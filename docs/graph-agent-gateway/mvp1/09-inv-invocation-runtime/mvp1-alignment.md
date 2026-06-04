@@ -11,7 +11,7 @@ verified_at: 2026-06-02
 > **Owns**：拿一条已解析 `ResolvedRoute` + 原始 `BaseMessage`，用原生 LangChain ChatX 真正调模型，取回 `AIMessage`，再把 route metadata 注入结果并把 usage 喂给观测层；**不做** fallback 遍历 / probe / 熔断 / 截断升级重试（那些归 07 编排层）。
 > **Status**：设计定稿（2026-06 判据复核，归属表判 09=纯 ③b 不变）；代码 = `_call_*` 待换原生 ChatX invoke、`_build_chat_result` 待改吃 ChatX `AIMessage`、thinking blocks 待保留、usage 待改从 `usage_metadata` 取。
 > **Related**：[[10-inv-route-chat-model-factory]]（`ResolvedRoute`→原生 ChatX 工厂，本模块的 invoke 用它构造模型）· [[11-inv-provider-profiles]]（provider 差异 init-kwargs 表）· [[07-orch-fallback-circuit-probe]]（fallback/probe/熔断/usage 归属/截断升级编排，与本模块共享 `gateway_chat_model.py`/`client_manager.py` 但各写各的步骤）· [[01-handoff-interface]]（`ResolvedRoute` 契约，调用层唯一输入）· [[04-orch-registry-schema]]（`ResolvedRoute`/`AIMessage` 字段权威源）
-> **决策日志**：`.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md`（D1 方案 A' / D2 编排-调用分离 / M2 client_manager 5 件事拆解 / M3 `_generate` 逐步归属 / F3 截断升级 / F4 thinking / F5 usage-metadata）+ `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`（§4 判 09 纯 ③b）
+> **决策日志**：client 层 A' 重设计决策（D1 方案 A' / D2 编排-调用分离 / M2 client_manager 5 件事拆解 / M3 `_generate` 逐步归属 / F3 截断升级 / F4 thinking / F5 usage-metadata）——完整逻辑 + PM 原话已留底于本文 §4（决策基础）/ §5（决策动机）/ §6（兼容性验证清单）；归属判据见 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`（§4 判 09 纯 ③b）
 > **现状**：见同目录 `baseline.md`
 
 本篇只写调用目标：原生 ChatX invoke、保留 LangChain message 结构、thinking content blocks 不拍平、从 `AIMessage.usage_metadata` 取 usage、把 route metadata 注入 `AIMessage.response_metadata`。fallback/probe/熔断/retry 跨 route/截断升级重试的编排位置在 [07-orch-fallback-circuit-probe/mvp1-alignment.md](../07-orch-fallback-circuit-probe/mvp1-alignment.md) 写。
@@ -32,7 +32,7 @@ MVP1 目标：把「一条 route 的实际调用」从自研消息转换 + provi
 
 **上下游**：① [[07-orch-fallback-circuit-probe]] 编排循环（`_generate` 遍历 fallback 链、probe、熔断决策）→ 选定一条候选 `ResolvedRoute` → **本模块 invoke runtime**（[[10-inv-route-chat-model-factory]] 构造 ChatX → `.invoke(原始 BaseMessage)` → `AIMessage`）→ `_build_chat_result` 注入 route metadata → `ChatResult` 回到 07 编排循环（记 usage、判异常、必要时 fallback 下一条）。
 
-1. `GatewayChatModel._generate`（执行一次模型生成请求的 LangChain 入口）继续保留编排外壳，但第 1 步不再调用 `_langchain_messages_to_dict`（把 LangChain `BaseMessage` 拍成 provider dict 的旧转换函数）；现状转换函数在 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:661-692`，目标是把原始 `BaseMessage` 交给 ChatX，权威决策见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:101-117`。
+1. `GatewayChatModel._generate`（执行一次模型生成请求的 LangChain 入口）继续保留编排外壳，但第 1 步不再调用 `_langchain_messages_to_dict`（把 LangChain `BaseMessage` 拍成 provider dict 的旧转换函数）；现状转换函数在 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:661-692`，目标是把原始 `BaseMessage` 交给 ChatX（A' 调用层只改 `_generate` 第 1/5/7 步，第 1 步即此消息准备点；决策基础见 §4 D1/D2、动机见 §5）。
 
 2. `_apply_system_prompt_prefix`（把 role system prompt prefix 合并进消息列表的函数）的目标职责要从“合并 dict content”变成“合并或插入 `SystemMessage`”；现状 dict 合并代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:695-707`，`SystemMessage` 类型已在当前文件导入，见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:15`。
 
@@ -56,7 +56,7 @@ MVP1 目标：把「一条 route 的实际调用」从自研消息转换 + provi
 
 12. `LLMClientManager._call_wavespeed_any_llm`（WaveSpeed Any-LLM HTTP 调用和响应解析函数）是特殊 HTTP path；如果 MVP1 继续支持它，应作为 10/11 的特殊 provider profile 或单独 adapter，而不是继续留在通用 invocation runtime，旧代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:771-863`。
 
-13. `LLMClientManager._call_with_token_escalation`（截断 finish reason 后扩大 token budget 重试的函数）不随 `_call_*` 一起删除；它的策略迁到 07 编排层，现状代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:990-1012`，权威决策见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:200-204`。
+13. `LLMClientManager._call_with_token_escalation`（截断 finish reason 后扩大 token budget 重试的函数）不随 `_call_*` 一起删除；它的策略迁到 07 编排层，现状代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:990-1012`（F3 截断升级搬家，决策动机见 §5；与 [[07-orch-fallback-circuit-probe]] 共享）。
 
 14. `GatewayChatModel._build_chat_result`（把 dict response 包成 LangChain `ChatResult` 的函数）的目标输入从 dict response 改为 ChatX `AIMessage`；现状函数构造 `AIMessage`、`ChatGeneration` 和 `ChatResult`，代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:313-357`。
 
@@ -64,7 +64,7 @@ MVP1 目标：把「一条 route 的实际调用」从自研消息转换 + provi
 
 16. `GatewayChatModel._build_chat_result` 要把 `route_id`、`endpoint_id`、`canonical_id`、`protocol`、`provider_model_id` 和 `effective_runtime_settings` 注入 ChatX `AIMessage.response_metadata`；现状 route metadata 写法在 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:323-332` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:348-356`。
 
-17. `GatewayChatModel._build_chat_result` 要从 ChatX `AIMessage.usage_metadata` 取 usage，再供 07 的 usage 归属写入 `LLMClientManager.record_usage`（按端点累计 token 的记账函数）；现状 `record_usage` 在 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:310-323`，目标决策见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:216-220`。
+17. `GatewayChatModel._build_chat_result` 要从 ChatX `AIMessage.usage_metadata` 取 usage，再供 07 的 usage 归属写入 `LLMClientManager.record_usage`（按端点累计 token 的记账函数）；现状 `record_usage` 在 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:310-323`（F5 usage/metadata，决策动机见 §5 决策 4）。
 
 18. `models.py`（Gateway 预留的 provider SDK wrapper 边界，当前 `__all__` 为空）仍可作为包内 provider wrapper 边界，但当前空导出不承担 invoke；MVP1 的实际 ChatX 工厂应在 10 的新模块落地，现状边界见 `packages/graph-agent-gateway/src/graph_agent_gateway/models.py:1-9`。
 
@@ -84,38 +84,38 @@ MVP1 目标：把「一条 route 的实际调用」从自研消息转换 + provi
 
 ## 4. 设计决策基础(用户原话)
 
-> **D1 方案 A'（否决 A，保留编排外壳）**（决策记录 `:41`）："不用留A, 这是错误判断, 正确的是A'。" → 调用层换原生 ChatX，但 `GatewayChatModel` 不删；fallback/probe/熔断/usage/metadata 留编排外壳。本模块只动其中的「调用」步（`_generate` 第 1/5/7 步），编排步（2/3/4/6/8/9）不动。
+> **D1 方案 A'（否决 A，保留编排外壳）**（PM 原话，verbatim）："不用留A, 这是错误判断, 正确的是A'。" → 调用层换原生 ChatX，但 `GatewayChatModel` 不删；fallback/probe/熔断/usage/metadata 留编排外壳。本模块只动其中的「调用」步（`_generate` 第 1/5/7 步），编排步（2/3/4/6/8/9）不动。**否决的 A**（激进版）= resolver 直接产 ChatX + 删 `GatewayChatModel` + 用 `with_fallbacks()`：会回归 fallback/probe/熔断/usage/metadata/predict，且 `with_fallbacks()` 只按异常类型、表达不了按 HTTP status 分类。第八轮真机只验证了「调用层换 ChatX 修空-content bug」，从未验证「删编排层」（见 §5）。此决策与 [[07-orch-fallback-circuit-probe]]、[[10-inv-route-chat-model-factory]] 共享（重复留底防 drift）。
 
-> **D2 编排 / 调用分离**（决策记录 `:63`）："你只要知道谁跟你说我现在要调copilot, 把copilot解析好的route给我, 你就给他, 就ok了……编排和调用是不是应该更模块化更内聚化, API写清楚, 编排输入什么输出什么. 调用输入什么输出什么。" → 本模块就是「调用」端：输入一条 `ResolvedRoute` + messages，输出 `AIMessage` / 结果。
+> **D2 编排 / 调用分离**（PM 原话，verbatim）："你只要知道谁跟你说我现在要调copilot, 把copilot解析好的route给我, 你就给他, 就ok了, 这是调copilot的路径,你只负责输出编排结果, 不负责调用. 所以这里还引申出一个问题, 编排和调用是不是应该更模块化更内聚化, API写清楚, 编排输入什么输出什么. 调用输入什么输出什么" → 本模块就是「调用」端：输入一条 `ResolvedRoute` + messages，输出 `AIMessage` / 结果（copilot 走 `claude_agent_sdk` 自己调，不归 gateway 调；gateway 只输出编排结果）。此决策与 [[07-orch-fallback-circuit-probe]]、[[10-inv-route-chat-model-factory]]、[[11-inv-provider-profiles]] 共享（重复留底防 drift）。
 
-> **F2 防抖动重试保留**（决策记录 `:214`）："和Claude sdk copilot一样的问题, 防抖动重试可以留。" → ChatX 的有界瞬时重试（429/5xx/连接）保留，不设 `max_retries=0`；与网关跨-route fallback 两层不冲突。
+> **F2 防抖动重试保留**（PM 原话，verbatim）："和Claude sdk copilot一样的问题, 防抖动重试可以留" → ChatX 的有界瞬时重试（429/5xx/连接，对 429 尊重 Retry-After、不对 400/401 重试）保留，不设 `max_retries=0`；它天然是「同 route 防抖动重试」，与网关「跨 route fallback」两层不冲突。要钉死的是：重试耗尽后异常仍能被 `classify_exception` 正确分类（确定性单测，见 §6）。
 
 > **通用判据（gateway = 富能力可复用网关）**（README §2）："换一个完全不同的应用装上 gateway，这个能力还原样能用吗？能 → 公共（gateway）。" → "拿一条 route 真正调模型"是任何调模型 app 的刚需，故本模块纯 ③b 公共。
 
 ## 5. 决策 + 动机(决策原因)
 
-选择 A' 而不是 A 的原因是调用层要换成 ChatX，但 `GatewayChatModel` 不能删；fallback/probe/熔断/usage/event 都是编排职责，权威记录见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:28-38`。**被否的 A**：resolver 直接裸返回原生 ChatX + 删 `GatewayChatModel` + 用 `with_fallbacks()`——会回归 fallback/probe/熔断/usage/metadata/predict，且 `with_fallbacks()` 只按异常类型、表达不了按 HTTP status 分类。
+**A' vs A（核心架构决策 D1）**：选择 A' 而不是 A 的原因是调用层要换成 ChatX，但 `GatewayChatModel` 不能删——fallback/probe/熔断/usage/event 都是编排职责，它们全部坐落在 `_generate` 内（熔断跳过 `gateway_chat_model.py:113` / probe `:115` / 异常分类 `:124,:238` / mark-down `:135,:249` / fallback event `:136,:250` / usage `:227` / metadata `:313-357`）。**被否的 A（激进版）**：resolver 直接裸返回原生 ChatX + 删 `GatewayChatModel` + 用 `with_fallbacks()`——会回归 fallback/probe/熔断/usage/metadata/predict，且 `with_fallbacks()` 只按异常类型、表达不了按 HTTP status 分类（对比 [[06-orch-error-classification]] 的真实分类语义）。判据证据：bug 本在调用层（消息转换）`_langchain_messages_to_dict`（`gateway_chat_model.py:661-692`）把带 tool_calls 的 `AIMessage(content="")` 转成 `{"content":""}` → 发出空 content → qiniu-anthropic `400 content must not be empty`；第八轮真机只用归一化后的 base_url 验证「调用层换 ChatX 修空-content bug」，从未跑编排、从未验证「删编排层」。
 
-把 `_call_*` 替换为 ChatX invoke 的原因是旧代码把“消息转换 + provider 调用 + 输出解析”都手写在 client manager 中，权威记录明确只退役这部分，不整块删除 client manager（它仍扛 probe / 熔断 / usage 统计），见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:82-97`。
+把 `_call_*` 替换为 ChatX invoke 的原因（M2 client_manager 5 件事拆解）是旧代码把“消息转换 + provider 调用 + 输出解析”都手写在 client manager 中（`client_manager.py:440-1012`）；A' 只退役其中「消息转换 + provider 调用/解析」两件（由 ChatX.invoke = 转换+调用+解析三合一取代），**不整块删除 client manager**——它仍扛 probe 探活（`client_manager.py:371-438`）、熔断 provider-down TTL（`:340-368`）、usage 统计（`:310-333`）三件编排/观测职责。早期「弃用 client_manager」的措辞是错的。
 
-thinking 不拍平的原因是旧 `_coerce_text` 和 `_anthropic_content_text`（只拼 Anthropic content 里 `type=="text"` 的文本）会丢结构；权威记录要求保留 ChatX content blocks，见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:208-212`。
+thinking 不拍平的原因（F4）是旧 `_coerce_text`（`gateway_chat_model.py:645-646`，把任意 content 拍成字符串）和 `_anthropic_content_text`（`client_manager.py:1296-1304`，只拼 Anthropic content 里 `type=="text"` 的文本）会丢 reasoning/thinking 结构；A' 要求取最终文本时保留 ChatX 的 content blocks，不再拍平。
 
-usage metadata 的原因是 ChatX `AIMessage` 已经携带标准 usage 元数据；Gateway 仍需把 usage 归属到 endpoint/route 观测，并把 route metadata 注入响应，权威记录见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:216-220`。
+usage metadata 的原因（F5）是 ChatX `AIMessage.usage_metadata` 已携带标准 usage 元数据；Gateway 仍需把 usage 归属到 endpoint/route 观测（喂 `record_usage`），并把 route_id/endpoint_id/canonical_id/protocol 注入 ChatX `AIMessage.response_metadata`（改 `_build_chat_result`，现状写法 `gateway_chat_model.py:313-357`），而不是重建全新 `AIMessage`（会覆盖 provider 自带 metadata、丢 content blocks）。
 
-截断升级重试搬家不删除的原因是 ChatX 本身不做截断 token 升级，error-handling 铁律第 7 条又要求截断必须自动重试；因此 `_call_with_token_escalation` 从被退役的 `_call_*` 内迁出，包到 07 编排层的 ChatX invoke 外，见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:200-204`、`:218-222`。
+截断升级重试搬家不删除的原因（F3）是 ChatX 本身不做截断 token 升级，而 error-handling 铁律第 7 条要求截断必须自动重试；因此 `_call_with_token_escalation`（`client_manager.py:990-1012`）从被退役的 `_call_*` 内迁出，包到 [[07-orch-fallback-circuit-probe]] 编排层的 ChatX invoke 外，不能随 dispatch 一起删。
 
 ## 6. 测试关键点
 
-> 来源 = 决策记录 §5「兼容性验证清单（A' 实现必过）」`:266-275`。本模块（调用运行时）对应其中与 invoke / 结果桥接相关的项；异常分类与 fallback event 的编排断言归 [[07-orch-fallback-circuit-probe]]，本模块只验证 ChatX 抛出的异常**形状**仍可被分类。
+> 来源 = client 层 A' 重设计决策的「兼容性验证清单（A' 实现必过）」，完整 7 项 + live 冒烟在此留底。本模块（调用运行时）对应其中与 invoke / 结果桥接相关的项；异常分类与 fallback event 的编排断言归 [[07-orch-fallback-circuit-probe]]，本模块只验证 ChatX 抛出的异常**形状**仍可被分类。
 
 - **原始 `BaseMessage` 输入（核心回归用例）**：不转 dict，原始 `BaseMessage` 直接交 ChatX —— **qiniu-anthropic 多轮 tool loop = 头号回归**（旧 `_langchain_messages_to_dict` 把带 tool_calls 的 `AIMessage(content="")` 转成空 content dict → anthropic `400 content must not be empty`；ChatX 直接消费 LangChain tool call message 即可消除）。
-- **异常分类形状不回归**：ChatX 瞬时重试（F2）耗尽后抛出的异常，仍能被 07 的 `classify_exception` 正确分到 fallback / fail-fast / retry（fake 401 → fallback、fake 400 非 capability → fail-fast、网络错 → fallback）；这是决策记录点名的头号风险（`:268`）。
-- **输出 metadata 完整**：成功响应的 `AIMessage.response_metadata` / `ChatResult.llm_output` 仍带 route_id / endpoint_id / canonical_id / protocol / usage（`:270`）。
-- **thinking blocks 不拍平**：reasoning/thinking content blocks 经 `_build_chat_result` 后仍保留 block 结构，不被 `_coerce_text` 压成普通字符串（`:271`）。
-- **截断 token 升级重试仍生效**：搬到 07 编排层后，截断 finish reason 仍触发 token budget 翻倍重试，直到 capability cap 或轮数耗尽（F3，`:272`）。
-- **usage 维度对齐**：ChatX `AIMessage.usage_metadata` 的 prompt/completion 维度能正确喂进 `record_usage`，按 endpoint 累计不丢（`:270`、§8 待办 1）。
-- **predict 分支不回归**：保住 `GatewayChatModel` 类 + 构造器 + `bind_tools`，`PredictGatewayChatModel` 的 `_generate` 全自走不经 dispatch，返回类型 / 契约不变（`:273`）。
-- **live 冒烟（非 CI 闸）**：`temp/probe_chatx.py` 5/5 人工跑通（`:275`）。
+- **异常分类形状不回归（头号风险）**：ChatX 瞬时重试（F2）耗尽后抛出的异常，仍能被 07 的 `classify_exception` 正确分到 fallback / fail-fast / retry（fake 401 → fallback、fake 400 非 capability → fail-fast、网络错 → fallback）。
+- **输出 metadata 完整**：成功响应的 `AIMessage.response_metadata` / `ChatResult.llm_output` 仍带 route_id / endpoint_id / canonical_id / protocol / usage。
+- **thinking blocks 不拍平**：reasoning/thinking content blocks 经 `_build_chat_result` 后仍保留 block 结构，不被 `_coerce_text` 压成普通字符串。
+- **截断 token 升级重试仍生效**：搬到 07 编排层后，截断 finish reason 仍触发 token budget 翻倍重试，直到 capability cap 或轮数耗尽（F3）。
+- **usage 维度对齐**：ChatX `AIMessage.usage_metadata` 的 prompt/completion 维度能正确喂进 `record_usage`，按 endpoint 累计不丢（另见 §8 待办 1）。
+- **predict 分支不回归**：保住 `GatewayChatModel` 类 + 构造器 + `bind_tools`，`PredictGatewayChatModel` 的 `_generate` 全自走不经 dispatch，返回类型 / 契约不变。
+- **live 冒烟（非 CI 闸）**：`temp/probe_chatx.py` 5/5 人工跑通。
 
 ## 7. 涉及 region / platform
 
@@ -168,4 +168,4 @@ usage metadata 的原因是 ChatX `AIMessage` 已经携带标准 usage 元数据
 - [[07-orch-fallback-circuit-probe]]：fallback 循环 / probe / 熔断 / mark_down / fallback event / usage 归属 / 截断升级重试（与本模块共享 `gateway_chat_model.py`/`client_manager.py`，各写各的步骤）
 - [[01-handoff-interface]]：`ResolvedRoute` 契约（调用层唯一输入）
 - [[04-orch-registry-schema]]：`ResolvedRoute` 字段权威源（本模块只消费）
-- 决策记录 `client-layer-decision-record.md` D1/D2/M2/M3/F2-F5 / 归属表 `module-disposition-revised.md`（§4 判 09 纯 ③b）
+- client 层 A' 重设计决策（D1/D2/M2/M3/F2-F5）：完整逻辑 + PM 原话留底于本文 §4/§5/§6 / 归属表 `module-disposition-revised.md`（§4 判 09 纯 ③b）

@@ -9,7 +9,7 @@ verified_at: 2026-06-02
 
 > 本文只描述当前源码（fallback event、异常类型、触发点）；目标设计见同目录 `mvp1-alignment.md`。
 > **判据归属**：本模块全部三块（fallback 事件 DTO / 结构化异常 / tracing helper）= **③b gateway 公共能力内核**，已在 `packages/graph-agent-gateway` 包内，**无反转、无下沉项**（原 2026-06-03 review 已判对，见 `module-disposition-revised.md` 行 46）。判据：任何调模型的 app 都需要这套可观测/异常底座，不依赖应用加工四件事（① UI ② 产品策略 ③ 调用方式 ④ 存储介质）→ ③b 公共。
-> **注**：MVP0 alignment 对错误分类有旧简写，A' 决策记录已纠正：401/402/403/404 当前分类是 fallback，不是全部 fail-fast；见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:164`。
+> **注**：MVP0 alignment 对错误分类有旧简写，client 层 A' 重设计决策（M5）已纠正：401/402/403/404 当前分类是 **fallback**（credential/route scope），**不是全部 fail-fast**；权威语义源 [[06-orch-error-classification]]，完整 M5 逻辑 + 用户语境见同目录 `mvp1-alignment.md` §4/§5。
 
 ## 覆盖代码(含覆盖率)
 
@@ -78,7 +78,7 @@ MVP1 目标差异：保留事件/异常结构，但调用层迁移到 ChatX 后�
 1. 事件 DTO 放在 Gateway 包内，是为了 Gateway 不 import Graph Agent execution internals；MVP0 alignment 明确 Gateway 自己拥有 fallback event DTO 和 gateway base exception，见 `docs/graph-agent-gateway/mvp0/mvp0-alignment.md:78`。
 2. fallback event 通过 callback adapter 发射，是为了对齐 tracing 底座而不是在 Gateway 内直接处理 callback 循环；MVP0 alignment 已记录 GW-3 完成，见 `docs/graph-agent-gateway/mvp0/mvp0-alignment.md:41`。
 3. 结构化异常替代纯文本 RuntimeError，是为了 Studio/trace 能读 `last_error_chain` 而不是解析自由文本，见 `docs/graph-agent-gateway/mvp0/mvp0-alignment.md:29`。
-4. A' 迁移不能丢 fallback event。决策记录的兼容性清单要求 fallback event payload 仍带 from/to route 诊断，见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:256`。
+4. A' 迁移不能丢 fallback event。client 层 A' 重设计决策的兼容性验证清单（A' 实现必过）第 7 条钉死：**调用层从自研 `_call_*` 换成原生 ChatX 后，fallback event payload 仍必须带 from/to route 诊断**——这是 A' 迁移的硬性兼容闸口。完整清单 + 用户语境见同目录 `mvp1-alignment.md` §4/§5。
 
 ## 代码索引 clues
 

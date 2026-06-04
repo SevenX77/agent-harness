@@ -10,8 +10,8 @@ verified_at: 2026-06-02
 > **Tier**：③b gateway 公共能力内核（`gateway_chat_model._generate` 编排外壳 + `client_manager` probe/熔断/usage 已在包内；`llm_health_store` 熔断持久化现散 ③a 待下沉）
 > **Owns**：fallback 链遍历 + 熔断跳过 + 1-token probe + 异常分类 + mark_down + fallback event + usage 归属 + 截断升级重试 + 批量探测策略；**每条 route 的真实 ChatX invoke 不在本模块**（归 [[09-inv-invocation-runtime]]）
 > **Status**：设计定稿（2026-06 判据第四轮反转）；代码 = `_generate` 编排段保留、调用段换 ChatX(归 09)、`_call_with_token_escalation` 待从调用层搬上编排层、`llm_health_store` 待下沉 ③b
-> **Related**：[[06-orch-error-classification]]（`classify_exception` 状态码语义权威源，本模块只消费）· [[09-inv-invocation-runtime]]（真实 invoke / `_call_*` / 消息转换）· [[13-x-tracing-events-exceptions]]（`LLMFallbackEvent` / `emit_llm_fallback_event` / `AllProvidersFailedError`）· [[04-orch-registry-schema]]（`RuntimePolicy` / `ProbeResult` 字段权威源）· [[08-orch-test-status-ssot]]（熔断持久化的另一消费视角 + 6 态投影）· [[12-inv-copilot-invocation]]（copilot 假测试 `copilot_test` 的应用侧消费方）
-> **决策日志**：`.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md`（D1 A' / D2 编排-调用分离 / M2 client_manager 5 件事 / M3 `_generate` 逐步归属 / F2 retry / F3 截断升级 / F5 usage）+ `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`（07 行三处反转）
+> **Related**：[[06-orch-error-classification]]（`classify_exception` 状态码语义权威源，本模块只消费）· [[09-inv-invocation-runtime]]（真实 invoke / `_call_*` / 消息转换 / F4 thinking / F5 metadata 注入落点）· [[13-x-tracing-events-exceptions]]（`LLMFallbackEvent` / `emit_llm_fallback_event` / `AllProvidersFailedError`）· [[04-orch-registry-schema]]（`RuntimePolicy` / `ProbeResult` 字段权威源）· [[03-orch-credentials-endpoints]]（F1 base_url 归一化共享决策的存写主体，probe 用对 base_url）· [[08-orch-test-status-ssot]]（熔断持久化的另一消费视角 + 6 态投影）· [[12-inv-copilot-invocation]]（copilot 假测试 `copilot_test` 的应用侧消费方）
+> **决策日志**：client 层 A' 重设计决策（D1 A' / D2 编排-调用分离 / M2 client_manager 5 件事 / M3 `_generate` 逐步归属 / F2 retry / F3 截断升级 / F5 usage）的完整逻辑 + PM 原话已就地留底在本文 §4（PM 原话）/ §5（决策 + 动机）；归属反转源 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`（07 行三处反转）
 > **现状**：见同目录 `baseline.md`
 
 ## 1. 定义
@@ -33,11 +33,11 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 
 **状态机（route 进入实际调用的判定,目标语义）**:候选 →〔熔断查询:`is_provider_marked_down`==true → `continue` 跳过〕→〔`probe_before_call`==true → 1-token 探活:`classify_exception` 不可 fallback → 抛;probe 失败可 fallback → mark_down + event + 继续;probe 通过 → 进调用〕→〔ChatX invoke:成功 → 归 usage + metadata 返回;异常 → `classify_exception`:fail-fast → 抛;可 fallback → mark_down + event + 继续〕→ 遍历尽 → `AllProvidersFailedError`。
 
-**编排 / 调用边界（M3 `_generate` 9 步逐步归属,权威决策 `client-layer-decision-record.md:119-135`）**:留编排(2/3/4/6/8/9 步)= 遍历 / 熔断跳过 / probe / usage 记账 / 异常处理 / 全失败;改调用(1/5/7 步)= 消息准备(不再拍 dict)/ 实际调用(build ChatX + invoke)/ 构建结果(augment ChatX `AIMessage`),改的三步归 09。
+**编排 / 调用边界（M3 `_generate` 9 步逐步归属,完整步表见 §2.1 与 §5 D2)**:留编排(2/3/4/6/8/9 步)= 遍历 / 熔断跳过 / probe / usage 记账 / 异常处理 / 全失败;改调用(1/5/7 步)= 消息准备(不再拍 dict)/ 实际调用(build ChatX + invoke)/ 构建结果(augment ChatX `AIMessage`),改的三步归 09。
 
 **目标设计与流程**（逐步;保留 baseline 全部步骤,标注判据归属）:
 
-1. `GatewayChatModel._generate`（③b 编排外壳,fallback 链主循环）是保留的编排外壳;MVP1 不删除它,因为它承载 fallback/probe/熔断/usage/event,现状入口在 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:96-271`,权威决策在 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:28-38`。
+1. `GatewayChatModel._generate`（③b 编排外壳,fallback 链主循环）是保留的编排外壳;MVP1 不删除它,因为它承载 fallback/probe/熔断/usage/event,现状入口在 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:96-271`,决策 D1（否决 A、保留 `GatewayChatModel`)的完整理由 + PM 原话见本文 §4 / §5。
 
 2. `GatewayChatModel._generate` 的输入准备要交给调用层保真处理;MVP1 不再把 `BaseMessage` 先拍成 dict,因为现状 `_langchain_messages_to_dict`(把 LangChain 消息转成 provider dict 的函数)位于 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:661-692`,它属于 09 的调用层问题(也是空-content bug 根源)。
 
@@ -63,13 +63,13 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 
 13. Route invoke 步骤改成调用 09 的 ChatX 调用层;07 只要求它抛出的异常仍能进入 `classify_exception`,成功返回的 `AIMessage.usage_metadata`(ChatX 返回的 token 用量)能供 usage 归属使用,现状 usage 补记点在 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:227-235`。
 
-14. ChatX 瞬时重试保留在同 route invoke 内;`GatewayChatModel._generate` 只在 ChatX 重试耗尽后接收最终异常并决定跨 route fallback。**注**(F2 撤回 `max_retries=0`):ChatX 只对 429/5xx/连接重试、对 429 尊重 Retry-After、不对 400/401 重试,天然是"同 route 防抖动重试";现状 SDK `max_retries=0` 反而会把瞬时 429 直接升级成跨 route 跳转,权威决策见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:187-193`。
+14. ChatX 瞬时重试保留在同 route invoke 内;`GatewayChatModel._generate` 只在 ChatX 重试耗尽后接收最终异常并决定跨 route fallback。**注**(F2 撤回 `max_retries=0`):ChatX 只对 429/5xx/连接重试、对 429 尊重 Retry-After、不对 400/401 重试,天然是"同 route 防抖动重试";现状 SDK `max_retries=0`(`client_manager.py:171,:206`)反而会把瞬时 429 直接升级成跨 route 跳转,F2 完整逻辑 + PM 原话见本文 §5（决策 + 动机)/ §4（PM 原话)。
 
-15. `_call_with_token_escalation`（遇到截断 finish reason 时扩大 token budget 重试的函数）的策略要从旧调用层搬到编排层;它的用途是遇到截断 finish reason 时扩大 token budget 重试,现状代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:990-1012`,权威决策见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:200-204`。搬家原因:它是跨调用的运行时策略,不是某个 SDK 的消息转换,不能随 `_call_*` 一起删。
+15. `_call_with_token_escalation`（遇到截断 finish reason 时扩大 token budget 重试的函数）的策略要从旧调用层搬到编排层;它的用途是遇到截断 finish reason 时扩大 token budget 重试,现状代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:990-1012`,F3 决策(保留 + 搬家)完整逻辑见本文 §5（决策 + 动机)。搬家原因:它是跨调用的运行时策略(对应 error-handling 铁律第 7 条"截断必须自动重试"),不是某个 SDK 的消息转换,ChatX 自身不做这件事,不能随 `_call_*` 一起删。
 
 16. `RuntimePolicy.token_escalation_rounds`（控制截断升级轮数的字段）继续控制截断升级轮数;该字段定义在 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:93-98`,MVP1 只是把消费位置从 client manager dispatch 外移到 `_generate` 的 route invoke 包装层。
 
-17. `LLMClientManager.record_usage`（按 endpoint/provider 字符串累计 token 的方法）继续保留为编排/观测接口;MVP1 的 usage 来源从旧 dict response 改为 ChatX `AIMessage.usage_metadata`,现状累计函数在 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:310-323`,目标决策见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:216-220`(借 deerflow `stream_usage` 默认开,保证第三方 openai-compat 端点 usage 不为空)。
+17. `LLMClientManager.record_usage`（按 endpoint/provider 字符串累计 token 的方法）继续保留为编排/观测接口。**F5(usage / metadata)决策**:MVP1 的 usage 来源从旧 dict response 改为从 ChatX `AIMessage.usage_metadata` 取 token 喂 `record_usage`;并把 route_id / endpoint_id / canonical_id / protocol 注入 ChatX `AIMessage.response_metadata`(改 `_build_chat_result`);同时借 deerflow `stream_usage` 默认开,保证第三方 openai-compat 端点 usage 不为空。现状累计函数在 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:310-323`;其中 `AIMessage` 的 metadata 注入与 `_build_chat_result` 改动属调用层,落点归 [[09-inv-invocation-runtime]] F4/F5,本模块只负责把读到的 token 写进 `record_usage`。
 
 ## 3. 接口契约
 
@@ -90,13 +90,13 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 
 > **判据（本轮反转 `llm_health_store` 归属 + 钉死 `copilot_test` 留 ③a）**："换个 app 还原样能用吗?能=③b,不能=③a。"(ux-spec §6.0 判据铁律,`00_settings-ux-spec.md:334`) → 熔断持久化是 fallback/熔断机制的跨进程延伸,任何调模型 app 都要 → **③b 公共**(原误判 ③a seam);`copilot_test` 绑死 copilot SDK 调用方式(四件事之③) → **③a 应用**。
 
-> **D1 否决 A、保留 `GatewayChatModel`**(决策记录 `:40-42`)："不用留A, 这是错误判断, 正确的是A'。" → 不裸返回 ChatX、不删编排外壳,只换每条 route 的实际调用。
+> **D1 否决 A、保留 `GatewayChatModel`**(PM 原话,逻辑见 §5)："不用留A, 这是错误判断, 正确的是A'。" → 不裸返回 ChatX、不删编排外壳,只换每条 route 的实际调用。
 
-> **D2 编排 / 调用分离**(决策记录 `:62-63`)："你只要知道谁跟你说我现在要调copilot, 把copilot解析好的route给我, 你就给他, 就ok了, 这是调copilot的路径,你只负责输出编排结果, 不负责调用. 所以这里还引申出一个问题, 编排和调用是不是应该更模块化更内聚化, API写清楚, 编排输入什么输出什么. 调用输入什么输出什么"
+> **D2 编排 / 调用分离**(PM 原话,逻辑见 §5)："你只要知道谁跟你说我现在要调copilot, 把copilot解析好的route给我, 你就给他, 就ok了, 这是调copilot的路径,你只负责输出编排结果, 不负责调用. 所以这里还引申出一个问题, 编排和调用是不是应该更模块化更内聚化, API写清楚, 编排输入什么输出什么. 调用输入什么输出什么"
 
-> **F1 base_url 归一化**(决策记录 `:200-201`,关联 probe 用对 base_url)："base_url 归一化的关键是每个protocol都有确定的统一的规则 ... 如果结果足够确定, 我觉得放在credential保存时归一化是最好的, 每个endpoint都有固定格式, 存这个固定格式保证不会出错"
+> **F1 base_url 归一化**(PM 原话,本模块关联 probe 用对 base_url;归一化主体见 [[03-orch-credentials-endpoints]],逻辑见 §5)："base_url 归一化的关键是每个protocol都有确定的统一的规则 ... 如果结果足够确定, 我觉得放在credential保存时归一化是最好的, 每个endpoint都有固定格式, 存这个固定格式保证不会出错"
 
-> **F2 保留瞬时重试**(决策记录 `:213-214`)："和Claude sdk copilot一样的问题, 防抖动重试可以留"
+> **F2 保留瞬时重试**(PM 原话,逻辑见 §5)："和Claude sdk copilot一样的问题, 防抖动重试可以留"
 
 > **PM 探测结果全进 draft / 失败也是历史**(ux-spec §1.4 #2.4,`00_settings-ux-spec.md:70`)："这几次的 endpoint / 模型探测结果(含失败)都要写进 draft / 证据库,不浪费(失败也是历史:哪些模型抖动 / 超时 / 不可用;下次免重探、喂蓝态)。" → 批量探测策略要把历史失败喂进下次编排(跳过历史失败、优先历史成功),这是 ③b 编排能力。
 
@@ -105,10 +105,11 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 - **`llm_health_store`(熔断持久化)= ③b 公共内核(本轮反转)**:把冷却事实跨进程存起来复用,是 fallback/熔断机制的内在延伸,换 app 还要;**判据**:"换个 app 还原样能用吗?能=③b"(`module-disposition-revised.md:38` 07 行新判定 = **③b 公共,下沉 gateway;存储介质留注入**)。**被反转**:原 baseline `Baseline/Alignment 差异` 与 `待办/疑点 #3` 把它判作"③a seam / 执行期 down-cache 与该 store 是否合并是疑点"(`07/baseline.md:75,:100`)。现按判据已定 ③b 待下沉,SQLite 路径(存储介质,四件事之④)由 ③a 注入。
 - **`copilot_test`(copilot 假测试)= ③a 应用(copilot 专属)**:它用 `AsyncAnthropic`(裸 Anthropic HTTP 客户端)发探测,而真实 copilot 跑 `ClaudeSDKClient`,绑死的是 copilot 的实际调用方式(四件事之③),不是通用 route probe;`module-disposition-revised.md:39` 07 行明确"③a 应用(copilot 专属),留 studio"。它与 ③b 的 `LLMClientManager.probe_provider`(通用 1-token route probe)**不同源**:前者是 copilot 接线工程的对象(假测试要改走真 `ClaudeSDKClient`,见 [[12-inv-copilot-invocation]] / ux-spec §3.4),后者是 fallback 链里的执行期探活。baseline 覆盖代码表已含 `copilot_test` 三个对象,本轮只**补归属标注**,内容不删。
 - **批量探测策略 = ③b 公共(边界说明)**:对一批 route 编排 probe 的顺序 / 并发 / 跳过历史失败 / 优先历史成功,是 gateway 探测机制衍生的能力,任何 app 都要;`module-disposition-revised.md:66` 下沉清单列"list-models 解析 + 批量探测编排"(现 `routers/llm.py` 探测编排)= ③b,只有"批量进度的 UI"留 ③a;ux-spec §6.4 横切表(`00_settings-ux-spec.md:452`)也把"批量探测策略"列入 ③b 公共列。本模块 brief 已含 probe;此处补一句边界:执行期 fallback 链 probe(`_generate` 单条)与批量探测编排(多条 job)是同一探测能力的两个入口,都 ③b,UI/进度留 ③a。
-- **A' 保留 `GatewayChatModel`**:`_generate` 里的 fallback、probe、熔断、异常分类、event 和 usage 都是 Gateway 自有语义;裸返回 ChatX 或 LangChain `with_fallbacks()` 不能表达按 route 状态码分类、probe、down TTL、usage 归属和 fallback event,权威记录见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:28-38`。
-- **编排 / 调用分离**:同一个 route 既可被 graph-agent 的 ChatX 调用层消费,也可被 copilot 的独立运行时消费;编排层应该输出 route 决策,调用层才负责真正 invoke,权威记录见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:45-60`。
-- **保留 ChatX 瞬时重试(撤回 `max_retries=0`)**:它处理同 route 的短暂 429/5xx/连接抖动,而 `_generate` 处理跨 route fallback;这两层不冲突,当前 `max_retries=0` 反而会把瞬时失败直接升级成跨 route 跳转,权威记录见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:187-193`。
-- **截断升级重试搬到编排层**:它不是某个 SDK 的消息转换能力,而是 Gateway 对"输出被截断"的运行时策略(error-handling 铁律第 7 条要求截断必须自动重试);现状函数在 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:990-1012`,权威记录见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:200-204`。
+- **D1 — A' 保留 `GatewayChatModel`(否决激进版 A)**:`_generate` 里的 fallback、probe、熔断、异常分类、event 和 usage 都是 Gateway 自有语义;裸返回 ChatX 或 LangChain `with_fallbacks()` 不能表达按 route 状态码分类、probe、down TTL、usage 归属和 fallback event。**被否决的方案 A(激进版)**= "resolver 直接产原生 ChatX + 删 `GatewayChatModel` + 用 `with_fallbacks()`",它会回归 fallback / probe / 熔断 / usage / metadata / predict 全套能力;真机第八轮只验证了"调用层换 ChatX 修掉空-content bug",**从未验证"删编排层"**,且 `with_fallbacks()` 只能按异常类型分流、表达不了"按 HTTP status 分类"(对比 `error_classification.py`,状态码语义归 [[06-orch-error-classification]])。因此 A' = 不删编排外壳、不裸返回 ChatX,只把"每条 route 的实际调用"从自研消息转换换成原生 ChatX。**bug 根源在调用层(消息转换),不在编排层**:`_langchain_messages_to_dict`(把带 `tool_calls` 的 `AIMessage(content="")` 转成 `{"content":""}`)在 `gateway_chat_model.py:661-692`,再经 anthropic dispatch 发出空 content → qiniu-anthropic `400 content must not be empty`(改在调用层,归 [[09-inv-invocation-runtime]])。**PM 原话见本文 §4**:"不用留A, 这是错误判断, 正确的是A'"。
+- **D2 — 编排 / 调用分离**:同一个 route 既可被 graph-agent 的 ChatX 调用层消费,也可被 copilot 的独立运行时消费(copilot 走 `claude_agent_sdk`,**不归 gateway 调**);编排层应该输出"该用哪条 route"的决策(`ResolvedRoute`:protocol / base_url / credential_ref / provider_model_id / runtime settings + fallback 顺序 + 熔断/probe 决策),调用层才负责真正 invoke(吃一条 `ResolvedRoute` + messages → 出 `AIMessage`)。落到 `_generate` 内即 M3 九步归属:留编排(遍历 / 熔断跳过 / probe / usage 记账 / 异常处理 / 全失败),改调用(消息准备 / 实际调用 / 构建结果,归 09)。**PM 原话见本文 §4**:"你只要知道谁跟你说我现在要调copilot, 把copilot解析好的route给我, 你就给他, 就ok了...编排和调用是不是应该更模块化更内聚化, API写清楚"。
+- **F2 — 保留 ChatX 瞬时重试(撤回 `max_retries=0`)**:**决策 = 保留 ChatX 的瞬时重试(有界,如默认 2),不设 0**。理由:ChatX 只对 429/5xx/连接重试、对 429 尊重 `Retry-After`、不对 400/401 重试 → 天然就是"同 route 防抖动重试",与网关"跨 route fallback"是**两层、不冲突**;当前代码反而**没有同-route 重试**(SDK 显式 `max_retries=0`,`client_manager.py:171,:206`),一次瞬时 429 会被 `_generate` 当 `fallback_allowed`(`gateway_chat_model.py:237-249`)直接跳 route,把所有 route 连环跳废。唯一要钉死的不变量:ChatX 重试**耗尽后**抛出的异常仍能被 `classify_exception` 正确分类(确定性单测)。**PM 原话见本文 §4**:"和Claude sdk copilot一样的问题, 防抖动重试可以留"。
+- **F3 — 截断升级重试保留 + 搬到编排层**:**决策 = 保留 `_call_with_token_escalation`,但从 client_manager dispatch 搬到编排层,包在 ChatX invoke 外**。它不是某个 SDK 的消息转换能力,而是 Gateway 对"输出被截断"的运行时策略(error-handling 铁律第 7 条要求"截断必须自动重试");ChatX 自身不做这件事,所以它**不能随 `_call_*` 消息转换一起被删**——必须显式搬家。现状函数在 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:990-1012`,消费的轮数字段 `RuntimePolicy.token_escalation_rounds` 在 `registry/schema.py:93-98`(字段权威源归 [[04-orch-registry-schema]])。
+- **F1 — base_url 归一化(与 [[03-orch-credentials-endpoints]] 共享决策,重复留底防 drift)**:**决策 = 主路径在 credential 保存时归一化(每 endpoint 存确定的 canonical 格式,从源头保证对),副路径在调用时做幂等归一化双保险(已 canonical 则 no-op)**。每 protocol 规则确定统一:anthropic 去尾 `/v1`(SDK 自加 `/v1/messages`)、openai 保持、deepseek-anthropic 去 `/v1` 后 `+/anthropic`、ark openai-compat `.../api/v3`。本模块只在 **probe 用对 base_url** 上消费它(`_probe` 发 1-token 请求要打到正确端点);归一化的存写主体归 [[03-orch-credentials-endpoints]]、调用时双保险归 [[09-inv-invocation-runtime]] 的 `RouteChatModelFactory`。**重复 OK**:F1 是 03 / 07 / 09 共享决策,各模块都写、用 `[[link]]` 双向索引防 drift。**PM 原话见本文 §4**:"base_url 归一化的关键是每个protocol都有确定的统一的规则 ... 放在credential保存时归一化是最好的, 每个endpoint都有固定格式, 存这个固定格式保证不会出错"。
 
 ## 6. 测试关键点
 
@@ -153,13 +154,7 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 
 ## 决策原因（保留 baseline 原文,补反转）
 
-A' 保留 `GatewayChatModel` 的原因是 `_generate` 里有 Gateway 自己的编排语义;裸返回 ChatX 或 LangChain `with_fallbacks()` 不能表达按 route 状态码分类、probe、down TTL、usage 归属和 fallback event,权威记录见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:28-38`。
-
-编排 / 调用分离的原因是同一个 route 既可被 graph-agent 的 ChatX 调用层消费,也可被 copilot 的独立运行时消费;编排层应该输出 route 决策,调用层才负责真正 invoke,权威记录见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:45-60`。
-
-保留 ChatX 瞬时重试的原因是它处理同 route 的短暂 429/5xx/连接抖动,而 `_generate` 处理跨 route fallback;这两层不冲突,当前 `max_retries=0` 反而会把瞬时失败直接升级成跨 route 跳转,权威记录见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:187-193`。
-
-截断升级重试搬到编排层的原因是它不是某个 SDK 的消息转换能力,而是 Gateway 对"输出被截断"的运行时策略;现状函数在 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:990-1012`,权威记录见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:200-204`。
+client 层 A' 重设计的四条决策(D1 保留 `GatewayChatModel`、D2 编排/调用分离、F2 保留 ChatX 瞬时重试、F3 截断升级重试搬家)的**完整逻辑 + PM 原话**已就地留底在本文 §4（PM 原话)/ §5（决策 + 动机),不再外链——A' 否决激进版 A、编排与调用分离、撤回 `max_retries=0`、截断升级重试从 client_manager dispatch 搬到编排层包住 ChatX invoke,逐条理由与 PM verbatim 见 §5 对应条目。
 
 **判据反转(2026-06 第四轮)**:`llm_health_store` 从"③a seam / 合并是疑点"反转为"③b 公共内核 / 待下沉",`copilot_test` 钉死"③a 应用 / 留 studio",批量探测策略明确"③b 公共 / UI 进度留 ③a";权威源 ux-spec §6.0 + 归属表 `module-disposition-revised.md:37-39,:66`。
 
@@ -186,4 +181,5 @@ A' 保留 `GatewayChatModel` 的原因是 `_generate` 里有 Gateway 自己的�
 - [[04-orch-registry-schema]]:`RuntimePolicy` / `ProbeResult` 字段权威源(本模块只链接)
 - [[08-orch-test-status-ssot]]:熔断持久化的 SSOT/投影视角 + 6 态(probe 结果作证据流)
 - [[12-inv-copilot-invocation]]:`copilot_test` 假测试的应用侧消费方 + 真 `ClaudeSDKClient` 测试接线
-- 决策记录 `client-layer-decision-record.md` D1/D2/M2/M3/F2/F3/F5 · 归属表 `module-disposition-revised.md`(07 行三处反转)
+- [[03-orch-credentials-endpoints]]:F1 base_url 归一化的存写主体(本模块只在 probe 用对 base_url 上共享该决策,双向索引防 drift)
+- client 层 A' 重设计决策(D1/D2/M2/M3/F2/F3/F5)完整逻辑 + PM 原话已留底本文 §4 / §5 · 归属反转源 `module-disposition-revised.md`(07 行三处反转)

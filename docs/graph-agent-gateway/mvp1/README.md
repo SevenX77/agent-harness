@@ -1,6 +1,6 @@
 ---
 milestone: MVP1
-decision_record: ../../../.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md
+decision_record: 已分散留底进各模块文档(每模块 §4 用户原话 / §5 决策+动机);client 层 A' 重设计决策不再单独引用外部文件
 coverage: 42 后端文件 100% 映射(Explore 清点);14 个模块 baseline/mvp1-alignment 已起草
 status: 14 个模块文档已补齐,待实现阶段按待办推进
 ---
@@ -15,7 +15,14 @@ status: 14 个模块文档已补齐,待实现阶段按待办推进
 - **编排(准备期)**:role → 解析出该用哪条 `route`(含 fallback 顺序、熔断/probe 决策),**不调模型**。
 - **交接**:`route`(`ResolvedRoute`/`ResolvedRole`)= 编排↔调用唯一接口。
 - **调用(实际执行)**:拿 `route` 真正调。两个消费方:graph-agent(原生 ChatX)/ copilot(交回 studio claude_agent_sdk)。
-- 决策与理由(A'、编排/调用分离、base_url 归一化、retry、错误分类):见 [决策记录](../../../.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md)。
+- 决策与理由(client 层 A' 重设计决策)已**分散留底进各模块文档**(每模块 §4 用户原话 + §5 决策+动机),不再单独引用外部文件。各决策主落点:
+  - **D1**(否决 A、保留编排外壳)→ [`07-orch-fallback-circuit-probe`](./07-orch-fallback-circuit-probe/mvp1-alignment.md) / [`13-x-tracing-events-exceptions`](./13-x-tracing-events-exceptions/mvp1-alignment.md)
+  - **D2**(编排/调用分离)→ [`01-handoff-interface`](./01-handoff-interface/mvp1-alignment.md)(权威) / [`12-inv-copilot-invocation`](./12-inv-copilot-invocation/mvp1-alignment.md)(copilot 用例) / [`predict-migration-to-engine`](./predict-migration-to-engine.md)
+  - **D3**(gateway 可复用、前端不归 gateway)→ [`14-api-router`](./14-api-router/mvp1-alignment.md) / [`12-inv-copilot-invocation`](./12-inv-copilot-invocation/mvp1-alignment.md)
+  - **F1**(base_url 保存时归一化)→ [`03-orch-credentials-endpoints`](./03-orch-credentials-endpoints/mvp1-alignment.md)(权威)
+  - **F2**(retry 保留 ChatX 瞬时重试)→ [`07-orch-fallback-circuit-probe`](./07-orch-fallback-circuit-probe/mvp1-alignment.md) / [`09-inv-invocation-runtime`](./09-inv-invocation-runtime/mvp1-alignment.md)
+  - **M5**(错误分类真实语义,401/402/403/404=fallback)→ [`06-orch-error-classification`](./06-orch-error-classification/mvp1-alignment.md)(权威)
+  - **M4**(predict mock=业务逻辑→engine)→ [`predict-migration-to-engine`](./predict-migration-to-engine.md)
 
 ## 模块清单(覆盖代码来自 Explore 清点,100%)
 

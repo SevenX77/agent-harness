@@ -52,11 +52,11 @@ alignment 要引入的 `ProviderProfile` 不是现有 `VerifiedProfile`。`Provi
 1. 现状 provider 差异太分散。OpenAI-compatible、Google、Ark、Anthropic 分别在 `_call_*` 函数里组织 kwargs，thinking 也在 provider 分支内处理(`packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:459-482`; `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:581-587`; `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:709-752`)。
 2. capability 是“支持什么”，不是“怎么构造 ChatX”。`capabilities.py` 文件头明确 capabilities 描述 support/bounds，用户 runtime intent 属于 role/profile route entry；这不等于 provider init kwargs profile(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/capabilities.py:1-5`)。
 3. lint 只能 warn/block，不能变成动态 provider 选择。MVP0 alignment 明确禁止按 provider/capability/price/latency/availability 搜索替代 route，capability 只能 lint/warn/block/fail-fast(`docs/graph-agent-gateway/mvp0/mvp0-alignment.md:142-146`)。
-4. provider profile 应只处理模型构造差异。权威记录要求用 deepagents `ProviderProfile` 模式承载 headers、Responses API、温度默认、thinking 开关等 init kwargs；只有 payload 差异才子类覆盖单方法，不能重写整套消息转换(`.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:224-228`)。
+4. provider profile 应只处理模型构造差异。client 层 A' 重设计决策（F6）要求用 deepagents `ProviderProfile` 模式承载 headers、Responses API、温度默认、thinking 开关等 init kwargs；只有 payload 差异才子类覆盖单方法，不能重写整套消息转换(完整逻辑 + PM 拍板原话见同目录 `mvp1-alignment.md` §4 F6 / §5 决策 1)。
 
 ## 代码索引 clues
 
-- `ProviderProfile`:当前 gateway 源码没有该调用层类；目标用途是 provider/model 到 ChatX init kwargs、`pre_init`、factory 的声明式配置(`.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:224-228`)。
+- `ProviderProfile`:当前 gateway 源码没有该调用层类；目标用途是 provider/model 到 ChatX init kwargs、`pre_init`、factory 的声明式配置（F6，完整逻辑见同目录 `mvp1-alignment.md` §4 F6 / §1 / §2）。
 - `VerifiedProfile`:现有 schema 类，表示一条已经验证过的 provider route 调用方式，不是 ChatX 构造配置(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:189-204`)。
 - `select_verified_profile`:现有选择函数，按 ready 状态、输入模态和 reasoning 需求挑一个 `VerifiedProfile`(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/profile_selector.py:14-52`)。
 - `normalize_route_capabilities`:现有能力归一化函数，把 provider 原始能力变成 normalized capability records(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/capabilities.py:35-202`)。

@@ -6,7 +6,7 @@ status: drafted
 
 # 03-orch-credentials-endpoints — Baseline(现状)
 
-本文件只描述当前源码现状,不写理想实现。权威约束来自 `docs/graph-agent-gateway/mvp1/README.md` 的 03 模块 brief 与 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md` 的 base_url / credential 决策。
+本文件只描述当前源码现状,不写理想实现。权威约束来自 `docs/graph-agent-gateway/mvp1/README.md` 的 03 模块 brief 与 client 层 A' 重设计的 base_url / credential 决策(F1 base_url 归一化等,完整逻辑 + PM 原话留底于同目录 `mvp1-alignment.md` §4/§5)。
 
 ## 覆盖代码(含覆盖率)
 

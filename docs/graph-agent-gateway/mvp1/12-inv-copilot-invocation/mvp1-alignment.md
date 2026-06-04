@@ -10,7 +10,7 @@ status: drafted (降 stub — 内容已移 studio copilot 页)
 > **Owns**：仅"把 `copilot_chat` 这个 role 解析成有序 `ResolvedRoute`"——而这本就是 [[02-orch-role-resolution]]/[[01-handoff-interface]] 的能力，**本模块不再持有独立职责，并入 [[01-handoff-interface]]**。
 > **Status**：本模块降为 stub；copilot 专属内容（`stream_query`/`get_or_create_session`/`build_options`/`_translate_sdk_message`/假测试/SDK env 注入/本地 fallback）**已移入 studio 文档**（`docs/studio/mvp1/01_workflows/00_settings-ux-spec.md` §3.4/§3.8/§6.3），正文在此只留指针，**非删除**。
 > **Related**：[[01-handoff-interface]]（route 契约 + route 级 `resolve_routes` 一等 API，copilot 是其消费方，模块 12 并入此处）· [[02-orch-role-resolution]]（`resolve_role` 解析 `copilot_chat`）· [[03-orch-credentials-endpoints]]（两个 base_url 助手 `_ark`/`_deepseek` = ③b 归一化原语，归属此模块）
-> **决策日志**：`.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md` D2（编排/调用分离，copilot 调用方自己调）+ D3（gateway 不含调用方式）+ `docs/graph-agent-gateway/mvp1/module-disposition-revised.md` 行 45（12 copilot = ③a 应用，降 stub 并入 01）+ ux-spec §6.3（copilot 四层，③b 只 resolve_routes + capability）
+> **决策日志**：client 层 A' 重设计决策（**完整逻辑 + 用户原话见本文 §4/§5，本模块留底**）—— D2（编排/调用分离，copilot 调用方自己调）+ D3（gateway 不含调用方式）；归属表 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md` 行 45（12 copilot = ③a 应用，降 stub 并入 01）+ ux-spec §6.3（copilot 四层，③b 只 resolve_routes + capability）。**D2/D3 跨模块共享**，另见 [[01-handoff-interface]]（route 级一等 API 的权威定义）/ [[14-api-router]]（D3 router=适配壳）/ [[predict-migration-to-engine]]（编排/调用分离同源）。
 > **现状**：见同目录 `baseline.md`（同样已压成 stub + 指针）
 
 ## 1. 定义（stub）
@@ -51,9 +51,13 @@ status: drafted (降 stub — 内容已移 studio copilot 页)
 
 ## 4. 设计决策基础（用户原话）
 
-> **D2 — 编排 / 调用分离（copilot 用例）**（决策记录 `:62-63`）："你只要知道谁跟你说我现在要调copilot, 把copilot解析好的route给我, 你就给他, 就ok了, 这是调copilot的路径,你只负责输出编排结果, 不负责调用。" → gateway 给 route，copilot 调用方（`claude_agent_sdk`）自己调；**这是模块 12 降 stub 的直接依据**。
+> **D2 — 编排 / 调用分离（copilot 用例）**（client 层 A' 重设计决策，本文留底）。**决策**：把「编排（orchestration，输入 role→输出该用哪条 route）」与「调用（invocation，拿一条 route + messages 真正调）」做成两个内聚模块、各有明确 API；gateway **只负责编排、不负责调用**。**copilot 用例正是这条原则的来源**：调用方说「我要调 copilot」，gateway 把 `copilot_chat` 解析成 route 给它就结束，调用方（`claude_agent_sdk`）自己调。用户原话：
+> > "你只要知道谁跟你说我现在要调copilot, 把copilot解析好的route给我, 你就给他, 就ok了, 这是调copilot的路径,你只负责输出编排结果, 不负责调用. 所以这里还引申出一个问题, 编排和调用是不是应该更模块化更内聚化, API写清楚, 编排输入什么输出什么. 调用输入什么输出什么"
+> → gateway 给 route，copilot 调用方自己调；**这是模块 12 降 stub 的直接依据**。D2 是跨模块共享决策，权威落点在 [[01-handoff-interface]]（route 级一等 API），本模块从 copilot 视角复述。
 
-> **D3 — gateway 不含实际调用方式**（决策记录 `:78`）："前端不归gateway管, 前端是studio的前端, gateway只管提供服务……要考虑复用其他app。" → copilot 用 Claude SDK 调是 studio 的"实际调用方式"（应用加工之③），不进 gateway 核心。
+> **D3 — Gateway = 可复用服务，前端不归 gateway**（client 层 A' 重设计决策，本文留底）。**决策**：gateway 只提供服务（编排 + 调用），**不含任何前端**；前端是 **studio 的前端**，studio 只是 gateway 的一个消费方，不是 gateway 的一部分；gateway 必须设计清晰的对外 API 供 studio 及其他 app 复用。用户原话：
+> > "前端不归gateway管, 前端是studio的前端, gateway只管提供服务, 所以模块功能分个清楚, API怎么提供要写清楚, 要考虑复用其他app"
+> → copilot 用 Claude SDK 调是 studio 的"实际调用方式"（应用加工之③），不进 gateway 核心。D3 同时驱动 [[14-api-router]]（router=studio 适配壳非 gateway 核心）；本模块据 D3 把 copilot SDK 调用判给 ③a。
 
 > **判据守边界（ux-spec §6.3）**："copilot 的 SDK 调用/测试/session 全在 ③a；③b **只** resolve_routes + capability。**库完全不知道 copilot 是什么**——它只解析一个叫 `copilot_chat` 的 role 的 route,谁拿去怎么用与它无关。" → gateway 模块 12 无独立职责，stub 化并入 01。
 
@@ -93,4 +97,4 @@ status: drafted (降 stub — 内容已移 studio copilot 页)
 - [[03-orch-credentials-endpoints]]：`_ark`/`_deepseek` base_url 归一化原语归属此模块
 - [[14-api-router]]：Copilot ws/context/test HTTP 适配壳 + 假测试修正
 - **studio copilot 页**：`docs/studio/mvp1/01_workflows/00_settings-ux-spec.md` §3.4（真 SDK 测试）/ §3.8（SDK 调用机制，从本模块移入）/ §6.3（copilot 四层归属）
-- 决策记录 `client-layer-decision-record.md` D2/D3 + 归属表 `module-disposition-revised.md` 行 45
+- **client 层 A' 重设计决策 D2/D3**：完整逻辑 + 用户原话见本文 §4/§5（本模块留底）；共享落点 [[01-handoff-interface]]（D2 route 级 API）/ [[14-api-router]]（D3 router=适配壳）。归属表 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md` 行 45

@@ -94,8 +94,8 @@ MVP1 目标差异：route 应成为编排和调用之间唯一交接物；Graph 
 
 ## 决策原因
 
-1. 保留 `GatewayChatModel` 作为编排外壳，不裸返回 ChatX。决策记录说明 A' 保留编排层，原因是 fallback、probe、熔断、usage、metadata 都在 `_generate` 中，见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:22` 和 `client-layer-decision-record.md:29`。
-2. route 作为唯一交接物，是因为 Copilot 用 `claude_agent_sdk` 自己调用，Gateway 只应输出编排结果；决策记录明确“编排输入什么输出什么、调用输入什么输出什么”，见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:47` 和 `client-layer-decision-record.md:54`。
+1. 保留 `GatewayChatModel`(用途:把 `ResolvedRole` 包成 LangChain chat model 并在内部跑 fallback/熔断/probe/usage 的编排外壳)作为编排外壳，不裸返回 ChatX。来源:client 层 A' 重设计决策(完整逻辑 + PM 原话见同目录 `mvp1-alignment.md` §4/§5 留底）。A' 否决了「resolver 直接产 ChatX + 删 `GatewayChatModel`」的激进版,理由是 fallback、probe、熔断、usage、metadata 这些编排职责全在 `_generate`(用途:`GatewayChatModel` 的 fallback 执行循环,逐条遍历 routes 做熔断跳过/probe/dispatch/usage/event)里;裸返回 ChatX 会把这些能力全丢掉。
+2. route 作为唯一交接物，是因为 Copilot 用 `claude_agent_sdk`(用途:Claude Agent 独立运行时 SDK,Copilot 自己拿它调模型,不经 gateway 调用层)自己调用，Gateway 只应输出编排结果;这条出自 client 层 A' 重设计「编排 / 调用分离」决策——编排只负责「该用哪条 route」,把解析好的 route 交回调用方,调用方自己调(完整逻辑 + PM 原话「编排输入什么输出什么、调用输入什么输出什么」见 `mvp1-alignment.md` §4/§5 留底,另见 [[02-orch-role-resolution]] 解析产出 route、[[09-inv-invocation-runtime]] 调用层消费 route)。
 3. MVP0 旧 `ResolvedProvider/call_chain` 叙述不可照抄，因为当前源码已切到 registry `ResolvedRoute/ResolvedRole`，见 `docs/graph-agent-gateway/mvp0/baseline.md:8` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:415`。
 
 ## 代码索引 clues

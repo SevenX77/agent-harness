@@ -10,7 +10,7 @@ status: drafted
 > **Owns**：把 HTTP 状态码 / provider error payload / 异常链映射成"该 **retry** 同 route / 该 **fallback** 下一 route / 该 **fail request**"的结构化分类；产出 legacy `decision`（旧 fallback loop 消费）+ v1.1 `action/scope`（细粒度）；**不调模型、不持状态**
 > **Status**：设计定稿（MVP1 **不改分类语义**，只纠正多处历史文档"401/403/404 → fail-fast"的过时简写）；代码 = 不动，A' 换 ChatX 后补确定性测试确认 ChatX 异常仍可被 `_status_code`/`_provider_error_payload`/`_exception_chain` 识别
 > **Related**：[[07-orch-fallback-circuit-probe]]（fallback loop 消费 `decision`）· [[02-orch-role-resolution]]（过滤后空链 vs 运行期全失败的边界）· [[09-inv-invocation-runtime]]（ChatX invoke 抛的异常进本分类器）· [[13-x-tracing-events-exceptions]]（`AllProvidersFailedError`/fallback event）
-> **决策日志**：`.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md` M5（真实语义表，纠正 401/403/404）+ D1（保留 `GatewayChatModel` 编排壳）
+> **决策日志**：client 层 A' 重设计决策 M5（真实语义表，纠正 401/403/404）+ D1（保留 `GatewayChatModel` 编排壳）——完整逻辑 + PM 原话见本文 §4 / §5（决策记录系临时任务文档，已不复引用，内容在本文留底）
 > **现状**：见同目录 `baseline.md`
 
 ## 1. 定义
@@ -37,7 +37,7 @@ MVP1 目标**不是重写错误分类**，而是在调用层 A' 迁移到原生 
 | 未知异常 | `fail_request` / `unknown`, `unclassified_default=True` | `fail_fast_with_route_context` | `registry/error_classification.py:179-188`, `:85-86` |
 | 200 后 SSE 中断 | `fallback_route` / `stream` | 直接 action 语义；legacy 映射为 fallback | `registry/error_classification.py:111-121`, `:83-84` |
 
-> ⚠️ **状态码语义铁律（写代码/改文档必守）**：401/402/403/404 → **fallback**（不是 fail-fast）；400+capability → **fallback**；400非capability/413/422 → **fail_fast**；429/5xx/网络错 → retry(`fallback_allowed`)；未知 → `fail_fast_with_route_context`。历史 mvp0 文档把 401/403/404/422 写成 fail-fast 是**过时简写、已被决策记录 M5 纠正**，以源码 + 决策记录为准。
+> ⚠️ **状态码语义铁律（写代码/改文档必守）**：401/402/403/404 → **fallback**（不是 fail-fast）；400+capability → **fallback**；400非capability/413/422 → **fail_fast**；429/5xx/网络错 → retry(`fallback_allowed`)；未知 → `fail_fast_with_route_context`。历史 mvp0 文档把 401/403/404/422 写成 fail-fast 是**过时简写、已被 client 层 A' 重设计决策 M5 纠正**（完整 PM 原话见 §4），以源码 `registry/error_classification.py:15-17`/`:133-188` + 本文 §4 留底为准。
 
 ### 2.2 编号执行流程（**保留原"编号执行流程"全部**）
 
@@ -64,33 +64,36 @@ MVP1 目标**不是重写错误分类**，而是在调用层 A' 迁移到原生 
 
 ## 4. 设计决策基础（用户原话）
 
-> 跨边界判据 verbatim，从决策记录 + ux-spec 抄，不改一字。
+> 跨边界判据 + 客户层 A' 决策 verbatim，从 client 层 A' 重设计决策 + ux-spec 抄，不改一字（决策记录系临时文档，原文已在下方各条 PM 原话留底）。
 
 > **判据（通用，每模块引）· README §2 行 44 / ux-spec §6.0 行 334（verbatim）**：
 > "判定一个逻辑归谁，只问一句：**换一个完全不同的应用装上 gateway，这个能力还原样能用吗？** 能 → 公共（gateway）；不能（因为它绑死了上面四件事之一）→ 应用。"
 > → 错误分类（status 码 → fallback/fail-fast/retry 语义）换任何调模型 app 都原样要 → **③b 公共**。
 
-> **保留编排壳 = 保留分类语义 · 决策记录 D1 用户原话（verbatim）**：
-> "不用留A, 这是错误判断, 正确的是A'"（`client-layer-decision-record.md:41`）
-> → 否决"resolver 裸返回 ChatX + 删 `GatewayChatModel` + 用 `with_fallbacks()`"；`with_fallbacks()` 只按异常类型，**表达不了"按 HTTP status + provider payload 组合分类"**，所以必须保留 `GatewayChatModel` 编排壳 + 本分类器。
+> **保留编排壳 = 保留分类语义 · D1（决策）+ PM 原话（verbatim，不改一字）**：
+> **决策（D1）**：resolver/gateway **不**裸返回原生 ChatX、**不**删 `GatewayChatModel`，保留它作为**编排外壳**，只把「每条 route 的实际调用」从自研消息转换换成原生 langchain ChatX。否决激进版 A（`resolver 直接产 ChatX + 删 GatewayChatModel + 用 with_fallbacks()`），因为 A 会回归 fallback / probe / 熔断 / usage / metadata / predict——第八轮真机只验证了「调用层换 ChatX 修掉空-content bug」，**从未验证「删编排层」**。
+> **PM 原话**："不用留A, 这是错误判断, 正确的是A'"
+> → `with_fallbacks()` 只按异常类型，**表达不了"按 HTTP status + provider payload 组合分类"**，所以必须保留 `GatewayChatModel` 编排壳 + 本分类器（`gateway_chat_model.py:111-271` 编排职责坐实：熔断跳过 `:113` / probe `:115` / 分类 `:124,238` / mark-down `:135,249` / fallback event `:136,250` / usage `:227` / metadata `:313-357`）。
 
-> **真实语义纠正 · 决策记录 M5（verbatim 表，纠正多处文档错误简写）**：
-> "**401 / 402 / 403 / 404** | **fallback**（credential/route scope） | `fallback_allowed`（**不是 fail-fast!**）"
-> "**文档错误（待更正）**：`temp` option-a task 第 44 行、本 spec **`design.md:142`** 都把它写成「`400/401/403/404/422 → fail-fast`」，错（401/403/404 实为 fallback）。"（`client-layer-decision-record.md:164,169`）
+> **真实语义纠正 · M5（决策）+ PM 原话（verbatim 表，纠正多处文档错误简写）**：
+> **决策（M5）**：执行期分类**不变**，沿用 `classify_exception`。真实语义表完整 8 行见上 §2.1，与源码 `error_classification.py:15-17`/`:133-188` 一致。
+> **PM 原话（语义表关键行）**："**401 / 402 / 403 / 404** | **fallback**（credential/route scope） | `fallback_allowed`（**不是 fail-fast!**）"
+> **PM 原话（文档错误纠正）**："**文档错误（待更正）**：`temp` option-a task 第 44 行、本 spec **`design.md:142`** 都把它写成「`400/401/403/404/422 → fail-fast`」，错（401/403/404 实为 fallback）。`design.md:142` 已在本轮一并更正。"
+> → 这是 06 否决"fail-fast 简写"的权威依据：401/402/403/404 实为 fallback（credential/route scope），把它们当 fail-fast 会让 credential 失效或 route not found 时**不再尝试下一条 route**，丢掉本可恢复的机会。
 
-> **A' 验证清单（头号风险）· 决策记录 §5 / §M6 验证项（verbatim）**：
-> "**异常分类（头号风险）**：fake 401 / 400 / 网络错 喂 `classify_exception` → 分别 fallback / fail-fast / fallback；且 ChatX 瞬时重试耗尽后的异常仍可分类。"（`client-layer-decision-record.md:268`）
+> **A' 验证清单（头号风险）· PM 原话（verbatim）**：
+> "**异常分类（头号风险）**：fake 401 / 400 / 网络错 喂 `classify_exception` → 分别 fallback / fail-fast / fallback；且 ChatX 瞬时重试耗尽后的异常仍可分类。"
 
 ## 5. 决策 + 动机
 
 > 保留原"决策原因"全部条目。
 
-1. **保留 `GatewayChatModel` 编排壳，才能保留本分类语义**：`with_fallbacks()` 只按异常类型，表达不了 HTTP status 和 provider payload 组合出来的分类语义（`.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:30-38`）。
+1. **保留 `GatewayChatModel` 编排壳，才能保留本分类语义**：`with_fallbacks()` 只按异常类型，表达不了 HTTP status 和 provider payload 组合出来的分类语义（决策依据 = D1，完整决策 + PM 原话见 §4「保留编排壳」；编排职责坐实 `gateway_chat_model.py:111-271`）。
 2. **401/402/403/404 fallback** 能保住 route/credential scope 的恢复机会；当前源码已把 404 视为 route scope，把 401/402/403 视为 credential scope（`registry/error_classification.py:144-154`）。
 3. **非 capability 400/413/422 fail request** 可以防止错误请求形状被 fallback 掩盖；这与"未知不当作模型选择信号"的原则一致（`registry/error_classification.py:169-188`，`docs/graph-agent-gateway/mvp0/mvp0-alignment.md:172`）。
 4. **capability 400 fallback** 是为 provider/route 能力差异留出口，例如 unsupported parameter 或 invalid model 说明当前 route/mapper 不合适，但不代表整个用户请求非法（`registry/error_classification.py:155-168`，`:272-290`）。
 5. **未知异常 fail with route context**：不能把未分类错误当作模型选择信号；这与 mvp0"无法分类时带 route context 暴露错误"的要求一致（`registry/error_classification.py:179-188`，`docs/graph-agent-gateway/mvp0/mvp0-alignment.md:172`）。
-6. **ChatX 瞬时重试可保留，但重试耗尽后的异常仍必须进入本分类器**：这样同 route 防抖动 retry（[[09-inv-invocation-runtime]] F2）与跨 route fallback 不会混在一起（`.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:187-193`）。
+6. **ChatX 瞬时重试可保留，但重试耗尽后的异常仍必须进入本分类器**：这样同 route 防抖动 retry（[[09-inv-invocation-runtime]] F2）与跨 route fallback 不会混在一起（决策依据 = client 层 A' 重设计决策 F2「保留 ChatX 瞬时重试」+ M5；瞬时重试归 [[09-inv-invocation-runtime]]，本分类器只需保证重试耗尽后的异常仍走 §2.1 表）。
 
 ## 6. 测试关键点
 
@@ -104,7 +107,7 @@ MVP1 目标**不是重写错误分类**，而是在调用层 A' 迁移到原生 
 - **429 / 5xx / 网络错 → retry(`fallback_allowed`)**：429→`bucket`、500/502/503/504/529→`endpoint`、ConnectError/Timeout→`route`+`retryable=True`。
 - **未知异常 → `fail_fast_with_route_context`**：无 status、无可识别 payload → `unclassified_default=True` → 映射 `fail_fast_with_route_context`（带 route context 暴露，不静默 fallback）。
 - **200 后 SSE 断流 → fallback/stream**：`stream_phase=="after_200_sse"` → `fallback_route`/`stream`（优先于普通状态码分支）。
-- **A' 异常识别兼容（换 ChatX 后必补）**：ChatX/SDK 抛的 401、400-unsupported、400-non-capability、413、422、wrapped network error 都仍被 `_status_code`/`_provider_error_payload`/`_exception_chain` 正确识别 → 仍走上表（决策记录 §5 头号风险、`:250`/`:268`）。
+- **A' 异常识别兼容（换 ChatX 后必补）**：ChatX/SDK 抛的 401、400-unsupported、400-non-capability、413、422、wrapped network error 都仍被 `_status_code`/`_provider_error_payload`/`_exception_chain` 正确识别 → 仍走上表（依据 = A' 验证清单头号风险，PM 原话见 §4「A' 验证清单」）。
 - **瞬时重试耗尽后仍可分类**：ChatX 有界瞬时重试（F2）耗尽后抛出的异常进 `classify_exception` 仍产出正确 decision（同 route retry 与跨 route fallback 不混）。
 
 ## 7. 涉及 region / platform
@@ -118,7 +121,7 @@ MVP1 目标**不是重写错误分类**，而是在调用层 A' 迁移到原生 
 
 > 保留原"待办/疑点"全部条目。
 
-- **待办（原 #1）**：A' 引入 ChatX 后，需新增或保留 fake exception 测试，确认 ChatX 的 401、400 unsupported、400 non-capability、413、422、wrapped network error 都仍走 §2.1 表格（`.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:250`）。
+- **待办（原 #1）**：A' 引入 ChatX 后，需新增或保留 fake exception 测试，确认 ChatX 的 401、400 unsupported、400 non-capability、413、422、wrapped network error 都仍走 §2.1 表格（依据 = A' 验证清单头号风险，PM 原话见 §4「A' 验证清单」）。
 - **疑点（原 #2）**：若 ChatX/provider SDK 的错误对象不暴露 `response.json()` 或 `status_code`，需在调用适配层保留可分类上下文，但**不应改变 06 的目标语义**（`registry/error_classification.py:223-269`）。
 - **疑点（原 baseline #2）**：当前 capability 400 识别依赖字符串 marker（unsupported/not supported/unknown parameter/invalid model/model not found）；若 provider 返回本地化或新字段，可能需扩展 marker，但 MVP1 不应改现有分类语义（`registry/error_classification.py:272-290`）。
 
@@ -130,8 +133,8 @@ MVP1 目标**不是重写错误分类**，而是在调用层 A' 迁移到原生 
 2. **已实现**：capability 400 通过 provider error type/message marker 识别后 fallback；非 capability 400 与 413/422 仍 fail request（`registry/error_classification.py:155-178`，`:272-290`）。
 3. **已实现**：未知异常设置 `unclassified_default=True`，经 `classify_exception` 映射为 `fail_fast_with_route_context`（`registry/error_classification.py:179-188`，`:85-98`）。
 4. **已实现**：测试已覆盖 401/402 fallback、413 fail_fast、未知 fail_fast_with_route_context、provider status_code 404 fallback、wrapped network fallback、stream after 200 fallback、400 unsupported fallback（`packages/graph-agent-gateway/tests/test_registry_error_classification.py:8-105`）。
-5. **与 baseline 差异**：MVP1 不改分类模块，只要求调用层 A' 迁移后继续把 ChatX 抛出的异常送进同一个分类器（`.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:136-153`）。
-6. **与历史 mvp0 文档差异**：`docs/graph-agent-gateway/mvp0/mvp0-alignment.md:146-148` 的旧句子把 401/403/404 写成 fail fast，与当前源码和最新决策记录冲突；本模块以源码和决策记录为准。
+5. **与 baseline 差异**：MVP1 不改分类模块，只要求调用层 A' 迁移后继续把 ChatX 抛出的异常送进同一个分类器（依据 = M5 真实语义表，见 §4「真实语义纠正」+ §2.1 表）。
+6. **与历史 mvp0 文档差异**：`docs/graph-agent-gateway/mvp0/mvp0-alignment.md:146-148` 的旧句子把 401/403/404 写成 fail fast，与当前源码和 M5 真实语义冲突；本模块以源码 `registry/error_classification.py:15-17`/`:133-188` + 本文 §2.1/§4 留底为准。
 
 ## 覆盖率
 
@@ -141,9 +144,8 @@ MVP1 目标**不是重写错误分类**，而是在调用层 A' 迁移到原生 
 
 > 保留原代码索引全部条目。
 
-- `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:136-153` — 最新权威错误分类语义，明确纠正 401/403/404。
-- `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:158-171` — M5 真实语义表（401/402/403/404 = fallback）+ 文档错误纠正点。
-- `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:250` — A' 验证清单要求 fake 401/400/网络错覆盖 fallback/fail-fast/fallback。
+- 本文 §2.1 目标语义表 + §4「真实语义纠正」 — 权威错误分类语义（M5），明确纠正 401/403/404；与源码 `registry/error_classification.py:15-17`/`:133-188` 一致（决策记录系临时文档已不引用，逻辑 + PM 原话在本文留底）。
+- 本文 §4「A' 验证清单」 — A' 头号风险验证：fake 401/400/网络错覆盖 fallback/fail-fast/fallback（PM 原话留底）。
 - `docs/graph-agent-gateway/mvp1/README.md:31` — 本模块 brief，要求 mvp1 不改分类，只纠正语义。
 - `docs/graph-agent-gateway/mvp1/module-disposition-revised.md:36` — 06 错误分类 = 纯 ③b 公共（原 review 已判对，本轮不变）。
 - `docs/graph-agent-gateway/mvp0/mvp0-alignment.md:146-148` — 历史过时说法，需在阅读时标记为已被纠正。
@@ -163,4 +165,4 @@ MVP1 目标**不是重写错误分类**，而是在调用层 A' 迁移到原生 
 - [[02-orch-role-resolution]]：过滤后空链（配置错误）vs 运行期全失败（`AllProvidersFailedError`）的边界
 - [[09-inv-invocation-runtime]]：ChatX invoke 抛的异常进本分类器；F2 瞬时重试耗尽后仍须可分类
 - [[13-x-tracing-events-exceptions]]：`AllProvidersFailedError` / fallback event payload（含 from/to route 诊断）
-- 决策日志：`client-layer-decision-record.md` M5（真实语义）+ D1（保留编排壳）· `module-disposition-revised.md:36`
+- 决策日志：client 层 A' 重设计决策 M5（真实语义，本文 §2.1/§4 留底）+ D1（保留编排壳，本文 §4/§5 留底）· `module-disposition-revised.md:36`（06 = 纯 ③b）

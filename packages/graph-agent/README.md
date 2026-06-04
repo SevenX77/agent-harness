@@ -20,8 +20,8 @@ Its sole responsibility: execute SKILL.md-described workflows reliably. The agen
 4. **Hexagonal SDK boundary**
    Only the names listed in "Public API" are part of the stable API surface. Internal modules (`core.*`, `io.*`, `models.*`, etc.) can be re-organised without breaking downstream consumers.
 
-5. **Multimodal tools are general capabilities**
-   Tools under `tools/` for images, video, and voice remain in the framework layer as cross-project reusable capabilities, not business-specific logic.
+5. **Engine ships only domain-agnostic orchestration tools**
+   `tools/` provides only orchestration builtins (reference/example/file reading, `parallel_map`, clarification, working-memory/artifact access). Domain- or vendor-specific capabilities (text-to-speech, image/video generation, etc.) do **not** live in the engine — skills bring their own tools. This keeps the engine reusable by any app.
 
 ---
 
@@ -149,10 +149,10 @@ graph_agent/
 ├── models/                  # Model resolution
 │   └── resolver.py          # ModelResolver
 │
-├── tools/                   # Multimodal tools
-│   ├── generate_image.py
-│   ├── generate_video.py
-│   └── synthesize_speech.py
+├── tools/                   # Orchestration builtins (domain-agnostic)
+│   ├── builtin/             # read_reference / read_example / read_file / parallel_map / ask_clarification / ...
+│   ├── dynamic_schema.py
+│   └── md_to_json.py
 │
 ├── skills/                  # Built-in skills (compiler etc.)
 └── examples/                # Runnable examples

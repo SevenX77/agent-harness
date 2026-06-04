@@ -2,6 +2,9 @@
 
 ## [1.0.0] - 2026-04-05
 
+### Removed
+- Domain-specific TTS tool `synthesize_speech` and its `providers` helper; reason: the engine should remain domain-agnostic.
+
 ### Fixed
 - **compiler.py**: P012 code-only phase validation was outside the per-node loop, only checking the last node
 - **resolver.py**: `_fallback_to_deerflow_native` used unsafe global hook swap — replaced with thread-safe `_bypass_hook` parameter

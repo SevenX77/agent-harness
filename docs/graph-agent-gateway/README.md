@@ -14,7 +14,7 @@ role → 解析出该用哪条 route                          • graph-agent: R
 - **编排**只回答「该用哪条 route」(含 fallback 顺序、熔断/probe 决策),不调模型。
 - **route**(`ResolvedRoute`/`ResolvedRole`)= 编排↔调用唯一接口。
 - **调用**拿 route 真正执行;两个消费方共用同一 route 契约。
-- 架构决策+证据:[client-layer-decision-record.md](../../.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md)。
+- 架构决策(client 层 A' 重设计 D1/D2/D3/F1/F2/M4/M5)+ 证据已**分散留底进各模块** `mvp1-alignment.md` §4(用户原话)/§5(决策+动机),不再引用外部临时文件;归属判据见 [`mvp1/module-disposition-revised.md`](./mvp1/module-disposition-revised.md)。
 
 ## 目录结构
 

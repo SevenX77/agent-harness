@@ -1,8 +1,8 @@
 ---
 milestone: MVP1
 decision_record: 已分散留底进各模块文档(每模块 §4 用户原话 / §5 决策+动机);client 层 A' 重设计决策不再单独引用外部文件
-coverage: 42 后端文件 100% 映射(Explore 清点);14 个模块 baseline/mvp1-alignment 已起草
-status: 14 个模块文档已补齐,待实现阶段按待办推进
+coverage: 后端文件映射(Explore 清点);12 个 gateway ③b 模块 baseline/mvp1-alignment 已起草(原 copilot、HTTP 适配壳 2 模块 2026-06-03 判 ③a，移交 studio)
+status: 12 个 gateway 模块文档已补齐,待实现阶段按待办推进
 ---
 
 # MVP1 — 模块 manifest + 写作 brief
@@ -17,8 +17,8 @@ status: 14 个模块文档已补齐,待实现阶段按待办推进
 - **调用(实际执行)**:拿 `route` 真正调。两个消费方:graph-agent(原生 ChatX)/ copilot(交回 studio claude_agent_sdk)。
 - 决策与理由(client 层 A' 重设计决策)已**分散留底进各模块文档**(每模块 §4 用户原话 + §5 决策+动机),不再单独引用外部文件。各决策主落点:
   - **D1**(否决 A、保留编排外壳)→ [`07-orch-fallback-circuit-probe`](./07-orch-fallback-circuit-probe/mvp1-alignment.md) / [`13-x-tracing-events-exceptions`](./13-x-tracing-events-exceptions/mvp1-alignment.md)
-  - **D2**(编排/调用分离)→ [`01-handoff-interface`](./01-handoff-interface/mvp1-alignment.md)(权威) / [`12-inv-copilot-invocation`](./12-inv-copilot-invocation/mvp1-alignment.md)(copilot 用例) / [`predict-migration-to-engine`](./predict-migration-to-engine.md)
-  - **D3**(gateway 可复用、前端不归 gateway)→ [`14-api-router`](./14-api-router/mvp1-alignment.md) / [`12-inv-copilot-invocation`](./12-inv-copilot-invocation/mvp1-alignment.md)
+  - **D2**(编排/调用分离)→ [`01-handoff-interface`](./01-handoff-interface/mvp1-alignment.md)(权威，copilot 用例并入此处) / [`predict-migration-to-engine`](./predict-migration-to-engine.md)
+  - **D3**(gateway 可复用、前端不归 gateway)→ [`01-handoff-interface`](./01-handoff-interface/mvp1-alignment.md)(权威) / studio `llm-copilot-http-api`(`docs/studio/mvp1/04_platform/llm-copilot-http-api/`，router=③a 适配壳)
   - **F1**(base_url 保存时归一化)→ [`03-orch-credentials-endpoints`](./03-orch-credentials-endpoints/mvp1-alignment.md)(权威)
   - **F2**(retry 保留 ChatX 瞬时重试)→ [`07-orch-fallback-circuit-probe`](./07-orch-fallback-circuit-probe/mvp1-alignment.md) / [`09-inv-invocation-runtime`](./09-inv-invocation-runtime/mvp1-alignment.md)
   - **M5**(错误分类真实语义,401/402/403/404=fallback)→ [`06-orch-error-classification`](./06-orch-error-classification/mvp1-alignment.md)(权威)
@@ -37,7 +37,7 @@ status: 14 个模块文档已补齐,待实现阶段按待办推进
 | `05-orch-capabilities-and-models` | `registry/capabilities.py`、`registry/profile_selector.py:select_verified_profile`、`registry/lint.py:lint_role_routes`、`services/llm_model_identity.py`、`services/llm_notable_models.py`、`services/llm_route_capabilities.py`、`services/llm_model_groups.py` | capability 规范化/探测;**lint 只 warn/block、不驱动选型**(决策);profile 选择;模型身份/分组/notable 投影 |
 | `06-orch-error-classification` | `registry/error_classification.py:classify_exception/classify_error_context` | 真实语义表(401/402/403/404 与 400-capability → **fallback**,非 fail-fast);decision 映射。mvp1 **不变**;纠正多处文档错误简写 |
 | `07-orch-fallback-circuit-probe` | `gateway_chat_model.py:_generate`(编排步骤,共享)、`client_manager.py:probe_provider/is_provider_marked_down/mark_provider_down`(共享)、`registry/probe_contracts.py`、`services/copilot_test.py`、`services/llm_health_store.py` | fallback 循环逐步;熔断 TTL;probe 1-token 真请求;**retry 保留 ChatX 瞬时重试(不设 0)**;截断升级重试搬到本层 |
-| `08-orch-test-status-ssot` | `services/llm_state_projection.py:project_provider_model_state`、`services/llm_import_drafts.py` | 探测→持久化→投影→复用(**用户核心目标**);UI state(ready/untested/cooling_down/needs_setup);draft + evidence library。baseline 前端易失态;mvp1 后端 SSOT 回写 |
+| `08-orch-test-status-ssot` | `services/llm_state_projection.py:project_provider_model_state`、`services/llm_import_drafts.py` | 探测→持久化→投影→复用(**用户核心目标**);UI state(6 态:ready/historical_ready/untested/failed/cooling_down/off，已取消 needs_setup);draft + evidence library。baseline 前端易失态;mvp1 后端 SSOT 回写 |
 
 ### 调用层
 | 文件夹 | 覆盖代码 | 职责 / 必须解释 |
@@ -45,14 +45,16 @@ status: 14 个模块文档已补齐,待实现阶段按待办推进
 | `09-inv-invocation-runtime` | `gateway_chat_model.py:_build_chat_result`(调用步骤,共享)、`client_manager.py:_call_*/_call_with_token_escalation`(共享)、`models.py` | invoke 流程;**retry(ChatX 瞬时重试);截断升级;thinking 不拍平;从 `usage_metadata` 取 usage + 注入 route metadata**。baseline 自研 `_call_*`;mvp1 原生 ChatX |
 | `10-inv-route-chat-model-factory` | **MVP1 新建**(现状逻辑散在 `client_manager`SDK 工厂 + `resolver` 实例化) | `ResolvedRoute`→原生 ChatX;base_url 双保险;init-kwargs;范本 `temp/deerflow/.../factory.py`、`temp/deepagents/.../_models.py`。baseline=无此模块/职责现由谁承担;mvp1 新建(A' 核心) |
 | `11-inv-provider-profiles` | **MVP1 新建**(现状散在 `profile_selector`+`capabilities`+`client_manager` thinking) | provider 差异 = init-kwargs 表;何时子类覆盖单方法(deerflow `PatchedChatDeepSeek`);**绝不重写整套消息转换**。baseline=无;mvp1 新建(deepagents `ProviderProfile` 模式) |
-| `12-inv-copilot-invocation` | `services/copilot.py:stream_query/_resolve_route_runtime/_deepseek_anthropic_base_url/_ark_anthropic_base_url` | copilot 拿 route 自己用 claude_agent_sdk 调(独立运行时);base_url→`ANTHROPIC_BASE_URL` env;spawn claude CLI;**假测试问题**(测试 SDK≠运行 SDK)。mvp1 统一从交接接口拿(已归一化)route |
+
+> **copilot SDK 调用（原模块 12）已移交 studio**：按判据它是 ③a 应用（copilot 的实际调用方式，绑 `claude_agent_sdk`），gateway 库不感知 copilot——只把 `copilot_chat` 当普通 role 解析成 route（[`01-handoff-interface`](./01-handoff-interface/mvp1-alignment.md) 的 route 级 API）。SDK 调用 / session / env 注入 / 事件翻译 / 假测试见 `docs/studio/mvp1/02_capabilities/copilot-assist/` + `01_workflows/00_settings-ux-spec.md` §3.8/§3.4；两个 base_url 归一化助手归 [`03-orch-credentials-endpoints`](./03-orch-credentials-endpoints/mvp1-alignment.md)（③b 归一化原语）。
 
 ### 交接 / 横切 / API
 | 文件夹 | 覆盖代码 | 职责 / 必须解释 |
 |---|---|---|
 | `01-handoff-interface` | `protocol.py:ModelResolverProtocol`、`__init__.py`、`apps/studio/backend/app/models/copilot.py`(ws 事件)+ 引用 `registry/schema.py:ResolvedRoute/ResolvedRole` | `route` 契约每字段;resolve API 契约;两个消费方各取什么。baseline:route 未作一等输出;mvp1:route 成唯一交接物 |
 | `13-x-tracing-events-exceptions` | `events.py:LLMFallbackEvent`、`exceptions.py`、`tracing.py:emit_llm_fallback_event` | fallback 事件 payload(含 from/to route 诊断);各异常类型语义与触发点 |
-| `14-api-router` | `routers/llm.py`、`routers/copilot.py` | 每个 HTTP 端点干啥 + delegate 到哪个功能模块;save/test 端点;5000 行巨型 router(后续拆分计划) |
+
+> **HTTP 适配壳（原模块 14）已移交 studio**：`routers/llm.py`、`routers/copilot.py` = ③a Studio HTTP 适配壳（HTTP 端点形状 / job·进度包装 / DTO 投影绑死 studio 调用方式 + 存储介质），不是 ③b gateway 公共内核。它 delegate 的能力内核（base_url 归一化 / capability / probe 策略 / materialize / 6 态 / draft / endpoint 拆分）才是 ③b 公共。文档见 `docs/studio/mvp1/04_platform/llm-copilot-http-api/`。
 
 ### Predict(单独文档,非 baseline+alignment 模块)
 [`predict-migration-to-engine.md`](./predict-migration-to-engine.md):`predict_interception.py`、`services/predictor.py`、`services/diagnostic_export.py`、`models/runs.py`、`protocol.py:PredictContext`。决策:mock/模拟移交 engine,gateway 只留「role→route」。

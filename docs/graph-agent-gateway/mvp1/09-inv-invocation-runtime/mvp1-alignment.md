@@ -120,7 +120,7 @@ usage metadata 的原因（F5）是 ChatX `AIMessage.usage_metadata` 已携带�
 ## 7. 涉及 region / platform
 
 - **③b** `packages/graph-agent-gateway`：`gateway_chat_model.py` 的调用桥接（`_dispatch`/`_build_chat_result`/`_coerce_text`/`_additional_kwargs_from_response`/`_apply_system_prompt_prefix`）、`client_manager.py` 的 `_call_*`/`_dispatch_provider_call`/`_call_with_token_escalation`（真实调用部分待退役换 ChatX；token 升级搬 07）、`models.py` 预留 wrapper 边界。
-- **③a** `apps/studio/backend`：N/A（本模块纯调用运行时，不含应用加工四件事；copilot 自己的调用方式归 [[12-inv-copilot-invocation]] ③a）。
+- **③a** `apps/studio/backend`：N/A（本模块纯调用运行时，不含应用加工四件事；copilot 自己的调用方式归 studio copilot 页 ③a）。
 - **② Rust**：N/A（调用层不落 Rust）。
 
 ## 8. gaps / 待设计(待办/疑点)

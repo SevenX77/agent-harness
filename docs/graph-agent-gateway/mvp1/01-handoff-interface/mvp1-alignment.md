@@ -10,7 +10,7 @@ verified_at: 2026-06-02
 > **Tier**：③b gateway 公共能力(`ResolvedRoute/ResolvedRole` 契约 + 两级对外接口都在/应在 gateway 包；Copilot WS 事件 DTO 是 ③a 消费方引用，非泄漏)
 > **Owns**：定义编排↔调用的唯一交接物 `ResolvedRoute/ResolvedRole` 契约，并把「role→route」暴露为两级对外公共 API(role 级已有、route 级待补)；**不调模型**
 > **Status**：设计定稿(2026-06 判据第四轮 + D3 两级 API 钉死)；代码 = route 级直调 public API 待新增、`ModelResolverProtocol` 待补 route-first 返回、`__init__` 待导出 route handoff 类型
-> **Related**：[[02-orch-role-resolution]](resolve_role/materialize 产出本契约)· [[04-orch-registry-schema]](`ResolvedRoute/ResolvedRole` 字段权威源)· [[09-inv-invocation-runtime]](调用层消费本契约)· [[10-inv-route-chat-model-factory]](`ResolvedRoute`→ChatX)· [[12-inv-copilot-invocation]](route 级消费方，已并入本模块)
+> **Related**：[[02-orch-role-resolution]](resolve_role/materialize 产出本契约)· [[04-orch-registry-schema]](`ResolvedRoute/ResolvedRole` 字段权威源)· [[09-inv-invocation-runtime]](调用层消费本契约)· [[10-inv-route-chat-model-factory]](`ResolvedRoute`→ChatX)。route 级消费方（如 studio copilot：拿 route 自己用 SDK 调）由本模块的 route 级 API 覆盖；copilot 怎么用 route 调（SDK/session/事件）属 ③a，见 studio copilot（`docs/studio/mvp1/02_capabilities/copilot-assist/` + `00_settings-ux-spec.md` §3.8）。
 > **决策日志**：本模块 route 契约依据 client 层 A' 重设计决策 D2(编排/调用分离)+ D3(gateway 可复用服务、API 一等公民、两级接口)——完整逻辑 + PM 原话留底于本文 §4/§5；归属判据见 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`(01 = ③b 公共，**补 route 级直调 public API**)。D2/D3 是跨模块共享决策,另见 [[04-orch-registry-schema]](schema 作为编排↔调用交接数据契约同引 D2/D3)、[[09-inv-invocation-runtime]](调用层落 D2「调用」侧)。
 > **现状**：见同目录 `baseline.md`
 
@@ -163,7 +163,7 @@ MVP1 目标：让 **route(`ResolvedRoute`/`ResolvedRole`)成为编排层和调�
 - [[04-orch-registry-schema]]：`ResolvedRoute/ResolvedRole` 字段权威源(本模块只链接)
 - [[09-inv-invocation-runtime]]：调用层如何消费本契约 route
 - [[10-inv-route-chat-model-factory]]：`ResolvedRoute`→原生 ChatX 的工厂
-- [[12-inv-copilot-invocation]]：route 级消费方(模块 12 已降为 stub 并入本模块)
+- route 级消费方（如 studio copilot）：见本文 §2.5 / §3「② route 级对外 API」——gateway 给解析好的 route，消费方自己用 SDK 调；copilot 的 ③a SDK 调用见 studio copilot（copilot-assist + ux-spec §3.8）。（原 gateway 模块 12「copilot invocation」已移除：copilot 是 ③a 应用、不构成独立 gateway 模块，其握手即本模块的 route 级 API。）
 - 本模块 route 契约依据 client 层 A' 重设计决策 D2/D3(完整逻辑 + PM 原话留底于本文 §4/§5)/ 归属判据见 `module-disposition-revised.md`
 
 ## 待办/疑点(原始留底，承上 §8)

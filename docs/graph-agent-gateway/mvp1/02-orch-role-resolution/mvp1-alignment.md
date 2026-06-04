@@ -9,7 +9,7 @@ status: drafted
 > **Tier**：③b gateway 公共能力内核（`resolve_role` 已在包内；materialize 编排内核现散 ③a 待下沉）
 > **Owns**：接收角色编排结构（fallback_chain + 意图），解析成有序可执行 `ResolvedRoute` 链 + 跳过诊断；**不调模型**
 > **Status**：设计定稿（2026-06 判据第四轮反转）；代码 = resolve_role 待补跳过语义 + route 级 API、materialize 待下沉
-> **Related**：[[01-handoff-interface]]（route 契约）· [[04-orch-registry-schema]]（schema 权威源）· [[05-orch-capabilities-and-models]]（capability/lint）· [[08-orch-test-status-ssot]]（6 态投影，materialize 消费）· [[12-inv-copilot-invocation]]（route 级消费方）
+> **Related**：[[01-handoff-interface]]（route 契约）· [[04-orch-registry-schema]]（schema 权威源）· [[05-orch-capabilities-and-models]]（capability/lint）· [[08-orch-test-status-ssot]]（6 态投影，materialize 消费）· studio copilot（copilot SDK 调用 = ③a，见 `docs/studio/mvp1/02_capabilities/copilot-assist/` + `00_settings-ux-spec.md` §3.8）
 > **决策依据**：client 层 A' 重设计决策（D1 A' / D2 编排-调用分离，完整逻辑 + PM 原话见本文 §4/§5）+ 归属表 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`
 > **现状**：见同目录 `baseline.md`
 

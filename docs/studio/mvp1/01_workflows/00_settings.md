@@ -63,7 +63,7 @@ Copilot 用与 LLM Roles 同构的角色模型(`role_kind=copilot`),但运行时
 - **内置角色动态浮出**:默认浮出 Claude(优先 opus4.8→退 4.7)+ DeepSeek(优先 V4Pro→退 V3.2Pro)在 available 里最新最好的;eligible 判据 = 后端 anthropic-messages 兼容,**未测不预过滤**(keep them in there)。
 - **「Backend Integration」slot → 统一 save-status badge**(四页共用、接真 `saveStatus`)。
 
-> **现状 → 接线工程(亲验 file:line,见 ux-spec §3.5)**:mock 驱动(`mock-copilot-data`)+ **假测试**(测试探针 `AsyncAnthropic` ≠ 运行 `ClaudeSDKClient`,`llm.py:2150` vs `copilot.py:242`,gateway `12-inv-copilot-invocation` 待修)+ `saveStatus` 丢弃 + **copilot_ 前缀分流 bug**(选组后丢前缀→后端 `_is_copilot_role` 误判存到 graph-agent 侧)+ 占位按钮。
+> **现状 → 接线工程(亲验 file:line,见 ux-spec §3.5)**:mock 驱动(`mock-copilot-data`)+ **假测试**(测试探针 `AsyncAnthropic` ≠ 运行 `ClaudeSDKClient`,`llm.py:2150` vs `copilot.py:242`,[[copilot-assist]] + ux-spec §3.8 待修)+ `saveStatus` 丢弃 + **copilot_ 前缀分流 bug**(选组后丢前缀→后端 `_is_copilot_role` 误判存到 graph-agent 侧)+ 占位按钮。
 > **session 持久化(D8)** 属 copilot 聊天(skill 工作台 region),settings §3 只配模型,失败退路见 §5。
 
 ## 4. 测试 → 持久化 → 投影(贯穿四旅程的核心机制)

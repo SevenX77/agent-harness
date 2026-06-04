@@ -42,9 +42,9 @@ PM 第四轮校准后：这些的**能力内核恰是 ③b 公共**（gateway �
 | 09 invocation runtime | ③b ✓ | ③b 公共 | 留 gateway |
 | 10 route-chat-model 工厂 | ③b（新建） | ③b 公共 | 留 gateway（新建） |
 | 11 provider profiles | ③b（新建） | ③b 公共 | 留 gateway（新建） |
-| 12 copilot（`copilot.py` SDK 调用） | ③a 全搬/降 stub | ③a 应用（实际调用方式） | 留 studio；gateway 只给 `copilot_chat` route（**模块 12 降为 stub 并入 01**） |
+| 12 copilot（`copilot.py` SDK 调用） | ③a 全搬/降 stub | ③a 应用（实际调用方式） | **模块 12 移除**（copilot=③a，不构成 gateway 模块）；gateway 只给 `copilot_chat` route（并入 01）；SDK 调用文档 → studio `02_capabilities/copilot-assist/` + `00_settings-ux-spec.md` §3.8 |
 | 13 tracing / events / exceptions | ③b ✓ | ③b 公共 | 留 gateway |
-| 14 routers（HTTP `/api/llm`·`/api/copilot`） | ③a | ③a 应用（薄壳/适配） | 留 studio |
+| 14 routers（HTTP `/api/llm`·`/api/copilot`） | ③a | ③a 应用（薄壳/适配） | **模块 14 移交 studio** `04_platform/llm-copilot-http-api/`（③a HTTP 适配壳） |
 | predict-migration | mock → engine | mock=业务逻辑→engine；role→route 公共 | 不变 |
 | 推荐 / 默认浮出 / family 折叠展示 | ③a | ③a 应用（产品策略/展示） | 留 studio / 前端 |
 
@@ -92,5 +92,5 @@ mock = 业务逻辑 → 移交 engine；gateway 只留 role→route。
 ## 6. 对原 14 个模块文档的影响
 
 - **不再"把模块搬出 gateway 文档"**——这些模块（含 model_group / 6 态 / draft / materialize）**本就该在 gateway 文档**，因为它们是公共能力。
-- 真正要从 gateway 文档**剥离/降级**的只有：**12 copilot**（降为 stub：gateway 只给 `copilot_chat` route，copilot 专属内容移 studio）、**14 routers**（标注为 ③a 适配壳），以及各模块里混入的 **UI / 产品策略**描述。
+- 真正要从 gateway 文档**移出**的只有：**12 copilot**（2026-06-03 **移除**——copilot=③a 应用、不构成 gateway 模块；gateway 只给 `copilot_chat` route，copilot 专属内容移 studio `copilot-assist` + ux-spec §3.8）、**14 routers**（2026-06-03 **移交 studio** `04_platform/llm-copilot-http-api/`，③a HTTP 适配壳），以及各模块里混入的 **UI / 产品策略**描述。
 - 各模块文档需**重写视角**：把"现状 ③a 实现"标为"待下沉 ③b 的公共能力"，把 UI / 产品策略部分明确划给 studio（与 `00_settings-ux-spec.md` §6 配套，不脱钩）。

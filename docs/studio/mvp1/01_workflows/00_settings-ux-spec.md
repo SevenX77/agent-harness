@@ -205,7 +205,7 @@
 
 ### 3.4 测试 = 真 SDK 调用（修假测试，核心）
 - **现状假测试**：`_probe_copilot_sdk_tool_call`（copilot SDK 测试探针，`llm.py:2150`）用 `AsyncAnthropic`（裸 Anthropic HTTP 客户端，`:2156`），而真实 copilot 跑 `ClaudeSDKClient`（`copilot.py:242`）→ **测的 SDK ≠ 跑的 SDK**，测过不证明 spawn/env 注入/tool loop 能跑。
-- **目标**：测试改走**真 `ClaudeSDKClient` 路径**（gateway `12-inv-copilot-invocation` 目标），发真工具调用、验 spawn/env/tool loop；成功**写高阶证据**（SDK 工具调用验证通过）回 credentials + draft。
+- **目标**：测试改走**真 `ClaudeSDKClient` 路径**（见本页 §3.8 Copilot SDK 调用机制），发真工具调用、验 spawn/env/tool loop；成功**写高阶证据**（SDK 工具调用验证通过）回 credentials + draft。
 - copilot 应走 **role→routes 一等 API**（`resolve_routes`，gateway 02 目标），不再自己手装 registry snapshot（现 `_resolve_copilot_runtime` 手装，`copilot.py:419`）。
 
 ### 3.5 现状 gap → 接线工程清单（亲验 file:line）
@@ -230,9 +230,9 @@
 - **保存反馈**：改完显保存中/已保存；失败显式告警不静默。
 - **去 mock**：无真数据时空态/骨架屏（非 mock 种子）。
 
-### 3.8 Copilot SDK 调用机制（③a Studio 领域；从 gateway 模块 12 降 stub 移入，原内容不丢）
+### 3.8 Copilot SDK 调用机制（③a Studio 领域；原 gateway 模块 12 移除后内容留此，不丢）
 
-> **来源迁移**：以下是 Copilot 拿到 route 后**怎么用 `claude_agent_sdk` 真正调**的现状机制，原记录在 gateway `docs/graph-agent-gateway/mvp1/12-inv-copilot-invocation/{baseline,mvp1-alignment}.md`。按第四轮判据，**gateway 库不感知 copilot**（只给 `copilot_chat` route），SDK 调用 / session / 事件翻译 / 假测试全属 **③a Studio 领域**——故内容迁入本页留底，gateway 模块 12 降为 stub 并指回此处。代码均在 `apps/studio/backend/app/services/copilot.py`（行号以当前源码为准）。
+> **来源迁移**：以下是 Copilot 拿到 route 后**怎么用 `claude_agent_sdk` 真正调**的现状机制。按第四轮判据，**gateway 库不感知 copilot**（只给 `copilot_chat` route），SDK 调用 / session / 事件翻译 / 假测试全属 **③a Studio 领域**——故 **2026-06-03 移除 gateway 模块 12「copilot-invocation」**（copilot=③a 应用、不构成 gateway 模块），其全部内容完整留在本页 + 能力 [[copilot-assist]]，gateway 侧只保留「把 `copilot_chat` 当普通 role 解析成 route」（gateway 模块 01 的 route 级 API）。代码均在 `apps/studio/backend/app/services/copilot.py`（行号以当前源码为准）。
 
 **A. session 缓存键**：`make_session_key`（用 skill、模型、endpoint 和 API key 哈希生成 SDK session cache key，`copilot.py:93`）保证换 key 后不会复用旧进程。`get_or_create_session`（复用同一 skill/model/provider/key 组合的 `ClaudeSDKClient`，`copilot.py:276`）减少重复 spawn SDK 会话。
 

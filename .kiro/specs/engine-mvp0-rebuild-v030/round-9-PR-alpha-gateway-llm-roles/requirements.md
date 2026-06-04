@@ -37,7 +37,7 @@ PR α 承接并完整交付以下 MVP0 R 级需求：
 ### 4.3 文档验收 (Documentation)
 1. Gateway 独立 Package 的 README.md 就绪。
 2. Studio API Spec 文档更新关于 LLM Roles 数据结构变更的内容（移除了顶层 temp，增加了底层 temp/max_tokens）。
-3. **Gateway 架构文档同步验收**: 必须同步更新 `docs/engine/graph-agent-gateway/mvp0-alignment.md` 与 `logic-explained.md`。所有隐式依赖 `ChatOpenAI` 等实体的测试用例全部重构为依赖 Dummy / Mock Resolver。
+3. **Gateway 架构文档同步验收**: 必须同步更新 `docs/graph-agent-gateway/mvp0/mvp0-alignment.md` 与 `docs/graph-agent-gateway/mvp0/logic-explained.md`。所有隐式依赖 `ChatOpenAI` 等实体的测试用例全部重构为依赖 Dummy / Mock Resolver。
 2. 新增 `packages/graph-agent-gateway/tests/` 目录，且单元测试覆盖率需达到基准线（验证 fallback 逻辑和温度透传）。
 
 ### 4.3 文档验收 (Documentation)

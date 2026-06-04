@@ -21,7 +21,7 @@ src 改动 4 文件全部在 CI/quality telemetry 层, **零触及**业务代码
 - `packages/graph-agent/tests/test_contract_hash_lock.py` (53 H2 + 14 FROZEN docs) → 零改 ✅
 - `packages/graph-agent/tests/test_round28_contract_manifests.py` (92 errors + 33 events) → 零改 ✅
 - `packages/graph-agent/tests/test_round28_invariant_guards.py` (R28 5 机制) → 零改 ✅
-- `docs/engine/skill-spec/*` + `docs/engine/public-api-contract.md` (FROZEN docs SHA) → 零改 ✅
+- `docs/engine/mvp0/skill-spec/*` + `docs/engine/mvp0/public-api-contract.md` (FROZEN docs SHA) → 零改 ✅
 - `apps/studio/backend/app/**` 业务代码 → 零改 ✅
 
 **我亲跑 4 contract gate**: `uv run pytest test_public_api_contract.py test_contract_hash_lock.py test_round28_contract_manifests.py test_round28_invariant_guards.py` → **38 passed in 78s** ✅. 跟主控亲跑数一致。

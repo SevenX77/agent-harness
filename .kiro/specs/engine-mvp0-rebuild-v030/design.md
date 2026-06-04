@@ -14,29 +14,29 @@ V0.3.0 engine is organized around five contracts:
 
 ### Field model source of truth
 
-This design does not invent a parallel schema. Field-level contracts come from `docs/engine/skill-spec/`:
+This design does not invent a parallel schema. Field-level contracts come from `docs/engine/mvp0/skill-spec/`:
 
-- Physical layout and mode/path lock: `docs/engine/skill-spec/01-physical-layout.md:32-36`, `:71-84`.
-- GRAPH root fields and root IO: `docs/engine/skill-spec/02-graph-md-spec.md:7-12`, `:51-78`.
-- LOGIC node fields and `actions:`: `docs/engine/skill-spec/03-logic-md-spec.md:7-12`, `:24`, `:33-40`, `:58-67`.
-- SUBGRAPH node fields and `target_skill`: `docs/engine/skill-spec/04-subgraph-md-spec.md`.
-- Agent node fields and body XML tags: `docs/engine/skill-spec/05-agent-md-spec.md:7-18`, `:41-52`.
-- SkillResolver DI: `docs/engine/skill-spec/10-skill-resolver-protocol-spec.md:24-35`, `:47-75`.
+- Physical layout and mode/path lock: `docs/engine/mvp0/skill-spec/01-physical-layout.md:32-36`, `:71-84`.
+- GRAPH root fields and root IO: `docs/engine/mvp0/skill-spec/02-graph-md-spec.md:7-12`, `:51-78`.
+- LOGIC node fields and `actions:`: `docs/engine/mvp0/skill-spec/03-logic-md-spec.md:7-12`, `:24`, `:33-40`, `:58-67`.
+- SUBGRAPH node fields and `target_skill`: `docs/engine/mvp0/skill-spec/04-subgraph-md-spec.md`.
+- Agent node fields and body XML tags: `docs/engine/mvp0/skill-spec/05-agent-md-spec.md:7-18`, `:41-52`.
+- SkillResolver DI: `docs/engine/mvp0/skill-spec/10-skill-resolver-protocol-spec.md:24-35`, `:47-75`.
 - **[Completed via PR α]** ModelResolver DI: Engine runtime decoupled from Gateway provider initialization through explicit `ModelResolverProtocol` dependency injection in `run_skill`.
 
-Root IO is stored inline in `GRAPH.md` frontmatter. Physical `io/inputs.json`, `io/outputs.json`, `io_inputs_ref`, and `io_outputs_ref` are hard failures, per `docs/engine/skill-spec/01-physical-layout.md:94-102`.
+Root IO is stored inline in `GRAPH.md` frontmatter. Physical `io/inputs.json`, `io/outputs.json`, `io_inputs_ref`, and `io_outputs_ref` are hard failures, per `docs/engine/mvp0/skill-spec/01-physical-layout.md:94-102`.
 
 ### `AgentNodeAST`
 
-Required and optional fields are not redefined here; use `docs/engine/skill-spec/05-agent-md-spec.md:11-18`. The body parser only accepts the flat XML tags listed in `docs/engine/skill-spec/05-agent-md-spec.md:41-52`; no `<steps>` / `<protocols>` shell is allowed.
+Required and optional fields are not redefined here; use `docs/engine/mvp0/skill-spec/05-agent-md-spec.md:11-18`. The body parser only accepts the flat XML tags listed in `docs/engine/mvp0/skill-spec/05-agent-md-spec.md:41-52`; no `<steps>` / `<protocols>` shell is allowed.
 
 ### `LogicNodeAST`
 
-Required fields are `name`, `mode: logic`, `actions`, and `io`, per `docs/engine/skill-spec/03-logic-md-spec.md:33-40`. Action names are one-level names resolved under `<skill_root>/actions/<name>.py`, per `docs/engine/skill-spec/03-logic-md-spec.md:58`. `python_callable` is not part of V0.3.0.
+Required fields are `name`, `mode: logic`, `actions`, and `io`, per `docs/engine/mvp0/skill-spec/03-logic-md-spec.md:33-40`. Action names are one-level names resolved under `<skill_root>/actions/<name>.py`, per `docs/engine/mvp0/skill-spec/03-logic-md-spec.md:58`. `python_callable` is not part of V0.3.0.
 
 ### `SubgraphNodeAST`
 
-Required fields come from `docs/engine/skill-spec/04-subgraph-md-spec.md`: `mode: subgraph`, `target_skill`, and `io`. Compiler resolves `target_skill` through `SkillResolverProtocol`, compiles the child root, and checks parent phase IO against child root IO.
+Required fields come from `docs/engine/mvp0/skill-spec/04-subgraph-md-spec.md`: `mode: subgraph`, `target_skill`, and `io`. Compiler resolves `target_skill` through `SkillResolverProtocol`, compiles the child root, and checks parent phase IO against child root IO.
 
 ## 3. Normalized state shape
 
@@ -220,7 +220,7 @@ Trace events carry only sanitized data:
 - reference reader fallback metadata
 - tool args after validation
 
-Trace must not dump full parent runtime state. It emits StateMapper-filtered inputs/outputs and structured metadata, matching `docs/engine/tracing-and-observability/mvp0-alignment.md` and `docs/engine/skill-spec/12-compile-runtime-flow-spec.md:119-121`.
+Trace must not dump full parent runtime state. It emits StateMapper-filtered inputs/outputs and structured metadata, matching `docs/engine/mvp0/tracing-and-observability/mvp0-alignment.md` and `docs/engine/mvp0/skill-spec/12-compile-runtime-flow-spec.md:119-121`.
 
 ## 11. Cleanup design
 

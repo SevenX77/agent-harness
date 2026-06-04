@@ -6,14 +6,22 @@
 
 | Spec | 状态 | 主题 | Level 3 关联 |
 |---|---|---|---|
-| [`canvas-micro-topology-v1/`](./canvas-micro-topology-v1/) | Draft (P0) | React Flow 画布微观拓扑展开 + 前后端嵌套 Payload schema | [`docs/studio/system-level/ux-workflow/baseline.md`](../../docs/studio/system-level/ux-workflow/baseline.md) + [`docs/engine/execution-runtime/baseline.md`](../../docs/engine/execution-runtime/baseline.md) |
-| [`trace-and-predict-visibility/`](./trace-and-predict-visibility/) | Draft (P1) | Trace 瀑布流 + Prompt 透视仪 + Edge Inspection + Compile 结构化报错 | [`docs/studio/feature-folders/trace-visualization/baseline.md`](../../docs/studio/feature-folders/trace-visualization/baseline.md) |
-| [`studio-api-keys-redesign/`](./studio-api-keys-redesign/) | Superseded (UX only) | API Keys Round 2/3 UX 参考；v2 生产契约见 `llm-provider-intelligence-v2` | [`docs/engine/graph-agent-gateway/baseline.md`](../../docs/engine/graph-agent-gateway/baseline.md) |
+| [`studio-feature-canvas-topology/`](./studio-feature-canvas-topology/) | Draft (P0) | **画布唯一主文档(全部 canvas 功能)**:纵向布局 · 黑板可视化连线+i/o panel · 拖拽改拓扑 · 三层下钻 · 运行态展开/Nudge · 空画布快捷 · 统一 Rust 文件管线(写校验解耦)。吸收并取代 ↓ canvas-authoring-v1 + canvas-micro-topology-v1 | [`docs/studio/02_features/canvas-topology/baseline.md`](../../docs/studio/02_features/canvas-topology/baseline.md) |
+| [`canvas-micro-topology-v1/`](./canvas-micro-topology-v1/) | **Superseded → studio-feature-canvas-topology** | 运行态微观展开/Nudge/Payload schema 已吸收入主文档(REQ-11..14),待物理归档到 `_archive/` | [`docs/studio/02_features/canvas-topology/mvp0-alignment.md`](../../docs/studio/02_features/canvas-topology/mvp0-alignment.md) |
+| [`canvas-authoring-v1/`](./canvas-authoring-v1/) | **Superseded → studio-feature-canvas-topology** | 编辑态(连线反写/新建节点/属性编辑)已实现并吸收入主文档(REQ-3/9/10,需迁 Rust),待物理归档到 `_archive/` | [`docs/studio/02_features/canvas-topology/mvp0-alignment.md`](../../docs/studio/02_features/canvas-topology/mvp0-alignment.md) |
+| [`studio-feature-trace-inspector/`](./studio-feature-trace-inspector/) | Draft (P1) | **运行追踪唯一权威 spec(完全去黑盒)**:Trace Panel 实时+回看 · 节点过滤/检索 · 边 dot→真实 state 黑板→编辑器查看 · Prompt 透视 · PropertiesPanel 净化。由 ↓ trace-and-predict-visibility 改名合并 | [`docs/studio/02_features/trace-inspector/baseline.md`](../../docs/studio/02_features/trace-inspector/baseline.md) |
+| [`trace-and-predict-visibility/`](./trace-and-predict-visibility/) | **Superseded → studio-feature-trace-inspector** | 旧名;内容已合并入 trace-inspector,待物理归档到 `_archive/` | [`docs/studio/02_features/trace-inspector/baseline.md`](../../docs/studio/02_features/trace-inspector/baseline.md) |
+| [`studio-api-keys-redesign/`](./studio-api-keys-redesign/) | Superseded (UX only) | API Keys Round 2/3 UX 参考；v2 生产契约见 `llm-provider-intelligence-v2` | [`docs/graph-agent-gateway/mvp0/baseline.md`](../../docs/graph-agent-gateway/mvp0/baseline.md) |
 | [`studio-api-keys-regression-hardening/`](./studio-api-keys-regression-hardening/) | Implementing | API Keys 回归收敛：先恢复删除前前端状态，再接 v2 API | [`docs/development/FRONTEND_UI_SPEC.md`](../../docs/development/FRONTEND_UI_SPEC.md) |
-| [`studio-gateway-runtime-schema-boundary/`](./studio-gateway-runtime-schema-boundary/) | Draft | Gateway runtime schema 去 UI 字段；Studio 后端拥有 display projection | [`docs/engine/graph-agent-gateway/baseline.md`](../../docs/engine/graph-agent-gateway/baseline.md) |
+| [`studio-gateway-runtime-schema-boundary/`](./studio-gateway-runtime-schema-boundary/) | Draft | Gateway runtime schema 去 UI 字段；Studio 后端拥有 display projection | [`docs/graph-agent-gateway/mvp0/baseline.md`](../../docs/graph-agent-gateway/mvp0/baseline.md) |
 | [`studio-llm-platform-control-plane-runtime/`](./studio-llm-platform-control-plane-runtime/) | Implementing | LLM Platform v2.0：Control Plane / Gateway Runtime Plane / 多客户接入 | [`apps/studio/backend/docs/llm-registry/LLM_PLATFORM_CONTROL_PLANE_RUNTIME_V1.md`](../../apps/studio/backend/docs/llm-registry/LLM_PLATFORM_CONTROL_PLANE_RUNTIME_V1.md) |
+| [`studio-llm-gateway-redesign/`](./studio-llm-gateway-redesign/) | Draft (Review-ready) | LLM Gateway 回归修复切片：save 解耦 · resolver 解析期跳过 · 测试状态 SSOT 回写 · 远端就绪形状（platform-control-plane-runtime 的近期子集，见 `architecture-direction.md`） | [`docs/studio/03_platform/llm-gateway/baseline.md`](../../docs/studio/03_platform/llm-gateway/baseline.md) |
 | [`studio-llm-roles-frontend-cutover/`](./studio-llm-roles-frontend-cutover/) | Draft | LLM Roles 前端按 6 个可回滚 PR 接入 Model Groups DTO | [`docs/development/FRONTEND_UI_SPEC.md`](../../docs/development/FRONTEND_UI_SPEC.md) |
+| [`studio-llm-copilot-reconciliation/`](./studio-llm-copilot-reconciliation/) | Draft (P0) | API Key 参数/端点双层校验 + Roles 全局状态回写 + Copilot SDK 专属工具测试 | [`docs/development/FRONTEND_UI_SPEC.md`](../../docs/development/FRONTEND_UI_SPEC.md) |
 | [`studio-frontend-v21-multifile-editor/`](./studio-frontend-v21-multifile-editor/) | Draft | Studio v3 多文件 skill 编辑架构 (VS Code 风格) | [`docs/studio/system-level/workspace-file-system/baseline.md`](../../docs/studio/system-level/workspace-file-system/baseline.md) |
+| [`studio-feature-skill-lifecycle/`](./studio-feature-skill-lifecycle/) | Draft (Review-ready) | 测试输入管理(原生选路径→Python 读入)+ 批量运行(序列自动批量)。已收敛去过度设计:S1 哈希冲突移出(DEF-011)、文件转换工具移交引擎(DEF-012)。建议改名 `test-inputs-batch` | [`docs/studio/02_features/skill-lifecycle/baseline.md`](../../docs/studio/02_features/skill-lifecycle/baseline.md) |
+
+
 
 ## Archive (历史归档区)
 

@@ -42,7 +42,7 @@ max-complexity = 10
 ## §4 黄金原则保障
 重构 13 个 src 函数必须保 65 API / 92 错误码 / 33 事件 / 53 H2 章节 / FROZEN docs SHA hash 一个不漏。重构后必须跑 round-28 contract validator 保持 GREEN 守门。具体 guard 清单如下：
 - `tests/test_public_api_contract.py` (含 `EXPECTED_CONTRACT_SYMBOLS` + `EXPECTED_SIGNATURES` + `EXPECTED_FIELD_CONTRACTS` + `EXPECTED_CALLBACK_PROTOCOL_METHODS` + `EXPECTED_EXCEPTION_MRO`) (65 public symbols field-level)
-- `tests/test_contract_hash_lock.py` (53 H2 + FROZEN docs SHA-256 (14 docs/engine/skill-spec/* + 4 contract docs SHA-256))
+- `tests/test_contract_hash_lock.py` (53 H2 + FROZEN docs SHA-256 (14 docs/engine/mvp0/skill-spec/* + 4 contract docs SHA-256))
 - `tests/test_round28_contract_manifests.py::test_primary_owner_unique_per_error_code_and_event` (92 错误码 + 33 事件 single primary owner (验 `R28_PRIMARY_OWNER_DUPLICATE`/`MISSING`))
 - `tests/test_round28_invariant_guards.py` (R28 5 机制 guard: prompt_template_8_slots / middleware_order / tool_sandbox / blackboard_mapping / f_v3_error_metadata_shape)
 - **全套 pytest GREEN** (整体 regression 防护)
@@ -86,5 +86,5 @@ Callback Protocol 含 `on_event` / `on_nudge` / `on_working_memory_update` / `on
 强化 4 维度验证保障：
 - **65 public API symbols 不漂**：`test_public_api_contract.py` 守门。含 13 Callback Protocol method 签名: `on_phase_start` / `on_phase_end` / `on_llm_call` / `on_tool_call` / `on_validation_fail` / `on_retry` / `on_finish_task` / `on_nudge` / `on_working_memory_update` / `on_dead_end_pruned` / `on_compaction` / `on_ambiguity_report` / `on_event`。`on_event` 重构 signature 必不漂。
 - **92 错误码 + 33 事件 single primary owner**：`test_round28_contract_manifests.py` 守门。13 helper 重构不动错误码 / 事件 owner。
-- **53 H2 章节 + 14 FROZEN docs SHA-256**：`test_contract_hash_lock.py` 守门。13 helper 重构不动 `docs/engine/skill-spec/*`。
+- **53 H2 章节 + 14 FROZEN docs SHA-256**：`test_contract_hash_lock.py` 守门。13 helper 重构不动 `docs/engine/mvp0/skill-spec/*`。
 - **R28 5 机制 invariant**：`test_round28_invariant_guards.py` 守门。13 helper 重构不破 5 机制。

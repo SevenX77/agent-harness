@@ -1,3 +1,5 @@
+> ⚠️ **Superseded → `studio-feature-canvas-topology`**（2026-06-01）。本 spec 编辑态能力（连线反写 / 新建节点 / Properties 编辑）已实现并吸收为主文档 REQ-3/9/10，写入侧待迁 Rust。本文件留作已实现代码的设计参考，待物理归档到 `_archive/`。
+
 # Canvas Authoring V1 设计
 
 ## 目标

@@ -23,7 +23,7 @@
 ## 2. 规范基准
 
 ### Ground Truth §5 与 错误码约束
-根据 `docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md` 与 `11-error-code-spec.md`:
+根据 `docs/engine/mvp0/skill-spec/00-FORMAT-GROUND-TRUTH.md` 与 `11-error-code-spec.md`:
 1. `{aligned_concepts_and_critical_corrections_markdown}` 是唯一合法的装载期 Reference Reader 降级填入变量。
 2. 内部的 thinking style 等插槽包含的内容**不允许带有外壳**（如无 `<steps>` 脱壳操作，需直接使用 `{skill_steps_splat}` 平铺）。
 3. Resource Runtime Tool 的 not found 错误码：

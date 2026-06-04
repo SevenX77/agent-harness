@@ -11,7 +11,7 @@ scope: Task B only, tests-first, [BREAKING] SOP-05 cutover
 
 本 PR 只做 Task B skill-compilation 静态编译契约硬切换: B1-B8。C2 Cognitive Template 8 插槽装配不在本轮, 只保证 Agent AST 能解析出 C2 后续需要的 role/goal/steps/protocols/examples/resources。
 
-唯一格式权威: `docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md`。
+唯一格式权威: `docs/engine/mvp0/skill-spec/00-FORMAT-GROUND-TRUTH.md`。
 
 [BREAKING] cutover discipline:
 

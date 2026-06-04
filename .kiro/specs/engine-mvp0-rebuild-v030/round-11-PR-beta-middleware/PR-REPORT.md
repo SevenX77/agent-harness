@@ -34,5 +34,5 @@ Key paths:
 - `packages/graph-agent/src/graph_agent/core/graph_assembler.py`
 - `packages/graph-agent/src/graph_agent/runtime/state_mapper.py`
 - `packages/graph-agent/tests/middleware/`
-- `docs/engine/execution-runtime/logic-explained.md`
-- `docs/engine/state-and-io-contract/logic-explained.md`
+- `docs/engine/mvp0/execution-runtime/logic-explained.md`
+- `docs/engine/mvp0/state-and-io-contract/logic-explained.md`

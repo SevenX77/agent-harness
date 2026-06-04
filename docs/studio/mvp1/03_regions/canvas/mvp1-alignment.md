@@ -14,8 +14,8 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 
 ## F1. Graph Render And Selection
 
-- 机制: render graph nodes/edges and use node click/double-click to drive selection and file/panel focus.
-- 决策: canvas is the macro/mid-level authoring surface; Properties/editor handle details.
+- 机制: render graph nodes/edges and use node click/double-click to drive selection and file/panel focus;**agent phase 节点可在画布上内联展开为正文 XML 的 L3 子节点(可拖拽增删改排),这些子节点也是运行期 debug bar 对话续跑的对象**。
+- 决策: canvas 是宏观/中观创作面 **+ 正文 XML 结构编辑面**(L3 子节点内联);**Properties 只管 frontmatter 属性,编辑器看文件/diff/trace**——三者职责切分(PM 2026-06-04)。
 - 原话/来源: `01_workflows/02_authoring.md:18` lists graph authoring and Properties actions.
 - 测试: click selects node; double-click phase opens file and Properties; double-click input opens i/o panel.
 - Status: live.
@@ -32,17 +32,21 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 
 ## F3. Compile And Runtime Node Markers
 
-- 机制: canvas badges show compile errors, running/success/fail, debug paused/resume states.
-- 决策: errors and run states must be contextual on the node.
-- 原话/来源: `01_workflows/03_compile.md:15` requires node error marker; `01_workflows/04_run-and-verify.md:50` requires node lights; `01_workflows/05_debugging.md:14` requires red failed node.
-- 测试: compile error marker appears on affected node; run events update node states; failed node shows Resume when valid.
+- 机制: 节点上**三条独立视觉通道 + 一个 debug 悬浮 bar**,互不抢位:
+  - ① **编译错** = 节点上一个 warning/error 小标志(badge)。
+  - ② **运行态** = 节点上一个小圆点灯(复用 Settings provider-row 运行灯视觉:绿=通过 / 橙=中间态;位置不照抄)。
+  - ③ **运行错** = 该圆点灯变红。
+  - ④ **debug 控制 = 节点上方悬浮一个小 bar**:运行时 focus 到哪个节点、哪个节点的 bar 显示;可点暂停 / 开始(resume)/ 打开聊天框说话;**聊天框仅当该节点是 agent phase 下的子节点时可用,其余节点 disable**;非运行时鼠标 hover 节点才显示该 bar。
+- 决策: 三态**不叠同一个优先级槽**——badge / 圆点灯 / 悬浮 bar 各占独立视觉位置,无需"谁盖谁"层级(推翻早期 visual-hierarchy gap);debug 干预集中到悬浮 bar,且"对话续跑"能力锁定在 agent phase 子节点(只有 agent 节点能边跑边对话)(PM 2026-06-04)。
+- 原话/来源: `01_workflows/03_compile.md:15`(节点错误标记)、`01_workflows/04_run-and-verify.md:50`(节点运行灯)、`01_workflows/05_debugging.md:14`(失败节点变红);节点 debug 悬浮 bar + agent 子节点对话续跑 = PM 2026-06-04。
+- 测试: 编译错在对应节点出 badge;运行事件驱动圆点灯绿/橙/红;运行中 focus 节点显 debug bar,可暂停/resume;agent phase 子节点的 bar 聊天框可用、其余 disable;非运行态 hover 显 bar。
 - Status: partial/target-design.
 - 归属: capabilities `compile-lint`, `run-execution`, `debug-resume`.
 
 ## F4. Subgraph Visual Affordance
 
-- 机制: subgraph node can expand inline or navigate to child graph when path resolves.
-- 决策: child graph references are local paths and missing paths recover through Assets.
+- 机制: subgraph node can expand inline or navigate to child graph when path resolves;**下钻进入子图后,导航面包屑显示在画布左上角(不在 Header)**,逐级可返回上层图。
+- 决策: child graph references are local paths and missing paths recover through Assets;**下钻面包屑刻意放画布左上角而非 Header**——避免"跳出项目"的页面切换感(本地 app 防"项目没保存"恐慌)(PM 2026-06-04)。
 - 原话/来源: `01_workflows/02_authoring.md:37` locks path-based subgraph references.
 - 测试: resolved subgraph expands; unresolved path shows recovery state; inline content is real, not mock.
 - Status: placeholder/stale.
@@ -57,6 +61,6 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 - Status: mock/target-design.
 - 归属: region `canvas`; capability `trace-observability`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Exact visual hierarchy when a node has compile error, run error, and Resume available at the same time.
+- 节点三态不叠优先级(见 F3):编译错=badge、运行态=圆点灯(运行错变红)、debug=节点上方悬浮 bar(暂停/resume/对话;对话仅 agent phase 子节点可用;非运行态 hover 显示)。三者各占独立视觉通道,无层级冲突。

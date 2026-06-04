@@ -66,6 +66,6 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - Status: target-design.
 - 归属: region `timeline`; capability `trace-observability`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Whether predict history rows should be visually distinct from real run rows.
+- predict 历史行**仅用 icon 与真实 run 行区分**,其余样式一致。

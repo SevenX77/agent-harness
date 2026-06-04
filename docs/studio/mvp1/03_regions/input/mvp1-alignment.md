@@ -51,8 +51,8 @@ Source workflow basis: `01_workflows/02_authoring.md:20`, `01_workflows/04_run-a
 
 ## F5. Golden Settings And JSON
 
-- 机制: generate/edit per-agent-node golden JSON from output schema.
-- 决策: golden settings belong with output because golden is expected output.
+- 机制: generate/edit per-agent-node golden JSON from output schema;**golden 文件可从 I/O output 区直接点开编辑/查看(随时可编辑),另一入口在 Assets workspace 文件树直接打开该文件**;golden 摘要/diff 入口归 I/O,不在 Properties。
+- 决策: golden settings belong with output because golden is expected output;**golden 主入口 = Assets workspace + I/O output,随时可编辑;golden 不归 Properties**(PM 2026-06-04)。
 - 原话/来源: `01_workflows/04_run-and-verify.md:125` and `01_workflows/04_run-and-verify.md:126` assign golden template/settings to i/o.
 - 测试: create template from schema; fill JSON; node state changes to has-golden.
 - Status: target-design.
@@ -67,6 +67,7 @@ Source workflow basis: `01_workflows/02_authoring.md:20`, `01_workflows/04_run-a
 - Status: backend/orphan frontend.
 - 归属: region `input`; capability `run-execution`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Final visible name: "Input" vs "I/O"; path remains `input` unless the docs/code tree is later renamed.
+- 面板可见名 = **"I/O"**(文件夹路径 `input` 不变)。
+- golden 主入口 = ① Assets workspace 文件树直接打开文件;② I/O 面板 output 区点开编辑/查看;**随时可编辑**;golden 归 I/O,不归 Properties。

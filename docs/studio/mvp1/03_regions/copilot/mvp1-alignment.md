@@ -58,6 +58,10 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:433`, `01_workflows/
 - Status: target-design.
 - 归属: region `copilot`; capability `golden-eval`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Exact behavior for Attach file and Add context buttons.
+- 砍掉旧 Attach file / Add context 占位按钮(上下文统一走 F4 @mention)。
+- **composer 新增图片附加**:① 拖拽图片文件;② 粘贴剪贴板图片(= "截图后加载":系统截图到剪贴板再 ⌘V)。**可行性已核**:`claude_agent_sdk` 有 `ImageContent` 输入类型 + `query` 收 message dict(含图)+ Claude 多模态 → 收图 OK;拖拽/粘贴纯前端、无需新 Tauri 插件。
+- **不做应用内截图按钮**:截图统一靠系统快捷键 + 粘贴(② 已覆盖)——Mac `⌘⌃⇧4` / Windows `Win+Shift+S` 都框选到剪贴板、跨平台都简单;应用内 capture 要写三套原生代码、不值。
+- **文件格式**:仅支持 Claude 原生组——图片(PNG/JPEG/GIF/WebP,单张 ≤~5MB)/ PDF / 文本类(md/code/json/csv 当文本读);**不支持格式给清晰提示**(转 PDF/图片/文本)。**自动转格式不在 copilot 做**,归 DEF-012(引擎内置转换 tools)、技能图按需调。
+- **前提**:copilot 角色须用 vision 模型(Claude 系);非 vision 模型给"不支持图片"降级提示。

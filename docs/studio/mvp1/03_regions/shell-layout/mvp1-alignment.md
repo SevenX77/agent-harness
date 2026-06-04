@@ -26,8 +26,8 @@ Source workflow basis: `01_workflows/01_init.md:8`, `01_workflows/02_authoring.m
 
 ## F2. Header Navigation And Team Menu
 
-- 机制: Header owns Home, breadcrumb stack, Team dropdown, and Copilot toggle.
-- 决策: publish/release remains minimal and low-priority under Team for MVP1.
+- 机制: Header owns Home(Back Home)、Team dropdown、Copilot toggle。**子图下钻面包屑导航不在 Header**——改放画布左上角(见 `canvas` F4),Header 保持极简。
+- 决策: publish/release remains minimal and low-priority under Team for MVP1;**面包屑(subgraph 下钻导航)刻意移出 Header**(理由同 Settings overlay:防"跳出项目"感,见下方已决)(PM 2026-06-04)。
 - 原话/来源: `01_workflows/06_eval.md:17` places Release in Header Team; `01_workflows/06_eval.md:24` keeps publish minimal.
 - 测试: Back Home clears workspace; breadcrumb click pops nav stack; Release disabled/status works while publishing.
 - Status: live.
@@ -51,6 +51,9 @@ Source workflow basis: `01_workflows/01_init.md:8`, `01_workflows/02_authoring.m
 - Status: live with prop mismatch risk.
 - 归属: region `shell-layout`; region `copilot`; capability `copilot-assist`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Whether Settings should remain center-overlay or eventually occupy a full settings route.
+- **Settings 维持中央 overlay,刻意不做全屏路由(连 P2 也不做)**。两条前因:
+  1. **不让用户感觉"跳出了项目"**——Studio 是本地 app,全屏路由式跳转会触发"我项目还没保存、会不会丢"的恐慌;overlay 盖在工作区上,用户始终感觉人在项目里。
+  2. **方便边调 copilot 连通边看**——overlay 不打断工作区/copilot 上下文,调 LLM/copilot 配置时不用一会儿开一会儿关、来回切页。
+- **子图下钻面包屑放画布左上角(不在 Header)**,同因:避免"跳出项目"的页面切换感。

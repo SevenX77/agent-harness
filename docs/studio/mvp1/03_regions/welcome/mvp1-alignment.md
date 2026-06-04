@@ -50,7 +50,7 @@ Source workflow basis: `01_workflows/01_init.md:8`, `01_workflows/01_init.md:16`
 - Status: live.
 - 归属: region `welcome`; platform `native-fs`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Final copy: "Import skill" versus "Open folder".
-- Whether card delete should say "Remove from Studio" to avoid implying disk deletion.
+- 入口动词 = **"Open folder"**(非 "Import skill"):贴 IDE「打开文件夹」心智 + "技能即文件夹"。
+- 卡片删除文案 = **"Remove from Studio"**:明确只摘出 Studio 列表、不删磁盘,避免误以为删盘。

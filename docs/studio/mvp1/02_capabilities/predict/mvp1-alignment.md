@@ -53,8 +53,8 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:8`, `01_workflows/04_r
 
 ## F5. Predict Trace Cannot Become Golden
 
-- 机制: any promotion attempt from a predict trace is rejected.
-- 决策: golden is author/copilot-defined expected output, not a captured predict/run snapshot.
+- 机制: any promotion attempt from a predict trace is rejected(409);**但 Run 真实输出可作 golden 默认种子,见 `golden-eval` F6**。
+- 决策: predict 轨迹(假数据)不可入 golden;guard 只挡 predict,**不挡 run**——run 真实输出可做 golden 起点(PM 2026-06-04)。
 - 原话/来源: `01_workflows/04_run-and-verify.md:25` keeps the 409 guard; `01_workflows/04_run-and-verify.md:131` changes golden to per-node author expectation.
 - 测试: predict trace promotion returns 409; manual/copilot golden creation remains allowed.
 - Status: backend-only live.

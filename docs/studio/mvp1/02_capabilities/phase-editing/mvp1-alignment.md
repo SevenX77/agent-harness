@@ -53,8 +53,8 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/02_autho
 
 ## F5. L3 Step Editing
 
-- 机制: agent body steps/actions can be added, removed, edited, and reordered from a node-level affordance while preserving source text.
-- 决策: L3 step editing is part of micro node editing and should not wait for implementation-time design.
+- 机制: agent body 的 steps/actions(正文 XML 结构)以**画布内联子节点**呈现,**在画布上直接拖拽增/删/改/重排**(保留源文本);**不在 Properties 做**——Properties 只管 frontmatter 属性。这些内联子节点正是运行期 debug bar「对话续跑」作用的对象(agent phase 子节点)。
+- 决策: L3 步骤编辑 = **画布内联**(canvas-inline),非 Properties-first;职责切分:Properties=frontmatter,canvas=XML 正文结构(PM 2026-06-04)。
 - 原话/来源: `01_workflows/02_authoring.md:30` defines the L3 add/edit/reorder target.
 - 测试: add step creates body block; reorder preserves content; compile sees the updated body.
 - Status: target-design.
@@ -69,6 +69,6 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/02_autho
 - Status: save live, feedback target-design.
 - 归属: capabilities `phase-editing`, `file-editing`, `compile-lint`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Exact UI for L3 step reorder and whether it is primarily canvas-inline or Properties-first.
+- L3 步骤重排 = **画布内联拖拽**(canvas-inline),非 Properties。Properties 只设 frontmatter 属性;正文 XML 结构(L3 步骤)= 画布内联子节点。

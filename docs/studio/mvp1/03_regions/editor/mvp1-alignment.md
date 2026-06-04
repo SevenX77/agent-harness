@@ -23,8 +23,8 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 
 ## F2. Split Graph Context
 
-- 机制: when a file is open, keep a compact graph below/alongside editor context.
-- 决策: editing should not detach the user from graph structure.
+- 机制: when a file is open, keep a compact graph below/alongside editor context;**编辑器与图之间有一条可拖拽 handle(分隔条),用户自调两侧大小**。
+- 决策: editing should not detach the user from graph structure;分屏比例由用户用 handle 自调(PM 2026-06-04)。
 - 原话/来源: `01_workflows/02_authoring.md:18` pairs graph and micro node editing.
 - 测试: selected node remains visible; mini graph selection opens the matching file.
 - Status: live.
@@ -57,6 +57,7 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 - Status: target-design.
 - 归属: region `editor`; capability `debug-resume`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Whether virtual trace/context docs appear as named tabs or replace the active editor temporarily.
+- 虚拟 trace/context 文档 = **具名只读 tab**(与正在编辑的文件并列,不临时替换当前编辑器)。
+- **golden 详细 diff 也在编辑器分屏里看**(Monaco diff 文档,实际 vs golden)——做分屏就是为了看 diff;Properties 只留字段级摘要(见 `properties` F4)。

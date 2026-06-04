@@ -106,7 +106,7 @@ This checklist is generated from the Round 28 feature manifest. Each item names 
 - **Sources**: skill-spec, source-file-map
 - **Core paths**: packages/graph-agent/src/graph_agent/core/cache.py, packages/graph-agent/src/graph_agent/core/checkpointer.py
 - **Primary contracts**: 0 error codes, 0 events
-- `[Covered By: packages/graph-agent/tests/core/test_harness_state_machine_resources.py::test_close_exits_checkpointer_context_manager]`
+- `[Covered By: packages/graph-agent/tests/core/test_v030_deltachannel_checkpoint.py::test_sqlite_deltachannel_checkpoint_size]`
 
 ### F-callback-event-stream: Emit typed callback events with stable discriminator and schema metadata.
 - **Boundary**: externally-observable-behavior - CallbackEvent union

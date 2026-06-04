@@ -21,7 +21,7 @@
 | **Cache Snapshot** | 新增 `subagents_by_phase` 与 `phase_tokens` 节点的序列化。由于 `CompiledSubagent.input_model` (Pydantic type) 不可被 JSON 序列化，Snapshot 中将其剥离，Rehydrate 时通过 `build_subagent_input_model` 动态重建。 | [BREAKING] | 随 Cache Key `v2` 一并更新。 |
 | **CompiledSubagent** | 为 `input_model` 字段增加 `field(compare=False)` | [BREAKING] | 修复因 `type[BaseModel]` 导致的对象判等失败（确保复水后缓存的 `CompiledSkill` 能通过片段的 `hit.subagents_by_phase == cold.subagents_by_phase` 测试。注：由于 `actions` 和 `tools` 是不可原样复原身份的动态实例，整对象 `cold == hit` 是结构性不可达的已知行为，故验收需转为片段断言）。 |
 | **SkillLoader 递归参数** | `SkillLoader.compile_skill` 新增内部参数 `_loading_stack: tuple[str, ...]` 与 `_compilation_cache: dict[str, CompiledSkill]` | [COMPATIBLE] | 默认参数为 `()` 和 `None`，不影响外部公开 `compile_skill` 门面调用。栈中记录的 key 统一为 `str(root.resolve())`。 |
-| **错误码与 Registry** | 新增 `[F-v3-compile-recursion-cycle]` 与 `[F-v3-compile-depth-exceeded]`，并在 `ERROR_REGISTRY` (`error_registry.py`) 注册 | [NEW/BREAKING] | 必须在 `docs/engine/skill-spec/11-error-code-spec.md` 补充定义。同时更新 `tests/core/test_error_payload_contract.py` 中的断言（`len(...) == 92`）以维护契约测试绿灯。 |
+| **错误码与 Registry** | 新增 `[F-v3-compile-recursion-cycle]` 与 `[F-v3-compile-depth-exceeded]`，并在 `ERROR_REGISTRY` (`error_registry.py`) 注册 | [NEW/BREAKING] | 必须在 `docs/engine/mvp0/skill-spec/11-error-code-spec.md` 补充定义。同时更新 `tests/core/test_error_payload_contract.py` 中的断言（`len(...) == 92`）以维护契约测试绿灯。 |
 
 ## 2. 关键修复设计决策
 

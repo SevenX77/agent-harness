@@ -6,36 +6,36 @@ This spec does not duplicate detailed baseline analysis. It indexes the source d
 
 Primary baseline docs:
 
-- `docs/engine/skill-compilation/baseline.md`
-- `docs/engine/state-and-io-contract/baseline.md`
-- `docs/engine/execution-runtime/baseline.md`
-- `docs/engine/tracing-and-observability/baseline.md`
-- `docs/engine/skill-resolution/baseline.md`
-- `docs/engine/graph-agent-gateway/baseline.md`
+- `docs/engine/mvp0/skill-compilation/baseline.md`
+- `docs/engine/mvp0/state-and-io-contract/baseline.md`
+- `docs/engine/mvp0/execution-runtime/baseline.md`
+- `docs/engine/mvp0/tracing-and-observability/baseline.md`
+- `docs/engine/mvp0/skill-resolution/baseline.md`
+- `docs/graph-agent-gateway/mvp0/baseline.md`
 
 Primary alignment docs:
 
-- `docs/engine/skill-compilation/mvp0-alignment.md`
-- `docs/engine/state-and-io-contract/mvp0-alignment.md`
-- `docs/engine/execution-runtime/mvp0-alignment.md`
-- `docs/engine/tracing-and-observability/mvp0-alignment.md`
-- `docs/engine/skill-resolution/mvp0-alignment.md`
-- `docs/engine/graph-agent-gateway/mvp0-alignment.md`
+- `docs/engine/mvp0/skill-compilation/mvp0-alignment.md`
+- `docs/engine/mvp0/state-and-io-contract/mvp0-alignment.md`
+- `docs/engine/mvp0/execution-runtime/mvp0-alignment.md`
+- `docs/engine/mvp0/tracing-and-observability/mvp0-alignment.md`
+- `docs/engine/mvp0/skill-resolution/mvp0-alignment.md`
+- `docs/graph-agent-gateway/mvp0/mvp0-alignment.md`
 
 Normative field specs:
 
-- `docs/engine/skill-spec/01-physical-layout.md`
-- `docs/engine/skill-spec/02-graph-md-spec.md`
-- `docs/engine/skill-spec/03-logic-md-spec.md`
-- `docs/engine/skill-spec/04-subgraph-md-spec.md`
-- `docs/engine/skill-spec/05-agent-md-spec.md`
-- `docs/engine/skill-spec/06-cognitive-template-spec.md`
-- `docs/engine/skill-spec/07-mention-syntax-spec.md`
-- `docs/engine/skill-spec/08-resource-mechanisms-spec.md`
-- `docs/engine/skill-spec/09-builtin-modules-spec.md`
-- `docs/engine/skill-spec/10-skill-resolver-protocol-spec.md`
-- `docs/engine/skill-spec/11-error-code-spec.md`
-- `docs/engine/skill-spec/12-compile-runtime-flow-spec.md`
+- `docs/engine/mvp0/skill-spec/01-physical-layout.md`
+- `docs/engine/mvp0/skill-spec/02-graph-md-spec.md`
+- `docs/engine/mvp0/skill-spec/03-logic-md-spec.md`
+- `docs/engine/mvp0/skill-spec/04-subgraph-md-spec.md`
+- `docs/engine/mvp0/skill-spec/05-agent-md-spec.md`
+- `docs/engine/mvp0/skill-spec/06-cognitive-template-spec.md`
+- `docs/engine/mvp0/skill-spec/07-mention-syntax-spec.md`
+- `docs/engine/mvp0/skill-spec/08-resource-mechanisms-spec.md`
+- `docs/engine/mvp0/skill-spec/09-builtin-modules-spec.md`
+- `docs/engine/mvp0/skill-spec/10-skill-resolver-protocol-spec.md`
+- `docs/engine/mvp0/skill-spec/11-error-code-spec.md`
+- `docs/engine/mvp0/skill-spec/12-compile-runtime-flow-spec.md`
 
 ## 2. Current implementation findings
 
@@ -100,5 +100,5 @@ Open Items: none. All audit items were finalized on 2026-05-23.
 - #28 context_mapping: delete full chain, including `ContextResolver`, harness entry points, validators, builtin md-patch / md_to_json dependency path, fixtures, and docs references.
 - #29 docs frontmatter: remove `.kiro/specs/docs-frontmatter-schema/`; it is not an engine MVP0 blocker.
 - #2 PR strategy: choose single atomic PR for engine src/tests plus Studio backend resolver/import, Studio frontend Assets Panel SUBGRAPH category, and Tauri folder picker. Splitting would require fallback or produce broken main, both against PM principle.
-- Q2.1: do not expand body tags and do not rename `python_callable`; remove `python_callable` and use LOGIC `actions:` from `docs/engine/skill-spec/03-logic-md-spec.md`.
+- Q2.1: do not expand body tags and do not rename `python_callable`; remove `python_callable` and use LOGIC `actions:` from `docs/engine/mvp0/skill-spec/03-logic-md-spec.md`.
 - 4580dde cleanup docs: rewrite stale “protect V2.1 main path”, “keep codemod”, “defer line-location”, “split PR”, and “docs-frontmatter-schema” conclusions.

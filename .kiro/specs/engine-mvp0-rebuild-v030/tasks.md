@@ -1,6 +1,6 @@
 # Tasks: Engine MVP0 Rebuild V0.3.0 Cutover
 
-本文档规划 V0.3.0 graph_skill cutover 的原子实施任务: `packages/graph-agent/src/`、`packages/graph-agent/tests/`、以及为 `SkillResolverProtocol` hard cutover 必需的 Studio backend / frontend / Tauri 配套改动。所有实现必须对齐 `docs/engine/skill-spec/` 字段级规范和 engine 子模块 MVP0 alignment 文档, 不做任何向后兼容。
+本文档规划 V0.3.0 graph_skill cutover 的原子实施任务: `packages/graph-agent/src/`、`packages/graph-agent/tests/`、以及为 `SkillResolverProtocol` hard cutover 必需的 Studio backend / frontend / Tauri 配套改动。所有实现必须对齐 `docs/engine/mvp0/skill-spec/` 字段级规范和 engine 子模块 MVP0 alignment 文档, 不做任何向后兼容。
 
 ## 整体框架
 
@@ -19,7 +19,7 @@
 
 ### 单 PR 原子切换策略
 
-按 PM 2026-05-23 原则和 a1+a2 cross-verify 收敛结论, 本 cutover 采用**单 PR 原子切换**: engine src + graph-agent tests + Studio backend (`StudioSkillResolver` + import endpoint) + Studio frontend (Assets Panel SUBGRAPH 类目) + Studio Tauri (`pick_folder` command) 放进同一 cutover PR。PR 内拆 8-12 个小 commit 分层 review; main 只接受原子切换后的完整状态。依据: `docs/engine/skill-spec/10-skill-resolver-protocol-spec.md:63-75` 要求含 child graph 的入口强注入 resolver, 缺 resolver FATAL, 拆 PR 会产生兼容 fallback 或 broken main。
+按 PM 2026-05-23 原则和 a1+a2 cross-verify 收敛结论, 本 cutover 采用**单 PR 原子切换**: engine src + graph-agent tests + Studio backend (`StudioSkillResolver` + import endpoint) + Studio frontend (Assets Panel SUBGRAPH 类目) + Studio Tauri (`pick_folder` command) 放进同一 cutover PR。PR 内拆 8-12 个小 commit 分层 review; main 只接受原子切换后的完整状态。依据: `docs/engine/mvp0/skill-spec/10-skill-resolver-protocol-spec.md:63-75` 要求含 child graph 的入口强注入 resolver, 缺 resolver FATAL, 拆 PR 会产生兼容 fallback 或 broken main。
 
 1. skill-resolution Protocol 独立 commit。
 2. AST / manifest / loader schema commit。
@@ -518,7 +518,7 @@ Merge 前必须满足:
   - tests that assert error strings
 - 改 lines / 函数 / 类:
   - Replace helpers `_graph_fatal`, `_io_fatal`, `_actions_fatal` code prefixes
-  - Ensure all codes exist in `docs/engine/skill-spec/11-error-code-spec.md`
+  - Ensure all codes exist in `docs/engine/mvp0/skill-spec/11-error-code-spec.md`
 - 依赖 tasks: A-F core implementations
 - 测试影响:
   - Global grep test: no `[F-v21-` in `packages/graph-agent/src`
@@ -563,7 +563,7 @@ Merge 前必须满足:
   - 删除 / 重写仍断言 V2.1 runner/compiler/assembler/state 的 tests。
   - 增加 grep guard: `rg "_run_v21_skill_dict|v21_|sub_skill_ref|BlackboardState" packages/graph-agent/src packages/graph-agent/tests` 无 active V2.1 main-path 残留。
 - 风险点:
-  - 不允许把旧路径改名成 V0.3.0 facade; 语义必须来自 `docs/engine/skill-spec/`.
+  - 不允许把旧路径改名成 V0.3.0 facade; 语义必须来自 `docs/engine/mvp0/skill-spec/`.
 
 #### G2. codemod 全删
 - 改 files:
@@ -653,7 +653,7 @@ Merge 前必须满足:
   - `packages/graph-agent/src/graph_agent/core/loader.py`
   - V2.1 LOGIC fixtures
 - 改 lines / 函数 / 类:
-  - `manifest.py:143` 删除 `python_callable: str`, 改为 `actions: list[str]` per `docs/engine/skill-spec/03-logic-md-spec.md:24`.
+  - `manifest.py:143` 删除 `python_callable: str`, 改为 `actions: list[str]` per `docs/engine/mvp0/skill-spec/03-logic-md-spec.md:24`.
   - `graph_assembler.py:170-171` 改为迭代 `actions`.
   - `loader.py:1043, 1094, 1108` 改 `actions:` 解析。
   - `<python_callable>` fixtures 在 G4 一并清。

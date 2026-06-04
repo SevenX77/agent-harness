@@ -13,7 +13,7 @@
 ## §3 黄金原则 / 不可动摇约束
 - 目标 13 个函数全为 internal 级别，重构仅限内部实现，**坚决不触碰、不动摇 65 个 public API**。
 - 不破坏现有系统的核心模型，不修改现有的 92 个错误码、33 个核心事件与 53 个 H2 章节契约。
-- 严禁修改 `docs/engine/skill-spec/*` 下已标记为 FROZEN 的系统规范文件。
+- 严禁修改 `docs/engine/mvp0/skill-spec/*` 下已标记为 FROZEN 的系统规范文件。
 
 ## §4 范围边界
 - **不在 scope**: 多 Python 版本矩阵构建（已经在 PR `6bacef9` 中处理完毕并 1010 passed）。

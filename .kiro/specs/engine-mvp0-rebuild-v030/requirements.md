@@ -10,8 +10,8 @@ The cutover implementation lands as one atomic PR across `packages/graph-agent/s
 
 This requirements document consolidates:
 
-- `docs/engine/MVP0-PROGRESS-2026-05-21.md` 18 PM decision questions.
-- `docs/engine/skill-spec/*.md` field-level V0.3.0 schema.
+- `docs/engine/mvp0/MVP0-PROGRESS-2026-05-21.md` 18 PM decision questions.
+- `docs/engine/mvp0/skill-spec/*.md` field-level V0.3.0 schema.
 - `docs/engine/{skill-compilation,state-and-io-contract,execution-runtime,tracing-and-observability}/mvp0-alignment.md`.
 - Finalized cleanup decisions from 2026-05-23: hard-cut T11 scope, direct deletion of the old compiler line-location test, context_mapping deletion, docs-frontmatter-schema removal, single-PR engine + Studio cutover, and python_callable cleanup.
 
@@ -19,14 +19,14 @@ This requirements document consolidates:
 
 ### R1. Skill identity and resolver
 
-Engine MUST define `SkillResolverProtocol.resolve_skill(skill_id: str) -> Path`; the field-level contract is `docs/engine/skill-spec/10-skill-resolver-protocol-spec.md:24-35`.
+Engine MUST define `SkillResolverProtocol.resolve_skill(skill_id: str) -> Path`; the field-level contract is `docs/engine/mvp0/skill-spec/10-skill-resolver-protocol-spec.md:24-35`.
 
 Required behavior:
 
 - reject invalid skill ids
 - fail unregistered skills with `[F-v3-skill-not-registered]`
 - fail invalid paths with `[F-v3-resolver-path-invalid]`
-- require resolver injection when compiling / running graphs that reference child skills; missing resolver for child graph usage is FATAL, per `docs/engine/skill-spec/10-skill-resolver-protocol-spec.md:63-75`
+- require resolver injection when compiling / running graphs that reference child skills; missing resolver for child graph usage is FATAL, per `docs/engine/mvp0/skill-spec/10-skill-resolver-protocol-spec.md:63-75`
 
 ### R2. V0.3.0 graph skill schema
 
@@ -38,7 +38,7 @@ Compiler MUST treat `GRAPH.md` as the graph root and parse:
 - `phases:` YAML list
 - DAG dependencies
 
-Compiler MUST reject physical `io/inputs.json`, physical `io/outputs.json`, `io_inputs_ref`, and `io_outputs_ref` with `[F-v3-graph-io-physical-file-deprecated]`, per `docs/engine/skill-spec/01-physical-layout.md:94-102` and `docs/engine/skill-spec/02-graph-md-spec.md:75-78`.
+Compiler MUST reject physical `io/inputs.json`, physical `io/outputs.json`, `io_inputs_ref`, and `io_outputs_ref` with `[F-v3-graph-io-physical-file-deprecated]`, per `docs/engine/mvp0/skill-spec/01-physical-layout.md:94-102` and `docs/engine/mvp0/skill-spec/02-graph-md-spec.md:75-78`.
 
 ### R3. Phase node schema
 
@@ -48,11 +48,11 @@ Every phase MUST be one of:
 - `logic`, backed by `LOGIC.md`
 - `subgraph`, backed by `SUBGRAPH.md`
 
-Each phase MUST declare `io.inputs` and `io.outputs` as JSON Schema object contracts; use the concrete field tables in `docs/engine/skill-spec/03-logic-md-spec.md:33-40`, `04-subgraph-md-spec.md`, and `05-agent-md-spec.md:11-18`.
+Each phase MUST declare `io.inputs` and `io.outputs` as JSON Schema object contracts; use the concrete field tables in `docs/engine/mvp0/skill-spec/03-logic-md-spec.md:33-40`, `04-subgraph-md-spec.md`, and `05-agent-md-spec.md:11-18`.
 
 ### R4. Agent AST and cognitive template
 
-Agent phases MUST parse body XML into the exact top-level tag allowlist in `docs/engine/skill-spec/05-agent-md-spec.md:41-52`:
+Agent phases MUST parse body XML into the exact top-level tag allowlist in `docs/engine/mvp0/skill-spec/05-agent-md-spec.md:41-52`:
 
 - `role`
 - `goal`
@@ -93,7 +93,7 @@ T3 and T5 are both required: T5 defines key space; T3 defines merge semantics ov
 
 Subagent and SUBGRAPH child runs MUST:
 
-- resolve target skill through `SkillResolverProtocol`, matching `docs/engine/skill-spec/04-subgraph-md-spec.md` and `docs/engine/skill-spec/10-skill-resolver-protocol-spec.md:47-61`
+- resolve target skill through `SkillResolverProtocol`, matching `docs/engine/mvp0/skill-spec/04-subgraph-md-spec.md` and `docs/engine/mvp0/skill-spec/10-skill-resolver-protocol-spec.md:47-61`
 - start from explicit input filtered by target root `io.inputs`
 - not inherit parent `data`
 - start with empty `messages`

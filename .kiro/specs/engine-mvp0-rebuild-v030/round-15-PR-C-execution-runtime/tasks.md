@@ -13,8 +13,8 @@ scope: C1+C2+C4+C5+C6+C7+C8+D4, tests-first, [BREAKING] V0.3.0 hard cutover
 
 唯一格式权威:
 
-- Cognitive Template: `docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md` §5。
-- 错误码总册: `docs/engine/skill-spec/11-error-code-spec.md`。
+- Cognitive Template: `docs/engine/mvp0/skill-spec/00-FORMAT-GROUND-TRUTH.md` §5。
+- 错误码总册: `docs/engine/mvp0/skill-spec/11-error-code-spec.md`。
 - 原始 task 定义: `.kiro/specs/engine-mvp0-rebuild-v030/tasks.md` `### C. execution-runtime` + `### D` D4。
 
 PR 结构: 1 个统一 PR, 内部 3 commit。
@@ -148,7 +148,7 @@ c15.1 Tests-first red suite
 - `packages/graph-agent/src/graph_agent/cognitive/prompt.py:192`
 - `packages/graph-agent/src/graph_agent/cognitive/prompt.py:196`
 - `packages/graph-agent/src/graph_agent/core/graph_assembler.py:396`
-- `docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md:204`
+- `docs/engine/mvp0/skill-spec/00-FORMAT-GROUND-TRUTH.md:204`
 
 **WHAT**:
 
@@ -195,8 +195,8 @@ c15.1 Tests-first red suite
 - `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:159`
 - `packages/graph-agent/src/graph_agent/core/graph_assembler.py:259`
 - `packages/graph-agent/src/graph_agent/core/graph_assembler.py:327`
-- `docs/engine/skill-spec/09-builtin-modules-spec.md:15`
-- `docs/engine/skill-spec/09-builtin-modules-spec.md:50`
+- `docs/engine/mvp0/skill-spec/09-builtin-modules-spec.md:15`
+- `docs/engine/mvp0/skill-spec/09-builtin-modules-spec.md:50`
 
 **WHAT**:
 
@@ -247,9 +247,9 @@ c15.1 Tests-first red suite
 - `packages/graph-agent/src/graph_agent/core/graph_assembler.py:434`
 - `packages/graph-agent/src/graph_agent/core/graph_assembler.py:457`
 - `packages/graph-agent/src/graph_agent/tools/builtin/__init__.py`
-- `docs/engine/skill-spec/09-builtin-modules-spec.md:75`
-- `docs/engine/skill-spec/11-error-code-spec.md:133`
-- `docs/engine/skill-spec/11-error-code-spec.md:139`
+- `docs/engine/mvp0/skill-spec/09-builtin-modules-spec.md:75`
+- `docs/engine/mvp0/skill-spec/11-error-code-spec.md:133`
+- `docs/engine/mvp0/skill-spec/11-error-code-spec.md:139`
 
 **WHAT**:
 
@@ -297,8 +297,8 @@ c15.1 Tests-first red suite
 - `packages/graph-agent/src/graph_agent/core/loader.py:359`
 - `packages/graph-agent/src/graph_agent/core/graph_assembler.py:203`
 - `packages/graph-agent/src/graph_agent/core/graph_assembler.py:751`
-- `docs/engine/skill-spec/03-logic-md-spec.md:80`
-- `docs/engine/skill-spec/11-error-code-spec.md:76`
+- `docs/engine/mvp0/skill-spec/03-logic-md-spec.md:80`
+- `docs/engine/mvp0/skill-spec/11-error-code-spec.md:76`
 
 **WHAT**:
 

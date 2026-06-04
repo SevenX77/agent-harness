@@ -1,11 +1,14 @@
 ---
 spec: canvas-micro-topology-v1
-status: Draft
-last_updated: 2026-05-19
+status: Superseded
+superseded_by: studio-feature-canvas-topology
+last_updated: 2026-06-01
 linked_level3_docs:
   - docs/studio/UX_WORKFLOW_BLUEPRINT.md
   - docs/engine/GRAPH_EXECUTION_MODEL.md
 ---
+
+> ⚠️ **Superseded → `studio-feature-canvas-topology`**（2026-06-01）。运行态微观展开 / Nudge / Payload schema 已吸收为主文档 REQ-11..14。本文件仅留作历史调研，待物理归档到 `_archive/`。
 
 # Requirement: Canvas Micro-Topology Expansion
 

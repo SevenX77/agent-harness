@@ -6,7 +6,7 @@
 
 ### 1.1 `context_mapping` / `ContextResolver`
 - **Grep 实证**: 扫描命中 `harness.py`, `runner.py`, `src/graph_agent/io/context_resolver.py`；validator 侧命中属于无 live caller 的死模块残留，不是 V0.3.0 wired 路径。
-- **Ground-Truth 校验**: 阅读 `docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md`，V0.3.0 格式的 `io` 机制已改为 inline dict (基于 StateMapper)，frontmatter 中已彻底移除 `context_mapping`。
+- **Ground-Truth 校验**: 阅读 `docs/engine/mvp0/skill-spec/00-FORMAT-GROUND-TRUTH.md`，V0.3.0 格式的 `io` 机制已改为 inline dict (基于 StateMapper)，frontmatter 中已彻底移除 `context_mapping`。
 - **Import-Graph 校验**: `harness.py:361/372/852` 和 `runner.py` 仍在主动 import 并调用 `ContextResolver`。
 - **状态判定**: **DEAD-BUT-WIRED (死且连线，可删但需全链路切除)**。
 - **理由**: 在 V0.3.0 格式中已退役，但目前仍错误地挂载在主执行入口 (harness/runner) 和 Public API 上。清理时必须连同所有的入参和解析路径一同抹除。

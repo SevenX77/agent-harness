@@ -154,7 +154,7 @@ PR α 只做两件底座事:
 - 补 `packages/graph-agent-gateway/tests/` 单测。
 - 补 engine integration tests: `run_skill(..., model_resolver=...)` 正常与缺失两条路径。
 - 补 Studio backend llm roles migration/API tests。
-- 更新 `docs/engine/graph-agent-gateway/{mvp0-alignment.md,logic-explained.md}` 中 PR α 已完成段。
+- 更新 `docs/graph-agent-gateway/mvp0/{mvp0-alignment.md,logic-explained.md}` 中 PR α 已完成段。
 - 更新 `.kiro/specs/engine-mvp0-rebuild-v030/round-9-PR-alpha-gateway-llm-roles/{requirements.md,design.md,research.md}` 若 implementation 发现字段偏移。
 
 **HOW**:

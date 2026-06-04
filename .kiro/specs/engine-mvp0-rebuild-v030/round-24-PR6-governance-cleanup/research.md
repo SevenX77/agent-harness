@@ -15,5 +15,5 @@
   > `# The compile-time gate in skill_validator.py rejects validator-...`
 
 ### 3. `mvp0-alignment.md` Documentation Hallucination
-- **Evidence:** In `docs/engine/skill-compilation/mvp0-alignment.md`, around line 317, there is a conceptual definition for a `DehydratedCompiledSkill` Pydantic model which includes a `schema_version` field.
+- **Evidence:** In `docs/engine/mvp0/skill-compilation/mvp0-alignment.md`, around line 317, there is a conceptual definition for a `DehydratedCompiledSkill` Pydantic model which includes a `schema_version` field.
 - **Reality Check:** A workspace-wide search for `DehydratedCompiledSkill` confirmed **0** hits in source code. The compilation caching in PR-4 actually relies on a standard dictionary round-trip strategy with `cache key format v2`, not a specialized `DehydratedCompiledSkill` BaseModel. The documentation is an outdated conceptual illustration.

@@ -14,7 +14,7 @@ The current Round 28 manifest baseline is:
 
 The dual-run guard is intentionally still present. `packages/graph-agent/tests/test_feature_traceability_matrix.py` remains as the upgraded checklist guard and now locks the Round 28 baseline at 35. `packages/graph-agent/tests/test_round28_contract_manifests.py` is the fixture-based manifest guard with 18 tests. `packages/graph-agent/tests/test_round28_invariant_guards.py` adds 5 mechanism guards for prompt slots, middleware ordering, tool sandboxing, blackboard state mapping, and error registry shape.
 
-Round 27 frozen contract docs remain unchanged: `docs/engine/public-api-contract.md` and `docs/engine/skill-spec/*.md` are still protected by the contract hash lock. Round 28 freezes `docs/engine/feature-compliance-checklist.md` as a generated checklist from `features.yaml`.
+Round 27 frozen contract docs remain unchanged: `docs/engine/mvp0/public-api-contract.md` and `docs/engine/mvp0/skill-spec/*.md` are still protected by the contract hash lock. Round 28 freezes `docs/engine/mvp0/feature-compliance-checklist.md` as a generated checklist from `features.yaml`.
 
 ## Round 29 Complexity Gate & C901 Refactoring Status
 

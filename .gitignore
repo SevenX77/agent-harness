@@ -75,6 +75,11 @@ Thumbs.db
 
 # Project specific
 e2e_*.log
+
+# Local agent workflow scratch + doc snapshot backups (not committed)
+.agent/
+.agents/
+docs/engine/_mvp1-snapshot-2026-06-03/
 opencode.json
 
 # CCB runtime

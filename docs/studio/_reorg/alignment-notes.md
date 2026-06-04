@@ -674,7 +674,39 @@
      - **3b gateway 库(领域无关)** `packages/graph-agent-gateway`: role→route 解析(`resolve_routes`)/ `ResolvedRoute`/`ResolvedRole` 契约 / ChatX 调用工厂 / capability 归一化+lint / 熔断+probe / 错误分类。**只懂 route/endpoint/credential/capability, 不懂 model group/bundle/draft/copilot/6 态。**
 - **铁律(PM 核心)**: 领域需求绝不下沉 3b gateway 库。现码已守住(model_groups/materialize/draft/projection/copilot 全在 3a `apps/studio/backend`, 库里没有)——重过时每个原子操作确认这条线没被越。
 - **握手**: FE↔3a = HTTP `/api/llm`+`/api/copilot`(DTO: ModelGroup/ProviderModelOption/RoleTestResponse/6 态 ui_state); 3a↔3b = 进程内, 适配层先 materialize model_groups→`RegistrySnapshot`(RoleEntry.fallback_chain), 调库 `resolve_routes`→拿 `ResolvedRole`(**库永不见 model group**); 3b↔provider = 真实调用(graph-agent 原生 ChatX; copilot 例外, 库只给 route, 调用交回 Studio copilot.py 用 ClaudeSDKClient)。
-- **✅ 已完成(PM 2026-06-03 确认四层模型 + 边界)**: ux-spec §6 已重做为四层 —— §6.0 四层模型 + 领域无关铁律 + 三处握手;§6.1 加 ③→③a/③b 映射注(不重开 API Keys);§6.2 Roles 四层职责 + R1–R25 逐操作归属表 + 守边界检查;§6.3 Copilot 四层 + C1–C12 逐操作表 + 守边界检查(copilot SDK 调用/测试/session 全 ③a,③b 只 resolve_routes+capability);§6.4 横切四层 + scope 句。**守边界结论**: ③b 库列全是通用能力(resolve/capability/lint/probe/ChatX),无一条领域需求——现码已守住。
+- **✅ 已完成 v1(PM 2026-06-03 确认四层模型 + 边界)**: ux-spec §6 重做为四层 —— §6.0 四层模型 + 领域无关铁律 + 三处握手;§6.1 加映射注;§6.2 Roles R1–R25;§6.3 Copilot C1–C12;§6.4 横切四层。
+- **✅ 已完成 v2(PM 2026-06-03 第三轮续：§6 全重做，重点 API↔前端握手)**:
+  - **本轮指令原话留底**: 「把它们全部列出来、你的建议」/「setting页面相关的部分, 把它们加入进去后, 完整的功能过一遍; 不同的是, 这次需要重点放在API, 怎么与前端握手. 需要与前端的设计对照」/「§6 全重做(四层模型 + Roles/Copilot 逐操作归属表 + 三处握手 + 两处守边界检查)」/「现在就跑起来」/「范围没有变」。
+  - **改动**: ① **§6.1 API Keys 从旧三列重做为完整四层**(① FE-ts / ② Rust N/A / ③a Studio 适配 / ③b gateway 库 + 三处握手 API 契约 + A1–A12 逐操作归属表), 顺带把审计薄项(list-models 解析 per protocol、密码管理器抑制属性、窄视口不溢出)落进对应层; ② **新增 §6.5「两处守边界检查」**——把散落 ✓ 注收拢成两条正式不变量: **检查 1 @③a↔③b = gateway 库领域无关**(现状 ✓ 守住)、**检查 2 @①↔③a = 前端只投影不持第二份真相**(现状 ✗ 未守住: 残留 `roleTestStates`/`routeStatusOverrides`/`mock-copilot-data` → 本次接线工程删)。
+  - **守边界结论**: 四页 ③b 列全是通用能力(resolve/capability/lint/probe/ChatX/协议探测/base_url 归一化), 无一条领域需求; 唯一未守住 = 检查 2(前端并行真相), 列为本次接线主工作。
 
 ### 任务 B: 多模态生成式模型测试(大需求, 见 [deferred DEF-014]) — 见下
 - 分类问(我答, 见 DEF-014): **按输出模态分** —— 输出文字/推理(含多模态输入: 图片/视频识别分析)→ **LLM 范围**(复用 role/copilot 机制, 多模态输入只是 capability flag); 输出生成资产(图/视频/TTS/音乐)→ **多模态生成范围**(新机制)。
+
+---
+
+## 补记 — API Keys 深挖走查(本 thread)原话留底 + 实测证据(2026-06-03)
+
+> 自查发现: 这几轮 API Keys 走查的**设计结论已全进权威 ux-spec**(批量探测/命名/两类失败/disabled可逆/层次分离/qiniu实测), 但 **verbatim PM 原话 + 实测证据当时只进了 chat + ux-spec(转述), 没进本工作日志** → 按原话留底铁律补记, 防 chat 清空丢失。
+
+### PM 原话留底(verbatim, 不改一字)
+> **[qiniu]** "qiniu就是一个key + 两个URL啊, 你怎么还没搞清楚状况 , 一个provider +多个URL, 一个provider= 一个key啊…我问你的是qiniu没有anthropic成功的配置数据吗?? 之前测过很多次了, 同一个api 怎么可能一个连通一个连不通呢, 肯定是配置的问题啊"
+> **[批量探测]** "你必须用模型测试连通性, 才能测试出endpoint是否真正连通…因为像qiniu可能你选的protocol和你填的url不匹配, 导致虽然可以get model(表明apikey和url的连通性没有问题), 但是没有测试url和sdk的匹配性…为什么一定要手选一个模型来测试, 为的是让用户选一个看起来就比较靠谱的常用模型, 成功率会高. 如果让系统自动选模型, 可能会因为选的模型连不通, 误判整个endpoint不通; 但是, 现在已经改成了完全自动匹配和测试endpoint, 所以测试逻辑必须换成: 批量选择模型进行probe(不要太多3个吧, 也不要一个一个测, 如果一连串失败会很浪费时间), 一批一批测,直到有一批中有一个模型连通,代表这个endpoint是可以用的, 或者所有模型失败, 代表这个endpoint是不能用的. (自我怀疑: 如果endpoint不能用, 比如url 和 protocol 错配, 是否会有明确的错误码?? 而不用把所有模型都试一遍??)"
+> **[结果展示]** "测试时间长了之后, 测试结果一出来sonner就马上消失了, 看不到结果…加一个把错误提示同时写在绿色小勾的位置" / "单个模型测试结果还在用旧的model badge样式, 改掉" / "这几次的测试结果都要加入draft, 不要浪费"
+> **[拆分归属]** "「一 provider 多 URL→多 endpoint」这是前端业务逻辑, 不是后端该管的, 后端不应该对card有感知, 应该是前端自己拆分好告诉后端要存哪些, 要测试哪些" / "如果2个url+2个protocol都能用呢? 产生4个endpoints, 命名是否冲突了"
+> **[两类失败]** "单模型probe连不上后的显示状态, 分两种: 1. 失败原因为: 模型不再提供、弃用, 显示为禁用(之前显示成failed, 红色); 2. 其他失败显示为红色failed(表示该模型+endpoint, 也就是routed链接失败), failed不阻塞他进入available models"
+> **[命名统一]** "为什么不是统一的先protocol, 再编号的格式?"
+> **[disabled 可逆]** "disabled(灰、不可选), hover变成禁用的图标, 但是点击仍然可以复制模型名称, 可以做单模型probe, 如果再次连通, 那么就从弃用区捞回来了"
+
+### 实测证据(用 app key 真机, key 未外泄)
+- qiniu-anthropic `deepseek-r1`: 先前裸探 401 → 照 gateway 配方 + 真实模型复测 **200**(同请求)= **瞬时抖动**, 非 key/endpoint 坏; `deepseek-v3-0324`→200; `minimax/glm`→间歇超时; `zzz-假模型`→400 invalid_request。→ **单探不可靠 = 批量探测的直接依据**。
+- 错误码: openai 打 anthropic URL→`500 "Use /v1/messages instead"`; anthropic 打 openai URL→`404`; 未知模型→`400 invalid_request`(结构错可短路); `401/429/超时`(瞬时, 不可短路)。
+- auth header: anthropic 兼容第三方(openrouter)走 `Authorization: Bearer`(实测 200), 非 native `x-api-key`(401)。
+
+### 决策(均已进 ux-spec 权威, 此处仅索引防 drift)
+- 批量模型探测(每批 ~3、批批打、命中即停/全失败判死、结构错短路、瞬时不短路) → ux-spec §1.2 item 2。
+- 两类失败(弃用→`disabled` 可逆捞回 / 其他→`failed` 红不阻塞 available) → §4.2。
+- 命名统一 `{slug}-{protocol}[-{n}]`(序号永在 protocol 后) → §1.2 item 4。
+- 拆分 + endpoint_id 生成 = 前端职责, 后端不感知卡 → §1.2 item 4 + §6.1。
+- 结果常驻 inline + 全进 draft(含失败) + 单模型 badge 换样式 → §1.4 + §4.1。
+- qiniu #1 真相(瞬时抖动非坏) → §5 #1。

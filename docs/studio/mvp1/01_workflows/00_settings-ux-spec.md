@@ -488,3 +488,141 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 ---
 
 > **scope 边界一句话**：本次设计交付 = **① 前端 (ts) + ③a Studio 适配层**（含"不持第二份、只投影"接线改造）；**③b gateway 库** = 写给它的**领域无关能力需求 + 握手契约**（标「新增能力」待补，但**绝不接收领域需求**）；**② Rust** 对这两页近乎不参与。
+
+---
+
+## 7. atom action 全清单（现状审计 × 能力·区域映射 — 由 `_reorg/settings-action-catalog` 折入）
+
+> **用途**：§1–§4 是**目标设计叙事**（按三页深入）；本节是**按 UX 心智顺序的最细 atom action 现状审计**——每个动作映射到 能力(细 slug) / 区域 / 现状 status / file:line 证据，是 §1–§6 设计的**原料与依据**。两块只在本节、§1–§3 叙事未覆盖：**Stage 0 壳层** + **Stage 1 General**。
+> **现状 vs 目标(铁律)**：status 列描述**当前代码行为**(✅=现接线可用)，**不等于目标设计**。凡现状与 §1–§4 冲突，以叙事为准。**最关键的一处 drift**：Stage 2 的 official(#24 异步批量 job)/third-party(#25 同步单次)**测试机制不对称是 current-code drift,不是设计**——目标是**统一 `POST /endpoints/{id}/test` + 批量探测**(§1.2)；官/三在目标设计里的真区别只剩**身份与 canonical 默认**(§1.1 vs §1.2),测试路径同一套。
+> **状态图例**：✅ live(接线可用) · 🟡 placeholder(桩/占位) · 🔌 orphan(组件已建·未挂载) · 🛠 backend-only(后端有·前端无 UI) · 🎯 target-design(仅设计) · ⚠️ 冲突/问题(stale-code / 契约违反 / 潜伏 bug)
+> **UX 主流程一句话**：工作区点 Toolbar Settings → 面板盖画布(左文件树/右 Copilot 仍在,工作区不卸载)→ General 配「我是谁/产物发哪」→ API Keys 配 provider 凭证 → LLM Roles 把角色映射到模型兜底链 → Copilot 配助手 → 一切即填即存 → 点 X 关闭回工作区。
+
+### 7.0 Stage 0 — 进入 Settings（壳层）〔区域 `settings:shell`，叙事未覆盖，仅此〕
+
+| # | 动作 | 能力 | 现状 |
+|---|---|---|---|
+| 1 | 点 Toolbar Settings 图标 → 打开面板(center overlay 盖画布,**不卸载工作区**) | open-settings-overlay | ✅ 非真 modal,左右栏仍挂载可交互,无 backdrop/focus-trap |
+| 2 | 数据未到显示骨架屏(available models 巨长列表是 NFR 首要) | settings-skeleton | ✅ ⚠️ 无壳层级骨架,完全下放各 tab 自管 |
+| 3 | 四 tab(General/API Keys/Roles/Copilot)间切换(切到才懒加载) | settings-tab-switch | ✅ |
+| 4 | 改动后看右上保存徽章(Pending/Saving/Saved/Failed) | settings-save-badge | ✅ ⚠️ 三 tab 各画各的,顶栏无全局保存态 |
+| 5 | 外部改 credentials → WS `registry_changed` 自动刷新 | ws-registry-refresh | ✅ ⚠️ 空 catch 静默,无重连(违 logging 铁律) |
+| 6 | 外部改 roles → WS `roles_changed` 自动刷新 | ws-roles-refresh | ✅ ⚠️ 没开过 Roles tab 则事件被吞 |
+| 7 | 点 X 关闭回工作区画布 | close-settings-overlay | ✅ 无未保存确认,in-flight PUT 仍落地 |
+| 8 | (Settings 打开时)点 Header Home → 连带关 Settings + 退首页 | home-closes-settings | ✅ 与 X 两条语义(Home 还卸载工作区) |
+| 9 | 某 tab 渲染崩溃 → 错误兜底卡 + Retry(不白屏) | settings-error-boundary | ✅ ⚠️ 只包 Roles/Copilot,General/API Keys 没包 |
+
+> Stage 0 行为 PM 已拍板(批次 settings-shell):窗口小自动收侧栏;再点 toolbar Settings 图标=关 settings;网络拉不到显示「连接不上」警告标志(否则不必让用户感知)。详见 [01_init §4](./01_init.md)(Settings overlay 不卸载工作区的流转)。
+
+### 7.1 Stage 1 — General（身份与产物路径）〔区域 `settings:general`,叙事未覆盖,仅此〕
+
+| # | 动作 | 能力 | 现状 |
+|---|---|---|---|
+| 10 | 改 Studio User ID | studio-user-id | ✅ |
+| 11 | 填 Gitea Host(**publish 硬依赖**,缺则 sync 报错) | gitea-host | ✅ |
+| 12 | 手填默认 skills 目录路径 | skills-dir-manual | ✅ |
+| 13 | Choose 弹 OS 文件夹选择器(**settings 唯一走 native/Rust 的本地操作**) | skills-dir-native-picker | ✅ web 模式仅 toast "Desktop only" |
+| 14 | Reset 还原默认目录(回 runtime 默认 `configDir/Skills`) | skills-dir-reset | ✅ runtime config 不可用时 disabled |
+| 15 | 任意字段即填即存(300ms debounce `PUT /api/settings`)+ 徽章 | appsettings-save | ✅ |
+
+> **机制**：三字段整体 PUT(无字段级 PATCH),`GET/PUT /api/settings`→`app_settings.json`。Gitea host 只是 publish 鉴权链的一半(token/凭据走另一套 credentials,且为 env-only `STUDIO_*`,见 [00_settings §git](./00_settings.md))。选目录是 settings 里唯一的 Rust 本地操作。**写入归属铁律**:credentials/roles/settings 走 gateway Python(`~/.studio/` + `routers/llm.py`),**settings 不适用 D12「写全量 Rust」**(那是 skill 源文件)——唯一 native 操作就是这条选目录。
+
+### 7.2 Stage 2 — API Keys（Provider 凭证）〔区域 `settings:api-keys`;轨 官/三/共〕
+> 设计叙事见 §1。下表 = 现状 atom 审计。**注意上方 drift 铁律**:#24/#25/#27 的官/三测试不对称是现状,非目标。
+
+| # | 动作 | 轨 | 能力 | 现状 |
+|---|---|---|---|---|
+| 16 | 进 tab → 加载凭证 + 逐个 GET secret 把 `'**********'` 换回真值 | 共 | secret-hydration | ✅ |
+| 17 | 渲染拆 official 区(固定 5 厂商预渲染)+ third-party 区(用户自增) | 共 | provider-partition | ✅ |
+| 18 | official 只填 Key;Base URL/Protocol canonical 默认+隐藏,不可增删改名 | 官 | official-key-only | ✅ |
+| 19 | `+ Add Provider` → 弹框填名 → 建 `custom-{uuid}` 草稿 | 三 | tp-add-provider | ✅ ⚠️ 现两步,目标 inline 一次填全(§1.2) |
+| 20 | 填 name / base_url / protocol / api_key | 三 | tp-credential-edit | ✅ |
+| 21 | 改 API Key(两类共用;改后旧测试失效→badge 回 untested) | 共 | credential-key-edit | ✅ |
+| 22 | Eye/EyeOff 切明文/掩码 | 共 | secret-mask-toggle | ✅ ⚠️ 切 native `password` type,违契约(目标:永 text + CSS mask) |
+| 23 | Copy 复制 key 到剪贴板 | 共 | secret-copy | ✅ |
+| 24 | `Test` → 异步批量 job(750ms 轮询)拉全厂商模型目录,endpoint 提 verified | 官 | official-test-job | ✅ ⚠️**DRIFT**:后端硬门禁 `provider_kind!='official'` 拒;目标=统一 `POST /endpoints/{id}/test`+批量探测(§1.2) |
+| 25 | `Get Models` → 同步单次 models-list 发现;路由停 unverified_manual | 三 | tp-getmodels | ✅ ⚠️ DRIFT(同上) |
+| 26 | 'Endpoint test' 填单 model id → Test 探测该 model | 三 | tp-model-probe | ✅ |
+| 27 | 'Manual model probing' 加多 model id 批量探测(后端按 kind 分叉) | 共 | manual-model-probe | ✅ ⚠️ 官→多候选 VerifiedProfile / 三→单次 `_probe_model` 写死 text-only(目标:统一批量探测+能力探测) |
+| 28 | (自动)Manual panel 拉 `notable-models` 候选作输入建议 | 共 | notable-models | ✅ 有 note 文件即返,不分官/三 |
+| 29 | `⋮` → Rename / Delete(official 不可改名/删) | 三 | tp-rename-delete | ✅ 删除二次确认 toast |
+| 30 | 状态投影:tp 顶层徽章(参数指纹) / official 每 route 彩色 Tag(后端权威) | 共 | test-status-projection | ✅ → 目标 6 态(§4.2) |
+| 31 | 刷新后从 registry 恢复 key/状态/Available Models | 共 | registry-restore | ✅ |
+
+> **官/三 目标区别(去掉 drift 后)**：official 不是用户选的,后端按 `endpoint_id` 白名单(anthropic/openai/gemini/deepseek/ark-official)钉死 `provider_kind`,前端镜像成固定 5 厂商 + canonical base_url/protocol 默认且隐藏;third-party 用户自填 name/url/protocol/key。**测试路径同一套**(统一 endpoint test + 批量探测)。多 URL/协议探测/命名见 §1.2。
+> **🔌 孤儿/🛠 backend-only**：`OfficialVendorSelect`、`AddProviderForm` createBlank/derive、`ProviderDeleteButton`(定义未渲染)、`probeRoute`→`POST /routes/{id}/probe`(此 tab 未接线)。处置(接线 vs 清死代码)逐组判定。
+
+### 7.3 Stage 3 — LLM Roles（角色 → 模型兜底链）〔区域 `settings:llm-roles`〕
+> 设计叙事见 §2。
+
+| # | 动作 | 能力 | 现状 |
+|---|---|---|---|
+| 32 | 进 tab → 加载 Graph Agent 角色卡(滤掉 copilot_)+ 右侧 Available Models 侧栏 | role-list-load | ✅ |
+| 33 | `Add Graph Agent Role` → 弹框命名 → 新建空角色 | role-create | ✅ 允许建无模型空壳角色 |
+| 34 | 侧栏搜模型(按 model/provider/id 多词匹配) | available-models-search | ✅ |
+| 35 | 展开模型卡看各 provider 状态(Ready/Untested/Cooling Down) | available-model-provider-states | ✅ ⚠️ needs_setup/off 的 provider 被静默过滤,看不到为何缺失 |
+| 36 | 拖模型进角色 → 自动挂 model group + 默认选 Ready+Untested 在前 | role-model-map-drag | ✅ |
+| 37 | 拖动调多个 model 兜底序 | role-model-reorder | ✅ active_model 永远同步第一个 |
+| 38 | 拖 provider tag 调该模型的 provider 兜底序 | role-provider-reorder | ✅ |
+| 39 | `Add provider` 补加 / 垃圾桶移除某 provider | role-provider-add/remove | ✅ |
+| 40 | 删整个 model group | role-model-remove | ✅ |
+| 41 | 切 `Model Fallback` 开关(关则只用第一个 model) | role-model-fallback-toggle | ✅ |
+| 42 | 切 `Thinking Preferred`(偏好推理模型) | role-thinking-intent | ✅ ⚠️ 后端还支持 `required` 档,前端只 off/preferred 两态无 UI |
+| 43 | 填 `Output Token Target` / 开 `Use max` | role-output-token-intent | ✅ ⚠️ 前端固定 downgrade=allow,后端 block/warn 策略无 UI |
+| 44 | 看 `Route max token` 摘要 | role-output-limit-summary | ✅ |
+| 45 | 悬停状态灯看 role-match(Can Run/Limited/Blocked)+ 诊断 | role-route-status-light | ✅ role_fit 来自后端 materialize report |
+| 46 | 点 `Test` → 后端 job 逐 route 探测兜底链,实时回填灯 + downgrades | role-test | ✅ ⚠️ 结果易失(切 tab 丢);`RoleTestResultPanel` 已写未挂载 |
+| 47 | Test 失败红色错误条(未保存先拒测) | role-test-error-banner | ✅ |
+| 48 | `⋮` → Rename / Delete 角色 | role-rename/delete | ✅ |
+| 49 | `Add Model Bundle`(可复用模型束,跨角色) | model-bundle-create | ✅ |
+| 50 | 拖模型进束 / 束内编辑(复用角色卡编辑器,束不可嵌套束) | model-bundle-edit | ✅ ⚠️ 束卡不显状态灯、无 Test 按钮 |
+| 51 | 把已建束整体拖进角色作一组兜底 | bundle-as-role-source | ✅ ⚠️ 快照复制,束后续改动不同步到已拖入的角色 |
+| 52 | 束 `⋮` → Edit 改名 / Delete 删束 | model-bundle-rename-delete | ✅ |
+| 53 | (被动)其它窗口改 roles / 窗口聚焦 → 自动重投影刷新 | role-projection-refresh | ✅ |
+
+> **机制**：角色存**结构化** `model_groups[]`(canonical_id + 各 provider 的 route),后端 `materialize_role` 物化成 gateway 消费的**平铺** `fallback_chain`;前端看 Group,引擎跑链。物化时跳过 needs_setup/off、cooling_down 记 warning、只把 fit 的 route 入链——UI 测试态与引擎编排同一套判断。
+> **测试 SSOT 落差(头号)**：role 测试结果后端 job 内存字典(`_role_test_jobs`)是 SSOT,但前端 `roleTestStates` 是组件易失 state,**切 tab 即丢**;只有静态 `role_fit` 持久。**本次接线工程要删前端易失层、纯投影后端 SSOT**(对应 §6.5 检查 2)。
+> **🔌 孤儿/🛠 backend-only**：`useRoleTestChainRunner`、`RoleTestResultPanel`、`RoleFitBadge`、`ProviderStateBadge`、`CoolingDownCountdown` 仅测试引用未挂载;`PUT /llm/roles/{name}`(单角色带 materialize)前端不调(只用 bulk PUT)。
+
+### 7.4 Stage 4 — Copilot（助手配置）〔区域 `settings:copilot`〕
+> 设计叙事见 §3。⚠️ 现状定性:**配置外壳真接线,内里大量 mock/桩/假测试**。
+
+| # | 动作 | 能力 | 现状 |
+|---|---|---|---|
+| 54 | 进 tab → 标题 + "Backend Integration" 徽章 + 角色卡(无数据先骨架屏) | copilot-tab-shell | ✅ ⚠️ 徽章是写死装饰,不反映真实连接 |
+| 55 | 看 copilot 角色卡(Opus 4.7 / DeepSeek V4,Built-in/Third-party 徽章) | copilot-role-list | ✅ ⚠️ 卡片元数据前端硬编码模板/启发式推导,与后端 role 语义脱节 |
+| 56 | (首次无角色)自动填 3 张种子卡 | role-seed-fallback | 🟡 ⚠️ 前端现造,默认 props 还是 mock |
+| 57 | 看每 route SDK 状态灯(N/M SDK Ready) | route-sdk-status-badge | 🟡 ⚠️ 只按 ui_state==ready 粗映射,非真测过 SDK |
+| 58 | 点 `Test` → 逐 route 验 SDK 工具调用(testing→ready/unsupported) | copilot-role-test | ✅ ⚠️**假测试**:探针走 `AsyncAnthropic`(发 weather 工具调用),真实 copilot 跑 `ClaudeSDKClient` —— 测的 SDK ≠ 跑的 SDK(§3.4 要修) |
+| 59 | 拖动调 route 回退优先级 | route-fallback-reorder | ✅ ⚠️ 运行侧 `_resolve_copilot_route` 只取首条,重排未必生效 |
+| 60 | `Add route` 追加兼容 route / 垃圾桶删 | route-fallback-add/remove | ✅ ⚠️ 可选 route 靠前端启发式过滤 |
+| 61 | model-group 行的 Remove 按钮 | model-group-remove | 🟡 ⚠️ disabled 写死且无 handler,纯占位 |
+| 62 | 点 `Add model` 新建第三方 copilot 角色草稿卡 | copilot-role-add | ✅ ⚠️ key 命名触发后端分流误判风险(见下 bug) |
+| 63 | 空卡下拉选 Model group → 变可配置角色 | copilot-config-model-group | ✅ ⚠️ 选 group 后 key 变 modelGroupId(无 `copilot_` 前缀) |
+| 64 | 删第三方 copilot 角色(确认 toast) | copilot-role-delete | ✅ built-in 卡无删除;走整表 PUT 覆盖 |
+| 65 | (期望)改完看保存中/已保存反馈 | copilot-save-status | ⚠️ stale-code:`void saveStatus; void error;` 直接丢弃,改完无任何反馈 |
+
+> **🐛 潜伏 bug(接线必修)**：新建 copilot 角色 id 用 `copilot_custom_N`,但选 model group 后 `selectModelGroup` 把 role key 改成 `modelGroupId`(如 `claude-sonnet-4.7`,**无 `copilot_` 前缀**);后端 `put_llm_roles` 的 copilot/graph-agent 分流只认 `copilot_` 前缀 → 会**误判为 graph-agent 角色错存**。
+> **🛠 后端有·前端无**：`POST /api/copilot/roles/{role}/test-sdk` 前端从未调(且最终仍落同一 AsyncAnthropic 假探针);真实对话 `ws`→`ClaudeSDKClient` 属 skill 工作台不在设置页;`dispatch_copilot` 仍 501 占位。
+> **mock 来源**：`mock-copilot-data.ts`(默认 props)、`copilot-role-state.ts` 全套 + `mockCopilotRoles`(死代码,仅 test 引用)。
+
+### 7.5 贯穿性问题（cross-cutting，现状审计结论）
+
+1. **测试 → SSOT 落差(头号工程)**：provider 测试(API Keys)与 role 测试(Roles/Copilot)后端都有持久化/job,但前端仍有易失副本、切 tab/刷新即丢。目标 = 删前端易失层、完全以后端投影为准(§6.5 检查 2)。settings 接线的主工程。
+2. **写入归属 = gateway Python,永不 Rust 化数据层**：见 §7.1 机制。settings **不适用** D12「写全量 Rust」,唯一 native 操作是选默认 skills 目录。
+3. **孤儿组件群**：API Keys 4 个 + Roles 5 个 + Copilot `copilot-role-state` 全套 + 多个 backend-only 端点。逐组判定:计划待接线(保留) vs 历史死代码(清理)。
+4. **Copilot 整体桩程度最高**：mock 数据 + 假测试(SDK 不一致) + save 无反馈 + 分流误判 bug + 占位按钮。
+
+### 7.6 当初的 open questions → 已拍板对照（闭环,无遗留待答）
+
+| 早期 open question | 结论落点 |
+|---|---|
+| 测试态 SSOT 落盘/回填、删前端易失层 | ✅ §6.5 检查 2 + §4.1 draft 写回 |
+| Copilot 整 tab 做到哪档 | ✅ 配置 + 真测试(修假测试)全做,§3.4 |
+| Copilot 分流 bug(#62/63 丢前缀) | ✅ 确认是 bug、接线必修,§7.4 |
+| role intent 前端缺口(#42/43 required/block) | ✅ 补 UI,§2.3 Role Intent |
+| Available Models 静默过滤(#35) | ✅ 显式展示「为何缺失」,§2.1 + §4.2 6 态 |
+| Model Bundle 语义(#50/51 快照/无 Test) | ✅ §2.6 Model Bundle 与 Role 高度统一 |
+| API Keys 现状差(probe/mask/两步/protocol/孤儿/base_url/状态术语) | ✅ §1.2 + §4.2 + §7.2 |
+| 壳层 NFR(骨架/WS 重连/全局保存徽章) | ✅ §7.0 + Stage 0 PM 拍板 |
+| 孤儿组件群处置 | ⏳ 接线工程逐组判定(保留 vs 清),非设计待答 |

@@ -1,0 +1,150 @@
+# 04 · 运行与验收(predict + run + trace + golden) — Workflow 节点
+
+> **Tier**: workflow
+> **旅程**: predict 试飞 → run 真跑 → trace 去黑盒 → golden 验收对比
+> **上游** [03 compile](./03_compile.md)(绿灯解锁);**下游失败** → [05 debug](./05_debugging.md)。
+> **走查完整记录**(全部 atom actions + 决策 + 原话 + 测试关键点)。
+
+## 旅程脊柱
+**predict(硬前提:验证逻辑+schema)→ run(真跑)→ trace(看)→ golden(验收 diff)**
+- compile-pass 解锁 Predict;predict-pass 解锁 Run。
+- **predict 是 run 的硬前提**;**golden 不是前提**(只决定 agent 节点用哪份 mock)。
+- input / validate / batch 都是**节点/run 配置**,不是 predict 的独立议题。
+
+---
+
+## B. predict(试飞)
+### Atom actions
+| # | 动作 | 区域 | status |
+|---|---|---|---|
+| B1 | 点 [Predict] 触发试飞 | 动作条 | placeholder(onPredict=桩) |
+| B2 | 选测试输入(节点自身 io 配置,含 G2「任意节点导入文件→注入黑板」) | i/o 面板 | (配置项) |
+| B3 | validate 输入合 schema(predict 流程内一步,非独立) | — | backend live |
+| B4 | logic 节点真跑(确定性、不烧 token) | canvas | backend live |
+| B5 | agent 节点走 mock(无 golden→启发式占位 / 有 golden→吐 golden) | canvas | backend |
+| B6 | 409 守卫:predict 来源 trace 不可晋升 golden | — | backend-only |
+| B7 | stage 推进 predict-pass → 解锁 Run | 动作条 | placeholder(永不置位) |
+
+### 决策
+- **predict 是 run 硬前提**(P6);golden 非前提;mock 由 golden 状态自动决定(g-b),无手动选择器。
+- input/validate/batch 是配置,非 predict 独立议题 → 撤回伪问题 3-1/3-2/3-5。
+- predict 触发改"i/o 面板选已导入文件 → 直接 predict"(路径式),废弃 PredictInputDialog。
+
+### 原话(留底)
+> "predict是硬前提, 但是golden不是. predict的任务是把逻辑跑通, 确认逻辑、输入输出schema等等真的没问题, 才能进入run; 有没有golden的区别只在于predict在agent节点拿哪个mock数据输出而已"
+> "input 和batch 都是节点配置问题, 和predict无关, predict和run就是按照配置来跑就行了"
+
+### 测试关键点
+- predict 不过 → run 被门控挡;logic 真跑 / agent 走 mock;mock 选择(无→占位/有→golden replay);409:predict trace 不能固化为 golden。
+
+---
+
+## C. run-execution(真跑)
+### Atom actions
+| # | 动作 | 区域 | status |
+|---|---|---|---|
+| C1 | 点 [Run] 触发真跑 | 动作条 | placeholder(onRun=桩) |
+| C2 | 发起单次运行(startRun → POST /runs) | — | placeholder(零 caller) |
+| C3 | 后端 spawn run_skill 跑真引擎、落盘 final_state/metrics/trace | 后端 | live |
+| C4 | 运行状态指示(运行中/暂停/失败/成功) | 动作条·画布 | placeholder |
+| C5 | 节点呼吸灯 + 红绿(随执行逐个亮) | 画布 | placeholder(statusByNodeId 未传) |
+| C6 | focus 自动跟随当前运行节点 | 画布 | target-design(G9) |
+| C7 | Run 历史列表(run_id/状态/耗时/token) | timeline | live |
+| C8 | Toolbar 'Trace Timeline' 命名混淆 → 正名 | toolbar | stale-doc |
+| C9 | 批量运行(选多个输入各跑一次) | i/o 面板 | orphan(后端 live) |
+| C10 | 命名序列(chapter1/2…)建议自动批量 | i/o 面板 | target-design |
+| C11 | 批量进度轮询(总数/完成/逐项状态) | i/o 面板 | orphan |
+| C12 | 批量某项失败 → 显式上报不静默 | i/o 面板 | backend-only |
+| C13 | 回看某次历史运行详情 + Replay 重跑 | timeline | orphan |
+| C14 | 成功运行后 autocommit + git_status | 后端 | backend-only(**归保存与发布**) |
+
+### 决策
+- run 入口在 i/o 面板(单次=选一个,批量=选多个)。
+- **batch/loop 是配置**(三处开关 + 图级/节点级/嵌套 + loop 状态机)→ **归引擎设计**;前端 UI 等引擎方案回来再做。
+- autocommit 由 run 触发但**归保存与发布**;运行态节点边框动画 = settings role-test 边框动画(P1)。
+
+### 原话(留底)
+> "predict和run就是按照配置来跑就行了" · "单次Run和批量Run的入口 在io panel OK" · "运行时加线的动画(已有)和节点边框的动画(在setting里面的role test, 测试时的边框动画统一)" · "存档应该和发布分发放一起, 都是git的功能"
+> batch/loop 完整原话(story-deconstruction + 三处开关 + 图级 range 例)→ [`_reorg/gemini-prompt-batch-loop.md`](../../_reorg/gemini-prompt-batch-loop.md)。
+
+### 测试关键点
+- run 需 compile-pass 且 predict-pass;run_skill 真跑落盘;节点灯随真实 run 事件亮;成功 run → autocommit;批量某项失败显式上报。
+
+---
+
+## D. trace-observability(去黑盒)
+### 核心概念:线上 dot = 节点间状态机转移点
+dot = 两节点之间的"中间节点"(langgraph edge),代表**上节点 end 后、下节点 start 前的所有操作**(黑板 reduce/聚合、输入文件注入、输出落盘、截断/摘要/存储)。点 dot → ① 看该刻黑板内容 ② 看"上节点 end→下节点 start"的全部操作记录。并联线从 dot 出发 = 并联节点输入由此黑板统一筛选分发。
+
+### 看 trace 两态(P2)
+- **run 时**:自动开面板,事件流式进;**agent 输出流式 + 分类折叠摘要**(参考 agent IDE「Worked for ▾ / Explored ▾ / Thought ▾」,一行摘要点开看详情 + 末尾自然语言总结);节点灯随跑。
+- **run 后**:predict/run 列表 → 点某次看 **run_id 概要**(focus 空白画布=全局)→ 点 button 看完整 trace timeline + **只读编辑器看完整 trace 文档(人能读、轻度格式化)** → **focus 决定粒度**(空画布=run 概要 / 节点=该节点 trace + 编辑器跳该节点范围);节点间过程点线上 dot。
+
+### Atom actions（04+05 去重）
+| # | 动作 | status |
+|---|---|---|
+| D1 | run 时实时 trace 控制台(流式;agent 输出流式+分类折叠) | orphan + agent 折叠为新 |
+| D2 | run 后从列表回看某次完整 trace | placeholder(useRunHistory live) |
+| D3 | run 概要(focus 空画布=全局) | target-design |
+| D4 | 看完整 trace:timeline + 只读编辑器(人读格式) | target-design |
+| D5 | focus 某节点 → 只显该节点 trace + 编辑器跳该节点范围 | orphan(过滤)+ target(跳) |
+| D6 | 点线上 dot → 黑板状态机内容 + "上节点 end→下节点 start"操作记录 | placeholder(定义已明确) |
+| D7 | 点状态 → 编辑器只读看完整黑板详情(深层可折叠) | target-design |
+| D8 | Prompt 透视:点 llm_call → 模板/喂入变量/渲染后 三视图 | orphan(PromptInspector) |
+| D9 | agent 节点 '+' 内联展开执行子树 | target-design |
+| D10 | Validator 重试 Nudge:2/3 徽章 + 失败 Error Stack | target-design |
+| D11 | 检索/筛选(事件类型 + 关键字) | orphan |
+| D12 | 失败节点亮红灯(Timeline 停 + Error Message) | placeholder |
+| D13 | 模型对比:**顶部 tab** 切换看不同 llm 结果(P8) | target-design |
+| D14 | 净化 PropertiesPanel(移除 selectedEdge JSON 倾倒,dot 改道本能力) | stale-code(清理) |
+| D15 | 失败退路:空态 / payload 截断 / live→history 源切换以 runId 重置 | target-design |
+| D16 | (引擎)推流运行态微观事件 Payload schema + 结构化前后态 diff(REQ-7) | target-design,依赖引擎 |
+
+### 决策
+- 完整 trace 文档 = **人能读、轻度格式化**(非原始 jsonl);agent 输出**流式 + 分类折叠摘要**(参考 agent IDE)。
+- **dot = 节点间状态机转移点**;P8 模型对比 = **顶部 tab**;概要=run_id 概要,focus 空画布=全局 / focus 节点=该节点 trace。
+- Q4:"事件→节点态"派生器归 **trace**(run 节点灯 + debug 红灯共用)。
+
+### 原话(留底)
+> "1. 当然是人能读的, 简单调整一下格式 / 3. dot就是langgraph的中间节点(我不知道怎么描述它), 在进入一个节点之前以及从一个节点出来后的所有操作, 主要围绕状态机黑板, 还有输入文件、输出文件, 还有一些状态机操作比如截断摘要存储等等. 所以点dot看黑板状态机当时的内容, 并联线从dot出发是因为所有并联节点的输入是由这里的状态机统一筛选的; 点击dot, trace timeline显示从上个节点end, 到下个节点start之间的所有操作记录 / 4. 顶部tab吧 / 5. 概要是这一次run_id 的概要, focus在空画布意味着全局,整个graph,而不是某个节点, 如果focus在某个节点就直接显示这个节点的trace了"
+> P2: "run行时自动打开这个panel, 实时看到tracing的返回结果(流式输出, agent也需要流式输出, 输出内容为摘要折叠, 点开可以看具体内容, 就和所有的copilot输出一样)…点击一个node, tracing变成该node(start-->end)最近的一次trace timeline记录, 编辑器文档直接跳到该node范围(node中间的过程点击线中间的dot)"
+> agent 折叠渲染参考图 = agent IDE「Worked for ▾ / Explored ▾ / Thought ▾」可折叠分类摘要 + 末尾自然语言总结。
+
+### 测试关键点
+- run 时 trace 流式;agent 输出折叠/可展开;focus 切换(空画布→概要/节点→该节点 trace + 编辑器跳);点 dot → 黑板内容 + 节点间操作记录;trace 文档人能读;payload 截断不 OOM;源切换以 runId 重置。
+
+---
+
+## E. golden-eval(验收)
+### Atom actions
+| # | 动作 | 区域 | status |
+|---|---|---|---|
+| E1 | agent 节点 golden 状态机:🔘未测试 → 🟡逻辑OK → 🟢有golden | canvas | target-design |
+| E2 | mock 由 golden 状态自动决定(无→占位 / 有→golden_case) | — | target-design |
+| E3 | golden 创建路A(copilot 协作):入口①trace 内占位节点旁按钮 ②sonner 批量开 N chat → copilot 看整图分析→定 golden | trace/copilot | target-design |
+| E4 | golden 创建路B(手动):按 io.outputs schema 自动生成空模版 json,i/o 面板手填 | i/o 面板 | target-design |
+| E5 | golden 设置/文件归 i/o 面板 | i/o 面板 | target-design |
+| E6 | golden 失效:改 prompt/agent 内部不失效;**仅改 output schema 致缺字段 → 编译错误,必须补才能 predict** | — | target-design |
+| E7 | run 后 实际输出 vs golden **字段级 diff** | properties | target-design(useGoldenDiff orphan) |
+| E8 | 409 守卫:golden 作者定/手填,非从 predict trace 捕获 | — | backend-only |
+
+### 决策
+- **g-a 取代**:golden = 逐节点作者期望值,取代现后端整次快照。
+- g-b mock 自动;g-c logic 不参与;g-d 失效条件(只绑 output schema);g-e 两提示入口;g-f predict 增量价值。
+
+### 原话(留底)
+> "设计完compile没问题,第一次点击predict, 测试逻辑链路跑通没问题, agent node 状态从未测试变成逻辑OK…agent节点需要一个新状态标签, 有没有golden? 有的情况下predict按照golden输出走; golden相关设置放在i/o 面板…没有golden时,会根据输出schema自动创建一个符合schema的golden模版…一旦golden有数据了, 状态自动切换到golden, predict按照golden输出运行. run运行后可以进行实际结果和golden的diff对比."
+> "g-a 取代; g-b对; g-c不用; g-d 看改什么, 改prompt、改agent内部设置都没事, 只有改输出schema后golden字段缺失需要的字段, 需要弹警告⚠️触发编译错误, 必须补上才能跑predict; g-e 两者都要(trace内按钮 + sonner批量); g-f OK"
+
+### 测试关键点
+- 状态机三态;mock 自动选;logic 不参与;失效(仅 output schema 改缺字段→编译错误);409;run 后字段级 diff;创建两路。
+
+---
+
+## 引擎需求(已抛出)
+1. **batch/loop**(C 配置)→ [`gemini-prompt-batch-loop.md`](../../_reorg/gemini-prompt-batch-loop.md)。
+2. **predict + golden + run 后端**→ [`engine-prompt-predict-golden-run.md`](../../_reorg/engine-prompt-predict-golden-run.md):golden 逐节点模型 + mock-by-golden + 逐节点 diff + 失效校验。
+3. **trace 后端**→ [`engine-prompt-trace-compile-debug.md`](../../_reorg/engine-prompt-trace-compile-debug.md):节点间操作事件 + 嵌套链路 + reducer diff。
+
+## 整层定性
+本节点整层 = **后端实 / 前端虚**:predict/run/golden 后端 live 或 backend-only,但 TracePanel/useRunStream/PromptInspector/BatchRunner/RunDetailDrawer/useGoldenDiff 全套已建却零挂载。**主要工程 = 接线孤儿 + 实现 target-design 件 + 引擎补缺口。**

@@ -1,5 +1,7 @@
 # Skill Studio 文档重组 — Workflow 动作目录(master)
 
+> **迁移状态(2026-06-03)**:§01_init → [`01_init.md`](../mvp1/01_workflows/01_init.md)、§02_authoring → [`02_authoring.md`](../mvp1/01_workflows/02_authoring.md) **已回写**(旅程 + atom 决策表 + 原话依据 + 测试关键点);§03_prediction / §04_execution / §05_debugging / §06_eval(golden 部分)→ [`03_run-and-verify.md`](../mvp1/01_workflows/03_run-and-verify.md) **已并入**;**§06_eval 的 publish 部分** = 「保存与发布」节点内容源,**⏳ 待走查**(见 [INDEX](../mvp1/01_workflows/INDEX.md))。已迁移段以对应 mvp1 节点文档为准;本文保留作迁移源 / 可追溯。
+
 > 来源: workflow `wf_1c266263-f42`(6 节点并行编目 + critic 审校), 2026-06-02。配套决策日志: [alignment-notes.md](alignment-notes.md)。
 > 本表 = 「**划分 scope + 理清每个 workflow 动作 + 每个动作动机 + FROZEN 改动**」。下一步据此撰写 `mvp1/02_capabilities/*` 与 `mvp1/03_regions/*`(新设计在 mvp1)。
 
@@ -103,12 +105,12 @@
 - **动机**: IDE 模型下用户常需跳到真实文件夹做外部操作; reveal 是 skill=文件夹 心智的自然配套(浏览器降级为复制路径)。
 - **证据**: WelcomePage.tsx:481-484,507-510 (Show in folder 菜单项→handleReveal); WelcomePage.tsx:270-272 (handleReveal→revealInFileManager); lib/tauri.ts:38-62 (reveal_in_file_manager Tauri 命令 / 浏览器降级复制路径)
 
-### [stale-code] Recent 卡片右键/⋯菜单 → Delete(从 Studio 移除最近, 二次确认 toast; 源文件夹保留在磁盘)
+### [移除·R1] ~~Recent 卡片右键 → Delete~~ — 删此功能(抄 Cursor: 不在 IDE 内删 skill, 要删用户去系统文件夹); Recent 失效路径改为点击报错+自动移除
 - **能力·区域**: `skill-workspace` · `welcome` — 目标: — (设计源 D1)
 - **动机**: D1 把动作 11 skill-delete 重定义为 remove-from-recent(不删盘)。当前已是'保留磁盘'(delete_skill 仅注销 metadata), 语义对; 但它注销的是**注册表条目**, 与无注册表目标不符——目标应是从 MRU(localStorage)移除。故标 stale-code: 删除目标改为 remove-from-Recent。'保留磁盘'承诺已正确传达给用户。
 - **证据**: WelcomePage.tsx:486-492,512-518 (Delete 菜单项→handleDelete); WelcomePage.tsx:96-107 (requestSkillDeleteConfirmation: 'Its source folder stays on disk'); WelcomePage.tsx:274-282 (deleteSkill→DELETE /skills); skills.py:475-483 (delete_skill_endpoint 204); services/skills.py:436-447 (delete_skill: 仅 unregister+remove index/summary, 不 rmtree skill 目录)
 
-### [stale-doc] Recent 卡片显示 Config drift 徽章(本地 git remote URL 与期望不符时告警, hover 显示 actual/expected/建议)
+### [移除·D-1-1] ~~Recent 卡片 Config drift 徽章~~ — 删除(去注册表后无落点, PM 2026-06-02)
 - **能力·区域**: `skill-workspace` · `welcome` — 目标: — (设计源 D1, 标'存疑/待定')
 - **动机**: 现状: 后端比对实际/期望 git remote 给出 config_mismatch, 前端渲染徽章(live 端到端)。但 D1 明确'12 config-drift-warn 在无注册表下存疑(待定)'——去注册表后该告警的存在意义/落点不明, 故标 stale-doc 待 PM 拍是否保留。
 - **证据**: WelcomePage.tsx:431-457 (Config drift Badge + Tooltip actual/expected/recommendation); models/skills.py:36 (config_mismatch 字段); services/skills.py:217,258-266 (_attach_config_mismatch); services/config_arbitration.py:15-41 (detect_config_mismatch 比对 remote URL)
@@ -168,7 +170,7 @@
 
 7) 多窗口(D9 决定做)在本节点无对应代码(单 App 实例); 归 04_platform(Rust 壳+无状态 sidecar)。本节点不含多窗口动作。
 
-**待定**:
+**待定 → ✅ 已解决 (PM 2026-06-02)** — 决策+动机见 [alignment-notes「批次1+2 残留确认」](alignment-notes.md): Config drift 徽章=**删** / Recent 卡片=**极简(只存路径+名)** / import 校验门=**全删** / 新建脚手架=**logic→agent 模板**(非空文件夹、不调 copilot, D-1-4); **删 Delete 功能**(R1, 抄 Cursor, 不在 IDE 内删 skill); **Recent 失效路径**=点击报错+自动移除(R1); **欢迎屏整体抄 Cursor/VS Code**(R2, atom actions 已确认)。原始 open question 留档:
 - Config drift 徽章(D1 标'存疑/待定'): 去注册表后是否保留这个 git-remote 比对告警? 若保留, 在 skill-workspace 模型下它的触发点/落点是什么(Recent 卡片? compile?)? 现为 live 端到端实现(WelcomePage.tsx:431-457 + config_arbitration.py), 需 PM 拍去留。
 - Home 的 Recent 数据源: D1 锁'无聚合注册表 + Recent(MRU localStorage)', 但当前 Recent 卡片的丰富元数据(phase_count/last_run/has_golden/config_mismatch)来自后端 GET /skills 聚合。去注册表后这些元数据从哪来(Rust 按 MRU 路径逐个读 skill 目录? 还是 Recent 只存路径+名, 卡片退化为极简)? 影响 Recent 卡片信息密度与是否需后端调用(关联 D6 skeleton)。
 - import 校验门删除范围(D2): services/skills.py:517-522 的'缺 GRAPH.md/SKILL.md 即拒'明确要删; 但 line 523-525 的'有 GRAPH.md 则 lint(不 raise)'是否也一并去掉(完全不在打开时做任何校验, 全交 compile)? D2 原话'有 compile 有 copilot 屎都改成标准 skill'倾向全删, 待确认。
@@ -273,7 +275,7 @@ NOT-OWNS: 测试输入/predict 触发 → 03; 真实 run/运行态可视化 → 
 
 **跨切**: ① [D12] 写全量 Rust: serialize_graph / mutate_phase_body / 新建 phase 写文件 / Properties 保存全经 Rust 文件命令(现走 Python `writeSkillFile` + `graph/serialize`, 标迁移)。② 读取层已 v030-aware(`CURRENT_SCHEMA_VERSION='v0.3.0'`), 但写入/脚手架/子图渲染层多为 V2.x `stale-code`: `defaultPhaseMarkdown` 写 mode/system_prompt/exit_contract/python_callable; `phase-frontmatter.ts` 字段集过时; `SubgraphInline` mock; `subagentsForPhase` 读过时 shape `phase_config.subagents`。③ FROZEN 改动落点集中本节点: 删子图 io 1:1(FROZEN-1)、io.outputs artifact(FROZEN-2)、REQ-2 字段勾选(FROZEN-4)。④ canvas REQ-7/8/9 覆盖核对: REQ-7 结构化 diff 归 trace(05/06); REQ-8 运行时策略开关(prompt_cache/compaction)= engine 未落地⏭️延后; REQ-9 = 右键新建节点(=T4, 已覆盖)。
 
-**待定**: Half B 细化(Properties 白名单逐字段表单 / L3 步骤 Rust `mutate_phase_body` 事务粒度 / 子图 inline 容器布局态持久化 G1)留实现期; 新建 skill 脚手架归属(Rust 内置模板 vs copilot 生成)与 01_init 边界待定(见 01 待定#4)。
+**待定 → ✅ 已解决 (PM 2026-06-02)** — 见 [alignment-notes「批次1+2 残留确认」](alignment-notes.md) + 新建能力文档 [phase-editing](../mvp1/02_capabilities/phase-editing.md)(字段唯一真相源=引擎 FROZEN spec, 只链接不复制): Half B **现在就设计**(不留实现期), 三类节点字段集 + 子图 `path` 引用(去注册表, D7)+ io.outputs artifact(G3)+ 子图 io 删严格 1:1(G2) 已落 phase-editing; 脚手架归属=logic→agent 模板(D-1-4)。**动作表 review 落地(R3–R5, 见 alignment-notes)**: 动作3 i/o panel 加 **input files 导入**(G2/FROZEN-3, 任意节点导入新文件→注入黑板); 动作6 连线=**建链/改链重连/拖拽断链/菜单断** 四操作(R4, 现仅菜单断); 新增 **assets subgraph 类目 ↔ 节点文件同步**(删节点→删条目, R5)+ **子图 path 找不到→标红→OS 选文件夹导入工作区**(D7)。原始 open question 留档: Half B 细化(Properties 白名单逐字段表单 / L3 步骤 Rust `mutate_phase_body` 事务粒度 / 子图 inline 容器布局态持久化 G1)。
 
 ---
 
@@ -402,7 +404,7 @@ NOT-OWNS: 测试输入/predict 触发 → 03; 真实 run/运行态可视化 → 
 
 【schema-infer 倾向弃用】InputPanel 的 SchemaInferPanel(拖/粘 JSON→推 schema)是死路 `<pre>`(不写回 io, InputPanel.tsx:18-70), 且 PredictInputDialog 里的 inferJsonSchema 同样只读预览。canvas REQ-2 改为"黑板字段勾选"后, paste-infer 倾向废弃(alignment-notes:189 Q-C)。predict 选输入不应依赖 schema-infer。
 
-**待定**:
+**待定 → ✅ 已收口 (PM 2026-06-02/03)** — 见 [alignment-notes「Part 3 review」](alignment-notes.md): **3-1 改名 / 3-2 输入入口 / 3-5 validate = 伪问题撤回**(input=节点 io 配置、validate=predict 流程内一步、batch=run 配置, 均非 predict 独立议题); **3-3 mock = 由 golden 状态自动决定**(无→占位/有→吐 golden, g-b); **3-4 守卫 = 保留**(golden 作者定, 不冲突)。**03 真正内容 = golden 机制** → [golden-eval 能力](../mvp1/02_capabilities/golden-eval.md)。本节点已并入「**运行与验收**」(predict+run+trace+golden+debug)。原始 open question 留档:
 - 改名确认: skill-lifecycle spec 自身建议改名 studio-feature-test-inputs-batch(design §8 开放项1); 若改, 本节点 target_spec 引用与 INDEX 映射需同步。
 - predict 触发的入口落点未定: 是复用孤儿 PredictInputDialog(需修 validateRemote 与后端 {input_file_path} 契约不匹配 + 挂载), 还是改为'在 i/o panel 选已导入的 test_input 文件→直接 predict'(更贴合 spec 的'选路径而非动态表单'方向)? 后者更一致但 PredictInputDialog 整件可能废弃。
 - mock-llm 策略选择 UI 缺失: PredictRunRequest.mock_llm=Any=None, 引擎支持 copilot/heuristic_stub/golden_case 三种 mocked_source, 但前端无策略选择器。predict 默认用哪种 mock? 是否暴露给 PM 选(如'用某个 golden case 当 mock')? 需新 spec 定义此交互。

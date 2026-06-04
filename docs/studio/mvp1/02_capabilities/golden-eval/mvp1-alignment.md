@@ -60,14 +60,14 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:118`, `01_workflows/04
 - Status: backend whole-run diff live; per-node target-design; frontend orphan/mismatch.
 - 归属: capability `golden-eval`; regions `properties`, `timeline`; platform `engine`.
 
-## F6. Predict Trace Promotion Guard
+## F6. Predict 不可入 golden,但 Run 输出可做默认种子
 
-- 机制: predict trace cannot be promoted into golden.
-- 决策: golden must be author/copilot-defined expectation.
-- 原话/来源: `01_workflows/04_run-and-verify.md:129` keeps the guard; `01_workflows/04_run-and-verify.md:132` replaces whole-run snapshot model.
-- 测试: predict trace promotion returns 409; manual/copilot golden save succeeds.
-- Status: backend-only live.
-- 归属: capability `golden-eval`; platform `engine`.
+- 机制: **golden 本身随时可写**(从 schema 模板 / copilot 设计 / 手填,**predict 之前也行**)。guard 很窄——**只挡"把 predict 的 mock 输出值直接提升成 golden"**(假数据无参考价值,409),**不限制 golden 的创建时机**。**Run 的真实输出可作 golden 默认种子**:agent 节点**无 golden / 空模板 / 坏文件(schema 完全不符)**时,默认用该节点 Run 输出填充、在其上编辑;**已有有效 golden 不被 Run 自动覆盖**。
+- 决策: 区分 predict 与 run——predict=假数据不可入 golden;run=真实输出可做起点。UX 心智:用户先 Run、觉得某节点结果"还行"就跳过,挑不行的去做 golden,所以拿 run 输出当默认基底最省力(PM 2026-06-04)。
+- 原话/来源: `01_workflows/04_run-and-verify.md:129`(predict 409 guard);run 输出 seed golden = PM 2026-06-04 UX 心智澄清。
+- 测试: predict 提升返回 409;无/空/坏 golden 节点 Run 后 golden 默认以 run 输出填充且可编辑;有效 golden 不被自动覆盖。
+- Status: predict-guard backend live;run-seed-golden target-design。
+- 归属: capability `golden-eval`; capability `run-execution`; platform `engine`。
 
 ## 待 PM 补 gap
 

@@ -49,6 +49,6 @@ Source workflow basis: `01_workflows/03_compile.md:10`, `01_workflows/04_run-and
 - Status: partial.
 - 归属: region `center-action-bar`; capability `compile-lint`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Whether the Compile drawer opens automatically on failed manual compile or only after clicking Compile again.
+- 手动 Compile 失败时,报错 drawer **自动弹出**(非"再点一次才弹")——失败必想看原因。

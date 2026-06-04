@@ -69,7 +69,7 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:340`, `01_workflows/
 - Status: partial live.
 - 归属: `studio-settings`; downstream `predict`, `run-execution`, `copilot-assist`, `publish`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Final visible labels for the six-state model in Chinese/English.
-- Whether Copilot SDK test should be a short smoke test or a full session-creation probe.
+- 六态最终标签(中/英,= i18n P1 首批词条):`ready`=就绪/Ready · `historical_ready`=曾连通/Previously connected · `untested`=未测试/Untested · `failed`=失败(带原因)/Failed · `cooling_down`=冷却中/Cooling down · `off`=已关闭/Off。`historical_ready` **直接显示**(非仅 tooltip)。
+- Copilot SDK 测试 = **短 smoke,走真实路径**(建会话 + 发一条 + 收到流式即过),不做完整 session 创建探测。

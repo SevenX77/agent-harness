@@ -67,6 +67,6 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:340`, `01_workflows/
 - Status: target-design.
 - 归属: region `settings`; platform `gateway`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Final six-state labels and whether "historical ready" should be visible or only tooltip-level.
+- 六态标签见 `studio-settings` 已决(就绪/曾连通/未测试/失败/冷却中/已关闭);`historical_ready` **直接显示**,非仅 tooltip。

@@ -43,8 +43,8 @@ Source workflow basis: `01_workflows/02_authoring.md:8`, `01_workflows/02_author
 
 ## F4. Expand Subgraph By Path
 
-- 机制: subgraph node expands inline or navigates into a child graph when its local path resolves.
-- 决策: child graph references are paths, not registry ids, and child IO is not forced into one-to-one mapping.
+- 机制: subgraph node expands inline or navigates into a child graph when its local path resolves;**新建子图默认嵌在父 phase 下 `<phase_name>/<subskill_name>/SKILL.md`**——子图/孙图物理嵌套、好找,只有要独立复用时才把 `<subskill_name>` 拎到顶层。
+- 决策: child graph references are paths, not registry ids, and child IO is not forced into one-to-one mapping;**子图默认嵌套父 phase 文件夹内、独立化是显式"拎出"**——避免所有子/孙图平铺难找(PM 2026-06-04)。
 - 原话/来源: `01_workflows/02_authoring.md:37` locks path-based subgraph references; `01_workflows/02_authoring.md:38` records the relaxed child IO decision.
 - 测试: resolved path expands/navigates; unresolved path shows an Assets recovery action; child IO filters from the shared blackboard.
 - Status: placeholder/stale.

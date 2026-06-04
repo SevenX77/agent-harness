@@ -49,6 +49,7 @@ Source workflow basis: `01_workflows/01_init.md:16`, `01_workflows/02_authoring.
 - Status: target-design.
 - 归属: region `assets`; region `canvas`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Whether subgraph membership belongs in Assets only or also appears in Welcome workspace settings.
+- 子图成员归属**只在 Assets**(不在 Welcome 重复)。
+- golden 文件也可从 **Assets workspace 文件树直接打开**(另一入口 = I/O output)。

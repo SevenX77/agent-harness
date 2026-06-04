@@ -14,8 +14,8 @@ Source workflow basis: `01_workflows/02_authoring.md:28`, `01_workflows/03_compi
 
 ## F1. Node Field Whitelist Form
 
-- 机制: render editable fields per agent/logic/subgraph node type and save to the phase file.
-- 决策: rebuild away from stale generic mode/frontmatter fields.
+- 机制: render editable fields per agent/logic/subgraph node type and save to the phase file。**Properties 只管节点的 frontmatter 属性(白名单字段);节点正文结构(XML / L3 步骤)不在 Properties,在画布上以内联子节点呈现与编辑(见 `canvas` / `phase-editing` F5)**。
+- 决策: rebuild away from stale generic mode/frontmatter fields;**职责切分锁定:Properties=frontmatter 属性,canvas=正文 XML 结构**(PM 2026-06-04)。
 - 原话/来源: `01_workflows/02_authoring.md:28` marks current save stale; `01_workflows/02_authoring.md:29` requires the whitelist rebuild.
 - 测试: selected agent/logic/subgraph each show only allowed fields; save preserves non-edited body blocks.
 - Status: target-design.
@@ -41,13 +41,13 @@ Source workflow basis: `01_workflows/02_authoring.md:28`, `01_workflows/03_compi
 
 ## F4. Golden Diff Summary
 
-- 机制: after run, Properties may show selected node actual-vs-golden field summary while detailed diff can live in Timeline.
-- 决策: golden diff is field-level acceptance after Run.
-- 原话/来源: `01_workflows/04_run-and-verify.md:128` lists field-level diff; `01_workflows/04_run-and-verify.md:136` records run-after diff.
-- 测试: selecting an agent node after run shows that node's diff; no-golden state shows a design-golden CTA.
-- Status: target-design.
-- 归属: region `properties`; capability `golden-eval`.
+- 机制: **golden 完全不在 Properties**——golden 设置/文件/摘要/diff 入口归 **I/O 面板 output 区**,完整详细 diff 在**编辑器分屏**看(Monaco diff,见 `editor`)。Properties 不显示任何 golden。
+- 决策: golden 属于 I/O(输出的期望基准);Properties 只剩 frontmatter 属性表单 + 字段级编译标记(PM 2026-06-04)。
+- 原话/来源: `01_workflows/04_run-and-verify.md:128`(字段 diff);golden 归 I/O、Properties 纯 frontmatter = PM 2026-06-04。
+- 测试: Properties 不出现任何 golden UI;golden 编辑/查看从 I/O output 或 Assets;详细 diff 从编辑器分屏。
+- Status: target-design。
+- 归属: region `input`(I/O); region `editor`; capability `golden-eval`。
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Whether full golden diff lives primarily in Properties, Timeline, or a dedicated drawer.
+- **golden 完全不在 Properties**:设置/文件/摘要归 **I/O output**,完整 diff 在**编辑器分屏(Monaco diff)**。Properties 只剩 frontmatter 属性 + 字段级编译标记。

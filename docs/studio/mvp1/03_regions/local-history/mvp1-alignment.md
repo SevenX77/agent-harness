@@ -40,6 +40,6 @@ Source workflow basis: `01_workflows/06_eval.md:13`, `01_workflows/06_eval.md:24
 - Status: ownership gap.
 - 归属: likely `timeline` and `input`; PM confirmation needed.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Confirm whether Local History should remain git-only or absorb RunDetailDrawer/BatchSummary as the old README implied.
+- Local History **只做 git 快照**;RunDetailDrawer / BatchSummary 属"运行/时间"语义、归 Timeline,不吸收进来。

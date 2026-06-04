@@ -18,7 +18,7 @@ from graph_agent.runtime.state_mapper import StateMapper
 from graph_agent.tools.builtin.read_reference import read_declared_reference
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-ERROR_SPEC = REPO_ROOT / "docs" / "engine" / "skill-spec" / "11-error-code-spec.md"
+ERROR_SPEC = REPO_ROOT / "docs" / "engine" / "mvp0" / "skill-spec" / "11-error-code-spec.md"
 
 
 def _error_payload_model() -> Any:

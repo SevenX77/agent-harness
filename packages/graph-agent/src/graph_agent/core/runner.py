@@ -32,14 +32,14 @@ import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from graph_agent.callbacks.emit import (
     _CallbackSink,
     _CompositeEventSink,
+    _safe_emit_event,
     _SubscriberSink,
     _TraceJsonlSink,
-    _safe_emit_event,
 )
 from graph_agent.callbacks.events import (
     CallbackEvent,
@@ -53,7 +53,7 @@ from graph_agent.core.exceptions import (
     make_error_payload,
 )
 from graph_agent.core.local_workspace_resolver import LocalWorkspaceResolver
-from graph_agent.core.result import WorkflowMetrics, WorkflowResult, RunResult
+from graph_agent.core.result import RunResult, WorkflowMetrics, WorkflowResult
 from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol, require_skill_resolver
 from graph_agent.runtime.state import normalize_blackboard_data
 
@@ -77,7 +77,7 @@ class PredictDeadlockError(RuntimeError):
 class SDKPredictContext:
     """PredictContext interface implementation for model resolution interception."""
 
-    def __init__(self, strategy: Any, copilot_predict: Callable | None = None) -> None:
+    def __init__(self, strategy: Any, copilot_predict: Callable[..., Any] | None = None) -> None:
         self.strategy = strategy
         self.copilot_predict = copilot_predict
 
@@ -87,8 +87,8 @@ class SDKPredictContext:
         role_name: str,
         messages: list[Any],
     ) -> tuple[dict[str, Any], str]:
-        from graph_agent.core._predict_internal.tracing import record_mock_source
         from graph_agent.core._predict_internal.stub import generate_heuristic_stub
+        from graph_agent.core._predict_internal.tracing import record_mock_source
 
         # 1. P0 Golden Case
         if self.strategy.has_golden_case(phase_name):
@@ -128,8 +128,7 @@ def _warn_on_stale_golden_hashes_sdk(
     strategy: Any,
     current_hashes: dict[str, dict[str, str]],
 ) -> None:
-    from graph_agent.core._predict_internal.strategy import GoldenCaseStrategy, BacktestStrategy
-    from graph_agent.core._predict_internal.models import GoldenCase
+    from graph_agent.core._predict_internal.strategy import BacktestStrategy, GoldenCaseStrategy
 
     golden_cases = []
     if isinstance(strategy, GoldenCaseStrategy):
@@ -161,7 +160,7 @@ def _warn_on_stale_golden_hashes_sdk(
             )
 
 
-def predict_skill(
+def predict_skill(  # noqa: C901
     skill_path: str | Path,
     *,
     workspace_dir: Path,
@@ -170,19 +169,20 @@ def predict_skill(
     event_subscriber: Callable[[CallbackEvent], None] | None = None,
     skill_resolver: SkillResolverProtocol,
     model_resolver: Any | None = None,
-    copilot_predict: Callable | None = None,
+    copilot_predict: Callable[..., Any] | None = None,
     **inputs: Any,
 ) -> RunResult:
     """Run skill compilation and execution in Predict mode with caching and mock generation."""
+    from collections import Counter
+
+    from graph_agent import PathDiff
+    from graph_agent.core._predict_internal.exporter import assemble_phase_record
+    from graph_agent.core._predict_internal.path_diff import compute_diff
+    from graph_agent.core._predict_internal.strategy import MockStrategy
+    from graph_agent.core._predict_internal.tracing import PredictTracingCallback
     from graph_agent.core.compiler import compile_skill
     from graph_agent.core.graph_assembler import assemble_graph
     from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
-    from graph_agent.core._predict_internal.strategy import MockStrategy
-    from graph_agent.core._predict_internal.tracing import PredictTracingCallback
-    from graph_agent.core._predict_internal.path_diff import compute_diff
-    from graph_agent.core._predict_internal.exporter import assemble_phase_record
-    from graph_agent import PhaseRecord, PathDiff
-    from collections import Counter
 
     resolver = require_skill_resolver(skill_resolver, caller="predict_skill")
     workspace_root = _validate_workspace_dir(workspace_dir)
@@ -199,10 +199,14 @@ def predict_skill(
     compiled = compile_skill(skill_path_obj, skill_resolver=resolver)
 
     if model_resolver is None:
-        from graph_agent_gateway.resolver import ModelResolver
         from graph_agent_gateway.registry.schema import (
-            RegistrySnapshot, ProviderEndpoint, ProviderRoute, RoleEntry, RoleRouteEntry
+            ProviderEndpoint,
+            ProviderRoute,
+            RegistrySnapshot,
+            RoleEntry,
+            RoleRouteEntry,
         )
+        from graph_agent_gateway.resolver import ModelResolver
         from pydantic import SecretStr
 
         roles = {}
@@ -273,7 +277,7 @@ def predict_skill(
         compiled,
         chat_model=None,
         model_resolver=model_resolver,
-        callbacks=event_sink,
+        callbacks=cast(Any, event_sink),
         skill_resolver=resolver,
         predict_context=predict_context,
     )
@@ -534,7 +538,7 @@ def _write_json(path: Path, payload: Any) -> None:
     )
 
 
-def _write_workflow_result_artifacts(run_dir: Path, result: WorkflowResult) -> None:
+def _write_workflow_result_artifacts(run_dir: Path, result: WorkflowResult | RunResult) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     _write_json(run_dir / "result.json", result.model_dump(mode="json"))
     _write_json(run_dir / "final_state.json", result.context)
@@ -664,7 +668,7 @@ def _run_v030_skill_dict(
             compiled,
             chat_model=chat_model,
             model_resolver=active_model_resolver,
-            callbacks=event_sink,
+            callbacks=cast(Any, event_sink),
             skill_resolver=resolver,
             checkpointer=active_checkpointer,
         )

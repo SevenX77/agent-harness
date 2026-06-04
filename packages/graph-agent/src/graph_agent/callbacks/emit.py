@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import logging
 import json
+import logging
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from threading import RLock

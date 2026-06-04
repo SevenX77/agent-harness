@@ -257,16 +257,6 @@ files:
 - path: packages/graph-agent/src/graph_agent/core/serialize.py
   classification: detail
   feature_id: F-serialization-output
-- path: packages/graph-agent/src/graph_agent/core/skill_builder.py
-  classification: detail
-  feature_id: F-graph-skill-loading
-- path: packages/graph-agent/src/graph_agent/core/skill_loader.py
-  classification: detail
-  feature_id: F-graph-skill-loading
-- path: packages/graph-agent/src/graph_agent/core/skill_parser.py
-  classification: feature
-  feature_ids:
-  - F-md-frontmatter-parsing
 - path: packages/graph-agent/src/graph_agent/core/skill_resolver_protocol.py
   classification: feature
   feature_ids:

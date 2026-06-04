@@ -13,7 +13,7 @@ Public API (20 stable exports):
   ``GraphExecutionError``, ``ModelProviderError``, ``ResourceNotFoundError``
 
 Internal helpers (``Phase``, ``WorkflowState``, ``IOManager``,
-``ModelResolver``, ``GraphAgentHarness``, ``load_workflow_from_md``,
+``ModelResolver``, ``load_workflow_from_md``,
 etc.) live under
 ``graph_agent.core.*`` / ``graph_agent.io.*`` / ``graph_agent.models.*``
 and are not part of the public ABI. Downstream code that depended on
@@ -40,9 +40,9 @@ from graph_agent.core.local_workspace_resolver import (
     LocalWorkspaceResolver as LocalWorkspaceResolver,
 )
 from graph_agent.core.manifest import SkillManifest as SkillManifest
-from graph_agent.core.result import RunResult as RunResult
 from graph_agent.core.result import PathDiff as PathDiff
 from graph_agent.core.result import PhaseRecord as PhaseRecord
+from graph_agent.core.result import RunResult as RunResult
 from graph_agent.core.runner import predict_skill as predict_skill
 from graph_agent.core.runner import run_skill as run_skill
 from graph_agent.core.serialize import serialize_skill as serialize_skill

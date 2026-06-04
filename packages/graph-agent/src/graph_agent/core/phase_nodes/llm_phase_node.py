@@ -128,7 +128,7 @@ class LLMPhaseNode(PhaseNode):
         return self._finalize_phase(phase, runtime, result_messages)
 
     def _prepare_phase_runtime(self, phase: Phase, state: WorkflowState) -> _PhaseRuntime:
-        from graph_agent.core.harness import _clone_state  # lazy: harness module depends on us
+        from graph_agent.core.state import _clone_state
 
         resolver = self.container.resolver
         if resolver is None:

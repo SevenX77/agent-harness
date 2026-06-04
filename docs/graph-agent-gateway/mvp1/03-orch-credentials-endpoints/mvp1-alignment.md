@@ -107,6 +107,7 @@ MVP1 目标：把「凭证 / 端点」的**数据结构 · 读写契约 · 归�
   - > **F1 调用时幂等双保险**(client 层 A' 重设计决策 F1)："副 = 调用时幂等归一化做双保险(已 canonical 则 no-op)" —— 调用层 no-op 保护历史数据;调用层落点见 [[10-inv-route-chat-model-factory]]。
 - **测试点**：
   - **per-protocol base_url canonical**：保存 anthropic endpoint(base_url 带 `/v1`)→ 存成去尾 `/v1`；deepseek-anthropic 带 `/v1` → 存成去 `/v1` 补 `/anthropic`；ark → `.../api/v3`；openai → 保持 provider 接受形状(防回归成「只 strip 尾斜杠」)。
+  - **实证（2026-06-04 spike，归一化必须）**：WaveSpeed anthropic SDK runtime 用 `https://llm.wavespeed.ai/v1` → **404**（Anthropic SDK 自加 `/v1/messages` 变 `/v1/v1/messages`），归一化到 root `https://llm.wavespeed.ai` → ok。**证明 per-protocol 归一化是 SDK runtime 跑通的前提，不是"应该做"而是"必须做"**（`temp/2026-06-04-wavespeed-generic-adapter-spike-report.md`）。⚠️ 还牵出 Finding C：Studio 的 raw HTTP probe 会 dedup `/v1` 而 SDK runtime 不会 → probe 通过 ≠ runtime 通过，详见 [[08-orch-test-status-ssot]]。
   - **保存=调用同一路径**：保存后 resolver / probe / client factory / fingerprint / copilot env 读到的 base_url **完全一致**(防「测试通了运行又错」)。
 - **status**：现只有 Copilot runtime 对 deepseek/ark 有局部 helper(保存时规则尚未集中，`copilot.py:476-491`)= target；baseline 的 `base_url` 是原样透传，MVP1 要求保存 endpoint 时按 protocol canonicalize，再由调用层做 no-op 双保险(详见文末「已实现 / 与 baseline 差异」#4)。
 - **归属**：region/platform **③b** `packages/graph-agent-gateway`：base_url 归一化(`registry/storage.py`)。调用时幂等落点 = [[10-inv-route-chat-model-factory]] / copilot `_resolve_route_runtime`(③a 调用方式)。
@@ -117,7 +118,7 @@ MVP1 目标：把「凭证 / 端点」的**数据结构 · 读写契约 · 归�
   > **本节是新增设计：当前文档完全没写「endpoint 标准化拆分 + 生成 canonical endpoint_id」这块 ③b 公共能力。** baseline 现状是这块散在前端(前端拆 / 前端给 id)+ v3→v4 migration 的 `_stable_endpoint_id`(`llm_credentials.py:369`)；MVP1 目标是把它**下沉为 ③b 公共能力**(本轮反转，详见本段决策)。
 
   1. 输入:① 前端把用户在一个 provider 卡里录入的**原始信息**(可能含多 key / 多 URL / 多协议混在一起)交给 gateway,前端**只负责怎么收集原始输入**,不自己拆、不自己生成 id(`ux-spec` §6.1 A4)。
-  2. 协议匹配(③b):gateway 用内置协议 SDK 对每个 URL 打各协议推理端点 + 对应 auth header(native anthropic=`x-api-key`、anthropic 兼容第三方=`Authorization: Bearer`),自动判定该 URL 是哪个 protocol(`ux-spec` §6.1 A3)。
+  2. 协议匹配(③b)（**Point #1 强化，PM 2026-06-04**）:gateway 用内置协议 SDK 对每个 URL 打各协议推理端点 + 对应 auth header(native anthropic=`x-api-key`、anthropic 兼容第三方=`Authorization: Bearer`),**系统自测、细分返回该 URL 能走通的「哪几个 protocol」(可多个**——如 WaveSpeed 实测同时支持 openai-compat `/chat/completions` + anthropic Messages)，**不再用户选 protocol、不再粗粒度「一个 openai / 一个 anthropic」**;每个 `url × protocol` 落一条 canonical endpoint(各自 per-protocol canonical base_url)(`ux-spec` §6.1 A3)。
   3. 测试连通(③b):对拆出的每条候选 endpoint 做连通性验证(official 走 list-models、third-party 走选一个模型 probe),确认可用。
   4. 拆分(③b):把「多 URL × 协议」拆成多条**标准 endpoint**——一个 endpoint = 一套 base_url + protocol + credential(`ux-spec` §6.1 A4)。
   5. 生成 canonical endpoint_id(③b):为每条拆出的 endpoint 生成确定的 canonical id。**规则 = `{slug}-{protocol}[-n]`**(`slug` 来自 provider/host 收敛，`protocol` 区分同 host 多协议，`-n` 处理重名)。**当前 `_stable_endpoint_id`(用途:v3→v4 migration 里按 host 硬编码 endpoint id)按 host 硬编码(如 `anthropic-official`)、且只在 migration 路径,不是统一 canonical 规则,本轮反转后应退役/并入 ③b 统一 canonical id 生成**(`apps/studio/backend/app/services/llm_credentials.py:369`)。

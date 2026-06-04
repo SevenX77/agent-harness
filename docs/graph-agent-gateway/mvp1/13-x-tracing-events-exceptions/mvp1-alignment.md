@@ -98,10 +98,10 @@ MVP1 核心约束：**调用层从自研 `_call_*` 换成原生 ChatX 后，fall
 
 ## gaps / 待设计
 
-- **疑点**：fallback event 的 `code` 是否继续复用 `[F-v3-gateway-all-providers-failed]`，还是拆出单独 event code，需要主控确认；当前调用点见 `gateway_chat_model.py:142`/`:256`。
+- ✅ **已定（PM 2026-06-04，P4a=B）**：fallback event **拆出专属 event code**，不再复用 `[F-v3-gateway-all-providers-failed]`（那是"全灭"终态码）——fallback 是"切换中"非"全灭"，专属码让 trace 分得清；当前调用点 `gateway_chat_model.py:142`/`:256`。
+- ✅ **已定（PM 2026-06-04，P4b=A）**：`from_provider`/`to_provider` 字段名 **保留**（文档注明值是 route id）；不改名——改名跨 gateway+graph-agent+studio 三个事件订阅方，且违背本模块"事件结构不变"原则；留待未来事件 schema 版本升级再统一。
+- ✅ **已定（PM 2026-06-04，P5=A）**：**不补** fail-fast diagnostic event——fail-fast 已抛结构化异常 `AllProvidersFailedError`（带 `failed_provider_codes`+`last_error_chain`+route context），上层读字段即可观测，补事件是重复。
 - **疑点**：`AllProvidersFailedError` 同时承载"全候选失败"和"fail-fast 分类后的结构化包装"，命名是否需要在 MVP1 文档或代码中细化，需要主控判断。
-- **疑点**：fallback event 当前只在 `fallback_allowed` 分支发射；fail-fast 分支只抛异常。是否需要 fail-fast diagnostic event，需要 tracing 产品判断。
-- **疑点**：`from_provider`/`to_provider` 字段名是否保留历史命名；当前实际值已经是 route id，改名涉及所有事件订阅者。
 - **核实项**：ChatX 迁移后需要主控核实 ChatX 抛出的异常是否仍能被 `classify_exception` 读取 status code 和 chained exception（[[06-orch-error-classification]] 的输入假设）。
 
 ## 交叉引用（双向 [[link]]，不复制）

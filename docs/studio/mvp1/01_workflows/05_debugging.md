@@ -1,33 +1,40 @@
-# Node 5: 调试与干预 (Debug, HitL & Resume)
+# 05 · Debug(调试续跑) — Workflow 节点
 
-## 1. 业务目标
-处理长流程 Skill 运行时的异常情况。Skill 可能因为 Validator 校验不通过、Python 代码抛错，或者由于配置了人工接入点（Human-in-the-loop）而暂停。PM 需要在这里进行干预并恢复执行，而不是每次都从头重跑（浪费 Token 和时间）。
+> **Tier**: workflow
+> **旅程**: [04 运行与验收](./04_run-and-verify.md) 运行失败/暂停 → 就地节点级干预续跑
+> **走查完整记录**(全部 atom actions + 决策 + 原话 + 测试关键点)。
+> **定性**: 能力表标"全孤儿待新建";后端零碎原语(resume 端点 501、checkpoint 仅 thread/run 级),前端几乎全无。**真要新建,核心难点落引擎。**
 
-## 2. 交互场景与 UX 设计
+## 旅程位
+04 真跑失败/暂停 → 在**出问题的那个节点/那条边上就地干预**,从该点精准续跑(不重跑上游)。三场景:B 节点级续跑、A HitL 人工干预、C 篡改 Context 续跑。
 
-### 场景 A: 人工干预点 (Human-in-the-loop)
-- **触发**: 底层 Python 工具执行了 `request_human_input()` 或 `ask_clarification()`。
-- **UI 表现**:
-  - Timeline 暂停，顶层弹出显眼的提问框（例如：“Agent 问：文案用词选方案 A 还是 B？”）。
-  - 提供文本输入框或选项。
-- **操作**: PM 输入答案后，点击 **[ Resume ]** 按钮，系统将答案作为 `ToolMessage` 注入，Graph 从断点继续向下流转。
+## Atom actions（三场景 A/B/C）
+| # | 动作 | 场景 | status |
+|---|---|---|---|
+| F1 | 失败节点亮红灯 + Error Message(Timeline 停在错误节点) | B 视觉 | placeholder |
+| F2 | **节点级 [Resume] 按钮**(节点上;改完 prompt/代码点它,用 checkpoint 已有数据从该节点精准续跑,上游不重跑) | B 核心 | backend-only(端点 501) |
+| F3 | **脏状态失效**:改上游节点/拓扑/输出 schema → 受影响下游节点 [Resume] 自动置灰,只有上游 checkpoint 有效的节点可 Resume | B | target-design |
+| F4 | 场景A HitL:agent 调请求人类输入 → run 暂停 → **顶部弹问题框**(文本/选项)→ PM 输入 | A | target-design |
+| F5 | 场景A 注入答案续跑:答完点 [Resume] → 答案作为消息注入,Graph 续跑 | A | backend-only |
+| F6 | 场景C 篡改 Context:点边 dot → **复用 Monaco 编辑器(切可写)**展开上轮真实 Context → 手改 JSON → 存 | C | target-design |
+| F7 | 场景C 用伪造数据续跑:篡改保存后点下游 [Resume] → 拿伪造 JSON 续跑下游 | C | backend-only |
+| F8 | 上游入口:进 debug 前需先有一次真实 Run(产出 trace+checkpoint) | 前置 | placeholder(Run 桩) |
 
-### 场景 B: 断点修复与续跑 (Breakpoint & Resume)
-- **触发**: 某个 Phase 运行失败（如 Validator 重试超限，或报错），Skill 停止。
-- **UI 表现**:
-  - Timeline 停在错误节点，亮红灯显示具体的 Error Message。
-  - **核心设计: 节点级 Resume**: `[ Resume ]` 按钮**不是全局的**，而是直接显示在画布上的**具体节点**旁边。
-- **操作逻辑**: 
-  - PM 可以在代码区修改 Prompt 或外部修改 Python 代码。
-  - 改完后，PM **点击图上某个节点的 `[ Resume ]`**。系统就会精准地从这个位置开始跑，并使用该节点之前的已有数据（Checkpoint）。
-  - **脏状态失效 (Dirty State Invalidation)**: 系统会严格判断依赖关系。如果 PM 修改了图的拓扑（例如删除了某个前置节点），那么所有受影响的后续节点旁边的 `[ Resume ]` 按钮会自动消失/置灰。只有存在合法前置数据的节点，才允许弹出 Resume。
+## 决策
+- **Q3 编辑器复用**:篡改用的可写 Monaco = trace 只读编辑器切 readonly。
+- **Q4 "事件→节点态"派生器归 trace-observability**(run 节点灯 + debug 红灯共用同一份派生)。
+- 核心难点(节点级 checkpoint、HitL 通道、篡改续跑)**归引擎**。
 
-### 场景 C: Context "大黑板"的强制篡改 (Raw JSON Edit)
-- **业务需求**: PM 发现某个阶段的输出有点瑕疵，导致下游报错。他不想改 Prompt 重跑该阶段，只想立刻“把这个瑕疵值改掉”试试下游逻辑。
-- **操作逻辑**:
-  - PM 点击画布上两个节点之间的**连线圆点 (Edge Dot)**，展开上一轮跑完的 Context 数据。
-  - **直接篡改**: 界面提供一个纯净的 Monaco JSON Editor。PM 直接在里面手写修改这段 JSON（例如把 `{"result": "坏消息"}` 改成 `{"result": "好消息"}`）。
-  - 修改保存后，点击下游节点的 `[ Resume ]` 按钮，系统就会拿着这段“伪造”的数据继续往下跑下游 Phase。
+## 原话(留底)
+> "1. 没问题(debug UX 三场景) / 2. 节点级 checkpoint 粒度 要,但是提出你前端UI的要求和设计, 你是设计用户交互心智的 / 3. 编辑器复用 / 4. (事件→节点态派生器)你先来定一下"
 
-## 3. 下游流转
-- 成功 Resume 并跑完全程后，进入 **[06_EVAL_AND_PUBLISH](./06_eval.md)** 进行最终评估。
+## 测试关键点
+- 节点级 Resume:从节点 X 续 → 1..X-1 用 checkpoint 不重跑。
+- 脏状态:改上游 → 受影响下游 [Resume] 置灰;无关节点仍可 Resume。
+- HitL:agent 请求输入 → 暂停 + 顶部问题框 → 答案注入 → 续跑。
+- 篡改:点 dot → 可写编辑器改黑板 → 存 → 下游 Resume 用篡改数据。
+- [Resume] 锚在节点上(非全局)。
+
+## 引擎需求
+节点级 checkpoint + checkpoint 失效追踪 + HitL 注入续跑 + 篡改续跑 → [`engine-prompt-trace-compile-debug.md`](../../_reorg/engine-prompt-trace-compile-debug.md)。
+> ⚠️ debug checkpoint 与 batch/loop 的 loop 状态机同源 → 引擎须设计**统一状态机**。

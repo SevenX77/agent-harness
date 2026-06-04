@@ -1,35 +1,60 @@
 # Node 1: 发现与初始化 (Discovery & Init)
 
-## 1. 业务目标
-定义 PM 如何进入 Studio 以及如何开启一个新的任务。本节点确立了 Studio 的顶层导航心智：“主页 (Home)” 与 “专注的工作空间 (Skill Workspace)” 的强隔离。
+> Tier: workflow · Owns: 进入 Studio + Home↔skill-workspace 强隔离切换的完整旅程 · 能力 `skill-workspace`(引用 `copilot-assist`)· 区域 `welcome` / `shell-layout` · 平台 `native-fs`(Rust) / `gateway`(sidecar)
+> Status: ✅ PM 已确认(批次1:D1–D11 + R1/R2 + D-1-1/D-1-4)
+> 设计权威: **D11 IDE/workspace 模型(锁)** + D1/D7/D10/D6 + INDEX §6;无专属 studio-feature spec。决策日志(原话依据): [`_reorg/alignment-notes.md` 批次1](../../_reorg/alignment-notes.md)
+> 本文 = 该节点**最终设计**(atom action 决策 + file:line 依据);原工作目录 `_reorg/workflow-action-catalog.md` §01_init 为迁移源。
 
-## 2. 核心范式：强隔离的 Home 与 Workspace
+## 1. 用户旅程目标
+PM 如何进入 Studio、在「主页 Home」与「沉浸式 skill workspace」间切换。核心范式 = **强隔离 Home/Workspace + IDE/workspace 模型**(D11 锁):skill = 一个文件夹;Home = 打开文件夹 + Recent(MRU localStorage);**无聚合注册表**;一窗口专注一个 skill;子图按 path 解析(D7)。
 
-参考 Coze、n8n 等成熟的 Agent/Workflow 编排产品，Studio 采用 **“主页 Dashboard + 沉浸式 Workspace”** 的强隔离模式。当前的“左侧边栏列出所有 Skill”是反模式，一个 Studio 窗口应当专注服务于一个正在开发或调试的 Skill。
+## 2. atom action 决策表
+> status 见 INDEX §4。**⚠️ 全局架构错配(影响整层 status)**:现状 Home/后端是**注册表模型**(MetadataStore + `GET /skills` 聚合 + 自动发现 unregistered,`useSkills.ts:7`/`services/skills.py:183-258`),与 D1/D11 锁定的「无注册表」**方向冲突** → 很多看似 live 的动作其底层机制要重塑为 skill-workspace(故标 stale-doc/stale-code 非 live)。
 
-### 2.1 主页 (Home / Dashboard)
-这是 PM 打开 Studio 时看到的第一屏。它的作用类似于 VS Code 的欢迎页。
-- **纯粹的入口**: 提供极简的两个动作：
-  1. **新建 Skill 文件夹**
-  2. **打开现有 Skill 文件夹**
-- **操作心智**: 这里的“打开/新建”在 UI 上只做最简单的事情——在文件系统中选定或创建一个空目录，然后立即发生页面路由跳转，进入沉浸式的 **Skill Workspace**。没有任何复杂的弹窗表单。
+| 动作 | 最终决策 / status | 能力·区域 | 依据(file:line)+ 动机/FROZEN |
+|---|---|---|---|
+| 应用启动 gate(全屏 splash→ready 才渲染) | **stale-doc**:RuntimeGate 退役 → 两 sidecar 启动期 Rust eager-spawn + 壳/FS 立即渲染 + 调 sidecar 处 skeleton(非全屏 gate,D10) | skill-workspace · shell-layout | `App.tsx:16`/`RuntimeGate.tsx:31-44`/`config/runtime.ts:53-61`;实现归 04_platform(native-fs 管 sidecar) |
+| 进入 Home 屏(`currentSkillId===null`→WelcomePage) | **live** | skill-workspace · welcome | `Workspace.tsx:512-513,38-54`;D11 强隔离落点 |
+| Home 显示 Recent 列表(MRU 卡片) | **stale-doc** → 机制重塑为 Recent(MRU)主导,**卡片极简(只存路径+名,D-1-1)**;欢迎屏整体抄 Cursor/VS Code(R2) | skill-workspace · welcome | `WelcomePage.tsx:241-244,401-521`/`useRecentSkills.ts:26-32`(MRU localStorage max10);现内容来自注册表聚合=冲突 |
+| 打开一个 Recent skill(点卡片→进 workspace) | **live** | skill-workspace · welcome | `WelcomePage.tsx:246-249,408-416`;Cursor Open Recent 同款 |
+| 新建 Skill(填名/选父目录→建文件夹+脚手架+git init→进 workspace) | **stale-code** → 写盘迁 Rust(D12);**脚手架=logic→agent 模板**(D-1-4,非空文件夹、不调 copilot) | skill-workspace · welcome | `WelcomePage.tsx:352-361`/`NewSkillDialog.tsx:23-107`/`skills.py:81-96`/`services/skills.py:558-560`。**FROZEN/D12**:写脚手架+git init 从 Python `POST /skills` 迁 Rust 文件命令 |
+| 新建对话框选父目录(OS 目录选择器;默认来自 `default_skills_directory`) | **live** | skill-workspace · welcome | `WelcomePage.tsx:258-268,239-240`/`lib/tauri.ts:64-81`/`skill-paths.ts:18` |
+| 打开现有文件夹(选任意本地文件夹→进 workspace) | **stale-code** → **删导入校验门**(D2:不卡导入、不合规交 compile+copilot 修);写路径迁 Rust(D12);文案改"打开文件夹" | skill-workspace · welcome | `WelcomePage.tsx:370-381,310-335`/`services/skills.py:517-522`(缺 GRAPH.md/SKILL.md 硬拒=违 D2)。**FROZEN/D2**:删校验门+import-error 文案 |
+| Recent 卡片 → Reveal(系统文件管理器定位) | **live**(浏览器降级复制路径) | skill-workspace · welcome | `WelcomePage.tsx:481-484`/`lib/tauri.ts:38-62` |
+| ~~Recent 卡片 → Delete~~ | **移除(R1)**:抄 Cursor,**不在 IDE 内删 skill**(要删去系统文件夹);Recent 失效路径改为**点击报错 + 自动移除** | skill-workspace · welcome | `WelcomePage.tsx:486-492`/`services/skills.py:436-447`(原 delete=仅注销不删盘) |
+| ~~Recent 卡片 Config drift 徽章~~ | **移除(D-1-1)**:去注册表后无落点 | skill-workspace · welcome | `WelcomePage.tsx:431-457`/`config_arbitration.py:15-41` |
+| 返回 Home(Back-to-Home→卸载工作区:清 navStack/面板/分屏/选中/copilot) | **live** | skill-workspace · shell-layout | `Header.tsx:56-66`/`Workspace.tsx:439-442,44-48`;D11 退出专注模式 |
+| 返回 Home 后 copilot 对话应可恢复(现全丢) | **target-design** → D8 MUST:退出再进恢复一模一样;其余工作态(面板/分屏)可丢(Q3) | copilot-assist · shell-layout | `copilotStore.ts:10-12,27-28`(纯内存 reset);实现归 copilot-assist / native-fs(D8 Rust 写) |
+| 打开 Settings 不算退出工作区(center overlay) | **live** | skill-workspace · shell-layout | `Workspace.tsx:496-497,466,439-440`;Q3 |
+| 进 workspace 后右侧出现 Copilot(welcome 无;新建空 skill 进入即有) | **live** | copilot-assist · shell-layout | `Workspace.tsx:41,47-52,545-555`;Q4(PM 修正:无矛盾) |
+| [失败退路] Recent 加载失败(局部红框,不阻塞新建/打开) | **live** | skill-workspace · welcome | `WelcomePage.tsx:392-399` |
+| [失败退路] 新建/打开失败(结构化错误文案) | **stale-code** → D2 删校验门后,manifest 校验类退路随之移除(仅留 OS 级失败) | skill-workspace · welcome | `WelcomePage.tsx:193-228`/`services/skills.py:488-510` |
+| [空态] 无 skill → "No skills found"(引导新建/打开) | **live** | skill-workspace · welcome | `WelcomePage.tsx:524-534` |
+| [NFR 缺口] Recent 列表加载骨架(D6/§11) | **target-design** | skill-workspace · welcome | `WelcomePage.tsx:401-521`(无 skeleton 分支);available models 巨长列表是首要 |
 
-### 2.2 沉浸式工作区 (Skill Workspace)
-一旦进入某个 Skill 的文件夹，整个窗口的上下文完全锁定在此 Skill 上。
-- **去除全局导航**: 左侧边栏不再展示整个 `skills/` 目录树，只展示当前 Skill 内部的相关文件（如 `SKILL.md`, `script/`, `references/`, `golden/`）。
-- **返回机制**: 左上角提供明显的 `[ ← Back to Home ]` 按钮退出当前专注模式。
+## 3. 设计决策基础(原话依据,锁定决策)
+- **D11 [锁] IDE/workspace 模型** > "锁 IDE/workspace 模型";Home=打开文件夹+Recent(MRU),skill=文件夹,无注册表,子图按 path(D7)。
+- **D1** > "skill 到底要不要注册表. 注册表(多了非常乱) vs ide方式(干净+自由)";Home 改 IDE 模型。
+- **D2 不卡导入** > "不用卡导入, 导入什么文件真不重要, 我们有compile, 有copilot, 屎都给你改成标准skill"。
+- **D12 写全量 Rust**(本地写经 native-fs,仅 engine/gateway 用 Python sidecar)> "全量切 rust, 除了 graph agent 和 llm gateway 相关使用 python sidecar"。
+- **R1 删 Delete**(抄 Cursor)/ **R2 欢迎屏抄 Cursor/VS Code** / **D-1-1 删 Config drift** / **D-1-4 脚手架 logic→agent 模板**。
+- D3(删外部 IDE 联动)、D6(skeleton+lazy load)、D9(多窗口)、D10(后端三分)— 详见 alignment-notes 批次1。
 
-## 3. 界面元素与 Copilot 占位
+## 4. 失败退路 + 节点间流转
+- **失败退路**:Recent 加载失败→局部红框(不阻塞入口);新建/打开失败→结构化文案(D2 后仅留 OS 级);sidecar 未就绪→skeleton + 全局就绪指示(非全屏 gate)。
+- **下游**:进入 workspace → [02_authoring](./02_authoring.md)(画布/编辑/编译);右侧 copilot → copilot-assist。
+- **上游**:无(应用入口)。
 
-### 3.1 Copilot 侧边栏 (右侧)
-- 遵循行业习惯，Copilot 对话面板固定在 **界面最右侧**。
-- **基于对话的创建向导**: 复杂的创建逻辑（确认类型、定义 Schema、生成骨架）不通过 Studio 的 UI 弹窗实现，而是作为 `create-skill` 交给 Copilot。PM 在新建空文件夹后，直接在右侧与 Copilot 对话完成 `SKILL.md` 的初始生成。
+## 5. 测试关键点
+- 去注册表后 Recent 卡片只靠 MRU(路径+名)渲染,后端不可用也能新建/打开。
+- D2:打开**任意**文件夹(缺 GRAPH.md/SKILL.md)不被拒,交 compile+copilot。
+- D12:新建/打开的落盘走 Rust 文件命令(非 Python `POST /skills`)。
+- Back-to-Home 卸载工作区但 copilot 对话可恢复(D8);打开 Settings **不**卸载。
+- RuntimeGate 退役后壳/FS 立即可用、调 sidecar 处 skeleton(无全屏 splash)。
 
-### 3.2 外部 IDE 联动快捷键
-在 Copilot 侧边栏的顶部或 Workspace 的全局 Navbar 右侧，提供一组极其重要的快捷键/按钮，保证 PM 能够快速在当前 Skill 路径下唤起外部的 AI 辅助工具：
-- `[ Open in Cursor ]`：一键在 Cursor IDE 中打开当前专注的 Skill 文件夹。
-- `[ Open in Terminal ]`：一键打开终端并 `cd` 到当前目录。
-- `[ Open in Codex ]`：唤起关联的 Codex 工具。
-
-## 4. 下游流转
-当在 Workspace 中通过 Copilot 或手动初始化了 `SKILL.md` 后，PM 将注意力转移到界面的中左侧，进入 **[02_EDIT_AND_COMPILE](./02_authoring.md)** 节点。
+## 6. 跨切 / 已知债
+- **注册表→无注册表重塑**(最重要):MetadataStore/`GET /skills` 聚合 → skill-workspace(Recent MRU + 子图按 path)。
+- **D12 写归属**:新建脚手架/打开注册/删除等落盘 → Rust(native-fs 唯一写者)。
+- **D3 死代码**:`lib/tauri.ts:26-36` open_in_cursor/terminal/codex 前端零调用 → 删 helper + Rust 命令。
+- **孤儿**:`components/WelcomeScreen.tsx`(no-op 包装,真实挂载=`Workspace.tsx:513`)。
+- **多窗口(D9)**:归 04_platform(Rust 壳 + 无状态 sidecar)。

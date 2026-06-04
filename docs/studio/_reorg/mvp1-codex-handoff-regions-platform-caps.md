@@ -6,7 +6,7 @@ scope: studio mvp1 补 23 个模块文档 = regions(12) + platform(4) + capabili
 ground_truth:
   - docs/DESIGN-PROCESS.md（写作框架，必读）
   - docs/studio/INDEX.md（三维治理总纲 + §7 模板 + §6 注册表 + §4 status 词表，必读）
-  - docs/engine/mvp1/api-engine-studio-contract.md（引擎↔studio 接口契约 SSOT）
+  - docs/engine/mvp1/_migration-src/api-engine-studio-contract.md（引擎↔studio 接口契约 SSOT;⚠️引擎 docs 重组中,写时 grep 确认当前路径）
   - docs/studio/mvp1/01_workflows/00_settings-ux-spec.md §6.0（LLM/copilot 四层边界 SSOT）
   - apps/studio/{frontend,backend,tauri}（前端/后端/Rust 当前源码 = baseline 复核对象）
   - packages/graph-agent（引擎库）、packages/graph-agent-gateway（网关库）
@@ -25,11 +25,11 @@ related_monorepos:
 
 ## 0. 写之前必读（按顺序，别跳）
 
-> 🔴 **源优先级（PM 2026-06-03 锁，凌驾一切，必照）**：**最新权威 = `01_workflows/`(workflow) + `_reorg/workflow-action-catalog.md`(atom actions) + `_reorg/alignment-notes.md`（PM 一项项确认的决策日志）+ `00_settings-ux-spec.md`（settings SSOT）**。格式/字段 → FROZEN `docs/engine/skill-spec`；实现/接线状态 → 当前代码。**`.kiro/specs/studio-feature-*` = 过去的设计、只作参考**（曾是 2026-06-01 权威，已被 06-02/03 逐项走查覆盖/refine，**不得当现行权威**；与权威层冲突一律以 workflow/catalog/alignment-notes 为准）。**且 workflow 本身漏了很多** —— 见 §4.1「PM 走查覆盖」，未走查的 capability 权威设计**尚不存在**，需 PM 先走查、不能照 `.kiro/specs/` 当已定就写。
+> 🔴 **源优先级（PM 2026-06-03 锁，凌驾一切，必照）**：**最新权威 = `01_workflows/`(workflow) + `_reorg/workflow-action-catalog.md`(atom actions) + `_reorg/alignment-notes.md`（PM 一项项确认的决策日志）+ `00_settings-ux-spec.md`（settings SSOT）**。格式/字段 → FROZEN `docs/engine/skill-spec`；实现/接线状态 → 当前代码。**`.kiro/specs/studio-feature-*` = 过去的设计、只作参考**（曾是 2026-06-01 权威，已被 06-02/03 逐项走查覆盖/refine，**不得当现行权威**；与权威层冲突一律以 workflow/catalog/alignment-notes 为准）。**走查覆盖**：14 个能力 **全部已走查**(2026-06-04 全清,各 `01_workflows/` 节点 = 完整走查记录,见 §4.1)；写 alignment 时**从对应 workflow 节点取**(原话+决策+测试点都在那),别照 `.kiro/specs/`(过去设计)当现行。
 
 1. `docs/DESIGN-PROCESS.md` — 设计文档模板（§2）、接口契约七项（§3）、双向引用（§3.5）、SSOT（§5）、反模式（§6）。
 2. `docs/studio/INDEX.md` — 三维模型（§1）、所有权不变量（§2，**灭重叠的关键**）、status 词表（§4）、权威注册表（§6，**只能用这里的名字**）、四套文档模板（§7）、cross-link 规范（§8）。
-3. `docs/engine/mvp1/api-engine-studio-contract.md` — 引擎↔studio 的执行/事件/HTTP-WS 三条接口面，是 region/platform 接口段的 SSOT。
+3. `api-engine-studio-contract.md`（引擎↔studio 执行/事件/HTTP-WS 三接口面 SSOT；**现在 `docs/engine/mvp1/_migration-src/`,引擎 docs 重组中——写时 grep 确认当前路径**）— region/platform 接口段的 SSOT。
 4. `docs/studio/mvp1/01_workflows/00_settings-ux-spec.md` §6.0 — LLM/copilot **四层边界**（settings region + gateway/engine 平台块必读）。
 5. 已写好的 7 个 capability 文档（`docs/studio/mvp1/02_capabilities/*.md`）— **作为格式范本**，你补的 7 个对齐它们的模板（⚠️ 已写 7 个形态**不完全一致**，以 §1 模板为准、顺带补齐差异，别照抄某一篇的偏差；`trace-observability.md` 最完整可参考）。
 
@@ -94,32 +94,33 @@ studio mvp1 是**三维治理体系**（不是 engine/gateway 那种纯扁平编
 
 ### 4.1 capabilities（含缺口 7）— **文件夹 baseline+mvp1-alignment**（DESIGN-PROCESS §2.1），**先写这组**（regions 要链接它们）
 
-> ⚠️ **每个 capability 先 grep `.kiro/specs/studio-feature-<x>/` 有没有对应 spec**（mvp1 README 明确：能力设计来源 = `.kiro/specs/studio-feature-*` + workflow catalog）。很多能力的完整 PM 设计躺在那儿、只是没迁进 mvp1（**copilot、settings 都是**）——别只看 mvp0 + workflow + registry one-liner，**registry/workflow 的一句话可能已被 spec 里更晚的 design.md 反转/重定位**（copilot 就是：registry 写 chat-shell，design.md 已 reframe 成 brain-first + chat-shell deferred）。有 spec 就以它最新的 `design.md` 为权威源。
+> **源（PM 走查全清 2026-06-04，最新权威）**：14 个能力**全部已走查**,每个的权威设计 = **它对应的 `01_workflows/` 节点(走查完整记录:原话+决策+测试点)** + `_reorg/alignment-notes.md`(决策日志) + `00_settings-ux-spec.md`(settings)。`.kiro/specs/studio-feature-*` = **过去设计、只作走查参考线索**(§5.1:正式文档**绝不引**,内容写进)。**别再「以 .kiro design.md 为权威」、别写 chat-shell deferred**——范例 [`copilot-assist/`](../mvp1/02_capabilities/copilot-assist/) 已是「做全」。
 
-| 文件 `02_capabilities/` | Owns（一句话边界） | 原话/设计依据源（挖，别编） | 必链 region（INDEX §6 注册表）|
+> **待写清单（13 个;`copilot-assist` 已写 = 范例,照它逐功能形态）**。「新建」=无现有文档;「转」=已有平铺 `<cap>.md` → 拆成 `<cap>/baseline.md` + `mvp1-alignment.md`,旧内容并入后删:
+
+| 文件夹 `02_capabilities/<cap>/` | 新建/转 | Owns（一句话边界） | 主源 = workflow 节点 · 必链 region |
 |---|---|---|---|
-| `skill-workspace.md` | 打开文件夹/Recent(MRU)/新建/移除最近/reveal；**无注册表**；子图按 path 解析（copilot cwd 含子图 path） | `01_workflows/01_init.md` + mvp0 `workspace-fs/{baseline,mvp0-alignment}` + `system-layout`(路由) + INDEX §6/§11(IDE 模型、子图按 path) | `welcome` `shell-layout` `assets` |
-| `graph-authoring.md` | 画布拓扑编辑: IO 节点、连线/断连、校验、新建 phase、子图展开/下钻、数据断层、dot 渲染 | `01_workflows/02_authoring.md` + `_reorg/workflow-action-catalog.md` + mvp0 `canvas-topology/{baseline,mvp0-alignment}` | `canvas` `properties` |
-| `file-editing.md` | Monaco 全文编辑/分屏/schema 推断/保存冲突/file-watch | `01_workflows/02_authoring.md` + mvp0 `asset-explorer/{baseline,mvp0-alignment}`(编辑器部分) | `editor` `input` |
-| `conflict-overwrite.md` | 顺序覆盖 overlay/白名单/cancel 标红 | mvp0 `skill-lifecycle` + `canvas-topology`(并发覆盖部分) + `_reorg` catalog | `canvas` `center-action-bar` |
-| `copilot-assist.md` | **MVP0=领域脑子**(engine 知识注入:常驻薄层+渐进式披露+SDK `system_prompt` 配置);chat-shell(@mention/pill/safe-write/diff)=**Deferred**(commodity 抄成熟品);连接/选模型=**他属** | **已充分 spec(权威)**:`.kiro/specs/studio-feature-copilot-chat/design.md`(2026-06-02 reframe)+ requirement/pm-pending-questions + `copilot-context-design/`(@mention)+ mvp0 copilot-chat | `copilot` |
-| `publish.md` | 上线/commit-msg/confetti/artifact-registry（**注意 stale-doc：走 Artifact Registry 非 git**，见 INDEX §9） | `01_workflows/06_eval.md` + mvp0(标 stale-doc 矛盾点) + INDEX §9 | `center-action-bar` `local-history` |
-| `studio-settings.md` | Settings 配置旅程: provider 凭证(API Keys)/LLM roles(角色→Model Group→route)/copilot 配置/身份与产物路径；测试→持久化→投影（后端 SSOT 6 态）；数据层走 gateway 永不 Rust 化 | **原话富矿**: `00_settings-ux-spec.md`(472 行) + `00_settings.md` + 四层边界 §6.0 | `settings` |
+| `skill-workspace/` | 新建 | 打开文件夹/Recent(MRU)/新建/移除/reveal；无注册表;子图按 path | `01_init` · `welcome` `shell-layout` `assets` |
+| `graph-authoring/` | 新建 | 画布拓扑: IO 节点/连线·断连/校验/新建 phase/子图展开+下钻/dot | `02_authoring`(M/T/G1-G9/R4/P6-P7) · `canvas` `properties` |
+| `file-editing/` | 新建 | Monaco 全文/分屏/schema 推断/保存冲突/file-watch | `02_authoring`(M2/M3) · `editor` `input` |
+| `conflict-overwrite/` | 新建 | 顺序覆盖 overlay/白名单/cancel 标红 | `02_authoring`(顺序覆盖) · `canvas` `center-action-bar` |
+| `publish/` | 新建 | 保存与发布:autocommit 存档 + Artifact Registry(占坑低优先,**非 git**) | `06_eval` · `shell-layout` `local-history` |
+| `studio-settings/` | 新建 | provider 凭证/LLM roles/copilot 配置/身份产物路径;测试→持久化→6 态投影;数据走 gateway 永不 Rust | `00_settings` + `00_settings-ux-spec`(细粒度权威) · `settings` |
+| `compile-lint/` | 转 | 实时 lint + 手动 compile + 错误面板 + stage 门控 | `03_compile` · `center-action-bar` |
+| `predict/` | 转 | 试飞:测试输入/远程校验/mock/golden 守卫 | `04_run-and-verify` · `center-action-bar` `canvas` |
+| `run-execution/` | 转 | 真跑/状态/WS 流/autocommit/batch+loop/模型对比/run 历史 | `04_run-and-verify` · `center-action-bar` `timeline` |
+| `trace-observability/` | 转 | trace 读取/metrics/filter/Prompt 透视/edge-dot/节点灯/微观拓扑 | `04_run-and-verify`(P2) · `timeline` `properties` `canvas` |
+| `golden-eval/` | 转 | golden 固化/Diff/字段得分/Copilot Judge/导出/打磨编排 | `04_run-and-verify`(g-a..g-f) · `properties` `copilot` |
+| `debug-resume/` | 转 | HitL 问题框/节点级 Resume/checkpoint 续跑/脏状态失效/context 篡改 | `05_debugging`(F1-F8) · `properties` `canvas` `timeline` |
+| `phase-editing/` | 转 | 节点属性表单全字段编辑 + 保存(FROZEN 白名单) | `02_authoring`(字段集) · `properties` `input(→i/o panel)` |
 
-> capability 的「依赖 platform 服务」段：照各自数据流链接 `04_platform/{engine,gateway,native-fs,state-engine}`；接口字段**链接 api-contract / gateway monorepo，不复制**。
+> `.kiro/specs/studio-feature-*`(canvas-topology/asset-explorer/skill-lifecycle/copilot-chat 等)可作**走查参考线索**,但**最终权威 = workflow 节点**,且正式文档**不留 `.kiro` 路径引用**(§5.1)。
+> `studio-settings`/`gateway` 涉及 ③a/③b 处用 §3 第四轮边界 + §6.0,别抄旧划分。
+> capability 的「依赖 platform 服务」段链接 `04_platform/{engine,gateway,native-fs,state-engine}`;接口字段链接 §5 锚点不复制。
 
-> **PM 走查覆盖（`alignment-notes.md` line 572-592 = PM 自审，决定能不能写）** —— 「workflow 漏了很多」就指这个：有些 capability **PM 还没逐项走查**，其权威设计**尚不存在**，**不能照 `.kiro/specs/`（过去设计）当已定就写**：
-> - **✅ 已走查·可写**（权威在 workflow / catalog / alignment-notes / ux-spec）：`skill-workspace` `phase-editing` `predict` `run-execution` `golden-eval` `studio-settings`。
-> - **🟡 部分走查**：`graph-authoring`（连线 R4 / 画布 P6-P7 已查；拓扑/新建节点仅表级，需补走查）。
-> - **❌ 未走查 / ⏳ 待走查 → 必须 PM 先逐项走查再定稿**：`compile-lint`(未走查) · `file-editing`(未走查) · `conflict-overwrite`(未走查) · `copilot-assist`(未聚焦) · `trace-observability`(待) · `debug-resume`(待) · `publish`(待)。
-> 下面每个 capability 给的「源」= **走查时的参考材料**（`.kiro/specs/` = 过去设计·**参考非权威**；最终权威 = PM 走查产出的 workflow / catalog / alignment-notes / ux-spec）：
-> - `studio-settings` = **最可挖**（`00_settings-ux-spec` 富原话），**但必须用最新 §6.0 第四轮边界**（见 §3，别抄旧 ③a/③b 划分）。
-> - `skill-workspace` → `.kiro/specs/studio-feature-asset-explorer`(文件树部分) + workspace-fs mvp0 + `_reorg/alignment-notes.md`(Recent/path 子图) + `01_init`。
-> - `graph-authoring` → `.kiro/specs/studio-feature-canvas-topology/{requirement,research}` + `canvas-authoring-v1` + `canvas-micro-topology-v1` + `02_authoring` + `alignment-notes`(T5/T6/io/G)。**有专属 canvas spec，先读**。
-> - `copilot-assist` → **mvp1 里缺 = `.kiro/specs/studio-feature-copilot-chat` 没迁进 mvp1（不是真 gap）**。权威 = `.kiro/specs/studio-feature-copilot-chat/design.md`(2026-06-02 PM 已解锁的 **reframe**：MVP0 核心=**领域脑子**(engine 知识注入) / chat-shell(@mention·pill·safe-write·diff)=**Deferred 抄成熟品** / 连接·选模型=**他属**(gateway-redesign + copilot-reconciliation) / Bash 安全写=**独立 P0**)。**按 design.md reframe 迁移，别照 INDEX §6 旧 one-liner**(它把 deferred 的 chat-shell 当核心、漏了 brain)。judge/commit-msg/打磨/建技能向导 = **跨能力**(数据流归 golden-eval/publish/predict/skill-workspace，`copilot` region 渲染，copilot-assist 只作聊天载体被链接)。真正待决 = Bash B1(移除) vs B2(沙箱)，标 target-design 链 pm-pending §P0-B。
-> - `file-editing` → `.kiro/specs/studio-feature-asset-explorer/{design,requirement}`(编辑器) + `studio-frontend-v21-multifile-editor` + `split-editor-focus-enhancement`。**mvp1 里缺 = 这几份 spec 没迁进来（不是真 gap）；迁入后仍缺的才标 gap**。
-> - `conflict-overwrite` → `.kiro/specs/studio-feature-skill-lifecycle/{design,requirement,research,review}` + `studio-feature-canvas-topology`(overlay)。**mvp1 里缺 = skill-lifecycle 全套 spec(含 review)没迁进来；迁入后仍缺的才标 gap**。
-> - `publish` → `.kiro/specs/studio-feature-skill-lifecycle`(可能含发布) + INDEX §9(走 Artifact Registry 非 git = stale-doc)。**无专属 studio-feature-publish spec，可能是这批真正最薄的——读完 skill-lifecycle 仍缺的才标 gap**；commit-msg/confetti 别当目标事实直接写。
+> **PM 走查覆盖（权威 = `01_workflows/INDEX.md` 走查状态，PM 2026-06-03 — 别再用 alignment-notes 那张中途自审表）**：
+> - **✅ 全 14 个能力已走查·可定稿**（2026-06-04 全清）：`skill-workspace`(01) · `graph-authoring` `phase-editing` `file-editing` `conflict-overwrite`(02) · `compile-lint`(03) · `predict` `run-execution` `trace-observability` `golden-eval`(04) · `debug-resume`(05) · `publish`(06,占坑低优先) · `studio-settings`(00) · `copilot-assist`。**每个对应 workflow 节点 = 走查完整记录(原话+决策+测试点),写 alignment 时从它取**。走查阶段全清,可批量定稿。
+> （各 cap 的源 = 上表「主源 = workflow 节点」那列;`.kiro/specs/` 仅作走查参考线索、不进正式文档,§5.1。）
 
 ### 4.2 regions（12）— 文件夹 baseline.md + mvp1-alignment.md
 
@@ -151,7 +152,9 @@ studio mvp1 是**三维治理体系**（不是 engine/gateway 那种纯扁平编
 | `engine/` | Python sidecar | **薄接缝**：复核 `apps/studio/backend`(run_manager / routers) 怎么进程内调引擎 | **§3 铁律**：只写 studio 消费面（`run_skill`/`predict_skill`/`compile_skill` 进程内调用 + WS/trace 转发 + 异步 spawn 接缝），内部**全链接** `docs/engine/mvp1/` + `api-engine-studio-contract.md`。引擎同步 RunResult ↔ studio 异步 RunMetadata 的接缝在 run_manager（api-contract §2.3）。|
 | `gateway/` | Python sidecar | **薄接缝 + ③a/③b 边界（按第四轮判据）**：复核 `apps/studio/backend`(③a) 现散落哪些「本应 ③b」的能力内核 | **§3 铁律 + 第四轮四层边界**：写 studio 这侧怎么消费 gateway 库（③a 把「角色编排结构+意图」交 ③b `materialize`→`resolve_routes`；copilot SDK 调用/session 留 ③a）。**baseline** 标「materialize/model_groups/6 态/draft/identity/notable/熔断持久化等能力内核现散 ③a `apps/studio/backend` 待下沉」；**alignment** 标「判据归 ③b 公共 + 规划下沉（本轮不动代码）」。库内部 + 逐模块处置**全链接** `docs/graph-agent-gateway/mvp1/` + `module-disposition-revised.md`。**禁写「领域需求不下沉库」（旧口径已反转）**。|
 
-> `04_platform/i18n.md` 已写（102 行，横切 NFR 保持平铺，**不动**）。在 `04_platform/README.md` 标注它形态特殊即可。
+> `04_platform/i18n.md` 已写（102 行，横切 NFR 保持平铺，**不动**）。
+> `04_platform/llm-copilot-http-api/` **已写成文件夹**(baseline+alignment)= **③a 的 copilot/llm HTTP API 壳**(正是 §3 说的「HTTP 适配壳归 ③a」那块)→ **别重写、别塞进 gateway/engine 薄接缝**;它和 gateway/engine 是不同模块。
+> ⚠️ **platform tier 在并行演进**:写前先 `ls docs/studio/mvp1/04_platform/` + 读 INDEX §6,确认当前模块清单 + 哪些已成文件夹,**只写缺的**(native-fs/state-engine/engine/gateway…),别照本表当全集。**同理 02_capabilities/03_regions 写前也 ls 一遍**(仓库在并行改)。
 
 ---
 
@@ -161,7 +164,7 @@ studio mvp1 是**三维治理体系**（不是 engine/gateway 那种纯扁平编
 
 - **引擎执行/事件/编译** → `api-engine-studio-contract.md`：§1 Trace(WS `/ws/runs/{run_id}` + GET `/runs/{id}`.events + 34 类事件) / §2 执行(`run_skill`/`predict_skill` 进程内 + `POST .../runs` 202 异步 + RunResult) / §3 Golden / §4 Resume(`resume_run` 现 501 桩) / §5 Compile(`compile_skill` + `ErrorPayload` 四轴 `phase_id`/`field_path`/`source_path`/`level`)。
 - **错误码标记三处**（canvas 节点 / properties 属性 / editor 行）→ `ErrorPayload` 四轴（api-contract §5.2）；四字段都已存在（均 `|None`），Task 3 审计是否填全。
-- **网关 role→route** → `docs/graph-agent-gateway/mvp1/01-handoff-interface`（`ResolvedRoute` 契约）+ `08-orch-test-status-ssot` + studio copilot-assist（copilot SDK 调用 = ③a）。**6 态以 settings §4.2/§6.0 为准**（左 = API canonical enum，括号 = UI 文案，别混）：`ready(verified🟢) / previously_connected(以前联通过🔵) / untested⚪ / failed🔴(reason: missing_config|endpoint_unreachable|model_failed) / cooling_down / off`——**取消了旧 `needs_setup`**（并入 failed）。⚠️ gateway 08 文档自身可能仍留旧 5 态口径（含 needs_setup）；写作时以 settings §6.0 + `module-disposition-revised.md` 为最新判据，不抄旧词。
+- **网关 role→route** → `docs/graph-agent-gateway/mvp1/01-handoff-interface/mvp1-alignment.md`（`ResolvedRoute` 契约;01-handoff-interface 是**文件夹**）+ `08-orch-test-status-ssot/mvp1-alignment.md` + studio copilot-assist（copilot SDK 调用 = ③a）。**6 态 canonical enum = `00_settings-ux-spec.md §4.2`(line 262 明文权威)**：`ready`(🟢,旧称 `verified`) / `historical_ready`(🔵 以前联通过) / `untested`(⚪) / `failed`(🔴,带 reason: `missing_config`|`endpoint_unreachable`|`model_failed`) / `cooling_down` / `off`(旧称 `disable`)。取消了旧 `needs_setup`(并入 failed)。⚠️ **现码 `ProviderUiState`(`llm_state_projection.py:12`)还是旧 5 态 `["ready","untested","cooling_down","needs_setup","off"]`**——目标去 `needs_setup`、补 `historical_ready` + `failed(reason)`;**别抄现码旧枚举,以 ux-spec §4.2 canonical 为准**。
 - **四层边界** → `00_settings-ux-spec.md §6.0`。
 
 > api-contract §7 待办 1 已要求 engine 各 alignment 的接口段改为「链接本文」。studio engine/gateway 接缝**同样只链接**，形成双向：studio→契约，契约↔引擎。
@@ -184,7 +187,7 @@ studio mvp1 是**三维治理体系**（不是 engine/gateway 那种纯扁平编
 ## 7. 写作顺序（codex 按此推进，减少返工）
 
 0. **Step 0 — 边界校准前置（blocker，先于一切写作）**：先按本 handoff 修订版 §3/§5 对齐「第四轮四层边界（公共能力内核 vs 应用加工四件事）+ 6 态（无 needs_setup）」；凡 `studio-settings` / `gateway` 涉及 ③a/③b 归属处，**必须以 `00_settings-ux-spec §6.0` + `module-disposition-revised.md` 为准**，否则这两块先天串错、连累下游。
-1. **capabilities 缺口(7)** 先写 —— 它们是 region 要链接的设计意图源；先写好，region 链接才有实体。从 §4.1 的原话源挖（按原话成熟度分级标 gap），对齐 §1 模板（已写 7 个形态不完全一致，以模板为准）。
+1. **capabilities（13:6 新建 + 7 转文件夹）** 先写 —— region 要链接它们。源 = §4.1 表的 workflow 节点（走查完整记录）；照范例 `copilot-assist/` **逐功能**写 baseline+alignment；「转」的把旧平铺 `<cap>.md` 内容并入新文件夹后删。
 2. **regions(12)** —— baseline 复核 `frontend/src` 当前组件；alignment 链接 §4.2 的 capability + §5 接口锚点。严守所有权不变量（组件归 region，流程只链接）。
 3. **platform(4)** —— native-fs/state-engine 真写；engine/gateway 薄接缝（§3 铁律，只链接）。
 4. **cross-ref 收口(§6)** + 更新三个 README（`02_capabilities` / `03_regions` / `04_platform` 的「状态」从「待创建/骨架」改为实际）+ INDEX §10 迁移分期勾掉 P2。
@@ -193,7 +196,7 @@ studio mvp1 是**三维治理体系**（不是 engine/gateway 那种纯扁平编
 
 ## 8. 验收清单
 
-- [ ] 23 个模块文档齐：capabilities 7 个单文件 + regions 12 个文件夹(各 2 文件) + platform 4 个文件夹(各 2 文件) = 7 + 24 + 8 = **39 个新文件**。
+- [ ] 模块齐（全文件夹 baseline+mvp1-alignment）：capabilities **13 个文件夹**(6 新建 + 7 转;`copilot-assist` 已写=范例)×2 + regions **12**×2 + platform **4**×2(`i18n` 平铺不动) = **26 + 24 + 8 = 58 个文件**；其中 7 个 cap 是**转换**(旧平铺 `<cap>.md` 内容并入新文件夹后删,非纯新增)。
 - [ ] 每条断言挂 `file:line`，来自实际打开的当前源码（不照抄旧行号）。
 - [ ] 每个代码名有一句话解释（写作 bar 1）。
 - [ ] 接口段**只链接 SSOT 不复制**（§5）；gateway/engine 是薄接缝（§3）。

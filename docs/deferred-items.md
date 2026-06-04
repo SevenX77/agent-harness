@@ -114,6 +114,13 @@
 - **前置条件**: PM 给落地排期;落地前实现计划须先过 Codex `[PLAN REVIEW REQUEST]`(CCB 规矩),通过后由 Codex 写代码(Claude 不亲自写)。
 - **来源**: 2026-06-03 PM「我们现在要设计 studio 的 i18n 功能…目前我只需要简体中文,其他语言顺便」;设计完成后「先不用落地」。
 
+### DEF-016 — glib 0.18.5 unsoundness 升级（受 tauri/GTK 栈约束阻塞）
+- **日期**: 2026-06-04
+- **事项**: 修 `apps/studio/tauri/Cargo.lock` 里 `glib 0.18.5` 的 `VariantStrIter` 的 `Iterator`/`DoubleEndedIterator` impl unsoundness（dependabot GHSA-wrw7-89jp-8q8g，medium）。修复版 = **glib 0.20.0**。
+- **延期原因**: `cargo update -p glib` 锁在 0.18.5 没动 —— 上层 tauri 2.x / GTK 栈把 glib 约束在 0.18.x，升到 0.20 要连带 bump 整个 GTK/tauri Rust 依赖栈，是破坏性大改、需单独回归测桌面外壳，不在本轮「快速安全修」范围。
+- **前置条件**: tauri/wry/GTK 栈整体升级排期（确认 0.20 兼容性 + 桌面端回归测试）。
+- **来源**: 2026-06-04 dependabot 27 条漏洞修复批；其余 26 条已修，仅此 1 条受栈约束阻塞。
+
 ## Completed / Promoted
 
 - **DEF-002 → Promoted (2026-06-01)**: 连线 Context 真实数据接线。已并入 `studio-feature-trace-inspector` **REQ-3(P1 核心,现在可做)** —— 本就是该 spec 自己的 scope,从 deferred 注册表拉回。

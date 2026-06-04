@@ -9,7 +9,7 @@ status: drafted
 > **Tier**：③b gateway 公共能力内核（6 态标准总结 `state_projection` + draft/证据库知识库内核 `import_drafts` **本轮反转判 ③b 公共,现散 ③a 待下沉**；UI 颜色渲染 / import-apply 工作流 / 远端源选择 / 存储介质留 ③a）
 > **Owns**：把"配置 + 健康 + 熔断 + 历史证据"总结成一套**标准 6 态**(`ready/historical_ready蓝/untested/failed带reason/cooling_down/off`)的投影内核 + 探测证据知识库(draft + append-only evidence + 远端共享)内核；**不渲染颜色、不做 import/apply 工作流 UI、不绑定存储介质**(归 ③a)
 > **Status**：设计定稿（2026-06 判据第四轮反转 + ux-spec §4.2 六态对齐）；代码 = `state_projection`/`import_drafts` 待下沉 ③b，`ProviderUiState` Literal 待从 5 态(含 `needs_setup`)改 6 态(取消 `needs_setup`、补蓝 `historical_ready`、`failed` 带 reason)，`probe_import_draft` 待去桩
-> **Related**：[[02-orch-role-resolution]]（materialize 消费 6 态投影排 fallback_chain，已取消 needs_setup）· [[05-orch-capabilities-and-models]]（`capability_state` 第二轴 + identity/notable/model_groups 同属下沉知识库）· [[07-orch-fallback-circuit-probe]]（probe 产证据 + 熔断写 health store）· [[04-orch-registry-schema]]（`ProviderImportDraft`/`EvidenceRecord`/`ProviderRoute` 字段权威源）· [[03-orch-credentials-endpoints]]（endpoint test 回写 active credentials）· [[14-api-router]]（HTTP 探测/draft 端点 = ③a 薄壳）
+> **Related**：[[02-orch-role-resolution]]（materialize 消费 6 态投影排 fallback_chain，已取消 needs_setup）· [[05-orch-capabilities-and-models]]（`capability_state` 第二轴 + identity/notable/model_groups 同属下沉知识库）· [[07-orch-fallback-circuit-probe]]（probe 产证据 + 熔断写 health store）· [[04-orch-registry-schema]]（`ProviderImportDraft`/`EvidenceRecord`/`ProviderRoute` 字段权威源）· [[03-orch-credentials-endpoints]]（endpoint test 回写 active credentials）· studio `llm-copilot-http-api`（HTTP 探测/draft 端点 = ③a 薄壳，`docs/studio/mvp1/04_platform/llm-copilot-http-api/`）
 > **决策日志**：`docs/studio/mvp1/01_workflows/00_settings-ux-spec.md` §4.1(draft)/§4.2(6 态体系)/§4.3(测试落点)/§6.0(判据)/§6.4(横切四层) + `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`（08 行两处反转 + 下沉清单）+ gateway 包 `README.md` §3 D/B（6 态总结 + draft 知识库属公共）
 > **现状**：见同目录 `baseline.md`
 
@@ -211,5 +211,5 @@ MVP1 目标:测试状态以**后端 SSOT(单一事实源)**为准。探测结果
 - [[07-orch-fallback-circuit-probe]]:probe 产证据 + 熔断写 health store（`SqliteLlmHealthStore` 同源反转 ③b）
 - [[04-orch-registry-schema]]:`ProviderImportDraft`/`EvidenceRecord`/`ProviderRoute`/`ProviderEndpoint` 字段权威源（本模块只链接）
 - [[03-orch-credentials-endpoints]]:endpoint test 回写 active credentials + base_url 归一化
-- [[14-api-router]]:HTTP `/api/llm/*` 探测/draft 端点 = ③a 薄壳
+- studio `llm-copilot-http-api`（`docs/studio/mvp1/04_platform/llm-copilot-http-api/`）:HTTP `/api/llm/*` 探测/draft 端点 = ③a 薄壳
 - ux-spec §4.1(draft)/§4.2(6 态体系)/§4.3(测试落点)/§6.0(判据)/§6.4(横切四层) · 归属表 `module-disposition-revised.md`（08 行两处反转 + 远端源可配置）· gateway 包 `README.md` §3 B/D

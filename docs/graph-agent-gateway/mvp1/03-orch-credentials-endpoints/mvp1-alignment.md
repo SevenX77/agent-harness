@@ -9,7 +9,7 @@ status: drafted
 > **Tier**：③b gateway 公共能力(凭证/端点 schema + 读写规范 + base_url 按协议归一化 + 凭证指纹 + **endpoint 标准化拆分 + 生成 canonical endpoint_id**；存储介质由 ③a 注入)
 > **Owns**：定义 `ProviderEndpoint`/`ProviderRoute`/`credential_ref` 的数据结构与读写契约；把「同一端点的等价 URL 收敛成 canonical」、「原始混合凭证 → 标准 endpoint list + canonical id」做成任何 app 可复用的公共能力；**不绑死存储位置**
 > **Status**：设计定稿(2026-06 判据第四轮反转 + F1 base_url 决策)；代码 = endpoint 拆分 + canonical id 生成待集中下沉 ③b(现散 ③a 前端 + `_stable_endpoint_id`)、base_url 保存时归一化待补、`_normalize_base_url` 待升级为 per-protocol
-> **Related**：[[01-handoff-interface]](`ResolvedRoute` 携带 credential_ref/base_url)· [[04-orch-registry-schema]](`ProviderEndpoint/ProviderRoute` schema 权威源)· [[10-inv-route-chat-model-factory]](调用时 base_url 幂等双保险)· [[07-orch-fallback-circuit-probe]](probe 打到 canonical base_url；F1 双向)· [[12-inv-copilot-invocation]](copilot `_resolve_route_runtime` 消费 credential_ref + base_url)
+> **Related**：[[01-handoff-interface]](`ResolvedRoute` 携带 credential_ref/base_url)· [[04-orch-registry-schema]](`ProviderEndpoint/ProviderRoute` schema 权威源)· [[10-inv-route-chat-model-factory]](调用时 base_url 幂等双保险)· [[07-orch-fallback-circuit-probe]](probe 打到 canonical base_url；F1 双向)· studio copilot（copilot SDK 调用 = ③a，见 `docs/studio/mvp1/02_capabilities/copilot-assist/` + `00_settings-ux-spec.md` §3.8）
 > **决策日志**：本模块 base_url / 凭证决策依据 client 层 A' 重设计 F1(base_url 归一化——每 protocol 确定规则、保存时归一化)+ D3(gateway 可复用服务、API 一等公民)——完整逻辑 + PM 原话留底于本文 §4/§5；归属判据见 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`(03 凭证端点 schema/读写/base_url 归一化 = ③b；**endpoint 标准化拆分反转为 ③b**)。D3 是跨模块共享决策,另见 [[01-handoff-interface]] §4、[[04-orch-registry-schema]] §4(均同引 D3 划分 ③b 公共边界)。
 > **现状**：见同目录 `baseline.md`
 
@@ -196,5 +196,5 @@ MVP1 目标：把「凭证 / 端点」的**数据结构 · 读写契约 · 归�
 - [[01-handoff-interface]]：`ResolvedRoute` 携带 credential_ref / canonical base_url / fingerprint
 - [[04-orch-registry-schema]]：`ProviderEndpoint`/`ProviderRoute`/`ResolvedRoute` schema 字段权威源(本模块只链接)
 - [[10-inv-route-chat-model-factory]]：调用时 base_url 幂等双保险(副归一化落点)
-- [[12-inv-copilot-invocation]]：copilot `_resolve_route_runtime` 消费 credential_ref + base_url
+- studio copilot（copilot-assist + ux-spec §3.8）：copilot `_resolve_route_runtime` 消费 credential_ref + base_url
 - 本模块 base_url / 凭证决策依据 client 层 A' 重设计 F1/D3(完整逻辑 + PM 原话留底于本文 §4/§5)/ 归属判据见 `module-disposition-revised.md` / `docs/studio/mvp1/01_workflows/00_settings-ux-spec.md` §6.1

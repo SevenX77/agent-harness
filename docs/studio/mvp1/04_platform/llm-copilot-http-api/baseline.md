@@ -1,13 +1,16 @@
 ---
-module: 14-api-router
+module: llm-copilot-http-api
 doc: baseline
+tier: ③a studio platform（后端 LLM/Copilot HTTP 适配壳）
 status: drafted
 ---
 
-# 14-api-router — Baseline(现状)
+# llm-copilot-http-api — Baseline(现状)
 
+> **本文 = studio ③a 平台文档**（`04_platform/`，后端基础设施）：Studio 后端 LLM/Copilot HTTP 适配壳的现状。**2026-06-03 从 gateway mvp1 模块 14 迁入**——它是 ③a 应用加工（HTTP 端点形状 / job·进度包装 / DTO 投影绑死 studio 调用方式 + 存储介质），不属 ③b gateway 公共内核，故移出 gateway 文件夹、归 studio 平台层。
 > 本文只描述当前源码（按 endpoint 家族）；目标设计见同目录 `mvp1-alignment.md`。
-> **判据归属**：`routers/llm.py`/`routers/copilot.py` = **③a Studio HTTP 适配壳，非 gateway 核心模块**（归属表 `module-disposition-revised.md` 行 47 + client 层 A' 重设计决策 D3「gateway 可复用、前端不归 gateway」，完整逻辑 + 用户原话见同目录 `mvp1-alignment.md` §4/§5）。判据：HTTP 端点形状、job/进度包装、DTO 投影绑死 studio 的调用方式 + 存储介质 → ③a。
+> **判据归属**：`routers/llm.py`/`routers/copilot.py` = **③a Studio HTTP 适配壳**（client 层 A' 重设计决策 D3「gateway 可复用、前端不归 gateway、router=适配壳非核心」，决策权威源 gateway 模块 `docs/graph-agent-gateway/mvp1/01-handoff-interface/mvp1-alignment.md` §4；归属表 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`）。判据：HTTP 端点形状、job/进度包装、DTO 投影绑死 studio 的调用方式 + 存储介质 → ③a。
+> **跨树引用约定**：本文中 `NN-orch-*` / `NN-inv-*` 形式的 wikilink 指 **gateway mvp1 模块**（`docs/graph-agent-gateway/mvp1/`）；router 调用的能力内核属 ③b 公共，HTTP 壳属本文 ③a。
 > **⚠️ 内核 vs 适配壳标注**：下文现状里凡 **base_url 归一化 / capability 归一化·对比 / probe 策略（批批打·命中停·结构错短路）/ materialize 编排 / 6 态标准总结 / draft 知识库 / endpoint 标准化拆分** 的逻辑——其**能力内核按判据属 ③b 公共（现散 ③a `apps/studio/backend/app/services/llm_*` 或内联 router，待下沉 gateway 包）**；router 自身**仅应保留 HTTP glue**（DTO 解析 + 状态码 + 调 service + job/进度/HTTP 包装 + 落存储）。下沉清单见 `module-disposition-revised.md` §2。
 
 本模块解释 Studio 后端暴露给前端的 LLM/Copilot HTTP 面。`apps/studio/backend/app/routers/llm.py` 约 4960 行,现状把 registry CRUD、endpoint/model/role test、import draft、model profile、capability projection、官方 provider 探测和若干内部投影 helper 放在一个巨型 router 里。本文按 endpoint 家族讲清楚,不逐行复述。
@@ -111,5 +114,5 @@ status: drafted
 ## 待办/疑点
 
 - `apps/studio/backend/app/routers/llm.py` 已达约 4960 行,把 API handler、job store、probe 策略、projection、evidence、role materialize 都放在一个文件里;MVP1 后续应拆成 endpoint registry、probe jobs、role/profile、import drafts、projection helpers 等模块。
-- `test_copilot_role_sdk` 的测试实现走 `AsyncAnthropic`,而真实 Copilot 走 `ClaudeSDKClient`;这个问题在 `12-inv-copilot-invocation` 里作为调用层目标修正。
+- `test_copilot_role_sdk` 的测试实现走 `AsyncAnthropic`,而真实 Copilot 走 `ClaudeSDKClient`;这个"假测试"问题的修正归 studio copilot（[[copilot-assist]] + `../../01_workflows/00_settings-ux-spec.md` §3.4/§3.8）。
 - `put_llm_roles` 中 Copilot/Graph Agent 分流属于产品保护逻辑,但现在写在 router handler 内 (`routers/llm.py:909-952`),后续最好下沉到 service 层以便复用和测试。

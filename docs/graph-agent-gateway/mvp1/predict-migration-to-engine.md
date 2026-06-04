@@ -10,7 +10,7 @@ owner: engine 模块设计师(predict 重设计归 engine)
 > **Owns（gateway 侧仅此一句）**：gateway 只输出编排结果（route），**不承载 predict 的 mock 业务逻辑**；迁移后 gateway 删 `PredictGatewayChatModel` / resolver 的 predict 特判 / `PredictContext` 协议位。
 > **Status**：决策已定（mock 移交 engine）；engine 侧重设计归 engine designer（提示词见下，待用户转发）；**gateway 侧待办本期不动**，等 engine 方案定了再按其接口边界删除。
 > **Related**：[[01-handoff-interface]]（gateway 迁移后只暴露 role→route 一等 API）· [[02-orch-role-resolution]]（role→route 编排，predict 删除后这条保持纯净）· [[09-inv-invocation-runtime]]（`GatewayChatModel` 正常调用层，predict 特判从 resolver 摘除后不影响它）
-> **决策日志**：client 层 A' 重设计决策（**完整逻辑 + 用户原话见本文 §4，本文留底**）—— M4（`PredictGatewayChatModel` 是什么 + 架构问题：mock=业务逻辑应移交 engine；predict 重设计归用户/engine = out of scope）；归属表 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md` 行 48（predict-migration：mock=业务逻辑→engine；role→route 公共，不变）。**M4 的「编排/调用分离」根源 = D2（跨模块共享）**，另见 [[01-handoff-interface]]（route 级一等 API）/ [[12-inv-copilot-invocation]]（copilot 同源「调用方自己调」）。
+> **决策日志**：client 层 A' 重设计决策（**完整逻辑 + 用户原话见本文 §4，本文留底**）—— M4（`PredictGatewayChatModel` 是什么 + 架构问题：mock=业务逻辑应移交 engine；predict 重设计归用户/engine = out of scope）；归属表 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md` 行 48（predict-migration：mock=业务逻辑→engine；role→route 公共，不变）。**M4 的「编排/调用分离」根源 = D2（跨模块共享）**，另见 [[01-handoff-interface]]（route 级一等 API）/ studio copilot（copilot SDK 调用 = ③a，见 copilot-assist + ux-spec §3.8）（copilot 同源「调用方自己调」）。
 > 决策(用户):predict 的过度设计要去掉,功能交给 engine。本文 = 现状+证据 + 一段可直接转发给 engine 设计师的提示词。
 > Gateway 侧只保留一条原则:**gateway 只输出编排结果(route),不承载 predict 的 mock 业务逻辑**。
 
@@ -105,4 +105,4 @@ predict 是 **skill(graph_agent)的「干跑模拟」**:不调真 LLM,用 mock �
 - [[01-handoff-interface]]：迁移后 gateway 只暴露 role→route 一等 API（predict 拿这个）
 - [[02-orch-role-resolution]]：role→route 编排（predict 特判删除后保持纯净）
 - [[09-inv-invocation-runtime]]：`GatewayChatModel` 正常调用层（不受 predict 摘除影响）
-- **client 层 A' 重设计决策 M4（§6 out-of-scope）**：完整逻辑 + 用户原话见本文 §4（本文留底）；M4 的编排/调用分离根源 = D2，共享见 [[01-handoff-interface]] / [[12-inv-copilot-invocation]]。归属表 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md` 行 48
+- **client 层 A' 重设计决策 M4（§6 out-of-scope）**：完整逻辑 + 用户原话见本文 §4（本文留底）；M4 的编排/调用分离根源 = D2，共享见 [[01-handoff-interface]] / studio copilot（copilot SDK 调用 = ③a，见 copilot-assist + ux-spec §3.8）。归属表 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md` 行 48

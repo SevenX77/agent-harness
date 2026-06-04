@@ -9,8 +9,8 @@ status: drafted
 > **Tier**：③b gateway 公共能力(凭证/端点 schema + 读写规范 + base_url 按协议归一化 + 凭证指纹 + **endpoint 标准化拆分 + 生成 canonical endpoint_id**；存储介质由 ③a 注入)
 > **Owns**：定义 `ProviderEndpoint`/`ProviderRoute`/`credential_ref` 的数据结构与读写契约；把「同一端点的等价 URL 收敛成 canonical」、「原始混合凭证 → 标准 endpoint list + canonical id」做成任何 app 可复用的公共能力；**不绑死存储位置**
 > **Status**：设计定稿(2026-06 判据第四轮反转 + F1 base_url 决策)；代码 = endpoint 拆分 + canonical id 生成待集中下沉 ③b(现散 ③a 前端 + `_stable_endpoint_id`)、base_url 保存时归一化待补、`_normalize_base_url` 待升级为 per-protocol
-> **Related**：[[01-handoff-interface]](`ResolvedRoute` 携带 credential_ref/base_url)· [[04-orch-registry-schema]](`ProviderEndpoint/ProviderRoute` schema 权威源)· [[10-inv-route-chat-model-factory]](调用时 base_url 幂等双保险)· [[12-inv-copilot-invocation]](copilot `_resolve_route_runtime` 消费 credential_ref + base_url)
-> **决策日志**：`.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md` F1 + D3 + `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`(03 凭证端点 schema/读写/base_url 归一化 = ③b；**endpoint 标准化拆分反转为 ③b**)
+> **Related**：[[01-handoff-interface]](`ResolvedRoute` 携带 credential_ref/base_url)· [[04-orch-registry-schema]](`ProviderEndpoint/ProviderRoute` schema 权威源)· [[10-inv-route-chat-model-factory]](调用时 base_url 幂等双保险)· [[07-orch-fallback-circuit-probe]](probe 打到 canonical base_url；F1 双向)· [[12-inv-copilot-invocation]](copilot `_resolve_route_runtime` 消费 credential_ref + base_url)
+> **决策日志**：本模块 base_url / 凭证决策依据 client 层 A' 重设计 F1(base_url 归一化——每 protocol 确定规则、保存时归一化)+ D3(gateway 可复用服务、API 一等公民)——完整逻辑 + PM 原话留底于本文 §4/§5；归属判据见 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`(03 凭证端点 schema/读写/base_url 归一化 = ③b；**endpoint 标准化拆分反转为 ③b**)。D3 是跨模块共享决策,另见 [[01-handoff-interface]] §4、[[04-orch-registry-schema]] §4(均同引 D3 划分 ③b 公共边界)。
 > **现状**：见同目录 `baseline.md`
 
 本文件描述 MVP1 对齐目标:密钥通过 `credential_ref` 执行期获取,endpoint 保存时按 protocol 写入 canonical `base_url`,**原始混合凭证由 gateway 拆成标准 endpoint list 并生成 canonical `endpoint_id`**,fingerprint 反映 endpoint/credential 变更,Studio storage 只承担文件边界。
@@ -34,7 +34,7 @@ MVP1 目标：把「凭证 / 端点」的**数据结构 · 读写契约 · 归�
 
 1. 输入:Studio 后端收到 endpoint payload,由 `upsert_endpoints`(用途:把 endpoint payload 写入 v4 credentials 文件,保留未提交 secret)变成 `ProviderEndpoint`(`apps/studio/backend/app/services/llm_credentials.py:107-123`)。
 2. 判定:读取 `ProviderEndpoint.protocol`,因为 protocol 决定 SDK 拼接路径的规则;当前 schema 已把 protocol 与 base_url 放在同一 endpoint 对象内(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:163-181`)。
-3. 归一化:按 protocol 写入 canonical `base_url`。F1 决策(`client-layer-decision-record.md:194`)要求 anthropic-compatible 去尾 `/v1`(SDK 自加 `/v1/messages`)、openai-compatible 保持 provider 接受的 `/v1` 形状、deepseek-anthropic 去 `/v1` 后补 `/anthropic`、ark openai-compat 使用 `.../api/v3`;当前只有 Copilot runtime 对 deepseek/ark 有局部 helper,说明保存时规则尚未集中(`apps/studio/backend/app/services/copilot.py:476-491`)。
+3. 归一化:按 protocol 写入 canonical `base_url`。F1 决策(每 protocol 规则固定,详见本文 §5 决策 2)要求 anthropic-compatible 去尾 `/v1`(SDK 自加 `/v1/messages`)、openai-compatible 保持 provider 接受的 `/v1` 形状、deepseek-anthropic 去 `/v1` 后补 `/anthropic`、ark openai-compat 使用 `.../api/v3`;当前只有 Copilot runtime 对 deepseek/ark 有局部 helper,说明保存时规则尚未集中(`apps/studio/backend/app/services/copilot.py:476-491`)。
 4. 持久化:canonical endpoint 进入 `LLMCredentialsFile.provider_endpoints`,再由 `_save_credentials_unlocked`(用途:credentials 原子写函数,临时文件→fsync→chmod 0600→replace)原子写入 active credentials 文件(`apps/studio/backend/app/services/llm_credentials.py:133-135`,`:449-482`)。
 5. 输出:后续 resolver、probe、client factory、fingerprint 都读取同一个 canonical `endpoint.base_url`,而不是各自猜测(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:77-84`;`apps/studio/backend/app/routers/llm.py:4906-4907`)。
 
@@ -99,16 +99,16 @@ MVP1 目标：把「凭证 / 端点」的**数据结构 · 读写契约 · 归�
 
 > **§0 #1b third-party 协议系统自动测**(ux-spec `:13`)："第三方唯一的区别是, 用户得填入URL, (protocol以前要自己选, 现在系统自动测); 用户必须在模型列表里面选一个模型进行一次模型测试, 才能验证这个endpoint可用" —— **protocol「现在系统自动测」**= ③b 协议探测，直接支撑「拆分 + 协议匹配」归 ③b。
 
-> **F1 base_url 归一化(保存时 + per-protocol 固定规则)**(决策记录 `:200-201`)："base_url 归一化的关键是每个protocol都有确定的统一的规则 ... 如果结果足够确定, 我觉得放在credential保存时归一化是最好的, 每个endpoint都有固定格式, 存这个固定格式保证不会出错" —— 保存时 canonical(主)+ per-protocol 固定规则。
+> **F1 base_url 归一化(保存时 + per-protocol 固定规则)**(client 层 A' 重设计决策 F1)："base_url 归一化的关键是每个protocol都有确定的统一的规则 ... 如果结果足够确定, 我觉得放在credential保存时归一化是最好的, 每个endpoint都有固定格式, 存这个固定格式保证不会出错" —— 保存时 canonical(主)+ per-protocol 固定规则。
 
-> **F1 调用时幂等双保险**(决策记录 `:189-192`)："副 = 调用时幂等归一化做双保险(已 canonical 则 no-op)" —— 调用层 no-op 保护历史数据。
+> **F1 调用时幂等双保险**(client 层 A' 重设计决策 F1)："副 = 调用时幂等归一化做双保险(已 canonical 则 no-op)" —— 调用层 no-op 保护历史数据;调用层落点见 [[10-inv-route-chat-model-factory]]。
 
-> **D3 gateway = 可复用服务 / 存储介质归应用**(决策记录 `:78-80`)："前端不归gateway管 ... gateway只管提供服务 ... 要考虑复用其他app" + README §2「存储介质(应用做)：把 gateway 定义的数据存到哪个文件 / 路径(只是『插座插哪』)」。
+> **D3 gateway = 可复用服务 / 存储介质归应用**(client 层 A' 重设计决策 D3)："前端不归gateway管 ... gateway只管提供服务 ... 要考虑复用其他app" + README §2「存储介质(应用做)：把 gateway 定义的数据存到哪个文件 / 路径(只是『插座插哪』)」。D3 是跨模块共享决策,另见 [[01-handoff-interface]] §4、[[04-orch-registry-schema]] §4。
 
 ## 5. 决策 + 动机
 
 1. **endpoint 标准化拆分 + 生成 canonical endpoint_id = ③b 公共(本轮反转，补整块缺漏)**：原 review/旧表述把「前端拆分 / 前端生成 id / `_stable_endpoint_id` 退役」当结论；按判据「用内置协议 SDK 自动拆 + 测 + 生成 canonical id」是任何 app 可复用的 gateway 机制，**反转为 ③b 公共**——拆分 / 协议匹配 / 测试 / 生成 canonical id(规则 `{slug}-{protocol}[-n]`)归 ③b，前端只录入，③a 只 upsert + 存储。**被否的旧表述**：「前端自己拆 endpoint / 前端生成 endpoint_id / `_stable_endpoint_id` 直接退役不替代」。证据：`ux-spec` §6.1 守边界检查(`:375`)「⚠️ 原『前端拆分 / 前端生成 id / `_stable_endpoint_id` 退役』已反转——endpoint 标准化拆分 + canonical id 归 ③b」。
-2. **base_url 保存时归一化(主)+ 调用时幂等(副)**：F1 决策——每 protocol 规则确定统一，存 canonical 最稳；调用时 no-op 双保险保护历史数据。被否：「运行时乱归一化」(之前觉得乱是因为多次实验用错格式，规则其实每 protocol 确定)。deerflow/deepagents **不做**这步 → 没东西可抄，自建(决策记录 `:196`)。
+2. **base_url 保存时归一化(主)+ 调用时幂等(副)**：F1 决策——每 protocol 规则确定统一,存 canonical 最稳;调用时 no-op 双保险保护历史数据。per-protocol 规则:anthropic 去尾 `/v1`(SDK 自加 `/v1/messages`)、openai 保持 provider 接受形状、deepseek-anthropic 去 `/v1` 后补 `/anthropic`、ark openai-compat 用 `.../api/v3`。被否:「运行时乱归一化」(之前觉得乱是因为多次实验用错格式,规则其实每 protocol 确定)。deerflow/deepagents **不做**这步(它们假设 base_url 已对)→ 没东西可抄,自建。(client 层 A' 重设计决策 F1;PM 原话见 §4。)
 3. **保存时归一化比调用时临时归一化更可靠**：resolver、probe、fingerprint、client factory 和 Copilot env 都读同一份 canonical endpoint,减少"测试与运行不是同一路径"的风险(`apps/studio/backend/app/routers/llm.py:460-486`;`packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:144-285`)。
 4. **`credential_ref` 优先于明文下沉 route**：route 会进入 role materialization、fallback event、response metadata 等诊断面,不能把 secret 当普通字段传递;`ResolvedRoute` 只保留 ref 和 fingerprint,降低 secret 泄漏面(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:415-439`)。
 5. **endpoint 与 route 分层是必要边界**：endpoint 代表连接/凭证/protocol,route 代表模型/capability/canonical_id;删除 endpoint 时同步删 route,说明这两个层级不能混成一个 provider 字符串(`apps/studio/backend/app/services/llm_credentials.py:139-155`)。
@@ -197,4 +197,4 @@ MVP1 目标：把「凭证 / 端点」的**数据结构 · 读写契约 · 归�
 - [[04-orch-registry-schema]]：`ProviderEndpoint`/`ProviderRoute`/`ResolvedRoute` schema 字段权威源(本模块只链接)
 - [[10-inv-route-chat-model-factory]]：调用时 base_url 幂等双保险(副归一化落点)
 - [[12-inv-copilot-invocation]]：copilot `_resolve_route_runtime` 消费 credential_ref + base_url
-- 决策记录 `client-layer-decision-record.md` F1/D3 / 归属表 `module-disposition-revised.md` / ux-spec §6.1
+- 本模块 base_url / 凭证决策依据 client 层 A' 重设计 F1/D3(完整逻辑 + PM 原话留底于本文 §4/§5)/ 归属判据见 `module-disposition-revised.md` / `docs/studio/mvp1/01_workflows/00_settings-ux-spec.md` §6.1

@@ -10,7 +10,7 @@ status: drafted
 > **Owns**：定义 gateway 全部 runtime 数据结构(`ProviderEndpoint`/`ProviderRoute`/`RoleEntry`/`ModelProfile`/`ResolvedRoute`/`ResolvedRole`/`RegistrySnapshot`…)、canonical 保守分组、snapshot 加载校验；是其它模块「只链接不复制」的字段权威源
 > **Status**：设计定稿(2026-06，基本已对，**无反转**)；代码 = schema 待补 skipped diagnostics + snapshot provenance(D1 回填)、`canonicalize_model` 保守不变、Studio DTO 剥离边界已对
 > **Related**：[[01-handoff-interface]](`ResolvedRoute/ResolvedRole` 契约消费方)· [[02-orch-role-resolution]](`resolve_role` 用本 schema)· [[03-orch-credentials-endpoints]](`ProviderEndpoint` credential/base_url 字段)· [[05-orch-capabilities-and-models]](`CapabilityValue`/canonical 分组)· [[08-orch-test-status-ssot]](D1 snapshot 版本-stale 交叉)
-> **决策日志**：`.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md` D2/D3 + `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`(04 registry schema = ③b 公共，原 review 已判对，不变)
+> **决策日志**：本模块 schema 作为编排↔调用契约边界,依据 client 层 A' 重设计 D2(编排/调用分离——schema 是交接数据契约)+ D3(gateway 可复用服务,数据结构由它定义)——完整逻辑 + PM 原话留底于本文 §4/§5；归属判据见 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`(04 registry schema = ③b 公共，原 review 已判对，不变)。D2/D3 是跨模块共享决策,另见 [[01-handoff-interface]] §4(route 契约同引 D2/D3)、[[03-orch-credentials-endpoints]] §4(凭证边界同引 D3)。
 > **现状**：见同目录 `baseline.md`
 
 MVP1 目标:把 registry schema 固定为 Studio↔Gateway 的共同契约。Studio 可以有 display/authoring 字段,但 runtime snapshot 只消费 gateway schema;canonical 分组只做保守展示和 profile 组织,不驱动动态 route 选择。
@@ -86,9 +86,9 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 
 > **判据(本模块「schema = ③b / Studio display = ③a」依据)**："换个 app 还原样能用吗?能=③b,不能=③a。"(ux-spec §6.0、`module-disposition-revised.md:15`) → gateway runtime schema 是 gateway 数据模型，任何调模型 app 复用 → **③b 公共**；Studio 的 `display_name` 等是「Studio 怎么展示/编辑」(绑死 UI)→ ③a，投影时剥离。**本模块无反转(原 review 已判对)。**
 
-> **D2 编排/调用分离 → schema 是交接数据契约**(决策记录 `:62-63`)："编排和调用是不是应该更模块化更内聚化, API写清楚, 编排输入什么输出什么. 调用输入什么输出什么" → `ResolvedRoute/ResolvedRole` 作为编排↔调用交接物的数据契约，归 schema 模块。
+> **D2 编排/调用分离 → schema 是交接数据契约**(client 层 A' 重设计决策 D2)："编排和调用是不是应该更模块化更内聚化, API写清楚, 编排输入什么输出什么. 调用输入什么输出什么" → `ResolvedRoute/ResolvedRole` 作为编排↔调用交接物的数据契约，归 schema 模块。D2 是跨模块共享决策,另见 [[01-handoff-interface]] §4(route 契约消费方,同引 D2)、[[03-orch-credentials-endpoints]] §4。
 
-> **D3 gateway = 可复用服务，数据结构由它定义**(决策记录 `:78-80`)："前端不归gateway管 ... gateway只管提供服务 ... 要考虑复用其他app" + README §2「存储介质(应用做)：数据结构与读写由它(gateway)定义，存到哪个介质由应用注入」→ schema 是 gateway 定义的数据结构(③b)，存储位置才是 ③a。
+> **D3 gateway = 可复用服务，数据结构由它定义**(client 层 A' 重设计决策 D3)："前端不归gateway管 ... gateway只管提供服务 ... 要考虑复用其他app" + README §2「存储介质(应用做)：数据结构与读写由它(gateway)定义，存到哪个介质由应用注入」→ schema 是 gateway 定义的数据结构(③b)，存储位置才是 ③a。D3 是跨模块共享决策,另见 [[01-handoff-interface]] §4、[[03-orch-credentials-endpoints]] §4。
 
 > **D1 快照版本失效 → 重探**(R3.2，PM 2026-06-03 需求对账)：见下方「MVP1 回填 — 快照版本失效」整块，PM 要求「ClientSpec/版本变 → 相关就绪证据视为 stale 直到重探」，落到 schema = 给 `RegistrySnapshot` 加版本字段(③b 公共能力)。
 
@@ -99,7 +99,7 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 3. **v4/v2 hard cutover**：为了避免旧 schema 混入 runtime。`_assert_v4_credentials` 拒绝旧 credentials 字段,见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:227-237`;`_assert_supported_roles` 拒绝旧 role schema,见 `:240-261`。
 4. **用 route-chain schema 替代旧 models/providers/active_model schema**：为了让 runtime identifier 变成精确 `route_id`,避免 provider/model 模糊匹配;`ProviderRoute` 强制 `route_id == endpoint_id:route_slug`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:239-244`。
 5. **canonical 分组不用于自动选型(保守)**：canonical 只是保守 grouping key;`canonicalize_model` 默认 `orphan`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/canonical.py:45-49`。保守是为了避免不同 provider 的相似模型名被误合并。
-6. **`models.py` 不承担 registry schema**：为了把「编排数据契约」和「调用实现适配」分开;决策记录也要求编排/调用分离,见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:45-56`。未来 provider wrapper 落调用层模块，不进 registry schema。
+6. **`models.py`(用途:gateway provider SDK wrapper 的预留边界)不承担 registry schema**：为了把「编排数据契约」(`ResolvedRoute/ResolvedRole` 这套 schema)和「调用实现适配」(provider SDK wrapper / ChatX factory)分开。这呼应 client 层 A' 重设计 D2「编排/调用分离」(完整逻辑 + PM 原话见本文 §4「D2」);编排侧产出纯数据 route,调用侧吃 route 构造 ChatX,两者各自内聚。未来 provider wrapper 落调用层模块([[09-inv-invocation-runtime]]/[[10-inv-route-chat-model-factory]]),不进 registry schema。
 
 ## 6. 测试关键点
 
@@ -160,7 +160,7 @@ v4/v2 hard cutover 是为了避免旧 schema 混入 runtime。`_assert_v4_creden
 
 canonical 分组不用于自动选型,是因为 canonical 只是保守 grouping key;`canonicalize_model`(用途:把 provider model id 映射成保守 canonical group key)默认 `orphan`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/canonical.py:45-49`。
 
-`models.py`(用途:gateway provider SDK wrapper 的预留边界)不承担 registry schema,是为了把"编排数据契约"和"调用实现适配"分开;决策记录也要求编排/调用分离,见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:45-56`。
+`models.py`(用途:gateway provider SDK wrapper 的预留边界)不承担 registry schema,是为了把"编排数据契约"和"调用实现适配"分开;这呼应 client 层 A' 重设计 D2「编排/调用分离」(完整逻辑 + PM 原话见本文 §4「D2」、§5 #6),provider wrapper 应落调用层模块而非 schema 模块。
 
 ## 代码索引(clues)
 
@@ -196,7 +196,7 @@ canonical 分组不用于自动选型,是因为 canonical 只是保守 grouping 
 - [[03-orch-credentials-endpoints]]：`ProviderEndpoint` credential/base_url 字段
 - [[05-orch-capabilities-and-models]]：`CapabilityValue` / canonical 分组消费方
 - [[08-orch-test-status-ssot]]：D1 snapshot 版本-stale 交叉(下方回填整块)
-- 决策记录 `client-layer-decision-record.md` D1/D2/D3 / 归属表 `module-disposition-revised.md`
+- 本模块 schema 契约依据 client 层 A' 重设计 D2/D3(完整逻辑 + PM 原话留底于本文 §4/§5)+ D1 快照版本失效(留底于本文末「MVP1 回填」整块)/ 归属判据见 `module-disposition-revised.md`
 
 ---
 

@@ -11,7 +11,7 @@ verified_at: 2026-06-02
 > **Owns**：fallback 事件 payload（含 from/to route 诊断、分类决策、provider status code、effective runtime settings）、三类 Gateway 结构化异常（语义 + 触发点）、callback 发射边界（callback 失败不遮蔽 runtime 错误）
 > **Status**：设计定稿（A' 决策记录已纠正 401/402/403/404 = fallback 非 fail-fast）；代码 = 已实现并测试覆盖，MVP1 只在调用层迁 ChatX 后保留触发位置，不改事件/异常结构
 > **Related**：[[01-handoff-interface]]（route 契约，事件 payload 复用同一 `ResolvedRoute`）· [[06-orch-error-classification]]（`classify_exception` 语义源，本模块只触发不重定义）· [[07-orch-fallback-circuit-probe]]（`_generate` fallback 循环，本模块是它的可观测输出）· [[09-inv-invocation-runtime]]（调用层换 ChatX，异常仍回到本模块分类分支）
-> **决策日志**：`.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md` D1（保留编排外壳）+ M5（错误分类语义）+ §5 兼容性清单第 7 条（fallback event payload 不丢）+ `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`（13 = 纯 ③b 公共，原 review 已判对，不变）
+> **决策日志**：client 层 A' 重设计决策（**完整逻辑 + 用户原话见本文 §4/§5，本模块留底**）—— D1（保留编排外壳，不删 `GatewayChatModel`）+ M5（错误分类真实语义：401/402/403/404 = fallback 非 fail-fast）+ 兼容性验证清单第 7 条（fallback event payload 不丢 from/to route 诊断）；归属表 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`（13 = 纯 ③b 公共，原 review 已判对，不变）。**M5 错误分类语义跨模块共享**，权威源 [[06-orch-error-classification]]；本模块只在分类决策上发事件/抛异常。
 > **现状**：见同目录 `baseline.md`
 
 ## 1. 定义
@@ -70,19 +70,21 @@ MVP1 核心约束：**调用层从自研 `_call_*` 换成原生 ChatX 后，fall
 
 ## 4. 设计决策基础（用户原话）
 
-> **D1 — 否决 A，保留编排外壳**（决策记录 `:40`）："不用留A, 这是错误判断, 正确的是A'。" → A' 只把"每条 route 的实际调用"从自研消息转换换成原生 ChatX，**不删 `GatewayChatModel`**；fallback 事件、probe、熔断、usage、metadata 都还在编排外壳里。因此 fallback event 触发点不随调用层迁移消失。
+> **D1 — 否决 A，保留编排外壳**（client 层 A' 重设计决策，本文留底）。**决策**：resolver/gateway **不**裸返回原生 ChatX、**不**删 `GatewayChatModel`，保留它作为编排外壳，只把「每条 route 的实际调用」从自研消息转换换成原生 langchain ChatX。**否决 A（激进版）的理由**：A =「resolver 直接产 ChatX + 删 GatewayChatModel + 用 `with_fallbacks()`」会回归 fallback / probe / 熔断 / usage / metadata / predict；真机只验证了「调用层换 ChatX 修空-content bug」，**从未验证「删编排层」**；且 `with_fallbacks()` 只按异常类型，表达不了「按 HTTP status 分类」。用户原话：
+> > "不用留A, 这是错误判断, 正确的是A'"
+> → A' 只换调用层，**不删 `GatewayChatModel`**；fallback 事件、probe、熔断、usage、metadata 都还在编排外壳里，因此 fallback event 触发点不随调用层迁移消失。
 
-> **M5 — 错误分类真实语义**（决策记录 `:164`，纠正多处文档错误简写）：**401 / 402 / 403 / 404 = fallback（credential/route scope），不是 fail-fast！** 决策记录原文把 design.md:142「400/401/403/404/422 → fail-fast」判定为错。本模块的 fallback 事件正是在这些 status 走 `fallback_allowed` 分支时发射；写测试时必须按真实语义验证，不能沿用旧简写。
+> **M5 — 错误分类真实语义**（client 层 A' 重设计决策，纠正多处文档错误简写，本文留底）。**真实语义**：**401 / 402 / 403 / 404 = fallback（credential/route scope），不是 fail-fast！**（429/500/502/503/504/529、网络错、400+capability 标记同为 `fallback_allowed`；400 非 capability / 413 / 422 才 `fail_fast`；未知 → `fail_fast_with_route_context`）。决策原文明确把 `design.md:142`「400/401/403/404/422 → fail-fast」判定为错（401/403/404 实为 fallback），并已在那一轮一并更正 `design.md:142`。本模块的 fallback 事件正是在 401/402/403/404 走 `fallback_allowed` 分支时发射；写测试时必须按真实语义验证，不能沿用旧简写。**M5 是跨模块共享决策，权威语义源 [[06-orch-error-classification]]**（`registry/error_classification.py:15-17` 三组状态码常量、`:133-188` 分支、`:83-88` action→decision 映射）。
 
-> **§5 兼容性清单第 7 条**（决策记录 `:274`）："fallback event payload 仍带 from/to route 诊断。" → 这是 A' 迁移的硬性兼容闸口：调用层换 ChatX 后，事件 payload 不得丢失 route diagnostics。
+> **兼容性验证清单第 7 条**（client 层 A' 重设计决策的「A' 实现必过」清单，本文留底）。**要求**："fallback event payload 仍带 from/to route 诊断。" → 这是 A' 迁移的硬性兼容闸口：调用层换 ChatX 后，事件 payload 不得丢失 route diagnostics。
 
 ## 5. 决策 + 动机
 
 1. **事件 DTO 放在 Gateway 包内**，是为了 Gateway 不 import Graph Agent execution internals；MVP0 alignment 明确 Gateway 自己拥有 fallback event DTO 和 gateway base exception，见 `docs/graph-agent-gateway/mvp0/mvp0-alignment.md:78`。**被否的近路**：复用 graph_agent 的 execution event/exception → 会让 ③b 公共网关反向依赖某个 engine 的内部类型，破坏可复用性。
 2. **fallback event 通过 callback adapter 发射**，是为了对齐 tracing 底座而不是在 Gateway 内直接处理 callback 循环；MVP0 alignment 已记录 GW-3 完成，见 `docs/graph-agent-gateway/mvp0/mvp0-alignment.md:41`。
 3. **结构化异常替代纯文本 RuntimeError**，是为了 Studio/trace 能读 `last_error_chain` 而不是解析自由文本，见 `docs/graph-agent-gateway/mvp0/mvp0-alignment.md:29`。
-4. **A' 迁移不能丢 fallback event**：决策记录的兼容性清单要求 fallback event payload 仍带 from/to route 诊断，见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:274`（§5 第 7 条）；D1 明确 `_generate` 中 fallback/probe/mark-down/usage/metadata 是编排职责，见 `client-layer-decision-record.md:30` 和 `client-layer-decision-record.md:36`。
-5. **异常分类不变**：决策记录 M5 明确 `classify_exception` 沿用，并纠正 401/402/403/404 是 fallback 不是 fail-fast，见 `client-layer-decision-record.md:164`。本模块只在分类决策上发事件/抛异常，分类语义本身归 [[06-orch-error-classification]]。
+4. **A' 迁移不能丢 fallback event**：兼容性验证清单第 7 条要求 fallback event payload 仍带 from/to route 诊断（见本文 §4 留底）；D1 明确 `_generate` 中 fallback/probe/mark-down/usage/metadata 是编排职责（坐实点：`gateway_chat_model.py:111-271` — 熔断跳过 `:113`、probe `:115`、分类 `:124,238`、mark-down `:135,249`、fallback event `:136,250`、usage `:227`、metadata `:313-357`），故调用层迁移不动这些。
+5. **异常分类不变**：M5 明确 `classify_exception` 沿用，并纠正 401/402/403/404 是 fallback 不是 fail-fast（见本文 §4 留底）。本模块只在分类决策上发事件/抛异常，分类语义本身归 [[06-orch-error-classification]]。
 6. **callback 失败不能遮蔽 runtime 错误**：观测层是旁路，不应让一个坏 callback 把真实的模型调用错误吞掉或顶替；当前测试验证 failing callback 后仍能给后续 callback 发 event，见 `packages/graph-agent-gateway/tests/test_llm_fallback_event.py:67`。
 
 ## 6. 测试关键点
@@ -141,4 +143,4 @@ MVP1 核心约束：**调用层从自研 `_call_*` 换成原生 ChatX 后，fall
 - [[06-orch-error-classification]]：`classify_exception` 真实语义（401/402/403/404 = fallback），本模块只触发不重定义
 - [[07-orch-fallback-circuit-probe]]：`_generate` fallback 循环（本模块是它的可观测输出 + 异常出口）
 - [[09-inv-invocation-runtime]]：调用层换 ChatX（dispatch 异常来源变化，触发分支不变）
-- 决策记录 `client-layer-decision-record.md` D1 / M5 / §5 第 7 条 + 归属表 `module-disposition-revised.md`
+- **client 层 A' 重设计决策 D1 / M5 / 兼容性清单第 7 条**：完整逻辑 + 用户原话见本文 §4/§5（本模块留底）；M5 共享语义源 [[06-orch-error-classification]]。归属表 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`

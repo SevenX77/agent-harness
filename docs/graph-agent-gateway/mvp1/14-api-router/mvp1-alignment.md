@@ -11,7 +11,7 @@ status: drafted
 > **Status**：设计定稿；代码 = `routers/llm.py` 约 4960 行巨型 router，MVP1 标注每端点 delegate 去向 + 登记拆分待办，**本轮不动代码**。
 > **⚠️ 内核 vs 适配壳**：文档内凡出现 **base_url 归一化 / capability 归一化·对比 / probe 策略（批批打·命中停·结构错短路）/ materialize 编排 / 6 态标准总结 / draft 知识库 / endpoint 标准化拆分** 的逻辑，其**能力内核属 ③b 公共（现散 ③a 待下沉）**；router 自身**仅 HTTP glue**（解析 DTO + 状态码映射 + 调 service + job/进度包装 + 落存储）。判据权威源：`packages/graph-agent-gateway/README.md` §2 + ux-spec §6.1 逐操作归属表（A1–A12）。
 > **Related**：[[02-orch-role-resolution]]（materialize/`resolve_role` 内核，router 的 `_role_effective_runtime_settings`/`_materialize_roles_for_response` 调它）· [[03-orch-credentials-endpoints]]（base_url 归一化 + endpoint 拆分内核，`put_registry_endpoints` 调它）· [[05-orch-capabilities-and-models]]（capability/profile/lint 内核，probe 端点调它）· [[07-orch-fallback-circuit-probe]]（route probe + 熔断 health store）· [[08-orch-test-status-ssot]]（6 态投影 + draft 知识库）· [[12-inv-copilot-invocation]]（Copilot ws/test 端点 delegate 去向）
-> **决策日志**：`.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md` D3（gateway 可复用、前端不归 gateway、router = studio 适配器非核心，`:73`）+ `docs/graph-agent-gateway/mvp1/module-disposition-revised.md` 行 47（14 routers = ③a 应用/薄壳适配）+ ux-spec §6.1/§6.3
+> **决策日志**：client 层 A' 重设计决策（**完整逻辑 + 用户原话见本文 §4/§5，本模块留底**）—— D3（gateway 可复用、前端不归 gateway、router = studio 适配器非 gateway 核心）+ F1（base_url 保存时归一化，见本文 §5 第 2 条）；归属表 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md` 行 47（14 routers = ③a 应用/薄壳适配）+ ux-spec §6.1/§6.3。**D3 跨模块共享**，另见 [[12-inv-copilot-invocation]]（copilot SDK 调用据 D3 判 ③a）；**F1 共享决策**权威源 [[03-orch-credentials-endpoints]]。
 > **现状**：见同目录 `baseline.md`
 
 ## 1. 定义
@@ -50,15 +50,17 @@ status: drafted
 
 ## 4. 设计决策基础（用户原话）
 
-> **D3 — Gateway = 可复用服务，前端不归 gateway，router = studio 适配器非核心**（决策记录 `:78`）："前端不归gateway管, 前端是studio的前端, gateway只管提供服务, 所以模块功能分个清楚, API怎么提供要写清楚, 要考虑复用其他app。" → `routers/llm.py`/`routers/copilot.py` 是 studio 的 HTTP 适配器（消费方），**非 gateway 核心**；底下调的 service（动脑逻辑）应迁入 gateway 包。
+> **D3 — Gateway = 可复用服务，前端不归 gateway，router = studio 适配器非核心**（client 层 A' 重设计决策，本文留底）。**决策**：gateway 只提供服务（编排 + 调用），**不含任何前端**；前端是 **studio 的前端**，studio 只是 gateway 的一个消费方；gateway 必须设计清晰对外 API 供其他 app 复用。**含义（本模块的直接依据）**：`routers/llm.py`、`routers/copilot.py` = studio 的 HTTP 适配器（消费方），**非 gateway 核心**；而 `apps/studio/backend/app/services/llm_*`（动脑 services）= **应迁入 gateway 包**。用户原话：
+> > "前端不归gateway管, 前端是studio的前端, gateway只管提供服务, 所以模块功能分个清楚, API怎么提供要写清楚, 要考虑复用其他app"
+> → 故本模块定性为薄适配壳、能力内核下沉。D3 是跨模块共享决策，另见 [[12-inv-copilot-invocation]]（copilot SDK 调用同据 D3 判 ③a）。
 
 > **判据铁律（ux-spec §6.0 第四轮反转）**："换个 app 还原样能用吗？能=③b 公共，不能（绑死那四件事之一）=③a。" → HTTP 端点形状、job/进度包装绑死了 studio 的调用方式 → router 留 ③a；但端点底下的 base_url 归一化 / capability / probe 策略 / materialize / 6 态 / draft 内核 = ③b 公共，应下沉。
 
 ## 5. 决策 + 动机
 
 1. **API 层不应成为编排/调用混合层**。A' 决策（D2）要求编排输出 route、调用层消费 route；router 如果继续直接藏 probe、profile、materialize、SDK 调用细节，后续很难判断某个失败属于 HTTP 输入、编排选择还是真实调用。**因此本模块定性为薄适配壳，内核下沉。**
-2. **保存时归一化 base_url 比运行时临时修正更稳**。HTTP save 端点是 endpoint 数据进入 active credentials 的边界；在这里（经 ③b 内核）归一化可让 graph-agent、Copilot、probe 三条路径拿到同一 canonical 数据，见决策记录 F1（`client-layer-decision-record.md:188`）。
-3. **Test endpoint 必须贴近真实运行路径**，因为 MVP0 素材和决策记录都指出"裸 SDK 单次 probe"不能证明 agent loop 能跑。现状 `_probe_copilot_sdk_tool_call`（Copilot SDK 测试探针，实际用 `AsyncAnthropic`）就是要修的反例，见 `routers/llm.py:2150-2172`；目标见 [[12-inv-copilot-invocation]]。
+2. **保存时归一化 base_url 比运行时临时修正更稳**（client 层 A' 重设计决策 F1）。**决策**：主 = credential 保存时归一化（每 endpoint 存确定的 canonical 格式，每 protocol 规则固定），副 = 调用时幂等归一化做双保险（已 canonical 则 no-op）。HTTP save 端点是 endpoint 数据进入 active credentials 的边界；在这里（经 ③b 内核）归一化可让 graph-agent、Copilot、probe 三条路径拿到同一 canonical 数据。用户原话："base_url 归一化的关键是每个protocol都有确定的统一的规则 ... 如果结果足够确定, 我觉得放在credential保存时归一化是最好的, 每个endpoint都有固定格式, 存这个固定格式保证不会出错"。**F1 共享决策权威源 [[03-orch-credentials-endpoints]]**（每 protocol canonical 规则 + 保存路径），本模块只钉「save 端点必须调到归一化 service」。
+3. **Test endpoint 必须贴近真实运行路径**，因为 MVP0 素材与 client 层 A' 重设计决策都指出"裸 SDK 单次 probe"不能证明 agent loop 能跑。现状 `_probe_copilot_sdk_tool_call`（Copilot SDK 测试探针，实际用 `AsyncAnthropic`）就是要修的反例，见 `routers/llm.py:2150-2172`；目标见 [[12-inv-copilot-invocation]]。
 4. **保留 model profile 作为 authoring abstraction**，是为了让前端复用"Claude Opus thinking"这类组合，但 runtime 只执行 role 保存的 route chain。现状 `apply_model_profile` 已把 profile snapshot 写入 role，见 `routers/llm.py:1279-1309`，这符合"profile 修改不隐式改变已有 role"的方向。
 5. **拆 router 是为了降低理解成本而不是改变行为**。`routers/llm.py` 已经超过 4900 行，文档只能按 endpoint 家族讲；代码后续也应按同样家族拆分（能力内核下沉 ③b，studio 适配留 ③a），否则每个 MVP1 改动都要穿越整座文件。**被否的近路**：把内核也留在 router"图省事" → 违反 D3「gateway 可复用」+ 让公共能力被 studio HTTP 壳绑死。
 
@@ -128,4 +130,4 @@ status: drafted
 - [[07-orch-fallback-circuit-probe]]：route probe + 熔断 health store
 - [[08-orch-test-status-ssot]]：6 态投影 + draft 知识库内核
 - [[12-inv-copilot-invocation]]：Copilot ws/test 端点的调用层目标（假测试修正）
-- 决策记录 `client-layer-decision-record.md` D3 + 归属表 `module-disposition-revised.md` 行 47 + ux-spec §6.1/§6.3
+- **client 层 A' 重设计决策 D3 + F1**：完整逻辑 + 用户原话见本文 §4/§5（本模块留底）；D3 共享见 [[12-inv-copilot-invocation]]，F1 共享源 [[03-orch-credentials-endpoints]]。归属表 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md` 行 47 + ux-spec §6.1/§6.3

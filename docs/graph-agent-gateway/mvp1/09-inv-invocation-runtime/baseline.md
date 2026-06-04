@@ -80,18 +80,18 @@ verified_at: 2026-06-02
 
 | 主题 | baseline 现状 | MVP1 方向 |
 |---|---|---|
-| 调用方式 | `LLMClientManager._call_*` 手写每个 provider 的请求 payload 和响应解析，见 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:440-988`。 | 改成原生 LangChain ChatX invoke；ChatX 负责消息转换、调用和输出解析，权威决策见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:92-97`。 |
-| 消息形状 | `_langchain_messages_to_dict` 把 LangChain message 拍成 dict，见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:661-692`。 | 原始 `BaseMessage` 交给 ChatX，system prefix 以 LangChain message 方式插入或合并，权威决策见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:101-117`。 |
-| thinking content | `_anthropic_content_text` 和 `_coerce_text` 都会把输出收敛成字符串，见 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:1296-1304` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:645-646`。 | 保留 ChatX 的 content blocks，不用旧 `_coerce_text` 拍平，权威决策见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:208-212`。 |
-| usage | 旧 dict response 带 `"usage"`，`_build_chat_result` 把它写入 metadata 和 llm_output，见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:318-356`。 | 从 ChatX `AIMessage.usage_metadata` 取 usage，再注入 route metadata，权威决策见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:216-220`。 |
+| 调用方式 | `LLMClientManager._call_*` 手写每个 provider 的请求 payload 和响应解析，见 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:440-988`。 | 改成原生 LangChain ChatX invoke；ChatX 负责消息转换、调用和输出解析。决策依据见同目录 `mvp1-alignment.md` §4/§5（client 层 A' 重设计决策：M2 把 client_manager 5 件事拆开，只退役"消息转换 + provider 调用"，换 ChatX）。 |
+| 消息形状 | `_langchain_messages_to_dict` 把 LangChain message 拍成 dict，见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:661-692`。 | 原始 `BaseMessage` 交给 ChatX，system prefix 以 LangChain message 方式插入或合并。决策依据见同目录 `mvp1-alignment.md` §4/§5（A' 调用层只改 `_generate` 第 1/5/7 步，把消息准备从拍 dict 换成原始 `BaseMessage` 交 ChatX）。 |
+| thinking content | `_anthropic_content_text` 和 `_coerce_text` 都会把输出收敛成字符串，见 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:1296-1304` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:645-646`。 | 保留 ChatX 的 content blocks，不用旧 `_coerce_text` 拍平。决策依据见同目录 `mvp1-alignment.md` §4/§5（F4 thinking blocks 不拍平）。 |
+| usage | 旧 dict response 带 `"usage"`，`_build_chat_result` 把它写入 metadata 和 llm_output，见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:318-356`。 | 从 ChatX `AIMessage.usage_metadata` 取 usage，再注入 route metadata。决策依据见同目录 `mvp1-alignment.md` §4/§5（F5 usage/metadata：从 `usage_metadata` 取 token 喂观测，route metadata augment 进 `AIMessage`）。 |
 | 截断升级 | `_call_with_token_escalation` 在 client manager 内部，见 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:990-1012`。 | 保留策略但搬到 07 编排层，09 不再把它当 provider SDK wrapper 的一部分。 |
 | SDK wrapper 边界 | `models.py` 是空边界，真实 wrapper 逻辑散在 `client_manager.py`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/models.py:1-9`。 | 新的 route → ChatX 工厂和 provider profile 在 10/11 写，09 只写运行时 invoke 和结果桥接。 |
 
 ## 决策原因
 
-当前自研调用层的问题不是“不能调用”，而是它重复实现了 LangChain ChatX 已经稳定处理的消息转换、provider payload 和响应解析；权威记录把这部分拆成“消息转换 → ChatX 取代、provider 调用/解析 → ChatX 取代、截断升级 → 保留搬家”，见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:82-97`。
+当前自研调用层的问题不是“不能调用”，而是它重复实现了 LangChain ChatX 已经稳定处理的消息转换、provider payload 和响应解析；client 层 A' 重设计决策把这部分拆成“消息转换 → ChatX 取代、provider 调用/解析 → ChatX 取代、截断升级 → 保留搬家”（M2 拆解，完整逻辑见同目录 `mvp1-alignment.md` §5 决策 2 + §2 第 5/6 步）。
 
-保留 `GatewayChatModel._build_chat_result` 的原因是 route metadata 仍要贴回 LangChain 结果；但它的输入不应再是旧 dict response，而应是 ChatX 返回的 `AIMessage`，目标见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:216-220`。
+保留 `GatewayChatModel._build_chat_result` 的原因是 route metadata 仍要贴回 LangChain 结果；但它的输入不应再是旧 dict response，而应是 ChatX 返回的 `AIMessage`（F5 usage/metadata，完整逻辑见同目录 `mvp1-alignment.md` §4 / §5 决策 4）。
 
 ## 代码索引 clues
 

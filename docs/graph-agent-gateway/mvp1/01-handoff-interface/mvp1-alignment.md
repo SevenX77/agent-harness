@@ -11,7 +11,7 @@ verified_at: 2026-06-02
 > **Owns**：定义编排↔调用的唯一交接物 `ResolvedRoute/ResolvedRole` 契约，并把「role→route」暴露为两级对外公共 API(role 级已有、route 级待补)；**不调模型**
 > **Status**：设计定稿(2026-06 判据第四轮 + D3 两级 API 钉死)；代码 = route 级直调 public API 待新增、`ModelResolverProtocol` 待补 route-first 返回、`__init__` 待导出 route handoff 类型
 > **Related**：[[02-orch-role-resolution]](resolve_role/materialize 产出本契约)· [[04-orch-registry-schema]](`ResolvedRoute/ResolvedRole` 字段权威源)· [[09-inv-invocation-runtime]](调用层消费本契约)· [[10-inv-route-chat-model-factory]](`ResolvedRoute`→ChatX)· [[12-inv-copilot-invocation]](route 级消费方，已并入本模块)
-> **决策日志**：`.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md` D2 + D3 + `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`(01 = ③b 公共，**补 route 级直调 public API**)
+> **决策日志**：本模块 route 契约依据 client 层 A' 重设计决策 D2(编排/调用分离)+ D3(gateway 可复用服务、API 一等公民、两级接口)——完整逻辑 + PM 原话留底于本文 §4/§5；归属判据见 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`(01 = ③b 公共，**补 route 级直调 public API**)。D2/D3 是跨模块共享决策,另见 [[04-orch-registry-schema]](schema 作为编排↔调用交接数据契约同引 D2/D3)、[[09-inv-invocation-runtime]](调用层落 D2「调用」侧)。
 > **现状**：见同目录 `baseline.md`
 
 > 本文按 A' 决策记录写目标：保留 `GatewayChatModel`(用途:把 `ResolvedRole` 包成 LangChain chat model 并在内部跑 fallback/熔断/probe/usage 的编排外壳)编排外壳，但把 `ResolvedRoute/ResolvedRole` 升级为编排和调用的唯一交接物。代码事实仍以当前源码行号为准，不把目标当成已实现。
@@ -43,7 +43,7 @@ MVP1 目标：让 **route(`ResolvedRoute`/`ResolvedRole`)成为编排层和调�
 1. 编排输入：调用方传 `role_name` 和可选 override。当前协议字段是 `role_name` 与 `model_override`，见 `protocol.py:30` 和 `protocol.py:33`；MVP1 语义应明确 override 是 route override，或更名为 route override。
 2. 编排解析：resolver 调用 registry `resolve_role()`(用途:把一个 role 展开成有序 `ResolvedRoute` 链，逐条 join route/endpoint/credential/profile/runtime settings，不调模型)，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:33`、`registry/resolver.py:55`、`registry/resolver.py:77`。
 3. 编排输出：resolver 返回 `ResolvedRole`，其中 `routes` 是 fallback 顺序，`runtime_policy` 是探活/熔断/截断升级策略，见 `registry/schema.py:455` 和 `registry/schema.py:456`。
-4. Graph Agent 调用消费(role 级)：Graph Agent 仍可以拿 `GatewayChatModel`，但该 model 内部只应把 `ResolvedRoute` 交给调用层工厂/ChatX，不再自研消息转换，决策记录指出 A' 改 `_generate`(用途:`GatewayChatModel` 的 fallback 执行循环，遍历 routes 做 probe/dispatch/usage/event)的消息准备、dispatch、结果构建三步，见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:83`。
+4. Graph Agent 调用消费(role 级)：Graph Agent 仍可以拿 `GatewayChatModel`，但该 model 内部只应把 `ResolvedRoute` 交给调用层工厂/ChatX，不再自研消息转换。按 client 层 A' 重设计,`_generate`(用途:`GatewayChatModel` 的 fallback 执行循环，遍历 routes 做 probe/dispatch/usage/event)只改「消息准备 / dispatch / 结果构建」三步(调用层),保留遍历/熔断/probe/usage/异常分类(编排层);这正是 D2 编排/调用分离在 `_generate` 内的体现(决策动机见本文 §5)。
 5. Copilot 调用消费(route 级)：Studio Copilot 应拿同一份 `ResolvedRoute`，再由 `claude_agent_sdk` 自己调用；当前 `stream_query`(用途:Copilot WebSocket 业务入口，解析 route 后用 Claude SDK 调)已有这个方向，但 helper 在 service 内部，没走对外 public API，见 `apps/studio/backend/app/services/copilot.py:210` 和 `copilot.py:419`。
 6. 交接边界：route 是唯一交接物，调用层不得重新按 provider/model 猜测或动态选择。MVP0 alignment 明确禁止 capability/price/latency/availability 搜索替代 route，见 `docs/graph-agent-gateway/mvp0/mvp0-alignment.md:118`。
 
@@ -72,9 +72,9 @@ MVP1 目标：让 **route(`ResolvedRoute`/`ResolvedRole`)成为编排层和调�
 
 > **判据(本模块「route 级直调 API 归 ③b」依据)**："换个 app 还原样能用吗?能=③b,不能=③a。"(`module-disposition-revised.md:15`、ux-spec §6.0) → 「给 app 解析好 route 让它自己调」是任何调模型 app 的通用需求(不绑死 UI/产品策略/调用方式/存储)→ **③b 公共**。Copilot WS 事件是 Studio 自己怎么把 route 用出去(绑死 copilot 语义 + Claude SDK 调用方式)→ ③a 应用，但它**引用** route ≠ 泄漏。
 
-> **D2 编排/调用分离 + copilot 用例**(决策记录 `:62-63`)："你只要知道谁跟你说我现在要调copilot, 把copilot解析好的route给我, 你就给他, 就ok了, 这是调copilot的路径,你只负责输出编排结果, 不负责调用. 所以这里还引申出一个问题, 编排和调用是不是应该更模块化更内聚化, API写清楚, 编排输入什么输出什么. 调用输入什么输出什么"
+> **D2 编排/调用分离 + copilot 用例**(client 层 A' 重设计决策 D2)："你只要知道谁跟你说我现在要调copilot, 把copilot解析好的route给我, 你就给他, 就ok了, 这是调copilot的路径,你只负责输出编排结果, 不负责调用. 所以这里还引申出一个问题, 编排和调用是不是应该更模块化更内聚化, API写清楚, 编排输入什么输出什么. 调用输入什么输出什么" —— 这条 D2 是跨模块共享决策,另见 [[04-orch-registry-schema]] §4(schema 同引 D2 作交接数据契约)、[[09-inv-invocation-runtime]](D2「调用」侧落点)。
 
-> **D3 gateway = 可复用服务 / API 一等公民 / 两级 API**(决策记录 `:78-80`)："前端不归gateway管, 前端是studio的前端, gateway只管提供服务, 所以模块功能分个清楚, API怎么提供要写清楚, 要考虑复用其他app" —— 直接支撑「route 级直调 API 升级为已定 ③b 公共 API」。
+> **D3 gateway = 可复用服务 / API 一等公民 / 两级 API**(client 层 A' 重设计决策 D3)："前端不归gateway管, 前端是studio的前端, gateway只管提供服务, 所以模块功能分个清楚, API怎么提供要写清楚, 要考虑复用其他app" —— 直接支撑「route 级直调 API 升级为已定 ③b 公共 API」。D3 是跨模块共享决策,另见 [[03-orch-credentials-endpoints]] §4、[[04-orch-registry-schema]] §4(均同引 D3 划分 ③b 公共边界)。
 
 > **§0 #3 copilot 取 route 自己调**(ux-spec `:17`)："copilot和llm roles类似, 只是copilot的role 只能填一个 model group, 并且测试走 copilot 自己的调用, 测试和真实调用没什么区别" —— copilot 拿 route、用自己的 SDK 调(③a 调用方式)，gateway 只给 route(③b)。
 
@@ -83,8 +83,8 @@ MVP1 目标：让 **route(`ResolvedRoute`/`ResolvedRole`)成为编排层和调�
 ## 5. 决策 + 动机
 
 1. **route 级直调 public API = 已定 ③b 新增要求(本轮反转)**：原 baseline/alignment 把它记为「待主控确认 handoff API 形状」；按 D3 + 判据，「给 app 解析好 route 让它自己调」是 gateway 必须提供的公共服务，**反转升级为已定 ③b 新增要求**——两级接口都钉死(role 级已有、route 级待补)。被否的旧表述：「route 形状待主控拍板」。
-2. **A' 否决「resolver 直接产 ChatX + 删 `GatewayChatModel`」**：`GatewayChatModel` 保留编排职责，避免丢失 fallback/probe/熔断/usage/metadata，见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:22` 和 `client-layer-decision-record.md:28`。
-3. **编排/调用分离是为了解决 Copilot 路径**：决策记录明确 Copilot 只需要「解析好的 route」，Gateway 不负责调用 Copilot，见 `client-layer-decision-record.md:47` 和 `client-layer-decision-record.md:54`。
+2. **A' 否决「resolver 直接产 ChatX + 删 `GatewayChatModel`」**：A'(温和版,保留编排外壳)否决了 A(激进版,resolver 直接裸返回 ChatX + 删 `GatewayChatModel` + 用 `with_fallbacks()`)。理由:第八轮真机只验证了「调用层换 ChatX 修空-content bug」,从未验证「删编排层」;而 fallback/probe/熔断/usage/metadata 全在 `GatewayChatModel._generate` 里,删掉就回归;且 `with_fallbacks()` 只按异常类型,表达不了我们「按 HTTP status 分类」的 fallback 语义。所以保留 `GatewayChatModel` 作编排外壳。(client 层 A' 重设计决策 D1;PM 原话见 §4「不用留A, 这是错误判断, 正确的是A'」。)
+3. **编排/调用分离是为了解决 Copilot 路径**：Copilot 只需要「解析好的 route」,拿 route 后用自己的 `claude_agent_sdk` 跑,Gateway 不负责调用 Copilot——所以编排(决定该用哪条 route)和调用(真正发请求)应做成两个内聚模块、各有清晰 API。(client 层 A' 重设计决策 D2;PM 原话见 §4。跨模块共享:[[04-orch-registry-schema]] 把 `ResolvedRoute/ResolvedRole` 定为这条交接边界的数据契约、[[09-inv-invocation-runtime]] 是「调用」侧落点。)
 4. **route-first 契约避免两套消费方各自解释配置**：当前 Graph Agent 通过 model 间接消费 route，Copilot service 通过 `_resolve_copilot_runtime()`(用途:Copilot service 内部 helper，解析 `copilot_chat` role 取 routes + credential provider)直接消费 route，见 `llm_phase_node.py:173` 和 `copilot.py:419`。两条路径应收敛到同一 handoff API。
 5. **route 契约必须保留 runtime settings 来源**：provider runtime matrix 说明 effective runtime settings 的来源顺序和元数据用途，见 `docs/graph-agent-gateway/mvp0/provider-runtime-settings-matrix.md:32` 和 `provider-runtime-settings-matrix.md:42`。
 6. **不照抄 MVP0 旧模型**：MVP0 baseline 已声明旧 `ResolvedRole.call_chain/ResolvedProvider` 模型过时，见 `docs/graph-agent-gateway/mvp0/baseline.md:8`；当前源码是 `ResolvedRole.routes`，见 `registry/schema.py:456`。
@@ -138,8 +138,8 @@ MVP1 目标：让 **route(`ResolvedRoute`/`ResolvedRole`)成为编排层和调�
 
 ## 决策原因(详细，承上 §5)
 
-1. A' 否决「resolver 直接产 ChatX + 删除 `GatewayChatModel`」。`GatewayChatModel` 保留编排职责，避免丢失 fallback/probe/熔断/usage/metadata，见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:22` 和 `client-layer-decision-record.md:28`。
-2. 编排/调用分离是为了解决 Copilot 路径。决策记录明确 Copilot 只需要「解析好的 route」，Gateway 不负责调用 Copilot，见 `client-layer-decision-record.md:47` 和 `client-layer-decision-record.md:54`。
+1. A' 否决「resolver 直接产 ChatX + 删除 `GatewayChatModel`」。`GatewayChatModel` 保留编排职责，避免丢失 fallback/probe/熔断/usage/metadata(完整否决理由 + PM 原话见本文 §4「A' 保留编排外壳」、§5 #2;源自 client 层 A' 重设计决策 D1)。
+2. 编排/调用分离是为了解决 Copilot 路径。Copilot 只需要「解析好的 route」，Gateway 不负责调用 Copilot,拿 route 后用自己的 `claude_agent_sdk` 跑(完整逻辑 + PM 原话见本文 §4「D2 编排/调用分离」、§5 #3;源自 client 层 A' 重设计决策 D2,跨模块共享见 [[04-orch-registry-schema]]/[[09-inv-invocation-runtime]])。
 3. route-first 契约避免两套消费方各自解释配置。当前 Graph Agent 通过 model 间接消费 route，Copilot service 通过 `_resolve_copilot_runtime()` 直接消费 route，见 `llm_phase_node.py:173` 和 `copilot.py:419`。
 4. route 契约必须保留 runtime settings 来源。provider runtime matrix 说明 effective runtime settings 的来源顺序和元数据用途，见 `docs/graph-agent-gateway/mvp0/provider-runtime-settings-matrix.md:32` 和 `provider-runtime-settings-matrix.md:42`。
 5. 不照抄 MVP0 旧模型。MVP0 baseline 已声明旧 `ResolvedRole.call_chain/ResolvedProvider` 模型过时，见 `docs/graph-agent-gateway/mvp0/baseline.md:8`；当前源码是 `ResolvedRole.routes`，见 `registry/schema.py:456`。
@@ -164,7 +164,7 @@ MVP1 目标：让 **route(`ResolvedRoute`/`ResolvedRole`)成为编排层和调�
 - [[09-inv-invocation-runtime]]：调用层如何消费本契约 route
 - [[10-inv-route-chat-model-factory]]：`ResolvedRoute`→原生 ChatX 的工厂
 - [[12-inv-copilot-invocation]]：route 级消费方(模块 12 已降为 stub 并入本模块)
-- 决策记录 `client-layer-decision-record.md` D2/D3 / 归属表 `module-disposition-revised.md`
+- 本模块 route 契约依据 client 层 A' 重设计决策 D2/D3(完整逻辑 + PM 原话留底于本文 §4/§5)/ 归属判据见 `module-disposition-revised.md`
 
 ## 待办/疑点(原始留底，承上 §8)
 

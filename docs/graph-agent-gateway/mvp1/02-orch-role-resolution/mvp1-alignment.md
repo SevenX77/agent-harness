@@ -10,7 +10,7 @@ status: drafted
 > **Owns**：接收角色编排结构（fallback_chain + 意图），解析成有序可执行 `ResolvedRoute` 链 + 跳过诊断；**不调模型**
 > **Status**：设计定稿（2026-06 判据第四轮反转）；代码 = resolve_role 待补跳过语义 + route 级 API、materialize 待下沉
 > **Related**：[[01-handoff-interface]]（route 契约）· [[04-orch-registry-schema]]（schema 权威源）· [[05-orch-capabilities-and-models]]（capability/lint）· [[08-orch-test-status-ssot]]（6 态投影，materialize 消费）· [[12-inv-copilot-invocation]]（route 级消费方）
-> **决策日志**：`.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md` D2 + `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`
+> **决策依据**：client 层 A' 重设计决策（D1 A' / D2 编排-调用分离，完整逻辑 + PM 原话见本文 §4/§5）+ 归属表 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`
 > **现状**：见同目录 `baseline.md`
 
 ## 1. 定义
@@ -68,15 +68,15 @@ MVP1 目标：把 role→route 变成一等编排 API。编排层只返回有序
 
 > **判据（本轮反转 materialize 归属）**："换个 app 还原样能用吗？能=③b，不能=③a。" → materialize 的意图过滤/降级/排链是 fallback 机制内在需求，任何调模型 app 都要 → **③b 公共**（原误判 ③a authoring）。
 
-> **D2 编排/调用分离**（决策记录 `:62-63`）："你只要知道谁跟你说我现在要调 copilot，把 copilot 解析好的 route 给我，你就给他……编排和调用是不是应该更模块化更内聚化，API 写清楚，编排输入什么输出什么。"
+> **D2 编排/调用分离**（PM 原话；client 层共享决策，另见 [[01-handoff-interface]] §4 / [[09-inv-invocation-runtime]] §4）："你只要知道谁跟你说我现在要调 copilot，把 copilot 解析好的 route 给我，你就给他……编排和调用是不是应该更模块化更内聚化，API 写清楚，编排输入什么输出什么。"
 
-> **A' 保留编排外壳**（决策记录 `:40`）："不用留 A，这是错误判断，正确的是 A'。" → 保留 `GatewayChatModel`，fallback/probe/熔断/usage/metadata 留编排外壳。
+> **A' 保留编排外壳**（PM 原话；client 层共享决策，另见 [[09-inv-invocation-runtime]] §4）："不用留 A，这是错误判断，正确的是 A'。" → 保留 `GatewayChatModel`，fallback/probe/熔断/usage/metadata 留编排外壳。
 
 ## 5. 决策 + 动机
 
 - **materialize 编排内核 = ③b 公共（本轮反转）**：意图驱动的能力编排是 fallback 机制内在需求，换 app 还要。**被否**：旧 §6 判它"③a authoring 投影 / 属产品解释 / 不是 Gateway runtime schema"。现实现散 ③a `llm_role_materializer.py` 待下沉；materialization_report 渲染留 ③a。
-- **把 role→route 做成一等 API**：架构决策要求编排/调用分离——编排层只决定 route，调用层才执行 provider 调用；决策记录明示输入输出边界，见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:45-56`。
-- **保留 `GatewayChatModel`**：决策记录否决了"resolver 直接返回原生 ChatX + 删除编排外壳"的方案；fallback、probe、熔断、usage、metadata 都还在编排外壳里，见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:28-39`。
+- **把 role→route 做成一等 API**（D2 编排/调用分离）：编排层只决定"该用哪条 route"，调用层才执行 provider 调用；copilot 走 `claude_agent_sdk` 不归 gateway 调，只问 gateway 要 route。PM 原话见 §4；client 层共享决策，另见 [[01-handoff-interface]] §5 / [[09-inv-invocation-runtime]] §5。
+- **保留 `GatewayChatModel`**（A'，否决激进版 A）：否决"resolver 直接返回原生 ChatX + 删编排外壳 + 用 `with_fallbacks()`"——它会回归 fallback/probe/熔断/usage/metadata，且 `with_fallbacks()` 只按异常类型分流、表达不了"按 HTTP status 分类"；第八轮真机只验证了"换 ChatX 修空-content bug"，从未验证"删编排层"。fallback、probe、熔断、usage、metadata 都还在编排外壳里。PM 原话见 §4；client 层共享决策，另见 [[09-inv-invocation-runtime]] §5。
 - **跳过普通 fallback 链里的坏 route**：fallback chain 的意义是"按顺序尝试候选"；第一条暂未配置时直接崩，会破坏后续已配置 route 的执行机会，当前崩点见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:56-71`。
 - **`model_override` 继续作为精确 route override**：MVP1 schema 的 execution identifier 是 `route_id`，不是 provider/model 模糊字符串；`RoleRouteEntry` 也用 `route_id` 做唯一引用，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:247-261`。
 - **runtime resolver 不做动态替代选择**：capability 只能 lint/warn/block，不能按能力自动找别的 route；MVP1 README 的编排层描述要求 role→route 确定性解析，见 `docs/graph-agent-gateway/mvp1/README.md:13-18`、`:27`。**注**：下沉 materialize/capability 到 ③b ≠ 引入动态选型——它们是分类/能力描述，runtime 仍按显式 `route_id` 执行。
@@ -139,4 +139,4 @@ MVP1 目标：把 role→route 变成一等编排 API。编排层只返回有序
 - [[04-orch-registry-schema]]：schema 字段权威源（本模块只链接）
 - [[05-orch-capabilities-and-models]]：capability / lint（materialize 消费）
 - [[08-orch-test-status-ssot]]：6 态投影（materialize 消费，已取消 needs_setup）
-- 决策记录 `client-layer-decision-record.md` D2 / 归属表 `module-disposition-revised.md`
+- D2 编排/调用分离 + A' 决策（本文 §4/§5 留底，client 层共享，另见 [[01-handoff-interface]] / [[09-inv-invocation-runtime]]）/ 归属表 `module-disposition-revised.md`

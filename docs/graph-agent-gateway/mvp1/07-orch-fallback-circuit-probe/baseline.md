@@ -69,17 +69,17 @@ verified_at: 2026-06-02
 
 | 主题 | baseline 现状 | MVP1 方向 |
 |---|---|---|
-| 编排外壳 | `GatewayChatModel._generate` 已承担 fallback、probe、熔断、事件和 usage 归属，见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:96-271`。 | 保留 `GatewayChatModel` 作为编排外壳，不删 gateway、不用裸 ChatX 取代整个 resolver/gateway，决策见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:28-38`。 |
-| 同 route 瞬时重试 | 当前 OpenAI/Anthropic SDK client 显式 `max_retries=0`，没有同 route 防抖重试，见 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:167-172` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:201-206`。 | 改用 ChatX invoke 后保留 ChatX 默认有界瞬时重试；跨 route fallback 仍由 `_generate` 管，决策见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:187-193`。 |
-| 截断升级重试 | `_call_with_token_escalation` 现在藏在 client manager 调用层里，见 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:990-1012`。 | 截断升级重试保留，但移到编排层包住 ChatX invoke；原因是它是跨调用策略，不是 provider payload 解析，决策见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:200-204`。 |
+| 编排外壳 | `GatewayChatModel._generate` 已承担 fallback、probe、熔断、事件和 usage 归属，见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:96-271`。 | 保留 `GatewayChatModel` 作为编排外壳，不删 gateway、不用裸 ChatX 取代整个 resolver/gateway，决策 D1（否决激进版 A）完整逻辑 + PM 原话见 `mvp1-alignment.md` §4 / §5。 |
+| 同 route 瞬时重试 | 当前 OpenAI/Anthropic SDK client 显式 `max_retries=0`，没有同 route 防抖重试，见 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:167-172` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:201-206`。 | 改用 ChatX invoke 后保留 ChatX 默认有界瞬时重试；跨 route fallback 仍由 `_generate` 管，决策 F2（撤回 `max_retries=0`）完整逻辑 + PM 原话见 `mvp1-alignment.md` §5 / §4。 |
+| 截断升级重试 | `_call_with_token_escalation` 现在藏在 client manager 调用层里，见 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:990-1012`。 | 截断升级重试保留，但移到编排层包住 ChatX invoke；原因是它是跨调用策略，不是 provider payload 解析，决策 F3（保留 + 搬家）完整逻辑见 `mvp1-alignment.md` §5。 |
 | 健康状态持久化 | `LLMClientManager` 用进程内 `_provider_down_cache` 做执行期 TTL，见 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:49-52` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:340-368`。 | Studio 后端已有 `SqliteLlmHealthStore` 可持久化 circuit，见 `apps/studio/backend/app/services/llm_health_store.py:26-124`。**判据反转:`SqliteLlmHealthStore` = ③b 公共内核(待下沉),不再是"③a seam / 是否打通是疑点"——执行期 down-cache 与持久化 store 都属 ③b,下沉后统一为同一运行时健康源,SQLite 路径(存储介质)留 ③a 注入。** |
 | Probe DTO | `ProbeResult` 只是 registry schema 中的 DTO，`probe_contracts.py` 只重导出，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:320-329` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/probe_contracts.py:1-7`。 | 探测结果应继续作为诊断/SSOT 证据流的一部分；执行期 `_generate` 仍只消费 boolean probe/fallback 结果。 |
 
 ## 决策原因
 
-保留编排层的原因是当前 `_generate` 里的 fallback、probe、熔断、异常分类、event 和 usage 都是 Gateway 自有语义；直接删除 `GatewayChatModel` 会丢掉这些能力，权威记录明确否决了裸返回 ChatX 的方案，见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:28-38`。
+保留编排层的原因是当前 `_generate` 里的 fallback、probe、熔断、异常分类、event 和 usage 都是 Gateway 自有语义；直接删除 `GatewayChatModel` 会丢掉这些能力，决策明确否决了裸返回 ChatX + `with_fallbacks()` 的激进方案 A（理由:`with_fallbacks()` 只按异常类型分流、表达不了按 HTTP status 分类，且真机第八轮从未验证"删编排层"），完整逻辑 + PM 原话见 `mvp1-alignment.md` §4 / §5。
 
-把真实调用换成 ChatX 的原因不在 07，而在 09：bug 根源是调用层消息转换把 LangChain message 拍成 provider dict，尤其 tool loop 中的空 `AIMessage(content="")`，证据见 `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:34-36` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:661-692`。
+把真实调用换成 ChatX 的原因不在 07，而在 09：bug 根源是调用层消息转换把 LangChain message 拍成 provider dict，尤其 tool loop 中的空 `AIMessage(content="")` 被转成 `{"content":""}`、经 anthropic dispatch 发出后触发 qiniu-anthropic `400 content must not be empty`，证据在 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:661-692`（`_langchain_messages_to_dict`），完整溯源见 `mvp1-alignment.md` §5 D1。
 
 ## 代码索引 clues
 

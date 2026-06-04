@@ -45,7 +45,7 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 3. 用户把 model profile 应用到 role 后，role 保存精确 `fallback_chain[*].route_id`；`RoleEntry`（保存可执行 role 的显式 fallback_chain 和 lint_requirements 的结构）用于保存这个显式链和 lint requirements（`registry/schema.py:264-273`，`docs/graph-agent-gateway/mvp0/mvp0-alignment.md:159-166`）。
 4. resolver 解析 role 时按 fallback_chain 顺序取 route，调用 `select_verified_profile` 选当前 route 的 verified profile，并把 profile id、capability、method_id、request_mapper_id 写入 `ResolvedRoute`（一条 runtime-ready route candidate 的结构）（`registry/resolver.py:55-113`）。**判据 ③b**。
 5. resolver 对已解析出来的 route 列表调用 `lint_role_routes`；如果有 blocking lint，抛 `RegistryResolutionError`（registry 解析失败异常），否则把 lint_results 带到 `ResolvedRole`（解析后的 role 元数据和有序 routes 的结构）（`registry/resolver.py:116-132`）。**判据 ③b**。
-6. 调用层消费 `ResolvedRoute.call_method_id` / `request_mapper_id` / `capabilities` / `effective_runtime_settings`；MVP1 A' 迁移时这些字段仍是 route 到 ChatX 调用适配（[[10-inv-route-chat-model-factory]]）的输入，**而不是 gateway 自研消息转换的理由**（`registry/schema.py:415-438`，`.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:157-164`）。
+6. 调用层消费 `ResolvedRoute.call_method_id` / `request_mapper_id` / `capabilities` / `effective_runtime_settings`；MVP1 A' 迁移时这些字段仍是 route 到 ChatX 调用适配（[[10-inv-route-chat-model-factory]]）的输入，**而不是 gateway 自研消息转换的理由**（`registry/schema.py:415-438`；依据 = D2 编排/调用分离，见 §4「编排 / 调用分离」）。
 7. Studio 前端通过 registry DTO 看到 lint_results、model_groups、route_runtime_settings 和 role_effective_runtime_settings；它**展示**这些信息（套 family 折叠 / 弃用区 / 颜色），但 **role 执行仍以保存的 route chain 为准**（`apps/studio/backend/app/routers/llm.py:1361-1383`）。**判据**：model_groups DTO 的分组内核 ③b（现散 ③a），渲染 ③a。
 
 ## 3. 接口契约
@@ -84,6 +84,10 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 > **留 ③a 的应用加工层 · PM §2.0 #R3 原话（verbatim，family 折叠 = ③a 产品策略/展示）**：
 > "#R3 在model family上做一个折叠功能: anthropic 可以折叠起来, 隐藏里面的所有模型"（ux-spec §2.0 行 80）→ family 折叠 = 展示策略，留前端 ①/③a；identity 的"归类成 anthropic 家族"内核 = ③b。
 
+> **编排 / 调用分离 · D2（决策）+ PM 原话（verbatim，不改一字）· 另见 [[10-inv-route-chat-model-factory]] / [[09-inv-invocation-runtime]]（同一 D2，跨模块共享，重复留底防 drift）**：
+> **决策（D2）**：把「编排（orchestration）」与「调用（invocation）」做成两个内聚模块，各有明确 API。**编排层**：输入 role_name / model_override，输出解析好的 `ResolvedRoute`(s)（protocol / base_url / credential_ref / provider_model_id / runtime settings + fallback 顺序 + 熔断/probe 决策），**只决定「该用哪条 route」，不负责真正调用**。**调用层**：输入一条 `ResolvedRoute` + messages（+ runtime params），输出 `AIMessage` / 结果，负责 build 原生 ChatX + invoke + 取结果。对 05 的含义：05 产出的 capability/profile 编排字段（`call_method_id` / `request_mapper_id` / `capabilities` / `effective_runtime_settings`）是**编排层输出**，A' 迁移时它们成为「route → 原生 ChatX 调用适配（RouteChatModelFactory，M6）」的**输入**，**而不是 gateway 自研消息转换的理由**——gateway 不再自己做消息转换，改由原生 ChatX 消费这些字段。
+> **PM 原话**："你只要知道谁跟你说我现在要调copilot, 把copilot解析好的route给我, 你就给他, 就ok了, 这是调copilot的路径,你只负责输出编排结果, 不负责调用. 所以这里还引申出一个问题, 编排和调用是不是应该更模块化更内聚化, API写清楚, 编排输入什么输出什么. 调用输入什么输出什么"
+
 ## 5. 决策 + 动机
 
 > 保留原"决策原因"全部条目 + 判据反转标注。
@@ -93,7 +97,7 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 3. **capability 保持"描述事实"，runtime settings 保持"用户意图"**（原 #2 保留）：避免把 provider 默认值误当成用户想要的参数（`docs/graph-agent-gateway/mvp0/provider-runtime-settings-matrix.md:5`，`docs/graph-agent-gateway/mvp0/mvp0-alignment.md:152-154`）。
 4. **verified profile 只在单 route 内选择调用方法**（原 #3 保留）：能支持同一模型 route 的不同 protocol/method 实测结果，但**不会把一条失败 route 替换成另一条未知 route**；`select_verified_profile` 只接收单个 `ProviderRoute` 的签名固化了这条边界（`registry/profile_selector.py:14-19`，`packages/graph-agent-gateway/tests/test_registry_profile_selector.py:246-281`）。
 5. **lint 设计成 warn/block**（原 #4 保留）：capability 缺失可能只是需要 probe，不能自动推断"另一个 route 更好"；error 级缺失才 blocking 并给 `requires_probe`（`registry/lint.py:45-57`，`registry/lint.py:74-86`）。
-6. **A' 不改 05 核心分类/归一化规则，只迁调用层**（原 §已实现/差异 #5 保留）：MVP1 A' 不要求重写 05 的归一化/分类规则，而是要求调用层换 ChatX 时**继续保留这些编排字段和投影**；selected profile 从 client manager dispatch 输入改为 `ResolvedRoute` 上的调用方法提示，交 RouteChatModelFactory/provider profile 适配层消费（`.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:47-56`、`:157-164`）。
+6. **A' 不改 05 核心分类/归一化规则，只迁调用层**（原 §已实现/差异 #5 保留）：MVP1 A' 不要求重写 05 的归一化/分类规则，而是要求调用层换 ChatX 时**继续保留这些编排字段和投影**；selected profile 从 client manager dispatch 输入改为 `ResolvedRoute` 上的调用方法提示，交 RouteChatModelFactory/provider profile 适配层消费（依据 = D2 编排/调用分离，完整决策 + PM 原话见 §4「编排 / 调用分离」；调用层落点 [[10-inv-route-chat-model-factory]] / [[11-inv-provider-profiles]]）。
 
 ## 6. 测试关键点
 
@@ -122,7 +126,7 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 > 保留原"待办/疑点"全部条目。
 
 - **代码下沉**（后续工程，非本轮）：`llm_model_groups.py` / `llm_model_identity.py` / `llm_notable_models.py` / `llm_route_capabilities.py` 的能力内核 → gateway 包；family 折叠 / 弃用区 / 展示名样式 / notable 数据源路径注入留 studio（disposition 下沉清单行 58-64）。
-- **待办（原 #1）**：A' 实现 RouteChatModelFactory 时，需明确 `ResolvedRoute.call_method_id` / `request_mapper_id` 与新 provider profile init-kwargs 的映射边界，避免把 verified profile 误用成跨 route 动态选型（`registry/schema.py:432-435`，`.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:224-228`）。
+- **待办（原 #1）**：A' 实现 RouteChatModelFactory 时，需明确 `ResolvedRoute.call_method_id` / `request_mapper_id` 与新 provider profile init-kwargs 的映射边界，避免把 verified profile 误用成跨 route 动态选型（`registry/schema.py:432-435`；映射边界归调用层 [[10-inv-route-chat-model-factory]] / [[11-inv-provider-profiles]]，依据 = D2 + F6 provider init-kwargs profile）。
 - **疑点（原 #2）**：resolver 是否应使用 `route_effective_capabilities` 合并 ready verified profile facts 后再 lint，目前源码没有这样做；这可能影响 verified profile 对 thinking capability 的补强（`apps/studio/backend/app/services/llm_route_capabilities.py:10-19`，`registry/resolver.py:104-116`）。下沉 `route_effective_capabilities` 到 ③b 后，resolver 与 Studio 投影可共用同一份合并能力。
 - **疑点（原 #3）**：`select_verified_profile` 的 reasoning 判断基于 profile 文本包含 thinking/reasoning，不是结构化 enum；若后续 profile capability 命名变化，需补测试保护（`registry/profile_selector.py:55-66`）。
 - **待办（原 baseline #3）**：`notable_model_ids` 依赖 Markdown 小节标题精确等于 `## 4. Notable Model IDs`；provider notes 标题变化会静默返回空列表，目前无运行时错误提示（`apps/studio/backend/app/services/llm_notable_models.py:8-37`）。下沉 ③b 时应让"找不到小节"显式 WARNING，不静默吞。
@@ -135,8 +139,8 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 2. **已实现**：profile selection 已按 ready status、required modalities、reasoning intent 和 default/fallback_rank/profile_id 稳定排序（`registry/profile_selector.py:21-52`、`:69-73`）。
 3. **已实现**：lint 已覆盖缺 capability、capability incompatible、未验证 error capability 以及 runtime setting 超界/不支持（`registry/lint.py:39-87`、`:90-332`）。
 4. **已实现**：Studio registry response 已输出 lint_results、model_groups、route_runtime_settings、role_effective_runtime_settings（`apps/studio/backend/app/routers/llm.py:1361-1383`）。
-5. **与 baseline 差异**：MVP1 A' 不要求重写 05 模块的核心分类/归一化规则，而是要求在调用层换 ChatX 时继续保留这些编排字段和投影（`.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:47-56`）。
-6. **与 baseline 差异**：当前 selected profile 仍服务于 client manager 的 provider-specific dispatch；MVP1 中它应作为 `ResolvedRoute` 上的调用方法提示，交给 RouteChatModelFactory/provider profile 适配层消费（`registry/resolver.py:94-113`，`.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:157-164`）。
+5. **与 baseline 差异**：MVP1 A' 不要求重写 05 模块的核心分类/归一化规则，而是要求在调用层换 ChatX 时继续保留这些编排字段和投影（依据 = D2 编排/调用分离，见 §4「编排 / 调用分离」）。
+6. **与 baseline 差异**：当前 selected profile 仍服务于 client manager 的 provider-specific dispatch；MVP1 中它应作为 `ResolvedRoute` 上的调用方法提示，交给 RouteChatModelFactory/provider profile 适配层消费（`registry/resolver.py:94-113`；依据 = D2，落点 [[10-inv-route-chat-model-factory]] / [[11-inv-provider-profiles]]）。
 7. **与 baseline 差异**：05 不新增 capability-based automatic routing；这点不是缺功能，而是架构边界（`docs/graph-agent-gateway/mvp0/mvp0-alignment.md:142`、`:228-230`）。
 8. **与 baseline 差异（本轮反转）**：原 baseline §差异 #4 把 Studio 投影定调为"显示/解释层，不是 runtime identity"，并据此暗示其归 ③a；本轮按判据反转——`model_groups`/`identity`/`notable`/`route_capabilities` 的**能力内核属 ③b 公共，现散 ③a 待下沉**，只有展示渲染留 ③a。runtime 精确执行保存的 route chain 这一点不变（`apps/studio/backend/app/services/llm_model_groups.py:50-53`）。
 
@@ -167,7 +171,7 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 - `docs/graph-agent-gateway/mvp0/mvp0-alignment.md:142` — capability 只能 lint/warn/block/fail fast，不能驱动动态选型。
 - `docs/graph-agent-gateway/mvp0/mvp0-alignment.md:159-166` — model profiles 是 authoring abstraction，role runtime 执行当前保存的 route chain。
 - `docs/graph-agent-gateway/mvp0/provider-runtime-settings-matrix.md:5` — capabilities 描述 support/default/bounds，不是 user intent。
-- `.kiro/specs/studio-llm-gateway-redesign/client-layer-decision-record.md:157-164` — RouteChatModelFactory 目标是用 ResolvedRoute 构造原生 ChatX。
+- §4「编排 / 调用分离」（D2，本文留底）— RouteChatModelFactory 目标是用 ResolvedRoute 构造原生 ChatX；落点 [[10-inv-route-chat-model-factory]]（决策记录系临时文档已不引用）。
 - `registry/capabilities.py:20-32` — `RUNTIME_SETTING_DESCRIPTORS`（固定前端 runtime setting 控件集合的常量）。**③b**。
 - `registry/capabilities.py:35-202` — `normalize_route_capabilities`（归一化 route capabilities 的函数）。**③b**。
 - `registry/capabilities.py:205-269` — `build_runtime_setting_descriptors`（生成前端控件描述的函数）。**③b**。

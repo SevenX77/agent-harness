@@ -24,6 +24,8 @@ MVP1 目标：新建 `ProviderProfile` 模式（用 provider 或 `provider:model
 
 本模块**纯 ③b 公共**（provider 构造差异是 gateway 机制内在的，任何调模型 app 都要），归属表判 11=纯 ③b 新建（`module-disposition-revised.md:44,84`）。注意边界:capability/lint 继续留编排前置校验（描述"支持什么"，不是"怎么构造"），不变成运行时动态选型或 ChatX 构造 profile。
 
+> **与通用适配器的边界（2026-06-04）**：`ProviderProfile`（init-kwargs 表）服务 **ChatX 面的「官方 ChatX」分支**（给 `ChatAnthropic`/`ChatOpenAI` 等叠构造参数）。**generic 分支**（`GenericRouteChatModel`，无官方 ChatX 的真·非标 route）的 provider 差异体现在它**自己的消息序列化**（见 [[10-inv-route-chat-model-factory]] §3.5 的 5 条序列化规则），不走本表的 init-kwargs。两者都属"怎么构造/怎么调"，但落点不同：官方 ChatX → 本表 init-kwargs；generic → 自有序列化内核。
+
 ## 2. 数据流 / 机制(目标设计与编号流程)
 
 覆盖率:100%。本文件覆盖 `ProviderProfile` 目标模式、它和现有 `VerifiedProfile`/capability/lint 的边界，以及 deerflow/deepagents 参考实现。`ProviderProfile` 是拟新建的 provider/model 到 ChatX init kwargs 的构造配置，不是 registry 里的 verified route profile。

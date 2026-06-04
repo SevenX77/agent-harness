@@ -108,8 +108,8 @@ docs/studio/
 | `debug-resume` | HitL 问题框/节点级 Resume/checkpoint 续跑/脏状态失效/context 篡改 | **全孤儿, 待新建** |
 | `conflict-overwrite` | 顺序覆盖 overlay/白名单/cancel 标红 | 旧 skill-lifecycle + canvas-topology(并) |
 | `copilot-assist` | 对话/上下文注入/@mention/建技能向导/打磨/judge/commit-msg | 旧 copilot-chat(流程) |
-| `publish` | 上线/commit-msg/confetti/artifact-registry | **无主待建**(注意文档与实现矛盾) |
-| `studio-settings` | Settings 页配置旅程: provider 凭证(API Keys)/ LLM roles(角色→Model Group→route)/ copilot 配置 / 身份与产物路径; 测试→持久化→投影(后端 SSOT 五态); 数据层走 gateway 永不 Rust 化 | **新建**(critic 浮现 settings 旅程无主, PM 2026-06-02 立 `00_settings` 节点配套) |
+| `publish` | 成功 run 本地 autocommit + 低优先 Artifact Registry 发布; commit-msg/confetti 为 stale-doc 删除项 | **无主补齐** |
+| `studio-settings` | Settings 页配置旅程: provider 凭证(API Keys)/ LLM roles(角色→Model Group→route)/ copilot 配置 / 身份与产物路径; 测试→持久化→投影(六态目标); 数据层走 gateway | **新建**(critic 浮现 settings 旅程无主, PM 2026-06-02 立 `00_settings` 节点配套) |
 
 ### 03_regions (12)
 | 区域 | 一句话 | 关键组件 | 迁移来源 |
@@ -186,9 +186,9 @@ docs/studio/
 ## 8. cross-link 规范
 
 - 一律相对路径 + 锚点, 文档内引用代码用 file:line(终端可点)。
-- region→capability: "本区域承载 [<cap>](../02_capabilities/<cap>.md)"。
-- capability→region: "在 [<region>](../03_regions/<region>.md) 渲染为……"。
-- capability→platform: "由 [<svc>](../04_platform/<svc>.md) 提供"。
+- region→capability: "本区域承载 [<cap>](../02_capabilities/<cap>/mvp1-alignment.md)"（cap 现为**文件夹** `<cap>/baseline.md + mvp1-alignment.md`,见 DESIGN-PROCESS §2.1）。
+- capability→region: "在 [<region>](../03_regions/<region>/mvp1-alignment.md) 渲染为……"（region 也是文件夹）。
+- capability→platform: "由 [<svc>](../04_platform/<svc>/mvp1-alignment.md) 提供"（platform 也是文件夹；`i18n` 例外仍平铺）。
 - workflow→cap/region: 动作清单表里每行链接。
 - **禁止跨 tier 重述实现**, 只能链接(见 §2 不变量)。
 - 链接到 legacy 文档时标注 `(legacy, 迁移源)`, 不在新文档里依赖它存活。

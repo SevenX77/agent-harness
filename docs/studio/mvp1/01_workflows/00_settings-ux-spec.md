@@ -230,6 +230,24 @@
 - **保存反馈**：改完显保存中/已保存；失败显式告警不静默。
 - **去 mock**：无真数据时空态/骨架屏（非 mock 种子）。
 
+### 3.8 Copilot SDK 调用机制（③a Studio 领域；从 gateway 模块 12 降 stub 移入，原内容不丢）
+
+> **来源迁移**：以下是 Copilot 拿到 route 后**怎么用 `claude_agent_sdk` 真正调**的现状机制，原记录在 gateway `docs/graph-agent-gateway/mvp1/12-inv-copilot-invocation/{baseline,mvp1-alignment}.md`。按第四轮判据，**gateway 库不感知 copilot**（只给 `copilot_chat` route），SDK 调用 / session / 事件翻译 / 假测试全属 **③a Studio 领域**——故内容迁入本页留底，gateway 模块 12 降为 stub 并指回此处。代码均在 `apps/studio/backend/app/services/copilot.py`（行号以当前源码为准）。
+
+**A. session 缓存键**：`make_session_key`（用 skill、模型、endpoint 和 API key 哈希生成 SDK session cache key，`copilot.py:93`）保证换 key 后不会复用旧进程。`get_or_create_session`（复用同一 skill/model/provider/key 组合的 `ClaudeSDKClient`，`copilot.py:276`）减少重复 spawn SDK 会话。
+
+**B. env 注入（base_url 不走构造器）**：`build_options`（把 API key、base_url 和 provider 特殊 env 写入 `ClaudeAgentOptions.env`，避免改全局 `os.environ`，`copilot.py:112`）固定写 `ANTHROPIC_API_KEY`（`:121`），route 有 base_url 时写 `ANTHROPIC_BASE_URL`（`:122-123`）。注释说明 Claude SDK `__init__` 不接受 base_url，只能 per-session env 注入（`copilot.py:1-8`）—— 这正是裸 SDK 测试覆盖不到的关键差异。
+
+**C. 一次用户消息主循环**：`stream_query`（Copilot 一次消息的主调用循环，`copilot.py:201`）先调 `_resolve_copilot_runtime`（读 credentials + roles 构造 registry snapshot，调 `resolve_role(snapshot,"copilot_chat",route_override=...)` 得有序 `ResolvedRoute` 列表，`copilot.py:419`）；遍历 routes（`:218-220`），每条先由 `_resolve_route_runtime`（把一条 `ResolvedRoute` 转成 SDK 需要的 `api_key/base_url/env_overrides`，`copilot.py:449`）取 secret/base_url/特殊 env；缺 credential 或解析失败时多 route 记录失败继续下一条、单 route 直接 yield `CopilotEventError`（`:225-238`，这是 Copilot 本地 fallback，不走 `GatewayChatModel._generate`）；成功后 `get_or_create_session` 建/复用 `ClaudeSDKClient` 再 `connect/query/receive_response`（`:242-256`）。全 route 失败才 yield `CopilotEventError("all configured Copilot providers failed")`（`:264-273`）。
+
+**D. SDK 消息翻译**：`_translate_sdk_message`（把 SDK message 翻译成 websocket event，`copilot.py:364`）把 `AssistantMessage`/`ResultMessage` 的 TextBlock→`CopilotEventText`、ToolUseBlock→`CopilotEventToolUseStart`、ToolResultBlock→`CopilotEventToolUseResult`、结束→`CopilotEventDone`（`:364-409`）。输出是 websocket event，不是 LangChain `ChatResult`——这是 Copilot 不归 `GatewayChatModel` 调的根本原因。
+
+**E. 假测试现状（要修）**：`test_copilot_role_sdk`（角色 SDK 测试端点，`routers/copilot.py:89`）调 `_probe_copilot_sdk_tool_call`（`routers/llm.py:2150`），后者实际用 `anthropic.AsyncAnthropic` 走 messages API（`:2150-2172`），而真实运行用 `ClaudeSDKClient` + per-session env（`copilot.py:242-252`）。→ **测的 SDK ≠ 跑的 SDK**，测过不证明 spawn/env 注入/tool loop 能跑（§3.4 的核心修正项）。
+
+**F. base_url 助手 = ③b 归一化原语（不属 copilot 领域）**：`_ark_anthropic_base_url`（`copilot.py:476`）和 `_deepseek_anthropic_base_url`（`copilot.py:485`）是两条 protocol 归一化规则（ark 去 `/api/v3` 补 `/api/compatible`；deepseek 去 `/v1` 补 `/anthropic`）。**这两条按判据属 ③b 公共 base_url 归一化（归属 gateway 模块 03 [[03-orch-credentials-endpoints]]），不是 copilot 专属**——MVP1 目标是保存时主归一化，Copilot 拿到的 route 应已 canonical，本地只做 SDK env 映射；这两个助手随归一化下沉 ③b 后，copilot 端不再各写一份。
+
+**G. session 持久化边界**：copilot **对话 session 落盘 / 退出恢复**属 copilot 聊天工作台 region（D8），**不在设置页**；见 [`00_settings.md`](./00_settings.md) §5 与 mvp0 `02_features/copilot-chat/`。本页 §3 只配"用哪个模型"。
+
 ---
 
 ## 4. 三条横切机制（贯穿三页）

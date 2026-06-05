@@ -2,8 +2,8 @@
 
 > Tier: workflow · Owns: 进入 Studio + Home↔skill-workspace 强隔离切换的完整旅程 · 能力 `skill-workspace`(引用 `copilot-assist`)· 区域 `welcome` / `shell-layout` · 平台 `native-fs`(Rust) / `gateway`(sidecar)
 > Status: ✅ PM 已确认(批次1:D1–D11 + R1/R2 + D-1-1/D-1-4)
-> 设计权威: **D11 IDE/workspace 模型(锁)** + D1/D7/D10/D6 + INDEX §6;无专属 studio-feature spec。决策日志(原话依据): [`_reorg/alignment-notes.md` 批次1](../../_reorg/alignment-notes.md)
-> 本文 = 该节点**最终设计**(atom action 决策 + file:line 依据);原工作目录 `_reorg/workflow-action-catalog.md` §01_init 为迁移源。
+> 设计权威: **D11 IDE/workspace 模型(锁)** + D1/D7/D10/D6 + INDEX §6;无专属 studio-feature spec。PM 决策原话就近留底于 §3。
+> 本文 = 该节点**最终设计**(atom action 决策 + file:line 依据)。
 
 ## 1. 用户旅程目标
 PM 如何进入 Studio、在「主页 Home」与「沉浸式 skill workspace」间切换。核心范式 = **强隔离 Home/Workspace + IDE/workspace 模型**(D11 锁):skill = 一个文件夹;Home = 打开文件夹 + Recent(MRU localStorage);**无聚合注册表**;一窗口专注一个 skill;子图按 path 解析(D7)。
@@ -38,7 +38,10 @@ PM 如何进入 Studio、在「主页 Home」与「沉浸式 skill workspace」�
 - **D2 不卡导入** > "不用卡导入, 导入什么文件真不重要, 我们有compile, 有copilot, 屎都给你改成标准skill"。
 - **D12 写全量 Rust**(本地写经 native-fs,仅 engine/gateway 用 Python sidecar)> "全量切 rust, 除了 graph agent 和 llm gateway 相关使用 python sidecar"。
 - **R1 删 Delete**(抄 Cursor)/ **R2 欢迎屏抄 Cursor/VS Code** / **D-1-1 删 Config drift** / **D-1-4 脚手架 logic→agent 模板**。
-- D3(删外部 IDE 联动)、D6(skeleton+lazy load)、D9(多窗口)、D10(后端三分)— 详见 alignment-notes 批次1。
+- **D3 删外部 IDE 联动** > "[Open in Cursor] 外部 IDE 联动 不需要了, 21、22、23都不需要了, 已经上copilot了";copilot 内置后无需外跳(`lib/tauri.ts:26-36` open_in_cursor/terminal/codex 死代码待删)。
+- **D6 skeleton + lazy load**(跨切 NFR,落 INDEX §11)> "后端相关所有组件需要skeleton、lazy load功能(available models, 巨长列表)"。
+- **D9 多窗口**(实现归 `04_platform`)> "多窗口难不难, 不难就实现吧";D10 三块拆分(Rust 壳 + 无状态 sidecar)下多窗口不难 → 做。
+- **D10 后端三分**(实现归 `04_platform`:gateway/engine = Python sidecar、native-fs = Rust)> "后端应该分为3块: 1. gateway 包括 studio backend里面的llm gateway相关的后端部分代码要并入 gateway, 全部用服务形式 python sidecar; 2. graph agent engine, 也是python, 用 sidecar; 3. 大量的本地操作, 读写文件, 文件系统(打开文件夹)等等, 全部用rust本地操作";启动期 sidecar **eager-spawn(非全屏 gate)** > "启动程序时就后端拉起sidecar, 因为未来还要登陆用户呢, 还有setting 页面里api、llm role这些配置都需要服务端"。
 
 ## 4. 失败退路 + 节点间流转
 - **失败退路**:Recent 加载失败→局部红框(不阻塞入口);新建/打开失败→结构化文案(D2 后仅留 OS 级);sidecar 未就绪→skeleton + 全局就绪指示(非全屏 gate)。

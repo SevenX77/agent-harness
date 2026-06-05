@@ -84,7 +84,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 |---|---|---|
 | TIMELINE-1 | live trace | 单元 `trace-dot-blackboard`；**为什么**：live trace 流挂 TimelinePanel，竖向时间轴(LangSmith 式) |
 | TIMELINE-2 | run detail | 单元 `run-execution-node-status`（消费/落点；owner=run-execution/state-engine）；**为什么**：run row 开 RunDetailDrawer，run 历史归 timeline |
-| TIMELINE-3 | golden actions | 单元 `golden-per-agent-node`（消费）；**为什么**：golden 相关动作入口/分析在 copilot bar，timeline 消费 |
+| TIMELINE-3 | golden actions | 单元 `golden-per-agent-node`（消费；owner=golden-eval）；**为什么**：golden 相关动作入口/分析在 copilot bar，timeline 消费 |
 
 ## 6. 测试关键点
 1. live trace: baseline 现状为 TracePanel/useRunStream 未挂主流程 ⚠️；目标为 run/predict 时 Timeline 自动打开 live trace。

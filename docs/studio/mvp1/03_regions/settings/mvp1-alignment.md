@@ -85,7 +85,7 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:340`, `01_workflows/
 |---|---|---|
 | SETTINGS-1 | 六态 | 单元 `settings-six-state-provider-health`；**为什么**：UI/API 仍有 needs_setup 旧态，要渲染六态标签 + 错误 copy 一致 |
 | SETTINGS-2 | role materialization UI | 单元 `model-group-role-materialization`；**为什么**：前端编辑角色/绑定，把角色结构交 ③b 物化 |
-| SETTINGS-3 | Copilot settings | 单元 `copilot-sdk-test-parity`；**为什么**：Copilot tab 测试按钮/状态走真实 SDK，现仍依赖 mock-copilot-data |
+| SETTINGS-3 | Copilot settings | 单元 `copilot-sdk-test-parity`（消费/UI；owner=copilot-assist）；**为什么**：Copilot tab 测试按钮/状态走真实 SDK，现仍依赖 mock-copilot-data |
 
 ## 6. 测试关键点
 1. 六态: baseline 现状为 UI/API 仍有 `needs_setup` 旧态 ⚠️；目标为 六态标签和错误 copy 一致。

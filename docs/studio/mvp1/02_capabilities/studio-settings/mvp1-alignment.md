@@ -88,7 +88,7 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:340`, `01_workflows/
 |---|---|---|
 | STUDIO_SETTINGS-1 | 六态 | 单元 `settings-six-state-provider-health`；**为什么**：6 态标准投影是 ③b gateway 内核，Studio 只渲染消费、不自定义状态 |
 | STUDIO_SETTINGS-2 | materialize 边界 | 单元 `model-group-role-materialization`；**为什么**：materialize/model group/endpoint 标准化归 ③b 内核，Studio 只传角色意图 |
-| STUDIO_SETTINGS-3 | Copilot test | 单元 `copilot-sdk-test-parity`；**为什么**：copilot role 测试须走真实 SDK 路径，与实际 chat 等价 |
+| STUDIO_SETTINGS-3 | Copilot test | 单元 `copilot-sdk-test-parity`（消费/配置面；owner=copilot-assist）；**为什么**：copilot role 测试须走真实 SDK 路径，与实际 chat 等价 |
 | STUDIO_SETTINGS-4 | 设置不挡壳 | 单元 `shell-runtime-gate`（消费）；**为什么**：Settings 中央 overlay 不卸载 copilot、不阻塞壳，边调边看 |
 
 ## 6. 测试关键点

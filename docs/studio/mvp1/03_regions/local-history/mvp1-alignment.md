@@ -1,19 +1,23 @@
-# local-history MVP1 Alignment
+---
+module: 03_regions/local-history
+doc: mvp1-alignment
+status: drafted（HistoryPanel 只显示 git snapshot；RunDetailDrawer/BatchSummary 存在但未挂，这与最新归属一致但旧 alignment 曾留未决口径 ⚠️。；目标结构已按 R4-R8 retrofit）
+binds_baseline: ./baseline.md
+units: [local-history-snapshot]
+aligns_with: 01_workflows/05_debugging.md（local history）
+---
 
-## 定义
+# local-history — MVP1 Alignment
 
+> **Tier**: region | **Owns**: `local-history-snapshot`（快照列表/显示 owner） | **现状**: HistoryPanel 只显示 git snapshot；RunDetailDrawer/BatchSummary 存在但未挂，这与最新归属一致但旧 alignment 曾留未决口径 ⚠️。 | **Related**: [baseline](./baseline.md)（双向）· `publish` · `native-fs` · `timeline`
+
+## 1. 定义
 `local-history` owns local workspace snapshots: successful-run autocommit visibility, manual/auto snapshot list, selecting a snapshot, and revert.
 
 Source workflow basis: `01_workflows/06_eval.md:13`, `01_workflows/06_eval.md:24`, `01_workflows/04_run-and-verify.md:59`.
 
-## 接口契约
-
-- Inputs: local git history items, current skill id, selected sha.
-- Outputs: refresh, select snapshot, revert request.
-- Capability links: `publish`, `run-execution`, `skill-workspace`.
-- Platform link: `native-fs`.
-
-## F1. Snapshot List
+## 2. 数据流 / 机制（设计细节）
+### F1. Snapshot List
 
 - 机制: show local git snapshots with short sha, kind, author, timestamp, and message.
 - 决策: local save is the MVP safety net.
@@ -22,7 +26,7 @@ Source workflow basis: `01_workflows/06_eval.md:13`, `01_workflows/06_eval.md:24
 - Status: live.
 - 归属: region `local-history`; capability `publish`.
 
-## F2. Revert Snapshot
+### F2. Revert Snapshot
 
 - 机制: user selects a snapshot and reverts the skill to that sha.
 - 决策: recovery should be local and explicit.
@@ -31,7 +35,7 @@ Source workflow basis: `01_workflows/06_eval.md:13`, `01_workflows/06_eval.md:24
 - Status: live.
 - 归属: region `local-history`; platform `native-fs`.
 
-## F3. Run Detail Ownership Check
+### F3. Run Detail Ownership Check
 
 - 机制: RunDetailDrawer/BatchSummary 接在 run review 处(Timeline / i-o),**不归 Local History**(已决 PM 2026-06-04)。
 - 决策: run detail is time/run semantics, not git snapshot semantics.
@@ -40,6 +44,32 @@ Source workflow basis: `01_workflows/06_eval.md:13`, `01_workflows/06_eval.md:24
 - Status: 已决(见下「已决」)。
 - 归属: Local History 只做 git snapshot;RunDetailDrawer / BatchSummary 归 `timeline` / `input`(已决 PM 2026-06-04)。
 
-## 已决(PM 2026-06-04)
+## 3. 接口契约
+- Inputs: local git history items, current skill id, selected sha.
+- Outputs: refresh, select snapshot, revert request.
+- Capability links: `publish`, `run-execution`, `skill-workspace`.
+- Platform link: `native-fs`.
 
+## 4. 设计决策基础（PM 原话）
 - Local History **只做 git 快照**;RunDetailDrawer / BatchSummary 属"运行/时间"语义、归 Timeline,不吸收进来。
+
+## 5. 决策 + 动机
+| ID | 决策 | 动机 |
+|---|---|---|
+| LOCAL_HISTORY-1 | scope | 对齐 `local-history-snapshot` 设计单元，保证 region 切面能被测试回扣 |
+| LOCAL_HISTORY-2 | snapshot | 对齐 `local-history-snapshot` 设计单元，保证 region 切面能被测试回扣 |
+| LOCAL_HISTORY-3 | 写机制 | 对齐 `local-history-snapshot` 设计单元，保证 region 切面能被测试回扣 |
+
+## 6. 测试关键点
+1. scope: baseline 现状为 旧文留 RunDetail/BatchSummary PM confirmation ⚠️；目标为 Local History 只做 git snapshot；RunDetail/BatchSummary 归 Timeline/I/O。
+2. snapshot: baseline 现状为 HistoryPanel 显示 snapshot/revert live；目标为 快照列表/刷新/revert 可用且错误可见。
+3. 写机制: baseline 现状为 快照写机制不在本 region；目标为 snapshot 写由 publish/native-fs 触发，本 region 只显示。
+
+## 7. 涉及 region / platform
+`publish` · `native-fs` · `timeline`
+
+## 8. gaps / 报警
+- 🚨 scope: 旧文留 RunDetail/BatchSummary PM confirmation ⚠️；目标 Local History 只做 git snapshot；RunDetail/BatchSummary 归 Timeline/I/O。
+
+## 交叉引用（链接, 不复制）
+[baseline](./baseline.md)（现状,双向）· `publish` · `native-fs` · `timeline`

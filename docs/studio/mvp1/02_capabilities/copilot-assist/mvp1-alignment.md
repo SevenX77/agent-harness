@@ -1,29 +1,21 @@
 ---
-module: copilot-assist
+module: 02_capabilities/copilot-assist
 doc: mvp1-alignment
-tier: capability
-owns: skill 工作台右侧 copilot chat 的端到端行为（对话 / 领域脑子 / @mention / 安全写 / 建技能向导 / judge·打磨载体 / 分析bar / 多session / 生命周期）
-status: 走查定稿 2026-06-03（PM 逐功能裁定，原话就地留底）；实现 = 接线工程
-related: 能力 [[graph-authoring]] [[golden-eval]] [[predict]] [[publish]] [[studio-settings]] [[skill-workspace]] · region [[copilot]] [[editor]] [[canvas]] [[timeline]] · platform [[native-fs]] [[gateway]] · workflow [[04_run-and-verify]]
+status: drafted（SDK 对话 live，但仍直写、session 内存态、ThinkingBlock 未翻译，Settings 里的 SDK 测试路径与真实 chat 不等价 ⚠️。；目标结构已按 R4-R8 retrofit）
+binds_baseline: ./baseline.md
+units: [copilot-sdk-test-parity, copilot-session-persistence]
+aligns_with: 01_workflows/00_settings-ux-spec.md（Copilot SDK test）· 01_workflows/04_run-and-verify.md（analysis bar）
 ---
 
-# copilot-assist — MVP1 Alignment（目标·对齐设计）
+# copilot-assist — MVP1 Alignment
 
-> **组织方式**：**以每个功能为索引** —— 每个功能(F1–F8)一段，把它的机制/决策+动机/原话/测试点/status/归属**全收在自己段里**；仅「定义」「接口契约」是模块级总览。现状基线见 [baseline](./baseline.md)。
-> **框架决策(PM 原话)**：「1.现在是mvp1. 2.做全」—— chat-shell（@mention/pill/安全写/diff）+ brain 全纳入，不再 deferred；copilot 一等能力、全功能不延后。
+> **Tier**: capability | **Owns**: `copilot-sdk-test-parity`（真实 SDK smoke 路径）+ `copilot-session-persistence`（多 session / 消息渲染） | **现状**: SDK 对话 live，但仍直写、session 内存态、ThinkingBlock 未翻译，Settings 里的 SDK 测试路径与真实 chat 不等价 ⚠️。 | **Related**: [baseline](./baseline.md)（双向）· `copilot` region · `studio-settings` · `golden-eval` · `publish` · `native-fs` · `llm-copilot-http-api`
 
-## 定义
+## 1. 定义
 copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个**懂搭 skill + 懂业务领域**的对话助手，能精确取上下文（@mention）、安全改文件（diff 提案）、对话式建技能、承载 judge/打磨、跑完主动提分析。
 
-## 接口契约（模块级，跨功能共享）
-- **copilot WS（① 前端 → ③a studio backend）**：`WS /api/skills/{skill_id}/copilot/ws`（现 `routers/copilot.py:34`）。请求(MVP1 扩展)`{user_message, model_override?, mentions[], implicit_context, attachments[]（图片 base64,新）, request_id}`；响应事件 union `text_delta | thinking_delta(新) | tool_use_start | tool_use_result | patch_proposed(新) | context_resolved(新) | tool_approval_request(新) | error | done`。字段 SSOT = `apps/studio/backend/app/models/copilot.py`(实现时扩展)。错误→`error` 事件不甩 raw traceback。
-- **调用 SDK（③a → claude_agent_sdk）**：copilot 自身 = `ClaudeSDKClient`；block 类型 SSOT = `claude_agent_sdk/types.py`(Text/Thinking/ToolUse/ToolResult/ServerTool)；`can_use_tool`/PreToolUse 回调拦截 Write/Edit→提案、Bash→审批(需 PoC)。
-- **安全写落盘 → [[native-fs]](Rust, D12)**：Apply→编辑器 buffer(开着)或 Rust 文件命令(没开)→`SaveConflict`→compile。写入唯一权威=Rust，落点 SSOT 在 native-fs。
-- **跨能力边界(数据流归别处)**：judge/打磨→[[golden-eval]]；commit-msg→[[publish]]；模型选择→[[studio-settings]]；role→route→[[gateway]] `resolve_routes("copilot_chat")`。
-
----
-
-## 功能逐项（每个功能为索引）
+## 2. 数据流 / 机制（设计细节）
+### 功能逐项（原 F 段迁移）
 
 ### F1 对话 + 流式输出（折叠不省略）
 - **机制**：用户发消息 → 后端 SDK → 全部 block 流式回 → 前端按 block 类型折叠渲染(ThinkingBlock→Thought ▾ / 读类工具→Explored ▾ / 写类→Worked ▾ / Bash→Ran ▾ / TextBlock=答复正文)。
@@ -90,17 +82,42 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 
 ---
 
-## gaps / 待设计
-- F3 主动诊断触发粒度(compile-fail 事件→主动消息 vs 错误旁一键)— 实现细化。
-- F1 `ThinkingBlock`/`ServerToolUse`/`SystemMessage` 翻译范围 + 折叠分类细则。
-- F4 tiptap 类富文本编辑器选型(内联 pill)。
-- F5 SDK `can_use_tool`/PreToolUse 拦截 + Bash auto-allow 白名单范围 — 先 30 行 PoC。
-- 工具集是否扩(Grep/Glob 给 F1 Explored 探索)。
+## 3. 接口契约
+- **copilot WS（① 前端 → ③a studio backend）**：`WS /api/skills/{skill_id}/copilot/ws`（现 `routers/copilot.py:34`）。请求(MVP1 扩展)`{user_message, model_override?, mentions[], implicit_context, attachments[]（图片 base64,新）, request_id}`；响应事件 union `text_delta | thinking_delta(新) | tool_use_start | tool_use_result | patch_proposed(新) | context_resolved(新) | tool_approval_request(新) | error | done`。字段 SSOT = `apps/studio/backend/app/models/copilot.py`(实现时扩展)。错误→`error` 事件不甩 raw traceback。
+- **调用 SDK（③a → claude_agent_sdk）**：copilot 自身 = `ClaudeSDKClient`；block 类型 SSOT = `claude_agent_sdk/types.py`(Text/Thinking/ToolUse/ToolResult/ServerTool)；`can_use_tool`/PreToolUse 回调拦截 Write/Edit→提案、Bash→审批(需 PoC)。
+- **安全写落盘 → [[native-fs]](Rust, D12)**：Apply→编辑器 buffer(开着)或 Rust 文件命令(没开)→`SaveConflict`→compile。写入唯一权威=Rust，落点 SSOT 在 native-fs。
+- **跨能力边界(数据流归别处)**：judge/打磨→[[golden-eval]]；commit-msg→[[publish]]；模型选择→[[studio-settings]]；role→route→[[gateway]] `resolve_routes("copilot_chat")`。
 
-## 交叉引用（双向，回写）
-- → [[golden-eval]]：F7 分析 bar 细化其 g-e **批量 golden 入口**(sonner→弹窗)；judge/打磨数据流归它。回写 g-e + workflow [[04_run-and-verify]]。
-- → [[native-fs]]：F2 多 session 落盘 + F5 安全写 Rust(反向登记"被 copilot-assist 依赖")。
-- → [[canvas]] [[editor]] [[timeline]]：F4 自动 @ 触发(反向登记"本区域点击→copilot @")。
-- → [[studio-settings]]：模型选择/eligible/真 SDK 测试/draft(copilot **配置**侧，§3 已走)。
-- → [[skill-workspace]]：F6 建技能向导产出的 skill 文件创建/脚手架。
-- → engine：F6 brainstorming graph skill；F3 skill-spec 知识源。
+---
+
+## 4. 设计决策基础（PM 原话）
+> **组织方式**：**以每个功能为索引** —— 每个功能(F1–F8)一段，把它的机制/决策+动机/原话/测试点/status/归属**全收在自己段里**；仅「定义」「接口契约」是模块级总览。现状基线见 [baseline](./baseline.md)。
+> **框架决策(PM 原话)**：「1.现在是mvp1. 2.做全」—— chat-shell（@mention/pill/安全写/diff）+ brain 全纳入，不再 deferred；copilot 一等能力、全功能不延后。
+
+## 5. 决策 + 动机
+| ID | 决策 | 动机 |
+|---|---|---|
+| COPILOT_ASSIST-1 | ThinkingBlock | 对齐 `copilot-sdk-test-parity` 设计单元，保证实现与测试可回扣 |
+| COPILOT_ASSIST-2 | 安全写 | 对齐 `copilot-sdk-test-parity` 设计单元，保证实现与测试可回扣 |
+| COPILOT_ASSIST-3 | session | 对齐 `copilot-sdk-test-parity` 设计单元，保证实现与测试可回扣 |
+| COPILOT_ASSIST-4 | SDK 测试 | 对齐 `copilot-sdk-test-parity` 设计单元，保证实现与测试可回扣 |
+
+## 6. 测试关键点
+1. ThinkingBlock: baseline 现状为 `_translate_sdk_message` 丢 ThinkingBlock ⚠️；目标为 thinking/tool call 全量流式，折叠但不省略。
+2. 安全写: baseline 现状为 SDK `acceptEdits` 直写 ⚠️；目标为 Write/Edit 变 diff proposal，Apply 走 Rust/编辑器保存与冲突处理。
+3. session: baseline 现状为 前端 store reset 后内存态丢失 ⚠️；目标为 一 skill 多 session 持久化，退出恢复全部与活跃 tab。
+4. SDK 测试: baseline 现状为 Settings probe 走 `AsyncAnthropic` ⚠️；目标为 短 smoke 走真实 `ClaudeSDKClient` chat 路径。
+
+## 7. 涉及 region / platform
+`copilot` region · `studio-settings` · `golden-eval` · `publish` · `native-fs` · `llm-copilot-http-api`
+
+## 8. gaps / 报警
+- 🚨 ThinkingBlock: `_translate_sdk_message` 丢 ThinkingBlock ⚠️；目标 thinking/tool call 全量流式，折叠但不省略。
+- 🚨 安全写: SDK `acceptEdits` 直写 ⚠️；目标 Write/Edit 变 diff proposal，Apply 走 Rust/编辑器保存与冲突处理。
+- 🚨 session: 前端 store reset 后内存态丢失 ⚠️；目标 一 skill 多 session 持久化，退出恢复全部与活跃 tab。
+- 🚨 SDK 测试: Settings probe 走 `AsyncAnthropic` ⚠️；目标 短 smoke 走真实 `ClaudeSDKClient` chat 路径。
+
+> 旧迁移附录暂存 [`_migrated-coverage-drift.md`](../../_migrated-coverage-drift.md#02-capabilities-copilot-assist)（迁移期安全网，代码实现验证后删）。
+
+## 交叉引用（链接, 不复制）
+[baseline](./baseline.md)（现状,双向）· `copilot` region · `studio-settings` · `golden-eval` · `publish` · `native-fs` · `llm-copilot-http-api`

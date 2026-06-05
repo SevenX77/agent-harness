@@ -56,9 +56,9 @@ aligns_with: 01_workflows/00_settings-ux-spec.md（HTTP/Settings/Copilot）· do
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| LLM_COPILOT_HTTP_API-1 | router 边界 | 对齐 `settings-six-state-provider-health` 设计单元并保护四层边界 |
-| LLM_COPILOT_HTTP_API-2 | Copilot SDK test | 对齐 `settings-six-state-provider-health` 设计单元并保护四层边界 |
-| LLM_COPILOT_HTTP_API-3 | DTO SSOT | 对齐 `settings-six-state-provider-health` 设计单元并保护四层边界 |
+| LLM_COPILOT_HTTP_API-1 | router 边界 | 单元 `settings-six-state-provider-health`（③a HTTP 壳消费）；**为什么**：router 只做 DTO/状态码/job 包装，内核 delegate ③b |
+| LLM_COPILOT_HTTP_API-2 | Copilot SDK test | 单元 `copilot-sdk-test-parity`；**为什么**：test 端点走真实 `ClaudeSDKClient` smoke，非 AsyncAnthropic |
+| LLM_COPILOT_HTTP_API-3 | DTO SSOT | 单元 `model-group-role-materialization`；**为什么**：DTO 字段链接 gateway registry schema，不复制第二份真理 |
 
 ## 6. 测试关键点
 1. router 边界: baseline 现状为 `llm.py` 混 API/service/probe/projection/job store ⚠️；目标为 router 只保留 DTO/status/job 包装，内核 delegate 到 ③b/③a service。

@@ -73,9 +73,9 @@ Source workflow basis: `01_workflows/03_compile.md:20`, `01_workflows/04_run-and
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| STATE_ENGINE-1 | 状态源 | 对齐 `shell-runtime-gate` 设计单元并保护四层边界 |
-| STATE_ENGINE-2 | WS bridge | 对齐 `shell-runtime-gate` 设计单元并保护四层边界 |
-| STATE_ENGINE-3 | sidecar failure | 对齐 `shell-runtime-gate` 设计单元并保护四层边界 |
+| STATE_ENGINE-1 | 状态源 | 单元 `run-execution-node-status`；**为什么**：stage/node/provider/sidecar 状态要有清晰单源和投影边界，现分散 Workspace/sessionStorage/SWR |
+| STATE_ENGINE-2 | WS bridge | 单元 `run-execution-node-status`（+`trace-dot-blackboard`）；**为什么**：run/global events 经统一 WS bridge 驱动节点灯/timeline/settings refresh |
+| STATE_ENGINE-3 | sidecar failure | 单元 `shell-runtime-gate`；**为什么**：sidecar failure 为局部壳状态、不阻塞基础 UI(D10) |
 
 ## 6. 测试关键点
 1. 状态源: baseline 现状为 Workspace/sessionStorage/SWR/store 分散持状态 ⚠️；目标为 stage/node/provider/sidecar 状态有清晰单源和投影边界。

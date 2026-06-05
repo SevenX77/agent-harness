@@ -36,9 +36,9 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:340`, `01_workflows/
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| GATEWAY-1 | 六态归属 | 对齐 `settings-six-state-provider-health` 设计单元并保护四层边界 |
-| GATEWAY-2 | materialize | 对齐 `settings-six-state-provider-health` 设计单元并保护四层边界 |
-| GATEWAY-3 | copilot route | 对齐 `settings-six-state-provider-health` 设计单元并保护四层边界 |
+| GATEWAY-1 | 六态归属 | 单元 `settings-six-state-provider-health`；**为什么**：6 态标准投影是 ③b gateway 公共内核，Studio 只渲染消费 |
+| GATEWAY-2 | materialize | 单元 `model-group-role-materialization`；**为什么**：materialize/model group/endpoint 标准化归 ③b 内核 |
+| GATEWAY-3 | copilot route | 单元 `copilot-sdk-test-parity`；**为什么**：gateway 只把 `copilot_chat` 当 role 解析 route，不感知 SDK session |
 
 ## 6. 测试关键点
 1. 六态归属: baseline 现状为 `llm_state_projection.py` 仍旧 5 态且应下沉 ③b ⚠️；目标为 6 态标准投影由 gateway ③b 内核提供，Studio 只渲染/消费。

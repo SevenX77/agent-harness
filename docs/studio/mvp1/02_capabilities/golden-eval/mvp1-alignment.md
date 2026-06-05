@@ -69,7 +69,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:118`, `01_workflows/04
 - Status: predict-guard backend live;run-seed-golden target-design。
 - 归属: capability `golden-eval`; capability `run-execution`; platform `engine`。
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Exact golden file layout for per-node JSON under workspace storage.
-- Copilot golden-design prompt content and stopping criteria.
+- **golden 物理布局 = `.workspace/golden/`,不写进 skill 源码树**(PM 2026-06-03 反转旧决策 A:golden 是会失效的临时优化产物、非 skill 定义)。绑定键 = phase_id(随 engine `01-physical-layout` 收口);失效校验从编译期移到 eval 期。详见 `docs/engine/mvp1/01-contract/01-physical-layout`。
+- **Copilot 设计 golden 的 prompt(描述驱动)**:先读 `GRAPH.md` 每个节点的 `description`(懂每个节点在整个 workflow 里的作用)+ 读 `SKILL.md`(懂这节点具体要干嘛、user 怎么设计的)→ 综合分析后产出。**严禁把 input/output schema 当黄金标准**(user 的输入输出标准本身可能有问题);但提示词须提示:**要改 schema 须谨慎、贯穿上下文看**。停止条件 = 产出可用 golden 且用户接受。

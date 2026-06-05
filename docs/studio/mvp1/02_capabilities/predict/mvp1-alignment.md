@@ -60,6 +60,6 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:8`, `01_workflows/04_r
 - Status: backend-only live.
 - 归属: capability `predict`; capability `golden-eval`; platform `engine`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Exact i/o panel affordance for choosing single input versus future batch input.
+- i/o 面板**先做单输入选择**(下拉);批量输入**低优先、留占位入口**(批量属 `run-execution` F4)。

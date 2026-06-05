@@ -69,6 +69,6 @@ Source workflow basis: `01_workflows/03_compile.md:22`, `01_workflows/04_run-and
 - Status: target-design.
 - 归属: platform `engine`; capability `debug-resume`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- None for core direction; remaining gaps are mostly engine design details already listed above.
+- 核心方向无 PM 决策缺口。engine **内部设计细节**(编译机制、trace 事件 schema、checkpoint/resume API、golden→`.workspace` 落点等)在 **engine 自己的 mvp1 文档** `docs/engine/mvp1/`(contract + mechanism)——本 studio 侧文档只写 studio↔engine 契约,细节交叉引用过去、不在此重复(避免两份漂移)。

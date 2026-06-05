@@ -59,6 +59,6 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 - Status: target-design.
 - 归属: capability `compile-lint`; region `editor`; platform `engine`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Whether trace/context documents should be virtual editor tabs or files materialized under `.workspace`.
+- trace/context 文档 = **具名只读 tab**(与正在编辑的文件并列,不临时替换当前编辑器)。

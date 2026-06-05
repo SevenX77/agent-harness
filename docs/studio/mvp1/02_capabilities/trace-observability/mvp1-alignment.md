@@ -68,6 +68,6 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 - Status: target-design.
 - 归属: capability `trace-observability`; capabilities `run-execution`, `debug-resume`; region `canvas`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Exact visual density for long trace documents and maximum auto-expanded payload size.
+- 长 trace **默认折叠大块**;自动展开 payload 上限 **~2KB**(超出给"展开"按钮)。

@@ -57,6 +57,6 @@ Source workflow basis: `01_workflows/03_compile.md:20`, `01_workflows/04_run-and
 - Status: target-design/audit.
 - 归属: platform `state-engine`; region `shell-layout`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Whether this platform gets a formal store/reducer package or remains hooks with documented contracts.
+- 保持 **hooks + 文档化契约**,**不引入**正式 store/reducer 框架(YAGNI,MVP1 状态量未到需要 Redux 级)。

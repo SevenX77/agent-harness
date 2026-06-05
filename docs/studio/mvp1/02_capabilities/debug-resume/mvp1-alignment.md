@@ -59,6 +59,6 @@ Source workflow basis: `01_workflows/05_debugging.md:8`, `01_workflows/05_debugg
 - Status: target-design.
 - 归属: capability `trace-observability`; capability `debug-resume`; region `canvas`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Copy and placement for the HitL top question frame when Settings or Copilot panel is open.
+- HitL **不做固定画布顶栏**:点节点 debug 悬浮 bar 的"对话"按钮 → **就在该 bar 上方就地弹出一个悬浮富文本输入框**(锚定节点、跟 bar 走);输入即作 HitL 回答注入续跑。

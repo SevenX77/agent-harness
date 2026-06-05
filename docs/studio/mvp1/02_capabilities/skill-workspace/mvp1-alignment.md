@@ -59,7 +59,7 @@ Source workflow basis: `01_workflows/01_init.md:8`, `01_workflows/01_init.md:16`
 - Status: live with a suspected copilot `skillId/currentSkillId` mismatch to watch.
 - 归属: capability `skill-workspace`; region `shell-layout`; capability `copilot-assist`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Whether "delete" should only unregister from Recent/workspace or also offer destructive disk deletion.
-- Exact UX copy for importing a non-skill folder into a repair flow.
+- delete = **仅从 Studio 列表移除("Remove from Studio")、不删磁盘**;入口动词 = "Open folder"(非 "Import skill")。
+- 打开**非标准技能文件夹**不在门口拦,进入后进 **repair 态**(由 compile/copilot 帮补齐)。

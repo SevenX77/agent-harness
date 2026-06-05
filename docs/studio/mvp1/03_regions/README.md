@@ -1,6 +1,6 @@
 # 03_regions — UI 区域维 (维度 ③)
 
-> 治理规则见 [../INDEX.md](../INDEX.md)。本 tier 拥有 **UI 组件**的结构/状态/props/API, 区域间 MECE(一个组件只属一个区域)。跨组件流程归 `02_capabilities`, 只在此被链接。文档模板见 INDEX §7 region 模板。
+> 治理规则见 [design-doc-standards](../../../development/design-doc-standards/)(三轴模型 + 写作标准 + 审计标准)。本 tier 拥有 **UI 组件**的结构/状态/props/API, 区域间 MECE(一个组件只属一个区域)。跨组件流程归 `02_capabilities`, 只在此被链接。文档模板见 01-writing-standard。
 > **状态**: 12 个 region 均已落为文件夹制。每个 region 文件夹含 `baseline.md` 与 `mvp1-alignment.md`。4 个 ⚠ 是冲突热点(P1 优先实现)。
 
 ## 计划文档 (12)

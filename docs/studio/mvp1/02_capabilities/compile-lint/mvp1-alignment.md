@@ -59,6 +59,7 @@ Source workflow basis: `01_workflows/03_compile.md:7`, `01_workflows/03_compile.
 - Status: backend live; some location metadata may need engine expansion.
 - 归属: platform `engine`; capability `compile-lint`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Final drawer title/copy labels and whether warning-level items should block Predict.
+- 编译 **warning 级不阻塞 Predict**(只 error 阻塞);warning 仅标记/提示,不挡试飞。
+- 报错呈现 = 底部 drawer(只盖画布、一键复制 Copilot,自动弹;见 `center-action-bar`),标题/文案随实现定。

@@ -68,6 +68,6 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:340`, `01_workflows/
 - Status: partial live.
 - 归属: platform `gateway`; region `settings`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Final distinction between "failed(reason)" and "historical_ready" copy in Settings.
+- `failed(reason)` vs `historical_ready` 文案 = 六态标签(见 `studio-settings`/`settings` 已决):`historical_ready`=曾连通(直接显示)、`failed`=失败(带 reason: missing_config/endpoint_unreachable/model_failed)。

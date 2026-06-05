@@ -60,6 +60,6 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
 - Status: backend-only live.
 - 归属: capability `publish`; platform `native-fs`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Final UX for batch input range naming and whether Replay belongs in Timeline or Local History first.
+- Replay 先放 **Timeline**;Local History **只做 git**(不吸收 RunDetailDrawer/BatchSummary);batch 输入范围命名随实现定。

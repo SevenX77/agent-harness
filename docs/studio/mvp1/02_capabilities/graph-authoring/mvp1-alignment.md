@@ -59,6 +59,6 @@ Source workflow basis: `01_workflows/02_authoring.md:8`, `01_workflows/02_author
 - Status: placeholder.
 - 归属: capability `graph-authoring` for rendering; `trace-observability` for data.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Exact inline subgraph expansion depth limit and whether expansion should auto-collapse sibling branches.
+- 子图展开 = 当前走查设计(`01_workflows/02_authoring.md` D7/G2/T5/T6),**非旧 canvas-micro-topology 那套**:**D7** `SUBGRAPH.md` 写死 `path` 直接解析、无注册表(copilot cwd 必须含子图 path);**G2** 不绑父子图 1:1 io(子图 input 从 state 状态机过滤字段拿);**T5** inline 展开(虚线容器 + 动态 group bbox);**T6** 下钻 = 就地聚焦、不切工程(+ 画布左上角面包屑返回、copilot 无缝);**L3** 右缘 `+` 展开 body `<step>`/`<action>` 走 Rust。**内联/聚焦递归展开**(超深子图性能退化为下钻属可选优化)。

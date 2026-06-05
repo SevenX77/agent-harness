@@ -40,6 +40,6 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/03_compi
 - Status: target-design.
 - 归属: regions `canvas`, `editor`, `center-action-bar`; capabilities `compile-lint`, `file-editing`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Final wording for "allow sequential overwrite" and whether it should live on the producing node or the consuming/downstream node.
+- "允许覆盖写"开关落在**消费/下游节点**(冲突在"谁要覆盖写入"那侧更直观)。

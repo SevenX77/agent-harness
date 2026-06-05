@@ -58,6 +58,6 @@ Source workflow basis: `01_workflows/01_init.md:39`, `01_workflows/02_authoring.
 - Status: partial; RuntimeGate still needs audit.
 - 归属: platform `native-fs`; region `shell-layout`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Whether external tool commands (`open_in_cursor`, `open_in_codex`, terminal) remain in MVP1 UI or stay hidden developer utilities.
+- **砍掉** `open_in_cursor` / `open_in_codex` / `open_in_terminal`(不进 MVP1 UI;现码 `apps/studio/frontend/src/lib/tauri.ts:26` 仍在,属待清 drift);`reveal_in_file_manager`(访达/资源管理器显示)= **保留**(正经工作区功能)。

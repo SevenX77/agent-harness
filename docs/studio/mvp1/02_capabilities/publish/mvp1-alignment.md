@@ -50,6 +50,6 @@ Source workflow basis: `01_workflows/06_eval.md:1`, `01_workflows/06_eval.md:13`
 - Status: partial live; no automatic redirect.
 - 归属: capability `skill-workspace`; region `welcome`, `shell-layout`.
 
-## 待 PM 补 gap
+## 已决(PM 2026-06-04)
 
-- Whether MVP1 should add a settings shortcut when publish preconditions fail.
+- 发布前置不满足时**加一个跳 Settings 的快捷入口**(一键去配)。

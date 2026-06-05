@@ -1,65 +1,56 @@
-# predict MVP1 Alignment
+---
+module: 02_capabilities/predict
+doc: mvp1-alignment
+status: drafted（后端链路 live；前端入口 + predict-pass = target-design）
+binds_baseline: ./baseline.md
+unit: predict-execution
+lock: drafted
+aligns_with: 01_workflows/04_run-and-verify.md（E. predict）
+---
 
-## 定义
+# predict — MVP1 Alignment
 
-`predict` owns the compile-after, run-before "flight test": run the graph according to node i/o configuration, validate schema and logic, execute deterministic logic nodes, and mock agent nodes without burning real tokens.
+> **Tier**: capability（compile 后 / run 前的试飞）| **Owns**: `predict-execution`——按节点 i/o 跑图、验 schema/逻辑、确定性跑 logic、agent mock 不烧 token | **现状**: 后端 live、前端入口桩 ⚠️ | **Related**: [baseline](./baseline.md)（双向）· `compile-lint`(gate) · `golden-eval`(mock/guard) · `input`(输入) · `engine`(`predict_skill`)
 
-Source workflow basis: `01_workflows/04_run-and-verify.md:8`, `01_workflows/04_run-and-verify.md:16`, `01_workflows/04_run-and-verify.md:28`.
+## 1. 定义
+`predict` = 编译后、运行前的"试飞"：按节点 i/o 配置跑图、验 schema 与逻辑、确定性执行 logic 节点、mock agent 节点而不烧真 token。是 Run 的硬前置。
 
-## 接口契约
+## 2. 数据流 / 机制（设计细节）
+1. **触发**：compile-pass 后 Predict 点亮 → 用户在 i/o 面板选已导入输入 → 点 Predict → `onPredict` 调 `postPredictRun` → 后端 `predict_run` → `dispatch_predict_job` → 引擎 `predict_skill`。
+2. **校验**：验 input schema → 确定性跑 logic 节点 → 验 output schema 兼容（schema 缺字段 → 编译 / predict 错误）。
+3. **agent mock by golden**：agent 节点不调真模型；按节点 **golden 状态**选 mock —— 无 golden → 占位 mock；有 golden → golden case。**golden 非前置**，只换 mock 源（golden 内容归 `golden-eval`）。
+4. **predict-pass**：成功 predict 置 `predict-pass`、解锁 Run；失败保持 Run 锁 + 就近报错。
+5. **guard**：predict 轨迹（假数据）**不可入 golden**（409）；但 **Run 真实输出可作 golden 默认种子**（见 `golden-eval`）。
 
-- Entry: center Predict becomes available after compile-pass.
-- Input: i/o panel selects an imported test input file or configured input set.
-- Backend: predict endpoint runs engine predict and returns run-like diagnostic output.
-- Golden: agent mock selection is automatic based on golden state.
-- Region links: `center-action-bar`, `input`, `canvas`, `timeline`.
-- Platform link: `engine`, `gateway` only through mock/model resolution boundaries.
+## 3. 接口契约
+- 入口：`postPredictRun(skillId, inputData)` → `POST /skills/{id}/runs/predict` → `predict_run`。
+- 输入：i/o 面板选已导入测试输入（单输入先做，批量低优先归 `run-execution`）。
+- 产物：run-like diagnostic（`RunResult`，`source="predict"`）；不入 golden。
 
-## F1. Trigger Predict From I/O Configuration
+## 4. 设计决策基础（PM 原话）
+> golden 非前置（`04_run-and-verify:29`）：有 golden 按 golden 输出、无则占位 mock。
+> predict 轨迹不可入 golden、run 可（PM 2026-06-04）：guard 只挡 predict、不挡 run。
+> i/o 面板先做单输入选择（下拉）；批量低优先、留占位（批量属 `run-execution`）。
 
-- 机制: user chooses already-imported input in the i/o panel, then clicks Predict.
-- 决策: input/validate/batch are configuration, not separate predict subproducts.
-- 原话/来源: `01_workflows/04_run-and-verify.md:21` assigns input selection to i/o config; `01_workflows/04_run-and-verify.md:31` replaces the old dynamic dialog with the path-style i/o panel flow.
-- 测试: Predict uses the selected file/config; no freeform JSON modal appears.
-- Status: target-design.
-- 归属: capability `predict`; region `input`; platform `engine`.
+## 5. 决策 + 动机
+| ID | 决策 | 动机 |
+|---|---|---|
+| PR1 | predict 是 Run 硬前置（predict-pass 才解锁 Run） | 先证逻辑 / schema 跑通，再烧真 token |
+| PR2 | agent mock by golden 状态，golden 非前置 | 试飞不烧 token；golden 只换 mock 源 |
+| PR3 | predict 轨迹不入 golden（409），run 输出可作种子 | predict 是假数据；run 是真实，可做 golden 起点 |
 
-## F2. Validate Schema And Logic Chain
+## 6. 测试关键点
+1. 点 Predict 真发请求、出 diagnostic（非 `console.info`）。
+2. 成功 predict 置 predict-pass、解锁 Run；失败 Run 仍锁。
+3. agent 节点零真 token；无 golden 出占位、有 golden 出 golden case。
+4. predict 轨迹提升 golden 返 409；手动 / copilot 建 golden 仍允许。
 
-- 机制: predict validates input schema, runs logic nodes deterministically, and verifies output schema compatibility.
-- 决策: Predict exists to prove logic and schema before Run.
-- 原话/来源: `01_workflows/04_run-and-verify.md:22` and `01_workflows/04_run-and-verify.md:23` list validation and logic execution; `01_workflows/04_run-and-verify.md:34` records the PM explanation.
-- 测试: invalid input blocks predict; logic node executes real code; schema mismatch produces compile/predict error.
-- Status: backend live, frontend not connected.
-- 归属: capability `predict`; platform `engine`; downstream `compile-lint`.
+## 7. 涉及 region / platform
+capability `predict`（owner）；region `input`（输入选择）/ `center-action-bar`（触发）；platform `engine`（`predict_skill`）。consume：`compile-lint`（gate）、`golden-eval`（mock/guard）。
 
-## F3. Agent Mock By Golden State
+## 8. gaps / 报警
+- 🚨 前端 predict 主入口 + predict-pass 置位未实现（`Workspace.tsx:onPredict` 桩，见 baseline 测试锚点）；**接线 / 签名实施归 kiro**。
+- F1 输入来源待接 i/o 面板（`io-panel-artifacts-test-inputs`）。
 
-- 机制: agent nodes do not call real models during predict; they emit placeholder mock or golden output depending on node golden state.
-- 决策: golden is not a prerequisite; it only changes mock source.
-- 原话/来源: `01_workflows/04_run-and-verify.md:24` lists agent mock behavior; `01_workflows/04_run-and-verify.md:29` locks golden as non-prerequisite.
-- 测试: no provider token is used; no-golden node emits placeholder; golden node emits golden case.
-- Status: backend/design partial.
-- 归属: capability `predict`; capability `golden-eval`; platform `engine`.
-
-## F4. Predict-pass Stage
-
-- 机制: successful predict sets `predict-pass`, enabling Run; failed predict keeps Run disabled.
-- 决策: Predict is the hard precondition for Run.
-- 原话/来源: `01_workflows/04_run-and-verify.md:10` and `01_workflows/04_run-and-verify.md:11` define the hard gate.
-- 测试: passing predict unlocks Run; failing predict leaves Run disabled and shows the error at context.
-- Status: missing.
-- 归属: capability `predict`; capability `run-execution`; region `center-action-bar`.
-
-## F5. Predict Trace Cannot Become Golden
-
-- 机制: any promotion attempt from a predict trace is rejected(409);**但 Run 真实输出可作 golden 默认种子,见 `golden-eval` F6**。
-- 决策: predict 轨迹(假数据)不可入 golden;guard 只挡 predict,**不挡 run**——run 真实输出可做 golden 起点(PM 2026-06-04)。
-- 原话/来源: `01_workflows/04_run-and-verify.md:25` keeps the 409 guard; `01_workflows/04_run-and-verify.md:131` changes golden to per-node author expectation.
-- 测试: predict trace promotion returns 409; manual/copilot golden creation remains allowed.
-- Status: backend-only live.
-- 归属: capability `predict`; capability `golden-eval`; platform `engine`.
-
-## 已决(PM 2026-06-04)
-
-- i/o 面板**先做单输入选择**(下拉);批量输入**低优先、留占位入口**(批量属 `run-execution` F4)。
+## 交叉引用（链接, 不复制）
+[baseline](./baseline.md)（现状,双向）· `compile-lint`（`compile-stage-gate`）· `golden-eval`（`golden-per-agent-node`）· `input` region（`io-panel-artifacts-test-inputs`）· `engine`（`predict_skill`）

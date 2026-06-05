@@ -1,29 +1,58 @@
-# predict Baseline
+---
+module: 02_capabilities/predict
+doc: baseline
+status: drafted（现状对齐 pinned 代码 3c1e2f5；后端 predict 链路 live、前端主入口是桩 ⚠️）
+binds_alignment: ./mvp1-alignment.md
+binds_code: apps/studio/frontend/src/components/studio/Workspace.tsx:onPredict · apps/studio/frontend/src/api/client.ts:postPredictRun · apps/studio/backend/app/routers/runs.py:predict_run · apps/studio/backend/app/services/predictor.py:dispatch_predict_job · packages/graph-agent/src/graph_agent/core/runner.py:predict_skill
+unit: predict-execution
+lock: drafted
+---
 
-Status: backend mostly live, frontend entry is a stub.
+# predict — Baseline（当下代码实现逻辑）
 
-Source workflow: `01_workflows/04_run-and-verify.md`.
+> **Scope**: compile 后、run 前的"试飞"——按节点 i/o 跑图、验 schema/逻辑、确定性跑 logic、agent mock 不烧 token。
+> **现状一句话**: 后端 predict 链路 live（路由 / service / 引擎 / golden guard），但**前端主入口 `Workspace.tsx:onPredict` 是 `console.info` 桩 ⚠️**，predict-pass 无法置位、Run 永锁。Source workflow：`01_workflows/04_run-and-verify.md`。
 
-## Current Code Index
+## UI/UX
+center-action-bar 的 Predict 按钮（compile-pass 后点亮），点击应触发试飞并出 diagnostic。**现状点击只打日志。**
 
-| Surface | Current behavior | Evidence |
+## 前端逻辑
+| 面 | 现状 | 证据（文件:符号名） |
 |---|---|---|
-| Predict button | Center action bar can enable Predict after compile-pass, but Workspace handler only logs. | `apps/studio/frontend/src/components/studio/center-action-bar.tsx:42`, `apps/studio/frontend/src/components/studio/Workspace.tsx:537` |
-| API helper | `postPredictRun` exists and posts input data to `/runs/predict`. | `apps/studio/frontend/src/api/client.ts:134` |
-| Backend route | Predict route dispatches predictor service with mock flag, input data, and current hashes. | `apps/studio/backend/app/routers/runs.py:32` |
-| Predictor service | Predictor dispatches a predict job and persists `result.json`. | `apps/studio/backend/app/services/predictor.py:41`, `apps/studio/backend/app/services/predictor.py:111` |
-| Engine predict | graph-agent exposes `predict_skill` and writes predict artifacts/trace. | `packages/graph-agent/src/graph_agent/core/runner.py:163`, `packages/graph-agent/src/graph_agent/core/runner.py:353` |
-| Input validation | Backend has a validate-input endpoint but it is not wired into a full i/o panel predict flow. | `apps/studio/backend/app/routers/skills.py:454` |
-| Golden guard | Diagnostic export rejects predict traces from promotion to golden. | `apps/studio/backend/app/services/diagnostic_export.py:25` |
-| Stage update | No frontend code sets `predict-pass`; Run remains gated. | `apps/studio/frontend/src/components/studio/center-action-bar.tsx:52`, `apps/studio/frontend/src/components/studio/Workspace.tsx:537` |
+| Predict 入口 | 点击 handler **只 `console.info("predict clicked")` ⚠️** | `Workspace.tsx:onPredict`（L537） |
+| API helper（就绪） | `postPredictRun` 已存在、POST `/skills/{id}/runs/predict` | `client.ts:postPredictRun`（L134） |
+| predict-pass | **前端无代码置位 ⚠️**，Run 仍门控 | `center-action-bar.tsx`（无 predict-pass @L52） |
 
-## Current Coverage
+## 后端功能
+| 面 | 现状 | 证据 |
+|---|---|---|
+| predict 路由 | 调 predictor service（mock flag / input / hashes） | `runs.py:predict_run`（L33） |
+| predictor service | `dispatch_predict_job` 跑 job + 落 `result.json` | `predictor.py:dispatch_predict_job`（L41） |
+| 引擎 predict | `predict_skill` 写 predict artifacts/trace | `runner.py:predict_skill`（L163/353） |
+| golden guard | diagnostic export 拒 predict trace 入 golden（409） | `diagnostic_export.py:export_predict_diagnostics`（L25） |
 
-- live/backend: predict endpoint, predictor service, engine predict path, diagnostic persistence, golden guard.
-- placeholder/frontend: button handler, input-file selection, stage update, trace display.
-- stale: old dynamic JSON predict dialog concept is replaced by i/o panel file selection.
+## API
+- 前端：`postPredictRun(skillId, inputData) -> PredictRunResponse | RunDetail`（`client.ts:postPredictRun`）。
+- 后端：`POST /skills/{id}/runs/predict` → `predict_run`（`runs.py:predict_run`）。
 
-## Known Drift
+## Data Model / State
+predict 产物落 `result.json`（`RunResult`，`source="predict"`）；不入 golden（409 guard 挡 predict 轨迹）。
 
-- Workflow says Predict is the hard precondition for Run; current UI cannot complete predict-pass (`apps/studio/frontend/src/components/studio/Workspace.tsx:537`).
-- Predict should run according to node i/o configuration; current helper only accepts ad hoc `input_data` (`apps/studio/frontend/src/api/client.ts:134`).
+## 当前边界（predict 现在不是什么）
+- 不是 Run（不烧真 token；agent 走 mock）。
+- 不拥有 golden 内容（只读 golden 状态选 mock）——golden 归 `golden-eval`。
+- 不拥有 compile gate 规则（只置 predict-pass）——gate 归 `compile-lint`。
+
+## baseline / alignment 差异（测试锚点）
+| 维度 | 现状（baseline） | 目标（alignment） |
+|---|---|---|
+| 前端主入口 | `onPredict` = `console.info` 桩 ⚠️ | onPredict 调 `postPredictRun` 跑真 predict |
+| predict-pass | 前端无置位、Run 永锁 ⚠️ | predict 成功置 predict-pass、解锁 Run |
+| 输入来源 | helper 只收 ad hoc `input_data` | 从 i/o 面板选已导入输入 |
+> **验"是否按目标改了"**：① 点 Predict 真发请求出 diagnostic；② 成功 predict 后 Run 可点；③ predict 用 i/o 面板选中的 input。
+
+## 读代码主路径提示
+`Workspace.tsx:onPredict` →（应接）`client.ts:postPredictRun` → `runs.py:predict_run` → `predictor.py:dispatch_predict_job` → `runner.py:predict_skill`。
+
+## 交叉引用（链接, 不复制）
+[alignment](./mvp1-alignment.md)（目标,双向）· `compile-lint`（`compile-stage-gate` 门控）· `golden-eval`（`golden-per-agent-node` mock/guard）· `input` region（输入）· `engine`（`predict_skill`）

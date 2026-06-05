@@ -35,8 +35,8 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:118`, `01_workflows/04
 
 ## F3. Create Golden Manually Or With Copilot
 
-- 机制: i/o panel can generate an empty JSON template from output schema, while trace/sonner can open copilot chats to design golden.
-- 决策: both the contextual trace button and batch sonner entry are required.
+- 机制: i/o panel 从 output schema 生成空 JSON 模版;per-node trace 按钮开单个 copilot chat;**批量入口 = Copilot 输入框上方分析 bar**(predict/run 后弹窗,自动写无 golden 节点)——旧 sonner 批量已细化为分析 bar,见 `copilot-assist` F7。
+- 决策: contextual trace 按钮 + Copilot 分析 bar(batch);**旧 sonner 批量入口已被分析 bar 取代**。
 - 原话/来源: `01_workflows/04_run-and-verify.md:124` and `01_workflows/04_run-and-verify.md:125` list the two creation paths; `01_workflows/04_run-and-verify.md:137` records "两者都要".
 - 测试: manual template matches output schema; trace button opens one chat for one node; batch entry opens chats for all missing-golden agent nodes.
 - Status: target-design.
@@ -58,7 +58,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:118`, `01_workflows/04
 - 原话/来源: `01_workflows/04_run-and-verify.md:128` lists field diff; `01_workflows/04_run-and-verify.md:136` records run-after diff.
 - 测试: changed/missing/extra fields show scores and values; route mismatch between frontend and backend is fixed.
 - Status: backend whole-run diff live; per-node target-design; frontend orphan/mismatch.
-- 归属: capability `golden-eval`; regions `properties`, `timeline`; platform `engine`.
+- 归属: capability `golden-eval`; regions `editor`(详细 diff), `input`(入口); platform `engine`。**不在 `properties`**(PM 2026-06-04:golden 完全不在 Properties)。
 
 ## F6. Predict 不可入 golden,但 Run 输出可做默认种子
 

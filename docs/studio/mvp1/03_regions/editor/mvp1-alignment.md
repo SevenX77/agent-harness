@@ -60,4 +60,4 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 ## 已决(PM 2026-06-04)
 
 - 虚拟 trace/context 文档 = **具名只读 tab**(与正在编辑的文件并列,不临时替换当前编辑器)。
-- **golden 详细 diff 也在编辑器分屏里看**(Monaco diff 文档,实际 vs golden)——做分屏就是为了看 diff;Properties 只留字段级摘要(见 `properties` F4)。
+- **golden 详细 diff 也在编辑器分屏里看**(Monaco diff 文档,实际 vs golden)——做分屏就是为了看 diff;**golden 完全不在 Properties**(入口归 I/O output + Assets,见 `properties` 已决 / `input` F)。

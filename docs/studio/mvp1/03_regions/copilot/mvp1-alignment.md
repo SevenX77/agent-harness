@@ -52,7 +52,7 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:433`, `01_workflows/
 ## F5. Golden Design Entry
 
 - 机制: trace/golden flows can open copilot chats for missing node golden design.
-- 决策: golden creation has trace-local and batch copilot entries.
+- 决策: golden creation 有 trace-local 入口 + **批量 = Copilot 分析 bar**(predict/run 后弹窗,sonner→弹窗),见 `copilot-assist` F7。
 - 原话/来源: `01_workflows/04_run-and-verify.md:124` lists copilot golden creation; `01_workflows/04_run-and-verify.md:137` requires both entries.
 - 测试: golden CTA starts a chat seeded with graph/node/output context.
 - Status: target-design.

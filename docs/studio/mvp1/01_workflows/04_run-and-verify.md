@@ -121,11 +121,11 @@ dot = 两节点之间的"中间节点"(langgraph edge),代表**上节点 end 后
 |---|---|---|---|
 | E1 | agent 节点 golden 状态机:🔘未测试 → 🟡逻辑OK → 🟢有golden | canvas | target-design |
 | E2 | mock 由 golden 状态自动决定(无→占位 / 有→golden_case) | — | target-design |
-| E3 | golden 创建路A(copilot 协作):入口①trace 内占位节点旁按钮 ②sonner 批量开 N chat → copilot 看整图分析→定 golden | trace/copilot | target-design |
+| E3 | golden 创建路A(copilot 协作):入口①trace 内占位节点旁按钮 ②**predict/run 跑完 copilot 输入框上方分析 bar 弹窗**(确认→无 golden 节点自动写 golden;细化自旧 sonner 批量,见 [`copilot-assist`](../02_capabilities/copilot-assist/mvp1-alignment.md) F7) | trace/copilot | target-design |
 | E4 | golden 创建路B(手动):按 io.outputs schema 自动生成空模版 json,i/o 面板手填 | i/o 面板 | target-design |
 | E5 | golden 设置/文件归 i/o 面板 | i/o 面板 | target-design |
 | E6 | golden 失效:改 prompt/agent 内部不失效;**仅改 output schema 致缺字段 → 编译错误,必须补才能 predict** | — | target-design |
-| E7 | run 后 实际输出 vs golden **字段级 diff** | properties | target-design(useGoldenDiff orphan) |
+| E7 | run 后 实际输出 vs golden **字段级 diff**(详细 diff 在 editor 分屏,**不在 properties**) | editor | target-design(useGoldenDiff orphan) |
 | E8 | 409 守卫:golden 作者定/手填,非从 predict trace 捕获 | — | backend-only |
 
 ### 决策

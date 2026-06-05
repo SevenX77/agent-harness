@@ -24,6 +24,7 @@ aligns_with: ../00-architecture-overview.md（§4 API契约层 C）
 - `predict_skill(...同, unattended 默认 True, copilot_predict?) -> RunResult`(干跑/mock;`mock_llm` 经 `**inputs`)
 - 失败不抛:`GraphAgentError` 捕获 → `success=False` 的 RunResult(带 `error: ErrorPayload`)。
 > RunResult/ErrorPayload 字段形状归 `data-contracts`(本域引用不复制)。
+> `skill_resolver` 的 **DI 协议形状**(输入绝对 path+边界 / 输出子图 root / 失败 raise)归 [`02-resolver`](../02-mechanism/02-resolver/mvp1-alignment.md) §3;本域只定它是 run/compile 的必填参数。
 
 ### 2.2 事件协议
 34 类 typed `CallbackEvent`(判别字段 `event_type`),字段 SSOT = `callbacks/events.py`(归 `02-observability`);live 走 WS、history 走 HTTP、`trace.jsonl` 落盘 SSOT。

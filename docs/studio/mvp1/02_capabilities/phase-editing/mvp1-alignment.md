@@ -85,9 +85,9 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/02_autho
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| PHASE_EDITING-1 | 字段白名单 | 对齐 `phase-field-whitelist` 设计单元，保证实现与测试可回扣 |
-| PHASE_EDITING-2 | subgraph path | 对齐 `phase-field-whitelist` 设计单元，保证实现与测试可回扣 |
-| PHASE_EDITING-3 | role test | 对齐 `phase-field-whitelist` 设计单元，保证实现与测试可回扣 |
+| PHASE_EDITING-1 | 字段白名单 | 单元 `phase-field-whitelist`；**为什么**：字段权威归 engine skill-syntax，Properties 只按三类节点(SKILL/LOGIC/SUBGRAPH)白名单显示 |
+| PHASE_EDITING-2 | subgraph path | 单元 `phase-field-whitelist`；**为什么**：SUBGRAPH.md 的 target_skill 是 path 字段(D7)，纳入白名单表单 |
+| PHASE_EDITING-3 | role test | 单元 `node-properties-role-test`；**为什么**：节点 Properties 的 role 旁要有 Test 键+状态，复用 settings 的 role 测试机制 |
 
 ## 6. 测试关键点
 1. 字段白名单: baseline 现状为 parser/form 仍用旧字段 ⚠️；目标为 只暴露 engine MVP1 phase schema 白名单字段。

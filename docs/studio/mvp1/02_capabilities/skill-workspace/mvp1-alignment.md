@@ -76,9 +76,9 @@ Source workflow basis: `01_workflows/01_init.md:8`, `01_workflows/01_init.md:16`
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| SKILL_WORKSPACE-1 | Open Folder | 对齐 `workspace-open-folder-mru` 设计单元，保证实现与测试可回扣 |
-| SKILL_WORKSPACE-2 | Import gate | 对齐 `workspace-open-folder-mru` 设计单元，保证实现与测试可回扣 |
-| SKILL_WORKSPACE-3 | 子图 membership | 对齐 `workspace-open-folder-mru` 设计单元，保证实现与测试可回扣 |
+| SKILL_WORKSPACE-1 | Open Folder | 单元 `workspace-open-folder-mru`；**为什么**：IDE 模型——打开任意文件夹即工作区，无聚合注册表(D1/D11) |
+| SKILL_WORKSPACE-2 | Import gate | 单元 `workspace-open-folder-mru`；**为什么**：不卡导入校验，不合规交 compile+copilot 改成标准 skill(D2) |
+| SKILL_WORKSPACE-3 | 子图 membership | 单元 `subgraph-path-inline-drilldown`；**为什么**：子图按 path 解析、随便放哪，copilot cwd 必须纳入子图 path(D7) |
 
 ## 6. 测试关键点
 1. Open Folder: baseline 现状为 Home 读 `/skills` 注册表/聚合 ⚠️；目标为 直接打开任意文件夹，MRU/Remove 不依赖注册表。

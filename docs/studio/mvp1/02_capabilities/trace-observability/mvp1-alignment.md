@@ -84,9 +84,9 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| TRACE_OBSERVABILITY-1 | trace 挂载 | 对齐 `trace-dot-blackboard` 设计单元，保证实现与测试可回扣 |
-| TRACE_OBSERVABILITY-2 | dot 黑板 | 对齐 `trace-dot-blackboard` 设计单元，保证实现与测试可回扣 |
-| TRACE_OBSERVABILITY-3 | 节点态 | 对齐 `trace-dot-blackboard` 设计单元，保证实现与测试可回扣 |
+| TRACE_OBSERVABILITY-1 | trace 挂载 | 单元 `trace-dot-blackboard`；**为什么**：TracePanel/useRunStream 已建但零挂载(zombie)，要接线成 live trace |
+| TRACE_OBSERVABILITY-2 | dot 黑板 | 单元 `trace-dot-blackboard`；**为什么**：边 dot 现假黑板，要换真实黑板 state card + 只读编辑器查看 |
+| TRACE_OBSERVABILITY-3 | 节点态 | 单元 `run-execution-node-status`；**为什么**：事件→节点态投影的实现归共享 state(state-engine)，trace 只拥有语义 |
 
 ## 6. 测试关键点
 1. trace 挂载: baseline 现状为 TracePanel/useRunStream 未挂 Timeline/Workspace 主路径 ⚠️；目标为 run live 时可看到流式 trace，结束后可查历史。

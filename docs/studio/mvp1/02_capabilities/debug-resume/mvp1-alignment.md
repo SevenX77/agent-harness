@@ -75,9 +75,9 @@ Source workflow basis: `01_workflows/05_debugging.md:8`, `01_workflows/05_debugg
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| DEBUG_RESUME-1 | resume API | 对齐 `debug-resume-checkpoint` 设计单元，保证实现与测试可回扣 |
-| DEBUG_RESUME-2 | 节点入口 | 对齐 `debug-resume-checkpoint` 设计单元，保证实现与测试可回扣 |
-| DEBUG_RESUME-3 | trace 来源 | 对齐 `debug-resume-checkpoint` 设计单元，保证实现与测试可回扣 |
+| DEBUG_RESUME-1 | resume API | 单元 `debug-resume-checkpoint`；**为什么**：节点级 resume 用 checkpoint 已有数据精准续跑、上游不重跑(现 `runs.py:resume_run` 501) |
+| DEBUG_RESUME-2 | 节点入口 | 单元 `debug-resume-checkpoint`；**为什么**：改完 prompt/代码点节点 [Resume]；脏上游 → 下游 Resume 自动置灰 |
+| DEBUG_RESUME-3 | trace 来源 | 单元 `trace-dot-blackboard`（消费）；**为什么**：失败/暂停节点与 dot context 由 trace 事件投影提供，debug 只消费 |
 
 ## 6. 测试关键点
 1. resume API: baseline 现状为 `resume_run` 返回 501 ⚠️；目标为 失败节点可 resume，并携带 checkpoint / answer / tamper 输入。

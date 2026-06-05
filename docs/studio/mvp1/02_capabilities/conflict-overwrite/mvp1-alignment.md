@@ -56,9 +56,9 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/03_compi
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| CONFLICT_OVERWRITE-1 | 冲突呈现 | 对齐 `conflict-overwrite-resolution` 设计单元，保证实现与测试可回扣 |
-| CONFLICT_OVERWRITE-2 | 顺序覆盖 | 对齐 `conflict-overwrite-resolution` 设计单元，保证实现与测试可回扣 |
-| CONFLICT_OVERWRITE-3 | 保存冲突 | 对齐 `conflict-overwrite-resolution` 设计单元，保证实现与测试可回扣 |
+| CONFLICT_OVERWRITE-1 | 冲突呈现 | 单元 `conflict-overwrite-resolution`；**为什么**：canvas/editor/compile 三处冲突要一套统一分类，不能各报各的 |
+| CONFLICT_OVERWRITE-2 | 顺序覆盖 | 单元 `conflict-overwrite-resolution`；**为什么**：顺序覆盖是前端 opt-in 警告，引擎 compile 才是数据流非法的持久权威 |
+| CONFLICT_OVERWRITE-3 | 保存冲突 | 单元 `conflict-overwrite-resolution`；**为什么**：expected-hash 乐观并发，冲突要给 use-remote/overwrite 明确选项、不静默覆盖 |
 
 ## 6. 测试关键点
 1. 冲突呈现: baseline 现状为 文件冲突与顺序覆盖是两条 UI 路径 ⚠️；目标为 共享一个冲突面：diff/use-remote/keep-local/allow overwrite 语义清楚。

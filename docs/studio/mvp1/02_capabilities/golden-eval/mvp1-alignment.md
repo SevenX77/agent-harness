@@ -86,9 +86,9 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:118`, `01_workflows/04
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| GOLDEN_EVAL-1 | 粒度 | 对齐 `golden-per-agent-node` 设计单元，保证实现与测试可回扣 |
-| GOLDEN_EVAL-2 | 入口 | 对齐 `golden-per-agent-node` 设计单元，保证实现与测试可回扣 |
-| GOLDEN_EVAL-3 | predict guard | 对齐 `golden-per-agent-node` 设计单元，保证实现与测试可回扣 |
+| GOLDEN_EVAL-1 | 粒度 | 单元 `golden-per-agent-node`；**为什么**：golden = 单个 agent 节点的期望输出，非整次 run 快照 |
+| GOLDEN_EVAL-2 | 入口 | 单元 `golden-per-agent-node`；**为什么**：golden 设置/文件归 I/O output 区、详细 diff 在编辑器分屏，不在 Properties |
+| GOLDEN_EVAL-3 | predict guard | 单元 `golden-per-agent-node`；**为什么**：predict 假数据不可提升成 golden(409)，run 真实输出可做默认种子 |
 
 ## 6. 测试关键点
 1. 粒度: baseline 现状为 `set_golden_baseline_for_run` 复制整次 final_state ⚠️；目标为 按 agent node 管 golden case / output。

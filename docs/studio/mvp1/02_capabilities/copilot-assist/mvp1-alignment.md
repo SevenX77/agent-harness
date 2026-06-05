@@ -97,10 +97,10 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| COPILOT_ASSIST-1 | ThinkingBlock | 对齐 `copilot-sdk-test-parity` 设计单元，保证实现与测试可回扣 |
-| COPILOT_ASSIST-2 | 安全写 | 对齐 `copilot-sdk-test-parity` 设计单元，保证实现与测试可回扣 |
-| COPILOT_ASSIST-3 | session | 对齐 `copilot-sdk-test-parity` 设计单元，保证实现与测试可回扣 |
-| COPILOT_ASSIST-4 | SDK 测试 | 对齐 `copilot-sdk-test-parity` 设计单元，保证实现与测试可回扣 |
+| COPILOT_ASSIST-1 | ThinkingBlock | 单元 `copilot-session-persistence`；**为什么**：全流式消息(含 ThinkingBlock)要完整翻译渲染、不省略 |
+| COPILOT_ASSIST-2 | 安全写 | 单元 `copilot-session-persistence`；**为什么**：SDK acceptEdits 直接落盘有风险，须经提案/安全写边界 |
+| COPILOT_ASSIST-3 | session | 单元 `copilot-session-persistence`；**为什么**：退出再进对话一模一样、session 必须落盘不丢(D8 MUST) |
+| COPILOT_ASSIST-4 | SDK 测试 | 单元 `copilot-sdk-test-parity`；**为什么**：copilot test 必须走真实 `ClaudeSDKClient`，不能用 AsyncAnthropic 假路径 |
 
 ## 6. 测试关键点
 1. ThinkingBlock: baseline 现状为 `_translate_sdk_message` 丢 ThinkingBlock ⚠️；目标为 thinking/tool call 全量流式，折叠但不省略。

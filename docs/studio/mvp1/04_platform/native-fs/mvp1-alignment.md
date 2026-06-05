@@ -4,7 +4,7 @@ doc: mvp1-alignment
 status: drafted（Tauri sidecar/picker/reveal live；实际 skill/graph/package 写入仍经 FastAPI/Python，多处未收敛到 Rust 唯一写者 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [native-rust-writer, workspace-open-folder-mru, subgraph-path-inline-drilldown, publish-artifact-autocommit, local-history-snapshot, copilot-session-persistence]
-aligns_with: docs/studio/_reorg/alignment-notes.md（D10/D12）· 01_workflows/01_init.md · 01_workflows/02_authoring.md
+aligns_with: 01_workflows/01_init.md（D10/D12 决策留底）· 01_workflows/02_authoring.md
 ---
 
 # native-fs — MVP1 Alignment
@@ -57,7 +57,7 @@ Source workflow basis: `01_workflows/01_init.md:39`, `01_workflows/02_authoring.
 
 - 机制: sidecar-dependent functions show scoped errors while shell/file surfaces remain available.
 - 决策: no full-screen bootstrap gate for sidecar failure.
-- 原话/来源: `_reorg/alignment-notes.md` D10(non-fullscreen sidecar gate)。
+- 原话/来源: 本文 §4 D10(non-fullscreen sidecar gate)+ `01_workflows/01_init.md` §3。
 - 测试: app shell opens when sidecar fails; compile/copilot/settings show local errors.
 - Status: partial; RuntimeGate still needs audit.
 - 归属: platform `native-fs`; region `shell-layout`.
@@ -69,7 +69,9 @@ Source workflow basis: `01_workflows/01_init.md:39`, `01_workflows/02_authoring.
 - Capability links: `skill-workspace`, `file-editing`, `graph-authoring`, `publish`, `golden-eval`.
 
 ## 4. 设计决策基础（PM 原话）
-- **砍掉** `open_in_cursor` / `open_in_codex` / `open_in_terminal`(不进 MVP1 UI;现码 `apps/studio/frontend/src/lib/tauri.ts:openInCursor（L26）` 仍在,属待清 drift);`reveal_in_file_manager`(访达/资源管理器显示)= **保留**(正经工作区功能)。
+- **D10 后端三分**(native-fs = 第三块「本地操作」,🔒锁 PM 2026-06-01)> "后端应该分为3块: 1. gateway... python sidecar; 2. graph agent engine, 也是python, 用 sidecar; 3. 大量的本地操作, 读写文件, 文件系统(打开文件夹)等等, 全部用rust本地操作";sidecar 启动期 eager-spawn(非全屏 gate)> "启动程序时就后端拉起sidecar, 因为未来还要登陆用户呢, 还有setting 页面里api、llm role这些配置都需要服务端"。
+- **D12 本地操作全量 Rust(唯一写者,🔒PM 裁定 2026-06-01)**> "全量切 rust, 除了 graph agent 和 llm gateway 相关使用 python sidecar, 其他本地操作都用 rust";skill 源文件 / `.workspace` / copilot patch 落盘 / 编辑器 save 全走 Rust 命令,Python 端点退为只读 + 编译装配。
+- **砍掉** `open_in_cursor` / `open_in_codex` / `open_in_terminal`(D3,不进 MVP1 UI;现码 `apps/studio/frontend/src/lib/tauri.ts:openInCursor（L26）` 仍在,属待清 drift);`reveal_in_file_manager`(访达/资源管理器显示)= **保留**(正经工作区功能)。
 
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |

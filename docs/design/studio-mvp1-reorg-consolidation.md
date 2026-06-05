@@ -43,8 +43,14 @@ alignment-notes:300 记:截至 **2026-06-02 只有 `01_init` / `02_authoring` �
 - 删第 5 行「决策日志(原话依据): _reorg/alignment-notes 批次1」、第 6 行「原工作目录 _reorg/workflow-action-catalog 为迁移源」两处 `_reorg` 指针。
 - 结果:`01_init.md` 零引用 `_reorg`,自包含。
 
-### ⏳ 02_authoring — 待做(批次2 + Half A + canvas 细化 T5/T6 + G1–G9 + kiro spec 更新)
-### ⏳ 00_settings / 00_settings-ux-spec — 待做(S1/S2 + 起草)
-### ⏳ 03_compile / 04_run-and-verify / 05_debugging / 06_eval — 待做(**finality 热点**,先查 PM 签批)
-### ⏳ alignment repoint — shell-layout / state-engine / native-fs 的 `aligns_with` _reorg → 主场 workflow
-### ⏳ alignment-notes 退役 — 全树零引用后盖 `superseded`,确认后 `deprecated`
+### ✅ 02_authoring — §3 已 inline D7/G2/G3 原话(忠实,PM 已确认);删 line 5/6/14/35 的 _reorg 指针(M/T/V 详情改指 §2 + 能力文档)
+### ✅ 00_settings / 00_settings-ux-spec — 删 settings-action-catalog 迁移源 + alignment-notes 走查流水指针(决策在 ux-spec PM 口述权威 + §0/§2.0 inline)
+### ✅ 03_compile / 04_run-and-verify / 05_debugging / INDEX — 删 engine-prompt/gemini-prompt「仅历史草稿」面包屑(本就标非 SSOT,真 SSOT=engine mvp1 已在旁)
+### ✅ alignment repoint — shell-layout / state-engine / native-fs 的 _reorg → 01_init / native-fs §4(D10/D12 原话现 inline 在 native-fs §4 主场)
+### ✅ 裸引用清理 — native-fs 锁标记改 PM+日期 · DESIGN_UNITS_INDEX:22 · docs/studio/INDEX:130 改指 native-fs
+### ✅ alignment-notes 退役 — 盖 `[SUPERSEDED 2026-06-05]` 横幅;mvp1 全树零引用(路径+裸文本);待 _reorg 内部依赖退役后 `deprecated` 删
+
+## 结果
+- **mvp1 全树零引用 `_reorg` / `alignment-notes`**(grep 验证);269 条相对链接 0 断链。
+- 决策原话就近 inline 在主场;workflow / alignment 引主场不引 _reorg。
+- **遗留(Phase B 语义读再核)**:`03_compile`/`04_run-and-verify`/`05_debugging`/`06_eval` 的 workflow **决策正文 finality** —— alignment-notes:300 记它们截至 06-02 未过 PM。本轮只清了它们的 _reorg 面包屑(非决策源),其决策正文是否 PM 签批,留待全量语义读核。

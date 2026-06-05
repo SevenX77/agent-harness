@@ -1,7 +1,7 @@
 # Node 0: 设置与配置 (Settings & Configuration)
 
 > Tier: workflow · 能力 `studio-settings` · 区域 `settings` · 平台 `gateway`(Python sidecar)
-> 设计源: `.kiro/specs/studio-{api-keys-redesign, api-keys-regression-hardening, llm-roles-model-groups, llm-roles-frontend-cutover, llm-gateway-redesign, llm-platform-control-plane-runtime}` + gateway 模块设计 [`docs/graph-agent-gateway/mvp1/`](../../../graph-agent-gateway/mvp1/) + 锁定决策 D8 / D10 / §11 / G3。
+> 设计源(最新权威): 本页 workflow 走查 + [`00_settings-ux-spec.md`](./00_settings-ux-spec.md)(PM 口述权威) + `_reorg/settings-action-catalog.md` + gateway 模块设计 [`docs/graph-agent-gateway/mvp1/`](../../../graph-agent-gateway/mvp1/) + 锁定决策 D8 / D10 / §11 / G3。(`.kiro/specs/studio-*` 仅历史参考,**不作 SSOT**。)
 > 角色: **运行底座** —— 被 predict / run / publish / copilot 硬依赖的前置配置节点,不串在主旅程里,而是托住主旅程。
 
 ## 1. 业务目标
@@ -29,7 +29,7 @@ Settings 看起来是"前端表单",但它的真相全在后端:一个 provider 
 > 📋 **每步操作 / 反馈 / 动机的细粒度 UX 规格**（含 draft 赋能写回、model/endpoint 标签表现、测试落点：endpoint 验证在 API key 页、model 保证在 role 页）见 [`00_settings-ux-spec.md`](./00_settings-ux-spec.md)（PM 2026-06-02 口述，权威）。
 
 ### 3.1 General — 身份与产物路径
-最朴素的一条:User ID、Gitea 主机、**默认 skills 目录**。前两者是身份 / 上线坐标(Publish 推送到 Gitea 时要用),后者决定 Home"新建 skill"时的默认落点。交互是即填即存(debounce auto-save,无 Save 按钮);"选目录"唤起 OS 文件夹选择器,"重置"回落到计算出的默认值。
+最朴素的一条:User ID、Gitea 主机、**默认 skills 目录**。前两者是身份 / 可选远端坐标(**注意:publish 走 Artifact Registry zip 上传、非 git push**,见 [`06_eval`](./06_eval.md);Gitea 主机不是 publish 机制),后者决定 Home"新建 skill"时的默认落点。交互是即填即存(debounce auto-save,无 Save 按钮);"选目录"唤起 OS 文件夹选择器,"重置"回落到计算出的默认值。
 
 ### 3.2 API Keys — Provider 凭证
 配 provider 让模型能连通,分两区:**official**(固定 5 厂商 anthropic/openai/gemini/deepseek/ark,只填 key)与 **third-party**(用户自增:填 URL + key,protocol 系统自动探)。
@@ -44,10 +44,10 @@ Settings 看起来是"前端表单",但它的真相全在后端:一个 provider 
 
 > 📋 **细粒度 UX(原子动作 + 测试关键点)见权威 [`00_settings-ux-spec.md` §2](./00_settings-ux-spec.md)。** 以下为高层要点。
 
-- **以 Model Group 为单位,而非裸 route**:左侧角色卡展示该角色的 Model Group 兜底链;右侧可用模型按 Model Group 卡片(扁平,不暴露 `route_id` / `canonical_id` / `endpoint_id`,只给 `display_name`;**model family 可整体折叠**)。拖一个 Model Group 进角色,自动挑 Ready + Untested + 🔵 蓝(以前联通过)的 provider、排除 Needs Setup / Off。
+- **以 Model Group 为单位,而非裸 route**:左侧角色卡展示该角色的 Model Group 兜底链;右侧可用模型按 Model Group 卡片(扁平,不暴露 `route_id` / `canonical_id` / `endpoint_id`,只给 `display_name`;**model family 可整体折叠**)。拖一个 Model Group 进角色,自动挑 Ready + Untested + 🔵 蓝(以前联通过)的 provider、排除 `failed` / Off(**旧 Needs Setup 已并入 `failed`**)。
 - **存储结构化、执行平铺**:角色存 `model_groups[]`,后端物化(materialize)成 gateway 平铺 `fallback_chain`。前端作者看 Group,引擎跑链。
 - **role → route 是一等编排 API**:gateway 把"角色名 → route[]"作为一等输出(`ResolvedRoute` 是编排 ↔ 调用唯一交接物)。provider 可用性标签 = 这条链上每个 route 的 UI state 投影。
-- **状态体系 6 态 + 弃用区**:provider 行用统一 6 态色(新增 🔵 蓝=以前联通过/draft 回填)。单模型失败**两分类**——`failed`(红、**不挡**进可用、仍可选)vs `disabled`(弃用→灰、入可折叠弃用区、re-probe 再通可**捞回**);`needs_setup`(provider 没配通:缺 key/base_url/protocol/model)灰显引导去 API Keys 修。
+- **状态体系 6 态 + 弃用区**:provider 行用统一 6 态色(`ready`/`historical_ready`🔵/`untested`/`failed`/`cooling_down`/`off`;🔵 蓝=以前联通过/draft 回填)。单模型失败**两分类**——`failed`(红、**不挡**进可用、仍可选)vs `disabled`(弃用→灰、入可折叠弃用区、re-probe 再通可**捞回**);**配置缺口**(缺 key/base_url/protocol/model)并入 `failed`(`reason=missing_config`)、引导去 API Keys 修(**旧 `needs_setup` 已取消**)。
 - **角色测试 = 批量探 + 回写 draft**:对 role 内**所有模型批量真 probe**,结果(含失败)回写 draft;后端 SSOT,删前端易失态。
 - **Model Bundle 与 Role 统一**:bundle 复用 role 的录入/测试/改名删除(Add 按钮同位);**拖进角色 = 引用同步**(改束→引用角色跟着变,非快照)。
 - **lint 只警示、不选型**:gateway 异常分类(401/402/403/404 + 400-capability → fallback)是运行期流量安全过滤,**不驱动**编排期选型;测试失败不挡拖拽,真正拦截在运行期 admission。
@@ -72,13 +72,15 @@ Copilot 用与 LLM Roles 同构的角色模型(`role_kind=copilot`),但运行时
 
 1. **探测**:endpoint 测试 / route probe / role 测试 是真实测试状态的唯一写入点。
 2. **持久化**:endpoint 成功 / 失败 / 空 key 写 endpoint 状态 + 时间戳 + 消息;route 确定成功写 `verified` + capabilities,确定失败写 `failed` + 原因码,**临时**网络 / 限流 / 超时写运行期熔断(cooling_down)而**不**永久打 failed —— 临时问题会过期,用 `retry_at` 表达"暂时别用"。熔断事实落 SQLite。
-3. **投影**:前端 registry 行与角色物化都调同一个后端投影函数,把"endpoint 状态 + route 状态 + 密钥存在性 + 熔断"合成五个 UI state 之一:
-   - **`ready`** — endpoint 与 route 都 verified,唯一绿灯。
-   - **`untested`** — 无禁用、无缺配、无熔断,但也未双 verified。
-   - **`cooling_down`** — 有未过期熔断,展示 `retry_at` + 消息,不当永久失败。
-   - **`needs_setup`** — 缺 key / endpoint failed / route failed。
+3. **投影**:前端 registry 行与角色物化都调同一个后端投影函数,把"endpoint 状态 + route 状态 + 密钥存在性 + 熔断 + draft 历史证据"合成 **6 个 UI state 之一**(canonical 见 [`00_settings-ux-spec §4.2`](./00_settings-ux-spec.md);**已取消旧 `needs_setup`**):
+   - **`ready`**(🟢) — endpoint 与 route 都 verified,唯一绿灯。
+   - **`historical_ready`**(🔵 蓝) — 历史连通过(draft 回填),当前未真测 verified —— 介于"没测"与 verified 之间。
+   - **`untested`**(⚪) — 没测。
+   - **`failed`**(🔴,带 `reason`) — **统一**「配置缺口(缺 key/base_url/protocol/model,`reason=missing_config`)」与「真测试失败(`reason=endpoint_unreachable`/`model_failed`)」;**红、不挡进可用**(仍可选)。
+   - **`cooling_down`**(⚪+倒计时) — 有未过期熔断(网络/限流/超时),展示 `retry_at`,不当永久失败。
    - **`off`** — 被用户 / 配置主动禁用,优先级最高。
-4. **复用**:角色物化时跳过 `needs_setup` / `off`、对 `cooling_down` 记警告、只把 fit 的 route 放进兜底链 —— UI 看到的测试态,与引擎实际编排用的是同一套判断。
+   > 投影优先级:`off > failed > cooling_down > ready > historical_ready > untested`。代码 `ProviderUiState`(`llm_state_projection.py`)仍为旧 5 态,待接线(去 `needs_setup`、加 `failed`+reason、加蓝态)。
+4. **复用**:角色物化时跳过 `failed` / `off`、对 `cooling_down` 记警告、只把 fit 的 route 放进兜底链 —— UI 看到的测试态,与引擎实际编排用的是同一套判断。
 
 > **现状落差(头号 gap)**:后端持久化(endpoint / route 状态 + SQLite 熔断 + 投影函数)已具雏形,但前端仍残留**易失副本**(provider 测试结果、role 测试态存内存,刷新即丢)。目标是删掉前端这层易失覆盖,完全以后端 SSOT 投影为准。这是 settings 接线的主工程。
 

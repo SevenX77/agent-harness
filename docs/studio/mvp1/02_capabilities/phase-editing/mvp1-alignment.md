@@ -44,7 +44,7 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/02_autho
 
 ## F4. Subgraph Path Field
 
-- 机制: subgraph nodes store a local path reference, and missing path recovery is handled by workspace/assets.
+- 机制: subgraph nodes store an **绝对 path**(engine skill-syntax §2.1:绝对路径、无 registry), and missing path recovery is handled by workspace/assets.
 - 决策: no registry id for child graph resolution in MVP1.
 - 原话/来源: `01_workflows/02_authoring.md:37` records subgraph path; `01_workflows/02_authoring.md:38` records relaxed child IO.
 - 测试: Properties exposes `path`; missing path marks Assets and offers folder add; no strict child IO one-to-one check blocks compile.

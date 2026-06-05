@@ -52,7 +52,7 @@ Source workflow basis: `01_workflows/03_compile.md:20`, `01_workflows/04_run-and
 
 - 机制: represent sidecar readiness per feature rather than block the whole app.
 - 决策: shell/file surfaces should render even when backend-dependent functions fail.
-- 原话/来源: `docs/studio/INDEX.md:221` records non-fullscreen sidecar gate.
+- 原话/来源: `_reorg/alignment-notes.md` D10(non-fullscreen sidecar gate)。
 - 测试: sidecar down leaves Home/editor available; compile/copilot/settings show scoped error.
 - Status: target-design/audit.
 - 归属: platform `state-engine`; region `shell-layout`.

@@ -53,7 +53,7 @@ Source workflow basis: `01_workflows/01_init.md:39`, `01_workflows/02_authoring.
 
 - 机制: sidecar-dependent functions show scoped errors while shell/file surfaces remain available.
 - 决策: no full-screen bootstrap gate for sidecar failure.
-- 原话/来源: `docs/studio/INDEX.md:221` records the non-fullscreen gate decision.
+- 原话/来源: `_reorg/alignment-notes.md` D10(non-fullscreen sidecar gate)。
 - 测试: app shell opens when sidecar fails; compile/copilot/settings show local errors.
 - Status: partial; RuntimeGate still needs audit.
 - 归属: platform `native-fs`; region `shell-layout`.

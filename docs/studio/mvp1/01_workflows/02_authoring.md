@@ -2,7 +2,7 @@
 
 > Tier: workflow · Owns: 把业务逻辑装配成严谨 graph_skill 的旅程(宏观契约 / 中观拓扑 / 微观节点编辑 / 实时 compile 门控)· 能力 `graph-authoring` `phase-editing` `file-editing` `compile-lint` `conflict-overwrite` · 区域 `canvas` `editor` `input(→i/o panel)` `properties` `center-action-bar` · 平台 `native-fs`(Rust 写) / `engine`(compile)
 > Status: ✅ PM 已确认(批次2 + Half A + G1–G9 + R3–R5;Half B 现在设计)
-> 设计权威: `.kiro/specs/studio-feature-canvas-topology`(canvas REQ) + **FROZEN `docs/engine/mvp0/skill-spec`**(字段/格式) + 决策 D7/G2/G3/D12/REQ-10。原话依据: [`_reorg/alignment-notes.md` 批次2 + Half A + G1-G9](../../_reorg/alignment-notes.md)。字段唯一真相源 = 能力文档 [`phase-editing`](../02_capabilities/phase-editing/mvp1-alignment.md)(只链接不复制)。
+> 设计权威(最新): 本页 workflow 走查 + **字段/格式 SSOT** = [`engine mvp1 skill-syntax`](../../../engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md) + 决策 D7/G2/G3/D12/REQ-10。原话依据: [`_reorg/alignment-notes.md` 批次2 + Half A + G1-G9](../../_reorg/alignment-notes.md)。字段唯一真相源 = 能力文档 [`phase-editing`](../02_capabilities/phase-editing/mvp1-alignment.md)(只链接不复制)。(`.kiro/specs/studio-*`、旧 mvp0 FROZEN 仅历史参考、**不作 SSOT**。)
 > 本文 = 该节点**最终设计**(atom action 决策 + file:line 依据);迁移源 = `_reorg/workflow-action-catalog.md` §02_authoring。
 
 ## 1. 用户旅程目标
@@ -29,7 +29,7 @@
 | Properties 白名单重建(按 FROZEN 三类节点字段集) | **target-design**(REQ-10 确认 batch-2 stale 结论) | phase-editing · properties | FROZEN `05-agent:14-26`/`03-logic`/`04-subgraph`;`build-nodes.ts:151-160`(subagents 读过时 shape)。**FROZEN/G2**:删 io 1:1;**D7**:子图 path |
 | L3 步骤(`<step>`/`<action>`)增删改序 | **target-design**:右缘加号展开 body,走 Rust `mutate_phase_body`,现无 L3 | phase-editing · canvas | `SkillNode.tsx:116-131`;canvas REQ-6 L3;FROZEN `05-agent:48` |
 | Lint + Compile + 错误面板 | **live**(防抖 lint + `compileSkill` 引擎真编译,CompileErrorPanel 渲染) | compile-lint · center-action-bar | `useDebouncedLint.ts:48-49`/`Workspace.tsx:432-435`→`skills.py:109` |
-| Predict 门控解锁(Compile 绿灯→解锁 Predict) | **门控 live;点击进试飞=桩**(归 03_run-and-verify) | compile-lint · center-action-bar | `center-action-bar.tsx:31-50,76-85` |
+| Predict 门控解锁(Compile 绿灯→解锁 Predict) | **门控 live;点击进试飞=桩**(归 04_run-and-verify) | compile-lint · center-action-bar | `center-action-bar.tsx:31-50,76-85` |
 | 顺序覆盖冲突保存(overlay Allow/Cancel) | **live** | conflict-overwrite · canvas | `canvas-authoring.ts:237-337`/`GraphCanvas.tsx:105-119` |
 | [失败退路] 写失败回滚 / 拒写 / YAML 坏 error+Open file / 环全屏阻断 | **live** | graph-authoring · canvas | `GraphCanvas.tsx:354-360,217-226,381-387`/`phase-frontmatter.ts:46-72` |
 | (R5)assets subgraph 类目 ↔ 节点文件同步;子图 path 找不到→标红→OS 选文件夹导入工作区 | **target-design**(R5 + D7) | graph-authoring · canvas/assets | alignment-notes R5;D7 path 解析 |
@@ -45,7 +45,7 @@
 ## 4. 失败退路 + 节点间流转
 - **失败退路**:写失败→回滚(hash 乐观并发);YAML 坏→error + Open file;环→全屏阻断;拒写。
 - **上游**:[01_init](./01_init.md)(进入 workspace + copilot 初始化 SKILL.md)。
-- **下游**:Compile 绿灯 → [03_run-and-verify](./03_run-and-verify.md)(predict 试飞解锁);copilot inline-diff → copilot-assist;文件树/.workspace → asset-explorer(file-editing)。
+- **下游**:Compile 绿灯 → [04_run-and-verify](./04_run-and-verify.md)(predict 试飞解锁);copilot inline-diff → copilot-assist;文件树/.workspace → asset-explorer(file-editing)。
 
 ## 5. 测试关键点
 - 新建 phase 脚手架产出**合 FROZEN**(logic/agent,无 mode/system_prompt/exit_contract/python_callable),可直接编译。
@@ -59,4 +59,4 @@
 - **[D12] 写全量 Rust**:serialize_graph / mutate_phase_body / 新建 phase 写文件 / Properties 保存 → Rust(现走 Python `writeSkillFile`+`graph/serialize`,标迁移)。
 - **读 v030 / 写 V2.x stale-code**:`defaultPhaseMarkdown`、`phase-frontmatter.ts`、`SubgraphInline` mock、`subagentsForPhase` 读过时 shape。
 - **FROZEN 改动落点集中本节点**:FROZEN-1 删子图 io 1:1、FROZEN-2 io.outputs artifact、FROZEN-4 REQ-2 字段勾选(待统一出 FROZEN 新版本)。
-- **canvas REQ 覆盖**:REQ-7 结构化 diff → 归 trace(03_run-and-verify);REQ-8 运行时策略开关(prompt_cache/compaction)= engine 未落地 ⏭️ 延后;REQ-9 右键新建节点 = T4(已覆盖)。
+- **canvas REQ 覆盖**:REQ-7 结构化 diff → 归 trace(04_run-and-verify);REQ-8 运行时策略开关(prompt_cache/compaction)= engine 未落地 ⏭️ 延后;REQ-9 右键新建节点 = T4(已覆盖)。

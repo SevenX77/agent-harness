@@ -24,7 +24,7 @@ Source workflow basis: `01_workflows/01_init.md:16`, `01_workflows/02_authoring.
 
 ## F2. Missing Subgraph Path Status
 
-- 机制: detect local subgraph path references and mark unresolved paths with a recovery action.
+- 机制: detect **绝对** subgraph path references(engine skill-syntax §2.1)and mark unresolved paths with a recovery action.
 - 决策: subgraph references are paths and missing child graph should be fixable from Assets.
 - 原话/来源: `01_workflows/02_authoring.md:37` locks path references.
 - 测试: unresolved path appears red/actionable; resolved path shows ready; no fake fallback rows.

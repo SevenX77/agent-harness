@@ -20,7 +20,10 @@ N/A。
 ## 后端功能
 
 ### 1. StateMapper:io 切片 / 回写(state_mapper.py)
-`StateMapper`(`runtime/state_mapper.py:37`)按 phase 的 `io.inputs`/`io.outputs` 从黑板 slice 输入、merge 输出;违规(required 缺失、越界 key)报 `[F-v3-runtime-state-mapping-failed]`(`:142/:208/:225`)。
+`StateMapper`(`runtime/state_mapper.py:37`)按 phase 的 `io.inputs`/`io.outputs` 从黑板 slice 输入、merge 输出。
+- **slice 输入**(`build_phase_input:44` → `filter_runtime_inputs:25`):只按 `io.inputs.properties` 过滤,**现状不校验 `required` 缺失**——缺的字段静默丢弃、不报错(`required` 在 schema 里根本没被读)。
+- **merge 输出**(`wrap_phase_output:77`):output key 越界(不在 `io.outputs.properties`)才报 `[F-v3-runtime-state-mapping-failed]`(`:142`);`PhaseWrapper` 双包 / 节点异常也报同码(`:208/:225`)。
+> ⚠️ **baseline 修正(2026-06-05 审计)**:旧文写"required 缺失报错"是把 alignment 目标当成了现状——代码实为只过滤、不校验 `required`。required 校验是 mvp1 目标(见差异表 + alignment §3/§6),归 refactor-target。
 
 ### 2. LOGIC 执行:可变 Context facade(现状,mvp1 要砍)
 `_build_logic_node`(`graph_assembler.py:325`):
@@ -51,6 +54,13 @@ blackboard = `WorkflowState.data`(`data-contracts`);io 经 StateMapper slice/mer
 - **action/tool 不统一**:两套注册表(spec 已固定 Action≠Tool)。
 - **代码里术语混叫**:历史处把 action 叫 "tool"(死簇,待清)。
 
+## 🚨 已知代码债(2026-06-05 审计;如实记录,不在文档审计里改代码)
+按"审计 ≠ 改代码"原则,以下代码现状如实登记 + 警告,归 refactor-target(kiro):
+- **`ensure_no_input_write` 空壳**:`state_mapper.py:187` 函数体只有 `pass`,却列进 `__all__`(`:264`)对外导出——本应阻止往只读输入写值,现状什么都不做。🚨 要么实现、要么删。
+- **类型逃逸(minor)**:`wrap_phase_output` 用 `cast(WorkflowState, updates)`(`:115`)、`PhaseWrapper.wrap` 用 `cast(Any, _wrapped)`(`:228`)绕过静态类型(`mypy` 过,但靠 cast 兜)。
+- **`graph_assembler.py` 体积**:1403 行,且包内 ruff 对它豁免 C901(圈复杂度检查),极简度偏弱(装配细节归 `03-assemble`)。
+- (可变 Context、action 跑 `run_skill`/碰 FS、黑板塞非序列化对象、死簇 —— 已在下方差异表 + alignment §8 登记为 refactor-target。)
+
 ## baseline / alignment 差异(测试锚点)
 | 维度 | 现状(baseline) | mvp1 目标(LE1-3) |
 |---|---|---|
@@ -58,6 +68,7 @@ blackboard = `WorkflowState.data`(`data-contracts`);io 经 StateMapper slice/mer
 | action 编排 | 现有 action 跑 `run_skill`/碰 FS | 硬禁(扩 purity 扫描器,归 `01-compile`) |
 | 黑板对象 | 塞 `BatchAccumulator` 等非序列化对象 | `iterate.accumulate` + 序列化数据 |
 | 死簇 | `code_phase_node`/`phase_executor` | 删(live 用 `_build_logic_node`) |
+| StateMapper required 校验 | slice **不校验** required(只过滤 properties、缺失静默丢)(`filter_runtime_inputs:25`) | required 缺失报 `[F-v3-runtime-state-mapping-failed]`(alignment §3/§6) |
 
 > **验"是否按 mvp1 改了"**:① action 是否变成 `def <name>(inputs)->dict` 纯返回(无 Context mutation);② action 里 `run_skill`/FS 是否触发编译期 purity FATAL;③ 黑板是否只剩可序列化数据;④ StateMapper required 缺失/越界 key 是否报 `[F-v3-runtime-state-mapping-failed]`。
 

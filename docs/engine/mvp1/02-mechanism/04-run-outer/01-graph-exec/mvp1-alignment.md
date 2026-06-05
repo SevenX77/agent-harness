@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/04-run-outer/01-graph-exec
 doc: mvp1-alignment
-status: drafted（机制·运行外层;⏳ AGENT侧迁移 + ❌ LOGIC执行待设计）
+status: drafted（机制·运行外层;LOGIC 干净契约已定 2026-06-04,live drift 待重构归 kiro;⏳ AGENT run_context/io_manager/nudge 收口待成段）
 binds_baseline: ./baseline.md
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行外层）
 ---

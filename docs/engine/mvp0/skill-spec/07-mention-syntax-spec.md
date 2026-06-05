@@ -7,6 +7,10 @@ status: FROZEN
 
 本文定义 `@type:NAME` 的统一解析规则、7 类引用的静态可达性算法和 Loader 拦截边界。它服务于 [Agent SKILL.md](./05-agent-md-spec.md#引用注入校验-frontmatter--body)、[Resource Mechanisms](./08-resource-mechanisms-spec.md#frontmatter-挂载格式) 和 [错误码字典](./11-error-code-spec.md#mention-domain)。
 
+> ~~已迁移: `@type:NAME` regex、字段级定义和解析行为 → [mvp1 skill-syntax §2.7.1](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#271-typename-语法规范)。~~
+> ~~已迁移: 7 大分类静态可达性算法 → [mvp1 skill-syntax §2.7.2](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#272-7-大分类静态可达性算法)。mvp1 delta:`@subgraph` 仍查 `frontmatter.subgraphs[].name`,但子项校验从 `target_skill` 改为绝对 `path`。~~
+> ~~已迁移: 语法滥用与容错 → [mvp1 skill-syntax §2.7.3](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#273-语法滥用与容错)。错误码全集不在 skill-syntax 重复,见 [mvp1 compile-rules §4 mention domain](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md#mention-domain)。~~
+
 ## @-Mention 语法规范
 
 全局 regex:

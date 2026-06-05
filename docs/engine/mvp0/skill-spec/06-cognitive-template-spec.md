@@ -7,6 +7,10 @@ status: FROZEN
 
 本文定义 V0.3.0 Cognitive Template 的 8 大插槽、静态 AST 映射和动态装配输入。它消费 [Agent SKILL.md](./05-agent-md-spec.md#body-xml-扁平化容器) 与 [Resource Mechanisms](./08-resource-mechanisms-spec.md#reference-三机制生命周期), 并进入 [Template 装配流](./12-compile-runtime-flow-spec.md#template-装配流-assembly-time-workflow)。
 
+> ~~已迁移: cognitive 模板语法、8 大插槽布局、字段级 slot 定义 → [mvp1 skill-syntax §2.6.1-§2.6.2](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#261-8-大插槽布局拓扑)。~~
+> ~~已迁移: 静态组装 slot 输入映射(语法侧) → [mvp1 skill-syntax §2.6.3](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#263-静态组装输入映射语法侧)。~~
+> ~~机制归属: 动态渲染、reference-reader 预读、失败降级和 trace 记录不属于 skill-syntax,落点为 [mvp1 assemble](../../mvp1/02-mechanism/03-assemble/mvp1-alignment.md)。错误码全集见 [mvp1 compile-rules §4 cognitive/tool/runtime domain](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md#cognitive--tool--runtime-domain)。~~
+
 ## 8 大插槽布局拓扑
 
 V0.3.0 Agent prompt 装配后的最终 XML 模板如下。`role` / `goal` / `step` / `protocol` / inline `example` 来自 SKILL.md body; 其余容器由 Engine 固定提供, 防止每个 skill 自己发明 prompt 结构。`exit_contract` 只在模板末尾 hardcode, 不从 SKILL.md 引用。

@@ -2,6 +2,7 @@
 module: 02-mechanism/04-run-outer/01-graph-exec
 doc: mvp1-alignment
 status: drafted（机制·运行外层;⏳ AGENT侧迁移 + ❌ LOGIC执行待设计）
+binds_baseline: ./baseline.md
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行外层）
 ---
 
@@ -13,7 +14,7 @@ aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行外�
 graph-exec = 运行时**按 DAG 执行 phase**,用 blackboard(`WorkflowState.data`)统一状态。三种 phase 范式:**LOGIC**(确定性 action,引擎调)/ **AGENT**(内层 agent loop,委派 `05-run-inner`)/ **SUBGRAPH**(子图调用)。io 经 StateMapper 从黑板切片/回写。
 
 ## 2. 数据流 / 机制
-`graph.invoke(inputs)` → 校验 inputs → blackboard init → `for phase in topological_order`:StateMapper.slice(state, phase.io.inputs) → **run phase** → 校验 output vs phase.io.outputs → StateMapper.merge → 终态校验。机制权威 mvp0 `12-compile-runtime-flow`(运行时流)。
+`graph.invoke(inputs)` → 校验 inputs → blackboard init → `for phase in topological_order`:StateMapper.slice(state, phase.io.inputs) → **run phase** → 校验 output vs phase.io.outputs → StateMapper.merge → 终态校验。(运行时流的完整机制正文 🚨 待 mvp1 自写,见 `07-runtime`;mvp0 已弃用。)
 - **LOGIC(V4 干净契约,2026-06-04 定稿)**:action = **确定性纯变换**:
   - 签名 `def <action_name>(inputs) -> dict`(函数名=action 名,自文档);`inputs` = **只读** io.inputs 切片。
   - **纯返回**:返回 dict、key ⊂ io.outputs;**不写黑板**——砍掉 Context 的 `set/update/delete/__setitem__`(action 不能 mutate)。
@@ -63,4 +64,4 @@ LOGIC 干净契约已定;**live 的 drift = 要重构掉的反模式**(不是真
 + run_context/io_manager/nudge 收口(待成段)。
 
 ## 交叉引用(链接, 不复制)
-00-architecture-overview §3 · `04-tools`(action/tool)· `02-iterate` · `03-checkpoint` · `05-run-inner`(AGENT)· `data-contracts` · mvp0/`12-compile-runtime-flow`
+**`baseline`(现状,双向)** · 00-architecture-overview §3 · `04-tools`(action/tool)· `02-iterate` · `03-checkpoint` · `05-run-inner`(AGENT)· `data-contracts`

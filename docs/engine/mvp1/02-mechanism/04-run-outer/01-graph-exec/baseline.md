@@ -2,6 +2,8 @@
 module: 02-mechanism/04-run-outer/01-graph-exec
 doc: baseline
 status: drafted（现状对齐 pinned 代码 7cd4b9c；LOGIC 用可变 Context facade,action/tool 两套注册表）
+binds_alignment: ./mvp1-alignment.md
+binds_code: core/graph_assembler.py（_build_logic_node:325）· runtime/state_mapper.py:37 · core/actions.py（18/49）
 ---
 
 # 01-graph-exec — Baseline(当下代码实现逻辑)
@@ -63,4 +65,4 @@ blackboard = `WorkflowState.data`(`data-contracts`);io 经 StateMapper slice/mer
 StateMapper `state_mapper.py:37` → LOGIC `_build_logic_node`(`graph_assembler.py:325`,Context facade `:336`)→ action/tool 注册表 `actions.py:18/49` → SUBGRAPH `:363`。
 
 ## 交叉引用(链接, 不复制)
-mvp1-alignment(目标 + LE1-3)· `04-tools`(action/tool,双向)· `02-iterate` · `03-checkpoint` · `05-run-inner`(AGENT 委派)· `data-contracts`(blackboard)· mvp0/`12-compile-runtime-flow`
+mvp1-alignment（目标 + LE1-3,双向）· `04-tools`(action/tool,双向)· `02-iterate` · `03-checkpoint` · `05-run-inner`(AGENT 委派)· `data-contracts`(blackboard)

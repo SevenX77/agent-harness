@@ -7,7 +7,7 @@ aligns_with: ../../00-architecture-overview.md（§2 契约层 A）
 
 # 04-data-contracts — 契约 A · 数据形状(我们的, 建在 langgraph 上)
 
-> **Tier**: 契约层 A(L0 共享词汇) | **Owns**: 类型 · 异常树 · 错误码契约 · state schema · result 类 · validator 签名 | **关键**: **我们定义的形状**,建在 langgraph 原语上(原语是底座,不是我们的契约) | **现状**: ✅ + delta | **Related**: `03-checkpoint`(state 存储)· `01-graph-exec`(blackboard)· `03-api-contract`(result)· Task3(错误码)
+> **Tier**: 契约层 A(L0 共享词汇) | **Owns**: 类型 · 异常树 · 错误码契约 · state schema · result 类 · validator 签名 | **关键**: **我们定义的形状**,建在 langgraph 原语上(原语是底座,不是我们的契约) | **现状**: A 成段;B baseline 待成段 | **Related**: `03-checkpoint`(state 存储)· `01-graph-exec`(blackboard)· `03-api-contract`(result)· Task3(错误码)
 
 ## 1. 定义
 data-contracts = Graph Agent 的**共享数据词汇**:所有模块 import 它、它不 import 任何内部模块(L0 叶,去 `core` 上帝包环的基石)。**这些形状是我们设计的**(`state.py`/`result.py`/`exceptions.py`);它们**建在 langgraph 原语上**(`StateGraph` state、`AgentState.messages`、`DeltaChannel` reducer、checkpointer)——**原语是机制底座,不是我们拥有的契约**。

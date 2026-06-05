@@ -1,7 +1,7 @@
 ---
 module: 01-contract/05-invalidation
 doc: mvp1-alignment
-status: drafted（变更轴模型成段 + mvp1: golden-stale 移 eval）
+status: drafted（A 部分成段:变更轴已写;反转前 golden 编译期源块待退役/等价说明）
 aligns_with: ../../00-architecture-overview.md（§2 契约层 A）
 ---
 

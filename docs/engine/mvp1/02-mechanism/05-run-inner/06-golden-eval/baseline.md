@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/05-run-inner/06-golden-eval
 doc: baseline
-status: drafted（迁自 _migration-src/09-golden-eval;⚠️ 含决策反转）
+status: drafted（B 不完整:仅列迁移源/少量代码点;_migration-src/09 baseline 0/6 未迁）
 ---
 
 # 06-golden-eval — Baseline(现状)

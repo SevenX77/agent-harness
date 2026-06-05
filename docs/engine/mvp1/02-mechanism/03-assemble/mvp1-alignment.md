@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/03-assemble
 doc: mvp1-alignment
-status: drafted（机制·装配期;✅ 机制+依据已成段内联）
+status: drafted（机制·装配期;A 摘要成段;W 仅工程依据,缺独立 PM 原话链）
 aligns_with: ../../00-architecture-overview.md（§3 机制层 B·装配）
 ---
 

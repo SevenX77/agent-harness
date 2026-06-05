@@ -1,13 +1,13 @@
 ---
 module: 02-mechanism/05-run-inner/03-cognitive
 doc: mvp1-alignment
-status: drafted（机制·运行内层;✅ 迁自 02/03/07/08）
+status: drafted（机制·运行内层;A 主体迁入;W 原话需补链;rich 三态校验未接 live）
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行内层）
 ---
 
 # 03-cognitive — 机制 B · 认知接缝(运行内层)
 
-> **Tier**: 机制层 B · 运行·内层 | **Owns**: system prompt 喂入 · finish_task 显式提交 · 输出解析/patch(md2json + patcher) | **现状**: ✅ | **Related**: `02-middleware`(CognitiveFlow 槽,双向)· `05-exit-control`(退出闸)· `skill-syntax`(模板语法)· `03-assemble`(模板渲染)
+> **Tier**: 机制层 B · 运行·内层 | **Owns**: system prompt 喂入 · finish_task 显式提交 · 输出解析/patch(md2json + patcher) | **现状**: A 主体迁入;W 原话需补链;rich 三态未接 live | **Related**: `02-middleware`(CognitiveFlow 槽,双向)· `05-exit-control`(退出闸)· `skill-syntax`(模板语法)· `03-assemble`(模板渲染)
 
 ## 1. 定义
 cognitive = 内层 agent 的**"认知"接缝**:消费 system prompt、`finish_task` 显式提交工具、输出解析(md2json)与修补(patcher)。CognitiveFlow 中间件**实现**在 `02-middleware` 的槽 2,但**逻辑归本域**(双向引用)。

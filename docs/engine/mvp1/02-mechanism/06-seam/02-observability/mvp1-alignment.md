@@ -1,13 +1,13 @@
 ---
 module: 02-mechanism/06-seam/02-observability
 doc: mvp1-alignment
-status: drafted（机制·接缝;✅ 迁自 06-trace-observability + api §1）
+status: drafted（机制·接缝;主体迁自 trace/api;边操作事件源 11-io 未迁全）
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·接缝）
 ---
 
 # 02-observability — 机制 B · 可观测(跨层接缝)
 
-> **Tier**: 机制层 B · 跨层接缝 | **Owns**: 可观测**事件流**(34 类 typed event)· trace.jsonl · 序列化 · metrics(= callbacks 系统) | **现状**: ✅ | **Related**: `02-middleware`(Tracing 槽,双向)· `07-subagent`(lifecycle 事件)· `03-api-contract`(事件协议)· `data-contracts`
+> **Tier**: 机制层 B · 跨层接缝 | **Owns**: 可观测**事件流**(34 类 typed event)· trace.jsonl · 序列化 · metrics(= callbacks 系统) | **现状**: 主体迁入;边操作事件源 11-io 未迁全 | **Related**: `02-middleware`(Tracing 槽,双向)· `07-subagent`(lifecycle 事件)· `03-api-contract`(事件协议)· `data-contracts`
 
 ## 1. 定义
 observability = 引擎执行的**可观测事件流**——把"发生了什么"以 34 类 typed `CallbackEvent`(phase_start/llm_call/tool_call…)发出:`event_subscriber` 回调 + `trace.jsonl`(落盘 SSOT)+ WS。**它是事件流,不是"所有返回的消息"**(messages 归 `08-messages-state`/`cognitive`,RunResult 归 `data-contracts`)。

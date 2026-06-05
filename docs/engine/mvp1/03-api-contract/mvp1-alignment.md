@@ -1,13 +1,13 @@
 ---
 module: 03-api-contract
 doc: mvp1-alignment
-status: drafted（API 契约成段;第2趴）
+status: drafted（A 摘要成段;_migration-src/api-engine-studio-contract 17 块未迁入）
 aligns_with: ../00-architecture-overview.md（§4 API契约层 C）
 ---
 
 # 03-api-contract — API 契约 C · engine↔studio 操作边界
 
-> **Tier**: API 契约层 C | **Owns**: 引擎被 studio 进程内调用(run/predict/compile)+ 事件流 + HTTP 端点 的完整接口 SSOT | **现状**: ✅ drafted | **Related**: `07-runtime`(实现 run/predict 入口)· `06-seam/02-observability`(供事件流)· `data-contracts`(RunResult/ErrorPayload 形状)
+> **Tier**: API 契约层 C | **Owns**: 引擎被 studio 进程内调用(run/predict/compile)+ 事件流 + HTTP 端点 的完整接口 SSOT | **现状**: A 摘要成段;完整表 17 块未迁 | **Related**: `07-runtime`(实现 run/predict 入口)· `06-seam/02-observability`(供事件流)· `data-contracts`(RunResult/ErrorPayload 形状)
 
 ## 1. 定义
 引擎是被 studio 后端**进程内调用**(`run_skill`/`predict_skill`/`compile_skill`)的库;事件经**回调 + trace.jsonl + WS** 流到前端。本域是这些接口的**显式契约 SSOT**——所有 consumer 只链接、不复制。**它是"怎么调引擎",和契约层 A("skill 是什么")不同类。**

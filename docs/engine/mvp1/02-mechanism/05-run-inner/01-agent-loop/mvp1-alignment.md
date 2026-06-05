@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/05-run-inner/01-agent-loop
 doc: mvp1-alignment
-status: drafted（机制·运行内层;✅ 机制+依据已成段内联）
+status: drafted（机制·运行内层;A 摘要成段;W 原话需补链;B live 仍手写 loop）
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行内层）
 ---
 

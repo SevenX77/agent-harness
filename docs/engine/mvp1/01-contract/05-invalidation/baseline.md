@@ -1,7 +1,7 @@
 ---
 module: 01-contract/05-invalidation
 doc: baseline
-status: drafted（迁自 _migration-src/records/change-invalidation-model;注意 mvp1 反转）
+status: drafted（B 部分:列迁移源/旧实证;反转后现状正文未完全成段）
 ---
 
 # 05-invalidation — Baseline(现状)

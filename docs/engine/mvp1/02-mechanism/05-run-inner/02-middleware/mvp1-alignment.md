@@ -1,13 +1,13 @@
 ---
 module: 02-mechanism/05-run-inner/02-middleware
 doc: mvp1-alignment
-status: drafted（机制·运行内层;✅ 链+卫生槽,域专槽归各域）
+status: drafted（机制·运行内层;A 链基础成段;B live 只接单槽且 3 槽 no-op）
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行内层）
 ---
 
 # 02-middleware — 机制 B · 6 槽中间件链(运行内层)
 
-> **Tier**: 机制层 B · 运行·内层 | **Owns**: 6 槽链**基础设施**(顺序/工厂/hook 契约)+ loop 卫生槽(ExecutionControl 迭代/dead-end、LoopDetection) | **现状**: ✅ | **Related**: 域专槽逻辑归各域:CognitiveFlow→`03-cognitive`、Tracing→`06-seam/02-observability`、ToolError→`04-tools`、ProtocolValidation→`data-contracts`;subagent/exit 各自独立模块
+> **Tier**: 机制层 B · 运行·内层 | **Owns**: 6 槽链**基础设施**(顺序/工厂/hook 契约)+ loop 卫生槽(ExecutionControl 迭代/dead-end、LoopDetection) | **现状**: A 链基础成段;B live 只接单槽且 3 槽 no-op | **Related**: 域专槽逻辑归各域:CognitiveFlow→`03-cognitive`、Tracing→`06-seam/02-observability`、ToolError→`04-tools`、ProtocolValidation→`data-contracts`;subagent/exit 各自独立模块
 
 ## 1. 定义
 middleware = 内层 agent loop 的 **6 槽 hook 链**(经 `create_agent(middleware=build_middleware_chain(...))` 接入)。本域 own **链本身**(顺序契约、工厂、AgentMiddleware hook 形态)+ **纯 loop 卫生槽**;**域专槽的逻辑归各域**(本域只写槽位 + 概述 + 链到域 detail,双向引用)。

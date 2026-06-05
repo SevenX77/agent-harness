@@ -3,11 +3,14 @@ status: FROZEN
 ---
 <!-- DO NOT EDIT: Golden principle contract baseline. Any divergence is strictly prohibited unless explicitly approved. -->
 
-# Compile Runtime Flow Spec
+> 🔖 **本文 = mvp0 迁移源档案，非当前 SSOT。** 三段生命周期契约已迁入 [`mvp1 compile-rules §2`](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md#2-三段生命周期契约)。StateMapper required 规则在 mvp1 中作为目标契约保留；当前代码 drift 见 `02-mechanism/04-run-outer/01-graph-exec` baseline。
+<!-- 核对进度:已迁 3 块 / 未迁 0 块 / 2026-06-05 -->
+
+~~# Compile Runtime Flow Spec~~ → ✅[已迁入](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md#2-三段生命周期契约)
 
 本文定义 graph_skill 从 Loader 编译、Template 装配到运行时执行的生命周期。它串联 [物理布局](./01-physical-layout.md#物理结构拓扑-directory-tree)、[Cognitive Template](./06-cognitive-template-spec.md#8-大插槽布局拓扑)、[错误码字典](./11-error-code-spec.md#错误码速查全表) 和 5 个 Engine 子模块 alignment。
 
-## 编译期校验流 (Compile-time Workflow)
+~~## 编译期校验流 (Compile-time Workflow)~~ → ✅[已迁入](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md#21-编译期校验流compile-time-workflow)
 
 编译期目标是把磁盘上的 graph_skill 变成可信 AST, 并在任何执行前发现结构、字段、拓扑、IO、mention 依赖问题。
 
@@ -55,7 +58,7 @@ sequenceDiagram
 
 本流程引用 [Physical Layout](./01-physical-layout.md#物理结构拓扑-directory-tree)、[GRAPH Phase DAG](./02-graph-md-spec.md#phases-注册与-body-拓扑校验-phase-registration--dag) 和 [Mention Syntax](./07-mention-syntax-spec.md#7-大分类静态可达性算法)。
 
-## Template 装配流 (Assembly-time Workflow)
+~~## Template 装配流 (Assembly-time Workflow)~~ → ✅[已迁入](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md#22-template-装配流assembly-time-workflow)
 
 装配期目标是把可信 AST 变成可运行 LangGraph 节点, 并为 Agent phase 构造最终 system prompt。
 
@@ -92,7 +95,7 @@ Compiled GraphSkillAST
 
 本流程引用 [Cognitive Template 内部插槽布局](./06-cognitive-template-spec.md#8-大插槽布局拓扑) 与 [Builtin Reference Reader Subagent 签名](./09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名)。
 
-## 运行时引擎流 (Run-time Workflow)
+~~## 运行时引擎流 (Run-time Workflow)~~ → ✅[已迁入](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md#23-运行时引擎流run-time-workflow)
 
 运行期目标是按 DAG 执行节点, 用 BlackboardState 做统一状态, 并把所有失败归一成 `[F-v3-*]`。
 

@@ -53,9 +53,8 @@ governed_by: ../../development/design-doc-standards/（00 三轴 · 02 R8 设计
 **当前:全部 `drafted`,零 `FROZEN` / 零单元 `locked`。** 锁迁移序(见 [写作规范 §1.5](../../development/design-doc-standards/01-writing-standard.md)):
 
 1. **去 mvp0 FROZEN 残留**(R1 唯一真理前置):
-   - `01-contract/03-compile-rules/baseline.md` status = `♻️ mvp0 FROZEN`(规则/码权威仍指 mvp0)。
-   - `README.md` / `00-architecture-overview.md` 的 `ground_truth` 仍列 `mvp0/skill-spec（FROZEN）`。
-   - → 这些是"拿 mvp0 当 SSOT"的残留,锁迁移第一步要么内容迁入 mvp1、要么降级引用。
+   - ✅ **compile-rules 已自承载(2026-06-05,codex 执行 + Claude 核验)**:mvp0 11(93 错误码全表)+ 12(三段生命周期)已迁入 `03-compile-rules/mvp1-alignment.md`;`error_registry.py` 93 个 `doc_link` 全指 mvp1(mvp0=0);baseline 改对代码(`ERROR_REGISTRY`/`SkillLoader.compile_skill`/`scan_python_purity`)。mvp0 11/12 已划线留档(FROZEN→superseded 待 mvp0 全域处置)。
+   - ⏳ 剩余:`README.md` / `00-architecture-overview.md` 的 `ground_truth` + `01-compile`/`03-assemble` alignment 仍有指向 mvp0 `12` 的链接 → 下游收尾(重定向到 mvp1 compile-rules)。
 2. **可优先锁的单元**(决策 firm、争议已收敛):**U3**(action/tool 不统一)· **U4**(LOGIC 契约,文档侧)· **U1**(subgraph path 契约)。
 3. **阻塞锁的真空**(见 §3),清空后才能盖单元 `locked` → 文件级 `FROZEN`。
 
@@ -63,7 +62,7 @@ governed_by: ../../development/design-doc-standards/（00 三轴 · 02 R8 设计
 
 ### 🚨 真空(SSOT 缺 / 待迁,阻塞 FROZEN)
 - `07-runtime`:**❌ 完全没设计**——顶层入口契约(`run_skill`/`predict_skill`/bootstrap/public API 均 live,缺契约文档)。
-- `01-contract/02-skill-syntax`:子图 path 已写清,**其余语法部件(四 phase 字段/body XML/mention/iterate 声明/cognitive 模板)真空**。
+- `01-contract/02-skill-syntax`:子图 path 已写清,**其余语法部件(四 phase 字段/body XML/mention/iterate 声明/cognitive 模板)真空**。(连带:compile-rules 迁入后 68 个错误码 `doc_link` 暂只能指到 skill-syntax §2 概览;skill-syntax 写细后精化。)
 - `01-contract/01-physical-layout`:`.workspace` 户型字段正文待从旧文档迁入(§8)。
 - `05-run-inner` 多模块:`05-exit-control`/`06-golden-eval`/`07-subagent` 标 ⏳ 迁自 `_migration-src`,正文待成段。
 

@@ -3,11 +3,14 @@ status: FROZEN
 ---
 <!-- DO NOT EDIT: Golden principle contract baseline. Any divergence is strictly prohibited unless explicitly approved. -->
 
-# Error Code Spec
+> 🔖 **本文 = mvp0 迁移源档案，非当前 SSOT。** 错误码设计模式、93 行全表与具体原因/修复建议已迁入 [`mvp1 compile-rules`](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md)。mvp1 删除 mvp0 引用时，不得再把本文当权威。
+<!-- 核对进度:已迁 2 块 / 未迁 0 块 / 2026-06-05 -->
+
+~~# Error Code Spec~~ → ✅[已迁入](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md#3-错误码设计模式--payload-契约)
 
 本文定义 `[F-v3-*]` 错误码前缀、等级划分和速查表。它是所有 spec 的统一失败语义出口, 并会被 [编译期校验流](./12-compile-runtime-flow-spec.md#编译期校验流-compile-time-workflow) 与各字段契约反向引用。
 
-## 错误码设计模式 (Prefix [F-v3-*])
+~~## 错误码设计模式 (Prefix [F-v3-*])~~ → ✅[已迁入](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md#3-错误码设计模式--payload-契约)
 
 格式:
 
@@ -37,9 +40,9 @@ status: FROZEN
 
 TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是错误码, 不进入本速查表; 事件协议由 tracing-and-observability 文档维护。
 
-## 错误码速查全表
+~~## 错误码速查全表~~ → ✅[已迁入](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md#4-错误码全表93)
 
-### graph domain
+~~### graph domain~~ → ✅[已迁入](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md#graph-domain)
 
 | 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
 |---|---|---|---|---|
@@ -66,14 +69,14 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 | `[F-v3-graph-dataflow-source-missing]` | 编译期 | phase input 没有根输入或上游输出来源 | 补依赖或调整 IO | [GRAPH](./02-graph-md-spec.md#根-io-契约-root-io-schema) |
 | `[F-v3-sequential-overwrite-unauthorized]` | 编译期 | 串联节点覆盖写入重名变量且未显式白名单授权 | 在 Frontmatter 中声明 allow_sequential_overwrite 允许覆盖 | [GRAPH](./02-graph-md-spec.md#phases-注册与-body-拓扑校验-phase-registration--dag) |
 
-### compile domain
+~~### compile domain~~ → ✅[已迁入](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md#compile-domain)
 
 | 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
 |---|---|---|---|---|
 | `[F-v3-compile-recursion-cycle]` | 编译期 | subgraph/subagent 递归编译链路中再次遇到已在加载栈内的 skill root | 打断 skill 间循环引用或抽出共享子图 | [Error Code](./11-error-code-spec.md#compile-domain) |
 | `[F-v3-compile-depth-exceeded]` | 编译期 | subgraph/subagent 递归编译深度超过安全上限 | 降低嵌套深度或合并中间 skill | [Error Code](./11-error-code-spec.md#compile-domain) |
 
-### logic domain
+~~### logic domain~~ → ✅[已迁入](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md#logic-domain)
 
 | 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
 |---|---|---|---|---|
@@ -95,7 +98,7 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 | `[F-v3-agent-validator-failed]` | 运行期 | agent validator 抛异常 | 触发 LLM 重试反馈 | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
 | `[F-v3-subgraph-validator-failed]` | 运行期 | subgraph validator 抛异常 | 检查子图业务规则 | [SUBGRAPH](./04-subgraph-md-spec.md#类型推导与节点契约) |
 
-### subgraph domain
+~~### subgraph domain~~ → ✅[已迁入](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md#subgraph-domain)
 
 | 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
 |---|---|---|---|---|
@@ -106,7 +109,7 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 | `[F-v3-subgraph-io-mismatch]` | 编译期 | 父子 IO 字段集合不一致 | 对齐父 phase 和子 GRAPH IO | [SUBGRAPH](./04-subgraph-md-spec.md#io-严格-11-映射校验-strict-mapping) |
 | `[F-v3-subgraph-io-schema-incompatible]` | 编译期 | 同名字段 schema 不兼容 | 对齐字段 schema | [SUBGRAPH](./04-subgraph-md-spec.md#io-严格-11-映射校验-strict-mapping) |
 
-### agent domain
+~~### agent domain~~ → ✅[已迁入](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md#agent-domain)
 
 | 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
 |---|---|---|---|---|
@@ -127,7 +130,7 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 | `[F-v3-agent-protocol-invalid]` | 编译期 | protocol id 非法或重复 | 修正 protocol | [Agent](./05-agent-md-spec.md#body-xml-扁平化容器) |
 | `[F-v3-agent-example-invalid]` | 编译期 | body inline example id 非法、重复或内容为空 | 修正 `<example id>` | [Agent](./05-agent-md-spec.md#body-xml-扁平化容器) |
 
-### mention domain
+~~### mention domain~~ → ✅[已迁入](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md#mention-domain)
 
 | 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
 |---|---|---|---|---|
@@ -136,7 +139,7 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 | `[F-v3-mention-target-not-found]` | 编译期 | 目标不在对应 registry | 注册目标或修正文案 | [Mention](./07-mention-syntax-spec.md#7-大分类静态可达性算法) |
 | `[F-v3-mention-unused-registry-entry]` | 编译期 | 注册项未被 body 引用 | 确认是否保留 | [Mention](./07-mention-syntax-spec.md#语法滥用与容错) |
 
-### resource domain
+~~### resource domain~~ → ✅[已迁入](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md#resource-domain)
 
 | 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
 |---|---|---|---|---|
@@ -153,7 +156,7 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 | `[F-v3-resource-example-not-found]` | 运行期 | `read_example` id 不存在 | 使用 registry 中 id | [Builtin](./09-builtin-modules-spec.md#按需调取-tools-read_reference--read_example) |
 | `[F-v3-reference-reader-failed]` | 装配期 | builtin reader 超时/异常/输出非法 | 查看 trace; 可依赖降级内容继续跑 | [Builtin](./09-builtin-modules-spec.md#优雅降级策略-graceful-degradation) |
 
-### resolver domain
+~~### resolver domain~~ → ✅[已迁入](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md#resolver-domain)
 
 | 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
 |---|---|---|---|---|
@@ -164,7 +167,7 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 | `[F-v3-resolver-interface-invalid]` | 编译期 | resolver 暴露非决议接口 | 实现单方法 `resolve_skill` | [Resolver](./10-skill-resolver-protocol-spec.md#protocol-interface-定义) |
 | `[F-v3-resolver-missing]` | 运行期 | 需要 resolver 但未注入 | 调用入口传入 resolver | [Resolver](./10-skill-resolver-protocol-spec.md#依赖注入-di-边界) |
 
-### cognitive / tool / runtime domain
+~~### cognitive / tool / runtime domain~~ → ✅[已迁入](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md#cognitive--tool--runtime-domain)
 
 | 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
 |---|---|---|---|---|

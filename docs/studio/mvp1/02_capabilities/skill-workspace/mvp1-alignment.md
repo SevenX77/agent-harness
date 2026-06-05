@@ -1,20 +1,23 @@
-# skill-workspace MVP1 Alignment
+---
+module: 02_capabilities/skill-workspace
+doc: mvp1-alignment
+status: drafted（Welcome 仍读 `/skills` 注册表聚合，import 仍要求 GRAPH/SKILL 门禁；MVP1 IDE-folder 模型未落 ⚠️。；目标结构已按 R4-R8 retrofit）
+binds_baseline: ./baseline.md
+units: [workspace-open-folder-mru, subgraph-path-inline-drilldown]
+aligns_with: 01_workflows/01_init.md（open folder / MRU）· 01_workflows/02_authoring.md（subgraph workspace）
+---
 
-## 定义
+# skill-workspace — MVP1 Alignment
 
+> **Tier**: capability | **Owns**: `workspace-open-folder-mru`（工作区/MRU/Remove）+ `subgraph-path-inline-drilldown` 的 workspace membership 切面 | **现状**: Welcome 仍读 `/skills` 注册表聚合，import 仍要求 GRAPH/SKILL 门禁；MVP1 IDE-folder 模型未落 ⚠️。 | **Related**: [baseline](./baseline.md)（双向）· `welcome` · `native-fs` · `graph-authoring` · `assets`
+
+## 1. 定义
 `skill-workspace` owns the local Studio workspace journey: open a folder, keep recent work, create/import skills, navigate into subgraphs by path, and return to Home. It does not own graph editing fields; it owns the workspace boundary around those files.
 
 Source workflow basis: `01_workflows/01_init.md:8`, `01_workflows/01_init.md:16`, `01_workflows/02_authoring.md:37`.
 
-## 接口契约
-
-- Frontend: Welcome/Home selects a local directory or recent skill, then passes `skillId/currentSkillId` into `Workspace`.
-- Native-fs target: local folder operations, MRU, reveal, and write orchestration should be Rust-owned.
-- Backend sidecar: compile/copilot may repair or validate content after import, but should not be the first gate to opening a folder.
-- Region links: `welcome`, `shell-layout`, `assets`.
-- Platform links: `native-fs`, `state-engine`.
-
-## F1. Open Existing Workspace
+## 2. 数据流 / 机制（设计细节）
+### F1. Open Existing Workspace
 
 - 机制: Home opens a local folder, remembers it in recent skills, and enters the workspace shell.
 - 决策: Studio should feel like an IDE, not a registry browser.
@@ -23,7 +26,7 @@ Source workflow basis: `01_workflows/01_init.md:8`, `01_workflows/01_init.md:16`
 - Status: partial live. UI and MRU exist; registry-centered backend remains.
 - 归属: capability `skill-workspace`; region `welcome`; platform `native-fs`.
 
-## F2. Import Any Folder Without Blocking
+### F2. Import Any Folder Without Blocking
 
 - 机制: accept a picked folder into workspace state, then show compile/copilot repair opportunities if the contents are not a valid skill yet.
 - 决策: import should optimize for getting the user into Studio, not for pre-validating every file shape.
@@ -32,7 +35,7 @@ Source workflow basis: `01_workflows/01_init.md:8`, `01_workflows/01_init.md:16`
 - Status: target-design. Current backend rejects missing root docs.
 - 归属: capability `skill-workspace`; regions `welcome`, `assets`; platform `native-fs`.
 
-## F3. Create New Skill
+### F3. Create New Skill
 
 - 机制: pick a parent directory, create a skill scaffold, then open it immediately.
 - 决策: new skill creation is a workspace action; generated starter files should match the current engine spec.
@@ -41,7 +44,7 @@ Source workflow basis: `01_workflows/01_init.md:8`, `01_workflows/01_init.md:16`
 - Status: live but stale scaffold risk.
 - 归属: capability `skill-workspace`; platform `native-fs`; downstream `graph-authoring`.
 
-## F4. Subgraph Path Workspace Membership
+### F4. Subgraph Path Workspace Membership
 
 - 机制: subgraph references resolve by **绝对 path**(engine skill-syntax §2.1); if missing, Assets lets the user add that folder into the workspace.
 - 决策: subgraph identity is a path, not a registry id.
@@ -50,7 +53,7 @@ Source workflow basis: `01_workflows/01_init.md:8`, `01_workflows/01_init.md:16`
 - Status: target-design. Current Assets panel has a fake registered-subgraph cache.
 - 归属: capability `skill-workspace`; regions `assets`, `canvas`; platform `native-fs`.
 
-## F5. Close And Return Home
+### F5. Close And Return Home
 
 - 机制: leaving a skill clears panels/copilot state and returns to Welcome without killing the local app shell.
 - 决策: Home is the loop-closing point after save/publish, and also the workspace switcher.
@@ -59,7 +62,36 @@ Source workflow basis: `01_workflows/01_init.md:8`, `01_workflows/01_init.md:16`
 - Status: live with a suspected copilot `skillId/currentSkillId` mismatch to watch.
 - 归属: capability `skill-workspace`; region `shell-layout`; capability `copilot-assist`.
 
-## 已决(PM 2026-06-04)
+## 3. 接口契约
+- Frontend: Welcome/Home selects a local directory or recent skill, then passes `skillId/currentSkillId` into `Workspace`.
+- Native-fs target: local folder operations, MRU, reveal, and write orchestration should be Rust-owned.
+- Backend sidecar: compile/copilot may repair or validate content after import, but should not be the first gate to opening a folder.
+- Region links: `welcome`, `shell-layout`, `assets`.
+- Platform links: `native-fs`, `state-engine`.
 
+## 4. 设计决策基础（PM 原话）
 - delete = **仅从 Studio 列表移除("Remove from Studio")、不删磁盘**;入口动词 = "Open folder"(非 "Import skill")。
 - 打开**非标准技能文件夹**不在门口拦,进入后进 **repair 态**(由 compile/copilot 帮补齐)。
+
+## 5. 决策 + 动机
+| ID | 决策 | 动机 |
+|---|---|---|
+| SKILL_WORKSPACE-1 | Open Folder | 对齐 `workspace-open-folder-mru` 设计单元，保证实现与测试可回扣 |
+| SKILL_WORKSPACE-2 | Import gate | 对齐 `workspace-open-folder-mru` 设计单元，保证实现与测试可回扣 |
+| SKILL_WORKSPACE-3 | 子图 membership | 对齐 `workspace-open-folder-mru` 设计单元，保证实现与测试可回扣 |
+
+## 6. 测试关键点
+1. Open Folder: baseline 现状为 Home 读 `/skills` 注册表/聚合 ⚠️；目标为 直接打开任意文件夹，MRU/Remove 不依赖注册表。
+2. Import gate: baseline 现状为 backend 要求 `GRAPH.md` + `SKILL.md` ⚠️；目标为 import/open 不因缺根文档阻塞。
+3. 子图 membership: baseline 现状为 旧 local path 口径残留 ⚠️；目标为 按 engine 绝对 `path` 判断同 workspace membership。
+
+## 7. 涉及 region / platform
+`welcome` · `native-fs` · `graph-authoring` · `assets`
+
+## 8. gaps / 报警
+- 🚨 Open Folder: Home 读 `/skills` 注册表/聚合 ⚠️；目标 直接打开任意文件夹，MRU/Remove 不依赖注册表。
+- 🚨 Import gate: backend 要求 `GRAPH.md` + `SKILL.md` ⚠️；目标 import/open 不因缺根文档阻塞。
+- 🚨 子图 membership: 旧 local path 口径残留 ⚠️；目标 按 engine 绝对 `path` 判断同 workspace membership。
+
+## 交叉引用（链接, 不复制）
+[baseline](./baseline.md)（现状,双向）· `welcome` · `native-fs` · `graph-authoring` · `assets`

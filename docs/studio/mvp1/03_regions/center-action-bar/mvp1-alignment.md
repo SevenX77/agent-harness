@@ -1,19 +1,23 @@
-# center-action-bar MVP1 Alignment
+---
+module: 03_regions/center-action-bar
+doc: mvp1-alignment
+status: drafted（Compile 入口 live；Predict/Run handler 仍是 `console.info` 桩，compile error 仍底部浮层 ⚠️。；目标结构已按 R4-R8 retrofit）
+binds_baseline: ./baseline.md
+units: [compile-stage-gate, predict-execution]
+aligns_with: 01_workflows/03_compile.md（stage gate）· 01_workflows/04_run-and-verify.md（predict/run）
+---
 
-## 定义
+# center-action-bar — MVP1 Alignment
 
+> **Tier**: region | **Owns**: `compile-stage-gate` 的触发 UI + `predict-execution` 的入口 UI | **现状**: Compile 入口 live；Predict/Run handler 仍是 `console.info` 桩，compile error 仍底部浮层 ⚠️。 | **Related**: [baseline](./baseline.md)（双向）· `compile-lint` · `predict` · `run-execution` · `timeline`
+
+## 1. 定义
 `center-action-bar` owns the main stage controls at the bottom center of the workspace: Compile, Predict, Run, their enabled/highlighted states, and the compile error drawer entry.
 
 Source workflow basis: `01_workflows/03_compile.md:10`, `01_workflows/04_run-and-verify.md:8`.
 
-## 接口契约
-
-- Input props: stage and action callbacks.
-- Stage contract: compile-pass enables Predict; predict-pass enables Run.
-- Compile drawer target uses local `@/components/ui/*` drawer/sheet wrapper if available.
-- Capability links: `compile-lint`, `predict`, `run-execution`.
-
-## F1. Stage-gated Primary Actions
+## 2. 数据流 / 机制（设计细节）
+### F1. Stage-gated Primary Actions
 
 - 机制: one action is emphasized at a time according to build/predict/run stage.
 - 决策: the user should always see the next safe action.
@@ -22,7 +26,7 @@ Source workflow basis: `01_workflows/03_compile.md:10`, `01_workflows/04_run-and
 - Status: compile gate live, predict/run incomplete.
 - 归属: region `center-action-bar`; capabilities `compile-lint`, `predict`, `run-execution`.
 
-## F2. Compile Drawer Entry
+### F2. Compile Drawer Entry
 
 - 机制: clicking Compile after or during failure opens a copyable drawer of all compile errors.
 - 决策: replace the old floating card.
@@ -31,7 +35,7 @@ Source workflow basis: `01_workflows/03_compile.md:10`, `01_workflows/04_run-and
 - Status: target-design.
 - 归属: region `center-action-bar`; capability `compile-lint`.
 
-## F3. Predict And Run Click Wiring
+### F3. Predict And Run Click Wiring
 
 - 机制: Predict and Run callbacks start their capability flows and update stage.
 - 决策: Predict is a required flight test; Run is real execution.
@@ -40,7 +44,7 @@ Source workflow basis: `01_workflows/03_compile.md:10`, `01_workflows/04_run-and
 - Status: missing/stub.
 - 归属: capabilities `predict`, `run-execution`; regions `input`, `timeline`.
 
-## F4. Scoped Error Feedback
+### F4. Scoped Error Feedback
 
 - 机制: action failures should show contextual markers and scoped drawer/toast, not noisy global error floods.
 - 决策: real-time lint only marks; manual action can show detailed error.
@@ -49,6 +53,34 @@ Source workflow basis: `01_workflows/03_compile.md:10`, `01_workflows/04_run-and
 - Status: partial.
 - 归属: region `center-action-bar`; capability `compile-lint`.
 
-## 已决(PM 2026-06-04)
+## 3. 接口契约
+- Input props: stage and action callbacks.
+- Stage contract: compile-pass enables Predict; predict-pass enables Run.
+- Compile drawer target uses local `@/components/ui/*` drawer/sheet wrapper if available.
+- Capability links: `compile-lint`, `predict`, `run-execution`.
 
+## 4. 设计决策基础（PM 原话）
 - 手动 Compile 失败时,报错 drawer **自动弹出**(非"再点一次才弹")——失败必想看原因。
+
+## 5. 决策 + 动机
+| ID | 决策 | 动机 |
+|---|---|---|
+| CENTER_ACTION_BAR-1 | Predict/Run wiring | 对齐 `compile-stage-gate` 设计单元，保证 region 切面能被测试回扣 |
+| CENTER_ACTION_BAR-2 | compile drawer | 对齐 `compile-stage-gate` 设计单元，保证 region 切面能被测试回扣 |
+| CENTER_ACTION_BAR-3 | gate | 对齐 `compile-stage-gate` 设计单元，保证 region 切面能被测试回扣 |
+
+## 6. 测试关键点
+1. Predict/Run wiring: baseline 现状为 `onPredict/onRun` 只 `console.info` ⚠️；目标为 Predict/Run 真发请求并驱动状态。
+2. compile drawer: baseline 现状为 错误仍底部浮层 ⚠️；目标为 Compile error drawer 由操作条入口/自动弹出。
+3. gate: baseline 现状为 Run 依赖永不会置位的 predict-pass ⚠️；目标为 compile-pass -> Predict；predict-pass -> Run。
+
+## 7. 涉及 region / platform
+`compile-lint` · `predict` · `run-execution` · `timeline`
+
+## 8. gaps / 报警
+- 🚨 Predict/Run wiring: `onPredict/onRun` 只 `console.info` ⚠️；目标 Predict/Run 真发请求并驱动状态。
+- 🚨 compile drawer: 错误仍底部浮层 ⚠️；目标 Compile error drawer 由操作条入口/自动弹出。
+- 🚨 gate: Run 依赖永不会置位的 predict-pass ⚠️；目标 compile-pass -> Predict；predict-pass -> Run。
+
+## 交叉引用（链接, 不复制）
+[baseline](./baseline.md)（现状,双向）· `compile-lint` · `predict` · `run-execution` · `timeline`

@@ -1,9 +1,21 @@
 ---
-status: FROZEN
+status: superseded
 ---
 <!-- DO NOT EDIT: Golden principle contract baseline. Any divergence is strictly prohibited unless explicitly approved. -->
 
 # Skill Spec 文档入口
+
+> 🔖 **本目录 = mvp0 留底,已整体 superseded(被 mvp1 取代),非 SSOT。** graph_skill 契约的唯一真理现在在 **`docs/engine/mvp1/`**;各 spec 正文保持 FROZEN 不动(历史存档),新读者请直接去 mvp1。架构入口:[`mvp1/00-architecture-overview.md`](../../mvp1/00-architecture-overview.md)。
+
+**mvp0 skill-spec → mvp1 落点(唯一真理):**
+
+| mvp0 skill-spec | mvp1 落点 |
+|---|---|
+| 00 FORMAT GROUND TRUTH · 02 GRAPH · 03 LOGIC · 04 SUBGRAPH · 05 AGENT · 06 cognitive · 07 mention | `01-contract/02-skill-syntax`(§2.1–§2.7) |
+| 01 physical-layout | `01-contract/01-physical-layout` |
+| 08 resource-mechanisms · 09 builtin-modules | `02-mechanism/03-assemble` + `05-run-inner/04-tools`(留底,深度待成段) |
+| 10 skill-resolver-protocol | `02-mechanism/02-resolver` |
+| 11 error-code · 12 compile-runtime-flow | `01-contract/03-compile-rules`(§4 错误码全表 / §2 生命周期) |
 
 ## 文档目标 (Purpose)
 

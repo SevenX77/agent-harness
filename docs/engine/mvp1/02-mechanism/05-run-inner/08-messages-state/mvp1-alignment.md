@@ -1,13 +1,13 @@
 ---
 module: 02-mechanism/05-run-inner/08-messages-state
 doc: mvp1-alignment
-status: drafted（机制·运行内层;✅/⏳ 内层 messages 状态生命周期）
+status: drafted（机制·运行内层;A 摘要成段;records 深度未迁完;B Delta live,compaction/resume 未接）
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行内层）
 ---
 
 # 08-messages-state — 机制 B · 内层 messages 状态(运行内层)
 
-> **Tier**: 机制层 B · 运行·内层 | **Owns**: 内层 messages 持久化(DeltaChannel)· summarization(摘要有界化)· HITL/interrupt/resume | **现状**: ✅ / ⏳ | **Related**: `04-run-outer/03-checkpoint`(共享 base,**双向**)· `02-middleware`(summarization 中间件)· `data-contracts`(messages 通道)· `03-api-contract`(resume)
+> **Tier**: 机制层 B · 运行·内层 | **Owns**: 内层 messages 持久化(DeltaChannel)· summarization(摘要有界化)· HITL/interrupt/resume | **现状**: A 摘要成段;B Delta live,compaction/resume 未接;records 深度未迁完 | **Related**: `04-run-outer/03-checkpoint`(共享 base,**双向**)· `02-middleware`(summarization 中间件)· `data-contracts`(messages 通道)· `03-api-contract`(resume)
 
 ## 1. 定义
 messages-state = 内层 agent loop 的 **messages 状态生命周期**(对照外层 `03-checkpoint` 的 blackboard):messages 持久化(DeltaChannel)+ summarization(messages 增长时摘要有界化)+ HITL(经 `interrupt()` 中断、人改 context 后 resume)。**经 `ns="<id>/agent"` 挂 `03-checkpoint` 的共享 base**——两层共享 base、各管各 state(外 blackboard / 内 messages,双向引用)。

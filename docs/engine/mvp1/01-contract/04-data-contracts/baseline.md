@@ -1,7 +1,7 @@
 ---
 module: 01-contract/04-data-contracts
 doc: baseline
-status: drafted（迁自 _migration-src/12-contracts + 代码实证）
+status: drafted（B 不完整:有迁移源+代码点,但正文仍是待迁 stub）
 ---
 
 # 04-data-contracts — Baseline(现状)

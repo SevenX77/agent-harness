@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/05-run-inner/06-golden-eval
 doc: mvp1-alignment
-status: drafted（机制·运行内层;⏳ 按 golden→workspace 反转改写）
+status: drafted（机制·运行内层;A 部分:已按 workspace 摘要改写,旧 G1-G5 未实质承载/退役）
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行内层）
 ---
 

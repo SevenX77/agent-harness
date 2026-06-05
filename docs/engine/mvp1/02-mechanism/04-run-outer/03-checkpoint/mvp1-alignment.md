@@ -1,13 +1,13 @@
 ---
 module: 02-mechanism/04-run-outer/03-checkpoint
 doc: mvp1-alignment
-status: drafted（✅ 共享 base 模型成段）
+status: drafted（A 摘要成段;records 深度未迁完;B inner 未挂/data delta 未）
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行外层）
 ---
 
 # 03-checkpoint — 机制 B · 外层状态持久化 + 共享 base
 
-> **Tier**: 机制层 B · 运行·外层(尺度无关) | **Owns**: **共享 checkpointer base**(建外层,经 `checkpoint_ns` 内外层共用)· 外层 blackboard 存储/delta/有界 · durability | **现状**: ✅ | **Related**: `05-run-inner/08-messages-state`(内层 messages,双向)· `02-iterate`(图级 loop)· `data-contracts`(state schema)· `03-api-contract`(resume)
+> **Tier**: 机制层 B · 运行·外层(尺度无关) | **Owns**: **共享 checkpointer base**(建外层,经 `checkpoint_ns` 内外层共用)· 外层 blackboard 存储/delta/有界 · durability | **现状**: A 摘要成段;records 深度未迁完 | **Related**: `05-run-inner/08-messages-state`(内层 messages,双向)· `02-iterate`(图级 loop)· `data-contracts`(state schema)· `03-api-contract`(resume)
 
 ## 1. 定义
 checkpoint = **一个共享 base**(LangGraph thread checkpointer,**建在外层 `builder.compile(checkpointer=)`**),节点/iterate/图级/**内层 agent loop** 都经 `checkpoint_ns` 挂同一个 saver(不另起内层 saver)。**两层各管各 state**:外层这边管 **blackboard**(`WorkflowState.data`);内层 messages 在 `08-messages-state`(经 `ns="<id>/agent"` 挂本 base)。

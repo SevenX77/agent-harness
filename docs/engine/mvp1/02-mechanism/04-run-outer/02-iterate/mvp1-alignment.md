@@ -1,13 +1,13 @@
 ---
 module: 02-mechanism/04-run-outer/02-iterate
 doc: mvp1-alignment
-status: drafted（✅ 机制已成段内联）
+status: drafted（A 目标摘要成段;B 仅节点级 batch;iterate 语法真空/图级 loop 未实现）
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行外层）
 ---
 
 # 02-iterate — 机制 B · 循环(运行外层)
 
-> **Tier**: 机制层 B · 运行·外层 | **Owns**: 声明式 `iterate`(batch/loop,图级+节点级+嵌套)· 图级 loop = 引擎包 loop-body | **现状**: ✅ | **Related**: `skill-syntax`(iterate 声明)· `03-checkpoint`(loop 累积/续跑)· `05-run-inner/08-messages-state`
+> **Tier**: 机制层 B · 运行·外层 | **Owns**: 声明式 `iterate`(batch/loop,图级+节点级+嵌套)· 图级 loop = 引擎包 loop-body | **现状**: A 目标摘要成段;B 仅节点级 batch | **Related**: `skill-syntax`(iterate 声明)· `03-checkpoint`(loop 累积/续跑)· `05-run-inner/08-messages-state`
 
 ## 1. 定义
 iterate = skill **声明的循环原语**:batch(并行 map)/ loop(回环),图级、节点级、嵌套。**图级 loop = B**:引擎是 DAG-only(用户画不出回边),整图自循环时**引擎把 DAG 包成 loop-body**、一个 thread 跑 N 遍(每遍 `ns=iter{k}`),非 runner 外层 N 次 invoke。

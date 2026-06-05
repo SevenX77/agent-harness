@@ -1,7 +1,7 @@
 ---
 module: 03-api-contract
 doc: baseline
-status: drafted（迁移源 = _migration-src/api-engine-studio-contract.md 完整 5 节）
+status: drafted（B 不完整:以迁移源为主,当前代码/端点现状未字段级成段）
 ---
 
 # 03-api-contract — Baseline(现状)

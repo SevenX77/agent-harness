@@ -1,13 +1,13 @@
 ---
 module: 02-mechanism/06-seam/01-models
 doc: mvp1-alignment
-status: drafted（机制·接缝;✅ 迁自 13-models）
+status: drafted（机制·接缝;主体迁自 13-models;predict_context/structured-output 约束未迁全）
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·接缝）
 ---
 
 # 01-models — 机制 B · LLM 接缝(跨层接缝)
 
-> **Tier**: 机制层 B · 跨层接缝 | **Owns**: LLM 接缝(`GatewayChatModel`)· model_resolver · D1 双模 · **predict-mock chat model** | **现状**: ✅ | **Related**: `05-run-inner/01-agent-loop`(用 model)· `05-run-inner/06-golden-eval`(predict 回放)· gateway(独立子系统,只对接)
+> **Tier**: 机制层 B · 跨层接缝 | **Owns**: LLM 接缝(`GatewayChatModel`)· model_resolver · D1 双模 · **predict-mock chat model** | **现状**: 主体迁入;predict_context/structured-output 约束未迁全 | **Related**: `05-run-inner/01-agent-loop`(用 model)· `05-run-inner/06-golden-eval`(predict 回放)· gateway(独立子系统,只对接)
 
 ## 1. 定义
 models = engine ↔ LLM 的**唯一接缝**:引擎只见 `GatewayChatModel`(编排外壳),provider 差异(OpenAI/Anthropic/qiniu 等)全由独立 **gateway** 吸收,引擎不自己分 provider。AGENT phase 的 `create_agent(model=...)` 从这里拿模型。

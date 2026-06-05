@@ -76,9 +76,9 @@ Source workflow basis: `01_workflows/01_init.md:39`, `01_workflows/02_authoring.
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| NATIVE_FS-1 | 唯一写者 | 对齐 `native-rust-writer` 设计单元并保护四层边界 |
-| NATIVE_FS-2 | 打包写者 | 对齐 `native-rust-writer` 设计单元并保护四层边界 |
-| NATIVE_FS-3 | sidecar gate | 对齐 `native-rust-writer` 设计单元并保护四层边界 |
+| NATIVE_FS-1 | 唯一写者 | 单元 `native-rust-writer`；**为什么**：所有本地写走 Rust 唯一写者(D12)，避免双写者并发冲突 |
+| NATIVE_FS-2 | 打包写者 | 单元 `native-rust-writer`（+`publish-artifact-autocommit`）；**为什么**：publish package 打包/写盘收口 native-fs，非 Python zip |
+| NATIVE_FS-3 | sidecar gate | 单元 `shell-runtime-gate`（消费）；**为什么**：sidecar 失败局部显示、不全屏阻塞(D10)，壳/runtime 状态归 shell-runtime-gate |
 
 ## 6. 测试关键点
 1. 唯一写者: baseline 现状为 file/graph writes 仍走 FastAPI/Python ⚠️；目标为 所有本地写走 Rust/Tauri writer 或明确的 Rust-mediated path。

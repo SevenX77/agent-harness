@@ -85,9 +85,9 @@ Source workflow basis: `01_workflows/03_compile.md:22`, `01_workflows/04_run-and
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| ENGINE-1 | resume | 对齐 `compile-stage-gate` 设计单元并保护四层边界 |
-| ENGINE-2 | engine SSOT | 对齐 `compile-stage-gate` 设计单元并保护四层边界 |
-| ENGINE-3 | golden/path/schema | 对齐 `compile-stage-gate` 设计单元并保护四层边界 |
+| ENGINE-1 | resume | 单元 `debug-resume-checkpoint`（引擎契约）；**为什么**：节点级 checkpoint/resume 归 engine `04-run-outer/03-checkpoint`，Studio 只引用 |
+| ENGINE-2 | engine SSOT | 引用 `docs/engine/mvp1/` 各契约 SSOT(compile/run/golden/trace)；**为什么**：engine 是格式/错误码/机制权威，Studio 平台只消费不重定义(R1) |
+| ENGINE-3 | golden/path/schema | 单元 `golden-per-agent-node`（引擎契约）；**为什么**：golden 落点/per-node 模型/失效校验归 engine `physical-layout`+`golden-eval`，Studio 引用 |
 
 ## 6. 测试关键点
 1. resume: baseline 现状为 Studio `resume_run` 仍 501 ⚠️；目标为 节点级 resume 引用 engine checkpoint/resume contract 并接 Studio 适配。

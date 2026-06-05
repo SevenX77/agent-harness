@@ -9,6 +9,8 @@ status: drafted（现状对齐 pinned 代码 7cd4b9c；live 接简化版 md2json
 > **Scope**: finish_task 显式提交 + 校验路由 + 输出解析/patch 的现状:`cognitive_flow.py`(截获+校验)、`cognitive/md2json.py`(简化版,live)、`tools/md_to_json.py`(rich 三态,未接 live)、`cognitive/md_patch.py`。
 > **现状一句话**:CognitiveFlow `wrap_tool_call`(`cognitive_flow.py:348`)在工具循环里截 finish_task;**live 接的是简化版 `parse_finish_markdown`**(`graph_assembler.py:644` 导入,`cognitive_flow.py:550/604` 用),**rich 版 `md_to_json`(三态分流)存在但没接 live**。成功 finish_task 现走 `goto=END`(`:511`)——**直接结束 phase、绕过退出闸**(mvp1 要改 marker 交 `05-exit-control`)。
 
+> ✅ **审计核实(2026-06-05,graph-exec 式逐条对 pinned `7cd4b9c`)**:本 baseline 全部 `file:line` claim 命中真实代码——`cognitive_flow.py`(在 `middleware/`)198/348/455/511/604/637/698/750/765 · `md2json.py:26`(185 行)· `tools/md_to_json.py` 171/284/454/515/556/560 · `graph_assembler.py`(在 `core/`)644 · `cognitive/finish_task.py` 30/151,**零 drift**。`goto=END 绕过退出闸` 系准确记录的 live 现状(非 bug)。唯一可精化:body 用裸文件名,完整路径为 `middleware/cognitive_flow.py` / `core/graph_assembler.py`。
+
 ## UI/UX
 N/A。
 

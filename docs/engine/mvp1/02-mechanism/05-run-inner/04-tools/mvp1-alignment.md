@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/05-run-inner/04-tools
 doc: mvp1-alignment
-status: drafted（机制·运行内层;❌ 待设计 + action/tool 统一待决）
+status: drafted（机制·运行内层;action/tool 不统一已定 2026-06-04(TL2);ToolError 待实现 + 数据流待设计）
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行内层）
 ---
 

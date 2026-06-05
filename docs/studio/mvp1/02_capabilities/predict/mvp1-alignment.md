@@ -3,8 +3,7 @@ module: 02_capabilities/predict
 doc: mvp1-alignment
 status: drafted（后端链路 live；前端入口 + predict-pass = target-design）
 binds_baseline: ./baseline.md
-unit: predict-execution
-lock: drafted
+units: [predict-execution]
 aligns_with: 01_workflows/04_run-and-verify.md（E. predict）
 ---
 

@@ -4,8 +4,7 @@ doc: baseline
 status: drafted（现状对齐 pinned 代码 <commit>；固定 3 次、无退避、不分错误类型）
 binds_alignment: ./alignment-example.md
 binds_code: core/retry.py:retry_call
-unit: retry-policy        # 轴③ 设计单元(在项目 INDEX 登记)
-lock: drafted
+units: [retry-policy]        # 轴③ 设计单元切面(锁态以 INDEX 为准,不在本文 frontmatter)
 ---
 
 # retry-policy — Baseline(当下代码实现逻辑)

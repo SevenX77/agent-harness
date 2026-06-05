@@ -56,7 +56,7 @@ governed_by: ../../development/design-doc-standards/（00 三轴 · 02 R8 设计
    - `skill-spec`/`workspace-spec` 的契约内容已迁入 mvp1 对应契约模块,旧契约文档可 deprecated、不作 SSOT。
    - **不可说"mvp0/engine 迁移整域可 deprecated"**:`_migration-src/`→`02-mechanism` 尚未清完,尤其 `09-golden-eval`、`11-io-and-edge-ops`、`api-engine-studio-contract`、`records/state-checkpoint-storage-model`、`records/uncovered-areas` 仍有未迁块(见 §3.2)。
 2. **锁迁移序(真实版)**:
-   - 先清 **B stub**:`01-contract/04-data-contracts/baseline.md`、`01-contract/05-invalidation/baseline.md`、`02-mechanism/05-run-inner/06-golden-eval/baseline.md`、`03-api-contract/baseline.md`。
+   - 先清 **B stub**:~~`01-contract/04-data-contracts/baseline.md`~~(✅ Phase 1 成段 2026-06-05)、`01-contract/05-invalidation/baseline.md`、`02-mechanism/05-run-inner/06-golden-eval/baseline.md`、`03-api-contract/baseline.md`。
    - 再清 **A 真空/摘要未迁**:`01-contract/02-skill-syntax` 的 resource/example、iterate、io 语法真空;`06-golden-eval` workspace 重写;`03-api-contract` 完整表;`11-io-and-edge-ops` 归入 `graph-exec`/`observability`;checkpoint/messages records 深度。
    - 最后才把可锁候选(U1/U3/U4 等)从 `drafted` 升为 `locked`;现在只能叫**候选**,不能叫已锁。
 3. **当前阻塞锁的事实**:任一 owner 模块 W/B/A 仍为 `stub` 或 `partial` 时,对应 unit 不能 `locked`,文件不能 `FROZEN`。
@@ -75,7 +75,7 @@ governed_by: ../../development/design-doc-standards/（00 三轴 · 02 R8 设计
 | `01-contract/01-physical-layout` | ✅ `mvp1-alignment.md:115,123-126` | ✅ `baseline.md:6,12`; code `loader.py:146`, `runner.py:376/527/541`, `emit.py:15` | ◐ `mvp1-alignment.md:137-138` | `.workspace` 户型已写;`evaluate_golden_baseline`/`golden`/`test_inputs` Engine SDK 未落地。 |
 | `01-contract/02-skill-syntax` | ✅ `mvp1-alignment.md:574,581-588` | ✅ `baseline.md:6,12`; code `loader.py:146/1499/1592`, `manifest.py:108/143/152/162`, `mentions.py:21` | ◐ `mvp1-alignment.md:28-31,604-605` | resource/example、iterate 声明、io 切片声明仍是真空。 |
 | `01-contract/03-compile-rules` | ✅ `mvp1-alignment.md:326-332`; `00-architecture-overview.md:98` | ✅ `baseline.md:6`; code `error_registry.py:15`, `loader.py:146`, `purity.py:44` | ✅/◐ `mvp1-alignment.md:184,334-350` | 文档自承载;实现 delta 仍有新 golden/iterate 码和 LE2 purity 扩展。 |
-| `01-contract/04-data-contracts` | ✅ `mvp1-alignment.md:27,35-38` | ❌ `baseline.md:10-15` | ✅ `mvp1-alignment.md:15-24` | baseline 只有迁移源+代码点,正文仍写"待迁";需补当前形状定义位置。 |
+| `01-contract/04-data-contracts` | ✅ `mvp1-alignment.md:27,35-38` | ✅ `baseline.md`(Phase 1 成段 2026-06-05;code state.py/result.py/exceptions.py/error_registry.py/validator_contract.py/types.py + runtime/state.py) | ✅ `mvp1-alignment.md:15-24` | ✅ B 成段;核出 BlackboardState 落点(runtime/state.py 非 core/)+ surface drift,已记 baseline §1/§7。 |
 | `01-contract/05-invalidation` | ✅/◐ `mvp1-alignment.md:29,35-37`; records `change-invalidation-model.md:3,9-10` | ◐ `baseline.md:10-14` | ◐ records `change-invalidation-model.md:28` | 变更轴已写;反转前"编译期硬错误"源块未等价承载/退役;baseline 仍偏来源清单。 |
 | `02-mechanism/01-compile` | ✅ `mvp1-alignment.md:24,30-31` | ✅ `baseline.md:4,20-39`; code `compiler.py:41`, `loader.py:146`, `purity.py:44` | ◐ `mvp1-alignment.md:41-42` | alignment 承认 loader/compiler 机制仍待成段化。 |
 | `02-mechanism/02-resolver` | ✅ `mvp1-alignment.md:29,36-39` | ✅ `baseline.md:4,20-30`; code `skill_resolver_protocol.py`, `local_workspace_resolver.py` | ◐ `mvp1-alignment.md:50-51` | path 目标已定;默认实现函数体仍是旧 registry/search_paths 语义待改。 |
@@ -112,7 +112,7 @@ governed_by: ../../development/design-doc-standards/（00 三轴 · 02 R8 设计
 ### 3.3 非 `_migration-src` 真空 / drift
 
 - `01-contract/02-skill-syntax`:resource/example、iterate、io 切片语法仍真空(`mvp1-alignment.md:28-31,605`)。
-- `01-contract/04-data-contracts/baseline.md`:baseline 仍是待迁 stub(`baseline.md:15`)。
+- ~~`01-contract/04-data-contracts/baseline.md`:baseline 仍是待迁 stub~~ → ✅ Phase 1 已成段(2026-06-05)。
 - `02-mechanism/07-runtime`:代码 live(`runner.py:163/376/623`),但顶层入口契约/bootstrap 未成段(`mvp1-alignment.md:15-16,40`)。
 - `GraphAgentHarness` 旧名仍出现在旧注释/示例/测试文本中,但当前 public 入口走 `run_skill`/`predict_skill`;这属于 runtime 文档/注释债,不能反推 live 入口类仍存在(`rg GraphAgentHarness` 命中 examples/tests/callback docstrings)。
 

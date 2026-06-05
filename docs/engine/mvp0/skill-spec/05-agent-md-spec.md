@@ -7,6 +7,10 @@ status: FROZEN
 
 本文定义 Agent 节点 `SKILL.md` 的 Frontmatter、Body XML 扁平化规则和引用注入校验。它是 [Cognitive Template](./06-cognitive-template-spec.md#8-大插槽布局拓扑) 的主要静态输入, 也和 [Mention Syntax](./07-mention-syntax-spec.md#--mention-语法规范) 强关联。
 
+> ~~已迁移: Frontmatter 字段解析表 → [mvp1 skill-syntax §2.5.1](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#251-frontmatter-字段)。mvp1 delta:`subgraphs[]` 子项从 mvp0 `target_skill` 改为绝对 `path`;`subagents[]` 保持 `target_skill`。~~
+> ~~已迁移: `subagents` / `subgraphs` 子项字段 → [mvp1 skill-syntax §2.5.2](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#252-subagents--subgraphs-子项字段)。~~
+> ~~已迁移: Body XML 5 标签、`<role>` / `<goal>` 必填、引用注入校验 → [mvp1 skill-syntax §2.5.3-§2.5.5](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#253-body-xml-扁平化容器)。错误码全集不在 skill-syntax 重复,见 [mvp1 compile-rules §4](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md#agent-domain)。~~
+
 ## Frontmatter 字段解析表
 
 Agent `SKILL.md` 是进入 LLM ReAct 循环的 phase 节点。节点类型由物理文件名 `SKILL.md` 唯一决定, Loader 注入内部 `mode="agent"`; 作者不写 `mode:`。frontmatter 只放框架装配配置, 业务 prompt 内容放在 body XML。未知字段编译期 FATAL `[F-v3-agent-schema-unknown-field]`。

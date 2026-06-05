@@ -7,7 +7,7 @@ aligns_with: ../../00-architecture-overview.md（§3 机制层 B·编译）
 
 # 02-resolver — 机制 B · 子图引用解析(path · DI 接缝)
 
-> **Tier**: 机制层 B · 编译期 | **Owns**: 把子图引用的**绝对 path** 解析成子图本地 root + 工作目录边界校验(**无 registry**) | **现状**: ⏳ | **Related**: `01-compile`(用它递归解析 SUBGRAPH)· `01-contract/02-skill-syntax`(path 语法)· `05-run-inner/07-subagent`(运行期子代理,另一回事)
+> **Tier**: 机制层 B · 编译期 | **Owns**: 把子图引用的**绝对 path** 解析成子图本地 root + 工作目录边界校验(**无 registry**)+ 定义 `SkillResolverProtocol` DI 接缝**形状**(契约,非 kiro) | **现状**: ⏳ | **Related**: `01-compile`(用它递归解析 SUBGRAPH)· `01-contract/02-skill-syntax`(path 语法)· `05-run-inner/07-subagent`(运行期子代理,另一回事)
 
 ## 1. 定义
 resolver = 把子图引用(`SUBGRAPH.md` / agent `subgraphs[]` 的 **`path`**,绝对路径)解析成**子图本地 root** 的接缝。mvp1 **无 registry、无逻辑 id 寻址**——path 即物理地址,引擎直接打开;resolver 只做两件事:**边界校验**(path 是否落在允许的工作目录范围内)+ **合法性校验**(是目录、含 `GRAPH.md`)。
@@ -24,7 +24,7 @@ resolver = 把子图引用(`SUBGRAPH.md` / agent `subgraphs[]` 的 **`path`**,�
 - 输入:`path`(绝对路径) + host 提供的工作目录边界;输出:子图 root(`Path`)。
 - 接缝**保留**(host 注入边界),但语义从"id→registry→root"变为"**绝对 path → 边界/合法性校验 → root**"。
 - **DI 显式、不全局化**:中间件消费 `_build_skill_node` 已备好的 runtime map,不自己找 resolver(见 `07-subagent`)。
-- 接口签名细节(方法名 / 参数形态)归 kiro 实施定。
+- **DI 接缝协议形状 = 契约,归本域(非 kiro)**:上面「输入(绝对 path + 工作目录边界)→ 输出(子图 root)+ 失败(越界 / 非目录 / 缺 `GRAPH.md` → raise)」就是 `SkillResolverProtocol` 的 mvp1 协议形状(mvp0 曾是 FROZEN 专文 `10-skill-resolver-protocol-spec`,path 版承接它)——**这是 engine↔studio 的 DI 契约,不是 kiro 实现细节**。`run_skill`/`compile_skill` 带 `skill_resolver` 必填参数这件事归 [`03-api-contract`](../../03-api-contract/mvp1-alignment.md)(只引用、不复制);**仅默认实现的内部函数体**(具体怎么查边界 / 合法性)归 kiro。
 
 ## 4. 设计决策基础(用户原话)
 > 子图 path(PM 2026-06-02):"subgraph.md里面写path, 直接解析就好了, 随便放哪里。唯一要注意的是copilot 的工作目录范围要把subgraph的子图path 加进去。"
@@ -48,7 +48,7 @@ resolver = 把子图引用(`SUBGRAPH.md` / agent `subgraphs[]` 的 **`path`**,�
 engine 定义解析机制 + 校验;host(studio)注入工作目录边界。
 
 ## 8. gaps / 待设计
-1. resolver 接口签名(path 解析版)成段;原 `LocalWorkspaceResolver`(registry/search_paths 寻址)退化为"边界 + 合法性校验"的细节归 kiro。
+1. **协议形状已不是 gap(2026-06-05 纠正)**:DI 接缝**形状**是契约、已在 §3 定义(本域 owns 形状,`03-api-contract` owns `skill_resolver` 参数面)。残留只剩默认实现 `LocalWorkspaceResolver` 的**内部函数体**(旧 registry/search_paths 寻址 → 边界+合法性校验的实现),归 kiro。
 2. **工作目录边界的具体表示**(copilot cwd / workspace 根集合怎么传进来)与 host 约定待定。
 
 ## 交叉引用(链接, 不复制)

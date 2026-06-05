@@ -29,7 +29,7 @@ aligns_with: ../../00-architecture-overview.md（§2 契约层 A）
 ```
 
 #### 2.1.1 子图默认落点(`subgraph/`)
-新建子图默认放在引用方 skill **自己根目录**的 `subgraph/<name>/` 下。每个子图本身是**完整 graph skill**(有自己的 `GRAPH.md` / `phases/`,以及它自己的 `subgraph/`),**递归自包含**——孙图落在 `<skill_root>/subgraph/<name>/subgraph/<name2>/`,层层下去,每个 skill 把自己的子图收在自己根的 `subgraph/`。子图用**绝对 path** 引用(语法见 `skill-syntax` §2.1、解析见 `02-resolver`),所以"默认放这"只是约定;要独立复用时可放工作区任意位置、path 指过去。旧 `subskills/`(本地素材区)不再承担子图落点。
+新建子图默认放在引用方 skill **自己根目录**的 `subgraph/<name>/` 下。每个子图本身是**完整 graph skill**(有自己的 `GRAPH.md` / `phases/`,以及它自己的 `subgraph/`),**递归自包含**——孙图落在 `<skill_root>/subgraph/<name>/subgraph/<name2>/`,层层下去,每个 skill 把自己的子图收在自己根的 `subgraph/`。子图用**绝对 path** 引用(语法见 `skill-syntax` §2.1、解析见 `02-resolver`),所以"默认放这"只是约定;要独立复用时可放工作区任意位置、path 指过去。子图相关目录在 engine **统一叫 `subgraph/`**(不再有 `subskills/` 这种旧概念——代码本就不消费它)。
 
 ### 2.2 `.workspace` 运行时树
 ```

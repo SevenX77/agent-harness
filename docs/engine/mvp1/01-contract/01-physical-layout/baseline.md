@@ -20,7 +20,7 @@ N/A —— 布局被 loader 校验、被 studio 文件树消费。
 ### 1. skill 源码树校验现状(loader 从根向下)
 - root 入口 `GRAPH.md`:`loader.py:183` `graph_path = root / "GRAPH.md"`;`loader.py:372` `_guard_v030_root`(缺 GRAPH.md FATAL)。
 - phase 节点:`phases/<id>/` 下 `LOGIC.md`/`SUBGRAPH.md`/`SKILL.md` 三选一;文件名→类型 `loader.py:51`(`"SUBGRAPH.md": "subgraph"` 等);缺/多报 `[F-v3-graph-phase-node-missing]`/`[F-v3-graph-phase-mode-ambiguous]`(`loader.py:442/1219`)。
-- 配套目录:references/、examples/、subskills/(本地素材区,**不参与子图解析**)。
+- 配套目录:references/、examples/(可选)。**代码现状无 `subskills/` 目录**(`grep subskills` 在 `src/` 下为空——`subskills` 仅是 mvp0 spec 遗留概念,代码不消费;engine 统一用 `subgraph/`)。
 
 ### 2. 子图物理现状(无 subgraph/ 约定)
 - **现状无 `subgraph/` 目录约定**:子图不靠物理位置,靠 `target_skill`(逻辑 id,`manifest.py:104`)经 `resolve_skill_root`(`loader.py:539`,归 `02-resolver`)找 root——物理位置由 resolver/registry 决定、**不在 skill 源码树布局里**。
@@ -43,7 +43,6 @@ N/A —— 布局被 loader 校验、被 studio 文件树消费。
 | 维度 | 现状(baseline) | mvp1 目标 |
 |---|---|---|
 | 子图落点 | 无约定目录;靠 target_skill 逻辑 id + resolver | `<skill_root>/subgraph/<name>/` 默认 + 绝对 path + 递归自包含 |
-| subskills/ | 本地素材区(不参与解析) | 不再承担子图落点(subgraph/ 取代) |
 | workspace 户型 | 现状代码 live(runner 校验 workspace_dir) | 户型字段正文自写进 mvp1(🚨 待补) |
 
 > **验"是否按 mvp1 改了"**:① 新建子图默认落 `<skill_root>/subgraph/<name>/`、是完整 graph skill;② 孙图递归在 `<name>/subgraph/<name2>/`;③ 子图位置由物理 path 定(不再靠 target_skill 逻辑 id + resolver registry 寻址)。

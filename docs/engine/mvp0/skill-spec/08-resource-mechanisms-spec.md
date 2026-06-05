@@ -5,6 +5,8 @@ status: FROZEN
 
 # Resource Mechanisms Spec
 
+> 🔖 **本文 = mvp0 留底,非 SSOT(mvp0 弃用中)。** 内容已分布到 mvp1(零 deferral):references/examples **声明语法** → `01-contract/02-skill-syntax` §2.5.1;**reference-reader 装配期机制** → `02-mechanism/03-assemble`;**`read_reference`/`read_example` 运行期工具** → `02-mechanism/05-run-inner/04-tools`。**机制细节深度**(三机制契约表 / 降级 / tool schema)待那两模块成段时纳入,当前留底参考。
+
 本文定义 Reference 三机制、Example 双模式和 Frontmatter 挂载格式。它连接 [Agent SKILL.md](./05-agent-md-spec.md#frontmatter-字段解析表)、[Builtin Modules](./09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名) 与 [Cognitive Template](./06-cognitive-template-spec.md#动态装配插槽解析)。
 
 ## Reference 三机制生命周期

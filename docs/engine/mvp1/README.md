@@ -3,7 +3,7 @@ milestone: MVP1
 status: drafted（2026-06-03 三层重构;23 模块落位）
 ground_truth:
   - packages/graph-agent
-  - ../mvp0/skill-spec（FROZEN）
+  - ../mvp0/workspace-spec（workspace 户型,待迁;skill-spec 契约已迁 mvp1)
 ---
 
 # Engine MVP1 — 文档索引
@@ -28,7 +28,7 @@ ground_truth:
 ## 迁移源(沉底)
 
 - `_migration-src/` = 旧 concern 目录(01–11)+ `records` + `api-engine-studio-contract` 的**迁移源**;各模块 deep file:line 复核完后清理。
-- `docs/engine/mvp0/skill-spec/`、`mvp0/workspace-spec/` = **FROZEN 契约基线**(♻️ 链接不复制)。
+- `docs/engine/mvp0/skill-spec/` 契约主体已迁入 mvp1(01 skill 树 + 02–07→skill-syntax、08/09→assemble/tools 留底、10→resolver、11/12→compile-rules);**留底不作 SSOT**。剩 01 的 `.workspace` 户型 + `mvp0/workspace-spec/` 仍是 workspace 基线,待迁 `01-physical-layout`。
 - 全量备份:`docs/engine/_mvp1-snapshot-2026-06-03/`。
 
 ## 阅读顺序

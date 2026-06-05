@@ -55,7 +55,8 @@ governed_by: ../../development/design-doc-standards/（00 三轴 · 02 R8 设计
 1. **去 mvp0 FROZEN 残留**(R1 唯一真理前置):
    - ✅ **compile-rules 已自承载(2026-06-05,codex 执行 + Claude 核验)**:mvp0 11(93 错误码全表)+ 12(三段生命周期)已迁入 `03-compile-rules/mvp1-alignment.md`;`error_registry.py` 93 个 `doc_link` 全指 mvp1(mvp0=0);baseline 改对代码(`ERROR_REGISTRY`/`SkillLoader.compile_skill`/`scan_python_purity`)。mvp0 11/12 已划线留档(FROZEN→superseded 待 mvp0 全域处置)。
    - ✅ `01-compile`/`03-assemble` 的 mvp0 `12` SSOT 引用已重定向到 `compile-rules` §2(2026-06-05)。
-   - ⏳ 剩余:`README.md` / `00-architecture-overview.md` 的 `ground_truth`(整个 mvp0 skill-spec 基线)+ overview §3 的 mvp0 mentions → **gated on skill-syntax 迁移**(mvp0 02–07 语法已迁批1/2;剩 08-resource/iterate/io 切片=批3;全迁完才好降级 ground_truth)。
+   - ✅ **mvp0 skill-spec 残留已清(2026-06-05)**:02–07→skill-syntax、08/09→assemble/tools(留底 banner)、10→resolver、11/12→compile-rules;README/overview ground_truth 已把 skill-spec 降级为"已迁留底"。
+   - ⏳ 剩余 mvp0:`mvp0/workspace-spec` + 01 的 `.workspace` 户型 → 待迁 `01-physical-layout`(§3 真空);08/09 机制细节深度待 `03-assemble`/`04-tools` 成段纳入。
 2. **可优先锁的单元**(决策 firm、争议已收敛):**U3**(action/tool 不统一)· **U4**(LOGIC 契约,文档侧)· **U1**(subgraph path 契约)。
 3. **阻塞锁的真空**(见 §3),清空后才能盖单元 `locked` → 文件级 `FROZEN`。
 

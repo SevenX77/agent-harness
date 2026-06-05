@@ -4,7 +4,7 @@ status: drafted（2026-06-03 三层解耦:契约 A / 机制 B / API契约 C）
 owns: Graph Agent 完整模块地图 · 契约-机制-API契约 三层 · 编译-装配-运行 生命周期 · 关键决策 · 待设计清单
 ground_truth:
   - packages/graph-agent（file:line 须复核）
-  - docs/engine/mvp0/skill-spec（FROZEN 契约基线）
+  - docs/engine/mvp0/workspace-spec（workspace 户型基线,待迁 physical-layout;skill-spec 契约已迁 mvp1)
 ---
 
 # Graph Agent MVP1 架构总览(设计北极星)
@@ -28,7 +28,7 @@ ground_truth:
 
 > A 是输入侧领域契约,C 是操作侧 API 契约,B 在中间。mvp0 早有 A/B 之分(`skill-spec/` 契约 vs `engine/{5子模块}` 机制);C = engine↔studio 边界(api-engine-studio-contract,第2趴)。
 
-机制层 B 按真实管线(mvp0 `12-compile-runtime-flow` FROZEN)分三段:
+机制层 B 按真实管线(`compile-rules` §2 三段生命周期契约,已自承载)分三段:
 - **编译期**:Loader 读 skill 源码 → DAG/IO/mention/purity 校验 → 可信 AST(或聚合 `[F-v3-*]`)。
 - **装配期**:AST → 跑 reference reader、渲染 cognitive 模板 → 可运行 LangGraph 节点。
 - **运行时**:`graph.invoke` → StateMapper slice/merge → 跑 phase。**运行时再分外/内,是组织铁律**(两层机制各一套:checkpoint、delta/compact、action/tool,混写=bug)。
@@ -113,7 +113,7 @@ ground_truth:
 - **⚠️ 校正(2026-06-04 verify)**:`LOGIC 执行`并非空白——`_build_logic_node` 已 live、真实 skill 在用;真问题是 **spec-code drift**(action 签名 `run(state_slice)` FROZEN vs `<name>(context)` live)+ 删死簇,**非 from-scratch 设计**。`07-runtime` 同理(`run_skill` live 在 runner.py,缺的是顶层契约文档,非代码)。
 - **进展(2026-06-04)**:① **LOGIC 已定**——`纯返回 / 硬禁 / 反写`(干净 action 契约:只读 inputs→返回 dict、禁 mutation/run_skill/FS;live drift = refactor-target;反写解冻 `03-logic-md-spec`;见 `graph-exec` LE1-3)。② **action/tool capability = 不统一**(spec 已固定 Action≠Tool,纯 action(read-only dict)vs StructuredTool 本质不同)。
 - **真·待定**:③ `07-runtime` 顶层契约成文(run_skill/bootstrap/public API,均 live);④ `04-tools` builtin/binding/ToolError 文档化(live,待 doc + 校 drift)。原则:**code 向干净设计对齐,不拿 live 当真理**。
-- **⏳ 成段化**:`01-compile`/`02-resolver`/`03-assemble` 实现机制;`invalidation`(golden-stale 移 eval);`06-golden-eval` 按 golden→workspace 改写;`skill-syntax`/`compile-rules` 标 mvp0 FROZEN ♻️ + mvp1 delta。
+- **⏳ 成段化**:`01-compile`/`02-resolver`/`03-assemble` 实现机制;`invalidation`(golden-stale 移 eval);`06-golden-eval` 按 golden→workspace 改写。(`skill-syntax`/`compile-rules` 已自承载迁出 mvp0,见 `INDEX.md` §2)
 
 ## 交叉引用(链接, 不复制)
-README(章节去向)· 契约层 A(5)· 机制层 B(17)· API契约层 C(1)· mvp0/skill-spec(FROZEN 契约基线)· mvp0/workspace-spec · ../design/agent-loop-planA-create-agent-migration(迁移叙事)
+README(章节去向)· 契约层 A(5)· 机制层 B(17)· API契约层 C(1)· mvp0/skill-spec(契约已迁 mvp1,留底)· mvp0/workspace-spec(workspace 户型待迁)· ../design/agent-loop-planA-create-agent-migration(迁移叙事)

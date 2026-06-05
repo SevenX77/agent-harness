@@ -5,6 +5,8 @@ status: FROZEN
 
 # Builtin Modules Spec
 
+> 🔖 **本文 = mvp0 留底,非 SSOT(mvp0 弃用中)。** 内容去向(mvp1 零 deferral):**reference-reader subagent 签名 + 优雅降级** → `02-mechanism/03-assemble`;**`read_reference`/`read_example` 工具** → `02-mechanism/05-run-inner/04-tools`。**I/O 签名表 / 降级矩阵 / tool param schema 的完整细节** 待那两模块成段时纳入,当前留底参考。
+
 本文定义 builtin reference reader subagent、降级策略和 `read_reference` / `read_example` tools 的 I/O 签名骨架。它支撑 [Resource Mechanisms](./08-resource-mechanisms-spec.md#reference-三机制生命周期) 与 [Cognitive Template 动态装配](./06-cognitive-template-spec.md#动态装配插槽解析)。
 
 ## Builtin Reference Reader Subagent 签名

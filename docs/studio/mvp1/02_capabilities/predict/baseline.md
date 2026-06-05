@@ -4,8 +4,7 @@ doc: baseline
 status: drafted（现状对齐 pinned 代码 3c1e2f5；后端 predict 链路 live、前端主入口是桩 ⚠️）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/studio/Workspace.tsx:onPredict · apps/studio/frontend/src/api/client.ts:postPredictRun · apps/studio/backend/app/routers/runs.py:predict_run · apps/studio/backend/app/services/predictor.py:dispatch_predict_job · packages/graph-agent/src/graph_agent/core/runner.py:predict_skill
-unit: predict-execution
-lock: drafted
+units: [predict-execution]
 ---
 
 # predict — Baseline（当下代码实现逻辑）

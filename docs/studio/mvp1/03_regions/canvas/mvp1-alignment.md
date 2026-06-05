@@ -46,7 +46,7 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 ## F4. Subgraph Visual Affordance
 
 - 机制: subgraph node can expand inline or navigate to child graph when path resolves;**下钻进入子图后,导航面包屑显示在画布左上角(不在 Header)**,逐级可返回上层图。
-- 决策: child graph references are local paths and missing paths recover through Assets;**下钻面包屑刻意放画布左上角而非 Header**——避免"跳出项目"的页面切换感(本地 app 防"项目没保存"恐慌)(PM 2026-06-04)。
+- 决策: child graph references use **绝对 path**(engine skill-syntax §2.1:绝对路径、无 registry)、missing paths recover through Assets;**下钻面包屑刻意放画布左上角而非 Header**——避免"跳出项目"的页面切换感(本地 app 防"项目没保存"恐慌)(PM 2026-06-04)。
 - 原话/来源: `01_workflows/02_authoring.md:37` locks path-based subgraph references.
 - 测试: resolved subgraph expands; unresolved path shows recovery state; inline content is real, not mock.
 - Status: placeholder/stale.

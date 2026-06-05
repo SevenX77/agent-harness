@@ -65,7 +65,7 @@
 
 ### 原话(留底)
 > "predict和run就是按照配置来跑就行了" · "单次Run和批量Run的入口 在io panel OK" · "运行时加线的动画(已有)和节点边框的动画(在setting里面的role test, 测试时的边框动画统一)" · "存档应该和发布分发放一起, 都是git的功能"
-> batch/loop 完整原话(story-deconstruction + 三处开关 + 图级 range 例)→ [`_reorg/gemini-prompt-batch-loop.md`](../../_reorg/gemini-prompt-batch-loop.md)。
+> batch/loop 完整原话(story-deconstruction + 三处开关 + 图级 range 例)→ 引擎契约 [`02-iterate`](../../../engine/mvp1/02-mechanism/04-run-outer/02-iterate/mvp1-alignment.md)(早期草稿 `_reorg/gemini-prompt-batch-loop.md` 仅历史)。
 
 ### 测试关键点
 - run 需 compile-pass 且 predict-pass;run_skill 真跑落盘;节点灯随真实 run 事件亮;成功 run → autocommit;批量某项失败显式上报。
@@ -142,9 +142,9 @@ dot = 两节点之间的"中间节点"(langgraph edge),代表**上节点 end 后
 ---
 
 ## 引擎需求(已抛出)
-1. **batch/loop**(C 配置)→ [`gemini-prompt-batch-loop.md`](../../_reorg/gemini-prompt-batch-loop.md)。
-2. **predict + golden + run 后端**→ [`engine-prompt-predict-golden-run.md`](../../_reorg/engine-prompt-predict-golden-run.md):golden 逐节点模型 + mock-by-golden + 逐节点 diff + 失效校验。
-3. **trace 后端**→ [`engine-prompt-trace-compile-debug.md`](../../_reorg/engine-prompt-trace-compile-debug.md):节点间操作事件 + 嵌套链路 + reducer diff。
+1. **batch/loop**(C 配置)→ 引擎 [`02-iterate`](../../../engine/mvp1/02-mechanism/04-run-outer/02-iterate/mvp1-alignment.md)(`_reorg/gemini-prompt-batch-loop.md` 仅历史草稿)。
+2. **predict + golden + run 后端**→ 引擎 [`06-golden-eval`](../../../engine/mvp1/02-mechanism/05-run-inner/06-golden-eval/mvp1-alignment.md) + `07-runtime`:golden 逐节点模型 + mock-by-golden + 逐节点 diff + 失效校验(`_reorg/engine-prompt-predict-golden-run.md` 仅历史草稿)。
+3. **trace 后端**→ 引擎 [`02-observability`](../../../engine/mvp1/02-mechanism/06-seam/02-observability/mvp1-alignment.md):节点间操作事件 + 嵌套链路 + reducer diff(`_reorg/engine-prompt-trace-compile-debug.md` 仅历史草稿)。
 
 ## 整层定性
 本节点整层 = **后端实 / 前端虚**:predict/run/golden 后端 live 或 backend-only,但 TracePanel/useRunStream/PromptInspector/BatchRunner/RunDetailDrawer/useGoldenDiff 全套已建却零挂载。**主要工程 = 接线孤儿 + 实现 target-design 件 + 引擎补缺口。**

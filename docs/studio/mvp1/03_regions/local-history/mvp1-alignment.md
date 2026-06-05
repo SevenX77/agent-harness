@@ -33,12 +33,12 @@ Source workflow basis: `01_workflows/06_eval.md:13`, `01_workflows/06_eval.md:24
 
 ## F3. Run Detail Ownership Check
 
-- 机制: RunDetailDrawer/BatchSummary should be wired where run review happens unless PM wants Local History to own them.
+- 机制: RunDetailDrawer/BatchSummary 接在 run review 处(Timeline / i-o),**不归 Local History**(已决 PM 2026-06-04)。
 - 决策: run detail is time/run semantics, not git snapshot semantics.
 - 原话/来源: `01_workflows/04_run-and-verify.md:58` lists run detail under run history; `01_workflows/04_run-and-verify.md:54` lists batch under i/o/run.
 - 测试: run row opens RunDetailDrawer from Timeline; batch progress opens from i/o panel.
-- Status: ownership gap.
-- 归属: likely `timeline` and `input`; PM confirmation needed.
+- Status: 已决(见下「已决」)。
+- 归属: Local History 只做 git snapshot;RunDetailDrawer / BatchSummary 归 `timeline` / `input`(已决 PM 2026-06-04)。
 
 ## 已决(PM 2026-06-04)
 

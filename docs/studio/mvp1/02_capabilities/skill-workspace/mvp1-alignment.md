@@ -43,7 +43,7 @@ Source workflow basis: `01_workflows/01_init.md:8`, `01_workflows/01_init.md:16`
 
 ## F4. Subgraph Path Workspace Membership
 
-- 机制: subgraph references resolve by local path; if missing, Assets lets the user add that folder into the workspace.
+- 机制: subgraph references resolve by **绝对 path**(engine skill-syntax §2.1); if missing, Assets lets the user add that folder into the workspace.
 - 决策: subgraph identity is a path, not a registry id.
 - 原话/来源: `01_workflows/02_authoring.md:37` locks the subgraph path direction.
 - 测试: a missing subgraph path is visible, actionable, and becomes resolved after adding the folder.

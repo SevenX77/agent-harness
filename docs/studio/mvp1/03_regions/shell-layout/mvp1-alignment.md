@@ -19,7 +19,7 @@ Source workflow basis: `01_workflows/01_init.md:8`, `01_workflows/02_authoring.m
 
 - 机制: keep Header/Toolbar/frame stable while the center swaps Home, Canvas, Editor, or Settings.
 - 决策: Studio is an app shell, not a landing page; sidecar failures should be scoped to dependent functions.
-- 原话/来源: `01_workflows/01_init.md:35` locks IDE/workspace model; `docs/studio/INDEX.md:221` records non-fullscreen sidecar gate behavior.
+- 原话/来源: `01_workflows/01_init.md:35` locks IDE/workspace model; `_reorg/alignment-notes.md` D10 records non-fullscreen sidecar gate behavior.
 - 测试: app shell renders before compile/copilot sidecar functions are ready; feature-specific errors stay local.
 - Status: mostly live, RuntimeGate still needs audit.
 - 归属: region `shell-layout`; platform `state-engine`.

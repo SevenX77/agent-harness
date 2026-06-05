@@ -97,7 +97,7 @@ N/A —— skill 源码语法被 Studio 编辑器/copilot 消费；本 baseline 
 - role prefix seam:`packages/graph-agent/src/graph_agent/cognitive/prompt.py:resolve_role_prefix_from_llm_role` 当前总是返回空字符串,注释说明 Provider Intelligence V2 已把 role prefix 应用移到 `graph_agent_gateway.GatewayChatModel`。
 - AGENT prompt 入口:`packages/graph-agent/src/graph_agent/core/graph_assembler.py:_agent_system_prompt` 把 `AgentNodeAST` 的 `role`、`goal`、`steps`、`protocols`、`examples_inline`、`references`、document `examples` 和 output schema 传给 `apply_v030_cognitive_template`。
 - reference/example registry 文本:`packages/graph-agent/src/graph_agent/core/graph_assembler.py:_reference_registry_listing` / `packages/graph-agent/src/graph_agent/core/graph_assembler.py:_example_registry_listing` 分别产出 `- id: summary` 列表或默认中文文案。
-- reference-reader 预读:`packages/graph-agent/src/graph_agent/core/graph_assembler.py:_build_reference_reader_markdown` 在装配 AGENT node 时用 `packages/graph-agent/src/graph_agent/core/builtin_subagents.py:ReferenceReaderRuntime` 生成 knowledge_base markdown。
+- reference-reader 预读:`packages/graph-agent/src/graph_agent/core/graph_assembler.py:_build_reference_reader_markdown` 在装配 AGENT node 时用 `packages/graph-agent/src/graph_agent/core/builtin_subagents/reference_reader.py:ReferenceReaderRuntime`(经 `core/builtin_subagents/__init__.py` re-export)生成 knowledge_base markdown。
 
 **cognitive drift / refactor-target**:
 - mvp1 目标 `{llm_role_prefix_section}` 来源是 `llm_roles.yaml system_prompt_prefix`;当前 `resolve_role_prefix_from_llm_role` 在 Engine 内恒返回 `""`,role prefix 实际下沉到 gateway。

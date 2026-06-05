@@ -75,7 +75,7 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 | ID | 决策 | 动机 |
 |---|---|---|
 | EDITOR-1 | 写路径 | 单元 `native-rust-writer`（消费；owner=native-fs）；**为什么**：editor save 走 Rust 唯一写者(D12) |
-| EDITOR-2 | inline diagnostics | 单元 `compile-lint-structured-error`（消费）；**为什么**：Monaco 行内编译诊断标记，错误语义归 compile-lint，非写者 |
+| EDITOR-2 | inline diagnostics | 单元 `compile-lint-structured-error`（消费；owner=compile-lint）；**为什么**：Monaco 行内编译诊断标记，错误语义归 compile-lint，非写者 |
 | EDITOR-3 | golden diff | 单元 `golden-per-agent-node`；**为什么**：编辑器分屏看 golden 完整 diff(Monaco diff)，是 golden 详细 diff 的落点 |
 
 ## 6. 测试关键点

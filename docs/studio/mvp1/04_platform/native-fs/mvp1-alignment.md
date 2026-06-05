@@ -69,7 +69,7 @@ Source workflow basis: `01_workflows/01_init.md:39`, `01_workflows/02_authoring.
 - Capability links: `skill-workspace`, `file-editing`, `graph-authoring`, `publish`, `golden-eval`.
 
 ## 4. 设计决策基础（PM 原话）
-- **D10 后端三分**(native-fs = 第三块「本地操作」,🔒锁 PM 2026-06-01)> "后端应该分为3块: 1. gateway 包括 studio backend里面的llm gateway相关的后端部分代码要并入 gateway, 这部分全部用服务形式, python sidecar; 2. graph agent engine, 也是python, 用 sidecar; 前面两块都是 引擎真跑的时候需要调用的服务; 3. 大量的本地操作, 读写文件, 文件系统(打开文件夹)等等, 全部用rust本地操作";sidecar 启动期 eager-spawn(非全屏 gate)> "启动程序时就后端拉起sidecar, 因为未来还要登陆用户呢, 还有setting 页面里api、llm role这些配置都需要服务端"。
+- **D10 后端三分**(native-fs = 第三块「本地操作」,🔒锁 PM 2026-06-01)> "后端应该分为3块: 1. gateway 包括 studio backend里面的llm gateway相关的后端部分代码要并入 gateway, 这部分全部用服务形式, python sidecar; 2. graph agent engine, 也是python, 用 sidecar; 前面两块都是 引擎真跑的时候需要调用的服务; 3. 大量的本地操作, 读写文件, 文件系统(打开文件夹)等等, 全部用rust本地操作. 判断这样是否可行?? 如果是这样的话, 应该不需要bootstrap. 调用后端的地方skeleton就行";sidecar 启动期 eager-spawn(非全屏 gate)> "启动程序时就后端拉起sidecar, 因为未来还要登陆用户呢, 还有setting 页面里api、llm role这些配置都需要服务端"。
 - **D12 本地操作全量 Rust(唯一写者,🔒PM 裁定 2026-06-01)**> "全量切 rust, 除了 graph agent 和 llm gateway 相关使用 python sidecar, 其他本地操作都用 rust";skill 源文件 / `.workspace` / copilot patch 落盘 / 编辑器 save 全走 Rust 命令,Python 端点退为只读 + 编译装配。
 - **砍掉** `open_in_cursor` / `open_in_codex` / `open_in_terminal`(D3,不进 MVP1 UI;现码 `apps/studio/frontend/src/lib/tauri.ts:openInCursor（L26）` 仍在,属待清 drift);`reveal_in_file_manager`(访达/资源管理器显示)= **保留**(正经工作区功能)。
 
@@ -78,7 +78,7 @@ Source workflow basis: `01_workflows/01_init.md:39`, `01_workflows/02_authoring.
 |---|---|---|
 | NATIVE_FS-1 | 唯一写者 | 单元 `native-rust-writer`；**为什么**：所有本地写走 Rust 唯一写者(D12)，避免双写者并发冲突 |
 | NATIVE_FS-2 | 打包写者 | 单元 `native-rust-writer`（+`publish-artifact-autocommit`）；**为什么**：publish package 打包/写盘收口 native-fs，非 Python zip |
-| NATIVE_FS-3 | sidecar gate | 单元 `shell-runtime-gate`（消费）；**为什么**：sidecar 失败局部显示、不全屏阻塞(D10)，壳/runtime 状态归 shell-runtime-gate |
+| NATIVE_FS-3 | sidecar gate | 单元 `shell-runtime-gate`（消费；owner=shell-layout）；**为什么**：sidecar 失败局部显示、不全屏阻塞(D10)，壳/runtime 状态归 shell-runtime-gate |
 
 ## 6. 测试关键点
 1. 唯一写者: baseline 现状为 file/graph writes 仍走 FastAPI/Python ⚠️；目标为 所有本地写走 Rust/Tauri writer 或明确的 Rust-mediated path。

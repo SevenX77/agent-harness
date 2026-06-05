@@ -77,7 +77,7 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| CANVAS-1 | 节点态 | 单元 `run-execution-node-status`（消费）；**为什么**：节点灯/边由 run events 经 state-engine 投影，canvas 只渲染 |
+| CANVAS-1 | 节点态 | 单元 `run-execution-node-status`（消费；owner=run-execution/state-engine）；**为什么**：节点灯/边由 run events 经 state-engine 投影，canvas 只渲染 |
 | CANVAS-2 | dot 黑板 | 单元 `trace-dot-blackboard`；**为什么**：边 dot 渲染真实黑板字段切片，非假数据 |
 | CANVAS-3 | 子图 inline | 单元 `subgraph-path-inline-drilldown`；**为什么**：主画布 inline 展开子拓扑 + 下钻并存，虚线容器靠父图最右 |
 

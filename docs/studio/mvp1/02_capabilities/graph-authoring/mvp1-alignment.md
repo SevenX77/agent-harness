@@ -77,7 +77,7 @@ Source workflow basis: `01_workflows/02_authoring.md:8`, `01_workflows/02_author
 |---|---|---|
 | GRAPH_AUTHORING-1 | 子图字段 | 单元 `subgraph-path-inline-drilldown`；**为什么**：子图按 path 解析(D7)、SUBGRAPH.md io 不再严格 1:1(G2 删伪需求) |
 | GRAPH_AUTHORING-2 | inline 展开 | 单元 `subgraph-path-inline-drilldown`；**为什么**：主画布 inline 展开子拓扑 + 下钻并存，虚线容器靠父图最右(G4 LOD) |
-| GRAPH_AUTHORING-3 | 节点态 | 单元 `run-execution-node-status`（消费）；**为什么**：节点运行态来自 run/predict/state 投影，graph-authoring 只消费不拥有 |
+| GRAPH_AUTHORING-3 | 节点态 | 单元 `run-execution-node-status`（消费；owner=run-execution/state-engine）；**为什么**：节点运行态来自 run/predict/state 投影，graph-authoring 只消费不拥有 |
 
 ## 6. 测试关键点
 1. 子图字段: baseline 现状为 `defaultPhaseMarkdown` 写旧 `mode/target_skill` ⚠️；目标为 子图 frontmatter 写 engine MVP1 绝对 `path`。

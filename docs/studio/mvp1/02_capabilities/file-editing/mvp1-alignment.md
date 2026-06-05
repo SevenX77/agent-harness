@@ -77,7 +77,7 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 |---|---|---|
 | FILE_EDITING-1 | 写路径 | 单元 `native-rust-writer`（消费；owner=native-fs）；**为什么**：所有本地写收口到 Rust 唯一写者(D12)，避免双写者并发冲突 |
 | FILE_EDITING-2 | autosave | 单元 `native-rust-writer`（消费；owner=native-fs）；**为什么**：编辑器 save 走 Rust 文件命令、保留 expected-hash 冲突检测 |
-| FILE_EDITING-3 | 只读 trace | 单元 `trace-dot-blackboard`（消费）；**为什么**：editor 复用 Monaco 只读看 trace context，trace 语义归 trace-observability，非写者切面 |
+| FILE_EDITING-3 | 只读 trace | 单元 `trace-dot-blackboard`（消费；owner=trace-observability）；**为什么**：editor 复用 Monaco 只读看 trace context，trace 语义归 trace-observability，非写者切面 |
 
 ## 6. 测试关键点
 1. 写路径: baseline 现状为 `writeSkillFile` / `handlePhaseFileSave` 走 FastAPI ⚠️；目标为 写盘经 Rust 唯一写者；HTTP 不再直接写本地文件。

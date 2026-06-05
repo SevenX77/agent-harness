@@ -19,7 +19,7 @@ Source workflows: `01_workflows/02_authoring.md`, `01_workflows/03_compile.md`, 
 
 ## Current Region Ownership
 
-- Owns: selected node property forms, selected edge summary if kept, field-level compile markers, golden diff placement if PM keeps it here.
+- Owns: selected node property forms, selected edge summary if kept, field-level compile markers.（**golden 不归 Properties** —— PM 2026-06-04 已决 golden 完全不在 Properties，详细 diff 在 editor、入口在 I/O output + Assets。）
 - Should not own: raw trace JSON dumping; trace data interpretation belongs to Timeline/Trace.
 
 ## Known Drift

@@ -51,7 +51,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:75`, `01_workflows/04_
 ## F5. Golden And Compare Actions
 
 - 机制: trace/timeline can trigger compare and design-golden flows.
-- 决策: golden prompts have both trace-local and sonner batch entries.
+- 决策: golden prompts 有 trace-local 入口;**批量入口 = Copilot 分析 bar**(不在 timeline,归 `copilot-assist` F7),旧 sonner 批量已被取代。
 - 原话/来源: `01_workflows/04_run-and-verify.md:124` and `01_workflows/04_run-and-verify.md:137` require trace and batch entries.
 - 测试: trace-local button opens one copilot chat; compare uses correct backend route.
 - Status: orphan/route mismatch.

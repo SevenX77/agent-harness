@@ -23,7 +23,7 @@ Settings 运行底座：provider credentials、model groups、LLM roles、Copilo
 | Load/save | Settings page loads credentials/roles, debounces saves, and listens to registry/roles websocket events. | `apps/studio/frontend/src/components/studio/settings/SettingsPage.tsx:cached（L398）`, `apps/studio/frontend/src/components/studio/settings/SettingsPage.tsx:handleFocus（L444）` |
 | Provider card | API Keys card owns key visibility, copy, endpoint, test, and get-models controls. | `apps/studio/frontend/src/components/studio/api-keys/ProviderCard.tsx:tag（L907）`, `apps/studio/frontend/src/components/studio/api-keys/ProviderCard.tsx:tag（L1001）` |
 | Frontend state enum | Frontend provider state still uses `ready/untested/cooling_down/needs_setup/off`. | `apps/studio/frontend/src/api/llm.ts:llm（L3）` |
-| Copilot tab | Copilot tab derives roles from model groups, but ignores save status/error and can rekey role names incorrectly. | `apps/studio/frontend/src/components/studio/settings/copilot/CopilotTab.tsx:CopilotTab（L70）`, `apps/studio/frontend/src/components/studio/settings/copilot/CopilotTab.tsx:selectModelGroup（L219）` |
+| Copilot tab | Copilot tab derives roles from model groups, but ignores save status/error and can rekey role names incorrectly — 后端分流逻辑依赖 `copilot_` 前缀边界。 | `apps/studio/frontend/src/components/studio/settings/copilot/CopilotTab.tsx:CopilotTab（L70）`, `apps/studio/frontend/src/components/studio/settings/copilot/CopilotTab.tsx:selectModelGroup（L219）`, `apps/studio/backend/app/routers/llm.py:_is_copilot_role（L909）` |
 
 ## 后端功能
 | 面 | 现状 | 证据（文件:符号名） |

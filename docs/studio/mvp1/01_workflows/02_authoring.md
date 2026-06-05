@@ -35,9 +35,9 @@
 | (R5)assets subgraph 类目 ↔ 节点文件同步;子图 path 找不到→标红→OS 选文件夹导入工作区 | **target-design**(R5 + D7) | graph-authoring · canvas/assets | R5(子图同步,PM 已确认);D7 path 解析 |
 
 ## 3. 设计决策基础(原话依据,锁定决策)
-- **D7 子图按 path** > "subgraph.md里面写path, 直接解析就好了, 随便放哪里…注册在agent phase里的子图也一样写path";`SkillResolverProtocol.resolve` 退化为读 path,无注册表。
-- **G2 删子图 io 严格 1:1**(FROZEN-1)> "父子图的io关系不用绑死(伪需求)…子图的input是从state状态机过滤字段拿的";+ 任意 i/o 面板可导入文件注入黑板(时机=a 跑到该节点才注入)。
-- **G3 artifact 落盘**(FROZEN-2)> io.outputs schema 顶层加文件路径(`xx/xx.json|md`),默认落 `.workspace/artifacts`;md 用最终 `business_data_md` 不回转。
+- **D7 子图按 path** > "subgraph.md里面写path, 直接解析就好了, 随便放哪里. 唯一要注意的是copilot 的工作目录范围要把subgraph的子图path 加进去. 还有一个是注册在agent phase里的子图,也一样写path";`SkillResolverProtocol.resolve` 退化为读 path、无注册表;**copilot cwd 必须纳入被引用子图 path**(否则读不到/改不到子图)。
+- **G2 删子图 io 严格 1:1**(FROZEN-1)> "数据流应该是单向不可逆的, 所以没有回写一说. 父子图的io关系不用绑死(伪需求), 和其他节点一样, 子图的input是从state状态机过滤字段拿的; 另外增加一点, 你可以在任何一个i/o界面导入文件, 就和第一个input节点导入文件一样. 导入文件就相当于导入这个文件的字段进状态机";导入时机 = **a 跑到该节点才注入**(后续锁定,非 G2 原句)。
+- **G3 artifact 落盘**(FROZEN-2)> "黑板肯定都得进. 落盘是并行需求不影响状态机. 落盘的写法就在io.outputs 的schema顶层再加一个文件路径, xx/xx/xx.json(或者md), 下面是这个文件的schema; …默认不用写前面的路径,只要写一个文件名,代表直接落盘在.workspace的artifacts; 格式:文字只允许md和json";md 用最终 validated `business_data_md` 不回转(后续锁定)。
 - **REQ-10 Properties 白名单对齐 FROZEN**(官方确认 batch-2 stale 表单结论);**REQ-1 TB 布局**;**REQ-2 黑板可视化连线**(FROZEN-4,删类型相等红、改 io.inputs 字段勾选)。
 - **D12 写全量 Rust**;**D-1-4 脚手架 logic→agent 模板**;**R3** i/o panel 加 input files 导入(FROZEN-3);**R4** 连线四操作;**R5** assets 同步 + 子图 path 标红导入。
 - **Half B 现在设计**(不留实现期):三类节点字段集 + 子图 path 引用 + io.outputs artifact + 删子图 io 1:1,已落能力文档 [phase-editing](../02_capabilities/phase-editing/mvp1-alignment.md)。

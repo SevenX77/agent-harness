@@ -3,11 +3,14 @@ status: FROZEN
 ---
 <!-- DO NOT EDIT: Golden principle contract baseline. Any divergence is strictly prohibited unless explicitly approved. -->
 
-# LOGIC.md Spec
+> 🔖 **本文 = mvp0 迁移源档案，非当前 SSOT。** LOGIC.md frontmatter、body `<action>`、action 寻址与 validator 生命周期已迁入 [`mvp1 skill-syntax`](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#23-logicmd-语法契约)。其中旧 `run()` / 可变 Context action 契约已按 mvp1 V4 反转为 `def <action_name>(inputs) -> dict`、只读 inputs、纯返回；权威运行决策见 mvp1 `graph-exec` LE1-3。mvp1 删除 mvp0 引用时，不得再把本文当权威。
+<!-- 核对进度:已迁 4 块 / 未迁 0 块 / 2026-06-05 -->
+
+~~# LOGIC.md Spec~~ → ✅[已迁入](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#23-logicmd-语法契约)
 
 本文定义 `LOGIC.md` 的 Frontmatter、Action 注册 / 调用和 validator 后置钩子契约。它与 [物理布局](./01-physical-layout.md#文件名类型推导-filename-type-derivation)、[错误码字典](./11-error-code-spec.md#错误码速查全表) 和 [运行流](./12-compile-runtime-flow-spec.md#运行时引擎流-run-time-workflow) 共同约束 Logic 节点。
 
-## Frontmatter 字段解析表 (Schema & Validation)
+~~## Frontmatter 字段解析表 (Schema & Validation)~~ → ✅[已迁入](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#231-frontmatter-字段)
 
 `LOGIC.md` 表示一个不进入 ReAct 循环的确定性执行节点。Loader 由物理文件名 `LOGIC.md` 推导节点类型并注入内部 `mode="logic"`; 作者不在 frontmatter 中书写 `mode:`。未知字段编译期 FATAL `[F-v3-logic-schema-unknown-field]`。
 
@@ -44,7 +47,7 @@ validator: true
 
 [F-v3-* 错误码](./11-error-code-spec.md#错误码速查全表) 覆盖字段缺失、类型错误和 action/validator 错误。
 
-## Actions 注册、寻址与执行契约
+~~## Actions 注册、寻址与执行契约~~ → ✅[已迁入并按 V4 反转](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#233-action-寻址与-v4-干净执行契约)
 
 `actions:` frontmatter 只注册 action 名字。body XML 用 `<action>name</action>` 按顺序调用。action 来源支持两类:
 
@@ -95,7 +98,7 @@ Action 与 Tool 的边界必须固定:
 
 [Execution Runtime MVP0 Alignment](../execution-runtime/mvp0-alignment.md) 承接 Action 执行边界; Tool 主动调用边界见 [Builtin Tools](./09-builtin-modules-spec.md#按需调取-tools-read_reference--read_example)。
 
-## Validator 生命周期 (Post-Execution Hook)
+~~## Validator 生命周期 (Post-Execution Hook)~~ → ✅[已迁入](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#234-validator-生命周期)
 
 `validator: true` 表示 action 链全部完成后, 但结果写回 BlackboardState 之前, Engine 必须执行同级物理文件:
 
@@ -124,7 +127,7 @@ validator 文件是 phase-local 的, 因为它校验的是该 phase 的业务输
 
 [运行时引擎流](./12-compile-runtime-flow-spec.md#运行时引擎流-run-time-workflow) 引用 validator 触发和失败中断位置。
 
-## 相关核心错误码速查 (Error Codes)
+~~## 相关核心错误码速查 (Error Codes)~~ → ✅[已迁入](../../mvp1/01-contract/03-compile-rules/mvp1-alignment.md#logic-domain)
 
 | 错误码 | 阶段 | 触发条件 | 修复方向 |
 |---|---|---|---|

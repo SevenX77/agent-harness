@@ -63,7 +63,7 @@ governed_by: ../../development/design-doc-standards/（00 三轴 · 02 R8 设计
 
 ### 🚨 真空(SSOT 缺 / 待迁,阻塞 FROZEN)
 - `07-runtime`:**❌ 完全没设计**——顶层入口契约(`run_skill`/`predict_skill`/bootstrap/public API 均 live,缺契约文档)。
-- `01-contract/02-skill-syntax`:子图 path 已写清,**其余语法部件(四 phase 字段/body XML/mention/iterate 声明/cognitive 模板)真空**。(连带:compile-rules 迁入后 68 个错误码 `doc_link` 暂只能指到 skill-syntax §2 概览;skill-syntax 写细后精化。)
+- `01-contract/02-skill-syntax`:子图 path + **GRAPH/LOGIC/SUBGRAPH 语法已迁入(§2.1–§2.4,2026-06-05,批 1/2)**;剩 **SKILL/cognitive/mention/resource/iterate/io 切片真空(批 2/2)**。(error_registry 68 个 `doc_link` 仍指 §2 概览;GRAPH/LOGIC/SUBGRAPH 现可细化到 §2.2/2.3/2.4,批 2 完成后一并精化。)
 - `01-contract/01-physical-layout`:`.workspace` 户型字段正文待从旧文档迁入(§8)。
 - `05-run-inner` 多模块:`05-exit-control`/`06-golden-eval`/`07-subagent` 标 ⏳ 迁自 `_migration-src`,正文待成段。
 

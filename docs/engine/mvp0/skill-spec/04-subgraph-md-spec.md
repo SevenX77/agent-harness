@@ -3,11 +3,14 @@ status: FROZEN
 ---
 <!-- DO NOT EDIT: Golden principle contract baseline. Any divergence is strictly prohibited unless explicitly approved. -->
 
-# SUBGRAPH.md Spec
+> 🔖 **本文 = mvp0 迁移源档案，非当前 SSOT。** SUBGRAPH.md 类型推导、name/validator/io 字段已迁入 [`mvp1 skill-syntax`](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#24-subgraphmd-其余语法契约path-之外)。旧 `target_skill` registry 寻址已按 mvp1 反转为绝对 `path`(见 §2.1),旧父子 IO 1:1 强校验已按 mvp1 反转为普通节点 blackboard slice/merge。mvp1 删除 mvp0 引用时，不得再把本文当权威。
+<!-- 核对进度:已迁 3 块 / 未迁 0 块 / 2026-06-05 -->
+
+~~# SUBGRAPH.md Spec~~ → ✅[已迁入并按 path/io 放宽反转](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#24-subgraphmd-其余语法契约path-之外)
 
 本文定义 `SUBGRAPH.md` 的 `target_skill` 寻址与父子图 IO 强校验。它连接 [SkillResolverProtocol](./10-skill-resolver-protocol-spec.md#protocol-interface-定义)、[Root IO Schema](./02-graph-md-spec.md#根-io-契约-root-io-schema) 和运行期 subgraph 调度。
 
-## 类型推导与节点契约
+~~## 类型推导与节点契约~~ → ✅[已迁入](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#242-loader-拦截规则)
 
 `SUBGRAPH.md` 表示当前 phase 委托另一个 graph skill 执行。节点类型由物理文件名 `SUBGRAPH.md` 唯一决定, Loader 注入内部 `mode="subgraph"`; 作者不写 `mode:`。它不是内联复制子图, 也不是相对路径 include; V0.3.0 的跨 skill 寻址统一走 registry + DI。
 
@@ -45,7 +48,7 @@ Loader 拦截规则:
 
 [物理布局校验](./01-physical-layout.md#文件名类型推导-filename-type-derivation) 与 [错误码速查表](./11-error-code-spec.md#subgraph-domain) 覆盖 loader 拦截规则。
 
-## target_skill 寻址规则
+~~## target_skill 寻址规则~~ → ✅[已按绝对 path 反转迁入](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威)
 
 `target_skill` 只描述逻辑 skill id, 不描述磁盘路径。Engine 编译或装配子图时必须调用 DI 注入的单方法接口:
 
@@ -71,7 +74,7 @@ resolved_root: Path = skill_resolver.resolve_skill(target_skill)
 
 `target_skill` 必须通过 [SkillResolverProtocol Interface](./10-skill-resolver-protocol-spec.md#protocol-interface-定义) 寻址。Studio 的 subgraph asset panel 可以在同一失败码上渲染红色未注册入口并触发导入流程。
 
-## IO 严格 1:1 映射校验 (Strict Mapping)
+~~## IO 严格 1:1 映射校验 (Strict Mapping)~~ → ✅[已按普通节点 io 放宽反转迁入](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#243-io-切片与合并规则mvp1-放宽)
 
 父图 `SUBGRAPH.md io` 与子图 `GRAPH.md io` 必须做字段名 1:1 相等校验。这里的“相等”指 properties key set 完全一致, 不只是 required 字段覆盖。
 

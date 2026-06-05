@@ -3,11 +3,14 @@ status: FROZEN
 ---
 <!-- DO NOT EDIT: Golden principle contract baseline. Any divergence is strictly prohibited unless explicitly approved. -->
 
-# GRAPH.md Spec
+> 🔖 **本文 = mvp0 迁移源档案，非当前 SSOT。** GRAPH.md 基础元数据、phase DAG、inline 根 IO 与静态数据流语法已迁入 [`mvp1 skill-syntax`](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#22-graphmd-根语法契约)。mvp1 删除 mvp0 引用时，不得再把本文当权威。
+<!-- 核对进度:已迁 4 块 / 未迁 0 块 / 2026-06-05 -->
+
+~~# GRAPH.md Spec~~ → ✅[已迁入](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#22-graphmd-根语法契约)
 
 本文定义 graph_skill 根节点 `GRAPH.md` 的 Frontmatter 契约 / phase DAG 校验 / 根 IO Schema 入口。它依赖 [物理结构规范](./01-physical-layout.md), 并为 [运行时生命周期](./12-compile-runtime-flow-spec.md) 提供根拓扑。
 
-## 基础元数据字段 (Metadata)
+~~## 基础元数据字段 (Metadata)~~ → ✅[已迁入](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#221-基础元数据字段)
 
 GRAPH.md frontmatter 必含以下基础字段, 未知字段编译期 FATAL `[F-v3-graph-schema-unknown-field]`:
 
@@ -20,11 +23,11 @@ GRAPH.md frontmatter 必含以下基础字段, 未知字段编译期 FATAL `[F-v
 
 [错误码速查表](./11-error-code-spec.md) 覆盖根元数据缺失 / 版本不匹配 / 类型错误全集。
 
-## phases 注册与 body 拓扑校验 (Phase Registration & DAG)
+~~## phases 注册与 body 拓扑校验 (Phase Registration & DAG)~~ → ✅[已迁入](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#222-phases-注册--body-dag-拓扑)
 
 GRAPH.md 是双轨制: frontmatter `phases:` 只注册 phase 名字, body `<phase>` XML 才描述 DAG 拓扑。两者都必须存在, 且 phase name 必须一致。
 
-### phases 字段结构
+~~### phases 字段结构~~ → ✅[已迁入](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#222-phases-注册--body-dag-拓扑)
 
 ```yaml
 schema_version: "v0.3.0"
@@ -44,7 +47,7 @@ phases: [extract_chapter, segment_text, producer_review]
 | body `depends_on` | string | 是 | 第一个节点写 `input`; 其他节点引用已注册 phase; 多依赖用空格或逗号分隔 | `[F-v3-graph-depends-unknown]` |
 | body `output` 属性 | flag | 否 | 标记结束节点, 可多个; 未标记时以无下游节点推导输出候选 | `[F-v3-graph-output-phase-invalid]` |
 
-### DAG 校验算法 (编译期 Loader 必跑)
+~~### DAG 校验算法 (编译期 Loader 必跑)~~ → ✅[已迁入](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#222-phases-注册--body-dag-拓扑)
 
 1. **唯一性**: frontmatter `phases` 列表内 name 不能重复 — 重复 → `[F-v3-graph-phase-id-duplicate]`
 2. **双轨一致**: body `<phase>` name 集合必须等于 frontmatter `phases` 集合, 并等于 `phases/<name>/` 目录集合; 任一 body name 或注册名与物理目录不一致 → `[F-v3-graph-phase-name-mismatch]`
@@ -55,11 +58,11 @@ phases: [extract_chapter, segment_text, producer_review]
 
 [编译期校验流](./12-compile-runtime-flow-spec.md) 引用本节 DAG 构建与环检测结果。
 
-## 根 IO 契约 (Root IO Schema)
+~~## 根 IO 契约 (Root IO Schema)~~ → ✅[已迁入](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#223-根-io-契约)
 
 GRAPH.md frontmatter `io:` 必填, 含 `inputs` + `outputs` 两个子字段, 均为 JSON Schema 对象 (Draft 2020-12), **inline frontmatter, 禁止引用外部物理文件** (V0.3.0 退役 `io/inputs.json` / `io/outputs.json` 物理文件路径, 见 [物理布局](./01-physical-layout.md))。
 
-### io 字段结构
+~~### io 字段结构~~ → ✅[已迁入](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#223-根-io-契约)
 
 ```yaml
 io:
@@ -86,7 +89,7 @@ io:
 | `io_inputs_ref` (V2.1 旧) | — | 禁止 | — | V0.3.0 编译期 FATAL | `[F-v3-graph-io-physical-file-deprecated]` |
 | `io_outputs_ref` (V2.1 旧) | — | 禁止 | — | V0.3.0 编译期 FATAL | `[F-v3-graph-io-physical-file-deprecated]` |
 
-### 静态数据流校验 (A8 补全 — 编译期)
+~~### 静态数据流校验 (A8 补全 — 编译期)~~ → ✅[已迁入](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#224-静态数据流校验)
 
 Loader 把根 `io.inputs` 作为漏斗 schema 源 (Input Funnel, 见 [State and IO Contract MVP0 Alignment](../state-and-io-contract/mvp0-alignment.md)), 按 DAG 拓扑遍历每个 phase 的 `io.inputs` 必填字段, 校验它来自:
 
@@ -95,4 +98,4 @@ Loader 把根 `io.inputs` 作为漏斗 schema 源 (Input Funnel, 见 [State and 
 
 来源缺失 → `[F-v3-graph-dataflow-source-missing]` (含 phase_id + field_name + 候选 source_phases 列表)。
 
-[SUBGRAPH IO 严格映射](./04-subgraph-md-spec.md) 引用本节根 IO 契约 — 子图作为 phase 调用时, 子图根 io.inputs 跟父图 phase 声明的 io.inputs 必须 1:1 名字对齐。
+~~[SUBGRAPH IO 严格映射](./04-subgraph-md-spec.md) 引用本节根 IO 契约 — 子图作为 phase 调用时, 子图根 io.inputs 跟父图 phase 声明的 io.inputs 必须 1:1 名字对齐。~~ → ✅[已按 mvp1 子图 io 放宽反转](../../mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#243-io-切片与合并规则mvp1-放宽)

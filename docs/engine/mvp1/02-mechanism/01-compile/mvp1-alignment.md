@@ -13,7 +13,7 @@ aligns_with: ../../00-architecture-overview.md（§3 机制层 B·编译）
 compile = 把磁盘 skill 源码**读进来 → 校验 → 编译成可信 AST**(或聚合 `[F-v3-*]`)的引擎机制。它是 `compile-rules`(契约 A)的**实现**:规则定义"怎么判",本域是"判的代码"。**编译期不执行 action、不调业务 Agent**(可调 resolver 做 skill root 可达性检查)。
 
 ## 2. 数据流 / 机制
-读根 GRAPH.md → 解析 frontmatter/拓扑/phase 节点 → DAG 无环/孤岛 + IO 数据流 + mention 可达 + **purity 扫描** → 出 AST。机制细节(时序)权威在 mvp0 `12-compile-runtime-flow`,本域链接不复制。
+读根 GRAPH.md → 解析 frontmatter/拓扑/phase 节点 → DAG 无环/孤岛 + IO 数据流 + mention 可达 + **purity 扫描** → 出 AST。生命周期时序契约在 `compile-rules` §2.1(编译期校验流),本域是它的实现、链接不复制。
 - **purity 扫描器**(`purity.py`,AST walk 挡文件写)在此;**规则**("action 要纯"+ 码)在 `compile-rules`(双向引用)。
 - **`module_sandbox`**(`module_sandbox.py`,把 skill 本地 Python 导入隔离、不污染 sys.modules)是 loader 加载 skill 代码的机制,在此。
 - cache(源 hash 重编)、serializer(图序列化,供 studio `/graph/serialize`)。
@@ -39,9 +39,9 @@ compile = 把磁盘 skill 源码**读进来 → 校验 → 编译成可信 AST**
 engine 全权。
 
 ## 8. gaps / 待设计
-1. 成段化 loader/compiler 实现机制(现散在 mvp0 + 代码)。
+1. 成段化 loader/compiler 实现机制(现散在代码 + `compile-rules` §2 契约)。
 2. **死簇清理**(~1900 行 legacy `graph_builder`/`phase_executor`/`phase_nodes`,live 走 `assemble_graph`)+ 消 `md2json` 重复 → kiro 实施。
 3. 换 create_agent 节点内核后编译/序列化契约是否成立(断层#5)。
 
 ## 交叉引用(链接, 不复制)
-00-architecture-overview §3 · `01-contract/03-compile-rules`(规则,双向)· `02-resolver` · `03-assemble` · `data-contracts` · mvp0/`12-compile-runtime-flow`(FROZEN)
+00-architecture-overview §3 · `01-contract/03-compile-rules`(规则 + 生命周期契约 §2,双向)· `02-resolver` · `03-assemble` · `data-contracts`

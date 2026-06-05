@@ -54,7 +54,8 @@ governed_by: ../../development/design-doc-standards/（00 三轴 · 02 R8 设计
 
 1. **去 mvp0 FROZEN 残留**(R1 唯一真理前置):
    - ✅ **compile-rules 已自承载(2026-06-05,codex 执行 + Claude 核验)**:mvp0 11(93 错误码全表)+ 12(三段生命周期)已迁入 `03-compile-rules/mvp1-alignment.md`;`error_registry.py` 93 个 `doc_link` 全指 mvp1(mvp0=0);baseline 改对代码(`ERROR_REGISTRY`/`SkillLoader.compile_skill`/`scan_python_purity`)。mvp0 11/12 已划线留档(FROZEN→superseded 待 mvp0 全域处置)。
-   - ⏳ 剩余:`README.md` / `00-architecture-overview.md` 的 `ground_truth` + `01-compile`/`03-assemble` alignment 仍有指向 mvp0 `12` 的链接 → 下游收尾(重定向到 mvp1 compile-rules)。
+   - ✅ `01-compile`/`03-assemble` 的 mvp0 `12` SSOT 引用已重定向到 `compile-rules` §2(2026-06-05)。
+   - ⏳ 剩余:`README.md` / `00-architecture-overview.md` 的 `ground_truth`(整个 mvp0 skill-spec 基线)+ overview §3 的 mvp0 mentions → **gated on skill-syntax 迁移**(mvp0 02–10 语法 spec 仍真空未迁,ground_truth 暂时有效,迁完才好降级)。
 2. **可优先锁的单元**(决策 firm、争议已收敛):**U3**(action/tool 不统一)· **U4**(LOGIC 契约,文档侧)· **U1**(subgraph path 契约)。
 3. **阻塞锁的真空**(见 §3),清空后才能盖单元 `locked` → 文件级 `FROZEN`。
 

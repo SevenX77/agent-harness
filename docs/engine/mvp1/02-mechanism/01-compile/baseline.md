@@ -66,4 +66,4 @@ N/A。
 `compile_skill`(`compiler.py:41`)→ 缓存 miss → `SkillLoader.compile_skill`(`loader.py:146`)→ 校验流水线(拓扑 `:1138/1165`、IO `:528`、签名 `:808/836`、purity `:763`)。purity 细节看 `purity.py:44`。
 
 ## 交叉引用(链接, 不复制)
-mvp1-alignment(目标)· `01-contract/03-compile-rules`(规则+码,双向)· `02-resolver`(子图解析)· `03-assemble`(下游)· `data-contracts`(CompiledSkill/ErrorPayload)· mvp0/`12-compile-runtime-flow`(FROZEN 时序)
+mvp1-alignment(目标)· `01-contract/03-compile-rules`(规则+码+生命周期契约,双向)· `02-resolver`(子图解析)· `03-assemble`(下游)· `data-contracts`(CompiledSkill/ErrorPayload)

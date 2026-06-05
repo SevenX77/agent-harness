@@ -33,7 +33,7 @@ governed_by: ../../development/design-doc-standards/（00 三轴 · 02 R8 设计
 
 | # | 设计单元 | 源决策(轴①) | spans:模块 × 切面 → owner | binds_code(详情见 owner baseline) | unit-lock | 锁前置 / 真空 |
 |---|---|---|---|---|---|---|
-| **U1** | **子图(subgraph)** | studio graph-authoring;path 反转 2026-06-04 | 布局切面→`physical-layout`◆ · 语法切面→`skill-syntax`◆ · 解析切面→`02-resolver`◆ · 执行切面→`graph-exec`(SUBGRAPH 调用) | `graph_assembler.py:_build_subgraph_node:363` · resolver `SkillResolverProtocol`/`LocalWorkspaceResolver` | drafted | path 契约已定;但 `skill-syntax` 其余语法部件真空、`physical-layout` workspace 户型待迁 → 阻塞文件级 FROZEN |
+| **U1** | **子图(subgraph)** | studio graph-authoring;path 反转 2026-06-04 | 布局切面→`physical-layout`◆ · 语法切面→`skill-syntax`◆ · 解析切面→`02-resolver`◆ · 执行切面→`graph-exec`(SUBGRAPH 调用) | `graph_assembler.py:_build_subgraph_node:363` · resolver `SkillResolverProtocol`/`LocalWorkspaceResolver` | drafted | path 契约已定;`physical-layout` 布局(含 .workspace 户型)✅已成段;剩 `skill-syntax` 批3语法部件(resource/example/iterate/io)真空 → 阻塞文件级 FROZEN |
 | **U2** | **golden→workspace 反转** | `GOLDEN`(PM 2026-06-03 反转) | 布局切面(.workspace/golden)→`physical-layout`◆ · 评估切面→`06-golden-eval`◆ · 失效切面→`05-invalidation` · 编译规则切面→`compile-rules`(golden-stale 移出编译期) | `runner.py:_warn_on_stale_golden_hashes_sdk:127-160`(**退役**) | drafted | `06-golden-eval` 按反转改写中(⏳);`compile-rules` delta 待标 |
 | **U3** | **action/tool 不统一** | `ACTION-TOOL`→`TL2`(2026-06-04 拍板) | 执行切面(action)→`graph-exec`◆ · 工具切面(tool)→`04-tools`◆ | `actions.py:ActionDef:18`/`ActionRegistry:25` · `actions.py:ToolDef:49`/`ToolRegistry:60` | **可锁候选** | 决策 firm + 两域 status 已校正(2026-06-05);`04-tools` 数据流正文待成段 |
 | **U4** | **LOGIC 干净契约(纯返回/硬禁/反写)** | LE1-3(2026-06-04 三问拍板) | 执行切面→`graph-exec`◆(LE1-3) · 编译规则切面→`compile-rules`(purity 扩展、硬禁 run_skill/FS) · 语法切面→`skill-syntax`(解冻 `03-logic-md-spec`、契约反写) | `graph_assembler.py:_build_logic_node:325`(live drift=refactor-target) | drafted | 契约已定;live drift(可变 Context/run_skill/FS)待重构归 kiro;反写解冻待做 |
@@ -56,7 +56,8 @@ governed_by: ../../development/design-doc-standards/（00 三轴 · 02 R8 设计
    - ✅ **compile-rules 已自承载(2026-06-05,codex 执行 + Claude 核验)**:mvp0 11(93 错误码全表)+ 12(三段生命周期)已迁入 `03-compile-rules/mvp1-alignment.md`;`error_registry.py` 93 个 `doc_link` 全指 mvp1(mvp0=0);baseline 改对代码(`ERROR_REGISTRY`/`SkillLoader.compile_skill`/`scan_python_purity`)。mvp0 11/12 已划线留档(FROZEN→superseded 待 mvp0 全域处置)。
    - ✅ `01-compile`/`03-assemble` 的 mvp0 `12` SSOT 引用已重定向到 `compile-rules` §2(2026-06-05)。
    - ✅ **mvp0 skill-spec 残留已清(2026-06-05)**:02–07→skill-syntax、08/09→assemble/tools(留底 banner)、10→resolver、11/12→compile-rules;README/overview ground_truth 已把 skill-spec 降级为"已迁留底"。
-   - ⏳ 剩余 mvp0:`mvp0/workspace-spec` + 01 的 `.workspace` 户型 → 待迁 `01-physical-layout`(§3 真空);08/09 机制细节深度待 `03-assemble`/`04-tools` 成段纳入。
+   - ✅ **mvp0/workspace-spec 已迁(2026-06-05,codex 执行 + Claude 核验)**:§1–§5 .workspace 户型迁入 `01-physical-layout §2.2`(入口契约 / runs/<run_id> / golden / test_inputs / 废除项 / 不变式);baseline 对齐真实 engine 符号(`runner.py:run_skill/predict_skill/_validate_workspace_dir/_write_workflow_result_artifacts` · `emit.py:_TraceJsonlSink` · `result.py:RunResult`);mvp0 workspace-spec 全文划线留底。**至此 mvp0 整份契约全迁,可整域 deprecated。**
+   - ⏳ 剩余(非 mvp0 契约残留):08/09 机制细节深度待 `03-assemble`/`04-tools` 成段纳入。
 2. **可优先锁的单元**(决策 firm、争议已收敛):**U3**(action/tool 不统一)· **U4**(LOGIC 契约,文档侧)· **U1**(subgraph path 契约)。
 3. **阻塞锁的真空**(见 §3),清空后才能盖单元 `locked` → 文件级 `FROZEN`。
 
@@ -65,7 +66,7 @@ governed_by: ../../development/design-doc-standards/（00 三轴 · 02 R8 设计
 ### 🚨 真空(SSOT 缺 / 待迁,阻塞 FROZEN)
 - `07-runtime`:**❌ 完全没设计**——顶层入口契约(`run_skill`/`predict_skill`/bootstrap/public API 均 live,缺契约文档)。
 - `01-contract/02-skill-syntax`:子图 path + **GRAPH/LOGIC/SUBGRAPH(批1)+ AGENT/cognitive/mention(批2)语法已迁入(§2.1–§2.7,2026-06-05)**;剩 **resource/example 机制、iterate 声明、io 切片声明真空(批 3)**。(error_registry 68 个 `doc_link` 仍指 §2 概览,可细化到 §2.2–§2.7,批 3 完成后一并精化。)
-- `01-contract/01-physical-layout`:`.workspace` 户型字段正文待从旧文档迁入(§8)。
+- `01-contract/01-physical-layout`:✅ `.workspace` 户型字段正文已迁入(§2.2,2026-06-05);剩 `golden/<baseline_id>/cases/<case_id>.json` 内部 schema 待与 `06-golden-eval` 协同(§8 gap②)。
 - `05-run-inner` 多模块:`05-exit-control`/`06-golden-eval`/`07-subagent` 标 ⏳ 迁自 `_migration-src`,正文待成段。
 
 ### 🔁 重复风险(同事实两处,需确认退役)

@@ -3,8 +3,7 @@ doc: 00-architecture-overview
 status: drafted（2026-06-03 三层解耦:契约 A / 机制 B / API契约 C）
 owns: Graph Agent 完整模块地图 · 契约-机制-API契约 三层 · 编译-装配-运行 生命周期 · 关键决策 · 待设计清单
 ground_truth:
-  - packages/graph-agent（file:line 须复核）
-  - docs/engine/mvp0/workspace-spec（workspace 户型基线,待迁 physical-layout;skill-spec 契约已迁 mvp1)
+  - packages/graph-agent（file:line 须复核;唯一真理源——mvp0 整份契约 skill-spec + workspace-spec 已全迁 mvp1,仅留底)
 ---
 
 # Graph Agent MVP1 架构总览(设计北极星)
@@ -116,4 +115,4 @@ ground_truth:
 - **⏳ 成段化**:`01-compile`/`02-resolver`/`03-assemble` 实现机制;`invalidation`(golden-stale 移 eval);`06-golden-eval` 按 golden→workspace 改写。(`skill-syntax`/`compile-rules` 已自承载迁出 mvp0,见 `INDEX.md` §2)
 
 ## 交叉引用(链接, 不复制)
-README(章节去向)· 契约层 A(5)· 机制层 B(17)· API契约层 C(1)· mvp0/skill-spec(契约已迁 mvp1,留底)· mvp0/workspace-spec(workspace 户型待迁)· ../design/agent-loop-planA-create-agent-migration(迁移叙事)
+README(章节去向)· 契约层 A(5)· 机制层 B(17)· API契约层 C(1)· mvp0(skill-spec + workspace-spec 契约已全迁 mvp1,留底)· ../design/agent-loop-planA-create-agent-migration(迁移叙事)

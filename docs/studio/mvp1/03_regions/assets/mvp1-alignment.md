@@ -66,9 +66,9 @@ Source workflow basis: `01_workflows/01_init.md:16`, `01_workflows/02_authoring.
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| ASSETS-1 | 子图检测 | 对齐 `subgraph-path-inline-drilldown` 设计单元，保证 region 切面能被测试回扣 |
-| ASSETS-2 | 假数据 | 对齐 `subgraph-path-inline-drilldown` 设计单元，保证 region 切面能被测试回扣 |
-| ASSETS-3 | 加入工作区 | 对齐 `subgraph-path-inline-drilldown` 设计单元，保证 region 切面能被测试回扣 |
+| ASSETS-1 | 子图检测 | 单元 `subgraph-path-inline-drilldown`；**为什么**：assets 子图类目 ↔ 节点文件同步，子图 path 找不到→标红 |
+| ASSETS-2 | 假数据 | 单元 `subgraph-path-inline-drilldown`；**为什么**：现 AssetsPanel 读 `sub_skill_ref` 旧形态假数据，要按 D7 path 真实呈现 |
+| ASSETS-3 | 加入工作区 | 单元 `subgraph-path-inline-drilldown`；**为什么**：子图 path 解析不到 → OS 选文件夹导入工作区(R5+D7) |
 
 ## 6. 测试关键点
 1. 子图检测: baseline 现状为 `AssetsPanel` 仍读旧 `mode/target_skill/sub_skill_ref` ⚠️；目标为 按 engine MVP1 绝对 `path` 与 resolver 状态显示。

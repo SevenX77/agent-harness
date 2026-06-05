@@ -67,9 +67,9 @@ Source workflow basis: `01_workflows/01_init.md:8`, `01_workflows/01_init.md:16`
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| WELCOME-1 | 数据源 | 对齐 `workspace-open-folder-mru` 设计单元，保证 region 切面能被测试回扣 |
-| WELCOME-2 | import gate | 对齐 `workspace-open-folder-mru` 设计单元，保证 region 切面能被测试回扣 |
-| WELCOME-3 | Remove | 对齐 `workspace-open-folder-mru` 设计单元，保证 region 切面能被测试回扣 |
+| WELCOME-1 | 数据源 | 单元 `workspace-open-folder-mru`；**为什么**：Home 卡片只靠 MRU(路径+名)，去注册表聚合(D1/D11) |
+| WELCOME-2 | import gate | 单元 `workspace-open-folder-mru`；**为什么**：打开任意文件夹不卡校验(D2)，缺 GRAPH/SKILL 不硬拒 |
+| WELCOME-3 | Remove | 单元 `workspace-open-folder-mru`；**为什么**：抄 Cursor 不在 IDE 内删 skill，失效路径点击报错 + 自动移除(R1) |
 
 ## 6. 测试关键点
 1. 数据源: baseline 现状为 Welcome 读 `/skills` 注册表列表 ⚠️；目标为 Home 以本地文件夹/MRU 为主，不依赖注册表聚合。

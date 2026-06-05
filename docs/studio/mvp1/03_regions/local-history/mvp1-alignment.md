@@ -56,9 +56,9 @@ Source workflow basis: `01_workflows/06_eval.md:13`, `01_workflows/06_eval.md:24
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| LOCAL_HISTORY-1 | scope | 对齐 `local-history-snapshot` 设计单元，保证 region 切面能被测试回扣 |
-| LOCAL_HISTORY-2 | snapshot | 对齐 `local-history-snapshot` 设计单元，保证 region 切面能被测试回扣 |
-| LOCAL_HISTORY-3 | 写机制 | 对齐 `local-history-snapshot` 设计单元，保证 region 切面能被测试回扣 |
+| LOCAL_HISTORY-1 | scope | 单元 `local-history-snapshot`；**为什么**：Local History 只做 git snapshot 显示，RunDetail/BatchSummary 不归它(归 timeline/input) |
+| LOCAL_HISTORY-2 | snapshot | 单元 `local-history-snapshot`；**为什么**：成功 run 自动 commit 快照 + 手动快照列表，可选中 revert |
+| LOCAL_HISTORY-3 | 写机制 | 单元 `publish-artifact-autocommit`/`native-rust-writer`（引，非本单元）；**为什么**：快照写盘机制归发布/Rust 写者，Local History 只显示 |
 
 ## 6. 测试关键点
 1. scope: baseline 现状为 旧文留 RunDetail/BatchSummary PM confirmation ⚠️；目标为 Local History 只做 git snapshot；RunDetail/BatchSummary 归 Timeline/I/O。

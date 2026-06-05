@@ -84,9 +84,9 @@ Source workflow basis: `01_workflows/02_authoring.md:20`, `01_workflows/04_run-a
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| INPUT-1 | input 文件 | 对齐 `io-panel-artifacts-test-inputs` 设计单元，保证 region 切面能被测试回扣 |
-| INPUT-2 | Predict/Run 输入 | 对齐 `io-panel-artifacts-test-inputs` 设计单元，保证 region 切面能被测试回扣 |
-| INPUT-3 | test_inputs API | 对齐 `io-panel-artifacts-test-inputs` 设计单元，保证 region 切面能被测试回扣 |
+| INPUT-1 | input 文件 | 单元 `io-panel-artifacts-test-inputs`；**为什么**：input panel 改 i/o panel，每节点 io 设置 + 文件导入注入黑板 |
+| INPUT-2 | Predict/Run 输入 | 单元 `io-panel-artifacts-test-inputs`；**为什么**：predict/run 的输入选择落在 i/o 面板 |
+| INPUT-3 | test_inputs API | 单元 `io-panel-artifacts-test-inputs`；**为什么**：test_inputs CRUD 现 501，要接通批量测试输入 |
 
 ## 6. 测试关键点
 1. input 文件: baseline 现状为 固定假 `input/schema.json` 行 ⚠️；目标为 从 workspace/test-inputs 列出真实输入并可写回。

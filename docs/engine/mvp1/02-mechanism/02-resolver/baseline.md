@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/02-resolver
 doc: baseline
-status: drafted（现状对齐 pinned 代码 7cd4b9c；DI 接缝 = Protocol + LocalWorkspaceResolver,live）
+status: drafted（现状对齐 pinned 代码 7cd4b9c；DI 接缝 = Protocol + LocalWorkspaceResolver,live；⚠️ 现状=registry/id 寻址=被 mvp1 path 反转的旧模型）
 ---
 
 # 02-resolver — Baseline(当下代码实现逻辑)
@@ -45,8 +45,9 @@ loader 在编译 SUBGRAPH / AgentNode subagent 时,经 resolver 递归解析 chi
 ## baseline / alignment 差异(测试锚点)
 | 维度 | 现状(baseline) | mvp1 目标 |
 |---|---|---|
-| 协议 + 本地实现 + 缺失防护 | 已 live | 成段文档化(机制散在 mvp0+代码) |
-| DI 纪律 | 代码已显式注入 | 文档明确"不全局化"(RS2) |
+| 子图寻址 | `resolve_skill(skill_id)` 按 registry / `search_paths` 解析**逻辑 id** | 子图**绝对 `path`** 直接解析,删 registry/id/dotted-id/多命中(RS1) |
+| resolver 职责 | id→root 寻址 + 本地 search_paths 查找 | 只剩**边界校验 + 合法性校验**(RS2) |
+| DI 纪律 | 代码已显式注入 | 文档明确"不全局化"(RS4) |
 
 > **验**:缺 resolver → `[F-v3-resolver-missing]`;SUBGRAPH/subagent target 递归解析正确 + 循环引用防护;中间件不绕过 resolver 重新解析。
 
@@ -54,4 +55,4 @@ loader 在编译 SUBGRAPH / AgentNode subagent 时,经 resolver 递归解析 chi
 协议 `skill_resolver_protocol.py:33` → 缺失防护 `:80` → 本地实现 `local_workspace_resolver.py:15` → 消费方 loader(见 `01-compile`)。
 
 ## 交叉引用(链接, 不复制)
-mvp1-alignment(目标)· `01-compile`(用它递归解析)· `05-run-inner/07-subagent`(运行期对照,断层#7)· `data-contracts`(LocalWorkspaceResolver 导出)· mvp0/`10-skill-resolver-protocol`(FROZEN)
+mvp1-alignment(目标)· `01-compile`(用它递归解析)· `05-run-inner/07-subagent`(运行期对照,断层#7)· `data-contracts`(LocalWorkspaceResolver 导出)

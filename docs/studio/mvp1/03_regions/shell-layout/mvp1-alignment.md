@@ -31,7 +31,7 @@ Source workflow basis: `01_workflows/01_init.md:8`, `01_workflows/02_authoring.m
 - 机制: Header owns Home(Back Home)、Team dropdown、Copilot toggle。**子图下钻面包屑导航不在 Header**——改放画布左上角(见 `canvas` F4),Header 保持极简。
 - 决策: publish/release remains minimal and low-priority under Team for MVP1;**面包屑(subgraph 下钻导航)刻意移出 Header**(理由同 Settings overlay:防"跳出项目"感,见下方已决)(PM 2026-06-04)。
 - 原话/来源: `01_workflows/06_eval.md:17` places Release in Header Team; `01_workflows/06_eval.md:24` keeps publish minimal.
-- 测试: Back Home clears workspace; breadcrumb click pops nav stack; Release disabled/status works while publishing.
+- 测试: Back Home clears workspace; Release disabled/status works while publishing。（面包屑下钻导航测试归 `canvas` F4，不在 Header）
 - Status: live.
 - 归属: region `shell-layout`; capabilities `skill-workspace`, `publish`.
 

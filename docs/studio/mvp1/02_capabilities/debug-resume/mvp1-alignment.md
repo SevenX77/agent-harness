@@ -37,7 +37,7 @@ Source workflow basis: `01_workflows/05_debugging.md:8`, `01_workflows/05_debugg
 
 ### F3. HitL Question And Answer Injection
 
-- 机制: an agent request for human input pauses the run, shows a top question frame, and injects the answer before resume.
+- 机制: an agent request for human input pauses the run, shows a floating rich-text input **above the node's debug bar**(anchored to the node, no fixed canvas top frame), and injects the answer before resume.
 - 决策: HitL is a first-class debug pause flow, not just a log event.
 - 原话/来源: `01_workflows/05_debugging.md:17` and `01_workflows/05_debugging.md:18` define HitL question/answer.
 - 测试: clarification event opens the frame; answer resumes the graph and appears in subsequent trace context.

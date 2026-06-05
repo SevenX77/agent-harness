@@ -14,7 +14,7 @@
 | F1 | 失败节点亮红灯 + Error Message(Timeline 停在错误节点) | B 视觉 | placeholder |
 | F2 | **节点级 [Resume] 按钮**(节点上;改完 prompt/代码点它,用 checkpoint 已有数据从该节点精准续跑,上游不重跑) | B 核心 | backend-only(端点 501) |
 | F3 | **脏状态失效**:改上游节点/拓扑/输出 schema → 受影响下游节点 [Resume] 自动置灰,只有上游 checkpoint 有效的节点可 Resume | B | target-design |
-| F4 | 场景A HitL:agent 调请求人类输入 → run 暂停 → **顶部弹问题框**(文本/选项)→ PM 输入 | A | target-design |
+| F4 | 场景A HitL:agent 调请求人类输入 → run 暂停 → **节点 debug bar 上方悬浮富文本输入框**(锚定节点,非固定顶栏)→ PM 输入 | A | target-design |
 | F5 | 场景A 注入答案续跑:答完点 [Resume] → 答案作为消息注入,Graph 续跑 | A | backend-only |
 | F6 | 场景C 篡改 Context:点边 dot → **复用 Monaco 编辑器(切可写)**展开上轮真实 Context → 手改 JSON → 存 | C | target-design |
 | F7 | 场景C 用伪造数据续跑:篡改保存后点下游 [Resume] → 拿伪造 JSON 续跑下游 | C | backend-only |

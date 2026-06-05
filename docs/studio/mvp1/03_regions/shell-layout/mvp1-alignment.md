@@ -70,9 +70,9 @@ Source workflow basis: `01_workflows/01_init.md:8`, `01_workflows/02_authoring.m
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| SHELL_LAYOUT-1 | runtime gate | 对齐 `shell-runtime-gate` 设计单元，保证 region 切面能被测试回扣 |
-| SHELL_LAYOUT-2 | copilot slot | 对齐 `shell-runtime-gate` 设计单元，保证 region 切面能被测试回扣 |
-| SHELL_LAYOUT-3 | settings overlay | 对齐 `shell-runtime-gate` 设计单元，保证 region 切面能被测试回扣 |
+| SHELL_LAYOUT-1 | runtime gate | 单元 `shell-runtime-gate`；**为什么**：RuntimeGate 现可全屏阻塞，目标壳即时渲染、sidecar 状态局部(D10) |
+| SHELL_LAYOUT-2 | copilot slot | 单元 `shell-runtime-gate`；**为什么**：下钻时 CopilotPanel 用 currentSkillId，slots 不丢状态 |
+| SHELL_LAYOUT-3 | settings overlay | 单元 `shell-runtime-gate`；**为什么**：Settings 中央 overlay 不卸载 copilot、不阻塞壳，防"跳出项目"感 |
 
 ## 6. 测试关键点
 1. runtime gate: baseline 现状为 RuntimeGate 全屏 loading/error gate ⚠️；目标为 shell 即时渲染，sidecar 状态局部呈现。

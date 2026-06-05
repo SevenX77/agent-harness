@@ -65,9 +65,9 @@ Source workflow basis: `01_workflows/03_compile.md:10`, `01_workflows/04_run-and
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| CENTER_ACTION_BAR-1 | Predict/Run wiring | 对齐 `compile-stage-gate` 设计单元，保证 region 切面能被测试回扣 |
-| CENTER_ACTION_BAR-2 | compile drawer | 对齐 `compile-stage-gate` 设计单元，保证 region 切面能被测试回扣 |
-| CENTER_ACTION_BAR-3 | gate | 对齐 `compile-stage-gate` 设计单元，保证 region 切面能被测试回扣 |
+| CENTER_ACTION_BAR-1 | Predict/Run wiring | 单元 `predict-execution`（+run 消费）；**为什么**：中心条 Predict/Run 按钮要接真实 onPredict/onRun，非 console 桩 |
+| CENTER_ACTION_BAR-2 | compile drawer | 单元 `compile-stage-gate`；**为什么**：Compile 按钮触发编译并自动弹 drawer(呈现归 compile-lint) |
+| CENTER_ACTION_BAR-3 | gate | 单元 `compile-stage-gate`；**为什么**：compile→predict→run 逐级门控，predict-pass 解锁 Run |
 
 ## 6. 测试关键点
 1. Predict/Run wiring: baseline 现状为 `onPredict/onRun` 只 `console.info` ⚠️；目标为 Predict/Run 真发请求并驱动状态。

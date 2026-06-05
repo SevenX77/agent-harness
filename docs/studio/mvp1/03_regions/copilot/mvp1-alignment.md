@@ -78,9 +78,9 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:433`, `01_workflows/
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| COPILOT-1 | session UI | 对齐 `copilot-session-persistence` 设计单元，保证 region 切面能被测试回扣 |
-| COPILOT-2 | analysis bar | 对齐 `copilot-session-persistence` 设计单元，保证 region 切面能被测试回扣 |
-| COPILOT-3 | 下钻 skillId | 对齐 `copilot-session-persistence` 设计单元，保证 region 切面能被测试回扣 |
+| COPILOT-1 | session UI | 单元 `copilot-session-persistence`；**为什么**：退出再进对话一模一样，session 渲染基于持久化(D8) |
+| COPILOT-2 | analysis bar | 单元 `copilot-session-persistence`；**为什么**：copilot 分析 bar 是 golden/诊断入口，挂在会话流里 |
+| COPILOT-3 | 下钻 skillId | 单元 `copilot-session-persistence`；**为什么**：下钻子图时 copilot 用 currentSkillId、cwd 含子图 path，不丢上下文 |
 
 ## 6. 测试关键点
 1. session UI: baseline 现状为 内存态 / skill 切换 reset 风险 ⚠️；目标为 顶部多 session tab 持久化并恢复。

@@ -64,9 +64,9 @@ Source workflow basis: `01_workflows/02_authoring.md:28`, `01_workflows/03_compi
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| PROPERTIES-1 | 字段表单 | 对齐 `phase-field-whitelist` 设计单元，保证 region 切面能被测试回扣 |
-| PROPERTIES-2 | edge trace | 对齐 `phase-field-whitelist` 设计单元，保证 region 切面能被测试回扣 |
-| PROPERTIES-3 | golden scope | 对齐 `phase-field-whitelist` 设计单元，保证 region 切面能被测试回扣 |
+| PROPERTIES-1 | 字段表单 | 单元 `phase-field-whitelist`；**为什么**：字段权威归 engine skill-syntax，Properties 按节点类型白名单显示 |
+| PROPERTIES-2 | edge trace | 单元 `trace-dot-blackboard`（消费）；**为什么**：选中 edge 的 raw JSON dump 要换成 dot/blackboard 结构化 inspector |
+| PROPERTIES-3 | golden scope | 单元 `golden-per-agent-node`（负向边界）；**为什么**：golden 完全不在 Properties，入口归 I/O、diff 归 editor |
 
 ## 6. 测试关键点
 1. 字段表单: baseline 现状为 旧 Mode/Python/SystemPrompt/ExitContract/TargetSkill ⚠️；目标为 字段白名单按 engine MVP1 schema。

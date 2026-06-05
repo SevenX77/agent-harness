@@ -66,9 +66,9 @@ Source workflow basis: `01_workflows/06_eval.md:1`, `01_workflows/06_eval.md:13`
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| PUBLISH-1 | 发布口径 | 对齐 `publish-artifact-autocommit` 设计单元，保证实现与测试可回扣 |
-| PUBLISH-2 | 打包写者 | 对齐 `publish-artifact-autocommit` 设计单元，保证实现与测试可回扣 |
-| PUBLISH-3 | autocommit | 对齐 `publish-artifact-autocommit` 设计单元，保证实现与测试可回扣 |
+| PUBLISH-1 | 发布口径 | 单元 `publish-artifact-autocommit`；**为什么**：发布≠git push;本地 git autocommit 存档 + Artifact Registry 最小发布(PM 2026-06-04 低优先) |
+| PUBLISH-2 | 打包写者 | 单元 `publish-artifact-autocommit`；**为什么**：publish package 打包/写盘边界收口到 native-fs(Rust)，非 Python zip |
+| PUBLISH-3 | autocommit | 单元 `publish-artifact-autocommit`；**为什么**：成功 run 自动 commit 本地存档，作恢复安全网 |
 
 ## 6. 测试关键点
 1. 发布口径: baseline 现状为 发布为 Artifact Registry zip；非 git push；目标为 UI 不再把 Publish 等同 Gitea push。

@@ -76,10 +76,10 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:42`, `01_workflows/04_
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
-| RUN_EXECUTION-1 | Run 入口 | 对齐 `run-execution-node-status` 设计单元，保证实现与测试可回扣 |
-| RUN_EXECUTION-2 | 节点态 | 对齐 `run-execution-node-status` 设计单元，保证实现与测试可回扣 |
-| RUN_EXECUTION-3 | batch | 对齐 `run-execution-node-status` 设计单元，保证实现与测试可回扣 |
-| RUN_EXECUTION-4 | golden seed | 对齐 `run-execution-node-status` 设计单元，保证实现与测试可回扣 |
+| RUN_EXECUTION-1 | Run 入口 | 单元 `run-execution-node-status`；**为什么**：onRun 现仅日志，要真调 startRun 带选中 input/settings |
+| RUN_EXECUTION-2 | 节点态 | 单元 `run-execution-node-status`；**为什么**：run events 经 state-engine 投到节点灯/边，非画布默认假态 |
+| RUN_EXECUTION-3 | batch | 单元 `run-execution-node-status`；**为什么**：后端 batch 与 hook 已存在但未挂 Workspace，批量/循环入口要可用 |
+| RUN_EXECUTION-4 | golden seed | 单元 `golden-per-agent-node`；**为什么**：run 真实输出可做 golden 默认种子，predict 假数据不可(409) |
 
 ## 6. 测试关键点
 1. Run 入口: baseline 现状为 `onRun` 只日志 ⚠️；目标为 Run 真调用 `startRun`，携带选中 input/settings。

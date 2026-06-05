@@ -95,7 +95,7 @@ Copilot 用与 LLM Roles 同构的角色模型(`role_kind=copilot`),但运行时
 
 - **平台**:本节点的数据面全部由 `gateway`(Python sidecar)提供 —— provider / role / credential / model 解析 + copilot chat facade;经 storage seam 抽象、预留 `user_id`。OS 文件夹选择器走 native(Rust)。
 - **下游硬依赖**:
-  - **[03_prediction](./03_prediction.md) / [04_execution](./04_execution.md)**:role 必须先在此配好并解析成 route,predict / run 才能调模型。
+  - **[04 运行与验收(predict/run)](./04_run-and-verify.md)**:role 必须先在此配好并解析成 route,predict / run 才能调模型。
   - **[06_eval](./06_eval.md)(publish)**:Publish 推 Gitea 要 General 的 Gitea 主机;产物落盘路径(artifacts 默认落 `.workspace/artifacts`,见 G3 / FROZEN-2 改动)与 General 的目录配置相关。
   - **Copilot(贯穿全程)**:右侧 copilot 自始至终依赖 copilot 角色 + 密钥配置。
 - **上游**:无强制上游 —— settings 可在任意时刻经 Toolbar 进入(center overlay);逻辑上它是被其余节点依赖的前置底座,而非串在主旅程里的一步。

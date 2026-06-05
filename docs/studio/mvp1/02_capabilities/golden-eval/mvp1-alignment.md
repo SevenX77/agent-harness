@@ -76,7 +76,7 @@ Source workflow basis: `01_workflows/04_run-and-verify.md:118`, `01_workflows/04
 - Storage/UI target: golden settings and JSON files live with i/o output configuration.
 - Predict: agent nodes mock from placeholder or golden automatically.
 - Run: actual output compares against golden after real execution.
-- Region links: `input`, `timeline`, `properties`, `canvas`, `copilot`.
+- Region links: `input`, `timeline`, `canvas`, `copilot`.（golden **不在** `properties`，见 F5）
 - Platform links: `engine`, `native-fs`, `gateway` through copilot design.
 
 ## 4. 设计决策基础（PM 原话）

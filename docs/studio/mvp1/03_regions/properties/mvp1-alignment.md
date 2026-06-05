@@ -54,9 +54,9 @@ Source workflow basis: `01_workflows/02_authoring.md:28`, `01_workflows/03_compi
 - 归属: region `input`(I/O); region `editor`; capability `golden-eval`。
 
 ## 3. 接口契约
-- Inputs: selected node/edge, skill detail, diagnostics, optional golden diff summary.
+- Inputs: selected node/edge, skill detail, diagnostics.（golden **不在** Properties，见 F4/§4）
 - Outputs: phase file save, file open requests, panel focus changes.
-- Capability links: `phase-editing`, `compile-lint`, `trace-observability`, `golden-eval`.
+- Capability links: `phase-editing`, `compile-lint`, `trace-observability`, `golden-eval`（**负向边界**：golden 不在 Properties）。
 
 ## 4. 设计决策基础（PM 原话）
 - **golden 完全不在 Properties**:设置/文件/摘要归 **I/O output**,完整 diff 在**编辑器分屏(Monaco diff)**。Properties 只剩 frontmatter 属性 + 字段级编译标记。

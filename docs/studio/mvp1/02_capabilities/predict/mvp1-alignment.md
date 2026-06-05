@@ -48,7 +48,7 @@ aligns_with: 01_workflows/04_run-and-verify.md（E. predict）
 capability `predict`（owner）；region `input`（输入选择）/ `center-action-bar`（触发）；platform `engine`（`predict_skill`）。consume：`compile-lint`（gate）、`golden-eval`（mock/guard）。
 
 ## 8. gaps / 报警
-- 🚨 前端 predict 主入口 + predict-pass 置位未实现（`Workspace.tsx:onPredict` 桩，见 baseline 测试锚点）；**接线 / 签名实施归 kiro**。
+- 🚨 前端 predict 主入口 + predict-pass 置位未实现（`Workspace.tsx:onPredict` 桩，见 baseline 测试锚点）；**接线 / 签名 = 实施待办**（实施任务，非当前设计 SSOT）。
 - F1 输入来源待接 i/o 面板（`io-panel-artifacts-test-inputs`）。
 
 ## 交叉引用（链接, 不复制）

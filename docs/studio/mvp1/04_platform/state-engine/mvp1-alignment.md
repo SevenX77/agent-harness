@@ -4,7 +4,7 @@ doc: mvp1-alignment
 status: drafted（状态分散在 Workspace/sessionStorage/SWR/copilotStore/settings hooks；run stream 与 global events 存在但未形成单一 state-engine/WS bridge ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [shell-runtime-gate, compile-stage-gate, run-execution-node-status, trace-dot-blackboard, settings-six-state-provider-health]
-aligns_with: docs/studio/_reorg/alignment-notes.md（D10）· 01_workflows/03_compile.md · 01_workflows/04_run-and-verify.md
+aligns_with: 01_workflows/01_init.md（D10 决策留底）· 01_workflows/03_compile.md · 01_workflows/04_run-and-verify.md
 ---
 
 # state-engine — MVP1 Alignment
@@ -57,7 +57,7 @@ Source workflow basis: `01_workflows/03_compile.md:20`, `01_workflows/04_run-and
 
 - 机制: represent sidecar readiness per feature rather than block the whole app.
 - 决策: shell/file surfaces should render even when backend-dependent functions fail.
-- 原话/来源: `_reorg/alignment-notes.md` D10(non-fullscreen sidecar gate)。
+- 原话/来源: `04_platform/native-fs` §4 D10 + `01_workflows/01_init.md` §3(non-fullscreen sidecar gate)。
 - 测试: sidecar down leaves Home/editor available; compile/copilot/settings show scoped error.
 - Status: target-design/audit.
 - 归属: platform `state-engine`; region `shell-layout`.

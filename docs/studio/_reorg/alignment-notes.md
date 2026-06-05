@@ -1,3 +1,5 @@
+> **[SUPERSEDED 2026-06-05]** 本文 PM 决策已逐条固化进 `docs/studio/mvp1/` 的 workflow 节点 + 能力/平台文档(原话就近 inline;finality 经 Gemini+codex 双审,PM 原话/🔒 不被更新的派生文档自动覆盖)。**mvp1 全树零引用本文**。固化裁决日志见 [`docs/design/studio-mvp1-reorg-consolidation.md`](../../design/studio-mvp1-reorg-consolidation.md)。**本文不再作 SSOT**;待 `_reorg/` 内部依赖(workflow-action-catalog / settings-action-catalog / handoff 等)一并退役后可 `deprecated` 删。
+
 # Studio 文档重组 — 逐节点对齐笔记
 
 > PM 对 AI 推导的 ~120 动作逐批对齐的**决策记录**, 原话留底(铁律: 不用提炼版替代原文)。

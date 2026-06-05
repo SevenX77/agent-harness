@@ -36,5 +36,5 @@
 - [Resume] 锚在节点上(非全局)。
 
 ## 引擎需求
-节点级 checkpoint + checkpoint 失效追踪 + HitL 注入续跑 + 篡改续跑 → 引擎契约 [`03-checkpoint`](../../../engine/mvp1/02-mechanism/04-run-outer/03-checkpoint/mvp1-alignment.md)(`_reorg/engine-prompt-trace-compile-debug.md` 仅早期需求草稿、非 SSOT)。
+节点级 checkpoint + checkpoint 失效追踪 + HitL 注入续跑 + 篡改续跑 → 引擎契约 [`03-checkpoint`](../../../engine/mvp1/02-mechanism/04-run-outer/03-checkpoint/mvp1-alignment.md)。
 > ⚠️ debug checkpoint 与 batch/loop 的 loop 状态机同源 → 引擎须设计**统一状态机**。

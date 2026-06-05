@@ -1,7 +1,7 @@
 # Studio docs — MVP1 / 新设计(重设计目标)
 
 > **新设计文档**(MVP1 重设计目标)的三维体系。旧设计(MVP0 当前实现)baseline 在 [`../mvp0/`](../mvp0/)。
-> 治理总纲 [`../INDEX.md`](../INDEX.md);**设计权威(最新)** = `01_workflows/` 走查 + [`../_reorg/workflow-action-catalog.md`](../_reorg/workflow-action-catalog.md) + `../_reorg/alignment-notes.md` + `01_workflows/00_settings-ux-spec.md`。(`.kiro/specs/studio-*` 仅**历史参考**、不作 SSOT。)
+> 治理总纲 [`../INDEX.md`](../INDEX.md);**设计权威(最新)** = `01_workflows/` 走查(决策 + 原话就近留底)+ `01_workflows/00_settings-ux-spec.md`。(`.kiro/specs/studio-*` 仅**历史参考**、不作 SSOT。)
 > 设计单元索引(轴③ · R8 枢纽)= [`DESIGN_UNITS_INDEX.md`](./DESIGN_UNITS_INDEX.md)。
 
 - `01_workflows/` — ① 用户旅程脊柱(7 节点, 含 `00_settings` 运行底座)。

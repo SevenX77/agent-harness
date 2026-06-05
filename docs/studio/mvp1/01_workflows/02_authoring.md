@@ -2,8 +2,8 @@
 
 > Tier: workflow · Owns: 把业务逻辑装配成严谨 graph_skill 的旅程(宏观契约 / 中观拓扑 / 微观节点编辑 / 实时 compile 门控)· 能力 `graph-authoring` `phase-editing` `file-editing` `compile-lint` `conflict-overwrite` · 区域 `canvas` `editor` `input(→i/o panel)` `properties` `center-action-bar` · 平台 `native-fs`(Rust 写) / `engine`(compile)
 > Status: ✅ PM 已确认(批次2 + Half A + G1–G9 + R3–R5;Half B 现在设计)
-> 设计权威(最新): 本页 workflow 走查 + **字段/格式 SSOT** = [`engine mvp1 skill-syntax`](../../../engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md) + 决策 D7/G2/G3/D12/REQ-10。原话依据: [`_reorg/alignment-notes.md` 批次2 + Half A + G1-G9](../../_reorg/alignment-notes.md)。字段唯一真相源 = 能力文档 [`phase-editing`](../02_capabilities/phase-editing/mvp1-alignment.md)(只链接不复制)。(`.kiro/specs/studio-*`、旧 mvp0 FROZEN 仅历史参考、**不作 SSOT**。)
-> 本文 = 该节点**最终设计**(atom action 决策 + file:line 依据);迁移源 = `_reorg/workflow-action-catalog.md` §02_authoring。
+> 设计权威(最新): 本页 workflow 走查 + **字段/格式 SSOT** = [`engine mvp1 skill-syntax`](../../../engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md) + 决策 D7/G2/G3/D12/REQ-10。决策原话就近留底于 §3;canvas/子图细化(T5/T6/G4/G7)见 `canvas`/`graph-authoring` 能力文档。字段唯一真相源 = 能力文档 [`phase-editing`](../02_capabilities/phase-editing/mvp1-alignment.md)(只链接不复制)。(`.kiro/specs/studio-*`、旧 mvp0 FROZEN 仅历史参考、**不作 SSOT**。)
+> 本文 = 该节点**最终设计**(atom action 决策 + file:line 依据)。
 
 ## 1. 用户旅程目标
 把脑子里的业务逻辑转成**严谨可编译的 graph_skill**:宏观全局契约(GRAPH.md `name`/`schema_version`/`llm_role`/`description`/`phases`/`io`,**无 `type` 字段**)→ 中观拓扑(连线/断连/新建 phase/子图 inline 展开+下钻)→ 微观节点编辑(Properties 白名单字段 + L3 步骤)→ 实时 compile/lint 门控(绿灯才解锁 Predict)。
@@ -11,7 +11,7 @@
 > ⚠️ **节点类型 = 文件名,非 `mode`/`type` 字段**(FROZEN):Agent=`SKILL.md` / Logic=`LOGIC.md` / Subgraph=`SUBGRAPH.md`;"新建节点选类型"=选建哪个文件。旧 UX 散文里的 `type(simple/graph)` / `<system_prompt>` / `<user_prompt_builder>` / `max_retries`/`max_nudges` 等**全部违 FROZEN**,已废。
 
 ## 2. atom action 决策表
-> ⚠️ 跨切定性:**读取层已 v030-aware**(`CURRENT_SCHEMA_VERSION='v0.3.0'`),但**写入/脚手架/子图渲染层多为 V2.x stale-code**(违 FROZEN)。详尽 M/T/V 动作及证据见 alignment-notes 批次2 Half A。
+> ⚠️ 跨切定性:**读取层已 v030-aware**(`CURRENT_SCHEMA_VERSION='v0.3.0'`),但**写入/脚手架/子图渲染层多为 V2.x stale-code**(违 FROZEN)。详尽 M/T/V 动作及证据见 §2 决策表 + `phase-editing`/`graph-authoring` 能力文档。
 
 | 动作 | 最终决策 / status | 能力·区域 | 依据(file:line)+ FROZEN |
 |---|---|---|---|
@@ -32,7 +32,7 @@
 | Predict 门控解锁(Compile 绿灯→解锁 Predict) | **门控 live;点击进试飞=桩**(归 04_run-and-verify) | compile-lint · center-action-bar | `center-action-bar.tsx:31-50,76-85` |
 | 顺序覆盖冲突保存(overlay Allow/Cancel) | **live** | conflict-overwrite · canvas | `canvas-authoring.ts:237-337`/`GraphCanvas.tsx:105-119` |
 | [失败退路] 写失败回滚 / 拒写 / YAML 坏 error+Open file / 环全屏阻断 | **live** | graph-authoring · canvas | `GraphCanvas.tsx:354-360,217-226,381-387`/`phase-frontmatter.ts:46-72` |
-| (R5)assets subgraph 类目 ↔ 节点文件同步;子图 path 找不到→标红→OS 选文件夹导入工作区 | **target-design**(R5 + D7) | graph-authoring · canvas/assets | alignment-notes R5;D7 path 解析 |
+| (R5)assets subgraph 类目 ↔ 节点文件同步;子图 path 找不到→标红→OS 选文件夹导入工作区 | **target-design**(R5 + D7) | graph-authoring · canvas/assets | R5(子图同步,PM 已确认);D7 path 解析 |
 
 ## 3. 设计决策基础(原话依据,锁定决策)
 - **D7 子图按 path** > "subgraph.md里面写path, 直接解析就好了, 随便放哪里…注册在agent phase里的子图也一样写path";`SkillResolverProtocol.resolve` 退化为读 path,无注册表。

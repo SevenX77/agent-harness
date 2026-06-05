@@ -1,7 +1,7 @@
 # Node 0: 设置与配置 (Settings & Configuration)
 
 > Tier: workflow · 能力 `studio-settings` · 区域 `settings` · 平台 `gateway`(Python sidecar)
-> 设计源(最新权威): 本页 workflow 走查 + [`00_settings-ux-spec.md`](./00_settings-ux-spec.md)(PM 口述权威) + `_reorg/settings-action-catalog.md` + gateway 模块设计 [`docs/graph-agent-gateway/mvp1/`](../../../graph-agent-gateway/mvp1/) + 锁定决策 D8 / D10 / §11 / G3。(`.kiro/specs/studio-*` 仅历史参考,**不作 SSOT**。)
+> 设计源(最新权威): 本页 workflow 走查 + [`00_settings-ux-spec.md`](./00_settings-ux-spec.md)(PM 口述权威) + gateway 模块设计 [`docs/graph-agent-gateway/mvp1/`](../../../graph-agent-gateway/mvp1/) + 锁定决策 D8 / D10 / §11 / G3。(`.kiro/specs/studio-*` 仅历史参考,**不作 SSOT**。)
 > 角色: **运行底座** —— 被 predict / run / publish / copilot 硬依赖的前置配置节点,不串在主旅程里,而是托住主旅程。
 
 ## 1. 业务目标

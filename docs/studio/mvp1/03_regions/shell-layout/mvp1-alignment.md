@@ -4,7 +4,7 @@ doc: mvp1-alignment
 status: drafted（Workspace shell live；RuntimeGate 仍可全屏 gate，copilot prop 用 outer skillId 有下钻风险 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [shell-runtime-gate]
-aligns_with: docs/studio/_reorg/alignment-notes.md（D10 eager sidecar）· 01_workflows/00_settings-ux-spec.md（settings overlay）
+aligns_with: 01_workflows/01_init.md（D10 eager sidecar 决策留底）· 01_workflows/00_settings-ux-spec.md（settings overlay）
 ---
 
 # shell-layout — MVP1 Alignment
@@ -21,7 +21,7 @@ Source workflow basis: `01_workflows/01_init.md:8`, `01_workflows/02_authoring.m
 
 - 机制: keep Header/Toolbar/frame stable while the center swaps Home, Canvas, Editor, or Settings.
 - 决策: Studio is an app shell, not a landing page; sidecar failures should be scoped to dependent functions.
-- 原话/来源: `01_workflows/01_init.md:35` locks IDE/workspace model; `_reorg/alignment-notes.md` D10 records non-fullscreen sidecar gate behavior.
+- 原话/来源: `01_workflows/01_init.md:35` locks IDE/workspace model; `01_workflows/01_init.md` §3 D10 records non-fullscreen sidecar gate behavior.
 - 测试: app shell renders before compile/copilot sidecar functions are ready; feature-specific errors stay local.
 - Status: mostly live, RuntimeGate still needs audit.
 - 归属: region `shell-layout`; platform `state-engine`.

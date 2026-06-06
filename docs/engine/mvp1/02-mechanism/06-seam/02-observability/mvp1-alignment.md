@@ -44,6 +44,11 @@ engine 全权;trace 被 studio trace-inspector 消费(前端挂载归 studio)。
 1. **V4 trace 增补(目标事件,impl 归 kiro)**:
    - **微观拓扑事件**:agent 节点内子事件带 `parent_node_id`(=该 agent phase_id)+ `node_type`——TracingMiddleware 的 `before_model`/`after_model`/`wrap_tool_call` 天然产出,只需把微观事件 schema 定义进 trace 契约(无引擎改动;源 06 #4 + studio canvas REQ-13)。
    - **3 个边操作事件**(`BlackboardReduceEvent` 输出并入黑板 / `InputDispatchEvent` 输入按 io.inputs 切片喂节点·**并联各一条** / `InputFileInjectedEvent` 文件注入)+ 已有 `ArtifactSavedEvent`/`CompactionEvent` 同归"边操作"族,前端点 dot 按 `from_phase`/`to_phase`(edge)聚合该族 + 黑板快照(OB4,机制落点 `graph-exec`,双向;源 11-io E5)。
+     - **字段草案(studio 消费契约,2026-06-06 定;impl 归 kiro 时按此建类)** —— 三者共享(继承 `_EventBase` 的 `event_type`/`run_id`/`thread_id`/`seq`/`ts`)+ edge 聚合字段:
+       - **共有**:`from_phase: str | None`(源节点 id;图入口为 `None`)· `to_phase: str`(目标节点 id)· `changed_keys: list[str]`(本次操作触及的黑板 key)· `blackboard_snapshot: dict[str, Any]`(操作后黑板快照,供 OB5 前端按 phase 边界近似 reducer-diff)。事件类型本身 = 操作类型(判别字段 `event_type`,无需另设 `op`)。
+       - **`BlackboardReduceEvent` 专有**:`reducer: str`(reducer 名/策略,取自 `iterate.accumulate.merge` 声明,如 `merge`/`append`/`override`;**声明式元数据,非引擎算的 authoritative diff**——逐 reducer 前后态 diff = 前端近似 OB5)。
+       - **`InputDispatchEvent` 专有**:`dispatched_keys: list[str]`(按 `io.inputs` 切给该节点的 key)· `branch_index: int | None`(并联/iterate 扇出时的分支/item 序号,让前端把并联分发画成各自的边;非并联为 `None`)。
+       - **`InputFileInjectedEvent` 专有**:`file_ref: str`(注入文件路径/ref)· `target_field: str`(文件内容注入到的黑板字段名)。
    - **Prompt 三视图 = 已满足**(2026-06-06 核实):`PromptCapturedEvent`(`events.py:217`)已同时带 `template_source`(模板)+ `variables`(喂入变量)+ `resolved_prompt`(渲染后)三视图——无需补(06 #7 待办关闭)。
 2. **subagent lifecycle 事件(A2)**:builtin subagent 已有 `BuiltinSubagentEnter/Exit/FallbackEvent`(`events.py:178/188/198`);**用户 subagent** 的 lifecycle 事件待补(与 `07-subagent` 协同,impl 归 kiro)。
 3. **reducer 前后态 diff(REQ-7)= 前端近似(OB5)**:OB4 边操作事件已带黑板快照,前端按 phase 边界(`PhaseStart`/`PhaseEnd` + 边操作族)近似"哪个 reducer 改了哪个 key";engine-authoritative 逐 reducer diff 事件 = deferred enhancement,**不在 mvp1 engine 范围**(PM 2026-06-06 选 A)。

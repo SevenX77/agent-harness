@@ -64,6 +64,7 @@ aligns_with: ../00-architecture-overview.md（§4 API契约层 C）
 ### 3.2 Iterate / Resume API 面(SSOT = `02-iterate` / `03-checkpoint`)
 - **iterate 配置**(目标):节点/图/子图声明 `iterate:{mode,over,item_var,range,concurrency,accumulate}`(语法 `skill-syntax §2.9`、执行 `02-iterate`);现状节点级 batch live,loop/图级/range 目标。
 - **resume**(目标):`POST .../runs/{run_id}/resume` + `ResumeReq{context_overrides}`;**现 501 桩**(`runs.py:69`,`ResumeReq` 零消费)。寻址契约(C2 闭环):`resume_run(run_id, from=<node_id>|<node_id>:<iter>, context_overrides?)` → LangGraph `get_state_history` 选 checkpoint(loop 轮用 `checkpoint_ns`)→ `update_state` 套 overrides / 注 ToolMessage(HitL)→ 带该 checkpoint 重 invoke(归 `03-checkpoint`)。
+  - **HITL 注入入参形态(2026-06-06 定,studio 消费契约)**:HITL 续跑 = 给中断点 pending tool call(`ask_clarification`/`interrupt()`,`cognitive_flow.py:292`)注一条 **ToolMessage**(`content` = 人类答复,`tool_call_id` = 该 pending call 的 id)。故引擎入参 = **结构化 `{tool_call_id?: str, content: str}`**:`content` 必填;`tool_call_id` **可选**——省略时引擎从该 checkpoint 的**唯一 pending 中断 tool call** 自解析(传了则校验须匹配)。studio 现有 `ResumeReq.human_input: str` 投影为 `{content: human_input}` 即可,`tool_call_id` 交引擎解析。**纯 string 不够当多个 pending call 并存时**,故契约取结构化、留 `tool_call_id` 槽位。(精确 wire 细节随内层 create_agent checkpointer 落地终定——见 `03-checkpoint §7`,实现期最高风险项。)
 - **失效追踪**(目标):上游/拓扑/输出 schema 变 → 下游 checkpoint 失效 → 前端 [Resume] 置灰(归 `05-invalidation`)。
 
 ### 3.3 Compile API 面(SSOT = `compiler.py` / `compile-rules`)

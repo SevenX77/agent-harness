@@ -1,0 +1,271 @@
+{
+  "schema_version": 1,
+  "_meta": {
+    "source": "docs/studio/mvp1/DESIGN_UNITS_INDEX.md",
+    "source_commit": "regenerated 2026-06-06 (gateway/llm-copilot-http-api ownership fix per baselines)",
+    "generated_on": "2026-06-06",
+    "canonical_fields": [
+      "unit",
+      "owned_lock",
+      "external_binding",
+      "integration_lock",
+      "owners",
+      "external_refs"
+    ],
+    "note": "Machine-enforced baseline for locked Studio design unit state. DESIGN_UNITS_INDEX.md stays live; locked unit owner/state drift must update this snapshot with owner approval."
+  },
+  "units": [
+    {
+      "unit": "compile-lint-structured-error",
+      "owned_lock": "locked",
+      "external_binding": "none",
+      "integration_lock": "locked",
+      "owners": [
+        "compile-lint"
+      ],
+      "external_refs": []
+    },
+    {
+      "unit": "compile-stage-gate",
+      "owned_lock": "locked",
+      "external_binding": "none",
+      "integration_lock": "locked",
+      "owners": [
+        "compile-lint"
+      ],
+      "external_refs": []
+    },
+    {
+      "unit": "conflict-overwrite-resolution",
+      "owned_lock": "locked",
+      "external_binding": "none",
+      "integration_lock": "locked",
+      "owners": [
+        "conflict-overwrite"
+      ],
+      "external_refs": []
+    },
+    {
+      "unit": "copilot-sdk-test-parity",
+      "owned_lock": "locked",
+      "external_binding": "floating-draft",
+      "integration_lock": "unverified",
+      "owners": [
+        "copilot-assist",
+        "gateway",
+        "llm-copilot-http-api"
+      ],
+      "external_refs": [
+        "copilot_chat route 解析→graph-agent-gateway"
+      ]
+    },
+    {
+      "unit": "copilot-session-persistence",
+      "owned_lock": "locked",
+      "external_binding": "none",
+      "integration_lock": "locked",
+      "owners": [
+        "copilot",
+        "copilot-assist"
+      ],
+      "external_refs": []
+    },
+    {
+      "unit": "debug-resume-checkpoint",
+      "owned_lock": "locked",
+      "external_binding": "floating-draft",
+      "integration_lock": "unverified",
+      "owners": [
+        "debug-resume"
+      ],
+      "external_refs": [
+        "checkpoint/resume→engine:04-run-outer/03-checkpoint"
+      ]
+    },
+    {
+      "unit": "golden-per-agent-node",
+      "owned_lock": "locked",
+      "external_binding": "floating-draft",
+      "integration_lock": "unverified",
+      "owners": [
+        "golden-eval"
+      ],
+      "external_refs": [
+        "eval→engine:05-run-inner/06-golden-eval",
+        "落点→engine:physical-layout"
+      ]
+    },
+    {
+      "unit": "i18n-error-code-ui-copy",
+      "owned_lock": "locked",
+      "external_binding": "none",
+      "integration_lock": "locked",
+      "owners": [
+        "i18n"
+      ],
+      "external_refs": []
+    },
+    {
+      "unit": "io-panel-artifacts-test-inputs",
+      "owned_lock": "locked",
+      "external_binding": "none",
+      "integration_lock": "locked",
+      "owners": [
+        "input"
+      ],
+      "external_refs": []
+    },
+    {
+      "unit": "local-history-snapshot",
+      "owned_lock": "locked",
+      "external_binding": "none",
+      "integration_lock": "locked",
+      "owners": [
+        "local-history"
+      ],
+      "external_refs": []
+    },
+    {
+      "unit": "model-group-role-materialization",
+      "owned_lock": "locked",
+      "external_binding": "floating-draft",
+      "integration_lock": "unverified",
+      "owners": [
+        "gateway",
+        "llm-copilot-http-api"
+      ],
+      "external_refs": [
+        "materialize 编排 + model group/endpoint 标准化(内核)→graph-agent-gateway"
+      ]
+    },
+    {
+      "unit": "native-rust-writer",
+      "owned_lock": "locked",
+      "external_binding": "none",
+      "integration_lock": "locked",
+      "owners": [
+        "native-fs"
+      ],
+      "external_refs": []
+    },
+    {
+      "unit": "node-properties-role-test",
+      "owned_lock": "locked",
+      "external_binding": "none",
+      "integration_lock": "locked",
+      "owners": [
+        "studio-settings"
+      ],
+      "external_refs": []
+    },
+    {
+      "unit": "phase-field-whitelist",
+      "owned_lock": "locked",
+      "external_binding": "floating-draft",
+      "integration_lock": "unverified",
+      "owners": [
+        "phase-editing"
+      ],
+      "external_refs": [
+        "字段权威→engine:skill-syntax"
+      ]
+    },
+    {
+      "unit": "predict-execution",
+      "owned_lock": "locked",
+      "external_binding": "floating-draft",
+      "integration_lock": "unverified",
+      "owners": [
+        "predict"
+      ],
+      "external_refs": [
+        "干跑 mock→engine:06-seam/01-models"
+      ]
+    },
+    {
+      "unit": "publish-artifact-autocommit",
+      "owned_lock": "locked",
+      "external_binding": "none",
+      "integration_lock": "locked",
+      "owners": [
+        "publish"
+      ],
+      "external_refs": []
+    },
+    {
+      "unit": "run-execution-node-status",
+      "owned_lock": "locked",
+      "external_binding": "floating-draft",
+      "integration_lock": "unverified",
+      "owners": [
+        "run-execution",
+        "state-engine"
+      ],
+      "external_refs": [
+        "事件源→engine:02-observability",
+        "循环原语→engine:04-run-outer/02-iterate"
+      ]
+    },
+    {
+      "unit": "settings-six-state-provider-health",
+      "owned_lock": "locked",
+      "external_binding": "floating-draft",
+      "integration_lock": "unverified",
+      "owners": [
+        "gateway",
+        "llm-copilot-http-api"
+      ],
+      "external_refs": [
+        "6 态标准投影(内核)→graph-agent-gateway"
+      ]
+    },
+    {
+      "unit": "shell-runtime-gate",
+      "owned_lock": "locked",
+      "external_binding": "none",
+      "integration_lock": "locked",
+      "owners": [
+        "shell-layout"
+      ],
+      "external_refs": []
+    },
+    {
+      "unit": "subgraph-path-inline-drilldown",
+      "owned_lock": "locked",
+      "external_binding": "floating-draft",
+      "integration_lock": "unverified",
+      "owners": [
+        "assets",
+        "canvas",
+        "graph-authoring"
+      ],
+      "external_refs": [
+        "path 解析→engine:02-resolver",
+        "落点→engine:physical-layout",
+        "语法→engine:skill-syntax"
+      ]
+    },
+    {
+      "unit": "trace-dot-blackboard",
+      "owned_lock": "locked",
+      "external_binding": "floating-draft",
+      "integration_lock": "unverified",
+      "owners": [
+        "trace-observability"
+      ],
+      "external_refs": [
+        "事件源→engine:02-observability"
+      ]
+    },
+    {
+      "unit": "workspace-open-folder-mru",
+      "owned_lock": "locked",
+      "external_binding": "none",
+      "integration_lock": "locked",
+      "owners": [
+        "skill-workspace"
+      ],
+      "external_refs": []
+    }
+  ]
+}

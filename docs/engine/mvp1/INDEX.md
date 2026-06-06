@@ -39,7 +39,7 @@ governed_by: ../../development/design-doc-standards/（00 三轴 · 02 R8 设计
 | **U4** | **LOGIC 干净契约(纯返回/硬禁/反写)** | LE1-3(2026-06-04 三问拍板) | 执行切面→`graph-exec`◆(LE1-3) · 编译规则切面→`compile-rules`(purity 扩展、硬禁 run_skill/FS) · 语法切面→`skill-syntax`(解冻 `03-logic-md-spec`、契约反写) | `graph_assembler.py:_build_logic_node:325`(live drift=refactor-target) | **locked**(2026-06-06) | LE1-3 干净契约 + LOGIC §2.3 + purity 码三 owner facet 就绪;live drift(可变 Context/run_skill/FS/反写解冻)= refactor-target 归 kiro;graph-exec A◐ 是 nudge(AGENT/U8 facet)不阻 U4 |
 | **U5** | **checkpoint 嵌套拓扑 + 存储纪律** | `CK1-6`(records/state-checkpoint,2026-06-03) | base 切面→`03-checkpoint`◆ · 内层 messages 切面→`08-messages-state`◆ · 迭代切面→`02-iterate` · agent 切面→`01-agent-loop`(经 ns 挂) · 数据切面→`data-contracts`(data delta reducer 待补) | `graph_assembler.py:151`(compile checkpointer) · `state.py:214`(messages DeltaChannel) · `cognitive_flow.py:292`(interrupt 依赖 checkpoint) | **locked**(2026-06-05) | records 深度(递归拓扑/delta-compact/durability/CK1-6/D-test/PM 原话)已回填 `03-checkpoint`+`08-messages-state`(codex 复审纠"目标当现状"、加现状框);live 仅外层 super-step checkpoint + WorkflowState.messages DeltaChannel,内层 ns/agent checkpoint/resume/compaction 全待实现 |
 | **U6** | **变更→失效模型** | records/change-invalidation(Task2 C3,2026-06-03) | 失效契约切面(A1–A5 轴+矩阵)→`05-invalidation`◆ · golden 切面(A2a 反转后 eval 期)→`06-golden-eval` · checkpoint 切面(A2/A4/A5 置灰)→`03-checkpoint` · cache 切面(源 hash)→`01-compile` | `compiler.py:compile_skill:41`(cache 壳) · `diff_skill`(待实施) | **locked**(2026-06-05) | `05-invalidation` 已写变更轴(IV1-3,golden 失效 eval 期);`records/change-invalidation-model.md` 的 1 块“编译期硬错误”= 反转前旧模型,**已由 IV2(eval 期)取代退役**、非待迁;`06-golden-eval` baseline 已成段(codex 复审) |
-| **U7** | **6 槽中间件链 + 域专槽** | `overview §6` 跨切点 | 链基础设施切面→`02-middleware`◆ · 认知槽→`03-cognitive`(CognitiveFlow) · 追踪槽→`02-observability`(Tracing) · 工具错误槽→`04-tools`(ToolError) · 并行→`02-iterate`(parallel_map,断层#3) | (middleware 工厂 + 各域;ToolError `middleware/tool_error.py` no-op) | drafted | 链+卫生槽✅;域专槽逻辑归各域(只写槽位+概述+双向链);ToolError 待实现 |
+| **U7** | **6 槽中间件链 + 域专槽** | `overview §6` 跨切点 | 链基础设施切面→`02-middleware`◆ · 认知槽→`03-cognitive`(CognitiveFlow) · 追踪槽→`02-observability`(Tracing) · 工具错误槽→`04-tools`(ToolError) · 并行→`02-iterate`(parallel_map,断层#3) | `factory.py:build_middleware_chain:29`(6 槽)/`:68`(单槽 live);顺序 `__init__.py:58`;后 3 槽 no-op(各 16 行) | **locked**(2026-06-06) | 6 槽链 + 顺序契约 + 域专槽归各域(双向链)成段(B✅);现状/目标 demarcate(live 单槽、后 3 no-op);live 接 6 槽 + 后 3 槽实现归 kiro;parallel_map×链 断层#3 = 跨切待设计(与 U11 共享,§8)、不阻 U7 核心链 |
 | **U8** | **退出闸(phase 不静默成功)** | `EXIT` 决策 | 退出闸切面→`05-exit-control`◆(after_agent + NudgeInjector) · 认知切面→`03-cognitive`(finish_task / goto=END 绕闸) | `NudgeInjector`(live);`after_agent` 退出闸(缺) | **locked**(2026-06-05) | ⏳ 迁自 `_migration-src/04-exit-control`;after_agent 闸未接 live(实现差距,归 kiro) |
 | **U9** | **可观测事件流** | `overview §6` api 面 | 事件流切面(33 typed event)→`02-observability`◆ · 追踪中间件→`02-middleware`(Tracing 槽) · API 切面→`03-api-contract`(协议→trace.jsonl/WS) · 边操作事件→`graph-exec` | `callbacks/events.py` typed events + callbacks;内联 emit 待迁 Tracing 中间件 | drafted | 主 trace 事件已迁;`_migration-src/11-io-and-edge-ops` 边操作事件/黑板切片/artifact 已分发入 `graph-exec`(执行面)+ `observability`(3 边操作事件命名,codex 复审) |
 | **U10** | **API 操作面(engine↔studio)** | `ARCH1`(C 层) | API 契约切面→`03-api-contract`◆ · 入口实现→`07-runtime` · 事件供给→`02-observability` · 形状供给→`data-contracts`(RunResult) | `runner.py:run_skill:376`/`predict_skill:163`(live) · `compiler.py:compile_skill:41` | drafted | `03-api-contract` 只有摘要,`api-engine-studio-contract.md` 17 块未迁;`07-runtime` 不是空白,但顶层契约/bootstrap 未成段 |
@@ -50,21 +50,20 @@ governed_by: ../../development/design-doc-standards/（00 三轴 · 02 R8 设计
 
 ## 2. 锁状态总账(lock-migration 骨架)
 
-**当前(2026-06-06):U1/U2/U3/U4/U5/U6/U8/U11/U12 单元 `locked`(9/12),其余 `drafted`;零文件级 `FROZEN`**(文件级 FROZEN 待该文件所有单元锁齐——如 `physical-layout` 参与 U1、`compile-rules` 参与 U4/U11/U12、`02-iterate` 参与 U5/U7/U11、`03-checkpoint` 参与 U5/U6、`08-messages-state` 参与 U5,故只锁单元不冻文件)。 锁状态不得继承旧 `✅` 标签,只按 §3 的 W/B/A 三关判断。
+**当前(2026-06-06):U1/U2/U3/U4/U5/U6/U7/U8/U11/U12 单元 `locked`(10/12),其余 `drafted`;零文件级 `FROZEN`**(文件级 FROZEN 待该文件所有单元锁齐 + 跨切待设计清零——如 `02-middleware` 参与 U7/U11 单元已锁但 parallel_map×链 断层#3 跨切待设计、暂不冻;`compile-rules` 参与 U4/U11/U12、`02-iterate` 参与 U5/U7/U11、`03-checkpoint` 参与 U5/U6,故只锁单元不冻文件)。 锁状态不得继承旧 `✅` 标签,只按 §3 的 W/B/A 三关判断。
 
 ### 锁就绪复评(2026-06-05,PM 定 A 达标线 = "写全目标 + 标清现状/gap,实现归 kiro")
 按此线,"只差实现"的 A◐ 达标升 ✅,"目标真空/待设计/待成段"的 A◐ 不达标。**2026-06-06 更新(9/12 锁后)**:
-- **A 达标(✅,目标写全 + demarcated,只差 impl)**:`physical-layout`、`compile-rules`、`02-resolver`、`03-checkpoint`、`08-messages-state`、`05-exit-control`、`07-subagent`、`06-seam/01-models`、`01-compile`、`graph-exec`(LOGIC)、`04-tools`、`06-golden-eval`、`02-iterate`(+ 既有 `data-contracts`/`invalidation`);`skill-syntax` resource(§2.8)/iterate(§2.9) 已达标,仅 io 切片 facet 仍真空。
-- **A 不达标(真空/待设计/待成段,非 impl)**:`skill-syntax`(仅 io 切片真空)、`07-runtime`(顶层契约待成文)、`02-middleware`(后 3 槽逻辑待成段)、`03-assemble`(W 缺 PM 原话链)、`06-seam/02-observability`(V4 trace 增补待设计)、`03-api-contract`(defer)。
-- **B 仍 ◐(baseline 待补深,与 A 达标线无关)**:`02-middleware`、`03-api-contract`。
+- **A 达标(✅,目标写全 + demarcated,只差 impl)**:`physical-layout`、`compile-rules`、`02-resolver`、`03-checkpoint`、`08-messages-state`、`05-exit-control`、`07-subagent`、`06-seam/01-models`、`01-compile`、`graph-exec`(LOGIC)、`04-tools`、`06-golden-eval`、`02-iterate`、`02-middleware`(+ 既有 `data-contracts`/`invalidation`);`skill-syntax` resource(§2.8)/iterate(§2.9) 已达标,仅 io 切片 facet 仍真空。
+- **A 不达标(真空/待设计/待成段,非 impl)**:`skill-syntax`(仅 io 切片真空)、`07-runtime`(顶层契约待成文)、`03-assemble`(W 缺 PM 原话链)、`06-seam/02-observability`(V4 trace 增补待设计)、`03-api-contract`(defer)。
+- **B 仍 ◐(baseline 待补深,与 A 达标线无关)**:`03-api-contract`。
 - **W 仍 ◐(决策待补链)**:`03-assemble`、`01-agent-loop`、`03-cognitive`、`04-tools`。
 
-**已锁(9/12)**:U1/U2/U3/U4/U5/U6/U8/U11/U12。
-**仍阻塞(3/12)**:
-- **U7**(6 槽中间件链,◆=`02-middleware`):待 02-middleware B 补深 + 域专槽(认知/追踪/工具错误/parallel_map)就绪;链基础 + 卫生槽 ✅。
+**已锁(10/12)**:U1/U2/U3/U4/U5/U6/U7/U8/U11/U12。
+**仍阻塞(2/12)**:
 - **U9**(可观测事件流,◆=`02-observability`):待 V4 trace 增补(Prompt 三视图/reducer diff)设计——可能需 PM。
 - **U10**(API 操作面,◆=`03-api-contract`):defer(api-contract 17 块牵 studio + 并发 session)。
-锁前每单元做一次 demarcation 终审;文件级 `FROZEN` 待该文件所有单元锁齐。
+锁前每单元做一次 demarcation 终审;文件级 `FROZEN` 待该文件所有单元锁齐 + 跨切待设计清零。
 
 1. **mvp0 只允许说"契约已迁"**:
    - `skill-spec`/`workspace-spec` 的契约内容已迁入 mvp1 对应契约模块,旧契约文档可 deprecated、不作 SSOT。
@@ -98,7 +97,7 @@ governed_by: ../../development/design-doc-standards/（00 三轴 · 02 R8 设计
 | `02-mechanism/04-run-outer/02-iterate` | ✅ `mvp1-alignment.md:28,34-35`; records `state-checkpoint-storage-model.md:100-103` | ✅ `baseline.md`(节点级 batch 写全,file:line 已核 `graph_assembler.py:225/240/249/253/268/300`;loop/图级/range 明确标缺口) | ✅ `mvp1-alignment.md`(执行模型 + 现状/目标 demarcate;声明语法收编 `skill-syntax §2.9`;U11 锁) | B 写全现状;loop/图级/range/统一 iterate = refactor-target 归 kiro(§8)。 |
 | `02-mechanism/04-run-outer/03-checkpoint` | ✅ `mvp1-alignment.md`(CK1-6 + 6 段 PM 原话回填) | ✅ `baseline.md`(B 成段+codex 核;code `checkpointer.py:39`, `runner.py:663`, `graph_assembler.py:151/201`, `state.py:212/214`, `phase_executor.py:82`) | ✅ `mvp1-alignment.md`(records 深度回填:递归拓扑/delta-compact/durability/D-test;codex 纠"目标当现状"+加现状框;U5 锁) | 三关全 ✅、目标/现状 demarcate;live 仅外层 super-step checkpoint,内层 ns/agent checkpoint/resume/data delta 待实现(§8,归 kiro)。 |
 | `02-mechanism/05-run-inner/01-agent-loop` | ◐ module says missing PM原话 `mvp1-alignment.md:21-25`; design doc has `agent-loop-planA-create-agent-migration.md:36,80` | ✅ `baseline.md:4,20-44`; code `graph_assembler.py:423` | ◐ `mvp1-alignment.md:10,40`; design doc `agent-loop-planA-create-agent-migration.md:50` | 设计依据在 design doc,模块内未补链;live 仍手写 ReAct loop,create_agent 是目标。 |
-| `02-mechanism/05-run-inner/02-middleware` | ✅ `mvp1-alignment.md:21,27-28` | ◐ `baseline.md:21-34`; code `middleware/__init__.py:58`, `factory.py:29`, `tracing.py:11`, `tool_error.py:12`, `loop_detection.py:11` | ◐ `mvp1-alignment.md:10,37` | 链基础成段;live 只接单槽,后 3 槽 no-op,ToolError/Tracing/LoopDetection 逻辑归各域未实现。 |
+| `02-mechanism/05-run-inner/02-middleware` | ✅ `mvp1-alignment.md:21,27-28`; overview `00-architecture-overview.md:104`(域专槽归域) | ✅ `baseline.md`(6 槽现状写全:工厂 `factory.py:29`/单槽 live `:68`/顺序 `__init__.py:58`/后 3 no-op 各 16 行,file:line+行数已核) | ✅ `mvp1-alignment.md`(6 槽链+顺序+域专槽双向链+现状/目标 demarcate;U7 锁) | 链基础+卫生槽成段;live 接 6 槽 + 后 3 槽实现归各域 kiro;parallel_map×链 断层#3 跨切待设计(与 U11 共享)。 |
 | `02-mechanism/05-run-inner/03-cognitive` | ◐ `mvp1-alignment.md:24-29`; design `agent-loop-planA-create-agent-migration.md:74,80,101` | ✅ `baseline.md:12,22-31`; code `cognitive_flow.py:55`, `finish_task.py:21/30`, `md2json.py:26`, `md_to_json.py:515` | ◐ `mvp1-alignment.md:31-36,45` | 主体迁入;模块内 W 原话需补链;rich 三态校验存在但未接 live。 |
 | `02-mechanism/05-run-inner/04-tools` | ◐ `mvp1-alignment.md:22-31`; graph-exec LE1-3 `04-run-outer/01-graph-exec/mvp1-alignment.md:38-42` | ✅ `baseline.md:4,20-28`; code `actions.py:49/60`, `tool_error.py:12` | ✅ `mvp1-alignment.md`(§2 tool 生命周期+ToolError 行为成段,demarcated;U3 锁) | action/tool 不统一已定;ToolError 实现(tool_error.py no-op)归 kiro。 |
 | `02-mechanism/05-run-inner/05-exit-control` | ✅ `mvp1-alignment.md:21,28-30` | ✅ `baseline.md:4,20-23`; code `nudge_injector.py:75`, `cognitive_flow.py:511`, `graph_assembler.py:527` | ✅ `mvp1-alignment.md:15-18,39`(目标成段,U8 锁) | 文档目标成段;live 无 after_agent 退出闸=实现差距(归 kiro)。 |

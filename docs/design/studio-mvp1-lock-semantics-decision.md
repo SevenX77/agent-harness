@@ -43,4 +43,5 @@ studio MVP1 把 63 份设计文档 FROZEN + 哈希锁(commit `924ff4c`)后,经 c
 - **commit `59f2fb2`**:INDEX spans 规范化为 codex owner 解析格式(**⚠️3 闭合**,81 条目 parser 自检通过)。
 - **commit `80fd930`**:codex 建快照测试 `apps/studio/backend/tests/test_design_unit_lock_snapshot.py` + `_design-unit-lock-snapshot.json`(入哈希底账 count 64);codex M4 ownership 复核 → Claude 据 baseline 修正 3 个 gateway 簇单元(`gateway`=消费边界 owner、`llm-copilot-http-api`=HTTP 壳 owner,`settings-six-state` owners 不再为空)。(**FAIL 2 闭合**)
 - **M4 对抗验证**:改 INDEX owner→快照测试 FAIL;篡改快照→哈希测试 FAIL;还原→5 passed。
-- **待**:codex 最终 M4 复核 ownership 修正(prompt 见 [`studio-mvp1-locksnapshot-review-prompt.md`](./studio-mvp1-locksnapshot-review-prompt.md));Phase B(外部 pin 台账)仍推迟至 engine/gateway 稳定。
+- **codex 终审通过(2026-06-06)**:确认 ownership 成立(`gateway`=③a 消费/适配边界 owner、HTTP 壳=`llm-copilot-http-api`)、owner 唯一性无冲突(parser 扫 within-unit/global 均空)、测试 5 passed;并补修 INDEX 第 47 行残留说明文案(`gateway` platform 由"HTTP 壳"改"消费/适配边界")。**FAIL 1 / FAIL 2 / ⚠️3 全闭合。**(prompt 见 [`studio-mvp1-locksnapshot-review-prompt.md`](./studio-mvp1-locksnapshot-review-prompt.md))
+- **Phase B(外部 pin 台账 + contract-manifest/可执行契约测试)仍推迟**至 engine/gateway 稳定。

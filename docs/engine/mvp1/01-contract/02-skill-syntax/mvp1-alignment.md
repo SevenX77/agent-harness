@@ -1,14 +1,14 @@
 ---
 module: 01-contract/02-skill-syntax
 doc: mvp1-alignment
-status: drafted（mvp1 自写=唯一真理；子图 path=绝对路径已写清；GRAPH/LOGIC/SUBGRAPH/AGENT/cognitive/mention/resource(§2.8)/iterate(§2.9) 语法已迁入；🚨 仅 io 切片仍是真空债，见 §2/§8）
+status: drafted（mvp1 自写=唯一真理；子图 path=绝对路径已写清；GRAPH/LOGIC/SUBGRAPH/AGENT/cognitive/mention/resource(§2.8)/iterate(§2.9)/io 切片(§2.10) 语法已迁入；语法部件全部补齐）
 binds_baseline: ./baseline.md
 aligns_with: ../../00-architecture-overview.md（§2 契约层 A）
 ---
 
 # 02-skill-syntax — 契约 A · skill 文件内容/语法
 
-> **Tier**: 契约层 A(声明式,喂 copilot) | **Owns**: skill 文件**里写什么**——四 phase(GRAPH/LOGIC/SUBGRAPH/SKILL)字段 schema + body XML + mention + io/iterate 声明 + cognitive 模板语法 | **现状**: 子图 path 已写清(§2.1);GRAPH/LOGIC/SUBGRAPH/AGENT/cognitive/mention/resource/iterate 语法已迁入(§2.1-§2.9);🚨 仅 io 切片仍待补(§8) | **Related**: `physical-layout`(文件放哪)· `compile-rules`(怎么判)· `02-mechanism/02-resolver`(path 怎么解析)· `02-mechanism/03-assemble`(模板渲染)· `02-iterate`(iterate 执行)
+> **Tier**: 契约层 A(声明式,喂 copilot) | **Owns**: skill 文件**里写什么**——四 phase(GRAPH/LOGIC/SUBGRAPH/SKILL)字段 schema + body XML + mention + io/iterate 声明 + cognitive 模板语法 | **现状**: 子图 path 已写清(§2.1);GRAPH/LOGIC/SUBGRAPH/AGENT/cognitive/mention/resource/iterate/io 切片 语法已迁入(§2.1-§2.10);语法部件全部补齐 | **Related**: `physical-layout`(文件放哪)· `compile-rules`(怎么判)· `02-mechanism/02-resolver`(path 怎么解析)· `02-mechanism/03-assemble`(模板渲染)· `02-iterate`(iterate 执行)
 
 ## 1. 定义
 定义 skill 文件**内容/语法**:每种文件的 frontmatter 字段、body 格式、`@type:NAME` mention 语法、io/iterate 声明。**只管"写什么"**,不管"放哪"(归 `physical-layout`)、"怎么判"(归 `compile-rules`)、"怎么解析引用"(归 `02-resolver`)。是喂 copilot 生成合法 skill 的核心语言。
@@ -27,8 +27,8 @@ aligns_with: ../../00-architecture-overview.md（§2 契约层 A）
 | mention `@type:NAME`(7 类) | ✅ 已迁入,见 §2.7 |
 | reference/example 机制 | ✅ 已写清,见 §2.8 |
 | iterate 声明(batch/loop/range/accumulate) | ✅ 已写清,见 §2.9(执行见 `04-run-outer/02-iterate`) |
-| io 切片声明(从黑板切片) | 🚨 **真空**(切片见 `04-run-outer/01-graph-exec`) |
-> 🚨 上述「真空」部件是 **mvp1 的债**:语法正文还没从旧文档迁进 mvp1。mvp0 弃用后这些就是真空,**必须在 mvp1 自写补齐**(这正是"mvp1 没有=错误"的报警点,见 §8)。本批已补 GRAPH/LOGIC/SUBGRAPH/AGENT/cognitive/mention + resource(§2.8) + iterate(§2.9);剩余 io 切片继续报警。
+| io 切片声明(从黑板切片) | ✅ 已写清,见 §2.10(执行见 `04-run-outer/01-graph-exec`) |
+> 🚨 上述「真空」部件是 **mvp1 的债**:语法正文还没从旧文档迁进 mvp1。mvp0 弃用后这些就是真空,**必须在 mvp1 自写补齐**(这正是"mvp1 没有=错误"的报警点,见 §8)。本批已补 GRAPH/LOGIC/SUBGRAPH/AGENT/cognitive/mention + resource(§2.8) + iterate(§2.9) + io 切片(§2.10);**语法部件全部补齐**。
 > ❌ **无 golden 声明**:golden 是 `.workspace` 临时产物,不进 skill 源码语法。
 
 ## 2.1 子图 path 引用契约(mvp1 权威)
@@ -630,6 +630,26 @@ loop 的累积变量由作者**显式声明**、引擎不猜:
 > **嵌套**:图级走到一个设了节点级 iterate 的节点,先跑完节点级再继续(总次数 = 图级 × 节点级)。本节只管声明,执行机制归 `02-iterate`。
 > ❌ **无 golden 声明**(同 §2 注):iterate 是 phase/graph 源码语法,不含运行期产物。
 
+## 2.10 io 切片 / V4 扩展声明部件契约
+每个 phase 节点的 `io.inputs`/`io.outputs` 是**从黑板(`WorkflowState.data`)切片/回写的边界**(基础字段语法已在各节点节:GRAPH §2.2.3、LOGIC §2.3.1、SUBGRAPH §2.4.3、AGENT §2.5.1)。本节收口**切片语义 + V4 新增的 io 扩展声明**;执行机制(StateMapper 切片/回写、文件 lazy 注入、artifact 落盘)归 [`04-run-outer/01-graph-exec`](../../02-mechanism/04-run-outer/01-graph-exec/mvp1-alignment.md) §2(E1-E4),切片失败码 `[F-v3-runtime-state-mapping-failed]` 归 `compile-rules`。
+
+> **⚠️ 现状 vs 目标**:基础 io.inputs/outputs 切片(StateMapper)**live**;下列 **E1 子图 io 放宽 / E2 文件导入→黑板 / E3 io.outputs artifact 路径标注** 是 **mvp1 目标**(graph-exec §2/§5 E1-E4 已定),声明语法在此收口、执行归 graph-exec、impl 归 kiro。
+
+### 2.10.1 io 切片基础(live)
+- `io.inputs`:声明本节点从黑板**读**哪些字段——StateMapper 按 `properties` 过滤切片;`required` 字段运行期缺失报 `[F-v3-runtime-state-mapping-failed]`。
+- `io.outputs`:声明本节点允许**回写**黑板的字段边界——output key 必须 ⊂ `io.outputs.properties`,越界报同码。
+
+### 2.10.2 子图 io 放宽(E1,目标)
+SUBGRAPH 节点 io **不要求父子字段 1:1**(详见 §2.4.3):`io.inputs` 从父图黑板切片喂子图、`io.outputs` 合并回父图,像普通节点;退役旧 `target_skill + 父子 io 1:1` 模型(执行侧删 `loader.py:528` inputs 1:1 强校,归 graph-exec E1)。
+
+### 2.10.3 文件导入→黑板(E2,目标·新能力)
+节点 `io.inputs` 可声明**"从文件导入 → 注入黑板字段"**:跑到该节点才 **lazy 注入**(非图启动时一次性),引擎读路径写黑板再切片(执行落 `_wrap_phase_runtime_node` 前置步,归 graph-exec E2;发 `InputFileInjectedEvent` 归 `observability`)。
+
+### 2.10.4 io.outputs artifact 路径标注(E3,目标)
+`io.outputs` 字段可标注 **artifact 落盘路径**(支持一/多文件;filename-only 默认落 `.workspace/artifacts`);md 类输出取中间件保留的原始 `business_data_md` 原样写,**不做 json→md 回转**(执行归 graph-exec E3)。
+
+> ❌ 同 §2.9:io 是 phase 源码语法,不含运行期产物(golden/artifact 实体等)。
+
 ## 3. 接口契约
 skill 源码(语法)→ AST(`GraphManifest` / `PhaseAST` / `Phase` 等,归 `data-contracts`)。
 - **GRAPH**:AST 持根 metadata、inline `io.inputs/outputs`、phase registry；body DAG 产出拓扑顺序与 output phase 集合。
@@ -674,7 +694,7 @@ skill 源码(语法)→ AST(`GraphManifest` / `PhaseAST` / `Phase` 等,归 `data
 engine 全权(子图语法是 engine 主决策);skill 源码被 studio 编辑器/copilot 消费。
 
 ## 8. gaps / 报警
-1. 🚨 **mvp1 语法真空(剩余批次)**:§2 标「真空」的部件(**io 切片**)语法正文**尚未迁入 mvp1**(resource/example 已补 §2.8;iterate 已补 §2.9)。mvp0 弃用后这是真空,**必须在 mvp1 自写补齐**。
+1. ✅ **mvp1 语法部件全部补齐**:resource/example(§2.8)、iterate(§2.9)、io 切片(§2.10)均已迁入 mvp1 自写;§2 表无剩余「真空」。
 2. **代码 drift(refactor-target)**:当前代码对 LOGIC action / SUBGRAPH path / SUBGRAPH io / AGENT body 严格校验 / cognitive slot 细节 / mention 完整静态校验仍有旧实现或缺口,详见 `baseline` 差异表；本文是目标契约,代码应向本文对齐。
 3. **subagents[] 不改 path(PM 2026-06-05 拍)**:子代理(`subagents[]`)与 **agent phase 捆绑**、是**运行期由 LLM 委派**的机制,跟子图(编译期解析、靠物理 path 引用的独立 skill)**不是一回事**(生命周期不同,断层#7)——引用方式**维持 `target_skill`,不改 path**。
 

@@ -55,11 +55,12 @@ governed_by: ../../development/design-doc-standards/（00 三轴 · 02 R8 设计
 **文件级 `audited-ready`(机器锁,2026-06-06 上线)**:engine **自包含**哈希锁机器层已生效——`_audited-ready-hashes.json`(16 文件 sha256 底账)+ `packages/graph-agent/tests/test_doc_hash_lock.py`(**目录 scope** 漂移/缺失/未入账检测,**不耦合 `apps/studio/**`**,`4 passed`)+ `_doc-exemptions.yaml`(豁免须 `file+sha256+reason+owner_approval`,精确匹配)。**8 个三关全 ✅ + 单元锁齐的模块**(各 `baseline.md`+`mvp1-alignment.md`)已标 `audited-ready` 并入底账:`physical-layout`、`02-resolver`、`05-invalidation`、`06-golden-eval`、`03-checkpoint`、`08-messages-state`、`05-exit-control`、`01-compile`。`compile-rules`/`data-contracts`/`03-api-contract` 因带错误契约 V2 鲜目标**暂不入**;其余模块单元未锁齐或 W/B/A 未全 ✅。语义:`audited-ready` = 已审 + 机器锁(挡并发 session 静默漂移),`FROZEN` 仍按标准留作 owner 盖章后的下一档(无机器盖章不冒用 FROZEN,见 `design-doc-standards/02 §131`)。
 
 ### 锁就绪复评(2026-06-05,PM 定 A 达标线 = "写全目标 + 标清现状/gap,实现归 kiro")
-按此线,"只差实现"的 A◐ 达标升 ✅,"目标真空/待设计/待成段"的 A◐ 不达标。**2026-06-06 更新(9/12 锁后)**:
-- **A 达标(✅,目标写全 + demarcated,只差 impl)**:`physical-layout`、`compile-rules`、`02-resolver`、`03-checkpoint`、`08-messages-state`、`05-exit-control`、`07-subagent`、`06-seam/01-models`、`01-compile`、`graph-exec`(LOGIC)、`04-tools`、`06-golden-eval`、`02-iterate`、`02-middleware`、`06-seam/02-observability`(+ 既有 `data-contracts`/`invalidation`);`skill-syntax` resource(§2.8)/iterate(§2.9) 已达标,仅 io 切片 facet 仍真空。
-- **A 不达标(真空/待设计/待成段,非 impl)**:`skill-syntax`(仅 io 切片真空)、`07-runtime`(顶层契约待成文)、`03-assemble`(W 缺 PM 原话链)、`03-api-contract`(defer,牵 studio)。
-- **B 仍 ◐(baseline 待补深,与 A 达标线无关)**:`03-api-contract`。
-- **W 仍 ◐(决策待补链)**:`03-assemble`、`01-agent-loop`、`03-cognitive`、`04-tools`。
+按此线,"只差实现"的 A◐ 达标升 ✅,"目标真空/待设计/待成段"的 A◐ 不达标。**2026-06-06 复评(读实际文件、纠保守 ◐)**:
+- **A 达标(✅,目标写全 + demarcated,只差 impl)**:**除 `03-api-contract` 外全部模块**。本轮纠正:`skill-syntax`(io 切片 §2.10 补齐 → 语法部件全完)、`07-runtime`(§2/§3 顶层入口 + bootstrap + public API 契约已成文)、`01-agent-loop`/`03-assemble`/`03-cognitive`(§2 机制 + §3 契约 + §4 决策依据齐;create_agent 迁移 cluster 无 PM 原话是**内部工程迁移**、§4 已诚实披露,非缺口)。
+- **A 不达标**:仅 `03-api-contract`(U10,defer,17 块牵 studio + 并发 session)。
+- **B 仍 ◐**:仅 `03-api-contract`。
+- **W**:create_agent cluster(`01-agent-loop`/`03-assemble`/`03-cognitive`/`04-tools`)= **工程决策、§4 documented**(无 PM 原话因属内部机制迁移、早于 06-03 三层重构,已披露)——非缺口。
+> **内容层面:engine 侧 alignment 仅剩 `03-api-contract`(U10)待写**;其余模块 alignment 内容已齐(锁 / audited-ready 是另一回事)。§3.1 矩阵的 `07-runtime`/`01-agent-loop`/`03-assemble`/`03-cognitive`/`skill-syntax` 行待同步为 ✅(末轮统一)。
 
 **已锁(11/12)**:U1/U2/U3/U4/U5/U6/U7/U8/U9/U11/U12。
 **仅剩(1/12)**:

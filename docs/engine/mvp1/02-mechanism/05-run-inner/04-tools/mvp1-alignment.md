@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/05-run-inner/04-tools
 doc: mvp1-alignment
-status: drafted（机制·运行内层;action/tool 不统一已定 2026-06-04(TL2);ToolError 待实现 + 数据流待设计）
+status: drafted（机制·运行内层;action/tool 不统一已定 2026-06-04(TL2);§2 tool 生命周期 + ToolError 行为已成段、现状/目标 demarcate;ToolError 实现(tool_error.py no-op→error ToolMessage)归 kiro）
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行内层）
 ---
 
@@ -13,7 +13,12 @@ aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行内�
 tools = **内层 agent loop 里 LLM 可调用的工具**(`StructuredTool`):builtin 工具 + 把业务/framework 工具 binding 给 `create_agent(tools=...)`。与外层 **action**(`graph-exec` 的 LOGIC,确定性,引擎调)分属**两套注册表**。
 
 ## 2. 数据流 / 机制
-❌ 待设计。现状:`core/actions.py` 里 `ToolDef/ToolRegistry`(tool)与 `ActionDef/ActionRegistry`(action)**两套独立、不互通、无桥**,代码里术语还被混叫(code_phase_node 把 action 叫 "tool")。ToolError(工具异常转 error ToolMessage 让 LLM 恢复)逻辑归本域,实现在 `02-middleware` 槽 5(双向引用)。
+tool 生命周期(内层 agent loop 内,四步):
+1. **注册**:`ToolDef` → `ToolRegistry`(`actions.py:60`)`for_phase` 产出 `StructuredTool`(带 args schema);与外层 `ActionRegistry`(action)**两套独立注册表、不互通、无桥**(TL2 不统一;代码里历史把 action 混叫 "tool" 是死簇,待清)。
+2. **binding**:phase 的 tools(frontmatter `tools[]` + builtin)绑给 agent——**目标**直接交 `create_agent(tools=...)`;**现状**是手动 `_bind_tools_if_supported`(`graph_assembler.py:508`,见 `01-agent-loop`)。
+3. **调用**:LLM 在 ReAct loop 按 schema 生成 tool 调用 → 执行 → 结果转 `ToolMessage` 回 loop(`01-agent-loop` §3)。
+4. **ToolError(目标,现 no-op)**:工具抛异常 → 转 **error ToolMessage**(把异常喂回 LLM、给恢复机会)、**不崩 phase**;逻辑归本域、实现在 `02-middleware` 槽 5(双向)。**现状** `middleware/tool_error.py` 是 no-op(16 行)、异常直接冒泡 → 归 kiro 实现。
+- **builtin 工具**(7 个,skill 经 `builtin.<name>` 引用):清单见 `baseline §2`;`read_reference`/`read_example` 在 `03-assemble` prompt 完成前绑定。
 > 运行期工具沙箱 = 伪需求(已撤);purity 是编译规则(`compile-rules`),扫描器在 `01-compile`——本域不重复沙箱。
 
 ## 3. 接口契约

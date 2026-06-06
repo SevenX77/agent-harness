@@ -32,7 +32,7 @@ WS-E7 golden / resume(runner.py + golden SDK)───────────�
 | WS | 名 | backlog | owns_files(主) | 依赖 | 并发性 | 优先级 |
 |---|---|---|---|---|---|---|
 | **WS-E1** | create_agent 核心 | K1/K2/I1/I3/I5(子图io) | `core/graph_assembler.py` · `middleware/factory.py`/`__init__.py` · `middleware/cognitive_flow.py`/`cognitive/finish_task.py`(finish_task对齐) · `core/loader.py:528` | gateway WS-1(soft)· E6 run_skill(LOGIC 子步 soft) | **内部串行**(热点) | P0 关键路径 |
-| **WS-E1-io** | 11-io 文件导入/artifact | I5(E2/E3) | `tools/builtin/read_file.py` · `core/storage.py` · `core/runner.py:598`(+ 协调 E4 events / E5 state.py) | WS-E4 + WS-E5 | 串行,E4/E5 后 | P1(从 E1 拆出) |
+| **WS-E1-io** | 11-io 文件导入/artifact | I5(E2/E3) | `graph_assembler.py:287`(文件lazy注入落点,**与 E1 同属 graph_assembler 串行链、E1 之后**)· `tools/builtin/read_file.py` · `io/manager.py`/`io/storage.py`(artifact) · `core/runner.py:598`(+ 协调 E4 events / E5 state.py) | WS-E4 + WS-E5 + E1(graph_assembler 串行) | 串行,E1/E4/E5 后 | P1(从 E1 拆出) |
 | **WS-E2** | 中间件后 3 槽 | A1/A2 | `middleware/tracing.py`/`tool_error.py`/`loop_detection.py` | WS-E1(链接好) | 并发(E1 后) | P1 |
 | **WS-E3** | 错误契约 V2 | V2a-d | `core/exceptions.py`/`error_registry.py`/`result.py` | 无 | **全并发** | P0-1→P2 |
 | **WS-E4** | V4 trace 事件 | S7 + V2a(DiagnosticEmitted) | `callbacks/events.py`/`emit.py` | 与 E2 共享 `tracing.py`→协调 | 并发 | P1 |
@@ -45,7 +45,7 @@ WS-E7 golden / resume(runner.py + golden SDK)───────────�
 0. (前置)gateway `GatewayChatModel` 可用(gateway WS-1 保稳)。
 1. **create_agent 构造**(K1/K2):手写 ReAct loop(`graph_assembler.py:483-576`)→ `create_agent(model,tools,middleware,checkpointer)` 一次构造 + invoke;`_build_skill_node`(`:437`)收口,tools 直接交 create_agent(不手动 bind_tools)。
 2. **6 槽中间件接线**(A1):`build_middleware_chain` 6 槽接进 AGENT(现单槽 `:300`/`factory.py:68`)。
-3. **LOGIC 干净契约**(I1/LE1-3):`_build_logic_node`(`:325`)纯返回 / 砍 Context mutation / 硬禁 run_skill·FS。
+3. **LOGIC 运行时契约**(I1/LE1-3,scope 降级):`_build_logic_node`(`:325`)纯返回 / 砍 Context mutation / **FS·import 越界 FATAL(现成)**;**`run_skill` 禁令归 E6**(ordering:E6 先于本步,或本步显式降级、不声明完整 LOGIC 干净——见 WS-E1 §8)。
 4. **iterate 执行**(I3):节点级 loop(accumulate)/ 图级 batch(`Send`)/ 图级 loop=B(`:240-300` 扩)。
 5. **11-io 子图 io 放宽**(I5,收敛):仅子图 io 放宽(`loader.py:528` 删 inputs 1:1)。**文件导入→黑板 lazy(E2)+ artifact business_data_md(E3)拆出 → WS-E1-io**(跨 read_file/state.py(E5)/events(E4)/storage/runner,owns 必相交违 IR1)。
 

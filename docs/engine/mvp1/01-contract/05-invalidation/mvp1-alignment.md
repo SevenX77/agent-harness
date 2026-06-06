@@ -1,7 +1,7 @@
 ---
 module: 01-contract/05-invalidation
 doc: mvp1-alignment
-status: drafted（A 部分成段:变更轴已写;反转前 golden 编译期源块待退役/等价说明）
+status: drafted（**U6 单元锁定 2026-06-05**:变更轴+消费者矩阵成段、codex 已审、反转前编译期块已退役;文件未 FROZEN——invalidation 仍参与 U5/U12）
 aligns_with: ../../00-architecture-overview.md（§2 契约层 A）
 ---
 

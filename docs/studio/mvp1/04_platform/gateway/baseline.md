@@ -1,7 +1,7 @@
 ---
 module: 04_platform/gateway
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；Gateway ③b 包已有 schema/resolver/fallback 代码；Studio 侧仍有 5 态投影、materializer、health/draft 等内核散在后端 ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；Gateway ③b 包已有 schema/resolver/fallback 代码；Studio 侧仍有 5 态投影、materializer、health/draft 等内核散在后端 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/backend/app/services/llm_state_projection.py:ProviderUiState · apps/studio/backend/app/services/llm_role_materializer.py:materialize_role · apps/studio/backend/app/services/llm_health_store.py:SqliteLlmHealthStore · apps/studio/backend/app/routers/llm.py:router
 units: [settings-six-state-provider-health, model-group-role-materialization, copilot-sdk-test-parity]

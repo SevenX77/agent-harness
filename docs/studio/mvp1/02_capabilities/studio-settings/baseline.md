@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/studio-settings
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；Settings UI/API 大体 live；6 态仍是旧 5 态/`needs_setup`，部分 ③b 内核逻辑还在 Studio 后端巨型路由中 ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；Settings UI/API 大体 live；6 态仍是旧 5 态/`needs_setup`，部分 ③b 内核逻辑还在 Studio 后端巨型路由中 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/studio/settings/SettingsPage.tsx:SettingsPage · apps/studio/frontend/src/components/studio/api-keys/ProviderCard.tsx:ProviderCard · apps/studio/frontend/src/api/llm.ts:ProviderUiState · apps/studio/backend/app/services/llm_state_projection.py:ProviderUiState · apps/studio/backend/app/routers/llm.py:router
 units: [settings-six-state-provider-health, model-group-role-materialization, node-properties-role-test, copilot-sdk-test-parity]

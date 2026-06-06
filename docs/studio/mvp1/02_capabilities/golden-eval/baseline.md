@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/golden-eval
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；后端 golden 以整次 run final_state 复制为 baseline；per-agent-node golden 目标未落 ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；后端 golden 以整次 run final_state 复制为 baseline；per-agent-node golden 目标未落 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/backend/app/services/golden_diff.py:set_golden_baseline_for_run · apps/studio/backend/app/services/golden_diff.py:compare_run_to_golden · apps/studio/frontend/src/hooks/useGoldenDiff.ts:compare · apps/studio/backend/app/services/diagnostic_export.py:export_predict_diagnostics
 units: [golden-per-agent-node]

@@ -1,7 +1,7 @@
 ---
 module: 03_regions/assets
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；文件树 live；subgraph 检测仍读旧 `mode/target_skill/sub_skill_ref`，且有本地假缓存/假 fallback 行 ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；文件树 live；subgraph 检测仍读旧 `mode/target_skill/sub_skill_ref`，且有本地假缓存/假 fallback 行 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/studio/panels/AssetsPanel.tsx:AssetsPanel · apps/studio/frontend/src/components/studio/panels/Panels.tsx:Panels
 units: [subgraph-path-inline-drilldown]

@@ -1,7 +1,7 @@
 ---
 module: 03_regions/assets
 doc: mvp1-alignment
-status: drafted（文件树 live；subgraph 检测仍读旧 `mode/target_skill/sub_skill_ref`，且有本地假缓存/假 fallback 行 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（文件树 live；subgraph 检测仍读旧 `mode/target_skill/sub_skill_ref`，且有本地假缓存/假 fallback 行 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [subgraph-path-inline-drilldown]
 aligns_with: 01_workflows/02_authoring.md（assets / subgraph）

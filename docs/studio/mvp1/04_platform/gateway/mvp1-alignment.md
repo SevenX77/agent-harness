@@ -1,7 +1,7 @@
 ---
 module: 04_platform/gateway
 doc: mvp1-alignment
-status: drafted（Gateway ③b 包已有 schema/resolver/fallback 代码；Studio 侧仍有 5 态投影、materializer、health/draft 等内核散在后端 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（Gateway ③b 包已有 schema/resolver/fallback 代码；Studio 侧仍有 5 态投影、materializer、health/draft 等内核散在后端 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [settings-six-state-provider-health, model-group-role-materialization, copilot-sdk-test-parity]
 aligns_with: docs/graph-agent-gateway/mvp1/（gateway ③b SSOT）· 01_workflows/00_settings-ux-spec.md（四层边界）

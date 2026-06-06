@@ -1,7 +1,7 @@
 ---
 module: 03_regions/welcome
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；Welcome 仍从 `/skills` 注册表聚合，import 仍走 backend 门禁；MVP1 open-folder IDE 模型未落 ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；Welcome 仍从 `/skills` 注册表聚合，import 仍走 backend 门禁；MVP1 open-folder IDE 模型未落 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/welcome/WelcomePage.tsx:WelcomePage · apps/studio/frontend/src/components/welcome/NewSkillDialog.tsx:NewSkillDialog · apps/studio/frontend/src/lib/tauri.ts:selectSkillDirectory · apps/studio/backend/app/services/skills.py:create_new_skill · apps/studio/backend/app/services/skills.py:list_skill_summaries
 units: [workspace-open-folder-mru]

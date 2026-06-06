@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/phase-editing
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；Properties/phase parser 仍读写旧 `mode/system_prompt/exit_contract/python_callable/target_skill` 字段 ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；Properties/phase parser 仍读写旧 `mode/system_prompt/exit_contract/python_callable/target_skill` 字段 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/studio/panels/PropertiesPanel.tsx:PropertiesPanel · apps/studio/frontend/src/components/studio/panels/phase-frontmatter.ts:parsePhaseFrontmatter · apps/studio/frontend/src/components/studio/panels/phase-frontmatter.ts:applyPhaseFrontmatterForm · apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:InputPanel
 units: [phase-field-whitelist, node-properties-role-test, io-panel-artifacts-test-inputs]

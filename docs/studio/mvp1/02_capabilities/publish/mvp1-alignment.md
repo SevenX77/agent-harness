@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/publish
 doc: mvp1-alignment
-status: drafted（Artifact Registry zip 发布路径 live；zip 构建仍在 Python 后端，D12 Rust 写者未收口 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（Artifact Registry zip 发布路径 live；zip 构建仍在 Python 后端，D12 Rust 写者未收口 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [publish-artifact-autocommit]
 aligns_with: 01_workflows/06_eval.md（publish / artifact registry）

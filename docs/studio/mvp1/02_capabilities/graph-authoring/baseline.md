@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/graph-authoring
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；画布主拓扑 live；新建 phase 和 subgraph 仍混旧字段，inline subgraph 是 mock ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；画布主拓扑 live；新建 phase 和 subgraph 仍混旧字段，inline subgraph 是 mock ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/GraphCanvas/GraphCanvas.tsx:GraphCanvas · apps/studio/frontend/src/components/GraphCanvas/build-nodes.ts:buildNodes · apps/studio/frontend/src/components/GraphCanvas/canvas-authoring.ts:defaultPhaseMarkdown · apps/studio/frontend/src/components/studio/SubgraphInline.tsx:SubgraphInline
 units: [subgraph-path-inline-drilldown]

@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/studio-settings
 doc: mvp1-alignment
-status: drafted（Settings UI/API 大体 live；6 态仍是旧 5 态/`needs_setup`，部分 ③b 内核逻辑还在 Studio 后端巨型路由中 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（Settings UI/API 大体 live；6 态仍是旧 5 态/`needs_setup`，部分 ③b 内核逻辑还在 Studio 后端巨型路由中 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [settings-six-state-provider-health, model-group-role-materialization, node-properties-role-test, copilot-sdk-test-parity]
 aligns_with: 01_workflows/00_settings-ux-spec.md（settings runtime base）

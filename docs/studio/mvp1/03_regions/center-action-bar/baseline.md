@@ -1,7 +1,7 @@
 ---
 module: 03_regions/center-action-bar
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；Compile 入口 live；Predict/Run handler 仍是 `console.info` 桩，compile error 仍底部浮层 ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；Compile 入口 live；Predict/Run handler 仍是 `console.info` 桩，compile error 仍底部浮层 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/studio/center-action-bar.tsx:CenterActionBar · apps/studio/frontend/src/components/studio/center-action-bar.tsx:deriveButtons · apps/studio/frontend/src/components/studio/Workspace.tsx:handleCompile · apps/studio/frontend/src/components/studio/Workspace.tsx:onPredict · apps/studio/frontend/src/components/studio/Workspace.tsx:onRun · apps/studio/frontend/src/components/studio/Workspace.tsx:CompileErrorPanel
 units: [compile-stage-gate, predict-execution]

@@ -1,7 +1,7 @@
 ---
 module: 03_regions/properties
 doc: mvp1-alignment
-status: drafted（Properties 仍用旧 phase 字段和 raw Connection Trace JSON；golden 完全不在 Properties 的新决策需保持 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（Properties 仍用旧 phase 字段和 raw Connection Trace JSON；golden 完全不在 Properties 的新决策需保持 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [phase-field-whitelist, node-properties-role-test, trace-dot-blackboard]
 aligns_with: 01_workflows/02_authoring.md（properties）· 01_workflows/00_settings-ux-spec.md（node role test）

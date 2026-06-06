@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/graph-authoring
 doc: mvp1-alignment
-status: drafted（画布主拓扑 live；新建 phase 和 subgraph 仍混旧字段，inline subgraph 是 mock ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（画布主拓扑 live；新建 phase 和 subgraph 仍混旧字段，inline subgraph 是 mock ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [subgraph-path-inline-drilldown]
 aligns_with: 01_workflows/02_authoring.md（graph authoring / subgraph）

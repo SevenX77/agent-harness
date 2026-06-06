@@ -1,7 +1,7 @@
 ---
 module: 03_regions/timeline
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；TimelinePanel 只列历史 run；TracePanel/PromptInspector/RunDetailDrawer/useRunStream 都存在但未挂主流程 ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；TimelinePanel 只列历史 run；TracePanel/PromptInspector/RunDetailDrawer/useRunStream 都存在但未挂主流程 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/studio/panels/TimelinePanel.tsx:TimelinePanel · apps/studio/frontend/src/components/TracePanel.tsx:TracePanel · apps/studio/frontend/src/components/PromptInspector.tsx:PromptInspector · apps/studio/frontend/src/components/history/RunDetailDrawer.tsx:RunDetailDrawer · apps/studio/frontend/src/hooks/useRunStream.ts:useRunStream
 units: [compile-lint-structured-error, trace-dot-blackboard, run-execution-node-status]

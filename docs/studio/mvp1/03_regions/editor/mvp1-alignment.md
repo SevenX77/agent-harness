@@ -1,7 +1,7 @@
 ---
 module: 03_regions/editor
 doc: mvp1-alignment
-status: drafted（Monaco autosave live；写文件仍走 FastAPI，trace 只读文档未接，golden 详细 diff 归属曾残留 Properties 口径 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（Monaco autosave live；写文件仍走 FastAPI，trace 只读文档未接，golden 详细 diff 归属曾残留 Properties 口径 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [native-rust-writer, trace-dot-blackboard, golden-per-agent-node]
 aligns_with: 01_workflows/02_authoring.md（editor）· 01_workflows/04_run-and-verify.md（trace/golden diff）

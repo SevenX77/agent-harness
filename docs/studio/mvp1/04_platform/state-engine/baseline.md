@@ -1,7 +1,7 @@
 ---
 module: 04_platform/state-engine
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；状态分散在 Workspace/sessionStorage/SWR/copilotStore/settings hooks；run stream 与 global events 存在但未形成单一 state-engine/WS bridge ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；状态分散在 Workspace/sessionStorage/SWR/copilotStore/settings hooks；run stream 与 global events 存在但未形成单一 state-engine/WS bridge ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/RuntimeGate.tsx:RuntimeGate · apps/studio/frontend/src/components/studio/Workspace.tsx:Workspace · apps/studio/frontend/src/hooks/useDebouncedLint.ts:useDebouncedLint · apps/studio/frontend/src/hooks/useRunStream.ts:useRunStream · apps/studio/frontend/src/store/copilotStore.ts:copilotStore · apps/studio/backend/app/routers/websockets.py:run_events
 units: [shell-runtime-gate, compile-stage-gate, run-execution-node-status, trace-dot-blackboard, settings-six-state-provider-health]

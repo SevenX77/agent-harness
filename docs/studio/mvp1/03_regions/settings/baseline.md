@@ -1,7 +1,7 @@
 ---
 module: 03_regions/settings
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；Settings shell live；前后端/界面仍有旧 `needs_setup` 与局部易失状态，Copilot tab 还有保存/role-key drift ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；Settings shell live；前后端/界面仍有旧 `needs_setup` 与局部易失状态，Copilot tab 还有保存/role-key drift ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/studio/settings/SettingsPageContent.tsx:SettingsPageContent · apps/studio/frontend/src/components/studio/settings/SettingsPage.tsx:SettingsPage · apps/studio/frontend/src/components/studio/api-keys/ProviderCard.tsx:ProviderCard · apps/studio/frontend/src/components/studio/settings/llm-roles/RoleCardList.tsx:RoleCardList · apps/studio/frontend/src/components/studio/settings/copilot/CopilotTab.tsx:CopilotTab · apps/studio/frontend/src/api/llm.ts:ProviderUiState
 units: [settings-six-state-provider-health, model-group-role-materialization, copilot-sdk-test-parity, i18n-error-code-ui-copy]

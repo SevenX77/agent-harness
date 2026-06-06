@@ -1,7 +1,7 @@
 ---
 module: 03_regions/welcome
 doc: mvp1-alignment
-status: drafted（Welcome 仍从 `/skills` 注册表聚合，import 仍走 backend 门禁；MVP1 open-folder IDE 模型未落 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（Welcome 仍从 `/skills` 注册表聚合，import 仍走 backend 门禁；MVP1 open-folder IDE 模型未落 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [workspace-open-folder-mru]
 aligns_with: 01_workflows/01_init.md（workspace open / MRU）

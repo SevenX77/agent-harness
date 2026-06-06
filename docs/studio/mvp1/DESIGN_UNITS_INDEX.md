@@ -10,6 +10,7 @@ aligns_with: ../../development/design-doc-standards/02-audit-standard.md（R8）
 > **职责**：只记**映射**，不重述实现 / 决策（实现 SSOT 在能力模块就近，决策原话就近 + workflow 留底）。
 > **去重铁律**：每个**切面**只有一个 owner 模块写实现；别的模块写同切面 = 重复违规（扫本表「切面 × owner」即照出）。
 > **锁**：`unit-lock ∈ {drafted, locked}`。`locked` = 该单元各切面审过 + 盖章；文件级 `FROZEN` = 文件承载的**所有**单元切面都 `locked`。**当前全部 `drafted`**（审计 R7：机器没装、没盖章，0 进 FROZEN）。
+> **audited-ready(2026-06-05)**：63 档语义审计全 PASS(全量脚本 + 逐档 + codex 双向对抗 + M4 复核),哈希底账见 [`_audited-ready-hashes.json`](./_audited-ready-hashes.json);`status` 暂留 `drafted`,待 studio 哈希锁机器建成后逐档 `locked`/`FROZEN`。**改这 63 档须经 owner 许可并同步底账**(防静默漂移)。
 > **引擎拥有的切面**：studio 单元若依赖 engine 拥有的契约（子图 path 解析 / golden 落点 / skill 语法 / 错误码 / resolver 协议 / checkpoint），owner 标 `engine:<module>` 且 **只引用 `docs/engine/mvp1/` SSOT、不在 studio 复制**。
 > **⚠️ 标记**：`binds_code` 里带 ⚠️ 的 = 已验真的 code↔design drift（现状 vs 目标冲突），按 decision-3 忠实落进对应 baseline + 警告。本表先收口，逐档 retrofit 时把 ⚠️ 同步到各 baseline 的「测试锚点」差异表。
 > **状态**：spans / owner 为**首版判断**，逐档 retrofit 时按真实正文复核（标 †=owner 待复核）。

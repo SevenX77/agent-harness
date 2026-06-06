@@ -23,6 +23,7 @@ data-contracts = Graph Agent 的**共享数据词汇**:所有模块 import 它�
 
 ## 3. 接口契约
 result 类(`RunResult` 等)显式契约 → `03-api-contract` §2(consumer studio 读 RunResult);`ErrorPayload` 形状跨 compile+runtime 共用(Task3 核心,加 `line` 定位轴)。
+> **错误契约 V2(目标,规则见 `compile-rules` §3.1)**:`ErrorPayload` 现状扁平(`exceptions.py:21`:code/level/stage/message/doc_link + 可选 skill_id/phase_id/field_path/source_path),异常 `GraphAgentError.context`(`exceptions.py:100`)转 payload 时丢弃。V2 加 `details: dict[str,Any]`(序列化异常 context + 每码结构化键)、`remediation: str | None`(注册表回填);`RunResult` 加 `diagnostics: list[ErrorPayload]`(FATAL+WARN 全集,`error` 仍为主致命)。形状归本域,规则/码注册归 `compile-rules`,API 暴露归 `03-api-contract`(三处双向)。
 
 ## 4. 设计决策基础(用户原话)
 > 完整记录(2026-06-03 PM):"mvp1 不应该只是部分优化的文档,而是完整记录整个 engine 设计决策的文档,不变的地方可以复用 mvp0,但是不能不写。"
@@ -36,6 +37,7 @@ result 类(`RunResult` 等)显式契约 → `03-api-contract` §2(consumer studi
 | DC2 | **我们的形状** vs langgraph 原语(底座);原语引用不复述 | 分清"我们的契约"和"依赖的机制" |
 | DC3 | A1:`WorkflowState` 拆 `BusinessData`(用户业务)/`FrameworkState`(框架元数据) | 物理隔离用户字段与框架字段 |
 | DC4 | `ErrorPayload` 加 `line` 轴(Task3)+ golden/iterate domain | 前端精准放标记 + mvp1 新码 |
+| DC5 | **错误契约 V2 形状**:`ErrorPayload` 加 `details`/`remediation`、`RunResult` 加 `diagnostics: list[ErrorPayload]` | 通用消费者要结构化诊断 + 全集(规则见 `compile-rules` §3.1 G1-G6) |
 
 ## 6. 测试关键点
 1. **acyclicity guard**:本模块 import 图不含任何 engine 内部模块。
@@ -48,6 +50,7 @@ engine 全权;公开 `__all__` surface + RunResult 被 studio/外部消费者依
 ## 8. gaps / 待设计
 1. 物理抽出 `core/`(模块重排,kiro)。
 2. `data` 通道 delta reducer(blackboard delta,见 `03-checkpoint`)。
+3. **错误契约 V2 形状**(`ErrorPayload.details/remediation`、`RunResult.diagnostics`,见 `compile-rules` §3.1)——impl 归 kiro。
 
 ## 交叉引用(链接, 不复制)
 00-architecture-overview §2 · `02-mechanism/04-run-outer/03-checkpoint`(state 存储)· `05-run-inner/08-messages-state`(messages 通道)· `03-api-contract`(result)· Task3 错误码审计

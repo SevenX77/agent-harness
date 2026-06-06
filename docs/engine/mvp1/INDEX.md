@@ -86,7 +86,7 @@ engine 可独立锁的单元已全锁(11/12);U10 待 studio 协同。文件级 `
 |---|---|---|---|---|
 | `01-contract/01-physical-layout` | ✅ `mvp1-alignment.md:115,123-126` | ✅ `baseline.md:6,12`; code `loader.py:146`, `runner.py:376/527/541`, `emit.py:15` | ◐ `mvp1-alignment.md:137-138` | `.workspace` 户型已写;`evaluate_golden_baseline`/`golden`/`test_inputs` Engine SDK 未落地。 |
 | `01-contract/02-skill-syntax` | ✅ `mvp1-alignment.md:574,581-588` | ✅ `baseline.md:6,12`; code `loader.py:146/1499/1592`, `manifest.py:108/121/143/152/162`, `mentions.py:21` | ◐ `mvp1-alignment.md`(resource §2.8 + iterate §2.9 已补;仅 io 切片真空) | 仅 io 切片声明真空(resource/example §2.8、iterate §2.9 已收编)。 |
-| `01-contract/03-compile-rules` | ✅ `mvp1-alignment.md:326-332`; `00-architecture-overview.md:98` | ✅ `baseline.md:6`; code `error_registry.py:15`, `loader.py:146`, `purity.py:44` | ✅ `mvp1-alignment.md`(生命周期契约+93 码全表+delta,demarcated;U12 锁,U4/U11 共享) | 文档自承载;实现 delta 仍有新 golden/iterate 码和 LE2 purity 扩展(归 kiro)。 |
+| `01-contract/03-compile-rules` | ✅ `mvp1-alignment.md:326-332`; `00-architecture-overview.md:98` | ✅ `baseline.md:6`; code `error_registry.py:15`, `loader.py:146`, `purity.py:44` | ✅ `mvp1-alignment.md`(生命周期契约+93 码全表+delta,demarcated;U12 锁,U4/U11 共享;+ 错误契约 V2 §3.1 目标已成段) | 文档自承载;实现 delta 仍有新 golden/iterate 码、LE2 purity 扩展、**错误契约 V2(G1-G6)**(归 kiro)。**含 V2 鲜目标 → 不进本轮 FROZEN。** |
 | `01-contract/04-data-contracts` | ✅ `mvp1-alignment.md:27,35-38` | ✅ `baseline.md`(Phase 1 成段 2026-06-05;code state.py/result.py/exceptions.py/error_registry.py/validator_contract.py/types.py + runtime/state.py) | ✅ `mvp1-alignment.md:15-24` | ✅ B 成段;核出 BlackboardState 落点(runtime/state.py 非 core/)+ surface drift,已记 baseline §1/§7。 |
 | `01-contract/05-invalidation` | ✅ `mvp1-alignment.md:29,35-37` | ✅ `baseline.md`(Phase 2 成段 2026-06-05,codex 复审;code cache.py/compiler.py/runner.py) | ✅ `mvp1-alignment.md:32-37`(IV1-3) | ✅ B 成段;旧编译期硬错误码确认从未落地、整哈希 warn 退役标的(仍 live)已记 baseline §2;核出 cache key 缺 action/tool `.py` 缺口(refactor-target)。 |
 | `02-mechanism/01-compile` | ✅ `mvp1-alignment.md:24,30-31` | ✅ `baseline.md:4,20-39`; code `compiler.py:41`, `loader.py:146`, `purity.py:44` | ✅ `mvp1-alignment.md`(§2 编译流水线成段、现状/目标 demarcate;U12 锁) | §2 已成段;死簇清理 + purity LE2 归 kiro。 |
@@ -124,6 +124,7 @@ engine 可独立锁的单元已全锁(11/12);U10 待 studio 协同。文件级 `
 ### 3.3 非 `_migration-src` 真空 / drift
 
 - `01-contract/02-skill-syntax`:仅 io 切片语法仍真空(resource/example §2.8、iterate §2.9 已收编;`mvp1-alignment.md:30`)。
+- **错误契约 V2(G1-G6,新横切目标 2026-06-06)**:通用引擎错误负载增强(结构化 details / remediation / 定位轴必填 / `RunResult.diagnostics` 列表 / doc_link 可解析 + 公开码表 / 运行期细化)——authoritative 规则在 `compile-rules` §3.1、形状在 `data-contracts` DC5、API 在 `03-api-contract` §2.1/§3;全 impl 归 kiro,驱动源 `_api-handshake-audit.md` §3。**这 3 个文件因带 V2 鲜目标,本轮不进 FROZEN。**
 - ~~`01-contract/04-data-contracts/baseline.md`:baseline 仍是待迁 stub~~ → ✅ Phase 1 已成段(2026-06-05)。
 - `02-mechanism/07-runtime`:代码 live(`runner.py:163/376/623`),但顶层入口契约/bootstrap 未成段(`mvp1-alignment.md:15-16,40`)。
 - `GraphAgentHarness` 旧名仍出现在旧注释/示例/测试文本中,但当前 public 入口走 `run_skill`/`predict_skill`;这属于 runtime 文档/注释债,不能反推 live 入口类仍存在(`rg GraphAgentHarness` 命中 examples/tests/callback docstrings)。

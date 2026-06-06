@@ -70,7 +70,7 @@ ground_truth:
 
 **接缝** `06-seam/`
 | `01-models` | LLM 接缝(`GatewayChatModel`,provider 差异归 gateway)+ predict-mock chat model | 主体成段;predict 约束未迁全 |
-| `02-observability` | 可观测**事件流**(34 类 typed event)+ trace.jsonl + metrics(= callbacks 系统;**不是"所有消息"**) | 主体成段;边操作事件未迁全 |
+| `02-observability` | 可观测**事件流**(33 类 typed event)+ trace.jsonl + metrics(= callbacks 系统;**不是"所有消息"**) | 主体成段;边操作事件未迁全 |
 
 **入口**
 | `07-runtime` | `run_skill`/`predict_skill` 两个执行**模式** + bootstrap + public API surface(`__all__`) | ⏳ |
@@ -79,7 +79,7 @@ ground_truth:
 
 | 模块 | 管什么 | 现状 |
 |---|---|---|
-| `03-api-contract` | `run_skill`/`predict_skill`/`compile_skill` 签名 + typed 事件协议(34 类 → trace.jsonl/WS)+ studio HTTP 端点 + `RunResult` 返回契约;共享接口 SSOT、consumer 只链接 | 摘要成段;完整表未迁入 |
+| `03-api-contract` | `run_skill`/`predict_skill`/`compile_skill` 签名 + typed 事件协议(33 类 → trace.jsonl/WS)+ studio HTTP 端点 + `RunResult` 返回契约;共享接口 SSOT、consumer 只链接 | 摘要成段;完整表未迁入 |
 
 > 它是引擎的**对外操作面**:`runtime`(B)实现它、`observability`(B)供它事件流、`data-contracts`(A)供它 `RunResult` 形状——三处双向引用。**和契约层 A 不同类**:A 是"skill 是什么",C 是"怎么调引擎"。
 

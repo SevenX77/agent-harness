@@ -27,7 +27,7 @@ aligns_with: ../00-architecture-overview.md（§4 API契约层 C）
 > `skill_resolver` 的 **DI 协议形状**(输入绝对 path+边界 / 输出子图 root / 失败 raise)归 [`02-resolver`](../02-mechanism/02-resolver/mvp1-alignment.md) §3;本域只定它是 run/compile 的必填参数。
 
 ### 2.2 事件协议
-34 类 typed `CallbackEvent`(判别字段 `event_type`),字段 SSOT = `callbacks/events.py`(归 `02-observability`);live 走 WS、history 走 HTTP、`trace.jsonl` 落盘 SSOT。
+33 类 typed `CallbackEvent`(判别字段 `event_type`),字段 SSOT = `callbacks/events.py`(归 `02-observability`);live 走 WS、history 走 HTTP、`trace.jsonl` 落盘 SSOT。
 
 ### 2.3 关键异步接缝
 引擎 `run_skill` 返回**同步** RunResult;studio `POST .../runs` 返回 RunMetadata(202,**异步** spawn)——接缝在 studio `run_manager`。

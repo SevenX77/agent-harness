@@ -1,9 +1,9 @@
 ---
 module: 02-mechanism/04-run-outer/01-graph-exec
 doc: baseline
-status: drafted（现状对齐 pinned 代码 7cd4b9c；LOGIC 用可变 Context facade,action/tool 两套注册表）
+status: drafted（现状对齐 pinned 代码 7cd4b9c；LOGIC 用可变 Context facade,action/tool 两套注册表;2026-06-05 吸收 11-io 现状:子图 io 1:1 校验 + io.outputs file/artifact 落盘）
 binds_alignment: ./mvp1-alignment.md
-binds_code: core/graph_assembler.py（_build_logic_node:325）· runtime/state_mapper.py:37 · core/actions.py（18/49）
+binds_code: core/graph_assembler.py（_build_logic_node:325, _build_subgraph_node:363）· runtime/state_mapper.py:37 · core/actions.py（18/49）· core/loader.py:528（_validate_subgraph_io_contracts）· io/manager.py:108（save_outputs）· io/storage.py:149（save_artifact）
 ---
 
 # 01-graph-exec — Baseline(当下代码实现逻辑)
@@ -38,8 +38,15 @@ N/A。
 - `ToolDef`(`:49`)/ `ToolRegistry`(`:60`,`_structured_tool` `:76`)——AGENT 的 tool(LLM 调,`StructuredTool`)。
 - **两套独立、不互通、无桥**(mvp1 决定**不统一** capability,见 `04-tools` TL2)。
 
-### 4. SUBGRAPH + io_manager
-SUBGRAPH 节点 `_build_subgraph_node`(`:363`,装配归 `03-assemble`)递归调 child graph,父 data 启动子图、回 delta。io 落盘经 `io/manager.py`。
+### 4. SUBGRAPH:io 严格 1:1 校验(loader)
+SUBGRAPH 节点 `_build_subgraph_node`(`:363`,装配归 `03-assemble`)递归调 child graph,父 data 启动子图、回 delta。
+- **子图 io 严格 1:1 校验**(编译期):`loader.py:_validate_subgraph_io_contracts`(:528,`:211` 调用)对 **inputs + outputs 都**强制父 `SUBGRAPH.md` io == 子 `GRAPH.md` io,任一不等 → `[F-v3-subgraph-io-mismatch]`(:553)fatal。mvp1 要**放宽 inputs**(子图像普通节点从黑板切片)、保留 outputs(见 alignment E1)。
+
+### 5. io.outputs 落盘:file / artifact(io/manager + io/storage)
+`IOManager.save_outputs`(`io/manager.py:108`,storage-agnostic)按 `output_spec.target`(默认 `"file"`,:143)分发:
+- **artifact**(:163):有注入 `artifact_saver` 用它(:176);否则回退框架 `StorageManager.save_artifact`(:168 → `io/storage.py:149`,写 `<run_dir>/phases/<phase>/<name>`、str/bytes 原样 else JSON、发 `ArtifactSavedEvent`)。
+- **file**(:184):`path` 来自 `output_spec.get("path")`(:185);**path-less 默认 `output_dir/{name}.json`**(:186-187,⚠️ 非旧文所写 `runner.py:603`);`{context.key}` 占位由 `_resolve_path_template`(:193 → :210)解析。
+- ⚠️ **缺口:文件导入→黑板**——运行中"跑到节点才把外部文件字段注入黑板"**无机制**(mvp1 新增,alignment E2)。
 
 ## API
 - `StateMapper`(`state_mapper.py:37`)——slice/merge。
@@ -53,6 +60,8 @@ blackboard = `WorkflowState.data`(`data-contracts`);io 经 StateMapper slice/mer
 - **LOGIC 现在能写黑板**:可变 Context facade(`:336`),mvp1 要砍成纯返回。
 - **action/tool 不统一**:两套注册表(spec 已固定 Action≠Tool)。
 - **代码里术语混叫**:历史处把 action 叫 "tool"(死簇,待清)。
+- **子图 io 现严格 1:1**:inputs+outputs 都强制相等(`loader.py:528`),mvp1 放宽 inputs(E1)。
+- **文件导入→黑板无机制**:运行中无"跑到节点才注入外部文件字段"(mvp1 新增 E2)。
 
 ## 🚨 已知代码债(2026-06-05 审计;如实记录,不在文档审计里改代码)
 按"审计 ≠ 改代码"原则,以下代码现状如实登记 + 警告,归 refactor-target(kiro):
@@ -69,6 +78,9 @@ blackboard = `WorkflowState.data`(`data-contracts`);io 经 StateMapper slice/mer
 | 黑板对象 | 塞 `BatchAccumulator` 等非序列化对象 | `iterate.accumulate` + 序列化数据 |
 | 死簇 | `code_phase_node`/`phase_executor` | 删(live 用 `_build_logic_node`) |
 | StateMapper required 校验 | slice **不校验** required(只过滤 properties、缺失静默丢)(`filter_runtime_inputs:25`) | required 缺失报 `[F-v3-runtime-state-mapping-failed]`(alignment §3/§6) |
+| 子图 io 校验 | inputs+outputs **都**严格 1:1(`loader.py:528/553`) | **放宽 inputs**(从黑板切片)、outputs 保留(E1) |
+| 文件导入→黑板 | 无机制 | 跑到节点才 lazy 注入(E2) |
+| io.outputs md artifact | str 原样写(`io/storage.py:167`);finish_task 工具走 markdown→parsed `data`,**未接 business_data_md**(中间件侧) | md 取 `business_data_md`、不 json→md 回转(E3) |
 
 > **验"是否按 mvp1 改了"**:① action 是否变成 `def <name>(inputs)->dict` 纯返回(无 Context mutation);② action 里 `run_skill`/FS 是否触发编译期 purity FATAL;③ 黑板是否只剩可序列化数据;④ StateMapper required 缺失/越界 key 是否报 `[F-v3-runtime-state-mapping-failed]`。
 

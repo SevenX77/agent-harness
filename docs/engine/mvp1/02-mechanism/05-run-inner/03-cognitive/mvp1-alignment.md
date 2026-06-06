@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/05-run-inner/03-cognitive
 doc: mvp1-alignment
-status: drafted（机制·运行内层;A 主体迁入;W 原话需补链;rich 三态校验未接 live）
+status: drafted（机制·运行内层;A §2 finish_task/三态/输出/prompt 成段;W 工程决策(§4 已披露);rich 三态接 live=impl 归 kiro）
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行内层）
 ---
 

@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/04-run-outer/01-graph-exec
 doc: mvp1-alignment
-status: drafted（**U4(LOGIC)单元锁定 2026-06-06**;LOGIC 干净契约 LE1-3 已定、live drift→refactor-target 归 kiro;AGENT run_context/io_manager 已成段(源 11-io)、nudge 收口待成段(U3/AGENT facet);文件未 FROZEN——graph-exec 还参与 U3/U11）
+status: drafted（**U4(LOGIC)单元锁定 2026-06-06**;LOGIC 干净契约 LE1-3 已定、live drift→refactor-target 归 kiro;AGENT run_context/io_manager 已成段(源 11-io)、nudge 归 `05-exit-control`(已成段,graph-exec 仅 AGENT 委派);文件未 FROZEN——graph-exec 还参与 U3/U11）
 binds_baseline: ./baseline.md
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行外层）
 ---
@@ -69,7 +69,7 @@ LOGIC 干净契约已定;**live 的 drift = 要重构掉的反模式**(不是真
 5. 死簇 `code_phase_node`/`phase_executor` 删(live 用 `_build_logic_node`)。
 6. 反写:解冻 `03-logic-md-spec` 改 action 契约(归 `compile-rules`/`skill-syntax`)。
 7. action/tool 统一 capability:spec 已固定 Action≠Tool,纯 action(read-only dict)与 tool(StructuredTool)本质不同 → **不统一**。
-+ run_context/io_manager 收口(源 11-io,本轮成段):子图 inputs 放宽(改 `loader.py:528` 只校 outputs)、文件导入→黑板(`_wrap_phase_runtime_node` 前置步,新能力)、io.outputs artifact 路径标注扩展 + md 取 business_data_md——均 TDD 归 kiro;边操作**事件**(BlackboardReduce/InputDispatch/InputFileInjected)归 `observability`(双向)。nudge 收口仍待成段。
++ run_context/io_manager 收口(源 11-io,本轮成段):子图 inputs 放宽(改 `loader.py:528` 只校 outputs)、文件导入→黑板(`_wrap_phase_runtime_node` 前置步,新能力)、io.outputs artifact 路径标注扩展 + md 取 business_data_md——均 TDD 归 kiro;边操作**事件**(BlackboardReduce/InputDispatch/InputFileInjected)归 `observability`(双向)。nudge/after_agent 闸 owner = `05-exit-control`(已成段),graph-exec 的 AGENT 分支(§2)委派内层即可、无额外 io 收口。
 + **FROZEN 解冻(源 11-io)**:`04-subgraph-md-spec` 删 inputs 1:1(归 `skill-syntax`/`compile-rules`)、io.outputs 加 artifact 路径标注 + file-import 声明(归 `skill-syntax`)。
 
 ## 交叉引用(链接, 不复制)

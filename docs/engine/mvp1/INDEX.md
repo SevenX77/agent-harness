@@ -52,6 +52,16 @@ governed_by: ../../development/design-doc-standards/（00 三轴 · 02 R8 设计
 
 **当前(2026-06-05 逐模块核账):全部 `drafted`,零 `FROZEN` / 零单元 `locked`。** 锁状态不得继承旧 `✅` 标签,只按 §3 的 W/B/A 三关判断。
 
+### 锁就绪复评(2026-06-05,PM 定 A 达标线 = "写全目标 + 标清现状/gap,实现归 kiro")
+按此线,"只差实现"的 A◐ 达标升 ✅,"目标真空/待设计/待成段"的 A◐ 不达标:
+- **A 达标(✅,目标写全 + demarcated,只差 impl)**:`physical-layout`、`compile-rules`、`02-resolver`、`03-checkpoint`、`08-messages-state`、`02-middleware`、`05-exit-control`、`07-subagent`、`06-seam/01-models`(+ 既有 `data-contracts`/`invalidation`);`06-golden-eval` 达标但 alignment 未经 codex 审(锁前补审)。
+- **A 不达标(真空/待设计/待成段,非 impl)**:`skill-syntax`(批3真空)、`04-tools`(ToolError 待设计)、`07-runtime`(顶层契约待成文)、`01-compile`(机制待成段化)、`graph-exec`(nudge 收口待成段)、`02-iterate`(iterate 真空)、`03-assemble`(reference/example 受 skill-syntax)、`06-seam/02-observability`(V4 trace 增补待设计)、`03-api-contract`(defer)。
+- **B 仍 ◐(baseline 待补深,与 A 达标线无关)**:`02-iterate`、`03-checkpoint`、`02-middleware`、`08-messages-state`、`03-api-contract`。
+- **W 仍 ◐(决策待补链)**:`03-assemble`、`01-agent-loop`、`03-cognitive`、`04-tools`。
+
+**锁就绪单元(◆owner 三关全 ✅)**:**U6**(变更→失效,◆=invalidation)、**U8**(退出闸,◆=05-exit-control)已就绪;**U2**(golden→workspace,◆=physical-layout+06-golden-eval)待 golden-eval alignment 补 codex 审即就绪。锁前每单元做一次 demarcation/codex 终审再 `FROZEN`。
+**仍阻塞**:U1(skill-syntax 真空)、U3/U7(04-tools)、U4(skill-syntax 解冻 + graph-exec nudge)、U5(checkpoint/messages B◐)、U9(observability V4)、U10(api-contract)、U11(02-iterate)、U12(01-compile)。
+
 1. **mvp0 只允许说"契约已迁"**:
    - `skill-spec`/`workspace-spec` 的契约内容已迁入 mvp1 对应契约模块,旧契约文档可 deprecated、不作 SSOT。
    - **mvp0/engine 迁移:纯 engine 源已清,只剩 `api-engine-studio-contract`(17 块,牵 studio,defer)**:`09-golden-eval`(baseline 迁、alignment G1-G5 已退役)、`11-io-and-edge-ops`、`records/state-checkpoint-storage-model`、`records/uncovered-areas`(约束/D-test 已分发,codex 复审)、`records/change-invalidation`(1 块退役)均已清(见 §3.2)。api-contract 清完才能说"整域 deprecated"。

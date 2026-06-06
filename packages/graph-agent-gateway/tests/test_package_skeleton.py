@@ -53,6 +53,7 @@ def test_gateway_package_owns_provider_dependency_boundary() -> None:
 
     assert "langchain-openai" in pyproject
     assert "langchain-anthropic" in pyproject
+    assert "langchain-google-genai" in pyproject
 
     graph_agent_pyproject = (
         PACKAGE_ROOT.parent / "graph-agent" / "pyproject.toml"

@@ -1,24 +1,30 @@
 ---
 module: 11-inv-provider-profiles
 doc: baseline
-status: written
-last_verified: 2026-06-02
+status: drafted
+verified_at: 2026-06-06
+binds_design: ./mvp1-alignment.md
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/provider_profiles.py:ProviderProfile/register_provider_profile/get_provider_profile/apply_provider_profile · packages/graph-agent-gateway/src/graph_agent_gateway/route_chat_model_factory.py:RouteChatModelFactory/_apply_profiles · packages/graph-agent-gateway/src/graph_agent_gateway/registry/profile_selector.py:ProfileSelectionError/select_verified_profile/_profile_supports_reasoning/_preferred_profile · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:VerifiedProfile/ProviderRoute/ResolvedRoute · packages/graph-agent-gateway/src/graph_agent_gateway/registry/capabilities.py:RUNTIME_SETTING_DESCRIPTORS/normalize_route_capabilities/build_runtime_setting_descriptors · packages/graph-agent-gateway/src/graph_agent_gateway/registry/lint.py:lint_role_routes/capability_key_for_lint · packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:resolve_role · packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:LLMClientManager/_dispatch_provider_call/_call_openai_compatible/_call_openai_responses/_call_google_genai/_call_ark_runtime/_call_anthropic_compatible/_google_thinking_config
+units: [provider-profiles-init-kwargs]
+aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
 
 # 11-inv-provider-profiles - Baseline(现状)
 
-> **Tier**：③b gateway 公共能力（**MVP1 新建**调用层 provider 差异表；归属表判 11=纯 ③b 新建，见 `module-disposition-revised.md:44,84`）。**本模块现源码不存在**——下文诚实记录"没有 `ProviderProfile` 调用层模块"这一现状（只有 `registry/profile_selector.py` 的 verified profile 选择器，与拟新建的 `ProviderProfile` 是不同层级），以及 provider 差异现散在 `profile_selector`+`capabilities`+`client_manager` thinking 分支。MVP1 目标见同目录 `mvp1-alignment.md`。
+> **Tier**：③b gateway 公共能力（**MVP1 新建**调用层 provider 差异表；归属表判 11=纯 ③b 新建，见 `module-disposition-revised.md:54`）。**WS-1 后 `ProviderProfile` 调用层模块已存在**，但默认 registry 为空；它与 `registry/profile_selector.py` 的 `VerifiedProfile` 仍是不同层级。MVP1 目标见同目录 `mvp1-alignment.md`。
 
 ## 覆盖代码(含覆盖率)
 
-本模块当前没有独立 `ProviderProfile` 调用层模块。`ProviderProfile` 是拟新建的 provider/model 到 ChatX init kwargs 的声明式配置模式；现状源码只有 `registry/profile_selector.py` 里的 verified profile 选择器，它选择“已验证调用方式”，不是 ChatX 构造 profile(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/profile_selector.py:1-23`; `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:189-204`)。
+本模块当前已有独立 `ProviderProfile` 调用层模块。`ProviderProfile` 是 provider/model 到 ChatX init kwargs 的声明式配置模式；`VerifiedProfile` 是 registry 里“已验证调用方式”的选择结果，不是 ChatX 构造 profile。
 
-覆盖率:100%。这里覆盖 MVP1 manifest 指定的散落职责:profile selection、capability normalization、runtime lint、resolver selected profile 字段、client_manager thinking/provider 分支(`docs/graph-agent-gateway/mvp1/README.md:39-40`)。
+覆盖率:100%。这里覆盖 MVP1 manifest 指定的 profile 职责:ProviderProfile registry、factory overlay、verified profile selection、capability normalization、runtime lint、resolver selected profile 字段，以及 legacy client_manager thinking/provider 分支的延期状态。
 
 覆盖代码索引:
 
 | 代码 | 覆盖原因 |
 |---|---|
+| `packages/graph-agent-gateway/src/graph_agent_gateway/provider_profiles.py` | `ProviderProfile`、注册表、provider/exact-model merge、`apply_provider_profile` 已落地；默认注册表为空。 |
+| `packages/graph-agent-gateway/src/graph_agent_gateway/route_chat_model_factory.py` | factory 通过 `_apply_profiles` 应用 profile overlay，当前 key 为 `endpoint_id:provider_model_id`。 |
 | `packages/graph-agent-gateway/src/graph_agent_gateway/registry/profile_selector.py:14-72` | 现状 `select_verified_profile` 只按 ready/profile capability/input modality/reasoning 选 verified profile。 |
 | `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:189-204` | `VerifiedProfile` 是一条 tested invocation profile，字段是 method/request mapper/status/default/rank，不是 ChatX init kwargs 表。 |
 | `packages/graph-agent-gateway/src/graph_agent_gateway/registry/capabilities.py:20-32` | normalized runtime setting descriptor 列表定义 provider-neutral 设置键。 |
@@ -26,37 +32,41 @@ last_verified: 2026-06-02
 | `packages/graph-agent-gateway/src/graph_agent_gateway/registry/lint.py:27-80` | `lint_role_routes` 用 capability 做 warn/block，不做 provider 调用构造。 |
 | `packages/graph-agent-gateway/src/graph_agent_gateway/registry/lint.py:202-332` | runtime setting lint 检查 reasoning effort、structured output、thinking budget 等 provider 差异。 |
 | `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:72-113` | `resolve_role` 把 selected verified profile 写进 `ResolvedRoute.call_method_id/request_mapper_id`。 |
-| `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:440-1012` | provider 差异最终仍落在 `_call_*` kwargs 和 thinking 分支里。 |
+| `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:440-1012` | 旧 provider 差异/ thinking 分支仍在 legacy helper 中，但 WS-1 主路径不再调用这些 `_call_*`。 |
 
 ## 编号执行流程(现状)
 
-1. `ProviderRoute` 是一个 endpoint 上的物理模型 route；它保存 `provider_model_id`、`canonical_id`、capabilities 和 `verified_profiles`(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:207-220`)。
-2. `VerifiedProfile` 是一种已验证调用方式；它记录 `profile_id`、`capability`、`method_id`、`request_mapper_id`、状态、默认标记和排序，用于从多个调用方式中选一个(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:189-204`)。
-3. `select_verified_profile` 是 verified profile 选择函数；它先过滤 status 为 ready 的 profile，再按输入模态和 reasoning 需求筛选(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/profile_selector.py:14-52`)。
-4. `_profile_supports_reasoning` 是 reasoning profile 判定 helper；它靠 `capability`、`profile_id`、`request_mapper_id` 文本里是否包含 thinking/reasoning 来判断，不生成 ChatX kwargs(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/profile_selector.py:55-66`)。
-5. `_preferred_profile` 是排序 helper；它按 default、fallback_rank、profile_id 选最优 ready profile(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/profile_selector.py:69-72`)。
-6. `normalize_route_capabilities` 是 capability 归一化函数；它把 provider 原始 metadata 归一成 `CapabilityValue`，并为 Anthropic-compatible thinking 写入 `thinking_protocol`、`adaptive_thinking`、`manual_thinking_budget_supported` 等能力(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/capabilities.py:35-202`)。
-7. `lint_role_routes` 是 role route lint 函数；它根据 role 要求和 runtime settings 产 warn/error，blocking 时阻止解析，但不构造 provider client(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/lint.py:27-80`; `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:116-122`)。
-8. `resolve_role` 是 registry resolver；它调用 `select_verified_profile`，再把 selected profile 的 `profile_id`、`capability`、`method_id`、`request_mapper_id` 写入 `ResolvedRoute`(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:72-113`)。
-9. `GatewayChatModel._generate` 读取 `reasoning.enabled`、`reasoning.budget_tokens`、`reasoning.effort` 等 effective runtime settings 后传给 `_dispatch`(`packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:205-224`)。
-10. `LLMClientManager._dispatch_provider_call` 按 protocol 分支把这些值传给 provider-specific `_call_*`；provider 差异最终散在 OpenAI Responses、Google thinking config、Anthropic thinking、Ark/OpenAI-compatible kwargs 中(`packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:866-988`)。
+1. `ProviderProfile` 保存 `init_kwargs`、可选 `pre_init(route)` 和可选 `init_kwargs_factory(route)`。
+2. `register_provider_profile(key, profile)` 会按规范化 key 注册 profile；重复注册同 key 时增量 merge，后者覆盖 init kwargs。
+3. `get_provider_profile(spec)` 会先取 provider-level key，再取 exact spec key，并把二者 merge。当前没有内置默认注册，registry 初始为空。
+4. `apply_provider_profile(spec, route=..., **caller_kwargs)` 的优先级是 `pre_init` -> `init_kwargs` -> `init_kwargs_factory` -> caller kwargs，因此 factory 的显式 kwargs 最终优先。
+5. `RouteChatModelFactory._apply_profiles` 当前使用 `f"{route.endpoint_id}:{route.provider_model_id}"` 查 profile；这等于把 endpoint 维度纳入 provider/model key。
+6. `VerifiedProfile` 仍由 `select_verified_profile` 选择，并写入 `ResolvedRoute.call_method_id/request_mapper_id`；它不生成 ChatX init kwargs。
+7. `normalize_route_capabilities` 和 `lint_role_routes` 仍表达“支持什么”和“是否违规”，不是 provider init kwargs overlay。
+8. thinking 当前只在 factory runtime kwargs 中映射了部分字段，且 ChatX `AIMessage` 结果桥不拍平 content；完整 provider profile defaults、DeepSeek 单方法 payload patch 和旧 thinking helper 迁移仍未完成。
 
 ## Baseline / Alignment 差异
 
-baseline 当前无独立 provider profile 模块。职责散在三层:registry 层选择 verified profile 和 capability/lint，resolver 把 method/request mapper 贴到 route，client_manager 在 provider 分支里写 kwargs 和 thinking payload(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/profile_selector.py:14-72`; `packages/graph-agent-gateway/src/graph_agent_gateway/registry/capabilities.py:35-202`; `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:440-1012`)。
+`ProviderProfile` 已建，但只是空 registry + merge/apply 原语。职责不再完全散在 client_manager；factory 已能在构造 ChatX 前应用 profile overlay。旧 client_manager `_call_*` 仍保留 provider-specific thinking/payload 代码，但已经不是生产主调用路径。
 
-alignment 要引入的 `ProviderProfile` 不是现有 `VerifiedProfile`。`ProviderProfile` 是 ChatX 构造 profile，用 provider/model key 映射到 init kwargs、可选 `pre_init` 和动态 factory；`VerifiedProfile` 是 route 已验证调用方式，用 method/request mapper 做运行期选择(`temp/deepagents/libs/deepagents/deepagents/profiles/provider/provider_profiles.py:36-90`; `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:189-204`)。
+alignment 要引入的 `ProviderProfile` 不是现有 `VerifiedProfile`。这一点在代码里已拆开：`ProviderProfile` 位于 `provider_profiles.py`，用于 ChatX 构造；`VerifiedProfile` 仍在 registry schema 中，用 method/request mapper 做运行期选择。
+
+尚未完成的 alignment 差异：registry 默认空，未 seed OpenAI/Ark/Anthropic/Google provider defaults；thinking 归一化只完成局部映射和结果不拍平；DeepSeek reasoning-content 单方法 patch 未移植；key 规则 `endpoint_id:provider_model_id` 仍是待确认选择。
 
 ## 决策原因
 
-1. 现状 provider 差异太分散。OpenAI-compatible、Google、Ark、Anthropic 分别在 `_call_*` 函数里组织 kwargs，thinking 也在 provider 分支内处理(`packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:459-482`; `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:581-587`; `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:709-752`)。
+1. provider 差异过去太分散。OpenAI-compatible、Google、Ark、Anthropic 分别在 `_call_*` 函数里组织 kwargs，thinking 也在 provider 分支内处理；WS-1 先把 profile 原语和 factory overlay 落地。
 2. capability 是“支持什么”，不是“怎么构造 ChatX”。`capabilities.py` 文件头明确 capabilities 描述 support/bounds，用户 runtime intent 属于 role/profile route entry；这不等于 provider init kwargs profile(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/capabilities.py:1-5`)。
-3. lint 只能 warn/block，不能变成动态 provider 选择。MVP0 alignment 明确禁止按 provider/capability/price/latency/availability 搜索替代 route，capability 只能 lint/warn/block/fail-fast(`docs/graph-agent-gateway/mvp0/mvp0-alignment.md:142-146`)。
+3. lint 只能 warn/block，不能变成动态 provider 选择。MVP1 当前权威是 README 的 05 模块边界与 05 文档；当前代码也只在 `lint_role_routes` 里产 warn/block，并由 `resolve_role` 对 blocking lint fail-fast，不会按 capability/price/latency/availability 搜索替代 route(`docs/graph-agent-gateway/mvp1/README.md:58`; `packages/graph-agent-gateway/src/graph_agent_gateway/registry/lint.py:27-85`; `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:116-122`)。
 4. provider profile 应只处理模型构造差异。client 层 A' 重设计决策（F6）要求用 deepagents `ProviderProfile` 模式承载 headers、Responses API、温度默认、thinking 开关等 init kwargs；只有 payload 差异才子类覆盖单方法，不能重写整套消息转换(完整逻辑 + PM 拍板原话见同目录 `mvp1-alignment.md` §4 F6 / §5 决策 1)。
+5. `endpoint_id:provider_model_id` 的临时 key 选择是为了同时区分 endpoint 级 base_url/credential/protocol 差异和物理模型差异；这避免同一 canonical model 在不同 endpoint/provider 下互相覆盖。但 alignment 11 §8 把 key 规则列为开放问题，所以这里仅记录理由，待最终确认。
 
 ## 代码索引 clues
 
-- `ProviderProfile`:当前 gateway 源码没有该调用层类；目标用途是 provider/model 到 ChatX init kwargs、`pre_init`、factory 的声明式配置（F6，完整逻辑见同目录 `mvp1-alignment.md` §4 F6 / §1 / §2）。
+- `ProviderProfile`:已存在，目标用途是 provider/model 到 ChatX init kwargs、`pre_init`、factory 的声明式配置。
+- `_PROVIDER_PROFILES`:默认空 registry；没有内置 provider defaults。
+- `register_provider_profile/get_provider_profile/apply_provider_profile`:已存在的 profile 原语。
+- `RouteChatModelFactory._apply_profiles`:当前用 `endpoint_id:provider_model_id` 查 profile。
 - `VerifiedProfile`:现有 schema 类，表示一条已经验证过的 provider route 调用方式，不是 ChatX 构造配置(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:189-204`)。
 - `select_verified_profile`:现有选择函数，按 ready 状态、输入模态和 reasoning 需求挑一个 `VerifiedProfile`(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/profile_selector.py:14-52`)。
 - `normalize_route_capabilities`:现有能力归一化函数，把 provider 原始能力变成 normalized capability records(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/capabilities.py:35-202`)。
@@ -66,6 +76,8 @@ alignment 要引入的 `ProviderProfile` 不是现有 `VerifiedProfile`。`Provi
 
 ## 待办/疑点
 
-1. 待办:命名上需要避免 `ProviderProfile` 与现有 `VerifiedProfile` 混淆；前者是 ChatX 构造 profile，后者是 route probe/verified 调用方式。
-2. 待办:`call_method_id` 与 `request_mapper_id` 在 MVP1 后是否继续存在，需要和 `ProviderProfile` 的 init kwargs 表分清层级；现状它们由 selected verified profile 写入 route(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:94-103`)。
-3. 疑点:现有 `_profile_supports_reasoning` 通过字符串包含 thinking/reasoning 判断 profile 是否支持 reasoning，是否足够稳定应在 05 模块继续跟踪；本模块只记录它不是 ChatX provider profile(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/profile_selector.py:55-66`)。
+1. 待办:seed ProviderProfile 默认表，至少覆盖本轮 official ChatX 主路径需要的 provider/model defaults。
+2. 待办:thinking 归一化完整迁入 ProviderProfile 或单方法 patch；当前只是局部 runtime kwargs 映射和 ChatX result 不拍平。
+3. 待办:`call_method_id` 与 `request_mapper_id` 在 MVP1 后是否继续存在，需要和 `ProviderProfile` 的 init kwargs 表分清层级。
+4. 疑点:ProviderProfile key 暂用 `endpoint_id:provider_model_id`，待 alignment 11 §8 确认。
+5. 疑点:现有 `_profile_supports_reasoning` 通过字符串包含 thinking/reasoning 判断 profile 是否支持 reasoning，是否足够稳定应在 05 模块继续跟踪；本模块只记录它不是 ChatX provider profile。

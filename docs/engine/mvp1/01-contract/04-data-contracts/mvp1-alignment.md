@@ -37,7 +37,7 @@ result 类(`RunResult` 等)显式契约 → `03-api-contract` §2(consumer studi
 | DC2 | **我们的形状** vs langgraph 原语(底座);原语引用不复述 | 分清"我们的契约"和"依赖的机制" |
 | DC3 | A1:`WorkflowState` 拆 `BusinessData`(用户业务)/`FrameworkState`(框架元数据) | 物理隔离用户字段与框架字段 |
 | DC4 | `ErrorPayload` 加 `line` 轴(Task3)+ golden/iterate domain | 前端精准放标记 + mvp1 新码 |
-| DC5 | **错误契约 V2 形状**:`ErrorPayload` 加 `details`/`remediation`、`RunResult` 加 `diagnostics: list[ErrorPayload]` | 通用消费者要结构化诊断 + 全集(规则见 `compile-rules` §3.1 G1-G6) |
+| DC5 | **错误契约 V2 形状(细化见 `compile-rules` §3.1.1)**:`ErrorPayload` 加 `source_span`/`phase_path[]`/`stage_id`/`details`(+每码 `details_schema`)/`remediation`/`message_key`;`RunResult` 加 `diagnostics: list[ErrorPayload]` + `diagnostics_limit`/`diagnostics_truncated`/`diagnostic_counts` | 通用消费者要结构化诊断 + 有界全集;分期落地(P0-1 details+diagnostics,P1 source_span/phase_path) |
 
 ## 6. 测试关键点
 1. **acyclicity guard**:本模块 import 图不含任何 engine 内部模块。

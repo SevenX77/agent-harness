@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/04-run-outer/03-checkpoint
 doc: baseline
-status: drafted（现状对齐 pinned 代码 7cd4b9c；run/thread 级已接,内层未挂、data 无 delta reducer）
+status: drafted（B 成段 2026-06-05,codex 已核(records/uncovered 块);run/thread 级 checkpoint 已接(runner.py:663→graph_assembler.py:151),内层 AGENT 分支不传 checkpointer(:201)、data 无 delta reducer、持久化边界 phase_executor.py:82）
 ---
 
 # 03-checkpoint — Baseline(当下代码实现逻辑)
@@ -38,8 +38,9 @@ state schema `WorkflowState`(归 `data-contracts`):`data`(blackboard,本域外�
 
 ## 当前边界(这个模块现在不是什么)
 - **只到 run/thread 级**:现状无节点级精准 resume、无嵌套 `checkpoint_ns` 分层。
-- **内层不挂**:agent loop 当前不在内层挂 checkpointer(mvp1 要经 `ns="<id>/agent"` 挂同一 base,使 HITL 续跑成立)——归 `08-messages-state`。
+- **内层不挂**:agent loop 当前不在内层挂 checkpointer——AGENT 分支 `_build_skill_node` **不接收 checkpointer**(`graph_assembler.py:201`;仅 SUBGRAPH 分支 `:193` 传),agent 仍手写 `for _ in range(max_turns)` loop(`:511`)。mvp1 要经 `ns="<id>/agent"` 挂同一 base 使 HITL 续跑成立——归 `08-messages-state`。
 - **data 无 delta**:`data` 通道每 super-step 全量(mvp1 要补 delta reducer)。
+- **持久化边界(现状证据)**:`PhaseExecutor.__getstate__`(`phase_executor.py:82`)fail-fast 禁 pickle `_phase_executor`——runtime 对象(callback/runtime/compiled graph)不得入可持久化 checkpoint state(legacy 路线约束,mvp1 沿用,见 alignment §8 #4)。
 
 ## baseline / alignment 差异(测试锚点)
 | 维度 | 现状(baseline) | mvp1 目标 |

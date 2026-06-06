@@ -1,0 +1,15 @@
+# DO NOT EDIT without owner approval. Engine doc exemptions are governance
+# records for intentional, reviewed drift from audited-ready design docs.
+#
+# Schema example:
+# version: "1"
+# exemptions:
+#   - exemption_id: EX-ENGINE-DOC-0001
+#     file: "03-api-contract/baseline.md"
+#     sha256: "new 64-character SHA-256 hex digest"
+#     reason: "Why this temporary drift is allowed."
+#     owner_approval: "Who approved it, with date or PR/reference."
+#     expires_or_cleanup: "Remove after the baseline hash table is updated."
+
+version: "1"
+exemptions: []

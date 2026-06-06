@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/02-resolver
 doc: baseline
-status: drafted（现状对齐 pinned 代码 7cd4b9c；DI 接缝 = Protocol + LocalWorkspaceResolver,live；⚠️ 现状=registry/id 寻址=被 mvp1 path 反转的旧模型）
+status: audited-ready（现状对齐 pinned 代码 7cd4b9c；DI 接缝 = Protocol + LocalWorkspaceResolver,live；⚠️ 现状=registry/id 寻址=被 mvp1 path 反转的旧模型）
 ---
 
 # 02-resolver — Baseline(当下代码实现逻辑)

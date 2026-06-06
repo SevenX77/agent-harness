@@ -1,7 +1,7 @@
 ---
 module: 01-contract/01-physical-layout
 doc: mvp1-alignment
-status: drafted（mvp1 自写=唯一真理；子图 subgraph/ 默认落点 + golden→workspace；.workspace 户型字段正文已迁入 §2.2）
+status: audited-ready（mvp1 自写=唯一真理；子图 subgraph/ 默认落点 + golden→workspace；.workspace 户型字段正文已迁入 §2.2）
 aligns_with: ../../00-architecture-overview.md（§2 契约层 A）
 ---
 

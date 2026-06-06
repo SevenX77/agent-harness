@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/05-run-inner/08-messages-state
 doc: baseline
-status: drafted（B 成段 2026-06-05,codex 已核(records/uncovered 块);messages DeltaChannel(state.py:214)live,compaction 搁浅 legacy(llm_phase_node.py:275/381/809)、live 单槽无 compaction,interrupt 原语 live(cognitive_flow.py:292)但 resume_run 501 桩）
+status: audited-ready（B 成段 2026-06-05,codex 已核(records/uncovered 块);messages DeltaChannel(state.py:214)live,compaction 搁浅 legacy(llm_phase_node.py:275/381/809)、live 单槽无 compaction,interrupt 原语 live(cognitive_flow.py:292)但 resume_run 501 桩）
 ---
 
 # 08-messages-state — Baseline(当下代码实现逻辑)

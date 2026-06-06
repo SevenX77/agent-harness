@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/05-run-inner/06-golden-eval
 doc: baseline
-status: drafted（B 成段 + codex 复审修正:对 graph-agent + graph-agent-gateway + apps/studio grep 核 2026-06-05;live=逐节点回放(resolve_generation P0)+ engine 路径 diff(→success)+ prompt+schema 双哈希 warn(退役标的)+ studio 字段 diff(整 final_state)+ studio 写 .workspace/golden 整次快照;拦截在 gateway 包、engine interception 是未接线 skeleton;逐节点常驻 golden / eval 期失效 / engine SDK 逐节点字段 diff 未实现）
+status: audited-ready（B 成段 + codex 复审修正:对 graph-agent + graph-agent-gateway + apps/studio grep 核 2026-06-05;live=逐节点回放(resolve_generation P0)+ engine 路径 diff(→success)+ prompt+schema 双哈希 warn(退役标的)+ studio 字段 diff(整 final_state)+ studio 写 .workspace/golden 整次快照;拦截在 gateway 包、engine interception 是未接线 skeleton;逐节点常驻 golden / eval 期失效 / engine SDK 逐节点字段 diff 未实现）
 binds_alignment: ./mvp1-alignment.md
 binds_code: packages/graph-agent/src/graph_agent/core/runner.py:{resolve_generation, _warn_on_stale_golden_hashes_sdk, path diff(:335)} · core/_predict_internal/{models.py:GoldenCase, strategy.py:MockStrategy, interception.py(skeleton), path_diff.py, stub.py} · packages/graph-agent-gateway/src/graph_agent_gateway/{predict_interception.py, resolver.py} · (studio) apps/studio/backend/app/services/{golden_diff.py, diagnostic_export.py, skills.py:golden_dir_for}
 ---

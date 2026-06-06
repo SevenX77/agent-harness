@@ -1,7 +1,7 @@
 ---
 module: 01-contract/01-physical-layout
 doc: baseline
-status: drafted（现状对齐 pinned 代码 7cd4b9c；skill 树按 loader 校验；run/predict 写 runs/<run_id>；golden/test_inputs engine SDK 尚未落地）
+status: audited-ready（现状对齐 pinned 代码 7cd4b9c；skill 树按 loader 校验；run/predict 写 runs/<run_id>；golden/test_inputs engine SDK 尚未落地）
 binds_alignment: ./mvp1-alignment.md
 binds_code: packages/graph-agent/src/graph_agent/core/loader.py:SkillLoader.compile_skill · packages/graph-agent/src/graph_agent/core/loader.py:_PHASE_FILE_TO_MODE · packages/graph-agent/src/graph_agent/core/runner.py:run_skill · packages/graph-agent/src/graph_agent/core/runner.py:predict_skill · packages/graph-agent/src/graph_agent/core/runner.py:_validate_workspace_dir · packages/graph-agent/src/graph_agent/core/runner.py:_write_workflow_result_artifacts · packages/graph-agent/src/graph_agent/callbacks/emit.py:_TraceJsonlSink · packages/graph-agent/src/graph_agent/core/result.py:RunResult
 ---

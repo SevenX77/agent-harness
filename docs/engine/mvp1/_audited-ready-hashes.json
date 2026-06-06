@@ -1,0 +1,26 @@
+{
+  "_meta": {
+    "count": 16,
+    "scope": "engine mvp1 audited-ready (unit-locked modules)",
+    "generated": "2026-06-06",
+    "note": "DO NOT EDIT manually; regenerate on approved doc change or add to _doc-exemptions.yaml"
+  },
+  "hashes": {
+    "01-contract/01-physical-layout/baseline.md": "a773fcd045379798306f98e0b4f405656731f3add2e2a901b44a587e14fc5e42",
+    "01-contract/01-physical-layout/mvp1-alignment.md": "3c88f9b6665e6ef041b5c15c01dc93d5869d8357f531ce294a5c216edcb013bd",
+    "01-contract/05-invalidation/baseline.md": "2fbe87d807eafd621336ccc069f0e54f08e673cc484d5e444cebb6da527485b8",
+    "01-contract/05-invalidation/mvp1-alignment.md": "1d7e0549174933332da5808aef85690d1a2c07ac4d505f42539009920be4bd9e",
+    "02-mechanism/01-compile/baseline.md": "50c584727283895486a2e9c277c1aac142dd40c96177819ffbb0d5c1d670faba",
+    "02-mechanism/01-compile/mvp1-alignment.md": "4b30b9d814906d5b544b4c2ed806184e2a6ce8b72e647254cf27650ff18e0536",
+    "02-mechanism/02-resolver/baseline.md": "02152362216c609c01191f69d73f06e687ef93663227ad4087433bb93c16a8fd",
+    "02-mechanism/02-resolver/mvp1-alignment.md": "802a424eda18f9ca6e4ecd5210ebb7c150c2cc239bb06c9acfebcf8018e4ab4d",
+    "02-mechanism/04-run-outer/03-checkpoint/baseline.md": "e6fa0c78d55a63fd9d9d820028d2c908ed038eecc1133f0469169b2272ada557",
+    "02-mechanism/04-run-outer/03-checkpoint/mvp1-alignment.md": "436e6f0c68d3023e6876fbe8b93039be34c6522c3cc925ac7433573671a309ee",
+    "02-mechanism/05-run-inner/05-exit-control/baseline.md": "9aba1a24f5af47278e1adc62b7090b4fbca0e4d2b22d4774dfb65e56f8929e00",
+    "02-mechanism/05-run-inner/05-exit-control/mvp1-alignment.md": "f45e788e15cf7b6fdeb9306cbc8882675f39edd6cbf8a414e5f8af7e34e394fb",
+    "02-mechanism/05-run-inner/06-golden-eval/baseline.md": "a0644125f70859cfc04be7f2ba67955c219b1df7ec867c21f3ad57b86aa828ea",
+    "02-mechanism/05-run-inner/06-golden-eval/mvp1-alignment.md": "6d540c79f9a9fd24def410543d923b8d0cf103105d393c9620b360322948ff23",
+    "02-mechanism/05-run-inner/08-messages-state/baseline.md": "72d9f7ec0c99d9008e6e1478405ea4521e1af96be345a380f8f6f00d13cad59f",
+    "02-mechanism/05-run-inner/08-messages-state/mvp1-alignment.md": "c71b89ad4e11bde436d693a2de303ec1c73869da59d454dad6330f0b5b5388dd"
+  }
+}

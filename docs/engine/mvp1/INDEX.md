@@ -52,6 +52,8 @@ governed_by: ../../development/design-doc-standards/（00 三轴 · 02 R8 设计
 
 **当前(2026-06-06):U1/U2/U3/U4/U5/U6/U7/U8/U9/U11/U12 单元 `locked`(11/12),仅 U10 `drafted`(defer,牵 studio);零文件级 `FROZEN`**(文件级 FROZEN 待该文件所有单元锁齐 + 跨切待设计清零——如 `02-middleware` 参与 U7/U11 单元已锁但 parallel_map×链 断层#3 跨切待设计、暂不冻;`02-observability` 参与 U7/U9、`compile-rules` 参与 U4/U11/U12、`02-iterate` 参与 U5/U7/U11、`03-checkpoint` 参与 U5/U6,故只锁单元不冻文件)。 锁状态不得继承旧 `✅` 标签,只按 §3 的 W/B/A 三关判断。
 
+**文件级 `audited-ready`(机器锁,2026-06-06 上线)**:engine **自包含**哈希锁机器层已生效——`_audited-ready-hashes.json`(16 文件 sha256 底账)+ `packages/graph-agent/tests/test_doc_hash_lock.py`(**目录 scope** 漂移/缺失/未入账检测,**不耦合 `apps/studio/**`**,`4 passed`)+ `_doc-exemptions.yaml`(豁免须 `file+sha256+reason+owner_approval`,精确匹配)。**8 个三关全 ✅ + 单元锁齐的模块**(各 `baseline.md`+`mvp1-alignment.md`)已标 `audited-ready` 并入底账:`physical-layout`、`02-resolver`、`05-invalidation`、`06-golden-eval`、`03-checkpoint`、`08-messages-state`、`05-exit-control`、`01-compile`。`compile-rules`/`data-contracts`/`03-api-contract` 因带错误契约 V2 鲜目标**暂不入**;其余模块单元未锁齐或 W/B/A 未全 ✅。语义:`audited-ready` = 已审 + 机器锁(挡并发 session 静默漂移),`FROZEN` 仍按标准留作 owner 盖章后的下一档(无机器盖章不冒用 FROZEN,见 `design-doc-standards/02 §131`)。
+
 ### 锁就绪复评(2026-06-05,PM 定 A 达标线 = "写全目标 + 标清现状/gap,实现归 kiro")
 按此线,"只差实现"的 A◐ 达标升 ✅,"目标真空/待设计/待成段"的 A◐ 不达标。**2026-06-06 更新(9/12 锁后)**:
 - **A 达标(✅,目标写全 + demarcated,只差 impl)**:`physical-layout`、`compile-rules`、`02-resolver`、`03-checkpoint`、`08-messages-state`、`05-exit-control`、`07-subagent`、`06-seam/01-models`、`01-compile`、`graph-exec`(LOGIC)、`04-tools`、`06-golden-eval`、`02-iterate`、`02-middleware`、`06-seam/02-observability`(+ 既有 `data-contracts`/`invalidation`);`skill-syntax` resource(§2.8)/iterate(§2.9) 已达标,仅 io 切片 facet 仍真空。

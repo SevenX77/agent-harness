@@ -29,6 +29,7 @@ aligns_with: ../00-architecture-overview.md（§4 API契约层 C）
 
 ### 2.2 事件协议
 33 类 typed `CallbackEvent`(判别字段 `event_type`),字段 SSOT = `callbacks/events.py`(归 `02-observability`);live 走 WS、history 走 HTTP、`trace.jsonl` 落盘 SSOT。
+> **错误契约 V2(目标)**:新增 `DiagnosticEmittedEvent`(实时诊断,带完整 `ErrorPayload` + `diagnostic_id`),与 `RunResult.diagnostics`(最终快照,`diagnostic_id` 关联)**双轨、不双写语义**(细化见 `compile-rules` §3.1.1)。
 
 ### 2.3 关键异步接缝
 引擎 `run_skill` 返回**同步** RunResult;studio `POST .../runs` 返回 RunMetadata(202,**异步** spawn)——接缝在 studio `run_manager`。
@@ -40,7 +41,7 @@ aligns_with: ../00-architecture-overview.md（§4 API契约层 C）
 | `POST/GET /skills/{id}/runs[/predict]` | → RunMetadata(202) / RunDetail(含 events) |
 | `POST .../runs/{run_id}/resume` | ResumeReq → **501 桩**(待 C2 寻址) |
 | `POST /skills/{id}/compile` `/lint` | → CompileSuccess/CompileError |
-| `GET /errors`(目标,G4) | → 可枚举错误码表 `[{code,level,stage,remediation,doc_link}]`,外部 app 自建 error UX |
+| `GET /errors`(目标,G4) | → 版本化信封 `{registry_version, schema_version, items:[{code,level,stage_id,domain,remediation,doc_ref,doc_url,status}], next_cursor?, etag}` + level/stage/domain/code_prefix/deprecated 过滤(细化见 `compile-rules` §3.1.1);外部 app 自建 error UX |
 > consumer(旧 06/09/10/11 关注点)的"接口"段改为**链接本文**,不复制(SSOT)。
 
 ## 4. 设计决策基础(用户原话)

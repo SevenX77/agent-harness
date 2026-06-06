@@ -194,6 +194,25 @@ TraceEventKind(例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`)不是错
 
 > **职责分布**:形状改动(`ErrorPayload.details/remediation`、`RunResult.diagnostics`)落 `data-contracts`(owns 形状);API 暴露(diagnostics 字段 + 码表端点)落 `03-api-contract`;本域 owns 规则(必填轴 / 结构化键约定 / 码注册 / remediation 文案)。三处双向引用。
 
+### 3.1.1 V2 细化 + 实施分期(codex 复审 2026-06-06 采纳)
+codex 复审确认 G1-G6 方向对,补强为"通用 app 可长期消费的协议",采纳如下细化(逐条已核工程合理性):
+- **G1 定位**:`source_path`(file:line 字符串)→ 结构化 `source_span:{path, line, column?, end_line?, end_column?}`(列/末位可选,parser 不一定有;`source_path` 保留为兼容别名)。`phase_id` 单值不够嵌套 → `phase_path:[{skill_id, phase_id, phase_execution_id, kind}]`(kind=logic|agent|subgraph|iterate),定位子图/子代理/iterate 多轮;`phase_execution_id` 与 V4 trace 同源。**G1 分阶段**:不立即硬必填(会打爆现有直接构造 payload 的调用点),改由 registry `location_requirements` 按 domain 软校验、逐码补齐(P1)。
+- **G2 details**:`details: dict[str, JsonValue]`(传输形状)+ registry 每码 `details_schema`(JSON Schema 描必填键/类型)——**非自由 dict、也非 Python union**;P0 先给高频码 + 运行期码定 schema,其余空 details 但必须 **JSON-safe + 脱敏 + 可序列化**(防泄密,security 规范)。
+- **G3 remediation**:`remediation: str`(P0)+ registry 可选 `remediation_actions:[{kind, label, args_schema}]`(给 app 做自动修复按钮,P1/P2)。
+- **G4 doc**:拆 `doc_ref: graph-agent://errors/<code>`(稳定机器引用)+ `doc_url: https://.../errors/<code>`(可点击);`doc_link` 留弃用别名;只能留一个则选 HTTPS。
+- **G5 diagnostics**:**事件 + 快照双轨、不双写语义**——新增 `DiagnosticEmittedEvent`(实时,带完整 `ErrorPayload` + `diagnostic_id`)走事件流;`RunResult.diagnostics` 是最终快照(+ 主 fatal `error`),靠 `diagnostic_id` 关联。diagnostics **有界**:`diagnostics_limit` / `diagnostics_truncated` / `diagnostic_counts`(按 code/level 计数),防 batch/iterate 无限长。
+- **G6 stage 机器化**:`stage`(中文 tuple)留作展示,补 `stage_id: compile|assemble|runtime|persistence|provider`(机器判断);运行期码按此细分(tool/state-transform/persistence/provider),对齐异常树。
+- **新增维度(P1/P2,通用 app 长期能力)**:i18n(`message_key` + `template_vars`,默认文案保留);错误码生命周期(`introduced_in` / `deprecated_in` / `replaced_by` / `status`,供外部 app 安全升级);`GET /errors` 信封(`registry_version` / `schema_version` / `items` / `next_cursor` / `etag` + level/stage/domain/code_prefix/deprecated 过滤,归 `03-api-contract`)。
+
+**实施分期(codex 采纳)**:
+- **P0-1**(G2+G5 最小闭环):`details` + 序列化异常 `context` + `RunResult.diagnostics` + 上限/截断 + 定义 snapshot↔event 关系。
+- **P0-2**(G3+G4 registry 化):registry 增 `remediation` / `doc_ref` / `doc_url` / `details_schema` / `schema_version`;`GET /errors` 版本化信封。
+- **P0-3**(G6 安全加码):先注册 golden/iterate 待加码,运行期先拆 tool/state-transform/persistence/provider,避免 catch-all + 未注册码炸消费者。
+- **P1**:G1 全面轴审计(`source_span` / `phase_path` / `location_requirements`,逐码补齐,不一次硬切)。
+- **P1/P2**:i18n、弃用生命周期、`GET /errors` 分页/过滤、`remediation_actions`。
+
+**向后兼容(impl 注意,归 kiro)**:加字段本身 additive 安全(`diagnostics=[]` / `details={}` / `remediation=None`);风险点:(a) `ErrorCodeMetadata` 现为 `NamedTuple` + 位置参数(`error_registry.py:8`),加字段须改 dataclass/Pydantic 或关键字构造,否则全量改 93 行;(b) `doc_link` 改 scheme/HTTPS 是语义变化,保留弃用别名;(c) studio 多处 `extra="forbid"` 模型(`RunMetadata` / `RunDetail` / `ErrorResponse`),加 diagnostics 须同步 studio 模型 + TS 类型(engine 加字段 / studio 同步 = 跨边界协同)。
+
 ## 4. 错误码全表(93)
 本表与 `ERROR_REGISTRY` 逐码核对:93 个现有码一个不少，code set 与 stage 完全一致。表内「具体原因 / 修复建议」来自迁移源并在 mvp1 保留；Spec 链接均指向 mvp1 文档。
 

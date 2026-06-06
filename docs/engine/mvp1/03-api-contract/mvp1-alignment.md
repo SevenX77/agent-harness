@@ -56,7 +56,7 @@ aligns_with: ../00-architecture-overview.md（§4 API契约层 C）
 > consumer(旧 06/09/10/11 关注点)的"接口"段链接本文、不复制(SSOT);⚠️ studio 前端 hook 挂载(useRunStream/TracePanel 是否孤儿)归 studio 核实。
 
 ### 3.1 Golden API 面(schema SSOT = `06-golden-eval`)
-- **golden 文件**(目标):`phases/<phase_id>/golden.json` = `{expected_output(匹配该节点 io.outputs), source:"manual"|"copilot"(永不 trace,409 天然成立), updated_at}`,随技能进 git、路径即身份。
+- **golden 户型**(SSOT = `01-physical-layout §2.2.3`,本文不重定义):`.workspace/golden/<baseline_id>/{baseline.json, report.json, cases/<case_id>.json}`——**`.workspace` 临时产物、不进 git**(反转前旧路径 `phases/<phase_id>/golden.json`/随技能进 git **已废**)。case 内容 = `{expected_output(匹配该节点 io.outputs), source:"manual"|"copilot"(永不 trace,409 天然成立), updated_at}`;**case ↔ 节点的绑定键 engine 尚未定稿**(`06-golden-eval §8` gap #1 标 `phase_id?`,与 physical-layout 协同后定)。
 - **逐节点 diff**(部分目标):引擎 SDK 纯函数 `evaluate_golden_baseline` 逐节点版(现 `golden_diff.py` 作用在整 final_state,逐节点待建);studio 只渲染。
 - **失效**(目标):eval 期 golden 缺 io.outputs 必填字段 → `[F-v3-golden-stale-fields]`(归 `compile-rules` §6 + V2 G6 注册)。
 - **409 守卫**(live):`assert_trace_can_be_promoted_to_golden`(`diagnostic_export.py:25`),predict trace→golden 拒。

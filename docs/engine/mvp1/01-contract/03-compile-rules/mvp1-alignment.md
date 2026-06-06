@@ -180,6 +180,20 @@ StateMapper 目标规则:
 
 TraceEventKind(例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`)不是错误码，不进入本速查表；事件协议由 observability / API 契约维护。
 
+### 3.1 错误契约 V2(通用消费者增强，目标归 kiro)
+> **动机**:engine 是**通用引擎**，对接的是各类 app(不止 studio)。当前 payload 够"分类 + 编译期校验"，但对通用消费者**负载太薄**(扁平、定位轴可选且常空、无结构化 details、无 remediation、doc_link 是仓库相对路径、run 只返回单个 error)。证据:studio 不得不自建 `{...,details}` error 模型且没消费 4 轴(`_api-handshake-audit.md` §3.1 G1-G6)。下表是 **V2 目标契约**，现状逐条标注，**实现归 kiro**。
+
+| 增强 | 现状 | 目标契约 |
+|---|---|---|
+| **G1 定位轴必填** | `skill_id/phase_id/field_path/source_path` 全可选、默认 None，只在调用点手动传(`exceptions.py:31-34`)，普遍空 | 按 domain 定**必填轴**:编译期码必填 `source_path`(file:line)+ 适用时 `field_path`;运行期码必填 `phase_id`(+`skill_id`);各 raise 点强制填(= Task 3 审计逐码核)。`source_path` 带行号(承接 `data-contracts` DC4 `line` 轴)。 |
+| **G2 结构化 details** | `ErrorPayload` 全扁平字符串、无 details;异常 `GraphAgentError.context: dict`(`exceptions.py:100`)转 payload 时**被丢弃** | `ErrorPayload` 加 `details: dict[str,Any]`，**把异常 context 序列化进去** + 每码约定结构化键(如 `graph-phase-cycle`→`{cycle_path:[...]}`;`graph-dataflow-source-missing`→`{phase_id, field, candidate_upstreams:[...]}`;`*-schema-unknown-field`→`{field, allowed:[...]}`)。消费者据此做富 UX / 自动修复，不靠正则抠 message。 |
+| **G3 remediation 进负载** | "修复建议"只在本文 §4 文档表，运行期拿不到;`ErrorCodeMetadata`(`error_registry.py:8`)无该字段 | `ErrorCodeMetadata` 加 `remediation: str`(把 §4 的"修复建议"搬进注册表);`ErrorPayload.remediation` 由校验器从注册表自动回填(同 level/stage/doc_link)。 |
+| **G4 doc_link 可解析 + 公开码表** | doc_link 是仓库相对路径(`docs/engine/mvp1/...#anchor`，`error_registry.py:16+`)，第三方 app 无此仓库 = 死链 | doc_link 改**稳定标识** `graph-agent://errors/<code>`(或发布的 HTTPS URL);并经 API 暴露**可枚举错误码表**(code→{level,stage,remediation,doc})，外部 app 自建 error UX(端点归 `03-api-contract`)。 |
+| **G5 统一 diagnostics 列表** | run 只返回单个 `RunResult.error`(`result.py:79`);WARN 只走事件流、不进 RunResult;消费者要 merge error+trace 才得全集 | `RunResult` 加 `diagnostics: list[ErrorPayload]`(FATAL+WARN 全集，一处拿全);`error` 保留为主致命(兼容)。对齐编译期 `CompileResult.issues` 的列表语义(形状归 `data-contracts`)。 |
+| **G6 运行期细化 + 注册待加码** | 运行期靠 catch-all `[F-v3-runtime-phase-failed]`，粒度粗;异常树有 ToolExecution/StateTransform/Checkpoint/TraceWrite/Artifact/ModelProvider(`exceptions.py`)但无对应码;golden/iterate 新码族未进 `ERROR_REGISTRY`(emit 会被校验器 raise) | 运行期码对齐异常树细分(tool / state-transform / persistence / provider 各给码);**先注册** `[F-v3-golden-stale-fields]` / `[F-v3-iterate-accumulate-fields-missing]` / `[F-v3-iterate-over-not-list]` 进 registry(带全四轴 + remediation)，再放开 emit(见 §6)。 |
+
+> **职责分布**:形状改动(`ErrorPayload.details/remediation`、`RunResult.diagnostics`)落 `data-contracts`(owns 形状);API 暴露(diagnostics 字段 + 码表端点)落 `03-api-contract`;本域 owns 规则(必填轴 / 结构化键约定 / 码注册 / remediation 文案)。三处双向引用。
+
 ## 4. 错误码全表(93)
 本表与 `ERROR_REGISTRY` 逐码核对:93 个现有码一个不少，code set 与 stage 完全一致。表内「具体原因 / 修复建议」来自迁移源并在 mvp1 保留；Spec 链接均指向 mvp1 文档。
 
@@ -330,6 +344,7 @@ TraceEventKind(例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`)不是错
 | CR3 | `[F-v3-golden-stale-fields]` 是 **eval 期** staleness，不是编译期 | `05-invalidation` + `05-run-inner/06-golden-eval` | registry 93 码里尚无该 mvp1 新码；不得按旧编译期逻辑落地 |
 | CR4 | `[F-v3-iterate-*]` 是 mvp1 新增码族 | `02-mechanism/04-run-outer/02-iterate` + 本文 §6 | registry 93 码里尚无该码族 |
 | LE1-3 | LOGIC action 契约收紧:纯返回 dict、只读 inputs、硬禁 `run_skill`/文件系统/`sys.path` | `02-mechanism/04-run-outer/01-graph-exec` owns action 范式；本域 owns purity 失败码 | live 仍有 Context mutation/编排 action/FS action，归 refactor-target |
+| CR5 | **错误契约 V2(G1-G6)**:定位轴必填 / 结构化 details(+序列化异常 context)/ remediation 进注册表 / doc_link 可解析 + 公开码表 / RunResult diagnostics 列表 / 运行期细化 + 注册待加码 | 本文 §3.1;形状→`data-contracts`、API→`03-api-contract`(双向) | 全部目标、impl 归 kiro;通用消费者需求驱动(`_api-handshake-audit` §3)，与 studio 自建 `{...,details}` 印证 |
 
 ## 6. mvp1 新增码目标(未计入现有 93 码)
 
@@ -367,6 +382,7 @@ engine 全权；规则全表喂 copilot，作为生成合法 skill 的依据。S
 2. `[F-v3-iterate-*]` 码族加入 `ERROR_REGISTRY`，并明确每个码的 level/stage/doc_link。
 3. purity 扫描器扩展硬禁 `run_skill`/文件系统/`sys.path`/import 越界。
 4. StateMapper required 缺失校验实现，归 `graph-exec` refactor-target。
+5. **错误契约 V2(G1-G6，见 §3.1)**:`ErrorPayload` 加 `details`/`remediation`、定位轴必填、doc_link 可解析 + 公开码表、`RunResult` 加 `diagnostics` 列表、运行期码对齐异常树细分——全部 impl 归 kiro;形状归 `data-contracts`、API 归 `03-api-contract`。
 
 ## 交叉引用(链接, 不复制)
 baseline(代码现状) · `00-architecture-overview` §2 · `01-contract/02-skill-syntax` · `02-mechanism/01-compile`(扫描器实现) · `01-contract/05-invalidation` + `02-mechanism/05-run-inner/06-golden-eval`(golden eval) · `02-mechanism/04-run-outer/02-iterate` · `02-mechanism/04-run-outer/01-graph-exec`(StateMapper/LOGIC action) · `01-contract/04-data-contracts`(ErrorPayload) · `03-api-contract`(CompileResult)

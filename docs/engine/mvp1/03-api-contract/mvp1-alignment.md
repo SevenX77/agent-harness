@@ -24,6 +24,7 @@ aligns_with: ../00-architecture-overview.md（§4 API契约层 C）
 - `predict_skill(...同, unattended 默认 True, copilot_predict?) -> RunResult`(干跑/mock;`mock_llm` 经 `**inputs`)
 - 失败不抛:`GraphAgentError` 捕获 → `success=False` 的 RunResult(带 `error: ErrorPayload`)。
 > RunResult/ErrorPayload 字段形状归 `data-contracts`(本域引用不复制)。
+> **错误契约 V2(目标)**:`RunResult` 加 `diagnostics: list[ErrorPayload]`(FATAL+WARN 全集),consumer 一处拿全;`ErrorPayload` 加 `details`/`remediation`。形状归 `data-contracts` DC5、规则归 `compile-rules` §3.1;本域负责 **API 暴露**(diagnostics 字段透传 + 公开错误码表端点,见 §3)。
 > `skill_resolver` 的 **DI 协议形状**(输入绝对 path+边界 / 输出子图 root / 失败 raise)归 [`02-resolver`](../02-mechanism/02-resolver/mvp1-alignment.md) §3;本域只定它是 run/compile 的必填参数。
 
 ### 2.2 事件协议
@@ -39,6 +40,7 @@ aligns_with: ../00-architecture-overview.md（§4 API契约层 C）
 | `POST/GET /skills/{id}/runs[/predict]` | → RunMetadata(202) / RunDetail(含 events) |
 | `POST .../runs/{run_id}/resume` | ResumeReq → **501 桩**(待 C2 寻址) |
 | `POST /skills/{id}/compile` `/lint` | → CompileSuccess/CompileError |
+| `GET /errors`(目标,G4) | → 可枚举错误码表 `[{code,level,stage,remediation,doc_link}]`,外部 app 自建 error UX |
 > consumer(旧 06/09/10/11 关注点)的"接口"段改为**链接本文**,不复制(SSOT)。
 
 ## 4. 设计决策基础(用户原话)
@@ -61,6 +63,7 @@ engine↔studio 边界;前端 hook 挂载归 studio(本契约只定义引擎产�
 1. resume `501 桩` → C2 寻址契约落地(与 `02-iterate`/`03-checkpoint` 协同)。
 2. V4 trace 增补事件 schema(随 `02-observability` 实现)。
 3. golden/iterate target schema 待 FROZEN 解冻回填。
+4. **错误契约 V2 API 面(G4/G5)**:`RunResult.diagnostics` 透传 + `GET /errors` 公开码表端点(规则/形状见 `compile-rules` §3.1 / `data-contracts` DC5)——impl 归 kiro。
 
 ## 交叉引用(链接, 不复制)
 00-architecture-overview §4 · `07-runtime` · `06-seam/02-observability` · `data-contracts`

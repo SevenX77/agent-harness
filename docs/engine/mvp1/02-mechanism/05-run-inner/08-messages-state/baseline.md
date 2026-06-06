@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/05-run-inner/08-messages-state
 doc: baseline
-status: drafted（现状对齐 pinned 代码 7cd4b9c；messages 已用 DeltaChannel,compaction 搁浅 legacy,HITL resume 未接 live）
+status: drafted（B 成段 2026-06-05,codex 已核(records/uncovered 块);messages DeltaChannel(state.py:214)live,compaction 搁浅 legacy(llm_phase_node.py:275/381/809)、live 单槽无 compaction,interrupt 原语 live(cognitive_flow.py:292)但 resume_run 501 桩）
 ---
 
 # 08-messages-state — Baseline(当下代码实现逻辑)
@@ -22,10 +22,10 @@ N/A —— studio debug/续跑 UI 经 `03-api-contract` 消费。
 > **DeltaChannel 第一次出现需定义**:LangGraph 的增量通道——对增长型列表(如对话历史)只存变化 + 周期快照,避免每 super-step 全量(去体积)。
 
 ### 2. summarization / compaction(搁浅 legacy,非 live)
-`save_compaction_sidecar`(`phase_nodes/llm_phase_node.py:84/138`)在 **legacy phase_nodes 死簇**里——超窗摘要 + sidecar 存全文。**live `assemble_graph` 路径没有 compaction**(待从死簇搬回 live)。`execution_control.py:201` 的 `_summarize_recent_failures` 是"失败摘要"(不同于 messages compaction)。
+summarization 配置 `phase_nodes/llm_phase_node.py:275`(`summarization=True`/`trigger_fraction=0.8`/`keep_messages=20`,底座 `SummarizationMiddleware` `cognitive/middlewares.py:466`)+ sidecar 写 `:381`(`_write_compaction_sidecar`→`:392`)、`CompactionEvent.content_ref` `:809`,均在 **legacy phase_nodes 死簇**里。**live `assemble_graph` 路径只挂单槽 cognitive_flow(`graph_assembler.py:481`)、没有 compaction**(待从死簇搬回 live)。`execution_control.py:201` 的 `_summarize_recent_failures` 是"失败摘要"(不同于 messages compaction)。
 
 ### 3. HITL / resume(未接 live)
-HITL(`interrupt()` 中断 → 人改 context → resume)与节点级 `resume_run` 在 live 未闭环:`resume_run` 端点 501(`apps/studio/.../runs.py`),`ResumeReq.context_overrides` 字段定义了但零消费(见 `03-api-contract` / `02-iterate` baseline)。
+`interrupt()` **原语 live**(`cognitive_flow.py:33` import / `:95` `_interrupt_fn or interrupt` / `:292` 调用 / `:300` `source="human_interrupt"`),但**未接 resume loop**:`resume_run` 端点 501(`apps/studio/backend/app/routers/runs.py:70` `raise_not_implemented`),`ResumeReq.context_overrides` 字段定义了但零消费(见 `03-api-contract` / `02-iterate` baseline)。
 
 ## API
 - `WorkflowState.messages`(`state.py:214`,DeltaChannel)/ `_messages_delta_reducer`(`:28`)。

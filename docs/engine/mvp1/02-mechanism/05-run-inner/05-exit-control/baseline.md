@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/05-run-inner/05-exit-control
 doc: baseline
-status: drafted（现状对齐 pinned 代码 7cd4b9c；NudgeInjector 已存在,但 live 无 after_agent 退出闸）
+status: audited-ready（现状对齐 pinned 代码 7cd4b9c；NudgeInjector 已存在,但 live 无 after_agent 退出闸）
 ---
 
 # 05-exit-control — Baseline(当下代码实现逻辑)

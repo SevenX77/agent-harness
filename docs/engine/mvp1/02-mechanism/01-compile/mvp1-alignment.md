@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/01-compile
 doc: mvp1-alignment
-status: drafted（**U12 单元锁定 2026-06-05**;§2 编译流水线机制已成段、现状/目标 demarcate;死簇清理 + purity LE2 扩展归 kiro;文件未 FROZEN）
+status: audited-ready（**U12 单元锁定 2026-06-05**;§2 编译流水线机制已成段、现状/目标 demarcate;死簇清理 + purity LE2 扩展归 kiro;文件未 FROZEN）
 aligns_with: ../../00-architecture-overview.md（§3 机制层 B·编译）
 ---
 

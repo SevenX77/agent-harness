@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/01-compile
 doc: baseline
-status: drafted（现状对齐 pinned 代码 7cd4b9c；编译机制 = loader 校验流水线 + compiler 缓存壳）
+status: audited-ready（现状对齐 pinned 代码 7cd4b9c；编译机制 = loader 校验流水线 + compiler 缓存壳）
 ---
 
 # 01-compile — Baseline(当下代码实现逻辑)

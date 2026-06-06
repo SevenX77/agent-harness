@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/02-resolver
 doc: mvp1-alignment
-status: drafted（**U1 单元锁定 2026-06-05**;子图绝对 path 解析 + DI 协议形状(契约)已定、删 registry;默认实现 LocalWorkspaceResolver 函数体归 kiro;文件未 FROZEN）
+status: audited-ready（**U1 单元锁定 2026-06-05**;子图绝对 path 解析 + DI 协议形状(契约)已定、删 registry;默认实现 LocalWorkspaceResolver 函数体归 kiro;文件未 FROZEN）
 aligns_with: ../../00-architecture-overview.md（§3 机制层 B·编译）
 ---
 

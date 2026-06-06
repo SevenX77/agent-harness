@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/04-run-outer/03-checkpoint
 doc: mvp1-alignment
-status: drafted（**U5 单元锁定 2026-06-05**;A + B 成段(codex 核):递归拓扑/delta-compact/durability/CK1-6/D-test,**均标注目标态 vs live**;live 仅外层 super-step checkpoint + WorkflowState.messages DeltaChannel;内层 ns/agent checkpoint/resume/compaction/data delta 全待实现(归 kiro);文件未 FROZEN）
+status: audited-ready（**U5 单元锁定 2026-06-05**;A + B 成段(codex 核):递归拓扑/delta-compact/durability/CK1-6/D-test,**均标注目标态 vs live**;live 仅外层 super-step checkpoint + WorkflowState.messages DeltaChannel;内层 ns/agent checkpoint/resume/compaction/data delta 全待实现(归 kiro);文件未 FROZEN）
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行外层）
 ---
 

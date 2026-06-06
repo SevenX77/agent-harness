@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/05-run-inner/06-golden-eval
 doc: mvp1-alignment
-status: drafted（**U2 单元锁定 2026-06-05**:反转重写 + codex 终审(补现状框/§8 归 kiro);旧 G1-G5(决策 A)已退役;文件未 FROZEN——physical-layout 参与 U1 未锁）
+status: audited-ready（**U2 单元锁定 2026-06-05**:反转重写 + codex 终审(补现状框/§8 归 kiro);旧 G1-G5(决策 A)已退役;文件未 FROZEN——physical-layout 参与 U1 未锁）
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行内层）
 ---
 

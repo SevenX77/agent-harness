@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/05-run-inner/08-messages-state
 doc: mvp1-alignment
-status: drafted（**U5 单元锁定 2026-06-05**;A + B 成段(codex 核):delta/compact 正交、snapshot_frequency=50、CK6、summarization 死簇,**标注目标态 vs live**;live 仅 WorkflowState.messages DeltaChannel + interrupt 原语,compaction/resume/ns checkpoint 全待实现(归 kiro);文件未 FROZEN）
+status: audited-ready（**U5 单元锁定 2026-06-05**;A + B 成段(codex 核):delta/compact 正交、snapshot_frequency=50、CK6、summarization 死簇,**标注目标态 vs live**;live 仅 WorkflowState.messages DeltaChannel + interrupt 原语,compaction/resume/ns checkpoint 全待实现(归 kiro);文件未 FROZEN）
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行内层）
 ---
 

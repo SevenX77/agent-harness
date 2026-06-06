@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/04-run-outer/03-checkpoint
 doc: baseline
-status: drafted（B 成段 2026-06-05,codex 已核(records/uncovered 块);run/thread 级 checkpoint 已接(runner.py:663→graph_assembler.py:151),内层 AGENT 分支不传 checkpointer(:201)、data 无 delta reducer、持久化边界 phase_executor.py:82）
+status: audited-ready（B 成段 2026-06-05,codex 已核(records/uncovered 块);run/thread 级 checkpoint 已接(runner.py:663→graph_assembler.py:151),内层 AGENT 分支不传 checkpointer(:201)、data 无 delta reducer、持久化边界 phase_executor.py:82）
 ---
 
 # 03-checkpoint — Baseline(当下代码实现逻辑)

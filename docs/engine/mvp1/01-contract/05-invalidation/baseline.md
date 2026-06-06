@@ -1,7 +1,7 @@
 ---
 module: 01-contract/05-invalidation
 doc: baseline
-status: drafted（B 成段:对当前 packages/graph-agent grep 核 2026-06-05 + codex 复审修正;live=compile cache(.md mtime/size)+ golden hash 比对 warn(退役标的);diff_skill/ChangeAxis 未实现;编译期 golden 硬错误码从未落地）
+status: audited-ready（B 成段:对当前 packages/graph-agent grep 核 2026-06-05 + codex 复审修正;live=compile cache(.md mtime/size)+ golden hash 比对 warn(退役标的);diff_skill/ChangeAxis 未实现;编译期 golden 硬错误码从未落地）
 binds_alignment: ./mvp1-alignment.md
 binds_code: packages/graph-agent/src/graph_agent/core/cache.py:compute_cache_key · core/compiler.py:compile_skill · core/runner.py:_warn_on_stale_golden_hashes_sdk
 ---

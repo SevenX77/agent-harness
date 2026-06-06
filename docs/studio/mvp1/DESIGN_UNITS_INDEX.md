@@ -44,7 +44,7 @@ aligns_with: ../../development/design-doc-standards/02-audit-standard.md（R8）
 
 ## 重复 owner 风险（待 retrofit 时按本表「切面 × owner」消解）
 - **stage gate**：`compile-lint` / `center-action-bar` / `predict` / `run-execution` / `state-engine` 都描述 Compile→Predict→Run 链 → owner=`compile-lint`(gate 规则)，其余消费、不重写。
-- **6 态 / materialize(内核归 ③b)**：**6 态标准投影 + materialize 编排 + endpoint 标准化 = ③b `graph-agent-gateway`**(公共内核,studio 只引不复制);`studio-settings`、`settings`(③a)只做 UI 编辑 + 消费投影;`gateway` platform = ③a HTTP 壳。**(2026-06-05 改回四层反转:内核归 ③b,不挂 studio-settings)**
+- **6 态 / materialize(内核归 ③b)**：**6 态标准投影 + materialize 编排 + endpoint 标准化 = ③b `graph-agent-gateway`**(公共内核,studio 只引不复制);`studio-settings`、`settings`(③a)只做 UI 编辑 + 消费投影;`gateway` platform = ③a 消费/适配边界,HTTP 壳 = `llm-copilot-http-api`(③a)。**(2026-06-05 改回四层反转:内核归 ③b,不挂 studio-settings)**
 - **trace dot / 节点态**：`trace-observability`(语义) / `state-engine`(事件→态) / `canvas`(渲染) 各占一切面，勿混。
 - **D12 本地写**：唯一 owner=`native-fs`，所有写者引它。
 - **golden**：`golden-eval`(studio 编辑/diff) vs `engine:physical-layout`(落点) vs `engine:06-golden-eval`(eval) 切清。

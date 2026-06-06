@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/04-run-outer/01-graph-exec
 doc: mvp1-alignment
-status: drafted（机制·运行外层;LOGIC 干净契约已定 2026-06-04,live drift 待重构归 kiro;⏳ AGENT run_context/io_manager/nudge 收口待成段）
+status: drafted（**U4(LOGIC)单元锁定 2026-06-06**;LOGIC 干净契约 LE1-3 已定、live drift→refactor-target 归 kiro;AGENT run_context/io_manager 已成段(源 11-io)、nudge 收口待成段(U3/AGENT facet);文件未 FROZEN——graph-exec 还参与 U3/U11）
 binds_baseline: ./baseline.md
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行外层）
 ---

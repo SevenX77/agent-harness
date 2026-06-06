@@ -44,13 +44,13 @@ governed_by: ../../development/design-doc-standards/（00 三轴 · 02 R8 设计
 | **U9** | **可观测事件流** | `overview §6` api 面 | 事件流切面(33 typed event)→`02-observability`◆ · 追踪中间件→`02-middleware`(Tracing 槽) · API 切面→`03-api-contract`(协议→trace.jsonl/WS) · 边操作事件→`graph-exec` | `callbacks/events.py` typed events + callbacks;内联 emit 待迁 Tracing 中间件 | drafted | 主 trace 事件已迁;`_migration-src/11-io-and-edge-ops` 边操作事件/黑板切片/artifact 已分发入 `graph-exec`(执行面)+ `observability`(3 边操作事件命名,codex 复审) |
 | **U10** | **API 操作面(engine↔studio)** | `ARCH1`(C 层) | API 契约切面→`03-api-contract`◆ · 入口实现→`07-runtime` · 事件供给→`02-observability` · 形状供给→`data-contracts`(RunResult) | `runner.py:run_skill:376`/`predict_skill:163`(live) · `compiler.py:compile_skill:41` | drafted | `03-api-contract` 只有摘要,`api-engine-studio-contract.md` 17 块未迁;`07-runtime` 不是空白,但顶层契约/bootstrap 未成段 |
 | **U11** | **图级 loop / iterate** | `GRAPH-LOOP`+`CK3` | 编排切面(batch/loop/图级)→`02-iterate`◆ · 执行切面→`graph-exec`(声明式替代 action run_skill) · 中间件→`02-middleware`(parallel_map) | `graph_assembler.py` batch live;图级 loop compile 实现待做 | drafted | `02-iterate` alignment 目标摘要成段;baseline 只有节点级 batch,`skill-syntax` iterate 声明仍真空,records 的 CK3/loop 深度未迁全 |
-| **U12** | **purity(纯函数编译期防护)** | `SANDBOX`(运行期沙箱=伪需求) | 规则切面→`compile-rules`◆ · 扫描器实现切面→`01-compile`◆(purity 扫描器 + `module_sandbox`) | `01-compile` purity 扫描器(待 LE2 扩展硬禁 run_skill/FS) | drafted | 规则↔扫描器双向;LE2 扩展(硬禁 action 里 run_skill/FS/sys.path)待做 |
+| **U12** | **purity(纯函数编译期防护)** | `SANDBOX`(运行期沙箱=伪需求) | 规则切面→`compile-rules`◆ · 扫描器实现切面→`01-compile`◆(purity 扫描器 + `module_sandbox`) | `01-compile` purity 扫描器(待 LE2 扩展硬禁 run_skill/FS) | **locked**(2026-06-05) | 规则↔扫描器双向;01-compile §2 成段、compile-rules CR2 purity 码;LE2 扩展(硬禁 run_skill/FS/sys.path)归 kiro |
 
 ---
 
 ## 2. 锁状态总账(lock-migration 骨架)
 
-**当前(2026-06-05):U2/U5/U6/U8 单元 `locked`,其余 `drafted`;零文件级 `FROZEN`**(文件级 FROZEN 待该文件所有单元锁齐——如 `invalidation` 还参与 U12、`physical-layout` 参与 U1、`03-checkpoint`/`08-messages-state` 也参与 U6/U9,故只锁单元不冻文件)。 锁状态不得继承旧 `✅` 标签,只按 §3 的 W/B/A 三关判断。
+**当前(2026-06-05):U2/U5/U6/U8/U12 单元 `locked`,其余 `drafted`;零文件级 `FROZEN`**(文件级 FROZEN 待该文件所有单元锁齐——如 `physical-layout` 参与 U1、`compile-rules` 参与 U4/U11、`03-checkpoint`/`08-messages-state` 参与 U6/U9,故只锁单元不冻文件)。 锁状态不得继承旧 `✅` 标签,只按 §3 的 W/B/A 三关判断。
 
 ### 锁就绪复评(2026-06-05,PM 定 A 达标线 = "写全目标 + 标清现状/gap,实现归 kiro")
 按此线,"只差实现"的 A◐ 达标升 ✅,"目标真空/待设计/待成段"的 A◐ 不达标:
@@ -84,10 +84,10 @@ governed_by: ../../development/design-doc-standards/（00 三轴 · 02 R8 设计
 |---|---|---|---|---|
 | `01-contract/01-physical-layout` | ✅ `mvp1-alignment.md:115,123-126` | ✅ `baseline.md:6,12`; code `loader.py:146`, `runner.py:376/527/541`, `emit.py:15` | ◐ `mvp1-alignment.md:137-138` | `.workspace` 户型已写;`evaluate_golden_baseline`/`golden`/`test_inputs` Engine SDK 未落地。 |
 | `01-contract/02-skill-syntax` | ✅ `mvp1-alignment.md:574,581-588` | ✅ `baseline.md:6,12`; code `loader.py:146/1499/1592`, `manifest.py:108/143/152/162`, `mentions.py:21` | ◐ `mvp1-alignment.md:28-31,604-605` | resource/example、iterate 声明、io 切片声明仍是真空。 |
-| `01-contract/03-compile-rules` | ✅ `mvp1-alignment.md:326-332`; `00-architecture-overview.md:98` | ✅ `baseline.md:6`; code `error_registry.py:15`, `loader.py:146`, `purity.py:44` | ✅/◐ `mvp1-alignment.md:184,334-350` | 文档自承载;实现 delta 仍有新 golden/iterate 码和 LE2 purity 扩展。 |
+| `01-contract/03-compile-rules` | ✅ `mvp1-alignment.md:326-332`; `00-architecture-overview.md:98` | ✅ `baseline.md:6`; code `error_registry.py:15`, `loader.py:146`, `purity.py:44` | ✅ `mvp1-alignment.md`(生命周期契约+93 码全表+delta,demarcated;U12 锁,U4/U11 共享) | 文档自承载;实现 delta 仍有新 golden/iterate 码和 LE2 purity 扩展(归 kiro)。 |
 | `01-contract/04-data-contracts` | ✅ `mvp1-alignment.md:27,35-38` | ✅ `baseline.md`(Phase 1 成段 2026-06-05;code state.py/result.py/exceptions.py/error_registry.py/validator_contract.py/types.py + runtime/state.py) | ✅ `mvp1-alignment.md:15-24` | ✅ B 成段;核出 BlackboardState 落点(runtime/state.py 非 core/)+ surface drift,已记 baseline §1/§7。 |
 | `01-contract/05-invalidation` | ✅ `mvp1-alignment.md:29,35-37` | ✅ `baseline.md`(Phase 2 成段 2026-06-05,codex 复审;code cache.py/compiler.py/runner.py) | ✅ `mvp1-alignment.md:32-37`(IV1-3) | ✅ B 成段;旧编译期硬错误码确认从未落地、整哈希 warn 退役标的(仍 live)已记 baseline §2;核出 cache key 缺 action/tool `.py` 缺口(refactor-target)。 |
-| `02-mechanism/01-compile` | ✅ `mvp1-alignment.md:24,30-31` | ✅ `baseline.md:4,20-39`; code `compiler.py:41`, `loader.py:146`, `purity.py:44` | ◐ `mvp1-alignment.md:41-42` | alignment 承认 loader/compiler 机制仍待成段化。 |
+| `02-mechanism/01-compile` | ✅ `mvp1-alignment.md:24,30-31` | ✅ `baseline.md:4,20-39`; code `compiler.py:41`, `loader.py:146`, `purity.py:44` | ✅ `mvp1-alignment.md`(§2 编译流水线成段、现状/目标 demarcate;U12 锁) | §2 已成段;死簇清理 + purity LE2 归 kiro。 |
 | `02-mechanism/02-resolver` | ✅ `mvp1-alignment.md:29,36-39` | ✅ `baseline.md:4,20-30`; code `skill_resolver_protocol.py`, `local_workspace_resolver.py` | ◐ `mvp1-alignment.md:50-51` | path 目标已定;默认实现函数体仍是旧 registry/search_paths 语义待改。 |
 | `02-mechanism/03-assemble` | ◐ `mvp1-alignment.md:22-26`; design `agent-loop-planA-create-agent-migration.md:26,36,50` | ✅ `baseline.md:4,20-38`; code `graph_assembler.py:88/158/423` | ◐ `mvp1-alignment.md:10,42` | alignment 是摘要成段;模块内承认缺独立 PM 原话链,reference/example 机制还受 `skill-syntax` 真空影响。 |
 | `02-mechanism/04-run-outer/01-graph-exec` | ✅ `mvp1-alignment.md:32,40-42`; overview `00-architecture-overview.md:113` | ✅ `baseline.md`(+11-io 现状:`loader.py:528` 子图 io 1:1、`io/manager.py:108` 落盘、`io/storage.py:149`);code `graph_assembler.py:325/363`, `state_mapper.py:37`, `actions.py:18/49` | ◐ `mvp1-alignment.md`(11-io 3 能力 E1-E4 已成段,codex 复审;仅 nudge 收口待成段) | LOGIC 决策已定;11-io 子图 io/黑板/artifact/edge 已吸收,余 nudge 收口 + LE 重构归 kiro。 |

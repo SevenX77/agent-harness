@@ -50,6 +50,11 @@ class LLMClientManager:
     _usage_stats: ClassVar[dict[str, UsageStats]] = {}
     _provider_down_cache: ClassVar[dict[str, float]] = {}
 
+    # WS-1 moved the production chat path to RouteChatModelFactory + ChatX invoke.
+    # dispatch_provider_call/_dispatch_provider_call/_call_* are retained only as
+    # legacy ordinary-chat helpers until GenericRouteChatModel is implemented or
+    # the old provider-call core is deleted; see docs/deferred-items.md DEF-018.
+
     @classmethod
     def is_provider_marked_down(
         cls,
@@ -98,7 +103,7 @@ class LLMClientManager:
         request_mapper_id: str | None = None,
         credential_provider: CredentialProviderProtocol | None = None,
     ) -> CallResult:
-        """Call one route and return a normalized chat result."""
+        """Legacy ordinary-chat path retained for deferred generic support."""
         return cls._dispatch_provider_call(
             route,
             messages,
@@ -885,7 +890,7 @@ class LLMClientManager:
         request_mapper_id: str | None = None,
         credential_provider: CredentialProviderProtocol | None = None,
     ) -> CallResult:
-        """Route a provider call by configured endpoint protocol."""
+        """Route a legacy provider call by configured endpoint protocol."""
 
         def invoke(token_budget: int) -> CallResult:
             if route.protocol == "openai_compatible":
@@ -996,7 +1001,7 @@ class LLMClientManager:
         *,
         runtime_policy: RuntimePolicy,
     ) -> CallResult:
-        """Retry with a larger token budget when the provider truncates output."""
+        """Legacy retry helper; GatewayChatModel now owns ChatX token escalation."""
         current_tokens = max(1, int(max_tokens))
         cap = cls._max_token_cap(route, current_tokens)
         result: CallResult | None = None

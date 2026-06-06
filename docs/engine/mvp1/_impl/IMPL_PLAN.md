@@ -16,21 +16,23 @@ binds_design: ../INDEX.md · ../_impl-backlog.md（Gap 清单源）· ../_api-ha
 
 ## 二、依赖图
 ```
-WS-E1 create_agent 核心(graph_assembler.py 串行链:create_agent→6槽接线→LOGIC-clean→iterate→11-io)
+WS-E1 create_agent 核心(graph_assembler.py 串行链:create_agent+运行边界(state_schema/finish_task/thread_id-ns/max_iter)→subagent重接→LOGIC-runtime→iterate→子图io放宽)
   ├─→ WS-E2 中间件后3槽(tracing/tool_error/loop_detection no-op→实现;链在 E1 接好)
   ├─→ WS-E5 checkpoint 内层(ns/agent 挂共享 base;create_agent 传 checkpointer 后)
   ├─→ WS-E8 退出闸(after_agent 闸接 create_agent)
   └─→ (gateway WS-1 GatewayChatModel 稳 ── soft 依赖,可并行)
+WS-E1-io 11-io 文件导入lazy(E2)+ artifact business_data_md(E3)── 依赖 E4(InputFileInjectedEvent)+E5(StateManager.update_business);跨 read_file/storage/runner(从 E1 拆出,IR1)
 WS-E3 错误契约 V2(exceptions/error_registry/result)──────── 并发(独立文件)
 WS-E4 V4 trace 事件(events.py/emit.py)──────────────────── 并发(与 E2 共享 tracing.py → 协调)
-WS-E6 purity 扩展(purity.py;注册码与 E3 协调)──────────── 并发
+WS-E6 purity 扩展(purity.py;run_skill 扫描码;注册码与 E3 协调)─ 并发;**run_skill 码须先于 E1 的 LOGIC 子步骤**(或 E1 LOGIC 显式降级 scope,见 WS-E1 §8)
 WS-E7 golden / resume(runner.py + golden SDK)──────────── 需 studio 协同,最后
 ```
 
 ## 三、工作流分区(按文件归属,IR1;exact owns_files 在各 WS 任务书 pin)
 | WS | 名 | backlog | owns_files(主) | 依赖 | 并发性 | 优先级 |
 |---|---|---|---|---|---|---|
-| **WS-E1** | create_agent 核心 | K1/K2/I1/I3/I5 | `core/graph_assembler.py` · `middleware/factory.py`/`__init__.py` | gateway WS-1(soft) | **内部串行**(热点) | P0 关键路径 |
+| **WS-E1** | create_agent 核心 | K1/K2/I1/I3/I5(子图io) | `core/graph_assembler.py` · `middleware/factory.py`/`__init__.py` · `middleware/cognitive_flow.py`/`cognitive/finish_task.py`(finish_task对齐) · `core/loader.py:528` | gateway WS-1(soft)· E6 run_skill(LOGIC 子步 soft) | **内部串行**(热点) | P0 关键路径 |
+| **WS-E1-io** | 11-io 文件导入/artifact | I5(E2/E3) | `tools/builtin/read_file.py` · `core/storage.py` · `core/runner.py:598`(+ 协调 E4 events / E5 state.py) | WS-E4 + WS-E5 | 串行,E4/E5 后 | P1(从 E1 拆出) |
 | **WS-E2** | 中间件后 3 槽 | A1/A2 | `middleware/tracing.py`/`tool_error.py`/`loop_detection.py` | WS-E1(链接好) | 并发(E1 后) | P1 |
 | **WS-E3** | 错误契约 V2 | V2a-d | `core/exceptions.py`/`error_registry.py`/`result.py` | 无 | **全并发** | P0-1→P2 |
 | **WS-E4** | V4 trace 事件 | S7 + V2a(DiagnosticEmitted) | `callbacks/events.py`/`emit.py` | 与 E2 共享 `tracing.py`→协调 | 并发 | P1 |
@@ -45,7 +47,7 @@ WS-E7 golden / resume(runner.py + golden SDK)───────────�
 2. **6 槽中间件接线**(A1):`build_middleware_chain` 6 槽接进 AGENT(现单槽 `:300`/`factory.py:68`)。
 3. **LOGIC 干净契约**(I1/LE1-3):`_build_logic_node`(`:325`)纯返回 / 砍 Context mutation / 硬禁 run_skill·FS。
 4. **iterate 执行**(I3):节点级 loop(accumulate)/ 图级 batch(`Send`)/ 图级 loop=B(`:240-300` 扩)。
-5. **11-io 接线**(I5):子图 io 放宽(`loader.py:528`)/ 文件导入→黑板(`:287` 前置步)/ artifact 路径标注。
+5. **11-io 子图 io 放宽**(I5,收敛):仅子图 io 放宽(`loader.py:528` 删 inputs 1:1)。**文件导入→黑板 lazy(E2)+ artifact business_data_md(E3)拆出 → WS-E1-io**(跨 read_file/state.py(E5)/events(E4)/storage/runner,owns 必相交违 IR1)。
 
 ## 五、本批不做(范围锁定)
 - **studio 侧 3 个 P0**(run 路径:SKILL.md→root / workspace 双层 / 假成功)= studio 团队,本计划只**路由**(见 `_api-handshake-audit` B1)。

@@ -132,6 +132,17 @@
 - **不阻塞的部分**：mvp1 子图**设计**已审计 clean（`skill-syntax §2.1` + `physical-layout §2.1.1` + `02-resolver` 三处一致、自包含、无 mvp0 依赖），可独立锁；受阻的只是 mvp0 文件退役与代码清引用。
 - **来源**: 2026-06-05 PM 三步指令 + 引用核实。
 
+### DEF-018 — Gateway WS-1 ChatX 调用层尾债（generic / legacy / profile / thinking）
+- **日期**: 2026-06-06
+- **事项**: `graph-agent-gateway` WS-1 已完成官方 ChatX factory + invocation runtime 主路径，但仍有四类尾债:
+  - `GenericRouteChatModel` 只是 fail-loud shell，普通 chat 内核未实现；当前会抛 `NotImplementedError`，避免静默返回空 `AIMessage`。
+  - `LLMClientManager.dispatch_provider_call/_dispatch_provider_call/_call_*` 已无生产活调用方，仅作为 legacy ordinary-chat helper 暂留；后续要删除，或收编进 generic 普通 chat 内核。
+  - `ProviderProfile` 注册表默认空，尚未 seed provider/model defaults；factory 暂用 `endpoint_id:provider_model_id` 作为 profile key，以区分 endpoint 级 base_url/credential/protocol 和物理模型，但该 key 规则仍待 alignment 11 §8 最终确认。
+  - thinking 归一化只完成局部 runtime kwargs 映射和 ChatX `AIMessage` 结果不拍平；DeepSeek reasoning-content 多轮保留的单方法 payload patch 未移植。
+- **延期原因**: 本轮 WS-1 的目标主线是 qiniu 空-content、异常分类、base_url、RouteChatModelFactory、ProviderProfile 原语、ChatX invoke/fallback/token escalation 主机制；generic 普通 chat、旧 provider-call helper 清理、profile defaults/key 最终化、DeepSeek payload patch 都需要独立契约和失败测试。
+- **前置条件**: ① 确认 ProviderProfile key 规则；② 为 generic 普通 chat 内核或删除路径补测试；③ 为 profile defaults/thinking/DeepSeek patch 补确定性失败测试；④ 清理或改写 `test_gateway_integration.py` / `test_runtime_hard_cutover.py` 中已迁到 ChatX 主路径后的 legacy 断言边界。
+- **来源**: `docs/graph-agent-gateway/mvp1/_impl/WS1-chatx-core.md` M2 说明；WS-1 终审要求（2026-06-06）。
+
 ## Completed / Promoted
 
 - **DEF-015 + DEF-013 → 拉回实现 (2026-06-04)**: PM「def 15 和 13 拉回来, 现在就要实现」。DEF-015 i18n 架构已定稿(`studio/mvp1/04_platform/i18n.md`,§9 P1 范围明确);DEF-013 后端 role-test 端点(`POST /api/llm/roles/{name}/test`)已就绪、缺前端 Properties 面板 UI。二者转入 **P1 实现**:Claude 出实现计划 → codex `[PLAN REVIEW REQUEST]` → codex 写代码(Claude 不亲自写)。上方 Active 区 DEF-013/DEF-015 条目保留作设计参考。

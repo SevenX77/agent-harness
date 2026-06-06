@@ -588,104 +588,60 @@ def test_dispatch_google_genai_uses_route_endpoint_and_runtime_policy(monkeypatc
     }
 
 
-def test_ark_runtime_settings_map_to_official_sdk_chat_completion_kwargs() -> None:
-    from graph_agent_gateway.client_manager import LLMClientManager
-
-    captured: list[dict[str, object]] = []
-
-    class FakeCompletions:
-        def create(self, **kwargs: object) -> dict[str, object]:
-            captured.append(dict(kwargs))
-            return {
-                "choices": [
-                    {
-                        "message": {"content": "ok"},
-                        "finish_reason": "stop",
-                    }
-                ],
-                "usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
-            }
-
-    class FakeClient:
-        chat = type("Chat", (), {"completions": FakeCompletions()})()
-
-    result = LLMClientManager._call_ark_runtime(
-        FakeClient(),
-        "ep-20260525-test",
-        [{"role": "user", "content": "hello"}],
-        4096,
-        0.7,
-        top_p=0.9,
-        stop_sequences=["END"],
-        parallel_tool_calls=False,
-        reasoning_effort="high",
-    )
-
-    assert result["content"] == "ok"
-    assert captured == [
-        {
-            "model": "ep-20260525-test",
-            "messages": [{"role": "user", "content": "hello"}],
-            "max_tokens": 4096,
-            "temperature": 0.7,
-            "top_p": 0.9,
-            "stop": ["END"],
-            "parallel_tool_calls": False,
-            "reasoning_effort": "high",
-        }
-    ]
-
-
-def test_dispatch_ark_runtime_uses_official_sdk_client_not_openai_path(monkeypatch) -> None:
-    from graph_agent_gateway import client_manager
-    from graph_agent_gateway.client_manager import LLMClientManager
-    from graph_agent_gateway.registry.schema import RuntimePolicy
+def test_ark_runtime_factory_maps_to_chat_openai_kwargs() -> None:
+    from graph_agent_gateway.route_chat_model_factory import RouteChatModelFactory
+    from langchain_openai import ChatOpenAI
 
     route = _route().model_copy(
         update={
             "route_id": "ark-cn:deepseek-v3",
             "endpoint_id": "ark-cn",
             "protocol": "ark_runtime",
-            "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+            "base_url": "https://ark.cn-beijing.volces.com",
+            "credential_ref": "endpoint:ark-cn",
             "provider_model_id": "ep-20260525-test",
             "canonical_id": "deepseek-v3",
         }
     )
-    captured: list[dict[str, object]] = []
-
-    def fake_get_openai_client(*_args: object, **_kwargs: object) -> object:
-        raise AssertionError("ark_runtime must not use OpenAI-compatible client")
-
-    def fake_get_ark_client(route_arg: object, runtime_policy: object) -> object:
-        captured.append({"route": route_arg, "runtime_policy": runtime_policy})
-        return object()
-
-    def fake_call_ark_runtime(*args: object, **kwargs: object) -> dict[str, object]:
-        captured.append({"args": args, "kwargs": kwargs})
-        return {
-            "content": "ok",
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-            "finish_reason": "stop",
-        }
-
-    monkeypatch.setattr(client_manager.LLMClientManager, "_get_openai_client", fake_get_openai_client)
-    monkeypatch.setattr(client_manager.LLMClientManager, "_get_ark_client", fake_get_ark_client)
-    monkeypatch.setattr(client_manager.LLMClientManager, "_call_ark_runtime", fake_call_ark_runtime)
-
-    result = LLMClientManager._dispatch_provider_call(
-        route,
-        [{"role": "user", "content": "hello"}],
-        512,
-        0.2,
-        runtime_policy=RuntimePolicy(token_escalation_rounds=0),
-        top_p=0.8,
-        reasoning_effort="high",
+    factory = RouteChatModelFactory(
+        credential_provider=StaticCredentialProvider({"endpoint:ark-cn": "ark-secret"})
     )
 
-    assert result["content"] == "ok"
-    assert captured[0] == {
-        "route": route,
-        "runtime_policy": RuntimePolicy(token_escalation_rounds=0),
-    }
-    assert captured[1]["kwargs"]["top_p"] == 0.8
-    assert captured[1]["kwargs"]["reasoning_effort"] == "high"
+    chat_model = factory.build(route)
+
+    assert isinstance(chat_model, ChatOpenAI)
+    assert chat_model.model_name == "ep-20260525-test"
+    assert chat_model.openai_api_base == "https://ark.cn-beijing.volces.com/api/v3"
+    assert chat_model.openai_api_key.get_secret_value() == "ark-secret"
+
+
+def test_ark_runtime_target_no_longer_uses_ark_sdk_client(monkeypatch) -> None:
+    from graph_agent_gateway import client_manager
+    from graph_agent_gateway.route_chat_model_factory import RouteChatModelFactory
+    from langchain_openai import ChatOpenAI
+
+    def fail_if_ark_sdk_path_is_used(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("ark_runtime target should be ChatOpenAI, not Ark SDK")
+
+    monkeypatch.setattr(
+        client_manager.LLMClientManager,
+        "_get_ark_client",
+        fail_if_ark_sdk_path_is_used,
+    )
+    route = _route().model_copy(
+        update={
+            "route_id": "ark-cn:deepseek-v3",
+            "endpoint_id": "ark-cn",
+            "protocol": "ark_runtime",
+            "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+            "credential_ref": "endpoint:ark-cn",
+            "provider_model_id": "ep-20260525-test",
+            "canonical_id": "deepseek-v3",
+        }
+    )
+
+    chat_model = RouteChatModelFactory(
+        credential_provider=StaticCredentialProvider({"endpoint:ark-cn": "ark-secret"})
+    ).build(route)
+
+    assert isinstance(chat_model, ChatOpenAI)

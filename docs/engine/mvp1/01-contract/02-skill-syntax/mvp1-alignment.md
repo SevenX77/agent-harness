@@ -1,14 +1,14 @@
 ---
 module: 01-contract/02-skill-syntax
 doc: mvp1-alignment
-status: drafted（mvp1 自写=唯一真理；子图 path=绝对路径已写清；GRAPH/LOGIC/SUBGRAPH/AGENT/cognitive/mention/resource(§2.8) 语法已迁入；🚨 iterate/io 切片仍是真空债，见 §2/§8）
+status: drafted（mvp1 自写=唯一真理；子图 path=绝对路径已写清；GRAPH/LOGIC/SUBGRAPH/AGENT/cognitive/mention/resource(§2.8)/iterate(§2.9) 语法已迁入；🚨 仅 io 切片仍是真空债，见 §2/§8）
 binds_baseline: ./baseline.md
 aligns_with: ../../00-architecture-overview.md（§2 契约层 A）
 ---
 
 # 02-skill-syntax — 契约 A · skill 文件内容/语法
 
-> **Tier**: 契约层 A(声明式,喂 copilot) | **Owns**: skill 文件**里写什么**——四 phase(GRAPH/LOGIC/SUBGRAPH/SKILL)字段 schema + body XML + mention + io/iterate 声明 + cognitive 模板语法 | **现状**: 子图 path 已写清(§2.1);GRAPH/LOGIC/SUBGRAPH/AGENT/cognitive/mention 语法已迁入(§2.2-§2.7);🚨 resource/iterate/io 切片仍待补(§8) | **Related**: `physical-layout`(文件放哪)· `compile-rules`(怎么判)· `02-mechanism/02-resolver`(path 怎么解析)· `02-mechanism/03-assemble`(模板渲染)· `02-iterate`(iterate 执行)
+> **Tier**: 契约层 A(声明式,喂 copilot) | **Owns**: skill 文件**里写什么**——四 phase(GRAPH/LOGIC/SUBGRAPH/SKILL)字段 schema + body XML + mention + io/iterate 声明 + cognitive 模板语法 | **现状**: 子图 path 已写清(§2.1);GRAPH/LOGIC/SUBGRAPH/AGENT/cognitive/mention/resource/iterate 语法已迁入(§2.1-§2.9);🚨 仅 io 切片仍待补(§8) | **Related**: `physical-layout`(文件放哪)· `compile-rules`(怎么判)· `02-mechanism/02-resolver`(path 怎么解析)· `02-mechanism/03-assemble`(模板渲染)· `02-iterate`(iterate 执行)
 
 ## 1. 定义
 定义 skill 文件**内容/语法**:每种文件的 frontmatter 字段、body 格式、`@type:NAME` mention 语法、io/iterate 声明。**只管"写什么"**,不管"放哪"(归 `physical-layout`)、"怎么判"(归 `compile-rules`)、"怎么解析引用"(归 `02-resolver`)。是喂 copilot 生成合法 skill 的核心语言。
@@ -26,9 +26,9 @@ aligns_with: ../../00-architecture-overview.md（§2 契约层 A）
 | cognitive 模板(8 槽布局) | ✅ 已迁入,见 §2.6；仅管模板语法,渲染机制见 `02-mechanism/03-assemble` |
 | mention `@type:NAME`(7 类) | ✅ 已迁入,见 §2.7 |
 | reference/example 机制 | ✅ 已写清,见 §2.8 |
-| iterate 声明(batch/loop/range/accumulate) | 🚨 **真空**(执行见 `04-run-outer/02-iterate`) |
+| iterate 声明(batch/loop/range/accumulate) | ✅ 已写清,见 §2.9(执行见 `04-run-outer/02-iterate`) |
 | io 切片声明(从黑板切片) | 🚨 **真空**(切片见 `04-run-outer/01-graph-exec`) |
-> 🚨 上述「真空」部件是 **mvp1 的债**:语法正文还没从旧文档迁进 mvp1。mvp0 弃用后这些就是真空,**必须在 mvp1 自写补齐**(这正是"mvp1 没有=错误"的报警点,见 §8)。本批已补 GRAPH/LOGIC/SUBGRAPH/AGENT/cognitive/mention + resource(§2.8);剩余 iterate/io 切片继续报警。
+> 🚨 上述「真空」部件是 **mvp1 的债**:语法正文还没从旧文档迁进 mvp1。mvp0 弃用后这些就是真空,**必须在 mvp1 自写补齐**(这正是"mvp1 没有=错误"的报警点,见 §8)。本批已补 GRAPH/LOGIC/SUBGRAPH/AGENT/cognitive/mention + resource(§2.8) + iterate(§2.9);剩余 io 切片继续报警。
 > ❌ **无 golden 声明**:golden 是 `.workspace` 临时产物,不进 skill 源码语法。
 
 ## 2.1 子图 path 引用契约(mvp1 权威)
@@ -590,6 +590,46 @@ references:
 | cognitive 槽 | `knowledge_base` | `examples` |
 > 二者都是"agent 可查阅资产",代码错误码统称 `resource` domain;reference 重**知识注入**(预读进 prompt),example 重**格式示范**(按需取)。
 
+## 2.9 iterate 声明部件契约
+phase 可声明**循环原语**:`batch`(并行 map)/ `loop`(串行累积),分**节点级**(单个 phase 迭代)与**图级**(整图自循环)。本节定义**作者写什么**(声明语法 = 契约);**执行机制**(引擎怎么跑 batch/loop、图级 loop=B 引擎包 loop-body、嵌套、子图继承、每轮 trace 盖戳)归 [`04-run-outer/02-iterate`](../../02-mechanism/04-run-outer/02-iterate/mvp1-alignment.md),`[F-v3-iterate-*]` 校验码归 [`03-compile-rules` §6](../03-compile-rules/mvp1-alignment.md#6-mvp1-新增码目标未计入现有-93-码)。
+
+> **⚠️ 现状 vs 目标**:现状代码**只有节点级 batch**,声明字段是 `batch:`(`BatchSpec`,只含 `iterator`/`item_var`/`concurrency`,`manifest.py:121`、`PhaseAST.batch:140`)。下表 `iterate:` 是 **mvp1 目标统一声明**(兼容 batch,新增 `mode`/`loop`/`range`/`accumulate`/图级),**尚未落代码**——`loop`/`range`/图级/统一 `iterate` 块归 kiro(执行侧见 `02-iterate` §8)。本节写目标语法契约,代码应向它对齐。
+
+### 2.9.1 `iterate:` 字段(目标统一声明)
+节点级写在 phase 节点 frontmatter(`LOGIC.md`/`SKILL.md`/`SUBGRAPH.md`,镜像现状 `batch:` 落在节点 AST);图级写在 `GRAPH.md` frontmatter(整图自循环,目标)。
+
+| 字段 | 类型 | 必填 | 默认值 | 语法/校验规则 | 业务作用 |
+|---|---|---|---|---|---|
+| `mode` | enum string | 是 | 无 | 只能是 `batch`(并行 map)或 `loop`(串行累积) | 选并行还是回环 |
+| `over` | string | 是 | 无 | 黑板字段路径(如 `data.events`);所指 schema 必须是 list/array,否则 `[F-v3-iterate-over-not-list]`(现状同义字段名为 `iterator`) | 迭代源列表 |
+| `item_var` | string | 是 | 无 | 正则 `^[a-z][a-z0-9_]*$`;每轮把当前项注入黑板该名 | 当前项变量名 |
+| `range` | [int, int] | 否 | 全量(predict 默认 `[1,1]`) | 闭区间切片,只跑子集 | 取前 N / 调试切片;predict 只跑 1 项 |
+| `concurrency` | int | 否(仅 `batch`) | `1` | `>= 1`;`asyncio.Semaphore` 并发上限 | batch 并发度 |
+| `accumulate` | object | 否(`loop` 必填) | 无 | 子字段见 §2.9.2 | 串行累积声明 |
+
+> **向后兼容**:现状 `batch:` = 目标 `iterate:{mode: batch}` 的子集;`iterator` 即 `over`。迁移期两种写法都接受,新写法统一用 `iterate:`。
+
+### 2.9.2 `accumulate:` 子字段(仅 `loop`)
+loop 的累积变量由作者**显式声明**、引擎不猜:
+
+| 子字段 | 类型 | 必填 | 语法/校验规则 | 业务作用 |
+|---|---|---|---|---|
+| `var` | string | 是 | 正则同 `item_var`;每轮注入黑板该名(持累积态) | 累积变量名 |
+| `init` | any | 是 | 可序列化值(loop 第一轮 `var` 初值) | 累积初值 |
+| `from` | string | 是 | 本轮 phase `io.outputs` 的字段名,取它做本轮增量 | 取哪个输出累积 |
+| `merge` | enum string | 是 | 只能是 `append` / `extend` / `merge` / `replace` | 累积合并策略 |
+
+**编译校验**:`mode=loop` 时,该 loop 节点 `io.inputs` 必须同时声明 `item_var` 与 `accumulate.var` 两字段,缺则 `[F-v3-iterate-accumulate-fields-missing]`(归 `compile-rules`)。
+
+### 2.9.3 图级 vs 节点级(声明位置)
+| | 节点级 | 图级 |
+|---|---|---|
+| 写在 | phase 节点 frontmatter | `GRAPH.md` frontmatter(目标) |
+| 语义 | 对一个 phase 迭代 | 对整图迭代(引擎包 loop-body,执行见 `02-iterate`) |
+| 子图 | — | `SUBGRAPH.md` 上的 iterate = 父图用来迭代调子图,子图本身跑 1 遍 |
+> **嵌套**:图级走到一个设了节点级 iterate 的节点,先跑完节点级再继续(总次数 = 图级 × 节点级)。本节只管声明,执行机制归 `02-iterate`。
+> ❌ **无 golden 声明**(同 §2 注):iterate 是 phase/graph 源码语法,不含运行期产物。
+
 ## 3. 接口契约
 skill 源码(语法)→ AST(`GraphManifest` / `PhaseAST` / `Phase` 等,归 `data-contracts`)。
 - **GRAPH**:AST 持根 metadata、inline `io.inputs/outputs`、phase registry；body DAG 产出拓扑顺序与 output phase 集合。
@@ -599,6 +639,7 @@ skill 源码(语法)→ AST(`GraphManifest` / `PhaseAST` / `Phase` 等,归 `data
 - **SKILL agent `subgraphs[]`**:引用项持绝对 `path`;`subagents[]` 仍持 `target_skill`,二者生命周期不同。
 - **cognitive 模板语法**:Agent AST + resources + `io.outputs` 填充固定 8 槽模板；渲染机制归 `02-mechanism/03-assemble`。
 - **mention**:`@type:NAME` 只允许 7 类,按静态 registry 做可达性校验。
+- **iterate**:节点 frontmatter `batch:`(现状)/ 目标统一 `iterate:` → `PhaseAST.batch`(`BatchSpec`,归 `data-contracts`);声明语法本节 §2.9,执行机制归 `04-run-outer/02-iterate`。
 
 ## 4. 设计决策基础(用户原话)
 > 子图 path(PM 2026-06-02):"subgraph.md里面写path, 直接解析就好了, 随便放哪里。唯一要注意的是copilot 的工作目录范围要把subgraph的子图path 加进去。还有一个是注册在agent phase里的子图,也一样写path"
@@ -615,6 +656,7 @@ skill 源码(语法)→ AST(`GraphManifest` / `PhaseAST` / `Phase` 等,归 `data
 | SS6 | AGENT `subagents[]` 保持 `target_skill`;AGENT `subgraphs[]` 改为绝对 `path` | 子代理是运行期 Agent 委派,子图是编译期 graph skill 寻址,生命周期不同 |
 | SS7 | cognitive 只在本文定义模板语法与 8 槽结构,渲染机制归 `02-mechanism/03-assemble` | 契约层只管 skill 写法,装配期机制不在 syntax 内重复 |
 | SS8 | mention 固定 7 类 `@type:NAME`,静态 registry 可达性失败即编译失败 | 引用必须在编译期可验证,不能留给 LLM 猜 |
+| SS9 | iterate 声明统一为 `iterate:{mode,over,item_var,range,concurrency,accumulate}`(现状 `batch:` 是其 `mode=batch` 子集) | 一套声明覆盖 batch/loop/图级;现状只 batch,loop/range/图级/统一块归 kiro,执行归 `02-iterate` |
 
 ## 6. 测试关键点
 1. **GRAPH**:frontmatter `phases`、body `<phase>`、物理 `phases/<name>/` 三者不一致会失败；inline `io.inputs/outputs` 合法；旧物理 IO/ref 字段失败。
@@ -626,12 +668,13 @@ skill 源码(语法)→ AST(`GraphManifest` / `PhaseAST` / `Phase` 等,归 `data
 7. **AGENT registries**:`subagents[].target_skill` 仍按子代理机制校验；`subgraphs[].path` 按绝对 path 校验；references/examples path/summary 合法；frontmatter 与 body mention 可达域一致。
 8. **cognitive 模板语法**:8 个固定容器存在；`<exit_contract>` 只由模板 hardcode；`{output_schema}` 来自当前 Agent phase `io.outputs`。
 9. **mention**:7 类 regex 命中；未知 type、残缺 token、目标不存在、大小写不一致均失败；未使用注册项只 WARN。
+10. **iterate**:`iterate.mode` ∈ {batch,loop};`over` 所指非 list → `[F-v3-iterate-over-not-list]`；`mode=loop` 缺 `item_var`/`accumulate.var` 对应 `io.inputs` 字段 → `[F-v3-iterate-accumulate-fields-missing]`；`accumulate.merge` ∈ {append,extend,merge,replace}。
 
 ## 7. 涉及 region / platform
 engine 全权(子图语法是 engine 主决策);skill 源码被 studio 编辑器/copilot 消费。
 
 ## 8. gaps / 报警
-1. 🚨 **mvp1 语法真空(剩余批次)**:§2 标「真空」的部件(**iterate / io 切片**)语法正文**尚未迁入 mvp1**(resource/example 已补 §2.8)。mvp0 弃用后这是真空,**必须在 mvp1 自写补齐**。
+1. 🚨 **mvp1 语法真空(剩余批次)**:§2 标「真空」的部件(**io 切片**)语法正文**尚未迁入 mvp1**(resource/example 已补 §2.8;iterate 已补 §2.9)。mvp0 弃用后这是真空,**必须在 mvp1 自写补齐**。
 2. **代码 drift(refactor-target)**:当前代码对 LOGIC action / SUBGRAPH path / SUBGRAPH io / AGENT body 严格校验 / cognitive slot 细节 / mention 完整静态校验仍有旧实现或缺口,详见 `baseline` 差异表；本文是目标契约,代码应向本文对齐。
 3. **subagents[] 不改 path(PM 2026-06-05 拍)**:子代理(`subagents[]`)与 **agent phase 捆绑**、是**运行期由 LLM 委派**的机制,跟子图(编译期解析、靠物理 path 引用的独立 skill)**不是一回事**(生命周期不同,断层#7)——引用方式**维持 `target_skill`,不改 path**。
 

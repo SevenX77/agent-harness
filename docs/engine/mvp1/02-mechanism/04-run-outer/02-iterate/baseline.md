@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/04-run-outer/02-iterate
 doc: baseline
-status: drafted（现状对齐 pinned 代码 7cd4b9c；只有节点级 batch,loop/图级/range 是缺口）
+status: drafted（B✅ 现状写全:节点级 batch live(file:line 已核 `graph_assembler.py:225/240/249/253/268/300`),loop/图级/range 明确标缺口;U11 锁）
 ---
 
 # 02-iterate — Baseline(当下代码实现逻辑)

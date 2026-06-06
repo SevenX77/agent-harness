@@ -27,13 +27,17 @@ FROZEN 是**审计通过的背书,不是起点**:drafted 期自由改,审过+盖
 ### 1.5 典型迁移序(旧版 → 新版 · 通用)
 旧版去 FROZEN → `superseded` → 新版零引用旧版(审计 R1)→ 旧版 `deprecated` → 新版严格审计全 PASS → 盖 `FROZEN`。(项目具体执行序登记在项目 INDEX。)
 
-### 1.6 单元级锁(横切设计单元)
-横切设计单元(横跨多能力模块)在 INDEX 有自己的锁态 `unit-lock ∈ {drafted, locked}`:
-- **单元 `locked`**:该单元审过、锁住(涉及的各模块切面再改走 exemption),**不必等同文件里别的单元**。
-- **文件级 `FROZEN`** = 该文件承载的**所有**单元切面都 `locked`(全 ready)。
-- 能力模块文件 frontmatter 标 `units:`(它承载哪些单元切面),锁态以 INDEX 为准。
-- **`units:` 含 owner 切面 + 消费/引/落点切面**(消费方"承载"的是该单元的消费切面);**非 owner 切面必须在 §5/正文标 `(消费)/(引)/(落点)` + owner 模块**。owner 唯一性(R8 去重)以 INDEX spans 为准——frontmatter 列消费切面**不算** R8 污染。
-> 解决:横切单元(如子图)ready 了能**先锁防漂移**,即使所在文件还有别的真空单元。
+### 1.6 单元级锁(横切设计单元)—— owner-scoped 三态
+横切设计单元(横跨多模块)在 INDEX 有锁态。多子系统 monorepo 里各子系统(studio / engine / gateway)**独立冻结**,故单元锁按"**本系统自有切面**"判定,**不被外部系统的冻结节奏卡死**。锁态拆三维:
+- **`owned-lock` ∈ {drafted, locked}**:本系统(studio)**自有 / 消费 / 适配 / 落点**切面是否审过 + 盖章 + 落在已 `FROZEN` 哈希锁文档里。`locked` 只背书"本系统自己那半"。
+- **`external-binding` ∈ {none, floating-draft, pinned-draft, frozen-pinned, stale}**:本单元对外部系统切面(标 `(引)`,owner=`engine:*` / `gateway:*`)的绑定状态。`none`=无外部依赖;`floating-draft`=有外部依赖但外部仍 drafted、未 pin(当前默认);`pinned-draft`=已 pin 外部 SHA 但外部仍 draft;`frozen-pinned`=外部已 FROZEN 且 pin;`stale`=pin 的外部已漂移待复核。
+- **`integration-lock` ∈ {unverified, locked}**(派生):`locked` ⟺ `owned-lock=locked` **且** `external-binding ∈ {none, frozen-pinned}`。即只有"自有锁 + 外部要么没有要么已冻结钉死"才算端到端锁定;有 `floating-draft` / `pinned-draft` 外部依赖的单元 = `unverified`,**不得宣称端到端 locked**。
+- **文件级 `FROZEN`** = 该文件承载的所有单元的 **owned 切面**都 `owned-lock=locked`(本系统控得住的部分);**不要求**外部依赖也冻结。
+- 能力模块文件 frontmatter 标 `units:`(承载哪些单元切面),锁态以 INDEX 为准。
+- **`units:` 含 owner 切面 + 消费/引/落点切面**;**非 owner 切面必须在 §5/正文标 `(消费)/(引)/(落点)` + owner 模块**。owner 唯一性(R8 去重)以 INDEX spans 为准——frontmatter 列消费切面**不算** R8 污染。
+- **防假信心**:`owned-lock` 只锁字节,挡不住"外部契约漂了、本系统文档没变"。外部依赖的语义防漂移靠 `external-binding` 的 pin 机制(外部引用台账;外部系统稳定后逐个 `floating-draft`→`pinned-draft`→`frozen-pinned`)。
+- **锁态机器强制**:INDEX 是活注册表(可加新单元)、**不整文件入哈希锁**;但已 `locked` 单元的锁态 / owner / spans 由**锁态快照**(`_design-unit-lock-snapshot.json`,入哈希锁)+ 快照测试保护,防静默回退 / 换 owner / 删行。
+> 解决:横切单元 ready 了能**先锁自有切面防漂移**,不必等外部系统冻结;同时用三态**诚实区分**"自有锁定"与"端到端锁定",不制造假信心。
 
 ## 2. 引用拓扑(防 drift)
 - **能力模块自包含**:实现 + 就近 PM 决策原话(§4 §5),读它就够、**不跳 workflow 取决策**。

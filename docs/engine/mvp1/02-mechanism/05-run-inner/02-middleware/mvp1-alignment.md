@@ -1,19 +1,21 @@
 ---
 module: 02-mechanism/05-run-inner/02-middleware
 doc: mvp1-alignment
-status: drafted（机制·运行内层;A 链基础成段;B live 只接单槽且 3 槽 no-op）
+status: drafted（**U7 单元锁定 2026-06-06**;6 槽链 + 顺序契约(`__init__.py:58`)+ 域专槽归各域(双向链)成段、现状/目标 demarcate;live 接 6 槽 + 后 3 槽实现归 kiro;parallel_map×链 断层#3 = 跨切待设计(与 U11 共享,§8)、不阻 U7 核心链;文件未 FROZEN）
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行内层）
 ---
 
 # 02-middleware — 机制 B · 6 槽中间件链(运行内层)
 
-> **Tier**: 机制层 B · 运行·内层 | **Owns**: 6 槽链**基础设施**(顺序/工厂/hook 契约)+ loop 卫生槽(ExecutionControl 迭代/dead-end、LoopDetection) | **现状**: A 链基础成段;B live 只接单槽且 3 槽 no-op | **Related**: 域专槽逻辑归各域:CognitiveFlow→`03-cognitive`、Tracing→`06-seam/02-observability`、ToolError→`04-tools`、ProtocolValidation→`data-contracts`;subagent/exit 各自独立模块
+> **Tier**: 机制层 B · 运行·内层 | **Owns**: 6 槽链**基础设施**(顺序/工厂/hook 契约)+ loop 卫生槽(ExecutionControl 迭代/dead-end、LoopDetection) | **现状**: ⏳(6 槽工厂存在;live 只接单槽 CognitiveFlow,后 3 槽 no-op;接 6 槽 + 后 3 槽实现归各域 kiro) | **Related**: 域专槽逻辑归各域:CognitiveFlow→`03-cognitive`、Tracing→`06-seam/02-observability`、ToolError→`04-tools`、ProtocolValidation→`data-contracts`;subagent/exit 各自独立模块
 
 ## 1. 定义
 middleware = 内层 agent loop 的 **6 槽 hook 链**(经 `create_agent(middleware=build_middleware_chain(...))` 接入)。本域 own **链本身**(顺序契约、工厂、AgentMiddleware hook 形态)+ **纯 loop 卫生槽**;**域专槽的逻辑归各域**(本域只写槽位 + 概述 + 链到域 detail,双向引用)。
 
 ## 2. 数据流 / 机制
-6 槽顺序:①ProtocolValidation(守 BusinessData 无 `_` 前缀,逻辑→`data-contracts`)②CognitiveFlow(截 finish_task/ask_clarification,逻辑→`03-cognitive`)③ExecutionControl(发 iteration 事件、检 dead-end/轻量 loop,**本域 own**)④Tracing(发微观事件,逻辑→`02-observability`)⑤ToolError(工具异常转 error ToolMessage,逻辑→`04-tools`)⑥LoopDetection(loop 保护,**本域 own**)。+ 退出闸(after_agent)= 独立 `05-exit-control` 模块、subagent 派发(wrap_tool_call)= 独立 `07-subagent` 模块(都是 middleware 实现但独立职责)。
+> **⚠️ 现状 vs 目标**:现状 live AGENT 闭包**只接单槽** CognitiveFlow(`build_middleware_chain_cognitive_flow`,`factory.py:68`),**6 槽链没接进 live**——6 槽工厂 `build_middleware_chain`(`factory.py:29`)存在但 live 不调它(已核)。6 槽里**前 3 有真实逻辑**(ProtocolValidation 213 行 / CognitiveFlow 984 行 / ExecutionControl 343 行)、**后 3 是 no-op 空壳**(Tracing/ToolError/LoopDetection 各 16 行)。下面 §2 写**目标 6 槽链**;`live 接 6 槽` + `后 3 槽从 no-op 实现到位`(逻辑归各域)= refactor-target 归 kiro(§8)。
+
+6 槽顺序(目标,顺序契约 `__init__.py:58`):①ProtocolValidation(守 BusinessData 无 `_` 前缀,逻辑→`data-contracts`)②CognitiveFlow(截 finish_task/ask_clarification,逻辑→`03-cognitive`)③ExecutionControl(发 iteration 事件、检 dead-end/轻量 loop,**本域 own**)④Tracing(**现 no-op**,发微观事件,逻辑→`02-observability`)⑤ToolError(**现 no-op**,工具异常转 error ToolMessage,逻辑→`04-tools`)⑥LoopDetection(**现 no-op**,loop 保护,**本域 own**)。+ 退出闸(after_agent)= 独立 `05-exit-control` 模块、subagent 派发(wrap_tool_call)= 独立 `07-subagent` 模块(都是 middleware 实现但独立职责)。
 
 ## 3. 接口契约
 `build_middleware_chain(...) -> tuple[AgentMiddleware, ...]` 交 create_agent;各 hook 形态(before/after_model、after_agent、wrap_tool_call)。

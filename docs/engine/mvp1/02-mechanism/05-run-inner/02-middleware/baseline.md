@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/05-run-inner/02-middleware
 doc: baseline
-status: drafted（现状对齐 pinned 代码 7cd4b9c；6 槽工厂存在,live 只接单槽;后 3 槽 no-op）
+status: drafted（B✅ 现状写全:6 槽工厂 `factory.py:29`、单槽 live `:68`、顺序契约 `__init__.py:58`、后 3 槽 no-op(各 16 行,file:line+行数已核);U7 锁）
 ---
 
 # 02-middleware — Baseline(当下代码实现逻辑)

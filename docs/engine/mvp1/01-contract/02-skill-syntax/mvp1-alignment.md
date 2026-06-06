@@ -1,7 +1,7 @@
 ---
 module: 01-contract/02-skill-syntax
 doc: mvp1-alignment
-status: drafted（mvp1 自写=唯一真理；子图 path=绝对路径已写清；GRAPH/LOGIC/SUBGRAPH/AGENT/cognitive/mention 语法已迁入；🚨 resource/iterate/io 切片仍是真空债，见 §2/§8）
+status: drafted（mvp1 自写=唯一真理；子图 path=绝对路径已写清；GRAPH/LOGIC/SUBGRAPH/AGENT/cognitive/mention/resource(§2.8) 语法已迁入；🚨 iterate/io 切片仍是真空债，见 §2/§8）
 binds_baseline: ./baseline.md
 aligns_with: ../../00-architecture-overview.md（§2 契约层 A）
 ---
@@ -25,10 +25,10 @@ aligns_with: ../../00-architecture-overview.md（§2 契约层 A）
 | SKILL.md(Agent frontmatter + body XML + 引用注入) | ✅ 已迁入,见 §2.5；其 `subgraphs[]` 引用按 §2.1 用绝对 path |
 | cognitive 模板(8 槽布局) | ✅ 已迁入,见 §2.6；仅管模板语法,渲染机制见 `02-mechanism/03-assemble` |
 | mention `@type:NAME`(7 类) | ✅ 已迁入,见 §2.7 |
-| reference/example 机制 | 🚨 **真空** |
+| reference/example 机制 | ✅ 已写清,见 §2.8 |
 | iterate 声明(batch/loop/range/accumulate) | 🚨 **真空**(执行见 `04-run-outer/02-iterate`) |
 | io 切片声明(从黑板切片) | 🚨 **真空**(切片见 `04-run-outer/01-graph-exec`) |
-> 🚨 上述「真空」部件是 **mvp1 的债**:语法正文还没从旧文档迁进 mvp1。mvp0 弃用后这些就是真空,**必须在 mvp1 自写补齐**(这正是"mvp1 没有=错误"的报警点,见 §8)。本批已补 GRAPH/LOGIC/SUBGRAPH/AGENT/cognitive/mention；剩余 resource/iterate/io 切片继续报警。
+> 🚨 上述「真空」部件是 **mvp1 的债**:语法正文还没从旧文档迁进 mvp1。mvp0 弃用后这些就是真空,**必须在 mvp1 自写补齐**(这正是"mvp1 没有=错误"的报警点,见 §8)。本批已补 GRAPH/LOGIC/SUBGRAPH/AGENT/cognitive/mention + resource(§2.8);剩余 iterate/io 切片继续报警。
 > ❌ **无 golden 声明**:golden 是 `.workspace` 临时产物,不进 skill 源码语法。
 
 ## 2.1 子图 path 引用契约(mvp1 权威)
@@ -561,6 +561,35 @@ mention 采用“语法宽入口、语义强校验”:token 字符允许大小�
 
 错误码全集见 [`03-compile-rules` §4 mention domain](../03-compile-rules/mvp1-alignment.md#mention-domain)。
 
+## 2.8 resource(reference / example)部件契约
+Agent `SKILL.md` 可声明两类**外部资产**供 LLM 查阅:**reference**(领域资料)与 **example**(样例)。声明在 frontmatter(字段表见 §2.5.1),body 用 `@reference:R1` / `@example:E1` 引用(可达校验见 §2.7),装配期注入 cognitive 槽(§2.6),错误码归 [`03-compile-rules` §4 resource domain](../03-compile-rules/mvp1-alignment.md#resource-domain)。本节把散在各节的这套机制收口成一个部件。
+
+### 2.8.1 reference(领域资料)
+```yaml
+references:
+  - id: R1                       # 正则 ^[A-Z][A-Za-z0-9_-]*$;同列表唯一
+    path: references/style.md    # skill 根内可读路径
+    summary: 风格指南             # 非空
+```
+- **装配期预读**:内置 reference-reader 子代理把 references 读一遍 → 提炼"领域知识修正报告"注入 `{aligned_concepts_and_critical_corrections_markdown}`(knowledge_base 槽,§2.6);reader 失败只 WARN + 原文摘录降级(`[F-v3-reference-reader-failed]`),不中断装配(装配流见 `compile-rules` §2.2)。
+- **运行期按需读**:`{reference_registry_listing}` 列出可用 R-id;agent 用 `read_reference` 工具按 id 读全文(找不到 → `[F-v3-resource-reference-not-found]`)。
+- **校验**:id/path/summary 合法(`[F-v3-resource-reference-invalid]` / `-id-invalid` / `-path-invalid` / `-summary-missing`);body `@reference:Rx` 必须可达 frontmatter `references[].id`(§2.7)。
+
+### 2.8.2 example(样例)
+两种,都注入 `examples` 槽(§2.6):
+- **inline**:body `<example id="E1">…</example>` → `{skill_examples_inline}`(短样例直接进 prompt;id 规则见 §2.5.3)。
+- **registry**:frontmatter `examples: [{id, path, summary}]` → `{example_registry_listing}`(扩展案例库,只列 id/summary);agent 用 `read_example` 工具按需读(找不到 → `[F-v3-resource-example-not-found]`)。
+- **校验**:registry id/path/summary 合法(`[F-v3-resource-example-invalid]` 等);`@example:Ex` 可达 body inline 或 registry(§2.7)。
+
+### 2.8.3 reference vs example(职责区分)
+| | reference | example |
+|---|---|---|
+| 是什么 | 领域**资料**(给 agent 判断依据) | **样例**(给 agent 懂格式/边界) |
+| 装配期 | reader 预读 → knowledge_base 报告 | inline 直接进 examples 槽 |
+| 运行期 | `read_reference`(按 R-id) | `read_example`(registry 按 E-id) |
+| cognitive 槽 | `knowledge_base` | `examples` |
+> 二者都是"agent 可查阅资产",代码错误码统称 `resource` domain;reference 重**知识注入**(预读进 prompt),example 重**格式示范**(按需取)。
+
 ## 3. 接口契约
 skill 源码(语法)→ AST(`GraphManifest` / `PhaseAST` / `Phase` 等,归 `data-contracts`)。
 - **GRAPH**:AST 持根 metadata、inline `io.inputs/outputs`、phase registry；body DAG 产出拓扑顺序与 output phase 集合。
@@ -602,7 +631,7 @@ skill 源码(语法)→ AST(`GraphManifest` / `PhaseAST` / `Phase` 等,归 `data
 engine 全权(子图语法是 engine 主决策);skill 源码被 studio 编辑器/copilot 消费。
 
 ## 8. gaps / 报警
-1. 🚨 **mvp1 语法真空(剩余批次)**:§2 标「真空」的部件(resource/iterate/io 切片)语法正文**尚未迁入 mvp1**。mvp0 弃用后这是真空,**必须在 mvp1 自写补齐**。
+1. 🚨 **mvp1 语法真空(剩余批次)**:§2 标「真空」的部件(**iterate / io 切片**)语法正文**尚未迁入 mvp1**(resource/example 已补 §2.8)。mvp0 弃用后这是真空,**必须在 mvp1 自写补齐**。
 2. **代码 drift(refactor-target)**:当前代码对 LOGIC action / SUBGRAPH path / SUBGRAPH io / AGENT body 严格校验 / cognitive slot 细节 / mention 完整静态校验仍有旧实现或缺口,详见 `baseline` 差异表；本文是目标契约,代码应向本文对齐。
 3. **subagents[] 不改 path(PM 2026-06-05 拍)**:子代理(`subagents[]`)与 **agent phase 捆绑**、是**运行期由 LLM 委派**的机制,跟子图(编译期解析、靠物理 path 引用的独立 skill)**不是一回事**(生命周期不同,断层#7)——引用方式**维持 `target_skill`,不改 path**。
 

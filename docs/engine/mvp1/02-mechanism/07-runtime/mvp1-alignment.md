@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/07-runtime
 doc: mvp1-alignment
-status: drafted（机制·入口;B live 且 public API 干净;A 顶层契约/bootstrapping 未成段）
+status: drafted（机制·入口;B live 且 public API 干净;A 顶层契约 §2/§3 已成文;bootstrap 文档化 + 死簇清理=impl 归 kiro）
 aligns_with: ../../00-architecture-overview.md（§3 机制层 B·入口）
 ---
 

@@ -10,6 +10,8 @@ ground_truth:
 
 > 本文是 engine mvp1 的**完整模块地图**。第一性原理:整个系统按 **三层** 解耦——**契约层 A**(声明式 skill 语言/规则/数据形状)→ **机制层 B**(引擎实现)→ **API 契约层 C**(engine↔studio 操作边界)。机制层按真实生命周期 **编译 → 装配 → 运行** 组织,运行再分 **外层图编排 / 内层 agent loop**。每个模块要么标「♻️ 沿用 mvp0」,要么指向它的 V4 设计——**不允许 silent omission**。本文只做 **地图 + 决策**,机制细节**链接各模块专文、不复制**(SSOT)。
 
+> ⚠️ **状态以 INDEX 为准**:本图 §2/§3 的 status 列 + §7 待设计清单是早期快照、可能滞后;**当前权威就绪状态见 [`INDEX.md §3.1`](./INDEX.md)**——2026-06-06 对账结论:**12 模块 alignment + baseline 内容全齐**,除 U10 单元锁(studio HTTP 协同)+ impl(各模块 §8 refactor-target 归 kiro)外无缺口;锁 / audited-ready 留实施后。
+
 ## 0. 术语(正式名)
 
 - **Graph Agent**(旧称 "engine"):**文档驱动的 agent 运行时**——主体由 LangGraph 确定性路由驱动,最大特点用文档(Graph Skill)驱动,比写 LangGraph 代码简单。

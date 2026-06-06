@@ -1,7 +1,7 @@
 ---
 module: 04_platform/engine
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；Studio 已消费 compile/predict/run/trace 部分 engine 能力；resume 仍 501，engine contract 应引用 `docs/engine/mvp1/` SSOT，不在 Studio 重写 ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；Studio 已消费 compile/predict/run/trace 部分 engine 能力；resume 仍 501，engine contract 应引用 `docs/engine/mvp1/` SSOT，不在 Studio 重写 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/backend/app/services/skills.py:lint_skill_path · apps/studio/backend/app/services/predictor.py:dispatch_predict_job · apps/studio/backend/app/services/run_manager.py:start_run · apps/studio/backend/app/services/golden_diff.py:compare_run_to_golden · apps/studio/backend/app/routers/runs.py:resume_run
 units: [compile-stage-gate, predict-execution, run-execution-node-status, trace-dot-blackboard, golden-per-agent-node, debug-resume-checkpoint, subgraph-path-inline-drilldown, phase-field-whitelist]

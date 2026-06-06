@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/golden-eval
 doc: mvp1-alignment
-status: drafted（后端 golden 以整次 run final_state 复制为 baseline；per-agent-node golden 目标未落 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（后端 golden 以整次 run final_state 复制为 baseline；per-agent-node golden 目标未落 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [golden-per-agent-node]
 aligns_with: 01_workflows/04_run-and-verify.md（golden-eval 段）

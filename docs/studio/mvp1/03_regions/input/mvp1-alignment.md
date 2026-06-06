@@ -1,7 +1,7 @@
 ---
 module: 03_regions/input
 doc: mvp1-alignment
-status: drafted（InputPanel 仍投影固定 `input/sample.json`/`input/schema.json`，schema inference 无写回，Predict/Run 不消费选中输入 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（InputPanel 仍投影固定 `input/sample.json`/`input/schema.json`，schema inference 无写回，Predict/Run 不消费选中输入 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [io-panel-artifacts-test-inputs, golden-per-agent-node]
 aligns_with: 01_workflows/02_authoring.md（i/o panel）· 01_workflows/04_run-and-verify.md（predict/run input/golden）

@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/skill-workspace
 doc: mvp1-alignment
-status: drafted（Welcome 仍读 `/skills` 注册表聚合，import 仍要求 GRAPH/SKILL 门禁；MVP1 IDE-folder 模型未落 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（Welcome 仍读 `/skills` 注册表聚合，import 仍要求 GRAPH/SKILL 门禁；MVP1 IDE-folder 模型未落 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [workspace-open-folder-mru, subgraph-path-inline-drilldown]
 aligns_with: 01_workflows/01_init.md（open folder / MRU）· 01_workflows/02_authoring.md（subgraph workspace）

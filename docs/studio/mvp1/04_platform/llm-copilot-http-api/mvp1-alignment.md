@@ -1,7 +1,7 @@
 ---
 module: 04_platform/llm-copilot-http-api
 doc: mvp1-alignment
-status: drafted（`routers/llm.py` 是巨型 router，HTTP glue 与 probe/materialize/draft/6态内核混在一起；Copilot SDK test 仍走假路径 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（`routers/llm.py` 是巨型 router，HTTP glue 与 probe/materialize/draft/6态内核混在一起；Copilot SDK test 仍走假路径 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [settings-six-state-provider-health, model-group-role-materialization, copilot-sdk-test-parity]
 aligns_with: 01_workflows/00_settings-ux-spec.md（HTTP/Settings/Copilot）· docs/graph-agent-gateway/mvp1/README.md（③a/③b handoff）

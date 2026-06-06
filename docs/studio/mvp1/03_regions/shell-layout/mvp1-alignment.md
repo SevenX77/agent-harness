@@ -1,7 +1,7 @@
 ---
 module: 03_regions/shell-layout
 doc: mvp1-alignment
-status: drafted（Workspace shell live；RuntimeGate 仍可全屏 gate，copilot prop 用 outer skillId 有下钻风险 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（Workspace shell live；RuntimeGate 仍可全屏 gate，copilot prop 用 outer skillId 有下钻风险 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [shell-runtime-gate]
 aligns_with: 01_workflows/01_init.md（D10 eager sidecar 决策留底）· 01_workflows/00_settings-ux-spec.md（settings overlay）

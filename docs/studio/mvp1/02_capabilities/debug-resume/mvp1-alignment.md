@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/debug-resume
 doc: mvp1-alignment
-status: drafted（Studio resume route 存在但直接 501，节点级 Resume 主路径不可用 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（Studio resume route 存在但直接 501，节点级 Resume 主路径不可用 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [debug-resume-checkpoint]
 aligns_with: 01_workflows/05_debugging.md（debug / resume）

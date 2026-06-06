@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/compile-lint
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；lint/compile 触发与 compile-pass stage live；错误仍是底部浮层/toast，drawer 与上下文标记未落 ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；lint/compile 触发与 compile-pass stage live；错误仍是底部浮层/toast，drawer 与上下文标记未落 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/hooks/useDebouncedLint.ts:useDebouncedLint · apps/studio/frontend/src/components/studio/Workspace.tsx:handleCompile · apps/studio/frontend/src/components/studio/Workspace.tsx:CompileErrorPanel · apps/studio/frontend/src/components/studio/center-action-bar.tsx:CenterActionBar · apps/studio/backend/app/routers/skills.py:compile_skill_endpoint
 units: [compile-stage-gate, compile-lint-structured-error]

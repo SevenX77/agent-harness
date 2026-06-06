@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/publish
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；Artifact Registry zip 发布路径 live；zip 构建仍在 Python 后端，D12 Rust 写者未收口 ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；Artifact Registry zip 发布路径 live；zip 构建仍在 Python 后端，D12 Rust 写者未收口 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/hooks/usePublishSkill.ts:usePublishSkill · apps/studio/backend/app/routers/skills.py:publish_skill · apps/studio/backend/app/services/artifact_registry.py:build_publish_package · apps/studio/backend/app/services/run_manager.py:_auto_commit_successful_run
 units: [publish-artifact-autocommit]

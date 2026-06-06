@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/conflict-overwrite
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；顺序覆盖与文件保存冲突都有实现痕迹，但还是两套 UX，没有统一冲突呈现 ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；顺序覆盖与文件保存冲突都有实现痕迹，但还是两套 UX，没有统一冲突呈现 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/GraphCanvas/canvas-authoring.ts:checkSequentialOverwrites · apps/studio/frontend/src/components/GraphCanvas/GraphCanvas.tsx:GraphCanvas · apps/studio/frontend/src/components/studio/LazyMonacoPanel.tsx:LazyMonacoPanel · apps/studio/backend/app/services/skills.py:update_skill_file
 units: [conflict-overwrite-resolution]

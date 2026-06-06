@@ -1,7 +1,7 @@
 ---
 module: 03_regions/local-history
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；HistoryPanel 只显示 git snapshot；RunDetailDrawer/BatchSummary 存在但未挂，这与最新归属一致但旧 alignment 曾留未决口径 ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；HistoryPanel 只显示 git snapshot；RunDetailDrawer/BatchSummary 存在但未挂，这与最新归属一致但旧 alignment 曾留未决口径 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/studio/panels/HistoryPanel.tsx:HistoryPanel · apps/studio/frontend/src/components/history/HistoryPanel.tsx:HistoryPanel · apps/studio/backend/app/routers/skills.py:get_skill_history · apps/studio/backend/app/routers/skills.py:get_skill_history
 units: [local-history-snapshot]

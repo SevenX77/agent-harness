@@ -1,7 +1,7 @@
 ---
 module: 04_platform/engine
 doc: mvp1-alignment
-status: drafted（Studio 已消费 compile/predict/run/trace 部分 engine 能力；resume 仍 501，engine contract 应引用 `docs/engine/mvp1/` SSOT，不在 Studio 重写 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（Studio 已消费 compile/predict/run/trace 部分 engine 能力；resume 仍 501，engine contract 应引用 `docs/engine/mvp1/` SSOT，不在 Studio 重写 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [compile-stage-gate, predict-execution, run-execution-node-status, trace-dot-blackboard, golden-per-agent-node, debug-resume-checkpoint, subgraph-path-inline-drilldown, phase-field-whitelist]
 aligns_with: docs/engine/mvp1/（engine-owned contract SSOT）· 01_workflows/03_compile.md · 01_workflows/04_run-and-verify.md · 01_workflows/05_debugging.md

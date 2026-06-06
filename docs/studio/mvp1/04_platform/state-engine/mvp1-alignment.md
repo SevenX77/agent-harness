@@ -1,7 +1,7 @@
 ---
 module: 04_platform/state-engine
 doc: mvp1-alignment
-status: drafted（状态分散在 Workspace/sessionStorage/SWR/copilotStore/settings hooks；run stream 与 global events 存在但未形成单一 state-engine/WS bridge ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（状态分散在 Workspace/sessionStorage/SWR/copilotStore/settings hooks；run stream 与 global events 存在但未形成单一 state-engine/WS bridge ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [shell-runtime-gate, compile-stage-gate, run-execution-node-status, trace-dot-blackboard, settings-six-state-provider-health]
 aligns_with: 01_workflows/01_init.md（D10 决策留底）· 01_workflows/03_compile.md · 01_workflows/04_run-and-verify.md

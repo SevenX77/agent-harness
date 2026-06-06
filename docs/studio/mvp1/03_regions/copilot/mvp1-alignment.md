@@ -1,7 +1,7 @@
 ---
 module: 03_regions/copilot
 doc: mvp1-alignment
-status: drafted（面板与 WS live；session 仍易丢，ThinkingBlock/@mention/analysis bar 未落，且 Workspace 传 outer `skillId` 有下钻风险 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（面板与 WS live；session 仍易丢，ThinkingBlock/@mention/analysis bar 未落，且 Workspace 传 outer `skillId` 有下钻风险 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [copilot-session-persistence, copilot-sdk-test-parity]
 aligns_with: 01_workflows/04_run-and-verify.md（analysis bar）· 01_workflows/00_settings-ux-spec.md（copilot route）

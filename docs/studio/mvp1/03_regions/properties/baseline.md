@@ -1,7 +1,7 @@
 ---
 module: 03_regions/properties
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；Properties 仍用旧 phase 字段和 raw Connection Trace JSON；golden 完全不在 Properties 的新决策需保持 ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；Properties 仍用旧 phase 字段和 raw Connection Trace JSON；golden 完全不在 Properties 的新决策需保持 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/studio/panels/PropertiesPanel.tsx:PropertiesPanel · apps/studio/frontend/src/components/studio/panels/phase-frontmatter.ts:parsePhaseFrontmatter · apps/studio/frontend/src/components/studio/panels/phase-frontmatter.ts:applyPhaseFrontmatterForm
 units: [phase-field-whitelist, node-properties-role-test, trace-dot-blackboard]

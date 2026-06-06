@@ -1,7 +1,7 @@
 ---
 module: 03_regions/local-history
 doc: mvp1-alignment
-status: drafted（HistoryPanel 只显示 git snapshot；RunDetailDrawer/BatchSummary 存在但未挂，这与最新归属一致但旧 alignment 曾留未决口径 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（HistoryPanel 只显示 git snapshot；RunDetailDrawer/BatchSummary 存在但未挂，这与最新归属一致但旧 alignment 曾留未决口径 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [local-history-snapshot]
 aligns_with: 01_workflows/06_eval.md（autocommit/快照）· 01_workflows/04_run-and-verify.md（run detail 归属）

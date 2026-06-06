@@ -1,7 +1,7 @@
 ---
 module: 03_regions/editor
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；Monaco autosave live；写文件仍走 FastAPI，trace 只读文档未接，golden 详细 diff 归属曾残留 Properties 口径 ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；Monaco autosave live；写文件仍走 FastAPI，trace 只读文档未接，golden 详细 diff 归属曾残留 Properties 口径 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/studio/SplitEditor.tsx:SplitEditor · apps/studio/frontend/src/components/studio/LazyMonacoPanel.tsx:LazyMonacoPanel · apps/studio/frontend/src/components/studio/Workspace.tsx:handlePhaseFileSave · apps/studio/frontend/src/components/TracePanel.tsx:TracePanel
 units: [native-rust-writer, trace-dot-blackboard, golden-per-agent-node]

@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/trace-observability
 doc: mvp1-alignment
-status: drafted（TracePanel/useRunStream/PromptInspector 存在但未挂主 Studio 流；edge dot 仍是假黑板 JSON ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（TracePanel/useRunStream/PromptInspector 存在但未挂主 Studio 流；edge dot 仍是假黑板 JSON ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [trace-dot-blackboard, run-execution-node-status]
 aligns_with: 01_workflows/04_run-and-verify.md（trace / run observability）· 01_workflows/05_debugging.md（debug trace）

@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/trace-observability
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；TracePanel/useRunStream/PromptInspector 存在但未挂主 Studio 流；edge dot 仍是假黑板 JSON ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；TracePanel/useRunStream/PromptInspector 存在但未挂主 Studio 流；edge dot 仍是假黑板 JSON ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/TracePanel.tsx:TracePanel · apps/studio/frontend/src/hooks/useRunStream.ts:useRunStream · apps/studio/frontend/src/components/edges/ContextEdge.tsx:getMockEdgeContext · apps/studio/frontend/src/components/studio/panels/PropertiesPanel.tsx:PropertiesPanel · apps/studio/backend/app/routers/websockets.py:run_events
 units: [trace-dot-blackboard, run-execution-node-status]

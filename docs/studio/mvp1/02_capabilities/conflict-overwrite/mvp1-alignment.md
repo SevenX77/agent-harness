@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/conflict-overwrite
 doc: mvp1-alignment
-status: drafted（顺序覆盖与文件保存冲突都有实现痕迹，但还是两套 UX，没有统一冲突呈现 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（顺序覆盖与文件保存冲突都有实现痕迹，但还是两套 UX，没有统一冲突呈现 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [conflict-overwrite-resolution]
 aligns_with: 01_workflows/02_authoring.md（保存 / 覆盖冲突）

@@ -1,7 +1,7 @@
 ---
 module: 03_regions/input
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；InputPanel 仍投影固定 `input/sample.json`/`input/schema.json`，schema inference 无写回，Predict/Run 不消费选中输入 ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；InputPanel 仍投影固定 `input/sample.json`/`input/schema.json`，schema inference 无写回，Predict/Run 不消费选中输入 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:InputPanel · apps/studio/frontend/src/components/studio/panels/panel-files.ts:inputFiles · apps/studio/backend/app/routers/test_inputs.py:create_test_input · apps/studio/backend/app/routers/test_inputs.py:delete_test_input · apps/studio/frontend/src/components/studio/Workspace.tsx:onPredict · apps/studio/frontend/src/components/studio/Workspace.tsx:onRun
 units: [io-panel-artifacts-test-inputs, golden-per-agent-node]

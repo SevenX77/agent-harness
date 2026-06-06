@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/run-execution
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；后端 run manager live；前端 Run handler 仍是桩，predict-pass 不会置位，batch UI 未挂主路径 ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；后端 run manager live；前端 Run handler 仍是桩，predict-pass 不会置位，batch UI 未挂主路径 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/studio/Workspace.tsx:onRun · apps/studio/frontend/src/api/client.ts:startRun · apps/studio/backend/app/routers/runs.py:start_run · apps/studio/backend/app/services/run_manager.py:start_run · apps/studio/frontend/src/hooks/useRunStream.ts:useRunStream
 units: [run-execution-node-status, golden-per-agent-node]

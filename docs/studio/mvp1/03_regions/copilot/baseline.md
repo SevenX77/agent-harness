@@ -1,7 +1,7 @@
 ---
 module: 03_regions/copilot
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；面板与 WS live；session 仍易丢，ThinkingBlock/@mention/analysis bar 未落，且 Workspace 传 outer `skillId` 有下钻风险 ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；面板与 WS live；session 仍易丢，ThinkingBlock/@mention/analysis bar 未落，且 Workspace 传 outer `skillId` 有下钻风险 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/studio/Workspace.tsx:Workspace · apps/studio/frontend/src/components/copilot/copilot-panel.tsx:CopilotPanel · apps/studio/frontend/src/hooks/useCopilot.ts:useCopilot · apps/studio/frontend/src/hooks/useCopilotContext.ts:useCopilotContext · apps/studio/frontend/src/components/copilot/tool-call-bubble.tsx:ToolCallBubble · apps/studio/frontend/src/components/copilot/diff-bubble.tsx:DiffBubble
 units: [copilot-session-persistence, copilot-sdk-test-parity]

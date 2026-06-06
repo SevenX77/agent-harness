@@ -1,7 +1,7 @@
 ---
 module: 03_regions/canvas
 doc: mvp1-alignment
-status: drafted（React Flow 画布 live；node status 仍非真实 run 态，edge dot 用 mock 黑板，inline subgraph 用 mock rows ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（React Flow 画布 live；node status 仍非真实 run 态，edge dot 用 mock 黑板，inline subgraph 用 mock rows ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [subgraph-path-inline-drilldown, run-execution-node-status, trace-dot-blackboard]
 aligns_with: 01_workflows/02_authoring.md（canvas authoring）· 01_workflows/04_run-and-verify.md（node status / dot）

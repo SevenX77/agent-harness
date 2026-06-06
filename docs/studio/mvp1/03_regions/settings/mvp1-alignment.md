@@ -1,7 +1,7 @@
 ---
 module: 03_regions/settings
 doc: mvp1-alignment
-status: drafted（Settings shell live；前后端/界面仍有旧 `needs_setup` 与局部易失状态，Copilot tab 还有保存/role-key drift ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（Settings shell live；前后端/界面仍有旧 `needs_setup` 与局部易失状态，Copilot tab 还有保存/role-key drift ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [settings-six-state-provider-health, model-group-role-materialization, copilot-sdk-test-parity, i18n-error-code-ui-copy]
 aligns_with: 01_workflows/00_settings-ux-spec.md（settings UX）

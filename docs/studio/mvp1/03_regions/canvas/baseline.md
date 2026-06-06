@@ -1,7 +1,7 @@
 ---
 module: 03_regions/canvas
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；React Flow 画布 live；node status 仍非真实 run 态，edge dot 用 mock 黑板，inline subgraph 用 mock rows ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；React Flow 画布 live；node status 仍非真实 run 态，edge dot 用 mock 黑板，inline subgraph 用 mock rows ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/GraphCanvas/GraphCanvas.tsx:GraphCanvas · apps/studio/frontend/src/components/GraphCanvas/build-nodes.ts:buildNodes · apps/studio/frontend/src/components/edges/ContextEdge.tsx:getMockEdgeContext · apps/studio/frontend/src/components/studio/SubgraphInline.tsx:SubgraphInline · apps/studio/frontend/src/components/studio/Workspace.tsx:Workspace
 units: [subgraph-path-inline-drilldown, run-execution-node-status, trace-dot-blackboard]

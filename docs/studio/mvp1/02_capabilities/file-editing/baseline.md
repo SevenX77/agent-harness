@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/file-editing
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；Monaco 编辑与 FastAPI 写文件 live；MVP1 D12 要求 Rust 唯一写者，当前写路径仍走 FastAPI ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；Monaco 编辑与 FastAPI 写文件 live；MVP1 D12 要求 Rust 唯一写者，当前写路径仍走 FastAPI ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/studio/Workspace.tsx:handlePhaseFileSave · apps/studio/frontend/src/components/studio/LazyMonacoPanel.tsx:LazyMonacoPanel · apps/studio/frontend/src/api/client.ts:writeSkillFile · apps/studio/backend/app/services/skills.py:update_skill_file
 units: [native-rust-writer]

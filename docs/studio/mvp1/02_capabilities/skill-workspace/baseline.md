@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/skill-workspace
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；Welcome 仍读 `/skills` 注册表聚合，import 仍要求 GRAPH/SKILL 门禁；MVP1 IDE-folder 模型未落 ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；Welcome 仍读 `/skills` 注册表聚合，import 仍要求 GRAPH/SKILL 门禁；MVP1 IDE-folder 模型未落 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/welcome/WelcomePage.tsx:WelcomePage · apps/studio/frontend/src/hooks/useRecentSkills.ts:useRecentSkills · apps/studio/backend/app/services/skills.py:create_new_skill · apps/studio/backend/app/services/skills.py:list_skill_summaries · apps/studio/tauri/src/lib.rs:open_in_cursor
 units: [workspace-open-folder-mru, subgraph-path-inline-drilldown]

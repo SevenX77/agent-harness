@@ -1,7 +1,7 @@
 ---
 module: 03_regions/shell-layout
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；Workspace shell live；RuntimeGate 仍可全屏 gate，copilot prop 用 outer skillId 有下钻风险 ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；Workspace shell live；RuntimeGate 仍可全屏 gate，copilot prop 用 outer skillId 有下钻风险 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/studio/Workspace.tsx:Workspace · apps/studio/frontend/src/components/studio/Header.tsx:Header · apps/studio/frontend/src/components/studio/Toolbar.tsx:Toolbar · apps/studio/frontend/src/components/studio/panels/Panels.tsx:Panels · apps/studio/frontend/src/components/RuntimeGate.tsx:RuntimeGate
 units: [shell-runtime-gate]

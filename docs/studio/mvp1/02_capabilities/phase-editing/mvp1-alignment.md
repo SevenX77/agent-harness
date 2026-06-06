@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/phase-editing
 doc: mvp1-alignment
-status: drafted（Properties/phase parser 仍读写旧 `mode/system_prompt/exit_contract/python_callable/target_skill` 字段 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（Properties/phase parser 仍读写旧 `mode/system_prompt/exit_contract/python_callable/target_skill` 字段 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [phase-field-whitelist, node-properties-role-test, io-panel-artifacts-test-inputs]
 aligns_with: 01_workflows/02_authoring.md（phase editing / properties）· 01_workflows/00_settings-ux-spec.md（node role test）

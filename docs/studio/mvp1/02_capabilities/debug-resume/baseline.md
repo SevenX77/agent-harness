@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/debug-resume
 doc: baseline
-status: drafted（现状对齐 pinned 代码 0d9fbaf；Studio resume route 存在但直接 501，节点级 Resume 主路径不可用 ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；Studio resume route 存在但直接 501，节点级 Resume 主路径不可用 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/backend/app/routers/runs.py:resume_run · apps/studio/backend/app/services/run_manager.py:start_run · apps/studio/frontend/src/components/nodes/SkillNode.tsx:SkillNode · apps/studio/frontend/src/components/studio/LazyMonacoPanel.tsx:LazyMonacoPanel
 units: [debug-resume-checkpoint]

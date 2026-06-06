@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/05-run-inner/05-exit-control
 doc: mvp1-alignment
-status: drafted（机制·运行内层;⏳ 迁自 04-exit-control）
+status: drafted（**U8 单元锁定 2026-06-05**:after_agent 退出闸目标成段、live 无闸已标 impl gap;文件未 FROZEN）
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行内层）
 ---
 

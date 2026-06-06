@@ -43,6 +43,7 @@ engine 全权;golden/diff 对齐 studio。
 1. golden 在 `.workspace` 的**绑定键**(phase_id?)+ 加载路径(与 `physical-layout` 协同)。
 2. 失效校验从编译期码迁到 **eval 期** staleness 的具体落地(原 `[F-v3-golden-stale-fields]` 归属调整)。
 3. 空 golden 模版生成(按节点 io.outputs schema)。
+4. **predict mock payload 须模拟 finish_task/tool-call**(源 uncovered #1):structured-output 下 golden/mock 输出要能驱动 exit gate 校验(约束主体在 `06-seam/01-models` §8,本域协同)。
 
 ## 交叉引用(链接, 不复制)
 00-architecture-overview §3 · `01-contract/01-physical-layout`(`.workspace` golden,双向)· `01-contract/05-invalidation`(失效轴,双向)· `01-contract/03-compile-rules`(CR3)· `06-seam/01-models`(predict mock)

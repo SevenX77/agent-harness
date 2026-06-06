@@ -50,6 +50,7 @@ engine 全权;HITL 暴露给 studio debug/续跑(`03-api-contract`)。
 ## 8. gaps / 待设计
 1. summarization middleware + sidecar **从 legacy 死簇搬回 live**(legacy 配置 `phase_nodes/llm_phase_node.py:275`(`summarization=True`/`trigger_fraction=0.8`/`keep_messages=20`;底座 `SummarizationMiddleware` `cognitive/middlewares.py:466`)+ sidecar 写 `:381`(`_write_compaction_sidecar`→`:392`)、`CompactionEvent.content_ref` `:809`;**live assemble_graph 只挂单槽 cognitive_flow `graph_assembler.py:481`、无 compaction**)。
 2. `resume_run` context 篡改边界(与 `03-checkpoint`/`02-iterate`)。
+3. **持久化边界(源 uncovered #3)**:messages 通道只写可序列化的 messages + 标记;middleware 内 callback/runtime/compiled graph **不得入 checkpoint state**(与 `03-checkpoint` §8 #4 共,防 nested state 污染)。
 
 ## 交叉引用(链接, 不复制)
 00-architecture-overview §3 · `04-run-outer/03-checkpoint`(共享 base,**双向:外 blackboard/内 messages**)· `02-middleware`(summarization 中间件)· `data-contracts`(messages 通道)· `03-api-contract`(resume)

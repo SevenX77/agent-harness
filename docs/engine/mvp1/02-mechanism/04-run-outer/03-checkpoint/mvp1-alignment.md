@@ -67,6 +67,7 @@ thread(唯一 checkpointer,builder.compile checkpointer= → graph_assembler.py:
 4. **blackboard delta**:1000 遍 loop checkpoint 总体积 O(N) 非 O(N²)。
 5. **有界 blackboard**:喂第 k 遍上下文体积恒定(不随 k 增),全文在 artifact 可取。
 6. **durability**:选定粒度下 HITL 可续 + checkpoint 总量可控。
+7. **内层 create_agent checkpointer**(源 uncovered #3,实现期风险最高):默认**不传**内层 checkpointer——**印证 live `graph_assembler.py:201` AGENT 分支不传 checkpointer 是刻意设计**(避免 nested graph state 污染外层 checkpoint),非漏;若启用须实测 thread_id/state schema/middleware state/ToolMessage 序列化,thread_id 须带 phase suffix(legacy precedent `LLMPhaseNode._agent_config` `{outer_tid}:{phase.name}`)。
 
 ## 7. 涉及 region / platform
 engine 全权;studio 侧 resume_run/HITL UI 经 `03-api-contract` 消费。
@@ -75,6 +76,7 @@ engine 全权;studio 侧 resume_run/HITL UI 经 `03-api-contract` 消费。
 1. `data`(blackboard)通道 delta reducer(append-accumulator 友好)。
 2. 有界 accumulator(`accumulate.merge` 加 rolling-summary)。
 3. durability 取值(D-test)。
+4. **持久化边界硬约束(源 uncovered #3)**:middleware 内 callback/runtime/compiled graph 等对象**不得进入可持久化 state**(只写可序列化标记 + messages);legacy precedent `PhaseExecutor.__getstate__`(`phase_executor.py:82`)fail-fast 禁 pickle `_phase_executor`,正说明 runtime 对象混存 checkpoint 是高风险点。
 
 ## 交叉引用(链接, 不复制)
 00-architecture-overview §3 · `05-run-inner/08-messages-state`(内层 messages,**双向:共享 base**)· `02-iterate`(图级 loop)· `data-contracts` · `03-api-contract`(resume C2)

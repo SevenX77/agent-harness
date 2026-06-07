@@ -201,10 +201,13 @@ def _typed_only_event_types() -> tuple[type[Any], ...]:
     from graph_agent.callbacks.events import (
         AmbiguityLoggedEvent,
         ArtifactSavedEvent,
+        BlackboardReduceEvent,
         BuiltinSubagentEnterEvent,
         BuiltinSubagentExitEvent,
         BuiltinSubagentFallbackEvent,
         HeartbeatEvent,
+        InputDispatchEvent,
+        InputFileInjectedEvent,
         InternalErrorEvent,
         LLMFallbackEvent,
         ModelResolvedEvent,
@@ -234,6 +237,9 @@ def _typed_only_event_types() -> tuple[type[Any], ...]:
         ParallelMapGroupStartedEvent,
         ParallelMapGroupEndedEvent,
         HeartbeatEvent,
+        BlackboardReduceEvent,
+        InputDispatchEvent,
+        InputFileInjectedEvent,
     )
 
 

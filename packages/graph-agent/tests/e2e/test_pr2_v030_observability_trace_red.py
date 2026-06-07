@@ -30,7 +30,8 @@ class V030ToolCallingChatModel:
         self.bound_tool_names: list[str] = []
         self.invocations: int = 0
 
-    def bind_tools(self, tools: list[Any]) -> V030ToolCallingChatModel:
+    def bind_tools(self, tools: list[Any], **kwargs: Any) -> V030ToolCallingChatModel:
+        del kwargs
         self.bound_tool_names = [str(getattr(tool, "name", "")) for tool in tools]
         return self
 
@@ -53,7 +54,11 @@ class V030ToolCallingChatModel:
             tool_calls=[
                 {
                     "name": "finish_task",
-                    "args": {"markdown": "## answer\n\ntrace-ready"},
+                    "args": {
+                        "reasoning": "done",
+                        "diagnostics_md": "schema aligned",
+                        "business_data_md": "## main\n- answer: trace-ready\n",
+                    },
                     "id": "finish-1",
                 }
             ],
@@ -64,8 +69,8 @@ class V030NoToolChatModel:
     def __init__(self) -> None:
         self.invocations: int = 0
 
-    def bind_tools(self, tools: list[Any]) -> V030NoToolChatModel:
-        del tools
+    def bind_tools(self, tools: list[Any], **kwargs: Any) -> V030NoToolChatModel:
+        del tools, kwargs
         return self
 
     def invoke(self, messages: list[Any]) -> AIMessage:
@@ -75,8 +80,8 @@ class V030NoToolChatModel:
 
 
 class V030UnknownToolChatModel:
-    def bind_tools(self, tools: list[Any]) -> V030UnknownToolChatModel:
-        del tools
+    def bind_tools(self, tools: list[Any], **kwargs: Any) -> V030UnknownToolChatModel:
+        del tools, kwargs
         return self
 
     def invoke(self, messages: list[Any]) -> AIMessage:

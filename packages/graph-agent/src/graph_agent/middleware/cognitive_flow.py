@@ -331,11 +331,12 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         if tool_name == self._FINISH_TOOL:
             return True, self._handle_finish_task(args, state, tool_call_id="")
         if tool_name == self._CLARIFICATION_TOOL:
+            unattended = _get_unattended(state, self._unattended)
             return True, self.intercept_ask_clarification(
                 tool=None,
                 args=args,
                 state={"phase_name": self._phase_name},
-                unattended=self._unattended,
+                unattended=unattended,
                 interrupt_fn=self._interrupt_fn,
             )
         return False, self.dispatch_tool_call(
@@ -367,12 +368,13 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
             return parsed_args
 
         if tool_name == self._CLARIFICATION_TOOL:
+            unattended = _get_unattended(request.state, self._unattended)
             return self._clarification_command(
                 self.intercept_ask_clarification(
                     tool=None,
                     args=parsed_args,
                     state=self._clarification_state(parsed_args),
-                    unattended=self._unattended,
+                    unattended=unattended,
                     interrupt_fn=self._interrupt_fn,
                 ),
                 args=parsed_args,
@@ -404,12 +406,13 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
             return parsed_args
 
         if tool_name == self._CLARIFICATION_TOOL:
+            unattended = _get_unattended(request.state, self._unattended)
             return self._clarification_command(
                 self.intercept_ask_clarification(
                     tool=None,
                     args=parsed_args,
                     state=self._clarification_state(parsed_args),
-                    unattended=self._unattended,
+                    unattended=unattended,
                     interrupt_fn=self._interrupt_fn,
                 ),
                 args=parsed_args,
@@ -979,6 +982,19 @@ def _workflow_state_or_none(value: object) -> WorkflowState | None:
 
 def _tool_call_id(request: ToolCallRequest) -> str:
     return str(request.tool_call.get("id") or "")
+
+
+def _get_unattended(state_val: Any, default_val: bool) -> bool:
+    if default_val:
+        return True
+    if isinstance(state_val, dict):
+        flow = state_val.get("flow")
+        if flow is not None:
+            if hasattr(flow, "unattended"):
+                return bool(flow.unattended)
+            if isinstance(flow, dict):
+                return bool(flow.get("unattended", default_val))
+    return default_val
 
 
 __all__ = ["CognitiveFlowError", "CognitiveFlowMiddleware"]

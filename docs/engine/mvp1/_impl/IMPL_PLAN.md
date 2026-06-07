@@ -2,7 +2,7 @@
 doc: impl-plan
 status: drafted（2026-06-06;mvp1 设计对账完成后建立,待 CCB 恢复后开跑）
 applies_standard: ../../../development/task-spec-standard.md
-binds_design: ../INDEX.md · ../_impl-backlog.md（Gap 清单源）· ../_api-handshake-audit.md（studio 协同）
+binds_design: ../INDEX.md · ../_impl-backlog.md（Gap 清单源）· ../_api-handshake-audit.md（studio 协同）· ./WS-E1-create-agent-core.md
 ---
 
 # Graph-Agent (Engine) MVP1 实施计划(大模块 + 并发分区)
@@ -62,8 +62,23 @@ WS-E7 golden / resume(runner.py + golden SDK)───────────�
 - **Wave 4**:WS-E7(studio 协同:P0 修完 + U10 对齐 + resume/golden)。
 - 每 WS 完成 = 测试绿 + 验收清单逐条勾 + 回写 baseline + Claude 终审,再进依赖它的 WS。
 
-## 七、CCB 恢复前已就绪产物
+## 七、产物状态(2026-06-06)
+
 - 任务书标准:`../../../development/task-spec-standard.md`(沿用 gateway 已建)。
 - Gap 清单:`../_impl-backlog.md`(各模块 §8 refactor-target → 任务)。
 - 本实施计划:本文件。
-- WS 任务书:**WS-E1(keystone)待产**(对标 gateway `WS1-chatx-core.md`);WS-E2…E8 同模板待产。
+- WS-E1 任务书:`./WS-E1-create-agent-core.md`(已按 codex round-1/round-2 findings 返工;round-2/round-3 复核 prompt 已存档)。
+
+| WS | 任务书 | 实现 | 状态 |
+|---|---|---|---|
+| **WS-E1** | `_impl/WS-E1-create-agent-core.md` | 待实现 | ✅ 任务书就绪 |
+| **WS-E1-io** | 待产(从 E1 拆出的 11-io 文件导入 lazy + artifact business_data_md) | 待实现 | ⏳ |
+| **WS-E2** | 待产(中间件后 3 槽) | 待实现 | ⏳ |
+| **WS-E3** | 待产(错误契约 V2) | 待实现 | ⏳ |
+| **WS-E4** | 待产(V4 trace 事件) | 待实现 | ⏳ |
+| **WS-E5** | 待产(checkpoint 内层) | 待实现 | ⏳ |
+| **WS-E6** | 待产(purity 扩展 + run_skill 扫描码) | 待实现 | ⏳ |
+| **WS-E8** | 待产(退出闸) | 待实现 | ⏳ |
+| **WS-E7** | 待产(golden/resume,需 studio 协同) | 待实现 | ⏳ |
+
+> 派单入口仍以本计划 §六 的波次为准;每个 WS 落地时,先按 `task-spec-standard` 写任务书,再执行 RED→GREEN→baseline 回写→终审。

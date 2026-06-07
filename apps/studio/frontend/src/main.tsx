@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import './store/themeStore'
+import { i18nReady } from './i18n'
 import { App } from './App'
 import { configureApiToken } from './api/client'
 import { bootstrapTunnelToken } from './config/tunnel-token'
@@ -11,8 +12,10 @@ if (token) {
   configureApiToken(token)
 }
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+void i18nReady.then(() => {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  )
+})

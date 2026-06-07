@@ -3,6 +3,10 @@ module: 01-handoff-interface
 doc: mvp1-alignment
 status: drafted
 verified_at: 2026-06-02
+binds_design: ./baseline.md
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/protocol.py:ModelResolverProtocol · packages/graph-agent-gateway/src/graph_agent_gateway/__init__.py · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:ResolvedRoute/ResolvedRole · packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:ModelResolver · apps/studio/backend/app/models/copilot.py:CopilotWsRequestPayload/CopilotEvent
+units: [route-handoff-interface]
+aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
 
 # 01-handoff-interface — MVP1 Alignment(目标设计)
@@ -30,7 +34,7 @@ MVP1 目标：让 **route(`ResolvedRoute`/`ResolvedRole`)成为编排层和调�
 
 **上下游**：① 调用方(Graph Agent phase / Copilot service / 未来其他 app)给 role name(+可选 override)→ **gateway 编排(`resolve_role`，③b)** → `ResolvedRole`(有序 `ResolvedRoute` + runtime policy)→〔role 级:gateway 包成 `GatewayChatModel` 自己一路调 ｜ route 级:直接把 route 交回调用方，调用方自己用 ChatX/SDK 跑〕。
 
-**交接边界铁律**：route 是唯一交接物。调用层**不得**重新按 provider/model 猜测或动态选择别的 route；MVP0 alignment 明确禁止 capability/price/latency/availability 搜索替代 route，见 `docs/graph-agent-gateway/mvp0/mvp0-alignment.md:118`。
+**交接边界铁律**：route 是唯一交接物。调用层**不得**重新按 provider/model 猜测或动态选择别的 route；MVP1 当前权威是本文 + README 的 route handoff / lint 边界，代码侧由 `resolve_role` 产出有序 `ResolvedRoute` 链，调用层只消费这条链。
 
 **目标设计与流程**(逐步)：
 
@@ -45,7 +49,7 @@ MVP1 目标：让 **route(`ResolvedRoute`/`ResolvedRole`)成为编排层和调�
 3. 编排输出：resolver 返回 `ResolvedRole`，其中 `routes` 是 fallback 顺序，`runtime_policy` 是探活/熔断/截断升级策略，见 `registry/schema.py:455` 和 `registry/schema.py:456`。
 4. Graph Agent 调用消费(role 级)：Graph Agent 仍可以拿 `GatewayChatModel`，但该 model 内部只应把 `ResolvedRoute` 交给调用层工厂/ChatX，不再自研消息转换。按 client 层 A' 重设计,`_generate`(用途:`GatewayChatModel` 的 fallback 执行循环，遍历 routes 做 probe/dispatch/usage/event)只改「消息准备 / dispatch / 结果构建」三步(调用层),保留遍历/熔断/probe/usage/异常分类(编排层);这正是 D2 编排/调用分离在 `_generate` 内的体现(决策动机见本文 §5)。
 5. Copilot 调用消费(route 级)：Studio Copilot 应拿同一份 `ResolvedRoute`，再由 `claude_agent_sdk` 自己调用；当前 `stream_query`(用途:Copilot WebSocket 业务入口，解析 route 后用 Claude SDK 调)已有这个方向，但 helper 在 service 内部，没走对外 public API，见 `apps/studio/backend/app/services/copilot.py:210` 和 `copilot.py:419`。
-6. 交接边界：route 是唯一交接物，调用层不得重新按 provider/model 猜测或动态选择。MVP0 alignment 明确禁止 capability/price/latency/availability 搜索替代 route，见 `docs/graph-agent-gateway/mvp0/mvp0-alignment.md:118`。
+6. 交接边界：route 是唯一交接物，调用层不得重新按 provider/model 猜测或动态选择。MVP1 当前权威是本文 + README 的 route handoff / lint 边界；当前代码的 `resolve_role` 只把 role 展开为有序 route 链，调用层不再另行选路由。
 
 ### route 契约目标
 
@@ -53,7 +57,7 @@ MVP1 目标：让 **route(`ResolvedRoute`/`ResolvedRole`)成为编排层和调�
 2. 调用字段：`protocol`、`base_url`、`credential_ref`、`timeout_seconds`、`trust_env`、`proxy_env` 是 provider 调用需要的最小环境，当前字段在 `registry/schema.py:423` 到 `registry/schema.py:429`。
 3. 安全字段：`credential_fingerprint` 是 cache/diagnostics 用的非明文密钥标识，当前字段在 `registry/schema.py:426`，构造来源在 `registry/resolver.py:85`。
 4. provider profile 字段：`selected_profile_id`、`call_method_id`、`request_mapper_id` 让调用层按 profile 做 init-kwargs 或 mapper 选择，当前字段在 `registry/schema.py:432` 到 `registry/schema.py:435`。
-5. runtime 字段：`runtime_settings` 和 `effective_runtime_settings` 分别保存用户意图和 resolver 合成值，当前字段在 `registry/schema.py:437` 和 `registry/schema.py:438`；provider matrix 说明 effective 值会进入 response metadata 和 fallback events，见 `docs/graph-agent-gateway/mvp0/provider-runtime-settings-matrix.md:42`。
+5. runtime 字段：`runtime_settings` 和 `effective_runtime_settings` 分别保存用户意图和 resolver 合成值，当前字段在 `registry/schema.py:437` 和 `registry/schema.py:438`；`GatewayChatModel._build_chat_result` 与 `_fallback_event_context` 会把 effective 值写入 response metadata 和 fallback event，见 `gateway_chat_model.py:331`、`gateway_chat_model.py:355`、`gateway_chat_model.py:391`。
 
 ## 3. 接口契约
 
@@ -64,18 +68,18 @@ MVP1 目标：让 **route(`ResolvedRoute`/`ResolvedRole`)成为编排层和调�
 - **签名(两级对外 API)**：
   - role 级 `ModelResolver.resolve(role_name, *, thinking_enabled, model_override, callbacks, phase_name, predict_context) → BaseChatModel`(协议 `protocol.py:24-39`)——返回包好的 `GatewayChatModel`/`PredictGatewayChatModel`，gateway 自动按 fallback 链调到底；`model_override` 当前实为精确 `route_override`(`registry/resolver.py:45`)。
   - route 级 `resolve_routes(role_name, model_override) → ResolvedRole`(待补，已定 ③b；[[02-orch-role-resolution]] 落实)——**只返回解析好的 route，不替 app 调**；给"不要编排外壳、自己用别的 SDK 跑"的消费方(如 copilot 走 `claude_agent_sdk`)。
-- **数据契约**：`ResolvedRole{ routes: ResolvedRoute[](有序 fallback 候选), system_prompt_prefix, runtime_policy(探活/熔断/截断升级), lint_results, source_profile_* }`。字段权威源 [[04-orch-registry-schema]] `registry/schema.py:415-459`(链接不复制)。
+- **数据契约**：`ResolvedRole{ routes: ResolvedRoute[] （有序 fallback 候选）, system_prompt_prefix, runtime_policy(探活/熔断/截断升级), lint_results, source_profile_*, skipped_diagnostics(list[SkippedRoute]：记录被跳过 route 的 route_id/reason_code/message/是否来自 override，供 Studio/trace 看"哪些 route 被跳过、为什么"，权威源同归 04) }`。字段权威源 [[04-orch-registry-schema]] `registry/schema.py:415-478`(链接不复制)。
 - **方向·归属**：producer = gateway 编排(③b)；consumer = Graph Agent phase / copilot service / 未来 app；**owner = 本模块(01)**——owner 改契约负责通知全部 consumer。
 - **错误契约**：role 不存在 / 过滤后空链 → `RegistryResolutionError`(配置错误)→ `ModelResolver.resolve` 统一映射 `GatewayRoleNotConfiguredError`；resolver 依赖缺失 → `GatewayResolverMissingError`(`llm_phase_node.py:133`)。
-- **不变量·前后置**：route 是**唯一交接物**——调用层**不得**回读 Studio DTO、不得按 provider/model/price/latency 另选或动态搜索 route(MVP0 禁令 `docs/graph-agent-gateway/mvp0/mvp0-alignment.md:118`)；两级 API 解析同一 role → 同一组有序 route。
-- **稳定性·版本**：两级 API 签名 FROZEN(D3「API 怎么提供要写清楚」)；`ResolvedRoute/ResolvedRole` 字段可扩展、权威源在 04；不得退回 MVP0 旧 `call_chain/ResolvedProvider`。
+- **不变量·前后置**：route 是**唯一交接物**——调用层**不得**回读 Studio DTO、不得按 provider/model/price/latency 另选或动态搜索 route；两级 API 解析同一 role → 同一组有序 route。
+- **稳定性·版本**：两级 API 签名已定(D3「API 怎么提供要写清楚」；不是文件级 `FROZEN`)；`ResolvedRoute/ResolvedRole` 字段可扩展、权威源在 04；不得退回旧 `call_chain/ResolvedProvider` 形状。
 - **SSOT 落点**：`registry/schema.py`(字段)+ `protocol.py`(resolver 协议)+ `__init__.py`(公共导出门面)。
 - **测试关键点**(同步模板 ##6)：两级 API 解析同一 role 得同一组 route；route 级返回后 gateway **不发起任何** provider 调用(纯编排)；`model_override`(route override)坏 route → fail-fast，普通 fallback 链坏 route → skip。
 
 ### consumer 拿 route 之后怎么用 —— 各自的事，本模块只链接(§3.5 所有权不变量)
 
 - **Graph Agent**(③a 消费方)：编排层拿 route，调用层用 route 构造原生 ChatX，见 [[10-inv-route-chat-model-factory]] / [[09-inv-invocation-runtime]]。
-- **copilot**(③a 消费方)：拿 `resolve_routes("copilot_chat")` 的 route，自己用 `claude_agent_sdk` 调(当前绕 class 直接 import pure `resolve_role`，`copilot.py:419-437`，应改走 route 级 API)。**其 WS 请求/事件契约**(`CopilotWsRequestPayload`/`CopilotEvent*`，`apps/studio/backend/app/models/copilot.py`)= **studio 应用自有契约，owner=studio**，见 studio [[copilot-assist]] §3.1 + `00_settings-ux-spec.md` §3.8——**本模块只链接、不重述**(WS 事件契约归 studio 一处写，gateway 不写第二份)。copilot **引用** route ≠ ③b 泄漏。
+- **copilot**(③a 消费方)：拿 `resolve_routes("copilot_chat")` 的 route，自己用 `claude_agent_sdk` 调(当前绕 class 直接 import pure `resolve_role`，`copilot.py:419-437`，应改走 route 级 API)。**其 WS 请求/事件契约**(`CopilotWsRequestPayload`/`CopilotEvent*`，`apps/studio/backend/app/models/copilot.py`)= **studio 应用自有契约，owner=studio**，见 studio `docs/studio/mvp1/02_capabilities/copilot-assist/mvp1-alignment.md` §3.1 + `00_settings-ux-spec.md` §3.8——**本模块只链接、不重述**(WS 事件契约归 studio 一处写，gateway 不写第二份)。copilot **引用** route ≠ ③b 泄漏。
 
 ## 4. 设计决策基础(用户原话)
 
@@ -95,8 +99,8 @@ MVP1 目标：让 **route(`ResolvedRoute`/`ResolvedRole`)成为编排层和调�
 2. **A' 否决「resolver 直接产 ChatX + 删 `GatewayChatModel`」**：A'(温和版,保留编排外壳)否决了 A(激进版,resolver 直接裸返回 ChatX + 删 `GatewayChatModel` + 用 `with_fallbacks()`)。理由:第八轮真机只验证了「调用层换 ChatX 修空-content bug」,从未验证「删编排层」;而 fallback/probe/熔断/usage/metadata 全在 `GatewayChatModel._generate` 里,删掉就回归;且 `with_fallbacks()` 只按异常类型,表达不了我们「按 HTTP status 分类」的 fallback 语义。所以保留 `GatewayChatModel` 作编排外壳。(client 层 A' 重设计决策 D1;PM 原话见 §4「不用留A, 这是错误判断, 正确的是A'」。)
 3. **编排/调用分离是为了解决 Copilot 路径**：Copilot 只需要「解析好的 route」,拿 route 后用自己的 `claude_agent_sdk` 跑,Gateway 不负责调用 Copilot——所以编排(决定该用哪条 route)和调用(真正发请求)应做成两个内聚模块、各有清晰 API。(client 层 A' 重设计决策 D2;PM 原话见 §4。跨模块共享:[[04-orch-registry-schema]] 把 `ResolvedRoute/ResolvedRole` 定为这条交接边界的数据契约、[[09-inv-invocation-runtime]] 是「调用」侧落点。)
 4. **route-first 契约避免两套消费方各自解释配置**：当前 Graph Agent 通过 model 间接消费 route，Copilot service 通过 `_resolve_copilot_runtime()`(用途:Copilot service 内部 helper，解析 `copilot_chat` role 取 routes + credential provider)直接消费 route，见 `llm_phase_node.py:173` 和 `copilot.py:419`。两条路径应收敛到同一 handoff API。
-5. **route 契约必须保留 runtime settings 来源**：provider runtime matrix 说明 effective runtime settings 的来源顺序和元数据用途，见 `docs/graph-agent-gateway/mvp0/provider-runtime-settings-matrix.md:32` 和 `provider-runtime-settings-matrix.md:42`。
-6. **不照抄 MVP0 旧模型**：MVP0 baseline 已声明旧 `ResolvedRole.call_chain/ResolvedProvider` 模型过时，见 `docs/graph-agent-gateway/mvp0/baseline.md:8`；当前源码是 `ResolvedRole.routes`，见 `registry/schema.py:456`。
+5. **route 契约必须保留 runtime settings 来源**：当前 resolver 合成 `effective_runtime_settings`，并由 `GatewayChatModel` 写入 response metadata / fallback event，见 `registry/resolver.py:156`、`gateway_chat_model.py:331`、`gateway_chat_model.py:391`。
+6. **不照抄旧模型**：当前源码是 `ResolvedRole.routes`，见 `registry/schema.py:456`，handoff 不再使用 `call_chain/ResolvedProvider` 形状。
 
 ## 6. 测试关键点
 
@@ -106,7 +110,7 @@ MVP1 目标：让 **route(`ResolvedRoute`/`ResolvedRole`)成为编排层和调�
 - **override fail-fast vs fallback skip**：`model_override`(route override)指坏 route → fail-fast；普通 fallback 链坏 route → skip(交接契约对两级 API 一致)。
 - **Copilot 走 public API 后行为不变**：Copilot 从直接 import pure `resolve_role` 改为走 route 级 public API 后，拿到的 routes(顺序/credential provider)与现状一致(回归 `copilot.py:419-437`)。
 - **WS 事件不承担 route 解析**：`CopilotEvent` 即使将来加 route diagnostics，route 的解析也**不**发生在 WS 层(WS 只渲染，解析在 ③b)。
-- **MVP0 旧模型不回归**：handoff 契约用 `ResolvedRole.routes`，不得退回 `call_chain/ResolvedProvider`。
+- **旧模型不回归**：handoff 契约用 `ResolvedRole.routes`，不得退回 `call_chain/ResolvedProvider`。
 
 ## 7. 涉及 region / platform
 
@@ -116,9 +120,9 @@ MVP1 目标：让 **route(`ResolvedRoute`/`ResolvedRole`)成为编排层和调�
 
 ## 8. gaps / 待设计
 
-1. 需要主控确认 route 级 handoff API 的**精确形状**(归属已定 ③b，形状待定)：是在 `ModelResolverProtocol` 增加 `resolve_routes()`，还是让 `resolve()` 返回新 wrapper，再保留旧 `resolve_chat_model()` 兼容。**注**：归属不再是疑点(已定 ③b 公共 API)，只剩签名取舍。
-2. 需要主控确认 `model_override` 是否改名为 `route_override`；当前代码行为已是 route override，见 `registry/resolver.py:37`。
-3. **Copilot WS 是否暴露 route diagnostics** = ③a 产品可观测性取舍，归 studio [[copilot-assist]]（gateway 只提供 route，WS 怎么展示/要不要 diagnostics 是 studio 的事，§3.5 所有权不变量）；gateway 侧只保证 route 解析**不**发生在 WS 层。
+1. ✅ **已定（PM 2026-06-04）**：route 级 handoff API = 在 `ModelResolverProtocol` **新增 `resolve_routes(role_name, route_override) → ResolvedRole`**，与 role 级 `resolve()` 并列（不采用"让 `resolve()` 返新 wrapper"）。理由：两方法两语义、职责最清；[[02-orch-role-resolution]] 已按此形状写。
+2. ✅ **已定（PM 2026-06-04）**：`model_override` **改名 `route_override`**——代码行为已是精确 route override（`registry/resolver.py:37`），改名消除"按 model 模糊匹配"的误解；属一次性公共 API 命名清理，需同步所有调用点 + 各模块签名引用（命名传播归实施期）。
+3. **Copilot WS 是否暴露 route diagnostics** = ③a 产品可观测性取舍，归 studio `docs/studio/mvp1/02_capabilities/copilot-assist/mvp1-alignment.md`（gateway 只提供 route，WS 怎么展示/要不要 diagnostics 是 studio 的事，§3.5 所有权不变量）；gateway 侧只保证 route 解析**不**发生在 WS 层。
 4. **代码下沉/接线**(后续工程，非本轮)：让 Copilot `_resolve_copilot_runtime` 从直接 import pure helper 改为调用 route 级 public API；`__init__` 导出 route handoff 类型。
 
 ## 已实现 / 与 baseline 差异
@@ -130,7 +134,7 @@ MVP1 目标：让 **route(`ResolvedRoute`/`ResolvedRole`)成为编排层和调�
 | Graph Agent 消费 | `LlmPhaseNode._resolved_tracing_model`(用途:Graph Agent phase 解析入口，调 resolver 拿 model 再包 tracing 代理)只拿 model，见 `llm_phase_node.py:173`。 | Graph Agent 编排层拿 route，调用层再用 route 构造 ChatX/Gateway model。 |
 | Copilot 消费 | `_resolve_copilot_runtime()` 自己从 registry 取 routes，见 `copilot.py:419`。 | Copilot 走 route 级 public API，拿 route 后自行调用 `claude_agent_sdk`(③a 调用方式)。 |
 | 公共导出 | `__init__.py`(用途:Gateway 包公开门面，导出 resolver/model/异常/fallback event)导出 resolver/model/errors/events，但未导出 route handoff helper，见 `__init__.py:15`。 | 公共门面应暴露稳定 route handoff 类型/API，避免 service 绕内部 resolver。 |
-| Copilot WS 事件契约 | `CopilotEvent`(③a studio 自有契约，`models/copilot.py`)。 | 归 studio [[copilot-assist]] §3.1(本模块只链接、不重述)；gateway 侧唯一不变量：route 解析**不**在 WS 层。 |
+| Copilot WS 事件契约 | `CopilotEvent`(③a studio 自有契约，`models/copilot.py`)。 | 归 studio `docs/studio/mvp1/02_capabilities/copilot-assist/mvp1-alignment.md` §3.1(本模块只链接、不重述)；gateway 侧唯一不变量：route 解析**不**在 WS 层。 |
 
 ## 覆盖代码(含覆盖率)
 
@@ -140,7 +144,7 @@ MVP1 目标：让 **route(`ResolvedRoute`/`ResolvedRole`)成为编排层和调�
 |---|---|---:|---|
 | `packages/graph-agent-gateway/src/graph_agent_gateway/protocol.py:ModelResolverProtocol` | **③b** | 100% | `ModelResolverProtocol` 当前只返回 `BaseChatModel`；MVP1 应补齐 route-first 编排 API(route 级 public API)。 |
 | `packages/graph-agent-gateway/src/graph_agent_gateway/__init__.py` | **③b** | 100% | `__init__.py` 当前未导出 route handoff API；MVP1 应让公共门面暴露稳定 route 契约入口。 |
-| `apps/studio/backend/app/models/copilot.py` | **③a 应用契约(studio owns)** | — | Copilot WS 请求/事件契约归 studio [[copilot-assist]] §3.1，本模块只链接不重述；这里仅记它是 route 的 ③a 消费方(引用 route ≠ ③b 泄漏)。 |
+| `apps/studio/backend/app/models/copilot.py` | **③a 应用契约(studio owns)** | — | Copilot WS 请求/事件契约归 studio `docs/studio/mvp1/02_capabilities/copilot-assist/mvp1-alignment.md` §3.1，本模块只链接不重述；这里仅记它是 route 的 ③a 消费方(引用 route ≠ ③b 泄漏)。 |
 | `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:ResolvedRoute` | **③b** | 100% | `ResolvedRoute` 应成为调用层输入的唯一 route 数据。 |
 | `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:ResolvedRole` | **③b** | 100% | `ResolvedRole` 应成为 role→routes 编排结果。 |
 
@@ -149,8 +153,8 @@ MVP1 目标：让 **route(`ResolvedRoute`/`ResolvedRole`)成为编排层和调�
 1. A' 否决「resolver 直接产 ChatX + 删除 `GatewayChatModel`」。`GatewayChatModel` 保留编排职责，避免丢失 fallback/probe/熔断/usage/metadata(完整否决理由 + PM 原话见本文 §4「A' 保留编排外壳」、§5 #2;源自 client 层 A' 重设计决策 D1)。
 2. 编排/调用分离是为了解决 Copilot 路径。Copilot 只需要「解析好的 route」，Gateway 不负责调用 Copilot,拿 route 后用自己的 `claude_agent_sdk` 跑(完整逻辑 + PM 原话见本文 §4「D2 编排/调用分离」、§5 #3;源自 client 层 A' 重设计决策 D2,跨模块共享见 [[04-orch-registry-schema]]/[[09-inv-invocation-runtime]])。
 3. route-first 契约避免两套消费方各自解释配置。当前 Graph Agent 通过 model 间接消费 route，Copilot service 通过 `_resolve_copilot_runtime()` 直接消费 route，见 `llm_phase_node.py:173` 和 `copilot.py:419`。
-4. route 契约必须保留 runtime settings 来源。provider runtime matrix 说明 effective runtime settings 的来源顺序和元数据用途，见 `docs/graph-agent-gateway/mvp0/provider-runtime-settings-matrix.md:32` 和 `provider-runtime-settings-matrix.md:42`。
-5. 不照抄 MVP0 旧模型。MVP0 baseline 已声明旧 `ResolvedRole.call_chain/ResolvedProvider` 模型过时，见 `docs/graph-agent-gateway/mvp0/baseline.md:8`；当前源码是 `ResolvedRole.routes`，见 `registry/schema.py:456`。
+4. route 契约必须保留 runtime settings 来源。当前 resolver 合成 `effective_runtime_settings`，并由 `GatewayChatModel` 写入 response metadata / fallback event，见 `registry/resolver.py:156`、`gateway_chat_model.py:331`、`gateway_chat_model.py:391`。
+5. 不照抄旧模型。当前源码是 `ResolvedRole.routes`，见 `registry/schema.py:456`，handoff 不再使用 `call_chain/ResolvedProvider` 形状。
 
 ## 代码索引 clues
 
@@ -162,7 +166,7 @@ MVP1 目标：让 **route(`ResolvedRoute`/`ResolvedRole`)成为编排层和调�
 - `packages/graph-agent-gateway/src/graph_agent_gateway/__init__.py`(③b)：公共 API 导出位置。
 - `packages/graph-agent/src/graph_agent/core/phase_nodes/llm_phase_node.py:LlmPhaseNode._resolved_tracing_model`(③a 消费方)：Graph Agent 当前 model-first 消费点。
 - `apps/studio/backend/app/services/copilot.py:_resolve_copilot_runtime`(③a 消费方)：Copilot 当前 route 解析 helper，应改走 route 级 public API。
-- `apps/studio/backend/app/models/copilot.py`(③a 应用契约，studio owns)：Copilot WS 请求/事件契约(`CopilotWsRequestPayload`/`CopilotEvent`)——契约定义归 studio [[copilot-assist]] §3.1，本模块只作 ③a 消费方线索、不重述。
+- `apps/studio/backend/app/models/copilot.py`(③a 应用契约，studio owns)：Copilot WS 请求/事件契约(`CopilotWsRequestPayload`/`CopilotEvent`)——契约定义归 studio `docs/studio/mvp1/02_capabilities/copilot-assist/mvp1-alignment.md` §3.1，本模块只作 ③a 消费方线索、不重述。
 
 ## 交叉引用(链接，不复制)
 

@@ -492,9 +492,10 @@ test.describe('LLM Roles actions menu', () => {
         ],
         status_summary: {
           ready: 2,
+          historical_ready: 0,
           untested: 0,
+          failed: 0,
           cooling_down: 0,
-          needs_setup: 0,
           off: 0,
         },
         capability_summary: {
@@ -634,9 +635,10 @@ test.describe('LLM Roles actions menu', () => {
         }],
         status_summary: {
           ready: 1,
+          historical_ready: 0,
           untested: 0,
+          failed: 0,
           cooling_down: 0,
-          needs_setup: 0,
           off: 0,
         },
         capability_summary: {
@@ -744,9 +746,10 @@ test.describe('LLM Roles actions menu', () => {
         }],
         status_summary: {
           ready: 0,
+          historical_ready: 0,
           untested: 0,
+          failed: 0,
           cooling_down: 1,
-          needs_setup: 0,
           off: 0,
         },
         capability_summary: {

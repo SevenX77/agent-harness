@@ -50,9 +50,10 @@ export function deriveRoleRouteStatus({
   if (testStatus === "warning") return "limited"
   if (testStatus && testStatus !== "ok" && testStatus !== "idle") return "blocked"
   if (roleFitEntry?.role_fit === "not_fit") return "blocked"
-  if (providerModel?.ui_state === "needs_setup" || providerModel?.ui_state === "off") return "blocked"
+  if (providerModel?.ui_state === "failed" || providerModel?.ui_state === "off") return "blocked"
   if (providerModel?.ui_state === "cooling_down" && testStatus !== "ok") return "blocked"
   if (roleFitEntry?.role_fit === "downgraded" || roleFitEntry?.role_fit === "needs_test") return "limited"
+  if (providerModel?.ui_state === "historical_ready" && testStatus !== "ok") return "limited"
   if (providerModel?.ui_state === "untested" && testStatus !== "ok") return "limited"
   if (providerModel || roleFitEntry || testStatus === "ok") return "runnable"
   return null
@@ -259,8 +260,13 @@ function providerUiStateDetail(providerModel?: ProviderModelOption): string | nu
   if (providerModel.ui_state === "untested") {
     return detail ? `Untested: ${ensureSentence(detail)}` : "Global route test is still untested."
   }
-  if (providerModel.ui_state === "needs_setup") {
-    return detail ? `Needs setup: ${ensureSentence(detail)}` : "Needs setup before this route can run."
+  if (providerModel.ui_state === "historical_ready") {
+    return detail
+      ? `Previously Connected: ${ensureSentence(detail)}`
+      : "Previously connected from historical probe evidence; test again before treating it as ready."
+  }
+  if (providerModel.ui_state === "failed") {
+    return detail ? `Failed: ${ensureSentence(detail)}` : "Provider route failed and must be fixed before it can run."
   }
   if (providerModel.ui_state === "off") {
     return detail ? `Off: ${ensureSentence(detail)}` : "This route is disabled."
@@ -318,9 +324,16 @@ function tooltipDiagnostic(line: string): "warning" | "failed" | null {
 
 function providerRouteHeadline(providerModel?: ProviderModelOption): string | null {
   if (!providerModel) return null
-  const state = providerModel.ui_state === "ready" ? "Verified" : humanizeToken(providerModel.ui_state)
+  const state = providerRouteStateHeadline(providerModel.ui_state)
   const modes = providerRouteModes(providerModel)
   return [state, modes.length > 0 ? `${modes.join(" + ")} route` : "route"].join(" ")
+}
+
+function providerRouteStateHeadline(state: ProviderModelOption["ui_state"]): string {
+  if (state === "ready") return "Verified"
+  if (state === "historical_ready") return "Previously Connected"
+  if (state === "failed") return "Failed"
+  return humanizeToken(state)
 }
 
 function providerRouteModes(providerModel: ProviderModelOption): string[] {

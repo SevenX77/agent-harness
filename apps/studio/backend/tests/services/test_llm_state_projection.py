@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import get_args
 
+import pytest
 from app.models.llm_config import ProviderEndpoint, ProviderRoute
+from graph_agent_gateway.registry.schema import EvidenceRecord
 
 
 def _endpoint(
@@ -39,6 +42,35 @@ def _route(
     )
 
 
+def _evidence_record(
+    trust_state: str,
+    *,
+    route_id: str | None = "openai-direct:gpt-5",
+    scope: dict[str, str] | None = None,
+) -> EvidenceRecord:
+    return EvidenceRecord(
+        evidence_id=f"evidence-{trust_state}",
+        evidence_type="probe",
+        trust_state=trust_state,
+        route_id=route_id,
+        scope=scope or {},
+    )
+
+
+def test_provider_ui_state_literal_is_six_state_contract() -> None:
+    from app.services.llm_state_projection import ProviderUiState
+
+    assert set(get_args(ProviderUiState)) == {
+        "ready",
+        "historical_ready",
+        "untested",
+        "failed",
+        "cooling_down",
+        "off",
+    }
+    assert "needs_setup" not in get_args(ProviderUiState)
+
+
 def test_provider_state_projection_uses_explicit_priority_chain() -> None:
     from app.services.llm_health_store import RuntimeCircuit
     from app.services.llm_state_projection import project_provider_model_state
@@ -60,24 +92,27 @@ def test_provider_state_projection_uses_explicit_priority_chain() -> None:
         route=_route(status="verified"),
         circuits=[circuit],
         now=now,
+        draft_history=True,
     )
     assert off_projection.ui_state == "off"
     assert off_projection.retry_at is None
 
-    setup_projection = project_provider_model_state(
+    failed_projection = project_provider_model_state(
         endpoint=_endpoint(api_key=None, status="verified"),
         route=_route(status="verified"),
         circuits=[circuit],
         now=now,
+        draft_history=True,
     )
-    assert setup_projection.ui_state == "needs_setup"
-    assert setup_projection.reason_code == "missing_key"
+    assert failed_projection.ui_state == "failed"
+    assert failed_projection.reason_code == "missing_config"
 
     cooling_projection = project_provider_model_state(
         endpoint=_endpoint(status="verified"),
         route=_route(status="verified"),
         circuits=[circuit],
         now=now,
+        draft_history=True,
     )
     assert cooling_projection.ui_state == "cooling_down"
     assert cooling_projection.retry_at == (now + timedelta(seconds=30)).isoformat()
@@ -88,16 +123,161 @@ def test_provider_state_projection_uses_explicit_priority_chain() -> None:
         route=_route(status="verified"),
         circuits=[],
         now=now,
+        draft_history=True,
     )
     assert ready_projection.ui_state == "ready"
 
-    untested_projection = project_provider_model_state(
-        endpoint=_endpoint(status="unverified_manual"),
+    historical_projection = project_provider_model_state(
+        endpoint=_endpoint(status="verified"),
         route=_route(status="unverified_manual"),
         circuits=[],
         now=now,
+        draft_history=True,
+    )
+    assert historical_projection.ui_state == "historical_ready"
+
+    untested_projection = project_provider_model_state(
+        endpoint=_endpoint(status="verified"),
+        route=_route(status="unverified_manual"),
+        circuits=[],
+        now=now,
+        draft_history=False,
     )
     assert untested_projection.ui_state == "untested"
+
+
+def test_provider_state_projection_maps_failed_reasons_to_six_state_failed() -> None:
+    from app.services.llm_state_projection import project_provider_model_state
+
+    now = datetime(2026, 5, 26, 12, 0, tzinfo=UTC)
+
+    missing_config = project_provider_model_state(
+        endpoint=_endpoint(api_key=None, status="verified"),
+        route=_route(status="verified"),
+        circuits=[],
+        now=now,
+        draft_history=False,
+    )
+    assert missing_config.ui_state == "failed"
+    assert missing_config.reason_code == "missing_config"
+
+    endpoint_unreachable = project_provider_model_state(
+        endpoint=_endpoint(status="failed"),
+        route=_route(status="verified"),
+        circuits=[],
+        now=now,
+        draft_history=False,
+    )
+    assert endpoint_unreachable.ui_state == "failed"
+    assert endpoint_unreachable.reason_code == "endpoint_unreachable"
+
+    model_failed = project_provider_model_state(
+        endpoint=_endpoint(status="verified"),
+        route=_route(status="failed"),
+        circuits=[],
+        now=now,
+        draft_history=False,
+    )
+    assert model_failed.ui_state == "failed"
+    assert model_failed.reason_code == "model_failed"
+
+
+def test_provider_state_projection_projects_historical_ready_from_draft_history() -> None:
+    from app.services.llm_state_projection import project_provider_model_state
+
+    now = datetime(2026, 5, 26, 12, 0, tzinfo=UTC)
+
+    historical = project_provider_model_state(
+        endpoint=_endpoint(status="verified"),
+        route=_route(status="unverified_manual"),
+        circuits=[],
+        now=now,
+        draft_history=True,
+    )
+    assert historical.ui_state == "historical_ready"
+
+    untested = project_provider_model_state(
+        endpoint=_endpoint(status="verified"),
+        route=_route(status="unverified_manual"),
+        circuits=[],
+        now=now,
+        draft_history=False,
+    )
+    assert untested.ui_state == "untested"
+
+
+def test_provider_state_projection_upgrades_historical_ready_to_ready_when_route_verified() -> None:
+    from app.services.llm_state_projection import project_provider_model_state
+
+    now = datetime(2026, 5, 26, 12, 0, tzinfo=UTC)
+
+    historical = project_provider_model_state(
+        endpoint=_endpoint(status="verified"),
+        route=_route(status="unverified_manual"),
+        circuits=[],
+        now=now,
+        draft_history=True,
+    )
+    assert historical.ui_state == "historical_ready"
+
+    ready = project_provider_model_state(
+        endpoint=_endpoint(status="verified"),
+        route=_route(status="verified"),
+        circuits=[],
+        now=now,
+        draft_history=True,
+    )
+    assert ready.ui_state == "ready"
+
+
+@pytest.mark.parametrize(
+    ("trust_state", "expected"),
+    [
+        ("doc-discovered", False),
+        ("provider-list-observed", False),
+        ("draft-inferred", False),
+        ("probe-verified", True),
+        ("probe-failed", False),
+        ("deprecated", False),
+        ("stale", False),
+    ],
+)
+def test_historical_ready_helper_only_trusts_probe_verified(
+    trust_state: str,
+    expected: bool,
+) -> None:
+    from app.services.llm_state_projection import has_historical_probe_verified
+
+    assert (
+        has_historical_probe_verified(
+            [_evidence_record(trust_state)],
+            "openai-direct:gpt-5",
+        )
+        is expected
+    )
+
+
+def test_historical_ready_helper_matches_route_id_and_scope() -> None:
+    from app.services.llm_state_projection import has_historical_probe_verified
+
+    assert has_historical_probe_verified(
+        [_evidence_record("probe-verified", route_id="openai-direct:gpt-5")],
+        "openai-direct:gpt-5",
+    )
+    assert has_historical_probe_verified(
+        [
+            _evidence_record(
+                "probe-verified",
+                route_id=None,
+                scope={"route_id": "openai-direct:gpt-5"},
+            )
+        ],
+        "openai-direct:gpt-5",
+    )
+    assert not has_historical_probe_verified(
+        [_evidence_record("probe-verified", route_id="openai-direct:gpt-4")],
+        "openai-direct:gpt-5",
+    )
 
 
 def test_provider_state_projection_uses_farthest_retry_at_across_circuit_scopes() -> None:
@@ -144,6 +324,7 @@ def test_provider_state_projection_uses_farthest_retry_at_across_circuit_scopes(
             ),
         ],
         now=now,
+        draft_history=False,
     )
 
     assert projection.ui_state == "cooling_down"
@@ -195,6 +376,7 @@ def test_provider_state_projection_ties_use_route_endpoint_bucket_message_priori
             ),
         ],
         now=now,
+        draft_history=False,
     )
 
     assert projection.ui_state == "cooling_down"
@@ -228,6 +410,7 @@ def test_provider_state_projection_ties_use_route_endpoint_bucket_message_priori
             ),
         ],
         now=now,
+        draft_history=False,
     )
 
     assert projection_without_route.reason_code == "endpoint_rate_limited"

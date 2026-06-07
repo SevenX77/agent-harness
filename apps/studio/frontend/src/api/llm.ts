@@ -1,15 +1,16 @@
 import { api } from './client'
 
 export type ProviderType =
+  | 'anthropic'
   | 'anthropic_compatible'
   | 'ark_runtime'
   | 'openai_compatible'
   | 'google_genai'
 
-export type RouteStatus = 'verified' | 'unverified_manual' | 'disabled' | 'failed' | 'probe-verified'
-export type ModelProbeStatus = RouteStatus | 'testing'
+export type RouteStatus = 'verified' | 'unverified_manual' | 'disabled' | 'failed'
 export type ProviderKind = 'official' | 'third_party' | 'custom'
-export type ProviderUiState = 'ready' | 'untested' | 'cooling_down' | 'needs_setup' | 'off'
+export type ProviderUiState = 'ready' | 'historical_ready' | 'untested' | 'failed' | 'cooling_down' | 'off'
+export type ModelProbeStatus = RouteStatus | ProviderUiState | 'testing'
 export type RoleFitState = 'using' | 'downgraded' | 'needs_test' | 'not_fit'
 export type CapabilityState = 'unknown' | 'callable_only' | 'partial' | 'known'
 export type CapabilitySummaryState = 'supported' | 'unsupported' | 'mixed' | 'unknown'
@@ -107,9 +108,10 @@ export interface ProviderModelOption {
 
 export interface ModelGroupStatusSummary {
   ready: number
+  historical_ready: number
   untested: number
+  failed: number
   cooling_down: number
-  needs_setup: number
   off: number
 }
 
@@ -192,6 +194,7 @@ export type TestStatus =
   | 'network_error'
   | 'timeout'
   | 'error'
+  | 'unverified_manual'
 
 export interface ModelInfo {
   id: string
@@ -612,19 +615,19 @@ function capabilityStringArray(
 
 function legacyProviderUiState(endpoint: ProviderEndpoint, route: ProviderRoute): ProviderUiState {
   if (endpoint.status === 'disabled' || route.status === 'disabled') return 'off'
-  if (!endpoint.api_key || endpoint.status === 'failed' || route.status === 'failed') return 'needs_setup'
+  if (!endpoint.api_key || endpoint.status === 'failed' || route.status === 'failed') return 'failed'
   if (endpoint.status === 'verified' && route.status === 'verified') return 'ready'
   return 'untested'
 }
 
 function legacyProviderReasonCode(endpoint: ProviderEndpoint, route: ProviderRoute): string | null {
-  if (!endpoint.api_key) return 'missing_key'
+  if (!endpoint.api_key) return 'missing_config'
   const routeReason = stringMetadata(route.metadata, 'reason_code')
   if (routeReason) return routeReason
   const endpointReason = stringMetadata(endpoint.metadata, 'reason_code')
   if (endpointReason) return endpointReason
-  if (route.status === 'failed') return 'route_failed'
-  if (endpoint.status === 'failed') return endpointErrorCode(endpoint) ?? 'endpoint_failed'
+  if (route.status === 'failed') return 'model_failed'
+  if (endpoint.status === 'failed') return endpointErrorCode(endpoint) ?? 'endpoint_unreachable'
   return null
 }
 
@@ -640,9 +643,10 @@ function stringMetadata(metadata: Record<string, unknown>, key: string): string 
 function summarizeProviderModelStates(providerModels: ProviderModelOption[]): ModelGroupStatusSummary {
   const summary: ModelGroupStatusSummary = {
     ready: 0,
+    historical_ready: 0,
     untested: 0,
+    failed: 0,
     cooling_down: 0,
-    needs_setup: 0,
     off: 0,
   }
   for (const option of providerModels) {

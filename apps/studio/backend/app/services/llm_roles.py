@@ -21,13 +21,38 @@ class InvalidRoleReference(ValueError):
     """Raised when a role/profile references an unknown route."""
 
 
+def _normalize_route_id(route_id: Any) -> Any:
+    if not isinstance(route_id, str):
+        return route_id
+    import re
+    return re.sub(r"\b(claude-(?:sonnet|opus|haiku)-\d+)-(\d+)\b", r"\1.\2", route_id)
+
+
+def _normalize_payload(val: Any) -> Any:
+    if isinstance(val, dict):
+        result: dict[Any, Any] = {}
+        for k, v in val.items():
+            if k == "route_id" and isinstance(v, str):
+                result[k] = _normalize_route_id(v)
+            elif k == "route_ids" and isinstance(v, list):
+                result[k] = [_normalize_route_id(item) for item in v]
+            else:
+                result[k] = _normalize_payload(v)
+        return result
+    if isinstance(val, list):
+        return [_normalize_payload(item) for item in val]
+    return val
+
+
 def load_roles_file(path: Path) -> RolesData:
     """Load a roles YAML file; legacy short-code schemas are fatal."""
     payload = _yaml().load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(payload, dict):
         raise ValueError(f"llm_roles.yaml must contain a mapping: {path}")
     _reject_legacy_roles(payload, path)
-    return RolesData.model_validate(_plain(payload))
+    normalized_payload = _normalize_payload(payload)
+    return RolesData.model_validate(_plain(normalized_payload))
+
 
 
 def save_roles_file(

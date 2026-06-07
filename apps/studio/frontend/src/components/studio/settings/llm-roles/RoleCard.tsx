@@ -49,7 +49,7 @@ import {
 } from "../role-utils"
 import { ModelItem } from "./ModelItem"
 import { RoleNameDialog } from "./RoleNameDialog"
-import { RoleSettingsPanel, type OutputLimitSummary } from "./RoleSettingsDialog"
+import { RoleSettingsPanel, type RoleTokenLimitSummary } from "./RoleSettingsDialog"
 
 export type RoleCategory = "graph-agent" | "copilot"
 
@@ -111,8 +111,8 @@ export const RoleCard = memo(function RoleCard({
   const roleFitByRouteId = useMemo<ReadonlyMap<string, MaterializationReportEntry>>(() => (
     new Map((role.materialization_report?.entries ?? []).map((entry) => [entry.route_id, entry]))
   ), [role.materialization_report?.entries])
-  const outputLimitSummary = useMemo(
-    () => roleOutputLimitSummary(role, providerModelsByRouteId),
+  const tokenLimitSummary = useMemo(
+    () => roleTokenLimitSummary(role, providerModelsByRouteId),
     [providerModelsByRouteId, role],
   )
   const sensors = useSensors(
@@ -298,7 +298,7 @@ export const RoleCard = memo(function RoleCard({
             roleName={roleName}
             modelFallbackEnabled={role.model_fallback_enabled}
             intent={role.intent}
-            outputLimitSummary={outputLimitSummary}
+            tokenLimitSummary={tokenLimitSummary}
             onModelFallbackChange={(checked) => onChange(toggleModelFallback(data, roleName, checked))}
             onSubmit={(intent) => onChange(updateRoleIntent(data, roleName, intent))}
           />
@@ -379,13 +379,25 @@ export const RoleCard = memo(function RoleCard({
   )
 })
 
-export function roleOutputLimitSummary(
+export function roleTokenLimitSummary(
   role: RolesData["roles"][string],
   providerModelsByRouteId: ReadonlyMap<string, ProviderModelOption>,
-): OutputLimitSummary {
+): RoleTokenLimitSummary {
   const routeIds = Object.values(role.models).flatMap((model) => model.providers)
+
+  return {
+    context: routeTokenLimitSummary(routeIds, providerModelsByRouteId, "max_input_tokens"),
+    output: routeTokenLimitSummary(routeIds, providerModelsByRouteId, "max_output_tokens"),
+  }
+}
+
+function routeTokenLimitSummary(
+  routeIds: string[],
+  providerModelsByRouteId: ReadonlyMap<string, ProviderModelOption>,
+  capabilityKey: "max_input_tokens" | "max_output_tokens",
+): RoleTokenLimitSummary["context"] {
   const values = routeIds
-    .map((routeId) => providerMaxOutputTokens(providerModelsByRouteId.get(routeId)))
+    .map((routeId) => providerMaxTokens(providerModelsByRouteId.get(routeId), capabilityKey))
     .filter((value): value is number => value !== null)
 
   return {
@@ -396,8 +408,12 @@ export function roleOutputLimitSummary(
   }
 }
 
-function providerMaxOutputTokens(providerModel?: ProviderModelOption): number | null {
-  const value = providerModel?.capabilities.max_output_tokens?.value
+function providerMaxTokens(
+  providerModel: ProviderModelOption | undefined,
+  capabilityKey: "max_input_tokens" | "max_output_tokens",
+): number | null {
+  const value = providerModel?.capabilities[capabilityKey]?.value
+  if (typeof value === "number" && Number.isFinite(value)) return value
   if (!value || typeof value !== "object" || Array.isArray(value)) return null
   const max = (value as { max?: unknown }).max
   return typeof max === "number" && Number.isFinite(max) ? max : null

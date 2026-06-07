@@ -992,7 +992,7 @@ describe('API Keys v4 registry adapter', () => {
     ])
   })
 
-  it('projects legacy missing key and invalid model routes to top-level Needs Setup', () => {
+  it('projects legacy missing key and invalid model routes to failed state', () => {
     const missingKeyEndpoint: ProviderEndpoint = {
       ...endpoint,
       api_key: null,
@@ -1023,7 +1023,78 @@ describe('API Keys v4 registry adapter', () => {
     }))
 
     const states = groups.flatMap((group) => group.provider_models.map((option) => option.ui_state))
-    expect(states).toEqual(['needs_setup', 'needs_setup'])
+    expect(states).toEqual(['failed', 'failed'])
+    expect(groups.flatMap((group) => group.provider_models.map((option) => option.reason_code))).toEqual([
+      'missing_config',
+      'missing_config',
+    ])
+  })
+
+  it('keeps backend six-state model group projection without synthesizing needs_setup', () => {
+    const groups = modelGroupsFromRegistry(registry({
+      model_groups: [
+        {
+          canonical_id: 'gpt-5',
+          display_name: 'GPT-5',
+          provider_models: [
+            {
+              route_id: 'historical:gpt-5',
+              provider_label: 'Historical Proxy',
+              provider_kind: 'third_party',
+              provider_model_id: 'openai/gpt-5',
+              ui_state: 'historical_ready',
+              ui_detail: 'Previously connected from shared probe evidence.',
+              retry_at: null,
+              reason_code: null,
+              capability_state: 'known',
+              capabilities: route.capabilities,
+            },
+            {
+              route_id: 'failed:gpt-5',
+              provider_label: 'Failed Proxy',
+              provider_kind: 'third_party',
+              provider_model_id: 'openai/gpt-5',
+              ui_state: 'failed',
+              ui_detail: 'Model failed probe.',
+              retry_at: null,
+              reason_code: 'model_failed',
+              capability_state: 'unknown',
+              capabilities: {},
+            },
+          ],
+          status_summary: {
+            ready: 0,
+            historical_ready: 1,
+            untested: 0,
+            failed: 1,
+            cooling_down: 0,
+            off: 0,
+          },
+          capability_summary: {
+            capability_known_count: 1,
+            thinking: 'unknown',
+            tools: 'unknown',
+            structured_output: 'unknown',
+            max_context_tokens: null,
+            max_output_tokens: null,
+          },
+        },
+      ],
+    }))
+
+    expect(groups[0].status_summary).toEqual({
+      ready: 0,
+      historical_ready: 1,
+      untested: 0,
+      failed: 1,
+      cooling_down: 0,
+      off: 0,
+    })
+    expect(groups[0].provider_models.map((option) => option.ui_state)).toEqual([
+      'historical_ready',
+      'failed',
+    ])
+    expect(JSON.stringify(groups[0])).not.toContain('needs_setup')
   })
 
   it('keeps backend Cooling Down projection and retry timestamp', () => {
@@ -1049,9 +1120,10 @@ describe('API Keys v4 registry adapter', () => {
           ],
           status_summary: {
             ready: 0,
+            historical_ready: 0,
             untested: 0,
+            failed: 0,
             cooling_down: 1,
-            needs_setup: 0,
             off: 0,
           },
           capability_summary: {
@@ -1084,9 +1156,10 @@ describe('API Keys v4 registry adapter', () => {
       display_name: 'GPT-5',
       status_summary: {
         ready: 1,
+        historical_ready: 0,
         untested: 0,
+        failed: 0,
         cooling_down: 0,
-        needs_setup: 0,
         off: 0,
       },
     })
@@ -1123,9 +1196,10 @@ describe('API Keys v4 registry adapter', () => {
               ],
               status_summary: {
                 ready: 1,
+                historical_ready: 0,
                 untested: 0,
+                failed: 0,
                 cooling_down: 0,
-                needs_setup: 0,
                 off: 0,
               },
               capability_summary: {

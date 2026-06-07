@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Literal
 
 import httpx
+from graph_agent_gateway.registry.base_url import canonicalize_base_url
 from graph_agent_gateway.registry.schema import (
     EvidenceRecord,
     ProviderImportDraft,
@@ -167,7 +168,7 @@ def apply_draft(
                 endpoint_id=endpoint.endpoint_id,
                 display_name=endpoint.display_name,
                 protocol=endpoint.protocol,
-                base_url=endpoint.base_url,
+                base_url=canonicalize_base_url(endpoint.base_url, endpoint.protocol),
                 api_key=endpoint.api_key,
                 status=endpoint.status,
                 last_test_at=endpoint.last_test_at,

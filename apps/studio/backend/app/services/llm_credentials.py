@@ -11,10 +11,11 @@ import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
+from graph_agent_gateway.registry.base_url import canonicalize_base_url
 from graph_agent_gateway.registry.canonical import canonicalize_model
 from graph_agent_gateway.registry.capabilities import normalize_route_capabilities
+from graph_agent_gateway.registry.endpoints import legacy_v3_endpoint_id
 from graph_agent_gateway.registry.schema import CapabilitySource
 from pydantic import SecretStr, ValidationError
 
@@ -120,7 +121,11 @@ def upsert_endpoints(
                 raise ValueError(f"endpoint payload key does not match endpoint_id: {endpoint_id}")
             current = endpoints.get(endpoint_id)
             api_key = _preserved_secret(incoming, current)
-            updates: dict[str, Any] = {"api_key": api_key}
+            canonical_base_url = canonicalize_base_url(incoming.base_url, incoming.protocol)
+            updates: dict[str, Any] = {
+                "api_key": api_key,
+                "base_url": canonical_base_url,
+            }
             curated_provider_kind = CURATED_PROVIDER_KIND_BY_ENDPOINT_ID.get(endpoint_id)
             if curated_provider_kind is not None and _field_omitted(payload, "provider_kind"):
                 updates["provider_kind"] = curated_provider_kind
@@ -302,7 +307,7 @@ def _v3_payload_to_v4(payload: dict[str, Any]) -> LLMCredentialsFile:
     for provider in payload.get("providers") or []:
         if not isinstance(provider, dict):
             continue
-        endpoint_id = _stable_endpoint_id(provider)
+        endpoint_id = legacy_v3_endpoint_id(provider)
         protocol = provider.get("provider_type") or provider.get("type")
         base_url = str(provider.get("base_url") or "").strip()
         supported_protocols = {
@@ -313,11 +318,12 @@ def _v3_payload_to_v4(payload: dict[str, Any]) -> LLMCredentialsFile:
         }
         if not endpoint_id or protocol not in supported_protocols:
             continue
+        canonical_url = canonicalize_base_url(base_url, protocol)
         endpoint = ProviderEndpoint(
             endpoint_id=endpoint_id,
             display_name=str(provider.get("name") or endpoint_id),
             protocol=protocol,
-            base_url=base_url,
+            base_url=canonical_url,
             api_key=provider.get("api_key") or None,
             status="verified" if provider.get("last_test_status") == "ok" else "unverified_manual",
             last_test_at=provider.get("last_test_at"),
@@ -364,52 +370,6 @@ def _legacy_models(provider: dict[str, Any]) -> list[dict[str, Any]]:
     if isinstance(models, list):
         return [item for item in models if isinstance(item, dict)]
     return []
-
-
-def _stable_endpoint_id(provider: dict[str, Any]) -> str:
-    raw = str(provider.get("id") or provider.get("code") or "").strip()
-    name = str(provider.get("name") or "").lower()
-    base_url = str(provider.get("base_url") or "").strip()
-    base_host = _url_hostname(base_url)
-    base_path = _url_path(base_url)
-    if base_host == "api.anthropic.com":
-        return "anthropic-official"
-    if base_host == "api.openai.com":
-        return "openai-official"
-    if base_host == "api.deepseek.com":
-        return "deepseek-official"
-    if base_host == "generativelanguage.googleapis.com":
-        return "gemini-official"
-    if _host_matches(base_host, "volces.com"):
-        return "ark-official"
-    if _host_matches(base_host, "openrouter.ai") or "openrouter" in name:
-        return "openrouter-prod"
-    if "wavespeed" in base_host or "wavespeed" in name:
-        return "wavespeed-prod"
-    if _host_matches(base_host, "qnaigc.com") and ("anthropic" in base_path or "anthropic" in name):
-        return "qiniu-anthropic"
-    if _host_matches(base_host, "qnaigc.com"):
-        return "qiniu-openai"
-    return raw
-
-
-def _url_hostname(raw_url: str) -> str:
-    if not raw_url:
-        return ""
-    parsed = urlparse(raw_url if "://" in raw_url else f"https://{raw_url}")
-    return (parsed.hostname or "").lower().rstrip(".")
-
-
-def _url_path(raw_url: str) -> str:
-    if not raw_url:
-        return ""
-    parsed = urlparse(raw_url if "://" in raw_url else f"https://{raw_url}")
-    return parsed.path.lower()
-
-
-def _host_matches(hostname: str, domain: str) -> bool:
-    normalized_domain = domain.lower().rstrip(".")
-    return hostname == normalized_domain or hostname.endswith(f".{normalized_domain}")
 
 
 def _route_slug(provider_model_id: str) -> str:

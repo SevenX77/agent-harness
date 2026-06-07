@@ -21,7 +21,12 @@ from app.services.llm_route_capabilities import route_thinking_capability
 from app.services.llm_state_projection import (
     ProviderModelStateProjection,
     project_provider_model_state,
+    has_historical_probe_verified,
 )
+from app.services.llm_import_drafts import load_evidence_library
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from graph_agent_gateway.registry.schema import EvidenceRecord
 
 
 def materialize_role(
@@ -37,6 +42,7 @@ def materialize_role(
         "skipped_provider_details": [],
     }
     groups = role.model_groups if role.model_fallback_enabled else role.model_groups[:1]
+    evidence_records = load_evidence_library().evidence_records
     for group in groups:
         for provider_model in _ordered_provider_models(group):
             route = credentials.provider_routes.get(provider_model.route_id)
@@ -45,10 +51,15 @@ def materialize_role(
             endpoint = credentials.provider_endpoints.get(route.endpoint_id)
             if endpoint is None:
                 continue
-            projection = _projection(route.route_id, credentials, health_store)
+            projection = _projection(
+                route.route_id,
+                credentials,
+                health_store,
+                evidence_records=evidence_records,
+            )
             if projection is None:
                 continue
-            if projection.ui_state in {"needs_setup", "off"}:
+            if projection.ui_state in {"failed", "off"}:
                 report["skipped_provider_details"].append(
                     {
                         "route_id": route.route_id,
@@ -132,6 +143,7 @@ def _projection(
     route_id: str,
     credentials: LLMCredentialsFile,
     health_store: SqliteLlmHealthStore,
+    evidence_records: list[EvidenceRecord] | None = None,
 ) -> ProviderModelStateProjection | None:
     route = credentials.provider_routes.get(route_id)
     if route is None:
@@ -146,11 +158,15 @@ def _projection(
         rate_limit_bucket=endpoint.rate_limit_bucket or endpoint.endpoint_id,
         now=now,
     )
+    if evidence_records is None:
+        evidence_records = load_evidence_library().evidence_records
+    draft_history = has_historical_probe_verified(evidence_records, route.route_id)
     return project_provider_model_state(
         endpoint=endpoint,
         route=route,
         circuits=circuits,
         now=now,
+        draft_history=draft_history,
     )
 
 

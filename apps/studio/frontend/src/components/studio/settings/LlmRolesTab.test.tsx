@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 import type { CredentialsState, ModelGroup, RolesData } from "../../../api/llm"
 import { roleChainStatusKey } from "../../../hooks/useRoleTestChainRunner"
-import { AvailableModelDragPreview, LlmRolesTab, modelDropFailureMessage, roleIntentFromSettingsDraft, roleTestStatusesByRole, RoleSettingsFields } from "./LlmRolesTab"
+import { AvailableModelDragPreview, LlmRolesTab, modelDropFailureMessage, roleIntentFromSettingsDraft, roleTestStatusesByRole, runPersistedRoleTestJob, RoleSettingsFields } from "./LlmRolesTab"
 import {
   AvailableModelsSidebar,
   buildAvailableModelGroups,
@@ -102,19 +102,20 @@ const modelGroups: ModelGroup[] = [
         provider_label: "Broken Proxy",
         provider_kind: "third_party",
         provider_model_id: "claude-sonnet-4-7",
-        ui_state: "needs_setup",
+        ui_state: "failed",
         ui_detail: "API key is missing.",
         retry_at: null,
-        reason_code: "missing_key",
+        reason_code: "missing_config",
         capability_state: "unknown",
         capabilities: {},
       },
     ],
     status_summary: {
       ready: 1,
+      historical_ready: 0,
       untested: 1,
+      failed: 1,
       cooling_down: 0,
-      needs_setup: 1,
       off: 0,
     },
     capability_summary: {
@@ -148,7 +149,7 @@ const rolesData: RolesData = {
     openai_proxy: { name: "OpenAI Proxy", type: "openai_compatible" },
   },
   roles: {
-    copilot_chat: {
+    graph_agent_chat: {
       model_fallback_enabled: true,
       active_model: "CL46T",
       models: {
@@ -178,17 +179,17 @@ describe("LlmRolesTab controls", () => {
     const dataWithBackendField: RolesData = {
       ...rolesData,
       roles: {
-        copilot_chat: {
-          ...rolesData.roles.copilot_chat,
+        graph_agent_chat: {
+          ...rolesData.roles.graph_agent_chat,
           model_fallback_enabled: true,
         },
       },
     }
 
-    const next = toggleModelFallback(dataWithBackendField, "copilot_chat", false)
+    const next = toggleModelFallback(dataWithBackendField, "graph_agent_chat", false)
 
-    expect(next.roles.copilot_chat.model_fallback_enabled).toBe(false)
-    expect(dataWithBackendField.roles.copilot_chat.model_fallback_enabled).toBe(true)
+    expect(next.roles.graph_agent_chat.model_fallback_enabled).toBe(false)
+    expect(dataWithBackendField.roles.graph_agent_chat.model_fallback_enabled).toBe(true)
   })
 
   it("renders Available Models from backend model group DTOs instead of credential model strings", () => {
@@ -200,11 +201,11 @@ describe("LlmRolesTab controls", () => {
     expect(html).toContain("Qiniu Anthropic")
     expect(html).not.toContain("1 Ready")
     expect(html).not.toContain("1 Untested")
-    expect(html).not.toContain("1 Needs Setup")
+    expect(html).not.toContain("1 Failed")
     expect(html).toContain('data-provider-state="ready"')
+    expect(html).toContain('data-provider-state="failed"')
     expect(html).toContain('data-provider-state="untested"')
-    expect(html).toContain('data-provider-state="needs_setup"')
-    expect(html).toContain('data-variant="default"')
+    expect(html).not.toContain('data-provider-state="needs_setup"')
     expect(html).not.toContain("claude-sonnet-4-7</")
     expect(html).not.toContain("anthropic-official:claude-sonnet-4-7")
     expect(html).not.toContain("route")
@@ -233,7 +234,7 @@ describe("LlmRolesTab controls", () => {
   })
 
   it("adds a model group to a role using every exact backend route id", () => {
-    const next = appendModelGroupToRole(rolesData, "copilot_chat", modelGroups[0])
+    const next = appendModelGroupToRole(rolesData, "graph_agent_chat", modelGroups[0])
 
     expect(next.models["claude-sonnet-4-7"]).toMatchObject({
       name: "Claude Sonnet 4.7",
@@ -242,7 +243,7 @@ describe("LlmRolesTab controls", () => {
         "qiniu-anthropic:claude-sonnet-4-7": "claude-sonnet-4-7",
       },
     })
-    expect(next.roles.copilot_chat.models["claude-sonnet-4-7"].providers).toEqual([
+    expect(next.roles.graph_agent_chat.models["claude-sonnet-4-7"].providers).toEqual([
       "anthropic-official:claude-sonnet-4-7",
       "qiniu-anthropic:claude-sonnet-4-7",
       "broken-proxy:claude-sonnet-4-7",
@@ -252,7 +253,7 @@ describe("LlmRolesTab controls", () => {
   })
 
   it("returns a drop error when a model group has no provider routes", () => {
-    const result = appendModelGroupToRoleWithResult(rolesData, "copilot_chat", {
+    const result = appendModelGroupToRoleWithResult(rolesData, "graph_agent_chat", {
       ...modelGroups[0],
       canonical_id: "empty-bundle",
       display_name: "Empty Bundle",
@@ -260,7 +261,7 @@ describe("LlmRolesTab controls", () => {
     })
 
     expect(result.data).toBe(rolesData)
-    expect(result.error).toBe("Could not add Empty Bundle to copilot_chat: no provider routes are available.")
+    expect(result.error).toBe("Could not add Empty Bundle to graph_agent_chat: no provider routes are available.")
   })
 
   it("formats model drop failures for Sonner", () => {
@@ -275,7 +276,7 @@ describe("LlmRolesTab controls", () => {
     const routeId = "deepseek-official:deepseek-v4-pro"
     const next = appendModelGroupToRole(
       rolesData,
-      "copilot_chat",
+      "graph_agent_chat",
       {
         ...modelGroups[0],
         canonical_id: "deepseek-v4-pro",
@@ -592,9 +593,9 @@ describe("LlmRolesTab controls", () => {
       ],
     }
 
-    const next = appendModelGroupToRole(rolesData, "copilot_chat", modelGroup)
+    const next = appendModelGroupToRole(rolesData, "graph_agent_chat", modelGroup)
 
-    expect(next.roles.copilot_chat.models["gpt-5"].providers).toEqual([
+    expect(next.roles.graph_agent_chat.models["gpt-5"].providers).toEqual([
       "ready:gpt-5",
       "untested:gpt-5",
       "cooldown:gpt-5",
@@ -602,7 +603,7 @@ describe("LlmRolesTab controls", () => {
     ])
   })
 
-  it("keeps setup-needed routes when adding a model group so users can see and remove them", () => {
+  it("keeps failed routes when adding a model group so users can see and remove them", () => {
     const modelGroup: ModelGroup = {
       ...modelGroups[0],
       canonical_id: "deepseek-v3",
@@ -622,14 +623,14 @@ describe("LlmRolesTab controls", () => {
           provider_label: "Needs Setup Provider",
           provider_kind: "official",
           provider_model_id: "deepseek-v3",
-          ui_state: "needs_setup",
+          ui_state: "failed",
         },
       ],
     }
 
-    const next = appendModelGroupToRole(rolesData, "copilot_chat", modelGroup)
+    const next = appendModelGroupToRole(rolesData, "graph_agent_chat", modelGroup)
 
-    expect(next.roles.copilot_chat.models["deepseek-v3"].providers).toEqual([
+    expect(next.roles.graph_agent_chat.models["deepseek-v3"].providers).toEqual([
       "cooldown:deepseek-v3",
       "needs-setup:deepseek-v3",
     ])
@@ -658,7 +659,8 @@ describe("LlmRolesTab controls", () => {
 
     expect(html).toContain('data-slot="card"')
     expect(html).toContain("Add Graph Agent Role")
-    expect(html).toContain("Add Copilot Role")
+    expect(html).not.toContain("Add Copilot Role")
+    expect(html).not.toContain("Copilot Roles")
     expect(html).toContain('data-role-add-trigger="true"')
     expect(html).toContain('data-slot="empty"')
     expect(html).toContain("Drop model")
@@ -752,10 +754,8 @@ describe("LlmRolesTab controls", () => {
     expect(html).toContain('data-variant="success"')
     expect(html).toContain("border-success")
     expect(html).toContain("bg-success/10")
-    expect(html).toContain('data-variant="destructive"')
-    expect(html).toContain("border-destructive")
     expect(html).toContain("Qiniu Anthropic")
-    expect(html).not.toContain('title="Qiniu Anthropic"')
+    expect(html).not.toContain('title="Anthropic Official"')
     expect(html).not.toContain('title="Claude Sonnet 4.7"')
   })
 
@@ -806,15 +806,28 @@ describe("LlmRolesTab controls", () => {
           capabilities: {},
         },
         {
+          route_id: "historical:gpt-5",
+          endpoint_id: "historical",
+          provider_label: "Historical Provider",
+          provider_kind: "third_party",
+          provider_model_id: "gpt-5",
+          ui_state: "historical_ready",
+          ui_detail: "Previously connected from shared probe evidence.",
+          retry_at: null,
+          reason_code: null,
+          capability_state: "partial",
+          capabilities: {},
+        },
+        {
           route_id: "setup:gpt-5",
           endpoint_id: "setup",
-          provider_label: "Setup Provider",
+          provider_label: "Failed Provider",
           provider_kind: "custom",
           provider_model_id: "gpt-5",
-          ui_state: "needs_setup",
+          ui_state: "failed",
           ui_detail: "Model does not exist.",
           retry_at: null,
-          reason_code: "invalid_model",
+          reason_code: "model_failed",
           capability_state: "unknown",
           capabilities: {},
         },
@@ -834,9 +847,10 @@ describe("LlmRolesTab controls", () => {
       ],
       status_summary: {
         ready: 1,
+        historical_ready: 1,
         untested: 1,
+        failed: 1,
         cooling_down: 1,
-        needs_setup: 1,
         off: 1,
       },
       capability_summary: {
@@ -888,6 +902,11 @@ describe("LlmRolesTab controls", () => {
               },
               {
                 canonical_id: "gpt-5",
+                route_id: "historical:gpt-5",
+                role_fit: "using",
+              },
+              {
+                canonical_id: "gpt-5",
                 route_id: "cooling:gpt-5",
                 role_fit: "needs_test",
                 warnings: [{ code: "thinking_capability_unknown" }],
@@ -921,6 +940,7 @@ describe("LlmRolesTab controls", () => {
     expect(html).toContain('data-role-route-status="limited"')
     expect(html).toContain('data-role-route-status="blocked"')
     expect(html).toContain("Using lower max output.")
+    expect(html).toContain("Previously Connected")
     expect(html).toContain("Thinking is required but capability is unknown.")
     expect(html).toContain("Cooling Down: Retry after transient rate limit.")
     expect(html).not.toMatch(/>Can Run<\/span>|>Limited<\/span>|>Blocked<\/span>/)
@@ -935,10 +955,10 @@ describe("LlmRolesTab controls", () => {
 
   it("uses only active provider progress statuses while a persisted role test is running", () => {
     expect(roleTestStatusesByRole({
-      copilot_chat: {
+      graph_agent_chat: {
         running: true,
         result: {
-          role_name: "copilot_chat",
+          role_name: "graph_agent_chat",
           status: "warning",
           warnings: [],
           model_groups: [{
@@ -973,13 +993,82 @@ describe("LlmRolesTab controls", () => {
           }],
         },
       },
-    }, "copilot_chat", {
+    }, "graph_agent_chat", {
       [roleChainStatusKey("CL46T", "anthropic")]: { status: "testing" },
     })).toEqual({
-      copilot_chat: {
+      graph_agent_chat: {
         [roleChainStatusKey("CL46T", "anthropic")]: { status: "testing" },
       },
     })
+  })
+
+  it("flushes autosave before role test and refreshes backend projection after completion", async () => {
+    const calls: string[] = []
+    const runningJob = {
+      job_id: "job-1",
+      role_name: "graph_agent_chat",
+      status: "running" as const,
+      message: "Testing role routes.",
+      provider_statuses: [{
+        canonical_id: "CL46T",
+        route_id: "anthropic",
+        status: "testing" as const,
+        message: null,
+      }],
+      result: null,
+    }
+    const completedJob = {
+      ...runningJob,
+      status: "completed" as const,
+      message: "Role test completed.",
+      provider_statuses: [{
+        canonical_id: "CL46T",
+        route_id: "anthropic",
+        status: "ok" as const,
+        message: null,
+      }],
+      result: {
+        role_name: "graph_agent_chat",
+        status: "ok" as const,
+        warnings: [],
+        model_groups: [],
+      },
+    }
+
+    const result = await runPersistedRoleTestJob({
+      roleName: "graph_agent_chat",
+      beforeRoleTest: async () => {
+        calls.push("flush")
+      },
+      afterRoleTest: async () => {
+        calls.push("refresh-projection")
+      },
+      startJob: async () => {
+        calls.push("start-job")
+        return runningJob
+      },
+      getJob: async (jobId) => {
+        calls.push(`poll-${jobId}`)
+        return completedJob
+      },
+      sleep: async () => {
+        calls.push("sleep")
+      },
+      onJobUpdate: (job) => {
+        calls.push(`state-${job.status}`)
+      },
+    })
+
+    expect(result.status).toBe("ok")
+    expect(calls).toEqual([
+      "flush",
+      "start-job",
+      "state-running",
+      "sleep",
+      "poll-job-1",
+      "state-completed",
+      "refresh-projection",
+    ])
   })
 
   it("keeps testing provider rows on the border-flow status path", () => {
@@ -1087,11 +1176,11 @@ describe("LlmRolesTab controls", () => {
         credentialsByCode={credentialsByProviderCode(rolesData, { providers: credentials.providers })}
         modelDisplayNamesByCode={new Map([["CL46T", "Claude Sonnet 4.6 Thinking"]])}
         ownedProviderCodesByModel={new Map([["CL46T", new Set(["anthropic"])], ["DS32R", new Set(["openai_proxy"])]])}
-        roleName="copilot_chat"
+        roleName="graph_agent_chat"
         testStatuses={{}}
         testChainRunning={false}
         roleTestResult={{
-          role_name: "copilot_chat",
+          role_name: "graph_agent_chat",
           status: "warning",
           warnings: [{ message: "Thinking is required but capability is unknown." }],
           model_groups: [{
@@ -1142,9 +1231,10 @@ describe("LlmRolesTab controls", () => {
       })),
       status_summary: {
         ready: 5,
+        historical_ready: 0,
         untested: 0,
+        failed: 0,
         cooling_down: 0,
-        needs_setup: 0,
         off: 0,
       },
     }]
@@ -1282,21 +1372,33 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain("model_profiles")
   })
 
-  it("sorts ready provider routes before untested and setup routes in model cards", () => {
+  it("sorts provider routes by the backend six-state display priority in model cards", () => {
     const unsortedModelGroups: ModelGroup[] = [{
       ...modelGroups[0],
       provider_models: [
         {
+          ...modelGroups[0].provider_models[2],
+          route_id: "off:deepseek-v4-flash",
+          provider_label: "Off Proxy",
+          ui_state: "off",
+        },
+        {
           ...modelGroups[0].provider_models[1],
           route_id: "qiniu-openai:deepseek-v4-flash",
           provider_label: "Qiniu-OpenAi",
-          ui_state: "untested",
+          ui_state: "cooling_down",
         },
         {
           ...modelGroups[0].provider_models[2],
           route_id: "broken:deepseek-v4-flash",
           provider_label: "Broken Proxy",
-          ui_state: "needs_setup",
+          ui_state: "failed",
+        },
+        {
+          ...modelGroups[0].provider_models[1],
+          route_id: "history:deepseek-v4-flash",
+          provider_label: "Historical Proxy",
+          ui_state: "historical_ready",
         },
         {
           ...modelGroups[0].provider_models[0],
@@ -1312,8 +1414,10 @@ describe("LlmRolesTab controls", () => {
 
     expect(providers.map((provider) => `${provider.label}:${provider.state}`)).toEqual([
       "DeepSeek Official:ready",
-      "Qiniu-OpenAi:untested",
-      "Broken Proxy:needs_setup",
+      "Historical Proxy:historical_ready",
+      "Qiniu-OpenAi:cooling_down",
+      "Broken Proxy:failed",
+      "Off Proxy:off",
     ])
   })
 
@@ -1329,7 +1433,7 @@ describe("LlmRolesTab controls", () => {
             provider_label: "Gemini Official",
             provider_kind: "official",
             provider_model_id: "antigravity-preview-05-2026",
-            ui_state: "untested",
+            ui_state: "ready",
             ui_detail: null,
             retry_at: null,
             reason_code: null,
@@ -1339,9 +1443,10 @@ describe("LlmRolesTab controls", () => {
         ],
         status_summary: {
           ready: 0,
+          historical_ready: 0,
           untested: 1,
+          failed: 0,
           cooling_down: 0,
-          needs_setup: 0,
           off: 0,
         },
         capability_summary: {
@@ -1503,7 +1608,7 @@ describe("LlmRolesTab controls", () => {
     const rolesViewportHtml = html.slice(rolesViewportStart, modelsSidebarStart)
 
     expect(rolesViewportHtml).toContain("LLM Roles")
-    expect(rolesViewportHtml).toContain('data-role-name="copilot_chat"')
+    expect(rolesViewportHtml).toContain('data-role-name="graph_agent_chat"')
     expect(rolesViewportHtml).not.toContain("Available Models")
     expect(html.indexOf("Available Models")).toBeGreaterThan(modelsSidebarStart)
     expect(html.slice(rolesScrollAreaStart, rolesViewportStart)).toContain("[&amp;_[data-slot=scroll-area-scrollbar]]:hidden")
@@ -1564,7 +1669,7 @@ describe("LlmRolesTab controls", () => {
   it("accepts available model drops across the role card content area", () => {
     const html = renderRolesHtml()
 
-    expect(html).toMatch(/data-slot="card"[^>]*data-role-name="copilot_chat"[^>]*data-model-drop-zone="true"/)
+    expect(html).toMatch(/data-slot="card"[^>]*data-role-name="graph_agent_chat"[^>]*data-model-drop-zone="true"/)
     expect(html).toContain('data-model-drop-zone="true"')
     expect(html).toContain('data-model-drop-target="true"')
     expect(html).toContain('data-model-drop-fallback="active-drag-ref"')
@@ -1591,11 +1696,11 @@ describe("LlmRolesTab controls", () => {
     const allProvidersAddedData: RolesData = {
       ...rolesData,
       roles: {
-        copilot_chat: {
-          ...rolesData.roles.copilot_chat,
+        graph_agent_chat: {
+          ...rolesData.roles.graph_agent_chat,
           models: {
             CL46T: {
-              ...rolesData.roles.copilot_chat.models.CL46T,
+              ...rolesData.roles.graph_agent_chat.models.CL46T,
               providers: ["anthropic", "openai_proxy"],
             },
           },
@@ -1608,24 +1713,24 @@ describe("LlmRolesTab controls", () => {
   })
 
   it("reorders model groups without changing the selected providers", () => {
-    const next = reorderModelInRole(rolesData, "copilot_chat", "DS32R", "CL46T")
+    const next = reorderModelInRole(rolesData, "graph_agent_chat", "DS32R", "CL46T")
 
-    expect(Object.keys(next.roles.copilot_chat.models)).toEqual(["DS32R", "CL46T"])
-    expect(next.roles.copilot_chat.active_model).toBe("DS32R")
-    expect(next.roles.copilot_chat.models.CL46T.providers).toEqual(["anthropic"])
-    expect(next.roles.copilot_chat.models.DS32R.providers).toEqual(["openai_proxy"])
+    expect(Object.keys(next.roles.graph_agent_chat.models)).toEqual(["DS32R", "CL46T"])
+    expect(next.roles.graph_agent_chat.active_model).toBe("DS32R")
+    expect(next.roles.graph_agent_chat.models.CL46T.providers).toEqual(["anthropic"])
+    expect(next.roles.graph_agent_chat.models.DS32R.providers).toEqual(["openai_proxy"])
   })
 
   it("reorders providers only inside the targeted model group", () => {
     const dataWithTwoProviders: RolesData = {
       ...rolesData,
       roles: {
-        copilot_chat: {
-          ...rolesData.roles.copilot_chat,
+        graph_agent_chat: {
+          ...rolesData.roles.graph_agent_chat,
           models: {
-            ...rolesData.roles.copilot_chat.models,
+            ...rolesData.roles.graph_agent_chat.models,
             CL46T: {
-              ...rolesData.roles.copilot_chat.models.CL46T,
+              ...rolesData.roles.graph_agent_chat.models.CL46T,
               providers: ["anthropic", "openai_proxy"],
             },
           },
@@ -1633,23 +1738,23 @@ describe("LlmRolesTab controls", () => {
       },
     }
 
-    const next = reorderProviderInRole(dataWithTwoProviders, "copilot_chat", "CL46T", 0, 1)
+    const next = reorderProviderInRole(dataWithTwoProviders, "graph_agent_chat", "CL46T", 0, 1)
 
-    expect(Object.keys(next.roles.copilot_chat.models)).toEqual(["CL46T", "DS32R"])
-    expect(next.roles.copilot_chat.models.CL46T.providers).toEqual(["openai_proxy", "anthropic"])
-    expect(next.roles.copilot_chat.models.DS32R.providers).toEqual(["openai_proxy"])
+    expect(Object.keys(next.roles.graph_agent_chat.models)).toEqual(["CL46T", "DS32R"])
+    expect(next.roles.graph_agent_chat.models.CL46T.providers).toEqual(["openai_proxy", "anthropic"])
+    expect(next.roles.graph_agent_chat.models.DS32R.providers).toEqual(["openai_proxy"])
   })
 
   it("removes providers and model groups without disturbing adjacent rows", () => {
     const dataWithTwoProviders: RolesData = {
       ...rolesData,
       roles: {
-        copilot_chat: {
-          ...rolesData.roles.copilot_chat,
+        graph_agent_chat: {
+          ...rolesData.roles.graph_agent_chat,
           models: {
-            ...rolesData.roles.copilot_chat.models,
+            ...rolesData.roles.graph_agent_chat.models,
             CL46T: {
-              ...rolesData.roles.copilot_chat.models.CL46T,
+              ...rolesData.roles.graph_agent_chat.models.CL46T,
               providers: ["anthropic", "openai_proxy"],
             },
           },
@@ -1657,14 +1762,14 @@ describe("LlmRolesTab controls", () => {
       },
     }
 
-    const providerRemoved = removeProviderFromRole(dataWithTwoProviders, "copilot_chat", "CL46T", 1)
-    const modelRemoved = removeModelFromRole(rolesData, "copilot_chat", "CL46T")
+    const providerRemoved = removeProviderFromRole(dataWithTwoProviders, "graph_agent_chat", "CL46T", 1)
+    const modelRemoved = removeModelFromRole(rolesData, "graph_agent_chat", "CL46T")
 
-    expect(providerRemoved.roles.copilot_chat.models.CL46T.providers).toEqual(["anthropic"])
-    expect(providerRemoved.roles.copilot_chat.models.DS32R.providers).toEqual(["openai_proxy"])
-    expect(modelRemoved.roles.copilot_chat.models.CL46T).toBeUndefined()
-    expect(modelRemoved.roles.copilot_chat.models.DS32R.providers).toEqual(["openai_proxy"])
-    expect(modelRemoved.roles.copilot_chat.active_model).toBe("DS32R")
+    expect(providerRemoved.roles.graph_agent_chat.models.CL46T.providers).toEqual(["anthropic"])
+    expect(providerRemoved.roles.graph_agent_chat.models.DS32R.providers).toEqual(["openai_proxy"])
+    expect(modelRemoved.roles.graph_agent_chat.models.CL46T).toBeUndefined()
+    expect(modelRemoved.roles.graph_agent_chat.models.DS32R.providers).toEqual(["openai_proxy"])
+    expect(modelRemoved.roles.graph_agent_chat.active_model).toBe("DS32R")
   })
 
   it("uses subdued provider card text and role editor icons", () => {
@@ -1679,7 +1784,7 @@ describe("LlmRolesTab controls", () => {
   it("adds named roles as empty drafts that can auto-save", () => {
     const next = appendRole(rolesData, "planner_role")
 
-    expect(Object.keys(next.roles)).toEqual(["copilot_chat", "planner_role"])
+    expect(Object.keys(next.roles)).toEqual(["graph_agent_chat", "planner_role"])
     expect(next.roles.planner_role).toEqual({
       model_fallback_enabled: true,
       active_model: "",
@@ -1717,14 +1822,14 @@ describe("LlmRolesTab controls", () => {
   it("renames role keys without changing role configuration", () => {
     const dataWithSingleModelRole: RolesData = {
       ...rolesData,
-      single_model_roles: ["copilot_chat"],
+      single_model_roles: ["graph_agent_chat"],
     }
 
-    const next = renameRole(dataWithSingleModelRole, "copilot_chat", "planner_role")
+    const next = renameRole(dataWithSingleModelRole, "graph_agent_chat", "planner_role")
 
     expect(Object.keys(next.roles)).toEqual(["planner_role"])
-    expect(next.roles.planner_role).toEqual(rolesData.roles.copilot_chat)
-    expect(next.roles.copilot_chat).toBeUndefined()
+    expect(next.roles.planner_role).toEqual(rolesData.roles.graph_agent_chat)
+    expect(next.roles.graph_agent_chat).toBeUndefined()
     expect(next.single_model_roles).toEqual(["planner_role"])
   })
 
@@ -1767,7 +1872,7 @@ describe("LlmRolesTab controls", () => {
           active_model: "",
           models: {},
         },
-        copilot_chat: rolesData.roles.copilot_chat,
+        graph_agent_chat: rolesData.roles.graph_agent_chat,
       },
     }
     const html = renderRolesHtml({ data: groupedData })
@@ -1776,12 +1881,9 @@ describe("LlmRolesTab controls", () => {
     expect(html).toContain('data-slot="catalog-accordion-trigger"')
     expect(html).toContain('data-role-category="graph-agent"')
     expect(html).toContain("Graph Agent Roles")
-    expect(html).toContain('data-role-category="copilot"')
-    expect(html).toContain("Copilot Roles")
-    expect(html.indexOf("Graph Agent Roles")).toBeLessThan(html.indexOf("Copilot Roles"))
-    expect(html.indexOf("catalog-accordion-state-icon")).toBeLessThan(html.indexOf("Graph Agent Roles"))
-    expect(html.indexOf("Graph Agent Roles")).toBeLessThan(html.indexOf("lucide-cog"))
-    expect(html).not.toContain("lucide-workflow")
+    expect(html).not.toContain('data-role-category="copilot"')
+    expect(html).not.toContain("Copilot Roles")
+    expect(html).toContain("lucide-cog")
   })
 
   it("uses role_kind instead of role name when grouping roles", () => {
@@ -1803,14 +1905,9 @@ describe("LlmRolesTab controls", () => {
       },
     }
     const html = renderRolesHtml({ data: groupedData })
-    const graphSectionStart = html.indexOf('data-role-category="graph-agent"')
-    const copilotSectionStart = html.indexOf('data-role-category="copilot"')
-    const graphSection = html.slice(graphSectionStart, copilotSectionStart)
-    const copilotSection = html.slice(copilotSectionStart)
 
-    expect(graphSection).toContain('data-role-name="copilot_planner"')
-    expect(graphSection).not.toContain('data-role-name="assistant"')
-    expect(copilotSection).toContain('data-role-name="assistant"')
+    expect(html).toContain('data-role-name="copilot_planner"')
+    expect(html).not.toContain('data-role-name="assistant"')
   })
 
   it("keeps empty role categories visible and uses default title typography", () => {
@@ -1830,10 +1927,10 @@ describe("LlmRolesTab controls", () => {
     const titleHtml = html.slice(titleIndex, titleEnd)
 
     expect(html).toContain('data-role-category="graph-agent"')
-    expect(html).toContain('data-role-category="copilot"')
-    expect(html).toContain("No Copilot roles configured.")
+    expect(html).not.toContain('data-role-category="copilot"')
+    expect(html).not.toContain("No Copilot roles configured.")
     expect(html).toContain("Add Graph Agent Role")
-    expect(html).toContain("Add Copilot Role")
+    expect(html).not.toContain("Add Copilot Role")
     expect(titleHtml).not.toContain("font-mono")
   })
 
@@ -1842,7 +1939,7 @@ describe("LlmRolesTab controls", () => {
 
     expect(html).toContain('data-role-title-icon="true"')
     expect(html).toContain('data-role-actions-trigger="true"')
-    expect(html).toContain('aria-label="More actions for copilot_chat"')
+    expect(html).toContain('aria-label="More actions for graph_agent_chat"')
     expect(html).not.toContain('data-role-edit-trigger="true"')
     expect(html).not.toContain(">Edit</button>")
   })
@@ -1850,12 +1947,12 @@ describe("LlmRolesTab controls", () => {
   it("uses a shadcn sonner confirmation toast before deleting a role", () => {
     const onDeleteRole = vi.fn()
 
-    requestRoleDeleteConfirmation("copilot_chat", onDeleteRole)
+    requestRoleDeleteConfirmation("graph_agent_chat", onDeleteRole)
 
     expect(toastMock).toHaveBeenCalledWith(
-      "Delete copilot_chat?",
+      "Delete graph_agent_chat?",
       expect.objectContaining({
-        description: "Remove copilot_chat and its model fallback chain.",
+        description: "Remove graph_agent_chat and its model fallback chain.",
         duration: Infinity,
         action: expect.objectContaining({ label: "Delete" }),
         cancel: expect.objectContaining({ label: "Cancel" }),
@@ -1870,22 +1967,22 @@ describe("LlmRolesTab controls", () => {
   it("wires the sonner role delete action to persisted role deletion", () => {
     const onDeleteRole = vi.fn()
 
-    requestRoleDeleteConfirmation("copilot_chat", onDeleteRole)
+    requestRoleDeleteConfirmation("graph_agent_chat", onDeleteRole)
     const options = toastMock.mock.calls.at(-1)?.[1] as {
       action?: { onClick?: () => void }
     }
 
     options.action?.onClick?.()
 
-    expect(onDeleteRole).toHaveBeenCalledWith("copilot_chat")
+    expect(onDeleteRole).toHaveBeenCalledWith("graph_agent_chat")
   })
 
   it("removes role entries from role maps and grouping metadata", () => {
     const dataWithMetadata: RolesData = {
       ...rolesData,
-      single_model_roles: ["copilot_chat"],
+      single_model_roles: ["graph_agent_chat"],
       peer_model_groups: {
-        default: ["copilot_chat", "planner"],
+        default: ["graph_agent_chat", "planner"],
       },
       roles: {
         ...rolesData.roles,
@@ -1897,20 +1994,20 @@ describe("LlmRolesTab controls", () => {
       },
     }
 
-    const next = removeRole(dataWithMetadata, "copilot_chat")
+    const next = removeRole(dataWithMetadata, "graph_agent_chat")
 
-    expect(next.roles.copilot_chat).toBeUndefined()
+    expect(next.roles.graph_agent_chat).toBeUndefined()
     expect(next.roles.planner).toBeTruthy()
     expect(next.single_model_roles).toEqual([])
     expect(next.peer_model_groups).toEqual({ default: ["planner"] })
   })
 
   it("does not show role name errors until submit and checks duplicates case-insensitively", () => {
-    expect(roleNameDisplayError("", ["copilot_chat"], "", false)).toBeNull()
-    expect(roleNameDisplayError("copilot_chat", ["copilot_chat"], "", false)).toBeNull()
-    expect(roleNameDisplayError("", ["copilot_chat"], "", true)).toBe("Role name is required.")
-    expect(roleNameDisplayError("copilot_chat", ["copilot_chat"], "", true)).toBe("Role name already exists.")
-    expect(roleNameDisplayError("Copilot_Chat", ["copilot_chat"], "", true)).toBe("Role name already exists.")
+    expect(roleNameDisplayError("", ["graph_agent_chat"], "", false)).toBeNull()
+    expect(roleNameDisplayError("graph_agent_chat", ["graph_agent_chat"], "", false)).toBeNull()
+    expect(roleNameDisplayError("", ["graph_agent_chat"], "", true)).toBe("Role name is required.")
+    expect(roleNameDisplayError("graph_agent_chat", ["graph_agent_chat"], "", true)).toBe("Role name already exists.")
+    expect(roleNameDisplayError("Graph_Agent_Chat", ["graph_agent_chat"], "", true)).toBe("Role name already exists.")
   })
 
   it("keeps role test actions in the header and model fallback in the compact settings form", () => {
@@ -1979,7 +2076,7 @@ describe("LlmRolesTab controls", () => {
     expect(renderedRoles.length).toBeGreaterThan(0)
     expect(renderedRoles.length).toBeLessThan(12)
     expect(html).toContain("Add Graph Agent Role")
-    expect(html).toContain("Add Copilot Role")
+    expect(html).not.toContain("Add Copilot Role")
   })
 
   it("shows readable model names instead of active model controls or model abbreviations", () => {
@@ -2056,8 +2153,8 @@ describe("LlmRolesTab controls", () => {
         },
       },
       roles: {
-        copilot_chat: {
-          ...rolesData.roles.copilot_chat,
+        graph_agent_chat: {
+          ...rolesData.roles.graph_agent_chat,
           models: {
             CL46T: { providers: ["anthropic", "gemini"], temperature: 0.2, max_tokens: 8192 },
           },
@@ -2065,7 +2162,7 @@ describe("LlmRolesTab controls", () => {
       },
     }
     const html = renderRolesHtml({ data: dataWithMismatchedProvider })
-    const roleCardStart = html.indexOf('data-role-name="copilot_chat"')
+    const roleCardStart = html.indexOf('data-role-name="graph_agent_chat"')
     const sidebarStart = html.indexOf("<aside", roleCardStart)
     const roleCardHtml = html.slice(roleCardStart, sidebarStart)
 
@@ -2088,11 +2185,11 @@ describe("LlmRolesTab controls", () => {
     }
     const next = appendAvailableModelToRole(
       rolesData,
-      "copilot_chat",
+      "graph_agent_chat",
       "anthropic/claude-opus-4.7",
       Object.fromEntries(customCredentials.providers.map((provider) => [provider.id, provider])),
     )
-    const modelCode = Object.keys(next.roles.copilot_chat.models)
+    const modelCode = Object.keys(next.roles.graph_agent_chat.models)
       .find((code) => next.models[code]?.name === "anthropic/claude-opus-4.7")
 
     expect(modelCode).toBeTruthy()
@@ -2104,7 +2201,7 @@ describe("LlmRolesTab controls", () => {
     expect(next.models[modelCode!].providers).toEqual({
       "custom-532dc361-de53-480e-864f-188d9271ef34": "anthropic/claude-opus-4.7",
     })
-    expect(next.roles.copilot_chat.models[modelCode!].providers).toEqual([
+    expect(next.roles.graph_agent_chat.models[modelCode!].providers).toEqual([
       "custom-532dc361-de53-480e-864f-188d9271ef34",
     ])
     expect(validateRolesDraft(next)).toBeNull()
@@ -2115,8 +2212,8 @@ describe("LlmRolesTab controls", () => {
       ...rolesData,
       roles: {
         ...rolesData.roles,
-        copilot_chat: {
-          ...rolesData.roles.copilot_chat,
+        graph_agent_chat: {
+          ...rolesData.roles.graph_agent_chat,
           models: {
             CL46T: { providers: ["missing-provider"], temperature: null, max_tokens: null },
           },
@@ -2125,7 +2222,7 @@ describe("LlmRolesTab controls", () => {
     }
 
     expect(validateRolesDraft(invalidData)).toBe(
-      "copilot_chat: Model CL46T references unknown provider missing-provider",
+      "graph_agent_chat: Model CL46T references unknown provider missing-provider",
     )
   })
 
@@ -2152,8 +2249,8 @@ describe("LlmRolesTab controls", () => {
         },
       },
       roles: {
-        copilot_chat: {
-          ...rolesData.roles.copilot_chat,
+        graph_agent_chat: {
+          ...rolesData.roles.graph_agent_chat,
           active_model: "anthropic/claude-opus-4.7",
           models: {
             "anthropic/claude-opus-4.7": { providers: [providerId], temperature: null, max_tokens: null },
@@ -2172,7 +2269,7 @@ describe("LlmRolesTab controls", () => {
       type: "anthropic_compatible",
       base_url: "https://example.test/v1",
     })
-    expect(repaired.roles.copilot_chat.models["anthropic/claude-opus-4.7"].providers).toEqual([providerId])
+    expect(repaired.roles.graph_agent_chat.models["anthropic/claude-opus-4.7"].providers).toEqual([providerId])
     expect(validateRolesDraft(repaired)).toBeNull()
   })
 
@@ -2233,7 +2330,6 @@ describe("LlmRolesTab controls", () => {
     })
 
     expect(html).toContain('data-role-route-status="blocked"')
-    expect(html).toContain('data-variant="destructive"')
     expect(html).not.toContain("border-red")
     expect(html).not.toContain("bg-red")
     expect(html).not.toContain("text-red")
@@ -2244,8 +2340,8 @@ describe("LlmRolesTab controls", () => {
       ...rolesData,
       roles: {
         ...rolesData.roles,
-        copilot_chat: {
-          ...rolesData.roles.copilot_chat,
+        graph_agent_chat: {
+          ...rolesData.roles.graph_agent_chat,
           intent: {
             provider_preference: "manual_order",
             thinking: "preferred",
@@ -2254,6 +2350,11 @@ describe("LlmRolesTab controls", () => {
               value: 8192,
               downgrade: "allow_with_warning",
             },
+            target_context_tokens: {
+              mode: "required_minimum",
+              value: 64000,
+              downgrade: "allow",
+            },
           },
         },
       },
@@ -2261,19 +2362,29 @@ describe("LlmRolesTab controls", () => {
     const html = renderRolesHtml({ data: dataWithIntent })
     const fieldsHtml = renderToStaticMarkup(
       <RoleSettingsFields
-        roleName="copilot_chat"
+        roleName="graph_agent_chat"
         modelFallbackEnabled={true}
         draft={{
           providerPreference: "manual_order",
-          thinking: "preferred",
-          outputTokens: "8192",
-          useMaximumTokens: true,
+          thinking: "required",
+          contextTokenMode: "required_minimum",
+          contextTokens: "64000",
+          outputTokenMode: "maximum_available",
+          outputTokens: "",
         }}
-        outputLimitSummary={{
-          knownCount: 2,
-          totalCount: 3,
-          min: 4096,
-          max: 16384,
+        tokenLimitSummary={{
+          context: {
+            knownCount: 2,
+            totalCount: 3,
+            min: 65536,
+            max: 200000,
+          },
+          output: {
+            knownCount: 2,
+            totalCount: 3,
+            min: 4096,
+            max: 16384,
+          },
         }}
         onModelFallbackChange={vi.fn()}
         onDraftChange={vi.fn()}
@@ -2294,60 +2405,85 @@ describe("LlmRolesTab controls", () => {
     expect(fieldsHtml).not.toContain("Manual order")
     expect(fieldsHtml).toContain("Model Fallback")
     expect(fieldsHtml).toContain("model_fallback_enabled")
-    expect(fieldsHtml).toContain("Thinking Preferred")
+    expect(fieldsHtml).toContain("Thinking")
+    expect(fieldsHtml).toContain("Preferred")
+    expect(fieldsHtml).toContain("Required")
     expect(fieldsHtml).toContain('data-slot="switch"')
+    expect(fieldsHtml).toContain('data-slot="radio-group"')
     expect(fieldsHtml).not.toContain("Try the next model group")
+    expect(fieldsHtml).toContain('data-role-context-settings="true"')
+    expect(fieldsHtml).toContain('data-role-output-settings="true"')
+    expect(fieldsHtml).toContain("Context Tokens")
+    expect(fieldsHtml).toContain("Output Tokens")
+    expect(fieldsHtml).toContain("Required Min")
+    expect(fieldsHtml).toContain("Use Max")
+    expect(fieldsHtml).toContain('value="64000"')
+    expect(fieldsHtml).toContain("Context route max token range: min 65,536 / max 200,000. 1 route cap unavailable.")
+    expect(fieldsHtml).toContain("Output route max token range: min 4,096 / max 16,384. 1 route cap unavailable.")
     expect(fieldsHtml).not.toContain("Require routes to prove")
-    expect(fieldsHtml).toContain("Output Token Target")
-    expect(fieldsHtml).toContain("Use max")
-    expect(fieldsHtml).toContain('aria-label="Use maximum output tokens for copilot_chat"')
-    expect(fieldsHtml).toContain('value="8192"')
-    expect(fieldsHtml).toContain("disabled")
-    expect(fieldsHtml).toContain("Route max token range: min 4,096 / max 16,384. 1 route cap unavailable.")
     expect(fieldsHtml).not.toContain("If Target Exceeds Route Cap")
     expect(fieldsHtml).not.toContain("Use route max and mark Limited")
-    expect(fieldsHtml).not.toContain('data-slot="select-trigger"')
+    expect(fieldsHtml).toContain('data-slot="select-trigger"')
     expect(fieldsHtml).not.toContain("Temperature")
     expect(fieldsHtml).not.toContain("Max Tokens")
-    expect(fieldsHtml).not.toContain("Runtime default")
   })
 
-  it("saves the Thinking switch as a preferred role intent", () => {
+  it("saves Thinking and context/output token modes as role intent", () => {
     expect(roleIntentFromSettingsDraft({
       providerPreference: "manual_order",
-      thinking: "preferred",
+      thinking: "required",
+      contextTokenMode: "required_minimum",
+      contextTokens: "64000",
+      outputTokenMode: "maximum_available",
       outputTokens: "",
-      useMaximumTokens: false,
     })).toMatchObject({
       provider_preference: "manual_order",
-      thinking: "preferred",
-      target_output_tokens: null,
+      thinking: "required",
+      target_context_tokens: {
+        mode: "required_minimum",
+        value: 64000,
+        downgrade: "allow",
+      },
+      target_output_tokens: {
+        mode: "maximum_available",
+      },
     })
   })
 
   it("does not tell users to run Role Test when route max token caps are unavailable", () => {
     const fieldsHtml = renderToStaticMarkup(
       <RoleSettingsFields
-        roleName="copilot_chat"
+        roleName="graph_agent_chat"
         modelFallbackEnabled={true}
         draft={{
           providerPreference: "manual_order",
           thinking: "required",
+          contextTokenMode: "default",
+          contextTokens: "",
+          outputTokenMode: "target",
           outputTokens: "",
-          useMaximumTokens: false,
         }}
-        outputLimitSummary={{
-          knownCount: 0,
-          totalCount: 2,
-          min: null,
-          max: null,
+        tokenLimitSummary={{
+          context: {
+            knownCount: 0,
+            totalCount: 2,
+            min: null,
+            max: null,
+          },
+          output: {
+            knownCount: 0,
+            totalCount: 2,
+            min: null,
+            max: null,
+          },
         }}
         onModelFallbackChange={vi.fn()}
         onDraftChange={vi.fn()}
       />,
     )
 
-    expect(fieldsHtml).toContain("Selected route max token caps are unavailable.")
+    expect(fieldsHtml).toContain("Context route max token caps are unavailable.")
+    expect(fieldsHtml).toContain("Output route max token caps are unavailable.")
     expect(fieldsHtml).not.toContain("Test first")
   })
 })

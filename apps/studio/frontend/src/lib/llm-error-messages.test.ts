@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import i18n from "@/i18n"
 import {
   composeRequestErrorMessage,
   composeTestErrorMessage,
@@ -6,6 +7,20 @@ import {
   translateHttpStatus,
   translateTestStatus,
 } from "./llm-error-messages"
+
+describe("i18n bootstrap", () => {
+  it("defaults to English resources and switches to Simplified Chinese at runtime", async () => {
+    expect(i18n.isInitialized).toBe(true)
+    expect(i18n.resolvedLanguage).toBe("en")
+    expect(i18n.t("settings:tabs.general")).toBe("General")
+
+    await i18n.changeLanguage("zh-CN")
+    expect(i18n.t("settings:tabs.general")).toBe("通用")
+
+    await i18n.changeLanguage("en")
+    expect(i18n.t("settings:tabs.general")).toBe("General")
+  })
+})
 
 describe("translateErrorCode", () => {
   it("returns empty string for falsy input", () => {
@@ -35,6 +50,16 @@ describe("translateErrorCode", () => {
   it("falls back to a verbatim quote of unknown codes so operators can grep them", () => {
     expect(translateErrorCode("MYSTERIOUS_FAILURE")).toBe("Provider returned error code: MYSTERIOUS_FAILURE")
   })
+
+  it("uses the active locale for known provider error codes", async () => {
+    await i18n.changeLanguage("zh-CN")
+
+    expect(translateErrorCode("invalid_api_key")).toContain("API key 无效")
+    expect(translateErrorCode("MYSTERIOUS_FAILURE")).toContain("MYSTERIOUS_FAILURE")
+
+    await i18n.changeLanguage("en")
+    expect(translateErrorCode("invalid_api_key")).toContain("API key is invalid")
+  })
 })
 
 describe("translateHttpStatus", () => {
@@ -49,15 +74,28 @@ describe("translateHttpStatus", () => {
 })
 
 describe("composeRequestErrorMessage", () => {
-  it("appends a human-readable explanation to raw HTTP errors", () => {
+  it("combines a human-readable status explanation with backend detail", () => {
     const error = {
       message: "Request failed with status code 404",
       response: { status: 404, data: { detail: "Unknown provider: openai-official" } },
     }
 
     expect(composeRequestErrorMessage(error)).toBe(
-      "Request failed with status code 404 - The resource or endpoint could not be found. (Unknown provider: openai-official)",
+      "The resource or endpoint could not be found. (Unknown provider: openai-official)",
     )
+  })
+
+  it("does not expose Axios request wrappers as the only user-facing explanation", () => {
+    const error = {
+      message: "Request failed with status code 422",
+      response: { status: 422, data: { detail: "Unknown LLM role: copilot_chat" } },
+    }
+
+    const message = composeRequestErrorMessage(error, "Provider test failed")
+
+    expect(message).toContain("The request does not match the backend schema.")
+    expect(message).toContain("Unknown LLM role: copilot_chat")
+    expect(message).not.toContain("Request failed with status code 422")
   })
 })
 

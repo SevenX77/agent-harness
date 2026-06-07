@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+FALLBACK_EVENT_CODE = "[F-v3-gateway-llm-fallback]"
+
 
 def test_studio_queue_callback_serializes_gateway_fallback_event() -> None:
     from app.services.run_manager import _queue_event_subscriber
@@ -21,7 +23,6 @@ def test_studio_queue_callback_serializes_gateway_fallback_event() -> None:
             from_provider="primary:route",
             to_provider="fallback:route",
             reason="RuntimeError: probe failed",
-            code="[F-v3-gateway-all-providers-failed]",
             context={
                 "role_name": "graph_agent",
                 "fallback_decision": "fallback_allowed",
@@ -38,7 +39,7 @@ def test_studio_queue_callback_serializes_gateway_fallback_event() -> None:
                 "from_provider": "primary:route",
                 "to_provider": "fallback:route",
                 "reason": "RuntimeError: probe failed",
-                "code": "[F-v3-gateway-all-providers-failed]",
+                "code": FALLBACK_EVENT_CODE,
                 "context": {
                     "role_name": "graph_agent",
                     "fallback_decision": "fallback_allowed",

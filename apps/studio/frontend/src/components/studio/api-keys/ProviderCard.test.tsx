@@ -134,6 +134,25 @@ describe("ProviderCard test status badge", () => {
     expect(html).toContain("animate-spin")
   })
 
+  it("renders Parameters Reachable badge for unverified_manual provider state", () => {
+    const html = renderCardHtml({ persisted: makePersisted({ last_test_status: "unverified_manual" }) })
+
+    expect(html).toContain("Parameters Reachable")
+    expect(html).not.toContain("Not configured")
+  })
+
+  it("renders checkmarks next to inputs when provider state is unverified_manual", () => {
+    const html = renderCardHtml({
+      persisted: makePersisted({
+        last_test_status: "unverified_manual",
+        available_models: [{ id: "model-1" }],
+      })
+    })
+
+    expect(html).toContain('aria-label="API key accepted by the model-list endpoint"')
+  })
+
+
   it("renders Connected badge through semantic success tokens", () => {
     const html = renderCardHtml({ persisted: makePersisted({ last_test_status: "ok" }) })
     const connectedIndex = html.indexOf("Connected")
@@ -730,7 +749,7 @@ describe("ProviderCard provider capabilities", () => {
     expect(tag).not.toContain("Verified route")
   })
 
-  it("renders historically probe-verified routes as blue (probe-verified variant) if not active in credentials", () => {
+  it("renders historical_ready routes as blue without using probe-verified as a display status", () => {
     const html = renderToStaticMarkup(
       <ProviderCard
         draft={makeDraft({ id: "openai-official", name: "OpenAI Official" })}
@@ -739,9 +758,9 @@ describe("ProviderCard provider capabilities", () => {
           name: "OpenAI Official",
           available_models: [
             {
-              id: "gpt-5-probe-verified",
-              route_id: "openai-official:gpt-5-probe-verified",
-              status: "probe-verified",
+              id: "gpt-5-historical",
+              route_id: "openai-official:gpt-5-historical",
+              status: "historical_ready",
               capabilities: { model_type: "language_reasoning", model_type_label: "Language/reasoning model" },
             },
           ],
@@ -754,9 +773,10 @@ describe("ProviderCard provider capabilities", () => {
       />,
     )
 
-    const tag = routeTagHtml(html, "gpt-5-probe-verified")
+    const tag = routeTagHtml(html, "gpt-5-historical")
     expect(tag).toContain('data-variant="probe-verified"')
-    expect(tag).toContain('data-route-status="probe-verified"')
+    expect(tag).toContain('data-route-status="historical_ready"')
+    expect(tag).not.toContain('data-route-status="probe-verified"')
   })
 
   it("describes verified route profile capability types instead of profile counts", () => {

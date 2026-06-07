@@ -41,11 +41,13 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.models.llm_config import (
     CapabilityValue,
+    EndpointCandidate,
     EvidenceRecord,
     FieldSource,
     LLMCredentialsFile,
     ModelBundle,
     ModelProfile,
+    ProbeResult,
     ProviderEndpoint,
     ProviderImportDraft,
     ProviderRoute,
@@ -128,6 +130,7 @@ router = APIRouter(prefix="/api/llm", tags=["llm"])
 logger = logging.getLogger(__name__)
 OFFICIAL_PROVIDER_TEST_CONCURRENCY = 4
 OFFICIAL_PROVIDER_TEST_BATCH_SIZE = 8
+TRANSIENT_PROBE_STATUSES = {"timeout", "rate_limited", "quota_exceeded", "network_error"}
 NO_VERIFIED_ROUTE_PROFILE_MESSAGE = "No verified language route profile."
 NO_WORKING_OFFICIAL_LANGUAGE_METHOD_MESSAGE = (
     "No official language call method passed for this model."
@@ -141,6 +144,23 @@ _THINKING_CAPABILITY_KEYS = (
     "reasoning",
     "supports_thinking",
 )
+_TOOL_CAPABILITY_KEYS = (
+    "tools",
+    "tool",
+    "tool_calling",
+    "supports_tools",
+    "tool_protocol",
+    "function_calling",
+    "functions",
+)
+_STRUCTURED_OUTPUT_CAPABILITY_KEYS = (
+    "structured_output",
+    "structured_output_protocol",
+    "json_schema",
+    "response_format_json_schema",
+    "supports_structured_output",
+)
+_CAPABILITY_METADATA_SUFFIXES = ("_source", "_source_urls")
 
 
 @dataclass(frozen=True)
@@ -178,7 +198,15 @@ class EndpointTestCompactModelInfo(BaseModel):
 
     id: str
     route_id: str | None = None
-    status: Literal["verified", "unverified_manual", "disabled", "failed", "testing", "probe-verified"] | None = None
+    status: Literal[
+        "ready",
+        "historical_ready",
+        "untested",
+        "failed",
+        "cooling_down",
+        "off",
+        "testing",
+    ] | None = None
     verified_profile_count: int | None = None
     last_probe_message: str | None = None
     capabilities: dict[str, object] = Field(default_factory=dict)
@@ -422,12 +450,12 @@ async def share_catalog() -> dict[str, Any]:
             for rec in library.evidence_records
             if rec.evidence_type == "probe" and rec.trust_state == "probe-verified"
         ]
-        
+
         credentials = load_credentials()
         verified_routes_count = sum(
             1 for r in credentials.provider_routes.values() if r.status == "verified"
         )
-        
+
         return {
             "status": "success",
             "message": "Local verified catalog evidence exported successfully.",
@@ -870,10 +898,136 @@ async def get_import_draft(draft_id: str) -> ProviderImportDraft:
 
 @router.post("/import-drafts/{draft_id}/probe", response_model=ProviderImportDraft)
 async def probe_import_draft(draft_id: str) -> ProviderImportDraft:
-    """Mark a draft as probed; real agent probing is handled by a later worker."""
+    """Probe every route candidate in a draft and persist advisory evidence."""
     draft = await get_import_draft(draft_id)
-    updated = draft.model_copy(update={"status": "probed", "updated_at": _now_iso()})
+    probing = draft.model_copy(update={"status": "probing", "updated_at": _now_iso()})
+    create_draft(probing)
+    probe_results = dict(probing.probe_results)
+    for route_id, route_candidate in probing.route_candidates.items():
+        probe_results[route_id] = await _probe_import_draft_route(
+            probing,
+            route_id,
+            route_candidate,
+        )
+    updated = probing.model_copy(
+        update={
+            "status": "probed",
+            "updated_at": _now_iso(),
+            "probe_results": probe_results,
+        }
+    )
     return create_draft(updated)
+
+
+async def _probe_import_draft_route(
+    draft: ProviderImportDraft,
+    route_id: str,
+    route_candidate: RouteCandidate,
+) -> ProbeResult:
+    endpoint_candidate = draft.endpoint_candidates.get(route_candidate.endpoint_id)
+    if endpoint_candidate is None:
+        return _failed_import_probe_result(
+            "missing_endpoint",
+            f"Draft route references unknown endpoint: {route_candidate.endpoint_id}",
+        )
+    try:
+        endpoint = _endpoint_from_import_candidate(endpoint_candidate)
+        route = _route_from_import_candidate(route_id, route_candidate)
+    except (ValidationError, ValueError) as exc:
+        return _failed_import_probe_result("invalid_candidate", str(exc))
+
+    if not endpoint.api_key or not endpoint.api_key.get_secret_value():
+        result = ModelProbeResult(
+            model_id=route.provider_model_id,
+            status="invalid_key",
+            message="API key is empty.",
+        )
+    else:
+        try:
+            result = await _probe_model(
+                _endpoint_probe_backend(endpoint),
+                endpoint.api_key.get_secret_value(),
+                _endpoint_probe_base_url(endpoint),
+                route.provider_model_id,
+            )
+        except Exception as exc:
+            result = ModelProbeResult(
+                model_id=route.provider_model_id,
+                status="error",
+                message=str(exc),
+            )
+
+    if result.status in TRANSIENT_PROBE_STATUSES:
+        _open_route_probe_circuit(
+            route_id=route.route_id,
+            result=result,
+            ttl_seconds=load_credentials().runtime_policy.provider_down_ttl_seconds,
+        )
+    _append_model_probe_evidence(
+        endpoint,
+        result,
+        route_id=route.route_id,
+        failure_reason=result.message,
+    )
+    return _import_probe_result_from_model_probe(endpoint, result)
+
+
+def _endpoint_from_import_candidate(endpoint_candidate: EndpointCandidate) -> ProviderEndpoint:
+    return ProviderEndpoint.model_validate(
+        endpoint_candidate.model_dump(mode="python", exclude={"field_sources"})
+    )
+
+
+def _route_from_import_candidate(route_id: str, candidate: RouteCandidate) -> ProviderRoute:
+    return ProviderRoute(
+        route_id=route_id,
+        endpoint_id=candidate.endpoint_id,
+        route_slug=candidate.route_slug,
+        provider_model_id=candidate.provider_model_id,
+        canonical_id=candidate.canonical_id,
+        display_name=candidate.display_name,
+        status="unverified_manual",
+        capabilities=candidate.capabilities,
+        metadata=candidate.metadata,
+    )
+
+
+def _failed_import_probe_result(code: str, message: str) -> ProbeResult:
+    return ProbeResult(
+        target_type="route",
+        status="failed",
+        observed_at=_now_iso(),
+        error={"code": code, "message": message},
+    )
+
+
+def _import_probe_result_from_model_probe(
+    endpoint: ProviderEndpoint,
+    result: ModelProbeResult,
+) -> ProbeResult:
+    verified = result.status == "ok"
+    capabilities = (
+        _third_party_route_capability_values(
+            endpoint,
+            result.model_id,
+            _successful_generation_probe_capabilities(),
+            source="probed_verified",
+        )
+        if verified
+        else {}
+    )
+    return ProbeResult(
+        target_type="route",
+        status="success" if verified else "failed",
+        observed_at=_now_iso(),
+        capabilities=capabilities,
+        error=None
+        if verified
+        else {
+            "code": result.status,
+            "message": result.message or _model_probe_failure_message(result),
+        },
+    )
 
 
 @router.post("/import-drafts/{draft_id}/apply", response_model=ProviderImportDraft)
@@ -902,15 +1056,46 @@ async def get_llm_roles() -> RolesData:
     return _materialize_roles_for_response(_load_roles_or_empty())
 
 
+def _is_copilot_role(name: str) -> bool:
+    return name.startswith("copilot_") or name == "sonnet-4-7-third-party"
+
+
 @router.put("/roles", response_model=RolesData)
 async def put_llm_roles(request: RolesData) -> RolesData:
-    """Upsert submitted roles; absent roles are retained."""
+    """Replace active roles, model bundles and profiles with the submitted state."""
     current = _load_roles_or_empty()
+
+    # Identify what kinds of roles are in the incoming request
+    has_incoming_copilot = any(_is_copilot_role(name) for name in request.roles)
+    has_incoming_graph_agent = any(not _is_copilot_role(name) for name in request.roles)
+
+    final_roles = {}
+
+    if has_incoming_graph_agent and not has_incoming_copilot:
+        # LLM Roles page is saving: overwrite Graph Agent roles, keep current Copilot roles!
+        for name, role in request.roles.items():
+            if not _is_copilot_role(name):
+                final_roles[name] = role
+        for name, role in current.roles.items():
+            if _is_copilot_role(name):
+                final_roles[name] = role
+    elif has_incoming_copilot and not has_incoming_graph_agent:
+        # Copilot page is saving: overwrite Copilot roles, keep current Graph Agent roles!
+        for name, role in request.roles.items():
+            if _is_copilot_role(name):
+                final_roles[name] = role
+        for name, role in current.roles.items():
+            if not _is_copilot_role(name):
+                final_roles[name] = role
+    else:
+        # If it's a mix or empty, use request.roles as is
+        final_roles = request.roles
+
     merged = current.model_copy(
         update={
-            "roles": {**current.roles, **request.roles},
-            "model_profiles": {**current.model_profiles, **request.model_profiles},
-            "model_bundles": {**current.model_bundles, **request.model_bundles},
+            "roles": final_roles,
+            "model_profiles": request.model_profiles,
+            "model_bundles": request.model_bundles,
         }
     )
     credentials = load_credentials()
@@ -919,12 +1104,13 @@ async def put_llm_roles(request: RolesData) -> RolesData:
     return _materialize_roles_for_response(saved, credentials)
 
 
+
 @router.get("/roles/{role_name}", response_model=RoleEntry)
 async def get_llm_role(role_name: str) -> RoleEntry:
     """Return one role."""
     data = _load_roles_or_empty()
     try:
-        return _materialize_role_for_response(get_role(data, role_name))
+        return _materialize_role_for_response(get_role(data, role_name), role_name=role_name)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"Unknown LLM role: {role_name}") from exc
 
@@ -945,7 +1131,7 @@ async def put_llm_role(role_name: str, request: RoleEntry) -> RoleEntry:
     saved = _save_roles_with_active_routes(
         data.model_copy(update={"schema_version": schema_version, "roles": roles})
     )
-    return _materialize_role_for_response(saved.roles[role_name], credentials)
+    return _materialize_role_for_response(saved.roles[role_name], credentials, role_name=role_name)
 
 
 @router.delete("/roles/{role_name}", response_model=RolesData)
@@ -970,7 +1156,7 @@ async def test_llm_role(role_name: str, _payload: dict[str, Any] | None = None) 
     if role is None:
         raise HTTPException(status_code=404, detail=f"Unknown LLM role: {role_name}")
     credentials = load_credentials()
-    role = _materialize_role_for_response(role, credentials)
+    role = _materialize_role_for_response(role, credentials, role_name=role_name)
     return await _run_role_test_targets(role_name, _role_test_targets(role, credentials))
 
 
@@ -982,7 +1168,7 @@ async def start_role_test_job(role_name: str) -> RoleTestJobResponse:
     if role is None:
         raise HTTPException(status_code=404, detail=f"Unknown LLM role: {role_name}")
     credentials = load_credentials()
-    role = _materialize_role_for_response(role, credentials)
+    role = _materialize_role_for_response(role, credentials, role_name=role_name)
     targets = _role_test_targets(role, credentials)
     job_id = str(uuid.uuid4())
     job = RoleTestJobResponse(
@@ -1054,11 +1240,13 @@ async def _run_role_test_targets(
     async def run_target(target: RoleTestTarget) -> dict[str, Any]:
         if on_provider_status is not None:
             await on_provider_status(target, "testing", None)
+        is_copilot = _is_copilot_role(role_name)
         provider_result = await _role_test_provider_result(
             target.entry,
             target.report_entry,
             target.route,
             target.endpoint,
+            is_copilot=is_copilot,
         )
         if on_provider_status is not None:
             await on_provider_status(
@@ -1443,6 +1631,8 @@ def _normalize_gemini_catalog_entry_for_registry_response(entry: object) -> obje
 
 
 def _model_groups_response(credentials: LLMCredentialsFile) -> list[dict[str, Any]]:
+    from app.services.llm_import_drafts import load_evidence_library
+    evidence_records = load_evidence_library().evidence_records
     routes_by_identity: dict[str, list[ProviderRoute]] = {}
     for route in credentials.provider_routes.values():
         if not _include_route_in_model_groups(route, credentials):
@@ -1456,6 +1646,7 @@ def _model_groups_response(credentials: LLMCredentialsFile) -> list[dict[str, An
             _representative_canonical_id(routes, credentials),
             routes,
             credentials,
+            evidence_records=evidence_records,
         )
         for routes in routes_by_identity.values()
     ]
@@ -1573,15 +1764,16 @@ def _model_group_response(
     canonical_id: str,
     routes: list[ProviderRoute],
     credentials: LLMCredentialsFile,
+    evidence_records: list[Any] | None = None,
 ) -> dict[str, Any]:
     provider_models = [
         option
         for route in sorted(routes, key=lambda item: item.route_id)
-        if (option := _provider_model_option(route, credentials)) is not None
+        if (option := _provider_model_option(route, credentials, evidence_records=evidence_records)) is not None
     ]
     status_summary = {
         state: 0
-        for state in ["ready", "untested", "cooling_down", "needs_setup", "off"]
+        for state in ["ready", "historical_ready", "untested", "failed", "cooling_down", "off"]
     }
     for option in provider_models:
         status_summary[option["ui_state"]] += 1
@@ -1670,6 +1862,7 @@ def _section_label_from_display_name(display_name: str) -> str:
 def _provider_model_option(
     route: ProviderRoute,
     credentials: LLMCredentialsFile,
+    evidence_records: list[Any] | None = None,
 ) -> dict[str, Any] | None:
     endpoint = credentials.provider_endpoints.get(route.endpoint_id)
     if endpoint is None:
@@ -1680,11 +1873,17 @@ def _provider_model_option(
         rate_limit_bucket=endpoint.rate_limit_bucket or endpoint.endpoint_id,
         now=datetime.now(UTC),
     )
+    if evidence_records is None:
+        from app.services.llm_import_drafts import load_evidence_library
+        evidence_records = load_evidence_library().evidence_records
+    from app.services.llm_state_projection import has_historical_probe_verified
+    draft_history = has_historical_probe_verified(evidence_records, route.route_id)
     projection = project_provider_model_state(
         endpoint=endpoint,
         route=route,
         circuits=circuits,
         now=datetime.now(UTC),
+        draft_history=draft_history,
     )
     capabilities = _provider_route_ui_capabilities(route, endpoint)
     model_type = _capability_string(capabilities, "model_type")
@@ -1731,9 +1930,21 @@ def _provider_route_ui_capabilities(
 
 
 def _capability_state(capabilities: dict[str, CapabilityValue]) -> str:
-    if not capabilities:
+    fact_capabilities = [
+        capability
+        for key, capability in capabilities.items()
+        if not key.endswith(_CAPABILITY_METADATA_SUFFIXES)
+    ]
+    if not fact_capabilities:
         return "unknown"
-    return "known"
+    probed_count = sum(
+        1 for capability in fact_capabilities if capability.source == "probed_verified"
+    )
+    if probed_count == 0:
+        return "callable_only"
+    if probed_count == len(fact_capabilities):
+        return "known"
+    return "partial"
 
 
 def _capability_summary(provider_models: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1741,8 +1952,14 @@ def _capability_summary(provider_models: list[dict[str, Any]]) -> dict[str, Any]
     return {
         "capability_known_count": known_count,
         "thinking": _capability_summary_state(provider_models, _THINKING_CAPABILITY_KEYS),
-        "tools": "unknown",
-        "structured_output": "unknown",
+        "tools": _capability_summary_known_value_state(
+            provider_models,
+            _TOOL_CAPABILITY_KEYS,
+        ),
+        "structured_output": _capability_summary_known_value_state(
+            provider_models,
+            _STRUCTURED_OUTPUT_CAPABILITY_KEYS,
+        ),
         "max_context_tokens": None,
         "max_output_tokens": None,
     }
@@ -1767,6 +1984,22 @@ def _capability_summary_state(
     if any(known_values):
         return "mixed"
     return "mixed" if unknown_count else "unsupported"
+
+
+def _capability_summary_known_value_state(
+    provider_models: list[dict[str, Any]],
+    capability_keys: tuple[str, ...],
+) -> str:
+    known_values: list[bool] = []
+    for option in provider_models:
+        supported = _capability_supported(option["capabilities"], capability_keys)
+        if supported is not None:
+            known_values.append(supported)
+    if not known_values:
+        return "unknown"
+    if any(known_values) and not all(known_values):
+        return "mixed"
+    return "supported" if any(known_values) else "unsupported"
 
 
 def _capability_supported(
@@ -1821,20 +2054,11 @@ async def _force_probe_route(
         save_credentials(credentials)
         _health_store().clear_circuit(scope="route", scope_id=route.route_id)
         return updated
-    if result.status in {"timeout", "rate_limited", "quota_exceeded", "network_error"}:
-        ttl_seconds = credentials.runtime_policy.provider_down_ttl_seconds
-        now = datetime.now(UTC)
-        _health_store().open_circuit(
-            RuntimeCircuit(
-                scope="route",
-                scope_id=route.route_id,
-                opened_at=now,
-                retry_at=now + timedelta(seconds=ttl_seconds),
-                ttl_seconds=ttl_seconds,
-                reason_code=result.status,
-                failure_count=1,
-                message=result.message,
-            )
+    if result.status in TRANSIENT_PROBE_STATUSES:
+        _open_route_probe_circuit(
+            route_id=route.route_id,
+            result=result,
+            ttl_seconds=credentials.runtime_policy.provider_down_ttl_seconds,
         )
         return route
     updated = route.model_copy(
@@ -1852,11 +2076,33 @@ async def _force_probe_route(
     return updated
 
 
+def _open_route_probe_circuit(
+    *,
+    route_id: str,
+    result: ModelProbeResult,
+    ttl_seconds: int,
+) -> None:
+    now = datetime.now(UTC)
+    _health_store().open_circuit(
+        RuntimeCircuit(
+            scope="route",
+            scope_id=route_id,
+            opened_at=now,
+            retry_at=now + timedelta(seconds=ttl_seconds),
+            ttl_seconds=ttl_seconds,
+            reason_code=result.status,
+            failure_count=1,
+            message=result.message,
+        )
+    )
+
+
 async def _role_test_provider_result(
     entry: RoleRouteEntry | None,
     report_entry: dict[str, Any],
     route: ProviderRoute,
     endpoint: ProviderEndpoint,
+    is_copilot: bool = False,
 ) -> dict[str, Any]:
     projection = _provider_model_projection(route, endpoint)
     provider_ui_state = projection.ui_state
@@ -1870,31 +2116,53 @@ async def _role_test_provider_result(
         admission_decision = "block"
         status = "blocked"
     elif admission_decision == "admit" and endpoint.api_key is not None:
-        route, profile_probe_result = await _ensure_official_role_test_verified_profile(
-            route,
-            endpoint,
-        )
-        if profile_probe_result is not None and not profile_probe_result.profiles:
-            result = ModelProbeResult(
-                model_id=route.provider_model_id,
-                status="error",
-                message=_official_role_test_profile_probe_failure_message(
-                    profile_probe_result
-                ),
-            )
+        if is_copilot:
+            result = await _probe_copilot_sdk_tool_call(endpoint, route)
+            status = "ok" if result.status == "ok" else "failed"
+            if status == "ok":
+                provider_ui_state = "ready"
+                _persist_copilot_sdk_probe_success(route, endpoint, result)
+            message = result.message
         else:
-            projection = _provider_model_projection(route, endpoint)
-            provider_ui_state = projection.ui_state
-            result = await _probe_role_route(
+            route, profile_probe_result = await _ensure_official_role_test_verified_profile(
                 route,
                 endpoint,
-                runtime_settings,
-                resolved_settings,
             )
-        status = "ok" if result.status == "ok" else "failed"
-        if status == "ok":
-            provider_ui_state = "ready"
-        message = result.message
+            if profile_probe_result is not None and not profile_probe_result.profiles:
+                result = ModelProbeResult(
+                    model_id=route.provider_model_id,
+                    status="error",
+                    message=_official_role_test_profile_probe_failure_message(
+                        profile_probe_result
+                    ),
+                )
+            else:
+                projection = _provider_model_projection(route, endpoint)
+                provider_ui_state = projection.ui_state
+                result = await _probe_role_route(
+                    route,
+                    endpoint,
+                    runtime_settings,
+                    resolved_settings,
+                )
+            status = "ok" if result.status == "ok" else "failed"
+            if status == "ok":
+                provider_ui_state = "ready"
+                if endpoint.provider_kind != "official":
+                    route = _persist_third_party_role_test_success(
+                        route,
+                        endpoint,
+                        result,
+                    )
+            elif endpoint.provider_kind != "official":
+                route = _persist_third_party_role_test_failure(
+                    route,
+                    endpoint,
+                    result,
+                )
+                projection = _provider_model_projection(route, endpoint)
+                provider_ui_state = projection.ui_state
+            message = result.message
     return {
         "route_id": route.route_id,
         "provider_label": endpoint.display_name,
@@ -2036,6 +2304,298 @@ def _persist_official_role_test_profile_failure(
     return updated_route
 
 
+def _persist_third_party_role_test_success(
+    route: ProviderRoute,
+    endpoint: ProviderEndpoint,
+    result: ModelProbeResult,
+) -> ProviderRoute:
+    credentials = load_credentials()
+    latest_endpoint = credentials.provider_endpoints.get(endpoint.endpoint_id)
+    if latest_endpoint is None or route.route_id not in credentials.provider_routes:
+        return route
+
+    probe_attempts = [
+        {
+            "status": result.status,
+            "latency_ms": result.latency_ms,
+            "message": result.message,
+        }
+    ]
+    raw_capabilities = _successful_generation_probe_capabilities()
+
+    credentials, route_ids_by_model = _upsert_discovered_routes(
+        credentials,
+        endpoint=latest_endpoint,
+        model_ids=(route.provider_model_id,),
+        verified=True,
+        probe_attempts_by_model={route.provider_model_id: probe_attempts},
+        raw_capabilities_by_model={route.provider_model_id: raw_capabilities},
+    )
+
+    updated_route_id = route_ids_by_model.get(route.provider_model_id, route.route_id)
+    updated_route = credentials.provider_routes.get(updated_route_id)
+    if updated_route is None:
+        return route
+
+    cleaned_metadata = {
+        key: value
+        for key, value in updated_route.metadata.items()
+        if key not in {"reason_code", "last_probe_message"}
+    }
+    cleaned_metadata["probe_attempts"] = probe_attempts
+    updated_route = updated_route.model_copy(update={"metadata": cleaned_metadata})
+    credentials.provider_routes[updated_route.route_id] = updated_route
+
+    latest_endpoint = latest_endpoint.model_copy(
+        update={
+            "status": "verified",
+            "last_test_at": _now_iso(),
+            "last_test_message": f"Connected. Model seen: {route.provider_model_id}.",
+        }
+    )
+    credentials.provider_endpoints[latest_endpoint.endpoint_id] = latest_endpoint
+
+    save_credentials(credentials)
+
+    _append_model_probe_evidence(
+        latest_endpoint,
+        result,
+        route_id=updated_route.route_id,
+    )
+
+    return updated_route
+
+
+def _persist_third_party_role_test_failure(
+    route: ProviderRoute,
+    endpoint: ProviderEndpoint,
+    result: ModelProbeResult,
+) -> ProviderRoute:
+    credentials = load_credentials()
+    latest_endpoint = credentials.provider_endpoints.get(endpoint.endpoint_id)
+    latest_route = credentials.provider_routes.get(route.route_id)
+    if latest_endpoint is None or latest_route is None:
+        return route
+
+    probe_attempts = [
+        {
+            "status": result.status,
+            "latency_ms": result.latency_ms,
+            "message": result.message,
+        }
+    ]
+    if result.status in {"timeout", "rate_limited", "quota_exceeded", "network_error"}:
+        ttl_seconds = credentials.runtime_policy.provider_down_ttl_seconds
+        now = datetime.now(UTC)
+        _health_store().open_circuit(
+            RuntimeCircuit(
+                scope="route",
+                scope_id=latest_route.route_id,
+                opened_at=now,
+                retry_at=now + timedelta(seconds=ttl_seconds),
+                ttl_seconds=ttl_seconds,
+                reason_code=result.status,
+                failure_count=1,
+                message=result.message,
+            )
+        )
+        updated_route = latest_route.model_copy(
+            update={
+                "metadata": {
+                    **latest_route.metadata,
+                    "probe_attempts": probe_attempts,
+                }
+            }
+        )
+    else:
+        updated_route = latest_route.model_copy(
+            update={
+                "status": "failed",
+                "metadata": {
+                    **latest_route.metadata,
+                    "reason_code": result.status,
+                    "last_probe_message": result.message,
+                    "probe_attempts": probe_attempts,
+                },
+            }
+        )
+
+    credentials.provider_routes[updated_route.route_id] = updated_route
+    save_credentials(credentials)
+    _append_model_probe_evidence(
+        latest_endpoint,
+        result,
+        route_id=updated_route.route_id,
+    )
+    return updated_route
+
+
+async def _probe_copilot_sdk_tool_call(
+    endpoint: ProviderEndpoint,
+    route: ProviderRoute,
+) -> ModelProbeResult:
+    """Execute a specialized Claude SDK tool-call verification probe."""
+    import time
+    from anthropic import AsyncAnthropic
+
+    started = time.perf_counter()
+    api_key = endpoint.api_key.get_secret_value() if endpoint.api_key is not None else ""
+    base_url = endpoint.base_url or "https://api.anthropic.com"
+
+    client = AsyncAnthropic(
+        api_key=api_key,
+        base_url=base_url,
+    )
+
+    try:
+        response = await client.messages.create(
+            model=route.provider_model_id,
+            max_tokens=100,
+            messages=[{"role": "user", "content": "What is the weather in SF?"}],
+            tools=[
+                {
+                    "name": "get_weather",
+                    "description": "Get the current weather in a given location",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "location": {"type": "string", "description": "The location to query"}
+                        },
+                        "required": ["location"]
+                    }
+                }
+            ]
+        )
+    except Exception as exc:
+        latency_ms = max(0, round((time.perf_counter() - started) * 1000))
+        return ModelProbeResult(
+            model_id=route.provider_model_id,
+            status="error",
+            latency_ms=latency_ms,
+            message=str(exc),
+        )
+
+    latency_ms = max(0, round((time.perf_counter() - started) * 1000))
+
+    has_tool_use = (
+        response.stop_reason == "tool_use" or
+        any(getattr(block, "type", None) == "tool_use" for block in response.content)
+    )
+
+    if has_tool_use:
+        return ModelProbeResult(
+            model_id=route.provider_model_id,
+            status="ok",
+            latency_ms=latency_ms,
+            message="Tool use simulation succeeded",
+        )
+    else:
+        return ModelProbeResult(
+            model_id=route.provider_model_id,
+            status="error",
+            latency_ms=latency_ms,
+            message="Endpoint responded successfully but did not trigger the weather tool.",
+        )
+
+
+def _persist_copilot_sdk_probe_success(
+    route: ProviderRoute,
+    endpoint: ProviderEndpoint,
+    result: ModelProbeResult,
+) -> ProviderRoute:
+    credentials = load_credentials()
+    latest_endpoint = credentials.provider_endpoints.get(endpoint.endpoint_id)
+    if latest_endpoint is None:
+        return route
+
+    real_route = credentials.provider_routes.get(route.route_id)
+    if real_route is None:
+        return route
+
+    current_route = real_route
+
+    probe_attempts = [
+        {
+            "status": result.status,
+            "latency_ms": result.latency_ms,
+            "message": result.message,
+        }
+    ]
+
+    base_capabilities = dict(current_route.capabilities)
+    base_capabilities["claude_sdk_tools"] = CapabilityValue(
+        value=True,
+        source="probed_verified",
+    )
+
+    updated_route = current_route.model_copy(
+        update={
+            "status": "verified",
+            "capabilities": base_capabilities,
+        }
+    )
+
+    cleaned_metadata = {
+        key: value
+        for key, value in updated_route.metadata.items()
+        if key not in {"reason_code", "last_probe_message"}
+    }
+    cleaned_metadata["probe_attempts"] = probe_attempts
+    updated_route = updated_route.model_copy(update={"metadata": cleaned_metadata})
+
+    credentials.provider_routes[updated_route.route_id] = updated_route
+
+    latest_endpoint = latest_endpoint.model_copy(
+        update={
+            "status": "verified",
+            "last_test_at": _now_iso(),
+            "last_test_message": f"Connected. SDK Tool call verified on: {real_route.provider_model_id}.",
+        }
+    )
+    credentials.provider_endpoints[latest_endpoint.endpoint_id] = latest_endpoint
+
+    save_credentials(credentials)
+
+    append_evidence_record(
+        EvidenceRecord(
+            evidence_id=new_evidence_id("probe"),
+            evidence_type="probe",
+            trust_state="probe-verified",
+            observed_at=_now_iso(),
+            attempted_at=_now_iso(),
+            endpoint_id=latest_endpoint.endpoint_id,
+            route_id=updated_route.route_id,
+            model_id=result.model_id,
+            provider_model_id=result.model_id,
+            probe_status=result.status,
+            reason=None,
+            candidate_capabilities={
+                "claude_sdk_tools": CapabilityValue(value=True, source="probed_verified"),
+            },
+            scope=_probe_evidence_scope(
+                endpoint_id=latest_endpoint.endpoint_id,
+                route_id=updated_route.route_id,
+                model_id=result.model_id,
+            ),
+            probe_attempts=[
+                {
+                    "status": result.status,
+                    "latency_ms": result.latency_ms,
+                    "message": result.message,
+                }
+            ],
+            successful_probe={
+                "status": result.status,
+                "latency_ms": result.latency_ms,
+                "claude_sdk_tools": True,
+            },
+        )
+    )
+
+    return updated_route
+
+
+
 def _official_role_test_profile_probe_failure_message(
     profile_result: OfficialModelProfileProbeResult,
 ) -> str:
@@ -2129,9 +2689,10 @@ def _append_model_probe_evidence(
     result: ModelProbeResult,
     *,
     route_id: str | None,
+    failure_reason: str | None = None,
 ) -> None:
     verified = result.status == "ok"
-    reason = None if verified else _model_probe_failure_message(result)
+    reason = None if verified else failure_reason or _model_probe_failure_message(result)
     capability_values = (
         _third_party_route_capability_values(
             endpoint,
@@ -3813,27 +4374,29 @@ def _compact_model_info_for_listed_official_route(
         if verified_profiles
         else _official_catalog_capabilities(endpoint, model_id, raw_capabilities)
     )
-    library = load_evidence_library()
-    is_probe_verified = any(
-        rec.endpoint_id == endpoint.endpoint_id
-        and rec.model_id == model_id
-        and rec.trust_state == "probe-verified"
-        for rec in library.evidence_records
-    )
-    model_status: Literal["verified", "unverified_manual", "disabled", "failed", "testing", "probe-verified"]
+    model_status: Literal[
+        "ready",
+        "historical_ready",
+        "untested",
+        "failed",
+        "cooling_down",
+        "off",
+    ] | None = None
+    projection: ProviderModelStateProjection | None = None
     if route is not None:
-        model_status = route.status
-        if model_status == "unverified_manual" and is_probe_verified:
-            model_status = "probe-verified"
-    else:
-        model_status = "probe-verified" if is_probe_verified else "unverified_manual"
+        projection = _provider_model_projection(route, endpoint)
+        model_status = projection.ui_state
 
     return EndpointTestCompactModelInfo(
         id=model_id,
         route_id=route_id,
         status=model_status,
         verified_profile_count=len(verified_profiles),
-        last_probe_message=_route_failure_message(route),
+        last_probe_message=(
+            projection.ui_detail
+            if projection is not None and projection.ui_state == "cooling_down"
+            else _route_failure_message(route)
+        ),
         capabilities=capabilities,
     )
 
@@ -3871,7 +4434,7 @@ def _compact_model_infos_with_active_status(
     for model in model_infos_by_id.values():
         if (
             model.id in active
-            and model.status in {None, "unverified_manual", "testing"}
+            and model.status in {None, "untested", "historical_ready", "testing"}
             and not model.last_probe_message
         ):
             compact.append(
@@ -3956,6 +4519,27 @@ def _role_test_entries(role: RoleEntry) -> list[tuple[dict[str, Any], RoleRouteE
         for entry in report.get("entries", [])
         if isinstance(entry, dict) and isinstance(entry.get("route_id"), str)
     ]
+    report_by_route = {entry["route_id"]: entry for entry in report_entries}
+    if role.model_groups:
+        entries: list[tuple[dict[str, Any], RoleRouteEntry | None]] = []
+        seen_route_ids: set[str] = set()
+        for group in role.model_groups:
+            for provider_model in group.provider_models:
+                route_id = provider_model.route_id
+                if route_id in seen_route_ids:
+                    continue
+                seen_route_ids.add(route_id)
+                report_entry = report_by_route.get(route_id)
+                if report_entry is None:
+                    report_entry = {
+                        "canonical_id": group.canonical_id,
+                        "route_id": route_id,
+                        "role_fit": "using",
+                        "warnings": [],
+                        "resolved_settings": {},
+                    }
+                entries.append((report_entry, fallback_by_route.get(route_id)))
+        return entries
     if report_entries:
         return [
             (entry, fallback_by_route.get(entry["route_id"]))
@@ -3991,8 +4575,14 @@ def _merge_role_test_status(current: str, provider_result: dict[str, Any]) -> st
 def _provider_model_projection(
     route: ProviderRoute,
     endpoint: ProviderEndpoint,
+    evidence_records: list[Any] | None = None,
 ) -> ProviderModelStateProjection:
     now = datetime.now(UTC)
+    if evidence_records is None:
+        from app.services.llm_import_drafts import load_evidence_library
+        evidence_records = load_evidence_library().evidence_records
+    from app.services.llm_state_projection import has_historical_probe_verified
+    draft_history = has_historical_probe_verified(evidence_records, route.route_id)
     return project_provider_model_state(
         endpoint=endpoint,
         route=route,
@@ -4003,13 +4593,14 @@ def _provider_model_projection(
             now=now,
         ),
         now=now,
+        draft_history=draft_history,
     )
 
 
 def _admission_decision(ui_state: str) -> str:
     if ui_state == "cooling_down":
         return "temporary_skip"
-    if ui_state in {"needs_setup", "off"}:
+    if ui_state in {"failed", "off"}:
         return "block"
     return "admit"
 
@@ -4337,35 +4928,110 @@ def _materialize_roles_for_response(
     data: RolesData,
     credentials: LLMCredentialsFile | None = None,
 ) -> RolesData:
-    has_role_authoring = any(role.model_groups for role in data.roles.values())
-    has_bundle_authoring = any(bundle.model_groups for bundle in data.model_bundles.values())
-    if not has_role_authoring and not has_bundle_authoring:
-        return data
     active_credentials = credentials or load_credentials()
     health_store = _health_store()
+
+    materialized_roles = {}
+    for role_name, role in data.roles.items():
+        if role.role_kind == "copilot":
+            materialized_roles[role_name] = _materialize_role_for_response(role, active_credentials, role_name)
+        elif role.model_groups:
+            materialized_roles[role_name] = materialize_role(role, active_credentials, health_store)
+        else:
+            materialized_roles[role_name] = role
+
+    materialized_bundles = {}
+    for bundle_id, bundle in data.model_bundles.items():
+        if bundle.model_groups:
+            materialized_bundles[bundle_id] = materialize_model_bundle(bundle, active_credentials, health_store)
+        else:
+            materialized_bundles[bundle_id] = bundle
+
     return data.model_copy(
         update={
             "schema_version": 3,
-            "roles": {
-                role_name: materialize_role(role, active_credentials, health_store)
-                if role.model_groups
-                else role
-                for role_name, role in data.roles.items()
-            },
-            "model_bundles": {
-                bundle_id: materialize_model_bundle(bundle, active_credentials, health_store)
-                if bundle.model_groups
-                else bundle
-                for bundle_id, bundle in data.model_bundles.items()
-            },
+            "roles": materialized_roles,
+            "model_bundles": materialized_bundles,
         }
     )
+
+
+def find_compatible_route_ids_for_model(
+    canonical_id: str,
+    credentials: LLMCredentialsFile,
+) -> list[str]:
+    """根据给定的模型标识（如 claude-opus-4.7），寻找并返回所有同模型组（具有相同
+    model group key）且已配置 API key 且状态可用的路由 ID 列表。
+    """
+    from app.models.llm_config import ProviderRoute
+
+    # 构造虚拟的 route 统一调用系统标准投影算法计算其 model group key
+    dummy_route = ProviderRoute(
+        route_id=f"dummy:{canonical_id}",
+        endpoint_id="dummy",
+        provider_model_id=canonical_id,
+        canonical_id=canonical_id,
+        route_slug=canonical_id,
+    )
+    target_group_key = _model_group_identity_key(dummy_route, credentials)
+
+    compatible_route_ids = []
+
+    for route_id, route in credentials.provider_routes.items():
+        if route.status not in ("verified", "unverified_manual"):
+            continue
+
+        endpoint = credentials.provider_endpoints.get(route.endpoint_id)
+        if not endpoint or endpoint.status not in ("verified", "unverified_manual") or not endpoint.api_key:
+            continue
+
+        # 使用完全相同的 _model_group_identity_key 算法获得投影 key 进行同模型组校验
+        route_group_key = _model_group_identity_key(route, credentials)
+        if route_group_key == target_group_key:
+            compatible_route_ids.append(route_id)
+
+    return compatible_route_ids
 
 
 def _materialize_role_for_response(
     role: RoleEntry,
     credentials: LLMCredentialsFile | None = None,
+    role_name: str | None = None,
 ) -> RoleEntry:
+    if role.role_kind == "copilot":
+        canonical_id = None
+        if role_name:
+            if role_name == "copilot_opus_4_7":
+                canonical_id = "claude-opus-4.7"
+            elif role_name == "copilot_deepseek_v4":
+                canonical_id = "deepseek-v4-pro"
+            elif role_name == "sonnet-4-7-third-party":
+                canonical_id = "claude-sonnet-4.7"
+
+        if not canonical_id:
+            active_credentials = credentials or load_credentials()
+            for entry in role.fallback_chain:
+                route = active_credentials.provider_routes.get(entry.route_id)
+                if route and route.canonical_id:
+                    canonical_id = route.canonical_id
+                    break
+
+        if canonical_id:
+            active_credentials = credentials or load_credentials()
+            compatible_route_ids = find_compatible_route_ids_for_model(canonical_id, active_credentials)
+
+            compatible_route_ids.sort()
+            existing_route_ids = [entry.route_id for entry in role.fallback_chain]
+            new_entries = list(role.fallback_chain)
+            for r_id in compatible_route_ids:
+                if r_id not in existing_route_ids:
+                    from graph_agent_gateway.registry.schema import RoleRouteEntry
+                    new_entries.append(RoleRouteEntry(route_id=r_id))
+
+            if len(new_entries) != len(role.fallback_chain):
+                role = role.model_copy(update={"fallback_chain": new_entries})
+
+
     if not role.model_groups:
         return role
     return materialize_role(role, credentials or load_credentials(), _health_store())

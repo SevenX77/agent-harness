@@ -190,13 +190,13 @@ roles:
     role_kind: copilot
     system_prompt_prefix: ""
     fallback_chain:
-      - route_id: anthropic-official:claude-opus-4-7
+      - route_id: anthropic-official:claude-opus-4.7
         runtime_settings:
           temperature: null
           max_output_tokens: 8192
           reasoning:
             enabled: true
-      - route_id: qiniu-anthropic:claude-opus-4-7
+      - route_id: qiniu-anthropic:claude-opus-4.7
         runtime_settings:
           temperature: null
           max_output_tokens: 8192
@@ -228,11 +228,11 @@ roles:
     role_kind: copilot
     system_prompt_prefix: ""
     fallback_chain:
-      - route_id: qiniu-anthropic-sonnet-4-7
+      - route_id: qiniu-anthropic:sonnet-4-7
         runtime_settings:
           temperature: null
           max_output_tokens: 8192
-      - route_id: onechats-anthropic-sonnet-4-7
+      - route_id: onechats-anthropic:sonnet-4-7
         runtime_settings:
           temperature: null
           max_output_tokens: 8192

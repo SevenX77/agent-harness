@@ -12,26 +12,33 @@ import pytest
 from app.core import config
 from app.models.llm_config import (
     CapabilityValue,
+    EndpointCandidate,
     LLMCredentialsFile,
     ModelBundle,
     ModelProfile,
     ProviderEndpoint,
+    ProviderImportDraft,
     ProviderRoute,
     RoleEntry,
     RoleModelGroup,
     RoleProviderModel,
     RoleRouteEntry,
+    RouteCandidate,
     RolesData,
 )
 from app.routers import llm as llm_router
 from app.services import copilot_test
 from app.services.copilot_test import ModelProbeResult, PingResult, _Unauthorized
 from app.services.llm_credentials import credentials_path, save_credentials
-from app.services.llm_import_drafts import load_evidence_library
+from app.services.llm_import_drafts import (
+    append_evidence_record,
+    create_draft,
+    load_evidence_library,
+)
 from app.services.llm_roles import load_roles_file, save_roles_file
 from app.services.llm_roles import roles_path as active_roles_path
 from fastapi.testclient import TestClient
-from graph_agent_gateway.registry.schema import VerifiedProfile
+from graph_agent_gateway.registry.schema import EvidenceRecord, VerifiedProfile
 
 
 def _seed(
@@ -118,6 +125,68 @@ def _open_runtime_circuit(
         )
     )
     return store
+
+
+def _historical_ready_credentials(
+    *,
+    route_status: str = "unverified_manual",
+) -> LLMCredentialsFile:
+    route_id = "openai-direct:gpt-5"
+    return LLMCredentialsFile(
+        provider_endpoints={
+            "openai-direct": ProviderEndpoint(
+                endpoint_id="openai-direct",
+                display_name="OpenAI",
+                protocol="openai_compatible",
+                base_url="https://api.openai.example/v1",
+                api_key="secret",
+                status="verified",
+            )
+        },
+        provider_routes={
+            route_id: ProviderRoute(
+                route_id=route_id,
+                endpoint_id="openai-direct",
+                route_slug="gpt-5",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
+                display_name="GPT-5",
+                status=route_status,
+            )
+        },
+    )
+
+
+def _save_import_probe_draft(
+    *,
+    draft_id: str = "draft-probe",
+    route_id: str = "openai-direct:gpt-5",
+    model_id: str = "gpt-5",
+) -> ProviderImportDraft:
+    draft = ProviderImportDraft(
+        draft_id=draft_id,
+        source={"url": "https://provider.example/models"},
+        status="needs_probe",
+        endpoint_candidates={
+            "openai-direct": EndpointCandidate(
+                endpoint_id="openai-direct",
+                display_name="OpenAI Direct",
+                protocol="openai_compatible",
+                base_url="https://api.openai.example/v1",
+                api_key="secret",
+            )
+        },
+        route_candidates={
+            route_id: RouteCandidate(
+                endpoint_id="openai-direct",
+                route_slug=route_id.split(":", 1)[1],
+                provider_model_id=model_id,
+                canonical_id=model_id,
+                display_name=model_id,
+            )
+        },
+    )
+    return create_draft(draft)
 
 
 def test_registry_read_and_endpoint_upsert_redacts_secret(
@@ -655,20 +724,93 @@ def test_registry_returns_model_groups_with_provider_ui_state_projection(
     assert model_group["display_name"] == "GPT 5"
     assert model_group["status_summary"] == {
         "ready": 1,
+        "historical_ready": 0,
         "untested": 1,
+        "failed": 2,
         "cooling_down": 0,
-        "needs_setup": 2,
         "off": 1,
     }
     provider_models = {option["route_id"]: option for option in model_group["provider_models"]}
     assert provider_models["ready-provider:gpt-5"]["ui_state"] == "ready"
     assert provider_models["untested-provider:gpt-5"]["ui_state"] == "untested"
-    assert provider_models["missing-key-provider:gpt-5"]["ui_state"] == "needs_setup"
-    assert provider_models["failed-provider:gpt-5"]["ui_state"] == "needs_setup"
+    assert provider_models["missing-key-provider:gpt-5"]["ui_state"] == "failed"
+    assert provider_models["missing-key-provider:gpt-5"]["reason_code"] == "missing_config"
+    assert provider_models["failed-provider:gpt-5"]["ui_state"] == "failed"
+    assert provider_models["failed-provider:gpt-5"]["reason_code"] == "model_failed"
     assert provider_models["disabled-provider:gpt-5"]["ui_state"] == "off"
     assert provider_models["ready-provider:gpt-5"]["endpoint_id"] == "ready-provider"
     assert provider_models["ready-provider:gpt-5"]["provider_kind"] == "third_party"
     assert provider_models["ready-provider:gpt-5"]["capability_state"] == "unknown"
+
+
+def test_registry_projects_historical_ready_from_probe_verified_evidence(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    active_credentials_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+    route_id = "openai-direct:gpt-5"
+
+    save_credentials(_historical_ready_credentials(), active_credentials_path)
+    save_roles_file(roles_path, RolesData(), known_route_ids={route_id})
+    append_evidence_record(
+        EvidenceRecord(
+            evidence_id="evidence-openai-direct-gpt-5-probe-ok",
+            evidence_type="probe",
+            trust_state="probe-verified",
+            endpoint_id="openai-direct",
+            route_id=route_id,
+            model_id="gpt-5",
+            probe_status="ok",
+            scope={"route_id": route_id},
+        )
+    )
+
+    response = client.get("/api/llm/registry")
+
+    assert response.status_code == 200
+    model_group = response.json()["model_groups"][0]
+    provider_model = model_group["provider_models"][0]
+    assert provider_model["route_id"] == route_id
+    assert provider_model["ui_state"] == "historical_ready"
+    assert model_group["status_summary"]["historical_ready"] == 1
+
+    save_credentials(
+        _historical_ready_credentials(route_status="verified"),
+        active_credentials_path,
+    )
+
+    upgraded = client.get("/api/llm/registry")
+
+    assert upgraded.status_code == 200
+    upgraded_model = upgraded.json()["model_groups"][0]["provider_models"][0]
+    assert upgraded_model["route_id"] == route_id
+    assert upgraded_model["ui_state"] == "ready"
+
+
+def test_registry_keeps_endpoint_verified_route_untested_without_probe_verified_history(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    active_credentials_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+    route_id = "openai-direct:gpt-5"
+
+    save_credentials(_historical_ready_credentials(), active_credentials_path)
+    save_roles_file(roles_path, RolesData(), known_route_ids={route_id})
+
+    response = client.get("/api/llm/registry")
+
+    assert response.status_code == 200
+    provider_model = response.json()["model_groups"][0]["provider_models"][0]
+    assert provider_model["route_id"] == route_id
+    assert provider_model["ui_state"] == "untested"
 
 
 def test_registry_model_group_exposes_thinking_capability_from_verified_profile(
@@ -726,6 +868,105 @@ def test_registry_model_group_exposes_thinking_capability_from_verified_profile(
         "observed_at": None,
         "message": None,
     }
+
+
+def test_registry_projects_capability_state_as_four_state_axis(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    active_credentials_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+    endpoints = {
+        endpoint_id: ProviderEndpoint(
+            endpoint_id=endpoint_id,
+            display_name=endpoint_id.replace("-", " ").title(),
+            protocol="openai_compatible",
+            base_url=f"https://{endpoint_id}.example/v1",
+            api_key="secret",
+            status="verified",
+        )
+        for endpoint_id in ("unknown", "callable", "partial", "known")
+    }
+    credentials = LLMCredentialsFile(
+        provider_endpoints=endpoints,
+        provider_routes={
+            "unknown:gpt-5": ProviderRoute(
+                route_id="unknown:gpt-5",
+                endpoint_id="unknown",
+                route_slug="gpt-5",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
+                display_name="GPT-5",
+                status="verified",
+                capabilities={},
+            ),
+            "callable:gpt-5": ProviderRoute(
+                route_id="callable:gpt-5",
+                endpoint_id="callable",
+                route_slug="gpt-5",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
+                display_name="GPT-5",
+                status="verified",
+                capabilities={
+                    "input_modalities": CapabilityValue(value=["text"], source="api_list"),
+                    "output_modalities": CapabilityValue(value=["text"], source="api_list"),
+                    "tools": CapabilityValue(value=True, source="api_list"),
+                },
+            ),
+            "partial:gpt-5": ProviderRoute(
+                route_id="partial:gpt-5",
+                endpoint_id="partial",
+                route_slug="gpt-5",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
+                display_name="GPT-5",
+                status="verified",
+                capabilities={
+                    "input_modalities": CapabilityValue(value=["text"], source="probed_verified"),
+                    "output_modalities": CapabilityValue(value=["text"], source="provider_doc"),
+                    "structured_output": CapabilityValue(value=False, source="provider_doc"),
+                },
+            ),
+            "known:gpt-5": ProviderRoute(
+                route_id="known:gpt-5",
+                endpoint_id="known",
+                route_slug="gpt-5",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
+                display_name="GPT-5",
+                status="verified",
+                capabilities={
+                    "input_modalities": CapabilityValue(value=["text"], source="probed_verified"),
+                    "output_modalities": CapabilityValue(value=["text"], source="probed_verified"),
+                    "thinking_protocol": CapabilityValue(value=True, source="probed_verified"),
+                    "tools": CapabilityValue(value=True, source="probed_verified"),
+                },
+            ),
+        },
+    )
+    save_credentials(credentials, active_credentials_path)
+    save_roles_file(roles_path, RolesData(), known_route_ids=set(credentials.provider_routes))
+
+    response = client.get("/api/llm/registry")
+
+    assert response.status_code == 200
+    model_group = response.json()["model_groups"][0]
+    states = {
+        provider["route_id"]: provider["capability_state"]
+        for provider in model_group["provider_models"]
+    }
+    assert states == {
+        "unknown:gpt-5": "unknown",
+        "callable:gpt-5": "callable_only",
+        "partial:gpt-5": "partial",
+        "known:gpt-5": "known",
+    }
+    assert model_group["capability_summary"]["tools"] == "supported"
+    assert model_group["capability_summary"]["structured_output"] == "unsupported"
 
 
 def test_registry_model_groups_include_unverified_language_routes_not_multimodal_candidates(
@@ -2391,9 +2632,9 @@ def test_official_endpoint_test_job_returns_compact_progress_without_registry(
     assert status["catalog_only_count"] == 0
     assert status["available_models"] == [
         {
-            "id": "gpt-5",
-            "route_id": "openai-official:gpt-5",
-            "status": "unverified_manual",
+                "id": "gpt-5",
+                "route_id": "openai-official:gpt-5",
+                "status": "untested",
             "verified_profile_count": 0,
             "last_probe_message": None,
             "capabilities": {
@@ -2430,9 +2671,9 @@ def test_official_endpoint_test_job_returns_compact_progress_without_registry(
             },
         },
         {
-            "id": "gpt-image-1",
-            "route_id": "openai-official:gpt-image-1",
-            "status": "unverified_manual",
+                "id": "gpt-image-1",
+                "route_id": "openai-official:gpt-image-1",
+                "status": "untested",
             "verified_profile_count": 0,
             "last_probe_message": None,
             "capabilities": {
@@ -2537,7 +2778,87 @@ def test_official_endpoint_test_job_does_not_mark_listed_models_testing(
         for model_id, model in models.items()
         if model["status"] == "testing"
     } == set()
-    assert {model["status"] for model in models.values()} == {"unverified_manual"}
+    assert {model["status"] for model in models.values()} == {"untested"}
+
+
+def test_official_endpoint_test_job_projects_probe_history_to_historical_ready(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    route_id = "openai-official:gpt-5"
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "openai-official": ProviderEndpoint(
+                    endpoint_id="openai-official",
+                    display_name="OpenAI Official",
+                    protocol="openai_compatible",
+                    base_url="https://api.openai.com/v1",
+                    api_key="secret",
+                    provider_kind="official",
+                    status="verified",
+                )
+            },
+            provider_routes={
+                route_id: ProviderRoute(
+                    route_id=route_id,
+                    endpoint_id="openai-official",
+                    route_slug="gpt-5",
+                    provider_model_id="gpt-5",
+                    canonical_id="gpt-5",
+                    display_name="GPT-5",
+                    status="unverified_manual",
+                )
+            },
+        ),
+        credentials_path(),
+    )
+    append_evidence_record(
+        EvidenceRecord(
+            evidence_id="probe-history-gpt-5",
+            evidence_type="probe",
+            trust_state="probe-verified",
+            endpoint_id="openai-official",
+            route_id=route_id,
+            model_id="gpt-5",
+            provider_model_id="gpt-5",
+            probe_status="ok",
+            scope={"endpoint_id": "openai-official", "route_id": route_id},
+            probe_attempts=[{"status": "ok"}],
+            successful_probe={"profile_count": 1},
+        )
+    )
+
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        assert (backend, api_key, base_url) == ("openai", "secret", "https://api.openai.com/v1")
+        return PingResult(latency_ms=42, model_ids=("gpt-5",))
+
+    async def fail_profile_probe(endpoint, model_id: str):
+        del endpoint, model_id
+        raise AssertionError("Provider-level Test jobs must not generation-probe listed models.")
+
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    monkeypatch.setattr(llm_router, "_probe_official_model_profile_result", fail_profile_probe)
+
+    start = client.post("/api/llm/endpoints/openai-official/test-jobs")
+    assert start.status_code == 200
+    job_id = start.json()["job_id"]
+    status = start.json()
+    for _ in range(50):
+        if status["status"] == "completed":
+            break
+        time.sleep(0.01)
+        poll = client.get(f"/api/llm/endpoint-test-jobs/{job_id}")
+        assert poll.status_code == 200
+        status = poll.json()
+
+    assert status["status"] == "completed"
+    models = {model["id"]: model for model in status["available_models"]}
+    assert models["gpt-5"]["status"] == "historical_ready"
+    assert "probe-verified" not in json.dumps(status["available_models"])
 
 
 def test_official_endpoint_test_job_lists_language_candidates_without_generation_probe(
@@ -2597,14 +2918,14 @@ def test_official_endpoint_test_job_lists_language_candidates_without_generation
     assert status["catalog_only_count"] == 0
     assert status["tested_model_count"] == 0
     models = {model["id"]: model for model in status["available_models"]}
-    assert models["gpt-5.2"]["status"] == "unverified_manual"
+    assert models["gpt-5.2"]["status"] == "untested"
     assert models["gpt-5.2"]["last_probe_message"] is None
     assert models["gpt-5.2"]["capabilities"]["model_type"] == "language_reasoning"
     assert models["gpt-5.2"]["capabilities"]["candidate_methods"] == [
         "openai_chat_completions",
         "openai_responses",
     ]
-    assert models["gpt-image-1"]["status"] == "unverified_manual"
+    assert models["gpt-image-1"]["status"] == "untested"
     assert models["gpt-image-1"]["last_probe_message"] is None
     assert models["gpt-image-1"]["capabilities"]["model_type"] == "image_generation"
 
@@ -2683,7 +3004,7 @@ def test_official_endpoint_test_job_leaves_generation_failures_to_single_model_t
     assert status["status"] == "completed"
     assert status["tested_model_count"] == 0
     models = {model["id"]: model for model in status["available_models"]}
-    assert models["gemini-3-pro-preview"]["status"] == "unverified_manual"
+    assert models["gemini-3-pro-preview"]["status"] == "untested"
     assert models["gemini-3-pro-preview"]["last_probe_message"] is None
     assert models["gemini-3-pro-preview"]["capabilities"]["model_type"] == "language_reasoning"
 
@@ -3471,7 +3792,7 @@ def test_route_probe_force_true_transient_failure_refreshes_route_circuit(
     assert provider_model["retry_at"] == active[0].retry_at.isoformat()
 
 
-def test_route_probe_force_true_hard_failure_projects_needs_setup(
+def test_route_probe_force_true_hard_failure_projects_failed(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
@@ -3501,8 +3822,8 @@ def test_route_probe_force_true_hard_failure_projects_needs_setup(
     registry = client.get("/api/llm/registry").json()
     provider_model = registry["model_groups"][0]["provider_models"][0]
     assert provider_model["route_id"] == "openai-direct:gpt-5"
-    assert provider_model["ui_state"] == "needs_setup"
-    assert provider_model["reason_code"] == "invalid_model"
+    assert provider_model["ui_state"] == "failed"
+    assert provider_model["reason_code"] == "model_failed"
 
 
 def test_put_role_v3_materializes_model_groups_to_gateway_fallback_chain(
@@ -3977,6 +4298,132 @@ def test_role_test_probes_role_routes_concurrently(
         provider["status"]
         for provider in response.json()["model_groups"][0]["provider_results"]
     ] == ["ok", "ok"]
+
+
+def test_role_test_reports_failed_and_off_role_candidates_without_probing(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    active_credentials_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+    credentials = LLMCredentialsFile(
+        provider_endpoints={
+            "ready-provider": ProviderEndpoint(
+                endpoint_id="ready-provider",
+                display_name="Ready Provider",
+                protocol="openai_compatible",
+                base_url="https://ready.example/v1",
+                api_key="secret",
+                status="verified",
+            ),
+            "failed-provider": ProviderEndpoint(
+                endpoint_id="failed-provider",
+                display_name="Failed Provider",
+                protocol="openai_compatible",
+                base_url="https://failed.example/v1",
+                api_key="secret",
+                status="verified",
+            ),
+            "off-provider": ProviderEndpoint(
+                endpoint_id="off-provider",
+                display_name="Off Provider",
+                protocol="openai_compatible",
+                base_url="https://off.example/v1",
+                api_key="secret",
+                status="disabled",
+            ),
+        },
+        provider_routes={
+            "ready-provider:gpt-5": ProviderRoute(
+                route_id="ready-provider:gpt-5",
+                endpoint_id="ready-provider",
+                route_slug="gpt-5",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
+                display_name="GPT-5",
+                status="verified",
+            ),
+            "failed-provider:gpt-5": ProviderRoute(
+                route_id="failed-provider:gpt-5",
+                endpoint_id="failed-provider",
+                route_slug="gpt-5",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
+                display_name="GPT-5",
+                status="failed",
+                metadata={"last_probe_message": "Model does not exist."},
+            ),
+            "off-provider:gpt-5": ProviderRoute(
+                route_id="off-provider:gpt-5",
+                endpoint_id="off-provider",
+                route_slug="gpt-5",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
+                display_name="GPT-5",
+                status="disabled",
+            ),
+        },
+    )
+    save_credentials(credentials, active_credentials_path)
+    save_roles_file(
+        roles_path,
+        RolesData(
+            roles={
+                "analyst": RoleEntry(
+                    model_groups=[
+                        RoleModelGroup(
+                            canonical_id="gpt-5",
+                            display_name="GPT-5",
+                            provider_models=[
+                                RoleProviderModel(route_id="ready-provider:gpt-5"),
+                                RoleProviderModel(route_id="failed-provider:gpt-5"),
+                                RoleProviderModel(route_id="off-provider:gpt-5"),
+                            ],
+                        )
+                    ]
+                )
+            }
+        ),
+        known_route_ids=set(credentials.provider_routes),
+    )
+    calls: list[str] = []
+
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+        runtime_settings: dict[str, object] | None = None,
+    ) -> ModelProbeResult:
+        del backend, api_key, base_url, runtime_settings
+        calls.append(model_id)
+        return ModelProbeResult(model_id=model_id, status="ok")
+
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
+
+    response = client.post("/api/llm/roles/analyst/test", json={})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert calls == ["gpt-5"]
+    providers = {
+        provider["route_id"]: provider
+        for provider in body["model_groups"][0]["provider_results"]
+    }
+    assert set(providers) == {
+        "ready-provider:gpt-5",
+        "failed-provider:gpt-5",
+        "off-provider:gpt-5",
+    }
+    assert providers["ready-provider:gpt-5"]["status"] == "ok"
+    assert providers["failed-provider:gpt-5"]["status"] == "blocked"
+    assert providers["failed-provider:gpt-5"]["provider_ui_state"] == "failed"
+    assert providers["failed-provider:gpt-5"]["admission_decision"] == "block"
+    assert providers["off-provider:gpt-5"]["status"] == "blocked"
+    assert providers["off-provider:gpt-5"]["provider_ui_state"] == "off"
 
 
 def test_role_test_reports_materialized_not_fit_provider_diagnostics(
@@ -4540,6 +4987,96 @@ def test_role_test_reports_missing_official_verified_profile_probe_failure(
     assert evidence_records[0].probe_attempts[0]["status"] == "error"
 
 
+def test_role_test_persists_third_party_probe_failure_evidence_and_projection(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    active_credentials_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+    credentials = LLMCredentialsFile(
+        provider_endpoints={
+            "custom-provider": ProviderEndpoint(
+                endpoint_id="custom-provider",
+                display_name="Custom Provider",
+                protocol="openai_compatible",
+                base_url="https://custom.example/v1",
+                api_key="secret",
+                status="verified",
+                provider_kind="third_party",
+            )
+        },
+        provider_routes={
+            "custom-provider:custom-model": ProviderRoute(
+                route_id="custom-provider:custom-model",
+                endpoint_id="custom-provider",
+                route_slug="custom-model",
+                provider_model_id="custom-model",
+                canonical_id="custom-model",
+                display_name="Custom Model",
+                status="verified",
+            )
+        },
+    )
+    save_credentials(credentials, active_credentials_path)
+    save_roles_file(
+        roles_path,
+        RolesData(
+            roles={
+                "analyst": RoleEntry(
+                    fallback_chain=[RoleRouteEntry(route_id="custom-provider:custom-model")]
+                )
+            }
+        ),
+        known_route_ids=set(credentials.provider_routes),
+    )
+
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+        runtime_settings: dict[str, object] | None = None,
+    ) -> ModelProbeResult:
+        del backend, api_key, base_url, runtime_settings
+        return ModelProbeResult(
+            model_id=model_id,
+            status="invalid_model",
+            message="Provider rejected model.",
+        )
+
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
+
+    response = client.post("/api/llm/roles/analyst/test", json={})
+
+    assert response.status_code == 200
+    provider_result = response.json()["model_groups"][0]["provider_results"][0]
+    assert provider_result["status"] == "failed"
+    route = json.loads(credentials_path().read_text(encoding="utf-8"))["provider_routes"][
+        "custom-provider:custom-model"
+    ]
+    assert route["status"] == "failed"
+    assert route["metadata"]["reason_code"] == "invalid_model"
+    assert route["metadata"]["last_probe_message"] == "Provider rejected model."
+    evidence_records = load_evidence_library().evidence_records
+    assert len(evidence_records) == 1
+    assert evidence_records[0].trust_state == "probe-failed"
+    assert evidence_records[0].route_id == "custom-provider:custom-model"
+    assert evidence_records[0].reason == (
+        "Endpoint model probe failed (invalid_model). Provider rejected model."
+    )
+
+    registry_response = client.get("/api/llm/registry")
+
+    assert registry_response.status_code == 200
+    provider_model = registry_response.json()["model_groups"][0]["provider_models"][0]
+    assert provider_model["route_id"] == "custom-provider:custom-model"
+    assert provider_model["ui_state"] == "failed"
+    assert provider_model["reason_code"] == "model_failed"
+
+
 def test_apply_model_profile_marks_runtime_settings_as_profile_default(
     client: TestClient,
     tmp_path: Path,
@@ -4609,9 +5146,156 @@ def test_provider_notable_models_are_doc_driven_for_manual_probe_placeholders(
     ]
 
 
+def test_import_draft_probe_runs_worker_and_writes_success_evidence(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    _save_import_probe_draft()
+    calls: list[tuple[str, str, str, str]] = []
+
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        calls.append((backend, api_key, base_url, model_id))
+        return ModelProbeResult(
+            model_id=model_id,
+            status="ok",
+            latency_ms=21,
+            message="draft probe connected",
+        )
+
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
+
+    response = client.post("/api/llm/import-drafts/draft-probe/probe")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "probed"
+    assert calls == [("openai", "secret", "https://api.openai.example/v1", "gpt-5")]
+    probe_result = body["probe_results"]["openai-direct:gpt-5"]
+    assert probe_result["target_type"] == "route"
+    assert probe_result["status"] == "success"
+    assert probe_result["error"] is None
+    evidence_records = load_evidence_library().evidence_records
+    record = next(record for record in evidence_records if record.route_id == "openai-direct:gpt-5")
+    assert record.trust_state == "probe-verified"
+    assert record.model_id == "gpt-5"
+    assert record.probe_status == "ok"
+    assert record.successful_probe == {"status": "ok", "latency_ms": 21}
+    assert record.probe_attempts[0]["message"] == "draft probe connected"
+
+
+def test_import_draft_probe_records_hard_failure_evidence(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    _save_import_probe_draft(model_id="missing-model", route_id="openai-direct:missing-model")
+
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        del backend, api_key, base_url
+        return ModelProbeResult(
+            model_id=model_id,
+            status="invalid_model",
+            latency_ms=22,
+            message="provider rejected model",
+        )
+
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
+
+    response = client.post("/api/llm/import-drafts/draft-probe/probe")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "probed"
+    probe_result = body["probe_results"]["openai-direct:missing-model"]
+    assert probe_result["target_type"] == "route"
+    assert probe_result["status"] == "failed"
+    assert probe_result["error"] == {
+        "code": "invalid_model",
+        "message": "provider rejected model",
+    }
+    evidence_records = load_evidence_library().evidence_records
+    record = next(
+        record for record in evidence_records if record.route_id == "openai-direct:missing-model"
+    )
+    assert record.trust_state == "probe-failed"
+    assert record.model_id == "missing-model"
+    assert record.probe_status == "invalid_model"
+    assert record.failed_probe == {
+        "status": "invalid_model",
+        "reason": "provider rejected model",
+    }
+
+
+def test_import_draft_probe_opens_cooling_down_circuit_for_transient_failure(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    _save_import_probe_draft(model_id="slow-model", route_id="openai-direct:slow-model")
+
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        del backend, api_key, base_url
+        return ModelProbeResult(
+            model_id=model_id,
+            status="timeout",
+            latency_ms=23,
+            message="draft probe timed out",
+        )
+
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
+
+    response = client.post("/api/llm/import-drafts/draft-probe/probe")
+
+    assert response.status_code == 200
+    body = response.json()
+    probe_result = body["probe_results"]["openai-direct:slow-model"]
+    assert probe_result["status"] == "failed"
+    assert probe_result["error"] == {"code": "timeout", "message": "draft probe timed out"}
+    evidence_records = load_evidence_library().evidence_records
+    record = next(record for record in evidence_records if record.route_id == "openai-direct:slow-model")
+    assert record.trust_state == "probe-failed"
+    assert record.probe_status == "timeout"
+
+    from app.services.llm_health_store import SqliteLlmHealthStore
+
+    active = SqliteLlmHealthStore(_health_store_path()).get_active_circuits(
+        route_id="openai-direct:slow-model",
+        endpoint_id="openai-direct",
+        rate_limit_bucket="openai-direct",
+        now=datetime.now(UTC),
+    )
+    assert len(active) == 1
+    assert active[0].scope == "route"
+    assert active[0].scope_id == "openai-direct:slow-model"
+    assert active[0].reason_code == "timeout"
+    assert active[0].message == "draft probe timed out"
+
+
 def test_sync_catalog_endpoint(client: TestClient, tmp_path: Path, monkeypatch) -> None:
     _seed(tmp_path, monkeypatch)
-    
+
     from app.services.llm_import_drafts import ProviderImportDraft
     async def mock_sync():
         return ProviderImportDraft(
@@ -4621,10 +5305,10 @@ def test_sync_catalog_endpoint(client: TestClient, tmp_path: Path, monkeypatch) 
             route_candidates={},
             evidence_records=[],
         )
-    
+
     import app.routers.llm as llm_router
     monkeypatch.setattr(llm_router, "sync_remote_evidence_library", mock_sync)
-    
+
     response = client.post("/api/llm/catalog/sync")
     assert response.status_code == 200
     assert response.json()["status"] == "success"
@@ -4633,8 +5317,312 @@ def test_sync_catalog_endpoint(client: TestClient, tmp_path: Path, monkeypatch) 
 
 def test_share_catalog_endpoint(client: TestClient, tmp_path: Path, monkeypatch) -> None:
     _seed(tmp_path, monkeypatch)
-    
+
     response = client.post("/api/llm/catalog/share")
     assert response.status_code == 200
     assert response.json()["status"] == "success"
     assert "Local verified catalog evidence exported successfully" in response.json()["message"]
+
+
+def test_put_roles_replaces_all_roles_supporting_rename_and_deletion(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _active_credentials_path, roles_path = _seed(tmp_path, monkeypatch)
+
+    # Verify graph_agent is originally present
+    original_roles = load_roles_file(roles_path)
+    assert "graph_agent" in original_roles.roles
+    assert "new_renamed_role" not in original_roles.roles
+
+    # PUT roles with only new_renamed_role (using valid v3 schema)
+    response = client.put(
+        "/api/llm/roles",
+        json={
+            "schema_version": 3,
+            "model_profiles": {},
+            "model_bundles": {},
+            "roles": {
+                "new_renamed_role": {
+                    "role_kind": "graph_agent",
+                    "model_fallback_enabled": True,
+                    "intent": {"provider_preference": "manual_order"},
+                    "model_groups": [
+                        {
+                            "canonical_id": "gpt-5",
+                            "display_name": "GPT-5",
+                            "provider_models": [
+                                {"route_id": "openai-direct:gpt-5"}
+                            ]
+                        }
+                    ]
+                }
+            }
+        }
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "new_renamed_role" in body["roles"]
+    assert "graph_agent" not in body["roles"]
+
+    # Verify the saved roles on disk also do not have the old role
+    saved_roles = load_roles_file(roles_path)
+    assert "new_renamed_role" in saved_roles.roles
+    assert "graph_agent" not in saved_roles.roles
+
+
+def test_third_party_role_test_persists_success_status(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    active_credentials_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+
+    # Provider endpoint has unverified_manual, route is untested!
+    credentials = LLMCredentialsFile(
+        provider_endpoints={
+            "custom-provider": ProviderEndpoint(
+                endpoint_id="custom-provider",
+                display_name="Custom Provider",
+                protocol="openai_compatible",
+                base_url="https://api.custom.example/v1",
+                api_key="secret",
+                status="unverified_manual",
+                provider_kind="custom",
+            )
+        },
+        provider_routes={
+            "custom-provider:custom-model": ProviderRoute(
+                route_id="custom-provider:custom-model",
+                endpoint_id="custom-provider",
+                route_slug="custom-model",
+                provider_model_id="custom-model",
+                canonical_id="custom-model",
+                display_name="Custom Model",
+                status="unverified_manual",
+                capabilities={},
+            )
+        },
+    )
+    save_credentials(credentials, active_credentials_path)
+    save_roles_file(
+        roles_path,
+        RolesData(
+            roles={
+                "graph_agent": RoleEntry(
+                    fallback_chain=[
+                        RoleRouteEntry(route_id="custom-provider:custom-model")
+                    ]
+                )
+            }
+        ),
+        known_route_ids=set(credentials.provider_routes),
+    )
+
+    calls: list[str] = []
+
+    async def fake_probe_model(
+        backend,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+        runtime_settings: dict[str, object] | None = None,
+    ) -> ModelProbeResult:
+        calls.append(model_id)
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=123, message="Successful custom probe")
+
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
+
+    response = client.post("/api/llm/roles/graph_agent/test", json={})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert calls == ["custom-model"]
+
+    # Now check credentials.json
+    saved_credentials = json.loads(active_credentials_path.read_text(encoding="utf-8"))
+
+    # Assert route is verified
+    route = saved_credentials["provider_routes"]["custom-provider:custom-model"]
+    assert route["status"] == "verified"
+    assert route["metadata"]["probe_attempts"][0]["status"] == "ok"
+
+    # Assert endpoint is verified
+    endpoint = saved_credentials["provider_endpoints"]["custom-provider"]
+    assert endpoint["status"] == "verified"
+
+    # Assert evidence is saved in import_drafts.json
+    evidence_records = load_evidence_library().evidence_records
+    assert len(evidence_records) >= 1
+    # Check if there is a probe-verified record for our custom model
+    probe_record = next(
+        (rec for rec in evidence_records if rec.route_id == "custom-provider:custom-model"),
+        None
+    )
+    assert probe_record is not None
+    assert probe_record.trust_state == "probe-verified"
+    assert probe_record.model_id == "custom-model"
+    assert probe_record.probe_attempts[0]["status"] == "ok"
+
+
+def test_put_roles_arbitration_preserves_copilot_roles_when_saving_llm_roles(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _active_credentials_path, roles_path = _seed(tmp_path, monkeypatch)
+
+    # 1. Manually add a copilot role to the initial yaml data
+    initial_data = load_roles_file(roles_path)
+    initial_data.roles["copilot_opus_4_7"] = RoleEntry(
+        role_kind="copilot",
+        fallback_chain=[RoleRouteEntry(route_id="openai-direct:gpt-5")]
+    )
+    save_roles_file(roles_path, initial_data, known_route_ids={"openai-direct:gpt-5"})
+
+    # Verify both exist initially
+    saved_roles = load_roles_file(roles_path)
+    assert "graph_agent" in saved_roles.roles
+    assert "copilot_opus_4_7" in saved_roles.roles
+
+    # 2. PUT roles containing ONLY a new renamed graph agent role (representing saving from LLM roles tab)
+    response = client.put(
+        "/api/llm/roles",
+        json={
+            "schema_version": 3,
+            "model_profiles": {},
+            "model_bundles": {},
+            "roles": {
+                "new_renamed_role": {
+                    "role_kind": "graph_agent",
+                    "model_fallback_enabled": True,
+                    "intent": {"provider_preference": "manual_order"},
+                    "model_groups": [
+                        {
+                            "canonical_id": "gpt-5",
+                            "display_name": "GPT-5",
+                            "provider_models": [
+                                {"route_id": "openai-direct:gpt-5"}
+                            ]
+                        }
+                    ]
+                }
+            }
+        }
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    # Assert old graph agent role is deleted, new graph agent role is added
+    assert "new_renamed_role" in body["roles"]
+    assert "graph_agent" not in body["roles"]
+
+    # Assert Copilot role is PRESERVED!
+    assert "copilot_opus_4_7" in body["roles"]
+
+    # Verify the saved roles on disk also match these expectations
+    disk_roles = load_roles_file(roles_path)
+    assert "new_renamed_role" in disk_roles.roles
+    assert "graph_agent" not in disk_roles.roles
+    assert "copilot_opus_4_7" in disk_roles.roles
+
+
+def test_copilot_auto_append_routes_by_model_group_identity(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    active_credentials_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+
+    credentials = LLMCredentialsFile(
+        provider_endpoints={
+            "anthropic-official": ProviderEndpoint(
+                endpoint_id="anthropic-official",
+                display_name="Anthropic Official",
+                protocol="anthropic_compatible",
+                base_url="https://api.anthropic.example",
+                api_key="secret",
+                status="verified",
+                provider_kind="official",
+            ),
+            "openrouter": ProviderEndpoint(
+                endpoint_id="openrouter",
+                display_name="OpenRouter",
+                protocol="openai_compatible",
+                base_url="https://openrouter.example/api/v1",
+                api_key="secret_openrouter",
+                status="verified",
+                provider_kind="third_party",
+            ),
+            "unrelated-provider": ProviderEndpoint(
+                endpoint_id="unrelated-provider",
+                display_name="Unrelated Provider",
+                protocol="openai_compatible",
+                base_url="https://unrelated.example/v1",
+                api_key="secret_unrelated",
+                status="verified",
+                provider_kind="third_party",
+            ),
+        },
+        provider_routes={
+            "anthropic-official:claude-opus-4.7": ProviderRoute(
+                route_id="anthropic-official:claude-opus-4.7",
+                endpoint_id="anthropic-official",
+                route_slug="claude-opus-4.7",
+                provider_model_id="claude-opus-4.7",
+                canonical_id="claude-opus-4.7",
+                display_name="Claude Opus 4.7 (Official)",
+                status="verified",
+            ),
+            "openrouter:claude-opus-4.7": ProviderRoute(
+                route_id="openrouter:claude-opus-4.7",
+                endpoint_id="openrouter",
+                route_slug="claude-opus-4.7",
+                provider_model_id="anthropic/claude-opus-4.7",
+                canonical_id="claude-opus-4.7",
+                display_name="Claude Opus 4.7 (OpenRouter)",
+                status="verified",
+            ),
+            "unrelated-provider:gpt-5": ProviderRoute(
+                route_id="unrelated-provider:gpt-5",
+                endpoint_id="unrelated-provider",
+                route_slug="gpt-5",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
+                display_name="GPT-5",
+                status="verified",
+            ),
+        },
+    )
+    save_credentials(credentials, active_credentials_path)
+
+    initial_roles = RolesData(
+        roles={
+            "copilot_opus_4_7": RoleEntry(
+                role_kind="copilot",
+                fallback_chain=[RoleRouteEntry(route_id="anthropic-official:claude-opus-4.7")]
+            )
+        }
+    )
+    save_roles_file(roles_path, initial_roles, known_route_ids={"anthropic-official:claude-opus-4.7", "openrouter:claude-opus-4.7"})
+
+    response = client.get("/api/llm/roles")
+    assert response.status_code == 200
+    body = response.json()
+
+    copilot_role = body["roles"]["copilot_opus_4_7"]
+    fallback_route_ids = [entry["route_id"] for entry in copilot_role["fallback_chain"]]
+
+    assert "anthropic-official:claude-opus-4.7" in fallback_route_ids
+    assert "openrouter:claude-opus-4.7" in fallback_route_ids
+    assert "unrelated-provider:gpt-5" not in fallback_route_ids

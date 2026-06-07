@@ -60,7 +60,6 @@ class GatewayFallbackChatModel:
             from_provider="primary:route",
             to_provider="fallback:route",
             reason="RuntimeError: probe failed",
-            code="[F-v3-gateway-all-providers-failed]",
             context={"role_name": "graph_agent"},
         )
         return AIMessage(

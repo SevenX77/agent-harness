@@ -14,11 +14,13 @@ from graph_agent_gateway.registry.schema import (
     CapabilityValue,
     EffectiveRuntimeSetting,
     ProviderEndpoint,
+    ProviderRoute,
     RegistrySnapshot,
     ResolvedRole,
     ResolvedRoute,
     RoleRouteEntry,
     RuntimeSettings,
+    SkippedRoute,
     VerifiedProfile,
 )
 from graph_agent_gateway.registry.storage import compute_credential_fingerprint
@@ -50,17 +52,58 @@ def resolve_role(
         )
     except ValidationError as exc:
         raise RegistryResolutionError(f"invalid route override: {route_override}") from exc
+
     provider_routes = []
     resolved_routes = []
+    skipped_diagnostics = []
+    from_override = route_override is not None
+
     for entry in entries:
-        route = snapshot.provider_routes.get(entry.route_id)
+        route_id = entry.route_id
+        route = snapshot.provider_routes.get(route_id)
         if route is None:
-            raise RegistryResolutionError(f"route is not configured: {entry.route_id}")
+            msg = f"route is not configured: {route_id}"
+            if from_override:
+                raise RegistryResolutionError(msg)
+            skipped_diagnostics.append(
+                SkippedRoute(
+                    route_id=route_id,
+                    reason_code="route_missing",
+                    message=msg,
+                    from_override=False,
+                )
+            )
+            continue
+
         if route.status not in EXECUTABLE_ROUTE_STATUSES:
-            raise RegistryResolutionError(f"route is not executable: {entry.route_id}")
+            msg = f"route is not executable: {route_id}"
+            if from_override:
+                raise RegistryResolutionError(msg)
+            skipped_diagnostics.append(
+                SkippedRoute(
+                    route_id=route_id,
+                    reason_code="route_not_executable",
+                    message=msg,
+                    from_override=False,
+                )
+            )
+            continue
+
         endpoint = snapshot.provider_endpoints.get(route.endpoint_id)
         if endpoint is None:
-            raise RegistryResolutionError(f"endpoint is not configured: {route.endpoint_id}")
+            msg = f"endpoint is not configured: {route.endpoint_id}"
+            if from_override:
+                raise RegistryResolutionError(msg)
+            skipped_diagnostics.append(
+                SkippedRoute(
+                    route_id=route_id,
+                    reason_code="endpoint_missing",
+                    message=msg,
+                    from_override=False,
+                )
+            )
+            continue
+
         credential_ref = endpoint.credential_ref or f"endpoint:{endpoint.endpoint_id}"
         credential_descriptor = _describe_credential(credential_provider, credential_ref)
         if (
@@ -68,12 +111,38 @@ def resolve_role(
         ) and not endpoint.credential_ref and not (
             credential_descriptor is not None and credential_descriptor.exists
         ):
-            raise RegistryResolutionError(f"endpoint has no credential: {route.endpoint_id}")
+            msg = f"endpoint has no credential: {route.endpoint_id}"
+            if from_override:
+                raise RegistryResolutionError(msg)
+            skipped_diagnostics.append(
+                SkippedRoute(
+                    route_id=route_id,
+                    reason_code="credential_missing",
+                    message=msg,
+                    from_override=False,
+                )
+            )
+            continue
+
+        live_route = _route_with_live_snapshot_evidence(snapshot, route)
+
         try:
-            selected_profile = select_verified_profile(route, entry.runtime_settings)
+            selected_profile = select_verified_profile(live_route, entry.runtime_settings)
         except ProfileSelectionError as exc:
-            raise RegistryResolutionError(str(exc)) from exc
-        provider_routes.append(route)
+            msg = str(exc)
+            if from_override:
+                raise RegistryResolutionError(msg) from exc
+            skipped_diagnostics.append(
+                SkippedRoute(
+                    route_id=route_id,
+                    reason_code="profile_unavailable",
+                    message=msg,
+                    from_override=False,
+                )
+            )
+            continue
+
+        provider_routes.append(live_route)
         resolved_routes.append(
             ResolvedRoute(
                 role_name=role_name,
@@ -101,12 +170,13 @@ def resolve_role(
                 request_mapper_id=(
                     selected_profile.request_mapper_id if selected_profile is not None else None
                 ),
-                capabilities=route.capabilities,
+                capabilities=live_route.capabilities,
                 runtime_settings=entry.runtime_settings,
+                snapshot_version=snapshot.snapshot_version,
                 effective_runtime_settings=_effective_runtime_settings(
                     entry,
                     entry.runtime_settings,
-                    route.capabilities,
+                    live_route.capabilities,
                     endpoint.protocol,
                     selected_profile,
                 ),
@@ -116,10 +186,41 @@ def resolve_role(
     lints = lint_role_routes(role_name, role, provider_routes)
     blocking = [item for item in lints if item.blocking]
     if blocking:
-        first = blocking[0]
-        raise RegistryResolutionError(
-            f"route {first.route_id} blocked by lint {first.capability}: {first.message}"
-        )
+        if from_override:
+            first = blocking[0]
+            raise RegistryResolutionError(
+                f"route {first.route_id} blocked by lint {first.capability}: {first.message}"
+            )
+        else:
+            blocked_route_ids = {item.route_id for item in blocking}
+            new_resolved_routes = []
+            new_provider_routes = []
+            for r_route, p_route in zip(resolved_routes, provider_routes):
+                if r_route.route_id in blocked_route_ids:
+                    lint_msgs = [item.message for item in blocking if item.route_id == r_route.route_id]
+                    msg = f"route {r_route.route_id} blocked by lint: " + "; ".join(lint_msgs)
+                    skipped_diagnostics.append(
+                        SkippedRoute(
+                            route_id=r_route.route_id,
+                            reason_code="lint_blocked",
+                            message=msg,
+                            from_override=False,
+                        )
+                    )
+                else:
+                    new_resolved_routes.append(r_route)
+                    new_provider_routes.append(p_route)
+            resolved_routes = new_resolved_routes
+            provider_routes = new_provider_routes
+
+    if not resolved_routes:
+        if not skipped_diagnostics:
+            raise RegistryResolutionError(f"role '{role_name}' has an empty fallback chain.")
+        else:
+            summary = "; ".join(f"{item.route_id} ({item.reason_code}): {item.message}" for item in skipped_diagnostics)
+            raise RegistryResolutionError(
+                f"Registry resolution failed for role '{role_name}'. All routes were skipped: {summary}"
+            )
 
     return ResolvedRole(
         role_name=role_name,
@@ -127,6 +228,7 @@ def resolve_role(
         runtime_policy=snapshot.runtime_policy,
         routes=resolved_routes,
         lint_results=lints,
+        skipped_diagnostics=skipped_diagnostics,
         source_profile_id=role.source_profile_id,
         source_profile_snapshot=role.source_profile_snapshot,
     )
@@ -151,6 +253,15 @@ def _credential_fingerprint(
     if credential_descriptor is not None and credential_descriptor.fingerprint:
         return credential_descriptor.fingerprint
     return compute_credential_fingerprint(endpoint)
+
+
+def _route_with_live_snapshot_evidence(
+    snapshot: RegistrySnapshot,
+    route: ProviderRoute,
+) -> ProviderRoute:
+    if snapshot.snapshot_version is None or route.snapshot_version == snapshot.snapshot_version:
+        return route
+    return route.model_copy(update={"capabilities": {}, "verified_profiles": []})
 
 
 def _effective_runtime_settings(

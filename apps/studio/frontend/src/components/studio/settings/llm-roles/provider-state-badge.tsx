@@ -1,4 +1,4 @@
-import { Circle, CircleAlert, PauseCircle, Timer, Check } from "lucide-react"
+import { Circle, CircleX, History, PauseCircle, Timer, Check } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import type { ProviderUiState } from "@/api/llm"
@@ -14,7 +14,8 @@ interface ProviderStateBadgeProps {
 
 const providerStateMeta: Record<ProviderUiState, {
   label: string
-  variant: "success" | "outline" | "destructive" | "secondary"
+  variant: "success" | "outline" | "destructive" | "secondary" | "warning"
+  className?: string
   description: string
   Icon: typeof Check
 }> = {
@@ -24,6 +25,13 @@ const providerStateMeta: Record<ProviderUiState, {
     description: "Can be used now.",
     Icon: Check,
   },
+  historical_ready: {
+    label: "Previously Connected",
+    variant: "outline",
+    className: "border-multimodal-border bg-success/10 text-foreground",
+    description: "Previously connected from historical probe evidence; test again before treating it as ready.",
+    Icon: History,
+  },
   untested: {
     label: "Untested",
     variant: "outline",
@@ -32,15 +40,15 @@ const providerStateMeta: Record<ProviderUiState, {
   },
   cooling_down: {
     label: "Cooling Down",
-    variant: "outline",
+    variant: "warning",
     description: "Temporarily paused after a runtime issue.",
     Icon: Timer,
   },
-  needs_setup: {
-    label: "Needs Setup",
+  failed: {
+    label: "Failed",
     variant: "destructive",
-    description: "Setup needs attention before this can run.",
-    Icon: CircleAlert,
+    description: "Blocked until configuration or model failure is fixed.",
+    Icon: CircleX,
   },
   off: {
     label: "Off",
@@ -73,7 +81,7 @@ export function ProviderStateBadge({
             variant={meta.variant}
             data-provider-state-label={state}
             aria-label={`Provider state ${meta.label}`}
-            className={cn("gap-1", className)}
+            className={cn("gap-1", meta.className, className)}
           >
             <Icon className="size-3" />
             {meta.label}
@@ -88,6 +96,9 @@ export function ProviderStateBadge({
 function reasonDetail(reasonCode?: string | null, detail?: string | null): string | null {
   if (detail) return detail
   if (!reasonCode) return null
+  if (reasonCode === "missing_config") return "Missing API key or required provider configuration."
+  if (reasonCode === "endpoint_unreachable") return "Provider endpoint is unreachable."
+  if (reasonCode === "model_failed") return "Model probe failed."
   if (reasonCode === "missing_key") return "Missing API key."
   if (reasonCode === "invalid_key") return "API key did not authenticate."
   if (reasonCode === "invalid_model") return "This model is not accepted by the provider."

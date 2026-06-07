@@ -45,14 +45,14 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { translateErrorCode, translateTestStatus } from "@/lib/llm-error-messages"
 import { cn } from "@/lib/utils"
-import type { CredentialsState, ModelInfo, ModelProbeStatus, ProviderTestResult, ProviderType, RouteStatus } from "../../../api/llm"
+import type { CredentialsState, ModelInfo, ModelProbeStatus, ProviderTestResult, ProviderType } from "../../../api/llm"
 import { providerCachedTestResult, providerTestParamsMatch } from "../settings/provider-utils"
 import type { ProviderDraft } from "../settings/types"
 import { ManualModelTestPanel } from "./ManualModelTestPanel"
 import { RoleNameDialog } from "../settings/llm-roles/RoleNameDialog"
 
 type TestMessageStatus = "not_configured" | "testing" | NonNullable<CredentialsState["providers"][number]["last_test_status"]>
-type RouteDisplayStatus = RouteStatus | "unknown" | "testing"
+type RouteDisplayStatus = ModelProbeStatus | "unknown"
 const availableModelsPreviewLimit = 12
 const fieldRowClassName = "grid grid-cols-[minmax(0,1fr)_11.5rem] items-center gap-2"
 const fieldActionClassName = "flex min-w-0 items-center justify-start gap-2"
@@ -171,6 +171,15 @@ export function TestMessage({
       <Badge variant="success">
         <CheckCircle2 className="size-3" />
         {latencyMs != null ? `Connected (${latencyMs}ms)` : "Connected"}
+      </Badge>
+    )
+  }
+
+  if (status === "unverified_manual") {
+    return (
+      <Badge variant="outline" className="text-warning gap-1">
+        <CheckCircle2 className="size-3 text-success" />
+        Parameters Reachable
       </Badge>
     )
   }
@@ -343,27 +352,29 @@ function modelRouteStatus(model: ModelInfo): ModelProbeStatus | "unknown" {
 function routeDisplayStatus(model: ModelInfo, isTesting: boolean): RouteDisplayStatus {
   const status = modelRouteStatus(model)
   if (status === "testing" && isTesting) return "testing"
-  if (status === "testing") return "unverified_manual"
+  if (status === "testing") return "untested"
   return status
 }
 
 function routeStatusTagVariant(status: RouteDisplayStatus): "success" | "destructive" | "muted" | "default" | "info" | "warning" | "probe-verified" {
   if (status === "testing") return "default"
   if (status === "failed") return "destructive"
-  if (status === "disabled") return "muted"
-  if (status === "verified") return "success"
-  if (status === "probe-verified") return "probe-verified"
-  if (status === "unverified_manual" || status === "unknown") return "default"
+  if (status === "disabled" || status === "off") return "muted"
+  if (status === "verified" || status === "ready") return "success"
+  if (status === "historical_ready") return "probe-verified"
+  if (status === "cooling_down") return "warning"
+  if (status === "unverified_manual" || status === "untested" || status === "unknown") return "default"
   return "default"
 }
 
 function routeStatusLabel(status: RouteDisplayStatus): string {
-  if (status === "verified") return "Verified route"
+  if (status === "verified" || status === "ready") return "Verified route"
   if (status === "failed") return "Route test failed"
-  if (status === "disabled") return "Disabled route"
+  if (status === "disabled" || status === "off") return "Disabled route"
   if (status === "testing") return "Testing route"
-  if (status === "probe-verified") return "Probe verified route (historical success)"
-  if (status === "unverified_manual") return "Untested route"
+  if (status === "historical_ready") return "Previously connected route"
+  if (status === "cooling_down") return "Route cooling down"
+  if (status === "unverified_manual" || status === "untested") return "Untested route"
   return "Route status unknown"
 }
 
@@ -452,7 +463,7 @@ function officialRouteGroupRank(label: string): number {
 }
 
 function routeProfileTooltipText(model: ModelInfo, status: RouteDisplayStatus): string | null {
-  if (status !== "verified") return null
+  if (status !== "verified" && status !== "ready") return null
   const profiles = modelVerifiedProfiles(model).filter((profile) => profile.status !== "failed")
   if (profiles.length === 0) return null
   const capabilityLabels = uniqueStrings(
@@ -769,7 +780,10 @@ export function ProviderCard({
     ? sortOfficialRouteInfos(matchedResult?.available_models ?? [])
     : sortModelInfos(matchedResult?.available_models ?? [])
   const hasAvailableModels = availableModels.length > 0
-  const hasVerifiedModel = availableModels.some((model) => modelRouteStatus(model) === "verified")
+  const hasVerifiedModel = availableModels.some((model) => {
+    const status = modelRouteStatus(model)
+    return status === "verified" || status === "ready"
+  })
   const availableModelsLabel = isOfficial ? "Available Routes:" : "Available Models:"
   const copyTargetLabel = isOfficial ? "route" : "model"
   const visibleModels = showAllModels ? availableModels : availableModels.slice(0, availableModelsPreviewLimit)
@@ -780,7 +794,7 @@ export function ProviderCard({
     hasRequiredConfig &&
     matchedResult &&
     !matchedErrorCode &&
-    (matchedStatus === "untested" || matchedStatus === "ok") &&
+    (matchedStatus === "untested" || matchedStatus === "ok" || matchedStatus === "unverified_manual") &&
     (matchedResult.last_test_at || matchedResult.last_test_message || availableModels.length > 0 || availableSdks.length > 0),
   )
   const hasEmptyModelListWarning = hasReachableModelList && !hasAvailableModels
@@ -840,7 +854,8 @@ export function ProviderCard({
     const appendModelTypeLabel = Boolean(
       modelTypeLabel &&
       primaryTooltipDetail !== modelTypeLabel &&
-      status !== "verified",
+      status !== "verified" &&
+      status !== "ready",
     )
     const tooltipText = isOfficial
       ? `${model.id} - ${tooltipDetail}${appendModelTypeLabel ? ` - ${modelTypeLabel}` : ""}`

@@ -88,7 +88,7 @@ def _open_materializer_route_circuit(
     )
 
 
-def test_put_role_v3_skips_needs_setup_and_off_provider_models(
+def test_put_role_v3_skips_failed_and_off_provider_models(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
@@ -97,11 +97,16 @@ def test_put_role_v3_skips_needs_setup_and_off_provider_models(
         provider_endpoints={
             "ready-provider": _provider_endpoint("ready-provider"),
             "missing-key-provider": _provider_endpoint("missing-key-provider", api_key=None),
+            "failed-provider": _provider_endpoint("failed-provider"),
             "disabled-provider": _provider_endpoint("disabled-provider", status="disabled"),
         },
         provider_routes={
             "ready-provider:gpt-5": _provider_route("ready-provider:gpt-5"),
             "missing-key-provider:gpt-5": _provider_route("missing-key-provider:gpt-5"),
+            "failed-provider:gpt-5": _provider_route(
+                "failed-provider:gpt-5",
+                status="failed",
+            ),
             "disabled-provider:gpt-5": _provider_route("disabled-provider:gpt-5"),
         },
     )
@@ -120,6 +125,7 @@ def test_put_role_v3_skips_needs_setup_and_off_provider_models(
                     "display_name": "GPT-5",
                     "provider_models": [
                         {"route_id": "missing-key-provider:gpt-5"},
+                        {"route_id": "failed-provider:gpt-5"},
                         {"route_id": "disabled-provider:gpt-5"},
                         {"route_id": "ready-provider:gpt-5"},
                     ],
@@ -133,13 +139,14 @@ def test_put_role_v3_skips_needs_setup_and_off_provider_models(
         "ready-provider:gpt-5"
     ]
     skipped = {
-        item["route_id"]: item["ui_state"]
+        item["route_id"]: item
         for item in response.json()["materialization_report"]["skipped_provider_details"]
     }
-    assert skipped == {
-        "missing-key-provider:gpt-5": "needs_setup",
-        "disabled-provider:gpt-5": "off",
-    }
+    assert skipped["missing-key-provider:gpt-5"]["ui_state"] == "failed"
+    assert skipped["missing-key-provider:gpt-5"]["reason_code"] == "missing_config"
+    assert skipped["failed-provider:gpt-5"]["ui_state"] == "failed"
+    assert skipped["failed-provider:gpt-5"]["reason_code"] == "model_failed"
+    assert skipped["disabled-provider:gpt-5"]["ui_state"] == "off"
 
 
 def test_put_role_v3_legacy_ready_first_migrates_to_manual_order_without_reordering(

@@ -96,6 +96,63 @@ def test_legacy_import_draft_without_evidence_records_loads_and_saves(
     assert saved.evidence_records == []
 
 
+def test_apply_draft_persists_protocol_canonical_base_urls(tmp_path: Path) -> None:
+    from app.services.llm_import_drafts import apply_draft
+
+    store_path = tmp_path / "import_drafts.json"
+    credentials_path = tmp_path / "llm_credentials.json"
+    draft = ProviderImportDraft(
+        draft_id="canonical-draft",
+        source={"url": "https://provider.example/docs"},
+        status="pending",
+        endpoint_candidates={
+            "wavespeed-anthropic": EndpointCandidate(
+                endpoint_id="wavespeed-anthropic",
+                display_name="WaveSpeed Anthropic",
+                protocol="anthropic_compatible",
+                base_url="https://llm.wavespeed.ai/v1/",
+                api_key="secret",
+            ),
+            "deepseek-anthropic": EndpointCandidate(
+                endpoint_id="deepseek-anthropic",
+                display_name="DeepSeek Anthropic",
+                protocol="anthropic_compatible",
+                base_url="https://api.deepseek.com/v1/",
+                api_key="secret",
+            ),
+            "ark-runtime": EndpointCandidate(
+                endpoint_id="ark-runtime",
+                display_name="Ark Runtime",
+                protocol="ark_runtime",
+                base_url="https://ark.cn-beijing.volces.com/",
+                api_key="secret",
+            ),
+            "openai-compatible": EndpointCandidate(
+                endpoint_id="openai-compatible",
+                display_name="OpenAI Compatible",
+                protocol="openai_compatible",
+                base_url="https://api.openai.example/v1",
+                api_key="secret",
+            ),
+        },
+    )
+    save_draft(draft, path=store_path)
+
+    apply_draft("canonical-draft", path=store_path, credentials_path=credentials_path)
+
+    saved = load_credentials(credentials_path)
+    assert saved.provider_endpoints["wavespeed-anthropic"].base_url == "https://llm.wavespeed.ai"
+    assert (
+        saved.provider_endpoints["deepseek-anthropic"].base_url
+        == "https://api.deepseek.com/anthropic"
+    )
+    assert (
+        saved.provider_endpoints["ark-runtime"].base_url
+        == "https://ark.cn-beijing.volces.com/api/v3"
+    )
+    assert saved.provider_endpoints["openai-compatible"].base_url == "https://api.openai.example/v1"
+
+
 def test_evidence_library_appends_probe_failure_without_overwriting_success(
     tmp_path: Path,
 ) -> None:

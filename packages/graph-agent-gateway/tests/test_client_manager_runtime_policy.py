@@ -103,7 +103,7 @@ def test_provider_down_ttl_comes_from_runtime_policy(monkeypatch) -> None:
 
 
 def test_token_escalation_rounds_come_from_runtime_policy() -> None:
-    from graph_agent_gateway.client_manager import LLMClientManager
+    from graph_agent_gateway import ordinary_chat
     from graph_agent_gateway.registry.schema import CapabilityValue, RuntimePolicy
 
     route = _route().model_copy(
@@ -123,7 +123,7 @@ def test_token_escalation_rounds_come_from_runtime_policy() -> None:
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         }
 
-    result = LLMClientManager._call_with_token_escalation(
+    result = ordinary_chat._call_with_token_escalation(
         route,
         2,
         invoke,
@@ -134,7 +134,7 @@ def test_token_escalation_rounds_come_from_runtime_policy() -> None:
     assert calls == [2, 4]
 
     calls.clear()
-    result = LLMClientManager._call_with_token_escalation(
+    result = ordinary_chat._call_with_token_escalation(
         route,
         2,
         invoke,
@@ -147,16 +147,15 @@ def test_token_escalation_rounds_come_from_runtime_policy() -> None:
 
 def test_anthropic_thinking_rejects_max_tokens_below_budget_floor(monkeypatch) -> None:
     import pytest
-    from graph_agent_gateway import client_manager
-    from graph_agent_gateway.client_manager import LLMClientManager
+    from graph_agent_gateway import ordinary_chat
 
     def fake_messages_create(_client: object, kwargs: dict[str, object]) -> dict[str, object]:
         raise AssertionError(f"provider should not be called with invalid thinking budget: {kwargs}")
 
-    monkeypatch.setattr(client_manager, "_anthropic_messages_create", fake_messages_create)
+    monkeypatch.setattr(ordinary_chat, "_anthropic_messages_create", fake_messages_create)
 
     with pytest.raises(ValueError, match="thinking budget"):
-        LLMClientManager._call_anthropic_compatible(
+        ordinary_chat._call_anthropic_compatible(
             object(),  # type: ignore[arg-type]
             "claude-sonnet-4-6",
             [{"role": "user", "content": "hello"}],
@@ -167,8 +166,7 @@ def test_anthropic_thinking_rejects_max_tokens_below_budget_floor(monkeypatch) -
 
 
 def test_anthropic_thinking_prefers_adaptive_without_budget_tokens(monkeypatch) -> None:
-    from graph_agent_gateway import client_manager
-    from graph_agent_gateway.client_manager import LLMClientManager
+    from graph_agent_gateway import ordinary_chat
 
     captured: list[dict[str, object]] = []
 
@@ -180,9 +178,9 @@ def test_anthropic_thinking_prefers_adaptive_without_budget_tokens(monkeypatch) 
             "stop_reason": "end_turn",
         }
 
-    monkeypatch.setattr(client_manager, "_anthropic_messages_create", fake_messages_create)
+    monkeypatch.setattr(ordinary_chat, "_anthropic_messages_create", fake_messages_create)
 
-    result = LLMClientManager._call_anthropic_compatible(
+    result = ordinary_chat._call_anthropic_compatible(
         object(),  # type: ignore[arg-type]
         "claude-sonnet-4-6",
         [{"role": "user", "content": "hello"}],
@@ -198,8 +196,7 @@ def test_anthropic_thinking_prefers_adaptive_without_budget_tokens(monkeypatch) 
 
 
 def test_anthropic_request_mapper_forces_adaptive_thinking_payload(monkeypatch) -> None:
-    from graph_agent_gateway import client_manager
-    from graph_agent_gateway.client_manager import LLMClientManager
+    from graph_agent_gateway import ordinary_chat
 
     captured: list[dict[str, object]] = []
 
@@ -211,9 +208,9 @@ def test_anthropic_request_mapper_forces_adaptive_thinking_payload(monkeypatch) 
             "stop_reason": "end_turn",
         }
 
-    monkeypatch.setattr(client_manager, "_anthropic_messages_create", fake_messages_create)
+    monkeypatch.setattr(ordinary_chat, "_anthropic_messages_create", fake_messages_create)
 
-    result = LLMClientManager._call_anthropic_compatible(
+    result = ordinary_chat._call_anthropic_compatible(
         object(),  # type: ignore[arg-type]
         "claude-custom-route-alias",
         [{"role": "user", "content": "hello"}],
@@ -228,8 +225,7 @@ def test_anthropic_request_mapper_forces_adaptive_thinking_payload(monkeypatch) 
 
 
 def test_anthropic_uses_configured_thinking_budget_only_for_manual_fallback(monkeypatch) -> None:
-    from graph_agent_gateway import client_manager
-    from graph_agent_gateway.client_manager import LLMClientManager
+    from graph_agent_gateway import ordinary_chat
 
     captured: list[dict[str, object]] = []
 
@@ -243,9 +239,9 @@ def test_anthropic_uses_configured_thinking_budget_only_for_manual_fallback(monk
             "stop_reason": "end_turn",
         }
 
-    monkeypatch.setattr(client_manager, "_anthropic_messages_create", fake_messages_create)
+    monkeypatch.setattr(ordinary_chat, "_anthropic_messages_create", fake_messages_create)
 
-    LLMClientManager._call_anthropic_compatible(
+    ordinary_chat._call_anthropic_compatible(
         object(),  # type: ignore[arg-type]
         "claude-sonnet-4-6",
         [{"role": "user", "content": "hello"}],
@@ -262,8 +258,7 @@ def test_anthropic_uses_configured_thinking_budget_only_for_manual_fallback(monk
 
 
 def test_anthropic_haiku_thinking_uses_manual_budget_without_adaptive_attempt(monkeypatch) -> None:
-    from graph_agent_gateway import client_manager
-    from graph_agent_gateway.client_manager import LLMClientManager
+    from graph_agent_gateway import ordinary_chat
 
     captured: list[dict[str, object]] = []
 
@@ -275,9 +270,9 @@ def test_anthropic_haiku_thinking_uses_manual_budget_without_adaptive_attempt(mo
             "stop_reason": "end_turn",
         }
 
-    monkeypatch.setattr(client_manager, "_anthropic_messages_create", fake_messages_create)
+    monkeypatch.setattr(ordinary_chat, "_anthropic_messages_create", fake_messages_create)
 
-    result = LLMClientManager._call_anthropic_compatible(
+    result = ordinary_chat._call_anthropic_compatible(
         object(),  # type: ignore[arg-type]
         "claude-haiku-4-5-20251001",
         [{"role": "user", "content": "hello"}],
@@ -294,7 +289,7 @@ def test_anthropic_haiku_thinking_uses_manual_budget_without_adaptive_attempt(mo
 
 
 def test_anthropic_system_only_messages_keep_required_user_turn() -> None:
-    from graph_agent_gateway.client_manager import _split_anthropic_messages
+    from graph_agent_gateway.ordinary_chat import _split_anthropic_messages
 
     system_text, api_messages = _split_anthropic_messages(
         [{"role": "system", "content": "You are a v0.3.0 agent prompt."}]
@@ -305,7 +300,7 @@ def test_anthropic_system_only_messages_keep_required_user_turn() -> None:
 
 
 def test_openai_runtime_settings_map_to_chat_completion_kwargs() -> None:
-    from graph_agent_gateway.client_manager import LLMClientManager
+    from graph_agent_gateway import ordinary_chat
 
     captured: list[dict[str, object]] = []
 
@@ -325,7 +320,7 @@ def test_openai_runtime_settings_map_to_chat_completion_kwargs() -> None:
     class FakeClient:
         chat = type("Chat", (), {"completions": FakeCompletions()})()
 
-    result = LLMClientManager._call_openai_compatible(
+    result = ordinary_chat._call_openai_compatible(
         FakeClient(),  # type: ignore[arg-type]
         "gpt-5",
         [{"role": "user", "content": "hello"}],
@@ -364,6 +359,7 @@ def test_openai_runtime_settings_map_to_chat_completion_kwargs() -> None:
 
 
 def test_openai_call_method_responses_uses_responses_api(monkeypatch) -> None:
+    from graph_agent_gateway import ordinary_chat
     from graph_agent_gateway.client_manager import LLMClientManager
     from graph_agent_gateway.registry.schema import ResolvedRoute, RuntimePolicy
 
@@ -399,11 +395,11 @@ def test_openai_call_method_responses_uses_responses_api(monkeypatch) -> None:
         classmethod(lambda cls, route, runtime_policy: FakeClient()),
     )
 
-    result = LLMClientManager._dispatch_provider_call(
+    result = ordinary_chat.dispatch_ordinary_chat(
         route,
         [{"role": "user", "content": "hello"}],
-        333,
-        0.4,
+        max_tokens=333,
+        temperature=0.4,
         runtime_policy=RuntimePolicy(token_escalation_rounds=0),
         top_p=0.9,
         reasoning_effort="medium",
@@ -425,8 +421,7 @@ def test_openai_call_method_responses_uses_responses_api(monkeypatch) -> None:
 
 
 def test_anthropic_runtime_settings_map_to_messages_kwargs(monkeypatch) -> None:
-    from graph_agent_gateway import client_manager
-    from graph_agent_gateway.client_manager import LLMClientManager
+    from graph_agent_gateway import ordinary_chat
 
     captured: list[dict[str, object]] = []
 
@@ -438,9 +433,9 @@ def test_anthropic_runtime_settings_map_to_messages_kwargs(monkeypatch) -> None:
             "stop_reason": "end_turn",
         }
 
-    monkeypatch.setattr(client_manager, "_anthropic_messages_create", fake_messages_create)
+    monkeypatch.setattr(ordinary_chat, "_anthropic_messages_create", fake_messages_create)
 
-    result = LLMClientManager._call_anthropic_compatible(
+    result = ordinary_chat._call_anthropic_compatible(
         object(),  # type: ignore[arg-type]
         "claude-haiku-4-5-20251001",
         [{"role": "user", "content": "hello"}],
@@ -467,7 +462,7 @@ def test_anthropic_runtime_settings_map_to_messages_kwargs(monkeypatch) -> None:
 
 
 def test_google_genai_runtime_settings_map_to_generate_content_config() -> None:
-    from graph_agent_gateway.client_manager import LLMClientManager
+    from graph_agent_gateway import ordinary_chat
 
     captured: list[dict[str, object]] = []
 
@@ -487,7 +482,7 @@ def test_google_genai_runtime_settings_map_to_generate_content_config() -> None:
     class FakeClient:
         models = FakeModels()
 
-    result = LLMClientManager._call_google_genai(
+    result = ordinary_chat._call_google_genai(
         FakeClient(),
         "gemini-3-pro",
         [
@@ -530,8 +525,7 @@ def test_google_genai_runtime_settings_map_to_generate_content_config() -> None:
 
 
 def test_dispatch_google_genai_uses_route_endpoint_and_runtime_policy(monkeypatch) -> None:
-    from graph_agent_gateway import client_manager
-    from graph_agent_gateway.client_manager import LLMClientManager
+    from graph_agent_gateway import client_manager, ordinary_chat
     from graph_agent_gateway.registry.schema import RuntimePolicy
 
     route = _route().model_copy(
@@ -559,13 +553,13 @@ def test_dispatch_google_genai_uses_route_endpoint_and_runtime_policy(monkeypatc
         }
 
     monkeypatch.setattr(client_manager.LLMClientManager, "_get_google_client", fake_get_google_client)
-    monkeypatch.setattr(client_manager.LLMClientManager, "_call_google_genai", fake_call_google_genai)
+    monkeypatch.setattr(ordinary_chat, "_call_google_genai", fake_call_google_genai)
 
-    result = LLMClientManager._dispatch_provider_call(
+    result = ordinary_chat.dispatch_ordinary_chat(
         route,
         [{"role": "user", "content": "hello"}],
-        256,
-        0.1,
+        max_tokens=256,
+        temperature=0.1,
         runtime_policy=RuntimePolicy(token_escalation_rounds=0),
         top_p=0.95,
         reasoning=True,
@@ -588,104 +582,60 @@ def test_dispatch_google_genai_uses_route_endpoint_and_runtime_policy(monkeypatc
     }
 
 
-def test_ark_runtime_settings_map_to_official_sdk_chat_completion_kwargs() -> None:
-    from graph_agent_gateway.client_manager import LLMClientManager
-
-    captured: list[dict[str, object]] = []
-
-    class FakeCompletions:
-        def create(self, **kwargs: object) -> dict[str, object]:
-            captured.append(dict(kwargs))
-            return {
-                "choices": [
-                    {
-                        "message": {"content": "ok"},
-                        "finish_reason": "stop",
-                    }
-                ],
-                "usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
-            }
-
-    class FakeClient:
-        chat = type("Chat", (), {"completions": FakeCompletions()})()
-
-    result = LLMClientManager._call_ark_runtime(
-        FakeClient(),
-        "ep-20260525-test",
-        [{"role": "user", "content": "hello"}],
-        4096,
-        0.7,
-        top_p=0.9,
-        stop_sequences=["END"],
-        parallel_tool_calls=False,
-        reasoning_effort="high",
-    )
-
-    assert result["content"] == "ok"
-    assert captured == [
-        {
-            "model": "ep-20260525-test",
-            "messages": [{"role": "user", "content": "hello"}],
-            "max_tokens": 4096,
-            "temperature": 0.7,
-            "top_p": 0.9,
-            "stop": ["END"],
-            "parallel_tool_calls": False,
-            "reasoning_effort": "high",
-        }
-    ]
-
-
-def test_dispatch_ark_runtime_uses_official_sdk_client_not_openai_path(monkeypatch) -> None:
-    from graph_agent_gateway import client_manager
-    from graph_agent_gateway.client_manager import LLMClientManager
-    from graph_agent_gateway.registry.schema import RuntimePolicy
+def test_ark_runtime_factory_maps_to_chat_openai_kwargs() -> None:
+    from graph_agent_gateway.route_chat_model_factory import RouteChatModelFactory
+    from langchain_openai import ChatOpenAI
 
     route = _route().model_copy(
         update={
             "route_id": "ark-cn:deepseek-v3",
             "endpoint_id": "ark-cn",
             "protocol": "ark_runtime",
-            "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+            "base_url": "https://ark.cn-beijing.volces.com",
+            "credential_ref": "endpoint:ark-cn",
             "provider_model_id": "ep-20260525-test",
             "canonical_id": "deepseek-v3",
         }
     )
-    captured: list[dict[str, object]] = []
-
-    def fake_get_openai_client(*_args: object, **_kwargs: object) -> object:
-        raise AssertionError("ark_runtime must not use OpenAI-compatible client")
-
-    def fake_get_ark_client(route_arg: object, runtime_policy: object) -> object:
-        captured.append({"route": route_arg, "runtime_policy": runtime_policy})
-        return object()
-
-    def fake_call_ark_runtime(*args: object, **kwargs: object) -> dict[str, object]:
-        captured.append({"args": args, "kwargs": kwargs})
-        return {
-            "content": "ok",
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-            "finish_reason": "stop",
-        }
-
-    monkeypatch.setattr(client_manager.LLMClientManager, "_get_openai_client", fake_get_openai_client)
-    monkeypatch.setattr(client_manager.LLMClientManager, "_get_ark_client", fake_get_ark_client)
-    monkeypatch.setattr(client_manager.LLMClientManager, "_call_ark_runtime", fake_call_ark_runtime)
-
-    result = LLMClientManager._dispatch_provider_call(
-        route,
-        [{"role": "user", "content": "hello"}],
-        512,
-        0.2,
-        runtime_policy=RuntimePolicy(token_escalation_rounds=0),
-        top_p=0.8,
-        reasoning_effort="high",
+    factory = RouteChatModelFactory(
+        credential_provider=StaticCredentialProvider({"endpoint:ark-cn": "ark-secret"})
     )
 
-    assert result["content"] == "ok"
-    assert captured[0] == {
-        "route": route,
-        "runtime_policy": RuntimePolicy(token_escalation_rounds=0),
-    }
-    assert captured[1]["kwargs"]["top_p"] == 0.8
-    assert captured[1]["kwargs"]["reasoning_effort"] == "high"
+    chat_model = factory.build(route)
+
+    assert isinstance(chat_model, ChatOpenAI)
+    assert chat_model.model_name == "ep-20260525-test"
+    assert chat_model.openai_api_base == "https://ark.cn-beijing.volces.com/api/v3"
+    assert chat_model.openai_api_key.get_secret_value() == "ark-secret"
+
+
+def test_ark_runtime_target_no_longer_uses_ark_sdk_client(monkeypatch) -> None:
+    from graph_agent_gateway import client_manager
+    from graph_agent_gateway.route_chat_model_factory import RouteChatModelFactory
+    from langchain_openai import ChatOpenAI
+
+    def fail_if_ark_sdk_path_is_used(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("ark_runtime target should be ChatOpenAI, not Ark SDK")
+
+    monkeypatch.setattr(
+        client_manager.LLMClientManager,
+        "_get_ark_client",
+        fail_if_ark_sdk_path_is_used,
+    )
+    route = _route().model_copy(
+        update={
+            "route_id": "ark-cn:deepseek-v3",
+            "endpoint_id": "ark-cn",
+            "protocol": "ark_runtime",
+            "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+            "credential_ref": "endpoint:ark-cn",
+            "provider_model_id": "ep-20260525-test",
+            "canonical_id": "deepseek-v3",
+        }
+    )
+
+    chat_model = RouteChatModelFactory(
+        credential_provider=StaticCredentialProvider({"endpoint:ark-cn": "ark-secret"})
+    ).build(route)
+
+    assert isinstance(chat_model, ChatOpenAI)

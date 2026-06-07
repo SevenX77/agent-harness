@@ -84,3 +84,47 @@ async def post_copilot_context(
         reason="out_of_order",
         summary=summary,
     )
+
+
+@router.post("/api/copilot/roles/{role_name}/test-sdk")
+async def test_copilot_role_sdk(role_name: str) -> dict[str, Any]:
+    """Execute a specialized Claude SDK tool-call verification test on the role's targets."""
+    from fastapi import HTTPException
+
+    from app.routers.llm import (
+        _load_roles_or_empty,
+        _materialize_role_for_response,
+        _persist_copilot_sdk_probe_success,
+        _probe_copilot_sdk_tool_call,
+        _role_test_targets,
+    )
+    from app.services.llm_credentials import load_credentials
+
+    data = _load_roles_or_empty()
+    role = data.roles.get(role_name)
+    if role is None:
+        raise HTTPException(status_code=404, detail=f"Unknown LLM role: {role_name}")
+
+    credentials = load_credentials()
+    role = _materialize_role_for_response(role, credentials)
+    targets = _role_test_targets(role, credentials)
+    if not targets:
+        raise HTTPException(status_code=400, detail=f"No active routes for role: {role_name}")
+
+    results = []
+    for target in targets:
+        result = await _probe_copilot_sdk_tool_call(target.endpoint, target.route)
+        if result.status == "ok":
+            _persist_copilot_sdk_probe_success(target.route, target.endpoint, result)
+        results.append({
+            "route_id": target.route.route_id,
+            "status": result.status,
+            "message": result.message,
+        })
+
+    success = any(res["status"] == "ok" for res in results)
+    return {
+        "role_name": role_name,
+        "status": "ok" if success else "failed",
+        "results": results,
+    }

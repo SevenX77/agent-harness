@@ -139,27 +139,28 @@ def test_migrate_v3_credentials_to_v4_preserves_secret_and_models(tmp_path: Path
 
 
 def test_migrate_v3_credentials_normalizes_known_endpoint_ids(tmp_path: Path) -> None:
+    from graph_agent_gateway.registry.endpoints import legacy_v3_endpoint_id
+
     path = tmp_path / "llm_credentials.json"
+    legacy_provider = {
+        "id": "98593eb6-764b-497e-808d-6610935f0e0a",
+        "name": "OpenRouter",
+        "provider_type": "openai_compatible",
+        "base_url": "https://openrouter.ai/api",
+        "api_key": "openrouter-secret",
+        "last_test_status": "ok",
+        "available_models": [
+            {
+                "id": "anthropic/claude-sonnet-4-6",
+                "capabilities": {"display_name": "Claude Sonnet 4.6"},
+            }
+        ],
+    }
     path.write_text(
         json.dumps(
             {
                 "schema_version": 3,
-                "providers": [
-                    {
-                        "id": "98593eb6-764b-497e-808d-6610935f0e0a",
-                        "name": "OpenRouter",
-                        "provider_type": "openai_compatible",
-                        "base_url": "https://openrouter.ai/api",
-                        "api_key": "openrouter-secret",
-                        "last_test_status": "ok",
-                        "available_models": [
-                            {
-                                "id": "anthropic/claude-sonnet-4-6",
-                                "capabilities": {"display_name": "Claude Sonnet 4.6"},
-                            }
-                        ],
-                    }
-                ],
+                "providers": [legacy_provider],
             }
         ),
         encoding="utf-8",
@@ -167,7 +168,8 @@ def test_migrate_v3_credentials_normalizes_known_endpoint_ids(tmp_path: Path) ->
 
     migrated = migrate_v3_credentials_to_v4(path)
 
-    assert "openrouter-prod" in migrated.provider_endpoints
+    assert legacy_v3_endpoint_id(legacy_provider) == "openrouter-prod"
+    assert legacy_v3_endpoint_id(legacy_provider) in migrated.provider_endpoints
     assert "98593eb6-764b-497e-808d-6610935f0e0a" not in migrated.provider_endpoints
     assert "openrouter-prod:anthropic.claude-sonnet-4-6" in migrated.provider_routes
 

@@ -137,9 +137,10 @@ function summarizeProviderStates(providerModels: ProviderModelOption[]): ModelGr
     return summary
   }, {
     ready: 0,
+    historical_ready: 0,
     untested: 0,
+    failed: 0,
     cooling_down: 0,
-    needs_setup: 0,
     off: 0,
   })
 }

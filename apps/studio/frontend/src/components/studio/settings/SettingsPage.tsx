@@ -80,9 +80,11 @@ function errorText(error: unknown): string {
 function modelInfoEvidenceRank(model: ModelInfo): number {
   if (
     model.status === "verified" ||
+    model.status === "ready" ||
     (model.verified_profile_count ?? 0) > 0 ||
     (model.verified_profiles ?? []).some((profile) => profile.status === "ready")
   ) return 4
+  if (model.status === "historical_ready") return 3
   if (model.status === "failed") return 3
   if (model.status === "disabled") return 2
   if (model.status === "testing") return 1
@@ -150,7 +152,9 @@ export function officialProviderTestSummary(models: ModelInfo[]): {
   kind: "success" | "warning"
   message: string
 } {
-  const verifiedCount = models.filter((model) => model.status === "verified").length
+  const verifiedCount = models.filter((model) => (
+    model.status === "verified" || model.status === "ready"
+  )).length
   const notVerifiedCount = Math.max(0, models.length - verifiedCount)
   if (verifiedCount === 0) {
     return {
@@ -426,7 +430,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         })
         .catch(() => {})
 
-      if (activeTab === "llm_roles" && rolesDataRef.current) {
+      if ((activeTab === "llm_roles" || activeTab === "copilot") && rolesDataRef.current) {
         Promise.all([getRoles(), getModelGroups()])
           .then(([next, nextModelGroups]) => {
             setRolesData(next)
@@ -530,7 +534,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   }, [activeTab])
 
   useEffect(() => {
-    if (activeTab !== "llm_roles" || rolesData) return
+    if ((activeTab !== "llm_roles" && activeTab !== "copilot") || rolesData) return
     let cancelled = false
     Promise.all([getRoles(), getModelGroups()])
       .then(([next, nextModelGroups]) => {
@@ -547,7 +551,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   }, [activeTab, rolesData])
 
   useEffect(() => {
-    if (activeTab !== "llm_roles" || !rolesData) return
+    if ((activeTab !== "llm_roles" && activeTab !== "copilot") || !rolesData) return
     if (!modelGroupsReferenceMissingCredentialProviders(modelGroups, credentials)) return
     void refreshLoadedLlmRolesProjection({
       rolesLoaded: true,
@@ -786,6 +790,15 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     }
   }, [cancelRolesSave, flushRolesSave])
 
+  const refreshRolesProjection = useCallback(async () => {
+    await refreshLoadedLlmRolesProjection({
+      rolesLoaded: Boolean(rolesDataRef.current),
+      setModelGroups,
+      setRolesData,
+      setRolesError,
+    })
+  }, [])
+
   return (
     <SettingsPageContent
       activeTab={activeTab}
@@ -820,6 +833,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       onDeleteRole={deleteRoleByName}
       onDeleteModelBundle={deleteModelBundleById}
       onBeforeRoleTest={flushRolesSave}
+      onAfterRoleTest={refreshRolesProjection}
     />
   )
 }

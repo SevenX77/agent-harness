@@ -6,6 +6,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+FALLBACK_EVENT_CODE = "[F-v3-gateway-llm-fallback]"
+
+
 @dataclass(frozen=True)
 class LLMFallbackEvent:
     """Structured fallback event emitted by Gateway runtime."""
@@ -14,7 +17,7 @@ class LLMFallbackEvent:
     from_provider: str
     to_provider: str
     reason: str
-    code: str | None = None
+    code: str = field(default=FALLBACK_EVENT_CODE, init=False)
     context: dict[str, Any] = field(default_factory=dict)
     event_type: str = field(default="llm_fallback", init=False)
 

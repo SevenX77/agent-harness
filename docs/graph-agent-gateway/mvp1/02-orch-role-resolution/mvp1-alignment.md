@@ -2,13 +2,17 @@
 module: 02-orch-role-resolution
 doc: mvp1-alignment
 status: drafted
+binds_design: ./baseline.md
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:resolve_role · packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:ModelResolver · apps/studio/backend/app/services/gateway_resolver.py:build_gateway_model_resolver · apps/studio/backend/app/services/llm_role_materializer.py:materialize_role
+units: [role-resolution-materialize]
+aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
 
 # 02 — Role Resolution（角色 → 路线解析）· MVP1 设计
 
 > **Tier**：③b gateway 公共能力内核（`resolve_role` 已在包内；materialize 编排内核现散 ③a 待下沉）
 > **Owns**：接收角色编排结构（fallback_chain + 意图），解析成有序可执行 `ResolvedRoute` 链 + 跳过诊断；**不调模型**
-> **Status**：设计定稿（2026-06 判据第四轮反转）；代码 = resolve_role 待补跳过语义 + route 级 API、materialize 待下沉
+> **Status**：设计定稿（2026-06 判据第四轮反转）；代码 = resolve_role 普通链跳过语义与 skipped diagnostics 已落地，materialize 待下沉
 > **Related**：[[01-handoff-interface]]（route 契约）· [[04-orch-registry-schema]]（schema 权威源）· [[05-orch-capabilities-and-models]]（capability/lint）· [[08-orch-test-status-ssot]]（6 态投影，materialize 消费）· studio copilot（copilot SDK 调用 = ③a，见 `docs/studio/mvp1/02_capabilities/copilot-assist/` + `00_settings-ux-spec.md` §3.8）
 > **决策依据**：client 层 A' 重设计决策（D1 A' / D2 编排-调用分离，完整逻辑 + PM 原话见各功能段 F4/F5）+ 归属表 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`
 > **现状**：见同目录 `baseline.md`
@@ -28,7 +32,7 @@ MVP1 目标：把 role→route 变成一等编排 API。编排层只返回有序
 |---|---|
 | **③a → ③b（materialize 入参）** | 角色编排结构 `RoleEntry`{ model_groups（候选 + 意图 thinking/token + fallback 开关）}。③b **看得到**"编排结构 + 意图"（通用），**看不到**"用户怎么 UI 编辑出它"（③a 应用加工）。 |
 | **materialize → resolve_role** | `RegistrySnapshot.RoleEntry.fallback_chain` = `RoleRouteEntry[]`（`route_id` + `runtime_settings`）。 |
-| **resolve_role 输出** | `ResolvedRole`{ `routes`: `ResolvedRoute[]`（protocol/base_url/credential_ref/provider_model_id/effective settings，字段权威源 `registry/schema.py:415-439`）, `runtime_policy`, `lint_results`, `source_profile`, **`skipped_diagnostics`（待补字段，`schema.py:448-459`）** }。 |
+| **resolve_role 输出** | `ResolvedRole`{ `routes`: `ResolvedRoute[]`（protocol/base_url/credential_ref/provider_model_id/effective settings，字段权威源 `registry/schema.py:415-439`）, `runtime_policy`, `lint_results`, `source_profile`, **`skipped_diagnostics`（已落地，`list[SkippedRoute]`，`schema.py:448-476`）** }。 |
 | **两级对外 API（③b 公共）** | ① role 级 `ModelResolver.resolve(role_name, model_override)` → `BaseChatModel`（已有 `resolver.py:73-146`）；② **route 级 `resolve_routes(role_name, model_override)` → `ResolvedRole`（待补，契约由 [[01-handoff-interface]] 钉死）**。 |
 | **错误** | role 不存在 / 过滤后空链 → `RegistryResolutionError`（配置错误，**非** 后置 `AllProvidersFailedError`）；`route_override` 坏 route → fail-fast。 |
 | **归属 / 稳定性** | `ResolvedRoute`/`ResolvedRole` 字段权威源 = [[04-orch-registry-schema]]（`registry/schema.py`）；本模块**只链接不复制**，防 drift。 |
@@ -56,17 +60,17 @@ MVP1 目标：把 role→route 变成一等编排 API。编排层只返回有序
 
 ### F2 fallback 链跳过坏 route + 过滤后空链报错 + skipped diagnostics
 
-- **机制/数据流**：`resolve_role` 遇到普通 fallback 链 entry 的 route missing、route disabled/failed、endpoint missing、credential missing 时，目标语义是**记录 warning/skipped diagnostic 并继续下一条**；当前这些点是直接抛错，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:56-71`。`resolve_role` 过滤后如果没有任何 route，目标语义是抛 `RegistryResolutionError` 并带 skipped summary；当前纯函数会返回空 `ResolvedRole`，空链错误由 `ModelResolver.resolve` 后置抛出，见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:104-109`。
-- **决策+动机**：**跳过普通 fallback 链里的坏 route**：fallback chain 的意义是"按顺序尝试候选"；第一条暂未配置时直接崩，会破坏后续已配置 route 的执行机会，当前崩点见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:56-71`。
+- **机制/数据流**：`resolve_role` 遇到普通 fallback 链 entry 的 route missing、route disabled/failed、endpoint missing、credential missing、profile unavailable 时，会记录 `SkippedRoute` 并继续下一条;相同错误如果来自 `route_override` 则 fail-fast，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:60-140`。`resolve_role` 过滤后如果没有任何 route，会抛 `RegistryResolutionError` 并带 skipped summary，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:212-219`。
+- **决策+动机**：**跳过普通 fallback 链里的坏 route**：fallback chain 的意义是"按顺序尝试候选"；第一条暂未配置时直接崩，会破坏后续已配置 route 的执行机会。当前 resolver 已按该语义追加 `skipped_diagnostics` 并继续，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:67-140`。
 - **原话**：（跳过语义为机制驱动，无单独 PM 原话；归属判据原话见 F4，编排/调用分离原话见 F5）
-- **status**：runtime `resolve_role` 尚未跳过普通链上的未配置/不可执行 entry，当前是直接抛 `RegistryResolutionError`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:56-71`；skipped diagnostics 没有 schema 字段，`ResolvedRole` 当前只有 `lint_results/source_profile` 等字段，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:448-459`。两者 = target。
+- **status**：runtime `resolve_role` 已跳过普通链上的未配置/不可执行 entry，并把 skipped diagnostics 写入 `ResolvedRole.skipped_diagnostics`;`SkippedRoute` 和 `ResolvedRole.skipped_diagnostics` 已在 schema 中落地，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:57-140`、`packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:198-227` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:448-476`。
 - **测试点**：
   - **跳过语义**：`fallback_chain` 第一条 route = `failed` → 后续 route **仍被解析进链**（防回归成"第一坏就崩"）。
   - **过滤后空链**：全部候选不可用 → `RegistryResolutionError` 带 skipped summary（**不是**后置 `AllProvidersFailedError`）。
   - **skipped diagnostics**：被跳过的 route 进诊断字段（Studio/trace 能看到"哪些 route 被跳过、为什么"，不只最终失败）。
 - **gaps / 待办**：
-  - 给 `ResolvedRole` 增加 skipped diagnostics 字段，记录 route missing/status/endpoint/credential/profile/lint 的跳过原因；当前字段列表见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:448-459`。
-  - 把普通 fallback 链的不可执行 entry 改为 warning + continue，把 override 的不可执行 entry 保持 fail-fast（override 见 F3）；当前普通链与 override 共用同一抛错分支，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:45-75`。
+  - 已落地: `ResolvedRole.skipped_diagnostics` 字段记录 route missing/status/endpoint/credential/profile/lint 的跳过原因，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:448-476`。
+  - 已落地:普通 fallback 链的不可执行 entry 会记录 skipped diagnostic 并继续，override 的不可执行 entry 保持 fail-fast，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:60-140`。
 - **归属**：region/platform ③b `packages/graph-agent-gateway`（`resolve_role` 跳过语义 + `ResolvedRole` skipped_diagnostics 契约）。
 
 ### F3 `model_override` 精确 route override（fail-fast）
@@ -113,12 +117,12 @@ MVP1 目标：把 role→route 变成一等编排 API。编排层只返回有序
 
 ### F6 capability lint（`lint_role_routes`；不做动态替代选择）
 
-- **机制/数据流**：`lint_role_routes`（对 role 的 route 链做 capability lint）仍只在可执行 route 集合上运行；blocking lint 应让该 role 解析失败或让对应 route 被跳过，这取决于 lint severity 的产品语义，当前 blocking 直接抛错，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:116-122`。
+- **机制/数据流**：`lint_role_routes`（对 role 的 route 链做 capability lint）仍只在可执行 route 集合上运行；普通 fallback 链的 blocking lint 会把对应 route 记入 `skipped_diagnostics(reason_code="lint_blocked")` 并继续，其余 route 保留;`route_override` 的 blocking lint 仍 fail-fast，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:182-210`。
 - **决策+动机**：**runtime resolver 不做动态替代选择**：capability 只能 lint/warn/block，不能按能力自动找别的 route；MVP1 README 的编排层描述要求 role→route 确定性解析，见 `docs/graph-agent-gateway/mvp1/README.md:13-18`、`:27`。**注**：下沉 materialize/capability 到 ③b ≠ 引入动态选型——它们是分类/能力描述，runtime 仍按显式 `route_id` 执行。
 - **原话**：（capability/lint 不做动态替代为确定性解析原则，无单独 PM 原话；归属判据原话见 F4。）
-- **status**：blocking lint 当前在全部 route 解析后抛 role 级错误，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:116-122`。
+- **status**：blocking lint 的普通链跳过语义已落地;resolver 会移除被 blocking lint 命中的 route 并追加 `SkippedRoute(reason_code="lint_blocked")`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:182-210`。
 - **测试点**：（blocking lint 的"整 role 失败 vs 跳该 route 继续"语义待定，见 gaps；capability 不做动态选型——runtime 仍按显式 `route_id` 执行。）
-- **gaps / 疑点**：blocking lint 是"整个 role 配置错误"还是"该 route 跳过后继续下一条"。当前 blocking lint 在全部 route 解析后抛 role 级错误，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:116-122`。
+- **gaps / 疑点**：✅ **已落地（PM 2026-06-04 决策）= 跳过该 route、继续下一条**（非整 role 失败）。resolver 会标记该 route 跳过(进 `skipped_diagnostics`)、继续下一条；空链才抛 `RegistryResolutionError`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:198-219`。
 - **归属**：region/platform ③b `packages/graph-agent-gateway`（lint 在可执行 route 集合上运行）；capability/lint 权威源 [[05-orch-capabilities-and-models]]（materialize 消费）。
 
 ---
@@ -129,9 +133,9 @@ MVP1 目标：把 role→route 变成一等编排 API。编排层只返回有序
 
 - **代码下沉**（后续工程，非本轮）：materialize 编排内核 → gateway 包；report 渲染留 studio。（详见 F4）
 - **待办**：新增 `ModelResolver.resolve_routes`（route→route 一等 API 返回 `ResolvedRole` 而非 chat model），并让 Copilot/registry response 复用它；当前这些路径直接调用 pure helper，见 `apps/studio/backend/app/services/copilot.py:419-437`、`apps/studio/backend/app/routers/llm.py:4588-4603`。（详见 F5）
-- **待办**：给 `ResolvedRole` 增加 skipped diagnostics 字段，记录 route missing/status/endpoint/credential/profile/lint 的跳过原因；当前字段列表见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:448-459`。（详见 F2）
-- **待办**：把普通 fallback 链的不可执行 entry 改为 warning + continue，把 override 的不可执行 entry 保持 fail-fast；当前普通链与 override 共用同一抛错分支，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:45-75`。（详见 F2/F3）
-- **疑点**：blocking lint 是"整个 role 配置错误"还是"该 route 跳过后继续下一条"。当前 blocking lint 在全部 route 解析后抛 role 级错误，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:116-122`。（详见 F6）
+- **已落地**：`ResolvedRole.skipped_diagnostics` 字段记录 route missing/status/endpoint/credential/profile/lint 的跳过原因，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:448-476`。（详见 F2）
+- **已落地**：普通 fallback 链的不可执行 entry 会记录 skipped diagnostic 并继续，override 的不可执行 entry 保持 fail-fast，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:60-140`。（详见 F2/F3）
+- ✅ **已落地（PM 2026-06-04 决策）**：blocking lint = **跳过该 route、继续下一条**（不让整个 role 失败）——与 fallback"跳坏 route"语义一致；resolver 会标记该 route 跳过(进 `skipped_diagnostics`)、继续；**全部候选被跳过(空链)才**抛配置错误 `RegistryResolutionError`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:198-219`。（详见 F6）
 
 ## 交叉引用（链接，不复制）
 
@@ -145,11 +149,11 @@ MVP1 目标：把 role→route 变成一等编排 API。编排层只返回有序
 
 ## 附录 A — 已实现 / 与 baseline 差异（模块级证据）
 
-- **已实现**：role→route 的纯数据形态已经存在。`ResolvedRoute`（一条 runtime-ready route candidate）包含 protocol/base_url/credential/provider_model/effective settings，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:415-439`；`ResolvedRole`（解析后的 role 元数据和有序 routes）包含 routes/runtime_policy/lint/source profile，见 `:448-459`。
+- **已实现**：role→route 的纯数据形态已经存在。`ResolvedRoute`（一条 runtime-ready route candidate）包含 protocol/base_url/credential/provider_model/effective settings，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:415-439`；`ResolvedRole`（解析后的 role 元数据和有序 routes）包含 routes/runtime_policy/lint/skipped_diagnostics/source profile，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:466-478`。
 - **已实现**：Copilot 内部已经按"编排只给 route，调用方自己调"的方向使用 `resolve_role`，见 `apps/studio/backend/app/services/copilot.py:419-437`；真正调用发生在 `stream_query` 里遍历 routes 并创建 Claude SDK session，见 `:218-263`。
-- **未实现**：runtime `resolve_role` 尚未跳过普通链上的未配置/不可执行 entry，当前是直接抛 `RegistryResolutionError`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:56-71`。
+- **已实现**：runtime `resolve_role` 已跳过普通链上的未配置/不可执行 entry，并把跳过原因写入 `skipped_diagnostics`;过滤后空链才抛 `RegistryResolutionError`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:60-140` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:212-219`。
 - **未实现**：route-only API 还不是 `ModelResolver` 的公开方法。现在 Engine 协议只有 `ModelResolverProtocol.resolve` 返回 `BaseChatModel`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/protocol.py:24-39`。
-- **未实现**：skipped diagnostics 没有 schema 字段。`ResolvedRole` 当前只有 `lint_results/source_profile` 等字段，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:448-459`。
+- **已实现**：skipped diagnostics 已有 schema 字段。`SkippedRoute` 定义跳过原因结构，`ResolvedRole.skipped_diagnostics` 保存 `list[SkippedRoute]`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:448-476`。
 
 ## 附录 B — 覆盖代码（含覆盖率，模块级证据）
 

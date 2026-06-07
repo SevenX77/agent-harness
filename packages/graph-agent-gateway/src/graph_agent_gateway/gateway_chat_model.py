@@ -23,6 +23,7 @@ from pydantic import ConfigDict, Field
 from graph_agent_gateway.exceptions import AllProvidersFailedError
 from graph_agent_gateway.registry.error_classification import classify_exception
 from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute
+from graph_agent_gateway.route_chat_model_factory import RouteChatModelFactory
 from graph_agent_gateway.tracing import emit_llm_fallback_event
 
 ToolSpec = dict[str, Any] | type | Callable[..., object] | BaseTool
@@ -102,7 +103,7 @@ class GatewayChatModel(BaseChatModel):
     ) -> ChatResult:
         del stop, run_manager
         request_messages = _apply_system_prompt_prefix(
-            _langchain_messages_to_dict(messages),
+            messages,
             self.resolved_role.system_prompt_prefix,
         )
         failures: list[dict[str, Any]] = []
@@ -139,7 +140,6 @@ class GatewayChatModel(BaseChatModel):
                         from_provider=candidate_id,
                         to_provider=self._next_candidate_id(index + 1),
                         reason=f"{type(exc).__name__}: {exc}",
-                        code="[F-v3-gateway-all-providers-failed]",
                         context=self._fallback_event_context(
                             candidate,
                             index + 1,
@@ -177,7 +177,6 @@ class GatewayChatModel(BaseChatModel):
                         from_provider=candidate_id,
                         to_provider=self._next_candidate_id(index + 1),
                         reason="RuntimeError: probe failed",
-                        code="[F-v3-gateway-all-providers-failed]",
                         context=self._fallback_event_context(
                             candidate,
                             index + 1,
@@ -253,7 +252,6 @@ class GatewayChatModel(BaseChatModel):
                     from_provider=candidate_id,
                     to_provider=self._next_candidate_id(index + 1),
                     reason=f"{type(exc).__name__}: {exc}",
-                    code="[F-v3-gateway-all-providers-failed]",
                     context=self._fallback_event_context(
                         candidate,
                         index + 1,
@@ -312,9 +310,12 @@ class GatewayChatModel(BaseChatModel):
 
     def _build_chat_result(
         self,
-        response: Mapping[str, object],
+        response: Mapping[str, object] | AIMessage,
         candidate: ResolvedRoute,
     ) -> ChatResult:
+        if isinstance(response, AIMessage):
+            return self._build_chat_result_from_ai_message(response, candidate)
+
         usage = _usage_from_response(response)
         finish_reason = _optional_text(response.get("finish_reason"))
         message = AIMessage(
@@ -331,6 +332,53 @@ class GatewayChatModel(BaseChatModel):
                 "effective_runtime_settings": _runtime_settings_metadata(candidate),
             },
         )
+        return ChatResult(
+            generations=[
+                ChatGeneration(
+                    message=message,
+                    generation_info={
+                        "finish_reason": finish_reason,
+                        "route_id": candidate.route_id,
+                        "endpoint_id": candidate.endpoint_id,
+                        "model": candidate.provider_model_id,
+                        "canonical_id": candidate.canonical_id,
+                        "protocol": candidate.protocol,
+                    },
+                )
+            ],
+            llm_output={
+                "token_usage": usage,
+                "model_name": candidate.provider_model_id,
+                "route_id": candidate.route_id,
+                "endpoint_id": candidate.endpoint_id,
+                "canonical_id": candidate.canonical_id,
+                "protocol": candidate.protocol,
+                "effective_runtime_settings": _runtime_settings_metadata(candidate),
+            },
+        )
+
+    def _build_chat_result_from_ai_message(
+        self,
+        response: AIMessage,
+        candidate: ResolvedRoute,
+    ) -> ChatResult:
+        usage = _usage_from_ai_message(response)
+        provider_metadata = dict(response.response_metadata or {})
+        finish_reason = _optional_text(
+            provider_metadata.get("finish_reason") or provider_metadata.get("stop_reason")
+        )
+        response_metadata = {
+            **provider_metadata,
+            "route_id": candidate.route_id,
+            "endpoint_id": candidate.endpoint_id,
+            "model": candidate.provider_model_id,
+            "canonical_id": candidate.canonical_id,
+            "protocol": candidate.protocol,
+            "finish_reason": finish_reason,
+            "usage": usage,
+            "effective_runtime_settings": _runtime_settings_metadata(candidate),
+        }
+        message = response.model_copy(update={"response_metadata": response_metadata})
         return ChatResult(
             generations=[
                 ChatGeneration(
@@ -474,24 +522,68 @@ def _probe(
 def _dispatch(
     client_manager: Any,
     candidate: ResolvedRoute,
-    messages: list[dict[str, Any]],
+    messages: list[BaseMessage],
     **kwargs: Any,
-) -> Mapping[str, object]:
-    manager = _manager(client_manager)
+) -> AIMessage:
+    del client_manager
     credential_provider = kwargs.pop("credential_provider", None)
-    if credential_provider is not None and _supports_credential_provider(
-        manager.dispatch_provider_call
-    ):
-        response = manager.dispatch_provider_call(
-            candidate,
-            messages,
-            credential_provider=credential_provider,
-            **kwargs,
+    runtime_policy = kwargs.pop("runtime_policy", None)
+    tools = kwargs.pop("tools", None)
+    tool_choice = kwargs.pop("tool_choice", None)
+    factory = RouteChatModelFactory(credential_provider=credential_provider)
+    return _invoke_with_token_escalation(
+        factory,
+        candidate,
+        messages,
+        runtime_policy=runtime_policy,
+        tools=tools,
+        tool_choice=tool_choice,
+        **kwargs,
+    )
+
+
+def _invoke_with_token_escalation(
+    factory: Any,
+    candidate: ResolvedRoute,
+    messages: list[BaseMessage],
+    *,
+    runtime_policy: Any = None,
+    tools: list[dict[str, object]] | None = None,
+    tool_choice: str | None = None,
+    **kwargs: Any,
+) -> AIMessage:
+    rounds = int(getattr(runtime_policy, "token_escalation_rounds", 0) or 0)
+    token_budget = _int_kwarg(kwargs.get("max_tokens"), 1)
+    cap = _max_output_token_cap(candidate)
+
+    for attempt in range(rounds + 1):
+        build_kwargs = {
+            key: value
+            for key, value in kwargs.items()
+            if value is not None
+        }
+        build_kwargs["max_tokens"] = token_budget
+        chat_model = factory.build(candidate, **build_kwargs)
+        if tools and hasattr(chat_model, "bind_tools"):
+            if tool_choice is not None:
+                chat_model = chat_model.bind_tools(tools, tool_choice=tool_choice)
+            else:
+                chat_model = chat_model.bind_tools(tools)
+        raw_response = chat_model.invoke(messages)
+        response: AIMessage = (
+            raw_response
+            if isinstance(raw_response, AIMessage)
+            else AIMessage(content=str(raw_response))
         )
-    else:
-        response = manager.dispatch_provider_call(candidate, messages, **kwargs)
-    if not isinstance(response, Mapping):
-        return {"content": str(response), "usage": {}}
+        if not _is_truncated_response(response) or attempt >= rounds:
+            return response
+        next_budget = token_budget * 2
+        if cap is not None:
+            next_budget = min(next_budget, cap)
+        if next_budget <= token_budget:
+            return response
+        token_budget = next_budget
+
     return response
 
 
@@ -512,7 +604,9 @@ def _mark_down(
     manager.mark_provider_down(candidate, exc, runtime_policy)
 
 
-def _usage_from_response(response: Mapping[str, object]) -> dict[str, int]:
+def _usage_from_response(response: Mapping[str, object] | AIMessage) -> dict[str, int]:
+    if isinstance(response, AIMessage):
+        return _usage_from_ai_message(response)
     usage = response.get("usage")
     if not isinstance(usage, Mapping):
         return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
@@ -526,6 +620,40 @@ def _usage_from_response(response: Mapping[str, object]) -> dict[str, int]:
         "completion_tokens": completion_tokens,
         "total_tokens": total_tokens,
     }
+
+
+def _usage_from_ai_message(response: AIMessage) -> dict[str, int]:
+    usage = getattr(response, "usage_metadata", None)
+    if not isinstance(usage, Mapping):
+        return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    prompt_tokens = _int_value(usage.get("input_tokens") or usage.get("prompt_tokens"))
+    completion_tokens = _int_value(
+        usage.get("output_tokens") or usage.get("completion_tokens")
+    )
+    total_tokens = _int_value(usage.get("total_tokens"))
+    if total_tokens == 0:
+        total_tokens = prompt_tokens + completion_tokens
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+    }
+
+
+def _is_truncated_response(response: AIMessage) -> bool:
+    metadata = response.response_metadata or {}
+    finish_reason = str(
+        metadata.get("finish_reason") or metadata.get("stop_reason") or ""
+    ).lower()
+    return finish_reason in {"length", "max_tokens", "max_output_tokens"}
+
+
+def _max_output_token_cap(candidate: ResolvedRoute) -> int | None:
+    capability = candidate.capabilities.get("max_output_tokens")
+    value = getattr(capability, "value", None)
+    if isinstance(value, int | float) and value > 0:
+        return int(value)
+    return None
 
 
 def _int_value(value: object) -> int:
@@ -693,18 +821,18 @@ def _langchain_messages_to_dict(messages: list[BaseMessage]) -> list[dict[str, A
 
 
 def _apply_system_prompt_prefix(
-    messages: list[dict[str, Any]],
+    messages: list[BaseMessage],
     system_prompt_prefix: str,
-) -> list[dict[str, Any]]:
+) -> list[BaseMessage]:
     prefix = system_prompt_prefix.strip()
     if not prefix:
-        return messages
-    if messages and messages[0].get("role") == "system":
-        merged = dict(messages[0])
-        content = _coerce_text(merged.get("content"))
-        merged["content"] = f"{prefix}\n\n{content}".strip() if content else prefix
+        return list(messages)
+    if messages and isinstance(messages[0], SystemMessage):
+        content = _coerce_text(messages[0].content)
+        merged_content = f"{prefix}\n\n{content}".strip() if content else prefix
+        merged = messages[0].model_copy(update={"content": merged_content})
         return [merged, *messages[1:]]
-    return [{"role": "system", "content": prefix}, *messages]
+    return [SystemMessage(content=prefix), *messages]
 
 
 def _normalise_tool(tool: ToolSpec) -> dict[str, object]:

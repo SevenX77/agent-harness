@@ -1,5 +1,5 @@
 import { memo } from "react"
-import { Bot, Cog, Plus, type LucideIcon } from "lucide-react"
+import { Cog, Plus, type LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   CatalogAccordion,
@@ -66,7 +66,7 @@ export const RoleCardList = memo(function RoleCardList({
     <div className="space-y-4" data-lazy-list="roles">
       <CatalogAccordion
         type="multiple"
-        defaultValue={["graph-agent", "copilot"]}
+        defaultValue={["graph-agent"]}
       >
         {roleGroups.map((group) => (
           <CatalogAccordionItem
@@ -162,22 +162,15 @@ function roleCategoryGroups(data: RolesData, visibleRoleNames: string[], allRole
       Icon: Cog,
       roles: [],
     },
-    {
-      category: "copilot",
-      label: "Copilot Roles",
-      emptyLabel: "Copilot roles",
-      addTitle: "Copilot Role",
-      initialRoleName: "copilot_",
-      Icon: Bot,
-      roles: [],
-    },
   ]
   const visibleRoleSet = new Set(visibleRoleNames)
 
   for (const roleName of allRoleNames) {
     if (!visibleRoleSet.has(roleName)) continue
     const category = roleCategoryForRole(data, roleName)
-    groups.find((group) => group.category === category)?.roles.push(roleName)
+    if (category === "graph-agent") {
+      groups[0].roles.push(roleName)
+    }
   }
 
   return groups

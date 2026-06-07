@@ -227,3 +227,180 @@ export const mockCopilotRoles: CopilotRolePreview[] = [
     ],
   },
 ]
+
+import type { ModelGroup, CredentialsState, ProviderModelOption } from "@/api/llm"
+
+export function buildCopilotRolesFromRealData(
+  modelGroups: ModelGroup[],
+  credentials: CredentialsState,
+): CopilotRolePreview[] {
+  const isCompatibleRoute = (pm: ProviderModelOption) => {
+    const provider = credentials.providers.find((p) => p.id === pm.endpoint_id)
+    if (!provider) return false
+    return provider.provider_type === "anthropic" || provider.provider_type === "anthropic_compatible"
+  }
+
+  return modelGroups
+    .filter((group) => {
+      return group.provider_models.some(isCompatibleRoute)
+    })
+    .map((group): CopilotRolePreview => {
+      const isOpus47 = group.canonical_id === "claude-opus-4.7" || group.canonical_id === "claude-opus-4-7"
+      const isBuiltIn = isOpus47 || group.canonical_id === "deepseek-v4-pro"
+
+      const availableRoutes: CopilotRoutePreview[] = group.provider_models
+          .filter((pm) => pm.ui_state !== "off" && pm.ui_state !== "failed")
+          .map((pm): CopilotRoutePreview => {
+            let agentStatus: CopilotAgentStatus = "not_tested"
+            if (pm.ui_state === "ready") agentStatus = "ready"
+
+            let methodId = "anthropic_messages"
+            if (pm.provider_label.toLowerCase().includes("deepseek")) {
+              methodId = "deepseek_anthropic_messages"
+            } else if (pm.provider_label.toLowerCase().includes("ark")) {
+              methodId = "ark_anthropic_messages"
+            }
+
+            return {
+              id: pm.route_id,
+              provider: pm.provider_label,
+              modelId: pm.provider_model_id,
+              endpoint: pm.ui_detail || "",
+              methodId: methodId,
+              adapter: pm.provider_label.toLowerCase().includes("deepseek") ? "DeepSeek Anthropic" : "Standard Anthropic",
+              providerApiStatus: "ready" as const,
+              agentStatus: agentStatus,
+              capabilities: Object.keys(pm.capabilities),
+            }
+          })
+
+      let title = group.display_name || group.canonical_id
+      if (isOpus47) title = "Opus 4.7 Copilot"
+      if (group.canonical_id === "deepseek-v4-pro") title = "DeepSeek V4 Copilot"
+      if (group.canonical_id === "claude-sonnet-4-7" || group.canonical_id === "claude-sonnet-4.7") title = "Claude Sonnet 4.7 Copilot"
+
+      return {
+        id: group.canonical_id,
+        title: title,
+        modelLabel: group.canonical_id,
+        description: `Coding copilot role for ${group.display_name}.`,
+        sdkId: "claude-agent-sdk" as const,
+        source: isBuiltIn ? ("built_in" as const) : ("third_party" as const),
+        fallbackEnabled: false,
+        activeRouteIds: availableRoutes.map((r) => r.id),
+        availableRoutes: availableRoutes,
+      }
+    })
+}
+
+export const defaultCopilotCredentials: CredentialsState = {
+  providers: [
+    {
+      id: "anthropic-official",
+      name: "Anthropic Official",
+      api_key: "sk-anthropic",
+      provider_type: "anthropic",
+      last_test_status: "ok",
+    },
+    {
+      id: "deepseek-official",
+      name: "DeepSeek Official",
+      api_key: "sk-deepseek",
+      provider_type: "anthropic_compatible",
+      last_test_status: "ok",
+    },
+    {
+      id: "ark-official",
+      name: "Ark Official",
+      api_key: "sk-ark",
+      provider_type: "anthropic_compatible",
+      last_test_status: "ok",
+    },
+    {
+      id: "qiniu-anthropic",
+      name: "Qiniu Anthropic",
+      api_key: "sk-qiniu",
+      provider_type: "anthropic_compatible",
+      last_test_status: "ok",
+    },
+  ],
+}
+
+export const defaultCopilotModelGroups: ModelGroup[] = [
+  {
+    canonical_id: "claude-opus-4-7",
+    display_name: "Claude Opus 4.7",
+    provider_models: [
+      {
+        route_id: "anthropic-official:claude-opus-4-7",
+        endpoint_id: "anthropic-official",
+        provider_label: "Anthropic Official",
+        provider_kind: "official",
+        provider_model_id: "claude-opus-4-7",
+        ui_state: "ready",
+        capability_state: "known",
+        capabilities: { text: { value: true, source: "probed_verified" } },
+      },
+      {
+        route_id: "qiniu-anthropic:claude-opus-4-7",
+        endpoint_id: "qiniu-anthropic",
+        provider_label: "Qiniu Anthropic",
+        provider_kind: "third_party",
+        provider_model_id: "claude-opus-4-7",
+        ui_state: "untested",
+        capability_state: "unknown",
+        capabilities: {},
+      },
+    ],
+    status_summary: { ready: 1, historical_ready: 0, untested: 1, failed: 0, cooling_down: 0, off: 0 },
+    capability_summary: {
+      capability_known_count: 1,
+      thinking: "supported",
+      tools: "unknown",
+      structured_output: "unknown",
+    },
+  },
+  {
+    canonical_id: "deepseek-v4-pro",
+    display_name: "DeepSeek V4 Pro",
+    provider_models: [
+      {
+        route_id: "deepseek-official:deepseek-v4-pro",
+        endpoint_id: "deepseek-official",
+        provider_label: "DeepSeek Official",
+        provider_kind: "official",
+        provider_model_id: "deepseek-v4-pro",
+        ui_state: "ready",
+        capability_state: "known",
+        capabilities: { text: { value: true, source: "probed_verified" } },
+      },
+      {
+        route_id: "ark-official:deepseek-v4-pro-260425",
+        endpoint_id: "ark-official",
+        provider_label: "Ark Official",
+        provider_kind: "official",
+        provider_model_id: "deepseek-v4-pro-260425",
+        ui_state: "ready",
+        capability_state: "known",
+        capabilities: { text: { value: true, source: "probed_verified" } },
+      },
+      {
+        route_id: "qiniu-anthropic:deepseek-v4-pro",
+        endpoint_id: "qiniu-anthropic",
+        provider_label: "Qiniu Anthropic",
+        provider_kind: "third_party",
+        provider_model_id: "deepseek-v4-pro",
+        ui_state: "untested",
+        capability_state: "unknown",
+        capabilities: {},
+      },
+    ],
+    status_summary: { ready: 2, historical_ready: 0, untested: 1, failed: 0, cooling_down: 0, off: 0 },
+    capability_summary: {
+      capability_known_count: 2,
+      thinking: "supported",
+      tools: "unknown",
+      structured_output: "unknown",
+    },
+  },
+]

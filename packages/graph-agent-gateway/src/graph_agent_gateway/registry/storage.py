@@ -7,6 +7,7 @@ import json
 
 from pydantic import SecretStr
 
+from graph_agent_gateway.registry.base_url import canonicalize_base_url
 from graph_agent_gateway.registry.schema import ProviderEndpoint
 
 
@@ -26,7 +27,7 @@ def compute_credential_fingerprint(
     payload = {
         "endpoint_id": endpoint.endpoint_id,
         "protocol": endpoint.protocol,
-        "base_url": _normalize_base_url(endpoint.base_url),
+        "base_url": _normalize_base_url(endpoint.base_url, endpoint.protocol),
         "secret": secret_value,
         "timeout_seconds": endpoint.timeout_seconds,
         "trust_env": endpoint.trust_env,
@@ -38,5 +39,5 @@ def compute_credential_fingerprint(
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
-def _normalize_base_url(value: str) -> str:
-    return value.strip().rstrip("/")
+def _normalize_base_url(value: str, protocol: str) -> str:
+    return canonicalize_base_url(value, protocol)

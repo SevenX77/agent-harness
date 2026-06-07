@@ -12,24 +12,28 @@ import {
 } from "./role-route-status"
 
 describe("LLM role state badges", () => {
-  it("renders exactly the five provider state labels", () => {
+  it("renders exactly the six provider state labels", () => {
     const html = renderToStaticMarkup(
       <>
         <ProviderStateBadge state="ready" />
+        <ProviderStateBadge state="historical_ready" detail="Previously connected from shared probe evidence." />
         <ProviderStateBadge state="untested" />
         <ProviderStateBadge state="cooling_down" retryAt="2026-05-26T18:30:00Z" />
-        <ProviderStateBadge state="needs_setup" reasonCode="invalid_model" detail="Model does not exist." />
+        <ProviderStateBadge state="failed" reasonCode="model_failed" detail="Model does not exist." />
         <ProviderStateBadge state="off" />
       </>,
     )
 
     expect(html).toContain("Ready")
+    expect(html).toContain("Previously Connected")
     expect(html).toContain("Untested")
     expect(html).toContain("Cooling Down")
-    expect(html).toContain("Needs Setup")
+    expect(html).toContain("Failed")
     expect(html).toContain("Off")
-    expect(html).toContain('data-provider-state-label="needs_setup"')
-    expect(html).not.toContain(">invalid_model<")
+    expect(html).toContain('data-provider-state-label="historical_ready"')
+    expect(html).toContain('data-provider-state-label="failed"')
+    expect(html).not.toContain('data-provider-state-label="needs_setup"')
+    expect(html).not.toContain(">model_failed<")
   })
 
   it("keeps role provider status compact and puts exact diagnostics on the status light", () => {
@@ -138,8 +142,12 @@ describe("LLM role state badges", () => {
       roleFitEntry: { route_id: "blocked:gpt-5", role_fit: "not_fit" },
     })).toBe("blocked")
     expect(deriveRoleRouteStatus({
-      providerModel: providerModel("needs_setup"),
-      roleFitEntry: { route_id: "setup:gpt-5", role_fit: "using" },
+      providerModel: providerModel("historical_ready"),
+      roleFitEntry: { route_id: "historical:gpt-5", role_fit: "using" },
+    })).toBe("limited")
+    expect(deriveRoleRouteStatus({
+      providerModel: providerModel("failed"),
+      roleFitEntry: { route_id: "failed:gpt-5", role_fit: "using" },
     })).toBe("blocked")
     expect(deriveRoleRouteStatus({
       providerModel: readyProvider,

@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import i18n from '../../i18n'
 import {
   CopilotTab,
   SettingsPageContent,
@@ -32,6 +33,7 @@ import {
   visibleRoleNames,
 } from './SettingsPage'
 import type { CredentialsState, ModelGroup, RolesData } from '../../api/llm'
+import { defaultCopilotCredentials, defaultCopilotModelGroups } from './settings/copilot/mock-copilot-data'
 
 const credentials: CredentialsState = {
   providers: [
@@ -115,15 +117,23 @@ const modelGroups: ModelGroup[] = []
 function baseViewProps(
   overrides: Partial<Parameters<typeof SettingsPageContent>[0]> = {},
 ): Parameters<typeof SettingsPageContent>[0] {
+  const mergedActiveTab = overrides.activeTab ?? 'api_keys'
+  const isCopilot = mergedActiveTab === 'copilot'
+  const mergedCredentials = {
+    providers: [
+      ...credentials.providers,
+      ...(isCopilot ? defaultCopilotCredentials.providers : []),
+    ],
+  }
   return {
     activeTab: 'api_keys',
-    credentials,
+    credentials: mergedCredentials,
     credentialsLoading: false,
     credentialsError: null,
-    drafts: draftsFromCredentials(credentials),
+    drafts: draftsFromCredentials(mergedCredentials),
     saveStatus: 'idle',
     rolesData,
-    modelGroups,
+    modelGroups: isCopilot ? defaultCopilotModelGroups : modelGroups,
     rolesSaveStatus: 'idle',
     rolesError: null,
     appSettings: {
@@ -148,9 +158,14 @@ function baseViewProps(
     onDeleteRole: vi.fn(),
     onDeleteModelBundle: vi.fn(),
     onBeforeRoleTest: vi.fn().mockResolvedValue(null),
+    onAfterRoleTest: vi.fn(),
     ...overrides,
   }
 }
+
+afterEach(async () => {
+  await i18n.changeLanguage('en')
+})
 
 describe('draftsFromCredentials', () => {
   it('produces one draft per provider with the persisted plaintext api_key', () => {
@@ -186,7 +201,7 @@ describe('refreshLoadedLlmRolesProjection', () => {
         canonical_id: 'gpt-5',
         display_name: 'GPT-5',
         provider_models: [],
-        status_summary: { ready: 0, untested: 0, cooling_down: 0, needs_setup: 0, off: 0 },
+        status_summary: { ready: 0, historical_ready: 0, untested: 0, failed: 0, cooling_down: 0, off: 0 },
         capability_summary: {
           capability_known_count: 0,
           thinking: 'unknown',
@@ -273,7 +288,7 @@ describe('modelGroupsReferenceMissingCredentialProviders', () => {
             capabilities: {},
           },
         ],
-        status_summary: { ready: 0, untested: 1, cooling_down: 0, needs_setup: 0, off: 0 },
+        status_summary: { ready: 0, historical_ready: 0, untested: 1, failed: 0, cooling_down: 0, off: 0 },
         capability_summary: {
           capability_known_count: 0,
           thinking: 'unknown',
@@ -303,7 +318,7 @@ describe('modelGroupsReferenceMissingCredentialProviders', () => {
             capabilities: {},
           },
         ],
-        status_summary: { ready: 1, untested: 0, cooling_down: 0, needs_setup: 0, off: 0 },
+        status_summary: { ready: 1, historical_ready: 0, untested: 0, failed: 0, cooling_down: 0, off: 0 },
         capability_summary: {
           capability_known_count: 1,
           thinking: 'supported',
@@ -700,6 +715,74 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).not.toContain('Using /Users/alice/Skills')
   })
 
+  it('renders Settings copy from the active locale and switches without refreshing', async () => {
+    await i18n.changeLanguage('en')
+    const englishHtml = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ activeTab: 'general' })} />)
+
+    expect(englishHtml).toContain('General')
+    expect(englishHtml).toContain('Application defaults and collaboration identity. Changes auto-save.')
+    expect(englishHtml).toContain('Language')
+    expect(i18n.t('errors:codes.invalid_api_key')).toBe('API key is invalid or was rejected by the provider.')
+    expect(englishHtml).not.toContain('通用')
+
+    await i18n.changeLanguage('zh-CN')
+    const chineseHtml = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ activeTab: 'general' })} />)
+
+    expect(chineseHtml).toContain('通用')
+    expect(chineseHtml).toContain('应用默认设置和协作身份。修改会自动保存。')
+    expect(chineseHtml).toContain('语言')
+    expect(i18n.t('errors:codes.invalid_api_key')).toBe('API key 无效或被服务商拒绝。')
+
+    await i18n.changeLanguage('en')
+    const englishAgainHtml = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ activeTab: 'general' })} />)
+
+    expect(englishAgainHtml).toContain('General')
+    expect(englishAgainHtml).not.toContain('通用')
+  })
+
+  it('renders the shared save-status badge on all Settings tabs and removes Copilot static integration copy', () => {
+    const cases: Array<{
+      activeTab: 'general' | 'api_keys' | 'llm_roles' | 'copilot'
+      expectedStatus: string
+      expectedText: string
+      props: Partial<Parameters<typeof SettingsPageContent>[0]>
+    }> = [
+      {
+        activeTab: 'general',
+        expectedStatus: 'saving',
+        expectedText: 'Saving',
+        props: { appSettings: { ...baseViewProps().appSettings, saveStatus: 'saving' } },
+      },
+      {
+        activeTab: 'api_keys',
+        expectedStatus: 'pending',
+        expectedText: 'Pending',
+        props: { saveStatus: 'pending' },
+      },
+      {
+        activeTab: 'llm_roles',
+        expectedStatus: 'saved',
+        expectedText: 'Saved',
+        props: { rolesSaveStatus: 'saved' },
+      },
+      {
+        activeTab: 'copilot',
+        expectedStatus: 'error',
+        expectedText: 'Save failed',
+        props: { rolesSaveStatus: 'error' },
+      },
+    ]
+
+    for (const { activeTab, expectedStatus, expectedText, props } of cases) {
+      const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ activeTab, ...props })} />)
+
+      expect(html).toContain('data-save-status-badge="true"')
+      expect(html).toContain(`data-save-status="${expectedStatus}"`)
+      expect(html).toContain(expectedText)
+      expect(html).not.toContain('Backend Integration')
+    }
+  })
+
   it('keeps every Settings tab content constrained within the Settings surface', () => {
     for (const activeTab of ['general', 'api_keys'] as const) {
       const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ activeTab })} />)
@@ -738,7 +821,7 @@ describe('SettingsPageContent (api_keys)', () => {
   })
 
   it('renders the Copilot tab component without depending on LLM Roles data', () => {
-    const html = renderToStaticMarkup(<CopilotTab />)
+    const html = renderToStaticMarkup(<CopilotTab data={rolesData} />)
 
     expect(html).toContain('data-copilot-role-card="true"')
     expect(html.match(/data-copilot-role-card="true"/g)).toHaveLength(2)

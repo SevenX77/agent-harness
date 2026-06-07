@@ -215,6 +215,7 @@ class ProviderRoute(BaseModel):
     provider_model_id: str
     canonical_id: str
     status: RouteStatus = "unverified_manual"
+    snapshot_version: SnapshotVersion | None = None
     capabilities: dict[str, CapabilityValue] = Field(default_factory=dict)
     verified_profiles: list[VerifiedProfile] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -405,6 +406,7 @@ class RegistrySnapshot(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    snapshot_version: SnapshotVersion | None = None
     provider_endpoints: dict[str, ProviderEndpoint] = Field(default_factory=dict)
     provider_routes: dict[str, ProviderRoute] = Field(default_factory=dict)
     runtime_policy: RuntimePolicy = Field(default_factory=RuntimePolicy)
@@ -445,6 +447,24 @@ class ResolvedRoute(BaseModel):
         return self
 
 
+class SkippedRoute(BaseModel):
+    """Skipped route diagnostic record."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    route_id: str
+    reason_code: Literal[
+        "route_missing",
+        "route_not_executable",
+        "endpoint_missing",
+        "credential_missing",
+        "profile_unavailable",
+        "lint_blocked",
+    ]
+    message: str
+    from_override: bool
+
+
 class ResolvedRole(BaseModel):
     """Resolved role metadata and ordered runtime routes."""
 
@@ -455,6 +475,7 @@ class ResolvedRole(BaseModel):
     runtime_policy: RuntimePolicy = Field(default_factory=RuntimePolicy)
     routes: list[ResolvedRoute] = Field(default_factory=list)
     lint_results: list[LintResult] = Field(default_factory=list)
+    skipped_diagnostics: list[SkippedRoute] = Field(default_factory=list)
     source_profile_id: str | None = None
     source_profile_snapshot: dict[str, Any] | None = None
 

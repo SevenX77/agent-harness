@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react"
 import { FlaskConical, Loader2, Plus, Trash2 } from "lucide-react"
+import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -32,11 +33,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { SaveStatusBadge } from "@/components/ui/save-status-badge"
 import { SectionTitle } from "../shared"
 import { CopilotModelGroupCard } from "./CopilotModelGroupCard"
 import {
   isClaudeAgentSdkCompatibleRoute,
-  mockCopilotRoles,
+  buildCopilotRolesFromRealData,
+  defaultCopilotCredentials,
+  defaultCopilotModelGroups,
   type CopilotRolePreview,
   type CopilotRoutePreview,
 } from "./mock-copilot-data"
@@ -46,13 +50,14 @@ import {
   runCopilotRoleTestJob,
   type CopilotRouteJobStatus,
 } from "./copilot-role-test"
+import { Skeleton } from "@/components/ui/skeleton"
 import type { CredentialsState, ModelGroup, RolesData } from "@/api/llm"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 
 export function CopilotTab({
   data = null,
-  credentials = { providers: [] },
-  modelGroups = [],
+  credentials = defaultCopilotCredentials,
+  modelGroups = defaultCopilotModelGroups,
   onChange = () => {},
   saveStatus = "idle",
   error = null,
@@ -64,35 +69,91 @@ export function CopilotTab({
   saveStatus?: SaveStatus
   error?: string | null
 } = {}) {
-  void credentials
-  void modelGroups
-  void saveStatus
-  void error
+  const { t } = useTranslation("settings")
 
-  const claudeModelGroups = mockCopilotRoles.filter((role) => (
-    role.sdkId === "claude-agent-sdk" && compatibleRoutesForRole(role).length > 0
-  ))
+  if (!data) {
+    return (
+      <div data-copilot-settings-page="true" className="max-w-3xl min-w-0">
+        <SectionTitle
+          title={t("copilot.title")}
+          description={t("copilot.description")}
+          trailing={<SaveStatusBadge status={saveStatus} />}
+        />
+        {error ? <div className="mb-3 text-xs text-destructive">{t("llmRoles.validationFailed", { error })}</div> : null}
+
+        <div className="space-y-4 pt-4">
+          {[1, 2].map((i) => (
+            <Card key={i} size="sm" className="min-w-0 rounded-md">
+              <CardHeader className="!grid-cols-1 items-start gap-2 sm:!grid-cols-[minmax(0,1fr)_auto]">
+                <div className="min-w-0 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Skeleton className="h-5 w-36" />
+                    <Skeleton className="h-5 w-16" />
+                  </div>
+                  <Skeleton className="h-4 w-64" />
+                </div>
+                <CardAction className="row-start-2 flex items-center gap-2 justify-self-start sm:row-start-1 sm:justify-self-end">
+                  <Skeleton className="h-5 w-24" />
+                  <Skeleton className="h-8 w-16" />
+                </CardAction>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center gap-3 rounded-md border border-foreground/10 bg-background/60 p-3">
+                  <Skeleton className="h-6 w-6 rounded-sm" />
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <Skeleton className="h-4 w-32" />
+                  </div>
+                  <div className="ml-auto">
+                    <Skeleton className="h-5 w-5 rounded" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  const realCopilotRoles = useMemo(() => {
+    return buildCopilotRolesFromRealData(modelGroups, credentials)
+  }, [modelGroups, credentials])
+
+  const claudeModelGroups = useMemo(() => {
+    return realCopilotRoles.filter((role) => (
+      role.sdkId === "claude-agent-sdk" && compatibleRoutesForRole(role).length > 0
+    ))
+  }, [realCopilotRoles])
 
   const activeRoles = useMemo(() => {
     const filtered = data
       ? Object.entries(data.roles)
-          .filter(([name]) => name === "copilot_opus_4_7" || name === "copilot_deepseek_v4" || name === "sonnet-4-7-third-party" || name.startsWith("copilot_custom_"))
+          .filter(([, role]) => role.role_kind === "copilot")
           .map(([name, role]) => {
-            const mockData = mockCopilotRoles.find((r) => r.id === name)
+            const activeModelGroupId = Object.keys(role.models ?? {})[0] ||
+              (name === "copilot_opus_4_7" ? (realCopilotRoles.some(r => r.id === "claude-opus-4.7") ? "claude-opus-4.7" : "claude-opus-4-7") :
+               name === "copilot_deepseek_v4" ? "deepseek-v4-pro" :
+               name === "sonnet-4-7-third-party" ? (realCopilotRoles.some(r => r.id === "claude-sonnet-4.7") ? "claude-sonnet-4.7" : "claude-sonnet-4-7") : name)
+
+            const mockData = realCopilotRoles.find((r) => r.id === activeModelGroupId)
+            const fallbackChainRoutes = role.models?.[activeModelGroupId]?.providers ??
+              role.fallback_chain?.map(e => e.route_id) ?? []
+
             return {
               id: name,
               title: mockData?.title ?? name.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
               description: mockData?.description ?? "Coding copilot role.",
               source: mockData?.source ?? ("third_party" as const),
-              modelGroupId: mockData?.id ?? name,
-              fallback_chain: role.fallback_chain ?? [],
+              modelGroupId: activeModelGroupId,
+              fallback_chain: fallbackChainRoutes.map((routeId) => ({ route_id: routeId, runtime_settings: {} })),
             }
           })
       : []
 
     if (filtered.length === 0) {
-      return mockCopilotRoles.slice(0, 2).map((mockData) => ({
-        id: mockData.id,
+      return realCopilotRoles.slice(0, 3).map((mockData) => ({
+        id: (mockData.id === "claude-opus-4-7" || mockData.id === "claude-opus-4.7") ? "copilot_opus_4_7" :
+            mockData.id === "deepseek-v4-pro" ? "copilot_deepseek_v4" : mockData.id,
         title: mockData.title,
         description: mockData.description,
         source: mockData.source,
@@ -101,7 +162,7 @@ export function CopilotTab({
       }))
     }
     return filtered
-  }, [data])
+  }, [data, realCopilotRoles])
 
   const [testingRoleIds, setTestingRoleIds] = useState<ReadonlySet<string>>(() => new Set())
   const [routeStatusOverrides, setRouteStatusOverrides] = useState<Record<string, CopilotRouteJobStatus>>({})
@@ -116,12 +177,23 @@ export function CopilotTab({
     const nextRoles = { ...data.roles }
     const role = nextRoles[roleId]
     if (!role) return
+
+    const activeModelGroupId = Object.keys(role.models ?? {})[0] ||
+      (roleId === "copilot_opus_4_7" ? (realCopilotRoles.some(r => r.id === "claude-opus-4.7") ? "claude-opus-4.7" : "claude-opus-4-7") :
+       roleId === "copilot_deepseek_v4" ? "deepseek-v4-pro" :
+       roleId === "sonnet-4-7-third-party" ? (realCopilotRoles.some(r => r.id === "claude-sonnet-4.7") ? "claude-sonnet-4.7" : "claude-sonnet-4-7") : roleId)
+
     nextRoles[roleId] = {
       ...role,
       fallback_chain: nextOrder.map((routeId) => ({
         route_id: routeId,
         runtime_settings: {},
       })),
+      models: {
+        [activeModelGroupId]: {
+          providers: nextOrder,
+        }
+      }
     }
     onChange({ ...data, roles: nextRoles })
   }
@@ -169,8 +241,12 @@ export function CopilotTab({
       })),
       intent: { provider_preference: "manual_order" as const },
       model_groups: [],
-      active_model: "",
-      models: {},
+      active_model: modelGroupId,
+      models: {
+        [modelGroupId]: {
+          providers: defaultRouteIds,
+        }
+      },
     }
     onChange({ ...data, roles: nextRoles })
   }
@@ -223,15 +299,16 @@ export function CopilotTab({
   return (
     <div data-copilot-settings-page="true" className="max-w-3xl min-w-0">
       <SectionTitle
-        title="Copilot"
-        description="Configure copilot roles with the same model group fallback pattern used by LLM Roles."
-        trailing={<Badge variant="outline">Backend Integration</Badge>}
+        title={t("copilot.title")}
+        description={t("copilot.description")}
+        trailing={<SaveStatusBadge status={saveStatus} />}
       />
+      {error ? <div className="mb-3 text-xs text-destructive">{t("llmRoles.validationFailed", { error })}</div> : null}
 
       <CatalogAccordion type="multiple" defaultValue={["claude-agent-sdk"]}>
         <CatalogAccordionItem value="claude-agent-sdk">
           <CatalogAccordionTrigger>
-            Claude Agent SDK
+            {t("copilot.claudeAgentSdk")}
           </CatalogAccordionTrigger>
           <CatalogAccordionContent className="-mx-2 space-y-4 pb-5">
             {activeRoles.map((role) => {

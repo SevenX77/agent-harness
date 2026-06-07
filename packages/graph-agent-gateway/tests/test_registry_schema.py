@@ -208,6 +208,34 @@ def test_control_plane_runtime_contract_models_validate_without_secrets() -> Non
         StandardTerminalRetrySettings(max_attempts=3, backoff_ms=[100])
 
 
+def test_registry_snapshot_and_route_accept_snapshot_version_with_legacy_default() -> None:
+    from graph_agent_gateway.registry.contracts import SnapshotVersion
+    from graph_agent_gateway.registry.schema import ProviderRoute, RegistrySnapshot
+
+    legacy_snapshot = RegistrySnapshot.model_validate({})
+
+    assert legacy_snapshot.snapshot_version is None
+
+    snapshot_version = SnapshotVersion(
+        registry_version="registry-2",
+        client_id="graph_agent",
+        client_route_profile_version="profile-2",
+    )
+    snapshot = RegistrySnapshot(snapshot_version=snapshot_version)
+    route = ProviderRoute(
+        route_id="provider:model",
+        endpoint_id="provider",
+        route_slug="model",
+        provider_model_id="model",
+        canonical_id="model",
+        status="verified",
+        snapshot_version=snapshot_version,
+    )
+
+    assert snapshot.snapshot_version == snapshot_version
+    assert route.snapshot_version == snapshot_version
+
+
 def test_ark_runtime_protocol_is_first_class() -> None:
     from graph_agent_gateway.registry.schema import ProviderEndpoint, ResolvedRoute
 

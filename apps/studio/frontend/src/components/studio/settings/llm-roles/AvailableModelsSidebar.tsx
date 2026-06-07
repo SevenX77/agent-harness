@@ -400,6 +400,7 @@ export function buildAvailableModelGroups(modelGroups: ModelGroup[]): AvailableM
           )),
       }
     })
+    .filter((model) => model.providers.length > 0)
     .sort(compareModelEntries)
 
   const bySection = new Map<string, AvailableModelEntry[]>()
@@ -509,24 +510,27 @@ function compareAvailableModelProviders(
 
 function providerDisplayStatePriority(state: ProviderUiState): number {
   if (state === "ready") return 0
-  if (state === "untested") return 1
-  if (state === "cooling_down") return 2
-  if (state === "needs_setup") return 3
-  return 4
+  if (state === "historical_ready") return 1
+  if (state === "untested") return 2
+  if (state === "cooling_down") return 3
+  if (state === "failed") return 4
+  return 5
 }
 
 function providerStateTagVariant(state: ProviderUiState): ComponentProps<typeof Tag>["variant"] {
   if (state === "ready") return "success"
+  if (state === "historical_ready") return "probe-verified"
   if (state === "untested") return "default"
-  if (state === "needs_setup") return "destructive"
+  if (state === "failed") return "destructive"
   if (state === "cooling_down") return "warning"
   return "muted"
 }
 
 function providerStateLabel(state: ProviderUiState): string {
   if (state === "ready") return "Ready"
+  if (state === "historical_ready") return "Previously Connected"
   if (state === "cooling_down") return "Cooling Down"
-  if (state === "needs_setup") return "Needs Setup"
+  if (state === "failed") return "Failed"
   if (state === "off") return "Off"
   return "Untested"
 }
@@ -548,9 +552,10 @@ function dominantProviderState(providers: AvailableModelProvider[]): ProviderUiS
 }
 
 function providerStatePriority(state: ProviderUiState): number {
-  if (state === "needs_setup") return 0
+  if (state === "failed") return 0
   if (state === "cooling_down") return 1
   if (state === "off") return 2
-  if (state === "untested") return 3
-  return 4
+  if (state === "historical_ready") return 3
+  if (state === "untested") return 4
+  return 5
 }

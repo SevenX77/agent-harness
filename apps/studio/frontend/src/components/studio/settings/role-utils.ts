@@ -470,9 +470,11 @@ function providerKindRank(kind: ModelGroup["provider_models"][number]["provider_
 
 function providerStateRank(state: ModelGroup["provider_models"][number]["ui_state"]): number {
   if (state === "ready") return 0
-  if (state === "untested") return 1
-  if (state === "cooling_down") return 2
-  return 3
+  if (state === "historical_ready") return 1
+  if (state === "untested") return 2
+  if (state === "cooling_down") return 3
+  if (state === "failed") return 4
+  return 5
 }
 
 function modelGroupSupportsThinking(modelGroup: ModelGroup): boolean {

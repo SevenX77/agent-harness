@@ -10,8 +10,9 @@ related:
   - 06-trace-observability（事件覆盖）
   - 09-golden-eval / 10-iteration-and-resume / 11-io-and-edge-ops（各自接口）
 ---
+<!-- 核对进度:已迁 2 块 / 未迁 17 块 / 2026-06-04 -->
 
-# Engine ↔ Studio API 接口契约(第2趴)
+~~# Engine ↔ Studio API 接口契约(第2趴)~~ → ✅[已迁入](../03-api-contract/mvp1-alignment.md#1-定义)
 
 > 第1趴(engine↔gateway)结论:引擎对 gateway 只有一个调用面 `ModelResolverProtocol.resolve()`。
 > 第2趴(本文,engine↔studio):引擎是被 studio 后端**进程内调用**(`run_skill`/`predict_skill`/`compile_skill`)的库,事件经**回调 + trace.jsonl + WS**流到前端。本文把这些接口写成显式契约。
@@ -19,7 +20,7 @@ related:
 
 ---
 
-## 0. 总览:三条接口面
+~~## 0. 总览:三条接口面~~ → ✅[已迁入](../03-api-contract/mvp1-alignment.md#2-三条接口面)
 
 | 面 | 形态 | 谁调谁 | 入口 |
 |---|---|---|---|
@@ -29,10 +30,12 @@ related:
 
 ---
 
+<!-- ⚠️ 未迁入（正式 03-api-contract 明确为摘要并写“完整表见迁移源”，未承载完整签名、字段、端点、router:line、trace/golden/iterate/compile API 细节） → 应归入:03-api-contract/mvp1-alignment -->
 ## 1. Trace API(= handoff 任务4 的答案:trace 怎么和前端交互、什么协议)
 
 **一句话**:**协议 = typed 事件流**;**live 走 WS,history 走 HTTP,落盘 trace.jsonl 是 SSOT**。
 
+<!-- ⚠️ 未迁入（正式 03-api-contract 明确为摘要并写“完整表见迁移源”，未承载完整签名、字段、端点、router:line、trace/golden/iterate/compile API 细节） → 应归入:03-api-contract/mvp1-alignment -->
 ### 1.1 链路(已逐段核代码)
 
 ```
@@ -47,6 +50,7 @@ related:
                      (另有 legacy `<run_id>.jsonl`,tracing.py:82;trace.jsonl 才是 Studio-facing SSOT,:106)
 ```
 
+<!-- ⚠️ 未迁入（正式 03-api-contract 明确为摘要并写“完整表见迁移源”，未承载完整签名、字段、端点、router:line、trace/golden/iterate/compile API 细节） → 应归入:03-api-contract/mvp1-alignment -->
 ### 1.2 事件契约(judge 判别联合)
 
 - **基类 `_EventBase`**(`callbacks/events.py:42`):`schema_version: Literal["1.0"]`、`timestamp`(UTC ISO)、`sub_run_id: str | None`(parallel-map / 子运行归属)。
@@ -56,6 +60,7 @@ related:
 **现有 34 类**(`event_type`):
 `phase_start` · `predict_chain_start` · `phase_end`(带 context 黑板快照)· `llm_call` · `tool_call` · `validation_fail` · `retry` · `finish_task` · `nudge` · `working_memory_update` · `dead_end_pruned` · `compaction` · `ambiguity_report` · `ambiguity_logged` · `builtin_subagent_enter|exit|fallback` · `prompt_captured` · `llm_fallback` · `run_started` · `run_ended`(status 含 `interrupted`)· `validation_pass` · `retry_exhausted` · `model_resolved` · `artifact_saved` · `parallel_map_group_started|ended` · `agent_loop_iteration` · `interrupted` · `resumed` · `heartbeat` · `thread_cleaned_up` · `internal_error`。
 
+<!-- ⚠️ 未迁入（正式 03-api-contract 明确为摘要并写“完整表见迁移源”，未承载完整签名、字段、端点、router:line、trace/golden/iterate/compile API 细节） → 应归入:03-api-contract/mvp1-alignment -->
 ### 1.3 studio 暴露(已核 router)
 
 | 用途 | 端点 | 证据 |
@@ -67,6 +72,7 @@ related:
 前端消费:`useRunStream`(WS live)、`useRunHistory`(HTTP history)、`TracePanel`/`PromptInspector`。
 ⚠️ **studio 侧待确认**:handoff 称 `useRunStream`/`TracePanel` 为"孤儿未挂载",需在 studio 前端核实挂载状态(本契约只定义引擎产出 + 后端暴露;前端挂载归 studio)。
 
+<!-- ⚠️ 未迁入（正式 03-api-contract 明确为摘要并写“完整表见迁移源”，未承载完整签名、字段、端点、router:line、trace/golden/iterate/compile API 细节） → 应归入:03-api-contract/mvp1-alignment -->
 ### 1.4 V4 trace 增补(本契约需扩展的事件 schema)
 
 trace 现有事件不够覆盖 mvp1 新关注点,以下需**加进事件契约**(详设计见对应关注点):
@@ -78,8 +84,10 @@ trace 现有事件不够覆盖 mvp1 新关注点,以下需**加进事件契约**
 
 ---
 
+<!-- ⚠️ 未迁入（正式 03-api-contract 明确为摘要并写“完整表见迁移源”，未承载完整签名、字段、端点、router:line、trace/golden/iterate/compile API 细节） → 应归入:03-api-contract/mvp1-alignment -->
 ## 2. 执行 API(predict / run / batch)
 
+<!-- ⚠️ 未迁入（正式 03-api-contract 明确为摘要并写“完整表见迁移源”，未承载完整签名、字段、端点、router:line、trace/golden/iterate/compile API 细节） → 应归入:03-api-contract/mvp1-alignment -->
 ### 2.1 引擎入口(进程内,SSOT = runner.py)
 
 ```python
@@ -109,6 +117,7 @@ def predict_skill(
 - `mock_llm` 经 `**inputs` 传(`run_skill:391` / `predict_skill:196` pop 出);类型决定 mock 策略(None→heuristic / Path→golden / list→backtest / dict→override,见 09)。
 - 失败不抛异常:`GraphAgentError` 被捕获 → 返回 `success=False` 的 `WorkflowResult`(带 `error: ErrorPayload`),见 `runner.py:416-435`。
 
+<!-- ⚠️ 未迁入（正式 03-api-contract 明确为摘要并写“完整表见迁移源”，未承载完整签名、字段、端点、router:line、trace/golden/iterate/compile API 细节） → 应归入:03-api-contract/mvp1-alignment -->
 ### 2.2 返回契约(result.py,SSOT)
 
 ```python
@@ -129,6 +138,7 @@ PathDiff(result.py:48): expected_path; actual_path; missing; extra; order_mismat
 WorkflowResult(RunResult)(result.py:92): 子类
 ```
 
+<!-- ⚠️ 未迁入（正式 03-api-contract 明确为摘要并写“完整表见迁移源”，未承载完整签名、字段、端点、router:line、trace/golden/iterate/compile API 细节） → 应归入:03-api-contract/mvp1-alignment -->
 ### 2.3 studio HTTP(prefix `/skills/{skill_id}/runs`,SSOT = routers/runs.py)
 
 | 端点 | 处理 | 请求 → 响应 | 证据 |
@@ -143,6 +153,7 @@ WorkflowResult(RunResult)(result.py:92): 子类
 
 **关键契约边界(异步)**:引擎 `run_skill` 返回 typed `RunResult`(同步);但 studio `POST .../runs` 返回 `RunMetadata`(202)——studio **异步 spawn** `run_skill`(`run_manager`),立刻回 metadata,结果/事件经 **WS(live)+ trace.jsonl + `GET /runs/{id}`→RunDetail(history)** 取(= §1 trace 链)。即:**engine 同步 RunResult ↔ studio 异步 RunMetadata 的接缝在 run_manager**。
 
+<!-- ⚠️ 未迁入（正式 03-api-contract 明确为摘要并写“完整表见迁移源”，未承载完整签名、字段、端点、router:line、trace/golden/iterate/compile API 细节） → 应归入:03-api-contract/mvp1-alignment -->
 ## 3. Golden API
 
 > schema SSOT = `09-golden-eval/mvp1-alignment.md`(决策 A,2026-06-03 锁);本节只列接口面 + 建设状态。
@@ -154,6 +165,7 @@ WorkflowResult(RunResult)(result.py:92): 子类
 - **拦截搬引擎(target,G5,接 D2)**:引擎侧 predict mock chat model(实现 `BaseChatModel`,`_generate` 调 `resolve_generation`)当 `create_agent(model=...)`,去 gateway 依赖。
 - 建设状态:逐节点回放/diff 算法/409 = 已实现(复用);逐节点常驻 golden.json / 编译期失效 / 逐节点 diff 喂入 / 拦截搬引擎 = target。
 
+<!-- ⚠️ 未迁入（正式 03-api-contract 明确为摘要并写“完整表见迁移源”，未承载完整签名、字段、端点、router:line、trace/golden/iterate/compile API 细节） → 应归入:03-api-contract/mvp1-alignment -->
 ## 4. Iterate / Resume API
 
 > schema SSOT = `10-iteration-and-resume/mvp1-alignment.md`(fork F1-F5 + C1,2026-06-03 锁);本节列接口面 + 建设状态。
@@ -166,8 +178,10 @@ WorkflowResult(RunResult)(result.py:92): 子类
 - **batch 状态(已实现)**:`GET /batch/{batch_id}` → `BatchRunStatus`(runs.py:73)。
 - **失效追踪(target)**:上游/拓扑/输出 schema 变 → 下游 checkpoint 失效 → 前端 [Resume] 置灰(归 C3 统一失效模型)。
 
+<!-- ⚠️ 未迁入（正式 03-api-contract 明确为摘要并写“完整表见迁移源”，未承载完整签名、字段、端点、router:line、trace/golden/iterate/compile API 细节） → 应归入:03-api-contract/mvp1-alignment -->
 ## 5. Compile API
 
+<!-- ⚠️ 未迁入（正式 03-api-contract 明确为摘要并写“完整表见迁移源”，未承载完整签名、字段、端点、router:line、trace/golden/iterate/compile API 细节） → 应归入:03-api-contract/mvp1-alignment -->
 ### 5.1 引擎入口(compiler.py,SSOT)
 
 ```python
@@ -182,6 +196,7 @@ class CompileResult:                 # compiler.py:23
     @property passed   -> not self.fatals
 ```
 
+<!-- ⚠️ 未迁入（正式 03-api-contract 明确为摘要并写“完整表见迁移源”，未承载完整签名、字段、端点、router:line、trace/golden/iterate/compile API 细节） → 应归入:03-api-contract/mvp1-alignment -->
 ### 5.2 错误契约 `ErrorPayload`(exceptions.py:21,跨 compile+runtime 共用 — Task 3 核心)
 
 ```python
@@ -198,6 +213,7 @@ class ErrorPayload(BaseModel):       # 也是 RunResult.error 的类型
 ```
 **Task 3 映射**:前端要在 canvas节点/属性/编辑器行 3 处放标记 → 需 `phase_id`(定位节点)+`field_path`(定位属性)+`source_path`(定位编辑器行)+`level`(标记色)。四个字段**都已存在**(均 `|None`)。**Task 3 = 审计每个 `[F-v3-*]` 码的实际 emit 是否都填全这四轴**(尤其 source_path 是否到行号);缺哪轴的码列清单补齐。
 
+<!-- ⚠️ 未迁入（正式 03-api-contract 明确为摘要并写“完整表见迁移源”，未承载完整签名、字段、端点、router:line、trace/golden/iterate/compile API 细节） → 应归入:03-api-contract/mvp1-alignment -->
 ### 5.3 studio HTTP
 
 | 端点 | 处理 | 响应 | 证据 |
@@ -211,6 +227,7 @@ class ErrorPayload(BaseModel):       # 也是 RunResult.error 的类型
 
 ---
 
+<!-- ⚠️ 未迁入（正式 03-api-contract 明确为摘要并写“完整表见迁移源”，未承载完整签名、字段、端点、router:line、trace/golden/iterate/compile API 细节） → 应归入:03-api-contract/mvp1-alignment -->
 ## 6. studio 后端端点总索引(已核 router:line)
 
 | 端点 | router:line | 请求 → 响应 | 节 |
@@ -231,6 +248,7 @@ class ErrorPayload(BaseModel):       # 也是 RunResult.error 的类型
 
 ---
 
+<!-- ⚠️ 未迁入（正式 03-api-contract 明确为摘要并写“完整表见迁移源”，未承载完整签名、字段、端点、router:line、trace/golden/iterate/compile API 细节） → 应归入:03-api-contract/mvp1-alignment -->
 ## 7. 待办
 1. **跨关注点链接**:06/09/10/11 各 mvp1-alignment 的"接口"部分改为**链接本文**,不复制(SSOT)。
 2. **studio 前端**:核实 hook 挂载状态(useRunStream/TracePanel 是否孤儿)——归 studio,本文登记。

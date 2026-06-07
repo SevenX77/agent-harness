@@ -4,12 +4,13 @@ doc: baseline
 status: drafted
 last_verified: 2026-06-02
 ---
+<!-- 核对进度:已迁 7 块 / 未迁 0 块 / 2026-06-04 -->
 
-# 08-prompt-and-cleanup — Baseline(现状)
+~~# 08-prompt-and-cleanup — Baseline(现状)~~ → ✅[已迁入](../../02-mechanism/05-run-inner/03-cognitive/baseline.md#后端功能)
 
 核心结论：V0.3.0 prompt spec 是 FROZEN，当前 prompt 仍多处强调 finish_task；但 live 工具集合没有默认绑定 `log_ambiguity` / `ask_clarification`。工具异常在 hand-written loop 中直接 `tool.invoke`，没有 try/except 桥接成 error ToolMessage。
 
-## 覆盖范围
+~~## 覆盖范围~~ → ✅[已迁入](../../02-mechanism/05-run-inner/03-cognitive/baseline.md#后端功能)
 
 覆盖范围：本文覆盖决策记录 §10、§11。
 
@@ -22,7 +23,7 @@ last_verified: 2026-06-02
 | tool binding | `packages/graph-agent/src/graph_agent/core/graph_assembler.py:650-672` | framework tools 只处理 critic 和 finish_task 跳过；未知 tool fatal。 |
 | tool exception | `packages/graph-agent/src/graph_agent/core/graph_assembler.py:545-546` | 普通工具直接 invoke，无 try/except。 |
 
-## 编号执行流程(现状)
+~~## 编号执行流程(现状)~~ → ✅[已迁入](../../02-mechanism/05-run-inner/03-cognitive/baseline.md#后端功能)
 
 1. `docs/engine/mvp0/skill-spec/06-cognitive-template-spec.md` 标注 `status: FROZEN`，并有 DO NOT EDIT 注释，见 `docs/engine/mvp0/skill-spec/06-cognitive-template-spec.md:1-4`。
 
@@ -48,24 +49,24 @@ last_verified: 2026-06-02
 
 12. LangChain `wrap_tool_call` 文档说明异常默认传播，除非 ToolNode 配了 handle_tool_errors，见 `.venv/lib/python3.12/site-packages/langchain/agents/middleware/types.py:649-660`。
 
-## Baseline / Alignment 差异
+~~## Baseline / Alignment 差异~~ → ✅[已迁入](../../02-mechanism/05-run-inner/03-cognitive/baseline.md#后端功能)
 
 baseline prompt 仍靠反复提醒 finish_task；alignment 目标是在 exit gate 结构性保证之后给 prompt 减负，但不改 frozen V0.3.0 spec，只标注“需新 V4 spec”。baseline 工具异常和提示词工具绑定存在止血缺口；alignment 要并入 Plan A 实现。
 
-## 决策原因
+~~## 决策原因~~ → ✅[已迁入](../../02-mechanism/05-run-inner/03-cognitive/baseline.md#后端功能)
 
 prompt 减负必须等待 exit gate 生效。否则删掉“必须 finish_task”提醒会放大现有 `if not tool_calls: break` 静默退出风险，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:526-528`。
 
 `log_ambiguity` / `ask_clarification` 必须绑定，是因为 prompt 让模型调用它们；如果工具集合没有它们，模型照做会触发 unknown tool fatal，当前 fatal 点见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:531-533`。
 
-## 代码索引(clues)
+~~## 代码索引(clues)~~ → ✅[已迁入](../../02-mechanism/05-run-inner/03-cognitive/baseline.md#后端功能)
 
 - `docs/engine/mvp0/skill-spec/06-cognitive-template-spec.md:1-4`: frozen 标记。
 - `packages/graph-agent/src/graph_agent/cognitive/prompt.py:227-240`: runtime finish_task 提醒。
 - `packages/graph-agent/src/graph_agent/core/graph_assembler.py:531-546`: unknown tool fatal 与工具异常无桥接。
 - `packages/graph-agent/src/graph_agent/middleware/tool_error.py:11-16`: no-op ToolError slot。
 
-## 待办/疑点
+~~## 待办/疑点~~ → ✅[已迁入](../../02-mechanism/05-run-inner/03-cognitive/baseline.md#后端功能)
 
 1. 待办：实现 ToolErrorHandlingMiddleware，把普通工具异常转成 error ToolMessage。
 2. 待办：默认绑定 `log_ambiguity` 和 `ask_clarification`，或从 prompt 移除未绑定工具指令。MVP1 决策倾向绑定。

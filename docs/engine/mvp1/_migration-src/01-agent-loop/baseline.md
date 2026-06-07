@@ -4,12 +4,13 @@ doc: baseline
 status: drafted
 last_verified: 2026-06-02
 ---
+<!-- 核对进度:已迁 7 块 / 未迁 0 块 / 2026-06-04 -->
 
-# 01-agent-loop — Baseline(现状)
+~~# 01-agent-loop — Baseline(现状)~~ → ✅[已迁入](../../02-mechanism/05-run-inner/01-agent-loop/baseline.md#后端功能)
 
 核心结论：当前 SDK 主入口仍走 `assemble_graph` 里的手写 ReAct loop；仓库中另有 `LLMPhaseNode` 这条 `create_agent` 风格代码，但当前 `run_skill` / `predict_skill` 的 live 路径没有通过它。完整 6 槽 middleware 工厂已存在，live 只临时接了 `CognitiveFlowMiddleware` 单槽。
 
-## 覆盖范围
+~~## 覆盖范围~~ → ✅[已迁入](../../02-mechanism/05-run-inner/01-agent-loop/baseline.md#后端功能)
 
 覆盖范围：本文覆盖决策记录 §1、§2、§3 对应的现状代码。
 
@@ -23,7 +24,7 @@ last_verified: 2026-06-02
 | 3 个 middleware 空桩 | `packages/graph-agent/src/graph_agent/middleware/tracing.py:11-16`、`packages/graph-agent/src/graph_agent/middleware/tool_error.py:11-16`、`packages/graph-agent/src/graph_agent/middleware/loop_detection.py:11-16` | Tracing / ToolError / LoopDetection 只是物理 no-op 类。 |
 | 并存 `LLMPhaseNode` | `packages/graph-agent/src/graph_agent/core/phase_nodes/llm_phase_node.py:105-128`、`packages/graph-agent/src/graph_agent/core/phase_nodes/llm_phase_node.py:559-576` | 已有 create_agent 风格路径，但非当前 SDK 主入口。 |
 
-## 编号执行流程(现状)
+~~## 编号执行流程(现状)~~ → ✅[已迁入](../../02-mechanism/05-run-inner/01-agent-loop/baseline.md#后端功能)
 
 1. `run_skill`(用途：执行 SKILL.md 并返回 typed workflow result)先调用 `_run_skill_dict`，见 `packages/graph-agent/src/graph_agent/core/runner.py:401-415`。
 
@@ -69,11 +70,11 @@ last_verified: 2026-06-02
 
 22. `LLMPhaseNode`(用途：旧 PhaseExecutor 路径下的 create_agent 风格 LLM phase)确实会创建 `create_agent(model, tools, system_prompt, middleware)`，见 `packages/graph-agent/src/graph_agent/core/phase_nodes/llm_phase_node.py:559-576`；但当前 SDK V0.3.0 root 入口不经 `GraphBuilder/PhaseExecutor`，而经 `assemble_graph`，见 `packages/graph-agent/src/graph_agent/core/runner.py:667-674`。
 
-## Baseline / Alignment 差异
+~~## Baseline / Alignment 差异~~ → ✅[已迁入](../../02-mechanism/05-run-inner/01-agent-loop/baseline.md#后端功能)
 
 baseline 当前是“手写 loop + 单槽 CognitiveFlow 桥接 + 完整 6 槽工厂未接线”。alignment 目标是“live `_skill_node` loop 体替换为 `create_agent(..., middleware=build_middleware_chain(...), checkpointer=...)`，并把 3 个 no-op 空桩实现为真实 middleware”。
 
-## 决策原因
+~~## 决策原因~~ → ✅[已迁入](../../02-mechanism/05-run-inner/01-agent-loop/baseline.md#后端功能)
 
 当前不能把 `LLMPhaseNode` 当作已完成迁移，因为 live `run_skill` 和 `predict_skill` 均通过 `assemble_graph` 装配，见 `packages/graph-agent/src/graph_agent/core/runner.py:276-283`、`packages/graph-agent/src/graph_agent/core/runner.py:667-674`。
 
@@ -81,7 +82,7 @@ baseline 当前是“手写 loop + 单槽 CognitiveFlow 桥接 + 完整 6 槽工
 
 当前 no-tool-call 裸退是 agent loop 架构冲突的核心证据：`tool_calls` 为空时直接 `break`，没有 finish_task 合格性检查，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:526-528`。
 
-## 代码索引(clues)
+~~## 代码索引(clues)~~ → ✅[已迁入](../../02-mechanism/05-run-inner/01-agent-loop/baseline.md#后端功能)
 
 - `packages/graph-agent/src/graph_agent/core/graph_assembler.py:483-576`: `_skill_node` 是当前 live 手写 ReAct loop。
 - `packages/graph-agent/src/graph_agent/middleware/factory.py:29-65`: `build_middleware_chain` 是 6 槽 AgentMiddleware 工厂。
@@ -89,7 +90,7 @@ baseline 当前是“手写 loop + 单槽 CognitiveFlow 桥接 + 完整 6 槽工
 - `packages/graph-agent/src/graph_agent/core/phase_nodes/llm_phase_node.py:570-575`: 并存 create_agent 调用点。
 - `packages/graph-agent/tests/middleware/test_aaa_beta_red_light_factory.py:12-35`: 测试已锁定 6 槽工厂顺序。
 
-## 待办/疑点
+~~## 待办/疑点~~ → ✅[已迁入](../../02-mechanism/05-run-inner/01-agent-loop/baseline.md#后端功能)
 
 1. 待办：把 `assemble_graph` 的 agent phase live path 接到 `create_agent`，同时保留 phase 级模型解析、工具装配、reference reader、subagent 编译缓存。
 2. 待办：实现 Tracing / ToolError / LoopDetection 三个 no-op 空桩。

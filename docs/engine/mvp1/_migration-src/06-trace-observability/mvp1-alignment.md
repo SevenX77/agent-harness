@@ -4,12 +4,13 @@ doc: mvp1-alignment
 status: drafted
 last_verified: 2026-06-02
 ---
+<!-- 核对进度:已迁 7 块 / 未迁 0 块 / 2026-06-04 -->
 
-# 06-trace-observability — MVP1 Alignment(目标设计)
+~~# 06-trace-observability — MVP1 Alignment(目标设计)~~ → ✅[已迁入](../../02-mechanism/06-seam/02-observability/mvp1-alignment.md#2-数据流--机制)
 
 MVP1/V4 决策：迁移到 create_agent 后 trace 覆盖不得回退。TracingMiddleware 要补回现有 loop 级 LLM/tool/iteration 事件；finish_task 校验流水线每个关键步骤都要发事件，让前端 trace 面板看到“做了什么、为什么被打回、是否 patch、是否 nudge”。
 
-## 覆盖范围
+~~## 覆盖范围~~ → ✅[已迁入](../../02-mechanism/06-seam/02-observability/mvp1-alignment.md#2-数据流--机制)
 
 覆盖范围：本文覆盖现有 trace 事件、TracingCallback、middleware skeleton、finish_task 黑盒消除目标。
 
@@ -20,7 +21,7 @@ MVP1/V4 决策：迁移到 create_agent 后 trace 覆盖不得回退。TracingMi
 | `middleware/tracing.py` | 实现 create_agent 路径下的 LLM/tool/iteration emit。 |
 | finish_task 校验链 | 每个分支发可解释事件。 |
 
-## 目标设计与编号流程
+~~## 目标设计与编号流程~~ → ✅[已迁入](../../02-mechanism/06-seam/02-observability/mvp1-alignment.md#2-数据流--机制)
 
 1. `TracingMiddleware` 构造时接收 phase_name 与 callbacks/event sink。当前 skeleton 只有 phase_name，见 `packages/graph-agent/src/graph_agent/middleware/tracing.py:11-16`；MVP1 需要补 callbacks 依赖。
 
@@ -44,7 +45,7 @@ MVP1/V4 决策：迁移到 create_agent 后 trace 覆盖不得回退。TracingMi
 
 11. 所有事件通过 `_safe_emit_event` 或 callback `on_event` 发，避免 observer 异常打断 run。安全派发逻辑见 `packages/graph-agent/src/graph_agent/callbacks/emit.py:68-102`。
 
-## 已实现 / 与 baseline 差异
+~~## 已实现 / 与 baseline 差异~~ → ✅[已迁入](../../02-mechanism/06-seam/02-observability/mvp1-alignment.md#2-数据流--机制)
 
 已实现：事件模型、trace writer、safe emit、loop 内联事件都已存在，见 `packages/graph-agent/src/graph_agent/callbacks/events.py:73-116`、`packages/graph-agent/src/graph_agent/callbacks/tracing.py:183-350`、`packages/graph-agent/src/graph_agent/core/graph_assembler.py:305-555`。
 
@@ -52,20 +53,20 @@ MVP1/V4 决策：迁移到 create_agent 后 trace 覆盖不得回退。TracingMi
 
 未实现：finish_task 校验子步骤不发事件，相关流程见 `packages/graph-agent/src/graph_agent/middleware/cognitive_flow.py:468-699`。
 
-## 决策原因
+~~## 决策原因~~ → ✅[已迁入](../../02-mechanism/06-seam/02-observability/mvp1-alignment.md#2-数据流--机制)
 
 trace 覆盖不回退，是因为 create_agent 迁移会移除当前 `_skill_node` 内联 emit 点。若 TracingMiddleware 没有先补上，前端会从“能看见模型/工具调用”退回黑盒。
 
 finish_task 子步骤必须可见，是为了处理用户提出的“流式输出和 trace 完整性、覆盖率、去黑盒”要求。semantic reject、structural patch、business validator reject 是完全不同的系统行为，前端和排障都不能混成一句“validation failed”。
 
-## 代码索引(clues)
+~~## 代码索引(clues)~~ → ✅[已迁入](../../02-mechanism/06-seam/02-observability/mvp1-alignment.md#2-数据流--机制)
 
 - `packages/graph-agent/src/graph_agent/callbacks/tracing.py:183-350`: TracingCallback 已支持核心事件写入。
 - `packages/graph-agent/src/graph_agent/middleware/execution_control.py:182-199`: AgentLoopIterationEvent 现有 emit。
 - `packages/graph-agent/src/graph_agent/tools/md_to_json.py:559-604`: semantic/structural 分流发事件的目标位置。
 - `packages/graph-agent/src/graph_agent/middleware/cognitive_flow.py:637-680`: business validator 发事件目标位置。
 
-## 待办/疑点
+~~## 待办/疑点~~ → ✅[已迁入](../../02-mechanism/06-seam/02-observability/mvp1-alignment.md#2-数据流--机制)
 
 1. 待办：为 TracingMiddleware 写失败测试，证明 create_agent 路径仍产生 LLMCallEvent 和 ToolCallEvent。
 2. 待办：决定是否新增 V4 `FinishTaskValidationEvent`，避免现有 `ValidationFailEvent` 信息不足。

@@ -4,12 +4,13 @@ doc: baseline
 status: drafted
 last_verified: 2026-06-03
 ---
+<!-- 核对进度:已迁 3 块 / 未迁 0 块 / 2026-06-04 -->
 
-# 12-contracts — Baseline(现状)
+~~# 12-contracts — Baseline(现状)~~ → ✅[已迁入](../../01-contract/04-data-contracts/mvp1-alignment.md#2-我们的形状-vs-langgraph-底座)
 
 共享词汇(类型 / 异常 / 错误码 / state schema / result / validator 契约),现**散在 `core/`**,是 L0 基础层:被几乎所有模块 import。理想性质 = 自身**不依赖任何内部模块**;现实是它埋在 `core/` 上帝包里,与上层(cognitive/middleware/tools/io/runtime)循环纠缠(见 00-overview §5)。
 
-## 覆盖代码(file:line 已核)
+~~## 覆盖代码(file:line 已核)~~ → ✅[已迁入](../../01-contract/04-data-contracts/mvp1-alignment.md#2-我们的形状-vs-langgraph-底座)
 
 | 契约 | 现状 | 证据 |
 |---|---|---|
@@ -22,7 +23,7 @@ last_verified: 2026-06-03
 | validator 契约 | `VALIDATOR_SIGNATURE`(`def validate(output, state_slice, **kwargs)->None|dict`)+ `VALIDATOR_ERROR_CODES`(agent/subgraph/logic,γ0 占位) | `core/validator_contract.py:9,11` |
 | 公开 surface | `run_skill`/`predict_skill`/`RunResult`/`PathDiff`/`PhaseRecord`/`BlackboardState`/5 异常 | `__init__.py __all__` |
 
-## Baseline / Alignment 差异(详见 mvp1-alignment)
+~~## Baseline / Alignment 差异(详见 mvp1-alignment)~~ → ✅[已迁入](../../01-contract/04-data-contracts/mvp1-alignment.md#2-我们的形状-vs-langgraph-底座)
 - 物理上散在 `core/`、与上层循环 → 目标抽成 L0 叶模块(去环);
 - `ErrorPayload` 无 `line` 轴、定位轴 emit 不全(Task3);
 - `data` 通道无 delta reducer(state-checkpoint);

@@ -41,6 +41,7 @@ engine 用"对接各类 app、非只 studio"的通用视角定型了错误协议
 ### 2.1 engine 现有 vs 待发
 - **现有可用**：`phase_start`/`phase_end`/`llm_call`/`tool_call`/`agent_loop_iteration`/`prompt_captured`（三视图 `template_source`/`variables`/`resolved_prompt` 齐，`events.py:217`）。
 - **待发（U9 归 kiro）**：`parent_node_id`/`node_type`（微观拓扑）、3 边操作事件（`blackboard_reduce`/`input_dispatch`/`input_file_injected`）、**逐轮归属 `phase_execution_id` + `iteration_index` + `source`**（`02-iterate §2` 行 24）。
+  - **3 边事件字段契约(engine 已答 Q1,落 `observability §8`;事件类未建、impl 归 kiro,studio 可照此先做渲染层)**:三者继承 `_EventBase`(`event_type`/`run_id`/`thread_id`/`seq`/`ts`),**事件类本身即操作类型**(判别 `event_type`,无 `op` 字段)。**共有**(支撑按 edge 聚合 + dot 渲染):`from_phase: str|None`(源,图入口 `None`)、`to_phase: str`(目标)、`changed_keys: list[str]`(触及黑板 key)、`blackboard_snapshot: dict`(操作后快照,供 OB5 在 phase 边界近似 reducer-diff)。**专有**:`BlackboardReduceEvent.reducer: str`(`merge`/`append`/`override`,取自 `iterate.accumulate.merge` 声明式元数据——engine 不发 authoritative 逐 reducer 前后态,OB5 选 A,逐 key 用快照比对近似);`InputDispatchEvent.dispatched_keys: list[str]` + `branch_index: int|None`(并联/iterate 扇出各发一条、据此画各自分发边,非并联为 `None`);`InputFileInjectedEvent.file_ref: str` + `target_field: str`。
   - ⚠️ **别混字段**：现有 `AgentLoopIterationEvent.iteration`（`events.py:359`）只是 **agent 内 ReAct loop 轮次**，不等于 V4 的多轮归属（`phase_execution_id`/`iteration_index`/`source`）。逐轮分组必须等 engine 发后者。
   - engine 现状还有缺口:batch 并发跑+聚合**未给每 item 盖维度** → 100 项 trace 全糊在同一 `phase_name`（engine 侧待补，`02-iterate §2`）。
 
@@ -56,13 +57,13 @@ engine 用"对接各类 app、非只 studio"的通用视角定型了错误协议
 
 ### 3.1 resume（节点级续跑）
 - **engine public 签名**（`03-api-contract §3.2`）：`resume_run(run_id, from=<node_id> | <node_id>:<iter>, context_overrides?)`——**只命名 `from` / `context_overrides`**。HITL 是**执行语义**（engine 在续跑时把人工回答包成 `ToolMessage` 注入），**不是 engine 已命名的请求字段**。
-- **studio 适配**：`ResumeReq`（`runs.py:109`）已有 `context_overrides` + `human_input`；**补 `from`**（`from` 是 Python 保留字,Pydantic 要 alias:`from_: str | None = Field(alias="from")`）。**写清投影**:studio 的 `human_input` 不是直接塞给 engine 同名字段,而是**由 studio→engine 适配层把它投影成 engine HITL 注入的入参**(engine 落地 resume 时定具体形态)。`POST .../resume`（现 501）待 engine `resume_run` 落地接通。
+- **studio 适配**：`ResumeReq`（`runs.py:109`）已有 `context_overrides` + `human_input`；**补 `from`**（`from` 是 Python 保留字,Pydantic 要 alias:`from_: str | None = Field(alias="from")`）。**HITL 投影(engine 已答 Q2,落 `api-contract §3.2`)**:engine HITL 注入入参 = 结构化 `{tool_call_id?: str, content: str}`(给中断点的 pending tool call—`ask_clarification`/`interrupt()`—注一条 ToolMessage)。studio `human_input` → 投影成 `{content: human_input}`;`tool_call_id` **默认省略**,engine 从该 checkpoint 唯一 pending 中断 call 自解析(传了则 engine 校验须匹配;多 pending 并存才需显式传)。`POST .../resume`(现 501)待 engine `resume_run` 落地接通(精确 wire 随内层 create_agent checkpointer 终定,engine `checkpoint §7` 标最高风险项)。
 - **checkpoint 失效 → Resume 置灰**：上游/拓扑/输出 schema 变 → 下游 checkpoint 失效 → 前端 [Resume] 置灰（`debug-resume` F2 + `03-api-contract §3.2`;失效语义归 engine `05-invalidation`,studio 只渲染置灰）。
 - **UI**（`debug-resume` F1–F4）：失败节点 Resume 按钮、HITL 悬浮输入注入、dot context 篡改续跑。
 
 ### 3.2 per-node golden（逐节点期望输出 + 旧布局迁移）
-- **消费 engine physical-layout SSOT,不重定义户型**：golden 落 **`.workspace/golden/<baseline_id>/{baseline.json, report.json, cases/<case_id>.json}`**（`01-physical-layout §2.2.3`）。**绑定键(case ↔ 节点的 schema key)engine 尚未定稿**——`golden-eval §8` gap #1 仍标 `phase_id?`(待设计),physical-layout 只定**目录户型**、不定 key。studio **不替 engine 定 schema key**,等 engine golden schema 定稿后按其 key 消费。`evaluate_golden_baseline`（逐节点 diff）是 engine SDK 目标入口（现 drift 未 live）。
-- **studio 旧布局迁移（不能只说"按新户型读"）**：studio **当前**是 whole-state 旧布局——`<golden_root>/<id>/golden_metadata.json` + 整份 `final_state.json` 拷贝（`golden_diff.py:26/36/51`,`set_golden_baseline_for_run` 复制整次 final_state）。要迁到 SSOT 的 per-node `baseline.json/report.json/cases/<case_id>.json`：① 读写路径切户型;② whole-state → per-node 的数据迁移/兼容;③ diff 从整 final_state 改逐节点字段级。**这是 studio 侧数据布局迁移,需显式排期**。
+- **消费 engine physical-layout SSOT,不重定义户型**：golden 落 **`.workspace/golden/<baseline_id>/{baseline.json, report.json, cases/<case_id>.json}`**（`01-physical-layout §2.2.3`）。**绑定键 = `phase_id`(engine 已答 Q3 确认,权威在 `physical-layout §3#2`;`golden-eval §8` 那个 `phase_id?` 是 stale 标记,engine 因该文件已哈希锁未改)**。`cases/<case_id>.json` schema(engine 已给):`{case_id: str, phase_id: str(绑定键=校验哪个节点), expected_output: {...}(匹配该 phase 的 io.outputs schema), source: "manual"|"copilot"(永不取 trace,409 天然成立), updated_at: iso8601, input_ref?: str(指向 test_inputs/)}`;`baseline.json`=baseline metadata + 绑定信息,`report.json`=`evaluate_golden_baseline` 评估报告(engine SDK 目标入口,现 drift 未 live)。
+- **studio 旧布局迁移（不能只说"按新户型读"）**：studio **当前**是 whole-state 旧布局——`<golden_root>/<id>/golden_metadata.json` + 整份 `final_state.json` 拷贝（`golden_diff.py:26/36/51`,`set_golden_baseline_for_run` 复制整次 final_state）。要迁到 SSOT 的 per-node `baseline.json/report.json/cases/<case_id>.json`：① 读写路径切户型;② whole-state → per-node **按 `phase_id` 拆**(`case.expected_output` vs 该 phase 实跑 output);③ diff 从整 `final_state` 改逐节点字段级(同按 `phase_id` 对齐;现 `golden_diff.py` 作用在整 final_state,per-node 版按 `phase_id` 拆)。**这是 studio 侧数据布局迁移,需显式排期**。
 - **studio UI**（`golden-eval` F1–F6）：per-node 字段级 diff 渲染;入口（I/O output + Assets + editor 分屏 + Copilot 分析 bar）;predict 假数据 409 guard（已 live）;run 真实输出做默认种子。**不在 studio 文档定义 golden 磁盘户型。**
 
 ---
@@ -86,9 +87,12 @@ engine 用"对接各类 app、非只 studio"的通用视角定型了错误协议
 
 **不 gated 的即时项**：B2.1 + B3.1（CallbackEvent 容错 + 用现有事件渲染 phase 级视图）。B2.2a 仅等 B1。是否现在派实现由 PM 定。
 
+> **设计已 schema-complete(round-4,engine 答 Q1–Q3)**:B3.2 渲染层、B4 `ResumeReq`+HITL 投影、B4 golden 迁移/per-node diff 的**契约都已知**,studio 可**照契约先建**(engine 明示"可先做渲染层");仍 impl-gated 的只是**真实数据**(engine 发 V4 事件 / `resume_run` 落地 / per-node golden SDK 落地)。即:**设计不再卡 engine,只剩实施等 engine 代码**。
+
 ---
 
 ## 5. 修订记录
+- **round-4（engine 答 Q1–Q3 设计意图后整合,B3.2/B4 由占位补成 schema 定稿,不再等 engine "设计")**:① B3.2 三边事件补**字段契约**(共有 `from_phase`/`to_phase`/`changed_keys`/`blackboard_snapshot` + 专有 `reducer`/`dispatched_keys`+`branch_index`/`file_ref`+`target_field`);② B4 resume **HITL 投影定稿**(`{content: human_input}`,`tool_call_id` 省略交 engine 解析);③ B4 golden **绑定键确认 = `phase_id`**(`golden-eval §8` 的 `phase_id?` 是 stale,权威 `physical-layout §3#2`)+ 补 `cases/<case_id>.json` schema + 迁移按 `phase_id` 拆;④ 多模态生成式调用 = **gateway 库 ③b**(PM 2026-06-06,DEF-014,studio 只做 ③a 测试 UX)。**剩下纯 impl-gated(等 engine 发事件/落 resume/落 golden SDK),设计无缺口。**
 - **round-3（codex 7.4 通过）后修正**：① CallbackEvent **live 路径错配**——live 走 `event.model_dump()` 出向序列化(`run_manager.py:74`)、不经 forbid,forbid 只炸回放 `validate_json`(`:522`),删"live 也经同一 union"误述;② golden **越界收回**——绑定键 engine 尚未定稿(`golden-eval §8` 标 `phase_id?`),studio 不替 engine 定 schema key,改"等定稿后消费";③ compile DTO 缺口补清——`doc_url`/`message_key`/`template_vars` 不进行内、按 `code` 去 `GET /errors` join;④ `GET /errors` 信封 studio DTO/TS 命名(`ErrorCatalogEnvelope`/`ErrorCatalogItem`);⑤ 未知事件**计数落点**写明(默认 structured log,不进 RunDetail,可选 `parse_warnings` 字段)。
 - **round-2（codex 6.8 不通过）后修正**：B3 逐轮字段名 `iteration`→`phase_execution_id`/`iteration_index`/`source`（区分 agent 内 `AgentLoopIterationEvent.iteration`）;B4 写清 `human_input`→engine HITL `ToolMessage` 注入的**投影**（非 engine 同名字段）;CallbackEvent 容错落到 DTO（默认跳过+计数 / 保留 raw 须改 `RunDetail.events` 类型）;`result.json`→DTO 明确为**宽容读+投影**且需同步前端 TS;`GET /errors` 补 studio proxy route+缓存+前端 fetch 落地面;golden 补**旧布局（`golden_metadata.json`+`final_state.json`）→ SSOT per-node** 迁移;gated 拆细——`error/source/phases/path_diff` 仅等 B1（现有字段)、`diagnostics` 等 P0-1、`stage_id` 等 P0-3、`GET /errors` 生命周期等 P1/P2;§(原)engine 提醒移出主体为非 gating handoff 附注（见 §7）。
 - **round-1（codex 5.8 不通过）后修正**：golden 路径收回消费 physical-layout SSOT;`source_span` 行级兜底;`diagnostics` 有界+双轨;i18n `message_key`/`code`;`extra=forbid` 拆清谁真消费;补 `GET /errors`/resume 置灰/`from` alias;gated 按 P0-1/P0-2/P1 分期。
@@ -99,3 +103,5 @@ engine 用"对接各类 app、非只 studio"的通用视角定型了错误协议
 
 ## 7. Handoff 附注（非 studio 执行依赖）
 > engine `03-api-contract §3.1`（Golden API 面，`:59`）仍写 golden 在 `phases/<phase_id>/golden.json`、随技能进 git——是**反转前旧路径**，和同仓 `01-physical-layout §2.2.3`（`.workspace/golden/<baseline_id>/...`，不进 git）矛盾。**这是 engine 文档内部治理,不是 studio B2–B4 的 gate**;仅作 handoff 提醒,engine session 统一即可。
+>
+> 另:engine `golden-eval §8` 的 `phase_id?`(待设计)是 **stale 标记** —— 绑定键权威结论在 `physical-layout §3#2` = `phase_id`(engine 2026-06-06 已确认,因 golden-eval 已哈希锁未改)。建议 engine session 经豁免/re-baseline 修正 `golden-eval §8`,免误导。

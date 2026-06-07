@@ -1,3 +1,13 @@
+---
+module: graph-agent-gateway-mvp1
+doc: module-disposition
+status: drafted
+workflow_axis: N/A（gateway MVP1 是库/公共能力模块,无独立用户旅程 workflow 文档）
+binds_design: ./README.md · ./DESIGN_UNITS_INDEX.md
+binds_code: packages/graph-agent-gateway/README.md · apps/studio/backend/app/services
+units: []
+aligns_with: ./README.md（scope / non-goals） · ./DESIGN_UNITS_INDEX.md（owner / spans） · packages/graph-agent-gateway/README.md（边界判据）
+---
 # Gateway MVP1 — 修订版逐模块归属表（按"公共能力内核 vs 应用加工"判据）
 
 > **取代** 2026-06-03 只读 review 的"领域泄漏"结论。
@@ -38,7 +48,7 @@ PM 第四轮校准后：这些的**能力内核恰是 ③b 公共**（gateway �
 | 07 health_store（熔断持久化） | ③a（seam） | **③b 公共** | 下沉 gateway；存储介质留注入 |
 | 07 copilot_test（copilot 假测试） | ③a leak | ③a 应用（copilot 专属） | 留 studio |
 | 08 6 态投影（`state_projection`） | ③a 全搬 ❌ | **③b 公共**（标准总结） | 下沉 gateway；颜色渲染留前端 |
-| 08 draft + 证据库（`import_drafts`） | ③a 全搬 ❌ | **③b 公共**（知识库）+ ③a（import/apply 工作流） | 知识库下沉 gateway；import UI 留 studio；**远端源改可配置** |
+| 08 draft + 证据库（`import_drafts`） | ③a 全搬 ❌ | **③b 公共**（知识库）+ ③a（import/apply 工作流） | 知识库下沉 gateway；import UI 留 studio；**远端源选择/配置留 ③a** |
 | 09 invocation runtime | ③b ✓ | ③b 公共 | 留 gateway |
 | 10 route-chat-model 工厂 | ③b（新建） | ③b 公共 | 留 gateway（新建） |
 | 11 provider profiles | ③b（新建） | ③b 公共 | 留 gateway（新建） |
@@ -58,7 +68,7 @@ PM 第四轮校准后：这些的**能力内核恰是 ③b 公共**（gateway �
 | model_group 分组 | `services/llm_model_groups.py` | family 折叠/弃用区的展示 |
 | identity 品牌/家族识别 | `services/llm_model_identity.py` | 展示名样式覆盖（如有） |
 | notable 知识 | `services/llm_notable_models.py` | 哪个面板展示（Manual panel） |
-| draft + 证据库 | `services/llm_import_drafts.py` | import/apply 工作流 UI + **远端源选择（现硬编码 GitHub repo，应改可配置）** |
+| draft + 证据库 | `services/llm_import_drafts.py` | import/apply 工作流 UI + **远端源选择/配置**（当前默认 GitHub URL,可由 `STUDIO_CATALOG_URL` 或调用参数覆盖） |
 | 6 态标准总结 | `services/llm_state_projection.py` | 状态颜色/文案呈现 |
 | 熔断持久化 | `services/llm_health_store.py` | 存储介质（SQLite 路径）注入 |
 | 能力合并 | `services/llm_route_capabilities.py` | — |

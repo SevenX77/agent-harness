@@ -9,12 +9,13 @@ aligns_with:
   - ../../../studio/_reorg/{gemini-prompt-batch-loop,engine-prompt-trace-compile-debug}.md
 design_draft: ../../../../temp/2026-06-03-batch-loop-resume-engine-design.md
 ---
+<!-- 核对进度:已迁 10 块 / 未迁 0 块 / 2026-06-04 -->
 
-# 10-iteration-and-resume — MVP1 Alignment(目标设计)
+~~# 10-iteration-and-resume — MVP1 Alignment(目标设计)~~ → ✅[已迁入](../../02-mechanism/04-run-outer/02-iterate/mvp1-alignment.md#2-数据流--机制)
 
 MVP1 目标:声明式 `iterate`(batch 并发 / loop 串行累积,图级 + 节点级 + 嵌套)+ **统一的节点级 checkpoint/状态机**(loop 累积 与 debug 续跑共用一套,engine-prompt 铁律)+ 实现 `resume_run`(节点级 + context 篡改 + HitL 注入)。复用现 `batch_spec`/checkpointer,不从零。
 
-## 0. fork 决策(2026-06-03 锁)
+~~## 0. fork 决策(2026-06-03 锁)~~ → ✅[已迁入](../../02-mechanism/04-run-outer/02-iterate/mvp1-alignment.md#2-数据流--机制)
 
 - **F1** loop 累积态 = **显式声明**(作者声明累积变量/初值/来源/合并,引擎不猜、不糊整黑板)。
 - **F2** 图级 loop 整体回灌 = 认可(上一轮所有节点 outputs 汇成 dict 当下一轮累积输入)。
@@ -22,7 +23,7 @@ MVP1 目标:声明式 `iterate`(batch 并发 / loop 串行累积,图级 + 节点
 - **F4** = 默认显式 `over`,自动探测仅作规整序列建议。
 - **F5** = 复用并发 semaphore + 图级全局并发闸。
 
-## 1. 统一配置 `iterate`(扩现 batch_spec,向后兼容)
+~~## 1. 统一配置 `iterate`(扩现 batch_spec,向后兼容)~~ → ✅[已迁入](../../02-mechanism/04-run-outer/02-iterate/mvp1-alignment.md#2-数据流--机制)
 
 ```yaml
 iterate:
@@ -37,7 +38,7 @@ iterate:
 - **scope = 写在哪**:节点文件=节点级 / `GRAPH.md`=图级 / `SUBGRAPH.md`=子图继承级(不写进子图自身 GRAPH.md)。
 - batch = 现 `_build_batch_wrapped_node` + range;`batch_spec` 即 `mode:batch`(兼容)。
 
-## 2. loop 累积语义(F1 显式)
+~~## 2. loop 累积语义(F1 显式)~~ → ✅[已迁入](../../02-mechanism/04-run-outer/02-iterate/mvp1-alignment.md#2-数据流--机制)
 
 ```
 acc = accumulate.init
@@ -50,7 +51,7 @@ for item in over[range]:                              # 串行 + range 切片
 - loop 节点的 `io.inputs` **必须含 `item_var` 和 `accumulate.var`**(显式契约,编译可校验)。
 - 例(event-timeline):`over:data.events`、`item_var:current_event`、`accumulate:{var:timeline,init:[],from:merged_segment,merge:append}`。
 
-## 3. 执行模型(4 种 + 嵌套 + 子图)
+~~## 3. 执行模型(4 种 + 嵌套 + 子图)~~ → ✅[已迁入](../../02-mechanism/04-run-outer/02-iterate/mvp1-alignment.md#2-数据流--机制)
 
 - 节点级 batch:现成 + range。
 - 节点级 loop:`_wrap_phase_runtime_node` 加 loop 分支(§2)。
@@ -60,7 +61,7 @@ for item in over[range]:                              # 串行 + range 切片
 - 子图继承(B5):SUBGRAPH.md 上的 iterate 由父图用来迭代调子图,子图本身跑 1 遍;子图 GRAPH.md 也设则嵌套。
 - **每轮 trace 归属(2026-06-03 PM 定,多轮不丢)**:loop/batch/图级 每轮、resume 每次,执行器都要给该轮所有事件盖 **`phase_execution_id`**(执行实例,前端按它分组)+ `iteration_index`/`source`——否则前端按节点看 trace 会丢轮次(只剩最近一次)。**⚠️ 现 `_build_batch_wrapped_node` 并发跑 + 聚合,事件没盖 item 维度 → 100 项 trace 全糊在同一 `phase_name` 下、丢归属,必须给每项补 `phase_execution_id` + `iteration_index`**。事件字段定义见 `06-trace-observability` 待办#9;层级 = `phase_name` → `phase_execution_id`(轮)→ 轮内 turns。
 
-## 4. 统一 checkpoint / 状态机 + resume(engine-prompt 铁律:不要两套)
+~~## 4. 统一 checkpoint / 状态机 + resume(engine-prompt 铁律:不要两套)~~ → ✅[已迁入](../../02-mechanism/04-run-outer/02-iterate/mvp1-alignment.md#2-数据流--机制)
 
 > **C2 机制已闭环(2026-06-03)** —— 不再留"实现期对齐"。**权威机制 = `records/state-checkpoint-storage-model`;本节是它在 iteration/resume 上的应用,不复制。** 核心:**唯一 base = LangGraph 的"每 super-step 一存"thread checkpoint**;节点级、loop 每轮、图级每遍、**以及 agent loop**,都映射成 super-step、靠 `checkpoint_ns` 嵌套区分,绝不另起自管 store(那才是两套)。
 > 已核证据:① 每 phase = 一个 `builder.add_node`(`graph_assembler.py:106-151`),即一个 super-step;② langgraph 1.2.2 支持 `checkpoint_ns`(嵌套命名空间)+ `get_state_history`/`get_state`(历史寻址)+ `Send`(并行 fan-out)。
@@ -76,7 +77,7 @@ for item in over[range]:                              # 串行 + range 切片
 - **range 起点 + 续跑**:`range.start=50` + 复用已有 checkpoint(载到 iter 49)= 接着跑;不复用 = 从 start。
 - **必须 D-test(承 uncovered-areas #3)**:嵌套子图在父 thread 下按 `checkpoint_ns` 逐 super-step 存档、且 `get_state_history` 能跨 ns 寻址续跑 —— 在 langgraph 1.2.2 + 我们的 GatewayChatModel 下实测成立(这是"统一一套"成立的唯一实证前提)。
 
-## 5. 决策表
+~~## 5. 决策表~~ → ✅[已迁入](../../02-mechanism/04-run-outer/02-iterate/mvp1-alignment.md#2-数据流--机制)
 
 | # | 决策 | 结论 |
 |---|---|---|
@@ -88,18 +89,18 @@ for item in over[range]:                              # 串行 + range 切片
 | C1 | checkpoint | loop 累积与 debug 续跑**统一一套**(engine-prompt 铁律) |
 | C2 | 统一机制(2026-06-03 闭环) | 唯一 base = LangGraph super-step thread checkpoint;节点/loop轮/图级遍 都映射 super-step,靠 `checkpoint_ns` 嵌套;**不**另起 node 自管 store。resume = `get_state_history`+`checkpoint_id/ns`+`update_state`。内层 create_agent 不带自己 checkpointer。需 D-test(嵌套 ns 寻址) |
 
-## 6. FROZEN 解冻清单
+~~## 6. FROZEN 解冻清单~~ → ✅[已迁入](../../02-mechanism/04-run-outer/02-iterate/mvp1-alignment.md#2-数据流--机制)
 
 1. skill-spec `02-graph`(图级)+`03-logic`/`05-agent`(节点级)+`04-subgraph`(继承):加 `iterate` 字段(兼容 `batch`)。
 2. 新校验:loop 节点 `io.inputs` 必须含 `item_var`+`accumulate.var`。
 3. 新错误码:`[F-v3-iterate-accumulate-fields-missing]`、`[F-v3-iterate-over-not-list]`;resume/失效相关码与 `11-error-code-spec` 对齐。
 
-## 7. 已实现 / 与 baseline 差异
+~~## 7. 已实现 / 与 baseline 差异~~ → ✅[已迁入](../../02-mechanism/04-run-outer/02-iterate/mvp1-alignment.md#2-数据流--机制)
 
 - 已实现(复用):节点级 batch、checkpointer 工厂、run 级 thread + 续跑开关、HitL 原语。
 - 未实现:loop 执行器、图级迭代层、统一节点级 checkpoint、`resume_run`、失效追踪、子图继承、iterate spec/校验。
 
-## 8. 待办/疑点
+~~## 8. 待办/疑点~~ → ✅[已迁入](../../02-mechanism/04-run-outer/02-iterate/mvp1-alignment.md#2-数据流--机制)
 
 1. 待办(TDD 先行):统一 iterate AST/spec + 编译校验、loop 执行器、图级迭代层、resume_run+overrides+失效、子图继承。
 2. ~~疑点:图级迭代每遍独立 sub-thread vs 共享 thread~~ → **已闭环(C2)**:共享 thread + `checkpoint_ns="iter{N}"`,不开独立 sub-thread(统一 base)。

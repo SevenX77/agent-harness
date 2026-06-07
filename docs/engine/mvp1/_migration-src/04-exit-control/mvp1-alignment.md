@@ -4,12 +4,13 @@ doc: mvp1-alignment
 status: drafted
 last_verified: 2026-06-02
 ---
+<!-- 核对进度:已迁 7 块 / 未迁 0 块 / 2026-06-04 -->
 
-# 04-exit-control — MVP1 Alignment(目标设计)
+~~# 04-exit-control — MVP1 Alignment(目标设计)~~ → ✅[已迁入](../../02-mechanism/05-run-inner/05-exit-control/mvp1-alignment.md#2-数据流--机制)
 
 MVP1/V4 决策：退出权集中到一个 `after_agent` 闸。phase 只有在记录到合格 finish_task 后才能 END；模型无 tool_calls 想自然结束时，闸注入 nudge 并 `jump_to:"model"`；耗尽预算时显式失败，不静默返回空或坏 BusinessData。
 
-## 覆盖范围
+~~## 覆盖范围~~ → ✅[已迁入](../../02-mechanism/05-run-inner/05-exit-control/mvp1-alignment.md#2-数据流--机制)
 
 覆盖范围：本文覆盖 after_agent 闸、NudgeInjector、deepagents RubricMiddleware 范式、create_agent jump 能力。
 
@@ -20,7 +21,7 @@ MVP1/V4 决策：退出权集中到一个 `after_agent` 闸。phase 只有在记
 | `NudgeInjector` | 复用 standard/selfcheck nudge 文本与计数策略。 |
 | `ExecutionControlMiddleware` | 与 max_iterations / loop detection 协同，不重复做 END 放行。 |
 
-## 目标设计与编号流程
+~~## 目标设计与编号流程~~ → ✅[已迁入](../../02-mechanism/05-run-inner/05-exit-control/mvp1-alignment.md#2-数据流--机制)
 
 1. 新增 exit gate middleware，hook 为 `after_agent`。本地 LangChain `after_agent` 返回 state update，并支持 decorator 的 `can_jump_to`，见 `.venv/lib/python3.12/site-packages/langchain/agents/middleware/types.py:625-634`、`.venv/lib/python3.12/site-packages/langchain/agents/middleware/types.py:1437-1456`。
 
@@ -48,7 +49,7 @@ MVP1/V4 决策：退出权集中到一个 `after_agent` 闸。phase 只有在记
 
 13. 诚实边界：系统不能保证 LLM 一定会把任务做好；能保证的是 phase 不会静默成功。结果要么是合格 finish_task，要么是带错误码的显式失败。
 
-## 已实现 / 与 baseline 差异
+~~## 已实现 / 与 baseline 差异~~ → ✅[已迁入](../../02-mechanism/05-run-inner/05-exit-control/mvp1-alignment.md#2-数据流--机制)
 
 已实现：NudgeInjector 的 standard/selfcheck/planning 逻辑和 callback 计数已存在，见 `packages/graph-agent/src/graph_agent/core/nudge_injector.py:75-151`。
 
@@ -58,7 +59,7 @@ MVP1/V4 决策：退出权集中到一个 `after_agent` 闸。phase 只有在记
 
 未实现：live path 没有 after_agent exit gate；手写 loop 的自然停止是 `break`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:526-528`。
 
-## 决策原因
+~~## 决策原因~~ → ✅[已迁入](../../02-mechanism/05-run-inner/05-exit-control/mvp1-alignment.md#2-数据流--机制)
 
 采用 after_agent，是因为 create_agent 默认自然停止发生在 agent 没有下一步 tool calls 时；这正是 `after_agent` 的语义位置。deepagents RubricMiddleware 的 docstring 也把它描述为 natural stop 处的状态，见 `temp/deepagents/libs/deepagents/deepagents/middleware/rubric.py:431-440`。
 
@@ -68,7 +69,7 @@ MVP1/V4 决策：退出权集中到一个 `after_agent` 闸。phase 只有在记
 
 成功 finish_task 不再 `goto=END`，是为了让唯一退出权落在 after_agent 闸。否则模型一旦调用合格 finish_task，CognitiveFlow 会直接跳到 `__end__`，绕开用于防静默退出和预算耗尽报错的统一闸门。
 
-## 代码索引(clues)
+~~## 代码索引(clues)~~ → ✅[已迁入](../../02-mechanism/05-run-inner/05-exit-control/mvp1-alignment.md#2-数据流--机制)
 
 - `.venv/lib/python3.12/site-packages/langchain/agents/middleware/types.py:1437-1456`: after_agent 支持 `can_jump_to`。
 - `.venv/lib/python3.12/site-packages/langchain/agents/factory.py:1433-1437`: 有 after_agent 时 exit_node 指向 after_agent 节点。
@@ -79,7 +80,7 @@ MVP1/V4 决策：退出权集中到一个 `after_agent` 闸。phase 只有在记
 - `packages/graph-agent/src/graph_agent/core/nudge_injector.py:136-151`: standard nudge。
 - `packages/graph-agent/src/graph_agent/middleware/cognitive_flow.py:680-699`: invalid finish_task 回 model 的现有模式。
 
-## 待办/疑点
+~~## 待办/疑点~~ → ✅[已迁入](../../02-mechanism/05-run-inner/05-exit-control/mvp1-alignment.md#2-数据流--机制)
 
 1. 待办：新增 exit gate 的 failing tests：无 tool_calls 不得 END、合格 finish_task 才 END、预算耗尽显式失败。
 2. 待办：D-test-2 覆盖 after_agent `jump_to:"model"` 重入端到端，证明无 finish_task 的自然停止会被 nudge 回模型，并最终合格提交或显式失败。

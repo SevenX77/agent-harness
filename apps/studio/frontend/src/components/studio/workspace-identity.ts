@@ -25,7 +25,7 @@ export function resolveWorkspaceIdentity(selection: string | null): { skillId: s
 }
 
 export function isAbsolutePath(value: string): boolean {
-  return value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value)
+  return value.startsWith('/') || isWindowsAbsolutePath(value)
 }
 
 function parseLocalWorkspaceSelection(selection: string): { skillId: string; workspaceRoot: string } | null {
@@ -47,8 +47,56 @@ function parseLocalWorkspaceSelection(selection: string): { skillId: string; wor
 }
 
 function skillIdFromWorkspaceRoot(path: string): string {
-  const name = path.split(/[\\/]/).filter(Boolean).pop() ?? 'imported-skill'
-  const normalized = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-  const withLetter = /^[a-z]/.test(normalized) ? normalized : `skill-${normalized}`
+  const name = lastPathSegment(path) ?? 'imported-skill'
+  const normalized = normalizeSkillIdSegment(name)
+  const withLetter = startsWithAsciiLetter(normalized) ? normalized : `skill-${normalized}`
   return withLetter || 'imported-skill'
+}
+
+function isWindowsAbsolutePath(value: string): boolean {
+  return value.length >= 3 && isAsciiLetter(value[0]) && value[1] === ':' && isPathSeparator(value[2])
+}
+
+function lastPathSegment(path: string): string | null {
+  let segment = ''
+  let lastSegment: string | null = null
+  for (const char of path) {
+    if (isPathSeparator(char)) {
+      if (segment) {
+        lastSegment = segment
+        segment = ''
+      }
+      continue
+    }
+    segment += char
+  }
+  return segment || lastSegment
+}
+
+function normalizeSkillIdSegment(name: string): string {
+  let normalized = ''
+  for (const char of name.toLowerCase()) {
+    if (isAsciiAlphaNumeric(char)) {
+      normalized += char
+    } else if (normalized && !normalized.endsWith('-')) {
+      normalized += '-'
+    }
+  }
+  return normalized.endsWith('-') ? normalized.slice(0, -1) : normalized
+}
+
+function isPathSeparator(char: string): boolean {
+  return char === '/' || char === '\\'
+}
+
+function startsWithAsciiLetter(value: string): boolean {
+  return value.length > 0 && isAsciiLetter(value[0])
+}
+
+function isAsciiAlphaNumeric(char: string): boolean {
+  return isAsciiLetter(char) || (char >= '0' && char <= '9')
+}
+
+function isAsciiLetter(char: string): boolean {
+  return (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z')
 }

@@ -203,8 +203,8 @@ def test_llm_fallback_event_code_is_not_call_site_configurable() -> None:
             from_provider="openai/gpt-5",
             to_provider="anthropic/claude-opus",
             reason="RateLimitError: quota exceeded",
-            code="[F-v3-gateway-all-providers-failed]",
             context={"role_name": "balanced"},
+            **{"code": "[F-v3-gateway-all-providers-failed]"},
         )
 
 
@@ -217,8 +217,8 @@ def test_tracing_helpers_reject_call_site_code_override() -> None:
             from_provider="openai/gpt-5",
             to_provider="anthropic/claude-opus",
             reason="RateLimitError: quota exceeded",
-            code="[F-v3-gateway-all-providers-failed]",
             context={"role_name": "balanced"},
+            **{"code": "[F-v3-gateway-all-providers-failed]"},
         )
 
     with pytest.raises(TypeError):
@@ -228,8 +228,8 @@ def test_tracing_helpers_reject_call_site_code_override() -> None:
             from_provider="openai/gpt-5",
             to_provider="anthropic/claude-opus",
             reason="RateLimitError: quota exceeded",
-            code="[F-v3-gateway-all-providers-failed]",
             context={"role_name": "balanced"},
+            **{"code": "[F-v3-gateway-all-providers-failed]"},
         )
 
 

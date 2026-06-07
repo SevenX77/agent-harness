@@ -480,46 +480,14 @@ def _call_anthropic_compatible(
             kwargs["tool_choice"] = anthropic_tool_choice
 
     if reasoning:
-        kwargs["temperature"] = 1.0
-        if _anthropic_mapper_prefers_adaptive_thinking(request_mapper_id):
-            kwargs["thinking"] = {"type": "adaptive"}
-            response = _anthropic_messages_create(client, kwargs)
-        elif _anthropic_mapper_prefers_manual_thinking(request_mapper_id):
-            kwargs["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": _anthropic_thinking_budget(
-                    max_tokens,
-                    thinking_budget_tokens,
-                ),
-            }
-            response = _anthropic_messages_create(client, kwargs)
-        elif _anthropic_adaptive_thinking_supported(model):
-            kwargs["thinking"] = {"type": "adaptive"}
-            try:
-                response = _anthropic_messages_create(client, kwargs)
-            except Exception as exc:
-                if (
-                    not _is_anthropic_adaptive_rejection(exc)
-                    or not _anthropic_manual_thinking_budget_supported(model)
-                ):
-                    raise
-                kwargs["thinking"] = {
-                    "type": "enabled",
-                    "budget_tokens": _anthropic_thinking_budget(
-                        max_tokens,
-                        thinking_budget_tokens,
-                    ),
-                }
-                response = _anthropic_messages_create(client, kwargs)
-        else:
-            kwargs["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": _anthropic_thinking_budget(
-                    max_tokens,
-                    thinking_budget_tokens,
-                ),
-            }
-            response = _anthropic_messages_create(client, kwargs)
+        response = _anthropic_messages_create_with_reasoning(
+            client,
+            kwargs,
+            model,
+            max_tokens,
+            thinking_budget_tokens,
+            request_mapper_id,
+        )
     else:
         kwargs["temperature"] = temperature
         response = _anthropic_messages_create(client, kwargs)
@@ -540,6 +508,51 @@ def _call_anthropic_compatible(
     if tool_calls:
         result["tool_calls"] = tool_calls
     return result
+
+
+def _anthropic_messages_create_with_reasoning(
+    client: Anthropic,
+    kwargs: dict[str, object],
+    model: str,
+    max_tokens: int,
+    thinking_budget_tokens: int | None,
+    request_mapper_id: str | None,
+) -> object:
+    kwargs["temperature"] = 1.0
+    if _anthropic_mapper_prefers_adaptive_thinking(request_mapper_id):
+        kwargs["thinking"] = {"type": "adaptive"}
+        return _anthropic_messages_create(client, kwargs)
+    if _anthropic_mapper_prefers_manual_thinking(request_mapper_id):
+        kwargs["thinking"] = _anthropic_manual_thinking(max_tokens, thinking_budget_tokens)
+        return _anthropic_messages_create(client, kwargs)
+    if not _anthropic_adaptive_thinking_supported(model):
+        kwargs["thinking"] = _anthropic_manual_thinking(max_tokens, thinking_budget_tokens)
+        return _anthropic_messages_create(client, kwargs)
+
+    kwargs["thinking"] = {"type": "adaptive"}
+    try:
+        return _anthropic_messages_create(client, kwargs)
+    except Exception as exc:
+        if (
+            not _is_anthropic_adaptive_rejection(exc)
+            or not _anthropic_manual_thinking_budget_supported(model)
+        ):
+            raise
+        kwargs["thinking"] = _anthropic_manual_thinking(max_tokens, thinking_budget_tokens)
+        return _anthropic_messages_create(client, kwargs)
+
+
+def _anthropic_manual_thinking(
+    max_tokens: int,
+    thinking_budget_tokens: int | None,
+) -> dict[str, object]:
+    return {
+        "type": "enabled",
+        "budget_tokens": _anthropic_thinking_budget(
+            max_tokens,
+            thinking_budget_tokens,
+        ),
+    }
 
 
 def _call_wavespeed_any_llm(

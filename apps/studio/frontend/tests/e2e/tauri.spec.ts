@@ -201,8 +201,8 @@ async function installTauriBridge(
               port: Number(window.location.port || 80),
               baseURL: `${window.location.origin}/api`,
               wsURL: `${window.location.origin.replace(/^http/, 'ws')}/ws`,
-              resourceDir: '/tmp/studio-resources',
-              configDir: '/tmp/studio-config',
+              resourceDir: '/workspace/studio-resources',
+              configDir: '/workspace/studio-config',
               api_token: null,
             }
           }

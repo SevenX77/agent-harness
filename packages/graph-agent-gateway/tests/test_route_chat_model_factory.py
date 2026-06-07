@@ -192,9 +192,9 @@ def test_factory_applies_protocol_endpoint_and_exact_model_profiles_with_caller_
     assert chat_model.kwargs["profile_scope"] == "exact"
     assert chat_model.kwargs["default_headers"] == {"x-profile-layer": "exact"}
     assert chat_model.kwargs["stream_usage"] is True
-    assert chat_model.kwargs["top_p"] == 0.5
+    assert chat_model.kwargs["top_p"] == pytest.approx(0.5)
     assert chat_model.kwargs["extra_body"] == {"reasoning": {"enabled": True}}
-    assert chat_model.kwargs["temperature"] == 0.9
+    assert chat_model.kwargs["temperature"] == pytest.approx(0.9)
     assert chat_model.kwargs["model"] == "Vendor/Model-A"
     assert chat_model.kwargs["api_key"] == "profile-secret"
 
@@ -391,7 +391,7 @@ def test_generic_chat_model_default_dispatcher_uses_ordinary_chat_core(
     assert captured[0]["route"] is route
     assert captured[0]["messages"] == [{"role": "user", "content": "hello"}]
     assert captured[0]["kwargs"]["max_tokens"] == 64  # type: ignore[index]
-    assert captured[0]["kwargs"]["temperature"] == 0.1  # type: ignore[index]
+    assert captured[0]["kwargs"]["temperature"] == pytest.approx(0.1)  # type: ignore[index]
 
 
 def test_generic_chat_model_dispatches_ordinary_chat_messages_preserving_tool_context() -> None:
@@ -452,7 +452,7 @@ def test_generic_chat_model_dispatches_ordinary_chat_messages_preserving_tool_co
     assert len(captured) == 1
     assert captured[0]["route"] is route
     assert captured[0]["kwargs"]["max_tokens"] == 128  # type: ignore[index]
-    assert captured[0]["kwargs"]["temperature"] == 0.3  # type: ignore[index]
+    assert captured[0]["kwargs"]["temperature"] == pytest.approx(0.3)  # type: ignore[index]
     messages = captured[0]["messages"]
     assert messages[1]["role"] == "assistant"  # type: ignore[index]
     assert messages[1]["content"] == ""  # type: ignore[index]

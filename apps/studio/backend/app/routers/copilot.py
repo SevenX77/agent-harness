@@ -86,7 +86,10 @@ async def post_copilot_context(
     )
 
 
-@router.post("/api/copilot/roles/{role_name}/test-sdk")
+@router.post(
+    "/api/copilot/roles/{role_name}/test-sdk",
+    responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}},
+)
 async def test_copilot_role_sdk(role_name: str) -> dict[str, Any]:
     """Execute a specialized Claude SDK tool-call verification test on the role's targets."""
     from fastapi import HTTPException

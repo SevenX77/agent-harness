@@ -204,7 +204,7 @@ describe('WelcomePage', () => {
   })
 
   it('does not require a registered skill match before opening a selected folder path', () => {
-    expect(registeredSkillIdForImport('/tmp/demo-skill/', [mismatchSkill])).toBeNull()
+    expect(registeredSkillIdForImport('/workspace/demo-skill/', [mismatchSkill])).toBeNull()
   })
 
   it('does not infer workspace identity from a normalized folder name collision', () => {

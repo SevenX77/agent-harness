@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -29,9 +28,7 @@ VALID_EXTERNAL_BINDINGS = {"none", "floating-draft", "pinned-draft", "frozen-pin
 VALID_INTEGRATION_LOCKS = {"unverified", "locked"}
 VALID_ROLES = {"owner", "消费", "引", "落点"}
 EXTERNAL_MODULE_PREFIXES = ("studio:", "engine:")
-SPAN_ENTRY_RE = re.compile(r"^(?P<facet>.+?)→`(?P<module>[^`]+)`\((?P<role_note>.+)\)$")
-ROLE_NOTE_RE = re.compile(r"^(?P<role>owner|消费|引|落点)(?:$|[;/,，;；]\s*.+$)")
-STATUS_RE = re.compile(r"^status:\s*(?P<status>.+)$", re.MULTILINE)
+ROLE_NOTE_SEPARATORS = {";", "/", ",", "，", "；"}
 
 
 @dataclass(frozen=True)
@@ -144,8 +141,11 @@ def _frontmatter_status(markdown: str) -> str | None:
     end = markdown.find("\n---\n", 4)
     if end == -1:
         return None
-    match = STATUS_RE.search(markdown[4:end])
-    return match.group("status").strip() if match else None
+    for line in markdown[4:end].splitlines():
+        key, separator, value = line.partition(":")
+        if separator and key.strip() == "status":
+            return value.strip()
+    return None
 
 
 def _is_frozen_doc(path: Path) -> bool:
@@ -219,25 +219,49 @@ def _parse_spans(*, unit: str, spans: str) -> list[SpanEntry]:
                 f"{unit}: span entry must contain exactly one separator arrow: {entry}; remediation: "
                 "write each span as 'facet→`module`(role)' and avoid arrows inside facet text"
             )
-        match = SPAN_ENTRY_RE.fullmatch(entry)
-        if not match:
-            raise AssertionError(
-                f"{unit}: span entry must match 'facet→`module`(role; optional note)': {entry}; remediation: "
-                "split compound spans and add an explicit leading role owner/消费/引/落点"
-            )
-        role_note = match.group("role_note").strip()
-        role_match = ROLE_NOTE_RE.fullmatch(role_note)
-        if not role_match:
-            raise AssertionError(
-                f"{unit}: span entry role must be one of {sorted(VALID_ROLES)}, got {role_note!r} in {entry}; "
-                "remediation: make the role the first token inside parentheses"
-            )
-        facet = match.group("facet").strip()
-        module = match.group("module").strip()
+        facet, module, role_note = _parse_span_entry(unit, entry)
+        role = _parse_span_role(unit, entry, role_note)
         if not facet or not module:
             raise AssertionError(f"{unit}: span entry has empty facet/module: {entry}")
-        entries.append(SpanEntry(facet=facet, module=module, role=role_match.group("role")))
+        entries.append(SpanEntry(facet=facet, module=module, role=role))
     return entries
+
+
+def _parse_span_entry(unit: str, entry: str) -> tuple[str, str, str]:
+    arrow_index = entry.index("→")
+    facet = entry[:arrow_index].strip()
+    remainder = entry[arrow_index + 1 :]
+    if not remainder.startswith("`"):
+        _raise_span_entry_shape_error(unit, entry)
+    module_end = remainder.find("`", 1)
+    if module_end < 0 or module_end + 1 >= len(remainder):
+        _raise_span_entry_shape_error(unit, entry)
+    module = remainder[1:module_end].strip()
+    role_note = remainder[module_end + 1 :]
+    if not role_note.startswith("(") or not role_note.endswith(")"):
+        _raise_span_entry_shape_error(unit, entry)
+    return facet, module, role_note[1:-1].strip()
+
+
+def _raise_span_entry_shape_error(unit: str, entry: str) -> None:
+    raise AssertionError(
+        f"{unit}: span entry must match 'facet→`module`(role; optional note)': {entry}; remediation: "
+        "split compound spans and add an explicit leading role owner/消费/引/落点"
+    )
+
+
+def _parse_span_role(unit: str, entry: str, role_note: str) -> str:
+    role = role_note
+    for index, char in enumerate(role_note):
+        if char in ROLE_NOTE_SEPARATORS:
+            role = role_note[:index].strip()
+            break
+    if role not in VALID_ROLES:
+        raise AssertionError(
+            f"{unit}: span entry role must be one of {sorted(VALID_ROLES)}, got {role_note!r} in {entry}; "
+            "remediation: make the role the first token inside parentheses"
+        )
+    return role
 
 
 def _is_external_module(module: str) -> bool:
@@ -250,50 +274,9 @@ def _canonicalize_design_units(index_path: Path) -> list[DesignUnitLockRecord]:
     seen_units: set[str] = set()
 
     for row in rows:
-        unit = _strip_inline_code(row["单元"])
-        if not unit:
-            raise AssertionError("DESIGN_UNITS_INDEX.md contains a unit row with an empty unit id")
-        if unit in seen_units:
-            raise AssertionError(f"{unit}: duplicate unit row in DESIGN_UNITS_INDEX.md")
-        seen_units.add(unit)
-
-        owned_lock = _normalize_lock_value(row["owned-lock"])
-        external_binding = _normalize_lock_value(row["external-binding"])
-        integration_lock = _normalize_lock_value(row["integration-lock"])
-        if owned_lock not in VALID_OWNED_LOCKS:
-            raise AssertionError(f"{unit}: invalid owned-lock {owned_lock!r}; expected {sorted(VALID_OWNED_LOCKS)}")
-        if external_binding not in VALID_EXTERNAL_BINDINGS:
-            raise AssertionError(
-                f"{unit}: invalid external-binding {external_binding!r}; expected {sorted(VALID_EXTERNAL_BINDINGS)}"
-            )
-        if integration_lock not in VALID_INTEGRATION_LOCKS:
-            raise AssertionError(
-                f"{unit}: invalid integration-lock {integration_lock!r}; expected {sorted(VALID_INTEGRATION_LOCKS)}"
-            )
-        expected_integration_lock = (
-            "locked" if owned_lock == "locked" and external_binding in {"none", "frozen-pinned"} else "unverified"
-        )
-        if integration_lock != expected_integration_lock:
-            raise AssertionError(
-                f"{unit}: integration-lock must be {expected_integration_lock!r} for owned-lock={owned_lock!r} "
-                f"and external-binding={external_binding!r}; got {integration_lock!r}"
-            )
-
-        span_entries = _parse_spans(unit=unit, spans=row["spans（切面 → 模块 · 角色;角色∈owner/消费/引/落点）"])
-        owners = sorted({entry.module for entry in span_entries if entry.role == "owner"})
-        external_refs = sorted(
-            {f"{entry.facet}→{entry.module}" for entry in span_entries if entry.role == "引" and _is_external_module(entry.module)}
-        )
-        if external_binding == "none" and external_refs:
-            raise AssertionError(
-                f"{unit}: external-binding is none but external refs exist: {external_refs}; remediation: "
-                "set external-binding to a non-none binding or remove the external '(引)' spans"
-            )
-        if external_binding != "none" and not external_refs:
-            raise AssertionError(
-                f"{unit}: external-binding is {external_binding!r} but no studio/engine '(引)' spans were found; "
-                "remediation: add external refs or set external-binding to none"
-            )
+        unit = _design_unit_from_row(row, seen_units)
+        owned_lock, external_binding, integration_lock = _design_unit_lock_values(unit, row)
+        owners, external_refs = _design_unit_span_refs(unit, row, external_binding)
 
         records.append(
             DesignUnitLockRecord(
@@ -307,6 +290,73 @@ def _canonicalize_design_units(index_path: Path) -> list[DesignUnitLockRecord]:
         )
 
     return sorted(records, key=lambda record: record.unit)
+
+
+def _design_unit_from_row(row: dict[str, str], seen_units: set[str]) -> str:
+    unit = _strip_inline_code(row["单元"])
+    if not unit:
+        raise AssertionError("DESIGN_UNITS_INDEX.md contains a unit row with an empty unit id")
+    if unit in seen_units:
+        raise AssertionError(f"{unit}: duplicate unit row in DESIGN_UNITS_INDEX.md")
+    seen_units.add(unit)
+    return unit
+
+
+def _design_unit_lock_values(unit: str, row: dict[str, str]) -> tuple[str, str, str]:
+    owned_lock = _normalize_lock_value(row["owned-lock"])
+    external_binding = _normalize_lock_value(row["external-binding"])
+    integration_lock = _normalize_lock_value(row["integration-lock"])
+    if owned_lock not in VALID_OWNED_LOCKS:
+        raise AssertionError(f"{unit}: invalid owned-lock {owned_lock!r}; expected {sorted(VALID_OWNED_LOCKS)}")
+    if external_binding not in VALID_EXTERNAL_BINDINGS:
+        raise AssertionError(
+            f"{unit}: invalid external-binding {external_binding!r}; expected {sorted(VALID_EXTERNAL_BINDINGS)}"
+        )
+    if integration_lock not in VALID_INTEGRATION_LOCKS:
+        raise AssertionError(
+            f"{unit}: invalid integration-lock {integration_lock!r}; expected {sorted(VALID_INTEGRATION_LOCKS)}"
+        )
+    _assert_design_unit_integration_lock(unit, owned_lock, external_binding, integration_lock)
+    return owned_lock, external_binding, integration_lock
+
+
+def _assert_design_unit_integration_lock(
+    unit: str,
+    owned_lock: str,
+    external_binding: str,
+    integration_lock: str,
+) -> None:
+    expected_integration_lock = (
+        "locked" if owned_lock == "locked" and external_binding in {"none", "frozen-pinned"} else "unverified"
+    )
+    if integration_lock != expected_integration_lock:
+        raise AssertionError(
+            f"{unit}: integration-lock must be {expected_integration_lock!r} for owned-lock={owned_lock!r} "
+            f"and external-binding={external_binding!r}; got {integration_lock!r}"
+        )
+
+
+def _design_unit_span_refs(unit: str, row: dict[str, str], external_binding: str) -> tuple[list[str], list[str]]:
+    span_entries = _parse_spans(unit=unit, spans=row["spans（切面 → 模块 · 角色;角色∈owner/消费/引/落点）"])
+    owners = sorted({entry.module for entry in span_entries if entry.role == "owner"})
+    external_refs = sorted(
+        {
+            f"{entry.facet}→{entry.module}"
+            for entry in span_entries
+            if entry.role == "引" and _is_external_module(entry.module)
+        }
+    )
+    if external_binding == "none" and external_refs:
+        raise AssertionError(
+            f"{unit}: external-binding is none but external refs exist: {external_refs}; remediation: "
+            "set external-binding to a non-none binding or remove the external '(引)' spans"
+        )
+    if external_binding != "none" and not external_refs:
+        raise AssertionError(
+            f"{unit}: external-binding is {external_binding!r} but no studio/engine '(引)' spans were found; "
+            "remediation: add external refs or set external-binding to none"
+        )
+    return owners, external_refs
 
 
 def _load_snapshot(path: Path = SNAPSHOT_PATH) -> dict[str, Any]:

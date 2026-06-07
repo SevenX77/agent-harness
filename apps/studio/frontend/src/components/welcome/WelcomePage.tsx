@@ -60,7 +60,7 @@ interface CreateSkillPayload {
 export function defaultSkillsDirectory(customDirectory?: string | null): string | null {
   if (customDirectory) return customDirectory
   const config = getRuntimeConfig()
-  if (config && config.configDir) {
+  if (config?.configDir) {
     return `${config.configDir}/Skills`
   }
   return '/studio/config/Skills'
@@ -86,9 +86,12 @@ function comparableDirectoryPath(path: string) {
   return path.trim().replace(/\\/g, '/').replace(/\/+$/, '')
 }
 
-export function registeredSkillIdForImport(directoryPath: string, skills: SkillSummary[]): string | null {
-  void directoryPath
-  void skills
+function ignorePromise(promise: Promise<unknown>) {
+  promise.catch(() => undefined)
+}
+
+export function registeredSkillIdForImport(directoryPath: string, skills: SkillSummary[]): string | null
+export function registeredSkillIdForImport(): string | null {
   return null
 }
 
@@ -309,8 +312,8 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
     const name = displayName || skillIdFromPath(workspaceRoot)
     const resolvedSkillId = await resolveBackendSkillIdForWorkspace(workspaceRoot, backendSkillId)
     rememberWorkspace({ absolutePath: workspaceRoot, displayName: name })
-    void addRecentWorkspace(workspaceRoot, name, `local:${workspaceRoot}`, new Date().toISOString())
-    void ensureWorkspaceSupportDirs(workspaceRoot)
+    ignorePromise(addRecentWorkspace(workspaceRoot, name, `local:${workspaceRoot}`, new Date().toISOString()))
+    ignorePromise(ensureWorkspaceSupportDirs(workspaceRoot))
     onSelectSkill(
       isAbsolutePath(workspaceRoot)
         ? createLocalWorkspaceSelection(resolvedSkillId, workspaceRoot)
@@ -319,7 +322,7 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
   }
 
   const openWorkspace = (workspace: { absolutePath: string; displayName: string; skillId?: string }) => {
-    void openSkill(workspace.absolutePath, workspace.displayName, workspace.skillId).catch((error) => {
+    openSkill(workspace.absolutePath, workspace.displayName, workspace.skillId).catch((error) => {
       toast.error('Open folder failed', { description: formatImportSkillError(error) })
     })
   }
@@ -344,7 +347,7 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
   }
 
   const handleReveal = (workspace: { absolutePath: string }) => {
-    void revealInFileManager(workspace.absolutePath)
+    ignorePromise(revealInFileManager(workspace.absolutePath))
   }
 
   const deleteSkill = async (workspace: { absolutePath: string; displayName: string; identity: string; skillId?: string }) => {
@@ -353,7 +356,7 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
         await api.delete(`/skills/${workspace.skillId}`)
       }
       removeWorkspace(workspace.identity)
-      void removeRecentWorkspace(workspace.identity)
+      ignorePromise(removeRecentWorkspace(workspace.identity))
       toast.success(`Removed ${workspace.displayName} from Studio`)
       await mutateSkills()
     } catch (error) {
@@ -442,7 +445,9 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
               variant="outline"
               size="lg"
               disabled={importing}
-              onClick={() => void importSkillDirectory()}
+              onClick={() => {
+                ignorePromise(importSkillDirectory())
+              }}
               className="w-full justify-start"
             >
               <FolderOpen />
@@ -523,7 +528,7 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
                             variant="destructive"
-                            onSelect={() => void handleDelete(workspace)}
+                            onSelect={() => handleDelete(workspace)}
                           >
                             <Trash2 />
                             {REMOVE_WORKSPACE_ACTION_LABEL}
@@ -549,7 +554,7 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
                 <ContextMenuSeparator />
                 <ContextMenuItem
                   variant="destructive"
-                  onSelect={() => void handleDelete(workspace)}
+                  onSelect={() => handleDelete(workspace)}
                 >
                   <Trash2 />
                   {REMOVE_WORKSPACE_ACTION_LABEL}
@@ -580,7 +585,9 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
         parentDirectory={newSkillParentDirectory}
         defaultParentDirectory={defaultSkillParentDirectory}
         selectingParentDirectory={selectingNewSkillParent}
-        onChooseParentDirectory={() => void chooseNewSkillParentDirectory()}
+        onChooseParentDirectory={() => {
+          ignorePromise(chooseNewSkillParentDirectory())
+        }}
         newSkillError={newSkillError}
         creating={creating}
         onSubmit={submitNewSkill}

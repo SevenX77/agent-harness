@@ -76,11 +76,11 @@ describe('Tauri native-fs bridge contract', () => {
       clipboard: { writeText },
     })
 
-    await revealInFileManager('/tmp/plain-folder')
+    await revealInFileManager('/workspace/plain-folder')
 
     expect(writeText).not.toHaveBeenCalled()
     expect(toast.info).toHaveBeenCalledWith('Desktop-only feature', {
-      description: '/tmp/plain-folder',
+      description: '/workspace/plain-folder',
     })
     expect(toast.success).not.toHaveBeenCalled()
   })

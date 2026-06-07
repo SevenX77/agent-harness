@@ -72,6 +72,68 @@ def _snapshot():
     )
 
 
+def _snapshot_with_stale_provider_route(
+    *,
+    capabilities: dict[str, object] | None = None,
+    verified_profiles: list[object] | None = None,
+    route_runtime_settings: dict[str, object] | None = None,
+):
+    from graph_agent_gateway.registry.contracts import SnapshotVersion
+    from graph_agent_gateway.registry.schema import (
+        ProviderEndpoint,
+        ProviderRoute,
+        RegistrySnapshot,
+        RoleEntry,
+        RoleRouteEntry,
+    )
+
+    old_version = SnapshotVersion(
+        registry_version="registry-1",
+        client_id="graph_agent",
+        client_route_profile_version="profile-1",
+    )
+    current_version = SnapshotVersion(
+        registry_version="registry-2",
+        client_id="graph_agent",
+        client_route_profile_version="profile-2",
+    )
+    route_kwargs: dict[str, object] = {
+        "route_id": "provider:model",
+        "endpoint_id": "provider",
+        "route_slug": "model",
+        "provider_model_id": "model",
+        "canonical_id": "model",
+        "status": "verified",
+        "snapshot_version": old_version,
+    }
+    if capabilities is not None:
+        route_kwargs["capabilities"] = capabilities
+    if verified_profiles is not None:
+        route_kwargs["verified_profiles"] = verified_profiles
+
+    fallback_kwargs: dict[str, object] = {"route_id": "provider:model"}
+    if route_runtime_settings is not None:
+        fallback_kwargs["runtime_settings"] = route_runtime_settings
+
+    return RegistrySnapshot(
+        snapshot_version=current_version,
+        provider_endpoints={
+            "provider": ProviderEndpoint(
+                endpoint_id="provider",
+                protocol="openai_compatible",
+                base_url="https://provider.example/v1",
+                api_key=SecretStr("secret"),
+            ),
+        },
+        provider_routes={"provider:model": ProviderRoute(**route_kwargs)},
+        roles={
+            "graph_agent": RoleEntry(
+                fallback_chain=[RoleRouteEntry(**fallback_kwargs)],
+            )
+        },
+    ), current_version
+
+
 def test_resolver_preserves_declared_route_order_and_role_metadata() -> None:
     from graph_agent_gateway.registry.resolver import resolve_role
 
@@ -117,63 +179,20 @@ def test_resolver_propagates_snapshot_version_to_resolved_routes() -> None:
 
 
 def test_snapshot_version_mismatch_keeps_verified_profile_historical_not_live_ready() -> None:
-    from graph_agent_gateway.registry.contracts import SnapshotVersion
     from graph_agent_gateway.registry.resolver import resolve_role
-    from graph_agent_gateway.registry.schema import (
-        ProviderEndpoint,
-        ProviderRoute,
-        RegistrySnapshot,
-        RoleEntry,
-        RoleRouteEntry,
-        VerifiedProfile,
-    )
+    from graph_agent_gateway.registry.schema import VerifiedProfile
 
-    old_version = SnapshotVersion(
-        registry_version="registry-1",
-        client_id="graph_agent",
-        client_route_profile_version="profile-1",
-    )
-    current_version = SnapshotVersion(
-        registry_version="registry-2",
-        client_id="graph_agent",
-        client_route_profile_version="profile-2",
-    )
-    snapshot = RegistrySnapshot(
-        snapshot_version=current_version,
-        provider_endpoints={
-            "provider": ProviderEndpoint(
-                endpoint_id="provider",
-                protocol="openai_compatible",
-                base_url="https://provider.example/v1",
-                api_key=SecretStr("secret"),
-            ),
-        },
-        provider_routes={
-            "provider:model": ProviderRoute(
-                route_id="provider:model",
-                endpoint_id="provider",
-                route_slug="model",
-                provider_model_id="model",
-                canonical_id="model",
-                status="verified",
-                snapshot_version=old_version,
-                verified_profiles=[
-                    VerifiedProfile(
-                        profile_id="text",
-                        capability="text_chat",
-                        method_id="openai_chat_completions",
-                        request_mapper_id="openai_chat_text",
-                        status="ready",
-                        default=True,
-                    )
-                ],
-            ),
-        },
-        roles={
-            "graph_agent": RoleEntry(
-                fallback_chain=[RoleRouteEntry(route_id="provider:model")],
+    snapshot, current_version = _snapshot_with_stale_provider_route(
+        verified_profiles=[
+            VerifiedProfile(
+                profile_id="text",
+                capability="text_chat",
+                method_id="openai_chat_completions",
+                request_mapper_id="openai_chat_text",
+                status="ready",
+                default=True,
             )
-        },
+        ],
     )
 
     resolved = resolve_role(snapshot, "graph_agent")
@@ -185,58 +204,15 @@ def test_snapshot_version_mismatch_keeps_verified_profile_historical_not_live_re
 
 
 def test_snapshot_version_mismatch_ignores_stale_capability_runtime_defaults() -> None:
-    from graph_agent_gateway.registry.contracts import SnapshotVersion
     from graph_agent_gateway.registry.resolver import resolve_role
-    from graph_agent_gateway.registry.schema import (
-        CapabilityValue,
-        ProviderEndpoint,
-        ProviderRoute,
-        RegistrySnapshot,
-        RoleEntry,
-        RoleRouteEntry,
-    )
+    from graph_agent_gateway.registry.schema import CapabilityValue
 
-    old_version = SnapshotVersion(
-        registry_version="registry-1",
-        client_id="graph_agent",
-        client_route_profile_version="profile-1",
-    )
-    current_version = SnapshotVersion(
-        registry_version="registry-2",
-        client_id="graph_agent",
-        client_route_profile_version="profile-2",
-    )
-    snapshot = RegistrySnapshot(
-        snapshot_version=current_version,
-        provider_endpoints={
-            "provider": ProviderEndpoint(
-                endpoint_id="provider",
-                protocol="openai_compatible",
-                base_url="https://provider.example/v1",
-                api_key=SecretStr("secret"),
+    snapshot, current_version = _snapshot_with_stale_provider_route(
+        capabilities={
+            "max_output_tokens": CapabilityValue(
+                value={"default": 12000, "max": 16000},
+                source="manual",
             ),
-        },
-        provider_routes={
-            "provider:model": ProviderRoute(
-                route_id="provider:model",
-                endpoint_id="provider",
-                route_slug="model",
-                provider_model_id="model",
-                canonical_id="model",
-                status="verified",
-                snapshot_version=old_version,
-                capabilities={
-                    "max_output_tokens": CapabilityValue(
-                        value={"default": 12000, "max": 16000},
-                        source="manual",
-                    ),
-                },
-            ),
-        },
-        roles={
-            "graph_agent": RoleEntry(
-                fallback_chain=[RoleRouteEntry(route_id="provider:model")],
-            )
         },
     )
 
@@ -250,64 +226,17 @@ def test_snapshot_version_mismatch_ignores_stale_capability_runtime_defaults() -
 
 
 def test_snapshot_version_mismatch_ignores_stale_capability_blocking_lint() -> None:
-    from graph_agent_gateway.registry.contracts import SnapshotVersion
     from graph_agent_gateway.registry.resolver import resolve_role
-    from graph_agent_gateway.registry.schema import (
-        CapabilityValue,
-        ProviderEndpoint,
-        ProviderRoute,
-        RegistrySnapshot,
-        RoleEntry,
-        RoleRouteEntry,
-    )
+    from graph_agent_gateway.registry.schema import CapabilityValue
 
-    old_version = SnapshotVersion(
-        registry_version="registry-1",
-        client_id="graph_agent",
-        client_route_profile_version="profile-1",
-    )
-    current_version = SnapshotVersion(
-        registry_version="registry-2",
-        client_id="graph_agent",
-        client_route_profile_version="profile-2",
-    )
-    snapshot = RegistrySnapshot(
-        snapshot_version=current_version,
-        provider_endpoints={
-            "provider": ProviderEndpoint(
-                endpoint_id="provider",
-                protocol="openai_compatible",
-                base_url="https://provider.example/v1",
-                api_key=SecretStr("secret"),
+    snapshot, _current_version = _snapshot_with_stale_provider_route(
+        capabilities={
+            "max_output_tokens": CapabilityValue(
+                value={"max": 1000},
+                source="manual",
             ),
         },
-        provider_routes={
-            "provider:model": ProviderRoute(
-                route_id="provider:model",
-                endpoint_id="provider",
-                route_slug="model",
-                provider_model_id="model",
-                canonical_id="model",
-                status="verified",
-                snapshot_version=old_version,
-                capabilities={
-                    "max_output_tokens": CapabilityValue(
-                        value={"max": 1000},
-                        source="manual",
-                    ),
-                },
-            ),
-        },
-        roles={
-            "graph_agent": RoleEntry(
-                fallback_chain=[
-                    RoleRouteEntry(
-                        route_id="provider:model",
-                        runtime_settings={"max_output_tokens": 2000},
-                    )
-                ],
-            )
-        },
+        route_runtime_settings={"max_output_tokens": 2000},
     )
 
     resolved = resolve_role(snapshot, "graph_agent")

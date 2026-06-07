@@ -70,7 +70,9 @@ export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appS
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => void chooseDefaultSkillsDirectory()}
+                onClick={() => {
+                  chooseDefaultSkillsDirectory().catch(() => undefined)
+                }}
                 disabled={appSettings.isLoading || selectingDefaultFolder}
                 className="h-8 shrink-0 text-xs"
               >
@@ -111,7 +113,7 @@ export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appS
             <Select
               value={currentLanguage}
               onValueChange={(value) => {
-                void i18n.changeLanguage(value)
+                i18n.changeLanguage(value).catch(() => undefined)
               }}
             >
               <SelectTrigger

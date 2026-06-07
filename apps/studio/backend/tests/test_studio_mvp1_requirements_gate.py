@@ -31,6 +31,8 @@ PM_BOUNDARY_PATTERNS = [
     re.compile(r"改第\s*\d+\s*行"),
     re.compile(r"^\s*[-*]\s*\[\s*\]\s*(?:Step|步骤)\s*\d+", re.IGNORECASE | re.MULTILINE),
 ]
+REQUIRED_SSOT_GROUNDING = ("mvp1-alignment.md", "baseline.md", "DESIGN_UNITS_INDEX.md", "01_workflows")
+REVIEW_FLOW_GATE_TERMS = ("RED 测试", "PM 契约门", "Codex", "Gemini", "baseline 回写", "PM 终审")
 FORBIDDEN_PRECONTRACT_ARTIFACT_PATTERNS = (
     "task-ws*.md",
     "tasks-ws*.md",
@@ -269,76 +271,95 @@ def test_studio_mvp1_ws_requirements_follow_task_spec_template() -> None:
 def test_studio_mvp1_ws_requirements_encode_contract_gates() -> None:
     violations: list[str] = []
     for doc in _load_existing_expected_docs():
-        section_2 = _section(doc, 2)
-        section_6 = _section(doc, 6)
-        section_8 = _section(doc, 8)
-        section_9 = _section(doc, 9)
-        section_12 = _section(doc, 12)
-        spec_ssot_text = "\n".join(str(item) for item in doc.frontmatter.get("spec_ssot", []))
-        owns_text = "\n".join(str(item) for item in doc.frontmatter.get("owns_files", []))
-        combined_grounding = f"{spec_ssot_text}\n{section_2}"
-
-        for needle in ("mvp1-alignment.md", "baseline.md", "DESIGN_UNITS_INDEX.md", "01_workflows"):
-            if needle not in combined_grounding:
-                violations.append(f"{doc.relative_path}: SSOT grounding must include {needle}")
-
-        if ".kiro/specs/studio-" in combined_grounding:
-            violations.append(f"{doc.relative_path}: historical .kiro Studio specs must not be design SSOT")
-
-        if not _body_has_any(section_6, ("RED", "失败测试", "先失败")):
-            violations.append(f"{doc.relative_path}: section 6 must name RED/failing tests")
-        if not _body_has_any(section_6, ("真实 e2e", "真实端到端", "手动验证")):
-            violations.append(f"{doc.relative_path}: section 6 must include real e2e or manual validation")
-        if "fake mock" not in section_6 and "不许 fake" not in section_6 and "不允许 fake" not in section_6:
-            violations.append(f"{doc.relative_path}: section 6 must mark no-fake boundaries")
-
-        if "- [ ]" not in section_8:
-            violations.append(f"{doc.relative_path}: section 8 must use checklist hard-exit items")
-        if "测试" not in section_8:
-            violations.append(f"{doc.relative_path}: section 8 must require tests to pass")
-        if not _body_has_any(section_8, ("真实 e2e", "真实端到端", "手动", "blocked", "阻塞")):
-            violations.append(f"{doc.relative_path}: section 8 must include real e2e/manual validation or blocked status")
-
-        if not _body_has_any(section_9, ("不做", "范围外", "deferred")):
-            violations.append(f"{doc.relative_path}: section 9 must lock non-goals and deferred handling")
-
-        if not _body_has_any(doc.body, ("用户在聊天窗口明确确认", "用户明确确认")):
-            violations.append(f"{doc.relative_path}: must preserve explicit human chat confirmation gate")
-        for needle in ("RED 测试", "PM 契约门", "Codex", "Gemini", "baseline 回写", "PM 终审"):
-            if needle not in doc.body and needle not in section_12:
-                violations.append(f"{doc.relative_path}: missing review-flow gate term {needle}")
-
-        for pattern in PM_BOUNDARY_PATTERNS:
-            if pattern.search(doc.body):
-                violations.append(f"{doc.relative_path}: contains PM-boundary implementation wording {pattern.pattern!r}")
-        if "```" in doc.body:
-            violations.append(f"{doc.relative_path}: requirements docs must not contain literal code fences")
-
-        if "docs/graph-agent-gateway/" in doc.body or "docs/engine/" in doc.body:
-            if not _body_has_any(doc.body, ("floating-draft", "pinned", "blocked", "阻塞", "条件放行")):
-                violations.append(f"{doc.relative_path}: external engine/gateway contract status must be stated")
-
-        if "apps/studio/frontend" in owns_text:
-            for needle in ("FRONTEND_UI_SPEC.md", "components/ui"):
-                if needle not in doc.body:
-                    violations.append(f"{doc.relative_path}: UI WS must reference {needle}")
-            if not _body_has_any(doc.body, ("Playwright", "浏览器")):
-                violations.append(f"{doc.relative_path}: UI WS must require Playwright/browser click verification")
-            if "窄" not in doc.body:
-                violations.append(f"{doc.relative_path}: UI WS must require narrow-width validation")
-            if not _body_has_any(doc.body, ("语义 token", "语义化 token", "语义化 CSS")):
-                violations.append(f"{doc.relative_path}: UI WS must require semantic design tokens")
-
-        if "apps/studio/backend" in owns_text and not _body_has_any(
-            doc.body,
-            ("重启 Studio App", "cargo tauri dev", "重启 Studio"),
-        ):
-            violations.append(f"{doc.relative_path}: backend WS must require Studio App restart after backend changes")
-
-        if "apps/studio/tauri" in owns_text and not _body_has_any(doc.body, ("Tauri bridge", "Tauri", "原生路径")):
-            violations.append(f"{doc.relative_path}: Tauri/native-fs WS must require Tauri bridge/native path validation")
+        _validate_contract_grounding(doc, violations)
+        _validate_contract_test_and_exit_gates(doc, violations)
+        _validate_contract_review_gates(doc, violations)
+        _validate_contract_scope_boundaries(doc, violations)
+        _validate_owned_surface_gates(doc, violations)
 
     assert not violations, "Studio MVP1 requirements contract-gate violations:\n" + "\n".join(violations)
+
+
+def _validate_contract_grounding(doc: RequirementsDoc, violations: list[str]) -> None:
+    section_2 = _section(doc, 2)
+    spec_ssot_text = "\n".join(str(item) for item in doc.frontmatter.get("spec_ssot", []))
+    combined_grounding = f"{spec_ssot_text}\n{section_2}"
+    for needle in REQUIRED_SSOT_GROUNDING:
+        if needle not in combined_grounding:
+            violations.append(f"{doc.relative_path}: SSOT grounding must include {needle}")
+    if ".kiro/specs/studio-" in combined_grounding:
+        violations.append(f"{doc.relative_path}: historical .kiro Studio specs must not be design SSOT")
+
+
+def _validate_contract_test_and_exit_gates(doc: RequirementsDoc, violations: list[str]) -> None:
+    section_6 = _section(doc, 6)
+    section_8 = _section(doc, 8)
+    section_9 = _section(doc, 9)
+    if not _body_has_any(section_6, ("RED", "失败测试", "先失败")):
+        violations.append(f"{doc.relative_path}: section 6 must name RED/failing tests")
+    if not _body_has_any(section_6, ("真实 e2e", "真实端到端", "手动验证")):
+        violations.append(f"{doc.relative_path}: section 6 must include real e2e or manual validation")
+    if not _body_has_any(section_6, ("fake mock", "不许 fake", "不允许 fake")):
+        violations.append(f"{doc.relative_path}: section 6 must mark no-fake boundaries")
+    if "- [ ]" not in section_8:
+        violations.append(f"{doc.relative_path}: section 8 must use checklist hard-exit items")
+    if "测试" not in section_8:
+        violations.append(f"{doc.relative_path}: section 8 must require tests to pass")
+    if not _body_has_any(section_8, ("真实 e2e", "真实端到端", "手动", "blocked", "阻塞")):
+        violations.append(f"{doc.relative_path}: section 8 must include real e2e/manual validation or blocked status")
+    if not _body_has_any(section_9, ("不做", "范围外", "deferred")):
+        violations.append(f"{doc.relative_path}: section 9 must lock non-goals and deferred handling")
+
+
+def _validate_contract_review_gates(doc: RequirementsDoc, violations: list[str]) -> None:
+    section_12 = _section(doc, 12)
+    if not _body_has_any(doc.body, ("用户在聊天窗口明确确认", "用户明确确认")):
+        violations.append(f"{doc.relative_path}: must preserve explicit human chat confirmation gate")
+    for needle in REVIEW_FLOW_GATE_TERMS:
+        if needle not in doc.body and needle not in section_12:
+            violations.append(f"{doc.relative_path}: missing review-flow gate term {needle}")
+
+
+def _validate_contract_scope_boundaries(doc: RequirementsDoc, violations: list[str]) -> None:
+    for pattern in PM_BOUNDARY_PATTERNS:
+        if pattern.search(doc.body):
+            violations.append(f"{doc.relative_path}: contains PM-boundary implementation wording {pattern.pattern!r}")
+    if "```" in doc.body:
+        violations.append(f"{doc.relative_path}: requirements docs must not contain literal code fences")
+    if _references_external_engine_or_gateway(doc.body) and not _body_has_any(
+        doc.body,
+        ("floating-draft", "pinned", "blocked", "阻塞", "条件放行"),
+    ):
+        violations.append(f"{doc.relative_path}: external engine/gateway contract status must be stated")
+
+
+def _references_external_engine_or_gateway(body: str) -> bool:
+    return "docs/graph-agent-gateway/" in body or "docs/engine/" in body
+
+
+def _validate_owned_surface_gates(doc: RequirementsDoc, violations: list[str]) -> None:
+    owns_text = "\n".join(str(item) for item in doc.frontmatter.get("owns_files", []))
+    if "apps/studio/frontend" in owns_text:
+        _validate_frontend_owned_surface_gates(doc, violations)
+    if "apps/studio/backend" in owns_text and not _body_has_any(
+        doc.body,
+        ("重启 Studio App", "cargo tauri dev", "重启 Studio"),
+    ):
+        violations.append(f"{doc.relative_path}: backend WS must require Studio App restart after backend changes")
+    if "apps/studio/tauri" in owns_text and not _body_has_any(doc.body, ("Tauri bridge", "Tauri", "原生路径")):
+        violations.append(f"{doc.relative_path}: Tauri/native-fs WS must require Tauri bridge/native path validation")
+
+
+def _validate_frontend_owned_surface_gates(doc: RequirementsDoc, violations: list[str]) -> None:
+    for needle in ("FRONTEND_UI_SPEC.md", "components/ui"):
+        if needle not in doc.body:
+            violations.append(f"{doc.relative_path}: UI WS must reference {needle}")
+    if not _body_has_any(doc.body, ("Playwright", "浏览器")):
+        violations.append(f"{doc.relative_path}: UI WS must require Playwright/browser click verification")
+    if "窄" not in doc.body:
+        violations.append(f"{doc.relative_path}: UI WS must require narrow-width validation")
+    if not _body_has_any(doc.body, ("语义 token", "语义化 token", "语义化 CSS")):
+        violations.append(f"{doc.relative_path}: UI WS must require semantic design tokens")
 
 
 def test_studio_mvp1_ws_requirements_owns_files_match_impl_plan_partition() -> None:

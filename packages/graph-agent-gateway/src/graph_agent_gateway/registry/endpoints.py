@@ -31,6 +31,13 @@ _PROTOCOL_ID_SUFFIX: dict[Protocol, str] = {
     "ark_runtime": "ark",
 }
 
+_OFFICIAL_LEGACY_ENDPOINT_IDS = {
+    "api.anthropic.com": "anthropic-official",
+    "api.openai.com": "openai-official",
+    "api.deepseek.com": "deepseek-official",
+    "generativelanguage.googleapis.com": "gemini-official",
+}
+
 ProtocolProbe = Callable[[str, Protocol, str | None], "ProtocolProbeResult"]
 
 
@@ -172,25 +179,25 @@ def legacy_v3_endpoint_id(provider: dict[str, Any]) -> str:
     base_url = str(provider.get("base_url") or "").strip()
     base_host = _url_hostname(base_url)
     base_path = _url_path(base_url)
-    if base_host == "api.anthropic.com":
-        return "anthropic-official"
-    if base_host == "api.openai.com":
-        return "openai-official"
-    if base_host == "api.deepseek.com":
-        return "deepseek-official"
-    if base_host == "generativelanguage.googleapis.com":
-        return "gemini-official"
+    if base_host in _OFFICIAL_LEGACY_ENDPOINT_IDS:
+        return _OFFICIAL_LEGACY_ENDPOINT_IDS[base_host]
     if _host_matches(base_host, "volces.com"):
         return "ark-official"
+    if product_endpoint_id := _legacy_product_endpoint_id(base_host, base_path, name):
+        return product_endpoint_id
+    return raw
+
+
+def _legacy_product_endpoint_id(base_host: str, base_path: str, name: str) -> str | None:
     if _host_matches(base_host, "openrouter.ai") or "openrouter" in name:
         return "openrouter-prod"
     if "wavespeed" in base_host or "wavespeed" in name:
         return "wavespeed-prod"
-    if _host_matches(base_host, "qnaigc.com") and ("anthropic" in base_path or "anthropic" in name):
+    if not _host_matches(base_host, "qnaigc.com"):
+        return None
+    if "anthropic" in base_path or "anthropic" in name:
         return "qiniu-anthropic"
-    if _host_matches(base_host, "qnaigc.com"):
-        return "qiniu-openai"
-    return raw
+    return "qiniu-openai"
 
 
 def _assign_endpoint_ids(

@@ -12,10 +12,10 @@ if (token) {
   configureApiToken(token)
 }
 
-void i18nReady.then(() => {
-  createRoot(document.getElementById('root')!).render(
-    <StrictMode>
-      <App />
-    </StrictMode>,
-  )
-})
+await i18nReady
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+)

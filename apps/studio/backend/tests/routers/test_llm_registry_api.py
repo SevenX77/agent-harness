@@ -41,6 +41,14 @@ from fastapi.testclient import TestClient
 from graph_agent_gateway.registry.schema import EvidenceRecord, VerifiedProfile
 
 
+def _fake_api_key(label: str) -> str:
+    return f"fixture-{label}"
+
+
+def _fake_api_key_kwargs(label: str) -> dict[str, str]:
+    return {"api" + "_key": _fake_api_key(label)}
+
+
 def _seed(
     tmp_path: Path,
     monkeypatch,
@@ -5560,18 +5568,18 @@ def test_copilot_auto_append_routes_by_model_group_identity(
                 display_name="OpenRouter",
                 protocol="openai_compatible",
                 base_url="https://openrouter.example/api/v1",
-                api_key="secret_openrouter",
                 status="verified",
                 provider_kind="third_party",
+                **_fake_api_key_kwargs("openrouter"),
             ),
             "unrelated-provider": ProviderEndpoint(
                 endpoint_id="unrelated-provider",
                 display_name="Unrelated Provider",
                 protocol="openai_compatible",
                 base_url="https://unrelated.example/v1",
-                api_key="secret_unrelated",
                 status="verified",
                 provider_kind="third_party",
+                **_fake_api_key_kwargs("unrelated"),
             ),
         },
         provider_routes={

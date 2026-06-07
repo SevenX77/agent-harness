@@ -117,6 +117,7 @@ from app.services.llm_route_capabilities import (
 )
 from app.services.llm_state_projection import (
     ProviderModelStateProjection,
+    ProviderUiState,
     project_provider_model_state,
 )
 from app.services.official_capability_sources import (
@@ -2115,54 +2116,21 @@ async def _role_test_provider_result(
     if role_fit == "not_fit":
         admission_decision = "block"
         status = "blocked"
-    elif admission_decision == "admit" and endpoint.api_key is not None:
+    elif _role_test_provider_can_probe(admission_decision, endpoint):
         if is_copilot:
-            result = await _probe_copilot_sdk_tool_call(endpoint, route)
-            status = "ok" if result.status == "ok" else "failed"
-            if status == "ok":
-                provider_ui_state = "ready"
-                _persist_copilot_sdk_probe_success(route, endpoint, result)
-            message = result.message
-        else:
-            route, profile_probe_result = await _ensure_official_role_test_verified_profile(
+            route, provider_ui_state, status, message = await _copilot_role_test_probe(
                 route,
                 endpoint,
+                provider_ui_state,
             )
-            if profile_probe_result is not None and not profile_probe_result.profiles:
-                result = ModelProbeResult(
-                    model_id=route.provider_model_id,
-                    status="error",
-                    message=_official_role_test_profile_probe_failure_message(
-                        profile_probe_result
-                    ),
-                )
-            else:
-                projection = _provider_model_projection(route, endpoint)
-                provider_ui_state = projection.ui_state
-                result = await _probe_role_route(
-                    route,
-                    endpoint,
-                    runtime_settings,
-                    resolved_settings,
-                )
-            status = "ok" if result.status == "ok" else "failed"
-            if status == "ok":
-                provider_ui_state = "ready"
-                if endpoint.provider_kind != "official":
-                    route = _persist_third_party_role_test_success(
-                        route,
-                        endpoint,
-                        result,
-                    )
-            elif endpoint.provider_kind != "official":
-                route = _persist_third_party_role_test_failure(
-                    route,
-                    endpoint,
-                    result,
-                )
-                projection = _provider_model_projection(route, endpoint)
-                provider_ui_state = projection.ui_state
-            message = result.message
+        else:
+            route, provider_ui_state, status, message = await _standard_role_test_probe(
+                route,
+                endpoint,
+                runtime_settings,
+                resolved_settings,
+                provider_ui_state,
+            )
     return {
         "route_id": route.route_id,
         "provider_label": endpoint.display_name,
@@ -2175,6 +2143,62 @@ async def _role_test_provider_result(
         "message": message,
         "resolved_settings": resolved_settings or {},
     }
+
+
+def _role_test_provider_can_probe(admission_decision: str, endpoint: ProviderEndpoint) -> bool:
+    return admission_decision == "admit" and endpoint.api_key is not None
+
+
+async def _copilot_role_test_probe(
+    route: ProviderRoute,
+    endpoint: ProviderEndpoint,
+    provider_ui_state: ProviderUiState,
+) -> tuple[ProviderRoute, ProviderUiState, str, str | None]:
+    result = await _probe_copilot_sdk_tool_call(endpoint, route)
+    status = "ok" if result.status == "ok" else "failed"
+    if status == "ok":
+        _persist_copilot_sdk_probe_success(route, endpoint, result)
+        provider_ui_state = "ready"
+    return route, provider_ui_state, status, result.message
+
+
+async def _standard_role_test_probe(
+    route: ProviderRoute,
+    endpoint: ProviderEndpoint,
+    runtime_settings: RuntimeSettings,
+    resolved_settings: dict[str, Any],
+    provider_ui_state: ProviderUiState,
+) -> tuple[ProviderRoute, ProviderUiState, str, str | None]:
+    route, profile_probe_result = await _ensure_official_role_test_verified_profile(
+        route,
+        endpoint,
+    )
+    if profile_probe_result is not None and not profile_probe_result.profiles:
+        result = ModelProbeResult(
+            model_id=route.provider_model_id,
+            status="error",
+            message=_official_role_test_profile_probe_failure_message(profile_probe_result),
+        )
+    else:
+        projection = _provider_model_projection(route, endpoint)
+        provider_ui_state = projection.ui_state
+        result = await _probe_role_route(
+            route,
+            endpoint,
+            runtime_settings,
+            resolved_settings,
+        )
+
+    status = "ok" if result.status == "ok" else "failed"
+    if status == "ok":
+        provider_ui_state = "ready"
+        if endpoint.provider_kind != "official":
+            route = _persist_third_party_role_test_success(route, endpoint, result)
+    elif endpoint.provider_kind != "official":
+        route = _persist_third_party_role_test_failure(route, endpoint, result)
+        projection = _provider_model_projection(route, endpoint)
+        provider_ui_state = projection.ui_state
+    return route, provider_ui_state, status, result.message
 
 
 def _role_test_runtime_settings(
@@ -4515,37 +4539,48 @@ def _default_official_text_method(endpoint: ProviderEndpoint) -> tuple[str, str]
 def _role_test_entries(role: RoleEntry) -> list[tuple[dict[str, Any], RoleRouteEntry | None]]:
     fallback_by_route = {entry.route_id: entry for entry in role.fallback_chain}
     report = role.materialization_report if isinstance(role.materialization_report, dict) else {}
-    report_entries = [
+    report_entries = _role_test_report_entries(report)
+    report_by_route = {entry["route_id"]: entry for entry in report_entries}
+    if role.model_groups:
+        return _role_test_model_group_entries(role, fallback_by_route, report_by_route)
+    if report_entries:
+        return [(entry, fallback_by_route.get(entry["route_id"])) for entry in report_entries]
+    return _role_test_fallback_entries(role)
+
+
+def _role_test_report_entries(report: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
         entry
         for entry in report.get("entries", [])
         if isinstance(entry, dict) and isinstance(entry.get("route_id"), str)
     ]
-    report_by_route = {entry["route_id"]: entry for entry in report_entries}
-    if role.model_groups:
-        entries: list[tuple[dict[str, Any], RoleRouteEntry | None]] = []
-        seen_route_ids: set[str] = set()
-        for group in role.model_groups:
-            for provider_model in group.provider_models:
-                route_id = provider_model.route_id
-                if route_id in seen_route_ids:
-                    continue
-                seen_route_ids.add(route_id)
-                report_entry = report_by_route.get(route_id)
-                if report_entry is None:
-                    report_entry = {
-                        "canonical_id": group.canonical_id,
-                        "route_id": route_id,
-                        "role_fit": "using",
-                        "warnings": [],
-                        "resolved_settings": {},
-                    }
-                entries.append((report_entry, fallback_by_route.get(route_id)))
-        return entries
-    if report_entries:
-        return [
-            (entry, fallback_by_route.get(entry["route_id"]))
-            for entry in report_entries
-        ]
+
+
+def _role_test_model_group_entries(
+    role: RoleEntry,
+    fallback_by_route: dict[str, RoleRouteEntry],
+    report_by_route: dict[str, dict[str, Any]],
+) -> list[tuple[dict[str, Any], RoleRouteEntry | None]]:
+    entries: list[tuple[dict[str, Any], RoleRouteEntry | None]] = []
+    seen_route_ids: set[str] = set()
+    for group in role.model_groups:
+        for provider_model in group.provider_models:
+            route_id = provider_model.route_id
+            if route_id in seen_route_ids:
+                continue
+            seen_route_ids.add(route_id)
+            report_entry = report_by_route.get(route_id) or {
+                "canonical_id": group.canonical_id,
+                "route_id": route_id,
+                "role_fit": "using",
+                "warnings": [],
+                "resolved_settings": {},
+            }
+            entries.append((report_entry, fallback_by_route.get(route_id)))
+    return entries
+
+
+def _role_test_fallback_entries(role: RoleEntry) -> list[tuple[dict[str, Any], RoleRouteEntry | None]]:
     return [
         (
             {
@@ -5000,42 +5035,59 @@ def _materialize_role_for_response(
     role_name: str | None = None,
 ) -> RoleEntry:
     if role.role_kind == "copilot":
-        canonical_id = None
-        if role_name:
-            if role_name == "copilot_opus_4_7":
-                canonical_id = "claude-opus-4.7"
-            elif role_name == "copilot_deepseek_v4":
-                canonical_id = "deepseek-v4-pro"
-            elif role_name == "sonnet-4-7-third-party":
-                canonical_id = "claude-sonnet-4.7"
-
-        if not canonical_id:
-            active_credentials = credentials or load_credentials()
-            for entry in role.fallback_chain:
-                route = active_credentials.provider_routes.get(entry.route_id)
-                if route and route.canonical_id:
-                    canonical_id = route.canonical_id
-                    break
-
-        if canonical_id:
-            active_credentials = credentials or load_credentials()
-            compatible_route_ids = find_compatible_route_ids_for_model(canonical_id, active_credentials)
-
-            compatible_route_ids.sort()
-            existing_route_ids = [entry.route_id for entry in role.fallback_chain]
-            new_entries = list(role.fallback_chain)
-            for r_id in compatible_route_ids:
-                if r_id not in existing_route_ids:
-                    from graph_agent_gateway.registry.schema import RoleRouteEntry
-                    new_entries.append(RoleRouteEntry(route_id=r_id))
-
-            if len(new_entries) != len(role.fallback_chain):
-                role = role.model_copy(update={"fallback_chain": new_entries})
-
+        role = _materialize_copilot_role_routes(role, credentials, role_name)
 
     if not role.model_groups:
         return role
     return materialize_role(role, credentials or load_credentials(), _health_store())
+
+
+def _materialize_copilot_role_routes(
+    role: RoleEntry,
+    credentials: LLMCredentialsFile | None,
+    role_name: str | None,
+) -> RoleEntry:
+    active_credentials = credentials or load_credentials()
+    canonical_id = _copilot_role_canonical_id(role, active_credentials, role_name)
+    if canonical_id is None:
+        return role
+
+    compatible_route_ids = find_compatible_route_ids_for_model(canonical_id, active_credentials)
+    existing_route_ids = {entry.route_id for entry in role.fallback_chain}
+    missing_route_ids = sorted(route_id for route_id in compatible_route_ids if route_id not in existing_route_ids)
+    if not missing_route_ids:
+        return role
+
+    from graph_agent_gateway.registry.schema import RoleRouteEntry
+
+    return role.model_copy(
+        update={
+            "fallback_chain": [
+                *role.fallback_chain,
+                *(RoleRouteEntry(route_id=route_id) for route_id in missing_route_ids),
+            ]
+        }
+    )
+
+
+def _copilot_role_canonical_id(
+    role: RoleEntry,
+    credentials: LLMCredentialsFile,
+    role_name: str | None,
+) -> str | None:
+    role_name_aliases = {
+        "copilot_opus_4_7": "claude-opus-4.7",
+        "copilot_deepseek_v4": "deepseek-v4-pro",
+        "sonnet-4-7-third-party": "claude-sonnet-4.7",
+    }
+    if role_name in role_name_aliases:
+        return role_name_aliases[role_name]
+
+    for entry in role.fallback_chain:
+        route = credentials.provider_routes.get(entry.route_id)
+        if route and route.canonical_id:
+            return route.canonical_id
+    return None
 
 
 def _save_roles_with_active_routes(data: RolesData) -> RolesData:

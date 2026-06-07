@@ -50,6 +50,19 @@ describe('runtime config', () => {
     })
   })
 
+  it('keeps a browser-compatible shell config when the Tauri sidecar config command fails', async () => {
+    await expect(resolveRuntimeConfig({
+      windowRef: { __TAURI_INTERNALS__: {} },
+      invoke: async () => {
+        throw new Error('Python sidecar disabled')
+      },
+      fallbackBaseURL: 'http://localhost:8787/api',
+    })).resolves.toEqual(expect.objectContaining({
+      baseURL: 'http://localhost:8787/api',
+      wsURL: 'ws://localhost:8787/ws',
+    }))
+  })
+
   it('derives websocket origin from fallback base URL', () => {
     expect(fallbackSidecarConfig('https://studio.local/api').wsURL).toBe('wss://studio.local/ws')
   })

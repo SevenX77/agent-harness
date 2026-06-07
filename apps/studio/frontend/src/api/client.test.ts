@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AxiosError } from 'axios'
 import type { AxiosAdapter, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
-import { api, compileSkill, configureApiBaseURL, configureApiToken, serializeSkillGraph, wsUrl } from './client'
+import { api, compileSkill, configureApiBaseURL, configureApiToken, serializeSkillGraph, writeSkillFile, wsUrl } from './client'
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn(),
+}))
+
 
 function captureHeadersAdapter(assertConfig: (config: InternalAxiosRequestConfig) => void): AxiosAdapter {
   return async (config): Promise<AxiosResponse> => {
@@ -166,5 +171,51 @@ describe('api client auth token', () => {
       elapsed_ms: 1.5,
       current_hash: 'def456',
     })
+  })
+
+  it('test_local_file_write_does_not_use_fastapi_file_write_endpoint', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
+    const { invoke } = await import('@tauri-apps/api/core')
+    vi.mocked(invoke).mockResolvedValue({
+      path: 'GRAPH.md',
+      hash: 'mock-hash',
+    })
+
+    api.defaults.adapter = async (config): Promise<AxiosResponse> => {
+      throw new Error(`FastAPI local file writer should be retired: ${config.method} ${config.url}`)
+    }
+
+    await expect(writeSkillFile('text-segmentation', 'GRAPH.md', '---\nname: text\n---\n', 'abc123'))
+      .resolves.toEqual(expect.objectContaining({
+        path: 'GRAPH.md',
+        hash: expect.any(String),
+      }))
+  })
+
+  it('test_tauri_hash_conflict_is_converted_to_axios_409_with_remote_content', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
+    const { invoke } = await import('@tauri-apps/api/core')
+    vi.mocked(invoke).mockRejectedValue({
+      type: 'HashConflict',
+      data: {
+        current_hash: 'remote-hash',
+        current_content: 'remote markdown\n',
+      },
+    })
+
+    api.defaults.adapter = async (config): Promise<AxiosResponse> => {
+      throw new Error(`FastAPI local file writer should not handle native conflicts: ${config.method} ${config.url}`)
+    }
+
+    await expect(writeSkillFile('/Users/sevenx/Projects/writer-smoke', 'GRAPH.md', 'local markdown\n', 'stale-hash'))
+      .rejects.toMatchObject({
+        response: {
+          status: 409,
+          data: {
+            current_hash: 'remote-hash',
+            current_markdown_content: 'remote markdown\n',
+          },
+        },
+      })
   })
 })

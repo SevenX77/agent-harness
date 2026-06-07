@@ -1,4 +1,5 @@
 import axios, { AxiosError, AxiosHeaders } from 'axios'
+import type { AxiosResponse } from 'axios'
 import type {
   AppSettings,
   CollaborateResult,
@@ -173,12 +174,50 @@ export async function getSkillDetail(skillId: string): Promise<SkillDetail> {
   return response.data
 }
 
+import { isTauriRuntime } from '../config/runtime'
+import { writeWorkspaceFile } from '../lib/tauri'
+
 export async function writeSkillFile(
   skillId: string,
   path: string,
   content: string,
   expectedHash?: string | null,
 ): Promise<UpdateSkillFileRes> {
+  if (isTauriRuntime()) {
+    try {
+      const res = await writeWorkspaceFile(skillId, path, content, expectedHash ?? null)
+      return {
+        path: res.path,
+        hash: res.hash,
+      }
+    } catch (err: any) {
+      if (err && err.type === 'HashConflict') {
+        const conflictData = err.data || {}
+        const responseData = {
+          current_hash: conflictData.current_hash || '',
+          current_markdown_content: conflictData.current_content || '',
+        }
+        const mockResponse: AxiosResponse = {
+          data: responseData,
+          status: 409,
+          statusText: 'Conflict',
+          headers: {},
+          config: {} as any,
+        }
+        const mockAxiosError = new AxiosError(
+          'Hash conflict',
+          'ERR_BAD_RESPONSE',
+          {} as any,
+          null,
+          mockResponse
+        )
+        mockAxiosError.isAxiosError = true
+        throw mockAxiosError
+      }
+      throw err
+    }
+  }
+
   const encodedPath = path.split('/').map(encodeURIComponent).join('/')
   const response = await api.post<UpdateSkillFileRes>(`/skills/${skillId}/files/${encodedPath}`, {
     content,

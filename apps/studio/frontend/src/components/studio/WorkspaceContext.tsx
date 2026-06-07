@@ -18,6 +18,7 @@ export interface SelectedEdge {
 
 export interface OpenFile extends FileMeta {
   skillId: string
+  workspaceRoot?: string | null
   hash: string | null
   title?: string
   saveEnabled?: boolean

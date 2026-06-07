@@ -9,6 +9,8 @@ import { readLintStatus } from "@/hooks/useDebouncedLint"
 import { useSkills } from "@/hooks/useSkills"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
 import { compileSkill, getSkillDetail, serializeSkillGraph, writeSkillFile, wsUrl } from "@/api/client"
+import { isTauriRuntime } from "@/config/runtime"
+import { writeWorkspaceFile } from "@/lib/tauri"
 import type { CompileError } from "@/api/types"
 import { connectPhaseRefs, createPhaseDraft, disconnectPhaseRefs, type NewPhaseKind } from "@/components/GraphCanvas/canvas-authoring"
 import { sha256Hex } from "@/lib/hash"
@@ -28,6 +30,7 @@ import {
   type SelectedEdge,
   type WorkspaceContextValue,
 } from "./WorkspaceContext"
+import { resolveWorkspaceIdentity } from "./workspace-identity"
 
 interface WorkspaceProps {
   skillId: string | null
@@ -39,7 +42,17 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const [navStack, setNavStack] = useState<string[]>(() => (skillId ? [skillId] : []))
   const [activePanel, setActivePanel] = useState<PanelKind | null>(skillId ? "assets" : null)
   const [copilotOpen, setCopilotOpen] = useState(Boolean(skillId))
-  const currentSkillId = navStack.at(-1) ?? null
+  const currentWorkspaceSelection = navStack.at(-1) ?? null
+  const currentWorkspaceIdentity = useMemo(
+    () => resolveWorkspaceIdentity(currentWorkspaceSelection),
+    [currentWorkspaceSelection],
+  )
+  const currentSkillId = currentWorkspaceIdentity.skillId
+  const currentWorkspaceRoot = currentWorkspaceIdentity.workspaceRoot
+  const displayNavStack = useMemo(
+    () => navStack.map((item) => resolveWorkspaceIdentity(item).skillId).filter((item): item is string => Boolean(item)),
+    [navStack],
+  )
 
   useEffect(() => {
     if (skillId === null) {
@@ -114,8 +127,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       content,
       hash: await sha256Hex(content),
       skillId: currentSkillId,
+      workspaceRoot: currentWorkspaceRoot,
     }
-  }, [currentSkillId, skillDetail?.files])
+  }, [currentSkillId, currentWorkspaceRoot, skillDetail?.files])
 
   const handleFileOpen = useCallback((fileOrPath: FileMeta | string, side?: EditorSide) => {
     setSettingsOpen(false)
@@ -156,6 +170,20 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     void mutateSkillDetail()
   }, [mutateSkillDetail])
 
+  const doWriteSkillFile = useCallback(async (
+    path: string,
+    content: string,
+    expectedHash?: string | null,
+  ) => {
+    if (!currentSkillId) {
+      throw new Error("No active workspace")
+    }
+    if (isTauriRuntime()) {
+      return await writeWorkspaceFile(currentWorkspaceRoot ?? currentSkillId, path, content, expectedHash ?? null)
+    }
+    return await writeSkillFile(currentSkillId, path, content, expectedHash)
+  }, [currentSkillId, currentWorkspaceRoot])
+
   const handlePhaseFileSave = useCallback(async ({
     path,
     content,
@@ -168,7 +196,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     if (!currentSkillId) {
       throw new Error("Open a skill before saving phase properties")
     }
-    const result = await writeSkillFile(currentSkillId, path, content, expectedHash)
+    const result = await doWriteSkillFile(path, content, expectedHash)
     setActiveFileDetails((current) => {
       const next = { ...current }
       for (const side of ["left", "right"] as const) {
@@ -192,9 +220,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     const graphContent = skillDetail.files?.["GRAPH.md"]
     const graphHash = graphContent === undefined ? null : await sha256Hex(graphContent)
     try {
-      await writeSkillFile(currentSkillId, draft.filePath, draft.fileContent)
+      await doWriteSkillFile(draft.filePath, draft.fileContent)
       const serialized = await serializeSkillGraph(currentSkillId, draft.phases, graphHash)
-      await writeSkillFile(currentSkillId, "GRAPH.md", serialized.markdown_content, graphHash)
+      await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash)
       toast.success(`Created ${draft.phaseId}`)
       await mutateSkillDetail()
     } catch (error) {
@@ -215,7 +243,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     const graphHash = graphContent === undefined ? null : await sha256Hex(graphContent)
     try {
       const serialized = await serializeSkillGraph(currentSkillId, result.phases, graphHash)
-      await writeSkillFile(currentSkillId, "GRAPH.md", serialized.markdown_content, graphHash)
+      await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash)
       await mutateSkillDetail()
     } catch (error) {
       void mutateSkillDetail()
@@ -235,7 +263,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     const graphHash = graphContent === undefined ? null : await sha256Hex(graphContent)
     try {
       const serialized = await serializeSkillGraph(currentSkillId, result.phases, graphHash)
-      await writeSkillFile(currentSkillId, "GRAPH.md", serialized.markdown_content, graphHash)
+      await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash)
       await mutateSkillDetail()
     } catch (error) {
       void mutateSkillDetail()
@@ -292,11 +320,12 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         content: conflict.remoteContent,
         hash: conflict.remoteHash,
         skillId: conflict.skillId,
+        workspaceRoot: currentWorkspaceRoot,
         saveEnabled: false,
       },
     }))
     setConflict(null)
-  }, [conflict])
+  }, [conflict, currentWorkspaceRoot])
 
   const pushNavSkill = useCallback((nextSkillId: string) => {
     setNavStack((current) => [...current, nextSkillId])
@@ -356,7 +385,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
 
   const contextValue = useMemo<WorkspaceContextValue>(() => ({
     currentSkillId,
-    navStack,
+    navStack: displayNavStack,
     activeFiles: {
       left: activeFileDetails.left?.path,
       right: activeFileDetails.right?.path,
@@ -382,7 +411,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     currentSkillId,
     handleFileOpen,
     markFileSaved,
-    navStack,
+    displayNavStack,
     popNavTo,
     pushNavSkill,
     reloadOpenFile,
@@ -449,7 +478,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
       <Header
         skillId={currentSkillId}
-        navStack={navStack}
+        navStack={displayNavStack}
         onBreadcrumbClick={popNavTo}
         copilotOpen={copilotOpen}
         onCopilotToggle={() => setCopilotOpen((open) => !open)}
@@ -551,7 +580,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                 minSize="18%"
                 maxSize="35%"
               >
-                <CopilotPanel skillId={skillId} />
+                <CopilotPanel skillId={currentSkillId} />
               </ResizablePanel>
             </>
           ) : null}

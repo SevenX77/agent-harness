@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
 import { toast } from 'sonner'
-import { selectSkillDirectory } from './tauri'
+import * as tauriBridge from './tauri'
+import { revealInFileManager, selectSkillDirectory } from './tauri'
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
@@ -11,6 +12,7 @@ vi.mock('sonner', () => ({
   toast: {
     error: vi.fn(),
     info: vi.fn(),
+    success: vi.fn(),
   },
 }))
 
@@ -52,5 +54,34 @@ describe('selectSkillDirectory', () => {
     expect(toast.error).toHaveBeenCalledWith('Failed to open directory picker', {
       description: 'dialog permission denied',
     })
+  })
+})
+
+describe('Tauri native-fs bridge contract', () => {
+  afterEach(() => {
+    vi.clearAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('does not expose retired external IDE or terminal helpers', () => {
+    expect(tauriBridge).not.toHaveProperty('openInCursor')
+    expect(tauriBridge).not.toHaveProperty('openInTerminal')
+    expect(tauriBridge).not.toHaveProperty('openInCodex')
+  })
+
+  it('does not fake a successful reveal action in browser fallback', async () => {
+    const writeText = vi.fn()
+    vi.stubGlobal('window', {})
+    vi.stubGlobal('navigator', {
+      clipboard: { writeText },
+    })
+
+    await revealInFileManager('/tmp/plain-folder')
+
+    expect(writeText).not.toHaveBeenCalled()
+    expect(toast.info).toHaveBeenCalledWith('Desktop-only feature', {
+      description: '/tmp/plain-folder',
+    })
+    expect(toast.success).not.toHaveBeenCalled()
   })
 })

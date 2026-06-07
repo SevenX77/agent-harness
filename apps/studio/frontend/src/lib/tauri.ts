@@ -1,38 +1,11 @@
 import { toast } from 'sonner'
 import { isTauriRuntime } from '../config/runtime'
 
-type TauriCommand = 'open_in_cursor' | 'open_in_terminal' | 'open_in_codex' | 'reveal_in_file_manager'
-
-async function invokeShell(command: TauriCommand, path: string) {
-  const targetPath = path.trim()
-  if (!targetPath) {
-    toast.error('No skill path available')
-    return
-  }
-
-  if (!isTauriRuntime()) {
-    toast.info('Desktop only')
-    return
-  }
-
-  try {
-    const { invoke } = await import('@tauri-apps/api/core')
-    await invoke(command, { path: targetPath })
-  } catch {
-    toast.error('Failed to open desktop tool')
-  }
-}
-
-export function openInCursor(path: string) {
-  return invokeShell('open_in_cursor', path)
-}
-
-export function openInTerminal(path: string) {
-  return invokeShell('open_in_terminal', path)
-}
-
-export function openInCodex(path: string) {
-  return invokeShell('open_in_codex', path)
+export interface RecentWorkspaceEntry {
+  absolutePath: string
+  displayName: string
+  identity: string
+  lastOpenedAt: string
 }
 
 export async function revealInFileManager(path: string) {
@@ -53,12 +26,7 @@ export async function revealInFileManager(path: string) {
     }
   }
 
-  try {
-    await navigator.clipboard.writeText(targetPath)
-    toast.success('Path copied to clipboard', { description: targetPath })
-  } catch {
-    toast.info('Desktop-only feature', { description: targetPath })
-  }
+  toast.info('Desktop-only feature', { description: targetPath })
 }
 
 export async function selectSkillDirectory(defaultDirectory?: string | null): Promise<string | null> {
@@ -78,4 +46,67 @@ export async function selectSkillDirectory(defaultDirectory?: string | null): Pr
     toast.error('Failed to open directory picker', { description })
     return null
   }
+}
+
+export async function writeWorkspaceFile(
+  workspaceRoot: string,
+  path: string,
+  content: string,
+  expectedHash: string | null = null,
+): Promise<{ path: string; hash: string }> {
+  if (!isTauriRuntime()) {
+    throw new Error('Desktop only')
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return await invoke<{ path: string; hash: string }>('write_workspace_file', {
+    workspaceRoot,
+    path,
+    content,
+    expectedHash,
+  })
+}
+
+export async function addRecentWorkspace(
+  absolutePath: string,
+  displayName: string,
+  identity: string,
+  lastOpenedAt: string,
+): Promise<void> {
+  if (!isTauriRuntime()) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('add_recent_workspace', {
+    absolutePath,
+    displayName,
+    identity,
+    lastOpenedAt,
+  })
+}
+
+export async function listRecentWorkspaces(): Promise<RecentWorkspaceEntry[]> {
+  if (!isTauriRuntime()) return []
+  const { invoke } = await import('@tauri-apps/api/core')
+  const raw = await invoke<Array<{
+    absolute_path: string
+    display_name: string
+    identity: string
+    last_opened_at: string
+  }>>('list_recent_workspaces')
+  return raw.map((item) => ({
+    absolutePath: item.absolute_path,
+    displayName: item.display_name,
+    identity: item.identity,
+    lastOpenedAt: item.last_opened_at,
+  }))
+}
+
+export async function removeRecentWorkspace(identity: string): Promise<void> {
+  if (!isTauriRuntime()) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('remove_recent_workspace', { identity })
+}
+
+export async function ensureWorkspaceSupportDirs(workspaceRoot: string): Promise<void> {
+  if (!isTauriRuntime()) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('ensure_workspace_support_dirs', { workspaceRoot })
 }

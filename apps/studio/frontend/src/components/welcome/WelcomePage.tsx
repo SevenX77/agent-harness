@@ -1,4 +1,4 @@
-import { AlertCircle, AlertTriangle, Clock3, FolderOpen, Layers, Layers3, MoreVertical, Plus, Sparkles, Trash2 } from 'lucide-react'
+import { AlertCircle, Clock3, FolderOpen, Layers, Layers3, MoreVertical, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { useMemo, useState, type FormEvent } from 'react'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
@@ -6,10 +6,10 @@ import type { SkillSummary } from '../../api/types'
 import { useAppSettings } from '../../hooks/useAppSettings'
 import { useRecentSkills } from '../../hooks/useRecentSkills'
 import { useSkills } from '../../hooks/useSkills'
-import { revealInFileManager, selectSkillDirectory } from '../../lib/tauri'
+import { getRuntimeConfig } from '../../config/runtime'
+import { revealInFileManager, selectSkillDirectory, addRecentWorkspace, removeRecentWorkspace, ensureWorkspaceSupportDirs } from '../../lib/tauri'
 import { errorMessage, isRecord } from '../../utils/errors'
-import { effectiveDefaultSkillsDirectory, joinDirectoryPath } from '../../utils/skill-paths'
-import { Badge } from '../ui/badge'
+import { joinDirectoryPath } from '../../utils/skill-paths'
 import { Button } from '../ui/button'
 import {
   Card,
@@ -39,11 +39,12 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '../ui/empty'
-import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
+import { createLocalWorkspaceSelection, isAbsolutePath } from '../studio/workspace-identity'
 import { NewSkillDialog } from './NewSkillDialog'
-import { formatLastRun, normalizeSkillId, shortPath, skillIdFromPath, sortRecent } from './utils'
+import { formatLastRun, normalizeSkillId, shortPath, skillIdFromPath } from './utils'
 
 export const REVEAL_ACTION_LABEL = 'Show in folder'
+export const REMOVE_WORKSPACE_ACTION_LABEL = 'Remove'
 export const ACTION_MENU_CLASSNAME = 'w-48'
 
 interface WelcomePageProps {
@@ -57,7 +58,12 @@ interface CreateSkillPayload {
 }
 
 export function defaultSkillsDirectory(customDirectory?: string | null): string | null {
-  return effectiveDefaultSkillsDirectory(customDirectory)
+  if (customDirectory) return customDirectory
+  const config = getRuntimeConfig()
+  if (config && config.configDir) {
+    return `${config.configDir}/Skills`
+  }
+  return '/studio/config/Skills'
 }
 
 export function buildSkillCreatePayload(name: string, parentDirectory?: string | null): CreateSkillPayload {
@@ -81,16 +87,9 @@ function comparableDirectoryPath(path: string) {
 }
 
 export function registeredSkillIdForImport(directoryPath: string, skills: SkillSummary[]): string | null {
-  const selectedPath = comparableDirectoryPath(directoryPath)
-  const pathMatch = skills.find((skill) => (
-    skill.directory_path ? comparableDirectoryPath(skill.directory_path) === selectedPath : false
-  ))
-  if (pathMatch) {
-    return pathMatch.id
-  }
-
-  const selectedSkillId = skillIdFromPath(directoryPath)
-  return skills.find((skill) => skill.id === selectedSkillId)?.id ?? null
+  void directoryPath
+  void skills
+  return null
 }
 
 export function requestSkillDeleteConfirmation(
@@ -100,8 +99,9 @@ export function requestSkillDeleteConfirmation(
   const displayName = skill.name.trim() || skill.id
   requestDeleteConfirmationToast({
     id: `delete-skill-${skill.id}`,
-    title: `Delete ${displayName}?`,
+    title: `Remove ${displayName} from Studio?`,
     description: 'This skill will be removed from Studio. Its source folder stays on disk.',
+    confirmLabel: REMOVE_WORKSPACE_ACTION_LABEL,
     onConfirm,
   })
 }
@@ -210,6 +210,9 @@ export function formatCreateSkillError(error: unknown, skillId: string): string 
 export function formatImportSkillError(error: unknown): string {
   const payload = studioErrorPayload(error)
   if (payload?.error_code === 'INVALID_DIRECTORY_PATH' && payload.message) {
+    if (payload.message.includes('missing GRAPH.md or SKILL.md')) {
+      return `Cannot import this folder: ${sentenceFragment(payload.message.replace(/: missing GRAPH\.md or SKILL\.md\./, ''))}`
+    }
     return `Cannot import this folder: ${sentenceFragment(payload.message)}`
   }
   if (payload?.error_code === 'SKILL_ALREADY_EXISTS') {
@@ -220,13 +223,12 @@ export function formatImportSkillError(error: unknown): string {
   }
   if (payload?.error_code === 'MANIFEST_VALIDATION_FAILED') {
     if (payload.message?.toLowerCase() === 'request validation failed') {
-      return `Cannot import this folder: ${requestValidationMessage(payload)}`
+      return requestValidationMessage(payload)
     }
-    return `Cannot import this folder: ${firstLintErrorMessage(payload) ?? sentenceFragment(payload.message ?? 'manifest validation failed')}`
+    return firstLintErrorMessage(payload) ?? sentenceFragment(payload.message ?? 'manifest validation failed')
   }
   return errorMessage(error)
 }
-
 
 export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
   const [importing, setImporting] = useState(false)
@@ -239,13 +241,87 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
   const appSettings = useAppSettings()
   const defaultSkillParentDirectory = defaultSkillsDirectory(appSettings.settings.default_skills_directory)
   const { skills, skillListError, mutateSkills } = useSkills(null)
-  const skillIds = useMemo(() => skills.map((skill) => skill.id), [skills])
-  const { recentSkills, rememberSkill } = useRecentSkills(skillIds)
-  const visibleSkills = useMemo(() => sortRecent(skills, recentSkills), [recentSkills, skills])
+  const { recentWorkspaces, rememberWorkspace, removeWorkspace } = useRecentSkills()
 
-  const openSkill = (skillId: string) => {
-    rememberSkill(skillId)
-    onSelectSkill(skillId)
+  const visibleWorkspaces = useMemo(() => {
+    const list: Array<{
+      absolutePath: string
+      displayName: string
+      identity: string
+      lastOpenedAt: string
+      phaseCount?: number
+      lastRunAt?: string | null
+      skillId?: string
+    }> = recentWorkspaces.map((w) => {
+      const matching = skills.find((s) => s.directory_path && comparableDirectoryPath(s.directory_path) === comparableDirectoryPath(w.absolutePath))
+      return {
+        absolutePath: w.absolutePath,
+        displayName: w.displayName,
+        identity: w.identity,
+        lastOpenedAt: w.lastOpenedAt,
+        phaseCount: matching ? matching.phase_count : 0,
+        lastRunAt: matching ? matching.last_run_at : null,
+        skillId: matching?.id,
+      }
+    })
+
+    for (const skill of skills) {
+      if (skill.directory_path) {
+        const path = skill.directory_path
+        if (!list.some((w) => comparableDirectoryPath(w.absolutePath) === comparableDirectoryPath(path))) {
+          list.push({
+            absolutePath: path,
+            displayName: skill.name || skill.id,
+            identity: `local:${path}`,
+            lastOpenedAt: skill.last_run_at || '',
+            phaseCount: skill.phase_count,
+            lastRunAt: skill.last_run_at,
+            skillId: skill.id,
+          })
+        }
+      }
+    }
+    return list
+  }, [recentWorkspaces, skills])
+
+  const resolveBackendSkillIdForWorkspace = async (workspaceRoot: string, backendSkillId?: string) => {
+    if (backendSkillId) {
+      return backendSkillId
+    }
+    if (!isAbsolutePath(workspaceRoot)) {
+      return workspaceRoot
+    }
+    try {
+      const response = await api.post<SkillSummary>('/skills', buildSkillImportPayload(workspaceRoot))
+      await mutateSkills()
+      return response.data.id
+    } catch (error) {
+      const existingSkillId = existingSkillIdFromError(error)
+      if (existingSkillId) {
+        await mutateSkills()
+        return existingSkillId
+      }
+      throw error
+    }
+  }
+
+  const openSkill = async (workspaceRoot: string, displayName?: string, backendSkillId?: string) => {
+    const name = displayName || skillIdFromPath(workspaceRoot)
+    const resolvedSkillId = await resolveBackendSkillIdForWorkspace(workspaceRoot, backendSkillId)
+    rememberWorkspace({ absolutePath: workspaceRoot, displayName: name })
+    void addRecentWorkspace(workspaceRoot, name, `local:${workspaceRoot}`, new Date().toISOString())
+    void ensureWorkspaceSupportDirs(workspaceRoot)
+    onSelectSkill(
+      isAbsolutePath(workspaceRoot)
+        ? createLocalWorkspaceSelection(resolvedSkillId, workspaceRoot)
+        : resolvedSkillId
+    )
+  }
+
+  const openWorkspace = (workspace: { absolutePath: string; displayName: string; skillId?: string }) => {
+    void openSkill(workspace.absolutePath, workspace.displayName, workspace.skillId).catch((error) => {
+      toast.error('Open folder failed', { description: formatImportSkillError(error) })
+    })
   }
 
   const openNewSkillDialog = () => {
@@ -267,22 +343,29 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
     }
   }
 
-  const handleReveal = (skill: SkillSummary) => {
-    void revealInFileManager(skill.directory_path ?? '')
+  const handleReveal = (workspace: { absolutePath: string }) => {
+    void revealInFileManager(workspace.absolutePath)
   }
 
-  const deleteSkill = async (skill: SkillSummary) => {
+  const deleteSkill = async (workspace: { absolutePath: string; displayName: string; identity: string; skillId?: string }) => {
     try {
-      await api.delete(`/skills/${skill.id}`)
-      toast.success(`Removed ${skill.name} from Studio`)
+      if (workspace.skillId) {
+        await api.delete(`/skills/${workspace.skillId}`)
+      }
+      removeWorkspace(workspace.identity)
+      void removeRecentWorkspace(workspace.identity)
+      toast.success(`Removed ${workspace.displayName} from Studio`)
       await mutateSkills()
     } catch (error) {
-      toast.error('Could not delete skill', { description: errorMessage(error) })
+      toast.error('Remove failed', { description: errorMessage(error) })
     }
   }
 
-  const handleDelete = (skill: SkillSummary) => {
-    requestSkillDeleteConfirmation(skill, () => deleteSkill(skill))
+  const handleDelete = (workspace: { absolutePath: string; displayName: string; identity: string; skillId?: string }) => {
+    requestSkillDeleteConfirmation(
+      { id: workspace.identity, name: workspace.displayName },
+      () => deleteSkill(workspace)
+    )
   }
 
   const submitNewSkill = async (event?: FormEvent) => {
@@ -299,7 +382,7 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
       const response = await api.post<SkillSummary>('/skills', buildSkillCreatePayload(skillId, newSkillParentDirectory))
       await mutateSkills()
       setNewSkillOpen(false)
-      openSkill(response.data.id)
+      await openSkill(response.data.directory_path || response.data.id, response.data.name, response.data.id)
     } catch (error) {
       setNewSkillError(formatCreateSkillError(error, skillId))
     } finally {
@@ -314,20 +397,8 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
       if (!directory) {
         return
       }
-      const registeredSkillId = registeredSkillIdForImport(directory, skills)
-      if (registeredSkillId) {
-        openSkill(registeredSkillId)
-        return
-      }
-      const response = await api.post<SkillSummary>('/skills', buildSkillImportPayload(directory))
-      await mutateSkills()
-      openSkill(response.data.id)
+      await openSkill(directory)
     } catch (error) {
-      const existingSkillId = existingSkillIdFromError(error)
-      if (existingSkillId) {
-        openSkill(existingSkillId)
-        return
-      }
       toast.error('Import failed', { description: formatImportSkillError(error) })
     } finally {
       setImporting(false)
@@ -375,7 +446,7 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
               className="w-full justify-start"
             >
               <FolderOpen />
-              {importing ? 'Importing' : 'Import skill'}
+              {importing ? 'Opening' : 'Open folder'}
             </Button>
             <p className="mt-1 truncate text-xs text-muted-foreground">Choose any local folder</p>
           </div>
@@ -399,18 +470,18 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
         ) : null}
 
         <div className="grid gap-3 sm:grid-cols-2">
-          {visibleSkills.map((skill) => (
-            <ContextMenu key={skill.id}>
+          {visibleWorkspaces.map((workspace) => (
+            <ContextMenu key={workspace.identity}>
               <ContextMenuTrigger asChild>
                 <Card
                   size="sm"
                   role="button"
                   tabIndex={0}
-                  onClick={() => openSkill(skill.id)}
+                  onClick={() => openWorkspace(workspace)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
                       event.preventDefault()
-                      openSkill(skill.id)
+                      openWorkspace(workspace)
                     }
                   }}
                   className="relative cursor-pointer select-none transition-colors hover:ring-2 hover:ring-primary/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
@@ -421,50 +492,17 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
                         <Layers3 className="size-4" />
                       </div>
                       <div className="min-w-0 flex-1 pr-12">
-                        <CardTitle className="truncate text-sm">{skill.name}</CardTitle>
+                        <CardTitle className="truncate text-sm">{workspace.displayName}</CardTitle>
                         <p className="mt-1 line-clamp-2 min-h-10 break-all font-mono text-[11px] leading-5 text-muted-foreground">
-                          {shortPath(skill.directory_path)}
+                          {shortPath(workspace.absolutePath)}
                         </p>
-                        {skill.has_golden || skill.config_mismatch ? (
-                          <div className="mt-2 flex flex-wrap items-center gap-1">
-                            {skill.has_golden ? <Badge>Golden</Badge> : null}
-                            {skill.config_mismatch ? (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Badge
-                                    variant="outline"
-                                    aria-label="Repo URL mismatch"
-                                    onClick={(event) => event.stopPropagation()}
-                                    className="border-destructive/40 bg-destructive/10 text-destructive"
-                                  >
-                                    <AlertTriangle />
-                                    Config drift
-                                  </Badge>
-                                </TooltipTrigger>
-                                <TooltipContent className="max-w-xs text-xs">
-                                  <div className="space-y-1.5">
-                                    <div>
-                                      <span className="font-medium">Actual:</span>{' '}
-                                      <span className="break-all font-mono">{skill.config_mismatch.actual_remote_url}</span>
-                                    </div>
-                                    <div>
-                                      <span className="font-medium">Expected:</span>{' '}
-                                      <span className="break-all font-mono">{skill.config_mismatch.expected_remote_url}</span>
-                                    </div>
-                                    <div className="pt-1 text-muted-foreground">{skill.config_mismatch.recommendation}</div>
-                                  </div>
-                                </TooltipContent>
-                              </Tooltip>
-                            ) : null}
-                          </div>
-                        ) : null}
                       </div>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
                             variant="ghost"
                             size="icon"
-                            aria-label={`More actions for ${skill.name}`}
+                            aria-label={`More actions for ${workspace.displayName}`}
                             className="absolute right-2 top-2 z-10"
                             onClick={(event) => event.stopPropagation()}
                             onPointerDown={(event) => event.stopPropagation()}
@@ -478,50 +516,50 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
                           className={ACTION_MENU_CLASSNAME}
                           onClick={(event) => event.stopPropagation()}
                         >
-                          <DropdownMenuItem onSelect={() => handleReveal(skill)}>
+                          <DropdownMenuItem onSelect={() => handleReveal(workspace)}>
                             <FolderOpen />
                             {REVEAL_ACTION_LABEL}
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
                             variant="destructive"
-                            onSelect={() => void handleDelete(skill)}
+                            onSelect={() => void handleDelete(workspace)}
                           >
                             <Trash2 />
-                            Delete
+                            {REMOVE_WORKSPACE_ACTION_LABEL}
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
                   </CardHeader>
                   <CardFooter className="justify-between gap-3 px-3 pt-0 text-xs text-muted-foreground">
-                    <span>{skill.phase_count} phases</span>
+                    <span>{workspace.phaseCount ?? 0} phases</span>
                     <span className="inline-flex items-center gap-1">
                       <Clock3 className="size-3.5" />
-                      {formatLastRun(skill.last_run_at)}
+                      {formatLastRun(workspace.lastRunAt ?? null)}
                     </span>
                   </CardFooter>
                 </Card>
               </ContextMenuTrigger>
               <ContextMenuContent className={ACTION_MENU_CLASSNAME}>
-                <ContextMenuItem onSelect={() => handleReveal(skill)}>
+                <ContextMenuItem onSelect={() => handleReveal(workspace)}>
                   <FolderOpen />
                   {REVEAL_ACTION_LABEL}
                 </ContextMenuItem>
                 <ContextMenuSeparator />
                 <ContextMenuItem
                   variant="destructive"
-                  onSelect={() => void handleDelete(skill)}
+                  onSelect={() => void handleDelete(workspace)}
                 >
                   <Trash2 />
-                  Delete
+                  {REMOVE_WORKSPACE_ACTION_LABEL}
                 </ContextMenuItem>
               </ContextMenuContent>
             </ContextMenu>
           ))}
         </div>
 
-        {!skillListError && visibleSkills.length === 0 ? (
+        {!skillListError && visibleWorkspaces.length === 0 ? (
           <Empty className="min-h-40 border border-dashed border-border">
             <EmptyHeader>
               <EmptyMedia variant="icon">

@@ -47,4 +47,5 @@ describe("LazyMonacoPanel header controls", () => {
     expect(html).not.toContain(">x</button>")
     expect(html).not.toContain("inline-flex size-7")
   })
+
 })

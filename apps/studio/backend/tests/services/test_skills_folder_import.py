@@ -7,6 +7,7 @@ from app.core import config
 from app.core.adapters.metadata_local import LocalJsonMetadataStore
 from app.core.adapters.storage_local import LocalFilesystemBackend
 from app.services import skills as skill_service
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 
@@ -82,7 +83,7 @@ async def test_create_new_skill_imports_existing_nonempty_directory_without_writ
     )
 
 
-def test_create_skill_import_rejects_non_skill_directory(
+def test_create_skill_import_opens_plain_folder_without_graph_or_skill_gate(
     client: TestClient,
     tmp_path: Path,
 ) -> None:
@@ -99,17 +100,18 @@ def test_create_skill_import_rejects_non_skill_directory(
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 201, response.json()
     body = response.json()
-    assert body["error_code"] == "INVALID_DIRECTORY_PATH"
-    assert "GRAPH.md or SKILL.md" in body["message"]
-    assert body["details"] == {
-        "directory_path": str(skill_dir),
-        "required_entry": "GRAPH.md or SKILL.md",
-    }
+    assert body["id"] == "not-a-skill"
+    assert body["name"] == "not-a-skill"
+    assert body["directory_path"] == str(skill_dir)
+    assert body["phase_count"] == 0
+    assert (skill_dir / "notes.txt").read_text(encoding="utf-8") == "plain folder\n"
+    assert not (skill_dir / "GRAPH.md").exists()
+    assert not (skill_dir / ".workspace").exists()
 
 
-def test_import_skill_rejects_empty_directory_without_scaffolding(
+def test_import_skill_opens_empty_directory_without_scaffolding(
     client: TestClient,
     tmp_path: Path,
 ) -> None:
@@ -125,11 +127,14 @@ def test_import_skill_rejects_empty_directory_without_scaffolding(
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 201, response.json()
     body = response.json()
-    assert body["error_code"] == "INVALID_DIRECTORY_PATH"
-    assert "GRAPH.md or SKILL.md" in body["message"]
+    assert body["id"] == "empty-folder"
+    assert body["name"] == "empty-folder"
+    assert body["directory_path"] == str(skill_dir)
+    assert body["phase_count"] == 0
     assert not (skill_dir / "GRAPH.md").exists()
+    assert not (skill_dir / ".workspace").exists()
 
 
 def test_import_skill_allows_invalid_graph_without_lint_gate(
@@ -183,6 +188,34 @@ io:
     body = response.json()
     assert body["id"] == "bad-graph"
     assert body["directory_path"] == str(skill_dir)
+
+
+@pytest.mark.anyio
+async def test_update_skill_file_rejects_fastapi_as_local_file_writer(
+    tmp_path: Path,
+    metadata_store: LocalJsonMetadataStore,
+) -> None:
+    skill_dir = tmp_path / "external" / "native-writer-only"
+    _write_graph_skill(skill_dir, "native-writer-only")
+    original_graph = (skill_dir / "GRAPH.md").read_text(encoding="utf-8")
+    storage = LocalFilesystemBackend(tmp_path)
+    await metadata_store.save_skill_index_entry(
+        "native-writer-only",
+        {"absolute_path": str(skill_dir), "l2_remote_url": ""},
+    )
+
+    with pytest.raises(HTTPException):
+        await skill_service.update_skill_file(
+            "default",
+            "native-writer-only",
+            "GRAPH.md",
+            "---\nname: overwritten-by-python\n---\n",
+            storage,
+            metadata_store,
+            expected_hash=None,
+        )
+
+    assert (skill_dir / "GRAPH.md").read_text(encoding="utf-8") == original_graph
 
 
 def test_create_skill_with_empty_directory_path_scaffolds(
@@ -494,6 +527,4 @@ io:
     return {"prepared": True}
 """,
     }
-
-
 

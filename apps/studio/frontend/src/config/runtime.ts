@@ -44,8 +44,12 @@ export function fallbackSidecarConfig(
 
 export async function resolveRuntimeConfig(options: RuntimeOptions = {}): Promise<SidecarConfig> {
   if (isTauriRuntime(options.windowRef)) {
-    const invoke = options.invoke ?? await loadTauriInvoke()
-    return normalizeSidecarConfig(await invoke<SidecarConfig>('get_sidecar_config'))
+    try {
+      const invoke = options.invoke ?? await loadTauriInvoke()
+      return normalizeSidecarConfig(await invoke<SidecarConfig>('get_sidecar_config'))
+    } catch {
+      return fallbackSidecarConfig(options.fallbackBaseURL)
+    }
   }
   return fallbackSidecarConfig(options.fallbackBaseURL)
 }

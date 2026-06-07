@@ -379,32 +379,7 @@ async def update_skill_files(
     expected_hash: str | None = None,
 ) -> SkillDetail:
     """Persist a full V2.1 skill file map and return the compiled detail."""
-    if expected_hash is not None:
-        current_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
-        current_markdown = _read_current_graph_markdown(current_dir)
-        current_hash = _graph_content_hash(current_markdown)
-        if current_hash != expected_hash:
-            raise CanvasConflictError(
-                current_hash=current_hash,
-                current_markdown_content=current_markdown,
-            )
-    skill_dir = await ensure_workspace_skill_dir_async(user_id, skill_id, storage, metadata)
-    write_skill_files_atomic(skill_dir, files)
-    for rel_path in files:
-        record_api_write(skill_dir.joinpath(*PurePosixPath(rel_path).parts))
-    lint = lint_skill_path(skill_dir)
-    if lint.status == "failed":
-        _raise_manifest_validation_failed(lint)
-    compiled = _load_compiled(skill_dir)
-    return await _detail_from_manifest_async(
-        user_id,
-        skill_id,
-        skill_dir,
-        compiled,
-        lint,
-        storage,
-        metadata,
-    )
+    raise HTTPException(status_code=400, detail="FastAPI local file writer is retired")
 
 
 async def update_skill_file(
@@ -417,20 +392,7 @@ async def update_skill_file(
     *,
     expected_hash: str | None = None,
 ) -> str:
-    validate_skill_file_path(rel_path)
-    skill_dir = await ensure_workspace_skill_dir_async(user_id, skill_id, storage, metadata)
-    target = skill_dir.joinpath(*PurePosixPath(rel_path).parts)
-    current = target.read_text(encoding="utf-8") if target.exists() else ""
-    current_hash = _graph_content_hash(current)
-    if expected_hash is not None and current_hash != expected_hash:
-        raise CanvasConflictError(
-            current_hash=current_hash,
-            current_markdown_content=current,
-        )
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
-    record_api_write(target)
-    return _graph_content_hash(content)
+    raise HTTPException(status_code=400, detail="FastAPI local file writer is retired")
 
 
 async def delete_skill(
@@ -514,12 +476,6 @@ async def create_new_skill(
             _raise_invalid_directory_path("", "directory_path is required for import")
         if not skill_dir.exists() or not skill_dir.is_dir():
             _raise_invalid_directory_path(str(skill_dir), "selected folder does not exist")
-        if not await _is_importable_skill_directory(skill_dir, storage):
-            _raise_invalid_directory_path(
-                str(skill_dir),
-                "Selected folder is not a Studio skill directory: missing GRAPH.md or SKILL.md.",
-                required_entry="GRAPH.md or SKILL.md",
-            )
         if await storage.exists(str(skill_dir / "GRAPH.md")):
             # Validate but do not raise validation error on import, allowing users to upgrade/correct it later
             lint_skill_path(skill_dir)

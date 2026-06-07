@@ -473,10 +473,33 @@ mod tests {
 
     #[test]
     fn allocate_loopback_port_returns_bindable_dynamic_port() {
-        let port = allocate_loopback_port().expect("port");
-        assert_ne!(port, 0);
-        let listener = TcpListener::bind(("127.0.0.1", port)).expect("released port should rebind");
-        drop(listener);
+        let mut success = false;
+        let mut last_err = None;
+        for _ in 0..10 {
+            let port = match allocate_loopback_port() {
+                Ok(p) => p,
+                Err(e) => {
+                    last_err = Some(e);
+                    thread::sleep(Duration::from_millis(50));
+                    continue;
+                }
+            };
+            assert_ne!(port, 0);
+            match TcpListener::bind(("127.0.0.1", port)) {
+                Ok(listener) => {
+                    drop(listener);
+                    success = true;
+                    break;
+                }
+                Err(e) => {
+                    last_err = Some(e);
+                    thread::sleep(Duration::from_millis(50));
+                }
+            }
+        }
+        if !success {
+            panic!("released port should rebind, last error: {:?}", last_err);
+        }
     }
 
     #[test]

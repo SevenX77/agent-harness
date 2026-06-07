@@ -1,4 +1,13 @@
+pub mod native_fs;
+pub use native_fs::{
+    add_recent_workspace, ensure_workspace_support_dirs, list_recent_workspaces,
+    remove_recent_workspace, write_workspace_file, NativeFsError, RecentWorkspace,
+    WriteWorkspaceFileRequest, WriteWorkspaceFileResponse, WorkspaceSupportDirs,
+};
+
 mod sidecar;
+#[cfg(test)]
+mod native_fs_contract_tests;
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -65,25 +74,6 @@ fn existing_path(path: &str) -> Result<PathBuf, String> {
         return Err(format!("path does not exist: {}", target.display()));
     }
     Ok(target)
-}
-
-fn spawn_tool(bin: &str, path: &str) -> Result<(), String> {
-    let target = existing_path(path)?;
-    Command::new(bin)
-        .arg(target)
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| format!("failed to spawn {bin}: {error}"))
-}
-
-#[tauri::command]
-fn open_in_cursor(path: String) -> Result<(), String> {
-    spawn_tool("cursor", &path)
-}
-
-#[tauri::command]
-fn open_in_codex(path: String) -> Result<(), String> {
-    spawn_tool("codex", &path)
 }
 
 #[tauri::command]
@@ -157,56 +147,60 @@ fn reveal_in_file_manager(path: String) -> Result<(), String> {
     Err("revealing in file manager is not supported on this platform".to_string())
 }
 
-#[tauri::command]
-fn open_in_terminal(path: String) -> Result<(), String> {
-    let target = existing_path(&path)?;
-    if cfg!(target_os = "macos") {
-        return Command::new("open")
-            .arg("-a")
-            .arg("Terminal")
-            .arg(target)
-            .spawn()
-            .map(|_| ())
-            .map_err(|error| format!("failed to open Terminal: {error}"));
+mod commands {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    #[tauri::command]
+    pub fn write_workspace_file(
+        workspace_root: String,
+        path: String,
+        content: String,
+        expected_hash: Option<String>,
+    ) -> Result<native_fs::WriteWorkspaceFileResponse, native_fs::NativeFsError> {
+        let req = native_fs::WriteWorkspaceFileRequest {
+            workspace_root: PathBuf::from(workspace_root),
+            relative_path: path,
+            content,
+            expected_hash,
+        };
+        native_fs::write_workspace_file(req)
     }
 
-    if cfg!(target_os = "linux") {
-        return Command::new("gnome-terminal")
-            .arg("--working-directory")
-            .arg(&target)
-            .spawn()
-            .or_else(|_| {
-                Command::new("xterm")
-                    .args([
-                        "-e",
-                        "sh",
-                        "-lc",
-                        "cd \"$1\" && exec \"${SHELL:-sh}\"",
-                        "sh",
-                    ])
-                    .arg(&target)
-                    .spawn()
-            })
-            .map(|_| ())
-            .map_err(|error| format!("failed to open terminal: {error}"));
+    #[tauri::command]
+    pub fn add_recent_workspace(
+        app: tauri::AppHandle,
+        absolute_path: String,
+        display_name: String,
+        identity: String,
+        last_opened_at: String,
+    ) -> Result<(), String> {
+        let workspace = native_fs::RecentWorkspace {
+            absolute_path: PathBuf::from(absolute_path),
+            display_name,
+            identity,
+            last_opened_at,
+        };
+        let config_dir = app.path().app_config_dir().unwrap_or_else(|_| sidecar::default_user_config_dir());
+        native_fs::add_recent_workspace(&config_dir, workspace).map_err(|e| e.to_string())
     }
 
-    if cfg!(target_os = "windows") {
-        return Command::new("wt.exe")
-            .arg("-d")
-            .arg(&target)
-            .spawn()
-            .or_else(|_| {
-                Command::new("cmd")
-                    .args(["/c", "start", "cmd", "/k", "cd", "/d"])
-                    .arg(&target)
-                    .spawn()
-            })
-            .map(|_| ())
-            .map_err(|error| format!("failed to open terminal: {error}"));
+    #[tauri::command]
+    pub fn list_recent_workspaces(app: tauri::AppHandle) -> Result<Vec<native_fs::RecentWorkspace>, String> {
+        let config_dir = app.path().app_config_dir().unwrap_or_else(|_| sidecar::default_user_config_dir());
+        native_fs::list_recent_workspaces(&config_dir).map_err(|e| e.to_string())
     }
 
-    Err("opening a terminal is not supported on this platform".to_string())
+    #[tauri::command]
+    pub fn remove_recent_workspace(app: tauri::AppHandle, identity: String) -> Result<(), String> {
+        let config_dir = app.path().app_config_dir().unwrap_or_else(|_| sidecar::default_user_config_dir());
+        native_fs::remove_recent_workspace(&config_dir, &identity).map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub fn ensure_workspace_support_dirs(workspace_root: String) -> Result<native_fs::WorkspaceSupportDirs, String> {
+        native_fs::ensure_workspace_support_dirs(Path::new(&workspace_root)).map_err(|e| e.to_string())
+    }
 }
 
 #[cfg(all(target_os = "macos", test))]
@@ -308,11 +302,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_sidecar_config,
             get_sidecar_stderr,
-            open_in_cursor,
-            open_in_codex,
             select_directory,
-            open_in_terminal,
-            reveal_in_file_manager
+            reveal_in_file_manager,
+            commands::write_workspace_file,
+            commands::add_recent_workspace,
+            commands::list_recent_workspaces,
+            commands::remove_recent_workspace,
+            commands::ensure_workspace_support_dirs,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -409,6 +405,57 @@ mod tests {
         let error = existing_path(&missing.display().to_string()).expect_err("missing path");
 
         assert!(error.contains("path does not exist"));
+    }
+
+    #[test]
+    fn write_workspace_file_command_preserves_hash_conflict_payload() {
+        let workspace = temp_path("command-hash-conflict");
+        let _ = std::fs::remove_dir_all(&workspace);
+        std::fs::create_dir_all(&workspace).expect("create temp workspace");
+        let initial = commands::write_workspace_file(
+            workspace.display().to_string(),
+            "GRAPH.md".to_string(),
+            "remote markdown\n".to_string(),
+            None,
+        )
+        .expect("initial command write succeeds");
+
+        let error = commands::write_workspace_file(
+            workspace.display().to_string(),
+            "GRAPH.md".to_string(),
+            "local markdown\n".to_string(),
+            Some("stale-hash".to_string()),
+        )
+        .expect_err("stale expected hash should preserve structured conflict");
+        let payload = serde_json::to_value(error).expect("command error serializes");
+
+        assert_eq!(
+            payload,
+            serde_json::json!({
+                "type": "HashConflict",
+                "data": {
+                    "current_hash": initial.hash,
+                    "current_content": "remote markdown\n",
+                },
+            })
+        );
+        let _ = std::fs::remove_dir_all(&workspace);
+    }
+
+    #[test]
+    fn tauri_command_registry_keeps_fs_commands_but_retires_dead_external_tools() {
+        let source = include_str!("lib.rs");
+        let handler = source
+            .split("tauri::generate_handler![")
+            .nth(1)
+            .and_then(|tail| tail.split("])").next())
+            .expect("Tauri invoke handler should be present");
+
+        assert!(handler.contains("select_directory"));
+        assert!(handler.contains("reveal_in_file_manager"));
+        assert!(!handler.contains("open_in_cursor"));
+        assert!(!handler.contains("open_in_codex"));
+        assert!(!handler.contains("open_in_terminal"));
     }
 
     #[cfg(target_os = "macos")]

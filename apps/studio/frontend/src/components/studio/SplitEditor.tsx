@@ -56,6 +56,7 @@ export function SplitEditor({
       <LazyMonacoPanel
         title={file.title ?? file.path}
         skillId={file.skillId}
+        workspaceRoot={file.workspaceRoot}
         filePath={file.path}
         initialHash={file.hash}
         saveEnabled={file.saveEnabled ?? true}

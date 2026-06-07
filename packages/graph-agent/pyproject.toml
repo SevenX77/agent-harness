@@ -51,9 +51,6 @@ e2e = [
     "pytest-playwright>=0.5",
     "websockets>=12",
 ]
-google = ["langchain-google-genai>=2.0", "google-genai>=1.0"]
-tts = ["edge-tts>=6.0"]
-all = ["graph-agent[google,tts]"]
 
 [build-system]
 requires = ["hatchling"]

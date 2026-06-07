@@ -85,6 +85,87 @@ Use @reference:Guide and @tool:lookup, then call @tool:finish_task.
     )
 
 
+def _subagent_child_skill(root: Path) -> None:
+    _write(
+        root / "GRAPH.md",
+        """---
+schema_version: "v0.3.0"
+name: ws-e1-subagent-child
+io:
+  inputs:
+    type: object
+    properties:
+      text:
+        type: string
+    required: [text]
+  outputs:
+    type: object
+    properties: {}
+phases:
+  - child
+---
+<phase depends_on="input" output>child</phase>
+""",
+    )
+    _write(
+        root / "phases" / "child" / "SKILL.md",
+        """---
+phase_config:
+  max_iterations: 1
+  llm_role: graph_agent
+---
+<role>
+Child expert.
+</role>
+<goal>
+Echo the provided text.
+</goal>
+""",
+    )
+
+
+def _subagent_parent_skill(root: Path, target_skill: str) -> None:
+    _write(
+        root / "GRAPH.md",
+        """---
+schema_version: "v0.3.0"
+name: ws-e1-subagent-parent
+io:
+  inputs:
+    type: object
+    properties:
+      text:
+        type: string
+  outputs:
+    type: object
+    properties: {}
+phases:
+  - main
+---
+<phase depends_on="input" output>main</phase>
+""",
+    )
+    _write(
+        root / "phases" / "main" / "SKILL.md",
+        f"""---
+phase_config:
+  max_iterations: 3
+  llm_role: graph_agent
+  subagents:
+    - name: child_expert
+      target_skill: {target_skill}
+      description: Echoes text from a child expert skill.
+---
+<role>
+Parent coordinator.
+</role>
+<goal>
+Call @subagent:child_expert with the input text.
+</goal>
+""",
+    )
+
+
 class _NoToolChatModel:
     def __init__(self) -> None:
         self.bound_tool_names: list[str] = []
@@ -219,6 +300,42 @@ class _OneFinishCallModel(BaseChatModel):
                             "business_data_md": "## item-1\n- answer: ok\n",
                         },
                         "id": "finish-1",
+                    }
+                ],
+            )
+        return ChatResult(generations=[ChatGeneration(message=message)])
+
+
+class _OneSubagentCallModel(BaseChatModel):
+    emitted: bool = False
+
+    @property
+    def _llm_type(self) -> str:
+        return "ws-e1-one-subagent-call"
+
+    def bind_tools(self, tools: list[Any], **kwargs: Any) -> "_OneSubagentCallModel":
+        del tools, kwargs
+        return self
+
+    def _generate(
+        self,
+        messages: list[Any],
+        stop: list[str] | None = None,
+        run_manager: Any | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        del messages, stop, run_manager, kwargs
+        if self.emitted:
+            message = AIMessage(content="done")
+        else:
+            self.emitted = True
+            message = AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "call_subagent_child_expert",
+                        "args": {"inputs": [{"text": "contracts"}]},
+                        "id": "subagent-1",
                     }
                 ],
             )
@@ -468,6 +585,56 @@ def test_phase_max_iterations_stops_repeated_tool_loop(
     assert chat.invocations == 2
 
 
+def test_create_agent_subagent_tool_uses_engine_dispatch_not_loader_placeholder(
+    monkeypatch: Any,
+    tmp_path: Path,
+    mock_skill_resolver: object,
+) -> None:
+    parent = tmp_path / "parent"
+    child = tmp_path / "demo.child"
+    _subagent_child_skill(child)
+    _subagent_parent_skill(parent, "demo.child")
+    chat = _OneSubagentCallModel()
+    dispatch_calls: list[dict[str, Any]] = []
+
+    def fake_invoke_subagent_tool_t21(**kwargs: Any) -> dict[str, Any]:
+        dispatch_calls.append(kwargs)
+        return {
+            "ok": True,
+            "tool_name": kwargs["tool_name"],
+            "subagent_name": kwargs["subagent"].name,
+            "results": [{"status": "ok", "data": {"echo": "contracts"}}],
+        }
+
+    monkeypatch.setattr(
+        graph_assembler,
+        "_invoke_subagent_tool_t21",
+        fake_invoke_subagent_tool_t21,
+    )
+
+    compiled = compile_skill(parent, cache=False, skill_resolver=mock_skill_resolver)
+    graph = graph_assembler.assemble_graph(
+        compiled,
+        chat_model=chat,
+        skill_resolver=mock_skill_resolver,
+    ).graph
+    graph.invoke(
+        {"data": {"text": "contracts"}, "flow": {"thread_id": "run-1"}, "messages": []},
+        config={"configurable": {"thread_id": "run-1"}},
+    )
+
+    assert dispatch_calls, (
+        "create_agent must receive a subagent tool wired to engine dispatch; "
+        "the loader placeholder must not be the callable that LangGraph executes"
+    )
+    call = dispatch_calls[0]
+    assert call["tool_name"] == "call_subagent_child_expert"
+    assert call["args"] == {"inputs": [{"text": "contracts"}]}
+    assert call["subagent"].name == "child_expert"
+    assert call["runtime"] is not None
+    assert call["state"]["flow"].thread_id == "run-1"
+
+
 def test_predict_gateway_model_stays_predict_bound_and_zero_usage(
     monkeypatch: Any,
     tmp_path: Path,
@@ -530,3 +697,132 @@ def test_predict_gateway_model_stays_predict_bound_and_zero_usage(
         "total_cost": 0,
     }
     assert resolver.calls[0]["predict_context"] is not None
+
+
+class _TwoInvalidSubagentCallModel(BaseChatModel):
+    calls: int = 0
+
+    @property
+    def _llm_type(self) -> str:
+        return "ws-e1-two-invalid-subagent-calls"
+
+    def bind_tools(self, tools: list[Any], **kwargs: Any) -> "_TwoInvalidSubagentCallModel":
+        del tools, kwargs
+        return self
+
+    def _generate(
+        self,
+        messages: list[Any],
+        stop: list[str] | None = None,
+        run_manager: Any | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        del messages, stop, run_manager, kwargs
+        self.calls += 1
+        if self.calls == 1:
+            message = AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "call_subagent_child_expert",
+                        "args": {"inputs": [{"invalid_field": "contracts"}]},
+                        "id": "subagent-1",
+                    }
+                ],
+            )
+        elif self.calls == 2:
+            message = AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "call_subagent_child_expert",
+                        "args": {"inputs": [{"invalid_field": "contracts"}]},
+                        "id": "subagent-2",
+                    }
+                ],
+            )
+        else:
+            message = AIMessage(content="done")
+        return ChatResult(generations=[ChatGeneration(message=message)])
+
+
+def test_create_agent_subagent_tool_persists_retry_count(
+    monkeypatch: Any,
+    tmp_path: Path,
+    mock_skill_resolver: object,
+) -> None:
+    parent = tmp_path / "parent"
+    child = tmp_path / "demo.child"
+    _subagent_child_skill(child)
+    _subagent_parent_skill(parent, "demo.child")
+    chat = _TwoInvalidSubagentCallModel()
+
+    dispatch_flows: list[dict[str, Any]] = []
+    original_invoke = graph_assembler._invoke_subagent_tool_t21
+
+    def spy_invoke_subagent_tool_t21(**kwargs: Any) -> dict[str, Any]:
+        from graph_agent.core.graph_assembler import parent_state_var
+        parent_state = parent_state_var.get(None)
+        assert kwargs["state"] is parent_state, "state passed to _invoke_subagent_tool_t21 must be the real parent state"
+
+        flow = kwargs.get("flow")
+        retries = {}
+        if flow is not None:
+            if isinstance(flow, dict):
+                retries = dict(flow.get("subagent_validation_retries", {}))
+            else:
+                retries = dict(getattr(flow, "subagent_validation_retries", {}))
+        dispatch_flows.append(retries)
+        return original_invoke(**kwargs)
+
+    monkeypatch.setattr(
+        graph_assembler,
+        "_invoke_subagent_tool_t21",
+        spy_invoke_subagent_tool_t21,
+    )
+
+    captured_tools: list[Any] = []
+    original_create_agent = graph_assembler.create_agent
+
+    def fake_create_agent(**kwargs: Any) -> Any:
+        captured_tools.extend(kwargs.get("tools", []))
+        return original_create_agent(**kwargs)
+
+    monkeypatch.setattr(graph_assembler, "create_agent", fake_create_agent)
+
+    from langgraph.checkpoint.memory import InMemorySaver
+    saver = InMemorySaver()
+    compiled = compile_skill(parent, cache=False, skill_resolver=mock_skill_resolver)
+    graph = graph_assembler.assemble_graph(
+        compiled,
+        chat_model=chat,
+        skill_resolver=mock_skill_resolver,
+        checkpointer=saver,
+    ).graph
+    graph.invoke(
+        {"data": {"text": "contracts"}, "flow": {"thread_id": "run-1"}, "messages": []},
+        config={"configurable": {"thread_id": "run-1"}},
+    )
+    checkpoint_state = saver.get_tuple({"configurable": {"thread_id": "run-1"}})
+    assert checkpoint_state is not None
+    res = checkpoint_state.checkpoint["channel_values"]
+
+    assert len(dispatch_flows) == 2
+    assert dispatch_flows[0] == {}
+    assert dispatch_flows[1] == {"call_subagent_child_expert": 1}
+
+    assert res["flow"].subagent_validation_retries == {"call_subagent_child_expert": 2}
+
+    subagent_tool = next(t for t in captured_tools if t.name == "call_subagent_child_expert")
+    inputs_schema = subagent_tool.args_schema.model_json_schema()["properties"]["inputs"]
+    assert inputs_schema["items"]["properties"]["text"]["type"] == "string"
+    assert inputs_schema["items"]["required"] == ["text"]
+    assert subagent_tool.args_schema.model_validate(
+        {"inputs": [{"invalid_field": "contracts"}]}
+    ).inputs == [{"invalid_field": "contracts"}]
+    assert subagent_tool.metadata is not None
+    assert subagent_tool.metadata.get("kind") == "subagent"
+    assert subagent_tool.metadata.get("subagent_name") == "child_expert"
+    assert "target_skill" in subagent_tool.metadata
+    assert "subagent_root" in subagent_tool.metadata
+    assert "expected_schema" in subagent_tool.metadata

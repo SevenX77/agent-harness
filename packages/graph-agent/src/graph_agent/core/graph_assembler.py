@@ -1,15 +1,19 @@
 """V2.1 CompiledSkill to LangGraph assembly."""
 
 import asyncio
+import contextvars
 import json
 import logging
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, Callable, NoReturn
 
 from langchain_core.messages import SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
+from typing_extensions import Annotated
+from langgraph.prebuilt import InjectedState
+from langchain_core.tools import StructuredTool
 from langgraph.graph import END, START, StateGraph
 
 from langchain.agents import create_agent
@@ -70,6 +74,7 @@ from graph_agent.tools.builtin.read_reference import read_declared_reference, re
 
 MAX_REACT_TURNS = 8
 logger = logging.getLogger(__name__)
+parent_state_var: contextvars.ContextVar[Any] = contextvars.ContextVar("parent_state_var")
 
 
 @dataclass(frozen=True)
@@ -617,7 +622,124 @@ def _build_skill_node(
         chat_model=phase_chat_model,
         max_patch_attempts=max_patch_attempts,
     )
-    all_tools = [*business_tools, *framework_tools, finish_task]
+    class FrameworkStateProxyDict(dict[str, Any]):
+        def __init__(self, obj: Any) -> None:
+            super().__init__()
+            self._obj = obj
+
+        def __getitem__(self, key: Any) -> Any:
+            if hasattr(self._obj, str(key)):
+                return getattr(self._obj, str(key))
+            raise KeyError(key)
+
+        def __setitem__(self, key: Any, value: Any) -> None:
+            if hasattr(self._obj, str(key)):
+                setattr(self._obj, str(key), value)
+            else:
+                super().__setitem__(key, value)
+
+        def get(self, key: Any, default: Any = None) -> Any:
+            if hasattr(self._obj, str(key)):
+                return getattr(self._obj, str(key))
+            return default
+
+        def setdefault(self, key: Any, default: Any = None) -> Any:
+            if hasattr(self._obj, str(key)):
+                val = getattr(self._obj, str(key))
+                if val is None or (isinstance(val, dict) and not val):
+                    setattr(self._obj, str(key), default)
+                    return default
+                return val
+            return super().setdefault(key, default)
+
+    rewired_business_tools = []
+    for tool in business_tools:
+        if tool.name in subagent_by_tool_name:
+            subagent = subagent_by_tool_name[tool.name]
+            runtime = subagent_runtime_by_tool_name.get(tool.name)
+
+            def _make_dispatch(
+                t_name: str = tool.name,
+                sa: CompiledSubagent = subagent,
+                rt: _SubagentRuntime | None = runtime,
+            ) -> Callable[..., Any]:
+                def dispatch_func(
+                    inputs: Any,
+                    state: Annotated[WorkflowState, InjectedState],
+                    config: RunnableConfig | None = None,
+                ) -> Any:
+                    raw_inputs = []
+                    for item in (inputs or []):
+                        if hasattr(item, "model_dump"):
+                            raw_inputs.append(item.model_dump())
+                        elif hasattr(item, "dict"):
+                            raw_inputs.append(item.dict())
+                        else:
+                            raw_inputs.append(item)
+                    parent_state = parent_state_var.get(None)
+                    raw_flow = parent_state["flow"] if parent_state else (state["flow"] if state else {})
+                    flow = (
+                        FrameworkStateProxyDict(raw_flow)
+                        if (raw_flow is not None and not isinstance(raw_flow, dict))
+                        else raw_flow
+                    )
+                    from typing import cast
+                    return _invoke_subagent_tool_t21(
+                        tool_name=t_name,
+                        subagent=sa,
+                        args={"inputs": raw_inputs},
+                        state=parent_state if parent_state is not None else state,
+                        flow=cast(dict[str, Any], flow),
+                        runtime=rt,
+                        parent_config=config,
+                    )
+
+                return dispatch_func
+
+            if tool.args_schema is not None and not isinstance(tool.args_schema, dict):
+                from pydantic import create_model, ConfigDict, Field
+                inputs_desc = ""
+                original_inputs_field = tool.args_schema.model_fields.get("inputs")
+                if original_inputs_field and original_inputs_field.description:
+                    inputs_desc = original_inputs_field.description
+
+                new_args_schema = create_model(
+                    tool.args_schema.__name__,
+                    __config__=ConfigDict(extra="allow"),
+                    inputs=(
+                        list[Any],
+                        Field(
+                            default=...,
+                            description=inputs_desc,
+                            json_schema_extra={"items": subagent.expected_schema},
+                        ),
+                    ),
+                )
+                original_metadata = tool.metadata or {}
+                metadata = {
+                    "kind": "subagent",
+                    "subagent_name": subagent.name,
+                    "target_skill": subagent.target_skill,
+                    "subagent_path": subagent.target_skill,
+                    "subagent_root": str(subagent.root),
+                    "expected_schema": subagent.expected_schema,
+                }
+                metadata.update(original_metadata)
+
+                rewired_tool = StructuredTool.from_function(
+                    func=_make_dispatch(),
+                    name=tool.name,
+                    description=tool.description or f"Call subagent {subagent.name}",
+                    args_schema=new_args_schema,
+                    metadata=metadata,
+                )
+                rewired_business_tools.append(rewired_tool)
+            else:
+                rewired_business_tools.append(tool)
+        else:
+            rewired_business_tools.append(tool)
+
+    all_tools = [*rewired_business_tools, *framework_tools, finish_task]
 
     # Coerce output_schema if it's a dict to SchemaObject, then get Pydantic model
     from graph_agent.core.schema_engine import SchemaEngine
@@ -679,6 +801,7 @@ def _build_skill_node(
         checkpointer=wrapped_checkpointer,
     )
 
+
     def _skill_node(
         state: WorkflowState,
         config: RunnableConfig | None = None,
@@ -710,22 +833,26 @@ def _build_skill_node(
             nodes_per_turn = 6
         inner_config["recursion_limit"] = max_turns * nodes_per_turn + 1
 
+        token = parent_state_var.set(state)
         try:
-            result = agent_graph.invoke(
-                {
-                    "data": state["data"],
-                    "flow": state["flow"],
-                    "messages": state["messages"],
-                },
-                config=cast(RunnableConfig, inner_config),
-            )  # type: ignore[call-overload]
-        except GraphRecursionError:
-            state_config = dict(inner_config)
-            state_configurable = dict(state_config.get("configurable", {}))
-            state_configurable["checkpoint_ns"] = ""
-            state_config["configurable"] = state_configurable
-            inner_state = agent_graph.get_state(cast(RunnableConfig, state_config))
-            result = inner_state.values
+            try:
+                result = agent_graph.invoke(
+                    {
+                        "data": state["data"],
+                        "flow": state["flow"],
+                        "messages": state["messages"],
+                    },
+                    config=cast(RunnableConfig, inner_config),
+                )  # type: ignore[call-overload]
+            except GraphRecursionError:
+                state_config = dict(inner_config)
+                state_configurable = dict(state_config.get("configurable", {}))
+                state_configurable["checkpoint_ns"] = ""
+                state_config["configurable"] = state_configurable
+                inner_state = agent_graph.get_state(cast(RunnableConfig, state_config))
+                result = inner_state.values
+        finally:
+            parent_state_var.reset(token)
 
         from langchain_core.messages import AIMessage
         res_messages = (result or {}).get("messages") or []
@@ -773,6 +900,12 @@ def _build_skill_node(
                         ),
                     )
 
+        if result is not None and isinstance(result, dict) and "flow" in result:
+            retries = getattr(state["flow"], "subagent_validation_retries", {})
+            if isinstance(result["flow"], dict):
+                result["flow"]["subagent_validation_retries"] = retries
+            else:
+                setattr(result["flow"], "subagent_validation_retries", retries)
         return cast(dict[str, Any] | WorkflowState, result)
 
     return _skill_node

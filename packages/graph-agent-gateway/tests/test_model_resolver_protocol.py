@@ -8,6 +8,7 @@ requirements.md §4.1 (Mock Model Resolver drives runtime).
 from __future__ import annotations
 
 import inspect
+import importlib.util
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, cast
@@ -40,6 +41,7 @@ def test_model_resolver_protocol_signature_is_complete() -> None:
         "model_override",
         "callbacks",
         "phase_name",
+        "predict_context",
         "kwargs",
     ]
     assert params["role_name"].default is None
@@ -51,6 +53,8 @@ def test_model_resolver_protocol_signature_is_complete() -> None:
     assert params["callbacks"].default == ()
     assert params["phase_name"].kind is inspect.Parameter.KEYWORD_ONLY
     assert params["phase_name"].default is None
+    assert params["predict_context"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert params["predict_context"].default is None
     assert params["kwargs"].kind is inspect.Parameter.VAR_KEYWORD
 
 
@@ -66,6 +70,7 @@ def test_protocol_is_runtime_checkable_for_di_validation() -> None:
             model_override: str | None = None,
             callbacks: tuple[Any, ...] = (),
             phase_name: str | None = None,
+            predict_context: Any | None = None,
             **kwargs: Any,
         ) -> object:
             return {
@@ -74,6 +79,7 @@ def test_protocol_is_runtime_checkable_for_di_validation() -> None:
                 "model_override": model_override,
                 "callbacks": callbacks,
                 "phase_name": phase_name,
+                "predict_context": predict_context,
                 "kwargs": kwargs,
             }
 
@@ -90,32 +96,16 @@ def test_run_skill_accepts_model_resolver_keyword() -> None:
     assert signature.parameters["model_resolver"].default is None
 
 
-def test_graph_agent_harness_requires_explicit_model_resolver_dependency() -> None:
-    from graph_agent.core.harness import GraphAgentHarness
+def test_mvp1_runtime_entrypoints_replace_legacy_harness_dependency() -> None:
+    from graph_agent import predict_skill, run_skill
 
-    signature = inspect.signature(GraphAgentHarness)
+    assert importlib.util.find_spec("graph_agent.core.harness") is None
 
-    assert "model_resolver" in signature.parameters
-    assert signature.parameters["model_resolver"].kind is inspect.Parameter.KEYWORD_ONLY
-
-
-@pytest.mark.skip(reason="GraphAgentHarness is fully deprecated and raises NotImplementedError")
-def test_harness_requires_model_resolver_without_legacy_singleton() -> None:
-    from graph_agent.core.harness import GraphAgentHarness
-    from graph_agent.core.types import Phase
-    from graph_agent_gateway.exceptions import GatewayResolverMissingError
-
-    class FakeResolver:
-        def resolve(self, *args: Any, **kwargs: Any) -> object:
-            return object()
-
-    phase = Phase(name="logic_only", requires_llm=False)
-    with pytest.raises(GatewayResolverMissingError):
-        GraphAgentHarness(phases=[phase])
-
-    harness = GraphAgentHarness(phases=[phase], model_resolver=FakeResolver())
-
-    assert harness._resolver is not None
+    for entrypoint in (run_skill, predict_skill):
+        signature = inspect.signature(entrypoint)
+        assert "model_resolver" in signature.parameters
+        assert signature.parameters["model_resolver"].kind is inspect.Parameter.KEYWORD_ONLY
+        assert signature.parameters["model_resolver"].default is None
 
 
 @pytest.mark.xfail(

@@ -33,8 +33,8 @@ N/A。
 - **purity**:`_raise_on_purity_violations`(`:763`)→ `scan_python_purity`(`:764`)有 violation → `[F-v3-logic-action-purity-violation]`(`:770`)+ `_purity_fatal`(`:362/:772`)。
 
 ### 4. purity 扫描器(purity.py)
-`scan_python_purity(path)`(`purity.py:44`)对一个 Python 源文件做 AST walk,收集 **local-write API** 违规(返回 `PurityViolation` `:11`)。`scan_tool_imports_context`(`:69`)扫工具导入上下文。
-> **现状局限(= mvp1 delta)**:当前只挡**本地写 API**(文件写等),**还没硬禁** `run_skill` / FS / `sys.path`——那是 `graph-exec` LE2 要扩的目标(扫描器归本域)。
+`scan_python_purity(path)`(`purity.py:134`)对一个 Python 源文件做 AST walk,收集 purity hard-ban 违规(返回 `PurityViolation` `:11`)。现状已覆盖 `run_skill` 编排调用、`open` / `io.open`、`pathlib.Path` 读/探测/枚举/变更、`os` / `os.path` 文件系统访问或变更、`shutil` 变更、`tempfile`、`glob`、`sys.path` mutation 调用与赋值/删除目标、`importlib` / `__import__` 动态导入。`scan_tool_imports_context`(`purity.py:165`)扫工具导入上下文。
+> **现状局限**:这是针对 loader 识别出的 skill-local action/tool 文件的静态 AST 启发式扫描,不执行代码、不做全仓扫描,也不替代 `module_sandbox`。LOGIC action 的纯签名、Context mutation 退场、非序列化返回等仍归 `graph-exec` / `skill-syntax` 后续目标。
 
 ### 5. module_sandbox(导入隔离)
 `module_sandbox.py`(208 行)把 skill 本地 Python 导入隔离,不污染全局 `sys.modules`(loader 加载 skill 代码时用)。
@@ -42,7 +42,7 @@ N/A。
 ## API
 - `compile_skill(skill_root, *, skill_resolver, cache=True) -> CompiledSkill`(`compiler.py:41`)——公开;签名权威归 `03-api-contract`,产出形状归 `data-contracts`。
 - `SkillLoader(...).compile_skill(root)`(`loader.py:146`)——内部校验主体。
-- `scan_python_purity(path) -> list[PurityViolation]`(`purity.py:44`)。
+- `scan_python_purity(path) -> list[PurityViolation]`(`purity.py:134`)。
 
 ## Data Model / State
 产出 `CompiledSkill`(可信 AST)+ `CompileResult` / `CompileIssue`(`compiler.py:23/15`);错误经 `make_error_payload([F-v3-*])`(`ErrorPayload` 归 `data-contracts`)。无运行时 state——编译期是纯函数(同源码同产物,缓存友好)。
@@ -50,20 +50,20 @@ N/A。
 ## 当前边界(这个模块现在不是什么)
 - **不执行 action、不调 Agent**:只读源码 + 校验(可调 resolver 做 skill root 可达性检查)。
 - **读不到 `.workspace`**:compile 只看 skill 源码树 → golden 失效**不在编译期**(mvp1 移 eval 期,见 `compile-rules` CR3 / `golden-eval`)。
-- **purity 还没硬禁 run_skill/FS**:当前只挡本地写 API(mvp1 LE2 要扩)。
+- **purity 是编译期源码门**:已挡 skill-local action/tool 源码里的 `run_skill`、直接 FS、`sys.path`、动态 import 高风险路径；运行期执行范式仍看 `graph-exec`。
 
 ## baseline / alignment 差异(测试锚点)
 | 维度 | 现状(baseline) | mvp1 目标 |
 |---|---|---|
-| purity 范围 | 只挡 local-write API(`purity.py:44`) | 扩硬禁 `run_skill`/FS/`sys.path`(LE2) |
+| purity 范围 | 已挡 local-write、`run_skill`、直接 FS、`sys.path`、动态 import 高风险路径(`purity.py:134`) | 剩余 LOGIC 纯签名/Context mutation/非序列化返回等由 run-outer 与 skill-syntax 后续收口 |
 | golden 失效 | 编译期无(读不到 workspace) | eval 期(`golden-eval`) |
 | iterate 码 | 无 | 新增 `[F-v3-iterate-*]` 进 ERROR_REGISTRY |
 | 死簇 | `graph_builder`/`phase_executor`/`phase_nodes`(~1900 行)仍在 | 删(live 走 `assemble_graph`) |
 
-> **验"是否按 mvp1 改了"**:① action 里写 `run_skill`/碰 FS 是否触发编译期 `[F-v3-logic-action-purity-violation]`;② golden-stale 是否不再在编译期报;③ 死簇是否删净。
+> **验"是否按 mvp1 改了"**:① action 里写 `run_skill`/碰 FS/改 `sys.path`/动态 import 是否触发编译期 `[F-v3-logic-action-purity-violation]`;② golden-stale 是否不再在编译期报;③ 死簇是否删净。
 
 ## 读代码主路径提示
-`compile_skill`(`compiler.py:41`)→ 缓存 miss → `SkillLoader.compile_skill`(`loader.py:146`)→ 校验流水线(拓扑 `:1138/1165`、IO `:528`、签名 `:808/836`、purity `:763`)。purity 细节看 `purity.py:44`。
+`compile_skill`(`compiler.py:41`)→ 缓存 miss → `SkillLoader.compile_skill`(`loader.py:146`)→ 校验流水线(拓扑 `:1138/1165`、IO `:528`、签名 `:808/836`、purity `:763`)。purity 细节看 `purity.py:134`。
 
 ## 交叉引用(链接, 不复制)
 mvp1-alignment(目标)· `01-contract/03-compile-rules`(规则+码+生命周期契约,双向)· `02-resolver`(子图解析)· `03-assemble`(下游)· `data-contracts`(CompiledSkill/ErrorPayload)

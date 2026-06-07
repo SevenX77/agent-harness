@@ -1,7 +1,7 @@
 ---
 module: 01-contract/04-data-contracts
 doc: baseline
-status: drafted（B 成段:对当前 packages/graph-agent 逐符号 grep 核 2026-06-05;形状散在 core/+runtime/;⚠️ BlackboardState 在 runtime/state.py、ErrorPayload 无 line 轴）
+status: drafted（B 成段:对当前 packages/graph-agent 逐符号 grep 核 2026-06-06;形状散在 core/+runtime/;WS-E3 P0-1 已落 ErrorPayload.details + RunResult.diagnostics;⚠️ BlackboardState 在 runtime/state.py、ErrorPayload 无 line 轴）
 binds_alignment: ./mvp1-alignment.md
 binds_code: packages/graph-agent/src/graph_agent/core/state.py:BusinessData · core/state.py:FrameworkState · core/state.py:WorkflowState · runtime/state.py:BlackboardState · core/result.py:RunResult · core/exceptions.py:ErrorPayload · core/error_registry.py:ERROR_REGISTRY · core/validator_contract.py:VALIDATOR_SIGNATURE · core/types.py:Phase
 ---
@@ -9,7 +9,7 @@ binds_code: packages/graph-agent/src/graph_agent/core/state.py:BusinessData · c
 # 04-data-contracts — Baseline(当下代码实现逻辑)
 
 > **Scope**: "我们设计的数据形状"在当前代码里的**现状落点**:state schema / result 类 / 异常树 + ErrorPayload / 错误码注册 / validator 契约 / Phase AST / 公开 `__all__` surface。langgraph 原语(StateGraph state、DeltaChannel reducer、checkpointer)是底座、引用不复述(归 `03-checkpoint`/`08-messages-state`)。
-> **现状一句话**:这些形状**物理散在 `core/`(+ `runtime/`)**、非独立 L0 叶——`BusinessData`/`FrameworkState`/`WorkflowState` 在 `core/state.py`,result 类在 `core/result.py`,异常树 + `ErrorPayload` 在 `core/exceptions.py`,错误码注册在 `core/error_registry.py`,而**公开的 `BlackboardState` + blackboard 数据模型在 `runtime/state.py`**(⚠️ 与迁移源"core/state.py 别名"说法漂移)。alignment 目标是抽成零内部依赖的 L0 叶 + 给 `ErrorPayload` 加 `line` 轴 + `data` 通道补 delta reducer。
+> **现状一句话**:这些形状**物理散在 `core/`(+ `runtime/`)**、非独立 L0 叶——`BusinessData`/`FrameworkState`/`WorkflowState` 在 `core/state.py`,result 类在 `core/result.py`,异常树 + `ErrorPayload` 在 `core/exceptions.py`,错误码注册在 `core/error_registry.py`,而**公开的 `BlackboardState` + blackboard 数据模型在 `runtime/state.py`**(⚠️ 与迁移源"core/state.py 别名"说法漂移)。WS-E3 P0-1 已把错误契约 V2 最小闭环落到 `ErrorPayload.details` 与 `RunResult.diagnostics`;alignment 里 L0 leaf 抽取、`line`/`source_span`/`phase_path`、`data` 通道 delta reducer 仍是目标。
 
 ## UI/UX
 N/A。
@@ -28,14 +28,18 @@ N/A —— 本模块是 engine 数据契约。
   > ⚠️ **drift vs 迁移源**:源 12-contracts 称 `BlackboardState` 是 `core/state.py` 的公开别名;实测它是 `runtime/state.py:88` 的独立 `TypedDict`,且源未记 `BlackboardData` 模型 + normalize/merge。blackboard 数据流机制归 `01-graph-exec`,本域只登记形状落点。
 
 ### 2. result 类(core/result.py)
-- `core/result.py:WorkflowMetrics`(:14)· `PathDiff`(:48)· `PhaseRecord`(:58)· `RunResult`(:68)· `WorkflowResult`(:92,继承 `RunResult`)。`RunResult` 是 run/predict 统一返回模型(字段对照见 `01-physical-layout` baseline §5;被 studio 消费,接口契约归 `03-api-contract`)。
+- `core/result.py:WorkflowMetrics`(:14)· `PathDiff`(:48)· `PhaseRecord`(:58)· `RunResult`(:68)· `WorkflowResult`(:151,继承 `RunResult`)。`RunResult` 是 run/predict 统一返回模型(字段对照见 `01-physical-layout` baseline §5;被 studio 消费,接口契约归 `03-api-contract`)。
+- `RunResult` 现有错误诊断快照字段:`error: ErrorPayload | None`(:79,主 fatal 兼容面)、`diagnostics: list[ErrorPayload]`(:86,最终快照)、`diagnostics_limit: int`(:87,默认 100)、`diagnostics_truncated: bool`(:88)、`diagnostic_counts: dict[str, Any]`(:89,形状为 `{total, by_level, by_code}`)。
+- `RunResult._process_diagnostics`(:91) 会先按 `path_diff` 把缺失/多余/顺序错结果派生为失败;再把 `error` 放到 diagnostics 首位、按完整 `ErrorPayload.model_dump(mode="json")` 签名去重、按 `diagnostics_limit` 截断可见快照，并按截断前去重集合统计 `diagnostic_counts`。成功结果默认 diagnostics 为空;若调用方显式传入 WARN/其他 diagnostics，现状会保留并计数。
+- `WorkflowResult` 继续只提供 dict-like `__getitem__`/`get` shim(:154-158)，新 diagnostics 字段通过继承自然可读。
 
 ### 3. 异常树 + ErrorPayload(core/exceptions.py)
 - 异常树(基类 `core/exceptions.py:GraphAgentError`:82):
   - `GraphCompileError`(:103)→ `LoaderError`(:126)→ `SkillParseError`(:135)
   - `GraphExecutionError`(:107)→ `GraphAgentFatalError`(:119)
   - `ModelProviderError`(:111)· `ResourceNotFoundError`(:115)
-- `core/exceptions.py:ErrorPayload`(:21,`BaseModel`):9 字段 `code` / `level` / `stage` / `message` / `doc_link` / `skill_id` / `phase_id` / `field_path` / `source_path`。**无 `line` 轴**(现状;alignment Task3 要加)。helper `make_error_payload`(被 `runtime/state.py` 等 import)。
+- `core/exceptions.py:ErrorPayload`(:48,`BaseModel`):10 字段 `code` / `level` / `stage` / `message` / `doc_link` / `skill_id` / `phase_id` / `field_path` / `source_path` / `details`。`details` 默认 `{}`(:62)，通过 `_normalize_details_validator`(:64) 与 `_normalize_details_val`(:21) 归一化为 JSON-safe 形状:`Path`→字符串、可排序 `set`→排序 list(不可直接排序时退为 list)、Pydantic `BaseModel`→dict、`Exception`→`"TypeName: message"`、其他非 JSON 值安全字符串化。**无 `line` 轴**(现状;alignment Task3/P1 要加)。helper `make_error_payload`(被 `runtime/state.py` 等 import)。
+- `GraphAgentError.__init__`(:127) 仍保留 `context` 属性;当异常有可用 payload 时，会把异常 `context` 的 JSON-safe 表达合入 `payload.details["context"]`(:139-149)。如果 payload 已有 dict 型 `details["context"]`，现状合并规则是异常 context 先作为底、显式 details context 后覆盖同名 key，因此显式 details 不丢且优先。
 
 ### 4. 错误码注册(core/error_registry.py)
 - `core/error_registry.py:ErrorCodeMetadata`(:8,`NamedTuple`,含 `level`)· `ERROR_REGISTRY`(:15,`dict[str, ErrorCodeMetadata]`;93 码全表见 `03-compile-rules §4`)。`ErrorPayload.code` 必须 ∈ `ERROR_REGISTRY`。
@@ -55,7 +59,7 @@ N/A —— 本模块是 engine 数据契约。
 - result 消费契约:`03-api-contract`(studio 读 `RunResult`)。
 
 ## Data Model / State
-- 我们的形状:`BusinessData`/`FrameworkState`/`WorkflowState`(core/state.py)+ `BlackboardState`/`BlackboardData`(runtime/state.py)+ result 类(core/result.py)+ `ErrorPayload`(core/exceptions.py)。
+- 我们的形状:`BusinessData`/`FrameworkState`/`WorkflowState`(core/state.py)+ `BlackboardState`/`BlackboardData`(runtime/state.py)+ result 类(core/result.py,含 diagnostics 快照)+ `ErrorPayload`(core/exceptions.py,含 details)。
 - langgraph 底座(机制,不复述):`StateGraph` state、`DeltaChannel` reducer、checkpointer —— 归 `03-checkpoint`/`08-messages-state`。
 
 ## 当前边界(这个模块现在不是什么)
@@ -67,12 +71,13 @@ N/A —— 本模块是 engine 数据契约。
 | 维度 | 现状(baseline) | mvp1 目标(alignment) |
 |---|---|---|
 | 物理布局 | 形状散在 `core/` + `runtime/state.py`,循环纠缠 | 抽成 L0 叶 `data-contracts`,**零内部依赖**(去环;kiro 重排) |
-| `ErrorPayload` 定位轴 | 9 字段,**无 `line`** | 加 `line` 轴(Task3)+ emit 处填全 phase/field/source/level |
+| `ErrorPayload` 定位轴/诊断负载 | 10 字段,含 `details` JSON-safe 结构化负载;**无 `line`/`source_span`/`phase_path`** | P1 加 `line`/`source_span`/`phase_path` 等定位轴并补 emit 填全 |
+| `RunResult.diagnostics` | 已有有界最终快照:`diagnostics`/`diagnostics_limit`/`diagnostics_truncated`/`diagnostic_counts`;`error` 仍是主 fatal | 后续与 WS-E4 `DiagnosticEmittedEvent` 用诊断身份关联;P0-2/P0-3 再补 registry/doc/remediation/细分码 |
 | `data` 通道 reducer | `WorkflowState.data` **无 delta reducer**(仅 messages 有 DeltaChannel) | `data` 通道补 delta reducer(归 `03-checkpoint`) |
 | 错误码 domain | 缺 `golden`/`iterate` domain | 加 `golden`/`iterate` 码(Task1) |
 | `BlackboardState` 落点 | `runtime/state.py:88`(独立 TypedDict) | 形状沿用;物理随 L0 抽出收口 |
 
-> **验"是否按 mvp1 改了"**:① `data-contracts` 成独立 leaf、import 图零内部模块(acyclicity guard);② `ErrorPayload` 有 `line` 字段且 emit 填全;③ `WorkflowState.data` 有 delta reducer;④ `ERROR_REGISTRY` 含 golden/iterate 码。
+> **验"是否按 mvp1 改了"**:① `data-contracts` 成独立 leaf、import 图零内部模块(acyclicity guard);② `ErrorPayload` 有 `line`/`source_span`/`phase_path` 且 emit 填全;③ `WorkflowState.data` 有 delta reducer;④ `ERROR_REGISTRY` 含 golden/iterate 码。WS-E3 P0-1 已完成的 `details` + `diagnostics` 不再列为 gap。
 
 ## 读代码主路径提示
 state: `core/state.py`(BusinessData/FrameworkState/WorkflowState/StateManager)+ `runtime/state.py`(BlackboardState/BlackboardData)。result: `core/result.py`。错误: `core/exceptions.py`(ErrorPayload + 树)→ `core/error_registry.py`(ERROR_REGISTRY)。validator: `core/validator_contract.py`。Phase AST: `core/types.py`。surface: `__init__.py:__all__`。

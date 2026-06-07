@@ -48,14 +48,14 @@ N/A —— skill 源码语法被 Studio 编辑器/copilot 消费；本 baseline 
 - action 签名现状:`packages/graph-agent/src/graph_agent/core/loader.py:_validate_action_signature` 要求第一个参数名是 `context` 或 `ctx`,且注解兼容 `graph_agent.cognitive.context_facade.Context`。
 - LOGIC 运行装配:`packages/graph-agent/src/graph_agent/core/graph_assembler.py:_build_logic_node` 当前创建 `Context(data, phase_id=..., run_id=...)`,然后执行 `action(ctx)`；返回必须是 dict,返回 key 和 Context mutation delta 都通过 `_validate_logic_update_keys` 限制在 `io.outputs`。
 - 运行外层 StateMapper:`packages/graph-agent/src/graph_agent/core/graph_assembler.py:_wrap_phase_runtime_node` 用 `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:StateMapper` 包裹 LOGIC 节点,按 `io.inputs` 过滤输入、按 `io.outputs` 限制写回。
-- purity 扫描:`packages/graph-agent/src/graph_agent/core/purity.py:scan_python_purity` 当前拦截本地写类 API,包括写模式 `open()`、Path mutation、`os`/`shutil` 文件系统变更、`tempfile`。
+- purity 扫描:`packages/graph-agent/src/graph_agent/core/purity.py:scan_python_purity` 当前拦截 LOGIC action/tool 源码里的 LE2 hard-ban,包括 `run_skill` 编排、`open`/`io.open`、`pathlib.Path` 读/探测/枚举/stat/mutation、`os`/`os.path` FS 访问或变更、`shutil` 变更、`tempfile`、`glob`、`sys.path` mutation/赋值/删除、`importlib`/`__import__` 动态导入。
 
 **LOGIC drift / refactor-target**:
 - mvp1 目标是 `def <action_name>(inputs) -> dict`、只读 inputs、纯返回；当前 `packages/graph-agent/src/graph_agent/core/loader.py:_validate_action_signature` 与 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:_build_logic_node` 仍要求/传入可变 `Context`。
 - 当前 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:_build_logic_node` 允许 action 通过 Context mutation 产生 delta；目标要求 action 不写黑板,只返回 dict。
 - 当前 `packages/graph-agent/src/graph_agent/core/loader.py:_load_action_dir` 发现本地 `actions/*.py` 中的任意本模块函数,未强制函数名必须等于文件名。
 - 当前未见 Engine/Studio 通用 action registry 装配入口；`packages/graph-agent/src/graph_agent/core/actions.py:ActionRegistry` 只承载 loader 发现的 phase-local actions。
-- 当前 `packages/graph-agent/src/graph_agent/core/purity.py:scan_python_purity` 未覆盖 mvp1 目标硬禁的 `run_skill`、`sys.path` hack、import 越界、非序列化对象返回。
+- 当前 `packages/graph-agent/src/graph_agent/core/purity.py:scan_python_purity` 已覆盖 `run_skill`、直接 FS、`sys.path` hack、动态 import 高风险路径；仍未覆盖非序列化对象返回,该项属于 LOGIC 运行/数据契约后续收口。
 - validator 现状只在 AST 中有 `validator: StrictBool`;`packages/graph-agent/src/graph_agent/core/validator_contract.py:VALIDATOR_SIGNATURE` 只是占位契约,注释明确运行期 validator loading 在后续 PR；当前未见 LOGIC `validator.py` 缺失/entrypoint 的编译期加载校验,也未见 `_build_logic_node` 后置调用 validator。
 
 ### 4. SUBGRAPH.md 现状
@@ -163,7 +163,7 @@ skill 源码(语法)→ `CompiledSkill` → LangGraph node:
 | GRAPH 静态数据流 | 未见 required 来源完整校验 | required 必须来自根输入或上游输出 |
 | LOGIC action 签名 | `_validate_action_signature` 要求 `context/ctx` + `Context` | `def <action_name>(inputs) -> dict` |
 | LOGIC action 写状态 | `_build_logic_node` 允许 Context mutation delta | 只读 inputs,纯返回 dict,不写黑板 |
-| LOGIC purity | 只挡部分本地写/FS 变更 | 硬禁 `run_skill`/FS/sys.path/import 越界/非序列化返回 |
+| LOGIC purity | 已挡 `run_skill`、直接 FS、`sys.path`、动态 import 高风险路径；仍未挡非序列化返回 | 继续收口非序列化返回与纯 action 数据契约 |
 | LOGIC validator | bool + `VALIDATOR_SIGNATURE` 占位,未见加载/调用 | `validator: true` 必须加载同级 `validator.py` 并后置阻断 |
 | SUBGRAPH 寻址字段 | `target_skill` 逻辑 id | `path` 绝对路径 |
 | SUBGRAPH resolver | `resolve_skill_root(... target_skill)` | 直接按绝对 path 解析,无 registry |
@@ -185,7 +185,7 @@ skill 源码(语法)→ `CompiledSkill` → LangGraph node:
 | mention 缺失聚合 | 第一处不可达即 fatal | 聚合全部不可达 ref 一次报错 |
 | mention unused registry | 未见 unused registry WARN | 未使用注册项 WARN |
 
-> **验"是否按 mvp1 改了"**:① GRAPH name/phase/io/output/dataflow 按目标收紧或推导；② LOGIC action 不再接受 `Context`,改为 action 同名函数 `inputs -> dict`,mutation/run_skill/FS/sys.path/import 越界被挡；③ LOGIC/SUBGRAPH/AGENT validator 生命周期真正加载同级 `validator.py`;④ SUBGRAPH / agent `subgraphs[]` 解析 `path` 绝对路径,旧 `target_skill` 报未知字段；⑤ 移除/反转 `_validate_subgraph_io_contracts` 的父子 1:1 schema 相等门；⑥ Agent `io` 必填、body 重复/id 唯一/mention 严格校验按目标生效；⑦ cognitive slot 文本、默认值和 output_schema 来源与目标一致。
+> **验"是否按 mvp1 改了"**:① GRAPH name/phase/io/output/dataflow 按目标收紧或推导；② LOGIC action 不再接受 `Context`,改为 action 同名函数 `inputs -> dict`,mutation/非序列化返回被挡,且 `run_skill`/FS/sys.path/import 越界保持编译期 purity FATAL；③ LOGIC/SUBGRAPH/AGENT validator 生命周期真正加载同级 `validator.py`;④ SUBGRAPH / agent `subgraphs[]` 解析 `path` 绝对路径,旧 `target_skill` 报未知字段；⑤ 移除/反转 `_validate_subgraph_io_contracts` 的父子 1:1 schema 相等门；⑥ Agent `io` 必填、body 重复/id 唯一/mention 严格校验按目标生效；⑦ cognitive slot 文本、默认值和 output_schema 来源与目标一致。
 
 ## 读代码主路径提示
 GRAPH: `loader.py:SkillLoader.compile_skill` → `parser.py:parse_markdown_parts` → `loader.py:_build_graph_manifest` → `loader.py:_extract_body_phase_refs` → `loader.py:_validate_graph_topology` → `loader.py:_discover_phase_files`。

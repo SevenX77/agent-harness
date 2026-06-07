@@ -68,13 +68,13 @@ blackboard = `WorkflowState.data`(`data-contracts`);io 经 StateMapper slice/mer
 - **`ensure_no_input_write` 空壳**:`state_mapper.py:187` 函数体只有 `pass`,却列进 `__all__`(`:264`)对外导出——本应阻止往只读输入写值,现状什么都不做。🚨 要么实现、要么删。
 - **类型逃逸(minor)**:`wrap_phase_output` 用 `cast(WorkflowState, updates)`(`:115`)、`PhaseWrapper.wrap` 用 `cast(Any, _wrapped)`(`:228`)绕过静态类型(`mypy` 过,但靠 cast 兜)。
 - **`graph_assembler.py` 体积**:1403 行,且包内 ruff 对它豁免 C901(圈复杂度检查),极简度偏弱(装配细节归 `03-assemble`)。
-- (可变 Context、action 跑 `run_skill`/碰 FS、黑板塞非序列化对象、死簇 —— 已在下方差异表 + alignment §8 登记为 refactor-target。)
+- (可变 Context、黑板塞非序列化对象、死簇仍是 refactor-target；skill-local action 源码里的 `run_skill`/直接 FS/`sys.path`/动态 import 已由 `01-compile` purity 门编译期拦截。)
 
 ## baseline / alignment 差异(测试锚点)
 | 维度 | 现状(baseline) | mvp1 目标(LE1-3) |
 |---|---|---|
 | action 写黑板 | 可变 `Context.update`(`:336`) | 纯返回 dict、只读 inputs(砍 set/update/delete) |
-| action 编排 | 现有 action 跑 `run_skill`/碰 FS | 硬禁(扩 purity 扫描器,归 `01-compile`) |
+| action 编排/副作用 | skill-local action 源码里的 `run_skill`/直接 FS/`sys.path`/动态 import 已编译期 purity FATAL；运行时仍是可变 Context 范式 | 保持 compile-time hard-ban,并继续收口 LOGIC 纯返回/只读 inputs |
 | 黑板对象 | 塞 `BatchAccumulator` 等非序列化对象 | `iterate.accumulate` + 序列化数据 |
 | 死簇 | `code_phase_node`/`phase_executor` | 删(live 用 `_build_logic_node`) |
 | StateMapper required 校验 | slice **不校验** required(只过滤 properties、缺失静默丢)(`filter_runtime_inputs:25`) | required 缺失报 `[F-v3-runtime-state-mapping-failed]`(alignment §3/§6) |
@@ -82,7 +82,7 @@ blackboard = `WorkflowState.data`(`data-contracts`);io 经 StateMapper slice/mer
 | 文件导入→黑板 | 无机制 | 跑到节点才 lazy 注入(E2) |
 | io.outputs md artifact | str 原样写(`io/storage.py:167`);finish_task 工具走 markdown→parsed `data`,**未接 business_data_md**(中间件侧) | md 取 `business_data_md`、不 json→md 回转(E3) |
 
-> **验"是否按 mvp1 改了"**:① action 是否变成 `def <name>(inputs)->dict` 纯返回(无 Context mutation);② action 里 `run_skill`/FS 是否触发编译期 purity FATAL;③ 黑板是否只剩可序列化数据;④ StateMapper required 缺失/越界 key 是否报 `[F-v3-runtime-state-mapping-failed]`。
+> **验"是否按 mvp1 改了"**:① action 是否变成 `def <name>(inputs)->dict` 纯返回(无 Context mutation);② action 里 `run_skill`/FS/`sys.path`/动态 import 是否触发编译期 purity FATAL;③ 黑板是否只剩可序列化数据;④ StateMapper required 缺失/越界 key 是否报 `[F-v3-runtime-state-mapping-failed]`。
 
 ## 读代码主路径提示
 StateMapper `state_mapper.py:37` → LOGIC `_build_logic_node`(`graph_assembler.py:325`,Context facade `:336`)→ action/tool 注册表 `actions.py:18/49` → SUBGRAPH `:363`。

@@ -13,13 +13,3 @@ ruamel.yaml>=0.18,<0.19
 httpx>=0.25
 openai>=1.0
 python-dotenv>=1.0
-
-# Optional provider adapters
-# langchain-anthropic>=0.3
-# langchain-google-genai>=2.0
-
-# Optional: Google Gemini multimodal (image generation, video understanding)
-# google-genai>=1.0
-
-# Optional: Edge TTS fallback for speech synthesis
-# edge-tts>=6.0

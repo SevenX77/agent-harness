@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Sequence
 from typing import Any, cast
 
 from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models.base import LanguageModelInput
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, BaseMessage
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
 from graph_agent_gateway.models import GenericRouteChatModel
-from graph_agent_gateway.provider_profiles import apply_provider_profile
+from graph_agent_gateway.provider_profiles import (
+    apply_provider_profile_layers,
+    route_provider_profile_keys,
+)
 from graph_agent_gateway.registry.base_url import canonicalize_base_url
 from graph_agent_gateway.registry.schema import ResolvedRoute
 
@@ -34,10 +40,10 @@ class RouteChatModelFactory:
                 "api_key": api_key,
                 "base_url": base_url,
                 "timeout": route.timeout_seconds,
-                "stream_usage": True,
                 **_openai_runtime_kwargs(common),
             }
-            return ChatOpenAI(**_apply_profiles(route, kwargs))
+            chat_openai_cls = PatchedChatDeepSeek if _is_deepseek_route(route) else ChatOpenAI
+            return chat_openai_cls(**_apply_profiles(route, kwargs))
 
         if protocol == "anthropic_compatible":
             kwargs = {
@@ -60,7 +66,26 @@ class RouteChatModelFactory:
             }
             return cast(BaseChatModel, chat_google(**_apply_profiles(route, kwargs)))
 
-        return GenericRouteChatModel(route=route, credential_provider=self.credential_provider)
+        generic_kwargs = {
+            "max_tokens": common.get("max_tokens"),
+            "temperature": common.get("temperature"),
+            "top_p": common.get("top_p"),
+            "stop_sequences": common.get("stop_sequences"),
+            "seed": common.get("seed"),
+            "reasoning_effort": common.get("reasoning_effort"),
+            "runtime_policy": caller_kwargs.get("runtime_policy"),
+            "reasoning": caller_kwargs.get("reasoning"),
+            "thinking_budget_tokens": caller_kwargs.get("thinking_budget_tokens"),
+            "parallel_tool_calls": caller_kwargs.get("parallel_tool_calls"),
+            "structured_output": caller_kwargs.get("structured_output"),
+            "call_method_id": caller_kwargs.get("call_method_id"),
+            "request_mapper_id": caller_kwargs.get("request_mapper_id"),
+        }
+        return GenericRouteChatModel(
+            route=route,
+            credential_provider=self.credential_provider,
+            **{key: value for key, value in generic_kwargs.items() if value is not None},
+        )
 
 
 def _runtime_kwargs(route: ResolvedRoute, caller_kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -136,11 +161,70 @@ def _google_runtime_kwargs(common: dict[str, Any]) -> dict[str, Any]:
 
 
 def _apply_profiles(route: ResolvedRoute, kwargs: dict[str, Any]) -> dict[str, Any]:
-    return apply_provider_profile(
-        f"{route.endpoint_id}:{route.provider_model_id}",
+    return apply_provider_profile_layers(
+        route_provider_profile_keys(route),
         route=route,
         **{key: value for key, value in kwargs.items() if value is not None},
     )
+
+
+class PatchedChatDeepSeek(ChatOpenAI):
+    """OpenAI-compatible DeepSeek ChatX with assistant reasoning replay."""
+
+    def _get_request_payload(
+        self,
+        input_: LanguageModelInput,
+        *,
+        stop: list[str] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        messages = self._convert_input(input_).to_messages()
+        payload = cast(
+            dict[str, Any],
+            super()._get_request_payload(input_, stop=stop, **kwargs),
+        )
+        _replay_assistant_reasoning_content(payload, messages)
+        return payload
+
+
+def _replay_assistant_reasoning_content(
+    payload: dict[str, Any],
+    messages: Sequence[BaseMessage],
+) -> None:
+    payload_messages = payload.get("messages")
+    if not isinstance(payload_messages, list):
+        return
+
+    assistant_reasoning = [
+        message.additional_kwargs.get("reasoning_content")
+        for message in messages
+        if isinstance(message, AIMessage)
+    ]
+    if not assistant_reasoning:
+        return
+
+    assistant_index = 0
+    for payload_message in payload_messages:
+        if not isinstance(payload_message, dict) or payload_message.get("role") != "assistant":
+            continue
+        if assistant_index >= len(assistant_reasoning):
+            break
+        reasoning = assistant_reasoning[assistant_index]
+        assistant_index += 1
+        if reasoning and "reasoning_content" not in payload_message:
+            payload_message["reasoning_content"] = reasoning
+
+
+def _is_deepseek_route(route: ResolvedRoute) -> bool:
+    identity = " ".join(
+        (
+            route.route_id,
+            route.endpoint_id,
+            route.provider_model_id,
+            route.canonical_id,
+        )
+    ).lower()
+    return "deepseek" in identity
 
 
 def _resolve_api_key(route: ResolvedRoute, credential_provider: Any) -> str:

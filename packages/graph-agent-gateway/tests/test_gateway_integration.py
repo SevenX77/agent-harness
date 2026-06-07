@@ -64,17 +64,12 @@ class AlwaysFailingClientManager:
     def probe_provider(self, route: Any, runtime_policy: Any) -> bool:
         return True
 
-    def dispatch_provider_call(self, route: Any, messages: list[Any], **kwargs: Any) -> Any:
-        raise RuntimeError(f"{route.route_id} failed")
-
     def mark_provider_down(self, route: Any, exc: BaseException, runtime_policy: Any) -> None:
         return None
 
 
 class ProbeFallbackClientManager:
     def __init__(self) -> None:
-        self.dispatches: list[str] = []
-        self.dispatch_kwargs: list[dict[str, Any]] = []
         self.marked_down: list[str] = []
 
     def is_provider_marked_down(self, route: Any, runtime_policy: Any) -> bool:
@@ -83,22 +78,12 @@ class ProbeFallbackClientManager:
     def probe_provider(self, route: Any, runtime_policy: Any) -> bool:
         return route.route_id != "dead:claude"
 
-    def dispatch_provider_call(self, route: Any, messages: list[Any], **kwargs: Any) -> Any:
-        self.dispatches.append(route.route_id)
-        self.dispatch_kwargs.append(dict(kwargs))
-        return {
-            "content": "ok from fallback",
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-            "finish_reason": "stop",
-        }
-
     def mark_provider_down(self, route: Any, exc: BaseException, runtime_policy: Any) -> None:
         self.marked_down.append(route.route_id)
 
 
 class ProbeRouteFallbackClientManager:
     def __init__(self) -> None:
-        self.dispatches: list[str] = []
         self.marked_down: list[str] = []
 
     def is_provider_marked_down(self, route: Any, runtime_policy: Any) -> bool:
@@ -112,35 +97,19 @@ class ProbeRouteFallbackClientManager:
             raise ProviderStatusError("model not found")
         return True
 
-    def dispatch_provider_call(self, route: Any, messages: list[Any], **kwargs: Any) -> Any:
-        self.dispatches.append(route.route_id)
-        return {
-            "content": "ok after missing model fallback",
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-            "finish_reason": "stop",
-        }
-
     def mark_provider_down(self, route: Any, exc: BaseException, runtime_policy: Any) -> None:
         self.marked_down.append(route.route_id)
 
 
 class RecordingSuccessClientManager:
     def __init__(self) -> None:
-        self.dispatch_kwargs: list[dict[str, Any]] = []
+        pass
 
     def is_provider_marked_down(self, route: Any, runtime_policy: Any) -> bool:
         return False
 
     def probe_provider(self, route: Any, runtime_policy: Any) -> bool:
         return True
-
-    def dispatch_provider_call(self, route: Any, messages: list[Any], **kwargs: Any) -> Any:
-        self.dispatch_kwargs.append(dict(kwargs))
-        return {
-            "content": "ok",
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-            "finish_reason": "stop",
-        }
 
     def mark_provider_down(self, route: Any, exc: BaseException, runtime_policy: Any) -> None:
         return None

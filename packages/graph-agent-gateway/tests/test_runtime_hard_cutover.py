@@ -84,7 +84,6 @@ def _snapshot():
 class RecordingClientManager:
     def __init__(self) -> None:
         self.probes: list[tuple[str, int]] = []
-        self.dispatches: list[dict[str, Any]] = []
         self.marked_down: list[tuple[str, str]] = []
 
     def is_provider_marked_down(self, route: Any, runtime_policy: Any) -> bool:
@@ -94,24 +93,49 @@ class RecordingClientManager:
         self.probes.append((route.route_id, runtime_policy.probe_timeout_seconds))
         return True
 
-    def dispatch_provider_call(
-        self,
-        route: Any,
-        messages: list[dict[str, Any]],
-        **kwargs: Any,
-    ) -> dict[str, Any]:
-        self.dispatches.append({"route": route, "messages": messages, "kwargs": kwargs})
-        return {
-            "content": "ok",
-            "usage": {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3},
-            "finish_reason": "stop",
-        }
-
     def mark_provider_down(self, route: Any, exc: BaseException, runtime_policy: Any) -> None:
         self.marked_down.append((route.route_id, str(exc)))
 
     def usage_total_calls(self, route: Any) -> int:
-        return len(self.dispatches)
+        return 0
+
+
+class FakeRouteChatModel:
+    def __init__(self, factory: FakeRouteChatModelFactory, route: Any) -> None:
+        self.factory = factory
+        self.route = route
+
+    def invoke(self, messages: list[BaseMessage]) -> AIMessage:
+        self.factory.invocations.append({"route": self.route, "messages": messages})
+        return AIMessage(
+            content="ok",
+            usage_metadata={"input_tokens": 2, "output_tokens": 1, "total_tokens": 3},
+            response_metadata={"finish_reason": "stop"},
+        )
+
+
+class FakeRouteChatModelFactory:
+    def __init__(self, **kwargs: Any) -> None:
+        self.init_kwargs = dict(kwargs)
+        self.builds: list[dict[str, Any]] = []
+        self.invocations: list[dict[str, Any]] = []
+
+    def build(self, route: Any, **kwargs: Any) -> FakeRouteChatModel:
+        self.builds.append({"route": route, "kwargs": dict(kwargs)})
+        return FakeRouteChatModel(self, route)
+
+
+def _install_route_factory(monkeypatch: pytest.MonkeyPatch) -> FakeRouteChatModelFactory:
+    from graph_agent_gateway import gateway_chat_model
+
+    factory = FakeRouteChatModelFactory()
+
+    def make_factory(**kwargs: Any) -> FakeRouteChatModelFactory:
+        factory.init_kwargs.update(kwargs)
+        return factory
+
+    monkeypatch.setattr(gateway_chat_model, "RouteChatModelFactory", make_factory)
+    return factory
 
 
 class FakeRouteChatModel:
@@ -276,6 +300,108 @@ def test_model_override_is_exact_route_id() -> None:
 
     with pytest.raises(Exception, match="route"):
         resolver.resolve("graph_agent", model_override="gpt-5")
+
+
+def test_model_resolver_resolve_routes_returns_resolved_role_without_provider_call() -> None:
+    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+    from graph_agent_gateway.registry.schema import ResolvedRole
+    from graph_agent_gateway.resolver import ModelResolver
+
+    client_manager = RecordingClientManager()
+    resolver = ModelResolver(
+        registry_snapshot=_snapshot(),
+        client_manager=client_manager,
+    )
+
+    resolved = resolver.resolve_routes("graph_agent")
+
+    assert isinstance(resolved, ResolvedRole)
+    assert not isinstance(resolved, GatewayChatModel)
+    assert [route.route_id for route in resolved.routes] == [
+        "openai-direct:gpt-5",
+        "openrouter-prod:openai.gpt-5",
+    ]
+    assert client_manager.probes == []
+    assert client_manager.marked_down == []
+
+
+def test_resolve_and_resolve_routes_share_the_same_route_resolution() -> None:
+    from graph_agent_gateway.resolver import ModelResolver
+
+    resolver = ModelResolver(registry_snapshot=_snapshot())
+
+    model = resolver.resolve("graph_agent")
+    resolved = resolver.resolve_routes("graph_agent")
+
+    assert [route.model_dump(mode="json") for route in resolved.routes] == [
+        route.model_dump(mode="json") for route in model.resolved_role.routes
+    ]
+
+
+def test_resolve_routes_exposes_registry_errors_without_gateway_mapping() -> None:
+    from graph_agent_gateway.registry.resolver import RegistryResolutionError
+    from graph_agent_gateway.resolver import ModelResolver
+
+    resolver = ModelResolver(registry_snapshot=_snapshot())
+
+    with pytest.raises(RegistryResolutionError):
+        resolver.resolve_routes("not_exist")
+
+
+def test_model_resolver_maps_filtered_empty_chain_to_gateway_role_not_configured() -> None:
+    from graph_agent_gateway.exceptions import GatewayRoleNotConfiguredError
+    from graph_agent_gateway.registry.schema import RoleEntry
+    from graph_agent_gateway.resolver import ModelResolver
+
+    snapshot = _snapshot()
+    snapshot.roles["empty"] = RoleEntry(fallback_chain=[])
+    resolver = ModelResolver(registry_snapshot=snapshot)
+
+    with pytest.raises(GatewayRoleNotConfiguredError) as exc_info:
+        resolver.resolve("empty", phase_name="draft")
+
+    assert exc_info.value.context["role_name"] == "empty"
+
+
+def test_model_resolver_predict_context_returns_predict_gateway_chat_model() -> None:
+    from graph_agent_gateway.predict_interception import PredictGatewayChatModel
+    from graph_agent_gateway.resolver import ModelResolver
+
+    class DummyPredictContext:
+        def resolve_generation(
+            self,
+            phase_name: str,
+            role_name: str,
+            messages: list[Any],
+        ) -> tuple[dict[str, Any], str]:
+            del phase_name, role_name, messages
+            return {"answer": "ok"}, "unit-test"
+
+    model = ModelResolver(registry_snapshot=_snapshot()).resolve(
+        "graph_agent",
+        phase_name="draft",
+        predict_context=DummyPredictContext(),
+    )
+
+    assert isinstance(model, PredictGatewayChatModel)
+    assert [route.route_id for route in model.resolved_role.routes] == [
+        "openai-direct:gpt-5",
+        "openrouter-prod:openai.gpt-5",
+    ]
+
+
+def test_mark_provider_down_uses_resolved_executable_route() -> None:
+    from graph_agent_gateway.resolver import ModelResolver
+
+    client_manager = RecordingClientManager()
+    resolver = ModelResolver(
+        registry_snapshot=_snapshot(),
+        client_manager=client_manager,
+    )
+
+    resolver.mark_provider_down("openai-direct:gpt-5")
+
+    assert client_manager.marked_down == [("openai-direct:gpt-5", "manual mark down")]
 
 
 def test_runtime_uses_route_secret_and_no_provider_env(

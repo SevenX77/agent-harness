@@ -40,6 +40,7 @@ def test_model_resolver_protocol_signature_is_complete() -> None:
         "model_override",
         "callbacks",
         "phase_name",
+        "predict_context",
         "kwargs",
     ]
     assert params["role_name"].default is None
@@ -51,7 +52,27 @@ def test_model_resolver_protocol_signature_is_complete() -> None:
     assert params["callbacks"].default == ()
     assert params["phase_name"].kind is inspect.Parameter.KEYWORD_ONLY
     assert params["phase_name"].default is None
+    assert params["predict_context"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert params["predict_context"].default is None
     assert params["kwargs"].kind is inspect.Parameter.VAR_KEYWORD
+
+
+def test_model_resolver_protocol_resolve_routes_signature_is_complete() -> None:
+    from graph_agent_gateway.protocol import ModelResolverProtocol
+
+    signature = inspect.signature(ModelResolverProtocol.resolve_routes)
+    params = signature.parameters
+
+    assert list(params) == [
+        "self",
+        "role_name",
+        "route_override",
+    ]
+    assert params["role_name"].annotation == "str"
+    assert params["route_override"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert params["route_override"].default is None
+    assert params["route_override"].annotation == "str | None"
+    assert signature.return_annotation == "ResolvedRole"
 
 
 def test_protocol_is_runtime_checkable_for_di_validation() -> None:
@@ -66,6 +87,7 @@ def test_protocol_is_runtime_checkable_for_di_validation() -> None:
             model_override: str | None = None,
             callbacks: tuple[Any, ...] = (),
             phase_name: str | None = None,
+            predict_context: Any | None = None,
             **kwargs: Any,
         ) -> object:
             return {
@@ -74,10 +96,50 @@ def test_protocol_is_runtime_checkable_for_di_validation() -> None:
                 "model_override": model_override,
                 "callbacks": callbacks,
                 "phase_name": phase_name,
+                "predict_context": predict_context,
                 "kwargs": kwargs,
             }
 
+        def resolve_routes(
+            self,
+            role_name: str,
+            *,
+            route_override: str | None = None,
+        ) -> object:
+            return {
+                "role_name": role_name,
+                "route_override": route_override,
+            }
+
     assert isinstance(FakeResolver(), ModelResolverProtocol)
+
+
+def test_protocol_rejects_chat_only_resolver_without_route_api() -> None:
+    from graph_agent_gateway.protocol import ModelResolverProtocol
+
+    class ChatOnlyResolver:
+        def resolve(
+            self,
+            role_name: str | None = None,
+            *,
+            thinking_enabled: bool | None = None,
+            model_override: str | None = None,
+            callbacks: tuple[Any, ...] = (),
+            phase_name: str | None = None,
+            predict_context: Any | None = None,
+            **kwargs: Any,
+        ) -> object:
+            return {
+                "role_name": role_name,
+                "thinking_enabled": thinking_enabled,
+                "model_override": model_override,
+                "callbacks": callbacks,
+                "phase_name": phase_name,
+                "predict_context": predict_context,
+                "kwargs": kwargs,
+            }
+
+    assert not isinstance(ChatOnlyResolver(), ModelResolverProtocol)
 
 
 def test_run_skill_accepts_model_resolver_keyword() -> None:
@@ -90,32 +152,6 @@ def test_run_skill_accepts_model_resolver_keyword() -> None:
     assert signature.parameters["model_resolver"].default is None
 
 
-def test_graph_agent_harness_requires_explicit_model_resolver_dependency() -> None:
-    from graph_agent.core.harness import GraphAgentHarness
-
-    signature = inspect.signature(GraphAgentHarness)
-
-    assert "model_resolver" in signature.parameters
-    assert signature.parameters["model_resolver"].kind is inspect.Parameter.KEYWORD_ONLY
-
-
-@pytest.mark.skip(reason="GraphAgentHarness is fully deprecated and raises NotImplementedError")
-def test_harness_requires_model_resolver_without_legacy_singleton() -> None:
-    from graph_agent.core.harness import GraphAgentHarness
-    from graph_agent.core.types import Phase
-    from graph_agent_gateway.exceptions import GatewayResolverMissingError
-
-    class FakeResolver:
-        def resolve(self, *args: Any, **kwargs: Any) -> object:
-            return object()
-
-    phase = Phase(name="logic_only", requires_llm=False)
-    with pytest.raises(GatewayResolverMissingError):
-        GraphAgentHarness(phases=[phase])
-
-    harness = GraphAgentHarness(phases=[phase], model_resolver=FakeResolver())
-
-    assert harness._resolver is not None
 
 
 @pytest.mark.xfail(
@@ -172,6 +208,7 @@ def test_agent_phase_react_loop_uses_injected_model_resolver(tmp_path: Path) -> 
             model_override: str | None = None,
             callbacks: tuple[Any, ...] = (),
             phase_name: str | None = None,
+            predict_context: Any | None = None,
             **kwargs: Any,
         ) -> BaseChatModel:
             self.calls.append(
@@ -181,6 +218,7 @@ def test_agent_phase_react_loop_uses_injected_model_resolver(tmp_path: Path) -> 
                     "model_override": model_override,
                     "callbacks": callbacks,
                     "phase_name": phase_name,
+                    "predict_context": predict_context,
                     "kwargs": kwargs,
                 }
             )

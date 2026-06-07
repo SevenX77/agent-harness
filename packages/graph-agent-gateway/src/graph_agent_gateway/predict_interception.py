@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
@@ -9,11 +10,8 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 from graph_agent_gateway.gateway_chat_model import GatewayChatModel
-from graph_agent_gateway.registry.schema import ResolvedRole
-
-
-import json
 from graph_agent_gateway.protocol import PredictContext
+from graph_agent_gateway.registry.schema import ResolvedRole
 
 
 class PredictGatewayChatModel(GatewayChatModel):

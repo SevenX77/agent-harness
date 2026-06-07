@@ -2,7 +2,7 @@
 milestone: MVP1
 decision_record: 已分散留底进各模块文档(每模块 §4 用户原话 / §5 决策+动机);client 层 A' 重设计决策不再单独引用外部文件
 coverage: 后端文件映射(Explore 清点);12 个 gateway ③b 模块 baseline/mvp1-alignment 已起草(原 copilot、HTTP 适配壳 2 模块 2026-06-03 判 ③a，移交 studio)
-status: drafted（12 个 gateway 模块文档已补齐,待实现阶段按待办推进）
+status: implemented（Gateway MVP1 优化已落地;剩余跨应用下沉项按 deferred 另行排期）
 design_units_index: ./DESIGN_UNITS_INDEX.md
 workflow_axis: N/A（gateway MVP1 是库/公共能力模块,无独立用户旅程 workflow 文档;覆盖以决策来源清单 + DESIGN_UNITS_INDEX + 各 alignment PM 原话核验）
 module: graph-agent-gateway-mvp1

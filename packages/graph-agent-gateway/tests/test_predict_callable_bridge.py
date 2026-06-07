@@ -1,15 +1,19 @@
 from __future__ import annotations
 
-import pytest
 from typing import Any
-from langchain_core.messages import AIMessage, HumanMessage
 
+import pytest
+from graph_agent_gateway.registry.schema import (
+    ProviderEndpoint,
+    ProviderRoute,
+    RegistrySnapshot,
+    RoleEntry,
+    RoleRouteEntry,
+)
 from graph_agent_gateway.resolver import ModelResolver
-from graph_agent_gateway.registry.schema import RegistrySnapshot, RoleEntry, RoleRouteEntry
-
-
+from langchain_core.messages import HumanMessage
 from pydantic import SecretStr
-from graph_agent_gateway.registry.schema import ProviderEndpoint, ProviderRoute, RegistrySnapshot, RoleEntry, RoleRouteEntry
+
 
 def _mock_registry_snapshot() -> RegistrySnapshot:
     return RegistrySnapshot(

@@ -349,9 +349,9 @@ gamma2.1 Tests-first red suite (D5 partial)
 
 **Files**:
 
-- `docs/engine/state-and-io-contract/logic-explained.md`
-- `docs/engine/state-and-io-contract/mvp0-alignment.md`
-- `docs/engine/state-and-io-contract/baseline.md`
+- `docs/engine/mvp0/state-and-io-contract/logic-explained.md`
+- `docs/engine/mvp0/state-and-io-contract/mvp0-alignment.md`
+- `docs/engine/mvp0/state-and-io-contract/baseline.md`
 - `.kiro/specs/engine-mvp0-rebuild-v030/round-13-PR-gamma2-state-io-isolation/PR-REPORT.md`
 
 **WHAT**:

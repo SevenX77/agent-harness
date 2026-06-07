@@ -10,7 +10,51 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from langchain_core.messages import AIMessage, BaseMessage
 from pydantic import SecretStr
+
+
+class FakeRouteChatModel:
+    def __init__(self, factory: FakeRouteChatModelFactory, route: Any) -> None:
+        self.factory = factory
+        self.route = route
+
+    def invoke(self, messages: list[BaseMessage]) -> AIMessage:
+        self.factory.invocations.append({"route": self.route, "messages": messages})
+        behavior = self.factory.behaviors.get(self.route.route_id, self.factory.default_behavior)
+        if isinstance(behavior, BaseException):
+            raise behavior
+        return AIMessage(
+            content=str(behavior),
+            usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+            response_metadata={"finish_reason": "stop"},
+        )
+
+
+class FakeRouteChatModelFactory:
+    def __init__(
+        self,
+        default_behavior: str | BaseException = "ok",
+        behaviors: dict[str, str | BaseException] | None = None,
+    ) -> None:
+        self.default_behavior = default_behavior
+        self.behaviors = dict(behaviors or {})
+        self.builds: list[dict[str, Any]] = []
+        self.invocations: list[dict[str, Any]] = []
+
+    def build(self, route: Any, **kwargs: Any) -> FakeRouteChatModel:
+        self.builds.append({"route": route, "kwargs": dict(kwargs)})
+        return FakeRouteChatModel(self, route)
+
+
+def _install_route_factory(monkeypatch: pytest.MonkeyPatch, factory: FakeRouteChatModelFactory) -> None:
+    from graph_agent_gateway import gateway_chat_model
+
+    monkeypatch.setattr(
+        gateway_chat_model,
+        "RouteChatModelFactory",
+        lambda **_kwargs: factory,
+    )
 
 
 class AlwaysFailingClientManager:
@@ -170,7 +214,9 @@ def test_resolver_applies_role_model_parameters_to_gateway_model() -> None:
     assert model.resolved_role.routes[0].provider_model_id == "gpt-5"
 
 
-def test_gateway_failure_path_emits_event_and_structured_exception() -> None:
+def test_gateway_failure_path_emits_event_and_structured_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from graph_agent_gateway.exceptions import AllProvidersFailedError
     from graph_agent_gateway.gateway_chat_model import GatewayChatModel
     from graph_agent_gateway.registry.schema import (
@@ -181,6 +227,7 @@ def test_gateway_failure_path_emits_event_and_structured_exception() -> None:
     from langchain_core.messages import HumanMessage
 
     callback = RecordingCallback()
+    _install_route_factory(monkeypatch, FakeRouteChatModelFactory(RuntimeError("openai:gpt-5 failed")))
     resolved_role = ResolvedRole(
         role_name="balanced",
         system_prompt_prefix="",
@@ -220,7 +267,9 @@ def test_gateway_failure_path_emits_event_and_structured_exception() -> None:
     assert len(callback.events) == 0
 
 
-def test_probe_failure_fallback_emits_event_and_returns_second_route_metadata() -> None:
+def test_probe_failure_fallback_emits_event_and_returns_second_route_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from graph_agent_gateway.gateway_chat_model import GatewayChatModel
     from graph_agent_gateway.registry.schema import (
         ResolvedRole,
@@ -231,6 +280,10 @@ def test_probe_failure_fallback_emits_event_and_returns_second_route_metadata() 
 
     callback = RecordingCallback()
     client_manager = ProbeFallbackClientManager()
+    factory = FakeRouteChatModelFactory(
+        behaviors={"anthropic-official:claude-sonnet-4.6": "ok from fallback"}
+    )
+    _install_route_factory(monkeypatch, factory)
     resolved_role = ResolvedRole(
         role_name="graph_agent",
         system_prompt_prefix="",
@@ -293,9 +346,11 @@ def test_probe_failure_fallback_emits_event_and_returns_second_route_metadata() 
         "temperature": {"value": 0.2, "source": "route_setting", "message": None},
     }
     assert client_manager.marked_down == ["dead:claude"]
-    assert client_manager.dispatches == ["anthropic-official:claude-sonnet-4.6"]
-    assert client_manager.dispatch_kwargs[0]["max_tokens"] == 222
-    assert client_manager.dispatch_kwargs[0]["temperature"] == 0.2
+    assert [item["route"].route_id for item in factory.builds] == [
+        "anthropic-official:claude-sonnet-4.6"
+    ]
+    assert factory.builds[0]["kwargs"]["max_tokens"] == 222
+    assert factory.builds[0]["kwargs"]["temperature"] == 0.2
     assert len(callback.events) == 1
     assert callback.events[0].from_provider == "dead:claude"
     assert callback.events[0].to_provider == "anthropic-official:claude-sonnet-4.6"
@@ -317,7 +372,9 @@ def test_probe_failure_fallback_emits_event_and_returns_second_route_metadata() 
     }
 
 
-def test_probe_missing_model_error_falls_back_to_next_route() -> None:
+def test_probe_missing_model_error_falls_back_to_next_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from graph_agent_gateway.gateway_chat_model import GatewayChatModel
     from graph_agent_gateway.registry.schema import (
         ResolvedRole,
@@ -328,6 +385,10 @@ def test_probe_missing_model_error_falls_back_to_next_route() -> None:
 
     callback = RecordingCallback()
     client_manager = ProbeRouteFallbackClientManager()
+    factory = FakeRouteChatModelFactory(
+        behaviors={"fallback:model": "ok after missing model fallback"}
+    )
+    _install_route_factory(monkeypatch, factory)
     resolved_role = ResolvedRole(
         role_name="graph_agent",
         runtime_policy=RuntimePolicy(),
@@ -367,7 +428,7 @@ def test_probe_missing_model_error_falls_back_to_next_route() -> None:
     result = model.invoke([HumanMessage(content="hello")])
 
     assert result.content == "ok after missing model fallback"
-    assert client_manager.dispatches == ["fallback:model"]
+    assert [item["route"].route_id for item in factory.builds] == ["fallback:model"]
     assert client_manager.marked_down == ["missing:model"]
     assert len(callback.events) == 1
     event_payload = callback.events[0].model_dump(mode="json")
@@ -375,7 +436,9 @@ def test_probe_missing_model_error_falls_back_to_next_route() -> None:
     assert event_payload["context"]["provider_status_code"] == 404
 
 
-def test_gateway_passes_effective_runtime_settings_to_client_manager() -> None:
+def test_gateway_passes_effective_runtime_settings_to_route_factory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from graph_agent_gateway.gateway_chat_model import GatewayChatModel
     from graph_agent_gateway.registry.schema import (
         ResolvedRole,
@@ -385,6 +448,8 @@ def test_gateway_passes_effective_runtime_settings_to_client_manager() -> None:
     from langchain_core.messages import HumanMessage
 
     client_manager = RecordingSuccessClientManager()
+    factory = FakeRouteChatModelFactory()
+    _install_route_factory(monkeypatch, factory)
     route = ResolvedRoute(
         role_name="graph_agent",
         route_id="openai:gpt-5",
@@ -428,15 +493,11 @@ def test_gateway_passes_effective_runtime_settings_to_client_manager() -> None:
 
     model.invoke([HumanMessage(content="hello")])
 
-    assert client_manager.dispatch_kwargs == [
+    assert [item["kwargs"] for item in factory.builds] == [
         {
             "max_tokens": 333,
             "temperature": 0.4,
             "reasoning": True,
-            "thinking_budget_tokens": None,
-            "tools": None,
-            "tool_choice": "auto",
-            "runtime_policy": RuntimePolicy(),
             "top_p": 0.9,
             "stop_sequences": ["END"],
             "seed": 42,

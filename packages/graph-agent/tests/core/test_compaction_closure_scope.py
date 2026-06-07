@@ -45,7 +45,6 @@ from pathlib import Path
 
 _CORE_DIR = Path(__file__).resolve().parents[2] / "src" / "graph_agent" / "core"
 _SCAN_PATHS = [
-    _CORE_DIR / "harness.py",
     _CORE_DIR / "phase_executor.py",
     # Phase 3 M6 (PHASE3_DESIGN.md §2): execute_llm_phase moved into
     # the polymorphic LLMPhaseNode subclass; the compaction call site

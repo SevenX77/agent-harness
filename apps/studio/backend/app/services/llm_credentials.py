@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from graph_agent_gateway.registry.base_url import canonicalize_base_url
 from graph_agent_gateway.registry.canonical import canonicalize_model
 from graph_agent_gateway.registry.capabilities import normalize_route_capabilities
 from graph_agent_gateway.registry.schema import CapabilitySource
@@ -120,7 +121,11 @@ def upsert_endpoints(
                 raise ValueError(f"endpoint payload key does not match endpoint_id: {endpoint_id}")
             current = endpoints.get(endpoint_id)
             api_key = _preserved_secret(incoming, current)
-            updates: dict[str, Any] = {"api_key": api_key}
+            canonical_base_url = canonicalize_base_url(incoming.base_url, incoming.protocol)
+            updates: dict[str, Any] = {
+                "api_key": api_key,
+                "base_url": canonical_base_url,
+            }
             curated_provider_kind = CURATED_PROVIDER_KIND_BY_ENDPOINT_ID.get(endpoint_id)
             if curated_provider_kind is not None and _field_omitted(payload, "provider_kind"):
                 updates["provider_kind"] = curated_provider_kind
@@ -313,11 +318,12 @@ def _v3_payload_to_v4(payload: dict[str, Any]) -> LLMCredentialsFile:
         }
         if not endpoint_id or protocol not in supported_protocols:
             continue
+        canonical_url = canonicalize_base_url(base_url, protocol)
         endpoint = ProviderEndpoint(
             endpoint_id=endpoint_id,
             display_name=str(provider.get("name") or endpoint_id),
             protocol=protocol,
-            base_url=base_url,
+            base_url=canonical_url,
             api_key=provider.get("api_key") or None,
             status="verified" if provider.get("last_test_status") == "ok" else "unverified_manual",
             last_test_at=provider.get("last_test_at"),

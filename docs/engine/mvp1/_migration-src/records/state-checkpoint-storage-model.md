@@ -1,6 +1,6 @@
 ---
 doc: state-checkpoint-storage-model
-status: drafted（2026-06-03 经多轮 PM 拷问收敛）
+status: 留底（轴① 决策档案;实现 SSOT 已迁 03-checkpoint/08-messages-state/02-iterate;保留递归拓扑 + CK1-6 + D-test 深度细节备锁前回填）
 owns: 引擎执行的【嵌套拓扑 + checkpoint 一套 base + 存储纪律(delta/compact)】跨关注点权威模型
 related:
   - ../01-agent-loop/mvp1-alignment.md（agent loop = 内层图,经 ns 挂同一 checkpointer）
@@ -11,17 +11,21 @@ ground_truth:
   - packages/graph-agent（file:line 已核）
   - langgraph 1.2.2（checkpoint_ns / get_state_history / Send 已确认存在）
 ---
+> 🔖 **本文 = 轴① 决策留底(workflow archive),非实现 SSOT。** 实现真相已迁入 [`03-checkpoint`](../../02-mechanism/04-run-outer/03-checkpoint/mvp1-alignment.md)(共享 base / blackboard)+ [`08-messages-state`](../../02-mechanism/05-run-inner/08-messages-state/mvp1-alignment.md)(内层 messages)+ [`02-iterate`](../../02-mechanism/04-run-outer/02-iterate/mvp1-alignment.md)(图级 loop=B / CK3)。正式模块 = 现状 SSOT(条理化版);本文保留**更深的决策细节**(递归拓扑图 §2.1、delta/compact 矩阵 §2.4、durability §2.5、CK1-6 全集 §4、7 条 D-test §5、6 段 PM 原话 §3)作锁前回填备查。
+<!-- 核对进度:已迁 7 块 / 未迁 7 块 / 2026-06-04 -->
 
-# State / Checkpoint / Storage 模型
+~~# State / Checkpoint / Storage 模型~~ → ✅[已迁入](../../02-mechanism/04-run-outer/03-checkpoint/mvp1-alignment.md#1-定义)
 
 > **Tier**: engine 执行核心 | **Owns**: 执行嵌套拓扑 · checkpoint 唯一 base · 存储去体积/压缩纪律 | **Status**: drafted | **Related**: 01-agent-loop · 10-iteration · change-invalidation-model | **决策记录**: ../../../design/agent-loop-planA-create-agent-migration.md
 
-## 1. 定义
+~~## 1. 定义~~ → ✅[已迁入](../../02-mechanism/04-run-outer/03-checkpoint/mvp1-alignment.md#1-定义)
 
 引擎里所有"执行重复 + 状态续跑"的形态——agent loop(模型↔工具)、节点 iterate、subgraph、图级 loop——都收敛到**一个 LangGraph thread checkpointer,靠 `checkpoint_ns` 嵌套分层**(唯一 base)。存储靠两条正交纪律兜底:**delta**(去体积/存储表示)+ **compact**(内容压缩/有界化);纪律按**"连乘后的大 N × state 增长"**施加,无固定次要层。
 
+<!-- ⚠️ 未迁入（正式 checkpoint/messages/iterate 仅摘要承载，缺递归拓扑、delta/compact 矩阵、durability、完整 PM 原话、CK 决策与 D-test 细节） → 应归入:02-mechanism/04-run-outer/03-checkpoint + 02-mechanism/05-run-inner/08-messages-state -->
 ## 2. 数据流 / 机制
 
+<!-- ⚠️ 未迁入（正式 checkpoint/messages/iterate 仅摘要承载，缺递归拓扑、delta/compact 矩阵、durability、完整 PM 原话、CK 决策与 D-test 细节） → 应归入:02-mechanism/04-run-outer/03-checkpoint + 02-mechanism/05-run-inner/08-messages-state -->
 ### 2.1 执行嵌套拓扑(递归,尺度无关)
 
 ```
@@ -37,19 +41,20 @@ thread(唯一 checkpointer)
 - **图级 loop**(整图自循环 N 次):见 2.3(引擎包 loop-body)。
 - 每层只 checkpoint **它自己的 state**:agent loop 层 = messages;phase/iterate/图层 = blackboard。数据天然按层分。
 
-### 2.2 唯一 base + checkpoint_ns(含 agent loop)
+~~### 2.2 唯一 base + checkpoint_ns(含 agent loop)~~ → ✅[已迁入](../../02-mechanism/04-run-outer/03-checkpoint/mvp1-alignment.md#2-数据流--机制)
 
 - **唯一 checkpointer**:外层 `builder.compile(checkpointer=...)`(graph_assembler.py:151)。所有嵌套层**经 `checkpoint_ns` 挂进同一个 saver**,不另起内层 saver 实例。langgraph 1.2.2 的 `checkpoint_ns` 提供嵌套命名空间,`get_state_history` 提供历史寻址。
 - **phase=super-step**:节点级/debug 续跑是 LangGraph 原生(每 super-step 一存)。
 - **agent loop 也 checkpoint(关键,纠正前稿)**:agent loop 经 `ns="<id>/agent"` 入同一 base,每 model/tool 步存档 → **HITL/interrupt/mid-conversation 续跑成立**。证据:引擎用 LangGraph `interrupt()`(`cognitive_flow.py:33` import、`:95` `_interrupt_fn or interrupt`、`:292` attended `interrupt_fn(payload)`、`:300` `source="human_interrupt"`),而 `interrupt` 依赖 checkpoint。命名空间隔离正好解掉"内层 checkpointer 污染外层"的顾虑(uncovered-areas #3)。
 - **resume 寻址**:`resume_run(run_id, from=<node_id>|<node_id>:<iter>, context_overrides?)` → `get_state_history` 列档 → 选 `checkpoint_id`(+`checkpoint_ns`)→ `update_state` 套 overrides / 注入 `ToolMessage`(HitL)→ 带该 checkpoint 重 `invoke`。
 
-### 2.3 图级 loop = B(引擎包 loop-body)
+~~### 2.3 图级 loop = B(引擎包 loop-body)~~ → ✅[已迁入](../../02-mechanism/04-run-outer/02-iterate/mvp1-alignment.md#2-数据流--机制)
 
 引擎是 **DAG-only**(编译期无环校验 `[F-v3-graph-phase-cycle]`,12-compile-runtime-flow),用户**画不出回边**。图级 loop 由**引擎注入**:把整张 DAG 当循环体、套一个 loop 控制器,**一次 LangGraph 执行 + 引擎注入回边**,每遍 `ns="iter{k}"`,全在**一个 thread**。
 - 否决 A(runner 外层 `for: invoke` N 次 + 各遍独立 sub-thread):那不是一套 base,跨遍 resume 成 runner 的活。
 - 印证:"最顶层图自循环 N 次"没有父图驱动,必须有驱动者 → 引擎把它降格成"被循环的体" = 与 subgraph-loop 同构。
 
+<!-- ⚠️ 未迁入（正式 checkpoint/messages/iterate 仅摘要承载，缺递归拓扑、delta/compact 矩阵、durability、完整 PM 原话、CK 决策与 D-test 细节） → 应归入:02-mechanism/04-run-outer/03-checkpoint + 02-mechanism/05-run-inner/08-messages-state -->
 ### 2.4 存储纪律:delta vs compact(两条正交线)
 
 | | delta(去体积) | compact(压缩/有界) |
@@ -69,10 +74,12 @@ thread(唯一 checkpointer)
 
 **delta 的 snapshot 频率 = 平衡旋钮(承 PM)**:纯 delta 不利于断点恢复——重建第 X 步的 state 要从上一个 snapshot 回放所有 diff。做法 = **每 N 步存一次全量 snapshot、中间 N-1 步存 diff**(messages 现 `snapshot_frequency=50`)。N 偏小 = snapshot 多 = 体积大;N 偏大 = 回放成本高、resume 慢。**最优 N 是效率平衡点,需实测定**(随 backend / state 大小 / resume 频率变化);messages 与 blackboard 两条 delta 通道各自调,与 §2.5 durability 联动。
 
+<!-- ⚠️ 未迁入（正式 checkpoint/messages/iterate 仅摘要承载，缺递归拓扑、delta/compact 矩阵、durability、完整 PM 原话、CK 决策与 D-test 细节） → 应归入:02-mechanism/04-run-outer/03-checkpoint + 02-mechanism/05-run-inner/08-messages-state -->
 ### 2.5 durability 旋钮
 
 有 checkpointer 时 LangGraph 按 super-step 存档;**粒度/持久化时机由 durability 模式控制**,取值需 D-test:HITL 至少需"中断点 + phase 边界"存;mid-loop 崩溃恢复需更密。它直接决定大 N 场景的 checkpoint 总量与写盘开销。
 
+<!-- ⚠️ 未迁入（正式 checkpoint/messages/iterate 仅摘要承载，缺递归拓扑、delta/compact 矩阵、durability、完整 PM 原话、CK 决策与 D-test 细节） → 应归入:02-mechanism/04-run-outer/03-checkpoint + 02-mechanism/05-run-inner/08-messages-state -->
 ## 3. 设计决策基础(用户原话)
 
 > 极限场景:"写一部1000章的小说, 或者分析拆解一部1000章的小说转成剧本"
@@ -85,6 +92,7 @@ thread(唯一 checkpointer)
 
 > 无固定次要层(质疑"外层少数 phase 不用 delta/compact"):"我问这个问题的原因是你说'外层少数 phase' 所以不需要delta和compact?"
 
+<!-- ⚠️ 未迁入（正式 checkpoint/messages/iterate 仅摘要承载，缺递归拓扑、delta/compact 矩阵、durability、完整 PM 原话、CK 决策与 D-test 细节） → 应归入:02-mechanism/04-run-outer/03-checkpoint + 02-mechanism/05-run-inner/08-messages-state -->
 ## 4. 决策 + 动机
 
 | ID | 决策 | 动机 |
@@ -96,6 +104,7 @@ thread(唯一 checkpointer)
 | CK5 | messages 与 blackboard **分治**(DeltaChannel/summarization vs delta/有界+artifact) | 两者增长源/兜底机制不同,挂错层白做 |
 | CK6 | compact 是 1000 章的**可行性前提**,非优化 | 不 compact 上下文 O(N²) 且爆窗口(第1000章塞999章=超所有模型);compact 后 O(N) |
 
+<!-- ⚠️ 未迁入（正式 checkpoint/messages/iterate 仅摘要承载，缺递归拓扑、delta/compact 矩阵、durability、完整 PM 原话、CK 决策与 D-test 细节） → 应归入:02-mechanism/04-run-outer/03-checkpoint + 02-mechanism/05-run-inner/08-messages-state -->
 ## 5. 测试关键点
 
 1. **HITL 续跑**:agent loop 内 `interrupt()` → resume 从**对话中断点**续(不是 phase 起点重跑)。
@@ -106,11 +115,11 @@ thread(唯一 checkpointer)
 6. **messages summarization**:长 agent loop messages 被摘要、全文进 sidecar;predict mock 仍能模拟该形态(承 09 G5)。
 7. **durability**:选定粒度下,HITL 可续 + checkpoint 总量可控。
 
-## 6. 涉及 region / platform
+~~## 6. 涉及 region / platform~~ → ✅[已迁入](../../02-mechanism/04-run-outer/03-checkpoint/mvp1-alignment.md#7-涉及-region--platform)
 
 engine 全权拥有机制;studio 侧 `resume_run` / HITL UI 经 api 契约消费(见 api-engine-studio-contract §4)。
 
-## 7. gaps / 待设计(实现属 kiro 实施层)
+~~## 7. gaps / 待设计(实现属 kiro 实施层)~~ → ✅[已迁入](../../02-mechanism/04-run-outer/03-checkpoint/mvp1-alignment.md#8-gaps--待设计)
 
 1. `data`(blackboard)通道 delta reducer 形态(append-accumulator 友好)。
 2. `accumulate.merge` 增 `rolling-summary` 模式(有界 accumulator)。
@@ -118,7 +127,7 @@ engine 全权拥有机制;studio 侧 `resume_run` / HITL UI 经 api 契约消费
 4. durability 取值(D-test 3/7)。
 5. 引擎包 loop-body 的 compile 实现(DAG-only 下注入回边 + 计数 + accumulate)。
 
-## 交叉引用(链接,不复制)
+~~## 交叉引用(链接,不复制)~~ → ✅[已迁入](../../02-mechanism/04-run-outer/03-checkpoint/mvp1-alignment.md#交叉引用-链接-不复制)
 - 01-agent-loop(agent loop 经 ns 入 checkpoint + summarization middleware 边界)
 - 10-iteration §3/§4(iterate / 图级 loop / resume = 本模型应用;§4 引本篇为 SSOT)
 - api-engine-studio-contract §4(resume 寻址契约)

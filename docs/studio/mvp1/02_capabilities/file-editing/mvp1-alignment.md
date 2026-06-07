@@ -1,20 +1,23 @@
-# file-editing MVP1 Alignment
+---
+module: 02_capabilities/file-editing
+doc: mvp1-alignment
+status: FROZEN（Monaco 编辑与 FastAPI 写文件 live；MVP1 D12 要求 Rust 唯一写者，当前写路径仍走 FastAPI ⚠️。；目标结构已按 R4-R8 retrofit）
+binds_baseline: ./baseline.md
+units: [native-rust-writer]
+aligns_with: 01_workflows/02_authoring.md（file editing / save）
+---
 
-## 定义
+# file-editing — MVP1 Alignment
 
+> **Tier**: capability | **Owns**: 消费 `native-rust-writer` 的文件编辑切面（写者 owner 在 `native-fs`） | **现状**: Monaco 编辑与 FastAPI 写文件 live；MVP1 D12 要求 Rust 唯一写者，当前写路径仍走 FastAPI ⚠️。 | **Related**: [baseline](./baseline.md)（双向）· `editor` · `conflict-overwrite` · `native-fs`
+
+## 1. 定义
 `file-editing` owns opening Studio files, editing them in Monaco, saving with conflict protection, and reusing the same editor surface for read-only trace/context views when another capability asks for it.
 
 Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-and-verify.md:81`, `01_workflows/05_debugging.md:23`.
 
-## 接口契约
-
-- Open file shape: path, content, content hash, save mode, and optional read-only reason.
-- Save contract: caller supplies expected hash; conflict returns remote content and a resolution choice.
-- Native-fs target: all local reads/writes should move behind Rust commands.
-- Region links: `editor`, `assets`, `properties`, `timeline`.
-- Capability links: `compile-lint`, `conflict-overwrite`, `trace-observability`, `debug-resume`.
-
-## F1. Open Source File From UI
+## 2. 数据流 / 机制（设计细节）
+### F1. Open Source File From UI
 
 - 机制: canvas double-click, assets selection, or property action opens a skill file in the editor.
 - 决策: files remain inspectable/editable even when the graph view is the primary authoring UI.
@@ -23,7 +26,7 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 - Status: live.
 - 归属: capability `file-editing`; regions `editor`, `canvas`, `assets`.
 
-## F2. Autosave With Expected Hash
+### F2. Autosave With Expected Hash
 
 - 机制: Monaco changes debounce to save; expected hash protects against remote or watcher-driven edits.
 - 决策: editing should feel local and low-friction, with explicit conflict recovery instead of silent overwrite.
@@ -32,7 +35,7 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 - Status: live through Python API.
 - 归属: capability `file-editing`; capability `conflict-overwrite`; platform `native-fs`.
 
-## F3. Read-only Trace Document
+### F3. Read-only Trace Document
 
 - 机制: after run, a human-readable trace document opens in Monaco with editing disabled and navigation to selected node ranges.
 - 决策: full trace should be readable, lightly formatted, and not just raw jsonl.
@@ -41,7 +44,7 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 - Status: target-design.
 - 归属: capability `trace-observability`; region `editor`, `timeline`.
 
-## F4. Writable Context Tamper Editor
+### F4. Writable Context Tamper Editor
 
 - 机制: debug flow can switch the reused Monaco surface from read-only trace context to writable JSON context for downstream resume.
 - 决策: PM confirmed editor reuse for context tampering.
@@ -50,7 +53,7 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 - Status: target-design.
 - 归属: capability `debug-resume`; capability `trace-observability`; region `editor`.
 
-## F5. Inline Compile Diagnostics
+### F5. Inline Compile Diagnostics
 
 - 机制: compile/lint errors map into Monaco gutter and inline markers.
 - 决策: compile errors should be shown like an IDE, while the drawer remains the full error list.
@@ -59,6 +62,33 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/04_run-a
 - Status: target-design.
 - 归属: capability `compile-lint`; region `editor`; platform `engine`.
 
-## 待 PM 补 gap
+## 3. 接口契约
+- Open file shape: path, content, content hash, save mode, and optional read-only reason.
+- Save contract: caller supplies expected hash; conflict returns remote content and a resolution choice.
+- Native-fs target: all local reads/writes should move behind Rust commands.
+- Region links: `editor`, `assets`, `properties`, `timeline`.
+- Capability links: `compile-lint`, `conflict-overwrite`, `trace-observability`, `debug-resume`.
 
-- Whether trace/context documents should be virtual editor tabs or files materialized under `.workspace`.
+## 4. 设计决策基础（PM 原话）
+- trace/context 文档 = **具名只读 tab**(与正在编辑的文件并列,不临时替换当前编辑器)。
+
+## 5. 决策 + 动机
+| ID | 决策 | 动机 |
+|---|---|---|
+| FILE_EDITING-1 | 写路径 | 单元 `native-rust-writer`（消费；owner=native-fs）；**为什么**：所有本地写收口到 Rust 唯一写者(D12)，避免双写者并发冲突 |
+| FILE_EDITING-2 | autosave | 单元 `native-rust-writer`（消费；owner=native-fs）；**为什么**：编辑器 save 走 Rust 文件命令、保留 expected-hash 冲突检测 |
+| FILE_EDITING-3 | 只读 trace | 单元 `trace-dot-blackboard`（消费；owner=trace-observability）；**为什么**：editor 复用 Monaco 只读看 trace context，trace 语义归 trace-observability，非写者切面 |
+
+## 6. 测试关键点
+1. 写路径: baseline 现状为 `writeSkillFile` / `handlePhaseFileSave` 走 FastAPI ⚠️；目标为 写盘经 Rust 唯一写者；HTTP 不再直接写本地文件。
+2. autosave: baseline 现状为 1500ms debounce + expected hash；目标为 冲突时进入统一 SaveConflict，不静默覆盖。
+3. 只读 trace: baseline 现状为 Monaco 支持 readOnly；目标为 trace/doc view 只读，context tamper 另走 debug 流。
+
+## 7. 涉及 region / platform
+`editor` · `conflict-overwrite` · `native-fs`
+
+## 8. gaps / 报警
+- 🚨 写路径: `writeSkillFile` / `handlePhaseFileSave` 走 FastAPI ⚠️；目标 写盘经 Rust 唯一写者；HTTP 不再直接写本地文件。
+
+## 交叉引用（链接, 不复制）
+[baseline](./baseline.md)（现状,双向）· `editor` · `conflict-overwrite` · `native-fs`

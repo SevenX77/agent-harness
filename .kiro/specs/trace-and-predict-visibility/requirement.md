@@ -9,6 +9,8 @@ linked_level3_docs:
 
 # Requirement: Trace & Predict Visibility (Timeline & Edge Inspection)
 
+> ⛔ **SUPERSEDED (2026-06-01)** — 本 spec 已**改名为 [`studio-feature-trace-inspector`](../studio-feature-trace-inspector/requirement.md)** 并合并内容。请勿在此继续编辑;以 trace-inspector 为准。本目录待物理归档到 `_archive/`。下方内容仅作合并来源留存(Timeline / Prompt 透视 / Edge Inspection / Compile 报错)。
+
 ## 1. 问题陈述 (Problem Statement)
 ### 1.1 现状痛点
 在 MVP 早期，Engine 可以运行图，但前端仅仅能收到一些干瘪的成功/失败响应。PM 在点击 Predict 或 Run 后，面临完全的盲区：输入是怎么被拆分映射的？每一轮 LLM 到底说了什么乱七八糟的话才导致了 Validator 失败？

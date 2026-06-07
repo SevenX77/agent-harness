@@ -12,7 +12,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Literal
 
-from graph_agent.callbacks.events import PredictChainStartEvent
+from graph_agent.callbacks.events import CallbackEvent, PredictChainStartEvent
 from graph_agent.callbacks.tracing import TracingCallback
 
 MockedSource = Literal["golden_case", "copilot", "heuristic_stub", "manual"]

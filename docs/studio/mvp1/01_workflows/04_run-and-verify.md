@@ -65,7 +65,7 @@
 
 ### 原话(留底)
 > "predict和run就是按照配置来跑就行了" · "单次Run和批量Run的入口 在io panel OK" · "运行时加线的动画(已有)和节点边框的动画(在setting里面的role test, 测试时的边框动画统一)" · "存档应该和发布分发放一起, 都是git的功能"
-> batch/loop 完整原话(story-deconstruction + 三处开关 + 图级 range 例)→ [`_reorg/gemini-prompt-batch-loop.md`](../../_reorg/gemini-prompt-batch-loop.md)。
+> batch/loop 完整原话(story-deconstruction + 三处开关 + 图级 range 例)→ 引擎契约 [`02-iterate`](../../../engine/mvp1/02-mechanism/04-run-outer/02-iterate/mvp1-alignment.md)。
 
 ### 测试关键点
 - run 需 compile-pass 且 predict-pass;run_skill 真跑落盘;节点灯随真实 run 事件亮;成功 run → autocommit;批量某项失败显式上报。
@@ -121,11 +121,11 @@ dot = 两节点之间的"中间节点"(langgraph edge),代表**上节点 end 后
 |---|---|---|---|
 | E1 | agent 节点 golden 状态机:🔘未测试 → 🟡逻辑OK → 🟢有golden | canvas | target-design |
 | E2 | mock 由 golden 状态自动决定(无→占位 / 有→golden_case) | — | target-design |
-| E3 | golden 创建路A(copilot 协作):入口①trace 内占位节点旁按钮 ②sonner 批量开 N chat → copilot 看整图分析→定 golden | trace/copilot | target-design |
+| E3 | golden 创建路A(copilot 协作):入口①trace 内占位节点旁按钮 ②**predict/run 跑完 copilot 输入框上方分析 bar 弹窗**(确认→无 golden 节点自动写 golden;细化自旧 sonner 批量,见 [`copilot-assist`](../02_capabilities/copilot-assist/mvp1-alignment.md) F7) | trace/copilot | target-design |
 | E4 | golden 创建路B(手动):按 io.outputs schema 自动生成空模版 json,i/o 面板手填 | i/o 面板 | target-design |
 | E5 | golden 设置/文件归 i/o 面板 | i/o 面板 | target-design |
 | E6 | golden 失效:改 prompt/agent 内部不失效;**仅改 output schema 致缺字段 → 编译错误,必须补才能 predict** | — | target-design |
-| E7 | run 后 实际输出 vs golden **字段级 diff** | properties | target-design(useGoldenDiff orphan) |
+| E7 | run 后 实际输出 vs golden **字段级 diff**(详细 diff 在 editor 分屏,**不在 properties**) | editor | target-design(useGoldenDiff orphan) |
 | E8 | 409 守卫:golden 作者定/手填,非从 predict trace 捕获 | — | backend-only |
 
 ### 决策
@@ -142,9 +142,9 @@ dot = 两节点之间的"中间节点"(langgraph edge),代表**上节点 end 后
 ---
 
 ## 引擎需求(已抛出)
-1. **batch/loop**(C 配置)→ [`gemini-prompt-batch-loop.md`](../../_reorg/gemini-prompt-batch-loop.md)。
-2. **predict + golden + run 后端**→ [`engine-prompt-predict-golden-run.md`](../../_reorg/engine-prompt-predict-golden-run.md):golden 逐节点模型 + mock-by-golden + 逐节点 diff + 失效校验。
-3. **trace 后端**→ [`engine-prompt-trace-compile-debug.md`](../../_reorg/engine-prompt-trace-compile-debug.md):节点间操作事件 + 嵌套链路 + reducer diff。
+1. **batch/loop**(C 配置)→ 引擎 [`02-iterate`](../../../engine/mvp1/02-mechanism/04-run-outer/02-iterate/mvp1-alignment.md)。
+2. **predict + golden + run 后端**→ 引擎 [`06-golden-eval`](../../../engine/mvp1/02-mechanism/05-run-inner/06-golden-eval/mvp1-alignment.md) + `07-runtime`:golden 逐节点模型 + mock-by-golden + 逐节点 diff + 失效校验。
+3. **trace 后端**→ 引擎 [`02-observability`](../../../engine/mvp1/02-mechanism/06-seam/02-observability/mvp1-alignment.md):节点间操作事件 + 嵌套链路 + reducer diff。
 
 ## 整层定性
 本节点整层 = **后端实 / 前端虚**:predict/run/golden 后端 live 或 backend-only,但 TracePanel/useRunStream/PromptInspector/BatchRunner/RunDetailDrawer/useGoldenDiff 全套已建却零挂载。**主要工程 = 接线孤儿 + 实现 target-design 件 + 引擎补缺口。**

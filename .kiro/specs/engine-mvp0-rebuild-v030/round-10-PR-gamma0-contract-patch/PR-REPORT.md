@@ -41,5 +41,5 @@ Key paths:
 - `packages/graph-agent/tests/core/`
 - `packages/graph-agent/tests/cognitive/`
 - `packages/graph-agent/tests/models/`
-- `docs/engine/skill-spec/`
-- `docs/engine/execution-runtime/`
+- `docs/engine/mvp0/skill-spec/`
+- `docs/engine/mvp0/execution-runtime/`

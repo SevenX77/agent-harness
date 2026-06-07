@@ -26,6 +26,22 @@ MVP1 目标：把「一条 route 的实际调用」从自研消息转换 + provi
 
 本模块**纯 ③b 公共**（换任何调模型的 app 都要"拿一条 route 真正调"），已在 gateway 包内，归属表判定不变（`module-disposition-revised.md:42,84`）。注意边界:本模块**只写运行时 invoke 和结果桥接**;route→ChatX 工厂细节在 [[10-inv-route-chat-model-factory]] 写,provider 差异 init-kwargs 在 [[11-inv-provider-profiles]] 写,fallback/probe/熔断/usage 归属/截断升级在 [[07-orch-fallback-circuit-probe]] 写。
 
+## 1.5 格式中立 + 普通 chat 面（gateway 基础调用能力，2026-06-04 PM 确认）
+
+> **§1 的"换成原生 ChatX `.invoke()`"是「ChatX 面」——给 engine 等 LangChain 消费方的路。但 gateway 调用层是格式中立的，不绑死 LangChain。**
+
+**决策（PM 2026-06-04）+ 动机**：gateway 是**可复用网关**（③b，"换个 app 装上就能用"）。**LangChain 不是普世标准**——市面上大量 app 直接用普通 chat 协议（OpenAI `/chat/completions`、Anthropic Messages）调模型，根本不依赖 LangChain。所以 gateway 必须**格式中立**，对外三张脸，业务端按需选：
+
+1. **ChatX 面**：`BaseChatModel`（官方 ChatX 或 `GenericRouteChatModel`，由 [[10-inv-route-chat-model-factory]] 工厂产），给 engine 的 `create_agent`。
+2. **普通 chat 面**：gateway 用自己的「普通 chat 内核」（序列化→调 provider→解析 = repurposed `_call_*`）调，返回**非-LangChain** 结果，给不想依赖 LangChain 的消费方。
+3. **route handoff**：只给解析好的 route、消费方自调（copilot 走 `claude_agent_sdk`），见 [[01-handoff-interface]]。
+
+**主次关系（重要）**：「普通 chat 内核」是 gateway 的**基础调用能力**——普通 chat 面直接用它，[[10-inv-route-chat-model-factory]] 的 `GenericRouteChatModel` 也是它的 LangChain 包装；官方 ChatX 则是 LangChain 自己的实现，ChatX 面在有官方时优先用（更可靠），无官方才用 generic 包装内核。
+
+> **原话依据**（PM 2026-06-04）："现在市面上没有用 chat 协议的 app 了？全部都用 chatX 了？"——反诘 = 普通 chat 消费方实打实存在（非-LangChain app 一大把），gateway 不能只给 LangChain 面。（"ChatX 不绑死"完整 PM 原话见 §4 D2/D3 + [[10-inv-route-chat-model-factory]] §3.5。）
+
+**测试关键点**：① 普通 chat 面返回非-LangChain 结果（不强制消费方依赖 LangChain）；② ChatX 面与普通 chat 面**共用同一调用内核**（同一 route 两面调，provider 请求形态一致）。
+
 ## 2. 数据流 / 机制(目标设计与流程)
 
 目标覆盖率：本模块 brief 指定的 `_build_chat_result`、调用桥接、旧 `_call_*` 替换范围和 `models.py` 边界全部覆盖，目标文档覆盖率 100%。`RouteChatModelFactory` 的新模块细节在 10 写；09 只定义 invoke runtime 和结果桥接。
@@ -50,7 +66,7 @@ MVP1 目标：把「一条 route 的实际调用」从自研消息转换 + provi
 
 9. `LLMClientManager._call_google_genai`（Google GenAI `generate_content` 调用和响应解析函数）的目标替换物是 `ChatGoogleGenerativeAI` 或等价 ChatX；旧函数手写 Gemini contents、generation config、thinking config 和 usage parse，代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:549-611`。
 
-10. `LLMClientManager._call_ark_runtime`（Volcengine Ark official SDK chat completions 调用和响应解析函数）的目标替换物应由 provider profile/factory 决定；旧函数手写 Ark official SDK chat completions payload 和 response parse，代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:613-670`。
+10. `LLMClientManager._call_ark_runtime`（Volcengine Ark official SDK chat completions 调用和响应解析函数）✅ **已定（2026-06-04）：`ark_runtime` 走 OpenAI-compatible（`ChatOpenAI`）**——Ark 官方支持 OpenAI-compatible，旧函数（Ark 官方 SDK，`client_manager.py:613-670`）退役，不作单独适配（见 [[10-inv-route-chat-model-factory]] §3 模型类选择 + §8#2）。
 
 11. `LLMClientManager._call_anthropic_compatible`（Anthropic-compatible Messages API 调用和响应解析函数）的目标替换物是 `ChatAnthropic` 或兼容 ChatX；旧函数手写 Anthropic messages、tools、thinking adaptive/manual fallback 和 response parse，代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:672-769`。
 
@@ -92,6 +108,8 @@ MVP1 目标：把「一条 route 的实际调用」从自研消息转换 + provi
 
 > **通用判据（gateway = 富能力可复用网关）**（README §2）："换一个完全不同的应用装上 gateway，这个能力还原样能用吗？能 → 公共（gateway）。" → "拿一条 route 真正调模型"是任何调模型 app 的刚需，故本模块纯 ③b 公共。
 
+> **格式中立 / 普通 chat 面**（PM 2026-06-04，verbatim）："不管是不是langchain的格式, gateway都得支持, 不是为了wavespeed, 给copilot的也不是langchain的格式. langchain格式是为了适配engine的create_agent, 不是langchain格式无非是engine报错, 报警. 或者studio侧做拦截, 必须支持langchain才会出现在available models. 但是gateway的职责是匹配通用的模式, 不走langchain就走普通的chat, 都提供,业务端想用啥就给啥" → 后续反诘（确认普通 chat 消费方实打实存在）："现在市面上没有用 chat 协议的 app 了？全部都用 chatX 了？" → 支撑 §1.5：gateway 调用层格式中立，普通 chat 面是基础调用能力、不绑死 LangChain；ChatX 面（官方 ChatX / generic 兜底）只是其上的 LangChain 适配层。此决策与 [[10-inv-route-chat-model-factory]] §3.5 共享（重复留底防 drift）。
+
 ## 5. 决策 + 动机(决策原因)
 
 **A' vs A（核心架构决策 D1）**：选择 A' 而不是 A 的原因是调用层要换成 ChatX，但 `GatewayChatModel` 不能删——fallback/probe/熔断/usage/event 都是编排职责，它们全部坐落在 `_generate` 内（熔断跳过 `gateway_chat_model.py:113` / probe `:115` / 异常分类 `:124,:238` / mark-down `:135,:249` / fallback event `:136,:250` / usage `:227` / metadata `:313-357`）。**被否的 A（激进版）**：resolver 直接裸返回原生 ChatX + 删 `GatewayChatModel` + 用 `with_fallbacks()`——会回归 fallback/probe/熔断/usage/metadata/predict，且 `with_fallbacks()` 只按异常类型、表达不了按 HTTP status 分类（对比 [[06-orch-error-classification]] 的真实分类语义）。判据证据：bug 本在调用层（消息转换）`_langchain_messages_to_dict`（`gateway_chat_model.py:661-692`）把带 tool_calls 的 `AIMessage(content="")` 转成 `{"content":""}` → 发出空 content → qiniu-anthropic `400 content must not be empty`；第八轮真机只用归一化后的 base_url 验证「调用层换 ChatX 修空-content bug」，从未跑编排、从未验证「删编排层」。
@@ -131,7 +149,7 @@ usage metadata 的原因（F5）是 ChatX `AIMessage.usage_metadata` 已携带�
 
 3. `call_method_id` / `request_mapper_id` 当前由旧 dispatch 消费，见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:224-225` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:884-887`；MVP1 要决定它们由 [[10-inv-route-chat-model-factory]] 的 factory 还是 [[11-inv-provider-profiles]] 的 provider profile 消费（与 11 §8 待办 2 同一悬而未决项）。
 
-4. WaveSpeed Any-LLM（`_call_wavespeed_any_llm`）是旧调用层独立 HTTP path（把多轮 messages 拍成 prompt string + 自己 502/503/504 backoff），不属标准 ChatX provider；MVP1 是否继续支持该 route，需在 10/11 的 factory/profile 设计里单独定，证据见 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:771-863`。
+4. ✅ **已定（PM 2026-06-04 + 实验）**：WaveSpeed 实测是 **native-compatible**——其 endpoint 同时支持 OpenAI-compatible `/chat/completions` 和 Anthropic Messages，**用官方 ChatX（`ChatOpenAI`/`ChatAnthropic`）就能跑**（实验 6 轮工具循环 PASS，`temp/2026-06-04-wavespeed-generic-adapter-spike-report.md`），**不需要** `_call_wavespeed_any_llm` 那条"拍平成 prompt string"的特殊 path。真·非标 provider（连官方 ChatX 都没有的）才走 `GenericRouteChatModel` 兜底（见 [[10-inv-route-chat-model-factory]] §3.5）。旧 `_call_wavespeed_any_llm`（`client_manager.py:771-863`）按需退役，或并入 generic 内核作一个内部分支。
 
 ## 已实现 / 与 baseline 差异
 

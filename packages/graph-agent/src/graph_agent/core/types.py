@@ -5,14 +5,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
 from graph_agent.core.manifest import ContextBridge
 
 if TYPE_CHECKING:
-    from graph_agent.core.harness import GraphAgentHarness
     from graph_agent.core.io_manager import IODef
 
 
@@ -51,12 +50,12 @@ class Phase:
     max_nudges: int = 1
     dead_end_threshold: int = 3
     data_architecture: str | None = None
-    subgraph: GraphAgentHarness | None = None
+    subgraph: Any | None = None
     # Parallel delegate runtime fields (PR-7).
     # Resolved at loader time per Gemini design Q1c: structures stay in
     # memory, the reducer path is dotted-string and imported at execute time
     # (Callable cannot be msgpack-serialised by LangGraph checkpointer).
-    parallel_subgraphs: list[GraphAgentHarness] = field(default_factory=list)
+    parallel_subgraphs: list[Any] = field(default_factory=list)
     reducer_path: str | None = None
     tolerance: float = 0.0
     context_bridge: ContextBridge | None = None

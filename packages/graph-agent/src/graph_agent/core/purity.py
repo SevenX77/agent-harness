@@ -15,7 +15,7 @@ class PurityViolation:
     reason: str
 
 
-_PATH_METHODS = {
+_PATH_MUTATION_METHODS = {
     "write_text",
     "write_bytes",
     "touch",
@@ -28,7 +28,97 @@ _PATH_METHODS = {
     "rmdir",
     "chmod",
 }
-_OS_METHODS = {"remove", "rename", "replace", "makedirs", "mkdir", "rmdir", "unlink", "chmod"}
+_PATH_ACCESS_METHODS = {
+    "exists",
+    "glob",
+    "group",
+    "is_block_device",
+    "is_char_device",
+    "is_dir",
+    "is_fifo",
+    "is_file",
+    "is_mount",
+    "is_socket",
+    "is_symlink",
+    "iterdir",
+    "lstat",
+    "open",
+    "owner",
+    "read_bytes",
+    "read_text",
+    "readlink",
+    "resolve",
+    "rglob",
+    "samefile",
+    "stat",
+}
+_OS_MUTATION_METHODS = {
+    "chmod",
+    "chown",
+    "link",
+    "makedirs",
+    "mkdir",
+    "mknod",
+    "remove",
+    "removedirs",
+    "rename",
+    "renames",
+    "replace",
+    "rmdir",
+    "symlink",
+    "truncate",
+    "unlink",
+    "utime",
+}
+_OS_ACCESS_METHODS = {
+    "access",
+    "fwalk",
+    "listdir",
+    "lstat",
+    "open",
+    "readlink",
+    "scandir",
+    "stat",
+    "walk",
+}
+_OS_PATH_ACCESS_METHODS = {
+    "exists",
+    "getatime",
+    "getctime",
+    "getmtime",
+    "getsize",
+    "isdir",
+    "isfile",
+    "islink",
+    "lexists",
+    "realpath",
+    "samefile",
+    "sameopenfile",
+    "samestat",
+}
+_GLOB_METHODS = {"glob", "iglob"}
+_SYS_PATH_MUTATION_METHODS = {
+    "append",
+    "clear",
+    "extend",
+    "insert",
+    "pop",
+    "remove",
+    "reverse",
+    "sort",
+}
+_DYNAMIC_IMPORT_CALLS = {
+    "__import__",
+    "builtins.__import__",
+    "importlib.import_module",
+    "importlib.util.spec_from_file_location",
+}
+_FILE_OPEN_CALLS = {"open", "builtins.open", "io.open"}
+_PATH_FACTORY_CALLS = {"pathlib.Path", "pathlib.Path.cwd", "pathlib.Path.home"}
+_OS_METHODS = _OS_MUTATION_METHODS | _OS_ACCESS_METHODS
+_SYS_PATH_MUTATION_CALLS = {f"sys.path.{method}" for method in _SYS_PATH_MUTATION_METHODS}
+_OS_PATH_ACCESS_CALLS = {f"os.path.{method}" for method in _OS_PATH_ACCESS_METHODS}
+_GLOB_CALLS = {f"glob.{method}" for method in _GLOB_METHODS}
 _SHUTIL_METHODS = {"copy", "copy2", "copyfile", "copytree", "move", "rmtree"}
 _TEMPFILE_METHODS = {
     "NamedTemporaryFile",
@@ -42,7 +132,7 @@ _READ_MODES = {"r", "rb", "rt"}
 
 
 def scan_python_purity(path: Path) -> list[PurityViolation]:
-    """Return local-write API violations found in a Python source file."""
+    """Return purity hard-ban API violations found in a Python source file."""
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     except SyntaxError as exc:
@@ -57,12 +147,18 @@ def scan_python_purity(path: Path) -> list[PurityViolation]:
 
     violations: list[PurityViolation] = []
     aliases = _collect_import_aliases(tree)
+    path_names = _collect_path_names(tree, aliases)
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        violation = _violation_for_call(path, node, aliases)
-        if violation is not None:
-            violations.append(violation)
+        if isinstance(node, ast.Call):
+            violation = _violation_for_call(path, node, aliases, path_names)
+            if violation is not None:
+                violations.append(violation)
+        elif isinstance(node, ast.Assign):
+            violations.extend(_violations_for_targets(path, node.targets, aliases, node.lineno))
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            violations.extend(_violations_for_targets(path, [node.target], aliases, node.lineno))
+        elif isinstance(node, ast.Delete):
+            violations.extend(_violations_for_targets(path, node.targets, aliases, node.lineno))
     return violations
 
 
@@ -127,17 +223,109 @@ def _collect_import_aliases(tree: ast.AST) -> dict[str, str]:
     return aliases
 
 
+def _collect_path_names(tree: ast.AST, aliases: dict[str, str]) -> set[str]:
+    path_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            if _is_pathlike_expr(node.value, aliases, path_names):
+                path_names.update(_name_targets(node.targets))
+        elif isinstance(node, ast.AnnAssign):
+            if node.value is not None and _is_pathlike_expr(node.value, aliases, path_names):
+                path_names.update(_name_targets([node.target]))
+    return path_names
+
+
+def _name_targets(targets: list[ast.AST]) -> set[str]:
+    names: set[str] = set()
+    for target in targets:
+        if isinstance(target, ast.Name):
+            names.add(target.id)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            names.update(_name_targets(list(target.elts)))
+    return names
+
+
+def _get_call_full_name(node: ast.AST, aliases: dict[str, str]) -> str | None:
+    if isinstance(node, ast.Name):
+        return aliases.get(node.id, node.id)
+    elif isinstance(node, ast.Attribute):
+        value_name = _get_call_full_name(node.value, aliases)
+        if value_name is not None:
+            return f"{value_name}.{node.attr}"
+    return None
+
+
+def _target_full_name(
+    node: ast.AST,
+    aliases: dict[str, str],
+    *,
+    resolve_name_alias: bool = True,
+) -> str | None:
+    if isinstance(node, ast.Subscript):
+        return _target_full_name(node.value, aliases)
+    if isinstance(node, ast.Name):
+        if resolve_name_alias:
+            return aliases.get(node.id, node.id)
+        return node.id
+    if isinstance(node, ast.Attribute):
+        value_name = _target_full_name(node.value, aliases)
+        if value_name is not None:
+            return f"{value_name}.{node.attr}"
+    return None
+
+
+def _violations_for_targets(
+    path: Path,
+    targets: list[ast.AST],
+    aliases: dict[str, str],
+    lineno: int,
+) -> list[PurityViolation]:
+    violations: list[PurityViolation] = []
+    for target in targets:
+        resolve_name_alias = not isinstance(target, ast.Name)
+        if _target_full_name(target, aliases, resolve_name_alias=resolve_name_alias) == "sys.path":
+            violations.append(PurityViolation(path, lineno, "sys.path", "sys.path mutation is forbidden"))
+    return violations
+
+
 def _violation_for_call(
     path: Path,
     node: ast.Call,
     aliases: dict[str, str],
+    path_names: set[str] | None = None,
 ) -> PurityViolation | None:
+    full_name = _get_call_full_name(node.func, aliases)
+    if full_name is not None:
+        if full_name in {"run_skill", "graph_agent.run_skill", "graph_agent.core.runner.run_skill"}:
+            return PurityViolation(path, node.lineno, "run_skill", "run_skill orchestration is forbidden")
+        if full_name in _FILE_OPEN_CALLS:
+            reason = _open_violation_reason(node) or "file system access open() is forbidden"
+            return PurityViolation(path, node.lineno, "open", reason)
+        if full_name in _SYS_PATH_MUTATION_CALLS:
+            return PurityViolation(path, node.lineno, full_name, "sys.path mutation is forbidden")
+        if full_name in _DYNAMIC_IMPORT_CALLS:
+            return PurityViolation(path, node.lineno, full_name, f"dynamic import via {full_name} is forbidden")
+        if full_name in _OS_PATH_ACCESS_CALLS:
+            return PurityViolation(
+                path,
+                node.lineno,
+                full_name,
+                f"file system access via {full_name} is forbidden",
+            )
+        if full_name in _GLOB_CALLS:
+            return PurityViolation(
+                path,
+                node.lineno,
+                full_name,
+                f"file system access via {full_name} is forbidden",
+            )
+
     func = node.func
     if isinstance(func, ast.Name):
         return _violation_for_name_call(path, node, aliases)
 
     if isinstance(func, ast.Attribute):
-        return _violation_for_attribute_call(path, node, aliases)
+        return _violation_for_attribute_call(path, node, aliases, path_names)
     return None
 
 
@@ -165,15 +353,30 @@ def _violation_for_attribute_call(
     path: Path,
     node: ast.Call,
     aliases: dict[str, str],
+    path_names: set[str] | None = None,
 ) -> PurityViolation | None:
     func = node.func
     assert isinstance(func, ast.Attribute)
     attr = func.attr
     base = _attribute_base_name(func.value)
     qualified_base = aliases.get(base or "", base or "")
-    if attr in _PATH_METHODS:
+    if attr in _PATH_MUTATION_METHODS and _is_pathlike_expr(func.value, aliases, path_names):
         return PurityViolation(path, node.lineno, attr, "path mutation APIs are forbidden")
+    if attr in _PATH_ACCESS_METHODS and _is_pathlike_expr(func.value, aliases, path_names):
+        return PurityViolation(
+            path,
+            node.lineno,
+            attr,
+            f"file system access via Path.{attr} is forbidden",
+        )
     if qualified_base == "os" and attr in _OS_METHODS:
+        if attr in _OS_ACCESS_METHODS:
+            return PurityViolation(
+                path,
+                node.lineno,
+                f"os.{attr}",
+                f"file system access via os.{attr} is forbidden",
+            )
         return PurityViolation(path, node.lineno, f"os.{attr}", "os filesystem mutation is forbidden")
     if qualified_base == "shutil" and attr in _SHUTIL_METHODS:
         return PurityViolation(
@@ -184,6 +387,23 @@ def _violation_for_attribute_call(
             path, node.lineno, f"tempfile.{attr}", "temporary files are local writes"
         )
     return None
+
+
+def _is_pathlike_expr(
+    node: ast.AST,
+    aliases: dict[str, str],
+    path_names: set[str] | None = None,
+) -> bool:
+    if isinstance(node, ast.Name):
+        return path_names is not None and node.id in path_names
+    if isinstance(node, ast.Call):
+        full_name = _get_call_full_name(node.func, aliases)
+        return full_name in _PATH_FACTORY_CALLS
+    if isinstance(node, ast.BinOp):
+        return _is_pathlike_expr(node.left, aliases, path_names) or _is_pathlike_expr(
+            node.right, aliases, path_names
+        )
+    return False
 
 
 def _open_violation_reason(node: ast.Call) -> str | None:

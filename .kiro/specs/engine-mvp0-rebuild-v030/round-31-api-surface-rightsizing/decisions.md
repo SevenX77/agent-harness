@@ -325,7 +325,7 @@ round-31 任务目标 = "API catalog rightsizing 60+ -> 浓缩到优雅", 本质
 
 - `.kiro/specs/engine-mvp0-rebuild-v030/round-31-api-surface-rightsizing/research.md:1-88`
 - `.kiro/specs/engine-mvp0-rebuild-v030/round-31-api-surface-rightsizing/design.md:1-429`
-- `docs/engine/public-api-contract.md:20-515`
+- `docs/engine/mvp0/public-api-contract.md:20-515`
 
 ## §14 copilot 接口在 Studio (业务)
 
@@ -375,9 +375,9 @@ round-31 任务目标 = "API catalog rightsizing 60+ -> 浓缩到优雅", 本质
 
 | # | 冲突位置 | 冲突内容 | 处置建议 |
 |---|---|---|---|
-| 1 | `docs/engine/tracing-and-observability/baseline.md:92` | `TracingCallback(trace_dir=...)` 作为用户配置 trace 的方式 | 加 OBSOLETE banner, 指向 §2 / §3 / §16.1 / §16.3 |
-| 2 | `docs/engine/public-api-contract.md:155-160` | `TracingCallback.__init__(trace_dir=...)` 仍作为 public API | 整段 OBSOLETE, 改为 `event_subscriber` callable |
-| 3 | `docs/engine/public-api-contract.md:498` | `PredictResult` 仍作为 public entity | 整段 OBSOLETE, 改为 `RunResult(source="predict")` |
+| 1 | `docs/engine/mvp0/tracing-and-observability/baseline.md:92` | `TracingCallback(trace_dir=...)` 作为用户配置 trace 的方式 | 加 OBSOLETE banner, 指向 §2 / §3 / §16.1 / §16.3 |
+| 2 | `docs/engine/mvp0/public-api-contract.md:155-160` | `TracingCallback.__init__(trace_dir=...)` 仍作为 public API | 整段 OBSOLETE, 改为 `event_subscriber` callable |
+| 3 | `docs/engine/mvp0/public-api-contract.md:498` | `PredictResult` 仍作为 public entity | 整段 OBSOLETE, 改为 `RunResult(source="predict")` |
 | 4 | `docs/studio/system-level/workspace-file-system/baseline.md:365-368` | 旧 `.workspace/predict/` 顶层子目录 | 删除旧目标态; 当前文档应只引用 Engine workspace spec 与 `<workspace_dir>/runs/<run_id>/` |
 | 5 | `docs/architecture/prod-dev-separation/baseline.md:61` | Studio/Engine tracing callback 缠绕仍按旧 callback class 描述 | 局部 OBSOLETE, 指向 §3 / §16.3 |
 | 6 | `.kiro/specs/_archive/predict-v2/design.md:105` | `PredictResult` schema | 文件顶加 OBSOLETE banner, 指向 §4 / §7 / §16 |

@@ -41,4 +41,4 @@
 - 门控:compile-pass 解锁 predict;predict-pass 解锁 run。
 
 ## 引擎需求
-compile 错误定位补齐(每条带 节点 + 字段 + 行 + 严重度)→ 见 [`_reorg/engine-prompt-trace-compile-debug.md`](../../_reorg/engine-prompt-trace-compile-debug.md)。
+compile 错误定位补齐(每条带 节点 + 字段 + 行 + 严重度)→ 引擎契约 [`compile-rules`](../../../engine/mvp1/01-contract/03-compile-rules/mvp1-alignment.md)。

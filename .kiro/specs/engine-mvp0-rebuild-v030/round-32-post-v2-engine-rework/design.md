@@ -128,8 +128,8 @@ T2 的目标不是把内部实现藏得更深，而是删除已经被测试误�
   - 删除继承式 callback protocol 测试 `EXPECTED_CALLBACK_PROTOCOL_METHODS`，当前定义见 `packages/graph-agent/tests/test_public_api_contract.py:621` 到 `packages/graph-agent/tests/test_public_api_contract.py:679`。
   - 保留并更新 `EXPECTED_CALLBACK_EVENT_VARIANTS`，当前定义见 `packages/graph-agent/tests/test_public_api_contract.py:587` 到 `packages/graph-agent/tests/test_public_api_contract.py:619`。
 - docs/spec
-  - `docs/engine/public-api-contract.md:33` 当前描述 `run_skill` 签名，需改为 `RunResult` 与 `event_subscriber`。
-  - `docs/engine/public-api-contract.md:38` 当前有 `WorkflowResult` 小节，需迁移为 `RunResult`。
+  - `docs/engine/mvp0/public-api-contract.md:33` 当前描述 `run_skill` 签名，需改为 `RunResult` 与 `event_subscriber`。
+  - `docs/engine/mvp0/public-api-contract.md:38` 当前有 `WorkflowResult` 小节，需迁移为 `RunResult`。
   - `packages/graph-agent/README.md:94`、`packages/graph-agent/README.md:125` 到 `packages/graph-agent/README.md:126`、`packages/graph-agent/README.md:173` 到 `packages/graph-agent/README.md:177` 当前提到 `WorkflowResult`，需同步。
 
 ### T2.5 迁移策略

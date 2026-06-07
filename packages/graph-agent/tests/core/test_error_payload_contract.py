@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import BaseModel
 
 from graph_agent.core.exceptions import (
     GraphAgentError,
@@ -18,7 +19,15 @@ from graph_agent.runtime.state_mapper import StateMapper
 from graph_agent.tools.builtin.read_reference import read_declared_reference
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-ERROR_SPEC = REPO_ROOT / "docs" / "engine" / "skill-spec" / "11-error-code-spec.md"
+ERROR_SPEC = (
+    REPO_ROOT
+    / "docs"
+    / "engine"
+    / "mvp1"
+    / "01-contract"
+    / "03-compile-rules"
+    / "mvp1-alignment.md"
+)
 
 
 def _error_payload_model() -> Any:
@@ -32,22 +41,59 @@ def _error_registry() -> dict[str, Any]:
 
 
 def _spec_codes() -> set[str]:
-    return set(re.findall(r"\[F-v3-[a-z0-9-]+\]", ERROR_SPEC.read_text(encoding="utf-8")))
+    text = ERROR_SPEC.read_text(encoding="utf-8")
+    match = re.search(r"## 4\. 错误码全表\(93\)(.*?)(?:\n## 5\.|\Z)", text, re.S)
+    assert match is not None, "mvp1 compile-rules must keep a bounded 93-code table section"
+    return set(re.findall(r"\[F-v3-[a-z0-9-]+\]", match.group(1)))
 
 
 def test_error_payload_autofills_registry_metadata() -> None:
     ErrorPayload = _error_payload_model()
 
     payload = ErrorPayload(code="[F-v3-graph-phase-cycle]", message="cycle")
+    metadata = _error_registry()[payload.code]
 
     assert payload.code == "[F-v3-graph-phase-cycle]"
     assert payload.level == "FATAL"
     assert payload.stage == ("编译期",)
     assert payload.message == "cycle"
-    assert (
-        payload.doc_link
-        == "./02-graph-md-spec.md#phases-注册与-body-拓扑校验-phase-registration--dag"
+    assert payload.doc_link == metadata.doc_link
+    assert payload.details == {}
+
+
+def test_error_payload_details_default_to_empty_json_object() -> None:
+    ErrorPayload = _error_payload_model()
+
+    payload = ErrorPayload(code="[F-v3-graph-phase-cycle]", message="cycle")
+
+    assert payload.details == {}
+    assert payload.model_dump(mode="json")["details"] == {}
+
+
+def test_error_payload_details_are_json_safe_and_stable(tmp_path: Path) -> None:
+    import json
+
+    class DiagnosticModel(BaseModel):
+        label: str
+
+    ErrorPayload = _error_payload_model()
+    payload = ErrorPayload(
+        code="[F-v3-graph-phase-cycle]",
+        message="cycle",
+        details={
+            "path": tmp_path / "GRAPH.md",
+            "choices": {"beta", "alpha"},
+            "error": RuntimeError("boom"),
+            "nested": {"model": DiagnosticModel(label="ok")},
+        },
     )
+
+    dumped = payload.model_dump(mode="json")
+    assert dumped["details"]["path"] == str(tmp_path / "GRAPH.md")
+    assert dumped["details"]["choices"] == ["alpha", "beta"]
+    assert dumped["details"]["error"] == "RuntimeError: boom"
+    assert dumped["details"]["nested"]["model"] == {"label": "ok"}
+    assert json.loads(payload.model_dump_json())["details"] == dumped["details"]
 
 
 def test_error_payload_rejects_unknown_code() -> None:
@@ -87,6 +133,7 @@ def test_error_registry_preserves_multi_stage_codes() -> None:
 def test_graph_agent_error_exposes_serializable_payload() -> None:
     ErrorPayload = _error_payload_model()
     payload = ErrorPayload(code="[F-v3-runtime-state-mapping-failed]", message="bad state")
+    metadata = _error_registry()[payload.code]
 
     exc = GraphAgentError("bad state", payload=payload)
 
@@ -95,19 +142,64 @@ def test_graph_agent_error_exposes_serializable_payload() -> None:
     assert dumped["level"] == "FATAL"
     assert dumped["stage"] == ("运行期",)
     assert dumped["message"] == "bad state"
-    assert dumped["doc_link"] == "./12-compile-runtime-flow-spec.md#运行时引擎流-run-time-workflow"
+    assert dumped["doc_link"] == metadata.doc_link
 
 
 def test_concrete_graph_agent_error_subclass_exposes_payload() -> None:
     ErrorPayload = _error_payload_model()
     payload = ErrorPayload(code="[F-v3-tool-argument-invalid]", message="bad argument")
+    metadata = _error_registry()[payload.code]
 
     exc = GraphAgentFatalError("bad argument", payload=payload)
 
     assert exc.payload.model_dump()["code"] == "[F-v3-tool-argument-invalid]"
-    assert exc.payload.model_dump()["doc_link"] == (
-        "./09-builtin-modules-spec.md#按需调取-tools-read_reference--read_example"
+    assert exc.payload.model_dump()["doc_link"] == metadata.doc_link
+
+
+def test_graph_agent_error_generated_payload_carries_context_details(tmp_path: Path) -> None:
+    exc = GraphAgentFatalError(
+        "[F-v3-runtime-state-mapping-failed] bad state",
+        context={"phase": "draft", "path": tmp_path / "state.json"},
     )
+
+    assert exc.payload is not None
+    assert exc.payload.details["context"] == {
+        "phase": "draft",
+        "path": str(tmp_path / "state.json"),
+    }
+
+
+def test_graph_agent_error_merges_explicit_payload_details_and_context(tmp_path: Path) -> None:
+    ErrorPayload = _error_payload_model()
+    payload = ErrorPayload(
+        code="[F-v3-runtime-state-mapping-failed]",
+        message="bad state",
+        details={"hint": "keep", "context": {"priority": "payload"}},
+    )
+
+    exc = GraphAgentError(
+        "bad state",
+        payload=payload,
+        context={"phase": "draft", "priority": "exception", "path": tmp_path / "state.json"},
+    )
+
+    assert exc.payload is payload
+    assert exc.payload.details["hint"] == "keep"
+    assert exc.payload.details["context"] == {
+        "phase": "draft",
+        "priority": "payload",
+        "path": str(tmp_path / "state.json"),
+    }
+
+
+def test_gateway_external_error_code_compatibility_keeps_payload_absent() -> None:
+    exc = GraphAgentError(
+        "[F-v3-gateway-provider-timeout] upstream failed",
+        context={"provider": "test"},
+    )
+
+    assert exc.payload is None
+    assert exc.context == {"provider": "test"}
 
 
 def test_skill_compilation_error_maps_location_fields_into_payload(tmp_path: Path, mock_skill_resolver: object) -> None:

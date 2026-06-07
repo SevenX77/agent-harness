@@ -22,7 +22,7 @@
 绝不允许凭个人记忆或凑数列举业务特性。所有的业务特性生成器只保留以下三处“契约锁”：
 1. **公开 API 契约（65 个稳定符号）**：参考 `public-api-contract.md` 推导其背后的端到端业务特性。
 2. **skill-spec 章节**：引擎直接对外的行为契约。
-3. **Studio Copilot consumer-file**：明确来源为 `docs/engine/public-api-contract.md` 中每个符号下记录的 `Consumer files:` 字段。
+3. **Studio Copilot consumer-file**：明确来源为 `docs/engine/mvp0/public-api-contract.md` 中每个符号下记录的 `Consumer files:` 字段。
 
 *注：错误码与事件流仅作为“切面字段引用”，不作为业务特性的生成来源。*
 
@@ -74,7 +74,7 @@
    - `id`: 正则 `^F-[a-z0-9-]+$`
    - `sources`: 多选，enum `[public-api, skill-spec, consumer-file]`，至少 1 个
    - `public_api_symbols`: 必须来自 65 清单
-   - `skill_spec_sections`: 文件路径 + heading anchor (e.g., `docs/engine/skill-spec/05-finish-task-spec.md#workflow-finish-mode`)
+   - `skill_spec_sections`: 文件路径 + heading anchor (e.g., `docs/engine/mvp0/skill-spec/05-finish-task-spec.md#workflow-finish-mode`)
    - `consumer_files`: 必须来自 public-api-contract.md 中记录的 Consumer files
    - `error_codes_primary` / `error_codes_secondary`
    - `events_primary` / `events_secondary`

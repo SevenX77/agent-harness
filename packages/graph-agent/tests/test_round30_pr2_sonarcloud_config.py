@@ -34,10 +34,10 @@ def test_sonar_project_properties_declares_project_sources_tests_and_coverage() 
     assert properties["sonar.organization"] == "sevenx77"
     assert properties["sonar.projectKey"] == "SevenX77_agent-harness"
     assert properties["sonar.host.url"] == "https://sonarcloud.io"
-    assert properties["sonar.sources"] == "packages/graph-agent/src,apps/studio/backend/app"
-    assert properties["sonar.tests"] == "packages/graph-agent/tests,apps/studio/backend/tests"
+    assert properties["sonar.sources"] == "packages/graph-agent/src,packages/graph-agent-gateway/src,apps/studio/backend/app,apps/studio/frontend/src"
+    assert properties["sonar.tests"] == "packages/graph-agent/tests,packages/graph-agent-gateway/tests,apps/studio/backend/tests,apps/studio/frontend/src"
     assert properties["sonar.python.version"] == "3.11,3.12,3.13"
     assert (
         properties["sonar.python.coverage.reportPaths"]
-        == "coverage-backend.xml,coverage-graph-agent.xml"
+        == "coverage-backend.xml,coverage-graph-agent.xml,coverage-gateway.xml"
     )

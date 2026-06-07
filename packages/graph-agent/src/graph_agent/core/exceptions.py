@@ -10,12 +10,39 @@ import re
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
 
 from graph_agent.core.error_registry import ERROR_REGISTRY
 
 _ERROR_CODE_RE = re.compile(r"\[F-v3-[a-z0-9-]+\]")
 _EXTERNAL_ERROR_CODE_PREFIXES = ("[F-v3-gateway-",)
+
+
+def _normalize_details_val(val: Any) -> Any:
+    """Recursively normalize values to be JSON-safe and stable."""
+    if isinstance(val, dict):
+        return {str(k): _normalize_details_val(v) for k, v in val.items()}
+    elif isinstance(val, (list, tuple)):
+        return [_normalize_details_val(x) for x in val]
+    elif isinstance(val, set):
+        try:
+            sorted_list = sorted(list(val))
+        except Exception:
+            sorted_list = list(val)
+        return [_normalize_details_val(x) for x in sorted_list]
+    elif isinstance(val, Path):
+        return str(val)
+    elif isinstance(val, BaseModel):
+        return _normalize_details_val(val.model_dump(mode="json"))
+    elif isinstance(val, Exception):
+        return f"{type(val).__name__}: {str(val)}"
+    else:
+        import json
+        try:
+            json.dumps(val)
+            return val
+        except Exception:
+            return str(val)
 
 
 class ErrorPayload(BaseModel):
@@ -32,6 +59,16 @@ class ErrorPayload(BaseModel):
     phase_id: str | None = None
     field_path: str | None = None
     source_path: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("details", mode="before")
+    @classmethod
+    def _normalize_details_validator(cls, v: Any) -> dict[str, Any]:
+        if v is None:
+            return {}
+        if not isinstance(v, dict):
+            return {}
+        return _normalize_details_val(v)
 
     @model_validator(mode="after")
     def _fill_registry_metadata(self) -> ErrorPayload:
@@ -96,8 +133,21 @@ class GraphAgentError(Exception):
     ) -> None:
         """Store the surfaced error message and optional structured context."""
         super().__init__(message)
-        self.payload = payload or _payload_from_message(message)
         self.context = context or {}
+        actual_payload = payload or _payload_from_message(message)
+        if actual_payload is not None:
+            if self.context:
+                details = dict(actual_payload.details or {})
+                existing_ctx = details.get("context")
+                normalized_exc_ctx = _normalize_details_val(self.context)
+                if isinstance(existing_ctx, dict) and isinstance(normalized_exc_ctx, dict):
+                    merged_ctx = dict(normalized_exc_ctx)
+                    merged_ctx.update(existing_ctx)
+                    details["context"] = merged_ctx
+                else:
+                    details["context"] = normalized_exc_ctx
+                actual_payload.details = _normalize_details_val(details)
+        self.payload = actual_payload
 
 
 class GraphCompileError(GraphAgentError):

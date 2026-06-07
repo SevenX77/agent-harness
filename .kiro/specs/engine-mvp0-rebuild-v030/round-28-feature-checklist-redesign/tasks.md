@@ -2,7 +2,7 @@
 
 ## Cutover Discipline
 
-本轮是 schema / contract manifest cutover：新增 F3 manifest YAML 与 schema，迁移旧 `docs/engine/feature-compliance-checklist.md` 和 `packages/graph-agent/tests/test_feature_traceability_matrix.py`。同 PR 必须同步文档、manifest、unit / integration / e2e 可用测试与 CI gate，不允许拆成“业务 PR-A + 测试 PR-B”。
+本轮是 schema / contract manifest cutover：新增 F3 manifest YAML 与 schema，迁移旧 `docs/engine/mvp0/feature-compliance-checklist.md` 和 `packages/graph-agent/tests/test_feature_traceability_matrix.py`。同 PR 必须同步文档、manifest、unit / integration / e2e 可用测试与 CI gate，不允许拆成“业务 PR-A + 测试 PR-B”。
 
 - 新旧 traceability gate 必须 AND 双跑至少 1 个独立 PR 在 `main` green merged 后，且 dual-run overlap 不少于 24h：旧 `test_feature_traceability_matrix.py` 与新 manifest CI 都必须 pass。安全 overlap 后，才允许在同一个原子 cutover PR 下架旧 checklist 和旧测试。
 - 严禁 admin override 跳过 CI 合入 `main`。
@@ -53,14 +53,14 @@ PM 黄金原则是合并硬门：功能 / API 一个都不能少。`feature-comp
 
 ### Task A3 — 示例路径与 anchor 全部真实化
 
-- 红灯：grep / schema test 禁止不存在的 illustrative examples，例如 `docs/engine/skill-spec/05-finish-task-spec.md#workflow-finish-mode`。
-- 绿灯：所有 schema 示例换成已 grep verify 的真实路径和 H2 anchor，例如 `docs/engine/skill-spec/05-agent-md-spec.md#body-xml-扁平化容器`、`docs/engine/skill-spec/06-cognitive-template-spec.md#8-大插槽布局拓扑`。
+- 红灯：grep / schema test 禁止不存在的 illustrative examples，例如 `docs/engine/mvp0/skill-spec/05-finish-task-spec.md#workflow-finish-mode`。
+- 绿灯：所有 schema 示例换成已 grep verify 的真实路径和 H2 anchor，例如 `docs/engine/mvp0/skill-spec/05-agent-md-spec.md#body-xml-扁平化容器`、`docs/engine/mvp0/skill-spec/06-cognitive-template-spec.md#8-大插槽布局拓扑`。
 - Acceptance：a2 audit pass + a3 audit pass。
 
 ### Task A4 — Hash lock 单文件 rename
 
 - 红灯：test discovery 断言只存在一个 contract hash lock test，不允许新增平行 hash-lock test。
-- 绿灯：rename `packages/graph-agent/tests/test_skill_spec_hash_lock.py` -> `packages/graph-agent/tests/test_contract_hash_lock.py`，并泛化覆盖 `docs/engine/skill-spec/*`、`docs/engine/public-api-contract.md`、新版 `docs/engine/feature-compliance-checklist.md`。
+- 绿灯：rename `packages/graph-agent/tests/test_skill_spec_hash_lock.py` -> `packages/graph-agent/tests/test_contract_hash_lock.py`，并泛化覆盖 `docs/engine/mvp0/skill-spec/*`、`docs/engine/mvp0/public-api-contract.md`、新版 `docs/engine/mvp0/feature-compliance-checklist.md`。
 - Acceptance：a2 audit pass + a3 audit pass。
 
 ### PM External Verify — Branch Protection Attestation
@@ -103,7 +103,7 @@ Tests first:
 
 Implementation:
 - feature 数量不设固定值，预计 40-80；以语义完整为准。
-- `targeted_tests` v0 从旧 `docs/engine/feature-compliance-checklist.md` 30 项 `[Covered By: ...]` 抽取并映射到对应 feature；不能先等待 Task 5 新测试。
+- `targeted_tests` v0 从旧 `docs/engine/mvp0/feature-compliance-checklist.md` 30 项 `[Covered By: ...]` 抽取并映射到对应 feature；不能先等待 Task 5 新测试。
 - 必须枚举 `src` 中所有 monkey-patch / compat shim / runtime hook 模块，反推并建立 runtime compatibility feature，避免 Task 3 source mapping 将这些模块误标为 detail/debt。
 - 每个 concrete `[F-v3-*]` 错误码必须有且只有一个 primary owner feature；模板 `[F-v3-*]` 与 `[F-v3-<domain>-<specific>]` 必须过滤。
 - 每个 `CallbackEvent` union variant 必须有且只有一个 primary owner feature；以 union variants 为准，不扫孤立类。
@@ -185,9 +185,9 @@ Tests first:
 - 新增 cutover mapping test，要求旧 30 项逐项有去向：保留 / 合并 / 拆分 / 降级 + exemption。
 
 Implementation:
-- overlap 至少 1 个独立 PR 在 `main` green merged 后且 dual-run overlap 不少于 24h，才允许原子删除旧 `packages/graph-agent/tests/test_feature_traceability_matrix.py` 与旧 `docs/engine/feature-compliance-checklist.md`，替换为新版 frozen checklist / manifest 输出。
-- `.github/CODEOWNERS` 必须新增 / 保留 `docs/engine/feature-compliance-checklist.md @SevenX77`，与 round-27 契约文档同标准。
-- 新版 `docs/engine/feature-compliance-checklist.md` 顶部必须添加 YAML frontmatter：
+- overlap 至少 1 个独立 PR 在 `main` green merged 后且 dual-run overlap 不少于 24h，才允许原子删除旧 `packages/graph-agent/tests/test_feature_traceability_matrix.py` 与旧 `docs/engine/mvp0/feature-compliance-checklist.md`，替换为新版 frozen checklist / manifest 输出。
+- `.github/CODEOWNERS` 必须新增 / 保留 `docs/engine/mvp0/feature-compliance-checklist.md @SevenX77`，与 round-27 契约文档同标准。
+- 新版 `docs/engine/mvp0/feature-compliance-checklist.md` 顶部必须添加 YAML frontmatter：
   ```yaml
   ---
   status: FROZEN
@@ -271,7 +271,7 @@ uv run pytest packages/graph-agent/tests --tb=short -q
 
 ```bash
 find packages/graph-agent/src/graph_agent -name '*.py' | sort
-rg -n "Consumer files|^## " docs/engine/public-api-contract.md docs/engine/skill-spec
+rg -n "Consumer files|^## " docs/engine/mvp0/public-api-contract.md docs/engine/mvp0/skill-spec
 rg -n "CallbackEvent|event_type" packages/graph-agent/src/graph_agent/callbacks/events.py
-rg -n "\[F-v3-" docs/engine/skill-spec/11-error-code-spec.md
+rg -n "\[F-v3-" docs/engine/mvp0/skill-spec/11-error-code-spec.md
 ```

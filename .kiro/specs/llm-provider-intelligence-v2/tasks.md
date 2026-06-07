@@ -1,6 +1,6 @@
 # Tasks: LLM Provider Intelligence V2 Hard Cutover
 
-本文档把 Claude audit 中的问题拆成两类：需要写进设计契约的内容，以及实现阶段要执行的任务。实现必须对齐 `requirements.md`、`design.md` 和 `docs/engine/graph-agent-gateway/mvp0-alignment.md`，不做旧 `models/providers/roles` schema、旧 Studio DTO、旧 Engine-owned client manager 的向后兼容。
+本文档把 Claude audit 中的问题拆成两类：需要写进设计契约的内容，以及实现阶段要执行的任务。实现必须对齐 `requirements.md`、`design.md` 和 `docs/graph-agent-gateway/mvp0/mvp0-alignment.md`，不做旧 `models/providers/roles` schema、旧 Studio DTO、旧 Engine-owned client manager 的向后兼容。
 
 ## Audit Disposition
 
@@ -377,7 +377,7 @@
   - Run a short Graph Agent flow with temp credentials/roles files and no `.env` provider keys.
   - Expected: resolver creates route-backed `GatewayChatModel`; fake client receives endpoint credential from `ResolvedRoute`.
 - [x] 6.7 Documentation cleanup.
-  - Update `docs/engine/graph-agent-gateway/mvp0-alignment.md` if implementation changes any package boundary.
+  - Update `docs/graph-agent-gateway/mvp0/mvp0-alignment.md` if implementation changes any package boundary.
   - Update `docs/development/FRONTEND_UI_SPEC.md` if UI verification reveals a reusable rule.
   - Archive or rewrite `docs/development/LLM_MODEL_CONFIGURATION_FLOW.md` to match the V2 endpoint/route registry flow.
   - Decide fate of `apps/studio/backend/app/data/llm_providers/*.md`: archived under `docs/development/llm_provider_notes/` as import-draft reference material, not runtime source.
@@ -460,7 +460,7 @@
   - Modify:
     - `docs/development/examples/llm_roles.v2.example.yaml`
     - `docs/development/CREDENTIALS_V4_BOOTSTRAP.md`
-    - `docs/engine/graph-agent-gateway/mvp0-alignment.md`
+    - `docs/graph-agent-gateway/mvp0/mvp0-alignment.md`
   - Examples use `runtime_settings` nested objects, not legacy scalar route-entry params.
   - Docs state repo `config/` files are seed/example only.
   - Acceptance: docs grep has no claim that repo-root `config/llm_roles.yaml` is the active runtime file.
@@ -501,7 +501,7 @@
   - Acceptance: live tests are opt-in, never required in normal CI, and produce a JSON observation artifact under `temp/` for review.
 
 - [x] 8.4 Record provider pattern defaults and lower bounds.
-  - Create: `docs/engine/graph-agent-gateway/provider-runtime-settings-matrix.md`
+  - Create: `docs/graph-agent-gateway/mvp0/provider-runtime-settings-matrix.md`
   - Document observed/default patterns for Anthropic, OpenAI-compatible, Google GenAI, DeepSeek, and Ark SDK routes.
   - Record at least one observed lower-bound or unsupported-setting result per tested provider family when safe.
   - Distinguish `provider_doc`, `manual`, and `probed_verified` sources.

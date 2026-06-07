@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 import yaml
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from pydantic import SecretStr
 
 
@@ -112,6 +112,44 @@ class RecordingClientManager:
 
     def usage_total_calls(self, route: Any) -> int:
         return len(self.dispatches)
+
+
+class FakeRouteChatModel:
+    def __init__(self, factory: FakeRouteChatModelFactory, route: Any) -> None:
+        self.factory = factory
+        self.route = route
+
+    def invoke(self, messages: list[BaseMessage]) -> AIMessage:
+        self.factory.invocations.append({"route": self.route, "messages": messages})
+        return AIMessage(
+            content="ok",
+            usage_metadata={"input_tokens": 2, "output_tokens": 1, "total_tokens": 3},
+            response_metadata={"finish_reason": "stop"},
+        )
+
+
+class FakeRouteChatModelFactory:
+    def __init__(self, **kwargs: Any) -> None:
+        self.init_kwargs = dict(kwargs)
+        self.builds: list[dict[str, Any]] = []
+        self.invocations: list[dict[str, Any]] = []
+
+    def build(self, route: Any, **kwargs: Any) -> FakeRouteChatModel:
+        self.builds.append({"route": route, "kwargs": dict(kwargs)})
+        return FakeRouteChatModel(self, route)
+
+
+def _install_route_factory(monkeypatch: pytest.MonkeyPatch) -> FakeRouteChatModelFactory:
+    from graph_agent_gateway import gateway_chat_model
+
+    factory = FakeRouteChatModelFactory()
+
+    def make_factory(**kwargs: Any) -> FakeRouteChatModelFactory:
+        factory.init_kwargs.update(kwargs)
+        return factory
+
+    monkeypatch.setattr(gateway_chat_model, "RouteChatModelFactory", make_factory)
+    return factory
 
 
 def _write_registry_files(tmp_path: Path) -> tuple[Path, Path]:
@@ -251,10 +289,11 @@ def test_runtime_uses_route_secret_and_no_provider_env(
         "GOOGLE_API_KEY",
         "GEMINI_API_KEY",
         "OPENROUTER_API_KEY",
-        "WAVESPEED_API_KEY",
+            "WAVESPEED_API_KEY",
     ):
         monkeypatch.delenv(key, raising=False)
 
+    factory = _install_route_factory(monkeypatch)
     client_manager = RecordingClientManager()
     model = ModelResolver(
         registry_snapshot=_snapshot(),
@@ -265,15 +304,18 @@ def test_runtime_uses_route_secret_and_no_provider_env(
 
     assert response.content == "ok"
     assert client_manager.probes == [("openai-direct:gpt-5", 3)]
-    dispatch = client_manager.dispatches[0]
-    assert dispatch["route"].credential_ref == "endpoint:openai-direct"
-    assert "api_key" not in dispatch["route"].model_dump(mode="json")
-    assert dispatch["route"].credential_fingerprint
-    assert dispatch["kwargs"]["runtime_policy"].token_escalation_rounds == 1
-    assert dispatch["messages"][0] == {"role": "system", "content": "Always be exact."}
+    build = factory.builds[0]
+    assert build["route"].credential_ref == "endpoint:openai-direct"
+    assert "api_key" not in build["route"].model_dump(mode="json")
+    assert build["route"].credential_fingerprint
+    assert factory.init_kwargs["credential_provider"].get("endpoint:openai-direct").get_secret_value() == "route-secret"
+    assert isinstance(factory.invocations[0]["messages"][0], SystemMessage)
+    assert factory.invocations[0]["messages"][0].content == "Always be exact."
 
 
-def test_thinking_protocol_uses_capability_value_not_field_presence() -> None:
+def test_thinking_protocol_uses_capability_value_not_field_presence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from graph_agent_gateway.registry.schema import CapabilityValue
     from graph_agent_gateway.resolver import ModelResolver
 
@@ -286,6 +328,7 @@ def test_thinking_protocol_uses_capability_value_not_field_presence() -> None:
             }
         }
     )
+    factory = _install_route_factory(monkeypatch)
     client_manager = RecordingClientManager()
     model = ModelResolver(
         registry_snapshot=snapshot,
@@ -294,10 +337,12 @@ def test_thinking_protocol_uses_capability_value_not_field_presence() -> None:
 
     model.invoke([HumanMessage(content="hello")])
 
-    assert client_manager.dispatches[0]["kwargs"]["reasoning"] is False
+    assert factory.builds[0]["kwargs"]["reasoning"] is False
 
 
-def test_route_runtime_setting_not_capability_enables_thinking() -> None:
+def test_route_runtime_setting_not_capability_enables_thinking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from graph_agent_gateway.registry.schema import CapabilityValue, RoleRouteEntry
     from graph_agent_gateway.resolver import ModelResolver
 
@@ -319,6 +364,7 @@ def test_route_runtime_setting_not_capability_enables_thinking() -> None:
             },
         )
     ]
+    factory = _install_route_factory(monkeypatch)
     client_manager = RecordingClientManager()
     model = ModelResolver(
         registry_snapshot=snapshot,
@@ -328,7 +374,7 @@ def test_route_runtime_setting_not_capability_enables_thinking() -> None:
     model.invoke([HumanMessage(content="hello")])
 
     assert model.thinking_enabled is True
-    assert client_manager.dispatches[0]["kwargs"]["reasoning"] is True
+    assert factory.builds[0]["kwargs"]["reasoning"] is True
 
 
 def test_legacy_roles_schema_is_fatal(tmp_path: Path) -> None:

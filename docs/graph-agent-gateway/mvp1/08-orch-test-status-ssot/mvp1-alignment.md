@@ -206,6 +206,10 @@ MVP1 目标:测试状态以**后端 SSOT(单一事实源)**为准。探测结果
 
 ## gaps / 待设计
 
+- ⚠️ **Finding C + C-2（2026-06-04 实查代码，状态真实性，强化本模块"后端 SSOT / 前端不持第二份真相"论点）**：
+  - **C（probe ≠ runtime）**：Studio endpoint test 走 raw HTTP（探测段经 `_join_base_url_and_endpoint` 会 dedup `/v1`），但 SDK runtime 不 dedup → 同一 base_url，probe 通过、runtime 404（实证见 [[03-orch-credentials-endpoints]] F3 + `temp/2026-06-04-wavespeed-generic-adapter-spike-report.md`）。**后果：route 可能 probe 显 verified/绿、runtime 实际挂 = false-positive verified。**
+  - **C-2（API Keys 页 Connected 假阳性）**：实查——`Connected` 徽章由 **studio 前端自算**（`ProviderCard.tsx` `testStatus`，取持久化 `available_models`/`last_test_status`），**没用本模块的 `project_provider_model_state` 6 态投影**。Get Models 失败仍显 Connected 的根因：① `upsertProviderModelsListResponse`（`SettingsPage.tsx:266`）"之前 ok 就永远保持 ok"、`:267` merge 不清旧模型；② thrown error 的 `catch`（`SettingsPage.tsx:694-698`）只 toast 不更新态；③ 徽章 `hasVerifiedModel`（`ProviderCard.tsx:781,800`）优先，旧 verified 模型在就显绿。
+  - **设计结论（要求）**：① 可用性状态（含 API Keys 页 Connected）由**后端 6 态投影**驱动，前端只读、不自持第二份；② **探测 / Get Models 失败必须回写状态**（降级，而非保留旧 ok）；③ probe 尽量贴 runtime 路径，或显式区分 `HTTP-reachable` / `SDK-runtime-verified` 两态。
 - **代码下沉**(后续工程,非本轮):6 态投影内核 + draft/证据知识库内核 + 熔断持久化内核 → gateway 包;颜色渲染 / import-apply 工作流 / 存储介质 / 远端源配置留 ③a。
 - **待办(去桩,PM 已拍板必做 D2)**:把 import draft probe 从"标记 probed"升级为真实 worker;当前 `probe_import_draft`(只把 draft.status 改成 probed,注释说真 agent probing 由后续 worker 处理)没有实际探测逻辑(`apps/studio/backend/app/routers/llm.py:871-876`)。**蓝态 + 真探测结果回写都依赖它去桩**(`routers/llm.py:872`)——做成真 probe worker。
 - **待办(6 态 Literal 改造)**:`ProviderUiState` Literal 去 `needs_setup`、加 `failed`(带 reason)+ `historical_ready`(`services/llm_state_projection.py:12`);`_setup_reason`(`:49-56`)改产 `failed` + reason(`missing_config`/`endpoint_unreachable`/`model_failed`)而非 `needs_setup`;`project_provider_model_state`(`:23-46`,现只读 endpoint+route+circuits、**不读 draft**)加"draft 是否有该 route 历史连通"输入。

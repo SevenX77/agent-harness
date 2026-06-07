@@ -12,6 +12,7 @@ from langchain_core.messages import SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
+from langchain.agents import create_agent
 from graph_agent.callbacks.emit import _safe_emit_event
 from graph_agent.callbacks.events import (
     BuiltinSubagentEnterEvent,
@@ -214,6 +215,7 @@ def _build_phase_node(
                 skill_resolver,
                 _loading_stack,
                 _compilation_cache,
+                checkpointer=checkpointer,
                 predict_context=predict_context,
             ),
             node_kind="agent",
@@ -420,6 +422,143 @@ def _build_subgraph_node(
     return _subgraph_node
 
 
+from langgraph.checkpoint.base import BaseCheckpointSaver, CheckpointTuple, Checkpoint, CheckpointMetadata
+from typing import AsyncIterator, Iterator, Any, cast
+
+class NamespaceCheckpointer(BaseCheckpointSaver[Any]):
+    def __init__(self, base_checkpointer: BaseCheckpointSaver[Any], target_ns: str) -> None:
+        super().__init__(serde=base_checkpointer.serde)
+        self.base_checkpointer = base_checkpointer
+        self.target_ns = target_ns
+
+    def _wrap_config(self, config: RunnableConfig) -> RunnableConfig:
+        new_config = dict(cast(Any, config))
+        configurable = dict(new_config.get("configurable", {}))
+        ns = configurable.get("checkpoint_ns")
+        if ns == "" or ns is None:
+            configurable["checkpoint_ns"] = self.target_ns
+        new_config["configurable"] = configurable
+        return new_config  # type: ignore[return-value]
+
+    def _unwrap_config(self, config: RunnableConfig) -> RunnableConfig:
+        new_config = dict(cast(Any, config))
+        configurable = dict(new_config.get("configurable", {}))
+        ns = configurable.get("checkpoint_ns")
+        if ns == self.target_ns:
+            configurable["checkpoint_ns"] = ""
+        new_config["configurable"] = configurable
+        return new_config  # type: ignore[return-value]
+
+    def _unwrap_tuple(self, tup: CheckpointTuple) -> CheckpointTuple:
+        return CheckpointTuple(
+            config=self._unwrap_config(tup.config),
+            checkpoint=tup.checkpoint,
+            metadata=tup.metadata,
+            parent_config=self._unwrap_config(tup.parent_config) if tup.parent_config else None,
+            pending_writes=tup.pending_writes,
+        )
+
+    def get_tuple(self, config: RunnableConfig) -> CheckpointTuple | None:
+        wrapped = self._wrap_config(config)
+        tup = self.base_checkpointer.get_tuple(wrapped)
+        if tup is None:
+            return None
+        return self._unwrap_tuple(tup)
+
+    async def aget_tuple(self, config: RunnableConfig) -> CheckpointTuple | None:
+        wrapped = self._wrap_config(config)
+        tup = await self.base_checkpointer.aget_tuple(wrapped)
+        if tup is None:
+            return None
+        return self._unwrap_tuple(tup)
+
+    def list(
+        self,
+        config: RunnableConfig | None,
+        *,
+        filter: dict[str, Any] | None = None,
+        before: RunnableConfig | None = None,
+        limit: int | None = None,
+    ) -> Iterator[CheckpointTuple]:
+        wrapped = self._wrap_config(config) if config is not None else None
+        wrapped_before = self._wrap_config(before) if before is not None else None
+        for tup in self.base_checkpointer.list(
+            wrapped, filter=filter, before=wrapped_before, limit=limit
+        ):
+            yield self._unwrap_tuple(tup)
+
+    async def alist(
+        self,
+        config: RunnableConfig | None,
+        *,
+        filter: dict[str, Any] | None = None,
+        before: RunnableConfig | None = None,
+        limit: int | None = None,
+    ) -> AsyncIterator[CheckpointTuple]:
+        wrapped = self._wrap_config(config) if config is not None else None
+        wrapped_before = self._wrap_config(before) if before is not None else None
+        async for tup in self.base_checkpointer.alist(
+            wrapped, filter=filter, before=wrapped_before, limit=limit
+        ):
+            yield self._unwrap_tuple(tup)
+
+    def put(
+        self,
+        config: RunnableConfig,
+        checkpoint: Checkpoint,
+        metadata: CheckpointMetadata,
+        new_versions: dict[str, Any],
+    ) -> RunnableConfig:
+        wrapped = self._wrap_config(config)
+        res = self.base_checkpointer.put(wrapped, checkpoint, metadata, new_versions)
+        return self._unwrap_config(res)
+
+    async def aput(
+        self,
+        config: RunnableConfig,
+        checkpoint: Checkpoint,
+        metadata: CheckpointMetadata,
+        new_versions: dict[str, Any],
+    ) -> RunnableConfig:
+        wrapped = self._wrap_config(config)
+        res = await self.base_checkpointer.aput(wrapped, checkpoint, metadata, new_versions)
+        return self._unwrap_config(res)
+
+    def put_writes(
+        self,
+        config: RunnableConfig,
+        writes: Any,
+        task_id: str,
+        task_path: str = "",
+    ) -> None:
+        wrapped = self._wrap_config(config)
+        from inspect import signature
+        sig = signature(self.base_checkpointer.put_writes)
+        if "task_path" in sig.parameters:
+            self.base_checkpointer.put_writes(wrapped, writes, task_id, task_path=task_path)
+        else:
+            self.base_checkpointer.put_writes(wrapped, writes, task_id)
+
+    async def aput_writes(
+        self,
+        config: RunnableConfig,
+        writes: Any,
+        task_id: str,
+        task_path: str = "",
+    ) -> None:
+        wrapped = self._wrap_config(config)
+        from inspect import signature
+        sig = signature(self.base_checkpointer.aput_writes)
+        if "task_path" in sig.parameters:
+            await self.base_checkpointer.aput_writes(wrapped, writes, task_id, task_path=task_path)
+        else:
+            await self.base_checkpointer.aput_writes(wrapped, writes, task_id)
+
+    def with_allowlist(self, extra_allowlist: Any) -> "NamespaceCheckpointer":
+        cloned = self.base_checkpointer.with_allowlist(extra_allowlist)
+        return NamespaceCheckpointer(cloned, self.target_ns)
+
+
 def _build_skill_node(
     phase_id: str,
     phase_doc: PhaseDocument,
@@ -432,6 +571,8 @@ def _build_skill_node(
     skill_resolver: SkillResolverProtocol,
     _loading_stack: tuple[str, ...],
     _compilation_cache: dict[str, CompiledSkill],
+    *,
+    checkpointer: Any = None,
     predict_context: Any = None,
 ) -> Any:
     phase_chat_model = _resolve_phase_chat_model(
@@ -477,8 +618,66 @@ def _build_skill_node(
         max_patch_attempts=max_patch_attempts,
     )
     all_tools = [*business_tools, *framework_tools, finish_task]
-    all_tools_by_name = {tool.name: tool for tool in all_tools}
-    cognitive_flow = build_middleware_chain_cognitive_flow(phase_name=phase_id)
+
+    # Coerce output_schema if it's a dict to SchemaObject, then get Pydantic model
+    from graph_agent.core.schema_engine import SchemaEngine
+    engine = SchemaEngine()
+    coerced_schema = output_schema
+    if isinstance(output_schema, dict):
+        coerced_schema = engine.parse_from_md(json.dumps(output_schema, ensure_ascii=False))
+
+    current_phase_schema = coerced_schema
+    if coerced_schema is not None:
+        current_phase_schema = engine.get_pydantic_model(coerced_schema)
+
+    from graph_agent.core.io_manager import IODef, IOManager
+    from graph_agent.middleware.factory import build_middleware_chain
+    io_specs = []
+    if isinstance(output_schema, dict):
+        properties = output_schema.get("properties")
+        if isinstance(properties, dict):
+            req_list = output_schema.get("required", [])
+            for prop_name in properties:
+                if isinstance(prop_name, str):
+                    is_req = prop_name in req_list
+                    io_specs.append(
+                        IODef(
+                            source_field="business_data_parsed",
+                            target_field=prop_name,
+                            hoist_path=f"business_data_parsed[0].{prop_name}",
+                            required=is_req,
+                        )
+                    )
+
+    middleware_chain = build_middleware_chain(
+        io_manager=IOManager(io_specs),
+        schema_engine=engine,
+        current_phase_schema=current_phase_schema,
+        phase_name=phase_id,
+        unattended=False,  # dynamically resolved in middleware
+        interrupt_fn=None,
+        callbacks=_callback_tuple(callbacks),
+    )
+
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.errors import GraphRecursionError
+
+    inner_checkpointer = checkpointer or InMemorySaver()
+    wrapped_checkpointer = NamespaceCheckpointer(inner_checkpointer, f"agent:{phase_id}")
+
+    agent_graph = create_agent(
+        model=phase_chat_model,
+        tools=all_tools,
+        system_prompt=_agent_system_prompt(
+            phase_id,
+            phase_ast,
+            compiled,
+            knowledge_base_markdown=knowledge_base_markdown,
+        ),
+        middleware=middleware_chain,
+        state_schema=WorkflowState,  # type: ignore[arg-type]
+        checkpointer=wrapped_checkpointer,
+    )
 
     def _skill_node(
         state: WorkflowState,
@@ -491,89 +690,90 @@ def _build_skill_node(
                 payload=make_error_payload("[F-v3-agent-llm-role-unknown]", detail),
             )
 
-        data_updates: dict[str, Any] = {}
-        flow = state["flow"].model_dump()
+        from typing import cast
+        inner_config: dict[str, Any] = {}
+        if config is not None:
+            inner_config = dict(config)
+        inner_configurable = dict(inner_config.get("configurable", {}))
 
-        messages = [
-            SystemMessage(
-                content=_agent_system_prompt(
-                    phase_id,
-                    phase_ast,
-                    compiled,
-                    knowledge_base_markdown=knowledge_base_markdown,
-                )
-            ),
-            *state["messages"],
-        ]
-        model = _bind_tools_if_supported(phase_chat_model, all_tools)
+        thread_id = inner_configurable.get("thread_id") or state["flow"].thread_id or "default"
+        inner_configurable["thread_id"] = thread_id
+        inner_configurable["checkpoint_ns"] = f"agent:{phase_id}"
+        inner_configurable["max_iterations"] = phase_ast.max_iterations
+        inner_config["configurable"] = inner_configurable
 
         max_turns = phase_ast.max_iterations
-        for _ in range(max_turns):
-            prompt_messages = messages
-            response = model.invoke(prompt_messages)
-            input_tokens, output_tokens = _extract_token_usage(response)
-            _safe_emit_event(
-                callbacks,
-                LLMCallEvent(
-                    phase_name=phase_id,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    messages=None,
-                    response_data=None,
-                ),
-            )
-            messages = [*prompt_messages, response]
-            tool_calls = list(getattr(response, "tool_calls", []) or [])
-            if not tool_calls:
-                break
-            for call in tool_calls:
-                name = call.get("name")
-                tool = all_tools_by_name.get(name)
-                if tool is None:
-                    _graph_fatal(f"LLM called unknown tool {name!r} in phase {phase_id!r}")
-                call_args = call.get("args", {})
-                if name in subagent_by_tool_name:
-                    result = _invoke_subagent_tool_t21(
-                        tool_name=name,
-                        subagent=subagent_by_tool_name[name],
-                        args=call_args if isinstance(call_args, dict) else {},
-                        state=state,
-                        flow=flow,
-                        runtime=subagent_runtime_by_tool_name[name],
-                        parent_config=config,
-                    )
-                else:
-                    result = tool.invoke(call_args)
+        if hasattr(agent_graph, "get_graph"):
+            all_nodes = [n for n in agent_graph.get_graph().nodes if n not in ("__start__", "__end__")]
+            nodes_per_turn = len(all_nodes) if all_nodes else 6
+        else:
+            nodes_per_turn = 6
+        inner_config["recursion_limit"] = max_turns * nodes_per_turn + 1
+
+        try:
+            result = agent_graph.invoke(
+                {
+                    "data": state["data"],
+                    "flow": state["flow"],
+                    "messages": state["messages"],
+                },
+                config=cast(RunnableConfig, inner_config),
+            )  # type: ignore[call-overload]
+        except GraphRecursionError:
+            state_config = dict(inner_config)
+            state_configurable = dict(state_config.get("configurable", {}))
+            state_configurable["checkpoint_ns"] = ""
+            state_config["configurable"] = state_configurable
+            inner_state = agent_graph.get_state(cast(RunnableConfig, state_config))
+            result = inner_state.values
+
+        from langchain_core.messages import AIMessage
+        res_messages = (result or {}).get("messages") or []
+        orig_messages = (state or {}).get("messages") or []
+        orig_msg_count = len(orig_messages)
+        new_messages = res_messages[orig_msg_count:]
+
+        valid_tool_names = set(tool.name for tool in all_tools) | set(subagent_by_tool_name.keys())
+        for msg in new_messages:
+            if isinstance(msg, AIMessage):
+                for tc in getattr(msg, "tool_calls", []) or []:
+                    tc_name = tc.get("name")
+                    if tc_name not in valid_tool_names:
+                        _graph_fatal(f"LLM called unknown tool {tc_name!r} in phase {phase_id!r}")
+
+        for i, msg in enumerate(new_messages):
+            if isinstance(msg, AIMessage):
+                input_tokens, output_tokens = _extract_token_usage(msg)
                 _safe_emit_event(
                     callbacks,
-                    ToolCallEvent(
+                    LLMCallEvent(
                         phase_name=phase_id,
-                        tool_name=str(name or ""),
-                        args=call_args if isinstance(call_args, dict) else {},
-                        result=_stringify_tool_result(result),
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        messages=None,
+                        response_data=None,
                     ),
                 )
-                messages.append(
-                    ToolMessage(
-                        content=json.dumps(result, ensure_ascii=False),
-                        name=name,
-                        tool_call_id=call.get("id", f"{name}-call"),
+                for tc in getattr(msg, "tool_calls", []) or []:
+                    tc_id = tc.get("id")
+                    tc_name = tc.get("name")
+                    tc_args = tc.get("args") or {}
+                    tc_result = ""
+                    for follow_msg in new_messages[i+1:]:
+                        if getattr(follow_msg, "tool_call_id", None) == tc_id:
+                            tc_result = str(follow_msg.content)
+                            break
+                    _safe_emit_event(
+                        callbacks,
+                        ToolCallEvent(
+                            phase_name=phase_id,
+                            tool_name=str(tc_name or ""),
+                            args=tc_args if isinstance(tc_args, dict) else {},
+                            result=tc_result,
+                        ),
                     )
-                )
-                finish_response = cognitive_flow.handle_finish_task_tool_result(
-                    tool_name=str(name or ""),
-                    tool_result=result,
-                    output_schema=output_schema if isinstance(output_schema, dict) else None,
-                    flow=flow,
-                    messages=messages,
-                    critic_metrics=critic_metrics,
-                )
-                if finish_response is not None:
-                    return finish_response
-        response_state = {"flow": flow, "messages": messages}
-        if data_updates:
-            response_state["data"] = data_updates
-        return response_state
+
+        return cast(dict[str, Any] | WorkflowState, result)
 
     return _skill_node
 
@@ -720,9 +920,13 @@ def _phase_end_context(
     response_state: dict[str, Any],
 ) -> dict[str, Any]:
     ctx = _observable_data_context(state)
+    if hasattr(response_state, "model_dump"):
+        response_state = response_state.model_dump()
     if isinstance(response_state, dict):
         # Extract only data/business updates
         data = response_state.get("data", {}) if "data" in response_state else response_state
+        if hasattr(data, "model_dump"):
+            data = data.model_dump()
         if isinstance(data, dict):
             if "phase_outputs" in data and isinstance(data["phase_outputs"], dict):
                 for p_name, p_out in data["phase_outputs"].items():

@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from graph_agent.core.exceptions import ErrorPayload
 
@@ -83,6 +83,65 @@ class RunResult(BaseModel):
     source: Literal["run", "predict"] = "run"
     phases: list[PhaseRecord] | None = None
     path_diff: PathDiff | None = None
+    diagnostics: list[ErrorPayload] = Field(default_factory=list)
+    diagnostics_limit: int = 100
+    diagnostics_truncated: bool = False
+    diagnostic_counts: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _process_diagnostics(self) -> RunResult:
+        if self.path_diff is not None:
+            if self.path_diff.missing or self.path_diff.extra or self.path_diff.order_mismatch:
+                self.success = False
+
+        limit = self.diagnostics_limit
+        if limit is None or limit <= 0:
+            limit = 100
+        self.diagnostics_limit = limit
+
+        raw_diagnostics = self.diagnostics or []
+
+        def _payload_sig(p: ErrorPayload) -> str:
+            import json
+            return json.dumps(p.model_dump(mode="json"), sort_keys=True)
+
+        seen_sigs = set()
+        deduped = []
+
+        if self.error is not None:
+            sig = _payload_sig(self.error)
+            seen_sigs.add(sig)
+            deduped.append(self.error)
+
+        for item in raw_diagnostics:
+            sig = _payload_sig(item)
+            if sig not in seen_sigs:
+                seen_sigs.add(sig)
+                deduped.append(item)
+
+        total = len(deduped)
+        by_level = {}
+        by_code = {}
+        for item in deduped:
+            lvl = item.level or "UNKNOWN"
+            by_level[lvl] = by_level.get(lvl, 0) + 1
+            code = item.code
+            by_code[code] = by_code.get(code, 0) + 1
+
+        self.diagnostic_counts = {
+            "total": total,
+            "by_level": by_level,
+            "by_code": by_code,
+        }
+
+        if total > limit:
+            self.diagnostics = deduped[:limit]
+            self.diagnostics_truncated = True
+        else:
+            self.diagnostics = deduped
+            self.diagnostics_truncated = False
+
+        return self
 
     @property
     def status(self) -> Literal["success", "failed"]:

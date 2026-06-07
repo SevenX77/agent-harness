@@ -74,7 +74,7 @@
 
 ## 2. LLM Roles 页面 — 把抽象角色映射到模型，并真实测通
 
-> 本节 = §0 原话 + **2026-06-03 第二轮原子动作走查**（PM 逐条裁定，原话见 §2.0）的细化定稿。走查工作流水见 [`_reorg/alignment-notes.md`](../../_reorg/alignment-notes.md)。本节整合三股改动：① ux-spec 状态体系（6 态 / failed-disabled 两分类 / draft，见 §4）；② 上一 part 底层改动（P8 run 模型对比测试复用 model-group/bundle；D10/D12 settings 数据走 gateway sidecar 永不 Rust）；③ gateway mvp1 契约（role→route 一等 API、base_url 保存时归一化、`build_runtime_setting_descriptors` 驱动 intent 控件，见 §6.2）。
+> 本节 = §0 原话 + **2026-06-03 第二轮原子动作走查**（PM 逐条裁定，原话见 §2.0）的细化定稿。本节整合三股改动：① ux-spec 状态体系（6 态 / failed-disabled 两分类 / draft，见 §4）；② 上一 part 底层改动（P8 run 模型对比测试复用 model-group/bundle；D10/D12 settings 数据走 gateway sidecar 永不 Rust）；③ gateway mvp1 契约（role→route 一等 API、base_url 保存时归一化、`build_runtime_setting_descriptors` 驱动 intent 控件，见 §6.2）。
 
 ### 2.0 PM 原话（2026-06-03 第二轮 Roles 走查，verbatim，不改一字）
 > 1. #R3 在model family上做一个折叠功能: anthropic 可以折叠起来, 隐藏里面的所有模型
@@ -491,7 +491,7 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 
 ---
 
-## 7. atom action 全清单（现状审计 × 能力·区域映射 — 由 `_reorg/settings-action-catalog` 折入）
+## 7. atom action 全清单（现状审计 × 能力·区域映射）
 
 > **用途**：§1–§4 是**目标设计叙事**（按三页深入）；本节是**按 UX 心智顺序的最细 atom action 现状审计**——每个动作映射到 能力(细 slug) / 区域 / 现状 status / file:line 证据，是 §1–§6 设计的**原料与依据**。两块只在本节、§1–§3 叙事未覆盖：**Stage 0 壳层** + **Stage 1 General**。
 > **现状 vs 目标(铁律)**：status 列描述**当前代码行为**(✅=现接线可用)，**不等于目标设计**。凡现状与 §1–§4 冲突，以叙事为准。**最关键的一处 drift**：Stage 2 的 official(#24 异步批量 job)/third-party(#25 同步单次)**测试机制不对称是 current-code drift,不是设计**——目标是**统一 `POST /endpoints/{id}/test` + 批量探测**(§1.2)；官/三在目标设计里的真区别只剩**身份与 canonical 默认**(§1.1 vs §1.2),测试路径同一套。

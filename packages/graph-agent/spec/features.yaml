@@ -75,7 +75,6 @@ features:
   - source-file-map
   core_paths:
   - path: packages/graph-agent/src/graph_agent/core/parser.py
-  - path: packages/graph-agent/src/graph_agent/core/skill_parser.py
   error_codes_primary: []
   error_codes_secondary: []
   events_primary: []
@@ -418,7 +417,7 @@ features:
   events_secondary: []
   non_functional_contracts: []
   targeted_tests:
-  - tests/core/test_harness_state_machine_resources.py::test_close_exits_checkpointer_context_manager
+  - tests/core/test_v030_deltachannel_checkpoint.py::test_sqlite_deltachannel_checkpoint_size
 - id: F-callback-event-stream
   description: Emit typed callback events with stable discriminator and schema metadata.
   feature_boundary:

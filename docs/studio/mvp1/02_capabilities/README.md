@@ -1,6 +1,6 @@
 # 02_capabilities — 能力维 (维度 ②)
 
-> 治理规则见 [../INDEX.md](../INDEX.md)。本 tier 拥有**跨组件的数据流/行为**, **只链接 region 不重述组件**(见 INDEX §2 不变量)。文档模板见 INDEX §7 capability 模板。
+> 治理规则见 [design-doc-standards](../../../development/design-doc-standards/)(三轴模型 + 写作标准 + 审计标准)。本 tier 拥有**跨组件的数据流/行为**, **只链接 region 不重述组件**(见 00-three-axes 去重铁律)。文档模板见 01-writing-standard。
 > **状态**: MVP1 baseline + alignment 已落为文件夹制。每个能力文件夹含 `baseline.md` 与 `mvp1-alignment.md`。
 
 ## 计划文档 (14)

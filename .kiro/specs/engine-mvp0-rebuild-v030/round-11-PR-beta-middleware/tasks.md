@@ -301,15 +301,15 @@ Owner: a1 docs sync / a2 audit / a3 audit。
 
 必须同步:
 
-1. `docs/engine/execution-runtime/mvp0-alignment.md`
+1. `docs/engine/mvp0/execution-runtime/mvp0-alignment.md`
    - middleware chain 顺序。
    - finish_task 由 CognitiveFlow 接管。
    - SchemaEngine `io.outputs` strict gate。
    - validator 新签名和错误反馈。
    - responsibility extraction: graph assembler shell 保留, runtime control 责任迁出。
-2. `docs/engine/skill-spec/06-cognitive-template-spec.md`
+2. `docs/engine/mvp0/skill-spec/06-cognitive-template-spec.md`
    - 如 PR β 改变 finish_task feedback 文案或 runtime 行为, 必须同步。
-3. `docs/engine/skill-spec/11-error-code-spec.md`
+3. `docs/engine/mvp0/skill-spec/11-error-code-spec.md`
    - `[F-v3-agent-validator-failed]` 从 placeholder 变成 runtime 行为时, 补触发条件。
 4. 本 spec 4 件套:
    - `design.md`, `requirements.md`, `research.md`, `tasks.md` 若实现阶段有主控裁决或工程现实调整, 必须同步。

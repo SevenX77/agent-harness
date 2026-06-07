@@ -127,7 +127,7 @@ docs/studio/
 | `copilot` | CopilotPanel: 对话/消息/工具气泡/模型选择器 | CopilotPanel, ModelPicker | 旧 copilot-chat(组件) |
 | `settings` | SettingsPage: API keys/roles/copilot 配置/产物路径 | SettingsPage, ProviderCard, LlmRolesTab | **无 region 文档**, 旧 llm-gateway 只覆盖后端配置 |
 
-### 04_platform (5) — 基础设施(后端三分锁定 2026-06-01;i18n 横切 2026-06-03 加入, 详见 [_reorg/alignment-notes.md D10](_reorg/alignment-notes.md))
+### 04_platform (5) — 基础设施(后端三分锁定 2026-06-01;i18n 横切 2026-06-03 加入, 详见 [`mvp1/04_platform/native-fs`](mvp1/04_platform/native-fs/mvp1-alignment.md) §4 D10)
 | 块 | 形态 | 职责 | 迁移来源 |
 |---|---|---|---|
 | `gateway` | Python sidecar | provider/role/credential/model 解析 + copilot chat facade | 旧 llm-gateway + studio backend 的 gateway 代码并入 |

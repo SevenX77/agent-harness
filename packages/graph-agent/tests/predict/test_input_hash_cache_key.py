@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-from typing import Any
 from pydantic import BaseModel
 
 # Try to import input_hash. This will fail in Red Phase!

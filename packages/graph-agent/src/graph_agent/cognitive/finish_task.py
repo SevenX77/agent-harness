@@ -21,7 +21,9 @@ _COGNITIVE_OUTPUT_SCHEMA_INVALID_CODE = "[F-v3-cognitive-output-schema-invalid]"
 class FinishTaskInput(BaseModel):
     """Input schema for the V2.1 finish_task tool."""
 
-    markdown: str = Field(description="Final markdown output for current phase.")
+    reasoning: str = Field(default="", description="Reasoning or explanation of the submitted work.")
+    diagnostics_md: str = Field(default="", description="Additional diagnostic markdown or details.")
+    business_data_md: str = Field(..., description="Final structured/unstructured business markdown output.")
 
 
 Md2JsonConverter = Callable[[str, dict[str, Any] | None], Md2JsonResult]
@@ -37,22 +39,26 @@ def build_finish_task_tool(
 
     _check_output_schema(output_schema)
 
-    def _finish_task(markdown: str) -> dict[str, Any]:
-        if not isinstance(markdown, str) or not markdown.strip():
+    def _finish_task(
+        business_data_md: str,
+        reasoning: str = "",
+        diagnostics_md: str = "",
+    ) -> dict[str, Any]:
+        if not isinstance(business_data_md, str) or not business_data_md.strip():
             return _structured_error(
                 Md2JsonResult(data={}, validation_errors=[], repaired=False),
                 attempts=0,
-                markdown="" if not isinstance(markdown, str) else markdown,
+                markdown="" if not isinstance(business_data_md, str) else business_data_md,
                 kind="invalid_markdown",
             )
 
-        result = md2json(markdown, output_schema)
+        result = md2json(business_data_md, output_schema)
         if not result.validation_errors:
             return {"ok": True, "data": result.data, "repaired": result.repaired}
         if patcher is None or output_schema is None:
-            return _structured_error(result, attempts=0, markdown=markdown)
+            return _structured_error(result, attempts=0, markdown=business_data_md)
 
-        current_markdown = markdown
+        current_markdown = business_data_md
         current_result = result
         for attempt in range(1, max_patch_attempts + 1):
             patched_markdown = patcher.patch(
@@ -98,6 +104,7 @@ def build_finish_task_tool(
         description="Submit phase final output. Markdown will be parsed to dict and validated.",
         args_schema=FinishTaskInput,
     )
+
 
 
 def _check_output_schema(output_schema: dict[str, Any] | None) -> None:

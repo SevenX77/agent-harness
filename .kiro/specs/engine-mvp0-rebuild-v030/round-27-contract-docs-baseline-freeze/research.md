@@ -3,7 +3,7 @@
 ## 1. Landscape & State (当前现状分析)
 
 ### 1.1 文件标准规范 (skill-spec/*)
-现状：位于 `docs/engine/skill-spec/` 目录，已形成非常成熟且体系化的 14 份标准文档（覆盖物理布局、解析、路由、错误码等各环节）：
+现状：位于 `docs/engine/mvp0/skill-spec/` 目录，已形成非常成熟且体系化的 14 份标准文档（覆盖物理布局、解析、路由、错误码等各环节）：
 - 00-FORMAT-GROUND-TRUTH.md
 - 01-physical-layout.md
 - 02-graph-md-spec.md

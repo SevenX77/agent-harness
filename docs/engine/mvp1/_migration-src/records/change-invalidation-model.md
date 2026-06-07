@@ -1,17 +1,19 @@
 ---
 doc: change-invalidation-model
-status: drafted（C3 闭环 2026-06-03）
+status: 留底（轴① 决策档案;实现 SSOT 已迁 05-invalidation/06-golden-eval;§2 含反转前旧内容,勿当现状）
 owns: 跨关注点"源变更 → 派生物失效"的统一模型(golden 09 / checkpoint 10 / compile-cache 12 共享)
 related:
   - 09-golden-eval（golden 失效 = 编译期硬错误）
   - 10-iteration-and-resume（checkpoint 失效 = resume 置灰）
 ---
+> 🔖 **本文 = 轴① 决策留底(workflow archive),非实现 SSOT。** 实现真相已迁入 [`05-invalidation`](../../01-contract/05-invalidation/mvp1-alignment.md)(变更轴 + 消费者矩阵,**已按 golden→workspace 反转调整为 eval 期**)+ [`06-golden-eval`](../../02-mechanism/05-run-inner/06-golden-eval/mvp1-alignment.md)。本文保留完整决策上下文,但 **§2 含反转前旧内容(golden 失效 = 编译期硬错误 `[F-v3-golden-stale-fields]`),已废——现状是 eval 期失效,勿当现状引用。**
+<!-- 核对进度:已迁 6 块 / 未迁 1 块 / 2026-06-04 -->
 
-# 统一"变更 → 失效"模型(C3)
+~~# 统一"变更 → 失效"模型(C3)~~ → ✅[已迁入](../../01-contract/05-invalidation/mvp1-alignment.md#1-定义)
 
 > **缘起(Task 2 C3)**:09 的 golden 失效、10 的 checkpoint 失效被随口称"同概念",但实际**粒度/时机/后果都不同**。含糊一句会让实现者造两个发散的 staleness 检测器,或把规则张冠李戴。本文**定义一套变更轴,再用矩阵把每个消费者映射到它关心的轴 + 后果** —— 让"同概念"落到"共享同一套变更轴定义,各取所需",而非"同一个检测器"。
 
-## 1. 变更轴(taxonomy:一个 skill/节点可能发生的变更)
+~~## 1. 变更轴(taxonomy:一个 skill/节点可能发生的变更)~~ → ✅[已迁入](../../01-contract/05-invalidation/mvp1-alignment.md#1-定义)
 
 | 轴 | 含义 | 是否动 IO 契约 |
 |---|---|---|
@@ -23,6 +25,7 @@ related:
 | **A4** 上游节点输出 改(本节点依赖的节点变了) | 改上游产物 | 间接 |
 | **A5** 拓扑改(`depends_on` / 节点 增删改名) | 改图结构 | 是 |
 
+<!-- ⚠️ 未迁入（仅摘要迁入且正式文档已因 golden→workspace 反转改为 eval 期；源文档里的“编译期硬错误 [F-v3-golden-stale-fields]”未等价承载） → 应归入:01-contract/05-invalidation + 02-mechanism/05-run-inner/06-golden-eval -->
 ## 2. 消费者 × 关心的轴 × 后果(核心矩阵)
 
 | 消费者 | 关心的轴 | 时机 | 后果 | **刻意不管** |
@@ -39,7 +42,7 @@ related:
 
 → 它们**不是同一个检测器**,但也不该各写各的"什么算变"。
 
-## 3. 一处定义、各取所需(实现原则)
+~~## 3. 一处定义、各取所需(实现原则)~~ → ✅[已迁入](../../01-contract/05-invalidation/mvp1-alignment.md#1-定义)
 
 实现**一个变更检测模块**:`diff_skill(old, new) -> set[ChangeAxis]`(算出 A1–A5 哪些轴变了)。然后:
 - golden 编译校验:`if A2a in changes(node): emit [F-v3-golden-stale-fields]`。
@@ -48,14 +51,14 @@ related:
 
 **好处**:轴定义单一真相源,新增消费者(如未来"重测建议")只需声明关心哪几轴,不重造"什么算变"。
 
-## 4. 退役项
+~~## 4. 退役项~~ → ✅[已迁入](../../01-contract/05-invalidation/mvp1-alignment.md#1-定义)
 - 旧 `io_outputs_schema_hash` 整哈希漂移检测(`runner.py:127-160` `_warn_on_stale_golden_hashes_sdk`,只 warn):**退役**。它把 A1/A2a/A2b/A2c 混成一个 hash,粒度太粗(改 prompt 也可能变 hash → 误报),正是 09 G2 要用"只看 A2a"取代的对象。
 
-## 5. 与其他文档
+~~## 5. 与其他文档~~ → ✅[已迁入](../../01-contract/05-invalidation/mvp1-alignment.md#1-定义)
 - golden 失效细节 → 09-golden-eval §G2(本文是其"为什么只看必填字段"的上位模型)。
 - checkpoint 失效 → 10-iteration §4(本文统一其"什么变更触发置灰")。
 - 错误码 `[F-v3-golden-stale-fields]` 带轴(phase_id + field_path=缺的必填字段)→ Task 3 错误码定位审计。
 
-## 6. 待办
+~~## 6. 待办~~ → ✅[已迁入](../../01-contract/05-invalidation/mvp1-alignment.md#1-定义)
 1. `ChangeAxis` 枚举 + `diff_skill` 实现(实施期,TDD)。
 2. checkpoint 置灰的"下游"判定 = 拓扑依赖分析(A5 变时尤其);与 12 编译期 DAG 分析复用。

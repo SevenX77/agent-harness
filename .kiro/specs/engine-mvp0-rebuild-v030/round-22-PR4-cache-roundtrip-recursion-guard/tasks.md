@@ -19,7 +19,7 @@
 - `core/loader.py` 的 `CompiledSubagent.input_model` 仍参与 dataclass compare；递归编译调用未传 `_loading_stack` / `_compilation_cache`。
 - `core/loader.py` 的冷编译路径会调用 `_inject_subagent_tools(tools, subagents_by_phase)`，但 cache rehydrate 路径当前没有恢复 subagents，也没有重放 tool 注入。
 - `core/graph_assembler.py` 的 `_build_subgraph_node` 与 `_subagent_runtime_map` 会重新 `SkillLoader(validate_context_writes=False).compile_skill(...)`，当前不受递归 guard 与同图缓存保护。
-- `core/error_registry.py`、`docs/engine/skill-spec/11-error-code-spec.md`、`tests/core/test_error_payload_contract.py` 仍按 90 个错误码契约运行。
+- `core/error_registry.py`、`docs/engine/mvp0/skill-spec/11-error-code-spec.md`、`tests/core/test_error_payload_contract.py` 仍按 90 个错误码契约运行。
 
 ## Tasks
 
@@ -122,7 +122,7 @@ Acceptance:
 
 Files:
 - `packages/graph-agent/src/graph_agent/core/error_registry.py`
-- `docs/engine/skill-spec/11-error-code-spec.md`
+- `docs/engine/mvp0/skill-spec/11-error-code-spec.md`
 - `packages/graph-agent/tests/core/test_error_payload_contract.py`
 
 Steps:
@@ -230,7 +230,7 @@ Commands:
 - `uv run pytest packages/graph-agent/tests/core/test_error_payload_contract.py`
 - `uv run pytest packages/graph-agent/tests/core`
 - `uv run pytest packages/graph-agent/tests`
-- `rg -n "compile-recursion-cycle|compile-depth-exceeded" packages/graph-agent/src docs/engine/skill-spec packages/graph-agent/tests`
+- `rg -n "compile-recursion-cycle|compile-depth-exceeded" packages/graph-agent/src docs/engine/mvp0/skill-spec packages/graph-agent/tests`
 - `rg -n "\"format\": \"v2\"|format.*v2|subagents_by_phase|phase_tokens|_inject_subagent_tools" packages/graph-agent/src/graph_agent/core/cache.py packages/graph-agent/src/graph_agent/core/loader.py`
 - `rg -n "SkillLoader\\(validate_context_writes=False\\)\\.compile_skill|_loading_stack|_compilation_cache" packages/graph-agent/src/graph_agent/core/loader.py packages/graph-agent/src/graph_agent/core/graph_assembler.py`
 

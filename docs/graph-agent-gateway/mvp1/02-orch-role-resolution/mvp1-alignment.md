@@ -118,7 +118,7 @@ MVP1 目标：把 role→route 变成一等编排 API。编排层只返回有序
 - **原话**：（capability/lint 不做动态替代为确定性解析原则，无单独 PM 原话；归属判据原话见 F4。）
 - **status**：blocking lint 当前在全部 route 解析后抛 role 级错误，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:116-122`。
 - **测试点**：（blocking lint 的"整 role 失败 vs 跳该 route 继续"语义待定，见 gaps；capability 不做动态选型——runtime 仍按显式 `route_id` 执行。）
-- **gaps / 疑点**：blocking lint 是"整个 role 配置错误"还是"该 route 跳过后继续下一条"。当前 blocking lint 在全部 route 解析后抛 role 级错误，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:116-122`。
+- **gaps / 疑点**：✅ **已定（PM 2026-06-04）= 跳过该 route、继续下一条**（非整 role 失败）。resolver 当前在全部 route 解析后抛 role 级错误（`registry/resolver.py:116-122`），改为标记该 route 跳过(进 `skipped_diagnostics`)、继续下一条；空链才抛 `RegistryResolutionError`。
 - **归属**：region/platform ③b `packages/graph-agent-gateway`（lint 在可执行 route 集合上运行）；capability/lint 权威源 [[05-orch-capabilities-and-models]]（materialize 消费）。
 
 ---
@@ -131,7 +131,7 @@ MVP1 目标：把 role→route 变成一等编排 API。编排层只返回有序
 - **待办**：新增 `ModelResolver.resolve_routes`（route→route 一等 API 返回 `ResolvedRole` 而非 chat model），并让 Copilot/registry response 复用它；当前这些路径直接调用 pure helper，见 `apps/studio/backend/app/services/copilot.py:419-437`、`apps/studio/backend/app/routers/llm.py:4588-4603`。（详见 F5）
 - **待办**：给 `ResolvedRole` 增加 skipped diagnostics 字段，记录 route missing/status/endpoint/credential/profile/lint 的跳过原因；当前字段列表见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:448-459`。（详见 F2）
 - **待办**：把普通 fallback 链的不可执行 entry 改为 warning + continue，把 override 的不可执行 entry 保持 fail-fast；当前普通链与 override 共用同一抛错分支，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:45-75`。（详见 F2/F3）
-- **疑点**：blocking lint 是"整个 role 配置错误"还是"该 route 跳过后继续下一条"。当前 blocking lint 在全部 route 解析后抛 role 级错误，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:116-122`。（详见 F6）
+- ✅ **已定（PM 2026-06-04）**：blocking lint = **跳过该 route、继续下一条**（不让整个 role 失败）——与 fallback"跳坏 route"语义一致；resolver 从"全部解析后抛 role 级错误"（`registry/resolver.py:116-122`）改为"标记该 route 跳过(进 `skipped_diagnostics`)、继续"；**全部候选被跳过(空链)才**抛配置错误 `RegistryResolutionError`。（详见 F6）
 
 ## 交叉引用（链接，不复制）
 

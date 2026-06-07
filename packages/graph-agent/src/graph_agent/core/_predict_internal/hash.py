@@ -35,9 +35,9 @@ def _clean_input(val: Any) -> Any:
         return {k: _clean_input(v) for k, v in val.items()}
     elif isinstance(val, (list, tuple, set)):
         return [_clean_input(v) for v in val]
-    elif hasattr(val, "model_dump") and callable(getattr(val, "model_dump")):
+    elif hasattr(val, "model_dump") and callable(val.model_dump):
         return _clean_input(val.model_dump(mode="json"))
-    elif hasattr(val, "dict") and callable(getattr(val, "dict")):
+    elif hasattr(val, "dict") and callable(val.dict):
         return _clean_input(val.dict())
     return val
 

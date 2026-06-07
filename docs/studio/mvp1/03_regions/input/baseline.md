@@ -1,28 +1,61 @@
-# input Baseline
+---
+module: 03_regions/input
+doc: baseline
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；InputPanel 仍投影固定 `input/sample.json`/`input/schema.json`，schema inference 无写回，Predict/Run 不消费选中输入 ⚠️。）
+binds_alignment: ./mvp1-alignment.md
+binds_code: apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:InputPanel · apps/studio/frontend/src/components/studio/panels/panel-files.ts:inputFiles · apps/studio/backend/app/routers/test_inputs.py:create_test_input · apps/studio/backend/app/routers/test_inputs.py:delete_test_input · apps/studio/frontend/src/components/studio/Workspace.tsx:onPredict · apps/studio/frontend/src/components/studio/Workspace.tsx:onRun
+units: [io-panel-artifacts-test-inputs, golden-per-agent-node]
+---
 
-Status: current panel is a small Input panel with fake/static file projection and schema inference; MVP1 target is broader i/o panel.
+# input — Baseline（当下代码实现逻辑）
 
-Source workflows: `01_workflows/02_authoring.md`, `01_workflows/04_run-and-verify.md`.
+> **Scope**: I/O 面板身份、input/schema 文件、output artifact settings、Predict/Run 输入选择、golden JSON 与 batch 输入选择。
+> **现状一句话**: InputPanel 仍投影固定 `input/sample.json`/`input/schema.json`，schema inference 无写回，Predict/Run 不消费选中输入 ⚠️。
 
-## Current Component Index
-
-| Component/area | Current behavior | Evidence |
+## UI/UX
+| 面 | 现状 | 证据（文件:符号名） |
 |---|---|---|
-| Panel route | `Panels` routes `activePanel === "input"` to `InputPanel`. | `apps/studio/frontend/src/components/studio/panels/Panels.tsx:34` |
-| Title | Panel title is still "Input". | `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:72`, `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:78` |
-| File rows | Panel projects `input/sample.json` and `input/schema.json` through `inputFiles`. | `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:73`, `apps/studio/frontend/src/components/studio/panels/panel-files.ts:70` |
-| Schema inference | User can paste/drop JSON and see inferred schema, but there is no writeback. | `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:18`, `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:28` |
-| File open | Input file rows open editor through `onFileOpen`. | `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:83`, `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:86` |
-| Backend validation | Backend validates input data/file against schema. | `apps/studio/backend/app/routers/skills.py:454` |
-| Predict/run gap | Predict/Run buttons do not consume selected input from this panel. | `apps/studio/frontend/src/components/studio/Workspace.tsx:537`, `apps/studio/frontend/src/components/studio/Workspace.tsx:538` |
-| Batch orphan | BatchRunner can list inputs and run batch but is not mounted here. | `apps/studio/frontend/src/components/playground/BatchRunner.tsx:33`, `apps/studio/frontend/src/hooks/useBatchRun.ts:73` |
+| Panel route | `Panels` routes `activePanel === "input"` to `InputPanel`. | `apps/studio/frontend/src/components/studio/panels/Panels.tsx:Panels（L34）` |
+| Title | Panel title is still "Input". | `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:InputPanel（L72）`, `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:sample（L78）` |
+| File rows | Panel projects `input/sample.json` and `input/schema.json` through `inputFiles`. | `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:files（L73）`, `apps/studio/frontend/src/components/studio/panels/panel-files.ts:inputFiles（L70）` |
+| Schema inference | User can paste/drop JSON and see inferred schema, but there is no writeback. | `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:SchemaInferPanel（L18）`, `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:handleDrop（L28）` |
+| File open | Input file rows open editor through `onFileOpen`. | `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:sample（L83）`, `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:sample（L86）` |
+| Backend validation | Backend validates input data/file against schema. | `apps/studio/backend/app/routers/skills.py:fork_existing_skill（L454）` |
+| Predict/run gap | Predict/Run buttons do not consume selected input from this panel. | `apps/studio/frontend/src/components/studio/Workspace.tsx:currentCompileErrors（L537）`, `apps/studio/frontend/src/components/studio/Workspace.tsx:currentCompileErrors（L538）` |
+| Batch orphan | BatchRunner can list inputs and run batch but is not mounted here. | `apps/studio/frontend/src/components/playground/BatchRunner.tsx:BatchRunner（L33）`, `apps/studio/frontend/src/hooks/useBatchRun.ts:runBatch（L73）` |
 
-## Current Region Ownership
+## 前端逻辑
+| 面 | 现状 | 证据（文件:符号名） |
+|---|---|---|
+| Panel route | `Panels` routes `activePanel === "input"` to `InputPanel`. | `apps/studio/frontend/src/components/studio/panels/Panels.tsx:Panels（L34）` |
+| Title | Panel title is still "Input". | `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:InputPanel（L72）`, `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:sample（L78）` |
+| File rows | Panel projects `input/sample.json` and `input/schema.json` through `inputFiles`. | `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:files（L73）`, `apps/studio/frontend/src/components/studio/panels/panel-files.ts:inputFiles（L70）` |
+| Schema inference | User can paste/drop JSON and see inferred schema, but there is no writeback. | `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:SchemaInferPanel（L18）`, `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:handleDrop（L28）` |
+| File open | Input file rows open editor through `onFileOpen`. | `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:sample（L83）`, `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:sample（L86）` |
+| Predict/run gap | Predict/Run buttons do not consume selected input from this panel. | `apps/studio/frontend/src/components/studio/Workspace.tsx:currentCompileErrors（L537）`, `apps/studio/frontend/src/components/studio/Workspace.tsx:currentCompileErrors（L538）` |
+| Batch orphan | BatchRunner can list inputs and run batch but is not mounted here. | `apps/studio/frontend/src/components/playground/BatchRunner.tsx:BatchRunner（L33）`, `apps/studio/frontend/src/hooks/useBatchRun.ts:runBatch（L73）` |
 
-- Owns: target i/o panel for test input files, schema, per-node i/o config, output artifacts, golden JSON/settings, single/batch run input selection.
-- Current code only owns: input file rows and local schema inference demo.
+## 后端功能
+| 面 | 现状 | 证据（文件:符号名） |
+|---|---|---|
+| Backend validation | Backend validates input data/file against schema. | `apps/studio/backend/app/routers/skills.py:fork_existing_skill（L454）` |
 
-## Known Drift
+## 当前边界（input 现在不是什么）
+- Predict/Run 执行归能力模块；input 只拥有输入选择/文件 UI。
+- golden eval 数据流归 `golden-eval`，input 只承载入口。
 
-- Workflow renames/expands this to i/o panel; current UI still says "Input" and lacks output/golden settings (`apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:78`).
-- Input/predict/run should use configured files; current buttons ignore the panel (`apps/studio/frontend/src/components/studio/Workspace.tsx:537`).
+## baseline / alignment 差异（测试锚点）
+| 维度 | 现状（baseline） | 目标（alignment） |
+|---|---|---|
+| input 文件 | 固定假 `input/schema.json` 行 ⚠️ | 从 workspace/test-inputs 列出真实输入并可写回 |
+| Predict/Run 输入 | 按钮不消费面板选中输入 ⚠️ | Predict/Run 使用 I/O 面板当前选择 |
+| test_inputs API | create/delete 仍 501 ⚠️ | 增删测试输入 live，错误就近显示 |
+> **验"是否按目标改了"**：1. input 文件；2. Predict/Run 输入；3. test_inputs API。
+
+## 读代码主路径提示
+`apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:InputPanel` → `apps/studio/frontend/src/components/studio/panels/panel-files.ts:inputFiles` → `apps/studio/backend/app/routers/test_inputs.py:create_test_input` → `apps/studio/backend/app/routers/test_inputs.py:delete_test_input` → `apps/studio/frontend/src/components/studio/Workspace.tsx:onPredict` → `apps/studio/frontend/src/components/studio/Workspace.tsx:onRun`。
+
+> 旧 Coverage/Drift 暂存 [`_migrated-coverage-drift.md`](../../_migrated-coverage-drift.md#03-regions-input)（迁移期安全网，代码实现验证后删）。
+
+## 交叉引用（链接, 不复制）
+[alignment](./mvp1-alignment.md)（目标,双向）· `phase-editing` · `predict` · `run-execution` · `golden-eval` · `assets`

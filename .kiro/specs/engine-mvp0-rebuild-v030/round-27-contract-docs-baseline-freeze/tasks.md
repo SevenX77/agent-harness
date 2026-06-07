@@ -12,14 +12,14 @@
 - 黄金原则硬门：65 符号一个不能漏。Audit Agent 会 100% 核对 inventory、API 文档、防漂移测试三方一致，任何遗漏即不合格。
 
 PR1 允许改动范围：
-- 新建 `docs/engine/public-api-contract.md`
-- 新建 `docs/engine/feature-compliance-checklist.md`
+- 新建 `docs/engine/mvp0/public-api-contract.md`
+- 新建 `docs/engine/mvp0/feature-compliance-checklist.md`
 - 新建 `packages/graph-agent/tests/test_public_api_contract.py`
 - 新建 `packages/graph-agent/tests/test_feature_traceability_matrix.py`
 - 新建 `packages/graph-agent/tests/test_skill_spec_hash_lock.py`
 - 新建 `packages/graph-agent/tests/contract-exemptions.yaml`
 - 新建 `.github/CODEOWNERS`
-- 修改 `docs/engine/skill-spec/` 下 14 份文档，且仅允许添加 `status: FROZEN` frontmatter 与 DO-NOT-EDIT 注释
+- 修改 `docs/engine/mvp0/skill-spec/` 下 14 份文档，且仅允许添加 `status: FROZEN` frontmatter 与 DO-NOT-EDIT 注释
 - 保留 / 更新本任务文件 `.kiro/specs/engine-mvp0-rebuild-v030/round-27-contract-docs-baseline-freeze/tasks.md`
 
 明确禁止：
@@ -106,7 +106,7 @@ Goal:
 - 明确区分 18 个 `__all__` 稳定导出、47 个非 `__all__` 外部依赖、12 个 `_predict_internal` 已知债务。
 
 Files:
-- 新建 `docs/engine/public-api-contract.md`
+- 新建 `docs/engine/mvp0/public-api-contract.md`
 
 Steps:
 - 以 `CONSUMER-API-INVENTORY.md` 和 `packages/graph-agent/src/graph_agent/__init__.py` 为事实来源，整理 65 符号章节。
@@ -126,11 +126,11 @@ Steps:
 - 不把 `skill-spec` Markdown 格式规范混入 Python API 契约；二者在文档中保持独立边界。
 
 Acceptance:
-- `docs/engine/public-api-contract.md` 覆盖 65 符号，符号名与本 tasks 的 65 清单、`CONSUMER-API-INVENTORY.md`、防漂移测试三方一致。
+- `docs/engine/mvp0/public-api-contract.md` 覆盖 65 符号，符号名与本 tasks 的 65 清单、`CONSUMER-API-INVENTORY.md`、防漂移测试三方一致。
 - 每个符号都有 Signature 或 Fields、Preconditions、Postconditions、`@stable`。
 - 12 个 `_predict_internal` 符号全部标注 `De Facto Contract / Known Debt`。
 - 文档包含 sibling 排除声明。
-- `rg -n "TODO|TBD|待补|unknown|不确定|以后补" docs/engine/public-api-contract.md` 无输出。
+- `rg -n "TODO|TBD|待补|unknown|不确定|以后补" docs/engine/mvp0/public-api-contract.md` 无输出。
 
 ### 2. Test: 新建 65 符号字段级 API 防漂移测试
 
@@ -183,7 +183,7 @@ Goal:
 - 每条功能必须绑定现存测试，误删测试或写错测试路径时 CI 报错。
 
 Files:
-- 新建 `docs/engine/feature-compliance-checklist.md`
+- 新建 `docs/engine/mvp0/feature-compliance-checklist.md`
 - 新建 `packages/graph-agent/tests/test_feature_traceability_matrix.py`
 
 Steps:
@@ -210,7 +210,7 @@ Acceptance:
 - 功能清单覆盖 5 类生命周期，且每条功能都有 `[Covered By: ...]` 标签。
 - `uv run pytest packages/graph-agent/tests/test_feature_traceability_matrix.py` 通过。
 - 删除任一被引用测试或改名时，矩阵测试失败。
-- `rg -n "TODO|TBD|待补|凭印象|unknown|不确定" docs/engine/feature-compliance-checklist.md` 无输出。
+- `rg -n "TODO|TBD|待补|凭印象|unknown|不确定" docs/engine/mvp0/feature-compliance-checklist.md` 无输出。
 
 ### 4. Docs + Test: Additive-Only 冻结 skill-spec 并建立 SHA-256 哈希锁
 
@@ -219,20 +219,20 @@ Goal:
 - 防止后续绕过 `status: FROZEN` 悄悄修改正文、空格或代码块。
 
 Files:
-- 修改 `docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md`
-- 修改 `docs/engine/skill-spec/01-physical-layout.md`
-- 修改 `docs/engine/skill-spec/02-graph-md-spec.md`
-- 修改 `docs/engine/skill-spec/03-logic-md-spec.md`
-- 修改 `docs/engine/skill-spec/04-subgraph-md-spec.md`
-- 修改 `docs/engine/skill-spec/05-agent-md-spec.md`
-- 修改 `docs/engine/skill-spec/06-cognitive-template-spec.md`
-- 修改 `docs/engine/skill-spec/07-mention-syntax-spec.md`
-- 修改 `docs/engine/skill-spec/08-resource-mechanisms-spec.md`
-- 修改 `docs/engine/skill-spec/09-builtin-modules-spec.md`
-- 修改 `docs/engine/skill-spec/10-skill-resolver-protocol-spec.md`
-- 修改 `docs/engine/skill-spec/11-error-code-spec.md`
-- 修改 `docs/engine/skill-spec/12-compile-runtime-flow-spec.md`
-- 修改 `docs/engine/skill-spec/README.md`
+- 修改 `docs/engine/mvp0/skill-spec/00-FORMAT-GROUND-TRUTH.md`
+- 修改 `docs/engine/mvp0/skill-spec/01-physical-layout.md`
+- 修改 `docs/engine/mvp0/skill-spec/02-graph-md-spec.md`
+- 修改 `docs/engine/mvp0/skill-spec/03-logic-md-spec.md`
+- 修改 `docs/engine/mvp0/skill-spec/04-subgraph-md-spec.md`
+- 修改 `docs/engine/mvp0/skill-spec/05-agent-md-spec.md`
+- 修改 `docs/engine/mvp0/skill-spec/06-cognitive-template-spec.md`
+- 修改 `docs/engine/mvp0/skill-spec/07-mention-syntax-spec.md`
+- 修改 `docs/engine/mvp0/skill-spec/08-resource-mechanisms-spec.md`
+- 修改 `docs/engine/mvp0/skill-spec/09-builtin-modules-spec.md`
+- 修改 `docs/engine/mvp0/skill-spec/10-skill-resolver-protocol-spec.md`
+- 修改 `docs/engine/mvp0/skill-spec/11-error-code-spec.md`
+- 修改 `docs/engine/mvp0/skill-spec/12-compile-runtime-flow-spec.md`
+- 修改 `docs/engine/mvp0/skill-spec/README.md`
 - 新建 `packages/graph-agent/tests/test_skill_spec_hash_lock.py`
 
 Mandatory order:
@@ -298,9 +298,9 @@ Steps:
 - CODEOWNERS 至少必须覆盖以下契约基线路径：
   - `.github/CODEOWNERS`
   - `packages/graph-agent/tests/contract-exemptions.yaml`
-  - `docs/engine/skill-spec/**`
-  - `docs/engine/public-api-contract.md`
-  - `docs/engine/feature-compliance-checklist.md`
+  - `docs/engine/mvp0/skill-spec/**`
+  - `docs/engine/mvp0/public-api-contract.md`
+  - `docs/engine/mvp0/feature-compliance-checklist.md`
   - `packages/graph-agent/tests/test_public_api_contract.py`
   - `packages/graph-agent/tests/test_feature_traceability_matrix.py`
   - `packages/graph-agent/tests/test_skill_spec_hash_lock.py`
@@ -312,7 +312,7 @@ Acceptance:
 - API drift 与 hash lock 测试都读取同一个 exemptions 文件。
 - 宽泛豁免、缺字段豁免、未登记漂移均无法放行。
 - `.github/CODEOWNERS` 存在，并覆盖 `packages/graph-agent/tests/contract-exemptions.yaml`。
-- `.github/CODEOWNERS` 覆盖 14 份 `docs/engine/skill-spec/` 冻结文档、`docs/engine/public-api-contract.md`、`docs/engine/feature-compliance-checklist.md` 和三份防漂移测试文件。
+- `.github/CODEOWNERS` 覆盖 14 份 `docs/engine/mvp0/skill-spec/` 冻结文档、`docs/engine/mvp0/public-api-contract.md`、`docs/engine/mvp0/feature-compliance-checklist.md` 和三份防漂移测试文件。
 - `.github/CODEOWNERS` 使用真实 PM / 指定负责人 owner，不包含 placeholder。
 - branch-protection `Require review from Code Owners` 被明确记录为 PM 合并前远端 ops 动作。
 
@@ -328,40 +328,40 @@ Commands:
 - `uv run pytest packages/graph-agent/tests/test_public_api_contract.py`
 - `uv run pytest packages/graph-agent/tests/test_feature_traceability_matrix.py`
 - `uv run pytest packages/graph-agent/tests/test_skill_spec_hash_lock.py`
-- `python - <<'PY'` 脚本读取 `CONSUMER-API-INVENTORY.md`、`docs/engine/public-api-contract.md`、`packages/graph-agent/tests/test_public_api_contract.py`，核对 65 符号集合完全一致。
-- `rg -n "TODO|TBD|待补|凭印象|unknown|不确定|以后补" docs/engine/public-api-contract.md docs/engine/feature-compliance-checklist.md`
-- `rg -n "De Facto Contract / Known Debt" docs/engine/public-api-contract.md`
-- `rg -n "status: FROZEN|DO NOT EDIT: Golden principle contract baseline" docs/engine/skill-spec`
-- `rg -n "contract-exemptions.yaml|docs/engine/skill-spec|public-api-contract.md|feature-compliance-checklist.md|test_public_api_contract.py|test_feature_traceability_matrix.py|test_skill_spec_hash_lock.py" .github/CODEOWNERS`
+- `python - <<'PY'` 脚本读取 `CONSUMER-API-INVENTORY.md`、`docs/engine/mvp0/public-api-contract.md`、`packages/graph-agent/tests/test_public_api_contract.py`，核对 65 符号集合完全一致。
+- `rg -n "TODO|TBD|待补|凭印象|unknown|不确定|以后补" docs/engine/mvp0/public-api-contract.md docs/engine/mvp0/feature-compliance-checklist.md`
+- `rg -n "De Facto Contract / Known Debt" docs/engine/mvp0/public-api-contract.md`
+- `rg -n "status: FROZEN|DO NOT EDIT: Golden principle contract baseline" docs/engine/mvp0/skill-spec`
+- `rg -n "contract-exemptions.yaml|docs/engine/mvp0/skill-spec|public-api-contract.md|feature-compliance-checklist.md|test_public_api_contract.py|test_feature_traceability_matrix.py|test_skill_spec_hash_lock.py" .github/CODEOWNERS`
 - `git diff --name-only`
 
 Acceptance:
 - 三个防线测试全部通过。
 - 65 符号在 inventory、API 文档、API 防漂移测试中三方一致。
 - 12 个 `_predict_internal` 符号在文档和测试中按现状冻结，并标记为已知债务。
-- `docs/engine/public-api-contract.md` 明确 sibling 排除声明。
+- `docs/engine/mvp0/public-api-contract.md` 明确 sibling 排除声明。
 - `.github/CODEOWNERS` 存在、覆盖批准门与契约基线文件，并在 PR 记录中明确 branch-protection `Require review from Code Owners` 合并前 ops 动作。
 - `git diff --name-only` 白名单只包含：
   - `.kiro/specs/engine-mvp0-rebuild-v030/round-27-contract-docs-baseline-freeze/tasks.md`
   - `.github/CODEOWNERS`
-  - `docs/engine/public-api-contract.md`
-  - `docs/engine/feature-compliance-checklist.md`
+  - `docs/engine/mvp0/public-api-contract.md`
+  - `docs/engine/mvp0/feature-compliance-checklist.md`
   - `packages/graph-agent/tests/test_public_api_contract.py`
   - `packages/graph-agent/tests/test_feature_traceability_matrix.py`
   - `packages/graph-agent/tests/test_skill_spec_hash_lock.py`
   - `packages/graph-agent/tests/contract-exemptions.yaml`
-  - `docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md`
-  - `docs/engine/skill-spec/01-physical-layout.md`
-  - `docs/engine/skill-spec/02-graph-md-spec.md`
-  - `docs/engine/skill-spec/03-logic-md-spec.md`
-  - `docs/engine/skill-spec/04-subgraph-md-spec.md`
-  - `docs/engine/skill-spec/05-agent-md-spec.md`
-  - `docs/engine/skill-spec/06-cognitive-template-spec.md`
-  - `docs/engine/skill-spec/07-mention-syntax-spec.md`
-  - `docs/engine/skill-spec/08-resource-mechanisms-spec.md`
-  - `docs/engine/skill-spec/09-builtin-modules-spec.md`
-  - `docs/engine/skill-spec/10-skill-resolver-protocol-spec.md`
-  - `docs/engine/skill-spec/11-error-code-spec.md`
-  - `docs/engine/skill-spec/12-compile-runtime-flow-spec.md`
-  - `docs/engine/skill-spec/README.md`
+  - `docs/engine/mvp0/skill-spec/00-FORMAT-GROUND-TRUTH.md`
+  - `docs/engine/mvp0/skill-spec/01-physical-layout.md`
+  - `docs/engine/mvp0/skill-spec/02-graph-md-spec.md`
+  - `docs/engine/mvp0/skill-spec/03-logic-md-spec.md`
+  - `docs/engine/mvp0/skill-spec/04-subgraph-md-spec.md`
+  - `docs/engine/mvp0/skill-spec/05-agent-md-spec.md`
+  - `docs/engine/mvp0/skill-spec/06-cognitive-template-spec.md`
+  - `docs/engine/mvp0/skill-spec/07-mention-syntax-spec.md`
+  - `docs/engine/mvp0/skill-spec/08-resource-mechanisms-spec.md`
+  - `docs/engine/mvp0/skill-spec/09-builtin-modules-spec.md`
+  - `docs/engine/mvp0/skill-spec/10-skill-resolver-protocol-spec.md`
+  - `docs/engine/mvp0/skill-spec/11-error-code-spec.md`
+  - `docs/engine/mvp0/skill-spec/12-compile-runtime-flow-spec.md`
+  - `docs/engine/mvp0/skill-spec/README.md`
 - `git diff --name-only | rg "^packages/graph-agent/src/"` 无输出。

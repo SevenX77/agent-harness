@@ -4,18 +4,18 @@ import json
 from pathlib import Path
 from typing import Any
 
+from graph_agent_gateway.tracing import emit_llm_fallback_event
 from langchain_core.messages import AIMessage
 
 from graph_agent.core.runner import run_skill
-from graph_agent_gateway.tracing import emit_llm_fallback_event
 
 
 class ToolCallingChatModel:
     def __init__(self) -> None:
         self.invocations = 0
 
-    def bind_tools(self, tools: list[Any]) -> ToolCallingChatModel:
-        del tools
+    def bind_tools(self, tools: list[Any], **kwargs: Any) -> ToolCallingChatModel:
+        del tools, kwargs
         return self
 
     def invoke(self, messages: list[Any]) -> AIMessage:
@@ -37,7 +37,11 @@ class ToolCallingChatModel:
             tool_calls=[
                 {
                     "name": "finish_task",
-                    "args": {"markdown": "## answer\n\ntrace-ready"},
+                    "args": {
+                        "reasoning": "done",
+                        "diagnostics_md": "schema aligned",
+                        "business_data_md": "## main\n- answer: trace-ready\n",
+                    },
                     "id": "finish-1",
                 }
             ],
@@ -48,8 +52,8 @@ class GatewayFallbackChatModel:
     def __init__(self, callbacks: tuple[Any, ...]) -> None:
         self.event_callbacks = tuple(callbacks)
 
-    def bind_tools(self, tools: list[Any]) -> GatewayFallbackChatModel:
-        del tools
+    def bind_tools(self, tools: list[Any], **kwargs: Any) -> GatewayFallbackChatModel:
+        del tools, kwargs
         return self
 
     def invoke(self, messages: list[Any]) -> AIMessage:
@@ -60,7 +64,6 @@ class GatewayFallbackChatModel:
             from_provider="primary:route",
             to_provider="fallback:route",
             reason="RuntimeError: probe failed",
-            code="[F-v3-gateway-all-providers-failed]",
             context={"role_name": "graph_agent"},
         )
         return AIMessage(
@@ -68,7 +71,11 @@ class GatewayFallbackChatModel:
             tool_calls=[
                 {
                     "name": "finish_task",
-                    "args": {"markdown": "## answer\n\nfallback-ready"},
+                    "args": {
+                        "reasoning": "done",
+                        "diagnostics_md": "schema aligned",
+                        "business_data_md": "## main\n- answer: fallback-ready\n",
+                    },
                     "id": "finish-1",
                 }
             ],

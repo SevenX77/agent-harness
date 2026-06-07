@@ -168,7 +168,7 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 1. 待办:在 `ResolvedRole`(用途:表示解析后的 role 元数据和有序 routes)中加入 skipped diagnostics,字段至少应能表达 route_id、reason_code、message、是否来自 override;当前字段不足,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:448-459`。
 2. 待办:明确 `SnapshotVersion` 的写入和传播(见上方 F4)。`ResolvedRoute`(用途:表示一条 runtime-ready route candidate)有 `snapshot_version`,但当前 `RegistrySnapshot` 没有版本字段且 resolver 未赋值,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:403-439`。
 3. 待办:如果 route-only API 成为正式 contract,`registry.__init__`(用途:把 registry 公共 schema/contract 作为稳定 import surface 导出)需要同步导出新增 diagnostics DTO,当前 public list 见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/__init__.py:41-71`。
-4. 疑点:`canonicalize_model`(用途:把 provider model id 映射成保守 canonical group key)的 `endpoint_id` 当前被 `del endpoint_id` 丢弃,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/canonical.py:22-30`;未来 explicit alias 是否应按 endpoint/provider 作用域区分,需要产品与数据来源判断。
+4. ✅ **已定（PM 2026-06-04）**：explicit alias **按 endpoint/provider 作用域区分** → `canonicalize_model` **不再 `del endpoint_id`**，把 endpoint/provider 纳入别名解析作用域（同一 model id 在不同 endpoint 可属不同 canonical 组）。现状丢弃见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/canonical.py:22-30`（待改）。
 
 ## 交叉引用（链接，不复制）
 

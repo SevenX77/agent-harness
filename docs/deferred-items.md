@@ -121,7 +121,31 @@
 - **前置条件**: tauri/wry/GTK 栈整体升级排期（确认 0.20 兼容性 + 桌面端回归测试）。
 - **来源**: 2026-06-04 dependabot 27 条漏洞修复批；其余 26 条已修，仅此 1 条受栈约束阻塞。
 
+### DEF-017 — mvp0 `04-subgraph-md-spec` 退役受「引用未清零」阻塞（PM 2026-06-05 三步）
+- **日期**: 2026-06-05
+- **事项**: 按 PM 三步退役 `docs/engine/mvp0/skill-spec/04-subgraph-md-spec.md`：① 去 FROZEN；② 清零引用后盖「废弃」；③ 审计 mvp1 子图设计、绝对没问题后盖 FROZEN。
+- **阻塞（违反第②步「绝对没有引用 mvp0」，grep 全库核实）**：
+  - **代码（改 04-subgraph 即挂）**：`packages/graph-agent/tests/test_contract_hash_lock.py:16`（SHA256 锁死该文件）；`src/graph_agent/core/error_registry.py:55-61`（7 个子图错误码的 doc 指针指向 `./04-subgraph-md-spec.md#...`）；`spec/contract_map.yaml:246-252`、`spec/round28-manifest-schema.yaml:76`（契约锚点映射）。
+  - **真空债**：04-subgraph 里仍有效的部分（子图 7 错误码、`validator` 生命周期）尚未迁入 mvp1（mvp1 无错误码文档，`compile-rules/baseline` 仍链 mvp0 `11-error-code`）。node-type 推导已落 `physical-layout §3` ✅。
+  - **活文档**：`docs/studio/mvp1/01_workflows/02_authoring.md:26-29` 仍引「FROZEN 04-subgraph」作字段 / G2 权威。
+- **前置条件**：① 子图错误码随 error-code 表迁入 mvp1；② codex 重指 `error_registry`/`contract_map`/`hash-lock`；③ `02_authoring` 改指 mvp1 `skill-syntax §2.1`。三者齐 → un-FROZEN + 废弃。
+- **不阻塞的部分**：mvp1 子图**设计**已审计 clean（`skill-syntax §2.1` + `physical-layout §2.1.1` + `02-resolver` 三处一致、自包含、无 mvp0 依赖），可独立锁；受阻的只是 mvp0 文件退役与代码清引用。
+- **来源**: 2026-06-05 PM 三步指令 + 引用核实。
+
+### DEF-018 — Gateway WS-1 ChatX 调用层尾债（generic / legacy / profile / thinking）
+- **日期**: 2026-06-06
+- **事项**: `graph-agent-gateway` WS-1 已完成官方 ChatX factory + invocation runtime 主路径，但仍有四类尾债:
+  - `GenericRouteChatModel` 只是 fail-loud shell，普通 chat 内核未实现；当前会抛 `NotImplementedError`，避免静默返回空 `AIMessage`。
+  - `LLMClientManager.dispatch_provider_call/_dispatch_provider_call/_call_*` 已无生产活调用方，仅作为 legacy ordinary-chat helper 暂留；后续要删除，或收编进 generic 普通 chat 内核。
+  - `ProviderProfile` 注册表默认空，尚未 seed provider/model defaults；factory 暂用 `endpoint_id:provider_model_id` 作为 profile key，以区分 endpoint 级 base_url/credential/protocol 和物理模型，但该 key 规则仍待 alignment 11 §8 最终确认。
+  - thinking 归一化只完成局部 runtime kwargs 映射和 ChatX `AIMessage` 结果不拍平；DeepSeek reasoning-content 多轮保留的单方法 payload patch 未移植。
+- **延期原因**: 本轮 WS-1 的目标主线是 qiniu 空-content、异常分类、base_url、RouteChatModelFactory、ProviderProfile 原语、ChatX invoke/fallback/token escalation 主机制；generic 普通 chat、旧 provider-call helper 清理、profile defaults/key 最终化、DeepSeek payload patch 都需要独立契约和失败测试。
+- **前置条件**: ① 确认 ProviderProfile key 规则；② 为 generic 普通 chat 内核或删除路径补测试；③ 为 profile defaults/thinking/DeepSeek patch 补确定性失败测试；④ 清理或改写 `test_gateway_integration.py` / `test_runtime_hard_cutover.py` 中已迁到 ChatX 主路径后的 legacy 断言边界。
+- **来源**: `docs/graph-agent-gateway/mvp1/_impl/WS1-chatx-core.md` M2 说明；WS-1 终审要求（2026-06-06）。
+
 ## Completed / Promoted
+
+- **DEF-015 + DEF-013 → 拉回实现 (2026-06-04)**: PM「def 15 和 13 拉回来, 现在就要实现」。DEF-015 i18n 架构已定稿(`studio/mvp1/04_platform/i18n.md`,§9 P1 范围明确);DEF-013 后端 role-test 端点(`POST /api/llm/roles/{name}/test`)已就绪、缺前端 Properties 面板 UI。二者转入 **P1 实现**:Claude 出实现计划 → codex `[PLAN REVIEW REQUEST]` → codex 写代码(Claude 不亲自写)。上方 Active 区 DEF-013/DEF-015 条目保留作设计参考。
 
 - **DEF-002 → Promoted (2026-06-01)**: 连线 Context 真实数据接线。已并入 `studio-feature-trace-inspector` **REQ-3(P1 核心,现在可做)** —— 本就是该 spec 自己的 scope,从 deferred 注册表拉回。
 - **DEF-001 → Promoted (2026-06-01)**: 结构化前后态 DIFF。已并入 `studio-feature-trace-inspector` **REQ-7(P2,本 spec 拥有,依赖引擎 emit reducer 级 diff)** —— 不再以 deferred 形式悬挂,作为本 spec 的 P2 路线项追踪。快照机制澄清(每 phase 边界全量快照,非 keyframe+delta;diff 是展示层)随 REQ-7 留存。

@@ -5,12 +5,21 @@ public_api_symbols:
   AgentSkillDef:
     feature_ids:
     - F-vendor-contract-debt
+  AmbiguityReportEvent:
+    feature_ids:
+    - F-clarification-flow
+  BaseMockStrategy:
+    feature_ids:
+    - F-predict-internal-mocking
   BlackboardState:
     feature_ids:
     - F-state-blackboard
   CallbackEvent:
     feature_ids:
     - F-callback-event-stream
+  CompactionEvent:
+    feature_ids:
+    - F-llm-prompt-assembly
   CompileIssue:
     feature_ids:
     - F-skill-compilation-vendor-export
@@ -23,9 +32,21 @@ public_api_symbols:
   CompiledStateGraph:
     feature_ids:
     - F-graph-assembly
+  DeadEndPrunedEvent:
+    feature_ids:
+    - F-llm-prompt-assembly
   ExecutionError:
     feature_ids:
     - F-error-code-recovery
+  FinishTaskEvent:
+    feature_ids:
+    - F-finish-task-validation
+  GoldenCase:
+    feature_ids:
+    - F-predict-internal-mocking
+  GoldenCaseStrategy:
+    feature_ids:
+    - F-predict-internal-mocking
   GraphAgentError:
     feature_ids:
     - F-error-code-recovery
@@ -44,16 +65,31 @@ public_api_symbols:
   GraphSkillDef:
     feature_ids:
     - F-vendor-contract-debt
+  HeuristicStubStrategy:
+    feature_ids:
+    - F-predict-internal-mocking
   IoInput:
     feature_ids:
     - F-vendor-contract-debt
+  LLMCallEvent:
+    feature_ids:
+    - F-llm-execution
+  LLMFallbackEvent:
+    feature_ids:
+    - F-llm-execution
   LocalWorkspaceResolver:
     feature_ids:
     - F-skill-resolution
   LogicNodeAST:
     feature_ids:
     - F-logic-action-execution
+  MockStrategy:
+    feature_ids:
+    - F-predict-internal-mocking
   ModelProviderError:
+    feature_ids:
+    - F-error-code-recovery
+  NudgeEvent:
     feature_ids:
     - F-error-code-recovery
   PathDiff:
@@ -62,13 +98,22 @@ public_api_symbols:
   PersonaSkillDef:
     feature_ids:
     - F-vendor-contract-debt
+  PhaseEndEvent:
+    feature_ids:
+    - F-runtime-execution
   PhaseRecord:
     feature_ids:
     - F-predict-internal-mocking
+  PhaseStartEvent:
+    feature_ids:
+    - F-runtime-execution
   PredictGatewayChatModel:
     feature_ids:
     - F-llm-execution
   ResourceNotFoundError:
+    feature_ids:
+    - F-error-code-recovery
+  RetryEvent:
     feature_ids:
     - F-error-code-recovery
   SkillCompilationError:
@@ -95,15 +140,33 @@ public_api_symbols:
   RunResult:
     feature_ids:
     - F-runtime-execution
+  ToolCallEvent:
+    feature_ids:
+    - F-tool-call-binding
+  ValidationFailEvent:
+    feature_ids:
+    - F-error-code-recovery
+  WorkingMemoryUpdateEvent:
+    feature_ids:
+    - F-state-blackboard
   assemble_graph:
     feature_ids:
     - F-graph-assembly
+  assemble_phase_record:
+    feature_ids:
+    - F-predict-internal-mocking
   compile_skill:
     feature_ids:
     - F-compile-runtime-flow
+  compute_diff:
+    feature_ids:
+    - F-predict-internal-mocking
   parse_skill_file:
     feature_ids:
     - F-vendor-contract-debt
+  predict_skill:
+    feature_ids:
+    - F-runtime-execution
   run_skill:
     feature_ids:
     - F-runtime-execution

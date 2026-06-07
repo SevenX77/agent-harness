@@ -147,7 +147,7 @@ Files:
 Files:
 
 - Modify:
-  - `docs/engine/public-api-contract.md:33`：可在 PR-1 先记录 `event_subscriber` 的 run signature，最终术语在 PR-3 收束。
+  - `docs/engine/mvp0/public-api-contract.md:33`：可在 PR-1 先记录 `event_subscriber` 的 run signature，最终术语在 PR-3 收束。
   - `apps/studio/tests-e2e/test_run_flow.py:6`：更新 trace 文件名说明。
   - `packages/graph-agent/src/graph_agent/tools/builtin/parallel_map.py:22`、`packages/graph-agent/src/graph_agent/tools/builtin/parallel_map.py:107`：如果 PR-1 改 nested trace 透传，更新注释中的 `tracing.jsonl`。
 - Delete:
@@ -438,9 +438,9 @@ Files:
 - Modify:
   - `packages/graph-agent/src/graph_agent/__init__.py:32` 到 `packages/graph-agent/src/graph_agent/__init__.py:35`：移除 callback 类顶层 import/export。
   - `packages/graph-agent/src/graph_agent/__init__.py:55` 到 `packages/graph-agent/src/graph_agent/__init__.py:76`：最终导出 `RunResult/predict_skill/CallbackEvent` 等公共面，不再以 `WorkflowResult` 为 canonical。
-  - `docs/engine/public-api-contract.md:33`：`run_skill` 签名改为 `event_subscriber` 与 `RunResult`。
-  - `docs/engine/public-api-contract.md:38`：`WorkflowResult` 小节迁移为 `RunResult`。
-  - `docs/engine/public-api-contract.md:541`：`PredictResult` 小节迁移或删除。
+  - `docs/engine/mvp0/public-api-contract.md:33`：`run_skill` 签名改为 `event_subscriber` 与 `RunResult`。
+  - `docs/engine/mvp0/public-api-contract.md:38`：`WorkflowResult` 小节迁移为 `RunResult`。
+  - `docs/engine/mvp0/public-api-contract.md:541`：`PredictResult` 小节迁移或删除。
   - `packages/graph-agent/spec/contract_map.yaml:122`：删除/迁移 `PredictResult` 条目。
   - `packages/graph-agent/spec/contract_map.yaml:164`、`packages/graph-agent/spec/contract_map.yaml:359`：`WorkflowResult` 条目改为 `RunResult`。
   - `packages/graph-agent/README.md:94`、`packages/graph-agent/README.md:125`、`packages/graph-agent/README.md:126`、`packages/graph-agent/README.md:173`、`packages/graph-agent/README.md:177`：README 示例与目录说明改为 `RunResult`。
@@ -462,7 +462,7 @@ Files:
 
 验收标准:
 
-- `rg -n "WorkflowResult|PredictResult|callbacks: list\\[Any\\]|EXPECTED_PREDICT_INTERNAL_SYMBOLS" packages/graph-agent/README.md docs/engine/public-api-contract.md packages/graph-agent/spec/contract_map.yaml packages/graph-agent/tests/test_public_api_contract.py` 不再命中最终 public docs/contract，历史说明例外需显式注释。
+- `rg -n "WorkflowResult|PredictResult|callbacks: list\\[Any\\]|EXPECTED_PREDICT_INTERNAL_SYMBOLS" packages/graph-agent/README.md docs/engine/mvp0/public-api-contract.md packages/graph-agent/spec/contract_map.yaml packages/graph-agent/tests/test_public_api_contract.py` 不再命中最终 public docs/contract，历史说明例外需显式注释。
 - `graph_agent.__all__` 不再把 callback 继承类或 `WorkflowResult` 作为 canonical public API。
 
 ### Task PR3-4 最终 repo-wide contract 扫描与 round-32 完成门

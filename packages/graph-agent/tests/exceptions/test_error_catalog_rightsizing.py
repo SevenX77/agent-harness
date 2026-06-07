@@ -168,6 +168,48 @@ def test_workflow_result_error_accepts_structured_payload() -> None:
     assert dumped["error"]["doc_link"] == metadata.doc_link
 
 
+def test_workflow_result_exposes_diagnostics_through_dump_and_dict_like_shims(tmp_path: Path) -> None:
+    main = ErrorPayload(
+        code="[F-v3-runtime-phase-failed]",
+        message="phase failed",
+        phase_id="draft",
+        details={"path": tmp_path / "run.json"},
+    )
+    warn = ErrorPayload(
+        code="[F-v3-reference-reader-failed]",
+        message="reference fallback",
+        details={"source": tmp_path / "ref.md"},
+    )
+
+    result = WorkflowResult(
+        success=False,
+        run_id="run-1",
+        skill_id="skill-1",
+        error=main,
+        diagnostics=[warn],
+    )
+
+    assert result["diagnostics"][0] is main
+    assert result.get("diagnostics")[1] is warn
+    assert result["diagnostic_counts"] == {
+        "total": 2,
+        "by_level": {"FATAL": 1, "WARN": 1},
+        "by_code": {
+            "[F-v3-runtime-phase-failed]": 1,
+            "[F-v3-reference-reader-failed]": 1,
+        },
+    }
+
+    dumped = result.model_dump(mode="json")
+    assert [item["code"] for item in dumped["diagnostics"]] == [
+        "[F-v3-runtime-phase-failed]",
+        "[F-v3-reference-reader-failed]",
+    ]
+    assert dumped["diagnostics"][0]["details"]["path"] == str(tmp_path / "run.json")
+    assert dumped["diagnostics"][1]["details"]["source"] == str(tmp_path / "ref.md")
+    assert result.model_dump_json()
+
+
 @pytest.mark.parametrize("leaf_name", GATEWAY_LEAF_TO_FAMILY)
 def test_gateway_errors_inherit_from_model_provider_family(leaf_name: str) -> None:
     family = _public_family("ModelProviderError")

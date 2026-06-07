@@ -9,6 +9,7 @@ phase_executor, middleware) happens in T2-T6.
 
 from __future__ import annotations
 
+import copy
 from typing import Annotated, Any, TypedDict, cast
 
 from langchain_core.messages import (
@@ -371,3 +372,8 @@ def workflow_state_from_legacy_context(
         flow=new_flow,
         messages=messages if messages is not None else state["messages"],
     )
+
+
+def _clone_state(state: WorkflowState) -> WorkflowState:
+    """Clone WorkflowState using deepcopy to prevent cross-phase mutation."""
+    return copy.deepcopy(state)

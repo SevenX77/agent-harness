@@ -1,13 +1,13 @@
 ---
 module: 02-mechanism/03-assemble
 doc: mvp1-alignment
-status: drafted（机制·装配期;✅ 机制+依据已成段内联）
+status: drafted（机制·装配期;A §2 装配机制 + create_agent 构造收口成段;W 工程决策依据(create_agent cluster 无 PM 原话,§4 已披露)）
 aligns_with: ../../00-architecture-overview.md（§3 机制层 B·装配）
 ---
 
 # 03-assemble — 机制 B · 装配机制
 
-> **Tier**: 机制层 B · 装配期 | **Owns**: `graph_assembler`(phase→节点)· `_build_skill_node`(AGENT 闭包)· cognitive 模板**渲染** · `reference-reader`(装配期 builtin) | **现状**: ⏳ | **Related**: `01-compile`(上游 AST)· `skill-syntax`(模板语法)· `05-run-inner/01-agent-loop`(产出的内层 loop)· mvp0 `12`(装配期)
+> **Tier**: 机制层 B · 装配期 | **Owns**: `graph_assembler`(phase→节点)· `_build_skill_node`(AGENT 闭包)· cognitive 模板**渲染** · `reference-reader`(装配期 builtin) | **现状**: ⏳ | **Related**: `01-compile`(上游 AST)· `skill-syntax`(模板语法)· `05-run-inner/01-agent-loop`(产出的内层 loop)· `compile-rules` §2.2(装配流契约)
 
 ## 1. 定义
 assemble = 把可信 AST **装配成可运行 LangGraph 节点**(装配期):对每个 AGENT 节点收集 refs/tools/subagents → 跑 reference-reader → 渲染 cognitive 模板 → 建带 tools+prompt 的 Agent 节点。
@@ -44,4 +44,4 @@ engine 全权。
 2. reference-reader / builtin read tools 的归属(装配期 reader vs 运行期 read tools → `04-tools`)。
 
 ## 交叉引用(链接, 不复制)
-00-architecture-overview §3 · `01-compile` · `01-contract/02-skill-syntax`(模板语法,双向)· `05-run-inner/01-agent-loop` · `06-seam/01-models` · 代码现状 `core/graph_assembler.py:437-479`(_build_skill_node 入口)/`:510-562`(待替换手写 loop)· mvp0/`12-compile-runtime-flow`(装配期)
+00-architecture-overview §3 · `01-compile` · `01-contract/03-compile-rules`(装配流契约 §2.2)· `01-contract/02-skill-syntax`(模板语法,双向)· `05-run-inner/01-agent-loop` · `06-seam/01-models` · 代码现状 `core/graph_assembler.py:437-479`(_build_skill_node 入口)/`:510-562`(待替换手写 loop)

@@ -1,7 +1,7 @@
 # V0.3.0 Engine MVP0 Rebuild — 任务进度状态 (被打断快照)
 
 > **用途**: 2026-05-25 服务器崩溃 + GRAPH.md 格式 ground truth 恢复事件打断了 round-14 实施。本文件记录被打断时的完整任务状态, 防止再次丢失。
-> **唯一格式权威**: `docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md` (PM 拍板恢复的双轨制真相)。
+> **唯一格式权威**: `docs/engine/mvp0/skill-spec/00-FORMAT-GROUND-TRUTH.md` (PM 拍板恢复的双轨制真相)。
 > **最后更新**: 2026-05-26 (parent master, 集成分支 `stage/engine-v030`; main 在 74950f4)
 
 ---
@@ -16,7 +16,7 @@
 - **✅ PR F 组 (错误码) 已完成** (round-17, SOP-08 9 步全走): F1 退役 `[F-v21-*]` 已完成; F2 standard error payload — 新 ErrorPayload model + error_registry (89 码, 实施期补 2 缺口码 purity-violation + cognitive-output-schema-invalid) autofill level/stage/doc_link; 退役粗码 → 11-spec 细码; 测试断言 message-regex → payload.code (24 文件); must-fix 堵静默失败 None 后门 → fail loud。a2+a3 双审 (catch must-fix 已修); tests-first 15 红转绿; logic-explained 字段级。merge-commit `487f11f` 进 `stage/engine-v030`。主控亲跑 **1005 passed** 实证。report 已发 PM (`/tmp/pr-f-report.md`)。
 - **✅ PR G 组 (schema cleanup 收尾) 已完成** (round-18, SOP-08 9 步全走, **最后一个引擎 PR**): 删 codemod/context_mapping 全链/python_callable/`<steps>`壳/5 dead validators/12 个 collect_ignore 隐藏死测试; cognitive 模块保活。dead-vs-live **三重审计** (a2 plan 重判 catch 2 致命误判 cognitive+context_mapping + a3 plan audit conftest/gate gap + a2 impl audit catch **假绿** collect_ignore 隐藏 broken tests + a3 impl audit gate 收窄合法性+覆盖无丢失) + **主控物理复验亲跑 pytest**。must-fix: collect_ignore_glob 清空 → **诚实全绿 981 passed 0 fail 0 error** (不再靠隐藏凑绿); round18 gate 加防回归断言。Studio + 根 skills/ corpus V0.3.0 迁移 = §10 Deferred (engine-only charter scope)。4 granular commits (spec `55a57a6` / tests-first `f03d9ca` / impl `9877bf1` / docs `7d8c6d3`), merge-commit `1a540ca` 进 `stage/engine-v030`。report 已发 PM (`/tmp/pr-g-report.md`)。
 - **🎉 engine 阶段 (C+E+F+G) 全部完成**: 4 个 PR 全在 `stage/engine-v030` 集成分支, **待 PM 实测 golden** 后才先打 tag 再 squash 进 main (§0 合并工作流铁律)。main 仍在 74950f4 (round-14)。
-- **✅ round-27 契约文档冻结基线完成**: 建立 `docs/engine/public-api-contract.md` + `docs/engine/skill-spec/*.md` 的 frozen contract baseline; `.github/CODEOWNERS` 绑定 `@SevenX77`; `packages/graph-agent/tests/contract-exemptions.yaml` 建立 PM approval / PR / reason / cleanup 形状; `test_skill_spec_hash_lock.py` 锁住 14 份 skill-spec hash, 后续 round-28 泛化为 contract hash lock。
+- **✅ round-27 契约文档冻结基线完成**: 建立 `docs/engine/mvp0/public-api-contract.md` + `docs/engine/mvp0/skill-spec/*.md` 的 frozen contract baseline; `.github/CODEOWNERS` 绑定 `@SevenX77`; `packages/graph-agent/tests/contract-exemptions.yaml` 建立 PM approval / PR / reason / cleanup 形状; `test_skill_spec_hash_lock.py` 锁住 14 份 skill-spec hash, 后续 round-28 泛化为 contract hash lock。
 - **✅ round-28 feature checklist redesign 完成**: 建立 35 个真实业务 feature 的 manifest 系统 (`features.yaml` / `source_file_map.yaml` / `contract_map.yaml`)；92 个 concrete `[F-v3-*]` 错误码 + 33 个 `CallbackEvent` variants 各有唯一 primary owner；121 个 `src/graph_agent/**/*.py` 聚类为 61 feature + 60 detail；65 public API symbols + 53 skill-spec H2 + consumer 三轴全映射, 含 vendor-only 6 项; validator 输出 `R28_*` 并已接入 `.github/workflows/ci.yml` gate；dual-run hard lock 从 round-27 30 strict 升级为 round-28 35 strict；`test_round28_contract_manifests.py` 18 项 + `test_round28_invariant_guards.py` 5 类机制 guard 均通过；CI 模式全套实证 **1071 passed, 2 skipped, 19 xfailed**。
 - git 仓库已 gc 清理 (15000→0 游离对象, auto-gc 恢复)。
 
@@ -70,7 +70,7 @@ PR-1 spec: `round-19-PR1-demask-resolver/` (design/research/requirements a2 + ta
 
 ### 污染链 (PM 2026-05-25 揭示)
 
-1. **第一污染源**: commit `e485261` (5-23) 把 `docs/engine/skill-spec/02-graph-md-spec.md` 写成**纯 YAML phases**(删了 body `<phase>` XML), 违反 PM "phase 写 body XML" 拍板。
+1. **第一污染源**: commit `e485261` (5-23) 把 `docs/engine/mvp0/skill-spec/02-graph-md-spec.md` 写成**纯 YAML phases**(删了 body `<phase>` XML), 违反 PM "phase 写 body XML" 拍板。
 2. 5-24 PM 重新拍板**双轨制定稿** + 打印 4 文件模版二次确认, 但**只存 `/tmp/`** → 服务器崩溃丢失。
 3. round-14 spec 四件套 (`4a794e7`) + 顶层 `tasks.md` **B3** 继承了"删 `<phase>`"的错误理解。
 4. a1 基于错误 spec 写了 round-14 src + test (当前 WIP modified files)。
@@ -86,8 +86,8 @@ GRAPH.md **双轨制 (DUAL-TRACK)**:
 
 | 文件 | 污染内容 | 修正方向 |
 |---|---|---|
-| `docs/engine/skill-spec/02-graph-md-spec.md` | 纯 YAML phases (删 XML) | 回归双轨制 |
-| `docs/engine/skill-spec/01,03-12-*.md` | 可能受牵连 | 按 ground truth 逐份校 |
+| `docs/engine/mvp0/skill-spec/02-graph-md-spec.md` | 纯 YAML phases (删 XML) | 回归双轨制 |
+| `docs/engine/mvp0/skill-spec/01,03-12-*.md` | 可能受牵连 | 按 ground truth 逐份校 |
 | `.kiro/specs/.../tasks.md` B3 | "GRAPH.md `<phase/>` 改为 phases: YAML list" | 改回双轨 |
 | `.kiro/specs/.../tasks.md` B2 | mode 三值化 (要求作者写 mode) | ground truth 定 mode frontmatter **删除** (loader 从文件名注入) |
 | `.kiro/specs/.../tasks.md` C2 | "Cognitive Template 7 插槽" | ground truth §5 定 **8 插槽** |
@@ -101,7 +101,7 @@ GRAPH.md **双轨制 (DUAL-TRACK)**:
 
 ## §3 ground truth 确认进度
 
-`docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md` (commit 684be1e→bfb8eff→790d780→77aad8d):
+`docs/engine/mvp0/skill-spec/00-FORMAT-GROUND-TRUTH.md` (commit 684be1e→bfb8eff→790d780→77aad8d):
 
 - §0 全局规则 / §1 GRAPH.md 双轨 / §2 LOGIC.md / §3 SUBGRAPH.md / §4 SKILL.md / §5 Cognitive Template 8 插槽 / §6 跨文件规则 — **待 PM 逐节确认 (对/错/错在哪)**
 - §7 字段状态: schema_version ✅v0.3.0 / mode ✅删 / SkillResolverProtocol ✅认可 / target_skill key ✅PM 认可(功能正常即可) / @type ✅PM 无异议 / 错误码 ✅agents 设计功能正常即可 / **exit_contract 缺 md 格式约定 ⏳待补**(设计阶段补措辞, 非 PM 拍)

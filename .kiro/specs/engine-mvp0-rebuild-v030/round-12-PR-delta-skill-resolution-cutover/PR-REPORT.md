@@ -39,6 +39,6 @@ Key paths:
 - `apps/studio/backend/app/services/skill_resolver.py`
 - `apps/studio/backend/tests/test_delta_skill_resolver_injection.py`
 - `packages/graph-agent/tests/fixtures/v030_skill_registry/`
-- `docs/engine/skill-resolution/logic-explained.md`
-- `docs/engine/skill-resolution/mvp0-alignment.md`
-- `docs/engine/skill-resolution/baseline.md`
+- `docs/engine/mvp0/skill-resolution/logic-explained.md`
+- `docs/engine/mvp0/skill-resolution/mvp0-alignment.md`
+- `docs/engine/mvp0/skill-resolution/baseline.md`

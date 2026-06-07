@@ -1,29 +1,62 @@
-# timeline Baseline
+---
+module: 03_regions/timeline
+doc: baseline
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；TimelinePanel 只列历史 run；TracePanel/PromptInspector/RunDetailDrawer/useRunStream 都存在但未挂主流程 ⚠️。）
+binds_alignment: ./mvp1-alignment.md
+binds_code: apps/studio/frontend/src/components/studio/panels/TimelinePanel.tsx:TimelinePanel · apps/studio/frontend/src/components/TracePanel.tsx:TracePanel · apps/studio/frontend/src/components/PromptInspector.tsx:PromptInspector · apps/studio/frontend/src/components/history/RunDetailDrawer.tsx:RunDetailDrawer · apps/studio/frontend/src/hooks/useRunStream.ts:useRunStream
+units: [compile-lint-structured-error, trace-dot-blackboard, run-execution-node-status]
+---
 
-Status: mounted panel lists run history; live trace/timeline UI exists separately but is not mounted here.
+# timeline — Baseline（当下代码实现逻辑）
 
-Source workflow: `01_workflows/04_run-and-verify.md`.
+> **Scope**: Timeline region：run/predict history、live trace auto-open、full trace、prompt inspector、compare/golden actions 与 model compare tabs。
+> **现状一句话**: TimelinePanel 只列历史 run；TracePanel/PromptInspector/RunDetailDrawer/useRunStream 都存在但未挂主流程 ⚠️。
 
-## Current Component Index
-
-| Component/area | Current behavior | Evidence |
+## UI/UX
+| 面 | 现状 | 证据（文件:符号名） |
 |---|---|---|
-| Panel route | Panels routes `activePanel === "timeline"` to `TimelinePanel`. | `apps/studio/frontend/src/components/studio/panels/Panels.tsx:37` |
-| Run history | TimelinePanel reads current skill id and `useRunHistory`. | `apps/studio/frontend/src/components/studio/panels/TimelinePanel.tsx:32` |
-| Header/refresh | Panel shows run count and refresh button. | `apps/studio/frontend/src/components/studio/panels/TimelinePanel.tsx:39`, `apps/studio/frontend/src/components/studio/panels/TimelinePanel.tsx:44` |
-| States | Panel has loading, error, and empty states. | `apps/studio/frontend/src/components/studio/panels/TimelinePanel.tsx:56` |
-| Run rows | Panel maps run rows with status, id, relative time, duration, and tokens. | `apps/studio/frontend/src/components/studio/panels/TimelinePanel.tsx:71` |
-| TracePanel orphan | TracePanel can render event streams and actions but is not mounted. | `apps/studio/frontend/src/components/TracePanel.tsx:22`, `apps/studio/frontend/src/components/TracePanel.tsx:50` |
-| Prompt inspector orphan | PromptInspector exists for template/variables/rendered tabs. | `apps/studio/frontend/src/components/PromptInspector.tsx:20` |
-| Run detail orphan | RunDetailDrawer exists but is not opened by Timeline rows. | `apps/studio/frontend/src/components/history/RunDetailDrawer.tsx:27` |
-| Stream hook orphan | `useRunStream` exists but no mounted timeline flow consumes it. | `apps/studio/frontend/src/hooks/useRunStream.ts:49` |
+| Panel route | Panels routes `activePanel === "timeline"` to `TimelinePanel`. | `apps/studio/frontend/src/components/studio/panels/Panels.tsx:Panels（L37）` |
+| Run history | TimelinePanel reads current skill id and `useRunHistory`. | `apps/studio/frontend/src/components/studio/panels/TimelinePanel.tsx:TimelinePanel（L32）` |
+| Header/refresh | Panel shows run count and refresh button. | `apps/studio/frontend/src/components/studio/panels/TimelinePanel.tsx:TimelinePanel（L39）`, `apps/studio/frontend/src/components/studio/panels/TimelinePanel.tsx:TimelinePanel（L44）` |
+| States | Panel has loading, error, and empty states. | `apps/studio/frontend/src/components/studio/panels/TimelinePanel.tsx:TimelinePanel（L56）` |
+| Run rows | Panel maps run rows with status, id, relative time, duration, and tokens. | `apps/studio/frontend/src/components/studio/panels/TimelinePanel.tsx:TimelinePanel（L71）` |
+| TracePanel orphan | TracePanel can render event streams and actions but is not mounted. | `apps/studio/frontend/src/components/TracePanel.tsx:TracePanel（L22）`, `apps/studio/frontend/src/components/TracePanel.tsx:filter（L50）` |
+| Prompt inspector orphan | PromptInspector exists for template/variables/rendered tabs. | `apps/studio/frontend/src/components/PromptInspector.tsx:PromptInspector（L20）` |
+| Run detail orphan | RunDetailDrawer exists but is not opened by Timeline rows. | `apps/studio/frontend/src/components/history/RunDetailDrawer.tsx:RunDetailDrawer（L27）` |
+| Stream hook orphan | `useRunStream` exists but no mounted timeline flow consumes it. | `apps/studio/frontend/src/hooks/useRunStream.ts:connect（L49）` |
 
-## Current Region Ownership
+## 前端逻辑
+| 面 | 现状 | 证据（文件:符号名） |
+|---|---|---|
+| Panel route | Panels routes `activePanel === "timeline"` to `TimelinePanel`. | `apps/studio/frontend/src/components/studio/panels/Panels.tsx:Panels（L37）` |
+| Run history | TimelinePanel reads current skill id and `useRunHistory`. | `apps/studio/frontend/src/components/studio/panels/TimelinePanel.tsx:TimelinePanel（L32）` |
+| Header/refresh | Panel shows run count and refresh button. | `apps/studio/frontend/src/components/studio/panels/TimelinePanel.tsx:TimelinePanel（L39）`, `apps/studio/frontend/src/components/studio/panels/TimelinePanel.tsx:TimelinePanel（L44）` |
+| States | Panel has loading, error, and empty states. | `apps/studio/frontend/src/components/studio/panels/TimelinePanel.tsx:TimelinePanel（L56）` |
+| Run rows | Panel maps run rows with status, id, relative time, duration, and tokens. | `apps/studio/frontend/src/components/studio/panels/TimelinePanel.tsx:TimelinePanel（L71）` |
+| TracePanel orphan | TracePanel can render event streams and actions but is not mounted. | `apps/studio/frontend/src/components/TracePanel.tsx:TracePanel（L22）`, `apps/studio/frontend/src/components/TracePanel.tsx:filter（L50）` |
+| Prompt inspector orphan | PromptInspector exists for template/variables/rendered tabs. | `apps/studio/frontend/src/components/PromptInspector.tsx:PromptInspector（L20）` |
+| Run detail orphan | RunDetailDrawer exists but is not opened by Timeline rows. | `apps/studio/frontend/src/components/history/RunDetailDrawer.tsx:RunDetailDrawer（L27）` |
+| Stream hook orphan | `useRunStream` exists but no mounted timeline flow consumes it. | `apps/studio/frontend/src/hooks/useRunStream.ts:connect（L49）` |
 
-- Owns: run history list, live trace stream, run-after full trace timeline, prompt inspector entry, selected-run summary.
-- Current mounted code owns only run list.
+## 后端功能
+N/A。
 
-## Known Drift
+## 当前边界（timeline 现在不是什么）
+- 不拥有 trace 语义；owner 是 `trace-observability`。
+- 不拥有 golden creation 数据流；只提供历史/动作入口。
 
-- Workflow says run starts should auto-open live trace; current Timeline is manual history only (`apps/studio/frontend/src/components/studio/panels/TimelinePanel.tsx:71`).
-- TracePanel uses one-off hardcoded palette classes and needs design-system cleanup before mounting (`apps/studio/frontend/src/components/TracePanel.tsx:50`).
+## baseline / alignment 差异（测试锚点）
+| 维度 | 现状（baseline） | 目标（alignment） |
+|---|---|---|
+| live trace | TracePanel/useRunStream 未挂主流程 ⚠️ | run/predict 时 Timeline 自动打开 live trace |
+| run detail | RunDetailDrawer 不由 row 打开 ⚠️ | row 可开 detail/replay/compare/export |
+| golden actions | 旧 sonner/batch copilot 入口残留 ⚠️ | golden analysis 入口为 Copilot analysis bar，Timeline 只提供 compare/detail |
+> **验"是否按目标改了"**：1. live trace；2. run detail；3. golden actions。
+
+## 读代码主路径提示
+`apps/studio/frontend/src/components/studio/panels/TimelinePanel.tsx:TimelinePanel` → `apps/studio/frontend/src/components/TracePanel.tsx:TracePanel` → `apps/studio/frontend/src/components/PromptInspector.tsx:PromptInspector` → `apps/studio/frontend/src/components/history/RunDetailDrawer.tsx:RunDetailDrawer` → `apps/studio/frontend/src/hooks/useRunStream.ts:useRunStream`。
+
+> 旧 Coverage/Drift 暂存 [`_migrated-coverage-drift.md`](../../_migrated-coverage-drift.md#03-regions-timeline)（迁移期安全网，代码实现验证后删）。
+
+## 交叉引用（链接, 不复制）
+[alignment](./mvp1-alignment.md)（目标,双向）· `trace-observability` · `run-execution` · `compile-lint` · `golden-eval` · `copilot-assist`

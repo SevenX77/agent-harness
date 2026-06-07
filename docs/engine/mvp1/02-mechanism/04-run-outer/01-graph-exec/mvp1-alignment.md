@@ -1,7 +1,8 @@
 ---
 module: 02-mechanism/04-run-outer/01-graph-exec
 doc: mvp1-alignment
-status: drafted（机制·运行外层;⏳ AGENT侧迁移 + ❌ LOGIC执行待设计）
+status: drafted（**U4(LOGIC)单元锁定 2026-06-06**;LOGIC 干净契约 LE1-3 已定、live drift→refactor-target 归 kiro;AGENT run_context/io_manager 已成段(源 11-io)、nudge 归 `05-exit-control`(已成段,graph-exec 仅 AGENT 委派);文件未 FROZEN——graph-exec 还参与 U3/U11）
+binds_baseline: ./baseline.md
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行外层）
 ---
 
@@ -13,7 +14,7 @@ aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行外�
 graph-exec = 运行时**按 DAG 执行 phase**,用 blackboard(`WorkflowState.data`)统一状态。三种 phase 范式:**LOGIC**(确定性 action,引擎调)/ **AGENT**(内层 agent loop,委派 `05-run-inner`)/ **SUBGRAPH**(子图调用)。io 经 StateMapper 从黑板切片/回写。
 
 ## 2. 数据流 / 机制
-`graph.invoke(inputs)` → 校验 inputs → blackboard init → `for phase in topological_order`:StateMapper.slice(state, phase.io.inputs) → **run phase** → 校验 output vs phase.io.outputs → StateMapper.merge → 终态校验。机制权威 mvp0 `12-compile-runtime-flow`(运行时流)。
+`graph.invoke(inputs)` → 校验 inputs → blackboard init → `for phase in topological_order`:StateMapper.slice(state, phase.io.inputs) → **run phase** → 校验 output vs phase.io.outputs → StateMapper.merge → 终态校验。(运行时流的完整机制正文 🚨 待 mvp1 自写,见 `07-runtime`;mvp0 已弃用。)
 - **LOGIC(V4 干净契约,2026-06-04 定稿)**:action = **确定性纯变换**:
   - 签名 `def <action_name>(inputs) -> dict`(函数名=action 名,自文档);`inputs` = **只读** io.inputs 切片。
   - **纯返回**:返回 dict、key ⊂ io.outputs;**不写黑板**——砍掉 Context 的 `set/update/delete/__setitem__`(action 不能 mutate)。
@@ -23,7 +24,11 @@ graph-exec = 运行时**按 DAG 执行 phase**,用 blackboard(`WorkflowState.dat
   > **这是把 live drift 重构掉的目标契约**,不是照抄 live。live 现状(11 action 全用可变 Context facade、3 个跑 run_skill、5 个碰 FS、黑板塞 `BatchAccumulator` 对象)= §8 的 refactor-target。
 - **AGENT**:委派 `05-run-inner` 跑内层 loop → finish_task。
 - **SUBGRAPH**:child compiled graph invoke,失败冒泡包 parent context。
-- run_context / io_manager(io 从黑板切片、文件跑到节点才注入、io.outputs artifact 路径)。
+- **run_context / io_manager(节点间黑板/IO 操作,源 11-io;现状见 baseline §4/§5)**:
+  - **子图 io 放宽(E1)**:删 `loader.py:528` 对 **inputs** 的 1:1 强制——子图像普通节点用自己 `io.inputs` 经 StateMapper 从黑板切片(机制现成);**outputs 保留**相等校验(下游契约)。
+  - **文件导入→黑板(E2,新能力)**:节点声明"导入文件 → 注入字段",**跑到该节点才 lazy 注入**(非图启动);落点 `_wrap_phase_runtime_node`(`graph_assembler.py:287`)进节点前,复用 read_file 工具(`make_read_file_tool`,`tools/builtin/read_file.py:43`)读路径 + `StateManager.update_business`(`state.py:225`)写黑板,再 StateMapper 切片;发 `InputFileInjectedEvent`(归 `observability`)。
+  - **io.outputs artifact 扩展(E3)**:路径标注更丰富(一/多文件、filename-only 默认 `.workspace/artifacts`);**md 输出取 `business_data_md`(`CognitiveFlowMiddleware` 保留的原始 md,`cognitive_flow.py:536`)原样写,不做 json→md 回转**——⚠️ 现状未接:主路径 finish_task 工具(`finish_task.py:51`)走 `markdown`→parsed `data`,`business_data_md` 在中间件侧;接线改取它(`save_artifact` 对 str 原样写,`storage.py:167`)而非 parsed json。
+  - **黑板切片(FROZEN-4)引擎侧已成(StateMapper),不改**(前端 canvas 可视化另算)。
 
 ## 3. 接口契约
 StateMapper 规则(init/slice/merge/final;`[F-v3-runtime-state-mapping-failed]`):slice 要求 required 字段在 state;merge output key ⊂ io.outputs.properties。blackboard = `WorkflowState.data`(归 `data-contracts`);**LOGIC action 调度契约**:`def <action_name>(inputs) -> dict` 纯返回、只读 inputs(见 §2 / §5 LE1-3)。
@@ -42,6 +47,10 @@ AGENT 侧的 run_context/io_manager/nudge 收口待成段(决策依据见 §5)�
 | **LE1** | LOGIC action = **纯返回**:只读 inputs → 返回 dict;砍 Context mutation(`set/update/delete`) | 可测、可序列化、不破 checkpoint;消除"action 写黑板"不可控 |
 | **LE2** | **硬禁** action 里 `run_skill`/FS/sys.path/import 越界(扩 purity 扫描器) | 逼回声明式 iterate/SUBGRAPH;否则声明式编排永远是摆设 |
 | **LE3** | 干净契约**反写进 `compile-rules`+`skill-syntax`**(解冻 `03-logic-md-spec`) | spec = V4 真相,code 向它对齐(非 spec 向退化 code 投降) |
+| **E1** | 子图 io 放宽:**只放 inputs**(从黑板切片),outputs 保留相等校验 | 子图像普通节点;outputs 仍需对齐否则下游取不到(源 11-io;studio FROZEN-1 只点名 inputs) |
+| **E2** | 文件导入→黑板 **lazy**(跑到节点才注入,非图启动) | 按需注入;落 `_wrap_phase_runtime_node` 前置步,复用 read_file + StateManager |
+| **E3** | md artifact 来源 = validated `business_data_md`(中间件保留)原样,不 json→md 回转 | 避免解析-回写丢格式;现工具走 parsed data,接线改取 business_data_md(`save_artifact` 对 str 原样写) |
+| **E4** | 黑板切片(FROZEN-4)引擎侧已成(StateMapper),本块不改 | 前端 canvas 可视化另算 |
 
 ## 6. 测试关键点
 1. StateMapper slice/merge:required 缺失报错;merge 越界 key 报错。
@@ -60,7 +69,8 @@ LOGIC 干净契约已定;**live 的 drift = 要重构掉的反模式**(不是真
 5. 死簇 `code_phase_node`/`phase_executor` 删(live 用 `_build_logic_node`)。
 6. 反写:解冻 `03-logic-md-spec` 改 action 契约(归 `compile-rules`/`skill-syntax`)。
 7. action/tool 统一 capability:spec 已固定 Action≠Tool,纯 action(read-only dict)与 tool(StructuredTool)本质不同 → **不统一**。
-+ run_context/io_manager/nudge 收口(待成段)。
++ run_context/io_manager 收口(源 11-io,本轮成段):子图 inputs 放宽(改 `loader.py:528` 只校 outputs)、文件导入→黑板(`_wrap_phase_runtime_node` 前置步,新能力)、io.outputs artifact 路径标注扩展 + md 取 business_data_md——均 TDD 归 kiro;边操作**事件**(BlackboardReduce/InputDispatch/InputFileInjected)归 `observability`(双向)。nudge/after_agent 闸 owner = `05-exit-control`(已成段),graph-exec 的 AGENT 分支(§2)委派内层即可、无额外 io 收口。
++ **FROZEN 解冻(源 11-io)**:`04-subgraph-md-spec` 删 inputs 1:1(归 `skill-syntax`/`compile-rules`)、io.outputs 加 artifact 路径标注 + file-import 声明(归 `skill-syntax`)。
 
 ## 交叉引用(链接, 不复制)
-00-architecture-overview §3 · `04-tools`(action/tool)· `02-iterate` · `03-checkpoint` · `05-run-inner`(AGENT)· `data-contracts` · mvp0/`12-compile-runtime-flow`
+**`baseline`(现状,双向)** · 00-architecture-overview §3 · `04-tools`(action/tool)· `02-iterate` · `03-checkpoint` · `05-run-inner`(AGENT)· `data-contracts`

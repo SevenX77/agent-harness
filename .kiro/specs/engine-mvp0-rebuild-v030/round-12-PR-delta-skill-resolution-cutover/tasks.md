@@ -44,8 +44,8 @@ Files:
 - `packages/graph-agent/src/graph_agent/core/skill_resolver_protocol.py:18`
 - `packages/graph-agent/src/graph_agent/core/skill_resolver_protocol.py:35`
 - `packages/graph-agent/tests/core/test_skill_resolver_protocol.py:1`
-- `docs/engine/skill-spec/10-skill-resolver-protocol-spec.md:33`
-- `docs/engine/skill-spec/11-error-code-spec.md:147-151`
+- `docs/engine/mvp0/skill-spec/10-skill-resolver-protocol-spec.md:33`
+- `docs/engine/mvp0/skill-spec/11-error-code-spec.md:147-151`
 
 Tasks:
 
@@ -352,8 +352,8 @@ Dependencies: δ.5, δ.6, δ.8.
 
 Files:
 
-- `docs/engine/skill-resolution/logic-explained.md`
-- `docs/engine/skill-resolution/mvp0-alignment.md`
+- `docs/engine/mvp0/skill-resolution/logic-explained.md`
+- `docs/engine/mvp0/skill-resolution/mvp0-alignment.md`
 - `.kiro/specs/engine-mvp0-rebuild-v030/round-12-PR-delta-skill-resolution-cutover/PR-REPORT.md`
 - `.kiro/specs/engine-mvp0-rebuild-v030/round-12-PR-delta-skill-resolution-cutover/{requirements,design,research,tasks}.md`
 

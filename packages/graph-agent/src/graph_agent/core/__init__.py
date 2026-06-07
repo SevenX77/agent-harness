@@ -11,7 +11,6 @@ from graph_agent.core.exceptions import (
     SkillLoadError,
     TemplateRenderError,
 )
-from graph_agent.core.harness import GraphAgentHarness
 from graph_agent.core.loader import load_workflow_from_md
 from graph_agent.core.local_workspace_resolver import LocalWorkspaceResolver
 from graph_agent.core.manifest import ContextBridge
@@ -30,7 +29,6 @@ __all__ = [
     "SkillCompilationError",
     "TemplateRenderError",
     "MaxRetriesExceededError",
-    "GraphAgentHarness",
     "LocalWorkspaceResolver",
     "load_workflow_from_md",
     "compile_skill",

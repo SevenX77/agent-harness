@@ -15,7 +15,7 @@
 > **结构 (PM 2026-06-03)**: compile / predict+run+trace+golden / debug **分三个节点(03/04/05)**,不合并成一个大节点。golden 跟着 predict/run 走(放 04)。
 
 ### 走查状态
-- ✅ **03 compile / 04 运行与验收 / 05 debug**: 全部走查 + **全量 atom actions 回写**进各节点文档(含决策 + 原话 + 测试关键点)。对引擎的设计需求 3 份 prompt 已抛出(见 `_reorg/engine-prompt-*` + `gemini-prompt-batch-loop`)。
+- ✅ **03 compile / 04 运行与验收 / 05 debug**: 全部走查 + **全量 atom actions 回写**进各节点文档(含决策 + 原话 + 测试关键点)。对引擎的设计需求见 `docs/engine/mvp1/`(契约层 + 机制层)。
 - ✅ **06 保存与发布**: 走查回写完成(PM 2026-06-04 定 **publish=占坑低优先**:本地 git autocommit 存档 + Artifact Registry 最小发布;commit-msg/confetti/独立按钮=stale-doc 删;团队协作/发布鉴权占坑未来)。
 - 🎉 **全 7 节点走查完成**(00–06);14 个能力全有完整走查记录。
 

@@ -40,8 +40,8 @@ Known high-risk mapping spots:
 
 Most pragmatic sync guard:
 
-- Add `packages/graph-agent/src/graph_agent/core/error_registry.py` with typed static metadata for all 87 codes currently listed in `docs/engine/skill-spec/11-error-code-spec.md`.
-- Add a test that parses `docs/engine/skill-spec/11-error-code-spec.md` with a narrow regex for `\[F-v3-[a-z0-9-]+\]` and asserts exact key-set equality with the registry.
+- Add `packages/graph-agent/src/graph_agent/core/error_registry.py` with typed static metadata for all 87 codes currently listed in `docs/engine/mvp0/skill-spec/11-error-code-spec.md`.
+- Add a test that parses `docs/engine/mvp0/skill-spec/11-error-code-spec.md` with a narrow regex for `\[F-v3-[a-z0-9-]+\]` and asserts exact key-set equality with the registry.
 - Add tests for representative metadata autofill: level, stage, and doc_link for compile-time, runtime, assembly-time, FATAL, and WARN examples.
 - Keep doc parsing in tests only. Runtime should not parse markdown.
 
@@ -68,7 +68,7 @@ Reason: this gives external boundaries one JSON contract while reducing repeated
 - WHAT: Add failing tests for Req1-Req5 before implementation:
   - `ErrorPayload(code="[F-v3-graph-phase-cycle]", message="cycle")` autofills `level`, `stage`, and `doc_link`.
   - unknown code is rejected.
-  - every code parsed from `docs/engine/skill-spec/11-error-code-spec.md` exists in `error_registry.py`.
+  - every code parsed from `docs/engine/mvp0/skill-spec/11-error-code-spec.md` exists in `error_registry.py`.
   - the three multi-stage codes preserve their exact stage lists, not a collapsed single value: `[F-v3-resource-reference-path-invalid]` -> `["编译期", "运行期"]`, `[F-v3-resource-example-path-invalid]` -> `["编译期", "运行期"]`, `[F-v3-skill-not-registered]` -> `["编译期", "装配期"]`.
   - `GraphAgentError` and concrete subclasses expose `exc.payload.model_dump()` with `code`, `level`, `stage`, `message`, `doc_link`.
   - `SkillCompilationError(skill_path=..., field_path=...)` exposes `payload.source_path` and `payload.field_path`.
@@ -84,7 +84,7 @@ Reason: this gives external boundaries one JSON contract while reducing repeated
 - Depends on: Task 1.
 - Risk: manual transcription drift. Mitigate with the spec key-set test from Task 1 and explicit stage assertions for the three multi-stage codes.
 - Doc link rule: `doc_link` for all 87 codes comes from the 11-spec rows, including the four a2-backfilled validator/runtime rows; no registry entry may have an empty doc_link.
-- Acceptance: `rg -o "\[F-v3-[a-z0-9-]+\]" docs/engine/skill-spec/11-error-code-spec.md | sort -u` equals registry keys exactly.
+- Acceptance: `rg -o "\[F-v3-[a-z0-9-]+\]" docs/engine/mvp0/skill-spec/11-error-code-spec.md | sort -u` equals registry keys exactly.
 
 ### 3. Add `ErrorPayload` model and exports
 

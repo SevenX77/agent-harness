@@ -64,7 +64,7 @@ MVP1 目标：让 **route(`ResolvedRoute`/`ResolvedRole`)成为编排层和调�
 - **签名(两级对外 API)**：
   - role 级 `ModelResolver.resolve(role_name, *, thinking_enabled, model_override, callbacks, phase_name, predict_context) → BaseChatModel`(协议 `protocol.py:24-39`)——返回包好的 `GatewayChatModel`/`PredictGatewayChatModel`，gateway 自动按 fallback 链调到底；`model_override` 当前实为精确 `route_override`(`registry/resolver.py:45`)。
   - route 级 `resolve_routes(role_name, model_override) → ResolvedRole`(待补，已定 ③b；[[02-orch-role-resolution]] 落实)——**只返回解析好的 route，不替 app 调**；给"不要编排外壳、自己用别的 SDK 跑"的消费方(如 copilot 走 `claude_agent_sdk`)。
-- **数据契约**：`ResolvedRole{ routes: ResolvedRoute[](有序 fallback 候选), system_prompt_prefix, runtime_policy(探活/熔断/截断升级), lint_results, source_profile_* }`。字段权威源 [[04-orch-registry-schema]] `registry/schema.py:415-459`(链接不复制)。
+- **数据契约**：`ResolvedRole{ routes: ResolvedRoute[](有序 fallback 候选), system_prompt_prefix, runtime_policy(探活/熔断/截断升级), lint_results, source_profile_*, skipped_diagnostics(**待补，FA 2026-06-04**：记录被跳过 route 的 route_id/reason_code/message/是否来自 override，供 Studio/trace 看"哪些 route 被跳过、为什么"，权威源同归 04) }`。字段权威源 [[04-orch-registry-schema]] `registry/schema.py:415-459`(链接不复制)。
 - **方向·归属**：producer = gateway 编排(③b)；consumer = Graph Agent phase / copilot service / 未来 app；**owner = 本模块(01)**——owner 改契约负责通知全部 consumer。
 - **错误契约**：role 不存在 / 过滤后空链 → `RegistryResolutionError`(配置错误)→ `ModelResolver.resolve` 统一映射 `GatewayRoleNotConfiguredError`；resolver 依赖缺失 → `GatewayResolverMissingError`(`llm_phase_node.py:133`)。
 - **不变量·前后置**：route 是**唯一交接物**——调用层**不得**回读 Studio DTO、不得按 provider/model/price/latency 另选或动态搜索 route(MVP0 禁令 `docs/graph-agent-gateway/mvp0/mvp0-alignment.md:118`)；两级 API 解析同一 role → 同一组有序 route。
@@ -116,8 +116,8 @@ MVP1 目标：让 **route(`ResolvedRoute`/`ResolvedRole`)成为编排层和调�
 
 ## 8. gaps / 待设计
 
-1. 需要主控确认 route 级 handoff API 的**精确形状**(归属已定 ③b，形状待定)：是在 `ModelResolverProtocol` 增加 `resolve_routes()`，还是让 `resolve()` 返回新 wrapper，再保留旧 `resolve_chat_model()` 兼容。**注**：归属不再是疑点(已定 ③b 公共 API)，只剩签名取舍。
-2. 需要主控确认 `model_override` 是否改名为 `route_override`；当前代码行为已是 route override，见 `registry/resolver.py:37`。
+1. ✅ **已定（PM 2026-06-04）**：route 级 handoff API = 在 `ModelResolverProtocol` **新增 `resolve_routes(role_name, route_override) → ResolvedRole`**，与 role 级 `resolve()` 并列（不采用"让 `resolve()` 返新 wrapper"）。理由：两方法两语义、职责最清；[[02-orch-role-resolution]] 已按此形状写。
+2. ✅ **已定（PM 2026-06-04）**：`model_override` **改名 `route_override`**——代码行为已是精确 route override（`registry/resolver.py:37`），改名消除"按 model 模糊匹配"的误解；属一次性公共 API 命名清理，需同步所有调用点 + 各模块签名引用（命名传播归实施期）。
 3. **Copilot WS 是否暴露 route diagnostics** = ③a 产品可观测性取舍，归 studio [[copilot-assist]]（gateway 只提供 route，WS 怎么展示/要不要 diagnostics 是 studio 的事，§3.5 所有权不变量）；gateway 侧只保证 route 解析**不**发生在 WS 层。
 4. **代码下沉/接线**(后续工程，非本轮)：让 Copilot `_resolve_copilot_runtime` 从直接 import pure helper 改为调用 route 级 public API；`__init__` 导出 route handoff 类型。
 

@@ -14,7 +14,7 @@
 - `packages/graph-agent/src/graph_agent/core/parser.py` 中 `parse_skill_file(path)` 只调用 `_fatal(...)`，消息为 `schema 2.0 parse_skill_file is not supported; use GRAPH.md`。
 - `parse_skill_file` 残留在 `core/parser.py` docstring、定义、`__all__`，`packages/graph-agent/src/graph_agent/__init__.py` docstring，以及 `packages/graph-agent/tests/core/test_parse_skill_file.py` 的 import / 单个测试中。
 - `packages/graph-agent/src/graph_agent/core/skill_validator.py` 存在，但 `packages/graph-agent/src` 与 `packages/graph-agent/tests` 下 0 import；活代码区提及是 `packages/graph-agent/src/graph_agent/middleware/cognitive_flow.py` 的注释，配置残留是 `pyproject.toml` 的 mypy legacy quarantine entry。
-- `DehydratedCompiledSkill` 只出现在 `docs/engine/skill-compilation/mvp0-alignment.md`，源码 0 命中；当前缓存实现是 `dict` snapshot round-trip，版本开关在 `core/cache.py` 的 cache key payload `"format": "v2"`。
+- `DehydratedCompiledSkill` 只出现在 `docs/engine/mvp0/skill-compilation/mvp0-alignment.md`，源码 0 命中；当前缓存实现是 `dict` snapshot round-trip，版本开关在 `core/cache.py` 的 cache key payload `"format": "v2"`。
 
 ## Tasks
 
@@ -58,7 +58,7 @@ Acceptance:
 ### 3. Docs: 修正 skill compilation cache 过时示意
 
 Files:
-- `docs/engine/skill-compilation/mvp0-alignment.md`
+- `docs/engine/mvp0/skill-compilation/mvp0-alignment.md`
 
 Steps:
 - 重写 `Data Model / State` 中 `DehydratedCompiledSkill` / `schema_version` 代码块附近内容。
@@ -71,8 +71,8 @@ Steps:
 - 保持该章节其它 V0.3.0 编译、resolver、递归 guard 语义不变。
 
 Acceptance:
-- `rg -n "DehydratedCompiledSkill" docs/engine/skill-compilation/mvp0-alignment.md packages/graph-agent/src packages/graph-agent/tests` 无输出。
-- `rg -n "\"format\": \"v2\"|format.*v2|_dehydrate_compiled_skill|_rehydrate_compiled_skill" packages/graph-agent/src/graph_agent/core/cache.py docs/engine/skill-compilation/mvp0-alignment.md` 能定位到代码事实与文档说明。
+- `rg -n "DehydratedCompiledSkill" docs/engine/mvp0/skill-compilation/mvp0-alignment.md packages/graph-agent/src packages/graph-agent/tests` 无输出。
+- `rg -n "\"format\": \"v2\"|format.*v2|_dehydrate_compiled_skill|_rehydrate_compiled_skill" packages/graph-agent/src/graph_agent/core/cache.py docs/engine/mvp0/skill-compilation/mvp0-alignment.md` 能定位到代码事实与文档说明。
 
 ### 4. Governance: 注册 pytest marker
 
@@ -100,7 +100,7 @@ Commands:
 - `rg -n "parse_skill_file" packages/graph-agent/src packages/graph-agent/tests`
 - `test ! -e packages/graph-agent/src/graph_agent/core/skill_validator.py`
 - `rg -n "skill_validator" packages/graph-agent/src packages/graph-agent/tests pyproject.toml`
-- `rg -n "DehydratedCompiledSkill" docs/engine/skill-compilation/mvp0-alignment.md packages/graph-agent/src packages/graph-agent/tests`
+- `rg -n "DehydratedCompiledSkill" docs/engine/mvp0/skill-compilation/mvp0-alignment.md packages/graph-agent/src packages/graph-agent/tests`
 - `rg -n "\"format\": \"v2\"|format.*v2" packages/graph-agent/src/graph_agent/core/cache.py`
 - `uv run pytest packages/graph-agent/tests -q 2>&1 | grep -i "PytestUnknownMark"`
 - `git diff --name-only`
@@ -117,5 +117,5 @@ Acceptance:
   - `packages/graph-agent/src/graph_agent/middleware/cognitive_flow.py`
   - `pyproject.toml`
   - `packages/graph-agent/pyproject.toml`
-  - `docs/engine/skill-compilation/mvp0-alignment.md`
+  - `docs/engine/mvp0/skill-compilation/mvp0-alignment.md`
 - 不出现 skip/xfail/collect_ignore 或弱化测试断言。

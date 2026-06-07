@@ -512,7 +512,7 @@ def test_predict_gateway_model_stays_predict_bound_and_zero_usage(
     with (
         patch.object(LLMClientManager, "_probe_provider", side_effect=AssertionError("provider")),
         patch(
-            "graph_agent_gateway.ordinary_chat._dispatch_provider_call",
+            "graph_agent_gateway.gateway_chat_model.RouteChatModelFactory.build",
             side_effect=AssertionError("provider"),
         ),
     ):

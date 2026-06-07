@@ -211,8 +211,8 @@
 ### 3.5 现状 gap → 接线工程清单（亲验 file:line）
 - **去 mock**：`mock-copilot-data.ts` 全套 + `mockCopilotRoles` 死代码（仅 test 引用）清理；默认 props `defaultCopilotModelGroups`（`CopilotTab.tsx:58`）→ 接真 registry（`buildCopilotRolesFromRealData`，`:117` 主导）。
 - **🐛 copilot_ 前缀分流 bug（必修）**：`selectModelGroup`（`:219`）选组后把 role 键改成**裸 `modelGroupId`**（`:232/242`，如 `claude-opus-4.7`，丢 `copilot_` 前缀）；后端 `_is_copilot_role`（`llm.py:905`，`startswith("copilot_")`）→ **误判成 graph-agent 角色错存**。修：选组后 role key 保 `copilot_` 前缀。
-- **「Backend Integration」假徽章 → 统一 save-status badge**〔#4，PM 校正：不是删，是换成和前两页一样的保存状态标签〕：现 `<Badge>Backend Integration</Badge>`（`CopilotTab.tsx:79` & `:302`）是写死装饰、不反映真实状态。改成**统一 save-status badge**（依据 `FRONTEND_UI_SPEC.md:76`「Settings 表单字段变更实时保存并显示保存状态、不放独立 Save 按钮」），放同一 header trailing slot，**接 Copilot 真 `saveStatus`**（修 `void saveStatus; void error`，`:70` 丢弃）。状态集同 `RoleSaveStatusBadge`（`RoleBadges.tsx:5`）：idle→静默不显 / pending→Pending / saving→Saving / saved→Saved / 失败→错误（**失败显式告警不静默**，D8 铁律）。
-- **统一组件（横切）**：现状是**三份近重复** badge —— `SaveStatusBadge`（API Keys，`ApiKeysTab.tsx:19`）/ `RoleSaveStatusBadge`（`RoleBadges.tsx:5`）/ `AppSettingsSaveStatusBadge`（`GeneralTab.tsx:12`），都吃同一 `SaveStatus` 类型。按"统一组件"要求应**合并成一个共享 save-status badge**，四页（General / API Keys / LLM Roles / Copilot）共用。（API Keys 已闭环，consolidation 作横切登记、不重开该页。）
+- **「Backend Integration」假徽章 → 统一 save-status badge**〔#4，PM 校正：不是删，是换成和前两页一样的保存状态标签〕：WS-7 已落 `components/ui/save-status-badge.tsx`,四页 header trailing slot 共用同一组件；Copilot 不再显示静态 `<Badge>Backend Integration</Badge>`,而是接真实 `saveStatus` / `error`。状态集:idle→静默不显 / pending→Pending / saving→Saving / saved→Saved / 失败→错误（失败显式告警不静默,D8 铁律）。
+- **统一组件（横切）**：原三份近重复 badge —— `SaveStatusBadge`（API Keys）/ `RoleSaveStatusBadge` / `AppSettingsSaveStatusBadge` —— 已收敛为本地 UI wrapper `components/ui/save-status-badge.tsx`;`RoleBadges.tsx` 仅保留仍被模型/route UI 复用的 `ThinkingBadge`。
 - **fallback 只取首条**：`_resolve_copilot_route`（`copilot.py:445`）只取首条 route → 走完整 fallback 链。
 - **占位按钮**：model-group 行 Remove 现 disabled 写死无 handler → 接 handler。
 - **SDK 状态灯**：现按 `ui_state==ready` 粗映射 → 来自真 SDK 测试结果。

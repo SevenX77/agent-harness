@@ -4,12 +4,13 @@ doc: baseline
 status: drafted
 last_verified: 2026-06-03
 ---
+<!-- 核对进度:已迁 3 块 / 未迁 0 块 / 2026-06-04 -->
 
-# 13-models — Baseline(现状)
+~~# 13-models — Baseline(现状)~~ → ✅[已迁入](../../02-mechanism/06-seam/01-models/baseline.md#后端功能)
 
 Graph Agent 侧的 **LLM 接缝(很薄)**:真正的 resolver / `GatewayChatModel` 在 **gateway 包**(独立子系统,第1趴 `temp/2026-06-02-engine-gateway-interface-needs.md` 已设计);engine 侧只有"拿模型的接缝 + 兼容补丁"。
 
-## 覆盖代码(file:line 已核)
+~~## 覆盖代码(file:line 已核)~~ → ✅[已迁入](../../02-mechanism/06-seam/01-models/baseline.md#后端功能)
 
 | 件 | 现状 | 证据 |
 |---|---|---|
@@ -19,6 +20,6 @@ Graph Agent 侧的 **LLM 接缝(很薄)**:真正的 resolver / `GatewayChatModel
 | `GatewayChatModel` | 在 gateway 包(**非 engine**) | 第1趴 |
 | 直连模式 `init_chat_model` | 全 src grep **无** → 未建 | — |
 
-## Baseline / Alignment 差异
+~~## Baseline / Alignment 差异~~ → ✅[已迁入](../../02-mechanism/06-seam/01-models/baseline.md#后端功能)
 - 只有 role 模式(吃 GatewayChatModel)live;**D1 的直连/兼容模式未建**(`init_chat_model` 现造 ChatX);
 - D1 双模目前只在 temp 第1趴,**未正式收进 mvp1**(本域补)。

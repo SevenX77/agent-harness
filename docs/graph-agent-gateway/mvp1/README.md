@@ -2,13 +2,34 @@
 milestone: MVP1
 decision_record: 已分散留底进各模块文档(每模块 §4 用户原话 / §5 决策+动机);client 层 A' 重设计决策不再单独引用外部文件
 coverage: 后端文件映射(Explore 清点);12 个 gateway ③b 模块 baseline/mvp1-alignment 已起草(原 copilot、HTTP 适配壳 2 模块 2026-06-03 判 ③a，移交 studio)
-status: 12 个 gateway 模块文档已补齐,待实现阶段按待办推进
+status: drafted（12 个 gateway 模块文档已补齐,待实现阶段按待办推进）
+design_units_index: ./DESIGN_UNITS_INDEX.md
+workflow_axis: N/A（gateway MVP1 是库/公共能力模块,无独立用户旅程 workflow 文档;覆盖以决策来源清单 + DESIGN_UNITS_INDEX + 各 alignment PM 原话核验）
+module: graph-agent-gateway-mvp1
+doc: manifest
+binds_design: ./DESIGN_UNITS_INDEX.md
+binds_code: packages/graph-agent-gateway/README.md
+units: []
+aligns_with: ../../development/design-doc-standards/00-three-axes.md · ../../development/design-doc-standards/01-writing-standard.md · ../../development/design-doc-standards/02-audit-standard.md
 ---
 
 # MVP1 — 模块 manifest + 写作 brief
 
 > 每个模块一个子文件夹,内含 `baseline.md`(现状)+ `mvp1-alignment.md`(目标)。
+> 设计单元索引(轴③ · R8 枢纽)= [`DESIGN_UNITS_INDEX.md`](./DESIGN_UNITS_INDEX.md)。本索引为 MVP1 新建,不复用 mvp0 `INDEX.md`。
 > 全部必须满足底部**写作 bar**——核心:**把每个类/函数解释清楚,不靠名字猜**。
+
+## Scope / Non-goals（审计边界）
+
+**MVP1 做什么**：把 `graph-agent-gateway` 定义成领域无关、可复用的大模型网关公共能力内核(③b)。本轮文档覆盖:role→route 编排与 route 交接契约、凭证/端点 schema 与 base_url 归一化、registry schema、capability/profile/model 知识、错误分类、fallback/circuit/probe、测试状态 SSOT 与证据库、原生 ChatX 调用运行时、route→ChatX 工厂、provider profile、fallback tracing/events/exceptions,以及 predict mock 移交 engine 后 gateway 只留 role→route 的边界。
+
+**MVP1 不做什么**：不定义前端 UI / 颜色 / 拖拽 / 卡片录入;不定义产品策略(默认推荐、动态浮出、弃用区、family 折叠展示);不承载 copilot 的实际 SDK 调用、session、WS 事件翻译或 SDK 测试;不承载 HTTP job/progress/DTO 包装;不绑定凭证、证据库、health store 存储介质;不承载 engine 的 predict mock / path diff 业务逻辑;不在本轮文档审计里顺手改代码。
+
+**归属判据**：凡是对模型数据/机制的标准化、组织、编排、状态总结、知识沉淀,且不依赖 UI 交互 / 产品策略 / 实际调用方式 / 存储介质,归 gateway ③b 公共能力;绑死四件应用加工之一的内容归 ③a Studio 或其它调用方。现代码中散在 `apps/studio/backend` 但按判据属 ③b 的能力,本轮文档写成"待下沉 gateway";代码迁移另立工程任务。
+
+**权威来源**：归属判据以 `packages/graph-agent-gateway/README.md` §2、`docs/studio/mvp1/01_workflows/00_settings-ux-spec.md` §6.0、[`module-disposition-revised.md`](./module-disposition-revised.md) 为准;横切单元 / owner / lock 以 [`DESIGN_UNITS_INDEX.md`](./DESIGN_UNITS_INDEX.md) 为准。
+
+**Workflow 轴说明**：gateway MVP1 是库/公共能力模块,不是用户旅程型产品模块,本目录没有独立轴① workflow 文档。审计覆盖不伪造 atom action,改按本 README 的决策主落点、[`module-disposition-revised.md`](./module-disposition-revised.md) 的归属反转、[`DESIGN_UNITS_INDEX.md`](./DESIGN_UNITS_INDEX.md) 的设计单元映射,以及各 `mvp1-alignment.md` 就近 PM 原话逐项核验。
 
 ## 架构:编排 → [route] → 调用
 
@@ -43,7 +64,7 @@ status: 12 个 gateway 模块文档已补齐,待实现阶段按待办推进
 | 文件夹 | 覆盖代码 | 职责 / 必须解释 |
 |---|---|---|
 | `09-inv-invocation-runtime` | `gateway_chat_model.py:_build_chat_result`(调用步骤,共享)、`client_manager.py:_call_*/_call_with_token_escalation`(共享)、`models.py` | invoke 流程;**retry(ChatX 瞬时重试);截断升级;thinking 不拍平;从 `usage_metadata` 取 usage + 注入 route metadata**。baseline 自研 `_call_*`;mvp1 原生 ChatX |
-| `10-inv-route-chat-model-factory` | **MVP1 新建**(现状逻辑散在 `client_manager`SDK 工厂 + `resolver` 实例化) | `ResolvedRoute`→原生 ChatX;base_url 双保险;init-kwargs;范本 `temp/deerflow/.../factory.py`、`temp/deepagents/.../_models.py`。baseline=无此模块/职责现由谁承担;mvp1 新建(A' 核心) |
+| `10-inv-route-chat-model-factory` | **MVP1 新建**(现状逻辑散在 `client_manager`SDK 工厂 + `resolver` 实例化) | `ResolvedRoute`→原生 ChatX;base_url 双保险;init-kwargs;范本 [chatx-provider-patterns.md](./references/chatx-provider-patterns.md)、[chatx-provider-patterns.md](./references/chatx-provider-patterns.md)。baseline=无此模块/职责现由谁承担;mvp1 新建(A' 核心) |
 | `11-inv-provider-profiles` | **MVP1 新建**(现状散在 `profile_selector`+`capabilities`+`client_manager` thinking) | provider 差异 = init-kwargs 表;何时子类覆盖单方法(deerflow `PatchedChatDeepSeek`);**绝不重写整套消息转换**。baseline=无;mvp1 新建(deepagents `ProviderProfile` 模式) |
 
 > **copilot SDK 调用（原模块 12）已移交 studio**：按判据它是 ③a 应用（copilot 的实际调用方式，绑 `claude_agent_sdk`），gateway 库不感知 copilot——只把 `copilot_chat` 当普通 role 解析成 route（[`01-handoff-interface`](./01-handoff-interface/mvp1-alignment.md) 的 route 级 API）。SDK 调用 / session / env 注入 / 事件翻译 / 假测试见 `docs/studio/mvp1/02_capabilities/copilot-assist/` + `01_workflows/00_settings-ux-spec.md` §3.8/§3.4；两个 base_url 归一化助手归 [`03-orch-credentials-endpoints`](./03-orch-credentials-endpoints/mvp1-alignment.md)（③b 归一化原语）。
@@ -67,4 +88,4 @@ status: 12 个 gateway 模块文档已补齐,待实现阶段按待办推进
 5. `baseline.md` 写现状 + 覆盖率;`mvp1-alignment.md` 写目标 + 已实现/差异 + 决策 + 代码索引 + 覆盖率。
 6. 单文件 >~400 行 → 在本模块文件夹再拆一级,并在此登记。
 7. 只写文档;代码问题记文末「待办/疑点」,不改代码。
-8. 素材源:`../mvp0/{logic-explained.md, baseline.md, mvp0-alignment.md}`(核对后引用,勿照抄过时内容)。
+8. 历史材料:`../mvp0/{logic-explained.md, baseline.md, mvp0-alignment.md}`只能用于核对迁移背景,不得作为 MVP1 SSOT 或复用 MVP0 INDEX;MVP1 横切映射以 [`DESIGN_UNITS_INDEX.md`](./DESIGN_UNITS_INDEX.md) 为准。

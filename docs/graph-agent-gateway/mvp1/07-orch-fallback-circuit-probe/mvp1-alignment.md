@@ -3,6 +3,10 @@ module: 07-orch-fallback-circuit-probe
 doc: mvp1-alignment
 status: drafted
 verified_at: 2026-06-02
+binds_design: ./baseline.md
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:GatewayChatModel/_generate/_is_marked_down/_probe/_mark_down/_usage_total_calls/_record_usage · packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:LLMClientManager/probe_provider/is_provider_marked_down/mark_provider_down/record_usage/_probe_provider/_is_provider_marked_down/_mark_provider_down/_call_with_token_escalation · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:RuntimePolicy/ProbeResult · packages/graph-agent-gateway/src/graph_agent_gateway/registry/probe_contracts.py · apps/studio/backend/app/services/copilot_test.py:ModelProbeResult/_probe_model/_probe_official_call_method · apps/studio/backend/app/services/llm_health_store.py:RuntimeCircuit/SqliteLlmHealthStore
+units: [fallback-circuit-probe-health]
+aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
 
 # 07 — Fallback / Circuit / Probe（编排外壳:回退链·熔断·探活）· MVP1 设计
@@ -12,7 +16,7 @@ verified_at: 2026-06-02
 > **Owns**：fallback 链遍历 + 熔断跳过 + 1-token probe + 异常分类 + mark_down + fallback event + usage 归属 + 截断升级重试 + 批量探测策略；**每条 route 的真实 ChatX invoke 不在本模块**（归 [[09-inv-invocation-runtime]]）
 > **Status**：设计定稿（2026-06 判据第四轮反转）；代码 = `_generate` 编排段保留、调用段换 ChatX(归 09)、`_call_with_token_escalation` 待从调用层搬上编排层、`llm_health_store` 待下沉 ③b
 > **Related**：[[06-orch-error-classification]]（`classify_exception` 状态码语义权威源，本模块只消费）· [[09-inv-invocation-runtime]]（真实 invoke / `_call_*` / 消息转换 / F4 thinking / F5 metadata 注入落点）· [[13-x-tracing-events-exceptions]]（`LLMFallbackEvent` / `emit_llm_fallback_event` / `AllProvidersFailedError`）· [[04-orch-registry-schema]]（`RuntimePolicy` / `ProbeResult` 字段权威源）· [[03-orch-credentials-endpoints]]（F1 base_url 归一化共享决策的存写主体，probe 用对 base_url）· [[08-orch-test-status-ssot]]（熔断持久化的另一消费视角 + 6 态投影）· studio copilot（copilot-assist + ux-spec §3.8）（copilot 假测试 `copilot_test` 的应用侧消费方）
-> **决策日志**：client 层 A' 重设计决策（D1 A' / D2 编排-调用分离 / M2 client_manager 5 件事 / M3 `_generate` 逐步归属 / F2 retry / F3 截断升级 / F5 usage）的完整逻辑 + PM 原话已就地留底在下文各功能段（F1 收 D1/D2、F3 收 base_url、F4 收 F2 retry、F5 收 F3 截断、F6 收 F5 usage、F8 收批量探测、F9 收熔断持久化反转）；归属反转源 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`（07 行三处反转）
+> **决策日志**：client 层 A' 重设计决策（D1 A' / D2 编排-调用分离 / M2 client_manager 5 件事 / M3 `_generate` 逐步归属 / F2 retry / F3 截断升级 / F5 usage）的完整逻辑 + PM 原话已就地留底在下文各功能段（F1 收 D1/D2、F3 收 base_url、F4 收 F2 retry、F5 收 F3 截断、F6 收 F5 usage、F8 收批量探测、F9 收熔断持久化反转）；归属反转源 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md` 第 47-49 行
 > **现状**：见同目录 `baseline.md`
 
 ## 定义
@@ -43,7 +47,7 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 | **resolver → `_generate`（入参）** | `ResolvedRole`{ `routes`: `ResolvedRoute[]`（有序 fallback 链）, `runtime_policy`: `RuntimePolicy`（down TTL / probe timeout / `token_escalation_rounds`,字段权威源 `registry/schema.py:88-98`）}。`_generate` **看得到**"有序候选 + 运行时策略"(通用编排概念),**看不到**"角色怎么被 UI 编辑 / 怎么排序出来"(③a 应用加工 + 02 materialize)。 |
 | **`_generate` → 09 调用层（每条 route）** | 入:一条 `ResolvedRoute` + 原始 `BaseMessage[]`(不拍 dict) + runtime params;出:ChatX `AIMessage`(含 `usage_metadata` + 注入的 route metadata) 或抛异常。**契约要求**:① 抛出的异常形状能被 `classify_exception` 沿异常链找到 `status_code`/`response.status_code`;② 成功 `AIMessage.usage_metadata` 非空可喂 usage 归属;③ thinking content blocks 不被拍平(归 09 F4)。 |
 | **`_generate` → `client_manager`（健康/probe/usage,③b 公共接口）** | `is_provider_marked_down(endpoint_id, provider_model_id) → bool`、`probe_provider(...) → bool`(可选带 `credential_provider`)、`mark_provider_down(..., runtime_policy)`、`record_usage(endpoint_id, prompt/completion/total tokens)`。这四个是 M2 拆解里**保留的**②③④(probe / 熔断 / usage),签名见 `client_manager.py:53-132,:310-323`。 |
-| **熔断持久化（③b 公共,现 ③a 待下沉）** | `SqliteLlmHealthStore.open_circuit(scope, scope_id, retry_at, reason_code, ...)` 写、`get_active_circuits(route_id, endpoint_id, rate_limit_bucket) → RuntimeCircuit[]`(只返回 `retry_at` 未过的)读;`RuntimeCircuit` DTO 字段 `scope/scope_id/opened_at/retry_at/ttl_seconds/reason_code/failure_count/message`,见 `apps/studio/backend/app/services/llm_health_store.py:14-101`。**存储介质 SQLite 路径由 ③a 注入**,store 逻辑本身 ③b。 |
+| **熔断持久化（③b 公共,现 ③a 待下沉）** | `SqliteLlmHealthStore.open_circuit(circuit: RuntimeCircuit)` 写、`get_active_circuits(route_id, endpoint_id, rate_limit_bucket) → RuntimeCircuit[]`(只返回 `retry_at` 未过的)读;`RuntimeCircuit` DTO 字段 `scope/scope_id/opened_at/retry_at/ttl_seconds/reason_code/failure_count/message`,见 `apps/studio/backend/app/services/llm_health_store.py:14-101`。**存储介质 SQLite 路径由 ③a 注入**,store 逻辑本身 ③b。 |
 | **probe 结果 DTO（③b 公共契约）** | `ProbeResult`(1-token 探测结果契约,字段权威源 `registry/schema.py:320-329`,经 `registry/probe_contracts.py` 重导出给诊断/SSOT 侧)。执行期 `_generate` 只消费 boolean probe/fallback 结果;探测结果作为诊断/证据流的一部分进 [[08-orch-test-status-ssot]]。 |
 | **fallback event（③b 公共,归 13）** | `emit_llm_fallback_event` 入 `LLMFallbackEvent`{ `phase_name`, from/to provider, reason, code, context(含 from/to route 诊断 + fallback decision + provider status code + runtime settings) }。callback 异常被吞,不掩盖运行时错误。 |
 | **错误** | route 全失败 → `AllProvidersFailedError`(payload 来自累积的 failure records,异常类归 13,`exceptions.py:33-60`);probe 不可 fallback 异常 / invoke fail-fast 异常 → 透传抛出。 |
@@ -91,7 +95,7 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
   - `LLMClientManager.probe_provider`（对外执行 route 探活的方法）继续保留为编排层接口;它当前委托 `_probe_provider`,后者对 OpenAI-compatible 发 `chat.completions.create(..., max_tokens=1, temperature=0)`、对 Anthropic-compatible 发 `messages.create(..., max_tokens=1)`,代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:63-76` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:370-438`。
   - probe 是**编排层自己**发的 1-token 真请求,用 client manager 的轻量 SDK client,不走 ChatX。
 - **决策 + 动机**：
-  - **F1 — base_url 归一化(与 [[03-orch-credentials-endpoints]] 共享决策,重复留底防 drift)**:**决策 = 主路径在 credential 保存时归一化(每 endpoint 存确定的 canonical 格式,从源头保证对),副路径在调用时做幂等归一化双保险(已 canonical 则 no-op)**。每 protocol 规则确定统一:anthropic 去尾 `/v1`(SDK 自加 `/v1/messages`)、openai 保持、deepseek-anthropic 去 `/v1` 后 `+/anthropic`、ark openai-compat `.../api/v3`。本模块只在 **probe 用对 base_url** 上消费它(`_probe` 发 1-token 请求要打到正确端点);归一化的存写主体归 [[03-orch-credentials-endpoints]]、调用时双保险归 [[09-inv-invocation-runtime]] 的 `RouteChatModelFactory`。**重复 OK**:F1 是 03 / 07 / 09 共享决策,各模块都写、用 `[[link]]` 双向索引防 drift。**PM 原话见本段下方**:"base_url 归一化的关键是每个protocol都有确定的统一的规则 ... 放在credential保存时归一化是最好的, 每个endpoint都有固定格式, 存这个固定格式保证不会出错"。
+  - **F1 — base_url 归一化(与 [[03-orch-credentials-endpoints]] 共享决策,重复留底防 drift)**:**决策 = 主路径在 credential 保存时归一化(每 endpoint 存确定的 canonical 格式,从源头保证对),副路径在调用时做幂等归一化双保险(已 canonical 则 no-op)**。每 protocol 规则确定统一:anthropic 去尾 `/v1`(SDK 自加 `/v1/messages`)、openai 保持、deepseek-anthropic 去 `/v1` 后 `+/anthropic`、ark openai-compat `.../api/v3`。本模块只在 **probe 用对 base_url** 上消费它(`_probe` 发 1-token 请求要打到正确端点);归一化的存写主体归 [[03-orch-credentials-endpoints]]、调用时双保险归 [[09-inv-invocation-runtime]] 的 `RouteChatModelFactory`。**重复 OK**:F1 是 03 / 07 / 09 共享决策,各模块都写、用双向模块链接防 drift。**PM 原话见本段下方**:"base_url 归一化的关键是每个protocol都有确定的统一的规则 ... 放在credential保存时归一化是最好的, 每个endpoint都有固定格式, 存这个固定格式保证不会出错"。
 - **原话**：
   > **F1 base_url 归一化**(本模块关联 probe 用对 base_url;归一化主体见 [[03-orch-credentials-endpoints]])："base_url 归一化的关键是每个protocol都有确定的统一的规则 ... 如果结果足够确定, 我觉得放在credential保存时归一化是最好的, 每个endpoint都有固定格式, 存这个固定格式保证不会出错"
 - **测试点**：
@@ -145,10 +149,10 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 
 - **机制/数据流**：对一批 route 编排 probe 的顺序 / 并发 / 跳过历史失败 / 优先历史成功,是 gateway 探测机制衍生的能力;现编排住 `routers/llm.py` 的探测段。执行期 fallback 链 probe(`_generate` 单条,见 F3)与批量探测编排(多条 job)是同一探测能力的两个入口。
 - **决策 + 动机**：
-  - **批量探测策略 = ③b 公共(边界说明)**:对一批 route 编排 probe 的顺序 / 并发 / 跳过历史失败 / 优先历史成功,是 gateway 探测机制衍生的能力,任何 app 都要;`module-disposition-revised.md:66` 下沉清单列"list-models 解析 + 批量探测编排"(现 `routers/llm.py` 探测编排)= ③b,只有"批量进度的 UI"留 ③a;ux-spec §6.4 横切表(`00_settings-ux-spec.md:452`)也把"批量探测策略"列入 ③b 公共列。本模块 brief 已含 probe;此处补一句边界:执行期 fallback 链 probe(`_generate` 单条)与批量探测编排(多条 job)是同一探测能力的两个入口,都 ③b,UI/进度留 ③a。
+  - **批量探测策略 = ③b 公共(边界说明)**:对一批 route 编排 probe 的顺序 / 并发 / 跳过历史失败 / 优先历史成功,是 gateway 探测机制衍生的能力,任何 app 都要;`module-disposition-revised.md:76` 下沉清单列"list-models 解析 + 批量探测编排"(现 `routers/llm.py` 探测编排)= ③b,只有"批量进度的 UI"留 ③a;ux-spec §6.0/§6.1 把"批量探测策略"列入 ③b 公共列(`00_settings-ux-spec.md:362`, `00_settings-ux-spec.md:370`, `00_settings-ux-spec.md:384`)。本模块 brief 已含 probe;此处补一句边界:执行期 fallback 链 probe(`_generate` 单条)与批量探测编排(多条 job)是同一探测能力的两个入口,都 ③b,UI/进度留 ③a。
   - 批量探测策略要把历史失败喂进下次编排(跳过历史失败、优先历史成功),这是 ③b 编排能力。
 - **原话**：
-  > **PM 探测结果全进 draft / 失败也是历史**(ux-spec §1.4 #2.4,`00_settings-ux-spec.md:70`)："这几次的 endpoint / 模型探测结果(含失败)都要写进 draft / 证据库,不浪费(失败也是历史:哪些模型抖动 / 超时 / 不可用;下次免重探、喂蓝态)。" → 批量探测策略要把历史失败喂进下次编排(跳过历史失败、优先历史成功),这是 ③b 编排能力。
+  > **PM 探测结果全进 draft / 失败也是历史**(ux-spec §1.4,`00_settings-ux-spec.md:259`)："这几次的 endpoint / 模型探测结果(含失败)都要写进 draft / 证据库,不浪费(失败也是历史:哪些模型抖动 / 超时 / 不可用;下次免重探、喂蓝态)。" → 批量探测策略要把历史失败喂进下次编排(跳过历史失败、优先历史成功),这是 ③b 编排能力。
 - **status**：现批量探测编排住 `routers/llm.py` 探测段(③a 位置)= target，**待下沉** ③b(进度 UI 留 ③a)。
 - **归属**：③b 批量探测编排(现 `routers/llm.py` 探测段,**待下沉** ③b)；批量探测进度 UI / HTTP 包装(适配壳)留 ③a `apps/studio/backend`。
 
@@ -156,10 +160,10 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 
 - **机制/数据流**：`SqliteLlmHealthStore` 把冷却事实跨进程存起来复用,`open_circuit` 写、`get_active_circuits` 读(只返回 `retry_at` 未过的),`RuntimeCircuit` DTO 字段见 `apps/studio/backend/app/services/llm_health_store.py:14-101`(契约详见模块级接口契约「熔断持久化」一行)。store 现状见 `apps/studio/backend/app/services/llm_health_store.py:26-124`。
 - **决策 + 动机**：
-  - **`llm_health_store`(熔断持久化)= ③b 公共内核(本轮反转)**:把冷却事实跨进程存起来复用,是 fallback/熔断机制的内在延伸,换 app 还要;**判据**:"换个 app 还原样能用吗?能=③b"(`module-disposition-revised.md:38` 07 行新判定 = **③b 公共,下沉 gateway;存储介质留注入**)。**被反转**:原 baseline `Baseline/Alignment 差异` 与 `待办/疑点 #3` 把它判作"③a seam / 执行期 down-cache 与该 store 是否合并是疑点"(`07/baseline.md:75,:100`)。现按判据已定 ③b 待下沉,SQLite 路径(存储介质,四件事之④)由 ③a 注入。
-  - **`copilot_test`(copilot 假测试)= ③a 应用(copilot 专属)**:它用 `AsyncAnthropic`(裸 Anthropic HTTP 客户端)发探测,而真实 copilot 跑 `ClaudeSDKClient`,绑死的是 copilot 的实际调用方式(四件事之③),不是通用 route probe;`module-disposition-revised.md:39` 07 行明确"③a 应用(copilot 专属),留 studio"。它与 ③b 的 `LLMClientManager.probe_provider`(通用 1-token route probe)**不同源**:前者是 copilot 接线工程的对象(假测试要改走真 `ClaudeSDKClient`,见 studio copilot 页 / ux-spec §3.4),后者是 fallback 链里的执行期探活。baseline 覆盖代码表已含 `copilot_test` 三个对象,本轮只**补归属标注**,内容不删。
+  - **`llm_health_store`(熔断持久化)= ③b 公共内核(本轮反转)**:把冷却事实跨进程存起来复用,是 fallback/熔断机制的内在延伸,换 app 还要;**判据**:"换个 app 还原样能用吗?能=③b"(`module-disposition-revised.md:48` 07 health_store 新判定 = **③b 公共,下沉 gateway;存储介质留注入**)。**被反转**:原 baseline 的差异表与待办/疑点 #3 把它判作"③a seam / 执行期 down-cache 与该 store 是否合并是疑点"。现按判据已定 ③b 待下沉,SQLite 路径(存储介质,四件事之④)由 ③a 注入。
+  - **`copilot_test`(copilot 假测试)= ③a 应用(copilot 专属)**:它用 `AsyncAnthropic`(裸 Anthropic HTTP 客户端)发探测,而真实 copilot 跑 `ClaudeSDKClient`,绑死的是 copilot 的实际调用方式(四件事之③),不是通用 route probe;`module-disposition-revised.md:49` 07 行明确"③a 应用(copilot 专属),留 studio"。它与 ③b 的 `LLMClientManager.probe_provider`(通用 1-token route probe)**不同源**:前者是 copilot 接线工程的对象(假测试要改走真 `ClaudeSDKClient`,见 studio copilot 页 / ux-spec §3.4),后者是 fallback 链里的执行期探活。baseline 覆盖代码表已含 `copilot_test` 三个对象,本轮只**补归属标注**,内容不删。
 - **原话**：
-  > **判据（本轮反转 `llm_health_store` 归属 + 钉死 `copilot_test` 留 ③a）**："换个 app 还原样能用吗?能=③b,不能=③a。"(ux-spec §6.0 判据铁律,`00_settings-ux-spec.md:334`) → 熔断持久化是 fallback/熔断机制的跨进程延伸,任何调模型 app 都要 → **③b 公共**(原误判 ③a seam);`copilot_test` 绑死 copilot SDK 调用方式(四件事之③) → **③a 应用**。
+  > **判据（本轮反转 `llm_health_store` 归属 + 钉死 `copilot_test` 留 ③a）**："换个 app 还原样能用吗?能=③b,不能=③a。"(ux-spec §6.0 判据铁律,`00_settings-ux-spec.md:342`, `00_settings-ux-spec.md:352`) → 熔断持久化是 fallback/熔断机制的跨进程延伸,任何调模型 app 都要 → **③b 公共**(原误判 ③a seam);`copilot_test` 绑死 copilot SDK 调用方式(四件事之③) → **③a 应用**。
 - **测试点**：（熔断态 route 不进 ChatX invoke 的执行期回归在 F2；本段持久化层无独立执行期断言，验证落"下沉后与执行期 TTL 缓存合并为同一健康源"的工程任务，见 gaps。）
 - **status**：`SqliteLlmHealthStore` 已能持久化 circuit(`apps/studio/backend/app/services/llm_health_store.py:26-124`)；**本轮反转**:从"③a seam / 是否打通是疑点"改判 **③b 公共,待下沉**;SQLite 路径留 ③a 注入。
 - **归属**：③b(现 ③a 待下沉) — 熔断持久化内核 → gateway 包；存储介质 SQLite 路径注入留 ③a `apps/studio/backend`。
@@ -175,7 +179,7 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 - **疑点(去重,实现期定)**:`_probe_provider` 在可 fallback 异常时已经 `_mark_provider_down` 并返回 false,`_generate` 的 `probe_ok=False` 分支又 `_mark_down` 一次;当前只是覆盖同一个 TTL key,是否需要去重由实现任务决定,证据见 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:407-410` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:168-173`。
 - **疑点**:`LLMClientManager.is_provider_marked_down` 接收 `runtime_policy` 但当前立即 `del runtime_policy`,实际 TTL 判断只看已写入的过期时间;如果 MVP1 要让查询逻辑也感知 policy,需要实现任务另行处理,证据见 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:53-61`。
 
-## 交叉引用（双向 [[link]]，不复制）
+## 交叉引用（双向链接，不复制）
 
 - [[06-orch-error-classification]]:`classify_exception` 状态码语义权威源(本模块只消费 fallback/fail-fast/retry 结果)
 - [[09-inv-invocation-runtime]]:真实 ChatX invoke / `_call_*` / 消息转换 / `_build_chat_result`(M3 第 1/5/7 步改动落点)
@@ -184,7 +188,7 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 - [[08-orch-test-status-ssot]]:熔断持久化的 SSOT/投影视角 + 6 态(probe 结果作证据流)
 - studio copilot（copilot-assist + ux-spec §3.8）:`copilot_test` 假测试的应用侧消费方 + 真 `ClaudeSDKClient` 测试接线
 - [[03-orch-credentials-endpoints]]:F1 base_url 归一化的存写主体(本模块只在 probe 用对 base_url 上共享该决策,双向索引防 drift)
-- client 层 A' 重设计决策(D1/D2/M2/M3/F2/F3/F5)完整逻辑 + PM 原话已逐功能留底(F1/F3/F4/F5/F6/F8/F9) · 归属反转源 `module-disposition-revised.md`(07 行三处反转)
+- client 层 A' 重设计决策(D1/D2/M2/M3/F2/F3/F5)完整逻辑 + PM 原话已逐功能留底(F1/F3/F4/F5/F6/F8/F9) · 归属反转源 `module-disposition-revised.md` 第 47-49 行
 
 ---
 
@@ -217,7 +221,7 @@ MVP1 目标:`GatewayChatModel._generate`（LangChain 调用进入 Gateway 后执
 
 client 层 A' 重设计的四条决策(D1 保留 `GatewayChatModel`、D2 编排/调用分离、F2 保留 ChatX 瞬时重试、F3 截断升级重试搬家)的**完整逻辑 + PM 原话**已就地留底在「功能逐项」(F1 收 D1/D2、F4 收 F2、F5 收 F3),不再外链——A' 否决激进版 A、编排与调用分离、撤回 `max_retries=0`、截断升级重试从 client_manager dispatch 搬到编排层包住 ChatX invoke,逐条理由与 PM verbatim 见对应功能段。
 
-**判据反转(2026-06 第四轮)**:`llm_health_store` 从"③a seam / 合并是疑点"反转为"③b 公共内核 / 待下沉",`copilot_test` 钉死"③a 应用 / 留 studio",批量探测策略明确"③b 公共 / UI 进度留 ③a";权威源 ux-spec §6.0 + 归属表 `module-disposition-revised.md:37-39,:66`。
+**判据反转(2026-06 第四轮)**:`llm_health_store` 从"③a seam / 合并是疑点"反转为"③b 公共内核 / 待下沉",`copilot_test` 钉死"③a 应用 / 留 studio",批量探测策略明确"③b 公共 / UI 进度留 ③a";权威源 ux-spec §6.0 + 归属表 `module-disposition-revised.md:47-49` 与 `module-disposition-revised.md:76`。
 
 ### 代码索引 clues
 

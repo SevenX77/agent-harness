@@ -5,11 +5,14 @@ status: drafted
 last_verified: 2026-06-03
 aligns_with: ../../../studio/mvp1/02_capabilities/golden-eval.md
 ---
+<!-- 核对进度:已迁 0 块 / 未迁 6 块 / 2026-06-04 -->
 
+<!-- ⚠️ 未迁入（正式 06-golden-eval/baseline 仅列迁移源与少量代码点，未承载逐节点现状表、回放/失效/diff/409/FROZEN 边界细节） → 应归入:02-mechanism/05-run-inner/06-golden-eval/baseline -->
 # 09-golden-eval — Baseline(现状)
 
 核心结论:引擎 predict mock 层**已经是逐节点 golden**(`GoldenCase.expected_traces` 按 phase 存、`resolve_generation` 按 phase 回放、metadata 带 `io_outputs_schema_hash`、schema 漂移检测已在);**"整次运行快照"的旧 golden 模型只存在于 Studio 后端 `golden_diff.py`,不在引擎 mock 层**。字段级评分 diff 算法也已存在(只是作用在整 `final_state`)。
 
+<!-- ⚠️ 未迁入（正式 06-golden-eval/baseline 仅列迁移源与少量代码点，未承载逐节点现状表、回放/失效/diff/409/FROZEN 边界细节） → 应归入:02-mechanism/05-run-inner/06-golden-eval/baseline -->
 ## 覆盖代码(含覆盖率)
 
 覆盖率:100%。覆盖 studio golden-eval 设计对应的引擎现状(回放/失效检测/diff/守卫)+ 物理布局 FROZEN 边界。
@@ -27,6 +30,7 @@ aligns_with: ../../../studio/mvp1/02_capabilities/golden-eval.md
 | golden 存储(旧) | `docs/engine/mvp0/workspace-spec/baseline.md:81-105`(§3.2) | `golden/<baseline_id>/{baseline.json,report.json,cases/}`——整次结构;且 §3.2 文字"把 predict RunResult 固化为 baseline"与 409 守卫矛盾(stale) |
 | 物理布局(FROZEN) | `docs/engine/mvp0/skill-spec/01-physical-layout.md:14-28` | `phases/<id>/` 含 `{SKILL\|LOGIC\|SUBGRAPH}.md` + 可选 `validator.py` / `actions/`——**当前无 golden 文件位** |
 
+<!-- ⚠️ 未迁入（正式 06-golden-eval/baseline 仅列迁移源与少量代码点，未承载逐节点现状表、回放/失效/diff/409/FROZEN 边界细节） → 应归入:02-mechanism/05-run-inner/06-golden-eval/baseline -->
 ## 编号执行流程(现状)
 
 1. `predict_skill(..., mock_llm=...)` 把 mock_llm 参数交 `MockStrategy.from_param` → 得到一个策略:`None`→Heuristic、`Path`→GoldenCase、`list`→Backtest、`dict`→Override,见 `strategy.py:150-173`。
@@ -38,6 +42,7 @@ aligns_with: ../../../studio/mvp1/02_capabilities/golden-eval.md
 7. Studio 侧把一次满意 run 的 `final_state.json` 整个 copy 成 golden baseline(`set_golden_baseline_for_run`),compare 时 diff 整 final_state(`compare_run_to_golden` → `_diff_value`),见 `golden_diff.py:34-110`。
 8. 固化前过 409 守卫:predict 来源 trace 被拒,见 `diagnostic_export.py:33-42`。
 
+<!-- ⚠️ 未迁入（正式 06-golden-eval/baseline 仅列迁移源与少量代码点，未承载逐节点现状表、回放/失效/diff/409/FROZEN 边界细节） → 应归入:02-mechanism/05-run-inner/06-golden-eval/baseline -->
 ## Baseline / Alignment 差异
 
 | 维度 | baseline 现状 | mvp1 目标 |
@@ -49,6 +54,7 @@ aligns_with: ../../../studio/mvp1/02_capabilities/golden-eval.md
 | 存储 | `.workspace/golden/<baseline_id>/`(整次) | `phases/<phase_id>/golden.json`(逐节点、随技能进 git,**决策 A**) |
 | 拦截 | mock 内容解析在引擎,拦截在 **gateway**(`PredictGatewayChatModel`) | 拦截搬进引擎(接上轮 D2) |
 
+<!-- ⚠️ 未迁入（正式 06-golden-eval/baseline 仅列迁移源与少量代码点，未承载逐节点现状表、回放/失效/diff/409/FROZEN 边界细节） → 应归入:02-mechanism/05-run-inner/06-golden-eval/baseline -->
 ## 代码索引(clues)
 
 - `packages/graph-agent/src/graph_agent/core/_predict_internal/models.py:12-23`:`GoldenCase`(逐节点 `expected_traces`)。
@@ -60,6 +66,7 @@ aligns_with: ../../../studio/mvp1/02_capabilities/golden-eval.md
 - `docs/engine/mvp0/skill-spec/01-physical-layout.md:14-28`:FROZEN 物理布局(待加 golden.json 位)。
 - `docs/engine/mvp0/workspace-spec/baseline.md:81-105`:旧 golden 整次结构(待改)。
 
+<!-- ⚠️ 未迁入（正式 06-golden-eval/baseline 仅列迁移源与少量代码点，未承载逐节点现状表、回放/失效/diff/409/FROZEN 边界细节） → 应归入:02-mechanism/05-run-inner/06-golden-eval/baseline -->
 ## 待办/疑点
 
 1. 现 golden 失效检测按整 `io_outputs_schema_hash`,粒度太粗(改 prompt 不该触发但 schema_hash 可能也变);新模型要改为字段级 + 编译期硬错误(见 alignment §G2)。

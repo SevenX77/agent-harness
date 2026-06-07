@@ -2,11 +2,15 @@
 module: 06-orch-error-classification
 doc: baseline
 status: drafted
+binds_design: ./mvp1-alignment.md
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/registry/error_classification.py:classify_exception/classify_error_context/ErrorContext/ErrorActionClassification/ErrorClassification
+units: [error-classification-policy]
+aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
 
 # 06-orch-error-classification — Baseline(现状)
 
-本文只描述当前源码里的真实错误分类语义,并纠正历史文档中“401/403/404 fail fast”的过时简写。MVP1 brief 明确要求覆盖 `registry/error_classification.py:classify_exception/classify_error_context`,并说明 401/402/403/404 与 capability 400 是 fallback,非 capability 400/413/422 是 fail request(`docs/graph-agent-gateway/mvp1/README.md:31`)。
+本文只描述当前源码里的真实错误分类语义,并纠正旧文档中“401/403/404 fail fast”的过时简写。MVP1 brief 明确要求覆盖 `registry/error_classification.py:classify_exception/classify_error_context`,并说明 401/402/403/404 与 capability 400 是 fallback,非 capability 400/413/422 是 fail request(`docs/graph-agent-gateway/mvp1/README.md:59`)。
 
 ## 覆盖代码(含覆盖率)
 
@@ -14,7 +18,7 @@ status: drafted
 
 | 文件 | 覆盖入口 | 覆盖说明 |
 |---|---|---|
-| `packages/graph-agent-gateway/src/graph_agent_gateway/registry/error_classification.py` | `classify_exception`：用于把异常映射为 legacy `decision` 以及 v1.1 action/scope。`classify_error_context`：用于把异常和 route/endpoint/stream 上下文映射为结构化 retry/fallback/fail action。 | 100%,含状态码常量、网络错误、provider payload、异常链 helper。**判据归属：纯 ③b 公共能力(错误码语义任何调模型 app 可复用，不依赖 UI/产品策略/调用方式/存储介质;disposition 表行 36 已判对，本轮不变);详见 `mvp1-alignment.md` §1。** |
+| `packages/graph-agent-gateway/src/graph_agent_gateway/registry/error_classification.py` | `classify_exception`：用于把异常映射为 legacy `decision` 以及 v1.1 action/scope。`classify_error_context`：用于把异常和 route/endpoint/stream 上下文映射为结构化 retry/fallback/fail action。 | 100%,含状态码常量、网络错误、provider payload、异常链 helper。**判据归属：纯 ③b 公共能力(错误码语义任何调模型 app 可复用，不依赖 UI/产品策略/调用方式/存储介质;disposition 表行 46 已判对，本轮不变);详见 `mvp1-alignment.md` §1。** |
 | 调用点 | `GatewayChatModel._generate`：用于在 probe 和真实 dispatch 失败时调用分类器决定 fallback 还是终止。`LLMClientManager.probe_provider`：用于 probe 多模型时复用分类器判断是否继续。 | 覆盖关键 runtime 使用链。 |
 
 ## 现状逻辑
@@ -24,9 +28,9 @@ status: drafted
 1. `Decision` 用于保留旧 fallback loop 的三态输出: `fallback_allowed`、`fail_fast`、`fail_fast_with_route_context`(`registry/error_classification.py:10`)。
 2. `ErrorAction` 用于表达 v1.1 语义中的动作: `retry_same_route`、`fallback_route`、`fail_request`(`registry/error_classification.py:11`)。
 3. `ErrorScope` 用于标记错误影响范围,包括 request、route、endpoint、credential、bucket、stream、unknown(`registry/error_classification.py:12`)。
-4. `ErrorContext` 用于携带 route_id、endpoint_id、credential_ref、method_id、request_mapper_id、runtime settings、provider error 和 stream phase(`registry/error_classification.py:20-36`)。
-5. `ErrorActionClassification` 用于返回 v1.1 action/scope/status/fallback_eligible/retryable 等结构化结果(`registry/error_classification.py:38-58`)。
-6. `ErrorClassification` 用于返回旧 decision 以及 action/scope/status/message,供当前 fallback loop 继续消费(`registry/error_classification.py:60-73`)。
+4. `ErrorContext` 用于携带 route_id、endpoint_id、credential_ref、method_id、request_mapper_id、selected_runtime_settings、role_requirements、provider_error_type、provider_error_message、status_code 和 stream_phase(`registry/error_classification.py:20-36`)。
+5. `ErrorActionClassification` 用于返回 v1.1 action/scope/status_code/fallback_eligible/retryable 等结构化结果(`registry/error_classification.py:38-58`)。
+6. `ErrorClassification` 用于返回旧 decision 以及 action/scope/provider_status_code/message,供当前 fallback loop 继续消费(`registry/error_classification.py:60-73`)。
 7. 状态码分组是源码里的真实语义: `RETRYABLE_STATUS_CODES={429,500,502,503,504,529}`,`FALLBACK_STATUS_CODES={401,402,403,404}`,`FAIL_REQUEST_STATUS_CODES={400,413,422}`(`registry/error_classification.py:15-17`)。**测试关键点(铁律，不可改坏)：401/402/403/404→fallback(不是 fail-fast)、400+capability→fallback、400非capability/413/422→fail_fast、429/5xx/网络错→retry(`fallback_allowed`)、未知→`fail_fast_with_route_context`。"401→fallback 不 fail-fast"是头号回归点必测;详见 `mvp1-alignment.md` §6。**
 
 ### 2. `classify_exception` 执行流程
@@ -56,7 +60,7 @@ status: drafted
 ## baseline/alignment 差异
 
 1. baseline 源码真实语义已经与 client 层 A' 重设计决策(M5,见 `mvp1-alignment.md` §2.1/§4 留底)一致:401/402/403/404 是 fallback,400 capability 错误是 fallback,非 capability 400/413/422 是 fail request,未知是 fail with route context(`registry/error_classification.py:15-17`, `registry/error_classification.py:133-188`)。
-2. 历史 mvp0 文档仍有过时简写,把 400/401/403/404/422 归成 fail fast;client 层 A' 重设计决策(M5)已明确指出这类写法错误,06 alignment 必须保护源码真实语义(`docs/graph-agent-gateway/mvp0/mvp0-alignment.md:146-148`, M5 真实语义表 + PM 否决"fail-fast 简写"原话见 `mvp1-alignment.md` §2.1/§4 留底)。
+2. 旧文档仍有过时简写,把 400/401/403/404/422 归成 fail fast;client 层 A' 重设计决策(M5)已明确指出这类写法错误,06 alignment 必须保护源码真实语义(M5 真实语义表 + PM 否决"fail-fast 简写"原话见 `mvp1-alignment.md` §2.1/§4 留底)。
 3. baseline 的 `classify_exception` 已把 v1.1 action 映射到旧 decision,所以 MVP1 调用层迁移不需要改错误分类,只需要保证 ChatX 抛出的异常仍能被 `_status_code` 和 provider payload helper 识别(`registry/error_classification.py:75-98`; 依据 = client 层 A' 重设计决策 M5/F2,详见 `mvp1-alignment.md` §4/§5)。
 
 ## 决策原因
@@ -64,7 +68,7 @@ status: drafted
 1. 401/402/403/404 做 fallback 的原因是它们更像 credential/route scope 问题,可能下一条 route 或 credential 可用;源码把 404 scope 标成 route,401/402/403 scope 标成 credential(`registry/error_classification.py:144-154`)。
 2. 非 capability 400/413/422 做 fail request 的原因是它们通常表示请求形状、payload 过大或 schema 验证问题,继续 fallback 可能掩盖调用方错误(`registry/error_classification.py:169-178`)。
 3. 400 capability 错误做 fallback 的原因是 unsupported parameter、invalid model、model not found 等表明当前 route/mapper 不适配,下一条 route 可能可用(`registry/error_classification.py:155-168`, `registry/error_classification.py:272-290`)。
-4. 未知异常 fail with route context 的原因是不能把未分类错误当作模型选择信号;这与 mvp0 “无法分类时带 route context 暴露错误”的要求一致(`registry/error_classification.py:179-188`, `docs/graph-agent-gateway/mvp0/mvp0-alignment.md:172`)。
+4. 未知异常 fail with route context 的原因是不能把未分类错误当作模型选择信号;当前代码通过 `unclassified_default=True` 把未知异常映射成 `fail_fast_with_route_context`(`registry/error_classification.py:179-188`, `registry/error_classification.py:85-98`)。
 
 ## 代码索引(clues)
 

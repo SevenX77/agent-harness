@@ -2,11 +2,15 @@
 module: 05-orch-capabilities-and-models
 doc: baseline
 status: drafted
+binds_design: ./mvp1-alignment.md
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/registry/capabilities.py:normalize_route_capabilities/build_runtime_setting_descriptors · packages/graph-agent-gateway/src/graph_agent_gateway/registry/lint.py:lint_role_routes/capability_key_for_lint · packages/graph-agent-gateway/src/graph_agent_gateway/registry/profile_selector.py:select_verified_profile/ProfileSelectionError · packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:resolve_role · apps/studio/backend/app/routers/llm.py:probe_route/_registry_response/_capability_state · apps/studio/backend/app/services/llm_model_identity.py:project_model_identity · apps/studio/backend/app/services/llm_model_groups.py:project_model_group_identity/normalize_model_group_key · apps/studio/backend/app/services/llm_notable_models.py:notable_model_ids/default_provider_notes_dir · apps/studio/backend/app/services/llm_route_capabilities.py:route_effective_capabilities/route_thinking_capability/verified_profile_route_capabilities
+units: [capability-model-knowledge]
+aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
 
 # 05-orch-capabilities-and-models — Baseline(现状)
 
-本文只描述当前源码事实: capability 如何归一化、verified profile 如何选择、lint 如何 warn/block,以及 Studio 后端如何把模型身份、分组、notable model 和 route capability 投影给前端。MVP1 总 brief 要求本模块覆盖这些文件,见 `docs/graph-agent-gateway/mvp1/README.md:30`。
+本文只描述当前源码事实: capability 如何归一化、verified profile 如何选择、lint 如何 warn/block,以及 Studio 后端如何把模型身份、分组、notable model 和 route capability 投影给前端。当前 mvp1 README 的模块清单要求本模块覆盖这些文件。
 
 ## 覆盖代码(含覆盖率)
 
@@ -79,13 +83,13 @@ status: drafted
 
 1. baseline 已有 capability 归一化、verified profile 选择、lint blocking 和 Studio 展示投影;这些是 MVP1 应保留的编排素材,不是要删除的旧层(`registry/capabilities.py:35-202`, `registry/profile_selector.py:14-52`, `registry/lint.py:27-87`)。
 2. baseline 仍把 selected profile 的 `call_method_id` / `request_mapper_id` 传给当前 gateway client manager 调用路径;MVP1 A' 会把这些信息作为 `ResolvedRoute` 上的调用层输入,由新的 ChatX 调用适配消费(`registry/resolver.py:94-113`)。
-3. baseline lint 的语义已经符合决策:只 warn/block,不根据 capability 搜索替代 route;MVP1 alignment 需要保护这个边界,避免把 capability 做成动态选型引擎(`docs/graph-agent-gateway/mvp0/mvp0-alignment.md:142`, `registry/lint.py:27-87`)。
-4. baseline 的 Studio 投影渲染是显示/解释层,不是 runtime identity;MVP1 仍要求 runtime 精确执行 role 当前保存的 route chain(`docs/graph-agent-gateway/mvp0/mvp0-alignment.md:159-166`, `apps/studio/backend/app/services/llm_model_groups.py:50-53`)。**判据标注(2026-06-03 第四轮反转)：identity/model_group/notable/route_capabilities 的分组/识别/知识/合并**内核**属 ③b 公共能力(现散 ③a 待下沉)——它们不依赖 UI/产品策略/调用方式/存储介质，换 app 仍原样要;只有 family 折叠/弃用区/展示名样式这层渲染留 ③a。"投影不改 runtime route_id"这点不变。详见 `mvp1-alignment.md` §5#1。**
+3. baseline lint 的语义已经符合当前 mvp1 边界:只 warn/block,不根据 capability 搜索替代 route;alignment 需要保护这个边界,避免把 capability 做成动态选型引擎(`registry/lint.py:27-87`, `registry/resolver.py:116-132`)。
+4. baseline 的 Studio 投影渲染是显示/解释层,不是 runtime identity;当前代码仍要求 runtime 精确执行 role 当前保存的 route chain(`apps/studio/backend/app/services/llm_model_groups.py:50-53`, `registry/resolver.py:55-113`)。**判据标注(2026-06-03 第四轮反转)：identity/model_group/notable/route_capabilities 的分组/识别/知识/合并**内核**属 ③b 公共能力(现散 ③a 待下沉)——它们不依赖 UI/产品策略/调用方式/存储介质，换 app 仍原样要;只有 family 折叠/弃用区/展示名样式这层渲染留 ③a。"投影不改 runtime route_id"这点不变。详见 `mvp1-alignment.md` §5#1。**
 
 ## 决策原因
 
-1. capability 只描述支持、默认和边界,不表达用户运行意图;用户意图属于 role/profile route entry 的 fixed runtime settings,这是 provider runtime settings 矩阵的前提(`docs/graph-agent-gateway/mvp0/provider-runtime-settings-matrix.md:5`, `docs/graph-agent-gateway/mvp0/mvp0-alignment.md:152-157`)。
-2. 禁止 capability-based automatic model replacement,原因是 role 编排必须可解释、可复现;选路只能来自显式 `fallback_chain[*].route_id`(`docs/graph-agent-gateway/mvp0/mvp0-alignment.md:142`, `docs/graph-agent-gateway/mvp0/mvp0-alignment.md:228-230`)。
+1. capability 只描述支持、默认和边界,不表达用户运行意图;用户意图属于 role/profile route entry 的 fixed runtime settings。当前代码也把 `CapabilityValue` 与 `RuntimeSettings` 分成两个 schema,且 `capabilities.py` 文件注释明确 capabilities 不编码 user runtime intent(`registry/schema.py:67-75`, `registry/schema.py:121-135`, `registry/capabilities.py:1-5`)。
+2. 禁止 capability-based automatic model replacement,原因是 role 编排必须可解释、可复现;当前代码的选路输入只能来自显式 `fallback_chain[*].route_id`,lint 只遍历这条显式链并产出 warn/block(`registry/schema.py:264-273`, `registry/lint.py:27-87`)。
 3. verified profile 选择只在一条 route 内选择“怎么调用”,不是跨 route 选择“调谁”;这与 `select_verified_profile` 只接收单个 `ProviderRoute` 的函数签名一致(`registry/profile_selector.py:14-19`)。
 4. Studio model identity/model group 让用户理解模型目录,但不会改变 runtime route identity;代码注释也明确 exact execution still uses each route_id(`apps/studio/backend/app/services/llm_model_groups.py:48-53`)。**判据标注(反转)：原把它们整体定调为"产品展示投影 → 留 ③a"已被否;按判据其分组/识别**能力内核 = ③b 公共**(现散 ③a 待下沉)，只有展示渲染留 ③a。"不改 runtime route identity / 执行仍用精确 route_id"不变。详见 `mvp1-alignment.md` §5#1。**
 
@@ -109,6 +113,6 @@ status: drafted
 
 ## 待办/疑点
 
-1. `resolve_role` 当前对 fallback_chain 中第一个缺失/不可执行 route 仍直接 raise,而 README/mvp0 修订要求逐条 skip + warning 后空链再失败;这属于 02/07 解析容错模块,本文件只记录影响点(`registry/resolver.py:55-71`, `docs/graph-agent-gateway/mvp0/mvp0-alignment.md:131-140`)。
+1. `resolve_role` 当前对 fallback_chain 中第一个缺失/不可执行 route 仍直接 raise,而 mvp1 解析容错目标要求逐条 skip + warning 后空链再失败;这属于 02/07 解析容错模块,本文件只记录影响点(`registry/resolver.py:55-71`, `../02-orch-role-resolution/mvp1-alignment.md`)。
 2. `route_effective_capabilities` 是 Studio service 层合并 verified profile facts,但 `resolve_role` 传给 `lint_role_routes` 的是 route 原始 capabilities;是否应在 resolver 侧也消费 effective capabilities,需要后续设计确认(`apps/studio/backend/app/services/llm_route_capabilities.py:10-19`, `registry/resolver.py:104-116`)。
 3. `notable_model_ids` 依赖 Markdown 小节标题精确等于 `## 4. Notable Model IDs`;provider notes 标题变化会静默返回空列表,目前无运行时错误提示(`apps/studio/backend/app/services/llm_notable_models.py:8-37`)。

@@ -8,11 +8,14 @@ aligns_with:
   - ../../../studio/mvp1/02_capabilities/phase-editing.md（G2/G3 io 改动）
   - ../../../studio/_reorg/engine-prompt-trace-compile-debug.md（§三-1 dot 操作事件）
 ---
+<!-- 核对进度:已迁 0 块 / 未迁 6 块 / 2026-06-04 -->
 
+<!-- ⚠️ 未迁入（正式 graph-exec/observability 仅摘要，缺黑板切片覆盖表、子图 io 校验、artifact 落盘、边操作事件现状细节） → 应归入:02-mechanism/04-run-outer/01-graph-exec + 02-mechanism/06-seam/02-observability -->
 # 11-io-and-edge-ops — Baseline(现状)
 
 核心结论:**黑板字段切片、io.outputs artifact 落盘、子图 io 校验都已实现**。缺口 = ① 子图 io 严格 1:1 要放宽(G2);② 节点级文件导入→黑板(新运行时能力,G2/FROZEN-3);③ io.outputs artifact **路径标注扩展 + md 取 business_data_md 不回转**(G3);④ "节点间操作"(dot)需成系列 emit trace 事件(现只零散 Compaction/ArtifactSaved)。
 
+<!-- ⚠️ 未迁入（正式 graph-exec/observability 仅摘要，缺黑板切片覆盖表、子图 io 校验、artifact 落盘、边操作事件现状细节） → 应归入:02-mechanism/04-run-outer/01-graph-exec + 02-mechanism/06-seam/02-observability -->
 ## 覆盖代码(含覆盖率)
 
 覆盖率:100%。覆盖黑板切片、子图 io 校验、artifact 落盘、现有边操作事件。
@@ -28,6 +31,7 @@ aligns_with:
 | 现有边操作事件 | `callbacks/events.py`(`ArtifactSavedEvent:315` / `CompactionEvent`) | artifact 落盘、截断/摘要已有事件 |
 | 文件导入→黑板 | 无 | **缺**:运行中"跑到节点才把外部文件字段注入黑板" |
 
+<!-- ⚠️ 未迁入（正式 graph-exec/observability 仅摘要，缺黑板切片覆盖表、子图 io 校验、artifact 落盘、边操作事件现状细节） → 应归入:02-mechanism/04-run-outer/01-graph-exec + 02-mechanism/06-seam/02-observability -->
 ## 编号执行流程(现状)
 
 1. 进节点前:`StateMapper.build_phase_input` 把全局黑板按该节点 `io.inputs` 切片(`filter_runtime_inputs`),只喂声明的字段,见 `state_mapper.py:44-75`。**并联节点各自切片**就是 dot 处"输入筛选/分发"。
@@ -37,6 +41,7 @@ aligns_with:
 5. 截断/摘要:`CompactionEvent`(removed_summary + sidecar)已 emit。
 6. **缺**:① 节点间"黑板 reduce/分发"操作没有专门事件(只有前后快照 PhaseStart/End.context);② 文件导入→黑板无机制。
 
+<!-- ⚠️ 未迁入（正式 graph-exec/observability 仅摘要，缺黑板切片覆盖表、子图 io 校验、artifact 落盘、边操作事件现状细节） → 应归入:02-mechanism/04-run-outer/01-graph-exec + 02-mechanism/06-seam/02-observability -->
 ## Baseline / Alignment 差异
 
 | 维度 | baseline | mvp1 目标 |
@@ -47,6 +52,7 @@ aligns_with:
 | io.outputs artifact | target/path 已有 | **扩展**路径标注 + **md 取 business_data_md 不回转**(G3/FROZEN-2) |
 | dot 操作事件 | 仅 Compaction/ArtifactSaved | **成系列**:黑板 reduce、输入分发、文件注入 都 emit(供前端点 dot 看完整操作) |
 
+<!-- ⚠️ 未迁入（正式 graph-exec/observability 仅摘要，缺黑板切片覆盖表、子图 io 校验、artifact 落盘、边操作事件现状细节） → 应归入:02-mechanism/04-run-outer/01-graph-exec + 02-mechanism/06-seam/02-observability -->
 ## 代码索引(clues)
 
 - `runtime/state_mapper.py:44-121`:黑板切片(输入)+ reduce(输出)。
@@ -56,6 +62,7 @@ aligns_with:
 - `io/storage.py:149-196`:`save_artifact` + `ArtifactSavedEvent`。
 - `callbacks/events.py:315`:`ArtifactSavedEvent`(+ `CompactionEvent`)。
 
+<!-- ⚠️ 未迁入（正式 graph-exec/observability 仅摘要，缺黑板切片覆盖表、子图 io 校验、artifact 落盘、边操作事件现状细节） → 应归入:02-mechanism/04-run-outer/01-graph-exec + 02-mechanism/06-seam/02-observability -->
 ## 待办/疑点
 
 1. 子图 io 1:1 放宽只放 inputs 还是 outputs 也放——待 alignment 定(studio FROZEN-1 只点名 inputs)。

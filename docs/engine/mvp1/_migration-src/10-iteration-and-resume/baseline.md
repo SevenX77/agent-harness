@@ -8,12 +8,13 @@ aligns_with:
   - ../../../studio/mvp1/02_capabilities/debug-resume.md（三场景）
   - ../../../studio/_reorg/engine-prompt-trace-compile-debug.md（#5-8 + 统一 checkpoint 铁律）
 ---
+<!-- 核对进度:已迁 6 块 / 未迁 0 块 / 2026-06-04 -->
 
-# 10-iteration-and-resume — Baseline(现状)
+~~# 10-iteration-and-resume — Baseline(现状)~~ → ✅[已迁入](../../02-mechanism/04-run-outer/02-iterate/baseline.md#后端功能)
 
 核心结论:**节点级 batch(声明式并发)已实现**;**checkpoint 整套已接**(run 级 thread,memory/sqlite/postgres,且留了续跑开关);**loop(串行累积)、图级迭代、节点级 resume 是缺口**(`resume_run`=501)。engine-prompt 明确要求"batch/loop 的 loop 累积态 与 debug 的 checkpoint **本质同源,统一一套**"——故本关注点把迭代与续跑合并、共用 checkpoint 底座设计。
 
-## 覆盖代码(含覆盖率)
+~~## 覆盖代码(含覆盖率)~~ → ✅[已迁入](../../02-mechanism/04-run-outer/02-iterate/baseline.md#后端功能)
 
 覆盖率:100%。覆盖现有 batch、checkpoint、续跑地基、HitL 原语。
 
@@ -28,7 +29,7 @@ aligns_with:
 | `resume_run`(501) | `apps/studio/backend/app/routers/runs.py`(raise_not_implemented) | 未实现;`ResumeReq.context_overrides` 字段已定义但**零消费** |
 | HitL 原语 | `tools/builtin/clarification_tool.py` + `AmbiguityReportEvent` + `RunEndedEvent status="interrupted"` | 引擎已 emit 问题/中断,缺"答案注入 + 续跑"入口 |
 
-## 编号执行流程(现状)
+~~## 编号执行流程(现状)~~ → ✅[已迁入](../../02-mechanism/04-run-outer/02-iterate/baseline.md#后端功能)
 
 1. 节点上声明 `batch`(`batch_spec`)时,`_wrap_phase_runtime_node` 把该 phase 包成 `_build_batch_wrapped_node`,见 `graph_assembler.py:299`。
 2. `_batch_wrapped` 用 `_resolve_iterator(state, batch_spec.iterator)` 取列表,`asyncio.Semaphore(concurrency)` 并发跑每项(每项经 `StateManager.update_business(state, **{item_var:item})` 注入),`asyncio.gather` 收集,见 `:241-258`。
@@ -37,7 +38,7 @@ aligns_with:
 5. `resume_run` 端点 501;`ResumeReq.context_overrides` 定义了但全代码零消费。
 6. HitL:`clarification_tool` / `AmbiguityReportEvent` / `interrupted` 已 emit,但无"注入答案从断点续"的闭环。
 
-## Baseline / Alignment 差异
+~~## Baseline / Alignment 差异~~ → ✅[已迁入](../../02-mechanism/04-run-outer/02-iterate/baseline.md#后端功能)
 
 | 维度 | baseline 现状 | mvp1 目标 |
 |---|---|---|
@@ -48,7 +49,7 @@ aligns_with:
 | resume | `resume_run`=501;overrides 零消费 | 实现 resume(节点级 + context_overrides + HitL 注入) |
 | 配置 | `batch_spec`(iterator/concurrency/item_var) | 统一 `iterate`(向后兼容) |
 
-## 代码索引(clues)
+~~## 代码索引(clues)~~ → ✅[已迁入](../../02-mechanism/04-run-outer/02-iterate/baseline.md#后端功能)
 
 - `graph_assembler.py:225-284`:`_resolve_iterator` + `_build_batch_wrapped_node`(现节点级 batch)。
 - `graph_assembler.py:299`:batch 接线点(loop 分支加这里)。
@@ -57,7 +58,7 @@ aligns_with:
 - `runner.py:481-485`:续跑开关(地基)。
 - `apps/studio/backend/app/routers/runs.py`:`resume_run` 501。
 
-## 待办/疑点
+~~## 待办/疑点~~ → ✅[已迁入](../../02-mechanism/04-run-outer/02-iterate/baseline.md#后端功能)
 
 1. loop 串行累积、图级迭代、节点级 resume 全缺;但底座(batch 包装点、checkpointer、续跑开关、HitL 原语)都在。
 2. engine-prompt 铁律:loop 累积态与 debug checkpoint 必须**统一一套**,不能两套——见 alignment §4。

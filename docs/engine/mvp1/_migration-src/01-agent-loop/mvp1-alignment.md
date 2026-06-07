@@ -4,12 +4,13 @@ doc: mvp1-alignment
 status: drafted
 last_verified: 2026-06-02
 ---
+<!-- 核对进度:已迁 7 块 / 未迁 0 块 / 2026-06-04 -->
 
-# 01-agent-loop — MVP1 Alignment(目标设计)
+~~# 01-agent-loop — MVP1 Alignment(目标设计)~~ → ✅[已迁入](../../02-mechanism/05-run-inner/01-agent-loop/mvp1-alignment.md#2-数据流--机制)
 
 MVP1/V4 目标：把当前 live 手写 ReAct loop 迁回 LangChain `create_agent`，并把 engine 已有 6 槽 middleware 链真实接入运行时。迁移不是重写 skill 编译、gateway 调用或 frozen skill-spec；它只收口 agent phase 的 loop 编排。
 
-## 覆盖范围
+~~## 覆盖范围~~ → ✅[已迁入](../../02-mechanism/05-run-inner/01-agent-loop/mvp1-alignment.md#2-数据流--机制)
 
 覆盖范围：本文覆盖手写 loop 替换、6 槽接线、3 个空桩实现、deepagents/deerflow 借鉴边界。
 
@@ -21,7 +22,7 @@ MVP1/V4 目标：把当前 live 手写 ReAct loop 迁回 LangChain `create_agent
 | `middleware/tool_error.py` | 把工具异常转为 error `ToolMessage`，让 LLM 有机会恢复。 |
 | `middleware/loop_detection.py` | 在 ExecutionControl 轻量检测之外实现更完整的 loop 保护，避免重复。 |
 
-## 目标设计与编号流程
+~~## 目标设计与编号流程~~ → ✅[已迁入](../../02-mechanism/05-run-inner/01-agent-loop/mvp1-alignment.md#2-数据流--机制)
 
 1. `_build_skill_node`(用途：构造 agent phase 的实际执行闭包)继续负责 phase 本地上下文：`_resolve_phase_chat_model`、reference reader、业务工具、subagent runtime map、finish_task 工具、system prompt，这些现状入口在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:437-479`。
 
@@ -49,7 +50,7 @@ MVP1/V4 目标：把当前 live 手写 ReAct loop 迁回 LangChain `create_agent
 
 13. `model=` 必须继续吃 gateway A' 的 `GatewayChatModel` 编排外壳，而不是 engine 自己处理 provider 差异。当前 `_resolve_phase_chat_model` 通过 `model_resolver.resolve(...)` 拿模型，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:581-603`。
 
-## 已实现 / 与 baseline 差异
+~~## 已实现 / 与 baseline 差异~~ → ✅[已迁入](../../02-mechanism/05-run-inner/01-agent-loop/mvp1-alignment.md#2-数据流--机制)
 
 已实现：6 槽顺序契约、6 槽工厂、前三槽真实类和后三槽物理类都在源码里。证据见 `packages/graph-agent/src/graph_agent/middleware/__init__.py:58-65` 与 `packages/graph-agent/src/graph_agent/middleware/factory.py:29-65`。
 
@@ -59,7 +60,7 @@ MVP1/V4 目标：把当前 live 手写 ReAct loop 迁回 LangChain `create_agent
 
 未实现：后三槽目前 no-op，不能承担 trace、工具异常或 loop 保护，见 `packages/graph-agent/src/graph_agent/middleware/tracing.py:11-16`、`packages/graph-agent/src/graph_agent/middleware/tool_error.py:11-16`、`packages/graph-agent/src/graph_agent/middleware/loop_detection.py:11-16`。
 
-## 决策原因
+~~## 决策原因~~ → ✅[已迁入](../../02-mechanism/05-run-inner/01-agent-loop/mvp1-alignment.md#2-数据流--机制)
 
 采用 `create_agent + middleware`，是因为 LangChain 当前 API 已经提供工具循环、middleware hook、checkpointer 与 jump 能力；继续手写 loop 会重复处理 tool-call 消息配对、return-direct、middleware 顺序和 checkpoint 交互。
 
@@ -67,7 +68,7 @@ MVP1/V4 目标：把当前 live 手写 ReAct loop 迁回 LangChain `create_agent
 
 接入完整 6 槽链，是为了化解 scoping 里的 agent loop 架构冲突：当前只有 CognitiveFlow 单槽桥接，导致 trace、tool error、loop detection 的职责散落或缺失。
 
-## 代码索引(clues)
+~~## 代码索引(clues)~~ → ✅[已迁入](../../02-mechanism/05-run-inner/01-agent-loop/mvp1-alignment.md#2-数据流--机制)
 
 - `packages/graph-agent/src/graph_agent/core/graph_assembler.py:483-576`: 需要替换的 live 手写 ReAct loop。
 - `packages/graph-agent/src/graph_agent/middleware/factory.py:29-65`: 目标 live middleware 链构造器。
@@ -75,7 +76,7 @@ MVP1/V4 目标：把当前 live 手写 ReAct loop 迁回 LangChain `create_agent
 - `.venv/lib/python3.12/site-packages/langchain/agents/factory.py:658-673`: 本地 create_agent 支持的参数。
 - `.venv/lib/python3.12/site-packages/langchain/agents/middleware/types.py:625-660`: after_agent / wrap_tool_call hook 形态。
 
-## 待办/疑点
+~~## 待办/疑点~~ → ✅[已迁入](../../02-mechanism/05-run-inner/01-agent-loop/mvp1-alignment.md#2-数据流--机制)
 
 1. 待办：实现前写失败测试，证明 live `assemble_graph` 的 agent phase 会调用 `create_agent` 且传入 6 槽 middleware。
 2. 待办：保留现有 `LLMCallEvent` / `ToolCallEvent` 覆盖，不允许迁移后 trace 变少。

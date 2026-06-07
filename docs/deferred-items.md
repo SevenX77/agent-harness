@@ -102,9 +102,16 @@
   - **输出文字/推理的模型 → 归 LLM 范围**(即便多模态**输入**:视频分析、图片识别这类 image/video→text)。理由:走同一 chat-completion 调用范式(多模态内容块进 prompt)、输出文本、契合 role→route→ChatX 兜底机制;"多模态输入"只是一个 capability flag,不另起体系。
   - **输出生成资产的模型 → 归多模态生成范围**(text/image→image/video/audio/music)。理由:API 形态非 chat-completion、输出是二进制资产、测试方法学根本不同 → 需独立机制。
 - **可借鉴(复用 LLM/copilot 已有)**: provider/endpoint/credential/route 层;6 态 + draft/证据(缓存哪些能用);"测试=真实调用"(role test 范式);model group(同模型跨 provider)/ 类 role 的"生成角色"+ 兜底。
-- **新的难点(本 pass 要设计)**: ① 验证标准——文本可读,资产怎么判"能用"(只验"产出合法资产/格式正确",质量靠人看预览,不自动判质);② 异步 job(视频/音乐生成多是 submit→poll→取结果,比 chat 长);③ 资产落点 + 成本(生成贵,测试要省;预览缩略图? 落 `.workspace/artifacts`?);④ 能力维度更丰富(图:分辨率/比例/n;视频:时长/fps;TTS:音色/语言/语速/格式;音乐:时长/风格)→ 扩展 runtime descriptor;⑤ 协议爆炸(各家生成 API 形态各异,非 chat-completion)→ gateway 库的 ChatX 调用范式不适用,**关键架构问题**:生成式调用是 3b gateway 库职责(领域无关"模型调用")还是另起 Studio 多模态调用层?
-- **前置条件**: 设置页 §2/§3 定稿(✅ 已完成,提供借鉴基线);独立设计 pass 排期 + PM 探明意图(先做哪类生成模型、测试要不要人评预览闭环)。
-- **来源**: 2026-06-03 PM 第三轮"多模态生成式模型测试该怎么做"大需求。
+- **新的难点(本 pass 要设计)**: ① 验证标准——文本可读,资产怎么判"能用"(只验"产出合法资产/格式正确",质量靠人看预览,不自动判质);② 异步 job(视频/音乐生成多是 submit→poll→取结果,比 chat 长);③ 资产落点 + 成本(生成贵,测试要省;预览缩略图? 落 `.workspace/artifacts`?);④ 能力维度更丰富(图:分辨率/比例/n;视频:时长/fps;TTS:音色/语言/语速/格式;音乐:时长/风格)→ 扩展 runtime descriptor;⑤ 协议爆炸(各家生成 API 形态各异,非 chat-completion)→ gateway 库的 ChatX 调用范式不适用。**架构裁定(PM 2026-06-06,已定):生成式调用归 gateway 库 ③b**(领域无关"模型调用"),不另起 Studio 多模态调用层 —— 生成式调用契约/各家协议适配/异步 job = gateway/engine session 的活(③b 公共内核);studio 侧只做 ③a 测试/配置 UX 消费(类 LLM Roles §2)。
+- **决策留底(PM 原话 2026-06-06)**:
+  > "多模态归gateway 库"
+
+  → 架构问题(⑤)闭环:生成式模型调用归 **gateway 库 ③b**(同 LLM 调用范式层级),非 studio 另起多模态层。
+- **前置条件**:
+  - 设置页 §2/§3 定稿(✅ 已完成,提供借鉴基线)。
+  - **gateway 库侧(③b,gateway/engine session)**:生成式调用契约 + 各家协议适配 + 异步 job 设计/实现。
+  - **studio 侧(③a)**:独立设计 pass 排期 + PM 探明意图(先做哪类生成模型、测试要不要人评预览闭环);设计为"消费 gateway 生成式能力的测试/配置 UX",复用 LLM Roles/Copilot 模式。
+- **来源**: 2026-06-03 PM 第三轮"多模态生成式模型测试该怎么做"大需求;2026-06-06 PM 裁定归 gateway 库。
 
 ### DEF-015 — i18n 实现落地(设计已定稿,P1 待排期)
 - **日期**: 2026-06-03
@@ -132,20 +139,30 @@
 - **不阻塞的部分**：mvp1 子图**设计**已审计 clean（`skill-syntax §2.1` + `physical-layout §2.1.1` + `02-resolver` 三处一致、自包含、无 mvp0 依赖），可独立锁；受阻的只是 mvp0 文件退役与代码清引用。
 - **来源**: 2026-06-05 PM 三步指令 + 引用核实。
 
-### DEF-018 — Gateway WS-1 ChatX 调用层尾债（generic / legacy / profile / thinking）
+### DEF-018 — Gateway WS-1 ChatX 调用层尾债（thinking）
 - **日期**: 2026-06-06
-- **事项**: `graph-agent-gateway` WS-1 已完成官方 ChatX factory + invocation runtime 主路径，但仍有四类尾债:
-  - `GenericRouteChatModel` 只是 fail-loud shell，普通 chat 内核未实现；当前会抛 `NotImplementedError`，避免静默返回空 `AIMessage`。
-  - `LLMClientManager.dispatch_provider_call/_dispatch_provider_call/_call_*` 已无生产活调用方，仅作为 legacy ordinary-chat helper 暂留；后续要删除，或收编进 generic 普通 chat 内核。
-  - `ProviderProfile` 注册表默认空，尚未 seed provider/model defaults；factory 暂用 `endpoint_id:provider_model_id` 作为 profile key，以区分 endpoint 级 base_url/credential/protocol 和物理模型，但该 key 规则仍待 alignment 11 §8 最终确认。
-  - thinking 归一化只完成局部 runtime kwargs 映射和 ChatX `AIMessage` 结果不拍平；DeepSeek reasoning-content 多轮保留的单方法 payload patch 未移植。
-- **延期原因**: 本轮 WS-1 的目标主线是 qiniu 空-content、异常分类、base_url、RouteChatModelFactory、ProviderProfile 原语、ChatX invoke/fallback/token escalation 主机制；generic 普通 chat、旧 provider-call helper 清理、profile defaults/key 最终化、DeepSeek payload patch 都需要独立契约和失败测试。
-- **前置条件**: ① 确认 ProviderProfile key 规则；② 为 generic 普通 chat 内核或删除路径补测试；③ 为 profile defaults/thinking/DeepSeek patch 补确定性失败测试；④ 清理或改写 `test_gateway_integration.py` / `test_runtime_hard_cutover.py` 中已迁到 ChatX 主路径后的 legacy 断言边界。
+- **已处理（2026-06-06）**: `GenericRouteChatModel` 已从 fail-loud shell 改为最小 generic ordinary-chat adapter：实现 `bind_tools()`、LangChain `BaseMessage` 到 OpenAI-style 普通 chat dict 的序列化、ordinary chat dispatcher 调用、dict response 到 `AIMessage` 的桥接，并补了真实 `langchain.agents.create_agent` 工具循环级测试。当前覆盖的是 OpenAI-style ordinary chat 最小内核；streaming、multimodal、provider-specific error normalization 仍不宣称完成。
+- **已处理（2026-06-06 ProviderProfile defaults/key）**: ProviderProfile key 规则已明确并落地为 `protocol:{route.protocol}` → `endpoint:{route.endpoint_id}` → `endpoint:{route.endpoint_id}:model:{route.provider_model_id}`；factory 不再使用临时 `endpoint_id:provider_model_id` key。默认表保持最小，只 seed `protocol:openai_compatible` / `protocol:ark_runtime` 的 `stream_usage=True`。
+- **已处理（2026-06-06 DeepSeek reasoning_content）**: `PatchedChatDeepSeek` 已作为 DeepSeek OpenAI-compatible/Ark route 的本地 ChatX 子类落在 `RouteChatModelFactory`，只覆盖 `_get_request_payload`，把多轮 assistant `AIMessage.additional_kwargs["reasoning_content"]` replay 回 provider request payload；未重写消息转换、未引入 legacy helper 清理。
+- **已处理（2026-06-07 legacy ordinary-chat helper）**: 已先补失败测试要求 `LLMClientManager` 不再暴露 `dispatch_provider_call/_dispatch_provider_call/_call_*`，并要求 `GenericRouteChatModel` 默认 dispatcher 来自独立 ordinary-chat core；随后把 legacy provider-call 分派、payload 拼装、响应解析和 ordinary token escalation 收编到 `graph_agent_gateway.ordinary_chat.dispatch_ordinary_chat`，`client_manager.py` 只保留客户端缓存、probe/down-cache 与 usage 统计。`test_client_manager_runtime_policy.py` 已改测 ordinary core，`test_chatx_invocation_runtime.py` / `test_gateway_integration.py` / `test_runtime_hard_cutover.py` 的 fake manager 也去掉 stale `dispatch_provider_call`。
+- **事项**: `graph-agent-gateway` WS-1 已完成官方 ChatX factory + invocation runtime 主路径；generic 最小闭环、legacy helper 清理、ProviderProfile defaults/key 与 DeepSeek payload patch 已落地，但仍有一类尾债:
+  - thinking 归一化只完成局部 runtime kwargs 映射、ChatX `AIMessage` 结果不拍平与 DeepSeek payload replay；其它 provider-specific thinking 规则和旧 thinking helper 迁移仍未完成。
+- **延期原因**: 其它 provider-specific thinking 规则不能借 DeepSeek payload patch 顺手泛化。
+- **下一步验收标准**: 其它 provider thinking 迁移需另补 provider-specific 失败测试，不能复用 DeepSeek payload replay 测试泛化。
 - **来源**: `docs/graph-agent-gateway/mvp1/_impl/WS1-chatx-core.md` M2 说明；WS-1 终审要求（2026-06-06）。
 
 ## Completed / Promoted
 
-- **DEF-015 + DEF-013 → 拉回实现 (2026-06-04)**: PM「def 15 和 13 拉回来, 现在就要实现」。DEF-015 i18n 架构已定稿(`studio/mvp1/04_platform/i18n.md`,§9 P1 范围明确);DEF-013 后端 role-test 端点(`POST /api/llm/roles/{name}/test`)已就绪、缺前端 Properties 面板 UI。二者转入 **P1 实现**:Claude 出实现计划 → codex `[PLAN REVIEW REQUEST]` → codex 写代码(Claude 不亲自写)。上方 Active 区 DEF-013/DEF-015 条目保留作设计参考。
+- **DEF-021 → Completed (2026-06-06)**: Studio 前端已同步 WS-3 provider UI 6 态: `ProviderUiState` / `ModelGroupStatusSummary` 改为 `ready/historical_ready/untested/failed/cooling_down/off`, legacy fallback 不再自算 `needs_setup` 而投 `failed`, LLM Roles provider badge / Available Models / role route status / Role Test result panel 已补 `failed` 与 `historical_ready` 的标签、排序和语义 variant；相关 fixtures 和断言已同步。本次契约漂移修复后已重新验证 `npm run typecheck --prefix apps/studio/frontend`，以及 `api/llm.test.ts`、`state-badges.test.tsx`、`LlmRolesTab.test.tsx`、`SettingsPage.test.tsx` 目标测试；全量前端测试仍被 Welcome/Open folder、native-fs bridge、RuntimeGate、Workspace local file writer 等既有非 DEF-021 失败阻塞。
+
+- **DEF-020 → Completed (2026-06-06)**: Import draft apply 的 active credentials 写入入口已接入 `graph_agent_gateway.registry.base_url.canonicalize_base_url(base_url, protocol)`，覆盖 anthropic-compatible `/v1` 去尾、DeepSeek anthropic `/v1`→`/anthropic`、Ark runtime `/api/v3` 补齐、OpenAI-compatible 保持 `/v1`。对应实现与回归测试在 `apps/studio/backend/app/services/llm_import_drafts.py` / `apps/studio/backend/tests/services/test_llm_import_drafts.py`。
+
+- **DEF-019 → Completed (2026-06-06)**: Gateway F4 endpoint 标准化内核已下沉到 `graph_agent_gateway.registry.endpoints`: `standardize_endpoint_candidates` 接收原始 provider 输入 + protocol probe 回调,输出标准 `EndpointCandidate` list,生成 `{slug}-{protocol}[-n]` canonical `endpoint_id`,覆盖 URL 顺序稳定性、collision suffix、reserved id 防撞与 protocol 匹配拆分；v3→v4 migration 的历史 host/name endpoint id 规则已迁入 gateway `legacy_v3_endpoint_id`,Studio `llm_credentials.py` 只调用该 helper,不再本地维护 `_stable_endpoint_id`。③a 仍只负责 HTTP/job 包装、调用 gateway 标准化结果并 `upsert` + 存储；前端只收集原始输入。
+
+- **DEF-015 + DEF-013 → 拉回实现 (2026-06-04)**: PM「def 15 和 13 拉回来, 现在就要实现」。DEF-015 i18n 架构已定稿(`studio/mvp1/04_platform/i18n.md`,§9 P1 范围明确);DEF-013 后端 role-test 端点(`POST /api/llm/roles/{name}/test`)已就绪、缺前端 Properties 面板 UI。二者转入 **P1 实现**。**2026-06-05 PM 更新:不另写计划,设计已在 mvp1(核实如下),实现时 codex 直接照 mvp1 设计落地**:
+  - **DEF-015**:✅ **设计完整在** `04_platform/i18n.md`(§2 库=react-i18next / §3 Strategy C 前端单权威 / §4 前端骨架 / §5 后端契约+清 6 处中文 / §9 P1 范围)。文档 §9 自述"只定架构,代码+tasks 走独立实现计划"——实现时再出 tasks,非现在。
+  - **DEF-013**:⚠️ **意图+机制+PM 原话在** `00_settings-ux-spec §2.7`(复用 §2.5 role 测试 + §2.4 role-fit 投影,节点 Properties role 旁加 Test 键+状态;后端端点 live);但**落点 region 文档(phase-editing/properties)尚未承载**——已登记为 INDEX 单元 `node-properties-role-test`,随 studio retrofit 补进 region。
+  - 冗余的 `docs/design/def-013-015-impl-plan.md` 已删(避免第二份 SSOT)。
 
 - **DEF-002 → Promoted (2026-06-01)**: 连线 Context 真实数据接线。已并入 `studio-feature-trace-inspector` **REQ-3(P1 核心,现在可做)** —— 本就是该 spec 自己的 scope,从 deferred 注册表拉回。
 - **DEF-001 → Promoted (2026-06-01)**: 结构化前后态 DIFF。已并入 `studio-feature-trace-inspector` **REQ-7(P2,本 spec 拥有,依赖引擎 emit reducer 级 diff)** —— 不再以 deferred 形式悬挂,作为本 spec 的 P2 路线项追踪。快照机制澄清(每 phase 边界全量快照,非 keyframe+delta;diff 是展示层)随 REQ-7 留存。

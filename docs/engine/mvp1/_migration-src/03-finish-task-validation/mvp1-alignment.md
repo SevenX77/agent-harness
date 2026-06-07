@@ -4,12 +4,13 @@ doc: mvp1-alignment
 status: drafted
 last_verified: 2026-06-02
 ---
+<!-- 核对进度:已迁 7 块 / 未迁 0 块 / 2026-06-04 -->
 
-# 03-finish-task-validation — MVP1 Alignment(目标设计)
+~~# 03-finish-task-validation — MVP1 Alignment(目标设计)~~ → ✅[已迁入](../../02-mechanism/05-run-inner/03-cognitive/mvp1-alignment.md#2-数据流--机制)
 
 MVP1/V4 决策：finish_task 校验流水线接回 `tools/md_to_json.py` 的丰富版 `md_to_json()`，恢复三态分流：全合格直接通过；结构错走 surgical md-patch；语义错打回主 agent 重生成，绝不交给 patcher 猜值。
 
-## 覆盖范围
+~~## 覆盖范围~~ → ✅[已迁入](../../02-mechanism/05-run-inner/03-cognitive/mvp1-alignment.md#2-数据流--机制)
 
 覆盖范围：本文覆盖 finish_task 校验路由、语义/结构错分流、错误码边界、git 溯源。
 
@@ -20,7 +21,7 @@ MVP1/V4 决策：finish_task 校验流水线接回 `tools/md_to_json.py` 的丰�
 | `cognitive/md2json.py` | 退役或收敛为兼容 facade，不再作为 live 决策入口。 |
 | `cognitive/md_patch.py` | 只处理 structural/mechanical repair，不处理 semantic regeneration。 |
 
-## 目标设计与编号流程
+~~## 目标设计与编号流程~~ → ✅[已迁入](../../02-mechanism/05-run-inner/03-cognitive/mvp1-alignment.md#2-数据流--机制)
 
 1. finish_task 收到 markdown 后，先根据 phase output schema 得到 Pydantic model。丰富版 `md_to_json` 的入参是 `md_text`、`schema: type[BaseModel]`，以及必填关键字参数 `skill_resolver`，见 `packages/graph-agent/src/graph_agent/tools/md_to_json.py:515-520`。MVP1 适配器必须从 graph assembly 已有 `skill_resolver` 依赖传入该参数，不能退回全局查找。
 
@@ -42,7 +43,7 @@ MVP1/V4 决策：finish_task 校验流水线接回 `tools/md_to_json.py` 的丰�
 
 10. 业务规则错仍由 `CognitiveFlowMiddleware._run_business_validator` 处理。它在 Pydantic 通过后运行 phase validator，失败时返回 `[Business]` 前缀错误，见 `packages/graph-agent/src/graph_agent/middleware/cognitive_flow.py:584-596`、`packages/graph-agent/src/graph_agent/middleware/cognitive_flow.py:637-680`。
 
-## 已实现 / 与 baseline 差异
+~~## 已实现 / 与 baseline 差异~~ → ✅[已迁入](../../02-mechanism/05-run-inner/03-cognitive/mvp1-alignment.md#2-数据流--机制)
 
 已实现：丰富版 `md_to_json`、semantic-only 判断、surgical patch、schema_to_type_dict 都在 `tools/md_to_json.py`，见 `packages/graph-agent/src/graph_agent/tools/md_to_json.py:515-684`。
 
@@ -50,7 +51,7 @@ MVP1/V4 决策：finish_task 校验流水线接回 `tools/md_to_json.py` 的丰�
 
 未实现：semantic-only 错误还没有统一转成 agent retry feedback；当前 `build_finish_task_tool` 只看 `validation_errors`，见 `packages/graph-agent/src/graph_agent/cognitive/finish_task.py:49-93`。
 
-## 决策原因
+~~## 决策原因~~ → ✅[已迁入](../../02-mechanism/05-run-inner/03-cognitive/mvp1-alignment.md#2-数据流--机制)
 
 接回 rich md_to_json 是为了化解 finish_task 校验路由冲突：格式修复只适合 structural errors，semantic errors 必须由主 agent 根据业务上下文重新生成。代码已有 `SemanticValidationError` 正是这个设计的残留证据，见 `packages/graph-agent/src/graph_agent/tools/md_to_json.py:171-181`。
 
@@ -58,14 +59,14 @@ MVP1/V4 决策：finish_task 校验流水线接回 `tools/md_to_json.py` 的丰�
 
 退役简化版是为了减少错误码和输出格式冲突。两套 parser 对同一 markdown 的 coercion、error shape 和 patch 策略不同，继续并存会让 finish_task 行为不可解释。
 
-## 代码索引(clues)
+~~## 代码索引(clues)~~ → ✅[已迁入](../../02-mechanism/05-run-inner/03-cognitive/mvp1-alignment.md#2-数据流--机制)
 
 - `packages/graph-agent/src/graph_agent/tools/md_to_json.py:140-142`: semantic_only 判断。
 - `packages/graph-agent/src/graph_agent/tools/md_to_json.py:559-567`: semantic-only 跳过 patch。
 - `packages/graph-agent/src/graph_agent/tools/md_to_json.py:578-589`: structural path 调 md-patch。
 - `packages/graph-agent/src/graph_agent/middleware/cognitive_flow.py:637-680`: schema 后业务 validator。
 
-## 待办/疑点
+~~## 待办/疑点~~ → ✅[已迁入](../../02-mechanism/05-run-inner/03-cognitive/mvp1-alignment.md#2-数据流--机制)
 
 1. 待办：实现适配器，把 `md_to_json()` 的 list[BaseModel] 结果转成 finish_task/CognitiveFlow 所需的 BusinessData 写入形态。
 2. 待办：补测试覆盖 semantic-only、structural-only、mixed errors 三类路由。

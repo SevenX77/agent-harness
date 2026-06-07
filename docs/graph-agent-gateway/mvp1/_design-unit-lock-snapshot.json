@@ -1,0 +1,184 @@
+{
+  "schema_version": 1,
+  "_meta": {
+    "source": "docs/graph-agent-gateway/mvp1/DESIGN_UNITS_INDEX.md",
+    "source_commit": "generated 2026-06-06 from drafted gateway MVP1 index; all units remain drafted",
+    "generated_on": "2026-06-06",
+    "canonical_fields": [
+      "unit",
+      "owned_lock",
+      "external_binding",
+      "integration_lock",
+      "owners",
+      "external_refs"
+    ],
+    "note": "Machine-enforced baseline for gateway design unit lock state. Locked unit owner/state drift must update this snapshot with owner approval."
+  },
+  "units": [
+    {
+      "unit": "capability-model-knowledge",
+      "owned_lock": "drafted",
+      "external_binding": "floating-draft",
+      "integration_lock": "unverified",
+      "owners": [
+        "05-orch-capabilities-and-models"
+      ],
+      "external_refs": [
+        "UI 展示/推荐策略→studio:settings"
+      ]
+    },
+    {
+      "unit": "chatx-invocation-runtime",
+      "owned_lock": "drafted",
+      "external_binding": "none",
+      "integration_lock": "unverified",
+      "owners": [
+        "09-inv-invocation-runtime"
+      ],
+      "external_refs": []
+    },
+    {
+      "unit": "credentials-endpoints-canonicalization",
+      "owned_lock": "drafted",
+      "external_binding": "floating-draft",
+      "integration_lock": "unverified",
+      "owners": [
+        "03-orch-credentials-endpoints"
+      ],
+      "external_refs": [
+        "storage path 注入→studio:llm_paths"
+      ]
+    },
+    {
+      "unit": "error-classification-policy",
+      "owned_lock": "drafted",
+      "external_binding": "none",
+      "integration_lock": "unverified",
+      "owners": [
+        "06-orch-error-classification"
+      ],
+      "external_refs": []
+    },
+    {
+      "unit": "fallback-circuit-probe-health",
+      "owned_lock": "drafted",
+      "external_binding": "floating-draft",
+      "integration_lock": "unverified",
+      "owners": [
+        "07-orch-fallback-circuit-probe"
+      ],
+      "external_refs": [
+        "copilot 假测试→studio:copilot-assist"
+      ]
+    },
+    {
+      "unit": "predict-migration-to-engine",
+      "owned_lock": "drafted",
+      "external_binding": "floating-draft",
+      "integration_lock": "unverified",
+      "owners": [
+        "predict-migration-to-engine"
+      ],
+      "external_refs": [
+        "predict mock/path diff 业务逻辑→engine:predict"
+      ]
+    },
+    {
+      "unit": "provider-profiles-init-kwargs",
+      "owned_lock": "drafted",
+      "external_binding": "none",
+      "integration_lock": "unverified",
+      "owners": [
+        "11-inv-provider-profiles"
+      ],
+      "external_refs": []
+    },
+    {
+      "unit": "registry-schema-contract",
+      "owned_lock": "drafted",
+      "external_binding": "floating-draft",
+      "integration_lock": "unverified",
+      "owners": [
+        "04-orch-registry-schema"
+      ],
+      "external_refs": [
+        "Studio DTO source→studio:llm_config"
+      ]
+    },
+    {
+      "unit": "role-resolution-materialize",
+      "owned_lock": "drafted",
+      "external_binding": "floating-draft",
+      "integration_lock": "unverified",
+      "owners": [
+        "02-orch-role-resolution"
+      ],
+      "external_refs": [
+        "report 渲染→studio:settings"
+      ]
+    },
+    {
+      "unit": "route-chat-model-factory",
+      "owned_lock": "drafted",
+      "external_binding": "none",
+      "integration_lock": "unverified",
+      "owners": [
+        "10-inv-route-chat-model-factory"
+      ],
+      "external_refs": []
+    },
+    {
+      "unit": "route-handoff-interface",
+      "owned_lock": "drafted",
+      "external_binding": "floating-draft",
+      "integration_lock": "unverified",
+      "owners": [
+        "01-handoff-interface",
+        "04-orch-registry-schema"
+      ],
+      "external_refs": [
+        "copilot route 消费→studio:copilot-assist",
+        "predict route 消费→engine:predict"
+      ]
+    },
+    {
+      "unit": "studio-boundary-copilot-http",
+      "owned_lock": "drafted",
+      "external_binding": "floating-draft",
+      "integration_lock": "unverified",
+      "owners": [
+        "01-handoff-interface",
+        "03-orch-credentials-endpoints",
+        "05-orch-capabilities-and-models",
+        "07-orch-fallback-circuit-probe",
+        "08-orch-test-status-ssot"
+      ],
+      "external_refs": [
+        "HTTP routers/job/progress/DTO→studio:llm-copilot-http-api",
+        "copilot SDK 调用/session/事件翻译→studio:copilot-assist"
+      ]
+    },
+    {
+      "unit": "test-status-ssot-evidence",
+      "owned_lock": "drafted",
+      "external_binding": "floating-draft",
+      "integration_lock": "unverified",
+      "owners": [
+        "08-orch-test-status-ssot"
+      ],
+      "external_refs": [
+        "UI 颜色/文案/import workflow/远端源选择→studio:settings"
+      ]
+    },
+    {
+      "unit": "tracing-events-exceptions",
+      "owned_lock": "drafted",
+      "external_binding": "none",
+      "integration_lock": "unverified",
+      "owners": [
+        "13-x-tracing-events-exceptions"
+      ],
+      "external_refs": []
+    }
+  ]
+}

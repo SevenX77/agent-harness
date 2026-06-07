@@ -3,6 +3,10 @@ module: 07-orch-fallback-circuit-probe
 doc: baseline
 status: drafted
 verified_at: 2026-06-02
+binds_design: ./mvp1-alignment.md
+binds_code: packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:GatewayChatModel/_generate/_is_marked_down/_probe/_mark_down/_usage_total_calls/_record_usage · packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:LLMClientManager/probe_provider/is_provider_marked_down/mark_provider_down/record_usage/_probe_provider/_is_provider_marked_down/_mark_provider_down/_call_with_token_escalation · packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:RuntimePolicy/ProbeResult · packages/graph-agent-gateway/src/graph_agent_gateway/registry/probe_contracts.py · apps/studio/backend/app/services/copilot_test.py:ModelProbeResult/_probe_model/_probe_official_call_method · apps/studio/backend/app/services/llm_health_store.py:RuntimeCircuit/SqliteLlmHealthStore
+units: [fallback-circuit-probe-health]
+aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ---
 
 # 07-orch-fallback-circuit-probe — Baseline(现状)
@@ -11,7 +15,7 @@ verified_at: 2026-06-02
 
 ## 覆盖代码(含覆盖率)
 
-覆盖率：本模块 brief 指定的 5 组代码已全部核源码，文档覆盖率 100%。共享文件按 [mvp1 README](../README.md:32) 的边界切分：`gateway_chat_model.py` / `client_manager.py` 的编排步骤写 07，调用步骤写 09。
+覆盖率：本模块 brief 指定的 5 组代码已全部核源码，文档覆盖率 100%。共享文件按 [mvp1 README](../README.md) 第 50 行的边界切分：`gateway_chat_model.py` / `client_manager.py` 的编排步骤写 07，调用步骤写 09。
 
 | 代码 | 本篇覆盖的用途 |
 |---|---|

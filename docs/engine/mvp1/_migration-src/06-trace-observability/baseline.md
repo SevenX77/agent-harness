@@ -4,12 +4,13 @@ doc: baseline
 status: drafted
 last_verified: 2026-06-02
 ---
+<!-- 核对进度:已迁 7 块 / 未迁 0 块 / 2026-06-04 -->
 
-# 06-trace-observability — Baseline(现状)
+~~# 06-trace-observability — Baseline(现状)~~ → ✅[已迁入](../../02-mechanism/06-seam/02-observability/baseline.md#后端功能)
 
 核心结论：事件类型和 trace sink 已经丰富，live 手写 loop 也发了 phase/LLM/tool 事件；但 finish_task 校验子步骤基本是黑盒。`CognitiveFlowMiddleware`、`cognitive/finish_task.py`、`cognitive/md2json.py`、`cognitive/md_patch.py` 当前没有发 finish/validation/patch/nudge 细分事件。
 
-## 覆盖范围
+~~## 覆盖范围~~ → ✅[已迁入](../../02-mechanism/06-seam/02-observability/baseline.md#后端功能)
 
 覆盖范围：本文覆盖决策记录 §8。
 
@@ -21,7 +22,7 @@ last_verified: 2026-06-02
 | live loop emit | `packages/graph-agent/src/graph_agent/core/graph_assembler.py:305-319`、`packages/graph-agent/src/graph_agent/core/graph_assembler.py:515-555` | phase、LLM、tool 事件在 hand-written loop 发出。 |
 | middleware tracing skeleton | `packages/graph-agent/src/graph_agent/middleware/tracing.py:11-16` | TracingMiddleware 仍是 no-op。 |
 
-## 编号执行流程(现状)
+~~## 编号执行流程(现状)~~ → ✅[已迁入](../../02-mechanism/06-seam/02-observability/baseline.md#后端功能)
 
 1. `LLMCallEvent` 与 `ToolCallEvent` 已定义，payload 包含 phase、token、messages、response、tool args/result/duration，见 `packages/graph-agent/src/graph_agent/callbacks/events.py:73-88`。
 
@@ -51,24 +52,24 @@ last_verified: 2026-06-02
 
 14. `cognitive/finish_task.py`、`cognitive/md2json.py`、`cognitive/md_patch.py` 当前也没有 trace emit；其核心流程分别在 `packages/graph-agent/src/graph_agent/cognitive/finish_task.py:40-93`、`packages/graph-agent/src/graph_agent/cognitive/md2json.py:26-38`、`packages/graph-agent/src/graph_agent/cognitive/md_patch.py:65-84`。
 
-## Baseline / Alignment 差异
+~~## Baseline / Alignment 差异~~ → ✅[已迁入](../../02-mechanism/06-seam/02-observability/baseline.md#后端功能)
 
 baseline 有事件基础设施和 loop 级事件，但 finish_task 校验链不可见。alignment 目标是实现 TracingMiddleware，并给 finish_task 校验流水线补发事件，迁移后覆盖率不能低于当前 hand-written loop。
 
-## 决策原因
+~~## 决策原因~~ → ✅[已迁入](../../02-mechanism/06-seam/02-observability/baseline.md#后端功能)
 
 trace 覆盖是验收标准，不是锦上添花。当前迁移如果只把 `_skill_node` 改成 create_agent，却不实现 TracingMiddleware，就会丢掉 `LLMCallEvent` 和 `ToolCallEvent` 的 live emit 点，见现状 emit 在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:515-555`。
 
 finish_task 校验黑盒会让前端无法解释“为什么被打回”：是 semantic-only、structural patch、schema gate、business validator 还是 exit gate nudge。现有事件类型已经足够承载这些节点，只是未发。
 
-## 代码索引(clues)
+~~## 代码索引(clues)~~ → ✅[已迁入](../../02-mechanism/06-seam/02-observability/baseline.md#后端功能)
 
 - `packages/graph-agent/src/graph_agent/callbacks/events.py:73-116`: 核心 trace 事件类型。
 - `packages/graph-agent/src/graph_agent/core/graph_assembler.py:515-555`: live LLM/tool emit。
 - `packages/graph-agent/src/graph_agent/middleware/tracing.py:11-16`: no-op tracing slot。
 - `packages/graph-agent/src/graph_agent/middleware/cognitive_flow.py:468-699`: finish_task 黑盒流程。
 
-## 待办/疑点
+~~## 待办/疑点~~ → ✅[已迁入](../../02-mechanism/06-seam/02-observability/baseline.md#后端功能)
 
 1. 待办：TracingMiddleware 接管 LLMCall/ToolCall/AgentLoopIteration emit。
 2. 待办：finish_task 校验链补事件：submitted、semantic_reject、structural_patch_start/pass/fail、schema_gate_pass/fail、business_validator_pass/fail、exit_gate_nudge。

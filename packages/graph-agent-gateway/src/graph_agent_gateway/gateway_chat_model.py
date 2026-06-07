@@ -278,7 +278,7 @@ class GatewayChatModel(BaseChatModel):
         cls = self.__class__
         extra_kwargs = {}
         if hasattr(self, "predict_context"):
-            extra_kwargs["predict_context"] = getattr(self, "predict_context")
+            extra_kwargs["predict_context"] = self.predict_context
 
         bound = cls(
             self.role_name,

@@ -8,7 +8,6 @@ import pytest
 
 from graph_agent.core.loader import CompiledSkill, SkillLoader
 from graph_agent.core.manifest import AgentNodeAST, LogicNodeAST
-
 from tests.conftest import MockSkillResolver
 
 REPO_ROOT = Path(__file__).resolve().parents[5]

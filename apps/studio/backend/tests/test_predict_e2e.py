@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from app.services import predictor as predictor_module
 from app.services.diagnostic_export import export_predict_diagnostics
-from app.services.predictor import MAX_PHASE_REVISITS, PredictDeadlockError, PredictorService
+from app.services.predictor import PredictorService
 
 
 @pytest.fixture(autouse=True)

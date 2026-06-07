@@ -2436,6 +2436,7 @@ async def _probe_copilot_sdk_tool_call(
 ) -> ModelProbeResult:
     """Execute a specialized Claude SDK tool-call verification probe."""
     import time
+
     from anthropic import AsyncAnthropic
 
     started = time.perf_counter()

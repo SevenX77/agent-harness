@@ -71,50 +71,6 @@ export function CopilotTab({
 } = {}) {
   const { t } = useTranslation("settings")
 
-  if (!data) {
-    return (
-      <div data-copilot-settings-page="true" className="max-w-3xl min-w-0">
-        <SectionTitle
-          title={t("copilot.title")}
-          description={t("copilot.description")}
-          trailing={<SaveStatusBadge status={saveStatus} />}
-        />
-        {error ? <div className="mb-3 text-xs text-destructive">{t("llmRoles.validationFailed", { error })}</div> : null}
-
-        <div className="space-y-4 pt-4">
-          {[1, 2].map((i) => (
-            <Card key={i} size="sm" className="min-w-0 rounded-md">
-              <CardHeader className="!grid-cols-1 items-start gap-2 sm:!grid-cols-[minmax(0,1fr)_auto]">
-                <div className="min-w-0 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Skeleton className="h-5 w-36" />
-                    <Skeleton className="h-5 w-16" />
-                  </div>
-                  <Skeleton className="h-4 w-64" />
-                </div>
-                <CardAction className="row-start-2 flex items-center gap-2 justify-self-start sm:row-start-1 sm:justify-self-end">
-                  <Skeleton className="h-5 w-24" />
-                  <Skeleton className="h-8 w-16" />
-                </CardAction>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center gap-3 rounded-md border border-foreground/10 bg-background/60 p-3">
-                  <Skeleton className="h-6 w-6 rounded-sm" />
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <Skeleton className="h-4 w-32" />
-                  </div>
-                  <div className="ml-auto">
-                    <Skeleton className="h-5 w-5 rounded" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </div>
-    )
-  }
-
   const realCopilotRoles = useMemo(() => {
     return buildCopilotRolesFromRealData(modelGroups, credentials)
   }, [modelGroups, credentials])
@@ -166,6 +122,50 @@ export function CopilotTab({
 
   const [testingRoleIds, setTestingRoleIds] = useState<ReadonlySet<string>>(() => new Set())
   const [routeStatusOverrides, setRouteStatusOverrides] = useState<Record<string, CopilotRouteJobStatus>>({})
+
+  if (!data) {
+    return (
+      <div data-copilot-settings-page="true" className="max-w-3xl min-w-0">
+        <SectionTitle
+          title={t("copilot.title")}
+          description={t("copilot.description")}
+          trailing={<SaveStatusBadge status={saveStatus} />}
+        />
+        {error ? <div className="mb-3 text-xs text-destructive">{t("llmRoles.validationFailed", { error })}</div> : null}
+
+        <div className="space-y-4 pt-4">
+          {[1, 2].map((i) => (
+            <Card key={i} size="sm" className="min-w-0 rounded-md">
+              <CardHeader className="!grid-cols-1 items-start gap-2 sm:!grid-cols-[minmax(0,1fr)_auto]">
+                <div className="min-w-0 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Skeleton className="h-5 w-36" />
+                    <Skeleton className="h-5 w-16" />
+                  </div>
+                  <Skeleton className="h-4 w-64" />
+                </div>
+                <CardAction className="row-start-2 flex items-center gap-2 justify-self-start sm:row-start-1 sm:justify-self-end">
+                  <Skeleton className="h-5 w-24" />
+                  <Skeleton className="h-8 w-16" />
+                </CardAction>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center gap-3 rounded-md border border-foreground/10 bg-background/60 p-3">
+                  <Skeleton className="h-6 w-6 rounded-sm" />
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <Skeleton className="h-4 w-32" />
+                  </div>
+                  <div className="ml-auto">
+                    <Skeleton className="h-5 w-5 rounded" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+    )
+  }
 
   const selectedModelGroupIds = new Set(
     activeRoles.map((role) => role.modelGroupId).filter((id): id is string => typeof id === "string" && id !== null),

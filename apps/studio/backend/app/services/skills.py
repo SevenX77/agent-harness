@@ -379,7 +379,34 @@ async def update_skill_files(
     expected_hash: str | None = None,
 ) -> SkillDetail:
     """Persist a full V2.1 skill file map and return the compiled detail."""
-    raise HTTPException(status_code=400, detail="FastAPI local file writer is retired")
+    skill_dir = await ensure_workspace_skill_dir_async(user_id, skill_id, storage, metadata)
+    graph_path = skill_dir / "GRAPH.md"
+    current_graph = await storage.read_text(str(graph_path))
+    current_hash = _graph_content_hash(current_graph)
+    if expected_hash is not None and expected_hash != current_hash:
+        raise CanvasConflictError(
+            current_hash=current_hash,
+            current_markdown_content=current_graph,
+        )
+
+    write_skill_files_atomic(skill_dir, files)
+    for rel_path in files:
+        record_api_write(skill_dir.joinpath(*PurePosixPath(rel_path).parts))
+
+    summary = await _summary_for_skill_dir_async(
+        user_id,
+        skill_dir,
+        storage,
+        metadata,
+        skill_id=skill_id,
+    )
+    summary = summary.model_copy(update={"directory_path": str(skill_dir)})
+    await metadata.save_skill_index_entry(
+        skill_id,
+        {"absolute_path": str(skill_dir), "l2_remote_url": ""},
+    )
+    await metadata.save_skill_summary(user_id, summary)
+    return await get_skill_detail(user_id, skill_id, storage, metadata)
 
 
 async def update_skill_file(

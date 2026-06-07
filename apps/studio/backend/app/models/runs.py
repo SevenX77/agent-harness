@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from graph_agent.callbacks.events import CallbackEvent
 from graph_agent import PathDiff, PhaseRecord
+from graph_agent.callbacks.events import CallbackEvent
 from pydantic import BaseModel, ConfigDict
 
 

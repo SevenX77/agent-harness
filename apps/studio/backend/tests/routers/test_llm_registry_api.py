@@ -23,8 +23,8 @@ from app.models.llm_config import (
     RoleModelGroup,
     RoleProviderModel,
     RoleRouteEntry,
-    RouteCandidate,
     RolesData,
+    RouteCandidate,
 )
 from app.routers import llm as llm_router
 from app.services import copilot_test

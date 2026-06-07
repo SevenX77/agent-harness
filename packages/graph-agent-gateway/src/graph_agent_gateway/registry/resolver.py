@@ -195,7 +195,7 @@ def resolve_role(
             blocked_route_ids = {item.route_id for item in blocking}
             new_resolved_routes = []
             new_provider_routes = []
-            for r_route, p_route in zip(resolved_routes, provider_routes):
+            for r_route, p_route in zip(resolved_routes, provider_routes, strict=True):
                 if r_route.route_id in blocked_route_ids:
                     lint_msgs = [item.message for item in blocking if item.route_id == r_route.route_id]
                     msg = f"route {r_route.route_id} blocked by lint: " + "; ".join(lint_msgs)

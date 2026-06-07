@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.models.llm_config import (
     LLMCredentialsFile,
@@ -17,14 +17,14 @@ from app.models.llm_config import (
     TokenIntent,
 )
 from app.services.llm_health_store import SqliteLlmHealthStore
+from app.services.llm_import_drafts import load_evidence_library
 from app.services.llm_route_capabilities import route_thinking_capability
 from app.services.llm_state_projection import (
     ProviderModelStateProjection,
-    project_provider_model_state,
     has_historical_probe_verified,
+    project_provider_model_state,
 )
-from app.services.llm_import_drafts import load_evidence_library
-from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     from graph_agent_gateway.registry.schema import EvidenceRecord
 

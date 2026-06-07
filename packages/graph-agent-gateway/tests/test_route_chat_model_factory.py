@@ -128,9 +128,9 @@ def test_deepseek_openai_payload_replays_multiturn_assistant_reasoning_content()
 def test_factory_applies_protocol_endpoint_and_exact_model_profiles_with_caller_wins(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import graph_agent_gateway.route_chat_model_factory as factory_module
     from graph_agent_gateway import provider_profiles
     from graph_agent_gateway.provider_profiles import ProviderProfile, register_provider_profile
-    import graph_agent_gateway.route_chat_model_factory as factory_module
 
     class FakeChatOpenAI:
         def __init__(self, **kwargs: object) -> None:
@@ -273,9 +273,18 @@ def test_factory_lazy_imports_chat_google_generative_ai(monkeypatch: pytest.Monk
 def test_factory_reports_missing_google_extra_at_build_time(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import graph_agent_gateway.route_chat_model_factory as factory_module
     from graph_agent_gateway.route_chat_model_factory import RouteChatModelFactory
 
+    real_import_module = factory_module.importlib.import_module
+
+    def fake_import_module(name: str, package: str | None = None) -> object:
+        if name == "langchain_google_genai":
+            raise ModuleNotFoundError(name)
+        return real_import_module(name, package)
+
     monkeypatch.delitem(sys.modules, "langchain_google_genai", raising=False)
+    monkeypatch.setattr(factory_module.importlib, "import_module", fake_import_module)
     factory = RouteChatModelFactory(
         credential_provider=StaticCredentialProvider({"endpoint:google": "google-secret"})
     )
@@ -294,8 +303,8 @@ def test_factory_reports_missing_google_extra_at_build_time(
 
 
 def test_factory_returns_generic_chat_model_for_nonstandard_protocol() -> None:
-    from langchain_core.language_models.chat_models import BaseChatModel
     from graph_agent_gateway.registry.schema import ResolvedRoute
+    from langchain_core.language_models.chat_models import BaseChatModel
 
     route = ResolvedRoute.model_construct(
         role_name="graph_agent",
@@ -455,9 +464,9 @@ def test_generic_chat_model_dispatches_ordinary_chat_messages_preserving_tool_co
 
 
 def test_generic_chat_model_runs_langchain_create_agent_tool_loop() -> None:
-    from langchain.agents import create_agent
     from graph_agent_gateway.models import GenericRouteChatModel
     from graph_agent_gateway.registry.schema import ResolvedRoute
+    from langchain.agents import create_agent
 
     route = ResolvedRoute.model_construct(
         role_name="graph_agent",

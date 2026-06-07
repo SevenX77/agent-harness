@@ -10,7 +10,7 @@ from app.services.predictor import (
     PredictDeadlockError,
     PredictorService,
 )
-from graph_agent import RunResult, PhaseRecord, PathDiff
+from graph_agent import PathDiff, PhaseRecord, RunResult
 from graph_agent.core.runner import PredictDeadlockError as SDKPredictDeadlockError
 
 

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from app.models.llm_config import ProviderEndpoint, ProviderRoute
 from app.services.llm_health_store import RuntimeCircuit
-from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     from graph_agent_gateway.registry.schema import EvidenceRecord
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-
 FALLBACK_EVENT_CODE = "[F-v3-gateway-llm-fallback]"
 
 

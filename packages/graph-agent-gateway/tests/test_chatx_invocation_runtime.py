@@ -6,8 +6,8 @@ from collections.abc import Sequence
 from typing import Any
 
 import httpx
-import pytest
 import openai
+import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
 

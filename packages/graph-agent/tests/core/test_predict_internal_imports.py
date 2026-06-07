@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 from typing import Any
 
 from graph_agent_gateway.gateway_chat_model import GatewayChatModel

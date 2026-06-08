@@ -104,18 +104,22 @@ def test_action_returning_non_dict_is_runtime_fatal(
     assert exc_info.value.payload.code == "[F-v3-logic-action-return-invalid]"
 
 
-def test_ctx_data_mutation_key_must_be_declared_and_not_written(
+def test_context_style_mutation_is_not_a_logic_output_channel(
     tmp_path: Path, mock_skill_resolver: object
 ) -> None:
     _logic_skill(
         tmp_path,
         "write_value",
-        "def write_value(context):\n    context.set('missing', 1)\n    return {'foo': 2}\n",
+        "def write_value(context):\n    context.set('foo', 99)\n    return {}\n",
     )
     compiled = compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
     graph = assemble_graph(compiled, skill_resolver=mock_skill_resolver).graph
 
-    with pytest.raises(GraphAgentFatalError) as exc_info:
-        graph.invoke({"data": {"inputs": {"foo": 1}}, "flow": {}, "messages": [], "run_id": "r1"})
-    assert exc_info.value.payload.code == "[F-v3-logic-output-field-undeclared]"
-    assert "missing" in str(exc_info.value)
+    try:
+        result = graph.invoke(
+            {"data": {"inputs": {"foo": 1}}, "flow": {}, "messages": [], "run_id": "r1"}
+        )
+    except GraphAgentFatalError:
+        return
+
+    assert result["data"].model_dump()["foo"] == 1

@@ -1,4 +1,4 @@
-"""Runtime coverage for LOGIC actions receiving the Context facade."""
+"""MVP1 drift coverage for LOGIC actions no longer receiving Context facade."""
 
 from __future__ import annotations
 
@@ -68,11 +68,11 @@ validator: false
         root / "phases" / "score" / "actions" / "score.py",
         "def score(context):\n"
         "    segments = context['segments']\n"
-        "    return {'report': f'scored {len(segments)} segments'}\n",
+        "    return {'report': f'{type(context).__name__}:scored {len(segments)} segments'}\n",
     )
 
 
-def test_logic_action_can_read_context_with_item_access(
+def test_logic_action_receives_plain_dict_not_context_facade(
     tmp_path: Path, mock_skill_resolver: object
 ) -> None:
     _score_logic_skill(tmp_path)
@@ -87,4 +87,4 @@ def test_logic_action_can_read_context_with_item_access(
         }
     )
 
-    assert result["data"]["phase_outputs"]["score"] == {"report": "scored 1 segments"}
+    assert result["data"]["phase_outputs"]["score"] == {"report": "dict:scored 1 segments"}

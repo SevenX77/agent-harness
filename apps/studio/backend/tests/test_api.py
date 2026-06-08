@@ -108,7 +108,7 @@ def test_lint_reports_failed_manifest_with_line_number(
     assert body["errors"][0]["error_code"]
 
 
-def test_put_updates_indexed_skill_atomically_and_invalid_content_preserves_file(
+def test_put_skill_rejects_fastapi_batch_writer_and_preserves_file(
     client: TestClient,
     studio_roots: tuple[Path, Path],
 ) -> None:
@@ -126,19 +126,12 @@ def test_put_updates_indexed_skill_atomically_and_invalid_content_preserves_file
     files = _agent_skill_files("idea-generator")
     files["GRAPH.md"] = updated
 
-    ok_response = client.put("/api/skills/idea-generator", json={"files": files})
+    response = client.put("/api/skills/idea-generator", json={"files": files})
 
-    assert ok_response.status_code == 200
-    assert ok_response.json()["manifest"]["description"] == "Updated ideas"
-    assert "Updated ideas" in skill_path.read_text(encoding="utf-8")
+    assert response.status_code == 400
+    assert response.json()["message"] == "FastAPI local file writer is retired"
+    assert "description: Draft structured ideas" in skill_path.read_text(encoding="utf-8")
     assert not (workspaces_dir / "default" / "skills" / "idea-generator" / "GRAPH.md").exists()
-
-    bad_files = dict(files)
-    bad_files["GRAPH.md"] = "not yaml"
-    bad_response = client.put("/api/skills/idea-generator", json={"files": bad_files})
-
-    assert bad_response.status_code == 422
-    assert "Updated ideas" in skill_path.read_text(encoding="utf-8")
 
 
 def test_create_skill(

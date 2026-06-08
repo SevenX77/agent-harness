@@ -17,6 +17,7 @@ from graph_agent.core._predict_internal.interception import PredictGatewayChatMo
 from graph_agent.core._predict_internal.strategy import BaseMockStrategy
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.io_manager import IOManager
+from graph_agent.core.loader import CompiledSubagent
 from graph_agent.core.schema_engine import SchemaEngine
 from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
 from graph_agent.middleware.cognitive_flow import CognitiveFlowMiddleware
@@ -744,6 +745,63 @@ class _TwoInvalidSubagentCallModel(BaseChatModel):
         else:
             message = AIMessage(content="done")
         return ChatResult(generations=[ChatGeneration(message=message)])
+
+
+class _SubagentRetryInput(BaseModel):
+    text: str
+
+
+def _compiled_retry_subagent(root: Path) -> CompiledSubagent:
+    schema = _SubagentRetryInput.model_json_schema()
+    return CompiledSubagent(
+        parent_phase_id="main",
+        name="child_expert",
+        target_skill="demo.child",
+        description="Child expert.",
+        root=root,
+        input_schema=schema,
+        input_model=_SubagentRetryInput,
+        expected_schema=schema,
+    )
+
+
+def test_subagent_validation_retry_count_ignores_successful_calls(tmp_path: Path) -> None:
+    flow: dict[str, Any] = {"subagent_validation_retries": {}}
+    subagent = _compiled_retry_subagent(tmp_path / "child")
+
+    for index in range(11):
+        result = graph_assembler._invoke_subagent_tool_t21(
+            tool_name="call_subagent_child_expert",
+            subagent=subagent,
+            args={"inputs": [{"text": f"ok-{index}"}]},
+            flow=flow,
+        )
+        assert result["ok"] is True
+
+    assert flow["subagent_validation_retries"] == {}
+
+
+def test_subagent_validation_retry_count_clears_after_success(tmp_path: Path) -> None:
+    flow: dict[str, Any] = {"subagent_validation_retries": {}}
+    subagent = _compiled_retry_subagent(tmp_path / "child")
+
+    first = graph_assembler._invoke_subagent_tool_t21(
+        tool_name="call_subagent_child_expert",
+        subagent=subagent,
+        args={"inputs": [{"invalid_field": "contracts"}]},
+        flow=flow,
+    )
+    assert first["ok"] is False
+    assert flow["subagent_validation_retries"] == {"call_subagent_child_expert": 1}
+
+    second = graph_assembler._invoke_subagent_tool_t21(
+        tool_name="call_subagent_child_expert",
+        subagent=subagent,
+        args={"inputs": [{"text": "contracts"}]},
+        flow=flow,
+    )
+    assert second["ok"] is True
+    assert flow["subagent_validation_retries"] == {}
 
 
 def test_create_agent_subagent_tool_persists_retry_count(

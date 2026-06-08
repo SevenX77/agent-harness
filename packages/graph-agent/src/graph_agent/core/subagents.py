@@ -98,13 +98,13 @@ def validate_subagent_tool_args(
     args: dict[str, Any],
     retry_count: int,
 ) -> list[BaseModel] | SubagentValidationFailure:
-    if retry_count > MAX_SUBAGENT_SCHEMA_RETRIES:
-        raise RuntimeError(
-            f"call_subagent validation exceeded max retries: tool={tool_name} "
-            f"retry_count={retry_count}"
-        )
     inputs = args.get("inputs")
     if not isinstance(inputs, list):
+        if retry_count > MAX_SUBAGENT_SCHEMA_RETRIES:
+            raise RuntimeError(
+                f"call_subagent validation exceeded max retries: tool={tool_name} "
+                f"retry_count={retry_count}"
+            )
         return SubagentValidationFailure(
             tool_name=tool_name,
             subagent_name=subagent_name,
@@ -133,6 +133,11 @@ def validate_subagent_tool_args(
                 error_copy["loc"] = ["inputs", index, *list(error.get("loc", ()))]
                 errors.append(error_copy)
     if errors:
+        if retry_count > MAX_SUBAGENT_SCHEMA_RETRIES:
+            raise RuntimeError(
+                f"call_subagent validation exceeded max retries: tool={tool_name} "
+                f"retry_count={retry_count}"
+            )
         return SubagentValidationFailure(
             tool_name=tool_name,
             subagent_name=subagent_name,

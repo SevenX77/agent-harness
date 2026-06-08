@@ -2460,37 +2460,28 @@ async def _probe_copilot_sdk_tool_call(
 ) -> ModelProbeResult:
     """Execute a specialized Claude SDK tool-call verification probe."""
     import time
+    from pathlib import Path
 
-    from anthropic import AsyncAnthropic
+    from app.services.copilot import _session_factory, build_options
 
     started = time.perf_counter()
     api_key = endpoint.api_key.get_secret_value() if endpoint.api_key is not None else ""
-    base_url = endpoint.base_url or "https://api.anthropic.com"
+    base_url = endpoint.base_url
 
-    client = AsyncAnthropic(
-        api_key=api_key,
-        base_url=base_url,
-    )
+    options = build_options(base_url, api_key, Path.cwd())
+    client = _session_factory(options)
 
     try:
-        response = await client.messages.create(
-            model=route.provider_model_id,
-            max_tokens=100,
-            messages=[{"role": "user", "content": "What is the weather in SF?"}],
-            tools=[
-                {
-                    "name": "get_weather",
-                    "description": "Get the current weather in a given location",
-                    "input_schema": {
-                        "type": "object",
-                        "properties": {
-                            "location": {"type": "string", "description": "The location to query"}
-                        },
-                        "required": ["location"]
-                    }
-                }
-            ]
-        )
+        await client.connect()
+        await client.query("Please read the file SKILL.md to see what is in it.")
+
+        has_tool_use = False
+        async for sdk_message in client.receive_response():
+            from claude_agent_sdk.types import AssistantMessage, ToolUseBlock
+            if isinstance(sdk_message, AssistantMessage):
+                for block in sdk_message.content:
+                    if isinstance(block, ToolUseBlock):
+                        has_tool_use = True
     except Exception as exc:
         latency_ms = max(0, round((time.perf_counter() - started) * 1000))
         return ModelProbeResult(
@@ -2501,11 +2492,6 @@ async def _probe_copilot_sdk_tool_call(
         )
 
     latency_ms = max(0, round((time.perf_counter() - started) * 1000))
-
-    has_tool_use = (
-        response.stop_reason == "tool_use" or
-        any(getattr(block, "type", None) == "tool_use" for block in response.content)
-    )
 
     if has_tool_use:
         return ModelProbeResult(
@@ -2519,7 +2505,7 @@ async def _probe_copilot_sdk_tool_call(
             model_id=route.provider_model_id,
             status="error",
             latency_ms=latency_ms,
-            message="Endpoint responded successfully but did not trigger the weather tool.",
+            message="Endpoint responded successfully but did not trigger the tool call.",
         )
 
 

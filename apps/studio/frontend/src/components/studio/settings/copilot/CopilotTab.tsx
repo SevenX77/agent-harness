@@ -37,13 +37,11 @@ import { SaveStatusBadge } from "@/components/ui/save-status-badge"
 import { SectionTitle } from "../shared"
 import { CopilotModelGroupCard } from "./CopilotModelGroupCard"
 import {
-  isClaudeAgentSdkCompatibleRoute,
-  buildCopilotRolesFromRealData,
-  defaultCopilotCredentials,
-  defaultCopilotModelGroups,
+  deriveCopilotCandidateGroups,
+  applyCopilotModelGroupSelection,
   type CopilotRolePreview,
   type CopilotRoutePreview,
-} from "./mock-copilot-data"
+} from "./copilot-role-derivation"
 import {
   copilotRoleTestErrorMessage,
   copilotRouteStatusesFromJob,
@@ -56,8 +54,8 @@ import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 
 export function CopilotTab({
   data = null,
-  credentials = defaultCopilotCredentials,
-  modelGroups = defaultCopilotModelGroups,
+  credentials = { providers: [] },
+  modelGroups = [],
   onChange = () => {},
   saveStatus = "idle",
   error = null,
@@ -72,24 +70,17 @@ export function CopilotTab({
   const { t } = useTranslation("settings")
 
   const realCopilotRoles = useMemo(() => {
-    return buildCopilotRolesFromRealData(modelGroups, credentials)
+    return deriveCopilotCandidateGroups(modelGroups, credentials)
   }, [modelGroups, credentials])
 
-  const claudeModelGroups = useMemo(() => {
-    return realCopilotRoles.filter((role) => (
-      role.sdkId === "claude-agent-sdk" && compatibleRoutesForRole(role).length > 0
-    ))
-  }, [realCopilotRoles])
+  const claudeModelGroups = realCopilotRoles
 
   const activeRoles = useMemo(() => {
-    const filtered = data
+    return data
       ? Object.entries(data.roles)
           .filter(([, role]) => role.role_kind === "copilot")
           .map(([name, role]) => {
-            const activeModelGroupId = Object.keys(role.models ?? {})[0] ||
-              (name === "copilot_opus_4_7" ? (realCopilotRoles.some(r => r.id === "claude-opus-4.7") ? "claude-opus-4.7" : "claude-opus-4-7") :
-               name === "copilot_deepseek_v4" ? "deepseek-v4-pro" :
-               name === "sonnet-4-7-third-party" ? (realCopilotRoles.some(r => r.id === "claude-sonnet-4.7") ? "claude-sonnet-4.7" : "claude-sonnet-4-7") : name)
+            const activeModelGroupId = Object.keys(role.models ?? {})[0] || role.active_model || name
 
             const mockData = realCopilotRoles.find((r) => r.id === activeModelGroupId)
             const fallbackChainRoutes = role.models?.[activeModelGroupId]?.providers ??
@@ -105,19 +96,6 @@ export function CopilotTab({
             }
           })
       : []
-
-    if (filtered.length === 0) {
-      return realCopilotRoles.slice(0, 3).map((mockData) => ({
-        id: (mockData.id === "claude-opus-4-7" || mockData.id === "claude-opus-4.7") ? "copilot_opus_4_7" :
-            mockData.id === "deepseek-v4-pro" ? "copilot_deepseek_v4" : mockData.id,
-        title: mockData.title,
-        description: mockData.description,
-        source: mockData.source,
-        modelGroupId: mockData.id,
-        fallback_chain: mockData.activeRouteIds.map((routeId) => ({ route_id: routeId, runtime_settings: {} })),
-      }))
-    }
-    return filtered
   }, [data, realCopilotRoles])
 
   const [testingRoleIds, setTestingRoleIds] = useState<ReadonlySet<string>>(() => new Set())
@@ -178,10 +156,7 @@ export function CopilotTab({
     const role = nextRoles[roleId]
     if (!role) return
 
-    const activeModelGroupId = Object.keys(role.models ?? {})[0] ||
-      (roleId === "copilot_opus_4_7" ? (realCopilotRoles.some(r => r.id === "claude-opus-4.7") ? "claude-opus-4.7" : "claude-opus-4-7") :
-       roleId === "copilot_deepseek_v4" ? "deepseek-v4-pro" :
-       roleId === "sonnet-4-7-third-party" ? (realCopilotRoles.some(r => r.id === "claude-sonnet-4.7") ? "claude-sonnet-4.7" : "claude-sonnet-4-7") : roleId)
+    const activeModelGroupId = Object.keys(role.models ?? {})[0] || role.active_model || roleId
 
     nextRoles[roleId] = {
       ...role,
@@ -222,33 +197,9 @@ export function CopilotTab({
     if (!data) return
     const modelGroup = claudeModelGroups.find((candidate) => candidate.id === modelGroupId)
     if (!modelGroup) return
-    const nextRoles = { ...data.roles }
-    const role = nextRoles[roleId]
-    if (!role) return
 
-    const defaultRouteIds = modelGroup.activeRouteIds.filter((routeId) =>
-      modelGroup.availableRoutes.filter(isClaudeAgentSdkCompatibleRoute).some((r) => r.id === routeId)
-    )
-
-    delete nextRoles[roleId]
-    nextRoles[modelGroupId] = {
-      role_kind: "copilot" as const,
-      system_prompt_prefix: "",
-      model_fallback_enabled: true,
-      fallback_chain: defaultRouteIds.map((routeId) => ({
-        route_id: routeId,
-        runtime_settings: {},
-      })),
-      intent: { provider_preference: "manual_order" as const },
-      model_groups: [],
-      active_model: modelGroupId,
-      models: {
-        [modelGroupId]: {
-          providers: defaultRouteIds,
-        }
-      },
-    }
-    onChange({ ...data, roles: nextRoles })
+    const nextData = applyCopilotModelGroupSelection(data, roleId, modelGroupId, modelGroup.availableRoutes)
+    onChange(nextData)
   }
 
   function requestDeleteCopilotRole(role: { id: string; title: string }) {
@@ -532,7 +483,7 @@ function EmptyCopilotRoleCard({
 }
 
 function compatibleRoutesForRole(role: CopilotRolePreview): CopilotRoutePreview[] {
-  return role.availableRoutes.filter(isClaudeAgentSdkCompatibleRoute)
+  return role.availableRoutes
 }
 
 function isCopilotRoute(route: CopilotRoutePreview | undefined): route is CopilotRoutePreview {

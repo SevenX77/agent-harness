@@ -4,6 +4,7 @@ import { nextBackoffMs } from '../lib/websocket'
 import { copilotStore } from '../store/copilotStore'
 import type { CopilotEvent, CopilotMessage } from '../types/copilot'
 import { normalizeCopilotEvent } from '../types/copilot'
+import { resolveWorkspaceIdentity } from '../components/studio/workspace-identity'
 
 type ConnectionStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'reconnecting' | 'error'
 
@@ -55,11 +56,17 @@ export function useCopilot(skillId: string | null) {
     }
   }, [])
 
+  const workspaceRoot = resolveWorkspaceIdentity(skillId).workspaceRoot ?? ''
+
   useEffect(() => {
-    if (snapshot.skillId !== skillId) {
-      copilotStore.reset(skillId)
+    if (skillId) {
+      copilotStore.setContext(workspaceRoot, skillId)
+      const snap = copilotStore.getSnapshot()
+      if (snap.sessions.length === 0) {
+        copilotStore.newSession()
+      }
     }
-  }, [skillId, snapshot.skillId])
+  }, [skillId, workspaceRoot])
 
   useEffect(() => {
     if (!skillId) {
@@ -163,5 +170,10 @@ export function useCopilot(skillId: string | null) {
     lastError,
     sendMessage,
     clearMessages: copilotStore.clearMessages,
+    persistenceError: snapshot.persistenceError,
+    activeSessionId: snapshot.activeSessionId,
+    sessions: snapshot.sessions,
+    newSession: () => copilotStore.newSession(),
+    switchSession: (id: string) => copilotStore.switchSession(id),
   }
 }

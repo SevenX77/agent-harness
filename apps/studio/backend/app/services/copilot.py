@@ -30,6 +30,7 @@ from claude_agent_sdk.types import (
     AssistantMessage,
     ResultMessage,
     TextBlock,
+    ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
 )
@@ -43,6 +44,7 @@ from app.models.copilot import (
     CopilotEventDone,
     CopilotEventError,
     CopilotEventText,
+    CopilotEventThinking,
     CopilotEventToolUseResult,
     CopilotEventToolUseStart,
     CopilotToolName,
@@ -381,6 +383,8 @@ def _translate_assistant_message(
     for block in message.content:
         if isinstance(block, TextBlock):
             events.append(CopilotEventText(content=block.text))
+        elif isinstance(block, ThinkingBlock):
+            events.append(CopilotEventThinking(content=block.thinking))
         elif isinstance(block, ToolUseBlock):
             if block.name not in _ALLOWED_TOOL_SET:
                 events.append(CopilotEventError(message=f"V1 不支持工具 {block.name}"))

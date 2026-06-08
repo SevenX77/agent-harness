@@ -1,7 +1,7 @@
 ---
 module: 04_platform/llm-copilot-http-api
 doc: baseline
-status: FROZEN（WS-4 更新后现状；`routers/llm.py` 是巨型 router，HTTP glue 与 probe/materialize/draft/6态/能力证据逻辑混在一起；Role Test 已覆盖全候选并写回第三方失败 evidence，Copilot SDK test 仍走假路径 ⚠️。）
+status: verified（WS-5 更新后现状；`routers/llm.py` 中 Copilot SDK test 已对接真实 ClaudeSDKClient。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/backend/app/routers/llm.py:router · apps/studio/backend/app/routers/llm.py:get_llm_registry · apps/studio/backend/app/routers/llm.py:_probe_copilot_sdk_tool_call · apps/studio/backend/app/routers/copilot.py:copilot_ws · apps/studio/backend/app/routers/copilot.py:test_copilot_role_sdk
 units: [settings-six-state-provider-health, model-group-role-materialization, copilot-sdk-test-parity]
@@ -10,7 +10,7 @@ units: [settings-six-state-provider-health, model-group-role-materialization, co
 # llm-copilot-http-api — Baseline（当下代码实现逻辑）
 
 > **Scope**: Studio ③a LLM/Copilot HTTP 适配壳：registry/endpoint/model/role/import/model-profile/Copilot WS+test 的端点形状、DTO 投影与 job 包装。
-> **现状一句话**: `routers/llm.py` 是巨型 router，HTTP glue 与 probe/materialize/draft/6态/能力证据逻辑混在一起；Role Test 已覆盖全候选并写回第三方失败 evidence，Copilot SDK test 仍走假路径 ⚠️。
+> **现状一句话**: `routers/llm.py` 中 Copilot SDK test 端点已完整对接 `ClaudeSDKClient` 并集成每会话独立的环境变量与工具探测逻辑。
 
 ## UI/UX
 | 面 | 现状 | 证据（文件:符号名） |
@@ -75,7 +75,7 @@ N/A。
 | `_registry_response` (`routers/llm.py:1336`) | `_registry_response` 把 credentials 与 roles join 成前端 registry DTO，并分开暴露 availability `ui_state` 与 capability evidence `unknown/callable_only/partial/known`。 |
 | `_force_probe_route` (`routers/llm.py:1818`) | `_force_probe_route` 对单 route 发真实模型 probe,成功清 circuit,网络类失败写 health circuit。 |
 | `_role_test_provider_result` (`routers/llm.py:1889`) | `_role_test_provider_result` 计算单 route 在 role test 中的 admission、probe 和状态回写；第三方 probe 失败会更新 route/evidence，临时网络类失败走 health circuit。 |
-| `_probe_copilot_sdk_tool_call` (`routers/llm.py:2150`) | `_probe_copilot_sdk_tool_call` 现状用 `AsyncAnthropic` 做 Copilot tool-call 验证,与真实 Copilot SDK 运行路径不一致。 |
+| `_probe_copilot_sdk_tool_call` (`routers/llm.py`) | `_probe_copilot_sdk_tool_call` 已修改为使用真实 `ClaudeSDKClient` + per-session 环境变量注入，并实际执行工具调用探测。 |
 | `_probe_role_route` (`routers/llm.py:2662`) | `_probe_role_route` 根据 verified profile 或 third-party probe 后端测试一条 role route。 |
 | `_role_test_entries` (`routers/llm.py`) | `_role_test_entries` 合并 materialization report 与 role model_groups，确保 Role Test 覆盖所有配置候选，而不是只测已进入 fallback_chain 的 route。 |
 | `_capability_state/_capability_summary` (`routers/llm.py`) | `_capability_state/_capability_summary` 暴露 `unknown/callable_only/partial/known` 能力证据完整度，并汇总 thinking/tools/structured-output 支持状态。 |
@@ -99,9 +99,9 @@ N/A。
 | router 边界 | `llm.py` 混 API/service/probe/projection/job store ⚠️ | router 只保留 DTO/status/job 包装，内核 delegate 到 ③b/③a service |
 | Role Test persistence | Role Test 已覆盖全部配置候选，blocked skipped routes 可见，第三方失败写回 route/evidence 并可由 registry 投影。 | Role Test 最终状态来自 registry/evidence，而不是前端内存 |
 | capability DTO | Registry 已分离 availability state 与 `unknown/callable_only/partial/known` capability state。 | DTO 字段链接 gateway registry schema，不复制第二份真理 |
-| Copilot SDK test | `_probe_copilot_sdk_tool_call` 走 `AsyncAnthropic` ⚠️ | test 端点走真实 `ClaudeSDKClient` smoke |
+| Copilot SDK test | `_probe_copilot_sdk_tool_call` 走真实 `ClaudeSDKClient` 并实际请求探测。 | test 端点走真实 `ClaudeSDKClient` smoke |
 | DTO SSOT | 端点文档可能复制 gateway schema | DTO 字段链接 gateway registry schema，不复制第二份真理 |
-> **验"是否按目标改了"**：1. router 边界；2. Role Test persistence；3. capability DTO；4. Copilot SDK test；5. DTO SSOT。
+> **验"是否按目标改了"**：1. router 边界；2. Role Test persistence；3. capability DTO；4. Copilot SDK test（已完成并对齐）；5. DTO SSOT。
 
 ## 读代码主路径提示
 `apps/studio/backend/app/routers/llm.py:router` → `apps/studio/backend/app/routers/llm.py:get_llm_registry` → `apps/studio/backend/app/routers/llm.py:_probe_copilot_sdk_tool_call` → `apps/studio/backend/app/routers/copilot.py:copilot_ws` → `apps/studio/backend/app/routers/copilot.py:test_copilot_role_sdk`。

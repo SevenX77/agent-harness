@@ -33,6 +33,11 @@ class CopilotEventBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class CopilotEventThinking(CopilotEventBase):
+    type: Literal["thinking_delta"] = "thinking_delta"
+    content: str
+
+
 class CopilotEventText(CopilotEventBase):
     type: Literal["text_delta"] = "text_delta"
     content: str
@@ -62,6 +67,7 @@ class CopilotEventError(CopilotEventBase):
 
 CopilotEvent: TypeAlias = Annotated[
     CopilotEventText
+    | CopilotEventThinking
     | CopilotEventToolUseStart
     | CopilotEventToolUseResult
     | CopilotEventDone

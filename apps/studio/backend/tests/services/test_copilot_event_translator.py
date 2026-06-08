@@ -19,6 +19,7 @@ from claude_agent_sdk.types import (
     AssistantMessage,
     ResultMessage,
     TextBlock,
+    ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
 )
@@ -64,6 +65,24 @@ def test_translate_text_event() -> None:
     )
 
     assert events == [CopilotEventText(content="hello")]
+
+
+def test_translate_thinking_block_preserves_reasoning_stream() -> None:
+    """WS-5 RED (copilot-assist F1): the SDK ThinkingBlock must stream through as
+    a thinking event, not be silently dropped. Current translator yields []."""
+
+    events = copilot._translate_sdk_message(
+        AssistantMessage(
+            content=[ThinkingBlock(thinking="first I read SKILL.md, then I edit", signature="sig")],
+            model="claude",
+        ),
+        {},
+    )
+
+    assert len(events) == 1, "ThinkingBlock must not be dropped"
+    event = events[0]
+    assert getattr(event, "type", None) == "thinking_delta"
+    assert "first I read SKILL.md, then I edit" in getattr(event, "content", "")
 
 
 def test_translate_tool_use_start_event() -> None:

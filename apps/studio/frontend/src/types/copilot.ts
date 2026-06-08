@@ -33,6 +33,11 @@ export interface CopilotDoneEvent extends CopilotEventBase {
   type: 'done'
 }
 
+export interface CopilotThinkingDeltaEvent extends CopilotEventBase {
+  type: 'thinking_delta'
+  content: string
+}
+
 export interface CopilotErrorEvent extends CopilotEventBase {
   type: 'error'
   message: string
@@ -45,6 +50,7 @@ export interface CopilotUnknownEvent extends CopilotEventBase {
 
 export type CopilotEvent =
   | CopilotTextDeltaEvent
+  | CopilotThinkingDeltaEvent
   | CopilotToolUseStartEvent
   | CopilotToolUseResultEvent
   | CopilotDoneEvent
@@ -73,6 +79,9 @@ export function normalizeCopilotEvent(raw: unknown, id: string): CopilotEvent {
   }
 
   const record = raw as Record<string, unknown>
+  if (record.type === 'thinking_delta' && typeof record.content === 'string') {
+    return { id, type: 'thinking_delta', status: 'running', receivedAt, raw, content: record.content }
+  }
   if (record.type === 'text_delta' && typeof record.content === 'string') {
     return { id, type: 'text_delta', status: 'running', receivedAt, raw, content: record.content }
   }

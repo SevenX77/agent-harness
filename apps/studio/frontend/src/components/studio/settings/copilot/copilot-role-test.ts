@@ -5,7 +5,7 @@ import {
   type RoleTestProviderProgressStatus,
   type RoleTestResponse,
 } from "@/api/llm"
-import type { CopilotAgentStatus } from "./mock-copilot-data"
+type CopilotAgentStatus = string
 
 export type CopilotRouteJobStatus = CopilotAgentStatus | "testing"
 

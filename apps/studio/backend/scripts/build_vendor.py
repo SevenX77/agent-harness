@@ -12,8 +12,32 @@ from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 STUDIO_DIR = BACKEND_DIR.parent
-DEFAULT_REQUIREMENTS = BACKEND_DIR / "requirements.txt"
 DEFAULT_TARGET = STUDIO_DIR / "tauri" / "vendor" / "site-packages"
+
+
+def get_repo_root() -> Path:
+    return Path(__file__).resolve().parents[4]
+
+
+def get_locked_requirements() -> str:
+    command = [
+        "uv",
+        "export",
+        "--package",
+        "studio-backend",
+        "--no-dev",
+        "--no-hashes",
+        "--no-editable",
+        "--frozen",
+    ]
+    res = subprocess.run(
+        command,
+        cwd=str(get_repo_root()),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return res.stdout
 
 
 def _build_local_requirement_wheel(requirement_path: Path, wheelhouse: Path) -> Path:
@@ -33,14 +57,15 @@ def _build_local_requirement_wheel(requirement_path: Path, wheelhouse: Path) -> 
     return new_wheels[-1]
 
 
-def _resolved_requirements_text(requirements: Path, wheelhouse: Path) -> str:
-    base_dir = requirements.parent
+def resolve_local_paths(requirements_content: str, wheelhouse: Path) -> str:
+    repo_root = get_repo_root()
     resolved_lines: list[str] = []
-    for line in requirements.read_text(encoding="utf-8").splitlines():
+    for line in requirements_content.splitlines():
         stripped = line.strip()
         if stripped.startswith(("./", "../")):
             indentation = line[: len(line) - len(line.lstrip())]
-            wheel = _build_local_requirement_wheel((base_dir / stripped).resolve(), wheelhouse)
+            absolute_pkg_path = (repo_root / stripped).resolve()
+            wheel = _build_local_requirement_wheel(absolute_pkg_path, wheelhouse)
             resolved_lines.append(f"{indentation}{wheel}")
         else:
             resolved_lines.append(line)
@@ -54,18 +79,26 @@ def _assert_bundle_safe_vendor(target: Path) -> None:
         raise SystemExit(f"editable vendor paths are not bundle-safe: {names}")
 
 
-def install_vendor(requirements: Path, target: Path, *, clean: bool = True) -> None:
-    if not requirements.exists():
-        raise SystemExit(f"requirements file not found: {requirements}")
+def install_vendor(requirements: Path | None, target: Path, *, clean: bool = True) -> None:
     if clean:
         shutil.rmtree(target, ignore_errors=True)
     target.mkdir(parents=True, exist_ok=True)
+
+    if requirements is not None:
+        if not requirements.exists():
+            raise SystemExit(f"requirements file not found: {requirements}")
+        requirements_content = requirements.read_text(encoding="utf-8")
+        filename_prefix = requirements.name
+    else:
+        requirements_content = get_locked_requirements()
+        filename_prefix = "locked_requirements.txt"
+
     with tempfile.TemporaryDirectory(prefix="studio-vendor-requirements.") as temp_dir:
         wheelhouse = Path(temp_dir) / "wheels"
         wheelhouse.mkdir()
-        resolved_requirements = Path(temp_dir) / requirements.name
+        resolved_requirements = Path(temp_dir) / filename_prefix
         resolved_requirements.write_text(
-            _resolved_requirements_text(requirements, wheelhouse),
+            resolve_local_paths(requirements_content, wheelhouse),
             encoding="utf-8",
         )
         command = [
@@ -89,7 +122,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--requirements",
         type=Path,
-        default=DEFAULT_REQUIREMENTS,
+        default=None,
+        help="Path to manual requirements file, defaults to exporting locked packages.",
     )
     parser.add_argument(
         "--target",

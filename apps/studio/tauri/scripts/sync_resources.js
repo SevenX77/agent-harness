@@ -27,7 +27,7 @@ function copyBackend() {
   fs.rmSync(backendTarget, { recursive: true, force: true })
   fs.mkdirSync(backendTarget, { recursive: true })
   copyDir(path.join(backendSource, 'app'), path.join(backendTarget, 'app'))
-  for (const file of ['requirements.txt', 'pyproject.toml']) {
+  for (const file of ['pyproject.toml']) {
     fs.copyFileSync(path.join(backendSource, file), path.join(backendTarget, file))
   }
 }

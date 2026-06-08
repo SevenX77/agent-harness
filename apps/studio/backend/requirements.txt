@@ -1,10 +1,14 @@
+../../../packages/graph-agent-gateway
+../../../packages/graph-agent
 fastapi>=0.115
-uvicorn>=0.30
+uvicorn[standard]>=0.30
 pydantic>=2.12,<3.0
 pydantic-settings>=2.0.0
 aiofiles>=23.0.0
 sqlalchemy>=2.0.0
 watchdog>=4.0.0
+watchfiles>=1.1.1
 ptyprocess>=0.7.0
 python-multipart>=0.0.5
 starlette>=0.37.2
+claude-agent-sdk>=0.1.80

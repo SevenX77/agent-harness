@@ -105,6 +105,30 @@ class SubagentSpec(BaseModel):
     description: str = Field(min_length=1)
 
 
+class IterateAccumulateSpec(BaseModel):
+    """Declarative loop accumulator spec."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    var: str = Field(min_length=1)
+    init: Any
+    from_: str = Field(alias="from", min_length=1)
+    merge: Literal["append", "extend", "merge", "replace"]
+
+
+class IterateSpec(BaseModel):
+    """Unified MVP1 iterate declaration for graph or phase runtime."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["batch", "loop"]
+    over: str = Field(min_length=1)
+    item_var: str = Field(min_length=1)
+    range: tuple[int, int] | None = None
+    concurrency: int = Field(default=1, ge=1)
+    accumulate: IterateAccumulateSpec | None = None
+
+
 class GraphManifest(BaseModel):
     """Root V0.3.0 graph manifest parsed from ``GRAPH.md``."""
 
@@ -116,6 +140,7 @@ class GraphManifest(BaseModel):
     io: PhaseIOSchema
     phases: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    iterate: IterateSpec | None = None
 
 
 class BatchSpec(BaseModel):
@@ -138,6 +163,7 @@ class _BaseNodeAST(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     allow_sequential_overwrite: list[str] = Field(default_factory=list)
     batch: BatchSpec | None = None
+    iterate: IterateSpec | None = None
 
 
 class LogicNodeAST(_BaseNodeAST):
@@ -218,6 +244,8 @@ __all__ = [
     "ExampleSpec",
     "GraphManifest",
     "GraphPhaseRef",
+    "IterateAccumulateSpec",
+    "IterateSpec",
     "LogicNodeAST",
     "PhaseAST",
     "PhaseIOSchema",

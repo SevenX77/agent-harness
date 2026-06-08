@@ -88,6 +88,7 @@ opencode.json
 
 # Workspaces
 workspaces/
+.worktrees/
 
 # Playwright MCP
 .playwright-mcp/

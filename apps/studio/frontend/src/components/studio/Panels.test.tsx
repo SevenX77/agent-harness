@@ -12,18 +12,20 @@ describe('PropertiesPanel', () => {
     expect(html).toContain('Select a node to inspect')
   })
 
-  it('renders selected phase metadata in the sidebar panel', () => {
+  it('renders an mvp1 logic phase without the legacy python_callable editor', () => {
     const html = renderToStaticMarkup(
       <PropertiesPanel
         skillDetail={skillDetailWithFiles({
           'phases/setup/LOGIC.md': [
             '---',
             'name: setup',
-            'mode: logic',
+            'io:',
+            '  inputs: {type: object, properties: {}}',
+            '  outputs: {type: object, properties: {}}',
+            'actions:',
+            '  - prepare',
             '---',
-            '<python_callable>',
-            'prepare',
-            '</python_callable>',
+            '<action>prepare</action>',
             '',
             'Body',
           ].join('\n'),
@@ -43,35 +45,36 @@ describe('PropertiesPanel', () => {
       />,
     )
 
+    // Node identity still renders.
     expect(html).toContain('setup')
     expect(html).toContain('LOGIC')
-    expect(html).toContain('Python callable')
-    expect(html).not.toContain('System prompt')
     expect(html).toContain('input')
-    expect(html).toContain('prepare')
     expect(html).toContain('phases/setup/LOGIC.md')
+    // MVP1: legacy logic/agent editors must not be the editable main path.
+    expect(html).not.toContain('Python callable')
+    expect(html).not.toContain('System prompt')
   })
 
-  it('renders agent frontmatter fields for skill phase files', () => {
+  it('renders an mvp1 agent phase without legacy system_prompt/exit_contract editors', () => {
     const html = renderToStaticMarkup(
       <PropertiesPanel
         skillDetail={skillDetailWithFiles({
           'phases/review/SKILL.md': [
             '---',
             'name: review',
-            'mode: skill',
+            'io:',
+            '  inputs: {type: object, properties: {}}',
+            '  outputs: {type: object, properties: {}}',
             'tools:',
             '  - read_file',
             '---',
-            '<system_prompt>',
-            'Review the draft.',
-            '</system_prompt>',
+            '<role>',
+            'Senior editor.',
+            '</role>',
             '',
-            '<exit_contract>',
-            'Call finish_task.',
-            '</exit_contract>',
-            '',
-            'Body',
+            '<goal>',
+            'Decide if the draft ships.',
+            '</goal>',
           ].join('\n'),
         })}
         selectedNode={{
@@ -89,21 +92,25 @@ describe('PropertiesPanel', () => {
       />,
     )
 
-    expect(html).toContain('System prompt')
-    expect(html).toContain('Exit contract')
-    expect(html).toContain('Tools')
+    expect(html).toContain('review')
+    expect(html).toContain('phases/review/SKILL.md')
+    // MVP1 (FROZEN 05-agent): the legacy prompt-shell editors are forbidden.
+    expect(html).not.toContain('System prompt')
+    expect(html).not.toContain('Exit contract')
     expect(html).not.toContain('Python callable')
   })
 
-  it('renders subgraph frontmatter fields for subgraph phase files', () => {
+  it('renders an mvp1 subgraph phase by path, not a legacy target_skill editor', () => {
     const html = renderToStaticMarkup(
       <PropertiesPanel
         skillDetail={skillDetailWithFiles({
           'phases/child/SUBGRAPH.md': [
             '---',
             'name: child',
-            'mode: subgraph',
-            'target_skill: child.skill',
+            'path: ./subskills/child',
+            'io:',
+            '  inputs: {type: object, properties: {}}',
+            '  outputs: {type: object, properties: {}}',
             '---',
             'Body',
           ].join('\n'),
@@ -123,9 +130,10 @@ describe('PropertiesPanel', () => {
       />,
     )
 
-    expect(html).toContain('Target skill')
+    // Studio D7 upper authority: subgraph is referenced by local path.
+    expect(html).toContain('./subskills/child')
+    expect(html).not.toContain('Target skill')
     expect(html).not.toContain('System prompt')
-    expect(html).not.toContain('phase-tools')
   })
 
   it('disables frontmatter editing when phase YAML is invalid', () => {

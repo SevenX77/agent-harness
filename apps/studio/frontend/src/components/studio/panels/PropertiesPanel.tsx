@@ -389,54 +389,23 @@ function PhaseFrontmatterForm({
               </SelectContent>
             </Select>
           </Field>
-          {kind === "logic" ? (
-            <Field>
-              <FieldLabel htmlFor="phase-python-callable">Python callable</FieldLabel>
-              <Input
-                id="phase-python-callable"
-                value={value.pythonCallable}
-                onChange={(event) => onFieldChange("pythonCallable", event.currentTarget.value)}
-              />
-              <FieldDescription>Function name exposed by this LOGIC phase.</FieldDescription>
-            </Field>
-          ) : null}
           {kind === "agent" ? (
-            <>
-              <Field>
-                <FieldLabel htmlFor="phase-system-prompt">System prompt</FieldLabel>
-                <Textarea
-                  id="phase-system-prompt"
-                  value={value.systemPrompt}
-                  onChange={(event) => onFieldChange("systemPrompt", event.currentTarget.value)}
-                  rows={5}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="phase-exit-contract">Exit contract</FieldLabel>
-                <Textarea
-                  id="phase-exit-contract"
-                  value={value.exitContract}
-                  onChange={(event) => onFieldChange("exitContract", event.currentTarget.value)}
-                  rows={4}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="phase-tools">Tools</FieldLabel>
-                <Textarea
-                  id="phase-tools"
-                  value={value.tools}
-                  onChange={(event) => onFieldChange("tools", event.currentTarget.value)}
-                  rows={4}
-                />
-                <FieldDescription>One tool name per line.</FieldDescription>
-              </Field>
-            </>
+            <Field>
+              <FieldLabel htmlFor="phase-tools">Tools</FieldLabel>
+              <Textarea
+                id="phase-tools"
+                value={value.tools}
+                onChange={(event) => onFieldChange("tools", event.currentTarget.value)}
+                rows={4}
+              />
+              <FieldDescription>One tool name per line.</FieldDescription>
+            </Field>
           ) : null}
           {kind === "subgraph" ? (
             <Field>
-              <FieldLabel htmlFor="phase-target-skill">Target skill</FieldLabel>
+              <FieldLabel htmlFor="phase-path">Path</FieldLabel>
               <Input
-                id="phase-target-skill"
+                id="phase-path"
                 value={value.targetSkill}
                 onChange={(event) => onFieldChange("targetSkill", event.currentTarget.value)}
               />

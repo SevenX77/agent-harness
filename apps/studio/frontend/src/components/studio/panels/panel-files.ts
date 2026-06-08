@@ -68,30 +68,17 @@ export function manifestFiles(skillDetail?: SkillDetail, selectedNode?: { id: st
 }
 
 export function inputFiles(skillDetail?: SkillDetail): FileMeta[] {
-  const manifest = skillDetail?.manifest as unknown as {
-    io?: {
-      inputs?: { properties?: Record<string, unknown> } | Record<string, unknown>
-      outputs?: { properties?: Record<string, unknown> } | Record<string, unknown>
-    }
+  if (!skillDetail?.files) {
+    return []
   }
-  const io = manifest?.io
-  const inputs = (io?.inputs && typeof io.inputs === "object" && "properties" in io.inputs)
-    ? (io.inputs.properties as Record<string, unknown>)
-    : (io?.inputs as Record<string, unknown>) ?? {}
-  const outputs = (io?.outputs && typeof io.outputs === "object" && "properties" in io.outputs)
-    ? (io.outputs.properties as Record<string, unknown>)
-    : (io?.outputs as Record<string, unknown>) ?? {}
-
-  return [
-    {
-      path: "input/schema.json",
-      language: "json",
-      content: JSON.stringify({ inputs, outputs }, null, 2),
-    },
-    {
-      path: "input/sample.json",
-      language: "json",
-      content: JSON.stringify(Object.fromEntries(Object.keys(inputs).map((name) => [name, ""])), null, 2),
-    },
-  ]
+  return Object.keys(skillDetail.files)
+    .filter((path) => {
+      return (
+        path === "input/schema.json" ||
+        path === "input/sample.json" ||
+        path.startsWith(".workspace/test_inputs/")
+      )
+    })
+    .sort()
+    .map((path) => fileFromDetail(skillDetail, path))
 }

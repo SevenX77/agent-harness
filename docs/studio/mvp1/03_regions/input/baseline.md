@@ -10,7 +10,7 @@ Source workflows: `01_workflows/02_authoring.md`, `01_workflows/04_run-and-verif
 |---|---|---|
 | Panel route | `Panels` routes `activePanel === "input"` to `InputPanel`. | `apps/studio/frontend/src/components/studio/panels/Panels.tsx:34` |
 | Title | Panel title is still "Input". | `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:72`, `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:78` |
-| File rows | Panel projects `input/sample.json` and `input/schema.json` through `inputFiles`. | `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:73`, `apps/studio/frontend/src/components/studio/panels/panel-files.ts:70` |
+| File rows | Panel lists real test-inputs and schema files from the workspace. | `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:73`, `apps/studio/frontend/src/components/studio/panels/panel-files.ts:70` |
 | Schema inference | User can paste/drop JSON and see inferred schema, but there is no writeback. | `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:18`, `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:28` |
 | File open | Input file rows open editor through `onFileOpen`. | `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:83`, `apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:86` |
 | Backend validation | Backend validates input data/file against schema. | `apps/studio/backend/app/routers/skills.py:454` |
@@ -20,7 +20,7 @@ Source workflows: `01_workflows/02_authoring.md`, `01_workflows/04_run-and-verif
 ## Current Region Ownership
 
 - Owns: target i/o panel for test input files, schema, per-node i/o config, output artifacts, golden JSON/settings, single/batch run input selection.
-- Current code only owns: input file rows and local schema inference demo.
+- Current code only owns: input file rows (based on real workspace files) and local schema inference demo.
 
 ## Known Drift
 

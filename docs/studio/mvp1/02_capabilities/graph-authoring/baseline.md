@@ -21,12 +21,10 @@ Source workflows: `01_workflows/02_authoring.md`, `01_workflows/03_compile.md`.
 
 ## Current Coverage
 
-- live: render, select, double-click open, connect/disconnect persistence, cycle overlay, add phase command.
-- stale: phase type inference still reads `mode`/old subgraph fields.
-- placeholder: subgraph inline rows, edge context JSON, status derivation from run events.
+- live: render, select, double-click open, connect/disconnect persistence, cycle overlay, add phase command, phase type inference derived from file names, subgraph path rendering and recovery.
+- placeholder: edge context JSON, status derivation from run events.
 
 ## Known Drift
 
-- The target graph spec says node type comes from phase file kind; current authoring helpers still generate old body/frontmatter shapes (`apps/studio/frontend/src/components/GraphCanvas/canvas-authoring.ts:143`).
 - The target trace/dot model needs real transition state; current edge panel is mock (`apps/studio/frontend/src/components/edges/ContextEdge.tsx:30`).
 - D12 says writes should route through Rust/native-fs; current graph persist uses the Python file API (`apps/studio/frontend/src/components/studio/Workspace.tsx:206`).

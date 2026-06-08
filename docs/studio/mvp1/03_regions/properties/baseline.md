@@ -24,5 +24,4 @@ Source workflows: `01_workflows/02_authoring.md`, `01_workflows/03_compile.md`, 
 
 ## Known Drift
 
-- Workflow says current Properties form is stale and must rebuild by node-type whitelist (`docs/studio/mvp1/01_workflows/02_authoring.md:28`).
 - Workflow says selected-edge JSON dump should be cleaned up and dot trace moved to trace-observability (`docs/studio/mvp1/01_workflows/04_run-and-verify.md:99`).

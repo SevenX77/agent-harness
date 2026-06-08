@@ -209,7 +209,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     })
     toast.success("Saved phase properties")
     void mutateSkillDetail()
-  }, [currentSkillId, mutateSkillDetail])
+  }, [currentSkillId, doWriteSkillFile, mutateSkillDetail])
 
   const handleCreatePhase = useCallback(async (kind: NewPhaseKind) => {
     if (!currentSkillId || !skillDetail) {
@@ -221,6 +221,11 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     const graphHash = graphContent === undefined ? null : await sha256Hex(graphContent)
     try {
       await doWriteSkillFile(draft.filePath, draft.fileContent)
+      if (draft.extraFiles && draft.extraFiles.length > 0) {
+        for (const extra of draft.extraFiles) {
+          await doWriteSkillFile(extra.filePath, extra.fileContent)
+        }
+      }
       const serialized = await serializeSkillGraph(currentSkillId, draft.phases, graphHash)
       await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash)
       toast.success(`Created ${draft.phaseId}`)
@@ -229,7 +234,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       toast.error(error instanceof Error ? error.message : "Could not create phase")
       void mutateSkillDetail()
     }
-  }, [currentSkillId, mutateSkillDetail, skillDetail])
+  }, [currentSkillId, doWriteSkillFile, mutateSkillDetail, skillDetail])
 
   const handlePersistConnection = useCallback(async (connection: Connection) => {
     if (!currentSkillId || !skillDetail) {
@@ -249,7 +254,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       void mutateSkillDetail()
       throw error
     }
-  }, [currentSkillId, mutateSkillDetail, skillDetail])
+  }, [currentSkillId, doWriteSkillFile, mutateSkillDetail, skillDetail])
 
   const handleDisconnectConnection = useCallback(async (connection: { source: string; target: string }) => {
     if (!currentSkillId || !skillDetail) {
@@ -269,7 +274,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       void mutateSkillDetail()
       throw error
     }
-  }, [currentSkillId, mutateSkillDetail, skillDetail])
+  }, [currentSkillId, doWriteSkillFile, mutateSkillDetail, skillDetail])
 
   const setFileInFlight = useCallback((side: EditorSide, active: boolean) => {
     setInFlight((current) => ({ ...current, [side]: active }))

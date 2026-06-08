@@ -20,11 +20,7 @@ Source workflow: `01_workflows/02_authoring.md`.
 
 ## Current Coverage
 
-- live: selected-node Properties form, phase file read/save, editor synchronization.
-- stale: field set, node kind inference, subgraph target field, XML body blocks.
-- missing: current three node-type field whitelist, i/o output artifact settings, L3 step editing, golden output settings.
+- live: selected-node Properties form, phase file read/save, editor synchronization, three node-type fields whitelist, subgraph path reference, XML body block stripping.
+- missing: i/o output artifact settings, L3 step editing, golden output settings.
 
 ## Known Drift
-
-- Workflow calls the current Properties form stale and requires a field whitelist rebuild (`docs/studio/mvp1/01_workflows/02_authoring.md:28`, `docs/studio/mvp1/01_workflows/02_authoring.md:29`).
-- Current helpers still write old fields that the target authoring flow should not expose (`apps/studio/frontend/src/components/GraphCanvas/canvas-authoring.ts:143`).

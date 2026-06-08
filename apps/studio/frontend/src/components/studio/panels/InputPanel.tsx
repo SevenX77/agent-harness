@@ -73,6 +73,9 @@ export function InputPanel({ skillDetail, onFileOpen }: InputPanelProps) {
   const files = inputFiles(skillDetail)
   const sample = files.find((file) => file.path === "input/sample.json")?.content ?? "{}"
 
+  const schemaFile = files.find((file) => file.path === "input/schema.json")
+  const inputDataFiles = files.filter((file) => file.path !== "input/schema.json")
+
   return (
     <div className="flex h-full flex-col bg-background">
       <PanelHeader title="Input" />
@@ -80,10 +83,19 @@ export function InputPanel({ skillDetail, onFileOpen }: InputPanelProps) {
       <ScrollArea className="flex-1">
         <div className="space-y-3 px-2 py-2 text-xs">
           <SectionHeading label="Input Files" />
-          <FileRow file={files[1]} onOpen={onFileOpen} />
+          {inputDataFiles.map((file) => (
+            <FileRow key={file.path} file={file} onOpen={onFileOpen} />
+          ))}
+          {inputDataFiles.length === 0 && (
+            <div className="text-muted-foreground p-2 text-center text-xs">No input files found.</div>
+          )}
 
-          <SectionHeading label="Schema" />
-          <FileRow file={files[0]} onOpen={onFileOpen} />
+          {schemaFile && (
+            <>
+              <SectionHeading label="Schema" />
+              <FileRow file={schemaFile} onOpen={onFileOpen} />
+            </>
+          )}
           <SchemaInferPanel initialJson={sample} />
         </div>
       </ScrollArea>

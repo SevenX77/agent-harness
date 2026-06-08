@@ -5,17 +5,30 @@ import {
   phaseFrontmatterToForm,
 } from './phase-frontmatter'
 
-describe('phase frontmatter helpers', () => {
-  it('updates supported logic fields while preserving unsupported fields and body', () => {
+// MVP1 Properties whitelist contract (FROZEN skill-spec + engine MVP1 + Studio D7/GE3):
+// - node type comes from the file kind, never a `mode:` field; Properties must never write `mode:`.
+// - legacy editable fields (<python_callable>, <system_prompt>, <exit_contract>, bare target_skill)
+//   are drift and must not be the editable main path.
+// - unknown frontmatter keys and the existing body must round-trip untouched.
+describe('phase frontmatter helpers (MVP1 whitelist)', () => {
+  it('edits a logic node without emitting a mode field or a python_callable shell', () => {
     const source = [
       '---',
       'name: draft',
-      'mode: logic',
+      'io:',
+      '  inputs:',
+      '    type: object',
+      '    properties:',
+      '      raw_text: { type: string }',
+      '  outputs:',
+      '    type: object',
+      '    properties:',
+      '      normalized_text: { type: string }',
+      'actions:',
+      '  - normalize_whitespace',
       'x_internal: keep-me',
       '---',
-      '<python_callable>',
-      'old_callable',
-      '</python_callable>',
+      '<action>normalize_whitespace</action>',
       '',
       '# Draft',
       '',
@@ -27,33 +40,46 @@ describe('phase frontmatter helpers', () => {
     if (!parsed.ok) return
 
     const form = phaseFrontmatterToForm(parsed.frontmatter, parsed.body)
-    const next = applyPhaseFrontmatterForm(source, {
-      ...form,
-      name: 'outline',
-      pythonCallable: 'new_callable',
-    })
+    const next = applyPhaseFrontmatterForm(source, { ...form, name: 'outline' })
 
     expect(next.ok).toBe(true)
     if (!next.ok) return
 
     expect(next.markdown).toContain('name: outline')
-    expect(next.markdown).toContain('mode: logic')
+    // MVP1: no synthetic `mode:` discriminator, no legacy python_callable shell.
+    expect(next.markdown).not.toMatch(/^mode:/m)
+    expect(next.markdown).not.toContain('<python_callable>')
+    // Real logic fields and unknown keys survive the round-trip.
+    expect(next.markdown).toMatch(/^actions:/m)
     expect(next.markdown).toContain('x_internal: keep-me')
-    expect(next.markdown).toContain('<python_callable>\nnew_callable\n</python_callable>')
-    expect(next.markdown).not.toContain('old_callable')
-    expect(next.markdown.endsWith('# Draft\n\nKeep this markdown body.')).toBe(true)
+    expect(next.markdown).toContain('<action>normalize_whitespace</action>')
+    expect(next.markdown).toContain('Keep this markdown body.')
   })
 
-  it('updates supported skill fields and converts textarea lines to tools', () => {
+  it('edits an agent node via role/goal body, never mode/system_prompt/exit_contract', () => {
     const source = [
       '---',
       'name: review',
-      'mode: skill',
+      'io:',
+      '  inputs:',
+      '    type: object',
+      '    properties:',
+      '      draft: { type: string }',
+      '  outputs:',
+      '    type: object',
+      '    properties:',
+      '      verdict: { type: string }',
       'tools:',
-      '  - read_file',
-      'unsafe_extra: true',
+      '  - read_reference',
+      'x_internal: keep-me',
       '---',
-      'Body',
+      '<role>',
+      'Senior editor.',
+      '</role>',
+      '',
+      '<goal>',
+      'Decide if the draft ships.',
+      '</goal>',
     ].join('\n')
 
     const parsed = parsePhaseFrontmatter(source)
@@ -61,33 +87,36 @@ describe('phase frontmatter helpers', () => {
     if (!parsed.ok) return
 
     const form = phaseFrontmatterToForm(parsed.frontmatter, parsed.body)
-    const next = applyPhaseFrontmatterForm(source, {
-      ...form,
-      systemPrompt: 'Review the draft.',
-      exitContract: 'Call finish_task.',
-      tools: 'read_file\nwrite_file',
-    })
+    const next = applyPhaseFrontmatterForm(source, { ...form })
 
     expect(next.ok).toBe(true)
     if (!next.ok) return
 
-    expect(next.markdown).toContain('<system_prompt>\nReview the draft.\n</system_prompt>')
-    expect(next.markdown).toContain('<exit_contract>\nCall finish_task.\n</exit_contract>')
-    expect(next.markdown).not.toContain('llm_role')
-    expect(next.markdown).not.toContain('agent_tools')
-    expect(next.markdown).toContain('  - read_file')
-    expect(next.markdown).toContain('  - write_file')
-    expect(next.markdown).toContain('unsafe_extra: true')
+    expect(next.markdown).not.toMatch(/^mode:/m)
+    expect(next.markdown).not.toContain('<system_prompt>')
+    expect(next.markdown).not.toContain('<exit_contract>')
+    // MVP1 agent business identity lives in <role>/<goal>, which must be preserved.
+    expect(next.markdown).toContain('<role>')
+    expect(next.markdown).toContain('<goal>')
+    expect(next.markdown).toContain('x_internal: keep-me')
   })
 
-  it('updates subgraph refs without adding agent-only fields', () => {
+  it('edits a subgraph node by local path, never a bare target_skill or mode', () => {
     const source = [
       '---',
       'name: child',
-      'mode: subgraph',
-      'target_skill: old.child',
+      'path: ./subskills/review',
+      'io:',
+      '  inputs:',
+      '    type: object',
+      '    properties:',
+      '      segments: { type: array }',
+      '  outputs:',
+      '    type: object',
+      '    properties:',
+      '      review_score: { type: number }',
       '---',
-      'Body',
+      '# child',
     ].join('\n')
 
     const parsed = parsePhaseFrontmatter(source)
@@ -95,20 +124,16 @@ describe('phase frontmatter helpers', () => {
     if (!parsed.ok) return
 
     const form = phaseFrontmatterToForm(parsed.frontmatter, parsed.body)
-    const next = applyPhaseFrontmatterForm(source, {
-      ...form,
-      targetSkill: 'new.child',
-      systemPrompt: 'ignored',
-      tools: 'ignored_tool',
-    })
+    const next = applyPhaseFrontmatterForm(source, { ...form })
 
     expect(next.ok).toBe(true)
     if (!next.ok) return
 
-    expect(next.markdown).toContain('target_skill: new.child')
-    expect(next.markdown).not.toContain('sub_skill_ref')
-    expect(next.markdown).not.toContain('tools:')
-    expect(next.markdown).not.toContain('<system_prompt>')
+    // Studio D7 is the upper authority: subgraph is referenced by path, not a registry id.
+    expect(next.markdown).toMatch(/^path:/m)
+    expect(next.markdown).toContain('./subskills/review')
+    expect(next.markdown).not.toMatch(/^target_skill:/m)
+    expect(next.markdown).not.toMatch(/^mode:/m)
   })
 
   it('does not generate replacement markdown when YAML is invalid', () => {

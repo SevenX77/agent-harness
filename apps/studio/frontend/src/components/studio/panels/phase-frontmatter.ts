@@ -79,7 +79,7 @@ export function phaseFrontmatterToForm(frontmatter: Partial<PhaseFrontmatter>, b
     systemPrompt: xmlBlockValue(body, 'system_prompt'),
     exitContract: xmlBlockValue(body, 'exit_contract'),
     tools: linesValue(frontmatter.tools),
-    targetSkill: stringValue(frontmatter.target_skill),
+    targetSkill: stringValue(frontmatter.path) || stringValue(frontmatter.target_skill),
   }
 }
 
@@ -97,14 +97,13 @@ export function applyPhaseFrontmatterForm(
   }
 
   const nextFrontmatter = frontmatterFromForm(parsed.frontmatter, form)
-  const kind = inferKind({ ...nextFrontmatter, mode: form.mode, target_skill: form.targetSkill })
   const dumped = yaml.dump(nextFrontmatter, {
     lineWidth: 120,
     noRefs: true,
     sortKeys: false,
     styles: { '!!null': 'empty' },
   }).trimEnd()
-  const nextBody = bodyFromForm(parsed.body, form, kind)
+  const nextBody = bodyFromForm(parsed.body)
   const body = nextBody.length > 0 ? `\n${nextBody}` : '\n'
   return { ok: true, markdown: `---\n${dumped}\n---${body}` }
 }
@@ -143,10 +142,10 @@ function splitMarkdownFrontmatter(markdown: string):
 
 function frontmatterFromForm(frontmatter: PhaseFrontmatter, form: PhaseFrontmatterFormData): PhaseFrontmatter {
   const next: PhaseFrontmatter = { ...frontmatter }
-  const kind = inferKind({ ...frontmatter, mode: form.mode, target_skill: form.targetSkill })
+  const kind = inferKind({ ...frontmatter, mode: form.mode, target_skill: form.targetSkill, path: form.targetSkill })
 
   setOptionalString(next, 'name', form.name)
-  setOptionalString(next, 'mode', form.mode)
+  delete next.mode
 
   if (kind === 'logic') {
     delete next.validator
@@ -159,11 +158,13 @@ function frontmatterFromForm(frontmatter: PhaseFrontmatter, form: PhaseFrontmatt
     delete next.sub_skill_ref
     delete next.tools
     delete next.target_skill
+    delete next.path
     return next
   }
 
   if (kind === 'subgraph') {
-    setOptionalString(next, 'target_skill', form.targetSkill)
+    setOptionalString(next, 'path', form.targetSkill)
+    delete next.target_skill
     delete next.validator
     delete next.execute_steps
     delete next.llm_role
@@ -186,12 +187,13 @@ function frontmatterFromForm(frontmatter: PhaseFrontmatter, form: PhaseFrontmatt
   delete next.agent_tools
   delete next.sub_skill_ref
   delete next.target_skill
+  delete next.path
   return next
 }
 
 function inferKind(frontmatter: Partial<PhaseFrontmatter>): PhaseFrontmatterKind {
   const mode = stringValue(frontmatter.mode)
-  if (mode === 'subgraph' || stringValue(frontmatter.target_skill) || stringValue(frontmatter.sub_skill_ref)) {
+  if (mode === 'subgraph' || stringValue(frontmatter.path) || stringValue(frontmatter.target_skill) || stringValue(frontmatter.sub_skill_ref)) {
     return 'subgraph'
   }
   if (mode === 'skill' || mode === 'llm' || mode === 'agent') {
@@ -200,34 +202,8 @@ function inferKind(frontmatter: Partial<PhaseFrontmatter>): PhaseFrontmatterKind
   return 'logic'
 }
 
-function bodyFromForm(body: string, form: PhaseFrontmatterFormData, kind: PhaseFrontmatterKind): string {
-  const next = removeXmlBlock(removeXmlBlock(removeXmlBlock(body, 'python_callable'), 'system_prompt'), 'exit_contract').trimStart()
-  if (kind === 'logic') {
-    return prependXmlBlocks(next, [['python_callable', form.pythonCallable]])
-  }
-  if (kind === 'agent') {
-    return prependXmlBlocks(next, [
-      ['system_prompt', form.systemPrompt],
-      ['exit_contract', form.exitContract],
-    ])
-  }
-  return next
-}
-
-function prependXmlBlocks(body: string, blocks: Array<[tag: string, value: string]>): string {
-  const rendered = blocks
-    .map(([tag, value]) => xmlBlock(tag, value))
-    .filter(Boolean)
-    .join('\n\n')
-  if (!rendered) {
-    return body
-  }
-  return body ? `${rendered}\n\n${body}` : `${rendered}\n`
-}
-
-function xmlBlock(tag: string, value: string): string {
-  const trimmed = value.trim()
-  return trimmed ? `<${tag}>\n${trimmed}\n</${tag}>` : ''
+function bodyFromForm(body: string): string {
+  return removeXmlBlock(removeXmlBlock(removeXmlBlock(body, 'python_callable'), 'system_prompt'), 'exit_contract').trimStart()
 }
 
 function xmlBlockValue(body: string, tag: string): string {

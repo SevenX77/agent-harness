@@ -12,6 +12,7 @@ export interface PhaseDraft {
   fileContent: string
   phaseRef: SerializableGraphPhaseRef
   phases: SerializableGraphPhaseRef[]
+  extraFiles?: Array<{ filePath: string; fileContent: string }>
 }
 
 export type ConnectPhaseRefsResult =
@@ -21,6 +22,25 @@ export type ConnectPhaseRefsResult =
     reason: 'global-node' | 'self-dependency' | 'unknown-phase' | 'duplicate-dependency' | 'missing-dependency'
     message: string
   }
+
+function deriveModeFromSrcAndTopology(src: string, detail: SkillDetail | undefined, topologyMode: string | undefined): GraphPhaseMode {
+  if (src.endsWith('/SKILL.md')) return 'skill'
+  if (src.endsWith('/LOGIC.md')) return 'logic'
+  if (src.endsWith('/SUBGRAPH.md')) return 'subgraph'
+
+  if (detail?.files) {
+    const normalizedSrc = src.replace(/\/$/, '')
+    if (`${normalizedSrc}/SKILL.md` in detail.files) return 'skill'
+    if (`${normalizedSrc}/LOGIC.md` in detail.files) return 'logic'
+    if (`${normalizedSrc}/SUBGRAPH.md` in detail.files) return 'subgraph'
+  }
+
+  if (topologyMode === 'agent' || topologyMode === 'skill') return 'skill'
+  if (topologyMode === 'subgraph') return 'subgraph'
+  if (topologyMode === 'logic') return 'logic'
+
+  return 'logic'
+}
 
 export function phaseRefsFromSkillDetail(detail: SkillDetail | undefined): SerializableGraphPhaseRef[] {
   if (!detail?.manifest) {
@@ -36,7 +56,7 @@ export function phaseRefsFromSkillDetail(detail: SkillDetail | undefined): Seria
   return phaseIds.map((phaseId) => {
     const topology = topologyById.get(phaseId)
     const src = topology?.src ?? `phases/${phaseId}`
-    const mode = normalizePhaseMode(topology?.mode) ?? modeFromSrc(src)
+    const mode = deriveModeFromSrcAndTopology(src, detail, topology?.mode)
     return {
       id: phaseId,
       src,
@@ -56,13 +76,29 @@ export function createPhaseDraft(detail: SkillDetail | undefined, kind: NewPhase
     depends_on: [],
     mode: kind,
   }
-  return {
+  const draft: PhaseDraft = {
     phaseId,
     filePath,
     fileContent: defaultPhaseMarkdown(phaseId, kind, skillId),
     phaseRef,
     phases: [...phases, phaseRef],
   }
+
+  if (kind === 'logic') {
+    const actionName = phaseId.replaceAll('-', '_')
+    draft.extraFiles = [
+      {
+        filePath: `phases/${phaseId}/actions/${actionName}.py`,
+        fileContent: [
+          `def ${actionName}(inputs) -> dict:`,
+          '    return {}',
+          '',
+        ].join('\n'),
+      },
+    ]
+  }
+
+  return draft
 }
 
 export function connectPhaseRefs(
@@ -145,17 +181,22 @@ export function defaultPhaseMarkdown(phaseId: string, kind: NewPhaseKind, skillI
     return [
       '---',
       `name: ${phaseId}`,
-      'mode: skill',
+      'io:',
+      '  inputs:',
+      '    type: object',
+      '    properties: {}',
+      '  outputs:',
+      '    type: object',
+      '    properties: {}',
       'tools: []',
       '---',
+      '<role>',
+      `Describe the role of ${phaseId}.`,
+      '</role>',
       '',
-      '<system_prompt>',
-      `Describe what ${phaseId} should do.`,
-      '</system_prompt>',
-      '',
-      '<exit_contract>',
-      'Call finish_task when this phase is complete.',
-      '</exit_contract>',
+      '<goal>',
+      `Describe the goal of ${phaseId}.`,
+      '</goal>',
       '',
       `# ${phaseId}`,
       '',
@@ -165,23 +206,28 @@ export function defaultPhaseMarkdown(phaseId: string, kind: NewPhaseKind, skillI
     return [
       '---',
       `name: ${phaseId}`,
-      'mode: subgraph',
-      `target_skill: ${skillId}`,
+      `path: ${skillId}`,
       '---',
       '',
       `# ${phaseId}`,
       '',
     ].join('\n')
   }
+  const actionName = phaseId.replaceAll('-', '_')
   return [
     '---',
     `name: ${phaseId}`,
-    'mode: logic',
+    'io:',
+    '  inputs:',
+    '    type: object',
+    '    properties: {}',
+    '  outputs:',
+    '    type: object',
+    '    properties: {}',
+    'actions:',
+    `  - ${actionName}`,
     '---',
-    '',
-    '<python_callable>',
-    phaseId.replaceAll('-', '_'),
-    '</python_callable>',
+    `<action>${actionName}</action>`,
     '',
     `# ${phaseId}`,
     '',
@@ -205,23 +251,6 @@ function basePhaseId(kind: NewPhaseKind): string {
     return 'agent'
   }
   return kind
-}
-
-function modeFromSrc(src: string): GraphPhaseMode {
-  if (src.endsWith('/SKILL.md')) {
-    return 'skill'
-  }
-  if (src.endsWith('/SUBGRAPH.md')) {
-    return 'subgraph'
-  }
-  return 'logic'
-}
-
-function normalizePhaseMode(mode: string | undefined): GraphPhaseMode | null {
-  if (mode === 'skill' || mode === 'subgraph' || mode === 'logic') {
-    return mode
-  }
-  return null
 }
 
 function isGlobalNode(id: string): boolean {

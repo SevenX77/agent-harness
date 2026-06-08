@@ -1410,7 +1410,6 @@ def _invoke_subagent_tool_t21(
         retry_counts = {}
         flow["subagent_validation_retries"] = retry_counts
     retry_count = int(retry_counts.get(tool_name, 0)) + 1
-    retry_counts[tool_name] = retry_count
     try:
         validation = validate_subagent_tool_args(
             tool_name=tool_name,
@@ -1432,7 +1431,9 @@ def _invoke_subagent_tool_t21(
         )
         raise GraphAgentFatalError(str(exc)) from exc
     if isinstance(validation, SubagentValidationFailure):
+        retry_counts[tool_name] = retry_count
         return validation.to_tool_result()
+    retry_counts.pop(tool_name, None)
     if runtime is not None and state is not None:
         return {
             "ok": True,

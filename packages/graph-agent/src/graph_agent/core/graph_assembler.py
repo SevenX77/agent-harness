@@ -27,7 +27,6 @@ from graph_agent.callbacks.events import (
     PhaseStartEvent,
     ToolCallEvent,
 )
-from graph_agent.cognitive.context_facade import Context
 from graph_agent.cognitive.critic import (
     CriticVerdict,
     FakeCriticClient,
@@ -339,18 +338,14 @@ def _build_logic_node(
 
     def _logic_node(state: WorkflowState) -> dict[str, Any]:
         before = phase_inputs_from_state(state)
-        data = dict(before)
-        ctx = Context(data, phase_id=phase_id, run_id=state["flow"].run_id or "default")
-        updates = _dict_delta(before, data)
+        updates: dict[str, Any] = {}
         for action_name in action_names:
             action = compiled.actions.resolve(phase_id, action_name)
             action_def = compiled.actions.for_phase(phase_id).get(action_name)
             action_path = action_def.path if action_def is not None else Path("<unknown>")
             action_line = getattr(getattr(action, "__code__", None), "co_firstlineno", 1)
-            result = action(ctx)
-            delta = _dict_delta(before | updates, data)
-            _validate_logic_update_keys(delta, output_schema_keys, action_path, action_line)
-            updates.update(delta)
+            action_ctx = {**before, **updates}
+            result = action(action_ctx)
             if not isinstance(result, dict):
                 detail = (
                     f"{action_path}:{action_line} action returned "

@@ -1,13 +1,13 @@
 ---
 module: 02-mechanism/04-run-outer/02-iterate
 doc: baseline
-status: drafted（B✅ 现状写全:节点级 batch live(file:line 已核 `graph_assembler.py:225/240/249/253/268/300`),loop/图级/range 明确标缺口;U11 锁）
+status: drafted（WS-E1 Step4 后现状:统一 `iterate` schema + 节点级 batch/range + 节点级 loop accumulate + 图级 batch/loop live;旧 `batch:` 兼容保留;trace/checkpoint 深接线仍归后续 WS）
 ---
 
 # 02-iterate — Baseline(当下代码实现逻辑)
 
-> **Scope**: 声明式循环的现状:`_build_batch_wrapped_node`(节点级 batch 并发)、`_resolve_iterator`(取迭代列表)。loop 串行累积、图级迭代、range 切片是 mvp1 缺口。
-> **现状一句话**:只有**节点级 batch**(声明式并发)live:`_build_batch_wrapped_node`(`graph_assembler.py:240`)读 `batch_spec.iterator` 列表、`Semaphore(concurrency)` 并发、按 `item_var` 注入每项、`gather` 收集、聚合成 `aggregated_data[k]=[各项值]`。**loop(串行累积)、图级迭代、range、统一 `iterate` 配置都还没有。**
+> **Scope**: 声明式循环的当前实现:phase-level `iterate` / legacy `batch`、graph-level `iterate`、range 切片、loop accumulate merge、iterate 专属错误码。
+> **现状一句话**:WS-E1 Step4 已把 `iterate:{mode,over,item_var,range,concurrency,accumulate}` 落到 schema 与 runtime。节点级 batch/range、节点级 loop accumulate、图级 batch、图级 loop 都已能执行;旧 `batch:{iterator,item_var,concurrency}` 仍兼容并走新 batch 适配层。真实 trace emit、callbacks/events 扩展、checkpoint delta/compaction 不在 Step4。
 
 ## UI/UX
 N/A。
@@ -17,42 +17,83 @@ N/A。
 
 ## 后端功能
 
-### 1. 节点级 batch(已 live)
-`_build_batch_wrapped_node(node, batch_spec)`(`:240`):
-1. `items = _resolve_iterator(state, batch_spec.iterator)`(`:242`)——按点路径(如 `data.events`)从 state 取 list(`_resolve_iterator` `:225`)。
-2. `semaphore = asyncio.Semaphore(batch_spec.concurrency)`(`:249`)控并发。
-3. 每项经 `StateManager.update_business(state, **{batch_spec.item_var: item})`(`:253`)注入,`asyncio.gather`(`:256`)并发跑。
-4. 聚合:每结果的 data key 收进 `aggregated_data[k].append(v)`(`:268-270`)。
-> **batch 第一次出现需定义**:对一组输入并行 map 同一个 phase,再把各项输出聚合回黑板。
+### 1. schema / compile
+- 统一声明模型:`packages/graph-agent/src/graph_agent/core/manifest.py:IterateSpec`，字段为 `mode`、`over`、`item_var`、`range`、`concurrency`、`accumulate`。
+- loop accumulator 模型:`packages/graph-agent/src/graph_agent/core/manifest.py:IterateAccumulateSpec`，字段为 `var`、`init`、`from`、`merge`，其中 `merge` 只接受 `append` / `extend` / `merge` / `replace`。
+- `GraphManifest.iterate` 支持 `GRAPH.md` frontmatter 图级 iterate；phase AST 共享字段支持 `LOGIC.md` / `SUBGRAPH.md` / `SKILL.md` 节点级 iterate。
+- 旧 `BatchSpec` 保留，phase-level `batch:` 仍可解析。
+- 编译期 loop 字段校验在 `loader.py:_validate_iterate_compile_contracts`:当 `iterate.mode=loop` 时，phase `io.inputs` 必须声明 `item_var` 与 `accumulate.var`，否则 fatal `[F-v3-iterate-accumulate-fields-missing]`。
+- iterate 错误码已进 `ERROR_REGISTRY`:`[F-v3-iterate-accumulate-fields-missing]` 与 `[F-v3-iterate-over-not-list]`。
 
-### 2. 接线
-`_wrap_phase_runtime_node`(`:287`)在 phase 声明了 batch 时,把节点包成 `_build_batch_wrapped_node`。
+### 2. 节点级 batch + range
+`graph_assembler.py:_build_iterate_wrapped_phase` 在 phase 有 `iterate` 时把已由 `PhaseWrapper(StateMapper)` 包好的 phase body 再套一层 iterate runtime。
+- `mode=batch` 走 `_build_batch_iterate_phase`。
+- `over` 通过 `_resolve_iterate_items` 从 `WorkflowState` 读取，非 list 报 `[F-v3-iterate-over-not-list]`。
+- `range` 由 `_apply_iterate_range` 处理，语义是 1-based 闭区间；如 `[2,3]` 命中第 2、3 项。
+- `concurrency` 用 `asyncio.Semaphore` 控制并发，`asyncio.gather` 保持结果顺序。
+- 每项通过 `StateManager.update_business(... item_var=item)` 注入，再调用 phase body。
+- 聚合按 phase `io.outputs` 的字段收集成 `field -> [per_item_value]`，并写回 business data 与 `phase_outputs[phase_id]`。
+- 空 list 不调用 phase body，返回声明输出字段的空聚合。
+
+### 3. 节点级 loop accumulate
+`mode=loop` 走 `graph_assembler.py:_build_loop_iterate_phase`。
+- 初始值来自 `accumulate.init`，每轮输入包含 `item_var` 与当前 `accumulate.var`。
+- 每轮先调用 phase body，再从本轮输出取 `accumulate.from`。
+- merge 语义由 `_merge_accumulator` 实现:
+  - `append`: list accumulator 追加单个 piece。
+  - `extend`: list accumulator 扩展 list piece。
+  - `merge`: dict accumulator 合并 dict piece。
+  - `replace`: 用 piece 替换 accumulator。
+- 后一轮能读到前一轮累积结果；最终只把 `accumulate.var` 写回 blackboard 与 `phase_outputs[phase_id]`。
+- 空 list 不调用 phase body，直接返回 `accumulate.init`。
+
+### 4. legacy `batch:` 兼容
+旧 `batch:{iterator,item_var,concurrency}` 不再走旧 `_build_batch_wrapped_node` 路径，而是经 `_build_legacy_batch_wrapped_phase` 转接到 `_build_batch_iterate_phase`。
+- legacy `iterator` 等价于新 `iterate.over`。
+- 为兼容旧测试与旧图输出，legacy batch 仍会写 `batch_outputs`。
+- 旧 `data.<field>` iterator 在 graph 输入信封场景下有窄 fallback，可解析到 `data.inputs.<field>`。
+
+### 5. 图级 batch / loop
+当 `GRAPH.md` 声明 `iterate` 时，`assemble_graph` 会把编译好的 LangGraph 包成 `_GraphIterateRuntime`。
+- `mode=batch` 走 `_run_graph_batch_iterate`:每个 item 执行一次整张 DAG，实例状态隔离，最终按 graph `io.outputs` 聚合。
+- `mode=loop` 走 `_run_graph_loop_iterate`:同一外层 `graph.invoke` 内串行执行整张 DAG，多轮共享 accumulator，最终写回 `accumulate.var`。
+- 每轮内部调用都会带 `checkpoint_ns=iter{k}` 风格 config；同时在 `flow.working_memory["iterate_executions"]` 暴露结构性信号，便于测试证明这是一次 graph.invoke 内部完成的图级迭代，而不是测试/runner 外层 N 次独立 invoke。
+- Step4 未接真实 checkpoint saver delta/compaction，也未扩展 callbacks/events trace schema。
 
 ## API
-- `_build_batch_wrapped_node(node, batch_spec) -> wrapped_node`(`:240`)。
-- `_resolve_iterator(state, path_str) -> list`(`:225`)。
+- `manifest.py:IterateSpec` / `IterateAccumulateSpec`。
+- `loader.py:_validate_iterate_compile_contracts`。
+- `graph_assembler.py:_build_iterate_wrapped_phase`。
+- `graph_assembler.py:_build_batch_iterate_phase` / `_build_loop_iterate_phase`。
+- `graph_assembler.py:_GraphIterateRuntime` / `_run_graph_batch_iterate` / `_run_graph_loop_iterate`。
 
 ## Data Model / State
-读 `batch_spec`(iterator/concurrency/item_var);写 `aggregated_data`(各 item 输出聚合回黑板)。
+iterate runtime 读写 `WorkflowState.data`。节点级 iterate 先让 `StateMapper` 对 phase body 做正常 io slice/merge，再由 iterate wrapper 聚合或累积结果写回 business data 与 `phase_outputs`。图级 iterate 包在 compiled graph 外层，按 graph `io.outputs` 取最终输出并聚合/累积。
 
 ## 当前边界(这个模块现在不是什么)
-- **没有串行累积(loop)**:现状只并发独立,无 `accumulate`。
-- **没有图级迭代**:只节点级。
-- **没有 range 切片**:跑全量。
-- **batch 事件未盖 item 维度**:100 项 trace 全糊在同一 `phase_name`(归 `02-observability`,要补 `phase_execution_id`+`iteration_index`)。
+- **没有真实 trace event emit 接线**:Step4 只提供轮次结构性入口，不改 callbacks/events 或 emit。
+- **没有 checkpoint delta/compaction**:图级 loop 会传 `checkpoint_ns=iter{k}`，但不改 checkpointer/state。
+- **没有 LangGraph `Send` 专门接线**:当前图级 batch 由外层 runtime fan-out 调用整图，契约上状态隔离并聚合输出。
+- **没有子图 inputs 放宽**:SUBGRAPH io 仍是 Step5 范围。
+- **没有 IO/read_file/Studio/gateway 改动**。
 
 ## baseline / alignment 差异(测试锚点)
 | 维度 | 现状(baseline) | mvp1 目标 |
 |---|---|---|
-| 配置 | `batch_spec`(iterator/concurrency/item_var) | 统一 `iterate`(mode/over/range/accumulate,兼容 batch) |
-| loop | 无 | mode=loop + 显式 `accumulate{var,init,from,merge}` |
-| 图级 | 无 | 图级 batch(Send)/ 图级 loop=B(引擎包 loop-body,一 thread + ns=iter{k}) |
-| range | 无 | range 切片(predict 默认 [1,1]) |
+| 配置 | `iterate` 已 live；旧 `batch` 兼容 | 统一 `iterate` 主契约，旧 `batch` 迁移期兼容 |
+| 节点 batch | live，含 1-based 闭区间 range 与空 list 空聚合 | 对齐 |
+| 节点 loop | live，显式 `accumulate{var,init,from,merge}` 串行累积 | 对齐基础 runtime |
+| merge | append/extend/merge/replace live | 对齐 |
+| 图级 batch | live，外层 runtime fan-out 整张 DAG 并聚合 | 目标提到 LangGraph `Send`，当前未用专门 Send API |
+| 图级 loop=B | live 为一次 graph.invoke 内部串行 loop-body，带 `iter{k}` config 与结构性信号 | checkpoint 深集成/trace 消费仍后续 |
+| 每轮 trace | 未真实盖 `phase_execution_id` / `iteration_index` event | 归 observability 后续 |
 
-> **验"是否按 mvp1 改了"**:① 图级 iterate 是否引擎包 loop-body(一 thread + ns=iter{k}),非 N 次独立 invoke;② loop 累积 checkpoint 总体积 O(N);③ 每项 trace 盖 `phase_execution_id`。
+> **验"是否按 mvp1 改了"**:① `iterate` schema 是否同时接受 phase 与 GRAPH frontmatter；② node batch `[2,3]` 是否按 1-based 闭区间命中第 2、3 项；③ loop 后轮是否读到前轮 accumulator；④ `over` 非 list 是否 `[F-v3-iterate-over-not-list]`；⑤ graph-level loop 是否能证明是单次 graph.invoke 内部 loop-body。
 
 ## 读代码主路径提示
-`_resolve_iterator`(`:225`)→ `_build_batch_wrapped_node`(`:240`)→ 接线 `_wrap_phase_runtime_node`(`:287`)。loop/图级/range 是 target,现无代码。
+phase-level: `manifest.py:IterateSpec` → `loader.py:_validate_iterate_compile_contracts` → `graph_assembler.py:_wrap_phase_runtime_node` → `_build_iterate_wrapped_phase` → `_build_batch_iterate_phase` / `_build_loop_iterate_phase`。
+
+graph-level: `GraphManifest.iterate` → `assemble_graph` → `_GraphIterateRuntime.invoke` → `_run_graph_batch_iterate` / `_run_graph_loop_iterate`。
 
 ## 交叉引用(链接, 不复制)
-mvp1-alignment(目标)· `01-contract/02-skill-syntax`(iterate 声明,双向)· `03-checkpoint`(loop 累积 checkpoint,双向)· `06-seam/02-observability`(每轮 trace 盖戳)· `05-run-inner/08-messages-state`
+mvp1-alignment(目标)· `01-contract/02-skill-syntax`(iterate 声明,双向)· `01-contract/03-compile-rules`(iterate 错误码)· `03-checkpoint`(loop 累积 checkpoint,双向)· `06-seam/02-observability`(每轮 trace 盖戳)· `05-run-inner/08-messages-state`

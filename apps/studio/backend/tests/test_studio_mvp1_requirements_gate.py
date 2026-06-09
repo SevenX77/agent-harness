@@ -33,9 +33,11 @@ PM_BOUNDARY_PATTERNS = [
 ]
 REQUIRED_SSOT_GROUNDING = ("mvp1-alignment.md", "baseline.md", "DESIGN_UNITS_INDEX.md", "01_workflows")
 REVIEW_FLOW_GATE_TERMS = ("RED 测试", "PM 契约门", "Codex", "Gemini", "baseline 回写", "PM 终审")
-FORBIDDEN_PRECONTRACT_ARTIFACT_PATTERNS = (
+TASK_ARTIFACT_PATTERNS = (
     "task-ws*.md",
     "tasks-ws*.md",
+)
+FORBIDDEN_PROMPT_ARTIFACT_PATTERNS = (
     "gemini-prompt-ws*.md",
 )
 EXPECTED_OWNS_BY_WS = {
@@ -207,15 +209,43 @@ def test_ws0_owns_the_requirements_gate_test() -> None:
 
 
 def test_studio_mvp1_has_no_precontract_task_or_prompt_artifacts() -> None:
-    forbidden = sorted(
+    forbidden_prompts = sorted(
         path.relative_to(REPO_ROOT).as_posix()
-        for pattern in FORBIDDEN_PRECONTRACT_ARTIFACT_PATTERNS
+        for pattern in FORBIDDEN_PROMPT_ARTIFACT_PATTERNS
         for path in SPEC_DIR.glob(pattern)
     )
 
-    assert not forbidden, (
-        "WS-0 contract gate must run before task files or Gemini prompts are produced.\n"
-        f"Forbidden pre-contract artifacts: {forbidden}"
+    assert not forbidden_prompts, (
+        "Gemini prompts must not be produced before their approved task handoff.\n"
+        f"Forbidden prompt artifacts: {forbidden_prompts}"
+    )
+
+    invalid_tasks: list[str] = []
+    for pattern in TASK_ARTIFACT_PATTERNS:
+        for path in SPEC_DIR.glob(pattern):
+            frontmatter, _ = _read_markdown_with_frontmatter(path)
+            ws_key = _ws_key(RequirementsDoc(path, path.relative_to(REPO_ROOT).as_posix(), frontmatter, ""))
+            relative = path.relative_to(REPO_ROOT).as_posix()
+            if ws_key is None:
+                invalid_tasks.append(f"{relative}: missing ws_id")
+                continue
+
+            ws_number = ws_key.split("-")[1]
+            requirements_exists = any(SPEC_DIR.glob(f"requirements-ws{ws_number}*.md"))
+            contract_ref = frontmatter.get("depends_on_contract_gate")
+            contract_exists = isinstance(contract_ref, str) and (SPEC_DIR / contract_ref).exists()
+            gate_text = " ".join(
+                str(frontmatter.get(key, ""))
+                for key in ("gate", "gate_decision", "green_authorization", "status")
+            )
+            has_gate_record = "契约门" in gate_text or "确认" in gate_text or "approved" in gate_text
+            if not requirements_exists or not (contract_exists or has_gate_record):
+                invalid_tasks.append(relative)
+
+    assert not invalid_tasks, (
+        "Task handoffs must only exist after a matching requirements document and "
+        "contract-gate or explicit authorization record exist.\n"
+        f"Invalid task artifacts: {invalid_tasks}"
     )
 
 

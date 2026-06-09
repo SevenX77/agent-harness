@@ -142,7 +142,7 @@ function isMissingPythonCallable(message: string) {
 
 function cleanLintMessage(message: string): string {
   if (isMissingPythonCallable(message)) {
-    return 'LOGIC.md is missing <python_callable>. Add a <python_callable> block that names a Python function in phases/<phase>/actions/.'
+    return 'LOGIC.md hit a legacy python_callable validator. MVP1 logic phases use actions/<phase>.py, not LOGIC.md python callable blocks.'
   }
   return message
     .replace(/\s*For further information visit https:\/\/errors\.pydantic\.dev\/\S+/g, '')

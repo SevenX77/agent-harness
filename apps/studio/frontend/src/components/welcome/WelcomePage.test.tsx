@@ -248,11 +248,11 @@ describe('WelcomePage', () => {
 
     expect(formatImportSkillError(error)).not.toContain('Cannot import this folder')
     expect(formatCreateSkillError(error, 'new-skill')).toBe(
-      'Cannot create "new-skill": phases/init/LOGIC.md:1 LOGIC.md is missing <python_callable>. Add a <python_callable> block that names a Python function in phases/<phase>/actions/.',
+      'Cannot create "new-skill": phases/init/LOGIC.md:1 LOGIC.md hit a legacy python_callable validator. MVP1 logic phases use actions/<phase>.py, not LOGIC.md python callable blocks.',
     )
   })
 
-  it('turns old scaffold python_callable validation into actionable copy', () => {
+  it('turns old scaffold python_callable validation into MVP1 drift copy', () => {
     const error = studioApiError({
       error_code: 'MANIFEST_VALIDATION_FAILED',
       message: 'Manifest validation failed',
@@ -265,9 +265,11 @@ describe('WelcomePage', () => {
       },
     })
 
-    expect(formatCreateSkillError(error, 'new-skill')).toBe(
-      'Cannot create "new-skill": phases/init/LOGIC.md:1 LOGIC.md is missing <python_callable>. Add a <python_callable> block that names a Python function in phases/<phase>/actions/.',
+    const message = formatCreateSkillError(error, 'new-skill')
+    expect(message).toBe(
+      'Cannot create "new-skill": phases/init/LOGIC.md:1 LOGIC.md hit a legacy python_callable validator. MVP1 logic phases use actions/<phase>.py, not LOGIC.md python callable blocks.',
     )
+    expect(message).not.toContain('Add a <python_callable>')
   })
 
   it('does not show stale /skills import validation copy for Open folder', () => {

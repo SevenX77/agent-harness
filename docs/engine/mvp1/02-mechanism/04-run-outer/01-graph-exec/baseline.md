@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/04-run-outer/01-graph-exec
 doc: baseline
-status: drafted（现状对齐 WS-E1 Step4 后代码；LOGIC runtime 已纯返回 dict;声明式 iterate 已接入 phase/graph 外层 runtime;action/tool 两套注册表;子图 io 1:1 校验 + io.outputs file/artifact 落盘仍是既有现状）
+status: drafted（现状对齐 WS-E1 Step5 后代码；LOGIC runtime 已纯返回 dict;声明式 iterate 已接入 phase/graph 外层 runtime;action/tool 两套注册表;子图 inputs 已放宽且 outputs 仍严校;io.outputs file/artifact 落盘仍是既有现状）
 binds_alignment: ./mvp1-alignment.md
 binds_code: core/graph_assembler.py（_build_logic_node, _wrap_phase_runtime_node, _GraphIterateRuntime, _build_subgraph_node）· runtime/state_mapper.py:37 · core/actions.py（18/49）· core/loader.py（_validate_subgraph_io_contracts, _validate_iterate_compile_contracts）· io/manager.py:108（save_outputs）· io/storage.py:149（save_artifact）
 ---
@@ -9,7 +9,7 @@ binds_code: core/graph_assembler.py（_build_logic_node, _wrap_phase_runtime_nod
 # 01-graph-exec — Baseline(当下代码实现逻辑)
 
 > **Scope**: 运行时按 DAG 执行 phase 的外层机制:`StateMapper`(io slice/merge)、LOGIC 执行(`_build_logic_node`,plain dict action input + 纯返回写回)、声明式 iterate 外层包装、SUBGRAPH 调用、action/tool 两套注册表(`actions.py`)、io_manager。
-> **现状一句话**:LOGIC 节点 `_build_logic_node` 已不再创建可变 `Context` facade;每个 action 收到 `{**before, **updates}` plain dict,只有 action 显式返回的 dict 会通过 `_validate_logic_update_keys` 校验后写回。WS-E1 Step4 已把声明式 iterate 接到 graph/phase 外层:phase-level iterate 包在 `PhaseWrapper(StateMapper)` 外侧聚合/累积结果,graph-level iterate 包在 compiled graph 外侧执行整图 batch/loop。action 与 tool 仍是 `actions.py` 里**两套独立注册表**。StateMapper(`runtime/state_mapper.py:37`)做 io slice/merge,失败报 `[F-v3-runtime-state-mapping-failed]`。
+> **现状一句话**:LOGIC 节点 `_build_logic_node` 已不再创建可变 `Context` facade;每个 action 收到 `{**before, **updates}` plain dict,只有 action 显式返回的 dict 会通过 `_validate_logic_update_keys` 校验后写回。WS-E1 Step4 已把声明式 iterate 接到 graph/phase 外层:phase-level iterate 包在 `PhaseWrapper(StateMapper)` 外侧聚合/累积结果,graph-level iterate 包在 compiled graph 外侧执行整图 batch/loop。WS-E1 Step5 已放宽 SUBGRAPH inputs 镜像校验:父 `SUBGRAPH.md io.inputs` 不再要求与子 `GRAPH.md io.inputs` 完全相等;outputs 仍严格相等。action 与 tool 仍是 `actions.py` 里**两套独立注册表**。StateMapper(`runtime/state_mapper.py:37`)做 io slice/merge,失败报 `[F-v3-runtime-state-mapping-failed]`。
 
 ## UI/UX
 N/A。
@@ -47,9 +47,10 @@ Step4 没把循环塞回 action,而是在 graph execution 外层接声明式 run
 - `ToolDef`(`:49`)/ `ToolRegistry`(`:60`,`_structured_tool` `:76`)——AGENT 的 tool(LLM 调,`StructuredTool`)。
 - **两套独立、不互通、无桥**(mvp1 决定**不统一** capability,见 `04-tools` TL2)。
 
-### 5. SUBGRAPH:io 严格 1:1 校验(loader)
+### 5. SUBGRAPH:inputs 放宽 / outputs 严校(loader)
 SUBGRAPH 节点 `_build_subgraph_node`(`:363`,装配归 `03-assemble`)递归调 child graph,父 data 启动子图、回 delta。
-- **子图 io 严格 1:1 校验**(编译期):`loader.py:_validate_subgraph_io_contracts`(:528,`:211` 调用)对 **inputs + outputs 都**强制父 `SUBGRAPH.md` io == 子 `GRAPH.md` io,任一不等 → `[F-v3-subgraph-io-mismatch]`(:553)fatal。mvp1 要**放宽 inputs**(子图像普通节点从黑板切片)、保留 outputs(见 alignment E1)。
+- **子图 inputs 已放宽**(编译期):`loader.py:_validate_subgraph_io_contracts`(:528,`:211` 调用)仍递归编译 child graph,但不再比较父 `SUBGRAPH.md io.inputs` 与子 `GRAPH.md io.inputs`。父子 input 字段集合、required 或同名 schema 不一致不会在 loader 层 fatal;运行期子图仍先经父 phase `StateMapper` 切片,再由 child graph 按自己的 `io.inputs` 切片。
+- **子图 outputs 仍严校**(编译期):同函数继续要求父 `SUBGRAPH.md io.outputs` 与子 `GRAPH.md io.outputs` 整个 schema 相等;不一致报 `[F-v3-subgraph-io-mismatch]`,错误信息标明 `outputs do not match`。
 
 ### 6. io.outputs 落盘:file / artifact(io/manager + io/storage)
 `IOManager.save_outputs`(`io/manager.py:108`,storage-agnostic)按 `output_spec.target`(默认 `"file"`,:143)分发:
@@ -70,7 +71,7 @@ blackboard = `WorkflowState.data`(`data-contracts`);io 经 StateMapper slice/mer
 - **iterate runtime 已接入 graph-exec**:节点级/图级声明式循环 live;真实 trace emit、checkpoint delta/compaction、LangGraph `Send` 专门接线仍不在本 baseline 当前实现内。
 - **action/tool 不统一**:两套注册表(spec 已固定 Action≠Tool)。
 - **代码里术语混叫**:历史处把 action 叫 "tool"(死簇,待清)。
-- **子图 io 现严格 1:1**:inputs+outputs 都强制相等(`loader.py:528`),mvp1 放宽 inputs(E1)。
+- **子图 io 现状**:inputs 已放宽(`loader.py:528` 不再比较 inputs);outputs 仍强制相等并用 `[F-v3-subgraph-io-mismatch]` fatal。
 - **文件导入→黑板无机制**:运行中无"跑到节点才注入外部文件字段"(mvp1 新增 E2)。
 
 ## 🚨 已知代码债(2026-06-05 审计;如实记录,不在文档审计里改代码)
@@ -88,7 +89,7 @@ blackboard = `WorkflowState.data`(`data-contracts`);io 经 StateMapper slice/mer
 | 声明式 iterate | phase-level batch/range/loop 与 graph-level batch/loop 已 live;trace/checkpoint 深集成未落 | iterate.accumulate + 序列化数据;每轮 trace/checkpoint 深接线分后续 WS |
 | 死簇 | `code_phase_node`/`phase_executor` | 删(live 用 `_build_logic_node`) |
 | StateMapper required 校验 | slice **不校验** required(只过滤 properties、缺失静默丢)(`filter_runtime_inputs:25`) | required 缺失报 `[F-v3-runtime-state-mapping-failed]`(alignment §3/§6) |
-| 子图 io 校验 | inputs+outputs **都**严格 1:1(`loader.py:528/553`) | **放宽 inputs**(从黑板切片)、outputs 保留(E1) |
+| 子图 io 校验 | inputs 已放宽(不再镜像比较);outputs 仍严格 1:1(`loader.py:528/553`) | 已对齐 E1:inputs 从黑板切片、outputs 保留严校 |
 | 文件导入→黑板 | 无机制 | 跑到节点才 lazy 注入(E2) |
 | io.outputs md artifact | str 原样写(`io/storage.py:167`);finish_task 工具走 markdown→parsed `data`,**未接 business_data_md**(中间件侧) | md 取 `business_data_md`、不 json→md 回转(E3) |
 

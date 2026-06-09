@@ -1,7 +1,7 @@
 ---
 module: 01-contract/02-skill-syntax
 doc: baseline
-status: drafted（现状对齐 WS-E1 Step4 后代码；GRAPH/LOGIC/SUBGRAPH/AGENT/cognitive/mention 解析已核实；统一 `iterate` 语法已 live;LOGIC runtime 已纯返回,但 action 签名命名、SUBGRAPH path/io、AGENT/cognitive/mention 严格契约仍有 refactor-target drift）
+status: drafted（现状对齐 WS-E1 Step5 后代码；GRAPH/LOGIC/SUBGRAPH/AGENT/cognitive/mention 解析已核实；统一 `iterate` 语法已 live;LOGIC runtime 已纯返回;SUBGRAPH inputs 已放宽且 outputs 仍严校;但 action 签名命名、SUBGRAPH path、AGENT/cognitive/mention 严格契约仍有 refactor-target drift）
 binds_alignment: ./mvp1-alignment.md
 binds_code: packages/graph-agent/src/graph_agent/core/loader.py:SkillLoader.compile_skill; packages/graph-agent/src/graph_agent/core/loader.py:_parse_agent_body; packages/graph-agent/src/graph_agent/core/loader.py:_validate_agent_mentions; packages/graph-agent/src/graph_agent/core/loader.py:_validate_iterate_compile_contracts; packages/graph-agent/src/graph_agent/core/manifest.py:GraphManifest; packages/graph-agent/src/graph_agent/core/manifest.py:IterateSpec; packages/graph-agent/src/graph_agent/core/manifest.py:LogicNodeAST; packages/graph-agent/src/graph_agent/core/manifest.py:SubgraphNodeAST; packages/graph-agent/src/graph_agent/core/manifest.py:AgentNodeAST; packages/graph-agent/src/graph_agent/core/mentions.py:scan_mentions; packages/graph-agent/src/graph_agent/cognitive/prompt.py:apply_v030_cognitive_template; packages/graph-agent/src/graph_agent/core/graph_assembler.py:_agent_system_prompt
 ---
@@ -9,7 +9,7 @@ binds_code: packages/graph-agent/src/graph_agent/core/loader.py:SkillLoader.comp
 # 02-skill-syntax — Baseline(当下代码实现逻辑)
 
 > **Scope**: skill 文件语法的**当前代码现状**:GRAPH/LOGIC/SUBGRAPH/AGENT 的 frontmatter 解析、body 解析、AST、mention 扫描与 cognitive prompt 模板装配入口。本文只对照代码,不拿旧 spec 当现状。
-> **现状一句话**:当前代码已能解析 V0.3.0 `GRAPH.md`、`LOGIC.md`、`SUBGRAPH.md`、Agent `SKILL.md`,并有 `core/mentions.py` 与 `apply_v030_cognitive_template`;WS-E1 Step4 已让 `GRAPH.md` 和 phase frontmatter 接受统一 `iterate` 声明。LOGIC runtime 已收口为 plain dict + 纯返回写回,但仍有几处与 mvp1 目标不一致:LOGIC action 签名校验仍要求参数名 `context/ctx`；SUBGRAPH / agent `subgraphs[]` 仍是 `target_skill` 逻辑 id；SUBGRAPH 编译期仍做父子 IO 完整相等校验；AGENT body/mention 严格校验不完整；cognitive slot 文本/默认值与目标契约有漂移；validator 主要是 bool/占位契约,缺完整加载生命周期。
+> **现状一句话**:当前代码已能解析 V0.3.0 `GRAPH.md`、`LOGIC.md`、`SUBGRAPH.md`、Agent `SKILL.md`,并有 `core/mentions.py` 与 `apply_v030_cognitive_template`;WS-E1 Step4 已让 `GRAPH.md` 和 phase frontmatter 接受统一 `iterate` 声明。LOGIC runtime 已收口为 plain dict + 纯返回写回;WS-E1 Step5 已让 SUBGRAPH inputs 不再要求父子镜像相等,但 outputs 仍严格相等。仍有几处与 mvp1 目标不一致:LOGIC action 签名校验仍要求参数名 `context/ctx`；SUBGRAPH / agent `subgraphs[]` 仍是 `target_skill` 逻辑 id；AGENT body/mention 严格校验不完整；cognitive slot 文本/默认值与目标契约有漂移；validator 主要是 bool/占位契约,缺完整加载生命周期。
 
 ## UI/UX
 N/A。
@@ -61,14 +61,14 @@ N/A —— skill 源码语法被 Studio 编辑器/copilot 消费；本 baseline 
 ### 4. SUBGRAPH.md 现状
 - AST:`packages/graph-agent/src/graph_agent/core/manifest.py:SubgraphNodeAST` 当前字段为 `mode`、`target_skill`、`io`、`validator`,并继承 `name`、`raw_blocks`、`metadata`、`allow_sequential_overwrite`、`batch`、`iterate`。
 - `target_skill` schema:`packages/graph-agent/src/graph_agent/core/manifest.py:SubgraphNodeAST` 使用 `packages/graph-agent/src/graph_agent/core/skill_resolver_protocol.py:SKILL_ID_PATTERN`;agent `SKILL.md` 的 `subgraphs[]` 仍复用 `packages/graph-agent/src/graph_agent/core/manifest.py:AgentRegistryItem`,字段也是 `target_skill`。
-- 编译期子图 IO 校验:`packages/graph-agent/src/graph_agent/core/loader.py:_validate_subgraph_io_contracts` 对每个 `SubgraphNodeAST` 调 `resolve_skill_root(resolver, doc.ast.target_skill)`,递归编译子图,再要求父 `SUBGRAPH.md io.inputs/outputs` 与子 `GRAPH.md io.inputs/outputs` 整个 schema 相等。
+- 编译期子图 IO 校验:`packages/graph-agent/src/graph_agent/core/loader.py:_validate_subgraph_io_contracts` 对每个 `SubgraphNodeAST` 调 `resolve_skill_root(resolver, doc.ast.target_skill)`,递归编译子图;现状不再比较父 `SUBGRAPH.md io.inputs` 与子 `GRAPH.md io.inputs`,但仍要求父 `SUBGRAPH.md io.outputs` 与子 `GRAPH.md io.outputs` 整个 schema 相等。
 - 运行期子图装配:`packages/graph-agent/src/graph_agent/core/graph_assembler.py:_build_subgraph_node` 同样用 `resolve_skill_root(skill_resolver, phase_ast.target_skill)` 找子图 root,递归 assemble 后 invoke 子 graph。
 - SUBGRAPH runtime 已被 StateMapper 包裹:`packages/graph-agent/src/graph_agent/core/graph_assembler.py:_wrap_phase_runtime_node` + `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:StateMapper` 会按父 `SUBGRAPH.md io.inputs` 切片,并按 `io.outputs` 限制合并。
 
 **SUBGRAPH drift / refactor-target**:
 - mvp1 目标字段是绝对 `path`;当前 `packages/graph-agent/src/graph_agent/core/manifest.py:SubgraphNodeAST` 和 `packages/graph-agent/src/graph_agent/core/manifest.py:AgentRegistryItem` 仍是 `target_skill` 逻辑 id。
 - mvp1 目标无 registry 寻址;当前 `packages/graph-agent/src/graph_agent/core/loader.py:_validate_subgraph_io_contracts` 与 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:_build_subgraph_node` 仍调用 `resolve_skill_root(... target_skill)`。
-- mvp1 目标放宽父子 IO,只按普通节点做 blackboard slice/merge；当前 `packages/graph-agent/src/graph_agent/core/loader.py:_validate_subgraph_io_contracts` 仍要求父子 `io.inputs/outputs` schema 完全相等。
+- mvp1 的 inputs 放宽目标已落地:当前 `packages/graph-agent/src/graph_agent/core/loader.py:_validate_subgraph_io_contracts` 不再要求父子 `io.inputs` schema 完全相等;outputs 仍严校,不一致报 `[F-v3-subgraph-io-mismatch]`。
 - SUBGRAPH validator 当前只是 `SubgraphNodeAST.validator` bool 与 `validator_contract.py:VALIDATOR_SIGNATURE` 占位,未见 subgraph phase-local `validator.py` 加载/调用生命周期。
 
 ### 5. AGENT `SKILL.md` 现状

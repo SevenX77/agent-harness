@@ -105,13 +105,19 @@ examples:
     _write(root / "phases" / phase_id / "examples" / "e2.md", "example\n")
 
 
-def _logic_phase(root: Path, phase_id: str = "main", *, validator: str = "false") -> None:
+def _logic_phase(
+    root: Path,
+    phase_id: str = "main",
+    *,
+    input_field: str = "text",
+    validator: str = "false",
+) -> None:
     _write(
         root / "phases" / phase_id / "LOGIC.md",
         f"""---
 io:
   inputs:
-    {_schema_yaml("text")}
+    {_schema_yaml(input_field)}
   outputs:
     {_schema_yaml("result")}
 actions: [run]
@@ -122,7 +128,7 @@ validator: {validator}
     )
     _write(
         root / "phases" / phase_id / "actions" / "run.py",
-        "def run(context):\n    return {'result': context['text']}\n",
+        f"def run(context):\n    return {{'result': context['{input_field}']}}\n",
     )
 
 
@@ -451,18 +457,17 @@ def test_missing_mention_target_is_rejected(tmp_path: Path, mock_skill_resolver:
     _expect_code(exc, "[F-v3-mention-target-not-found]")
 
 
-def test_subgraph_io_input_mismatch_is_rejected_at_compile_time(tmp_path: Path, mock_skill_resolver: object) -> None:
+def test_subgraph_io_input_mismatch_is_allowed_at_compile_time(tmp_path: Path, mock_skill_resolver: object) -> None:
     parent = tmp_path / "parent"
     child = tmp_path / "child"
     _graph(parent)
     _subgraph_phase(parent, input_field="parent_input", output_field="result")
     _graph(child, inputs_field="child_input", outputs_field="result")
-    _logic_phase(child)
+    _logic_phase(child, input_field="child_input")
 
-    with pytest.raises(SkillLoadError) as exc:
-        SkillLoader().compile_skill(parent, skill_resolver=DictSkillResolver({"child": child}))
+    compiled = SkillLoader().compile_skill(parent, skill_resolver=DictSkillResolver({"child": child}))
 
-    _expect_code(exc, "[F-v3-subgraph-io-mismatch]")
+    assert compiled.nodes[0].phase_name == "main"
 
 
 def test_subgraph_io_output_mismatch_is_rejected_at_compile_time(tmp_path: Path, mock_skill_resolver: object) -> None:

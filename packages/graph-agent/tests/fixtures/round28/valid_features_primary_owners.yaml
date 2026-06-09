@@ -193,7 +193,7 @@ features:
   events_secondary: []
   non_functional_contracts: []
   targeted_tests:
-  - tests/core/test_round14_skill_compilation_cutover.py::test_subgraph_io_input_mismatch_is_rejected_at_compile_time
+  - tests/core/test_round14_skill_compilation_cutover.py::test_subgraph_io_input_mismatch_is_allowed_at_compile_time
   public_api_symbols:
   - SubgraphNodeAST
 - id: F-agent-phase-orchestration

@@ -1,7 +1,7 @@
 ---
 module: 01-contract/04-data-contracts
 doc: baseline
-status: drafted（B 成段:对当前 packages/graph-agent 逐符号 grep 核 2026-06-06;形状散在 core/+runtime/;WS-E3 P0-1 已落 ErrorPayload.details + RunResult.diagnostics;⚠️ BlackboardState 在 runtime/state.py、ErrorPayload 无 line 轴）
+status: drafted（B 成段:对当前 packages/graph-agent 逐符号 grep 核 2026-06-06;形状散在 core/+runtime/;WS-E3 P0-1 已落 ErrorPayload.details + RunResult.diagnostics;WS-E5 未改 state 形状,仅验证 checkpoint namespace 不进入 BusinessData;⚠️ BlackboardState 在 runtime/state.py、ErrorPayload 无 line 轴）
 binds_alignment: ./mvp1-alignment.md
 binds_code: packages/graph-agent/src/graph_agent/core/state.py:BusinessData · core/state.py:FrameworkState · core/state.py:WorkflowState · runtime/state.py:BlackboardState · core/result.py:RunResult · core/exceptions.py:ErrorPayload · core/error_registry.py:ERROR_REGISTRY · core/validator_contract.py:VALIDATOR_SIGNATURE · core/types.py:Phase
 ---
@@ -24,6 +24,7 @@ N/A —— 本模块是 engine 数据契约。
 - `core/state.py:FrameworkState`(:156,`BaseModel`):框架元数据,与用户业务字段物理隔离(A1 拆分)。
 - `core/state.py:WorkflowState`(:203,`TypedDict`):顶层 graph state;`messages` 通道用 langgraph `DeltaChannel`(:214,reducer `_messages_delta_reducer`、`snapshot_frequency=50`;`DeltaChannel` 导入 :21)。`data` 通道**无 delta reducer**(现状,见差异表)。
 - `core/state.py:StateManager`(:217):state 读写/校验 helper(含 `_` 前缀守卫 :227/:265-267)。
+- WS-E5 后 state 形状本身无改动:checkpoint namespace 组合由 graph/checkpointer config 层处理,不写入 `BusinessData`;`StateManager.update_business` 继续拒 `_` 前缀字段,`route_finish_task` 继续把 `_` metadata 放进 `flow.finish_task_result`。
 - `packages/graph-agent/src/graph_agent/runtime/state.py:BlackboardState`(:88,`TypedDict`):公开的 blackboard state 形状(`__init__.py:49` re-export 进 `__all__`)。同文件 `BlackboardData`(:14,`TypedDict`:`inputs`/`phase_outputs`/`scratch` 三区)+ `normalize_blackboard_data` / `blackboard_data_merge`(归一化 / 合并 helper)。
   > ⚠️ **drift vs 迁移源**:源 12-contracts 称 `BlackboardState` 是 `core/state.py` 的公开别名;实测它是 `runtime/state.py:88` 的独立 `TypedDict`,且源未记 `BlackboardData` 模型 + normalize/merge。blackboard 数据流机制归 `01-graph-exec`,本域只登记形状落点。
 

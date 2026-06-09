@@ -608,12 +608,16 @@ def _run_graph_batch_iterate(
         async def _run_one(index: int, item: Any) -> dict[str, Any]:
             async with semaphore:
                 child_state = StateManager.update_business(state, **{iterate.item_var: item})
-                result = await asyncio.to_thread(
-                    graph.invoke,
-                    child_state,
-                    config=_iteration_config(config, index),
-                    **invoke_kwargs,
-                )
+                token = active_outer_ns.set(f"iter{index}")
+                try:
+                    result = await asyncio.to_thread(
+                        graph.invoke,
+                        child_state,
+                        config=_iteration_config(config, index),
+                        **invoke_kwargs,
+                    )
+                finally:
+                    active_outer_ns.reset(token)
                 return _phase_result_payload(child_state, result, output_keys)
 
         return await asyncio.gather(
@@ -658,12 +662,16 @@ def _run_graph_loop_iterate(
             loop_state,
             **{iterate.item_var: item, accumulate.var: acc},
         )
-        result = graph.invoke(
-            child_state,
-            config=_iteration_config(config, index),
-            **invoke_kwargs,
-        )
-        payload = _phase_result_payload(child_state, result, output_keys)
+        token = active_outer_ns.set(namespace)
+        try:
+            result = graph.invoke(
+                child_state,
+                config=_iteration_config(config, index),
+                **invoke_kwargs,
+            )
+            payload = _phase_result_payload(child_state, result, output_keys)
+        finally:
+            active_outer_ns.reset(token)
         if accumulate.from_ not in payload:
             _iterate_merge_fatal(
                 f"graph loop iterate output missing accumulate.from {accumulate.from_!r}"
@@ -821,6 +829,9 @@ def _build_subgraph_node(
 
     return _subgraph_node
 
+active_outer_ns: contextvars.ContextVar[str] = contextvars.ContextVar("active_outer_ns", default="")
+
+
 class NamespaceCheckpointer(BaseCheckpointSaver[Any]):
     def __init__(self, base_checkpointer: BaseCheckpointSaver[Any], target_ns: str) -> None:
         super().__init__(serde=base_checkpointer.serde)
@@ -832,7 +843,14 @@ class NamespaceCheckpointer(BaseCheckpointSaver[Any]):
         configurable = dict(new_config.get("configurable", {}))
         ns = configurable.get("checkpoint_ns")
         if ns == "" or ns is None:
-            configurable["checkpoint_ns"] = self.target_ns
+            ns = self.target_ns
+
+        outer = active_outer_ns.get()
+        if outer:
+            if ns and not ns.startswith(f"{outer}."):
+                ns = f"{outer}.{ns}"
+
+        configurable["checkpoint_ns"] = ns
         new_config["configurable"] = configurable
         return new_config  # type: ignore[return-value]
 
@@ -840,8 +858,15 @@ class NamespaceCheckpointer(BaseCheckpointSaver[Any]):
         new_config = dict(cast(Any, config))
         configurable = dict(new_config.get("configurable", {}))
         ns = configurable.get("checkpoint_ns")
+
+        outer = active_outer_ns.get()
+        if outer and ns and ns.startswith(f"{outer}."):
+            ns = ns[len(outer) + 1:]
+
         if ns == self.target_ns:
-            configurable["checkpoint_ns"] = ""
+            ns = ""
+
+        configurable["checkpoint_ns"] = ns
         new_config["configurable"] = configurable
         return new_config  # type: ignore[return-value]
 

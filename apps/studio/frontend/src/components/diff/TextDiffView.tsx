@@ -30,22 +30,22 @@ export function TextDiffView({ currentValue, goldenValue }: TextDiffViewProps) {
   const rows = compareLines(currentValue, goldenValue)
 
   return (
-    <div className="grid grid-cols-2 overflow-hidden rounded-md border border-slate-200 text-xs dark:border-slate-800">
-      <div className="border-r border-slate-200 dark:border-slate-800">
-        <div className="bg-slate-100 px-3 py-1 font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+    <div className="grid grid-cols-2 overflow-hidden rounded-md border border-border text-xs">
+      <div className="border-r border-border">
+        <div className="bg-muted px-3 py-1 font-semibold text-muted-foreground">
           Golden
         </div>
         {lines(goldenValue).map((line, index) => (
           <pre
             key={`golden-${index}`}
-            className="min-h-6 whitespace-pre-wrap px-3 py-1 font-mono text-slate-600 dark:text-slate-300"
+            className="min-h-6 whitespace-pre-wrap px-3 py-1 font-mono text-muted-foreground"
           >
             {line || ' '}
           </pre>
         ))}
       </div>
       <div>
-        <div className="bg-slate-100 px-3 py-1 font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+        <div className="bg-muted px-3 py-1 font-semibold text-muted-foreground">
           Current
         </div>
         {rows.map((row) => (
@@ -53,8 +53,8 @@ export function TextDiffView({ currentValue, goldenValue }: TextDiffViewProps) {
             key={`current-${row.index}`}
             className={`min-h-6 whitespace-pre-wrap px-3 py-1 font-mono ${
               row.changed
-                ? 'bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200'
-                : 'text-slate-600 dark:text-slate-300'
+                ? 'bg-warning-background text-warning-foreground'
+                : 'text-muted-foreground'
             }`}
           >
             {row.line || ' '}

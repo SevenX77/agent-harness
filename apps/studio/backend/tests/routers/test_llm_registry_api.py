@@ -104,6 +104,60 @@ def _seed(
     return active_credentials_path, roles_path
 
 
+def test_role_effective_runtime_settings_uses_gateway_model_resolver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from graph_agent_gateway.resolver import ModelResolver
+
+    route_id = "openai-direct:gpt-5"
+    credentials = LLMCredentialsFile(
+        provider_endpoints={
+            "openai-direct": ProviderEndpoint(
+                endpoint_id="openai-direct",
+                display_name="OpenAI",
+                protocol="openai_compatible",
+                base_url="https://api.openai.example/v1",
+                api_key="secret",
+            )
+        },
+        provider_routes={
+            route_id: ProviderRoute(
+                route_id=route_id,
+                endpoint_id="openai-direct",
+                route_slug="gpt-5",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
+            )
+        },
+    )
+    roles = RolesData(
+        roles={
+            "graph_agent": RoleEntry(
+                fallback_chain=[RoleRouteEntry(route_id=route_id)],
+            )
+        }
+    )
+    calls: list[str] = []
+    original_resolve_routes = ModelResolver.resolve_routes
+
+    def recording_resolve_routes(
+        self: ModelResolver,
+        role_name: str,
+        *,
+        route_override: str | None = None,
+    ):
+        assert route_override is None
+        calls.append(role_name)
+        return original_resolve_routes(self, role_name, route_override=route_override)
+
+    monkeypatch.setattr(ModelResolver, "resolve_routes", recording_resolve_routes)
+
+    result = llm_router._role_effective_runtime_settings(credentials, roles)
+
+    assert calls == ["graph_agent"]
+    assert route_id in result["graph_agent"]
+
+
 def _health_store_path() -> Path:
     return Path(config.APP_SETTINGS_DIR) / "llm" / "llm_health.sqlite"
 

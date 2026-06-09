@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { api } from '../api/client'
+import { api, compareRunToGolden } from '../api/client'
 import type { CompareResult, GoldenBaseline } from '../api/types'
 import { errorMessage } from '../utils/errors'
 
@@ -24,11 +24,9 @@ export function useGoldenDiff(skillId: string | null, runId: string | null) {
 
     setState((current) => ({ ...current, loading: true, error: null }))
     try {
-      const response = await api.get<CompareResult>(`/skills/${skillId}/runs/${targetRunId}/compare`, {
-        params: against ? { against } : undefined,
-      })
-      setState({ result: response.data, loading: false, error: null })
-      return response.data
+      const data = await compareRunToGolden(skillId, targetRunId, against)
+      setState({ result: data, loading: false, error: null })
+      return data
     } catch (error) {
       const message = errorMessage(error)
       setState((current) => ({ ...current, loading: false, error: message }))

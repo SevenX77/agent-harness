@@ -17,7 +17,7 @@ from app.core.backends import (
     get_registry_client,
     get_storage,
 )
-from app.core.exceptions import error_response, raise_error_response
+from app.core.exceptions import error_response, raise_error_response, standard_http_exception
 from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
 from app.models.git_collab import SyncSkillReq
@@ -323,6 +323,22 @@ async def publish_skill(
 
     artifact_id_value = server_response.get("artifact_id")
     artifact_id = artifact_id_value if isinstance(artifact_id_value, str) else None
+    if artifact_id:
+        try:
+            if not (skill_dir / ".git").exists():
+                from app.services.git_local import initialize_skill_repository
+                initialize_skill_repository(skill_dir, user_id=user_id)
+            git_service.commit(
+                skill_dir,
+                f"publish-artifact-{artifact_id}",
+                allow_empty=True,
+            )
+        except Exception as exc:
+            raise standard_http_exception(
+                "LOCAL_HISTORY_RECORD_FAILED",
+                f"Failed to record publish commit in local git history: {exc}"
+            ) from exc
+
     return PublishResult(
         status="ok",
         message="Published to registry",

@@ -16,6 +16,9 @@ def test_standard_error_codes_map_to_http_exceptions() -> None:
         "LLM_FALLBACK_EXHAUSTED": 502,
         "LLM_CREDENTIALS_SCHEMA": 422,
         "RESUME_CHECKPOINT_NOT_FOUND": 404,
+        "WHOLE_RUN_GOLDEN_PROMOTION_NOT_ALLOWED": 409,
+        "PREDICT_TRACE_CANNOT_BE_GOLDEN": 409,
+        "LOCAL_HISTORY_RECORD_FAILED": 500,
     }
 
     assert set(STANDARD_ERROR_MAP) == set(expected)

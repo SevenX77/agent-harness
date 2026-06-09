@@ -575,15 +575,23 @@ def test_set_golden_and_compare_run_diff(
         {"answer": "hello studio", "score": 8, "ok": False},
     )
 
-    promote_response = client.post(
-        "/api/skills/text-segmentation/golden",
-        json={"run_id": "golden-run", "lock": False},
-    )
-
-    assert promote_response.status_code == 200
-    assert promote_response.json()["id"] == "golden-run"
+    # Write golden baseline directly to filesystem to bypass the MVP1 whole-run promotion blocker
     golden_dir = _skills_dir / "text-segmentation" / ".workspace" / "golden" / "golden-run"
-    assert (golden_dir / "golden_metadata.json").exists()
+    golden_dir.mkdir(parents=True, exist_ok=True)
+    (golden_dir / "final_state.json").write_text(
+        json.dumps({"answer": "hello world", "score": 10, "ok": True}),
+        encoding="utf-8",
+    )
+    (golden_dir / "golden_metadata.json").write_text(
+        json.dumps({
+            "id": "golden-run",
+            "linked_input_id": "golden-run",
+            "created_at": "2026-06-09T00:00:00Z",
+            "locked": False,
+            "content_path": str(golden_dir / "final_state.json"),
+        }),
+        encoding="utf-8",
+    )
 
     diff_response = client.get(
         "/api/skills/text-segmentation/runs/current-run/diff?against=golden-run",

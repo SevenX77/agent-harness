@@ -26,7 +26,7 @@ from graph_agent_gateway.registry.profile_selector import (
     ProfileSelectionError,
     select_verified_profile,
 )
-from graph_agent_gateway.registry.resolver import RegistryResolutionError, resolve_role
+from graph_agent_gateway.registry.resolver import RegistryResolutionError
 from graph_agent_gateway.registry.schema import (
     ProviderRoute as GatewayProviderRoute,
 )
@@ -37,6 +37,7 @@ from graph_agent_gateway.registry.schema import (
     RuntimeSettings,
     VerifiedProfile,
 )
+from graph_agent_gateway.resolver import ModelResolver
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.models.llm_config import (
@@ -4926,10 +4927,11 @@ def _role_effective_runtime_settings(
     roles: RolesData,
 ) -> dict[str, dict[str, dict[str, Any]]]:
     snapshot = roles.to_registry_snapshot(credentials)
+    resolver = ModelResolver(registry_snapshot=snapshot)
     result: dict[str, dict[str, dict[str, Any]]] = {}
     for role_name in roles.roles:
         try:
-            resolved = resolve_role(snapshot, role_name)
+            resolved = resolver.resolve_routes(role_name)
         except RegistryResolutionError:
             continue
         result[role_name] = {

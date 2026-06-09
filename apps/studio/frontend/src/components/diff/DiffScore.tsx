@@ -5,12 +5,12 @@ interface DiffScoreProps {
 
 function scoreColor(score: number): string {
   if (score >= 90) {
-    return '#16a34a'
+    return 'var(--success)'
   }
   if (score >= 70) {
-    return '#ca8a04'
+    return 'var(--warning)'
   }
-  return '#dc2626'
+  return 'var(--destructive)'
 }
 
 export function DiffScore({ score, compact = false }: DiffScoreProps) {
@@ -20,13 +20,13 @@ export function DiffScore({ score, compact = false }: DiffScoreProps) {
 
   return (
     <div
-      className={`${sizeClass} grid shrink-0 place-items-center rounded-full font-bold text-slate-900 shadow-sm dark:text-slate-100`}
+      className={`${sizeClass} grid shrink-0 place-items-center rounded-full font-bold text-foreground shadow-sm`}
       style={{
-        background: `conic-gradient(${color} ${clamped}%, rgb(226 232 240) ${clamped}% 100%)`,
+        background: `conic-gradient(${color} ${clamped}%, var(--muted) ${clamped}% 100%)`,
       }}
       title={`Diff score ${clamped.toFixed(1)}%`}
     >
-      <div className="grid h-[76%] w-[76%] place-items-center rounded-full bg-white dark:bg-slate-900">
+      <div className="grid h-[76%] w-[76%] place-items-center rounded-full bg-background">
         {Math.round(clamped)}%
       </div>
     </div>

@@ -65,6 +65,43 @@ def set_golden_baseline_for_run(skill_id: str, run_id: str, *, lock: bool) -> Go
     return baseline
 
 
+def set_golden_baseline_for_manual_node(
+    skill_id: str,
+    node_id: str | None,
+    expected_output: Any,
+    source: str | None,
+    *,
+    lock: bool,
+) -> GoldenBaseline:
+    """Save manual per-node golden expected output."""
+    if not node_id:
+        raise ValueError("node_id is required for manual per-node golden baseline")
+
+    baseline_dir = _golden_dir_for(skill_id, f"manual-{node_id}")
+    baseline_dir.mkdir(parents=True, exist_ok=True)
+    content_path = baseline_dir / "final_state.json"
+
+    # Save a draft layout under .workspace/golden
+    final_state_data = {node_id: expected_output}
+    content_path.write_text(json.dumps(final_state_data), encoding="utf-8")
+
+    baseline = GoldenBaseline(
+        id=f"manual-{node_id}",
+        linked_input_id=f"manual-{node_id}",
+        created_at=datetime.now(UTC),
+        locked=lock,
+        content_path=str(content_path),
+        node_id=node_id,
+        source=source or "manual",
+    )
+    (baseline_dir / "golden_metadata.json").write_text(
+        baseline.model_dump_json(),
+        encoding="utf-8",
+    )
+    return baseline
+
+
+
 def compare_run_to_golden(
     skill_id: str,
     run_id: str,

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { CompareResult, FieldDifference } from '../../api/types'
 import { renderCompareReport, reportFileBase } from '../../utils/reportTemplates'
 import { ExportButton } from '../export/ExportButton'
+import { Button } from '../ui/button'
 import { DiffField } from './DiffField'
 import { DiffScore } from './DiffScore'
 
@@ -47,51 +48,50 @@ export function DiffView({
 
   if (!result && !loading && !error) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 bg-slate-50 p-6 text-center dark:bg-slate-950">
-        <GitCompareArrows className="h-9 w-9 text-slate-400" />
+      <div className="flex h-full flex-col items-center justify-center gap-3 bg-muted/30 p-6 text-center">
+        <GitCompareArrows className="h-9 w-9 text-muted-foreground/80" />
         <div>
-          <h3 className="font-bold text-slate-800 dark:text-slate-100">Golden Diff</h3>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          <h3 className="font-bold text-foreground">Golden Diff</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
             Compare the latest run output against the active golden baseline.
           </p>
         </div>
         <div className="flex gap-2">
-          <button
+          <Button
             type="button"
             disabled={!canCompare}
             onClick={onCompare}
-            className="flex items-center gap-2 rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-sky-300 dark:disabled:bg-sky-900"
           >
             <GitCompareArrows className="h-4 w-4" />
             Compare to Golden
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="outline"
             disabled={!canPromote}
             onClick={onPromote}
-            className="flex items-center gap-2 rounded-md border border-amber-300 px-3 py-1.5 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-800 dark:text-amber-300 dark:hover:bg-amber-950/40"
           >
             <BadgeCheck className="h-4 w-4" />
             Promote to Golden
-          </button>
+          </Button>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="flex h-full flex-col bg-slate-50 dark:bg-slate-950">
-      <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+    <div className="flex h-full flex-col bg-muted/10">
+      <div className="flex shrink-0 flex-col gap-3 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <DiffScore score={result?.total_score ?? 0} />
           <div>
-            <h3 className="font-bold text-slate-800 dark:text-slate-100">Golden Diff</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
+            <h3 className="font-bold text-foreground">Golden Diff</h3>
+            <p className="text-xs text-muted-foreground">
               {result ? `Against ${result.golden_run_id}` : 'No comparison loaded'}
             </p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <ExportButton
             label="Export Compare"
             title="Export comparison report"
@@ -104,37 +104,39 @@ export function DiffView({
               return renderCompareReport({ skillId, runId, result }, format)
             }}
           />
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             disabled={!canCompare || loading}
             onClick={onCompare}
-            className="flex items-center gap-2 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             Compare
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             disabled={!canPromote}
             onClick={onPromote}
-            className="flex items-center gap-2 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-600 disabled:cursor-not-allowed disabled:bg-amber-300"
           >
             <BadgeCheck className="h-3.5 w-3.5" />
             Promote
-          </button>
+          </Button>
         </div>
       </div>
 
       {error ? (
-        <div className="m-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+        <div className="m-4 rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive dark:border-destructive/40 dark:bg-destructive/20 dark:text-destructive-foreground">
           {error}
         </div>
       ) : null}
 
-      <div className="grid min-h-0 flex-1 grid-cols-[14rem_1fr]">
-        <div className="overflow-y-auto border-e border-slate-200 p-3 dark:border-slate-800">
+      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[14rem_1fr]">
+        <div className="max-h-36 overflow-y-auto border-b border-border p-3 md:max-h-none md:border-b-0 md:border-e">
           {fields.length === 0 ? (
-            <div className="text-sm text-slate-500 dark:text-slate-400">
+            <div className="text-sm text-muted-foreground">
               {loading ? 'Loading diff...' : 'No fields to compare.'}
             </div>
           ) : null}
@@ -146,8 +148,8 @@ export function DiffView({
                 onClick={() => setSelectedPath(field.field_path)}
                 className={`block w-full rounded-md border px-2 py-2 text-start text-xs ${
                   selectedField?.field_path === field.field_path
-                    ? 'border-sky-400 bg-sky-50 text-sky-800 dark:border-sky-500 dark:bg-sky-950/40 dark:text-sky-200'
-                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
+                    ? 'border-primary/50 bg-primary/10 text-primary dark:border-primary/60 dark:bg-primary/20 dark:text-primary-foreground'
+                    : 'border-border bg-card text-card-foreground hover:bg-accent hover:text-accent-foreground'
                 }`}
               >
                 <div className="truncate font-mono font-semibold">{field.field_path}</div>
@@ -159,7 +161,7 @@ export function DiffView({
             ))}
           </div>
         </div>
-        <div className="overflow-y-auto p-4">
+        <div className="min-w-0 overflow-y-auto p-4">
           {selectedField ? <DiffField field={selectedField} /> : null}
         </div>
       </div>

@@ -28,6 +28,22 @@ def test_publish_skill_success(client: TestClient) -> None:
     assert registry.calls[0]["metadata"]["version"] == "1.0.0"
 
 
+def test_publish_success_records_artifact_in_local_history(client: TestClient) -> None:
+    registry = FakeRegistry()
+    client.app.dependency_overrides[get_registry_client] = lambda: registry
+    _write_settings(client, user_id="alice")
+
+    publish_response = client.post("/api/skills/text-segmentation/publish", json={})
+    history_response = client.get("/api/skills/text-segmentation/history")
+
+    assert publish_response.status_code == 200
+    assert history_response.status_code == 200
+    history = history_response.json()
+    assert history
+    assert history[0]["kind"] == "publish"
+    assert history[0]["message"].startswith("publish-artifact-art-123")
+
+
 def test_publish_skill_app_settings_incomplete(client: TestClient) -> None:
     registry = FakeRegistry()
     client.app.dependency_overrides[get_registry_client] = lambda: registry
@@ -124,3 +140,18 @@ def _write_settings(client: TestClient, *, user_id: str) -> None:
         json={"user_id": user_id, "gitea_host": "https://gitea.example.com"},
     )
     assert response.status_code == 200
+
+
+def test_publish_local_history_failure(client: TestClient, monkeypatch: Any) -> None:
+    registry = FakeRegistry()
+    client.app.dependency_overrides[get_registry_client] = lambda: registry
+    _write_settings(client, user_id="alice")
+
+    from app.routers.skills import git_service
+    def mock_commit(*args: Any, **kwargs: Any) -> None:
+        raise Exception("Mock git commit failure")
+    monkeypatch.setattr(git_service, "commit", mock_commit)
+
+    response = client.post("/api/skills/text-segmentation/publish", json={})
+    assert response.status_code == 500
+    assert response.json()["error_code"] == "LOCAL_HISTORY_RECORD_FAILED"

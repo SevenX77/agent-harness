@@ -6,6 +6,7 @@ import type {
   CompileFailure,
   CompileResult,
   CompileSuccess,
+  CompareResult,
   GitHistoryItem,
   GoldenBaseline,
   JsonObject,
@@ -149,6 +150,17 @@ export async function saveGoldenBaseline(skillId: string, runId: string, lock = 
 
 export async function listGoldenBaselines(skillId: string): Promise<GoldenBaseline[]> {
   const response = await api.get<GoldenBaseline[]>(`/skills/${skillId}/golden`)
+  return response.data
+}
+
+export async function compareRunToGolden(
+  skillId: string,
+  runId: string,
+  against?: string | null,
+): Promise<CompareResult> {
+  const response = await api.get<CompareResult>(`/skills/${skillId}/runs/${runId}/diff`, {
+    params: against ? { against } : undefined,
+  })
   return response.data
 }
 

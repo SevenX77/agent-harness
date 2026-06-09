@@ -45,6 +45,18 @@ STANDARD_ERROR_MAP: dict[str, ErrorDefinition] = {
         http_status=404,
         retry_strategy="not_retryable",
     ),
+    "WHOLE_RUN_GOLDEN_PROMOTION_NOT_ALLOWED": ErrorDefinition(
+        http_status=409,
+        retry_strategy="not_retryable",
+    ),
+    "PREDICT_TRACE_CANNOT_BE_GOLDEN": ErrorDefinition(
+        http_status=409,
+        retry_strategy="not_retryable",
+    ),
+    "LOCAL_HISTORY_RECORD_FAILED": ErrorDefinition(
+        http_status=500,
+        retry_strategy="not_retryable",
+    ),
 }
 
 

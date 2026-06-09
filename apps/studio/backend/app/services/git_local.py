@@ -410,4 +410,6 @@ def _history_kind(message: str) -> GitHistoryKind:
         return "auto_run"
     if message.startswith("manual-") or message.startswith("initial-"):
         return "manual"
+    if message.startswith("publish-artifact-"):
+        return "publish"
     return "other"

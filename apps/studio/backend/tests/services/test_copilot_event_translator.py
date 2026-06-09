@@ -13,6 +13,14 @@ from app.models.copilot import (
     CopilotEventToolUseResult,
     CopilotEventToolUseStart,
 )
+from app.models.llm_config import (
+    LLMCredentialsFile,
+    ProviderEndpoint,
+    ProviderRoute,
+    RoleEntry,
+    RoleRouteEntry,
+    RolesData,
+)
 from app.services import copilot
 from claude_agent_sdk import CLIConnectionError
 from claude_agent_sdk.types import (
@@ -169,6 +177,67 @@ def test_stream_query_errors_when_model_override_is_unknown(
     )
 
     assert events == [CopilotEventError(message="未知模型: 'BAD_MODEL'")]
+
+
+def test_resolve_copilot_runtime_uses_gateway_model_resolver(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from graph_agent_gateway.resolver import ModelResolver
+
+    route_id = "anthropic-official:claude-sonnet"
+    credentials = LLMCredentialsFile(
+        provider_endpoints={
+            "anthropic-official": ProviderEndpoint(
+                endpoint_id="anthropic-official",
+                display_name="Anthropic",
+                protocol="anthropic_compatible",
+                base_url="https://api.anthropic.example",
+                api_key="secret",
+            )
+        },
+        provider_routes={
+            route_id: ProviderRoute(
+                route_id=route_id,
+                endpoint_id="anthropic-official",
+                route_slug="claude-sonnet",
+                provider_model_id="claude-sonnet",
+                canonical_id="claude-sonnet",
+            )
+        },
+    )
+    roles = RolesData(
+        roles={
+            "copilot_chat": RoleEntry(
+                role_kind="copilot",
+                fallback_chain=[RoleRouteEntry(route_id=route_id)],
+            )
+        }
+    )
+    roles_path = tmp_path / "llm_roles.yaml"
+    roles_path.touch()
+    calls: list[tuple[str, str | None]] = []
+    original_resolve_routes = ModelResolver.resolve_routes
+
+    def recording_resolve_routes(
+        self: ModelResolver,
+        role_name: str,
+        *,
+        route_override: str | None = None,
+    ):
+        calls.append((role_name, route_override))
+        return original_resolve_routes(self, role_name, route_override=route_override)
+
+    monkeypatch.setattr(copilot, "load_credentials", lambda: credentials)
+    monkeypatch.setattr(copilot, "default_roles_path", lambda: roles_path)
+    monkeypatch.setattr(copilot, "load_roles_file", lambda _path: roles)
+    monkeypatch.setattr(ModelResolver, "resolve_routes", recording_resolve_routes)
+
+    routes, credential_provider = copilot._resolve_copilot_runtime(route_id)
+
+    assert calls == [("copilot_chat", route_id)]
+    assert routes[0].route_id == route_id
+    assert credential_provider.get("endpoint:anthropic-official").get_secret_value() == "secret"
 
 
 def test_stream_query_timeout_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

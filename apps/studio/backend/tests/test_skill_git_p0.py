@@ -101,8 +101,14 @@ def test_p0_skill_git_directory_index_and_workspace_flow(
     assert ".workspace/runs/latest" not in committed_files
 
     golden_response = client.post(
-        "/api/skills/p0-skill/golden", json={"run_id": run_id, "lock": False}
+        "/api/skills/p0-skill/golden",
+        json={
+            "node_id": "setup",
+            "expected_output": {"prepared": True},
+            "source": "manual",
+            "lock": False,
+        },
     )
 
     assert golden_response.status_code == 200
-    assert (workspace_dir / "golden" / run_id / "golden_metadata.json").exists()
+    assert (workspace_dir / "golden" / "manual-setup" / "golden_metadata.json").exists()

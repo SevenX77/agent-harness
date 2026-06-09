@@ -2,15 +2,112 @@
 
 from __future__ import annotations
 
+import logging
+import time
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
+from langchain_core.messages import ToolMessage
+from langgraph.prebuilt.tool_node import ToolCallRequest
+from langgraph.types import Command
+
+from graph_agent.callbacks.base import Callback
+from graph_agent.callbacks.events import ToolCallEvent
+
+logger = logging.getLogger(__name__)
 
 
 class TracingMiddleware(AgentMiddleware[AgentState[Any]]):
-    """No-op tracing slot reserved by ``MVP0_MIDDLEWARE_ORDER_CONTRACT``."""
+    """Tracing slot to capture tool calls and emit ToolCallEvents."""
 
-    def __init__(self, *, phase_name: str = "unknown") -> None:
+    def __init__(
+        self,
+        *,
+        callbacks: Sequence[Callback] | None = None,
+        phase_name: str = "unknown",
+    ) -> None:
         super().__init__()
+        self._callbacks = list(callbacks or [])
         self._phase_name = phase_name
+
+    def wrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], ToolMessage | Command[Any]],
+    ) -> ToolMessage | Command[Any]:
+        start_time = time.perf_counter()
+        result = handler(request)
+        duration_ms = (time.perf_counter() - start_time) * 1000.0
+
+        if isinstance(result, ToolMessage):
+            self._emit_tool_call_event(request, result, duration_ms)
+        return result
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
+    ) -> ToolMessage | Command[Any]:
+        start_time = time.perf_counter()
+        result = await handler(request)
+        duration_ms = (time.perf_counter() - start_time) * 1000.0
+
+        if isinstance(result, ToolMessage):
+            self._emit_tool_call_event(request, result, duration_ms)
+        return result
+
+    def _emit_tool_call_event(
+        self,
+        request: ToolCallRequest,
+        result: ToolMessage,
+        duration_ms: float,
+    ) -> None:
+        if not self._callbacks:
+            return
+
+        tool_name = request.tool_call.get("name", "unknown")
+        args = request.tool_call.get("args", {})
+        if not isinstance(args, dict):
+            args = {"args": args}
+
+        result_content = ""
+        if isinstance(result.content, str):
+            result_content = result.content
+        else:
+            try:
+                import json
+
+                result_content = json.dumps(result.content, sort_keys=True, default=str)
+            except Exception:
+                result_content = str(result.content)
+
+        event = ToolCallEvent(
+            phase_name=self._phase_name,
+            tool_name=tool_name,
+            args=args,
+            result=result_content,
+            duration_ms=duration_ms,
+            parent_node_id=None,
+            node_type="tool",
+        )
+
+        for cb in self._callbacks:
+            try:
+                if hasattr(cb, "on_event"):
+                    cb.on_event(event)
+                elif hasattr(cb, "on_tool_call"):
+                    cb.on_tool_call(
+                        self._phase_name,
+                        tool_name,
+                        args,
+                        result_content,
+                        duration_ms=duration_ms,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "[Tracing] callback %s error on dispatch: %s",
+                    type(cb).__name__,
+                    e,
+                )

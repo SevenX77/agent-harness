@@ -60,6 +60,7 @@ class PredictorService:
                 unattended=True,
                 **(input_data or {}),
             )
+            result: RunResult
             if isinstance(raw_result, dict):
                 from graph_agent.core.result import PathDiff, PhaseRecord, WorkflowMetrics, WorkflowResult
                 context = raw_result.get("context", raw_result)

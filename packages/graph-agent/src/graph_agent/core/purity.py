@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -235,7 +236,7 @@ def _collect_path_names(tree: ast.AST, aliases: dict[str, str]) -> set[str]:
     return path_names
 
 
-def _name_targets(targets: list[ast.AST]) -> set[str]:
+def _name_targets(targets: Sequence[ast.AST]) -> set[str]:
     names: set[str] = set()
     for target in targets:
         if isinstance(target, ast.Name):
@@ -276,7 +277,7 @@ def _target_full_name(
 
 def _violations_for_targets(
     path: Path,
-    targets: list[ast.AST],
+    targets: Sequence[ast.AST],
     aliases: dict[str, str],
     lineno: int,
 ) -> list[PurityViolation]:

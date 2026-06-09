@@ -155,9 +155,19 @@ def test_factory_lazy_imports_chat_google_generative_ai(monkeypatch: pytest.Monk
 def test_factory_reports_missing_google_extra_at_build_time(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from graph_agent_gateway import route_chat_model_factory as factory_module
     from graph_agent_gateway.route_chat_model_factory import RouteChatModelFactory
 
     monkeypatch.delitem(sys.modules, "langchain_google_genai", raising=False)
+
+    real_import_module = factory_module.importlib.import_module
+
+    def missing_google_import(name: str, package: str | None = None):
+        if name == "langchain_google_genai":
+            raise ImportError("missing langchain_google_genai")
+        return real_import_module(name, package)
+
+    monkeypatch.setattr(factory_module.importlib, "import_module", missing_google_import)
     factory = RouteChatModelFactory(
         credential_provider=StaticCredentialProvider({"endpoint:google": "google-secret"})
     )

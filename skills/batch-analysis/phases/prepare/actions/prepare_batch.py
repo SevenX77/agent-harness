@@ -2,7 +2,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from skills.shared.schemas import BatchAccumulator
+
+class BatchAccumulator:
+    def __init__(self):
+        self.known_characters = {}
+        self.known_props = {}
+        self.open_foreshadowing = []
+        self.active_arcs = []
+        self.character_latest_states = {}
+        self.time_tracker = {}
+        self.location_registry = {}
 
 
 def prepare_batch(context) -> dict:

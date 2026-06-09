@@ -4,13 +4,15 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from graph_agent_gateway.client_manager import LLMClientManager
+from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute, RuntimePolicy
 from langchain.agents import create_agent
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 from langgraph.checkpoint.memory import InMemorySaver
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 import graph_agent.core.graph_assembler as graph_assembler
 from graph_agent.core._predict_internal.interception import PredictGatewayChatModel
@@ -24,8 +26,6 @@ from graph_agent.middleware.cognitive_flow import CognitiveFlowMiddleware
 from graph_agent.middleware.execution_control import ExecutionControlMiddleware
 from graph_agent.middleware.factory import build_middleware_chain
 from graph_agent.middleware.protocol_validation import ProtocolValidationMiddleware
-from graph_agent_gateway.client_manager import LLMClientManager
-from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute, RuntimePolicy
 
 
 def _write(path: Path, text: str) -> None:
@@ -171,7 +171,7 @@ class _NoToolChatModel:
     def __init__(self) -> None:
         self.bound_tool_names: list[str] = []
 
-    def bind_tools(self, tools: list[Any], **kwargs: Any) -> "_NoToolChatModel":
+    def bind_tools(self, tools: list[Any], **kwargs: Any) -> _NoToolChatModel:
         del kwargs
         self.bound_tool_names = [str(getattr(tool, "name", "")) for tool in tools]
         return self
@@ -229,7 +229,7 @@ class _LoopingToolChatModel(BaseChatModel):
     def _llm_type(self) -> str:
         return "ws-e1-looping-tool"
 
-    def bind_tools(self, tools: list[Any], **kwargs: Any) -> "_LoopingToolChatModel":
+    def bind_tools(self, tools: list[Any], **kwargs: Any) -> _LoopingToolChatModel:
         del tools, kwargs
         return self
 
@@ -274,7 +274,7 @@ class _OneFinishCallModel(BaseChatModel):
     def _llm_type(self) -> str:
         return "ws-e1-one-finish-call"
 
-    def bind_tools(self, tools: list[Any], **kwargs: Any) -> "_OneFinishCallModel":
+    def bind_tools(self, tools: list[Any], **kwargs: Any) -> _OneFinishCallModel:
         del tools, kwargs
         return self
 
@@ -314,7 +314,7 @@ class _OneSubagentCallModel(BaseChatModel):
     def _llm_type(self) -> str:
         return "ws-e1-one-subagent-call"
 
-    def bind_tools(self, tools: list[Any], **kwargs: Any) -> "_OneSubagentCallModel":
+    def bind_tools(self, tools: list[Any], **kwargs: Any) -> _OneSubagentCallModel:
         del tools, kwargs
         return self
 
@@ -707,7 +707,7 @@ class _TwoInvalidSubagentCallModel(BaseChatModel):
     def _llm_type(self) -> str:
         return "ws-e1-two-invalid-subagent-calls"
 
-    def bind_tools(self, tools: list[Any], **kwargs: Any) -> "_TwoInvalidSubagentCallModel":
+    def bind_tools(self, tools: list[Any], **kwargs: Any) -> _TwoInvalidSubagentCallModel:
         del tools, kwargs
         return self
 

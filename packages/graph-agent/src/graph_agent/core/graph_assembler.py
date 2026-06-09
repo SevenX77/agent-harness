@@ -6,18 +6,18 @@ import copy
 import json
 import logging
 import uuid
+from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, NoReturn
-
-from langchain_core.messages import SystemMessage, ToolMessage
-from langchain_core.runnables import RunnableConfig
-from typing_extensions import Annotated
-from langgraph.prebuilt import InjectedState
-from langchain_core.tools import StructuredTool
-from langgraph.graph import END, START, StateGraph
+from typing import Annotated, Any, NoReturn, cast
 
 from langchain.agents import create_agent
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import StructuredTool
+from langgraph.checkpoint.base import BaseCheckpointSaver, Checkpoint, CheckpointMetadata, CheckpointTuple
+from langgraph.graph import END, START, StateGraph
+from langgraph.prebuilt import InjectedState
+
 from graph_agent.callbacks.emit import _safe_emit_event
 from graph_agent.callbacks.events import (
     BuiltinSubagentEnterEvent,
@@ -65,7 +65,6 @@ from graph_agent.core.subagents import (
     current_subagent_depth,
     validate_subagent_tool_args,
 )
-from graph_agent.middleware.factory import build_middleware_chain_cognitive_flow
 from graph_agent.runtime.state_mapper import (
     PhaseWrapper,
     StateMapper,
@@ -822,10 +821,6 @@ def _build_subgraph_node(
 
     return _subgraph_node
 
-
-from langgraph.checkpoint.base import BaseCheckpointSaver, CheckpointTuple, Checkpoint, CheckpointMetadata
-from typing import AsyncIterator, Iterator, Any, cast
-
 class NamespaceCheckpointer(BaseCheckpointSaver[Any]):
     def __init__(self, base_checkpointer: BaseCheckpointSaver[Any], target_ns: str) -> None:
         super().__init__(serde=base_checkpointer.serde)
@@ -1093,7 +1088,7 @@ def _build_skill_node(
                 return dispatch_func
 
             if tool.args_schema is not None and not isinstance(tool.args_schema, dict):
-                from pydantic import create_model, ConfigDict, Field
+                from pydantic import ConfigDict, Field, create_model
                 inputs_desc = ""
                 original_inputs_field = tool.args_schema.model_fields.get("inputs")
                 if original_inputs_field and original_inputs_field.description:
@@ -1301,7 +1296,7 @@ def _build_skill_node(
             if isinstance(result["flow"], dict):
                 result["flow"]["subagent_validation_retries"] = retries
             else:
-                setattr(result["flow"], "subagent_validation_retries", retries)
+                result["flow"].subagent_validation_retries = retries
         return cast(dict[str, Any] | WorkflowState, result)
 
     return _skill_node

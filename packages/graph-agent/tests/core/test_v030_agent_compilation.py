@@ -91,7 +91,8 @@ class FakeAgentChatModel:
         self.messages_seen: list[list[object]] = []
         self.bound_tool_names: list[str] = []
 
-    def bind_tools(self, tools: list[object]) -> FakeAgentChatModel:
+    def bind_tools(self, tools: list[object], **kwargs: object) -> FakeAgentChatModel:
+        del kwargs
         self.bound_tool_names = [getattr(tool, "name", "") for tool in tools]
         return self
 
@@ -102,7 +103,7 @@ class FakeAgentChatModel:
             tool_calls=[
                 {
                     "name": "finish_task",
-                    "args": {"markdown": "## answer\n\nok"},
+                    "args": {"business_data_md": "## item-1\n- answer: ok\n"},
                     "id": "finish-1",
                 }
             ],

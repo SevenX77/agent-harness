@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from app.services import predictor as predictor_module
 from app.services.diagnostic_export import export_predict_diagnostics
-from app.services.predictor import MAX_PHASE_REVISITS, PredictDeadlockError, PredictorService
+from app.services.predictor import PredictorService
 
 
 @pytest.fixture(autouse=True)
@@ -89,7 +89,7 @@ def _write_backend_skill(tmp_path: Path) -> Path:
     action_dir.mkdir(parents=True)
     (action_dir / "__init__.py").write_text("", encoding="utf-8")
     (action_dir / "prepare.py").write_text(
-        "def prepare(context):\n    context.set('prepared', True)\n    return {'prepared': True}\n",
+        "def prepare(context):\n    return {'prepared': True}\n",
         encoding="utf-8",
     )
     (skill_dir / "phases" / "draft").mkdir(parents=True)
@@ -97,7 +97,7 @@ def _write_backend_skill(tmp_path: Path) -> Path:
     draft_action_dir.mkdir(parents=True)
     (draft_action_dir / "__init__.py").write_text("", encoding="utf-8")
     (draft_action_dir / "draft.py").write_text(
-        "def draft(context):\n    context.set('text', 'draft')\n    return {'text': 'draft'}\n",
+        "def draft(context):\n    return {'text': 'draft'}\n",
         encoding="utf-8",
     )
     (skill_dir / "GRAPH.md").write_text(

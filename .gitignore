@@ -48,10 +48,15 @@ venv/
 
 # IDE
 .claude/
+.cursor/
 .idea/
 .vscode/
 *.swp
 *.swo
+
+# Local agent/editor workflow scratch
+.agent/
+.agents/workflows/dev.md
 
 # Superpowers brainstorm visual companion (per-session, ephemeral)
 .superpowers/

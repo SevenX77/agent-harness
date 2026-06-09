@@ -1,5 +1,5 @@
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
-import { GraphCanvas, type SkillGraphNodeData } from "@/components/GraphCanvas"
+import { GraphCanvas, type SkillGraphNodeData, type SkillNodeStatus } from "@/components/GraphCanvas"
 import type { Connection } from "@xyflow/react"
 import type { SkillDetail } from "@/api/types"
 import type { NewPhaseKind } from "@/components/GraphCanvas/canvas-authoring"
@@ -18,6 +18,7 @@ interface SplitEditorProps {
   onPersistConnection?: (connection: Connection) => Promise<void> | void
   onDisconnectConnection?: (connection: { source: string; target: string }) => Promise<void> | void
   onPhaseFileSave?: (args: { path: string; content: string; expectedHash: string }) => Promise<void> | void
+  statusByNodeId?: Record<string, SkillNodeStatus>
 }
 
 export function SplitEditor({
@@ -32,6 +33,7 @@ export function SplitEditor({
   onPersistConnection,
   onDisconnectConnection,
   onPhaseFileSave,
+  statusByNodeId,
 }: SplitEditorProps) {
   const {
     activeFileDetails,
@@ -112,6 +114,7 @@ export function SplitEditor({
             onPersistConnection={onPersistConnection}
             onDisconnectConnection={onDisconnectConnection}
             onPhaseFileSave={onPhaseFileSave}
+            statusByNodeId={statusByNodeId}
             compact
           />
         </div>

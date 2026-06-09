@@ -2,13 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Connection } from "@xyflow/react"
 import { toast } from "sonner"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
-import { GraphCanvas, type SkillGraphNodeData } from "@/components/GraphCanvas"
+import { GraphCanvas, type SkillGraphNodeData, type SkillNodeStatus } from "@/components/GraphCanvas"
 import { CopilotPanel } from "@/components/copilot/copilot-panel"
 import { useCopilotContext } from "@/hooks/useCopilotContext"
 import { readLintStatus } from "@/hooks/useDebouncedLint"
+import { useRunStream } from "@/hooks/useRunStream"
 import { useSkills } from "@/hooks/useSkills"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
-import { compileSkill, getSkillDetail, serializeSkillGraph, writeSkillFile, wsUrl } from "@/api/client"
+import { compileSkill, getSkillDetail, serializeSkillGraph, writeSkillFile, wsUrl, postPredictRun, startRun } from "@/api/client"
 import { isTauriRuntime } from "@/config/runtime"
 import { writeWorkspaceFile } from "@/lib/tauri"
 import type { CompileError } from "@/api/types"
@@ -78,6 +79,36 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const isLoading = useMemo(() => Boolean(currentSkillId && !skillDetail && !skillDetailError), [skillDetail, skillDetailError, currentSkillId])
   const [compileStages, setCompileStages] = useState<Record<string, SkillBuildStage>>({})
   const [compileErrors, setCompileErrors] = useState<Record<string, CompileError[]>>({})
+  const [runId, setRunId] = useState<string | null>(null)
+
+  useEffect(() => {
+    setRunId(null)
+  }, [currentSkillId])
+
+  const updateStage = useCallback((id: string, stage: SkillBuildStage) => {
+    setCompileStages((current) => ({ ...current, [id]: stage }))
+  }, [])
+
+  const runStream = useRunStream(runId)
+
+  const statusByNodeId = useMemo(() => {
+    const statuses: Record<string, SkillNodeStatus> = {}
+    if (!runStream.events) return statuses
+    for (const event of runStream.events) {
+      const phaseName = event.phase_name || event.current_phase
+      if (!phaseName) continue
+      const type = event.event_type || ""
+      const isError = type.includes("error") || event.status === "failed" || event.status === "error"
+      if (isError) {
+        statuses[phaseName] = "error"
+      } else if (type === "phase_start") {
+        statuses[phaseName] = "running"
+      } else if (type === "phase_end") {
+        statuses[phaseName] = "success"
+      }
+    }
+    return statuses
+  }, [runStream.events])
 
   useCopilotContext({
     skillId: currentSkillId,
@@ -431,26 +462,26 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const handleCompile = useCallback(() => {
     if (!currentSkillId) return
     const targetSkillId = currentSkillId
-    setCompileStages((current) => ({ ...current, [targetSkillId]: "compiling" }))
+    updateStage(targetSkillId, "compiling")
     setCompileErrors((current) => ({ ...current, [targetSkillId]: [] }))
     void compileSkill(targetSkillId)
       .then((result) => {
         if ("code" in result) {
-          setCompileStages((current) => ({ ...current, [targetSkillId]: "compile-fail" }))
+          updateStage(targetSkillId, "compile-fail")
           setCompileErrors((current) => ({ ...current, [targetSkillId]: result.errors }))
           const firstMessage = result.errors[0]?.message ?? result.detail
           toast.error(`${result.errors.length} compile error${result.errors.length === 1 ? "" : "s"}: ${firstMessage}`)
           return
         }
         if (result.status === "ok") {
-          setCompileStages((current) => ({ ...current, [targetSkillId]: "compile-pass" }))
+          updateStage(targetSkillId, "compile-pass")
           setCompileErrors((current) => ({ ...current, [targetSkillId]: [] }))
           toast.success(`Compiled ${result.manifest_name}`)
           void mutateSkillDetail()
         }
       })
       .catch((error: unknown) => {
-        setCompileStages((current) => ({ ...current, [targetSkillId]: "compile-fail" }))
+        updateStage(targetSkillId, "compile-fail")
         const message = error instanceof Error ? error.message : "Compile request failed"
         setCompileErrors((current) => ({
           ...current,
@@ -458,9 +489,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         }))
         toast.error(message)
       })
-  }, [currentSkillId, mutateSkillDetail])
+  }, [currentSkillId, mutateSkillDetail, updateStage])
 
-  const deriveBuildStage = (id: string): SkillBuildStage => {
+  const deriveBuildStage = useCallback((id: string): SkillBuildStage => {
     const compileStage = compileStages[id]
     if (compileStage) return compileStage
     const lint = readLintStatus(id)
@@ -468,7 +499,61 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     if (lint === "failed") return "compile-fail"
     if (lint === "passed") return "compile-pass"
     return "idle"
-  }
+  }, [compileStages])
+
+  const handlePredict = useCallback(async () => {
+    if (!currentSkillId) return
+    const targetSkillId = currentSkillId
+    updateStage(targetSkillId, "predicting")
+    try {
+      await postPredictRun(targetSkillId, {})
+      updateStage(targetSkillId, "predict-pass")
+      toast.success("Predict run completed successfully")
+    } catch (error: unknown) {
+      updateStage(targetSkillId, "predict-fail")
+      interface PredictErrorResponse {
+        response?: {
+          data?: {
+            code?: string
+            errors?: Array<{
+              file?: string | null
+              line?: number | null
+              field?: string | null
+              message?: string
+            }>
+          }
+        }
+      }
+      const err = error as PredictErrorResponse
+      const responseData = err?.response?.data
+      if (responseData?.code === "compile_failed" && Array.isArray(responseData?.errors)) {
+        const firstError = responseData.errors[0]
+        const detailMsg = firstError?.message || "Unknown compile/predict error"
+        toast.error(`Predict failed: ${detailMsg}`)
+      } else {
+        const fallbackMsg = error instanceof Error ? error.message : "Predict request failed"
+        toast.error(`Predict failed: ${fallbackMsg}`)
+      }
+    }
+  }, [currentSkillId, updateStage])
+
+  const handleRun = useCallback(async () => {
+    if (!currentSkillId) return
+    const stage = deriveBuildStage(currentSkillId)
+    if (stage !== "predict-pass") {
+      return
+    }
+    const targetSkillId = currentSkillId
+    updateStage(targetSkillId, "running")
+    try {
+      const result = await startRun(targetSkillId, {})
+      setRunId(result.run_id)
+      toast.success("Run started successfully")
+    } catch (error) {
+      updateStage(targetSkillId, "predict-pass")
+      toast.error(error instanceof Error ? error.message : "Failed to start run")
+    }
+  }, [currentSkillId, deriveBuildStage, updateStage, setRunId])
 
   const handleHome = useCallback(() => {
     setSettingsOpen(false)
@@ -542,6 +627,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   onPersistConnection={handlePersistConnection}
                   onDisconnectConnection={handleDisconnectConnection}
                   onPhaseFileSave={handlePhaseFileSave}
+                  statusByNodeId={statusByNodeId}
                 />
               ) : currentSkillId === null ? (
                 <WelcomePage onSelectSkill={onSelectSkill} />
@@ -558,6 +644,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   onPersistConnection={handlePersistConnection}
                   onDisconnectConnection={handleDisconnectConnection}
                   onPhaseFileSave={handlePhaseFileSave}
+                  statusByNodeId={statusByNodeId}
                 />
               )}
               {currentSkillId && !settingsOpen ? (
@@ -568,8 +655,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   <CenterActionBar
                     stage={deriveBuildStage(currentSkillId)}
                     onCompile={handleCompile}
-                    onPredict={() => console.info("predict clicked")}
-                    onRun={() => console.info("run clicked")}
+                    onPredict={handlePredict}
+                    onRun={handleRun}
                   />
                 </>
               ) : null}

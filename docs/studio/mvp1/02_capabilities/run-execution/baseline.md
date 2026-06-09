@@ -1,6 +1,6 @@
 # run-execution Baseline
 
-Status: backend live, frontend Run entry and live state wiring are stubs/orphans.
+Status: Workspace已接startRun和runId，节点状态投影有单测覆盖；真实Tauri/App手动QA和完整timeline flow仍deferred。
 
 Source workflow: `01_workflows/04_run-and-verify.md`.
 
@@ -8,8 +8,8 @@ Source workflow: `01_workflows/04_run-and-verify.md`.
 
 | Surface | Current behavior | Evidence |
 |---|---|---|
-| Run button | Center action bar can display Run after predict-pass, but no code sets predict-pass and handler only logs. | `apps/studio/frontend/src/components/studio/center-action-bar.tsx:52`, `apps/studio/frontend/src/components/studio/Workspace.tsx:538` |
-| API helper | `startRun` posts input data to `/runs`. | `apps/studio/frontend/src/api/client.ts:154` |
+| Run button | Center action bar displays and enables Run after predict-pass. Workspace handler invokes the `startRun` API client. | `apps/studio/frontend/src/components/studio/center-action-bar.tsx:52`, `apps/studio/frontend/src/components/studio/Workspace.tsx:542` |
+| API helper | `startRun` posts input data to `/skills/{skill_id}/runs`. | `apps/studio/frontend/src/api/client.ts:155` |
 | Run route | Backend starts a run via `run_manager.start_run`. | `apps/studio/backend/app/routers/runs.py:27` |
 | Worker | Run manager spawns a process, calls `run_skill`, writes final state, metrics, and status. | `apps/studio/backend/app/services/run_manager.py:81`, `apps/studio/backend/app/services/run_manager.py:182` |
 | Run artifacts | Run directory includes trace, artifacts, checkpoints, and metadata files. | `apps/studio/backend/app/services/run_manager.py:164` |
@@ -21,10 +21,9 @@ Source workflow: `01_workflows/04_run-and-verify.md`.
 ## Current Coverage
 
 - live/backend: start run, worker, run files, websocket stream, run history, batch route, autocommit.
-- orphan/frontend: batch runner, run detail drawer, run stream hook, node status animation.
-- missing: Run button hookup, `statusByNodeId` mapping, focus follow, i/o panel entry.
+- live/frontend: Run button execution, WS-3 stage integration with predict-pass gate, and WebSocket event stream connection via `useRunStream` driving node status projection.
 
-## Known Drift
+## Known Drift / Deferred Items
 
-- Workflow requires node lights driven by real run events; Workspace does not pass `statusByNodeId` to GraphCanvas (`apps/studio/frontend/src/components/studio/Workspace.tsx:515`).
-- Run should start from i/o panel input selection; current button has no input contract (`apps/studio/frontend/src/components/studio/Workspace.tsx:538`).
+- 真实的 Tauri/App 本地开发启动运行调试与手动 QA 处于 **deferred** 状态。
+- Timeline 流式完整呈现、历史运行抽屉的完整渲染与闭环仍属于本批次 **deferred**。

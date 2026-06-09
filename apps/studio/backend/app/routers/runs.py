@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Response, status
+from fastapi.responses import JSONResponse
 
 from app.core.exceptions import raise_not_implemented
 from app.models.errors import ErrorResponse
@@ -29,15 +30,48 @@ async def create_run(skill_id: str, request: RunRequest) -> RunMetadata:
     return await run_manager.start_run(skill_id, request)
 
 
-@router.post("/predict")
-async def predict_run(skill_id: str, request: PredictRunRequest) -> dict[str, object]:
-    result = predictor_service.dispatch_predict_job(
-        skill_id,
-        request.mock_llm,
-        input_data=request.input_data,
-        current_hashes=request.current_hashes,
+def _format_predict_value_error(exc: ValueError) -> JSONResponse:
+    msg = str(exc)
+    known_fields = ["system_prompt", "user_prompt", "inputs", "outputs", "manifest"]
+    field = "general"
+    for f in known_fields:
+        if f in msg:
+            field = f
+            break
+
+    parts = msg.split(":")
+    last_part = parts[-1].strip()
+    if last_part.lower().startswith("invalid "):
+        message = "Invalid " + last_part[8:]
+    else:
+        message = last_part.capitalize()
+
+    return JSONResponse(
+        status_code=400,
+        content={
+            "code": "compile_failed",
+            "errors": [
+                {
+                    "field": field,
+                    "message": message,
+                }
+            ]
+        }
     )
-    return result.model_dump(mode="json")
+
+
+@router.post("/predict", response_model=None)
+async def predict_run(skill_id: str, request: PredictRunRequest) -> dict[str, object] | JSONResponse:
+    try:
+        result = predictor_service.dispatch_predict_job(
+            skill_id,
+            request.mock_llm,
+            input_data=request.input_data,
+            current_hashes=request.current_hashes,
+        )
+        return result.model_dump(mode="json")
+    except ValueError as exc:
+        return _format_predict_value_error(exc)
 
 
 @router.get("", response_model=RunListResponse)

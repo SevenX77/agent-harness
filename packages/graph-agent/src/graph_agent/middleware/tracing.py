@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from collections.abc import Awaitable, Callable, Sequence
@@ -17,6 +18,7 @@ from graph_agent.callbacks.base import Callback
 from graph_agent.callbacks.events import ToolCallEvent
 
 logger = logging.getLogger(__name__)
+ToolCallResult = ToolMessage | Command[Any]
 
 
 class TracingMiddleware(AgentMiddleware[AgentState[Any]]):
@@ -35,25 +37,28 @@ class TracingMiddleware(AgentMiddleware[AgentState[Any]]):
     def wrap_tool_call(
         self,
         request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], ToolMessage | Command[Any]],
-    ) -> ToolMessage | Command[Any]:
+        handler: Callable[[ToolCallRequest], ToolCallResult],
+    ) -> ToolCallResult:
         start_time = time.perf_counter()
         result = handler(request)
-        duration_ms = (time.perf_counter() - start_time) * 1000.0
-
-        if isinstance(result, ToolMessage):
-            self._emit_tool_call_event(request, result, duration_ms)
-        return result
+        return self._record_tool_result(request, result, start_time)
 
     async def awrap_tool_call(
         self,
         request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
-    ) -> ToolMessage | Command[Any]:
+        handler: Callable[[ToolCallRequest], Awaitable[ToolCallResult]],
+    ) -> ToolCallResult:
         start_time = time.perf_counter()
         result = await handler(request)
-        duration_ms = (time.perf_counter() - start_time) * 1000.0
+        return self._record_tool_result(request, result, start_time)
 
+    def _record_tool_result(
+        self,
+        request: ToolCallRequest,
+        result: ToolCallResult,
+        start_time: float,
+    ) -> ToolCallResult:
+        duration_ms = (time.perf_counter() - start_time) * 1000.0
         if isinstance(result, ToolMessage):
             self._emit_tool_call_event(request, result, duration_ms)
         return result
@@ -68,21 +73,8 @@ class TracingMiddleware(AgentMiddleware[AgentState[Any]]):
             return
 
         tool_name = request.tool_call.get("name", "unknown")
-        args = request.tool_call.get("args", {})
-        if not isinstance(args, dict):
-            args = {"args": args}
-
-        result_content = ""
-        if isinstance(result.content, str):
-            result_content = result.content
-        else:
-            try:
-                import json
-
-                result_content = json.dumps(result.content, sort_keys=True, default=str)
-            except Exception:
-                result_content = str(result.content)
-
+        args = _tool_args(request)
+        result_content = _result_content(result)
         event = ToolCallEvent(
             phase_name=self._phase_name,
             tool_name=tool_name,
@@ -111,3 +103,19 @@ class TracingMiddleware(AgentMiddleware[AgentState[Any]]):
                     type(cb).__name__,
                     e,
                 )
+
+
+def _tool_args(request: ToolCallRequest) -> dict[str, Any]:
+    args = request.tool_call.get("args", {})
+    if isinstance(args, dict):
+        return args
+    return {"args": args}
+
+
+def _result_content(result: ToolMessage) -> str:
+    if isinstance(result.content, str):
+        return result.content
+    try:
+        return json.dumps(result.content, sort_keys=True, default=str)
+    except Exception:
+        return str(result.content)

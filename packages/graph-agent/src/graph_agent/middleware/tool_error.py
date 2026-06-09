@@ -30,21 +30,7 @@ class ToolErrorHandlingMiddleware(AgentMiddleware[AgentState[Any]]):
         except GraphBubbleUp:
             raise
         except Exception as exc:
-            tool_name = request.tool_call.get("name", "unknown")
-            tool_call_id = request.tool_call.get("id", "")
-            exc_type = type(exc).__name__
-            exc_msg = str(exc)
-
-            diagnostic = (
-                f"Error executing tool '{tool_name}' in phase '{self._phase_name}' "
-                f"(call_id: {tool_call_id}): {exc_type}: {exc_msg}"
-            )
-            return ToolMessage(
-                content=diagnostic,
-                name=tool_name,
-                tool_call_id=tool_call_id,
-                status="error",
-            )
+            return _error_tool_message(self._phase_name, request, exc)
 
     async def awrap_tool_call(
         self,
@@ -56,18 +42,23 @@ class ToolErrorHandlingMiddleware(AgentMiddleware[AgentState[Any]]):
         except GraphBubbleUp:
             raise
         except Exception as exc:
-            tool_name = request.tool_call.get("name", "unknown")
-            tool_call_id = request.tool_call.get("id", "")
-            exc_type = type(exc).__name__
-            exc_msg = str(exc)
+            return _error_tool_message(self._phase_name, request, exc)
 
-            diagnostic = (
-                f"Error executing tool '{tool_name}' in phase '{self._phase_name}' "
-                f"(call_id: {tool_call_id}): {exc_type}: {exc_msg}"
-            )
-            return ToolMessage(
-                content=diagnostic,
-                name=tool_name,
-                tool_call_id=tool_call_id,
-                status="error",
-            )
+
+def _error_tool_message(
+    phase_name: str,
+    request: ToolCallRequest,
+    exc: Exception,
+) -> ToolMessage:
+    tool_name = str(request.tool_call.get("name") or "unknown")
+    tool_call_id = str(request.tool_call.get("id") or "")
+    diagnostic = (
+        f"Error executing tool '{tool_name}' in phase '{phase_name}' "
+        f"(call_id: {tool_call_id}): {type(exc).__name__}: {exc}"
+    )
+    return ToolMessage(
+        content=diagnostic,
+        name=tool_name,
+        tool_call_id=tool_call_id,
+        status="error",
+    )

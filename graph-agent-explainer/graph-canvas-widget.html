@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Graph Canvas Widget</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Outfit:wght@300;400;500;600;700;800&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+  /* ---- only the tokens this widget needs ---- */
+  :root {
+    --accent-orange: #f39c12;
+    --font-sans: 'Outfit', 'Noto Sans SC', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+    /* Studio dark palette */
+    --st-bg: #09090b;
+    --st-panel: #131316;
+    --st-border: #27272a;
+    --st-text: #e4e4e7;
+    --st-muted: #8a8a93;
+    --st-primary: #7c6cf0;
+    --st-primary-soft: rgba(124,108,240,.16);
+    --st-logic: #2dd4bf;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #f3f4f8; font-family: var(--font-sans); padding: 40px 20px; display: flex; justify-content: center; }
+  .wrap { width: 100%; max-width: 760px; }
+
+  /* ===== STUDIO MOCK (dark canvas) ===== */
+  .studio { margin: 0 0 26px; border: 1px solid var(--st-border); border-radius: 12px; overflow: hidden; background: var(--st-bg); box-shadow: 0 16px 44px rgba(20,30,60,.16); font-size: 13px; }
+  .studio-title { height: 38px; display: flex; align-items: center; gap: 8px; padding: 0 14px; background: #0d0d10; border-bottom: 1px solid var(--st-border); }
+  .studio-title .dots { display: flex; gap: 6px; }
+  .studio-title .dots i { width: 10px; height: 10px; border-radius: 50%; background: #2c2c31; display: block; }
+  .studio-title .tt { font-family: var(--font-mono); font-size: 11px; color: var(--st-muted); letter-spacing: .4px; }
+  .studio-title .tt b { color: var(--st-text); font-weight: 600; }
+  .studio-body { display: flex; min-height: 360px; }
+  .studio-rail { width: 46px; background: #0d0d10; border-right: 1px solid var(--st-border); display: flex; flex-direction: column; align-items: center; padding: 10px 0; gap: 4px; flex-shrink: 0; }
+  .rail-ico { width: 30px; height: 30px; border-radius: 7px; display: flex; align-items: center; justify-content: center; color: var(--st-muted); font-size: 14px; cursor: pointer; transition: all .2s; }
+  .rail-ico:hover { background: #1a1a1f; color: var(--st-text); }
+  .rail-ico.active { background: var(--st-primary-soft); color: #b6acff; }
+  .studio-main { flex: 1; min-width: 0; display: flex; }
+  .studio-canvas { flex: 1; min-width: 0; position: relative; background-color: var(--st-bg); background-image: radial-gradient(var(--st-border) 1px, transparent 1px); background-size: 18px 18px; }
+  .studio-canvas svg { width: 100%; height: 100%; display: block; }
+  /* control bar */
+  .studio-ctrl { display: flex; gap: 8px; padding: 12px 14px 4px; flex-wrap: wrap; align-items: center; }
+  .sbtn { font-size: 12px; font-weight: 600; padding: 6px 13px; border-radius: 7px; background: #16161b; border: 1px solid var(--st-border); color: var(--st-text); cursor: pointer; transition: all .18s; }
+  .sbtn:hover { border-color: #3a3a42; }
+  .sbtn.active { background: var(--st-primary-soft); border-color: var(--st-primary); color: #c3bbff; }
+  .sbtn.green.active { background: rgba(45,212,191,.15); border-color: var(--st-logic); color: #5eead4; }
+  .ctrl-hint { font-size: 11px; color: var(--st-muted); }
+  /* trace timeline */
+  .trace { border-top: 1px solid var(--st-border); background: #0d0d10; max-height: 118px; overflow-y: auto; padding: 8px 12px; font-family: var(--font-mono); font-size: 11px; }
+  .trace-row { display: flex; gap: 8px; padding: 2px 0; color: var(--st-muted); opacity: .35; transition: opacity .25s; }
+  .trace-row.on { opacity: 1; color: var(--st-text); }
+  .trace-row .ev { color: #b6acff; }
+  .trace-row .ok { color: var(--st-logic); }
+  /* SVG node helpers */
+  .nlabel { fill: var(--st-text); font-size: 11px; font-weight: 600; font-family: var(--font-sans); }
+  .nkind { font-size: 8.5px; font-family: var(--font-mono); font-weight: 700; letter-spacing: .5px; }
+  .gedge { stroke: #3a3a42; stroke-width: 1.6; fill: none; transition: stroke .3s, stroke-width .3s; }
+  .gedge.flow { stroke: var(--st-primary); stroke-width: 2.2; stroke-dasharray: 4 4; animation: gdash 1s linear infinite; }
+  @keyframes gdash { to { stroke-dashoffset: -16; } }
+  .gnode { transition: all .25s; cursor: pointer; }
+  .gnode rect { transition: all .3s; }
+  .gnode.dim rect { opacity: .5; }
+  .gnode.running rect { filter: drop-shadow(0 0 7px var(--st-primary)); }
+  .gnode.done rect { stroke-width: 2; }
+  .gbadge { font-size: 8.5px; font-family: var(--font-mono); font-weight: 700; }
+  .gbadge.run { fill: #b6acff; }
+  .gbadge.ok { fill: var(--st-logic); }
+  .gbadge.idle { fill: var(--st-muted); }
+  .gbadge.stale { fill: var(--accent-orange); }
+  @keyframes stpulse { from { opacity: .55; } to { opacity: 1; } }
+  .gnode.running .gbadge { animation: stpulse .9s infinite alternate; }
+  .gnode.stale rect { stroke: var(--accent-orange) !important; fill: rgba(245,158,11,.08) !important; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <!-- ===== the canvas widget (copy this block + the <style> + <script>) ===== -->
+    <div class="studio" id="demo-run">
+      <div class="studio-title"><span class="dots"><i></i><i></i><i></i></span><span class="tt">Studio · <b id="run-name">v030_e2e_pipeline</b></span></div>
+      <div class="studio-ctrl">
+        <button class="sbtn active" id="run-topo-linear" onclick="DEMO_run_setTopo('linear')">线性流程</button>
+        <button class="sbtn" id="run-topo-fan" onclick="DEMO_run_setTopo('fan')">并行 fan-out</button>
+        <button class="sbtn green active" id="run-go" onclick="DEMO_run_go()">▶ Run</button>
+        <span class="ctrl-hint" id="run-hint">按 super-step 推进;无依赖的节点会同时点亮</span>
+      </div>
+      <div class="studio-body">
+        <div class="studio-rail"><span class="rail-ico">▦</span><span class="rail-ico">⊞</span><span class="rail-ico">⊳</span><span class="rail-ico active">≣</span><span class="rail-ico">↺</span></div>
+        <div class="studio-main">
+          <div class="studio-canvas"><svg id="svg-run" viewBox="0 0 560 200" preserveAspectRatio="xMidYMid meet"></svg></div>
+        </div>
+      </div>
+      <div class="trace" id="run-trace"></div>
+    </div>
+  </div>
+
+  <script>
+  // ===== generic SVG graph renderer (zero deps) =====
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const KIND_COLOR = { agent:'#7c6cf0', logic:'#2dd4bf', subgraph:'#f59e0b', io:'#64748b' };
+  const KIND_LABEL = { agent:'AGENT', logic:'LOGIC', subgraph:'SUBGRAPH', io:'I/O' };
+  function NS(t){ return document.createElementNS(SVGNS, t); }
+  function gget(svg, id){ return svg.querySelector('.gnode[data-id="'+id+'"]'); }
+  function $(id){ return document.getElementById(id); }
+
+  function renderGraph(svg, nodes, edges, dir){
+    dir = dir || 'h';
+    svg.innerHTML = '';
+    const map = {}; nodes.forEach(n => map[n.id] = n);
+    edges.forEach(([a,b]) => {
+      const s = map[a], t = map[b]; if(!s||!t) return;
+      let x1,y1,x2,y2,c1x,c1y,c2x,c2y;
+      if(dir==='h'){ x1=s.x+s.w; y1=s.y+s.h/2; x2=t.x; y2=t.y+t.h/2; const dx=Math.max(24,(x2-x1)/2); c1x=x1+dx; c1y=y1; c2x=x2-dx; c2y=y2; }
+      else { x1=s.x+s.w/2; y1=s.y+s.h; x2=t.x+t.w/2; y2=t.y; const dy=Math.max(18,(y2-y1)/2); c1x=x1; c1y=y1+dy; c2x=x2; c2y=y2-dy; }
+      const p = NS('path');
+      p.setAttribute('class','gedge');
+      p.setAttribute('data-edge', a+'>'+b);
+      p.setAttribute('d', 'M '+x1+' '+y1+' C '+c1x+' '+c1y+' '+c2x+' '+c2y+' '+x2+' '+y2);
+      svg.appendChild(p);
+    });
+    nodes.forEach(n => {
+      const g = NS('g');
+      g.setAttribute('class','gnode'+(n.kind==='io'?' dim':''));
+      g.setAttribute('data-id', n.id);
+      const r = NS('rect');
+      r.setAttribute('x',n.x); r.setAttribute('y',n.y); r.setAttribute('width',n.w); r.setAttribute('height',n.h); r.setAttribute('rx',8);
+      r.setAttribute('fill','#16161b'); r.setAttribute('stroke',KIND_COLOR[n.kind]); r.setAttribute('stroke-width',1.6);
+      g.appendChild(r);
+      const k = NS('text'); k.setAttribute('class','nkind'); k.setAttribute('x',n.x+9); k.setAttribute('y',n.y+15); k.setAttribute('fill',KIND_COLOR[n.kind]); k.textContent = KIND_LABEL[n.kind]; g.appendChild(k);
+      const l = NS('text'); l.setAttribute('class','nlabel'); l.setAttribute('x',n.x+n.w/2); l.setAttribute('y',n.y+n.h-11); l.setAttribute('text-anchor','middle'); l.textContent = n.label; g.appendChild(l);
+      const b = NS('text'); b.setAttribute('class','gbadge idle'); b.setAttribute('data-badge',''); b.setAttribute('x',n.x+n.w-9); b.setAttribute('y',n.y+15); b.setAttribute('text-anchor','end'); b.textContent='○'; g.appendChild(b);
+      svg.appendChild(g);
+    });
+  }
+  function setState(svg, id, state){
+    const g = gget(svg, id); if(!g) return;
+    g.classList.remove('running','done','stale');
+    const b = g.querySelector('[data-badge]');
+    if(state==='running'){ g.classList.add('running'); b.setAttribute('class','gbadge run'); b.textContent='● run'; }
+    else if(state==='done'){ g.classList.add('done'); b.setAttribute('class','gbadge ok'); b.textContent='✓'; }
+    else if(state==='stale'){ g.classList.add('stale'); b.setAttribute('class','gbadge stale'); b.textContent='▲ stale'; }
+    else { b.setAttribute('class','gbadge idle'); b.textContent='○'; }
+  }
+  function setFlow(svg, a, b, on){ const e = svg.querySelector('[data-edge="'+a+'>'+b+'"]'); if(e) e.classList.toggle('flow', !!on); }
+  function addTrace(el, html){ const d=document.createElement('div'); d.className='trace-row'; d.innerHTML=html; el.appendChild(d); el.scrollTop=el.scrollHeight; requestAnimationFrame(()=>d.classList.add('on')); }
+
+  // ===== topologies (edit nodes/edges here; coordinates are hand-laid) =====
+  function linearH(){ return {
+    nodes:[
+      {id:'input',label:'input',kind:'io',x:8,y:77,w:100,h:46},
+      {id:'segment',label:'segment',kind:'agent',x:122,y:77,w:104,h:46},
+      {id:'score',label:'score',kind:'logic',x:240,y:77,w:104,h:46},
+      {id:'expand',label:'expand',kind:'subgraph',x:358,y:77,w:104,h:46},
+      {id:'output',label:'output',kind:'io',x:476,y:77,w:78,h:46},
+    ],
+    edges:[['input','segment'],['segment','score'],['score','expand'],['expand','output']] };
+  }
+  function fanH(){ return {
+    nodes:[
+      {id:'input',label:'input',kind:'io',x:8,y:77,w:92,h:46},
+      {id:'prepare',label:'prepare',kind:'agent',x:120,y:77,w:104,h:46},
+      {id:'branch_a',label:'branch_a',kind:'agent',x:244,y:30,w:104,h:46},
+      {id:'branch_b',label:'branch_b',kind:'agent',x:244,y:124,w:104,h:46},
+      {id:'assemble',label:'assemble',kind:'logic',x:368,y:77,w:104,h:46},
+      {id:'output',label:'output',kind:'io',x:486,y:77,w:66,h:46},
+    ],
+    edges:[['input','prepare'],['prepare','branch_a'],['prepare','branch_b'],['branch_a','assemble'],['branch_b','assemble'],['assemble','output']] };
+  }
+
+  // ===== run interaction =====
+  let runBusy=false, runTopo='linear';
+  function DEMO_run_setTopo(t){
+    if(runBusy) return; runTopo=t; const svg=$('svg-run');
+    $('run-topo-linear').classList.toggle('active',t==='linear');
+    $('run-topo-fan').classList.toggle('active',t==='fan');
+    $('run-name').textContent = t==='linear'?'v030_e2e_pipeline':'fake_canvas_fanout';
+    $('run-hint').textContent = t==='linear'?'线性:节点逐个推进':'fan-out:branch_a / branch_b 无依赖 → 同时点亮';
+    const topo = t==='linear'?linearH():fanH();
+    svg.setAttribute('viewBox','0 0 560 200');
+    renderGraph(svg, topo.nodes, topo.edges, 'h');
+    $('run-trace').innerHTML='';
+  }
+  function DEMO_run_go(){
+    if(runBusy) return; runBusy=true;
+    const svg=$('svg-run');
+    const topo = runTopo==='linear'?linearH():fanH();
+    topo.nodes.forEach(n=>setState(svg,n.id,'idle'));
+    const steps = runTopo==='linear'
+      ? [['input'],['segment'],['score'],['expand'],['output']]
+      : [['input'],['prepare'],['branch_a','branch_b'],['assemble'],['output']];
+    const inc = {}; topo.edges.forEach(e=>{ (inc[e[1]]=inc[e[1]]||[]).push(e[0]); });
+    const trace=$('run-trace'); trace.innerHTML='';
+    let t=0; const STEP=760;
+    steps.forEach(grp=>{
+      setTimeout(()=>{ grp.forEach(id=>{ setState(svg,id,'running'); (inc[id]||[]).forEach(a=>setFlow(svg,a,id,true)); addTrace(trace,'<span class="ev">PhaseStarted</span> '+id); }); }, t);
+      setTimeout(()=>{ grp.forEach(id=>{ setState(svg,id,'done'); (inc[id]||[]).forEach(a=>setFlow(svg,a,id,false)); addTrace(trace,'<span class="ok">PhaseCompleted</span> '+id+' ✓'); }); }, t+STEP-200);
+      t+=STEP;
+    });
+    setTimeout(()=>{ runBusy=false; addTrace(trace,'<span class="ok">GraphCompleted</span> ✓'); }, t+150);
+  }
+
+  // boot
+  window.addEventListener('load', () => DEMO_run_setTopo('linear'));
+  </script>
+</body>
+</html>

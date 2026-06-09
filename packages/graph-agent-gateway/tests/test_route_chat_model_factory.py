@@ -176,8 +176,8 @@ def test_factory_reports_missing_google_extra_at_build_time(
 
 
 def test_factory_returns_generic_chat_model_for_nonstandard_protocol() -> None:
-    from langchain_core.language_models.chat_models import BaseChatModel
     from graph_agent_gateway.registry.schema import ResolvedRoute
+    from langchain_core.language_models.chat_models import BaseChatModel
 
     route = ResolvedRoute.model_construct(
         role_name="graph_agent",
@@ -201,8 +201,8 @@ def test_factory_returns_generic_chat_model_for_nonstandard_protocol() -> None:
 
 
 def test_generic_chat_model_fails_loud_until_ordinary_chat_core_exists() -> None:
-    from langchain_core.messages import HumanMessage
     from graph_agent_gateway.registry.schema import ResolvedRoute
+    from langchain_core.messages import HumanMessage
 
     route = ResolvedRoute.model_construct(
         role_name="graph_agent",

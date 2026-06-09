@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
 from typing import Any
-from pydantic import BaseModel
 
-from app.services.predictor import PredictorService
+import pytest
 from app.models.runs import PredictDiagnosticExport
+from app.services.predictor import PredictorService
 
 
 def test_predictor_service_integrates_with_sdk_predict_skill(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -26,7 +25,7 @@ def test_predictor_service_integrates_with_sdk_predict_skill(monkeypatch: pytest
     # For the Red Phase, let's assume we import RunResult and construct it.
     # Since RunResult doesn't exist yet, we will mock it or let it fail!
     try:
-        from graph_agent import RunResult, PhaseRecord, PathDiff
+        from graph_agent import PathDiff, PhaseRecord, RunResult
     except ImportError:
         # Expected to fail in Red Phase!
         pytest.fail("Cannot import RunResult, PhaseRecord, PathDiff in Red Phase")

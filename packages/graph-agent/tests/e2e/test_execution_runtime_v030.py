@@ -15,7 +15,7 @@ class ToolCallingChatModel:
             [
                 {
                     "name": "finish_task",
-                    "args": {"markdown": "## answer\n\nok"},
+                    "args": {"business_data_md": "## item-1\n- answer: ok\n"},
                     "id": "finish-1",
                 }
             ]
@@ -23,8 +23,8 @@ class ToolCallingChatModel:
         self.system_prompts: list[str] = []
         self.tool_messages: list[Any] = []
 
-    def bind_tools(self, tools: list[Any]) -> ToolCallingChatModel:
-        del tools
+    def bind_tools(self, tools: list[Any], **kwargs: Any) -> ToolCallingChatModel:
+        del tools, kwargs
         return self
 
     def invoke(self, messages: list[Any]) -> AIMessage:
@@ -233,7 +233,7 @@ def test_agent_can_call_read_example_for_declared_document_example(
     chat = ToolCallingChatModel(
         [
             [{"name": "read_example", "args": {"example_id": "E2"}, "id": "read-example-1"}],
-            [{"name": "finish_task", "args": {"markdown": "## answer\n\nok"}, "id": "finish-1"}],
+            [{"name": "finish_task", "args": {"business_data_md": "## item-1\n- answer: ok\n"}, "id": "finish-1"}],
         ]
     )
 

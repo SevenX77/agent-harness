@@ -228,15 +228,14 @@ roles:
     role_kind: copilot
     system_prompt_prefix: ""
     fallback_chain:
-      - route_id: qiniu-anthropic-sonnet-4-7
+      - route_id: qiniu-anthropic:claude-sonnet-4-7
         runtime_settings:
           temperature: null
           max_output_tokens: 8192
-      - route_id: onechats-anthropic-sonnet-4-7
+      - route_id: onechats-anthropic:claude-sonnet-4-7
         runtime_settings:
           temperature: null
           max_output_tokens: 8192
     lint_requirements:
       thinking: "warn"
       tool_calling: "warn"
-

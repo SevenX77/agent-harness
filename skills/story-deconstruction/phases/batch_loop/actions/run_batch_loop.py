@@ -1,19 +1,12 @@
 import logging
-from pathlib import Path
-from graph_agent.core.runner import run_skill
-from graph_agent.core.local_workspace_resolver import LocalWorkspaceResolver
 
 logger = logging.getLogger(__name__)
 
 
 def run_batch_loop(context) -> dict:
-    """执行批次分析循环。"""
+    """Group flattened events into deterministic batches without nested skill calls."""
     all_events = context.get("all_events", [])
 
-    # 1. 发现追踪维度
-    dynamic_dimensions = ["plot_progression", "character_development", "tension_level"]
-
-    # 2. 扁平化所有事件
     flat_events = []
     for ch in all_events:
         ch_num = ch.get("chapter_number")
@@ -23,16 +16,10 @@ def run_batch_loop(context) -> dict:
                 "chapter_number": ch_num,
             })
 
-    # 3. 循环批次处理
     batch_size = 10
     total_batches = (len(flat_events) + batch_size - 1) // batch_size
     all_batch_results = []
     accumulated_context = {}
-
-    repo_root = Path(__file__).resolve().parents[5]
-    skills_base = repo_root / "skills"
-    workspace_dir = repo_root / ".workspace"
-    resolver = LocalWorkspaceResolver(search_paths=[repo_root, skills_base])
 
     for batch_index in range(total_batches):
         start_idx = batch_index * batch_size
@@ -50,27 +37,11 @@ def run_batch_loop(context) -> dict:
 
         logger.info(f"Running batch analysis for Batch {batch_index + 1}: chapters {chapter_range}")
 
-        # 调用 batch-analysis 技能
-        result = run_skill(
-            skills_base / "batch-analysis",
-            workspace_dir=workspace_dir,
-            skill_resolver=resolver,
-            batch_events=batch_events,
-            accumulated_context=accumulated_context,
-            dynamic_dimensions=dynamic_dimensions,
-            chapter_range=chapter_range,
-        )
-
-        batch_ctx = result.context
-        batch_result = batch_ctx.get("batch_result", {})
-        updated_accumulated = batch_ctx.get("updated_accumulated", {})
-
         all_batch_results.append({
             "batch_index": batch_index + 1,
             "chapter_range": chapter_range,
-            "result": batch_result,
+            "result": batch_events,
         })
-        accumulated_context = updated_accumulated
 
     logger.info(f"Batch analysis completed: {len(all_batch_results)} batches")
     return {

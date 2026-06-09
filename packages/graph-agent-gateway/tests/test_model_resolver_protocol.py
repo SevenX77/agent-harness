@@ -7,8 +7,8 @@ requirements.md §4.1 (Mock Model Resolver drives runtime).
 
 from __future__ import annotations
 
-import inspect
 import importlib.util
+import inspect
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, cast

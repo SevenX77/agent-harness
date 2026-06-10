@@ -58,7 +58,10 @@ def build_middleware_chain(
             callbacks=callbacks,
             phase_name=phase_name,
         ),
-        "Tracing": TracingMiddleware(phase_name=phase_name),
+        "Tracing": TracingMiddleware(
+            callbacks=callbacks,
+            phase_name=phase_name,
+        ),
         "ToolError": ToolErrorHandlingMiddleware(phase_name=phase_name),
         "LoopDetection": LoopDetectionMiddleware(phase_name=phase_name),
     }

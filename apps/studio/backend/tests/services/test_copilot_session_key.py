@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import hashlib
 
+from app.services import copilot
 from app.services.copilot import make_session_key
-
-SESSION_KEY_SALT = b"agent-harness-copilot-session-key-v1"
-SESSION_KEY_ITERATIONS = 100_000
 
 
 def test_session_key_differs_by_skill_and_model() -> None:
@@ -49,9 +47,14 @@ def test_session_key_hashes_api_key_one_way() -> None:
     assert api_key_hash == hashlib.pbkdf2_hmac(
         "sha256",
         api_key.encode("utf-8"),
-        SESSION_KEY_SALT,
-        SESSION_KEY_ITERATIONS,
+        copilot._SESSION_KEY_SALT,
+        copilot._SESSION_KEY_ITERATIONS,
         dklen=8,
     ).hex()[:16]
     assert len(api_key_hash) == 16
     assert api_key not in api_key_hash
+
+
+def test_session_key_salt_is_not_a_hardcoded_constant() -> None:
+    assert copilot._SESSION_KEY_SALT != b"agent-harness-copilot-session-key-v1"
+    assert len(copilot._SESSION_KEY_SALT) >= 16

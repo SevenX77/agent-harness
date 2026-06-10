@@ -1,13 +1,13 @@
 ---
 module: 02-mechanism/04-run-outer/03-checkpoint
 doc: baseline
-status: audited-ready（B 成段 2026-06-05,codex 已核(records/uncovered 块);run/thread 级 checkpoint 已接(runner.py:663→graph_assembler.py:151),内层 AGENT 分支不传 checkpointer(:201)、data 无 delta reducer、持久化边界 phase_executor.py:82）
+status: audited-ready（B 成段 2026-06-05,codex 已核(records/uncovered 块);WS-E5 2026-06-09 回写:run/thread 级 checkpoint 已接,AGENT 内层经 NamespaceCheckpointer 挂共享 base,graph iterate 内 agent namespace 保留 iter{k};data 无 delta reducer、持久化边界 phase_executor.py:82）
 ---
 
 # 03-checkpoint — Baseline(当下代码实现逻辑)
 
-> **Scope**: 共享 checkpointer base 的现状:`checkpointer.py`(backend 工厂)、`assemble_graph` 的 `builder.compile(checkpointer=)` 接线、`state.py` 的 `data`/`messages` 通道(messages 已用 DeltaChannel,data 还是普通字段)。
-> **现状一句话**:checkpoint 已接到 **run/thread 级**——`resolve_checkpointer("auto")` 造 saver(memory/sqlite/postgres),`assemble_graph` 传给 `builder.compile(checkpointer=)`(`graph_assembler.py:151`),`graph.invoke` 用 `thread_id=run_id`,LangGraph 在 thread 内每 super-step 存档。**但内层 agent loop 现在不挂 checkpoint,`data` 黑板通道也还没 delta reducer(每 super-step 全量)。**
+> **Scope**: 共享 checkpointer base 的现状:`checkpointer.py`(backend 工厂)、`assemble_graph` 的 `builder.compile(checkpointer=)` 接线、AGENT 内层 namespace wrapper、graph iterate 与 agent namespace 组合、`state.py` 的 `data`/`messages` 通道(messages 已用 DeltaChannel,data 还是普通字段)。
+> **现状一句话**:checkpoint 已接到 **run/thread 级 + AGENT 内层 namespace**——`resolve_checkpointer("auto")` 造 saver(memory/sqlite/postgres),`assemble_graph` 传给 `builder.compile(checkpointer=)`,AGENT `create_agent(..., checkpointer=NamespaceCheckpointer(base,"agent:<phase>"))` 复用同一 base,`graph.invoke` 用同一 `thread_id`,LangGraph 在 thread 内按 namespace 存档。graph-level iterate 内的 AGENT checkpoint 会保留 `iter{k}.agent:<phase>` 组合 namespace。`data` 黑板通道仍无 delta reducer(每 super-step 全量)。
 
 ## UI/UX
 N/A。
@@ -29,28 +29,35 @@ N/A —— studio 的 [Resume]/HITL UI 经 `03-api-contract` 消费,不直接调
 - `data: BusinessData`(`:212`)——业务黑板,**普通字段、无 delta reducer**(每 super-step 全量存,大 N 时是 O(N²) 隐患)。
 - `messages: Annotated[list, DeltaChannel(_messages_delta_reducer, snapshot_frequency=50)]`(`:214`)——**已用增量快照通道**(每 50 步一快照),归 `08-messages-state`。
 
+### 4. WS-E5:AGENT 内层 namespace + graph iterate 组合
+`graph_assembler.py` 现有 `NamespaceCheckpointer(base_checkpointer,target_ns)` 包装 AGENT 内层 saver。外层 graph 传入显式 checkpointer 时,AGENT 内层不另起独立 saver,而是把同一个 base 作为 `base_checkpointer` 包装,目标 namespace 为 `agent:<phase_id>`。同一 `thread_id` 下可分别查询外层 `checkpoint_ns=""` 与 AGENT 内层 `checkpoint_ns="agent:<phase>"`。
+
+graph-level iterate 调整为在每轮 graph invoke 期间设置一个进程内 context marker(`active_outer_ns`),值为 `iter{k}`。AGENT 内层 `NamespaceCheckpointer` 写 checkpoint 时把当前 outer namespace 与 agent namespace 组合为 `iter{k}.agent:<phase>`;因此 iterate round 与 agent/phase scope 不互相覆盖。该 marker 在 batch/loop 每轮结束后 reset,避免后续非 iterate AGENT checkpoint 泄漏前一轮 namespace。
+
 ## API
 - `checkpointer_context(*, backend="memory", ...)`(`:39`)/ `resolve_checkpointer(spec)`——造 saver。
-- `assemble_graph(..., checkpointer=)`(`graph_assembler.py:88/151`)——注入点(归 `03-assemble`)。
+- `assemble_graph(..., checkpointer=)`——外层 base 注入点(归 `03-assemble`)。
+- `graph_assembler.py:NamespaceCheckpointer`——AGENT 内层 namespace wrapper;写入 base 时按 `checkpoint_ns` 分层,读取 wrapper tuple 时还原内层视角。
+- `graph_assembler.py:active_outer_ns`——graph iterate 运行期间的 namespace 组合 marker,只用于 checkpoint namespace 组合,不写入 `WorkflowState.data`。
 
 ## Data Model / State
 state schema `WorkflowState`(归 `data-contracts`):`data`(blackboard,本域外层管)/`messages`(内层,归 `08-messages-state`)。checkpoint 存的是整个 WorkflowState 快照。
 
 ## 当前边界(这个模块现在不是什么)
-- **只到 run/thread 级**:现状无节点级精准 resume、无嵌套 `checkpoint_ns` 分层。
-- **内层不挂**:agent loop 当前不在内层挂 checkpointer——AGENT 分支 `_build_skill_node` **不接收 checkpointer**(`graph_assembler.py:201`;仅 SUBGRAPH 分支 `:193` 传),agent 仍手写 `for _ in range(max_turns)` loop(`:511`)。mvp1 要经 `ns="<id>/agent"` 挂同一 base 使 HITL 续跑成立——归 `08-messages-state`。
+- **已有 namespace 分层,但不是完整 resume 产品**:外层/AGENT/graph-iterate+AGENT checkpoint 可按 namespace 区分;但 Studio `resume_run`、checkpoint 选择 UI、context_overrides 消费、HITL 从对话断点恢复仍未闭环。
+- **内层 AGENT 已挂共享 base,但没有 messages compaction**:AGENT `create_agent` 已复用外层 base checkpointer 并写 `agent:<phase>` / `iter{k}.agent:<phase>` namespace;messages summarization/sidecar 仍归 `08-messages-state` 后续。
 - **data 无 delta**:`data` 通道每 super-step 全量(mvp1 要补 delta reducer)。
 - **持久化边界(现状证据)**:`PhaseExecutor.__getstate__`(`phase_executor.py:82`)fail-fast 禁 pickle `_phase_executor`——runtime 对象(callback/runtime/compiled graph)不得入可持久化 checkpoint state(legacy 路线约束,mvp1 沿用,见 alignment §8 #4)。
 
 ## baseline / alignment 差异(测试锚点)
 | 维度 | 现状(baseline) | mvp1 目标 |
 |---|---|---|
-| 粒度 | run/thread 级(`runner.py:663`) | 节点级 + 嵌套 `checkpoint_ns`(图⊃phase⊃iterate⊃agent) |
-| 内层 agent loop | 不挂 checkpoint | 经 `ns="<id>/agent"` 挂同一 base(HITL) |
+| 粒度 | run/thread 级 + AGENT 内层 namespace;graph iterate 内 agent checkpoint 保留 `iter{k}.agent:<phase>` | 节点级 + 嵌套 `checkpoint_ns`(图⊃phase⊃iterate⊃agent) + resume 产品闭环 |
+| 内层 agent loop | 经 `agent:<phase>` 挂同一 base;在 graph iterate 内组合为 `iter{k}.agent:<phase>` | HITL/resume 可从内层对话断点续跑 |
 | data 通道 | 普通字段全量(`state.py:212`) | delta reducer(O(N) 非 O(N²)) |
 | 有界 accumulator | 无 | rolling_summary + recent_window + artifact_refs |
 
-> **验"是否按 mvp1 改了"**:① 1000 遍 loop checkpoint 总体积是否 O(N);② interrupt→人改 context→resume 是否从断点恢复(嵌套 ns 寻址 D-test);③ 内层 agent step 是否在 `ns="<id>/agent"` 下存档。
+> **验"是否按 mvp1 改了"**:① 同一 base/thread 下外层 `""` 与 AGENT `agent:<phase>` history 是否可区分;② graph iterate 内 AGENT checkpoint 是否保留 `iter{k}.agent:<phase>`;③ 1000 遍 loop checkpoint 总体积是否 O(N)(仍未满足,data delta 后续);④ interrupt→人改 context→resume 是否从断点恢复(仍未闭环)。
 
 ## 读代码主路径提示
 `resolve_checkpointer`(`checkpointer.py`)→ `runner.py:663` 接线 → `graph_assembler.py:151` compile 传入 → state 通道 `state.py:212/214`。

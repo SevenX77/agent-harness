@@ -574,27 +574,13 @@ def resume_skill(
 
     # Step 7: Successful path execution metrics & context extraction
     wall_time = round(time.monotonic() - started_monotonic, 3)
-    final_context = result["data"].model_dump()
-    output_context = _context_with_framework_output_sources(final_context, result)
-    compiled_raw = getattr(compiled, "raw", {})
-    output_schema = (
-        compiled_raw.get("io", {}).get("outputs") if isinstance(compiled_raw, dict) else None
-    )
-    _save_v030_declared_file_outputs(
-        output_schema,
-        output_context,
-        default_output_dir=trace_output / "artifacts",
-    )
-    final_trace_context = _v030_phase_context(final_context)
-    _emit_v030_event(
-        event_sink,
-        RunEndedEvent(
-            run_id=run_id,
-            thread_id=run_id,
-            status="completed",
-            final_context=final_trace_context,
-            wall_time_seconds=wall_time,
-        )
+    final_context = _finalize_successful_v030_run(
+        result,
+        compiled=compiled,
+        event_sink=event_sink,
+        run_id=run_id,
+        trace_output=trace_output,
+        wall_time=wall_time,
     )
 
     saved_trace_path = str(event_sink.trace_path) if event_sink.trace_path is not None else None
@@ -873,6 +859,39 @@ def _resume_error_payload(exc: Exception) -> Any:
     return make_error_payload(_RUNTIME_PHASE_FAILED_CODE, str(exc))
 
 
+def _finalize_successful_v030_run(
+    result: Any,
+    *,
+    compiled: Any,
+    event_sink: Any,
+    run_id: str,
+    trace_output: Path,
+    wall_time: float,
+) -> dict[str, Any]:
+    final_context = result["data"].model_dump()
+    output_context = _context_with_framework_output_sources(final_context, result)
+    compiled_raw = getattr(compiled, "raw", {})
+    output_schema = (
+        compiled_raw.get("io", {}).get("outputs") if isinstance(compiled_raw, dict) else None
+    )
+    _save_v030_declared_file_outputs(
+        output_schema,
+        output_context,
+        default_output_dir=trace_output / "artifacts",
+    )
+    _emit_v030_event(
+        event_sink,
+        RunEndedEvent(
+            run_id=run_id,
+            thread_id=run_id,
+            status="completed",
+            final_context=_v030_phase_context(final_context),
+            wall_time_seconds=wall_time,
+        ),
+    )
+    return cast(dict[str, Any], final_context)
+
+
 def _resume_failed_result(
     exc: Exception,
     *,
@@ -1095,29 +1114,15 @@ def _run_v030_skill_dict(
         )
         raise
     wall_time = round(time.time() - t0, 3)
-    
+
     # Step 4.4: Extract flat business output data directly from model_dump
-    final_context = result["data"].model_dump()
-    output_context = _context_with_framework_output_sources(final_context, result)
-    compiled_raw = getattr(compiled, "raw", {})
-    output_schema = (
-        compiled_raw.get("io", {}).get("outputs") if isinstance(compiled_raw, dict) else None
-    )
-    _save_v030_declared_file_outputs(
-        output_schema,
-        output_context,
-        default_output_dir=trace_output / "artifacts",
-    )
-    final_trace_context = _v030_phase_context(final_context)
-    _emit_v030_event(
-        event_sink,
-        RunEndedEvent(
-            run_id=run_id,
-            thread_id=run_id,
-            status="completed",
-            final_context=final_trace_context,
-            wall_time_seconds=wall_time,
-        ),
+    final_context = _finalize_successful_v030_run(
+        result,
+        compiled=compiled,
+        event_sink=event_sink,
+        run_id=run_id,
+        trace_output=trace_output,
+        wall_time=wall_time,
     )
     saved_trace_path = str(event_sink.trace_path) if event_sink.trace_path is not None else None
     return {

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from textwrap import dedent
 from typing import Any
 
 from graph_agent.callbacks.emit import _CompositeEventSink, _SubscriberSink, _TraceJsonlSink
@@ -16,18 +14,12 @@ from graph_agent.callbacks.events import (
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.graph_assembler import assemble_graph
 from graph_agent.core.runner import run_skill
-
-
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def _schema_yaml(properties: dict[str, Any], *, required: list[str] | None = None) -> str:
-    schema: dict[str, Any] = {"type": "object", "properties": properties}
-    if required is not None:
-        schema["required"] = required
-    return json.dumps(schema, ensure_ascii=False, indent=4).replace("\n", "\n    ")
+from tests.ws_e4_runtime_skills import (
+    write_batch_iterate_skill,
+    write_file_input_skill,
+    write_loop_accumulate_skill,
+    write_serial_two_phase_skill,
+)
 
 
 def _business_data(result: dict[str, Any]) -> dict[str, Any]:
@@ -66,200 +58,11 @@ def _invoke(
     )
 
 
-def _serial_two_phase_skill(root: Path) -> None:
-    _write(
-        root / "GRAPH.md",
-        f"""---
-schema_version: "v0.3.0"
-name: ws-e4-runtime-serial
-io:
-  inputs:
-    {_schema_yaml({"source": {"type": "string"}}, required=["source"])}
-  outputs:
-    {_schema_yaml({"answer": {"type": "string"}})}
-phases:
-  - prepare
-  - finish
----
-<phase depends_on="input">prepare</phase>
-<phase depends_on="prepare" output>finish</phase>
-""",
-    )
-    _write_logic_phase(
-        root,
-        "prepare",
-        inputs={"source": {"type": "string"}},
-        outputs={"prepared": {"type": "string"}},
-        required=["source"],
-        action_body="""
-            def prepare(context):
-                return {"prepared": f"{context['source']}:prepared"}
-        """,
-    )
-    _write_logic_phase(
-        root,
-        "finish",
-        inputs={"prepared": {"type": "string"}},
-        outputs={"answer": {"type": "string"}},
-        required=["prepared"],
-        action_body="""
-            def finish(context):
-                return {"answer": f"{context['prepared']}:done"}
-        """,
-    )
-
-
-def _loop_accumulate_skill(root: Path) -> None:
-    _write(
-        root / "GRAPH.md",
-        f"""---
-schema_version: "v0.3.0"
-name: ws-e4-runtime-loop-reduce
-io:
-  inputs:
-    {_schema_yaml({"items": {"type": "array"}})}
-  outputs:
-    {_schema_yaml({"collected": {"type": "array"}})}
-phases:
-  - collect
----
-<phase depends_on="input" output>collect</phase>
-""",
-    )
-    _write_logic_phase(
-        root,
-        "collect",
-        inputs={"item": {}, "collected": {}},
-        outputs={"piece": {}},
-        required=["item", "collected"],
-        iterate="""
-iterate:
-  mode: loop
-  over: data.inputs.items
-  item_var: item
-  accumulate:
-    var: collected
-    init: []
-    from: piece
-    merge: append
-""",
-        action_body="""
-            def collect(context):
-                return {"piece": context["item"]}
-        """,
-    )
-
-
-def _batch_iterate_skill(root: Path) -> None:
-    _write(
-        root / "GRAPH.md",
-        f"""---
-schema_version: "v0.3.0"
-name: ws-e4-runtime-batch-dispatch
-io:
-  inputs:
-    {_schema_yaml({"items": {"type": "array"}})}
-  outputs:
-    {_schema_yaml({"seen": {"type": "array"}})}
-phases:
-  - worker
----
-<phase depends_on="input" output>worker</phase>
-""",
-    )
-    _write_logic_phase(
-        root,
-        "worker",
-        inputs={"item": {}},
-        outputs={"seen": {}},
-        required=["item"],
-        iterate="""
-iterate:
-  mode: batch
-  over: data.inputs.items
-  item_var: item
-  concurrency: 2
-""",
-        action_body="""
-            def worker(context):
-                return {"seen": context["item"]}
-        """,
-    )
-
-
-def _file_input_skill(root: Path) -> None:
-    _write(
-        root / "GRAPH.md",
-        f"""---
-schema_version: "v0.3.0"
-name: ws-e4-runtime-file-input
-io:
-  inputs:
-    {_schema_yaml({"title": {"type": "string"}}, required=["title"])}
-  outputs:
-    {_schema_yaml({"answer": {"type": "string"}})}
-phases:
-  - reader
----
-<phase depends_on="input" output>reader</phase>
-""",
-    )
-    _write_logic_phase(
-        root,
-        "reader",
-        inputs={
-            "title": {"type": "string"},
-            "body": {
-                "type": "string",
-                "source": "file",
-                "path": "inputs/body.md",
-            },
-        },
-        outputs={"answer": {"type": "string"}},
-        required=["title", "body"],
-        action_body="""
-            def reader(context):
-                return {"answer": f"{context['title']}::{context['body']}"}
-        """,
-    )
-
-
-def _write_logic_phase(
-    root: Path,
-    phase_id: str,
-    *,
-    inputs: dict[str, Any],
-    outputs: dict[str, Any],
-    action_body: str,
-    required: list[str] | None = None,
-    iterate: str | None = None,
-) -> None:
-    iterate_block = f"{iterate.rstrip()}\n" if iterate else ""
-    _write(
-        root / "phases" / phase_id / "LOGIC.md",
-        f"""---
-io:
-  inputs:
-    {_schema_yaml(inputs, required=required)}
-  outputs:
-    {_schema_yaml(outputs)}
-actions: [{phase_id}]
-validator: false
-{iterate_block}---
-<action>{phase_id}</action>
-""",
-    )
-    _write(
-        root / "phases" / phase_id / "actions" / f"{phase_id}.py",
-        dedent(action_body).lstrip(),
-    )
-
-
 def test_serial_graph_emits_input_dispatch_for_each_phase_before_execution(
     tmp_path: Path,
     mock_skill_resolver: object,
 ) -> None:
-    _serial_two_phase_skill(tmp_path)
+    write_serial_two_phase_skill(tmp_path)
     events: list[object] = []
     sink = _event_sink(tmp_path / "trace", events)
 
@@ -292,7 +95,7 @@ def test_batch_iterate_emits_input_dispatch_for_each_branch_with_stable_branch_i
     tmp_path: Path,
     mock_skill_resolver: object,
 ) -> None:
-    _batch_iterate_skill(tmp_path)
+    write_batch_iterate_skill(tmp_path)
     events: list[object] = []
     sink = _event_sink(tmp_path / "trace", events)
 
@@ -319,7 +122,7 @@ def test_loop_accumulate_emits_blackboard_reduce_after_each_declared_merge(
     tmp_path: Path,
     mock_skill_resolver: object,
 ) -> None:
-    _loop_accumulate_skill(tmp_path)
+    write_loop_accumulate_skill(tmp_path)
     events: list[object] = []
     sink = _event_sink(tmp_path / "trace", events)
 
@@ -353,8 +156,10 @@ def test_input_file_injected_event_emits_before_dispatch_for_runtime_file_input(
     skill_root = tmp_path / "skill"
     workspace_dir = tmp_path / "workspace"
     events: list[object] = []
-    _write(workspace_dir / "inputs" / "body.md", "Imported body.")
-    _file_input_skill(skill_root)
+    input_path = workspace_dir / "inputs" / "body.md"
+    input_path.parent.mkdir(parents=True, exist_ok=True)
+    input_path.write_text("Imported body.", encoding="utf-8")
+    write_file_input_skill(skill_root)
 
     result = run_skill(
         skill_root,

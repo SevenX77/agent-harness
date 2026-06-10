@@ -4,95 +4,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from textwrap import dedent
 from typing import Any
 
 from graph_agent.callbacks.events import InputDispatchEvent
 from graph_agent.core.runner import run_skill
-
-
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def _schema_yaml(properties: dict[str, Any], *, required: list[str] | None = None) -> str:
-    schema: dict[str, Any] = {"type": "object", "properties": properties}
-    if required is not None:
-        schema["required"] = required
-    return json.dumps(schema, ensure_ascii=False, indent=4).replace("\n", "\n    ")
-
-
-def _serial_two_phase_skill(root: Path) -> None:
-    _write(
-        root / "GRAPH.md",
-        f"""---
-schema_version: "v0.3.0"
-name: ws-e4-runtime-trace-e2e
-io:
-  inputs:
-    {_schema_yaml({"source": {"type": "string"}}, required=["source"])}
-  outputs:
-    {_schema_yaml({"answer": {"type": "string"}})}
-phases:
-  - prepare
-  - finish
----
-<phase depends_on="input">prepare</phase>
-<phase depends_on="prepare" output>finish</phase>
-""",
-    )
-    _write_logic_phase(
-        root,
-        "prepare",
-        inputs={"source": {"type": "string"}},
-        outputs={"prepared": {"type": "string"}},
-        required=["source"],
-        action_body="""
-            def prepare(context):
-                return {"prepared": f"{context['source']}:prepared"}
-        """,
-    )
-    _write_logic_phase(
-        root,
-        "finish",
-        inputs={"prepared": {"type": "string"}},
-        outputs={"answer": {"type": "string"}},
-        required=["prepared"],
-        action_body="""
-            def finish(context):
-                return {"answer": f"{context['prepared']}:done"}
-        """,
-    )
-
-
-def _write_logic_phase(
-    root: Path,
-    phase_id: str,
-    *,
-    inputs: dict[str, Any],
-    outputs: dict[str, Any],
-    action_body: str,
-    required: list[str] | None = None,
-) -> None:
-    _write(
-        root / "phases" / phase_id / "LOGIC.md",
-        f"""---
-io:
-  inputs:
-    {_schema_yaml(inputs, required=required)}
-  outputs:
-    {_schema_yaml(outputs)}
-actions: [{phase_id}]
-validator: false
----
-<action>{phase_id}</action>
-""",
-    )
-    _write(
-        root / "phases" / phase_id / "actions" / f"{phase_id}.py",
-        dedent(action_body).lstrip(),
-    )
+from tests.ws_e4_runtime_skills import write_serial_two_phase_skill
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -105,7 +21,7 @@ def test_runtime_edge_events_reach_event_subscriber_and_trace_jsonl(
 ) -> None:
     skill_root = tmp_path / "skill"
     workspace = tmp_path / "workspace"
-    _serial_two_phase_skill(skill_root)
+    write_serial_two_phase_skill(skill_root, name="ws-e4-runtime-trace-e2e")
     subscriber_events: list[object] = []
 
     result = run_skill(

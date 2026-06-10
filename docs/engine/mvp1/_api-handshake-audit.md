@@ -45,9 +45,9 @@ scope: U10 API 操作面;studio 已改完等 engine,过一遍能否牵手 + 问�
 - engine `events.py` **还没这些**(边操作事件未定义;事件只有 `sub_run_id`/`group_key`,无 `phase_execution_id`/`iteration`)。U9 已锁为**目标归 kiro**。
 - **判定**:最大功能缺口——**studio 建在前、engine impl 在后**;studio canvas 微观/dot/逐轮视图在 engine 补这些事件前**渲染不出**。非签名 mismatch,是 impl 时序。
 
-### 3.3 🎯 resume(F6)/ per-node golden(F5)= 目标
-- **resume**:studio `app/routers/runs.py:69` `POST .../resume` → **501**;engine `resume_run` 未实现(依赖 C2 checkpoint 寻址)。双边都 stub,F6 调试不可用。
-- **golden**:studio F5 要 per-node 字段级 golden diff;engine 是 whole-pipeline `mock_llm` + studio `golden_diff.py` whole-state。per-node `golden.json` 存储 + `evaluate_golden_baseline()` = 目标(未 live)。whole-run golden 能牵手。
+### 3.3 🎯 resume(F6)/ per-node golden(F5)= Engine 已补,Studio 仍需薄接
+- **resume**:WS-E7 后,engine public `resume_skill(...)` 已实现 checkpoint_id / checkpoint_ns latest 选择、context_overrides 与 HITL ToolMessage 注入;studio `app/routers/runs.py:69` `POST .../resume` 仍是 **501**。F6 调试不可用的剩余 blocker 在 Studio HTTP/UI 投影,不在 Engine 通用能力。
+- **golden**:WS-E7 后,engine public `evaluate_golden_baseline(...)` 读取 `workspace_dir/golden/<baseline_id>` 并产逐节点字段 diff/report;studio F5 仍需改为消费 Engine report。旧 studio `golden_diff.py` whole-state diff 不是 Engine truth。
 
 ## 4. codex 复审 prompt(已发,结果见 §5)
 要点:独立复核两边 API,逐条 challenge §2/§3 draft finding,重点回答"能不能端到端跑通 run/predict + 哪些是签名级 mismatch(改了才调通)vs 功能未实现(能调通缺特性)+ 有无漏掉的签名级 mismatch"。
@@ -67,7 +67,7 @@ codex 跑了 13 测试(`test_predict_e2e` / `test_workspace_dir_contract_red` / 
 4. ErrorPayload 四轴 → **对、更具体**:studio `ErrorResponse`(`errors.py:10`)只 `{error_code,http_status,message,details}`;compile 投影(`skills.py:1449`)只 `file/line/field/severity/message`;predict 原样 model_dump 能带 `result.error`,run/compile/lint 路径基本丢失。
 5. 未注册 code 会炸 → **机制对**(`exceptions.py:37`);golden/iterate 目标码当前源码未见已 emit(= error-V2 G6 要先注册)。
 6. V4 trace 字段 → **对**(事件 union 无 `parent_node_id/node_type/phase_execution_id`,`events.py:55`)。
-7. resume/per-node golden → **对**(studio resume 501 `runs.py:69`;engine 无 public `resume_run`)。
+7. resume/per-node golden → **2026-06-10 更新**:studio resume 仍 501,但 engine 已有 public `resume_skill`;per-node golden Engine eval 已有 `evaluate_golden_baseline`,Studio 仍需薄接。
 
 ## 交叉引用
 `03-api-contract/mvp1-alignment.md`(U10 ◆)· `_migration-src/api-engine-studio-contract.md`(17 块契约源)· `docs/studio/mvp1/04_platform/engine/mvp1-alignment.md`(studio 侧 F1-F6 期望)· `02-observability`(U9,V4 trace 目标)

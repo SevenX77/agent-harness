@@ -34,6 +34,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+from langchain_core.messages import ToolMessage
+
 from graph_agent.callbacks.emit import (
     _CallbackSink,
     _CompositeEventSink,
@@ -46,6 +48,8 @@ from graph_agent.callbacks.events import (
     RunEndedEvent,
     RunStartedEvent,
 )
+from graph_agent.core.checkpointer import resolve_checkpointer
+from graph_agent.core.compiler import compile_skill
 from graph_agent.core.exceptions import (
     GraphAgentError,
     GraphAgentFatalError,
@@ -53,14 +57,18 @@ from graph_agent.core.exceptions import (
     SkillLoadError,
     make_error_payload,
 )
+from graph_agent.core.graph_assembler import assemble_graph
 from graph_agent.core.local_workspace_resolver import LocalWorkspaceResolver
 from graph_agent.core.result import RunResult, WorkflowMetrics, WorkflowResult
 from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol, require_skill_resolver
+from graph_agent.core.state import BusinessData
 from graph_agent.runtime.state import normalize_blackboard_data
 
 logger = logging.getLogger(__name__)
 
 _NO_MOCK_LLM = object()
+_RUNTIME_PHASE_FAILED_CODE = "[F-v3-runtime-phase-failed]"
+_SKILL_ENTRYPOINT_FILENAME = "SKILL.md"
 
 
 class PredictDeadlockError(RuntimeError):
@@ -73,6 +81,21 @@ class PredictDeadlockError(RuntimeError):
             f"Predict P2 deadlock guard tripped for phase '{phase_name}' "
             f"after {actual_path.count(phase_name)} visits"
         )
+
+
+class _ResumeInputError(ValueError):
+    """Raised for invalid resume caller input that should surface directly."""
+
+
+_RESUME_CONTEXT_OVERRIDE_FORBIDDEN_KEYS = {
+    "messages",
+    "tool_calls",
+    "checkpoint_ns",
+    "configurable",
+    "runtime",
+    "callbacks",
+    "compiled_graph",
+}
 
 
 class SDKPredictContext:
@@ -191,7 +214,9 @@ def predict_skill(  # noqa: C901
     started_monotonic = time.monotonic()
     skill_path_obj = Path(skill_path)
     skill_id = (
-        skill_path_obj.parent.name if skill_path_obj.name == "SKILL.md" else skill_path_obj.stem
+        skill_path_obj.parent.name
+        if skill_path_obj.name == _SKILL_ENTRYPOINT_FILENAME
+        else skill_path_obj.stem
     )
 
     mock_llm = inputs.pop("mock_llm", None)
@@ -309,7 +334,7 @@ def predict_skill(  # noqa: C901
             skill_id=skill_id,
             context={},
             metrics=WorkflowMetrics(wall_time_sec=wall_time),
-            error=make_error_payload("[F-v3-runtime-phase-failed]", str(exc)),
+            error=make_error_payload(_RUNTIME_PHASE_FAILED_CODE, str(exc)),
             started_at=started_at,
             finished_at=finished_at,
             wall_time_sec=wall_time,
@@ -397,7 +422,9 @@ def run_skill(
     started_monotonic = time.monotonic()
     skill_path_obj = Path(skill_path)
     skill_id = (
-        skill_path_obj.parent.name if skill_path_obj.name == "SKILL.md" else skill_path_obj.stem
+        skill_path_obj.parent.name
+        if skill_path_obj.name == _SKILL_ENTRYPOINT_FILENAME
+        else skill_path_obj.stem
     )
 
     try:
@@ -425,7 +452,7 @@ def run_skill(
             context={},
             metrics=WorkflowMetrics(wall_time_sec=wall_time),
             trace_path=None,
-            error=exc.payload or make_error_payload("[F-v3-runtime-phase-failed]", str(exc)),
+            error=exc.payload or make_error_payload(_RUNTIME_PHASE_FAILED_CODE, str(exc)),
             started_at=started_at,
             finished_at=finished_at,
             wall_time_sec=wall_time,
@@ -453,6 +480,145 @@ def run_skill(
     run_dir = Path(raw.get("run_dir") or workspace_root / "runs" / workflow_result.run_id)
     _write_workflow_result_artifacts(run_dir, workflow_result)
     return workflow_result
+
+
+def resume_skill(
+    skill_path: str | Path,
+    *,
+    workspace_dir: Path,
+    run_id: str,
+    checkpoint_id: str | None = None,
+    checkpoint_ns: str | None = None,
+    context_overrides: dict[str, Any] | None = None,
+    human_response: dict[str, Any] | None = None,
+    skill_resolver: SkillResolverProtocol,
+    model_resolver: Any | None = None,
+    event_subscriber: Callable[[CallbackEvent], None] | None = None,
+) -> RunResult:
+    """Resume a previously interrupted skill run from a checkpoint."""
+    workspace_root = _validate_workspace_dir(workspace_dir)
+    _validate_resume_human_response(human_response)
+    _validate_resume_context_overrides(context_overrides)
+
+    resolver = require_skill_resolver(skill_resolver, caller="resume_skill")
+    started_at = datetime.now(UTC)
+    started_monotonic = time.monotonic()
+    skill_path_obj = Path(skill_path)
+    skill_id = (
+        skill_path_obj.parent.name
+        if skill_path_obj.name == _SKILL_ENTRYPOINT_FILENAME
+        else skill_path_obj.stem
+    )
+
+    trace_output = workspace_root / "runs" / run_id
+    event_sink = _prepare_v030_event_sink(
+        trace_output=trace_output,
+        event_subscriber=event_subscriber,
+    )
+
+    logger.info(
+        "[Resume] Resuming run_id=%s checkpoint_ns=%s checkpoint_id=%s",
+        run_id,
+        checkpoint_ns,
+        checkpoint_id,
+    )
+
+    active_checkpointer = _resolve_resume_checkpointer()
+    invoke_config = _resolve_resume_config(
+        active_checkpointer,
+        run_id=run_id,
+        checkpoint_ns=checkpoint_ns,
+        checkpoint_id=checkpoint_id,
+    )
+
+    try:
+        compiled = compile_skill(skill_path, skill_resolver=resolver)
+        assembled = assemble_graph(
+            compiled,
+            model_resolver=model_resolver,
+            callbacks=cast(Any, event_sink),
+            skill_resolver=resolver,
+            checkpointer=active_checkpointer,
+        )
+        graph = assembled.graph
+
+        invoke_config = _apply_resume_context_overrides(graph, compiled, invoke_config, context_overrides)
+        invoke_config = _apply_resume_human_response(graph, invoke_config, human_response)
+        result = graph.invoke(None, config=invoke_config)
+
+    except Exception as exc:
+        if isinstance(exc, _ResumeInputError):
+            raise
+        failed_result = _resume_failed_result(
+            exc,
+            run_id=run_id,
+            skill_id=skill_id,
+            started_at=started_at,
+            started_monotonic=started_monotonic,
+        )
+        _write_workflow_result_artifacts(
+            trace_output,
+            failed_result,
+        )
+        _emit_v030_event(
+            event_sink,
+            RunEndedEvent(
+                run_id=run_id,
+                thread_id=run_id,
+                status="crashed",
+                final_context={},
+                wall_time_seconds=failed_result.wall_time_sec,
+            )
+        )
+        return failed_result
+
+    # Step 7: Successful path execution metrics & context extraction
+    wall_time = round(time.monotonic() - started_monotonic, 3)
+    final_context = _finalize_successful_v030_run(
+        result,
+        compiled=compiled,
+        event_sink=event_sink,
+        run_id=run_id,
+        trace_output=trace_output,
+        wall_time=wall_time,
+    )
+
+    saved_trace_path = str(event_sink.trace_path) if event_sink.trace_path is not None else None
+    workflow_result = WorkflowResult(
+        success=True,
+        run_id=run_id,
+        skill_id=skill_id,
+        context=final_context,
+        metrics=WorkflowMetrics.from_mapping({"wall_time_sec": wall_time}, wall_time_sec=wall_time),
+        trace_path=Path(saved_trace_path) if saved_trace_path else None,
+        error=None,
+        started_at=started_at,
+        finished_at=datetime.now(UTC),
+        wall_time_sec=wall_time,
+    )
+
+    _write_workflow_result_artifacts(trace_output, workflow_result)
+    return workflow_result
+
+
+def evaluate_golden_baseline(
+    skill_path: str | Path,
+    *,
+    workspace_dir: Path,
+    baseline_id: str,
+    skill_resolver: SkillResolverProtocol,
+    model_resolver: Any | None = None,
+) -> dict[str, Any]:
+    """Evaluate skill outputs against golden baseline test cases."""
+    _validate_workspace_dir(workspace_dir)
+    from graph_agent.core._predict_internal.golden_eval import evaluate_golden_baseline_impl
+    return evaluate_golden_baseline_impl(
+        skill_path,
+        workspace_dir=workspace_dir,
+        baseline_id=baseline_id,
+        skill_resolver=skill_resolver,
+        model_resolver=model_resolver,
+    )
 
 
 def _run_skill_dict(
@@ -531,6 +697,222 @@ def _validate_workspace_dir(workspace_dir: Path) -> Path:
     if not workspace_path.is_absolute():
         raise ValueError("workspace_dir must be an absolute path")
     return workspace_path
+
+
+def _validate_resume_human_response(human_response: dict[str, Any] | None) -> None:
+    if human_response is None:
+        return
+    if not isinstance(human_response, dict):
+        raise TypeError("human_response must be a dictionary")
+    if "content" not in human_response:
+        raise ValueError("human_response must contain 'content'")
+    if not isinstance(human_response["content"], str):
+        raise TypeError("human_response['content'] must be a string")
+    if "tool_call_id" in human_response and human_response["tool_call_id"] is not None:
+        if not isinstance(human_response["tool_call_id"], str):
+            raise TypeError("human_response['tool_call_id'] must be a string")
+
+
+def _validate_resume_context_overrides(context_overrides: dict[str, Any] | None) -> None:
+    if context_overrides is None:
+        return
+    if not isinstance(context_overrides, dict):
+        raise TypeError("context_overrides must be a dictionary")
+    forbidden = [
+        key
+        for key in context_overrides
+        if key.startswith("_") or key in _RESUME_CONTEXT_OVERRIDE_FORBIDDEN_KEYS
+    ]
+    if forbidden:
+        joined = ", ".join(sorted(forbidden))
+        raise ValueError(f"context_overrides may only contain business fields; forbidden: {joined}")
+
+
+def _resolve_resume_checkpointer() -> Any:
+    active_checkpointer = resolve_checkpointer("auto")
+    if active_checkpointer is None or active_checkpointer is True:
+        raise RuntimeError("No active checkpointer configured for resume_skill")
+    return cast(Any, active_checkpointer)
+
+
+def _resolve_resume_config(
+    active_checkpointer: Any,
+    *,
+    run_id: str,
+    checkpoint_ns: str | None,
+    checkpoint_id: str | None,
+) -> dict[str, Any]:
+    ns = checkpoint_ns or ""
+    resolved_checkpoint_id = checkpoint_id
+    if not resolved_checkpoint_id:
+        search_config = {"configurable": {"thread_id": run_id, "checkpoint_ns": ns}}
+        checkpoints = list(active_checkpointer.list(search_config))
+        if not checkpoints:
+            raise ValueError(f"No checkpoints found in namespace {ns!r} for run_id {run_id!r}")
+        resolved_checkpoint_id = str(checkpoints[0].checkpoint["id"])
+
+    return {
+        "configurable": {
+            "thread_id": run_id,
+            "checkpoint_ns": ns,
+            "checkpoint_id": resolved_checkpoint_id,
+        }
+    }
+
+
+def _override_source_node(compiled: Any, overridden_fields: set[str]) -> str | None:
+    matching_nodes: list[str] = []
+    for node in compiled.nodes:
+        io = node.frontmatter.get("io") or {}
+        outputs = io.get("outputs") or {}
+        properties = outputs.get("properties") or {}
+        if any(field in properties for field in overridden_fields):
+            matching_nodes.append(node.phase_name)
+    return matching_nodes[-1] if matching_nodes else None
+
+
+def _apply_resume_context_overrides(
+    graph: Any,
+    compiled: Any,
+    invoke_config: dict[str, Any],
+    context_overrides: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not context_overrides:
+        return invoke_config
+
+    current_state = graph.get_state(invoke_config)
+    existing_data = current_state.values.get("data")
+    raw_data = existing_data.model_dump() if hasattr(existing_data, "model_dump") else dict(existing_data or {})
+    raw_data.update(context_overrides)
+    updated_data = BusinessData.model_validate(raw_data)
+
+    as_node = None
+    if not current_state.next:
+        as_node = _override_source_node(compiled, set(context_overrides.keys()))
+
+    return cast(dict[str, Any], graph.update_state(invoke_config, {"data": updated_data}, as_node=as_node))
+
+
+def _pending_tool_calls(state_messages: list[Any]) -> list[dict[str, Any]]:
+    ai_tool_calls: dict[str, dict[str, Any]] = {}
+    answered_tool_call_ids: set[str] = set()
+    for msg in state_messages:
+        for tool_call in getattr(msg, "tool_calls", None) or []:
+            if isinstance(tool_call, dict) and "id" in tool_call:
+                ai_tool_calls[tool_call["id"]] = tool_call
+
+        is_tool_msg = msg.__class__.__name__ == "ToolMessage" or getattr(msg, "type", None) == "tool"
+        if is_tool_msg:
+            tool_call_id = getattr(msg, "tool_call_id", None)
+            if tool_call_id:
+                answered_tool_call_ids.add(tool_call_id)
+
+    return [
+        tool_call
+        for tool_call_id, tool_call in ai_tool_calls.items()
+        if tool_call_id not in answered_tool_call_ids
+    ]
+
+
+def _select_pending_tool_call_id(
+    pending_tool_calls: list[dict[str, Any]],
+    requested_tool_call_id: str | None,
+) -> str:
+    if not pending_tool_calls:
+        raise _ResumeInputError("human_response requires a pending interrupt/tool call in the selected checkpoint")
+    if len(pending_tool_calls) == 1:
+        single_id = pending_tool_calls[0]["id"]
+        if requested_tool_call_id and requested_tool_call_id != single_id:
+            raise ValueError(
+                f"Requested tool_call_id {requested_tool_call_id!r} does not match pending tool call {single_id!r}"
+            )
+        return str(single_id)
+    if not requested_tool_call_id:
+        raise ValueError("Multiple pending tool calls exist. 'tool_call_id' is required for human_response.")
+    if requested_tool_call_id not in [tool_call["id"] for tool_call in pending_tool_calls]:
+        raise ValueError(f"Requested tool_call_id {requested_tool_call_id!r} is not among pending tool calls.")
+    return requested_tool_call_id
+
+
+def _apply_resume_human_response(
+    graph: Any,
+    invoke_config: dict[str, Any],
+    human_response: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if human_response is None:
+        return invoke_config
+
+    current_state = graph.get_state(invoke_config)
+    state_messages = current_state.values.get("messages", []) or []
+    final_tool_call_id = _select_pending_tool_call_id(
+        _pending_tool_calls(state_messages),
+        human_response.get("tool_call_id"),
+    )
+    as_node = current_state.next[0] if current_state.next else None
+    tool_msg = ToolMessage(content=human_response["content"], tool_call_id=final_tool_call_id)
+    return cast(dict[str, Any], graph.update_state(invoke_config, {"messages": [tool_msg]}, as_node=as_node))
+
+
+def _resume_error_payload(exc: Exception) -> Any:
+    if isinstance(exc, GraphAgentError) and exc.payload is not None:
+        return exc.payload
+    return make_error_payload(_RUNTIME_PHASE_FAILED_CODE, str(exc))
+
+
+def _finalize_successful_v030_run(
+    result: Any,
+    *,
+    compiled: Any,
+    event_sink: Any,
+    run_id: str,
+    trace_output: Path,
+    wall_time: float,
+) -> dict[str, Any]:
+    final_context = result["data"].model_dump()
+    output_context = _context_with_framework_output_sources(final_context, result)
+    compiled_raw = getattr(compiled, "raw", {})
+    output_schema = (
+        compiled_raw.get("io", {}).get("outputs") if isinstance(compiled_raw, dict) else None
+    )
+    _save_v030_declared_file_outputs(
+        output_schema,
+        output_context,
+        default_output_dir=trace_output / "artifacts",
+    )
+    _emit_v030_event(
+        event_sink,
+        RunEndedEvent(
+            run_id=run_id,
+            thread_id=run_id,
+            status="completed",
+            final_context=_v030_phase_context(final_context),
+            wall_time_seconds=wall_time,
+        ),
+    )
+    return cast(dict[str, Any], final_context)
+
+
+def _resume_failed_result(
+    exc: Exception,
+    *,
+    run_id: str,
+    skill_id: str,
+    started_at: datetime,
+    started_monotonic: float,
+) -> WorkflowResult:
+    wall_time = round(time.monotonic() - started_monotonic, 3)
+    return WorkflowResult(
+        success=False,
+        run_id=run_id,
+        skill_id=skill_id,
+        context={},
+        metrics=WorkflowMetrics(wall_time_sec=wall_time),
+        trace_path=None,
+        error=_resume_error_payload(exc),
+        started_at=started_at,
+        finished_at=datetime.now(UTC),
+        wall_time_sec=wall_time,
+    )
 
 
 def _write_json(path: Path, payload: Any) -> None:
@@ -732,29 +1114,15 @@ def _run_v030_skill_dict(
         )
         raise
     wall_time = round(time.time() - t0, 3)
-    
+
     # Step 4.4: Extract flat business output data directly from model_dump
-    final_context = result["data"].model_dump()
-    output_context = _context_with_framework_output_sources(final_context, result)
-    compiled_raw = getattr(compiled, "raw", {})
-    output_schema = (
-        compiled_raw.get("io", {}).get("outputs") if isinstance(compiled_raw, dict) else None
-    )
-    _save_v030_declared_file_outputs(
-        output_schema,
-        output_context,
-        default_output_dir=trace_output / "artifacts",
-    )
-    final_trace_context = _v030_phase_context(final_context)
-    _emit_v030_event(
-        event_sink,
-        RunEndedEvent(
-            run_id=run_id,
-            thread_id=run_id,
-            status="completed",
-            final_context=final_trace_context,
-            wall_time_seconds=wall_time,
-        ),
+    final_context = _finalize_successful_v030_run(
+        result,
+        compiled=compiled,
+        event_sink=event_sink,
+        run_id=run_id,
+        trace_output=trace_output,
+        wall_time=wall_time,
     )
     saved_trace_path = str(event_sink.trace_path) if event_sink.trace_path is not None else None
     return {
@@ -777,9 +1145,12 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Run a SKILL.md workflow (document-driven, no per-skill Python code needed)"
+        description=(
+            f"Run a {_SKILL_ENTRYPOINT_FILENAME} workflow "
+            "(document-driven, no per-skill Python code needed)"
+        )
     )
-    parser.add_argument("--skill", required=True, help="Path to SKILL.md")
+    parser.add_argument("--skill", required=True, help=f"Path to {_SKILL_ENTRYPOINT_FILENAME}")
     parser.add_argument("--inputs", type=str, default=None, help="JSON string of runtime inputs")
     parser.add_argument("--inputs-file", type=str, default=None, help="JSON file of runtime inputs")
     parser.add_argument("--output", type=str, default=None, help="Output directory")

@@ -51,8 +51,8 @@ related: INDEX.md（设计单元台账）· 各模块 mvp1-alignment.md §8（im
 | S2 | **[P0] workspace_dir 双层** | 传 workspace 根(别 `run_dir.parent`)→ trace 落对 | `run_manager.py:97` |
 | S3 | **[P0] worker 假成功** | 按 `result.success` 置 status、失败落 `result.error` | `run_manager.py:95→111` |
 | S4 | U10 双边会签 | `03-api-contract` 与 studio 敲定(尤其 Error V2 payload);B baseline 补深 | `03-api-contract` |
-| S5 | resume | `resume_run`(501→impl):`get_state_history`→选 checkpoint→`update_state`→重 invoke(C2) | `runner.py`;`runs.py:69` |
-| S6 | per-node golden | `golden.json` 常驻 + 逐节点 diff SDK(`evaluate_golden_baseline`)+ 拦截搬引擎 | `06-golden-eval` |
+| S5 | resume | Engine `resume_skill` 已实现;剩余 Studio `resume_run`(501→thin route):投影请求→选 checkpoint→调用 Engine API | `runs.py:69`;`runner.py` |
+| S6 | per-node golden | Engine `evaluate_golden_baseline` 已实现;剩余 Studio F5 消费 report + 空 template / predict 拦截搬引擎后续 | `06-golden-eval`;Studio UI/API |
 | S7 | V4 trace 事件 | `parent_node_id`/`node_type`(微观)/ 3 边操作事件 / `phase_execution_id`+`iteration`(逐轮)/ subagent lifecycle | `events.py`;middleware Tracing 槽 |
 
 ## Tier 5 — 收尾 / 死代码

@@ -1,7 +1,7 @@
 ---
 module: 02-mechanism/04-run-outer/03-checkpoint
 doc: mvp1-alignment
-status: audited-ready（**U5 单元锁定 2026-06-05**;A + B 成段(codex 核):递归拓扑/delta-compact/durability/CK1-6/D-test,**均标注目标态 vs live**;live 仅外层 super-step checkpoint + WorkflowState.messages DeltaChannel;内层 ns/agent checkpoint/resume/compaction/data delta 全待实现(归 kiro);文件未 FROZEN）
+status: audited-ready（**U5 单元锁定 2026-06-05**;WS-E5/E7 回写:外层 super-step checkpoint + WorkflowState.messages DeltaChannel + AGENT namespace checkpoint + Engine resume_skill 已 live;data delta/compaction/Studio resume 产品仍待实现;文件未 FROZEN）
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行外层）
 ---
 
@@ -10,14 +10,14 @@ aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行外�
 > **Tier**: 机制层 B · 运行·外层(尺度无关) | **Owns**: **共享 checkpointer base**(建外层,经 `checkpoint_ns` 内外层共用)· 外层 blackboard 存储/delta/有界 · durability | **现状**: A 摘要成段;records 深度未迁完 | **Related**: `05-run-inner/08-messages-state`(内层 messages,双向)· `02-iterate`(图级 loop)· `data-contracts`(state schema)· `03-api-contract`(resume)
 
 ## 1. 定义
-checkpoint = **一个共享 base**(LangGraph thread checkpointer,**建在外层 `builder.compile(checkpointer=)`**),节点/iterate/图级/**内层 agent loop** 都经 `checkpoint_ns` 挂同一个 saver(不另起内层 saver)——**目标态,live 现状见 §2 框**(现仅外层 super-step checkpoint live)。**两层各管各 state**:外层这边管 **blackboard**(`WorkflowState.data`);内层 messages 在 `08-messages-state`(经 `ns="<id>/agent"` 挂本 base)。
+checkpoint = **一个共享 base**(LangGraph thread checkpointer,**建在外层 `builder.compile(checkpointer=)`**),节点/iterate/图级/**内层 agent loop** 都经 `checkpoint_ns` 挂同一个 saver(不另起内层 saver)。WS-E5 后,AGENT 内层已用 `NamespaceCheckpointer` 写 `agent:<phase>` / `iter{k}.agent:<phase>`;WS-E7 后,Engine `resume_skill` 已能按 checkpoint_id/checkpoint_ns 消费这些 checkpoint。**两层各管各 state**:外层这边管 **blackboard**(`WorkflowState.data`);内层 messages 在 `08-messages-state`。
 
 ## 2. 数据流 / 机制
 本域承接共享 checkpoint 的**外层/base 部分**(模型经多轮 PM 收敛)。
 
-> **⚠️ 现状 vs 目标(铁律:不得把目标当现状)**:**live 今天只有**——① 外层图 super-step checkpoint(`resolve_checkpointer("auto")` `runner.py:663` → `assemble_graph(checkpointer=)` `:667` → `builder.compile(checkpointer=)` `graph_assembler.py:151`,`invoke(thread_id=run_id)` `:689`);② `WorkflowState.messages` 的 `DeltaChannel(snapshot_frequency=50)` 通道(`state.py:214`);③ `interrupt()` 原语(`cognitive_flow.py:292`)。**以下嵌套 `checkpoint_ns` / agent loop 入 checkpoint / blackboard data delta reducer / durability 调参 / 图级 loop-body 全是目标态、未 live**:AGENT 分支不向 `_build_skill_node` 传 checkpointer(`graph_assembler.py:201`,仅 SUBGRAPH 分支 `:193` 传)、agent 仍手写 `for _ in range(max_turns)` loop(`:511`)、全仓无 `checkpoint_ns` live 接线、`resume_run` 是 501 桩(studio `runs.py:70`)。下文拓扑/纪律/CK/D-test = **PM 锁定的目标模型 + 待验证风险**,非现状已接线。
+> **现状 vs 目标(铁律:不得把目标当现状)**:**live 今天已有**——① 外层图 super-step checkpoint(`resolve_checkpointer("auto")` → `assemble_graph(checkpointer=)` → `builder.compile(checkpointer=)`);② `WorkflowState.messages` 的 `DeltaChannel(snapshot_frequency=50)` 通道(`state.py:214`);③ AGENT 内层 `NamespaceCheckpointer` 共享 base 并写 `agent:<phase>` / graph iterate 内 `iter{k}.agent:<phase>`;④ `runner.py:resume_skill` 可按 `checkpoint_id` 或 `checkpoint_ns` latest 恢复,并支持 context overrides / HITL ToolMessage 注入;⑤ `interrupt()` 原语(`cognitive_flow.py:292`)。**仍未 live**:blackboard data delta reducer、messages compaction、durability 调参产品化、Studio HTTP/UI resume。
 
-**目标执行嵌套拓扑(递归,尺度无关;非现状)**——所有"执行重复 + 状态续跑"形态(agent loop / iterate / subgraph / 图级 loop)收敛到**一个 thread checkpointer**,靠 `checkpoint_ns` 嵌套分层:
+**目标执行嵌套拓扑(递归,尺度无关;部分 live)**——所有"执行重复 + 状态续跑"形态(agent loop / iterate / subgraph / 图级 loop)收敛到**一个 thread checkpointer**,靠 `checkpoint_ns` 嵌套分层:
 ```
 thread(唯一 checkpointer,builder.compile checkpointer= → graph_assembler.py:151)
 └ 图 G(StateGraph(WorkflowState);phase = 节点 = super-step)
@@ -40,7 +40,7 @@ thread(唯一 checkpointer,builder.compile checkpointer= → graph_assembler.py:
 - 图级 loop=B(引擎包 loop-body)的 checkpoint 归 `02-iterate`(双向)。
 
 ## 3. 接口契约
-`assemble_graph(..., checkpointer=)` 注入(归 `03-assemble`);嵌套 ns 寻址(外层 super-step ↔ 内层 agent step,经 `08-messages-state`);resume 寻址 `get_state_history`→选 checkpoint_id→update_state(归 `03-api-contract` C2);state schema 归 `data-contracts`。
+`assemble_graph(..., checkpointer=)` 注入(归 `03-assemble`);嵌套 ns 寻址(外层 super-step ↔ 内层 agent step,经 `08-messages-state`);Engine `resume_skill` 选 checkpoint_id / checkpoint_ns latest → `update_state` → re-invoke;Studio HTTP resume 仍归 `03-api-contract` 后续薄接;state schema 归 `data-contracts`。
 
 ## 4. 设计决策基础(用户原话)
 > 两层各一套(2026-06-03 PM):"checkpoint 不是 in/out 分别单独一套吗?" → 一个共享 base、两层各管各 state(外 blackboard / 内 messages)。
@@ -61,13 +61,13 @@ thread(唯一 checkpointer,builder.compile checkpointer= → graph_assembler.py:
 | CK6 | compact 是 1000 章的**可行性前提**,非优化 | 不 compact 上下文 O(N²) 爆窗口;compact 后 O(N)——细节归 `08-messages-state` |
 
 ## 6. 测试关键点(D-test)
-1. **嵌套 ns 寻址续跑**(头号风险,uncovered #3;**当前未 live,待验证**):子图/agent loop 在父 thread 下按 `checkpoint_ns` 逐 super-step 存、`get_state_history` 跨 ns 寻址续跑——能否在 langgraph 1.2.2 + GatewayChatModel 下成立 = 头号 D-test(与 `08-messages-state`/`02-middleware` 协同)。
+1. **嵌套 ns 寻址续跑**:AGENT namespace checkpoint + Engine `resume_skill` 已有 WS-E5/WS-E7 覆盖;后续仍需 Studio route/UI 与更大规模 durability 实测。
 2. **HITL 续跑**:agent loop 内 `interrupt()` → resume 从对话中断点续(非 phase 起点重跑;细节归 `08-messages-state`)。
 3. **B 图级 loop**:图级 iterate → 引擎包 loop-body(一 thread + ns=iter{k}),非 N 次独立 invoke/独立 sub-thread(归 `02-iterate`)。
 4. **blackboard delta**:1000 遍 loop checkpoint 总体积 O(N) 非 O(N²)。
 5. **有界 blackboard**:喂第 k 遍上下文体积恒定(不随 k 增),全文在 artifact 可取。
 6. **durability**:选定粒度下 HITL 可续 + checkpoint 总量可控。
-7. **内层 create_agent checkpointer**(源 uncovered #3,实现期风险最高):默认**不传**内层 checkpointer——**印证 live `graph_assembler.py:201` AGENT 分支不传 checkpointer 是刻意设计**(避免 nested graph state 污染外层 checkpoint),非漏;若启用须实测 thread_id/state schema/middleware state/ToolMessage 序列化,thread_id 须带 phase suffix(legacy precedent `LLMPhaseNode._agent_config` `{outer_tid}:{phase.name}`)。
+7. **内层 create_agent checkpointer**:WS-E5 已改为通过 `NamespaceCheckpointer` 复用共享 base;实现需继续守住 thread_id/state schema/middleware state/ToolMessage 序列化边界,避免 runtime 对象污染 checkpoint。
 
 ## 7. 涉及 region / platform
 engine 全权;studio 侧 resume_run/HITL UI 经 `03-api-contract` 消费。

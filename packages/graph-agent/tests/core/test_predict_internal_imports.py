@@ -18,6 +18,8 @@ import graph_agent
 EXPECTED_TOP_LEVEL_EXPORTS = [
     "run_skill",
     "predict_skill",
+    "resume_skill",
+    "evaluate_golden_baseline",
     "RunResult",
     "PathDiff",
     "PhaseRecord",

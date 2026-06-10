@@ -394,9 +394,10 @@ def test_agent_phase_constructs_create_agent_with_workflow_state_boundaries(
     captured: dict[str, Any] = {}
 
     class _Agent:
-        def invoke(self, input: Any, config: Any | None = None) -> Any:
+        def invoke(self, input: Any, config: Any | None = None, **kwargs: Any) -> Any:
             captured["agent_input"] = input
             captured["agent_config"] = config or {}
+            captured["agent_invoke_kwargs"] = kwargs
             return input
 
     def fake_create_agent(**kwargs: Any) -> _Agent:
@@ -460,6 +461,7 @@ def test_agent_phase_constructs_create_agent_with_workflow_state_boundaries(
     assert "agent" in str(configurable["checkpoint_ns"])
     assert configurable["max_iterations"] == 2
     assert int(agent_config["recursion_limit"]) < 10000
+    assert captured["agent_invoke_kwargs"]["durability"] == "sync"
 
     assert resolver.calls == [
         {
@@ -657,8 +659,8 @@ def test_predict_gateway_model_stays_predict_bound_and_zero_usage(
     captured: dict[str, Any] = {}
 
     class _Agent:
-        def invoke(self, input: Any, config: Any | None = None) -> Any:
-            del config
+        def invoke(self, input: Any, config: Any | None = None, **kwargs: Any) -> Any:
+            del config, kwargs
             return input
 
     def fake_create_agent(**kwargs: Any) -> _Agent:

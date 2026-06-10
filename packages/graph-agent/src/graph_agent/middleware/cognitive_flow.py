@@ -511,7 +511,6 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
                     )
                 ],
             },
-            goto=END,
         )
 
     def _validate_finish_args(self, args: dict[str, Any]) -> _FinishValidation:

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 from graph_agent.middleware.cognitive_flow import CognitiveFlowMiddleware
 from graph_agent.middleware.execution_control import ExecutionControlMiddleware
+from graph_agent.middleware.exit_control import ExitControlMiddleware
 from graph_agent.middleware.loop_detection import LoopDetectionMiddleware
 from graph_agent.middleware.protocol_validation import ProtocolValidationMiddleware
 from graph_agent.middleware.tool_error import ToolErrorHandlingMiddleware
@@ -62,6 +63,7 @@ MVP0_MIDDLEWARE_ORDER_CONTRACT: tuple[str, ...] = (
     "Tracing",
     "ToolError",
     "LoopDetection",
+    "ExitControl",
 )
 
 # Backward-compatible public name used by the γ0 TDD tests and future PR β.
@@ -80,6 +82,7 @@ __all__ = [
     "MVP0_MIDDLEWARE_ORDER_CONTRACT",
     "CognitiveFlowMiddleware",
     "ExecutionControlMiddleware",
+    "ExitControlMiddleware",
     "LoopDetectionMiddleware",
     "ProtocolValidationMiddleware",
     "ToolErrorHandlingMiddleware",

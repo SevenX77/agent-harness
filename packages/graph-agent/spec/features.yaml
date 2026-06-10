@@ -619,13 +619,16 @@ features:
   core_paths:
   - path: packages/graph-agent/src/graph_agent/cognitive/finish.py
   - path: packages/graph-agent/src/graph_agent/cognitive/finish_task.py
-  error_codes_primary: []
+  - path: packages/graph-agent/src/graph_agent/middleware/exit_control.py
+  error_codes_primary:
+  - '[F-v3-agent-exit-control-failed]'
   error_codes_secondary: []
   events_primary: []
   events_secondary: []
   non_functional_contracts: []
   targeted_tests:
   - tests/runtime/test_exit_contract.py::test_v030_exit_contract_is_hardcoded_at_prompt_tail
+  - tests/core/test_ws_e8_exit_gate_red.py::test_agent_without_finish_task_returns_explicit_failure
   public_api_symbols:
   - FinishTaskEvent
 - id: F-md-patch

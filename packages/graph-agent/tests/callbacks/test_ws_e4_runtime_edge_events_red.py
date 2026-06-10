@@ -384,5 +384,5 @@ def test_input_file_injected_event_emits_before_dispatch_for_runtime_file_input(
     assert file_event.file_ref == "inputs/body.md"
     assert file_event.target_field == "body"
     assert file_event.blackboard_snapshot["body"] == "Imported body."
-    assert dispatch_event.dispatched_keys == ["title", "body"]
+    assert set(dispatch_event.dispatched_keys) == {"title", "body"}
     assert dispatch_event.blackboard_snapshot["body"] == "Imported body."

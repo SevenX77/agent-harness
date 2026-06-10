@@ -71,7 +71,6 @@ from graph_agent.core.subagents import (
 from graph_agent.runtime.state_mapper import (
     PhaseWrapper,
     StateMapper,
-    flatten_runtime_data,
     phase_inputs_from_state,
     schema_properties,
 )
@@ -559,6 +558,59 @@ def _run_batch_iterate_payload(
     )
 
 
+def _batch_payload_runner(
+    base_state: WorkflowState,
+    item_var: str,
+    output_keys: set[str] | None,
+    invoke_child: Callable[[int, WorkflowState], Awaitable[Any]],
+) -> Callable[[int, Any], Awaitable[dict[str, Any]]]:
+    async def _run_one(index: int, item: Any) -> dict[str, Any]:
+        child_state = StateManager.update_business(base_state, **{item_var: item})
+        result = await invoke_child(index, child_state)
+        return _phase_result_payload(child_state, result, output_keys)
+
+    return _run_one
+
+
+def _phase_batch_runner(
+    workflow_state: WorkflowState,
+    item_var: str,
+    node: Any,
+    output_keys: set[str] | None,
+) -> Callable[[int, Any], Awaitable[dict[str, Any]]]:
+    async def _invoke_child(index: int, child_state: WorkflowState) -> Any:
+        return await _run_with_branch_index_async(
+            index,
+            lambda: asyncio.to_thread(node, child_state),
+        )
+
+    return _batch_payload_runner(workflow_state, item_var, output_keys, _invoke_child)
+
+
+def _graph_batch_runner(
+    graph: Any,
+    state: WorkflowState,
+    iterate: IterateSpec,
+    output_keys: set[str] | None,
+    *,
+    config: RunnableConfig | None,
+    invoke_kwargs: dict[str, Any],
+) -> Callable[[int, Any], Awaitable[dict[str, Any]]]:
+    async def _invoke_child(index: int, child_state: WorkflowState) -> Any:
+        return await _run_with_iteration_context_async(
+            index,
+            _iteration_namespace(index),
+            lambda: asyncio.to_thread(
+                graph.invoke,
+                child_state,
+                config=_iteration_config(config, index),
+                **invoke_kwargs,
+            ),
+        )
+
+    return _batch_payload_runner(state, iterate.item_var, output_keys, _invoke_child)
+
+
 def _emit_blackboard_reduce(
     callbacks: Any | None,
     *,
@@ -596,11 +648,11 @@ def _emit_input_dispatch(
     callbacks: Any | None,
     *,
     phase_id: str,
-    input_schema: Any,
+    mapper: StateMapper,
     state: WorkflowState,
 ) -> None:
-    raw_data = flatten_runtime_data(state.get("data"))
-    keys = schema_properties(input_schema)
+    raw_data = phase_inputs_from_state(mapper.build_phase_input(state))
+    keys = schema_properties(mapper.input_schema)
     dispatched_keys = [key for key in keys if key in raw_data] if keys else list(raw_data.keys())
     _safe_emit_event(
         callbacks,
@@ -676,20 +728,11 @@ def _build_batch_iterate_phase(
     def _batch_phase(state: WorkflowState) -> WorkflowState:
         workflow_state = _coerce_workflow_state(state)
         items = _apply_iterate_range(_resolve_iterate_items(workflow_state, over), range_spec)
-
-        async def _run_one(index: int, item: Any) -> dict[str, Any]:
-            child_state = StateManager.update_business(workflow_state, **{item_var: item})
-            result = await _run_with_branch_index_async(
-                index,
-                lambda: asyncio.to_thread(node, child_state),
-            )
-            return _phase_result_payload(child_state, result, output_keys)
-
         aggregated = _run_batch_iterate_payload(
             items,
             output_keys,
             concurrency,
-            _run_one,
+            _phase_batch_runner(workflow_state, item_var, node, output_keys),
             include_batch_outputs=include_batch_outputs,
         )
         return _with_phase_outputs(workflow_state, {phase_id: aggregated})
@@ -791,26 +834,18 @@ def _run_graph_batch_iterate(
 ) -> WorkflowState:
     output_keys = _schema_output_keys(output_schema)
     items = _apply_iterate_range(_resolve_iterate_items(state, iterate.over), iterate.range)
-
-    async def _run_one(index: int, item: Any) -> dict[str, Any]:
-        child_state = StateManager.update_business(state, **{iterate.item_var: item})
-        result = await _run_with_iteration_context_async(
-            index,
-            _iteration_namespace(index),
-            lambda: asyncio.to_thread(
-                graph.invoke,
-                child_state,
-                config=_iteration_config(config, index),
-                **invoke_kwargs,
-            ),
-        )
-        return _phase_result_payload(child_state, result, output_keys)
-
     aggregated = _run_batch_iterate_payload(
         items,
         output_keys,
         iterate.concurrency,
-        _run_one,
+        _graph_batch_runner(
+            graph,
+            state,
+            iterate,
+            output_keys,
+            config=config,
+            invoke_kwargs=invoke_kwargs,
+        ),
     )
     final_state = _with_phase_outputs(
         state,
@@ -924,7 +959,7 @@ def _wrap_phase_runtime_node(
     phase_runner = PhaseWrapper(mapper, node_kind=node_kind).wrap(_node_with_lifecycle)
 
     def _dispatch_and_run(state: WorkflowState) -> WorkflowState:
-        _emit_input_dispatch(callbacks, phase_id=phase_id, input_schema=input_schema, state=state)
+        _emit_input_dispatch(callbacks, phase_id=phase_id, mapper=mapper, state=state)
         return phase_runner(state)
 
     wrapped = _wrap_declared_input_files(

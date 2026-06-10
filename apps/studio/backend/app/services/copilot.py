@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 import inspect
 import json
+import secrets
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -87,7 +88,10 @@ _session_lock = asyncio.Lock()
 _session_factory: Callable[[ClaudeAgentOptions], ClaudeSDKClient] = ClaudeSDKClient
 _view_contexts: dict[str, ViewContext] = {}
 _view_context_lock = asyncio.Lock()
-_SESSION_KEY_SALT = b"agent-harness-copilot-session-key-v1"
+# Session keys only index the in-process ``_sessions`` cache, so the salt just
+# needs to stay stable for the process lifetime; a fresh random salt per start
+# keeps the derived api_key hash unpredictable (S2053).
+_SESSION_KEY_SALT = secrets.token_bytes(16)
 _SESSION_KEY_ITERATIONS = 100_000
 
 

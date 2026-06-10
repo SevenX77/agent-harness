@@ -138,44 +138,6 @@ def _install_route_factory(monkeypatch: pytest.MonkeyPatch) -> FakeRouteChatMode
     return factory
 
 
-class FakeRouteChatModel:
-    def __init__(self, factory: FakeRouteChatModelFactory, route: Any) -> None:
-        self.factory = factory
-        self.route = route
-
-    def invoke(self, messages: list[BaseMessage]) -> AIMessage:
-        self.factory.invocations.append({"route": self.route, "messages": messages})
-        return AIMessage(
-            content="ok",
-            usage_metadata={"input_tokens": 2, "output_tokens": 1, "total_tokens": 3},
-            response_metadata={"finish_reason": "stop"},
-        )
-
-
-class FakeRouteChatModelFactory:
-    def __init__(self, **kwargs: Any) -> None:
-        self.init_kwargs = dict(kwargs)
-        self.builds: list[dict[str, Any]] = []
-        self.invocations: list[dict[str, Any]] = []
-
-    def build(self, route: Any, **kwargs: Any) -> FakeRouteChatModel:
-        self.builds.append({"route": route, "kwargs": dict(kwargs)})
-        return FakeRouteChatModel(self, route)
-
-
-def _install_route_factory(monkeypatch: pytest.MonkeyPatch) -> FakeRouteChatModelFactory:
-    from graph_agent_gateway import gateway_chat_model
-
-    factory = FakeRouteChatModelFactory()
-
-    def make_factory(**kwargs: Any) -> FakeRouteChatModelFactory:
-        factory.init_kwargs.update(kwargs)
-        return factory
-
-    monkeypatch.setattr(gateway_chat_model, "RouteChatModelFactory", make_factory)
-    return factory
-
-
 def _write_registry_files(tmp_path: Path) -> tuple[Path, Path]:
     snapshot = _snapshot()
     credentials_path = tmp_path / "llm_credentials.json"

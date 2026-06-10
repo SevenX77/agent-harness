@@ -12,6 +12,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.checkpoint.memory import InMemorySaver
 
+from graph_agent.core import graph_assembler
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.graph_assembler import (
     NamespaceCheckpointer,
@@ -263,6 +264,62 @@ def test_history_queries_distinguish_outer_and_agent_checkpoints(
     assert outer.config.get("configurable", {}).get("checkpoint_ns", "") == ""
     assert agent.config.get("configurable", {}).get("checkpoint_ns", "") == "agent:main"
     assert outer.checkpoint["id"] != agent.checkpoint["id"]
+
+
+def test_agent_inner_invoke_uses_sync_durability_with_shared_checkpointer(
+    monkeypatch: Any,
+    tmp_path: Path,
+    mock_skill_resolver: object,
+) -> None:
+    _agent_skill(tmp_path)
+    saver = InMemorySaver()
+    captured_invoke_kwargs: dict[str, Any] = {}
+
+    class _FakeCompiledAgent:
+        def get_graph(self) -> Any:
+            class _GraphShape:
+                nodes = ["__start__", "model", "__end__"]
+
+            return _GraphShape()
+
+        def invoke(
+            self,
+            payload: dict[str, Any],
+            config: dict[str, Any] | None = None,
+            **kwargs: Any,
+        ) -> WorkflowState:
+            del config
+            captured_invoke_kwargs.update(kwargs)
+            return WorkflowState(
+                data=BusinessData.model_validate({"answer": "sync"}),
+                flow=payload["flow"],
+                messages=payload["messages"],
+            )
+
+    def fake_create_agent(**kwargs: Any) -> _FakeCompiledAgent:
+        del kwargs
+        return _FakeCompiledAgent()
+
+    monkeypatch.setattr(graph_assembler, "create_agent", fake_create_agent)
+
+    compiled = compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
+    graph = assemble_graph(
+        compiled,
+        chat_model=_FinishTaskChatModel(),
+        skill_resolver=mock_skill_resolver,
+        checkpointer=saver,
+    ).graph
+
+    graph.invoke(
+        {
+            "data": {"topic": "sync"},
+            "flow": {"thread_id": "thread-sync", "run_id": "thread-sync"},
+            "messages": [],
+        },
+        config={"configurable": {"thread_id": "thread-sync"}},
+    )
+
+    assert captured_invoke_kwargs.get("durability") == "sync"
 
 
 def test_finish_task_framework_meta_stays_out_of_business_data() -> None:

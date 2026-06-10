@@ -71,6 +71,7 @@ jobs:
 
   graph-agent-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       matrix:
         include:
@@ -95,9 +96,11 @@ jobs:
         run: uv sync --all-packages --all-extras --group dev
 
       - name: pytest graph-agent (unit + integration)
+        timeout-minutes: 15
         run: |
           uv run pytest packages/graph-agent/tests \
-            --tb=short -q \
+            --tb=short -vv \
+            -o faulthandler_timeout=120 \
             --cov=packages/graph-agent/src/graph_agent \
             --cov-report=xml:coverage-graph-agent.xml \
             --cov-report=term

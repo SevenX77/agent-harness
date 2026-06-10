@@ -35,7 +35,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 2. `ProviderRoute` 是一个 endpoint 上的物理模型 route:它包含 `route_id`、`endpoint_id`、`route_slug`、`provider_model_id`、`canonical_id`、状态和能力(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:207-220`)。
 3. `LLMCredentialsFile` 是 Studio active credentials 文件 schema:它把 `provider_endpoints`、`provider_routes` 与 `runtime_policy` 放在同一个 v4 文件内(`apps/studio/backend/app/models/llm_config.py:121-130`)。
 4. `load_credentials` 是 v4 credentials 入口:文件不存在返回空 v4 registry,遇到 legacy provider schema 或非 v4 schema 会直接报错,避免 runtime 静默退回旧配置(`apps/studio/backend/app/services/llm_credentials.py:39-67`)。
-5. `save_credentials` 是 credentials 写入入口:它调用 `_save_credentials_unlocked` 原子写文件,并把权限设为 `0600`(`apps/studio/backend/app/services/llm_credentials.py:70-79`,`:449-482`)。
+5. `save_credentials` 是 credentials 写入入口:它调用 `_save_credentials_unlocked` 原子写文件,并把权限设为 `0600`(`apps/studio/backend/app/services/llm_credentials.py:70-79`,`:409-442`)。
 
 ### 2. credential_ref 已经是 route 运行时引用,不是明文 secret
 
@@ -65,8 +65,8 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 1. `serialize_for_response` 是 API 响应序列化入口:它使用 pydantic `model_dump(mode="json")`,让 `SecretStr` 以脱敏形式返回(`apps/studio/backend/app/services/llm_credentials.py:102-104`;`packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:171-172`)。
 2. `upsert_endpoints` 是 endpoint upsert 入口:它保留未提交的现有 secret,避免 UI 回写脱敏占位符时覆盖真实 secret(`apps/studio/backend/app/services/llm_credentials.py:107-136`)。
 3. `_preserved_secret` 是 secret 保留规则:空字符串表示清空,非占位符的新值表示替换,占位符 `**********` 表示沿用 current secret(`apps/studio/backend/app/services/llm_credentials.py:431-446`)。
-4. `_credentials_payload_for_storage` 是落盘 payload 生成函数:它会把 `SecretStr` 的真实值写回 active credentials 文件,说明当前 storage 不是外部 secret vault,而是本地受权限保护的 secret 文件(`apps/studio/backend/app/services/llm_credentials.py:475-482`)。
-5. `_save_credentials_unlocked` 是 credentials 原子写函数:它创建临时文件、fsync、chmod `0600`、再 replace,这是当前 storage 边界的主要安全措施(`apps/studio/backend/app/services/llm_credentials.py:449-472`)。
+4. `_credentials_payload_for_storage` 是落盘 payload 生成函数:它会把 `SecretStr` 的真实值写回 active credentials 文件,说明当前 storage 不是外部 secret vault,而是本地受权限保护的 secret 文件(`apps/studio/backend/app/services/llm_credentials.py:435-442`)。
+5. `_save_credentials_unlocked` 是 credentials 原子写函数:它创建临时文件、fsync、chmod `0600`、再 replace,这是当前 storage 边界的主要安全措施(`apps/studio/backend/app/services/llm_credentials.py:409-430`)。
 
 ### 5. roles 只引用 route,不直接碰 endpoint secret
 
@@ -92,7 +92,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 ## Baseline / Alignment 差异
 
 1. baseline 已经实现 `credential_ref` 运行时取 secret:resolved route 不带 `api_key`,真实调用前由 `CredentialProviderProtocol.get` 取 secret(`packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:415-439`;`apps/studio/backend/app/services/copilot.py:449-469`)。
-2. baseline 仍把 secret 保存在 active credentials 文件中:它靠 `SecretStr` 响应脱敏和 `0600` 文件权限保护,还不是外部 vault 或纯 host-managed secret store(`apps/studio/backend/app/services/llm_credentials.py:102-104`,`:449-482`)。
+2. baseline 仍把 secret 保存在 active credentials 文件中:它靠 `SecretStr` 响应脱敏和 `0600` 文件权限保护,还不是外部 vault 或纯 host-managed secret store(`apps/studio/backend/app/services/llm_credentials.py:102-104`,`:409-442`)。
 3. baseline 已实现 upsert / v3 migration / import draft apply 保存时按 protocol 归一化 `base_url`,并让 `compute_credential_fingerprint` 使用 canonical base_url 输入(`apps/studio/backend/app/services/llm_credentials.py:107-136`,`:299-326`;`apps/studio/backend/app/services/llm_import_drafts.py:136-202`;`packages/graph-agent-gateway/src/graph_agent_gateway/registry/storage.py:13-42`)。
 4. baseline 已实现 endpoint 标准化内核下沉:gateway 生成 canonical endpoint_id、拆分 URL×protocol 探测成功项、输出标准 `EndpointCandidate` list;Studio v3 migration 已改为调用 gateway legacy helper,避免继续在 ③a 维护 endpoint id 规则。
 
@@ -114,14 +114,14 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 - `apps/studio/backend/app/services/llm_credentials.py:107-136`: endpoint upsert 保存时 canonicalize base_url,并保留 secret/provider_kind/rate_limit_bucket 规则。
 - `apps/studio/backend/app/services/llm_credentials.py:299-326`: v3→v4 migration 保存时 canonicalize base_url,并调用 gateway `legacy_v3_endpoint_id` 保留历史 endpoint id。
 - `apps/studio/backend/app/services/llm_import_drafts.py:136-202`: import draft apply 保存 endpoint 时 canonicalize base_url,并保留 collision/secret/atomic write 行为。
-- `apps/studio/backend/app/services/llm_credentials.py:431-482`: secret 占位符规则与 active credentials 落盘。
+- `apps/studio/backend/app/services/llm_credentials.py:391-442`: secret 占位符规则与 active credentials 落盘。
 - `apps/studio/backend/app/services/llm_roles.py:88-133`: roles/profile/bundle route 引用校验。
 - `apps/studio/backend/app/services/llm_paths.py:13-49`: Studio LLM 文件路径边界。
 
 ## 待办/疑点
 
 1. 待办:调用层继续保留幂等 base_url 双保险;SDK 工厂和 probe helper主要消费已保存的 canonical route/endpoint base_url(`packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:161-205`;`apps/studio/backend/app/routers/llm.py:4906-4907`)。
-2. 疑点:active credentials 文件仍写入明文 API key,这与 `credential_ref` 不落 route 明文并不冲突,但如果 MVP1 要升级到 host-managed secret store,需要明确迁移边界(`apps/studio/backend/app/services/llm_credentials.py:475-482`)。
+2. 疑点:active credentials 文件仍写入明文 API key,这与 `credential_ref` 不落 route 明文并不冲突,但如果 MVP1 要升级到 host-managed secret store,需要明确迁移边界(`apps/studio/backend/app/services/llm_credentials.py:435-442`)。
 3. 疑点:roles 文件写入没有 chmod `0600`;按当前职责 roles 不含 secret,但若未来把 credential metadata 扩展到 roles,需要重新确认权限边界(`apps/studio/backend/app/services/llm_roles.py:191-206`)。
 
 4. 待办:Studio HTTP/job 层仍需在后续 UI 接线中消费 gateway `standardize_endpoint_candidates`;该接线属于 ③a 包装和进度展示,不是 endpoint 标准化规则本身。

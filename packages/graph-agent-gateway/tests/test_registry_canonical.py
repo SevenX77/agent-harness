@@ -29,6 +29,31 @@ def test_explicit_alias_can_merge_variant() -> None:
     assert result.confidence == "explicit_alias"
 
 
+def test_canonicalize_model_uses_endpoint_scoped_explicit_aliases() -> None:
+    from graph_agent_gateway.registry.canonical import canonicalize_model
+
+    aliases = {
+        "endpoint-a:vendor/model": "alpha-model",
+        "endpoint-b:vendor/model": "beta-model",
+    }
+
+    alpha = canonicalize_model(
+        endpoint_id="endpoint-a",
+        provider_model_id="vendor/model",
+        explicit_aliases=aliases,
+    )
+    beta = canonicalize_model(
+        endpoint_id="endpoint-b",
+        provider_model_id="vendor/model",
+        explicit_aliases=aliases,
+    )
+
+    assert alpha.canonical_id == "alpha-model"
+    assert alpha.confidence == "explicit_alias"
+    assert beta.canonical_id == "beta-model"
+    assert beta.confidence == "explicit_alias"
+
+
 def test_variants_remain_orphans_without_explicit_alias() -> None:
     from graph_agent_gateway.registry.canonical import canonicalize_model
 

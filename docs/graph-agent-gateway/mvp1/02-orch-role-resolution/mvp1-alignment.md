@@ -12,7 +12,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 > **Tier**：③b gateway 公共能力内核（`resolve_role` 已在包内；materialize 编排内核现散 ③a 待下沉）
 > **Owns**：接收角色编排结构（fallback_chain + 意图），解析成有序可执行 `ResolvedRoute` 链 + 跳过诊断；**不调模型**
-> **Status**：设计定稿（2026-06 判据第四轮反转）；代码 = resolve_role 普通链跳过语义与 skipped diagnostics 已落地，materialize 待下沉
+> **Status**：设计定稿（2026-06 判据第四轮反转）；代码 = resolve_role 普通链跳过语义、skipped diagnostics、route 级 `resolve_routes` 已落地，materialize 待下沉
 > **Related**：[[01-handoff-interface]]（route 契约）· [[04-orch-registry-schema]]（schema 权威源）· [[05-orch-capabilities-and-models]]（capability/lint）· [[08-orch-test-status-ssot]]（6 态投影，materialize 消费）· studio copilot（copilot SDK 调用 = ③a，见 `docs/studio/mvp1/02_capabilities/copilot-assist/` + `00_settings-ux-spec.md` §3.8）
 > **决策依据**：client 层 A' 重设计决策（D1 A' / D2 编排-调用分离，完整逻辑 + PM 原话见各功能段 F4/F5）+ 归属表 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`
 > **现状**：见同目录 `baseline.md`
@@ -33,7 +33,7 @@ MVP1 目标：把 role→route 变成一等编排 API。编排层只返回有序
 | **③a → ③b（materialize 入参）** | 角色编排结构 `RoleEntry`{ model_groups（候选 + 意图 thinking/token + fallback 开关）}。③b **看得到**"编排结构 + 意图"（通用），**看不到**"用户怎么 UI 编辑出它"（③a 应用加工）。 |
 | **materialize → resolve_role** | `RegistrySnapshot.RoleEntry.fallback_chain` = `RoleRouteEntry[]`（`route_id` + `runtime_settings`）。 |
 | **resolve_role 输出** | `ResolvedRole`{ `routes`: `ResolvedRoute[]`（protocol/base_url/credential_ref/provider_model_id/effective settings，字段权威源 `registry/schema.py:415-439`）, `runtime_policy`, `lint_results`, `source_profile`, **`skipped_diagnostics`（已落地，`list[SkippedRoute]`，`schema.py:448-476`）** }。 |
-| **两级对外 API（③b 公共）** | ① role 级 `ModelResolver.resolve(role_name, model_override)` → `BaseChatModel`（已有 `resolver.py:73-146`）；② **route 级 `resolve_routes(role_name, model_override)` → `ResolvedRole`（待补，契约由 [[01-handoff-interface]] 钉死）**。 |
+| **两级对外 API（③b 公共）** | ① role 级 `ModelResolver.resolve(role_name, model_override)` → `BaseChatModel`（已有 `resolver.py:71-138`）；② **route 级 `ModelResolver.resolve_routes(role_name, route_override)` → `ResolvedRole`（已落地，契约由 [[01-handoff-interface]] 钉死）**。 |
 | **错误** | role 不存在 / 过滤后空链 → `RegistryResolutionError`（配置错误，**非** 后置 `AllProvidersFailedError`）；`route_override` 坏 route → fail-fast。 |
 | **归属 / 稳定性** | `ResolvedRoute`/`ResolvedRole` 字段权威源 = [[04-orch-registry-schema]]（`registry/schema.py`）；本模块**只链接不复制**，防 drift。 |
 
@@ -51,10 +51,10 @@ MVP1 目标：把 role→route 变成一等编排 API。编排层只返回有序
 
 ### F1 `resolve_role` 路线解析（role 展开成有序 `ResolvedRoute` 链）
 
-- **机制/数据流**：`resolve_role`（③b，role 展开成有序 `ResolvedRoute` 链）读取 role 后，应按 `role.fallback_chain` 的声明顺序遍历；有 `route_override` 时仍只解析 override 那一条，见当前 entry 选择逻辑 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:45-55`。`select_verified_profile`（选择一个 route 上已验证的调用 profile）仍应在 route 可执行后运行；profile 不可选时是 route 级不可执行原因，目标语义应进入 skipped diagnostic 或 override fail-fast，当前调用点见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:72-75`。`_effective_runtime_settings`（把 route entry 的用户设置、route capability 默认值、protocol 默认值合成最终 runtime settings）仍负责生成 route 的最终调用参数来源，因为调用层只应消费已解析 route，当前实现见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:156-270`。
+- **机制/数据流**：`resolve_role`（③b，role 展开成有序 `ResolvedRoute` 链）读取 role 后，应按 `role.fallback_chain` 的声明顺序遍历；有 `route_override` 时仍只解析 override 那一条，见当前 entry 选择逻辑 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:47-55`。`select_verified_profile`（选择一个 route 上已验证的调用 profile）仍应在 route 可执行后运行；profile 不可选时是 route 级不可执行原因，当前实现已进入 skipped diagnostic 或 override fail-fast，调用点见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:129-143`。`_effective_runtime_settings`（把 route entry 的用户设置、route capability 默认值、protocol 默认值合成最终 runtime settings）仍负责生成 route 的最终调用参数来源，因为调用层只应消费已解析 route，当前实现见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:176-182`。
 - **决策+动机**：`resolve_role`（③b）是应承载跳过语义和空链报错的地方（跳过/空链语义见 F2，override 解析见 F3）；逐条解析的产物是 `ResolvedRoute`（一条 runtime-ready route candidate，含 protocol/base_url/credential/provider_model/effective settings）。
 - **原话**：（本功能为机制承载点，跳过/空链/override 等关键决策原话见 F2/F3；编排/调用分离原话见 F5）
-- **status**：role→route 的纯数据形态已经存在（已实现，见文末附录）；逐条跳过 / 空链 / route-only 暴露 = target。
+- **status**：role→route 的纯数据形态、逐条跳过、空链报错、route-only 暴露均已落地（已实现，见文末附录）；materialize 下沉仍为 target。
 - **测试点**：`fallback_chain` 按声明顺序逐条解析进链（顺序正确）；route 可执行后才选 profile、合成 effective settings（跳过/override 的具体测试点见 F2/F3）。
 - **归属**：region/platform ③b `packages/graph-agent-gateway`：`resolve_role`（已在）、`ResolvedRoute/ResolvedRole` 契约。
 
@@ -78,7 +78,7 @@ MVP1 目标：把 role→route 变成一等编排 API。编排层只返回有序
 - **机制/数据流**：`resolve_role` 遇到 `route_override` 指定的单条 route 失败时，目标语义仍应 **fail fast**，因为 override 是调用方显式选择，不是 fallback 链里的可跳过候选；当前 override 由 `ModelResolver.resolve` 传入，见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:92-98`。
 - **决策+动机**：**`model_override` 继续作为精确 route override**：MVP1 schema 的 execution identifier 是 `route_id`，不是 provider/model 模糊字符串；`RoleRouteEntry` 也用 `route_id` 做唯一引用，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:247-261`。
 - **原话**：（override fail-fast 为机制驱动，无单独 PM 原话；两级 API / 编排-调用分离原话见 F5）
-- **status**：override 当前与普通链共用同一抛错分支（见 F2 gaps）；override fail-fast 与普通链 skip 的分离 = target。
+- **status**：override fail-fast 与普通链 skip 的分离已落地；`route_override` 指向不可执行 route 时抛 `RegistryResolutionError`,普通 fallback 链不可执行 route 记录 skipped diagnostic 后继续，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:61-143`。
 - **测试点**：**override fail-fast**：`route_override` 指向坏 route → **fail-fast，不 skip**。
 - **归属**：region/platform ③b `packages/graph-agent-gateway`（`resolve_role` override 分支语义）。
 
@@ -101,8 +101,8 @@ MVP1 目标：把 role→route 变成一等编排 API。编排层只返回有序
 ### F5 两级对外 API（role 级 `resolve` + route 级 `resolve_routes`；编排/调用分离 + A'）
 
 - **机制/数据流**：
-  - `ModelResolver`（把 registry 解析结果包成 `GatewayChatModel` 或 predict mock model）应新增 route-only API，例如 `resolve_routes(role_name, model_override)` 返回 `ResolvedRole`，这样 Copilot 和未来 API 不必绕过 class 去直接 import `registry.resolver.resolve_role`，当前 Copilot 是直接调 pure helper，见 `apps/studio/backend/app/services/copilot.py:419-437`。
-  - `ModelResolver.resolve`（把 role/model override 解析成 LangChain chat model）继续作为 Engine 旧入口，只在 route-only 结果不为空时包成 `GatewayChatModel` 或 `PredictGatewayChatModel`，当前包装逻辑见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:119-146`。
+  - `ModelResolver`（把 registry 解析结果包成 `GatewayChatModel` 或 predict mock model，或直接返回 route handoff）已提供 route-only API：`resolve_routes(role_name, route_override)` 返回 `ResolvedRole`。Copilot 和 registry response 已通过该 route-only API 取得 handoff routes，不再绕过 class 去直接 import `registry.resolver.resolve_role`。
+  - `ModelResolver.resolve`（把 role/model override 解析成 LangChain chat model）继续作为 Engine 旧入口，只在 route-only 结果不为空时包成 `GatewayChatModel` 或 `PredictGatewayChatModel`，当前包装逻辑见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:111-138`。
 - **决策+动机**：
   - **把 role→route 做成一等 API**（D2 编排/调用分离）：编排层只决定"该用哪条 route"，调用层才执行 provider 调用；copilot 走 `claude_agent_sdk` 不归 gateway 调，只问 gateway 要 route。client 层共享决策，另见 [[01-handoff-interface]] §5 / [[09-inv-invocation-runtime]] §5。
   - **保留 `GatewayChatModel`**（A'，否决激进版 A）：否决"resolver 直接返回原生 ChatX + 删编排外壳 + 用 `with_fallbacks()`"——它会回归 fallback/probe/熔断/usage/metadata，且 `with_fallbacks()` 只按异常类型分流、表达不了"按 HTTP status 分类"；第八轮真机只验证了"换 ChatX 修空-content bug"，从未验证"删编排层"。fallback、probe、熔断、usage、metadata 都还在编排外壳里。client 层共享决策，另见 [[09-inv-invocation-runtime]] §5。
@@ -110,10 +110,10 @@ MVP1 目标：把 role→route 变成一等编排 API。编排层只返回有序
   > **D2 编排/调用分离**（PM 原话；client 层共享决策，另见 [[01-handoff-interface]] §4 / [[09-inv-invocation-runtime]] §4）："你只要知道谁跟你说我现在要调 copilot，把 copilot 解析好的 route 给我，你就给他……编排和调用是不是应该更模块化更内聚化，API 写清楚，编排输入什么输出什么。"
 
   > **A' 保留编排外壳**（PM 原话；client 层共享决策，另见 [[09-inv-invocation-runtime]] §4）："不用留 A，这是错误判断，正确的是 A'。" → 保留 `GatewayChatModel`，fallback/probe/熔断/usage/metadata 留编排外壳。
-- **status**：Copilot 内部已按"编排只给 route，调用方自己调"的方向使用 `resolve_role`（已实现，见文末附录）；但 route-only API 还不是 `ModelResolver` 的公开方法，现在 Engine 协议只有 `ModelResolverProtocol.resolve` 返回 `BaseChatModel`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/protocol.py:24-39`。route 级 `resolve_routes` = target。
+- **status**：Copilot 内部已按"编排只给 route，调用方自己调"的方向使用 `ModelResolver.resolve_routes`（已实现，见文末附录）；`ModelResolver.resolve_routes` 与 `ModelResolverProtocol.resolve_routes` 也已成为公开 route 级 API，见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:140-153` 与 `packages/graph-agent-gateway/src/graph_agent_gateway/protocol.py:43-49`。registry response 的 role effective runtime settings 也已复用同一 API。
 - **测试点**：（API 契约见模块级「接口契约」两级对外 API 行 + [[01-handoff-interface]]；route-only 返回 `ResolvedRole` 而非 chat model，role 级仍兼容 `BaseChatModel` 入口。）
-- **gaps / 待办**：新增 `ModelResolver.resolve_routes`（route→route 一等 API 返回 `ResolvedRole` 而非 chat model），并让 Copilot/registry response 复用它；当前这些路径直接调用 pure helper，见 `apps/studio/backend/app/services/copilot.py:419-437`、`apps/studio/backend/app/routers/llm.py:4588-4603`。
-- **归属**：region/platform ③b `packages/graph-agent-gateway`（`ModelResolver`：兼容 Engine `BaseChatModel` 入口 + 补 route 级 `resolve_routes` 一等 API）；消费方 ③a `apps/studio/backend`（copilot、registry response）。
+- **已实现补充**：Copilot/registry response 复用 `ModelResolver.resolve_routes`，不再直接调用 pure helper。后续只剩 materialize 编排内核下沉（见 F4）。
+- **归属**：region/platform ③b `packages/graph-agent-gateway`（`ModelResolver`：兼容 Engine `BaseChatModel` 入口 + route 级 `resolve_routes` 一等 API）；消费方 ③a `apps/studio/backend`（copilot、registry response）。
 
 ### F6 capability lint（`lint_role_routes`；不做动态替代选择）
 
@@ -132,7 +132,7 @@ MVP1 目标：把 role→route 变成一等编排 API。编排层只返回有序
 > 功能内 gap 见各 F 段；下列为模块级 / 跨功能 gap。
 
 - **代码下沉**（后续工程，非本轮）：materialize 编排内核 → gateway 包；report 渲染留 studio。（详见 F4）
-- **待办**：新增 `ModelResolver.resolve_routes`（route→route 一等 API 返回 `ResolvedRole` 而非 chat model），并让 Copilot/registry response 复用它；当前这些路径直接调用 pure helper，见 `apps/studio/backend/app/services/copilot.py:419-437`、`apps/studio/backend/app/routers/llm.py:4588-4603`。（详见 F5）
+- **已落地**：Copilot/registry response 复用已落地的 `ModelResolver.resolve_routes`;详见 F5。
 - **已落地**：`ResolvedRole.skipped_diagnostics` 字段记录 route missing/status/endpoint/credential/profile/lint 的跳过原因，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:448-476`。（详见 F2）
 - **已落地**：普通 fallback 链的不可执行 entry 会记录 skipped diagnostic 并继续，override 的不可执行 entry 保持 fail-fast，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:60-140`。（详见 F2/F3）
 - ✅ **已落地（PM 2026-06-04 决策）**：blocking lint = **跳过该 route、继续下一条**（不让整个 role 失败）——与 fallback"跳坏 route"语义一致；resolver 会标记该 route 跳过(进 `skipped_diagnostics`)、继续；**全部候选被跳过(空链)才**抛配置错误 `RegistryResolutionError`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:198-219`。（详见 F6）
@@ -150,27 +150,27 @@ MVP1 目标：把 role→route 变成一等编排 API。编排层只返回有序
 ## 附录 A — 已实现 / 与 baseline 差异（模块级证据）
 
 - **已实现**：role→route 的纯数据形态已经存在。`ResolvedRoute`（一条 runtime-ready route candidate）包含 protocol/base_url/credential/provider_model/effective settings，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:415-439`；`ResolvedRole`（解析后的 role 元数据和有序 routes）包含 routes/runtime_policy/lint/skipped_diagnostics/source profile，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:466-478`。
-- **已实现**：Copilot 内部已经按"编排只给 route，调用方自己调"的方向使用 `resolve_role`，见 `apps/studio/backend/app/services/copilot.py:419-437`；真正调用发生在 `stream_query` 里遍历 routes 并创建 Claude SDK session，见 `:218-263`。
+- **已实现**：Copilot 内部已经按"编排只给 route，调用方自己调"的方向使用 `ModelResolver.resolve_routes`；真正调用发生在 `stream_query` 里遍历 routes 并创建 Claude SDK session，见 `apps/studio/backend/app/services/copilot.py`。
 - **已实现**：runtime `resolve_role` 已跳过普通链上的未配置/不可执行 entry，并把跳过原因写入 `skipped_diagnostics`;过滤后空链才抛 `RegistryResolutionError`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:60-140` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:212-219`。
-- **未实现**：route-only API 还不是 `ModelResolver` 的公开方法。现在 Engine 协议只有 `ModelResolverProtocol.resolve` 返回 `BaseChatModel`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/protocol.py:24-39`。
+- **已实现**：route-only API 已是 `ModelResolver` 的公开方法，`ModelResolverProtocol` 也声明 `resolve_routes(role_name, *, route_override=None) -> ResolvedRole`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:140-153` 与 `packages/graph-agent-gateway/src/graph_agent_gateway/protocol.py:43-49`。
 - **已实现**：skipped diagnostics 已有 schema 字段。`SkippedRoute` 定义跳过原因结构，`ResolvedRole.skipped_diagnostics` 保存 `list[SkippedRoute]`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:448-476`。
 
 ## 附录 B — 覆盖代码（含覆盖率，模块级证据）
 
-覆盖率：4/4 个 brief 指定目标已覆盖，100%。其中 runtime 解析覆盖 `registry/resolver.py:33-132` 与 `resolver.py:41-184`；Studio 装配覆盖 `services/gateway_resolver.py:15-21`；authoring 投影覆盖 `services/llm_role_materializer.py:27-269`。
+覆盖率：4/4 个 brief 指定目标已覆盖，100%。其中 runtime 解析覆盖 `registry/resolver.py:35-234` 与 `resolver.py:42-153`；Studio 装配覆盖 `services/gateway_resolver.py:15-21`；authoring 投影覆盖 `services/llm_role_materializer.py:27-269`。
 
 | 覆盖目标 | 归属 | MVP1 目标 |
 |---|---|---|
 | `registry/resolver.py:resolve_role`（role 展开成有序 `ResolvedRoute` 链，不调模型） | **③b**（已在包内） | 恢复逐条跳过语义、暴露 skipped diagnostics、过滤后空链抛配置错误、保留精确 `route_override` |
-| `resolver.py:ModelResolver`（把解析结果包成 `GatewayChatModel`/predict mock） | **③b**（已在包内） | 兼容 Engine `BaseChatModel` 入口 + 补 route 级 `resolve_routes` 一等 API |
+| `resolver.py:ModelResolver`（把解析结果包成 `GatewayChatModel`/predict mock，或直接返回 route handoff） | **③b**（已在包内） | 兼容 Engine `BaseChatModel` 入口 + 已落地 route 级 `resolve_routes` 一等 API |
 | `services/gateway_resolver.py:build_gateway_model_resolver`（Studio v4 creds + roles 构造 resolver） | **③a 装配入口** | 继续作 Studio 装配入口，可复用同一 snapshot 构造 route-only resolver |
 | `services/llm_role_materializer.py:materialize_role`（角色编辑 → fallback_chain） | **③b 编排内核（现散 ③a 待下沉）** | 意图过滤/降级/排链/role-fit 诊断下沉 gateway；report 渲染留 ③a |
 
 ## 附录 C — 代码索引（clues，模块级证据）
 
-- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:33-132`：`resolve_role`（③b）是应承载跳过语义和空链报错的地方。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:73-146`：`ModelResolver.resolve`（③b）是旧 Engine 入口，应继续保留。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/protocol.py:24-39`：`ModelResolverProtocol` 当前只暴露 chat model 返回值（route 级 API 待补）。
-- `apps/studio/backend/app/services/copilot.py:419-437`：`_resolve_copilot_runtime` 展示了 route-only API 的现实需求（③a 消费方）。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:35-234`：`resolve_role`（③b）承载跳过语义、空链报错、override fail-fast 和 lint skip。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:71-153`：`ModelResolver.resolve`（③b）是旧 Engine 入口，`ModelResolver.resolve_routes` 是 route 级 handoff API。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/protocol.py:27-49`：`ModelResolverProtocol` 同时暴露 chat model 返回值和 route 级 `resolve_routes`。
+- `apps/studio/backend/app/services/copilot.py:_resolve_copilot_runtime`：已通过 `ModelResolver.resolve_routes` 消费 route-only API（③a 消费方）。
 - `apps/studio/backend/app/services/llm_role_materializer.py:27-96`：`materialize_role`（③b 编排内核，现散 ③a 待下沉）是保存/展示前的投影。
-- `apps/studio/backend/app/routers/llm.py:4588-4603`：`_role_effective_runtime_settings` 现在也直接调用 pure `resolve_role`，遇到解析错误会跳过整个 role。
+- `apps/studio/backend/app/routers/llm.py:_role_effective_runtime_settings`：已通过 `ModelResolver.resolve_routes` 取得 role effective runtime settings，遇到解析错误仍跳过该 role。

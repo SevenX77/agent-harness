@@ -13,6 +13,14 @@ from graph_agent_gateway.registry.credentials import (
     EndpointCredentialProvider,
     FallbackCredentialProvider,
 )
+from graph_agent_gateway.registry.endpoints import (
+    EndpointStandardizationResult,
+    ProtocolProbeResult,
+    RawProviderEndpointInput,
+    canonical_endpoint_id_base,
+    legacy_v3_endpoint_id,
+    standardize_endpoint_candidates,
+)
 from graph_agent_gateway.registry.schema import (
     CapabilityValue,
     EffectiveRuntimeSetting,
@@ -34,6 +42,7 @@ from graph_agent_gateway.registry.schema import (
     RouteCandidate,
     RuntimePolicy,
     RuntimeSettings,
+    SkippedRoute,
     StructuredOutputSettings,
     VerifiedProfile,
 )
@@ -46,6 +55,7 @@ __all__ = [
     "EndpointCandidate",
     "EvidenceRecord",
     "EndpointCredentialProvider",
+    "EndpointStandardizationResult",
     "FallbackCredentialProvider",
     "FieldSource",
     "LintResult",
@@ -54,6 +64,8 @@ __all__ = [
     "ProviderEndpoint",
     "ProviderImportDraft",
     "ProviderRoute",
+    "ProtocolProbeResult",
+    "RawProviderEndpointInput",
     "RegistrySnapshot",
     "ResolvedRole",
     "ResolvedRoute",
@@ -63,9 +75,13 @@ __all__ = [
     "RoleRouteEntry",
     "RouteCandidate",
     "RuntimePolicy",
+    "SkippedRoute",
     "StructuredOutputSettings",
     "SecretLifetimePolicy",
     "SnapshotVersion",
     "TerminalRetryPolicy",
     "VerifiedProfile",
+    "canonical_endpoint_id_base",
+    "legacy_v3_endpoint_id",
+    "standardize_endpoint_candidates",
 ]

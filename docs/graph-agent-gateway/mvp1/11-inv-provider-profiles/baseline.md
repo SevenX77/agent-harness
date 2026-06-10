@@ -11,7 +11,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 # 11-inv-provider-profiles - Baseline(现状)
 
-> **Tier**：③b gateway 公共能力（**MVP1 新建**调用层 provider 差异表；归属表判 11=纯 ③b 新建，见 `module-disposition-revised.md:54`）。**WS-1 后 `ProviderProfile` 调用层模块已存在**，并 seed 最小 defaults；它与 `registry/profile_selector.py` 的 `VerifiedProfile` 仍是不同层级。MVP1 目标见同目录 `mvp1-alignment.md`。
+> **Tier**：③b gateway 公共能力（MVP1 新增设计单元/调用层 provider 差异表；归属表判 11=纯 ③b，见 `module-disposition-revised.md:54`）。**WS-1 后 `ProviderProfile` 调用层模块已存在**，并 seed 最小 defaults；它与 `registry/profile_selector.py` 的 `VerifiedProfile` 仍是不同层级。MVP1 目标见同目录 `mvp1-alignment.md`。
 
 ## 覆盖代码(含覆盖率)
 

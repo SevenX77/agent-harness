@@ -11,11 +11,11 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 # 11-inv-provider-profiles - MVP1 Alignment(目标设计)
 
-> **Tier**：③b gateway 公共能力（**MVP1 新建**调用层 provider 差异表；WS-1 后源码已存在，ordinary provider/thinking 分支已迁到 `ordinary_chat.py`，后续只按需收束进 ProviderProfile 或 payload patch）
+> **Tier**：③b gateway 公共能力（MVP1 新增设计单元/调用层 provider 差异表；WS-1 后源码已存在，ordinary provider/thinking 分支已迁到 `ordinary_chat.py`，后续只按需收束进 ProviderProfile 或 payload patch）
 > **Owns**：`ProviderProfile` = route 派生 key → ChatX init-kwargs（+ 可选 `pre_init` / 动态 `init_kwargs_factory`）的声明式表；gateway 工厂按 `protocol:{route.protocol}` → `endpoint:{route.endpoint_id}` → `endpoint:{route.endpoint_id}:model:{route.provider_model_id}` 叠加。把 headers / Responses API / 温度默认 / stream_usage / thinking 开关等**构造期差异**收束到 init-kwargs 层。仅当请求 payload 必须改才子类覆盖单方法（deerflow 范式），**绝不重写整套消息转换**。**只描述怎么构造 ChatX，不做运行时动态选型**。
-> **Status**：设计定稿（2026-06 判据复核，归属表判 11=纯 ③b 新建不变）；代码 = `ProviderProfile` 注册表、route key 派生、factory overlay、最小 `stream_usage` defaults 与 DeepSeek payload patch 已落地；其它 provider thinking 完整归一化仍 deferred。
+> **Status**：设计定稿（2026-06 判据复核，归属表判 11=纯 ③b 不变）；代码 = `ProviderProfile` 注册表、route key 派生、factory overlay、最小 `stream_usage` defaults 与 DeepSeek payload patch 已落地；其它 provider thinking 完整归一化仍 deferred。
 > **Related**：[[10-inv-route-chat-model-factory]]（本表被工厂第 6 步调用，合成 ChatX init-kwargs）· [[05-orch-capabilities-and-models]]（capability/lint/`select_verified_profile` 留编排前置校验，与本表划清层级）· [[09-inv-invocation-runtime]]（invoke 运行时；`call_method_id`/`request_mapper_id` 归属悬案共享）· [[04-orch-registry-schema]]（`VerifiedProfile` 字段权威源，**不**与 `ProviderProfile` 合并）
-> **决策日志**：client 层 A' 重设计决策（F6 provider 差异 → init-kwargs profile / M6 `RouteChatModelFactory` / D1 方案 A' / 借鉴 vs 自建）——完整逻辑 + PM 拍板原话已留底于本文 §4（决策基础）/ §5（决策动机）/ §6（兼容性验证清单）；归属判据见 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`（§4 判 11 纯 ③b 新建）
+> **决策日志**：client 层 A' 重设计决策（F6 provider 差异 → init-kwargs profile / M6 `RouteChatModelFactory` / D1 方案 A' / 借鉴 vs 自建）——完整逻辑 + PM 拍板原话已留底于本文 §4（决策基础）/ §5（决策动机）/ §6（兼容性验证清单）；归属判据见 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`（§4 判 11 纯 ③b）
 > **现状**：见同目录 `baseline.md`（WS-1 后 `ProviderProfile` 调用层模块已存在；它与 `registry/profile_selector.py` 的 verified profile 选择器是不同层级）
 
 ## 1. 定义
@@ -95,7 +95,7 @@ MVP1 目标：`ProviderProfile` 模式（用 provider 或 route 派生 key 映�
 > 来源 = client 层 A' 重设计决策的「兼容性验证清单（A' 实现必过）」（完整 7 项 + live 冒烟留底于 [[09-inv-invocation-runtime]] §6）。本模块（provider 构造差异表）对应其中与 init-kwargs 合并 / thinking / stream_usage / payload patch / 边界不混相关的项。
 
 - **lookup 顺序 + caller-wins**：gateway factory 按 `protocol:{route.protocol}` → `endpoint:{route.endpoint_id}` → `endpoint:{route.endpoint_id}:model:{route.provider_model_id}` 叠加；caller kwargs（route runtime settings）压过 profile default（合并优先级 `pre_init`→`init_kwargs`→factory→caller）。
-- **thinking 归一化进 init-kwargs**：把 thinking 规则从 `ordinary_chat.py` 的 provider 分支提炼成 profile/init kwargs 前，需保留 lint 里的预算校验和 Anthropic manual/adaptive 约束（`lint.py:242-332`）；profile 只承载构造期开关，约束仍在 lint。
+- **thinking 归一化进 init-kwargs**：把 thinking 规则从 `ordinary_chat.py` 的 provider 分支提炼成 profile/init kwargs 前，需保留 lint 里的预算校验和 Anthropic manual/adaptive 约束（`registry/lint.py:242-332`）；profile 只承载构造期开关，约束仍在 lint。
 - **stream_usage 默认开**：OpenAI-compatible profile 默认带 `stream_usage`，保证第三方 base_url 下 streaming 响应不丢 usage（deerflow 经验，F5/F6）。
 - **payload patch 仅单方法**：`PatchedChatDeepSeek` 已移植，仅覆盖 `_get_request_payload` 恢复多轮 assistant `reasoning_content`，**不重写整套消息转换**（A' 边界，见 §4 F6 / §5 决策 1）；已用 gateway 本地 helper 按 assistant message 顺序 replay，不搬 deerflow 文件。
 - **`VerifiedProfile` 不被吞**：`ProviderProfile`（构造）与 `VerifiedProfile`（已验证调用方式）层级分明，`select_verified_profile` 仍在编排/解析层正常选 profile，不被 init-kwargs 表替代。

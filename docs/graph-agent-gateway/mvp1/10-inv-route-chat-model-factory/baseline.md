@@ -11,7 +11,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 # 10-inv-route-chat-model-factory - Baseline(现状)
 
-> **Tier**：③b gateway 公共能力（**MVP1 新建**调用层核心；归属表判 10=纯 ③b 新建，见 `module-disposition-revised.md:53`）。**WS-1 后本模块源码已存在**：`RouteChatModelFactory` 负责把一条 `ResolvedRoute` 构造成官方 LangChain ChatX；generic 分支已具备最小 ordinary-chat adapter。MVP1 目标见同目录 `mvp1-alignment.md`。
+> **Tier**：③b gateway 公共能力（MVP1 新增设计单元/调用层核心；归属表判 10=纯 ③b，见 `module-disposition-revised.md:53`）。**WS-1 后本模块源码已存在**：`RouteChatModelFactory` 负责把一条 `ResolvedRoute` 构造成官方 LangChain ChatX；generic 分支已具备最小 ordinary-chat adapter。MVP1 目标见同目录 `mvp1-alignment.md`。
 
 ## 覆盖代码(含覆盖率)
 

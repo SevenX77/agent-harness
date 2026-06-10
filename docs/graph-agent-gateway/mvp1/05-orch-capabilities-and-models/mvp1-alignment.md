@@ -13,7 +13,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 > **组织方式**：**以每个功能为索引** —— 每个功能(F1–F8)一段，把它的机制/数据流 · 决策+动机 · 原话 · 测试点 · status · 归属**全收在自己段里**；仅「定义」「接口契约」「跨功能设计依据」是模块级总览，证据附录（已实现/差异、覆盖代码、代码索引）落在文末。现状基线见同目录 `baseline.md`。
 > **Tier**：③b gateway 公共能力内核（`capabilities`/`lint`/`profile_selector` 已在包内；**model_groups / identity / notable / route_capabilities 的能力内核也属 ③b，现散 ③a `apps/studio/backend/app/services` 待下沉**）
 > **Owns**：把各厂商参差的模型能力**归一化**成统一表示、把能力翻译成前端可渲染的**控件描述符**、在单条 route 内选择已验证的**调用 profile**、对显式 route 链做 capability **lint**、把原始 model id 客观**分组（model group）/ 识别品牌家族（identity）/ 沉淀已知可用知识（notable）/ 合并静态+探测能力（route_capabilities）**；**不调模型、不做动态选型**
-> **Status**：设计定稿（2026-06-03 判据第四轮反转 model_groups/identity/notable/route_capabilities 归属）；代码 = `capabilities`/`lint`/`profile_selector` 不动，四项模型知识能力内核待下沉 ③b，`_capability_state` 待升四态
+> **Status**：设计定稿（2026-06-03 判据第四轮反转 model_groups/identity/notable/route_capabilities 归属）；代码 = `capabilities`/`lint`/`profile_selector` 不动，四项模型知识能力内核待下沉 ③b，`_capability_state` 四态轴已落地
 > **Related**：[[02-orch-role-resolution]]（消费 profile + lint 结果）· [[04-orch-registry-schema]]（`CapabilityValue`/`VerifiedProfile`/`LintResult` 字段权威源）· [[08-orch-test-status-ssot]]（capability_state 第二轴投影落点）· [[10-inv-route-chat-model-factory]] / [[11-inv-provider-profiles]]（消费 `call_method_id`/`request_mapper_id`）
 > **决策日志**：`packages/graph-agent-gateway/README.md` §2/§3 + `docs/studio/mvp1/01_workflows/00_settings-ux-spec.md` §6.0 + `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`（行 42-45 四项反转）
 > **现状**：见同目录 `baseline.md`
@@ -38,7 +38,7 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 | **profile 选择 → ③b** | `select_verified_profile(route, runtime_settings) -> VerifiedProfile | None`（`registry/profile_selector.py:14-52`）。无 ready profile → 返回 `None`（走默认调用方式，不失败）；要求模态/reasoning 无 ready profile 覆盖 → 抛 `ProfileSelectionError`（无 verified profile 满足请求意图的异常）。**单 route 入参**（只接收单个 `ProviderRoute`），结构上保证不跨 route 选型。 |
 | **lint → ③b** | `lint_role_routes(role, routes) -> list[LintResult]`（`registry/lint.py:27-87`）。`LintResult`{ `severity`(warn/error)、`blocking`(bool)、`code`(`requires_probe`/incompatible…) }（`registry/schema.py:388-400`）。**只产出结果**，不改 `fallback_chain`、不补 route。 |
 | **模型知识 → ③b（现散 ③a 待下沉）** | `project_model_group_identity(route) -> ModelGroupIdentityProjection`（组 key/组展示名/section/剥离 token，`llm_model_groups.py:43-68`）；`project_model_identity(route) -> ModelIdentityProjection`（展示名/section/置信度/unknown_tokens，`llm_model_identity.py:83-121`）；`notable_model_ids(provider, notes_dir) -> list[str]`（`llm_notable_models.py:16-37`）；`route_effective_capabilities(route) -> dict`（静态 + ready verified 合并，`llm_route_capabilities.py:10-64`）。**输出 = 模型知识 DTO**；③b **看得到**"route + endpoint 原始信息"（通用），**看不到**"family 折叠态/弃用区/展示名样式覆盖/数据源在哪个文件"（③a 应用加工）。 |
-| **capability_state 第二轴（D2，待补四态）** | `_capability_state(route) -> Literal["unknown","callable_only","partial","known"]`（现散 ③a `routers/llm.py:1767-1770`，现二值待升四态）。**判据 = 按每个 capability 的 `source` 算（probe-verified vs doc/list/draft 声称 vs 未知），不并入 `route.status`（availability）**。投影侧落点见 [[08-orch-test-status-ssot]] 回填。归属 = route 内在轴（③b 标准总结，现散 ③a）。机制/决策见 §F8。 |
+| **capability_state 第二轴（D2，四态）** | `_capability_state(capabilities) -> Literal["unknown","callable_only","partial","known"]`（现散 ③a `routers/llm.py`，已按四态落地）。**判据 = 按每个 capability 的 `source` 算（probe-verified vs doc/list/draft 声称 vs 未知），不并入 `route.status`（availability）**。投影侧落点见 [[08-orch-test-status-ssot]] 回填。归属 = route 内在轴（③b 标准总结，现散 ③a待下沉）。机制/决策见 §F8。 |
 | **错误** | profile 无匹配 → `ProfileSelectionError`（route 级不可执行原因，由 `resolve_role` 转 skipped diagnostic 或 override fail-fast，归 [[02-orch-role-resolution]]）；blocking lint → `RegistryResolutionError`（role 级配置错误）。**不抛"找不到更好的 route"类错误**（无动态选型）。 |
 | **归属 / 稳定性** | 所有上述 schema 字段权威源 = [[04-orch-registry-schema]]；本模块只链接。`call_method_id`/`request_mapper_id` 的消费契约由 [[10-inv-route-chat-model-factory]] / [[11-inv-provider-profiles]] 钉死。 |
 
@@ -162,14 +162,14 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 
 > 源：`studio-llm-platform-control-plane-runtime` R5.3「role 要 thinking/tools/structured/vision 时，capability 就绪与 availability 就绪分开记」；studio `00_settings-ux-spec.md §4.2` 已立 `capability_state` 轴。（PM 2026-06-03 需求对账补；接 gaps。）
 
-- **机制 / 数据流**：`_capability_state(route) -> Literal["unknown","callable_only","partial","known"]`（capability 就绪轴，现散 ③a `routers/llm.py:1767-1770`，现二值待升四态）。
+- **机制 / 数据流**：`_capability_state(capabilities) -> Literal["unknown","callable_only","partial","known"]`（capability 就绪轴，现散 ③a `routers/llm.py`，已按四态落地）。
   - **capability 两个正交面**：① **支持**（route 是否声称 thinking/tools/structured/vision —— 现已覆盖）；② **capability 就绪** = 每个契约是否 **probe-verified**（`CapabilityValue.source==probed_verified`，`schema.py:67-74`）vs 仅 doc/list/draft 声称 vs 未知。
   - **四态轴**：`unknown`(无线索)/ `callable_only`(key/endpoint 通但无契约验证)/ `partial`(部分契约 verified)/ `known`(全 verified)。**判据 = 按每个 capability 的 `source` 算，不并入 `route.status`（availability）**。
 - **决策 + 动机**：**轴归属（Claude 定，PM 可推翻）**：`capability_state` 是 **route 内在轴**（ux-spec §4.2「了解多少能力」），按 route **声称**的 capability 集算；"适不适合本角色"是另一条 `role_fit`(role 级)——两者不混。判据归属 = ③b 标准总结（现散 ③a 待下沉）。投影侧落点见 [[08-orch-test-status-ssot]] 回填。
 - **测试点**：**capability_state 四态（D2 回填）**：`unknown`(无线索)/`callable_only`(key/endpoint 通无契约验证)/`partial`(部分契约 probe-verified)/`known`(全 verified)，**按 per-capability `source` 算，不并入 `route.status`**；`tools`/`structured_output` 改派生（不再硬编码 `unknown`，`llm.py:1778-1779`）。
-- **现状 gap**：`_capability_state`（`apps/studio/backend/app/routers/llm.py:1767-1770`）现是二值（空 dict→unknown / 非空→known），要升四态、按 per-capability source 算；summary 里 `tools`/`structured_output` 硬编码 `unknown`（`llm.py:1778-1779`）要改派生。投影侧落点见 [[08-orch-test-status-ssot]] 回填。
-- **status**：现二值待升四态 = target。
-- **归属**：route 内在轴（③b 标准总结，现散 ③a `routers/llm.py:1767-1779`，待升四态）。投影侧落点 [[08-orch-test-status-ssot]]。
+- **现状 gap**：四态投影已落地：无线索→`unknown`，有非 verified 声称但无 probe→`callable_only`，部分 verified→`partial`，全部 fact capabilities verified→`known`；`tools`/`structured_output` summary 已改为按能力值派生。剩余 gap 是该 route 内在轴仍散在 ③a，后续可随模型知识下沉迁入 gateway。
+- **status**：四态 capability_state 已实现；下沉 gateway = target。
+- **归属**：route 内在轴（③b 标准总结，现散 ③a `routers/llm.py`，四态已实现，待随模型知识能力下沉）。投影侧落点 [[08-orch-test-status-ssot]]。
 
 ---
 
@@ -241,4 +241,4 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 - `apps/studio/backend/app/services/llm_model_groups.py:43-68` — `project_model_group_identity`（Studio 模型组投影函数）。**③b 内核（现散 ③a）**。
 - `apps/studio/backend/app/services/llm_notable_models.py:16-37` — `notable_model_ids`（从文档提取 notable models 的函数）。**③b 内核（现散 ③a）**。
 - `apps/studio/backend/app/services/llm_route_capabilities.py:10-64` — `route_effective_capabilities` / `verified_profile_route_capabilities`（合并 verified profile facts 的函数）。**③b 内核（现散 ③a）**。
-- `apps/studio/backend/app/routers/llm.py:1767-1779` — `_capability_state`（capability 就绪轴，现二值待升四态）+ `tools`/`structured_output` 硬编码 `unknown` 待改派生。
+- `apps/studio/backend/app/routers/llm.py:_capability_state` — capability 就绪轴已四态；`tools`/`structured_output` summary 已按能力值派生。

@@ -48,5 +48,10 @@ units: [publish-artifact-autocommit]
 
 > 旧 Coverage/Drift 暂存 [`_migrated-coverage-drift.md`](../../_migrated-coverage-drift.md#02-capabilities-publish)（迁移期安全网，代码实现验证后删）。
 
+## WS-6 Studio-only Closeout Update
+
+- **Artifact Registry Release & History Record**: Live. Artifact Registry minimal release is functional, and recording publish events in local history is live. Silent failure when recording local history is blocked; it is rejected with 500 `LOCAL_HISTORY_RECORD_FAILED`.
+- **Deferred Items**: Team collaboration features, git push, commit-message UI, and completion confetti remain deferred.
+
 ## 交叉引用（链接, 不复制）
 [alignment](./mvp1-alignment.md)（目标,双向）· `native-fs` · `local-history` · `skill-workspace`

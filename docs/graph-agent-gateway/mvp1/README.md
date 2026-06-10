@@ -2,7 +2,7 @@
 milestone: MVP1
 decision_record: 已分散留底进各模块文档(每模块 §4 用户原话 / §5 决策+动机);client 层 A' 重设计决策不再单独引用外部文件
 coverage: 后端文件映射(Explore 清点);12 个 gateway ③b 模块 baseline/mvp1-alignment 已起草(原 copilot、HTTP 适配壳 2 模块 2026-06-03 判 ③a，移交 studio)
-status: drafted（12 个 gateway 模块文档已补齐,待实现阶段按待办推进）
+status: implemented（Gateway MVP1 优化已落地;剩余跨应用下沉项按 deferred 另行排期）
 design_units_index: ./DESIGN_UNITS_INDEX.md
 workflow_axis: N/A（gateway MVP1 是库/公共能力模块,无独立用户旅程 workflow 文档;覆盖以决策来源清单 + DESIGN_UNITS_INDEX + 各 alignment PM 原话核验）
 module: graph-agent-gateway-mvp1
@@ -47,7 +47,7 @@ aligns_with: ../../development/design-doc-standards/00-three-axes.md · ../../de
 
 ## 模块清单(覆盖代码来自 Explore 清点,100%)
 
-> ⚠️ 标「共享」的文件:`gateway_chat_model.py` / `client_manager.py` 的**编排步骤**写进 07、**调用步骤**写进 09;两篇各写各的那部分,交叉引用。
+> ⚠️ 标「共享」的文件:`gateway_chat_model.py` 的 fallback / probe / 熔断 / usage 编排步骤写进 07,单 route ChatX invoke / 结果桥接写进 09;`client_manager.py` 现只覆盖 probe / 熔断 / usage 健康职责,旧 `_call_*` provider 调用已迁到 `ordinary_chat.py` / `route_chat_model_factory.py`。
 
 ### 编排层
 | 文件夹 | 覆盖代码 | 职责 / 必须解释 |
@@ -63,16 +63,16 @@ aligns_with: ../../development/design-doc-standards/00-three-axes.md · ../../de
 ### 调用层
 | 文件夹 | 覆盖代码 | 职责 / 必须解释 |
 |---|---|---|
-| `09-inv-invocation-runtime` | `gateway_chat_model.py:_build_chat_result`(调用步骤,共享)、`client_manager.py:_call_*/_call_with_token_escalation`(共享)、`models.py` | invoke 流程;**retry(ChatX 瞬时重试);截断升级;thinking 不拍平;从 `usage_metadata` 取 usage + 注入 route metadata**。baseline 自研 `_call_*`;mvp1 原生 ChatX |
-| `10-inv-route-chat-model-factory` | **MVP1 新建**(现状逻辑散在 `client_manager`SDK 工厂 + `resolver` 实例化) | `ResolvedRoute`→原生 ChatX;base_url 双保险;init-kwargs;范本 [chatx-provider-patterns.md](./references/chatx-provider-patterns.md)、[chatx-provider-patterns.md](./references/chatx-provider-patterns.md)。baseline=无此模块/职责现由谁承担;mvp1 新建(A' 核心) |
-| `11-inv-provider-profiles` | **MVP1 新建**(现状散在 `profile_selector`+`capabilities`+`client_manager` thinking) | provider 差异 = init-kwargs 表;何时子类覆盖单方法(deerflow `PatchedChatDeepSeek`);**绝不重写整套消息转换**。baseline=无;mvp1 新建(deepagents `ProviderProfile` 模式) |
+| `09-inv-invocation-runtime` | `gateway_chat_model.py:_dispatch/_invoke_with_token_escalation/_build_chat_result/_build_chat_result_from_ai_message`、`ordinary_chat.py:dispatch_ordinary_chat/_call_*`、`models.py:GenericRouteChatModel` | invoke 流程;**retry(ChatX 瞬时重试);截断升级;thinking 不拍平;从 `usage_metadata` 取 usage + 注入 route metadata**。baseline 已记录旧 `client_manager._call_*` 退役;MVP1 主路径为原生 ChatX,generic ordinary path 在 `ordinary_chat.py` |
+| `10-inv-route-chat-model-factory` | `route_chat_model_factory.py:RouteChatModelFactory`、`models.py:GenericRouteChatModel`、`provider_profiles.py` | `ResolvedRoute`→原生 ChatX;base_url 双保险;init-kwargs;范本 [chatx-provider-patterns.md](./references/chatx-provider-patterns.md)、[chatx-provider-patterns.md](./references/chatx-provider-patterns.md)。WS-1 后模块源码已存在,剩余为 generic 完整性 deferred |
+| `11-inv-provider-profiles` | `provider_profiles.py:ProviderProfile/apply_provider_profile_layers`、`route_chat_model_factory.py:_apply_profiles` | provider 差异 = init-kwargs 表;何时子类覆盖单方法(deerflow `PatchedChatDeepSeek`);**绝不重写整套消息转换**。WS-1 后最小 profile registry 已存在,后续按需收束 provider-specific thinking |
 
 > **copilot SDK 调用（原模块 12）已移交 studio**：按判据它是 ③a 应用（copilot 的实际调用方式，绑 `claude_agent_sdk`），gateway 库不感知 copilot——只把 `copilot_chat` 当普通 role 解析成 route（[`01-handoff-interface`](./01-handoff-interface/mvp1-alignment.md) 的 route 级 API）。SDK 调用 / session / env 注入 / 事件翻译 / 假测试见 `docs/studio/mvp1/02_capabilities/copilot-assist/` + `01_workflows/00_settings-ux-spec.md` §3.8/§3.4；两个 base_url 归一化助手归 [`03-orch-credentials-endpoints`](./03-orch-credentials-endpoints/mvp1-alignment.md)（③b 归一化原语）。
 
 ### 交接 / 横切 / API
 | 文件夹 | 覆盖代码 | 职责 / 必须解释 |
 |---|---|---|
-| `01-handoff-interface` | `protocol.py:ModelResolverProtocol`、`__init__.py`、`apps/studio/backend/app/models/copilot.py`(ws 事件)+ 引用 `registry/schema.py:ResolvedRoute/ResolvedRole` | `route` 契约每字段;resolve API 契约;两个消费方各取什么。baseline:route 未作一等输出;mvp1:route 成唯一交接物 |
+| `01-handoff-interface` | `protocol.py:ModelResolverProtocol.resolve/resolve_routes`、`resolver.py:ModelResolver.resolve_routes`、`__init__.py`、`apps/studio/backend/app/models/copilot.py`(ws 事件)+ 引用 `registry/schema.py:ResolvedRoute/ResolvedRole` | `route` 契约每字段;resolve API 契约;两个消费方各取什么。baseline:route 级 public API 已落地;剩余下游接线与公共门面导出 |
 | `13-x-tracing-events-exceptions` | `events.py:LLMFallbackEvent`、`exceptions.py`、`tracing.py:emit_llm_fallback_event` | fallback 事件 payload(含 from/to route 诊断);各异常类型语义与触发点 |
 
 > **HTTP 适配壳（原模块 14）已移交 studio**：`routers/llm.py`、`routers/copilot.py` = ③a Studio HTTP 适配壳（HTTP 端点形状 / job·进度包装 / DTO 投影绑死 studio 调用方式 + 存储介质），不是 ③b gateway 公共内核。它 delegate 的能力内核（base_url 归一化 / capability / probe 策略 / materialize / 6 态 / draft / endpoint 拆分）才是 ③b 公共。文档见 `docs/studio/mvp1/04_platform/llm-copilot-http-api/`。

@@ -72,13 +72,13 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 6. role 级 `resolve()` 返回 `BaseChatModel`，即 `GatewayChatModel` 或 `PredictGatewayChatModel`，见 `protocol.py:40` 和 `resolver.py:111-138`。
 7. route 级 `resolve_routes(role_name, *, route_override=None) -> ResolvedRole` 直接返回解析后的 handoff 数据,不构造 chat model,不触发 provider 调用,也不把 `RegistryResolutionError` 映射成 `GatewayRoleNotConfiguredError`,见 `protocol.py:43-48` 和 `resolver.py:140-153`。
 
-`__init__.py` 是 Gateway 公共导出边界：它把 `ModelResolverProtocol`、`ModelResolver`、`GatewayChatModel`、结构化异常和 `LLMFallbackEvent` 暴露给外部包，见 `packages/graph-agent-gateway/src/graph_agent_gateway/__init__.py:5` 和 `__init__.py:15`。
+`__init__.py` 是 Gateway 公共导出边界：它把 `ModelResolverProtocol`、`ModelResolver`、`GatewayChatModel`、结构化异常和 `LLMFallbackEvent` 暴露给外部包，见 `packages/graph-agent-gateway/src/graph_agent_gateway/__init__.py:5` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/__init__.py:15`。
 
 ## 两个消费方各取什么(现状)
 
-1. Graph Agent phase 消费方只取 LangChain 模型。`LlmPhaseNode._resolved_tracing_model` 是 phase 侧解析入口：它调用 `resolver.resolve(phase.tier, model_override=..., callbacks=..., phase_name=...)`，随后把返回模型包进 `TracingClientProxy`，见 `packages/graph-agent/src/graph_agent/core/phase_nodes/llm_phase_node.py:167`、`llm_phase_node.py:173`、`llm_phase_node.py:193`。它没有直接读取 `ResolvedRoute`。
+1. Graph Agent phase 消费方只取 LangChain 模型。`LLMPhaseNode._resolved_tracing_model` 是 phase 侧解析入口：它调用 `resolver.resolve(phase.tier, model_override=..., callbacks=..., phase_name=...)`，随后把返回模型包进 `TracingClientProxy`，见 `packages/graph-agent/src/graph_agent/core/phase_nodes/llm_phase_node.py:167`、`llm_phase_node.py:173`、`llm_phase_node.py:193`。它没有直接读取 `ResolvedRoute`。
 2. Gateway runtime 消费方在模型内部读取 route。`GatewayChatModel._generate` 是当前 fallback 执行循环：它遍历 `self.resolved_role.routes`，做 marked-down、probe、dispatch、usage 和 fallback event，见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:96`、`gateway_chat_model.py:111`、`gateway_chat_model.py:190`。
-3. Studio Copilot 消费方已经直接取 route 列表，但当前仍是 service 内部 helper 直调 pure `resolve_role`,尚未接到 `ModelResolver.resolve_routes`。`stream_query` 是 Copilot WebSocket 业务入口：它调用 `_resolve_copilot_runtime()` 得到 `routes` 和 `credential_provider`，再自己用 `ClaudeSDKClient` 调用，见 `apps/studio/backend/app/services/copilot.py:201`、`copilot.py:210`、`copilot.py:242`。
+3. Studio Copilot 消费方已经直接取 route 列表，并已通过 service 内部 helper 接到 `ModelResolver.resolve_routes`。`stream_query` 是 Copilot WebSocket 业务入口：它调用 `_resolve_copilot_runtime()` 得到 `routes` 和 `credential_provider`，再自己用 `ClaudeSDKClient` 调用，见 `apps/studio/backend/app/services/copilot.py`。
 4. `CopilotWsRequestPayload` 是 Copilot WS 请求体：它只含 `user_message` 和 `model_override`，没有 route payload，见 `apps/studio/backend/app/models/copilot.py:21`。
 5. `CopilotEvent` 是 Copilot WS 输出联合类型：它只表达文本、工具开始/结果、done/error，不携带 route diagnostics，见 `apps/studio/backend/app/models/copilot.py:63`。
 
@@ -90,13 +90,13 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 4. `registry.resolve_role()` 遍历 role 的 `fallback_chain` 或 override route，逐条 join route、endpoint、credential、profile 和 runtime settings;普通 fallback 坏 route 会进入 `skipped_diagnostics` 并继续,override 坏 route fail-fast,见 `registry/resolver.py:46-58`、`registry/resolver.py:60-140`。
 5. `ModelResolver.resolve()` 把 `ResolvedRole` 塞进 `GatewayChatModel` 或 `PredictGatewayChatModel`;`ModelResolver.resolve_routes()` 则直接返回同一类 `ResolvedRole` handoff 数据,见 `resolver.py:111-153`。
 6. LangChain/agent loop 真正调用模型时，`GatewayChatModel._generate()` 才消费 `resolved_role.routes`，见 `gateway_chat_model.py:111`。
-7. Copilot 另走 Studio service：`_resolve_copilot_runtime()` 直接调用 registry `resolve_role()` 取 `ResolvedRoute` 列表，再把每条 route 变成 Claude Agent SDK 的 env/base_url/session，见 `copilot.py:419`、`copilot.py:429`、`copilot.py:449`。
+7. Copilot 另走 Studio service：`_resolve_copilot_runtime()` 通过 `ModelResolver.resolve_routes()` 取 `ResolvedRoute` 列表，再把每条 route 变成 Claude Agent SDK 的 env/base_url/session。
 
 ## baseline/alignment 差异
 
-baseline 当前事实：route 已存在于 `ResolvedRole.routes`，并已通过 `ModelResolver.resolve_routes()` / `ModelResolverProtocol.resolve_routes()` 成为 Gateway 公共 route 级 handoff API；Graph Agent 当前仍只看 `BaseChatModel`，Copilot service 仍自己绕到 registry resolver 取 route。
+baseline 当前事实：route 已存在于 `ResolvedRole.routes`，并已通过 `ModelResolver.resolve_routes()` / `ModelResolverProtocol.resolve_routes()` 成为 Gateway 公共 route 级 handoff API；Graph Agent 当前仍只看 `BaseChatModel`，Copilot service 已通过 route 级 public API 取 route。
 
-MVP1 剩余差异：下游接线尚未统一。Graph Agent 调用层仍走 role 级 `resolve()` 拿 `BaseChatModel`;Copilot service 仍手写 `_resolve_copilot_runtime()` 直调 pure `resolve_role`;`__init__.py` 也尚未导出 route handoff 类型。route 级 public API 本身已经落地。
+MVP1 剩余差异：Graph Agent 调用层仍走 role 级 `resolve()` 拿 `BaseChatModel`（这是兼容入口，不是 handoff 缺口）；Copilot service 与 registry response 已统一走 `ModelResolver.resolve_routes`;`__init__.py` 已导出 route handoff 类型。全局 `model_override` 命名清理仍属后续 API 清理。
 
 ## 决策原因
 
@@ -113,7 +113,7 @@ MVP1 剩余差异：下游接线尚未统一。Graph Agent 调用层仍走 role 
 - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:ResolvedRoute`：单条可执行 route 数据契约。
 - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:ResolvedRole`：role 解析后的 metadata + routes 契约。
 - `packages/graph-agent-gateway/src/graph_agent_gateway/__init__.py`：Gateway 公共导出边界。
-- `packages/graph-agent/src/graph_agent/core/phase_nodes/llm_phase_node.py:LlmPhaseNode._resolved_tracing_model`：Graph Agent 消费 resolver 的入口。
+- `packages/graph-agent/src/graph_agent/core/phase_nodes/llm_phase_node.py:LLMPhaseNode._resolved_tracing_model`：Graph Agent 消费 resolver 的入口。
 - `apps/studio/backend/app/services/copilot.py:stream_query`：Copilot WebSocket 查询入口，当前自己取 route 并调用 SDK。
 - `apps/studio/backend/app/models/copilot.py:CopilotEvent`：Copilot WebSocket 输出事件联合类型。
 

@@ -11,11 +11,11 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 # 10-inv-route-chat-model-factory - MVP1 Alignment(目标设计)
 
-> **Tier**：③b gateway 公共能力（**MVP1 新建**调用层核心；`RouteChatModelFactory` 源码已存在并作为 route → ChatX 工厂）
+> **Tier**：③b gateway 公共能力（MVP1 新增设计单元/调用层核心；`RouteChatModelFactory` 源码已存在并作为 route → ChatX 工厂）
 > **Owns**：把一条 `ResolvedRoute` 构造成一个 LangChain `BaseChatModel`（=「ChatX 面」，给 engine 等 LangChain 消费方）——**`route.protocol` 有官方 ChatX 就用官方（`ChatAnthropic`/`ChatOpenAI`/`ChatGoogleGenerativeAI`），没有就用自定义 `GenericRouteChatModel`（也是 BaseChatModel 子类）兜底**。内部 = 官方/generic 选择 + base_url per-protocol 归一化双保险 + provider profile init-kwargs + thinking 归一化 + stream_usage 默认开 + deepseek 单方法 patch（借鉴）。**只构造模型，不 invoke**（invoke 归 09，编排循环第 5 步调本工厂）。详见 §3.5。
-> **Status**：设计定稿（2026-06 判据复核，归属表判 10=纯 ③b 新建不变）；代码 = `RouteChatModelFactory` 已落地，官方 ChatX 主路径由本工厂构造，generic ordinary-chat 默认 dispatcher 已迁到 `ordinary_chat.dispatch_ordinary_chat`。
+> **Status**：设计定稿（2026-06 判据复核，归属表判 10=纯 ③b 不变）；代码 = `RouteChatModelFactory` 已落地，官方 ChatX 主路径由本工厂构造，generic ordinary-chat 默认 dispatcher 已迁到 `ordinary_chat.dispatch_ordinary_chat`。
 > **Related**：[[09-inv-invocation-runtime]]（invoke 运行时，拿本工厂构造的 ChatX 执行 `.invoke()`）· [[11-inv-provider-profiles]]（本工厂调用 `ProviderProfile` 表合 init-kwargs）· [[03-orch-credentials-endpoints]]（base_url 保存时归一化 = 主修复，本工厂只做调用时副保险）· [[01-handoff-interface]]（`ResolvedRoute` 契约 = 工厂唯一输入）· [[04-orch-registry-schema]]（`ResolvedRoute` 字段权威源）
-> **决策日志**：client 层 A' 重设计决策（M6 `RouteChatModelFactory` 新建 / D2 编排-调用分离 / F1 base_url 归一化 / F4 thinking / F5 usage+stream_usage / F6 provider profile init-kwargs / 借鉴 vs 自建）——完整逻辑 + PM 原话已留底于本文 §4（决策基础）/ §5（决策动机）/ §6（兼容性验证清单）；归属判据见 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`（§4 判 10 纯 ③b 新建）
+> **决策日志**：client 层 A' 重设计决策（M6 `RouteChatModelFactory` 设计单元 / D2 编排-调用分离 / F1 base_url 归一化 / F4 thinking / F5 usage+stream_usage / F6 provider profile init-kwargs / 借鉴 vs 自建）——完整逻辑 + PM 原话已留底于本文 §4（决策基础）/ §5（决策动机）/ §6（兼容性验证清单）；归属判据见 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`（§4 判 10 纯 ③b）
 > **现状**：见同目录 `baseline.md`（`RouteChatModelFactory` 已是 route → ChatX 工厂）
 
 ## 1. 定义
@@ -68,7 +68,7 @@ MVP1 目标：`RouteChatModelFactory`（一条 `ResolvedRoute` → 原生 LangCh
 | **09 编排 → 10 工厂（构造入参）** | 一条 `ResolvedRoute`（字段权威源 `registry/schema.py:415-445`）。工厂从中取 protocol（选 ChatX 类）、base_url（双保险后传 ChatX）、credential_ref（解析凭证）、provider_model_id（model 名）、timeout_seconds、effective_runtime_settings（temperature/max tokens/reasoning/tool/structured-output）。**不接受 provider/model 字符串**（与 deepagents `resolve_model` 的 `provider:model` spec 区别，见 §5 决策 2）。 |
 | **10 工厂 → 模型类选择** | `route.protocol`（`registry/schema.py:19` Protocol 字面量）映射：`anthropic_compatible`→`ChatAnthropic`，`openai_compatible`/需 OpenAI shape→`ChatOpenAI`，`google_genai`→`ChatGoogleGenerativeAI`，**`ark_runtime`→`ChatOpenAI`**（✅ 已定 2026-06-04：Ark 官方支持 OpenAI-compatible，不需单独适配）；**以上是「有官方 ChatX」分支。protocol 无对应官方 ChatX → 走自定义 `GenericRouteChatModel` 兜底**（见 §3.5）。 |
 | **10 工厂 → 11 ProviderProfile（合 init-kwargs）** | 调 [[11-inv-provider-profiles]] 的 `apply_provider_profile`-类入口：以 route 生成基础 kwargs → 叠 provider/model profile defaults（headers / Responses API / 温度默认 / stream_usage / thinking 开关）→ 叠 route runtime settings；**调用方显式 kwargs 最高优先级**（caller-wins）。 |
-| **10 工厂 → 凭证（不落明文）** | 经 `CredentialProviderProtocol`（按 `credential_ref` 取明文 key）解析，明文 key 只进 ChatX init kwargs 的 `api_key`，**绝不写回 `ResolvedRoute`**；现状约束体现于 `_resolve_api_key`（`client_manager.py:1034-1055`）。 |
+| **10 工厂 → 凭证（不落明文）** | 经 `CredentialProviderProtocol`（按 `credential_ref` 取明文 key）解析，明文 key 只进 ChatX init kwargs 的 `api_key`，**绝不写回 `ResolvedRoute`**；现状约束体现于 `route_chat_model_factory._resolve_api_key`（`packages/graph-agent-gateway/src/graph_agent_gateway/route_chat_model_factory.py:230-236`）。 |
 | **10 工厂输出（交 09 invoke）** | 一个原生 `BaseChatModel` 子类实例（`ChatAnthropic`/`ChatOpenAI`/`ChatGoogleGenerativeAI`，或必要时 deepseek 单方法子类），已配置 base_url（双保险后）、api_key、model、timeout、thinking、stream_usage 与 provider profile kwargs。09 拿它执行 `.invoke(原始 BaseMessage)`。 |
 | **base_url 双保险（与 03 分工）** | 主修复 = [[03-orch-credentials-endpoints]] 保存 credential/endpoint 时按 protocol 归一化（每 protocol 固定规则）；本工厂只做**调用时幂等副保险**（已 canonical→no-op，未 canonical→按 protocol 修）。**工厂不能替代保存侧修复**（F1 主/副分工见 §4 F1 / §5 决策 3、`baseline.md:65`）。 |
 | **归属 / 稳定性** | `ResolvedRoute` 字段权威源 = [[04-orch-registry-schema]]；`ProviderProfile` 表归 [[11-inv-provider-profiles]]；本工厂**只消费不定义**，防 drift。 |
@@ -105,7 +105,7 @@ gateway 调用层**格式中立**，对外三张脸，业务端按需选（P7，
   4. Anthropic 的 assistant tool call 是 **`tool_use` content block**（不是 OpenAI 的 `tool_calls` 字段）；tool result 是 user message 里的 `tool_result` block。
   5. Anthropic **相邻同 role 消息合并**（tool result 属 user role）。
 - **决策 + 动机**：① 通用适配器把"非标 provider 套不进 ChatX"这条死路打通（包成 `BaseChatModel` 进 engine）；② provider-specific ordinary chat core 已迁到 `ordinary_chat.py`，成为 generic 面 + 普通 chat 面共用的内核。
-- **status**：**真机验证 PASS**（spike，与官方 ChatX 行为一致）；production 落地待补失败测试（qiniu 空-content 回归，见 §8#1）+ streaming / multimodal / error-normalization（spike 未覆盖）。
+- **status**：**真机验证 PASS**（spike，与官方 ChatX 行为一致）；production 已补 qiniu 空-content / tool loop 回归测试（`packages/graph-agent-gateway/tests/test_chatx_invocation_runtime.py:96-155` 与 `packages/graph-agent-gateway/tests/test_route_chat_model_factory.py:397-540`）。streaming / multimodal / error-normalization 仍 deferred。
 
 ### base_url per-protocol 归一化（实证强化）
 
@@ -156,7 +156,7 @@ gateway 调用层**格式中立**，对外三张脸，业务端按需选（P7，
 
 1. 已处理:`RouteChatModelFactory` 已落地，qiniu-anthropic 多轮 tool loop 的空 content 回归由原始 `BaseMessage` + ChatX 主路径覆盖。
 2. 已处理:`ark_runtime` 走 **OpenAI-compatible（`ChatOpenAI`）**——Volcengine Ark 官方支持 OpenAI-compatible，不需要单独适配；generic ordinary path 的 Ark 分支保留在 `ordinary_chat.py`。
-3. 疑点:ChatX retry 耗尽后的异常形状是否仍能被 `classify_exception` 正确分类，需确定性单测（兼容性验证清单头号风险，见 §6；分类语义权威源 [[06-orch-error-classification]]）。
+3. 已处理:ChatX retry 耗尽后的异常形状已用确定性单测覆盖——fake 401 / network error 仍 fallback,400 non-capability 仍 fail-fast,见 `packages/graph-agent-gateway/tests/test_chatx_invocation_runtime.py:287-330`（分类语义权威源 [[06-orch-error-classification]]）。
 4. 待办（跨模块协调）:`call_method_id` / `request_mapper_id` 由本工厂消费还是由 [[11-inv-provider-profiles]] 的 `ProviderProfile` 消费，需与 11 §8 待办 2、09 §8 待办 3 一并定（同一悬案）。
 
 ## 已实现 / 与 baseline 差异

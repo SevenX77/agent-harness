@@ -140,7 +140,6 @@ class GatewayChatModel(BaseChatModel):
                         from_provider=candidate_id,
                         to_provider=self._next_candidate_id(index + 1),
                         reason=f"{type(exc).__name__}: {exc}",
-                        code="[F-v3-gateway-all-providers-failed]",
                         context=self._fallback_event_context(
                             candidate,
                             index + 1,
@@ -178,7 +177,6 @@ class GatewayChatModel(BaseChatModel):
                         from_provider=candidate_id,
                         to_provider=self._next_candidate_id(index + 1),
                         reason="RuntimeError: probe failed",
-                        code="[F-v3-gateway-all-providers-failed]",
                         context=self._fallback_event_context(
                             candidate,
                             index + 1,
@@ -254,7 +252,6 @@ class GatewayChatModel(BaseChatModel):
                     from_provider=candidate_id,
                     to_provider=self._next_candidate_id(index + 1),
                     reason=f"{type(exc).__name__}: {exc}",
-                    code="[F-v3-gateway-all-providers-failed]",
                     context=self._fallback_event_context(
                         candidate,
                         index + 1,

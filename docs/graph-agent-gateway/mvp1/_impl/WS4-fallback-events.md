@@ -1,7 +1,7 @@
 ---
 ws_id: WS-4-fallback-event-code
 modules: [13]
-depends_on: [WS-1]   # 仅最后一步:删 gateway_chat_model.py 三处 code= 实参,须在 WS-1 提交、该文件脱离 dirty 之后
+depends_on: [WS-1]   # 已完成;原仅最后一步依赖 WS-1 后删除 gateway_chat_model.py 三处 code= 实参
 blocks: []
 owns_files:
   # 生产代码
@@ -16,7 +16,7 @@ owns_files:
   - apps/studio/backend/tests/services/test_run_manager_gateway_events.py
 spec_ssot:
   - ../13-x-tracing-events-exceptions/mvp1-alignment.md §F1 / gaps 第 1 条(PM 2026-06-04 P4a=B:拆专属 fallback event code)
-status: drafted
+status: completed
 ---
 
 # WS-4 fallback event 专属 code — 需求书(给 Codex)
@@ -100,18 +100,18 @@ fallback event 的 code 由**三处调用点**(`gateway_chat_model.py:143/181/25
 3. **等 WS-1 提交、`gateway_chat_model.py` 脱离 dirty 后**:删 `:143/:181/:257` 三处 `code=...` 实参(各一行)。
 4. 同步修正 §6 列出的现存测试(本包 + 跨包)。
 
-> 说明:步骤 1/2/4(events/tracing/测试)可在 WS-1 进行中并行准备(不依赖 gateway_chat_model.py);仅步骤 3(删调用点实参)硬卡 WS-1 提交后。
+> 说明:本 WS 已完成;原执行约束是步骤 1/2/4(events/tracing/测试)可先并行准备,步骤 3(删调用点实参)须在 WS-1 提交后执行。
 
 ## 8. 验收标准(硬退出,IR4)
 
-- [ ] §6 新增测试全绿(①②③④)。
-- [ ] `uv run pytest packages/graph-agent-gateway/tests -q` 全绿。
-- [ ] `uv run pytest packages/graph-agent/tests/runner/test_event_subscriber_cutover.py -q` 全绿。
-- [ ] `uv run pytest apps/studio/backend/tests/services/test_run_manager_gateway_events.py -q` 全绿。
-- [ ] `uv run mypy packages/graph-agent-gateway/src/graph_agent_gateway/events.py packages/graph-agent-gateway/src/graph_agent_gateway/tracing.py packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py` 0 error。
-- [ ] `AllProvidersFailedError` 回归断言未改、仍绿(③)。
-- [ ] 至少一条真实 e2e(经 `_generate` 触发 fallback)断言 `event.code == 专属码`(①c/②)。
-- [ ] `git diff packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py` 仅含删 3 行 `code=` 实参,无其它改动。
+- [x] §6 新增测试全绿(①②③④)。
+- [x] `uv run pytest packages/graph-agent-gateway/tests -q` 全绿。
+- [x] `uv run pytest packages/graph-agent/tests/runner/test_event_subscriber_cutover.py -q` 全绿。
+- [x] `uv run pytest apps/studio/backend/tests/services/test_run_manager_gateway_events.py -q` 全绿。
+- [x] `uv run mypy packages/graph-agent-gateway/src/graph_agent_gateway/events.py packages/graph-agent-gateway/src/graph_agent_gateway/tracing.py packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py` 0 error。
+- [x] `AllProvidersFailedError` 回归断言未改、仍绿(③)。
+- [x] 至少一条真实 e2e(经 `_generate` 触发 fallback)断言 `event.code == 专属码`(①c/②)。
+- [x] `git diff packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py` 仅含删 3 行 `code=` 实参,无其它改动。
 
 ## 9. 不做(范围锁定,IR7)
 
@@ -128,7 +128,7 @@ fallback event 的 code 由**三处调用点**(`gateway_chat_model.py:143/181/25
 - §「fallback event payload(现状)」`code` 行:`复用全灭码` → `专属码 [F-v3-gateway-llm-fallback],init=False 固有常量,调用点不再传`;代码依据更新为 events.py 新行 + 三处调用点已删 code= 实参。
 - §「编号执行流程」涉及 emit 的描述:原文只点 `:142/:256`,更新为**三处**(含 `:181`)且不再传 code。
 - §「待办/疑点」第 1 条(code 复用全灭码)→ 标记为**已解决(WS-4 落地)**。
-- 同步把 alignment gaps 第 1 条由「已定待实现」→「已实现」(由 Claude 终审确认后改 alignment §gaps,或先在 baseline 注明已落地)。
+- alignment gaps 第 1 条已改为「已实现」,baseline 已同步注明 WS-4 落地。
 
 ## 11. 评审检查点
 

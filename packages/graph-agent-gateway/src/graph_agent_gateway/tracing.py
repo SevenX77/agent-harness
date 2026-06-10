@@ -16,7 +16,6 @@ def build_llm_fallback_event(
     from_provider: str,
     to_provider: str,
     reason: str,
-    code: str | None = None,
     context: dict[str, Any] | None = None,
 ) -> LLMFallbackEvent:
     """Build one fallback event using the shared graph-agent callback schema."""
@@ -25,7 +24,6 @@ def build_llm_fallback_event(
         from_provider=from_provider,
         to_provider=to_provider,
         reason=reason,
-        code=code,
         context=dict(context or {}),
     )
 
@@ -37,7 +35,6 @@ def emit_llm_fallback_event(
     from_provider: str,
     to_provider: str,
     reason: str,
-    code: str | None = None,
     context: dict[str, Any] | None = None,
 ) -> None:
     """Emit a gateway fallback event without letting callback failures mask runtime errors."""
@@ -46,7 +43,6 @@ def emit_llm_fallback_event(
         from_provider=from_provider,
         to_provider=to_provider,
         reason=reason,
-        code=code,
         context=context,
     )
     for callback in callbacks:

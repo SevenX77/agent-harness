@@ -13,7 +13,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 > **组织方式**：**以每个功能为索引**（DESIGN-PROCESS §2.2 铁律）—— 每个功能(F1–F4)一段，把它的机制/数据流 · 决策+动机 · 原话 · 测试点 · status · 归属**全收在自己段里**；仅「定义」「接口契约」是模块级总览，证据附录(已实现/差异、覆盖代码/覆盖率、决策原因、代码索引)留模块级末尾。现状基线见同目录 `baseline.md`。
 > **Tier**：③b gateway 公共能力(registry endpoint/route/role/profile/resolved runtime schema = Studio↔Gateway 共同契约；Studio DTO 的 display/authoring 字段是 ③a 应用加工，投影时剥离)
 > **Owns**：定义 gateway 全部 runtime 数据结构(`ProviderEndpoint`/`ProviderRoute`/`RoleEntry`/`ModelProfile`/`ResolvedRoute`/`ResolvedRole`/`RegistrySnapshot`…)、canonical 保守分组、snapshot 加载校验；是其它模块「只链接不复制」的字段权威源
-> **Status**：设计定稿(2026-06，基本已对，**无反转**)；代码 = snapshot provenance schema/resolver 回填已落地（版本戳填充由接入侧负责），`canonicalize_model` 保守不变，Studio DTO 剥离边界已对；skipped diagnostics schema / `ResolvedRole.skipped_diagnostics` 已落地
+> **Status**：设计定稿(2026-06，基本已对，**无反转**)；代码 = snapshot provenance schema/resolver 回填已落地（版本戳填充由接入侧负责），`canonicalize_model` 保守分组 + endpoint-scoped explicit alias 已落地，Studio DTO 剥离边界已对；skipped diagnostics schema / `ResolvedRole.skipped_diagnostics` / `SkippedRoute` public export 已落地
 > **Related**：[[01-handoff-interface]](`ResolvedRoute/ResolvedRole` 契约消费方)· [[02-orch-role-resolution]](`resolve_role` 用本 schema)· [[03-orch-credentials-endpoints]](`ProviderEndpoint` credential/base_url 字段)· [[05-orch-capabilities-and-models]](`CapabilityValue`/canonical 分组)· [[08-orch-test-status-ssot]](D1 snapshot 版本-stale 交叉)
 > **决策日志**：本模块 schema 作为编排↔调用契约边界,依据 client 层 A' 重设计 D2(编排/调用分离——schema 是交接数据契约)+ D3(gateway 可复用服务,数据结构由它定义)——完整逻辑 + PM 原话留底于本文 F1/F4 各功能段；归属判据见 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`(04 registry schema = ③b 公共，原 review 已判对，不变)。D2/D3 是跨模块共享决策,另见 [[01-handoff-interface]] §4(route 契约同引 D2/D3)、[[03-orch-credentials-endpoints]] §4(凭证边界同引 D3)。
 > **现状**：见同目录 `baseline.md`
@@ -40,8 +40,8 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 | **③a 应用加工(Studio DTO display/authoring 字段)** | `models/llm_config.py` 的 Studio wrapper 在 gateway 字段之上挂的 `display_name`(`:71-75`)等 display/authoring 字段 = **① UI / ③a 加工**，gateway 感知不到。剥离 seam = `to_registry_snapshot`(`:279-296`)+ `_gateway_*` helpers(`:89-118`)。 |
 | **剥离边界(③a → ③b)** | `RolesData.to_registry_snapshot(credentials) → RegistrySnapshot`：把 display/authoring 剥掉，只把 gateway schema 字段放进 snapshot。测试断言 `test_studio_display_fields_are_stripped_from_gateway_runtime_snapshot`(`test_llm_config_boundary.py:53-59`)。 |
 | **snapshot 加载校验(③b)** | `load_registry_snapshot`(`resolver.py:186-202`)+ `_assert_v4_credentials`(`:227-237`)+ `_assert_supported_roles`(`:240-261`)：hard cutover，拒绝旧 schema。 |
-| **canonical 分组(③b 保守)** | `canonicalize_model(provider_model_id, …) → CanonicalModel`：explicit alias / `anthropic/` transport prefix / orphan slug 三种结果，默认 `confidence="orphan"`(`canonical.py:45-49`)。**只做保守分组，不驱动动态 route 选择**(route 执行仍指精确 route_id)。 |
-| **稳定性 / re-export** | `registry/__init__.py:41-71` 的 `__all__` 是稳定 public surface；当前 `SnapshotVersion` / `ResolvedRole` 已导出，`SkippedRoute` 如需成为直接公共 import surface 仍需同步 re-export。 |
+| **canonical 分组(③b 保守)** | `canonicalize_model(provider_model_id, …) → CanonicalModel`：endpoint-scoped explicit alias / legacy global explicit alias / `anthropic/` transport prefix / orphan slug 四类结果，默认 `confidence="orphan"`。**只做保守分组，不驱动动态 route 选择**(route 执行仍指精确 route_id)。 |
+| **稳定性 / re-export** | `registry/__init__.py` 的 `__all__` 是稳定 public surface；`SnapshotVersion` / `ResolvedRole` / `ResolvedRoute` / `SkippedRoute` 已导出。 |
 
 ---
 
@@ -107,15 +107,15 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 
   3. `_registry_response`(用途:组装 Studio LLM registry API response)继续按 `canonical_id` 分组展示 routes,并调用 `_role_effective_runtime_settings` 输出每个 role/route 的 effective settings,见 `apps/studio/backend/app/routers/llm.py:1336-1383`。
 
-  4. `_role_effective_runtime_settings`(用途:为 registry response 投影每个 role/route 的 effective runtime settings)目标上应使用同一个 route-only resolver API,避免直接调用 pure helper 后吞掉解析错误;当前直接调用 `resolve_role` 并在 `RegistryResolutionError` 时 continue,见 `apps/studio/backend/app/routers/llm.py:4588-4603`。
+  4. `_role_effective_runtime_settings`(用途:为 registry response 投影每个 role/route 的 effective runtime settings)已使用同一个 route-only resolver API,避免和 public handoff API 分叉;遇到 `RegistryResolutionError` 时仍按 registry response 语义跳过该 role。
 
 - **决策 + 动机**：**canonical 分组不用于自动选型(保守)**：canonical 只是保守 grouping key;`canonicalize_model` 默认 `orphan`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/canonical.py:45-49`。保守是为了避免不同 provider 的相似模型名被误合并。canonical 分组不用于自动选型,是因为 canonical 只是保守 grouping key;`canonicalize_model`(用途:把 provider model id 映射成保守 canonical group key)默认 `orphan`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/canonical.py:45-49`。
 
 - **原话**：（canonical 保守分组归属判据见模块级「定义」+ F1「原话」判据铁律「换个 app 还原样能用吗?能=③b」;canonical 分组本身无独立 PM 原话。）
 
-- **status**：canonical groups 已用于 Studio registry response 展示(③a 投影)——`_registry_response` 按 `route.canonical_id` 聚合 route ids(`routers/llm.py:1344-1374`)= 现状对；`canonicalize_model` 保守不变 = target。
+- **status**：canonical groups 已用于 Studio registry response 展示(③a 投影)——`_registry_response` 按 `route.canonical_id` 聚合 route ids= 现状对；`canonicalize_model` 保守分组保留，并已支持 endpoint-scoped explicit alias。
 
-- **测试点**：**canonical 保守不误合并**：不同 provider 的相似模型名 → 默认各自 `orphan`，不被合并到同一 canonical group。
+- **测试点**：**canonical 保守不误合并**：不同 provider 的相似模型名 → 默认各自 `orphan`，不被合并到同一 canonical group；同一 provider model id 在不同 endpoint 可通过 `endpoint_id:provider_model_id` explicit alias 映射到不同 canonical group。
 
 - **归属**：**③b** `packages/graph-agent-gateway`：`registry/canonical.py`(保守分组)。**③a** `apps/studio/backend`：`models/llm_config.py`(`RegistryResponse` 展示投影)、`routers/llm.py`(`_registry_response`/`_role_effective_runtime_settings` 展示组装)。**② Rust**：N/A。
 
@@ -171,8 +171,8 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 
 1. 已落地:`ResolvedRole.skipped_diagnostics` 已能表达 route_id、reason_code、message、是否来自 override;字段类型为 `list[SkippedRoute]`,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:448-476`。
 2. 已落地:`SnapshotVersion` 的 schema/resolver 传播与 stale 降级契约已明确(见上方 F4)。剩余接入责任是各 loader/materializer 在产生当前 snapshot 和 route verified evidence 时填入对应版本戳。
-3. 待办:如果 `SkippedRoute` 需要成为直接 public import surface,`registry.__init__`(用途:把 registry 公共 schema/contract 作为稳定 import surface 导出)需要同步导出该 diagnostics DTO;当前 `ResolvedRole` 已导出而 `SkippedRoute` 未导出,见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/__init__.py:41-71`。
-4. ✅ **已定（PM 2026-06-04）**：explicit alias **按 endpoint/provider 作用域区分** → `canonicalize_model` **不再 `del endpoint_id`**，把 endpoint/provider 纳入别名解析作用域（同一 model id 在不同 endpoint 可属不同 canonical 组）。现状丢弃见 `packages/graph-agent-gateway/src/graph_agent_gateway/registry/canonical.py:22-30`（待改）。
+3. ✅ **已落地**：`SkippedRoute` 已成为直接 public import surface,`registry.__init__` 已同步导出该 diagnostics DTO。
+4. ✅ **已落地（PM 2026-06-04）**：explicit alias **按 endpoint/provider 作用域区分** → `canonicalize_model` 不再丢弃 `endpoint_id`，同一 provider model id 在不同 endpoint 可属不同 canonical 组；legacy 全局 alias 仍保留兼容。
 
 ## 交叉引用（链接，不复制）
 
@@ -208,8 +208,8 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 | 覆盖目标 | 判据归属 | MVP1 目标 |
 |---|---|---|
 | `registry/schema.py`(用途:定义 gateway endpoint/route/role/profile/resolved runtime schema) | **③b 公共契约(权威源)** | 保持 route-chain runtime schema、skipped diagnostics 与 snapshot provenance。schema 字段 = 全包共享的 ③b 公共契约。 |
-| `registry/__init__.py`(用途:把 registry 公共 schema/contract 作为稳定 import surface 导出) | **③b 公共** | 继续只导出稳定 DTO/contract;`SnapshotVersion` 已在 public surface 中。 |
-| `registry/canonical.py:canonicalize_model`(用途:把 provider model id 映射成保守 canonical group key) | **③b 公共** | 保持保守 canonical 分组,只在明确 alias/transport normalization 时合并。 |
+| `registry/__init__.py`(用途:把 registry 公共 schema/contract 作为稳定 import surface 导出) | **③b 公共** | 继续只导出稳定 DTO/contract;`SnapshotVersion` 与 skipped diagnostics DTO 已在 public surface 中。 |
+| `registry/canonical.py:canonicalize_model`(用途:把 provider model id 映射成保守 canonical group key) | **③b 公共** | 保持保守 canonical 分组,只在 endpoint-scoped explicit alias、legacy alias 或 transport normalization 时合并。 |
 | `models/llm_config.py`(用途:Studio v4 credentials/v2-v3 roles 文件 DTO,并投影到 gateway snapshot) | **③a 应用加工(display/authoring)+ ③b 剥离 seam** | 保持 Studio display/authoring 与 gateway runtime 的剥离边界。display 字段 = ③a；`to_registry_snapshot` 剥离 seam 输出 ③b snapshot。 |
 | `models.py`(用途:GenericRouteChatModel 通用 LangChain route wrapper) | **③b 公共调用层** | `GenericRouteChatModel` 已落地;继续不承载 registry schema,具体 ChatX/provider 构造由调用层模块负责。 |
 

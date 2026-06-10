@@ -10,6 +10,7 @@ from graph_agent_gateway.exceptions import (
 )
 from graph_agent_gateway.gateway_chat_model import GatewayChatModel
 from graph_agent_gateway.protocol import ModelResolverProtocol
+from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute
 from graph_agent_gateway.resolver import ModelResolver
 
 __all__ = [
@@ -20,4 +21,6 @@ __all__ = [
     "LLMFallbackEvent",
     "ModelResolver",
     "ModelResolverProtocol",
+    "ResolvedRole",
+    "ResolvedRoute",
 ]

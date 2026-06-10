@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 GATEWAY_SRC = Path(__file__).resolve().parents[1] / "src" / "graph_agent_gateway"
+FALLBACK_EVENT_CODE = "[F-v3-gateway-llm-fallback]"
 
 
 def test_gateway_owns_llm_fallback_event_schema() -> None:
@@ -16,7 +17,6 @@ def test_gateway_owns_llm_fallback_event_schema() -> None:
         from_provider="openai/gpt-5",
         to_provider="anthropic/claude-opus",
         reason="RateLimitError: quota exceeded",
-        code="[F-v3-gateway-all-providers-failed]",
         context={"role_name": "balanced"},
     )
 
@@ -25,7 +25,7 @@ def test_gateway_owns_llm_fallback_event_schema() -> None:
     assert event.from_provider == "openai/gpt-5"
     assert event.to_provider == "anthropic/claude-opus"
     assert event.reason == "RateLimitError: quota exceeded"
-    assert event.code == "[F-v3-gateway-all-providers-failed]"
+    assert event.code == FALLBACK_EVENT_CODE
     assert event.context == {"role_name": "balanced"}
 
 
@@ -40,6 +40,24 @@ def test_gateway_runtime_surface_does_not_export_factory() -> None:
 
     assert not hasattr(graph_agent_gateway, "factory")
     assert "factory" not in graph_agent_gateway.__all__
+
+
+def test_gateway_runtime_surface_exports_route_handoff_dtos() -> None:
+    import graph_agent_gateway
+    from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute
+
+    assert graph_agent_gateway.ResolvedRole is ResolvedRole
+    assert graph_agent_gateway.ResolvedRoute is ResolvedRoute
+    assert "ResolvedRole" in graph_agent_gateway.__all__
+    assert "ResolvedRoute" in graph_agent_gateway.__all__
+
+
+def test_registry_surface_exports_skipped_route_diagnostics() -> None:
+    import graph_agent_gateway.registry as registry
+    from graph_agent_gateway.registry.schema import SkippedRoute
+
+    assert registry.SkippedRoute is SkippedRoute
+    assert "SkippedRoute" in registry.__all__
 
 
 def test_gateway_phase1_has_no_engine_internal_imports() -> None:

@@ -55,13 +55,13 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 1. `GatewayChatModel._generate` 在 probe 抛异常时调用 `classify_exception`;decision 不是 `fallback_allowed` 就立刻抛 `AllProvidersFailedError`,否则 mark down 并发 fallback event 后继续下一候选(`gateway_chat_model.py:123-152`)。
 2. `GatewayChatModel._generate` 在真实 dispatch 抛异常时同样调用 `classify_exception`;非 fallback_allowed 终止,fallback_allowed 则 mark down、emit event、继续下一 route(`gateway_chat_model.py:237-255`)。
-3. `LLMClientManager.probe_provider` 在 route probe 中遇到异常时也调用 `classify_exception`;不是 fallback_allowed 的异常会重新抛出,避免把请求级错误误判成“这个模型暂时不通”(`client_manager.py:407`, `client_manager.py:433`)。
+3. `LLMClientManager.probe_provider` 在 route probe 中遇到异常时也调用 `classify_exception`;不是 fallback_allowed 的异常会重新抛出,避免把请求级错误误判成“这个模型暂时不通”(`client_manager.py:352-354`, `client_manager.py:378-380`)。
 
 ## baseline/alignment 差异
 
 1. baseline 源码真实语义已经与 client 层 A' 重设计决策(M5,见 `mvp1-alignment.md` §2.1/§4 留底)一致:401/402/403/404 是 fallback,400 capability 错误是 fallback,非 capability 400/413/422 是 fail request,未知是 fail with route context(`registry/error_classification.py:15-17`, `registry/error_classification.py:133-188`)。
 2. 旧文档仍有过时简写,把 400/401/403/404/422 归成 fail fast;client 层 A' 重设计决策(M5)已明确指出这类写法错误,06 alignment 必须保护源码真实语义(M5 真实语义表 + PM 否决"fail-fast 简写"原话见 `mvp1-alignment.md` §2.1/§4 留底)。
-3. baseline 的 `classify_exception` 已把 v1.1 action 映射到旧 decision,所以 MVP1 调用层迁移不需要改错误分类,只需要保证 ChatX 抛出的异常仍能被 `_status_code` 和 provider payload helper 识别(`registry/error_classification.py:75-98`; 依据 = client 层 A' 重设计决策 M5/F2,详见 `mvp1-alignment.md` §4/§5)。
+3. baseline 的 `classify_exception` 已把 v1.1 action 映射到旧 decision,所以 MVP1 调用层迁移不需要改错误分类,只需要保证 ChatX 抛出的异常仍能被 `_status_code` 和 provider payload helper 识别(`registry/error_classification.py:75-98`; 依据 = client 层 A' 重设计决策 M5/F2,详见 `mvp1-alignment.md` §4/§5)。核心 ChatX/SDK 回归已由 `tests/test_chatx_invocation_runtime.py` 覆盖。
 
 ## 决策原因
 
@@ -89,5 +89,5 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 ## 待办/疑点
 
-1. ChatX A' 迁移后需补确定性测试,确认 ChatX/SDK 抛出的 status_code、response JSON、wrapped network error 仍能被 `_status_code`、`_provider_error_payload`、`_exception_chain` 正确识别(`registry/error_classification.py:223-301`; 依据 = A' 验证清单头号风险,详见 `mvp1-alignment.md` §4「A' 验证清单」)。
+1. 已补核心确定性测试:ChatX A' 迁移后 fake 401、wrapped network、400 non-capability 与真实 OpenAI SDK 401/400 error shape 仍可被 `_status_code`、`_provider_error_payload`、`_exception_chain` 正确识别并进入既有分类语义(`registry/error_classification.py:223-301`; `packages/graph-agent-gateway/tests/test_chatx_invocation_runtime.py`;依据 = A' 验证清单头号风险,详见 `mvp1-alignment.md` §4「A' 验证清单」)。未来新 provider SDK 形态仍需补同类回归。
 2. 当前 capability 400 的识别依赖字符串 marker,覆盖 unsupported/not supported/unknown parameter/invalid model/model not found;若 provider 返回本地化或新字段,可能需要扩展 marker,但 MVP1 不应改现有分类语义(`registry/error_classification.py:272-290`)。

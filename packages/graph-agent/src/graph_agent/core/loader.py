@@ -214,6 +214,7 @@ class SkillLoader:
             _loading_stack=loading_stack,
             _compilation_cache=_compilation_cache,
         )
+        _validate_iterate_compile_contracts(phase_docs)
         _validate_sequential_overwrites(graph_path, body_phase_refs, phase_docs)
 
         actions, tools = _discover_actions_and_tools(root, discovered)
@@ -543,17 +544,16 @@ def _validate_subgraph_io_contracts(
             _loading_stack=_loading_stack,
             _compilation_cache=_compilation_cache,
         )
-        for side in ("inputs", "outputs"):
-            parent_schema = getattr(doc.ast.io, side)
-            child_schema = getattr(child.manifest.io, side)
-            if parent_schema != child_schema:
-                _fatal(
-                    doc.path,
-                    _frontmatter_key_line(doc.path, "io"),
-                    "[F-v3-subgraph-io-mismatch] "
-                    f"SUBGRAPH {doc.phase_name!r} {side} do not match "
-                    f"target_skill {doc.ast.target_skill!r}",
-                )
+        parent_outputs = doc.ast.io.outputs
+        child_outputs = child.manifest.io.outputs
+        if parent_outputs != child_outputs:
+            _fatal(
+                doc.path,
+                _frontmatter_key_line(doc.path, "io"),
+                "[F-v3-subgraph-io-mismatch] "
+                f"SUBGRAPH {doc.phase_name!r} outputs do not match "
+                f"target_skill {doc.ast.target_skill!r}",
+            )
 
 
 def _validate_agent_reference_paths(skill_root: Path, phase_docs: list[PhaseDocument]) -> None:
@@ -1256,6 +1256,35 @@ def _extract_output_schema_keys(schema: dict[str, Any]) -> set[str] | None:
     return {key for key in properties if isinstance(key, str)}
 
 
+def _validate_iterate_compile_contracts(phase_docs: list[PhaseDocument]) -> None:
+    for doc in phase_docs:
+        iterate = getattr(doc.ast, "iterate", None)
+        if iterate is None or iterate.mode != "loop":
+            continue
+        io = getattr(doc.ast, "io", None)
+        input_keys = _extract_output_schema_keys(io.inputs) if io is not None else set()
+        accumulate = iterate.accumulate
+        if accumulate is None:
+            _iterate_fields_fatal(doc.path, "accumulate")
+        missing = [
+            name
+            for name in (iterate.item_var, accumulate.var)
+            if input_keys is not None and name not in input_keys
+        ]
+        if missing:
+            _iterate_fields_fatal(doc.path, ", ".join(missing))
+
+
+def _iterate_fields_fatal(path: Path, missing: str) -> NoReturn:
+    _fatal(
+        path,
+        _frontmatter_key_line(path, "iterate"),
+        "[F-v3-iterate-accumulate-fields-missing] "
+        f"loop iterate io.inputs must declare {missing}",
+        code="[F-v3-iterate-accumulate-fields-missing]",
+    )
+
+
 class _ActionReturnKeyVisitor(ast.NodeVisitor):
     def __init__(
         self,
@@ -1445,6 +1474,7 @@ def _normalize_skill_node_frontmatter(path: Path, data: dict[str, Any]) -> dict[
         "validator",
         "allow_sequential_overwrite",
         "batch",
+        "iterate",
     )
     for key in phase_config_keys[1:]:
         if key in phase_config:

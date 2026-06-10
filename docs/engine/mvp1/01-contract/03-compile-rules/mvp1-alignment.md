@@ -9,7 +9,7 @@ aligns_with: ../../00-architecture-overview.md（§2 契约层 A）
 
 # 03-compile-rules — 契约 A · 编译规则 + 错误码全表
 
-> **Tier**: 契约层 A(声明式,喂 copilot) | **Owns**: 编译/装配/运行生命周期契约 + 全部校验规则(DAG/IO/mention/purity/golden/iterate)+ `[F-v3-*]` 错误码全表 | **现状**: mvp1 自承载,代码 registry 93 码 | **Related**: `skill-syntax`(被校验语法)· `01-compile`(扫描器实现)· `invalidation`/`06-golden-eval`(golden eval 期)· `02-iterate`(iterate 新码目标)· `03-api-contract`(CompileResult)
+> **Tier**: 契约层 A(声明式,喂 copilot) | **Owns**: 编译/装配/运行生命周期契约 + 全部校验规则(DAG/IO/mention/purity/golden/iterate)+ `[F-v3-*]` 错误码全表 | **现状**: mvp1 自承载,代码 registry 95 码 | **Related**: `skill-syntax`(被校验语法)· `01-compile`(扫描器实现)· `invalidation`/`06-golden-eval`(golden eval 期)· `02-iterate`(iterate 新码目标)· `03-api-contract`(CompileResult)
 
 ## 1. 定义
 compile-rules = skill **要满足什么才合法可编译**,以及 Loader **怎么判、错误怎么报**(`[F-v3-*]`)。这是喂 copilot 的核心:copilot 生成的 skill 必须过这些规则。规则是声明式契约；扫描器实现归 `02-mechanism/01-compile`，运行外层行为归 `02-mechanism/04-run-outer/01-graph-exec`。
@@ -213,8 +213,8 @@ codex 复审确认 G1-G6 方向对,补强为"通用 app 可长期消费的协议
 
 **向后兼容(impl 注意,归 kiro)**:加字段本身 additive 安全(`diagnostics=[]` / `details={}` / `remediation=None`);风险点:(a) `ErrorCodeMetadata` 现为 `NamedTuple` + 位置参数(`error_registry.py:8`),加字段须改 dataclass/Pydantic 或关键字构造,否则全量改 93 行;(b) `doc_link` 改 scheme/HTTPS 是语义变化,保留弃用别名;(c) studio 多处 `extra="forbid"` 模型(`RunMetadata` / `RunDetail` / `ErrorResponse`),加 diagnostics 须同步 studio 模型 + TS 类型(engine 加字段 / studio 同步 = 跨边界协同)。
 
-## 4. 错误码全表(93)
-本表与 `ERROR_REGISTRY` 逐码核对:93 个现有码一个不少，code set 与 stage 完全一致。表内「具体原因 / 修复建议」来自迁移源并在 mvp1 保留；Spec 链接均指向 mvp1 文档。
+## 4. 错误码全表(95)
+本表与 `ERROR_REGISTRY` 逐码核对:95 个现有码一个不少，code set 与 stage 完全一致。表内「具体原因 / 修复建议」来自迁移源并在 mvp1 保留；Spec 链接均指向 mvp1 文档。
 
 ### graph domain
 
@@ -249,6 +249,8 @@ codex 复审确认 G1-G6 方向对,补强为"通用 app 可长期消费的协议
 |---|---|---|---|---|
 | `[F-v3-compile-recursion-cycle]` | 编译期 | subgraph/subagent 递归编译链路中再次遇到已在加载栈内的 skill root | 打断 skill 间循环引用或抽出共享子图 | [Error Code](#compile-domain) |
 | `[F-v3-compile-depth-exceeded]` | 编译期 | subgraph/subagent 递归编译深度超过安全上限 | 降低嵌套深度或合并中间 skill | [Error Code](#compile-domain) |
+| `[F-v3-iterate-accumulate-fields-missing]` | 编译期 | loop iterate 声明缺 `item_var` 或 `accumulate.var` 对应的 `io.inputs` 字段 | 在 loop 节点 `io.inputs` 声明 item 与累积字段 | [Iterate](../../02-mechanism/04-run-outer/02-iterate/mvp1-alignment.md) |
+| `[F-v3-iterate-over-not-list]` | 编译期/运行期 | iterate `over` 指向的 schema 或运行期值不是 list/array 形态 | 调整 `over` 字段 schema、输入值或 iterate 声明 | [Iterate](../../02-mechanism/04-run-outer/02-iterate/mvp1-alignment.md) |
 
 ### logic domain
 
@@ -358,10 +360,10 @@ codex 复审确认 G1-G6 方向对,补强为"通用 app 可长期消费的协议
 
 | ID | 决策 | 契约落点 | 代码现状 |
 |---|---|---|---|
-| CR1 | compile-rules mvp1 自承载生命周期契约和 93 码全表 | 本文 §2 / §4 | 已迁入，mvp0 不再是 SSOT |
+| CR1 | compile-rules mvp1 自承载生命周期契约和 95 码全表 | 本文 §2 / §4 | 已迁入，mvp0 不再是 SSOT |
 | CR2 | purity 是 compile 的一条规则 | `[F-v3-logic-action-purity-violation]` 编译期 FATAL；扫描器实现归 `02-mechanism/01-compile` | 现只挡本地写 API；`run_skill`/FS/`sys.path` 扩展待实现 |
 | CR3 | `[F-v3-golden-stale-fields]` 是 **eval 期** staleness，不是编译期 | `05-invalidation` + `05-run-inner/06-golden-eval` | registry 93 码里尚无该 mvp1 新码；不得按旧编译期逻辑落地 |
-| CR4 | `[F-v3-iterate-*]` 是 mvp1 新增码族 | `02-mechanism/04-run-outer/02-iterate` + 本文 §6 | registry 93 码里尚无该码族 |
+| CR4 | `[F-v3-iterate-*]` 是 mvp1 新增码族 | `02-mechanism/04-run-outer/02-iterate` + 本文 §4 / §6 | 已纳入 registry 95 码 |
 | LE1-3 | LOGIC action 契约收紧:纯返回 dict、只读 inputs、硬禁 `run_skill`/文件系统/`sys.path` | `02-mechanism/04-run-outer/01-graph-exec` owns action 范式；本域 owns purity 失败码 | live 仍有 Context mutation/编排 action/FS action，归 refactor-target |
 | CR5 | **错误契约 V2(G1-G6)**:定位轴必填 / 结构化 details(+序列化异常 context)/ remediation 进注册表 / doc_link 可解析 + 公开码表 / RunResult diagnostics 列表 / 运行期细化 + 注册待加码 | 本文 §3.1;形状→`data-contracts`、API→`03-api-contract`(双向) | 全部目标、impl 归 kiro;通用消费者需求驱动(`_api-handshake-audit` §3)，与 studio 自建 `{...,details}` 印证 |
 
@@ -370,22 +372,22 @@ codex 复审确认 G1-G6 方向对,补强为"通用 app 可长期消费的协议
 | 错误码 | 阶段 | 具体原因 | 修复建议 | SSOT / 状态 |
 |---|---|---|---|---|
 | `[F-v3-golden-stale-fields]` | eval 期 | `.workspace/golden` 中某节点 expected output 缺当前 `io.outputs.required` 字段 | 重新生成或补齐该节点 golden | `06-golden-eval` / `05-invalidation`; 当前未进 `ERROR_REGISTRY` |
-| `[F-v3-iterate-accumulate-fields-missing]` | 编译期 | loop iterate 声明缺 `item_var` 或 `accumulate.var` 对应的 `io.inputs` 字段 | 在 loop 节点 `io.inputs` 声明 item 与累积字段 | `02-iterate`; 当前未进 `ERROR_REGISTRY` |
-| `[F-v3-iterate-over-not-list]` | 编译期 | iterate `over` 指向的 schema 不是 list/array 形态，无法 batch/loop | 调整 `over` 字段 schema 或 iterate 声明 | `02-iterate`; 当前未进 `ERROR_REGISTRY` |
+| `[F-v3-iterate-accumulate-fields-missing]` | 编译期 | loop iterate 声明缺 `item_var` 或 `accumulate.var` 对应的 `io.inputs` 字段 | 在 loop 节点 `io.inputs` 声明 item 与累积字段 | `02-iterate`; 已进 `ERROR_REGISTRY` |
+| `[F-v3-iterate-over-not-list]` | 编译期/运行期 | iterate `over` 指向的 schema 或运行期值不是 list/array 形态，无法 batch/loop | 调整 `over` 字段 schema、输入值或 iterate 声明 | `02-iterate`; 已进 `ERROR_REGISTRY` |
 
 ## 7. spec-vs-code drift 清单
 
 | 项 | 核对结果 | 处置 |
 |---|---|---|
-| mvp0 11 表 vs `ERROR_REGISTRY` | 93 vs 93；无 table-only / registry-only；stage 全一致 | 以代码为准迁入 §4 |
+| mvp0 11 表 vs `ERROR_REGISTRY` | 95 vs 95；无 table-only / registry-only；stage 全一致 | 以代码为准迁入 §4 |
 | `doc_link` | 原 registry 93 个链接均为旧 spec 语境；目标改为 mvp1 文档 | 本次更新 93 个 |
 | domain pattern | 规范为 `[F-v3-<domain>-<specific>]`；既有 `[F-v3-sequential-overwrite-unauthorized]` 无显式 domain | 保留现有码，不重命名 |
 | golden stale | 旧迁移源曾写编译期硬错误；mvp1 决策反转为 eval 期 | 本文只以 eval 期写入，不计入现有 93 |
-| iterate 码族 | mvp1 文档已有目标，代码 registry 尚无 | 写为新增目标/剩余 gap |
+| iterate 码族 | mvp1 文档已有目标，代码 registry 已落 `[F-v3-iterate-accumulate-fields-missing]` / `[F-v3-iterate-over-not-list]` | 已迁入 §4，§6 保留为历史 delta 目标说明 |
 | StateMapper required | 契约目标要求 slice 缺 required 报 `[F-v3-runtime-state-mapping-failed]`；代码只过滤 properties | alignment 写目标，baseline 写代码现状并交叉引用 graph-exec |
 
 ## 8. 测试关键点
-1. registry 与本文 §4 保持 93 个现有码一致。
+1. registry 与本文 §4 保持 95 个现有码一致。
 2. `ErrorPayload` 至少含 `code/level/stage/message/doc_link`，未知 code 被拒绝。
 3. DAG 无环/无孤岛、IO 数据流、mention 可达各报对应 `[F-v3-*]`。
 4. action 写文件 / 未来 `run_skill` / `sys.path` 命中编译期 `[F-v3-logic-action-purity-violation]` FATAL。

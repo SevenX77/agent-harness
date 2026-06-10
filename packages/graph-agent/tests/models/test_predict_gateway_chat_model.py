@@ -156,7 +156,7 @@ def test_generate_sets_mock_metadata_and_zero_usage_without_provider_call() -> N
     with (
         patch.object(LLMClientManager, "_probe_provider", side_effect=AssertionError("provider")),
         patch(
-            "graph_agent_gateway.ordinary_chat._dispatch_provider_call",
+            "graph_agent_gateway.gateway_chat_model.RouteChatModelFactory.build",
             side_effect=AssertionError("provider"),
         ),
     ):

@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from graph_agent import predict_skill, RunResult
+from graph_agent import RunResult, predict_skill
 from graph_agent.core.loader import SkillLoader
 
 from app.models.runs import PredictDiagnosticExport
@@ -60,8 +60,9 @@ class PredictorService:
                 unattended=True,
                 **(input_data or {}),
             )
+            result: RunResult
             if isinstance(raw_result, dict):
-                from graph_agent.core.result import WorkflowResult, WorkflowMetrics, PhaseRecord, PathDiff
+                from graph_agent.core.result import PathDiff, PhaseRecord, WorkflowMetrics, WorkflowResult
                 context = raw_result.get("context", raw_result)
                 if not isinstance(context, dict):
                     context = {}

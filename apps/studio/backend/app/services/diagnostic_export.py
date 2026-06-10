@@ -13,10 +13,9 @@ from app.models.runs import PredictDiagnosticExport
 def export_predict_diagnostics(result: RunResult) -> PredictDiagnosticExport:
     """Return the stable in-process payload consumed by Studio internals."""
 
-    status = "success" if result.success else "failed"
     return PredictDiagnosticExport(
         is_predict=True,
-        status=status,
+        status=result.status,
         phases=result.phases or [],
         path_diff=result.path_diff,
     )

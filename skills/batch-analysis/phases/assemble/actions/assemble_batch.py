@@ -1,15 +1,17 @@
 import logging
-import sys
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Add workspace root to sys.path
-_WORKSPACE_ROOT = Path(__file__).resolve().parents[4]
-if str(_WORKSPACE_ROOT) not in sys.path:
-    sys.path.insert(0, str(_WORKSPACE_ROOT))
 
-from shared.schemas import BatchAccumulator
+class BatchAccumulator:
+    def __init__(self):
+        self.known_characters = {}
+        self.known_props = {}
+        self.open_foreshadowing = []
+        self.active_arcs = []
+        self.character_latest_states = {}
+        self.time_tracker = {}
+        self.location_registry = {}
 
 
 def assemble_batch(context) -> dict:

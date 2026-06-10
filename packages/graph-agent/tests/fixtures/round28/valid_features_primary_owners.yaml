@@ -129,6 +129,31 @@ features:
   - GraphPhaseRef
   - SkillLoader
   - SkillManifest
+- id: F-iterate-runtime
+  description: Compile and execute MVP1 iterate batch/loop contracts for node-level
+    and graph-level loops.
+  feature_boundary:
+    kind: lifecycle-behavior
+    evidence: iterate runtime contract
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/core/graph_assembler.py
+  - path: packages/graph-agent/src/graph_agent/core/loader.py
+  - path: packages/graph-agent/src/graph_agent/core/manifest.py
+  error_codes_primary:
+  - '[F-v3-iterate-accumulate-fields-missing]'
+  - '[F-v3-iterate-over-not-list]'
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/core/test_ws_e1_iterate_runtime_contract_red.py::test_loop_iterate_requires_item_and_accumulator_in_phase_inputs
+  - tests/core/test_ws_e1_iterate_runtime_contract_red.py::test_iterate_over_must_resolve_to_list_at_runtime
+  public_api_symbols:
+  - IterateSpec
 - id: F-logic-action-execution
   description: Run LOGIC action phases through registered Python actions and validators.
   feature_boundary:
@@ -193,7 +218,7 @@ features:
   events_secondary: []
   non_functional_contracts: []
   targeted_tests:
-  - tests/core/test_round14_skill_compilation_cutover.py::test_subgraph_io_input_mismatch_is_rejected_at_compile_time
+  - tests/core/test_round14_skill_compilation_cutover.py::test_subgraph_io_input_mismatch_is_allowed_at_compile_time
   public_api_symbols:
   - SubgraphNodeAST
 - id: F-agent-phase-orchestration
@@ -356,6 +381,8 @@ features:
   error_codes_secondary: []
   events_primary:
   - HeartbeatEvent
+  - InputDispatchEvent
+  - InputFileInjectedEvent
   - InterruptedEvent
   - PhaseEndEvent
   - PhaseStartEvent
@@ -388,6 +415,7 @@ features:
   - '[F-v3-runtime-state-mapping-failed]'
   error_codes_secondary: []
   events_primary:
+  - BlackboardReduceEvent
   - WorkingMemoryUpdateEvent
   events_secondary: []
   non_functional_contracts:

@@ -77,6 +77,8 @@ class LLMCallEvent(_EventBase):
     output_tokens: int
     messages: list[dict[str, Any]] | None = None
     response_data: dict[str, Any] | None = None
+    parent_node_id: str | None = None
+    node_type: str | None = None
 
 
 class ToolCallEvent(_EventBase):
@@ -86,6 +88,8 @@ class ToolCallEvent(_EventBase):
     args: dict[str, Any] = Field(default_factory=dict)
     result: str
     duration_ms: float | None = None
+    parent_node_id: str | None = None
+    node_type: str | None = None
 
 
 class ValidationFailEvent(_EventBase):
@@ -247,6 +251,35 @@ class LLMFallbackEvent(_EventBase):
     reason: str
     code: str | None = None
     context: dict[str, Any] = Field(default_factory=dict)
+
+
+class BlackboardReduceEvent(_EventBase):
+    event_type: Literal["blackboard_reduce"] = "blackboard_reduce"
+    from_phase: str | None
+    to_phase: str
+    changed_keys: list[str]
+    blackboard_snapshot: dict[str, Any]
+    reducer: str
+
+
+class InputDispatchEvent(_EventBase):
+    event_type: Literal["input_dispatch"] = "input_dispatch"
+    from_phase: str | None
+    to_phase: str
+    changed_keys: list[str]
+    blackboard_snapshot: dict[str, Any]
+    dispatched_keys: list[str]
+    branch_index: int | None
+
+
+class InputFileInjectedEvent(_EventBase):
+    event_type: Literal["input_file_injected"] = "input_file_injected"
+    from_phase: str | None
+    to_phase: str
+    changed_keys: list[str]
+    blackboard_snapshot: dict[str, Any]
+    file_ref: str
+    target_field: str
 
 
 # ---------------------------------------------------------------------------
@@ -480,7 +513,10 @@ CallbackEvent = Annotated[
     | ThreadCleanedUpEvent
     | InterruptedEvent
     | ResumedEvent
-    | AgentLoopIterationEvent,
+    | AgentLoopIterationEvent
+    | BlackboardReduceEvent
+    | InputDispatchEvent
+    | InputFileInjectedEvent,
     Field(discriminator="event_type"),
 ]
 
@@ -521,4 +557,7 @@ __all__ = [
     "InterruptedEvent",
     "ResumedEvent",
     "AgentLoopIterationEvent",
+    "BlackboardReduceEvent",
+    "InputDispatchEvent",
+    "InputFileInjectedEvent",
 ]

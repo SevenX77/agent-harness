@@ -17,7 +17,8 @@ class FakeToolChatModel:
         self.calls = calls
         self.tool_results: list[str] = []
 
-    def bind_tools(self, tools: list[Any]) -> FakeToolChatModel:
+    def bind_tools(self, tools: list[Any], **kwargs: Any) -> FakeToolChatModel:
+        del tools, kwargs
         return self
 
     def invoke(self, messages: list[Any]) -> AIMessage:
@@ -152,7 +153,7 @@ def test_reference_reader_runtime_is_invoked_with_sandbox(
     chat = FakeToolChatModel(
         [
             [{"name": "read_reference", "args": {"reference_id": "Guide"}, "id": "read-1"}],
-            [{"name": "finish_task", "args": {"markdown": "## answer\n\nok"}, "id": "done"}],
+            [{"name": "finish_task", "args": {"business_data_md": "## item-1\n- answer: ok\n"}, "id": "done"}],
         ]
     )
 

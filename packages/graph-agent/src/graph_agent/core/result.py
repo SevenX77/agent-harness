@@ -120,8 +120,8 @@ class RunResult(BaseModel):
                 deduped.append(item)
 
         total = len(deduped)
-        by_level = {}
-        by_code = {}
+        by_level: dict[str, int] = {}
+        by_code: dict[str, int] = {}
         for item in deduped:
             lvl = item.level or "UNKNOWN"
             by_level[lvl] = by_level.get(lvl, 0) + 1

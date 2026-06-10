@@ -130,7 +130,6 @@ class _GraphIterateRuntime:
                 self.output_schema,
                 self.terminal_phase_ids,
                 config=config,
-                callbacks=self.callbacks,
                 invoke_kwargs=kwargs,
             )
         return _run_graph_loop_iterate(
@@ -140,7 +139,6 @@ class _GraphIterateRuntime:
             self.output_schema,
             self.terminal_phase_ids,
             config=config,
-            callbacks=self.callbacks,
             invoke_kwargs=kwargs,
         )
 
@@ -636,6 +634,62 @@ def _graph_batch_runner(
     return _batch_payload_runner(state, iterate.item_var, output_keys, _invoke_child)
 
 
+def _phase_batch_payload(
+    workflow_state: WorkflowState,
+    *,
+    over: str,
+    range_spec: tuple[int, int] | None,
+    output_schema: dict[str, Any] | None,
+    concurrency: int,
+    item_var: str,
+    node: Any,
+    include_batch_outputs: bool,
+) -> dict[str, Any]:
+    _items, aggregated = _collect_batch_iteration(
+        workflow_state,
+        over=over,
+        range_spec=range_spec,
+        output_schema=output_schema,
+        concurrency=concurrency,
+        runner_factory=lambda output_keys: _phase_batch_runner(
+            workflow_state,
+            item_var,
+            node,
+            output_keys,
+        ),
+        include_batch_outputs=include_batch_outputs,
+    )
+    return aggregated
+
+
+def _graph_batch_payload_and_namespaces(
+    graph: Any,
+    state: WorkflowState,
+    iterate: IterateSpec,
+    output_schema: dict[str, Any] | None,
+    *,
+    config: RunnableConfig | None,
+    invoke_kwargs: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    items, aggregated = _collect_batch_iteration(
+        state,
+        over=iterate.over,
+        range_spec=iterate.range,
+        output_schema=output_schema,
+        concurrency=iterate.concurrency,
+        runner_factory=lambda output_keys: _graph_batch_runner(
+            graph=graph,
+            state=state,
+            iterate=iterate,
+            output_keys=output_keys,
+            config=config,
+            invoke_kwargs=invoke_kwargs,
+        ),
+    )
+    namespaces = [_iteration_namespace(index) for index in range(1, len(items) + 1)]
+    return aggregated, namespaces
+
+
 def _emit_blackboard_reduce(
     callbacks: Any | None,
     *,
@@ -710,7 +764,6 @@ def _build_iterate_wrapped_phase(
             range_spec=iterate.range,
             output_schema=output_schema,
             include_batch_outputs=False,
-            callbacks=callbacks,
         )
     return _build_loop_iterate_phase(phase_id, node, iterate, output_schema, callbacks=callbacks)
 
@@ -720,8 +773,6 @@ def _build_legacy_batch_wrapped_phase(
     node: Any,
     batch: BatchSpec,
     output_schema: dict[str, Any] | None,
-    *,
-    callbacks: Any | None = None,
 ) -> Any:
     return _build_batch_iterate_phase(
         phase_id,
@@ -732,7 +783,6 @@ def _build_legacy_batch_wrapped_phase(
         range_spec=None,
         output_schema=output_schema,
         include_batch_outputs=True,
-        callbacks=callbacks,
     )
 
 
@@ -746,25 +796,20 @@ def _build_batch_iterate_phase(
     range_spec: tuple[int, int] | None,
     output_schema: dict[str, Any] | None,
     include_batch_outputs: bool,
-    callbacks: Any | None = None,
 ) -> Any:
     def _batch_phase(state: WorkflowState) -> WorkflowState:
         workflow_state = _coerce_workflow_state(state)
-        _items, aggregated = _collect_batch_iteration(
+        payload = _phase_batch_payload(
             workflow_state,
             over=over,
             range_spec=range_spec,
             output_schema=output_schema,
             concurrency=concurrency,
-            runner_factory=lambda output_keys: _phase_batch_runner(
-                workflow_state,
-                item_var,
-                node,
-                output_keys,
-            ),
+            item_var=item_var,
+            node=node,
             include_batch_outputs=include_batch_outputs,
         )
-        return _with_phase_outputs(workflow_state, {phase_id: aggregated})
+        return _with_phase_outputs(workflow_state, {phase_id: payload})
 
     return _batch_phase
 
@@ -858,29 +903,20 @@ def _run_graph_batch_iterate(
     terminal_phase_ids: list[str],
     *,
     config: RunnableConfig | None,
-    callbacks: Any | None = None,
     invoke_kwargs: dict[str, Any],
 ) -> WorkflowState:
-    items, aggregated = _collect_batch_iteration(
+    payload, namespaces = _graph_batch_payload_and_namespaces(
+        graph,
         state,
-        over=iterate.over,
-        range_spec=iterate.range,
-        output_schema=output_schema,
-        concurrency=iterate.concurrency,
-        runner_factory=lambda output_keys: _graph_batch_runner(
-            graph=graph,
-            state=state,
-            iterate=iterate,
-            output_keys=output_keys,
-            config=config,
-            invoke_kwargs=invoke_kwargs,
-        ),
+        iterate,
+        output_schema,
+        config=config,
+        invoke_kwargs=invoke_kwargs,
     )
     final_state = _with_phase_outputs(
         state,
-        _terminal_phase_outputs(terminal_phase_ids, aggregated),
+        _terminal_phase_outputs(terminal_phase_ids, payload),
     )
-    namespaces = [_iteration_namespace(index) for index in range(1, len(items) + 1)]
     return _with_graph_iterate_signal(final_state, mode="batch", namespaces=namespaces)
 
 
@@ -1012,7 +1048,6 @@ def _wrap_phase_runtime_node(
             wrapped,
             phase_ast.batch,
             output_schema,
-            callbacks=callbacks,
         )
     return wrapped
 

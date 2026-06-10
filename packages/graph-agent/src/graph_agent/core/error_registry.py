@@ -2,7 +2,30 @@
 
 from __future__ import annotations
 
-from typing import NamedTuple
+from copy import deepcopy
+from typing import Any, NamedTuple
+
+ERROR_CATALOG_VERSION = "engine-mvp1.error-catalog.v1"
+ERROR_METADATA_SCHEMA_VERSION = "engine-mvp1.error-metadata.v1"
+_PUBLIC_DOC_BASE_URL = "https://docs.graph-agent.dev/errors"
+_DOC_SUBGRAPH_PATH_CONTRACT = (
+    "docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威"
+)
+_DEFAULT_DETAILS_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": True,
+}
+_DOMAIN_AGENT = "agent"
+_DOMAIN_COGNITIVE_RUNTIME = "cognitive / tool / runtime"
+_DOMAIN_COMPILE = "compile"
+_DOMAIN_GRAPH = "graph"
+_DOMAIN_LOGIC = "logic"
+_DOMAIN_MENTION = "mention"
+_DOMAIN_RESOLVER = "resolver"
+_DOMAIN_RESOURCE = "resource"
+_DOMAIN_SUBGRAPH = "subgraph"
+_REMEDIATE_DELETE_FIELD = "删除字段"
+_REMEDIATE_FIX_NAME = "修正命名"
 
 
 class ErrorCodeMetadata(NamedTuple):
@@ -10,6 +33,12 @@ class ErrorCodeMetadata(NamedTuple):
     level: str
     stage: tuple[str, ...]
     doc_link: str
+    remediation: str = ""
+    doc_ref: str = ""
+    doc_url: str = ""
+    details_schema: dict[str, Any] = _DEFAULT_DETAILS_SCHEMA
+    schema_version: str = ERROR_METADATA_SCHEMA_VERSION
+    status: str = "active"
 
 
 ERROR_REGISTRY: dict[str, ErrorCodeMetadata] = {
@@ -57,10 +86,10 @@ ERROR_REGISTRY: dict[str, ErrorCodeMetadata] = {
     '[F-v3-subgraph-validator-failed]': ErrorCodeMetadata('[F-v3-subgraph-validator-failed]', 'FATAL', ('运行期',), 'docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态'),
     '[F-v3-subgraph-schema-unknown-field]': ErrorCodeMetadata('[F-v3-subgraph-schema-unknown-field]', 'FATAL', ('编译期',), 'docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态'),
     '[F-v3-subgraph-name-invalid]': ErrorCodeMetadata('[F-v3-subgraph-name-invalid]', 'FATAL', ('编译期',), 'docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态'),
-    '[F-v3-subgraph-target-skill-invalid]': ErrorCodeMetadata('[F-v3-subgraph-target-skill-invalid]', 'FATAL', ('编译期',), 'docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威'),
-    '[F-v3-subgraph-io-schema-invalid]': ErrorCodeMetadata('[F-v3-subgraph-io-schema-invalid]', 'FATAL', ('编译期',), 'docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威'),
-    '[F-v3-subgraph-io-mismatch]': ErrorCodeMetadata('[F-v3-subgraph-io-mismatch]', 'FATAL', ('编译期',), 'docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威'),
-    '[F-v3-subgraph-io-schema-incompatible]': ErrorCodeMetadata('[F-v3-subgraph-io-schema-incompatible]', 'FATAL', ('编译期',), 'docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威'),
+    '[F-v3-subgraph-target-skill-invalid]': ErrorCodeMetadata('[F-v3-subgraph-target-skill-invalid]', 'FATAL', ('编译期',), _DOC_SUBGRAPH_PATH_CONTRACT),
+    '[F-v3-subgraph-io-schema-invalid]': ErrorCodeMetadata('[F-v3-subgraph-io-schema-invalid]', 'FATAL', ('编译期',), _DOC_SUBGRAPH_PATH_CONTRACT),
+    '[F-v3-subgraph-io-mismatch]': ErrorCodeMetadata('[F-v3-subgraph-io-mismatch]', 'FATAL', ('编译期',), _DOC_SUBGRAPH_PATH_CONTRACT),
+    '[F-v3-subgraph-io-schema-incompatible]': ErrorCodeMetadata('[F-v3-subgraph-io-schema-incompatible]', 'FATAL', ('编译期',), _DOC_SUBGRAPH_PATH_CONTRACT),
     '[F-v3-agent-schema-unknown-field]': ErrorCodeMetadata('[F-v3-agent-schema-unknown-field]', 'FATAL', ('编译期',), 'docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态'),
     '[F-v3-agent-name-invalid]': ErrorCodeMetadata('[F-v3-agent-name-invalid]', 'FATAL', ('编译期',), 'docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态'),
     '[F-v3-agent-llm-role-unknown]': ErrorCodeMetadata('[F-v3-agent-llm-role-unknown]', 'FATAL', ('编译期',), 'docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态'),
@@ -112,4 +141,189 @@ ERROR_REGISTRY: dict[str, ErrorCodeMetadata] = {
 }
 
 
-__all__ = ["ERROR_REGISTRY", "ErrorCodeMetadata"]
+_CATALOG_METADATA_ROWS: tuple[tuple[str, str], ...] = (
+    (_DOMAIN_GRAPH, '删除字段或纳入 spec'),
+    (_DOMAIN_GRAPH, '改为小写开头标识'),
+    (_DOMAIN_GRAPH, '升级/降级 spec 或 engine'),
+    (_DOMAIN_GRAPH, '使用 `llm_roles.yaml` 中角色'),
+    (_DOMAIN_GRAPH, '创建精确命名的 `GRAPH.md`'),
+    (_DOMAIN_GRAPH, '创建 phases 目录'),
+    (_DOMAIN_GRAPH, '添加 `phases: [...]` 名字注册'),
+    (_DOMAIN_GRAPH, '修正 phase name 为合法标识'),
+    (_DOMAIN_GRAPH, '对齐 body、frontmatter 和目录名'),
+    (_DOMAIN_GRAPH, '去重'),
+    (_DOMAIN_GRAPH, '修正依赖名'),
+    (_DOMAIN_GRAPH, '修正 `<phase ... output>` 标记'),
+    (_DOMAIN_GRAPH, '打断循环依赖'),
+    (_DOMAIN_GRAPH, '增加依赖连接或删除孤岛'),
+    (_DOMAIN_GRAPH, '创建 `phases/<id>/`'),
+    (_DOMAIN_GRAPH, '保留 `LOGIC.md`/`SUBGRAPH.md`/`SKILL.md` 之一'),
+    (_DOMAIN_GRAPH, '添加 `LOGIC.md`/`SUBGRAPH.md`/`SKILL.md` 之一'),
+    (_DOMAIN_GRAPH, '设置 `type: object`'),
+    (_DOMAIN_GRAPH, '修正 schema'),
+    (_DOMAIN_GRAPH, '改为 inline `io.inputs` / `io.outputs`'),
+    (_DOMAIN_GRAPH, '补依赖或调整 IO'),
+    (_DOMAIN_COMPILE, '打断 skill 间循环引用或抽出共享子图'),
+    (_DOMAIN_COMPILE, '降低嵌套深度或合并中间 skill'),
+    (_DOMAIN_LOGIC, _REMEDIATE_DELETE_FIELD),
+    (_DOMAIN_LOGIC, _REMEDIATE_FIX_NAME),
+    (_DOMAIN_LOGIC, '修正 object schema'),
+    (_DOMAIN_LOGIC, '声明至少一个 action'),
+    (_DOMAIN_LOGIC, '使用一级合法函数名'),
+    (_DOMAIN_LOGIC, '创建目录或注册通用 action'),
+    (_DOMAIN_LOGIC, '增加 `<name>.py` 或注册通用 action'),
+    (_DOMAIN_LOGIC, '导出 `run`'),
+    (_DOMAIN_LOGIC, "移除 `open('w')` 等非纯操作"),
+    (_DOMAIN_LOGIC, '返回 dict'),
+    (_DOMAIN_LOGIC, '更新 `io.outputs` 或删字段'),
+    (_DOMAIN_LOGIC, '改为 true/false'),
+    (_DOMAIN_LOGIC, '增加同级 `validator.py`'),
+    (_DOMAIN_LOGIC, '导出 `validate`'),
+    (_DOMAIN_LOGIC, '修正输出或校验规则'),
+    (_DOMAIN_COMPILE, '在 loop 节点 `io.inputs` 声明 item 与累积字段'),
+    (_DOMAIN_COMPILE, '调整 `over` 字段 schema、输入值或 iterate 声明'),
+    (_DOMAIN_LOGIC, '触发 LLM 重试反馈'),
+    (_DOMAIN_LOGIC, '检查子图业务规则'),
+    (_DOMAIN_SUBGRAPH, _REMEDIATE_DELETE_FIELD),
+    (_DOMAIN_SUBGRAPH, _REMEDIATE_FIX_NAME),
+    (_DOMAIN_SUBGRAPH, '使用 registry skill id'),
+    (_DOMAIN_SUBGRAPH, '修正 object schema'),
+    (_DOMAIN_SUBGRAPH, '对齐父 phase 和子 GRAPH IO'),
+    (_DOMAIN_SUBGRAPH, '对齐字段 schema'),
+    (_DOMAIN_AGENT, _REMEDIATE_DELETE_FIELD),
+    (_DOMAIN_AGENT, _REMEDIATE_FIX_NAME),
+    (_DOMAIN_AGENT, '使用已注册角色'),
+    (_DOMAIN_AGENT, '修正 schema'),
+    (_DOMAIN_AGENT, '触发 LLM 重试反馈'),
+    (_DOMAIN_AGENT, '修正 AST / pipeline'),
+    (_DOMAIN_AGENT, '注册 tool 或删引用'),
+    (_DOMAIN_AGENT, '补 name/target_skill/description'),
+    (_DOMAIN_AGENT, '补 name/target_skill/description'),
+    (_DOMAIN_AGENT, '设为 1..50'),
+    (_DOMAIN_AGENT, '仅保留 5 类白名单标签'),
+    (_DOMAIN_AGENT, '添加 role'),
+    (_DOMAIN_AGENT, '添加 goal'),
+    (_DOMAIN_AGENT, '修正 step'),
+    (_DOMAIN_AGENT, '修正 protocol'),
+    (_DOMAIN_AGENT, '修正 `<example id>`'),
+    (_DOMAIN_MENTION, '改用合法 type'),
+    (_DOMAIN_MENTION, '改成 `@type:NAME`'),
+    (_DOMAIN_MENTION, '注册目标或修正文案'),
+    (_DOMAIN_MENTION, '确认是否保留'),
+    (_DOMAIN_RESOURCE, '补 id/path/summary'),
+    (_DOMAIN_RESOURCE, '修正 id'),
+    (_DOMAIN_RESOURCE, '修正路径'),
+    (_DOMAIN_RESOURCE, '补 summary'),
+    (_DOMAIN_RESOURCE, '使用 registry 中 id'),
+    (_DOMAIN_RESOURCE, '补 id/path/summary'),
+    (_DOMAIN_RESOURCE, '修正 id'),
+    (_DOMAIN_RESOURCE, '补 path'),
+    (_DOMAIN_RESOURCE, '修正路径'),
+    (_DOMAIN_RESOURCE, '补 summary'),
+    (_DOMAIN_RESOURCE, '使用 registry 中 id'),
+    (_DOMAIN_RESOURCE, '查看 trace; 可依赖降级内容继续跑'),
+    (_DOMAIN_RESOLVER, '修正 target_skill'),
+    (_DOMAIN_RESOLVER, '收窄 search paths 或移除重复注册'),
+    (_DOMAIN_RESOLVER, '在 Studio 导入或注册 skill'),
+    (_DOMAIN_RESOLVER, '修正 registry 记录'),
+    (_DOMAIN_RESOLVER, '实现单方法 `resolve_skill`'),
+    (_DOMAIN_RESOLVER, '调用入口传入 resolver'),
+    (_DOMAIN_COGNITIVE_RUNTIME, '检查 body AST'),
+    (_DOMAIN_COGNITIVE_RUNTIME, '修正 `io.outputs`'),
+    (_DOMAIN_COGNITIVE_RUNTIME, '检查 Agent 的 `io.outputs` 或装配传入 schema'),
+    (_DOMAIN_COGNITIVE_RUNTIME, '检查 references registry'),
+    (_DOMAIN_COGNITIVE_RUNTIME, '修 reader 模块'),
+    (_DOMAIN_COGNITIVE_RUNTIME, '修正 tool 调用参数'),
+    (_DOMAIN_COGNITIVE_RUNTIME, '检查 phase IO 和上游输出'),
+    (_DOMAIN_COGNITIVE_RUNTIME, '查看 trace 原始异常'),
+    (_DOMAIN_GRAPH, '在 Frontmatter 中声明 allow_sequential_overwrite 允许覆盖'),
+    (_DOMAIN_AGENT, '让模型调用 finish_task 并提交通过 schema 的业务输出'),
+)
+_CATALOG_METADATA_BY_CODE: dict[str, tuple[str, str]] = dict(
+    zip(ERROR_REGISTRY, _CATALOG_METADATA_ROWS, strict=True)
+)
+
+
+def _code_slug(code: str) -> str:
+    return code.strip("[]")
+
+
+def _metadata_doc_ref(code: str) -> str:
+    return f"graph-agent://errors/{_code_slug(code)}"
+
+
+def _metadata_doc_url(code: str) -> str:
+    return f"{_PUBLIC_DOC_BASE_URL}/{_code_slug(code)}"
+
+
+def _with_catalog_metadata(metadata: ErrorCodeMetadata) -> ErrorCodeMetadata:
+    domain_and_remediation = _CATALOG_METADATA_BY_CODE.get(metadata.code)
+    if domain_and_remediation is None:
+        raise RuntimeError(f"missing P0-2 catalog metadata for {metadata.code}")
+    _domain, remediation = domain_and_remediation
+    return metadata._replace(
+        remediation=remediation,
+        doc_ref=_metadata_doc_ref(metadata.code),
+        doc_url=_metadata_doc_url(metadata.code),
+        details_schema=deepcopy(_DEFAULT_DETAILS_SCHEMA),
+        schema_version=ERROR_METADATA_SCHEMA_VERSION,
+        status="active",
+    )
+
+
+def _assert_catalog_metadata_matches_registry(registry: dict[str, ErrorCodeMetadata]) -> None:
+    registry_codes = set(registry)
+    metadata_codes = set(_CATALOG_METADATA_BY_CODE)
+    missing = sorted(registry_codes - metadata_codes)
+    extra = sorted(metadata_codes - registry_codes)
+    if missing or extra:
+        raise RuntimeError(
+            "P0-2 catalog metadata must match ERROR_REGISTRY keys exactly: "
+            f"missing={missing}, extra={extra}"
+        )
+
+
+def _catalog_item(metadata: ErrorCodeMetadata) -> dict[str, Any]:
+    domain, _remediation = _CATALOG_METADATA_BY_CODE[metadata.code]
+    return {
+        "code": metadata.code,
+        "level": metadata.level,
+        "stage": list(metadata.stage),
+        "domain": domain,
+        "remediation": metadata.remediation,
+        "doc_link": metadata.doc_link,
+        "doc_ref": metadata.doc_ref,
+        "doc_url": metadata.doc_url,
+        "status": metadata.status,
+        "details_schema": deepcopy(metadata.details_schema),
+        "schema_version": metadata.schema_version,
+    }
+
+
+def export_error_metadata(code: str) -> dict[str, Any]:
+    metadata = ERROR_REGISTRY.get(code)
+    if metadata is None:
+        raise ValueError(f"unknown graph_agent error code: {code}")
+    return _catalog_item(metadata)
+
+
+def export_error_catalog() -> dict[str, Any]:
+    return {
+        "registry_version": ERROR_CATALOG_VERSION,
+        "schema_version": ERROR_METADATA_SCHEMA_VERSION,
+        "items": [export_error_metadata(code) for code in sorted(ERROR_REGISTRY)],
+    }
+
+
+_assert_catalog_metadata_matches_registry(ERROR_REGISTRY)
+ERROR_REGISTRY = {code: _with_catalog_metadata(metadata) for code, metadata in ERROR_REGISTRY.items()}
+
+
+__all__ = [
+    "ERROR_CATALOG_VERSION",
+    "ERROR_METADATA_SCHEMA_VERSION",
+    "ERROR_REGISTRY",
+    "ErrorCodeMetadata",
+    "export_error_catalog",
+    "export_error_metadata",
+]

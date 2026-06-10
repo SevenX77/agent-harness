@@ -1,7 +1,7 @@
 ---
 module: 01-contract/04-data-contracts
 doc: baseline
-status: drafted（B 成段:对当前 packages/graph-agent 逐符号 grep 核 2026-06-06;形状散在 core/+runtime/;WS-E3 P0-1 已落 ErrorPayload.details + RunResult.diagnostics;WS-E5 未改 state 形状,仅验证 checkpoint namespace 不进入 BusinessData;⚠️ BlackboardState 在 runtime/state.py、ErrorPayload 无 line 轴）
+status: drafted（B 成段:对当前 packages/graph-agent 逐符号 grep 核 2026-06-10;形状散在 core/+runtime/;WS-E3 P0-1 已落 ErrorPayload.details + RunResult.diagnostics;WS-E3 P0-2 已落 registry metadata + engine-side catalog export;WS-E5 未改 state 形状,仅验证 checkpoint namespace 不进入 BusinessData;⚠️ BlackboardState 在 runtime/state.py、ErrorPayload 无 line 轴）
 binds_alignment: ./mvp1-alignment.md
 binds_code: packages/graph-agent/src/graph_agent/core/state.py:BusinessData · core/state.py:FrameworkState · core/state.py:WorkflowState · runtime/state.py:BlackboardState · core/result.py:RunResult · core/exceptions.py:ErrorPayload · core/error_registry.py:ERROR_REGISTRY · core/validator_contract.py:VALIDATOR_SIGNATURE · core/types.py:Phase
 ---
@@ -9,7 +9,7 @@ binds_code: packages/graph-agent/src/graph_agent/core/state.py:BusinessData · c
 # 04-data-contracts — Baseline(当下代码实现逻辑)
 
 > **Scope**: "我们设计的数据形状"在当前代码里的**现状落点**:state schema / result 类 / 异常树 + ErrorPayload / 错误码注册 / validator 契约 / Phase AST / 公开 `__all__` surface。langgraph 原语(StateGraph state、DeltaChannel reducer、checkpointer)是底座、引用不复述(归 `03-checkpoint`/`08-messages-state`)。
-> **现状一句话**:这些形状**物理散在 `core/`(+ `runtime/`)**、非独立 L0 叶——`BusinessData`/`FrameworkState`/`WorkflowState` 在 `core/state.py`,result 类在 `core/result.py`,异常树 + `ErrorPayload` 在 `core/exceptions.py`,错误码注册在 `core/error_registry.py`,而**公开的 `BlackboardState` + blackboard 数据模型在 `runtime/state.py`**(⚠️ 与迁移源"core/state.py 别名"说法漂移)。WS-E3 P0-1 已把错误契约 V2 最小闭环落到 `ErrorPayload.details` 与 `RunResult.diagnostics`;alignment 里 L0 leaf 抽取、`line`/`source_span`/`phase_path`、`data` 通道 delta reducer 仍是目标。
+> **现状一句话**:这些形状**物理散在 `core/`(+ `runtime/`)**、非独立 L0 叶——`BusinessData`/`FrameworkState`/`WorkflowState` 在 `core/state.py`,result 类在 `core/result.py`,异常树 + `ErrorPayload` 在 `core/exceptions.py`,错误码注册和 engine-side catalog export 在 `core/error_registry.py`,而**公开的 `BlackboardState` + blackboard 数据模型在 `runtime/state.py`**(⚠️ 与迁移源"core/state.py 别名"说法漂移)。WS-E3 P0-1 已把错误契约 V2 最小闭环落到 `ErrorPayload.details` 与 `RunResult.diagnostics`;WS-E3 P0-2 已给既有 registry metadata 补齐可导出的 remediation/doc_ref/doc_url/details_schema/schema_version/status，但未改变 payload/result 形状。alignment 里 L0 leaf 抽取、`line`/`source_span`/`phase_path`、`data` 通道 delta reducer 仍是目标。
 
 ## UI/UX
 N/A。
@@ -43,7 +43,8 @@ N/A —— 本模块是 engine 数据契约。
 - `GraphAgentError.__init__`(:127) 仍保留 `context` 属性;当异常有可用 payload 时，会把异常 `context` 的 JSON-safe 表达合入 `payload.details["context"]`(:139-149)。如果 payload 已有 dict 型 `details["context"]`，现状合并规则是异常 context 先作为底、显式 details context 后覆盖同名 key，因此显式 details 不丢且优先。
 
 ### 4. 错误码注册(core/error_registry.py)
-- `core/error_registry.py:ErrorCodeMetadata`(:8,`NamedTuple`,含 `level`)· `ERROR_REGISTRY`(:15,`dict[str, ErrorCodeMetadata]`;93 码全表见 `03-compile-rules §4`)。`ErrorPayload.code` 必须 ∈ `ERROR_REGISTRY`。
+- `core/error_registry.py:ErrorCodeMetadata`(:19,`NamedTuple`):旧字段 `code` / `level` / `stage` / `doc_link` 仍可读；WS-E3 P0-2 追加 `remediation` / `doc_ref` / `doc_url` / `details_schema` / `schema_version` / `status`。`ERROR_REGISTRY`(:32,`dict[str, ErrorCodeMetadata]`)当前 96 码全表见 `03-compile-rules §4`，key set 未因 P0-2 改变。`ErrorPayload.code` 必须 ∈ `ERROR_REGISTRY`。
+- `core/error_registry.py:export_error_metadata(code)` / `export_error_catalog()`:engine-side catalog 读取契约，输出 JSON-safe dict；catalog envelope 为 `{registry_version, schema_version, items}`，items 按 code 稳定排序且将 `stage` 从 tuple 导出为 list。unknown engine code 仍拒绝，gateway 外部 code 不进入 core registry。
 
 ### 5. validator 契约(core/validator_contract.py)
 - `core/validator_contract.py:VALIDATOR_SIGNATURE`(:9,`"def validate(output: dict, state_slice: dict, **kwargs) -> None | dict"`)· `VALIDATOR_ERROR_CODES`(:11,`tuple[str, ...]`;agent/subgraph/logic γ0 占位)。运行时 validator 加载属 execution 域(`graph-exec`)。
@@ -72,16 +73,17 @@ N/A —— 本模块是 engine 数据契约。
 | 维度 | 现状(baseline) | mvp1 目标(alignment) |
 |---|---|---|
 | 物理布局 | 形状散在 `core/` + `runtime/state.py`,循环纠缠 | 抽成 L0 叶 `data-contracts`,**零内部依赖**(去环;kiro 重排) |
-| `ErrorPayload` 定位轴/诊断负载 | 10 字段,含 `details` JSON-safe 结构化负载;**无 `line`/`source_span`/`phase_path`** | P1 加 `line`/`source_span`/`phase_path` 等定位轴并补 emit 填全 |
-| `RunResult.diagnostics` | 已有有界最终快照:`diagnostics`/`diagnostics_limit`/`diagnostics_truncated`/`diagnostic_counts`;`error` 仍是主 fatal | 后续与 WS-E4 `DiagnosticEmittedEvent` 用诊断身份关联;P0-2/P0-3 再补 registry/doc/remediation/细分码 |
+| `ErrorPayload` 定位轴/诊断负载 | 10 字段,含 `details` JSON-safe 结构化负载;P0-2 未新增 payload 字段;**无 `line`/`source_span`/`phase_path`** | P1 加 `line`/`source_span`/`phase_path` 等定位轴并补 emit 填全 |
+| `RunResult.diagnostics` | 已有有界最终快照:`diagnostics`/`diagnostics_limit`/`diagnostics_truncated`/`diagnostic_counts`;P0-2 未改变 diagnostics 语义;`error` 仍是主 fatal | 后续与 WS-E4 `DiagnosticEmittedEvent` 用诊断身份关联;P0-3 再补运行期细分码 |
+| Registry metadata/export | `ERROR_REGISTRY` 96 码 metadata 已含 remediation/doc_ref/doc_url/details_schema/schema_version/status；engine-side catalog export 已 live | Studio route 若需要，只能薄透传 engine export |
 | `data` 通道 reducer | `WorkflowState.data` **无 delta reducer**(仅 messages 有 DeltaChannel) | `data` 通道补 delta reducer(归 `03-checkpoint`) |
-| 错误码 domain | 缺 `golden`/`iterate` domain | 加 `golden`/`iterate` 码(Task1) |
+| 错误码 domain | iterate 两个 code 已注册在 compile domain；`golden` stale code 仍未注册 | golden stale 如需进入 registry 归后续 WS |
 | `BlackboardState` 落点 | `runtime/state.py:88`(独立 TypedDict) | 形状沿用;物理随 L0 抽出收口 |
 
-> **验"是否按 mvp1 改了"**:① `data-contracts` 成独立 leaf、import 图零内部模块(acyclicity guard);② `ErrorPayload` 有 `line`/`source_span`/`phase_path` 且 emit 填全;③ `WorkflowState.data` 有 delta reducer;④ `ERROR_REGISTRY` 含 golden/iterate 码。WS-E3 P0-1 已完成的 `details` + `diagnostics` 不再列为 gap。
+> **验"是否按 mvp1 改了"**:① `data-contracts` 成独立 leaf、import 图零内部模块(acyclicity guard);② `ErrorPayload` 有 `line`/`source_span`/`phase_path` 且 emit 填全;③ `WorkflowState.data` 有 delta reducer;④ 后续若注册 golden stale code 需继续守住 96 码 key-set 回归。WS-E3 P0-1 已完成的 `details` + `diagnostics` 不再列为 gap；WS-E3 P0-2 已完成 registry metadata + engine-side catalog export。
 
 ## 读代码主路径提示
 state: `core/state.py`(BusinessData/FrameworkState/WorkflowState/StateManager)+ `runtime/state.py`(BlackboardState/BlackboardData)。result: `core/result.py`。错误: `core/exceptions.py`(ErrorPayload + 树)→ `core/error_registry.py`(ERROR_REGISTRY)。validator: `core/validator_contract.py`。Phase AST: `core/types.py`。surface: `__init__.py:__all__`。
 
 ## 交叉引用(链接, 不复制)
-[mvp1-alignment](./mvp1-alignment.md)(目标)· `02-mechanism/04-run-outer/03-checkpoint`(state 存储 / data delta reducer)· `05-run-inner/08-messages-state`(messages 通道 DeltaChannel)· `04-run-outer/01-graph-exec`(blackboard 数据流)· `03-api-contract`(RunResult 消费契约)· `03-compile-rules`(ERROR_REGISTRY 93 码)· `07-runtime`(public `__all__` surface 契约)
+[mvp1-alignment](./mvp1-alignment.md)(目标)· `02-mechanism/04-run-outer/03-checkpoint`(state 存储 / data delta reducer)· `05-run-inner/08-messages-state`(messages 通道 DeltaChannel)· `04-run-outer/01-graph-exec`(blackboard 数据流)· `03-api-contract`(RunResult 消费契约)· `03-compile-rules`(ERROR_REGISTRY 96 码 + catalog export)· `07-runtime`(public `__all__` surface 契约)

@@ -12,7 +12,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 # 09-inv-invocation-runtime — MVP1 Alignment(目标设计)
 
 > **Tier**：③b gateway 公共能力（纯调用运行时；已在 `packages/graph-agent-gateway` 包内，无判据反转）
-> **Owns**：拿一条已解析 `ResolvedRoute` + 原始 `BaseMessage`，用原生 LangChain ChatX 真正调模型，取回 `AIMessage`，再把 route metadata 注入结果并把 usage 喂给观测层；**不做** fallback 遍历 / probe / 熔断 / 截断升级重试（那些归 07 编排层）。
+> **Owns**：拿一条已解析 `ResolvedRoute` + 原始 `BaseMessage`，用原生 LangChain ChatX 真正调模型，取回 `AIMessage`，再把 route metadata 注入结果并把 usage 喂给观测层；**不做** fallback 遍历 / probe / 熔断。ChatX 主路径的 token escalation helper 位于 `gateway_chat_model.py`,策略归 07 编排层,本篇只记录 invoke bridge 如何被包住。
 > **Status**：设计定稿（2026-06 判据复核，归属表判 09=纯 ③b 不变）；代码 = ChatX invoke bridge 已落地，`RouteChatModelFactory` 负责 route → ChatX 构造，`ordinary_chat.py` 承接 generic ordinary-chat core；thinking blocks / usage metadata / DeepSeek replay 已在主路径覆盖，非标协议完整性仍 deferred。
 > **Related**：[[10-inv-route-chat-model-factory]]（`ResolvedRoute`→原生 ChatX 工厂，本模块的 invoke 用它构造模型）· [[11-inv-provider-profiles]]（provider 差异 init-kwargs 表）· [[07-orch-fallback-circuit-probe]]（fallback/probe/熔断/usage 归属/截断升级编排，与本模块共享 `gateway_chat_model.py`/`client_manager.py` 但各写各的步骤）· [[01-handoff-interface]]（`ResolvedRoute` 契约，调用层唯一输入）· [[04-orch-registry-schema]]（`ResolvedRoute`/`AIMessage` 字段权威源）
 > **决策日志**：client 层 A' 重设计决策（D1 方案 A' / D2 编排-调用分离 / M2 client_manager 5 件事拆解 / M3 `_generate` 逐步归属 / F3 截断升级 / F4 thinking / F5 usage-metadata）——完整逻辑 + PM 原话已留底于本文 §4（决策基础）/ §5（决策动机）/ §6（兼容性验证清单）；归属判据见 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`（§4 判 09 纯 ③b）
@@ -78,7 +78,7 @@ MVP1 目标：把「一条 route 的实际调用」从自研消息转换 + provi
 
 13. 截断 finish reason 后扩大 token budget 的策略已分层：官方 ChatX 主路径由 `GatewayChatModel._invoke_with_token_escalation` 包住 invoke，generic ordinary path 由 `ordinary_chat._call_with_token_escalation` 处理；不再挂在 `LLMClientManager` legacy helper 上。
 
-14. `GatewayChatModel._build_chat_result`（把 dict response 包成 LangChain `ChatResult` 的函数）的目标输入从 dict response 改为 ChatX `AIMessage`；现状函数构造 `AIMessage`、`ChatGeneration` 和 `ChatResult`，代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:313-357`。
+14. `GatewayChatModel._build_chat_result`（把 provider response 包成 LangChain `ChatResult` 的函数）当前同时支持 legacy dict response 和 ChatX `AIMessage`;AIMessage 分支委托 `_build_chat_result_from_ai_message`,代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:311-405`。
 
 15. `GatewayChatModel._build_chat_result` 的目标输出仍是 LangChain `ChatResult`；但 message content 应保留 ChatX 原始 content，包括 reasoning/thinking blocks，不能再通过 `_coerce_text`（把任意 content 强制转字符串的函数）强制变字符串，现状拍平点在 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:320-323` 和 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:645-646`。
 
@@ -118,13 +118,13 @@ MVP1 目标：把「一条 route 的实际调用」从自研消息转换 + provi
 
 **A' vs A（核心架构决策 D1）**：选择 A' 而不是 A 的原因是调用层要换成 ChatX，但 `GatewayChatModel` 不能删——fallback/probe/熔断/usage/event 都是编排职责，它们全部坐落在 `_generate` 内（熔断跳过 `gateway_chat_model.py:113` / probe `:115` / 异常分类 `:124,:238` / mark-down `:135,:249` / fallback event `:136,:250` / usage `:227` / metadata `:313-357`）。**被否的 A（激进版）**：resolver 直接裸返回原生 ChatX + 删 `GatewayChatModel` + 用 `with_fallbacks()`——会回归 fallback/probe/熔断/usage/metadata/predict，且 `with_fallbacks()` 只按异常类型、表达不了按 HTTP status 分类（对比 [[06-orch-error-classification]] 的真实分类语义）。判据证据：bug 本在调用层（消息转换）`_langchain_messages_to_dict`（`gateway_chat_model.py:661-692`）把带 tool_calls 的 `AIMessage(content="")` 转成 `{"content":""}` → 发出空 content → qiniu-anthropic `400 content must not be empty`；第八轮真机只用归一化后的 base_url 验证「调用层换 ChatX 修空-content bug」，从未跑编排、从未验证「删编排层」。
 
-把 `_call_*` 替换为 ChatX invoke 的原因（M2 client_manager 5 件事拆解）是旧代码把“消息转换 + provider 调用 + 输出解析”都手写在 client manager 中（`client_manager.py:440-1012`）；A' 只退役其中「消息转换 + provider 调用/解析」两件（由 ChatX.invoke = 转换+调用+解析三合一取代），**不整块删除 client manager**——它仍扛 probe 探活（`client_manager.py:371-438`）、熔断 provider-down TTL（`:340-368`）、usage 统计（`:310-333`）三件编排/观测职责。早期「弃用 client_manager」的措辞是错的。
+把 `_call_*` 替换为 ChatX invoke 的原因（M2 client_manager 5 件事拆解）是旧代码把“消息转换 + provider 调用 + 输出解析”都手写在 client manager 中；A' 只退役其中「消息转换 + provider 调用/解析」两件（由 ChatX.invoke = 转换+调用+解析三合一取代）。**不整块删除 client manager**——当前 `client_manager.py` 仍扛 probe 探活（`client_manager.py:316-383`）、熔断 provider-down TTL（`:286-313`）、usage 统计（`:256-268`）三件编排/观测职责；generic ordinary-chat provider core 则迁到 `ordinary_chat.py`。早期「弃用 client_manager」的措辞是错的。
 
-thinking 不拍平的原因（F4）是旧 `_coerce_text`（`gateway_chat_model.py:645-646`，把任意 content 拍成字符串）和 `_anthropic_content_text`（`client_manager.py:1296-1304`，只拼 Anthropic content 里 `type=="text"` 的文本）会丢 reasoning/thinking 结构；A' 要求取最终文本时保留 ChatX 的 content blocks，不再拍平。
+thinking 不拍平的原因（F4）是旧 dict/ordinary 结果桥接会经 `_coerce_text` 把任意 content 拍成字符串（当前 legacy dict 分支仍在 `gateway_chat_model.py:321-323` / `_coerce_text` 在 `gateway_chat_model.py:773-775`）；ChatX 主路径已通过 `_build_chat_result_from_ai_message` 使用 `response.model_copy(...)` 保留 ChatX 的 content blocks 与 provider metadata，见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:360-405`。
 
 usage metadata 的原因（F5）是 ChatX `AIMessage.usage_metadata` 已携带标准 usage 元数据；Gateway 仍需把 usage 归属到 endpoint/route 观测（喂 `record_usage`），并把 route_id/endpoint_id/canonical_id/protocol 注入 ChatX `AIMessage.response_metadata`（改 `_build_chat_result`，现状写法 `gateway_chat_model.py:313-357`），而不是重建全新 `AIMessage`（会覆盖 provider 自带 metadata、丢 content blocks）。
 
-截断升级重试搬家不删除的原因（F3）是 ChatX 本身不做截断 token 升级，而 error-handling 铁律第 7 条要求截断必须自动重试；因此 `_call_with_token_escalation`（`client_manager.py:990-1012`）从被退役的 `_call_*` 内迁出，包到 [[07-orch-fallback-circuit-probe]] 编排层的 ChatX invoke 外，不能随 dispatch 一起删。
+截断升级重试搬家不删除的原因（F3）是 ChatX 本身不做截断 token 升级，而 error-handling 铁律第 7 条要求截断必须自动重试；因此 ChatX 主路径用 `GatewayChatModel._invoke_with_token_escalation` 包住 factory build + invoke，见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:545-587`。generic ordinary path 的同类策略保留在 `ordinary_chat._call_with_token_escalation`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/ordinary_chat.py:653-673`。
 
 ## 6. 测试关键点
 
@@ -147,9 +147,9 @@ usage metadata 的原因（F5）是 ChatX `AIMessage.usage_metadata` 已携带�
 
 ## 8. gaps / 待设计(待办/疑点)
 
-1. ChatX 返回的 `AIMessage.usage_metadata` 字段名要和当前 `LLMClientManager.record_usage`（按端点累计 token）需要的 prompt/completion 维度对齐；旧 dict usage 解析在 `_usage_from_response`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:515-528`。
+1. ✅ 已处理:ChatX 返回的 `AIMessage.usage_metadata` 字段名已和当前 `LLMClientManager.record_usage`（按端点累计 token）需要的 prompt/completion 维度对齐；`_usage_from_ai_message` 同时识别 `input_tokens/output_tokens` 与 `prompt_tokens/completion_tokens`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:625-640`。
 
-2. ChatX `AIMessage.response_metadata` 注入 route metadata 时，应避免覆盖 provider 自带 metadata；当前 `_build_chat_result` 是**重建全新 `AIMessage`**（用 `_coerce_text(response.get("content"))` 重造 content + 全新 `response_metadata`），MVP1 应改成 augment ChatX 返回的 `AIMessage`，代码在 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:320-333`。
+2. ✅ 已处理:ChatX `AIMessage.response_metadata` 注入 route metadata 时已避免覆盖 provider 自带 metadata；`_build_chat_result_from_ai_message` 复制 provider metadata 后追加 route metadata,再 `model_copy` augment 原消息,见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:360-405`。
 
 3. `call_method_id` / `request_mapper_id` 当前仍是 verified invocation profile 语义遗留字段；MVP1 后续要决定它们由 [[10-inv-route-chat-model-factory]] 的 factory、[[11-inv-provider-profiles]] 的 provider profile，还是只由 ordinary-chat/generic path 消费（与 11 §8 待办 2 同一悬而未决项）。
 
@@ -162,24 +162,24 @@ usage metadata 的原因（F5）是 ChatX `AIMessage.usage_metadata` 已携带�
 | LangChain 输入 | 当前先转 dict，见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:104-107`。 | 保留 `BaseMessage`，由 ChatX 处理 provider-specific message serialization。 |
 | Provider 调用 | ChatX 主路径当前由 route → ChatX 工厂构造原生 ChatX，再执行 `.invoke()`；generic ordinary path 走 `ordinary_chat.dispatch_ordinary_chat`。 | 后续只补非标 protocol 完整性，不再把 `LLMClientManager` helper 当现状。 |
 | Tool loop | 当前 `AIMessage.tool_calls` 转 dict 时 arguments 固定 `"{}"`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:676-687`。 | ChatX 直接消费 LangChain tool call message，避免手写转换丢结构。 |
-| Thinking | 当前 `_anthropic_content_text` 只保留 text blocks，见 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:1296-1304`。 | 保留 ChatX `AIMessage.content` 的 block 结构，reasoning/thinking 不拍平成普通字符串。 |
+| Thinking | legacy dict 分支仍会经 `_coerce_text` 拍平成字符串，见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:321-323` 和 `gateway_chat_model.py:773-775`。 | ChatX 主路径已通过 `_build_chat_result_from_ai_message` 保留 `AIMessage.content` block 结构和 provider metadata。 |
 | Usage | 当前从旧 response dict 的 `"usage"` 读取，见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:515-528`。 | 从 ChatX `AIMessage.usage_metadata` 读取，并注入 response metadata / llm_output。 |
 | Route metadata | 当前 `_build_chat_result` 已写 route metadata，见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:323-356`。 | 保留并迁移到对 ChatX `AIMessage` 的 augment，而不是重建丢内容的 message。 |
-| 截断升级 | 当前在 `LLMClientManager._call_with_token_escalation`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:990-1012`。 | 由 07 编排层包住 ChatX invoke，09 不重复实现。 |
+| 截断升级 | ChatX 主路径在 `GatewayChatModel._invoke_with_token_escalation`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:545-587`;generic ordinary path 在 `ordinary_chat._call_with_token_escalation`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/ordinary_chat.py:653-673`。 | 策略归 07 编排层；09 只记录 invoke bridge 被包住,不重复定义 fallback/probe/circuit。 |
 | SDK client cache | 当前 `_get_*_client` 创建并缓存 SDK client，见 `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:144-295`。 | probe 可继续用轻量 client path；真实 invoke 的 client 由 ChatX/factory 管。 |
 
 ## 覆盖率
 
-本 alignment 覆盖 09 brief 的全部要求：`gateway_chat_model.py:_build_chat_result`、调用桥接、`client_manager.py:_call_*` / `_call_with_token_escalation`、`models.py` 均已落到真实 `file:line`。07 的 fallback/probe/mark_down/event/usage 归属只交叉引用，不在本篇重复展开。
+本 alignment 覆盖 09 brief 的全部要求：`gateway_chat_model.py:_dispatch/_invoke_with_token_escalation/_build_chat_result/_build_chat_result_from_ai_message`、`ordinary_chat.py:dispatch_ordinary_chat/_call_*`、`models.py:GenericRouteChatModel` 均已落到真实 `file:line`。07 的 fallback/probe/mark_down/event/usage 归属只交叉引用，不在本篇重复展开。
 
 ## 代码索引 clues
 
-- `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:104-107`：MVP1 要替换的旧输入准备点。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:313-357`：MVP1 要改造的结果桥接点。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:661-707`：MVP1 要退出真实调用 path 的消息 dict 转换。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:105-108`：当前 system prompt prefix 合并入口，已保留 `BaseMessage` 结构。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:311-405`：当前结果桥接点，dict legacy 分支与 ChatX `AIMessage` augment 分支并存。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:789-859`：旧消息 dict 转换 helper，已退出真实 ChatX 主路径。
 - `packages/graph-agent-gateway/src/graph_agent_gateway/route_chat_model_factory.py`：route → ChatX 工厂，官方 ChatX 主路径构造入口。
 - `packages/graph-agent-gateway/src/graph_agent_gateway/ordinary_chat.py`：普通 chat core 与 `GenericRouteChatModel` 默认 dispatcher。
-- `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py`：ChatX invoke bridge、结果桥接与 ChatX token escalation。
+- `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:522-587`：ChatX invoke bridge 与 ChatX token escalation。
 - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:415-439`：调用层输入 `ResolvedRoute` 的字段。
 - `packages/graph-agent-gateway/src/graph_agent_gateway/models.py:24-301`：`GenericRouteChatModel` 通用 route wrapper。
 

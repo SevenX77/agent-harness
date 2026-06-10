@@ -36,6 +36,7 @@ from claude_agent_sdk.types import (
 from graph_agent_gateway.registry.contracts import CredentialProviderProtocol
 from graph_agent_gateway.registry.credentials import EndpointCredentialProvider
 from graph_agent_gateway.registry.schema import ResolvedRoute
+from graph_agent_gateway.resolver import ModelResolver
 from pydantic import SecretStr
 
 from app.models.copilot import (
@@ -419,22 +420,22 @@ def _tool_result_summary(content: str | list[dict[str, Any]] | None) -> str:
 def _resolve_copilot_runtime(
     model_override: str | None,
 ) -> tuple[list[ResolvedRoute], CredentialProviderProtocol]:
-    from graph_agent_gateway.registry.resolver import resolve_role
-
     credentials = load_credentials()
     credential_provider = EndpointCredentialProvider(credentials.provider_endpoints)
     active_roles_path = default_roles_path()
     roles = load_roles_file(active_roles_path) if active_roles_path.exists() else RolesData()
     snapshot = roles.to_registry_snapshot(credentials)
-    resolved = resolve_role(
-        snapshot,
+    resolver = ModelResolver(
+        registry_snapshot=snapshot,
+        credential_provider=credential_provider,
+    )
+    resolved = resolver.resolve_routes(
         "copilot_chat",
         route_override=model_override,
-        credential_provider=credential_provider,
     )
     if not resolved.routes:
         raise ValueError("copilot_chat role 无可用 route")
-    return list(resolved.routes), credential_provider
+    return list(resolved.routes), resolver.credential_provider
 
 
 def _resolve_copilot_routes(model_override: str | None) -> list[ResolvedRoute]:

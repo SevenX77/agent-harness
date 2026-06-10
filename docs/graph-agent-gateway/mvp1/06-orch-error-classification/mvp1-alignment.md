@@ -12,7 +12,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 > **Tier**：③b gateway 公共能力内核（`registry/error_classification.py` 已在包内；**纯 ③b，本轮无反转**）
 > **Owns**：把 HTTP 状态码 / provider error payload / 异常链映射成"该 **retry** 同 route / 该 **fallback** 下一 route / 该 **fail request**"的结构化分类；产出 legacy `decision`（旧 fallback loop 消费）+ v1.1 `action/scope`（细粒度）；**不调模型、不持状态**
-> **Status**：设计定稿（MVP1 **不改分类语义**，只纠正多处历史文档"401/403/404 → fail-fast"的过时简写）；代码 = 不动，A' 换 ChatX 后补确定性测试确认 ChatX 异常仍可被 `_status_code`/`_provider_error_payload`/`_exception_chain` 识别
+> **Status**：设计定稿（MVP1 **不改分类语义**，只纠正多处历史文档"401/403/404 → fail-fast"的过时简写）；代码 = 分类器语义不动，A' ChatX 迁移后的确定性测试已覆盖 fake 401 / wrapped network / 400 non-capability 以及真实 OpenAI SDK error shape，确认 `_status_code`/`_provider_error_payload`/`_exception_chain` 仍可识别
 > **Related**：[[07-orch-fallback-circuit-probe]]（fallback loop 消费 `decision`）· [[02-orch-role-resolution]]（过滤后空链 vs 运行期全失败的边界）· [[09-inv-invocation-runtime]]（ChatX invoke 抛的异常进本分类器）· [[13-x-tracing-events-exceptions]]（`AllProvidersFailedError`/fallback event）
 > **决策日志**：client 层 A' 重设计决策 M5（真实语义表，纠正 401/403/404）+ D1（保留 `GatewayChatModel` 编排壳）——完整逻辑 + PM 原话见本文 §4 / §5（决策记录系临时任务文档，已不复引用，内容在本文留底）
 > **现状**：见同目录 `baseline.md`
@@ -111,7 +111,7 @@ MVP1 目标**不是重写错误分类**，而是在调用层 A' 迁移到原生 
 - **429 / 5xx / 网络错 → retry(`fallback_allowed`)**：429→`bucket`、500/502/503/504/529→`endpoint`、ConnectError/Timeout→`route`+`retryable=True`。
 - **未知异常 → `fail_fast_with_route_context`**：无 status、无可识别 payload → `unclassified_default=True` → 映射 `fail_fast_with_route_context`（带 route context 暴露，不静默 fallback）。
 - **200 后 SSE 断流 → fallback/stream**：`stream_phase=="after_200_sse"` → `fallback_route`/`stream`（优先于普通状态码分支）。
-- **A' 异常识别兼容（换 ChatX 后必补）**：ChatX/SDK 抛的 401、400-unsupported、400-non-capability、413、422、wrapped network error 都仍被 `_status_code`/`_provider_error_payload`/`_exception_chain` 正确识别 → 仍走上表（依据 = A' 验证清单头号风险，PM 原话见 §4「A' 验证清单」）。
+- **A' 异常识别兼容（换 ChatX 后已补核心回归）**：ChatX/SDK 抛的 fake 401、wrapped network、400 non-capability，以及真实 OpenAI `AuthenticationError` / `BadRequestError` shape 已有确定性测试；后续如接入新 SDK error shape，仍按 `_status_code`/`_provider_error_payload`/`_exception_chain` 扩展测试，不改 §2.1 语义。
 - **瞬时重试耗尽后仍可分类**：ChatX 有界瞬时重试（F2）耗尽后抛出的异常进 `classify_exception` 仍产出正确 decision（同 route retry 与跨 route fallback 不混）。
 
 ## 7. 涉及 region / platform
@@ -125,7 +125,7 @@ MVP1 目标**不是重写错误分类**，而是在调用层 A' 迁移到原生 
 
 > 保留原"待办/疑点"全部条目。
 
-- **待办（原 #1）**：A' 引入 ChatX 后，需新增或保留 fake exception 测试，确认 ChatX 的 401、400 unsupported、400 non-capability、413、422、wrapped network error 都仍走 §2.1 表格（依据 = A' 验证清单头号风险，PM 原话见 §4「A' 验证清单」）。
+- **已落地（原 #1）**：A' 引入 ChatX 后的核心确定性测试已新增/保留，确认 fake 401、wrapped network、400 non-capability 与真实 OpenAI SDK 401/400 error shape 仍走 §2.1 表格；剩余工作是未来接入新 provider SDK 形态时继续补同类回归。
 - **疑点（原 #2）**：若 ChatX/provider SDK 的错误对象不暴露 `response.json()` 或 `status_code`，需在调用适配层保留可分类上下文，但**不应改变 06 的目标语义**（`registry/error_classification.py:223-269`）。
 - **疑点（原 baseline #2）**：当前 capability 400 识别依赖字符串 marker（unsupported/not supported/unknown parameter/invalid model/model not found）；若 provider 返回本地化或新字段，可能需扩展 marker，但 MVP1 不应改现有分类语义（`registry/error_classification.py:272-290`）。
 
@@ -137,8 +137,9 @@ MVP1 目标**不是重写错误分类**，而是在调用层 A' 迁移到原生 
 2. **已实现**：capability 400 通过 provider error type/message marker 识别后 fallback；非 capability 400 与 413/422 仍 fail request（`registry/error_classification.py:155-178`，`:272-290`）。
 3. **已实现**：未知异常设置 `unclassified_default=True`，经 `classify_exception` 映射为 `fail_fast_with_route_context`（`registry/error_classification.py:179-188`，`:85-98`）。
 4. **已实现**：测试已覆盖 401/402 fallback、413 fail_fast、未知 fail_fast_with_route_context、provider status_code 404 fallback、wrapped network fallback、stream after 200 fallback、400 unsupported fallback（`packages/graph-agent-gateway/tests/test_registry_error_classification.py:8-105`）。
-5. **与 baseline 差异**：MVP1 不改分类模块，只要求调用层 A' 迁移后继续把 ChatX 抛出的异常送进同一个分类器（依据 = M5 真实语义表，见 §4「真实语义纠正」+ §2.1 表）。
-6. **与旧文档差异**：旧句子把 401/403/404 写成 fail fast，与当前源码和 M5 真实语义冲突；本模块以源码 `registry/error_classification.py:15-17`/`:133-188` + 本文 §2.1/§4 留底为准。
+5. **已实现**：调用层 A' / ChatX 路径的异常分类回归已覆盖 fake retry exhaustion 401、wrapped network、400 non-capability，以及真实 OpenAI SDK `AuthenticationError` / `BadRequestError` shape（`packages/graph-agent-gateway/tests/test_chatx_invocation_runtime.py`）。
+6. **与 baseline 差异**：MVP1 不改分类模块，只要求调用层 A' 迁移后继续把 ChatX 抛出的异常送进同一个分类器（依据 = M5 真实语义表，见 §4「真实语义纠正」+ §2.1 表）。
+7. **与旧文档差异**：旧句子把 401/403/404 写成 fail fast，与当前源码和 M5 真实语义冲突；本模块以源码 `registry/error_classification.py:15-17`/`:133-188` + 本文 §2.1/§4 留底为准。
 
 ## 覆盖率
 
@@ -159,7 +160,7 @@ MVP1 目标**不是重写错误分类**，而是在调用层 A' 迁移到原生 
 - `registry/error_classification.py:223-301` — status/payload/capability marker/exception chain helpers。
 - `gateway_chat_model.py:123-152` — probe 异常分类和 fallback event 使用点。
 - `gateway_chat_model.py:237-255` — dispatch 异常分类和 fallback event 使用点。
-- `client_manager.py:407` / `client_manager.py:433` — route probe 复用分类器判断是否继续。
+- `client_manager.py:352-354` / `client_manager.py:378-380` — route probe 复用分类器判断是否继续。
 - `packages/graph-agent-gateway/tests/test_registry_error_classification.py:25-54` — 测试保护 401/402 fallback、413 fail_fast、unknown route context。
 - `packages/graph-agent-gateway/tests/test_registry_error_classification.py:82-105` — 测试保护 stream fallback 和 capability 400 fallback。
 

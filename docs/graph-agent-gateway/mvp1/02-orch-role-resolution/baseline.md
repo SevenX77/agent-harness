@@ -24,7 +24,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 | `services/gateway_resolver.py:build_gateway_model_resolver`(用途:从 Studio v4 credentials + v2/v3 roles 构造 gateway resolver) | `apps/studio/backend/app/services/gateway_resolver.py:15-21` | 覆盖 Studio→Gateway 装配入口。 |
 | `services/llm_role_materializer.py:materialize_role`(用途:把 Studio Role 的 model groups 投影成 gateway `fallback_chain`) | `apps/studio/backend/app/services/llm_role_materializer.py:27-96` | 覆盖 authoring 顺序、状态投影、跳过报告、runtime settings 写入。**判据归属:意图过滤/降级/排链/role-fit 诊断 = ③b 编排内核(现散 ③a 待下沉),report 渲染留 ③a;详见 `mvp1-alignment.md`。** |
 
-辅助证据:`test_gateway_resolver_bridge_builds_snapshot_without_env_patch`(用途:验证 Studio 文件数据能构造 gateway resolver)见 `apps/studio/backend/tests/services/test_gateway_resolver_bridge.py:19-70`;`test_put_role_v3_skips_needs_setup_and_off_provider_models`(用途:验证 materializer 会跳过未配置/关闭模型)见 `apps/studio/backend/tests/routers/test_llm_role_materializer_api.py:91-142`。
+辅助证据:`test_gateway_resolver_bridge_builds_snapshot_without_env_patch`(用途:验证 Studio 文件数据能构造 gateway resolver)见 `apps/studio/backend/tests/services/test_gateway_resolver_bridge.py:19-70`;`test_put_role_v3_skips_failed_and_off_provider_models`(用途:验证 materializer 会跳过失败/关闭模型)见 `apps/studio/backend/tests/routers/test_llm_role_materializer_api.py:91-142`。
 
 ## 编号执行流程
 
@@ -34,9 +34,9 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 3. `materialize_role`(用途:把 Studio Role authoring 投影成 gateway fallback chain)会跳过找不到 route、找不到 endpoint、拿不到状态投影的 provider model,但这些分支当前是 silent continue,不写入 warning/report,见 `apps/studio/backend/app/services/llm_role_materializer.py:42-50`。
 
-4. `_projection`(用途:把 route + endpoint + durable circuit 转成 UI/runtime 状态投影)读取健康库的 active circuits,再调用 `project_provider_model_state` 生成 `ready/untested/cooling_down/needs_setup/off` 等状态,见 `apps/studio/backend/app/services/llm_role_materializer.py:131-154`。
+4. `_projection`(用途:把 route + endpoint + durable circuit 转成 UI/runtime 状态投影)读取健康库的 active circuits,再调用 `project_provider_model_state` 生成 `ready/historical_ready/untested/failed/cooling_down/off` 六态,见 `apps/studio/backend/app/services/llm_role_materializer.py:131-154`。
 
-5. `materialize_role`(用途:把 Studio Role authoring 投影成 gateway fallback chain)遇到 `needs_setup` 或 `off` 会把 route 写进 `skipped_provider_details`,并继续看下一条,见 `apps/studio/backend/app/services/llm_role_materializer.py:51-59`;这条行为被 `test_put_role_v3_skips_needs_setup_and_off_provider_models` 覆盖,见 `apps/studio/backend/tests/routers/test_llm_role_materializer_api.py:131-142`。
+5. `materialize_role`(用途:把 Studio Role authoring 投影成 gateway fallback chain)遇到 `failed` 或 `off` 会把 route 写进 `skipped_provider_details`,并继续看下一条;`cooling_down` 会保留在链上但写 warning,见 `apps/studio/backend/app/services/llm_role_materializer.py:51-59`;这条行为被 `test_put_role_v3_skips_failed_and_off_provider_models` 覆盖,见 `apps/studio/backend/tests/routers/test_llm_role_materializer_api.py:131-142`。
 
 6. `_apply_intent`(用途:按 Role/Model Group 的 thinking 与 token 意图决定 route 是否适合执行)会在 thinking required 但能力未知时返回 `needs_test`,在 thinking unsupported 或 token block 时返回 `not_fit`,见 `apps/studio/backend/app/services/llm_role_materializer.py:157-208`。
 
@@ -78,7 +78,7 @@ aligns_with: ../README.md · ../DESIGN_UNITS_INDEX.md
 
 当前 baseline 与 alignment 的主要差异已收敛:runtime 核心 `resolve_role` 已具备普通链 skip、skipped diagnostics、过滤后空链配置错误、override fail-fast、lint skip 语义;`ModelResolver` 也已新增 route 级 `resolve_routes` API。
 
-剩余差异在接线和边界清理:Copilot/LLM registry response 仍直接调用 pure `resolve_role`,尚未统一改走 `ModelResolver.resolve_routes`;旧 `resolve(model_override=...)` 命名仍保留,全局改名为 `route_override` 属后续清理。
+剩余差异在边界清理:Copilot/LLM registry response 已统一改走 `ModelResolver.resolve_routes`;旧 `resolve(model_override=...)` 命名仍保留,全局改名为 `route_override` 属后续清理。
 
 ## 决策原因
 
@@ -98,7 +98,7 @@ runtime 跳过语义已经下沉到 `resolve_role`,原因是 save 解耦后 role
 - `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:71-153`: `ModelResolver.resolve` 与 `ModelResolver.resolve_routes` 分别是 role 级 chat model API 和 route 级 handoff API。
 - `apps/studio/backend/app/services/gateway_resolver.py:15-21`: `build_gateway_model_resolver`(用途:从 Studio v4 credentials + v2/v3 roles 构造 gateway resolver)是 Studio backend 接入点。
 - `apps/studio/backend/app/services/llm_role_materializer.py:27-96`: `materialize_role`(用途:把 Studio Role authoring 投影成 gateway fallback chain)是 authoring→runtime chain 的投影入口。
-- `apps/studio/backend/app/services/copilot.py:419-437`: `_resolve_copilot_runtime`(用途:解析 `copilot_chat` role 并返回 routes + credential provider)已经把 role→route 用作 Copilot 内部交接。
+- `apps/studio/backend/app/services/copilot.py:_resolve_copilot_runtime`: 解析 `copilot_chat` role 并返回 routes + credential provider，已通过 `ModelResolver.resolve_routes` 把 role→route 用作 Copilot 内部交接。
 
 ## 待办/疑点
 
@@ -110,4 +110,4 @@ runtime 跳过语义已经下沉到 `resolve_role`,原因是 save 解耦后 role
 
 4. 已落地:`ModelResolver.resolve` 中空链 `AllProvidersFailedError` 后置分支已删除;空链现在由 `resolve_role` 抛 `RegistryResolutionError`,role 级 `resolve()` 再映射成 `GatewayRoleNotConfiguredError`。
 
-5. 后续:Copilot/LLM registry response/Engine route 级消费方尚未统一接线到 `ModelResolver.resolve_routes`;当前仍可直接 import pure `resolve_role`,但语义已经一致。
+5. 已落地:Copilot/LLM registry response 已统一接线到 `ModelResolver.resolve_routes`;Engine 仍保留 role 级 `resolve()` 兼容入口。

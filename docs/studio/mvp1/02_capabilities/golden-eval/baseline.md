@@ -49,5 +49,10 @@ units: [golden-per-agent-node]
 
 > 旧 Coverage/Drift 暂存 [`_migrated-coverage-drift.md`](../../_migrated-coverage-drift.md#02-capabilities-golden-eval)（迁移期安全网，代码实现验证后删）。
 
+## WS-6 Studio-only Closeout Update
+
+- **Manual Per-Node Golden Drafts**: Live. Users can now save manual per-node golden expected output drafts. Predict-source golden saves are strictly guarded and rejected with 409 `PREDICT_TRACE_CANNOT_BE_GOLDEN`.
+- **Deferred Items**: Engine exact per-node golden layout and actual-vs-golden run artifact diff remain deferred.
+
 ## 交叉引用（链接, 不复制）
 [alignment](./mvp1-alignment.md)（目标,双向）· `predict` · `run-execution` · `input` · `assets` · `editor` · `copilot-assist` · `engine`

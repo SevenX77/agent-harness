@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -16,7 +16,11 @@ class ProviderProfile:
     init_kwargs_factory: Callable[[Any], Mapping[str, Any] | None] | None = None
 
 
-_PROVIDER_PROFILES: dict[str, ProviderProfile] = {}
+_DEFAULT_PROVIDER_PROFILES: dict[str, ProviderProfile] = {
+    "protocol:openai_compatible": ProviderProfile(init_kwargs={"stream_usage": True}),
+    "protocol:ark_runtime": ProviderProfile(init_kwargs={"stream_usage": True}),
+}
+_PROVIDER_PROFILES: dict[str, ProviderProfile] = dict(_DEFAULT_PROVIDER_PROFILES)
 
 
 def register_provider_profile(key: str, profile: ProviderProfile) -> None:
@@ -44,6 +48,35 @@ def get_provider_profile(spec: str) -> ProviderProfile | None:
     return _merge_profiles(provider_profile, exact_profile)
 
 
+def route_provider_profile_keys(route: Any) -> tuple[str, str, str]:
+    """Return profile overlay keys for a resolved route."""
+
+    return (
+        f"protocol:{route.protocol}",
+        f"endpoint:{route.endpoint_id}",
+        f"endpoint:{route.endpoint_id}:model:{route.provider_model_id}",
+    )
+
+
+def apply_provider_profile_layers(
+    specs: Iterable[str],
+    *,
+    route: Any = None,
+    **caller_kwargs: Any,
+) -> dict[str, Any]:
+    """Apply profile overlays in order with caller kwargs taking final precedence."""
+
+    profile: ProviderProfile | None = None
+    for spec in specs:
+        layer = _PROVIDER_PROFILES.get(_normalize_key(spec))
+        if layer is None:
+            continue
+        profile = layer if profile is None else _merge_profiles(profile, layer)
+    if profile is None:
+        return dict(caller_kwargs)
+    return _apply_profile(profile, route=route, caller_kwargs=caller_kwargs)
+
+
 def apply_provider_profile(
     spec: str,
     *,
@@ -55,7 +88,15 @@ def apply_provider_profile(
     profile = get_provider_profile(spec)
     if profile is None:
         return dict(caller_kwargs)
+    return _apply_profile(profile, route=route, caller_kwargs=caller_kwargs)
 
+
+def _apply_profile(
+    profile: ProviderProfile,
+    *,
+    route: Any = None,
+    caller_kwargs: Mapping[str, Any],
+) -> dict[str, Any]:
     merged: dict[str, Any] = {}
     if profile.pre_init is not None:
         pre_init_kwargs = profile.pre_init(route)
@@ -66,7 +107,7 @@ def apply_provider_profile(
         factory_kwargs = profile.init_kwargs_factory(route)
         if factory_kwargs:
             merged.update(dict(factory_kwargs))
-    merged.update(caller_kwargs)
+    merged.update(dict(caller_kwargs))
     return merged
 
 

@@ -26,10 +26,10 @@ def canonicalize_model(
     explicit_aliases: dict[str, str] | None = None,
 ) -> CanonicalModel:
     """Map a provider model ID to a conservative execution grouping key."""
-    del endpoint_id
     aliases = explicit_aliases or {}
-    if provider_model_id in aliases:
-        canonical = _slug(aliases[provider_model_id])
+    alias = aliases.get(f"{endpoint_id}:{provider_model_id}") or aliases.get(provider_model_id)
+    if alias:
+        canonical = _slug(alias)
         return CanonicalModel(
             canonical_id=canonical,
             confidence="explicit_alias",

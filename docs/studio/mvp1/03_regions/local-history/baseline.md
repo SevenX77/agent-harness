@@ -55,5 +55,10 @@ units: [local-history-snapshot]
 
 > 旧 Coverage/Drift 暂存 [`_migrated-coverage-drift.md`](../../_migrated-coverage-drift.md#03-regions-local-history)（迁移期安全网，代码实现验证后删）。
 
+## WS-6 Studio-only Closeout Update
+
+- **Publish Record Visibility**: Live. Publish history entries are visible in the local history panel.
+- **Deferred Items**: Run detail integration and engine run artifact diff ownership remain deferred.
+
 ## 交叉引用（链接, 不复制）
 [alignment](./mvp1-alignment.md)（目标,双向）· `publish` · `native-fs` · `timeline`

@@ -6,6 +6,8 @@ from typing import Any, Protocol, runtime_checkable
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from graph_agent_gateway.registry.schema import ResolvedRole
+
 
 @runtime_checkable
 class PredictContext(Protocol):
@@ -37,3 +39,11 @@ class ModelResolverProtocol(Protocol):
         **kwargs: Any,
     ) -> BaseChatModel:
         """Return a LangChain-compatible chat model for one phase."""
+
+    def resolve_routes(
+        self,
+        role_name: str,
+        *,
+        route_override: str | None = None,
+    ) -> ResolvedRole:
+        """Resolve registry configuration to an ordered route chain."""

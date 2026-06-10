@@ -11,10 +11,7 @@ from typing import Any
 import yaml
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from graph_agent_gateway.exceptions import (
-    AllProvidersFailedError,
-    GatewayRoleNotConfiguredError,
-)
+from graph_agent_gateway.exceptions import GatewayRoleNotConfiguredError
 from graph_agent_gateway.gateway_chat_model import GatewayChatModel
 from graph_agent_gateway.protocol import PredictContext
 from graph_agent_gateway.registry.contracts import CredentialProviderProtocol
@@ -25,6 +22,7 @@ from graph_agent_gateway.registry.credentials import (
 from graph_agent_gateway.registry.resolver import RegistryResolutionError, resolve_role
 from graph_agent_gateway.registry.schema import (
     RegistrySnapshot,
+    ResolvedRole,
     RoleEntry,
     RoleRouteEntry,
     RuntimePolicy,
@@ -101,12 +99,6 @@ class ModelResolver:
                 role_name=role_name,
                 model_override=model_override,
             ) from exc
-        if not resolved.routes:
-            raise AllProvidersFailedError(
-                resolved.role_name,
-                [],
-                phase_name=phase_name or "<gateway>",
-            )
 
         first_route = resolved.routes[0]
         max_tokens = _effective_int(first_route, "max_output_tokens", 4096)
@@ -143,6 +135,21 @@ class ModelResolver:
             client_manager=self.client_manager,
             credential_provider=self.credential_provider,
             name=first_route.provider_model_id,
+        )
+
+    def resolve_routes(
+        self,
+        role_name: str,
+        *,
+        route_override: str | None = None,
+    ) -> ResolvedRole:
+        with self._stats_lock:
+            self.stats.total_resolves += 1
+        return resolve_role(
+            self.registry_snapshot,
+            role_name,
+            route_override=route_override,
+            credential_provider=self.credential_provider,
         )
 
     def mark_provider_down(self, route_id: str) -> None:

@@ -46,7 +46,6 @@ def _role(routes: Sequence[Any], *, token_escalation_rounds: int = 0):
 
 class RecordingManager:
     def __init__(self) -> None:
-        self.dispatches: list[dict[str, object]] = []
         self.marked_down: list[str] = []
         self.usage_records: list[tuple[str, int, int]] = []
 
@@ -55,19 +54,6 @@ class RecordingManager:
 
     def probe_provider(self, route: Any, runtime_policy: Any, **kwargs: Any) -> bool:
         return True
-
-    def dispatch_provider_call(
-        self,
-        route: Any,
-        messages: list[dict[str, Any]],
-        **kwargs: Any,
-    ) -> dict[str, object]:
-        self.dispatches.append({"route": route, "messages": messages, "kwargs": kwargs})
-        return {
-            "content": "legacy-dispatch",
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-            "finish_reason": "stop",
-        }
 
     def mark_provider_down(self, route: Any, exc: BaseException, runtime_policy: Any) -> None:
         self.marked_down.append(route.route_id)

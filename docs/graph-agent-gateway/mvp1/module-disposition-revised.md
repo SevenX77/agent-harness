@@ -32,7 +32,7 @@ PM 第四轮校准后：这些的**能力内核恰是 ③b 公共**（gateway �
 
 | 模块 / 能力 | 原 review 判定 | 新判定 | 处置 |
 |---|---|---|---|
-| 01 handoff route 契约 | ③b ✓ | ③b 公共 | 留 gateway；**补 route 级直调 public API** |
+| 01 handoff route 契约 | ③b ✓ | ③b 公共 | 留 gateway；route 级直调 public API 已落地,公共门面导出和下游接线后续收敛 |
 | 02 `resolve_role` 路线解析 | ③b | ③b 公共 | 留 gateway |
 | 02 materialize（`llm_role_materializer`） | ③a 应搬 studio ❌ | **③b 公共**（编排内核）+ ③a（report 渲染） | 编排内核下沉 gateway；report 渲染留 studio |
 | 03 凭证/端点 schema+读写+base_url 归一化 | ③b（seam） | ③b 公共 | 留 gateway；存储介质留 studio 注入 |
@@ -50,8 +50,8 @@ PM 第四轮校准后：这些的**能力内核恰是 ③b 公共**（gateway �
 | 08 6 态投影（`state_projection`） | ③a 全搬 ❌ | **③b 公共**（标准总结） | 下沉 gateway；颜色渲染留前端 |
 | 08 draft + 证据库（`import_drafts`） | ③a 全搬 ❌ | **③b 公共**（知识库）+ ③a（import/apply 工作流） | 知识库下沉 gateway；import UI 留 studio；**远端源选择/配置留 ③a** |
 | 09 invocation runtime | ③b ✓ | ③b 公共 | 留 gateway |
-| 10 route-chat-model 工厂 | ③b（新建） | ③b 公共 | 留 gateway（新建） |
-| 11 provider profiles | ③b（新建） | ③b 公共 | 留 gateway（新建） |
+| 10 route-chat-model 工厂 | ③b（新建） | ③b 公共 | 留 gateway（WS-1 后源码已存在） |
+| 11 provider profiles | ③b（新建） | ③b 公共 | 留 gateway（WS-1 后源码已存在） |
 | 12 copilot（`copilot.py` SDK 调用） | ③a 全搬/降 stub | ③a 应用（实际调用方式） | **模块 12 移除**（copilot=③a，不构成 gateway 模块）；gateway 只给 `copilot_chat` route（并入 01）；SDK 调用文档 → studio `02_capabilities/copilot-assist/` + `00_settings-ux-spec.md` §3.8 |
 | 13 tracing / events / exceptions | ③b ✓ | ③b 公共 | 留 gateway |
 | 14 routers（HTTP `/api/llm`·`/api/copilot`） | ③a | ③a 应用（薄壳/适配） | **模块 14 移交 studio** `04_platform/llm-copilot-http-api/`（③a HTTP 适配壳） |

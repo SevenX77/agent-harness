@@ -1263,6 +1263,9 @@ def _build_skill_node(
                         "messages": state["messages"],
                     },
                     config=cast(RunnableConfig, inner_config),
+                    # Nested AGENT invokes share the outer checkpointer; sync writes
+                    # avoid LangGraph async checkpoint futures waiting on each other.
+                    durability="sync",
                 )  # type: ignore[call-overload]
             except GraphRecursionError:
                 state_config = dict(inner_config)

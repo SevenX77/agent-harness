@@ -212,11 +212,13 @@ def test_live_agent_assembly_passes_tail_slots_to_create_agent(
     )
 
     names = [type(middleware).__name__ for middleware in captured["middleware"]]
-    assert names[-3:] == [
+    tracing_index = names.index("TracingMiddleware")
+    assert names[tracing_index : tracing_index + 3] == [
         "TracingMiddleware",
         "ToolErrorHandlingMiddleware",
         "LoopDetectionMiddleware",
     ]
+    assert names[tracing_index + 3] == "ExitControlMiddleware"
 
 
 def _write(path: Path, text: str) -> None:

@@ -18,6 +18,10 @@ logger = logging.getLogger(__name__)
 _MAX_FILE_SIZE_BYTES = 200_000
 
 
+class RuntimeInputFileError(ValueError):
+    """Stable runtime error for declarative workspace file inputs."""
+
+
 def _clean_path(path: str) -> str:
     cleaned = str(path or "").strip().replace("\\", "/")
     while cleaned.startswith("./"):
@@ -62,6 +66,72 @@ def make_read_file_tool(
         "(e.g. 'references/01_role.md' or '01_role.md')"
     )
     return read_file
+
+
+def read_workspace_text_file(path: str, workspace_dir: Path) -> str:
+    """Read a declared runtime input file from ``workspace_dir`` as UTF-8 text."""
+    raw_path = str(path or "").strip().replace("\\", "/")
+    if not raw_path:
+        raise RuntimeInputFileError("file input path is empty")
+    if Path(raw_path).is_absolute():
+        raise RuntimeInputFileError(
+            f"file input path {raw_path!r} escapes workspace_dir: absolute paths are not allowed"
+        )
+
+    workspace_root = Path(workspace_dir).resolve()
+    target = _resolve_workspace_text_target(raw_path, workspace_root)
+    return _read_utf8_text_target(target, raw_path)
+
+
+def _resolve_workspace_text_target(raw_path: str, workspace_root: Path) -> Path:
+    candidate = (workspace_root / raw_path).resolve(strict=False)
+    _ensure_under_workspace(candidate, workspace_root, raw_path)
+
+    if not candidate.exists():
+        raise RuntimeInputFileError(f"file input {raw_path!r} not found")
+
+    target = candidate.resolve()
+    _ensure_under_workspace(target, workspace_root, raw_path)
+    if target.is_dir():
+        raise RuntimeInputFileError(f"file input {raw_path!r} is a directory")
+    if not target.is_file():
+        raise RuntimeInputFileError(f"file input {raw_path!r} is not a file")
+    return target
+
+
+def _ensure_under_workspace(candidate: Path, workspace_root: Path, raw_path: str) -> None:
+    try:
+        candidate.relative_to(workspace_root)
+    except ValueError as exc:
+        raise RuntimeInputFileError(
+            f"file input path {raw_path!r} escapes workspace_dir"
+        ) from exc
+
+
+def _read_utf8_text_target(target: Path, raw_path: str) -> str:
+    try:
+        file_size = target.stat().st_size
+    except OSError as exc:
+        raise RuntimeInputFileError(f"file input {raw_path!r} could not be stat'ed") from exc
+    if file_size > _MAX_FILE_SIZE_BYTES:
+        raise RuntimeInputFileError(
+            f"file input {raw_path!r} is too large "
+            f"({file_size} bytes > {_MAX_FILE_SIZE_BYTES})"
+        )
+
+    try:
+        data = target.read_bytes()
+    except OSError as exc:
+        raise RuntimeInputFileError(f"file input {raw_path!r} could not be read") from exc
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise RuntimeInputFileError(
+            f"file input {raw_path!r} is binary or non-text"
+        ) from exc
+    if "\x00" in text:
+        raise RuntimeInputFileError(f"file input {raw_path!r} is binary or non-text")
+    return text
 
 
 def _allowed_reference_paths(
@@ -169,4 +239,4 @@ def _is_allowed_reference(
         return False
 
 
-__all__ = ["make_read_file_tool"]
+__all__ = ["RuntimeInputFileError", "make_read_file_tool", "read_workspace_text_file"]

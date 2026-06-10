@@ -1,13 +1,12 @@
 ---
 module: 02-mechanism/06-seam/02-observability
 doc: baseline
-status: drafted（WS-E2 回写 2026-06-09:36 类 typed event + callbacks;TracingMiddleware tool hook 已发 ToolCallEvent;V4 边操作事件 schema/union/export 已落地;WS-E1-io 已接入 InputFileInjectedEvent runtime emit）
+status: drafted（WS-E1-io + WS-E4 runtime 后:36 类 typed event + callbacks;TracingMiddleware tool hook 已发 ToolCallEvent;V4 InputDispatch/BlackboardReduce/InputFileInjected runtime emit 已接入）
 ---
 
 # 02-observability — Baseline(当下代码实现逻辑)
 
-> **Scope**: 引擎执行的可观测事件流现状:`callbacks/events.py`(36 类 typed event)、`callbacks/{emit,tracing,serialize,metrics,logging_cb,base}.py`、trace.jsonl 落盘。
-> **现状一句话**:把"发生了什么"以 **36 类 typed `CallbackEvent`** 发出(`callbacks/events.py`,`_EventBase` + `event_type` Literal 判别)——经回调 + `trace.jsonl` 落盘 + WS。WS-E2 已让 `TracingMiddleware` 在 tool hook 中对 `ToolMessage` 结果发 `ToolCallEvent`,并由 `factory.py` 向 Tracing 槽传 callbacks;WS-E1-io 已在声明式 file input 成功注入时发 `InputFileInjectedEvent`。LLM hook 深覆盖、BlackboardReduce/InputDispatch 真实 emit、trace.jsonl 端到端覆盖仍是后续工作。**它是事件流,不是"所有消息"**。
+> **现状一句话**:把"发生了什么"以 **36 类 typed `CallbackEvent`** 发出(`callbacks/events.py`,`_EventBase` + `event_type` Literal 判别)——经回调 + `trace.jsonl` 落盘 + WS。WS-E2 已让 `TracingMiddleware` 在 tool hook 中对 `ToolMessage` 结果发 `ToolCallEvent`,并由 `factory.py` 向 Tracing 槽传 callbacks;WS-E1-io 已在声明式 file input 成功注入时发 `InputFileInjectedEvent`;WS-E4 runtime 已让 phase input dispatch 与声明式 accumulate/reducer 发出 `InputDispatchEvent` / `BlackboardReduceEvent`。LLM hook 深覆盖、`parent_node_id` 真实关联外层 phase 仍是后续工作。**它是事件流,不是"所有消息"**。
 
 ## UI/UX
 N/A —— trace 被 studio trace-inspector 消费(前端挂载归 studio)。
@@ -47,8 +46,8 @@ callback 派发失败只记录 warning,不破坏工具执行。该实现只记�
 ### 4. 边操作事件现状(节点间 dot 操作,源 11-io)
 "节点间操作"(上节点 end→下节点 start 之间)已有 typed event schema:`ArtifactSavedEvent`(io.outputs artifact 落盘)、`CompactionEvent`(截断/摘要)、`BlackboardReduceEvent`、`InputDispatchEvent`、`InputFileInjectedEvent`。
 - `InputFileInjectedEvent` 已在声明式 `source: file` 输入成功注入普通 blackboard 后发出;事件包含 `from_phase`、`to_phase`、`changed_keys`、`blackboard_snapshot`、`file_ref`、`target_field`。该发射点位于 graph-exec/io 接线,不是 Studio DTO。
-- `BlackboardReduceEvent` / `InputDispatchEvent` 当前仍是 schema/union/export/default-callback/JSONL contract 已落地,真实 emit 接线尚未实现。
-- ⚠️ **缺口**:黑板 reduce、输入分发的 runtime 发射点仍未接入；后续归 WS-E4 runtime-edge-events / graph-exec 工作。
+- `InputDispatchEvent` runtime emit 已接入 `graph_assembler.py:_wrap_phase_runtime_node` 返回的节点入口拦截器:phase 执行前按 `io.inputs.properties` 从 business blackboard 计算 `dispatched_keys`/`changed_keys`,携带 dispatch 时的 `blackboard_snapshot`,经通用 callbacks/event sink 发出并写入 `trace.jsonl`。非 iterate 执行 `branch_index=None`;phase/graph iterate 执行期间由 runtime contextvar 写入稳定的 1-based `branch_index`。
+- `BlackboardReduceEvent` runtime emit 已接入声明式 loop accumulate:每次 `_merge_accumulator` 后、`StateManager.update_business(... accumulate.var=acc)` 写回后发出,携带声明的 `accumulate.merge`、`changed_keys=[accumulate.var]` 与操作后的 blackboard snapshot。engine 不计算 authoritative before/after diff;OB5 仍由 consumer 用 snapshot 近似。
 
 ## API
 - 事件 schema:`_EventBase` + `event_type` 判别(`events.py:42`)。
@@ -61,19 +60,19 @@ callback 派发失败只记录 warning,不破坏工具执行。该实现只记�
 - **不是"所有消息"**:事件(发生了 X)≠ messages(对话)≠ RunResult(返回)。
 - **Tracing 中间件只完成 tool hook 最小覆盖**:尚未声明 LLM hook 深覆盖、trace.jsonl 端到端写入、真实 `parent_node_id` 关联已经完成。
 - **subagent lifecycle 事件缺(A2)**:子代理 start/end/error 未补(与 `07-subagent` 协同)。
-- **V4 边操作事件部分 runtime 接入**:`InputFileInjectedEvent` 已在 WS-E1-io 接入真实 runtime emit;`BlackboardReduceEvent`/`InputDispatchEvent` 仍只到 typed union、默认 callback、JSONL 和 public contract。
+- **V4 边操作事件已部分 runtime 接入**:`InputDispatchEvent`、`BlackboardReduceEvent`、`InputFileInjectedEvent` 已有真实 runtime emit;reducer authoritative before/after diff、真实 `parent_node_id` 关联仍未完成。
 
 ## baseline / alignment 差异(测试锚点)
 | 维度 | 现状(baseline) | mvp1 目标 |
 |---|---|---|
 | 发射点 | TracingMiddleware tool hook 已发 `ToolCallEvent`;LLM hook 深覆盖仍待后续 | 迁到 Tracing 中间件且覆盖不减 |
 | subagent 事件 | 缺(A2) | 补 start/end/error |
-| V4 trace | 现 36 类；微观拓扑字段已在 `LLMCallEvent`/`ToolCallEvent` schema；3 个边操作事件 schema 已落地,其中 `InputFileInjectedEvent` 已 runtime emit,`BlackboardReduceEvent`/`InputDispatchEvent` 仍待接线 | 接入真实微观/边操作 emit；Prompt 三视图已满足；reducer 前后态 diff 维持前端近似 |
+| V4 trace | 现 36 类；微观拓扑字段已在 `LLMCallEvent`/`ToolCallEvent` schema；`InputDispatchEvent`、`BlackboardReduceEvent`、`InputFileInjectedEvent` runtime emit 已接入 callbacks + `trace.jsonl` | 接入真实微观/边操作 emit；Prompt 三视图已满足；reducer 前后态 diff 维持前端近似 |
 
 > **验"是否按 mvp1 改了"**:① 迁到 create_agent/Tracing 中间件后现有 LLMCallEvent/ToolCallEvent 覆盖不减;② 微观事件 `parent_node_id` 正确关联外层 phase;③ trace.jsonl 一行一 event、predict trace usage 归零。
 
 ## 读代码主路径提示
-事件 schema `callbacks/events.py`(36 类)→ callbacks `emit/tracing/serialize/metrics.py` → Tracing tool hook `middleware/tracing.py` → trace 落点 `<workspace>/runs/<run_id>/trace.jsonl`。
+事件 schema `callbacks/events.py`(36 类)→ callbacks `emit/tracing/serialize/metrics.py` → Tracing tool hook `middleware/tracing.py` / runtime edge emit `core/graph_assembler.py:_wrap_phase_runtime_node`、`_build_loop_iterate_phase`、`_run_graph_loop_iterate` → trace 落点 `<workspace>/runs/<run_id>/trace.jsonl`。
 
 ## 交叉引用(链接, 不复制)
 mvp1-alignment(目标)· `02-middleware`(Tracing 槽,双向)· `07-subagent`(lifecycle)· `03-api-contract`(事件协议)· `data-contracts`

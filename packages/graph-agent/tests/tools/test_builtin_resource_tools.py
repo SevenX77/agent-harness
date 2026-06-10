@@ -15,7 +15,8 @@ class CaptureToolsChatModel:
     def __init__(self) -> None:
         self.tools_by_name: dict[str, Any] = {}
 
-    def bind_tools(self, tools: list[Any]) -> CaptureToolsChatModel:
+    def bind_tools(self, tools: list[Any], **kwargs: Any) -> CaptureToolsChatModel:
+        del kwargs
         self.tools_by_name = {tool.name: tool for tool in tools}
         return self
 
@@ -26,7 +27,7 @@ class CaptureToolsChatModel:
             tool_calls=[
                 {
                     "name": "finish_task",
-                    "args": {"markdown": "## answer\n\nok"},
+                    "args": {"business_data_md": "## item-1\n- answer: ok\n"},
                     "id": "finish-1",
                 }
             ],

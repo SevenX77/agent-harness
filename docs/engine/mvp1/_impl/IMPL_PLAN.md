@@ -71,7 +71,7 @@ WS-E7 golden / resume(runner.py + golden SDK)───────────�
 
 | WS | 任务书 | 实现 | 状态 |
 |---|---|---|---|
-| **WS-E1** | `_impl/WS-E1-create-agent-core.md` | 待实现 | ✅ 任务书就绪 |
+| **WS-E1** | `_impl/WS-E1-create-agent-core.md` | Step1-5 已本地实现(至子图 io 放宽) | ✅ 串行链完成,待终审/提交 |
 | **WS-E1-io** | 待产(从 E1 拆出的 11-io 文件导入 lazy + artifact business_data_md) | 待实现 | ⏳ |
 | **WS-E2** | 待产(中间件后 3 槽) | 待实现 | ⏳ |
 | **WS-E3** | 待产(错误契约 V2) | 待实现 | ⏳ |

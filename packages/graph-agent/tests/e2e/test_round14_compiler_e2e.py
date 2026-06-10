@@ -314,10 +314,10 @@ def _empty_logic_actions(root: Path) -> None:
     _write(logic, _read(logic).replace("<action>score</action>", ""))
 
 
-def _mismatch_subgraph_io(root: Path) -> None:
+def _mismatch_subgraph_outputs(root: Path) -> None:
     subgraph = root / "phases" / "expand" / "SUBGRAPH.md"
-    text = _read(subgraph).replace("required: [brief]", "required: [outline]")
-    text = text.replace("brief:", "outline:")
+    text = _read(subgraph).replace("required: [report]", "required: [expanded_report]")
+    text = text.replace("report:", "expanded_report:")
     _write(subgraph, text)
 
 
@@ -356,7 +356,7 @@ _LOCATED_ERROR_CASES: list[tuple[str, Callable[[Path], None], str]] = [
     ("mention-syntax-invalid", _break_mention_syntax, "[F-v3-mention-syntax-invalid]"),
     ("logic-validator-type-invalid", _bad_logic_validator_type, "[F-v3-logic-validator-type-invalid]"),
     ("logic-actions-empty", _empty_logic_actions, "[F-v3-logic-actions-empty]"),
-    ("subgraph-io-mismatch", _mismatch_subgraph_io, "[F-v3-subgraph-io-mismatch]"),
+    ("subgraph-io-mismatch", _mismatch_subgraph_outputs, "[F-v3-subgraph-io-mismatch]"),
     (
         "graph-io-physical-file-deprecated",
         _add_deprecated_physical_io,

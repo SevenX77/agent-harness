@@ -1,18 +1,23 @@
 """V2.1 CompiledSkill to LangGraph assembly."""
 
 import asyncio
+import contextvars
+import copy
 import json
 import logging
 import uuid
+from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, NoReturn
-
-from langchain_core.messages import SystemMessage, ToolMessage
-from langchain_core.runnables import RunnableConfig
-from langgraph.graph import END, START, StateGraph
+from typing import Annotated, Any, NoReturn, cast
 
 from langchain.agents import create_agent
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import StructuredTool
+from langgraph.checkpoint.base import BaseCheckpointSaver, Checkpoint, CheckpointMetadata, CheckpointTuple
+from langgraph.graph import END, START, StateGraph
+from langgraph.prebuilt import InjectedState
+
 from graph_agent.callbacks.emit import _safe_emit_event
 from graph_agent.callbacks.events import (
     BuiltinSubagentEnterEvent,
@@ -23,7 +28,6 @@ from graph_agent.callbacks.events import (
     PhaseStartEvent,
     ToolCallEvent,
 )
-from graph_agent.cognitive.context_facade import Context
 from graph_agent.cognitive.critic import (
     CriticVerdict,
     FakeCriticClient,
@@ -43,7 +47,9 @@ from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError, ma
 from graph_agent.core.loader import CompiledSkill, CompiledSubagent, PhaseDocument, SkillLoader
 from graph_agent.core.manifest import (
     AgentNodeAST,
+    BatchSpec,
     GraphManifest,
+    IterateSpec,
     LogicNodeAST,
     SubgraphNodeAST,
 )
@@ -59,7 +65,6 @@ from graph_agent.core.subagents import (
     current_subagent_depth,
     validate_subagent_tool_args,
 )
-from graph_agent.middleware.factory import build_middleware_chain_cognitive_flow
 from graph_agent.runtime.state_mapper import (
     PhaseWrapper,
     StateMapper,
@@ -70,6 +75,7 @@ from graph_agent.tools.builtin.read_reference import read_declared_reference, re
 
 MAX_REACT_TURNS = 8
 logger = logging.getLogger(__name__)
+parent_state_var: contextvars.ContextVar[Any] = contextvars.ContextVar("parent_state_var")
 
 
 @dataclass(frozen=True)
@@ -84,6 +90,44 @@ class CompiledStateGraph:
 class _SubagentRuntime:
     subagent: CompiledSubagent
     graph: Any
+
+
+@dataclass(frozen=True)
+class _GraphIterateRuntime:
+    graph: Any
+    iterate: IterateSpec
+    output_schema: dict[str, Any] | None
+    terminal_phase_ids: list[str]
+
+    def invoke(
+        self,
+        state: WorkflowState | dict[str, Any],
+        config: RunnableConfig | None = None,
+        **kwargs: Any,
+    ) -> WorkflowState:
+        workflow_state = _coerce_workflow_state(state)
+        if self.iterate.mode == "batch":
+            return _run_graph_batch_iterate(
+                self.graph,
+                workflow_state,
+                self.iterate,
+                self.output_schema,
+                self.terminal_phase_ids,
+                config=config,
+                invoke_kwargs=kwargs,
+            )
+        return _run_graph_loop_iterate(
+            self.graph,
+            workflow_state,
+            self.iterate,
+            self.output_schema,
+            self.terminal_phase_ids,
+            config=config,
+            invoke_kwargs=kwargs,
+        )
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.graph, name)
 
 
 def assemble_graph(
@@ -148,8 +192,17 @@ def assemble_graph(
         builder.add_edge(phase_id, END)
         edges.append((phase_id, "END"))
 
+    graph: Any = builder.compile(checkpointer=checkpointer)
+    if compiled.manifest.iterate is not None:
+        graph = _GraphIterateRuntime(
+            graph=graph,
+            iterate=compiled.manifest.iterate,
+            output_schema=compiled.manifest.io.outputs,
+            terminal_phase_ids=_terminal_phase_ids(compiled.manifest, compiled),
+        )
+
     return CompiledStateGraph(
-        graph=builder.compile(checkpointer=checkpointer),
+        graph=graph,
         compiled_skill=compiled,
         phase_ids=phase_ids,
         edges=edges,
@@ -224,66 +277,409 @@ def _build_phase_node(
     _graph_fatal(f"unknown phase mode for {phase_id!r}")
 
 
-def _resolve_iterator(state: WorkflowState, path_str: str) -> list[Any]:
-    parts = path_str.split(".")
+_MISSING = object()
+
+
+def _coerce_workflow_state(state: WorkflowState | dict[str, Any]) -> WorkflowState:
+    data_obj = state.get("data") if isinstance(state, dict) else None
+    if isinstance(data_obj, BusinessData):
+        data = data_obj
+    elif isinstance(data_obj, dict):
+        data = BusinessData.model_validate(data_obj)
+    else:
+        data = BusinessData()
+
+    flow_obj = state.get("flow") if isinstance(state, dict) else None
+    if isinstance(flow_obj, FrameworkState):
+        flow = flow_obj
+    elif isinstance(flow_obj, dict):
+        flow = FrameworkState.model_validate(flow_obj)
+    else:
+        flow = FrameworkState()
+
+    messages = list(state.get("messages", [])) if isinstance(state, dict) else []
+    return WorkflowState(data=data, flow=flow, messages=messages)
+
+
+def _resolve_path_value(state: WorkflowState, path_str: str) -> Any:
     curr: Any = state
-    for part in parts:
-        if isinstance(curr, dict) and part in curr:
+    for part in path_str.split("."):
+        if isinstance(curr, dict):
+            if part not in curr:
+                return _MISSING
             curr = curr[part]
-        elif hasattr(curr, "model_dump") and hasattr(curr, part):
+            continue
+        if hasattr(curr, "model_dump"):
+            dumped = curr.model_dump()
+            if isinstance(dumped, dict) and part in dumped:
+                curr = dumped[part]
+                continue
+        if hasattr(curr, part):
             curr = getattr(curr, part)
-        elif hasattr(curr, "get") and callable(curr.get):
-            curr = curr.get(part)
-        else:
-            return []
-    return curr if isinstance(curr, list) else []
+            continue
+        get = getattr(curr, "get", None)
+        if callable(get):
+            next_value = get(part, _MISSING)
+            if next_value is not _MISSING:
+                curr = next_value
+                continue
+        return _MISSING
+    return curr
 
 
-def _build_batch_wrapped_node(node: Any, batch_spec: Any) -> Any:
-    def _batch_wrapped(state: WorkflowState) -> dict[str, Any]:
-        items = _resolve_iterator(state, batch_spec.iterator)
+def _resolve_iterate_items(state: WorkflowState, path_str: str) -> list[Any]:
+    value = _resolve_path_value(state, path_str)
+    if value is _MISSING:
+        value = _resolve_legacy_data_input_path(state, path_str)
+    if not isinstance(value, list):
+        detail = f"iterate over path {path_str!r} must resolve to list"
+        raise GraphAgentFatalError(
+            detail,
+            payload=make_error_payload(
+                "[F-v3-iterate-over-not-list]",
+                detail,
+                field_path=path_str,
+            ),
+        )
+    return value
+
+
+def _resolve_legacy_data_input_path(state: WorkflowState, path_str: str) -> Any:
+    if not path_str.startswith("data.") or path_str.startswith("data.inputs."):
+        return _MISSING
+    inputs = _resolve_path_value(state, "data.inputs")
+    if not isinstance(inputs, dict):
+        return _MISSING
+    legacy_tail = path_str.removeprefix("data.")
+    return _resolve_path_value(
+        WorkflowState(
+            data=BusinessData.model_validate(inputs),
+            flow=state["flow"],
+            messages=state["messages"],
+        ),
+        f"data.{legacy_tail}",
+    )
+
+
+def _apply_iterate_range(items: list[Any], range_spec: tuple[int, int] | None) -> list[Any]:
+    if range_spec is None:
+        return list(items)
+    start, end = range_spec
+    if end < start:
+        return []
+    start_index = max(start, 1) - 1
+    return list(items[start_index:end])
+
+
+def _phase_result_payload(
+    before: WorkflowState,
+    result: WorkflowState | dict[str, Any],
+    output_keys: set[str] | None,
+) -> dict[str, Any]:
+    result_state = _coerce_workflow_state(result)
+    after_data = result_state["data"].model_dump()
+    if output_keys is None:
+        return _dict_delta(before["data"].model_dump(), after_data)
+    return {key: after_data[key] for key in output_keys if key in after_data}
+
+
+def _with_phase_outputs(
+    state: WorkflowState,
+    phase_outputs: dict[str, dict[str, Any]],
+) -> WorkflowState:
+    merged_outputs = state["data"].model_dump().get("phase_outputs")
+    if not isinstance(merged_outputs, dict):
+        merged_outputs = {}
+    merged_outputs = dict(merged_outputs)
+    for phase_id, payload in phase_outputs.items():
+        merged_outputs[phase_id] = dict(payload)
+    data_updates: dict[str, Any] = {}
+    for payload in phase_outputs.values():
+        data_updates.update(payload)
+    data_updates["phase_outputs"] = merged_outputs
+    return StateManager.update_business(state, **data_updates)
+
+
+def _terminal_phase_outputs(
+    phase_ids: list[str],
+    payload: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    if not phase_ids:
+        return {"output": dict(payload)}
+    return {phase_id: dict(payload) for phase_id in phase_ids}
+
+
+def _merge_accumulator(current: Any, piece: Any, merge: str) -> Any:
+    if merge == "append":
+        if not isinstance(current, list):
+            _iterate_merge_fatal("append accumulator must be a list")
+        return [*current, piece]
+    if merge == "extend":
+        if not isinstance(current, list) or not isinstance(piece, list):
+            _iterate_merge_fatal("extend accumulator and piece must be lists")
+        return [*current, *piece]
+    if merge == "merge":
+        if not isinstance(current, dict) or not isinstance(piece, dict):
+            _iterate_merge_fatal("merge accumulator and piece must be objects")
+        return {**current, **piece}
+    if merge == "replace":
+        return piece
+    _iterate_merge_fatal(f"unsupported accumulate merge mode {merge!r}")
+
+
+def _iterate_merge_fatal(message: str) -> NoReturn:
+    raise GraphAgentFatalError(
+        message,
+        payload=make_error_payload("[F-v3-runtime-state-mapping-failed]", message),
+    )
+
+
+def _build_iterate_wrapped_phase(
+    phase_id: str,
+    node: Any,
+    iterate: IterateSpec,
+    output_schema: dict[str, Any] | None,
+) -> Any:
+    if iterate.mode == "batch":
+        return _build_batch_iterate_phase(
+            phase_id,
+            node,
+            over=iterate.over,
+            item_var=iterate.item_var,
+            concurrency=iterate.concurrency,
+            range_spec=iterate.range,
+            output_schema=output_schema,
+            include_batch_outputs=False,
+        )
+    return _build_loop_iterate_phase(phase_id, node, iterate, output_schema)
+
+
+def _build_legacy_batch_wrapped_phase(
+    phase_id: str,
+    node: Any,
+    batch: BatchSpec,
+    output_schema: dict[str, Any] | None,
+) -> Any:
+    return _build_batch_iterate_phase(
+        phase_id,
+        node,
+        over=batch.iterator,
+        item_var=batch.item_var,
+        concurrency=batch.concurrency,
+        range_spec=None,
+        output_schema=output_schema,
+        include_batch_outputs=True,
+    )
+
+
+def _build_batch_iterate_phase(
+    phase_id: str,
+    node: Any,
+    *,
+    over: str,
+    item_var: str,
+    concurrency: int,
+    range_spec: tuple[int, int] | None,
+    output_schema: dict[str, Any] | None,
+    include_batch_outputs: bool,
+) -> Any:
+    output_keys = _schema_output_keys(output_schema)
+
+    def _batch_phase(state: WorkflowState) -> WorkflowState:
+        workflow_state = _coerce_workflow_state(state)
+        items = _apply_iterate_range(_resolve_iterate_items(workflow_state, over), range_spec)
         if not items:
-            return {}
+            empty: dict[str, Any] = {key: [] for key in (output_keys or set())}
+            if include_batch_outputs:
+                empty["batch_outputs"] = []
+            return _with_phase_outputs(workflow_state, {phase_id: empty})
 
-        import asyncio
+        async def _run_all() -> list[dict[str, Any]]:
+            semaphore = asyncio.Semaphore(concurrency)
 
-        async def _run_all() -> list[Any]:
-            semaphore = asyncio.Semaphore(batch_spec.concurrency)
-
-            async def _run_one(item: Any) -> Any:
+            async def _run_one(item: Any) -> dict[str, Any]:
                 async with semaphore:
-                    child_state = StateManager.update_business(state, **{batch_spec.item_var: item})
-                    return await asyncio.to_thread(node, child_state)
+                    child_state = StateManager.update_business(workflow_state, **{item_var: item})
+                    result = await asyncio.to_thread(node, child_state)
+                    return _phase_result_payload(child_state, result, output_keys)
 
             return await asyncio.gather(*[_run_one(item) for item in items])
 
-        results = asyncio.run(_run_all())
+        item_payloads = asyncio.run(_run_all())
+        aggregated: dict[str, Any] = {}
+        for payload in item_payloads:
+            for key, value in payload.items():
+                aggregated.setdefault(key, []).append(value)
+        if include_batch_outputs:
+            aggregated["batch_outputs"] = item_payloads
+        return _with_phase_outputs(workflow_state, {phase_id: aggregated})
 
-        aggregated_data: dict[str, Any] = {}
-        batch_outputs = []
-        for r in results:
-            if isinstance(r, dict):
-                data_val = r.get("data", r) if "data" in r else r
-                if isinstance(data_val, dict):
-                    batch_outputs.append(data_val)
-                    for k, v in data_val.items():
-                        if k not in aggregated_data:
-                            aggregated_data[k] = []
-                        aggregated_data[k].append(v)
-            elif hasattr(r, "get"):
-                data_obj = r.get("data")
-                if data_obj is not None:
-                    data_dict = data_obj.model_dump() if hasattr(data_obj, "model_dump") else dict(data_obj)
-                    batch_outputs.append(data_dict)
-                    for k, v in data_dict.items():
-                        if k not in aggregated_data:
-                            aggregated_data[k] = []
-                        aggregated_data[k].append(v)
+    return _batch_phase
 
-        aggregated_data["batch_outputs"] = batch_outputs
-        return {"data": aggregated_data}
 
-    return _batch_wrapped
+def _build_loop_iterate_phase(
+    phase_id: str,
+    node: Any,
+    iterate: IterateSpec,
+    output_schema: dict[str, Any] | None,
+) -> Any:
+    accumulate = iterate.accumulate
+    if accumulate is None:
+        _iterate_merge_fatal("loop iterate requires accumulate")
+    output_keys = _schema_output_keys(output_schema)
+
+    def _loop_phase(state: WorkflowState) -> WorkflowState:
+        workflow_state = _coerce_workflow_state(state)
+        items = _apply_iterate_range(_resolve_iterate_items(workflow_state, iterate.over), iterate.range)
+        acc = copy.deepcopy(accumulate.init)
+        loop_state = StateManager.update_business(workflow_state, **{accumulate.var: acc})
+        for item in items:
+            child_state = StateManager.update_business(
+                loop_state,
+                **{iterate.item_var: item, accumulate.var: acc},
+            )
+            result = node(child_state)
+            payload = _phase_result_payload(child_state, result, output_keys)
+            if accumulate.from_ not in payload:
+                _iterate_merge_fatal(
+                    f"loop iterate output missing accumulate.from {accumulate.from_!r}"
+                )
+            acc = _merge_accumulator(acc, payload[accumulate.from_], accumulate.merge)
+            loop_state = StateManager.update_business(loop_state, **{accumulate.var: acc})
+        final_payload = {accumulate.var: acc}
+        return _with_phase_outputs(workflow_state, {phase_id: final_payload})
+
+    return _loop_phase
+
+
+def _iteration_config(config: RunnableConfig | None, iteration_index: int) -> RunnableConfig:
+    inner_config: dict[str, Any] = dict(config or {})
+    configurable = dict(inner_config.get("configurable", {}))
+    configurable["checkpoint_ns"] = f"iter{iteration_index}"
+    inner_config["configurable"] = configurable
+    return inner_config  # type: ignore[return-value]
+
+
+def _with_graph_iterate_signal(
+    state: WorkflowState,
+    *,
+    mode: str,
+    namespaces: list[str],
+) -> WorkflowState:
+    working_memory = state["flow"].working_memory
+    if not isinstance(working_memory, dict):
+        working_memory = {"value": working_memory}
+    else:
+        working_memory = dict(working_memory)
+    executions = working_memory.get("iterate_executions")
+    if not isinstance(executions, list):
+        executions = []
+    executions.append(
+        {
+            "scope": "graph",
+            "mode": mode,
+            "checkpoint_ns": list(namespaces),
+        }
+    )
+    working_memory["iterate_executions"] = executions
+    return StateManager.update_framework(state, working_memory=working_memory)
+
+
+def _run_graph_batch_iterate(
+    graph: Any,
+    state: WorkflowState,
+    iterate: IterateSpec,
+    output_schema: dict[str, Any] | None,
+    terminal_phase_ids: list[str],
+    *,
+    config: RunnableConfig | None,
+    invoke_kwargs: dict[str, Any],
+) -> WorkflowState:
+    output_keys = _schema_output_keys(output_schema)
+    items = _apply_iterate_range(_resolve_iterate_items(state, iterate.over), iterate.range)
+    if not items:
+        empty: dict[str, Any] = {key: [] for key in (output_keys or set())}
+        final_state = _with_phase_outputs(state, _terminal_phase_outputs(terminal_phase_ids, empty))
+        return _with_graph_iterate_signal(final_state, mode="batch", namespaces=[])
+
+    async def _run_all() -> list[dict[str, Any]]:
+        semaphore = asyncio.Semaphore(iterate.concurrency)
+
+        async def _run_one(index: int, item: Any) -> dict[str, Any]:
+            async with semaphore:
+                child_state = StateManager.update_business(state, **{iterate.item_var: item})
+                result = await asyncio.to_thread(
+                    graph.invoke,
+                    child_state,
+                    config=_iteration_config(config, index),
+                    **invoke_kwargs,
+                )
+                return _phase_result_payload(child_state, result, output_keys)
+
+        return await asyncio.gather(
+            *[_run_one(index, item) for index, item in enumerate(items, start=1)]
+        )
+
+    item_payloads = asyncio.run(_run_all())
+    aggregated: dict[str, Any] = {}
+    for payload in item_payloads:
+        for key, value in payload.items():
+            aggregated.setdefault(key, []).append(value)
+    final_state = _with_phase_outputs(
+        state,
+        _terminal_phase_outputs(terminal_phase_ids, aggregated),
+    )
+    namespaces = [f"iter{index}" for index in range(1, len(items) + 1)]
+    return _with_graph_iterate_signal(final_state, mode="batch", namespaces=namespaces)
+
+
+def _run_graph_loop_iterate(
+    graph: Any,
+    state: WorkflowState,
+    iterate: IterateSpec,
+    output_schema: dict[str, Any] | None,
+    terminal_phase_ids: list[str],
+    *,
+    config: RunnableConfig | None,
+    invoke_kwargs: dict[str, Any],
+) -> WorkflowState:
+    accumulate = iterate.accumulate
+    if accumulate is None:
+        _iterate_merge_fatal("graph loop iterate requires accumulate")
+    output_keys = _schema_output_keys(output_schema)
+    items = _apply_iterate_range(_resolve_iterate_items(state, iterate.over), iterate.range)
+    acc = copy.deepcopy(accumulate.init)
+    loop_state = StateManager.update_business(state, **{accumulate.var: acc})
+    namespaces: list[str] = []
+    for index, item in enumerate(items, start=1):
+        namespace = f"iter{index}"
+        namespaces.append(namespace)
+        child_state = StateManager.update_business(
+            loop_state,
+            **{iterate.item_var: item, accumulate.var: acc},
+        )
+        result = graph.invoke(
+            child_state,
+            config=_iteration_config(config, index),
+            **invoke_kwargs,
+        )
+        payload = _phase_result_payload(child_state, result, output_keys)
+        if accumulate.from_ not in payload:
+            _iterate_merge_fatal(
+                f"graph loop iterate output missing accumulate.from {accumulate.from_!r}"
+            )
+        acc = _merge_accumulator(acc, payload[accumulate.from_], accumulate.merge)
+        loop_state = StateManager.update_business(
+            _coerce_workflow_state(result),
+            **{accumulate.var: acc},
+        )
+
+    final_payload = {accumulate.var: acc}
+    final_state = _with_phase_outputs(
+        state,
+        _terminal_phase_outputs(terminal_phase_ids, final_payload),
+    )
+    return _with_graph_iterate_signal(final_state, mode="loop", namespaces=namespaces)
 
 
 def _wrap_phase_runtime_node(
@@ -297,9 +693,6 @@ def _wrap_phase_runtime_node(
     io = getattr(phase_ast, "io", None)
     input_schema = getattr(io, "inputs", None) if io is not None else None
     output_schema = getattr(io, "outputs", None) if io is not None else None
-
-    if getattr(phase_ast, "batch", None) is not None:
-        node = _build_batch_wrapped_node(node, phase_ast.batch)
 
     mapper = StateMapper(input_schema, output_schema, phase_id=phase_id)
 
@@ -321,7 +714,18 @@ def _wrap_phase_runtime_node(
                 ),
             )
 
-    return PhaseWrapper(mapper, node_kind=node_kind).wrap(_node_with_lifecycle)
+    wrapped = PhaseWrapper(mapper, node_kind=node_kind).wrap(_node_with_lifecycle)
+    iterate = getattr(phase_ast, "iterate", None)
+    if iterate is not None:
+        return _build_iterate_wrapped_phase(phase_id, wrapped, iterate, output_schema)
+    if getattr(phase_ast, "batch", None) is not None:
+        return _build_legacy_batch_wrapped_phase(
+            phase_id,
+            wrapped,
+            phase_ast.batch,
+            output_schema,
+        )
+    return wrapped
 
 
 def _build_logic_node(
@@ -334,18 +738,14 @@ def _build_logic_node(
 
     def _logic_node(state: WorkflowState) -> dict[str, Any]:
         before = phase_inputs_from_state(state)
-        data = dict(before)
-        ctx = Context(data, phase_id=phase_id, run_id=state["flow"].run_id or "default")
-        updates = _dict_delta(before, data)
+        updates: dict[str, Any] = {}
         for action_name in action_names:
             action = compiled.actions.resolve(phase_id, action_name)
             action_def = compiled.actions.for_phase(phase_id).get(action_name)
             action_path = action_def.path if action_def is not None else Path("<unknown>")
             action_line = getattr(getattr(action, "__code__", None), "co_firstlineno", 1)
-            result = action(ctx)
-            delta = _dict_delta(before | updates, data)
-            _validate_logic_update_keys(delta, output_schema_keys, action_path, action_line)
-            updates.update(delta)
+            action_ctx = {**before, **updates}
+            result = action(action_ctx)
             if not isinstance(result, dict):
                 detail = (
                     f"{action_path}:{action_line} action returned "
@@ -420,10 +820,6 @@ def _build_subgraph_node(
         }
 
     return _subgraph_node
-
-
-from langgraph.checkpoint.base import BaseCheckpointSaver, CheckpointTuple, Checkpoint, CheckpointMetadata
-from typing import AsyncIterator, Iterator, Any, cast
 
 class NamespaceCheckpointer(BaseCheckpointSaver[Any]):
     def __init__(self, base_checkpointer: BaseCheckpointSaver[Any], target_ns: str) -> None:
@@ -617,7 +1013,124 @@ def _build_skill_node(
         chat_model=phase_chat_model,
         max_patch_attempts=max_patch_attempts,
     )
-    all_tools = [*business_tools, *framework_tools, finish_task]
+    class FrameworkStateProxyDict(dict[str, Any]):
+        def __init__(self, obj: Any) -> None:
+            super().__init__()
+            self._obj = obj
+
+        def __getitem__(self, key: Any) -> Any:
+            if hasattr(self._obj, str(key)):
+                return getattr(self._obj, str(key))
+            raise KeyError(key)
+
+        def __setitem__(self, key: Any, value: Any) -> None:
+            if hasattr(self._obj, str(key)):
+                setattr(self._obj, str(key), value)
+            else:
+                super().__setitem__(key, value)
+
+        def get(self, key: Any, default: Any = None) -> Any:
+            if hasattr(self._obj, str(key)):
+                return getattr(self._obj, str(key))
+            return default
+
+        def setdefault(self, key: Any, default: Any = None) -> Any:
+            if hasattr(self._obj, str(key)):
+                val = getattr(self._obj, str(key))
+                if val is None or (isinstance(val, dict) and not val):
+                    setattr(self._obj, str(key), default)
+                    return default
+                return val
+            return super().setdefault(key, default)
+
+    rewired_business_tools = []
+    for tool in business_tools:
+        if tool.name in subagent_by_tool_name:
+            subagent = subagent_by_tool_name[tool.name]
+            runtime = subagent_runtime_by_tool_name.get(tool.name)
+
+            def _make_dispatch(
+                t_name: str = tool.name,
+                sa: CompiledSubagent = subagent,
+                rt: _SubagentRuntime | None = runtime,
+            ) -> Callable[..., Any]:
+                def dispatch_func(
+                    inputs: Any,
+                    state: Annotated[WorkflowState, InjectedState],
+                    config: RunnableConfig | None = None,
+                ) -> Any:
+                    raw_inputs = []
+                    for item in (inputs or []):
+                        if hasattr(item, "model_dump"):
+                            raw_inputs.append(item.model_dump())
+                        elif hasattr(item, "dict"):
+                            raw_inputs.append(item.dict())
+                        else:
+                            raw_inputs.append(item)
+                    parent_state = parent_state_var.get(None)
+                    raw_flow = parent_state["flow"] if parent_state else (state["flow"] if state else {})
+                    flow = (
+                        FrameworkStateProxyDict(raw_flow)
+                        if (raw_flow is not None and not isinstance(raw_flow, dict))
+                        else raw_flow
+                    )
+                    from typing import cast
+                    return _invoke_subagent_tool_t21(
+                        tool_name=t_name,
+                        subagent=sa,
+                        args={"inputs": raw_inputs},
+                        state=parent_state if parent_state is not None else state,
+                        flow=cast(dict[str, Any], flow),
+                        runtime=rt,
+                        parent_config=config,
+                    )
+
+                return dispatch_func
+
+            if tool.args_schema is not None and not isinstance(tool.args_schema, dict):
+                from pydantic import ConfigDict, Field, create_model
+                inputs_desc = ""
+                original_inputs_field = tool.args_schema.model_fields.get("inputs")
+                if original_inputs_field and original_inputs_field.description:
+                    inputs_desc = original_inputs_field.description
+
+                new_args_schema = create_model(
+                    tool.args_schema.__name__,
+                    __config__=ConfigDict(extra="allow"),
+                    inputs=(
+                        list[Any],
+                        Field(
+                            default=...,
+                            description=inputs_desc,
+                            json_schema_extra={"items": subagent.expected_schema},
+                        ),
+                    ),
+                )
+                original_metadata = tool.metadata or {}
+                metadata = {
+                    "kind": "subagent",
+                    "subagent_name": subagent.name,
+                    "target_skill": subagent.target_skill,
+                    "subagent_path": subagent.target_skill,
+                    "subagent_root": str(subagent.root),
+                    "expected_schema": subagent.expected_schema,
+                }
+                metadata.update(original_metadata)
+
+                rewired_tool = StructuredTool.from_function(
+                    func=_make_dispatch(),
+                    name=tool.name,
+                    description=tool.description or f"Call subagent {subagent.name}",
+                    args_schema=new_args_schema,
+                    metadata=metadata,
+                )
+                rewired_business_tools.append(rewired_tool)
+            else:
+                rewired_business_tools.append(tool)
+        else:
+            rewired_business_tools.append(tool)
+
+    all_tools = [*rewired_business_tools, *framework_tools, finish_task]
 
     # Coerce output_schema if it's a dict to SchemaObject, then get Pydantic model
     from graph_agent.core.schema_engine import SchemaEngine
@@ -679,6 +1192,7 @@ def _build_skill_node(
         checkpointer=wrapped_checkpointer,
     )
 
+
     def _skill_node(
         state: WorkflowState,
         config: RunnableConfig | None = None,
@@ -710,22 +1224,26 @@ def _build_skill_node(
             nodes_per_turn = 6
         inner_config["recursion_limit"] = max_turns * nodes_per_turn + 1
 
+        token = parent_state_var.set(state)
         try:
-            result = agent_graph.invoke(
-                {
-                    "data": state["data"],
-                    "flow": state["flow"],
-                    "messages": state["messages"],
-                },
-                config=cast(RunnableConfig, inner_config),
-            )  # type: ignore[call-overload]
-        except GraphRecursionError:
-            state_config = dict(inner_config)
-            state_configurable = dict(state_config.get("configurable", {}))
-            state_configurable["checkpoint_ns"] = ""
-            state_config["configurable"] = state_configurable
-            inner_state = agent_graph.get_state(cast(RunnableConfig, state_config))
-            result = inner_state.values
+            try:
+                result = agent_graph.invoke(
+                    {
+                        "data": state["data"],
+                        "flow": state["flow"],
+                        "messages": state["messages"],
+                    },
+                    config=cast(RunnableConfig, inner_config),
+                )  # type: ignore[call-overload]
+            except GraphRecursionError:
+                state_config = dict(inner_config)
+                state_configurable = dict(state_config.get("configurable", {}))
+                state_configurable["checkpoint_ns"] = ""
+                state_config["configurable"] = state_configurable
+                inner_state = agent_graph.get_state(cast(RunnableConfig, state_config))
+                result = inner_state.values
+        finally:
+            parent_state_var.reset(token)
 
         from langchain_core.messages import AIMessage
         res_messages = (result or {}).get("messages") or []
@@ -773,6 +1291,12 @@ def _build_skill_node(
                         ),
                     )
 
+        if result is not None and isinstance(result, dict) and "flow" in result:
+            retries = getattr(state["flow"], "subagent_validation_retries", {})
+            if isinstance(result["flow"], dict):
+                result["flow"]["subagent_validation_retries"] = retries
+            else:
+                result["flow"].subagent_validation_retries = retries
         return cast(dict[str, Any] | WorkflowState, result)
 
     return _skill_node
@@ -1277,7 +1801,6 @@ def _invoke_subagent_tool_t21(
         retry_counts = {}
         flow["subagent_validation_retries"] = retry_counts
     retry_count = int(retry_counts.get(tool_name, 0)) + 1
-    retry_counts[tool_name] = retry_count
     try:
         validation = validate_subagent_tool_args(
             tool_name=tool_name,
@@ -1299,7 +1822,9 @@ def _invoke_subagent_tool_t21(
         )
         raise GraphAgentFatalError(str(exc)) from exc
     if isinstance(validation, SubagentValidationFailure):
+        retry_counts[tool_name] = retry_count
         return validation.to_tool_result()
+    retry_counts.pop(tool_name, None)
     if runtime is not None and state is not None:
         return {
             "ok": True,

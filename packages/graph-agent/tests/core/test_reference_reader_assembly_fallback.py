@@ -15,8 +15,8 @@ class CapturePromptChatModel:
     def __init__(self) -> None:
         self.system_prompts: list[str] = []
 
-    def bind_tools(self, tools: list[Any]) -> CapturePromptChatModel:
-        del tools
+    def bind_tools(self, tools: list[Any], **kwargs: Any) -> CapturePromptChatModel:
+        del tools, kwargs
         return self
 
     def invoke(self, messages: list[Any]) -> AIMessage:
@@ -26,7 +26,7 @@ class CapturePromptChatModel:
             tool_calls=[
                 {
                     "name": "finish_task",
-                    "args": {"markdown": "## answer\n\nok"},
+                    "args": {"business_data_md": "## item-1\n- answer: ok\n"},
                     "id": "finish-1",
                 }
             ],

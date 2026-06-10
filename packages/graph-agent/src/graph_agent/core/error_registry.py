@@ -51,6 +51,8 @@ ERROR_REGISTRY: dict[str, ErrorCodeMetadata] = {
     '[F-v3-logic-validator-missing]': ErrorCodeMetadata('[F-v3-logic-validator-missing]', 'FATAL', ('编译期',), 'docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态'),
     '[F-v3-logic-validator-entrypoint-missing]': ErrorCodeMetadata('[F-v3-logic-validator-entrypoint-missing]', 'FATAL', ('编译期',), 'docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态'),
     '[F-v3-logic-validator-failed]': ErrorCodeMetadata('[F-v3-logic-validator-failed]', 'FATAL', ('运行期',), 'docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态'),
+    '[F-v3-iterate-accumulate-fields-missing]': ErrorCodeMetadata('[F-v3-iterate-accumulate-fields-missing]', 'FATAL', ('编译期',), 'docs/engine/mvp1/01-contract/03-compile-rules/mvp1-alignment.md#6-mvp1-新增码目标未计入现有-93-码'),
+    '[F-v3-iterate-over-not-list]': ErrorCodeMetadata('[F-v3-iterate-over-not-list]', 'FATAL', ('编译期', '运行期'), 'docs/engine/mvp1/01-contract/03-compile-rules/mvp1-alignment.md#6-mvp1-新增码目标未计入现有-93-码'),
     '[F-v3-agent-validator-failed]': ErrorCodeMetadata('[F-v3-agent-validator-failed]', 'FATAL', ('运行期',), 'docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态'),
     '[F-v3-subgraph-validator-failed]': ErrorCodeMetadata('[F-v3-subgraph-validator-failed]', 'FATAL', ('运行期',), 'docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态'),
     '[F-v3-subgraph-schema-unknown-field]': ErrorCodeMetadata('[F-v3-subgraph-schema-unknown-field]', 'FATAL', ('编译期',), 'docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态'),

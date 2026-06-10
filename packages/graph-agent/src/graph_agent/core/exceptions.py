@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from graph_agent.core.error_registry import ERROR_REGISTRY
 
@@ -68,7 +68,8 @@ class ErrorPayload(BaseModel):
             return {}
         if not isinstance(v, dict):
             return {}
-        return _normalize_details_val(v)
+        normalized = _normalize_details_val(v)
+        return normalized if isinstance(normalized, dict) else {}
 
     @model_validator(mode="after")
     def _fill_registry_metadata(self) -> ErrorPayload:

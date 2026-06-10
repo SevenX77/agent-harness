@@ -13,7 +13,6 @@ from pydantic import Field
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.graph_assembler import assemble_graph
 
-
 VALID_BUSINESS_MD = """## item-1
 - answer: ok
 """
@@ -86,7 +85,7 @@ class _TargetFinishTaskChatModel(BaseChatModel):
     def _llm_type(self) -> str:
         return "ws-e1-target-finish-task"
 
-    def bind_tools(self, tools: list[Any], **kwargs: Any) -> "_TargetFinishTaskChatModel":
+    def bind_tools(self, tools: list[Any], **kwargs: Any) -> _TargetFinishTaskChatModel:
         del kwargs
         self.bound_tool_names = [str(getattr(tool, "name", "")) for tool in tools]
         return self

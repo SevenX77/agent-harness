@@ -155,9 +155,19 @@ def test_factory_lazy_imports_chat_google_generative_ai(monkeypatch: pytest.Monk
 def test_factory_reports_missing_google_extra_at_build_time(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from graph_agent_gateway import route_chat_model_factory as factory_module
     from graph_agent_gateway.route_chat_model_factory import RouteChatModelFactory
 
     monkeypatch.delitem(sys.modules, "langchain_google_genai", raising=False)
+
+    real_import_module = factory_module.importlib.import_module
+
+    def missing_google_import(name: str, package: str | None = None):
+        if name == "langchain_google_genai":
+            raise ImportError("missing langchain_google_genai")
+        return real_import_module(name, package)
+
+    monkeypatch.setattr(factory_module.importlib, "import_module", missing_google_import)
     factory = RouteChatModelFactory(
         credential_provider=StaticCredentialProvider({"endpoint:google": "google-secret"})
     )
@@ -176,8 +186,8 @@ def test_factory_reports_missing_google_extra_at_build_time(
 
 
 def test_factory_returns_generic_chat_model_for_nonstandard_protocol() -> None:
-    from langchain_core.language_models.chat_models import BaseChatModel
     from graph_agent_gateway.registry.schema import ResolvedRoute
+    from langchain_core.language_models.chat_models import BaseChatModel
 
     route = ResolvedRoute.model_construct(
         role_name="graph_agent",
@@ -201,8 +211,8 @@ def test_factory_returns_generic_chat_model_for_nonstandard_protocol() -> None:
 
 
 def test_generic_chat_model_fails_loud_until_ordinary_chat_core_exists() -> None:
-    from langchain_core.messages import HumanMessage
     from graph_agent_gateway.registry.schema import ResolvedRoute
+    from langchain_core.messages import HumanMessage
 
     route = ResolvedRoute.model_construct(
         role_name="graph_agent",

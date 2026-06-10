@@ -52,9 +52,11 @@ def _registry_module() -> Any:
 
 def _spec_codes() -> set[str]:
     text = ERROR_SPEC.read_text(encoding="utf-8")
-    match = re.search(r"## 4\. 错误码全表\(96\)(.*?)(?:\n## 5\.|\Z)", text, re.S)
-    assert match is not None, "mvp1 compile-rules must keep a bounded 96-code table section"
-    return set(re.findall(r"\[F-v3-[a-z0-9-]+\]", match.group(1)))
+    section_start = "## 4. 错误码全表(96)"
+    section_end = "\n## 5."
+    assert section_start in text, "mvp1 compile-rules must keep a bounded 96-code table section"
+    section = text.split(section_start, 1)[1].split(section_end, 1)[0]
+    return set(re.findall(r"\[F-v3-[a-z0-9-]+\]", section))
 
 
 def _assert_https_url(value: str) -> None:

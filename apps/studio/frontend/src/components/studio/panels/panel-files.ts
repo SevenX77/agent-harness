@@ -30,7 +30,7 @@ export function phaseIds(skillDetail?: SkillDetail): string[] {
 export function actionFiles(skillDetail: SkillDetail | undefined, phaseId: string): FileMeta[] {
   return Object.keys(skillDetail?.files ?? {})
     .filter((path) => path.startsWith(`phases/${phaseId}/actions/`) && path.endsWith(".py"))
-    .sort()
+    .sort((a, b) => a.localeCompare(b))
     .map((path) => fileFromDetail(skillDetail, path))
 }
 
@@ -38,7 +38,7 @@ export function manifestFiles(skillDetail?: SkillDetail, selectedNode?: { id: st
   const manifest = skillDetail?.manifest
   if (skillDetail?.files) {
     return Object.keys(skillDetail.files)
-      .sort()
+      .sort((a, b) => a.localeCompare(b))
       .map((path) => fileFromDetail(skillDetail, path))
   }
   const files: FileMeta[] = [

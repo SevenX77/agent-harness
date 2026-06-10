@@ -42,9 +42,11 @@ export function deriveAddProviderFormSubmission({
   }
 }
 
+let providerCodeFallbackCounter = 0
+
 function newProviderCodeSuffix(): string {
-  return (
-    globalThis.crypto?.randomUUID?.() ??
-    `${Date.now()}-${Math.random().toString(36).slice(2)}`
-  ).toString()
+  const uuid = globalThis.crypto?.randomUUID?.()
+  if (uuid) return uuid
+  providerCodeFallbackCounter += 1
+  return `${Date.now()}-${providerCodeFallbackCounter}`
 }

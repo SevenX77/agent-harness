@@ -224,7 +224,7 @@ def test_v030_run_skill_emits_phase_llm_tool_events_from_graph_root(
     assert json.loads(inspect_event.result)["items"] == ["alpha", "beta"]
 
 
-def test_v030_run_skill_emits_phase_end_when_agent_returns_without_finish_task(
+def test_v030_run_skill_fails_when_agent_returns_without_finish_task(
     tmp_path: Path,
     mock_skill_resolver: object,
 ) -> None:
@@ -242,7 +242,8 @@ def test_v030_run_skill_emits_phase_end_when_agent_returns_without_finish_task(
         request_id="req-no-finish",
     )
 
-    assert result.success is True
+    assert result.success is False
+    assert result.diagnostic_counts["by_code"] == {"[F-v3-agent-exit-control-failed]": 1}
     phase_end = next(event for event in spy.events if isinstance(event, PhaseEndEvent))
     assert phase_end.context == {
         "inputs": {"topic": "observability", "request_id": "req-no-finish"},

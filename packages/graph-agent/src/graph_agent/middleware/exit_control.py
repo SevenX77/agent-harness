@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware, hook_config
@@ -55,8 +55,11 @@ class ExitControlMiddleware(AgentMiddleware[AgentState[Any]]):
         current_iteration = working_memory.get(key, 0) + 1
         working_memory[key] = current_iteration
 
-        from graph_agent.core.state import StateManager
-        next_state = StateManager.update_framework(state, working_memory=working_memory)
+        from graph_agent.core.state import StateManager, WorkflowState
+        next_state = StateManager.update_framework(
+            cast(WorkflowState, state),
+            working_memory=working_memory,
+        )
 
         # 进行预算判断
         from langgraph.config import get_config

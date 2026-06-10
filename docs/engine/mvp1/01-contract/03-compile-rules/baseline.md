@@ -1,7 +1,7 @@
 ---
 module: 01-contract/03-compile-rules
 doc: baseline
-status: drafted（现状对齐 WS-E1 Step4 后代码 error_registry.py / loader.py / purity.py / exceptions.py / result.py；已移除 mvp0 SSOT 依赖；WS-E3 P0-1 已落 details+diagnostics 最小闭环；iterate 两个错误码已注册）
+status: drafted（现状对齐 WS-E3 P0-2 后代码 error_registry.py / loader.py / purity.py / exceptions.py / result.py；已移除 mvp0 SSOT 依赖；WS-E3 P0-1 已落 details+diagnostics 最小闭环；P0-2 已落 registry metadata + engine-side catalog export）
 binds_alignment: ./mvp1-alignment.md
 binds_code:
   - packages/graph-agent/src/graph_agent/core/error_registry.py:ERROR_REGISTRY
@@ -12,8 +12,8 @@ units: [U4, U11, U12]
 
 # 03-compile-rules — Baseline(当下代码实现逻辑)
 
-> **Scope**: 编译规则与错误码现状。代码 SSOT 是 `error_registry.py:ERROR_REGISTRY`(95 个码及 level/stage/doc_link)、`loader.py:SkillLoader.compile_skill`(DAG/IO/mention/purity/iterate 等校验聚合)、`purity.py:scan_python_purity`(action/tool Python 扫描器)。
-> **现状一句话**: registry 已有 95 个 `[F-v3-*]` 码；WS-E1 Step4 新增 `[F-v3-iterate-accumulate-fields-missing]` 与 `[F-v3-iterate-over-not-list]`。loader 会在编译期聚合物理结构、frontmatter、DAG、IO、mention、subgraph/subagent resolver、iterate loop 输入字段、action purity 等校验；WS-E3 P0-1 已落 `ErrorPayload.details` + `GraphAgentError.context` 序列化 + `RunResult.diagnostics` 有界快照;purity 扫描器已从本地写 API 扩到 LE2 的 `run_skill` / 直接 FS / `sys.path` / 动态 import 高风险路径。
+> **Scope**: 编译规则与错误码现状。代码 SSOT 是 `error_registry.py:ERROR_REGISTRY`(96 个码及 level/stage/doc_link/remediation/doc_ref/doc_url/details_schema/schema_version/status)、`loader.py:SkillLoader.compile_skill`(DAG/IO/mention/purity/iterate 等校验聚合)、`purity.py:scan_python_purity`(action/tool Python 扫描器)。
+> **现状一句话**: registry 已有 96 个 `[F-v3-*]` 码；WS-E3 P0-2 没改 key set，只把 §4 全表中的修复建议补进 metadata，并提供 engine-side `export_error_catalog()` / `export_error_metadata(code)` JSON-safe 导出。loader 会在编译期聚合物理结构、frontmatter、DAG、IO、mention、subgraph/subagent resolver、iterate loop 输入字段、action purity 等校验；WS-E3 P0-1 已落 `ErrorPayload.details` + `GraphAgentError.context` 序列化 + `RunResult.diagnostics` 有界快照;purity 扫描器已从本地写 API 扩到 LE2 的 `run_skill` / 直接 FS / `sys.path` / 动态 import 高风险路径。
 
 ## UI/UX
 N/A。本模块是 engine 契约/编译规则，不直接承载 Studio UI。
@@ -24,7 +24,7 @@ N/A。Studio 前端只消费编译结果和错误 payload；错误 payload 形�
 ## 后端功能
 
 ### 1. 错误码注册表(error_registry.py)
-`ERROR_REGISTRY`(`packages/graph-agent/src/graph_agent/core/error_registry.py:ERROR_REGISTRY`)注册 95 个 `ErrorCodeMetadata`，每个条目包含:
+`ERROR_REGISTRY`(`packages/graph-agent/src/graph_agent/core/error_registry.py:ERROR_REGISTRY`)注册 96 个 `ErrorCodeMetadata`，每个条目包含:
 
 | 字段 | 代码现状 |
 |---|---|
@@ -32,8 +32,14 @@ N/A。Studio 前端只消费编译结果和错误 payload；错误 payload 形�
 | `level` | `FATAL` 或 `WARN` |
 | `stage` | `("编译期",)` / `("装配期",)` / `("运行期",)` 或多阶段 tuple |
 | `doc_link` | 指向 mvp1 契约/机制文档的链接 |
+| `remediation` | 来自 `mvp1-alignment.md §4`「修复建议」列的短建议 |
+| `doc_ref` | `graph-agent://errors/<F-v3-...>` 稳定机器引用 |
+| `doc_url` | `https://docs.graph-agent.dev/errors/<F-v3-...>` 可点击公开 URL |
+| `details_schema` | P0-2 统一安全 object JSON Schema:`{"type":"object","additionalProperties":true}` |
+| `schema_version` | `engine-mvp1.error-metadata.v1` |
+| `status` | 当前统一为 `active` |
 
-WS-E1 Step4 前的 93 个既有码保持不变；Step4 只新增两个 iterate 码。`[F-v3-mention-unused-registry-entry]` 与 `[F-v3-reference-reader-failed]` 是 `WARN`，其余现有码为 `FATAL`。
+WS-E3 P0-2 不新增/删除错误码；当前 key set 继续是 96 个。`[F-v3-mention-unused-registry-entry]` 与 `[F-v3-reference-reader-failed]` 是 `WARN`，其余现有码为 `FATAL`。
 
 iterate 新增码:
 - `[F-v3-iterate-accumulate-fields-missing]`:编译期 fatal；loop phase `io.inputs` 缺 `item_var` 或 `accumulate.var`。
@@ -78,14 +84,22 @@ WS-E3 P0-1 已落地通用消费者所需的最小诊断容器，但未推进 re
 - `ErrorPayload.details`(`packages/graph-agent/src/graph_agent/core/exceptions.py:62`) 默认 `{}`，由 `_normalize_details_val` 归一化为 JSON-safe 传输形状。`GraphAgentError.__init__` 会把异常 `context` 合入 `payload.details["context"]`;显式 dict 型 `details["context"]` 与异常 context 冲突时，显式值优先。
 - `RunResult.diagnostics`(`packages/graph-agent/src/graph_agent/core/result.py:86`) 是最终诊断快照；`error` 仍保留为主 fatal。失败只传 `error` 时 diagnostics 自动包含主 fatal；显式 diagnostics 会与主 error 去重合并、按 `diagnostics_limit` 截断，并产出 `diagnostic_counts={total,by_level,by_code}`。
 - 真实 run failure 边界不用改 `runner.py`:现有 `_write_workflow_result_artifacts` 通过 `result.model_dump(mode="json")` 写 `result.json`，因此新增 diagnostics 字段会自然落盘。
-- P0-1 **未改** `ERROR_REGISTRY` key set、`ErrorCodeMetadata` 形状、`doc_link` 语义，也未新增 `remediation` / `doc_ref` / `doc_url` / `details_schema` / `schema_version`。
-- P0-1 **未实现** `DiagnosticEmittedEvent` / `CallbackEvent` union 变更 / `GET /errors` / golden 新码 / 运行期细分码；这些仍归后续 WS-E4、P0-2、P0-3。iterate 两个基础码已由 WS-E1 Step4 注册。
+- P0-2 仍未改 `ErrorPayload` / `RunResult` 形状，P0-1 的 details/diagnostics 语义保持原样。
+- P0-2 **未实现** `DiagnosticEmittedEvent` / `CallbackEvent` union 变更 / Studio `GET /errors` route / golden 新码 / 运行期细分码；这些仍归后续 WS-E4、Studio thin route 或 P0-3。iterate 两个基础码已注册。
+
+### 6. 错误契约 V2 P0-2 registry metadata + catalog export(error_registry.py)
+`core/error_registry.py` 现在提供两个 engine-side 读取入口:
+
+- `export_error_metadata(code) -> dict[str, Any]`:只接受 `ERROR_REGISTRY` 中的 engine code；unknown code 继续 `ValueError("unknown graph_agent error code: ...")`，gateway 外部码不被 core registry 接管。
+- `export_error_catalog() -> dict[str, Any]`:返回版本化 envelope，形状为 `{registry_version, schema_version, items}`。`items` 按 code 字符串稳定排序，每个 item 都是 JSON-safe dict，`stage` 导出为 list，并包含 `code/level/stage/domain/remediation/doc_link/doc_ref/doc_url/status/details_schema/schema_version`。
+
+catalog version 为 `engine-mvp1.error-catalog.v1`，metadata schema version 为 `engine-mvp1.error-metadata.v1`。P0-2 没做 i18n、`remediation_actions`、生命周期、分页/过滤，也没做 Studio HTTP route。
 
 ## API
 本模块不定义 public API。它约束的运行入口由 `03-api-contract` 定义，编译机制入口由 `02-mechanism/01-compile` 实现。
 
 ## Data Model / State
-错误 payload 数据形状由 `ErrorCodeMetadata` 和 `ErrorPayload` 承接:至少有 `code`、`level`、`stage`、`message`、`doc_link`，可带 `skill_id`、`phase_id`、`field_path`、`source_path`、`details`。运行结果可通过 `RunResult.diagnostics` 获取有界诊断快照。
+错误 payload 数据形状由 `ErrorCodeMetadata` 和 `ErrorPayload` 承接:payload 至少有 `code`、`level`、`stage`、`message`、`doc_link`，可带 `skill_id`、`phase_id`、`field_path`、`source_path`、`details`。registry metadata 另提供 `remediation`、`doc_ref`、`doc_url`、`details_schema`、`schema_version`、`status` 给 catalog consumer。运行结果可通过 `RunResult.diagnostics` 获取有界诊断快照。
 
 ## 当前边界(这个模块现在不是什么)
 - 不是 scanner 实现细节文档；loader/purity/module_sandbox 的实现归 `02-mechanism/01-compile`。
@@ -96,18 +110,19 @@ WS-E3 P0-1 已落地通用消费者所需的最小诊断容器，但未推进 re
 
 | 维度 | 现状 | 目标 |
 |---|---|---|
-| 错误码总量 | `ERROR_REGISTRY` 95 个码；WS-E3 P0-1 未改 key set，WS-E1 Step4 新增 2 个 iterate 码 | mvp1 alignment 自承载；新增码按 WS 落地后回写 baseline |
+| 错误码总量 | `ERROR_REGISTRY` 96 个码；WS-E3 P0-2 未改 key set | mvp1 alignment 自承载；新增码按 WS 落地后回写 baseline |
 | doc_link | 现状应指向 mvp1 文档 | 验证所有 `metadata.doc_link.startswith("docs/engine/mvp1/")` |
-| 错误契约 V2 P0-1 | `ErrorPayload.details`、异常 context 序列化、`RunResult.diagnostics` 有界快照已 live | 后续 registry 化、诊断事件、码表端点、运行期细分码分 WS 落地 |
+| 错误契约 V2 P0-1 | `ErrorPayload.details`、异常 context 序列化、`RunResult.diagnostics` 有界快照已 live | 后续诊断事件、运行期细分码分 WS 落地 |
+| 错误契约 V2 P0-2 | registry metadata 已含 remediation/doc_ref/doc_url/details_schema/schema_version/status；engine-side catalog export 已 live | Studio HTTP route 若需要，只能薄透传 engine export |
 | golden stale | registry 现无 `[F-v3-golden-stale-fields]` | mvp1 目标:golden 缺必填字段是 eval 期 staleness，不是编译期 |
 | iterate 码族 | registry 已有 `[F-v3-iterate-accumulate-fields-missing]` / `[F-v3-iterate-over-not-list]`;loader/runtime 已使用 | 基础 iterate 错误码已落地；更细运行期码如需增加归后续契约 |
 | purity 范围 | 已挡本地写/API、直接 FS、`run_skill`、`sys.path`、动态 import 高风险路径；tool context import 禁令仍有效 | 剩余 LOGIC 纯签名、Context mutation 退场、非序列化返回等由后续 WS 收口 |
 | StateMapper required | `build_phase_input` 只过滤 properties，required 缺失静默丢 | required 缺失报 `[F-v3-runtime-state-mapping-failed]` |
 
-> **验“是否按 mvp1 改了”**:① registry 是 95 个现有码且 doc_link 全部指向 mvp1；② compile-rules alignment 自承载错误码与三段生命周期；③ mvp0 11/12 不再被本域当 SSOT 引用；④ iterate 两个基础码已注册且被 loader/runtime 使用；⑤ StateMapper required drift 明确留在 graph-exec refactor-target；⑥ WS-E3 P0-1 的 details/diagnostics 回归测试绿。
+> **验“是否按 mvp1 改了”**:① registry 是 96 个现有码且 doc_link 全部指向 mvp1；② compile-rules alignment 自承载错误码与三段生命周期；③ mvp0 11/12 不再被本域当 SSOT 引用；④ iterate 两个基础码已注册且被 loader/runtime 使用；⑤ StateMapper required drift 明确留在 graph-exec refactor-target；⑥ WS-E3 P0-1 的 details/diagnostics 回归测试绿；⑦ P0-2 engine catalog export JSON roundtrip 与 stable sort 回归测试绿。
 
 ## 读代码主路径提示
-`error_registry.py:ERROR_REGISTRY` → `exceptions.py:ErrorPayload` 自动补 metadata + details/context 归一化 → `loader.py:SkillLoader.compile_skill` 编译校验聚合 → `loader.py:_validate_iterate_compile_contracts` iterate 编译校验 → `result.py:RunResult` diagnostics 快照 → `purity.py:scan_python_purity` / `loader.py:_raise_on_purity_violations` purity 错误上报。
+`error_registry.py:ERROR_REGISTRY/export_error_catalog/export_error_metadata` → `exceptions.py:ErrorPayload` 自动补旧 metadata + details/context 归一化 → `loader.py:SkillLoader.compile_skill` 编译校验聚合 → `loader.py:_validate_iterate_compile_contracts` iterate 编译校验 → `result.py:RunResult` diagnostics 快照 → `purity.py:scan_python_purity` / `loader.py:_raise_on_purity_violations` purity 错误上报。
 
 ## 交叉引用(链接, 不复制)
 mvp1-alignment(目标) · `02-mechanism/01-compile`(loader/purity 实现,双向) · `02-mechanism/04-run-outer/01-graph-exec`(StateMapper + LOGIC action 目标,双向) · `01-contract/02-skill-syntax`(被校验语法) · `01-contract/05-invalidation` / `05-run-inner/06-golden-eval`(golden eval 期) · `02-mechanism/04-run-outer/02-iterate`(iterate 码族目标) · `03-api-contract` / `01-contract/04-data-contracts`(payload/API 形状)

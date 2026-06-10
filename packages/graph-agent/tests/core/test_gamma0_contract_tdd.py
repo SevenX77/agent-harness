@@ -194,6 +194,7 @@ def test_γ0_3_middleware_order_contract_constant_exists() -> None:
         "Tracing",
         "ToolError",
         "LoopDetection",
+        "ExitControl",
     )
 
 

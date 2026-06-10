@@ -13,6 +13,7 @@ from graph_agent.callbacks.base import Callback
 from graph_agent.middleware import MVP0_MIDDLEWARE_ORDER_CONTRACT
 from graph_agent.middleware.cognitive_flow import CognitiveFlowMiddleware, InterruptFn
 from graph_agent.middleware.execution_control import ExecutionControlMiddleware
+from graph_agent.middleware.exit_control import ExitControlMiddleware
 from graph_agent.middleware.loop_detection import LoopDetectionMiddleware
 from graph_agent.middleware.protocol_validation import ProtocolValidationMiddleware
 from graph_agent.middleware.tool_error import ToolErrorHandlingMiddleware
@@ -36,9 +37,9 @@ def build_middleware_chain(
     unattended: bool = False,
     interrupt_fn: InterruptFn | None = None,
     callbacks: Sequence[Callback] | None = None,
+    has_finish_task: bool = False,
 ) -> tuple[AgentMiddleware[AgentState[Any]], ...]:
-    """Instantiate the six middleware slots in the γ0 contract order."""
-
+    """Instantiate the seven middleware slots in the γ0 contract order."""
     by_contract_name: dict[str, AgentMiddleware[AgentState[Any]]] = {
         "ProtocolValidation": ProtocolValidationMiddleware(
             schema_engine=schema_engine,
@@ -64,6 +65,11 @@ def build_middleware_chain(
         ),
         "ToolError": ToolErrorHandlingMiddleware(phase_name=phase_name),
         "LoopDetection": LoopDetectionMiddleware(phase_name=phase_name),
+        "ExitControl": ExitControlMiddleware(
+            phase_name=phase_name,
+            callbacks=callbacks,
+            has_finish_task=has_finish_task,
+        ),
     }
     return tuple(by_contract_name[name] for name in MIDDLEWARE_ORDER_CONTRACT)
 

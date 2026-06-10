@@ -1038,6 +1038,9 @@ def _build_skill_node(
         chat_model=phase_chat_model,
         max_patch_attempts=max_patch_attempts,
     )
+    has_finish_task = bool(phase_ast.tools and "finish_task" in phase_ast.tools)
+    if has_finish_task:
+        finish_task.return_direct = True
     class FrameworkStateProxyDict(dict[str, Any]):
         def __init__(self, obj: Any) -> None:
             super().__init__()
@@ -1195,6 +1198,7 @@ def _build_skill_node(
         unattended=False,  # dynamically resolved in middleware
         interrupt_fn=None,
         callbacks=_callback_tuple(callbacks),
+        has_finish_task=has_finish_task,
     )
 
     from langgraph.checkpoint.memory import InMemorySaver

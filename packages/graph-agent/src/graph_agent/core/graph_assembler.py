@@ -20,9 +20,11 @@ from langgraph.prebuilt import InjectedState
 
 from graph_agent.callbacks.emit import _safe_emit_event
 from graph_agent.callbacks.events import (
+    BlackboardReduceEvent,
     BuiltinSubagentEnterEvent,
     BuiltinSubagentExitEvent,
     BuiltinSubagentFallbackEvent,
+    InputDispatchEvent,
     InputFileInjectedEvent,
     LLMCallEvent,
     PhaseEndEvent,
@@ -70,6 +72,7 @@ from graph_agent.runtime.state_mapper import (
     PhaseWrapper,
     StateMapper,
     phase_inputs_from_state,
+    schema_properties,
 )
 from graph_agent.tools.builtin.read_example import read_declared_example
 from graph_agent.tools.builtin.read_file import RuntimeInputFileError, read_workspace_text_file
@@ -78,6 +81,9 @@ from graph_agent.tools.builtin.read_reference import read_declared_reference, re
 MAX_REACT_TURNS = 8
 logger = logging.getLogger(__name__)
 parent_state_var: contextvars.ContextVar[Any] = contextvars.ContextVar("parent_state_var")
+active_branch_index_var: contextvars.ContextVar[int | None] = contextvars.ContextVar(
+    "active_branch_index_var", default=None
+)
 
 
 @dataclass(frozen=True)
@@ -106,6 +112,7 @@ class _GraphIterateRuntime:
     iterate: IterateSpec
     output_schema: dict[str, Any] | None
     terminal_phase_ids: list[str]
+    callbacks: Any | None = None
 
     def invoke(
         self,
@@ -122,6 +129,7 @@ class _GraphIterateRuntime:
                 self.output_schema,
                 self.terminal_phase_ids,
                 config=config,
+                callbacks=self.callbacks,
                 invoke_kwargs=kwargs,
             )
         return _run_graph_loop_iterate(
@@ -131,6 +139,7 @@ class _GraphIterateRuntime:
             self.output_schema,
             self.terminal_phase_ids,
             config=config,
+            callbacks=self.callbacks,
             invoke_kwargs=kwargs,
         )
 
@@ -207,6 +216,7 @@ def assemble_graph(
             iterate=compiled.manifest.iterate,
             output_schema=compiled.manifest.io.outputs,
             terminal_phase_ids=_terminal_phase_ids(compiled.manifest, compiled),
+            callbacks=callbacks,
         )
 
     return CompiledStateGraph(
@@ -447,6 +457,8 @@ def _build_iterate_wrapped_phase(
     node: Any,
     iterate: IterateSpec,
     output_schema: dict[str, Any] | None,
+    *,
+    callbacks: Any | None = None,
 ) -> Any:
     if iterate.mode == "batch":
         return _build_batch_iterate_phase(
@@ -458,8 +470,9 @@ def _build_iterate_wrapped_phase(
             range_spec=iterate.range,
             output_schema=output_schema,
             include_batch_outputs=False,
+            callbacks=callbacks,
         )
-    return _build_loop_iterate_phase(phase_id, node, iterate, output_schema)
+    return _build_loop_iterate_phase(phase_id, node, iterate, output_schema, callbacks=callbacks)
 
 
 def _build_legacy_batch_wrapped_phase(
@@ -467,6 +480,8 @@ def _build_legacy_batch_wrapped_phase(
     node: Any,
     batch: BatchSpec,
     output_schema: dict[str, Any] | None,
+    *,
+    callbacks: Any | None = None,
 ) -> Any:
     return _build_batch_iterate_phase(
         phase_id,
@@ -477,6 +492,7 @@ def _build_legacy_batch_wrapped_phase(
         range_spec=None,
         output_schema=output_schema,
         include_batch_outputs=True,
+        callbacks=callbacks,
     )
 
 
@@ -490,6 +506,7 @@ def _build_batch_iterate_phase(
     range_spec: tuple[int, int] | None,
     output_schema: dict[str, Any] | None,
     include_batch_outputs: bool,
+    callbacks: Any | None = None,
 ) -> Any:
     output_keys = _schema_output_keys(output_schema)
 
@@ -505,13 +522,17 @@ def _build_batch_iterate_phase(
         async def _run_all() -> list[dict[str, Any]]:
             semaphore = asyncio.Semaphore(concurrency)
 
-            async def _run_one(item: Any) -> dict[str, Any]:
+            async def _run_one(index: int, item: Any) -> dict[str, Any]:
                 async with semaphore:
                     child_state = StateManager.update_business(workflow_state, **{item_var: item})
-                    result = await asyncio.to_thread(node, child_state)
+                    token = active_branch_index_var.set(index)
+                    try:
+                        result = await asyncio.to_thread(node, child_state)
+                    finally:
+                        active_branch_index_var.reset(token)
                     return _phase_result_payload(child_state, result, output_keys)
 
-            return await asyncio.gather(*[_run_one(item) for item in items])
+            return await asyncio.gather(*[_run_one(index, item) for index, item in enumerate(items, start=1)])
 
         item_payloads = asyncio.run(_run_all())
         aggregated: dict[str, Any] = {}
@@ -530,6 +551,8 @@ def _build_loop_iterate_phase(
     node: Any,
     iterate: IterateSpec,
     output_schema: dict[str, Any] | None,
+    *,
+    callbacks: Any | None = None,
 ) -> Any:
     accumulate = iterate.accumulate
     if accumulate is None:
@@ -541,12 +564,16 @@ def _build_loop_iterate_phase(
         items = _apply_iterate_range(_resolve_iterate_items(workflow_state, iterate.over), iterate.range)
         acc = copy.deepcopy(accumulate.init)
         loop_state = StateManager.update_business(workflow_state, **{accumulate.var: acc})
-        for item in items:
+        for index, item in enumerate(items, start=1):
             child_state = StateManager.update_business(
                 loop_state,
                 **{iterate.item_var: item, accumulate.var: acc},
             )
-            result = node(child_state)
+            token = active_branch_index_var.set(index)
+            try:
+                result = node(child_state)
+            finally:
+                active_branch_index_var.reset(token)
             payload = _phase_result_payload(child_state, result, output_keys)
             if accumulate.from_ not in payload:
                 _iterate_merge_fatal(
@@ -554,6 +581,16 @@ def _build_loop_iterate_phase(
                 )
             acc = _merge_accumulator(acc, payload[accumulate.from_], accumulate.merge)
             loop_state = StateManager.update_business(loop_state, **{accumulate.var: acc})
+            _safe_emit_event(
+                callbacks,
+                BlackboardReduceEvent(
+                    from_phase=None,
+                    to_phase=phase_id,
+                    changed_keys=[accumulate.var],
+                    blackboard_snapshot=loop_state["data"].model_dump(),
+                    reducer=accumulate.merge,
+                ),
+            )
         final_payload = {accumulate.var: acc}
         return _with_phase_outputs(workflow_state, {phase_id: final_payload})
 
@@ -601,6 +638,7 @@ def _run_graph_batch_iterate(
     terminal_phase_ids: list[str],
     *,
     config: RunnableConfig | None,
+    callbacks: Any | None = None,
     invoke_kwargs: dict[str, Any],
 ) -> WorkflowState:
     output_keys = _schema_output_keys(output_schema)
@@ -617,6 +655,7 @@ def _run_graph_batch_iterate(
             async with semaphore:
                 child_state = StateManager.update_business(state, **{iterate.item_var: item})
                 token = active_outer_ns.set(f"iter{index}")
+                token_branch = active_branch_index_var.set(index)
                 try:
                     result = await asyncio.to_thread(
                         graph.invoke,
@@ -626,6 +665,7 @@ def _run_graph_batch_iterate(
                     )
                 finally:
                     active_outer_ns.reset(token)
+                    active_branch_index_var.reset(token_branch)
                 return _phase_result_payload(child_state, result, output_keys)
 
         return await asyncio.gather(
@@ -653,6 +693,7 @@ def _run_graph_loop_iterate(
     terminal_phase_ids: list[str],
     *,
     config: RunnableConfig | None,
+    callbacks: Any | None = None,
     invoke_kwargs: dict[str, Any],
 ) -> WorkflowState:
     accumulate = iterate.accumulate
@@ -671,6 +712,7 @@ def _run_graph_loop_iterate(
             **{iterate.item_var: item, accumulate.var: acc},
         )
         token = active_outer_ns.set(namespace)
+        token_branch = active_branch_index_var.set(index)
         try:
             result = graph.invoke(
                 child_state,
@@ -680,6 +722,7 @@ def _run_graph_loop_iterate(
             payload = _phase_result_payload(child_state, result, output_keys)
         finally:
             active_outer_ns.reset(token)
+            active_branch_index_var.reset(token_branch)
         if accumulate.from_ not in payload:
             _iterate_merge_fatal(
                 f"graph loop iterate output missing accumulate.from {accumulate.from_!r}"
@@ -688,6 +731,17 @@ def _run_graph_loop_iterate(
         loop_state = StateManager.update_business(
             _coerce_workflow_state(result),
             **{accumulate.var: acc},
+        )
+        to_phase = terminal_phase_ids[0] if terminal_phase_ids else "output"
+        _safe_emit_event(
+            callbacks,
+            BlackboardReduceEvent(
+                from_phase=None,
+                to_phase=to_phase,
+                changed_keys=[accumulate.var],
+                blackboard_snapshot=loop_state["data"].model_dump(),
+                reducer=accumulate.merge,
+            ),
         )
 
     final_payload = {accumulate.var: acc}
@@ -730,22 +784,82 @@ def _wrap_phase_runtime_node(
                 ),
             )
 
-    wrapped = PhaseWrapper(mapper, node_kind=node_kind).wrap(_node_with_lifecycle)
+    phase_runner = PhaseWrapper(mapper, node_kind=node_kind).wrap(_node_with_lifecycle)
+
+    def _dispatch_and_run(state: WorkflowState) -> WorkflowState:
+        data_obj = state.get("data")
+        if hasattr(data_obj, "model_dump"):
+            raw_dict = data_obj.model_dump()
+        elif isinstance(data_obj, dict):
+            raw_dict = dict(data_obj)
+        else:
+            raw_dict = {}
+
+        if "inputs" in raw_dict or "phase_outputs" in raw_dict:
+            flat_data = {}
+            if "inputs" in raw_dict and isinstance(raw_dict["inputs"], dict):
+                flat_data.update(raw_dict["inputs"])
+            if "phase_outputs" in raw_dict and isinstance(raw_dict["phase_outputs"], dict):
+                for p_val in raw_dict["phase_outputs"].values():
+                    if isinstance(p_val, dict):
+                        flat_data.update(p_val)
+            for k, v in raw_dict.items():
+                if k not in ("inputs", "phase_outputs"):
+                    flat_data[k] = v
+            raw_data = flat_data
+        else:
+            raw_data = raw_dict
+        keys = schema_properties(input_schema)
+        if not keys:
+            dispatched_keys = list(raw_data.keys())
+        else:
+            dispatched_keys = [k for k in keys if k in raw_data]
+
+        from_phase = None
+        flow_obj = state.get("flow")
+        if flow_obj:
+            if hasattr(flow_obj, "current_phase"):
+                from_phase = flow_obj.current_phase
+            elif isinstance(flow_obj, dict):
+                from_phase = flow_obj.get("current_phase")
+        if not from_phase:
+            from_phase = None
+
+        _safe_emit_event(
+            callbacks,
+            InputDispatchEvent(
+                from_phase=from_phase,
+                to_phase=phase_id,
+                changed_keys=dispatched_keys,
+                blackboard_snapshot=raw_data,
+                dispatched_keys=dispatched_keys,
+                branch_index=active_branch_index_var.get(),
+            )
+        )
+        return phase_runner(state)
+
     wrapped = _wrap_declared_input_files(
         phase_id,
         input_schema,
-        wrapped,
+        _dispatch_and_run,
         callbacks=callbacks,
     )
     iterate = getattr(phase_ast, "iterate", None)
     if iterate is not None:
-        return _build_iterate_wrapped_phase(phase_id, wrapped, iterate, output_schema)
+        return _build_iterate_wrapped_phase(
+            phase_id,
+            wrapped,
+            iterate,
+            output_schema,
+            callbacks=callbacks,
+        )
     if getattr(phase_ast, "batch", None) is not None:
         return _build_legacy_batch_wrapped_phase(
             phase_id,
             wrapped,
             phase_ast.batch,
             output_schema,
+            callbacks=callbacks,
         )
     return wrapped
 

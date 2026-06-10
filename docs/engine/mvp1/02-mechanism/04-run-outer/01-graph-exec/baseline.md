@@ -1,15 +1,14 @@
 ---
 module: 02-mechanism/04-run-outer/01-graph-exec
 doc: baseline
-status: drafted（现状对齐 WS-E1 Step5 + WS-E1-io 后代码；LOGIC runtime 已纯返回 dict;声明式 iterate 已接入 phase/graph 外层 runtime;action/tool 两套注册表;子图 inputs 已放宽且 outputs 仍严校;声明式 file input lazy 注入与 file/artifact 输出落盘已接入）
+status: drafted（现状对齐 WS-E1 Step5 + WS-E1-io + WS-E4 runtime 后代码；LOGIC runtime 已纯返回 dict;声明式 iterate 已接入 phase/graph 外层 runtime;phase input dispatch、loop reduce、file input injection 已发 runtime edge events;action/tool 两套注册表;子图 inputs 已放宽且 outputs 仍严校;声明式 file input lazy 注入与 file/artifact 输出落盘已接入）
 binds_alignment: ./mvp1-alignment.md
 binds_code: core/graph_assembler.py（_build_logic_node, _wrap_phase_runtime_node, _wrap_declared_input_files, _GraphIterateRuntime, _build_subgraph_node）· runtime/state_mapper.py:37 · core/actions.py（18/49）· core/loader.py（_validate_subgraph_io_contracts, _validate_iterate_compile_contracts）· core/runner.py（_save_v030_declared_file_outputs, _context_with_framework_output_sources）· tools/builtin/read_file.py（read_workspace_text_file）· io/manager.py:108（save_outputs）· io/storage.py:149（save_artifact）
 ---
 
 # 01-graph-exec — Baseline(当下代码实现逻辑)
 
-> **Scope**: 运行时按 DAG 执行 phase 的外层机制:`StateMapper`(io slice/merge)、LOGIC 执行(`_build_logic_node`,plain dict action input + 纯返回写回)、声明式 iterate 外层包装、SUBGRAPH 调用、action/tool 两套注册表(`actions.py`)、io_manager。
-> **现状一句话**:LOGIC 节点 `_build_logic_node` 已不再创建可变 `Context` facade;每个 action 收到 `{**before, **updates}` plain dict,只有 action 显式返回的 dict 会通过 `_validate_logic_update_keys` 校验后写回。WS-E1 Step4 已把声明式 iterate 接到 graph/phase 外层:phase-level iterate 包在 `PhaseWrapper(StateMapper)` 外侧聚合/累积结果,graph-level iterate 包在 compiled graph 外侧执行整图 batch/loop。WS-E1 Step5 已放宽 SUBGRAPH inputs 镜像校验:父 `SUBGRAPH.md io.inputs` 不再要求与子 `GRAPH.md io.inputs` 完全相等;outputs 仍严格相等。WS-E1-io 已把 `source: file` 的 phase input 接成目标 phase 执行前 lazy 注入普通 blackboard,并把 `target=file/artifact` 根输出与 `business_data_md` 原文保存接到 runner/io。action 与 tool 仍是 `actions.py` 里**两套独立注册表**。StateMapper(`runtime/state_mapper.py:37`)做 io slice/merge,失败报 `[F-v3-runtime-state-mapping-failed]`。
+> **现状一句话**:LOGIC 节点 `_build_logic_node` 已不再创建可变 `Context` facade;每个 action 收到 `{**before, **updates}` plain dict,只有 action 显式返回的 dict 会通过 `_validate_logic_update_keys` 校验后写回。WS-E1 Step4 已把声明式 iterate 接到 graph/phase 外层:phase-level iterate 包在 `PhaseWrapper(StateMapper)` 外侧聚合/累积结果,graph-level iterate 包在 compiled graph 外侧执行整图 batch/loop。WS-E4 runtime 后,phase input slice/dispatch 进入节点前会发 `InputDispatchEvent`,声明式 loop accumulate merge 写回后会发 `BlackboardReduceEvent`。WS-E1 Step5 已放宽 SUBGRAPH inputs 镜像校验:父 `SUBGRAPH.md io.inputs` 不再要求与子 `GRAPH.md io.inputs` 完全相等;outputs 仍严格相等。WS-E1-io 已把 `source: file` 的 phase input 接成目标 phase 执行前 lazy 注入普通 blackboard,成功注入时发 `InputFileInjectedEvent`,并把 `target=file/artifact` 根输出与 `business_data_md` 原文保存接到 runner/io。action 与 tool 仍是 `actions.py` 里**两套独立注册表**。StateMapper(`runtime/state_mapper.py:37`)做 io slice/merge,失败报 `[F-v3-runtime-state-mapping-failed]`。
 
 ## UI/UX
 N/A。
@@ -22,6 +21,7 @@ N/A。
 ### 1. StateMapper:io 切片 / 回写(state_mapper.py)
 `StateMapper`(`runtime/state_mapper.py:37`)按 phase 的 `io.inputs`/`io.outputs` 从黑板 slice 输入、merge 输出。
 - **slice 输入**(`build_phase_input:44` → `filter_runtime_inputs:25`):只按 `io.inputs.properties` 过滤,**现状不校验 `required` 缺失**——缺的字段静默丢弃、不报错(`required` 在 schema 里根本没被读)。
+- **input dispatch 可观测性**(WS-E4 runtime):`graph_assembler.py:_wrap_phase_runtime_node` 在调用 `PhaseWrapper(StateMapper)` 前发 `InputDispatchEvent`,按 phase `io.inputs.properties` 从 business blackboard 计算 `dispatched_keys`/`changed_keys`,携带 dispatch 时的 `blackboard_snapshot`。普通 phase `branch_index=None`;iterate/graph iterate 分支由 runtime contextvar 提供 1-based `branch_index`。
 - **merge 输出**(`wrap_phase_output:77`):output key 越界(不在 `io.outputs.properties`)才报 `[F-v3-runtime-state-mapping-failed]`(`:142`);`PhaseWrapper` 双包 / 节点异常也报同码(`:208/:225`)。
 > ⚠️ **baseline 修正(2026-06-05 审计)**:旧文写"required 缺失报错"是把 alignment 目标当成了现状——代码实为只过滤、不校验 `required`。required 校验是 mvp1 目标(见差异表 + alignment §3/§6),归 refactor-target。
 
@@ -41,6 +41,7 @@ Step4 没把循环塞回 action,而是在 graph execution 外层接声明式 run
 - node loop:`_build_loop_iterate_phase` 串行执行,每轮把 `accumulate.var` 作为普通 business input 喂给 action,最终只写回 accumulator。
 - graph-level iterate:`assemble_graph` 在 `compiled.manifest.iterate` 存在时,把 compiled LangGraph 包成 `_GraphIterateRuntime`;其 `invoke` 内部执行整图 batch 或整图 loop。
 - legacy `batch:` 仍兼容,但通过 `_build_legacy_batch_wrapped_phase` 接到新的 batch runtime。
+- WS-E4 runtime 后,phase/graph iterate 每轮设置 1-based branch contextvar,让各轮 `InputDispatchEvent` 可区分分支;node-level loop 与 graph-level loop 在声明式 accumulator merge 后发 `BlackboardReduceEvent`,携带 reducer 名、changed keys 与 merge 后 blackboard snapshot。
 
 ### 4. action vs tool:两套独立注册表(actions.py)
 - `ActionDef`(`actions.py:18`)/ `ActionRegistry`(`:25`,`for_phase` `:44`)——LOGIC 的 action(引擎调,确定性)。
@@ -79,7 +80,7 @@ blackboard = `WorkflowState.data`(`data-contracts`);io 经 StateMapper slice/mer
 
 ## 当前边界(这个模块现在不是什么)
 - **LOGIC runtime 已纯返回**:action 收到 plain dict,只显式返回 dict 写回;loader 对 action 第一参数名仍要求 `context/ctx`,这是语法层 drift,见 `01-contract/02-skill-syntax/baseline.md`。
-- **iterate runtime 已接入 graph-exec**:节点级/图级声明式循环 live;真实 trace emit、checkpoint delta/compaction、LangGraph `Send` 专门接线仍不在本 baseline 当前实现内。
+- **iterate runtime 已接入 graph-exec**:节点级/图级声明式循环 live;WS-E4 runtime edge trace 已覆盖 input dispatch 与 loop reduce;checkpoint delta/compaction、LangGraph `Send` 专门接线仍不在本 baseline 当前实现内。
 - **action/tool 不统一**:两套注册表(spec 已固定 Action≠Tool)。
 - **代码里术语混叫**:历史处把 action 叫 "tool"(死簇,待清)。
 - **子图 io 现状**:inputs 已放宽(`loader.py:528` 不再比较 inputs);outputs 仍强制相等并用 `[F-v3-subgraph-io-mismatch]` fatal。
@@ -97,7 +98,8 @@ blackboard = `WorkflowState.data`(`data-contracts`);io 经 StateMapper slice/mer
 |---|---|---|
 | action 写黑板 | 仅 action 返回 dict 写回;Context mutation diff 通道已关闭 | 纯返回 dict、只读 inputs(砍 set/update/delete) |
 | action 编排/副作用 | skill-local action 源码里的 `run_skill`/直接 FS/`sys.path`/动态 import 已编译期 purity FATAL；运行时是 plain dict + 纯返回范式 | 保持 compile-time hard-ban,并继续收口非序列化返回等纯 action 数据契约 |
-| 声明式 iterate | phase-level batch/range/loop 与 graph-level batch/loop 已 live;trace/checkpoint 深集成未落 | iterate.accumulate + 序列化数据;每轮 trace/checkpoint 深接线分后续 WS |
+| 声明式 iterate | phase-level batch/range/loop 与 graph-level batch/loop 已 live;input dispatch branch trace 与 loop reduce trace 已落;checkpoint 深集成未落 | iterate.accumulate + 序列化数据;checkpoint 深接线分后续 WS |
+| 边操作 observability | `InputDispatchEvent` 在 phase 执行前发出;`BlackboardReduceEvent` 在声明式 loop accumulate merge 后发出;`InputFileInjectedEvent` 仍无 runtime path | 文件 lazy 注入等 WS-E1-io 落地后补齐 |
 | 死簇 | `code_phase_node`/`phase_executor` | 删(live 用 `_build_logic_node`) |
 | StateMapper required 校验 | slice **不校验** required(只过滤 properties、缺失静默丢)(`filter_runtime_inputs:25`) | required 缺失报 `[F-v3-runtime-state-mapping-failed]`(alignment §3/§6) |
 | 子图 io 校验 | inputs 已放宽(不再镜像比较);outputs 仍严格 1:1(`loader.py:528/553`) | 已对齐 E1:inputs 从黑板切片、outputs 保留严校 |
@@ -107,7 +109,7 @@ blackboard = `WorkflowState.data`(`data-contracts`);io 经 StateMapper slice/mer
 > **验"是否按 mvp1 改了"**:① LOGIC runtime 是否只把 action 返回 dict 写回、Context mutation 不再隐式改黑板;② action 里 `run_skill`/FS/`sys.path`/动态 import 是否触发编译期 purity FATAL;③ 循环/累积是否由声明式 iterate runtime 执行,而不是 action 手写循环;④ StateMapper required 缺失/越界 key 是否报 `[F-v3-runtime-state-mapping-failed]`。
 
 ## 读代码主路径提示
-StateMapper `state_mapper.py:37` → LOGIC `_build_logic_node`(plain dict action_ctx)→ phase-level iterate `_build_iterate_wrapped_phase` → graph-level iterate `_GraphIterateRuntime` → action/tool 注册表 `actions.py:18/49` → SUBGRAPH `_build_subgraph_node`。
+StateMapper `state_mapper.py:37` → runtime edge dispatch `_wrap_phase_runtime_node` → LOGIC `_build_logic_node`(plain dict action_ctx)→ phase-level iterate `_build_iterate_wrapped_phase` / `_build_loop_iterate_phase`(reduce emit) → graph-level iterate `_GraphIterateRuntime` → action/tool 注册表 `actions.py:18/49` → SUBGRAPH `_build_subgraph_node`。
 
 ## 交叉引用(链接, 不复制)
 mvp1-alignment（目标 + LE1-3,双向）· `04-tools`(action/tool,双向)· `02-iterate` · `03-checkpoint` · `05-run-inner`(AGENT 委派)· `data-contracts`(blackboard)

@@ -6,6 +6,7 @@ import ast
 import importlib.util
 import inspect
 import logging
+import os
 import re
 import traceback
 from collections.abc import Callable
@@ -254,7 +255,8 @@ class SkillLoader:
                 for doc in phase_docs
             ],
         }
-        logger.info("Compiled V0.3.0 graph skill root=%s phases=%d", root, len(phase_docs))
+        safe_root = root_key.replace("\r", "").replace("\n", "")
+        logger.info("Compiled V0.3.0 graph skill root=%s phases=%d", safe_root, len(phase_docs))
         compiled = CompiledSkill(
             raw=raw,
             manifest=manifest,
@@ -1209,7 +1211,15 @@ def _validate_output_phases(
 
 
 def _validate_phase_dir(graph_path: Path, phase: str, skill_root: Path) -> None:
-    candidate = skill_root / "phases" / phase
+    phases_root = str((skill_root / "phases").resolve())
+    candidate_str = os.path.normpath(os.path.join(phases_root, phase))
+    if not candidate_str.startswith(phases_root + os.sep):
+        _graph_fatal(
+            graph_path,
+            _frontmatter_key_line(graph_path, "phases"),
+            f"[F-v3-graph-phase-id-invalid] phase {phase!r} escapes the phases directory",
+        )
+    candidate = Path(candidate_str)
     if not candidate.is_dir() or not any(
         (candidate / name).is_file() for name in _PHASE_FILE_TO_MODE
     ):

@@ -41,7 +41,9 @@ def test_scorecard_workflow_matches_design_contract() -> None:
     assert workflow["name"] == "Scorecard"
     assert workflow["on"]["push"]["branches"] == ["main"]
     assert workflow["on"]["schedule"][0]["cron"] == "0 7 * * 1"
-    assert workflow["permissions"] == "read-all"
+    # Least-privilege top level (S8234); the analysis job re-declares the
+    # write permissions Scorecard itself needs.
+    assert workflow["permissions"] == {"contents": "read"}
     # MF-1 (a3 audit): Scorecard publish_results: true 要求 workflow 完整性, 不能设 workflow-level env / defaults
     assert "env" not in workflow, (
         "Scorecard publish_results forbids workflow-level env (design §5.1 L281)"

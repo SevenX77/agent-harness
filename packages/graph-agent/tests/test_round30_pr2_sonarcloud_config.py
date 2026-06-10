@@ -1,9 +1,10 @@
-"""PR-2 SonarCloud 接入 config characterization tests.
+"""SonarCloud analysis-scope config characterization tests.
 
-锁 design.md §3.1 (前置) + §3.3 (sonar-project.properties).
-PR-2 必须 report-only — design §3.4 'PR-2 ship 时不在 CI 配置中阻断 PR merge'.
-PR-2 ship 时 ci.yml 含 sonar-scan job; round-30 后置 cleanup 后改
-SonarCloud Automatic Analysis 模式, 不再走 CI sonar-scan.
+历史: round-30 PR-2 接入 SonarCloud 时走 CI sonar-scan + sonar-project.properties;
+round-30 后置 cleanup 改 Automatic Analysis 模式后, Automatic Analysis 不读
+sonar-project.properties, 只读默认分支根目录的 .sonarcloud.properties。
+本测试锁当前权威配置: .sonarcloud.properties 存在且声明测试归类/排除规则,
+失效的 sonar-project.properties 不得回归(避免再次误导扫描范围认知)。
 """
 
 from __future__ import annotations
@@ -12,14 +13,18 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SONAR_PROPERTIES = REPO_ROOT / "sonar-project.properties"
+SONARCLOUD_PROPERTIES = REPO_ROOT / ".sonarcloud.properties"
+LEGACY_SONAR_PROPERTIES = REPO_ROOT / "sonar-project.properties"
 
 
-def _read_sonar_properties() -> dict[str, str]:
-    assert SONAR_PROPERTIES.exists(), "sonar-project.properties must exist at the repository root"
+def _read_sonarcloud_properties() -> dict[str, str]:
+    assert SONARCLOUD_PROPERTIES.exists(), (
+        ".sonarcloud.properties must exist at the repository root "
+        "(it is the only config file SonarCloud Automatic Analysis reads)"
+    )
 
     properties: dict[str, str] = {}
-    for raw_line in SONAR_PROPERTIES.read_text(encoding="utf-8").splitlines():
+    for raw_line in SONARCLOUD_PROPERTIES.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
@@ -28,16 +33,26 @@ def _read_sonar_properties() -> dict[str, str]:
     return properties
 
 
-def test_sonar_project_properties_declares_project_sources_tests_and_coverage() -> None:
-    properties = _read_sonar_properties()
-
-    assert properties["sonar.organization"] == "sevenx77"
-    assert properties["sonar.projectKey"] == "SevenX77_agent-harness"
-    assert properties["sonar.host.url"] == "https://sonarcloud.io"
-    assert properties["sonar.sources"] == "packages/graph-agent/src,packages/graph-agent-gateway/src,apps/studio/backend/app,apps/studio/frontend/src"
-    assert properties["sonar.tests"] == "packages/graph-agent/tests,packages/graph-agent-gateway/tests,apps/studio/backend/tests,apps/studio/frontend/src"
-    assert properties["sonar.python.version"] == "3.11,3.12,3.13"
-    assert (
-        properties["sonar.python.coverage.reportPaths"]
-        == "coverage-backend.xml,coverage-graph-agent.xml,coverage-gateway.xml"
+def test_legacy_sonar_project_properties_must_not_return() -> None:
+    assert not LEGACY_SONAR_PROPERTIES.exists(), (
+        "sonar-project.properties is ignored by Automatic Analysis and was removed; "
+        "configure analysis scope in .sonarcloud.properties instead"
     )
+
+
+def test_sonarcloud_properties_classifies_tests_and_excludes_non_product_code() -> None:
+    properties = _read_sonarcloud_properties()
+
+    test_inclusions = properties["sonar.test.inclusions"].split(",")
+    assert "**/tests/**" in test_inclusions
+    assert "**/conftest.py" in test_inclusions
+    assert "**/*.test.ts" in test_inclusions
+    assert "**/*.test.tsx" in test_inclusions
+
+    exclusions = properties["sonar.exclusions"].split(",")
+    assert "code-diagnostics/**" in exclusions
+    assert "**/__pycache__/**" in exclusions
+
+    cpd_exclusions = properties["sonar.cpd.exclusions"].split(",")
+    assert "skills/**" in cpd_exclusions
+    assert "**/tests/**" in cpd_exclusions

@@ -6,10 +6,10 @@ import copy
 import json
 import logging
 import uuid
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Any, NoReturn, cast
+from typing import Annotated, Any, NoReturn, TypeVar, cast
 
 from langchain.agents import create_agent
 from langchain_core.runnables import RunnableConfig
@@ -84,6 +84,7 @@ parent_state_var: contextvars.ContextVar[Any] = contextvars.ContextVar("parent_s
 active_branch_index_var: contextvars.ContextVar[int | None] = contextvars.ContextVar(
     "active_branch_index_var", default=None
 )
+_T = TypeVar("_T")
 
 
 @dataclass(frozen=True)
@@ -452,6 +453,153 @@ def _iterate_merge_fatal(message: str) -> NoReturn:
     )
 
 
+def _iteration_namespace(index: int) -> str:
+    return f"iter{index}"
+
+
+def _run_with_branch_index(index: int, action: Callable[[], _T]) -> _T:
+    token = active_branch_index_var.set(index)
+    try:
+        return action()
+    finally:
+        active_branch_index_var.reset(token)
+
+
+async def _run_with_branch_index_async(
+    index: int,
+    action: Callable[[], Awaitable[_T]],
+) -> _T:
+    token = active_branch_index_var.set(index)
+    try:
+        return await action()
+    finally:
+        active_branch_index_var.reset(token)
+
+
+def _run_with_iteration_context(index: int, namespace: str, action: Callable[[], _T]) -> _T:
+    token_outer = active_outer_ns.set(namespace)
+    token_branch = active_branch_index_var.set(index)
+    try:
+        return action()
+    finally:
+        active_outer_ns.reset(token_outer)
+        active_branch_index_var.reset(token_branch)
+
+
+async def _run_with_iteration_context_async(
+    index: int,
+    namespace: str,
+    action: Callable[[], Awaitable[_T]],
+) -> _T:
+    token_outer = active_outer_ns.set(namespace)
+    token_branch = active_branch_index_var.set(index)
+    try:
+        return await action()
+    finally:
+        active_outer_ns.reset(token_outer)
+        active_branch_index_var.reset(token_branch)
+
+
+async def _gather_indexed(
+    items: list[Any],
+    concurrency: int,
+    run_one: Callable[[int, Any], Awaitable[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def _guarded_run(index: int, item: Any) -> dict[str, Any]:
+        async with semaphore:
+            return await run_one(index, item)
+
+    return await asyncio.gather(
+        *[_guarded_run(index, item) for index, item in enumerate(items, start=1)]
+    )
+
+
+def _emit_blackboard_reduce(
+    callbacks: Any | None,
+    *,
+    to_phase: str,
+    state: WorkflowState,
+    changed_key: str,
+    reducer: str,
+) -> None:
+    _safe_emit_event(
+        callbacks,
+        BlackboardReduceEvent(
+            from_phase=None,
+            to_phase=to_phase,
+            changed_keys=[changed_key],
+            blackboard_snapshot=state["data"].model_dump(),
+            reducer=reducer,
+        ),
+    )
+
+
+def _runtime_blackboard_snapshot(state: WorkflowState) -> dict[str, Any]:
+    data_obj = state.get("data")
+    if hasattr(data_obj, "model_dump"):
+        dumped = data_obj.model_dump()
+        raw_dict = dict(dumped) if isinstance(dumped, dict) else {}
+    elif isinstance(data_obj, dict):
+        raw_dict = dict(data_obj)
+    else:
+        raw_dict = {}
+
+    if "inputs" not in raw_dict and "phase_outputs" not in raw_dict:
+        return raw_dict
+
+    flat_data: dict[str, Any] = {}
+    inputs = raw_dict.get("inputs")
+    if isinstance(inputs, dict):
+        flat_data.update(inputs)
+    phase_outputs = raw_dict.get("phase_outputs")
+    if isinstance(phase_outputs, dict):
+        for output in phase_outputs.values():
+            if isinstance(output, dict):
+                flat_data.update(output)
+    for key, value in raw_dict.items():
+        if key not in ("inputs", "phase_outputs"):
+            flat_data[key] = value
+    return flat_data
+
+
+def _current_phase_from_state(state: WorkflowState) -> str | None:
+    flow_obj = state.get("flow")
+    if not flow_obj:
+        return None
+    if hasattr(flow_obj, "current_phase"):
+        phase = flow_obj.current_phase
+    elif isinstance(flow_obj, dict):
+        phase = flow_obj.get("current_phase")
+    else:
+        phase = None
+    return phase if isinstance(phase, str) and phase else None
+
+
+def _emit_input_dispatch(
+    callbacks: Any | None,
+    *,
+    phase_id: str,
+    input_schema: Any,
+    state: WorkflowState,
+) -> None:
+    raw_data = _runtime_blackboard_snapshot(state)
+    keys = schema_properties(input_schema)
+    dispatched_keys = [key for key in keys if key in raw_data] if keys else list(raw_data.keys())
+    _safe_emit_event(
+        callbacks,
+        InputDispatchEvent(
+            from_phase=_current_phase_from_state(state),
+            to_phase=phase_id,
+            changed_keys=dispatched_keys,
+            blackboard_snapshot=raw_data,
+            dispatched_keys=dispatched_keys,
+            branch_index=active_branch_index_var.get(),
+        ),
+    )
+
+
 def _build_iterate_wrapped_phase(
     phase_id: str,
     node: Any,
@@ -520,19 +668,15 @@ def _build_batch_iterate_phase(
             return _with_phase_outputs(workflow_state, {phase_id: empty})
 
         async def _run_all() -> list[dict[str, Any]]:
-            semaphore = asyncio.Semaphore(concurrency)
-
             async def _run_one(index: int, item: Any) -> dict[str, Any]:
-                async with semaphore:
-                    child_state = StateManager.update_business(workflow_state, **{item_var: item})
-                    token = active_branch_index_var.set(index)
-                    try:
-                        result = await asyncio.to_thread(node, child_state)
-                    finally:
-                        active_branch_index_var.reset(token)
-                    return _phase_result_payload(child_state, result, output_keys)
+                child_state = StateManager.update_business(workflow_state, **{item_var: item})
+                result = await _run_with_branch_index_async(
+                    index,
+                    lambda: asyncio.to_thread(node, child_state),
+                )
+                return _phase_result_payload(child_state, result, output_keys)
 
-            return await asyncio.gather(*[_run_one(index, item) for index, item in enumerate(items, start=1)])
+            return await _gather_indexed(items, concurrency, _run_one)
 
         item_payloads = asyncio.run(_run_all())
         aggregated: dict[str, Any] = {}
@@ -569,11 +713,11 @@ def _build_loop_iterate_phase(
                 loop_state,
                 **{iterate.item_var: item, accumulate.var: acc},
             )
-            token = active_branch_index_var.set(index)
-            try:
-                result = node(child_state)
-            finally:
-                active_branch_index_var.reset(token)
+
+            def _invoke_node(child: WorkflowState = child_state) -> Any:
+                return node(child)
+
+            result = _run_with_branch_index(index, _invoke_node)
             payload = _phase_result_payload(child_state, result, output_keys)
             if accumulate.from_ not in payload:
                 _iterate_merge_fatal(
@@ -581,15 +725,12 @@ def _build_loop_iterate_phase(
                 )
             acc = _merge_accumulator(acc, payload[accumulate.from_], accumulate.merge)
             loop_state = StateManager.update_business(loop_state, **{accumulate.var: acc})
-            _safe_emit_event(
+            _emit_blackboard_reduce(
                 callbacks,
-                BlackboardReduceEvent(
-                    from_phase=None,
-                    to_phase=phase_id,
-                    changed_keys=[accumulate.var],
-                    blackboard_snapshot=loop_state["data"].model_dump(),
-                    reducer=accumulate.merge,
-                ),
+                to_phase=phase_id,
+                state=loop_state,
+                changed_key=accumulate.var,
+                reducer=accumulate.merge,
             )
         final_payload = {accumulate.var: acc}
         return _with_phase_outputs(workflow_state, {phase_id: final_payload})
@@ -600,7 +741,7 @@ def _build_loop_iterate_phase(
 def _iteration_config(config: RunnableConfig | None, iteration_index: int) -> RunnableConfig:
     inner_config: dict[str, Any] = dict(config or {})
     configurable = dict(inner_config.get("configurable", {}))
-    configurable["checkpoint_ns"] = f"iter{iteration_index}"
+    configurable["checkpoint_ns"] = _iteration_namespace(iteration_index)
     inner_config["configurable"] = configurable
     return inner_config  # type: ignore[return-value]
 
@@ -649,28 +790,21 @@ def _run_graph_batch_iterate(
         return _with_graph_iterate_signal(final_state, mode="batch", namespaces=[])
 
     async def _run_all() -> list[dict[str, Any]]:
-        semaphore = asyncio.Semaphore(iterate.concurrency)
-
         async def _run_one(index: int, item: Any) -> dict[str, Any]:
-            async with semaphore:
-                child_state = StateManager.update_business(state, **{iterate.item_var: item})
-                token = active_outer_ns.set(f"iter{index}")
-                token_branch = active_branch_index_var.set(index)
-                try:
-                    result = await asyncio.to_thread(
-                        graph.invoke,
-                        child_state,
-                        config=_iteration_config(config, index),
-                        **invoke_kwargs,
-                    )
-                finally:
-                    active_outer_ns.reset(token)
-                    active_branch_index_var.reset(token_branch)
-                return _phase_result_payload(child_state, result, output_keys)
+            child_state = StateManager.update_business(state, **{iterate.item_var: item})
+            result = await _run_with_iteration_context_async(
+                index,
+                _iteration_namespace(index),
+                lambda: asyncio.to_thread(
+                    graph.invoke,
+                    child_state,
+                    config=_iteration_config(config, index),
+                    **invoke_kwargs,
+                ),
+            )
+            return _phase_result_payload(child_state, result, output_keys)
 
-        return await asyncio.gather(
-            *[_run_one(index, item) for index, item in enumerate(items, start=1)]
-        )
+        return await _gather_indexed(items, iterate.concurrency, _run_one)
 
     item_payloads = asyncio.run(_run_all())
     aggregated: dict[str, Any] = {}
@@ -681,7 +815,7 @@ def _run_graph_batch_iterate(
         state,
         _terminal_phase_outputs(terminal_phase_ids, aggregated),
     )
-    namespaces = [f"iter{index}" for index in range(1, len(items) + 1)]
+    namespaces = [_iteration_namespace(index) for index in range(1, len(items) + 1)]
     return _with_graph_iterate_signal(final_state, mode="batch", namespaces=namespaces)
 
 
@@ -705,24 +839,29 @@ def _run_graph_loop_iterate(
     loop_state = StateManager.update_business(state, **{accumulate.var: acc})
     namespaces: list[str] = []
     for index, item in enumerate(items, start=1):
-        namespace = f"iter{index}"
+        namespace = _iteration_namespace(index)
         namespaces.append(namespace)
         child_state = StateManager.update_business(
             loop_state,
             **{iterate.item_var: item, accumulate.var: acc},
         )
-        token = active_outer_ns.set(namespace)
-        token_branch = active_branch_index_var.set(index)
-        try:
-            result = graph.invoke(
-                child_state,
-                config=_iteration_config(config, index),
+
+        def _invoke_graph_iteration(
+            child: WorkflowState = child_state,
+            iteration_index: int = index,
+        ) -> Any:
+            return graph.invoke(
+                child,
+                config=_iteration_config(config, iteration_index),
                 **invoke_kwargs,
             )
-            payload = _phase_result_payload(child_state, result, output_keys)
-        finally:
-            active_outer_ns.reset(token)
-            active_branch_index_var.reset(token_branch)
+
+        result = _run_with_iteration_context(
+            index,
+            namespace,
+            _invoke_graph_iteration,
+        )
+        payload = _phase_result_payload(child_state, result, output_keys)
         if accumulate.from_ not in payload:
             _iterate_merge_fatal(
                 f"graph loop iterate output missing accumulate.from {accumulate.from_!r}"
@@ -733,15 +872,12 @@ def _run_graph_loop_iterate(
             **{accumulate.var: acc},
         )
         to_phase = terminal_phase_ids[0] if terminal_phase_ids else "output"
-        _safe_emit_event(
+        _emit_blackboard_reduce(
             callbacks,
-            BlackboardReduceEvent(
-                from_phase=None,
-                to_phase=to_phase,
-                changed_keys=[accumulate.var],
-                blackboard_snapshot=loop_state["data"].model_dump(),
-                reducer=accumulate.merge,
-            ),
+            to_phase=to_phase,
+            state=loop_state,
+            changed_key=accumulate.var,
+            reducer=accumulate.merge,
         )
 
     final_payload = {accumulate.var: acc}
@@ -787,55 +923,7 @@ def _wrap_phase_runtime_node(
     phase_runner = PhaseWrapper(mapper, node_kind=node_kind).wrap(_node_with_lifecycle)
 
     def _dispatch_and_run(state: WorkflowState) -> WorkflowState:
-        data_obj = state.get("data")
-        if hasattr(data_obj, "model_dump"):
-            raw_dict = data_obj.model_dump()
-        elif isinstance(data_obj, dict):
-            raw_dict = dict(data_obj)
-        else:
-            raw_dict = {}
-
-        if "inputs" in raw_dict or "phase_outputs" in raw_dict:
-            flat_data = {}
-            if "inputs" in raw_dict and isinstance(raw_dict["inputs"], dict):
-                flat_data.update(raw_dict["inputs"])
-            if "phase_outputs" in raw_dict and isinstance(raw_dict["phase_outputs"], dict):
-                for p_val in raw_dict["phase_outputs"].values():
-                    if isinstance(p_val, dict):
-                        flat_data.update(p_val)
-            for k, v in raw_dict.items():
-                if k not in ("inputs", "phase_outputs"):
-                    flat_data[k] = v
-            raw_data = flat_data
-        else:
-            raw_data = raw_dict
-        keys = schema_properties(input_schema)
-        if not keys:
-            dispatched_keys = list(raw_data.keys())
-        else:
-            dispatched_keys = [k for k in keys if k in raw_data]
-
-        from_phase = None
-        flow_obj = state.get("flow")
-        if flow_obj:
-            if hasattr(flow_obj, "current_phase"):
-                from_phase = flow_obj.current_phase
-            elif isinstance(flow_obj, dict):
-                from_phase = flow_obj.get("current_phase")
-        if not from_phase:
-            from_phase = None
-
-        _safe_emit_event(
-            callbacks,
-            InputDispatchEvent(
-                from_phase=from_phase,
-                to_phase=phase_id,
-                changed_keys=dispatched_keys,
-                blackboard_snapshot=raw_data,
-                dispatched_keys=dispatched_keys,
-                branch_index=active_branch_index_var.get(),
-            )
-        )
+        _emit_input_dispatch(callbacks, phase_id=phase_id, input_schema=input_schema, state=state)
         return phase_runner(state)
 
     wrapped = _wrap_declared_input_files(

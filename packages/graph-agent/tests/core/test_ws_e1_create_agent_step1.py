@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import pytest
 from graph_agent_gateway.client_manager import LLMClientManager
 from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute, RuntimePolicy
 from langchain.agents import create_agent
@@ -18,6 +19,7 @@ import graph_agent.core.graph_assembler as graph_assembler
 from graph_agent.core._predict_internal.interception import PredictGatewayChatModel
 from graph_agent.core._predict_internal.strategy import BaseMockStrategy
 from graph_agent.core.compiler import compile_skill
+from graph_agent.core.exceptions import GraphAgentFatalError
 from graph_agent.core.io_manager import IOManager
 from graph_agent.core.loader import CompiledSubagent
 from graph_agent.core.schema_engine import SchemaEngine
@@ -445,6 +447,7 @@ def test_agent_phase_constructs_create_agent_with_workflow_state_boundaries(
         "TracingMiddleware",
         "ToolErrorHandlingMiddleware",
         "LoopDetectionMiddleware",
+        "ExitControlMiddleware",
     ]
 
     agent_input = captured["agent_input"]
@@ -578,10 +581,12 @@ def test_phase_max_iterations_stops_repeated_tool_loop(
         chat_model=chat,
         skill_resolver=mock_skill_resolver,
     ).graph
-    graph.invoke(
-        {"data": {"topic": "contracts"}, "flow": {"thread_id": "run-1"}, "messages": []},
-        config={"configurable": {"thread_id": "run-1"}},
-    )
+
+    with pytest.raises(GraphAgentFatalError):
+        graph.invoke(
+            {"data": {"topic": "contracts"}, "flow": {"thread_id": "run-1"}, "messages": []},
+            config={"configurable": {"thread_id": "run-1"}},
+        )
 
     assert chat.invocations == 2
 

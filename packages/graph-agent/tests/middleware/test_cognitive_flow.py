@@ -129,7 +129,7 @@ class TestFinishTask:
         result = middleware.wrap_tool_call(request, _handler)
 
         assert isinstance(result, Command)
-        assert result.goto == END
+        assert result.goto != END
         assert engine.validate_calls == 1
         new_data = result.update["data"]
         assert isinstance(new_data, BusinessData)
@@ -221,7 +221,10 @@ class TestFinishTask:
 
         assert handled is True
         assert isinstance(result, Command)
-        assert result.goto == END
+        assert result.goto != END
+        new_flow = result.update["flow"]
+        assert isinstance(new_flow, FrameworkState)
+        assert new_flow.finish_task_result["schema_validation"] == "passed"
 
     def test_finish_without_schema_raises_phase_2_a1(self) -> None:
         import pytest
@@ -343,7 +346,7 @@ class TestPhase2A2v3PydanticSchemaDispatch:
         result = middleware.wrap_tool_call(request, _handler)
 
         assert isinstance(result, Command)
-        assert result.goto == END
+        assert result.goto != END
         new_data = result.update["data"]
         assert isinstance(new_data, BusinessData)
         # The Pydantic dispatch path must have produced the same parsed
@@ -412,7 +415,10 @@ class TestPhase2A2v3BusinessValidatorDispatch:
         result = middleware.wrap_tool_call(request, _handler)
 
         assert isinstance(result, Command)
-        assert result.goto == END
+        assert result.goto != END
+        new_flow = result.update["flow"]
+        assert isinstance(new_flow, FrameworkState)
+        assert new_flow.finish_task_result["schema_validation"] == "passed"
         # Validator must have received the Pydantic-validated parsed
         # items list (A1 §2.4 contract), not the raw markdown text or
         # the legacy ctx dict.

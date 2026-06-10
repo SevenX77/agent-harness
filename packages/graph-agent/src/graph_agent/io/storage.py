@@ -257,14 +257,27 @@ class StorageManager:
 
     def _artifact_path(self, run_id: str, name: str, phase: str | None) -> Path:
         run_dir = self._run_dir(run_id)
-        if phase:
-            return run_dir / "phases" / phase / name
-        return run_dir / name
+        base_dir = run_dir / "phases" / phase if phase else run_dir
+        return self._artifact_path_under(base_dir, name)
+
+    @staticmethod
+    def _artifact_path_under(base_dir: Path, name: str) -> Path:
+        if not name:
+            raise ValueError("artifact name must be non-empty")
+        relative_name = Path(str(name))
+        if relative_name.is_absolute():
+            raise ValueError(f"artifact path escapes run directory: {name!r}")
+        base_resolved = base_dir.resolve(strict=False)
+        target = (base_resolved / relative_name).resolve(strict=False)
+        try:
+            target.relative_to(base_resolved)
+        except ValueError as exc:
+            raise ValueError(f"artifact path escapes run directory: {name!r}") from exc
+        return target
 
     def _artifact_path_for_dir(self, run_dir: Path, name: str, phase: str | None) -> Path:
-        if phase:
-            return run_dir / "phases" / phase / name
-        return run_dir / name
+        base_dir = run_dir / "phases" / phase if phase else run_dir
+        return self._artifact_path_under(base_dir, name)
 
     @staticmethod
     def _read_artifact(path: Path) -> Any:

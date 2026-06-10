@@ -141,7 +141,7 @@ class IOManager:
             if not name:
                 raise ValueError(f"Output spec missing 'name' field: {output_spec}")
             target = output_spec.get("target", "file")
-            data = context.get(name)
+            data = self._resolve_output_data(output_spec, context, name)
 
             if data is None:
                 public_keys = sorted(str(key) for key in context if not str(key).startswith("_"))
@@ -165,13 +165,24 @@ class IOManager:
                     # Kitchen-Pass default: no caller-supplied saver, so fall
                     # back to the framework's built-in StorageManager.
                     phase = context.get("current_phase") or context.get("phase")
-                    path = storage_manager.save_artifact(name, data, phase=phase)
+                    artifact_name = self._resolve_artifact_name(output_spec, context, name)
+                    path = storage_manager.save_artifact(artifact_name, data, phase=phase)
                     saved_paths.append(str(path))
                     logger.info(
                         "[IOManager] Output '%s' saved via StorageManager fallback: %s",
                         name,
                         path,
                     )
+                elif artifact_saver is None and output_dir is not None:
+                    file_path = self._resolve_output_file_path(
+                        output_spec,
+                        context,
+                        output_dir=output_dir,
+                        default_name=name,
+                        default_suffix="",
+                    )
+                    self._save_file(file_path, data)
+                    saved_paths.append(str(file_path))
                 else:
                     paths = self._save_via_artifact_saver(
                         name,
@@ -182,17 +193,19 @@ class IOManager:
                     saved_paths.extend(paths)
 
             elif target == "file":
-                file_path = output_spec.get("path")
-                if not file_path and output_dir:
-                    file_path = str(Path(output_dir) / f"{name}.json")
-                if not file_path:
+                if not output_spec.get("path") and not output_spec.get("filename") and not output_dir:
                     raise ValueError(
                         f"Output '{name}' has target='file' but no path could be determined"
                     )
-                # Replace {context.key} placeholders in path
-                file_path = self._resolve_path_template(file_path, context)
-                self._save_file(Path(file_path), data)
-                saved_paths.append(file_path)
+                file_path = self._resolve_output_file_path(
+                    output_spec,
+                    context,
+                    output_dir=output_dir,
+                    default_name=f"{name}.json",
+                    default_suffix=".json",
+                )
+                self._save_file(file_path, data)
+                saved_paths.append(str(file_path))
 
             else:
                 raise ValueError(
@@ -205,6 +218,61 @@ class IOManager:
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _resolve_output_data(
+        output_spec: dict[str, Any],
+        context: dict[str, Any],
+        name: str,
+    ) -> Any:
+        source = output_spec.get("source")
+        content_type = str(output_spec.get("content_type") or "").lower()
+        if source == "business_data_md" or (
+            not source and content_type == "text/markdown" and "business_data_md" in context
+        ):
+            return context.get("business_data_md")
+        return context.get(name)
+
+    @staticmethod
+    def _resolve_artifact_name(
+        output_spec: dict[str, Any],
+        context: dict[str, Any],
+        name: str,
+    ) -> str:
+        declared = output_spec.get("path") or output_spec.get("filename") or name
+        resolved = IOManager._resolve_path_template(str(declared), context)
+        if not resolved:
+            raise ValueError(f"Output '{name}' resolved to an empty artifact path")
+        return resolved
+
+    @staticmethod
+    def _resolve_output_file_path(
+        output_spec: dict[str, Any],
+        context: dict[str, Any],
+        *,
+        output_dir: str | Path | None,
+        default_name: str,
+        default_suffix: str,
+    ) -> Path:
+        declared = output_spec.get("path") or output_spec.get("filename")
+        if declared:
+            raw_path = IOManager._resolve_path_template(str(declared), context)
+        else:
+            raw_path = default_name
+            if default_suffix and not Path(raw_path).suffix:
+                raw_path = f"{raw_path}{default_suffix}"
+
+        path = Path(raw_path)
+        if output_dir is None:
+            return path
+
+        base_dir = Path(output_dir).resolve()
+        target = path.resolve(strict=False) if path.is_absolute() else (base_dir / path).resolve(strict=False)
+        try:
+            target.relative_to(base_dir)
+        except ValueError as exc:
+            raise ValueError(f"Declared output path {raw_path!r} escapes output_dir") from exc
+        return target
 
     @staticmethod
     def _resolve_path_template(path: str, context: dict[str, Any]) -> str:

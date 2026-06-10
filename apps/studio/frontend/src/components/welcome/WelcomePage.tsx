@@ -124,7 +124,7 @@ function sentenceFragment(message: string) {
 }
 
 function relativeLintFile(value: string): string | null {
-  const match = value.match(/(?:^|[\\/])?((?:phases[\\/][A-Za-z0-9_-]+[\\/](?:LOGIC|SUBGRAPH|SKILL)\.md)|GRAPH\.md|io[\\/]inputs\.json|io[\\/]outputs\.json)/)
+  const match = value.match(/[\\/]?((?:phases[\\/][A-Za-z0-9_-]+[\\/](?:LOGIC|SUBGRAPH|SKILL)\.md)|GRAPH\.md|io[\\/]inputs\.json|io[\\/]outputs\.json)/)
   return match ? match[1].replace(/\\/g, '/') : null
 }
 

@@ -7,7 +7,7 @@ import hashlib
 import logging
 import re
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -232,6 +232,15 @@ _running_endpoint_test_jobs: dict[str, str] = {}
 _endpoint_test_jobs_lock = asyncio.Lock()
 _role_test_jobs: dict[str, RoleTestJobResponse] = {}
 _role_test_jobs_lock = asyncio.Lock()
+# Keep strong references to fire-and-forget background tasks so the event loop
+# cannot garbage-collect them mid-flight (Sonar S7502).
+_background_tasks: set[asyncio.Task[None]] = set()
+
+
+def _spawn_background_task(coro: Coroutine[Any, Any, None]) -> None:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 
 class EndpointUpsertRequest(BaseModel):
@@ -391,7 +400,7 @@ async def start_endpoint_test_job(endpoint_id: str) -> EndpointTestJobResponse:
         )
         _endpoint_test_jobs[job.job_id] = job
         _running_endpoint_test_jobs[endpoint_id] = job.job_id
-    asyncio.create_task(_run_official_endpoint_test_job(job.job_id, endpoint_id))
+    _spawn_background_task(_run_official_endpoint_test_job(job.job_id, endpoint_id))
     return job
 
 
@@ -998,7 +1007,7 @@ async def start_role_test_job(role_name: str) -> RoleTestJobResponse:
     )
     async with _role_test_jobs_lock:
         _role_test_jobs[job_id] = job
-    asyncio.create_task(_run_role_test_job_impl(job_id, role_name, targets))
+    _spawn_background_task(_run_role_test_job_impl(job_id, role_name, targets))
     return job
 
 

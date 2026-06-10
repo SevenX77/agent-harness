@@ -361,7 +361,7 @@ class LLMPhaseNode(PhaseNode):
         loop_state.checkpoint_count += 1
         loop_state.wm_snapshot = wm_current
         removed_pairs = max((len(loop_state.current_messages) - 2) // 2, 0)
-        _emit_working_memory_update(phase, runtime.active_callbacks, str(wm_current or ""))
+        _emit_working_memory_update(phase, runtime.active_callbacks, wm_current)
         sidecar_ref = self._write_compaction_sidecar(runtime, loop_state)
         _emit_compaction_event(
             phase,

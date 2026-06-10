@@ -1,10 +1,14 @@
 import { useCallback, useState } from 'react'
 import type { Toast, ToastKind } from '../types/studio'
 
+let toastIdFallbackCounter = 0
+
 function newToastId(): string {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random()}`
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID()
+  }
+  toastIdFallbackCounter += 1
+  return `${Date.now()}-${toastIdFallbackCounter}`
 }
 
 export function useToasts() {

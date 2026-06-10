@@ -12,75 +12,100 @@ from graph_agent.core.runner import run_skill
 from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol
 
 
+def _changed_diff(path: str, *, actual: Any, expected: Any) -> dict[str, Any]:
+    return {
+        "path": path,
+        "expected": expected,
+        "actual": actual,
+        "status": "changed",
+    }
+
+
+def _field_path(path_prefix: str, key: str) -> str:
+    return f"{path_prefix}.{key}" if path_prefix else key
+
+
+def _diff_dict_outputs(
+    actual: dict[Any, Any],
+    expected: dict[Any, Any],
+    path_prefix: str,
+) -> list[dict[str, Any]]:
+    diffs: list[dict[str, Any]] = []
+    for key in sorted(set(actual.keys()) | set(expected.keys())):
+        key_path = _field_path(path_prefix, str(key))
+        if key not in expected:
+            diffs.append(_changed_diff(key_path, actual=actual[key], expected=None))
+            continue
+        if key not in actual:
+            diffs.append(_changed_diff(key_path, actual=None, expected=expected[key]))
+            continue
+        diffs.extend(diff_outputs(actual[key], expected[key], key_path))
+    return diffs
+
+
+def _diff_list_outputs(
+    actual: list[Any],
+    expected: list[Any],
+    path_prefix: str,
+) -> list[dict[str, Any]]:
+    diffs: list[dict[str, Any]] = []
+    for index in range(max(len(actual), len(expected))):
+        current_path = f"{path_prefix}[{index}]"
+        actual_value = actual[index] if index < len(actual) else None
+        expected_value = expected[index] if index < len(expected) else None
+        diffs.extend(diff_outputs(actual_value, expected_value, current_path))
+    return diffs
+
+
 def diff_outputs(actual: Any, expected: Any, path_prefix: str = "") -> list[dict[str, Any]]:
     if actual == expected:
         return []
 
     if isinstance(actual, dict) and isinstance(expected, dict):
-        diffs = []
-        all_keys = sorted(set(actual.keys()) | set(expected.keys()))
-        for k in all_keys:
-            current_path = f"{path_prefix}.{k}" if path_prefix else k
-            if k not in expected:
-                diffs.append({
-                    "path": current_path,
-                    "expected": None,
-                    "actual": actual[k],
-                    "status": "changed"
-                })
-            elif k not in actual:
-                diffs.append({
-                    "path": current_path,
-                    "expected": expected[k],
-                    "actual": None,
-                    "status": "changed"
-                })
-            else:
-                diffs.extend(diff_outputs(actual[k], expected[k], current_path))
-        return diffs
+        return _diff_dict_outputs(actual, expected, path_prefix)
 
     if isinstance(actual, list) and isinstance(expected, list):
-        diffs = []
-        for i in range(max(len(actual), len(expected))):
-            current_path = f"{path_prefix}[{i}]"
-            act_val = actual[i] if i < len(actual) else None
-            exp_val = expected[i] if i < len(expected) else None
-            diffs.extend(diff_outputs(act_val, exp_val, current_path))
-        return diffs
+        return _diff_list_outputs(actual, expected, path_prefix)
 
-    return [{
-        "path": path_prefix,
-        "expected": expected,
-        "actual": actual,
-        "status": "changed"
-    }]
+    return [_changed_diff(path_prefix, actual=actual, expected=expected)]
+
+
+def _mean_score(scores: list[float]) -> float:
+    if not scores:
+        return 1.0
+    return sum(scores) / len(scores)
+
+
+def _dict_score(actual: dict[Any, Any], expected: dict[Any, Any]) -> float:
+    keys = set(actual.keys()) | set(expected.keys())
+    return _mean_score([calculate_score(actual.get(key), expected.get(key)) for key in keys])
+
+
+def _list_score(actual: list[Any], expected: list[Any]) -> float:
+    scores = []
+    for index in range(max(len(actual), len(expected))):
+        actual_value = actual[index] if index < len(actual) else None
+        expected_value = expected[index] if index < len(expected) else None
+        scores.append(calculate_score(actual_value, expected_value))
+    return _mean_score(scores)
+
+
+def _numeric_score(actual: int | float, expected: int | float) -> float:
+    denominator = max(abs(actual), abs(expected), 1.0)
+    return max(0.0, 1.0 - (abs(actual - expected) / denominator))
 
 
 def calculate_score(actual: Any, expected: Any) -> float:
     if actual == expected:
         return 1.0
     if isinstance(actual, dict) and isinstance(expected, dict):
-        all_keys = set(actual.keys()) | set(expected.keys())
-        if not all_keys:
-            return 1.0
-        scores = []
-        for k in all_keys:
-            scores.append(calculate_score(actual.get(k), expected.get(k)))
-        return sum(scores) / len(scores)
+        return _dict_score(actual, expected)
     if isinstance(actual, list) and isinstance(expected, list):
-        if not actual and not expected:
-            return 1.0
-        scores = []
-        for i in range(max(len(actual), len(expected))):
-            act_val = actual[i] if i < len(actual) else None
-            exp_val = expected[i] if i < len(expected) else None
-            scores.append(calculate_score(act_val, exp_val))
-        return sum(scores) / len(scores)
+        return _list_score(actual, expected)
     if isinstance(actual, str) and isinstance(expected, str):
         return SequenceMatcher(None, expected, actual).ratio()
     if isinstance(actual, (int, float)) and isinstance(expected, (int, float)):
-        denominator = max(abs(actual), abs(expected), 1.0)
-        return max(0.0, 1.0 - (abs(actual - expected) / denominator))
+        return _numeric_score(actual, expected)
     return 0.0
 
 

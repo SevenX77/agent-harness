@@ -1,6 +1,6 @@
 ---
 doc: impl-plan
-status: active（2026-06-10 回写:WS-E1/E1-io/E2/E3/E4/E5/E6/E8 已合入 main;Engine MVP1 功能链仅剩 WS-E7 golden/resume）
+status: active（2026-06-10 回写:WS-E1/E1-io/E2/E3/E4/E5/E6/E7/E8 首批 Engine 功能链均已实现;剩余为 CI/质量门、Studio 消费接线与后续 backlog）
 applies_standard: ../../../development/task-spec-standard.md
 binds_design: ../INDEX.md · ../_impl-backlog.md（Gap 清单源）· ../_api-handshake-audit.md（studio 协同）· ./WS-E1-create-agent-core.md
 ---
@@ -8,7 +8,7 @@ binds_design: ../INDEX.md · ../_impl-backlog.md（Gap 清单源）· ../_api-ha
 # Graph-Agent (Engine) MVP1 实施计划(大模块 + 并发分区)
 
 > **原则**(同 `task-spec-standard`):大模块按**依赖**串,小模块按**文件归属**并发(IR1);baseline 实施后回写(IR6);目标机制以各 `alignment` 为唯一真理(IR5)——本计划只排**顺序 + 并发 + 文件锁**,Gap 明细见 [`_impl-backlog.md`](../_impl-backlog.md)。
-> **当前事实(2026-06-10)**:WS-E1 串行链、WS-E1-io、WS-E2、WS-E3 P0-1/P0-2、WS-E4、WS-E5、WS-E6、WS-E8 已合入 `main`;本文件此前未随 PR 回写,本次按 `origin/main` 历史校正。剩余 Engine MVP1 功能阶段为 **WS-E7 golden/resume**。主线 SonarCloud gate 聚合失败属于 CI/质量门收尾,不改变功能 WS 进度。
+> **当前事实(2026-06-10)**:WS-E1 串行链、WS-E1-io、WS-E2、WS-E3 P0-1/P0-2、WS-E4、WS-E5、WS-E6、WS-E8 已合入 `main`;WS-E7 golden/resume 已在 Engine 侧实现为通用 public API。Engine MVP1 首批功能 WS 已收敛,剩余是 CI/质量门、Studio 薄接线以及 P0-3/P1/P2 等后续 backlog。
 > **跨模块依赖(与 gateway 不冲突)**:`create_agent`(WS-E1)绑 `model=GatewayChatModel` → 依赖 gateway 保住该类(gateway `IMPL_PLAN §五` 已承诺"本批不碰 engine、保 GatewayChatModel 稳");**可并行**,gateway 核心(WS-1)先落更稳。
 
 ## 一、为什么不是全并发:engine 核心耦合在 graph_assembler.py
@@ -25,7 +25,7 @@ WS-E1-io 11-io 文件导入lazy(E2)+ artifact business_data_md(E3)── 依赖 
 WS-E3 错误契约 V2(exceptions/error_registry/result)──────── P0-1/P0-2 已完成;P0-3/P1/P2 后续 backlog
 WS-E4 V4 trace 事件(events.py/emit.py)──────────────────── runtime edge events 已完成 ✅
 WS-E6 purity 扩展(purity.py;run_skill 扫描码;注册码与 E3 协调)─ 已完成 ✅
-WS-E7 golden / resume(runner.py + golden SDK)──────────── 需 studio 协同,最后 ⏳
+WS-E7 golden / resume(runner.py + golden SDK)──────────── Engine public API 已实现 ✅;Studio HTTP/UI 薄接线后续
 ```
 
 ## 三、工作流分区(按文件归属,IR1;exact owns_files 在各 WS 任务书 pin)
@@ -39,7 +39,7 @@ WS-E7 golden / resume(runner.py + golden SDK)───────────�
 | **WS-E5** | checkpoint 内层 | A3/A4 | `core/checkpointer.py`/`state.py`/`graph_assembler.py` | WS-E1 | 已完成 | ✅ |
 | **WS-E6** | purity 扩展 | I2/I6 | `core/purity.py` | 无 | 已完成 | ✅ |
 | **WS-E8** | 退出闸 | I4 | exit-control middleware · `graph_assembler.py` | WS-E1 | 已完成 | ✅ |
-| **WS-E7** | golden/resume(studio 协同) | S5/S6 | `core/runner.py` resume API · `.workspace/golden` Engine SDK · public API/tests | 已合 E1/E5/E1-io/E4;Studio 作为消费者协同 | 最后功能阶段 | ⏳ |
+| **WS-E7** | golden/resume(Engine-first) | S5/S6 | `core/runner.py` resume API · `core/_predict_internal/golden_eval.py` · public API/tests | 已合 E1/E5/E1-io/E4;Studio 作为消费者后续薄接线 | 已实现 | ✅ |
 
 ## 四、WS-E1 内部子步骤(graph_assembler.py 严格串行)
 0. (前置)gateway `GatewayChatModel` 可用(gateway WS-1 保稳)。
@@ -57,7 +57,7 @@ WS-E7 golden / resume(runner.py + golden SDK)───────────�
 
 ## 六、执行波次(当前)
 - **Wave 1-3**:已完成并合入 `main`。覆盖 WS-E1、WS-E1-io、WS-E2、WS-E3 P0-1/P0-2、WS-E4、WS-E5、WS-E6、WS-E8。
-- **Wave 4(当前唯一功能阶段)**:WS-E7 golden/resume。Engine 侧以通用 SDK/API 为主:resume checkpoint 寻址续跑、`.workspace/golden` 逐节点读取/评估/报告。Studio 只消费 Engine 契约,不得反向定义 Engine。
+- **Wave 4**:WS-E7 golden/resume 已实现。Engine 侧以通用 SDK/API 为主:resume checkpoint 寻址续跑、`workspace_dir/golden` 逐节点读取/评估/报告。Studio 只消费 Engine 契约,不得反向定义 Engine。
 - **非功能收尾**:main SonarCloud Quality Gate 聚合失败、#126 stale CI unblock PR 清理、旧 planning worktree 清理。这些是工程卫生项,不算新的 Engine 功能 WS。
 - 每 WS 完成 = 测试绿 + 验收清单逐条勾 + 回写 baseline + 终审,再进入下一依赖链。
 
@@ -78,6 +78,6 @@ WS-E7 golden / resume(runner.py + golden SDK)───────────�
 | **WS-E5** | `.kiro/specs/engine-mvp1/requirements-ws-e5-checkpoint-inner.md` / task / prompt | 已合入 `main`:AGENT 内层 checkpoint namespace + graph iterate namespace 组合 | ✅ |
 | **WS-E6** | `.kiro/specs/engine-mvp1/requirements-ws-e6-purity-extensions.md` / task / prompt | 已合入 `main`:compile-time purity hard bans | ✅ |
 | **WS-E8** | `.kiro/specs/engine-mvp1/requirements-ws-e8-exit-gate.md` / task / prompt | 已合入 `main`:ExitControl gate + iteration leak fix | ✅ |
-| **WS-E7** | 本轮进入:requirements/RED 待写 | 未实现:resume 501→Engine resume API;`.workspace/golden` Engine SDK 逐节点评估 | ⏳ 当前阶段 |
+| **WS-E7** | `.kiro/specs/engine-mvp1/requirements-ws-e7-golden-resume.md` / task / prompt | 已实现:public `resume_skill(...)` + `evaluate_golden_baseline(...)`;`workspace_dir/golden/<baseline_id>` 逐节点评估报告 | ✅ |
 
 > 派单入口仍以本计划 §六 的波次为准;每个 WS 落地时,先按 `task-spec-standard` 写任务书,再执行 RED→GREEN→baseline 回写→终审。

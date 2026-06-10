@@ -1,13 +1,13 @@
 ---
 module: 02-mechanism/05-run-inner/08-messages-state
 doc: baseline
-status: audited-ready（B 成段 2026-06-05,codex 已核(records/uncovered 块);WS-E5 2026-06-09 回写:messages DeltaChannel(state.py:214)live,AGENT create_agent 内层经 namespace 挂共享 base,compaction 搁浅 legacy(llm_phase_node.py:275/381/809)、live 单槽无 compaction,interrupt 原语 live(cognitive_flow.py:292)但 resume_run 501 桩）
+status: audited-ready（WS-E7 回写:messages DeltaChannel(state.py:214)live,AGENT create_agent 内层经 namespace 挂共享 base,Engine resume_skill 可注入 HITL ToolMessage;compaction 搁浅 legacy、live 单槽无 compaction、Studio resume_run 仍 501）
 ---
 
 # 08-messages-state — Baseline(当下代码实现逻辑)
 
 > **Scope**: 内层 messages 状态生命周期的现状:messages 持久化(`state.py` 的 DeltaChannel)、AGENT 内层 namespace checkpoint、summarization/compaction、HITL/resume。
-> **现状一句话**:内层 messages 用 **DeltaChannel 增量快照通道**(`state.py:214`,`snapshot_frequency=50`)已 live;AGENT create_agent 路径已通过 `NamespaceCheckpointer` 复用外层共享 base 并写入 `agent:<phase>` namespace,graph iterate 内组合为 `iter{k}.agent:<phase>`;但 **summarization/compaction 搁浅在 legacy `phase_nodes`**(`llm_phase_node.py:84/138` 的 `save_compaction_sidecar`,**不在** live `assemble_graph` 路径);HITL `resume` 未接 live(`resume_run`=501,见 `03-api-contract`)。
+> **现状一句话**:内层 messages 用 **DeltaChannel 增量快照通道**(`state.py:214`,`snapshot_frequency=50`)已 live;AGENT create_agent 路径已通过 `NamespaceCheckpointer` 复用外层共享 base 并写入 `agent:<phase>` namespace,graph iterate 内组合为 `iter{k}.agent:<phase>`;WS-E7 `resume_skill` 已能向 pending tool call 注入结构化 HITL `ToolMessage`;但 **summarization/compaction 搁浅在 legacy `phase_nodes`**(`llm_phase_node.py:84/138` 的 `save_compaction_sidecar`,**不在** live `assemble_graph` 路径),Studio HTTP `resume_run` 仍是 501。
 
 ## UI/UX
 N/A。
@@ -24,34 +24,34 @@ N/A —— studio debug/续跑 UI 经 `03-api-contract` 消费。
 ### 1.5 AGENT 内层 namespace checkpoint(WS-E5 已 live)
 live `assemble_graph` 的 AGENT phase 走 LangChain `create_agent(..., state_schema=WorkflowState, checkpointer=NamespaceCheckpointer(base,"agent:<phase>"))`。当外层 graph 提供 checkpointer 时,内层 AGENT 使用同一个 base saver,同一 `thread_id` 下可通过 `checkpoint_ns="agent:<phase>"` 读取内层 checkpoint。若 AGENT 跑在 graph-level iterate 内,namespace 组合为 `iter{k}.agent:<phase>`,因此轮次与 agent/phase scope 同时保留。
 
-这一步只解决 checkpoint namespace/共享 base;messages summarization、有界化 sidecar、HITL resume 仍未接 live。
+这一步解决 checkpoint namespace/共享 base;WS-E7 又补上 Engine `resume_skill` 的 HITL ToolMessage 注入。messages summarization、有界化 sidecar、Studio resume UI/HTTP 仍未接 live。
 
 ### 2. summarization / compaction(搁浅 legacy,非 live)
 summarization 配置 `phase_nodes/llm_phase_node.py:275`(`summarization=True`/`trigger_fraction=0.8`/`keep_messages=20`,底座 `SummarizationMiddleware` `cognitive/middlewares.py:466`)+ sidecar 写 `:381`(`_write_compaction_sidecar`→`:392`)、`CompactionEvent.content_ref` `:809`,均在 **legacy phase_nodes 死簇**里。**live `assemble_graph` 路径只挂单槽 cognitive_flow(`graph_assembler.py:481`)、没有 compaction**(待从死簇搬回 live)。`execution_control.py:201` 的 `_summarize_recent_failures` 是"失败摘要"(不同于 messages compaction)。
 
-### 3. HITL / resume(未接 live)
-`interrupt()` **原语 live**(`cognitive_flow.py:33` import / `:95` `_interrupt_fn or interrupt` / `:292` 调用 / `:300` `source="human_interrupt"`),但**未接 resume loop**:`resume_run` 端点 501(`apps/studio/backend/app/routers/runs.py:70` `raise_not_implemented`),`ResumeReq.context_overrides` 字段定义了但零消费(见 `03-api-contract` / `02-iterate` baseline)。
+### 3. HITL / resume(Engine live,Studio route 未接)
+`interrupt()` **原语 live**(`cognitive_flow.py:33` import / `:95` `_interrupt_fn or interrupt` / `:292` 调用 / `:300` `source="human_interrupt"`)。WS-E7 后,Engine `resume_skill` 要求 `human_response={content, tool_call_id?}`,会校验 selected checkpoint 内存在 pending tool call,并通过 `ToolMessage(content=..., tool_call_id=...)` 更新 state 后重 invoke。Studio `resume_run` 端点仍 501(`apps/studio/backend/app/routers/runs.py:70` `raise_not_implemented`),`ResumeReq.context_overrides` 字段定义了但零消费(见 `03-api-contract`)。
 
 ## API
 - `WorkflowState.messages`(`state.py:214`,DeltaChannel)/ `_messages_delta_reducer`(`:28`)。
-- (目标)`resume_run(run_id, from, context_overrides?)`(归 `03-api-contract` C2)。
+- `runner.py:resume_skill`(Engine 进程内 HITL/context override resume);Studio `resume_run(run_id, ...)` route 后续薄接。
 
 ## Data Model / State
 `messages: list[AnyMessage]`(DeltaChannel,`state.py:214`)——内层对话历史(对照外层 `data` blackboard,归 `03-checkpoint`)。
 
 ## 当前边界(这个模块现在不是什么)
 - **compaction 不在 live**:搁浅 legacy phase_nodes(`llm_phase_node.py:84`),live 路径无摘要有界化。
-- **HITL resume 未闭环**:`resume_run`=501,context_overrides 零消费。
-- **messages 已有内层 ns checkpoint,但不是完整 HITL 产品**:AGENT 内层已按 `agent:<phase>` / `iter{k}.agent:<phase>` 写入共享 base;从用户界面选择 checkpoint、更新 context 并从对话断点恢复仍未闭环。
+- **Studio HITL resume 未闭环**:`resume_run`=501,context_overrides 零消费;Engine `resume_skill` 已能注入 HITL ToolMessage。
+- **messages 已有内层 ns checkpoint,但不是完整 Studio HITL 产品**:AGENT 内层已按 `agent:<phase>` / `iter{k}.agent:<phase>` 写入共享 base;Engine 可从 checkpoint 恢复,但用户界面选择 checkpoint、HTTP 投影和错误展示仍未闭环。
 
 ## baseline / alignment 差异(测试锚点)
 | 维度 | 现状(baseline) | mvp1 目标 |
 |---|---|---|
 | messages 持久化 | DeltaChannel 已 live(`state.py:214`);AGENT 内层经 `agent:<phase>` / `iter{k}.agent:<phase>` 挂共享 base | HITL/resume 能消费这些 checkpoint 从内层断点续跑 |
 | compaction | 搁浅 legacy(`llm_phase_node.py:84`) | 搬回 live(超窗摘要 + sidecar 存全文) |
-| HITL/resume | 501、零消费 | interrupt + 同 base 续跑 + context_overrides |
+| HITL/resume | Engine `resume_skill` 已消费 pending tool call + overrides;Studio HTTP route 仍 501 | Studio 薄接 Engine resume 并提供用户态 checkpoint/HITL 工作流 |
 
-> **验"是否按 mvp1 改了"**:① 同一 base/thread 是否能区分外层 `""` 和 AGENT `agent:<phase>` checkpoint;② graph iterate 内 AGENT checkpoint 是否保留 `iter{k}.agent:<phase>`;③ interrupt → 人改 context → resume 从对话断点恢复(仍未闭环);④ messages summarization 触发后有界、sidecar 存全文(仍未 live)。
+> **验"是否按 mvp1 改了"**:① 同一 base/thread 是否能区分外层 `""` 和 AGENT `agent:<phase>` checkpoint;② graph iterate 内 AGENT checkpoint 是否保留 `iter{k}.agent:<phase>`;③ Engine `resume_skill` 能注入 HITL response 并从对话断点恢复;④ Studio HTTP/UI resume 是否闭环(仍未 live);⑤ messages summarization 触发后有界、sidecar 存全文(仍未 live)。
 
 ## 读代码主路径提示
 messages 通道 `state.py:214` + reducer `:28` → compaction 搁浅点 `phase_nodes/llm_phase_node.py:84/138` → resume 缺口 `03-api-contract`/`02-iterate` baseline。

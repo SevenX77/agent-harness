@@ -67,6 +67,8 @@ from graph_agent.runtime.state import normalize_blackboard_data
 logger = logging.getLogger(__name__)
 
 _NO_MOCK_LLM = object()
+_RUNTIME_PHASE_FAILED_CODE = "[F-v3-runtime-phase-failed]"
+_SKILL_ENTRYPOINT_FILENAME = "SKILL.md"
 
 
 class PredictDeadlockError(RuntimeError):
@@ -212,7 +214,9 @@ def predict_skill(  # noqa: C901
     started_monotonic = time.monotonic()
     skill_path_obj = Path(skill_path)
     skill_id = (
-        skill_path_obj.parent.name if skill_path_obj.name == "SKILL.md" else skill_path_obj.stem
+        skill_path_obj.parent.name
+        if skill_path_obj.name == _SKILL_ENTRYPOINT_FILENAME
+        else skill_path_obj.stem
     )
 
     mock_llm = inputs.pop("mock_llm", None)
@@ -330,7 +334,7 @@ def predict_skill(  # noqa: C901
             skill_id=skill_id,
             context={},
             metrics=WorkflowMetrics(wall_time_sec=wall_time),
-            error=make_error_payload("[F-v3-runtime-phase-failed]", str(exc)),
+            error=make_error_payload(_RUNTIME_PHASE_FAILED_CODE, str(exc)),
             started_at=started_at,
             finished_at=finished_at,
             wall_time_sec=wall_time,
@@ -418,7 +422,9 @@ def run_skill(
     started_monotonic = time.monotonic()
     skill_path_obj = Path(skill_path)
     skill_id = (
-        skill_path_obj.parent.name if skill_path_obj.name == "SKILL.md" else skill_path_obj.stem
+        skill_path_obj.parent.name
+        if skill_path_obj.name == _SKILL_ENTRYPOINT_FILENAME
+        else skill_path_obj.stem
     )
 
     try:
@@ -446,7 +452,7 @@ def run_skill(
             context={},
             metrics=WorkflowMetrics(wall_time_sec=wall_time),
             trace_path=None,
-            error=exc.payload or make_error_payload("[F-v3-runtime-phase-failed]", str(exc)),
+            error=exc.payload or make_error_payload(_RUNTIME_PHASE_FAILED_CODE, str(exc)),
             started_at=started_at,
             finished_at=finished_at,
             wall_time_sec=wall_time,
@@ -499,7 +505,9 @@ def resume_skill(
     started_monotonic = time.monotonic()
     skill_path_obj = Path(skill_path)
     skill_id = (
-        skill_path_obj.parent.name if skill_path_obj.name == "SKILL.md" else skill_path_obj.stem
+        skill_path_obj.parent.name
+        if skill_path_obj.name == _SKILL_ENTRYPOINT_FILENAME
+        else skill_path_obj.stem
     )
 
     trace_output = workspace_root / "runs" / run_id
@@ -862,7 +870,7 @@ def _apply_resume_human_response(
 def _resume_error_payload(exc: Exception) -> Any:
     if isinstance(exc, GraphAgentError) and exc.payload is not None:
         return exc.payload
-    return make_error_payload("[F-v3-runtime-phase-failed]", str(exc))
+    return make_error_payload(_RUNTIME_PHASE_FAILED_CODE, str(exc))
 
 
 def _resume_failed_result(
@@ -1132,9 +1140,12 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Run a SKILL.md workflow (document-driven, no per-skill Python code needed)"
+        description=(
+            f"Run a {_SKILL_ENTRYPOINT_FILENAME} workflow "
+            "(document-driven, no per-skill Python code needed)"
+        )
     )
-    parser.add_argument("--skill", required=True, help="Path to SKILL.md")
+    parser.add_argument("--skill", required=True, help=f"Path to {_SKILL_ENTRYPOINT_FILENAME}")
     parser.add_argument("--inputs", type=str, default=None, help="JSON string of runtime inputs")
     parser.add_argument("--inputs-file", type=str, default=None, help="JSON file of runtime inputs")
     parser.add_argument("--output", type=str, default=None, help="Output directory")

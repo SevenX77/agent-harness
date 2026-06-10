@@ -135,8 +135,8 @@ Studio 可以继续提供 Test Inputs CRUD,但不得把 HTTP 编排 / helper 路
 engine 全权定义两棵树;`.workspace` 户型被 studio/host 消费(`03-api-contract` C 引用产物落点)。
 
 ## 8. gaps / 待设计 + 报警
-1. ⚠️ **实现 drift**:`evaluate_golden_baseline` 作为目标入口尚未在 engine public API 落地;`.workspace/golden/` / `test_inputs/` 的 CRUD 现主要由 Studio 编排。Engine SDK 实现需按 §2.2 户型补齐。
-2. golden 绑定键 = `phase_id`(已定);`golden/<baseline_id>/cases/<case_id>.json` 内部 schema 与逐节点 stale 报告字段仍需与 `06-golden-eval` 协同落地。
+1. WS-E7 后,`evaluate_golden_baseline` 已作为 Engine public API 落地,并按 §2.2 读写 `workspace_dir/golden/<baseline_id>`。`.workspace` 是 Studio/host 可选择的 workspace root 名称,Engine 只认入参 `workspace_dir`。
+2. `test_inputs/` 的 Engine SDK CRUD 仍主要由 Studio 编排,后续若进入 Engine 必须继续按 §2.2 户型补齐。
 
 ## 交叉引用(链接, 不复制)
 00-architecture-overview §2 · `skill-syntax`(子图 path 语法)· `02-mechanism/02-resolver`(子图 path 解析)· `compile-rules` · `05-run-inner/06-golden-eval`

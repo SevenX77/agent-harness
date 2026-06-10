@@ -24,7 +24,7 @@ EXPECTED_CONTRACT_HASHES = {
     "docs/engine/mvp0/skill-spec/12-compile-runtime-flow-spec.md": "0c632cbc7edbad3e741bf4a3676d08e68852ea2311f10624503d20f84d598223",
     "docs/engine/mvp0/skill-spec/README.md": "dc16c4c4caade48e027700f91ce666779b07f9a053ed3b8bda9f957fa6053b30",
     "docs/engine/mvp0/public-api-contract.md": "8a3ae8d4f7f5e723b356fd97881e38a17b69d1c493a7f80a3cfea782c5b848c5",
-    "docs/engine/mvp0/feature-compliance-checklist.md": "d66088143b5f1acfe632020b9f1310f74b15789b39ee07c5462eec134901617a",
+    "docs/engine/mvp0/feature-compliance-checklist.md": "77ea3efd4c6dfed5a09f496a82a1ba7ff3d2832ad1dc92ba9ac1f5cb759dc5c7",
     "packages/graph-agent/spec/round28-manifest-schema.yaml": "bcdf70ea0469fe02adff8e2c20e03f813195c1eaa0e4c325f8987cb6cfed5481",
 }
 

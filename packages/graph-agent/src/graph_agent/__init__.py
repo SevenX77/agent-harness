@@ -1,9 +1,10 @@
 """graph_agent - Document-driven LLM agent harness SDK.
 
-Public API (20 stable exports):
+Public API (21 stable exports):
 
-* Execution & Interception: ``run_skill``, ``predict_skill``, ``RunResult``,
-  ``PathDiff``, ``PhaseRecord``
+* Execution & Interception: ``run_skill``, ``predict_skill``,
+  ``resume_skill``, ``evaluate_golden_baseline``, ``RunResult``, ``PathDiff``,
+  ``PhaseRecord``
 * Static analysis: ``compile_skill``, ``CompileResult``, ``SkillManifest``,
   ``serialize_skill``
 * Graph assembly: ``assemble_graph``, ``CompiledSkill``, ``CompiledStateGraph``
@@ -17,7 +18,7 @@ Internal helpers (``Phase``, ``WorkflowState``, ``IOManager``,
 etc.) live under
 ``graph_agent.core.*`` / ``graph_agent.io.*`` / ``graph_agent.models.*``
 and are not part of the public ABI. Downstream code that depended on
-the previous lazy-deprecated re-exports must migrate to the 20-export
+the previous lazy-deprecated re-exports must migrate to the 21-export
 surface.
 
 Each ``from X import Y as Y`` re-export is intentional — the explicit
@@ -43,7 +44,9 @@ from graph_agent.core.manifest import SkillManifest as SkillManifest
 from graph_agent.core.result import PathDiff as PathDiff
 from graph_agent.core.result import PhaseRecord as PhaseRecord
 from graph_agent.core.result import RunResult as RunResult
+from graph_agent.core.runner import evaluate_golden_baseline as evaluate_golden_baseline
 from graph_agent.core.runner import predict_skill as predict_skill
+from graph_agent.core.runner import resume_skill as resume_skill
 from graph_agent.core.runner import run_skill as run_skill
 from graph_agent.core.serialize import serialize_skill as serialize_skill
 from graph_agent.runtime.state import BlackboardState as BlackboardState
@@ -51,6 +54,8 @@ from graph_agent.runtime.state import BlackboardState as BlackboardState
 __all__ = [
     "run_skill",
     "predict_skill",
+    "resume_skill",
+    "evaluate_golden_baseline",
     "RunResult",
     "PathDiff",
     "PhaseRecord",

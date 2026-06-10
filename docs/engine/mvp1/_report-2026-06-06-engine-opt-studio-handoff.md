@@ -63,10 +63,10 @@ codex 用临时 V0.3 skill 复现 + 13 测试通过:
 ### B3. 🟡 [协同] V4 trace 事件(studio 已就绪、engine 待发)
 studio canvas(F4)依赖 `parent_node_id`/`node_type`(微观拓扑)、3 个边操作事件(`blackboard_reduce`/`input_dispatch`/`input_file_injected`)、`phase_execution_id`/`iteration`(逐轮分组)——engine `events.py` 还没发(U9 锁为目标归 kiro)。engine 实现这些事件后,studio 微观/dot/逐轮视图才渲染得出。**Prompt 三视图已可用**(engine `PromptCapturedEvent` 已带 template_source/variables/resolved_prompt)。
 
-### B4. 🟢 [协同] resume / per-node golden(双边 target)
-- **resume**:studio `runs.py:69` → 501;engine 无 public `resume_run`(依赖 checkpoint 寻址 C2)。
-- **per-node golden**:studio F5 要字段级;engine 现 whole-run mock + studio whole-state diff。
-两者都是目标态,需双边协同实现。
+### B4. 🟢 [协同] resume / per-node golden(2026-06-10 更新)
+- **resume**:engine 已有 public `resume_skill(...)`，支持 checkpoint_id / checkpoint_ns latest、context_overrides 与 HITL ToolMessage 注入；studio `runs.py:69` 仍 501,后续只应薄接 Engine API。
+- **per-node golden**:engine 已有 public `evaluate_golden_baseline(...)`，读取 `workspace_dir/golden/<baseline_id>` 并写逐节点 diff/report；studio F5 仍需消费 Engine report,旧 whole-state diff 不再是目标真相。
+两者的 Engine 通用能力已落地,剩余是 Studio 消费接线。
 
 ### B5. ℹ️ 文档哈希锁 = 两套独立
 engine 已自建一套(`packages/graph-agent/tests/test_doc_hash_lock.py` + `docs/engine/mvp1/_audited-ready-hashes.json`),**与 studio 那套(`apps/studio/backend/tests/test_doc_hash_lock.py` + `docs/studio/mvp1/_audited-ready-hashes.json`)完全独立**,各锁各的 docs、互不耦合。逻辑同构,如需可日后抽共享 util(目前按"不混"保持独立)。

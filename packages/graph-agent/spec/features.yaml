@@ -17,7 +17,7 @@ features:
   events_secondary: []
   non_functional_contracts: []
   targeted_tests:
-  - tests/test_public_api_contract.py::test_top_level_all_remains_the_declared_18_symbol_surface
+  - tests/test_public_api_contract.py::test_top_level_all_remains_the_declared_symbol_surface
 - id: F-vendor-contract-debt
   description: Keep known vendor-only contract debt visible until compatibility shims
     or removals are approved.

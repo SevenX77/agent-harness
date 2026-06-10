@@ -15,7 +15,7 @@ aligns_with: ../00-architecture-overview.md（§4 API契约层 C）
 ## 2. 三条接口面
 | 面 | 形态 | 入口 |
 |---|---|---|
-| 执行 | 进程内 Python | `run_skill`/`predict_skill`/`compile_skill`(runner.py/compiler.py) |
+| 执行 | 进程内 Python | `run_skill`/`predict_skill`/`resume_skill`/`evaluate_golden_baseline`/`compile_skill`(runner.py/compiler.py) |
 | 事件 | typed 事件流 → 回调+落盘+WS | `event_subscriber` 回调 + `trace.jsonl`(SSOT)+ WS `/ws/runs/{run_id}` |
 | HTTP | REST+WS | `apps/studio/backend/app/routers/*`(studio 暴露面) |
 
@@ -56,14 +56,14 @@ aligns_with: ../00-architecture-overview.md（§4 API契约层 C）
 > consumer(旧 06/09/10/11 关注点)的"接口"段链接本文、不复制(SSOT);⚠️ studio 前端 hook 挂载(useRunStream/TracePanel 是否孤儿)归 studio 核实。
 
 ### 3.1 Golden API 面(schema SSOT = `06-golden-eval`)
-- **golden 户型**(SSOT = `01-physical-layout §2.2.3`,本文不重定义):`.workspace/golden/<baseline_id>/{baseline.json, report.json, cases/<case_id>.json}`——**`.workspace` 临时产物、不进 git**(反转前旧路径 `phases/<phase_id>/golden.json`/随技能进 git **已废**)。case 内容 = `{expected_output(匹配该节点 io.outputs), source:"manual"|"copilot"(永不 trace,409 天然成立), updated_at}`;**case ↔ 节点的绑定键 engine 尚未定稿**(`06-golden-eval §8` gap #1 标 `phase_id?`,与 physical-layout 协同后定)。
-- **逐节点 diff**(部分目标):引擎 SDK 纯函数 `evaluate_golden_baseline` 逐节点版(现 `golden_diff.py` 作用在整 final_state,逐节点待建);studio 只渲染。
+- **golden 户型**(SSOT = `01-physical-layout §2.2.3`,本文不重定义):`.workspace/golden/<baseline_id>/{baseline.json, report.json, cases/<case_id>.json}`——**`.workspace` 临时产物、不进 git**(反转前旧路径 `phases/<phase_id>/golden.json`/随技能进 git **已废**)。case 内容包含 `phase_id` / `inputs` / `expected_output`;case ↔ 节点的绑定键已取 `phase_id`。
+- **逐节点 diff**(Engine live):引擎 SDK 纯函数 `evaluate_golden_baseline` 逐节点读取 `workspace_dir/golden/<baseline_id>` 并写 `report.json`;studio 只渲染/透传。
 - **失效**(目标):eval 期 golden 缺 io.outputs 必填字段 → `[F-v3-golden-stale-fields]`(归 `compile-rules` §6 + V2 G6 注册)。
 - **409 守卫**(live):`assert_trace_can_be_promoted_to_golden`(`diagnostic_export.py:25`),predict trace→golden 拒。
 
 ### 3.2 Iterate / Resume API 面(SSOT = `02-iterate` / `03-checkpoint`)
 - **iterate 配置**(目标):节点/图/子图声明 `iterate:{mode,over,item_var,range,concurrency,accumulate}`(语法 `skill-syntax §2.9`、执行 `02-iterate`);现状节点级 batch live,loop/图级/range 目标。
-- **resume**(目标):`POST .../runs/{run_id}/resume` + `ResumeReq{context_overrides}`;**现 501 桩**(`runs.py:69`,`ResumeReq` 零消费)。寻址契约(C2 闭环):`resume_run(run_id, from=<node_id>|<node_id>:<iter>, context_overrides?)` → LangGraph `get_state_history` 选 checkpoint(loop 轮用 `checkpoint_ns`)→ `update_state` 套 overrides / 注 ToolMessage(HitL)→ 带该 checkpoint 重 invoke(归 `03-checkpoint`)。
+- **resume**:Engine 进程内 `resume_skill(...)` 已实现 checkpoint_id / checkpoint_ns latest 选择、`context_overrides`、HITL ToolMessage 注入与重 invoke。Studio HTTP `POST .../runs/{run_id}/resume` + `ResumeReq{context_overrides}` 仍是 **501 桩**(`runs.py:69`,`ResumeReq` 零消费),后续只能薄接 Engine API。
   - **HITL 注入入参形态(2026-06-06 定,studio 消费契约)**:HITL 续跑 = 给中断点 pending tool call(`ask_clarification`/`interrupt()`,`cognitive_flow.py:292`)注一条 **ToolMessage**(`content` = 人类答复,`tool_call_id` = 该 pending call 的 id)。故引擎入参 = **结构化 `{tool_call_id?: str, content: str}`**:`content` 必填;`tool_call_id` **可选**——省略时引擎从该 checkpoint 的**唯一 pending 中断 tool call** 自解析(传了则校验须匹配)。studio 现有 `ResumeReq.human_input: str` 投影为 `{content: human_input}` 即可,`tool_call_id` 交引擎解析。**纯 string 不够当多个 pending call 并存时**,故契约取结构化、留 `tool_call_id` 槽位。(精确 wire 细节随内层 create_agent checkpointer 落地终定——见 `03-checkpoint §7`,实现期最高风险项。)
 - **失效追踪**(目标):上游/拓扑/输出 schema 变 → 下游 checkpoint 失效 → 前端 [Resume] 置灰(归 `05-invalidation`)。
 
@@ -89,7 +89,7 @@ aligns_with: ../00-architecture-overview.md（§4 API契约层 C）
 engine↔studio 边界;前端 hook 挂载归 studio(本契约只定义引擎产出 + 后端暴露)。
 
 ## 8. gaps / 待设计(接口面已成段:17 块迁移源 consolidate;以下均 impl-target 归 kiro / studio 协同)
-1. resume `501 桩` → C2 寻址契约落地(与 `02-iterate`/`03-checkpoint` 协同)。
+1. Studio HTTP resume `501 桩` → 薄接 Engine `resume_skill`(与 `02-iterate`/`03-checkpoint` 协同)。
 2. V4 trace 增补事件 schema(随 `02-observability` 实现)。
 3. golden/iterate target schema 待 FROZEN 解冻回填。
 4. **错误契约 V2 API 面(G4/G5)**:`RunResult.diagnostics` 透传 + `GET /errors` 公开码表端点(规则/形状见 `compile-rules` §3.1 / `data-contracts` DC5)——impl 归 kiro。

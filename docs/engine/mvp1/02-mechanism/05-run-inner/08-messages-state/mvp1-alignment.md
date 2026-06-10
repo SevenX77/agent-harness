@@ -1,21 +1,21 @@
 ---
 module: 02-mechanism/05-run-inner/08-messages-state
 doc: mvp1-alignment
-status: audited-ready（**U5 单元锁定 2026-06-05**;A + B 成段(codex 核):delta/compact 正交、snapshot_frequency=50、CK6、summarization 死簇,**标注目标态 vs live**;live 仅 WorkflowState.messages DeltaChannel + interrupt 原语,compaction/resume/ns checkpoint 全待实现(归 kiro);文件未 FROZEN）
+status: audited-ready（**U5 单元锁定 2026-06-05**;WS-E5/E7 回写:WorkflowState.messages DeltaChannel + AGENT namespace checkpoint + Engine HITL resume_skill 已 live;compaction/Studio resume 产品仍待实现;文件未 FROZEN）
 aligns_with: ../../../00-architecture-overview.md（§3 机制层 B·运行内层）
 ---
 
 # 08-messages-state — 机制 B · 内层 messages 状态(运行内层)
 
-> **Tier**: 机制层 B · 运行·内层 | **Owns**: 内层 messages 持久化(DeltaChannel)· summarization(摘要有界化)· HITL/interrupt/resume | **现状**: A 摘要成段;B Delta live,compaction/resume 未接;records 深度未迁完 | **Related**: `04-run-outer/03-checkpoint`(共享 base,**双向**)· `02-middleware`(summarization 中间件)· `data-contracts`(messages 通道)· `03-api-contract`(resume)
+> **Tier**: 机制层 B · 运行·内层 | **Owns**: 内层 messages 持久化(DeltaChannel)· summarization(摘要有界化)· HITL/interrupt/resume | **现状**: Delta + AGENT namespace checkpoint + Engine HITL resume live;compaction/Studio route 后续 | **Related**: `04-run-outer/03-checkpoint`(共享 base,**双向**)· `02-middleware`(summarization 中间件)· `data-contracts`(messages 通道)· `03-api-contract`(resume)
 
 ## 1. 定义
-messages-state = 内层 agent loop 的 **messages 状态生命周期**(对照外层 `03-checkpoint` 的 blackboard):messages 持久化(DeltaChannel)+ summarization(messages 增长时摘要有界化)+ HITL(经 `interrupt()` 中断、人改 context 后 resume)。**经 `ns="<id>/agent"` 挂 `03-checkpoint` 的共享 base**(**目标态,现状见 §2 框**)——两层共享 base、各管各 state(外 blackboard / 内 messages,双向引用)。
+messages-state = 内层 agent loop 的 **messages 状态生命周期**(对照外层 `03-checkpoint` 的 blackboard):messages 持久化(DeltaChannel)+ summarization(messages 增长时摘要有界化)+ HITL(经 `interrupt()` 中断、人改 context 后 resume)。WS-E5 后,AGENT messages 已经经 `agent:<phase>` / `iter{k}.agent:<phase>` namespace 挂 `03-checkpoint` 的共享 base;WS-E7 后,Engine `resume_skill` 已能注入 HITL ToolMessage。两层共享 base、各管各 state(外 blackboard / 内 messages,双向引用)。
 
 ## 2. 数据流 / 机制
 承接共享 checkpoint 的**内层/messages 部分** + agent-loop 的 summarization。
 
-> **⚠️ 现状 vs 目标**:**live 今天只有** `WorkflowState.messages` 的 `DeltaChannel(snapshot_frequency=50)` 通道(`state.py:214`)+ `interrupt()` 原语(`cognitive_flow.py:292`)。**summarization/compaction、agent loop 经 ns 入 checkpoint、mid-conversation HITL resume 全是目标态、未 live**:live `assemble_graph` 只挂单槽 cognitive_flow(`graph_assembler.py:481`)、无 compaction;summarization 仅在 **legacy 死簇** `LLMPhaseNode`(`llm_phase_node.py`,非 SDK 主路径);`resume_run` 是 501 桩(studio `runs.py:70`)。
+> **现状 vs 目标**:**live 今天已有** `WorkflowState.messages` 的 `DeltaChannel(snapshot_frequency=50)` 通道(`state.py:214`)、AGENT namespace checkpoint、`interrupt()` 原语(`cognitive_flow.py:292`)以及 Engine `resume_skill` 的 HITL ToolMessage 注入。**仍未 live**:summarization/compaction 在 live `assemble_graph` 路径;Studio HTTP `resume_run` 仍是 501 桩(`runs.py:70`)。
 
 messages 两条存储纪律(与 `03-checkpoint` blackboard 同构、各管各;**下为目标模型**):
 - **delta(去体积,无损)**:`DeltaChannel`(`state.py:214`,`_messages_delta_reducer:28`,**`snapshot_frequency=50`**——每 50 步存全量 snapshot、中间存 diff;经 ns 入共享 base,每 model/tool 步存档)。snapshot 频率 = 平衡旋钮(小=体积大、大=回放/resume 慢,需实测)。
@@ -24,7 +24,7 @@ messages 两条存储纪律(与 `03-checkpoint` blackboard 同构、各管各;**
 - HITL:`interrupt()`(`cognitive_flow.py:292`;`:95` `_interrupt_fn or interrupt`、`:300` `source="human_interrupt"`)中断 → `update_state` 套 context_overrides / 注入 ToolMessage → 带该 checkpoint 重 invoke。
 
 ## 3. 接口契约
-messages 经 `ns="<id>/agent"` 挂 `03-checkpoint` base(**目标,未 live**;双向);`resume_run(run_id, from, context_overrides?)`(归 `03-api-contract` C2,**现 501 桩**);messages 通道**现状** = `WorkflowState.messages` + `DeltaChannel` reducer(`state.py:214`,归 `data-contracts`);迁 create_agent 后内层 `AgentState.messages` 经 ns 挂本 base(目标)。
+messages 经 `agent:<phase>` / `iter{k}.agent:<phase>` namespace 挂 `03-checkpoint` base(live;双向);Engine `resume_skill(run_id, checkpoint_id|checkpoint_ns, context_overrides?, human_response?)` 已 live;Studio `resume_run(...)` HTTP route 仍是 501 桩;messages 通道 = `WorkflowState.messages` + `DeltaChannel` reducer(`state.py:214`,归 `data-contracts`)。
 
 ## 4. 设计决策基础(用户原话)
 > 两层各管各 state(2026-06-03 PM):checkpoint 一个共享 base,外管 blackboard、内(本域)管 messages。
@@ -40,7 +40,7 @@ messages 经 `ns="<id>/agent"` 挂 `03-checkpoint` base(**目标,未 live**;双�
 | HS4 | **compact(summarization)是 1000 章可行性前提,非优化**(= `03-checkpoint` CK6) | 不 compact 上下文 O(N²) 爆窗口;compact 后 O(N) |
 
 ## 6. 测试关键点
-1. interrupt → 人改 context → resume,从对话断点恢复(嵌套 ns 寻址 D-test,与 `03-checkpoint`/`02-middleware` 协同)。
+1. Engine `resume_skill` 注入 HITL response 后,从对话断点恢复(嵌套 ns 寻址 D-test,与 `03-checkpoint`/`02-middleware` 协同)。
 2. messages summarization 触发后有界、不丢关键上下文;sidecar 存全文。
 3. predict mock 仍能模拟 summarization 形态(承 09 G5,→ `06-seam/01-models`)。
 
@@ -49,7 +49,7 @@ engine 全权;HITL 暴露给 studio debug/续跑(`03-api-contract`)。
 
 ## 8. gaps / 待设计
 1. summarization middleware + sidecar **从 legacy 死簇搬回 live**(legacy 配置 `phase_nodes/llm_phase_node.py:275`(`summarization=True`/`trigger_fraction=0.8`/`keep_messages=20`;底座 `SummarizationMiddleware` `cognitive/middlewares.py:466`)+ sidecar 写 `:381`(`_write_compaction_sidecar`→`:392`)、`CompactionEvent.content_ref` `:809`;**live assemble_graph 只挂单槽 cognitive_flow `graph_assembler.py:481`、无 compaction**)。
-2. `resume_run` context 篡改边界(与 `03-checkpoint`/`02-iterate`)。
+2. Studio `resume_run` thin route + context 篡改边界(与 `03-checkpoint`/`02-iterate`)。
 3. **持久化边界(源 uncovered #3)**:messages 通道只写可序列化的 messages + 标记;middleware 内 callback/runtime/compiled graph **不得入 checkpoint state**(与 `03-checkpoint` §8 #4 共,防 nested state 污染)。
 
 ## 交叉引用(链接, 不复制)

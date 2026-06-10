@@ -16,6 +16,8 @@ EXEMPTIONS_PATH = Path(__file__).with_name("contract-exemptions.yaml")
 EXPECTED_CONTRACT_SYMBOLS: dict[str, str] = {
     "run_skill": "graph_agent",
     "predict_skill": "graph_agent",
+    "resume_skill": "graph_agent",
+    "evaluate_golden_baseline": "graph_agent",
     "RunResult": "graph_agent",
     "compile_skill": "graph_agent",
     "CompileResult": "graph_agent",
@@ -149,6 +151,19 @@ EXPECTED_SIGNATURES: dict[str, tuple[str, tuple[tuple[str, str, str, str], ...],
                   (('expected_path', 'POSITIONAL_OR_KEYWORD', '<required>', 'list[str]'),
                    ('actual_path', 'POSITIONAL_OR_KEYWORD', '<required>', 'list[str]')),
                   'PathDiff'),
+  'evaluate_golden_baseline': ('graph_agent',
+                               (('skill_path',
+                                 'POSITIONAL_OR_KEYWORD',
+                                 '<required>',
+                                 'str | Path'),
+                                ('workspace_dir', 'KEYWORD_ONLY', '<required>', 'Path'),
+                                ('baseline_id', 'KEYWORD_ONLY', '<required>', 'str'),
+                                ('skill_resolver',
+                                 'KEYWORD_ONLY',
+                                 '<required>',
+                                 'SkillResolverProtocol'),
+                                ('model_resolver', 'KEYWORD_ONLY', 'None', 'Any | None')),
+                               'dict[str, Any]'),
   'predict_skill': ('graph_agent',
                     (('skill_path', 'POSITIONAL_OR_KEYWORD', '<required>', 'str | Path'),
                      ('workspace_dir', 'KEYWORD_ONLY', '<required>', 'Path'),
@@ -160,6 +175,30 @@ EXPECTED_SIGNATURES: dict[str, tuple[str, tuple[tuple[str, str, str, str], ...],
                      ('copilot_predict', 'KEYWORD_ONLY', 'None', 'Callable[..., Any] | None'),
                      ('inputs', 'VAR_KEYWORD', '<required>', 'Any')),
                     'RunResult'),
+  'resume_skill': ('graph_agent',
+                   (('skill_path', 'POSITIONAL_OR_KEYWORD', '<required>', 'str | Path'),
+                    ('workspace_dir', 'KEYWORD_ONLY', '<required>', 'Path'),
+                    ('run_id', 'KEYWORD_ONLY', '<required>', 'str'),
+                    ('checkpoint_id', 'KEYWORD_ONLY', 'None', 'str | None'),
+                    ('checkpoint_ns', 'KEYWORD_ONLY', 'None', 'str | None'),
+                    ('context_overrides',
+                     'KEYWORD_ONLY',
+                     'None',
+                     'dict[str, Any] | None'),
+                    ('human_response',
+                     'KEYWORD_ONLY',
+                     'None',
+                     'dict[str, Any] | None'),
+                    ('skill_resolver',
+                     'KEYWORD_ONLY',
+                     '<required>',
+                     'SkillResolverProtocol'),
+                    ('model_resolver', 'KEYWORD_ONLY', 'None', 'Any | None'),
+                    ('event_subscriber',
+                     'KEYWORD_ONLY',
+                     'None',
+                     'Callable[[CallbackEvent], None] | None')),
+                   'RunResult'),
   'run_skill': ('graph_agent',
                 (('skill_path', 'POSITIONAL_OR_KEYWORD', '<required>', 'str | Path'),
                  ('workspace_dir', 'KEYWORD_ONLY', '<required>', 'Path'),
@@ -629,7 +668,7 @@ def test_exemptions_yaml_lookup_returns_false_for_unknown_symbols() -> None:
 
 
 def test_contract_symbol_count_and_static_sets_are_authoritative() -> None:
-    assert len(EXPECTED_CONTRACT_SYMBOLS) == 36
+    assert len(EXPECTED_CONTRACT_SYMBOLS) == 38
     assert len(EXPECTED_VENDOR_ONLY_SYMBOLS) == 5
     assert EXPECTED_KNOWN_MISSING_VENDOR_ONLY.keys() < EXPECTED_CONTRACT_SYMBOLS.keys()
 
@@ -657,7 +696,7 @@ def test_known_missing_vendor_only_symbols_are_locked_as_external_consumer_debt(
             )
 
 
-def test_top_level_all_remains_the_declared_18_symbol_surface() -> None:
+def test_top_level_all_remains_the_declared_symbol_surface() -> None:
     import graph_agent
 
     _assert_symbol_contract(sorted(graph_agent.__all__), sorted(list(EXPECTED_ALL_18)), "__all__")

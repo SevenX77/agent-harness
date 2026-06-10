@@ -15,7 +15,7 @@ This checklist is generated from the Round 28 feature manifest. Each item names 
 - **Sources**: skill-spec, source-file-map
 - **Core paths**: packages/graph-agent/src/graph_agent/__main__.py, packages/graph-agent/src/graph_agent/settings.py
 - **Primary contracts**: 0 error codes, 0 events
-- `[Covered By: packages/graph-agent/tests/test_public_api_contract.py::test_top_level_all_remains_the_declared_18_symbol_surface]`
+- `[Covered By: packages/graph-agent/tests/test_public_api_contract.py::test_top_level_all_remains_the_declared_symbol_surface]`
 
 ### F-vendor-contract-debt: Keep known vendor-only contract debt visible until compatibility shims or removals are approved.
 - **Boundary**: externally-observable-behavior - vendor-only symbols in public-api contract

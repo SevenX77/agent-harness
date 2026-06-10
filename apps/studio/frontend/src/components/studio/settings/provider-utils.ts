@@ -38,8 +38,13 @@ export function draftsFromCredentials(credentials: CredentialsState): ProviderDr
   }))
 }
 
+let providerIdFallbackCounter = 0
+
 function newProviderId(): string {
-  return (globalThis.crypto?.randomUUID?.() ?? Date.now() + "-" + Math.random().toString(36).slice(2)).toString()
+  const uuid = globalThis.crypto?.randomUUID?.()
+  if (uuid) return uuid
+  providerIdFallbackCounter += 1
+  return `${Date.now()}-${providerIdFallbackCounter}`
 }
 
 export function inferProviderType(providerCode: string, baseUrl = "", name = ""): ProviderType {

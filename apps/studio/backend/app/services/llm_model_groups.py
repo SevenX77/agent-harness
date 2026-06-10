@@ -69,7 +69,7 @@ def project_model_group_identity(
 
 
 def normalize_model_group_key(value: str) -> str:
-    return re.sub(r"(^-|-$)", "", re.sub(r"[^a-z0-9]+", "-", value.strip().lower()))
+    return re.sub(r"(?:^-)|(?:-$)", "", re.sub(r"[^a-z0-9]+", "-", value.strip().lower()))
 
 
 def _split_model_group_tokens(tokens: tuple[str, ...]) -> dict[str, tuple[str, ...]]:

@@ -7,8 +7,14 @@ import { normalizeCopilotEvent } from '../types/copilot'
 
 type ConnectionStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'reconnecting' | 'error'
 
+let messageIdFallbackCounter = 0
+
 function nextId(prefix: string) {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `${prefix}-${crypto.randomUUID()}`
+  }
+  messageIdFallbackCounter += 1
+  return `${prefix}-${Date.now()}-${messageIdFallbackCounter}`
 }
 
 function createMessage(role: CopilotMessage['role'], content: string, status: CopilotMessage['status']): CopilotMessage {

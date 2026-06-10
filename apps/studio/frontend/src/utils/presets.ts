@@ -11,10 +11,14 @@ function presetKey(skillId: string): string {
   return `studio:presets:${skillId}`
 }
 
+let presetIdFallbackCounter = 0
+
 function newPresetId(): string {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random()}`
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID()
+  }
+  presetIdFallbackCounter += 1
+  return `${Date.now()}-${presetIdFallbackCounter}`
 }
 
 export class PresetManager {

@@ -348,4 +348,4 @@ def _first_non_empty(*values: str | None) -> str:
 
 
 def _normalize_key(value: str) -> str:
-    return re.sub(r"(^-|-$)", "", re.sub(r"[^a-z0-9.]+", "-", value.strip().lower()))
+    return re.sub(r"(?:^-)|(?:-$)", "", re.sub(r"[^a-z0-9.]+", "-", value.strip().lower()))

@@ -36,7 +36,7 @@ function createAssetTreeNode(name: string, path: string): AssetTreeNode {
 
 function buildAssetTree(skillDetail?: SkillDetail): AssetTreeNode {
   const root = createAssetTreeNode("", "")
-  for (const path of Object.keys(skillDetail?.files ?? {}).sort()) {
+  for (const path of Object.keys(skillDetail?.files ?? {}).sort((a, b) => a.localeCompare(b))) {
     const parts = path.split("/").filter(Boolean)
     if (parts.length === 0) continue
 

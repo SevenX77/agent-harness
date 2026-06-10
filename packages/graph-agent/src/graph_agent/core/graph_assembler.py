@@ -23,6 +23,7 @@ from graph_agent.callbacks.events import (
     BuiltinSubagentEnterEvent,
     BuiltinSubagentExitEvent,
     BuiltinSubagentFallbackEvent,
+    InputFileInjectedEvent,
     LLMCallEvent,
     PhaseEndEvent,
     PhaseStartEvent,
@@ -71,6 +72,7 @@ from graph_agent.runtime.state_mapper import (
     phase_inputs_from_state,
 )
 from graph_agent.tools.builtin.read_example import read_declared_example
+from graph_agent.tools.builtin.read_file import RuntimeInputFileError, read_workspace_text_file
 from graph_agent.tools.builtin.read_reference import read_declared_reference, read_resource_file
 
 MAX_REACT_TURNS = 8
@@ -90,6 +92,12 @@ class CompiledStateGraph:
 class _SubagentRuntime:
     subagent: CompiledSubagent
     graph: Any
+
+
+@dataclass(frozen=True)
+class _InputFileSpec:
+    field: str
+    path: str
 
 
 @dataclass(frozen=True)
@@ -723,6 +731,12 @@ def _wrap_phase_runtime_node(
             )
 
     wrapped = PhaseWrapper(mapper, node_kind=node_kind).wrap(_node_with_lifecycle)
+    wrapped = _wrap_declared_input_files(
+        phase_id,
+        input_schema,
+        wrapped,
+        callbacks=callbacks,
+    )
     iterate = getattr(phase_ast, "iterate", None)
     if iterate is not None:
         return _build_iterate_wrapped_phase(phase_id, wrapped, iterate, output_schema)
@@ -734,6 +748,145 @@ def _wrap_phase_runtime_node(
             output_schema,
         )
     return wrapped
+
+
+def _wrap_declared_input_files(
+    phase_id: str,
+    input_schema: dict[str, Any] | None,
+    node: Any,
+    *,
+    callbacks: Any | None,
+) -> Any:
+    file_specs = _declared_input_file_specs(input_schema, phase_id=phase_id)
+    if not file_specs:
+        return node
+
+    def _node_with_input_files(state: WorkflowState) -> WorkflowState:
+        return cast(
+            WorkflowState,
+            node(
+                _inject_declared_input_files(
+                    state,
+                    phase_id=phase_id,
+                    file_specs=file_specs,
+                    callbacks=callbacks,
+                )
+            ),
+        )
+
+    return _node_with_input_files
+
+
+def _declared_input_file_specs(
+    input_schema: dict[str, Any] | None,
+    *,
+    phase_id: str,
+) -> list[_InputFileSpec]:
+    if not isinstance(input_schema, dict):
+        return []
+    properties = input_schema.get("properties")
+    if not isinstance(properties, dict):
+        return []
+    specs: list[_InputFileSpec] = []
+    for field_name, schema in properties.items():
+        if not isinstance(field_name, str) or not isinstance(schema, dict):
+            continue
+        if schema.get("source") != "file":
+            continue
+        path = schema.get("path")
+        if not isinstance(path, str) or not path.strip():
+            detail = f"file input field {field_name!r} has source='file' but no path"
+            raise GraphAgentFatalError(
+                detail,
+                payload=make_error_payload(
+                    "[F-v3-runtime-state-mapping-failed]",
+                    detail,
+                    phase_id=phase_id,
+                    field_path=field_name,
+                ),
+            )
+        specs.append(_InputFileSpec(field=field_name, path=path))
+    return specs
+
+
+def _inject_declared_input_files(
+    state: WorkflowState,
+    *,
+    phase_id: str,
+    file_specs: list[_InputFileSpec],
+    callbacks: Any | None,
+) -> WorkflowState:
+    workspace_dir = _workspace_dir_from_state(state, phase_id=phase_id)
+    next_state = state
+    for spec in file_specs:
+        if spec.field.startswith("_"):
+            _input_file_fatal(
+                f"file input target field {spec.field!r} is not a business field",
+                phase_id=phase_id,
+                field_path=spec.field,
+                source_path=spec.path,
+            )
+        try:
+            content = read_workspace_text_file(spec.path, workspace_dir)
+        except RuntimeInputFileError as exc:
+            _input_file_fatal(
+                str(exc),
+                phase_id=phase_id,
+                field_path=spec.field,
+                source_path=spec.path,
+                cause=exc,
+            )
+        next_state = StateManager.update_business(next_state, **{spec.field: content})
+        _safe_emit_event(
+            callbacks,
+            InputFileInjectedEvent(
+                from_phase=state["flow"].current_phase or None,
+                to_phase=phase_id,
+                changed_keys=[spec.field],
+                blackboard_snapshot=next_state["data"].model_dump(),
+                file_ref=spec.path,
+                target_field=spec.field,
+            ),
+        )
+    return next_state
+
+
+def _workspace_dir_from_state(state: WorkflowState, *, phase_id: str) -> Path:
+    flow = state["flow"]
+    storage_config = getattr(flow, "persistent_storage_config", None)
+    if isinstance(storage_config, dict):
+        workspace_dir = storage_config.get("workspace_dir")
+        if isinstance(workspace_dir, str) and workspace_dir:
+            return Path(workspace_dir)
+    _input_file_fatal(
+        "workspace_dir is required for declarative file input",
+        phase_id=phase_id,
+        field_path=None,
+        source_path=None,
+    )
+
+
+def _input_file_fatal(
+    detail: str,
+    *,
+    phase_id: str,
+    field_path: str | None,
+    source_path: str | None,
+    cause: Exception | None = None,
+) -> NoReturn:
+    error = GraphAgentFatalError(
+        detail,
+        payload=make_error_payload(
+            "[F-v3-runtime-state-mapping-failed]",
+            detail,
+            phase_id=phase_id,
+            field_path=field_path,
+            source_path=source_path,
+        ),
+    )
+    if cause is not None:
+        raise error from cause
+    raise error
 
 
 def _build_logic_node(

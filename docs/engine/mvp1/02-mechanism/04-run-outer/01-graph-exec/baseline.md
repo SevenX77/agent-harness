@@ -1,15 +1,15 @@
 ---
 module: 02-mechanism/04-run-outer/01-graph-exec
 doc: baseline
-status: drafted（现状对齐 WS-E1 Step5 后代码；LOGIC runtime 已纯返回 dict;声明式 iterate 已接入 phase/graph 外层 runtime;action/tool 两套注册表;子图 inputs 已放宽且 outputs 仍严校;io.outputs file/artifact 落盘仍是既有现状）
+status: drafted（现状对齐 WS-E1 Step5 + WS-E1-io 后代码；LOGIC runtime 已纯返回 dict;声明式 iterate 已接入 phase/graph 外层 runtime;action/tool 两套注册表;子图 inputs 已放宽且 outputs 仍严校;声明式 file input lazy 注入与 file/artifact 输出落盘已接入）
 binds_alignment: ./mvp1-alignment.md
-binds_code: core/graph_assembler.py（_build_logic_node, _wrap_phase_runtime_node, _GraphIterateRuntime, _build_subgraph_node）· runtime/state_mapper.py:37 · core/actions.py（18/49）· core/loader.py（_validate_subgraph_io_contracts, _validate_iterate_compile_contracts）· io/manager.py:108（save_outputs）· io/storage.py:149（save_artifact）
+binds_code: core/graph_assembler.py（_build_logic_node, _wrap_phase_runtime_node, _wrap_declared_input_files, _GraphIterateRuntime, _build_subgraph_node）· runtime/state_mapper.py:37 · core/actions.py（18/49）· core/loader.py（_validate_subgraph_io_contracts, _validate_iterate_compile_contracts）· core/runner.py（_save_v030_declared_file_outputs, _context_with_framework_output_sources）· tools/builtin/read_file.py（read_workspace_text_file）· io/manager.py:108（save_outputs）· io/storage.py:149（save_artifact）
 ---
 
 # 01-graph-exec — Baseline(当下代码实现逻辑)
 
 > **Scope**: 运行时按 DAG 执行 phase 的外层机制:`StateMapper`(io slice/merge)、LOGIC 执行(`_build_logic_node`,plain dict action input + 纯返回写回)、声明式 iterate 外层包装、SUBGRAPH 调用、action/tool 两套注册表(`actions.py`)、io_manager。
-> **现状一句话**:LOGIC 节点 `_build_logic_node` 已不再创建可变 `Context` facade;每个 action 收到 `{**before, **updates}` plain dict,只有 action 显式返回的 dict 会通过 `_validate_logic_update_keys` 校验后写回。WS-E1 Step4 已把声明式 iterate 接到 graph/phase 外层:phase-level iterate 包在 `PhaseWrapper(StateMapper)` 外侧聚合/累积结果,graph-level iterate 包在 compiled graph 外侧执行整图 batch/loop。WS-E1 Step5 已放宽 SUBGRAPH inputs 镜像校验:父 `SUBGRAPH.md io.inputs` 不再要求与子 `GRAPH.md io.inputs` 完全相等;outputs 仍严格相等。action 与 tool 仍是 `actions.py` 里**两套独立注册表**。StateMapper(`runtime/state_mapper.py:37`)做 io slice/merge,失败报 `[F-v3-runtime-state-mapping-failed]`。
+> **现状一句话**:LOGIC 节点 `_build_logic_node` 已不再创建可变 `Context` facade;每个 action 收到 `{**before, **updates}` plain dict,只有 action 显式返回的 dict 会通过 `_validate_logic_update_keys` 校验后写回。WS-E1 Step4 已把声明式 iterate 接到 graph/phase 外层:phase-level iterate 包在 `PhaseWrapper(StateMapper)` 外侧聚合/累积结果,graph-level iterate 包在 compiled graph 外侧执行整图 batch/loop。WS-E1 Step5 已放宽 SUBGRAPH inputs 镜像校验:父 `SUBGRAPH.md io.inputs` 不再要求与子 `GRAPH.md io.inputs` 完全相等;outputs 仍严格相等。WS-E1-io 已把 `source: file` 的 phase input 接成目标 phase 执行前 lazy 注入普通 blackboard,并把 `target=file/artifact` 根输出与 `business_data_md` 原文保存接到 runner/io。action 与 tool 仍是 `actions.py` 里**两套独立注册表**。StateMapper(`runtime/state_mapper.py:37`)做 io slice/merge,失败报 `[F-v3-runtime-state-mapping-failed]`。
 
 ## UI/UX
 N/A。
@@ -36,7 +36,7 @@ N/A。
 
 ### 3. 声明式 iterate 对 graph-exec 的接线影响(WS-E1 Step4 已落)
 Step4 没把循环塞回 action,而是在 graph execution 外层接声明式 runtime:
-- phase-level iterate:`_wrap_phase_runtime_node` 先构造 `PhaseWrapper(StateMapper).wrap(_node_with_lifecycle)`,再由 `_build_iterate_wrapped_phase` 包成 batch/loop。这样每轮 phase body 仍走正常 io slice/merge,action 仍收到 plain dict。
+- phase-level iterate:`_wrap_phase_runtime_node` 先构造 `PhaseWrapper(StateMapper).wrap(_node_with_lifecycle)`,再接 `_wrap_declared_input_files`,最后由 `_build_iterate_wrapped_phase` 包成 batch/loop。这样每轮 phase body 仍走正常 io slice/merge;若该 phase 声明 `source: file`,文件内容会在目标 phase 执行前注入普通 blackboard,再被 `PhaseWrapper` 按 `io.inputs` 切片给 action。
 - node batch/range:`_build_batch_iterate_phase` 按 `iterate.over` 解析 list、按 `item_var` 注入每项、按 phase outputs 聚合。
 - node loop:`_build_loop_iterate_phase` 串行执行,每轮把 `accumulate.var` 作为普通 business input 喂给 action,最终只写回 accumulator。
 - graph-level iterate:`assemble_graph` 在 `compiled.manifest.iterate` 存在时,把 compiled LangGraph 包成 `_GraphIterateRuntime`;其 `invoke` 内部执行整图 batch 或整图 loop。
@@ -52,19 +52,30 @@ SUBGRAPH 节点 `_build_subgraph_node`(`:363`,装配归 `03-assemble`)递归调 
 - **子图 inputs 已放宽**(编译期):`loader.py:_validate_subgraph_io_contracts`(:528,`:211` 调用)仍递归编译 child graph,但不再比较父 `SUBGRAPH.md io.inputs` 与子 `GRAPH.md io.inputs`。父子 input 字段集合、required 或同名 schema 不一致不会在 loader 层 fatal;运行期子图仍先经父 phase `StateMapper` 切片,再由 child graph 按自己的 `io.inputs` 切片。
 - **子图 outputs 仍严校**(编译期):同函数继续要求父 `SUBGRAPH.md io.outputs` 与子 `GRAPH.md io.outputs` 整个 schema 相等;不一致报 `[F-v3-subgraph-io-mismatch]`,错误信息标明 `outputs do not match`。
 
-### 6. io.outputs 落盘:file / artifact(io/manager + io/storage)
-`IOManager.save_outputs`(`io/manager.py:108`,storage-agnostic)按 `output_spec.target`(默认 `"file"`,:143)分发:
-- **artifact**(:163):有注入 `artifact_saver` 用它(:176);否则回退框架 `StorageManager.save_artifact`(:168 → `io/storage.py:149`,写 `<run_dir>/phases/<phase>/<name>`、str/bytes 原样 else JSON、发 `ArtifactSavedEvent`)。
-- **file**(:184):`path` 来自 `output_spec.get("path")`(:185);**path-less 默认 `output_dir/{name}.json`**(:186-187,⚠️ 非旧文所写 `runner.py:603`);`{context.key}` 占位由 `_resolve_path_template`(:193 → :210)解析。
-- ⚠️ **缺口:文件导入→黑板**——运行中"跑到节点才把外部文件字段注入黑板"**无机制**(mvp1 新增,alignment E2)。
+### 6. io.outputs 落盘:file / artifact(io/manager + io/storage + runner)
+`IOManager.save_outputs`(`io/manager.py:108`,storage-agnostic)按 `output_spec.target`(默认 `"file"`)分发:
+- **artifact / artifact_manager**:有注入 `artifact_saver` 时交给调用方;否则若有 `storage_manager`,回退 `StorageManager.save_artifact`(`io/storage.py:149`,写 `<run_dir>/phases/<phase>/<name>` 或 `<run_dir>/<name>`,str/bytes 原样,其他 JSON,并发出 `ArtifactSavedEvent`);若只有 `output_dir`,按声明 `path`/`filename` 写到 `output_dir` 下。
+- **file**:`path`/`filename` 优先,否则 path-less 默认 `output_dir/{name}.json`;`{context.key}` 占位由 `_resolve_path_template` 解析。带 `output_dir` 时会校验最终路径不能逃逸 `output_dir`。
+- **artifact 路径边界**:`StorageManager._artifact_path_under` 拒绝空名、绝对路径和 `..` 逃逸 run/phase 目录。
+- **root output 保存**:`runner._save_v030_declared_file_outputs` 会扫描根 `GRAPH.md io.outputs.properties`,把 `target in {"file","artifact"}` 的声明交给 `IOManager`,默认写到 `<workspace_dir>/runs/<run_id>/artifacts`。
+- **markdown 原文**:`IOManager._resolve_output_data` 支持 `source: business_data_md`;若未显式 source 但 `content_type: text/markdown` 且 context 中有 `business_data_md`,也保存 markdown 原文。`runner._context_with_framework_output_sources` 从 `flow.finish_task_result.business_data_md` 把该值带入输出上下文。
+
+### 7. 声明式 file input lazy 注入(graph_assembler + read_file)
+`_wrap_declared_input_files` 在 phase runtime wrapper 中识别 `io.inputs.properties.<field>.source == "file"`:
+- `path` 缺失会在装配时抛 `[F-v3-runtime-state-mapping-failed]`。
+- 运行到目标 phase 时,从 `flow.persistent_storage_config["workspace_dir"]` 解析相对路径,通过 `read_workspace_text_file` 读 UTF-8 文本;注入位置是普通 `WorkflowState.data`,因此仍由后续 `PhaseWrapper(StateMapper)` 按该 phase 的 `io.inputs` 切片消费。
+- 成功注入后发 `InputFileInjectedEvent`,包含 `from_phase`、`to_phase`、`changed_keys`、`blackboard_snapshot`、`file_ref`、`target_field`。
+- 绝对路径、`..` 逃逸、缺失文件、目录、非普通文件、超 200KB、二进制/非 UTF-8 文本都会稳定转成 `[F-v3-runtime-state-mapping-failed]`。
 
 ## API
 - `StateMapper`(`state_mapper.py:37`)——slice/merge。
 - `_build_logic_node(...)`(`graph_assembler.py:325`)——LOGIC 节点闭包(装配归 `03-assemble`,执行范式归本域)。
+- `_wrap_declared_input_files(...)` / `read_workspace_text_file(...)`——声明式 `source: file` 输入在目标 phase 前 lazy 注入普通 blackboard。
 - `ActionRegistry.for_phase(phase_id)`(`actions.py:44`)/ `ToolRegistry.for_phase`(`:71`)。
+- `IOManager.save_outputs(...)` / `StorageManager.save_artifact(...)` / `runner._save_v030_declared_file_outputs(...)`——声明式 `target=file/artifact` 输出保存。
 
 ## Data Model / State
-blackboard = `WorkflowState.data`(`data-contracts`);io 经 StateMapper slice/merge。LOGIC 现只把 action 返回 dict 写回 data,不再经可变 Context mutation diff 写回。
+blackboard = `WorkflowState.data`(`data-contracts`);io 经 StateMapper slice/merge。LOGIC 现只把 action 返回 dict 写回 data,不再经可变 Context mutation diff 写回。声明式 file input 的内容同样写入普通 `WorkflowState.data` 字段,再被目标 phase 的 `io.inputs` 切片消费。运行期工作区根来自 `FrameworkState.persistent_storage_config["workspace_dir"]`。
 
 ## 当前边界(这个模块现在不是什么)
 - **LOGIC runtime 已纯返回**:action 收到 plain dict,只显式返回 dict 写回;loader 对 action 第一参数名仍要求 `context/ctx`,这是语法层 drift,见 `01-contract/02-skill-syntax/baseline.md`。
@@ -72,7 +83,7 @@ blackboard = `WorkflowState.data`(`data-contracts`);io 经 StateMapper slice/mer
 - **action/tool 不统一**:两套注册表(spec 已固定 Action≠Tool)。
 - **代码里术语混叫**:历史处把 action 叫 "tool"(死簇,待清)。
 - **子图 io 现状**:inputs 已放宽(`loader.py:528` 不再比较 inputs);outputs 仍强制相等并用 `[F-v3-subgraph-io-mismatch]` fatal。
-- **文件导入→黑板无机制**:运行中无"跑到节点才注入外部文件字段"(mvp1 新增 E2)。
+- **声明式 file input 依赖 runner 注入 workspace_dir**:经 `run_skill` / v0.3 runner 路径会写入 `persistent_storage_config.workspace_dir`;若直接拼状态调用 graph 且缺该配置,文件注入会以 `[F-v3-runtime-state-mapping-failed]` 失败。
 
 ## 🚨 已知代码债(2026-06-05 审计;如实记录,不在文档审计里改代码)
 按"审计 ≠ 改代码"原则,以下代码现状如实登记 + 警告,归 refactor-target(kiro):
@@ -90,8 +101,8 @@ blackboard = `WorkflowState.data`(`data-contracts`);io 经 StateMapper slice/mer
 | 死簇 | `code_phase_node`/`phase_executor` | 删(live 用 `_build_logic_node`) |
 | StateMapper required 校验 | slice **不校验** required(只过滤 properties、缺失静默丢)(`filter_runtime_inputs:25`) | required 缺失报 `[F-v3-runtime-state-mapping-failed]`(alignment §3/§6) |
 | 子图 io 校验 | inputs 已放宽(不再镜像比较);outputs 仍严格 1:1(`loader.py:528/553`) | 已对齐 E1:inputs 从黑板切片、outputs 保留严校 |
-| 文件导入→黑板 | 无机制 | 跑到节点才 lazy 注入(E2) |
-| io.outputs md artifact | str 原样写(`io/storage.py:167`);finish_task 工具走 markdown→parsed `data`,**未接 business_data_md**(中间件侧) | md 取 `business_data_md`、不 json→md 回转(E3) |
+| 文件导入→黑板 | `source: file` phase input 已在目标 phase 前 lazy 注入普通 blackboard;路径受 `workspace_dir` 约束,成功发 `InputFileInjectedEvent`,失败报 `[F-v3-runtime-state-mapping-failed]` | 已对齐 E2:跑到目标节点才 lazy 注入 |
+| io.outputs md artifact | `target=file/artifact` 根输出由 runner 交给 `IOManager`;markdown artifact 可取 `business_data_md` 原文;file/artifact 路径均有逃逸防护 | 已对齐 E3:md 取 `business_data_md`、不 json→md 回转 |
 
 > **验"是否按 mvp1 改了"**:① LOGIC runtime 是否只把 action 返回 dict 写回、Context mutation 不再隐式改黑板;② action 里 `run_skill`/FS/`sys.path`/动态 import 是否触发编译期 purity FATAL;③ 循环/累积是否由声明式 iterate runtime 执行,而不是 action 手写循环;④ StateMapper required 缺失/越界 key 是否报 `[F-v3-runtime-state-mapping-failed]`。
 

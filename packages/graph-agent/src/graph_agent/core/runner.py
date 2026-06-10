@@ -48,6 +48,7 @@ from graph_agent.callbacks.events import (
 )
 from graph_agent.core.exceptions import (
     GraphAgentError,
+    GraphAgentFatalError,
     LoaderError,
     SkillLoadError,
     make_error_payload,
@@ -289,6 +290,7 @@ def predict_skill(  # noqa: C901
             "run_id": run_id,
             "thread_id": run_id,
             "unattended": unattended,
+            "persistent_storage_config": {"workspace_dir": str(workspace_root)},
         }),
         messages=[],
     )
@@ -600,7 +602,7 @@ def _save_v030_declared_file_outputs(
         for name, schema in properties.items()
         if isinstance(name, str)
         and isinstance(schema, dict)
-        and schema.get("target") == "file"
+        and schema.get("target") in {"file", "artifact"}
     ]
     if not file_outputs:
         return
@@ -614,10 +616,35 @@ def _save_v030_declared_file_outputs(
             output_context.update(phase_outputs)
 
     io_mgr = IOManager({"outputs": file_outputs})
-    io_mgr.save_outputs(
-        output_context,
-        output_dir=output_context.get("output_dir") or default_output_dir,
-    )
+    try:
+        io_mgr.save_outputs(
+            output_context,
+            output_dir=output_context.get("output_dir") or default_output_dir,
+        )
+    except GraphAgentError:
+        raise
+    except Exception as exc:
+        detail = str(exc)
+        raise GraphAgentFatalError(
+            detail,
+            payload=make_error_payload("[F-v3-runtime-state-mapping-failed]", detail),
+        ) from exc
+
+
+def _context_with_framework_output_sources(
+    context: dict[str, Any],
+    final_state: Any,
+) -> dict[str, Any]:
+    output_context = dict(context)
+    flow = final_state.get("flow") if isinstance(final_state, dict) else None
+    finish_task_result = getattr(flow, "finish_task_result", None)
+    if isinstance(flow, dict):
+        finish_task_result = flow.get("finish_task_result")
+    if isinstance(finish_task_result, dict):
+        business_data_md = finish_task_result.get("business_data_md")
+        if isinstance(business_data_md, str) and business_data_md:
+            output_context["business_data_md"] = business_data_md
+    return output_context
 
 
 def _run_v030_skill_dict(
@@ -681,6 +708,7 @@ def _run_v030_skill_dict(
                 "run_id": run_id,
                 "thread_id": run_id,
                 "unattended": inputs.get("_unattended", False),
+                "persistent_storage_config": {"workspace_dir": str(workspace_dir)},
             }),
             messages=[],
         )
@@ -707,13 +735,14 @@ def _run_v030_skill_dict(
     
     # Step 4.4: Extract flat business output data directly from model_dump
     final_context = result["data"].model_dump()
+    output_context = _context_with_framework_output_sources(final_context, result)
     compiled_raw = getattr(compiled, "raw", {})
     output_schema = (
         compiled_raw.get("io", {}).get("outputs") if isinstance(compiled_raw, dict) else None
     )
     _save_v030_declared_file_outputs(
         output_schema,
-        final_context,
+        output_context,
         default_output_dir=trace_output / "artifacts",
     )
     final_trace_context = _v030_phase_context(final_context)

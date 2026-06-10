@@ -13,6 +13,7 @@ from graph_agent.core.state import BusinessData, FrameworkState, StateManager, W
 
 logger = logging.getLogger(__name__)
 
+
 def schema_properties(schema: dict[str, Any] | None) -> set[str]:
     if not isinstance(schema, dict):
         return set()
@@ -20,6 +21,41 @@ def schema_properties(schema: dict[str, Any] | None) -> set[str]:
     if not isinstance(properties, dict):
         return set()
     return {key for key in properties if isinstance(key, str)}
+
+
+def flatten_runtime_data(data_obj: Any) -> dict[str, Any]:
+    if hasattr(data_obj, "model_dump"):
+        dumped = data_obj.model_dump()
+        raw_data = dict(dumped) if isinstance(dumped, dict) else {}
+    elif isinstance(data_obj, dict):
+        raw_data = dict(data_obj)
+    else:
+        return {}
+
+    if "inputs" not in raw_data and "phase_outputs" not in raw_data:
+        return raw_data
+
+    flat_data: dict[str, Any] = {}
+    inputs = raw_data.get("inputs")
+    if isinstance(inputs, dict):
+        flat_data.update(inputs)
+    phase_outputs = raw_data.get("phase_outputs")
+    if isinstance(phase_outputs, dict):
+        for phase_output in phase_outputs.values():
+            if isinstance(phase_output, dict):
+                flat_data.update(phase_output)
+    for key, value in raw_data.items():
+        if key not in ("inputs", "phase_outputs"):
+            flat_data[key] = value
+    return flat_data
+
+
+def _business_data_from_runtime(data_obj: Any) -> BusinessData:
+    if isinstance(data_obj, BusinessData):
+        return data_obj
+    if data_obj is None:
+        return BusinessData()
+    return BusinessData.model_validate(flatten_runtime_data(data_obj))
 
 
 def filter_runtime_inputs(
@@ -43,21 +79,7 @@ class StateMapper:
 
     def build_phase_input(self, state: WorkflowState) -> WorkflowState:
         """Filter global business data to only what is declared in the input schema."""
-        data_obj = state.get("data")
-        if isinstance(data_obj, dict):
-            if "inputs" in data_obj or "phase_outputs" in data_obj:
-                flat_data = {}
-                if "inputs" in data_obj and isinstance(data_obj["inputs"], dict):
-                    flat_data.update(data_obj["inputs"])
-                if "phase_outputs" in data_obj and isinstance(data_obj["phase_outputs"], dict):
-                    for p_val in data_obj["phase_outputs"].values():
-                        if isinstance(p_val, dict):
-                            flat_data.update(p_val)
-                data_obj = BusinessData.model_validate(flat_data)
-            else:
-                data_obj = BusinessData.model_validate(data_obj)
-        elif data_obj is None:
-            data_obj = BusinessData()
+        data_obj = _business_data_from_runtime(state.get("data"))
             
         flow_obj = state.get("flow")
         if isinstance(flow_obj, dict):
@@ -76,21 +98,7 @@ class StateMapper:
 
     def wrap_phase_output(self, state: WorkflowState, updates: dict[str, Any] | WorkflowState) -> WorkflowState:
         """Validate updates against the output schema and merge into WorkflowState."""
-        data_obj = state.get("data")
-        if isinstance(data_obj, dict):
-            if "inputs" in data_obj or "phase_outputs" in data_obj:
-                flat_data = {}
-                if "inputs" in data_obj and isinstance(data_obj["inputs"], dict):
-                    flat_data.update(data_obj["inputs"])
-                if "phase_outputs" in data_obj and isinstance(data_obj["phase_outputs"], dict):
-                    for p_val in data_obj["phase_outputs"].values():
-                        if isinstance(p_val, dict):
-                            flat_data.update(p_val)
-                data_obj = BusinessData.model_validate(flat_data)
-            else:
-                data_obj = BusinessData.model_validate(data_obj)
-        elif data_obj is None:
-            data_obj = BusinessData()
+        data_obj = _business_data_from_runtime(state.get("data"))
             
         flow_obj = state.get("flow")
         if isinstance(flow_obj, dict):
@@ -267,6 +275,7 @@ __all__ = [
     "StateMapper",
     "ensure_no_input_write",
     "filter_runtime_inputs",
+    "flatten_runtime_data",
     "phase_inputs_from_state",
     "phase_outputs_from_state",
     "schema_properties",

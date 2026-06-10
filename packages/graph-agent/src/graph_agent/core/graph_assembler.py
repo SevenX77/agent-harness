@@ -71,6 +71,7 @@ from graph_agent.core.subagents import (
 from graph_agent.runtime.state_mapper import (
     PhaseWrapper,
     StateMapper,
+    flatten_runtime_data,
     phase_inputs_from_state,
     schema_properties,
 )
@@ -516,6 +517,48 @@ async def _gather_indexed(
     )
 
 
+def _empty_batch_payload(
+    output_keys: set[str] | None,
+    *,
+    include_batch_outputs: bool,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {key: [] for key in (output_keys or set())}
+    if include_batch_outputs:
+        payload["batch_outputs"] = []
+    return payload
+
+
+def _aggregate_batch_payloads(
+    item_payloads: list[dict[str, Any]],
+    *,
+    include_batch_outputs: bool,
+) -> dict[str, Any]:
+    aggregated: dict[str, Any] = {}
+    for payload in item_payloads:
+        for key, value in payload.items():
+            aggregated.setdefault(key, []).append(value)
+    if include_batch_outputs:
+        aggregated["batch_outputs"] = item_payloads
+    return aggregated
+
+
+def _run_batch_iterate_payload(
+    items: list[Any],
+    output_keys: set[str] | None,
+    concurrency: int,
+    run_one: Callable[[int, Any], Awaitable[dict[str, Any]]],
+    *,
+    include_batch_outputs: bool = False,
+) -> dict[str, Any]:
+    if not items:
+        return _empty_batch_payload(output_keys, include_batch_outputs=include_batch_outputs)
+    item_payloads = asyncio.run(_gather_indexed(items, concurrency, run_one))
+    return _aggregate_batch_payloads(
+        item_payloads,
+        include_batch_outputs=include_batch_outputs,
+    )
+
+
 def _emit_blackboard_reduce(
     callbacks: Any | None,
     *,
@@ -534,34 +577,6 @@ def _emit_blackboard_reduce(
             reducer=reducer,
         ),
     )
-
-
-def _runtime_blackboard_snapshot(state: WorkflowState) -> dict[str, Any]:
-    data_obj = state.get("data")
-    if hasattr(data_obj, "model_dump"):
-        dumped = data_obj.model_dump()
-        raw_dict = dict(dumped) if isinstance(dumped, dict) else {}
-    elif isinstance(data_obj, dict):
-        raw_dict = dict(data_obj)
-    else:
-        raw_dict = {}
-
-    if "inputs" not in raw_dict and "phase_outputs" not in raw_dict:
-        return raw_dict
-
-    flat_data: dict[str, Any] = {}
-    inputs = raw_dict.get("inputs")
-    if isinstance(inputs, dict):
-        flat_data.update(inputs)
-    phase_outputs = raw_dict.get("phase_outputs")
-    if isinstance(phase_outputs, dict):
-        for output in phase_outputs.values():
-            if isinstance(output, dict):
-                flat_data.update(output)
-    for key, value in raw_dict.items():
-        if key not in ("inputs", "phase_outputs"):
-            flat_data[key] = value
-    return flat_data
 
 
 def _current_phase_from_state(state: WorkflowState) -> str | None:
@@ -584,7 +599,7 @@ def _emit_input_dispatch(
     input_schema: Any,
     state: WorkflowState,
 ) -> None:
-    raw_data = _runtime_blackboard_snapshot(state)
+    raw_data = flatten_runtime_data(state.get("data"))
     keys = schema_properties(input_schema)
     dispatched_keys = [key for key in keys if key in raw_data] if keys else list(raw_data.keys())
     _safe_emit_event(
@@ -661,30 +676,22 @@ def _build_batch_iterate_phase(
     def _batch_phase(state: WorkflowState) -> WorkflowState:
         workflow_state = _coerce_workflow_state(state)
         items = _apply_iterate_range(_resolve_iterate_items(workflow_state, over), range_spec)
-        if not items:
-            empty: dict[str, Any] = {key: [] for key in (output_keys or set())}
-            if include_batch_outputs:
-                empty["batch_outputs"] = []
-            return _with_phase_outputs(workflow_state, {phase_id: empty})
 
-        async def _run_all() -> list[dict[str, Any]]:
-            async def _run_one(index: int, item: Any) -> dict[str, Any]:
-                child_state = StateManager.update_business(workflow_state, **{item_var: item})
-                result = await _run_with_branch_index_async(
-                    index,
-                    lambda: asyncio.to_thread(node, child_state),
-                )
-                return _phase_result_payload(child_state, result, output_keys)
+        async def _run_one(index: int, item: Any) -> dict[str, Any]:
+            child_state = StateManager.update_business(workflow_state, **{item_var: item})
+            result = await _run_with_branch_index_async(
+                index,
+                lambda: asyncio.to_thread(node, child_state),
+            )
+            return _phase_result_payload(child_state, result, output_keys)
 
-            return await _gather_indexed(items, concurrency, _run_one)
-
-        item_payloads = asyncio.run(_run_all())
-        aggregated: dict[str, Any] = {}
-        for payload in item_payloads:
-            for key, value in payload.items():
-                aggregated.setdefault(key, []).append(value)
-        if include_batch_outputs:
-            aggregated["batch_outputs"] = item_payloads
+        aggregated = _run_batch_iterate_payload(
+            items,
+            output_keys,
+            concurrency,
+            _run_one,
+            include_batch_outputs=include_batch_outputs,
+        )
         return _with_phase_outputs(workflow_state, {phase_id: aggregated})
 
     return _batch_phase
@@ -784,33 +791,27 @@ def _run_graph_batch_iterate(
 ) -> WorkflowState:
     output_keys = _schema_output_keys(output_schema)
     items = _apply_iterate_range(_resolve_iterate_items(state, iterate.over), iterate.range)
-    if not items:
-        empty: dict[str, Any] = {key: [] for key in (output_keys or set())}
-        final_state = _with_phase_outputs(state, _terminal_phase_outputs(terminal_phase_ids, empty))
-        return _with_graph_iterate_signal(final_state, mode="batch", namespaces=[])
 
-    async def _run_all() -> list[dict[str, Any]]:
-        async def _run_one(index: int, item: Any) -> dict[str, Any]:
-            child_state = StateManager.update_business(state, **{iterate.item_var: item})
-            result = await _run_with_iteration_context_async(
-                index,
-                _iteration_namespace(index),
-                lambda: asyncio.to_thread(
-                    graph.invoke,
-                    child_state,
-                    config=_iteration_config(config, index),
-                    **invoke_kwargs,
-                ),
-            )
-            return _phase_result_payload(child_state, result, output_keys)
+    async def _run_one(index: int, item: Any) -> dict[str, Any]:
+        child_state = StateManager.update_business(state, **{iterate.item_var: item})
+        result = await _run_with_iteration_context_async(
+            index,
+            _iteration_namespace(index),
+            lambda: asyncio.to_thread(
+                graph.invoke,
+                child_state,
+                config=_iteration_config(config, index),
+                **invoke_kwargs,
+            ),
+        )
+        return _phase_result_payload(child_state, result, output_keys)
 
-        return await _gather_indexed(items, iterate.concurrency, _run_one)
-
-    item_payloads = asyncio.run(_run_all())
-    aggregated: dict[str, Any] = {}
-    for payload in item_payloads:
-        for key, value in payload.items():
-            aggregated.setdefault(key, []).append(value)
+    aggregated = _run_batch_iterate_payload(
+        items,
+        output_keys,
+        iterate.concurrency,
+        _run_one,
+    )
     final_state = _with_phase_outputs(
         state,
         _terminal_phase_outputs(terminal_phase_ids, aggregated),

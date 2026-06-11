@@ -88,16 +88,16 @@
 9. **E3 加过渡包装 `run_dev(source)`**:别直接删旧接口,保留内部做"源码→临时编译→临时存储→按指纹跑"的包装器,平稳过渡再剥离(否则瞬间打断所有现有 E2E)。
 10. **S8 Rust 只管写权+watcher+锁**:大文件读留编译/解析所在语言,避免 FFI 跨语言传全量大字符串(D12"唯一写者"指写权,不强制读)。
 
-### B. 与 Gemini 已达成 consensus(2026-06-11;偏离已锁决策处待 PM 签字)
-1. **6态/materialize**:consensus = **materialize 留 gateway**(把角色意图投影成有序 route 链 = 动态路由选择;输出物理 route 列表而非 UI 态名,不算污染);**6态拆开**——gateway 暴露**原始健康事实**(route 可用/凭证在/熔断冷却),studio 做**6态命名投影 + 视觉状态机 + 渲染**。
-   - 对照已锁 MVP1(6态投影**整个**下沉 gateway):materialize 不变;**6态的"命名态投影"从 gateway 挪回 studio = 偏离 → 待 PM 签字**。
-   - 任务调整:**G4** = gateway 只出"原始健康事实 + materialize";**S6** = studio 吃事实做 6态命名投影+状态机+渲染。
-2. **golden**:consensus = golden 是**归 studio 产品域、但物理解耦的 headless 组件(CLI/lib)**,封装产品特定判定(可含 copilot),向上撑 studio 看板、横向撑 CI 无头。
-   - 对照"golden 归 studio":一致,**细化为 headless 组件(不埋桌面后端)→ 待 PM 知会**。
-   - 任务调整:**E6/S5** = golden 做成 headless 组件(studio 产品域,UI+CI 共用同一套判定),engine 内置那套退役。
+### B. 2 个"冲突"经 PM 澄清后消解(Gemini 原 premise 有误)
+1. **6态**:Gemini 误把 6态当"业务交互状态机";**实际 6态 = route 能不能用(基础设施健康),与业务/copilot 无关**。所以**不拆、无偏离,MVP1 原样**:
+   - **G4 = gateway 计算并输出 6态**(从自己的事实:route 状态/凭证在否/熔断冷却 → 映射成 `ready/untested/cooling_down/off` 等可用性状态)+ materialize(角色意图→有序 route 链)。
+   - **S6 = studio 只渲染**(把 6态画成颜色/文案/重试提示);不算状态。
+2. **golden**:**engine 不带 golden 跑**;golden diff 是 engine 批量跑完产出结果**之后**的独立操作。Gemini 把"批量跑"和"比对"搅一起了。正确:
+   - 批量跑 = engine 自己的事(N 输入跑 N 次出 N 结果,engine 不知为 golden)。
+   - **E6/S5 = golden 是独立的 headless diff/判定组件**(lib/CLI):吃**已产出结果 + 基线 → diff → 判定(可含 copilot)**;**不跑/不编排 engine**,只消费结果。headless = 不依赖桌面 UI,studio UI 与 CI 共用同一套判定。engine 内置那套退役。
 
 ### C. 流程
-✅ Gemini consensus 已达成 → ⏳ PM 签字(2 处偏离/细化)→ 写 Codex audit prompt → 通过后反写 MVP1 设计+决策原因 → 反向链接回本计划。
+✅ 2 个冲突经澄清消解(6态无偏离=MVP1原样;golden 与"产品判定"一致、明确为独立 headless 组件)→ 写 Codex audit prompt → 通过后反写 MVP1 设计+决策原因 → 反向链接回本计划。
 
 ## 反向链接表(占位 · 反写 MVP1 后填)
 

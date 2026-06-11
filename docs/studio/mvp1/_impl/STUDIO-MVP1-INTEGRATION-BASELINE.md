@@ -68,8 +68,8 @@ main 在 `92d33c34`（wave3 的基底，已是 main 祖先）之后改过、且 
 
 **前端（3）**：`components/studio/panels/panel-files.ts`、`components/welcome/WelcomePage.tsx`、`hooks/useCopilot.ts`
 
-- **11 个是机械合并**：main 的 Sonar 安全修复（随机盐、后台任务强引用等）vs 新功能撞在同段 → 两边都留。
-- **3 个与 resolver 决策纠缠（见 §7）**：`routers/llm.py`、`services/copilot.py`、`useCopilot.ts` —— 它们的冲突段正是 `ModelResolver` vs `resolve_role` 那处，**必须先定 §7 再解**。
+- **12 个是机械合并**：main 的 Sonar 安全修复（随机盐、后台任务强引用等）vs 新功能撞在同段 → 两边都留。其中 `useCopilot.ts` 改的是 `resolveWorkspaceIdentity`（工作区身份解析，与模型 resolver 无关，子 agent 曾误报为 resolver 纠缠）。
+- **2 个涉及 resolver 形式**：`routers/llm.py`、`services/copilot.py` —— main 用 `ModelResolver.resolve_routes(...)`，wave3 直接调 `resolve_role(...)`。**二者语义等价（见 §7），机械合并即可，不阻塞**。
 
 ---
 
@@ -92,14 +92,18 @@ main 在 `92d33c34`（wave3 的基底，已是 main 祖先）之后改过、且 
 
 ---
 
-## 7. 下一轮开场第一题：resolver API 方向
+## 7. resolver 形式：near-trivial，不是架构分叉（2026-06-11 核实修正）
 
-集成分支 §5 的 3 个冲突文件解不了，除非先定这个：
+**核实结论**：`ModelResolver.resolve_routes(role, route_override)`（类方法）的实现**就是** `resolve_role(snapshot, role, ...)`（底层函数）外加一个 `stats.total_resolves` 计数器（`packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:140-153`）。两处真冲突点（copilot.py、routers/llm.py）main 与 wave3 的调用**返回完全相同的 `ResolvedRole.routes`**，且两处都不取 `.resolve()→BaseChatModel`。
 
-- **`ModelResolver`**（gateway 旧的类式解析器，直接返回可调用模型）—— main 当前 studio 代码用它。
-- **`resolve_role`**（gateway registry 包里新的函数式角色解析 API，返回有序 `ResolvedRoute` 链由调用方自己执行）—— wave3 staged 改用它。
+所以这不是「两套架构选一套」，只是「保留薄壳 `ModelResolver`（多一个 telemetry 计数、留着 `.resolve()`/`.mark_provider_down()` 备用）还是直接调底层 `resolve_role`」：
 
-两者**都是** `docs/graph-agent-gateway/mvp1/02-orch-role-resolution/` 绑定的合法公共接口（不是合规问题，是选哪边）。倾向 `resolve_role`（更贴「编排与调用分离」方向，且签名与当前 main 的 gateway 兼容），但**由 PM 定**。
+- 一致性论据：predict 链经 `build_gateway_model_resolver`（`services/gateway_resolver.py`）仍用 `ModelResolver`；copilot/llm-test 若也用 `ModelResolver` 则全 studio 统一。
+- 直接论据：`resolve_role` 少一层包装、更直接。
+
+冲突机械可解（任一方向），**不阻塞集成**。按本项目流程，此类技术取舍交 **Gemini 技术评审**（2026-06-11 已发起）；不作 PM 阻塞决策。
+
+> 修正记录：上一轮曾把它拔高成「开场第一题 + 个人倾向 resolve_role」，经核实代码（`resolve_routes` 仅是 `resolve_role` + 计数器）属过度拔高，已撤回。教训见 feedback memory `escalate-technical-decisions-to-gemini`。
 
 ---
 

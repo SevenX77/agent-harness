@@ -74,6 +74,27 @@
 - **可并行**:阶段 1 三模块在接口定好后各自推进;注意 T1.S2(Rust 本地存储)要等 E1+G1 的存储收口。
 - **可记账待迁**:位置错任务(golden 收敛、6 态下沉、Rust 源码、解直连)不阻塞主线,但要在反写 MVP1 时一并记账。
 
+## Gemini 验证修订(2026-06-11 · 反写前最后一道审)
+
+### A. 已采纳的修订(整合进上面阶段表)
+1. **T0.3 前置 T0.2**:成品库 put/get 的负载就是编译产物,"产物=不可变快照+指纹"要先定。
+2. **新增 T0.0 锁定原语签名**(尤其 run-by-version):E3 改了 run 的核心签名,adapter(T0.4)是原语一对一,必须等签名定,否则 adapter 是空中楼阁。
+3. **新增 T0.8 engine LLM-provider SPI**:E5 解直连靠依赖倒置——engine 定自己要的 LLM SPI(已有 `ModelResolverProtocol`,补"默认路径也注入"),studio 注入 gateway 实现。
+4. **新增 T0.9 事件流/流式契约(跨 adapter 边界)**:engine 输出+中间态是流式,adapter 走 HTTP 要定**反压/断线重连/多路复用**,否则只能同步一问一答。(漏掉的关键任务)
+5. **T0.3 加 Source Map**:engine 跑成品、studio 渲染源码——错误/节点高亮要能从成品映射回 GRAPH.md 行号/节点 id,编译器必须产 source map,否则 trace/调试瘫痪。
+6. **T0.3 拆执行拓扑 vs UI 元数据**:GRAPH.md 的 UI 坐标(x,y)不进指纹,否则拖动节点触发无效重编译;指纹只算执行拓扑。
+7. **新增临时产物旁路 resolver**:E3 改"按版本取成品"后,设计期本地测试走 **Ephemeral Artifact Resolver**(本地、按内容指纹、**不进 publish 成品库**),否则每次调试触发全局 publish。
+8. **T0.1 运行态线加 Lease+Heartbeat**:远程多副本下"单实例独占"靠租约+心跳防脑裂/接管死锁,不能只 K/V。
+9. **E3 加过渡包装 `run_dev(source)`**:别直接删旧接口,保留内部做"源码→临时编译→临时存储→按指纹跑"的包装器,平稳过渡再剥离(否则瞬间打断所有现有 E2E)。
+10. **S8 Rust 只管写权+watcher+锁**:大文件读留编译/解析所在语言,避免 FFI 跨语言传全量大字符串(D12"唯一写者"指写权,不强制读)。
+
+### B. 待 PM 裁定的 2 个冲突(Gemini 质疑了已锁决策,不自行翻案)
+1. **6态/materialize 下沉 gateway(G4)**:Gemini 反对(gateway 该无状态、对业务场景无知;6态是业务状态机,塞进去毁复用)。但 studio MVP1 第四轮反转恰把它判给 ③b gateway(健康态从 gateway 自己的 route/凭证/熔断事实算出)。**调和建议**:gateway 只暴露**原始健康事实**,studio 做 **6态投影+命名+渲染**。⏳ 待裁:维持MVP1 / 采纳Gemini / 拆细调和。
+2. **golden 归属(E6/S5)**:Gemini 反对"收敛进 studio 后端"(golden=批量跑+比对=执行编排,埋 UI 壳就无法在无头 CI 跑);应做成**基于 engine 的独立 headless 组件**(CLI/pipeline),studio UI + CI 共用同一套判定。**看法**:有道理且不冲突——判定逻辑(可含 copilot)是产品的,但要 **headless 可跑**,不埋桌面后端。⏳ 待裁。
+
+### C. 流程
+2 个冲突裁定 → 整合进阶段表 → 写 Codex audit prompt → 通过后反写 MVP1。
+
 ## 反向链接表(占位 · 反写 MVP1 后填)
 
 | 任务模块 | 对应 MVP1 设计单元(反写后填) | 反写状态 |

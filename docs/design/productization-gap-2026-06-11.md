@@ -29,7 +29,7 @@
 | 项 | 现状 | 目标(底座六) |
 |---|---|---|
 | **golden 判定重复** | engine 有一套完整判定(`evaluate_golden_baseline`→`golden_eval.py:147`,diff+打分+裁决+写报告)**且** studio 也有一套(`golden_diff.py:68`) | 收敛到 studio;engine 那套退役;studio 补"可调 copilot 语义判定"(现只有算法 diff) |
-| **图可视结构** | engine 只有源码 round-trip serializer(`serialize.py:79`,manifest→Markdown),**没有"可视图结构"契约产物**;结构数据在 `CompiledSkill.raw["graph_topology"]` 未导出 | engine 导出**图结构数据**(契约,allowed);studio 画布渲染 |
+| **画布渲染/编辑(从源码,纠正)** | studio `/graph/serialize` 调 engine `serialize_graph`(`skills.py:1228`)做"图→GRAPH.md"写回;渲染侧 studio 自己建邻接(`skills.py:1246`)。**渲染不经编译产物**(编译产物只给 engine 跑) | 渲染/编辑 = studio 读写**源码**。"图→GRAPH.md"和"GRAPH.md→图"都是 skill 语法格式读写,要**单一来源防漂移**(共享一套轻量 parse/serialize,而非 studio/engine 各写一套) |
 | **本地源码 I/O** | Python 写(`skills.py`/`git_local.py` subprocess);Rust 只启 sidecar+系统外壳,不碰源码 | D12:Rust 拥有本地 skill 源码读写 |
 | **6 态计算** | studio 一手算+渲染(`llm_state_projection.py:18`)；materialize 也在 studio(`llm_role_materializer.py:27`) | gateway **算**健康态/materialize、studio **渲染** |
 | **engine→gateway 直连泄漏** | engine 有 8 处直接 `import graph_agent_gateway`(`runner.py:228/235`、`interception.py:11`、`llm_phase_node.py:135`);predict 默认 mock 路径直连 gateway 造 resolver | 默认 resolver 也由调用方注入,engine 不直连 gateway 具体类型 |

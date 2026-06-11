@@ -44,13 +44,17 @@
 
 **③ 存储(按数据性质分三套插座,⚠️ 不统一)**
 
-| 插座 | 服务什么数据 | 性质 | 本地实现 | 服务器实现 |
-|---|---|---|---|---|
-| **`ConfigRepository`**(metadata) | settings / 凭证 / 角色 / draft 知识库 | 高频读、极小、强一致、结构化 | `~/.studio/` 文件 + SQLite | 按 `user_id` 的 DB(Postgres) |
-| **`WorkspaceProvider`**(artifacts) | runs / golden / trace / artifacts | 大文件、高频 IO、非结构化 | 本地 `.workspace` 目录 | 对象存储 + **本地 scratch 缓存**(不能直接对网络存储做高频随机读写) |
-| **`StateProvider`**(运行态) | checkpoint / resume / session 上下文 | 运行时状态、低延迟 | 内存 / sqlite | Redis 类分布式缓存(**不靠 Postgres 扛运行态同步**) |
+> **单一真相源铁律(PM 2026-06-11,踩过 bug)**:每类数据只有**一个真相源**,谁拥有谁读写;**可变真相(配置/凭证)绝不允许旁路缓存**——缓存导致真相不统一是踩过的 bug。下面三套里只有"产物类"可以有本地副本,因为它存的是**写完不改的不可变内容**(冻结成品 / 一次写成的日志),副本不会和真相分叉;配置类**无缓存**、运行态**单一归属**。
 
-> engine 的 `workspace_dir` 从裸 `Path` 抽象成 `WorkspaceProvider`(操作"逻辑对象" `get_artifact`/`save_checkpoint`,不是裸字节);`artifact_saver` 从 `Any` 定成协议。**关键:抽象时必须带 I/O 批处理 + 缓存,否则 trace 落盘会让远程延迟爆炸。**
+| 插座 | 服务什么数据 | 性质 | 本地实现 | 服务器实现 | 缓存 |
+|---|---|---|---|---|---|
+| **`ConfigRepository`**(配置真相) | settings / 凭证 / 角色 / draft | 高频读、极小、强一致 | studio 后端专门接口写本地文件(=本地模拟远端) | 按 `user_id` 的 DB | **无缓存**;写经 FastAPI→gateway→唯一真相;前端只投影不持第二份 |
+| **`WorkspaceProvider`**(产物) | runs / golden / trace / artifacts | 大文件、写完不改 | 本地 `.workspace` 目录 | 对象存储 + 本地 scratch | 仅**不可变内容**的本地副本(非可变真相的回写缓存) |
+| **`StateProvider`**(运行态) | checkpoint / resume / session | 运行时活状态、单实例独占 | 内存 / sqlite | Redis 类 | 运行实例独占的活状态,**非他处真相的缓存** |
+
+> engine 的 `workspace_dir` 从裸 `Path` 抽象成 `WorkspaceProvider`(操作"逻辑对象"而非裸字节);`artifact_saver` 从 `Any` 定成协议。**产物类抽象时带 I/O 批处理,否则 trace 落盘会让远程延迟爆炸——但这条缓存只对不可变产物,不碰配置真相。**
+
+> **凭证线的精确模型(PM)**:用户写入 → FastAPI → gateway(远端,本地模拟或真远端)→ **唯一真相源**。"本地模拟远端" = 借 studio 后端的专门读写接口写本地文件;"真远端" = 写 DB。两者只是真相源**物理位置**不同,**都不引入客户端缓存**。这与 studio 设计"后端唯一真相源、前端只投影、不持第二份真相"(`00_settings.md`)一致。
 
 ### 跨宿主交接 = 内容寻址发布流水线(不是文件同步)
 

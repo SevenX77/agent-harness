@@ -101,7 +101,7 @@ main 在 `92d33c34`（wave3 的基底，已是 main 祖先）之后改过、且 
 - 一致性论据：predict 链经 `build_gateway_model_resolver`（`services/gateway_resolver.py`）仍用 `ModelResolver`；copilot/llm-test 若也用 `ModelResolver` 则全 studio 统一。
 - 直接论据：`resolve_role` 少一层包装、更直接。
 
-冲突机械可解（任一方向），**不阻塞集成**。按本项目流程，此类技术取舍交 **Gemini 技术评审**（2026-06-11 已发起）；不作 PM 阻塞决策。
+冲突机械可解（任一方向），**不阻塞集成**。按本项目流程，此类技术取舍交 **Gemini 技术评审**（2026-06-11 首次 dispatch 因 `askd` 异步守护进程未运行失败；Gemini 连通本身 OK，待守护进程恢复后重发，或下轮处理冲突时一并交评审）；不作 PM 阻塞决策。
 
 > 修正记录：上一轮曾把它拔高成「开场第一题 + 个人倾向 resolve_role」，经核实代码（`resolve_routes` 仅是 `resolve_role` + 计数器）属过度拔高，已撤回。教训见 feedback memory `escalate-technical-decisions-to-gemini`。
 

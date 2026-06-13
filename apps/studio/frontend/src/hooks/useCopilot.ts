@@ -4,6 +4,7 @@ import { nextBackoffMs } from '../lib/websocket'
 import { copilotStore } from '../store/copilotStore'
 import type { CopilotEvent, CopilotMessage } from '../types/copilot'
 import { normalizeCopilotEvent } from '../types/copilot'
+import { resolveWorkspaceIdentity } from '../components/studio/workspace-identity'
 
 type ConnectionStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'reconnecting' | 'error'
 
@@ -61,11 +62,28 @@ export function useCopilot(skillId: string | null) {
     }
   }, [])
 
+  const workspaceRoot = resolveWorkspaceIdentity(skillId).workspaceRoot ?? ''
+
   useEffect(() => {
+    if (!skillId) {
+      return
+    }
+    if (workspaceRoot) {
+      // Multi-session context: load (or create) sessions for this workspace/skill pair.
+      copilotStore.setContext(workspaceRoot, skillId)
+      const snap = copilotStore.getSnapshot()
+      if (snap.sessions.length === 0) {
+        copilotStore.newSession()
+      }
+      return
+    }
+    // Fallback (web / no workspace identity): main's single-session reset on skill change.
     if (snapshot.skillId !== skillId) {
       copilotStore.reset(skillId)
+      copilotStore.newSession()
     }
-  }, [skillId, snapshot.skillId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skillId, workspaceRoot])
 
   useEffect(() => {
     if (!skillId) {
@@ -169,5 +187,10 @@ export function useCopilot(skillId: string | null) {
     lastError,
     sendMessage,
     clearMessages: copilotStore.clearMessages,
+    persistenceError: snapshot.persistenceError,
+    activeSessionId: snapshot.activeSessionId,
+    sessions: snapshot.sessions,
+    newSession: () => copilotStore.newSession(),
+    switchSession: (id: string) => copilotStore.switchSession(id),
   }
 }

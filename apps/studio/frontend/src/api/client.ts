@@ -1,4 +1,5 @@
 import axios, { AxiosError, AxiosHeaders } from 'axios'
+import type { AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 import type {
   AppSettings,
   CollaborateResult,
@@ -18,6 +19,8 @@ import type {
   UpdateSkillFileRes,
   SerializableGraphPhaseRef,
 } from './types'
+import { isTauriRuntime } from '../config/runtime'
+import { writeWorkspaceFile } from '../lib/tauri'
 
 export const API_BASE_URL = import.meta.env.VITE_STUDIO_API_BASE_URL ?? 'http://localhost:8787/api'
 
@@ -173,12 +176,67 @@ export async function getSkillDetail(skillId: string): Promise<SkillDetail> {
   return response.data
 }
 
+interface TauriHashConflictError {
+  type: 'HashConflict'
+  data?: {
+    current_hash?: string
+    current_content?: string
+  }
+}
+
+function isTauriHashConflictError(error: unknown): error is TauriHashConflictError {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'type' in error &&
+    error.type === 'HashConflict'
+  )
+}
+
 export async function writeSkillFile(
   skillId: string,
   path: string,
   content: string,
   expectedHash?: string | null,
 ): Promise<UpdateSkillFileRes> {
+  if (isTauriRuntime()) {
+    try {
+      const res = await writeWorkspaceFile(skillId, path, content, expectedHash ?? null)
+      return {
+        path: res.path,
+        hash: res.hash,
+      }
+    } catch (err: unknown) {
+      if (isTauriHashConflictError(err)) {
+        const conflictData = err.data || {}
+        const responseData = {
+          current_hash: conflictData.current_hash || '',
+          current_markdown_content: conflictData.current_content || '',
+        }
+        const mockConfig: InternalAxiosRequestConfig = {
+          headers: new AxiosHeaders(),
+        }
+        const mockResponse: AxiosResponse = {
+          data: responseData,
+          status: 409,
+          statusText: 'Conflict',
+          headers: {},
+          config: mockConfig,
+        }
+        const mockAxiosError = new AxiosError(
+          'Hash conflict',
+          'ERR_BAD_RESPONSE',
+          mockConfig,
+          null,
+          mockResponse
+        )
+        mockAxiosError.isAxiosError = true
+        throw mockAxiosError
+      }
+      throw err
+    }
+  }
+
   const encodedPath = path.split('/').map(encodeURIComponent).join('/')
   const response = await api.post<UpdateSkillFileRes>(`/skills/${skillId}/files/${encodedPath}`, {
     content,

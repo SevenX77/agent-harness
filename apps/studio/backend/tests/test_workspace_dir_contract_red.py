@@ -14,7 +14,9 @@ from tests.test_api import _agent_skill_files
 
 def _raw_predict_result() -> dict[str, object]:
     return {
+        "success": True,
         "run_id": "predict-workspace-run",
+        "skill_id": "skill",
         "context": {
             "predict_trace": [
                 {
@@ -27,6 +29,18 @@ def _raw_predict_result() -> dict[str, object]:
             ],
             "actual_path": ["draft"],
         },
+        "metrics": {},
+        "source": "predict",
+        "phases": [
+            {
+                "phase_name": "draft",
+                "type": "llm",
+                "inputs": {"topic": "predict"},
+                "outputs": {"text": "<mock_text>"},
+                "mocked_source": "heuristic_stub",
+            }
+        ],
+        "path_diff": None,
     }
 
 
@@ -49,11 +63,28 @@ def test_predictor_dispatch_writes_predict_artifacts_under_workspace_runs(
 
     monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda _skill_id: skill_dir)
 
-    def fake_run_skill(skill_path: Path, **kwargs: object) -> dict[str, object]:
-        calls.append({"skill_path": skill_path, **kwargs})
+    import app.core.adapters.engine as engine_adapter_module
+
+    artifact_ref = {
+        "artifact_id": "skill",
+        "content_hash": f"sha256:{'c' * 64}",
+        "store": "ephemeral",
+        "manifest_ref": "manifests/skill.json",
+    }
+
+    monkeypatch.setattr(
+        engine_adapter_module.EngineAdapter,
+        "compile",
+        lambda *_args, **_kwargs: artifact_ref,
+    )
+
+    def fake_predict_artifact(_adapter: object, payload: dict[str, object]) -> dict[str, object]:
+        calls.append(payload)
         return _raw_predict_result()
 
-    service = PredictorService(run_skill_fn=fake_run_skill)
+    monkeypatch.setattr(engine_adapter_module.EngineAdapter, "predict_artifact", fake_predict_artifact)
+
+    service = PredictorService()
 
     result = service.dispatch_predict_job("skill", None, input_data={"topic": "predict"})
 
@@ -62,7 +93,7 @@ def test_predictor_dispatch_writes_predict_artifacts_under_workspace_runs(
     assert (run_dir / "result.json").is_file()
     assert not (run_dir / "latest_predict.json").exists()
     assert not (workspace_dir / "predict").exists()
-    assert calls[0]["workspace_dir"] == workspace_dir
+    assert calls[0]["workspace_dir"] == str(workspace_dir)
 
 
 def test_new_skill_gitignore_template_no_longer_unignores_top_level_predict(
@@ -79,6 +110,6 @@ def test_new_skill_gitignore_template_no_longer_unignores_top_level_predict(
     assert response.status_code == 201
     assert "!/.workspace/predict/" not in STUDIO_GITIGNORE.splitlines()
     gitignore_lines = (
-        config.DEFAULT_SKILLS_ROOT / "workspace-gitignore" / ".gitignore"
-    ).read_text(encoding="utf-8").splitlines()
+        (config.DEFAULT_SKILLS_ROOT / "workspace-gitignore" / ".gitignore").read_text(encoding="utf-8").splitlines()
+    )
     assert "!/.workspace/predict/" not in gitignore_lines

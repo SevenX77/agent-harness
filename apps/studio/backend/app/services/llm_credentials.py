@@ -13,12 +13,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from graph_agent_gateway.registry.base_url import canonicalize_base_url
-from graph_agent_gateway.registry.canonical import canonicalize_model
-from graph_agent_gateway.registry.capabilities import normalize_route_capabilities
-from graph_agent_gateway.registry.schema import CapabilitySource
 from pydantic import SecretStr, ValidationError
 
+from app.core.adapters.gateway import (
+    CapabilitySource,
+    canonicalize_base_url,
+    canonicalize_model,
+    normalize_route_capabilities,
+)
 from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint, ProviderRoute
 from app.services.llm_paths import credentials_path
 
@@ -50,12 +52,8 @@ def load_credentials(path: Path | None = None) -> LLMCredentialsFile:
     try:
         payload = json.loads(credential_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise ValueError(
-            f"LLM_CREDENTIALS_SCHEMA: invalid llm_credentials.json: {credential_path}"
-        ) from exc
-    if isinstance(payload, dict) and (
-        payload.get("schema_version") != 4 or "providers" in payload
-    ):
+        raise ValueError(f"LLM_CREDENTIALS_SCHEMA: invalid llm_credentials.json: {credential_path}") from exc
+    if isinstance(payload, dict) and (payload.get("schema_version") != 4 or "providers" in payload):
         raise ValueError(
             f"LLM_CREDENTIALS_SCHEMA: llm_credentials.json must use schema_version 4; "
             f"legacy provider credentials are rejected: {credential_path}"
@@ -63,15 +61,14 @@ def load_credentials(path: Path | None = None) -> LLMCredentialsFile:
     try:
         return _normalize_loaded_credentials(LLMCredentialsFile.model_validate(payload))
     except ValidationError as exc:
-        raise ValueError(
-            f"LLM_CREDENTIALS_SCHEMA: invalid v4 llm credentials schema: {credential_path}"
-        ) from exc
+        raise ValueError(f"LLM_CREDENTIALS_SCHEMA: invalid v4 llm credentials schema: {credential_path}") from exc
 
 
 def save_credentials(data: LLMCredentialsFile, path: Path | None = None) -> None:
     """Atomically write credentials and force file permissions to ``0600``."""
     credential_path = path or credentials_path()
     from app.services.file_watcher import record_api_write
+
     try:
         record_api_write(credential_path)
     except Exception:
@@ -149,13 +146,9 @@ def delete_endpoint(endpoint_id: str, *, path: Path | None = None) -> LLMCredent
         endpoints = dict(data.provider_endpoints)
         endpoints.pop(endpoint_id, None)
         routes = {
-            route_id: route
-            for route_id, route in data.provider_routes.items()
-            if route.endpoint_id != endpoint_id
+            route_id: route for route_id, route in data.provider_routes.items() if route.endpoint_id != endpoint_id
         }
-        data = data.model_copy(
-            update={"provider_endpoints": endpoints, "provider_routes": routes}
-        )
+        data = data.model_copy(update={"provider_endpoints": endpoints, "provider_routes": routes})
         _save_credentials_unlocked(data, credential_path)
         return data
 
@@ -233,9 +226,7 @@ def _repair_curated_provider_kinds(data: LLMCredentialsFile) -> LLMCredentialsFi
     for endpoint_id, endpoint in data.provider_endpoints.items():
         curated_provider_kind = CURATED_PROVIDER_KIND_BY_ENDPOINT_ID.get(endpoint_id)
         if curated_provider_kind is not None and endpoint.provider_kind != curated_provider_kind:
-            endpoints[endpoint_id] = endpoint.model_copy(
-                update={"provider_kind": curated_provider_kind}
-            )
+            endpoints[endpoint_id] = endpoint.model_copy(update={"provider_kind": curated_provider_kind})
             changed = True
         else:
             endpoints[endpoint_id] = endpoint

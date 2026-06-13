@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from graph_agent_gateway.exceptions import GatewayRoleNotConfiguredError
@@ -27,6 +25,15 @@ from graph_agent_gateway.registry.schema import (
     RoleRouteEntry,
     RuntimePolicy,
 )
+from graph_agent_gateway.storage_contracts import ConfigTruthStore
+
+
+class ResourceTerminalError(Exception):
+    def __init__(self, error_code: str, error_payload: dict[str, Any]) -> None:
+        super().__init__(f"ResourceTerminalError: {error_code} - {error_payload}")
+        self.error_code = error_code
+        self.error_payload = error_payload
+
 
 
 @dataclass
@@ -42,19 +49,28 @@ class ModelResolver:
     def __init__(
         self,
         *,
-        registry_snapshot: RegistrySnapshot | None = None,
-        credentials_path: str | Path | None = None,
-        roles_path: str | Path | None = None,
+        config_store: ConfigTruthStore,
+        user_id: str,
         client_manager: Any = None,
         credential_provider: CredentialProviderProtocol | None = None,
     ) -> None:
-        if registry_snapshot is None:
-            if credentials_path is None or roles_path is None:
-                raise ValueError(
-                    "ModelResolver requires registry_snapshot or explicit "
-                    "credentials_path and roles_path"
-                )
-            registry_snapshot = load_registry_snapshot(credentials_path, roles_path)
+        credentials = config_store.get_config(user_id, "credentials").value
+        roles = config_store.get_config(user_id, "roles").value
+
+        _assert_v4_credentials(credentials, Path("credentials"))
+        _assert_supported_roles(roles, Path("roles"))
+        roles = _gateway_roles_payload(roles)
+
+        registry_snapshot = RegistrySnapshot(
+            provider_endpoints=credentials.get("provider_endpoints") or {},
+            provider_routes=credentials.get("provider_routes") or {},
+            runtime_policy=RuntimePolicy.model_validate(credentials.get("runtime_policy") or {}),
+            model_profiles=roles.get("model_profiles") or {},
+            roles=roles.get("roles") or {},
+        )
+
+        self.config_store = config_store
+        self.user_id = user_id
         self.registry_snapshot = registry_snapshot
         self.client_manager = client_manager
         endpoint_credential_provider = EndpointCredentialProvider(
@@ -95,10 +111,16 @@ class ModelResolver:
                 credential_provider=self.credential_provider,
             )
         except RegistryResolutionError as exc:
-            raise GatewayRoleNotConfiguredError(
-                role_name=role_name,
-                model_override=model_override,
+            raise ResourceTerminalError(
+                error_code="resource.no_available_route",
+                error_payload={"role": role_name},
             ) from exc
+
+        if not resolved.routes:
+            raise ResourceTerminalError(
+                error_code="resource.no_available_route",
+                error_payload={"role": role_name},
+            )
 
         first_route = resolved.routes[0]
         max_tokens = _effective_int(first_route, "max_output_tokens", 4096)
@@ -145,12 +167,25 @@ class ModelResolver:
     ) -> ResolvedRole:
         with self._stats_lock:
             self.stats.total_resolves += 1
-        return resolve_role(
-            self.registry_snapshot,
-            role_name,
-            route_override=route_override,
-            credential_provider=self.credential_provider,
-        )
+        try:
+            resolved = resolve_role(
+                self.registry_snapshot,
+                role_name,
+                route_override=route_override,
+                credential_provider=self.credential_provider,
+            )
+        except RegistryResolutionError as exc:
+            raise ResourceTerminalError(
+                error_code="resource.no_available_route",
+                error_payload={"role": role_name},
+            ) from exc
+
+        if not resolved.routes:
+            raise ResourceTerminalError(
+                error_code="resource.no_available_route",
+                error_payload={"role": role_name},
+            )
+        return resolved
 
     def mark_provider_down(self, route_id: str) -> None:
         """Manually mark a route down in the shared gateway cache."""
@@ -188,47 +223,6 @@ class ModelResolver:
             RuntimeError("manual mark down"),
             role.runtime_policy,
         )
-
-
-def load_registry_snapshot(
-    credentials_path: str | Path,
-    roles_path: str | Path,
-) -> RegistrySnapshot:
-    """Load a v4 credentials file and v2 roles file into one snapshot."""
-    credentials = _load_json_object(Path(credentials_path))
-    roles = _load_yaml_object(Path(roles_path))
-    _assert_v4_credentials(credentials, Path(credentials_path))
-    _assert_supported_roles(roles, Path(roles_path))
-    roles = _gateway_roles_payload(roles)
-    return RegistrySnapshot(
-        provider_endpoints=credentials.get("provider_endpoints") or {},
-        provider_routes=credentials.get("provider_routes") or {},
-        runtime_policy=RuntimePolicy.model_validate(credentials.get("runtime_policy") or {}),
-        model_profiles=roles.get("model_profiles") or {},
-        roles=roles.get("roles") or {},
-    )
-
-
-def _load_json_object(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise ValueError(f"missing v4 credentials file: {path}") from exc
-    if not isinstance(value, dict):
-        raise ValueError(f"credentials file must contain a JSON object: {path}")
-    return value
-
-
-def _load_yaml_object(path: Path) -> dict[str, Any]:
-    try:
-        value = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise ValueError(f"missing v2 roles file: {path}") from exc
-    if value is None:
-        return {}
-    if not isinstance(value, dict):
-        raise ValueError(f"roles file must contain a YAML object: {path}")
-    return value
 
 
 def _assert_v4_credentials(payload: dict[str, Any], path: Path) -> None:

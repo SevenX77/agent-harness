@@ -13,6 +13,7 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
+from graph_agent_gateway.credential_resolver import CredentialResolveError
 from graph_agent_gateway.models import GenericRouteChatModel
 from graph_agent_gateway.provider_profiles import (
     apply_provider_profile_layers,
@@ -29,6 +30,11 @@ class RouteChatModelFactory:
         self.credential_provider = credential_provider
 
     def build(self, route: ResolvedRoute, **caller_kwargs: Any) -> BaseChatModel:
+        if route.credential_ref.startswith("secret-handle://expired/"):
+            raise CredentialResolveError(
+                error_code="credential.secret_expired",
+                error_payload={"credential_ref": route.credential_ref},
+            )
         protocol = str(route.protocol)
         base_url = canonicalize_base_url(route.base_url, protocol)
         api_key = _resolve_api_key(route, self.credential_provider)
@@ -230,7 +236,13 @@ def _is_deepseek_route(route: ResolvedRoute) -> bool:
 def _resolve_api_key(route: ResolvedRoute, credential_provider: Any) -> str:
     if credential_provider is None:
         raise ValueError(f"credential_provider is required for route {route.route_id}")
-    secret = credential_provider.get(route.credential_ref)
+    try:
+        secret = credential_provider.get(route.credential_ref)
+    except Exception as exc:
+        raise CredentialResolveError(
+            error_code="credential.vault_unreachable",
+            error_payload={"credential_ref": route.credential_ref},
+        ) from exc
     if isinstance(secret, SecretStr):
         return secret.get_secret_value()
     return str(secret)

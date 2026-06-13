@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from graph_agent import RunResult
-
+from app.core.adapters.engine import RunResult
 from app.core.exceptions import error_response, raise_error_response
 from app.models.runs import PredictDiagnosticExport
 

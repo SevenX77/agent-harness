@@ -2254,6 +2254,11 @@ describe("LlmRolesTab controls", () => {
               value: 8192,
               downgrade: "allow_with_warning",
             },
+            target_context_tokens: {
+              mode: "required_minimum",
+              value: 64000,
+              downgrade: "allow",
+            },
           },
         },
       },
@@ -2265,15 +2270,25 @@ describe("LlmRolesTab controls", () => {
         modelFallbackEnabled={true}
         draft={{
           providerPreference: "manual_order",
-          thinking: "preferred",
-          outputTokens: "8192",
-          useMaximumTokens: true,
+          thinking: "required",
+          contextTokenMode: "required_minimum",
+          contextTokens: "64000",
+          outputTokenMode: "maximum_available",
+          outputTokens: "",
         }}
-        outputLimitSummary={{
-          knownCount: 2,
-          totalCount: 3,
-          min: 4096,
-          max: 16384,
+        tokenLimitSummary={{
+          context: {
+            knownCount: 2,
+            totalCount: 3,
+            min: 65536,
+            max: 200000,
+          },
+          output: {
+            knownCount: 2,
+            totalCount: 3,
+            min: 4096,
+            max: 16384,
+          },
         }}
         onModelFallbackChange={vi.fn()}
         onDraftChange={vi.fn()}
@@ -2294,34 +2309,48 @@ describe("LlmRolesTab controls", () => {
     expect(fieldsHtml).not.toContain("Manual order")
     expect(fieldsHtml).toContain("Model Fallback")
     expect(fieldsHtml).toContain("model_fallback_enabled")
-    expect(fieldsHtml).toContain("Thinking Preferred")
+    expect(fieldsHtml).toContain("Thinking")
+    expect(fieldsHtml).toContain("Preferred")
+    expect(fieldsHtml).toContain("Required")
     expect(fieldsHtml).toContain('data-slot="switch"')
+    expect(fieldsHtml).toContain('data-slot="radio-group"')
     expect(fieldsHtml).not.toContain("Try the next model group")
+    expect(fieldsHtml).toContain('data-role-context-settings="true"')
+    expect(fieldsHtml).toContain('data-role-output-settings="true"')
+    expect(fieldsHtml).toContain("Context Tokens")
+    expect(fieldsHtml).toContain("Output Tokens")
+    expect(fieldsHtml).toContain("Required Min")
+    expect(fieldsHtml).toContain("Use Max")
+    expect(fieldsHtml).toContain('value="64000"')
+    expect(fieldsHtml).toContain("Context route max token range: min 65,536 / max 200,000. 1 route cap unavailable.")
+    expect(fieldsHtml).toContain("Output route max token range: min 4,096 / max 16,384. 1 route cap unavailable.")
     expect(fieldsHtml).not.toContain("Require routes to prove")
-    expect(fieldsHtml).toContain("Output Token Target")
-    expect(fieldsHtml).toContain("Use max")
-    expect(fieldsHtml).toContain('aria-label="Use maximum output tokens for copilot_chat"')
-    expect(fieldsHtml).toContain('value="8192"')
-    expect(fieldsHtml).toContain("disabled")
-    expect(fieldsHtml).toContain("Route max token range: min 4,096 / max 16,384. 1 route cap unavailable.")
     expect(fieldsHtml).not.toContain("If Target Exceeds Route Cap")
     expect(fieldsHtml).not.toContain("Use route max and mark Limited")
-    expect(fieldsHtml).not.toContain('data-slot="select-trigger"')
+    expect(fieldsHtml).toContain('data-slot="select-trigger"')
     expect(fieldsHtml).not.toContain("Temperature")
     expect(fieldsHtml).not.toContain("Max Tokens")
-    expect(fieldsHtml).not.toContain("Runtime default")
   })
 
-  it("saves the Thinking switch as a preferred role intent", () => {
+  it("saves Thinking and context/output token modes as role intent", () => {
     expect(roleIntentFromSettingsDraft({
       providerPreference: "manual_order",
-      thinking: "preferred",
+      thinking: "required",
+      contextTokenMode: "required_minimum",
+      contextTokens: "64000",
+      outputTokenMode: "maximum_available",
       outputTokens: "",
-      useMaximumTokens: false,
     })).toMatchObject({
       provider_preference: "manual_order",
-      thinking: "preferred",
-      target_output_tokens: null,
+      thinking: "required",
+      target_context_tokens: {
+        mode: "required_minimum",
+        value: 64000,
+        downgrade: "allow",
+      },
+      target_output_tokens: {
+        mode: "maximum_available",
+      },
     })
   })
 
@@ -2333,21 +2362,32 @@ describe("LlmRolesTab controls", () => {
         draft={{
           providerPreference: "manual_order",
           thinking: "required",
+          contextTokenMode: "default",
+          contextTokens: "",
+          outputTokenMode: "target",
           outputTokens: "",
-          useMaximumTokens: false,
         }}
-        outputLimitSummary={{
-          knownCount: 0,
-          totalCount: 2,
-          min: null,
-          max: null,
+        tokenLimitSummary={{
+          context: {
+            knownCount: 0,
+            totalCount: 2,
+            min: null,
+            max: null,
+          },
+          output: {
+            knownCount: 0,
+            totalCount: 2,
+            min: null,
+            max: null,
+          },
         }}
         onModelFallbackChange={vi.fn()}
         onDraftChange={vi.fn()}
       />,
     )
 
-    expect(fieldsHtml).toContain("Selected route max token caps are unavailable.")
+    expect(fieldsHtml).toContain("Context route max token caps are unavailable.")
+    expect(fieldsHtml).toContain("Output route max token caps are unavailable.")
     expect(fieldsHtml).not.toContain("Test first")
   })
 })

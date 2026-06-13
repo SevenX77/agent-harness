@@ -52,6 +52,7 @@ export interface SettingsPageContentProps {
   onDeleteRole: (roleName: string) => void
   onDeleteModelBundle: (bundleId: string) => void
   onBeforeRoleTest: () => Promise<RolesData | null>
+  onAfterRoleTest: () => Promise<void> | void
 }
 
 export type { ReactNode }

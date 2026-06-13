@@ -1,44 +1,22 @@
 import { useState } from "react"
-import { Check, FolderOpen, Loader2, RotateCcw, TriangleAlert } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { FolderOpen, RotateCcw } from "lucide-react"
+import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { SaveStatusBadge } from "@/components/ui/save-status-badge"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { selectSkillDirectory } from "@/lib/tauri"
 import { effectiveDefaultSkillsDirectory } from "@/utils/skill-paths"
 import { SectionTitle } from "./shared"
 import type { SettingsPageContentProps } from "./types"
 
-function AppSettingsSaveStatusBadge({ status }: { status: SettingsPageContentProps["appSettings"]["saveStatus"] }) {
-  if (status === "idle") return null
-  if (status === "pending" || status === "saving") {
-    return (
-      <Badge variant="outline" className="gap-1 text-[10px] font-normal text-muted-foreground">
-        <Loader2 className="size-3 animate-spin" />
-        {status === "pending" ? "Pending" : "Saving"}
-      </Badge>
-    )
-  }
-  if (status === "saved") {
-    return (
-      <Badge variant="outline" className="gap-1 text-[10px] font-normal">
-        <Check className="size-3" />
-        Saved
-      </Badge>
-    )
-  }
-  return (
-    <Badge variant="outline" className="gap-1 text-[10px] font-normal">
-      <TriangleAlert className="size-3" />
-      Save failed
-    </Badge>
-  )
-}
-
 export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appSettings">) {
+  const { i18n, t } = useTranslation("settings")
   const [selectingDefaultFolder, setSelectingDefaultFolder] = useState(false)
   const fallbackDefaultSkillsDirectory = effectiveDefaultSkillsDirectory(null) ?? ""
   const currentDefaultSkillsDirectory = effectiveDefaultSkillsDirectory(appSettings.defaultSkillsDirectory)
+  const currentLanguage = i18n.resolvedLanguage === "zh-CN" || i18n.language === "zh-CN" ? "zh-CN" : "en"
 
   async function chooseDefaultSkillsDirectory() {
     setSelectingDefaultFolder(true)
@@ -55,36 +33,36 @@ export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appS
   return (
     <div className="max-w-3xl">
       <SectionTitle
-        title="General"
-        description="Application defaults and collaboration identity. Changes auto-save."
-        trailing={<AppSettingsSaveStatusBadge status={appSettings.saveStatus} />}
+        title={t("general.title")}
+        description={t("general.description")}
+        trailing={<SaveStatusBadge status={appSettings.saveStatus} />}
       />
       <FieldSet>
         <FieldGroup className="gap-5">
           <Field>
-            <FieldLabel htmlFor="studio-user-id">Studio User ID</FieldLabel>
+            <FieldLabel htmlFor="studio-user-id">{t("general.userId.label")}</FieldLabel>
             <Input
               id="studio-user-id"
               value={appSettings.userId}
               onChange={(event) => appSettings.setUserId(event.target.value)}
-              placeholder="your-username"
+              placeholder={t("general.userId.placeholder")}
               className="h-8 text-xs"
-              aria-label="Studio User ID"
+              aria-label={t("general.userId.label")}
               disabled={appSettings.isLoading}
             />
-            <FieldDescription>Used as the local Git author and team owner.</FieldDescription>
+            <FieldDescription>{t("general.userId.description")}</FieldDescription>
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="default-skill-folder">Default skill folder</FieldLabel>
+            <FieldLabel htmlFor="default-skill-folder">{t("general.defaultSkillFolder.label")}</FieldLabel>
             <div className="flex min-w-0 items-center gap-2">
               <Input
                 id="default-skill-folder"
                 value={appSettings.defaultSkillsDirectory}
                 onChange={(event) => appSettings.setDefaultSkillsDirectory(event.target.value)}
-                placeholder="Select a folder path"
+                placeholder={t("general.defaultSkillFolder.placeholder")}
                 className="h-8 min-w-0 flex-1 text-xs"
-                aria-label="Default skill folder"
+                aria-label={t("general.defaultSkillFolder.label")}
                 disabled={appSettings.isLoading}
                 title={appSettings.defaultSkillsDirectory}
               />
@@ -92,12 +70,14 @@ export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appS
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => void chooseDefaultSkillsDirectory()}
+                onClick={() => {
+                  chooseDefaultSkillsDirectory().catch(() => undefined)
+                }}
                 disabled={appSettings.isLoading || selectingDefaultFolder}
                 className="h-8 shrink-0 text-xs"
               >
                 <FolderOpen />
-                Choose
+                {t("general.defaultSkillFolder.choose")}
               </Button>
               <Button
                 type="button"
@@ -106,26 +86,49 @@ export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appS
                 onClick={() => appSettings.setDefaultSkillsDirectory(fallbackDefaultSkillsDirectory)}
                 disabled={appSettings.isLoading || !fallbackDefaultSkillsDirectory}
                 className="size-8 shrink-0"
-                aria-label="Reset default skill folder"
+                aria-label={t("general.defaultSkillFolder.reset")}
               >
                 <RotateCcw />
               </Button>
             </div>
-            <FieldDescription>New skills are created here when no folder is chosen.</FieldDescription>
+            <FieldDescription>{t("general.defaultSkillFolder.description")}</FieldDescription>
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="gitea-host">Gitea Host</FieldLabel>
+            <FieldLabel htmlFor="gitea-host">{t("general.giteaHost.label")}</FieldLabel>
             <Input
               id="gitea-host"
               value={appSettings.giteaHost}
               onChange={(event) => appSettings.setGiteaHost(event.target.value)}
-              placeholder="https://gitea.example.com"
+              placeholder={t("general.giteaHost.placeholder")}
               className="h-8 text-xs"
-              aria-label="Gitea Host"
+              aria-label={t("general.giteaHost.label")}
               disabled={appSettings.isLoading}
             />
-            <FieldDescription>Private Gitea host used for team collaboration.</FieldDescription>
+            <FieldDescription>{t("general.giteaHost.description")}</FieldDescription>
+          </Field>
+
+          <Field>
+            <FieldLabel htmlFor="studio-language">{t("general.language.label")}</FieldLabel>
+            <Select
+              value={currentLanguage}
+              onValueChange={(value) => {
+                i18n.changeLanguage(value).catch(() => undefined)
+              }}
+            >
+              <SelectTrigger
+                id="studio-language"
+                className="h-8 text-xs"
+                aria-label={t("general.language.ariaLabel")}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="en">{t("general.language.english")}</SelectItem>
+                <SelectItem value="zh-CN">{t("general.language.simplifiedChinese")}</SelectItem>
+              </SelectContent>
+            </Select>
+            <FieldDescription>{t("general.language.description")}</FieldDescription>
           </Field>
         </FieldGroup>
       </FieldSet>

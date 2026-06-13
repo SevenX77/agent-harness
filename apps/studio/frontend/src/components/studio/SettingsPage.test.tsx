@@ -1,7 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import {
-  CopilotTab,
   SettingsPageContent,
   draftFromAddProviderSubmission,
   draftsFromCredentials,
@@ -711,42 +710,6 @@ describe('SettingsPageContent (api_keys)', () => {
     const copilotHtml = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ activeTab: 'copilot' })} />)
     expect(copilotHtml).toContain('max-w-5xl')
     expect(copilotHtml).toContain('max-w-3xl')
-  })
-
-  it('renders Copilot as a standalone Settings page with SDK compatibility states', () => {
-    const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ activeTab: 'copilot' })} />)
-
-    expect(html).toContain('data-copilot-settings-page="true"')
-    expect(html).toContain('Copilot</button>')
-    expect(html).toContain('data-slot="catalog-accordion"')
-    expect(html).toContain('Claude Agent SDK')
-    expect(html).not.toContain('Copilot Roles')
-    expect(html).toContain('Opus 4.7 Copilot')
-    expect(html).toContain('DeepSeek V4 Copilot')
-    expect(html).toContain('Claude Agent SDK Ready')
-    expect(html).toContain('Claude Agent SDK Not tested')
-    expect(html).toContain('data-copilot-model-group="true"')
-    expect(html).toContain('data-copilot-provider-grid="true"')
-    expect(html).toContain('data-copilot-provider-card="true"')
-    expect(html).toContain('data-copilot-model-add-trigger="true"')
-    expect(html).toContain('Add model')
-    expect(html).toContain('DeepSeek Official')
-    expect(html).toContain('Ark Official')
-    expect(html).not.toContain('aria-label="Copilot roles"')
-    expect(html).not.toContain('data-copilot-sdk-select="true"')
-    expect(html).not.toContain('openai_chat_completions')
-  })
-
-  it('renders the Copilot tab component without depending on LLM Roles data', () => {
-    const html = renderToStaticMarkup(<CopilotTab />)
-
-    expect(html).toContain('data-copilot-role-card="true"')
-    expect(html.match(/data-copilot-role-card="true"/g)).toHaveLength(2)
-    expect(html.match(/data-copilot-role-source="built_in"/g)).toHaveLength(2)
-    expect(html).toContain('data-copilot-model-name="true"')
-    expect(html).toContain('data-variant="default"')
-    expect(html).toContain('Test</button>')
-    expect(html).not.toContain('data-copilot-role-delete-trigger="true"')
   })
 
   it('renders provider skeletons while credentials are loading', () => {

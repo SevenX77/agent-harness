@@ -38,7 +38,8 @@ import {
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { ThinkingBadge } from "../llm-roles/RoleBadges"
-import type { CopilotAgentStatus, CopilotRoutePreview } from "./mock-copilot-data"
+import type { CopilotRoutePreview } from "./copilot-role-derivation"
+type CopilotAgentStatus = string
 import type { CopilotRouteJobStatus } from "./copilot-role-test"
 
 export const CopilotModelGroupCard = memo(function CopilotModelGroupCard({

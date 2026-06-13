@@ -118,9 +118,25 @@ def _run_worker_main(
         metrics = _result_metrics(result)
         metrics.setdefault("wall_time_sec", _result_wall_time(result, started))
         _write_json(run_dir / "final_state.json", _result_context(result))
-        _write_json(run_dir / "metrics.json", {"status": "success", **metrics})
         _ensure_run_files(run_dir)
-        process_queue.put({"type": "status", "status": "success", "metrics": metrics})
+        # P0#3 (handshake audit §5.3): never report fake success — honor RunResult.success.
+        if _result_success(result):
+            _write_json(run_dir / "metrics.json", {"status": "success", **metrics})
+            process_queue.put({"type": "status", "status": "success", "metrics": metrics})
+        else:
+            run_error = _result_error(result)
+            _write_json(
+                run_dir / "metrics.json",
+                {"status": "failed", "error": run_error, **metrics},
+            )
+            process_queue.put(
+                {
+                    "type": "status",
+                    "status": "failed",
+                    "metrics": metrics,
+                    "error": run_error,
+                },
+            )
     except Exception as exc:  # noqa: BLE001
         metrics = {"wall_time_sec": round(time.monotonic() - started, 3)}
         _write_json(run_dir / "final_state.json", {})
@@ -170,6 +186,28 @@ def _result_wall_time(result: Any, started: float) -> float:
     if isinstance(value, int | float):
         return float(value)
     return round(time.monotonic() - started, 3)
+
+
+def _result_success(result: Any) -> bool:
+    """Whether the engine RunResult reports success. Absent → treat as success."""
+    if isinstance(result, dict):
+        value = result.get("success")
+    else:
+        value = getattr(result, "success", None)
+    return True if value is None else bool(value)
+
+
+def _result_error(result: Any) -> Any:
+    """Extract the engine RunResult error payload (ErrorPayload model → json) for the failed-status report."""
+    if isinstance(result, dict):
+        error = result.get("error")
+    else:
+        error = getattr(result, "error", None)
+    if error is None:
+        return None
+    if hasattr(error, "model_dump"):
+        return error.model_dump(mode="json")
+    return error
 
 
 def _ensure_run_files(run_dir: Path) -> None:

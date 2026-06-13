@@ -1,4 +1,5 @@
 import { Bot, KeyRound, Plug, Settings, X } from "lucide-react"
+import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ApiKeysTab } from "./api-keys/ApiKeysTab"
@@ -33,12 +34,15 @@ export function SettingsPageContent({
   onDeleteRole,
   onDeleteModelBundle,
   onBeforeRoleTest,
+  onAfterRoleTest,
 }: SettingsPageContentProps) {
+  const { t } = useTranslation("settings")
+
   return (
     <div className="flex size-full flex-col bg-background">
       <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border pl-4 pr-2">
-        <span className="text-sm font-semibold text-foreground">Settings</span>
-        <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close settings" className="size-7">
+        <span className="text-sm font-semibold text-foreground">{t("shell.title")}</span>
+        <Button variant="ghost" size="icon" onClick={onClose} aria-label={t("shell.close")} className="size-7">
           <X className="size-4" />
         </Button>
       </div>
@@ -46,16 +50,16 @@ export function SettingsPageContent({
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <nav className="flex w-full shrink-0 gap-1 overflow-x-auto border-b border-border bg-sidebar/40 px-2 py-2 md:w-56 md:flex-col md:border-b-0 md:border-r md:py-4">
           <NavButton active={activeTab === "general"} icon={<Settings />} onClick={() => onTabChange("general")}>
-            General
+            {t("tabs.general")}
           </NavButton>
           <NavButton active={activeTab === "api_keys"} icon={<KeyRound />} onClick={() => onTabChange("api_keys")}>
-            API Keys
+            {t("tabs.apiKeys")}
           </NavButton>
           <NavButton active={activeTab === "llm_roles"} icon={<Plug />} onClick={() => onTabChange("llm_roles")}>
-            LLM Roles
+            {t("tabs.llmRoles")}
           </NavButton>
           <NavButton active={activeTab === "copilot"} icon={<Bot />} onClick={() => onTabChange("copilot")}>
-            Copilot
+            {t("tabs.copilot")}
           </NavButton>
         </nav>
 
@@ -73,6 +77,7 @@ export function SettingsPageContent({
                   onDeleteRole={onDeleteRole}
                   onDeleteModelBundle={onDeleteModelBundle}
                   onBeforeRoleTest={onBeforeRoleTest}
+                  onAfterRoleTest={onAfterRoleTest}
                 />
               </SettingsErrorBoundary>
             </div>

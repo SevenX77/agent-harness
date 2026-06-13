@@ -52,7 +52,7 @@ import {
   updateBundleIntent,
 } from "../model-bundle-utils"
 import { ModelItem } from "./ModelItem"
-import { roleOutputLimitSummary } from "./RoleCard"
+import { roleTokenLimitSummary } from "./RoleCard"
 import { RoleNameDialog } from "./RoleNameDialog"
 import { RoleSettingsPanel } from "./RoleSettingsDialog"
 
@@ -105,12 +105,20 @@ export const ModelBundleCard = memo(function ModelBundleCard({
   const roleFitByRouteId = useMemo<ReadonlyMap<string, MaterializationReportEntry>>(() => (
     new Map((bundle.materialization_report?.entries ?? []).map((entry) => [entry.route_id, entry]))
   ), [bundle.materialization_report?.entries])
-  const outputLimitSummary = useMemo(
-    () => role ? roleOutputLimitSummary(role, providerModelsByRouteId) : {
-      knownCount: 0,
-      totalCount: 0,
-      min: null,
-      max: null,
+  const tokenLimitSummary = useMemo(
+    () => role ? roleTokenLimitSummary(role, providerModelsByRouteId) : {
+      context: {
+        knownCount: 0,
+        totalCount: 0,
+        min: null,
+        max: null,
+      },
+      output: {
+        knownCount: 0,
+        totalCount: 0,
+        min: null,
+        max: null,
+      },
     },
     [providerModelsByRouteId, role],
   )
@@ -238,7 +246,7 @@ export const ModelBundleCard = memo(function ModelBundleCard({
             roleName={`bundle-${bundleId}`}
             modelFallbackEnabled={bundle.model_fallback_enabled ?? true}
             intent={bundle.intent}
-            outputLimitSummary={outputLimitSummary}
+            tokenLimitSummary={tokenLimitSummary}
             onModelFallbackChange={(checked) => onChange(toggleBundleModelFallback(data, bundleId, checked))}
             onSubmit={(intent) => onChange(updateBundleIntent(data, bundleId, intent))}
           />

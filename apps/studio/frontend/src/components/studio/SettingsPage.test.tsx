@@ -147,6 +147,7 @@ function baseViewProps(
     onDeleteRole: vi.fn(),
     onDeleteModelBundle: vi.fn(),
     onBeforeRoleTest: vi.fn().mockResolvedValue(null),
+    onAfterRoleTest: vi.fn(),
     ...overrides,
   }
 }

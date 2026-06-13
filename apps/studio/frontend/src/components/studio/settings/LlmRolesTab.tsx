@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react"
+import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { SaveStatusBadge } from "@/components/ui/save-status-badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 import { roleChainStatusKey, type RoleChainStatus, type RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
 import { getRoleTestJob, startRoleTestJob, type CredentialsState, type ModelGroup, type ProviderModelOption, type RoleTestJobResponse, type RoleTestProviderProgress, type RoleTestProviderResult, type RoleTestResponse, type RolesData } from "../../../api/llm"
 import { AdvancedModelBundlesSection, modelBundleGroupsFromData } from "./llm-roles/AdvancedModelBundlesSection"
 import { AvailableModelsSidebar } from "./llm-roles/AvailableModelsSidebar"
-import { RoleSaveStatusBadge } from "./llm-roles/RoleBadges"
 import { RoleCardList } from "./llm-roles/RoleCardList"
 import { appendModelGroupToBundle, removeModelBundle } from "./model-bundle-utils"
 import { appendModelGroupToRoleWithResult, modelDropFailureMessage, ownedProviderCodesForModel, pruneInvalidRoleProviders, removeRole } from "./role-utils"
@@ -40,6 +41,38 @@ export interface RoleTestState {
   activeStatuses?: RoleChainStatusMap
 }
 
+export async function runPersistedRoleTestJob({
+  roleName,
+  beforeRoleTest,
+  afterRoleTest,
+  startJob = startRoleTestJob,
+  getJob = getRoleTestJob,
+  onJobUpdate,
+  sleep: sleepFn = sleep,
+}: {
+  roleName: string
+  beforeRoleTest?: () => Promise<unknown> | unknown
+  afterRoleTest?: () => Promise<unknown> | unknown
+  startJob?: (roleName: string) => Promise<RoleTestJobResponse>
+  getJob?: (jobId: string) => Promise<RoleTestJobResponse>
+  onJobUpdate?: (job: RoleTestJobResponse) => void
+  sleep?: (ms: number) => Promise<void>
+}): Promise<RoleTestResponse> {
+  await beforeRoleTest?.()
+  let job = await startJob(roleName)
+  onJobUpdate?.(job)
+  while (job.status === "queued" || job.status === "running") {
+    await sleepFn(500)
+    job = await getJob(job.job_id)
+    onJobUpdate?.(job)
+  }
+  if (job.status === "failed" || !job.result) {
+    throw new Error(job.message ?? "Role test failed")
+  }
+  await afterRoleTest?.()
+  return job.result
+}
+
 export function LlmRolesTab({
   data,
   credentials,
@@ -50,6 +83,7 @@ export function LlmRolesTab({
   onDeleteRole,
   onDeleteModelBundle,
   onBeforeRoleTest,
+  onAfterRoleTest,
 }: {
   data: RolesData | null
   credentials: CredentialsState
@@ -60,7 +94,9 @@ export function LlmRolesTab({
   onDeleteRole?: (roleName: string) => void
   onDeleteModelBundle?: (bundleId: string) => void
   onBeforeRoleTest?: () => Promise<RolesData | null>
+  onAfterRoleTest?: () => Promise<void> | void
 }) {
+  const { t } = useTranslation("settings")
   const credentialsByCode = useMemo(() => (
     data
       ? credentialsByProviderCode(data, { providers: credentials.providers })
@@ -410,36 +446,26 @@ export function LlmRolesTab({
       }))
 
       try {
-        await onBeforeRoleTest?.()
-        let job = await startRoleTestJob(roleName)
-        setRoleTestStates((current) => ({
-          ...current,
-          [roleName]: {
-            ...current[roleName],
-            running: true,
-            activeStatuses: roleTestStatusesFromJob(job),
+        const result = await runPersistedRoleTestJob({
+          roleName,
+          beforeRoleTest: onBeforeRoleTest,
+          afterRoleTest: onAfterRoleTest,
+          onJobUpdate: (job) => {
+            setRoleTestStates((current) => ({
+              ...current,
+              [roleName]: {
+                ...current[roleName],
+                running: true,
+                activeStatuses: roleTestStatusesFromJob(job),
+              },
+            }))
           },
-        }))
-        while (job.status === "queued" || job.status === "running") {
-          await sleep(500)
-          job = await getRoleTestJob(job.job_id)
-          setRoleTestStates((current) => ({
-            ...current,
-            [roleName]: {
-              ...current[roleName],
-              running: true,
-              activeStatuses: roleTestStatusesFromJob(job),
-            },
-          }))
-        }
-        if (job.status === "failed" || !job.result) {
-          throw new Error(job.message ?? "Role test failed")
-        }
+        })
         setRoleTestStates((current) => ({
           ...current,
           [roleName]: {
             running: false,
-            result: job.result ?? undefined,
+            result,
             error: undefined,
             activeStatuses: undefined,
           },
@@ -456,12 +482,12 @@ export function LlmRolesTab({
         }))
       }
     },
-    [error, onBeforeRoleTest],
+    [error, onAfterRoleTest, onBeforeRoleTest],
   )
   if (!normalizedData) {
     return (
       <LlmRolesLayout sidebar={<LlmRolesModelsSkeleton />}>
-        <SectionTitle title="LLM Roles" description="Edit model and provider fallback order." />
+        <SectionTitle title={t("llmRoles.title")} description={t("llmRoles.loadingDescription")} />
         <LlmRolesRolesSkeleton />
       </LlmRolesLayout>
     )
@@ -479,12 +505,12 @@ export function LlmRolesTab({
         )}
       >
         <SectionTitle
-          title="LLM Roles"
-          description="Edit model and provider fallback order. Changes auto-save."
-          trailing={<RoleSaveStatusBadge status={saveStatus} />}
+          title={t("llmRoles.title")}
+          description={t("llmRoles.description")}
+          trailing={<SaveStatusBadge status={saveStatus} />}
         />
 
-        {error ? <div className="mb-3 text-xs text-destructive">Validation failed: {error}</div> : null}
+        {error ? <div className="mb-3 text-xs text-destructive">{t("llmRoles.validationFailed", { error })}</div> : null}
 
         <RoleCardList
           data={normalizedData}

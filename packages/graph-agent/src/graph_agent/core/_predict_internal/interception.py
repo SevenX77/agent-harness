@@ -149,19 +149,21 @@ class _PredictGatewayChatModelMixin:
 
 
 class _PredictGatewayChatModelMeta(type):
-    _resolved_class = None
+    _resolved_class: type[Any] | None = None
 
-    def __call__(cls, *args, **kwargs):
+    def __call__(cls, *args: Any, **kwargs: Any) -> Any:
         real_cls = cls._resolve()
+        if real_cls is None:
+            raise ImportError("graph_agent_gateway concrete module is missing. Please ensure Gateway is configured.")
         return real_cls(*args, **kwargs)
 
-    def __instancecheck__(cls, instance):
+    def __instancecheck__(cls, instance: object) -> bool:
         real_cls = cls._resolve(err_on_missing=False)
         if real_cls is not None:
             return isinstance(instance, real_cls)
         return False
 
-    def _resolve(cls, err_on_missing=True):
+    def _resolve(cls, err_on_missing: bool = True) -> type[Any] | None:
         if cls._resolved_class is None:
             try:
                 from graph_agent_gateway.gateway_chat_model import GatewayChatModel, ToolSpec, _normalise_tool
@@ -173,7 +175,7 @@ class _PredictGatewayChatModelMeta(type):
                     ) from err
                 return None
 
-            class _RealPredictGatewayChatModel(_PredictGatewayChatModelMixin, GatewayChatModel):
+            class _RealPredictGatewayChatModel(_PredictGatewayChatModelMixin, GatewayChatModel):  # type: ignore[misc]
                 mock_strategy: BaseMockStrategy
 
                 def __init__(
@@ -211,7 +213,7 @@ class _PredictGatewayChatModelMeta(type):
                     **kwargs: Any,
                 ) -> Runnable[LanguageModelInput, AIMessage]:
                     """Keep Predict interception active after LangChain binds phase tools."""
-                    bound = PredictGatewayChatModel(
+                    bound = type(self)(
                         self.role_name,
                         self.resolved_role,
                         mock_strategy=self.mock_strategy,
@@ -245,7 +247,7 @@ class PredictGatewayChatModel(metaclass=_PredictGatewayChatModelMeta):
     pass
 
 
-PredictGatewayChatModel.__signature__ = Signature(
+PredictGatewayChatModel.__signature__ = Signature(  # type: ignore[attr-defined]
     parameters=[
         Parameter("role_name", Parameter.POSITIONAL_OR_KEYWORD, annotation="str"),
         Parameter("resolved_role", Parameter.POSITIONAL_OR_KEYWORD, annotation="ResolvedRole"),

@@ -5,7 +5,7 @@ import hashlib
 import json
 import logging
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -27,10 +27,10 @@ class ArtifactRef(BaseModel):
 
     @field_validator("store")
     @classmethod
-    def validate_store(cls, v: Any) -> str:
+    def validate_store(cls, v: Any) -> Literal["ephemeral", "product"]:
         if v not in ("ephemeral", "product"):
             raise ValueError("store must be either 'ephemeral' or 'product'")
-        return v
+        return cast(Literal["ephemeral", "product"], v)
 
 
 class CompiledArtifactManifest(BaseModel):

@@ -729,7 +729,7 @@ def _run_compiled_artifact_graph(
     run_id: str,
     skill_resolver: SkillResolverProtocol | None,
     model_resolver: Any | None,
-) -> WorkflowResult | RunArtifactErrorResult:
+) -> RunResult | RunArtifactErrorResult:
     artifact_root = _resolve_artifact_root(request)
     workspace_dir = _resolve_artifact_workspace_dir(request)
     if artifact_root is None or workspace_dir is None:
@@ -829,7 +829,7 @@ def _execute_run_artifact_outputs(
     artifact_executor: Callable[[RunArtifactRequest], dict[str, Any]] | None,
     skill_resolver: SkillResolverProtocol | None,
     model_resolver: Any | None,
-) -> dict[str, Any] | WorkflowResult | RunArtifactErrorResult:
+) -> dict[str, Any] | RunResult | RunArtifactErrorResult:
     if artifact_executor is not None:
         return artifact_executor(request)
 

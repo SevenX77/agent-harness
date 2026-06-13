@@ -37,9 +37,15 @@
   - 关键判断:wave3 多数文件 main #139 反而更对(RouteStatus 契约 / mode+target_skill 的 D8 正确 schema / 确定性 ID),只 graft 了真正前进的子集。
   - **FLAG 转后端**:6 态词汇收敛(Studio adapter `needs_setup`→gateway 6 态 `historical_ready`/`failed`)= 三模块 D6 后端+前端耦合任务。Phase 1 按计划保留 main 5 态,待后端 adapter 收敛后再翻前端枚举 + 对应 KEEP-MAIN 文件。
 
-## 下一步:Phase 3 桶 B 后端(三模块全部实现)
+## Phase 3 桶 B 后端(三模块全部实现)
 
-优先级:① run 路径打通(engine↔studio 握手 3 个 studio 侧 P0,直接关系生命周期 run)② 6 态收敛(配 Phase 1)③ D10 resume + RuntimeStateStore(lease/heartbeat/fencing)④ Rust native-fs 唯一写者(D10/D12)+ RuntimeGate 降级 ⑤ copilot 安全写/dispatch/@mention/冷启动 ⑥ TracePanel 挂载 ⑦ llm_* 下沉 gateway。
+**① run 路径打通 ✅ 完成**(engine↔studio 握手 3 个 studio 侧 P0,直接关系生命周期 run):
+- P0#1 skill 路径(传 SKILL.md)= #139 已修(改走 `compile(skill_dir)→art_ref→run_artifact`)。
+- **P0#2 workspace_dir 双层**:worker 传 `run_dir.parent`(=`.workspace/runs`)→ 引擎写 `.workspace/runs/runs/<id>`、studio 读空。改传 `run_dir.parent.parent`(`.workspace` 根),对齐 predict 契约。commit `e412a1c1` + 回归测试。
+- **P0#3 假成功**:worker 硬写 status=success、不查 `result.success`。加 `_result_success`/`_result_error` 按 success 分支报 failed+error。commit `1e70d876` + 回归测试。
+- 后端全量 **481 passed**(基线 479 + 2 回归测试),零回归。
+
+**剩余优先级**:② resume 501→接引擎(engine 已有 public `resume_skill`,studio `routers/runs.py:69` 仍 501,薄接即可)③ 6 态收敛(Studio adapter `needs_setup`→gateway 6 态,配 Phase 1 前端)④ per-node golden 薄接(engine `evaluate_golden_baseline` 已有)⑤ D10 RuntimeStateStore lease/fencing 接口 ⑥ Rust native-fs 唯一写者(D10/D12)+ RuntimeGate 降级 ⑦ copilot 安全写/dispatch/@mention/冷启动 ⑧ TracePanel 挂载 ⑨ llm_* 下沉 gateway。
 完成后:出后端可用 .app → computer-use 走完整生命周期验收。
 
 ### 硬约束提醒(详见 goal-charter.md §5)

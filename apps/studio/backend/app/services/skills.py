@@ -57,8 +57,6 @@ from app.services.skill_resolver import build_studio_skill_resolver
 _LOCATION_RE = re.compile(r":(?P<line>\d+)(?::(?P<loc>.*))?")
 _SAFE_SKILL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _SAFE_RUN_ID_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._:-]*$")
-_NAME_LINE_RE = re.compile(r"(?m)^(?P<prefix>name:\s*)(?P<quote>['\"]?)(?P<value>[^'\"\n]+)(?P=quote)\s*$")
-
 _ALLOWED_SKILL_FILE_SUFFIXES = {".md", ".json", ".py"}
 _PHASE_NODE_FILES = {"LOGIC.md", "SUBGRAPH.md", "SKILL.md"}
 _SCAFFOLD_FILES = {
@@ -166,9 +164,6 @@ def _scaffold_files_for(skill_id: str) -> dict[str, str]:
     files = dict(_SCAFFOLD_FILES)
     files["GRAPH.md"] = files["GRAPH.md"].replace("name: new-skill", f"name: {skill_id}")
     return files
-
-
-_ID_LINE_RE = re.compile(r"(?m)^(?P<prefix>id:\s*)(?P<quote>['\"]?)(?P<value>[^'\"\n]+)(?P=quote)\s*$")
 
 
 def ensure_workspace_layout() -> None:
@@ -1560,16 +1555,34 @@ def _workspace_skills_dir_for(user_id: str) -> Path:
 
 def _rewrite_forked_skill_content(content: str, *, old_id: str, new_id: str) -> str:
     """Update frontmatter identity fields that exactly match the source id."""
+    return "".join(
+        _rewrite_identity_line(line, old_id=old_id, new_id=new_id)
+        for line in content.splitlines(keepends=True)
+    )
 
-    def replace_identity(match: re.Match[str]) -> str:
-        value = match.group("value").strip()
+
+def _rewrite_identity_line(line: str, *, old_id: str, new_id: str) -> str:
+    ending = ""
+    body = line
+    for candidate in ("\r\n", "\n", "\r"):
+        if line.endswith(candidate):
+            ending = candidate
+            body = line.removesuffix(candidate)
+            break
+
+    for key in ("id", "name"):
+        prefix = f"{key}:"
+        if not body.startswith(prefix):
+            continue
+        raw_value = body[len(prefix) :]
+        leading_space = raw_value[: len(raw_value) - len(raw_value.lstrip())]
+        stripped = raw_value.strip()
+        quote = stripped[0] if len(stripped) >= 2 and stripped[0] in {"'", '"'} and stripped[-1] == stripped[0] else ""
+        value = stripped[1:-1] if quote else stripped
         if value != old_id:
-            return match.group(0)
-        quote = match.group("quote")
-        return f"{match.group('prefix')}{quote}{new_id}{quote}"
-
-    rewritten = _ID_LINE_RE.sub(replace_identity, content)
-    return _NAME_LINE_RE.sub(replace_identity, rewritten)
+            return line
+        return f"{prefix}{leading_space}{quote}{new_id}{quote}{ending}"
+    return line
 
 
 def _copy_tree(source: Path, target: Path) -> None:

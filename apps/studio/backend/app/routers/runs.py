@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Response, status
 
-from app.core.exceptions import raise_not_implemented
 from app.models.errors import ErrorResponse
 from app.models.runs import (
     BatchRunRequest,
@@ -67,7 +66,34 @@ async def delete_run(skill_id: str, run_id: str) -> Response:
     responses={501: {"model": ErrorResponse}},
 )
 async def resume_run(skill_id: str, run_id: str, request: ResumeReq) -> RunMetadata:
-    raise_not_implemented(f"resume run {run_id} for skill {skill_id}")
+    from app.core.adapters.engine import EngineAdapter
+    from app.core.adapters.http_transport import StudioAdapterError
+    from app.core.exceptions import standard_http_exception
+
+    adapter = EngineAdapter(transport="in_process")
+    try:
+        result = adapter.resume(
+            {
+                "skill_id": skill_id,
+                "run_id": run_id,
+                "context_overrides": request.context_overrides,
+                "human_input": request.human_input,
+            }
+        )
+    except StudioAdapterError as exc:
+        raise standard_http_exception(
+            "RESUME_CHECKPOINT_NOT_FOUND",
+            f"Resume failed: {exc.error_payload.get('detail', str(exc))}",
+            exc.error_payload,
+        ) from exc
+    return RunMetadata(
+        run_id=result["run_id"],
+        status=result["status"],
+        started_at=result["started_at"],
+        input_summary=result.get("input_summary"),
+        metrics=result.get("metrics"),
+        git_status=result.get("git_status"),
+    )
 
 
 @batch_router.get("/{batch_id}", response_model=BatchRunStatus)

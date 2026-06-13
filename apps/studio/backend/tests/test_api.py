@@ -608,6 +608,47 @@ def test_set_golden_and_compare_run_diff(
     assert answer_diff["score"] < 1
 
 
+def test_compare_endpoint_returns_per_node_golden_diff(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    _skills_dir, workspaces_dir = studio_roots
+    _write_result_snapshot(
+        workspaces_dir,
+        "text-segmentation",
+        "golden-node-run",
+        [
+            {"phase_name": "setup", "outputs": {"answer": "hello world", "ok": True}},
+            {"phase_name": "review", "outputs": {"score": 10}},
+        ],
+    )
+    _write_result_snapshot(
+        workspaces_dir,
+        "text-segmentation",
+        "current-node-run",
+        [
+            {"phase_name": "setup", "outputs": {"answer": "hello studio", "ok": True}},
+            {"phase_name": "review", "outputs": {"score": 10}},
+        ],
+    )
+
+    promote_response = client.post(
+        "/api/skills/text-segmentation/golden",
+        json={"run_id": "golden-node-run", "lock": False},
+    )
+    assert promote_response.status_code == 200
+
+    compare_response = client.get("/api/skills/text-segmentation/runs/current-node-run/compare")
+
+    assert compare_response.status_code == 200
+    body = compare_response.json()
+    assert [node["node_id"] for node in body["node_results"]] == ["setup", "review"]
+    assert body["node_results"][0]["verdict"] == "fail"
+    assert body["node_results"][0]["differences"][0]["field_path"] == "nodes.setup.answer"
+    assert body["node_results"][1]["verdict"] == "pass"
+    assert body["node_results"][1]["differences"] == []
+
+
 def test_compare_missing_golden_returns_404(
     client: TestClient,
     studio_roots: tuple[Path, Path],
@@ -668,14 +709,23 @@ def test_events_ws_broadcasts_to_multiple_clients(client: TestClient) -> None:
         assert second.receive_json() == {"type": "skill_changed", "skill_id": "text-segmentation"}
 
 
-def test_deferred_endpoints_return_structured_501(client: TestClient) -> None:
-    response = client.delete("/api/skills/demo/golden/example")
+def test_delete_golden_baseline_removes_persisted_baseline(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    _skills_dir, workspaces_dir = studio_roots
+    _write_final_state(workspaces_dir, "text-segmentation", "delete-golden-run", {"answer": "remove me"})
 
-    assert response.status_code == 501
-    body = response.json()
-    assert body["error_code"] == "NOT_IMPLEMENTED"
-    assert body["http_status"] == 501
-    assert body["retry_strategy"] == "not_retryable"
+    promote_response = client.post(
+        "/api/skills/text-segmentation/golden",
+        json={"run_id": "delete-golden-run", "lock": False},
+    )
+    assert promote_response.status_code == 200
+
+    delete_response = client.delete("/api/skills/text-segmentation/golden/delete-golden-run")
+
+    assert delete_response.status_code == 204
+    assert client.get("/api/skills/text-segmentation/golden").json() == []
 
 
 def test_value_error_handler_returns_studio_error_response(client: TestClient) -> None:
@@ -882,6 +932,31 @@ def _write_final_state(
     run_dir = config.SKILLS_DIR / skill_id / ".workspace" / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "final_state.json").write_text(json.dumps(payload), encoding="utf-8")
+    return run_dir
+
+
+def _write_result_snapshot(
+    workspaces_dir: Path,
+    skill_id: str,
+    run_id: str,
+    phases: list[dict[str, Any]],
+) -> Path:
+    del workspaces_dir
+    run_dir = config.SKILLS_DIR / skill_id / ".workspace" / "runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "success": True,
+                "skill_id": skill_id,
+                "context": {},
+                "metrics": {},
+                "phases": phases,
+            }
+        ),
+        encoding="utf-8",
+    )
     return run_dir
 
 

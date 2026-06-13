@@ -8,6 +8,10 @@ from graph_agent.core.exceptions import ErrorPayload
 
 
 def test_predict_skill_returns_run_result_with_predict_source(tmp_path: Path, mock_skill_resolver: Any) -> None:
+    from graph_agent.core._predict_internal.tracing import clear_mock_source_cache
+
+    clear_mock_source_cache()
+
     skill_dir = tmp_path / "skill"
     skill_dir.mkdir()
     (skill_dir / "GRAPH.md").write_text(
@@ -18,7 +22,9 @@ def test_predict_skill_returns_run_result_with_predict_source(tmp_path: Path, mo
         "  inputs:\n"
         "    properties: {}\n"
         "  outputs:\n"
-        "    properties: {}\n"
+        "    properties:\n"
+        "      text:\n"
+        "        type: string\n"
         "phases:\n"
         "  - draft\n"
         "---\n\n"
@@ -27,13 +33,25 @@ def test_predict_skill_returns_run_result_with_predict_source(tmp_path: Path, mo
     )
 
     phases_dir = skill_dir / "phases" / "draft"
-    phases_dir.mkdir(parents=True)
-    (phases_dir / "SKILL.md").write_text(
+    actions_dir = phases_dir / "actions"
+    actions_dir.mkdir(parents=True)
+    (phases_dir / "LOGIC.md").write_text(
         "---\n"
-        "name: draft\n"
+        "io:\n"
+        "  inputs:\n"
+        "    properties: {}\n"
+        "  outputs:\n"
+        "    properties:\n"
+        "      text:\n"
+        "        type: string\n"
+        "actions: [draft]\n"
         "---\n\n"
-        "<role>graph_agent</role>\n"
-        "<goal>do draft</goal>\n",
+        "<action>draft</action>\n",
+        encoding="utf-8",
+    )
+    (actions_dir / "draft.py").write_text(
+        "def draft(context):\n"
+        "    return {'text': 'hello'}\n",
         encoding="utf-8",
     )
 
@@ -41,7 +59,6 @@ def test_predict_skill_returns_run_result_with_predict_source(tmp_path: Path, mo
         skill_dir,
         workspace_dir=tmp_path / "workspace",
         skill_resolver=mock_skill_resolver,
-        mock_llm={"draft": {"output": "hello"}},
     )
 
     assert isinstance(result, RunResult)
@@ -49,7 +66,7 @@ def test_predict_skill_returns_run_result_with_predict_source(tmp_path: Path, mo
     assert result.success is True
     assert len(result.phases) == 1
     assert result.phases[0].phase_name == "draft"
-    assert result.phases[0].mocked_source == "manual"
+    assert result.phases[0].mocked_source is None
 
 
 def test_run_result_success_derives_from_path_diff() -> None:

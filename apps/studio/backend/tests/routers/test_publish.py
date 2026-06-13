@@ -22,10 +22,18 @@ def test_publish_skill_success(client: TestClient) -> None:
     assert body["artifact_id"] == "art-123"
     assert body["extra"]["version"] == "1.0.0"
     assert body["extra"]["skill_id"] == "text-segmentation"
-    assert body["extra"]["package_bytes"] > 0
+    assert body["extra"]["release_version"] == "1.0.0"
+    assert "package_bytes" not in body["extra"]
+    assert body["extra"]["package_kind"] == "product_artifact"
+    artifact_ref = body["extra"]["artifact_ref"]
+    assert artifact_ref["artifact_id"] == "text-segmentation"
+    assert artifact_ref["store"] == "product"
+    assert artifact_ref["content_hash"].startswith("sha256:")
     assert registry.calls[0]["skill_id"] == "text-segmentation"
     assert registry.calls[0]["metadata"]["author"] == "alice"
     assert registry.calls[0]["metadata"]["version"] == "1.0.0"
+    assert registry.calls[0]["metadata"]["package_kind"] == "product_artifact"
+    assert registry.calls[0]["metadata"]["artifact_ref"] == artifact_ref
 
 
 def test_publish_skill_app_settings_incomplete(client: TestClient) -> None:
@@ -89,6 +97,7 @@ def test_publish_skill_custom_version(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.json()["extra"]["version"] == "2.0.0"
+    assert response.json()["extra"]["release_version"] == "2.0.0"
     assert registry.calls[0]["metadata"]["version"] == "2.0.0"
 
 

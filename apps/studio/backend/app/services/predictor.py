@@ -6,13 +6,11 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from graph_agent import RunResult, predict_skill
-from graph_agent.core.loader import SkillLoader
-
+from app.core.adapters.engine import (
+    RunResult,
+)
 from app.models.runs import PredictDiagnosticExport
 from app.services.diagnostic_export import export_predict_diagnostics
-from app.services.gateway_resolver import build_gateway_model_resolver
-from app.services.skill_resolver import build_studio_skill_resolver
 from app.services.skills import ensure_workspace_skill_dir, workspace_dir_for
 
 logger = logging.getLogger(__name__)
@@ -27,16 +25,35 @@ class PredictDeadlockError(RuntimeError):
         self.phase_name = phase_name
         self.actual_path = actual_path
         super().__init__(
-            f"Predict P2 deadlock guard tripped for phase '{phase_name}' "
-            f"after {actual_path.count(phase_name)} visits"
+            f"Predict P2 deadlock guard tripped for phase '{phase_name}' after {actual_path.count(phase_name)} visits"
         )
+
+
+class PredictArtifactError(RuntimeError):
+    """Raised when Engine artifact predict returns a structured error result."""
+
+    def __init__(
+        self,
+        error_code: str,
+        error_payload: dict[str, Any],
+        *,
+        run_id: str | None = None,
+        retryable: bool = False,
+    ) -> None:
+        self.error_code = error_code
+        self.error_payload = error_payload
+        self.run_id = run_id
+        self.retryable = retryable
+        message = str(error_payload.get("message") or error_payload.get("detail") or error_code)
+        super().__init__(message)
 
 
 class PredictorService:
     """Studio Backend orchestration layer for Predict V2 runs."""
 
-    def __init__(self, run_skill_fn: Any = None) -> None:
-        self._run_skill = run_skill_fn
+    def __init__(self, **_deprecated_hooks: Any) -> None:
+        if _deprecated_hooks:
+            logger.debug("Ignoring deprecated PredictorService constructor hooks.")
 
     def dispatch_predict_job(
         self,
@@ -49,81 +66,51 @@ class PredictorService:
         """Resolve strategy, run graph_agent in Predict mode, and assemble result."""
         skill_dir = ensure_workspace_skill_dir(skill_id)
 
-        if self._run_skill is not None:
-            raw_result = self._run_skill(
-                skill_dir,
-                workspace_dir=workspace_dir_for(skill_dir),
-                mock_llm=mock_param,
-                current_hashes=current_hashes,
-                model_resolver=build_gateway_model_resolver(),
-                skill_resolver=build_studio_skill_resolver(),
-                unattended=True,
-                **(input_data or {}),
-            )
-            result: RunResult
-            if isinstance(raw_result, dict):
-                from graph_agent.core.result import PathDiff, PhaseRecord, WorkflowMetrics, WorkflowResult
-                context = raw_result.get("context", raw_result)
-                if not isinstance(context, dict):
-                    context = {}
-                raw_phases = context.get("predict_trace") or context.get("phases") or []
-                phases_list = []
-                for item in raw_phases:
-                    if isinstance(item, dict):
-                        phases_list.append(PhaseRecord(
-                            phase_name=item.get("phase_name", ""),
-                            type=item.get("type", "logic"),
-                            inputs=item.get("inputs", {}),
-                            outputs=item.get("outputs", {}),
-                            mocked_source=item.get("mocked_source"),
-                        ))
-                
-                path_diff = None
-                actual_path = [str(i) for i in context.get("actual_path", [])]
-                expected_path = getattr(mock_param, "expected_path", None) if mock_param else None
-                if expected_path:
-                    from graph_agent.core._predict_internal.path_diff import compute_diff
-                    rd = compute_diff([str(item) for item in expected_path], actual_path)
-                    path_diff = PathDiff(
-                        expected_path=rd.expected_path,
-                        actual_path=rd.actual_path,
-                        missing=rd.missing,
-                        extra=rd.extra,
-                        order_mismatch=rd.order_mismatch,
-                    )
+        from app.core.adapters.engine import EngineAdapter
 
-                result = WorkflowResult(
-                    success=True,
-                    run_id=raw_result.get("run_id") or "predict-workspace-run",
-                    skill_id=skill_id,
-                    context=context,
-                    metrics=WorkflowMetrics(),
-                    source="predict",
-                    phases=phases_list,
-                    path_diff=path_diff,
-                )
-            else:
-                result = raw_result
+        adapter = EngineAdapter(transport="in_process")
 
-            self._persist_predict_result(skill_dir, result.run_id, result)
-            return result
+        art_ref = adapter.compile(
+            {
+                "skill_dir": str(skill_dir),
+                "skill_id": skill_id,
+                "artifact_scope": "ephemeral",
+            }
+        )
 
-        # 直接调用 SDK 的 predict_skill
-        from graph_agent.core.runner import PredictDeadlockError as SDKPredictDeadlockError
+        # Route through EngineAdapter predict_artifact
+        from app.core.adapters.http_transport import StudioAdapterError
+
         try:
-            result = predict_skill(
-                skill_dir,
-                workspace_dir=workspace_dir_for(skill_dir),
-                mock_llm=mock_param,
-                current_hashes=current_hashes,
-                model_resolver=build_gateway_model_resolver(),
-                skill_resolver=build_studio_skill_resolver(),
-                unattended=True,
-                **(input_data or {}),
+            result = adapter.predict_artifact(
+                {
+                    "artifact_ref": {
+                        "artifact_id": art_ref["artifact_id"],
+                        "content_hash": art_ref["content_hash"],
+                        "store": art_ref["store"],
+                        "manifest_ref": art_ref["manifest_ref"],
+                    },
+                    "mock_llm": mock_param,
+                    "current_hashes": current_hashes,
+                    "inputs": input_data or {},
+                    "workspace_dir": str(workspace_dir_for(skill_dir)),
+                }
             )
-        except SDKPredictDeadlockError as exc:
-            raise PredictDeadlockError(exc.phase_name, exc.actual_path) from exc
+        except StudioAdapterError as exc:
+            if exc.error_code == "engine.predict_deadlock":
+                raise PredictDeadlockError(exc.error_payload["phase_name"], exc.error_payload["actual_path"]) from exc
+            raise exc
 
+        if isinstance(result, dict) and "error_code" in result and "success" not in result:
+            error_payload = result.get("error_payload")
+            raise PredictArtifactError(
+                str(result["error_code"]),
+                error_payload if isinstance(error_payload, dict) else {},
+                run_id=result.get("run_id") if isinstance(result.get("run_id"), str) else None,
+                retryable=bool(result.get("retryable", False)),
+            )
+        if isinstance(result, dict):
+            result = RunResult.model_validate(result)
         self._persist_predict_result(skill_dir, result.run_id, result)
         return result
 
@@ -142,29 +129,20 @@ class PredictorService:
 
 def _fallback_trace_from_skill(skill_dir: Path, raw_result: Any) -> list[dict[str, Any]]:
     del raw_result
+    from app.core.adapters.engine import EngineAdapter
+
+    adapter = EngineAdapter(transport="in_process")
     try:
-        compiled = SkillLoader().compile_skill(
-            skill_dir,
-            skill_resolver=build_studio_skill_resolver(),
-        )
+        return adapter.get_fallback_trace(str(skill_dir))
     except Exception:
         return []
-    mode_by_phase = {node.phase_name: node.mode for node in compiled.nodes}
-    return [
-        {
-            "phase_name": phase_name,
-            "type": "llm" if mode_by_phase.get(phase_name) == "agent" else "logic",
-            "inputs": {},
-            "outputs": {},
-        }
-        for phase_name in compiled.manifest.phases
-    ]
 
 
 predictor_service = PredictorService()
 
 __all__ = [
     "MAX_PHASE_REVISITS",
+    "PredictArtifactError",
     "PredictDeadlockError",
     "PredictorService",
     "predictor_service",

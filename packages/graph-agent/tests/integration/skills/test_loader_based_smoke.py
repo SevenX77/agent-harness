@@ -8,7 +8,8 @@ import pytest
 
 from graph_agent.core.loader import CompiledSkill, SkillLoader
 from graph_agent.core.manifest import AgentNodeAST, LogicNodeAST
-from tests.conftest import MockSkillResolver
+
+from ...conftest import MockSkillResolver
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
 
@@ -176,4 +177,3 @@ def test_final_skill_phases_document_output_contracts(
     assert isinstance(node.ast, AgentNodeAST)
     assert node.ast.io is not None
     assert expected_output_property in node.ast.io.outputs.get("properties", {})
-

@@ -16,18 +16,21 @@ from typing import Any, NoReturn
 
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
-from graph_agent import GraphAgentError, GraphCompileError, ResourceNotFoundError, compile_skill
-from graph_agent.core.graph_serializer import serialize_graph
-from graph_agent.core.loader import CompiledSkill, SkillLoader
-from graph_agent.core.manifest import (
+
+from app.core import config
+from app.core.adapters.engine import (
     AgentNodeAST,
+    CompiledSkill,
+    GraphAgentError,
+    GraphCompileError,
     GraphManifest,
     GraphPhaseRef,
     LogicNodeAST,
+    ResourceNotFoundError,
+    SkillLoader,
     SubgraphNodeAST,
+    compile_skill,
 )
-
-from app.core import config
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
 from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
@@ -48,13 +51,12 @@ from app.services.canvas_errors import CanvasConflictError, CanvasSerializerFata
 from app.services.config_arbitration import detect_config_mismatch
 from app.services.file_watcher import record_api_write
 from app.services.git_local import GitLocalService, initialize_skill_repository
+from app.services.graph_roundtrip import serialize_graph
 from app.services.skill_resolver import build_studio_skill_resolver
 
 _LOCATION_RE = re.compile(r":(?P<line>\d+)(?::(?P<loc>.*))?")
 _SAFE_SKILL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-_NAME_LINE_RE = re.compile(
-    r"(?m)^(?P<prefix>name:\s*)(?P<quote>['\"]?)(?P<value>[^'\"\n]+)(?P=quote)\s*$"
-)
+_NAME_LINE_RE = re.compile(r"(?m)^(?P<prefix>name:\s*)(?P<quote>['\"]?)(?P<value>[^'\"\n]+)(?P=quote)\s*$")
 
 _ALLOWED_SKILL_FILE_SUFFIXES = {".md", ".json", ".py"}
 _PHASE_NODE_FILES = {"LOGIC.md", "SUBGRAPH.md", "SKILL.md"}
@@ -125,12 +127,7 @@ def validate_skill_file_path(rel_path: str) -> None:
         return
     if len(parts) == 3 and parts[0] == "phases" and parts[2] in _PHASE_NODE_FILES:
         return
-    if (
-        len(parts) == 4
-        and parts[0] == "phases"
-        and parts[2] in {"actions", "tools"}
-        and parts[3].endswith(".py")
-    ):
+    if len(parts) == 4 and parts[0] == "phases" and parts[2] in {"actions", "tools"} and parts[3].endswith(".py"):
         return
     raise HTTPException(status_code=422, detail=invalid_message)
 
@@ -170,9 +167,7 @@ def _scaffold_files_for(skill_id: str) -> dict[str, str]:
     return files
 
 
-_ID_LINE_RE = re.compile(
-    r"(?m)^(?P<prefix>id:\s*)(?P<quote>['\"]?)(?P<value>[^'\"\n]+)(?P=quote)\s*$"
-)
+_ID_LINE_RE = re.compile(r"(?m)^(?P<prefix>id:\s*)(?P<quote>['\"]?)(?P<value>[^'\"\n]+)(?P=quote)\s*$")
 
 
 def ensure_workspace_layout() -> None:
@@ -202,9 +197,7 @@ async def list_skill_summaries(
         if skill_id not in unregistered_skill_ids
     ]
     metadata_summaries = [
-        summary
-        for summary in await metadata.list_skills(user_id)
-        if summary.id not in unregistered_skill_ids
+        summary for summary in await metadata.list_skills(user_id) if summary.id not in unregistered_skill_ids
     ]
     for skill_id in public_ids:
         skill_dir = config.SKILLS_DIR / skill_id
@@ -544,8 +537,7 @@ async def create_new_skill(
     if directory_path and await _directory_is_nonempty(skill_dir):
         _raise_invalid_directory_path(
             str(skill_dir),
-            "Cannot create a new skill in a non-empty folder. "
-            "Choose an empty folder or use Import skill.",
+            "Cannot create a new skill in a non-empty folder. Choose an empty folder or use Import skill.",
         )
 
     if await _is_importable_skill_directory(skill_dir, storage):
@@ -887,9 +879,7 @@ async def _directory_is_nonempty(path: Path) -> bool:
 
 
 async def _is_importable_skill_directory(path: Path, storage: StorageBackend) -> bool:
-    return await storage.exists(str(path / "GRAPH.md")) or await storage.exists(
-        str(path / "SKILL.md")
-    )
+    return await storage.exists(str(path / "GRAPH.md")) or await storage.exists(str(path / "SKILL.md"))
 
 
 async def _workspace_skill_body_exists(path: Path, storage: StorageBackend) -> bool:
@@ -897,9 +887,7 @@ async def _workspace_skill_body_exists(path: Path, storage: StorageBackend) -> b
         return False
     child_names = await storage.list_dirs(str(path))
     files = await asyncio.to_thread(
-        lambda: (
-            [child.name for child in path.iterdir() if child.is_file()] if path.exists() else []
-        ),
+        lambda: [child.name for child in path.iterdir() if child.is_file()] if path.exists() else [],
     )
     entries = set(child_names) | set(files)
     return not entries or bool(entries - {"runs", "skill_summary.json"})
@@ -1046,12 +1034,14 @@ def _parse_broken_graph_topology_and_phases(
         body = "---".join(parts[2:])
 
         import yaml
+
         frontmatter = yaml.safe_load(frontmatter_raw) or {}
         phases = frontmatter.get("phases", [])
         if not isinstance(phases, list):
             phases = []
 
         import re
+
         phase_pattern = re.compile(r"<phase\b([^>]*?)>(.*?)</phase>", re.IGNORECASE | re.DOTALL)
 
         topology = []
@@ -1074,12 +1064,14 @@ def _parse_broken_graph_topology_and_phases(
             elif (phase_dir / "SKILL.md").exists():
                 mode = "agent"
 
-            topology.append({
-                "id": tag_content,
-                "src": f"phases/{tag_content}",
-                "depends_on": depends_on_list,
-                "mode": mode,
-            })
+            topology.append(
+                {
+                    "id": tag_content,
+                    "src": f"phases/{tag_content}",
+                    "depends_on": depends_on_list,
+                    "mode": mode,
+                }
+            )
 
         return [str(p) for p in phases], topology
     except Exception:
@@ -1382,9 +1374,7 @@ def _sync_skill_index_entry(skill_id: str) -> dict[str, str] | None:
         return None
     return {
         "absolute_path": entry["absolute_path"],
-        "l2_remote_url": (
-            entry.get("l2_remote_url") if isinstance(entry.get("l2_remote_url"), str) else ""
-        ),
+        "l2_remote_url": (entry.get("l2_remote_url") if isinstance(entry.get("l2_remote_url"), str) else ""),
     }
 
 
@@ -1509,10 +1499,7 @@ def _raise_v21_directory_authoring_required() -> NoReturn:
     response = error_response(
         error_code="MANIFEST_VALIDATION_FAILED",
         http_status=422,
-        message=(
-            "V2.1 skills are directory-based; single-file SKILL.md authoring "
-            "is not supported by this endpoint"
-        ),
+        message=("V2.1 skills are directory-based; single-file SKILL.md authoring is not supported by this endpoint"),
         details={"required_entry": "GRAPH.md"},
         retry_strategy="not_retryable",
     )

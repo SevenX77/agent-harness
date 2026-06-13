@@ -10,9 +10,6 @@ from pathlib import Path
 from typing import Any, cast
 
 from fastapi.encoders import jsonable_encoder
-from graph_agent.core.exceptions import GraphAgentError
-from graph_agent.core.loader import SkillLoader
-from graph_agent.core.manifest import GraphManifest
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -25,6 +22,7 @@ from pydantic import (
     create_model,
 )
 
+from app.core.adapters.engine import GraphAgentError, GraphManifest, SkillLoader
 from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
 from app.services.skill_resolver import build_studio_skill_resolver

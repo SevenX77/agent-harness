@@ -242,10 +242,18 @@ export interface FieldDifference {
   changed: boolean
 }
 
+export interface NodeGoldenResult {
+  node_id: string
+  verdict: 'pass' | 'fail'
+  score: number
+  differences: FieldDifference[]
+}
+
 export interface CompareResult {
   differences: FieldDifference[]
   total_score: number
   golden_run_id: string
+  node_results: NodeGoldenResult[]
 }
 
 export interface TerminalSession {

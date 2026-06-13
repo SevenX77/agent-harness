@@ -10,7 +10,7 @@ SCHEMA_VERSION = "studio.mvp1.v1"
 
 
 class StudioAdapterError(Exception):
-    def __init__(self, error_code: str, error_payload: dict[str, Any] = None):
+    def __init__(self, error_code: str, error_payload: dict[str, Any] | None = None):
         super().__init__(f"StudioAdapterError: {error_code} - {error_payload}")
         self.error_code = error_code
         self.error_payload = error_payload or {}

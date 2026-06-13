@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -108,10 +108,10 @@ def _node_outputs(payload: Any) -> dict[str, dict[str, Any]]:
         node_id = item.get("phase_name") or item.get("name") or item.get("node_id")
         if not isinstance(node_id, str) or not node_id:
             node_id = f"node_{index}"
-        outputs = item.get("outputs")
+        outputs: Any = item.get("outputs")
         if not isinstance(outputs, dict):
             outputs = item.get("context") if isinstance(item.get("context"), dict) else {}
-        nodes[node_id] = outputs
+        nodes[node_id] = cast(dict[str, Any], outputs)
     return nodes
 
 
@@ -140,7 +140,7 @@ def _field_differences(
     return differences, score
 
 
-def _diff_type(value: Any) -> str:
+def _diff_type(value: Any) -> Literal["text", "number", "bool", "list", "dict", "null", "unknown"]:
     if isinstance(value, bool):
         return "bool"
     if isinstance(value, str):

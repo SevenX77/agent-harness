@@ -210,6 +210,16 @@ def _unzip_directory(zip_bytes: bytes, target_dir: Path) -> None:
         zf.extractall(target_dir)
 
 
+def _studio_storage_root() -> Path:
+    from app.core import config
+
+    settings_obj = getattr(config, "settings", None)
+    storage_root = getattr(settings_obj, "storage_root", None)
+    if storage_root is not None:
+        return Path(storage_root)
+    return config.WORKSPACES_DIR / "default"
+
+
 def _jsonable(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json")
@@ -261,11 +271,9 @@ class EngineAdapter:
 
         zip_bytes = _zip_directory(Path(skill_dir))
 
-        from app.core import config
         from app.core.adapters.product_store_local import LocalProductArtifactStore
 
-        has_settings = hasattr(config, "settings") and hasattr(config.settings, "storage_root")
-        storage_root = Path(config.settings.storage_root) if has_settings else (config.WORKSPACES_DIR / "default")
+        storage_root = _studio_storage_root()
         product_store = LocalProductArtifactStore(root=storage_root)
         artifact_ref = product_store.put(zip_bytes, artifact_id=skill_id, store=store_type)
 
@@ -426,11 +434,9 @@ class EngineAdapter:
         )
         content_hash = art_ref["content_hash"]
 
-        from app.core import config
         from app.core.adapters.product_store_local import LocalProductArtifactStore
 
-        has_settings = hasattr(config, "settings") and hasattr(config.settings, "storage_root")
-        storage_root = Path(config.settings.storage_root) if has_settings else (config.WORKSPACES_DIR / "default")
+        storage_root = _studio_storage_root()
 
         sha256_val = content_hash.split(":", 1)[1]
         ephemeral_dir = storage_root / "ephemeral_run_skills" / sha256_val
@@ -499,11 +505,9 @@ class EngineAdapter:
         if not isinstance(content_hash, str) or not content_hash.startswith("sha256:"):
             return None
 
-        from app.core import config
         from app.core.adapters.product_store_local import LocalProductArtifactStore
 
-        has_settings = hasattr(config, "settings") and hasattr(config.settings, "storage_root")
-        storage_root = Path(config.settings.storage_root) if has_settings else (config.WORKSPACES_DIR / "default")
+        storage_root = _studio_storage_root()
         sha256_val = content_hash.split(":", 1)[1]
         ephemeral_dir = storage_root / "ephemeral_run_skills" / sha256_val
         if (ephemeral_dir / "GRAPH.md").is_file():

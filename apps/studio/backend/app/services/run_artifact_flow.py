@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import NoReturn
+
 from app.core.adapters.http_transport import StudioAdapterError
 from app.core.adapters.product_store_local import ArtifactRef, LocalProductArtifactStore
 
@@ -60,7 +62,7 @@ def compile_ephemeral_for_dev_missing_hash(artifact_id: str) -> ArtifactRef:
     )
 
 
-def reject_prod_missing_hash(artifact_id: str, content_hash: str | None) -> None:
+def reject_prod_missing_hash(artifact_id: str, content_hash: str | None) -> NoReturn:
     raise StudioAdapterError(
         "artifact.not_found",
         {"detail": f"Artifact {artifact_id} with hash {content_hash} is missing in production store"},

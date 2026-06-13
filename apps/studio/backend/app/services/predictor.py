@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from app.core.adapters.engine import (
     RunResult,
@@ -112,7 +112,7 @@ class PredictorService:
         if isinstance(result, dict):
             result = RunResult.model_validate(result)
         self._persist_predict_result(skill_dir, result.run_id, result)
-        return result
+        return cast(RunResult, result)
 
     def export_diagnostics(self, result: RunResult) -> PredictDiagnosticExport:
         """Expose PredictResult through the Studio in-process diagnostic contract."""

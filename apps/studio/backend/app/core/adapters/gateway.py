@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from graph_agent_gateway.registry.base_url import (
     canonicalize_base_url as canonicalize_base_url,
@@ -329,11 +329,11 @@ class GatewayAdapter:
             }
         )
 
-    def project_route_state(self, payload: dict[str, Any]) -> Any:
+    def project_route_state(self, payload: dict[str, Any]) -> ProviderModelStateProjection:
         if self.transport == "http_loopback":
             if not self.http_transport:
                 raise ValueError("http_transport is required for http_loopback")
-            return self.http_transport.post("/gateway/project_route_state", payload)
+            return cast(ProviderModelStateProjection, self.http_transport.post("/gateway/project_route_state", payload))
 
         # in_process
         endpoint = payload["endpoint"]
@@ -396,11 +396,11 @@ class GatewayAdapter:
 
     def _circuit_matches(self, endpoint: Any, route: Any, circuit: Any) -> bool:
         if circuit.scope == "route":
-            return circuit.scope_id == route.route_id
+            return bool(circuit.scope_id == route.route_id)
         if circuit.scope == "endpoint":
-            return circuit.scope_id == endpoint.endpoint_id
+            return bool(circuit.scope_id == endpoint.endpoint_id)
         effective_bucket = endpoint.rate_limit_bucket or endpoint.endpoint_id
-        return circuit.scope_id == effective_bucket
+        return bool(circuit.scope_id == effective_bucket)
 
     def _private_projection(
         self,

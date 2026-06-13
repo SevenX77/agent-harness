@@ -4218,7 +4218,7 @@ def _materialize_role_for_response(
     if not role.model_groups:
         return role
     adapter = GatewayAdapter(transport="in_process")
-    return adapter.materialize_role({"role": role, "credentials": credentials or load_credentials()})
+    return cast(RoleEntry, adapter.materialize_role({"role": role, "credentials": credentials or load_credentials()}))
 
 
 def _save_roles_with_active_routes(data: RolesData) -> RolesData:

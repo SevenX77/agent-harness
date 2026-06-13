@@ -2,19 +2,17 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from graph_agent_gateway.storage_contracts import ConfigRecord as GatewayConfigRecord
 
 from app.core.adapters.http_transport import StudioAdapterError
 
 
-@dataclass
-class ConfigRecord:
+class ConfigRecord(GatewayConfigRecord):
     user_id: str
     key: str
-    value: dict[str, Any]
-    etag: str
 
 
 class LocalGatewayConfigStore:
@@ -44,9 +42,10 @@ class LocalGatewayConfigStore:
         user_id: str,
         key: str,
         value: dict[str, Any],
+        *,
         if_match: str | None = None,
         if_none_match: str | None = None,
-    ) -> ConfigRecord:
+    ) -> str:
         if not user_id or not key:
             raise ValueError("user_id and key cannot be empty")
 
@@ -93,9 +92,4 @@ class LocalGatewayConfigStore:
                     pass
             raise e
 
-        return ConfigRecord(
-            user_id=user_id,
-            key=key,
-            value=value,
-            etag=new_etag,
-        )
+        return new_etag

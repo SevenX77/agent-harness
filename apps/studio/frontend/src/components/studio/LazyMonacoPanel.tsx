@@ -22,6 +22,7 @@ interface SaveConflictPayload {
 interface LazyMonacoPanelProps {
   title: string
   skillId: string
+  workspaceRoot?: string | null
   filePath: string
   value: string
   onChange: (value: string) => void
@@ -52,6 +53,7 @@ function wait(ms: number) {
 export function LazyMonacoPanel({
   title,
   skillId,
+  workspaceRoot = null,
   filePath,
   value,
   onChange,
@@ -84,16 +86,26 @@ export function LazyMonacoPanel({
     onConflictRef.current = onConflict
   })
 
+  const lastPathRef = useRef(filePath)
+  const lastHashRef = useRef(initialHash)
+
   useEffect(() => {
-    setDraft(value)
-    draftRef.current = value
-    savedRef.current = value
-    hashRef.current = initialHash
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current)
-      timerRef.current = null
+    const pathChanged = lastPathRef.current !== filePath
+    const hashChanged = lastHashRef.current !== initialHash
+    lastPathRef.current = filePath
+    lastHashRef.current = initialHash
+
+    if (pathChanged || hashChanged || value !== draftRef.current) {
+      setDraft(value)
+      draftRef.current = value
+      savedRef.current = value
+      hashRef.current = initialHash
+      if (timerRef.current !== null) {
+        window.clearTimeout(timerRef.current)
+        timerRef.current = null
+      }
+      onInFlightChangeRef.current(false)
     }
-    onInFlightChangeRef.current(false)
   }, [filePath, initialHash, value])
 
   const saveNow = useCallback(async (content: string) => {
@@ -105,7 +117,7 @@ export function LazyMonacoPanel({
     let attempts = 0
     while (attempts < 4) {
       try {
-        const result = await writeSkillFile(skillId, filePath, content, hashRef.current)
+        const result = await writeSkillFile(workspaceRoot ?? skillId, filePath, content, hashRef.current)
         hashRef.current = result.hash
         savedRef.current = content
         onSavedRef.current(result.hash)
@@ -143,7 +155,7 @@ export function LazyMonacoPanel({
         attempts += 1
       }
     }
-  }, [filePath, saveEnabled, skillId])
+  }, [filePath, saveEnabled, skillId, workspaceRoot])
 
   const flush = useCallback(() => {
     if (timerRef.current !== null) {

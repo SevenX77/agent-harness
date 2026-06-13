@@ -1,35 +1,83 @@
 import { useCallback, useState } from 'react'
 
-export function readRecentSkillIds() {
+export interface RecentWorkspaceEntry {
+  absolutePath: string
+  displayName: string
+  identity: string
+  lastOpenedAt: string
+}
+
+export function readRecentWorkspaces(): RecentWorkspaceEntry[] {
   if (typeof window === 'undefined') {
     return []
   }
-
   try {
-    const parsed = JSON.parse(localStorage.getItem('recentSkills') || '[]') as unknown
-    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []
+    const parsed = JSON.parse(localStorage.getItem('recentWorkspaces') || '[]') as unknown
+    return Array.isArray(parsed) ? parsed.filter((w): w is RecentWorkspaceEntry => (
+      w && typeof w === 'object' && 'absolutePath' in w && 'displayName' in w && 'identity' in w
+    )) : []
   } catch {
     return []
   }
 }
 
-export function useRecentSkills(validSkillIds: string[] = []) {
-  const [recentSkills, setRecentSkills] = useState<string[]>(() => {
-    const ids = readRecentSkillIds()
-    if (validSkillIds.length === 0) {
-      return ids
-    }
-    const valid = new Set(validSkillIds)
-    return ids.filter((id) => valid.has(id))
+export function rememberRecentWorkspace(workspace: Pick<RecentWorkspaceEntry, 'absolutePath' | 'displayName'>): RecentWorkspaceEntry {
+  const absolutePath = workspace.absolutePath
+  const displayName = workspace.displayName
+  const identity = `local:${absolutePath}`
+  const lastOpenedAt = new Date().toISOString()
+
+  const entry: RecentWorkspaceEntry = {
+    absolutePath,
+    displayName,
+    identity,
+    lastOpenedAt,
+  }
+
+  if (typeof window !== 'undefined') {
+    const list = readRecentWorkspaces()
+    const filtered = list.filter((w) => w.identity !== identity)
+    const next = [entry, ...filtered].slice(0, 10)
+    localStorage.setItem('recentWorkspaces', JSON.stringify(next))
+  }
+
+  return entry
+}
+
+export function removeRecentWorkspace(identity: string): void {
+  if (typeof window === 'undefined') return
+  const list = readRecentWorkspaces()
+  const next = list.filter((w) => w.identity !== identity)
+  localStorage.setItem('recentWorkspaces', JSON.stringify(next))
+}
+
+export function pruneMissingRecentWorkspaces(exists: (absolutePath: string) => boolean): RecentWorkspaceEntry[] {
+  if (typeof window === 'undefined') return []
+  const list = readRecentWorkspaces()
+  const next = list.filter((w) => exists(w.absolutePath))
+  localStorage.setItem('recentWorkspaces', JSON.stringify(next))
+  return next
+}
+
+export function useRecentSkills() {
+  const [recentWorkspaces, setRecentWorkspaces] = useState<RecentWorkspaceEntry[]>(() => {
+    return readRecentWorkspaces()
   })
 
-  const rememberSkill = useCallback((skillId: string) => {
-    setRecentSkills((previous) => {
-      const next = [skillId, ...previous.filter((id) => id !== skillId)].slice(0, 10)
-      localStorage.setItem('recentSkills', JSON.stringify(next))
-      return next
-    })
+  const rememberWorkspace = useCallback((workspace: Pick<RecentWorkspaceEntry, 'absolutePath' | 'displayName'>) => {
+    const entry = rememberRecentWorkspace(workspace)
+    setRecentWorkspaces(readRecentWorkspaces())
+    return entry
   }, [])
 
-  return { recentSkills, rememberSkill }
+  const removeWorkspace = useCallback((identity: string) => {
+    removeRecentWorkspace(identity)
+    setRecentWorkspaces(readRecentWorkspaces())
+  }, [])
+
+  return {
+    recentWorkspaces,
+    rememberWorkspace,
+    removeWorkspace,
+  }
 }

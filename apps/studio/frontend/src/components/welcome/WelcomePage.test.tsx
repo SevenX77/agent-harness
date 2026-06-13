@@ -9,6 +9,7 @@ import {
   formatCreateSkillError,
   formatImportSkillError,
   registeredSkillIdForImport,
+  REMOVE_WORKSPACE_ACTION_LABEL,
   REVEAL_ACTION_LABEL,
   requestSkillDeleteConfirmation,
   WelcomePage,
@@ -46,8 +47,9 @@ vi.mock('../../hooks/useSkills', () => ({
 
 vi.mock('../../hooks/useRecentSkills', () => ({
   useRecentSkills: () => ({
-    recentSkills: [],
-    rememberSkill: vi.fn(),
+    recentWorkspaces: [],
+    rememberWorkspace: vi.fn(),
+    removeWorkspace: vi.fn(),
   }),
 }))
 
@@ -70,6 +72,7 @@ vi.mock('../../config/runtime', () => ({
 }))
 
 vi.mock('../../lib/tauri', () => ({
+  revealInFileManager: vi.fn(),
   selectSkillDirectory: vi.fn(),
 }))
 
@@ -80,12 +83,22 @@ vi.mock('../ui/tooltip', () => ({
 }))
 
 describe('WelcomePage', () => {
-  it('renders Config drift badge when skill.config_mismatch is present', () => {
+  it('re-attaches the gateway-truth Golden and Config drift badges on workspace cards', () => {
     const html = renderToStaticMarkup(<WelcomePage onSelectSkill={vi.fn()} />)
 
+    expect(html).toContain('Golden')
     expect(html).toContain('aria-label="Repo URL mismatch"')
     expect(html).toContain('Config drift')
     expect(html).toContain('https://gitea.example.test/bob/demo-skill.git')
+    expect(html).toContain('https://gitea.example.test/alice/demo-skill.git')
+  })
+
+  it('renders Open folder as the local workspace entry point', () => {
+    const html = renderToStaticMarkup(<WelcomePage onSelectSkill={vi.fn()} />)
+
+    expect(html).toContain('Open folder')
+    expect(html).not.toContain('Import skill')
+    expect(html).not.toContain('Importing')
   })
 
   it('renders compact skill cards with the real folder path subtitle', () => {
@@ -120,17 +133,21 @@ describe('WelcomePage', () => {
     expect(ACTION_MENU_CLASSNAME).toBe('w-48')
   })
 
-  it('uses a shadcn sonner confirmation toast before deleting a skill', () => {
+  it('labels workspace removal actions without implying disk deletion', () => {
+    expect(REMOVE_WORKSPACE_ACTION_LABEL).toBe('Remove')
+  })
+
+  it('uses a shadcn sonner confirmation toast before removing a workspace from Studio', () => {
     const onConfirm = vi.fn()
 
     requestSkillDeleteConfirmation(mismatchSkill, onConfirm)
 
     expect(toastMock).toHaveBeenCalledWith(
-      'Delete Demo skill?',
+      'Remove Demo skill from Studio?',
       expect.objectContaining({
         description: 'This skill will be removed from Studio. Its source folder stays on disk.',
         duration: Infinity,
-        action: expect.objectContaining({ label: 'Delete' }),
+        action: expect.objectContaining({ label: 'Remove' }),
         cancel: expect.objectContaining({ label: 'Cancel' }),
         classNames: expect.objectContaining({
           actionButton: expect.stringContaining('!bg-destructive'),
@@ -140,7 +157,7 @@ describe('WelcomePage', () => {
     expect(onConfirm).not.toHaveBeenCalled()
   })
 
-  it('wires the sonner delete action to the confirmed skill delete callback', () => {
+  it('wires the sonner remove action to the confirmed workspace removal callback', () => {
     const onConfirm = vi.fn()
 
     requestSkillDeleteConfirmation(mismatchSkill, onConfirm)
@@ -166,7 +183,7 @@ describe('WelcomePage', () => {
     })
   })
 
-  it('builds import payload for an existing selected directory', () => {
+  it('builds an import-existing payload so Open folder creates a backend identity for local paths', () => {
     expect(buildSkillImportPayload('/Users/sevenx/AgentStudio/Skills/My Skill')).toEqual({
       skill_id: 'my-skill',
       directory_path: '/Users/sevenx/AgentStudio/Skills/My Skill',
@@ -188,12 +205,12 @@ describe('WelcomePage', () => {
     expect(html).toContain('Default: /studio/config/Skills')
   })
 
-  it('finds an already registered skill by selected import directory path', () => {
-    expect(registeredSkillIdForImport('/tmp/demo-skill/', [mismatchSkill])).toBe('demo-skill')
+  it('does not require a registered skill match before opening a selected folder path', () => {
+    expect(registeredSkillIdForImport('/workspace/demo-skill/', [mismatchSkill])).toBeNull()
   })
 
-  it('falls back to matching an already registered skill by normalized selected folder name', () => {
-    expect(registeredSkillIdForImport('/other/place/Demo Skill', [mismatchSkill])).toBe('demo-skill')
+  it('does not infer workspace identity from a normalized folder name collision', () => {
+    expect(registeredSkillIdForImport('/other/place/Demo Skill', [mismatchSkill])).toBeNull()
   })
 
   it('explains duplicate skill create failures', () => {
@@ -208,19 +225,17 @@ describe('WelcomePage', () => {
     )
   })
 
-  it('explains invalid import folder failures', () => {
+  it('does not present missing GRAPH.md or SKILL.md as a Home/Open folder blocker', () => {
     const error = studioApiError({
       error_code: 'INVALID_DIRECTORY_PATH',
       message: 'Selected folder is not a Studio skill directory: missing GRAPH.md or SKILL.md.',
       details: { directory_path: '/tmp/not-a-skill', required_entry: 'GRAPH.md or SKILL.md' },
     })
 
-    expect(formatImportSkillError(error)).toBe(
-      'Cannot import this folder: selected folder is not a Studio skill directory: missing GRAPH.md or SKILL.md.',
-    )
+    expect(formatImportSkillError(error)).not.toContain('missing GRAPH.md or SKILL.md')
   })
 
-  it('explains manifest validation failures with the first lint detail', () => {
+  it('does not use import-time manifest lint failures to block Open folder', () => {
     const error = studioApiError({
       error_code: 'MANIFEST_VALIDATION_FAILED',
       message: 'Manifest validation failed',
@@ -233,15 +248,13 @@ describe('WelcomePage', () => {
       },
     })
 
-    expect(formatImportSkillError(error)).toBe(
-      'Cannot import this folder: phases/init/LOGIC.md:1 LOGIC.md is missing <python_callable>. Add a <python_callable> block that names a Python function in phases/<phase>/actions/.',
-    )
+    expect(formatImportSkillError(error)).not.toContain('Cannot import this folder')
     expect(formatCreateSkillError(error, 'new-skill')).toBe(
-      'Cannot create "new-skill": phases/init/LOGIC.md:1 LOGIC.md is missing <python_callable>. Add a <python_callable> block that names a Python function in phases/<phase>/actions/.',
+      'Cannot create "new-skill": phases/init/LOGIC.md:1 LOGIC.md hit a legacy python_callable validator. MVP1 logic phases use actions/<phase>.py, not LOGIC.md python callable blocks.',
     )
   })
 
-  it('turns old scaffold python_callable validation into actionable copy', () => {
+  it('turns old scaffold python_callable validation into MVP1 drift copy', () => {
     const error = studioApiError({
       error_code: 'MANIFEST_VALIDATION_FAILED',
       message: 'Manifest validation failed',
@@ -254,12 +267,14 @@ describe('WelcomePage', () => {
       },
     })
 
-    expect(formatCreateSkillError(error, 'new-skill')).toBe(
-      'Cannot create "new-skill": phases/init/LOGIC.md:1 LOGIC.md is missing <python_callable>. Add a <python_callable> block that names a Python function in phases/<phase>/actions/.',
+    const message = formatCreateSkillError(error, 'new-skill')
+    expect(message).toBe(
+      'Cannot create "new-skill": phases/init/LOGIC.md:1 LOGIC.md hit a legacy python_callable validator. MVP1 logic phases use actions/<phase>.py, not LOGIC.md python callable blocks.',
     )
+    expect(message).not.toContain('Add a <python_callable>')
   })
 
-  it('explains stale sidecar request validation on import', () => {
+  it('does not show stale /skills import validation copy for Open folder', () => {
     const error = studioApiError({
       error_code: 'MANIFEST_VALIDATION_FAILED',
       message: 'Request validation failed',
@@ -272,9 +287,8 @@ describe('WelcomePage', () => {
       },
     })
 
-    expect(formatImportSkillError(error)).toBe(
-      'Cannot import this folder: the running backend does not support folder import yet. Quit and restart Studio so the updated sidecar is loaded.',
-    )
+    expect(formatImportSkillError(error)).not.toContain('/skills API contract')
+    expect(formatImportSkillError(error)).not.toContain('Cannot import this folder')
   })
 })
 

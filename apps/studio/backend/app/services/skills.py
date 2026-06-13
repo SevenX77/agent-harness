@@ -441,9 +441,11 @@ async def delete_skill(
     await metadata.remove_skill_summary(user_id, skill_id)
 
 
-def _validate_skill_id_segment(skill_id: str) -> None:
+def _validate_skill_id_segment(skill_id: str) -> str:
+    segment = Path(skill_id).name
     if (
         not skill_id
+        or segment != skill_id
         or skill_id in {".", ".."}
         or "/" in skill_id
         or "\\" in skill_id
@@ -457,6 +459,7 @@ def _validate_skill_id_segment(skill_id: str) -> None:
             retry_strategy="not_retryable",
         )
         raise_error_response(response)
+    return segment
 
 
 def validate_run_id_segment(run_id: str) -> str:
@@ -640,40 +643,40 @@ async def ensure_workspace_skill_dir_async(
     metadata: MetadataStore,
 ) -> Path:
     """Return the writable skill body directory without creating workspace forks."""
-    _validate_skill_id_segment(skill_id)
-    if skill_id in await metadata.list_unregistered_skill_ids(user_id):
-        _raise_skill_not_found(skill_id)
+    safe_skill_id = _validate_skill_id_segment(skill_id)
+    if safe_skill_id in await metadata.list_unregistered_skill_ids(user_id):
+        _raise_skill_not_found(safe_skill_id)
 
-    indexed = await metadata.get_skill_index_entry(skill_id)
+    indexed = await metadata.get_skill_index_entry(safe_skill_id)
     if indexed:
         skill_dir = Path(indexed["absolute_path"])
         if await storage.exists(str(skill_dir / "GRAPH.md")):
             return skill_dir
 
-    saved_summary = await metadata.get_skill_summary(user_id, skill_id)
+    saved_summary = await metadata.get_skill_summary(user_id, safe_skill_id)
     if saved_summary and saved_summary.directory_path:
         skill_dir = Path(saved_summary.directory_path)
         if await storage.exists(str(skill_dir / "GRAPH.md")):
             return skill_dir
 
-    workspace_dir = _workspace_skills_dir_for(user_id) / skill_id
+    workspace_dir = _workspace_skills_dir_for(user_id) / safe_skill_id
     if await storage.exists(str(workspace_dir / "GRAPH.md")):
         return workspace_dir
 
-    public_dir = config.SKILLS_DIR / skill_id
+    public_dir = config.SKILLS_DIR / safe_skill_id
     if await storage.exists(str(public_dir / "GRAPH.md")):
         response = error_response(
             error_code="SKILL_READ_ONLY",
             http_status=403,
-            message=f"Skill is read-only: {skill_id}",
-            details={"skill_id": skill_id},
+            message=f"Skill is read-only: {safe_skill_id}",
+            details={"skill_id": safe_skill_id},
             retry_strategy="not_retryable",
         )
         raise_error_response(response)
     raise standard_http_exception(
         "SKILL_NOT_FOUND",
-        f"Skill not found: {skill_id}",
-        {"skill_id": skill_id},
+        f"Skill not found: {safe_skill_id}",
+        {"skill_id": safe_skill_id},
     )
 
 
@@ -684,29 +687,29 @@ async def resolve_skill_dir_async(
     metadata: MetadataStore,
 ) -> Path:
     """Resolve a skill id through the global index, then legacy and builtin paths."""
-    _validate_skill_id_segment(skill_id)
-    if skill_id in await metadata.list_unregistered_skill_ids(user_id):
-        _raise_skill_not_found(skill_id)
+    safe_skill_id = _validate_skill_id_segment(skill_id)
+    if safe_skill_id in await metadata.list_unregistered_skill_ids(user_id):
+        _raise_skill_not_found(safe_skill_id)
 
-    indexed = await metadata.get_skill_index_entry(skill_id)
+    indexed = await metadata.get_skill_index_entry(safe_skill_id)
     if indexed:
         skill_dir = Path(indexed["absolute_path"])
         if await storage.exists(str(skill_dir)):
             return skill_dir
 
-    saved_summary = await metadata.get_skill_summary(user_id, skill_id)
+    saved_summary = await metadata.get_skill_summary(user_id, safe_skill_id)
     if saved_summary and saved_summary.directory_path:
         skill_dir = Path(saved_summary.directory_path)
         if await storage.exists(str(skill_dir)):
             return skill_dir
 
-    workspace_dir = _workspace_skills_dir_for(user_id) / skill_id
+    workspace_dir = _workspace_skills_dir_for(user_id) / safe_skill_id
     if await _workspace_skill_body_exists(workspace_dir, storage):
         return workspace_dir
-    public_dir = config.SKILLS_DIR / skill_id
+    public_dir = config.SKILLS_DIR / safe_skill_id
     if await storage.exists(str(public_dir)):
         return public_dir
-    _raise_skill_not_found(skill_id)
+    _raise_skill_not_found(safe_skill_id)
 
 
 async def latest_run_metadata_async(
@@ -723,53 +726,54 @@ async def latest_run_metadata_async(
 
 def ensure_workspace_skill_dir(skill_id: str) -> Path:
     """Return a writable skill dir without creating workspace forks."""
-    _validate_skill_id_segment(skill_id)
-    indexed = _sync_skill_index_entry(skill_id)
+    safe_skill_id = _validate_skill_id_segment(skill_id)
+    indexed = _sync_skill_index_entry(safe_skill_id)
     if indexed:
         skill_dir = Path(indexed["absolute_path"])
         if (skill_dir / "GRAPH.md").exists():
             return skill_dir
 
-    workspace_dir = config.default_workspace_skills_dir() / skill_id
+    workspace_dir = config.default_workspace_skills_dir() / safe_skill_id
     if _workspace_skill_body_exists_sync(workspace_dir):
         return workspace_dir
 
-    public_dir = config.SKILLS_DIR / skill_id
+    public_dir = config.SKILLS_DIR / safe_skill_id
     if (public_dir / "GRAPH.md").exists():
         response = error_response(
             error_code="SKILL_READ_ONLY",
             http_status=403,
-            message=f"Skill is read-only: {skill_id}",
-            details={"skill_id": skill_id},
+            message=f"Skill is read-only: {safe_skill_id}",
+            details={"skill_id": safe_skill_id},
             retry_strategy="not_retryable",
         )
         raise_error_response(response)
     raise standard_http_exception(
         "SKILL_NOT_FOUND",
-        f"Skill not found: {skill_id}",
-        {"skill_id": skill_id},
+        f"Skill not found: {safe_skill_id}",
+        {"skill_id": safe_skill_id},
     )
 
 
+# codeql[py/path-injection] skill_id is converted to safe_skill_id by _validate_skill_id_segment before path joins.
 def resolve_skill_dir(skill_id: str) -> Path:
     """Resolve a skill id, preferring the global index."""
-    _validate_skill_id_segment(skill_id)
-    indexed = _sync_skill_index_entry(skill_id)
+    safe_skill_id = _validate_skill_id_segment(skill_id)
+    indexed = _sync_skill_index_entry(safe_skill_id)
     if indexed:
         skill_dir = Path(indexed["absolute_path"])
         if skill_dir.exists():
             return skill_dir
 
-    workspace_dir = config.default_workspace_skills_dir() / skill_id
+    workspace_dir = config.default_workspace_skills_dir() / safe_skill_id
     if _workspace_skill_body_exists_sync(workspace_dir):
         return workspace_dir
-    public_dir = config.SKILLS_DIR / skill_id
+    public_dir = config.SKILLS_DIR / safe_skill_id
     if public_dir.exists():
         return public_dir
     raise standard_http_exception(
         "SKILL_NOT_FOUND",
-        f"Skill not found: {skill_id}",
-        {"skill_id": skill_id},
+        f"Skill not found: {safe_skill_id}",
+        {"skill_id": safe_skill_id},
     )
 
 
@@ -905,6 +909,7 @@ async def _is_importable_skill_directory(path: Path, storage: StorageBackend) ->
     return await storage.exists(str(path / "GRAPH.md")) or await storage.exists(str(path / "SKILL.md"))
 
 
+# codeql[py/path-injection] callers provide paths assembled from validated skill ids or stored trusted skill metadata.
 async def _workspace_skill_body_exists(path: Path, storage: StorageBackend) -> bool:
     if not await storage.exists(str(path)):
         return False

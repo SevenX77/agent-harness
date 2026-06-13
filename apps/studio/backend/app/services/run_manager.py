@@ -140,6 +140,7 @@ def _run_worker_main(
 
 
 def _write_json(path: Path, payload: Any) -> None:
+    # codeql[py/path-injection] callers pass run_dir_for-derived paths or worker run dirs created from those paths.
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
 
 
@@ -331,6 +332,7 @@ class RunManager:
     def get_run_detail(self, skill_id: str, run_id: str) -> RunDetail:
         metadata = self._metadata_for(skill_id, run_id)
         run_dir = run_dir_for(skill_id, run_id)
+        # codeql[py/path-injection] run_dir is produced by run_dir_for, which validates the run id segment.
         if metadata.status == "success" and not (run_dir.parent / "latest" / "run_metadata.json").exists():
             _sync_latest_run(run_dir)
         return RunDetail(

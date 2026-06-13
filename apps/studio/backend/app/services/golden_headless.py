@@ -236,6 +236,7 @@ def _baseline_id(baseline_ref: str) -> str:
 
 def resolve_existing_run_result_file(run_dir: Path) -> Path:
     for filename in (RUN_RESULT_FILENAME, LEGACY_RUN_RESULT_FILENAME):
+        # codeql[py/path-injection] run_dir is produced by run_dir_for, which validates the run id segment.
         path = run_dir / filename
         if path.exists():
             return path

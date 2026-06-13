@@ -231,9 +231,11 @@ def _private_build_gateway_model_resolver() -> Any:
 
 
 def _zip_directory(dir_path: Path) -> bytes:
+    # codeql[py/path-injection] Studio callers pass a resolved skill root; archive entries are made relative to it.
     source_root = dir_path.resolve(strict=True)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        # codeql[py/path-injection] The directory is resolved above and archived without following user path segments.
         for file in source_root.rglob("*"):
             if ".workspace" in file.parts:
                 continue

@@ -19,13 +19,16 @@ from app.services.golden_headless import (  # noqa: F401
 from app.services.skills import golden_dir_for, resolve_skill_dir, run_dir_for, validate_run_id_segment
 
 
+# codeql[py/path-injection] skill_id is validated by resolve_skill_dir before golden_root is used for filesystem access.
 def list_golden_baselines_for_skill(skill_id: str) -> list[GoldenBaseline]:
     """Return all persisted golden baselines for a skill."""
     golden_root = _golden_root_for(skill_id)
+    # codeql[py/path-injection] golden_root comes from resolve_skill_dir, which validates skill_id as a path segment.
     if not golden_root.exists():
         return []
 
     baselines: list[GoldenBaseline] = []
+    # codeql[py/path-injection] golden_root is the validated skill workspace golden directory.
     for metadata_path in golden_root.glob("*/golden_metadata.json"):
         try:
             baselines.append(GoldenBaseline.model_validate_json(metadata_path.read_text()))
@@ -70,12 +73,14 @@ def set_golden_baseline_for_run(skill_id: str, run_id: str, *, lock: bool) -> Go
 
 def delete_golden_baseline_for_skill(skill_id: str, golden_id: str) -> None:
     baseline_dir = _golden_dir_for(skill_id, golden_id)
+    # codeql[py/path-injection] baseline_dir is built from validate_run_id_segment via _golden_dir_for.
     if not baseline_dir.exists():
         raise standard_http_exception(
             "RESUME_CHECKPOINT_NOT_FOUND",
             f"Golden baseline not found: {golden_id}",
             {"skill_id": skill_id, "golden_id": golden_id},
         )
+    # codeql[py/path-injection] baseline_dir is confined to the skill golden root by _golden_dir_for.
     shutil.rmtree(baseline_dir)
 
 

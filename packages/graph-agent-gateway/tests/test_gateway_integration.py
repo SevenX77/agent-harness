@@ -123,6 +123,35 @@ class RecordingCallback:
         self.events.append(event)
 
 
+def _resolver_from_snapshot(snapshot: Any, **kwargs: Any) -> Any:
+    from graph_agent_gateway.resolver import ModelResolver
+    from graph_agent_gateway.storage_contracts import InMemoryConfigTruthStore
+
+    payload = snapshot.model_dump(mode="python")
+    store = InMemoryConfigTruthStore()
+    user_id = "test-user"
+    store.put_config(
+        user_id,
+        "credentials",
+        {
+            "schema_version": 4,
+            "provider_endpoints": payload["provider_endpoints"],
+            "provider_routes": payload["provider_routes"],
+            "runtime_policy": payload["runtime_policy"],
+        },
+    )
+    store.put_config(
+        user_id,
+        "roles",
+        {
+            "schema_version": 2,
+            "model_profiles": payload["model_profiles"],
+            "roles": payload["roles"],
+        },
+    )
+    return ModelResolver(config_store=store, user_id=user_id, **kwargs)
+
+
 def test_resolver_applies_role_model_parameters_to_gateway_model() -> None:
     from graph_agent_gateway.gateway_chat_model import GatewayChatModel
     from graph_agent_gateway.registry.schema import (
@@ -132,7 +161,6 @@ def test_resolver_applies_role_model_parameters_to_gateway_model() -> None:
         RoleEntry,
         RoleRouteEntry,
     )
-    from graph_agent_gateway.resolver import ModelResolver
 
     snapshot = RegistrySnapshot(
         provider_endpoints={
@@ -168,8 +196,8 @@ def test_resolver_applies_role_model_parameters_to_gateway_model() -> None:
         },
     )
 
-    resolver = ModelResolver(
-        registry_snapshot=snapshot,
+    resolver = _resolver_from_snapshot(
+        snapshot,
         client_manager=AlwaysFailingClientManager(),
     )
     model = resolver.resolve("balanced", phase_name="draft")
@@ -484,7 +512,6 @@ def test_gateway_passes_effective_runtime_settings_to_route_factory(
 
 
 def test_unknown_role_raises_gateway_role_not_configured_error() -> None:
-    from graph_agent_gateway.exceptions import GatewayRoleNotConfiguredError
     from graph_agent_gateway.registry.schema import (
         ProviderEndpoint,
         ProviderRoute,
@@ -492,7 +519,7 @@ def test_unknown_role_raises_gateway_role_not_configured_error() -> None:
         RoleEntry,
         RoleRouteEntry,
     )
-    from graph_agent_gateway.resolver import ModelResolver
+    from graph_agent_gateway.resolver import ResourceTerminalError
 
     snapshot = RegistrySnapshot(
         provider_endpoints={
@@ -519,13 +546,13 @@ def test_unknown_role_raises_gateway_role_not_configured_error() -> None:
         },
     )
 
-    resolver = ModelResolver(
-        registry_snapshot=snapshot,
+    resolver = _resolver_from_snapshot(
+        snapshot,
         client_manager=AlwaysFailingClientManager(),
     )
 
-    with pytest.raises(GatewayRoleNotConfiguredError) as exc_info:
+    with pytest.raises(ResourceTerminalError) as exc_info:
         resolver.resolve("not_exist", phase_name="draft")
 
-    assert exc_info.value.code == "[F-v3-gateway-role-not-configured]"
-    assert exc_info.value.context["role_name"] == "not_exist"
+    assert exc_info.value.error_code == "resource.no_available_route"
+    assert exc_info.value.error_payload == {"role": "not_exist"}

@@ -186,22 +186,64 @@ def _write_registry_files(tmp_path: Path) -> tuple[Path, Path]:
     return credentials_path, roles_path
 
 
-def test_model_resolver_requires_explicit_registry_source() -> None:
+def _resolver_from_payloads(
+    credentials: dict[str, Any],
+    roles: dict[str, Any],
+    **kwargs: Any,
+) -> Any:
+    from graph_agent_gateway.resolver import ModelResolver
+    from graph_agent_gateway.storage_contracts import InMemoryConfigTruthStore
+
+    store = InMemoryConfigTruthStore()
+    user_id = "test-user"
+    store.put_config(user_id, "credentials", credentials)
+    store.put_config(user_id, "roles", roles)
+    return ModelResolver(config_store=store, user_id=user_id, **kwargs)
+
+
+def _resolver_from_snapshot(snapshot: Any, **kwargs: Any) -> Any:
+    payload = snapshot.model_dump(mode="python")
+    return _resolver_from_payloads(
+        {
+            "schema_version": 4,
+            "provider_endpoints": payload["provider_endpoints"],
+            "provider_routes": payload["provider_routes"],
+            "runtime_policy": payload["runtime_policy"],
+        },
+        {
+            "schema_version": 2,
+            "model_profiles": payload["model_profiles"],
+            "roles": payload["roles"],
+        },
+        **kwargs,
+    )
+
+
+def _resolver_from_files(
+    credentials_path: Path,
+    roles_path: Path,
+    **kwargs: Any,
+) -> Any:
+    credentials = json.loads(credentials_path.read_text(encoding="utf-8"))
+    roles = yaml.safe_load(roles_path.read_text(encoding="utf-8"))
+    return _resolver_from_payloads(credentials, roles, **kwargs)
+
+
+def test_model_resolver_requires_config_truth_store() -> None:
     from graph_agent_gateway.resolver import ModelResolver
 
-    with pytest.raises(ValueError, match="registry_snapshot|credentials_path"):
+    with pytest.raises(TypeError, match="config_store"):
         ModelResolver()
 
 
 def test_model_resolver_loads_explicit_v4_v2_files(tmp_path: Path) -> None:
     from graph_agent_gateway.gateway_chat_model import GatewayChatModel
-    from graph_agent_gateway.resolver import ModelResolver
 
     credentials_path, roles_path = _write_registry_files(tmp_path)
     client_manager = RecordingClientManager()
-    resolver = ModelResolver(
-        credentials_path=credentials_path,
-        roles_path=roles_path,
+    resolver = _resolver_from_files(
+        credentials_path,
+        roles_path,
         client_manager=client_manager,
     )
 
@@ -222,7 +264,6 @@ def test_model_resolver_loads_studio_v3_roles_file_using_materialized_chain(
     tmp_path: Path,
 ) -> None:
     from graph_agent_gateway.gateway_chat_model import GatewayChatModel
-    from graph_agent_gateway.resolver import ModelResolver
 
     credentials_path, roles_path = _write_registry_files(tmp_path)
     roles_payload = yaml.safe_load(roles_path.read_text(encoding="utf-8"))
@@ -256,7 +297,7 @@ def test_model_resolver_loads_studio_v3_roles_file_using_materialized_chain(
     )
     roles_path.write_text(yaml.safe_dump(roles_payload, sort_keys=True), encoding="utf-8")
 
-    resolver = ModelResolver(credentials_path=credentials_path, roles_path=roles_path)
+    resolver = _resolver_from_files(credentials_path, roles_path)
     model = resolver.resolve("graph_agent", phase_name="draft")
 
     assert isinstance(model, GatewayChatModel)
@@ -267,9 +308,8 @@ def test_model_resolver_loads_studio_v3_roles_file_using_materialized_chain(
 
 
 def test_model_override_is_exact_route_id() -> None:
-    from graph_agent_gateway.resolver import ModelResolver
 
-    resolver = ModelResolver(registry_snapshot=_snapshot())
+    resolver = _resolver_from_snapshot(_snapshot())
 
     model = resolver.resolve("graph_agent", model_override="openrouter-prod:openai.gpt-5")
     assert [route.route_id for route in model.resolved_role.routes] == [
@@ -283,11 +323,10 @@ def test_model_override_is_exact_route_id() -> None:
 def test_model_resolver_resolve_routes_returns_resolved_role_without_provider_call() -> None:
     from graph_agent_gateway.gateway_chat_model import GatewayChatModel
     from graph_agent_gateway.registry.schema import ResolvedRole
-    from graph_agent_gateway.resolver import ModelResolver
 
     client_manager = RecordingClientManager()
-    resolver = ModelResolver(
-        registry_snapshot=_snapshot(),
+    resolver = _resolver_from_snapshot(
+        _snapshot(),
         client_manager=client_manager,
     )
 
@@ -304,9 +343,8 @@ def test_model_resolver_resolve_routes_returns_resolved_role_without_provider_ca
 
 
 def test_resolve_and_resolve_routes_share_the_same_route_resolution() -> None:
-    from graph_agent_gateway.resolver import ModelResolver
 
-    resolver = ModelResolver(registry_snapshot=_snapshot())
+    resolver = _resolver_from_snapshot(_snapshot())
 
     model = resolver.resolve("graph_agent")
     resolved = resolver.resolve_routes("graph_agent")
@@ -316,34 +354,35 @@ def test_resolve_and_resolve_routes_share_the_same_route_resolution() -> None:
     ]
 
 
-def test_resolve_routes_exposes_registry_errors_without_gateway_mapping() -> None:
-    from graph_agent_gateway.registry.resolver import RegistryResolutionError
-    from graph_agent_gateway.resolver import ModelResolver
+def test_resolve_routes_projects_resource_terminal_error() -> None:
+    from graph_agent_gateway.resolver import ResourceTerminalError
 
-    resolver = ModelResolver(registry_snapshot=_snapshot())
+    resolver = _resolver_from_snapshot(_snapshot())
 
-    with pytest.raises(RegistryResolutionError):
+    with pytest.raises(ResourceTerminalError) as exc_info:
         resolver.resolve_routes("not_exist")
 
+    assert exc_info.value.error_code == "resource.no_available_route"
+    assert exc_info.value.error_payload == {"role": "not_exist"}
 
-def test_model_resolver_maps_filtered_empty_chain_to_gateway_role_not_configured() -> None:
-    from graph_agent_gateway.exceptions import GatewayRoleNotConfiguredError
+
+def test_model_resolver_maps_filtered_empty_chain_to_resource_terminal_error() -> None:
     from graph_agent_gateway.registry.schema import RoleEntry
-    from graph_agent_gateway.resolver import ModelResolver
+    from graph_agent_gateway.resolver import ResourceTerminalError
 
     snapshot = _snapshot()
     snapshot.roles["empty"] = RoleEntry(fallback_chain=[])
-    resolver = ModelResolver(registry_snapshot=snapshot)
+    resolver = _resolver_from_snapshot(snapshot)
 
-    with pytest.raises(GatewayRoleNotConfiguredError) as exc_info:
+    with pytest.raises(ResourceTerminalError) as exc_info:
         resolver.resolve("empty", phase_name="draft")
 
-    assert exc_info.value.context["role_name"] == "empty"
+    assert exc_info.value.error_code == "resource.no_available_route"
+    assert exc_info.value.error_payload == {"role": "empty"}
 
 
 def test_model_resolver_predict_context_returns_predict_gateway_chat_model() -> None:
     from graph_agent_gateway.predict_interception import PredictGatewayChatModel
-    from graph_agent_gateway.resolver import ModelResolver
 
     class DummyPredictContext:
         def resolve_generation(
@@ -355,7 +394,7 @@ def test_model_resolver_predict_context_returns_predict_gateway_chat_model() -> 
             del phase_name, role_name, messages
             return {"answer": "ok"}, "unit-test"
 
-    model = ModelResolver(registry_snapshot=_snapshot()).resolve(
+    model = _resolver_from_snapshot(_snapshot()).resolve(
         "graph_agent",
         phase_name="draft",
         predict_context=DummyPredictContext(),
@@ -369,11 +408,10 @@ def test_model_resolver_predict_context_returns_predict_gateway_chat_model() -> 
 
 
 def test_mark_provider_down_uses_resolved_executable_route() -> None:
-    from graph_agent_gateway.resolver import ModelResolver
 
     client_manager = RecordingClientManager()
-    resolver = ModelResolver(
-        registry_snapshot=_snapshot(),
+    resolver = _resolver_from_snapshot(
+        _snapshot(),
         client_manager=client_manager,
     )
 
@@ -385,7 +423,6 @@ def test_mark_provider_down_uses_resolved_executable_route() -> None:
 def test_runtime_uses_route_secret_and_no_provider_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from graph_agent_gateway.resolver import ModelResolver
 
     for key in (
         "OPENAI_API_KEY",
@@ -399,8 +436,8 @@ def test_runtime_uses_route_secret_and_no_provider_env(
 
     factory = _install_route_factory(monkeypatch)
     client_manager = RecordingClientManager()
-    model = ModelResolver(
-        registry_snapshot=_snapshot(),
+    model = _resolver_from_snapshot(
+        _snapshot(),
         client_manager=client_manager,
     ).resolve("graph_agent")
 
@@ -421,7 +458,6 @@ def test_thinking_protocol_uses_capability_value_not_field_presence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from graph_agent_gateway.registry.schema import CapabilityValue
-    from graph_agent_gateway.resolver import ModelResolver
 
     snapshot = _snapshot()
     route = snapshot.provider_routes["openai-direct:gpt-5"]
@@ -434,8 +470,8 @@ def test_thinking_protocol_uses_capability_value_not_field_presence(
     )
     factory = _install_route_factory(monkeypatch)
     client_manager = RecordingClientManager()
-    model = ModelResolver(
-        registry_snapshot=snapshot,
+    model = _resolver_from_snapshot(
+        snapshot,
         client_manager=client_manager,
     ).resolve("graph_agent")
 
@@ -448,7 +484,6 @@ def test_route_runtime_setting_not_capability_enables_thinking(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from graph_agent_gateway.registry.schema import CapabilityValue, RoleRouteEntry
-    from graph_agent_gateway.resolver import ModelResolver
 
     snapshot = _snapshot()
     route = snapshot.provider_routes["openai-direct:gpt-5"]
@@ -470,8 +505,8 @@ def test_route_runtime_setting_not_capability_enables_thinking(
     ]
     factory = _install_route_factory(monkeypatch)
     client_manager = RecordingClientManager()
-    model = ModelResolver(
-        registry_snapshot=snapshot,
+    model = _resolver_from_snapshot(
+        snapshot,
         client_manager=client_manager,
     ).resolve("graph_agent")
 
@@ -482,7 +517,6 @@ def test_route_runtime_setting_not_capability_enables_thinking(
 
 
 def test_legacy_roles_schema_is_fatal(tmp_path: Path) -> None:
-    from graph_agent_gateway.resolver import ModelResolver
 
     credentials_path, roles_path = _write_registry_files(tmp_path)
     roles_path.write_text(
@@ -497,7 +531,7 @@ def test_legacy_roles_schema_is_fatal(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ValueError, match="legacy|schema_version"):
-        ModelResolver(credentials_path=credentials_path, roles_path=roles_path)
+        _resolver_from_files(credentials_path, roles_path)
 
 
 def test_gateway_runtime_source_has_no_engine_llm_imports() -> None:

@@ -143,6 +143,32 @@ def test_role_effective_runtime_settings_uses_gateway_model_resolver(
     assert route_id in result["graph_agent"]
 
 
+def test_role_effective_runtime_settings_projects_no_available_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class NoAvailableRouteError(Exception):
+        error_code = "resource.no_available_route"
+        error_payload = {"role": "graph_agent"}
+
+    def raise_no_available_route(_self: object, _payload: dict[str, object]) -> object:
+        raise NoAvailableRouteError()
+
+    monkeypatch.setattr(llm_router.GatewayAdapter, "resolve_routes", raise_no_available_route)
+
+    result = llm_router._role_effective_runtime_settings(
+        LLMCredentialsFile(),
+        RolesData(
+            roles={
+                "graph_agent": RoleEntry(
+                    fallback_chain=[RoleRouteEntry(route_id="missing:model")],
+                )
+            }
+        ),
+    )
+
+    assert result == {"graph_agent": {}}
+
+
 def _health_store_path() -> Path:
     return Path(config.APP_SETTINGS_DIR) / "llm" / "llm_health.sqlite"
 
@@ -711,14 +737,15 @@ def test_registry_returns_model_groups_with_provider_ui_state_projection(
         "ready": 1,
         "untested": 1,
         "cooling_down": 0,
-        "needs_setup": 2,
+        "needs_setup": 1,
         "off": 1,
+        "failed": 1,
     }
     provider_models = {option["route_id"]: option for option in model_group["provider_models"]}
     assert provider_models["ready-provider:gpt-5"]["ui_state"] == "ready"
     assert provider_models["untested-provider:gpt-5"]["ui_state"] == "untested"
     assert provider_models["missing-key-provider:gpt-5"]["ui_state"] == "needs_setup"
-    assert provider_models["failed-provider:gpt-5"]["ui_state"] == "needs_setup"
+    assert provider_models["failed-provider:gpt-5"]["ui_state"] == "failed"
     assert provider_models["disabled-provider:gpt-5"]["ui_state"] == "off"
     assert provider_models["ready-provider:gpt-5"]["endpoint_id"] == "ready-provider"
     assert provider_models["ready-provider:gpt-5"]["provider_kind"] == "third_party"
@@ -3555,7 +3582,7 @@ def test_route_probe_force_true_hard_failure_projects_needs_setup(
     registry = client.get("/api/llm/registry").json()
     provider_model = registry["model_groups"][0]["provider_models"][0]
     assert provider_model["route_id"] == "openai-direct:gpt-5"
-    assert provider_model["ui_state"] == "needs_setup"
+    assert provider_model["ui_state"] == "failed"
     assert provider_model["reason_code"] == "invalid_model"
 
 

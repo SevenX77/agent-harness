@@ -6,10 +6,9 @@ import json
 import time
 from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
+from inspect import Parameter, Signature
 from typing import Any, cast
 
-from graph_agent_gateway.gateway_chat_model import GatewayChatModel, ToolSpec, _normalise_tool
-from graph_agent_gateway.registry.schema import ResolvedRole
 from langchain_core.callbacks.manager import (
     AsyncCallbackManagerForLLMRun,
     CallbackManagerForLLMRun,
@@ -26,37 +25,26 @@ from graph_agent.core._predict_internal.stub import generate_heuristic_stub
 from graph_agent.core._predict_internal.tracing import record_mock_source
 
 
-class PredictGatewayChatModel(GatewayChatModel):
-    """Gateway subclass used only for Predict-bound model resolver instances."""
-
+class _PredictGatewayChatModelMixin:
     mock_strategy: BaseMockStrategy
-
-    def __init__(
-        self,
-        role_name: str,
-        resolved_role: ResolvedRole,
-        *,
-        mock_strategy: BaseMockStrategy,
-        max_tokens: int = 4096,
-        temperature: float = 0.7,
-        callbacks: Sequence[Callback] = (),
-        phase_name: str | None = None,
-        probe_before_call: bool = True,
-        thinking_enabled: bool | None = None,
-        **kwargs: Any,
-    ) -> None:
-        kwargs["mock_strategy"] = mock_strategy
-        super().__init__(
-            role_name,
-            resolved_role,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            callbacks=callbacks,
-            phase_name=phase_name,
-            probe_before_call=probe_before_call,
-            thinking_enabled=thinking_enabled,
-            **kwargs,
-        )
+    name: str | None
+    role_name: str
+    phase_name: str | None
+    resolved_role: Any
+    max_tokens: int
+    temperature: float
+    event_callbacks: Sequence[Callback]
+    probe_before_call: bool
+    thinking_enabled: bool | None
+    cache: Any
+    verbose: bool
+    tags: list[str]
+    metadata: dict[str, Any] | None
+    custom_get_token_ids: Any
+    rate_limiter: Any
+    disable_streaming: bool
+    output_version: str | None
+    profile: Any
 
     def _generate(
         self,
@@ -104,41 +92,6 @@ class PredictGatewayChatModel(GatewayChatModel):
             generation_info=metadata,
         )
 
-    def bind_tools(
-        self,
-        tools: Sequence[ToolSpec],
-        *,
-        tool_choice: str | None = None,
-        **kwargs: Any,
-    ) -> Runnable[LanguageModelInput, AIMessage]:
-        """Keep Predict interception active after LangChain binds phase tools."""
-
-        bound = PredictGatewayChatModel(
-            self.role_name,
-            self.resolved_role,
-            mock_strategy=self.mock_strategy,
-            max_tokens=self.max_tokens,
-            temperature=self.temperature,
-            callbacks=self.event_callbacks,
-            phase_name=self.phase_name,
-            probe_before_call=self.probe_before_call,
-            thinking_enabled=self.thinking_enabled,
-            bound_tools=tuple(_normalise_tool(tool) for tool in tools),
-            tool_choice=tool_choice,
-            tool_kwargs={key: cast(object, value) for key, value in kwargs.items()},
-            name=self.name,
-            cache=self.cache,
-            verbose=self.verbose,
-            tags=self.tags,
-            metadata=self.metadata,
-            custom_get_token_ids=self.custom_get_token_ids,
-            rate_limiter=self.rate_limiter,
-            disable_streaming=self.disable_streaming,
-            output_version=self.output_version,
-            profile=self.profile,
-        )
-        return cast(Runnable[LanguageModelInput, AIMessage], bound)
-
     def _select_mock_payload(self) -> tuple[dict[str, Any], MockedSource]:
         phase_name = self._predict_phase_name
         if self.mock_strategy.has_golden_case(phase_name):
@@ -150,9 +103,7 @@ class PredictGatewayChatModel(GatewayChatModel):
                 source = "manual"
             return self.mock_strategy.get_manual_override(phase_name), source
 
-        return generate_heuristic_stub(self.mock_strategy.get_phase_schema(phase_name)), (
-            "heuristic_stub"
-        )
+        return generate_heuristic_stub(self.mock_strategy.get_phase_schema(phase_name)), ("heuristic_stub")
 
     def _build_predict_chat_result(
         self,
@@ -195,6 +146,126 @@ class PredictGatewayChatModel(GatewayChatModel):
             "finish_reason": "stop",
             "usage": _zero_usage(),
         }
+
+
+class _PredictGatewayChatModelMeta(type):
+    _resolved_class: type[Any] | None = None
+
+    def __call__(cls, *args: Any, **kwargs: Any) -> Any:
+        real_cls = cls._resolve()
+        if real_cls is None:
+            raise ImportError("graph_agent_gateway concrete module is missing. Please ensure Gateway is configured.")
+        return real_cls(*args, **kwargs)
+
+    def __instancecheck__(cls, instance: object) -> bool:
+        real_cls = cls._resolve(err_on_missing=False)
+        if real_cls is not None:
+            return isinstance(instance, real_cls)
+        return False
+
+    def _resolve(cls, err_on_missing: bool = True) -> type[Any] | None:
+        if cls._resolved_class is None:
+            try:
+                from graph_agent_gateway.gateway_chat_model import GatewayChatModel, ToolSpec, _normalise_tool
+                from graph_agent_gateway.registry.schema import ResolvedRole
+            except ImportError as err:
+                if err_on_missing:
+                    raise ImportError(
+                        "graph_agent_gateway concrete module is missing. Please ensure Gateway is configured."
+                    ) from err
+                return None
+
+            class _RealPredictGatewayChatModel(_PredictGatewayChatModelMixin, GatewayChatModel):  # type: ignore[misc]
+                mock_strategy: BaseMockStrategy
+
+                def __init__(
+                    self,
+                    role_name: str,
+                    resolved_role: ResolvedRole,
+                    *,
+                    mock_strategy: BaseMockStrategy,
+                    max_tokens: int = 4096,
+                    temperature: float = 0.7,
+                    callbacks: Sequence[Callback] = (),
+                    phase_name: str | None = None,
+                    probe_before_call: bool = True,
+                    thinking_enabled: bool | None = None,
+                    **kwargs: Any,
+                ) -> None:
+                    kwargs["mock_strategy"] = mock_strategy
+                    super().__init__(
+                        role_name,
+                        resolved_role,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        callbacks=callbacks,
+                        phase_name=phase_name,
+                        probe_before_call=probe_before_call,
+                        thinking_enabled=thinking_enabled,
+                        **kwargs,
+                    )
+
+                def bind_tools(
+                    self,
+                    tools: Sequence[ToolSpec],
+                    *,
+                    tool_choice: str | None = None,
+                    **kwargs: Any,
+                ) -> Runnable[LanguageModelInput, AIMessage]:
+                    """Keep Predict interception active after LangChain binds phase tools."""
+                    bound = type(self)(
+                        self.role_name,
+                        self.resolved_role,
+                        mock_strategy=self.mock_strategy,
+                        max_tokens=self.max_tokens,
+                        temperature=self.temperature,
+                        callbacks=self.event_callbacks,
+                        phase_name=self.phase_name,
+                        probe_before_call=self.probe_before_call,
+                        thinking_enabled=self.thinking_enabled,
+                        bound_tools=tuple(_normalise_tool(tool) for tool in tools),
+                        tool_choice=tool_choice,
+                        tool_kwargs={key: cast(object, value) for key, value in kwargs.items()},
+                        name=self.name,
+                        cache=self.cache,
+                        verbose=self.verbose,
+                        tags=self.tags,
+                        metadata=self.metadata,
+                        custom_get_token_ids=self.custom_get_token_ids,
+                        rate_limiter=self.rate_limiter,
+                        disable_streaming=self.disable_streaming,
+                        output_version=self.output_version,
+                        profile=self.profile,
+                    )
+                    return cast(Runnable[LanguageModelInput, AIMessage], bound)
+
+            cls._resolved_class = _RealPredictGatewayChatModel
+        return cls._resolved_class
+
+
+class PredictGatewayChatModel(metaclass=_PredictGatewayChatModelMeta):
+    pass
+
+
+PredictGatewayChatModel.__signature__ = Signature(  # type: ignore[attr-defined]
+    parameters=[
+        Parameter("role_name", Parameter.POSITIONAL_OR_KEYWORD, annotation="str"),
+        Parameter("resolved_role", Parameter.POSITIONAL_OR_KEYWORD, annotation="ResolvedRole"),
+        Parameter(
+            "mock_strategy",
+            Parameter.KEYWORD_ONLY,
+            annotation="BaseMockStrategy",
+        ),
+        Parameter("max_tokens", Parameter.KEYWORD_ONLY, default=4096, annotation="int"),
+        Parameter("temperature", Parameter.KEYWORD_ONLY, default=0.7, annotation="float"),
+        Parameter("callbacks", Parameter.KEYWORD_ONLY, default=(), annotation="Sequence[Callback]"),
+        Parameter("phase_name", Parameter.KEYWORD_ONLY, default=None, annotation="str | None"),
+        Parameter("probe_before_call", Parameter.KEYWORD_ONLY, default=True, annotation="bool"),
+        Parameter("thinking_enabled", Parameter.KEYWORD_ONLY, default=None, annotation="bool | None"),
+        Parameter("kwargs", Parameter.VAR_KEYWORD, annotation="Any"),
+    ],
+    return_annotation="None",
+)
 
 
 def _payload_to_content(payload: dict[str, Any]) -> str:

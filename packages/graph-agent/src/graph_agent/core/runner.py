@@ -48,6 +48,12 @@ from graph_agent.callbacks.events import (
     RunEndedEvent,
     RunStartedEvent,
 )
+from graph_agent.core.adapter_contracts import (
+    PredictArtifactRequest,
+    RunArtifactErrorResult,
+    RunArtifactRequest,
+    RunSession,
+)
 from graph_agent.core.checkpointer import resolve_checkpointer
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.exceptions import (
@@ -58,10 +64,12 @@ from graph_agent.core.exceptions import (
     make_error_payload,
 )
 from graph_agent.core.graph_assembler import assemble_graph
+from graph_agent.core.llm_provider import LLMProvider
 from graph_agent.core.local_workspace_resolver import LocalWorkspaceResolver
 from graph_agent.core.result import RunResult, WorkflowMetrics, WorkflowResult
 from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol, require_skill_resolver
 from graph_agent.core.state import BusinessData
+from graph_agent.core.storage_contracts import RunArtifactStore
 from graph_agent.runtime.state import normalize_blackboard_data
 
 logger = logging.getLogger(__name__)
@@ -224,48 +232,6 @@ def predict_skill(  # noqa: C901
 
     compiled = compile_skill(skill_path_obj, skill_resolver=resolver)
 
-    if model_resolver is None:
-        from graph_agent_gateway.registry.schema import (
-            ProviderEndpoint,
-            ProviderRoute,
-            RegistrySnapshot,
-            RoleEntry,
-            RoleRouteEntry,
-        )
-        from graph_agent_gateway.resolver import ModelResolver
-        from pydantic import SecretStr
-
-        roles = {}
-        for phase_name in compiled.manifest.phases:
-            roles[phase_name] = RoleEntry(
-                fallback_chain=[RoleRouteEntry(route_id="mock-endpoint:mock-route")]
-            )
-        roles["graph_agent"] = RoleEntry(
-            fallback_chain=[RoleRouteEntry(route_id="mock-endpoint:mock-route")]
-        )
-
-        snapshot = RegistrySnapshot(
-            provider_endpoints={
-                "mock-endpoint": ProviderEndpoint(
-                    endpoint_id="mock-endpoint",
-                    protocol="openai_compatible",
-                    base_url="http://localhost",
-                    api_key=SecretStr("mock-key"),
-                )
-            },
-            provider_routes={
-                "mock-endpoint:mock-route": ProviderRoute(
-                    route_id="mock-endpoint:mock-route",
-                    endpoint_id="mock-endpoint",
-                    route_slug="mock-route",
-                    provider_model_id="mock-model",
-                    canonical_id="mock-model",
-                    status="verified",
-                )
-            },
-            roles=roles,
-        )
-        model_resolver = ModelResolver(registry_snapshot=snapshot)
 
     # 1. Strategy setup
     strategy = MockStrategy.from_param(mock_llm)
@@ -692,7 +658,360 @@ def _run_skill_dict(
     )
 
 
+_LLM_PROVIDER_UNSET = object()
+
+
+class RawSkillPathError(Exception):
+    def __init__(self, message: str = "raw skill_path is not allowed") -> None:
+        super().__init__(message)
+        self.error_code = "runtime.raw_skill_path"
+
+
+_RUN_CACHE: dict[str, RunSession] = {}
+
+
+def _artifact_run_id(request: RunArtifactRequest | PredictArtifactRequest) -> str:
+    requested = request.execution_context.get("thread_id") or request.execution_context.get("run_id")
+    if isinstance(requested, str) and requested:
+        return requested
+    return f"run-{request.artifact_ref.artifact_id}-{request.idempotency_key}"
+
+
+def _artifact_hash_hex(request: RunArtifactRequest | PredictArtifactRequest) -> str | None:
+    content_hash = request.artifact_ref.content_hash
+    if content_hash.startswith("sha256:"):
+        return content_hash.split(":", 1)[1]
+    return None
+
+
+def _resolve_artifact_root(request: RunArtifactRequest | PredictArtifactRequest) -> Path | None:
+    explicit = request.execution_context.get("artifact_root")
+    if isinstance(explicit, str) and explicit:
+        path = Path(explicit)
+        if (path / "GRAPH.md").is_file():
+            return path
+
+    sha256_val = _artifact_hash_hex(request)
+    workspace_raw = request.execution_context.get("workspace_dir")
+    if not isinstance(workspace_raw, str) or not workspace_raw or sha256_val is None:
+        return None
+
+    workspace_dir = Path(workspace_raw)
+    candidates = (
+        workspace_dir / "ephemeral_run_skills" / sha256_val,
+        workspace_dir.parent / "ephemeral_run_skills" / sha256_val,
+    )
+    for candidate in candidates:
+        if (candidate / "GRAPH.md").is_file():
+            return candidate
+    return None
+
+
+def _resolve_artifact_workspace_dir(request: RunArtifactRequest | PredictArtifactRequest) -> Path | None:
+    workspace_raw = request.execution_context.get("workspace_dir")
+    if isinstance(workspace_raw, str) and workspace_raw:
+        return Path(workspace_raw)
+    return None
+
+
+def _artifact_skill_resolver(
+    artifact_root: Path,
+    skill_resolver: SkillResolverProtocol | None,
+) -> SkillResolverProtocol:
+    if skill_resolver is not None:
+        return skill_resolver
+    return LocalWorkspaceResolver(search_paths=[artifact_root, artifact_root.parent])
+
+
+def _run_compiled_artifact_graph(
+    request: RunArtifactRequest,
+    *,
+    run_id: str,
+    skill_resolver: SkillResolverProtocol | None,
+    model_resolver: Any | None,
+) -> RunResult | RunArtifactErrorResult:
+    artifact_root = _resolve_artifact_root(request)
+    workspace_dir = _resolve_artifact_workspace_dir(request)
+    if artifact_root is None or workspace_dir is None:
+        return RunArtifactErrorResult(
+            error_code="llm.provider_not_configured",
+            error_payload={
+                "error_code": "llm.provider_not_configured",
+                "message": "LLM Provider is not configured",
+                "details": {"artifact_root": str(artifact_root) if artifact_root else None},
+                "retryable": False,
+            },
+            run_id=run_id,
+            retryable=False,
+        )
+
+    event_subscriber = request.execution_context.get("event_subscriber")
+    return run_skill(
+        artifact_root,
+        workspace_dir=workspace_dir,
+        thread_id=run_id,
+        unattended=True,
+        event_subscriber=event_subscriber if callable(event_subscriber) else None,
+        skill_resolver=_artifact_skill_resolver(artifact_root, skill_resolver),
+        model_resolver=model_resolver,
+        **request.inputs,
+    )
+
+
+def _run_compiled_artifact_predict_graph(
+    request: PredictArtifactRequest,
+    *,
+    run_id: str,
+    skill_resolver: SkillResolverProtocol | None,
+    model_resolver: Any | None,
+) -> RunResult | RunArtifactErrorResult:
+    artifact_root = _resolve_artifact_root(request)
+    workspace_dir = _resolve_artifact_workspace_dir(request)
+    if artifact_root is None or workspace_dir is None:
+        return RunArtifactErrorResult(
+            error_code="llm.provider_not_configured",
+            error_payload={
+                "error_code": "llm.provider_not_configured",
+                "message": "LLM Provider is not configured",
+                "details": {"artifact_root": str(artifact_root) if artifact_root else None},
+                "retryable": False,
+            },
+            run_id=run_id,
+            retryable=False,
+        )
+
+    return predict_skill(
+        artifact_root,
+        workspace_dir=workspace_dir,
+        thread_id=run_id,
+        unattended=True,
+        skill_resolver=_artifact_skill_resolver(artifact_root, skill_resolver),
+        model_resolver=model_resolver,
+        mock_llm=request.execution_context.get("mock_llm"),
+        current_hashes=request.execution_context.get("current_hashes") or {},
+        **request.inputs,
+    )
+
+
+def _workflow_result_ref(result: WorkflowResult | RunResult, workspace_dir: Path | None) -> str | None:
+    if workspace_dir is None:
+        return None
+    result_path = workspace_dir / "runs" / result.run_id / "result.json"
+    if result_path.is_file():
+        return f"file://{result_path}"
+    return None
+
+
+def _artifact_not_materialized_error(
+    request: RunArtifactRequest | PredictArtifactRequest,
+    run_id: str,
+) -> RunArtifactErrorResult:
+    return RunArtifactErrorResult(
+        error_code="runtime.artifact_not_materialized",
+        error_payload={
+            "error_code": "runtime.artifact_not_materialized",
+            "message": "Artifact bytes are not materialized for graph execution",
+            "details": {
+                "artifact_id": request.artifact_ref.artifact_id,
+                "content_hash": request.artifact_ref.content_hash,
+            },
+            "retryable": False,
+        },
+        run_id=run_id,
+        retryable=False,
+    )
+
+
+def _execute_run_artifact_outputs(
+    request: RunArtifactRequest,
+    *,
+    run_id: str,
+    artifact_executor: Callable[[RunArtifactRequest], dict[str, Any]] | None,
+    skill_resolver: SkillResolverProtocol | None,
+    model_resolver: Any | None,
+) -> dict[str, Any] | RunResult | RunArtifactErrorResult:
+    if artifact_executor is not None:
+        return artifact_executor(request)
+
+    artifact_root = _resolve_artifact_root(request)
+    if artifact_root is not None:
+        return _run_compiled_artifact_graph(
+            request,
+            run_id=run_id,
+            skill_resolver=skill_resolver,
+            model_resolver=model_resolver,
+        )
+
+    return _artifact_not_materialized_error(request, run_id)
+
+
+def _run_artifact_store_result(
+    *,
+    run_artifact_store: RunArtifactStore,
+    run_id: str,
+    request: RunArtifactRequest,
+    outputs: Any,
+) -> str:
+    metadata = {"artifact_id": request.artifact_ref.artifact_id}
+    run_artifact_store.begin_run(run_id, metadata)
+
+    if hasattr(outputs, "model_dump"):
+        serializable_outputs = outputs.model_dump(mode="json")
+    else:
+        serializable_outputs = outputs
+    data_bytes = json.dumps(serializable_outputs, default=str).encode("utf-8")
+    refs = run_artifact_store.put_batch(run_id, {"outputs.json": data_bytes})
+
+    run_artifact_store.seal_run(run_id)
+
+    if isinstance(refs, dict):
+        ref_val = next(iter(refs.values()))
+        return ref_val.bytes_ref
+    if isinstance(refs, list) and refs:
+        return refs[0].bytes_ref
+    return f"bytes://{run_id}/outputs.json"
+
+
+def run_artifact(
+    request: RunArtifactRequest | None = None,
+    *,
+    artifact_executor: Callable[[RunArtifactRequest], dict[str, Any]] | None = None,
+    run_artifact_store: RunArtifactStore | None = None,
+    llm_provider: LLMProvider | None | object = _LLM_PROVIDER_UNSET,
+    skill_resolver: SkillResolverProtocol | None = None,
+    model_resolver: Any | None = None,
+    **legacy_kwargs: Any,
+) -> RunSession | RunArtifactErrorResult:
+    if "skill_path" in legacy_kwargs:
+        raise RawSkillPathError()
+
+    if request is None or not isinstance(request, RunArtifactRequest):
+        raise TypeError("request must be an instance of RunArtifactRequest")
+
+    run_id = _artifact_run_id(request)
+
+    if request.idempotency_key in _RUN_CACHE:
+        return _RUN_CACHE[request.idempotency_key]
+
+    workspace_dir = _resolve_artifact_workspace_dir(request)
+    try:
+        outputs = _execute_run_artifact_outputs(
+            request,
+            run_id=run_id,
+            artifact_executor=artifact_executor,
+            skill_resolver=skill_resolver,
+            model_resolver=model_resolver,
+        )
+        if isinstance(outputs, RunArtifactErrorResult):
+            return outputs
+    except Exception as exc:
+        error_code = getattr(exc, "error_code", "llm.provider_invoke_failed")
+        message = str(exc)
+        details = getattr(exc, "details", {})
+        retryable = getattr(exc, "retryable", False)
+
+        return RunArtifactErrorResult(
+            error_code=error_code,
+            error_payload={
+                "error_code": error_code,
+                "message": message,
+                "details": details,
+                "retryable": retryable,
+            },
+            run_id=run_id,
+            retryable=retryable,
+        )
+
+    result_ref = _workflow_result_ref(outputs, workspace_dir) if isinstance(outputs, RunResult) else None
+    if run_artifact_store is not None:
+        result_ref = _run_artifact_store_result(
+            run_artifact_store=run_artifact_store,
+            run_id=run_id,
+            request=request,
+            outputs=outputs,
+        )
+
+    session = RunSession(
+        run_id=run_id,
+        event_stream_ref=f"stream://{run_id}",
+        result_ref=result_ref,
+        status_ref=f"state://{run_id}/status",
+    )
+    _RUN_CACHE[request.idempotency_key] = session
+    return session
+
+
+def predict_artifact(
+    request: PredictArtifactRequest | RunArtifactRequest,
+    *,
+    artifact_executor: Callable[[RunArtifactRequest], dict[str, Any]] | None = None,
+    run_artifact_store: RunArtifactStore | None = None,
+    llm_provider: LLMProvider | None | object = _LLM_PROVIDER_UNSET,
+    skill_resolver: SkillResolverProtocol | None = None,
+    model_resolver: Any | None = None,
+) -> RunSession | RunArtifactErrorResult:
+    from graph_agent.core.adapter_contracts import PredictArtifactRequest, RunArtifactRequest
+
+    if not isinstance(request, (PredictArtifactRequest, RunArtifactRequest)):
+        raise TypeError("request must be an instance of PredictArtifactRequest or RunArtifactRequest")
+
+    if isinstance(request, PredictArtifactRequest) and _resolve_artifact_root(request) is not None:
+        run_id = _artifact_run_id(request)
+        if request.idempotency_key in _RUN_CACHE:
+            return _RUN_CACHE[request.idempotency_key]
+        try:
+            result = _run_compiled_artifact_predict_graph(
+                request,
+                run_id=run_id,
+                skill_resolver=skill_resolver,
+                model_resolver=model_resolver,
+            )
+            if isinstance(result, RunArtifactErrorResult):
+                return result
+        except Exception as exc:
+            error_code = getattr(exc, "error_code", "llm.provider_invoke_failed")
+            message = str(exc)
+            details = getattr(exc, "details", {})
+            retryable = getattr(exc, "retryable", False)
+            return RunArtifactErrorResult(
+                error_code=error_code,
+                error_payload={
+                    "error_code": error_code,
+                    "message": message,
+                    "details": details,
+                    "retryable": retryable,
+                },
+                run_id=run_id,
+                retryable=retryable,
+            )
+        workspace_dir = _resolve_artifact_workspace_dir(request)
+        session = RunSession(
+            run_id=run_id,
+            event_stream_ref=f"stream://{run_id}",
+            result_ref=_workflow_result_ref(result, workspace_dir),
+            status_ref=f"state://{run_id}/status",
+        )
+        _RUN_CACHE[request.idempotency_key] = session
+        return session
+
+    run_request = RunArtifactRequest(
+        artifact_ref=request.artifact_ref,
+        inputs=request.inputs,
+        execution_context=request.execution_context,
+        idempotency_key=request.idempotency_key,
+    )
+    return run_artifact(
+        run_request,
+        artifact_executor=artifact_executor,
+        run_artifact_store=run_artifact_store,
+        llm_provider=llm_provider,
+        skill_resolver=skill_resolver,
+        model_resolver=model_resolver,
+    )
+
+
 def _validate_workspace_dir(workspace_dir: Path) -> Path:
+
     workspace_path = Path(workspace_dir)
     if not workspace_path.is_absolute():
         raise ValueError("workspace_dir must be an absolute path")

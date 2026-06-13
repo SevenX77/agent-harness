@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Self
@@ -231,6 +232,7 @@ def test_stream_query_falls_back_to_second_copilot_route_when_first_route_fails(
         ),
     ]
     created_keys: list[str] = []
+    fallback_payloads: list[dict[str, object]] = []
     secondary = FakeClient(
         [AssistantMessage(content=[TextBlock(text="fallback hello")], model="claude")]
     )
@@ -249,6 +251,23 @@ def test_stream_query_falls_back_to_second_copilot_route_when_first_route_fails(
     )
     monkeypatch.setattr(copilot_service, "_resolve_copilot_route", lambda _override: routes[0])
 
+    class FakeGatewayAdapter:
+        def decide_fallback(self, payload: dict[str, object]) -> dict[str, object]:
+            fallback_payloads.append(payload)
+            return {
+                "decision": "switch_route",
+                "route_id": "secondary:claude",
+                "retry_same": False,
+                "give_up": False,
+            }
+
+    monkeypatch.setattr(
+        copilot_service,
+        "_gateway_adapter_factory",
+        lambda: FakeGatewayAdapter(),
+        raising=False,
+    )
+
     def session_factory(options: ClaudeAgentOptions) -> FakeClient:
         api_key = options.env["ANTHROPIC_API_KEY"]
         created_keys.append(api_key)
@@ -263,6 +282,12 @@ def test_stream_query_falls_back_to_second_copilot_route_when_first_route_fails(
     )
 
     assert created_keys == ["first-secret", "second-secret"]
+    assert len(fallback_payloads) == 1
+    assert fallback_payloads[0]["current_route_id"] == "primary:claude"
+    assert fallback_payloads[0]["fallback_chain"] == [
+        {"route_id": "primary:claude"},
+        {"route_id": "secondary:claude"},
+    ]
     assert secondary.options is not None
     assert secondary.options.env["ANTHROPIC_BASE_URL"] == "https://secondary.test"
     assert events == [CopilotEventText(content="fallback hello"), CopilotEventDone()]
@@ -343,6 +368,39 @@ def test_stream_query_reports_clear_error_after_all_copilot_routes_fail(
     assert len(events) == 1
     assert isinstance(events[0], CopilotEventError)
     assert "all configured Copilot providers failed" in events[0].message
+
+
+def test_next_copilot_route_logs_gateway_fallback_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    route = _resolved_route(route_id="primary:claude", endpoint_id="primary")
+
+    class FailingGatewayAdapter:
+        def decide_fallback(self, payload: dict[str, object]) -> dict[str, object]:
+            del payload
+            raise RuntimeError("gateway adapter unavailable")
+
+    monkeypatch.setattr(
+        copilot_service,
+        "_gateway_adapter_factory",
+        lambda: FailingGatewayAdapter(),
+        raising=False,
+    )
+    caplog.set_level(logging.WARNING, logger="app.services.copilot")
+
+    next_route = copilot_service._next_copilot_route(
+        routes=[route],
+        route_by_id={route.route_id: route},
+        current_route=route,
+        failed_route_ids=[],
+        retry_counts={},
+        error=TimeoutError("provider timed out"),
+    )
+
+    assert next_route is None
+    assert "Gateway fallback decision failed" in caplog.text
+    assert "primary:claude" in caplog.text
 
 
 def test_stream_query_uses_model_override_when_provided(

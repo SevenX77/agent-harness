@@ -14,7 +14,8 @@ from graph_agent.callbacks.events import (
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.graph_assembler import assemble_graph
 from graph_agent.core.runner import run_skill
-from tests.ws_e4_runtime_skills import (
+
+from ..ws_e4_runtime_skills import (
     write_batch_iterate_skill,
     write_file_input_skill,
     write_loop_accumulate_skill,

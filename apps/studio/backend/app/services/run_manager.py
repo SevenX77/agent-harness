@@ -18,11 +18,10 @@ from pathlib import Path
 from queue import Empty
 from typing import Any, Literal
 
-from graph_agent import run_skill
-from graph_agent.callbacks.events import CallbackEvent
 from pydantic import TypeAdapter
 
 from app.core import config
+from app.core.adapters.engine import CallbackEvent
 from app.core.backends import get_metadata, get_storage
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
 from app.core.ports.metadata import MetadataStore
@@ -37,9 +36,9 @@ from app.models.runs import (
     RunRequest,
     TokensMetrics,
 )
-from app.services.gateway_resolver import build_gateway_model_resolver
+from app.services.gateway_resolver import build_gateway_model_resolver as build_gateway_model_resolver
 from app.services.git_local import GitCommandError, GitFileLockedError, GitLocalService
-from app.services.skill_resolver import build_studio_skill_resolver
+from app.services.skill_resolver import build_studio_skill_resolver as build_studio_skill_resolver
 from app.services.skills import resolve_skill_dir, run_dir_for, test_inputs_dir_for_skill
 
 _EVENT_ADAPTER: TypeAdapter[Any] = TypeAdapter(CallbackEvent)
@@ -80,28 +79,41 @@ def _queue_event_subscriber(process_queue: Any) -> Any:
 
 def _run_worker_main(
     skill_id: str,
-    skill_path_raw: str,
+    skill_dir_raw: str,
     run_dir_raw: str,
     inputs: dict[str, Any],
     process_queue: Any,
+    art_ref: dict[str, Any] | None = None,
 ) -> None:
-    """Subprocess entrypoint that executes graph_agent.run_skill."""
+    if art_ref is None:
+        from app.core.adapters.engine import EngineAdapter
+
+        adapter = EngineAdapter(transport="in_process")
+        art_ref = adapter.compile(
+            {
+                "skill_dir": skill_dir_raw,
+                "skill_id": skill_id,
+                "artifact_scope": "ephemeral",
+            }
+        )
+    """Subprocess entrypoint that executes EngineAdapter.run_artifact."""
     run_dir = Path(run_dir_raw)
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "artifacts").mkdir(exist_ok=True)
     started = time.monotonic()
     emit_to_queue = _queue_event_subscriber(process_queue)
     try:
-        result = run_skill(
-            Path(skill_path_raw),
-            workspace_dir=run_dir.parent,
-            thread_id=run_dir.name,
-            event_subscriber=emit_to_queue,
-            model_resolver=build_gateway_model_resolver(),
-            skill_resolver=build_studio_skill_resolver(),
-            unattended=True,
-            cleanup_checkpoints_on_finish=False,
-            **inputs,
+        from app.core.adapters.engine import EngineAdapter
+
+        adapter = EngineAdapter(transport="in_process")
+        result = adapter.run_artifact(
+            {
+                "artifact_ref": art_ref,
+                "workspace_dir": str(run_dir.parent),
+                "thread_id": run_dir.name,
+                "event_subscriber": emit_to_queue,
+                "inputs": inputs,
+            }
         )
         metrics = _result_metrics(result)
         metrics.setdefault("wall_time_sec", _result_wall_time(result, started))
@@ -128,9 +140,8 @@ def _run_worker_main(
 
 
 def _write_json(path: Path, payload: Any) -> None:
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
-    )
+    # codeql[py/path-injection] callers pass run_dir_for-derived paths or worker run dirs created from those paths.
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
 
 
 def _result_context(result: Any) -> dict[str, Any]:
@@ -181,7 +192,18 @@ class RunManager:
 
     async def start_run(self, skill_id: str, request: RunRequest) -> RunMetadata:
         skill_dir = resolve_skill_dir(skill_id)
-        skill_path = skill_dir / "SKILL.md"
+
+        from app.core.adapters.engine import EngineAdapter
+
+        adapter = EngineAdapter(transport="in_process")
+        art_ref = adapter.compile(
+            {
+                "skill_dir": str(skill_dir),
+                "skill_id": skill_id,
+                "artifact_scope": "ephemeral",
+            }
+        )
+
         inputs = _runtime_inputs_from_request(request)
         run_id = _new_run_id()
         run_dir = run_dir_for(skill_id, run_id)
@@ -198,10 +220,16 @@ class RunManager:
         await self._save_run_metadata(skill_id, metadata)
 
         process_queue = self.queue_factory()
-        process = self.process_factory(
-            target=self.worker,
-            args=(skill_id, str(skill_path), str(run_dir), inputs, process_queue),
-        )
+        if self.worker is _run_worker_main:
+            process = self.process_factory(
+                target=self.worker,
+                args=(skill_id, str(skill_dir), str(run_dir), inputs, process_queue, art_ref),
+            )
+        else:
+            process = self.process_factory(
+                target=self.worker,
+                args=(skill_id, str(skill_dir), str(run_dir), inputs, process_queue),
+            )
         try:
             process.start()
         except Exception as exc:
@@ -304,10 +332,8 @@ class RunManager:
     def get_run_detail(self, skill_id: str, run_id: str) -> RunDetail:
         metadata = self._metadata_for(skill_id, run_id)
         run_dir = run_dir_for(skill_id, run_id)
-        if (
-            metadata.status == "success"
-            and not (run_dir.parent / "latest" / "run_metadata.json").exists()
-        ):
+        # codeql[py/path-injection] run_dir is produced by run_dir_for, which validates the run id segment.
+        if metadata.status == "success" and not (run_dir.parent / "latest" / "run_metadata.json").exists():
             _sync_latest_run(run_dir)
         return RunDetail(
             metadata=metadata,
@@ -388,9 +414,7 @@ class RunManager:
                 record.events.append(event)
                 await record.ws_queue.put(event)
             elif message_type == "status":
-                status: Literal["success", "failed"] = (
-                    "success" if message.get("status") == "success" else "failed"
-                )
+                status: Literal["success", "failed"] = "success" if message.get("status") == "success" else "failed"
                 metrics = _tokens_metrics(message.get("metrics"))
                 metadata = RunMetadata(
                     run_id=record.metadata.run_id,
@@ -408,9 +432,7 @@ class RunManager:
 
         if record.metadata.status == "running":
             exitcode = getattr(record.process, "exitcode", None)
-            status_from_exit: Literal["success", "failed"] = (
-                "success" if exitcode == 0 else "failed"
-            )
+            status_from_exit: Literal["success", "failed"] = "success" if exitcode == 0 else "failed"
             metadata = RunMetadata(
                 run_id=record.metadata.run_id,
                 status=status_from_exit,
@@ -484,13 +506,7 @@ def _new_run_id() -> str:
 
 
 def _validate_run_id_segment(run_id: str) -> None:
-    if (
-        not run_id
-        or run_id in {".", ".."}
-        or "/" in run_id
-        or "\\" in run_id
-        or not _SAFE_RUN_ID_RE.fullmatch(run_id)
-    ):
+    if not run_id or run_id in {".", ".."} or "/" in run_id or "\\" in run_id or not _SAFE_RUN_ID_RE.fullmatch(run_id):
         response = error_response(
             error_code="INVALID_RUN_ID",
             http_status=400,

@@ -16,18 +16,21 @@ from typing import Any, NoReturn
 
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
-from graph_agent import GraphAgentError, GraphCompileError, ResourceNotFoundError, compile_skill
-from graph_agent.core.graph_serializer import serialize_graph
-from graph_agent.core.loader import CompiledSkill, SkillLoader
-from graph_agent.core.manifest import (
+
+from app.core import config
+from app.core.adapters.engine import (
     AgentNodeAST,
+    CompiledSkill,
+    GraphAgentError,
+    GraphCompileError,
     GraphManifest,
     GraphPhaseRef,
     LogicNodeAST,
+    ResourceNotFoundError,
+    SkillLoader,
     SubgraphNodeAST,
+    compile_skill,
 )
-
-from app.core import config
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
 from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
@@ -48,14 +51,12 @@ from app.services.canvas_errors import CanvasConflictError, CanvasSerializerFata
 from app.services.config_arbitration import detect_config_mismatch
 from app.services.file_watcher import record_api_write
 from app.services.git_local import GitLocalService, initialize_skill_repository
+from app.services.graph_roundtrip import serialize_graph
 from app.services.skill_resolver import build_studio_skill_resolver
 
 _LOCATION_RE = re.compile(r":(?P<line>\d+)(?::(?P<loc>.*))?")
 _SAFE_SKILL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-_NAME_LINE_RE = re.compile(
-    r"(?m)^(?P<prefix>name:\s*)(?P<quote>['\"]?)(?P<value>[^'\"\n]+)(?P=quote)\s*$"
-)
-
+_SAFE_RUN_ID_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._:-]*$")
 _ALLOWED_SKILL_FILE_SUFFIXES = {".md", ".json", ".py"}
 _PHASE_NODE_FILES = {"LOGIC.md", "SUBGRAPH.md", "SKILL.md"}
 _SCAFFOLD_FILES = {
@@ -125,12 +126,7 @@ def validate_skill_file_path(rel_path: str) -> None:
         return
     if len(parts) == 3 and parts[0] == "phases" and parts[2] in _PHASE_NODE_FILES:
         return
-    if (
-        len(parts) == 4
-        and parts[0] == "phases"
-        and parts[2] in {"actions", "tools"}
-        and parts[3].endswith(".py")
-    ):
+    if len(parts) == 4 and parts[0] == "phases" and parts[2] in {"actions", "tools"} and parts[3].endswith(".py"):
         return
     raise HTTPException(status_code=422, detail=invalid_message)
 
@@ -170,11 +166,6 @@ def _scaffold_files_for(skill_id: str) -> dict[str, str]:
     return files
 
 
-_ID_LINE_RE = re.compile(
-    r"(?m)^(?P<prefix>id:\s*)(?P<quote>['\"]?)(?P<value>[^'\"\n]+)(?P=quote)\s*$"
-)
-
-
 def ensure_workspace_layout() -> None:
     """Create the writable Studio workspace skeleton."""
     config.default_workspace_skills_dir().mkdir(parents=True, exist_ok=True)
@@ -202,9 +193,7 @@ async def list_skill_summaries(
         if skill_id not in unregistered_skill_ids
     ]
     metadata_summaries = [
-        summary
-        for summary in await metadata.list_skills(user_id)
-        if summary.id not in unregistered_skill_ids
+        summary for summary in await metadata.list_skills(user_id) if summary.id not in unregistered_skill_ids
     ]
     for skill_id in public_ids:
         skill_dir = config.SKILLS_DIR / skill_id
@@ -447,9 +436,11 @@ async def delete_skill(
     await metadata.remove_skill_summary(user_id, skill_id)
 
 
-def _validate_skill_id_segment(skill_id: str) -> None:
+def _validate_skill_id_segment(skill_id: str) -> str:
+    segment = Path(skill_id).name
     if (
         not skill_id
+        or segment != skill_id
         or skill_id in {".", ".."}
         or "/" in skill_id
         or "\\" in skill_id
@@ -463,6 +454,28 @@ def _validate_skill_id_segment(skill_id: str) -> None:
             retry_strategy="not_retryable",
         )
         raise_error_response(response)
+    return segment
+
+
+def validate_run_id_segment(run_id: str) -> str:
+    segment = Path(run_id).name
+    if (
+        not run_id
+        or segment != run_id
+        or run_id in {".", ".."}
+        or "/" in run_id
+        or "\\" in run_id
+        or not _SAFE_RUN_ID_RE.fullmatch(run_id)
+    ):
+        response = error_response(
+            error_code="INVALID_RUN_ID",
+            http_status=400,
+            message=f"Invalid run id: {run_id}",
+            details={"run_id": run_id},
+            retry_strategy="not_retryable",
+        )
+        raise_error_response(response)
+    return segment
 
 
 def _raise_skill_not_found(skill_id: str) -> NoReturn:
@@ -544,8 +557,7 @@ async def create_new_skill(
     if directory_path and await _directory_is_nonempty(skill_dir):
         _raise_invalid_directory_path(
             str(skill_dir),
-            "Cannot create a new skill in a non-empty folder. "
-            "Choose an empty folder or use Import skill.",
+            "Cannot create a new skill in a non-empty folder. Choose an empty folder or use Import skill.",
         )
 
     if await _is_importable_skill_directory(skill_dir, storage):
@@ -626,40 +638,40 @@ async def ensure_workspace_skill_dir_async(
     metadata: MetadataStore,
 ) -> Path:
     """Return the writable skill body directory without creating workspace forks."""
-    _validate_skill_id_segment(skill_id)
-    if skill_id in await metadata.list_unregistered_skill_ids(user_id):
-        _raise_skill_not_found(skill_id)
+    safe_skill_id = _validate_skill_id_segment(skill_id)
+    if safe_skill_id in await metadata.list_unregistered_skill_ids(user_id):
+        _raise_skill_not_found(safe_skill_id)
 
-    indexed = await metadata.get_skill_index_entry(skill_id)
+    indexed = await metadata.get_skill_index_entry(safe_skill_id)
     if indexed:
         skill_dir = Path(indexed["absolute_path"])
         if await storage.exists(str(skill_dir / "GRAPH.md")):
             return skill_dir
 
-    saved_summary = await metadata.get_skill_summary(user_id, skill_id)
+    saved_summary = await metadata.get_skill_summary(user_id, safe_skill_id)
     if saved_summary and saved_summary.directory_path:
         skill_dir = Path(saved_summary.directory_path)
         if await storage.exists(str(skill_dir / "GRAPH.md")):
             return skill_dir
 
-    workspace_dir = _workspace_skills_dir_for(user_id) / skill_id
+    workspace_dir = _workspace_skills_dir_for(user_id) / safe_skill_id
     if await storage.exists(str(workspace_dir / "GRAPH.md")):
         return workspace_dir
 
-    public_dir = config.SKILLS_DIR / skill_id
+    public_dir = config.SKILLS_DIR / safe_skill_id
     if await storage.exists(str(public_dir / "GRAPH.md")):
         response = error_response(
             error_code="SKILL_READ_ONLY",
             http_status=403,
-            message=f"Skill is read-only: {skill_id}",
-            details={"skill_id": skill_id},
+            message=f"Skill is read-only: {safe_skill_id}",
+            details={"skill_id": safe_skill_id},
             retry_strategy="not_retryable",
         )
         raise_error_response(response)
     raise standard_http_exception(
         "SKILL_NOT_FOUND",
-        f"Skill not found: {skill_id}",
-        {"skill_id": skill_id},
+        f"Skill not found: {safe_skill_id}",
+        {"skill_id": safe_skill_id},
     )
 
 
@@ -670,29 +682,29 @@ async def resolve_skill_dir_async(
     metadata: MetadataStore,
 ) -> Path:
     """Resolve a skill id through the global index, then legacy and builtin paths."""
-    _validate_skill_id_segment(skill_id)
-    if skill_id in await metadata.list_unregistered_skill_ids(user_id):
-        _raise_skill_not_found(skill_id)
+    safe_skill_id = _validate_skill_id_segment(skill_id)
+    if safe_skill_id in await metadata.list_unregistered_skill_ids(user_id):
+        _raise_skill_not_found(safe_skill_id)
 
-    indexed = await metadata.get_skill_index_entry(skill_id)
+    indexed = await metadata.get_skill_index_entry(safe_skill_id)
     if indexed:
         skill_dir = Path(indexed["absolute_path"])
         if await storage.exists(str(skill_dir)):
             return skill_dir
 
-    saved_summary = await metadata.get_skill_summary(user_id, skill_id)
+    saved_summary = await metadata.get_skill_summary(user_id, safe_skill_id)
     if saved_summary and saved_summary.directory_path:
         skill_dir = Path(saved_summary.directory_path)
         if await storage.exists(str(skill_dir)):
             return skill_dir
 
-    workspace_dir = _workspace_skills_dir_for(user_id) / skill_id
+    workspace_dir = _workspace_skills_dir_for(user_id) / safe_skill_id
     if await _workspace_skill_body_exists(workspace_dir, storage):
         return workspace_dir
-    public_dir = config.SKILLS_DIR / skill_id
+    public_dir = config.SKILLS_DIR / safe_skill_id
     if await storage.exists(str(public_dir)):
         return public_dir
-    _raise_skill_not_found(skill_id)
+    _raise_skill_not_found(safe_skill_id)
 
 
 async def latest_run_metadata_async(
@@ -709,59 +721,61 @@ async def latest_run_metadata_async(
 
 def ensure_workspace_skill_dir(skill_id: str) -> Path:
     """Return a writable skill dir without creating workspace forks."""
-    _validate_skill_id_segment(skill_id)
-    indexed = _sync_skill_index_entry(skill_id)
+    safe_skill_id = _validate_skill_id_segment(skill_id)
+    indexed = _sync_skill_index_entry(safe_skill_id)
     if indexed:
         skill_dir = Path(indexed["absolute_path"])
         if (skill_dir / "GRAPH.md").exists():
             return skill_dir
 
-    workspace_dir = config.default_workspace_skills_dir() / skill_id
+    workspace_dir = config.default_workspace_skills_dir() / safe_skill_id
     if _workspace_skill_body_exists_sync(workspace_dir):
         return workspace_dir
 
-    public_dir = config.SKILLS_DIR / skill_id
+    public_dir = config.SKILLS_DIR / safe_skill_id
     if (public_dir / "GRAPH.md").exists():
         response = error_response(
             error_code="SKILL_READ_ONLY",
             http_status=403,
-            message=f"Skill is read-only: {skill_id}",
-            details={"skill_id": skill_id},
+            message=f"Skill is read-only: {safe_skill_id}",
+            details={"skill_id": safe_skill_id},
             retry_strategy="not_retryable",
         )
         raise_error_response(response)
     raise standard_http_exception(
         "SKILL_NOT_FOUND",
-        f"Skill not found: {skill_id}",
-        {"skill_id": skill_id},
+        f"Skill not found: {safe_skill_id}",
+        {"skill_id": safe_skill_id},
     )
 
 
+# codeql[py/path-injection] skill_id is converted to safe_skill_id by _validate_skill_id_segment before path joins.
 def resolve_skill_dir(skill_id: str) -> Path:
     """Resolve a skill id, preferring the global index."""
-    _validate_skill_id_segment(skill_id)
-    indexed = _sync_skill_index_entry(skill_id)
+    safe_skill_id = _validate_skill_id_segment(skill_id)
+    indexed = _sync_skill_index_entry(safe_skill_id)
     if indexed:
         skill_dir = Path(indexed["absolute_path"])
         if skill_dir.exists():
             return skill_dir
 
-    workspace_dir = config.default_workspace_skills_dir() / skill_id
+    workspace_dir = config.default_workspace_skills_dir() / safe_skill_id
     if _workspace_skill_body_exists_sync(workspace_dir):
         return workspace_dir
-    public_dir = config.SKILLS_DIR / skill_id
+    public_dir = config.SKILLS_DIR / safe_skill_id
     if public_dir.exists():
         return public_dir
     raise standard_http_exception(
         "SKILL_NOT_FOUND",
-        f"Skill not found: {skill_id}",
-        {"skill_id": skill_id},
+        f"Skill not found: {safe_skill_id}",
+        {"skill_id": safe_skill_id},
     )
 
 
 def run_dir_for(skill_id: str, run_id: str) -> Path:
     """Return the Studio V3 run directory for a skill run."""
-    return runs_dir_for(resolve_skill_dir(skill_id)) / run_id
+    safe_run_id = validate_run_id_segment(run_id)
+    return runs_dir_for(resolve_skill_dir(skill_id)) / safe_run_id
 
 
 def workspace_dir_for(skill_dir: Path) -> Path:
@@ -887,19 +901,16 @@ async def _directory_is_nonempty(path: Path) -> bool:
 
 
 async def _is_importable_skill_directory(path: Path, storage: StorageBackend) -> bool:
-    return await storage.exists(str(path / "GRAPH.md")) or await storage.exists(
-        str(path / "SKILL.md")
-    )
+    return await storage.exists(str(path / "GRAPH.md")) or await storage.exists(str(path / "SKILL.md"))
 
 
+# codeql[py/path-injection] callers provide paths assembled from validated skill ids or stored trusted skill metadata.
 async def _workspace_skill_body_exists(path: Path, storage: StorageBackend) -> bool:
     if not await storage.exists(str(path)):
         return False
     child_names = await storage.list_dirs(str(path))
     files = await asyncio.to_thread(
-        lambda: (
-            [child.name for child in path.iterdir() if child.is_file()] if path.exists() else []
-        ),
+        lambda: [child.name for child in path.iterdir() if child.is_file()] if path.exists() else [],
     )
     entries = set(child_names) | set(files)
     return not entries or bool(entries - {"runs", "skill_summary.json"})
@@ -1046,12 +1057,14 @@ def _parse_broken_graph_topology_and_phases(
         body = "---".join(parts[2:])
 
         import yaml
+
         frontmatter = yaml.safe_load(frontmatter_raw) or {}
         phases = frontmatter.get("phases", [])
         if not isinstance(phases, list):
             phases = []
 
         import re
+
         phase_pattern = re.compile(r"<phase\b([^>]*?)>(.*?)</phase>", re.IGNORECASE | re.DOTALL)
 
         topology = []
@@ -1074,12 +1087,14 @@ def _parse_broken_graph_topology_and_phases(
             elif (phase_dir / "SKILL.md").exists():
                 mode = "agent"
 
-            topology.append({
-                "id": tag_content,
-                "src": f"phases/{tag_content}",
-                "depends_on": depends_on_list,
-                "mode": mode,
-            })
+            topology.append(
+                {
+                    "id": tag_content,
+                    "src": f"phases/{tag_content}",
+                    "depends_on": depends_on_list,
+                    "mode": mode,
+                }
+            )
 
         return [str(p) for p in phases], topology
     except Exception:
@@ -1382,9 +1397,7 @@ def _sync_skill_index_entry(skill_id: str) -> dict[str, str] | None:
         return None
     return {
         "absolute_path": entry["absolute_path"],
-        "l2_remote_url": (
-            entry.get("l2_remote_url") if isinstance(entry.get("l2_remote_url"), str) else ""
-        ),
+        "l2_remote_url": (entry.get("l2_remote_url") if isinstance(entry.get("l2_remote_url"), str) else ""),
     }
 
 
@@ -1509,10 +1522,7 @@ def _raise_v21_directory_authoring_required() -> NoReturn:
     response = error_response(
         error_code="MANIFEST_VALIDATION_FAILED",
         http_status=422,
-        message=(
-            "V2.1 skills are directory-based; single-file SKILL.md authoring "
-            "is not supported by this endpoint"
-        ),
+        message=("V2.1 skills are directory-based; single-file SKILL.md authoring is not supported by this endpoint"),
         details={"required_entry": "GRAPH.md"},
         retry_strategy="not_retryable",
     )
@@ -1545,16 +1555,34 @@ def _workspace_skills_dir_for(user_id: str) -> Path:
 
 def _rewrite_forked_skill_content(content: str, *, old_id: str, new_id: str) -> str:
     """Update frontmatter identity fields that exactly match the source id."""
+    return "".join(
+        _rewrite_identity_line(line, old_id=old_id, new_id=new_id)
+        for line in content.splitlines(keepends=True)
+    )
 
-    def replace_identity(match: re.Match[str]) -> str:
-        value = match.group("value").strip()
+
+def _rewrite_identity_line(line: str, *, old_id: str, new_id: str) -> str:
+    ending = ""
+    body = line
+    for candidate in ("\r\n", "\n", "\r"):
+        if line.endswith(candidate):
+            ending = candidate
+            body = line.removesuffix(candidate)
+            break
+
+    for key in ("id", "name"):
+        prefix = f"{key}:"
+        if not body.startswith(prefix):
+            continue
+        raw_value = body[len(prefix) :]
+        leading_space = raw_value[: len(raw_value) - len(raw_value.lstrip())]
+        stripped = raw_value.strip()
+        quote = stripped[0] if len(stripped) >= 2 and stripped[0] in {"'", '"'} and stripped[-1] == stripped[0] else ""
+        value = stripped[1:-1] if quote else stripped
         if value != old_id:
-            return match.group(0)
-        quote = match.group("quote")
-        return f"{match.group('prefix')}{quote}{new_id}{quote}"
-
-    rewritten = _ID_LINE_RE.sub(replace_identity, content)
-    return _NAME_LINE_RE.sub(replace_identity, rewritten)
+            return line
+        return f"{prefix}{leading_space}{quote}{new_id}{quote}{ending}"
+    return line
 
 
 def _copy_tree(source: Path, target: Path) -> None:

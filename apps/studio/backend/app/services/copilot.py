@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 import inspect
 import json
+import logging
 import secrets
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
@@ -34,12 +35,13 @@ from claude_agent_sdk.types import (
     ToolResultBlock,
     ToolUseBlock,
 )
-from graph_agent_gateway.registry.contracts import CredentialProviderProtocol
-from graph_agent_gateway.registry.credentials import EndpointCredentialProvider
-from graph_agent_gateway.registry.schema import ResolvedRoute
-from graph_agent_gateway.resolver import ModelResolver
 from pydantic import SecretStr
 
+from app.core.adapters.gateway import (
+    CredentialProviderProtocol,
+    GatewayAdapter,
+    ResolvedRoute,
+)
 from app.models.copilot import (
     CopilotEvent,
     CopilotEventDone,
@@ -49,12 +51,9 @@ from app.models.copilot import (
     CopilotEventToolUseStart,
     CopilotToolName,
 )
-from app.models.llm_config import RolesData
-from app.services.llm_credentials import load_credentials
-from app.services.llm_roles import load_roles_file
-from app.services.llm_roles import roles_path as default_roles_path
 
 SessionKey = tuple[str, str, str]
+logger = logging.getLogger(__name__)
 
 MAX_REFERENCE_BYTES = 5 * 1024
 _BODY_REFERENCE_CHARS = 300
@@ -93,6 +92,13 @@ _view_context_lock = asyncio.Lock()
 # keeps the derived api_key hash unpredictable (S2053).
 _SESSION_KEY_SALT = secrets.token_bytes(16)
 _SESSION_KEY_ITERATIONS = 100_000
+
+
+def _default_gateway_adapter_factory() -> GatewayAdapter:
+    return GatewayAdapter(transport="in_process")
+
+
+_gateway_adapter_factory: Callable[[], GatewayAdapter] = _default_gateway_adapter_factory
 
 
 def make_session_key(
@@ -198,9 +204,7 @@ def build_system_prompt(skill_id: str) -> str:
         indent=2,
         sort_keys=True,
     )
-    return (
-        f"{BASE_SYSTEM_PROMPT_TEMPLATE}\n\n## 当前 View: {view_context.view}\n{formatted_context}"
-    )
+    return f"{BASE_SYSTEM_PROMPT_TEMPLATE}\n\n## 当前 View: {view_context.view}\n{formatted_context}"
 
 
 async def stream_query(
@@ -221,7 +225,11 @@ async def stream_query(
         return
 
     failures: list[str] = []
-    for route in routes:
+    failed_route_ids: list[str] = []
+    retry_counts: dict[str, int] = {}
+    route_by_id = {route.route_id: route for route in routes}
+    route: ResolvedRoute | None = routes[0]
+    while route is not None:
         try:
             api_key, base_url, env_overrides = _resolve_route_runtime(
                 route,
@@ -232,14 +240,28 @@ async def stream_query(
                 yield CopilotEventError(message=str(exc))
                 return
             failures.append(f"{route.route_id}: {exc}")
+            route = _next_copilot_route(
+                routes=routes,
+                route_by_id=route_by_id,
+                current_route=route,
+                failed_route_ids=failed_route_ids,
+                retry_counts=retry_counts,
+                error=exc,
+            )
             continue
         if not api_key:
             if len(routes) == 1:
-                yield CopilotEventError(
-                    message=f"Endpoint {route.endpoint_id} 未配置 API key"
-                )
+                yield CopilotEventError(message=f"Endpoint {route.endpoint_id} 未配置 API key")
                 return
             failures.append(f"{route.route_id}: missing API key")
+            route = _next_copilot_route(
+                routes=routes,
+                route_by_id=route_by_id,
+                current_route=route,
+                failed_route_ids=failed_route_ids,
+                retry_counts=retry_counts,
+                error=ValueError("missing API key"),
+            )
             continue
 
         tool_names: dict[str, str] = {}
@@ -270,12 +292,79 @@ async def stream_query(
                 yield _error_event_for_exception(exc)
                 return
             failures.append(f"{route.route_id}: {type(exc).__name__}: {exc}")
+            route = _next_copilot_route(
+                routes=routes,
+                route_by_id=route_by_id,
+                current_route=route,
+                failed_route_ids=failed_route_ids,
+                retry_counts=retry_counts,
+                error=exc,
+            )
             continue
 
     yield CopilotEventError(
-        message="all configured Copilot providers failed"
-        + (f": {'; '.join(failures)}" if failures else "")
+        message="all configured Copilot providers failed" + (f": {'; '.join(failures)}" if failures else "")
     )
+
+
+def _next_copilot_route(
+    *,
+    routes: list[ResolvedRoute],
+    route_by_id: dict[str, ResolvedRoute],
+    current_route: ResolvedRoute,
+    failed_route_ids: list[str],
+    retry_counts: dict[str, int],
+    error: Exception,
+) -> ResolvedRoute | None:
+    attempted_failed = list(failed_route_ids)
+    current_attempt = retry_counts.get(current_route.route_id, 0)
+    if current_attempt > 0 and current_route.route_id not in attempted_failed:
+        attempted_failed.append(current_route.route_id)
+
+    try:
+        decision = _gateway_adapter_factory().decide_fallback(
+            {
+                "fallback_chain": [{"route_id": route.route_id} for route in routes],
+                "current_route_id": current_route.route_id,
+                "failed_route_ids": attempted_failed,
+                "error": _fallback_error_context(error),
+            }
+        )
+    except Exception as exc:
+        logger.warning(
+            "Gateway fallback decision failed for current_route_id=%s",
+            current_route.route_id,
+            exc_info=exc,
+        )
+        return None
+    action = str(decision.get("decision") or decision.get("action") or "")
+    if action == "retry_same" and current_attempt == 0:
+        retry_counts[current_route.route_id] = current_attempt + 1
+        return current_route
+
+    if current_route.route_id not in failed_route_ids:
+        failed_route_ids.append(current_route.route_id)
+
+    if action != "switch_route":
+        return None
+    next_route_id = decision.get("route_id") or decision.get("next_route_id")
+    if not isinstance(next_route_id, str):
+        return None
+    return route_by_id.get(next_route_id)
+
+
+def _fallback_error_context(error: Exception) -> dict[str, Any]:
+    status_code = getattr(error, "status_code", None)
+    response = getattr(error, "response", None)
+    if status_code is None and response is not None:
+        status_code = getattr(response, "status_code", None)
+    payload: dict[str, Any] = {
+        "exception_type": type(error).__name__,
+        "message": str(error),
+    }
+    if isinstance(status_code, int):
+        payload["status_code"] = status_code
+    return payload
 
 
 async def get_or_create_session(
@@ -319,11 +408,7 @@ async def reset_session(
             session_key
             for session_key in _sessions
             if (skill_id is None or session_key[0] == skill_id)
-            and (
-                model_code is None
-                or session_key[1] == model_code
-                or session_key[1].startswith(f"{model_code}:")
-            )
+            and (model_code is None or session_key[1] == model_code or session_key[1].startswith(f"{model_code}:"))
         ]
         sessions = [_sessions.pop(session_key) for session_key in matched_keys]
 
@@ -424,15 +509,9 @@ def _tool_result_summary(content: str | list[dict[str, Any]] | None) -> str:
 def _resolve_copilot_runtime(
     model_override: str | None,
 ) -> tuple[list[ResolvedRoute], CredentialProviderProtocol]:
-    credentials = load_credentials()
-    credential_provider = EndpointCredentialProvider(credentials.provider_endpoints)
-    active_roles_path = default_roles_path()
-    roles = load_roles_file(active_roles_path) if active_roles_path.exists() else RolesData()
-    snapshot = roles.to_registry_snapshot(credentials)
-    resolver = ModelResolver(
-        registry_snapshot=snapshot,
-        credential_provider=credential_provider,
-    )
+    from app.services.gateway_resolver import build_gateway_model_resolver
+
+    resolver = build_gateway_model_resolver()
     resolved = resolver.resolve_routes(
         "copilot_chat",
         route_override=model_override,

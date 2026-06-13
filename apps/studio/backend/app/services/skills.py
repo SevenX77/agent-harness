@@ -56,6 +56,7 @@ from app.services.skill_resolver import build_studio_skill_resolver
 
 _LOCATION_RE = re.compile(r":(?P<line>\d+)(?::(?P<loc>.*))?")
 _SAFE_SKILL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_SAFE_RUN_ID_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._:-]*$")
 _NAME_LINE_RE = re.compile(r"(?m)^(?P<prefix>name:\s*)(?P<quote>['\"]?)(?P<value>[^'\"\n]+)(?P=quote)\s*$")
 
 _ALLOWED_SKILL_FILE_SUFFIXES = {".md", ".json", ".py"}
@@ -458,6 +459,27 @@ def _validate_skill_id_segment(skill_id: str) -> None:
         raise_error_response(response)
 
 
+def validate_run_id_segment(run_id: str) -> str:
+    segment = Path(run_id).name
+    if (
+        not run_id
+        or segment != run_id
+        or run_id in {".", ".."}
+        or "/" in run_id
+        or "\\" in run_id
+        or not _SAFE_RUN_ID_RE.fullmatch(run_id)
+    ):
+        response = error_response(
+            error_code="INVALID_RUN_ID",
+            http_status=400,
+            message=f"Invalid run id: {run_id}",
+            details={"run_id": run_id},
+            retry_strategy="not_retryable",
+        )
+        raise_error_response(response)
+    return segment
+
+
 def _raise_skill_not_found(skill_id: str) -> NoReturn:
     raise standard_http_exception(
         "SKILL_NOT_FOUND",
@@ -753,7 +775,8 @@ def resolve_skill_dir(skill_id: str) -> Path:
 
 def run_dir_for(skill_id: str, run_id: str) -> Path:
     """Return the Studio V3 run directory for a skill run."""
-    return runs_dir_for(resolve_skill_dir(skill_id)) / run_id
+    safe_run_id = validate_run_id_segment(run_id)
+    return runs_dir_for(resolve_skill_dir(skill_id)) / safe_run_id
 
 
 def workspace_dir_for(skill_dir: Path) -> Path:

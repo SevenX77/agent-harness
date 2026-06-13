@@ -16,7 +16,7 @@ from app.services.golden_headless import (  # noqa: F401
     evaluate_golden_headless,
     resolve_existing_run_result_file,
 )
-from app.services.skills import golden_dir_for, resolve_skill_dir, run_dir_for
+from app.services.skills import golden_dir_for, resolve_skill_dir, run_dir_for, validate_run_id_segment
 
 
 def list_golden_baselines_for_skill(skill_id: str) -> list[GoldenBaseline]:
@@ -69,12 +69,6 @@ def set_golden_baseline_for_run(skill_id: str, run_id: str, *, lock: bool) -> Go
 
 
 def delete_golden_baseline_for_skill(skill_id: str, golden_id: str) -> None:
-    if Path(golden_id).name != golden_id or golden_id in {"", ".", ".."}:
-        raise standard_http_exception(
-            "RESUME_CHECKPOINT_NOT_FOUND",
-            f"Golden baseline not found: {golden_id}",
-            {"skill_id": skill_id, "golden_id": golden_id},
-        )
     baseline_dir = _golden_dir_for(skill_id, golden_id)
     if not baseline_dir.exists():
         raise standard_http_exception(
@@ -120,7 +114,8 @@ def _golden_root_for(skill_id: str) -> Path:
 
 
 def _golden_dir_for(skill_id: str, run_id: str) -> Path:
-    return _golden_root_for(skill_id) / run_id
+    safe_run_id = validate_run_id_segment(run_id)
+    return _golden_root_for(skill_id) / safe_run_id
 
 
 def _latest_golden_run_id(skill_id: str) -> str | None:

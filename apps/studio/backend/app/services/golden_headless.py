@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -164,7 +164,7 @@ def _read_json_ref(ref: str) -> Any:
 
 
 def _find_file(ref: str) -> Path:
-    ref_path = Path(ref)
+    ref_path = _safe_ref_path(ref)
     if ref_path.exists():
         return ref_path
 
@@ -172,15 +172,15 @@ def _find_file(ref: str) -> Path:
 
     candidates: list[Path] = []
     storage_root = _storage_root()
-    candidates.append(storage_root / ref)
-    candidates.append(Path(".") / ref)
+    candidates.append(_safe_join(storage_root, ref_path))
+    candidates.append(_safe_join(Path("."), ref_path))
 
     parts = ref_path.parts
     skill_id = parts[0] if len(parts) >= 3 and parts[0] not in {"runs", "golden"} else None
     if skill_id:
         suffix = Path(*parts[1:])
-        candidates.append(config.SKILLS_DIR / skill_id / ".workspace" / suffix)
-        candidates.append(config.SKILLS_DIR / skill_id / suffix)
+        candidates.append(_safe_join(config.SKILLS_DIR / skill_id / ".workspace", suffix))
+        candidates.append(_safe_join(config.SKILLS_DIR / skill_id, suffix))
 
     for candidate in candidates:
         if candidate.exists():
@@ -190,6 +190,30 @@ def _find_file(ref: str) -> Path:
             if legacy_candidate.exists():
                 return legacy_candidate
     return ref_path
+
+
+def _safe_ref_path(ref: str) -> Path:
+    if not ref or "\\" in ref:
+        raise ValueError(f"Invalid artifact ref: {ref}")
+    ref_path = Path(ref)
+    if ref_path.is_absolute():
+        return ref_path.resolve(strict=False)
+    posix_path = PurePosixPath(ref)
+    if posix_path.is_absolute() or any(part in {"", ".", ".."} for part in posix_path.parts):
+        raise ValueError(f"Invalid artifact ref: {ref}")
+    return Path(*posix_path.parts)
+
+
+def _safe_join(root: Path, relative_path: Path) -> Path:
+    if relative_path.is_absolute():
+        return relative_path
+    root_resolved = root.resolve(strict=False)
+    candidate = root_resolved.joinpath(relative_path).resolve(strict=False)
+    try:
+        candidate.relative_to(root_resolved)
+    except ValueError as exc:
+        raise ValueError(f"Invalid artifact ref: {relative_path}") from exc
+    return candidate
 
 
 def _storage_root() -> Path:

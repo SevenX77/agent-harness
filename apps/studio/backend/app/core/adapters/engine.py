@@ -3,8 +3,10 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
+import shutil
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
 from graph_agent import (
@@ -66,6 +68,40 @@ from graph_agent.core.runner import (
 
 from app.core.adapters.http_transport import HttpTransport, StudioAdapterError
 
+_SAFE_STUDIO_SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_SHA256_HEX_RE = re.compile(r"^[A-Fa-f0-9]{64}$")
+
+
+def _safe_studio_segment(value: str, label: str) -> str:
+    segment = Path(value).name
+    if (
+        not value
+        or segment != value
+        or value in {".", ".."}
+        or "/" in value
+        or "\\" in value
+        or not _SAFE_STUDIO_SEGMENT_RE.fullmatch(value)
+    ):
+        raise ValueError(f"Invalid {label}: {value}")
+    return segment
+
+
+def _safe_child_path(root: Path, *segments: str) -> Path:
+    root_resolved = root.resolve(strict=False)
+    candidate = root_resolved.joinpath(*segments).resolve(strict=False)
+    try:
+        candidate.relative_to(root_resolved)
+    except ValueError as exc:
+        raise ValueError(f"Unsafe path outside root: {candidate}") from exc
+    return candidate
+
+
+def _sha256_hex_from_content_hash(content_hash: str) -> str | None:
+    if not content_hash.startswith("sha256:"):
+        return None
+    sha256_val = content_hash.split(":", 1)[1]
+    return sha256_val if _SHA256_HEX_RE.fullmatch(sha256_val) else None
+
 
 class _PrivateStudioSkillResolver:
     """Resolve Studio skill ids through local index, workspace, then bundled skills."""
@@ -75,37 +111,38 @@ class _PrivateStudioSkillResolver:
 
         from app.core import config
 
-        indexed = self._skill_index_entry(skill_id)
+        safe_skill_id = _safe_studio_segment(skill_id, "skill_id")
+        indexed = self._skill_index_entry(safe_skill_id)
         if indexed:
             indexed_root = Path(indexed["absolute_path"])
             if self._is_skill_root(indexed_root):
                 return indexed_root
-            message = f"skill {skill_id!r}: indexed path is not a skill root: {indexed_root}"
+            message = f"skill {safe_skill_id!r}: indexed path is not a skill root: {indexed_root}"
             raise ResourceNotFoundError(
                 message,
                 payload=make_error_payload(
                     "[F-v3-resolver-path-invalid]",
                     message,
-                    skill_id=skill_id,
+                    skill_id=safe_skill_id,
                     source_path=indexed_root,
                 ),
             )
 
-        workspace_root = config.default_workspace_skills_dir() / skill_id
+        workspace_root = _safe_child_path(config.default_workspace_skills_dir(), safe_skill_id)
         if self._is_skill_root(workspace_root):
             return workspace_root
 
-        bundled_root = config.SKILLS_DIR / skill_id
+        bundled_root = _safe_child_path(config.SKILLS_DIR, safe_skill_id)
         if self._is_skill_root(bundled_root):
             return bundled_root
 
-        message = f"skill {skill_id!r}: skill is not registered in Studio"
+        message = f"skill {safe_skill_id!r}: skill is not registered in Studio"
         raise ResourceNotFoundError(
             message,
             payload=make_error_payload(
                 "[F-v3-skill-not-registered]",
                 message,
-                skill_id=skill_id,
+                skill_id=safe_skill_id,
             ),
         )
 
@@ -194,20 +231,42 @@ def _private_build_gateway_model_resolver() -> Any:
 
 
 def _zip_directory(dir_path: Path) -> bytes:
+    source_root = dir_path.resolve(strict=True)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for file in dir_path.rglob("*"):
+        for file in source_root.rglob("*"):
             if ".workspace" in file.parts:
                 continue
             if file.is_file():
-                zf.write(file, file.relative_to(dir_path))
+                zf.write(file, file.relative_to(source_root))
     return buf.getvalue()
 
 
 def _unzip_directory(zip_bytes: bytes, target_dir: Path) -> None:
-    target_dir.mkdir(parents=True, exist_ok=True)
+    target_root = target_dir.resolve(strict=False)
+    target_root.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-        zf.extractall(target_dir)
+        for info in zf.infolist():
+            raw_name = info.filename
+            member_path = PurePosixPath(raw_name)
+            if (
+                not raw_name
+                or "\\" in raw_name
+                or member_path.is_absolute()
+                or any(part in {"", ".", ".."} for part in member_path.parts)
+            ):
+                raise ValueError(f"Unsafe zip member: {raw_name}")
+            destination = target_root.joinpath(*member_path.parts).resolve(strict=False)
+            try:
+                destination.relative_to(target_root)
+            except ValueError as exc:
+                raise ValueError(f"Unsafe zip member: {raw_name}") from exc
+            if info.is_dir():
+                destination.mkdir(parents=True, exist_ok=True)
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(info) as source, destination.open("wb") as target:
+                shutil.copyfileobj(source, target)
 
 
 def _studio_storage_root() -> Path:
@@ -438,8 +497,10 @@ class EngineAdapter:
 
         storage_root = _studio_storage_root()
 
-        sha256_val = content_hash.split(":", 1)[1]
-        ephemeral_dir = storage_root / "ephemeral_run_skills" / sha256_val
+        sha256_val = _sha256_hex_from_content_hash(content_hash)
+        if sha256_val is None:
+            raise StudioAdapterError("artifact.invalid_hash", {"content_hash": content_hash})
+        ephemeral_dir = _safe_child_path(storage_root / "ephemeral_run_skills", sha256_val)
         if not ephemeral_dir.exists():
             product_store = LocalProductArtifactStore(root=storage_root)
             zip_bytes = product_store.get(content_hash)
@@ -502,14 +563,16 @@ class EngineAdapter:
 
     def _ensure_local_artifact_root(self, artifact_ref_data: dict[str, Any]) -> Path | None:
         content_hash = artifact_ref_data.get("content_hash")
-        if not isinstance(content_hash, str) or not content_hash.startswith("sha256:"):
+        if not isinstance(content_hash, str):
+            return None
+        sha256_val = _sha256_hex_from_content_hash(content_hash)
+        if sha256_val is None:
             return None
 
         from app.core.adapters.product_store_local import LocalProductArtifactStore
 
         storage_root = _studio_storage_root()
-        sha256_val = content_hash.split(":", 1)[1]
-        ephemeral_dir = storage_root / "ephemeral_run_skills" / sha256_val
+        ephemeral_dir = _safe_child_path(storage_root / "ephemeral_run_skills", sha256_val)
         if (ephemeral_dir / "GRAPH.md").is_file():
             return ephemeral_dir
 

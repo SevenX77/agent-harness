@@ -1,89 +1,16 @@
-/**
- * Translate backend Test outcome / vendor error codes into English UI messages.
- * Future i18n should wrap this catalog rather than showing raw codes directly.
- */
-
 import type { ProviderTestStatus, TestStatus } from "@/api/llm"
+import i18n from "@/i18n"
 
-/**
- * Map of `error_code` strings returned by the backend POST /providers/test
- * response (vendor codes + the synthetic `missing_api_key` / `timeout`).
- *
- * Anthropic error codes: `invalid_api_key`, `permission_error`,
- * `not_found_error`, `request_too_large`, `rate_limit_error`, `api_error`,
- * `overloaded_error`. OpenAI uses `invalid_api_key`, `insufficient_quota`,
- * `model_not_found`, `rate_limit_exceeded`. Gemini uses `PERMISSION_DENIED`,
- * `UNAUTHENTICATED`, `RESOURCE_EXHAUSTED`, `UNAVAILABLE`.
- */
-const ERROR_CODE_TRANSLATIONS: Record<string, string> = {
-  missing_api_key: "API key is empty. Add a key before testing.",
-  timeout: "The request timed out after 8 seconds.",
+const ERRORS_NS = "errors"
+const tError = i18n.t.bind(i18n) as (key: string, options?: Record<string, unknown>) => string
+const errorExists = i18n.exists.bind(i18n) as (key: string, options?: Record<string, unknown>) => boolean
 
-  // OpenAI-style.
-  invalid_api_key: "API key is invalid or was rejected by the provider.",
-  invalid_x_api_key: "API key is invalid or was rejected by the provider.",
-  insufficient_quota: "The account has no remaining quota.",
-  model_not_found: "The model does not exist or this API key cannot access it.",
-  rate_limit_exceeded: "Rate limit exceeded (429).",
-  invalid_request_error: "The provider rejected the request format.",
-  context_length_exceeded: "The request exceeds the model context window.",
-
-  // Anthropic-style.
-  permission_error: "The API key does not have permission to access this resource.",
-  authentication_error: "Authentication failed. Check the API key and required headers.",
-  not_found_error: "The provider returned 404 for the endpoint or resource.",
-  request_too_large: "The request body is too large.",
-  rate_limit_error: "Rate limit exceeded (429).",
-  api_error: "The provider returned an internal API error.",
-  overloaded_error: "The provider is temporarily overloaded.",
-  unauthorized: "The API key is not authorized (401).",
-
-  // Gemini-style.
-  PERMISSION_DENIED: "The API key does not have permission to access this resource.",
-  UNAUTHENTICATED: "The API key could not be authenticated.",
-  RESOURCE_EXHAUSTED: "Quota or rate limit is exhausted.",
-  UNAVAILABLE: "The provider is temporarily unavailable.",
-
-  // Generic fallbacks (set by backend `_extract_vendor_error_code`).
-  no_available_sdk: "No compatible protocol was confirmed. Check the API key, Base URL, and selected provider protocol, then retry.",
-  model_list_unavailable: "The provider model list could not be loaded. Check the Base URL and whether the provider supports a model-list endpoint.",
-  rate_limited: "Rate limit exceeded (429).",
-  quota_exceeded: "Quota is exhausted (402/403).",
-  network_error: "Network error. The provider could not be reached.",
-  http_error: "The provider returned an unexpected HTTP status.",
+function errorText(key: string, options?: Record<string, unknown>): string {
+  return tError(key, { ns: ERRORS_NS, ...options })
 }
 
-const HTTP_STATUS_TRANSLATIONS: Record<number, string> = {
-  400: "The request parameters are invalid.",
-  401: "The request is not authenticated.",
-  403: "The request is not authorized, or this API key cannot access the resource.",
-  404: "The resource or endpoint could not be found.",
-  408: "The request timed out.",
-  409: "The request conflicts with the current state.",
-  422: "The request does not match the backend schema.",
-  429: "The provider rate limit was reached. Try again later.",
-  500: "The backend service failed.",
-  502: "The backend service or proxy is unavailable.",
-  503: "The service is temporarily unavailable.",
-  504: "The backend request timed out.",
-}
-
-/**
- * Map of persisted `TestStatus` (last_test_status on credentials).
- * Includes `untested` and `ok`; the error variants overlap with the per-code
- * map but are kept here as a guaranteed coverage in case `error_code` is
- * blank.
- */
-const STATUS_TRANSLATIONS: Record<TestStatus | ProviderTestStatus, string> = {
-  untested: "Not configured",
-  ok: "Connected",
-  error: "Test failed",
-  invalid_key: "Invalid API key",
-  rate_limited: "Rate limited",
-  quota_exceeded: "Quota exhausted",
-  network_error: "Network error",
-  timeout: "Request timed out",
-  missing_api_key: "API key is empty",
+function hasErrorText(key: string): boolean {
+  return errorExists(key, { ns: ERRORS_NS })
 }
 
 /**
@@ -93,12 +20,14 @@ const STATUS_TRANSLATIONS: Record<TestStatus | ProviderTestStatus, string> = {
  */
 export function translateErrorCode(code: string | null | undefined): string {
   if (!code) return ""
-  return ERROR_CODE_TRANSLATIONS[code] ?? `Provider returned error code: ${code}`
+  const key = `codes.${code}`
+  return hasErrorText(key) ? errorText(key) : errorText("fallbacks.errorCode", { code })
 }
 
 export function translateHttpStatus(status: number | null | undefined): string {
   if (!status) return ""
-  return HTTP_STATUS_TRANSLATIONS[status] ?? `HTTP ${status} request failed.`
+  const key = `httpStatus.${status}`
+  return hasErrorText(key) ? errorText(key) : errorText("fallbacks.httpStatus", { status })
 }
 
 /**
@@ -106,8 +35,9 @@ export function translateHttpStatus(status: number | null | undefined): string {
  * badge). Falls back to the raw status string if unrecognized.
  */
 export function translateTestStatus(status: TestStatus | ProviderTestStatus | undefined): string {
-  if (!status) return "Not configured"
-  return STATUS_TRANSLATIONS[status] ?? status
+  if (!status) return errorText("fallbacks.notConfigured")
+  const key = `status.${status}`
+  return hasErrorText(key) ? errorText(key) : status
 }
 
 /**
@@ -128,14 +58,20 @@ export function composeTestErrorMessage(
 }
 
 export function composeRequestErrorMessage(error: unknown, fallback = "Request failed"): string {
-  const rawMessage = getErrorMessage(error) || fallback
+  const rawMessage = getErrorMessage(error)
   const response = getErrorResponse(error)
   const statusLabel = translateHttpStatus(response?.status)
   const detail = getErrorDetail(response?.data)
   if (statusLabel) {
-    return detail ? `${rawMessage} - ${statusLabel} (${detail})` : `${rawMessage} - ${statusLabel}`
+    return detail ? `${statusLabel} (${detail})` : statusLabel
   }
-  return rawMessage || fallback
+  if (detail) return detail
+  if (rawMessage && !isHttpRequestWrapper(rawMessage)) return rawMessage
+  return fallback || errorText("fallbacks.requestFailed")
+}
+
+function isHttpRequestWrapper(message: string): boolean {
+  return /^Request failed with status code \d+$/i.test(message.trim())
 }
 
 function getErrorMessage(error: unknown): string {

@@ -11,6 +11,8 @@
 
 ## 2. 完成判据(done-set,画死终点线)
 
+> **范围 = MVP1 设计 + 三模块接口设计,两套全部实现,不挑不减**:① MVP1 设计(engine + gateway + studio 各自 `mvp1-alignment` 的全部 FROZEN capability)② 三模块接口设计 `docs/mvp1-three-module-interface-design-and-changes-2026-06-11`(D1–D12 全部:ArtifactRef/run_artifact、存储三线+成品库、冻结产物 run-by-version、Engine↔Gateway SPI 倒置、凭证/route/fallback、6态、golden headless、GRAPH parse/serialize、**D10 resume+RuntimeStateStore lease/fencing**、EventEnvelope、**D12 Rust native-fs 唯一写者**)。冲突处 three-module 赢。**设计里写的都做,只有设计自己登记的延期项才延期。**
+
 **达成 = 下面全部满足:**
 
 1. **主验收(headline)**:用 computer-use 驱动**真 Tauri 桌面构建**,把用户生命周期 **设计 → 编译 → debug → predict → run → 看 trace → 调试(resume)→ 发布** 端到端走通,无明显 bug。载荷用 story-deconstruction-v2 **跑一章** 或单个 subgraph(只为串通生命周期、暴露问题,不真做解构)。
@@ -18,7 +20,7 @@
 3. **桶 B 前向工作落地**:D10/D12 Rust native-fs 唯一写者 + RuntimeGate 降级启动;D10 resume + RuntimeStateStore(lease/heartbeat/fencing);copilot 安全写/dispatch/@mention/冷启动恢复;TracePanel 挂载 + edge blackboard;`llm_state_projection`/`llm_role_materializer`/`llm_import_drafts` 下沉 gateway。
 4. **底线(基础流程,不是 headline 但必须有)**:单元测试 + 单功能 smoke + 设计强制的错误/并发/传输测试(§4 那些 etag/lease/fencing/传输错误)+ owner 边界静态守卫,全绿;模块门禁全绿(Engine/Gateway/Studio **分进程** pytest + 前端 tsc/lint + `cargo test`)。
 
-**明确不在范围(设计自身登记的延期项,保持延期,不做)**:3 个硬多机错误(时钟漂移/网络分区/跨节点配额,只留接口位)、`remote_vault`(仅枚举)、audit/intent-drift(501 scaffold,非 MVP1)、copilot 旧 dispatch endpoint 的存废另议。**做这些 = 超范围。**
+**明确不在范围(设计自身登记的延期项,保持延期,不做)**:3 个硬多机错误(时钟漂移/网络分区/跨节点配额,只留接口位)、`remote_vault`(仅枚举)、audit/intent-drift(501 scaffold,非 MVP1)。copilot **真功能在范围内**(安全写 / @mention / 冷启动,见桶B §3);旧 `/api/copilot` dispatch 按设计 = 非-MVP1 scaffold、copilot 走 WS 活路径。**这些延期项之外,设计写的全做。**
 
 ## 3. e2e 分层(主验收 + 底线)
 
@@ -60,6 +62,8 @@
 
 ## 6. 自主执行规则
 
+- **执行主体**:Claude 自己写代码 + 自己派 subagent / Workflow 编排;能自决的不外包给 PM。
+- **跑到完成不停**:Phase 0 → 验收全程自主,**只在 §5.6 三种硬 blocker 才停**;里程碑汇报但不 halt。
 - **持久进度**:程序规模大(跨多会话/会被 compaction 截断),进度必须落盘(plan + `progress.md`),靠文件恢复,不靠对话记忆。
 - **小批次**:大分支内部仍拆小批次,每批独立可验、可回滚;每批走 RED→GREEN。
 - **桶 B 的 e2e 先 RED**:resume/native-fs/安全写的 e2e 先写成红,随实现转绿。

@@ -192,6 +192,60 @@ def test_run_worker_reports_failed_when_result_unsuccessful(
     assert metrics["status"] == "failed"
 
 
+def test_run_worker_passes_workspace_root_not_runs_dir(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """P0#2 (handshake audit §5.2): worker passes workspace_dir = the .workspace ROOT.
+
+    Engine writes <workspace_dir>/runs/<thread_id>. Passing run_dir.parent (=.workspace/runs)
+    made it land in .workspace/runs/runs/<id> while Studio reads .workspace/runs/<id> (empty).
+    Mirrors the predict-path contract (test_workspace_dir_contract_red §predict).
+    """
+    from app.core import config
+
+    monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
+
+    sha_val = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+    storage_root = tmp_path / "workspaces" / "default"
+    ephemeral_dir = storage_root / "ephemeral_run_skills" / sha_val
+    ephemeral_dir.mkdir(parents=True, exist_ok=True)
+    (ephemeral_dir / "GRAPH.md").write_text("# Skill\n", encoding="utf-8")
+
+    import app.core.adapters.engine as engine_adapter_module
+
+    calls: list[dict[str, Any]] = []
+
+    def fake_run_artifact(_adapter: object, payload: dict[str, Any]) -> dict[str, Any]:
+        calls.append(payload)
+        return {"context": {}, "metrics": {}, "success": True}
+
+    monkeypatch.setattr(engine_adapter_module.EngineAdapter, "run_artifact", fake_run_artifact)
+
+    art_ref = {
+        "artifact_id": "demo.skill",
+        "content_hash": f"sha256:{sha_val}",
+        "store": "ephemeral",
+        "manifest_ref": "some_manifest_ref",
+    }
+    workspace_root = tmp_path / "skill" / ".workspace"
+    run_dir = workspace_root / "runs" / "run-123"
+    queue = _Queue()
+
+    run_manager_module._run_worker_main(
+        "demo.skill",
+        str(ephemeral_dir),
+        str(run_dir),
+        {},
+        queue,
+        art_ref=art_ref,
+    )
+
+    assert calls
+    assert calls[0]["workspace_dir"] == str(workspace_root)
+    assert calls[0]["thread_id"] == "run-123"
+
+
 def test_delta4_lint_skill_path_passes_skill_resolver(
     tmp_path: Path,
     monkeypatch: Any,

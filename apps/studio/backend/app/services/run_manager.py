@@ -109,7 +109,10 @@ def _run_worker_main(
         result = adapter.run_artifact(
             {
                 "artifact_ref": art_ref,
-                "workspace_dir": str(run_dir.parent),
+                # P0#2 (handshake audit §5.2): pass the .workspace ROOT, not run_dir.parent
+                # (=.workspace/runs). Engine writes <workspace_dir>/runs/<thread_id>; passing the
+                # runs dir made it land in .workspace/runs/runs/<id> while Studio read .workspace/runs/<id>.
+                "workspace_dir": str(run_dir.parent.parent),
                 "thread_id": run_dir.name,
                 "event_subscriber": emit_to_queue,
                 "inputs": inputs,

@@ -4,6 +4,7 @@ import { toast } from "sonner"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { GraphCanvas, type SkillGraphNodeData, type SkillNodeStatus } from "@/components/GraphCanvas"
 import { CopilotPanel } from "@/components/copilot/copilot-panel"
+import { PromptInspector } from "@/components/PromptInspector"
 import { useCopilotContext } from "@/hooks/useCopilotContext"
 import { readLintStatus } from "@/hooks/useDebouncedLint"
 import { useRunStream } from "@/hooks/useRunStream"
@@ -95,6 +96,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     setCompileStages((current) => ({ ...current, [id]: stage }))
   }, [])
 
+  // F5 (trace): index of the trace event whose prompt is open in the inspector.
+  const [promptIndex, setPromptIndex] = useState<number | null>(null)
   const runStream = useRunStream(runId)
   // F7: a finished run (run_ended in the stream) drives the copilot analysis bar.
   const completedRunId = runStream.events.some((event) => event.event_type === "run_ended")
@@ -638,6 +641,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   runId={runId}
                   traceEvents={runStream.events}
                   activeTracePhase={activeTracePhase}
+                  onSelectTracePrompt={setPromptIndex}
                   traceCanCompare={Boolean(runId)}
                   traceCompareLoading={goldenDiff.loading}
                   onCompareToGolden={handleCompareToGolden}
@@ -726,6 +730,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   </div>
                 </div>
               ) : null}
+              <PromptInspector
+                promptEvent={promptIndex != null ? runStream.events[promptIndex] ?? null : null}
+                onClose={() => setPromptIndex(null)}
+              />
             </div>
           </ResizablePanel>
 

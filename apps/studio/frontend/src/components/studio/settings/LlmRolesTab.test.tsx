@@ -102,7 +102,7 @@ const modelGroups: ModelGroup[] = [
         provider_label: "Broken Proxy",
         provider_kind: "third_party",
         provider_model_id: "claude-sonnet-4-7",
-        ui_state: "needs_setup",
+        ui_state: "failed",
         ui_detail: "API key is missing.",
         retry_at: null,
         reason_code: "missing_key",
@@ -114,7 +114,8 @@ const modelGroups: ModelGroup[] = [
       ready: 1,
       untested: 1,
       cooling_down: 0,
-      needs_setup: 1,
+      historical_ready: 0,
+      failed: 1,
       off: 0,
     },
     capability_summary: {
@@ -203,7 +204,7 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain("1 Needs Setup")
     expect(html).toContain('data-provider-state="ready"')
     expect(html).toContain('data-provider-state="untested"')
-    expect(html).toContain('data-provider-state="needs_setup"')
+    expect(html).toContain('data-provider-state="failed"')
     expect(html).toContain('data-variant="default"')
     expect(html).not.toContain("claude-sonnet-4-7</")
     expect(html).not.toContain("anthropic-official:claude-sonnet-4-7")
@@ -622,7 +623,7 @@ describe("LlmRolesTab controls", () => {
           provider_label: "Needs Setup Provider",
           provider_kind: "official",
           provider_model_id: "deepseek-v3",
-          ui_state: "needs_setup",
+          ui_state: "failed",
         },
       ],
     }
@@ -811,7 +812,7 @@ describe("LlmRolesTab controls", () => {
           provider_label: "Setup Provider",
           provider_kind: "custom",
           provider_model_id: "gpt-5",
-          ui_state: "needs_setup",
+          ui_state: "failed",
           ui_detail: "Model does not exist.",
           retry_at: null,
           reason_code: "invalid_model",
@@ -836,7 +837,8 @@ describe("LlmRolesTab controls", () => {
         ready: 1,
         untested: 1,
         cooling_down: 1,
-        needs_setup: 1,
+        historical_ready: 0,
+        failed: 1,
         off: 1,
       },
       capability_summary: {
@@ -1144,7 +1146,8 @@ describe("LlmRolesTab controls", () => {
         ready: 5,
         untested: 0,
         cooling_down: 0,
-        needs_setup: 0,
+        historical_ready: 0,
+        failed: 0,
         off: 0,
       },
     }]
@@ -1296,7 +1299,7 @@ describe("LlmRolesTab controls", () => {
           ...modelGroups[0].provider_models[2],
           route_id: "broken:deepseek-v4-flash",
           provider_label: "Broken Proxy",
-          ui_state: "needs_setup",
+          ui_state: "failed",
         },
         {
           ...modelGroups[0].provider_models[0],
@@ -1313,7 +1316,7 @@ describe("LlmRolesTab controls", () => {
     expect(providers.map((provider) => `${provider.label}:${provider.state}`)).toEqual([
       "DeepSeek Official:ready",
       "Qiniu-OpenAi:untested",
-      "Broken Proxy:needs_setup",
+      "Broken Proxy:failed",
     ])
   })
 
@@ -1341,7 +1344,8 @@ describe("LlmRolesTab controls", () => {
           ready: 0,
           untested: 1,
           cooling_down: 0,
-          needs_setup: 0,
+          historical_ready: 0,
+          failed: 0,
           off: 0,
         },
         capability_summary: {

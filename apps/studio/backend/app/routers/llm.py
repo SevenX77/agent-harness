@@ -1531,7 +1531,7 @@ def _model_group_response(
         for route in sorted(routes, key=lambda item: item.route_id)
         if (option := _provider_model_option(route, credentials)) is not None
     ]
-    status_summary = {state: 0 for state in ["ready", "untested", "cooling_down", "needs_setup", "off", "failed"]}
+    status_summary = {state: 0 for state in ["ready", "historical_ready", "untested", "cooling_down", "off", "failed"]}
     for option in provider_models:
         status_summary[option["ui_state"]] += 1
     identity = _model_group_identity(canonical_id, routes, credentials)
@@ -1741,7 +1741,7 @@ async def _force_probe_route(
                 "status": "failed",
                 "metadata": {
                     **route.metadata,
-                    "reason_code": "missing_key",
+                    "reason_code": "missing_config",
                     "last_probe_message": "API key is empty.",
                 },
             }
@@ -3868,7 +3868,7 @@ def _provider_model_projection(
 def _admission_decision(ui_state: str) -> str:
     if ui_state == "cooling_down":
         return "temporary_skip"
-    if ui_state in {"needs_setup", "off"}:
+    if ui_state in {"failed", "off"}:
         return "block"
     return "admit"
 

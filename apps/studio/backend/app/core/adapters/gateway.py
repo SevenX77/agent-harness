@@ -63,7 +63,7 @@ from graph_agent_gateway.resolver import ModelResolver as ModelResolver
 
 from app.core.adapters.http_transport import HttpTransport, StudioAdapterError
 
-ProviderUiState = Literal["ready", "untested", "cooling_down", "needs_setup", "off", "failed"]
+ProviderUiState = Literal["ready", "historical_ready", "untested", "cooling_down", "off", "failed"]
 
 
 @dataclass(frozen=True)
@@ -238,7 +238,7 @@ class GatewayAdapter:
                 projection = self._private_projection(route.route_id, credentials, health_store)
                 if projection is None:
                     continue
-                if projection.ui_state in {"needs_setup", "off"}:
+                if projection.ui_state in {"failed", "off"}:
                     report["skipped_provider_details"].append(
                         {
                             "route_id": route.route_id,
@@ -358,7 +358,7 @@ class GatewayAdapter:
             )
 
         if endpoint.api_key is None or not endpoint.api_key.get_secret_value():
-            return ProviderModelStateProjection(ui_state="needs_setup", reason_code="missing_key")
+            return ProviderModelStateProjection(ui_state="failed", reason_code="missing_config")
 
         relevant = [
             circuit

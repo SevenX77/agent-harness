@@ -186,7 +186,7 @@ describe('refreshLoadedLlmRolesProjection', () => {
         canonical_id: 'gpt-5',
         display_name: 'GPT-5',
         provider_models: [],
-        status_summary: { ready: 0, untested: 0, cooling_down: 0, needs_setup: 0, off: 0 },
+        status_summary: { ready: 0, untested: 0, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
         capability_summary: {
           capability_known_count: 0,
           thinking: 'unknown',
@@ -273,7 +273,7 @@ describe('modelGroupsReferenceMissingCredentialProviders', () => {
             capabilities: {},
           },
         ],
-        status_summary: { ready: 0, untested: 1, cooling_down: 0, needs_setup: 0, off: 0 },
+        status_summary: { ready: 0, untested: 1, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
         capability_summary: {
           capability_known_count: 0,
           thinking: 'unknown',
@@ -303,7 +303,7 @@ describe('modelGroupsReferenceMissingCredentialProviders', () => {
             capabilities: {},
           },
         ],
-        status_summary: { ready: 1, untested: 0, cooling_down: 0, needs_setup: 0, off: 0 },
+        status_summary: { ready: 1, untested: 0, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
         capability_summary: {
           capability_known_count: 1,
           thinking: 'supported',

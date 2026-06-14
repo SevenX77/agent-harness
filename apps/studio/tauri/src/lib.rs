@@ -331,6 +331,8 @@ pub fn run() {
             open_in_terminal,
             reveal_in_file_manager,
             native_fs::write_workspace_file,
+            native_fs::read_workspace_file,
+            native_fs::list_workspace_dir,
             native_fs::add_recent_workspace,
             native_fs::list_recent_workspaces,
             native_fs::remove_recent_workspace,

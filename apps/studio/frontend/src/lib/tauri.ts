@@ -149,3 +149,40 @@ export async function ensureWorkspaceSupportDirs(workspaceRoot: string): Promise
   const { invoke } = await import('@tauri-apps/api/core')
   await invoke('ensure_workspace_support_dirs', { workspaceRoot })
 }
+
+export interface ReadWorkspaceFileResult {
+  path: string
+  content: string
+  hash: string
+}
+
+export async function readWorkspaceFile(
+  workspaceRoot: string,
+  path: string,
+): Promise<ReadWorkspaceFileResult> {
+  if (!isTauriRuntime()) {
+    throw new Error('Desktop only')
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return await invoke<ReadWorkspaceFileResult>('read_workspace_file', {
+    workspaceRoot,
+    path,
+  })
+}
+
+export interface WorkspaceDirEntry {
+  name: string
+  kind: 'file' | 'dir'
+}
+
+export async function listWorkspaceDir(
+  workspaceRoot: string,
+  relativeDir: string,
+): Promise<WorkspaceDirEntry[]> {
+  if (!isTauriRuntime()) return []
+  const { invoke } = await import('@tauri-apps/api/core')
+  return await invoke<WorkspaceDirEntry[]>('list_workspace_dir', {
+    workspaceRoot,
+    relativeDir,
+  })
+}

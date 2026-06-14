@@ -295,5 +295,13 @@ Stop-hook、反自造停下铁律、copilot F3/F4-echo/F7、trace F5/F2、input 
 - **结论**:charter §3① headline(computer-use 鼠标在真 Tauri .app 上跑通完整生命周期、肉眼无 bug)**达成**——而且这一步真把一个 backend 全绿都测不出的 CORS ship-blocker 逼了出来并修掉。PM 坚持"用鼠标真跑"是对的。
 - **门禁**:后端 pytest **514 passed / 1 skip**(含新 CORS 回归测试),CORS 改动无回归。
 
+### copilot 在真 .app 里的验证(2026-06-14 续 · "不要停"后继续逼 bug)
+> headline 跑通后继续在真 .app 上驱动最大的未验证面 = copilot 聊天(我建了一堆 copilot F-units 但从没在打包 app 里跑过)。用真凭证(拷进隔离 config,真库 0 污染)鼠标驱动。
+
+- **先排除一个疑似 ship-blocker(copilot CLI 打包)✅**:claude-agent-sdk 在 .app 里 spawn `claude` CLI。核 `_find_cli`(SDK 定位 CLI 的函数):优先用 `_bundled/claude`,再 PATH,再 ~/.local/bin 等。**bundle 里确实带了 `claude_agent_sdk/_bundled/claude` = 自包含 Mach-O arm64 二进制(非 Node 脚本)**,不依赖 node 在 PATH → .app 里 CLI 可用,**之前担心的"Node CLI 没打包"不成立**。
+- **copilot 聊天 UI + HTTP 路径在 .app 里通 ✅**:鼠标在 copilot 输入框打字 → 发送 → 出现 "You / success" 用户气泡。**= CORS 修复对 copilot 同样生效**(之前不修的话这条也发不出去)。
+- **但拿不到回复 ❌(= 路由配置问题,非新 bug)**:发送后无 assistant 气泡、sidecar **没 spawn 任何 `claude` 子进程**(进程树核过)→ copilot stream 在路由解析阶段就没拿到可用路线,所以根本没起 CLI。这正是上个 session 已报 PM 的老问题:**当前配置下没有一个 copilot 角色解析到可用 anthropic 路线**(`copilot_opus_4_7` 指向的 `anthropic-official:claude-opus-4-7` 在我 COPILOT_ASSIST-4 的 SDK 测试里是 PASS 的,但 copilot 聊天解析路径却拿不到——可能 cooling-down / 面板默认用了别的角色 / 解析路径与 SDK-test 路径不一致)。
+- **登记(诚实分类)**:copilot 在 .app 的**管线**(UI / 发送 / CORS / CLI 打包)全部验通;**唯一缺口 = copilot 要有可解析的工作路线**。这要么是 PM 决策(copilot 用哪条路线/模型 + 确保其凭证/路线健康),要么是一轮专门的 gateway 路由解析调查(为什么 chat 解析路径拿不到 SDK-test 能用的那条路线)。**= 真正的 ③(需 PM 价值/配置判断)/ 专门轮**,不是可直接撸的实现细节。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

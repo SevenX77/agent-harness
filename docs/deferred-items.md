@@ -52,12 +52,14 @@
 - **前置条件**: 指派 owner(候选:`workspace-fs` 平台域 / `studio-feature-asset-explorer`)。
 - **来源**: 同上评审。
 
-### DEF-005 — 节点级「编辑-续跑」干预(Intervene-mode)— 后端阻塞
-- **日期**: 2026-06-01
+### DEF-005 — 节点级「编辑-续跑」干预(Intervene-mode)— 仅剩节点级粒度(run-level resume 已做)
+- **日期**: 2026-06-01;**更新 2026-06-14**(审计纠正过时描述)
 - **事项**: `05_debugging.md` 场景C:点边原点 → 可编辑 Monaco 篡改 inter-node state → 点下游节点 `[Resume]` 用伪造数据续跑。
-- **延期原因**: 后端 resume 端点 `POST /api/skills/{skill_id}/runs/{run_id}/resume` 当前 `501 Not Implemented`(`apps/studio/backend/app/routers/runs.py:64-70`);`ResumeReq.context_overrides` 字段已定义但全代码零引用;无节点级 resume 粒度(仅 thread/run 级 checkpoint)。
-- **前置条件**: 后端实现 resume 端点 + 消费 `context_overrides` + 节点级 checkpoint 恢复粒度。
-- **来源**: 同上评审;能力散见于 `05_debugging.md` 场景C 与 `trace-and-predict-visibility` 验收末行。
+- **现状更正(2026-06-14 审计)**: 原"后端 resume 端点 501"已**过时**——`runs.py:63-96` 的 resume 端点**已接线**(调 `EngineAdapter.resume` → `resume_skill`,非 501),`ResumeReq.context_overrides` / `human_input` 已透传给 adapter;**run-level「从 checkpoint 续跑」前后端都已做**(本会话补了前端 Resume 按钮 `TracePanel`→`Workspace.handleResume`,commit `d914f9a3`)。**仅剩真缺口 = 节点级粒度**:(a) 点边编辑 inter-node state 的 Monaco 干预 UI;(b) 引擎暴露节点级(非仅 thread/run 级)checkpoint 恢复点,让 `context_overrides` 能定位到某节点。
+- **延期原因(收窄后)**: 节点级 resume 需引擎侧 checkpoint 粒度(仅 thread/run 级 LangGraph checkpoint 现有);干预 UI 依赖 edge-dot 真黑板(F4,引擎结构化 transition 事件)。
+- **另:D10 lease/heartbeat/fencing 未接入 resume 路径**(审计 P2 确认)= 引擎侧 D10 缺口,独立于本 UI(`resume_skill` 走 LangGraph checkpointer 绕过 RuntimeStateStore)。
+- **前置条件**: 引擎节点级 checkpoint 恢复 + edge-dot transition 事件 + D10 lease 接入 resume。
+- **来源**: 同上评审 + 2026-06-14 wave2 conformance 审计(resume-ui 项)。
 
 ### DEF-006 — （已撤回）侧边栏去过滤 `needs_setup` —— 经核实为误诊
 - **日期**: 2026-06-01（同日核实撤回）

@@ -5,9 +5,19 @@
 
 ---
 
-## 1. 目标(一句话)
+## 1. 目标 / 验证 / 最高决策原则(PM 2026-06-14 重申,铁律)
 
-在**新 worktree + 新分支**(从 `main`=#139 切出,**全程不碰 main**)上,完整实现 **MVP1 + three-module 两套设计**,并以 **computer-use 驱动真 Tauri 桌面 app 把完整用户生命周期走通、无明显 bug** 作为主验收。
+> 这三条是本工程的北极星。任何"要不要停 / 要不要碰某文件 / 该怎么做"的疑问,**唯一裁判是设计文档本身**(下方三模块 + MVP1),不是本章程、不是 §5.6、不是任何我自造的中间规则。我自己写的执行文档(本 charter / progress)只是设计文档的有损代理,与设计文档冲突时**以设计文档为准**。
+
+1. **目标**:完整实现 **MVP1 设计 + 三模块接口设计** 两套(不挑不减,设计写的都做,只有设计自己登记的延期项才延期)。在新 worktree + 新分支(从 `main`=#139 切,全程不碰 main)上做。
+2. **如何验证**:**e2e 测试——computer-use 鼠标模拟真实用户操作,把完整生命周期(设计→编译→debug→predict→run→看 trace→resume→发布)真跑通、肉眼无明显 bug。** 模块门禁/单测绿是必要不充分;**没真鼠标跑过 = 还没算分**。
+3. **最高决策原则**:**MVP1 + 三模块设计文档**(下列四个权威根)。遇到任何决策,先回设计文档找答案;设计文档答了就照做,不停、不自造理由。
+
+### 权威设计文档(PM 待确认其完整性)
+- **三模块接口设计**(D1–D12,跨模块契约):[`docs/mvp1-three-module-interface-design-and-changes-2026-06-11/`](../mvp1-three-module-interface-design-and-changes-2026-06-11/) — 入口 `01-design.md` + `README.md`
+- **Engine MVP1**:[`docs/engine/mvp1/`](../engine/mvp1/) — 入口 `INDEX.md` / `README.md` / `00-architecture-overview.md`
+- **Gateway MVP1**:[`docs/graph-agent-gateway/mvp1/`](../graph-agent-gateway/mvp1/) — 入口 `README.md` / `DESIGN_UNITS_INDEX.md`
+- **Studio MVP1**:[`docs/studio/mvp1/`](../studio/mvp1/) — 入口 `README.md` / `DESIGN_UNITS_INDEX.md`
 
 ## 2. 完成判据(done-set,画死终点线)
 

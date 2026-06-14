@@ -11,8 +11,29 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from app.models.llm_config import LLMCredentialsFile, ProviderRoute
 from app.routers import llm
 from app.services.copilot import RouteSdkTestResult
+
+
+def _seed_credentials(monkeypatch: pytest.MonkeyPatch, route: ProviderRoute) -> list[LLMCredentialsFile]:
+    creds = LLMCredentialsFile(provider_routes={route.route_id: route})
+    saved: list[LLMCredentialsFile] = []
+    monkeypatch.setattr(llm, "load_credentials", lambda: creds)
+    monkeypatch.setattr(llm, "save_credentials", lambda c: saved.append(c))
+    return saved
+
+
+def _route_record(route_id: str) -> ProviderRoute:
+    endpoint_id, _, slug = route_id.partition(":")
+    return ProviderRoute(
+        route_id=route_id,
+        endpoint_id=endpoint_id,
+        route_slug=slug,
+        provider_model_id="m1",
+        canonical_id="c1",
+        metadata={"reason_code": "keep-me"},
+    )
 
 
 def _route(route_id: str, canonical: str = "claude-sonnet") -> SimpleNamespace:
@@ -67,6 +88,7 @@ def test_run_copilot_sdk_test_job_updates_each_route_light_and_result(
 
     monkeypatch.setattr(llm.copilot, "run_route_sdk_test", fake_sdk_test)
 
+    monkeypatch.setattr(llm, "_persist_copilot_sdk_evidence", lambda _results: None)
     try:
         asyncio.run(llm._run_copilot_sdk_test_job(job_id, "copilot_chat", routes, object()))
         final = llm._role_test_jobs[job_id]
@@ -77,3 +99,36 @@ def test_run_copilot_sdk_test_job_updates_each_route_light_and_result(
         assert final.result["sdk_evidence"]["passed"] == 1
     finally:
         llm._role_test_jobs.pop(job_id, None)
+
+
+def test_persist_copilot_sdk_evidence_writes_route_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    saved = _seed_credentials(monkeypatch, _route_record("e1:r1"))
+
+    llm._persist_copilot_sdk_evidence([RouteSdkTestResult("e1:r1", "ok", None)])
+
+    assert saved, "passing evidence must be persisted to credentials"
+    route = saved[-1].provider_routes["e1:r1"]
+    evidence = route.metadata["sdk_tool_call_verified"]
+    assert evidence["verified"] is True and evidence["status"] == "ok"
+    assert "verified_at" in evidence
+    assert route.metadata["reason_code"] == "keep-me", "existing metadata preserved"
+
+
+def test_persist_copilot_sdk_evidence_records_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    saved = _seed_credentials(monkeypatch, _route_record("e1:r1"))
+
+    llm._persist_copilot_sdk_evidence([RouteSdkTestResult("e1:r1", "failed", "boom")])
+
+    evidence = saved[-1].provider_routes["e1:r1"].metadata["sdk_tool_call_verified"]
+    assert evidence["verified"] is False and evidence["status"] == "failed"
+
+
+def test_persist_copilot_sdk_evidence_skips_unknown_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    creds = LLMCredentialsFile(provider_routes={})
+    saved: list[LLMCredentialsFile] = []
+    monkeypatch.setattr(llm, "load_credentials", lambda: creds)
+    monkeypatch.setattr(llm, "save_credentials", lambda c: saved.append(c))
+
+    llm._persist_copilot_sdk_evidence([RouteSdkTestResult("missing", "ok", None)])
+
+    assert saved == [], "nothing to persist when the route is unknown"

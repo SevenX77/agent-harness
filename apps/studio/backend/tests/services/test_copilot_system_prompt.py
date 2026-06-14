@@ -49,7 +49,9 @@ def test_build_system_prompt_injects_small_view_context() -> None:
     prompt = copilot.build_system_prompt("skill-a")
 
     assert prompt.startswith(copilot.BASE_SYSTEM_PROMPT_TEMPLATE.strip())
-    assert "\n\n## 当前 View: Edit\n" in prompt
+    # F4: context now renders as structured 4-layer XML, not a flat JSON dump.
+    assert "## 当前上下文" in prompt
+    assert '<skill>{"id": "skill-a", "view": "Edit"}</skill>' in prompt
     assert '"skill_md_text": "hello"' in prompt
     assert '"dirty": true' in prompt
 
@@ -71,7 +73,8 @@ def test_build_system_prompt_truncates_large_file_context() -> None:
 
     prompt = copilot.build_system_prompt("skill-a")
 
-    assert "\n\n## 当前 View: Edit\n" in prompt
+    assert "## 当前上下文" in prompt
+    assert "<copilot_context>" in prompt
     assert "x" * 300 in prompt
     assert "x" * 301 not in prompt
     assert "[Content truncated due to length. Use 'Read' tool" in prompt

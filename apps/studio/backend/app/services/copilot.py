@@ -21,6 +21,7 @@ from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
+from xml.sax.saxutils import escape
 
 from claude_agent_sdk import (
     ClaudeAgentOptions,
@@ -403,9 +404,55 @@ def truncate_for_reference(content: str, file_path: str | None) -> str:
     return frontmatter + body[:_BODY_REFERENCE_CHARS] + marker
 
 
+def _xml_leaf(tag: str, value: object) -> str:
+    """One XML leaf, value JSON-encoded then XML-escaped (safe for dict/scalar)."""
+
+    payload = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return f"  <{tag}>{escape(payload)}</{tag}>"
+
+
+def render_copilot_context_xml(skill_id: str, view: str, context: dict[str, Any]) -> str:
+    """F4 4-layer resolver: render injected context as structured XML (not a flat
+    JSON dump) so the model can attend to each layer separately.
+
+    Layers: (1) skill basics, (2) current selection (node/edge), (3) lint/compile
+    status, (4) explicit @mention content; any remaining keys go under <implicit>.
+    Per-value truncation reuses ``_context_for_prompt`` so the >150K reference cap
+    still applies. Empty layers are omitted.
+    """
+
+    capped = _context_for_prompt(context)
+    layers: list[str] = [_xml_leaf("skill", {"id": skill_id, "view": view})]
+
+    selection: list[str] = []
+    node = capped.get("selected_node")
+    if isinstance(node, dict):
+        selection.append("    " + _xml_leaf("node", node).strip())
+    edge = capped.get("selected_edge")
+    if isinstance(edge, dict):
+        selection.append("    " + _xml_leaf("edge", edge).strip())
+    if selection:
+        layers.append("  <selection>\n" + "\n".join(selection) + "\n  </selection>")
+
+    lint = capped.get("lint_status")
+    if lint is not None and lint != "idle":
+        layers.append(_xml_leaf("lint_status", lint))
+
+    mentions = capped.get("mentions")
+    if mentions:
+        layers.append(_xml_leaf("mentions", mentions))
+
+    handled = {"selected_node", "selected_node_id", "selected_edge", "lint_status", "mentions"}
+    implicit = {key: value for key, value in capped.items() if key not in handled and value is not None}
+    if implicit:
+        layers.append(_xml_leaf("implicit", implicit))
+
+    return "<copilot_context>\n" + "\n".join(layers) + "\n</copilot_context>"
+
+
 def build_system_prompt(skill_id: str) -> str:
     """Build the Copilot system prompt: skill-authoring brain + mounted-spec
-    pointer + the latest view context."""
+    pointer + the latest view context (structured 4-layer XML)."""
 
     prompt = BASE_SYSTEM_PROMPT_TEMPLATE
     spec_dir = _skill_spec_dir()
@@ -417,13 +464,9 @@ def build_system_prompt(skill_id: str) -> str:
 
     view_context = get_view_context(skill_id)
     if view_context is not None:
-        formatted_context = json.dumps(
-            _context_for_prompt(view_context.context),
-            ensure_ascii=False,
-            indent=2,
-            sort_keys=True,
+        prompt += "\n\n## 当前上下文\n" + render_copilot_context_xml(
+            skill_id, view_context.view, view_context.context
         )
-        prompt += f"\n\n## 当前 View: {view_context.view}\n{formatted_context}"
 
     return prompt
 
@@ -436,13 +479,10 @@ def _context_resolved_event(skill_id: str) -> CopilotEventContextResolved:
     detail_lines: list[str] = []
     if view_context is not None:
         parts.append(f"view={view_context.view}")
+        # Echo the exact structured XML that gets injected, so the user can verify
+        # what the model actually receives (anti hidden-prompt-magic, F4).
         detail_lines.append(
-            json.dumps(
-                _context_for_prompt(view_context.context),
-                ensure_ascii=False,
-                indent=2,
-                sort_keys=True,
-            )
+            render_copilot_context_xml(skill_id, view_context.view, view_context.context)
         )
     else:
         detail_lines.append("(无 view 上下文)")

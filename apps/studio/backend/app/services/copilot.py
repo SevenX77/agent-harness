@@ -73,10 +73,36 @@ _FILE_CONTENT_KEYS = {
 _FILE_PATH_KEYS = ("absolute_file_path", "file_path", "path")
 
 BASE_SYSTEM_PROMPT_TEMPLATE = """
-你是 Studio Copilot，负责协助用户编辑、理解、验证和运行当前 Studio skill。
-请聚焦 Studio 上下文，但允许任何通用问题；不要拒答用户的合理问题。
-当上下文不足时，先说明缺口并提出下一步；涉及文件内容时优先使用 Read 工具读取完整文件。
+你是 Studio Copilot —— 精通 graph_skill 搭建的助手，在 Studio 工作台帮用户设计 / 编辑 / 理解 / 验证 / 运行当前 skill。
+
+## graph_skill 格式心智模型 (schema v0.3.0)
+一个 skill = 根 `GRAPH.md` + 每个 phase 一个目录 `phases/<name>/`：
+- **GRAPH.md** frontmatter 必含：`schema_version: "v0.3.0"`(精确)、`name`(`^[a-z][a-z0-9_-]*$`)、
+  `phases: [名字列表]`、`io:`(根输入/输出 JSON schema)；可选 `description` / `llm_role`。
+- **GRAPH.md body** 用 `<phase>` XML 画 DAG：入口 `depends_on="input"`，下游引用上游 phase 名
+  (多依赖空格/逗号分隔)，终点加 `output`。三处名字必须一致：
+  frontmatter `phases` = body `<phase>` = `phases/<name>/` 目录。
+- **每个 phase 目录恰好一个模式文件**：`LOGIC.md`(确定性 Python，最常见)= frontmatter `io:` +
+  body `<action>名</action>` → `phases/<name>/actions/<名>.py`(签名 `def 名(context): ...`，读上游、写本 phase 输出)。
+  另两种模式是 `SUBGRAPH.md`(子图) / `SKILL.md`(委派子 skill)；
+  agent 等行为、精确语法与错误码以**挂载的 skill-spec 为准**。
+
+## 生命周期
+Compile(校验 DAG + schema)→ Predict(测试输入空跑)→ Run(真跑)。编译/lint 错误码形如 `[F-v3-...]`。
+
+## 工作方式
+- **先 Read 后改**：动文件前先读完整内容，别凭空猜；改完该编译就编译验证。
+- **主动诊断**：用户问"为啥编译失败"或出现 `[F-v3-...]` → 读相关文件定位根因、给具体修法，不空谈。
+- 权威格式细节已挂载(见下)，用 Read 查阅；业务领域知识靠你自带 + 用户喂的文档，不编造领域事实。
+- 聚焦 Studio 上下文，但允许任何合理通用问题，不拒答。
 """.strip()
+
+
+def _skill_spec_dir() -> Path | None:
+    """The authoritative graph_skill syntax spec dir, mounted for the copilot to
+    Read (F3 渐进暴露). Returns None when absent (e.g. a bundled app without docs)."""
+    candidate = Path(__file__).resolve().parents[5] / "docs/engine/mvp1/01-contract/02-skill-syntax"
+    return candidate if candidate.is_dir() else None
 
 
 @dataclass(frozen=True)
@@ -139,6 +165,10 @@ def build_options(
     if env_overrides:
         env.update(env_overrides)
 
+    # F3: mount the authoritative graph_skill spec so the copilot can Read it for
+    # exact format/error-code ground-truth (渐进暴露). Skipped if absent.
+    spec_dir = _skill_spec_dir()
+    add_dirs: list[str | Path] = [str(spec_dir)] if spec_dir is not None else []
     return ClaudeAgentOptions(
         cwd=workspace_dir,
         permission_mode="acceptEdits",
@@ -149,6 +179,7 @@ def build_options(
         # default (full) — never "summarized"/"omitted" — so the whole reasoning
         # trace streams to the UI (collapsible, not summarized away).
         thinking={"type": "adaptive"},
+        add_dirs=add_dirs,
     )
 
 
@@ -201,19 +232,28 @@ def truncate_for_reference(content: str, file_path: str | None) -> str:
 
 
 def build_system_prompt(skill_id: str) -> str:
-    """Build the Copilot system prompt with the latest view context injected."""
+    """Build the Copilot system prompt: skill-authoring brain + mounted-spec
+    pointer + the latest view context."""
+
+    prompt = BASE_SYSTEM_PROMPT_TEMPLATE
+    spec_dir = _skill_spec_dir()
+    if spec_dir is not None:
+        prompt += (
+            f"\n\n## 已挂载 skill-spec(权威格式规范)\n{spec_dir}\n"
+            "需要精确字段 / 语法 / 错误码时用 Read 查阅该目录下的 .md。"
+        )
 
     view_context = get_view_context(skill_id)
-    if view_context is None:
-        return BASE_SYSTEM_PROMPT_TEMPLATE
+    if view_context is not None:
+        formatted_context = json.dumps(
+            _context_for_prompt(view_context.context),
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        prompt += f"\n\n## 当前 View: {view_context.view}\n{formatted_context}"
 
-    formatted_context = json.dumps(
-        _context_for_prompt(view_context.context),
-        ensure_ascii=False,
-        indent=2,
-        sort_keys=True,
-    )
-    return f"{BASE_SYSTEM_PROMPT_TEMPLATE}\n\n## 当前 View: {view_context.view}\n{formatted_context}"
+    return prompt
 
 
 async def stream_query(

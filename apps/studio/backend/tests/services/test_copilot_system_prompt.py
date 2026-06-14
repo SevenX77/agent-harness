@@ -14,14 +14,25 @@ def clear_view_contexts() -> Iterator[None]:
     copilot._view_contexts.clear()
 
 
-def test_base_system_prompt_contains_ac11_phrases() -> None:
-    assert "聚焦 Studio 上下文" in copilot.BASE_SYSTEM_PROMPT_TEMPLATE
-    assert "允许任何通用问题" in copilot.BASE_SYSTEM_PROMPT_TEMPLATE
-    assert "不要拒答" in copilot.BASE_SYSTEM_PROMPT_TEMPLATE
+def test_base_system_prompt_is_skill_authoring_brain() -> None:
+    # F3: the prompt teaches the v0.3.0 graph_skill format (replacing the old
+    # 3-line generic prompt) while keeping "answer any reasonable question".
+    template = copilot.BASE_SYSTEM_PROMPT_TEMPLATE
+    assert "graph_skill" in template
+    assert "v0.3.0" in template
+    assert "phases" in template
+    assert "聚焦 Studio 上下文" in template
+    assert "不拒答" in template
 
 
-def test_build_system_prompt_without_view_context_returns_base_only() -> None:
-    assert copilot.build_system_prompt("skill-a") == copilot.BASE_SYSTEM_PROMPT_TEMPLATE.strip()
+def test_build_system_prompt_without_view_context_has_brain_and_mounted_spec() -> None:
+    # F3: with no view context, the prompt is the brain + the mounted-spec pointer
+    # (the spec dir exists in this repo), and no view section.
+    prompt = copilot.build_system_prompt("skill-a")
+
+    assert prompt.startswith(copilot.BASE_SYSTEM_PROMPT_TEMPLATE.strip())
+    assert "已挂载 skill-spec" in prompt
+    assert "## 当前 View" not in prompt
 
 
 def test_build_system_prompt_injects_small_view_context() -> None:

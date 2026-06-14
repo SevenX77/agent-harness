@@ -123,3 +123,54 @@ def test_run_emits_trace_events_and_writes_artifacts(
     logger.info("event_types=%s", event_types)
     assert "run_ended" in event_types, f"run_ended must terminate the stream; got {event_types}"
     assert "internal_error" not in event_types, f"saw internal_error: {event_types}"
+
+
+def _wait_for_completed_run(runs_root: Path, pre_existing: set[Path], pattern: re.Pattern[str]) -> Path:
+    deadline = time.time() + RUN_TIMEOUT_S
+    while time.time() < deadline:
+        if runs_root.exists():
+            fresh = {d for d in runs_root.glob("*") if pattern.match(d.name)} - pre_existing
+            done = [
+                d for d in fresh
+                if (d / "final_state.json").exists() and (d / "metrics.json").exists()
+            ]
+            if done:
+                return sorted(done)[-1]
+        time.sleep(0.25)
+    raise AssertionError(f"no completed run under {runs_root} within {RUN_TIMEOUT_S}s")
+
+
+def test_promote_then_compare_golden_renders_per_node_diff(
+    studio_page: Page,
+    studio_workspace: dict[str, Path],
+) -> None:
+    page = studio_page
+    page.set_default_timeout(15_000)
+
+    _select_skill(page, "e2e-fast")
+    runs_root = (
+        studio_workspace["workspaces_dir"] / "default" / "skills" / "e2e-fast" / ".workspace" / "runs"
+    )
+    run_dir_re = re.compile(r"^\d{4}-\d{2}-\d{2}T")
+    pre_existing = (
+        {d for d in runs_root.glob("*") if run_dir_re.match(d.name)} if runs_root.exists() else set()
+    )
+
+    _drive_compile_predict_run(page)
+    expect(page.get_by_text("Trace Timeline", exact=False)).to_be_visible(timeout=15_000)
+    _wait_for_completed_run(runs_root, pre_existing, run_dir_re)
+    logger.info("run completed; promoting to golden")
+
+    # Promote the run to a golden baseline (TracePanel header button I wired).
+    page.get_by_role("button", name="Promote run to golden baseline").click()
+    expect(page.get_by_text(re.compile("Promoted run to golden", re.IGNORECASE))).to_be_visible(
+        timeout=10_000
+    )
+
+    # Compare the run to the golden baseline -> golden diff overlay with a verdict.
+    page.get_by_role("button", name="Compare trace to golden baseline").click()
+    expect(page.get_by_text("Golden Diff").first).to_be_visible(timeout=10_000)
+    # Run vs its own freshly-promoted golden is identical -> a passing verdict
+    # with no differences (proves compare resolved + rendered, not a silent fail).
+    expect(page.get_by_text("No differences", exact=False).first).to_be_visible(timeout=10_000)
+    logger.info("golden diff overlay rendered with a verdict")

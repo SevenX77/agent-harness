@@ -239,6 +239,16 @@ describe('AssetsPanel', () => {
     expect(html).not.toContain('GRAPH.md')
     expect(html).not.toContain('SKILL.md')
   })
+
+  it('shows no subgraphs (no hardcoded mock) when the skill has none', () => {
+    const html = renderAssetsPanel({ 'phases/step1/LOGIC.md': '---\nname: step1\n---\n' })
+
+    // The panel must render gateway/skill facts only — never the old hardcoded
+    // intent_classifier / translator_subgraph fallback.
+    expect(html).not.toContain('intent_classifier')
+    expect(html).not.toContain('translator_subgraph')
+    expect(html).toContain('Subgraphs')
+  })
 })
 
 function renderAssetsPanel(files: Record<string, string>): string {

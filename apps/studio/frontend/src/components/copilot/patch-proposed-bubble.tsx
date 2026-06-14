@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, FilePlus2, FilePenLine, RotateCcw, X } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -8,7 +8,6 @@ import {
   clearWorkspaceCheckpoint,
   restoreWorkspaceFile,
   seedWorkspaceCheckpoint,
-  writeWorkspaceFile,
 } from '../../lib/tauri'
 import { resolveWorkspaceIdentity } from '../studio/workspace-identity'
 import { errorMessage } from '../../utils/errors'
@@ -35,6 +34,25 @@ function PatchProposedBubbleBase({ event, skillId }: PatchProposedBubbleProps) {
     return resolveWorkspaceIdentity(skillId).workspaceRoot ?? skillId
   }
 
+  // Apply path (model B): record the pre-edit bytes the moment the edit lands so
+  // Reject rewinds the whole pending change through the Rust sole writer.
+  // Earliest-wins + durable; uses the bytes the backend shipped in the event
+  // (race-free vs re-reading the already-applied file). Best-effort — does not
+  // run in web/test (seedWorkspaceCheckpoint throws "Desktop only", caught here).
+  const seededRef = useRef(false)
+  useEffect(() => {
+    if (seededRef.current) return
+    const root = resolveRoot()
+    if (!root) return
+    seededRef.current = true
+    void seedWorkspaceCheckpoint(root, event.path, event.beforeContent, event.beforeExisted).catch(
+      (err: unknown) => {
+        console.warn(`copilot: could not seed checkpoint for ${event.path}: ${errorMessage(err)}`)
+      },
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const onAccept = async () => {
     setBusy(true)
     try {
@@ -59,15 +77,10 @@ function PatchProposedBubbleBase({ event, skillId }: PatchProposedBubbleProps) {
       if (!root) {
         throw new Error('No workspace to restore into (desktop only).')
       }
-      if (event.beforeExisted) {
-        // Restore the pre-edit bytes through the Rust sole writer.
-        await writeWorkspaceFile(root, event.path, event.beforeContent)
-      } else {
-        // Brand-new file: seed an existed:false checkpoint then restore, which
-        // deletes the file the copilot created rather than leaving empty bytes.
-        await seedWorkspaceCheckpoint(root, event.path, '', false)
-        await restoreWorkspaceFile(root, event.path)
-      }
+      // Rewind through the Rust sole writer from the checkpoint seeded on apply:
+      // write-back for an edited file, delete for a copilot-created one. This is
+      // the design's "Reject 经 Rust 从 checkpoint 还原" — not a blind overwrite.
+      await restoreWorkspaceFile(root, event.path)
       setReview('rejected')
     } catch (err: unknown) {
       toast.error(`Couldn't revert change: ${errorMessage(err)}`)

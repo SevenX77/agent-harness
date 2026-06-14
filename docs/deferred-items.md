@@ -8,6 +8,27 @@
 
 > **DEF-001 / DEF-002 已拉回 `studio-feature-trace-inspector` scope**(2026-06-01),不再是 deferred 项 —— 二者本就是该 spec 自己的 feature,不属跨 spec/孤儿,见下方 Promoted 区与 `requirement.md` REQ-3 / REQ-7。
 
+### DEF-024 — copilot F5 安全写:Bash 交互审批往返(双向 WS 控制通道)— 后续
+- **日期**: 2026-06-14
+- **事项**: copilot F5 模型 B 的 Bash「逐条审批卡」需用户点 Approve/Reject,回传后端解析 `can_use_tool` 的 Future 决定 Allow/Deny。现 `can_use_tool` 已对 Bash 触发并 emit `bash_approval_required` 事件,但**保守 hold=deny**(破坏性命令不批不跑,安全但不能 approve)。
+- **延期原因**: copilot WS 端点(`routers/copilot.py:34`)是**严格单向**(收一条 user_message → 流式发到 done,不在流式中读入站消息);Bash approve 需在流式途中接收前端 `{type:bash_decision,tool_use_id,approved}` 入站消息并解析 callback 的 pending Future = 需重构 WS 为双向控制通道 + 后端 pending-approval Future 注册表。
+- **前置条件**: 设计/实现双向 WS 控制协议(入站审批消息路由到 per-(skill,tool_use_id) Future)。Write/Edit 的 accept/reject 是**非阻塞**的(模型 B 即时应用事后审阅),已完整实现,不依赖此项。
+- **来源**: copilot-assist mvp1-alignment §F5;本会话 PoC 真跑确认 can_use_tool 对 Bash 触发(2026-06-14)。
+
+### DEF-025 — copilot F5 安全写:编辑器 buffer 实时同步 + accept/reject 后自动 recompile — 后续
+- **日期**: 2026-06-14
+- **事项**: 设计 §F5「改动即时进编辑器 buffer」+「改后自动 compile 回灌」。现 patch_proposed 的 Reject 把文件**还原到磁盘**(经 Rust 唯一写者),但 **Monaco 编辑器 buffer 不自动 reload、compile 不自动触发**。需:copilot 改动 → 编辑器 buffer live 更新;Accept/Reject 后 → 触发 recompile 回灌。
+- **延期原因**: copilot 面板与 Monaco 编辑器 / compile 流是分离组件,live buffer 双向同步是更深的集成(编辑器 store ↔ copilot 事件)。内联 diff bubble(主路径)+ 磁盘还原已做。
+- **前置条件**: 编辑器 store 暴露"外部文件变更 → reload buffer"钩子 + compile 触发 API。
+- **来源**: copilot-assist mvp1-alignment §F5;本会话 F5 frontend 实现(2026-06-14)。
+
+### DEF-026 — copilot F5:Monaco 并排 Open Compare(side-by-side)— 增强
+- **日期**: 2026-06-14
+- **事项**: 设计 §F5「Open Compare 并排 Monaco」。现做的是**内联 green/red 行 diff**(LCS,主路径,已满足"看改动 + accept/reject")。side-by-side Monaco DiffEditor 是增强视图。
+- **延期原因**: 内联 diff 已覆盖核心审阅需求;Monaco DiffEditor 挂载是增量增强,非阻塞。
+- **前置条件**: 复用 LazyMonacoPanel + DiffEditor;从 PatchProposedBubble 开 overlay。
+- **来源**: copilot-assist mvp1-alignment §F5。
+
 ### DEF-003 — 画布亮暗模式联动(Responsive Canvas Theme)— owner 待指派
 - **日期**: 2026-06-01
 - **事项**: React Flow 画布的网格、背景、自定义边 SVG(`stroke`/`strokeDasharray`)、节点辉光在 light/dark 切换时自动重绘(对应 trace-inspector level-3 `mvp0-alignment.md` target 2)。

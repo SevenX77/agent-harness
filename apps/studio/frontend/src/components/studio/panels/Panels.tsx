@@ -57,7 +57,7 @@ export function Panels({
     return <AssetsPanel skillDetail={skillDetail} selectedNode={selectedNode} />
   }
   if (activePanel === "input") {
-    return <InputPanel skillDetail={skillDetail} onFileOpen={onFileOpen} />
+    return <InputPanel skillId={skillId} skillDetail={skillDetail} onFileOpen={onFileOpen} />
   }
   if (activePanel === "timeline") {
     // Active run → live trace stream; otherwise the run-history list.

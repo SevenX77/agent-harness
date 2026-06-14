@@ -1,0 +1,144 @@
+import { useState } from "react"
+import useSWR from "swr"
+import { Plus, Trash2 } from "lucide-react"
+import { createTestInput, deleteTestInput, fetcher } from "@/api/client"
+import type { JsonObject, TestInputMetadata } from "@/api/types"
+import { errorMessage, isJsonObject } from "@/utils/errors"
+import { SectionHeading } from "./_shared/SectionHeading"
+
+type PrepareResult =
+  | { ok: true; name: string; content: JsonObject }
+  | { ok: false; error: string }
+
+/**
+ * Pure client-side validation for the create form, mirroring the backend's
+ * contract (non-empty name + JSON object content). Kept exported and pure so it
+ * is unit-testable without `@testing-library/react`; the interactive flow is
+ * covered by the Playwright e2e that drives the live panel.
+ */
+export function prepareTestInputCreate(name: string, contentText: string): PrepareResult {
+  const trimmed = name.trim()
+  if (!trimmed) {
+    return { ok: false, error: "Name is required" }
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(contentText)
+  } catch {
+    return { ok: false, error: "Content must be valid JSON" }
+  }
+  if (!isJsonObject(parsed)) {
+    return { ok: false, error: "Content must be a JSON object" }
+  }
+  return { ok: true, name: trimmed, content: parsed }
+}
+
+const EMPTY_CONTENT = "{\n  \n}"
+
+export function TestInputsSection({ skillId }: { skillId: string }) {
+  const { data, mutate } = useSWR<TestInputMetadata[]>(
+    `/skills/${skillId}/test_inputs`,
+    fetcher,
+  )
+  const [name, setName] = useState("")
+  const [content, setContent] = useState(EMPTY_CONTENT)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const items = data ?? []
+
+  const handleCreate = async () => {
+    const prepared = prepareTestInputCreate(name, content)
+    if (!prepared.ok) {
+      setError(prepared.error)
+      return
+    }
+    setError(null)
+    setBusy(true)
+    try {
+      await createTestInput(skillId, prepared.name, prepared.content)
+      setName("")
+      setContent(EMPTY_CONTENT)
+      await mutate()
+    } catch (err) {
+      // Surface the backend's typed reason "就近" (e.g. duplicate name) rather
+      // than a generic failure.
+      setError(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleDelete = async (id: string) => {
+    setError(null)
+    try {
+      await deleteTestInput(skillId, id)
+      await mutate()
+    } catch (err) {
+      setError(errorMessage(err))
+    }
+  }
+
+  return (
+    <section className="space-y-2">
+      <SectionHeading label="Test Inputs" />
+      <div className="space-y-1">
+        {items.length === 0 ? (
+          <p className="px-2 text-[11px] text-muted-foreground">No saved test inputs.</p>
+        ) : (
+          items.map((item) => (
+            <div
+              key={item.id}
+              className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1"
+            >
+              <span
+                className="min-w-0 flex-1 truncate text-xs text-foreground"
+                title={item.content_preview}
+              >
+                {item.name}
+              </span>
+              <button
+                type="button"
+                onClick={() => void handleDelete(item.id)}
+                aria-label={`Delete test input ${item.id}`}
+                className="text-muted-foreground transition-colors hover:text-destructive"
+              >
+                <Trash2 className="size-3.5" />
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="space-y-2 rounded-md border border-border bg-background p-2">
+        <input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="Name (e.g. happy-path)"
+          aria-label="New test input name"
+          className="w-full rounded-md border border-border bg-card px-2 py-1 text-xs"
+        />
+        <textarea
+          value={content}
+          onChange={(event) => setContent(event.target.value)}
+          aria-label="New test input JSON"
+          spellCheck={false}
+          className="h-24 w-full resize-none rounded-md border border-border bg-card px-2 py-1 font-mono text-xs"
+        />
+        {error ? (
+          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">
+            {error}
+          </div>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => void handleCreate()}
+          disabled={busy}
+          className="flex items-center gap-1 rounded-md bg-foreground px-2 py-1 text-xs font-medium text-background transition-opacity hover:opacity-80 disabled:opacity-50"
+        >
+          <Plus className="size-3.5" />
+          Save test input
+        </button>
+      </div>
+    </section>
+  )
+}

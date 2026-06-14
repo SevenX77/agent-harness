@@ -27,7 +27,10 @@ from claude_agent_sdk import (
     ClaudeSDKClient,
     ClaudeSDKError,
     CLIConnectionError,
+    PermissionResultAllow,
+    PermissionResultDeny,
     ProcessError,
+    ToolPermissionContext,
 )
 from claude_agent_sdk.types import (
     AssistantMessage,
@@ -47,9 +50,11 @@ from app.core.adapters.gateway import (
 )
 from app.models.copilot import (
     CopilotEvent,
+    CopilotEventBashApprovalRequired,
     CopilotEventContextResolved,
     CopilotEventDone,
     CopilotEventError,
+    CopilotEventPatchProposed,
     CopilotEventText,
     CopilotEventThinking,
     CopilotEventToolUseResult,
@@ -132,6 +137,155 @@ def _default_gateway_adapter_factory() -> GatewayAdapter:
 _gateway_adapter_factory: Callable[[], GatewayAdapter] = _default_gateway_adapter_factory
 
 
+# ── F5 safe-write (model B) ──────────────────────────────────────────────────
+#
+# The SDK consults ``can_use_tool`` only for tools NOT pre-allowed via
+# ``allowed_tools`` (verified by PoC). So safe-write keeps only Read pre-allowed
+# and routes Write/Edit/Bash through the callback: Write/Edit emit a
+# ``patch_proposed`` event (apply-then-review, non-blocking) then ALLOW; Bash is
+# held for human approval (the interactive approve round-trip needs a
+# bidirectional WS channel, not yet wired) and surfaced as
+# ``bash_approval_required``. The callback feeds events into the active query's
+# queue via a per-skill registry — one active query per skill.
+
+
+@dataclass
+class _SafeWriteSink:
+    queue: asyncio.Queue[CopilotEvent | object]
+    workspace_root: Path
+
+
+_safe_write_sinks: dict[str, _SafeWriteSink] = {}
+
+_STREAM_SENTINEL = object()
+
+
+async def _drain_sdk_response(
+    client: ClaudeSDKClient,
+    tool_names: dict[str, str],
+    queue: asyncio.Queue[CopilotEvent | object],
+) -> None:
+    """Translate the SDK response stream onto the query queue, then close it.
+
+    Module-level (not a per-query closure) so it binds its args explicitly — the
+    can_use_tool callback feeds the same queue concurrently, and a sentinel marks
+    end-of-stream so the generator stops draining.
+    """
+
+    try:
+        async for sdk_message in client.receive_response():
+            for event in _translate_sdk_message(sdk_message, tool_names):
+                await queue.put(event)
+    finally:
+        await queue.put(_STREAM_SENTINEL)
+
+_BASH_HELD_MESSAGE = "Bash 命令需用户审批（审批 UI 待接入，命令已暂缓执行）"
+
+
+def _relative_to_workspace(abs_path: Path, workspace_root: Path) -> str:
+    """Project an absolute tool path back to a workspace-relative path for the UI.
+
+    Falls back to the bare filename if the edit targets a path outside the
+    workspace (the editor maps by relative path, and an out-of-tree edit cannot
+    be reflected there anyway — surfaced rather than silently dropped).
+    """
+
+    try:
+        return str(abs_path.relative_to(workspace_root))
+    except ValueError:
+        logger.warning(
+            "phase=copilot_safe_write edit target outside workspace: %s (root=%s)",
+            abs_path,
+            workspace_root,
+        )
+        return abs_path.name
+
+
+def _compute_after_content(
+    tool_name: str, tool_input: Mapping[str, Any], before: str
+) -> str:
+    """Best-effort applied content for instant diff rendering.
+
+    Authoritative content is the file on disk after the SDK applies; this only
+    drives the inline diff bubble, so an approximate Edit replacement is fine.
+    """
+
+    if tool_name == "Write":
+        return str(tool_input.get("content", ""))
+    old = str(tool_input.get("old_string", ""))
+    new = str(tool_input.get("new_string", ""))
+    if tool_input.get("replace_all"):
+        return before.replace(old, new)
+    return before.replace(old, new, 1)
+
+
+def _build_patch_proposed_event(
+    tool_name: str,
+    tool_input: Mapping[str, Any],
+    tool_use_id: str,
+    workspace_root: Path,
+) -> CopilotEventPatchProposed | None:
+    """Read pre-edit bytes (a read — D12 sole-writer untouched) and build the diff event."""
+
+    raw_path = tool_input.get("file_path") or tool_input.get("path")
+    if not raw_path:
+        return None
+    abs_path = Path(str(raw_path))
+    existed = abs_path.is_file()
+    try:
+        before = abs_path.read_text(encoding="utf-8") if existed else ""
+    except OSError as exc:
+        logger.warning("phase=copilot_safe_write cannot read pre-edit bytes %s: %s", abs_path, exc)
+        before = ""
+        existed = False
+    return CopilotEventPatchProposed(
+        tool_use_id=tool_use_id,
+        tool_name=cast(Literal["Write", "Edit"], tool_name),
+        path=_relative_to_workspace(abs_path, workspace_root),
+        before_existed=existed,
+        before_content=before,
+        after_content=_compute_after_content(tool_name, tool_input, before),
+    )
+
+
+def _make_safe_write_can_use_tool(
+    skill_id: str,
+) -> Callable[[str, dict[str, Any], ToolPermissionContext], Any]:
+    """Build the per-skill ``can_use_tool`` callback (looks up the active sink)."""
+
+    async def can_use_tool(
+        tool_name: str,
+        tool_input: dict[str, Any],
+        context: ToolPermissionContext,
+    ) -> PermissionResultAllow | PermissionResultDeny:
+        sink = _safe_write_sinks.get(skill_id)
+        tool_use_id = context.tool_use_id or ""
+        if tool_name in ("Write", "Edit"):
+            if sink is not None:
+                event = _build_patch_proposed_event(
+                    tool_name, tool_input, tool_use_id, sink.workspace_root
+                )
+                if event is not None:
+                    logger.info(
+                        "phase=copilot_safe_write action=patch_proposed tool=%s path=%s",
+                        tool_name,
+                        event.path,
+                    )
+                    await sink.queue.put(event)
+            return PermissionResultAllow()
+        if tool_name == "Bash":
+            command = str(tool_input.get("command", ""))
+            logger.info("phase=copilot_safe_write action=bash_held command=%s", command)
+            if sink is not None:
+                await sink.queue.put(
+                    CopilotEventBashApprovalRequired(tool_use_id=tool_use_id, command=command)
+                )
+            return PermissionResultDeny(message=_BASH_HELD_MESSAGE, interrupt=False)
+        return PermissionResultAllow()
+
+    return can_use_tool
+
+
 def make_session_key(
     skill_id: str,
     model_code: str,
@@ -157,8 +311,15 @@ def build_options(
     workspace_dir: str | Path,
     *,
     env_overrides: Mapping[str, str] | None = None,
+    can_use_tool: Callable[[str, dict[str, Any], ToolPermissionContext], Any] | None = None,
 ) -> ClaudeAgentOptions:
-    """Build per-session Claude Agent SDK options without mutating os.environ."""
+    """Build per-session Claude Agent SDK options without mutating os.environ.
+
+    With ``can_use_tool`` (the F5 safe-write path) only Read is pre-allowed and
+    permission_mode is "default", so the SDK routes Write/Edit/Bash through the
+    callback. Without it (the SDK probe path) the legacy acceptEdits + full
+    allow-list is kept so the probe applies edits without prompting.
+    """
 
     env = {"ANTHROPIC_API_KEY": api_key}
     if base_url:
@@ -170,11 +331,21 @@ def build_options(
     # exact format/error-code ground-truth (渐进暴露). Skipped if absent.
     spec_dir = _skill_spec_dir()
     add_dirs: list[str | Path] = [str(spec_dir)] if spec_dir is not None else []
+    permission_mode: Literal["default", "acceptEdits"]
+    if can_use_tool is not None:
+        # Pre-allowing a tool makes the SDK skip can_use_tool for it, so keep only
+        # Read pre-allowed; Write/Edit/Bash flow through the safe-write callback.
+        allowed_tools = ["Read"]
+        permission_mode = "default"
+    else:
+        allowed_tools = _ALLOWED_TOOLS.copy()
+        permission_mode = "acceptEdits"
     return ClaudeAgentOptions(
         cwd=workspace_dir,
-        permission_mode="acceptEdits",
-        allowed_tools=_ALLOWED_TOOLS.copy(),
+        permission_mode=permission_mode,
+        allowed_tools=allowed_tools,
         env=env,
+        can_use_tool=can_use_tool,
         # F1: enable extended thinking so the SDK emits ThinkingBlocks. Adaptive
         # lets the model size its own reasoning per task; display is left at the
         # default (full) — never "summarized"/"omitted" — so the whole reasoning
@@ -361,6 +532,9 @@ async def stream_query(
             continue
 
         tool_names: dict[str, str] = {}
+        resolved_workspace = Path(
+            str(workspace_dir or _resolve_copilot_workspace_dir(skill_id))
+        )
         try:
             client = await get_or_create_session(
                 skill_id=skill_id,
@@ -369,19 +543,43 @@ async def stream_query(
                 base_url=base_url,
                 api_key=api_key,
                 env_overrides=env_overrides,
-                workspace_dir=workspace_dir or _resolve_copilot_workspace_dir(skill_id),
+                workspace_dir=resolved_workspace,
             )
             await _ensure_client_connected(client)
-            await client.query(_prompt_with_system_context(skill_id, user_message))
 
-            yielded_done = False
-            async for sdk_message in client.receive_response():
-                for event in _translate_sdk_message(sdk_message, tool_names):
-                    if isinstance(event, CopilotEventDone):
+            # F5: register the safe-write sink so the can_use_tool callback can
+            # interleave patch_proposed / bash_approval_required events into this
+            # query's stream, then drain translated messages + callback events
+            # from one queue (preserving arrival order).
+            queue: asyncio.Queue[CopilotEvent | object] = asyncio.Queue()
+            _safe_write_sinks[skill_id] = _SafeWriteSink(
+                queue=queue, workspace_root=resolved_workspace
+            )
+            consumer: asyncio.Task[None] | None = None
+            try:
+                await client.query(_prompt_with_system_context(skill_id, user_message))
+                consumer = asyncio.create_task(
+                    _drain_sdk_response(client, tool_names, queue)
+                )
+                yielded_done = False
+                while True:
+                    event = await queue.get()
+                    if event is _STREAM_SENTINEL:
+                        break
+                    typed_event = cast(CopilotEvent, event)
+                    if isinstance(typed_event, CopilotEventDone):
                         yielded_done = True
-                    yield event
-            if not yielded_done:
-                yield CopilotEventDone()
+                    yield typed_event
+                if not yielded_done:
+                    yield CopilotEventDone()
+            finally:
+                _safe_write_sinks.pop(skill_id, None)
+                if consumer is not None and not consumer.done():
+                    consumer.cancel()
+                    try:
+                        await consumer
+                    except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                        pass
             return
         except Exception as exc:  # noqa: BLE001
             if len(routes) == 1:
@@ -487,6 +685,7 @@ async def get_or_create_session(
                     api_key,
                     workspace_dir,
                     env_overrides=env_overrides,
+                    can_use_tool=_make_safe_write_can_use_tool(skill_id),
                 )
             )
             _sessions[session_key] = session

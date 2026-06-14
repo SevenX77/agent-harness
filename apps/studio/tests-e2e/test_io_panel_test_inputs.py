@@ -63,7 +63,7 @@ def test_io_panel_create_and_delete_test_input(
     assert not input_file.exists(), f"unexpected pre-existing {input_file}"
 
     # Open the Input (i/o) panel from the left toolbar.
-    page.get_by_role("button", name="Input", exact=True).click()
+    page.get_by_role("button", name="I/O", exact=True).click()
     name_field = page.get_by_label("New test input name")
     expect(name_field).to_be_visible(timeout=10_000)
     logger.info("Input panel + Test Inputs section visible")
@@ -97,7 +97,7 @@ def test_io_panel_duplicate_name_shows_clear_error(
     page.set_default_timeout(15_000)
 
     _select_skill(page, "e2e-fast")
-    page.get_by_role("button", name="Input", exact=True).click()
+    page.get_by_role("button", name="I/O", exact=True).click()
     name_field = page.get_by_label("New test input name")
     expect(name_field).to_be_visible(timeout=10_000)
 
@@ -125,7 +125,7 @@ def test_selected_test_input_feeds_predict_and_run(studio_page: Page) -> None:
     page.set_default_timeout(15_000)
 
     _select_skill(page, "e2e-fast")
-    page.get_by_role("button", name="Input", exact=True).click()
+    page.get_by_role("button", name="I/O", exact=True).click()
     name_field = page.get_by_label("New test input name")
     expect(name_field).to_be_visible(timeout=10_000)
 

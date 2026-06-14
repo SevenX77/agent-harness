@@ -33,6 +33,19 @@ class CopilotEventBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class CopilotEventContextResolved(CopilotEventBase):
+    """F4: echo, as the first streamed event, what context was injected this turn.
+
+    Anti-hidden-prompt-magic (same spirit as F1 "不省略"): the UI shows a
+    collapsible "injected context" card so the user can see exactly what the
+    copilot was given before it starts.
+    """
+
+    type: Literal["context_resolved"] = "context_resolved"
+    summary: str
+    detail: str
+
+
 class CopilotEventThinking(CopilotEventBase):
     """Streamed extended-thinking delta.
 
@@ -73,7 +86,8 @@ class CopilotEventError(CopilotEventBase):
 
 
 CopilotEvent: TypeAlias = Annotated[
-    CopilotEventThinking
+    CopilotEventContextResolved
+    | CopilotEventThinking
     | CopilotEventText
     | CopilotEventToolUseStart
     | CopilotEventToolUseResult

@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from app.models.copilot import (
+    CopilotEventContextResolved,
     CopilotEventDone,
     CopilotEventError,
     CopilotEventText,
@@ -172,7 +173,8 @@ def test_stream_query_uses_copilot_chat_active_model_when_no_override(
     assert client.options is not None
     assert client.options.env["ANTHROPIC_API_KEY"] == "primary-secret"
     assert client.options.env["ANTHROPIC_BASE_URL"] == "https://credential.test"
-    assert events == [CopilotEventText(content="hello"), CopilotEventDone()]
+    assert isinstance(events[0], CopilotEventContextResolved)
+    assert events[1:] == [CopilotEventText(content="hello"), CopilotEventDone()]
 
 
 def test_stream_query_resolves_secret_from_credential_provider(
@@ -211,7 +213,8 @@ def test_stream_query_resolves_secret_from_credential_provider(
 
     assert client.options is not None
     assert client.options.env["ANTHROPIC_API_KEY"] == "provider-secret"
-    assert events == [CopilotEventText(content="hello"), CopilotEventDone()]
+    assert isinstance(events[0], CopilotEventContextResolved)
+    assert events[1:] == [CopilotEventText(content="hello"), CopilotEventDone()]
 
 
 def test_stream_query_falls_back_to_second_copilot_route_when_first_route_fails(
@@ -290,7 +293,8 @@ def test_stream_query_falls_back_to_second_copilot_route_when_first_route_fails(
     ]
     assert secondary.options is not None
     assert secondary.options.env["ANTHROPIC_BASE_URL"] == "https://secondary.test"
-    assert events == [CopilotEventText(content="fallback hello"), CopilotEventDone()]
+    assert isinstance(events[0], CopilotEventContextResolved)
+    assert events[1:] == [CopilotEventText(content="fallback hello"), CopilotEventDone()]
 
 
 def test_stream_query_maps_ark_anthropic_profile_to_claude_code_env(
@@ -326,7 +330,8 @@ def test_stream_query_maps_ark_anthropic_profile_to_claude_code_env(
     )
     assert client.options.env["ANTHROPIC_AUTH_TOKEN"] == "ark-secret"
     assert client.options.env["ANTHROPIC_MODEL"] == "doubao-seed-2-0-pro-260215"
-    assert events == [CopilotEventText(content="ark hello"), CopilotEventDone()]
+    assert isinstance(events[0], CopilotEventContextResolved)
+    assert events[1:] == [CopilotEventText(content="ark hello"), CopilotEventDone()]
 
 
 def test_stream_query_reports_clear_error_after_all_copilot_routes_fail(
@@ -365,9 +370,10 @@ def test_stream_query_reports_clear_error_after_all_copilot_routes_fail(
     )
 
     assert created_keys == ["first-secret", "second-secret"]
-    assert len(events) == 1
-    assert isinstance(events[0], CopilotEventError)
-    assert "all configured Copilot providers failed" in events[0].message
+    assert isinstance(events[0], CopilotEventContextResolved)
+    assert len(events) == 2
+    assert isinstance(events[1], CopilotEventError)
+    assert "all configured Copilot providers failed" in events[1].message
 
 
 def test_next_copilot_route_logs_gateway_fallback_failure(
@@ -451,7 +457,8 @@ def test_stream_query_yields_error_when_no_api_key(
         _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
     )
 
-    assert events == [CopilotEventError(message="Endpoint test-provider 未配置 API key")]
+    assert isinstance(events[0], CopilotEventContextResolved)
+    assert events[1:] == [CopilotEventError(message="Endpoint test-provider 未配置 API key")]
 
 
 def test_stream_query_yields_clear_error_for_credential_ref_only_route(
@@ -471,7 +478,8 @@ def test_stream_query_yields_clear_error_for_credential_ref_only_route(
         _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
     )
 
-    assert events == [
+    assert isinstance(events[0], CopilotEventContextResolved)
+    assert events[1:] == [
         CopilotEventError(message="Endpoint test-provider 未配置 API key")
     ]
 

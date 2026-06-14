@@ -115,5 +115,26 @@ commit 链:`c05f33cb`(综述)→`59169f9c`(trace 挂载)→`79521944`+`b2d3559c`
 - **判断**:KEEP-MAIN 约束本是 **Phase-1 前端嫁接**的卫生规则(别拿 wave3 覆盖 #139);Phase-1 plan 自己把"翻 api/llm.ts 到 6 态"显式设计成"**后端 adapter 先收敛后**的下一步",即本阶段。按决策层级(核心决策>配套条件)+ "冲突处 three-module 赢",6 态收敛应做、含翻 api/llm.ts。
 - **本轮处理**:因 PM 显式点名该文件、且是大耦合改动,**本轮不擅自翻 api/llm.ts**;先做其余不碰 KEEP-MAIN 的隔离缺口。6 态收敛待 PM 一句"可翻 api/llm.ts 做 6 态"即开工(全程可回滚、非 main)。
 
+## E2E 验证:浏览器驱动生命周期跑通(2026-06-14 · 真分数)
+
+> PM 重申:验证 = computer-use 鼠标模拟用户跑通生命周期;单测绿不算分。本节是用 **Playwright(浏览器)** 作为 headless 代理,把生命周期在**真前端+真后端**上真跑通——逼出并修了一串真 drift。
+
+- **`apps/studio/tests-e2e/test_run_flow.py` ✅ GREEN**(commit `e6776187`):浏览器开 e2e-fast → **Compile→Predict→Run** → **TracePanel 挂载**(我 Tier 1A 的活,真机验证)→ run 产物落盘。验到的真数据流:`final_state={step1:_s1, step2:_s1_s2, final_result:_s1_s2_s3}`、metrics `status=success`、trace `run_started/3×phase/run_ended`。
+- **跑起来逼出的 5 个真 bug(全修)**:
+  1. **后端强制 auth**:`main.py:71` 没 token 拒启动、每请求要 Bearer(无 dev bypass)。e2e 接 `STUDIO_DEV_TUNNEL_TOKEN` + 前端 `#tkn=` dev-tunnel hash。
+  2. **multiprocessing spawn 重导致命**:run_manager spawn worker 重导 `_backend_runner` 的 `__main__`,模块级建了 FastAPI app → worker 重初始化把 run 打断(final_state 不落)。把 app+uvicorn 收进 `__main__` guard。
+  3. **skill 格式过时**:e2e-fast 是 V2.0 root SKILL.md("schema 2.0 root SKILL.md is not supported; use GRAPH.md")→ 重写成当前 v0.3.0 GRAPH.md + logic phases(actions)。
+  4. **public 只读**:predict 要可写 workspace skill(public SKILLS_DIR 只读→403 SKILL_READ_ONLY)→ 种进 `WORKSPACES_DIR/default/skills`。
+  5. **当前 UI 选择器**:旧 header-run/playground test-id 没了 → 改驱 center-action-bar + 工作区卡片 + `.workspace/runs/<ts>` 产物路径。
+- **`test_desktop_lifecycle.py` ✅**(4 passed,commit `e6776187`):补 sidecar auth token + Bearer。
+- **端口隔离 ✅**(commit `953464e7`):conftest 后端改用 ephemeral 端口,让全套同 session 跑时 8787 留给 desktop"8787 占用"场景。
+- **诚实 skip(非伪绿)2 个**(commit `953464e7`):`test_cli_toast`(点已删的"Open CLI")、`test_lint_flow`(编辑已不存在的 root SKILL.md + 已删的 Save/"Saved and linted" 流);各带精确 re-author 理由。
+- **全套门禁**:`uv run --group e2e pytest apps/studio/tests-e2e` = **5 passed / 2 skipped / 0 failed**,ruff clean。
+
+### E2E 剩余(登记,下一步)
+- **生命周期 spine 未覆盖段**:resume(前端零 resume UI=桶B缺口,需先建 UI)、publish、golden compare(我已接 Compare 按钮,可加 UI 断言)、debug。
+- **lint/cli e2e re-author**:按当前 GRAPH.md 编辑→lint 流 / 确认 CLI 是否在 MVP1 范围。
+- **真 headline 仍欠**:computer-use 驱动**真 Tauri .app**(需后端可用 .app,build_vendor 坑)——Playwright 浏览器是代理,桌面 .app 才是 charter §3 ① headline。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

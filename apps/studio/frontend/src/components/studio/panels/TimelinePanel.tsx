@@ -1,6 +1,11 @@
-import { AlertCircle, CheckCircle2, RefreshCw } from "lucide-react"
+import { useState } from "react"
+import { AlertCircle, ArrowLeft, CheckCircle2, RefreshCw } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { TracePanel } from "@/components/TracePanel"
+import { getRunDetail } from "@/api/client"
+import type { CallbackEvent } from "@/api/types"
 import { useRunHistory } from "../../../hooks/useRunHistory"
+import { errorMessage } from "../../../utils/errors"
 import { useWorkspaceContext } from "../WorkspaceContext"
 import { Button } from "../../ui/button"
 
@@ -32,9 +37,50 @@ const relativeTime = (value: string): string => {
 export function TimelinePanel() {
   const { currentSkillId } = useWorkspaceContext()
   const { runs, isLoading, error, refresh } = useRunHistory(currentSkillId)
+  // F2 (trace): clicking a past run loads its full trace (RunDetail.events) in place.
+  const [selected, setSelected] = useState<{ runId: string; events: CallbackEvent[] } | null>(null)
+  const [traceError, setTraceError] = useState<string | null>(null)
+  const [loadingRunId, setLoadingRunId] = useState<string | null>(null)
+
+  const openRun = async (runId: string) => {
+    if (!currentSkillId) return
+    setLoadingRunId(runId)
+    setTraceError(null)
+    try {
+      const detail = await getRunDetail(currentSkillId, runId)
+      setSelected({ runId, events: detail.events })
+    } catch (caught) {
+      setTraceError(errorMessage(caught))
+    } finally {
+      setLoadingRunId(null)
+    }
+  }
+
+  if (selected) {
+    return (
+      <div className="flex h-full flex-col bg-background">
+        <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-lg"
+            onClick={() => setSelected(null)}
+            aria-label="Back to timeline"
+          >
+            <ArrowLeft className="size-4" />
+          </Button>
+          <span className="truncate font-mono text-xs text-muted-foreground">
+            Run {selected.runId.slice(0, 12)}…
+          </span>
+        </div>
+        <div className="min-h-0 flex-1">
+          <TracePanel traceLogs={selected.events} activePhase={null} onSelectPrompt={() => undefined} />
+        </div>
+      </div>
+    )
+  }
 
   return (
-
     <div className="flex h-full flex-col bg-background">
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-3">
         <div>
@@ -54,24 +100,33 @@ export function TimelinePanel() {
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="px-2 py-2 space-y-1">
+        <div className="space-y-1 px-2 py-2">
           {isLoading && runs.length === 0 ? (
             <div className="p-3 text-xs text-muted-foreground">Loading runs...</div>
           ) : null}
           {error ? (
-            <div className="p-3 text-xs text-destructive rounded-md border border-destructive/20 bg-destructive/10">
+            <div className="rounded-md border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
               Failed to load run history
             </div>
           ) : null}
+          {traceError ? (
+            <div className="rounded-md border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
+              {traceError}
+            </div>
+          ) : null}
           {!isLoading && !error && runs.length === 0 ? (
-            <div className="p-3 text-xs text-muted-foreground text-center">
+            <div className="p-3 text-center text-xs text-muted-foreground">
               No runs recorded yet. Compile and run your skill to see them here!
             </div>
           ) : null}
           {runs.map((run) => (
-            <div
+            <button
+              type="button"
               key={run.run_id}
-              className="group cursor-pointer rounded-md px-2 py-2 transition-colors hover:bg-accent border border-transparent hover:border-border"
+              onClick={() => void openRun(run.run_id)}
+              disabled={loadingRunId !== null}
+              aria-label={`View trace for run ${run.run_id}`}
+              className="group w-full cursor-pointer rounded-md border border-transparent px-2 py-2 text-left transition-colors hover:border-border hover:bg-accent disabled:opacity-60"
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -80,19 +135,19 @@ export function TimelinePanel() {
                   ) : (
                     <AlertCircle className="size-4 text-destructive" />
                   )}
-                  <span className="text-xs font-mono text-muted-foreground group-hover:text-foreground truncate max-w-[120px]">
+                  <span className="max-w-[120px] truncate font-mono text-xs text-muted-foreground group-hover:text-foreground">
                     {run.run_id.slice(0, 12)}...
                   </span>
                 </div>
-                <span className="text-[10px] text-muted-foreground">{relativeTime(run.started_at)}</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {loadingRunId === run.run_id ? "Loading…" : relativeTime(run.started_at)}
+                </span>
               </div>
               <div className="mt-1 flex items-center justify-between pl-6 text-[11px] text-muted-foreground">
                 <span>{formatDuration((run.metrics as unknown as Record<string, unknown>)?.wall_time_sec as number | null)}</span>
-                {run.metrics?.total_tokens ? (
-                  <span>{run.metrics.total_tokens} tokens</span>
-                ) : null}
+                {run.metrics?.total_tokens ? <span>{run.metrics.total_tokens} tokens</span> : null}
               </div>
-            </div>
+            </button>
           ))}
         </div>
       </ScrollArea>

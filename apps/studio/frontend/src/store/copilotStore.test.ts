@@ -130,4 +130,39 @@ describe('copilotStore.hydrate', () => {
 
     expect(listWorkspaceDir).toHaveBeenCalledTimes(1)
   })
+
+  it('restores the last-viewed tab from _active.json, not the newest session (F2/D8)', async () => {
+    // session-100 (older) was the last-viewed tab; session-200 is just newer.
+    listWorkspaceDir.mockResolvedValue([fileEntry('session-100.json'), fileEntry('session-200.json')])
+    readWorkspaceFile.mockImplementation((_ws: string, path: string) => {
+      if (path.endsWith('_active.json')) {
+        return Promise.resolve({ path, content: JSON.stringify({ activeSessionId: 'session-100' }), hash: 'h' })
+      }
+      return Promise.resolve({
+        path,
+        content: JSON.stringify(diskSession(path.includes('100') ? 'session-100' : 'session-200', 'x')),
+        hash: 'h',
+      })
+    })
+
+    copilotStore.setContext(WS, SKILL)
+    await copilotStore.hydrate(WS, SKILL)
+
+    // Active is the persisted last-viewed tab, even though session-200 is newer.
+    expect(copilotStore.getSnapshot().activeSessionId).toBe('session-100')
+  })
+
+  it('ignores the _active.json marker file when loading sessions', async () => {
+    listWorkspaceDir.mockResolvedValue([fileEntry('session-1.json'), fileEntry('_active.json')])
+    readWorkspaceFile.mockImplementation((_ws: string, path: string) => {
+      if (path.endsWith('_active.json')) {
+        return Promise.resolve({ path, content: JSON.stringify({ activeSessionId: 'session-1' }), hash: 'h' })
+      }
+      return Promise.resolve({ path, content: JSON.stringify(diskSession('session-1', 'x')), hash: 'h' })
+    })
+
+    const sessions = await loadCopilotSessionsFromDisk(WS, SKILL)
+    // _active.json is a marker, not a session — it must not appear as a session.
+    expect(sessions.map((s) => s.id)).toEqual(['session-1'])
+  })
 })

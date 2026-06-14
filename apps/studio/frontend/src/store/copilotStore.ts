@@ -38,7 +38,10 @@ export async function loadCopilotSessionsFromDisk(
   const entries = await listWorkspaceDir(workspaceId, dir)
   const sessions: CopilotSession[] = []
   for (const entry of entries) {
-    if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
+    // `_`-prefixed files are reserved markers (e.g. _active.json), not sessions.
+    if (entry.kind !== 'file' || !entry.name.endsWith('.json') || entry.name.startsWith('_')) {
+      continue
+    }
     try {
       const result = await readWorkspaceFile(workspaceId, `${dir}/${entry.name}`)
       const parsed: unknown = JSON.parse(result.content)
@@ -56,6 +59,31 @@ export async function loadCopilotSessionsFromDisk(
     }
   }
   return sessions
+}
+
+function activeMarkerPath(skillId: string): string {
+  return `${sessionsDir(skillId)}/_active.json`
+}
+
+/**
+ * Read the last-active session id persisted for a workspace/skill, so cold-start
+ * restores the tab the user was actually viewing (F2/D8: "退出恢复 ... 上次活跃
+ * tab"), not just the newest-created one. Returns null if no marker / unreadable.
+ */
+export async function loadActiveCopilotSessionId(
+  workspaceId: string,
+  skillId: string,
+): Promise<string | null> {
+  try {
+    const result = await readWorkspaceFile(workspaceId, activeMarkerPath(skillId))
+    const parsed: unknown = JSON.parse(result.content)
+    if (parsed && typeof parsed === 'object' && typeof (parsed as { activeSessionId?: unknown }).activeSessionId === 'string') {
+      return (parsed as { activeSessionId: string }).activeSessionId
+    }
+  } catch {
+    // No marker yet (first run) or unreadable — fall back to newest session.
+  }
+  return null
 }
 
 export interface CopilotState {
@@ -88,6 +116,22 @@ let cachedSnapshot: CopilotState | null = null
 function emit() {
   cachedSnapshot = null
   listeners.forEach((listener) => listener())
+}
+
+/**
+ * Persist the active session id (last-viewed tab) so cold start restores it.
+ * Fire-and-forget — failure surfaces via persistenceError but never blocks the
+ * UI tab switch. Inert in web/test (writeWorkspaceFile throws "Desktop only",
+ * caught here). Captures ids at call time so a later context change can't retarget.
+ */
+function persistActiveSession(workspaceId: string, skillId: string, activeSessionId: string): void {
+  void writeWorkspaceFile(
+    workspaceId,
+    activeMarkerPath(skillId),
+    JSON.stringify({ activeSessionId }, null, 2),
+  ).catch((err: unknown) => {
+    state.persistenceError = err instanceof Error ? err.message : String(err)
+  })
 }
 
 export const copilotStore = {
@@ -154,6 +198,9 @@ export const copilotStore = {
     )
     sessionsByContext[key] = merged
 
+    // Restore the LAST-VIEWED tab (F2/D8), not just the newest-created one.
+    const persistedActiveId = await loadActiveCopilotSessionId(workspaceId, skillId)
+
     // Only touch live state if this is still the active context.
     if (state.workspaceId === workspaceId && state.skillId === skillId) {
       state.sessions = merged
@@ -161,7 +208,11 @@ export const copilotStore = {
         state.activeSessionId !== null &&
         merged.some((session) => session.id === state.activeSessionId)
       if (!activeStillValid) {
-        state.activeSessionId = merged[merged.length - 1].id
+        const restoredActive =
+          persistedActiveId && merged.some((session) => session.id === persistedActiveId)
+            ? persistedActiveId
+            : merged[merged.length - 1].id
+        state.activeSessionId = restoredActive
       }
       emit()
     }
@@ -177,12 +228,16 @@ export const copilotStore = {
     if (state.workspaceId && state.skillId) {
       const key = `${state.workspaceId}::${state.skillId}`
       sessionsByContext[key] = state.sessions
+      persistActiveSession(state.workspaceId, state.skillId, newId)
     }
     emit()
     return newId
   },
   switchSession(id: string) {
     state.activeSessionId = id
+    if (state.workspaceId && state.skillId) {
+      persistActiveSession(state.workspaceId, state.skillId, id)
+    }
     emit()
   },
   async appendMessage(message: CopilotMessage) {

@@ -35,7 +35,18 @@ export function prepareTestInputCreate(name: string, contentText: string): Prepa
 
 const EMPTY_CONTENT = "{\n  \n}"
 
-export function TestInputsSection({ skillId }: { skillId: string }) {
+interface TestInputsSectionProps {
+  skillId: string
+  // F4: which saved input feeds Predict/Run (null = empty payload).
+  selectedId?: string | null
+  onSelect?: (id: string | null) => void
+}
+
+export function TestInputsSection({
+  skillId,
+  selectedId = null,
+  onSelect,
+}: TestInputsSectionProps) {
   const { data, mutate } = useSWR<TestInputMetadata[]>(
     `/skills/${skillId}/test_inputs`,
     fetcher,
@@ -72,6 +83,9 @@ export function TestInputsSection({ skillId }: { skillId: string }) {
     setError(null)
     try {
       await deleteTestInput(skillId, id)
+      if (selectedId === id) {
+        onSelect?.(null)
+      }
       await mutate()
     } catch (err) {
       setError(errorMessage(err))
@@ -85,27 +99,40 @@ export function TestInputsSection({ skillId }: { skillId: string }) {
         {items.length === 0 ? (
           <p className="px-2 text-[11px] text-muted-foreground">No saved test inputs.</p>
         ) : (
-          items.map((item) => (
-            <div
-              key={item.id}
-              className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1"
-            >
-              <span
-                className="min-w-0 flex-1 truncate text-xs text-foreground"
-                title={item.content_preview}
+          items.map((item) => {
+            const isSelected = selectedId === item.id
+            return (
+              <div
+                key={item.id}
+                className={`flex items-center gap-2 rounded-md border px-2 py-1 ${
+                  isSelected
+                    ? "border-primary bg-accent"
+                    : "border-border bg-background"
+                }`}
               >
-                {item.name}
-              </span>
-              <button
-                type="button"
-                onClick={() => void handleDelete(item.id)}
-                aria-label={`Delete test input ${item.id}`}
-                className="text-muted-foreground transition-colors hover:text-destructive"
-              >
-                <Trash2 className="size-3.5" />
-              </button>
-            </div>
-          ))
+                <button
+                  type="button"
+                  // F4: select this input as the Predict/Run payload (toggle off
+                  // to fall back to empty).
+                  onClick={() => onSelect?.(isSelected ? null : item.id)}
+                  aria-pressed={isSelected}
+                  aria-label={`Select test input ${item.id}`}
+                  title={item.content_preview}
+                  className="min-w-0 flex-1 truncate text-left text-xs text-foreground"
+                >
+                  {item.name}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleDelete(item.id)}
+                  aria-label={`Delete test input ${item.id}`}
+                  className="text-muted-foreground transition-colors hover:text-destructive"
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              </div>
+            )
+          })
         )}
       </div>
 

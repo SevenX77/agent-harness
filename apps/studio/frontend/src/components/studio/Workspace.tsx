@@ -11,7 +11,7 @@ import { useGoldenDiff } from "@/hooks/useGoldenDiff"
 import { useSkills } from "@/hooks/useSkills"
 import { DiffView } from "@/components/diff/DiffView"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
-import { compileSkill, getSkillDetail, serializeSkillGraph, writeSkillFile, wsUrl, postPredictRun, startRun } from "@/api/client"
+import { compileSkill, getSkillDetail, resolveRunInput, serializeSkillGraph, writeSkillFile, wsUrl, postPredictRun, startRun } from "@/api/client"
 import { isTauriRuntime } from "@/config/runtime"
 import { writeWorkspaceFile } from "@/lib/tauri"
 import type { CompileError } from "@/api/types"
@@ -82,9 +82,13 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const [compileStages, setCompileStages] = useState<Record<string, SkillBuildStage>>({})
   const [compileErrors, setCompileErrors] = useState<Record<string, CompileError[]>>({})
   const [runId, setRunId] = useState<string | null>(null)
+  // F4: the test input selected in the i/o panel feeds Predict/Run (null = the
+  // prior empty-payload behaviour). Reset when the active skill changes.
+  const [selectedTestInputId, setSelectedTestInputId] = useState<string | null>(null)
 
   useEffect(() => {
     setRunId(null)
+    setSelectedTestInputId(null)
   }, [currentSkillId])
 
   const updateStage = useCallback((id: string, stage: SkillBuildStage) => {
@@ -522,7 +526,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     const targetSkillId = currentSkillId
     updateStage(targetSkillId, "predicting")
     try {
-      await postPredictRun(targetSkillId, {})
+      const inputData = await resolveRunInput(targetSkillId, selectedTestInputId)
+      await postPredictRun(targetSkillId, inputData)
       updateStage(targetSkillId, "predict-pass")
       toast.success("Predict run completed successfully")
     } catch (error: unknown) {
@@ -551,7 +556,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         toast.error(`Predict failed: ${fallbackMsg}`)
       }
     }
-  }, [currentSkillId, updateStage])
+  }, [currentSkillId, selectedTestInputId, updateStage])
 
   const handleRun = useCallback(async () => {
     if (!currentSkillId) return
@@ -562,7 +567,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     const targetSkillId = currentSkillId
     updateStage(targetSkillId, "running")
     try {
-      const result = await startRun(targetSkillId, {})
+      const inputData = await resolveRunInput(targetSkillId, selectedTestInputId)
+      const result = await startRun(targetSkillId, inputData)
       setRunId(result.run_id)
       // F1: starting a run opens the timeline region to stream live trace events.
       setActivePanel("timeline")
@@ -571,7 +577,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       updateStage(targetSkillId, "predict-pass")
       toast.error(error instanceof Error ? error.message : "Failed to start run")
     }
-  }, [currentSkillId, deriveBuildStage, updateStage, setRunId])
+  }, [currentSkillId, deriveBuildStage, selectedTestInputId, updateStage, setRunId])
 
   const handleHome = useCallback(() => {
     setSettingsOpen(false)
@@ -622,6 +628,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   skillId={currentSkillId}
                   skillDetail={skillDetail}
                   selectedNode={selectedNode}
+                  selectedTestInputId={selectedTestInputId}
+                  onSelectTestInput={setSelectedTestInputId}
                   onPhaseFileSave={handlePhaseFileSave}
                   runId={runId}
                   traceEvents={runStream.events}

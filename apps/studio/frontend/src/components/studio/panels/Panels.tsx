@@ -15,6 +15,9 @@ interface PanelsProps {
   skillId: string | null
   skillDetail?: SkillDetail
   selectedNode: { id: string; data: SkillGraphNodeData } | null
+  // F4: i/o-panel test-input selection that feeds Predict/Run.
+  selectedTestInputId?: string | null
+  onSelectTestInput?: (id: string | null) => void
   onPhaseFileSave?: (payload: { path: string; content: string; expectedHash: string }) => Promise<void> | void
   // trace-observability F1: while a run is active the timeline region streams
   // live trace events (TracePanel); with no active run it shows run history (F2).
@@ -33,6 +36,8 @@ export function Panels({
   skillId,
   skillDetail,
   selectedNode,
+  selectedTestInputId,
+  onSelectTestInput,
   onPhaseFileSave,
   runId,
   traceEvents,
@@ -57,7 +62,15 @@ export function Panels({
     return <AssetsPanel skillDetail={skillDetail} selectedNode={selectedNode} />
   }
   if (activePanel === "input") {
-    return <InputPanel skillId={skillId} skillDetail={skillDetail} onFileOpen={onFileOpen} />
+    return (
+      <InputPanel
+        skillId={skillId}
+        skillDetail={skillDetail}
+        onFileOpen={onFileOpen}
+        selectedTestInputId={selectedTestInputId ?? null}
+        onSelectTestInput={onSelectTestInput}
+      />
+    )
   }
   if (activePanel === "timeline") {
     // Active run → live trace stream; otherwise the run-history list.

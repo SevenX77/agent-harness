@@ -15,6 +15,8 @@ interface InputPanelProps {
   skillId: string
   skillDetail?: SkillDetail
   onFileOpen: (file: FileMeta) => void
+  selectedTestInputId?: string | null
+  onSelectTestInput?: (id: string | null) => void
 }
 
 function SchemaInferPanel({ initialJson }: { initialJson: string }) {
@@ -71,7 +73,13 @@ function SchemaInferPanel({ initialJson }: { initialJson: string }) {
   )
 }
 
-export function InputPanel({ skillId, skillDetail, onFileOpen }: InputPanelProps) {
+export function InputPanel({
+  skillId,
+  skillDetail,
+  onFileOpen,
+  selectedTestInputId = null,
+  onSelectTestInput,
+}: InputPanelProps) {
   const files = inputFiles(skillDetail)
   const sample = files.find((file) => file.path === "input/sample.json")?.content ?? "{}"
 
@@ -81,7 +89,11 @@ export function InputPanel({ skillId, skillDetail, onFileOpen }: InputPanelProps
 
       <ScrollArea className="flex-1">
         <div className="space-y-3 px-2 py-2 text-xs">
-          <TestInputsSection skillId={skillId} />
+          <TestInputsSection
+            skillId={skillId}
+            selectedId={selectedTestInputId}
+            onSelect={onSelectTestInput}
+          />
 
           <SectionHeading label="Input Files" />
           <FileRow file={files[1]} onOpen={onFileOpen} />

@@ -132,6 +132,12 @@ export interface TestInputMetadata {
   content_preview: string
 }
 
+export interface TestInputDetail {
+  id: string
+  name: string
+  content: JsonObject
+}
+
 export interface BatchRunRequest {
   input_ids: string[]
 }

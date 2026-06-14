@@ -16,6 +16,7 @@ import type {
   SerializeGraphRes,
   SkillDetail,
   SyncSkillReq,
+  TestInputDetail,
   TestInputMetadata,
   UpdateSkillFileRes,
   SerializableGraphPhaseRef,
@@ -176,6 +177,31 @@ export async function createTestInput(
 
 export async function deleteTestInput(skillId: string, inputId: string): Promise<void> {
   await api.delete(`/skills/${skillId}/test_inputs/${encodeURIComponent(inputId)}`)
+}
+
+export async function getTestInput(skillId: string, inputId: string): Promise<TestInputDetail> {
+  const response = await api.get<TestInputDetail>(
+    `/skills/${skillId}/test_inputs/${encodeURIComponent(inputId)}`,
+  )
+  return response.data
+}
+
+/**
+ * F4: resolve the Predict/Run input payload. With a selected test input, fetch
+ * its full content; with none selected, fall back to an empty payload (the
+ * prior behaviour). A failed fetch (e.g. the input was deleted) propagates so
+ * the caller surfaces a clear error instead of silently running empty.
+ */
+export async function resolveRunInput(
+  skillId: string,
+  selectedTestInputId: string | null,
+  getInput: (skillId: string, inputId: string) => Promise<TestInputDetail> = getTestInput,
+): Promise<JsonObject> {
+  if (!selectedTestInputId) {
+    return {}
+  }
+  const detail = await getInput(skillId, selectedTestInputId)
+  return detail.content
 }
 
 export async function getLocalHistory(skillId: string): Promise<GitHistoryItem[]> {

@@ -204,6 +204,13 @@ export async function resolveRunInput(
   return detail.content
 }
 
+export async function getRunDetail(skillId: string, runId: string): Promise<RunDetail> {
+  const response = await api.get<RunDetail>(
+    `/skills/${skillId}/runs/${encodeURIComponent(runId)}`,
+  )
+  return response.data
+}
+
 export async function getLocalHistory(skillId: string): Promise<GitHistoryItem[]> {
   const response = await api.get<GitHistoryItem[]>(`/skills/${skillId}/history`)
   return response.data

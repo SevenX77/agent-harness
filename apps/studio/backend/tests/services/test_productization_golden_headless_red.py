@@ -78,6 +78,66 @@ def test_golden_headless_returns_per_node_verdicts(tmp_path: Path) -> None:
     assert review.differences == []
 
 
+def test_golden_headless_returns_per_node_verdicts_for_real_run_shape(tmp_path: Path) -> None:
+    """Real engine run/golden result is BusinessData {inputs, phase_outputs, scratch}.
+
+    Per-node golden must derive nodes from the `phase_outputs` dict, not only from
+    the synthetic top-level `phases` list. Without this, real runs silently degrade
+    to a single run-level `output` verdict.
+    """
+    from app.services.golden_headless import GoldenHeadlessRequest, evaluate_golden_headless
+
+    current_path = tmp_path / "current" / "result.json"
+    golden_path = tmp_path / "golden" / "result.json"
+    current_path.parent.mkdir()
+    golden_path.parent.mkdir()
+    current_path.write_text(
+        json.dumps(
+            {
+                "inputs": {"topic": "x"},
+                "phase_outputs": {
+                    "draft": {"answer": "hello studio", "ok": True},
+                    "review": {"score": 10},
+                },
+                "scratch": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    golden_path.write_text(
+        json.dumps(
+            {
+                "inputs": {"topic": "x"},
+                "phase_outputs": {
+                    "draft": {"answer": "hello world", "ok": True},
+                    "review": {"score": 10},
+                },
+                "scratch": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = evaluate_golden_headless(
+        GoldenHeadlessRequest(
+            run_results_ref=str(current_path),
+            baseline_ref=str(golden_path),
+        )
+    )
+
+    # Must produce per-node verdicts, NOT degrade to a single run-level node.
+    assert [node.node_id for node in result.node_results] == ["draft", "review"]
+    assert [node.node_id for node in result.node_results] != ["output"]
+    draft = result.node_results[0]
+    review = result.node_results[1]
+    assert draft.verdict == "fail"
+    assert draft.score < 1
+    assert draft.differences[0].field_path == "nodes.draft.answer"
+    assert review.verdict == "pass"
+    assert review.score == 1
+    assert review.differences == []
+
+
 def _contains_computed_string(source: str, expected: str) -> bool:
     tree = ast.parse(source)
     for node in ast.walk(tree):

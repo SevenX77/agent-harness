@@ -192,6 +192,13 @@ PM 要求建一个 hook,在我停下来时检查最终目标是否完成。已�
 - 控制文件 `.goal-active`/`.stop-allowed` 已 gitignore(机器本地、瞬时)。三路径已测:有 marker 无 token→阻断;有 token→放行+消费;无 marker→inert。
 - **注意**:hook 在会话启动时加载;本会话可能要下个会话才完全生效。**合法停之前务必先写 `.stop-allowed`**。
 
+### copilot-assist 多单元推进(2026-06-14 续 · "别停下"后连续推)
+- **F3 技能搭建脑子 ✅**(commit `cbf2914e`):3 行通用 prompt → graph_skill v0.3.0 格式心智模型(GRAPH.md frontmatter/phase DAG/LOGIC.md+actions、compile→predict→run、`[F-v3-]` 主动诊断)+ 经 `add_dirs` 挂载权威 skill-spec(`_skill_spec_dir` 存在才挂)。**真跑验证**:真 Opus copilot 读挂载 spec 正确答出 3-选-1 模式(LOGIC/SUBGRAPH/SKILL)+ schema_version。
+- **F4 上下文回显 ✅**(commit `ab16d434`):stream_query 第一条 `context_resolved` 事件回显本轮注入上下文(反 hidden-prompt-magic);前端折叠卡片。(F4 @mention composer 仍待做。)
+- **F7 分析 bar ✅**(commit `f7783764`):run 跑完(run_ended)→ copilot 面板瞬时 bar「自动写 golden?」→ 确认则无 golden 时写(有的不动)→ 消失。复用 golden list/promote(数据流归 golden-eval);`autoWriteGoldenIfAbsent` 纯单测 + **e2e 真跑**(run→bar→确认→golden 落盘+toast+消失,无需 creds)。
+- **门禁(累计)**:后端 pytest **513**/1 skip、前端 vitest **442**、e2e **11 passed/2 skip**、tsc/eslint/mypy/ruff clean(llm.py 1 预存 mypy 错已 flag)。
+- **copilot-assist 单元状态**:F1✅ COPILOT_ASSIST-4✅ F3✅ F4(context echo✅/@mention 待)F7✅;剩 F2(多 session 持久化,依赖 Rust)、F5(安全写,依赖 Rust checkpoint+PoC)、F4 @mention(tiptap)、F6(建技能向导=graph skill)、F8(下钻无缝)。
+
 ### 本会话产出汇总(2026-06-14 续 · 断点续跑)
 8 个 commit:`19d39444`(F1 ThinkingBlock 流式)→`0e9995e5`(test_inputs CRUD 后端)→`4e5d79ca`(doc)→`dbe21c02`(io-panel test-input UI+e2e)→`f07b38f8`(F4-A GET content)→`d6db0bd7`(F4-B predict/run 用选中输入+e2e)→`b17b1bf4`(doc)→`d0673aff`(F1 tool call 折叠)。**门禁全绿真跑**:后端 pytest **497**、前端 vitest **438** + tsc + eslint clean、e2e **10 passed/2 skip**、mypy/ruff clean。api/llm.ts 及 KEEP-MAIN 零改动,never touched main。
 **完成的设计单元**:copilot-assist F1(thinking + tool call 全量折叠流式,真闭环)、input 区 INPUT-3(test input CRUD + UI)、input 区 F4(predict/run 消费选中输入)。

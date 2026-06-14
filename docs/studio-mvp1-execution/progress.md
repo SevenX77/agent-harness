@@ -385,5 +385,20 @@ Stop-hook、反自造停下铁律、copilot F3/F4-echo/F7、trace F5/F2、input 
 - **F5 剩余(记录,需各自后续)**:① **Bash 交互审批往返**(approve/reject 需前端→后端**双向 WS 控制通道**,现 WS 是严格单向;现保守 hold=deny 命令不跑,安全但不能 approve)② **Monaco 并排 Open Compare**(我做了内联 diff=主路径;side-by-side 是增强)③ **编辑器 buffer 实时同步 + accept/reject 后自动 recompile 回灌**(现还原到磁盘,编辑器/compile 未自动触发)④ **真 .app 鼠标复验**(需 creds + 构建,Tier-4)。
 - **门禁(累计真跑)**:后端 pytest **523**/1 skip、前端 vitest **458**、tauri `cargo test --lib` **46**、tsc/eslint/mypy/ruff/rustfmt clean。api/llm.ts 及 KEEP-MAIN 零改动,never touched main。
 
+### 2026-06-14 续2:PM 触发 wave2 conformance 审计 → 逼出真 bug 修 + F4 backend + 剩余精确登记
+> PM 停下问"我写的代码有没有按 MVP1+三模块设计实施?"指向 wave2-safety 审计文档。我用 5-审计-agent workflow(各读真代码+真设计单元,对抗复核每条偏离)核了本会话四块改动 + 跨切边界。
+
+- **审计结论(带证据)**:① **native-fs(D12)= 符合**(两条疑似偏离经对抗复核都被推翻);② **跨模块边界 = 干净**(没新引入 Studio 自算 gateway 态 / needs_setup 回流 / engine import gateway / 新双写者;copilot.py 读文件是读不是写);③ **F2 = 部分→已修**;④ **F5 = 部分**;⑤ **resume = 部分**(run-level 没绕 adapter,节点级 DEF-005)。
+- **审计逼出真问题,全修**:
+  - **F2 冷启动只恢复"最新创建"tab、非"上次活跃"tab**(P2,两名复核都确认违 F2/D8"恢复全部 session + 上次活跃 tab")→ 修(commit `32f85681`):持久化 `_active.json`,hydrate 还原上次查看 tab,`_`前缀 marker 排除出 session 加载。
+  - **F5 Reject 是无 expected_hash 的盲写覆盖 + apply 不记 checkpoint**(P1,审计逼出,不在任何延期项)→ 修(commit `495f3a1a`):apply 时 seed checkpoint(用事件改前字节,race-free)、Reject 改走 Rust `restore_workspace_file`(忠实"Reject 经 Rust 从 checkpoint 还原")。
+- **F5 前向写偏离(SDK 直写非 Rust)= PM 放行**(commit `495f3a1a` 记 DEF-027 已接受;审计也判它是"已登记的已知偏离非隐藏违规")。F5 编辑器 buffer 同步=DEF-025、Bash 审批往返=DEF-024(都已登记)。
+- **resume DEF-005 过时描述纠正**(commit `e5d21f08`):resume 端点早已接线(非 501),run-level 前后端都做了;仅剩节点级粒度(引擎侧)+ D10 lease 未接入 resume(引擎侧)。
+- **copilot F4 backend 4 层 XML resolver ✅**(commit `53de255a`):设计要"4 层 resolver(skill 基本/选中节点/@内容/lint)→XML 喂 prompt",原是扁平 JSON dump。改 `render_copilot_context_xml`:结构化 `<copilot_context>`(skill/selection/lint/mentions/implicit),XML 转义、空层省略、复用 `_context_for_prompt` 保 150K 截断;F4 回显改成显示真注入的 XML(echo==injection)。7 测,后端 530。(F4 @mention composer+MentionMenu+auto-mention 仍需富文本 composer=独立前端轮。)
+- **F8 下钻无缝(copilot 部分)= 由架构满足**:子图是 skill workspace 内的 phase 文件(`phase.src` 含 `/SUBGRAPH.md`),copilot cwd=skill workspace 本就含子图文件;`CopilotPanel` 绑 `currentSkillId`+我的 F2 hydration 恢复各层 session。auto-mention 子图节点骑 F4。
+- **剩余两单元精确登记**:F6 建技能向导=**DEF-028**(需 authoring 独立 brainstorming graph skill 工件,核实该 skill 不存在);input F3 输出产物=**DEF-029**(引擎只有 run 级 output_dir、无 per-node output-path schema 字段=owner=engine 跨模块前置)。
+- **门禁(累计真跑)**:后端 pytest **530**/1 skip、前端 vitest **462**、tauri `cargo test --lib` **46**、tsc/eslint/mypy/ruff/rustfmt clean。api/llm.ts 及 KEEP-MAIN 零改动,never touched main。
+- **下一步 = 真 .app 鼠标验收**(computer-use 本会话可用):重建 .app(含本会话 frontend+backend+Rust)→ 隔离启动 → 鼠标验 copilot F5 diff/accept-reject + resume 按钮 + F2 重启恢复(charter §3① headline 对新功能的复验)。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

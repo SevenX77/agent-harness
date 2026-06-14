@@ -8,6 +8,22 @@
 
 > **DEF-001 / DEF-002 已拉回 `studio-feature-trace-inspector` scope**(2026-06-01),不再是 deferred 项 —— 二者本就是该 spec 自己的 feature,不属跨 spec/孤儿,见下方 Promoted 区与 `requirement.md` REQ-3 / REQ-7。
 
+### DEF-028 — copilot F6 建技能向导(独立 brainstorming graph skill)— 需独立 authoring 轮
+- **日期**: 2026-06-14
+- **事项**: 设计 §F6:copilot-SDK 调一个**独立 brainstorming graph skill**(graph 背景知识 + skill-spec 渐进暴露 + template few-shot)对话式设计新 skill(问需求→定 io schema→生成骨架),两入口(新建 skill 时可选 + chat 说"帮我建个 X")。
+- **现状(核实)**: 该 brainstorming graph skill **不存在**(全仓 `find` 无 brainstorm/skill-builder skill);`SkillCreatorWizard.tsx` 是**模板路径**(`TemplatePicker` + `skillMdGenerator`),= 设计里"默认新建(模板文件夹,不调 copilot)"那条,不是 F6 的对话式向导。
+- **延期原因**: F6 = **authoring 一个新的 graph_skill 工件**(GRAPH.md + phases + 背景知识/few-shot 内容)+ copilot 调用集成 + chat-trigger 入口。这是内容创作 + 集成,非代码小改,需独立 fresh-context 轮(且产出物本身要按 FROZEN 骨架可编译)。
+- **前置条件**: 设计/撰写 brainstorming graph skill 内容;copilot 经自定义工具/`add_dirs` 调它;chat "帮我建 X" 触发路由。
+- **来源**: copilot-assist mvp1-alignment §F6(line 60-65)。
+
+### DEF-029 — input F3 输出产物路径(per-node output artifact)— owner=engine(缺 schema 字段)
+- **日期**: 2026-06-14
+- **事项**: 设计 §F3:从 i/o 面板配置**每节点**输出文件 / 产物路径;"setting an output artifact path updates node file; default path lands under workspace artifacts"。
+- **现状(核实)**: 引擎只有**run 级** `output_dir` / `default_output_dir`(`runner.py:1199,1296`,产物落 `trace_output/artifacts` 或 run 级 output_context),**没有 per-node「output artifact path」字段**在 manifest/phase schema 里。
+- **延期原因**: F3 要的是 per-node 输出路径设置,需引擎 manifest/phase schema **加一个 per-node output-path 字段**让引擎按节点落产物 = **owner=engine 的 schema 变更**,Studio 不能单方面加引擎不读的字段(与 per-node golden 扁平、edge 黑板同类的 engine 侧前置)。
+- **前置条件**: 引擎在 phase/manifest schema 暴露 per-node output-artifact-path + run 时按它落产物;之后 Studio i/o 面板加编辑 UI 写该字段。
+- **来源**: input/mvp1-alignment §F3(line 38-43)+ 引擎 schema 核实(2026-06-14)。
+
 ### DEF-027 — copilot F5 安全写:前向写未走 Rust(D12 偏离)— ✅ PM 放行(2026-06-14,接受偏离,不重构)
 - **PM 裁决(2026-06-14)**: **放行**。接受"前向写由 SDK CLI 直写、不重构成自定义 MCP propose-tools 走 Rust"这条偏离;不做下方"忠实修法"的再架构。Reject 还原仍经 Rust(忠实)。此条不再是待办,留作**已知已接受的设计偏离**记录。
 - **日期**: 2026-06-14

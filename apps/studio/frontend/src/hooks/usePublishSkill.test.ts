@@ -70,4 +70,17 @@ describe('executePublishSkill', () => {
     expect(setError).toHaveBeenCalledWith('network failed')
     expect(mockToast.error).toHaveBeenCalledWith(ERROR_TOAST_MESSAGE)
   })
+
+  it('surfaces the backend typed error message (e.g. registry not configured)', async () => {
+    mockPublishSkill.mockRejectedValue({
+      response: { data: { error_code: 'REGISTRY_NOT_CONFIGURED', message: 'Artifact Registry Host 未配置' } },
+    })
+    const { execute, statusCalls, setError } = setupExecute()
+
+    await execute()
+
+    expect(statusCalls).toEqual(['publishing', 'error'])
+    expect(setError).toHaveBeenCalledWith('Artifact Registry Host 未配置')
+    expect(mockToast.error).toHaveBeenCalledWith('Artifact Registry Host 未配置')
+  })
 })

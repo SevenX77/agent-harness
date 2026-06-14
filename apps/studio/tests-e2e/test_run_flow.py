@@ -174,3 +174,36 @@ def test_promote_then_compare_golden_renders_per_node_diff(
     # with no differences (proves compare resolved + rendered, not a silent fail).
     expect(page.get_by_text("No differences", exact=False).first).to_be_visible(timeout=10_000)
     logger.info("golden diff overlay rendered with a verdict")
+
+
+def test_release_without_registry_reports_clear_typed_error(
+    studio_page: Page,
+    studio_workspace: dict[str, Path],
+) -> None:
+    # Publish design F2: "Release to Artifact Registry" requires registry
+    # settings; missing settings must give a CLEAR error (not a silent fail or a
+    # mutated draft). The e2e env has no registry configured, so this validates
+    # that designed behavior end-to-end.
+    page = studio_page
+    page.set_default_timeout(15_000)
+
+    _select_skill(page, "e2e-fast")
+    _action_button(page, "Compile").click()
+    expect(_action_button(page, "Predict")).to_be_enabled(timeout=20_000)
+
+    # Release via the Team dropdown.
+    page.get_by_role("button", name="Team").click()
+    with page.expect_response(re.compile(r"/publish")) as resp_info:
+        page.get_by_role("menuitem", name="Release").click()
+    response = resp_info.value
+
+    # Backend returns a typed, clear error.
+    assert response.status == 400, f"expected a clear 400, got {response.status}"
+    body = response.json()
+    assert body["error_code"] == "REGISTRY_NOT_CONFIGURED", body
+
+    # And the frontend surfaces that clear reason (not a generic toast) so the
+    # user knows to configure the registry.
+    expect(
+        page.get_by_text(re.compile("Artifact Registry Host", re.IGNORECASE)).first
+    ).to_be_visible(timeout=10_000)

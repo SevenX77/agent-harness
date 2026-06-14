@@ -108,7 +108,10 @@ commit 链:`c05f33cb`(综述)→`59169f9c`(trace 挂载)→`79521944`+`b2d3559c`
 
 **下一轮优先级(按依赖)**:① **6 态收敛**(D,**待 PM 确认可翻 api/llm.ts**——这是唯一被显式硬约束挡住的范围项)② **copilot 安全写/@mention/冷启动**(I,large 多层:copilot.py PreToolUse 回调 + 新 patch 事件 + 前端 diff/accept/reject UI + **依赖 Rust checkpoint/restore**——native-fs 续作;@mention=tiptap composer+4 层 resolver;冷启动=readWorkspaceFile Rust 命令+hydrate)③ native-fs follow-up(Python 写端点降只读 / publish-native / Rust checkpoint)④ resume 前端 UI(B)⑤ test_inputs create/delete(E,需注册 TEST_INPUT_* 错误码)⑥ D10 lease/fencing 接入 resume(engine 活)⑦ trace F2/F4/F5。建议:copilot + native-fs checkpoint 作一个专门轮;6 态待 PM 一句即开;最后 computer-use 走完整生命周期验收。
 
-### ⚠️ 6 态收敛(Tier 2D)与 api/llm.ts 硬约束冲突 —— 待 PM 一句确认
+### ✅ 6 态收敛(D6)已完成(commit `968e441a`,2026-06-14)
+PM 经"最高裁判=设计文档/三模块>MVP1"裁定授权翻 api/llm.ts。原子前后端 flip:Studio 去 needs_setup→failed/missing_config、加 historical_ready,对齐 gateway canonical(`state_projection.py`)+ FROZEN ux-spec。后端 gateway.py adapter + routers/llm.py(status_summary/admission/_force_probe_route metadata);前端 api/llm.ts 枚举+ModelGroupStatusSummary + 5 个 llm-roles 组件(badge/label/color/sort-rank/route-status,对齐 wave3 设计目标)。8-agent workflow + 独立 diff 复核(尤其 route.metadata reason_code 流)。门禁:后端 483、前端 tsc+vitest 423、e2e 7/2skip、lint/ruff clean。登记:dead `services/llm_state_projection.py`(薄委派 wrapper)留作单独 sink/删除任务。
+
+### (历史)⚠️ 6 态收敛与 api/llm.ts 硬约束冲突 —— 已由上方裁定解决
 
 - **冲突**:charter §2 把 D6 6 态收敛列为范围内("两套全部实现不挑不减");但 §5.3/goal 命令把 `api/llm.ts` 列为**KEEP-MAIN 不碰**文件。
 - **为何必须碰**:6 态收敛是**前后端原子**改动——后端 adapter 收敛到 gateway canonical(去 needs_setup→failed+missing_config、加 historical_ready)后,前端 `api/llm.ts` 的 `ProviderUiState`/`ModelGroupStatusSummary` 枚举**必须同步翻**,否则前端收到 `historical_ready`/`failed` 而类型不含→运行时分叉(正是 Phase-1 plan 警告的)。只动后端不动前端 = 故意制造分叉。

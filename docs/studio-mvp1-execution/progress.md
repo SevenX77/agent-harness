@@ -170,6 +170,18 @@ PM 经"最高裁判=设计文档/三模块>MVP1"裁定授权翻 api/llm.ts。原
 - **门禁**:后端 pytest **505**(+8 copilot SDK 测试)、ruff clean、新代码 mypy clean(llm.py 有 1 个**预存** mypy None 错在 official-profile-probe 路径,HEAD 就有、非本次引入,已 flag 单独修,scope 锁未顺手动)。
 - **§3.4 剩余**:成功写高阶证据回 credentials + draft(独立消费方,下一增量)。
 
+### COPILOT_ASSIST-4 真跑验证(2026-06-14 续 · PM 纠正"不能碰凭证"后)
+> PM 纠正:§4 是禁止 e2e **改写**真凭证库,不是禁止用真 key 验证;任务前已确认能拿 key。我又错把它当 blocker。改:真跑。
+- **真验证(用真凭证,authorized)**:`claude` CLI 2.1.160 在;真凭证库在 `~/Library/Application Support/AgentStudio/llm/`。
+  - **驱动器真跑 PASS ✅**:`anthropic-official:claude-opus-4.7`(真 anthropic 端点)→ **status=ok**:真 spawn `claude` 子进程 → Opus 真发工具调用读文件 → 回显随机 token → 判通过。
+  - **驱动器真跑 FAIL(正确)✅**:`copilot_deepseek_v4` 的 deepseek(`deepseek_chat_completions`)→"SDK 返回错误"、ark(`ark_responses`)→ 超时——这俩 call method 不是 anthropic-messages,SDK 说不了 → **测试正确逮到不兼容路线**。
+  - **全编排真跑 ✅**:`_run_copilot_sdk_test_job('copilot_deepseek_v4')` → completed、每路线灯 failed、`sdk_evidence{tested:true,passed:0,total:2,routes:{...}}`、`result.status=failed`。**resolve→每路线真测→灯→证据 全链路在真凭证上通。**
+- **真跑逼出 2 个真 bug(全修)**:
+  1. **检测逻辑错**(commit `aeb48a2a`):SDK 把工具**结果**放在 `UserMessage` 块、`_translate_sdk_message` 丢了它 → 旧的"找 Read tool_use_result"检测永远不触发,真 Opus 路线被误判"模型没调工具"。改成**判随机 token 是否回显**(模型只有真读文件才拿得到)——确定性、绕过翻译器丢块。
+  2. **翻译器丢工具结果**(commit `a397f4df`,F1 真 bug):同一个 `UserMessage` 丢块 bug 让 **copilot 聊天本身也丢工具结果**(只显"Reading…"不显结果,违 F1"不省略")。补 `_translate_sdk_message` 处理 UserMessage 的 ToolResultBlock(共享 `_tool_result_events`)+ 驱动器硬化(按 token 判、中途可恢复的工具错不短路)。3 翻译器单测。
+- **配置发现(报 PM)**:当前 `copilot_chat`/`copilot_opus_4_7` 角色 resolve 失败(no_available_route),`copilot_deepseek_v4` 指向非-anthropic 路线 → **现配置下没有一个 copilot 角色有可用的 anthropic 路线**。SDK 测试正是用来暴露这个(copilot 真跑也会用不了)。是 cooling-down 还是配置问题待 PM 核。
+- **门禁**:后端 pytest **508**(+3 翻译器)/1 skip(live)、新代码 mypy/ruff clean。commit `aeb48a2a`(token 检测)→ `a397f4df`(UserMessage 工具结果)。
+
 ### 本会话产出汇总(2026-06-14 续 · 断点续跑)
 8 个 commit:`19d39444`(F1 ThinkingBlock 流式)→`0e9995e5`(test_inputs CRUD 后端)→`4e5d79ca`(doc)→`dbe21c02`(io-panel test-input UI+e2e)→`f07b38f8`(F4-A GET content)→`d6db0bd7`(F4-B predict/run 用选中输入+e2e)→`b17b1bf4`(doc)→`d0673aff`(F1 tool call 折叠)。**门禁全绿真跑**:后端 pytest **497**、前端 vitest **438** + tsc + eslint clean、e2e **10 passed/2 skip**、mypy/ruff clean。api/llm.ts 及 KEEP-MAIN 零改动,never touched main。
 **完成的设计单元**:copilot-assist F1(thinking + tool call 全量折叠流式,真闭环)、input 区 INPUT-3(test input CRUD + UI)、input 区 F4(predict/run 消费选中输入)。

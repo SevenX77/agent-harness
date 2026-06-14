@@ -159,6 +159,17 @@ PM 经"最高裁判=设计文档/三模块>MVP1"裁定授权翻 api/llm.ts。原
 - **copilot F1 tool call 折叠 ✅**(commit `d0673aff`):F1 要 tool call 按类折叠(读=Explored / 写=Worked / Bash=Ran),与 thinking 的「Thought ▾」一套(折叠仅视觉、输出不省略)。原 `tool-call-bubble.tsx` 泛化「Running Read」标签 + input/output 永远展开。改成 `<details>`(默认折起、失败保持展开)+ 语义动词。static-render 单测覆盖标签/折叠/失败展开。**这是本轮起手 F1(thinking 流式)的渲染收尾**。vitest 438(+4)、tsc/eslint clean。
 - **build_vendor 现状勘查(2026-06-14)**:`tauri.conf.json:8` `beforeBuildCommand` 里 `python backend/scripts/build_vendor.py` —— 本机无 `python`(只 `python3`/.venv),且把 Python 后端(含 Claude Agent SDK 自带 Node CLI + pydantic-core/sqlite 等原生轮子)整包 vendor 进 .app = 真打包工程,非一行修。charter 把它列 Tier-4 验收期专门轮,本轮不进。**真 headline(.app + computer-use 全生命周期)= 下一个专门轮的事**。
 
+### COPILOT_ASSIST-4 copilot 真 SDK 测试(2026-06-14 续 · PM 纠偏后)
+> PM 纠偏:我之前被无上下文的 Gemini "图省事"框架带歪,把"验证 copilot 真能用"偷换成"smoke 能开机"。最高原则=设计文档不挑不减。设计 §3.4 白纸黑字:测试走真 `ClaudeSDKClient` + **发真工具调用、验 spawn/env/tool loop** + 写证据回 credentials/draft。"smoke/text-only/D-vs-D-Minimal"全是降级/假选择题,作废。
+- **驱动器 ✅**(commit `179c5ad1`):`copilot.run_route_sdk_test`——真 `ClaudeSDKClient`(spawn CLI + env 注 base_url),往临时 workspace 写**随机 token** 文件,**焊死** prompt 让模型 Read 它,**只有**成功的 Read tool_use_result 回环 + Done 才判 ok。随机 token 让工具调用非可选 → **确定性、不 flaky**;模型不调工具(瞎答)= 真 bug(copilot 改不了 skill)被判 failed。独立子进程生命周期(本地 `_close_session` 不碰全局)、真 tempdir、`asyncio.timeout`。5 单测走 `_session_factory` 缝。
+- **编排 ✅**(commit `ff373a11`):copilot role(`role_kind=="copilot"` 分流)→ 经 `resolve_routes` 一等 API 解析路线 → 每路线跑真 SDK 测试(完整 fallback 链 + `Semaphore(2)` 限流)→ 结果进现有 `provider_statuses` 灯(**前端零契约改**)+ 结构化 `result.sdk_evidence{tested,passed,total,routes}`;verdict=任一路线 ok→role ok(fallback 只需一条通)。非 copilot 角色保持 httpx 路径。3 单测。
+- **前端 ✅ 零改**:灯(`copilotRouteStatusesFromJob` 读 provider_statuses)+ "N/M SDK Ready" 徽章(`readyCount`)本就读 provider_statuses,现自动被真 SDK 结果驱动。api/llm.ts 未碰(KEEP-MAIN 干净;`sdk_evidence` 额外字段 TS 运行时容忍,无需加类型)。
+- **§3.4 prefix bug 自核=本分支已修**:`applyCopilotModelGroupSelection`(copilot-role-derivation.ts:129)保留 role key + 强制 `role_kind:'copilot'` → 我的 gate 对配置好的 copilot 角色正确触发。设计文档 `:232/242` 的 bug 描述是过时的。
+- **live 测试 ✅ 就绪**(commit `7558a99d`):creds-gated `STUDIO_LIVE_COPILOT_TEST=<role>` skipif——这是唯一真正 discharge "测试通过⟺运行可用"的测试(mocked 单测换掉了 `_session_factory`,不 spawn 真 CLU)。
+- **⚠️ 真验证边界(§5.6 凭证 blocker)**:本特性"真跑"= 真模型调用,需真凭证。mocked 单测只证接线/判定/错误映射,**不证真 spawn/env**。跑 live 测试要么碰用户真凭证库(§4 铁律禁止自主碰),要么需隔离路径放测试 key(我没有)→ **真验证需 PM 决策**(授权隔离跑 / 提供隔离 creds)。
+- **门禁**:后端 pytest **505**(+8 copilot SDK 测试)、ruff clean、新代码 mypy clean(llm.py 有 1 个**预存** mypy None 错在 official-profile-probe 路径,HEAD 就有、非本次引入,已 flag 单独修,scope 锁未顺手动)。
+- **§3.4 剩余**:成功写高阶证据回 credentials + draft(独立消费方,下一增量)。
+
 ### 本会话产出汇总(2026-06-14 续 · 断点续跑)
 8 个 commit:`19d39444`(F1 ThinkingBlock 流式)→`0e9995e5`(test_inputs CRUD 后端)→`4e5d79ca`(doc)→`dbe21c02`(io-panel test-input UI+e2e)→`f07b38f8`(F4-A GET content)→`d6db0bd7`(F4-B predict/run 用选中输入+e2e)→`b17b1bf4`(doc)→`d0673aff`(F1 tool call 折叠)。**门禁全绿真跑**:后端 pytest **497**、前端 vitest **438** + tsc + eslint clean、e2e **10 passed/2 skip**、mypy/ruff clean。api/llm.ts 及 KEEP-MAIN 零改动,never touched main。
 **完成的设计单元**:copilot-assist F1(thinking + tool call 全量折叠流式,真闭环)、input 区 INPUT-3(test input CRUD + UI)、input 区 F4(predict/run 消费选中输入)。

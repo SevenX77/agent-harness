@@ -1,6 +1,6 @@
 import React, { useEffect, useState, type FormEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { ArrowUp, Bot, CircleAlert, Paperclip, Plus } from 'lucide-react'
+import { ArrowUp, Bot, CircleAlert, Paperclip, Plus, TerminalSquare } from 'lucide-react'
 import { toast } from 'sonner'
 import { getRegistry, type RegistryResponse, type RoleEntry } from '../../api/llm'
 import { useCopilot } from '../../hooks/useCopilot'
@@ -9,13 +9,15 @@ import type { CopilotMessage } from '../../types/copilot'
 import { AnalysisBar } from './analysis-bar'
 import { DiffBubble } from './diff-bubble'
 import { ModelPicker } from './model-picker'
+import { PatchProposedBubble } from './patch-proposed-bubble'
 import { ToolCallBubble } from './tool-call-bubble'
 
 interface ChatMessageItemProps {
   message: CopilotMessage
+  skillId: string | null
 }
 
-function ChatMessageItemBase({ message }: ChatMessageItemProps) {
+function ChatMessageItemBase({ message, skillId }: ChatMessageItemProps) {
   const isUser = message.role === 'user'
   return (
     <article className={`rounded-md border p-3 text-sm ${isUser ? 'border-primary/30 bg-primary/10' : 'border-border bg-background'}`}>
@@ -46,6 +48,25 @@ function ChatMessageItemBase({ message }: ChatMessageItemProps) {
                 Copilot error
               </div>
               <p className="mt-1 whitespace-pre-wrap">{event.message}</p>
+            </div>
+          )
+        }
+        if (event.type === 'patch_proposed') {
+          return <PatchProposedBubble key={event.id} event={event} skillId={skillId} />
+        }
+        if (event.type === 'bash_approval_required') {
+          return (
+            <div key={event.id} className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
+              <div className="flex items-center gap-1.5 font-medium text-amber-700 dark:text-amber-400">
+                <TerminalSquare className="size-3.5" />
+                Bash held for approval
+              </div>
+              <pre className="mt-1.5 overflow-auto rounded bg-background/70 p-2 font-mono text-foreground">
+                {event.command}
+              </pre>
+              <p className="mt-1 text-muted-foreground">
+                {event.blocked ? 'Command not run — approval UI pending.' : 'Approved.'}
+              </p>
             </div>
           )
         }
@@ -154,7 +175,9 @@ export function CopilotPanel({ skillId, view = 'edit', completedRunId = null }: 
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
         {copilot.messages.length > 0 ? (
-          copilot.messages.map((message) => <ChatMessageItem key={message.id} message={message} />)
+          copilot.messages.map((message) => (
+            <ChatMessageItem key={message.id} message={message} skillId={skillId} />
+          ))
         ) : (
           <div className="rounded-md border border-dashed border-sidebar-border p-3 text-sm text-muted-foreground">
             <div className="prose prose-sm max-w-none text-muted-foreground dark:prose-invert">

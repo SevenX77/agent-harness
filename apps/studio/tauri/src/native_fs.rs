@@ -292,6 +292,42 @@ pub fn checkpoint_workspace_file_impl(
     })
 }
 
+/// Seed a checkpoint from EXPLICIT pre-edit state (no file re-read). Used by the
+/// copilot safe-write flow: the backend captures before-bytes in its can_use_tool
+/// callback and ships them in the patch_proposed event, so the frontend records
+/// the checkpoint race-free (re-reading the file here would capture the already
+/// applied edit). Earliest-wins, like `checkpoint_workspace_file_impl`.
+pub fn seed_workspace_checkpoint_impl(
+    workspace_root: &str,
+    path: &str,
+    content: &str,
+    existed: bool,
+) -> Result<CheckpointOutcome, String> {
+    let root = PathBuf::from(workspace_root.trim());
+    safe_join(&root, path)?;
+    let ckpt = checkpoint_path(&root, path.trim());
+    if ckpt.is_file() {
+        return Ok(CheckpointOutcome {
+            path: path.to_string(),
+            existed,
+            created: false,
+        });
+    }
+    let record = CheckpointRecord {
+        path: path.to_string(),
+        existed,
+        content: content.to_string(),
+    };
+    let serialized = serde_json::to_string(&record)
+        .map_err(|error| format!("cannot serialize checkpoint: {error}"))?;
+    write_atomic(&ckpt, &serialized)?;
+    Ok(CheckpointOutcome {
+        path: path.to_string(),
+        existed,
+        created: true,
+    })
+}
+
 /// Restore `<root>/<path>` to its checkpointed pre-edit state and clear the
 /// checkpoint. A file that did not exist before is removed. Errors if there is
 /// no checkpoint — Reject without a captured before-state is a bug, not a no-op.
@@ -559,6 +595,18 @@ pub fn checkpoint_workspace_file(
     let config_dir = crate::resolve_config_dir();
     let resolved = resolve_workspace_root(&workspace_root, &config_dir)?;
     checkpoint_workspace_file_impl(&resolved.to_string_lossy(), &path)
+}
+
+#[tauri::command]
+pub fn seed_workspace_checkpoint(
+    workspace_root: String,
+    path: String,
+    content: String,
+    existed: bool,
+) -> Result<CheckpointOutcome, String> {
+    let config_dir = crate::resolve_config_dir();
+    let resolved = resolve_workspace_root(&workspace_root, &config_dir)?;
+    seed_workspace_checkpoint_impl(&resolved.to_string_lossy(), &path, &content, existed)
 }
 
 #[tauri::command]
@@ -992,6 +1040,43 @@ mod tests {
         // Idempotent — clearing again is fine; restore now has nothing.
         clear_workspace_checkpoint_impl(rs, "g.md").expect("clear idempotent");
         assert!(restore_workspace_file_impl(rs, "g.md").is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn seed_checkpoint_from_explicit_state_then_restore() {
+        // Copilot safe-write path: backend captured before-bytes and shipped them
+        // in the event; frontend seeds the checkpoint race-free (no file re-read).
+        let root = temp_root("ckpt-seed");
+        let rs = root.to_str().unwrap();
+        // The file already holds the APPLIED edit (SDK wrote it); seed records the
+        // before-state from explicit content, not by reading the edited file.
+        std::fs::write(root.join("GRAPH.md"), "AFTER edit").unwrap();
+        let cp = seed_workspace_checkpoint_impl(rs, "GRAPH.md", "BEFORE edit", true).expect("seed");
+        assert!(cp.created && cp.existed);
+        // Seeding again is earliest-wins (no overwrite).
+        let again = seed_workspace_checkpoint_impl(rs, "GRAPH.md", "OTHER", true).expect("seed2");
+        assert!(!again.created);
+
+        let restored = restore_workspace_file_impl(rs, "GRAPH.md").expect("restore");
+        assert_eq!(restored.content, "BEFORE edit");
+        assert_eq!(
+            std::fs::read_to_string(root.join("GRAPH.md")).unwrap(),
+            "BEFORE edit"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn seed_checkpoint_for_new_file_restores_to_absent() {
+        let root = temp_root("ckpt-seed-new");
+        let rs = root.to_str().unwrap();
+        std::fs::write(root.join("new.md"), "copilot wrote this").unwrap();
+        // existed:false → Reject must delete the file the copilot created.
+        seed_workspace_checkpoint_impl(rs, "new.md", "", false).expect("seed new");
+        let restored = restore_workspace_file_impl(rs, "new.md").expect("restore");
+        assert!(!restored.existed);
+        assert!(!root.join("new.md").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 

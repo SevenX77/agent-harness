@@ -49,6 +49,27 @@ export interface CopilotErrorEvent extends CopilotEventBase {
   message: string
 }
 
+/** F5 safe-write: a copilot Write/Edit applied; carries the diff + restore data. */
+export interface CopilotPatchProposedEvent extends CopilotEventBase {
+  type: 'patch_proposed'
+  toolUseId: string
+  toolName: 'Write' | 'Edit'
+  path: string
+  beforeExisted: boolean
+  beforeContent: string
+  afterContent: string
+  /** Review state, driven locally by Accept/Reject. */
+  review: 'pending' | 'accepted' | 'rejected'
+}
+
+/** F5: a copilot Bash command held for human approval (not executed). */
+export interface CopilotBashApprovalRequiredEvent extends CopilotEventBase {
+  type: 'bash_approval_required'
+  toolUseId: string
+  command: string
+  blocked: boolean
+}
+
 export interface CopilotUnknownEvent extends CopilotEventBase {
   type: 'unknown'
   payload: unknown
@@ -60,6 +81,8 @@ export type CopilotEvent =
   | CopilotContextResolvedEvent
   | CopilotToolUseStartEvent
   | CopilotToolUseResultEvent
+  | CopilotPatchProposedEvent
+  | CopilotBashApprovalRequiredEvent
   | CopilotDoneEvent
   | CopilotErrorEvent
   | CopilotUnknownEvent
@@ -128,6 +151,38 @@ export function normalizeCopilotEvent(raw: unknown, id: string): CopilotEvent {
       tool_name: record.tool_name,
       success: record.success !== false,
       result_summary: typeof record.result_summary === 'string' ? record.result_summary : '',
+    }
+  }
+  if (
+    record.type === 'patch_proposed' &&
+    typeof record.path === 'string' &&
+    (record.tool_name === 'Write' || record.tool_name === 'Edit')
+  ) {
+    return {
+      id,
+      type: 'patch_proposed',
+      status: 'success',
+      receivedAt,
+      raw,
+      toolUseId: typeof record.tool_use_id === 'string' ? record.tool_use_id : '',
+      toolName: record.tool_name,
+      path: record.path,
+      beforeExisted: record.before_existed === true,
+      beforeContent: typeof record.before_content === 'string' ? record.before_content : '',
+      afterContent: typeof record.after_content === 'string' ? record.after_content : '',
+      review: 'pending',
+    }
+  }
+  if (record.type === 'bash_approval_required' && typeof record.command === 'string') {
+    return {
+      id,
+      type: 'bash_approval_required',
+      status: 'pending',
+      receivedAt,
+      raw,
+      toolUseId: typeof record.tool_use_id === 'string' ? record.tool_use_id : '',
+      command: record.command,
+      blocked: record.blocked !== false,
     }
   }
   if (record.type === 'done') {

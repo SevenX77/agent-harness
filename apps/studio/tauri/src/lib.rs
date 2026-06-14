@@ -334,6 +334,7 @@ pub fn run() {
             native_fs::read_workspace_file,
             native_fs::list_workspace_dir,
             native_fs::checkpoint_workspace_file,
+            native_fs::seed_workspace_checkpoint,
             native_fs::restore_workspace_file,
             native_fs::clear_workspace_checkpoint,
             native_fs::add_recent_workspace,

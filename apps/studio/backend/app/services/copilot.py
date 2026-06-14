@@ -32,6 +32,7 @@ from claude_agent_sdk.types import (
     AssistantMessage,
     ResultMessage,
     TextBlock,
+    ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
 )
@@ -47,6 +48,7 @@ from app.models.copilot import (
     CopilotEventDone,
     CopilotEventError,
     CopilotEventText,
+    CopilotEventThinking,
     CopilotEventToolUseResult,
     CopilotEventToolUseStart,
     CopilotToolName,
@@ -140,6 +142,11 @@ def build_options(
         permission_mode="acceptEdits",
         allowed_tools=_ALLOWED_TOOLS.copy(),
         env=env,
+        # F1: enable extended thinking so the SDK emits ThinkingBlocks. Adaptive
+        # lets the model size its own reasoning per task; display is left at the
+        # default (full) — never "summarized"/"omitted" — so the whole reasoning
+        # trace streams to the UI (collapsible, not summarized away).
+        thinking={"type": "adaptive"},
     )
 
 
@@ -469,7 +476,12 @@ def _translate_assistant_message(
 ) -> list[CopilotEvent]:
     events: list[CopilotEvent] = []
     for block in message.content:
-        if isinstance(block, TextBlock):
+        if isinstance(block, ThinkingBlock):
+            # F1: stream the whole reasoning trace; the UI collapses but never
+            # drops it. Skip empty deltas to avoid blank Thought blocks.
+            if block.thinking:
+                events.append(CopilotEventThinking(content=block.thinking))
+        elif isinstance(block, TextBlock):
             events.append(CopilotEventText(content=block.text))
         elif isinstance(block, ToolUseBlock):
             if block.name not in _ALLOWED_TOOL_SET:

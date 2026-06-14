@@ -10,6 +10,7 @@ from app.models.copilot import (
     CopilotEventDone,
     CopilotEventError,
     CopilotEventText,
+    CopilotEventThinking,
     CopilotEventToolUseResult,
     CopilotEventToolUseStart,
 )
@@ -27,6 +28,7 @@ from claude_agent_sdk.types import (
     AssistantMessage,
     ResultMessage,
     TextBlock,
+    ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
 )
@@ -72,6 +74,40 @@ def test_translate_text_event() -> None:
     )
 
     assert events == [CopilotEventText(content="hello")]
+
+
+def test_translate_thinking_block_event() -> None:
+    # F1: extended-thinking must be streamed (collapsible, never dropped).
+    events = copilot._translate_sdk_message(
+        AssistantMessage(
+            content=[ThinkingBlock(thinking="let me reason...", signature="sig")],
+            model="claude",
+        ),
+        {},
+    )
+
+    assert events == [CopilotEventThinking(content="let me reason...")]
+
+
+def test_translate_thinking_then_text_preserves_order() -> None:
+    # Thinking precedes the visible answer in the same assistant turn; both
+    # events must be emitted in order so the UI can render the collapsible
+    # Thought above the answer text.
+    events = copilot._translate_sdk_message(
+        AssistantMessage(
+            content=[
+                ThinkingBlock(thinking="reasoning", signature="sig"),
+                TextBlock(text="answer"),
+            ],
+            model="claude",
+        ),
+        {},
+    )
+
+    assert events == [
+        CopilotEventThinking(content="reasoning"),
+        CopilotEventText(content="answer"),
+    ]
 
 
 def test_translate_tool_use_start_event() -> None:

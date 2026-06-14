@@ -190,3 +190,11 @@ def test_build_options_sets_provider_base_url(tmp_path: Path) -> None:
     assert options.env["ANTHROPIC_BASE_URL"] == "https://provider.example/anthropic"
     assert options.allowed_tools == ["Read", "Write", "Edit", "Bash"]
     assert options.permission_mode == "acceptEdits"
+
+
+def test_build_options_enables_full_thinking(tmp_path: Path) -> None:
+    # F1: thinking must be enabled and shown in full (never summarized/omitted),
+    # otherwise the SDK emits no ThinkingBlock and the streamed Thought is empty.
+    options = copilot.build_options(None, "claude-key", tmp_path)
+
+    assert options.thinking == {"type": "adaptive"}

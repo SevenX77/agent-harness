@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from app.core.adapters.http_transport import StudioAdapterError
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -131,14 +134,30 @@ class LocalRuntimeStateStore:
     def release(self, run_id: str, lease: LeaseToken) -> None:
         run_dir = self.root / "runs" / run_id
         lease_file = run_dir / "lease.json"
-        if lease_file.exists():
-            try:
-                with open(lease_file) as f:
-                    data = json.load(f)
-                if data.get("fencing_token") == lease.fencing_token:
-                    lease_file.unlink()
-            except Exception:
-                pass
+        if not lease_file.exists():
+            return
+        try:
+            data = json.loads(lease_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            # Degrade explicitly and observably (no silent swallow): a corrupt or
+            # unreadable lease file is left in place rather than blindly removed.
+            logger.warning(
+                "runtime_state.release run=%s could not read lease, leaving in place: %s",
+                run_id,
+                exc,
+            )
+            return
+        if data.get("fencing_token") != lease.fencing_token:
+            # A newer owner holds the lease; a stale holder must not release it.
+            logger.info(
+                "runtime_state.release run=%s skipped: lease held by a newer fencing token",
+                run_id,
+            )
+            return
+        try:
+            lease_file.unlink()
+        except OSError as exc:
+            logger.warning("runtime_state.release run=%s failed to unlink lease: %s", run_id, exc)
 
     def _next_fencing_token(self, run_dir: Path) -> int:
         counter_file = run_dir / "fencing_counter.json"

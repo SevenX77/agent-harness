@@ -96,6 +96,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   }, [])
 
   const runStream = useRunStream(runId)
+  // F7: a finished run (run_ended in the stream) drives the copilot analysis bar.
+  const completedRunId = runStream.events.some((event) => event.event_type === "run_ended")
+    ? runId
+    : null
 
   const statusByNodeId = useMemo(() => {
     const statuses: Record<string, SkillNodeStatus> = {}
@@ -734,7 +738,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                 minSize="18%"
                 maxSize="35%"
               >
-                <CopilotPanel skillId={currentSkillId} />
+                <CopilotPanel skillId={currentSkillId} completedRunId={completedRunId} />
               </ResizablePanel>
             </>
           ) : null}

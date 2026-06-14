@@ -31,6 +31,7 @@ from claude_agent_sdk.types import (
     ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
+    UserMessage,
 )
 from pydantic import SecretStr
 
@@ -138,6 +139,35 @@ def test_translate_tool_result_event() -> None:
     assert events == [
         CopilotEventToolUseResult(tool_name="Read", success=True, result_summary="ok")
     ]
+
+
+def test_translate_tool_result_in_user_message() -> None:
+    # The real SDK returns tool results in UserMessage, not AssistantMessage —
+    # these must still surface (F1 "不省略"), keyed back to the tool name.
+    events = copilot._translate_sdk_message(
+        UserMessage(content=[ToolResultBlock(tool_use_id="tool-1", content="file contents")]),
+        {"tool-1": "Read"},
+    )
+
+    assert events == [
+        CopilotEventToolUseResult(tool_name="Read", success=True, result_summary="file contents")
+    ]
+
+
+def test_translate_failed_tool_result_in_user_message() -> None:
+    events = copilot._translate_sdk_message(
+        UserMessage(
+            content=[ToolResultBlock(tool_use_id="tool-1", content="denied", is_error=True)]
+        ),
+        {"tool-1": "Bash"},
+    )
+
+    assert events == [CopilotEventError(message="工具 Bash 失败: denied")]
+
+
+def test_translate_user_message_with_plain_text_is_ignored() -> None:
+    # A plain user-text message (not a tool result) is not echoed back.
+    assert copilot._translate_sdk_message(UserMessage(content="hello"), {}) == []
 
 
 def test_translate_result_message_is_done() -> None:

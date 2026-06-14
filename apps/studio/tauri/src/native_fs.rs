@@ -189,6 +189,87 @@ pub fn write_workspace_file_impl(
     })
 }
 
+/// Read outcome mirrors the writer (`WriteOutcome`): the caller gets both the
+/// content and its content-addressable hash so it can pass the hash back as
+/// `expected_hash` on a subsequent write without re-hashing the body.
+#[derive(Serialize, Debug)]
+pub struct ReadOutcome {
+    pub path: String,
+    pub content: String,
+    pub hash: String,
+}
+
+/// Sole-reader counterpart to `write_workspace_file_impl`. Reads a file from
+/// `<workspace_root>/<path>`, returning content + sha256-hex, refusing path
+/// traversal so a read can never escape the workspace.
+pub fn read_workspace_file_impl(workspace_root: &str, path: &str) -> Result<ReadOutcome, String> {
+    let root = PathBuf::from(workspace_root.trim());
+    let target = safe_join(&root, path)?;
+    let content = std::fs::read_to_string(&target).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            format!("file not found: {path}")
+        } else {
+            format!("cannot read file: {error}")
+        }
+    })?;
+    Ok(ReadOutcome {
+        path: path.to_string(),
+        hash: sha256_hex(&content),
+        content,
+    })
+}
+
+/// One directory entry — `kind` is `"file"` or `"dir"` (symlinks fold into the
+/// kind of their target so callers don't have to special-case them).
+#[derive(Serialize, Debug, PartialEq)]
+pub struct WorkspaceDirEntry {
+    pub name: String,
+    pub kind: String,
+}
+
+/// List entries directly under `<workspace_root>/<relative_dir>` (non-recursive).
+/// A missing directory is surfaced as an empty list rather than an error so
+/// callers can probe optional dirs (e.g. `.gemini/copilot/sessions/<skill>`)
+/// without `if exists` ceremony — distinguishing "missing" from "empty" isn't
+/// useful for the hydrate path that consumes this.
+pub fn list_workspace_dir_impl(
+    workspace_root: &str,
+    relative_dir: &str,
+) -> Result<Vec<WorkspaceDirEntry>, String> {
+    let root = PathBuf::from(workspace_root.trim());
+    let target = safe_join(&root, relative_dir)?;
+    let read_dir = match std::fs::read_dir(&target) {
+        Ok(iter) => iter,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("cannot list directory: {error}")),
+    };
+    let mut entries = Vec::new();
+    for entry in read_dir {
+        let entry = entry.map_err(|error| format!("cannot read directory entry: {error}"))?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        let metadata = entry
+            .metadata()
+            .map_err(|error| format!("cannot stat entry {name}: {error}"))?;
+        let kind = if metadata.is_dir() {
+            "dir"
+        } else if metadata.is_file() {
+            "file"
+        } else {
+            // Skip sockets/fifos/etc. — hydrate paths only care about regular
+            // files and directories.
+            continue;
+        };
+        entries.push(WorkspaceDirEntry {
+            name,
+            kind: kind.to_string(),
+        });
+    }
+    // Deterministic order so callers (and tests) don't rely on filesystem
+    // iteration order which varies by platform.
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(entries)
+}
+
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct RecentWorkspace {
     pub absolute_path: String,
@@ -298,6 +379,23 @@ pub fn remove_recent_workspace(identity: String) -> Result<(), String> {
     let file = recent_workspaces_file();
     let updated = remove_recent(read_recent(&file), &identity);
     write_recent(&file, &updated)
+}
+
+#[tauri::command]
+pub fn read_workspace_file(workspace_root: String, path: String) -> Result<ReadOutcome, String> {
+    let config_dir = crate::resolve_config_dir();
+    let resolved = resolve_workspace_root(&workspace_root, &config_dir)?;
+    read_workspace_file_impl(&resolved.to_string_lossy(), &path)
+}
+
+#[tauri::command]
+pub fn list_workspace_dir(
+    workspace_root: String,
+    relative_dir: String,
+) -> Result<Vec<WorkspaceDirEntry>, String> {
+    let config_dir = crate::resolve_config_dir();
+    let resolved = resolve_workspace_root(&workspace_root, &config_dir)?;
+    list_workspace_dir_impl(&resolved.to_string_lossy(), &relative_dir)
 }
 
 #[tauri::command]
@@ -545,6 +643,91 @@ mod tests {
             );
         }
         let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn read_workspace_file_returns_content_and_matching_hash() {
+        let root = temp_root("read-basic");
+        std::fs::write(root.join("note.md"), "hello world").unwrap();
+        let outcome =
+            read_workspace_file_impl(root.to_str().unwrap(), "note.md").expect("read existing");
+        assert_eq!(outcome.path, "note.md");
+        assert_eq!(outcome.content, "hello world");
+        // The reader's hash must match what the writer's `WriteOutcome.hash`
+        // would have produced for the same bytes, so callers can feed it
+        // straight into `expected_hash` for a follow-up write without
+        // re-hashing.
+        assert_eq!(outcome.hash, sha256_hex("hello world"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn read_workspace_file_clearly_reports_missing() {
+        let root = temp_root("read-missing");
+        let error = read_workspace_file_impl(root.to_str().unwrap(), "nope.json")
+            .expect_err("missing file rejected");
+        assert!(error.contains("file not found"), "unexpected: {error}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn read_workspace_file_refuses_traversal() {
+        let root = temp_root("read-traversal");
+        // Reads must not escape the workspace — the writer's safe_join also
+        // refuses these, and the reader inherits that guard. Without it a
+        // request for `../../etc/passwd` could leak host files.
+        assert!(read_workspace_file_impl(root.to_str().unwrap(), "../escape.md").is_err());
+        assert!(read_workspace_file_impl(root.to_str().unwrap(), "/etc/passwd").is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn list_workspace_dir_returns_sorted_files_and_dirs() {
+        let root = temp_root("list-basic");
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::write(root.join("b.json"), "{}").unwrap();
+        std::fs::write(root.join("a.json"), "{}").unwrap();
+        let entries =
+            list_workspace_dir_impl(root.to_str().unwrap(), ".").expect("list workspace root");
+        // Sort guarantees deterministic order for callers and tests; the
+        // platform-native iteration order is not stable.
+        assert_eq!(
+            entries,
+            vec![
+                WorkspaceDirEntry {
+                    name: "a.json".to_string(),
+                    kind: "file".to_string()
+                },
+                WorkspaceDirEntry {
+                    name: "b.json".to_string(),
+                    kind: "file".to_string()
+                },
+                WorkspaceDirEntry {
+                    name: "sub".to_string(),
+                    kind: "dir".to_string()
+                },
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn list_workspace_dir_treats_missing_dir_as_empty() {
+        let root = temp_root("list-missing");
+        // Optional dirs (e.g. `.gemini/copilot/sessions/<skill>` on first
+        // launch) should produce an empty list, not an error — callers can
+        // hydrate without a pre-flight `exists()` check.
+        let entries = list_workspace_dir_impl(root.to_str().unwrap(), ".gemini/copilot/sessions")
+            .expect("missing dir maps to empty list");
+        assert!(entries.is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn list_workspace_dir_refuses_traversal() {
+        let root = temp_root("list-traversal");
+        assert!(list_workspace_dir_impl(root.to_str().unwrap(), "../escape").is_err());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

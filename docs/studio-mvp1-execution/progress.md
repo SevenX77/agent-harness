@@ -331,5 +331,16 @@ Stop-hook、反自造停下铁律、copilot F3/F4-echo/F7、trace F5/F2、input 
 - **门禁**:后端 515/1 skip,copilot.py/gateway.py 改动 mypy 中性 + ruff 干净。
 - **登记**:① 你真 `llm_roles.yaml` 的 copilot role route_id 是连字符格式、与注册表点格式不符 = 你的配置数据需修(我在隔离副本验证了正确格式可用,没动你真库);② copilot model/role 选择器(切 Claude/deepseek)= 前端 F-unit 待加;③ GUI init 超时 = 专门轮。
 
+### input F2 schema 写回 实现 + 真 app 验证逼出 native-fs 限制(2026-06-14 续)
+> PM:F2 不是 blocker,实现 + 测。已实现 + 单测,真 app 鼠标验证逼出一个深层 native-fs 限制(影响所有 .app 写,非 F2 独有)。
+
+- **F2 实现 ✅**:`applyInputSchemaToGraph`(纯函数,js-yaml):把推断出的 schema 写进 GRAPH.md 的 `io.inputs`(引擎输入契约),保留 `io.outputs` + phase DAG body;I/O 面板加"Save as input schema"按钮,经既有 `writeSkillFile` 写。GRAPH.md git-tracked 可回滚(回应 PM:"破坏性覆盖"= 覆盖手写 io.inputs,但可逆,非 blocker)。2 单测(写回 + 无 frontmatter 报错)。tsc/eslint/vitest **444** 绿。
+- **真 app 鼠标验证逼出 native-fs 限制 🐛(深层,影响面广)**:I/O 面板 infer `{"foo":"bar","count":3}` → 推断 schema 正确显示 → 点 Save → **GRAPH.md 没更新 + 红框报错**。逐层核:
+  - `.app`(Tauri)里 `writeSkillFile` 走**原生写**(`writeWorkspaceFile`),首参是 **workspace root**,不是 skillId。
+  - 我先按 Monaco 编辑器同款 `writeSkillFile(workspaceRoot ?? skillId, ...)` 修(`resolveWorkspaceIdentity` 解析 root)——但 **default-workspace 技能**(从"Recent skills"开的,skillId 是短名 "e2e-fast")`resolveWorkspaceIdentity` 给不出 workspaceRoot → 退回短名 → 原生写 `write_workspace_file_impl("e2e-fast","GRAPH.md")` 解析不出真路径 → 失败。
+  - **= native-fs sole-writer(D12)架构限制:它要真 workspace root,但 default-workspace 技能只有短 id → `.app` 里这类技能的所有 skill-file 写都会失败(Monaco 编辑同样会),非 F2 独有。** 是真深层问题(桶B native-fs 专门轮)。
+- **顺手修的真 UX bug**:报错原来显示 "[object Object]"(`errorMessage` 不处理 Tauri 的纯对象拒绝)→ 改成提取 `.message`/JSON,报错可读。
+- **登记**:① F2 逻辑 + 浏览器/HTTP 路径已单测;`.app` 原生写对 opened-folder workspace 可用(正确 pattern),default-workspace 技能受 native-fs 限制阻塞 = 桶B 专门轮。② commit `e88a4881`(F2)+ `e0665e06`(workspaceRoot + errorMessage 修)。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

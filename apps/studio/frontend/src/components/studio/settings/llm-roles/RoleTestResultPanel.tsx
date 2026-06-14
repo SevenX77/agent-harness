@@ -112,8 +112,9 @@ function providerStatusLabel(status: RoleTestProviderStatus, admissionDecision: 
 
 function providerUiStateLabel(state: ProviderUiState): string {
   if (state === "ready") return "Ready"
+  if (state === "historical_ready") return "Previously Connected"
   if (state === "cooling_down") return "Cooling Down"
-  if (state === "needs_setup") return "Needs Setup"
+  if (state === "failed") return "Failed"
   if (state === "off") return "Off"
   return "Untested"
 }

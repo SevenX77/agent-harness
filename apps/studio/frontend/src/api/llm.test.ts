@@ -1023,7 +1023,7 @@ describe('API Keys v4 registry adapter', () => {
     }))
 
     const states = groups.flatMap((group) => group.provider_models.map((option) => option.ui_state))
-    expect(states).toEqual(['needs_setup', 'needs_setup'])
+    expect(states).toEqual(['failed', 'failed'])
   })
 
   it('keeps backend Cooling Down projection and retry timestamp', () => {
@@ -1051,7 +1051,8 @@ describe('API Keys v4 registry adapter', () => {
             ready: 0,
             untested: 0,
             cooling_down: 1,
-            needs_setup: 0,
+            historical_ready: 0,
+            failed: 0,
             off: 0,
           },
           capability_summary: {
@@ -1086,7 +1087,8 @@ describe('API Keys v4 registry adapter', () => {
         ready: 1,
         untested: 0,
         cooling_down: 0,
-        needs_setup: 0,
+        historical_ready: 0,
+        failed: 0,
         off: 0,
       },
     })
@@ -1125,7 +1127,8 @@ describe('API Keys v4 registry adapter', () => {
                 ready: 1,
                 untested: 0,
                 cooling_down: 0,
-                needs_setup: 0,
+                historical_ready: 0,
+                failed: 0,
                 off: 0,
               },
               capability_summary: {

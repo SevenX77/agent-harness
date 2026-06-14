@@ -70,8 +70,8 @@ def test_provider_state_projection_uses_explicit_priority_chain() -> None:
         circuits=[circuit],
         now=now,
     )
-    assert setup_projection.ui_state == "needs_setup"
-    assert setup_projection.reason_code == "missing_key"
+    assert setup_projection.ui_state == "failed"
+    assert setup_projection.reason_code == "missing_config"
 
     cooling_projection = project_provider_model_state(
         endpoint=_endpoint(status="verified"),

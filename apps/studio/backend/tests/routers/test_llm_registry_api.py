@@ -735,16 +735,17 @@ def test_registry_returns_model_groups_with_provider_ui_state_projection(
     assert model_group["display_name"] == "GPT 5"
     assert model_group["status_summary"] == {
         "ready": 1,
+        "historical_ready": 0,
         "untested": 1,
         "cooling_down": 0,
-        "needs_setup": 1,
         "off": 1,
-        "failed": 1,
+        "failed": 2,
     }
     provider_models = {option["route_id"]: option for option in model_group["provider_models"]}
     assert provider_models["ready-provider:gpt-5"]["ui_state"] == "ready"
     assert provider_models["untested-provider:gpt-5"]["ui_state"] == "untested"
-    assert provider_models["missing-key-provider:gpt-5"]["ui_state"] == "needs_setup"
+    # Missing credential now converges to the canonical failed/missing_config (was needs_setup).
+    assert provider_models["missing-key-provider:gpt-5"]["ui_state"] == "failed"
     assert provider_models["failed-provider:gpt-5"]["ui_state"] == "failed"
     assert provider_models["disabled-provider:gpt-5"]["ui_state"] == "off"
     assert provider_models["ready-provider:gpt-5"]["endpoint_id"] == "ready-provider"

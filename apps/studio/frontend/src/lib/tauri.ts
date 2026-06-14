@@ -186,3 +186,51 @@ export async function listWorkspaceDir(
     relativeDir,
   })
 }
+
+// ── Safe-write checkpoints (copilot F5) ──────────────────────────────────────
+
+export interface CheckpointResult {
+  path: string
+  existed: boolean
+  created: boolean
+}
+
+export interface RestoreResult {
+  path: string
+  existed: boolean
+  content: string
+}
+
+/** Capture a file's pre-edit bytes so a Reject can restore them (copilot F5). */
+export async function checkpointWorkspaceFile(
+  workspaceRoot: string,
+  path: string,
+): Promise<CheckpointResult> {
+  if (!isTauriRuntime()) {
+    throw new Error('Desktop only')
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return await invoke<CheckpointResult>('checkpoint_workspace_file', { workspaceRoot, path })
+}
+
+/** Reject: restore a file to its checkpointed pre-edit state via the sole writer. */
+export async function restoreWorkspaceFile(
+  workspaceRoot: string,
+  path: string,
+): Promise<RestoreResult> {
+  if (!isTauriRuntime()) {
+    throw new Error('Desktop only')
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return await invoke<RestoreResult>('restore_workspace_file', { workspaceRoot, path })
+}
+
+/** Accept: discard the checkpoint, keeping the applied edit. */
+export async function clearWorkspaceCheckpoint(
+  workspaceRoot: string,
+  path: string,
+): Promise<void> {
+  if (!isTauriRuntime()) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('clear_workspace_checkpoint', { workspaceRoot, path })
+}

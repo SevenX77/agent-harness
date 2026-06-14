@@ -189,6 +189,159 @@ pub fn write_workspace_file_impl(
     })
 }
 
+// ── Safe-write checkpoints (copilot F5, model B) ────────────────────────────
+//
+// Cursor-style apply-then-review: a copilot Write/Edit is applied immediately
+// (so compile/predict/run use it), but the pre-edit bytes are checkpointed so a
+// Reject can restore them exactly. The checkpoint is captured by Rust and the
+// restore write goes back through the sole writer — the design requires "Reject
+// 经 Rust 从 checkpoint 还原", and D12 keeps Rust as the only writer.
+//
+// At most one checkpoint per file: the FIRST unreviewed edit records the
+// before-state; later edits before review do not overwrite it, so Reject always
+// rewinds to before the whole pending change. Accept clears the checkpoint.
+
+const CHECKPOINT_DIR: &str = ".gemini/copilot/checkpoints";
+
+#[derive(Serialize, Deserialize, Debug)]
+struct CheckpointRecord {
+    path: String,
+    /// Whether the file existed before the first unreviewed edit. A Reject of a
+    /// brand-new file must delete it, not write empty bytes.
+    existed: bool,
+    content: String,
+}
+
+#[derive(Serialize, Debug)]
+pub struct CheckpointOutcome {
+    pub path: String,
+    pub existed: bool,
+    /// false when a checkpoint already existed (earliest pre-edit state kept).
+    pub created: bool,
+}
+
+#[derive(Serialize, Debug)]
+pub struct RestoreOutcome {
+    pub path: String,
+    /// Whether the file exists after restore (false = the pending file was new
+    /// and has been removed).
+    pub existed: bool,
+    pub content: String,
+}
+
+/// Checkpoint record location: `<root>/.gemini/copilot/checkpoints/<sha(path)>.json`.
+/// Keyed by the hash of the relative path so any path maps to a safe filename.
+fn checkpoint_path(root: &Path, rel: &str) -> PathBuf {
+    root.join(CHECKPOINT_DIR)
+        .join(format!("{}.json", sha256_hex(rel)))
+}
+
+fn write_atomic(target: &Path, bytes: &str) -> Result<(), String> {
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("cannot create parent dir: {error}"))?;
+    }
+    let mut temp_os = target.to_path_buf().into_os_string();
+    temp_os.push(".native-tmp");
+    let temp = PathBuf::from(temp_os);
+    std::fs::write(&temp, bytes).map_err(|error| format!("cannot write temp file: {error}"))?;
+    std::fs::rename(&temp, target).map_err(|error| format!("cannot finalize write: {error}"))?;
+    Ok(())
+}
+
+/// Capture the pre-edit state of `<root>/<path>` so it can be restored on
+/// Reject. No-op (returns `created:false`) if a checkpoint already exists, so
+/// the earliest before-state survives a run of edits.
+pub fn checkpoint_workspace_file_impl(
+    workspace_root: &str,
+    path: &str,
+) -> Result<CheckpointOutcome, String> {
+    let root = PathBuf::from(workspace_root.trim());
+    let target = safe_join(&root, path)?;
+    let ckpt = checkpoint_path(&root, path.trim());
+
+    if ckpt.is_file() {
+        let existing = std::fs::read_to_string(&ckpt)
+            .map_err(|error| format!("cannot read existing checkpoint: {error}"))?;
+        let record: CheckpointRecord = serde_json::from_str(&existing)
+            .map_err(|error| format!("corrupt checkpoint record: {error}"))?;
+        return Ok(CheckpointOutcome {
+            path: path.to_string(),
+            existed: record.existed,
+            created: false,
+        });
+    }
+
+    let (existed, content) = match std::fs::read_to_string(&target) {
+        Ok(text) => (true, text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (false, String::new()),
+        Err(error) => return Err(format!("cannot read file to checkpoint: {error}")),
+    };
+    let record = CheckpointRecord {
+        path: path.to_string(),
+        existed,
+        content,
+    };
+    let serialized = serde_json::to_string(&record)
+        .map_err(|error| format!("cannot serialize checkpoint: {error}"))?;
+    write_atomic(&ckpt, &serialized)?;
+    Ok(CheckpointOutcome {
+        path: path.to_string(),
+        existed,
+        created: true,
+    })
+}
+
+/// Restore `<root>/<path>` to its checkpointed pre-edit state and clear the
+/// checkpoint. A file that did not exist before is removed. Errors if there is
+/// no checkpoint — Reject without a captured before-state is a bug, not a no-op.
+pub fn restore_workspace_file_impl(
+    workspace_root: &str,
+    path: &str,
+) -> Result<RestoreOutcome, String> {
+    let root = PathBuf::from(workspace_root.trim());
+    let target = safe_join(&root, path)?;
+    let ckpt = checkpoint_path(&root, path.trim());
+
+    let serialized = std::fs::read_to_string(&ckpt).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            format!("no checkpoint to restore for: {path}")
+        } else {
+            format!("cannot read checkpoint: {error}")
+        }
+    })?;
+    let record: CheckpointRecord = serde_json::from_str(&serialized)
+        .map_err(|error| format!("corrupt checkpoint record: {error}"))?;
+
+    if record.existed {
+        write_atomic(&target, &record.content)?;
+    } else if target.exists() {
+        std::fs::remove_file(&target)
+            .map_err(|error| format!("cannot remove pending new file on restore: {error}"))?;
+    }
+    std::fs::remove_file(&ckpt)
+        .map_err(|error| format!("restored but cannot clear checkpoint: {error}"))?;
+
+    Ok(RestoreOutcome {
+        path: path.to_string(),
+        existed: record.existed,
+        content: record.content,
+    })
+}
+
+/// Discard the checkpoint for `<root>/<path>` (Accept keeps the applied edit).
+/// Idempotent — a missing checkpoint is not an error.
+pub fn clear_workspace_checkpoint_impl(workspace_root: &str, path: &str) -> Result<(), String> {
+    let root = PathBuf::from(workspace_root.trim());
+    safe_join(&root, path)?;
+    let ckpt = checkpoint_path(&root, path.trim());
+    match std::fs::remove_file(&ckpt) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("cannot clear checkpoint: {error}")),
+    }
+}
+
 /// Read outcome mirrors the writer (`WriteOutcome`): the caller gets both the
 /// content and its content-addressable hash so it can pass the hash back as
 /// `expected_hash` on a subsequent write without re-hashing the body.
@@ -396,6 +549,33 @@ pub fn list_workspace_dir(
     let config_dir = crate::resolve_config_dir();
     let resolved = resolve_workspace_root(&workspace_root, &config_dir)?;
     list_workspace_dir_impl(&resolved.to_string_lossy(), &relative_dir)
+}
+
+#[tauri::command]
+pub fn checkpoint_workspace_file(
+    workspace_root: String,
+    path: String,
+) -> Result<CheckpointOutcome, String> {
+    let config_dir = crate::resolve_config_dir();
+    let resolved = resolve_workspace_root(&workspace_root, &config_dir)?;
+    checkpoint_workspace_file_impl(&resolved.to_string_lossy(), &path)
+}
+
+#[tauri::command]
+pub fn restore_workspace_file(
+    workspace_root: String,
+    path: String,
+) -> Result<RestoreOutcome, String> {
+    let config_dir = crate::resolve_config_dir();
+    let resolved = resolve_workspace_root(&workspace_root, &config_dir)?;
+    restore_workspace_file_impl(&resolved.to_string_lossy(), &path)
+}
+
+#[tauri::command]
+pub fn clear_workspace_checkpoint(workspace_root: String, path: String) -> Result<(), String> {
+    let config_dir = crate::resolve_config_dir();
+    let resolved = resolve_workspace_root(&workspace_root, &config_dir)?;
+    clear_workspace_checkpoint_impl(&resolved.to_string_lossy(), &path)
 }
 
 #[tauri::command]
@@ -727,6 +907,101 @@ mod tests {
     fn list_workspace_dir_refuses_traversal() {
         let root = temp_root("list-traversal");
         assert!(list_workspace_dir_impl(root.to_str().unwrap(), "../escape").is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn checkpoint_then_restore_rewinds_an_edited_file_to_original_bytes() {
+        let root = temp_root("ckpt-edit");
+        let rs = root.to_str().unwrap();
+        std::fs::write(root.join("GRAPH.md"), "original").unwrap();
+
+        // Capture before-state, then a copilot edit lands on disk.
+        let cp = checkpoint_workspace_file_impl(rs, "GRAPH.md").expect("checkpoint");
+        assert!(cp.created && cp.existed);
+        write_workspace_file_impl(rs, "GRAPH.md", "edited by copilot", None).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("GRAPH.md")).unwrap(),
+            "edited by copilot"
+        );
+
+        // Reject: Rust restores the original bytes and clears the checkpoint.
+        let restored = restore_workspace_file_impl(rs, "GRAPH.md").expect("restore");
+        assert_eq!(restored.content, "original");
+        assert!(restored.existed);
+        assert_eq!(
+            std::fs::read_to_string(root.join("GRAPH.md")).unwrap(),
+            "original"
+        );
+        // Checkpoint consumed — a second restore has nothing to do.
+        assert!(restore_workspace_file_impl(rs, "GRAPH.md").is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn restore_removes_a_file_that_did_not_exist_before_the_edit() {
+        let root = temp_root("ckpt-new");
+        let rs = root.to_str().unwrap();
+        // No file yet → checkpoint records existed:false.
+        let cp = checkpoint_workspace_file_impl(rs, "new.md").expect("checkpoint");
+        assert!(cp.created && !cp.existed);
+        write_workspace_file_impl(rs, "new.md", "fresh content", None).unwrap();
+        assert!(root.join("new.md").is_file());
+
+        let restored = restore_workspace_file_impl(rs, "new.md").expect("restore");
+        assert!(!restored.existed);
+        // Reject of a brand-new file deletes it rather than leaving empty bytes.
+        assert!(!root.join("new.md").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn second_checkpoint_keeps_earliest_before_state() {
+        let root = temp_root("ckpt-earliest");
+        let rs = root.to_str().unwrap();
+        std::fs::write(root.join("g.md"), "v0").unwrap();
+
+        let first = checkpoint_workspace_file_impl(rs, "g.md").expect("first checkpoint");
+        assert!(first.created);
+        write_workspace_file_impl(rs, "g.md", "v1", None).unwrap();
+        // A second edit checkpoints again, but must NOT overwrite the v0 capture.
+        let second = checkpoint_workspace_file_impl(rs, "g.md").expect("second checkpoint");
+        assert!(!second.created);
+        write_workspace_file_impl(rs, "g.md", "v2", None).unwrap();
+
+        // Reject rewinds all the way to v0, not v1.
+        let restored = restore_workspace_file_impl(rs, "g.md").expect("restore");
+        assert_eq!(restored.content, "v0");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn clear_checkpoint_keeps_the_applied_edit_and_is_idempotent() {
+        let root = temp_root("ckpt-clear");
+        let rs = root.to_str().unwrap();
+        std::fs::write(root.join("g.md"), "before").unwrap();
+        checkpoint_workspace_file_impl(rs, "g.md").unwrap();
+        write_workspace_file_impl(rs, "g.md", "after-accept", None).unwrap();
+
+        // Accept: clear the checkpoint, applied edit stays.
+        clear_workspace_checkpoint_impl(rs, "g.md").expect("clear");
+        assert_eq!(
+            std::fs::read_to_string(root.join("g.md")).unwrap(),
+            "after-accept"
+        );
+        // Idempotent — clearing again is fine; restore now has nothing.
+        clear_workspace_checkpoint_impl(rs, "g.md").expect("clear idempotent");
+        assert!(restore_workspace_file_impl(rs, "g.md").is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn checkpoint_and_restore_refuse_traversal() {
+        let root = temp_root("ckpt-traversal");
+        let rs = root.to_str().unwrap();
+        assert!(checkpoint_workspace_file_impl(rs, "../escape.md").is_err());
+        assert!(restore_workspace_file_impl(rs, "/etc/passwd").is_err());
+        assert!(clear_workspace_checkpoint_impl(rs, "../escape.md").is_err());
         let _ = std::fs::remove_dir_all(&root);
     }
 

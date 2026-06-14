@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 
 import type { CopilotPatchProposedEvent } from '../../types/copilot'
-import { PatchProposedBubble } from './patch-proposed-bubble'
+import { PatchProposedBubble, copilotFileActionEffects } from './patch-proposed-bubble'
 
 function patchEvent(overrides: Partial<CopilotPatchProposedEvent> = {}): CopilotPatchProposedEvent {
   return {
@@ -44,5 +44,19 @@ describe('PatchProposedBubble', () => {
     )
     expect(html).toContain('Created phases/p/LOGIC.md')
     expect(html).toContain('new body')
+  })
+})
+
+describe('copilotFileActionEffects (F5/DEF-025)', () => {
+  it('applied → reload the editor buffer only (edit is live, review not settled)', () => {
+    expect(copilotFileActionEffects('applied')).toEqual({ reload: true, recompile: false })
+  })
+
+  it('accepted → recompile only (buffer already shows the applied edit)', () => {
+    expect(copilotFileActionEffects('accepted')).toEqual({ reload: false, recompile: true })
+  })
+
+  it('rejected → reload (file rewound) AND recompile', () => {
+    expect(copilotFileActionEffects('rejected')).toEqual({ reload: true, recompile: true })
   })
 })

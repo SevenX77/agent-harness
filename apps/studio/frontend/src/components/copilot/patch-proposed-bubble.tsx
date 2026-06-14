@@ -12,14 +12,35 @@ import {
 import { resolveWorkspaceIdentity } from '../studio/workspace-identity'
 import { errorMessage } from '../../utils/errors'
 
+/** F5 DEF-025: tells the workspace a copilot edit hit disk so the editor buffer
+ * reloads and predict/run recompile against the reviewed code. */
+export type CopilotFileAction = 'applied' | 'accepted' | 'rejected'
+
+/**
+ * What the workspace should do for each copilot file action:
+ * - applied (SDK just wrote the edit) → reload the open buffer to show it live.
+ * - accepted (review final)           → recompile so predict/run use it.
+ * - rejected (file rewound on disk)   → reload the buffer AND recompile.
+ */
+export function copilotFileActionEffects(action: CopilotFileAction): {
+  reload: boolean
+  recompile: boolean
+} {
+  return {
+    reload: action === 'applied' || action === 'rejected',
+    recompile: action === 'accepted' || action === 'rejected',
+  }
+}
+
 interface PatchProposedBubbleProps {
   event: CopilotPatchProposedEvent
   skillId: string | null
+  onFileChanged?: (path: string, action: CopilotFileAction) => void
 }
 
 type Review = 'pending' | 'accepted' | 'rejected'
 
-function PatchProposedBubbleBase({ event, skillId }: PatchProposedBubbleProps) {
+function PatchProposedBubbleBase({ event, skillId, onFileChanged }: PatchProposedBubbleProps) {
   const [review, setReview] = useState<Review>('pending')
   const [busy, setBusy] = useState(false)
 
@@ -50,6 +71,9 @@ function PatchProposedBubbleBase({ event, skillId }: PatchProposedBubbleProps) {
         console.warn(`copilot: could not seed checkpoint for ${event.path}: ${errorMessage(err)}`)
       },
     )
+    // The SDK already wrote the file; tell the workspace to reflect it live in
+    // the editor buffer (design F5: "改动即时进编辑器 buffer").
+    onFileChanged?.(event.path, 'applied')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -63,6 +87,8 @@ function PatchProposedBubbleBase({ event, skillId }: PatchProposedBubbleProps) {
         await clearWorkspaceCheckpoint(root, event.path)
       }
       setReview('accepted')
+      // Reviewed code is final — recompile so predict/run use it (改后自动 compile).
+      onFileChanged?.(event.path, 'accepted')
     } catch (err: unknown) {
       toast.error(`Couldn't accept change: ${errorMessage(err)}`)
     } finally {
@@ -82,6 +108,8 @@ function PatchProposedBubbleBase({ event, skillId }: PatchProposedBubbleProps) {
       // the design's "Reject 经 Rust 从 checkpoint 还原" — not a blind overwrite.
       await restoreWorkspaceFile(root, event.path)
       setReview('rejected')
+      // File rewound on disk — reload the editor buffer + recompile.
+      onFileChanged?.(event.path, 'rejected')
     } catch (err: unknown) {
       toast.error(`Couldn't revert change: ${errorMessage(err)}`)
     } finally {

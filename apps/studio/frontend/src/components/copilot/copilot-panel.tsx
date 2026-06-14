@@ -9,15 +9,16 @@ import type { CopilotMessage } from '../../types/copilot'
 import { AnalysisBar } from './analysis-bar'
 import { DiffBubble } from './diff-bubble'
 import { ModelPicker } from './model-picker'
-import { PatchProposedBubble } from './patch-proposed-bubble'
+import { PatchProposedBubble, type CopilotFileAction } from './patch-proposed-bubble'
 import { ToolCallBubble } from './tool-call-bubble'
 
 interface ChatMessageItemProps {
   message: CopilotMessage
   skillId: string | null
+  onFileChanged?: (path: string, action: CopilotFileAction) => void
 }
 
-function ChatMessageItemBase({ message, skillId }: ChatMessageItemProps) {
+function ChatMessageItemBase({ message, skillId, onFileChanged }: ChatMessageItemProps) {
   const isUser = message.role === 'user'
   return (
     <article className={`rounded-md border p-3 text-sm ${isUser ? 'border-primary/30 bg-primary/10' : 'border-border bg-background'}`}>
@@ -52,7 +53,14 @@ function ChatMessageItemBase({ message, skillId }: ChatMessageItemProps) {
           )
         }
         if (event.type === 'patch_proposed') {
-          return <PatchProposedBubble key={event.id} event={event} skillId={skillId} />
+          return (
+            <PatchProposedBubble
+              key={event.id}
+              event={event}
+              skillId={skillId}
+              onFileChanged={onFileChanged}
+            />
+          )
         }
         if (event.type === 'bash_approval_required') {
           return (
@@ -113,9 +121,11 @@ interface CopilotPanelProps {
   view?: 'edit' | 'eval'
   // F7: id of the run that just finished (predict/run) — drives the analysis bar.
   completedRunId?: string | null
+  // F5/DEF-025: a copilot edit hit disk — reload the editor buffer + recompile.
+  onFileChanged?: (path: string, action: CopilotFileAction) => void
 }
 
-export function CopilotPanel({ skillId, view = 'edit', completedRunId = null }: CopilotPanelProps) {
+export function CopilotPanel({ skillId, view = 'edit', completedRunId = null, onFileChanged }: CopilotPanelProps) {
   const [draft, setDraft] = useState('')
   const [dismissedRunId, setDismissedRunId] = useState<string | null>(null)
   const [roleData, setRoleData] = useState<RoleEntry | null>(null)
@@ -176,7 +186,12 @@ export function CopilotPanel({ skillId, view = 'edit', completedRunId = null }: 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
         {copilot.messages.length > 0 ? (
           copilot.messages.map((message) => (
-            <ChatMessageItem key={message.id} message={message} skillId={skillId} />
+            <ChatMessageItem
+              key={message.id}
+              message={message}
+              skillId={skillId}
+              onFileChanged={onFileChanged}
+            />
           ))
         ) : (
           <div className="rounded-md border border-dashed border-sidebar-border p-3 text-sm text-muted-foreground">

@@ -7,6 +7,7 @@ import type { SkillDetail } from "@/api/types"
 import { applyInputSchemaToGraph, inferJsonSchemaFromText } from "@/lib/schema-infer"
 import { errorMessage } from "@/utils/errors"
 import type { FileMeta } from "../file-types"
+import { resolveWorkspaceIdentity } from "../workspace-identity"
 import { FileRow } from "./_shared/FileRow"
 import { PanelHeader } from "./_shared/PanelHeader"
 import { SectionHeading } from "./_shared/SectionHeading"
@@ -54,7 +55,12 @@ function SchemaInferPanel({ initialJson, skillId, graphMd, onSaved }: SchemaInfe
     setSaved(false)
     try {
       const next = applyInputSchemaToGraph(graphMd, result.schema)
-      await writeSkillFile(skillId, "GRAPH.md", next)
+      // In the desktop app skill files are written natively by workspace root,
+      // not skill id — pass `workspaceRoot ?? skillId` like the Monaco editor
+      // (LazyMonacoPanel) so the native write targets the right path. In the
+      // browser this resolves to skillId and writeSkillFile takes the HTTP path.
+      const target = resolveWorkspaceIdentity(skillId).workspaceRoot ?? skillId
+      await writeSkillFile(target, "GRAPH.md", next)
       setSaved(true)
       onSaved?.()
     } catch (error) {

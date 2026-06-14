@@ -8,7 +8,8 @@
 
 > **DEF-001 / DEF-002 已拉回 `studio-feature-trace-inspector` scope**(2026-06-01),不再是 deferred 项 —— 二者本就是该 spec 自己的 feature,不属跨 spec/孤儿,见下方 Promoted 区与 `requirement.md` REQ-3 / REQ-7。
 
-### DEF-027 — copilot F5 安全写:前向写未走 Rust(D12 偏离)— 需 PM 架构裁决 ⚠️ P1
+### DEF-027 — copilot F5 安全写:前向写未走 Rust(D12 偏离)— ✅ PM 放行(2026-06-14,接受偏离,不重构)
+- **PM 裁决(2026-06-14)**: **放行**。接受"前向写由 SDK CLI 直写、不重构成自定义 MCP propose-tools 走 Rust"这条偏离;不做下方"忠实修法"的再架构。Reject 还原仍经 Rust(忠实)。此条不再是待办,留作**已知已接受的设计偏离**记录。
 - **日期**: 2026-06-14
 - **事项**: 设计 §F5 + D12 要求 copilot 的 Write/Edit **前向写经 Rust autosave 落盘**(Rust 唯一写者)。当前实现:`can_use_tool`(`copilot.py:_make_safe_write_can_use_tool`)对 Write/Edit 返回 `PermissionResultAllow` → **是 SDK CLI 子进程自己把文件写到磁盘的,不是经 Rust**。只有 **Reject 还原**走了 Rust(`restore_workspace_file`,忠实)。所以**前向写偏离了"落盘走 Rust"/D12 唯一写者**。
 - **为何不能用权限回调修**: 已 PoC 真跑核实——SDK 的 `can_use_tool` 和 `hooks`(PreToolUse)都只有 `allow|deny|ask` 三态,**只能放行/拦截,没有"我自己用 Rust 写、并告诉模型成功"的口子**;Allow=SDK 直写,Deny=模型看到工具失败。且 backend sidecar **调不了 Tauri Rust IPC**(只有前端能调)→ 前向写要走 Rust 必须经前端。

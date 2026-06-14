@@ -2142,6 +2142,8 @@ def _persist_official_role_test_verified_profile(
         probe_attempts_by_model=probe_attempts_by_model,
     )
     updated_route_id = route_ids_by_model.get(profile_result.model_id, route.route_id)
+    if updated_route_id is None:
+        return route
     updated_route = credentials.provider_routes.get(updated_route_id)
     if updated_route is None:
         return route

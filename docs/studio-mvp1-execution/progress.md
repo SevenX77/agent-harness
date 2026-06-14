@@ -143,6 +143,13 @@ PM 经"最高裁判=设计文档/三模块>MVP1"裁定授权翻 api/llm.ts。原
 - **publish 澄清 + 修(commit `bb4693dd`)**:Release 要求配 Artifact Registry = **设计 F2 行为(非 bug)**;但前端把后端的清晰 typed error(`REGISTRY_NOT_CONFIGURED`「Artifact Registry Host 未配置」)塌成泛化 toast → 用户不知道要配啥。改为对 typed error 透出后端清晰原因(网络错仍走泛化,向后兼容锁定测试)。e2e `test_release_without_registry_reports_clear_typed_error` 验 400 typed + 清晰原因可见。**登记**:发布前置不满足的"跳 Settings 快捷入口"(设计§6)+ publish 错误码 i18n = 后续。
 - **e2e 覆盖扩到**:compile→predict→run→trace→golden(promote/compare)→publish(error 路径)。全套 **7 passed / 2 skipped**。
 
+### publish 收尾(2026-06-14)
+- **F2 清晰错误**(commit `bb4693dd`)+ **§6 跳 Settings 快捷入口**(commit `3762a0a5`):Release 缺 registry 时,toast 透出后端清晰原因 +「Open Settings」一键动作(REGISTRY_NOT_CONFIGURED/APP_SETTINGS_INCOMPLETE);Workspace→Header→usePublishSkill 接线。e2e 验真 app 上 button 出现。登记:publish 错误码 i18n = 后续。
+
+### 大件未做(登记,需各自专门轮 + fresh context)
+- **copilot 安全写/@mention/冷启动**(桶B,多层:copilot.py PreToolUse + 前端 diff/accept/reject + **依赖 Rust checkpoint/restore**);**resume 前端 UI**(桶B,设计是节点级 intervene=DEF-005 延期 + 依赖真 edge 黑板 F4;且 e2e-fast 不暂停,headless 难验);**native-fs follow-up**(Python 写端点降只读=去双写者,但浏览器路径仍用 FastAPI,耦合;publish→native;Rust checkpoint);**per-node golden 扁平结果**(引擎发 per-node outputs);**trace edge-dot 真黑板**(F4,引擎 transition 事件)。
+- **headless e2e 限制(非 bug)**:Monaco 编辑器在 headless Playwright 不初始化(web worker/dynamic import),编辑流不可 headless 验;真浏览器/桌面正常。
+
 ### E2E 剩余(登记,下一步)
 - **生命周期 spine 未覆盖段**:resume(前端零 resume UI=桶B缺口,需先建 UI)、publish、golden compare(我已接 Compare 按钮,可加 UI 断言)、debug。
 - **lint/cli e2e re-author**:按当前 GRAPH.md 编辑→lint 流 / 确认 CLI 是否在 MVP1 范围。

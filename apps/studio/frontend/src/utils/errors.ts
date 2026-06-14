@@ -63,5 +63,23 @@ export function errorMessage(error: unknown): string {
     const payload = error.response?.data as Partial<ErrorResponse> | undefined
     return payload?.message ?? error.message
   }
-  return error instanceof Error ? error.message : String(error)
+  if (error instanceof Error) {
+    return error.message
+  }
+  if (typeof error === 'string') {
+    return error
+  }
+  // Native (Tauri) command rejections are plain objects — surface a readable
+  // reason instead of the useless "[object Object]" that String() produces.
+  if (isRecord(error)) {
+    if (typeof error.message === 'string') {
+      return error.message
+    }
+    try {
+      return JSON.stringify(error)
+    } catch {
+      return String(error)
+    }
+  }
+  return String(error)
 }

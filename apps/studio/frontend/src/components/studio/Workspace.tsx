@@ -110,6 +110,12 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     return statuses
   }, [runStream.events])
 
+  // The currently-running phase, used to highlight/link the live trace stream.
+  const activeTracePhase = useMemo(() => {
+    const running = Object.entries(statusByNodeId).find(([, status]) => status === "running")
+    return running?.[0] ?? null
+  }, [statusByNodeId])
+
   useCopilotContext({
     skillId: currentSkillId,
     view: "Edit",
@@ -543,6 +549,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     try {
       const result = await startRun(targetSkillId, {})
       setRunId(result.run_id)
+      // F1: starting a run opens the timeline region to stream live trace events.
+      setActivePanel("timeline")
       toast.success("Run started successfully")
     } catch (error) {
       updateStage(targetSkillId, "predict-pass")
@@ -599,6 +607,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   skillDetail={skillDetail}
                   selectedNode={selectedNode}
                   onPhaseFileSave={handlePhaseFileSave}
+                  runId={runId}
+                  traceEvents={runStream.events}
+                  activeTracePhase={activeTracePhase}
                 />
               </ResizablePanel>
               <ResizableHandle />

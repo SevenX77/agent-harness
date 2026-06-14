@@ -1,5 +1,5 @@
 import { BadgeCheck, GitCompareArrows, RefreshCw } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactElement } from 'react'
 import type { CompareResult, FieldDifference } from '../../api/types'
 import { renderCompareReport, reportFileBase } from '../../utils/reportTemplates'
 import { ExportButton } from '../export/ExportButton'
@@ -26,6 +26,53 @@ function visibleFields(result: CompareResult | null): FieldDifference[] {
   return fields.length > 0 ? fields : result.differences
 }
 
+interface NodeGroup {
+  nodeId: string
+  verdict: 'pass' | 'fail'
+  score: number
+  fields: FieldDifference[]
+}
+
+// D7 / golden-per-agent-node: organize the diff by node so each agent node
+// carries its own pass/fail verdict and score, with field differences nested.
+function buildNodeGroups(result: CompareResult | null): NodeGroup[] {
+  if (!result?.node_results?.length) {
+    return []
+  }
+  return result.node_results.map((node) => ({
+    nodeId: node.node_id,
+    verdict: node.verdict,
+    score: node.score,
+    fields: node.differences.filter((field) => field.field_path !== 'output'),
+  }))
+}
+
+function fieldButton(
+  field: FieldDifference,
+  selectedField: FieldDifference | null,
+  setSelectedPath: (path: string) => void,
+): ReactElement {
+  const isSelected = selectedField?.field_path === field.field_path
+  return (
+    <button
+      key={field.field_path}
+      type="button"
+      onClick={() => setSelectedPath(field.field_path)}
+      className={`block w-full rounded-md border px-2 py-2 text-start text-xs ${
+        isSelected
+          ? 'border-sky-400 bg-sky-50 text-sky-800 dark:border-sky-500 dark:bg-sky-950/40 dark:text-sky-200'
+          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
+      }`}
+    >
+      <div className="truncate font-mono font-semibold">{field.field_path}</div>
+      <div className="mt-1 flex items-center justify-between">
+        <span>{field.type}</span>
+        <span>{Math.round(field.score * 100)}%</span>
+      </div>
+    </button>
+  )
+}
+
 export function DiffView({
   result,
   skillId,
@@ -38,12 +85,17 @@ export function DiffView({
   onPromote,
 }: DiffViewProps) {
   const fields = useMemo(() => visibleFields(result), [result])
+  const nodeGroups = useMemo(() => buildNodeGroups(result), [result])
+  const allFields = useMemo(
+    () => (nodeGroups.length > 0 ? nodeGroups.flatMap((group) => group.fields) : fields),
+    [nodeGroups, fields],
+  )
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
-  const selectedField = fields.find((field) => field.field_path === selectedPath) ?? fields[0] ?? null
+  const selectedField = allFields.find((field) => field.field_path === selectedPath) ?? allFields[0] ?? null
 
   useEffect(() => {
-    setSelectedPath(fields[0]?.field_path ?? null)
-  }, [fields])
+    setSelectedPath(allFields[0]?.field_path ?? null)
+  }, [allFields])
 
   if (!result && !loading && !error) {
     return (
@@ -133,31 +185,43 @@ export function DiffView({
 
       <div className="grid min-h-0 flex-1 grid-cols-[14rem_1fr]">
         <div className="overflow-y-auto border-e border-slate-200 p-3 dark:border-slate-800">
-          {fields.length === 0 ? (
+          {allFields.length === 0 && nodeGroups.length === 0 ? (
             <div className="text-sm text-slate-500 dark:text-slate-400">
               {loading ? 'Loading diff...' : 'No fields to compare.'}
             </div>
           ) : null}
-          <div className="space-y-2">
-            {fields.map((field) => (
-              <button
-                key={field.field_path}
-                type="button"
-                onClick={() => setSelectedPath(field.field_path)}
-                className={`block w-full rounded-md border px-2 py-2 text-start text-xs ${
-                  selectedField?.field_path === field.field_path
-                    ? 'border-sky-400 bg-sky-50 text-sky-800 dark:border-sky-500 dark:bg-sky-950/40 dark:text-sky-200'
-                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
-                }`}
-              >
-                <div className="truncate font-mono font-semibold">{field.field_path}</div>
-                <div className="mt-1 flex items-center justify-between">
-                  <span>{field.type}</span>
-                  <span>{Math.round(field.score * 100)}%</span>
+          {nodeGroups.length > 0 ? (
+            <div className="space-y-3">
+              {nodeGroups.map((group) => (
+                <div key={group.nodeId}>
+                  <div className="mb-1 flex items-center justify-between gap-2 px-1">
+                    <span className="truncate font-mono text-xs font-semibold text-slate-700 dark:text-slate-200">
+                      {group.nodeId}
+                    </span>
+                    <span className="flex items-center gap-1.5 text-[11px]">
+                      <span
+                        className={`rounded px-1.5 py-0.5 font-semibold uppercase ${
+                          group.verdict === 'pass'
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
+                            : 'bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300'
+                        }`}
+                      >
+                        {group.verdict}
+                      </span>
+                      <span className="text-slate-500 dark:text-slate-400">{Math.round(group.score * 100)}%</span>
+                    </span>
+                  </div>
+                  {group.fields.length === 0 ? (
+                    <div className="px-1 pb-1 text-[11px] text-slate-400 dark:text-slate-500">No differences</div>
+                  ) : (
+                    <div className="space-y-1">{group.fields.map((field) => fieldButton(field, selectedField, setSelectedPath))}</div>
+                  )}
                 </div>
-              </button>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-2">{fields.map((field) => fieldButton(field, selectedField, setSelectedPath))}</div>
+          )}
         </div>
         <div className="overflow-y-auto p-4">
           {selectedField ? <DiffField field={selectedField} /> : null}

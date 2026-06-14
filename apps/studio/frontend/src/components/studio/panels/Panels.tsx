@@ -22,6 +22,10 @@ interface PanelsProps {
   traceEvents?: CallbackEvent[]
   activeTracePhase?: string | null
   onSelectTracePrompt?: (index: number) => void
+  traceCanCompare?: boolean
+  traceCompareLoading?: boolean
+  onCompareToGolden?: () => void
+  onPromoteToGolden?: () => void
 }
 
 export function Panels({
@@ -34,6 +38,10 @@ export function Panels({
   traceEvents,
   activeTracePhase,
   onSelectTracePrompt,
+  traceCanCompare,
+  traceCompareLoading,
+  onCompareToGolden,
+  onPromoteToGolden,
 }: PanelsProps) {
   const { onFileOpen } = useWorkspaceContext()
   if (!skillId) {
@@ -59,6 +67,10 @@ export function Panels({
           traceLogs={traceEvents ?? []}
           activePhase={activeTracePhase ?? null}
           onSelectPrompt={onSelectTracePrompt ?? (() => undefined)}
+          canCompare={traceCanCompare}
+          compareLoading={traceCompareLoading}
+          onCompareToGolden={onCompareToGolden}
+          onPromoteToGolden={onPromoteToGolden}
         />
       )
     }

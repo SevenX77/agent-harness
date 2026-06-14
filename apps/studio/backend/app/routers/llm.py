@@ -19,12 +19,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.adapters.gateway import (
+    CredentialProviderProtocol,
     GatewayAdapter,
     GatewayProviderRoute,
     GatewayRoleEntry,
     ProfileSelectionError,
     ProviderModelStateProjection,
     RegistryResolutionError,
+    ResolvedRoute,
     RuntimeSettings,
     VerifiedProfile,
     build_runtime_setting_descriptors,
@@ -49,6 +51,7 @@ from app.models.llm_config import (
     RolesData,
     RouteCandidate,
 )
+from app.services import copilot
 from app.services.copilot_test import (
     CopilotProvider,
     ModelProbeResult,
@@ -64,6 +67,7 @@ from app.services.copilot_test import (
 from app.services.copilot_test import (
     _probe_official_call_method as _probe_official_call_method_request,
 )
+from app.services.gateway_resolver import build_gateway_model_resolver
 from app.services.llm_credentials import (
     _route_slug,
     credentials_path,
@@ -950,6 +954,10 @@ async def start_role_test_job(role_name: str) -> RoleTestJobResponse:
         raise HTTPException(status_code=404, detail=f"Unknown LLM role: {role_name}")
     credentials = load_credentials()
     role = _materialize_role_for_response(role, credentials)
+    # COPILOT_ASSIST-4: copilot's test走 copilot 自己的真实 ClaudeSDKClient 调用
+    # (发真工具调用、验 spawn/env/tool loop), not the httpx connectivity probe.
+    if role.role_kind == "copilot":
+        return await _start_copilot_sdk_test_job(role_name)
     targets = _role_test_targets(role, credentials)
     job_id = str(uuid.uuid4())
     job = RoleTestJobResponse(
@@ -1146,6 +1154,166 @@ async def _update_role_test_job_provider(
             for provider in current.provider_statuses
         ]
         _role_test_jobs[job_id] = current.model_copy(update={"provider_statuses": provider_statuses})
+
+
+# COPILOT_ASSIST-4: copilot test orchestration — resolve the role's routes via the
+# gateway role→routes API, run the real ClaudeSDKClient tool-call test per route
+# (full fallback chain, bounded concurrency), and project per-route lights +
+# structured sdk_evidence into the same job contract the LLM-Roles UI consumes.
+_COPILOT_SDK_TEST_CONCURRENCY = 2
+
+
+async def _start_copilot_sdk_test_job(role_name: str) -> RoleTestJobResponse:
+    job_id = str(uuid.uuid4())
+    try:
+        routes, credential_provider = _resolve_copilot_test_routes(role_name)
+    except Exception as exc:  # noqa: BLE001 — surfaced as a failed job, not swallowed
+        logger.warning("copilot SDK test: cannot resolve routes for %s: %s", role_name, exc)
+        job = RoleTestJobResponse(
+            job_id=job_id,
+            role_name=role_name,
+            status="failed",
+            message=f"无法解析 copilot 路线: {exc}",
+            provider_statuses=[],
+            result=_build_copilot_sdk_result(role_name, [], []),
+        )
+        async with _role_test_jobs_lock:
+            _role_test_jobs[job_id] = job
+        return job
+    job = RoleTestJobResponse(
+        job_id=job_id,
+        role_name=role_name,
+        status="queued",
+        message="Queued copilot SDK test.",
+        provider_statuses=[_copilot_route_progress(route, "queued") for route in routes],
+    )
+    async with _role_test_jobs_lock:
+        _role_test_jobs[job_id] = job
+    _spawn_background_task(
+        _run_copilot_sdk_test_job(job_id, role_name, routes, credential_provider)
+    )
+    return job
+
+
+def _resolve_copilot_test_routes(
+    role_name: str,
+) -> tuple[list[ResolvedRoute], CredentialProviderProtocol]:
+    resolver = build_gateway_model_resolver()
+    resolved = resolver.resolve_routes(role_name)
+    return list(resolved.routes), resolver.credential_provider
+
+
+def _copilot_route_progress(
+    route: ResolvedRoute,
+    status: Literal["queued", "testing", "ok", "failed", "blocked", "untested"],
+    message: str | None = None,
+) -> RoleTestProviderProgressInfo:
+    return RoleTestProviderProgressInfo(
+        canonical_id=route.canonical_id,
+        route_id=route.route_id,
+        status=status,
+        message=message,
+    )
+
+
+async def _run_copilot_sdk_test_job(
+    job_id: str,
+    role_name: str,
+    routes: list[ResolvedRoute],
+    credential_provider: CredentialProviderProtocol,
+) -> None:
+    await _update_role_test_job(job_id, status="running", message="Testing copilot SDK routes.")
+    semaphore = asyncio.Semaphore(_COPILOT_SDK_TEST_CONCURRENCY)
+
+    async def test_route(route: ResolvedRoute) -> copilot.RouteSdkTestResult:
+        async with semaphore:
+            await _update_copilot_route(job_id, route, "testing", None)
+            result = await copilot.run_route_sdk_test(route, credential_provider)
+            await _update_copilot_route(job_id, route, result.status, result.message)
+            return result
+
+    try:
+        results = await asyncio.gather(*(test_route(route) for route in routes))
+    except Exception as exc:  # pragma: no cover - defensive job boundary
+        logger.exception("Copilot SDK test job failed: %s", job_id)
+        await _update_role_test_job(job_id, status="failed", message=str(exc))
+        return
+
+    await _update_role_test_job(
+        job_id,
+        status="completed",
+        message="Copilot SDK test completed.",
+        result=_build_copilot_sdk_result(role_name, routes, list(results)),
+    )
+
+
+async def _update_copilot_route(
+    job_id: str,
+    route: ResolvedRoute,
+    status: Literal["testing", "ok", "failed", "blocked", "untested"],
+    message: str | None,
+) -> None:
+    async with _role_test_jobs_lock:
+        current = _role_test_jobs.get(job_id)
+        if current is None:
+            return
+        provider_statuses = [
+            _copilot_route_progress(route, status, message)
+            if provider.route_id == route.route_id
+            else provider
+            for provider in current.provider_statuses
+        ]
+        _role_test_jobs[job_id] = current.model_copy(
+            update={"provider_statuses": provider_statuses}
+        )
+
+
+def _build_copilot_sdk_result(
+    role_name: str,
+    routes: list[ResolvedRoute],
+    results: list[copilot.RouteSdkTestResult],
+) -> dict[str, Any]:
+    passed = sum(1 for result in results if result.status == "ok")
+    # Copilot only needs one working route at runtime (fallback chain), so any
+    # passing route makes the role usable.
+    overall = "ok" if passed > 0 else "failed"
+    routes_evidence = {
+        result.route_id: {"status": result.status, "message": result.message}
+        for result in results
+    }
+    return {
+        "role_name": role_name,
+        "status": overall,
+        "warnings": [],
+        "model_groups": _copilot_sdk_model_groups(routes, results),
+        "sdk_evidence": {
+            "tested": bool(results),
+            "passed": passed,
+            "total": len(results),
+            "routes": routes_evidence,
+        },
+    }
+
+
+def _copilot_sdk_model_groups(
+    routes: list[ResolvedRoute],
+    results: list[copilot.RouteSdkTestResult],
+) -> list[dict[str, Any]]:
+    by_route = {result.route_id: result for result in results}
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for route in routes:
+        result = by_route.get(route.route_id)
+        groups.setdefault(route.canonical_id, []).append(
+            {
+                "route_id": route.route_id,
+                "status": result.status if result else "untested",
+                "message": result.message if result else None,
+            }
+        )
+    return [
+        {"canonical_id": canonical_id, "provider_results": provider_results}
+        for canonical_id, provider_results in groups.items()
+    ]
 
 
 @router.get("/model-profiles")

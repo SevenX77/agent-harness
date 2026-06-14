@@ -6,6 +6,7 @@ import { getRegistry, type RegistryResponse, type RoleEntry } from '../../api/ll
 import { useCopilot } from '../../hooks/useCopilot'
 import { useTemplates } from '../../hooks/useTemplates'
 import type { CopilotMessage } from '../../types/copilot'
+import { AnalysisBar } from './analysis-bar'
 import { DiffBubble } from './diff-bubble'
 import { ModelPicker } from './model-picker'
 import { ToolCallBubble } from './tool-call-bubble'
@@ -89,10 +90,13 @@ export const ChatMessageItem = React.memo(ChatMessageItemBase)
 interface CopilotPanelProps {
   skillId: string | null
   view?: 'edit' | 'eval'
+  // F7: id of the run that just finished (predict/run) — drives the analysis bar.
+  completedRunId?: string | null
 }
 
-export function CopilotPanel({ skillId, view = 'edit' }: CopilotPanelProps) {
+export function CopilotPanel({ skillId, view = 'edit', completedRunId = null }: CopilotPanelProps) {
   const [draft, setDraft] = useState('')
+  const [dismissedRunId, setDismissedRunId] = useState<string | null>(null)
   const [roleData, setRoleData] = useState<RoleEntry | null>(null)
   const [registry, setRegistry] = useState<RegistryResponse | null>(null)
   const [selectedRouteId, setSelectedRouteId] = useState('')
@@ -205,6 +209,16 @@ export function CopilotPanel({ skillId, view = 'edit' }: CopilotPanelProps) {
           </div>
         ) : null}
       </div>
+
+      {skillId && completedRunId && completedRunId !== dismissedRunId ? (
+        <div className="px-3 pt-1 shrink-0">
+          <AnalysisBar
+            skillId={skillId}
+            runId={completedRunId}
+            onDismiss={() => setDismissedRunId(completedRunId)}
+          />
+        </div>
+      ) : null}
 
       <form onSubmit={submit} className="p-3 shrink-0">
         <div className="flex flex-col gap-2 rounded-md border border-transparent bg-sidebar-accent/60 px-2.5 py-2 transition-colors focus-within:border-border">

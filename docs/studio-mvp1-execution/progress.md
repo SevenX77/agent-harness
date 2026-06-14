@@ -400,5 +400,15 @@ Stop-hook、反自造停下铁律、copilot F3/F4-echo/F7、trace F5/F2、input 
 - **门禁(累计真跑)**:后端 pytest **530**/1 skip、前端 vitest **462**、tauri `cargo test --lib` **46**、tsc/eslint/mypy/ruff/rustfmt clean。api/llm.ts 及 KEEP-MAIN 零改动,never touched main。
 - **下一步 = 真 .app 鼠标验收**(computer-use 本会话可用):重建 .app(含本会话 frontend+backend+Rust)→ 隔离启动 → 鼠标验 copilot F5 diff/accept-reject + resume 按钮 + F2 重启恢复(charter §3① headline 对新功能的复验)。
 
+### 2026-06-14 续3:真 .app 鼠标验收(computer-use 本会话可用)— 逼出 2 个真 bug 修
+> 重建 .app(含本会话 frontend+backend+Rust 全部改动)→ 隔离 STUDIO_CONFIG_DIR 启动 → computer-use 鼠标驱动验收。PM 否决了"cop一份真凭证库到 iso"(尊重,不 copy);用空 iso 验 cred-free 部分 + copilot 错误处理。
+
+- **真 .app 验过(鼠标)**:① 重建 .app 启动正常(Rust 二进制 + 6 个新 native-fs 命令注册无崩);② **CORS 修仍成立**(home 加载出 skills,非"Could not load skills");③ `STUDIO_CONFIG_DIR` resolver 生效("Default: /tmp/studio-validate-s2/Skills");④ 开 e2e-fast → 画布渲染 3 phase 图、**copilot 面板渲染**(F4/F5 组件打进 bundle 无崩)、AssetsPanel 真子图("No subgraphs" 非假);⑤ **完整生命周期 Compile→Predict→Run**(3 节点全绿)→ TracePanel 流式;⑥ **本会话新 Resume 按钮真渲染 + 真接线**(点了真打后端);⑦ F7 分析 bar run 完出现;⑧ **copilot 无凭证场景 silent-failure 修仍成立**——发消息出**清晰红框 "Copilot error: copilot_chat 无可用 route"**(非静默死)。
+- **鼠标逼出 2 个真 bug,全修**:
+  1. **resume 错误信息没用**(commit `e960396e`):点 Resume 完成态的 run → 后端正确返回 typed `RESUME_CHECKPOINT_NOT_FOUND`(404,逻辑技能跑完无 checkpoint 可续=语义正确),但 `handleResume` 显示原始 axios "Request failed with status code 404"。改用 `errorMessage()` 透出后端清晰原因。**根因核实**:run 数据在 `<config>/workspaces/default/skills/e2e-fast/.workspace/runs/<id>`,无 checkpoint sqlite(逻辑技能跑完不留可续 checkpoint),resume 正确报无可续。
+  2. **trace 事件无界增长**(commit `bl7bvwy8y`):完成态 run 的事件数从 55→242→3553→3883 一直涨。根因(`useRunStream`,既有码,我验收逼出):WS close 后**无终止守卫就重连**,后端每次连上**重放全量事件日志** → 前端无去重 append → 无界增长。修:收到 `run_ended` 标记终止,close 后不再重连。
+- **未验(需真 LLM 凭证,PM 否决 copy 真库)**:copilot F5 diff 气泡 + Accept/Reject(需 copilot 真改文件)/ F2 重启恢复(需先有 session)/ F4 上下文回显——这些 copilot **真驱动**的复验留作有隔离凭证时做(错误处理路径已验)。
+- **重建复验(rebuild #2)**:补完 resume-msg + useRunStream 两修后重建 .app,再跑一遍确认 trace 事件数有界 + resume 出清晰信息。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

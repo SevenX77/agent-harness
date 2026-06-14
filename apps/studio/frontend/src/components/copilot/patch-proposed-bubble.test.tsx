@@ -33,6 +33,8 @@ describe('PatchProposedBubble', () => {
     expect(html).toContain('EDITED')
     expect(html).toContain('Accept')
     expect(html).toContain('Reject')
+    // DEF-026: side-by-side compare affordance is always available.
+    expect(html).toContain('Open side-by-side compare')
   })
 
   it('labels a brand-new file as Created', () => {

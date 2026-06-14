@@ -71,11 +71,19 @@ export function useCopilot(skillId: string | null) {
     if (workspaceRoot) {
       // Multi-session context: load (or create) sessions for this workspace/skill pair.
       copilotStore.setContext(workspaceRoot, skillId)
-      const snap = copilotStore.getSnapshot()
-      if (snap.sessions.length === 0) {
-        copilotStore.newSession()
+      // Cold-start recovery (F2): pull any disk-persisted sessions first, and
+      // only mint a fresh session if none survive on disk — otherwise a restart
+      // would silently discard prior conversations.
+      let cancelled = false
+      void copilotStore.hydrate(workspaceRoot, skillId).finally(() => {
+        if (cancelled) return
+        if (copilotStore.getSnapshot().sessions.length === 0) {
+          copilotStore.newSession()
+        }
+      })
+      return () => {
+        cancelled = true
       }
-      return
     }
     // Fallback (web / no workspace identity): main's single-session reset on skill change.
     if (snapshot.skillId !== skillId) {

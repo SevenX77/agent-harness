@@ -83,7 +83,7 @@ function AssetTreeRows({ node, onOpen }: { node: AssetTreeNode; onOpen: (file: F
   )
 }
 
-const registeredSubgraphsCache = new Set<string>(['intent_classifier'])
+const registeredSubgraphsCache = new Set<string>()
 
 export function AssetsPanel({ skillDetail }: AssetsPanelProps) {
   const { onFileOpen } = useWorkspaceContext()
@@ -117,32 +117,12 @@ export function AssetsPanel({ skillDetail }: AssetsPanelProps) {
     return list
   }, [skillDetail, registeredSubgraphs])
 
-  const displaySubgraphs = useMemo(() => {
-    if (subgraphs.length > 0) {
-      return subgraphs
-    }
-    return [
-      {
-        id: "classifier",
-        targetSkill: "intent_classifier",
-        isRegistered: registeredSubgraphs.has("intent_classifier"),
-        filePath: "phases/classifier/SUBGRAPH.md"
-      },
-      {
-        id: "translation",
-        targetSkill: "translator_subgraph",
-        isRegistered: registeredSubgraphs.has("translator_subgraph"),
-        filePath: "phases/translation/SUBGRAPH.md"
-      }
-    ]
-  }, [subgraphs, registeredSubgraphs])
-
   const handleRegisterSubgraph = async (name: string) => {
     try {
-      let selectedDir = await selectSkillDirectory()
+      const selectedDir = await selectSkillDirectory()
       if (!selectedDir) {
-        // Fallback for browser development/demo
-        selectedDir = `/Users/sevenx/Documents/coding/agent-harness/subgraphs/${name}`
+        // No directory chosen — do not fabricate a path or mark as registered.
+        return
       }
 
       registeredSubgraphsCache.add(name)
@@ -173,7 +153,10 @@ export function AssetsPanel({ skillDetail }: AssetsPanelProps) {
             <SectionHeading label="Subgraphs" />
             <div className="mt-1 space-y-0.5">
               <FolderRow name="Subgraph Library" defaultExpanded={true}>
-                {displaySubgraphs.map((sub) => (
+                {subgraphs.length === 0 ? (
+                  <div className="px-2 py-1.5 text-[11px] text-muted-foreground">No subgraphs</div>
+                ) : null}
+                {subgraphs.map((sub) => (
                   <div
                     key={sub.id}
                     className="group/sub relative flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-zinc-900/60 text-muted-foreground hover:text-foreground animate-in fade-in duration-200"

@@ -98,10 +98,24 @@ def _compare_node_outputs(
 def _node_outputs(payload: Any) -> dict[str, dict[str, Any]]:
     if not isinstance(payload, dict):
         return {}
+    # Real engine run/golden result shape is BusinessData
+    # ({inputs, phase_outputs, scratch}); phase_outputs maps node_id -> that
+    # node's outputs dict. This is the live shape written by run_manager and
+    # copied into golden baselines, so it must drive per-node verdicts.
+    phase_outputs = payload.get("phase_outputs")
+    if isinstance(phase_outputs, dict) and phase_outputs:
+        nodes: dict[str, dict[str, Any]] = {}
+        for node_id, outputs in phase_outputs.items():
+            if not isinstance(node_id, str) or not node_id:
+                continue
+            nodes[node_id] = outputs if isinstance(outputs, dict) else {"value": outputs}
+        if nodes:
+            return nodes
+    # Legacy / synthetic shape: a top-level list of phase records.
     phases = payload.get("phases")
     if not isinstance(phases, list):
         return {}
-    nodes: dict[str, dict[str, Any]] = {}
+    nodes = {}
     for index, item in enumerate(phases):
         if not isinstance(item, dict):
             continue

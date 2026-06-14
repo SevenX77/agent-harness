@@ -125,3 +125,7 @@ test/
 code-diagnostics/output/
 code-diagnostics/reports/
 code-diagnostics/scratch/
+
+# studio-mvp1 goal Stop-hook control files (machine-local, transient)
+docs/studio-mvp1-execution/.goal-active
+docs/studio-mvp1-execution/.stop-allowed

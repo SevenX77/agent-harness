@@ -185,6 +185,13 @@ PM 经"最高裁判=设计文档/三模块>MVP1"裁定授权翻 api/llm.ts。原
 - **反自造停下铁律已落盘(PM 怒斥后)**:memory `never-manufacture-stops.md`(+MEMORY.md 置顶)、charter §1.4/§4/§5.2/§5.6、全局 `~/.claude/CLAUDE.md` + `~/.claude/rules/no-manufactured-stops.md`、workspace `interview-first.md` 加优先级 banner(执行阶段以 no-manufactured-stops 为准)。核心:真 key/真凭证/真 CLI 在手边就直接真跑(隔离≠不能用真凭证),实现细节自己定,降级=偷换目标=禁。
 - **门禁(累计)**:后端 pytest **511** / 1 skip、新代码 mypy/ruff clean(llm.py 1 个预存 mypy None 错,HEAD 就有、已 flag 单独修)。
 
+### Stop-hook 防早停(PM 2026-06-14 要求)
+PM 要求建一个 hook,在我停下来时检查最终目标是否完成。已建并测通:
+- **脚本**:`~/.claude/hooks/goal-stop-check.sh`,注册在 `~/.claude/settings.json` 的 `Stop` 钩子(全局,但 marker-gated → 对其他 session/项目 inert)。
+- **机制**:① 只有 `docs/studio-mvp1-execution/.goal-active` 存在时才生效(目标进行中标记;目标真完成时删掉它)。② 停下时若无 `.stop-allowed` token → **exit 2 阻断停止 + 把"继续干"理由喂回**,逼我继续。③ 要合法停 → 先把**具体理由**写进 `docs/studio-mvp1-execution/.stop-allowed`(one-shot,hook 读后删除)再停;只允许三种理由(目标真完成 / §5.6 硬 blocker / 需 PM 价值判断)。
+- 控制文件 `.goal-active`/`.stop-allowed` 已 gitignore(机器本地、瞬时)。三路径已测:有 marker 无 token→阻断;有 token→放行+消费;无 marker→inert。
+- **注意**:hook 在会话启动时加载;本会话可能要下个会话才完全生效。**合法停之前务必先写 `.stop-allowed`**。
+
 ### 本会话产出汇总(2026-06-14 续 · 断点续跑)
 8 个 commit:`19d39444`(F1 ThinkingBlock 流式)→`0e9995e5`(test_inputs CRUD 后端)→`4e5d79ca`(doc)→`dbe21c02`(io-panel test-input UI+e2e)→`f07b38f8`(F4-A GET content)→`d6db0bd7`(F4-B predict/run 用选中输入+e2e)→`b17b1bf4`(doc)→`d0673aff`(F1 tool call 折叠)。**门禁全绿真跑**:后端 pytest **497**、前端 vitest **438** + tsc + eslint clean、e2e **10 passed/2 skip**、mypy/ruff clean。api/llm.ts 及 KEEP-MAIN 零改动,never touched main。
 **完成的设计单元**:copilot-assist F1(thinking + tool call 全量折叠流式,真闭环)、input 区 INPUT-3(test input CRUD + UI)、input 区 F4(predict/run 消费选中输入)。

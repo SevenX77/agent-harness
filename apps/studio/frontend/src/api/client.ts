@@ -16,6 +16,7 @@ import type {
   SerializeGraphRes,
   SkillDetail,
   SyncSkillReq,
+  TestInputMetadata,
   UpdateSkillFileRes,
   SerializableGraphPhaseRef,
 } from './types'
@@ -159,6 +160,22 @@ export async function startRun(skillId: string, inputData: JsonObject): Promise<
     input_data: inputData,
   })
   return response.data
+}
+
+export async function createTestInput(
+  skillId: string,
+  name: string,
+  content: JsonObject,
+): Promise<TestInputMetadata> {
+  const response = await api.post<TestInputMetadata>(`/skills/${skillId}/test_inputs`, {
+    name,
+    content,
+  })
+  return response.data
+}
+
+export async function deleteTestInput(skillId: string, inputId: string): Promise<void> {
+  await api.delete(`/skills/${skillId}/test_inputs/${encodeURIComponent(inputId)}`)
 }
 
 export async function getLocalHistory(skillId: string): Promise<GitHistoryItem[]> {

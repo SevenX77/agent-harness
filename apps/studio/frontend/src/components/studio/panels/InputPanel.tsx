@@ -9,8 +9,10 @@ import { FileRow } from "./_shared/FileRow"
 import { PanelHeader } from "./_shared/PanelHeader"
 import { SectionHeading } from "./_shared/SectionHeading"
 import { inputFiles } from "./panel-files"
+import { TestInputsSection } from "./TestInputsSection"
 
 interface InputPanelProps {
+  skillId: string
   skillDetail?: SkillDetail
   onFileOpen: (file: FileMeta) => void
 }
@@ -69,7 +71,7 @@ function SchemaInferPanel({ initialJson }: { initialJson: string }) {
   )
 }
 
-export function InputPanel({ skillDetail, onFileOpen }: InputPanelProps) {
+export function InputPanel({ skillId, skillDetail, onFileOpen }: InputPanelProps) {
   const files = inputFiles(skillDetail)
   const sample = files.find((file) => file.path === "input/sample.json")?.content ?? "{}"
 
@@ -79,6 +81,8 @@ export function InputPanel({ skillDetail, onFileOpen }: InputPanelProps) {
 
       <ScrollArea className="flex-1">
         <div className="space-y-3 px-2 py-2 text-xs">
+          <TestInputsSection skillId={skillId} />
+
           <SectionHeading label="Input Files" />
           <FileRow file={files[1]} onOpen={onFileOpen} />
 

@@ -195,6 +195,19 @@ def _find_file(ref: str) -> Path:
         suffix = Path(*parts[1:])
         candidates.append(_safe_join(config.SKILLS_DIR / skill_id / ".workspace", suffix))
         candidates.append(_safe_join(config.SKILLS_DIR / skill_id, suffix))
+        # Workspace skills (the writable ones you actually run/promote) keep their
+        # run/golden artifacts under WORKSPACES_DIR, not SKILLS_DIR. Resolve the
+        # real skill dir so compare finds them there too — otherwise golden
+        # compare fails for every runnable skill.
+        try:
+            from app.services.skills import resolve_skill_dir
+
+            resolved_skill_dir: Path | None = resolve_skill_dir(skill_id)
+        except Exception:  # noqa: BLE001 — fall back to the SKILLS_DIR candidates below
+            resolved_skill_dir = None
+        if resolved_skill_dir is not None:
+            candidates.append(_safe_join(resolved_skill_dir / ".workspace", suffix))
+            candidates.append(_safe_join(resolved_skill_dir, suffix))
 
     for candidate in candidates:
         if candidate.exists():

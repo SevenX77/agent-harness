@@ -28,6 +28,22 @@ function messageFromError(error: unknown): string {
   return error instanceof Error ? error.message : 'Publish failed'
 }
 
+// Surface the backend's clear, typed error (e.g. REGISTRY_NOT_CONFIGURED —
+// "Artifact Registry Host 未配置") instead of a generic toast, per publish
+// design F2 ("missing settings gives a clear error"). Returns null for plain
+// network errors so the generic fallback still applies.
+function backendErrorMessage(error: unknown): string | null {
+  if (typeof error !== 'object' || error === null || !('response' in error)) {
+    return null
+  }
+  const data = (error as { response?: { data?: unknown } }).response?.data
+  if (typeof data !== 'object' || data === null || !('message' in data)) {
+    return null
+  }
+  const message = (data as { message?: unknown }).message
+  return typeof message === 'string' && message.trim() ? message : null
+}
+
 export async function executePublishSkill({
   skillId,
   setStatus,
@@ -56,13 +72,13 @@ export async function executePublishSkill({
 
     setStatus('error')
     setError(result.message)
-    toast.error(ERROR_TOAST_MESSAGE)
+    toast.error(result.message?.trim() ? result.message : ERROR_TOAST_MESSAGE)
     return result
   } catch (error) {
-    const message = messageFromError(error)
+    const backendMessage = backendErrorMessage(error)
     setStatus('error')
-    setError(message)
-    toast.error(ERROR_TOAST_MESSAGE)
+    setError(backendMessage ?? messageFromError(error))
+    toast.error(backendMessage ?? ERROR_TOAST_MESSAGE)
     return null
   }
 }

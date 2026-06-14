@@ -146,6 +146,11 @@ PM 经"最高裁判=设计文档/三模块>MVP1"裁定授权翻 api/llm.ts。原
 ### publish 收尾(2026-06-14)
 - **F2 清晰错误**(commit `bb4693dd`)+ **§6 跳 Settings 快捷入口**(commit `3762a0a5`):Release 缺 registry 时,toast 透出后端清晰原因 +「Open Settings」一键动作(REGISTRY_NOT_CONFIGURED/APP_SETTINGS_INCOMPLETE);Workspace→Header→usePublishSkill 接线。e2e 验真 app 上 button 出现。登记:publish 错误码 i18n = 后续。
 
+### 续轮(2026-06-14 续 · 断点续跑)
+- **copilot F1 ThinkingBlock 全流式 ✅**(commit `19d39444`):baseline `_translate_assistant_message` 静默丢 `ThinkingBlock` → copilot 推理过程到不了 UI(违 copilot-assist F1「全部思考全程流式、折叠仅视觉、绝不摘要替代/不丢步」)。修:① `models/copilot.py` 加 `CopilotEventThinking`(type=`thinking_delta`)入事件 union;② `copilot.py` 翻译 ThinkingBlock→thinking_delta(逐字不摘要)+ `build_options` 开 `thinking={"type":"adaptive"}`(default display=full,非 summarized/omitted)让 SDK 真发 ThinkingBlock(SDK 序列化成 `--thinking adaptive`,message_parser 解析回 ThinkingBlock,全链路通);③ 前端 normalize/panel Phase-1 已接(thinking_delta→折叠 Thought),补 `types/copilot.test.ts` 锁前端契约。门禁:后端 copilot 37 passed + mypy/ruff clean,前端 normalize 3 passed + tsc clean。**Phase-1 line 34「copilot-panel thinking_delta」只接了前端;此轮补的是后端真丢点 = F1 真闭环。**
+- **test_inputs CRUD(INPUT-3)✅**(commit `0e9995e5`):`03_regions/input` INPUT-3 要 test_input 增删 live,但 create/delete 是 501 桩(只 list 活)。实现:POST 存名 JSON 到 `.workspace/test_inputs/`(安全 slug 名守卫挡穿越 + 重名 409 拒)、DELETE 按 id 删(204,缺则 404);注册 `TEST_INPUT_NOT_FOUND/ALREADY_EXISTS/VALIDATION_FAILED` 三错误码让错误「就近」typed 显示。9 RED→GREEN + 更新 `test_exceptions` 错误码集断言。门禁:后端全量 **495 passed**、mypy/ruff clean。**登记**:前端 io-panel create/delete UI 接线 = follow-up(今仅 list 经 BatchRunner/useBatchRun 接);InputPanel 仍投影固定假数据(input 区前端 F1-F6 = 独立专门轮)。
+- **501 桩盘点**:仅剩 `audit.py`(charter §1 line33 明令「audit/intent-drift 501 scaffold,非 MVP1」延期)+ `copilot.py` dispatch(设计延期)= 两个都是登记延期,正确保留不做。**契约内 501 已清完。**
+
 ### 大件未做(登记,需各自专门轮 + fresh context)
 - **copilot 安全写/@mention/冷启动**(桶B,多层:copilot.py PreToolUse + 前端 diff/accept/reject + **依赖 Rust checkpoint/restore**);**resume 前端 UI**(桶B,设计是节点级 intervene=DEF-005 延期 + 依赖真 edge 黑板 F4;且 e2e-fast 不暂停,headless 难验);**native-fs follow-up**(Python 写端点降只读=去双写者,但浏览器路径仍用 FastAPI,耦合;publish→native;Rust checkpoint);**per-node golden 扁平结果**(引擎发 per-node outputs);**trace edge-dot 真黑板**(F4,引擎 transition 事件)。
 - **headless e2e 限制(非 bug)**:Monaco 编辑器在 headless Playwright 不初始化(web worker/dynamic import),编辑流不可 headless 验;真浏览器/桌面正常。

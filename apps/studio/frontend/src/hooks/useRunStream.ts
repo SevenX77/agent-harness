@@ -25,6 +25,10 @@ export function useRunStream(runId: string | null) {
     }
 
     let closed = false
+    // Once the run terminates the backend replays its full event log on every
+    // reconnect; without this guard a closed-then-reconnect loop re-appends all
+    // events unboundedly (observed: a 3-phase run growing to thousands of events).
+    let runEnded = false
     let socket: WebSocket | null = null
     let attempt = 0
     let reconnectTimer: number | undefined
@@ -53,7 +57,13 @@ export function useRunStream(runId: string | null) {
       }
       socket.onmessage = (message) => {
         try {
-          queueRef.current.push(JSON.parse(String(message.data)) as CallbackEvent)
+          const event = JSON.parse(String(message.data)) as CallbackEvent
+          queueRef.current.push(event)
+          if (event.event_type === 'run_ended') {
+            // Terminal: stop reconnecting so the backend's replay-on-connect
+            // can't re-append the whole event log.
+            runEnded = true
+          }
         } catch (error) {
           setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Invalid run event' }))
         }
@@ -62,7 +72,7 @@ export function useRunStream(runId: string | null) {
         setState((current) => ({ ...current, status: 'error', error: 'Run stream connection failed' }))
       }
       socket.onclose = () => {
-        if (closed) {
+        if (closed || runEnded) {
           setState((current) => ({ ...current, status: 'closed', reconnectInMs: null }))
           return
         }

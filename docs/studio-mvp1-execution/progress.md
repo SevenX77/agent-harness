@@ -303,5 +303,18 @@ Stop-hook、反自造停下铁律、copilot F3/F4-echo/F7、trace F5/F2、input 
 - **但拿不到回复 ❌(= 路由配置问题,非新 bug)**:发送后无 assistant 气泡、sidecar **没 spawn 任何 `claude` 子进程**(进程树核过)→ copilot stream 在路由解析阶段就没拿到可用路线,所以根本没起 CLI。这正是上个 session 已报 PM 的老问题:**当前配置下没有一个 copilot 角色解析到可用 anthropic 路线**(`copilot_opus_4_7` 指向的 `anthropic-official:claude-opus-4-7` 在我 COPILOT_ASSIST-4 的 SDK 测试里是 PASS 的,但 copilot 聊天解析路径却拿不到——可能 cooling-down / 面板默认用了别的角色 / 解析路径与 SDK-test 路径不一致)。
 - **登记(诚实分类)**:copilot 在 .app 的**管线**(UI / 发送 / CORS / CLI 打包)全部验通;**唯一缺口 = copilot 要有可解析的工作路线**。这要么是 PM 决策(copilot 用哪条路线/模型 + 确保其凭证/路线健康),要么是一轮专门的 gateway 路由解析调查(为什么 chat 解析路径拿不到 SDK-test 能用的那条路线)。**= 真正的 ③(需 PM 价值/配置判断)/ 专门轮**,不是可直接撸的实现细节。
 
+### copilot 静默失败 = 真 bug,逼出并修(2026-06-14 续)
+> 继续深挖 copilot 在 .app 里"发送 success 但无回复无报错"的现象,逐层核到根因——一个 backend 全绿单测都没盖到的 silent-failure bug。
+
+- **逐层定位(全程核实非猜)**:
+  1. copilot 聊天走 WS(`/copilot/ws`)→ `stream_query`,**硬编码用 `copilot_chat` 角色**(`copilot.py:290`),输入框无 model picker → 永远用它。
+  2. `copilot_chat` 角色解析:`stream_query` 只 catch `KeyError`/`ValueError`。但用真凭证跑 `resolve_routes("copilot_chat")` → 抛 **`ResourceTerminalError`(基类 Exception,不是 ValueError)** → **stream_query 没 catch → 异常冒出 WS 循环 → ws 静默关闭 → 前端只显 "success" 无任何回复/报错**。(底层原因是该配置下 copilot_chat 解析到的路线 route_missing = 配置/网关问题,另说;但**无论底层为何,异常没被 surface = silent failure = 真 bug**。)
+  - 注:`RegistryResolutionError` 是 `ValueError` 子类(本会被 catch),但网关把它包成 `ResourceTerminalError` 抛出,绕过了 ValueError catch。
+- **修复 ✅**:① 网关 adapter 重导出 `ResourceTerminalError`(boundary-respecting);② `_resolve_copilot_runtime` catch `(ResourceTerminalError, RegistryResolutionError)` → 转成清晰 `ValueError`(stream_query 已会把 ValueError 转成 `CopilotEventError` 显示在面板)。**silent failure → 用户看得见"copilot_chat 无可用 route: ..."**(符合 error-observability 铁律)。
+- **回归测试 ✅**:`test_stream_query_surfaces_resource_terminal_error_as_copilot_error`(mock 解析器抛 ResourceTerminalError → 断言 stream_query yield `CopilotEventError`、不再静默)。**这正是之前单测漏掉的:旧单测 mock 掉 stream_query 直接 yield error,没覆盖"真解析器抛非-ValueError 异常"的路径——只有真 .app 鼠标驱动才暴露。**
+- **门禁**:copilot.py + gateway.py mypy 中性(0 新增错;全包 mypy 基线 19 个预存错,stash 我的改动后仍 19,非我引入)、ruff 干净;copilot ws 16 测试通过。
+- **.app GUI 复验未能眼见**:重建 .app 后想再鼠标驱动确认报错气泡显示,但此时屏幕锁屏(`loginwindow` 置前,长会话超时锁屏)→ computer-use 无法操作锁屏(需用户解锁)。**非自造 blocker**:修复已被回归测试 + 既有 `test_copilot_ws_forwards_stream_query_error`(前端渲染 error 事件)端到端覆盖;解锁后可补眼见复验。
+- **登记**:copilot 真正出回复仍需可解析的工作路线(copilot_chat → CL46T profile → route_missing)= PM/网关配置 / 专门轮(见上一节)。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

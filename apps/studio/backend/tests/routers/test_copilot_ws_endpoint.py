@@ -484,6 +484,34 @@ def test_stream_query_yields_clear_error_for_credential_ref_only_route(
     ]
 
 
+def test_stream_query_surfaces_resource_terminal_error_as_copilot_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # Regression: the gateway raises ResourceTerminalError (base Exception, NOT a
+    # ValueError) when no copilot route resolves. Left uncaught it propagated out
+    # of the ws stream loop and the socket died silently (user saw nothing). It
+    # must now surface as a CopilotEventError so the panel shows the reason.
+    from app.core.adapters.gateway import ResourceTerminalError
+    from app.services import gateway_resolver
+
+    class _Resolver:
+        def resolve_routes(self, *_args: object, **_kwargs: object) -> object:
+            raise ResourceTerminalError(
+                "resource.no_available_route", {"role": "copilot_chat"}
+            )
+
+    monkeypatch.setattr(gateway_resolver, "build_gateway_model_resolver", lambda: _Resolver())
+
+    events = asyncio.run(
+        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+    )
+
+    assert len(events) == 1
+    assert isinstance(events[0], CopilotEventError)
+    assert "无可用 route" in events[0].message
+
+
 async def _events(*items: object) -> AsyncIterator[object]:
     for item in items:
         yield item

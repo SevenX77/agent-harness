@@ -614,13 +614,23 @@ def _tool_result_summary(content: str | list[dict[str, Any]] | None) -> str:
 def _resolve_copilot_runtime(
     model_override: str | None,
 ) -> tuple[list[ResolvedRoute], CredentialProviderProtocol]:
+    from app.core.adapters.gateway import RegistryResolutionError, ResourceTerminalError
     from app.services.gateway_resolver import build_gateway_model_resolver
 
     resolver = build_gateway_model_resolver()
-    resolved = resolver.resolve_routes(
-        "copilot_chat",
-        route_override=model_override,
-    )
+    try:
+        resolved = resolver.resolve_routes(
+            "copilot_chat",
+            route_override=model_override,
+        )
+    except (ResourceTerminalError, RegistryResolutionError) as exc:
+        # The gateway raises ResourceTerminalError (base Exception, NOT a
+        # ValueError) when no copilot route resolves — e.g. the configured route
+        # is missing/cooling-down. Left uncaught it propagates out of the ws
+        # stream loop and the socket dies silently, so the user sees nothing.
+        # Convert to the domain ValueError that stream_query surfaces as a
+        # CopilotEventError, so the failure reason is shown in the panel.
+        raise ValueError(f"copilot_chat 无可用 route: {exc}") from exc
     if not resolved.routes:
         raise ValueError("copilot_chat role 无可用 route")
     return list(resolved.routes), resolver.credential_provider

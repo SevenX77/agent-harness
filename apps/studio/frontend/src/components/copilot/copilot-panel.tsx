@@ -48,6 +48,16 @@ function ChatMessageItemBase({ message }: ChatMessageItemProps) {
             </div>
           )
         }
+        if (event.type === 'context_resolved') {
+          return (
+            <details key={event.id} className="mt-2 rounded-md border border-border bg-muted/30 p-2 text-xs text-muted-foreground">
+              <summary className="cursor-pointer font-medium text-foreground">{event.summary}</summary>
+              <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-background/70 p-2">
+                {event.detail}
+              </pre>
+            </details>
+          )
+        }
         if (event.type === 'thinking_delta') {
           return (
             <details key={event.id} className="mt-2 rounded-md border border-border bg-muted/40 p-2 text-xs text-muted-foreground">

@@ -47,6 +47,7 @@ from app.core.adapters.gateway import (
 )
 from app.models.copilot import (
     CopilotEvent,
+    CopilotEventContextResolved,
     CopilotEventDone,
     CopilotEventError,
     CopilotEventText,
@@ -256,6 +257,30 @@ def build_system_prompt(skill_id: str) -> str:
     return prompt
 
 
+def _context_resolved_event(skill_id: str) -> CopilotEventContextResolved:
+    """F4: build the first-event echo of what context is injected this turn."""
+    spec_mounted = _skill_spec_dir() is not None
+    view_context = get_view_context(skill_id)
+    parts: list[str] = []
+    detail_lines: list[str] = []
+    if view_context is not None:
+        parts.append(f"view={view_context.view}")
+        detail_lines.append(
+            json.dumps(
+                _context_for_prompt(view_context.context),
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    else:
+        detail_lines.append("(无 view 上下文)")
+    if spec_mounted:
+        parts.append("skill-spec 已挂载")
+    summary = "本轮注入: " + (" · ".join(parts) if parts else "仅 skill-authoring 基础上下文")
+    return CopilotEventContextResolved(summary=summary, detail="\n".join(detail_lines))
+
+
 async def stream_query(
     skill_id: str,
     user_message: str,
@@ -272,6 +297,9 @@ async def stream_query(
     except ValueError as exc:
         yield CopilotEventError(message=str(exc))
         return
+
+    # F4: first event echoes the injected context (anti hidden-prompt-magic).
+    yield _context_resolved_event(skill_id)
 
     failures: list[str] = []
     failed_route_ids: list[str] = []

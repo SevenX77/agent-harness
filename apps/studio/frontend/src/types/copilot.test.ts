@@ -14,6 +14,21 @@ describe('normalizeCopilotEvent', () => {
     expect(event).toMatchObject({ id: 'evt-1', status: 'running', content: 'let me reason...' })
   })
 
+  it('maps a context_resolved payload (F4 context echo) with summary + detail', () => {
+    const event = normalizeCopilotEvent(
+      { type: 'context_resolved', summary: '本轮注入: view=Edit', detail: '{...}' },
+      'evt-ctx',
+    )
+
+    expect(event.type).toBe('context_resolved')
+    expect(event).toMatchObject({ status: 'success', summary: '本轮注入: view=Edit', detail: '{...}' })
+  })
+
+  it('falls back to unknown for context_resolved missing detail', () => {
+    const event = normalizeCopilotEvent({ type: 'context_resolved', summary: 'x' }, 'evt-bad')
+    expect(event.type).toBe('unknown')
+  })
+
   it('maps a text_delta payload to a text event', () => {
     const event = normalizeCopilotEvent({ type: 'text_delta', content: 'answer' }, 'evt-2')
 

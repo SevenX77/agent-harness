@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from app.models.copilot import (
+    CopilotEventContextResolved,
     CopilotEventDone,
     CopilotEventError,
     CopilotEventText,
@@ -208,7 +209,8 @@ def test_stream_query_errors_when_api_key_missing(monkeypatch: pytest.MonkeyPatc
     )
     events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi")))
 
-    assert events == [CopilotEventError(message="Endpoint anthropic-official 未配置 API key")]
+    assert isinstance(events[0], CopilotEventContextResolved)  # F4: first event echoes context
+    assert events[1:] == [CopilotEventError(message="Endpoint anthropic-official 未配置 API key")]
 
 
 def test_stream_query_errors_when_model_override_is_unknown(
@@ -302,7 +304,8 @@ def test_stream_query_timeout_error(monkeypatch: pytest.MonkeyPatch, tmp_path: P
 
     events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi", workspace_dir=tmp_path)))
 
-    assert events == [CopilotEventError(message="请求超时, 检查网络 / 代理")]
+    assert isinstance(events[0], CopilotEventContextResolved)
+    assert events[1:] == [CopilotEventError(message="请求超时, 检查网络 / 代理")]
 
 
 def test_stream_query_sdk_network_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -319,7 +322,8 @@ def test_stream_query_sdk_network_error(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
     events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi", workspace_dir=tmp_path)))
 
-    assert events == [
+    assert isinstance(events[0], CopilotEventContextResolved)
+    assert events[1:] == [
         CopilotEventError(
             message="后端连接失败 (DeepSeek 端点不可达 / 大陆需代理): connection failed"
         )
@@ -344,7 +348,9 @@ def test_stream_query_uses_system_prompt_and_yields_done(
         _collect(copilot.stream_query("skill-a", "user text", workspace_dir=tmp_path))
     )
 
-    assert events == [CopilotEventText(content="hello"), CopilotEventDone()]
+    assert isinstance(events[0], CopilotEventContextResolved)  # F4: context echo first
+    assert events[0].summary.startswith("本轮注入")
+    assert events[1:] == [CopilotEventText(content="hello"), CopilotEventDone()]
     assert client.connected is True
     assert "聚焦 Studio 上下文" in client.queries[0]
     assert "user text" in client.queries[0]

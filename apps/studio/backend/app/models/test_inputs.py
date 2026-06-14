@@ -24,3 +24,13 @@ class TestInputCreateRequest(BaseModel):
 
     name: str
     content: dict[str, object]
+
+
+class TestInputDetail(BaseModel):
+    """A test input plus its full JSON content (for Predict/Run input selection)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    content: dict[str, object]

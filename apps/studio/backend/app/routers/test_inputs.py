@@ -17,7 +17,11 @@ from fastapi import APIRouter, Response, status
 
 from app.core.exceptions import standard_http_exception
 from app.models.errors import ErrorResponse
-from app.models.test_inputs import TestInputCreateRequest, TestInputMetadata
+from app.models.test_inputs import (
+    TestInputCreateRequest,
+    TestInputDetail,
+    TestInputMetadata,
+)
 from app.services.run_manager import test_inputs_dir_for
 
 logger = logging.getLogger(__name__)
@@ -55,6 +59,44 @@ async def list_test_inputs(skill_id: str) -> list[TestInputMetadata]:
             ),
         )
     return items
+
+
+@router.get(
+    "/{input_id}",
+    response_model=TestInputDetail,
+    responses={
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+    },
+)
+async def get_test_input(skill_id: str, input_id: str) -> TestInputDetail:
+    name = _validated_input_name(input_id)
+    path = test_inputs_dir_for(skill_id) / f"{name}.json"
+    if not path.exists():
+        logger.warning("test_input get rejected: %s not found", path)
+        raise standard_http_exception(
+            "TEST_INPUT_NOT_FOUND",
+            f"Test input not found: {name}",
+            {"name": name},
+        )
+    raw = path.read_text(encoding="utf-8")
+    try:
+        content = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        logger.warning("test_input %s is not valid JSON: %s", path, exc)
+        raise standard_http_exception(
+            "TEST_INPUT_VALIDATION_FAILED",
+            f"Test input is not valid JSON: {name}",
+            {"name": name},
+        ) from exc
+    if not isinstance(content, dict):
+        logger.warning("test_input %s content is not a JSON object", path)
+        raise standard_http_exception(
+            "TEST_INPUT_VALIDATION_FAILED",
+            f"Test input is not a JSON object: {name}",
+            {"name": name},
+        )
+    return TestInputDetail(id=name, name=name, content=content)
 
 
 @router.post(

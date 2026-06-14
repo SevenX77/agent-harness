@@ -68,6 +68,24 @@ def test_create_persists_content_roundtrip(client: TestClient) -> None:
     assert json.loads(json.dumps(payload))  # sanity: payload is JSON-serialisable
 
 
+def test_get_returns_full_content(client: TestClient) -> None:
+    payload = {"input_text": "hello", "nested": {"n": 1}}
+    assert _create(client, "case-a", payload).status_code == 200
+
+    response = client.get(f"{BASE}/case-a")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["id"] == "case-a"
+    assert body["name"] == "case-a"
+    assert body["content"] == payload
+
+
+def test_get_missing_input_returns_not_found(client: TestClient) -> None:
+    response = client.get(f"{BASE}/missing")
+    assert response.status_code == 404
+    assert response.json()["error_code"] == "TEST_INPUT_NOT_FOUND"
+
+
 def test_delete_removes_input(client: TestClient) -> None:
     assert _create(client, "case-a", {"input_text": "hello"}).status_code == 200
 

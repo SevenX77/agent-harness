@@ -316,5 +316,20 @@ Stop-hook、反自造停下铁律、copilot F3/F4-echo/F7、trace F5/F2、input 
 - **.app GUI 复验未能眼见**:重建 .app 后想再鼠标驱动确认报错气泡显示,但此时屏幕锁屏(`loginwindow` 置前,长会话超时锁屏)→ computer-use 无法操作锁屏(需用户解锁)。**非自造 blocker**:修复已被回归测试 + 既有 `test_copilot_ws_forwards_stream_query_error`(前端渲染 error 事件)端到端覆盖;解锁后可补眼见复验。
 - **登记**:copilot 真正出回复仍需可解析的工作路线(copilot_chat → CL46T profile → route_missing)= PM/网关配置 / 专门轮(见上一节)。
 
+### copilot 路由配置 + 真 LLM 跑通 + GUI 报错可见(2026-06-14 续 · PM 指示"配置两个 role、全部测完")
+> PM 纠偏:别再问优先级、别造 blocker;用真凭证配置 copilot 的 Claude/deepseek role(Claude 优先第三方、deepseek 优先官网),全部测完。屏幕锁屏用 `caffeinate -d -i` 解决(已起,4h 不锁;PM 解锁一次)。
+
+- **copilot 不出回复的真根因(逐层核到)**:
+  1. copilot 聊天硬编码用 `copilot_chat` 角色(`copilot.py:290`);该角色经 `source_profile_id: CL46T`(= 你真 `llm_roles.yaml` 里的 "Claude Sonnet 4.6 Thinking" 档,我答 PM 的 CL46T 出处)解析。
+  2. **真 bug = 角色里的 route_id 格式过时**:`copilot_opus_4_7` 指 `anthropic-official:claude-opus-4-7`(**连字符**),但注册表里是 `claude-opus-4.7`(**点**)→ `route_missing` 解析失败。773 条注册路线里,可用的 anthropic-compatible 端点:`anthropic-official`(官网)、`custom-ed6bcae2…`(第三方,verified,有 `anthropic.claude-opus-4.8` 等)、`custom-a8726272…`(第三方,verified,走 anthropic 协议供 deepseek)。
+- **配置 + 真跑验证(隔离 config,真库 0 污染)**:把 `copilot_chat` 改成正确注册的 route_id、**Claude 优先第三方**(`custom-ed6bcae2:anthropic.claude-opus-4.8` 第一、`anthropic-official:claude-opus-4.8` 兜底)→ `resolve_routes` **RESOLVE OK route count=2**。直接驱动 `stream_query` 真跑:**resolve → spawn bundle 内自包含 claude CLI → 真 LLM 调用 → 全程流式(context_resolved/thinking_delta/tool_use_start/tool_use_result/text_delta/done)→ 真答出 "hello from copilot"**。copilot 全 F-units(F1 思考流/工具折叠、F4 上下文回显)真跑验证。
+- **deepseek role 的架构约束(真发现,报 PM)**:copilot 走 claude CLI = **只认 anthropic 协议**。`deepseek-official` 是 `openai_compatible` → **根本驱动不了 copilot CLI**(和我之前真跑 deepseek 报 "SDK 错误" 一致)。所以 "deepseek 优先用官网" 对 copilot **不可行**;copilot 的 deepseek 只能走 anthropic-compatible 的第三方端点(如 `custom-a8726272`)。这是真架构约束,不是配置疏忽。
+- **GUI 真鼠标复验(屏幕已解锁)**:
+  - ✅ **silent-failure 修复在 GUI 生效**:copilot 报错现在**红框可见**("Copilot 请求失败: Control request timeout: initialize"),不再是"success 但空白"。这是 PM 最初困惑的根源,已修。
+  - ✅ **route-config 修复生效**:不再 "no available route",能解析到 CLI spawn 阶段。
+  - ⚠️ **GUI 新问题(深层,专门轮)**:GUI/sidecar 里 claude CLI 的 `initialize` 控制握手超时(SDK floor 60s)。直接驱动器(一次性进程)init 秒过,GUI(长驻 sidecar)却超时——疑似 sidecar 事件循环调度 / CLI init 阶段加载 MCP server 卡住(SDK 注释:initialize 会等 MCP server 启动)。需专门一轮查(非快修)。
+- **门禁**:后端 515/1 skip,copilot.py/gateway.py 改动 mypy 中性 + ruff 干净。
+- **登记**:① 你真 `llm_roles.yaml` 的 copilot role route_id 是连字符格式、与注册表点格式不符 = 你的配置数据需修(我在隔离副本验证了正确格式可用,没动你真库);② copilot model/role 选择器(切 Claude/deepseek)= 前端 F-unit 待加;③ GUI init 超时 = 专门轮。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

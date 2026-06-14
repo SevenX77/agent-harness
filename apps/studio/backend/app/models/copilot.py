@@ -76,6 +76,39 @@ class CopilotEventToolUseResult(CopilotEventBase):
     result_summary: str
 
 
+class CopilotEventPatchProposed(CopilotEventBase):
+    """F5 safe-write (model B): a copilot Write/Edit applied to a workspace file.
+
+    Emitted before the SDK applies the edit (apply-then-review), carrying the
+    pre-edit bytes so the UI can show an inline diff and a Reject can restore the
+    original bytes through the Rust sole writer. ``after_content`` is best-effort
+    for instant rendering; the authoritative applied content is the file on disk.
+    """
+
+    type: Literal["patch_proposed"] = "patch_proposed"
+    tool_use_id: str
+    tool_name: Literal["Write", "Edit"]
+    path: str
+    before_existed: bool
+    before_content: str
+    after_content: str
+
+
+class CopilotEventBashApprovalRequired(CopilotEventBase):
+    """F5: a copilot Bash command gated for human-in-the-loop approval.
+
+    The interactive approve/reject round-trip needs a bidirectional WS control
+    channel (not yet wired), so the command is held — surfaced for visibility but
+    not executed. ``blocked`` distinguishes "held pending approval" from a future
+    "approved" state.
+    """
+
+    type: Literal["bash_approval_required"] = "bash_approval_required"
+    tool_use_id: str
+    command: str
+    blocked: bool = True
+
+
 class CopilotEventDone(CopilotEventBase):
     type: Literal["done"] = "done"
 
@@ -91,6 +124,8 @@ CopilotEvent: TypeAlias = Annotated[
     | CopilotEventText
     | CopilotEventToolUseStart
     | CopilotEventToolUseResult
+    | CopilotEventPatchProposed
+    | CopilotEventBashApprovalRequired
     | CopilotEventDone
     | CopilotEventError,
     Field(discriminator="type"),

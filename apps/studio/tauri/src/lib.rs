@@ -67,7 +67,7 @@ fn config_dir_from_override(override_value: Option<std::ffi::OsString>) -> Optio
         .filter(|path| !path.as_os_str().is_empty())
 }
 
-fn resolve_config_dir() -> PathBuf {
+pub(crate) fn resolve_config_dir() -> PathBuf {
     config_dir_from_override(std::env::var_os("STUDIO_CONFIG_DIR"))
         .unwrap_or_else(sidecar::default_user_config_dir)
 }
@@ -426,7 +426,10 @@ mod tests {
     #[test]
     fn config_dir_override_honors_non_empty_value() {
         let resolved = config_dir_from_override(Some("/tmp/studio-iso".into()));
-        assert_eq!(resolved.as_deref(), Some(std::path::Path::new("/tmp/studio-iso")));
+        assert_eq!(
+            resolved.as_deref(),
+            Some(std::path::Path::new("/tmp/studio-iso"))
+        );
     }
 
     #[test]

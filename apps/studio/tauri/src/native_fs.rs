@@ -12,6 +12,75 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+/// Workspace root id validator: mirrors Python `_SAFE_SKILL_ID_RE`
+/// (`^[A-Za-z0-9][A-Za-z0-9._-]*$`) so a short id we accept here is also valid
+/// in the backend. Plus the segment-equality guard (no path components).
+fn is_valid_default_workspace_skill_id(raw: &str) -> bool {
+    if raw.is_empty() || raw == "." || raw == ".." {
+        return false;
+    }
+    if raw.contains('/') || raw.contains('\\') {
+        return false;
+    }
+    let mut chars = raw.chars();
+    let first = match chars.next() {
+        Some(c) => c,
+        None => return false,
+    };
+    if !(first.is_ascii_alphanumeric()) {
+        return false;
+    }
+    for c in chars {
+        if !(c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-') {
+            return false;
+        }
+    }
+    true
+}
+
+/// Resolve a `workspace_root` arg from the frontend to a real absolute dir.
+///
+/// Two callers feed this:
+/// - **Opened-folder workspace**: frontend passes the absolute workspace root
+///   path (resolved via `resolveWorkspaceIdentity`). We return it as-is.
+/// - **Default-workspace skill** (the user opened a skill from "Recent skills"
+///   without a hosting folder): `resolveWorkspaceIdentity` cannot supply a
+///   root, so the frontend falls back to the short skill id (e.g. `e2e-fast`).
+///   We resolve it to `<config_dir>/workspaces/default/skills/<id>` — the same
+///   layout Python `default_workspace_skills_dir()` uses — so native writes
+///   land in the right place instead of failing to resolve.
+///
+/// Anything else (a relative path with slashes, an invalid id, or a short id
+/// whose directory doesn't actually contain a skill body) is rejected with a
+/// clear message so silent path-targeting bugs cannot regress.
+pub fn resolve_workspace_root(raw: &str, config_dir: &Path) -> Result<PathBuf, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("workspace root is required".to_string());
+    }
+    let path = Path::new(trimmed);
+    if path.is_absolute() {
+        return Ok(path.to_path_buf());
+    }
+    if !is_valid_default_workspace_skill_id(trimmed) {
+        return Err(format!(
+            "workspace root must be an absolute path or a default-workspace skill id; got: {trimmed}"
+        ));
+    }
+    let candidate = config_dir
+        .join("workspaces")
+        .join("default")
+        .join("skills")
+        .join(trimmed);
+    if !candidate.join("GRAPH.md").is_file() {
+        return Err(format!(
+            "unknown default-workspace skill: {trimmed} (looked under {})",
+            candidate.display()
+        ));
+    }
+    Ok(candidate)
+}
+
 /// SHA-256 hex of UTF-8 content. Must stay byte-compatible with Python
 /// `_graph_content_hash` (services/skills.py) so cross-writer hash conflicts
 /// are detected identically.
@@ -189,7 +258,14 @@ pub fn write_workspace_file(
     content: String,
     expected_hash: Option<String>,
 ) -> Result<WriteOutcome, WriteWorkspaceError> {
-    write_workspace_file_impl(&workspace_root, &path, &content, expected_hash.as_deref())
+    let config_dir = crate::resolve_config_dir();
+    let resolved = resolve_workspace_root(&workspace_root, &config_dir).map_err(write_failed)?;
+    write_workspace_file_impl(
+        &resolved.to_string_lossy(),
+        &path,
+        &content,
+        expected_hash.as_deref(),
+    )
 }
 
 #[tauri::command]
@@ -226,10 +302,8 @@ pub fn remove_recent_workspace(identity: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn ensure_workspace_support_dirs(workspace_root: String) -> Result<(), String> {
-    let root = PathBuf::from(workspace_root.trim());
-    if root.as_os_str().is_empty() {
-        return Err("workspace root is required".to_string());
-    }
+    let config_dir = crate::resolve_config_dir();
+    let root = resolve_workspace_root(&workspace_root, &config_dir)?;
     let sessions = root.join(".gemini").join("copilot").join("sessions");
     std::fs::create_dir_all(&sessions)
         .map_err(|error| format!("cannot create support dirs: {error}"))
@@ -391,5 +465,128 @@ mod tests {
             .join("sessions")
             .is_dir());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Seed a fake default-workspace `<config_dir>/workspaces/default/skills/<id>/GRAPH.md`
+    /// so `resolve_workspace_root` accepts the short id. Mirrors the on-disk layout
+    /// the Python backend (`default_workspace_skills_dir()`) writes for default-user
+    /// skills opened from "Recent skills".
+    fn seed_default_workspace_skill(config_dir: &Path, skill_id: &str) {
+        let dir = config_dir
+            .join("workspaces")
+            .join("default")
+            .join("skills")
+            .join(skill_id);
+        std::fs::create_dir_all(&dir).expect("seed skill dir");
+        std::fs::write(dir.join("GRAPH.md"), "schema_version: \"v0.3.0\"\n")
+            .expect("seed GRAPH.md");
+    }
+
+    #[test]
+    fn resolve_workspace_root_passes_absolute_path_through() {
+        let abs = temp_root("resolve-abs");
+        // Config dir is irrelevant when an absolute path is supplied.
+        let resolved =
+            resolve_workspace_root(abs.to_str().unwrap(), Path::new("/nonexistent-config"))
+                .expect("absolute path resolves unchanged");
+        assert_eq!(resolved, abs);
+        let _ = std::fs::remove_dir_all(&abs);
+    }
+
+    #[test]
+    fn resolve_workspace_root_resolves_default_workspace_short_id() {
+        let config = temp_root("resolve-shortid");
+        seed_default_workspace_skill(&config, "e2e-fast");
+        let resolved = resolve_workspace_root("e2e-fast", &config)
+            .expect("short id resolves under default workspace");
+        assert_eq!(
+            resolved,
+            config
+                .join("workspaces")
+                .join("default")
+                .join("skills")
+                .join("e2e-fast")
+        );
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn resolve_workspace_root_rejects_short_id_without_graph_body() {
+        let config = temp_root("resolve-noskill");
+        // No seeded skill: the directory does not exist, so the resolver must refuse
+        // rather than silently create a phantom skill dir on first write.
+        let error =
+            resolve_workspace_root("ghost-skill", &config).expect_err("missing skill is rejected");
+        assert!(
+            error.contains("unknown default-workspace skill"),
+            "unexpected error: {error}"
+        );
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn resolve_workspace_root_rejects_invalid_ids_and_traversal() {
+        let config = temp_root("resolve-bad");
+        // Path components / traversal must be refused even before disk lookup so the
+        // resolver cannot be tricked into escaping the default-workspace tree.
+        for bad in [
+            "",
+            "  ",
+            ".",
+            "..",
+            "../escape",
+            "a/b",
+            "a\\b",
+            "-leading-dash",
+        ] {
+            assert!(
+                resolve_workspace_root(bad, &config).is_err(),
+                "expected rejection for {bad:?}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn write_to_default_workspace_short_id_lands_under_config_dir_skills() {
+        // End-to-end of the F2 default-workspace save path: the command receives
+        // a short skill id (because resolveWorkspaceIdentity has no workspaceRoot
+        // for default-workspace skills), the resolver maps it under
+        // `<config_dir>/workspaces/default/skills/<id>`, and the writer puts the
+        // file there. This is the bug the previous turn registered (writes
+        // failed because the short id was used as a literal workspace root).
+        let config = temp_root("write-shortid");
+        seed_default_workspace_skill(&config, "e2e-fast");
+        let skill_dir = config
+            .join("workspaces")
+            .join("default")
+            .join("skills")
+            .join("e2e-fast");
+
+        let resolved =
+            resolve_workspace_root("e2e-fast", &config).expect("resolver accepts short id");
+        let outcome = write_workspace_file_impl(
+            &resolved.to_string_lossy(),
+            "GRAPH.md",
+            "schema_version: \"v0.3.0\"\nname: e2e-fast\n",
+            Some(&sha256_hex("schema_version: \"v0.3.0\"\n")),
+        )
+        .expect("write to default-workspace short id");
+        assert_eq!(outcome.path, "GRAPH.md");
+        assert_eq!(
+            std::fs::read_to_string(skill_dir.join("GRAPH.md")).unwrap(),
+            "schema_version: \"v0.3.0\"\nname: e2e-fast\n"
+        );
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn resolve_workspace_root_trims_whitespace() {
+        let abs = temp_root("resolve-trim");
+        let raw = format!("  {}  ", abs.display());
+        let resolved =
+            resolve_workspace_root(&raw, Path::new("/nonexistent-config")).expect("trimmed path");
+        assert_eq!(resolved, abs);
+        let _ = std::fs::remove_dir_all(&abs);
     }
 }

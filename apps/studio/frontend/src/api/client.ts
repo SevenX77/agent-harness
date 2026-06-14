@@ -163,6 +163,26 @@ export async function startRun(skillId: string, inputData: JsonObject): Promise<
   return response.data
 }
 
+/**
+ * Resume a run from its last checkpoint (the headline lifecycle's debug step).
+ * Optional context_overrides / human_input feed an intervened resume; omitted
+ * for a plain continue.
+ */
+export async function resumeRun(
+  skillId: string,
+  runId: string,
+  options: { contextOverrides?: JsonObject; humanInput?: string } = {},
+): Promise<RunMetadata> {
+  const response = await api.post<RunMetadata>(
+    `/skills/${skillId}/runs/${encodeURIComponent(runId)}/resume`,
+    {
+      context_overrides: options.contextOverrides ?? null,
+      human_input: options.humanInput ?? null,
+    },
+  )
+  return response.data
+}
+
 export async function createTestInput(
   skillId: string,
   name: string,

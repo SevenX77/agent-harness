@@ -12,7 +12,7 @@ import { useGoldenDiff } from "@/hooks/useGoldenDiff"
 import { useSkills } from "@/hooks/useSkills"
 import { DiffView } from "@/components/diff/DiffView"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
-import { compileSkill, getSkillDetail, resolveRunInput, serializeSkillGraph, writeSkillFile, wsUrl, postPredictRun, startRun } from "@/api/client"
+import { compileSkill, getSkillDetail, resolveRunInput, serializeSkillGraph, writeSkillFile, wsUrl, postPredictRun, startRun, resumeRun } from "@/api/client"
 import { isTauriRuntime } from "@/config/runtime"
 import { writeWorkspaceFile } from "@/lib/tauri"
 import type { CompileError } from "@/api/types"
@@ -586,6 +586,27 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     }
   }, [currentSkillId, deriveBuildStage, selectedTestInputId, updateStage, setRunId])
 
+  // Headline lifecycle "resume": continue the active run from its last
+  // checkpoint. The backend reports RESUME_CHECKPOINT_NOT_FOUND when a run has
+  // nothing to continue (e.g. it already finished) — surfaced as a clear toast.
+  const [resumeLoading, setResumeLoading] = useState(false)
+  const handleResume = useCallback(async () => {
+    if (!currentSkillId || !runId) return
+    setResumeLoading(true)
+    try {
+      const result = await resumeRun(currentSkillId, runId)
+      setActivePanel("timeline")
+      // Re-subscribe the trace stream to the resumed run (new id, or re-attach).
+      setRunId(null)
+      setRunId(result.run_id)
+      toast.success("Run resumed from checkpoint")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to resume run")
+    } finally {
+      setResumeLoading(false)
+    }
+  }, [currentSkillId, runId, setRunId])
+
   const handleHome = useCallback(() => {
     setSettingsOpen(false)
     onCloseSkill()
@@ -646,6 +667,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   traceCompareLoading={goldenDiff.loading}
                   onCompareToGolden={handleCompareToGolden}
                   onPromoteToGolden={handlePromoteToGolden}
+                  traceCanResume={Boolean(runId)}
+                  traceResumeLoading={resumeLoading}
+                  onResumeRun={handleResume}
                 />
               </ResizablePanel>
               <ResizableHandle />

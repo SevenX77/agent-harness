@@ -1,6 +1,6 @@
 import type { CallbackEvent } from '../api/types'
 import { useTraceFilter } from '../hooks/useTraceFilter'
-import { BadgeCheck, GitCompareArrows } from 'lucide-react'
+import { BadgeCheck, GitCompareArrows, Play } from 'lucide-react'
 import { TraceFilter } from './trace/TraceFilter'
 import { TraceSearchBar } from './trace/TraceSearchBar'
 import { VirtualTraceList } from './trace/VirtualTraceList'
@@ -17,6 +17,9 @@ interface TracePanelProps {
   compareLoading?: boolean
   onCompareToGolden?: () => void
   onPromoteToGolden?: () => void
+  canResume?: boolean
+  resumeLoading?: boolean
+  onResume?: () => void
 }
 
 export function TracePanel({
@@ -31,6 +34,9 @@ export function TracePanel({
   compareLoading = false,
   onCompareToGolden,
   onPromoteToGolden,
+  canResume = false,
+  resumeLoading = false,
+  onResume,
 }: TracePanelProps) {
   const filter = useTraceFilter(traceLogs, linkEnabled ? activePhase : null)
 
@@ -53,6 +59,17 @@ export function TracePanel({
         <div className="flex items-center justify-between gap-3">
           <h3 className="font-semibold text-foreground">Trace Timeline</h3>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              aria-label="Resume run from last checkpoint"
+              title="Continue this run from its last checkpoint"
+              disabled={!canResume || resumeLoading}
+              onClick={onResume}
+              className="flex items-center gap-1 rounded-md border border-emerald-200 px-2 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-900 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
+            >
+              <Play className="h-3.5 w-3.5" />
+              {resumeLoading ? 'Resuming' : 'Resume'}
+            </button>
             <button
               type="button"
               aria-label="Compare trace to golden baseline"

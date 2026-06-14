@@ -41,4 +41,49 @@ describe('normalizeCopilotEvent', () => {
 
     expect(event.type).toBe('unknown')
   })
+
+  // F5: safe-write events must normalize so the diff bubble + Bash card render.
+  it('maps a patch_proposed payload to a patch event with before/after', () => {
+    const event = normalizeCopilotEvent(
+      {
+        type: 'patch_proposed',
+        tool_use_id: 'tu-9',
+        tool_name: 'Edit',
+        path: 'GRAPH.md',
+        before_existed: true,
+        before_content: 'a\nold',
+        after_content: 'a\nnew',
+      },
+      'evt-patch',
+    )
+
+    expect(event.type).toBe('patch_proposed')
+    expect(event).toMatchObject({
+      toolUseId: 'tu-9',
+      toolName: 'Edit',
+      path: 'GRAPH.md',
+      beforeExisted: true,
+      beforeContent: 'a\nold',
+      afterContent: 'a\nnew',
+      review: 'pending',
+    })
+  })
+
+  it('maps a bash_approval_required payload to a held command event', () => {
+    const event = normalizeCopilotEvent(
+      { type: 'bash_approval_required', tool_use_id: 'tu-10', command: 'rm -rf x', blocked: true },
+      'evt-bash',
+    )
+
+    expect(event.type).toBe('bash_approval_required')
+    expect(event).toMatchObject({ command: 'rm -rf x', blocked: true, status: 'pending' })
+  })
+
+  it('falls back to unknown for patch_proposed with a non-Write/Edit tool', () => {
+    const event = normalizeCopilotEvent(
+      { type: 'patch_proposed', tool_name: 'Bash', path: 'x' },
+      'evt-bad-patch',
+    )
+    expect(event.type).toBe('unknown')
+  })
 })

@@ -213,6 +213,29 @@ export async function checkpointWorkspaceFile(
   return await invoke<CheckpointResult>('checkpoint_workspace_file', { workspaceRoot, path })
 }
 
+/**
+ * Seed a checkpoint from explicit pre-edit state (copilot F5). The backend ships
+ * before-bytes in the patch_proposed event; recording them here is race-free
+ * (re-reading would capture the already-applied edit).
+ */
+export async function seedWorkspaceCheckpoint(
+  workspaceRoot: string,
+  path: string,
+  content: string,
+  existed: boolean,
+): Promise<CheckpointResult> {
+  if (!isTauriRuntime()) {
+    throw new Error('Desktop only')
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return await invoke<CheckpointResult>('seed_workspace_checkpoint', {
+    workspaceRoot,
+    path,
+    content,
+    existed,
+  })
+}
+
 /** Reject: restore a file to its checkpointed pre-edit state via the sole writer. */
 export async function restoreWorkspaceFile(
   workspaceRoot: string,

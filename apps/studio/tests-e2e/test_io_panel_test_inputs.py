@@ -13,6 +13,7 @@ for INPUT-3; module/unit green alone does not count.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -160,3 +161,32 @@ def test_selected_test_input_feeds_predict_and_run(studio_page: Page) -> None:
     assert run_info.value.post_data_json["input_data"] == marker, (
         "Run must use the selected test input"
     )
+
+
+def test_batch_run_multiple_inputs(studio_page: Page) -> None:
+    # F6: select multiple test inputs and run them as one batch; the panel shows
+    # progress (completed/total + status).
+    page = studio_page
+    page.set_default_timeout(15_000)
+
+    _select_skill(page, "e2e-fast")
+    _action_button(page, "Compile").click()
+    expect(_action_button(page, "Predict")).to_be_enabled(timeout=20_000)
+    page.get_by_role("button", name="I/O", exact=True).click()
+    name_field = page.get_by_label("New test input name")
+    expect(name_field).to_be_visible(timeout=10_000)
+
+    for nm in ("batch-a", "batch-b"):
+        name_field.fill(nm)
+        page.get_by_label("New test input JSON").fill('{"input_text": "hi"}')
+        page.get_by_role("button", name="Save test input").click()
+        expect(page.get_by_role("button", name=f"Delete test input {nm}")).to_be_visible(
+            timeout=10_000
+        )
+
+    page.get_by_role("checkbox", name="Select test input batch-a for batch").check()
+    page.get_by_role("checkbox", name="Select test input batch-b for batch").check()
+
+    page.get_by_role("button", name=re.compile("Run 2 as batch")).click()
+    # Batch completes (2 sub-second logic runs) -> the panel shows the progress.
+    expect(page.get_by_text(re.compile(r"2/2 · (success|failed)"))).to_be_visible(timeout=30_000)

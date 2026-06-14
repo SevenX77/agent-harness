@@ -1239,11 +1239,17 @@ async def _run_copilot_sdk_test_job(
         await _update_role_test_job(job_id, status="failed", message=str(exc))
         return
 
+    results_list = list(results)
+    try:
+        _persist_copilot_sdk_evidence(results_list)
+    except Exception as exc:  # noqa: BLE001 — evidence persistence is best-effort
+        logger.warning("copilot SDK evidence persist failed (non-fatal): %s", exc)
+
     await _update_role_test_job(
         job_id,
         status="completed",
         message="Copilot SDK test completed.",
-        result=_build_copilot_sdk_result(role_name, routes, list(results)),
+        result=_build_copilot_sdk_result(role_name, routes, results_list),
     )
 
 
@@ -1314,6 +1320,32 @@ def _copilot_sdk_model_groups(
         {"canonical_id": canonical_id, "provider_results": provider_results}
         for canonical_id, provider_results in groups.items()
     ]
+
+
+def _persist_copilot_sdk_evidence(results: list[copilot.RouteSdkTestResult]) -> None:
+    # COPILOT_ASSIST-4: write the high-order SDK tool-call evidence back to
+    # credentials so the route's verified state survives reload and isn't
+    # re-derived from a transient run (§3.4 "成功写高阶证据回 credentials").
+    credentials = load_credentials()
+    verified_at = datetime.now(UTC).isoformat()
+    changed = False
+    for result in results:
+        route = credentials.provider_routes.get(result.route_id)
+        if route is None:
+            continue
+        metadata = dict(route.metadata)
+        metadata["sdk_tool_call_verified"] = {
+            "verified": result.status == "ok",
+            "status": result.status,
+            "verified_at": verified_at,
+        }
+        credentials.provider_routes[result.route_id] = route.model_copy(
+            update={"metadata": metadata}
+        )
+        changed = True
+    if changed:
+        save_credentials(credentials)
+        logger.info("copilot SDK evidence persisted for %d route(s)", len(results))
 
 
 @router.get("/model-profiles")

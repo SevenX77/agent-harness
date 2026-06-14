@@ -198,3 +198,22 @@ def test_build_options_enables_full_thinking(tmp_path: Path) -> None:
     options = copilot.build_options(None, "claude-key", tmp_path)
 
     assert options.thinking == {"type": "adaptive"}
+
+
+def test_build_options_mounts_skill_spec(tmp_path: Path) -> None:
+    # F3: the authoritative graph_skill spec is mounted so the copilot can Read it.
+    # The spec dir exists in this repo, so add_dirs must include it.
+    options = copilot.build_options(None, "claude-key", tmp_path)
+
+    assert any("02-skill-syntax" in entry for entry in options.add_dirs), options.add_dirs
+
+
+def test_build_system_prompt_has_skill_authoring_brain() -> None:
+    # F3: the prompt must teach the v0.3.0 graph_skill format (not the old 3-line
+    # generic prompt) and point to the mounted spec.
+    prompt = copilot.build_system_prompt("nonexistent-skill")
+
+    assert "graph_skill" in prompt
+    assert "v0.3.0" in prompt
+    assert "phases" in prompt
+    assert "skill-spec" in prompt  # mounted-spec pointer

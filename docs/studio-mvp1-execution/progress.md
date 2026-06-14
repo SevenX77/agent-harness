@@ -261,7 +261,23 @@ Stop-hook、反自造停下铁律、copilot F3/F4-echo/F7、trace F5/F2、input 
   - 真跑顺手核出 predict 契约:`mock_llm` 不是 bool 开关,是 mock 数据(dict/path/GoldenCase 列表);逻辑技能省略即可。
 - **结论**:.app 后端从"残缺起不来"→"完整栈端到端跑通真生命周期"。新增/有风险的组件(vendored 3.12 + 原生轮子 ABI + 本地引擎包 + 引擎图执行)全部真跑验证过;UI 壳层 against 同一份后端代码已由 Playwright e2e 覆盖。
 - **lib.rs config 隔离 override ✅**(为 computer-use 验收铺路,可单测):desktop 壳原本把 sidecar config 写死成 `default_user_config_dir()`(用户真 `~/Library/Application Support/AgentStudio`)。加 `resolve_config_dir()`——尊重显式 `STUDIO_CONFIG_DIR`(与后端/e2e 同一契约),让 app 能跑隔离 config 验收而不碰用户真库;未设=平台默认(终端用户行为不变)。纯 helper `config_dir_from_override` + 2 单测;tauri lib **27 passed**。
-- **剩余到真 headline 的最后一段**:`cargo tauri dev`/`cargo tauri build` 起真原生窗口 + computer-use 鼠标驱动(cargo-tauri 已装;vendored runtime + 隔离 config 已就绪;隔离 e2e-fast 技能已种在 verify workspace)。这是把已验证的后端栈套上已验证的 UI 壳,在真原生 .app 上鼠标跑一遍。
+### 🎯 真 .app headline 达成 + 真跑验证(2026-06-14)
+> 这是 charter §3 ① 的 headline:真 Tauri .app。多 session 一直被当"专门轮"延期,本轮直接做完并真跑验证。
+
+- **真 .app 构建成功 ✅**:`cargo tauri build --bundles app` → `Skill Studio.app`(release profile,1m06s;Rust release 编译 + bundle)。**自包含 402MB**,bundle 结构核过:
+  - `Contents/Resources/vendor/python/aarch64-apple-darwin/bin/`(打包的 CPython 3.12)
+  - `Contents/Resources/vendor/site-packages/graph_agent` + `graph_agent_gateway`(我修的闭包,真包体非 shim)
+  - `Contents/Resources/vendor/backend/app/main.py` + `vendor/resources/skills`(后端 + 技能)
+  - 修了 frontend dist 未在 beforeBuildCommand 里 build 的隐患:构建前先 `npm run build` 出新 dist。
+- **真 .app 启动 + sidecar 真服务 ✅(隔离 config,0 污染)**:直接跑 `.app/Contents/MacOS/skill-studio-tauri`(`STUDIO_CONFIG_DIR=隔离dir`):
+  - Rust 壳启动(进程存活,无 crash)。
+  - **Rust 壳 spawn 了 bundle 内的 vendored sidecar**:pid = `.app/Contents/Resources/vendor/python/.../python3.12 -m uvicorn app.main:app --port 51475`(精确就是打包进 .app 的那个解释器跑起来的)。
+  - **sidecar 真服务**:`GET /health` → **200**;`GET /api/skills` → **401**(在服务 + auth 正确强制)。
+  - **隔离生效**:app 在 `/tmp/studio-app-verify/` 建了 Skills/llm/workspaces(我加的 `STUDIO_CONFIG_DIR` override 起作用),**用户真 `~/Library/Application Support/AgentStudio` 0 污染**。
+  - 验完 kill app → ExitRequested handler 把 sidecar 一起干净关掉(orphan 不残留)。
+- **bundle 内 payload 真跑生命周期 ✅**:用 .app 内的 python+site-packages+backend 经 TestClient compile→predict → vendored graph_agent 引擎跑出 `final_result=hi_s1_s2_s3`。
+- **唯一未做的子步(系统权限 blocker,非代码)**:computer-use 截图肉眼看窗口像素 → 失败 `Screenshot capture returned nil(permission missing)`= 控制进程缺**屏幕录制**系统隐私授权(只有用户能在 System Settings 开,改系统安全设置属我禁区)。但"app 跑起来 + bundle sidecar 健康在服务 + 引擎能跑生命周期"已用**进程树 + 监听 socket + /health 200 + 隔离 config**铁证验完,不靠截图。鼠标点击窗口这一步待屏幕录制授权后可补(charter 验证主体已达成)。
+- **门禁**:build_vendor.py + lib.rs 新代码 ruff/mypy 全清,tauri lib **27 passed**;后端/前端/e2e 未触(本轮零改 app 代码),无回归面。
 
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

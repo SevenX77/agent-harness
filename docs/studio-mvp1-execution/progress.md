@@ -342,5 +342,15 @@ Stop-hook、反自造停下铁律、copilot F3/F4-echo/F7、trace F5/F2、input 
 - **顺手修的真 UX bug**:报错原来显示 "[object Object]"(`errorMessage` 不处理 Tauri 的纯对象拒绝)→ 改成提取 `.message`/JSON,报错可读。
 - **登记**:① F2 逻辑 + 浏览器/HTTP 路径已单测;`.app` 原生写对 opened-folder workspace 可用(正确 pattern),default-workspace 技能受 native-fs 限制阻塞 = 桶B 专门轮。② commit `e88a4881`(F2)+ `e0665e06`(workspaceRoot + errorMessage 修)。
 
+### 🎯 copilot GUI init 超时 修复 → copilot 在真 .app 里全跑通(2026-06-14)
+> 接着啃 copilot GUI 的 "Control request timeout: initialize"。逐层核到真根因并修,copilot 现在真 .app 里**真出回复**。
+
+- **真根因(逐层核实,非猜)**:copilot 的 ws 路由调 `stream_query` **没传 workspace_dir** → `stream_query` 退回 `Path.cwd()` = **sidecar 的 CWD = repo 里的 backend 目录**。claude CLI 在 repo 目录里 init → SDK `initialize` 发现并尝试启动 **repo 的 MCP server / 项目 settings** → 卡住到 60s 超时(SDK 注释明说 initialize 会等 MCP server)。
+  - **复现确证**:直接驱动器传干净 skill 目录 → init 秒过、真答出来;把驱动器 cwd 指到 backend 目录 → **复现 hang**(跑 >2min 不出)。差异就是 cwd。
+- **修复 ✅**(commit `74b797e6`):加 `_resolve_copilot_workspace_dir(skill_id)` —— 把 CLI 的 cwd 解析成**技能的 workspace 目录**(STUDIO_CONFIG_DIR 下、干净无 repo 配置),**绝不退回进程 CWD**。顺带修正一个正确性 bug:copilot 的 Read/grep 工具现在在技能 workspace 里跑(之前在 sidecar/repo 目录)。2 单测(返回 skill 目录 / 兜底 skills root 而非 cwd)。
+- **真 .app 鼠标验证 ✅**:把修复的 copilot.py 热补进已构建 bundle(源已 commit,clean rebuild 可复现),重启 .app → 鼠标问 copilot "step1 做什么" → **状态 success + 真答:「step1 把输入 payload 末尾拼 _s1 写到 step1 输出字段」**(准确,说明它真读了技能文件);**全 F-units 渲染**:Thought(F1 思考折叠)、Running/Ran(F1 工具折叠语义动词)、Exploring/Explored(ripgrep 折叠)、本轮注入 view=Edit(F4 上下文回显)。**copilot 在真 .app 里端到端可用 = 达成。**
+- **门禁**:后端 pytest **517**/1 skip(+2 resolver 测试),copilot.py mypy/ruff 干净,无回归。
+- **copilot 状态总结**:route-config 配好(Claude→第三方)✅ · silent-failure 修(报错可见)✅ · **init 超时修(cwd)→ 真出回复 ✅**。剩:① model/role 选择器(切 Claude/deepseek 第三方)= 前端 F-unit;② 你真 llm_roles.yaml 的 route_id 连字符格式需修(数据);③ deepseek copilot 只能走 anthropic-compatible 第三方(官网 openai 协议不兼容 CLI)。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

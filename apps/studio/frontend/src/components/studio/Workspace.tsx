@@ -15,6 +15,7 @@ import { WelcomePage } from "@/components/welcome/WelcomePage"
 import { compileSkill, getSkillDetail, resolveRunInput, serializeSkillGraph, writeSkillFile, wsUrl, postPredictRun, startRun, resumeRun } from "@/api/client"
 import { isTauriRuntime } from "@/config/runtime"
 import { writeWorkspaceFile } from "@/lib/tauri"
+import { errorMessage } from "@/utils/errors"
 import type { CompileError } from "@/api/types"
 import { connectPhaseRefs, createPhaseDraft, disconnectPhaseRefs, type NewPhaseKind } from "@/components/GraphCanvas/canvas-authoring"
 import { sha256Hex } from "@/lib/hash"
@@ -601,7 +602,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       setRunId(result.run_id)
       toast.success("Run resumed from checkpoint")
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to resume run")
+      // Surface the backend's typed reason (e.g. RESUME_CHECKPOINT_NOT_FOUND for
+      // a run that already finished) instead of the raw "status code 404".
+      toast.error(`Resume failed: ${errorMessage(error)}`)
     } finally {
       setResumeLoading(false)
     }

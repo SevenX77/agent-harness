@@ -56,6 +56,22 @@ fn get_sidecar_stderr(state: tauri::State<'_, SidecarAppState>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Resolve the sidecar config dir, honoring an explicit `STUDIO_CONFIG_DIR`
+/// override (the same contract the backend and e2e harness use) so the app can
+/// run against an isolated config dir for verification without touching the
+/// user's real `~/Library/Application Support/AgentStudio` store. Unset -> the
+/// platform default, i.e. unchanged behavior for end users.
+fn config_dir_from_override(override_value: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    override_value
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+}
+
+fn resolve_config_dir() -> PathBuf {
+    config_dir_from_override(std::env::var_os("STUDIO_CONFIG_DIR"))
+        .unwrap_or_else(sidecar::default_user_config_dir)
+}
+
 fn existing_path(path: &str) -> Result<PathBuf, String> {
     let target = path.trim();
     if target.is_empty() {
@@ -335,7 +351,7 @@ pub fn run() {
                     .unwrap_or_else(|_| sidecar::default_tauri_dir());
                 let resource_root = sidecar::resource_root_for_runtime(resolved_resource_root);
                 let config = sidecar::SidecarLaunchConfig::from_resource_root(resource_root)
-                    .with_config_dir(sidecar::default_user_config_dir());
+                    .with_config_dir(resolve_config_dir());
                 match sidecar::SidecarManager::start(config) {
                     Ok(manager) => app.manage(SidecarAppState {
                         manager: Mutex::new(Some(manager)),
@@ -405,6 +421,18 @@ mod tests {
     fn picker_starting_directory_ignores_empty_default() {
         assert!(picker_starting_directory(Some("  ".to_string())).is_none());
         assert!(picker_starting_directory(None).is_none());
+    }
+
+    #[test]
+    fn config_dir_override_honors_non_empty_value() {
+        let resolved = config_dir_from_override(Some("/tmp/studio-iso".into()));
+        assert_eq!(resolved.as_deref(), Some(std::path::Path::new("/tmp/studio-iso")));
+    }
+
+    #[test]
+    fn config_dir_override_ignores_empty_and_absent() {
+        assert!(config_dir_from_override(Some("".into())).is_none());
+        assert!(config_dir_from_override(None).is_none());
     }
 
     #[test]

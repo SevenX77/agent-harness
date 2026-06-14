@@ -251,5 +251,17 @@ Stop-hook、反自造停下铁律、copilot F3/F4-echo/F7、trace F5/F2、input 
 - **门禁**:build_vendor.py 新代码 ruff + mypy 全清。`vendor/` 重活全 gitignore(含我新写的 requirements.lock.txt/thirdparty.txt)。
 - **登记(诚实)**:① requirements.txt 现已不是 vendor 真理来源(build_vendor 走 uv export),它仍被 sync_resources 拷进 bundle 仅作参考、运行时无人读;留作后续 reconcile(改 sync_resources 不拷 / 或重生成快照),非阻塞。② claude-agent-sdk 的 python 包已 vendored(import 通),但 copilot 真跑还需它自带的 Node CLI 一并打进 .app = copilot-in-.app 的后续(核心生命周期 compile/predict/run 逻辑技能不需要它)。③ 下一步:`cargo tauri build`(release 编译 + .app bundle + 签名)或 `cargo tauri dev` 起真原生窗口 + computer-use 驱动全生命周期(cargo-tauri 已装;config 隔离方案:跑 built app 时覆盖 HOME / 或 lib.rs 加 debug-only STUDIO_CONFIG_DIR override)。
 
+### .app 后端 + 引擎全链路真跑验证(2026-06-14 续)
+> 修完打包管线后,真跑验证 .app 的后端栈端到端可用——不是"能 import"而是"引擎能跑出正确结果"。
+
+- **真跑生命周期(隔离 config,0 污染)**:用**被打包的那个 python3.12 + vendor/site-packages + 打包的 backend 副本**(= .app sidecar 的精确栈),经 Starlette TestClient 驱动 compile→predict(predict 是同步、进程内、真跑引擎,不 spawn worker):
+  - compile → 200;predict → 200。
+  - **vendored graph_agent 引擎真跑出 3 阶段图**:`payload "hi"` → step1 `hi_s1` → step2 `hi_s1_s2` → step3 `final_result=hi_s1_s2_s3` ✅,真写 trace.jsonl + metrics + 时间戳。
+  - 隔离在 `/private/tmp/studio-vendor-verify`,**用户真 AgentStudio 库 0 污染**。
+  - 真跑顺手核出 predict 契约:`mock_llm` 不是 bool 开关,是 mock 数据(dict/path/GoldenCase 列表);逻辑技能省略即可。
+- **结论**:.app 后端从"残缺起不来"→"完整栈端到端跑通真生命周期"。新增/有风险的组件(vendored 3.12 + 原生轮子 ABI + 本地引擎包 + 引擎图执行)全部真跑验证过;UI 壳层 against 同一份后端代码已由 Playwright e2e 覆盖。
+- **lib.rs config 隔离 override ✅**(为 computer-use 验收铺路,可单测):desktop 壳原本把 sidecar config 写死成 `default_user_config_dir()`(用户真 `~/Library/Application Support/AgentStudio`)。加 `resolve_config_dir()`——尊重显式 `STUDIO_CONFIG_DIR`(与后端/e2e 同一契约),让 app 能跑隔离 config 验收而不碰用户真库;未设=平台默认(终端用户行为不变)。纯 helper `config_dir_from_override` + 2 单测;tauri lib **27 passed**。
+- **剩余到真 headline 的最后一段**:`cargo tauri dev`/`cargo tauri build` 起真原生窗口 + computer-use 鼠标驱动(cargo-tauri 已装;vendored runtime + 隔离 config 已就绪;隔离 e2e-fast 技能已种在 verify workspace)。这是把已验证的后端栈套上已验证的 UI 壳,在真原生 .app 上鼠标跑一遍。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

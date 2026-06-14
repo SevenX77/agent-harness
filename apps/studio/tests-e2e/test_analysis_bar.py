@@ -78,3 +78,9 @@ def test_analysis_bar_writes_golden_after_run(
                 break
         time.sleep(0.25)
     assert new_golden, f"no golden baseline written under {golden_dir}"
+
+    # F5 (input region): the written golden now appears in the I/O panel's Golden
+    # section (golden 摘要入口归 I/O).
+    page.get_by_role("button", name="Input", exact=True).click()
+    expect(page.get_by_text("No golden baselines yet.")).to_have_count(0, timeout=10_000)
+    logger.info("golden baseline visible in the I/O panel Golden section")

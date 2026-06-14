@@ -512,6 +512,39 @@ def test_stream_query_surfaces_resource_terminal_error_as_copilot_error(
     assert "无可用 route" in events[0].message
 
 
+def test_resolve_copilot_workspace_dir_uses_skill_dir_not_process_cwd(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # The copilot CLI cwd must be the skill workspace dir, never the process CWD
+    # (in the packaged app that is the backend dir inside the repo, which makes
+    # the SDK initialize load the repo's MCP/settings and hang).
+    from app.core import config
+
+    skills_root = tmp_path / "workspaces" / "default" / "skills"
+    skill_dir = skills_root / "demo"
+    skill_dir.mkdir(parents=True)
+    monkeypatch.setattr(config, "default_workspace_skills_dir", lambda: skills_root)
+
+    assert copilot_service._resolve_copilot_workspace_dir("demo") == skill_dir
+
+
+def test_resolve_copilot_workspace_dir_falls_back_to_skills_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from app.core import config
+
+    skills_root = tmp_path / "skills"
+    monkeypatch.setattr(config, "default_workspace_skills_dir", lambda: skills_root)
+
+    resolved = copilot_service._resolve_copilot_workspace_dir("missing-skill")
+
+    assert resolved == skills_root
+    assert resolved.is_dir()
+    assert resolved != Path.cwd()
+
+
 async def _events(*items: object) -> AsyncIterator[object]:
     for item in items:
         yield item

@@ -281,6 +281,25 @@ def _context_resolved_event(skill_id: str) -> CopilotEventContextResolved:
     return CopilotEventContextResolved(summary=summary, detail="\n".join(detail_lines))
 
 
+def _resolve_copilot_workspace_dir(skill_id: str) -> Path:
+    """Resolve the copilot CLI's cwd to the skill's workspace dir.
+
+    Never falls back to the process CWD: in the packaged app the sidecar's CWD is
+    the backend dir *inside the agent-harness repo*, so running the claude CLI
+    there makes its `initialize` discover and try to start the repo's MCP servers
+    / project settings — which hangs init until the SDK's control-request timeout.
+    The skill workspace dir (under STUDIO_CONFIG_DIR) is clean of that config.
+    """
+    from app.core import config
+
+    skills_root = config.default_workspace_skills_dir()
+    skill_dir = skills_root / skill_id
+    if skill_dir.is_dir():
+        return skill_dir
+    skills_root.mkdir(parents=True, exist_ok=True)
+    return skills_root
+
+
 async def stream_query(
     skill_id: str,
     user_message: str,
@@ -350,7 +369,7 @@ async def stream_query(
                 base_url=base_url,
                 api_key=api_key,
                 env_overrides=env_overrides,
-                workspace_dir=workspace_dir or Path.cwd(),
+                workspace_dir=workspace_dir or _resolve_copilot_workspace_dir(skill_id),
             )
             await _ensure_client_connected(client)
             await client.query(_prompt_with_system_context(skill_id, user_message))

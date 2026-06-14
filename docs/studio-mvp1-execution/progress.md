@@ -199,6 +199,14 @@ PM 要求建一个 hook,在我停下来时检查最终目标是否完成。已�
 - **门禁(累计)**:后端 pytest **513**/1 skip、前端 vitest **442**、e2e **11 passed/2 skip**、tsc/eslint/mypy/ruff clean(llm.py 1 预存 mypy 错已 flag)。
 - **copilot-assist 单元状态**:F1✅ COPILOT_ASSIST-4✅ F3✅ F4(context echo✅/@mention 待)F7✅;剩 F2(多 session 持久化,依赖 Rust)、F5(安全写,依赖 Rust checkpoint+PoC)、F4 @mention(tiptap)、F6(建技能向导=graph skill)、F8(下钻无缝)。
 
+### 连续推进:trace + input 单元(2026-06-14 续 · "不要停"后)
+- **trace F5 Prompt Inspector ✅**(commit `925efe2d`):`PromptInspector` 组件早建好但孤儿(onSelectTracePrompt no-op)。接线:点 trace 节点的 prompt → Workspace 存 index → Inspector 显示该事件 template_source/variables/resolved_prompt。纯孤儿挂载(tsc + 既有单测);click→open e2e 需 LLM-skill trace(e2e-fast 无 prompt),已 flag。
+- **trace F2 历史 run trace ✅**(commit `1beb406c`):timeline run 卡片看着可点其实没反应(可见 bug)。改:点 → `getRunDetail`(GET /runs/{id} 本就返 events)→ 该 run 的 trace 就地渲染(TracePanel)+ 返回按钮。无后端改。**e2e**:run→Home→reopen→Trace Timeline→点 run→其 trace 加载→返回(robust 断言用 log region,空/非空 trace 都过)。
+- **input F5 golden 摘要入 I/O ✅**(commit `6cf3a0cc`):I/O 面板新增 Golden 区列出 golden baselines(id/linked-input/locked/age)。复用 listGoldenBaselines 无后端改。**e2e**:分析 bar 写 golden 后,I/O 面板 Golden 区显示它(非空)。golden 开编辑需 golden-content-read 端点 = flag follow-on。
+- **门禁(累计)**:后端 pytest **513**/1 skip、前端 vitest **442**、e2e **12 passed/2 skip**、tsc/eslint/mypy/ruff clean(llm.py 1 预存 mypy 错已 flag)。
+- **本轮(断点续 + "不要停")已交付 8 个 increment**:Stop-hook、反自造停下铁律、copilot F3、F4 上下文回显、F7 分析 bar、trace F5、trace F2、input F5。
+- **剩余单元的真实卡点(均需决策/新端点/硬依赖,非可直接撸)**:F6 batch(单选 vs 批量 UX 决策 + 重复列表)、input F2 schema 写回(覆盖 skill io 决策 + 写端点)、F5 golden 编辑(golden-content-read 端点)、copilot F2 多 session(Rust)/F5 安全写(Rust+PoC)/F4 @mention(tiptap)/F6 向导(graph skill)/F8 下钻(需子图下钻)、resume(DEF-005 + e2e 难)、engine 侧(per-node golden 扁平 / edge 黑板 = engine scope)、真 headline(.app build_vendor)。
+
 ### 本会话产出汇总(2026-06-14 续 · 断点续跑)
 8 个 commit:`19d39444`(F1 ThinkingBlock 流式)→`0e9995e5`(test_inputs CRUD 后端)→`4e5d79ca`(doc)→`dbe21c02`(io-panel test-input UI+e2e)→`f07b38f8`(F4-A GET content)→`d6db0bd7`(F4-B predict/run 用选中输入+e2e)→`b17b1bf4`(doc)→`d0673aff`(F1 tool call 折叠)。**门禁全绿真跑**:后端 pytest **497**、前端 vitest **438** + tsc + eslint clean、e2e **10 passed/2 skip**、mypy/ruff clean。api/llm.ts 及 KEEP-MAIN 零改动,never touched main。
 **完成的设计单元**:copilot-assist F1(thinking + tool call 全量折叠流式,真闭环)、input 区 INPUT-3(test input CRUD + UI)、input 区 F4(predict/run 消费选中输入)。

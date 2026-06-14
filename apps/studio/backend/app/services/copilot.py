@@ -36,6 +36,7 @@ from claude_agent_sdk.types import (
     ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
+    UserMessage,
 )
 from pydantic import SecretStr
 
@@ -462,6 +463,11 @@ def _prompt_with_system_context(skill_id: str, user_message: str) -> str:
 def _translate_sdk_message(message: object, tool_names: dict[str, str]) -> list[CopilotEvent]:
     if isinstance(message, AssistantMessage):
         return _translate_assistant_message(message, tool_names)
+    if isinstance(message, UserMessage):
+        # The SDK delivers tool RESULTS in UserMessage blocks, not AssistantMessage
+        # — without this they'd be silently dropped (copilot would show "Reading…"
+        # but never the result), violating F1 "不省略".
+        return _translate_user_message(message, tool_names)
     if isinstance(message, ResultMessage):
         if message.is_error:
             details = "; ".join(message.errors or [])
@@ -469,6 +475,35 @@ def _translate_sdk_message(message: object, tool_names: dict[str, str]) -> list[
             return [CopilotEventError(message=f"SDK 返回错误{suffix}")]
         return [CopilotEventDone()]
     return []
+
+
+def _translate_user_message(
+    message: UserMessage, tool_names: dict[str, str]
+) -> list[CopilotEvent]:
+    content = message.content
+    if not isinstance(content, list):
+        return []
+    events: list[CopilotEvent] = []
+    for block in content:
+        if isinstance(block, ToolResultBlock):
+            events.extend(_tool_result_events(block, tool_names))
+    return events
+
+
+def _tool_result_events(
+    block: ToolResultBlock, tool_names: dict[str, str]
+) -> list[CopilotEvent]:
+    tool_name = tool_names.get(block.tool_use_id, block.tool_use_id)
+    result_summary = _tool_result_summary(block.content)
+    if block.is_error:
+        return [CopilotEventError(message=f"工具 {tool_name} 失败: {result_summary}")]
+    return [
+        CopilotEventToolUseResult(
+            tool_name=tool_name,
+            success=True,
+            result_summary=result_summary,
+        )
+    ]
 
 
 def _translate_assistant_message(
@@ -496,18 +531,7 @@ def _translate_assistant_message(
                 )
             )
         elif isinstance(block, ToolResultBlock):
-            tool_name = tool_names.get(block.tool_use_id, block.tool_use_id)
-            result_summary = _tool_result_summary(block.content)
-            if block.is_error:
-                events.append(CopilotEventError(message=f"工具 {tool_name} 失败: {result_summary}"))
-            else:
-                events.append(
-                    CopilotEventToolUseResult(
-                        tool_name=tool_name,
-                        success=True,
-                        result_summary=result_summary,
-                    )
-                )
+            events.extend(_tool_result_events(block, tool_names))
     return events
 
 
@@ -675,17 +699,22 @@ async def _drive_sdk_test(
 ) -> RouteSdkTestResult:
     tool_names: dict[str, str] = {}
     answer: list[str] = []
+    errors: list[str] = []
     await _ensure_client_connected(client)
     await client.query(_SDK_TEST_PROMPT)
     async for message in client.receive_response():
         for event in _translate_sdk_message(message, tool_names):
             if isinstance(event, CopilotEventError):
-                logger.warning("phase=sdk_test route=%s sdk error: %s", route_id, event.message)
-                return RouteSdkTestResult(route_id, "failed", event.message)
-            if isinstance(event, CopilotEventText):
+                # Don't short-circuit: a mid-run tool error the model recovers
+                # from shouldn't fail the test — the echoed token is the verdict.
+                errors.append(event.message)
+            elif isinstance(event, CopilotEventText):
                 answer.append(event.content)
     if token in "".join(answer):
         return RouteSdkTestResult(route_id, "ok", None)
+    if errors:
+        logger.warning("phase=sdk_test route=%s errors: %s", route_id, errors[-1])
+        return RouteSdkTestResult(route_id, "failed", errors[-1])
     return RouteSdkTestResult(
         route_id, "failed", "模型未真实读取文件 (token 未回显), tool loop 未验证"
     )

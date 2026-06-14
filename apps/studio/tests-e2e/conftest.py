@@ -11,6 +11,7 @@ Port plan (matches design.md §4 defaults):
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
@@ -223,8 +224,21 @@ def studio_workspace(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[
     workspaces_dir = base / "workspaces"
     workspace_skills_dir = workspaces_dir / "default" / "skills"
     _seed_skill_files(workspace_skills_dir)
-    logger.info("seeded e2e workspace skills_dir=%s", workspace_skills_dir)
-    yield {"skills_dir": skills_dir, "workspaces_dir": workspaces_dir, "base": base}
+    # Isolated app-settings + LLM credentials dir (charter §4: e2e must never read
+    # or mutate the user's real ~/Library/Application Support/AgentStudio库).
+    config_dir = base / "config"
+    (config_dir / "llm").mkdir(parents=True)
+    (config_dir / "app_settings.json").write_text(
+        json.dumps({"user_id": "e2e-user", "gitea_host": "", "default_skills_directory": ""}),
+        encoding="utf-8",
+    )
+    logger.info("seeded e2e workspace skills_dir=%s config_dir=%s", workspace_skills_dir, config_dir)
+    yield {
+        "skills_dir": skills_dir,
+        "workspaces_dir": workspaces_dir,
+        "config_dir": config_dir,
+        "base": base,
+    }
 
 
 @pytest.fixture(scope="session")
@@ -236,12 +250,16 @@ def studio_servers(studio_workspace: dict[str, Path]) -> Iterator[dict[str, str]
 
     venv_python = REPO_ROOT / ".venv" / "bin" / "python"
     backend_runner = Path(__file__).parent / "_backend_runner.py"
+    config_dir = studio_workspace["config_dir"]
     backend_env = {
         **os.environ,
         "STUDIO_TEST_SKILLS_DIR": str(studio_workspace["skills_dir"]),
         "STUDIO_TEST_WORKSPACES_DIR": str(studio_workspace["workspaces_dir"]),
         "STUDIO_TEST_PORT": str(BACKEND_PORT),
         "STUDIO_DEV_TUNNEL_TOKEN": E2E_TUNNEL_TOKEN,
+        # Isolate app settings + LLM credentials from the user's real库 (charter §4).
+        "STUDIO_CONFIG_DIR": str(config_dir),
+        "STUDIO_LLM_CREDENTIALS_PATH": str(config_dir / "llm" / "llm_credentials.json"),
         "PYTHONPATH": os.pathsep.join(
             [str(STUDIO_BACKEND), str(SRC_CORE), os.environ.get("PYTHONPATH", "")],
         ),

@@ -86,7 +86,7 @@ export function InputPanel({
 
   return (
     <div className="flex h-full flex-col bg-background">
-      <PanelHeader title="Input" />
+      <PanelHeader title="I/O" />
 
       <ScrollArea className="flex-1">
         <div className="space-y-3 px-2 py-2 text-xs">

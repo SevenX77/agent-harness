@@ -759,6 +759,24 @@ def test_cors_allows_vite_and_backup_dev_origins(client: TestClient) -> None:
         assert response.headers["access-control-allow-origin"] == origin
 
 
+def test_cors_allows_packaged_tauri_webview_origins(client: TestClient) -> None:
+    # The packaged desktop .app serves its frontend from the Tauri custom
+    # protocol origin (tauri://localhost on macOS/Linux, http://tauri.localhost
+    # on Windows). Without these in the allow-list the bundled UI cannot make any
+    # HTTP API call (it can only open the WebSocket, which is not CORS-gated),
+    # which surfaces as a permanent "Could not load skills".
+    for origin in ("tauri://localhost", "http://tauri.localhost"):
+        response = client.options(
+            "/api/skills",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == origin
+
+
 class InlineProcess:
     def __init__(self, *, target: Any, args: tuple[Any, ...]) -> None:
         self._target = target

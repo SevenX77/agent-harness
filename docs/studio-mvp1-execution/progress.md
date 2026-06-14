@@ -279,5 +279,21 @@ Stop-hook、反自造停下铁律、copilot F3/F4-echo/F7、trace F5/F2、input 
 - **唯一未做的子步(系统权限 blocker,非代码)**:computer-use 截图肉眼看窗口像素 → 失败 `Screenshot capture returned nil(permission missing)`= 控制进程缺**屏幕录制**系统隐私授权(只有用户能在 System Settings 开,改系统安全设置属我禁区)。但"app 跑起来 + bundle sidecar 健康在服务 + 引擎能跑生命周期"已用**进程树 + 监听 socket + /health 200 + 隔离 config**铁证验完,不靠截图。鼠标点击窗口这一步待屏幕录制授权后可补(charter 验证主体已达成)。
 - **门禁**:build_vendor.py + lib.rs 新代码 ruff/mypy 全清,tauri lib **27 passed**;后端/前端/e2e 未触(本轮零改 app 代码),无回归面。
 
+### 🎯 真 .app computer-use 鼠标驱动全生命周期 + 逼出并修 CORS ship-blocker(2026-06-14)
+> PM 追问"还有什么授权没开""还是截不了图"——纠正了我两个错误判断,并最终用鼠标在真 .app 上跑通全生命周期。
+
+- **纠错 1(我自造的"截图 blocker")**:上轮我把 computer-use 截图返回 nil 误判成"缺屏幕录制系统授权"。**错**——截图正常工作(MCP 连接当时瞬断,resume 后恢复)。后续多张截图都成功。教训:又一次没核实就甩 blocker。
+- **纠错 2(两实例混淆)**:我先 bare-binary 启 app,又 `open_application` 把 bundle 又拉起一个实例(走 launchd 没继承我的 `STUDIO_CONFIG_DIR` → 用了用户真 config)。清理后改用 `launchctl setenv STUDIO_CONFIG_DIR + open -n` 单实例隔离启动(UI 显示 "Default: /tmp/studio-app-verify/Skills" 确认隔离生效)。
+- **🐛 真 ship-blocker 逼出(只有真 app 鼠标驱动能暴露)**:真 .app 启动后渲染正常,但 home 页红字 "Could not load skills"。逐步排查(非猜):后端 `/api/skills`=200 没问题 / 前端拿到了正确 sidecar 动态端口(WebSocket 已连)/ 但 `curl -H "Origin: tauri://localhost" /api/skills` 返回 **200 但无 `Access-Control-Allow-Origin` 头** → WebKit 把所有 HTTP 响应拦了。根因:后端 CORS 白名单(`app/core/config.py` 的 `CORS_ORIGINS`)只有 `localhost/127.0.0.1` 开发端口,**漏了打包 webview 的 origin `tauri://localhost`**;WebSocket 不走 CORS 所以能连(正是迷惑现象的来源)。**= 打包 .app 的前端根本无法 HTTP 调后端 = MVP1 上线级 bug,dev 模式被 Vite 代理掩盖,只有真 app 能暴露。**
+- **修复 ✅**:`CORS_ORIGINS` 加 `tauri://localhost`(macOS/Linux)+ `http://tauri.localhost`(Windows);加回归测试 `test_cors_allows_packaged_tauri_webview_origins`(OPTIONS 预检断言返 ACAO)。
+- **真 .app 鼠标驱动全生命周期跑通 ✅(隔离 config,0 污染)**:重建 .app 后 `launchctl + open -n` 隔离启动,computer-use 鼠标:
+  - home 页技能列表**正常加载**(CORS 修好,显示 adaptation_v1_sandbox / batch-analysis(5 phases)/ e2e-fast(3 phases)/ event-extraction … 全部真实技能)。
+  - 点开 e2e-fast → 图编辑器渲染(Input→step1→step2→step3→Output 的 React Flow DAG + Assets 面板 + Copilot 面板 + 动作栏)。
+  - 鼠标点 **Compile → Predict → Run**:动作栏逐步推进;Run 完成后左栏切到 **Trace Timeline 显示 110→440 事件**(run_started/input_dispatch/phase_start/phase_end×3/run_ended),三个图节点全亮绿 **Success** 徽章。
+  - **F7 分析 bar 真出现**:"运行完成 — 自动写 golden?" + 确认按钮;点**确认** → bar 消失 + golden 真落盘 `…/.workspace/golden/2026-06-14T16-09-58_1d15c140`(隔离目录)。
+  - 全程 `/tmp/studio-app-verify`,用户真 AgentStudio 0 污染;验完干净 kill。
+- **结论**:charter §3① headline(computer-use 鼠标在真 Tauri .app 上跑通完整生命周期、肉眼无 bug)**达成**——而且这一步真把一个 backend 全绿都测不出的 CORS ship-blocker 逼了出来并修掉。PM 坚持"用鼠标真跑"是对的。
+- **门禁**:后端 pytest **514 passed / 1 skip**(含新 CORS 回归测试),CORS 改动无回归。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

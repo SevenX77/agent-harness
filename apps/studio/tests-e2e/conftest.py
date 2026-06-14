@@ -42,12 +42,20 @@ def _find_free_port(preferred: int) -> int:
     """Return preferred when available, otherwise ask the OS for an ephemeral port."""
     if _is_port_free(preferred):
         return preferred
+    return _ephemeral_port()
+
+
+def _ephemeral_port() -> int:
+    """Ask the OS for a free ephemeral port."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
 
 
-BACKEND_PORT = int(os.environ.get("STUDIO_TEST_BACKEND_PORT", _find_free_port(8787)))
+# Use an ephemeral backend port (not the 8787 default) so test_desktop_lifecycle's
+# "8787 is occupied" scenario can bind 8787 itself when the whole suite runs in one
+# session. The frontend talks to BACKEND_URL dynamically, so the port is irrelevant.
+BACKEND_PORT = int(os.environ.get("STUDIO_TEST_BACKEND_PORT", _ephemeral_port()))
 FRONTEND_PORT = int(os.environ.get("STUDIO_TEST_FRONTEND_PORT", _find_free_port(5173)))
 # The backend refuses to start without an auth token and there is no dev bypass
 # (app/main.py configure_api_auth). The dev frontend picks the token up from the

@@ -12,9 +12,22 @@ import logging
 import re
 from pathlib import Path
 
+import pytest
 from playwright.sync_api import Page, expect
 
 logger = logging.getLogger("e2e.lint_flow")
+
+# STALE vs current UI/format — quarantined (honest skip, not fake-green) pending
+# re-author. The test edits a root SKILL.md and corrupts "mode: logic", but the
+# current skill format is root GRAPH.md (no root SKILL.md, no mode:logic), and
+# the explicit "Save" button + "Saved and linted" toast flow it drives no longer
+# exists (saves are debounced/auto; lint surfaces via the CompileErrorPanel). It
+# also reads the now-empty public skills_dir. Re-author the edit -> lint ->
+# error-drawer flow against the current GRAPH.md / phase-file editing.
+pytestmark = pytest.mark.skip(
+    reason="stale vs current UI/format: root SKILL.md + Save/'Saved and linted' flow removed; "
+    "re-author edit->lint against current GRAPH.md editing"
+)
 
 
 SAVE_TOAST = re.compile(r"Saved and linted", re.IGNORECASE)

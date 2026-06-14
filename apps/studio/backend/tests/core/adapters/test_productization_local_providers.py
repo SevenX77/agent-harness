@@ -110,6 +110,31 @@ def test_runtime_state_store_fencing_token_stays_monotonic_after_release(tmp_pat
     assert _error_code(exc_info.value) == "state.lease_fenced"
 
 
+def test_runtime_state_store_release_is_observable_and_stale_safe(tmp_path: Path) -> None:
+    LocalRuntimeStateStore = _load_symbol(
+        "app.core.adapters.runtime_state_store_local",
+        "LocalRuntimeStateStore",
+    )
+    store = LocalRuntimeStateStore(root=tmp_path)
+    lease_path = tmp_path / "runs" / "run-x" / "lease.json"
+
+    # A stale owner must not release the lease now held by a newer fencing token.
+    stale = store.acquire_lease(run_id="run-x", owner_id="worker-a", ttl_ms=30_000)
+    current = store.acquire_lease(run_id="run-x", owner_id="worker-b", ttl_ms=30_000)
+    store.release(run_id="run-x", lease=stale)
+    assert lease_path.exists()
+
+    # A corrupt lease file is left in place, not silently removed (no bare except).
+    lease_path.write_text("{ not json", encoding="utf-8")
+    store.release(run_id="run-x", lease=current)
+    assert lease_path.exists()
+
+    # The rightful owner releases its own lease.
+    owner = store.acquire_lease(run_id="run-y", owner_id="worker-c", ttl_ms=30_000)
+    store.release(run_id="run-y", lease=owner)
+    assert not (tmp_path / "runs" / "run-y" / "lease.json").exists()
+
+
 def test_run_artifact_store_rejects_writes_after_seal(tmp_path: Path) -> None:
     LocalRunArtifactStore = _load_symbol(
         "app.core.adapters.run_artifact_store_local",

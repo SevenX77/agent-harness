@@ -68,7 +68,7 @@ describe('executePublishSkill', () => {
 
     expect(statusCalls).toEqual(['publishing', 'error'])
     expect(setError).toHaveBeenCalledWith('network failed')
-    expect(mockToast.error).toHaveBeenCalledWith(ERROR_TOAST_MESSAGE)
+    expect(mockToast.error).toHaveBeenCalledWith(ERROR_TOAST_MESSAGE, undefined)
   })
 
   it('surfaces the backend typed error message (e.g. registry not configured)', async () => {
@@ -81,6 +81,26 @@ describe('executePublishSkill', () => {
 
     expect(statusCalls).toEqual(['publishing', 'error'])
     expect(setError).toHaveBeenCalledWith('Artifact Registry Host 未配置')
-    expect(mockToast.error).toHaveBeenCalledWith('Artifact Registry Host 未配置')
+    // No onOpenSettings provided -> no Settings action.
+    expect(mockToast.error).toHaveBeenCalledWith('Artifact Registry Host 未配置', undefined)
+  })
+
+  it('offers an Open Settings shortcut for settings-fixable publish errors (design §6)', async () => {
+    mockPublishSkill.mockRejectedValue({
+      response: { data: { error_code: 'REGISTRY_NOT_CONFIGURED', message: 'Artifact Registry Host 未配置' } },
+    })
+    const onOpenSettings = vi.fn()
+    await executePublishSkill({
+      skillId: 'skill-1',
+      setStatus: vi.fn(),
+      setError: vi.fn(),
+      setLastResult: vi.fn(),
+      scheduleReset: vi.fn((callback: () => void) => callback()),
+      onOpenSettings,
+    })
+
+    expect(mockToast.error).toHaveBeenCalledWith('Artifact Registry Host 未配置', {
+      action: { label: 'Open Settings', onClick: onOpenSettings },
+    })
   })
 })

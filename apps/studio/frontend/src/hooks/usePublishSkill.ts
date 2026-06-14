@@ -19,7 +19,12 @@ interface ExecutePublishSkillOptions {
   setLastResult: (result: PublishResult | null) => void
   resetDelayMs?: number
   scheduleReset?: (callback: () => void, delayMs: number) => unknown
+  onOpenSettings?: () => void
 }
+
+// Publish preconditions that the user resolves in Settings — when these fail,
+// the error toast offers a one-click shortcut to Settings (publish design §6).
+const SETTINGS_FIXABLE_ERROR_CODES = new Set(['REGISTRY_NOT_CONFIGURED', 'APP_SETTINGS_INCOMPLETE'])
 
 const DEFAULT_RESET_DELAY_MS = 200
 export const ERROR_TOAST_MESSAGE = 'Release validation failed or the network is unavailable. The draft version is unchanged.'
@@ -44,6 +49,29 @@ function backendErrorMessage(error: unknown): string | null {
   return typeof message === 'string' && message.trim() ? message : null
 }
 
+function backendErrorCode(error: unknown): string | null {
+  if (typeof error !== 'object' || error === null || !('response' in error)) {
+    return null
+  }
+  const data = (error as { response?: { data?: unknown } }).response?.data
+  if (typeof data !== 'object' || data === null || !('error_code' in data)) {
+    return null
+  }
+  const code = (data as { error_code?: unknown }).error_code
+  return typeof code === 'string' ? code : null
+}
+
+function settingsToastOptions(
+  error: unknown,
+  onOpenSettings: (() => void) | undefined,
+): { action: { label: string; onClick: () => void } } | undefined {
+  const code = backendErrorCode(error)
+  if (!onOpenSettings || !code || !SETTINGS_FIXABLE_ERROR_CODES.has(code)) {
+    return undefined
+  }
+  return { action: { label: 'Open Settings', onClick: onOpenSettings } }
+}
+
 export async function executePublishSkill({
   skillId,
   setStatus,
@@ -51,6 +79,7 @@ export async function executePublishSkill({
   setLastResult,
   resetDelayMs = DEFAULT_RESET_DELAY_MS,
   scheduleReset = (callback, delayMs) => window.setTimeout(callback, delayMs),
+  onOpenSettings,
 }: ExecutePublishSkillOptions): Promise<PublishResult | null> {
   if (!skillId) {
     console.warn('Cannot publish without a selected skillId')
@@ -78,12 +107,15 @@ export async function executePublishSkill({
     const backendMessage = backendErrorMessage(error)
     setStatus('error')
     setError(backendMessage ?? messageFromError(error))
-    toast.error(backendMessage ?? ERROR_TOAST_MESSAGE)
+    toast.error(backendMessage ?? ERROR_TOAST_MESSAGE, settingsToastOptions(error, onOpenSettings))
     return null
   }
 }
 
-export function usePublishSkill(skillId: string | null): UsePublishSkillResult {
+export function usePublishSkill(
+  skillId: string | null,
+  onOpenSettings?: () => void,
+): UsePublishSkillResult {
   const [status, setStatus] = useState<PublishSkillStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const [lastResult, setLastResult] = useState<PublishResult | null>(null)
@@ -111,8 +143,9 @@ export function usePublishSkill(skillId: string | null): UsePublishSkillResult {
       setError,
       setLastResult,
       scheduleReset,
+      onOpenSettings,
     })
-  }, [scheduleReset, skillId])
+  }, [scheduleReset, skillId, onOpenSettings])
 
   return { status, error, lastResult, publish }
 }

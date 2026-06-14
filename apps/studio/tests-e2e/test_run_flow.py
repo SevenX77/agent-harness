@@ -207,3 +207,5 @@ def test_release_without_registry_reports_clear_typed_error(
     expect(
         page.get_by_text(re.compile("Artifact Registry Host", re.IGNORECASE)).first
     ).to_be_visible(timeout=10_000)
+    # ...with a one-click shortcut to Settings (publish design §6).
+    expect(page.get_by_role("button", name="Open Settings").first).to_be_visible(timeout=10_000)

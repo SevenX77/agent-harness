@@ -20,6 +20,7 @@ interface HeaderProps {
   onHome: () => void
   onBreadcrumbClick?: (index: number) => void
   onSyncSuccess?: (result: CollaborateResult) => void
+  onOpenSettings?: () => void
 }
 
 export function Header({
@@ -30,9 +31,10 @@ export function Header({
   onHome,
   onBreadcrumbClick,
   onSyncSuccess,
+  onOpenSettings,
 }: HeaderProps) {
   const skillSync = useSkillSync(skillId, { onSyncSuccess })
-  const publish = usePublishSkill(skillId)
+  const publish = usePublishSkill(skillId, onOpenSettings)
   const isSaving = skillSync.status === "saving"
   const isSyncing = skillSync.status === "syncing"
   const isSubmitting = skillSync.status === "submitting"

@@ -1,9 +1,11 @@
 import { useMemo, useState, type DragEvent } from "react"
-import { Upload } from "lucide-react"
+import { Save, Upload } from "lucide-react"
+import { writeSkillFile } from "@/api/client"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Textarea } from "@/components/ui/textarea"
 import type { SkillDetail } from "@/api/types"
-import { inferJsonSchemaFromText } from "@/lib/schema-infer"
+import { applyInputSchemaToGraph, inferJsonSchemaFromText } from "@/lib/schema-infer"
+import { errorMessage } from "@/utils/errors"
 import type { FileMeta } from "../file-types"
 import { FileRow } from "./_shared/FileRow"
 import { PanelHeader } from "./_shared/PanelHeader"
@@ -20,8 +22,18 @@ interface InputPanelProps {
   onSelectTestInput?: (id: string | null) => void
 }
 
-function SchemaInferPanel({ initialJson }: { initialJson: string }) {
+interface SchemaInferPanelProps {
+  initialJson: string
+  skillId: string
+  graphMd?: string
+  onSaved?: () => void
+}
+
+function SchemaInferPanel({ initialJson, skillId, graphMd, onSaved }: SchemaInferPanelProps) {
   const [draft, setDraft] = useState(initialJson)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
   const result = useMemo(() => {
     try {
       return { schema: inferJsonSchemaFromText(draft), error: null as string | null }
@@ -29,6 +41,28 @@ function SchemaInferPanel({ initialJson }: { initialJson: string }) {
       return { schema: null, error: error instanceof Error ? error.message : "Invalid JSON" }
     }
   }, [draft])
+
+  // F2: persist the inferred schema into GRAPH.md's io.inputs (the engine's
+  // input contract). The design says inference can be saved; GRAPH.md is git-
+  // tracked so this is reversible.
+  const handleSave = async () => {
+    if (!result.schema || !graphMd) {
+      return
+    }
+    setSaving(true)
+    setSaveError(null)
+    setSaved(false)
+    try {
+      const next = applyInputSchemaToGraph(graphMd, result.schema)
+      await writeSkillFile(skillId, "GRAPH.md", next)
+      setSaved(true)
+      onSaved?.()
+    } catch (error) {
+      setSaveError(errorMessage(error))
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const handleDrop = async (event: DragEvent<HTMLTextAreaElement>) => {
     event.preventDefault()
@@ -69,6 +103,26 @@ function SchemaInferPanel({ initialJson }: { initialJson: string }) {
             {JSON.stringify(result.schema, null, 2)}
           </pre>
         )}
+        <button
+          type="button"
+          onClick={() => void handleSave()}
+          disabled={saving || !result.schema || !graphMd}
+          aria-label="Save inferred schema as input contract"
+          className="flex items-center gap-1 rounded-md bg-foreground px-2 py-1 text-xs font-medium text-background transition-opacity hover:opacity-80 disabled:opacity-50"
+        >
+          <Save className="size-3.5" />
+          {saving ? "Saving…" : "Save as input schema"}
+        </button>
+        {saveError ? (
+          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">
+            {saveError}
+          </div>
+        ) : null}
+        {saved && !saveError ? (
+          <div className="px-1 text-[11px] text-muted-foreground">
+            Saved to GRAPH.md io.inputs.
+          </div>
+        ) : null}
       </div>
     </section>
   )
@@ -103,7 +157,11 @@ export function InputPanel({
 
           <SectionHeading label="Schema" />
           <FileRow file={files[0]} onOpen={onFileOpen} />
-          <SchemaInferPanel initialJson={sample} />
+          <SchemaInferPanel
+            initialJson={sample}
+            skillId={skillId}
+            graphMd={skillDetail?.files?.["GRAPH.md"]}
+          />
         </div>
       </ScrollArea>
     </div>

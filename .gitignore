@@ -26,6 +26,8 @@ apps/studio/frontend/src/lib/*
 !apps/studio/frontend/src/lib/llm-error-messages.ts
 !apps/studio/frontend/src/lib/llm-error-messages.test.ts
 !apps/studio/frontend/src/lib/tauri.test.ts
+!apps/studio/frontend/src/lib/schema-infer.ts
+!apps/studio/frontend/src/lib/schema-infer.test.ts
 lib64/
 parts/
 sdist/

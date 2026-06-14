@@ -50,5 +50,41 @@
 
 > **⚠️ 下一轮第一步:先逐项核对桶 B 真实状态再动手**。#139 比 2026-06-06 握手审计完整得多——已确认**已做**的别重复造:P0#1 skill 路径、**resume(完整 resume_skill 接线,非 501)**、run/predict/publish/golden 真后端、copilot fallback 委派 gateway。核完直接打**真·缺口**:6 态收敛(配 Phase 1)→ copilot 安全写(acceptEdits→patch_proposed)/dispatch/@mention/冷启动 → Rust native-fs(D10/D12)+RuntimeGate → TracePanel 挂载核实 → per-node golden 薄接 → llm_* 下沉。核对方式:对每项读 #139 现有代码(file:line)确认是否已实现,只对真未实现的开工。
 
+## Phase 3 桶 B 真实状态核对结果(2026-06-13 续 · 8-verifier sweep + Claude 独立复核)
+
+> 方法:8 个 verifier 子 agent 各读 #139 真代码 + FROZEN 设计端到端 trace;Claude 独立复核 resume 链 / runtime_state_store / RuntimeGate / 设计文档。`DESIGN_UNITS_INDEX.md` 的 22 单元 drift 标记冻结于 2026-06-05(#139 之前),多已过时,以本核对为当前真理。
+
+| 项 | 状态 | 当前真理(file:line) |
+|---|---|---|
+| ② resume(D10 节点级续跑) | **核心已做** | `runs.py:75`→`EngineAdapter.resume`(engine.py:475)→`resume_skill`(runner.py:451)→SqliteSaver checkpoint→`graph.invoke(None)` 真续跑;有 e2e round-trip(`test_ws_e7_golden_resume.py`)。**缺口**:前端零 resume UI;D10 lease/fencing 未接入 resume 路径(engine 活)。`/engine/resume` http_loopback 路由是死码(live 走 in_process) |
+| ③ 6 态收敛(D6) | **真缺口·最大耦合** | gateway 包 canonical = `state_projection.py:13` `['ready,historical_ready,untested,failed,cooling_down,off]`;Studio adapter `gateway.py:66` 仍 needs_setup 且 l332-395 **自己重算不委派 gateway 包**(违 D6);`routers/llm.py:1534` status_summary 硬编码 needs_setup;前端 `api/llm.ts:12` 缺 historical_ready+failed;FROZEN `00_settings-ux-spec.md:106,114` 明令取消 needs_setup→failed+missing_config。修法:adapter 委派 gateway 包 + 前端枚举翻转(注:historical_ready 需 draft_history 信号,probe-worker 是桩) |
+| ④ golden per-node(D7) | **逻辑在·真跑断** | studio `golden_headless._compare_node_outputs` 有 per-node 逻辑,但 `_node_outputs()` 找 top-level `'phases'`,真 run 写 BusinessData(`phase_outputs`)→真跑退化 run-level 单节点;前端 `DiffView` 不读 node_results 且孤儿、route mismatch。engine `evaluate_golden_baseline` 是 per-case 跑技能,**故意不在 studio 路径**(D7),勿绕它重建 |
+| ⑤ D10 RuntimeStateStore | **部分** | LocalRuntimeStateStore snapshot 期 fencing + 单调 token 真有效;但**未接入 resume**(resume 用 LangGraph checkpointer 绕过它)、签名与 engine SPI(`storage_contracts.py:92`)不兼容、缺 lease 抢占(engine 参考会 raise LeaseConflictError)、TTL 空摆设、`release()` l140 裸 except |
+| ⑥ Rust native-fs(D12) | **缺口·large** | 无 native_fs.rs;`lib.rs:308` invoke_handler 只注册 reveal/open/sidecar,**无 write_workspace_file 等 5 命令**;前端 `tauri.ts:90-151` 已 invoke 它们→真桌面构建写路径悬空;今天只靠 Python `skills.py:399 update_skill_file`(target.write_text + sha256 `_graph_content_hash` l1171);publish=Python zip;RuntimeGate 全屏阻塞(违 D10) |
+| ⑦ copilot 安全写/@mention/冷启动 | **缺口·large** | `copilot.py:140` 仍 acceptEdits 直写、无 PreToolUse/checkpoint/reject、无 patch 事件(测试 l182/192 还 pin acceptEdits);@mention 纯空壳 textarea(`copilot-panel.tsx:201`);session 只写不读回(`copilotStore.ts` 写 .gemini/copilot/sessions,但无 readWorkspaceFile)→重启丢。**依赖 ⑥ Rust writer**(checkpoint/restore+readWorkspaceFile)。dispatch 501=设计延期✓ |
+| ⑧ TracePanel 挂载 | **部分·small wire** | TracePanel 全建好但**零 importer 孤儿**;"Trace Timeline" tab 渲染历史列表 TimelinePanel;真事件管道已活(trace.jsonl→`/ws/runs/{id}`→useRunStream→`Workspace.runStream.events`)仅用于节点上色;edge dot `ContextEdge.tsx:getMockEdgeContext` 是 mock JSON。修法:(A)挂 `<TracePanel traceLogs={runStream.events}>`=薄接无后端;(B)edge 真黑板需 engine 发结构化 transition 事件,后做 |
+| ⑨ llm_* 下沉 gateway | **设计登记延期✓** | 两薄服务(state_projection/role_materializer)已掏空成委派、无生产调用方;真逻辑在 adapter `gateway.py:193-538`;`module-disposition-revised.md:78` 明确"下沉是后续工程、本轮不动代码";baseline FROZEN 标 should-sink-3b。**保持延期**,补 DEF-id;dead `services/llm_state_projection.py` 无 live import,可单独删 |
+
+### 本轮攻击清单(依赖 + 风险排序)
+
+**Tier 1 — 薄接/小改,高确定低风险,直接推 headline(先做):**
+- A. **TracePanel 挂载**(⑧A,frontend-only,管道已活)→ headline 的"看 trace"
+- B. **Resume 前端 UI 接线**(⑧→② 前端缺口,薄接已活端点)→ headline 的"调试(resume)"
+- C. **golden per-node 真跑修复**(④:`_node_outputs` 读真 shape + 前端 node 视图 + 挂载 + route)
+
+**Tier 2 — 中等耦合:**
+- D. **6 态收敛**(③:adapter 委派 gateway 包 + 前端枚举翻转,Phase 1 FLAG 兑现)
+- E. **test_inputs 501→实现**(io-panel 单元,`test_inputs.py:51/60`)
+- F. **RuntimeGate 降级启动**(⑥的 F5 frontend 片,可独立于 Rust writer)
+- G. **D10 store 硬化**(⑤:release 可观测 + lease 抢占 + SPI 对齐,孤立单文件)
+
+**Tier 3 — large:**
+- H. **Rust native-fs writer**(⑥,foundational for copilot)+ sha2 字节兼容 Python
+- I. **copilot 安全写 + @mention + 冷启动**(⑦,依赖 H)
+
+**Tier 4 — headline 验收:** computer-use 驱动后端可用 .app 走完整生命周期。
+
+**延期(设计登记,本轮不做)**:⑨ llm_* 下沉(补 DEF-id)、copilot dispatch、publish-zip→Rust(可后)、多机错误(时钟/分区/配额)、DEF-003/004/007/008/009/010/011/012/014/016/017/018。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

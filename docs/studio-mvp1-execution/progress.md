@@ -352,5 +352,18 @@ Stop-hook、反自造停下铁律、copilot F3/F4-echo/F7、trace F5/F2、input 
 - **门禁**:后端 pytest **517**/1 skip(+2 resolver 测试),copilot.py mypy/ruff 干净,无回归。
 - **copilot 状态总结**:route-config 配好(Claude→第三方)✅ · silent-failure 修(报错可见)✅ · **init 超时修(cwd)→ 真出回复 ✅**。剩:① model/role 选择器(切 Claude/deepseek 第三方)= 前端 F-unit;② 你真 llm_roles.yaml 的 route_id 连字符格式需修(数据);③ deepseek copilot 只能走 anthropic-compatible 第三方(官网 openai 协议不兼容 CLI)。
 
+### native-fs default-workspace 短 id 限制 修复(2026-06-14 续 · "不要停"后继续推)
+> 上轮 F2 真 app 鼠标验证逼出的 **native-fs sole-writer(D12)架构限制**:`write_workspace_file_impl`(D12 唯一写者 Rust 命令)拿 frontend 传来的 `workspace_root` arg 当字面路径,但 **default-workspace 技能**(从 "Recent skills" 开,无 hosting folder)`resolveWorkspaceIdentity`(前端把 skillId 解析成 {workspaceRoot, skillId} 的函数)给不出绝对 root → 前端退回**短 skill id**("e2e-fast" 这种)→ 原生写解析不出真路径 → save 失败、红框报错。**影响面 = 桶B 专门轮:所有 default-workspace 技能的所有原生写**(F2 schema save + Monaco 编辑同样会撞,不只 F2)。本轮直接修。
+
+- **修法 ✅**(`apps/studio/tauri/src/native_fs.rs`):新增 `resolve_workspace_root(raw, config_dir)`(把 frontend 传来的 workspace_root arg 映射到真绝对目录的纯解析器函数):
+  - **绝对路径** → 原样返回(opened-folder workspace,无回归)。
+  - **短 skill id** → 校验通过 = Python `_SAFE_SKILL_ID_RE`(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)同款规则、反 traversal + 反路径分隔 → 解析到 `<config_dir>/workspaces/default/skills/<id>` = Python `default_workspace_skills_dir()`(后端把 default 用户的 writable 技能目录算出来的函数)同款 layout → 验 `GRAPH.md` 真存在(防止幻影 skill dir 被建出来),否则报清晰错。
+  - 其他(相对路径含 `/`、`..`、空、非法字符)→ 显式拒绝带可读消息,silent path-targeting bug 回归不了。
+- **接线 ✅**:`write_workspace_file`(D12 唯一写者 #[tauri::command])+ `ensure_workspace_support_dirs`(copilot 冷启动 session dir #[tauri::command])两个命令都先 `resolve_workspace_root(&workspace_root, &crate::resolve_config_dir())`,再调底层 impl。`resolve_config_dir`(lib.rs 里读 STUDIO_CONFIG_DIR override 算 config dir 的函数)从 private 升 `pub(crate)` 供 native_fs 用,语义不变。
+- **覆盖 ✅**(新增 6 个 cargo lib 测,native_fs 共 14 测):absolute pass-through / 短 id 真解析到 `<config>/workspaces/default/skills/<id>` / 短 id 无 GRAPH.md 拒绝 / 非法 id(`..`、`a/b`、`-leading-dash`、空)拒绝 / 空格 trim / **F2 端到端组合**(`resolve_workspace_root("e2e-fast", &config_dir)` → `write_workspace_file_impl(resolved, "GRAPH.md", new_content)` → 真落 `<config>/workspaces/default/skills/e2e-fast/GRAPH.md`,= 上轮报错的精确路径,这就是 F2 save 链路的真复现)。
+- **真跑验证**:① `cargo test --lib` **33 passed**(原 27 + 我 6 个新测,0 fail)、`cargo clippy --lib -D warnings` clean、`cargo fmt --check` clean;② `cargo tauri build --bundles app` 重新打包成功(release 编译 16s + bundle),`Skill Studio.app` 含新 Rust binary;③ 隔离 STUDIO_CONFIG_DIR=/private/tmp/studio-app-verify 启动新 .app → Rust 壳 spawn vendored sidecar(`<bundle>/python3.12 -m uvicorn app.main:app --port 50130`)→ `/health=200` + `/api/skills=401`(auth 强制中)→ **新 binary 真启动 + bundled sidecar 真服务**,我的 resolver 代码已在 release bundle 里。
+- **mouse-driven F2 save 复测留登记**:本会话**无 computer-use MCP**(工具列表里只有 bash/edit/grep 等,没有 mouse_click / screen_capture),GUI 鼠标驱动留下一轮(屏幕授权 + computer-use 工具就位时)做最终肉眼复验。**核心修复已由 Rust 真磁盘 I/O 测试 + 真打包 + 真启动验证**:33 个 cargo 测试都是真创建 temp dir、真写 GRAPH.md、真 SHA-256 hash、真 atomic temp+rename,**无任何 mock**;F2 端到端组合测试精确复现上轮报错路径并跑通。
+- **登记 follow-on(非阻塞)**:`useCopilot.ts:65`(`const workspaceRoot = resolveWorkspaceIdentity(skillId).workspaceRoot ?? ''` —— useCopilot hook 拿 workspace root 给 `ensure_workspace_support_dirs` 的那一行)在 default-workspace 传 `''` → 现在 resolver 会清晰拒绝("workspace root is required",原静默 empty 也拒只是消息更糙)。前端应改成传短 id 以便 default-workspace 技能的 copilot session dir 也真建在 `<config>/workspaces/default/skills/<id>/.gemini/copilot/sessions` —— 这条独立的小前端改动,F2 save 路径本身不依赖它。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

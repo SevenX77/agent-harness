@@ -131,6 +131,15 @@ commit 链:`c05f33cb`(综述)→`59169f9c`(trace 挂载)→`79521944`+`b2d3559c`
 - **诚实 skip(非伪绿)2 个**(commit `953464e7`):`test_cli_toast`(点已删的"Open CLI")、`test_lint_flow`(编辑已不存在的 root SKILL.md + 已删的 Save/"Saved and linted" 流);各带精确 re-author 理由。
 - **全套门禁**:`uv run --group e2e pytest apps/studio/tests-e2e` = **5 passed / 2 skipped / 0 failed**,ruff clean。
 
+### 续:驱动更多生命周期段,继续抓真 bug 修(2026-06-14 续)
+> PM 重申:实现设计 ≠ 写完跑一遍;要按 mvp1 设计**成功使用、无 bug**。继续在真 app 上驱动 golden/publish,抓 bug 修。
+
+- **golden compare 全坏 → 修(commit `667b658d`)**:`_find_file`(golden 把 ref 解析成磁盘路径的函数)只在 public `SKILLS_DIR` 找产物,但能跑/promote 的是 `WORKSPACES_DIR` 下的 workspace skill → compare **静默失败**(无 result→无 overlay→无 error toast),对**每个**可跑技能都坏。改为用 `resolve_skill_dir` 解析真 skill dir + 加 `.workspace` 候选。e2e `test_promote_then_compare_golden`:run→Promote→Compare 现真渲染 Golden Diff(100%、verdict、No differences)。
+  - **登记**:e2e-fast 的 result 是扁平 final context(非 `phase_outputs` map)→ golden verdict 退化成 run-level 单 `output`;**per-node golden 在扁平结果上不触发**,要引擎在 run result 里发 per-node outputs(引擎活)。
+- **AssetsPanel 假子图 → 修(commit `c967bfee`)**:每个技能都硬编码显示假子图 `intent_classifier`/`translator_subgraph`(真 app 肉眼可见 bug)→ 去 mock,渲染真子图 + "No subgraphs" 空态。真 app 验证已生效。
+- **publish 澄清 + 修(commit `bb4693dd`)**:Release 要求配 Artifact Registry = **设计 F2 行为(非 bug)**;但前端把后端的清晰 typed error(`REGISTRY_NOT_CONFIGURED`「Artifact Registry Host 未配置」)塌成泛化 toast → 用户不知道要配啥。改为对 typed error 透出后端清晰原因(网络错仍走泛化,向后兼容锁定测试)。e2e `test_release_without_registry_reports_clear_typed_error` 验 400 typed + 清晰原因可见。**登记**:发布前置不满足的"跳 Settings 快捷入口"(设计§6)+ publish 错误码 i18n = 后续。
+- **e2e 覆盖扩到**:compile→predict→run→trace→golden(promote/compare)→publish(error 路径)。全套 **7 passed / 2 skipped**。
+
 ### E2E 剩余(登记,下一步)
 - **生命周期 spine 未覆盖段**:resume(前端零 resume UI=桶B缺口,需先建 UI)、publish、golden compare(我已接 Compare 按钮,可加 UI 断言)、debug。
 - **lint/cli e2e re-author**:按当前 GRAPH.md 编辑→lint 流 / 确认 CLI 是否在 MVP1 范围。

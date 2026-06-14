@@ -4,6 +4,7 @@ import { toast } from "sonner"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { GraphCanvas, type SkillGraphNodeData, type SkillNodeStatus } from "@/components/GraphCanvas"
 import { CopilotPanel } from "@/components/copilot/copilot-panel"
+import { copilotFileActionEffects, type CopilotFileAction } from "@/components/copilot/patch-proposed-bubble"
 import { PromptInspector } from "@/components/PromptInspector"
 import { useCopilotContext } from "@/hooks/useCopilotContext"
 import { readLintStatus } from "@/hooks/useDebouncedLint"
@@ -519,6 +520,30 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       })
   }, [currentSkillId, mutateSkillDetail, updateStage])
 
+  // F5/DEF-025: a copilot edit (Write/Edit / Accept / Reject) hit disk. Reflect it
+  // in the open editor buffer, and on a settled review recompile so predict/run
+  // use the reviewed code ("改动即时进编辑器 buffer + 改后自动 compile 回灌").
+  const reloadFileIfOpen = useCallback(
+    (path: string) => {
+      ;(["left", "right"] as EditorSide[]).forEach((side) => {
+        const file = activeFileDetails[side]
+        if (file && file.skillId === currentSkillId && file.path === path) {
+          void reloadOpenFile(side)
+        }
+      })
+    },
+    [activeFileDetails, currentSkillId, reloadOpenFile],
+  )
+
+  const handleCopilotFileChanged = useCallback(
+    (path: string, action: CopilotFileAction) => {
+      const { reload, recompile } = copilotFileActionEffects(action)
+      if (reload) reloadFileIfOpen(path)
+      if (recompile) handleCompile()
+    },
+    [reloadFileIfOpen, handleCompile],
+  )
+
   const deriveBuildStage = useCallback((id: string): SkillBuildStage => {
     const compileStage = compileStages[id]
     if (compileStage) return compileStage
@@ -773,7 +798,11 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                 minSize="18%"
                 maxSize="35%"
               >
-                <CopilotPanel skillId={currentSkillId} completedRunId={completedRunId} />
+                <CopilotPanel
+                  skillId={currentSkillId}
+                  completedRunId={completedRunId}
+                  onFileChanged={handleCopilotFileChanged}
+                />
               </ResizablePanel>
             </>
           ) : null}

@@ -410,5 +410,14 @@ Stop-hook、反自造停下铁律、copilot F3/F4-echo/F7、trace F5/F2、input 
 - **未验(需真 LLM 凭证,PM 否决 copy 真库)**:copilot F5 diff 气泡 + Accept/Reject(需 copilot 真改文件)/ F2 重启恢复(需先有 session)/ F4 上下文回显——这些 copilot **真驱动**的复验留作有隔离凭证时做(错误处理路径已验)。
 - **重建复验(rebuild #2)**:补完 resume-msg + useRunStream 两修后重建 .app,再跑一遍确认 trace 事件数有界 + resume 出清晰信息。
 
+### 2026-06-14 续4:PM 三问核实 + DEF-025 编辑器同步做完 + P0-2 记录
+> PM 三问:① worktree 里发现的问题都解决了吗 ② F5 我说允许 copilot 自读写、你也改成 Rust 了吗 ③ 半成品做完了吗。核实回答(见下),确认后继续。
+
+- **Q1 核实结论**:① 我这会话发现的 bug **全修**(F2 active-tab、F5 Reject 盲写、resume 信息、useRunStream 无界增长、DEF-005 过时描述);② **wave2-safety 审计的 engine/gateway P0 大部分没解决但非我 scope**(那审的是另一分支+engine侧):**P0-2(engine 运行时 import gateway concrete,D4 依赖倒置)我 worktree 里还在**(`interception.py:169` 懒加载 GatewayChatModel/ResolvedRole、`llm_phase_node.py:135` import GatewayResolverMissingError)= **owner=engine 未解决,已记录,需 PM 定要不要我跨模块收口**;**P0-4(Studio 自算 needs_setup)已解决**(6 态收敛清零);P0-1/P0-3 我分支没复现到;③ 设计大件记录在案(DEF-024/025→改见下/026/028/029/005)。
+- **Q2 核实结论**:**没有**。copilot 前向读写仍 SDK 直写(`can_use_tool` 对 Write/Edit `return PermissionResultAllow()`),copilot.py 不调任何 Rust 写命令;只有 Reject 撤销的 checkpoint+restore 走 Rust = Studio 自有安全写基础设施(符合 DEF-027「D12 约束 Studio 自有写入」裁定)。
+- **Q3 核实结论**:**做完了**。git 无未提交代码(只有 PM 在编辑的设计文档);半成品全提交。
+- **✅ DEF-025 编辑器 buffer 同步 + 改后自动 compile 做完**(本轮):F5 设计「改动即时进编辑器 buffer + 改后自动 compile 回灌」。`PatchProposedBubble` 加 `onFileChanged(path, action)` 回调(applied/accepted/rejected)→ 经 `CopilotPanel`→`ChatMessageItem` 透传 → `Workspace.handleCopilotFileChanged`:`reloadFileIfOpen(path)`(若该文件在编辑器开着则重载 buffer)+ `handleCompile()`(改后重编译)。action→效果决策抽成纯函数 `copilotFileActionEffects`(applied=只 reload、accepted=只 recompile、rejected=reload+recompile)+ 3 单测。门禁:tsc/eslint clean、前端 vitest **467**。**F5 安全写闭环再进一步:diff 审阅 + Rust checkpoint 还原 + 编辑器 buffer 同步 + 自动 recompile 都齐了;剩 DEF-024 Bash 审批往返、DEF-026 Monaco 并排。**
+- **engine D4(P0-2)登记**:`interception.py`/`llm_phase_node.py` 运行时 import gateway concrete = D4 SPI 倒置未收口,owner=engine,跨模块大改,待 PM 定。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

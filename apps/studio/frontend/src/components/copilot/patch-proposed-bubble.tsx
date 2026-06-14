@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, FilePlus2, FilePenLine, RotateCcw, X } from 'lucide-react'
+import { Check, Columns2, FilePlus2, FilePenLine, RotateCcw, X } from 'lucide-react'
 import { toast } from 'sonner'
 
 import type { CopilotPatchProposedEvent } from '../../types/copilot'
 import { computeLineDiff, lineDiffStats } from '../../lib/line-diff'
+import { CopilotCompareOverlay } from './copilot-compare-overlay'
 import {
   clearWorkspaceCheckpoint,
   restoreWorkspaceFile,
@@ -43,6 +44,7 @@ type Review = 'pending' | 'accepted' | 'rejected'
 function PatchProposedBubbleBase({ event, skillId, onFileChanged }: PatchProposedBubbleProps) {
   const [review, setReview] = useState<Review>('pending')
   const [busy, setBusy] = useState(false)
+  const [showCompare, setShowCompare] = useState(false)
 
   const rows = useMemo(
     () => computeLineDiff(event.beforeContent, event.afterContent),
@@ -131,37 +133,47 @@ function PatchProposedBubbleBase({ event, skillId, onFileChanged }: PatchPropose
             <span className="text-red-600 dark:text-red-400">−{stats.removed}</span>
           </span>
         </div>
-        {review === 'pending' ? (
-          <div className="flex shrink-0 items-center gap-1">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={onReject}
-              className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-muted-foreground hover:bg-background disabled:opacity-50"
-            >
-              <RotateCcw className="size-3" /> Reject
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={onAccept}
-              className="inline-flex items-center gap-1 rounded border border-primary/40 bg-primary/10 px-1.5 py-0.5 text-primary hover:bg-primary/20 disabled:opacity-50"
-            >
-              <Check className="size-3" /> Accept
-            </button>
-          </div>
-        ) : (
-          <span
-            className={`inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 ${
-              review === 'accepted'
-                ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                : 'bg-muted text-muted-foreground'
-            }`}
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            aria-label="Open side-by-side compare"
+            onClick={() => setShowCompare(true)}
+            className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-muted-foreground hover:bg-background"
           >
-            {review === 'accepted' ? <Check className="size-3" /> : <X className="size-3" />}
-            {review === 'accepted' ? 'Accepted' : 'Reverted'}
-          </span>
-        )}
+            <Columns2 className="size-3" /> Compare
+          </button>
+          {review === 'pending' ? (
+            <>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={onReject}
+                className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-muted-foreground hover:bg-background disabled:opacity-50"
+              >
+                <RotateCcw className="size-3" /> Reject
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={onAccept}
+                className="inline-flex items-center gap-1 rounded border border-primary/40 bg-primary/10 px-1.5 py-0.5 text-primary hover:bg-primary/20 disabled:opacity-50"
+              >
+                <Check className="size-3" /> Accept
+              </button>
+            </>
+          ) : (
+            <span
+              className={`inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 ${
+                review === 'accepted'
+                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                  : 'bg-muted text-muted-foreground'
+              }`}
+            >
+              {review === 'accepted' ? <Check className="size-3" /> : <X className="size-3" />}
+              {review === 'accepted' ? 'Accepted' : 'Reverted'}
+            </span>
+          )}
+        </div>
       </div>
       <pre className="max-h-72 overflow-auto px-2.5 py-2 font-mono leading-relaxed">
         {rows.map((row, index) => (
@@ -182,6 +194,14 @@ function PatchProposedBubbleBase({ event, skillId, onFileChanged }: PatchPropose
           </div>
         ))}
       </pre>
+      {showCompare ? (
+        <CopilotCompareOverlay
+          path={event.path}
+          before={event.beforeContent}
+          after={event.afterContent}
+          onClose={() => setShowCompare(false)}
+        />
+      ) : null}
     </div>
   )
 }

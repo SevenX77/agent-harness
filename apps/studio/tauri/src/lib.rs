@@ -1,3 +1,4 @@
+mod native_fs;
 mod sidecar;
 
 use std::path::PathBuf;
@@ -312,7 +313,12 @@ pub fn run() {
             open_in_codex,
             select_directory,
             open_in_terminal,
-            reveal_in_file_manager
+            reveal_in_file_manager,
+            native_fs::write_workspace_file,
+            native_fs::add_recent_workspace,
+            native_fs::list_recent_workspaces,
+            native_fs::remove_recent_workspace,
+            native_fs::ensure_workspace_support_dirs
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

@@ -594,6 +594,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         onSyncSuccess={() => {
           void mutateSkillDetail()
         }}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
 
       <div className="relative flex min-h-0 flex-1">

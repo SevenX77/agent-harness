@@ -94,7 +94,13 @@
   - 前端:`DiffView` 原扁平字段列表忽略 `node_results`→改为**按节点分组**(每节点 pass/fail 徽章+score,字段嵌套);接上原孤儿 golden flow(TracePanel Compare/Promote 按钮→useGoldenDiff→DiffView center overlay)。后端 GET /compare 本就在(verifier"route mismatch"是过时说法)。
 - **门禁**:前端 tsc clean + vitest 418 + lint clean;后端 golden 18 passed + ruff clean;api/llm.ts 及 KEEP-MAIN 零改动。
 
+- **G. D10 release 可观测化 ✅**(commit `442a95df`):`LocalRuntimeStateStore.release` 原裸 `except Exception: pass`(违 §5 禁静默降级)→ 显式:corrupt lease 留盘+WARNING、stale owner 跳过+INFO、仅 rightful owner unlink。**保留乐观 fencing-token 模型**(未加 engine 参考的 LeaseConflictError 抢占——会破已锁测试 `test_runtime_state_store_rejects_missing_lease_and_stale_fencing_token` 的背靠背异 owner acquire 成功语义);全 SPI 对齐 + lease/fencing 接入 resume 路径 = **engine 活(D10)**,已 flag。RED→GREEN `test_runtime_state_store_release_is_observable_and_stale_safe`。
+- **F. RuntimeGate 降级启动 ✅**(commit `aa14a783`):原全屏 gate(sidecar init 失败→只显"Backend startup failed"、children 不渲染,违 D10/native-fs F5)→ 抽纯 `RuntimeShell` 永远渲染 children + 非阻塞底部 banner(loading"Connecting…"/error"Backend unavailable"+Retry)。RED→GREEN `RuntimeGate.test.tsx`。**注**:常见"backend 不通"其实走 ready 路径(get_sidecar_config 多半成功)逐功能降级;本修针对 sidecar-config 命令本身 reject 的全屏遮蔽。真机验证留 computer-use 验收期。
+- **本轮门禁(真跑)**:Studio 后端 `uv run pytest tests/` **483 passed**(481 基线+2 新)、前端 `vitest` **421 passed**(412 基线+9 新)、tsc clean、lint clean、api/llm.ts 及 KEEP-MAIN 零改动。Engine/gateway 未触,绿态延续(本轮未重跑)。
+
 **Tier 1/golden 剩余子项(登记,后续)**:trace F2(点历史 run→拉回该 run full trace,需读历史 trace.jsonl)、F4(edge dot 真黑板,需 engine 发结构化 transition 事件)、F5(Prompt Inspector 挂载,onSelectPrompt 现 no-op 占位)。
+
+**下一轮优先级(本轮未做,按依赖)**:① 6 态收敛(D,**待 PM 确认可翻 api/llm.ts**)② Rust native-fs writer(H,large,foundational for copilot;sha2 字节兼容 Python `_graph_content_hash`)③ copilot 安全写/@mention/冷启动(I,large,依赖 H)④ resume 前端 UI(B)⑤ test_inputs create/delete(E,需注册 TEST_INPUT_* 错误码)⑥ D10 lease/fencing 接入 resume(engine 活)。多为 large/跨会话,建议各自独立轮 + computer-use 验收。
 
 ### ⚠️ 6 态收敛(Tier 2D)与 api/llm.ts 硬约束冲突 —— 待 PM 一句确认
 

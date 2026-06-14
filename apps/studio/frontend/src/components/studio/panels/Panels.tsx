@@ -29,6 +29,9 @@ interface PanelsProps {
   traceCompareLoading?: boolean
   onCompareToGolden?: () => void
   onPromoteToGolden?: () => void
+  traceCanResume?: boolean
+  traceResumeLoading?: boolean
+  onResumeRun?: () => void
 }
 
 export function Panels({
@@ -47,6 +50,9 @@ export function Panels({
   traceCompareLoading,
   onCompareToGolden,
   onPromoteToGolden,
+  traceCanResume,
+  traceResumeLoading,
+  onResumeRun,
 }: PanelsProps) {
   const { onFileOpen } = useWorkspaceContext()
   if (!skillId) {
@@ -84,6 +90,9 @@ export function Panels({
           compareLoading={traceCompareLoading}
           onCompareToGolden={onCompareToGolden}
           onPromoteToGolden={onPromoteToGolden}
+          canResume={traceCanResume}
+          resumeLoading={traceResumeLoading}
+          onResume={onResumeRun}
         />
       )
     }

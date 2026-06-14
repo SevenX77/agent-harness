@@ -100,7 +100,13 @@
 
 **Tier 1/golden 剩余子项(登记,后续)**:trace F2(点历史 run→拉回该 run full trace,需读历史 trace.jsonl)、F4(edge dot 真黑板,需 engine 发结构化 transition 事件)、F5(Prompt Inspector 挂载,onSelectPrompt 现 no-op 占位)。
 
-**下一轮优先级(本轮未做,按依赖)**:① 6 态收敛(D,**待 PM 确认可翻 api/llm.ts**)② Rust native-fs writer(H,large,foundational for copilot;sha2 字节兼容 Python `_graph_content_hash`)③ copilot 安全写/@mention/冷启动(I,large,依赖 H)④ resume 前端 UI(B)⑤ test_inputs create/delete(E,需注册 TEST_INPUT_* 错误码)⑥ D10 lease/fencing 接入 resume(engine 活)。多为 large/跨会话,建议各自独立轮 + computer-use 验收。
+- **H(部分). Rust native-fs writer ✅**(commit `95d6a96d`):前端 `tauri.ts`/`client.ts`/`copilotStore` 早已 invoke `write_workspace_file`+`add/list/remove_recent_workspace`+`ensure_workspace_support_dirs`,但 Rust `lib.rs` invoke_handler 一个都没注册→真桌面构建写路径悬空、全落 Python(违 D12 唯一写者)。新增 `apps/studio/tauri/src/native_fs.rs`:write_workspace_file(SHA-256 hex **字节兼容** Python `_graph_content_hash`、乐观 expected-hash 闸、HashConflict 序列化成 `client.ts` 解析的精确 `{type,data:{current_hash,current_content}}`、路径穿越沙箱、原子 temp+rename);recent-workspace MRU(identity 去重,corrupt 重置带 WARNING 非静默);ensure_workspace_support_dirs(建 `.gemini/copilot/sessions`)。lib.rs 注册 5 命令;Cargo 加 `sha2`。`cargo test --lib` **25 passed**(9 新,含 Python hash 向量、HashConflict 形状、穿越拒绝、原子写、MRU roundtrip)。前端零改动(invoke 早在)。
+  - **native-fs 剩余(follow-up)**:Python `/skills/{id}/files` 写端点降为只读(D12 去双写者)、publish-zip→native(`artifact_registry.build_publish_package`)、**Rust checkpoint/restore**(copilot 安全写 model B 依赖:即时落盘+记 checkpoint、Reject 精确还原)、真机/bundle 验证(需 build_vendor,留 computer-use 验收期)。
+
+### 本轮总结(7 个功能里程碑 + 验证综述)
+commit 链:`c05f33cb`(综述)→`59169f9c`(trace 挂载)→`79521944`+`b2d3559c`(golden per-node 后/前)→`442a95df`(D10 release)→`aa14a783`(RuntimeGate)→`95d6a96d`(native-fs writer)。门禁真跑:Studio 后端 pytest 483、前端 vitest 421、tauri cargo test 25,均绿;tsc/lint/ruff/rustfmt clean;api/llm.ts 及 KEEP-MAIN 零改动。
+
+**下一轮优先级(按依赖)**:① **6 态收敛**(D,**待 PM 确认可翻 api/llm.ts**——这是唯一被显式硬约束挡住的范围项)② **copilot 安全写/@mention/冷启动**(I,large 多层:copilot.py PreToolUse 回调 + 新 patch 事件 + 前端 diff/accept/reject UI + **依赖 Rust checkpoint/restore**——native-fs 续作;@mention=tiptap composer+4 层 resolver;冷启动=readWorkspaceFile Rust 命令+hydrate)③ native-fs follow-up(Python 写端点降只读 / publish-native / Rust checkpoint)④ resume 前端 UI(B)⑤ test_inputs create/delete(E,需注册 TEST_INPUT_* 错误码)⑥ D10 lease/fencing 接入 resume(engine 活)⑦ trace F2/F4/F5。建议:copilot + native-fs checkpoint 作一个专门轮;6 态待 PM 一句即开;最后 computer-use 走完整生命周期验收。
 
 ### ⚠️ 6 态收敛(Tier 2D)与 api/llm.ts 硬约束冲突 —— 待 PM 一句确认
 

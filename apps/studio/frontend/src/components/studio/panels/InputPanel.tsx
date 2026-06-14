@@ -8,6 +8,7 @@ import type { FileMeta } from "../file-types"
 import { FileRow } from "./_shared/FileRow"
 import { PanelHeader } from "./_shared/PanelHeader"
 import { SectionHeading } from "./_shared/SectionHeading"
+import { GoldenSection } from "./GoldenSection"
 import { inputFiles } from "./panel-files"
 import { TestInputsSection } from "./TestInputsSection"
 
@@ -94,6 +95,8 @@ export function InputPanel({
             selectedId={selectedTestInputId}
             onSelect={onSelectTestInput}
           />
+
+          <GoldenSection skillId={skillId} />
 
           <SectionHeading label="Input Files" />
           <FileRow file={files[1]} onOpen={onFileOpen} />

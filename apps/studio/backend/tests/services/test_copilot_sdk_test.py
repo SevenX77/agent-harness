@@ -89,18 +89,22 @@ def _result_message() -> ResultMessage:
     )
 
 
-def _read_tool_messages() -> list[object]:
-    # A real tool round-trip: the model issues a Read, the SDK executes it and
-    # returns a successful tool result, then the turn completes.
+_TOKEN = "tok123deadbeef"
+
+
+def _echoed_token_messages() -> list[object]:
+    # Mirrors the real SDK stream: the model issues a tool call (Bash/Read), the
+    # SDK runs it and returns the result in a UserMessage (which the translator
+    # drops), then the model echoes the file contents (the token) in a TextBlock.
     return [
         AssistantMessage(
             content=[ToolUseBlock(id="t1", name="Read", input={"file_path": "copilot_probe.txt"})],
             model="claude",
         ),
-        AssistantMessage(
-            content=[ToolResultBlock(tool_use_id="t1", content="probe-token")],
-            model="claude",
-        ),
+        # In the real SDK this is a UserMessage(ToolResultBlock); the translator
+        # ignores it. The proof of a working tool loop is the echoed token below.
+        AssistantMessage(content=[ToolResultBlock(tool_use_id="t1", content=_TOKEN)], model="claude"),
+        AssistantMessage(content=[TextBlock(text=_TOKEN)], model="claude"),
         _result_message(),
     ]
 
@@ -109,8 +113,11 @@ def _run(route: object, provider: object):
     return asyncio.run(copilot.run_route_sdk_test(route, provider, timeout_s=5.0))
 
 
-def test_passes_only_when_a_real_tool_call_round_trips(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = FakeClient(messages=_read_tool_messages())
+def test_passes_when_model_echoes_the_probe_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The model can only echo the random token by actually reading the file, so
+    # token-echoed ⟺ the tool loop ran.
+    monkeypatch.setattr(copilot, "_sdk_test_token", lambda: _TOKEN)
+    client = FakeClient(messages=_echoed_token_messages())
     monkeypatch.setattr(copilot, "_session_factory", lambda _options: client)
 
     result = _run(_route(), _CredProvider())
@@ -118,19 +125,22 @@ def test_passes_only_when_a_real_tool_call_round_trips(monkeypatch: pytest.Monke
     assert result.status == "ok"
     assert result.route_id == "anthropic-official:claude-sonnet"
     assert client.queries, "a real query must be sent to the SDK"
-    assert client.closed is True, "the smoke client must be closed locally (not via global cleanup)"
+    assert client.closed is True, "the client must be closed locally (not via global cleanup)"
 
 
-def test_fails_when_model_never_issues_a_tool_call(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Text-only answer = the tool loop was never exercised → must FAIL, because
-    # copilot's whole job is using tools to edit skills.
-    client = FakeClient(messages=[AssistantMessage(content=[TextBlock(text="42")], model="claude"), _result_message()])
+def test_fails_when_token_is_not_echoed(monkeypatch: pytest.MonkeyPatch) -> None:
+    # No token in the answer = the model never really read the file = the tool
+    # loop wasn't exercised → must FAIL (copilot's whole job is using tools).
+    monkeypatch.setattr(copilot, "_sdk_test_token", lambda: _TOKEN)
+    client = FakeClient(
+        messages=[AssistantMessage(content=[TextBlock(text="I can't read files.")], model="claude"), _result_message()]
+    )
     monkeypatch.setattr(copilot, "_session_factory", lambda _options: client)
 
     result = _run(_route(), _CredProvider())
 
     assert result.status == "failed"
-    assert "工具" in (result.message or ""), result.message
+    assert "token" in (result.message or "") or "读取" in (result.message or ""), result.message
 
 
 def test_fails_on_sdk_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:

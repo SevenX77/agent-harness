@@ -1,5 +1,12 @@
 # Progress — Studio MVP1 + three-module
 
+> ━━━ PM 铁律(2026-06-14,重复三遍,绝不可违反)━━━
+> **【一】遇到 blocker 绝不停下 → 记进本文件 / docs/deferred-items.md → 立刻继续做下一个功能。**
+> **【二】遇到 blocker 绝不停下 → 记进本文件 / docs/deferred-items.md → 立刻继续做下一个功能。**
+> **【三】遇到 blocker 绝不停下 → 记进本文件 / docs/deferred-items.md → 立刻继续做下一个功能。**
+> 不是完成一个汇报一个;是自己做完**所有**功能和测试,某功能有问题就记下来做下一个。唯一合法停点 = 每个功能都处理过一遍(能做的做完、做不了的记录在案)。详见 goal-charter.md §1 / §5.6。
+> ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 - **分支**:`feat/studio-mvp1-mainbased-2026-06-13`(从 `main`=#139 切,含三模块 adapter)
 - **更新**:2026-06-13
 - **基线**:`goal-charter.md`(目标/done/硬约束)+ `integration-plan.md`(以 main 为基的阶段)
@@ -364,6 +371,19 @@ Stop-hook、反自造停下铁律、copilot F3/F4-echo/F7、trace F5/F2、input 
 - **真跑验证**:① `cargo test --lib` **33 passed**(原 27 + 我 6 个新测,0 fail)、`cargo clippy --lib -D warnings` clean、`cargo fmt --check` clean;② `cargo tauri build --bundles app` 重新打包成功(release 编译 16s + bundle),`Skill Studio.app` 含新 Rust binary;③ 隔离 STUDIO_CONFIG_DIR=/private/tmp/studio-app-verify 启动新 .app → Rust 壳 spawn vendored sidecar(`<bundle>/python3.12 -m uvicorn app.main:app --port 50130`)→ `/health=200` + `/api/skills=401`(auth 强制中)→ **新 binary 真启动 + bundled sidecar 真服务**,我的 resolver 代码已在 release bundle 里。
 - **mouse-driven F2 save 复测留登记**:本会话**无 computer-use MCP**(工具列表里只有 bash/edit/grep 等,没有 mouse_click / screen_capture),GUI 鼠标驱动留下一轮(屏幕授权 + computer-use 工具就位时)做最终肉眼复验。**核心修复已由 Rust 真磁盘 I/O 测试 + 真打包 + 真启动验证**:33 个 cargo 测试都是真创建 temp dir、真写 GRAPH.md、真 SHA-256 hash、真 atomic temp+rename,**无任何 mock**;F2 端到端组合测试精确复现上轮报错路径并跑通。
 - **登记 follow-on(非阻塞)**:`useCopilot.ts:65`(`const workspaceRoot = resolveWorkspaceIdentity(skillId).workspaceRoot ?? ''` —— useCopilot hook 拿 workspace root 给 `ensure_workspace_support_dirs` 的那一行)在 default-workspace 传 `''` → 现在 resolver 会清晰拒绝("workspace root is required",原静默 empty 也拒只是消息更糙)。前端应改成传短 id 以便 default-workspace 技能的 copilot session dir 也真建在 `<config>/workspaces/default/skills/<id>/.gemini/copilot/sessions` —— 这条独立的小前端改动,F2 save 路径本身不依赖它。
+
+### 2026-06-14 续(新会话 · PM 铁律"遇 blocker 记录后继续,不停"):copilot F2 冷启动 + F5 安全写
+> PM 把铁律收紧并要求写进所有文档 + stop hook(各重复三遍):**遇到 blocker 不停下,记下来继续做下一个功能;唯一合法停点=所有功能都处理过一遍**。已落盘:goal-charter §1/§5.6、progress 顶部 banner、~/.claude/commands/goal.md、~/.claude/hooks/goal-stop-check.sh、memory never-manufacture-stops + MEMORY.md、~/.claude/rules/no-manufactured-stops.md。
+
+- **native 读侧 ✅**(commit `57ea9ce1`):`read_workspace_file`(读内容+sha256,hash 可直接当下次写的 expected_hash)+ `list_workspace_dir`(非递归列目录,缺失=空列表免 exists 仪式)两个 Rust 命令(`native_fs.rs` impl + tauri 命令 + 前端 wrapper),都反路径穿越。6 Rust 测;= copilot 冷启动 hydration 的读侧地基。
+- **copilot F2 冷启动 session hydration ✅**(commit `763a1b54`):原 app 重启后 copilot 面板**直接建新 session 丢历史**(盘上 `.gemini/copilot/sessions/<skill>/<id>.json` 还在但没读回)。加 `copilotStore.hydrate()`(`store/copilotStore.ts`):用上面的 list+read 把盘上 session 读回内存(live 内存 session 在 id 碰撞时胜出)、唯有盘上无 session 才建新;`useCopilot.ts` 改成 hydrate 完才决定建不建。idempotent(每 context 只读盘一次)、web/test 惰性(listWorkspaceDir 在非 Tauri 返 []=inert)。5 store 测。
+- **copilot F5 安全写(模型 B,即时应用+事后审阅)—— 大件,分四层做完核心**:
+  - **PoC 真跑核实(真凭证只读,anthropic-official endpoint)**:`can_use_tool` 回调**仅对未 pre-allow 的工具触发**(acceptEdits 会绕过;把 Write/Edit/Bash 移出 allowed_tools 后,回调对 Edit 真触发 给 old/new_string+file_path、对 Bash 真触发 给 command,DENY 真拦)。这就是设计标的"需 PoC"。
+  - **Rust checkpoint/restore/seed ✅**(commit `15fe3521` + `7a3c049e`):`checkpoint`(记最早改前态)/`restore`(从 checkpoint 还原+清除,新文件则删)/`clear`(Accept 清除)/`seed`(从事件显式改前字节记 checkpoint=race-free)。Reject 的还原写走 Rust 唯一写者(D12 忠实)。10 Rust 测,`cargo test --lib` 46 passed。
+  - **backend can_use_tool → patch_proposed ✅**(commit `8d28ba57`):`copilot.py` 加 per-skill `can_use_tool`:Write/Edit emit `patch_proposed`(path+改前/改后,供 diff + Reject)然后 Allow(非阻塞);Bash emit `bash_approval_required` 并 HOLD(deny,破坏性命令不批不跑)。`build_options` 有 can_use_tool 时只 pre-allow Read+permission_mode=default;SDK 探针路径(无回调)保留 acceptEdits 不受影响。`stream_query` 用一个有序队列同时 drain 翻译消息 + 回调事件。6 测,后端 523 passed。
+  - **frontend diff bubble + Accept/Reject ✅**(commit `7a3c049e`):`PatchProposedBubble`(绿/红行 diff via LCS `line-diff.ts` + Accept/Reject);Accept→clearWorkspaceCheckpoint;Reject→Rust 还原(改过的文件 writeWorkspaceFile 改前字节;copilot 新建的文件 seed+restore 删掉)。Bash 显示 held-command 卡片。types/normalize + 静态渲染测;前端 vitest **458** passed、tsc/eslint clean。
+- **F5 剩余(记录,需各自后续)**:① **Bash 交互审批往返**(approve/reject 需前端→后端**双向 WS 控制通道**,现 WS 是严格单向;现保守 hold=deny 命令不跑,安全但不能 approve)② **Monaco 并排 Open Compare**(我做了内联 diff=主路径;side-by-side 是增强)③ **编辑器 buffer 实时同步 + accept/reject 后自动 recompile 回灌**(现还原到磁盘,编辑器/compile 未自动触发)④ **真 .app 鼠标复验**(需 creds + 构建,Tier-4)。
+- **门禁(累计真跑)**:后端 pytest **523**/1 skip、前端 vitest **458**、tauri `cargo test --lib` **46**、tsc/eslint/mypy/ruff/rustfmt clean。api/llm.ts 及 KEEP-MAIN 零改动,never touched main。
 
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

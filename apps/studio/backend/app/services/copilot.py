@@ -16,10 +16,11 @@ import inspect
 import json
 import logging
 import secrets
+import tempfile
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from claude_agent_sdk import (
     ClaudeAgentOptions,
@@ -593,6 +594,100 @@ def _error_event_for_exception(exc: Exception) -> CopilotEventError:
     if isinstance(exc, (CLIConnectionError, ProcessError, ClaudeSDKError)):
         return CopilotEventError(message=f"后端连接失败 (DeepSeek 端点不可达 / 大陆需代理): {exc}")
     return CopilotEventError(message=f"Copilot 请求失败: {exc}")
+
+
+# COPILOT_ASSIST-4: the copilot test must exercise the SAME path copilot uses at
+# runtime and prove the tool loop. We force a real Read of a random-token file so
+# the tool call is non-optional (deterministic, not flaky) and pass only when a
+# successful Read result round-trips.
+SDK_TEST_TIMEOUT_S = 60.0
+_SDK_TEST_TOOL = "Read"
+_SDK_TEST_FILE = "copilot_probe.txt"
+_SDK_TEST_PROMPT = (
+    f"Read the file {_SDK_TEST_FILE} in the current directory and reply with its "
+    "exact contents and nothing else."
+)
+
+
+@dataclass(frozen=True)
+class RouteSdkTestResult:
+    """Outcome of a real ClaudeSDKClient tool-call test for one route."""
+
+    route_id: str
+    status: Literal["ok", "failed"]
+    message: str | None = None
+
+
+async def run_route_sdk_test(
+    route: ResolvedRoute,
+    credential_provider: CredentialProviderProtocol,
+    *,
+    timeout_s: float = SDK_TEST_TIMEOUT_S,
+) -> RouteSdkTestResult:
+    """Drive the real ClaudeSDKClient for one route, forcing a real tool call.
+
+    Spawns the same CLI-subprocess + ANTHROPIC_BASE_URL-env path copilot runs at
+    runtime; passes only if a successful Read tool result round-trips before Done.
+    Owns its client lifecycle locally (no global session teardown).
+    """
+    logger.info("phase=sdk_test action=start route=%s", route.route_id)
+    try:
+        api_key, base_url, env_overrides = _resolve_route_runtime(route, credential_provider)
+    except ValueError as exc:
+        logger.warning("phase=sdk_test route=%s config error: %s", route.route_id, exc)
+        return RouteSdkTestResult(route.route_id, "failed", str(exc))
+    if not api_key:
+        return RouteSdkTestResult(
+            route.route_id, "failed", f"Endpoint {route.endpoint_id} 未配置 API key"
+        )
+
+    with tempfile.TemporaryDirectory(prefix="copilot-sdk-test-") as workspace:
+        token = secrets.token_hex(8)
+        (Path(workspace) / _SDK_TEST_FILE).write_text(token, encoding="utf-8")
+        options = build_options(base_url, api_key, workspace, env_overrides=env_overrides)
+        client = _session_factory(options)
+        try:
+            async with asyncio.timeout(timeout_s):
+                return await _drive_sdk_test(client, route.route_id)
+        except Exception as exc:  # noqa: BLE001 — mapped to a clear message, not swallowed
+            event = _error_event_for_exception(exc)
+            logger.warning(
+                "phase=sdk_test route=%s failed type=%s: %s",
+                route.route_id,
+                type(exc).__name__,
+                event.message,
+            )
+            return RouteSdkTestResult(route.route_id, "failed", event.message)
+        finally:
+            await _close_session(client)
+            logger.info("phase=sdk_test action=end route=%s", route.route_id)
+
+
+async def _drive_sdk_test(client: ClaudeSDKClient, route_id: str) -> RouteSdkTestResult:
+    tool_names: dict[str, str] = {}
+    saw_tool_ok = False
+    await _ensure_client_connected(client)
+    await client.query(_SDK_TEST_PROMPT)
+    async for message in client.receive_response():
+        for event in _translate_sdk_message(message, tool_names):
+            if isinstance(event, CopilotEventError):
+                logger.warning("phase=sdk_test route=%s tool/sdk error: %s", route_id, event.message)
+                return RouteSdkTestResult(route_id, "failed", event.message)
+            if (
+                isinstance(event, CopilotEventToolUseResult)
+                and event.tool_name == _SDK_TEST_TOOL
+                and event.success
+            ):
+                saw_tool_ok = True
+            if isinstance(event, CopilotEventDone):
+                return _sdk_test_verdict(route_id, saw_tool_ok)
+    return _sdk_test_verdict(route_id, saw_tool_ok)
+
+
+def _sdk_test_verdict(route_id: str, saw_tool_ok: bool) -> RouteSdkTestResult:
+    if saw_tool_ok:
+        return RouteSdkTestResult(route_id, "ok", None)
+    return RouteSdkTestResult(route_id, "failed", "模型未发起工具调用 (Read), tool loop 未验证")
 
 
 def _context_for_prompt(context: dict[str, Any]) -> dict[str, Any]:

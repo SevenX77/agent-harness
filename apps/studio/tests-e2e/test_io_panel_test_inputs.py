@@ -23,6 +23,10 @@ logger = logging.getLogger("e2e.io_panel_test_inputs")
 INPUT_NAME = "happy-path"
 
 
+def _action_button(page: Page, name: str):
+    return page.get_by_role("button", name=name, exact=True)
+
+
 def _select_skill(page: Page, skill_id: str) -> None:
     page.get_by_text(skill_id, exact=True).first.click()
     expect(page.get_by_role("button", name="Compile", exact=True)).to_be_visible(timeout=10_000)
@@ -110,4 +114,49 @@ def test_io_panel_duplicate_name_shows_clear_error(
     page.get_by_role("button", name="Save test input").click()
     expect(page.get_by_text("Test input already exists", exact=False)).to_be_visible(
         timeout=10_000
+    )
+
+
+def test_selected_test_input_feeds_predict_and_run(studio_page: Page) -> None:
+    # F4: the input selected in the i/o panel must become the Predict/Run
+    # payload (was hard-coded `{}`). Verified by capturing the actual request
+    # bodies on the running app.
+    page = studio_page
+    page.set_default_timeout(15_000)
+
+    _select_skill(page, "e2e-fast")
+    page.get_by_role("button", name="Input", exact=True).click()
+    name_field = page.get_by_label("New test input name")
+    expect(name_field).to_be_visible(timeout=10_000)
+
+    marker = {"input_text": "selected-marker"}
+    name_field.fill("marker-case")
+    page.get_by_label("New test input JSON").fill('{"input_text": "selected-marker"}')
+    page.get_by_role("button", name="Save test input").click()
+
+    select_button = page.get_by_role("button", name="Select test input marker-case")
+    expect(select_button).to_be_visible(timeout=10_000)
+    select_button.click()
+    expect(select_button).to_have_attribute("aria-pressed", "true", timeout=10_000)
+
+    def is_predict(request) -> bool:  # type: ignore[no-untyped-def]
+        return request.method == "POST" and request.url.rstrip("/").endswith("/runs/predict")
+
+    def is_run(request) -> bool:  # type: ignore[no-untyped-def]
+        return request.method == "POST" and request.url.rstrip("/").endswith("/runs")
+
+    _action_button(page, "Compile").click()
+    expect(_action_button(page, "Predict")).to_be_enabled(timeout=20_000)
+
+    with page.expect_request(is_predict) as predict_info:
+        _action_button(page, "Predict").click()
+    assert predict_info.value.post_data_json["input_data"] == marker, (
+        "Predict must use the selected test input"
+    )
+    expect(_action_button(page, "Run")).to_be_enabled(timeout=20_000)
+
+    with page.expect_request(is_run) as run_info:
+        _action_button(page, "Run").click()
+    assert run_info.value.post_data_json["input_data"] == marker, (
+        "Run must use the selected test input"
     )

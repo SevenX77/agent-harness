@@ -1,8 +1,9 @@
 import { useState } from "react"
 import useSWR from "swr"
-import { Plus, Trash2 } from "lucide-react"
+import { ListChecks, Loader2, Plus, Trash2 } from "lucide-react"
 import { createTestInput, deleteTestInput, fetcher } from "@/api/client"
 import type { JsonObject, TestInputMetadata } from "@/api/types"
+import { useBatchRun } from "@/hooks/useBatchRun"
 import { errorMessage, isJsonObject } from "@/utils/errors"
 import { SectionHeading } from "./_shared/SectionHeading"
 
@@ -56,6 +57,8 @@ export function TestInputsSection({
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const items = data ?? []
+  // F6: batch run shares the same test_inputs SWR key, so the list is deduped.
+  const batch = useBatchRun(skillId)
 
   const handleCreate = async () => {
     const prepared = prepareTestInputCreate(name, content)
@@ -110,6 +113,14 @@ export function TestInputsSection({
                     : "border-border bg-background"
                 }`}
               >
+                <input
+                  type="checkbox"
+                  // F6: select inputs to run together as a batch.
+                  checked={batch.selectedInputIds.includes(item.id)}
+                  onChange={() => batch.toggleInput(item.id)}
+                  aria-label={`Select test input ${item.id} for batch`}
+                  className="size-3.5 shrink-0 rounded border-border"
+                />
                 <button
                   type="button"
                   // F4: select this input as the Predict/Run payload (toggle off
@@ -135,6 +146,26 @@ export function TestInputsSection({
           })
         )}
       </div>
+
+      {batch.selectedInputIds.length > 0 || batch.batchStatus ? (
+        <div className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1 text-xs">
+          <button
+            type="button"
+            onClick={() => void batch.runBatch()}
+            disabled={batch.batchRunning || batch.selectedInputIds.length === 0}
+            className="flex items-center gap-1 rounded-md bg-foreground px-2 py-0.5 font-medium text-background transition-opacity hover:opacity-80 disabled:opacity-50"
+          >
+            {batch.batchRunning ? <Loader2 className="size-3.5 animate-spin" /> : <ListChecks className="size-3.5" />}
+            Run {batch.selectedInputIds.length} as batch
+          </button>
+          {batch.batchStatus ? (
+            <span className="text-muted-foreground">
+              {batch.batchStatus.completed}/{batch.batchStatus.total} · {batch.batchStatus.status}
+            </span>
+          ) : null}
+          {batch.batchError ? <span className="text-destructive">{batch.batchError}</span> : null}
+        </div>
+      ) : null}
 
       <div className="space-y-2 rounded-md border border-border bg-background p-2">
         <input

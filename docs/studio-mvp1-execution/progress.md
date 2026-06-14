@@ -48,5 +48,7 @@
 **剩余优先级**:② resume 501→接引擎(engine 已有 public `resume_skill`,studio `routers/runs.py:69` 仍 501,薄接即可)③ 6 态收敛(Studio adapter `needs_setup`→gateway 6 态,配 Phase 1 前端)④ per-node golden 薄接(engine `evaluate_golden_baseline` 已有)⑤ D10 RuntimeStateStore lease/fencing 接口 ⑥ Rust native-fs 唯一写者(D10/D12)+ RuntimeGate 降级 ⑦ copilot 安全写/dispatch/@mention/冷启动 ⑧ TracePanel 挂载 ⑨ llm_* 下沉 gateway。
 完成后:出后端可用 .app → computer-use 走完整生命周期验收。
 
+> **⚠️ 下一轮第一步:先逐项核对桶 B 真实状态再动手**。#139 比 2026-06-06 握手审计完整得多——已确认**已做**的别重复造:P0#1 skill 路径、**resume(完整 resume_skill 接线,非 501)**、run/predict/publish/golden 真后端、copilot fallback 委派 gateway。核完直接打**真·缺口**:6 态收敛(配 Phase 1)→ copilot 安全写(acceptEdits→patch_proposed)/dispatch/@mention/冷启动 → Rust native-fs(D10/D12)+RuntimeGate → TracePanel 挂载核实 → per-node golden 薄接 → llm_* 下沉。核对方式:对每项读 #139 现有代码(file:line)确认是否已实现,只对真未实现的开工。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

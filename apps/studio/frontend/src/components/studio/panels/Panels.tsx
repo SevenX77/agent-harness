@@ -1,5 +1,6 @@
-import type { SkillDetail } from "@/api/types"
+import type { CallbackEvent, SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData } from "@/components/GraphCanvas"
+import { TracePanel } from "@/components/TracePanel"
 import type { PanelKind } from "../Toolbar"
 import { useWorkspaceContext } from "../WorkspaceContext"
 import { AssetsPanel } from "./AssetsPanel"
@@ -15,9 +16,25 @@ interface PanelsProps {
   skillDetail?: SkillDetail
   selectedNode: { id: string; data: SkillGraphNodeData } | null
   onPhaseFileSave?: (payload: { path: string; content: string; expectedHash: string }) => Promise<void> | void
+  // trace-observability F1: while a run is active the timeline region streams
+  // live trace events (TracePanel); with no active run it shows run history (F2).
+  runId?: string | null
+  traceEvents?: CallbackEvent[]
+  activeTracePhase?: string | null
+  onSelectTracePrompt?: (index: number) => void
 }
 
-export function Panels({ activePanel, skillId, skillDetail, selectedNode, onPhaseFileSave }: PanelsProps) {
+export function Panels({
+  activePanel,
+  skillId,
+  skillDetail,
+  selectedNode,
+  onPhaseFileSave,
+  runId,
+  traceEvents,
+  activeTracePhase,
+  onSelectTracePrompt,
+}: PanelsProps) {
   const { onFileOpen } = useWorkspaceContext()
   if (!skillId) {
     return (
@@ -35,6 +52,16 @@ export function Panels({ activePanel, skillId, skillDetail, selectedNode, onPhas
     return <InputPanel skillDetail={skillDetail} onFileOpen={onFileOpen} />
   }
   if (activePanel === "timeline") {
+    // Active run → live trace stream; otherwise the run-history list.
+    if (runId) {
+      return (
+        <TracePanel
+          traceLogs={traceEvents ?? []}
+          activePhase={activeTracePhase ?? null}
+          onSelectPrompt={onSelectTracePrompt ?? (() => undefined)}
+        />
+      )
+    }
     return <TimelinePanel />
   }
   if (activePanel === "local-history") {

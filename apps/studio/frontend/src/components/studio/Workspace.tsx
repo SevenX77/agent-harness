@@ -7,7 +7,9 @@ import { CopilotPanel } from "@/components/copilot/copilot-panel"
 import { useCopilotContext } from "@/hooks/useCopilotContext"
 import { readLintStatus } from "@/hooks/useDebouncedLint"
 import { useRunStream } from "@/hooks/useRunStream"
+import { useGoldenDiff } from "@/hooks/useGoldenDiff"
 import { useSkills } from "@/hooks/useSkills"
+import { DiffView } from "@/components/diff/DiffView"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
 import { compileSkill, getSkillDetail, serializeSkillGraph, writeSkillFile, wsUrl, postPredictRun, startRun } from "@/api/client"
 import { isTauriRuntime } from "@/config/runtime"
@@ -115,6 +117,19 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     const running = Object.entries(statusByNodeId).find(([, status]) => status === "running")
     return running?.[0] ?? null
   }, [statusByNodeId])
+
+  // Golden compare/promote for the active run (per-node diff surfaced as an overlay).
+  const goldenDiff = useGoldenDiff(currentSkillId, runId)
+  const handleCompareToGolden = useCallback(() => {
+    void goldenDiff.compare()
+  }, [goldenDiff])
+  const handlePromoteToGolden = useCallback(() => {
+    void goldenDiff.promote().then((baseline) => {
+      if (baseline) {
+        toast.success("Promoted run to golden baseline")
+      }
+    })
+  }, [goldenDiff])
 
   useCopilotContext({
     skillId: currentSkillId,
@@ -610,6 +625,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   runId={runId}
                   traceEvents={runStream.events}
                   activeTracePhase={activeTracePhase}
+                  traceCanCompare={Boolean(runId)}
+                  traceCompareLoading={goldenDiff.loading}
+                  onCompareToGolden={handleCompareToGolden}
+                  onPromoteToGolden={handlePromoteToGolden}
                 />
               </ResizablePanel>
               <ResizableHandle />
@@ -665,6 +684,34 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                     onRun={handleRun}
                   />
                 </>
+              ) : null}
+              {goldenDiff.result && !settingsOpen ? (
+                <div className="absolute inset-0 z-40 flex flex-col bg-background">
+                  <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
+                    <span className="text-sm font-semibold text-foreground">Golden Diff</span>
+                    <button
+                      type="button"
+                      onClick={goldenDiff.clear}
+                      aria-label="Close golden diff"
+                      className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                    >
+                      Close
+                    </button>
+                  </div>
+                  <div className="min-h-0 flex-1">
+                    <DiffView
+                      result={goldenDiff.result}
+                      skillId={currentSkillId}
+                      runId={runId}
+                      loading={goldenDiff.loading}
+                      error={goldenDiff.error}
+                      canCompare={Boolean(runId)}
+                      canPromote={Boolean(runId)}
+                      onCompare={handleCompareToGolden}
+                      onPromote={handlePromoteToGolden}
+                    />
+                  </div>
+                </div>
               ) : null}
             </div>
           </ResizablePanel>

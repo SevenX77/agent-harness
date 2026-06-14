@@ -86,5 +86,22 @@
 
 **延期(设计登记,本轮不做)**:⑨ llm_* 下沉(补 DEF-id)、copilot dispatch、publish-zip→Rust(可后)、多机错误(时钟/分区/配额)、DEF-003/004/007/008/009/010/011/012/014/016/017/018。
 
+### 本轮进展(2026-06-13 续 · Tier 1 + 起 Tier 2)
+
+- **A. TracePanel 挂载 ✅**(commit `59169f9c`):timeline 区有活跑时流式 TracePanel(喂 runStream.events)、无活跑显示历史 TimelinePanel;handleRun 自动开 timeline。事件管道本就活,补的是挂载。RED→GREEN `Panels.trace-mount.test.tsx`。
+- **C. golden per-node ✅**(后端 `79521944` + 前端 `b2d3559c`):
+  - 后端:`golden_headless._node_outputs` 原只认 top-level `'phases'` 列表,真 run 写的是 BusinessData `phase_outputs`(node_id→outputs dict)→真跑退化 run-level。改为先读 `phase_outputs`,保留 legacy phases 路径。RED→GREEN 真 shape 测试。
+  - 前端:`DiffView` 原扁平字段列表忽略 `node_results`→改为**按节点分组**(每节点 pass/fail 徽章+score,字段嵌套);接上原孤儿 golden flow(TracePanel Compare/Promote 按钮→useGoldenDiff→DiffView center overlay)。后端 GET /compare 本就在(verifier"route mismatch"是过时说法)。
+- **门禁**:前端 tsc clean + vitest 418 + lint clean;后端 golden 18 passed + ruff clean;api/llm.ts 及 KEEP-MAIN 零改动。
+
+**Tier 1/golden 剩余子项(登记,后续)**:trace F2(点历史 run→拉回该 run full trace,需读历史 trace.jsonl)、F4(edge dot 真黑板,需 engine 发结构化 transition 事件)、F5(Prompt Inspector 挂载,onSelectPrompt 现 no-op 占位)。
+
+### ⚠️ 6 态收敛(Tier 2D)与 api/llm.ts 硬约束冲突 —— 待 PM 一句确认
+
+- **冲突**:charter §2 把 D6 6 态收敛列为范围内("两套全部实现不挑不减");但 §5.3/goal 命令把 `api/llm.ts` 列为**KEEP-MAIN 不碰**文件。
+- **为何必须碰**:6 态收敛是**前后端原子**改动——后端 adapter 收敛到 gateway canonical(去 needs_setup→failed+missing_config、加 historical_ready)后,前端 `api/llm.ts` 的 `ProviderUiState`/`ModelGroupStatusSummary` 枚举**必须同步翻**,否则前端收到 `historical_ready`/`failed` 而类型不含→运行时分叉(正是 Phase-1 plan 警告的)。只动后端不动前端 = 故意制造分叉。
+- **判断**:KEEP-MAIN 约束本是 **Phase-1 前端嫁接**的卫生规则(别拿 wave3 覆盖 #139);Phase-1 plan 自己把"翻 api/llm.ts 到 6 态"显式设计成"**后端 adapter 先收敛后**的下一步",即本阶段。按决策层级(核心决策>配套条件)+ "冲突处 three-module 赢",6 态收敛应做、含翻 api/llm.ts。
+- **本轮处理**:因 PM 显式点名该文件、且是大耦合改动,**本轮不擅自翻 api/llm.ts**;先做其余不碰 KEEP-MAIN 的隔离缺口。6 态收敛待 PM 一句"可翻 api/llm.ts 做 6 态"即开工(全程可回滚、非 main)。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

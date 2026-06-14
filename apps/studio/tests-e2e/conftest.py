@@ -49,6 +49,11 @@ def _find_free_port(preferred: int) -> int:
 
 BACKEND_PORT = int(os.environ.get("STUDIO_TEST_BACKEND_PORT", _find_free_port(8787)))
 FRONTEND_PORT = int(os.environ.get("STUDIO_TEST_FRONTEND_PORT", _find_free_port(5173)))
+# The backend refuses to start without an auth token and there is no dev bypass
+# (app/main.py configure_api_auth). The dev frontend picks the token up from the
+# URL hash (#tkn=) via bootstrapTunnelToken, so the e2e drives both ends with the
+# same fixed dev-tunnel token.
+E2E_TUNNEL_TOKEN = "e2e-dev-tunnel-token"
 BACKEND_URL = f"http://127.0.0.1:{BACKEND_PORT}"
 FRONTEND_URL = f"http://127.0.0.1:{FRONTEND_PORT}"
 API_BASE_URL = f"{BACKEND_URL}/api"
@@ -122,82 +127,95 @@ def _write_minimal_text_segmentation(skill_dir: Path) -> None:
 
 
 def _write_e2e_fast_skill(skill_dir: Path) -> None:
-    """Synthesize a multi-phase logic-only skill that completes in milliseconds."""
-    (skill_dir / "script").mkdir(parents=True)
-    (skill_dir / "script" / "__init__.py").write_text("", encoding="utf-8")
-    (skill_dir / "script" / "fast.py").write_text(
+    """Synthesize a current-format (v0.3.0) logic-only multi-phase skill.
+
+    Root GRAPH.md + phases/<name>/LOGIC.md + actions/<name>.py; completes in
+    milliseconds without API keys. The current engine rejects root SKILL.md
+    ("schema 2.0 root SKILL.md is not supported; use GRAPH.md").
+    """
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "GRAPH.md").write_text(
         textwrap.dedent("""\
-            from __future__ import annotations
-
-
-            def step1(context):
-                context['step1'] = (context.get('payload') or '') + '_s1'
-                return 'step1 ok'
-
-
-            def step2(context):
-                context['step2'] = (context.get('step1') or '') + '_s2'
-                return 'step2 ok'
-
-
-            def step3(context):
-                context['step3'] = (context.get('step2') or '') + '_s3'
-                context['final_result'] = context['step3']
-                return 'step3 ok'
+            ---
+            schema_version: "v0.3.0"
+            name: e2e-fast
+            description: Fast logic-only multi-phase skill used by the Studio e2e suite
+            io:
+              inputs:
+                type: object
+                required: [payload]
+                properties:
+                  payload:
+                    type: string
+              outputs:
+                type: object
+                required: [final_result]
+                properties:
+                  final_result:
+                    type: string
+            phases:
+              - step1
+              - step2
+              - step3
+            ---
+            <phase depends_on="input">step1</phase>
+            <phase depends_on="step1">step2</phase>
+            <phase depends_on="step2" output>step3</phase>
             """),
         encoding="utf-8",
     )
-    (skill_dir / "SKILL.md").write_text(
-        textwrap.dedent("""\
+    _write_logic_phase(skill_dir, "step1", "payload", "step1", "_s1")
+    _write_logic_phase(skill_dir, "step2", "step1", "step2", "_s2")
+    _write_logic_phase(skill_dir, "step3", "step2", "final_result", "_s3")
+
+
+def _write_logic_phase(skill_dir: Path, phase: str, in_key: str, out_key: str, suffix: str) -> None:
+    phase_dir = skill_dir / "phases" / phase
+    (phase_dir / "actions").mkdir(parents=True, exist_ok=True)
+    (phase_dir / "LOGIC.md").write_text(
+        textwrap.dedent(f"""\
             ---
-            schema_version: "2.0"
-            name: e2e-fast
-            description: Fast logic-only multi-phase skill used by the Studio e2e suite
-            type: graph
-            context_mapping:
-              payload: "{input.payload}"
-              step1: ""
-              step2: ""
-              step3: ""
-              final_result: ""
             io:
               inputs:
-                - name: payload
-                  type: str
-                  source: runtime
+                type: object
+                required: [{in_key}]
+                properties:
+                  {in_key}:
+                    type: string
               outputs:
-                - name: final_result
-                  type: str
-                  target: file
-                  path: "output/e2e-fast/final.json"
-            phases:
-              - name: phase1
-                mode: logic
-                execute_steps:
-                  - script.fast.step1
-              - name: phase2
-                mode: logic
-                execute_steps:
-                  - script.fast.step2
-              - name: phase3
-                mode: logic
-                execute_steps:
-                  - script.fast.step3
+                type: object
+                required: [{out_key}]
+                properties:
+                  {out_key}:
+                    type: string
+            actions: [{phase}]
+            validator: false
             ---
+            <action>{phase}</action>
             """),
+        encoding="utf-8",
+    )
+    (phase_dir / "actions" / f"{phase}.py").write_text(
+        f'def {phase}(context):\n    return {{"{out_key}": (context.get("{in_key}") or "") + "{suffix}"}}\n',
         encoding="utf-8",
     )
 
 
 @pytest.fixture(scope="session")
 def studio_workspace(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[str, Path]]:
-    """Create temp skills/workspaces dirs that are exclusively owned by the e2e suite."""
+    """Create temp skills/workspaces dirs that are exclusively owned by the e2e suite.
+
+    Skills are seeded into the *writable* workspace skills dir
+    (WORKSPACES_DIR/default/skills), not the read-only public SKILLS_DIR, so
+    predict/run work (public skills are read-only -> predict 403 SKILL_READ_ONLY).
+    """
     base = tmp_path_factory.mktemp("studio_e2e")
     skills_dir = base / "skills"
+    skills_dir.mkdir()
     workspaces_dir = base / "workspaces"
-    workspaces_dir.mkdir()
-    _seed_skill_files(skills_dir)
-    logger.info("seeded e2e workspace skills_dir=%s", skills_dir)
+    workspace_skills_dir = workspaces_dir / "default" / "skills"
+    _seed_skill_files(workspace_skills_dir)
+    logger.info("seeded e2e workspace skills_dir=%s", workspace_skills_dir)
     yield {"skills_dir": skills_dir, "workspaces_dir": workspaces_dir, "base": base}
 
 
@@ -215,6 +233,7 @@ def studio_servers(studio_workspace: dict[str, Path]) -> Iterator[dict[str, str]
         "STUDIO_TEST_SKILLS_DIR": str(studio_workspace["skills_dir"]),
         "STUDIO_TEST_WORKSPACES_DIR": str(studio_workspace["workspaces_dir"]),
         "STUDIO_TEST_PORT": str(BACKEND_PORT),
+        "STUDIO_DEV_TUNNEL_TOKEN": E2E_TUNNEL_TOKEN,
         "PYTHONPATH": os.pathsep.join(
             [str(STUDIO_BACKEND), str(SRC_CORE), os.environ.get("PYTHONPATH", "")],
         ),
@@ -306,6 +325,10 @@ def studio_servers(studio_workspace: dict[str, Path]) -> Iterator[dict[str, str]
 
 @pytest.fixture
 def studio_page(page, studio_servers: dict[str, str]):  # type: ignore[no-untyped-def]
-    """Navigate to the Studio frontend root and return the Playwright page."""
-    page.goto(studio_servers["frontend_url"])
+    """Navigate to the Studio frontend root and return the Playwright page.
+
+    The #tkn= hash seeds the dev-tunnel auth token (bootstrapTunnelToken) so the
+    frontend sends Authorization: Bearer on every backend request.
+    """
+    page.goto(f"{studio_servers['frontend_url']}/#tkn={E2E_TUNNEL_TOKEN}")
     return page

@@ -8,6 +8,14 @@
 
 > **DEF-001 / DEF-002 已拉回 `studio-feature-trace-inspector` scope**(2026-06-01),不再是 deferred 项 —— 二者本就是该 spec 自己的 feature,不属跨 spec/孤儿,见下方 Promoted 区与 `requirement.md` REQ-3 / REQ-7。
 
+### DEF-027 — copilot F5 安全写:前向写未走 Rust(D12 偏离)— 需 PM 架构裁决 ⚠️ P1
+- **日期**: 2026-06-14
+- **事项**: 设计 §F5 + D12 要求 copilot 的 Write/Edit **前向写经 Rust autosave 落盘**(Rust 唯一写者)。当前实现:`can_use_tool`(`copilot.py:_make_safe_write_can_use_tool`)对 Write/Edit 返回 `PermissionResultAllow` → **是 SDK CLI 子进程自己把文件写到磁盘的,不是经 Rust**。只有 **Reject 还原**走了 Rust(`restore_workspace_file`,忠实)。所以**前向写偏离了"落盘走 Rust"/D12 唯一写者**。
+- **为何不能用权限回调修**: 已 PoC 真跑核实——SDK 的 `can_use_tool` 和 `hooks`(PreToolUse)都只有 `allow|deny|ask` 三态,**只能放行/拦截,没有"我自己用 Rust 写、并告诉模型成功"的口子**;Allow=SDK 直写,Deny=模型看到工具失败。且 backend sidecar **调不了 Tauri Rust IPC**(只有前端能调)→ 前向写要走 Rust 必须经前端。
+- **忠实的修法(已核实 SDK 支持,但是再架构)**: 不给模型 SDK 原生 Write/Edit,改用**自定义 in-process MCP 工具**(SDK 的 `@tool` + `create_sdk_mcp_server` + `McpSdkServerConfig`,已确认 PRESENT):`propose_write(path,content)` / `propose_edit(...)` 的 handler = 我们的代码,**只 emit patch_proposed 事件 + 返回 success,不写文件**;前端收到事件后**经 Rust `write_workspace_file` 落盘**(= 前向写走 Rust,D12 忠实)。代价:模型从用原生 Write/Edit 改成用自定义工具,行为/质量有影响 = **架构/价值判断,需 PM 拍板**(接受当前 SDK 直写的偏离 / 还是切自定义工具走 Rust)。
+- **当前状态**: diff 审阅 + checkpoint 还原(经 Rust)已做;唯"前向写经 Rust"未做。功能上 copilot 能改、能看 diff、能还原;偏离的是 D12 写者归属。
+- **来源**: copilot-assist mvp1-alignment §F5(line 53「经 Rust autosave 落盘」、line 88「Rust autosave 落盘」)+ 01-design.md D12;本会话 PoC + SDK 能力核实(2026-06-14)。
+
 ### DEF-024 — copilot F5 安全写:Bash 交互审批往返(双向 WS 控制通道)— 后续
 - **日期**: 2026-06-14
 - **事项**: copilot F5 模型 B 的 Bash「逐条审批卡」需用户点 Approve/Reject,回传后端解析 `can_use_tool` 的 Future 决定 Allow/Deny。现 `can_use_tool` 已对 Bash 触发并 emit `bash_approval_required` 事件,但**保守 hold=deny**(破坏性命令不批不跑,安全但不能 approve)。

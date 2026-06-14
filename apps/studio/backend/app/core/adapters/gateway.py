@@ -60,6 +60,7 @@ from graph_agent_gateway.registry.schema import (
 
 # Re-exports from graph_agent_gateway for services isolation
 from graph_agent_gateway.resolver import ModelResolver as ModelResolver
+from graph_agent_gateway.resolver import ResourceTerminalError as ResourceTerminalError
 
 from app.core.adapters.http_transport import HttpTransport, StudioAdapterError
 
@@ -730,6 +731,7 @@ __all__ = [
     "ProfileSelectionError",
     "select_verified_profile",
     "RegistryResolutionError",
+    "ResourceTerminalError",
     "lint_role_routes",
     "RuntimeSettings",
     "VerifiedProfile",

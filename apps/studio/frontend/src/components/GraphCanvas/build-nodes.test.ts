@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import type { SkillDetail } from '@/api/types'
+import type { GraphTopologyItem, SkillDetail } from '@/api/types'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 import { INPUT_ID, OUTPUT_ID, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
-import { buildNodes, phaseKindFile } from './build-nodes'
+import { buildNodes, buildNodesFromTopology, phaseKindFile } from './build-nodes'
 
 describe('phaseKindFile', () => {
   it('maps an agent phase (mode "agent") to SKILL.md, not LOGIC.md', () => {
@@ -78,6 +78,38 @@ describe('buildNodes', () => {
 
     expect(nodes[0].id).toBe(INPUT_ID)
     expect(nodes[nodes.length - 1].id).toBe(OUTPUT_ID)
+  })
+})
+
+describe('buildNodesFromTopology (drilled child graph)', () => {
+  const topology: GraphTopologyItem[] = [
+    { id: 'plan', src: 'phases/plan/SKILL.md', depends_on: [], mode: 'agent' },
+    { id: 'nested', src: 'phases/nested/SUBGRAPH.md', depends_on: ['plan'], mode: 'subgraph', path: 'skills/grandchild' },
+  ]
+
+  it('brackets drilled phases with global input/output and preserves order + deps', () => {
+    const nodes = buildNodesFromTopology('demo', ['plan', 'nested'], topology, {})
+    expect(nodes[0].id).toBe(INPUT_ID)
+    expect(nodes[nodes.length - 1].id).toBe(OUTPUT_ID)
+
+    const plan = phaseNode(nodes, 'plan')
+    expect(plan.mode).toBe('agent')
+    expect(plan.dependsOn).toEqual([])
+
+    const nested = phaseNode(nodes, 'nested')
+    expect(nested.dependsOn).toEqual(['plan'])
+  })
+
+  it('exposes a nested subgraph child path so deeper drilling is possible', () => {
+    const nodes = buildNodesFromTopology('demo', ['plan', 'nested'], topology, {})
+    expect(phaseNode(nodes, 'nested').subgraphPath).toBe('skills/grandchild')
+    expect(phaseNode(nodes, 'plan').subgraphPath).toBeNull()
+  })
+
+  it('defaults drilled phases to idle and carries through a real status', () => {
+    const nodes = buildNodesFromTopology('demo', ['plan', 'nested'], topology, { plan: 'success' })
+    expect(phaseNode(nodes, 'plan').status).toBe('success')
+    expect(phaseNode(nodes, 'nested').status).toBe('idle')
   })
 })
 

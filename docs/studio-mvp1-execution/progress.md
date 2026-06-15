@@ -432,7 +432,12 @@ Stop-hook、反自造停下铁律、copilot F3/F4-echo/F7、trace F5/F2、input 
   - **post-audit 逼出的真回归(全绿门禁都没逮到,对抗审计逮到)**:batch/iterate phase + **开放输出 schema**(io.outputs 无 properties)时,每条 item 的 `phase_outputs` 经 `_dict_delta` 漏进该节点 golden entry。修 + 加永久 RED→GREEN 守卫(stash fix 该测真 FAIL)。
   - **验证(真跑 + 单测)**:新 e2e `test_ws_e8_per_node_phase_outputs.py`(真 run_skill 跑 2-phase 线性逻辑技能 → 读盘 `final_state.json` 确认真 `phase_outputs={segment:{segments},expand:{report}}` + batch 开放 schema 无泄漏);`test_state_mapper.py` 加 2 单测(真 model_dump phase_outputs 累积 + 子图 IO 不泄漏);修了 1 个 exact-equality 旧断言(现含 phase_outputs)。
   - **门禁(真跑)**:engine pytest **1301 passed**(+我 3 测,含修复后 0 fail)、Studio 后端 **530**、Studio golden RED **4**、engine ruff/mypy 全清。**纯 engine 改动**:git diff 仅 `state_mapper.py`+`graph_assembler.py`+2 测;api/llm.ts + 前端 + gateway + frozen 契约(result_contracts.py)**零改动**;never main。
-  - **登记**:增量 C(DEF-029 per-node 输出路径 schema)= frozen-schema 变更高风险,A 之后独立轮做。
+  - **登记**:增量 C(DEF-029 per-node 输出路径 schema)= frozen-schema 变更高风险,A 之后先核实是否真需要(见下)。
+- **✅ 增量 C(DEF-029)核实结论 = FRONTEND-ONLY,撤销"engine schema 变更"登记**(verify-before-asking,真跑验证):
+  - **DEF-029 前提("引擎无 per-node output artifact path 字段")= 错**。引擎 `_save_v030_declared_file_outputs`(`runner.py:1292-1332`)对每个 `io.outputs.<field>` 带 `target∈{file,artifact}` 的字段,把它写到该字段的 `path`(经 `IOManager.save_outputs` → `_resolve_output_file_path`,full path 照用 + 路径逃逸守卫;artifact/file 只换 base dir;裸文件名→默认落 artifacts 目录)。**子 agent 真跑验证**:2-phase 技能 alpha/beta 各声明 `io.outputs` 带不同(含嵌套子目录)`path` → 各落 `runs/<id>/artifacts/alpha/report.md`、`.../beta/data.json`。
+  - **F3 设计(FROZEN-2/G3,`01_workflows/02_authoring.md:40`)白纸黑字就是这套** `io.outputs` 顶层加文件路径机制(PM 原话:"落盘的写法就在 io.outputs 的 schema 顶层再加一个文件路径...默认只写文件名落 .workspace/artifacts")。**F3 = 前端在 I/O 面板写 `{target:artifact, path:}` 进 GRAPH.md `io.outputs.<field>`**(镜像已有 F2 的 `io.inputs` 写回 `applyInputSchemaToGraph`),**引擎已消费该字段,零 engine 改动**(且不违"Studio 不能加引擎不读的字段"——字段已被读)。
+  - **= 第三个"engine 缺口"其实不是**(P0-2 懒加载 / B 已发事件 / C 已honor),verify-before-asking 避免了一次高风险 frozen-schema 变更。DEF-029 reclassify → owner=studio/input 前端。
+- **本轮 engine wave 收束**:A=唯一真 engine 缺口(已做已提交);B/C/D 经核实皆非 engine 工作(B engine 已发事件、C 前端、D 设计延期)。下一步按 PM 指令 ③ 转**前端适配**(沿用现有组件+shadcn):F3 输出路径编辑器、edge-blackboard 消费引擎已发的 transition 事件等。
 
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

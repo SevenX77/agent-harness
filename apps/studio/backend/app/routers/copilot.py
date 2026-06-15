@@ -49,6 +49,7 @@ async def copilot_ws(websocket: WebSocket, skill_id: str) -> None:
                 skill_id=skill_id,
                 user_message=payload.user_message,
                 model_override=payload.model_override,
+                role=payload.role,
             ):
                 await websocket.send_json(event.model_dump())
     except WebSocketDisconnect:

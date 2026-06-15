@@ -25,6 +25,9 @@ class CopilotWsRequestPayload(BaseModel):
 
     user_message: str
     model_override: str | None = None
+    # The selected copilot role (one per `role_kind=="copilot"` role in settings,
+    # each auto-matched to its model group). Defaults to copilot_chat.
+    role: str | None = None
 
 
 class CopilotEventBase(BaseModel):

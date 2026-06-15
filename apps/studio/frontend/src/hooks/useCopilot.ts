@@ -18,6 +18,28 @@ function nextId(prefix: string) {
   return `${prefix}-${Date.now()}-${messageIdFallbackCounter}`
 }
 
+export interface CopilotSendPayload {
+  user_message: string
+  model_override?: string
+  role?: string
+}
+
+/** Build the ws send payload, attaching model_override / role only when present. */
+export function buildCopilotSendPayload(
+  userMessage: string,
+  modelOverride?: string | null,
+  role?: string | null,
+): CopilotSendPayload {
+  const payload: CopilotSendPayload = { user_message: userMessage }
+  if (modelOverride) {
+    payload.model_override = modelOverride
+  }
+  if (role) {
+    payload.role = role
+  }
+  return payload
+}
+
 function createMessage(role: CopilotMessage['role'], content: string, status: CopilotMessage['status']): CopilotMessage {
   return {
     id: nextId(role),
@@ -172,7 +194,7 @@ export function useCopilot(skillId: string | null) {
     }
   }, [skillId, appendAssistantEvent])
 
-  const sendMessage = useCallback((content: string, modelOverride?: string | null) => {
+  const sendMessage = useCallback((content: string, modelOverride?: string | null, role?: string | null) => {
     const trimmed = content.trim()
     if (!trimmed || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
       return false
@@ -180,11 +202,7 @@ export function useCopilot(skillId: string | null) {
 
     assistantMessageIdRef.current = null
     copilotStore.appendMessage(createMessage('user', trimmed, 'success'))
-    const payload: { user_message: string, model_override?: string } = { user_message: trimmed }
-    if (modelOverride) {
-      payload.model_override = modelOverride
-    }
-    socketRef.current.send(JSON.stringify(payload))
+    socketRef.current.send(JSON.stringify(buildCopilotSendPayload(trimmed, modelOverride, role)))
     return true
   }, [])
 

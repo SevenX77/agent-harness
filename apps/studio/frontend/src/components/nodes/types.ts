@@ -10,6 +10,7 @@ export interface SubagentRef {
 }
 
 export interface SkillGraphNodeData extends Record<string, unknown> {
+  skillId: string
   label: string
   mode: string
   role?: string | null

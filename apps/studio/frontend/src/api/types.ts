@@ -428,6 +428,20 @@ export interface GraphTopologyItem {
   src: string
   depends_on: string[]
   mode: 'logic' | 'subgraph' | 'skill' | string
+  /** Absolute child-graph path, surfaced only for subgraph phases. */
+  path?: string | null
+}
+
+/**
+ * Child graph resolved by absolute path for inline subgraph rendering.
+ * Mirrors the backend `ChildGraphTopology` model.
+ */
+export interface ChildGraphTopology {
+  path: string
+  name: string
+  description: string
+  phases: string[]
+  graph_topology: GraphTopologyItem[]
 }
 
 export interface SkillDetail {

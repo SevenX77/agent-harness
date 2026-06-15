@@ -45,7 +45,10 @@ describe('PropertiesPanel', () => {
 
     expect(html).toContain('setup')
     expect(html).toContain('LOGIC')
-    expect(html).toContain('Python callable')
+    // FROZEN whitelist: a logic node edits Actions + Validator, never the
+    // deprecated mode/python_callable/system_prompt fields.
+    expect(html).toContain('Actions')
+    expect(html).not.toContain('Python callable')
     expect(html).not.toContain('System prompt')
     expect(html).toContain('input')
     expect(html).toContain('prepare')
@@ -89,9 +92,13 @@ describe('PropertiesPanel', () => {
       />,
     )
 
-    expect(html).toContain('System prompt')
-    expect(html).toContain('Exit contract')
+    // FROZEN whitelist: an agent node edits LLM role + Tools + Subagents, never
+    // the deprecated system_prompt/exit_contract/python_callable fields.
+    expect(html).toContain('LLM role')
     expect(html).toContain('Tools')
+    expect(html).toContain('Subagents')
+    expect(html).not.toContain('System prompt')
+    expect(html).not.toContain('Exit contract')
     expect(html).not.toContain('Python callable')
   })
 
@@ -123,7 +130,10 @@ describe('PropertiesPanel', () => {
       />,
     )
 
-    expect(html).toContain('Target skill')
+    // FROZEN whitelist: a subgraph node edits Path (absolute) + Validator, never
+    // the deprecated target_skill/system_prompt fields.
+    expect(html).toContain('>Path<')
+    expect(html).not.toContain('Target skill')
     expect(html).not.toContain('System prompt')
     expect(html).not.toContain('phase-tools')
   })

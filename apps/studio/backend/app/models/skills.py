@@ -60,6 +60,18 @@ class PhaseRef(BaseModel):
     mode: Literal["logic", "subgraph", "skill"]
 
 
+class ChildGraphTopology(BaseModel):
+    """Child graph resolved by absolute path for inline subgraph rendering."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    name: str
+    description: str = ""
+    phases: list[str] = Field(default_factory=list)
+    graph_topology: list[dict[str, object]] = Field(default_factory=list)
+
+
 class SerializeGraphReq(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

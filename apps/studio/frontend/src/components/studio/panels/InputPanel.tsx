@@ -1,31 +1,44 @@
 import { useMemo, useState, type DragEvent } from "react"
 import yaml from "js-yaml"
-import { Save, Upload } from "lucide-react"
+import { Plus, Save, Trash2, Upload } from "lucide-react"
 import { writeSkillFile } from "@/api/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import type { SkillDetail } from "@/api/types"
 import {
+  addIoField,
   applyInputSchemaToGraph,
   applyOutputArtifactPathToGraph,
   inferJsonSchemaFromText,
+  IO_FIELD_TYPES,
+  listIoFields,
+  removeIoField,
+  renameIoField,
+  setIoFieldType,
+  type IoField,
+  type IoFieldType,
+  type IoSide,
 } from "@/lib/schema-infer"
 import { errorMessage } from "@/utils/errors"
-import type { FileMeta } from "../file-types"
 import { resolveWorkspaceIdentity } from "../workspace-identity"
-import { FileRow } from "./_shared/FileRow"
 import { PanelHeader } from "./_shared/PanelHeader"
 import { SectionHeading } from "./_shared/SectionHeading"
 import { GoldenSection } from "./GoldenSection"
-import { inputFiles } from "./panel-files"
+import { inputContractView } from "./panel-files"
 import { TestInputsSection } from "./TestInputsSection"
 
 interface InputPanelProps {
   skillId: string
   skillDetail?: SkillDetail
-  onFileOpen: (file: FileMeta) => void
   selectedTestInputId?: string | null
   onSelectTestInput?: (id: string | null) => void
 }
@@ -284,17 +297,256 @@ function OutputArtifactPathPanel({ fields, skillId, graphMd, onSaved }: OutputAr
   )
 }
 
+interface IoSchemaFieldsPanelProps {
+  side: IoSide
+  fields: IoField[]
+  skillId: string
+  graphMd?: string
+  onSaved?: () => void
+}
+
+interface IoFieldRowProps {
+  side: IoSide
+  field: IoField
+  skillId: string
+  graphMd?: string
+  onSaved?: () => void
+}
+
+// Writes one mutation back to GRAPH.md frontmatter via the shared F2/F3 save
+// path: resolve the workspace root, apply a pure writeback, then writeSkillFile
+// to GRAPH.md. The pure function decides which io side + field changes; the
+// other io side, every other frontmatter key, and the body (phase DAG) survive.
+async function saveGraph(
+  skillId: string,
+  graphMd: string,
+  next: (graphMd: string) => string,
+): Promise<void> {
+  const target = resolveWorkspaceIdentity(skillId).workspaceRoot ?? skillId
+  await writeSkillFile(target, "GRAPH.md", next(graphMd))
+}
+
+// One declared io field as an editable row: rename (Input, save on blur/Enter),
+// change-type (Select), remove (Trash). Each commit goes through saveGraph onto
+// `io.<side>.properties.<field>` in GRAPH.md — the authoritative contract the
+// engine validates — so there are no fake-file dead paths to lose edits to.
+function IoFieldRow({ side, field, skillId, graphMd, onSaved }: IoFieldRowProps) {
+  const [nameDraft, setNameDraft] = useState(field.name)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const run = async (next: (graphMd: string) => string) => {
+    if (!graphMd) {
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      await saveGraph(skillId, graphMd, next)
+      onSaved?.()
+    } catch (caught) {
+      setError(errorMessage(caught))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleRename = () => {
+    const nextName = nameDraft.trim()
+    if (nextName === "" || nextName === field.name) {
+      setNameDraft(field.name)
+      return
+    }
+    void run((graphMd) => renameIoField(graphMd, side, field.name, nextName))
+  }
+
+  return (
+    <div className="space-y-1.5 rounded-md border border-border bg-background p-3">
+      <div className="flex items-center gap-2">
+        <Input
+          value={nameDraft}
+          onChange={(event) => setNameDraft(event.target.value)}
+          onBlur={handleRename}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.currentTarget.blur()
+            }
+          }}
+          placeholder="field_name"
+          className="font-mono"
+          spellCheck={false}
+          aria-label={`Rename ${side} field ${field.name}`}
+          disabled={busy || !graphMd}
+        />
+        <Select
+          value={IO_FIELD_TYPES.includes(field.type as IoFieldType) ? field.type : undefined}
+          onValueChange={(value) =>
+            void run((graphMd) => setIoFieldType(graphMd, side, field.name, value as IoFieldType))
+          }
+          disabled={busy || !graphMd}
+        >
+          <SelectTrigger
+            className="w-28 font-mono"
+            aria-label={`Type for ${side} field ${field.name}`}
+          >
+            <SelectValue placeholder={field.type || "type"} />
+          </SelectTrigger>
+          <SelectContent>
+            {IO_FIELD_TYPES.map((type) => (
+              <SelectItem key={type} value={type} className="font-mono">
+                {type}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={() => void run((graphMd) => removeIoField(graphMd, side, field.name))}
+          disabled={busy || !graphMd}
+          aria-label={`Remove ${side} field ${field.name}`}
+        >
+          <Trash2 className="size-3.5" />
+        </Button>
+      </div>
+      {error ? (
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">
+          {error}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+// Add-a-field control: a name Input + type Select + Add Button that appends a
+// new `{type}` field to `io.<side>.properties` in GRAPH.md.
+function IoFieldAddRow({
+  side,
+  skillId,
+  graphMd,
+  onSaved,
+}: {
+  side: IoSide
+  skillId: string
+  graphMd?: string
+  onSaved?: () => void
+}) {
+  const [name, setName] = useState("")
+  const [type, setType] = useState<IoFieldType>("string")
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleAdd = async () => {
+    if (!graphMd || name.trim() === "") {
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      await saveGraph(skillId, graphMd, (graphMd) => addIoField(graphMd, side, name, type))
+      setName("")
+      onSaved?.()
+    } catch (caught) {
+      setError(errorMessage(caught))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-1.5 rounded-md border border-dashed border-border bg-background p-3">
+      <div className="flex items-center gap-2">
+        <Input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              void handleAdd()
+            }
+          }}
+          placeholder="new_field"
+          className="font-mono"
+          spellCheck={false}
+          aria-label={`New ${side} field name`}
+          disabled={busy || !graphMd}
+        />
+        <Select
+          value={type}
+          onValueChange={(value) => setType(value as IoFieldType)}
+          disabled={busy || !graphMd}
+        >
+          <SelectTrigger className="w-28 font-mono" aria-label={`New ${side} field type`}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {IO_FIELD_TYPES.map((option) => (
+              <SelectItem key={option} value={option} className="font-mono">
+                {option}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => void handleAdd()}
+          disabled={busy || !graphMd || name.trim() === ""}
+          aria-label={`Add ${side} field`}
+        >
+          <Plus className="size-3.5" />
+          Add
+        </Button>
+      </div>
+      {error ? (
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">
+          {error}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+// Field-level editor for one io side (inputs/outputs): lists each declared field
+// with rename / change-type / remove, plus an add row. Writes back to GRAPH.md
+// `io.<side>.properties` frontmatter — the engine's authoritative contract —
+// complementing the F2 schema-infer and F3 artifact-path tools (which stay).
+function IoSchemaFieldsPanel({ side, fields, skillId, graphMd, onSaved }: IoSchemaFieldsPanelProps) {
+  const label = side === "inputs" ? "Input fields" : "Output fields"
+  return (
+    <section className="space-y-2">
+      <div className="flex items-center gap-2 px-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        <Upload className="size-3.5" />
+        {label}
+      </div>
+      <div className="space-y-2">
+        {fields.map((field) => (
+          <IoFieldRow
+            key={field.name}
+            side={side}
+            field={field}
+            skillId={skillId}
+            graphMd={graphMd}
+            onSaved={onSaved}
+          />
+        ))}
+        <IoFieldAddRow side={side} skillId={skillId} graphMd={graphMd} onSaved={onSaved} />
+      </div>
+    </section>
+  )
+}
+
 export function InputPanel({
   skillId,
   skillDetail,
-  onFileOpen,
   selectedTestInputId = null,
   onSelectTestInput,
 }: InputPanelProps) {
-  const files = inputFiles(skillDetail)
-  const sample = files.find((file) => file.path === "input/sample.json")?.content ?? "{}"
+  const contract = inputContractView(skillDetail)
   const graphMd = skillDetail?.files?.["GRAPH.md"]
   const outputFields = useMemo(() => outputArtifactFields(graphMd), [graphMd])
+  const inputIoFields = useMemo(() => (graphMd ? listIoFields(graphMd, "inputs") : []), [graphMd])
+  const outputIoFields = useMemo(() => (graphMd ? listIoFields(graphMd, "outputs") : []), [graphMd])
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -310,13 +562,23 @@ export function InputPanel({
 
           <GoldenSection skillId={skillId} />
 
-          <SectionHeading label="Input Files" />
-          <FileRow file={files[1]} onOpen={onFileOpen} />
-
-          <SectionHeading label="Schema" />
-          <FileRow file={files[0]} onOpen={onFileOpen} />
+          <SectionHeading label="Input Schema" />
+          <IoSchemaFieldsPanel
+            side="inputs"
+            fields={inputIoFields}
+            skillId={skillId}
+            graphMd={graphMd}
+          />
           <SchemaInferPanel
-            initialJson={sample}
+            initialJson={contract.inputSampleJson}
+            skillId={skillId}
+            graphMd={graphMd}
+          />
+
+          <SectionHeading label="Output Schema" />
+          <IoSchemaFieldsPanel
+            side="outputs"
+            fields={outputIoFields}
             skillId={skillId}
             graphMd={graphMd}
           />

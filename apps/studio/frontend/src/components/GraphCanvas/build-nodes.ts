@@ -7,7 +7,7 @@ const EMPTY_IO: IoDeclaration = { inputs: [], outputs: [] }
 
 export function phaseKindFile(data: Pick<SkillGraphNodeData, 'mode' | 'subgraphPath'>): 'LOGIC.md' | 'SKILL.md' | 'SUBGRAPH.md' {
   if (data.subgraphPath || data.mode === 'subgraph') return 'SUBGRAPH.md'
-  if (data.mode === 'skill' || data.mode === 'llm') return 'SKILL.md'
+  if (data.mode === 'agent' || data.mode === 'skill' || data.mode === 'llm') return 'SKILL.md'
   return 'LOGIC.md'
 }
 
@@ -190,7 +190,7 @@ export function buildNodes(
         tools: mode === 'skill' ? stringListFromUnknown(frontmatter?.tools) : phase.mode === 'llm' ? phase.agent_tools : [],
         subagents: subagentsForPhase(detail, phase.name),
         filePath,
-        status: statusByNodeId[phase.name] ?? (index === 0 ? 'success' : 'idle'),
+        status: statusByNodeId[phase.name] ?? 'idle',
         dependsOn: topology?.depends_on ?? normalizeDependsOn(phase.depends_on),
         subgraphPath,
         isExpanded: expandedSubgraphs.has(phase.name),

@@ -553,5 +553,17 @@ R2 add-node(AddPhaseControl 画布左上下拉,wire onCreatePhase,配 R1 脚手�
 - **⚠️ 视觉鼠标复验仍 BLOCKED(真 blocker,非自造)**:`request_access` 授权成功(tier full)但 `screenshot` 仍 `SCContentFilter failure` → **屏幕录制权限未授**。这需 PM 在 System Settings → Privacy & Security → Screen Recording 勾选(改系统安全设置 = 我禁止自做)。**只 block 视觉鼠标 pass,不 block 任何其他功能工作**;按"遇 blocker 记录后继续"已记此处,继续推进。
 - **结论给 PM**:fresh .app 已在跑(当前前端 + 健康后端),PM 现在就能点穿 7 条复盘里的功能;要我自己做 computer-use 鼠标全流程复验,请开屏幕录制权限。
 
+### R24 ✅(commit `6a58467b`)+ R15 ✅(`42b8b7ea`)— 四步法各跑完(pre-audit→实施→post-audit CONFORM)
+- **R24 / D14 / properties F3**(dot 改道 trace,去 Properties JSON dump):Properties 的 `selectedEdge` 原始 JSON dump("Connection Trace"/Input Arguments/Phase Outputs/Full Frame Trace+Copy JSON)删除,Properties 纯节点 frontmatter 表单;edge dot 点击改 `onPanelChange('timeline')`(原 'properties'),由新建的 trace-owned `EdgeContextView`(挂 TimelinePanel)渲染——把携带的 contextJson 框成**节点间黑板转移**(dot=transition point):changed_keys 徽章 + dispatched 黑板(结构化 key→value,非裸 dump),honest 标注 reduce/filter/inject/persist 算子流是 trace target-design follow-up。TimelinePanel 加显式三模式优先级(dot-context / run-detail / run-list 互斥清理)。
+  - **pre-audit 抓 3 修正**(全采纳):① dot 语义=transition 非 node I/O(去掉误导的 Input Arguments/Phase Outputs 标签)② 不得把整个 contextJson 原始 dump 搬到 trace(去 Full Frame Trace+Copy JSON)③ 三模式显式 cross-clear。post-audit = CONFORM(7/7)。门禁:tsc/eslint clean + vitest **586**;api/llm.ts 零改。
+- **R15 / welcome F2 / WELCOME-2 / 01_init.md D2(FROZEN)**(open-folder 不卡 file shape):`create_new_skill` import 分支去掉"缺 GRAPH.md/SKILL.md 硬拒"(workflow row 22 明列为违 D2 的门),改 `logger.warning` + 进 repair state;只留 OS 级守卫(path required/exists/is_dir);SKILL_ALREADY_EXISTS 碰撞守卫保留。下游 summary + `get_skill_detail→_broken_detail_from_files_async` 本就优雅降级(空文件夹/非 skill 文件夹都到 repair state 不崩)。补了 skills.py 缺失的 module logger。两个断言"拒绝"的测试反转成断言 201 repair-state。
+  - **pre-audit 抓 2 修正**(采纳):测试要反转(非 update),warning 文案覆盖空+非skill。post-audit = CONFORM(7/7)。门禁:后端 pytest **563**/ruff clean/mypy 无新错(yaml import-untyped + GraphManifest io arg-type 两个 = HEAD 既存,非 R15 引入);api/llm.ts 零改。
+- **post-audit 旁路发现(非 R15,登记)**:`_parse_broken_graph_topology_and_phases`(skills.py:1109)有 bare `except Exception: return [],[]` 静默吞(违 logging「无静默失败」铁律),HEAD 既存、R15 没碰 → 已派独立 task 修。
+
+### 剩余 backlog(audit 已记)
+- **R18 @mention composer**(copilot 输入框 @ 引用,**PM 已批加 tiptap 新依赖**)= 大件 net-new。
+- **R25 L3 步骤编辑**(canvas 内联展开 agent phase 正文 XML 的 L3 子节点,可拖拽增删改)= 需 Rust `mutate_phase_body`(D12 native-fs 唯一写者),后端 Rust 改动较重。
+- 需 PM 决策(留最终报告):R21 bundle 引用(碰 api/llm.ts KEEP-MAIN 需授权)、golden per-node 重做范围、node-level resume 范围、Bash HITL 双向 WS、R28 刷新 stale FROZEN 文档(PM 在编)。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

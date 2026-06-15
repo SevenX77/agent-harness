@@ -28,6 +28,7 @@ from app.core.adapters.engine import (
     GraphManifest,
     GraphPhaseRef,
     LogicNodeAST,
+    PhaseIOSchema,
     ResourceNotFoundError,
     SkillLoader,
     SubgraphNodeAST,
@@ -1324,21 +1325,35 @@ def _load_compiled(skill_path: Path) -> CompiledSkill:
         raise_error_response(response)
 
 
-def _load_compiled_for_graph_serializer(skill_path: Path) -> CompiledSkill:
+def _graph_frontmatter_from_md(markdown: str) -> dict[str, object]:
+    """Parse the YAML frontmatter block of a GRAPH.md string (lenient)."""
+    parts = markdown.split("---")
+    if len(parts) < 3:
+        return {}
     try:
-        return SkillLoader(validate_context_writes=False).compile_skill(
-            skill_path,
-            skill_resolver=build_studio_skill_resolver(),
-        )
-    except Exception as exc:
-        response = error_response(
-            error_code="MANIFEST_VALIDATION_FAILED",
-            http_status=422,
-            message=str(exc),
-            details={"errors": []},
-            retry_strategy="not_retryable",
-        )
-        raise_error_response(response)
+        loaded = yaml.safe_load(parts[1])
+    except yaml.YAMLError:
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _io_schema_from_frontmatter(io_raw: object) -> PhaseIOSchema:
+    """Build a PhaseIOSchema from GRAPH.md frontmatter `io`, or fail cleanly.
+
+    Canvas-save only mutates topology, never the IO schema, so we reuse the
+    current GRAPH.md `io` verbatim. A malformed/missing io is a serializer-fatal
+    (422) with a clear message rather than an uncaught 500.
+    """
+    if isinstance(io_raw, dict):
+        inputs = io_raw.get("inputs")
+        outputs = io_raw.get("outputs")
+        if isinstance(inputs, dict) and isinstance(outputs, dict):
+            return PhaseIOSchema(inputs=inputs, outputs=outputs)
+    raise CanvasSerializerFatal(
+        code="serializer_io_invalid",
+        message="GRAPH.md frontmatter is missing a valid io.inputs/io.outputs block",
+        detail={},
+    )
 
 
 async def serialize_skill_graph_markdown(
@@ -1355,19 +1370,27 @@ async def serialize_skill_graph_markdown(
     original_md = await storage.read_text(str(graph_path))
     current_hash = _graph_content_hash(original_md)
     try:
-        compiled = _load_compiled_for_graph_serializer(skill_dir)
+        # Read name/description/io straight from the current GRAPH.md frontmatter
+        # rather than full-compiling the skill. Serialize is ABOUT TO OVERWRITE
+        # GRAPH.md, so it must tolerate a transient on-disk inconsistency: the canvas
+        # writes the new phase dir BEFORE calling serialize, and a full compile would
+        # FATAL on the "phase dirs == frontmatter phases" check before this serializer
+        # ever runs (the second half of the orphan-phase bug).
+        frontmatter = _graph_frontmatter_from_md(original_md)
+        phases_fm = frontmatter.get("phases")
+        current_phase_count = len(phases_fm) if isinstance(phases_fm, list) else 0
         if request.expected_hash is not None and request.expected_hash != current_hash:
             raise CanvasConflictError(
                 current_hash=current_hash,
                 current_markdown_content=original_md,
-                current_phase_count=len(compiled.manifest.phases),
+                current_phase_count=current_phase_count,
             )
         _validate_canvas_topology(request)
         # Build the canvas's desired topology (id + real depends_on) and serialize it.
         # NOTE: GraphManifest.phases is list[str] (no edges), so we MUST pass the full
         # phase refs to the topology serializer — cramming GraphPhaseRef into the
-        # manifest's phases and re-validating raises ValidationError (the old bug that
-        # 500'd every canvas topology save and left orphan phase dirs).
+        # manifest's phases and re-validating raises ValidationError (the first half of
+        # the bug that 500'd every canvas topology save and left orphan phase dirs).
         refs = [
             GraphPhaseRef(
                 id=phase.id,
@@ -1376,10 +1399,11 @@ async def serialize_skill_graph_markdown(
             )
             for phase in request.phases
         ]
+        description_raw = frontmatter.get("description")
         markdown = serialize_graph_topology(
-            name=compiled.manifest.name,
-            description=compiled.manifest.description,
-            io=compiled.manifest.io,
+            name=str(frontmatter.get("name") or skill_id),
+            description=description_raw if isinstance(description_raw, str) else None,
+            io=_io_schema_from_frontmatter(frontmatter.get("io")),
             phases=refs,
         )
     except CanvasConflictError:

@@ -1,0 +1,56 @@
+import type { GraphTopologyItem, SkillDetail } from "@/api/types"
+
+/**
+ * Real subgraph membership for the Assets panel.
+ *
+ * Membership is derived from the skill's actual subgraph phases as surfaced by
+ * the backend topology (R4): each `graph_topology` row with `mode === "subgraph"`
+ * carries an absolute child `path` read from that phase's SUBGRAPH.md. A row with
+ * a usable `path` is `resolved`; a row whose `path` is null/blank is `missing`
+ * (the SUBGRAPH.md declared no path, so the child graph is unresolvable).
+ *
+ * This replaces the former in-memory `registeredSubgraphsCache`, which faked
+ * "registered" state in the browser instead of reflecting real path-based
+ * references. The view is read-only: it reports what the skill actually
+ * references, never fabricated membership.
+ */
+export type SubgraphMembershipStatus = "resolved" | "missing"
+
+export interface SubgraphMembership {
+  /** Phase id of the subgraph phase (its label in the topology). */
+  id: string
+  /** Display label — the subgraph phase name. */
+  label: string
+  /** Absolute child-graph path, or null when the phase declares none. */
+  path: string | null
+  /** `resolved` when a usable path is present, else `missing`. */
+  status: SubgraphMembershipStatus
+}
+
+function normalizedPath(value: GraphTopologyItem["path"]): string | null {
+  if (typeof value !== "string") return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+/**
+ * Project the skill's topology into the list of subgraphs it actually
+ * references, by path. Subgraph phases are identified by `mode === "subgraph"`;
+ * their `path` (from R4) determines resolved-vs-missing. Pure and side-effect
+ * free so it is unit-testable and renderable synchronously.
+ */
+export function subgraphMembership(skillDetail?: SkillDetail): SubgraphMembership[] {
+  const topology = skillDetail?.graph_topology ?? []
+  const memberships: SubgraphMembership[] = []
+  for (const row of topology) {
+    if (row.mode !== "subgraph") continue
+    const path = normalizedPath(row.path)
+    memberships.push({
+      id: row.id,
+      label: row.id,
+      path,
+      status: path ? "resolved" : "missing",
+    })
+  }
+  return memberships
+}

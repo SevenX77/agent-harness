@@ -11,6 +11,7 @@ import { DiffBubble } from './diff-bubble'
 import { ModelPicker } from './model-picker'
 import { PatchProposedBubble, type CopilotFileAction } from './patch-proposed-bubble'
 import { DEFAULT_COPILOT_ROLE, RolePicker, copilotRoleOptions } from './role-picker'
+import { SessionTabs } from './session-tabs'
 import { ToolCallBubble } from './tool-call-bubble'
 
 interface ChatMessageItemProps {
@@ -212,6 +213,13 @@ export function CopilotPanel({ skillId, view = 'edit', completedRunId = null, on
           {copilot.reconnectInMs ? `, retry ${Math.round(copilot.reconnectInMs / 1000)}s` : ''}
         </p>
       </header>
+
+      <SessionTabs
+        sessions={copilot.sessions}
+        activeSessionId={copilot.activeSessionId}
+        onSwitch={copilot.switchSession}
+        onNew={copilot.newSession}
+      />
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
         {copilot.messages.length > 0 ? (

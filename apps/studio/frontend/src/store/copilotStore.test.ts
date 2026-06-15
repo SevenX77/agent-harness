@@ -5,9 +5,11 @@ import type { CopilotSession } from './copilotStore'
 
 const listWorkspaceDir = vi.fn()
 const readWorkspaceFile = vi.fn()
+const writeWorkspaceFile = vi.fn()
 
 vi.mock('../lib/tauri', () => ({
-  writeWorkspaceFile: vi.fn().mockResolvedValue({ path: '', content: '', hash: '' }),
+  writeWorkspaceFile: (workspaceRoot: string, path: string, content: string) =>
+    writeWorkspaceFile(workspaceRoot, path, content),
   ensureWorkspaceSupportDirs: vi.fn().mockResolvedValue(undefined),
   readWorkspaceFile: (workspaceRoot: string, path: string) =>
     readWorkspaceFile(workspaceRoot, path),
@@ -30,6 +32,8 @@ beforeEach(() => {
   copilotStore.reset(null)
   listWorkspaceDir.mockReset()
   readWorkspaceFile.mockReset()
+  writeWorkspaceFile.mockReset()
+  writeWorkspaceFile.mockResolvedValue({ path: '', content: '', hash: '' })
 })
 
 describe('loadCopilotSessionsFromDisk', () => {
@@ -164,5 +168,83 @@ describe('copilotStore.hydrate', () => {
     const sessions = await loadCopilotSessionsFromDisk(WS, SKILL)
     // _active.json is a marker, not a session — it must not appear as a session.
     expect(sessions.map((s) => s.id)).toEqual(['session-1'])
+  })
+})
+
+/** Find the last persisted JSON for a given session id from the write spy. */
+function lastWrittenSession(sessionId: string): CopilotSession | null {
+  const calls = writeWorkspaceFile.mock.calls as Array<[string, string, string]>
+  for (let i = calls.length - 1; i >= 0; i -= 1) {
+    const [, path, content] = calls[i]
+    if (path.endsWith(`/${sessionId}.json`)) {
+      return JSON.parse(content) as CopilotSession
+    }
+  }
+  return null
+}
+
+describe('copilotStore streamed-turn persistence (R16/D8)', () => {
+  it('flushes the full assistant message to disk when the turn completes', async () => {
+    listWorkspaceDir.mockResolvedValue([])
+    copilotStore.setContext(WS, SKILL)
+    const sessionId = copilotStore.newSession()
+
+    // 1. User turn.
+    await copilotStore.appendMessage({ id: 'u1', role: 'user', content: 'hi', events: [], status: 'success', createdAt: 1 } as never)
+    // 2. Assistant shell appended empty + running (mirrors useCopilot's first delta).
+    await copilotStore.appendMessage({ id: 'a1', role: 'assistant', content: '', events: [], status: 'running', createdAt: 2 } as never)
+
+    // 3. Streamed text deltas keep status 'running' — these must NOT persist.
+    const writesBeforeDone = writeWorkspaceFile.mock.calls.length
+    copilotStore.updateMessage('a1', (m) => ({ ...m, content: `${m.content}Hello `, status: 'running' }))
+    copilotStore.updateMessage('a1', (m) => ({ ...m, content: `${m.content}world`, status: 'running' }))
+    expect(writeWorkspaceFile.mock.calls.length).toBe(writesBeforeDone)
+
+    // 4. Terminal done event settles the message (status -> success) and persists.
+    copilotStore.updateMessage('a1', (m) => ({
+      ...m,
+      status: 'success',
+      events: [...m.events, { id: 'e1', type: 'done', status: 'success', receivedAt: 3, raw: {} } as never],
+    }))
+    // updateMessage's disk flush is fire-and-forget — let the microtask settle.
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const persisted = lastWrittenSession(sessionId)
+    expect(persisted).not.toBeNull()
+    const assistant = persisted?.messages.find((m) => m.id === 'a1')
+    expect(assistant?.content).toBe('Hello world')
+    expect(assistant?.events.some((e) => (e as { type: string }).type === 'done')).toBe(true)
+  })
+
+  it('hydrate round-trips the persisted assistant content on cold start', async () => {
+    // Stream a turn, capture what hit disk, then simulate a fresh process restart.
+    listWorkspaceDir.mockResolvedValue([])
+    copilotStore.setContext(WS, SKILL)
+    const sessionId = copilotStore.newSession()
+    await copilotStore.appendMessage({ id: 'u1', role: 'user', content: 'q', events: [], status: 'success', createdAt: 1 } as never)
+    await copilotStore.appendMessage({ id: 'a1', role: 'assistant', content: '', events: [], status: 'running', createdAt: 2 } as never)
+    copilotStore.updateMessage('a1', (m) => ({ ...m, content: 'streamed answer', status: 'success' }))
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const onDisk = lastWrittenSession(sessionId)
+    expect(onDisk?.messages.find((m) => m.id === 'a1')?.content).toBe('streamed answer')
+
+    // Cold restart: wipe in-memory state, then hydrate from the captured disk file.
+    copilotStore.reset(null)
+    listWorkspaceDir.mockResolvedValue([fileEntry(`${sessionId}.json`)])
+    readWorkspaceFile.mockImplementation((_ws: string, path: string) =>
+      Promise.resolve({ path, content: JSON.stringify(onDisk), hash: 'h' }),
+    )
+
+    copilotStore.setContext(WS, SKILL)
+    await copilotStore.hydrate(WS, SKILL)
+
+    const restored = copilotStore
+      .getSnapshot()
+      .sessions.find((s) => s.id === sessionId)
+      ?.messages.find((m) => m.id === 'a1')
+    expect(restored?.content).toBe('streamed answer')
   })
 })

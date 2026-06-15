@@ -396,7 +396,14 @@ def _phase_result_payload(
     result_state = _coerce_workflow_state(result)
     after_data = result_state["data"].model_dump()
     if output_keys is None:
-        return _dict_delta(before["data"].model_dump(), after_data)
+        delta = _dict_delta(before["data"].model_dump(), after_data)
+        # phase_outputs is a reserved meta-accumulator (D7 per-node golden), never a
+        # business output. Exclude it from the open-schema delta so a batch/iterate
+        # per-item payload does not carry a spurious nested phase_outputs aggregate
+        # into this node's golden entry. The declared-schema branch below is already
+        # safe (phase_outputs is not a declared output key).
+        delta.pop("phase_outputs", None)
+        return delta
     return {key: after_data[key] for key in output_keys if key in after_data}
 
 

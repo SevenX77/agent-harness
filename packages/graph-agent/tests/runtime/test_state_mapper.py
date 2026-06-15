@@ -53,8 +53,56 @@ def test_phase_wrapper_maps_input_and_output() -> None:
     )
     res = wrapped(state)
 
-    assert res["data"].model_dump() == {"topic": "A", "extra": True, "answer": "A"}
+    # The phase now also records its outputs into the reserved phase_outputs map
+    # (D7 per-node golden); phase_id defaults to "unknown" for this bare mapper.
+    assert res["data"].model_dump() == {
+        "topic": "A",
+        "extra": True,
+        "answer": "A",
+        "phase_outputs": {"unknown": {"answer": "A"}},
+    }
     assert seen == {"topic": "A"}
+
+
+def test_wrap_phase_output_accumulates_real_phase_outputs_map_per_node() -> None:
+    """D7: simple linear phases must produce a REAL phase_outputs map (node_id ->
+    that node's outputs) in model_dump() — not only via the synthetic __getitem__
+    compat layer — so headless per-node golden does not degrade to run-level."""
+    step1 = StateMapper(output_schema={"type": "object", "properties": {"a": {}}}, phase_id="step1")
+    step2 = StateMapper(output_schema={"type": "object", "properties": {"b": {}}}, phase_id="step2")
+
+    state = WorkflowState(data=BusinessData(), flow=FrameworkState(), messages=[])
+    after1 = step1.wrap_phase_output(state, {"data": {"a": 1}})
+    after2 = step2.wrap_phase_output(after1, {"data": {"b": 2}})
+
+    real_map = after2["data"].model_dump()["phase_outputs"]
+    assert real_map == {"step1": {"a": 1}, "step2": {"b": 2}}
+
+
+def test_wrap_phase_output_does_not_leak_child_phase_outputs_across_subgraph_io() -> None:
+    """A child graph's internal phase_outputs must not cross a subgraph IO boundary:
+    a node returning {declared_output, phase_outputs:{...}} keeps only its declared
+    output, and the parent records phase_outputs[phase_id] = the declared output."""
+    delegate = StateMapper(
+        output_schema={"type": "object", "properties": {"child_answer": {}}},
+        phase_id="delegate",
+    )
+    state = WorkflowState(data=BusinessData(), flow=FrameworkState(), messages=[])
+
+    # Simulate a subgraph result carrying the child's internal phase_outputs.
+    result = {
+        "data": {
+            "child_answer": "ok",
+            "phase_outputs": {"child_prep": {"scratch_only": 1}, "child_final": {"child_answer": "ok"}},
+        }
+    }
+    after = delegate.wrap_phase_output(state, result)
+
+    dumped = after["data"].model_dump()
+    # The child's intermediate field never leaked into the parent business namespace.
+    assert "scratch_only" not in dumped
+    assert dumped["child_answer"] == "ok"
+    assert dumped["phase_outputs"] == {"delegate": {"child_answer": "ok"}}
 
 
 def test_reader_sandbox_state_does_not_inherit_parent_blackboard(tmp_path: Path) -> None:

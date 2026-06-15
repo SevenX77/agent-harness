@@ -96,3 +96,39 @@ describe('PropertiesPanel — per-kind whitelist form (R3)', () => {
     }
   })
 })
+
+describe('PropertiesPanel — node role Test control (R23)', () => {
+  it('agent node renders a Test button next to the LLM role field', () => {
+    const html = renderPanel({
+      id: 'review',
+      data: baseData({ mode: 'llm', filePath: 'phases/review/SKILL.md' }),
+      filePath: 'phases/review/SKILL.md',
+      content: ['---', 'name: review', 'llm_role: reviewer', '---', '<role>r</role>'].join('\n'),
+    })
+
+    expect(html).toContain('LLM role')
+    expect(html).toContain('>Test<')
+  })
+
+  it('logic node has no role Test control', () => {
+    const html = renderPanel({
+      id: 'normalize',
+      data: baseData({ mode: 'logic', filePath: 'phases/normalize/LOGIC.md' }),
+      filePath: 'phases/normalize/LOGIC.md',
+      content: ['---', 'name: normalize', 'actions:', '  - strip_noise', '---', 'Body'].join('\n'),
+    })
+
+    expect(html).not.toContain('>Test<')
+  })
+
+  it('subgraph node has no role Test control', () => {
+    const html = renderPanel({
+      id: 'child',
+      data: baseData({ mode: 'subgraph', subgraphPath: '/abs/child', filePath: 'phases/child/SUBGRAPH.md' }),
+      filePath: 'phases/child/SUBGRAPH.md',
+      content: ['---', 'name: child', 'path: /abs/child', '---', 'Body'].join('\n'),
+    })
+
+    expect(html).not.toContain('>Test<')
+  })
+})

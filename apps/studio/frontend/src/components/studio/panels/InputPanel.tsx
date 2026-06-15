@@ -1,10 +1,17 @@
 import { useMemo, useState, type DragEvent } from "react"
+import yaml from "js-yaml"
 import { Save, Upload } from "lucide-react"
 import { writeSkillFile } from "@/api/client"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Textarea } from "@/components/ui/textarea"
 import type { SkillDetail } from "@/api/types"
-import { applyInputSchemaToGraph, inferJsonSchemaFromText } from "@/lib/schema-infer"
+import {
+  applyInputSchemaToGraph,
+  applyOutputArtifactPathToGraph,
+  inferJsonSchemaFromText,
+} from "@/lib/schema-infer"
 import { errorMessage } from "@/utils/errors"
 import type { FileMeta } from "../file-types"
 import { resolveWorkspaceIdentity } from "../workspace-identity"
@@ -134,6 +141,149 @@ function SchemaInferPanel({ initialJson, skillId, graphMd, onSaved }: SchemaInfe
   )
 }
 
+interface OutputArtifactField {
+  name: string
+  path: string
+}
+
+/**
+ * Read the declared output fields and their currently-configured artifact paths
+ * out of GRAPH.md frontmatter (`io.outputs.properties.<field>.path`). GRAPH.md is
+ * the authoritative contract the engine validates, so the editor reads/writes the
+ * same source rather than the projected manifest.
+ */
+function outputArtifactFields(graphMd?: string): OutputArtifactField[] {
+  if (!graphMd) {
+    return []
+  }
+  const match = graphMd.match(/^---\n([\s\S]*?)\n---/)
+  if (!match) {
+    return []
+  }
+  const data = (yaml.load(match[1]) ?? {}) as { io?: { outputs?: { properties?: Record<string, unknown> } } }
+  const properties = data.io?.outputs?.properties
+  if (!properties || typeof properties !== "object") {
+    return []
+  }
+  return Object.entries(properties).map(([name, schema]) => {
+    const fieldPath =
+      schema && typeof schema === "object" && typeof (schema as { path?: unknown }).path === "string"
+        ? (schema as { path: string }).path
+        : ""
+    return { name, path: fieldPath }
+  })
+}
+
+interface OutputArtifactPathPanelProps {
+  fields: OutputArtifactField[]
+  skillId: string
+  graphMd?: string
+  onSaved?: () => void
+}
+
+interface OutputPathRowProps {
+  field: OutputArtifactField
+  skillId: string
+  graphMd?: string
+  onSaved?: () => void
+}
+
+// F3: configure where each declared output field's artifact is written by setting
+// `{target: "artifact", path}` onto `io.outputs.<field>` in GRAPH.md (the engine
+// resolves `path` to `runs/<id>/artifacts/<path>`). Mirrors the F2 save path:
+// reads GRAPH.md, applies a pure writeback, then writeSkillFile to the resolved
+// workspace root. An empty path clears the artifact target.
+function OutputPathRow({ field, skillId, graphMd, onSaved }: OutputPathRowProps) {
+  const [draft, setDraft] = useState(field.path)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  const handleSave = async () => {
+    if (!graphMd) {
+      return
+    }
+    setSaving(true)
+    setSaveError(null)
+    setSaved(false)
+    try {
+      const next = applyOutputArtifactPathToGraph(graphMd, field.name, draft)
+      const target = resolveWorkspaceIdentity(skillId).workspaceRoot ?? skillId
+      await writeSkillFile(target, "GRAPH.md", next)
+      setSaved(true)
+      onSaved?.()
+    } catch (error) {
+      setSaveError(errorMessage(error))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="space-y-1.5 rounded-md border border-border bg-background p-3">
+      <div className="px-0.5 font-mono text-xs text-foreground">{field.name}</div>
+      <div className="flex items-center gap-2">
+        <Input
+          value={draft}
+          onChange={(event) => {
+            setDraft(event.target.value)
+            setSaved(false)
+          }}
+          placeholder="artifacts/output.json"
+          className="font-mono"
+          spellCheck={false}
+          aria-label={`Artifact path for output ${field.name}`}
+        />
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => void handleSave()}
+          disabled={saving || !graphMd}
+          aria-label={`Save artifact path for output ${field.name}`}
+        >
+          <Save className="size-3.5" />
+          {saving ? "Saving…" : "Save path"}
+        </Button>
+      </div>
+      {saveError ? (
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">
+          {saveError}
+        </div>
+      ) : null}
+      {saved && !saveError ? (
+        <div className="px-1 text-[11px] text-muted-foreground">
+          Saved to GRAPH.md io.outputs.{field.name}.
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function OutputArtifactPathPanel({ fields, skillId, graphMd, onSaved }: OutputArtifactPathPanelProps) {
+  if (fields.length === 0) {
+    return null
+  }
+  return (
+    <section className="space-y-2">
+      <div className="flex items-center gap-2 px-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        <Upload className="size-3.5" />
+        Output artifact paths
+      </div>
+      <div className="space-y-2">
+        {fields.map((field) => (
+          <OutputPathRow
+            key={field.name}
+            field={field}
+            skillId={skillId}
+            graphMd={graphMd}
+            onSaved={onSaved}
+          />
+        ))}
+      </div>
+    </section>
+  )
+}
+
 export function InputPanel({
   skillId,
   skillDetail,
@@ -143,6 +293,8 @@ export function InputPanel({
 }: InputPanelProps) {
   const files = inputFiles(skillDetail)
   const sample = files.find((file) => file.path === "input/sample.json")?.content ?? "{}"
+  const graphMd = skillDetail?.files?.["GRAPH.md"]
+  const outputFields = useMemo(() => outputArtifactFields(graphMd), [graphMd])
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -166,8 +318,19 @@ export function InputPanel({
           <SchemaInferPanel
             initialJson={sample}
             skillId={skillId}
-            graphMd={skillDetail?.files?.["GRAPH.md"]}
+            graphMd={graphMd}
           />
+
+          {outputFields.length > 0 ? (
+            <>
+              <SectionHeading label="Output Artifacts" />
+              <OutputArtifactPathPanel
+                fields={outputFields}
+                skillId={skillId}
+                graphMd={graphMd}
+              />
+            </>
+          ) : null}
         </div>
       </ScrollArea>
     </div>

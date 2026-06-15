@@ -439,5 +439,22 @@ Stop-hook、反自造停下铁律、copilot F3/F4-echo/F7、trace F5/F2、input 
   - **= 第三个"engine 缺口"其实不是**(P0-2 懒加载 / B 已发事件 / C 已honor),verify-before-asking 避免了一次高风险 frozen-schema 变更。DEF-029 reclassify → owner=studio/input 前端。
 - **本轮 engine wave 收束**:A=唯一真 engine 缺口(已做已提交);B/C/D 经核实皆非 engine 工作(B engine 已发事件、C 前端、D 设计延期)。下一步按 PM 指令 ③ 转**前端适配**(沿用现有组件+shadcn):F3 输出路径编辑器、edge-blackboard 消费引擎已发的 transition 事件等。
 
+### 2026-06-14 续6:前端适配 wave(PM 指令 ③ engine 后 → 前端,plan→pre-audit→并行 subagent→gatekeep→post-audit)
+> 两个非冲突前端任务,**派两 subagent 并行实施**(文件不重叠、只写代码不跑 gate),我统一 gatekeep + 独立 post-audit。计划落盘 `frontend-wave-plan-2026-06-14.md`。
+
+- **任务 1 — F3 输出产物路径编辑器 ✅(input 区,CONFORMS)**:
+  - `applyOutputArtifactPathToGraph(graphMd, field, path)`(`schema-infer.ts:80`)——镜像 F2 `applyInputSchemaToGraph`,在 GRAPH.md frontmatter 的 `io.outputs.properties.<field>` 上 set `{target:"artifact", path}`(空 path 清除),**只动该字段、保 io.inputs+body 不变**。引擎已 honor(`runner.py:1292` `_save_v030_declared_file_outputs`→`IOManager`,真跑验证)= 零 engine 改动。
+  - `InputPanel.tsx`:"Output Artifacts" 区每输出字段一个 shadcn `Input`+`Button` 路径编辑器,读 GRAPH.md 当前 path、存经**与 F2 同款** `resolveWorkspaceIdentity`+`writeSkillFile`(D12 唯一写者)。5 纯单测。
+- **任务 2 — edge-blackboard 真数据(trace/properties 区,CONFORMS,只做 REQ-3 数据修)✅**:
+  - 引擎已发 `InputDispatchEvent`(`events.py:265`,带 `from_phase`/`to_phase`/`blackboard_snapshot`),`_TraceJsonlSink` 无过滤全写 trace.jsonl,已到前端 `runStream.events` = **零 engine/backend 改动**。
+  - 纯选择器 `edgeContextFromEvents(events, from, to)`(`edge-context.ts`):取**最近**一条匹配边的 input_dispatch,**关键形状映射**把扁平 `blackboard_snapshot` 放 `.inputs`(= PropertiesPanel:222 渲染键,真出数据非空白)、`phase_outputs:{}`(:235 自动隐藏)、graph-entry(null/"input"↔INPUT_ID)/OUTPUT_ID→null/无匹配→null(空态非 mock)。删 `getMockEdgeContext`(0 残留 ref)。
+  - 接线:`runStream.events`→`WorkspaceContext.traceEvents`→`GraphCanvas`→`buildEdges`(`hasTraceData` 改用选择器真判),`ContextEdge.onClick` 取真 contextJson **仍路由 properties 面板**(不做 REQ-6 dot→trace 改道)。5 纯单测(断言渲染形状)。
+  - **REQ-6/D14 = 独立延期**:dot→trace console 改道 + 结构化 inspector + 删 Properties raw-JSON dump 分支本轮**不做**,记延期(别把"Properties 显真 JSON"当 edge-blackboard 完成态)。
+- **gatekeep(真跑)**:tsc clean + eslint clean + **vitest 477 passed**(基线 467 +10 新);git diff 核 **api/llm.ts + KEEP-MAIN + gateway + package.json 零改动**、`.gitignore` 仅加 2 行 `!` 白名单(新 lib 文件,沿用现有约定);两任务文件不重叠;never main。
+- **post-audit subagent 独立复核**:两任务 CONFORMS、门禁自跑复现、无 defect、scope 无 overstep、boundary 干净。
+
+### 延期登记补充(本轮新增)
+- **edge-blackboard REQ-6/D14 结构清理**:dot 从 Properties 改道 trace console + 结构化 dot/blackboard inspector + 移除 PropertiesPanel selectedEdge raw-JSON dump 分支。前置:本轮 REQ-3 真数据已落(`edgeContextFromEvents`)。来源:PM frozen `properties/mvp1-alignment.md:38-45` F3 / `04_run-and-verify.md:99` D14。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

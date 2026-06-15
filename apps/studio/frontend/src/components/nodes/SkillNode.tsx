@@ -79,7 +79,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
         }
       }}
     >
-      <Handle type="target" position={Position.Left} className="!size-2.5 !border-background !bg-primary opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+      <Handle type="target" position={Position.Top} className="!size-2.5 !border-background !bg-primary opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
       <div className="flex items-start gap-3">
         <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
           <KindIcon className="size-4" />
@@ -121,7 +121,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
             event.stopPropagation()
             data.onToggleSubgraph?.()
           }}
-          className="absolute bottom-0 left-1/2 inline-flex size-5 -translate-x-1/2 translate-y-1/2 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-sm transition-colors hover:border-primary"
+          className="absolute bottom-0 right-3 inline-flex size-5 translate-y-1/2 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-sm transition-colors hover:border-primary"
         >
           {data.isExpanded ? <Minus className="size-3" /> : <Plus className="size-3" />}
         </button>
@@ -129,7 +129,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
       {data.subgraphPath && data.isExpanded ? (
         <SubgraphInline path={data.subgraphPath} parentLabel={data.label} />
       ) : null}
-      <Handle type="source" position={Position.Right} className="!size-2.5 !border-background !bg-primary opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+      <Handle type="source" position={Position.Bottom} className="!size-2.5 !border-background !bg-primary opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
     </div>
   )
 

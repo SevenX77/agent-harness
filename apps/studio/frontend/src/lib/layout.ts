@@ -28,7 +28,9 @@ export function getAutoLayoutedElements<TNode extends Node, TEdge extends Edge>(
   const graph = new graphlib.Graph()
   graph.setDefaultEdgeLabel(() => ({}))
   graph.setGraph({
-    rankdir: 'LR',
+    // Vertical top-to-bottom layout (authoring REQ-1): the graph reads top→down
+    // so the side panels are not squished by a wide horizontal (LR) graph.
+    rankdir: 'TB',
     nodesep: 80,
     ranksep: 100,
     marginx: 24,

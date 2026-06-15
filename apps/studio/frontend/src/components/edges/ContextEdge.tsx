@@ -22,10 +22,14 @@ type GlobalWithProcess = typeof globalThis & {
   }
 }
 
-const HORIZONTAL_EDGE_EPSILON = 0.5
+const STRAIGHT_EDGE_EPSILON = 0.5
 
 function isHorizontalHandlePosition(position: ReactFlow.Position): boolean {
   return position === ReactFlow.Position.Left || position === ReactFlow.Position.Right
+}
+
+function isVerticalHandlePosition(position: ReactFlow.Position): boolean {
+  return position === ReactFlow.Position.Top || position === ReactFlow.Position.Bottom
 }
 
 export function ContextEdge({
@@ -41,10 +45,18 @@ export function ContextEdge({
 }: EdgeProps<ContextEdgeModel>) {
   const workspace = useOptionalWorkspaceContext()
 
-  const [edgePath, labelX, labelY] = Math.abs(sourceY - targetY) <= HORIZONTAL_EDGE_EPSILON
+  const isHorizontalStraight =
+    Math.abs(sourceY - targetY) <= STRAIGHT_EDGE_EPSILON
     && isHorizontalHandlePosition(sourcePosition)
     && isHorizontalHandlePosition(targetPosition)
-    ? [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, (sourceX + targetX) / 2, sourceY]
+  // TB layout: a node and its single child share an X, so draw a clean vertical
+  // line instead of a bezier (mirrors the horizontal-straight case for LR).
+  const isVerticalStraight =
+    Math.abs(sourceX - targetX) <= STRAIGHT_EDGE_EPSILON
+    && isVerticalHandlePosition(sourcePosition)
+    && isVerticalHandlePosition(targetPosition)
+  const [edgePath, labelX, labelY] = isHorizontalStraight || isVerticalStraight
+    ? [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, (sourceX + targetX) / 2, (sourceY + targetY) / 2]
     : ReactFlow.getBezierPath({
         sourceX,
         sourceY,

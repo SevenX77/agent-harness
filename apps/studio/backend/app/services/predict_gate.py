@@ -28,11 +28,14 @@ def last_predict_path_for(skill_dir: Path) -> Path:
     return workspace_dir_for(skill_dir) / _LAST_PREDICT_FILENAME
 
 
-def record_predict_pass(skill_dir: Path, skill_id: str, run_id: str) -> Path:
+def record_predict_pass(skill_dir: Path, skill_id: str, run_id: str, *, content_hash: str) -> Path:
     """Persist a passing predict for one skill so the run gate can consume it.
 
     Called only when a Predict run reports success; overwrites any prior record
-    so the gate always reflects the latest predict outcome.
+    so the gate always reflects the latest predict outcome. ``content_hash`` is
+    the compiled-artifact hash the predict ran against — the run gate matches it
+    against the freshly-compiled hash so an edit after a pass forces a re-predict
+    (predict certifies the *current* graph, not whatever last passed).
     """
     workspace_dir_for(skill_dir).mkdir(parents=True, exist_ok=True)
     record_path = last_predict_path_for(skill_dir)
@@ -40,6 +43,7 @@ def record_predict_pass(skill_dir: Path, skill_id: str, run_id: str) -> Path:
         "skill_id": skill_id,
         "run_id": run_id,
         "success": True,
+        "content_hash": content_hash,
         "recorded_at": datetime.now(UTC).isoformat(),
     }
     record_path.write_text(
@@ -47,16 +51,24 @@ def record_predict_pass(skill_dir: Path, skill_id: str, run_id: str) -> Path:
         encoding="utf-8",
     )
     logger.info(
-        "predict_gate action=record skill_id=%s run_id=%s path=%s",
+        "predict_gate action=record skill_id=%s run_id=%s content_hash=%s path=%s",
         skill_id,
         run_id,
+        content_hash,
         record_path,
     )
     return record_path
 
 
-def has_passing_predict(skill_id: str) -> bool:
-    """Whether the latest recorded predict for this skill passed."""
+def has_passing_predict(skill_id: str, *, content_hash: str) -> bool:
+    """Whether the latest recorded predict passed *for the current graph*.
+
+    Returns ``True`` only when a success record exists AND its recorded
+    ``content_hash`` equals ``content_hash`` (the freshly-compiled hash). A
+    hash mismatch means the graph was edited since the last pass, so the record
+    is stale and the gate must re-require predict. Records written before this
+    field existed (no ``content_hash``) are treated as stale → no pass.
+    """
     skill_dir = resolve_skill_dir(skill_id)
     record_path = last_predict_path_for(skill_dir)
     if not record_path.exists():
@@ -71,15 +83,34 @@ def has_passing_predict(skill_id: str) -> bool:
             exc,
         )
         return False
-    return isinstance(loaded, dict) and loaded.get("success") is True
+    if not (isinstance(loaded, dict) and loaded.get("success") is True):
+        return False
+    recorded_hash = loaded.get("content_hash")
+    if recorded_hash != content_hash:
+        logger.warning(
+            "predict_gate action=hash_check skill_id=%s recorded=%s current=%s verdict=stale",
+            skill_id,
+            recorded_hash,
+            content_hash,
+        )
+        return False
+    return True
 
 
-def require_passing_predict(skill_id: str) -> None:
-    """Raise RUN_REQUIRES_PREDICT when no passing predict is on record for the skill."""
-    if has_passing_predict(skill_id):
-        logger.info("predict_gate decision=allow_run skill_id=%s reason=passing_predict_on_record", skill_id)
+def require_passing_predict(skill_id: str, *, content_hash: str) -> None:
+    """Raise RUN_REQUIRES_PREDICT unless a passing predict for the current graph is on record."""
+    if has_passing_predict(skill_id, content_hash=content_hash):
+        logger.info(
+            "predict_gate decision=allow_run skill_id=%s content_hash=%s reason=passing_predict_on_record",
+            skill_id,
+            content_hash,
+        )
         return
-    logger.warning("predict_gate decision=block_run skill_id=%s reason=no_passing_predict", skill_id)
+    logger.warning(
+        "predict_gate decision=block_run skill_id=%s content_hash=%s reason=no_matching_passing_predict",
+        skill_id,
+        content_hash,
+    )
     _raise_run_requires_predict(skill_id)
 
 

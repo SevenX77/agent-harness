@@ -22,6 +22,7 @@ import { connectPhaseRefs, createPhaseDraft, disconnectPhaseRefs, type NewPhaseK
 import { sha256Hex } from "@/lib/hash"
 import { CenterActionBar, type SkillBuildStage } from "./center-action-bar"
 import { deriveNodeStatuses } from "./node-status"
+import { compileErrorsByNode } from "./node-compile-errors"
 import { ConflictDialog } from "./ConflictDialog"
 import { Header } from "./Header"
 import { Panels } from "./Panels"
@@ -631,6 +632,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
 
   const hasOpenFile = Boolean(activeFileDetails.left || activeFileDetails.right)
   const currentCompileErrors = currentSkillId ? compileErrors[currentSkillId] ?? [] : []
+  const compileErrorsByNodeId = useMemo(
+    () => compileErrorsByNode(currentSkillId ? compileErrors[currentSkillId] : []),
+    [compileErrors, currentSkillId],
+  )
 
   return (
     <WorkspaceProvider value={contextValue}>
@@ -711,6 +716,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   onDisconnectConnection={handleDisconnectConnection}
                   onPhaseFileSave={handlePhaseFileSave}
                   statusByNodeId={statusByNodeId}
+                  compileErrorsByNodeId={compileErrorsByNodeId}
                 />
               ) : currentSkillId === null ? (
                 <WelcomePage onSelectSkill={onSelectSkill} />
@@ -728,6 +734,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   onDisconnectConnection={handleDisconnectConnection}
                   onPhaseFileSave={handlePhaseFileSave}
                   statusByNodeId={statusByNodeId}
+                  compileErrorsByNodeId={compileErrorsByNodeId}
                 />
               )}
               {currentSkillId && !settingsOpen ? (

@@ -1,5 +1,5 @@
 import yaml from 'js-yaml'
-import type { IoDeclaration, PhaseDef, SkillDetail, SkillManifest, IoInput, IoOutput, GraphManifestV030, GraphTopologyItem } from '@/api/types'
+import type { CompileError, IoDeclaration, PhaseDef, SkillDetail, SkillManifest, IoInput, IoOutput, GraphManifestV030, GraphTopologyItem } from '@/api/types'
 import { INPUT_ID, OUTPUT_ID, type GlobalNodeData, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus, type SubagentRef } from '@/components/nodes'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 
@@ -169,6 +169,7 @@ export function buildNodes(
   expandedSubgraphs: Set<string>,
   onToggleSubgraph: (nodeId: string) => void,
   statusByNodeId: Record<string, SkillNodeStatus>,
+  compileErrorsByNodeId: Record<string, CompileError[]> = {},
 ): GraphCanvasNode[] {
   const phases = phasesFromManifest(detail?.manifest, skillId)
   const io = ioFromManifest(detail?.manifest)
@@ -197,6 +198,7 @@ export function buildNodes(
         subagents: subagentsForPhase(detail, phase.name),
         filePath,
         status: statusByNodeId[phase.name] ?? 'idle',
+        compileErrors: compileErrorsByNodeId[phase.name] ?? [],
         dependsOn: topology?.depends_on ?? normalizeDependsOn(phase.depends_on),
         subgraphPath,
         isExpanded: expandedSubgraphs.has(phase.name),

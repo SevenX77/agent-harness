@@ -17,7 +17,7 @@ import { Plus } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type MouseEvent } from 'react'
 import { toast } from 'sonner'
 import { AxiosError } from 'axios'
-import type { ChildGraphTopology, ErrorResponse, SkillDetail } from '@/api/types'
+import type { ChildGraphTopology, CompileError, ErrorResponse, SkillDetail } from '@/api/types'
 import { getChildGraphTopology } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
@@ -66,6 +66,7 @@ interface GraphCanvasProps {
   onPersistConnection?: (connection: Connection) => Promise<void> | void
   onDisconnectConnection?: (connection: { source: string; target: string }) => Promise<void> | void
   statusByNodeId?: Record<string, SkillNodeStatus>
+  compileErrorsByNodeId?: Record<string, CompileError[]>
   compact?: boolean
   onPhaseFileSave?: (args: { path: string; content: string; expectedHash: string }) => Promise<void> | void
 }
@@ -115,6 +116,7 @@ export function GraphCanvas({
   onPersistConnection,
   onDisconnectConnection,
   statusByNodeId,
+  compileErrorsByNodeId,
   compact = false,
   onPhaseFileSave,
 }: GraphCanvasProps) {
@@ -273,6 +275,7 @@ export function GraphCanvas({
     }
   }, [skillId, drilledPath])
   const safeStatusByNodeId = useMemo(() => statusByNodeId ?? {}, [statusByNodeId])
+  const safeCompileErrorsByNodeId = useMemo(() => compileErrorsByNodeId ?? {}, [compileErrorsByNodeId])
   const compactRatio = compact && canvasHeight > 0 && canvasHeight < 500 ? 0.2 : 0
 
   useEffect(() => {
@@ -293,8 +296,8 @@ export function GraphCanvas({
       if (!childGraph) return []
       return buildNodesFromTopology(skillId, childGraph.phases, childGraph.graph_topology, {})
     }
-    return buildNodes(skillId, skillDetail, expandedSubgraphs, toggleSubgraph, safeStatusByNodeId)
-  }, [childGraph, expandedSubgraphs, isDrilled, safeStatusByNodeId, skillDetail, skillId, toggleSubgraph])
+    return buildNodes(skillId, skillDetail, expandedSubgraphs, toggleSubgraph, safeStatusByNodeId, safeCompileErrorsByNodeId)
+  }, [childGraph, expandedSubgraphs, isDrilled, safeStatusByNodeId, safeCompileErrorsByNodeId, skillDetail, skillId, toggleSubgraph])
   const phaseNodes = useMemo(
     () => rawNodes.filter((node): node is SkillGraphNode => node.type === 'skill'),
     [rawNodes],

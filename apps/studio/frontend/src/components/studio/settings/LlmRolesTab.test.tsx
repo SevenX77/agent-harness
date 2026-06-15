@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 import type { CredentialsState, ModelGroup, RolesData } from "../../../api/llm"
 import { roleChainStatusKey } from "../../../hooks/useRoleTestChainRunner"
-import { AvailableModelDragPreview, LlmRolesTab, modelDropFailureMessage, roleIntentFromSettingsDraft, roleTestStatusesByRole, RoleSettingsFields } from "./LlmRolesTab"
+import { AvailableModelDragPreview, LlmRolesTab, modelDropFailureMessage, roleIntentFromSettingsDraft, roleTestStatusesByRole, RoleSettingsFields, seedRoleTestStatesFromPersisted } from "./LlmRolesTab"
 import {
   AvailableModelsSidebar,
   buildAvailableModelGroups,
@@ -2393,5 +2393,91 @@ describe("LlmRolesTab controls", () => {
     expect(fieldsHtml).toContain("Context route max token caps are unavailable.")
     expect(fieldsHtml).toContain("Output route max token caps are unavailable.")
     expect(fieldsHtml).not.toContain("Test first")
+  })
+})
+
+describe("R20 persisted role test result seeding", () => {
+  const persistedResult = {
+    role_name: "analyst",
+    status: "ok",
+    warnings: [],
+    model_groups: [
+      {
+        canonical_id: "claude-opus-4-7",
+        display_name: "Claude Opus 4.7",
+        provider_results: [
+          {
+            route_id: "anthropic-official:claude-opus-4-7",
+            provider_label: "Anthropic Official",
+            provider_ui_state: "ready" as const,
+            role_fit: "using" as const,
+            admission_decision: "admit" as const,
+            status: "ok" as const,
+            warnings: [],
+            retry_at: null,
+            message: null,
+            resolved_settings: {},
+          },
+        ],
+      },
+    ],
+  }
+
+  it("seeds settled role test states from the persisted results map", () => {
+    const seeded = seedRoleTestStatesFromPersisted({
+      results: {
+        analyst: {
+          role_name: "analyst",
+          status: "ok",
+          message: "Role test completed.",
+          result: persistedResult,
+          updated_at: "2026-06-14T00:00:00Z",
+        },
+      },
+    })
+
+    expect(seeded.analyst).toEqual({ running: false, result: persistedResult })
+  })
+
+  it("does not clobber an existing in-session state for the same role", () => {
+    const live = { running: true } as const
+    const seeded = seedRoleTestStatesFromPersisted(
+      {
+        results: {
+          analyst: {
+            role_name: "analyst",
+            status: "ok",
+            message: null,
+            result: persistedResult,
+            updated_at: "2026-06-14T00:00:00Z",
+          },
+        },
+      },
+      { analyst: live },
+    )
+
+    expect(seeded.analyst).toBe(live)
+  })
+
+  it("returns current state unchanged when no persisted results exist", () => {
+    const current = { analyst: { running: false } }
+    expect(seedRoleTestStatesFromPersisted(null, current)).toBe(current)
+    expect(seedRoleTestStatesFromPersisted({ results: {} }, current)).toEqual(current)
+  })
+
+  it("skips malformed persisted entries without a model_groups array", () => {
+    const seeded = seedRoleTestStatesFromPersisted({
+      results: {
+        broken: {
+          role_name: "broken",
+          status: "ok",
+          message: null,
+          result: { role_name: "broken", status: "ok" },
+          updated_at: "2026-06-14T00:00:00Z",
+        },
+      },
+    })
+
+    expect(seeded.broken).toBeUndefined()
   })
 })

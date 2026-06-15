@@ -66,6 +66,34 @@ export async function fetcher<T>(url: string): Promise<T> {
   return response.data
 }
 
+/**
+ * R20: one durably persisted LAST role/copilot test result. The `result`
+ * payload mirrors the backend RoleTestResponse / copilot SDK result shape; it
+ * is typed as a loose object here so this read client stays decoupled from the
+ * KEEP-MAIN api/llm.ts RolesData contract (callers narrow it in pure helpers).
+ */
+export interface PersistedRoleTestResult {
+  role_name: string
+  status: string
+  message?: string | null
+  result: JsonObject
+  updated_at: string
+}
+
+export interface RoleTestResultsResponse {
+  results: Record<string, PersistedRoleTestResult>
+}
+
+/**
+ * R20: fetch the persisted last-known role/copilot test results so the settings
+ * tabs can re-seed their badges on mount (survives server restart / remount).
+ * Kept here, NOT in api/llm.ts, so the KEEP-MAIN roles contract is untouched.
+ */
+export async function getRoleTestResults(): Promise<RoleTestResultsResponse> {
+  const response = await api.get<RoleTestResultsResponse>('/llm/roles/test-results')
+  return response.data
+}
+
 export async function getAppSettings(): Promise<AppSettings> {
   const response = await api.get<AppSettings>('/settings')
   return response.data

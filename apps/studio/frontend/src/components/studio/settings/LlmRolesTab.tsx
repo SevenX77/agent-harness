@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 import { roleChainStatusKey, type RoleChainStatus, type RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
 import { getRoleTestJob, startRoleTestJob, type CredentialsState, type ModelGroup, type ProviderModelOption, type RoleTestJobResponse, type RoleTestProviderProgress, type RoleTestProviderResult, type RoleTestResponse, type RolesData } from "../../../api/llm"
+import { getRoleTestResults, type RoleTestResultsResponse } from "../../../api/client"
 import { AdvancedModelBundlesSection, modelBundleGroupsFromData } from "./llm-roles/AdvancedModelBundlesSection"
 import { AvailableModelsSidebar } from "./llm-roles/AvailableModelsSidebar"
 import { RoleCardList } from "./llm-roles/RoleCardList"
@@ -162,6 +163,25 @@ export function LlmRolesTab({
   const testStatusesByRole = useMemo(() => (
     roleTestStatusesByRole(roleTestStates)
   ), [roleTestStates])
+
+  // R20: on mount, seed badges from the persisted last-known test results so a
+  // remount/restart shows prior status instead of resetting to untested. Live
+  // tests still update + re-persist via the backend; the seed only fills empty
+  // slots (see seedRoleTestStatesFromPersisted's merge guard).
+  useEffect(() => {
+    let cancelled = false
+    getRoleTestResults()
+      .then((persisted) => {
+        if (cancelled) return
+        setRoleTestStates((current) => seedRoleTestStatesFromPersisted(persisted, current))
+      })
+      .catch(() => {
+        // Seeding is best-effort; the live test flow remains fully functional.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
   const activeAvailableModelDragRef = useRef<string | null>(null)
   const availableModelPointerDragRef = useRef<AvailableModelPointerDrag | null>(null)
   const availableModelDragPreviewNodeRef = useRef<HTMLDivElement | null>(null)
@@ -542,6 +562,28 @@ export function LlmRolesTab({
       <AvailableModelDragPreview drag={availableModelDragPreview} nodeRef={availableModelDragPreviewNodeRef} />
     </>
   )
+}
+
+/**
+ * R20: project the persisted last-known role test results into the initial
+ * `roleTestStates` shape so badges show the last status after a remount/restart.
+ * Each persisted entry becomes a settled (not-running) state carrying its
+ * stored `RoleTestResponse`. The merge keeps any existing in-session state
+ * (running or freshly settled) so a late seed fetch never clobbers a live test.
+ */
+export function seedRoleTestStatesFromPersisted(
+  persisted: RoleTestResultsResponse | null | undefined,
+  current: Record<string, RoleTestState> = {},
+): Record<string, RoleTestState> {
+  if (!persisted?.results) return current
+  const seeded: Record<string, RoleTestState> = { ...current }
+  for (const [roleName, entry] of Object.entries(persisted.results)) {
+    if (seeded[roleName]) continue
+    const result = entry.result as unknown as RoleTestResponse | undefined
+    if (!result || !Array.isArray(result.model_groups)) continue
+    seeded[roleName] = { running: false, result }
+  }
+  return seeded
 }
 
 export function roleTestStatusesByRole(

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { FlaskConical, Loader2, Plus, Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
@@ -45,10 +45,12 @@ import {
 import {
   copilotRoleTestErrorMessage,
   copilotRouteStatusesFromJob,
+  copilotRouteStatusesFromPersistedResult,
   runCopilotRoleTestJob,
   type CopilotRouteJobStatus,
 } from "./copilot-role-test"
 import { Skeleton } from "@/components/ui/skeleton"
+import { getRoleTestResults } from "@/api/client"
 import type { CredentialsState, ModelGroup, RolesData } from "@/api/llm"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 
@@ -100,6 +102,30 @@ export function CopilotTab({
 
   const [testingRoleIds, setTestingRoleIds] = useState<ReadonlySet<string>>(() => new Set())
   const [routeStatusOverrides, setRouteStatusOverrides] = useState<Record<string, CopilotRouteJobStatus>>({})
+
+  // R20: on mount, seed copilot route lights from the persisted last-known test
+  // results so they show prior status after a remount/restart instead of
+  // resetting. Live tests still update + re-persist via the backend; the seed
+  // only fills route ids not already overridden in this session.
+  useEffect(() => {
+    let cancelled = false
+    getRoleTestResults()
+      .then((persisted) => {
+        if (cancelled) return
+        const seeded: Record<string, CopilotRouteJobStatus> = {}
+        for (const entry of Object.values(persisted.results ?? {})) {
+          Object.assign(seeded, copilotRouteStatusesFromPersistedResult(entry.result))
+        }
+        if (Object.keys(seeded).length === 0) return
+        setRouteStatusOverrides((current) => ({ ...seeded, ...current }))
+      })
+      .catch(() => {
+        // Seeding is best-effort; the live test flow remains fully functional.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   if (!data) {
     return (

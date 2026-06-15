@@ -8,7 +8,14 @@ dirs because GRAPH.md was never updated. These tests pin the fixed behavior.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
+
+_LOGIC_MD = (
+    "---\nname: extra\nio:\n  inputs:\n    type: object\n    properties: {}\n"
+    "  outputs:\n    type: object\n    properties: {}\nactions: [x]\nvalidator: false\n---\n<action>x</action>\n"
+)
 
 
 def test_serialize_adds_a_disconnected_phase_without_500(client: TestClient) -> None:
@@ -56,3 +63,31 @@ def test_serialize_preserves_fan_in_depends_on(client: TestClient) -> None:
     # left/right both depend only on setup (not linearised).
     assert '<phase depends_on="setup">left</phase>' in markdown
     assert '<phase depends_on="setup">right</phase>' in markdown
+
+
+def test_serialize_tolerates_a_phase_dir_not_yet_in_graph(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    # The exact canvas mid-add state: the new phase DIR exists on disk but GRAPH.md
+    # doesn't list it yet. A full compile FATALs on the dir/frontmatter-must-match
+    # rule; serialize must tolerate it (it is about to write the matching GRAPH.md)
+    # and return the new topology, not 422/500.
+    skills_dir, _ = studio_roots
+    extra = skills_dir / "text-segmentation" / "phases" / "extra"
+    extra.mkdir(parents=True)
+    (extra / "LOGIC.md").write_text(_LOGIC_MD, encoding="utf-8")
+
+    response = client.post(
+        "/api/skills/text-segmentation/graph/serialize",
+        json={
+            "phases": [
+                {"id": "setup", "src": "phases/setup", "mode": "logic", "depends_on": []},
+                {"id": "extra", "src": "phases/extra", "mode": "logic", "depends_on": []},
+            ],
+            "expected_hash": None,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert "  - extra" in response.json()["markdown_content"]

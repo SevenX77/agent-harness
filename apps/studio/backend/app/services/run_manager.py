@@ -233,10 +233,6 @@ class RunManager:
         self.git_service: GitLocalService = GitLocalService()
 
     async def start_run(self, skill_id: str, request: RunRequest) -> RunMetadata:
-        # MVP1 run-and-verify gate: Run requires a passing Predict on record for the
-        # skill (server-side prerequisite, not UI-only). Raises RUN_REQUIRES_PREDICT
-        # (HTTP 409) when no passing predict exists.
-        require_passing_predict(skill_id)
         skill_dir = resolve_skill_dir(skill_id)
 
         from app.core.adapters.engine import EngineAdapter
@@ -249,6 +245,13 @@ class RunManager:
                 "artifact_scope": "ephemeral",
             }
         )
+
+        # MVP1 run-and-verify gate: Run requires a passing Predict for *this* graph
+        # state (server-side prerequisite, not UI-only). The gate matches the recorded
+        # predict-pass content_hash against the freshly-compiled hash, so editing the
+        # graph after a pass forces a re-predict. Raises RUN_REQUIRES_PREDICT (409)
+        # when no matching passing predict is on record.
+        require_passing_predict(skill_id, content_hash=art_ref["content_hash"])
 
         inputs = _runtime_inputs_from_request(request)
         run_id = _new_run_id()

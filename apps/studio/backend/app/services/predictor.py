@@ -111,14 +111,16 @@ class PredictorService:
             )
         if isinstance(result, dict):
             result = RunResult.model_validate(result)
-        self._persist_predict_result(skill_dir, result.run_id, result)
+        self._persist_predict_result(skill_dir, result.run_id, result, content_hash=art_ref["content_hash"])
         return cast(RunResult, result)
 
     def export_diagnostics(self, result: RunResult) -> PredictDiagnosticExport:
         """Expose PredictResult through the Studio in-process diagnostic contract."""
         return export_predict_diagnostics(result)
 
-    def _persist_predict_result(self, skill_dir: Path, run_id: str, result: RunResult) -> None:
+    def _persist_predict_result(
+        self, skill_dir: Path, run_id: str, result: RunResult, *, content_hash: str
+    ) -> None:
         run_dir = workspace_dir_for(skill_dir) / "runs" / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "result.json").write_text(
@@ -128,9 +130,10 @@ class PredictorService:
         if result.success:
             # Persist predict-pass server-side so the run-spawn path can enforce the
             # MVP1 "predict-pass unlocks Run" prerequisite for any caller, not just the UI.
+            # Bind it to the compiled content_hash so a later edit invalidates the pass.
             from app.services.predict_gate import record_predict_pass
 
-            record_predict_pass(skill_dir, result.skill_id, run_id)
+            record_predict_pass(skill_dir, result.skill_id, run_id, content_hash=content_hash)
         else:
             logger.info(
                 "predictor predict_pass=not_recorded skill_id=%s run_id=%s reason=predict_failed",

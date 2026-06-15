@@ -32,9 +32,18 @@ def _record_predict_pass(skill_id: str) -> None:
     """Satisfy the server-side predict-pass run prerequisite for a skill.
 
     Mirrors the real predict-then-run flow: a passing Predict records predict-pass
-    server-side, which the run-spawn gate consumes.
+    bound to the compiled content_hash, which the run-spawn gate consumes after
+    matching it against the freshly-compiled hash. Compiling here (as the real
+    predict does) guarantees the recorded hash matches what start_run compiles.
     """
-    record_predict_pass(resolve_skill_dir(skill_id), skill_id, "predict-fixture")
+    from app.core.adapters.engine import EngineAdapter
+
+    skill_dir = resolve_skill_dir(skill_id)
+    adapter = EngineAdapter(transport="in_process")
+    art_ref = adapter.compile(
+        {"skill_dir": str(skill_dir), "skill_id": skill_id, "artifact_scope": "ephemeral"}
+    )
+    record_predict_pass(skill_dir, skill_id, "predict-fixture", content_hash=art_ref["content_hash"])
 
 
 def test_openapi_registers_phase0_rest_surface(client: TestClient) -> None:

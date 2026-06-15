@@ -81,6 +81,20 @@ describe('ContextEdge', () => {
     expect(getBezierPathMock).not.toHaveBeenCalled()
   })
 
+  it('renders a straight path for vertically aligned handles (TB layout)', () => {
+    const html = renderToStaticMarkup(
+      <ContextEdge
+        {...baseProps}
+        sourcePosition={Position.Bottom}
+        targetPosition={Position.Top}
+        targetX={0}
+      />,
+    )
+
+    expect(html).toContain('d="M 0 0 L 0 100"')
+    expect(getBezierPathMock).not.toHaveBeenCalled()
+  })
+
   it('renders a design-time edge dot button when hasTraceData is false', () => {
     const html = renderToStaticMarkup(<ContextEdge {...baseProps} />)
 

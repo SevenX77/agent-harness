@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
 from graph_agent.core.loader import PhaseTokenInfo
-from graph_agent.core.manifest import GraphManifest
+from graph_agent.core.manifest import GraphManifest, GraphPhaseRef, PhaseIOSchema
 
 TokenKind = Literal["frontmatter", "comment", "phase", "whitespace", "text"]
 
@@ -26,6 +27,46 @@ def serialize_graph(manifest: GraphManifest, original_md: str | None = None) -> 
 
     del original_md
     return _render_fresh_graph(manifest)
+
+
+def serialize_graph_topology(
+    *,
+    name: str,
+    description: str | None,
+    io: PhaseIOSchema,
+    phases: Sequence[GraphPhaseRef],
+) -> str:
+    """Serialize a canvas topology snapshot to canonical GRAPH.md Markdown.
+
+    Unlike :func:`serialize_graph` (which only sees ``manifest.phases`` as a
+    ``list[str]`` and therefore cannot carry edges), this takes the full phase
+    refs so the body ``<phase depends_on=...>`` elements reflect the REAL graph.
+
+    - ``depends_on``: comma-joined; a phase with no deps renders ``depends_on="input"``
+      (the reserved entry sentinel — the loader requires a non-empty ``depends_on``).
+    - ``output``: derived as the leaf phases (ids that appear in no other phase's
+      ``depends_on``), satisfying the FROZEN rules "at least one output" and
+      "an output phase has no downstream edges".
+    """
+    downstream = {dep for phase in phases for dep in phase.depends_on}
+    lines = [
+        "---",
+        'schema_version: "v0.3.0"',
+        f"name: {name}",
+    ]
+    if description:
+        lines.append(f"description: {description}")
+    lines.append("io:")
+    lines.extend(_render_mapping(io.model_dump(mode="json"), indent=2))
+    lines.append("phases:")
+    for phase in phases:
+        lines.append(f"  - {phase.id}")
+    lines.append("---")
+    for phase in phases:
+        depends_on = ", ".join(phase.depends_on) if phase.depends_on else "input"
+        output = " output" if phase.id not in downstream else ""
+        lines.append(f'<phase depends_on="{depends_on}"{output}>{phase.id}</phase>')
+    return "\n".join(lines) + "\n"
 
 
 def _render_fresh_graph(manifest: GraphManifest) -> str:
@@ -81,4 +122,4 @@ def _scalar(value: object) -> str:
     return str(value)
 
 
-__all__ = ["GraphToken", "serialize_graph"]
+__all__ = ["GraphToken", "serialize_graph", "serialize_graph_topology"]

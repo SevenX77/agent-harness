@@ -29,6 +29,9 @@ from graph_agent.core._predict_internal.golden_eval import diff_outputs as diff_
 from graph_agent.core._predict_internal.path_diff import compute_diff as compute_diff
 from graph_agent.core.exceptions import make_error_payload as make_error_payload
 from graph_agent.core.graph_serializer import serialize_graph as serialize_graph
+from graph_agent.core.graph_serializer import (
+    serialize_graph_topology as serialize_graph_topology,
+)
 from graph_agent.core.loader import SkillLoader as SkillLoader
 from graph_agent.core.manifest import (
     AgentNodeAST as AgentNodeAST,
@@ -41,6 +44,9 @@ from graph_agent.core.manifest import (
 )
 from graph_agent.core.manifest import (
     LogicNodeAST as LogicNodeAST,
+)
+from graph_agent.core.manifest import (
+    PhaseIOSchema as PhaseIOSchema,
 )
 from graph_agent.core.manifest import (
     SkillManifest as SkillManifest,

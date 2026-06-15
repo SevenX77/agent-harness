@@ -21,8 +21,10 @@ vi.mock('../ui/tooltip', () => ({
   TooltipTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
 }))
 
+const { workspaceCtxMock } = vi.hoisted(() => ({ workspaceCtxMock: vi.fn<() => unknown>(() => null) }))
+
 vi.mock('../studio/WorkspaceContext', () => ({
-  useOptionalWorkspaceContext: () => null,
+  useOptionalWorkspaceContext: workspaceCtxMock,
 }))
 
 const baseProps: Parameters<typeof ContextEdge>[0] = {
@@ -72,6 +74,7 @@ function findButton(node: ReactNode): ReactElement<{
 describe('ContextEdge', () => {
   beforeEach(() => {
     getBezierPathMock.mockClear()
+    workspaceCtxMock.mockReturnValue(null)
   })
 
   it('renders a straight path for horizontally aligned handles', () => {
@@ -116,6 +119,21 @@ describe('ContextEdge', () => {
 
     expect(() => button?.props.onClick?.({ stopPropagation })).not.toThrow()
     expect(stopPropagation).toHaveBeenCalledOnce()
+  })
+
+  it('routes the dot to the trace timeline (not Properties) when the workspace is wired', () => {
+    const setSelectedEdge = vi.fn()
+    const onPanelChange = vi.fn()
+    workspaceCtxMock.mockReturnValue({ setSelectedEdge, onPanelChange, traceEvents: [] })
+    const button = findButton(ContextEdge(baseProps))
+
+    button?.props.onClick?.({ stopPropagation: vi.fn() })
+
+    expect(setSelectedEdge).toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'a', target: 'b' }),
+    )
+    expect(onPanelChange).toHaveBeenCalledWith('timeline')
+    expect(onPanelChange).not.toHaveBeenCalledWith('properties')
   })
 
   it('right-clicking the design-time dot opens the edge context menu callback', () => {

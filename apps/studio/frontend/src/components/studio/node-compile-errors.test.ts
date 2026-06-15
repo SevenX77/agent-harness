@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { CompileError } from "@/api/types"
-import { compileErrorsByNode, hasFatalCompileError } from "./node-compile-errors"
+import { compileErrorsByNode } from "./node-compile-errors"
 
 function err(file: string | null, severity: CompileError["severity"] = "fatal"): CompileError {
   return { file, line: 1, field: null, severity, message: "boom" }
@@ -27,12 +27,12 @@ describe("compileErrorsByNode", () => {
     expect(compileErrorsByNode(null)).toEqual({})
     expect(compileErrorsByNode([])).toEqual({})
   })
-})
 
-describe("hasFatalCompileError", () => {
-  it("is true only when a fatal error is present", () => {
-    expect(hasFatalCompileError([err("phases/p/LOGIC.md", "warning")])).toBe(false)
-    expect(hasFatalCompileError([err("phases/p/LOGIC.md", "fatal")])).toBe(true)
-    expect(hasFatalCompileError(undefined)).toBe(false)
+  it("matches the backend phase-id char class (upper-case / digit-leading ids)", () => {
+    const byNode = compileErrorsByNode([
+      err("phases/Segment_1/LOGIC.md"),
+      err("phases/2nd-pass/SKILL.md"),
+    ])
+    expect(Object.keys(byNode).sort()).toEqual(["2nd-pass", "Segment_1"])
   })
 })

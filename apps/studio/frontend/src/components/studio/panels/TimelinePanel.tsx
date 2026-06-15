@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { AlertCircle, ArrowLeft, CheckCircle2, RefreshCw } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { TracePanel } from "@/components/TracePanel"
@@ -8,6 +8,7 @@ import { useRunHistory } from "../../../hooks/useRunHistory"
 import { errorMessage } from "../../../utils/errors"
 import { useWorkspaceContext } from "../WorkspaceContext"
 import { Button } from "../../ui/button"
+import { EdgeContextView } from "./EdgeContextView"
 
 const formatDuration = (sec?: number | null) => {
   if (sec == null) return "n/a"
@@ -35,15 +36,25 @@ const relativeTime = (value: string): string => {
 }
 
 export function TimelinePanel() {
-  const { currentSkillId } = useWorkspaceContext()
+  const { currentSkillId, selectedEdge, setSelectedEdge } = useWorkspaceContext()
   const { runs, isLoading, error, refresh } = useRunHistory(currentSkillId)
   // F2 (trace): clicking a past run loads its full trace (RunDetail.events) in place.
   const [selected, setSelected] = useState<{ runId: string; events: CallbackEvent[] } | null>(null)
   const [traceError, setTraceError] = useState<string | null>(null)
   const [loadingRunId, setLoadingRunId] = useState<string | null>(null)
 
+  // D14 mode precedence: the panel has three mutually-exclusive views (edge dot
+  // context, a selected run's trace, the run list). A dot click (selectedEdge)
+  // takes over, so clear any open run-detail; opening a run clears the dot.
+  useEffect(() => {
+    if (selectedEdge) {
+      setSelected(null)
+    }
+  }, [selectedEdge])
+
   const openRun = async (runId: string) => {
     if (!currentSkillId) return
+    setSelectedEdge?.(null)
     setLoadingRunId(runId)
     setTraceError(null)
     try {
@@ -54,6 +65,11 @@ export function TimelinePanel() {
     } finally {
       setLoadingRunId(null)
     }
+  }
+
+  // Dot/edge context is trace-owned (D14 / properties F3); it takes precedence.
+  if (selectedEdge) {
+    return <EdgeContextView selectedEdge={selectedEdge} onClear={() => setSelectedEdge?.(null)} />
   }
 
   if (selected) {

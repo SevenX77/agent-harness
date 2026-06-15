@@ -21,7 +21,6 @@ import { runPersistedRoleTestJob } from "../settings/LlmRolesTab"
 import type { FileMeta } from "../file-types"
 import { PanelHeader } from "./_shared/PanelHeader"
 import { roleTestStatusBadge, type RoleTestStatusInput } from "./role-test-status"
-import { useOptionalWorkspaceContext } from "../WorkspaceContext"
 import {
   applyPhaseFrontmatterForm,
   parsePhaseFrontmatter,
@@ -121,8 +120,6 @@ export function PropertiesPanel({
   onFileOpen,
   onPhaseFileSave,
 }: PropertiesPanelProps) {
-  const workspace = useOptionalWorkspaceContext()
-  const selectedEdge = workspace?.selectedEdge
 
   const modeLabel = selectedNode ? phaseKindLabel(selectedNode.data) : null
   const kind: PhaseFrontmatterKind = phaseFrontmatterKind(modeLabel ?? "LOGIC")
@@ -217,93 +214,6 @@ export function PropertiesPanel({
       toast.error(message)
     }
   }, [])
-
-  if (selectedEdge) {
-    return (
-      <div className="flex h-full flex-col bg-background">
-        <PanelHeader title="Connection Trace" />
-        <ScrollArea className="flex-1">
-          <div className="space-y-4 px-3 py-3 animate-in fade-in duration-200">
-            <div className="flex flex-col gap-1.5 rounded-md border border-border bg-card p-3 shadow-md">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Path Route
-              </div>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="font-mono text-xs text-indigo-400 bg-indigo-950/40 px-2 py-0.5 rounded border border-indigo-900/50">
-                  {selectedEdge.source}
-                </span>
-                <span className="text-muted-foreground text-xs">→</span>
-                <span className="font-mono text-xs text-emerald-400 bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-900/50">
-                  {selectedEdge.target}
-                </span>
-              </div>
-              <div className="mt-2 text-xs text-muted-foreground leading-relaxed">
-                Transferred context package captured during run execution.
-              </div>
-            </div>
-
-            {/* Rich formatted subsections */}
-            <div className="space-y-3">
-              {/* Inputs Segment */}
-              {selectedEdge.contextJson?.inputs != null && (
-                <div className="rounded-md border border-border bg-zinc-900/40 p-3">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center justify-between">
-                    <span>Input Arguments</span>
-                    <Badge variant="outline" className="text-[9px] px-1 py-0 border-zinc-700 text-zinc-400">Inputs</Badge>
-                  </div>
-                  <pre className="text-[11px] font-mono text-zinc-300 bg-zinc-950 p-2.5 rounded border border-zinc-800/80 overflow-x-auto whitespace-pre-wrap break-all leading-normal">
-                    {JSON.stringify(selectedEdge.contextJson.inputs, null, 2)}
-                  </pre>
-                </div>
-              )}
-
-              {/* Phase Outputs Segment */}
-              {selectedEdge.contextJson?.phase_outputs && Object.keys(selectedEdge.contextJson.phase_outputs).length > 0 && (
-                <div className="rounded-md border border-border bg-zinc-900/40 p-3">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center justify-between">
-                    <span>Phase Outputs</span>
-                    <Badge variant="outline" className="text-[9px] px-1 py-0 border-zinc-700 text-zinc-400">Outputs</Badge>
-                  </div>
-                  <pre className="text-[11px] font-mono text-zinc-300 bg-zinc-950 p-2.5 rounded border border-zinc-800/80 overflow-x-auto whitespace-pre-wrap break-all leading-normal">
-                    {JSON.stringify(selectedEdge.contextJson.phase_outputs, null, 2)}
-                  </pre>
-                </div>
-              )}
-
-              {/* Full Trace JSON */}
-              <div className="rounded-md border border-border bg-zinc-900/40 p-3">
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center justify-between">
-                  <span>Full Frame Trace</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(JSON.stringify(selectedEdge.contextJson, null, 2))
-                      toast.success("Trace JSON copied to clipboard!")
-                    }}
-                    className="text-[10px] text-primary hover:underline flex items-center gap-1 cursor-pointer bg-transparent border-none p-0 outline-none"
-                  >
-                    Copy JSON
-                  </button>
-                </div>
-                <pre className="max-h-72 text-[11px] font-mono text-zinc-400 bg-zinc-950 p-2.5 rounded border border-zinc-800/80 overflow-auto whitespace-pre leading-normal">
-                  {JSON.stringify(selectedEdge.contextJson, null, 2)}
-                </pre>
-              </div>
-            </div>
-
-            <Button
-              type="button"
-              variant="secondary"
-              className="w-full text-xs"
-              onClick={() => workspace?.setSelectedEdge?.(null)}
-            >
-              Clear Inspector Selection
-            </Button>
-          </div>
-        </ScrollArea>
-      </div>
-    )
-  }
 
   return (
     <div className="flex h-full flex-col bg-background">

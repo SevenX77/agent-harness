@@ -166,7 +166,9 @@ export function ContextEdge({
                       target,
                       contextJson,
                     })
-                    workspace.onPanelChange('properties')
+                    // D14: the dot is trace-owned. Route to the timeline (trace)
+                    // panel, not Properties, which no longer renders edge JSON.
+                    workspace.onPanelChange('timeline')
                   }
                 }}
                 onContextMenu={(event) => {

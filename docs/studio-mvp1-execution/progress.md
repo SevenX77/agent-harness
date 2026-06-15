@@ -511,8 +511,16 @@ R2 add-node(AddPhaseControl 画布左上下拉,wire onCreatePhase,配 R1 脚手�
 
 ### Wave 5 启动(并行 disjoint):R13 predict-pass 服务端前置(run_manager,非 UI 调用也得先 predict)· R23 node-Properties role Test 键(复用 settings role-test)· R14 Assets 真 path-based 子图成员(去 fake registeredSubgraphsCache,用 R4 的真 path)。
 
+### Wave 5 ✅(commit `a9ff7574` R13 · `8a0edb81` R23 · `17b67c21` R14)+ R10 ✅(`71584859`):
+- **R13 predict-pass 服务端前置**:新 `predict_gate`(`record_predict_pass`/`has_passing_predict`/`require_passing_predict`,在 `.workspace` 落 predict-pass marker)+ `run_manager` spawn run 前要求一条通过的 predict,否则 `RUN_REQUIRES_PREDICT`(409)。「没过 schema-predict 不许 spawn 真 run」,UI 与非 UI 调用一致受门。
+- **R23 node-Properties role Test 键**:Properties(逐节点编辑器)对 agent phase 在 LLM role 字段旁加 Test 触发 + 派生 role-test 状态(`role-test-status` 纯函数),节点角色就地试跑。
+- **R14 Assets 真子图成员**:`subgraph-membership` 从已解析 `graph_topology`(label+绝对子 path)派生成员,去猜测;有引用无可解析 path 诚实标 missing。
+- **R10 per-node compile badge**:新 `node-compile-errors`(按 `/phases/<id>/` 路径映射 CompileError 到属主节点)→ SkillNode 渲 destructive 角标(Workspace→GraphCanvas/SplitEditor→buildNodes→node.data 贯通);Studio 只渲 gateway 的 compile 错误不自算。
+- 门禁:前端 tsc/eslint clean(0 warn)+ vitest **582**;后端 pytest **561**/ruff clean/mypy 无新真错;api/llm.ts + PM 在编 docs 零改;never main。
+- post-audit:Wave 5+R10 派独立子 agent 审计 MVP1+三模块符合性(进行中)。
+
 ### 剩余(audit 已记):
-- **可做待续**:R10 per-node compile-error badge、R15 open-folder 导入门放宽、R18 @mention composer(**PM 已批加 tiptap 新依赖**,大件 net-new)、R24 Properties 去 edge-JSON dump 改道 trace(D14)、R25 L3 步骤编辑(需 Rust mutate_phase_body)。
+- **可做待续**:R15 open-folder 导入门放宽、R18 @mention composer(**PM 已批加 tiptap 新依赖**,大件 net-new)、R24 Properties 去 edge-JSON dump 改道 trace(D14)、R25 L3 步骤编辑(需 Rust mutate_phase_body)。
 - **需 PM 决策(记最终报告)**:① **R21 bundle 引用 = 需授权碰 api/llm.ts(KEEP-MAIN)**(bundle_id 在 RoleEntry,与 D6 同类,需 PM 一句授权)② golden per-node 重做范围 ③ node-level resume 范围(R22 debug bar 挂它)④ Bash HITL 双向 WS ⑤ R28 刷新 stale FROZEN 文档(PM 正在编辑这些 doc,避让)。
 - **真机视觉 e2e**:screenshot infra(SCContentFilter nil)失败 + 需 .app 重建 → **待 PM 在 System Settings 开屏幕录制授权** + 全波次落地后最终鼠标复验。
 

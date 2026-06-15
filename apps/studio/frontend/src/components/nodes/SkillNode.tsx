@@ -127,7 +127,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
         </button>
       ) : null}
       {data.subgraphPath && data.isExpanded ? (
-        <SubgraphInline path={data.subgraphPath} parentLabel={data.label} />
+        <SubgraphInline skillId={data.skillId} path={data.subgraphPath} parentLabel={data.label} />
       ) : null}
       <Handle type="source" position={Position.Bottom} className="!size-2.5 !border-background !bg-primary opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
     </div>

@@ -176,7 +176,12 @@ export function buildNodes(
   const phaseNodes: SkillGraphNode[] = phases.map((phase, index) => {
     const topology = topologyById.get(phase.name)
     const mode = topology?.mode ?? phase.mode
-    const subgraphPath = phase.subgraph ?? subgraphRefFromFile(detail?.files?.[`phases/${phase.name}/SUBGRAPH.md`])
+    // Prefer the topology row's absolute child `path` (what the subgraph
+    // resolver consumes); fall back to the legacy target_skill ref so the
+    // expand affordance still appears for older skills.
+    const subgraphPath = topology?.path
+      ?? phase.subgraph
+      ?? subgraphRefFromFile(detail?.files?.[`phases/${phase.name}/SUBGRAPH.md`])
     const filePath = `phases/${phase.name}/${phaseKindFile({ mode, subgraphPath })}`
     const frontmatter = phaseFrontmatter(detail?.files?.[filePath])
     return {
@@ -184,6 +189,7 @@ export function buildNodes(
       type: 'skill',
       position: { x: 160 + (index % 2) * 320, y: 80 + index * 150 },
       data: {
+        skillId,
         label: phase.name,
         mode,
         role: phase.mode === 'llm' ? phase.llm_role : null,

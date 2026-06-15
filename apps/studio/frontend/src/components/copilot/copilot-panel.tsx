@@ -1,8 +1,8 @@
-import React, { useEffect, useState, type FormEvent } from 'react'
+import React, { useEffect, useMemo, useState, type FormEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { ArrowUp, Bot, CircleAlert, Paperclip, Plus, TerminalSquare } from 'lucide-react'
 import { toast } from 'sonner'
-import { getRegistry, type RegistryResponse, type RoleEntry } from '../../api/llm'
+import { getRegistry, getRoles, type RegistryResponse, type RoleEntry, type RolesData } from '../../api/llm'
 import { useCopilot } from '../../hooks/useCopilot'
 import { useTemplates } from '../../hooks/useTemplates'
 import type { CopilotMessage } from '../../types/copilot'
@@ -10,6 +10,7 @@ import { AnalysisBar } from './analysis-bar'
 import { DiffBubble } from './diff-bubble'
 import { ModelPicker } from './model-picker'
 import { PatchProposedBubble, type CopilotFileAction } from './patch-proposed-bubble'
+import { DEFAULT_COPILOT_ROLE, RolePicker, copilotRoleOptions } from './role-picker'
 import { ToolCallBubble } from './tool-call-bubble'
 
 interface ChatMessageItemProps {
@@ -131,9 +132,12 @@ export function CopilotPanel({ skillId, view = 'edit', completedRunId = null, on
   const [roleData, setRoleData] = useState<RoleEntry | null>(null)
   const [registry, setRegistry] = useState<RegistryResponse | null>(null)
   const [selectedRouteId, setSelectedRouteId] = useState('')
+  const [rolesData, setRolesData] = useState<RolesData | null>(null)
+  const [selectedRole, setSelectedRole] = useState(DEFAULT_COPILOT_ROLE)
   const { templates, templatesLoading } = useTemplates()
   const copilot = useCopilot(skillId)
   const inEvalView = view === 'eval'
+  const roleOptions = useMemo(() => copilotRoleOptions(rolesData), [rolesData])
 
   useEffect(() => {
     let cancelled = false
@@ -155,6 +159,28 @@ export function CopilotPanel({ skillId, view = 'edit', completedRunId = null, on
     }
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+    getRoles()
+      .then((nextRoles) => {
+        if (cancelled) {
+          return
+        }
+        setRolesData(nextRoles)
+        const options = copilotRoleOptions(nextRoles)
+        // Keep the default when present; otherwise fall back to the first copilot role.
+        if (!options.some((option) => option.role === DEFAULT_COPILOT_ROLE) && options[0]) {
+          setSelectedRole(options[0].role)
+        }
+      })
+      .catch(() => {
+        toast.error('Copilot roles unavailable')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   function selectRoute(routeId: string) {
     if (routeId === selectedRouteId) {
       return
@@ -165,7 +191,11 @@ export function CopilotPanel({ skillId, view = 'edit', completedRunId = null, on
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (copilot.sendMessage(draft, selectedRouteId || roleData?.fallback_chain?.[0]?.route_id || null)) {
+    if (copilot.sendMessage(
+      draft,
+      selectedRouteId || roleData?.fallback_chain?.[0]?.route_id || null,
+      selectedRole || null,
+    )) {
       setDraft('')
     }
   }
@@ -288,6 +318,11 @@ export function CopilotPanel({ skillId, view = 'edit', completedRunId = null, on
                 registry={registry}
                 selectedRouteId={selectedRouteId || roleData?.fallback_chain?.[0]?.route_id || ''}
                 onSelect={selectRoute}
+              />
+              <RolePicker
+                options={roleOptions}
+                selectedRole={selectedRole}
+                onSelect={setSelectedRole}
               />
             </div>
             <button

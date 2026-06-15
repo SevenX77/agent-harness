@@ -2,6 +2,7 @@ import axios, { AxiosError, AxiosHeaders } from 'axios'
 import type { AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 import type {
   AppSettings,
+  ChildGraphTopology,
   CollaborateResult,
   CompileFailure,
   CompileResult,
@@ -243,6 +244,23 @@ export async function revertSkill(skillId: string, sha: string): Promise<SkillDe
 
 export async function getSkillDetail(skillId: string): Promise<SkillDetail> {
   const response = await api.get<SkillDetail>(`/skills/${skillId}`)
+  return response.data
+}
+
+/**
+ * Resolve a subgraph's real child-graph topology by its absolute `path`.
+ * The backend resolver (`GET /skills/{skillId}/subgraph`) returns the child
+ * graph's phases + topology so the inline preview renders real child phases
+ * instead of a mock. A missing/invalid path yields a typed 404/422 the caller
+ * surfaces as an error state.
+ */
+export async function getChildGraphTopology(
+  skillId: string,
+  path: string,
+): Promise<ChildGraphTopology> {
+  const response = await api.get<ChildGraphTopology>(`/skills/${skillId}/subgraph`, {
+    params: { path },
+  })
   return response.data
 }
 

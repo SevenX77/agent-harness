@@ -1,7 +1,7 @@
 import { isValidElement, type ReactElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildEdges, CanvasContextMenuContent, GraphCanvas, SkillNode, type SkillGraphNode } from './GraphCanvas'
+import { AddPhaseControl, buildEdges, CanvasContextMenuContent, GraphCanvas, SkillNode, type SkillGraphNode } from './GraphCanvas'
 import { CycleDetectedError, getAutoLayoutedElements } from '../lib/layout'
 import type { Edge, Node } from '@xyflow/react'
 import type { SkillDetail } from '@/api/types'
@@ -18,6 +18,7 @@ vi.mock('@xyflow/react', () => ({
   Handle: () => <span data-testid="handle" />,
   MarkerType: { ArrowClosed: 'arrowclosed' },
   MiniMap: () => <div data-testid="minimap" />,
+  Panel: ({ children }: { children: ReactNode }) => <div data-testid="panel">{children}</div>,
   Position: { Left: 'left', Right: 'right', Top: 'top', Bottom: 'bottom' },
   ReactFlow: (props: { children: ReactNode; nodeOrigin?: [number, number] }) => {
     reactFlowPropsRef.current = props
@@ -77,6 +78,7 @@ function phaseNode(id: string, dependsOn: string[] = []): SkillGraphNode {
     type: 'skill',
     position: { x: 0, y: 0 },
     data: {
+      skillId: 'demo',
       label: id,
       mode: 'llm',
       status: 'idle',
@@ -90,6 +92,7 @@ function skillNodeProps(overrides: Partial<SkillGraphNode['data']> = {}): Parame
     id: 'phase',
     type: 'skill',
     data: {
+      skillId: 'demo',
       label: 'Phase',
       mode: 'llm',
       status: 'idle',
@@ -396,5 +399,24 @@ describe('GraphCanvas', () => {
 
     expect(stopPropagation).toHaveBeenCalledOnce()
     expect(onToggleSubgraph).not.toHaveBeenCalled()
+  })
+})
+
+describe('AddPhaseControl', () => {
+  it('invokes onCreatePhase with the chosen kind when a menu item is selected', () => {
+    const onCreatePhase = vi.fn()
+    // Walk the element tree (no DOM): DropdownMenu > [trigger, content];
+    // content children = the ADD_PHASE_OPTIONS items keyed by kind.
+    const element = AddPhaseControl({ onCreatePhase }) as ReactElement<{ children: ReactNode[] }>
+    const content = element.props.children[1] as ReactElement<{ children: ReactNode[] }>
+    const items = content.props.children.flat() as ReactElement<{ onSelect?: () => void }>[]
+
+    const logicItem = items.find((item) => item.key === 'logic')
+    logicItem?.props.onSelect?.()
+    expect(onCreatePhase).toHaveBeenCalledWith('logic')
+
+    const agentItem = items.find((item) => item.key === 'skill')
+    agentItem?.props.onSelect?.()
+    expect(onCreatePhase).toHaveBeenCalledWith('skill')
   })
 })

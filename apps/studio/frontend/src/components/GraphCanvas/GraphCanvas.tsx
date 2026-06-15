@@ -4,6 +4,7 @@ import {
   Background,
   Controls,
   MiniMap,
+  Panel,
   ReactFlow,
   addEdge,
   useEdgesState,
@@ -12,9 +13,11 @@ import {
   type Edge,
   type ReactFlowInstance,
 } from '@xyflow/react'
+import { Plus } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { toast } from 'sonner'
 import type { SkillDetail } from '@/api/types'
+import { Button } from '@/components/ui/button'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -24,6 +27,12 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { CycleDetectedError, getAutoLayoutedElements } from '@/lib/layout'
 import { ContextEdge, type ContextEdgeData } from '@/components/edges/ContextEdge'
 import { GlobalInputNode, GlobalOutputNode } from '@/components/nodes/GlobalInputOutputNode'
@@ -449,6 +458,11 @@ export function GraphCanvas({
         <Background gap={18} size={1} />
         <Controls position="bottom-left" />
         {!compact ? <MiniMap pannable zoomable position="bottom-right" style={{ height: 120, width: 200 }} /> : null}
+        {onCreatePhase ? (
+          <Panel position="top-left">
+            <AddPhaseControl onCreatePhase={onCreatePhase} />
+          </Panel>
+        ) : null}
       </ReactFlow>
         </section>
       </ContextMenuTrigger>
@@ -459,6 +473,36 @@ export function GraphCanvas({
         onCloseEdgeMenu={() => setEdgeMenuConnection(null)}
       />
     </ContextMenu>
+  )
+}
+
+const ADD_PHASE_OPTIONS: ReadonlyArray<{ kind: NewPhaseKind; label: string }> = [
+  { kind: 'skill', label: 'Agent Phase' },
+  { kind: 'logic', label: 'Logic Phase' },
+  { kind: 'subgraph', label: 'Subgraph Phase' },
+]
+
+export function AddPhaseControl({
+  onCreatePhase,
+}: {
+  onCreatePhase: (kind: NewPhaseKind) => Promise<void> | void
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" size="sm" variant="outline" className="shadow-sm" aria-label="Add phase">
+          <Plus className="size-3.5" />
+          Add phase
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        {ADD_PHASE_OPTIONS.map((option) => (
+          <DropdownMenuItem key={option.kind} onSelect={() => { void onCreatePhase(option.kind) }}>
+            {option.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 

@@ -31,7 +31,8 @@ describe('PropertiesPanel', () => {
         selectedNode={{
           id: 'setup',
           data: {
-            label: 'setup',
+            skillId: 'demo',
+            label:'setup',
             mode: 'logic',
             status: 'idle',
             dependsOn: ['input'],
@@ -80,7 +81,8 @@ describe('PropertiesPanel', () => {
         selectedNode={{
           id: 'review',
           data: {
-            label: 'review',
+            skillId: 'demo',
+            label:'review',
             mode: 'skill',
             status: 'idle',
             dependsOn: [],
@@ -118,7 +120,8 @@ describe('PropertiesPanel', () => {
         selectedNode={{
           id: 'child',
           data: {
-            label: 'child',
+            skillId: 'demo',
+            label:'child',
             mode: 'subgraph',
             status: 'idle',
             dependsOn: [],
@@ -152,7 +155,8 @@ describe('PropertiesPanel', () => {
         selectedNode={{
           id: 'broken',
           data: {
-            label: 'broken',
+            skillId: 'demo',
+            label:'broken',
             mode: 'logic',
             status: 'idle',
             dependsOn: [],
@@ -175,7 +179,8 @@ describe('PropertiesPanel', () => {
         selectedNode={{
           id: 'main',
           data: {
-            label: 'main',
+            skillId: 'demo',
+            label:'main',
             mode: 'skill',
             status: 'idle',
             dependsOn: [],

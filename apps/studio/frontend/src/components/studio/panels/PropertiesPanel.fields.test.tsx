@@ -20,6 +20,7 @@ const DEPRECATED_LABELS = [
 
 function baseData(overrides: Partial<SkillGraphNodeData>): SkillGraphNodeData {
   return {
+    skillId: 'demo',
     label: 'phase',
     mode: 'logic',
     status: 'idle',

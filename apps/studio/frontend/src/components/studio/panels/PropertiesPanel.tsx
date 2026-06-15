@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -16,8 +17,10 @@ import { Textarea } from "@/components/ui/textarea"
 import type { SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData, SubagentRef } from "@/components/GraphCanvas"
 import { sha256Hex } from "@/lib/hash"
+import { runPersistedRoleTestJob } from "../settings/LlmRolesTab"
 import type { FileMeta } from "../file-types"
 import { PanelHeader } from "./_shared/PanelHeader"
+import { roleTestStatusBadge, type RoleTestStatusInput } from "./role-test-status"
 import { useOptionalWorkspaceContext } from "../WorkspaceContext"
 import {
   applyPhaseFrontmatterForm,
@@ -145,11 +148,13 @@ export function PropertiesPanel({
     phaseFormState.ok ? phaseFormState.form : null
   ))
   const [saving, setSaving] = useState(false)
+  const [roleTest, setRoleTest] = useState<RoleTestStatusInput>({ running: false })
 
   useEffect(() => {
     setLoadedFormKey(phaseFormState.key)
     setDraft(phaseFormState.ok ? phaseFormState.form : null)
     setSaving(false)
+    setRoleTest({ running: false })
   }, [phaseFormState])
 
   const activeDraft = phaseFormState.ok
@@ -192,6 +197,26 @@ export function PropertiesPanel({
       setSaving(false)
     }
   }
+
+  // Reuses the settings role-test runner (runPersistedRoleTestJob) verbatim so the
+  // node Properties Test button verifies the same backend job + status projection
+  // the Settings page does (settings-ux-spec §2.7). No re-implementation.
+  const handleRoleTest = useCallback(async (roleName: string) => {
+    const trimmed = roleName.trim()
+    if (!trimmed) {
+      toast.error("Set an LLM role before testing.")
+      return
+    }
+    setRoleTest({ running: true, status: null, error: null })
+    try {
+      const result = await runPersistedRoleTestJob({ roleName: trimmed })
+      setRoleTest({ running: false, status: result.status, error: null })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Role test failed"
+      setRoleTest({ running: false, status: null, error: message })
+      toast.error(message)
+    }
+  }, [])
 
   if (selectedEdge) {
     return (
@@ -298,10 +323,14 @@ export function PropertiesPanel({
                 saving={saving}
                 canSave={canSave}
                 canReset={dirty && !saving}
+                roleTest={roleTest}
                 onFieldChange={setField}
                 onReset={handleReset}
                 onSave={() => {
                   void handleSave()
+                }}
+                onRoleTest={(roleName) => {
+                  void handleRoleTest(roleName)
                 }}
               />
             ) : (
@@ -344,18 +373,22 @@ function PhaseFrontmatterForm({
   saving,
   canSave,
   canReset,
+  roleTest,
   onFieldChange,
   onReset,
   onSave,
+  onRoleTest,
 }: {
   value: PhaseFrontmatterFormData
   kind: PhaseFrontmatterKind
   saving: boolean
   canSave: boolean
   canReset: boolean
+  roleTest: RoleTestStatusInput
   onFieldChange: <Key extends keyof PhaseFrontmatterFormData>(field: Key, value: PhaseFrontmatterFormData[Key]) => void
   onReset: () => void
   onSave: () => void
+  onRoleTest: (roleName: string) => void
 }) {
   return (
     <form
@@ -371,12 +404,20 @@ function PhaseFrontmatterForm({
             <>
               <Field>
                 <FieldLabel htmlFor="phase-llm-role">LLM role</FieldLabel>
-                <Input
-                  id="phase-llm-role"
-                  value={value.llmRole}
-                  placeholder="analyst"
-                  onChange={(event) => onFieldChange("llmRole", event.currentTarget.value)}
-                />
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="phase-llm-role"
+                    className="flex-1"
+                    value={value.llmRole}
+                    placeholder="analyst"
+                    onChange={(event) => onFieldChange("llmRole", event.currentTarget.value)}
+                  />
+                  <RoleTestControl
+                    roleName={value.llmRole}
+                    roleTest={roleTest}
+                    onRoleTest={onRoleTest}
+                  />
+                </div>
                 <FieldDescription>Routes model tier/policy. Inherits the graph default when blank.</FieldDescription>
               </Field>
               <Field>
@@ -442,6 +483,38 @@ function PhaseFrontmatterForm({
         </div>
       </FieldSet>
     </form>
+  )
+}
+
+function RoleTestControl({
+  roleName,
+  roleTest,
+  onRoleTest,
+}: {
+  roleName: string
+  roleTest: RoleTestStatusInput
+  onRoleTest: (roleName: string) => void
+}) {
+  const badge = roleTestStatusBadge(roleTest)
+  const showBadge = badge.running || roleTest.status != null || Boolean(roleTest.error)
+  return (
+    <div className="flex shrink-0 items-center gap-2">
+      {showBadge ? (
+        <Badge variant={badge.variant} className="h-6">
+          {badge.running ? <Loader2 className="size-3 animate-spin" aria-hidden /> : null}
+          {badge.label}
+        </Badge>
+      ) : null}
+      <Button
+        type="button"
+        size="sm"
+        variant="secondary"
+        disabled={badge.running || roleName.trim().length === 0}
+        onClick={() => onRoleTest(roleName)}
+      >
+        Test
+      </Button>
+    </div>
   )
 }
 

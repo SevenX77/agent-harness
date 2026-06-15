@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -55,6 +56,8 @@ from app.services.file_watcher import record_api_write
 from app.services.git_local import GitLocalService, initialize_skill_repository
 from app.services.graph_roundtrip import serialize_graph
 from app.services.skill_resolver import build_studio_skill_resolver
+
+logger = logging.getLogger(__name__)
 
 _LOCATION_RE = re.compile(r":(?P<line>\d+)(?::(?P<loc>.*))?")
 _SAFE_SKILL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -530,13 +533,20 @@ async def create_new_skill(
         if not skill_dir.exists() or not skill_dir.is_dir():
             _raise_invalid_directory_path(str(skill_dir), "selected folder does not exist")
         if not await _is_importable_skill_directory(skill_dir, storage):
-            _raise_invalid_directory_path(
-                str(skill_dir),
-                "Selected folder is not a Studio skill directory: missing GRAPH.md or SKILL.md.",
-                required_entry="GRAPH.md or SKILL.md",
+            # WELCOME-2 / welcome F2 / 01_init.md D2 (FROZEN): "Open folder" must not
+            # block on file shape. A folder lacking a Studio manifest (GRAPH.md/SKILL.md)
+            # — empty or non-skill — imports into a repair state (compile/copilot
+            # normalize it later) instead of being hard-rejected. Only OS-level guards
+            # (path missing / not a directory, above) remain. The summary + detail paths
+            # already degrade gracefully for a manifest-less folder.
+            logger.warning(
+                "import skill_id=%s dir=%s: no GRAPH.md/SKILL.md manifest; "
+                "importing into repair state (D2: do not block on file shape)",
+                skill_id,
+                skill_dir,
             )
-        if await storage.exists(str(skill_dir / "GRAPH.md")):
-            # Validate but do not raise validation error on import, allowing users to upgrade/correct it later
+        elif await storage.exists(str(skill_dir / "GRAPH.md")):
+            # Validate but do not raise on import, letting users upgrade/correct later.
             lint_skill_path(skill_dir)
         summary = (
             await _summary_for_skill_dir_async(

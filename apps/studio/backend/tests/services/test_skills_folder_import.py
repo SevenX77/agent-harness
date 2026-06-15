@@ -82,10 +82,13 @@ async def test_create_new_skill_imports_existing_nonempty_directory_without_writ
     )
 
 
-def test_create_skill_import_rejects_non_skill_directory(
+def test_create_skill_import_allows_non_skill_directory_into_repair_state(
     client: TestClient,
     tmp_path: Path,
 ) -> None:
+    # WELCOME-2 / F2 / D2 (FROZEN): "Open folder" must not block on file shape.
+    # A non-skill folder (no GRAPH.md/SKILL.md) imports into a repair state instead
+    # of being hard-rejected — compile/copilot normalize it later.
     skill_dir = tmp_path / "external" / "not-a-skill"
     skill_dir.mkdir(parents=True)
     (skill_dir / "notes.txt").write_text("plain folder\n", encoding="utf-8")
@@ -99,20 +102,23 @@ def test_create_skill_import_rejects_non_skill_directory(
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 201
     body = response.json()
-    assert body["error_code"] == "INVALID_DIRECTORY_PATH"
-    assert "GRAPH.md or SKILL.md" in body["message"]
-    assert body["details"] == {
-        "directory_path": str(skill_dir),
-        "required_entry": "GRAPH.md or SKILL.md",
-    }
+    assert body["id"] == "not-a-skill"
+    assert body["directory_path"] == str(skill_dir)
+    # Repair state: no manifest yet, so no phases and an empty description.
+    assert body["phase_count"] == 0
+    assert body["description"] == ""
+    # Import must not scaffold a manifest behind the user's back.
+    assert not (skill_dir / "GRAPH.md").exists()
 
 
-def test_import_skill_rejects_empty_directory_without_scaffolding(
+def test_import_skill_allows_empty_directory_into_repair_state(
     client: TestClient,
     tmp_path: Path,
 ) -> None:
+    # D2: opening ANY folder (including an empty one) must reach Workspace in a
+    # repair state rather than being rejected for missing root docs.
     skill_dir = tmp_path / "external" / "empty-folder"
     skill_dir.mkdir(parents=True)
 
@@ -125,10 +131,10 @@ def test_import_skill_rejects_empty_directory_without_scaffolding(
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 201
     body = response.json()
-    assert body["error_code"] == "INVALID_DIRECTORY_PATH"
-    assert "GRAPH.md or SKILL.md" in body["message"]
+    assert body["id"] == "empty-folder"
+    assert body["phase_count"] == 0
     assert not (skill_dir / "GRAPH.md").exists()
 
 

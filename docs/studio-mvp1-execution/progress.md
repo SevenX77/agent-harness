@@ -582,5 +582,13 @@ R2 add-node(AddPhaseControl 画布左上下拉,wire onCreatePhase,配 R1 脚手�
 - **修复方向(待 pre-audit 定)**:① engine 加/改一个能吃完整拓扑(phase id + depends_on)的 serializer,emit FROZEN-conformant GRAPH.md(frontmatter phases + body `<phase depends_on output>`,output=叶子节点派生,遵守「≥1 output」「output 无下游」);② studio service 去掉 broken model_copy/model_validate,直接用 request.phases 拓扑调它。engine 拥有 GRAPH.md 格式 → 修在 engine 为主。
 - **登记**:在 e2e-fast 测试 skill(`/tmp/studio-app-verify/.../e2e-fast`)留了个孤儿 `phases/logic`(rm 被门禁拦,/tmp 测试件无害,待清);视觉验证现可用 → 修完即真机复点确认加节点能上画布。
 
+### ✅ 已修(commit `6ee4fe87`,走完四步法 pre-audit→实施→门禁)
+- **engine** 加 `serialize_graph_topology(name, description, io, phases)`(graph_serializer.py)——吃完整 phase refs(id+depends_on),emit FROZEN-conformant GRAPH.md:depends_on 逗号连接、空依赖→`input` 哨兵、output=叶子节点派生(满足「≥1 output」「output 无下游」)。**不碰** pinned `serialize_graph` 签名(public-API gate 绿)、不进顶层 `__all__`。
+- **studio** `serialize_skill_graph_markdown` 去掉 broken `model_copy`/`model_validate(list[str])`,改用 request.phases 真拓扑调新 serializer(经 `graph_roundtrip` 边界,不直接 import engine serializer——roundtrip-boundary 测试绿);engine.py re-export `serialize_graph_topology`+`PhaseIOSchema`。
+- **pre-audit**(独立子 agent 对照 FROZEN GRAPH.md 格式 + loader parse 规则)= CONFORM,2 必守约束(格式归 engine、`[]→input` 映射)都遵了。
+- **测试**:补了**该路径的首个端到端测试**(此前 0 测试 = bug 漏网根因):engine 5 单测(线性/diamond fan-in 保真/多 output/空依赖→input)+ studio 2 端到端(加孤立 phase 不再 500、fan-in depends_on 保真)。真跑 round-trip:serialize→loader 解析回同拓扑。
+- **门禁**:engine **1306 passed** + ruff/mypy clean;studio **565 passed** + ruff/mypy clean(skills.py 仅 2 个 HEAD 既存错,无新);api/llm.ts 零改。
+- **待**:重打 .app(进行中)→ 真机复点 +Add phase 确认节点上画布 + GRAPH.md 落 logic(视觉终验)。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

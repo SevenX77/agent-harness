@@ -456,5 +456,15 @@ Stop-hook、反自造停下铁律、copilot F3/F4-echo/F7、trace F5/F2、input 
 ### 延期登记补充(本轮新增)
 - **edge-blackboard REQ-6/D14 结构清理**:dot 从 Properties 改道 trace console + 结构化 dot/blackboard inspector + 移除 PropertiesPanel selectedEdge raw-JSON dump 分支。前置:本轮 REQ-3 真数据已落(`edgeContextFromEvents`)。来源:PM frozen `properties/mvp1-alignment.md:38-45` F3 / `04_run-and-verify.md:99` D14。
 
+### 2026-06-15:PM 怒指"核对 MVP1 实现+把功能全部点一遍" → 全面 conformance 审计 + 修复波次启动
+> PM 看真 app 发现核心编辑器多处坏/不按设计(canvas 不竖排、node 连线/拓扑/+号、i/o 还有 json 文件、properties 不能改)。10-agent 审计(每区域 design vs 真代码)+ synth triage 落盘 `conformance-audit-2026-06-15.md`(全量 `/tmp/.../wjax3lk87.output` 226KB)。
+
+- **✅ REQ-1 TB 竖排布局已修**(commit 本轮):`lib/layout.ts` rankdir LR→TB + 4 个 node handle Left/Right→Top/Bottom + 子图展开按钮避让底部 handle + ContextEdge 加竖直直线 case。synth 复核确认"竖排没实现"不再成立。tsc/eslint/vitest 绿。
+- **审计确认 PM 全部抱怨 + 更多真坏**(crit):①加节点"+"缺且加节点链路整条死(脚手架写 mode 等违 FROZEN→编译 FATAL);②Properties 编废弃字段 + 静默删 llm_role(数据破坏);③子图展开=硬编码 mock(entry/execute/return)+后端不发 path;④i/o 面板假可编辑 json 文件(autosave 死路径=丢数据)+无字段级 schema 编辑器;⑤真 agent 节点渲染成 logic;⑥首节点假绿灯。
+- **Wave 1 启动(5 并行 subagent,文件不冲突,FROZEN 字段权威=engine skill-syntax §2.2-2.5)**:R1 FROZEN 脚手架(canvas-authoring)· R3 Properties FROZEN 白名单+停删 llm_role(PropertiesPanel+phase-frontmatter)· R6+8 node-kind agent+去假绿(build-nodes)· R7 去假 io 文件+字段级 io schema 编辑器(panel-files+InputPanel+schema-infer)· R4 后端发子图 path+child resolver(skills.py)。我 gatekeep 门禁+diff+post-audit。
+- **Wave 2(依赖 W1)**:R2 加节点"+"UI(依赖 R1)· R5 SubgraphInline 真 loader(依赖 R4)。后续:子图下钻/面包屑、copilot session 持久化+tab、@mention(PM 批"加")、settings 6态/role-test 持久化/bundle 引用、validation_fail 红节点、刷新 stale 文档、删死码。
+- **需 PM 决策(到该波次前确认)**:golden per-node 重做范围、node-level resume 范围、copilot 范围(@mention 已批/wizard 已否/图片)、Bash HITL 双向 WS。
+- **screenshot blocker(记录,不阻塞)**:真 .app screenshot 当前 infra 失败(SCContentFilter nil,5 retries,MCP 活+app full-tier)。疑屏幕录制授权或 compositor;代码修复不依赖它,真机鼠标复验留授权恢复后。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

@@ -570,5 +570,17 @@ R2 add-node(AddPhaseControl 画布左上下拉,wire onCreatePhase,配 R1 脚手�
 
 > **本轮停点说明**:所有"契约内 contained + 可单测/可门禁验证"的单元都已做完并验证(R13 修偏差/R10 清理/R24 dot→trace/R15 open-folder,各跑完四步法 pre+post audit,后端 563 / 前端 586 全绿;fresh .app 重建+后端健康)。**仅剩 R18/R25 两个交互式前端 epic,二者卡在同一个真 blocker:交互验证需 PM 开屏幕录制权限(我无法自设系统安全设置),且设计否决可验证的替代法**。盲建 = 假绿,违 PM 铁律。故记录在案、待 PM 解屏幕录制后专门轮做,非自造停下。
 
+## 🔴 真机 e2e 复诊(2026-06-15,屏幕录制其实没坏)+ 抓到核心编辑器真 bug
+> 上一条"屏幕录制 blocker"是**我误诊**(报错文案"权限缺失 OR SCContentFilter 失败",我跳到权限结论,违背自己 memory「截图正常别误判」)。**重试即成功** —— `request_access` 早授权(tier full),截图正常。PM 一句"不是已经授权过了吗"点破。computer-use 视觉验证**没被 block**。
+
+**真机点穿 fresh .app 结果**:canvas 竖排 ✅ / 连线 ✅ / +Add phase 控件(Agent/Logic/Subgraph)✅ / I/O 面板(无假 json,字段级 schema 编辑 + Test Inputs + Golden)✅ / Properties(选节点出可编辑 Actions/Validator + Save)✅ —— **PM 7 条吐槽 6 条在 fresh app 上确认正常**。
+
+**但点 +Add phase → Logic Phase 抓到核心 bug(= 审计早判的「核心编辑器 BROKEN」)**:
+- **现象**:`phases/logic/LOGIC.md` 被创建(scaffold 是 FROZEN-clean,R1 对),但 **GRAPH.md 的 `phases:` 没加 logic** → 孤儿目录,canvas 永不显示。本质 = 所有 canvas 拓扑保存(加节点 / 连线 / 断线)都不落盘。
+- **根因(已 reproduce 确证)**:studio `serialize_skill_graph_markdown`(skills.py:1344)做 `compiled.manifest.model_copy(update={"phases":[GraphPhaseRef(...)]})` 再 `GraphManifest.model_validate(model_dump())` —— 但 `GraphManifest.phases` 是 **`list[str]`**(manifest.py:141),把 GraphPhaseRef 塞进字符串列表 → model_validate **抛 ValidationError**(每 phase 一条)→ 未被 try 捕获(只接 CanvasConflictError/CanvasSerializerFatal/GraphAgentError)→ `/graph/serialize` **500** → 前端 `handleCreatePhase` catch → `toast.error("Could not create phase")` → GRAPH.md 不写 → 孤儿。
+- **第二层 bug**:即便修了上面,engine `serialize_graph`(graph_serializer.py:24)**`del original_md` + `_render_fresh_graph` 硬造线性链**(phase[i] 依赖 phase[i-1]、末位 output,**无视真 depends_on**)→ 任何非线性图(分支/fan-in)被 serialize 都会**拓扑损坏**。GraphManifest.phases=list[str] 结构上承载不了 depends_on。
+- **修复方向(待 pre-audit 定)**:① engine 加/改一个能吃完整拓扑(phase id + depends_on)的 serializer,emit FROZEN-conformant GRAPH.md(frontmatter phases + body `<phase depends_on output>`,output=叶子节点派生,遵守「≥1 output」「output 无下游」);② studio service 去掉 broken model_copy/model_validate,直接用 request.phases 拓扑调它。engine 拥有 GRAPH.md 格式 → 修在 engine 为主。
+- **登记**:在 e2e-fast 测试 skill(`/tmp/studio-app-verify/.../e2e-fast`)留了个孤儿 `phases/logic`(rm 被门禁拦,/tmp 测试件无害,待清);视觉验证现可用 → 修完即真机复点确认加节点能上画布。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

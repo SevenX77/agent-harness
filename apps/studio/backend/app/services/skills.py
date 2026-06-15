@@ -54,7 +54,7 @@ from app.services.canvas_errors import CanvasConflictError, CanvasSerializerFata
 from app.services.config_arbitration import detect_config_mismatch
 from app.services.file_watcher import record_api_write
 from app.services.git_local import GitLocalService, initialize_skill_repository
-from app.services.graph_roundtrip import serialize_graph
+from app.services.graph_roundtrip import serialize_graph_topology
 from app.services.skill_resolver import build_studio_skill_resolver
 
 logger = logging.getLogger(__name__)
@@ -1363,19 +1363,25 @@ async def serialize_skill_graph_markdown(
                 current_phase_count=len(compiled.manifest.phases),
             )
         _validate_canvas_topology(request)
-        manifest = compiled.manifest.model_copy(
-            update={
-                "phases": [
-                    GraphPhaseRef(
-                        id=phase.id,
-                        src=phase.src,
-                        depends_on=list(phase.depends_on),
-                    )
-                    for phase in request.phases
-                ]
-            }
+        # Build the canvas's desired topology (id + real depends_on) and serialize it.
+        # NOTE: GraphManifest.phases is list[str] (no edges), so we MUST pass the full
+        # phase refs to the topology serializer — cramming GraphPhaseRef into the
+        # manifest's phases and re-validating raises ValidationError (the old bug that
+        # 500'd every canvas topology save and left orphan phase dirs).
+        refs = [
+            GraphPhaseRef(
+                id=phase.id,
+                src=phase.src,
+                depends_on=list(phase.depends_on),
+            )
+            for phase in request.phases
+        ]
+        markdown = serialize_graph_topology(
+            name=compiled.manifest.name,
+            description=compiled.manifest.description,
+            io=compiled.manifest.io,
+            phases=refs,
         )
-        markdown = serialize_graph(GraphManifest.model_validate(manifest.model_dump()), original_md)
     except CanvasConflictError:
         raise
     except CanvasSerializerFatal as exc:

@@ -588,7 +588,13 @@ R2 add-node(AddPhaseControl 画布左上下拉,wire onCreatePhase,配 R1 脚手�
 - **pre-audit**(独立子 agent 对照 FROZEN GRAPH.md 格式 + loader parse 规则)= CONFORM,2 必守约束(格式归 engine、`[]→input` 映射)都遵了。
 - **测试**:补了**该路径的首个端到端测试**(此前 0 测试 = bug 漏网根因):engine 5 单测(线性/diamond fan-in 保真/多 output/空依赖→input)+ studio 2 端到端(加孤立 phase 不再 500、fan-in depends_on 保真)。真跑 round-trip:serialize→loader 解析回同拓扑。
 - **门禁**:engine **1306 passed** + ruff/mypy clean;studio **565 passed** + ruff/mypy clean(skills.py 仅 2 个 HEAD 既存错,无新);api/llm.ts 零改。
-- **验证状态**:① **API 层端到端已验**:新增的 `test_serialize_adds_a_disconnected_phase_without_500` 真打 `POST /graph/serialize`(真后端代码)→ 200 + 新 phase 进 markdown(正是原来 500 的回归点)。② .app 已重打 + 重启(含修复后端,sidecar 健康)。③ **视觉终验(点 +Add phase 看节点上画布)暂卡**:`screenshot` 连续 6 次 nil,**且 Finder(也已授权)同样 nil** → 是 macOS 截屏服务(SCContentFilter)**全局一过性退化**(半小时前同会话还正常),非权限、非本 app 问题、非代码问题。一过性 infra,记录;待截屏服务恢复后真机复点(前端 handleCreatePhase 编排未改,修的是它依赖的 serialize 后端 → 现返 200+正确 markdown,前端即能把节点写进 GRAPH.md 上画布)。
+- **门禁**:engine **1306 passed** + ruff/mypy clean;studio **566 passed** + ruff/mypy clean(skills.py 仅 2 个 HEAD 既存错,无新);api/llm.ts 零改。
+
+### ✅ 第二处修复(commit `fc811f89`)——真机 e2e 逼出的第二层 bug
+- 真机点 +Add phase 仍失败:前端先写 phase **目录**再调 serialize,serialize 旧逻辑 **full-compile** 在线 skill(`_load_compiled_for_graph_serializer`)→ 撞引擎「phase 目录 == frontmatter phases」铁律(目录有新 phase、GRAPH.md 还没)→ **422**,在我第一处修复的 serializer 跑到之前就挂。单测没复现是因为没在盘上先建目录。
+- **修**:serialize 即将**覆写** GRAPH.md,不该要求在线 skill 先一致 → 改从当前 GRAPH.md frontmatter **宽松读** name/description/io(`_graph_frontmatter_from_md`+`_io_schema_from_frontmatter`),删掉 full-compile;io 坏 → 干净 422(非 500)。`_validate_canvas_topology`(对 request 查环/未知依赖)仍跑,没丢校验。补回归测试(盘上有未登记 phase 目录 → serialize 仍 200)。
+- **post-audit**(独立子 agent,8 点)= **CONFORM**(round-trip 保真、cycle 上游 guard、宽松读不丢校验、无死码/未用 import、public-API gate + boundary 绿、KEEP-MAIN 零改、回归全 pin)。
+- **验证状态**:① 门禁绿(engine 1306 / studio 566)。② **真机后端已验**:重打 .app(含两处修复)+ 重启,直打**运行中 app 的 sidecar** `POST /graph/serialize`(e2e-fast 加孤立 logic 节点)→ **HTTP 200** + `<phase depends_on="input" output>logic</phase>` 正确序列化(正是之前 422/500 的场景)。**这是对真运行 app 的端到端验证,非仅单测。** ③ 视觉终验(点按钮看节点上画布):每次 relaunch 后 `screenshot` 一过性 nil(SCContentFilter 全局退化,会自行恢复——本会话已恢复过一次),非权限非代码;前端 handleCreatePhase 编排未改、其依赖的 serialize 后端真机已返 200 → 节点必上画布;待截屏恢复肉眼复点。
 
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

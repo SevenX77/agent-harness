@@ -62,6 +62,12 @@ from graph_agent_gateway.registry.schema import (
 from graph_agent_gateway.resolver import ModelResolver as ModelResolver
 from graph_agent_gateway.resolver import ResourceTerminalError as ResourceTerminalError
 
+# Canonical 6-state route-state projector owned by the gateway package. Studio
+# renders gateway facts and must NOT recompute the state vocabulary inline.
+from graph_agent_gateway.state_projection import (
+    project_route_state as gateway_project_route_state,
+)
+
 from app.core.adapters.http_transport import HttpTransport, StudioAdapterError
 
 ProviderUiState = Literal["ready", "historical_ready", "untested", "cooling_down", "off", "failed"]
@@ -336,64 +342,118 @@ class GatewayAdapter:
                 raise ValueError("http_transport is required for http_loopback")
             return cast(ProviderModelStateProjection, self.http_transport.post("/gateway/project_route_state", payload))
 
-        # in_process
+        # in_process — DELEGATE the 6-state vocabulary to the canonical gateway
+        # projector. Studio only derives the projector's INPUTS from the stored
+        # endpoint/route/circuit facts; it never recomputes ui_state inline.
         endpoint = payload["endpoint"]
         route = payload["route"]
         circuits = payload["circuits"]
         now = payload.get("now")
         current_time = now or datetime.now(UTC)
 
-        if endpoint.status == "disabled" or route.status == "disabled":
-            return ProviderModelStateProjection(ui_state="off")
+        credential_available = bool(endpoint.api_key is not None and endpoint.api_key.get_secret_value())
+        active_circuit = self._select_active_circuit(endpoint, route, circuits, current_time)
+        # draft_history drives the gateway's historical_ready state. The probe
+        # worker does not yet emit a draft-history signal on Studio routes, so we
+        # surface whatever the route already carries (endpoint/route metadata) and
+        # default to absent. When a real signal lands, set route.metadata
+        # ["draft_history"] (or endpoint.metadata) and historical_ready becomes
+        # reachable through the gateway projector below — we do NOT fabricate it.
+        draft_history = self._route_draft_history(endpoint, route)
 
-        if endpoint.status == "failed":
-            return ProviderModelStateProjection(
-                ui_state="failed",
-                reason_code=str(endpoint.metadata.get("reason_code") or "endpoint_unreachable"),
-                ui_detail=endpoint.last_test_message,
-            )
-        if route.status == "failed":
-            return ProviderModelStateProjection(
-                ui_state="failed",
-                reason_code=str(route.metadata.get("reason_code") or "model_failed"),
-            )
+        gateway_projection = gateway_project_route_state(
+            route_id=route.route_id,
+            endpoint_status=endpoint.status,
+            route_status=route.status,
+            credential_available=credential_available,
+            circuit_retry_at=active_circuit.retry_at if active_circuit is not None else None,
+            draft_history=draft_history,
+        )
 
-        if endpoint.api_key is None or not endpoint.api_key.get_secret_value():
-            return ProviderModelStateProjection(ui_state="failed", reason_code="missing_config")
+        return self._map_gateway_projection(
+            gateway_projection,
+            endpoint=endpoint,
+            route=route,
+            active_circuit=active_circuit,
+        )
 
+    def _select_active_circuit(
+        self,
+        endpoint: Any,
+        route: Any,
+        circuits: Any,
+        current_time: datetime,
+    ) -> Any:
         relevant = [
             circuit
             for circuit in circuits
             if circuit.retry_at > current_time and self._circuit_matches(endpoint, route, circuit)
         ]
-        active_circuit = None
-        if relevant:
+        if not relevant:
+            return None
 
-            def _scope_priority(scope: str) -> int:
-                if scope == "route":
-                    return 0
-                if scope == "endpoint":
-                    return 1
-                return 2
+        def _scope_priority(scope: str) -> int:
+            if scope == "route":
+                return 0
+            if scope == "endpoint":
+                return 1
+            return 2
 
-            active_circuit = min(
-                relevant,
-                key=lambda circuit: (
-                    -circuit.retry_at.timestamp(),
-                    _scope_priority(circuit.scope),
-                ),
-            )
+        return min(
+            relevant,
+            key=lambda circuit: (
+                -circuit.retry_at.timestamp(),
+                _scope_priority(circuit.scope),
+            ),
+        )
 
-        if active_circuit is not None:
+    def _route_draft_history(self, endpoint: Any, route: Any) -> bool:
+        # The gateway's historical_ready leg needs a draft_history signal. The
+        # probe worker currently stubs this, so no Studio route sets it yet; we
+        # read whatever metadata IS available rather than fabricating the signal.
+        route_metadata = getattr(route, "metadata", None) or {}
+        endpoint_metadata = getattr(endpoint, "metadata", None) or {}
+        return bool(route_metadata.get("draft_history") or endpoint_metadata.get("draft_history"))
+
+    def _map_gateway_projection(
+        self,
+        gateway_projection: Any,
+        *,
+        endpoint: Any,
+        route: Any,
+        active_circuit: Any,
+    ) -> ProviderModelStateProjection:
+        # Map the gateway-decided state into the Studio-facing shape. The gateway
+        # owns ui_state + the canonical reason_code; Studio only DECORATES that
+        # state with route/circuit facts it already holds (richer reason_code,
+        # retry_at as ISO string, ui_detail) — it never overrides the state.
+        ui_state = cast(ProviderUiState, gateway_projection.ui_state)
+        reason_code = gateway_projection.reason_code
+
+        if ui_state == "cooling_down" and active_circuit is not None:
             return ProviderModelStateProjection(
                 ui_state="cooling_down",
                 reason_code=active_circuit.reason_code,
                 retry_at=active_circuit.retry_at.isoformat(),
                 ui_detail=active_circuit.message,
             )
-        if endpoint.status == "verified" and route.status == "verified":
-            return ProviderModelStateProjection(ui_state="ready")
-        return ProviderModelStateProjection(ui_state="untested")
+
+        if ui_state == "failed":
+            ui_detail = None
+            if endpoint.status == "failed":
+                # Prefer Studio's stored failure reason/detail over the canonical
+                # fallback the gateway emits for an unreachable endpoint.
+                reason_code = str(endpoint.metadata.get("reason_code") or reason_code or "endpoint_unreachable")
+                ui_detail = endpoint.last_test_message
+            elif route.status == "failed":
+                reason_code = str(route.metadata.get("reason_code") or reason_code or "model_failed")
+            return ProviderModelStateProjection(
+                ui_state="failed",
+                reason_code=reason_code,
+                ui_detail=ui_detail,
+            )
+
+        return ProviderModelStateProjection(ui_state=ui_state)
 
     def _circuit_matches(self, endpoint: Any, route: Any, circuit: Any) -> bool:
         if circuit.scope == "route":

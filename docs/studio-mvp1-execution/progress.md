@@ -524,5 +524,31 @@ R2 add-node(AddPhaseControl 画布左上下拉,wire onCreatePhase,配 R1 脚手�
 - **需 PM 决策(记最终报告)**:① **R21 bundle 引用 = 需授权碰 api/llm.ts(KEEP-MAIN)**(bundle_id 在 RoleEntry,与 D6 同类,需 PM 一句授权)② golden per-node 重做范围 ③ node-level resume 范围(R22 debug bar 挂它)④ Bash HITL 双向 WS ⑤ R28 刷新 stale FROZEN 文档(PM 正在编辑这些 doc,避让)。
 - **真机视觉 e2e**:screenshot infra(SCContentFilter nil)失败 + 需 .app 重建 → **待 PM 在 System Settings 开屏幕录制授权** + 全波次落地后最终鼠标复验。
 
+## PM e2e 复盘:7 个"基本功能坏了"的诊断(2026-06-15)
+
+> PM 点开真 app 后列了 7 条"最基本功能都坏了":① canvas 没竖排 ② node 连线有问题 ③ 拓扑展开有问题 ④ 点+号连 node 都没有 ⑤ i/o 面板还有 input/output 的 json 文件 ⑥ io 面板能方便改 io schema 吗 ⑦ properties 能改属性吗。派 3 个只读诊断子 agent(canvas / io / properties)对照设计文档(`03_regions/{canvas,input,properties}` + `02_capabilities/{graph-authoring,phase-editing}`)+ 现状代码逐条裁定,我亲自复核证据。
+
+**根因 = PM 点的是过期 .app**(`target/release/bundle/macos/Skill Studio.app`,bundle 于 Jun 14 16:55),而所有 canvas/io 修复 Jun 14 18:53→Jun 15 03:53 才落地——PM 看的二进制落后源码 ~11 小时。**亲自证实**:bundle 内 `frontend/dist/assets/*.js` grep `"Add phase"`/`"Loading subgraph"` = **0**,源码 = 有;Properties 旧 bundle 还含 `System prompt`/`Exit contract`/`Mode` 等已删的废字段。Tauri 把前端 embed 进 Rust 二进制(`frontendDist`),光改 dist 文件没用,**必须重打包**。
+
+逐条裁定(现状源码 vs 设计):
+- **① 竖排**:WORKS。`lib/layout.ts:33 rankdir:'TB'` + SkillNode Handle Top(target)/Bottom(source) + ContextEdge 有 `isVerticalStraight` 竖线分支 = 真竖排(非"TB rank 配左右 handle"的坑)。
+- **② 连线**:WORKS(edges 由 `buildEdges` 从 `dependsOn` 建真拓扑 + onConnect/onDisconnect 接 Workspace 带回滚);**唯一真残留** = 连接 handle `opacity-0 group-hover` 悬停才显形(发现态可改进,登记)。
+- **③ 拓扑展开**:WORKS。SkillNode 的 +/− 展开按钮 + `SubgraphInline` 调 `getChildGraphTopology` 渲**真**子图 phase + 双击下钻 + 左上 breadcrumb(R5/R9 已落,旧 bundle 没有)。
+- **④ 点+号加 node**:WORKS。`AddPhaseControl`(画布左上 shadcn DropdownMenu「Add phase」→ Agent/Logic/Subgraph)+ 边右键菜单建下游 phase(R2 已落,旧 bundle 没有,grep 证实)。
+- **⑤ io 假 json 文件**:WORKS。`6c7997cb` 已删假 `input/schema.json`/`input/sample.json` 投影(全 src 仅剩 panel-files.ts:74 一句解释注释);InputPanel 渲结构化 Test Inputs / Golden / Input Schema / Output Schema / Output Artifacts 区,无裸 json blob。
+- **⑥ 改 io schema**:WORKS。`IoSchemaFieldsPanel`(inputs+outputs 各一)字段级编辑——rename(Input)/retype(Select 六类型)/remove(Trash)/add(IoFieldAddRow),全 shadcn;经 `schema-infer.ts` 写回 **GRAPH.md `io.<side>.properties.<field>`**(引擎权威契约)→ `POST /api/skills/{id}/files/GRAPH.md` 落盘 → 重读 round-trip。23 单测覆盖。
+- **⑦ properties 改属性**:WORKS。`PhaseFrontmatterForm` 按节点三类(agent: LLM role/Tools/Subagents;logic: Actions/Validator;subgraph: Path/Validator)渲可编辑控件 → `handleSave` 经 `applyPhaseFrontmatterForm` 写**phase 文件 frontmatter** → writeSkillFile → 后端 update_skill_file → mutateSkillDetail round-trip;dirty 跟踪 + expectedHash 乐观锁。旧 bundle 渲的是改废字段的旧表单 = 看着像坏。
+
+**结论**:7 条里 6 条"源码已对齐设计,过期二进制看不到",1 条(②连线 handle 发现态)真有小改进空间。**最高价值动作 = 重打包一个当前 .app 让 PM 真点**(进行中)。设计裁判:`03_regions/*` 多份标 `status:FROZEN` 钉旧 commit,其 baseline/现状列是历史,target/alignment 列才是真 spec——当前源码满足 target。
+
+### Wave 5 + R10 post-audit(独立子 agent + 我复核)
+- **R23/R14/R10 = CONFORM**(R10 两处小注已修:删死码 `hasFatalCompileError` + phase-id 正则放宽到后端同款 `[A-Za-z0-9_-]+` 防大写/数字开头节点丢角标,commit `f327b7d5`)。
+- **R13 = DEVIATE → 已修**(commit `57718fb8`):原 predict-pass marker 不带图指纹 → predict 通过后**改坏图仍能 spawn run**(后端门比 UI 的 recompute-on-edit 门更弱)。修:marker 记 compiled `content_hash`,run 门在 compile 后比对当前 hash,不符(图被改)或旧无-hash 记录 → 重新要求 predict;新增 stale-hash + legacy-no-hash 两单测。后端 **563 passed**。**predict 认证的是"当前图",非"上次过的图"。**
+
+### 重打包当前 .app(进行中,2026-06-15)
+- `cd apps/studio/tauri && cargo tauri build`(beforeBuildCommand 自动跑 download_runtime[已缓存]+build_vendor[python3,非 python——旧 blocker 已解]+sync_resources;前端 `npm run build` dist 已重生,293ms 干净)。运行中的 release .app(PID 21606)带可用 vendored Python 后端,证实整条 vendor 路径可跑。
+- 唯一风险 = 最后 bundle copy 撞运行中 .app 文件占用 → cargo 编译缓存让重试便宜;真撞了再 quit 旧 .app 重跑。
+- 完成后:relaunch 新 .app → 这才是 PM "把功能全部点一遍" 的真载体;computer-use 鼠标复验仍待屏幕录制授权。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

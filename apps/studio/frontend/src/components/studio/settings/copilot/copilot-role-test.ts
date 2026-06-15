@@ -56,6 +56,41 @@ export function copilotRouteStatusesFromJob(
   )
 }
 
+/**
+ * R20: project the persisted copilot SDK test results into the route status
+ * override map (route_id -> ready/unsupported/...) that CopilotTab seeds on
+ * mount, so route lights show the last-known status after a remount/restart.
+ *
+ * The persisted `result` is the backend copilot SDK result; its per-route
+ * verdicts live under `sdk_evidence.routes` (route_id -> {status}). Each route
+ * `status` is "ok"/"failed"/etc., mapped through the same provider-status logic
+ * as the live job poller so seeded and live lights stay consistent.
+ */
+export function copilotRouteStatusesFromPersistedResult(
+  result: unknown,
+): Record<string, CopilotRouteJobStatus> {
+  const routes = persistedSdkEvidenceRoutes(result)
+  if (!routes) return {}
+  const statuses: Record<string, CopilotRouteJobStatus> = {}
+  for (const [routeId, routeResult] of Object.entries(routes)) {
+    if (!isRecord(routeResult)) continue
+    const rawStatus = routeResult.status
+    if (typeof rawStatus !== "string") continue
+    statuses[routeId] = copilotRouteStatusFromProviderStatus(
+      rawStatus as RoleTestProviderProgressStatus,
+    )
+  }
+  return statuses
+}
+
+function persistedSdkEvidenceRoutes(result: unknown): Record<string, unknown> | null {
+  if (!isRecord(result)) return null
+  const evidence = result.sdk_evidence
+  if (!isRecord(evidence)) return null
+  const routes = evidence.routes
+  return isRecord(routes) ? routes : null
+}
+
 function copilotRouteStatusFromProviderStatus(
   status: RoleTestProviderProgressStatus,
 ): CopilotRouteJobStatus {

@@ -3,6 +3,7 @@ import {
   copilotRoleTestErrorMessage,
   runCopilotRoleTestJob,
   copilotRouteStatusesFromJob,
+  copilotRouteStatusesFromPersistedResult,
 } from "./copilot-role-test"
 import type { RoleTestJobResponse } from "@/api/llm"
 
@@ -119,5 +120,53 @@ describe("copilot role test job helpers", () => {
     }, "DeepSeek V4 Copilot")
 
     expect(message).toBe("DeepSeek V4 Copilot test failed: Role test job crashed")
+  })
+})
+
+describe("R20 persisted copilot route status seeding", () => {
+  it("maps persisted sdk_evidence route verdicts into route status overrides", () => {
+    const result = {
+      role_name: "copilot_opus_4_7",
+      status: "ok",
+      model_groups: [],
+      sdk_evidence: {
+        tested: true,
+        passed: 1,
+        total: 2,
+        routes: {
+          "anthropic-official:claude-opus-4-7": { status: "ok", message: null },
+          "qiniu-anthropic:claude-opus-4-7": { status: "failed", message: "boom" },
+        },
+      },
+    }
+
+    expect(copilotRouteStatusesFromPersistedResult(result)).toEqual({
+      "anthropic-official:claude-opus-4-7": "ready",
+      "qiniu-anthropic:claude-opus-4-7": "unsupported",
+    })
+  })
+
+  it("returns an empty map when persisted result has no sdk_evidence routes", () => {
+    expect(copilotRouteStatusesFromPersistedResult(null)).toEqual({})
+    expect(copilotRouteStatusesFromPersistedResult({ status: "ok" })).toEqual({})
+    expect(
+      copilotRouteStatusesFromPersistedResult({ sdk_evidence: { routes: {} } }),
+    ).toEqual({})
+  })
+
+  it("skips route entries with a non-string status", () => {
+    const result = {
+      sdk_evidence: {
+        routes: {
+          "good:route": { status: "ok" },
+          "bad:route": { status: 42 },
+          "missing:route": {},
+        },
+      },
+    }
+
+    expect(copilotRouteStatusesFromPersistedResult(result)).toEqual({
+      "good:route": "ready",
+    })
   })
 })

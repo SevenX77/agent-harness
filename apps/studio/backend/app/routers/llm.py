@@ -98,6 +98,12 @@ from app.services.llm_model_groups import (
 )
 from app.services.llm_model_identity import project_model_identity
 from app.services.llm_notable_models import notable_model_ids
+from app.services.llm_role_test_results import (
+    load_all as load_role_test_results,
+)
+from app.services.llm_role_test_results import (
+    save_result as save_role_test_result,
+)
 from app.services.llm_roles import (
     InvalidRoleReference,
     get_role,
@@ -213,6 +219,26 @@ class RoleTestJobResponse(BaseModel):
     message: str | None = None
     provider_statuses: list[RoleTestProviderProgressInfo] = Field(default_factory=list)
     result: dict[str, Any] | None = None
+
+
+class PersistedRoleTestResult(BaseModel):
+    """R20: one durably stored LAST completed role/copilot test result."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role_name: str
+    status: str
+    message: str | None = None
+    result: dict[str, Any]
+    updated_at: str
+
+
+class RoleTestResultsResponse(BaseModel):
+    """R20: persisted last test results keyed by role name for mount re-seed."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    results: dict[str, PersistedRoleTestResult] = Field(default_factory=dict)
 
 
 _endpoint_test_jobs: dict[str, EndpointTestJobResponse] = {}
@@ -895,6 +921,25 @@ async def put_llm_roles(request: RolesData) -> RolesData:
     return _materialize_roles_for_response(saved, credentials)
 
 
+@router.get("/roles/test-results", response_model=RoleTestResultsResponse)
+async def get_role_test_results() -> RoleTestResultsResponse:
+    """R20: return the durably persisted LAST test result per role.
+
+    The settings UI seeds role/copilot badges from this on mount so the
+    last-known status survives a server restart or a tab remount; live tests
+    still update + re-persist through the existing test-job endpoints. This is
+    declared before ``/roles/{role_name}`` so FastAPI does not capture the
+    literal ``test-results`` path segment as a role name.
+    """
+    persisted = load_role_test_results()
+    return RoleTestResultsResponse(
+        results={
+            role_name: PersistedRoleTestResult.model_validate(entry)
+            for role_name, entry in persisted.items()
+        }
+    )
+
+
 @router.get("/roles/{role_name}", response_model=RoleEntry)
 async def get_llm_role(role_name: str) -> RoleEntry:
     """Return one role."""
@@ -1105,6 +1150,7 @@ async def _run_role_test_job_impl(
         )
         return
 
+    _persist_completed_role_test_result(role_name, result)
     await _update_role_test_job(
         job_id,
         status="completed",
@@ -1245,11 +1291,13 @@ async def _run_copilot_sdk_test_job(
     except Exception as exc:  # noqa: BLE001 — evidence persistence is best-effort
         logger.warning("copilot SDK evidence persist failed (non-fatal): %s", exc)
 
+    copilot_result = _build_copilot_sdk_result(role_name, routes, results_list)
+    _persist_completed_role_test_result(role_name, copilot_result)
     await _update_role_test_job(
         job_id,
         status="completed",
         message="Copilot SDK test completed.",
-        result=_build_copilot_sdk_result(role_name, routes, results_list),
+        result=copilot_result,
     )
 
 
@@ -1346,6 +1394,28 @@ def _persist_copilot_sdk_evidence(results: list[copilot.RouteSdkTestResult]) -> 
     if changed:
         save_credentials(credentials)
         logger.info("copilot SDK evidence persisted for %d route(s)", len(results))
+
+
+def _persist_completed_role_test_result(role_name: str, result: dict[str, Any]) -> None:
+    """R20: durably persist the LAST completed role/copilot test result per role.
+
+    Role-test jobs live in transient in-memory dicts; persisting the finished
+    result keyed by role name lets the settings UI re-seed badges after a
+    server restart or a tab remount instead of resetting to untested.
+    """
+    status = str(result.get("status") or "")
+    message = result.get("message")
+    try:
+        save_role_test_result(
+            role_name,
+            result,
+            status=status,
+            message=message if isinstance(message, str) else None,
+        )
+    except Exception as exc:  # noqa: BLE001 — persistence is best-effort, never fail the job
+        logger.warning(
+            "role test result persist failed (non-fatal) role=%s: %s", role_name, exc
+        )
 
 
 @router.get("/model-profiles")

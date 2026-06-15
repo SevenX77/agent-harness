@@ -612,3 +612,10 @@ R2 add-node(AddPhaseControl 画布左上下拉,wire onCreatePhase,配 R1 脚手�
 
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。
+
+### ✅ R15 post-audit 旁路 spawned-task 闭环(commit `581ad586`,2026-06-15)
+- **修了 `_parse_broken_graph_topology_and_phases`(skills.py:1058,损坏/缺失 GRAPH.md 时给「修复态视图」硬解析阶段拓扑的解析器)的 bare `except Exception: return [],[]` 静默吞**(违 logging 铁律「无静默失败」,R15 post-audit 旁路发现、HEAD 既存、已派独立 task)。
+- 改成只 catch 真实可能异常 `(OSError, UnicodeDecodeError, yaml.YAMLError, AttributeError)`(逐行枚举 try 块每个操作确认全覆盖:read_text→OSError/UnicodeDecodeError、yaml.safe_load→YAMLError、frontmatter 非 dict 时 `.get`→AttributeError、`.exists()`→OSError)+ 降级前 `logger.warning` 带文件路径/异常类型/影响。**`([],[])` 优雅降级行为零改**——修复态视图照常渲染,只是「为什么空」变可观测。意料外错误现在正确上抛而非静默。
+- 测试:新 `test_skills_broken_graph_parse.py`(2 用例:坏 YAML frontmatter→1 条 WARNING(消息含 skill_dir+GRAPH.md)+`([],[])`;GRAPH.md 合法缺失→`([],[])` 且**不**报 warning,正是「区分崩溃 vs 合法空」的对照)。先写失败测试(RED,确认当前静默 0 warning)→ 实现 →GREEN。
+- 门禁:后端 `tests/services/` **238 passed,1 skipped**;ruff clean;mypy 仅 2 个 HEAD 既存错(yaml import-untyped + GraphManifest io arg-type),无新错;api/llm.ts 零改;仅新增/改 2 个 backend 文件,PM 在编的 docs 零碰。
+- **同一修复也已落在 `codex/studio-mvp1-wave2-safety-2026-06-13`(commit `de07a0d2`,该分支 R15 还没把 import 提模块级,故那边额外 hoist 了 import yaml + 补 logger)** —— 两分支同问题都已闭环。

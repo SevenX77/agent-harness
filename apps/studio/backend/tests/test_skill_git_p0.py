@@ -13,7 +13,12 @@ from app.services.local_settings import read_local_settings, write_local_setting
 from app.services.run_manager import run_manager
 from fastapi.testclient import TestClient
 
-from tests.test_api import InlineProcess, _agent_skill_files, fake_run_worker
+from tests.test_api import (
+    InlineProcess,
+    _agent_skill_files,
+    _record_predict_pass,
+    fake_run_worker,
+)
 
 
 def test_p0_skill_git_directory_index_and_workspace_flow(
@@ -69,6 +74,7 @@ def test_p0_skill_git_directory_index_and_workspace_flow(
     assert "predict_dir" not in file_paths
     assert file_paths["local_settings"] == str(workspace_dir / "local_settings.json")
 
+    _record_predict_pass("p0-skill")
     run_response = client.post("/api/skills/p0-skill/runs", json={"input_data": {"topic": "p0"}})
     assert run_response.status_code == 202
     run_id = run_response.json()["run_id"]

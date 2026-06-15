@@ -38,6 +38,7 @@ from app.models.runs import (
 )
 from app.services.gateway_resolver import build_gateway_model_resolver as build_gateway_model_resolver
 from app.services.git_local import GitCommandError, GitFileLockedError, GitLocalService
+from app.services.predict_gate import require_passing_predict
 from app.services.skill_resolver import build_studio_skill_resolver as build_studio_skill_resolver
 from app.services.skills import resolve_skill_dir, run_dir_for, test_inputs_dir_for_skill
 
@@ -232,6 +233,10 @@ class RunManager:
         self.git_service: GitLocalService = GitLocalService()
 
     async def start_run(self, skill_id: str, request: RunRequest) -> RunMetadata:
+        # MVP1 run-and-verify gate: Run requires a passing Predict on record for the
+        # skill (server-side prerequisite, not UI-only). Raises RUN_REQUIRES_PREDICT
+        # (HTTP 409) when no passing predict exists.
+        require_passing_predict(skill_id)
         skill_dir = resolve_skill_dir(skill_id)
 
         from app.core.adapters.engine import EngineAdapter

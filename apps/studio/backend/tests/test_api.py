@@ -11,7 +11,9 @@ import pytest
 from app.core import config
 from app.models.runs import RunMetadata
 from app.services.event_bus import event_bus
+from app.services.predict_gate import record_predict_pass
 from app.services.run_manager import run_manager
+from app.services.skills import resolve_skill_dir
 from app.services.terminal_manager import terminal_manager
 from fastapi.testclient import TestClient
 from graph_agent.callbacks.events import (
@@ -24,6 +26,15 @@ from graph_agent.callbacks.events import (
 )
 
 from tests.conftest import copy_skill
+
+
+def _record_predict_pass(skill_id: str) -> None:
+    """Satisfy the server-side predict-pass run prerequisite for a skill.
+
+    Mirrors the real predict-then-run flow: a passing Predict records predict-pass
+    server-side, which the run-spawn gate consumes.
+    """
+    record_predict_pass(resolve_skill_dir(skill_id), skill_id, "predict-fixture")
 
 
 def test_openapi_registers_phase0_rest_surface(client: TestClient) -> None:
@@ -362,6 +373,7 @@ def test_run_endpoint_spawns_worker_and_ws_streams_events(
     monkeypatch.setattr(run_manager, "process_factory", InlineProcess)
     monkeypatch.setattr(run_manager, "queue_factory", queue.Queue)
     monkeypatch.setattr(run_manager, "worker", fake_run_worker)
+    _record_predict_pass("text-segmentation")
 
     response = client.post(
         "/api/skills/text-segmentation/runs",
@@ -419,6 +431,7 @@ def test_successful_run_triggers_auto_commit(
         "git_service",
         FakeGitService(commits),
     )
+    _record_predict_pass("commit-skill")
 
     response = client.post("/api/skills/commit-skill/runs", json={"input_data": {"topic": "ok"}})
 
@@ -448,6 +461,7 @@ def test_failed_run_does_not_auto_commit(
     monkeypatch.setattr(run_manager, "queue_factory", queue.Queue)
     monkeypatch.setattr(run_manager, "worker", fake_failed_run_worker)
     monkeypatch.setattr(run_manager, "git_service", FakeGitService(commits))
+    _record_predict_pass("failed-commit-skill")
 
     response = client.post(
         "/api/skills/failed-commit-skill/runs",
@@ -541,6 +555,7 @@ def test_batch_run_starts_runs_from_test_inputs(
     monkeypatch.setattr(run_manager, "process_factory", InlineProcess)
     monkeypatch.setattr(run_manager, "queue_factory", queue.Queue)
     monkeypatch.setattr(run_manager, "worker", fake_run_worker)
+    _record_predict_pass("text-segmentation")
 
     inputs_response = client.get("/api/skills/text-segmentation/test_inputs")
 
@@ -668,6 +683,7 @@ def test_run_spawn_failure_maps_to_500(
 ) -> None:
     monkeypatch.setattr(run_manager, "process_factory", FailingProcess)
     monkeypatch.setattr(run_manager, "queue_factory", queue.Queue)
+    _record_predict_pass("text-segmentation")
 
     response = client.post(
         "/api/skills/text-segmentation/runs",
@@ -676,6 +692,50 @@ def test_run_spawn_failure_maps_to_500(
 
     assert response.status_code == 500
     assert response.json()["error_code"] == "RUN_SPAWN_FAILED"
+
+
+def test_run_without_prior_predict_returns_run_requires_predict(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # No predict-pass on record: the server-side gate must block the run-spawn
+    # path before any worker is started, for any caller (not just the UI).
+    del studio_roots
+    monkeypatch.setattr(run_manager, "process_factory", InlineProcess)
+    monkeypatch.setattr(run_manager, "queue_factory", queue.Queue)
+    monkeypatch.setattr(run_manager, "worker", fake_run_worker)
+
+    response = client.post(
+        "/api/skills/text-segmentation/runs",
+        json={"input_data": {"input_text": "hello"}},
+    )
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body["error_code"] == "RUN_REQUIRES_PREDICT"
+    assert body["details"]["skill_id"] == "text-segmentation"
+
+
+def test_run_after_passing_predict_is_allowed(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A passing predict on record satisfies the gate and lets the run spawn.
+    del studio_roots
+    monkeypatch.setattr(run_manager, "process_factory", InlineProcess)
+    monkeypatch.setattr(run_manager, "queue_factory", queue.Queue)
+    monkeypatch.setattr(run_manager, "worker", fake_run_worker)
+    _record_predict_pass("text-segmentation")
+
+    response = client.post(
+        "/api/skills/text-segmentation/runs",
+        json={"input_data": {"input_text": "hello"}},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "running"
 
 
 def test_terminal_endpoint_spawns_pty_and_reaps_expired_session(

@@ -21,6 +21,7 @@ def test_standard_error_codes_map_to_http_exceptions() -> None:
         "TEST_INPUT_VALIDATION_FAILED": 422,
         "SUBGRAPH_PATH_INVALID": 422,
         "SUBGRAPH_PATH_NOT_FOUND": 404,
+        "RUN_REQUIRES_PREDICT": 409,
     }
 
     assert set(STANDARD_ERROR_MAP) == set(expected)

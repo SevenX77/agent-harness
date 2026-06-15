@@ -125,6 +125,18 @@ class PredictorService:
             result.model_dump_json(),
             encoding="utf-8",
         )
+        if result.success:
+            # Persist predict-pass server-side so the run-spawn path can enforce the
+            # MVP1 "predict-pass unlocks Run" prerequisite for any caller, not just the UI.
+            from app.services.predict_gate import record_predict_pass
+
+            record_predict_pass(skill_dir, result.skill_id, run_id)
+        else:
+            logger.info(
+                "predictor predict_pass=not_recorded skill_id=%s run_id=%s reason=predict_failed",
+                result.skill_id,
+                run_id,
+            )
 
 
 def _fallback_trace_from_skill(skill_dir: Path, raw_result: Any) -> list[dict[str, Any]]:

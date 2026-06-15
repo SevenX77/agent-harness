@@ -560,10 +560,15 @@ R2 add-node(AddPhaseControl 画布左上下拉,wire onCreatePhase,配 R1 脚手�
   - **pre-audit 抓 2 修正**(采纳):测试要反转(非 update),warning 文案覆盖空+非skill。post-audit = CONFORM(7/7)。门禁:后端 pytest **563**/ruff clean/mypy 无新错(yaml import-untyped + GraphManifest io arg-type 两个 = HEAD 既存,非 R15 引入);api/llm.ts 零改。
 - **post-audit 旁路发现(非 R15,登记)**:`_parse_broken_graph_topology_and_phases`(skills.py:1109)有 bare `except Exception: return [],[]` 静默吞(违 logging「无静默失败」铁律),HEAD 既存、R15 没碰 → 已派独立 task 修。
 
-### 剩余 backlog(audit 已记)
-- **R18 @mention composer**(copilot 输入框 @ 引用,**PM 已批加 tiptap 新依赖**)= 大件 net-new。
-- **R25 L3 步骤编辑**(canvas 内联展开 agent phase 正文 XML 的 L3 子节点,可拖拽增删改)= 需 Rust `mutate_phase_body`(D12 native-fs 唯一写者),后端 Rust 改动较重。
+### 剩余 backlog(精确核过现状,2026-06-15)
+- **R18 @mention composer — 后端已全做完,仅剩前端 tiptap 组件,且该组件本环境无法验证**:
+  - **后端 DONE+wired**(亲核):`render_copilot_context_xml`(copilot.py:414 F4 4 层 resolver,读 `context["mentions"]`)+ `_context_resolved_event`(474,作为 stream_query **第一条**事件 yield,535)+ `POST /copilot/context`(routers/copilot.py:60 缓存 view-context)。前端隐式上下文也已接(`useCopilotContext.ts:54` POST view-context)。**显式 @mention 走现有 view-context 的 `mentions` 键即可,无后端缺口**。
+  - **仅剩**:前端把 textarea 换成 tiptap 富文本(F4 决策**明令** = inline 彩色 pill,显式否决 react-mentions overlay/textarea+menu 替代方案 → 不能降级换法)。tiptap v3.26.1 已核 **React 19 兼容**。
+  - **真 blocker(非自造,与视觉 e2e 同一个)**:tiptap/prosemirror 编辑器**本环境无法验证** —— 仓库无 jsdom(交互编辑器单测不了)+ 屏幕录制权限未授(computer-use 视觉验不了)。设计强制 pill(可验证的 textarea 替代被否决)。盲建复杂交互编辑器 = 交不可验证的代码 = 违 verify-first / PM「不许假绿」。→ **待 PM 开屏幕录制权限后,R18 整体(纯 helper 测试 + tiptap 组件 + 真 app 鼠标验证)一并在专门轮做**。
+- **R25 L3 步骤编辑**(canvas 内联展开 agent phase 正文 XML 为 L3 子节点,拖拽增删改):写回**未必需新 Rust**——可复用现有 `writeSkillFile`/`update_skill_file`(Properties 用的同一路径)序列化整文件写回(`mutate_phase_body` 是 surgical 优化非必须,先前"需 Rust"判断过严)。但交互式 canvas L3 编辑同 R18 一样**本环境无法验证**(无 jsdom + 屏幕录制未授)+ 写法(整文件 vs surgical)是架构取舍。→ 待 PM 开屏幕录制 + 定写法后做。
 - 需 PM 决策(留最终报告):R21 bundle 引用(碰 api/llm.ts KEEP-MAIN 需授权)、golden per-node 重做范围、node-level resume 范围、Bash HITL 双向 WS、R28 刷新 stale FROZEN 文档(PM 在编)。
+
+> **本轮停点说明**:所有"契约内 contained + 可单测/可门禁验证"的单元都已做完并验证(R13 修偏差/R10 清理/R24 dot→trace/R15 open-folder,各跑完四步法 pre+post audit,后端 563 / 前端 586 全绿;fresh .app 重建+后端健康)。**仅剩 R18/R25 两个交互式前端 epic,二者卡在同一个真 blocker:交互验证需 PM 开屏幕录制权限(我无法自设系统安全设置),且设计否决可验证的替代法**。盲建 = 假绿,违 PM 铁律。故记录在案、待 PM 解屏幕录制后专门轮做,非自造停下。
 
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

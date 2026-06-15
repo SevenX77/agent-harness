@@ -503,10 +503,18 @@ R2 add-node(AddPhaseControl 画布左上下拉,wire onCreatePhase,配 R1 脚手�
 - **R19** Studio adapter `project_route_state` 委派 gateway-package `state_projection`(去 divergent 内联自算 6 态,落实「Studio 只渲染 gateway 事实不自算」硬约束;historical_ready draft 腿挂 probe-worker stub,记)。
 - **R9** 子图下钻(就地聚焦 focus stack + 左上 breadcrumb,调 R5 resolver 渲染真子图,state 留 GraphCanvas 本地避让 Workspace)。
 
-### 剩余(audit 已记,待后续轮 / PM 决策):
-- 可做待续:R20 role-test 持久化、R21 bundle 引用、R22 debug bar(挂 node-resume PM 决策)、R28 刷新 stale FROZEN 文档。
-- **需 PM 决策(记最终报告)**:golden per-node 重做范围、node-level resume 范围、Bash HITL 双向 WS。
-- **真机视觉 e2e**:screenshot infra(SCContentFilter)失败 + 需 .app 重建 → 待屏幕录制授权 + 全波次落地后最终复验。
+### Wave 4 ✅(commit `e758d3dc` R19 + `6bc2b18b` R9)+ R20 ✅(`079d3f9a`):
+- **R19**:Studio adapter `project_route_state` 委派 gateway-package `state_projection`(去内联自算 6 态,落实硬约束;只 decorate reason_code/retry_at;historical_ready 挂 draft_history 信号 reachable,probe-worker stub 记);现有 projection 测试全过;mypy 仅多 1 个 import-untyped(gateway 包无 py.typed),无真错。
+- **R9**:子图下钻(`drillStackReducer` 纯函数 push/pop/popTo/reset same-ref no-op + `breadcrumbItems` + `DrillBreadcrumb` 复用 shadcn breadcrumb;双击进子图渲真子图,左上面包屑回退;state 留 GraphCanvas)。
+- **R20**:role/copilot test 结果落盘 `<settings>/llm/llm_role_test_results.json`(完成时 best-effort)+ `GET /api/llm/roles/test-results` re-project;前端 LlmRolesTab/CopilotTab mount 时 seed(api/llm.ts 零改,新 client.ts fn);重启/重挂不再丢测试态。
+- 门禁:前端 tsc/eslint clean + vitest **561**;后端 pytest **555**/ruff clean/mypy 无新真错;api/llm.ts 零改。
+
+### Wave 5 启动(并行 disjoint):R13 predict-pass 服务端前置(run_manager,非 UI 调用也得先 predict)· R23 node-Properties role Test 键(复用 settings role-test)· R14 Assets 真 path-based 子图成员(去 fake registeredSubgraphsCache,用 R4 的真 path)。
+
+### 剩余(audit 已记):
+- **可做待续**:R10 per-node compile-error badge、R15 open-folder 导入门放宽、R18 @mention composer(**PM 已批加 tiptap 新依赖**,大件 net-new)、R24 Properties 去 edge-JSON dump 改道 trace(D14)、R25 L3 步骤编辑(需 Rust mutate_phase_body)。
+- **需 PM 决策(记最终报告)**:① **R21 bundle 引用 = 需授权碰 api/llm.ts(KEEP-MAIN)**(bundle_id 在 RoleEntry,与 D6 同类,需 PM 一句授权)② golden per-node 重做范围 ③ node-level resume 范围(R22 debug bar 挂它)④ Bash HITL 双向 WS ⑤ R28 刷新 stale FROZEN 文档(PM 正在编辑这些 doc,避让)。
+- **真机视觉 e2e**:screenshot infra(SCContentFilter nil)失败 + 需 .app 重建 → **待 PM 在 System Settings 开屏幕录制授权** + 全波次落地后最终鼠标复验。
 
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

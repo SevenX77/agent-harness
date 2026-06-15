@@ -516,11 +516,14 @@ async def stream_query(
     user_message: str,
     model_override: str | None = None,
     workspace_dir: str | Path | None = None,
+    role: str | None = None,
 ) -> AsyncIterator[CopilotEvent]:
-    """Stream one Copilot query using the copilot_chat role and optional model override."""
+    """Stream one Copilot query using the selected copilot role (default
+    copilot_chat) plus an optional finer-grained route override."""
 
+    copilot_role = role or "copilot_chat"
     try:
-        routes, credential_provider = _resolve_copilot_runtime(model_override)
+        routes, credential_provider = _resolve_copilot_runtime(model_override, role=copilot_role)
     except KeyError as exc:
         yield CopilotEventError(message=f"未知模型: {exc}")
         return
@@ -871,6 +874,7 @@ def _tool_result_summary(content: str | list[dict[str, Any]] | None) -> str:
 
 def _resolve_copilot_runtime(
     model_override: str | None,
+    role: str = "copilot_chat",
 ) -> tuple[list[ResolvedRoute], CredentialProviderProtocol]:
     from app.core.adapters.gateway import RegistryResolutionError, ResourceTerminalError
     from app.services.gateway_resolver import build_gateway_model_resolver
@@ -878,7 +882,7 @@ def _resolve_copilot_runtime(
     resolver = build_gateway_model_resolver()
     try:
         resolved = resolver.resolve_routes(
-            "copilot_chat",
+            role,
             route_override=model_override,
         )
     except (ResourceTerminalError, RegistryResolutionError) as exc:
@@ -888,19 +892,23 @@ def _resolve_copilot_runtime(
         # stream loop and the socket dies silently, so the user sees nothing.
         # Convert to the domain ValueError that stream_query surfaces as a
         # CopilotEventError, so the failure reason is shown in the panel.
-        raise ValueError(f"copilot_chat 无可用 route: {exc}") from exc
+        raise ValueError(f"{role} 无可用 route: {exc}") from exc
     if not resolved.routes:
-        raise ValueError("copilot_chat role 无可用 route")
+        raise ValueError(f"{role} role 无可用 route")
     return list(resolved.routes), resolver.credential_provider
 
 
-def _resolve_copilot_routes(model_override: str | None) -> list[ResolvedRoute]:
-    routes, _credential_provider = _resolve_copilot_runtime(model_override)
+def _resolve_copilot_routes(
+    model_override: str | None, role: str = "copilot_chat"
+) -> list[ResolvedRoute]:
+    routes, _credential_provider = _resolve_copilot_runtime(model_override, role=role)
     return routes
 
 
-def _resolve_copilot_route(model_override: str | None) -> ResolvedRoute:
-    return _resolve_copilot_routes(model_override)[0]
+def _resolve_copilot_route(
+    model_override: str | None, role: str = "copilot_chat"
+) -> ResolvedRoute:
+    return _resolve_copilot_routes(model_override, role=role)[0]
 
 
 def _resolve_route_runtime(

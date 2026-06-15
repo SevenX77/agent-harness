@@ -205,7 +205,7 @@ def test_stream_query_errors_when_api_key_missing(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(
         copilot,
         "_resolve_copilot_runtime",
-        lambda _model_override: _runtime(_resolved_route(), ""),
+        lambda _model_override, role="copilot_chat": _runtime(_resolved_route(), ""),
     )
     events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi")))
 
@@ -216,7 +216,7 @@ def test_stream_query_errors_when_api_key_missing(monkeypatch: pytest.MonkeyPatc
 def test_stream_query_errors_when_model_override_is_unknown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def resolve_copilot_runtime(_model_override: str | None) -> object:
+    def resolve_copilot_runtime(_model_override: str | None, role: str = "copilot_chat") -> object:
         raise KeyError("BAD_MODEL")
 
     monkeypatch.setattr(copilot, "_resolve_copilot_runtime", resolve_copilot_runtime)
@@ -299,7 +299,7 @@ def test_stream_query_timeout_error(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     monkeypatch.setattr(
         copilot,
         "_resolve_copilot_runtime",
-        lambda _model_override: _runtime(_resolved_route()),
+        lambda _model_override, role="copilot_chat": _runtime(_resolved_route()),
     )
 
     events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi", workspace_dir=tmp_path)))
@@ -317,7 +317,7 @@ def test_stream_query_sdk_network_error(monkeypatch: pytest.MonkeyPatch, tmp_pat
     monkeypatch.setattr(
         copilot,
         "_resolve_copilot_runtime",
-        lambda _model_override: _runtime(_resolved_route()),
+        lambda _model_override, role="copilot_chat": _runtime(_resolved_route()),
     )
 
     events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi", workspace_dir=tmp_path)))
@@ -341,7 +341,7 @@ def test_stream_query_uses_system_prompt_and_yields_done(
     monkeypatch.setattr(
         copilot,
         "_resolve_copilot_runtime",
-        lambda _model_override: _runtime(_resolved_route()),
+        lambda _model_override, role="copilot_chat": _runtime(_resolved_route()),
     )
 
     events = asyncio.run(

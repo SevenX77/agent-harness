@@ -62,6 +62,7 @@ def test_copilot_ws_forwards_model_override(
             "skill_id": "text-segmentation",
             "user_message": "hi",
             "model_override": "CL46T",
+            "role": None,
         }
     ]
 
@@ -156,7 +157,7 @@ def test_stream_query_uses_copilot_chat_active_model_when_no_override(
     client = FakeClient([AssistantMessage(content=[TextBlock(text="hello")], model="claude")])
     calls: list[str | None] = []
     route = _resolved_route(base_url="https://credential.test")
-    def mock_resolve(override: str | None) -> tuple[list[ResolvedRoute], StaticCredentialProvider]:
+    def mock_resolve(override: str | None, role: str = "copilot_chat") -> tuple[list[ResolvedRoute], StaticCredentialProvider]:
         calls.append(override)
         return _runtime([route], {route.credential_ref: "primary-secret"})
 
@@ -175,6 +176,44 @@ def test_stream_query_uses_copilot_chat_active_model_when_no_override(
     assert client.options.env["ANTHROPIC_BASE_URL"] == "https://credential.test"
     assert isinstance(events[0], CopilotEventContextResolved)
     assert events[1:] == [CopilotEventText(content="hello"), CopilotEventDone()]
+
+
+def test_stream_query_passes_selected_copilot_role_to_resolver(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # The composer's copilot role picker sends the chosen role; stream_query must
+    # resolve THAT role (each copilot role = its own model group), not always
+    # copilot_chat. role=None falls back to copilot_chat.
+    client = FakeClient([AssistantMessage(content=[TextBlock(text="hi")], model="claude")])
+    seen: dict[str, object] = {}
+    route = _resolved_route(base_url="https://credential.test")
+
+    def mock_resolve(
+        override: str | None, role: str = "copilot_chat"
+    ) -> tuple[list[ResolvedRoute], StaticCredentialProvider]:
+        seen["role"] = role
+        return _runtime([route], {route.credential_ref: "primary-secret"})
+
+    monkeypatch.setattr(copilot_service, "_resolve_copilot_runtime", mock_resolve)
+    monkeypatch.setattr(
+        copilot_service, "_session_factory", lambda options: client.capture(options)
+    )
+
+    asyncio.run(
+        _collect(
+            copilot_service.stream_query(
+                "skill-a", "hi", role="copilot_opus_4_7", workspace_dir=tmp_path
+            )
+        )
+    )
+    assert seen["role"] == "copilot_opus_4_7"
+
+    seen.clear()
+    asyncio.run(
+        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+    )
+    assert seen["role"] == "copilot_chat"
 
 
 def test_stream_query_resolves_secret_from_credential_provider(
@@ -197,7 +236,7 @@ def test_stream_query_resolves_secret_from_credential_provider(
     monkeypatch.setattr(
         copilot_service,
         "_resolve_copilot_runtime",
-        lambda _override: (
+        lambda _override, role="copilot_chat": (
             [route],
             StaticCredentialProvider({"cred:test-provider": "provider-secret"}),
         ),
@@ -243,7 +282,7 @@ def test_stream_query_falls_back_to_second_copilot_route_when_first_route_fails(
     monkeypatch.setattr(
         copilot_service,
         "_resolve_copilot_runtime",
-        lambda _override: _runtime(
+        lambda _override, role="copilot_chat": _runtime(
             routes,
             {
                 routes[0].credential_ref: "first-secret",
@@ -252,7 +291,7 @@ def test_stream_query_falls_back_to_second_copilot_route_when_first_route_fails(
         ),
         raising=False,
     )
-    monkeypatch.setattr(copilot_service, "_resolve_copilot_route", lambda _override: routes[0])
+    monkeypatch.setattr(copilot_service, "_resolve_copilot_route", lambda _override, role="copilot_chat": routes[0])
 
     class FakeGatewayAdapter:
         def decide_fallback(self, payload: dict[str, object]) -> dict[str, object]:
@@ -314,7 +353,7 @@ def test_stream_query_maps_ark_anthropic_profile_to_claude_code_env(
     monkeypatch.setattr(
         copilot_service,
         "_resolve_copilot_runtime",
-        lambda _override: _runtime([route], {route.credential_ref: "ark-secret"}),
+        lambda _override, role="copilot_chat": _runtime([route], {route.credential_ref: "ark-secret"}),
     )
     monkeypatch.setattr(
         copilot_service, "_session_factory", lambda options: client.capture(options)
@@ -348,7 +387,7 @@ def test_stream_query_reports_clear_error_after_all_copilot_routes_fail(
     monkeypatch.setattr(
         copilot_service,
         "_resolve_copilot_runtime",
-        lambda _override: _runtime(
+        lambda _override, role="copilot_chat": _runtime(
             routes,
             {
                 routes[0].credential_ref: "first-secret",
@@ -357,7 +396,7 @@ def test_stream_query_reports_clear_error_after_all_copilot_routes_fail(
         ),
         raising=False,
     )
-    monkeypatch.setattr(copilot_service, "_resolve_copilot_route", lambda _override: routes[0])
+    monkeypatch.setattr(copilot_service, "_resolve_copilot_route", lambda _override, role="copilot_chat": routes[0])
 
     def session_factory(options: ClaudeAgentOptions) -> FailingClient:
         created_keys.append(options.env["ANTHROPIC_API_KEY"])
@@ -416,7 +455,7 @@ def test_stream_query_uses_model_override_when_provided(
     client = FakeClient([AssistantMessage(content=[TextBlock(text="hello")], model="claude")])
     calls: list[str | None] = []
     route = _resolved_route()
-    def mock_resolve(override: str | None) -> tuple[list[ResolvedRoute], StaticCredentialProvider]:
+    def mock_resolve(override: str | None, role: str = "copilot_chat") -> tuple[list[ResolvedRoute], StaticCredentialProvider]:
         calls.append(override)
         return _runtime([route], {route.credential_ref: "primary-secret"})
 
@@ -447,7 +486,7 @@ def test_stream_query_yields_error_when_no_api_key(
     monkeypatch.setattr(
         copilot_service,
         "_resolve_copilot_runtime",
-        lambda _override: _runtime(
+        lambda _override, role="copilot_chat": _runtime(
             [_resolved_route()],
             {"endpoint:test-provider": ""},
         ),
@@ -468,7 +507,7 @@ def test_stream_query_yields_clear_error_for_credential_ref_only_route(
     monkeypatch.setattr(
         copilot_service,
         "_resolve_copilot_runtime",
-        lambda _override: _runtime(
+        lambda _override, role="copilot_chat": _runtime(
             [_resolved_route(credential_ref="cred:test-provider")],
             {},
         ),

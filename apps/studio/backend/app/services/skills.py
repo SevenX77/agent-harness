@@ -14,6 +14,7 @@ from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 from typing import Any, NoReturn
 
+import yaml
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
 
@@ -39,6 +40,7 @@ from app.models.lint import LintResult
 from app.models.runs import RunMetadata
 from app.models.settings import AppSettings
 from app.models.skills import (
+    ChildGraphTopology,
     CompileError,
     CompileFailure,
     CompileSuccess,
@@ -992,7 +994,7 @@ def _detail_from_manifest(
 ) -> SkillDetail:
     return SkillDetail(
         manifest=compiled.manifest,
-        graph_topology=_graph_topology(compiled),
+        graph_topology=_graph_topology(compiled, skill_dir),
         node_schema_v21=_node_schema_v21(),
         io_schema=_io_schema(compiled),
         file_paths={
@@ -1023,7 +1025,7 @@ async def _detail_from_manifest_async(
     latest = await latest_run_metadata_async(user_id, skill_id, metadata)
     return SkillDetail(
         manifest=compiled.manifest,
-        graph_topology=_graph_topology(compiled),
+        graph_topology=_graph_topology(compiled, skill_dir),
         node_schema_v21=_node_schema_v21(),
         io_schema=_io_schema(compiled),
         file_paths={
@@ -1056,18 +1058,14 @@ def _parse_broken_graph_topology_and_phases(
         frontmatter_raw = parts[1]
         body = "---".join(parts[2:])
 
-        import yaml
-
         frontmatter = yaml.safe_load(frontmatter_raw) or {}
         phases = frontmatter.get("phases", [])
         if not isinstance(phases, list):
             phases = []
 
-        import re
-
         phase_pattern = re.compile(r"<phase\b([^>]*?)>(.*?)</phase>", re.IGNORECASE | re.DOTALL)
 
-        topology = []
+        topology: list[dict[str, object]] = []
         for match in phase_pattern.finditer(body):
             attributes = match.group(1).strip()
             tag_content = match.group(2).strip()
@@ -1087,14 +1085,15 @@ def _parse_broken_graph_topology_and_phases(
             elif (phase_dir / "SKILL.md").exists():
                 mode = "agent"
 
-            topology.append(
-                {
-                    "id": tag_content,
-                    "src": f"phases/{tag_content}",
-                    "depends_on": depends_on_list,
-                    "mode": mode,
-                }
-            )
+            row: dict[str, object] = {
+                "id": tag_content,
+                "src": f"phases/{tag_content}",
+                "depends_on": depends_on_list,
+                "mode": mode,
+            }
+            if mode == "subgraph":
+                row["path"] = _subgraph_path_for_phase(skill_dir, tag_content)
+            topology.append(row)
 
         return [str(p) for p in phases], topology
     except Exception:
@@ -1166,6 +1165,132 @@ def _read_current_graph_markdown(skill_dir: Path) -> str:
     if not graph_path.exists():
         return ""
     return graph_path.read_text(encoding="utf-8")
+
+
+def _markdown_frontmatter(path: Path) -> dict[str, object]:
+    """Parse the YAML frontmatter block of a Studio markdown file."""
+    if not path.is_file():
+        return {}
+    content = path.read_text(encoding="utf-8")
+    parts = content.split("---")
+    if len(parts) < 3:
+        return {}
+    try:
+        loaded = yaml.safe_load(parts[1])
+    except yaml.YAMLError:
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _subgraph_path_for_phase(skill_dir: Path, phase_name: str) -> str | None:
+    """Read a subgraph phase's absolute child ``path`` from its SUBGRAPH.md.
+
+    Per engine skill-syntax §2.1, subgraphs reference the child graph by an
+    absolute ``path`` (no registry). The legacy ``target_skill`` field is never
+    surfaced here.
+    """
+    frontmatter = _markdown_frontmatter(skill_dir / "phases" / phase_name / "SUBGRAPH.md")
+    path_value = frontmatter.get("path")
+    if isinstance(path_value, str) and path_value.strip():
+        return path_value.strip()
+    return None
+
+
+def _child_graph_boundary_roots(parent_skill_dir: Path) -> list[Path]:
+    """Allowed roots a subgraph child path may resolve inside (copilot cwd boundary).
+
+    Per engine skill-syntax §2.1, a subgraph child path must fall within the
+    copilot working-directory boundary. In Studio that boundary is the managed
+    skill roots: the parent skill's own tree plus the workspace and bundled
+    skill roots.
+    """
+    roots = [
+        parent_skill_dir,
+        config.default_workspace_skills_dir(),
+        config.SKILLS_DIR,
+    ]
+    resolved: list[Path] = []
+    for root in roots:
+        try:
+            resolved.append(root.resolve(strict=False))
+        except OSError:
+            continue
+    return resolved
+
+
+def _raise_subgraph_path_invalid(child_path: str, reason: str) -> NoReturn:
+    response = error_response(
+        error_code="SUBGRAPH_PATH_INVALID",
+        http_status=422,
+        message=f"Invalid subgraph child path: {reason}",
+        details={"path": child_path, "reason": reason},
+        retry_strategy="not_retryable",
+    )
+    raise_error_response(response)
+
+
+def _raise_subgraph_path_not_found(child_path: str) -> NoReturn:
+    response = error_response(
+        error_code="SUBGRAPH_PATH_NOT_FOUND",
+        http_status=404,
+        message=f"Subgraph child graph not found at path: {child_path}",
+        details={"path": child_path},
+        retry_strategy="not_retryable",
+    )
+    raise_error_response(response)
+
+
+async def resolve_child_graph_topology(
+    user_id: str,
+    skill_id: str,
+    child_path: str,
+    storage: StorageBackend,
+    metadata: MetadataStore,
+) -> ChildGraphTopology:
+    """Resolve and read a subgraph child GRAPH.md by absolute path.
+
+    Validates the path is absolute and within the copilot/workspace boundary
+    (path-traversal guard), then returns the child graph's phases/topology so the
+    frontend can render real inline subgraph content.
+    """
+    if not child_path or not child_path.strip():
+        _raise_subgraph_path_invalid(child_path, "path is empty")
+    if "\x00" in child_path:
+        _raise_subgraph_path_invalid(child_path, "path contains null byte")
+
+    candidate = Path(child_path)
+    if not candidate.is_absolute():
+        _raise_subgraph_path_invalid(child_path, "path must be absolute")
+
+    parent_skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
+    resolved_child = candidate.resolve(strict=False)
+    boundary_roots = _child_graph_boundary_roots(parent_skill_dir)
+    if not any(_is_within(resolved_child, root) for root in boundary_roots):
+        _raise_subgraph_path_invalid(child_path, "path is outside the workspace boundary")
+
+    graph_md = resolved_child / "GRAPH.md"
+    if not graph_md.is_file():
+        _raise_subgraph_path_not_found(child_path)
+
+    frontmatter = _markdown_frontmatter(graph_md)
+    phases, topology = _parse_broken_graph_topology_and_phases(resolved_child)
+    name = frontmatter.get("name")
+    description = frontmatter.get("description")
+    return ChildGraphTopology(
+        path=str(resolved_child),
+        name=name if isinstance(name, str) and name else resolved_child.name,
+        description=description if isinstance(description, str) else "",
+        phases=phases,
+        graph_topology=topology,
+    )
+
+
+def _is_within(candidate: Path, root: Path) -> bool:
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return False
+    return True
 
 
 def _graph_content_hash(content: str) -> str:
@@ -1334,32 +1459,40 @@ def _phase_summary_from_compiled(compiled: CompiledSkill) -> list[dict[str, Any]
     ]
 
 
-def _graph_topology(compiled: CompiledSkill) -> list[dict[str, object]]:
+def _graph_topology(compiled: CompiledSkill, skill_dir: Path) -> list[dict[str, object]]:
     mode_by_phase = {node.phase_name: node.mode for node in compiled.nodes}
     topology = compiled.raw.get("graph_topology", {})
     rows = topology.get("phases", []) if isinstance(topology, dict) else []
     if isinstance(rows, list):
         return [
-            {
-                "id": name,
-                "src": f"phases/{name}",
-                "depends_on": list(depends_on),
-                "mode": mode_by_phase.get(name, ""),
-            }
+            _topology_row(name, list(depends_on), mode_by_phase.get(name, ""), skill_dir)
             for row in rows
             if isinstance(row, dict)
             and isinstance((name := row.get("name")), str)
             and isinstance((depends_on := row.get("depends_on")), list)
         ]
     return [
-        {
-            "id": phase_name,
-            "src": f"phases/{phase_name}",
-            "depends_on": [],
-            "mode": mode_by_phase.get(phase_name, ""),
-        }
+        _topology_row(phase_name, [], mode_by_phase.get(phase_name, ""), skill_dir)
         for phase_name in compiled.manifest.phases
     ]
+
+
+def _topology_row(
+    phase_name: str,
+    depends_on: list[str],
+    mode: str,
+    skill_dir: Path,
+) -> dict[str, object]:
+    """Build one topology row, surfacing a subgraph phase's absolute child path."""
+    row: dict[str, object] = {
+        "id": phase_name,
+        "src": f"phases/{phase_name}",
+        "depends_on": depends_on,
+        "mode": mode,
+    }
+    if mode == "subgraph":
+        row["path"] = _subgraph_path_for_phase(skill_dir, phase_name)
+    return row
 
 
 def _node_schema_v21() -> dict[str, dict[str, object]]:

@@ -46,7 +46,7 @@ export function phaseRefsFromSkillDetail(detail: SkillDetail | undefined): Seria
   })
 }
 
-export function createPhaseDraft(detail: SkillDetail | undefined, kind: NewPhaseKind, skillId?: string): PhaseDraft {
+export function createPhaseDraft(detail: SkillDetail | undefined, kind: NewPhaseKind): PhaseDraft {
   const phases = phaseRefsFromSkillDetail(detail)
   const phaseId = nextPhaseId(phases.map((phase) => phase.id), basePhaseId(kind))
   const filePath = phaseFilePath(phaseId, kind)
@@ -59,7 +59,7 @@ export function createPhaseDraft(detail: SkillDetail | undefined, kind: NewPhase
   return {
     phaseId,
     filePath,
-    fileContent: defaultPhaseMarkdown(phaseId, kind, skillId),
+    fileContent: defaultPhaseMarkdown(phaseId, kind),
     phaseRef,
     phases: [...phases, phaseRef],
   }
@@ -140,50 +140,94 @@ function phaseDirectoryPath(phaseId: string): string {
   return `phases/${phaseId}`
 }
 
-export function defaultPhaseMarkdown(phaseId: string, kind: NewPhaseKind, skillId = 'placeholder.child_skill'): string {
+// Node type is determined by the phase FILE KIND (LOGIC.md / SKILL.md /
+// SUBGRAPH.md), never a `mode:` frontmatter field. The scaffolds below stay
+// FROZEN-clean per engine skill-syntax §2.3 (LOGIC), §2.5 (agent SKILL),
+// §2.4/§2.1 (SUBGRAPH) so the engine compiler accepts them with no
+// unknown-field FATAL. Deprecated fields (`mode`, `system_prompt`,
+// `exit_contract`, `python_callable`, `target_skill`) must never be emitted.
+const SUBGRAPH_PATH_PLACEHOLDER = '/absolute/path/to/child_skill'
+
+export function defaultPhaseMarkdown(
+  phaseId: string,
+  kind: NewPhaseKind,
+  subgraphPath = SUBGRAPH_PATH_PLACEHOLDER,
+): string {
   if (kind === 'skill') {
-    return [
-      '---',
-      `name: ${phaseId}`,
-      'mode: skill',
-      'tools: []',
-      '---',
-      '',
-      '<system_prompt>',
-      `Describe what ${phaseId} should do.`,
-      '</system_prompt>',
-      '',
-      '<exit_contract>',
-      'Call finish_task when this phase is complete.',
-      '</exit_contract>',
-      '',
-      `# ${phaseId}`,
-      '',
-    ].join('\n')
+    return agentPhaseMarkdown(phaseId)
   }
   if (kind === 'subgraph') {
-    return [
-      '---',
-      `name: ${phaseId}`,
-      'mode: subgraph',
-      `target_skill: ${skillId}`,
-      '---',
-      '',
-      `# ${phaseId}`,
-      '',
-    ].join('\n')
+    return subgraphPhaseMarkdown(phaseId, subgraphPath)
   }
+  return logicPhaseMarkdown(phaseId)
+}
+
+function logicPhaseMarkdown(phaseId: string): string {
+  const actionName = `${phaseId.replaceAll('-', '_')}_action`
   return [
     '---',
     `name: ${phaseId}`,
-    'mode: logic',
+    'io:',
+    '  inputs:',
+    '    type: object',
+    '    properties: {}',
+    '  outputs:',
+    '    type: object',
+    '    properties: {}',
+    `actions: [${actionName}]`,
+    'validator: false',
     '---',
     '',
-    '<python_callable>',
-    phaseId.replaceAll('-', '_'),
-    '</python_callable>',
+    `<action>${actionName}</action>`,
     '',
-    `# ${phaseId}`,
+  ].join('\n')
+}
+
+function agentPhaseMarkdown(phaseId: string): string {
+  return [
+    '---',
+    `name: ${phaseId}`,
+    'llm_role: analyst',
+    'io:',
+    '  inputs:',
+    '    type: object',
+    '    properties: {}',
+    '  outputs:',
+    '    type: object',
+    '    properties: {}',
+    'tools: []',
+    'validator: false',
+    '---',
+    '',
+    '<role>',
+    `Describe the professional identity ${phaseId} should adopt.`,
+    '</role>',
+    '',
+    '<goal>',
+    `Describe what ${phaseId} must produce, then call finish_task.`,
+    '</goal>',
+    '',
+    '<step id="S1" name="plan">Outline the approach before acting.</step>',
+    '',
+    '<protocol id="P1">State the rule each key judgement relies on.</protocol>',
+    '',
+  ].join('\n')
+}
+
+function subgraphPhaseMarkdown(phaseId: string, subgraphPath: string): string {
+  return [
+    '---',
+    `name: ${phaseId}`,
+    `path: ${subgraphPath}`,
+    'io:',
+    '  inputs:',
+    '    type: object',
+    '    properties: {}',
+    '  outputs:',
+    '    type: object',
+    '    properties: {}',
+    'validator: false',
+    '---',
     '',
   ].join('\n')
 }

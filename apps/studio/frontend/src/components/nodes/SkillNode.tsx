@@ -43,7 +43,7 @@ const STATUS_STYLE: Record<SkillNodeStatus, { label: string, className: string, 
 
 function phaseKindLabel(data: Pick<SkillGraphNodeData, 'mode' | 'subgraphPath'>): PhaseKind {
   if (data.subgraphPath || data.mode === 'subgraph') return 'SUBGRAPH'
-  if (data.mode === 'skill' || data.mode === 'llm') return 'AGENT'
+  if (data.mode === 'agent' || data.mode === 'skill' || data.mode === 'llm') return 'AGENT'
   return 'LOGIC'
 }
 

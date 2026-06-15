@@ -42,34 +42,51 @@ describe('canvas authoring helpers', () => {
       filePath: 'phases/agent/SKILL.md',
       phaseRef: { id: 'agent', src: 'phases/agent', depends_on: [], mode: 'skill' },
     })
-    expect(createPhaseDraft(detail, 'subgraph', 'demo-skill')).toMatchObject({
+    expect(createPhaseDraft(detail, 'subgraph')).toMatchObject({
       phaseId: 'subgraph',
       filePath: 'phases/subgraph/SUBGRAPH.md',
       phaseRef: { id: 'subgraph', src: 'phases/subgraph', depends_on: [], mode: 'subgraph' },
     })
   })
 
-  it('creates phase files that match the node AST fields', () => {
+  it('scaffolds FROZEN-clean phase files with no deprecated frontmatter fields', () => {
     const detail = skillDetail()
     const logic = createPhaseDraft(detail, 'logic')
     const skill = createPhaseDraft(detail, 'skill')
-    const subgraph = createPhaseDraft(detail, 'subgraph', 'demo-skill')
+    const subgraph = createPhaseDraft(detail, 'subgraph')
 
-    expect(logic.fileContent).toContain('mode: logic')
-    expect(logic.fileContent).toContain('<python_callable>')
-    expect(logic.fileContent).not.toContain('execute_steps')
+    // No scaffold may emit any FROZEN-violating field.
+    for (const content of [logic.fileContent, skill.fileContent, subgraph.fileContent]) {
+      expect(content).not.toContain('mode:')
+      expect(content).not.toContain('system_prompt')
+      expect(content).not.toContain('exit_contract')
+      expect(content).not.toContain('python_callable')
+      expect(content).not.toContain('target_skill')
+    }
 
-    expect(skill.fileContent).toContain('mode: skill')
+    // LOGIC.md: io slices + actions registry + validator; body <action>. No mode.
+    expect(logic.fileContent).toContain('name: logic')
+    expect(logic.fileContent).toContain('io:')
+    expect(logic.fileContent).toContain('actions: [logic_action]')
+    expect(logic.fileContent).toContain('validator: false')
+    expect(logic.fileContent).toContain('<action>logic_action</action>')
+
+    // Agent SKILL.md: llm_role + tools + io + validator; body role/goal/step/protocol.
+    expect(skill.fileContent).toContain('name: agent')
+    expect(skill.fileContent).toContain('llm_role: analyst')
     expect(skill.fileContent).toContain('tools: []')
-    expect(skill.fileContent).toContain('<system_prompt>')
-    expect(skill.fileContent).toContain('<exit_contract>')
-    expect(skill.fileContent).not.toContain('llm_role')
-    expect(skill.fileContent).not.toContain('agent_tools')
-    expect(skill.fileContent).not.toContain('prompt:')
+    expect(skill.fileContent).toContain('io:')
+    expect(skill.fileContent).toContain('validator: false')
+    expect(skill.fileContent).toContain('<role>')
+    expect(skill.fileContent).toContain('<goal>')
+    expect(skill.fileContent).toContain('<step id="S1"')
+    expect(skill.fileContent).toContain('<protocol id="P1">')
 
-    expect(subgraph.fileContent).toContain('mode: subgraph')
-    expect(subgraph.fileContent).toContain('target_skill: demo-skill')
-    expect(subgraph.fileContent).not.toContain('sub_skill_ref')
+    // SUBGRAPH.md: absolute path placeholder + io + validator. Uses path, not target_skill.
+    expect(subgraph.fileContent).toContain('name: subgraph')
+    expect(subgraph.fileContent).toContain('path: /absolute/path/to/child_skill')
+    expect(subgraph.fileContent).toContain('io:')
+    expect(subgraph.fileContent).toContain('validator: false')
   })
 
   it('appends a numeric suffix when the readable phase id already exists', () => {

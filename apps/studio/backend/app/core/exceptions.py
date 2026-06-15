@@ -48,6 +48,8 @@ STANDARD_ERROR_MAP: dict[str, ErrorDefinition] = {
     "TEST_INPUT_NOT_FOUND": ErrorDefinition(http_status=404, retry_strategy="not_retryable"),
     "TEST_INPUT_ALREADY_EXISTS": ErrorDefinition(http_status=409, retry_strategy="not_retryable"),
     "TEST_INPUT_VALIDATION_FAILED": ErrorDefinition(http_status=422, retry_strategy="not_retryable"),
+    "SUBGRAPH_PATH_INVALID": ErrorDefinition(http_status=422, retry_strategy="not_retryable"),
+    "SUBGRAPH_PATH_NOT_FOUND": ErrorDefinition(http_status=404, retry_strategy="not_retryable"),
 }
 
 

@@ -72,7 +72,6 @@ export function Panels({
       <InputPanel
         skillId={skillId}
         skillDetail={skillDetail}
-        onFileOpen={onFileOpen}
         selectedTestInputId={selectedTestInputId ?? null}
         onSelectTestInput={onSelectTestInput}
       />

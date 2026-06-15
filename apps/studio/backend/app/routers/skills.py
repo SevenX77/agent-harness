@@ -23,6 +23,7 @@ from app.models.git_collab import SyncSkillReq
 from app.models.git_history import GitHistoryItem, RevertSkillReq
 from app.models.publish import PublishResult, PublishSkillReq
 from app.models.skills import (
+    ChildGraphTopology,
     CompileSuccess,
     CreateSkillReq,
     ForkSkillReq,
@@ -54,6 +55,7 @@ from app.services.skills import (
     fork_skill,
     get_skill_detail,
     list_skill_summaries,
+    resolve_child_graph_topology,
     resolve_skill_dir_async,
     serialize_skill_graph_markdown,
     update_skill_file,
@@ -100,6 +102,18 @@ async def get_skill(
     metadata: MetadataStore = Depends(get_metadata),
 ) -> SkillDetail:
     return await get_skill_detail(user_id, skill_id, storage, metadata)
+
+
+@router.get("/{skill_id}/subgraph", response_model=ChildGraphTopology)
+async def get_subgraph_child_topology(
+    skill_id: str,
+    path: str,
+    user_id: str = Depends(get_auth_user_id),
+    storage: StorageBackend = Depends(get_storage),
+    metadata: MetadataStore = Depends(get_metadata),
+) -> ChildGraphTopology:
+    """Resolve a subgraph's child GRAPH.md by absolute path within the boundary."""
+    return await resolve_child_graph_topology(user_id, skill_id, path, storage, metadata)
 
 
 @router.post("/{skill_id}/compile", response_model=CompileSuccess)

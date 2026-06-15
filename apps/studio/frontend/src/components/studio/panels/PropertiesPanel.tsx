@@ -11,13 +11,7 @@ import {
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import type { SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData, SubagentRef } from "@/components/GraphCanvas"
@@ -30,6 +24,8 @@ import {
   parsePhaseFrontmatter,
   phaseFrontmatterToForm,
   type PhaseFrontmatterFormData,
+  type PhaseFrontmatterKind,
+  type PhaseSubagentRef,
 } from "./phase-frontmatter"
 
 function phaseKindLabel(data: Pick<SkillGraphNodeData, "mode" | "subgraphPath">): "LOGIC" | "AGENT" | "SUBGRAPH" {
@@ -43,6 +39,13 @@ function phaseKindFile(data: Pick<SkillGraphNodeData, "mode" | "subgraphPath">):
   if (kind === "SUBGRAPH") return "SUBGRAPH.md"
   if (kind === "AGENT") return "SKILL.md"
   return "LOGIC.md"
+}
+
+// Node kind is derived from the phase FILE KIND, never a `mode:` frontmatter field.
+function phaseFrontmatterKind(label: "LOGIC" | "AGENT" | "SUBGRAPH"): PhaseFrontmatterKind {
+  if (label === "SUBGRAPH") return "subgraph"
+  if (label === "AGENT") return "agent"
+  return "logic"
 }
 
 function DetailRow({ label, value }: { label: string; value?: string | string[] | null }) {
@@ -119,6 +122,7 @@ export function PropertiesPanel({
   const selectedEdge = workspace?.selectedEdge
 
   const modeLabel = selectedNode ? phaseKindLabel(selectedNode.data) : null
+  const kind: PhaseFrontmatterKind = phaseFrontmatterKind(modeLabel ?? "LOGIC")
   const filePath = selectedNode?.data.filePath ?? (selectedNode ? `phases/${selectedNode.id}/${phaseKindFile(selectedNode.data)}` : null)
   const fileContent = filePath ? skillDetail?.files?.[filePath] : undefined
   const subagents = selectedNode?.data.subagents ?? []
@@ -133,12 +137,9 @@ export function PropertiesPanel({
     if (!parsed.ok) {
       return { key: `${filePath}:${fileContent}`, ok: false as const, reason: parsed.reason, message: parsed.message }
     }
-    const form = phaseFrontmatterToForm(parsed.frontmatter, parsed.body)
-    if (typeof parsed.frontmatter.mode !== "string") {
-      form.mode = modeLabel === "SUBGRAPH" ? "subgraph" : modeLabel === "AGENT" ? "agent" : "logic"
-    }
+    const form = phaseFrontmatterToForm(parsed.frontmatter)
     return { key: `${filePath}:${fileContent}`, ok: true as const, form }
-  }, [fileContent, filePath, modeLabel])
+  }, [fileContent, filePath])
   const [loadedFormKey, setLoadedFormKey] = useState(phaseFormState.key)
   const [draft, setDraft] = useState<PhaseFrontmatterFormData | null>(() => (
     phaseFormState.ok ? phaseFormState.form : null
@@ -173,7 +174,7 @@ export function PropertiesPanel({
     if (!onPhaseFileSave || !filePath || fileContent === undefined || !activeDraft) {
       return
     }
-    const next = applyPhaseFrontmatterForm(fileContent, activeDraft)
+    const next = applyPhaseFrontmatterForm(fileContent, activeDraft, kind)
     if (!next.ok) {
       toast.error(`Frontmatter error: ${next.message}`)
       return
@@ -293,7 +294,7 @@ export function PropertiesPanel({
             {phaseFormState.ok && activeDraft ? (
               <PhaseFrontmatterForm
                 value={activeDraft}
-                modeLabel={modeLabel}
+                kind={kind}
                 saving={saving}
                 canSave={canSave}
                 canReset={dirty && !saving}
@@ -339,7 +340,7 @@ export function PropertiesPanel({
 
 function PhaseFrontmatterForm({
   value,
-  modeLabel,
+  kind,
   saving,
   canSave,
   canReset,
@@ -348,7 +349,7 @@ function PhaseFrontmatterForm({
   onSave,
 }: {
   value: PhaseFrontmatterFormData
-  modeLabel: "LOGIC" | "AGENT" | "SUBGRAPH" | null
+  kind: PhaseFrontmatterKind
   saving: boolean
   canSave: boolean
   canReset: boolean
@@ -356,8 +357,6 @@ function PhaseFrontmatterForm({
   onReset: () => void
   onSave: () => void
 }) {
-  const kind = value.mode === "subgraph" ? "subgraph" : value.mode === "skill" || value.mode === "llm" || value.mode === "agent" ? "agent" : modeLabel === "SUBGRAPH" ? "subgraph" : modeLabel === "AGENT" ? "agent" : "logic"
-
   return (
     <form
       className="rounded-md border border-border bg-card px-3 py-3"
@@ -368,57 +367,17 @@ function PhaseFrontmatterForm({
     >
       <FieldSet>
         <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor="phase-name">Name</FieldLabel>
-            <Input
-              id="phase-name"
-              value={value.name}
-              onChange={(event) => onFieldChange("name", event.currentTarget.value)}
-            />
-          </Field>
-          <Field>
-            <FieldLabel>Mode</FieldLabel>
-            <Select value={value.mode || kind} onValueChange={(next) => onFieldChange("mode", next)}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Mode" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="logic">Logic</SelectItem>
-                <SelectItem value="agent">Agent</SelectItem>
-                <SelectItem value="subgraph">Subgraph</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          {kind === "logic" ? (
-            <Field>
-              <FieldLabel htmlFor="phase-python-callable">Python callable</FieldLabel>
-              <Input
-                id="phase-python-callable"
-                value={value.pythonCallable}
-                onChange={(event) => onFieldChange("pythonCallable", event.currentTarget.value)}
-              />
-              <FieldDescription>Function name exposed by this LOGIC phase.</FieldDescription>
-            </Field>
-          ) : null}
           {kind === "agent" ? (
             <>
               <Field>
-                <FieldLabel htmlFor="phase-system-prompt">System prompt</FieldLabel>
-                <Textarea
-                  id="phase-system-prompt"
-                  value={value.systemPrompt}
-                  onChange={(event) => onFieldChange("systemPrompt", event.currentTarget.value)}
-                  rows={5}
+                <FieldLabel htmlFor="phase-llm-role">LLM role</FieldLabel>
+                <Input
+                  id="phase-llm-role"
+                  value={value.llmRole}
+                  placeholder="analyst"
+                  onChange={(event) => onFieldChange("llmRole", event.currentTarget.value)}
                 />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="phase-exit-contract">Exit contract</FieldLabel>
-                <Textarea
-                  id="phase-exit-contract"
-                  value={value.exitContract}
-                  onChange={(event) => onFieldChange("exitContract", event.currentTarget.value)}
-                  rows={4}
-                />
+                <FieldDescription>Routes model tier/policy. Inherits the graph default when blank.</FieldDescription>
               </Field>
               <Field>
                 <FieldLabel htmlFor="phase-tools">Tools</FieldLabel>
@@ -430,17 +389,47 @@ function PhaseFrontmatterForm({
                 />
                 <FieldDescription>One tool name per line.</FieldDescription>
               </Field>
+              <SubagentsField
+                value={value.subagents}
+                onChange={(next) => onFieldChange("subagents", next)}
+              />
+            </>
+          ) : null}
+          {kind === "logic" ? (
+            <>
+              <Field>
+                <FieldLabel htmlFor="phase-actions">Actions</FieldLabel>
+                <Textarea
+                  id="phase-actions"
+                  value={value.actions}
+                  onChange={(event) => onFieldChange("actions", event.currentTarget.value)}
+                  rows={4}
+                />
+                <FieldDescription>One action name per line, in execution order.</FieldDescription>
+              </Field>
+              <ValidatorField
+                value={value.validator}
+                onChange={(next) => onFieldChange("validator", next)}
+              />
             </>
           ) : null}
           {kind === "subgraph" ? (
-            <Field>
-              <FieldLabel htmlFor="phase-target-skill">Target skill</FieldLabel>
-              <Input
-                id="phase-target-skill"
-                value={value.targetSkill}
-                onChange={(event) => onFieldChange("targetSkill", event.currentTarget.value)}
+            <>
+              <Field>
+                <FieldLabel htmlFor="phase-path">Path</FieldLabel>
+                <Input
+                  id="phase-path"
+                  value={value.path}
+                  placeholder="/absolute/path/to/child_graph"
+                  onChange={(event) => onFieldChange("path", event.currentTarget.value)}
+                />
+                <FieldDescription>Absolute path to the child graph skill root.</FieldDescription>
+              </Field>
+              <ValidatorField
+                value={value.validator}
+                onChange={(next) => onFieldChange("validator", next)}
               />
-            </Field>
+            </>
           ) : null}
         </FieldGroup>
         <div className="flex justify-end gap-2">
@@ -456,8 +445,99 @@ function PhaseFrontmatterForm({
   )
 }
 
+function ValidatorField({ value, onChange }: { value: boolean; onChange: (next: boolean) => void }) {
+  return (
+    <Field orientation="horizontal" className="items-center justify-between gap-3">
+      <FieldLabel htmlFor="phase-validator" className="min-w-0">Validator</FieldLabel>
+      <Switch
+        id="phase-validator"
+        size="sm"
+        checked={value}
+        onCheckedChange={onChange}
+        aria-label="Validator"
+      />
+    </Field>
+  )
+}
+
+function SubagentsField({
+  value,
+  onChange,
+}: {
+  value: PhaseSubagentRef[]
+  onChange: (next: PhaseSubagentRef[]) => void
+}) {
+  const update = (index: number, patch: Partial<PhaseSubagentRef>) => {
+    onChange(value.map((entry, idx) => (idx === index ? { ...entry, ...patch } : entry)))
+  }
+  const remove = (index: number) => {
+    onChange(value.filter((_, idx) => idx !== index))
+  }
+  const add = () => {
+    onChange([...value, { name: "", target_skill: "", description: "" }])
+  }
+
+  return (
+    <Field>
+      <FieldLabel>Subagents</FieldLabel>
+      <div className="space-y-2">
+        {value.map((entry, index) => (
+          <div key={index} className="space-y-1.5 rounded-md border border-border bg-background px-2 py-2">
+            <Input
+              aria-label={`Subagent ${index + 1} name`}
+              value={entry.name}
+              placeholder="name"
+              onChange={(event) => update(index, { name: event.currentTarget.value })}
+            />
+            <Input
+              aria-label={`Subagent ${index + 1} target skill`}
+              value={entry.target_skill}
+              placeholder="target_skill"
+              onChange={(event) => update(index, { target_skill: event.currentTarget.value })}
+            />
+            <Input
+              aria-label={`Subagent ${index + 1} description`}
+              value={entry.description}
+              placeholder="description"
+              onChange={(event) => update(index, { description: event.currentTarget.value })}
+            />
+            <div className="flex justify-end">
+              <Button type="button" size="sm" variant="ghost" onClick={() => remove(index)}>
+                Remove
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <Button type="button" size="sm" variant="secondary" className="mt-1" onClick={add}>
+        Add subagent
+      </Button>
+    </Field>
+  )
+}
+
 function formsEqual(left: PhaseFrontmatterFormData, right: PhaseFrontmatterFormData): boolean {
-  return Object.keys(left).every((key) => (
-    left[key as keyof PhaseFrontmatterFormData] === right[key as keyof PhaseFrontmatterFormData]
-  ))
+  return (
+    left.llmRole === right.llmRole
+    && left.tools === right.tools
+    && left.actions === right.actions
+    && left.path === right.path
+    && left.validator === right.validator
+    && subagentsEqual(left.subagents, right.subagents)
+  )
+}
+
+function subagentsEqual(left: PhaseSubagentRef[], right: PhaseSubagentRef[]): boolean {
+  if (left.length !== right.length) {
+    return false
+  }
+  return left.every((entry, index) => {
+    const other = right[index]
+    return (
+      other !== undefined
+      && entry.name === other.name
+      && entry.target_skill === other.target_skill
+      && entry.description === other.description
+    )
+  })
 }

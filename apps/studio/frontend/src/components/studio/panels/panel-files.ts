@@ -67,7 +67,24 @@ export function manifestFiles(skillDetail?: SkillDetail, selectedNode?: { id: st
   return files
 }
 
-export function inputFiles(skillDetail?: SkillDetail): FileMeta[] {
+/**
+ * Read-only projection of the skill's declared io contract for DISPLAY/SEEDING
+ * only. The authoritative io contract lives in GRAPH.md `io.inputs`/`io.outputs`
+ * frontmatter; the manifest's `io` is a derived copy. This used to project two
+ * FAKE editable files (`input/schema.json` + `input/sample.json`) into the
+ * editor — but those paths do not exist on disk, so edits autosaved to dead
+ * paths = silent data loss. The projection is gone: callers now get the parsed
+ * io maps and a sample seed string, and edit the real contract via the GRAPH.md
+ * field editor instead.
+ */
+export interface IoContractView {
+  inputs: Record<string, unknown>
+  outputs: Record<string, unknown>
+  /** A `{field: ""}` skeleton from the input fields, to seed the schema-infer textarea. */
+  inputSampleJson: string
+}
+
+export function inputContractView(skillDetail?: SkillDetail): IoContractView {
   const manifest = skillDetail?.manifest as unknown as {
     io?: {
       inputs?: { properties?: Record<string, unknown> } | Record<string, unknown>
@@ -82,16 +99,13 @@ export function inputFiles(skillDetail?: SkillDetail): FileMeta[] {
     ? (io.outputs.properties as Record<string, unknown>)
     : (io?.outputs as Record<string, unknown>) ?? {}
 
-  return [
-    {
-      path: "input/schema.json",
-      language: "json",
-      content: JSON.stringify({ inputs, outputs }, null, 2),
-    },
-    {
-      path: "input/sample.json",
-      language: "json",
-      content: JSON.stringify(Object.fromEntries(Object.keys(inputs).map((name) => [name, ""])), null, 2),
-    },
-  ]
+  return {
+    inputs,
+    outputs,
+    inputSampleJson: JSON.stringify(
+      Object.fromEntries(Object.keys(inputs).map((name) => [name, ""])),
+      null,
+      2,
+    ),
+  }
 }

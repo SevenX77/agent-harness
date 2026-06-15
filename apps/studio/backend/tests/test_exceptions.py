@@ -19,6 +19,8 @@ def test_standard_error_codes_map_to_http_exceptions() -> None:
         "TEST_INPUT_NOT_FOUND": 404,
         "TEST_INPUT_ALREADY_EXISTS": 409,
         "TEST_INPUT_VALIDATION_FAILED": 422,
+        "SUBGRAPH_PATH_INVALID": 422,
+        "SUBGRAPH_PATH_NOT_FOUND": 404,
     }
 
     assert set(STANDARD_ERROR_MAP) == set(expected)

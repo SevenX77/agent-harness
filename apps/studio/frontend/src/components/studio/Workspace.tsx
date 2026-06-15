@@ -281,7 +281,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       toast.error("Open a skill before creating a phase")
       return
     }
-    const draft = createPhaseDraft(skillDetail, kind, currentSkillId)
+    const draft = createPhaseDraft(skillDetail, kind)
     const graphContent = skillDetail.files?.["GRAPH.md"]
     const graphHash = graphContent === undefined ? null : await sha256Hex(graphContent)
     try {

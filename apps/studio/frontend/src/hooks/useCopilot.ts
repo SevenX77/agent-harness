@@ -51,6 +51,36 @@ function createMessage(role: CopilotMessage['role'], content: string, status: Co
   }
 }
 
+/**
+ * Drain queued text deltas into the store, coalescing by message. Shared by the
+ * 75ms flush timer and the terminal-event path: draining before applying
+ * done/error guarantees the persisted snapshot (R16/D8) includes every trailing
+ * text token, not just whatever happened to flush before the turn settled.
+ */
+function flushTextQueue(
+  queue: Array<{ messageId: string; content: string; event: CopilotEvent }>,
+): void {
+  if (queue.length === 0) {
+    return
+  }
+  const batch = queue.splice(0)
+  const byMessage = new Map<string, { content: string; events: CopilotEvent[] }>()
+  batch.forEach((item) => {
+    const current = byMessage.get(item.messageId) ?? { content: '', events: [] }
+    current.content += item.content
+    current.events.push(item.event)
+    byMessage.set(item.messageId, current)
+  })
+  byMessage.forEach((value, messageId) => {
+    copilotStore.updateMessage(messageId, (message) => ({
+      ...message,
+      content: `${message.content}${value.content}`,
+      status: 'running',
+      events: [...message.events, ...value.events],
+    }))
+  })
+}
+
 export function useCopilot(skillId: string | null) {
   const snapshot = useSyncExternalStore(copilotStore.subscribe, copilotStore.getSnapshot)
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('idle')
@@ -72,6 +102,12 @@ export function useCopilot(skillId: string | null) {
     if (event.type === 'text_delta') {
       textQueueRef.current.push({ messageId, content: event.content, event })
     } else {
+      // Terminal events (done/error) trigger an on-disk flush in the store. Drain
+      // any still-queued text deltas first so the persisted transcript carries the
+      // complete assistant answer, not a truncated one (R16/D8).
+      if (event.type === 'done' || event.type === 'error') {
+        flushTextQueue(textQueueRef.current)
+      }
       copilotStore.updateMessage(messageId, (message) => ({
         ...message,
         status: event.status,
@@ -126,25 +162,7 @@ export function useCopilot(skillId: string | null) {
     let reconnectTimer: number | undefined
 
     const flushTimer = window.setInterval(() => {
-      if (textQueueRef.current.length === 0) {
-        return
-      }
-      const batch = textQueueRef.current.splice(0)
-      const byMessage = new Map<string, { content: string, events: CopilotEvent[] }>()
-      batch.forEach((item) => {
-        const current = byMessage.get(item.messageId) ?? { content: '', events: [] }
-        current.content += item.content
-        current.events.push(item.event)
-        byMessage.set(item.messageId, current)
-      })
-      byMessage.forEach((value, messageId) => {
-        copilotStore.updateMessage(messageId, (message) => ({
-          ...message,
-          content: `${message.content}${value.content}`,
-          status: 'running',
-          events: [...message.events, ...value.events],
-        }))
-      })
+      flushTextQueue(textQueueRef.current)
     }, 75)
 
     const connect = () => {

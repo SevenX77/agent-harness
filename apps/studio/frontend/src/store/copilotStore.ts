@@ -134,6 +134,33 @@ function persistActiveSession(workspaceId: string, skillId: string, activeSessio
   })
 }
 
+/**
+ * Flush a full session (id + messages) to its `<id>.json` file via the native fs
+ * wrapper. This is the SINGLE on-disk write path for transcripts — shared by
+ * appendMessage (a turn starts) and updateMessage (the streamed assistant text /
+ * thinking / tool events land here). R16/D8: streamed assistant content was only
+ * ever applied via updateMessage, which previously never persisted, so a restart
+ * restored the user question with a BLANK assistant answer. Persisting on every
+ * message mutation (incl. the terminal done event) makes hydrate() round-trip the
+ * complete transcript. Snapshots the session by value so a later context switch
+ * can't retarget the write. Inert in web/test (writeWorkspaceFile rejects there).
+ */
+async function persistSessionToDisk(
+  workspaceId: string,
+  skillId: string,
+  session: CopilotSession,
+): Promise<void> {
+  try {
+    await ensureWorkspaceSupportDirs(workspaceId)
+    const relativePath = `.gemini/copilot/sessions/${skillId}/${session.id}.json`
+    await writeWorkspaceFile(workspaceId, relativePath, JSON.stringify(session, null, 2))
+    state.persistenceError = null
+  } catch (err: unknown) {
+    state.persistenceError = err instanceof Error ? err.message : String(err)
+  }
+  emit()
+}
+
 export const copilotStore = {
   getSnapshot(): CopilotState {
     if (!cachedSnapshot) {
@@ -255,21 +282,16 @@ export const copilotStore = {
 
     const activeSession = state.sessions.find((s) => s.id === state.activeSessionId)
     if (state.workspaceId && state.skillId && activeSession) {
-      try {
-        await ensureWorkspaceSupportDirs(state.workspaceId)
-        const relativePath = `.gemini/copilot/sessions/${state.skillId}/${activeSession.id}.json`
-        await writeWorkspaceFile(
-          state.workspaceId,
-          relativePath,
-          JSON.stringify(activeSession, null, 2)
-        )
-        state.persistenceError = null
-      } catch (err: unknown) {
-        state.persistenceError = err instanceof Error ? err.message : String(err)
-      }
-      emit()
+      await persistSessionToDisk(state.workspaceId, state.skillId, activeSession)
     }
   },
+  /**
+   * Apply an updater to one message in the active session. Streamed assistant
+   * deltas (text/thinking/tool) and the terminal done/error events all flow
+   * through here. R16/D8: when a turn completes (status no longer 'running' —
+   * i.e. the done/error event landed), flush the full assembled message to disk
+   * so hydrate() restores a complete transcript instead of a blank answer.
+   */
   updateMessage(messageId: string, updater: (message: CopilotMessage) => CopilotMessage) {
     state.sessions = state.sessions.map((s) => {
       if (s.id === state.activeSessionId) {
@@ -285,6 +307,22 @@ export const copilotStore = {
       sessionsByContext[key] = state.sessions
     }
     emit()
+
+    const activeSession = state.sessions.find((s) => s.id === state.activeSessionId)
+    const updatedMessage = activeSession?.messages.find((m) => m.id === messageId)
+    // Persist once the turn settles (status leaves 'running'); skip mid-stream
+    // deltas to avoid a disk write per token. The empty-shell write from
+    // appendMessage already covers the early in-flight state on disk.
+    if (
+      state.workspaceId &&
+      state.skillId &&
+      activeSession &&
+      updatedMessage &&
+      updatedMessage.status !== 'running' &&
+      updatedMessage.status !== 'pending'
+    ) {
+      void persistSessionToDisk(state.workspaceId, state.skillId, activeSession)
+    }
   },
   clearMessages() {
     state.sessions = state.sessions.map((s) => {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Connection } from "@xyflow/react"
 import { toast } from "sonner"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
-import { GraphCanvas, type SkillGraphNodeData, type SkillNodeStatus } from "@/components/GraphCanvas"
+import { GraphCanvas, type SkillGraphNodeData } from "@/components/GraphCanvas"
 import { CopilotPanel } from "@/components/copilot/copilot-panel"
 import { copilotFileActionEffects, type CopilotFileAction } from "@/components/copilot/patch-proposed-bubble"
 import { PromptInspector } from "@/components/PromptInspector"
@@ -21,6 +21,7 @@ import type { CompileError } from "@/api/types"
 import { connectPhaseRefs, createPhaseDraft, disconnectPhaseRefs, type NewPhaseKind } from "@/components/GraphCanvas/canvas-authoring"
 import { sha256Hex } from "@/lib/hash"
 import { CenterActionBar, type SkillBuildStage } from "./center-action-bar"
+import { deriveNodeStatuses } from "./node-status"
 import { ConflictDialog } from "./ConflictDialog"
 import { Header } from "./Header"
 import { Panels } from "./Panels"
@@ -106,24 +107,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     ? runId
     : null
 
-  const statusByNodeId = useMemo(() => {
-    const statuses: Record<string, SkillNodeStatus> = {}
-    if (!runStream.events) return statuses
-    for (const event of runStream.events) {
-      const phaseName = event.phase_name || event.current_phase
-      if (!phaseName) continue
-      const type = event.event_type || ""
-      const isError = type.includes("error") || event.status === "failed" || event.status === "error"
-      if (isError) {
-        statuses[phaseName] = "error"
-      } else if (type === "phase_start") {
-        statuses[phaseName] = "running"
-      } else if (type === "phase_end") {
-        statuses[phaseName] = "success"
-      }
-    }
-    return statuses
-  }, [runStream.events])
+  const statusByNodeId = useMemo(
+    () => deriveNodeStatuses(runStream.events),
+    [runStream.events],
+  )
 
   // The currently-running phase, used to highlight/link the live trace stream.
   const activeTracePhase = useMemo(() => {

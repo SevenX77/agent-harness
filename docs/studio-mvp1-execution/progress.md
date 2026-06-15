@@ -466,5 +466,23 @@ Stop-hook、反自造停下铁律、copilot F3/F4-echo/F7、trace F5/F2、input 
 - **需 PM 决策(到该波次前确认)**:golden per-node 重做范围、node-level resume 范围、copilot 范围(@mention 已批/wizard 已否/图片)、Bash HITL 双向 WS。
 - **screenshot blocker(记录,不阻塞)**:真 .app screenshot 当前 infra 失败(SCContentFilter nil,5 retries,MCP 活+app full-tier)。疑屏幕录制授权或 compositor;代码修复不依赖它,真机鼠标复验留授权恢复后。
 
+### Wave 1 编辑器基础修复 ✅ 完成(commit `6c7997cb`)+ post-audit 执行级验证
+5 并行 FROZEN-faithful 修复,post-audit subagent **真执行追踪验证**(非只读代码):
+- **R1 脚手架**:`defaultPhaseMarkdown` 重写成三类 FROZEN-clean 模板(logic name/io/actions/validator、agent llm_role/tools/io+XML、subgraph 绝对 path/io/validator),无 mode/system_prompt/target_skill → 「Add Phase」从编译 FATAL+孤儿目录变成真能建。action 名 hyphen→underscore 合 regex。
+- **R3 Properties 白名单**(数据破坏 bug,执行级验证零丢失):按节点类型只显白名单字段;save `{...frontmatter}` 全拷再只改白名单键 → **真保留 llm_role/io/body/未知键**(旧 bug 静默删 llm_role 已除)。Properties 不再编 io schema(归 i/o 面板)。
+- **R6+8**:agent(SKILL.md)节点正确分类成 agent(原渲染成 logic);去掉首节点 index===0 假绿。
+- **R7**:去掉假可编辑 io json 文件(autosave 死路径=丢数据)→ 只读 contract view;新增字段级 io schema 编辑器(add/rename/remove/retype inputs+outputs 写 GRAPH.md frontmatter);**F2 infer-save / F3 output-artifact 面板未破**(执行级验证)。
+- **R4 后端**:topology 发子图绝对 path(读 SUBGRAPH.md path,非 target_skill)+ `GET /api/skills/{id}/subgraph?path=` child resolver(workspace 边界守卫 + SUBGRAPH_PATH_INVALID/NOT_FOUND typed error)。engine 包零改。
+- **门禁(真跑)**:frontend tsc/eslint clean + vitest **507**;backend pytest **537**/ruff clean;mypy 零新错(4 个 pre-existing baseline);api/llm.ts + engine 包零改;never main。
+
+### copilot 角色选择 后端 ✅(commit `1e43442e`)
+ws payload 加 `role` → `stream_query` → `_resolve_copilot_runtime(role=)` 解析选中的 copilot 角色(原硬编码 copilot_chat);role=None 仍默认 copilot_chat。前端 picker 列 `GET /api/llm/roles` 筛 `role_kind=='copilot'`(Wave 2 接)。
+
+### Wave 2 启动(并行,依赖 R1/R4 已落):
+- **R2** 加节点 "+" UI(画布级 + 可选 on-node,wire 既有 onCreatePhase,R1 脚手架已能编译)。
+- **R5** SubgraphInline 真 loader(调 R4 resolver 渲染真子图 phase,替 entry/execute/return mock)。
+- **copilot 角色 picker 前端**(composer 下拉列 copilot 角色 → 传 role)。
+我 gatekeep 门禁 + post-audit。后续波次见 `conformance-audit-2026-06-15.md`(子图下钻、copilot session 持久化+tab、@mention、settings 6态/role-test、validation_fail 红节点、刷新 stale 文档等)。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

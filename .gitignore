@@ -32,6 +32,8 @@ apps/studio/frontend/src/lib/*
 !apps/studio/frontend/src/lib/line-diff.test.ts
 !apps/studio/frontend/src/lib/edge-context.ts
 !apps/studio/frontend/src/lib/edge-context.test.ts
+!apps/studio/frontend/src/lib/agent-steps.ts
+!apps/studio/frontend/src/lib/agent-steps.test.ts
 lib64/
 parts/
 sdist/

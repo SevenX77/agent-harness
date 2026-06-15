@@ -12,7 +12,10 @@ import type { CompileError } from "@/api/types"
  * panel still surfaces them).
  */
 
-const PHASE_FILE_RE = /(?:^|\/)phases\/([a-z][a-z0-9_-]*)\//
+// Mirrors the backend's phase-path character class (skills.py `_relative_compile_path`
+// emits `phases/<id>/...` where `<id>` matches `[A-Za-z0-9_-]+`). Keep these in sync so
+// an upper-case or digit-leading phase id never silently loses its node badge.
+const PHASE_FILE_RE = /(?:^|\/)phases\/([A-Za-z0-9_-]+)\//
 
 export function compileErrorsByNode(
   errors: readonly CompileError[] | null | undefined,
@@ -32,9 +35,4 @@ export function compileErrorsByNode(
     bucket.push(error)
   }
   return byNode
-}
-
-/** Whether a node has at least one fatal compile error (vs. warnings only). */
-export function hasFatalCompileError(errors: readonly CompileError[] | undefined): boolean {
-  return (errors ?? []).some((error) => error.severity === "fatal")
 }

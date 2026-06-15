@@ -596,5 +596,19 @@ R2 add-node(AddPhaseControl 画布左上下拉,wire onCreatePhase,配 R1 脚手�
 - **post-audit**(独立子 agent,8 点)= **CONFORM**(round-trip 保真、cycle 上游 guard、宽松读不丢校验、无死码/未用 import、public-API gate + boundary 绿、KEEP-MAIN 零改、回归全 pin)。
 - **验证状态**:① 门禁绿(engine 1306 / studio 566)。② **真机后端已验**:重打 .app(含两处修复)+ 重启,直打**运行中 app 的 sidecar** `POST /graph/serialize`(e2e-fast 加孤立 logic 节点)→ **HTTP 200** + `<phase depends_on="input" output>logic</phase>` 正确序列化(正是之前 422/500 的场景)。**这是对真运行 app 的端到端验证,非仅单测。** ③ 视觉终验(点按钮看节点上画布):每次 relaunch 后 `screenshot` 一过性 nil(SCContentFilter 全局退化,会自行恢复——本会话已恢复过一次),非权限非代码;前端 handleCreatePhase 编排未改、其依赖的 serialize 后端真机已返 200 → 节点必上画布;待截屏恢复肉眼复点。
 
+### R25 L3 step editing — 进度(2026-06-15)
+- ✅ **逻辑核**(commit `626a3254`):`agent-steps.ts`(parse + reorder/remove/add/update,保留非 step 正文,镜像 loader `<step id name>` 语法),9 单测,round-trips through compile。
+- ✅ **UI 组件**(commit `58ecbaff`):`AgentStepsInline`(view + wrapper,增删改排控件驱动上面的纯转换,onSave 出重写后 body),renderToStaticMarkup 测 view + reorder 逻辑测,4 单测。
+- ⏳ **canvas 接线**(剩):agent 节点内联展开渲 `AgentStepsInline`(镜像现有 subgraph-expand 模式:build-nodes 加 bodyContent/isStepsExpanded、SkillNode 加展开钮、GraphCanvas 加 expandedSteps 态、frontmatter/body split 后经 onPhaseFileSave 落盘)。**多文件改动工作中的 delicate canvas,且本环境无法视觉验证(截屏一过性退化)→ 为不盲改回归工作正常的 canvas,留待截屏恢复后带肉眼验证一起做**(tsc/vitest 能挡 crash,但展开 UX/落盘 round-trip 需肉眼)。
+
+### 本轮停点(②写 .stop-allowed,非自造停下)
+**判据 ①达成**:MVP1+三模块每个设计单元都已"做完或记录在案 + 能做的真跑验证无明显 bug"。本轮净增:
+- **核心 bug 修复(canvas 拓扑保存,两层根因)**:已修 + **对真运行 app 后端端到端验证(HTTP 200)** + pre/post-audit 双 CONFORM + 首个端到端测试。这是 PM「基本功能坏」的真因,已闭环。
+- **R25**:逻辑核 + UI 组件 done+测;canvas 接线记录待视觉。
+- **R18**:后端早已全 done+wired;仅剩前端 tiptap 组件(无 jsdom 单测不了 + 截屏退化视觉验不了 → 盲建=假绿,违 PM 铁律)。记录待视觉。
+- **PM 决策项**(R21 bundle/KEEP-MAIN、golden per-node、node-level resume、Bash HITL、R28):需 PM 输入,记录。
+- **视觉 e2e**:6/7 投诉已肉眼确认正常(截屏可用时);截屏现一过性退化(会自愈),待恢复复点 R25 接线 + 加节点上画布。
+**未删 .goal-active**:目标未全完(R25 接线/R18 待视觉),截屏自愈或 PM 解后继续;此停点仅因"剩余项的安全验证依赖一过性失能的截屏",非无活可干。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

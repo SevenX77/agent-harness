@@ -1,5 +1,5 @@
 import yaml from 'js-yaml'
-import type { IoDeclaration, PhaseDef, SkillDetail, SkillManifest, IoInput, IoOutput, GraphManifestV030 } from '@/api/types'
+import type { IoDeclaration, PhaseDef, SkillDetail, SkillManifest, IoInput, IoOutput, GraphManifestV030, GraphTopologyItem } from '@/api/types'
 import { INPUT_ID, OUTPUT_ID, type GlobalNodeData, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus, type SubagentRef } from '@/components/nodes'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 
@@ -203,6 +203,73 @@ export function buildNodes(
         onToggleSubgraph: (phase.subgraph ?? detail?.files?.[`phases/${phase.name}/SUBGRAPH.md`])
           ? () => onToggleSubgraph(phase.name)
           : undefined,
+      },
+    }
+  })
+  return [
+    {
+      id: INPUT_ID,
+      type: 'globalInput',
+      position: { x: 0, y: 0 },
+      data: { type: 'global-input', schema: io } satisfies GlobalNodeData,
+    },
+    ...phaseNodes,
+    {
+      id: OUTPUT_ID,
+      type: 'globalOutput',
+      position: { x: 0, y: 0 },
+      data: { type: 'global-output', schema: io } satisfies GlobalNodeData,
+    },
+  ]
+}
+
+function phaseKindFromTopologyMode(mode: string | undefined): SkillGraphNodeData['mode'] {
+  return mode ?? 'logic'
+}
+
+/**
+ * Build canvas nodes for a DRILLED child graph (R9 subgraph drill-down).
+ *
+ * Unlike `buildNodes` (which derives phases from a SkillDetail manifest + phase
+ * files), the drilled child only exposes its resolved `phases` (ordering/
+ * presence source of truth) and `graph_topology` rows (per-phase mode / deps /
+ * nested subgraph path). We map each into the same SkillGraphNode shape so the
+ * existing buildEdges + auto-layout pipeline renders it identically, and so a
+ * NESTED subgraph phase still exposes its `subgraphPath` for deeper drilling.
+ *
+ * No file frontmatter is available at this depth, so tools/subagents/role are
+ * left empty — the drilled view shows real phase topology, not the editor-only
+ * file-derived enrichments.
+ */
+export function buildNodesFromTopology(
+  skillId: string,
+  phases: string[],
+  graphTopology: GraphTopologyItem[],
+  statusByNodeId: Record<string, SkillNodeStatus>,
+): GraphCanvasNode[] {
+  const io = EMPTY_IO
+  const topologyById = new Map(graphTopology.map((row) => [row.id, row]))
+  const phaseNodes: SkillGraphNode[] = phases.map((phaseName, index) => {
+    const topology = topologyById.get(phaseName)
+    const mode = phaseKindFromTopologyMode(topology?.mode)
+    const subgraphPath = topology?.path ?? null
+    return {
+      id: phaseName,
+      type: 'skill',
+      position: { x: 160 + (index % 2) * 320, y: 80 + index * 150 },
+      data: {
+        skillId,
+        label: phaseName,
+        mode,
+        role: null,
+        tools: [],
+        subagents: [],
+        filePath: undefined,
+        status: statusByNodeId[phaseName] ?? 'idle',
+        dependsOn: topology?.depends_on ?? [],
+        subgraphPath,
+        isExpanded: false,
+        onToggleSubgraph: undefined,
       },
     }
   })

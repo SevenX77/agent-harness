@@ -14,10 +14,13 @@ import {
   type ReactFlowInstance,
 } from '@xyflow/react'
 import { Plus } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type MouseEvent } from 'react'
 import { toast } from 'sonner'
-import type { SkillDetail } from '@/api/types'
+import { AxiosError } from 'axios'
+import type { ChildGraphTopology, ErrorResponse, SkillDetail } from '@/api/types'
+import { getChildGraphTopology } from '@/api/client'
 import { Button } from '@/components/ui/button'
+import { Spinner } from '@/components/ui/spinner'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -39,7 +42,7 @@ import { GlobalInputNode, GlobalOutputNode } from '@/components/nodes/GlobalInpu
 import { buildEdges, INPUT_ID, OUTPUT_ID, SkillNode, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
 import { useOptionalWorkspaceContext } from '@/components/studio/WorkspaceContext'
 import type { PanelKind } from '@/components/studio/Toolbar'
-import { buildNodes, phaseKindFile } from './build-nodes'
+import { buildNodes, buildNodesFromTopology, phaseKindFile } from './build-nodes'
 import {
   type NewPhaseKind,
   checkSequentialOverwrites,
@@ -48,6 +51,8 @@ import {
   phaseFilePath,
   type OverwriteConflict,
 } from './canvas-authoring'
+import { DrillBreadcrumb } from './DrillBreadcrumb'
+import { drillStackReducer, type DrillStack } from './drill-stack'
 
 interface GraphCanvasProps {
   skillId: string
@@ -83,6 +88,21 @@ function isEdgeContextTarget(target: EventTarget | null): boolean {
   ))
 }
 
+/** Map a child-topology resolver failure to a human-readable drill error. */
+function childGraphErrorMessage(error: unknown, path: string): string {
+  if (error instanceof AxiosError) {
+    const status = error.response?.status
+    const body = error.response?.data as Partial<ErrorResponse> | undefined
+    if (status === 404) {
+      return `subgraph not found at ${path}`
+    }
+    if (body?.message) {
+      return body.message
+    }
+  }
+  return `Failed to load subgraph at ${path}`
+}
+
 export function GraphCanvas({
   skillId,
   skillDetail,
@@ -100,6 +120,14 @@ export function GraphCanvas({
 }: GraphCanvasProps) {
   const workspace = useOptionalWorkspaceContext()
   const [expandedSubgraphs, setExpandedSubgraphs] = useState<Set<string>>(() => new Set())
+  // R9: LOCAL drill-down focus stack. Empty = root graph (unchanged). When
+  // non-empty the canvas focuses INTO the drilled child graph and a top-left
+  // breadcrumb lets the user pop back up. Kept inside GraphCanvas (not lifted to
+  // Workspace) so the navigation state never crosses the canvas boundary.
+  const [drillStack, dispatchDrill] = useReducer(drillStackReducer, [] as DrillStack)
+  const [childGraph, setChildGraph] = useState<ChildGraphTopology | null>(null)
+  const [childGraphError, setChildGraphError] = useState<string | null>(null)
+  const [isChildGraphLoading, setIsChildGraphLoading] = useState(false)
   const [selectedCanvasNodeId, setSelectedCanvasNodeId] = useState<string | null>(null)
   const [edgeMenuConnection, setEdgeMenuConnection] = useState<{ source: string; target: string } | null>(null)
   const [canvasHeight, setCanvasHeight] = useState(0)
@@ -201,6 +229,49 @@ export function GraphCanvas({
       return next
     })
   }, [])
+
+  // R9: drill INTO a subgraph node (push a focus level). The drilled child
+  // topology is fetched by the effect below.
+  const drillInto = useCallback((path: string, label: string) => {
+    dispatchDrill({ type: 'push', level: { path, label } })
+  }, [])
+  // Pop back to a breadcrumb index (-1 = root graph).
+  const drillNavigate = useCallback((index: number) => {
+    dispatchDrill({ type: 'popTo', index })
+  }, [])
+
+  const drilledLevel = drillStack.length > 0 ? drillStack[drillStack.length - 1] : null
+  const drilledPath = drilledLevel?.path ?? null
+
+  // Fetch the drilled child graph whenever the focused path changes. Empty
+  // stack clears the child state so the root graph renders unchanged.
+  useEffect(() => {
+    if (!drilledPath) {
+      setChildGraph(null)
+      setChildGraphError(null)
+      setIsChildGraphLoading(false)
+      return
+    }
+    let cancelled = false
+    setIsChildGraphLoading(true)
+    setChildGraphError(null)
+    setChildGraph(null)
+    getChildGraphTopology(skillId, drilledPath)
+      .then((topology) => {
+        if (cancelled) return
+        setChildGraph(topology)
+        setIsChildGraphLoading(false)
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setChildGraph(null)
+        setChildGraphError(childGraphErrorMessage(error, drilledPath))
+        setIsChildGraphLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [skillId, drilledPath])
   const safeStatusByNodeId = useMemo(() => statusByNodeId ?? {}, [statusByNodeId])
   const compactRatio = compact && canvasHeight > 0 && canvasHeight < 500 ? 0.2 : 0
 
@@ -214,10 +285,16 @@ export function GraphCanvas({
     return () => observer.disconnect()
   }, [])
 
-  const rawNodes = useMemo(
-    () => buildNodes(skillId, skillDetail, expandedSubgraphs, toggleSubgraph, safeStatusByNodeId),
-    [expandedSubgraphs, safeStatusByNodeId, skillDetail, skillId, toggleSubgraph],
-  )
+  const isDrilled = drilledPath !== null
+  const rawNodes = useMemo(() => {
+    // R9: when focused into a child graph, render its real phases/topology;
+    // status overlays (which key on root phase ids) are dropped at depth.
+    if (isDrilled) {
+      if (!childGraph) return []
+      return buildNodesFromTopology(skillId, childGraph.phases, childGraph.graph_topology, {})
+    }
+    return buildNodes(skillId, skillDetail, expandedSubgraphs, toggleSubgraph, safeStatusByNodeId)
+  }, [childGraph, expandedSubgraphs, isDrilled, safeStatusByNodeId, skillDetail, skillId, toggleSubgraph])
   const phaseNodes = useMemo(
     () => rawNodes.filter((node): node is SkillGraphNode => node.type === 'skill'),
     [rawNodes],
@@ -225,7 +302,12 @@ export function GraphCanvas({
   // Trace events drive hasTraceData: an edge lights up only when the active run
   // actually dispatched data across it (matching input_dispatch event).
   const traceEvents = workspace?.traceEvents
-  const rawEdges = useMemo(() => buildEdges(phaseNodes, traceEvents), [phaseNodes, traceEvents])
+  // No nodes at all (e.g. drilled child still loading) → no edges, so we never
+  // emit a phantom INPUT→OUTPUT edge against a node-less canvas.
+  const rawEdges = useMemo(
+    () => (rawNodes.length === 0 ? [] : buildEdges(phaseNodes, traceEvents)),
+    [phaseNodes, rawNodes.length, traceEvents],
+  )
   const layoutResult = useMemo((): { nodes: GraphCanvasNode[]; edges: Edge<ContextEdgeData>[]; error: CycleDetectedError | null } => {
     try {
       return { ...getAutoLayoutedElements(rawNodes, rawEdges, { canvasHeight, compactRatio }), error: null }
@@ -440,6 +522,12 @@ export function GraphCanvas({
             return
           }
           if (node.type === 'skill') {
+            // R9: double-clicking a subgraph node focuses INTO its child graph
+            // in-place; non-subgraph phases open their source file as before.
+            if (node.data.subgraphPath) {
+              drillInto(node.data.subgraphPath, node.data.label)
+              return
+            }
             onNodeSelect?.({ id: node.id, data: node.data })
             workspace?.onFileOpen(`${skillId}/${node.data.filePath ?? `phases/${node.id}/${phaseKindFile(node.data)}`}`)
             onPanelChange?.('properties')
@@ -458,9 +546,29 @@ export function GraphCanvas({
         <Background gap={18} size={1} />
         <Controls position="bottom-left" />
         {!compact ? <MiniMap pannable zoomable position="bottom-right" style={{ height: 120, width: 200 }} /> : null}
-        {onCreatePhase ? (
+        {(onCreatePhase && !isDrilled) || drillStack.length > 0 ? (
           <Panel position="top-left">
-            <AddPhaseControl onCreatePhase={onCreatePhase} />
+            <div className="flex flex-col items-start gap-2">
+              {drillStack.length > 0 ? (
+                <DrillBreadcrumb
+                  stack={drillStack}
+                  rootLabel={skillDetail?.manifest.name ?? skillId}
+                  onNavigate={drillNavigate}
+                />
+              ) : null}
+              {isChildGraphLoading ? (
+                <div className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs text-muted-foreground shadow-sm">
+                  <Spinner className="size-3" />
+                  <span>Loading subgraph…</span>
+                </div>
+              ) : null}
+              {childGraphError ? (
+                <div className="rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive shadow-sm">
+                  {childGraphError}
+                </div>
+              ) : null}
+              {onCreatePhase && !isDrilled ? <AddPhaseControl onCreatePhase={onCreatePhase} /> : null}
+            </div>
           </Panel>
         ) : null}
       </ReactFlow>

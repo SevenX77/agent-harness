@@ -264,6 +264,56 @@ describe('AssetsPanel', () => {
     expect(html).not.toContain('translator_subgraph')
     expect(html).toContain('Subgraphs')
   })
+
+  it('renders REAL subgraph membership from the topology (label + absolute path)', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceProvider value={workspaceContextStub}>
+        <AssetsPanel
+          skillDetail={{
+            ...skillDetailWithFiles({}),
+            graph_topology: [
+              { id: 'setup', src: 'phases/setup', depends_on: [], mode: 'logic' },
+              {
+                id: 'translate',
+                src: 'phases/translate',
+                depends_on: ['setup'],
+                mode: 'subgraph',
+                path: '/abs/skills/translator',
+              },
+            ],
+          }}
+          selectedNode={null}
+        />
+      </WorkspaceProvider>,
+    )
+
+    // Real phase label + real absolute path are surfaced; resolved → "Linked".
+    expect(html).toContain('translate')
+    expect(html).toContain('/abs/skills/translator')
+    expect(html).toContain('Linked')
+    // Logic phases are not subgraph members.
+    expect(html).not.toContain('phases/setup')
+  })
+
+  it('surfaces a referenced subgraph with no path honestly as missing', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceProvider value={workspaceContextStub}>
+        <AssetsPanel
+          skillDetail={{
+            ...skillDetailWithFiles({}),
+            graph_topology: [
+              { id: 'translate', src: 'phases/translate', depends_on: [], mode: 'subgraph', path: null },
+            ],
+          }}
+          selectedNode={null}
+        />
+      </WorkspaceProvider>,
+    )
+
+    expect(html).toContain('translate')
+    expect(html).toContain('Missing path')
+    expect(html).toContain('unresolvable')
+  })
 })
 
 function renderAssetsPanel(files: Record<string, string>): string {

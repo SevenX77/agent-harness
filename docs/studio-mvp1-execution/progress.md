@@ -492,5 +492,21 @@ R2 add-node(AddPhaseControl 画布左上下拉,wire onCreatePhase,配 R1 脚手�
 - **R26** validation_fail → 红节点(`statusByNodeId` 现只认 type 含 "error"/status failed,validation 失败不变红)。
 我 gatekeep + 必要时 post-audit。
 
+### Wave 3 ✅(commit `a9325318`)+ R29 死码清理(`...`):
+- **R16 copilot session 持久化(D8,数据丢失修)**:`copilotStore` 原只持久化空 assistant 壳,流式内容不刷盘 → 重开 session 助手回复空白。改:turn settle(done/error)时把完整组装消息刷盘 + done 前 drain 待发 text delta(snapshot 完整);hydrate 冷启动 round-trip(已测)。
+- **R17 session tab bar + "+"**:新 `SessionTabs`(store 早有 session API 但无 UI),copilot 面板头部接;composer/picker 不动。
+- **R26 validation_fail 红节点**:抽纯函数 `deriveNodeStatuses`(对照引擎 `events.py` validation_fail/retry_exhausted 判失败,last-event-wins fail-then-recover 转绿);Workspace 委派。
+- **R29 死码**(commit 单独):删 RunDetailDrawer + BatchRunner 僵尸(确认零生产引用);CustomNodes(有引用)/cost_priority(在 KEEP-MAIN api/llm.ts)/dispatch 501(登记延期)保留。
+- 门禁:tsc/eslint clean + vitest **536**;api/llm.ts 零改。
+
+### Wave 4 启动(并行,disjoint:后端 gateway vs 前端 canvas):
+- **R19** Studio adapter `project_route_state` 委派 gateway-package `state_projection`(去 divergent 内联自算 6 态,落实「Studio 只渲染 gateway 事实不自算」硬约束;historical_ready draft 腿挂 probe-worker stub,记)。
+- **R9** 子图下钻(就地聚焦 focus stack + 左上 breadcrumb,调 R5 resolver 渲染真子图,state 留 GraphCanvas 本地避让 Workspace)。
+
+### 剩余(audit 已记,待后续轮 / PM 决策):
+- 可做待续:R20 role-test 持久化、R21 bundle 引用、R22 debug bar(挂 node-resume PM 决策)、R28 刷新 stale FROZEN 文档。
+- **需 PM 决策(记最终报告)**:golden per-node 重做范围、node-level resume 范围、Bash HITL 双向 WS。
+- **真机视觉 e2e**:screenshot infra(SCContentFilter)失败 + 需 .app 重建 → 待屏幕录制授权 + 全波次落地后最终复验。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

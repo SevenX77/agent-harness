@@ -545,10 +545,13 @@ R2 add-node(AddPhaseControl 画布左上下拉,wire onCreatePhase,配 R1 脚手�
 - **R23/R14/R10 = CONFORM**(R10 两处小注已修:删死码 `hasFatalCompileError` + phase-id 正则放宽到后端同款 `[A-Za-z0-9_-]+` 防大写/数字开头节点丢角标,commit `f327b7d5`)。
 - **R13 = DEVIATE → 已修**(commit `57718fb8`):原 predict-pass marker 不带图指纹 → predict 通过后**改坏图仍能 spawn run**(后端门比 UI 的 recompute-on-edit 门更弱)。修:marker 记 compiled `content_hash`,run 门在 compile 后比对当前 hash,不符(图被改)或旧无-hash 记录 → 重新要求 predict;新增 stale-hash + legacy-no-hash 两单测。后端 **563 passed**。**predict 认证的是"当前图",非"上次过的图"。**
 
-### 重打包当前 .app(进行中,2026-06-15)
-- `cd apps/studio/tauri && cargo tauri build`(beforeBuildCommand 自动跑 download_runtime[已缓存]+build_vendor[python3,非 python——旧 blocker 已解]+sync_resources;前端 `npm run build` dist 已重生,293ms 干净)。运行中的 release .app(PID 21606)带可用 vendored Python 后端,证实整条 vendor 路径可跑。
-- 唯一风险 = 最后 bundle copy 撞运行中 .app 文件占用 → cargo 编译缓存让重试便宜;真撞了再 quit 旧 .app 重跑。
-- 完成后:relaunch 新 .app → 这才是 PM "把功能全部点一遍" 的真载体;computer-use 鼠标复验仍待屏幕录制授权。
+### 重打包当前 .app ✅(2026-06-15)
+- `cd apps/studio/tauri && cargo tauri build`:Rust release **17.39s**(warm cache)编译 + `.app` bundle 成功;**DMG 步骤失败(bundle_dmg.sh)→ 整命令 exit 1,但 .app 本身已产出**(charter 既定:dmg 失败可忽略,只要 .app)。`beforeBuildCommand` 全过(download_runtime 已缓存 + build_vendor python3 + sync_resources)。
+- **嵌入链亲自证实**:① 重生的 loose `frontend/dist/assets/*.js` 含 `Add phase`/`Loading subgraph`(=有修复),mtime 04:27;② fresh 二进制 mtime 04:36(晚于 dist 重生)→ 嵌入的是修复后前端;③ 直接 grep 二进制查不到任何明文(连 "Skill Studio"/"skill" 都 0)=Tauri 嵌入资源是压缩的,**之前 grep 二进制 0/0 是假阴性,非过期证据**。
+- **quit 旧 stale .app(PID 21606)+ `open -n` fresh .app(PID 77635)**:旧实例 osascript 优雅退出干净;新实例起来。
+- **后端真健康(可做的非视觉验证)**:vendored python3.12 sidecar(PID 77641)listen `127.0.0.1:65405`;`/health` → **HTTP 200 `{"status":"ok"}`**;`/api/skills` → 401(auth-gated,服务活着,前端带 runtime Bearer)。**(注:7000 是 macOS AirTunes/ControlCenter,非本后端——别再误判)**。
+- **⚠️ 视觉鼠标复验仍 BLOCKED(真 blocker,非自造)**:`request_access` 授权成功(tier full)但 `screenshot` 仍 `SCContentFilter failure` → **屏幕录制权限未授**。这需 PM 在 System Settings → Privacy & Security → Screen Recording 勾选(改系统安全设置 = 我禁止自做)。**只 block 视觉鼠标 pass,不 block 任何其他功能工作**;按"遇 blocker 记录后继续"已记此处,继续推进。
+- **结论给 PM**:fresh .app 已在跑(当前前端 + 健康后端),PM 现在就能点穿 7 条复盘里的功能;要我自己做 computer-use 鼠标全流程复验,请开屏幕录制权限。
 
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

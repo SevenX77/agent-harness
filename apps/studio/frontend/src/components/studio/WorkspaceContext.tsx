@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react'
+import type { CallbackEvent } from '@/api/types'
 import type { FileMeta } from './file-types'
 
 export type EditorSide = 'left' | 'right'
@@ -52,6 +53,9 @@ export interface WorkspaceContextValue {
   selectedEdge?: SelectedEdge | null
   setSelectedEdge?: (edge: SelectedEdge | null) => void
   onPanelChange?: (panel: WorkspacePanelKind) => void
+  // Unfiltered trace events for the active run. The edge dot reads these to
+  // resolve the real blackboard snapshot dispatched across the clicked edge.
+  traceEvents?: CallbackEvent[]
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null)

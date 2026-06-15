@@ -213,7 +213,10 @@ export function GraphCanvas({
     () => rawNodes.filter((node): node is SkillGraphNode => node.type === 'skill'),
     [rawNodes],
   )
-  const rawEdges = useMemo(() => buildEdges(phaseNodes), [phaseNodes])
+  // Trace events drive hasTraceData: an edge lights up only when the active run
+  // actually dispatched data across it (matching input_dispatch event).
+  const traceEvents = workspace?.traceEvents
+  const rawEdges = useMemo(() => buildEdges(phaseNodes, traceEvents), [phaseNodes, traceEvents])
   const layoutResult = useMemo((): { nodes: GraphCanvasNode[]; edges: Edge<ContextEdgeData>[]; error: CycleDetectedError | null } => {
     try {
       return { ...getAutoLayoutedElements(rawNodes, rawEdges, { canvasHeight, compactRatio }), error: null }

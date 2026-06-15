@@ -30,6 +30,8 @@ apps/studio/frontend/src/lib/*
 !apps/studio/frontend/src/lib/schema-infer.test.ts
 !apps/studio/frontend/src/lib/line-diff.ts
 !apps/studio/frontend/src/lib/line-diff.test.ts
+!apps/studio/frontend/src/lib/edge-context.ts
+!apps/studio/frontend/src/lib/edge-context.test.ts
 lib64/
 parts/
 sdist/

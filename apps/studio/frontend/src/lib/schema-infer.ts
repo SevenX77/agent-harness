@@ -63,3 +63,49 @@ export function applyInputSchemaToGraph(graphMd: string, inputSchema: JsonObject
   const nextFrontmatter = yaml.dump(data, { lineWidth: -1, noRefs: true })
   return `---\n${nextFrontmatter}---\n${body}`
 }
+
+/**
+ * F3 (i/o panel): persist the destination of a declared output field's artifact
+ * onto the `io.outputs.<field>` schema object in GRAPH.md frontmatter. The engine
+ * honours `io.outputs.<field>.path` by writing the artifact to
+ * `runs/<id>/artifacts/<path>`; a bare filename means "default under .workspace
+ * artifacts" (the engine resolves the default, so we store the path verbatim).
+ * Only the named field's `target`/`path` keys change — `io.inputs`, the other
+ * output fields, every other frontmatter key, and the GRAPH.md body (phase DAG)
+ * are preserved. An empty/whitespace path CLEARS the artifact target so the user
+ * can unset it. Pure + exported so the writeback is unit-testable without driving
+ * the live panel. Throws if GRAPH.md has no frontmatter, no `io.outputs.properties`,
+ * or no such field (caller surfaces it).
+ */
+export function applyOutputArtifactPathToGraph(graphMd: string, fieldName: string, path: string): string {
+  const match = graphMd.match(FRONTMATTER_RE)
+  if (!match) {
+    throw new Error('GRAPH.md has no frontmatter to write the output path into')
+  }
+  const [, frontmatter, body] = match
+  const data = (yaml.load(frontmatter) ?? {}) as Record<string, unknown>
+  const io = data.io && typeof data.io === 'object' ? (data.io as Record<string, unknown>) : null
+  const outputs = io && io.outputs && typeof io.outputs === 'object' ? (io.outputs as Record<string, unknown>) : null
+  const properties =
+    outputs && outputs.properties && typeof outputs.properties === 'object'
+      ? (outputs.properties as Record<string, unknown>)
+      : null
+  if (!properties) {
+    throw new Error('GRAPH.md has no io.outputs.properties to write the output path into')
+  }
+  const field = properties[fieldName]
+  if (!field || typeof field !== 'object') {
+    throw new Error(`io.outputs has no output field "${fieldName}" to set an artifact path on`)
+  }
+  const schema = field as Record<string, unknown>
+  const trimmed = path.trim()
+  if (trimmed === '') {
+    delete schema.target
+    delete schema.path
+  } else {
+    schema.target = 'artifact'
+    schema.path = trimmed
+  }
+  const nextFrontmatter = yaml.dump(data, { lineWidth: -1, noRefs: true })
+  return `---\n${nextFrontmatter}---\n${body}`
+}

@@ -470,6 +470,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     selectedEdge,
     setSelectedEdge,
     onPanelChange: setActivePanel,
+    traceEvents: runStream.events,
   }), [
     activeFileDetails,
     closeFile,
@@ -486,6 +487,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     selectedEdge,
     setSelectedEdge,
     setActivePanel,
+    runStream.events,
   ])
 
   const handleCompile = useCallback(() => {

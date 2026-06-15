@@ -1107,7 +1107,18 @@ def _parse_broken_graph_topology_and_phases(
             topology.append(row)
 
         return [str(p) for p in phases], topology
-    except Exception:
+    except (OSError, UnicodeDecodeError, yaml.YAMLError, AttributeError) as exc:
+        # The repair-state view depends on this graceful ([], []) degradation,
+        # so we never raise here. But a genuine parse failure must be visible:
+        # otherwise an operator cannot tell a legitimately-empty graph from a
+        # crash (e.g. malformed frontmatter, non-dict frontmatter, bad encoding).
+        logger.warning(
+            "Failed to parse broken GRAPH.md at %s: %s: %s; "
+            "degrading to empty topology/phases for repair view",
+            graph_path,
+            type(exc).__name__,
+            exc,
+        )
         return [], []
 
 

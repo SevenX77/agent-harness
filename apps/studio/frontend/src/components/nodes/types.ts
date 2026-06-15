@@ -1,5 +1,5 @@
 import type { Node } from '@xyflow/react'
-import type { IoDeclaration } from '@/api/types'
+import type { CompileError, IoDeclaration } from '@/api/types'
 
 export type SkillNodeStatus = 'idle' | 'running' | 'success' | 'error' | 'paused' | 'breakpoint'
 
@@ -17,6 +17,8 @@ export interface SkillGraphNodeData extends Record<string, unknown> {
   tools?: string[]
   filePath?: string
   status: SkillNodeStatus
+  /** Compile/lint errors attributed to this phase node (separate channel from run status). */
+  compileErrors?: CompileError[]
   dependsOn: string[]
   subgraphPath?: string | null
   subagents?: SubagentRef[]

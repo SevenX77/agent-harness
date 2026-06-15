@@ -59,6 +59,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
   const kind = phaseKindLabel(data)
   const KindIcon = phaseKindIcon(kind)
   const subagentCount = data.subagents?.length ?? 0
+  const compileErrorCount = data.compileErrors?.length ?? 0
 
   const nodeContent = (
     <div
@@ -99,6 +100,20 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
                   </span>
                 </TooltipTrigger>
                 <TooltipContent side="top">{subagentCount} subagents available</TooltipContent>
+              </Tooltip>
+            ) : null}
+            {compileErrorCount > 0 ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    aria-label={`${compileErrorCount} compile errors`}
+                    className="inline-flex items-center gap-0.5 rounded-md border border-destructive/40 bg-destructive/10 px-1 font-medium text-destructive"
+                  >
+                    <AlertTriangle className="size-3" />
+                    {compileErrorCount}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top">{compileErrorCount} compile error(s) on this node</TooltipContent>
               </Tooltip>
             ) : null}
           </div>

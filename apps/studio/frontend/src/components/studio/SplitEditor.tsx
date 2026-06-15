@@ -1,7 +1,7 @@
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { GraphCanvas, type SkillGraphNodeData, type SkillNodeStatus } from "@/components/GraphCanvas"
 import type { Connection } from "@xyflow/react"
-import type { SkillDetail } from "@/api/types"
+import type { CompileError, SkillDetail } from "@/api/types"
 import type { NewPhaseKind } from "@/components/GraphCanvas/canvas-authoring"
 import { LazyMonacoPanel } from "./LazyMonacoPanel"
 import { useWorkspaceContext, type EditorSide, type OpenFile } from "./WorkspaceContext"
@@ -19,6 +19,7 @@ interface SplitEditorProps {
   onDisconnectConnection?: (connection: { source: string; target: string }) => Promise<void> | void
   onPhaseFileSave?: (args: { path: string; content: string; expectedHash: string }) => Promise<void> | void
   statusByNodeId?: Record<string, SkillNodeStatus>
+  compileErrorsByNodeId?: Record<string, CompileError[]>
 }
 
 export function SplitEditor({
@@ -34,6 +35,7 @@ export function SplitEditor({
   onDisconnectConnection,
   onPhaseFileSave,
   statusByNodeId,
+  compileErrorsByNodeId,
 }: SplitEditorProps) {
   const {
     activeFileDetails,
@@ -115,6 +117,7 @@ export function SplitEditor({
             onDisconnectConnection={onDisconnectConnection}
             onPhaseFileSave={onPhaseFileSave}
             statusByNodeId={statusByNodeId}
+            compileErrorsByNodeId={compileErrorsByNodeId}
             compact
           />
         </div>

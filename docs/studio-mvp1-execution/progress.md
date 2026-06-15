@@ -484,5 +484,13 @@ ws payload 加 `role` → `stream_query` → `_resolve_copilot_runtime(role=)` �
 - **copilot 角色 picker 前端**(composer 下拉列 copilot 角色 → 传 role)。
 我 gatekeep 门禁 + post-audit。后续波次见 `conformance-audit-2026-06-15.md`(子图下钻、copilot session 持久化+tab、@mention、settings 6态/role-test、validation_fail 红节点、刷新 stale 文档等)。
 
+### Wave 2 ✅ 完成(commit `e6f4e928`)
+R2 add-node(AddPhaseControl 画布左上下拉,wire onCreatePhase,配 R1 脚手架真能建可编译 phase)· R5 SubgraphInline 真 loader(按绝对 path 调 `GET /skills/{id}/subgraph` 渲染真子图 phase + loading/error/empty,替 entry/execute/return mock;skillId 经 GraphCanvas→buildNodes→node.data→SkillNode→SubgraphInline 贯通,SkillGraphNodeData.skillId 转必填)· copilot 角色 picker(composer 下拉列 role_kind=='copilot' 角色 → 传 role)。**R2/R5 agent 中途撞 ECONNRESET infra,我接管补完 + 验证**(8 个 fixture 补 skillId、role-picker onSelect 测试修、jsdom 测试改 element-walk、sibling shim 补 AddPhaseControl 导出)。门禁:tsc/eslint clean + vitest **519**;api/llm.ts + package.json 零改;never main。
+
+### Wave 3 启动(并行,文件不冲突):
+- **R16+17** copilot session 持久化(done 时把流式 assistant 内容刷盘,修 D8「重开 session 助手回复空白」)+ session tab bar/「+」(store/hook 有 session 但无 UI)。
+- **R26** validation_fail → 红节点(`statusByNodeId` 现只认 type 含 "error"/status failed,validation 失败不变红)。
+我 gatekeep + 必要时 post-audit。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

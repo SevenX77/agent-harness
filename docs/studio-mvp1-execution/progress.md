@@ -588,7 +588,7 @@ R2 add-node(AddPhaseControl 画布左上下拉,wire onCreatePhase,配 R1 脚手�
 - **pre-audit**(独立子 agent 对照 FROZEN GRAPH.md 格式 + loader parse 规则)= CONFORM,2 必守约束(格式归 engine、`[]→input` 映射)都遵了。
 - **测试**:补了**该路径的首个端到端测试**(此前 0 测试 = bug 漏网根因):engine 5 单测(线性/diamond fan-in 保真/多 output/空依赖→input)+ studio 2 端到端(加孤立 phase 不再 500、fan-in depends_on 保真)。真跑 round-trip:serialize→loader 解析回同拓扑。
 - **门禁**:engine **1306 passed** + ruff/mypy clean;studio **565 passed** + ruff/mypy clean(skills.py 仅 2 个 HEAD 既存错,无新);api/llm.ts 零改。
-- **待**:重打 .app(进行中)→ 真机复点 +Add phase 确认节点上画布 + GRAPH.md 落 logic(视觉终验)。
+- **验证状态**:① **API 层端到端已验**:新增的 `test_serialize_adds_a_disconnected_phase_without_500` 真打 `POST /graph/serialize`(真后端代码)→ 200 + 新 phase 进 markdown(正是原来 500 的回归点)。② .app 已重打 + 重启(含修复后端,sidecar 健康)。③ **视觉终验(点 +Add phase 看节点上画布)暂卡**:`screenshot` 连续 6 次 nil,**且 Finder(也已授权)同样 nil** → 是 macOS 截屏服务(SCContentFilter)**全局一过性退化**(半小时前同会话还正常),非权限、非本 app 问题、非代码问题。一过性 infra,记录;待截屏服务恢复后真机复点(前端 handleCreatePhase 编排未改,修的是它依赖的 serialize 后端 → 现返 200+正确 markdown,前端即能把节点写进 GRAPH.md 上画布)。
 
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

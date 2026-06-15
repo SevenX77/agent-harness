@@ -619,3 +619,4 @@ R2 add-node(AddPhaseControl 画布左上下拉,wire onCreatePhase,配 R1 脚手�
 - 测试:新 `test_skills_broken_graph_parse.py`(2 用例:坏 YAML frontmatter→1 条 WARNING(消息含 skill_dir+GRAPH.md)+`([],[])`;GRAPH.md 合法缺失→`([],[])` 且**不**报 warning,正是「区分崩溃 vs 合法空」的对照)。先写失败测试(RED,确认当前静默 0 warning)→ 实现 →GREEN。
 - 门禁:后端 `tests/services/` **238 passed,1 skipped**;ruff clean;mypy 仅 2 个 HEAD 既存错(yaml import-untyped + GraphManifest io arg-type),无新错;api/llm.ts 零改;仅新增/改 2 个 backend 文件,PM 在编的 docs 零碰。
 - **同一修复也已落在 `codex/studio-mvp1-wave2-safety-2026-06-13`(commit `de07a0d2`,该分支 R15 还没把 import 提模块级,故那边额外 hoist 了 import yaml + 补 logger)** —— 两分支同问题都已闭环。
+- **本轮尝试视觉复验未成(记录,非自造停下)**:bare-except 闭环后,趁 fresh .app 在跑(PID 50290 + sidecar 64998)想做「点 +Add phase → 节点上画布」的鼠标视觉终验,但 `request_access`(申请控制 Skill Studio 的授权弹窗)**300s 超时无响应**(PM 大概率不在键盘前,无法点授权)。这是真外部 blocker——授权系统弹窗我不能自点。R25 canvas 接线 / R18 tiptap 都卡同一个视觉验证依赖,盲建=假绿(违 PM 铁律),故仍记录待 PM 在场时一并做。`.goal-active` 不删(R25 接线/R18 两 net-new 仍未完)。

@@ -419,5 +419,20 @@ Stop-hook、反自造停下铁律、copilot F3/F4-echo/F7、trace F5/F2、input 
 - **✅ DEF-025 编辑器 buffer 同步 + 改后自动 compile 做完**(本轮):F5 设计「改动即时进编辑器 buffer + 改后自动 compile 回灌」。`PatchProposedBubble` 加 `onFileChanged(path, action)` 回调(applied/accepted/rejected)→ 经 `CopilotPanel`→`ChatMessageItem` 透传 → `Workspace.handleCopilotFileChanged`:`reloadFileIfOpen(path)`(若该文件在编辑器开着则重载 buffer)+ `handleCompile()`(改后重编译)。action→效果决策抽成纯函数 `copilotFileActionEffects`(applied=只 reload、accepted=只 recompile、rejected=reload+recompile)+ 3 单测。门禁:tsc/eslint clean、前端 vitest **467**。**F5 安全写闭环再进一步:diff 审阅 + Rust checkpoint 还原 + 编辑器 buffer 同步 + 自动 recompile 都齐了;剩 DEF-024 Bash 审批往返、DEF-026 Monaco 并排。**
 - **engine D4(P0-2)登记**:`interception.py`/`llm_phase_node.py` 运行时 import gateway concrete = D4 SPI 倒置未收口,owner=engine,跨模块大改,待 PM 定。
 
+### 2026-06-14 续5:engine-first wave(PM 指令:先做 engine 后端,plan→subagent 审计→实施→subagent 审计)
+> PM 新指令:① 任何功能实施前先计划 + subagent 独立审计是否符合 MVP1+three-module,实施完再独立审计;② 规划不冲突任务并行,把关设计审计;③ 先改 engine/gateway 后端,再前端适配,前端用 shadcn 不乱写。已写进 `~/.claude/rules/no-manufactured-stops.md` 四步工作流。
+
+- **先核实"已知 engine 缺口"真实状态(verify-before-asking)——三个 subagent 调查 + 真跑**:
+  - **P0-2 engine D4 依赖倒置 = 不是违规(撤销该登记)**:设计自带 RED 测试 `test_importing_graph_agent_does_not_require_gateway_concrete_module`(`test_productization_gateway_dependency_red.py`)只禁 **import-time** gateway 依赖;`interception.py:169`/`llm_phase_node.py:135` 是**懒加载**(`_PredictGatewayChatModelMeta._resolve` 函数内 try/except import),`import graph_agent` 不拉 gateway → **21/21 productization 测试通过**。设计接受懒加载,重构掉 = 逆设计。**不动。**(纠正上方"待 PM 定 D4 收口"的登记。)
+  - **B edge transition 事件 = engine 侧已做**:`InputDispatchEvent`/`BlackboardReduceEvent`/`InputFileInjectedEvent`(`callbacks/events.py:256-283`)已在每条边发 from/to_phase+blackboard_snapshot。剩 Studio 前端消费(替 `getMockEdgeContext`)+ 部分挂 DEF-005 延期 = 前端轮。
+  - **D D10 lease/fencing 接入 resume = 设计正确延期**:设计「现在只留接口位、不做恢复逻辑」,multi-host lease 在延期清单;单用户 MVP1 进程内独占,不做。
+- **✅ 增量 A:per-node golden 输出(D7)实现完成**(plan 落盘 `engine-wave-plan-2026-06-14.md` → pre-audit subagent[CONFORMS-w/-concerns,3 调整纳入] → 实现 → post-audit subagent[逼出 1 真回归] → 修 + 再验[CLEAN]):
+  - **真缺口**:`_with_phase_outputs`(`graph_assembler.py:403`)只在 batch/iterate/terminal 写 `phase_outputs`(node_id→outputs);简单线性 phase 走 `StateMapper.wrap_phase_output`(`runtime/state_mapper.py`)不写 → e2e-fast 这类扁平结果技能无 per-node 输出 → Studio `golden_headless._node_outputs` 退化 run-level 单节点。
+  - **修法(3 处,纯 engine 内部,owner=engine)**:① `wrap_phase_output` 末尾(schema 校验后,作为最后一次 mutation)记 `phase_outputs[phase_id]=updates_dict` 累积进 map;② `wrap_phase_output` 在 flatten/校验前**剥离** node/subgraph 返回的 `phase_outputs`(子图内部 phase_outputs 不越 IO 边界污染父 business / 父输出校验);③ `build_phase_input` 剥离 `phase_outputs`(父 phase_outputs 不漏进子图当输入腐蚀子图累积);④ `graph_assembler._phase_result_payload` open-schema 分支 `delta.pop("phase_outputs")`(batch/iterate 开放输出 schema 节点不带 spurious 嵌套 phase_outputs 进 golden entry——post-audit 逼出的回归)。
+  - **post-audit 逼出的真回归(全绿门禁都没逮到,对抗审计逮到)**:batch/iterate phase + **开放输出 schema**(io.outputs 无 properties)时,每条 item 的 `phase_outputs` 经 `_dict_delta` 漏进该节点 golden entry。修 + 加永久 RED→GREEN 守卫(stash fix 该测真 FAIL)。
+  - **验证(真跑 + 单测)**:新 e2e `test_ws_e8_per_node_phase_outputs.py`(真 run_skill 跑 2-phase 线性逻辑技能 → 读盘 `final_state.json` 确认真 `phase_outputs={segment:{segments},expand:{report}}` + batch 开放 schema 无泄漏);`test_state_mapper.py` 加 2 单测(真 model_dump phase_outputs 累积 + 子图 IO 不泄漏);修了 1 个 exact-equality 旧断言(现含 phase_outputs)。
+  - **门禁(真跑)**:engine pytest **1301 passed**(+我 3 测,含修复后 0 fail)、Studio 后端 **530**、Studio golden RED **4**、engine ruff/mypy 全清。**纯 engine 改动**:git diff 仅 `state_mapper.py`+`graph_assembler.py`+2 测;api/llm.ts + 前端 + gateway + frozen 契约(result_contracts.py)**零改动**;never main。
+  - **登记**:增量 C(DEF-029 per-node 输出路径 schema)= frozen-schema 变更高风险,A 之后独立轮做。
+
 ### 硬约束提醒(详见 goal-charter.md §5)
 仅新分支、永不碰 main;密钥永不打印/提交;Studio 只渲染 gateway 事实;e2e 凭证用 `STUDIO_LLM_CREDENTIALS_PATH` 隔离不碰用户真库;LLM 主用第三方+DeepSeek+ARK、其他官方 fallback。

@@ -51,6 +51,7 @@ export const CopilotModelGroupCard = memo(function CopilotModelGroupCard({
   onAddRoute,
   onRemoveRoute,
   onReorderRoutes,
+  onRemoveModelGroup,
 }: {
   modelName: string
   modelIndex: number
@@ -60,6 +61,7 @@ export const CopilotModelGroupCard = memo(function CopilotModelGroupCard({
   onAddRoute: (routeId: string) => void
   onRemoveRoute: (routeId: string) => void
   onReorderRoutes: (activeRouteId: string, overRouteId: string) => void
+  onRemoveModelGroup?: () => void
 }) {
   const routeIds = useMemo(() => routes.map((route) => route.id), [routes])
   const sensors = useSensors(
@@ -105,8 +107,10 @@ export const CopilotModelGroupCard = memo(function CopilotModelGroupCard({
           variant="ghost"
           size="icon-xs"
           aria-label={`Remove ${modelName}`}
-          className="text-muted-foreground hover:text-foreground"
-          disabled
+          data-copilot-model-group-remove="true"
+          className="text-muted-foreground hover:text-destructive"
+          onClick={onRemoveModelGroup}
+          disabled={!onRemoveModelGroup}
         >
           <Trash2 data-role-icon="true" className="size-3 text-muted-foreground" />
         </Button>

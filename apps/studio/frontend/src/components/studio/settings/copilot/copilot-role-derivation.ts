@@ -1,4 +1,4 @@
-import type { CredentialsState, ModelGroup, RolesData } from '@/api/llm'
+import type { CredentialsState, ModelGroup, RoleEntry, RolesData } from '@/api/llm'
 
 export interface CopilotRoutePreview {
   id: string
@@ -41,7 +41,7 @@ export function deriveCopilotCandidateGroups(
       .map((p) => p.id)
   )
 
-  return (modelGroups || []).map((group) => {
+  const candidates = (modelGroups || []).map((group) => {
     const availableRoutes: CopilotRoutePreview[] = (group.provider_models || [])
       .filter((pm) => pm.endpoint_id && anthropicProviderIds.has(pm.endpoint_id))
       .map((pm) => ({
@@ -62,19 +62,13 @@ export function deriveCopilotCandidateGroups(
 
     const activeRouteIds = availableRoutes.filter((r) => r.uiState === 'ready').map((r) => r.id)
 
-    const isBuiltIn =
-      group.canonical_id === 'claude-opus-4.7' ||
-      group.canonical_id === 'claude-opus-4.8' ||
-      group.canonical_id === 'deepseek-v4-pro' ||
-      group.canonical_id === 'deepseek-v3.2-pro'
-
+    // Title + description come from the normalized canonical display_name — no
+    // family-name heuristic (spec §3.2: never branch on display_name.includes('Claude')).
     return {
       id: group.canonical_id,
       title: group.display_name,
-      description: group.display_name.includes('Claude')
-        ? 'Anthropic Claude reasoning agent'
-        : 'DeepSeek agent role',
-      source: isBuiltIn ? ('built_in' as const) : ('third_party' as const),
+      description: group.display_name,
+      source: 'third_party' as const, // resolved below against the floated default set
       modelLabel: group.display_name,
       sdkId: 'claude-agent-sdk' as const,
       activeRouteIds,
@@ -82,6 +76,15 @@ export function deriveCopilotCandidateGroups(
       routes: availableRoutes,
     }
   }).filter((r) => r.availableRoutes.length > 0)
+
+  // Built-in detection is the SAME canonical-id truth as the dynamic float
+  // (spec §3.2 / atom-55/56): a group is built_in iff it is one the system would
+  // float by family ladder. pickDefaultCopilotGroupIds is the single source.
+  const floatedDefaultIds = new Set(pickDefaultCopilotGroupIds(candidates))
+  return candidates.map((candidate) => ({
+    ...candidate,
+    source: floatedDefaultIds.has(candidate.id) ? ('built_in' as const) : ('third_party' as const),
+  }))
 }
 
 /**
@@ -106,6 +109,29 @@ export function pickDefaultCopilotGroupIds(candidates: CopilotRolePreview[]): st
   }
 
   return defaults
+}
+
+/**
+ * Materialize a candidate/floated group into a persistable copilot RoleEntry.
+ *
+ * Used both when a floated built-in default is first acted on (it enters the
+ * save chain only on user action, per atom-56 ①) and as the base shape for a
+ * selected group. The default fallback chain is the group's ready routes.
+ */
+export function buildCopilotRoleEntry(group: CopilotRolePreview): RoleEntry {
+  const readyRouteIds = group.availableRoutes.filter((route) => route.uiState === 'ready').map((route) => route.id)
+  return {
+    role_kind: 'copilot',
+    system_prompt_prefix: '',
+    model_fallback_enabled: true,
+    intent: { provider_preference: 'manual_order' },
+    model_groups: [],
+    active_model: group.id,
+    models: {
+      [group.id]: { providers: readyRouteIds },
+    },
+    fallback_chain: readyRouteIds.map((routeId) => ({ route_id: routeId, runtime_settings: {} })),
+  }
 }
 
 /**

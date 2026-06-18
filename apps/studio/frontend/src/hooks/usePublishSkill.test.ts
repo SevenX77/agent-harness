@@ -41,7 +41,7 @@ describe('executePublishSkill', () => {
     vi.clearAllMocks()
   })
 
-  it('publish calls publishSkill action and toasts artifact_id on success', async () => {
+  it('publish calls publishSkill action and uses generic success copy without committed release identity', async () => {
     const result: PublishResult = {
       status: 'ok',
       artifact_id: 'art-999',
@@ -56,8 +56,86 @@ describe('executePublishSkill', () => {
     expect(mockPublishSkill).toHaveBeenCalledWith('skill-1')
     expect(statusCalls).toEqual(['publishing', 'success', 'idle'])
     expect(setLastResult).toHaveBeenCalledWith(result)
-    expect(mockToast.success).toHaveBeenCalledWith('Released to production: art-999')
+    expect(mockToast.success).toHaveBeenCalledWith('Released to production: artifact published')
+    expect(mockToast.success).not.toHaveBeenCalledWith(expect.stringContaining('art-999'))
     expect(scheduleReset).toHaveBeenCalledWith(expect.any(Function), 200)
+  })
+
+  it('success toast includes release version, content hash, and manifest ref when backend returns them', async () => {
+    const result: PublishResult = {
+      status: 'ok',
+      artifact_id: 'art-123',
+      message: 'Published',
+      extra: {
+        release_version: '2026.06.11',
+        artifact_ref: {
+          artifact_id: 'text-segmentation',
+          content_hash: `sha256:${'a'.repeat(64)}`,
+          manifest_ref: 'manifests/text-segmentation.json',
+          store: 'product',
+        },
+        remote_sync: {
+          status: 'skipped',
+          reason: 'registry_not_configured',
+        },
+      },
+    }
+    mockPublishSkill.mockResolvedValue(result)
+    const { execute } = setupExecute()
+
+    await execute()
+
+    expect(mockToast.success).toHaveBeenCalledWith(
+      `Released 2026.06.11: text-segmentation, sha256:${'a'.repeat(64)}, manifests/text-segmentation.json, remote sync skipped (registry_not_configured)`,
+    )
+  })
+
+  it('uses generic success copy when release identity is missing content metadata', async () => {
+    const result = {
+      status: 'ok',
+      artifact_id: 'art-123',
+      message: 'Published',
+      extra: {
+        release_version: '2026.06.11',
+        artifact_ref: {
+          artifact_id: 'text-segmentation',
+          store: 'product',
+        },
+      },
+    } as unknown as PublishResult
+    mockPublishSkill.mockResolvedValue(result)
+    const { execute } = setupExecute()
+
+    await execute()
+
+    expect(mockToast.success).toHaveBeenCalledWith('Released to production: artifact published')
+    expect(mockToast.success).not.toHaveBeenCalledWith(expect.stringContaining('text-segmentation'))
+  })
+
+  it('surfaces publish version conflicts without the generic network fallback', async () => {
+    mockPublishSkill.mockRejectedValue({
+      response: {
+        status: 409,
+        data: {
+          error_code: 'PUBLISH_CONFLICT',
+          message: 'Release version 1.0.0 already exists',
+          details: {
+            release_version: '1.0.0',
+          },
+        },
+      },
+    })
+    const { execute, statusCalls, setError } = setupExecute()
+
+    await execute()
+
+    expect(statusCalls).toEqual(['publishing', 'error'])
+    expect(setError).toHaveBeenCalledWith('Release version 1.0.0 already exists')
+    expect(mockToast.error).toHaveBeenCalledWith(
+      'Release version 1.0.0 already exists',
+      undefined,
+    )
+    expect(mockToast.error).not.toHaveBeenCalledWith(ERROR_TOAST_MESSAGE, undefined)
   })
 
   it('publish error toasts business-named error message', async () => {

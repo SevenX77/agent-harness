@@ -1,5 +1,5 @@
 import type { Edge } from '@xyflow/react'
-import type { CallbackEvent } from '@/api/types'
+import type { CallbackEvent, EventEnvelope } from '@/api/types'
 import type { ContextEdgeData } from '@/components/edges/ContextEdge'
 import { edgeContextFromEvents } from '@/lib/edge-context'
 import type { SkillGraphNode } from './types'
@@ -7,7 +7,9 @@ import type { SkillGraphNode } from './types'
 export const INPUT_ID = '__global_input__'
 export const OUTPUT_ID = '__global_output__'
 
-function contextEdge(source: string, target: string, traceEvents: CallbackEvent[]): Edge<ContextEdgeData> {
+type TraceEventInput = CallbackEvent | EventEnvelope
+
+function contextEdge(source: string, target: string, traceEvents: TraceEventInput[]): Edge<ContextEdgeData> {
   // hasTraceData reflects whether the run actually dispatched data across this
   // edge — i.e. a matching `input_dispatch` event exists in the stream. Without
   // a run (empty events) every edge is inert, replacing the old `!isGlobal`
@@ -29,7 +31,7 @@ function contextEdge(source: string, target: string, traceEvents: CallbackEvent[
 
 export function buildEdges(
   phaseNodes: SkillGraphNode[],
-  traceEvents: CallbackEvent[] = [],
+  traceEvents: TraceEventInput[] = [],
 ): Edge<ContextEdgeData>[] {
   if (phaseNodes.length === 0) {
     return [contextEdge(INPUT_ID, OUTPUT_ID, traceEvents)]

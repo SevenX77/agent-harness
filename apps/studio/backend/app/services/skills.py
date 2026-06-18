@@ -34,6 +34,7 @@ from app.core.adapters.engine import (
     SubgraphNodeAST,
     compile_skill,
 )
+from app.core.adapters.transport_factory import build_engine_adapter
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
 from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
@@ -334,11 +335,21 @@ async def compile_skill_for_studio(
         )
     except (GraphCompileError, ResourceNotFoundError) as exc:
         raise CompileFailedError(_compile_failure_from_exception(exc, skill_dir)) from exc
+    artifact_ref = build_engine_adapter().compile(
+        {
+            "skill_dir": str(skill_dir),
+            "skill_id": skill_id,
+            "artifact_scope": "ephemeral",
+        }
+    )
     return CompileSuccess(
         skill_id=skill_id,
         status="ok",
         phase_count=len(compiled.manifest.phases),
         manifest_name=compiled.manifest.name,
+        artifact_ref=artifact_ref,
+        source_map_ref=artifact_ref["source_map_ref"],
+        execution_fingerprint=artifact_ref["execution_fingerprint"],
     )
 
 
@@ -1416,6 +1427,7 @@ async def serialize_skill_graph_markdown(
             description=description_raw if isinstance(description_raw, str) else None,
             io=_io_schema_from_frontmatter(frontmatter.get("io")),
             phases=refs,
+            original_md=original_md,
         )
     except CanvasConflictError:
         raise

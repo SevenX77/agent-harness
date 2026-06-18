@@ -136,14 +136,15 @@ def _subgraph_phase(
     root: Path,
     phase_id: str = "main",
     *,
-    target_skill: str = "child",
+    child_path: Path | None = None,
     input_field: str = "text",
     output_field: str = "result",
 ) -> None:
+    child_path = child_path or root / "subgraphs" / "child"
     _write(
         root / "phases" / phase_id / "SUBGRAPH.md",
         f"""---
-target_skill: {target_skill}
+path: {child_path}
 io:
   inputs:
     {_schema_yaml(input_field)}
@@ -459,9 +460,9 @@ def test_missing_mention_target_is_rejected(tmp_path: Path, mock_skill_resolver:
 
 def test_subgraph_io_input_mismatch_is_allowed_at_compile_time(tmp_path: Path, mock_skill_resolver: object) -> None:
     parent = tmp_path / "parent"
-    child = tmp_path / "child"
+    child = parent / "subgraphs" / "child"
     _graph(parent)
-    _subgraph_phase(parent, input_field="parent_input", output_field="result")
+    _subgraph_phase(parent, child_path=child, input_field="parent_input", output_field="result")
     _graph(child, inputs_field="child_input", outputs_field="result")
     _logic_phase(child, input_field="child_input")
 
@@ -472,9 +473,9 @@ def test_subgraph_io_input_mismatch_is_allowed_at_compile_time(tmp_path: Path, m
 
 def test_subgraph_io_output_mismatch_is_rejected_at_compile_time(tmp_path: Path, mock_skill_resolver: object) -> None:
     parent = tmp_path / "parent"
-    child = tmp_path / "child"
+    child = parent / "subgraphs" / "child"
     _graph(parent)
-    _subgraph_phase(parent, input_field="text", output_field="parent_output")
+    _subgraph_phase(parent, child_path=child, input_field="text", output_field="parent_output")
     _graph(child, inputs_field="text", outputs_field="child_output")
     _logic_phase(child)
 

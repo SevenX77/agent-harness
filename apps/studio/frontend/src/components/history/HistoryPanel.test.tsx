@@ -55,12 +55,15 @@ function textOf(node: ReactNode): string {
   return ''
 }
 
-function findButtonByText(node: ReactNode, label: string): ReactElement<{ children?: ReactNode; onClick?: () => void }> | null {
+function findButtonByText(
+  node: ReactNode,
+  label: string,
+): ReactElement<{ children?: ReactNode; disabled?: boolean; onClick?: () => void }> | null {
   if (!isValidElement(node)) {
     return null
   }
 
-  const element = node as ReactElement<{ children?: ReactNode; onClick?: () => void }>
+  const element = node as ReactElement<{ children?: ReactNode; disabled?: boolean; onClick?: () => void }>
   if (element.props.onClick && textOf(element.props.children).includes(label)) {
     return element
   }
@@ -97,6 +100,28 @@ describe('LocalHistoryPanelView', () => {
     expect(html).toContain('history failed')
   })
 
+  it('renders release snapshots with a release kind label', () => {
+    const html = renderToStaticMarkup(
+      <LocalHistoryPanelView
+        {...baseProps({
+          history: [
+            {
+              sha: 'release1234567890',
+              message: 'release-1.0.0',
+              author: 'studio-user',
+              timestamp: '2026-05-13T12:00:00Z',
+              kind: 'release',
+              release_version: '1.0.0',
+            },
+          ],
+        })}
+      />,
+    )
+
+    expect(html).toContain('Release')
+    expect(html).not.toContain('Other')
+  })
+
   it('calls revert for the selected snapshot', () => {
     const onRevert = vi.fn()
     const element = LocalHistoryPanelView(baseProps({ history: snapshots, selectedSha: snapshots[0].sha, onRevert }))
@@ -105,5 +130,27 @@ describe('LocalHistoryPanelView', () => {
     button?.props.onClick?.()
 
     expect(onRevert).toHaveBeenCalledWith(snapshots[0].sha)
+  })
+
+  it('disables revert for manifest-only release snapshots', () => {
+    const onRevert = vi.fn()
+    const manifestOnlyRelease = {
+      sha: 'release:1.0.0:sha256abc',
+      message: 'release-1.0.0',
+      author: 'product-store',
+      timestamp: '2026-05-13T12:00:00Z',
+      kind: 'release',
+      release_version: '1.0.0',
+      source: 'manifest',
+      revertable: false,
+    } as GitHistoryItem
+    const element = LocalHistoryPanelView(
+      baseProps({ history: [manifestOnlyRelease], selectedSha: manifestOnlyRelease.sha, onRevert }),
+    )
+    const button = findButtonByText(element, 'Revert')
+
+    expect(button?.props.disabled).toBe(true)
+    button?.props.onClick?.()
+    expect(onRevert).not.toHaveBeenCalled()
   })
 })

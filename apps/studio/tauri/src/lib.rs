@@ -331,7 +331,10 @@ pub fn run() {
             open_in_terminal,
             reveal_in_file_manager,
             native_fs::write_workspace_file,
+            native_fs::publish_package_writer,
+            native_fs::write_golden_baseline,
             native_fs::read_workspace_file,
+            native_fs::delete_workspace_path,
             native_fs::list_workspace_dir,
             native_fs::checkpoint_workspace_file,
             native_fs::seed_workspace_checkpoint,
@@ -442,6 +445,15 @@ mod tests {
     fn config_dir_override_ignores_empty_and_absent() {
         assert!(config_dir_from_override(Some("".into())).is_none());
         assert!(config_dir_from_override(None).is_none());
+    }
+
+    #[test]
+    fn invoke_handler_registers_publish_package_writer_command() {
+        let source = include_str!("lib.rs");
+        assert!(
+            source.contains("native_fs::publish_package_writer"),
+            "publish package writer must be registered in the Tauri invoke handler"
+        );
     }
 
     #[test]

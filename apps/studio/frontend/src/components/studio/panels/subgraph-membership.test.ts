@@ -3,7 +3,7 @@ import type { GraphTopologyItem, SkillDetail } from "@/api/types"
 import { CURRENT_SCHEMA_VERSION } from "@/config/schema"
 import { subgraphMembership } from "./subgraph-membership"
 
-function skillDetailWithTopology(topology: GraphTopologyItem[]): SkillDetail {
+function skillDetailWithTopology(topology: GraphTopologyItem[], files: Record<string, string> = {}): SkillDetail {
   return {
     manifest: {
       schema_version: CURRENT_SCHEMA_VERSION,
@@ -19,7 +19,7 @@ function skillDetailWithTopology(topology: GraphTopologyItem[]): SkillDetail {
     node_schema_v21: {},
     io_schema: {},
     file_paths: {},
-    files: {},
+    files,
     manifest_errors: null,
     has_golden: false,
     latest_run_metadata: null,
@@ -75,6 +75,35 @@ describe("subgraphMembership", () => {
 
     expect(memberships).toEqual([
       { id: "translate", label: "translate", path: null, status: "missing" },
+    ])
+  })
+
+  it("marks a legacy target_skill subgraph as migration-required instead of resolved", () => {
+    const memberships = subgraphMembership(
+      skillDetailWithTopology(
+        [
+          { id: "translate", src: "phases/translate", depends_on: [], mode: "subgraph", path: null },
+        ],
+        {
+          "phases/translate/SUBGRAPH.md": [
+            "---",
+            "name: translate",
+            "target_skill: legacy.registry.child",
+            "---",
+            "",
+          ].join("\n"),
+        },
+      ),
+    )
+
+    expect(memberships).toEqual([
+      {
+        id: "translate",
+        label: "translate",
+        path: null,
+        status: "migration-required",
+        legacyTargetSkill: "legacy.registry.child",
+      },
     ])
   })
 

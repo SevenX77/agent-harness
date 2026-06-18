@@ -33,6 +33,48 @@ function messageFromError(error: unknown): string {
   return error instanceof Error ? error.message : 'Publish failed'
 }
 
+function stringField(value: unknown, key: string): string | null {
+  if (typeof value !== 'object' || value === null || !(key in value)) {
+    return null
+  }
+  const field = (value as Record<string, unknown>)[key]
+  return typeof field === 'string' && field.trim() ? field : null
+}
+
+function remoteSyncSummary(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null) {
+    return null
+  }
+  const status = stringField(value, 'status')
+  if (!status) {
+    return null
+  }
+  const reason = stringField(value, 'reason') ?? stringField(value, 'error_type')
+  return reason ? `remote sync ${status} (${reason})` : `remote sync ${status}`
+}
+
+function releaseSuccessMessage(result: PublishResult): string {
+  const releaseVersion = stringField(result.extra, 'release_version')
+  const artifactRef = typeof result.extra?.artifact_ref === 'object' ? result.extra.artifact_ref : null
+  const artifactId = stringField(artifactRef, 'artifact_id')
+  const contentHash =
+    stringField(result.extra, 'content_hash') ?? stringField(artifactRef, 'content_hash')
+  const manifestRef =
+    stringField(result.extra, 'manifest_ref') ?? stringField(artifactRef, 'manifest_ref')
+  const remoteSync = remoteSyncSummary(result.extra?.remote_sync)
+
+  if (releaseVersion && artifactId && contentHash && manifestRef) {
+    return [
+      `Released ${releaseVersion}: ${artifactId}`,
+      contentHash,
+      manifestRef,
+      remoteSync,
+    ].filter(Boolean).join(', ')
+  }
+
+  return 'Released to production: artifact published'
+}
+
 // Surface the backend's clear, typed error (e.g. REGISTRY_NOT_CONFIGURED —
 // "Artifact Registry Host 未配置") instead of a generic toast, per publish
 // design F2 ("missing settings gives a clear error"). Returns null for plain
@@ -94,7 +136,7 @@ export async function executePublishSkill({
     setLastResult(result)
     if (result.status === 'ok') {
       setStatus('success')
-      toast.success(`Released to production: ${result.artifact_id ?? 'artifact published'}`)
+      toast.success(releaseSuccessMessage(result))
       scheduleReset(() => setStatus('idle'), resetDelayMs)
       return result
     }

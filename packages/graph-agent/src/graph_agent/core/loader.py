@@ -210,6 +210,7 @@ class SkillLoader:
             )
         _validate_agent_reference_paths(root, phase_docs)
         _validate_subgraph_io_contracts(
+            root,
             phase_docs,
             skill_resolver=skill_resolver,
             _loading_stack=loading_stack,
@@ -529,6 +530,7 @@ def _reject_deprecated_physical_io(skill_root: Path) -> None:
 
 
 def _validate_subgraph_io_contracts(
+    skill_root: Path,
     phase_docs: list[PhaseDocument],
     *,
     skill_resolver: SkillResolverProtocol | None,
@@ -539,7 +541,7 @@ def _validate_subgraph_io_contracts(
         if not isinstance(doc.ast, SubgraphNodeAST):
             continue
         resolver = require_skill_resolver(skill_resolver, caller="SkillLoader.compile_skill")
-        child_root = resolve_skill_root(resolver, doc.ast.target_skill)
+        child_root = _resolve_subgraph_path_root(skill_root, doc.path, doc.ast.path)
         child = SkillLoader(validate_context_writes=False).compile_skill(
             child_root,
             skill_resolver=resolver,
@@ -554,8 +556,45 @@ def _validate_subgraph_io_contracts(
                 _frontmatter_key_line(doc.path, "io"),
                 "[F-v3-subgraph-io-mismatch] "
                 f"SUBGRAPH {doc.phase_name!r} outputs do not match "
-                f"target_skill {doc.ast.target_skill!r}",
+                f"path {doc.ast.path!r}",
             )
+
+
+def _resolve_subgraph_path_root(skill_root: Path, source_path: Path, value: str) -> Path:
+    root_resolved = skill_root.resolve()
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        _fatal(
+            source_path,
+            _frontmatter_key_line(source_path, "path"),
+            "[F-v3-subgraph-target-skill-invalid] subgraph path must be absolute",
+        )
+    resolved = candidate.resolve()
+    try:
+        resolved.relative_to(root_resolved)
+    except ValueError as exc:
+        _fatal(
+            source_path,
+            _frontmatter_key_line(source_path, "path"),
+            "[F-v3-subgraph-target-skill-invalid] "
+            f"subgraph path {value!r} escapes skill root {root_resolved}",
+        )
+        raise AssertionError("unreachable") from exc
+    if not resolved.is_dir():
+        _fatal(
+            source_path,
+            _frontmatter_key_line(source_path, "path"),
+            "[F-v3-subgraph-target-skill-invalid] "
+            f"subgraph path {value!r} is not a directory",
+        )
+    if not (resolved / "GRAPH.md").is_file():
+        _fatal(
+            source_path,
+            _frontmatter_key_line(source_path, "path"),
+            "[F-v3-subgraph-target-skill-invalid] "
+            f"subgraph path {value!r} has no GRAPH.md",
+        )
+    return resolved
 
 
 def _validate_agent_reference_paths(skill_root: Path, phase_docs: list[PhaseDocument]) -> None:
@@ -1435,6 +1474,14 @@ def _build_phase_document(
             _validate_logic_actions_declared(path, logic_ast, body)
             ast: PhaseAST = logic_ast
         elif mode == "subgraph":
+            if "target_skill" in data:
+                _fatal(
+                    path,
+                    _frontmatter_key_line(path, "target_skill"),
+                    "[F-v3-subgraph-target-skill-invalid] "
+                    "SUBGRAPH.md target_skill is deprecated; migrate to absolute path: "
+                    "path: /absolute/path/to/child",
+                )
             ast = SubgraphNodeAST.model_validate(data)
         elif is_agent:
             data.update(_parse_agent_body(path, body, blocks))

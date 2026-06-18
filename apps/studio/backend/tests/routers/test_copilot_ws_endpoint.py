@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -17,11 +18,67 @@ from app.models.copilot import (
 )
 from app.routers import copilot as copilot_router
 from app.services import copilot as copilot_service
-from claude_agent_sdk import ClaudeAgentOptions
+from claude_agent_sdk import ClaudeAgentOptions, ProcessError
 from claude_agent_sdk.types import AssistantMessage, TextBlock
 from fastapi.testclient import TestClient
 from graph_agent_gateway.registry.schema import Protocol, ResolvedRoute
 from pydantic import SecretStr
+
+
+def test_copilot_bash_approval_endpoint_forwards_decision(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    async def resolve_bash_approval(
+        skill_id: str,
+        tool_use_id: str,
+        *,
+        approve: bool,
+    ) -> copilot_service.BashApprovalResult:
+        calls.append(
+            {
+                "skill_id": skill_id,
+                "tool_use_id": tool_use_id,
+                "approve": approve,
+            }
+        )
+        return copilot_service.BashApprovalResult(
+            tool_use_id=tool_use_id,
+            approved=approve,
+            executed=approve,
+            success=True,
+            stdout="ok\n",
+            stderr="",
+            returncode=0,
+        )
+
+    monkeypatch.setattr(copilot_router, "resolve_bash_approval", resolve_bash_approval)
+
+    response = client.post(
+        "/api/skills/text-segmentation/copilot/bash-approval",
+        json={"tool_use_id": "tu-approve", "approve": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "tool_use_id": "tu-approve",
+        "approved": True,
+        "executed": True,
+        "success": True,
+        "stdout": "ok\n",
+        "stderr": "",
+        "returncode": 0,
+        "message": None,
+    }
+    assert calls == [
+        {
+            "skill_id": "text-segmentation",
+            "tool_use_id": "tu-approve",
+            "approve": True,
+        }
+    ]
 
 
 def test_copilot_ws_streams_normal_query(
@@ -63,8 +120,108 @@ def test_copilot_ws_forwards_model_override(
             "user_message": "hi",
             "model_override": "CL46T",
             "role": None,
+            "workspace_root": None,
+            "judge_context": None,
         }
     ]
+
+
+def test_copilot_ws_forwards_workspace_root(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def stream_query(**kwargs: object) -> AsyncIterator[object]:
+        calls.append(kwargs)
+        return _events(CopilotEventDone())
+
+    monkeypatch.setattr(copilot_router, "stream_query", stream_query)
+
+    with client.websocket_connect("/api/skills/text-segmentation/copilot/ws") as websocket:
+        websocket.send_json({
+            "user_message": "hi",
+            "workspace_root": "/abs/imported-skill",
+        })
+        assert websocket.receive_json()["type"] == "done"
+
+    assert calls == [
+        {
+            "skill_id": "text-segmentation",
+            "user_message": "hi",
+            "model_override": None,
+            "role": None,
+            "workspace_root": "/abs/imported-skill",
+            "judge_context": None,
+        }
+    ]
+
+
+def test_copilot_ws_forwards_structured_judge_context(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+    judge_context = {
+        "compare_result_ref": "text-segmentation/golden/golden-1/compare/run-1/compare_result.json",
+        "judge_context_ref": "text-segmentation/runs/run-1/copilot_judge/golden-1/judge_context.json",
+        "baseline_ref": "text-segmentation/golden/golden-1/baseline.json",
+        "diff_summary": {
+            "baseline_id": "golden-1",
+            "run_results_ref": "text-segmentation/runs/run-1/result.json",
+            "total_score": 88,
+            "node_group_count": 2,
+            "failed_node_count": 1,
+        },
+    }
+
+    def stream_query(**kwargs: object) -> AsyncIterator[object]:
+        calls.append(kwargs)
+        return _events(CopilotEventDone())
+
+    monkeypatch.setattr(copilot_router, "stream_query", stream_query)
+
+    with client.websocket_connect("/api/skills/text-segmentation/copilot/ws") as websocket:
+        websocket.send_json({
+            "user_message": "judge it",
+            "role": "copilot_judge",
+            "judge_context": judge_context,
+        })
+        assert websocket.receive_json()["type"] == "done"
+
+    assert calls == [
+        {
+            "skill_id": "text-segmentation",
+            "user_message": "judge it",
+            "model_override": None,
+            "role": "copilot_judge",
+            "workspace_root": None,
+            "judge_context": judge_context,
+        }
+    ]
+
+
+def test_copilot_prompt_renders_structured_judge_context() -> None:
+    prompt = copilot_service._prompt_with_system_context(
+        "text-segmentation",
+        "judge it",
+        judge_context={
+            "compare_result_ref": "text-segmentation/golden/golden-1/compare/run-1/compare_result.json",
+            "judge_context_ref": "text-segmentation/runs/run-1/copilot_judge/golden-1/judge_context.json",
+            "baseline_ref": "text-segmentation/golden/golden-1/baseline.json",
+            "diff_summary": {
+                "baseline_id": "golden-1",
+                "run_results_ref": "text-segmentation/runs/run-1/result.json",
+                "total_score": 88,
+                "node_group_count": 2,
+                "failed_node_count": 1,
+            },
+        },
+    )
+
+    assert "<judge_context>" in prompt
+    assert "<baseline_ref>text-segmentation/golden/golden-1/baseline.json</baseline_ref>" in prompt
+    assert '"failed_node_count": 1' in prompt
 
 
 def test_copilot_ws_does_not_read_legacy_copilot_json(
@@ -415,6 +572,92 @@ def test_stream_query_reports_clear_error_after_all_copilot_routes_fail(
     assert "all configured Copilot providers failed" in events[1].message
 
 
+def test_stream_query_single_route_error_redacts_provider_secret_and_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    route = _resolved_route(route_id="primary:claude", endpoint_id="primary")
+    canary = "sk-live-secret Traceback (most recent call last)"
+
+    monkeypatch.setattr(
+        copilot_service,
+        "_resolve_copilot_runtime",
+        lambda _override, role="copilot_chat": _runtime([route], {route.credential_ref: "first-secret"}),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        copilot_service,
+        "_session_factory",
+        lambda options: FailingClient(ProcessError(canary, exit_code=1, stderr=canary)).capture(options),
+    )
+
+    events = asyncio.run(
+        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+    )
+
+    assert isinstance(events[-1], CopilotEventError)
+    assert "sk-live-secret" not in events[-1].message
+    assert "Traceback" not in events[-1].message
+
+
+def test_stream_query_all_routes_failed_redacts_provider_secret_and_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    routes = [
+        _resolved_route(route_id="primary:claude", endpoint_id="primary"),
+        _resolved_route(route_id="secondary:claude", endpoint_id="secondary"),
+    ]
+    canary = "sk-live-secret Traceback (most recent call last)"
+    decisions: list[dict[str, object]] = [
+        {"decision": "switch_route", "route_id": "secondary:claude", "retry_same": False, "give_up": False},
+        {
+            "decision": "give_up",
+            "error_code": "resource.no_available_route",
+            "failed_route_ids": ["primary:claude", "secondary:claude"],
+            "route_ids": ["primary:claude", "secondary:claude"],
+            "give_up": True,
+        },
+    ]
+
+    monkeypatch.setattr(
+        copilot_service,
+        "_resolve_copilot_runtime",
+        lambda _override, role="copilot_chat": _runtime(
+            routes,
+            {
+                routes[0].credential_ref: "first-secret",
+                routes[1].credential_ref: "second-secret",
+            },
+        ),
+        raising=False,
+    )
+
+    class FakeGatewayAdapter:
+        def decide_fallback(self, _payload: dict[str, object]) -> dict[str, object]:
+            return decisions.pop(0)
+
+    monkeypatch.setattr(
+        copilot_service,
+        "_gateway_adapter_factory",
+        lambda: FakeGatewayAdapter(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        copilot_service,
+        "_session_factory",
+        lambda options: FailingClient(RuntimeError(canary)).capture(options),
+    )
+
+    events = asyncio.run(
+        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+    )
+
+    assert isinstance(events[-1], CopilotEventError)
+    assert "sk-live-secret" not in events[-1].message
+    assert "Traceback" not in events[-1].message
+
+
 def test_next_copilot_route_logs_gateway_fallback_failure(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -446,6 +689,73 @@ def test_next_copilot_route_logs_gateway_fallback_failure(
     assert next_route is None
     assert "Gateway fallback decision failed" in caplog.text
     assert "primary:claude" in caplog.text
+
+
+def test_stream_query_all_routes_failed_surfaces_canonical_fallback_event(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    routes = [
+        _resolved_route(route_id="primary:claude", endpoint_id="primary"),
+        _resolved_route(route_id="secondary:claude", endpoint_id="secondary"),
+    ]
+    decisions: list[dict[str, object]] = [
+        {
+            "decision": "switch_route",
+            "route_id": "secondary:claude",
+            "retry_same": False,
+            "give_up": False,
+        },
+        {
+            "decision": "give_up",
+            "error_code": "resource.no_available_route",
+            "failed_route_ids": ["primary:claude", "secondary:claude"],
+            "route_ids": ["primary:claude", "secondary:claude"],
+            "give_up": True,
+        },
+    ]
+
+    monkeypatch.setattr(
+        copilot_service,
+        "_resolve_copilot_runtime",
+        lambda _override, role="copilot_chat": _runtime(
+            routes,
+            {
+                routes[0].credential_ref: "first-secret",
+                routes[1].credential_ref: "second-secret",
+            },
+        ),
+    )
+
+    class FakeGatewayAdapter:
+        def decide_fallback(self, _payload: dict[str, object]) -> dict[str, object]:
+            return decisions.pop(0)
+
+    monkeypatch.setattr(
+        copilot_service,
+        "_gateway_adapter_factory",
+        lambda: FakeGatewayAdapter(),
+        raising=False,
+    )
+
+    def session_factory(options: ClaudeAgentOptions) -> FakeClient:
+        api_key = options.env["ANTHROPIC_API_KEY"]
+        if api_key == "first-secret":
+            return FailingClient(TimeoutError("primary timed out")).capture(options)
+        return FailingClient(TimeoutError("secondary timed out")).capture(options)
+
+    monkeypatch.setattr(copilot_service, "_session_factory", session_factory)
+
+    events = asyncio.run(
+        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+    )
+
+    assert isinstance(events[0], CopilotEventContextResolved)
+    assert isinstance(events[-1], CopilotEventError)
+    assert "resource.no_available_route" in events[-1].message
+    assert "failed_route_ids" in events[-1].message
+    assert "primary:claude" in events[-1].message
+    assert "secondary:claude" in events[-1].message
 
 
 def test_stream_query_uses_model_override_when_provided(
@@ -551,6 +861,39 @@ def test_stream_query_surfaces_resource_terminal_error_as_copilot_error(
     assert "无可用 route" in events[0].message
 
 
+def test_stream_query_preserves_resource_terminal_error_code_and_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from app.core.adapters.gateway import ResourceTerminalError
+    from app.services import gateway_resolver
+
+    def fail_runtime(*_args: object, **_kwargs: object) -> object:
+        raise ResourceTerminalError(
+            "resource.no_available_route",
+            {
+                "role": "copilot_chat",
+                "route_ids": [],
+                "failed_route_ids": ["primary"],
+            },
+        )
+
+    monkeypatch.setattr(gateway_resolver, "build_gateway_route_runtime", fail_runtime)
+
+    events = asyncio.run(
+        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+    )
+
+    assert len(events) == 1
+    assert isinstance(events[0], CopilotEventError)
+    assert events[0].error_code == "resource.no_available_route"
+    assert events[0].error_payload == {
+        "role": "copilot_chat",
+        "route_ids": [],
+        "failed_route_ids": ["primary"],
+    }
+
+
 def test_resolve_copilot_workspace_dir_uses_skill_dir_not_process_cwd(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -566,6 +909,116 @@ def test_resolve_copilot_workspace_dir_uses_skill_dir_not_process_cwd(
     monkeypatch.setattr(config, "default_workspace_skills_dir", lambda: skills_root)
 
     assert copilot_service._resolve_copilot_workspace_dir("demo") == skill_dir
+
+
+def test_resolve_copilot_workspace_dir_accepts_registered_imported_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from app.core import config
+
+    imported_root = tmp_path / "imported-skill"
+    imported_root.mkdir()
+    (imported_root / "GRAPH.md").write_text("---\nname: imported-skill\n---\n", encoding="utf-8")
+    index_path = tmp_path / "skill-index.json"
+    index_path.write_text(
+        json.dumps({"text-segmentation": {"absolute_path": str(imported_root), "l2_remote_url": ""}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "SKILL_INDEX_PATH", index_path)
+
+    assert (
+        copilot_service._resolve_copilot_workspace_dir(
+            "text-segmentation",
+            workspace_root=str(imported_root),
+        )
+        == imported_root.resolve()
+    )
+
+
+def test_resolve_copilot_workspace_dir_rejects_registered_root_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from app.core import config
+
+    registered_root = tmp_path / "registered-skill"
+    requested_root = tmp_path / "wrong-skill"
+    registered_root.mkdir()
+    requested_root.mkdir()
+    index_path = tmp_path / "skill-index.json"
+    index_path.write_text(
+        json.dumps({"text-segmentation": {"absolute_path": str(registered_root), "l2_remote_url": ""}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "SKILL_INDEX_PATH", index_path)
+
+    with pytest.raises(ValueError, match="does not match registered workspace"):
+        copilot_service._resolve_copilot_workspace_dir(
+            "text-segmentation",
+            workspace_root=str(requested_root),
+        )
+
+
+def test_resolve_copilot_workspace_dir_rejects_missing_workspace_root(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="does not exist"):
+        copilot_service._resolve_copilot_workspace_dir(
+            "text-segmentation",
+            workspace_root=str(tmp_path / "missing"),
+        )
+
+
+def test_resolve_copilot_workspace_dir_rejects_relative_workspace_root() -> None:
+    with pytest.raises(ValueError, match="must be absolute"):
+        copilot_service._resolve_copilot_workspace_dir(
+            "text-segmentation",
+            workspace_root="relative-skill",
+        )
+
+
+def test_stream_query_uses_imported_workspace_root_as_sdk_cwd(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from app.core import config
+
+    imported_root = tmp_path / "imported-skill"
+    imported_root.mkdir()
+    index_path = tmp_path / "skill-index.json"
+    index_path.write_text(
+        json.dumps({"skill-a": {"absolute_path": str(imported_root), "l2_remote_url": ""}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "SKILL_INDEX_PATH", index_path)
+
+    client = FakeClient([AssistantMessage(content=[TextBlock(text="hello")], model="claude")])
+    route = _resolved_route(base_url="https://credential.test")
+    monkeypatch.setattr(
+        copilot_service,
+        "_resolve_copilot_runtime",
+        lambda _override, role="copilot_chat": _runtime(
+            [route],
+            {route.credential_ref: "primary-secret"},
+        ),
+    )
+    monkeypatch.setattr(
+        copilot_service, "_session_factory", lambda options: client.capture(options)
+    )
+
+    events = asyncio.run(
+        _collect(
+            copilot_service.stream_query(
+                "skill-a",
+                "hi",
+                workspace_root=str(imported_root),
+            )
+        )
+    )
+
+    assert client.options is not None
+    assert Path(client.options.cwd) == imported_root.resolve()
+    assert isinstance(events[0], CopilotEventContextResolved)
+    assert events[1:] == [CopilotEventText(content="hello"), CopilotEventDone()]
 
 
 def test_resolve_copilot_workspace_dir_falls_back_to_skills_root(

@@ -53,6 +53,10 @@ describe('normalizeCopilotEvent', () => {
         before_existed: true,
         before_content: 'a\nold',
         after_content: 'a\nnew',
+        before_hash: 'sha-before',
+        after_hash: 'sha-after',
+        diff: '@@ -1,2 +1,2 @@\n a\n-old\n+new',
+        checkpoint_id: 'checkpoint-7',
       },
       'evt-patch',
     )
@@ -65,7 +69,30 @@ describe('normalizeCopilotEvent', () => {
       beforeExisted: true,
       beforeContent: 'a\nold',
       afterContent: 'a\nnew',
+      beforeHash: 'sha-before',
+      afterHash: 'sha-after',
+      diff: '@@ -1,2 +1,2 @@\n a\n-old\n+new',
+      checkpointId: 'checkpoint-7',
       review: 'pending',
+    })
+  })
+
+  it('keeps old patch_proposed payloads compatible with conservative metadata fallbacks', () => {
+    const event = normalizeCopilotEvent(
+      {
+        type: 'patch_proposed',
+        tool_name: 'Write',
+        path: 'GRAPH.md',
+      },
+      'evt-old-patch',
+    )
+
+    expect(event.type).toBe('patch_proposed')
+    expect(event).toMatchObject({
+      beforeHash: null,
+      afterHash: '',
+      diff: '',
+      checkpointId: '',
     })
   })
 

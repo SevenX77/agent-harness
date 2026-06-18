@@ -16,6 +16,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import type { SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData, SubagentRef } from "@/components/GraphCanvas"
+import { legacySubgraphTargetSkill } from "@/components/studio/subgraph-path"
 import { sha256Hex } from "@/lib/hash"
 import { runPersistedRoleTestJob } from "../settings/LlmRolesTab"
 import type { FileMeta } from "../file-types"
@@ -138,7 +139,12 @@ export function PropertiesPanel({
       return { key: `${filePath}:${fileContent}`, ok: false as const, reason: parsed.reason, message: parsed.message }
     }
     const form = phaseFrontmatterToForm(parsed.frontmatter)
-    return { key: `${filePath}:${fileContent}`, ok: true as const, form }
+    return {
+      key: `${filePath}:${fileContent}`,
+      ok: true as const,
+      form,
+      legacyTargetSkill: kind === "subgraph" ? legacySubgraphTargetSkill(fileContent) : null,
+    }
   }, [fileContent, filePath])
   const [loadedFormKey, setLoadedFormKey] = useState(phaseFormState.key)
   const [draft, setDraft] = useState<PhaseFrontmatterFormData | null>(() => (
@@ -234,6 +240,7 @@ export function PropertiesPanel({
                 canSave={canSave}
                 canReset={dirty && !saving}
                 roleTest={roleTest}
+                legacyTargetSkill={phaseFormState.legacyTargetSkill ?? null}
                 onFieldChange={setField}
                 onReset={handleReset}
                 onSave={() => {
@@ -284,6 +291,7 @@ function PhaseFrontmatterForm({
   canSave,
   canReset,
   roleTest,
+  legacyTargetSkill,
   onFieldChange,
   onReset,
   onSave,
@@ -295,6 +303,7 @@ function PhaseFrontmatterForm({
   canSave: boolean
   canReset: boolean
   roleTest: RoleTestStatusInput
+  legacyTargetSkill: string | null
   onFieldChange: <Key extends keyof PhaseFrontmatterFormData>(field: Key, value: PhaseFrontmatterFormData[Key]) => void
   onReset: () => void
   onSave: () => void
@@ -375,6 +384,11 @@ function PhaseFrontmatterForm({
                   onChange={(event) => onFieldChange("path", event.currentTarget.value)}
                 />
                 <FieldDescription>Absolute path to the child graph skill root.</FieldDescription>
+                {legacyTargetSkill ? (
+                  <div className="rounded-md border border-border bg-muted px-2 py-1 text-xs text-foreground">
+                    Legacy child reference <span className="font-mono">{legacyTargetSkill}</span> no longer resolves subgraphs. Save an absolute path to migrate this phase.
+                  </div>
+                ) : null}
               </Field>
               <ValidatorField
                 value={value.validator}

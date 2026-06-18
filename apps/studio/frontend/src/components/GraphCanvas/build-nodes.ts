@@ -1,6 +1,7 @@
 import yaml from 'js-yaml'
 import type { CompileError, IoDeclaration, PhaseDef, SkillDetail, SkillManifest, IoInput, IoOutput, GraphManifestV030, GraphTopologyItem } from '@/api/types'
 import { INPUT_ID, OUTPUT_ID, type GlobalNodeData, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus, type SubagentRef } from '@/components/nodes'
+import { normalizeAbsoluteSubgraphPath } from '@/components/studio/subgraph-path'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 
 const EMPTY_IO: IoDeclaration = { inputs: [], outputs: [] }
@@ -119,14 +120,6 @@ function ioFromManifest(manifest: SkillManifest | undefined): IoDeclaration {
   return manifest?.type === 'graph' ? manifest.io : EMPTY_IO
 }
 
-function subgraphRefFromFile(content: string | undefined): string | null {
-  if (!content) return null
-  const block = content.match(/<target_skill>\s*([\s\S]*?)\s*<\/target_skill>/)
-  if (block?.[1]) return block[1].trim()
-  const yaml = content.match(/^target_skill:\s*['"]?([^'"\n]+)['"]?/m)
-  return yaml?.[1]?.trim() ?? null
-}
-
 function subagentsFromUnknown(value: unknown): SubagentRef[] {
   if (!Array.isArray(value)) return []
   return value.flatMap((item) => {
@@ -177,12 +170,7 @@ export function buildNodes(
   const phaseNodes: SkillGraphNode[] = phases.map((phase, index) => {
     const topology = topologyById.get(phase.name)
     const mode = topology?.mode ?? phase.mode
-    // Prefer the topology row's absolute child `path` (what the subgraph
-    // resolver consumes); fall back to the legacy target_skill ref so the
-    // expand affordance still appears for older skills.
-    const subgraphPath = topology?.path
-      ?? phase.subgraph
-      ?? subgraphRefFromFile(detail?.files?.[`phases/${phase.name}/SUBGRAPH.md`])
+    const subgraphPath = normalizeAbsoluteSubgraphPath(topology?.path)
     const filePath = `phases/${phase.name}/${phaseKindFile({ mode, subgraphPath })}`
     const frontmatter = phaseFrontmatter(detail?.files?.[filePath])
     return {
@@ -202,7 +190,7 @@ export function buildNodes(
         dependsOn: topology?.depends_on ?? normalizeDependsOn(phase.depends_on),
         subgraphPath,
         isExpanded: expandedSubgraphs.has(phase.name),
-        onToggleSubgraph: (phase.subgraph ?? detail?.files?.[`phases/${phase.name}/SUBGRAPH.md`])
+        onToggleSubgraph: subgraphPath
           ? () => onToggleSubgraph(phase.name)
           : undefined,
       },
@@ -254,7 +242,7 @@ export function buildNodesFromTopology(
   const phaseNodes: SkillGraphNode[] = phases.map((phaseName, index) => {
     const topology = topologyById.get(phaseName)
     const mode = phaseKindFromTopologyMode(topology?.mode)
-    const subgraphPath = topology?.path ?? null
+    const subgraphPath = normalizeAbsoluteSubgraphPath(topology?.path)
     return {
       id: phaseName,
       type: 'skill',

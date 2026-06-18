@@ -41,6 +41,7 @@ import { ContextEdge, type ContextEdgeData } from '@/components/edges/ContextEdg
 import { GlobalInputNode, GlobalOutputNode } from '@/components/nodes/GlobalInputOutputNode'
 import { buildEdges, INPUT_ID, OUTPUT_ID, SkillNode, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
 import { useOptionalWorkspaceContext } from '@/components/studio/WorkspaceContext'
+import { normalizeAbsoluteSubgraphPath } from '@/components/studio/subgraph-path'
 import type { PanelKind } from '@/components/studio/Toolbar'
 import { buildNodes, buildNodesFromTopology, phaseKindFile } from './build-nodes'
 import {
@@ -527,8 +528,9 @@ export function GraphCanvas({
           if (node.type === 'skill') {
             // R9: double-clicking a subgraph node focuses INTO its child graph
             // in-place; non-subgraph phases open their source file as before.
-            if (node.data.subgraphPath) {
-              drillInto(node.data.subgraphPath, node.data.label)
+            const subgraphPath = normalizeAbsoluteSubgraphPath(node.data.subgraphPath)
+            if (subgraphPath) {
+              drillInto(subgraphPath, node.data.label)
               return
             }
             onNodeSelect?.({ id: node.id, data: node.data })

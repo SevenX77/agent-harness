@@ -113,7 +113,7 @@ def upsert_endpoints(
         data = load_credentials(credential_path)
         endpoints = dict(data.provider_endpoints)
         for endpoint_id, payload in endpoint_payloads.items():
-            incoming = _endpoint_from_payload(payload)
+            incoming = _endpoint_from_payload(_endpoint_authoring_payload(payload))
             if incoming.endpoint_id != endpoint_id:
                 raise ValueError(f"endpoint payload key does not match endpoint_id: {endpoint_id}")
             current = endpoints.get(endpoint_id)
@@ -122,6 +122,9 @@ def upsert_endpoints(
             updates: dict[str, Any] = {
                 "api_key": api_key,
                 "base_url": canonical_base_url,
+                "status": current.status if current is not None else "unverified_manual",
+                "last_test_at": current.last_test_at if current is not None else None,
+                "last_test_message": current.last_test_message if current is not None else None,
             }
             curated_provider_kind = CURATED_PROVIDER_KIND_BY_ENDPOINT_ID.get(endpoint_id)
             if curated_provider_kind is not None and _field_omitted(payload, "provider_kind"):
@@ -132,6 +135,8 @@ def upsert_endpoints(
                 updates["provider_kind"] = current.provider_kind
             if current is not None and _field_omitted(payload, "rate_limit_bucket"):
                 updates["rate_limit_bucket"] = current.rate_limit_bucket
+            if current is not None and _field_omitted(payload, "credential_ref"):
+                updates["credential_ref"] = current.credential_ref
             endpoints[endpoint_id] = incoming.model_copy(update=updates)
         data = data.model_copy(update={"provider_endpoints": endpoints})
         _save_credentials_unlocked(data, credential_path)
@@ -196,6 +201,19 @@ def _endpoint_from_payload(payload: dict[str, Any] | ProviderEndpoint) -> Provid
     if isinstance(payload, ProviderEndpoint):
         return payload
     return ProviderEndpoint.model_validate(payload)
+
+
+def _endpoint_authoring_payload(payload: dict[str, Any] | ProviderEndpoint) -> dict[str, Any] | ProviderEndpoint:
+    fact_fields = {"status", "last_test_at", "last_test_message"}
+    if isinstance(payload, dict):
+        return {key: value for key, value in payload.items() if key not in fact_fields}
+    return payload.model_copy(
+        update={
+            "status": "unverified_manual",
+            "last_test_at": None,
+            "last_test_message": None,
+        }
+    )
 
 
 def _field_omitted(payload: dict[str, Any] | ProviderEndpoint, field_name: str) -> bool:

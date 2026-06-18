@@ -186,7 +186,7 @@ _CATALOG_METADATA_ROWS: tuple[tuple[str, str], ...] = (
     (_DOMAIN_LOGIC, '检查子图业务规则'),
     (_DOMAIN_SUBGRAPH, _REMEDIATE_DELETE_FIELD),
     (_DOMAIN_SUBGRAPH, _REMEDIATE_FIX_NAME),
-    (_DOMAIN_SUBGRAPH, '使用 registry skill id'),
+    (_DOMAIN_SUBGRAPH, '使用绝对 path 指向工作目录内子图'),
     (_DOMAIN_SUBGRAPH, '修正 object schema'),
     (_DOMAIN_SUBGRAPH, '对齐父 phase 和子 GRAPH IO'),
     (_DOMAIN_SUBGRAPH, '对齐字段 schema'),

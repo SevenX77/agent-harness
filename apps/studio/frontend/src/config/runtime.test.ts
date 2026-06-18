@@ -1,8 +1,22 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { configureApiToken, currentApiTokenIsSet } from '../api/client'
-import { fallbackSidecarConfig, initializeRuntimeConfig, isTauriRuntime, resolveRuntimeConfig } from './runtime'
+import {
+  fallbackSidecarConfig,
+  getRuntimeStatus,
+  initializeRuntimeConfig,
+  isTauriRuntime,
+  resolveRuntimeConfig,
+} from './runtime'
 
 describe('runtime config', () => {
+  afterEach(async () => {
+    await initializeRuntimeConfig({
+      windowRef: {},
+      fallbackBaseURL: 'http://localhost:8787/api',
+    })
+    configureApiToken(null)
+  })
+
   it('detects the Tauri runtime marker', () => {
     expect(isTauriRuntime({ __TAURI_INTERNALS__: {} })).toBe(true)
     expect(isTauriRuntime({})).toBe(false)
@@ -47,6 +61,24 @@ describe('runtime config', () => {
       resourceDir: '/tmp/studio',
       configDir: '/tmp/studio-config',
       api_token: 'secret-token',
+    })
+  })
+
+  it('keeps native helpers available when only sidecar config cannot be resolved', async () => {
+    await expect(
+      initializeRuntimeConfig({
+        windowRef: { __TAURI_INTERNALS__: {} },
+        invoke: async () => {
+          throw new Error('sidecar disabled')
+        },
+      }),
+    ).rejects.toThrow('sidecar disabled')
+
+    expect(getRuntimeStatus()).toMatchObject({
+      isTauri: true,
+      sidecar: 'degraded',
+      nativeHelpersAvailable: true,
+      message: 'sidecar disabled',
     })
   })
 

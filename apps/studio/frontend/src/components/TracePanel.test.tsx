@@ -1,16 +1,25 @@
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, expectTypeOf, it } from 'vitest'
 
-import type { CallbackEvent } from '../api/types'
+import type { CallbackEvent, EventEnvelope } from '../api/types'
 import { TracePanel } from './TracePanel'
 
 const events = [
   {
+    schema_version: 'studio.event.v1',
+    stream_id: 'run:run-1',
+    seq: 1,
+    cursor: 'run:run-1:1',
+    run_id: 'run-1',
     event_type: 'run_started',
-    phase: 'phase1',
     timestamp: '2026-06-14T00:00:00Z',
-    data: {},
-  } as unknown as CallbackEvent,
+    payload: {
+      schema_version: '1.0',
+      event_type: 'run_started',
+      phase_name: 'phase1',
+      timestamp: '2026-06-14T00:00:00Z',
+    },
+  } satisfies EventEnvelope,
 ]
 
 function render(props: Partial<React.ComponentProps<typeof TracePanel>>): string {
@@ -18,6 +27,29 @@ function render(props: Partial<React.ComponentProps<typeof TracePanel>>): string
     <TracePanel traceLogs={events} onSelectPrompt={() => undefined} {...props} />,
   )
 }
+
+describe('TracePanel EventEnvelope contract', () => {
+  it('accepts EventEnvelope trace logs instead of raw CallbackEvent fixtures', () => {
+    expectTypeOf<React.ComponentProps<typeof TracePanel>['traceLogs']>().toEqualTypeOf<EventEnvelope[]>()
+
+    const html = render({})
+
+    expect(html).toContain('Showing 1 of 1 events')
+  })
+
+  it('does not accept a raw CallbackEvent fixture as trace logs', () => {
+    const rawCallbackEvent = {
+      schema_version: '1.0',
+      event_type: 'run_started',
+      timestamp: '2026-06-14T00:00:00Z',
+    } as CallbackEvent
+
+    // @ts-expect-error TracePanel must consume EventEnvelope[] only.
+    const invalidProps: Partial<React.ComponentProps<typeof TracePanel>> = { traceLogs: [rawCallbackEvent] }
+
+    expect(invalidProps.traceLogs).toHaveLength(1)
+  })
+})
 
 describe('TracePanel Resume action', () => {
   it('shows a Resume button enabled when the run can be resumed', () => {

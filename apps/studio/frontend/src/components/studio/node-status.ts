@@ -1,4 +1,4 @@
-import type { CallbackEvent } from "@/api/types"
+import type { CallbackEvent, EventEnvelope } from "@/api/types"
 import type { SkillNodeStatus } from "@/components/GraphCanvas"
 
 // Engine event_types that mark a phase as failed (see
@@ -24,6 +24,16 @@ function isFailureEvent(type: string, status: string | null | undefined): boolea
   return false
 }
 
+type TraceEventInput = CallbackEvent | EventEnvelope
+
+function callbackPayload(event: TraceEventInput): CallbackEvent {
+  const maybeEnvelope = event as EventEnvelope
+  if (maybeEnvelope.schema_version === "studio.event.v1" && maybeEnvelope.payload) {
+    return maybeEnvelope.payload as CallbackEvent
+  }
+  return event as CallbackEvent
+}
+
 /**
  * Derive the per-node status map from an ordered trace event stream.
  *
@@ -32,10 +42,11 @@ function isFailureEvent(type: string, status: string | null | undefined): boolea
  * validation_pass / phase_end) end up green, while a phase whose final state is
  * a failure (validation_fail with no recovery, or retry_exhausted) ends up red.
  */
-export function deriveNodeStatuses(events: readonly CallbackEvent[] | null | undefined): Record<string, SkillNodeStatus> {
+export function deriveNodeStatuses(events: readonly TraceEventInput[] | null | undefined): Record<string, SkillNodeStatus> {
   const statuses: Record<string, SkillNodeStatus> = {}
   if (!events) return statuses
-  for (const event of events) {
+  for (const traceEvent of events) {
+    const event = callbackPayload(traceEvent)
     const phaseName = event.phase_name || event.current_phase
     if (!phaseName) continue
     const type = event.event_type || ""

@@ -68,6 +68,29 @@ def test_build_copilot_sdk_result_all_failed_is_failed() -> None:
     assert out["sdk_evidence"]["passed"] == 0
 
 
+def test_start_copilot_sdk_test_job_preserves_gateway_terminal_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core.adapters.gateway import ResourceTerminalError
+
+    async def run_job() -> llm.RoleTestJobResponse:
+        return await llm._start_copilot_sdk_test_job("copilot_chat")
+
+    def fail_resolution(_role_name: str) -> object:
+        raise ResourceTerminalError(
+            "resource.no_available_route",
+            {"role": "copilot_chat", "route_ids": []},
+        )
+
+    monkeypatch.setattr(llm, "_resolve_copilot_test_routes", fail_resolution)
+
+    job = asyncio.run(run_job())
+
+    assert job.status == "failed"
+    assert job.error_code == "resource.no_available_route"
+    assert job.error_payload == {"role": "copilot_chat", "route_ids": []}
+
+
 def test_run_copilot_sdk_test_job_updates_each_route_light_and_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

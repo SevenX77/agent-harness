@@ -8,6 +8,7 @@ live，错误就近显示") requires the i/o panel to drive.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -16,10 +17,23 @@ __test__ = True
 
 SKILL_ID = "text-segmentation"
 BASE = f"/api/skills/{SKILL_ID}/test_inputs"
+FALLBACK_HEADERS = {"X-Studio-Write-Fallback": "browser"}
 
 
 def _create(client: TestClient, name: str, content: dict[str, object]):
-    return client.post(BASE, json={"name": name, "content": content})
+    return client.post(BASE, json={"name": name, "content": content}, headers=FALLBACK_HEADERS)
+
+
+def test_create_requires_explicit_browser_fallback_header(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, _workspaces_dir = studio_roots
+    response = client.post(BASE, json={"name": "case-a", "content": {"input_text": "hello"}})
+
+    assert response.status_code == 409
+    assert response.json()["error_code"] == "NATIVE_FS_REQUIRED"
+    assert not (skills_dir / SKILL_ID / ".workspace" / "test_inputs" / "case-a.json").exists()
 
 
 def test_create_writes_input_and_returns_metadata(client: TestClient) -> None:
@@ -89,7 +103,7 @@ def test_get_missing_input_returns_not_found(client: TestClient) -> None:
 def test_delete_removes_input(client: TestClient) -> None:
     assert _create(client, "case-a", {"input_text": "hello"}).status_code == 200
 
-    deleted = client.delete(f"{BASE}/case-a")
+    deleted = client.delete(f"{BASE}/case-a", headers=FALLBACK_HEADERS)
     assert deleted.status_code == 204, deleted.text
 
     listing = client.get(BASE).json()
@@ -97,14 +111,30 @@ def test_delete_removes_input(client: TestClient) -> None:
 
 
 def test_delete_missing_input_returns_not_found(client: TestClient) -> None:
-    response = client.delete(f"{BASE}/does-not-exist")
+    response = client.delete(f"{BASE}/does-not-exist", headers=FALLBACK_HEADERS)
     assert response.status_code == 404
     assert response.json()["error_code"] == "TEST_INPUT_NOT_FOUND"
 
 
+def test_delete_requires_explicit_browser_fallback_header(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, _workspaces_dir = studio_roots
+    input_path = skills_dir / SKILL_ID / ".workspace" / "test_inputs" / "case-a.json"
+    input_path.parent.mkdir(parents=True, exist_ok=True)
+    input_path.write_text('{"input_text":"keep me"}', encoding="utf-8")
+
+    response = client.delete(f"{BASE}/case-a")
+
+    assert response.status_code == 409
+    assert response.json()["error_code"] == "NATIVE_FS_REQUIRED"
+    assert input_path.exists()
+
+
 def test_delete_then_recreate_same_name(client: TestClient) -> None:
     assert _create(client, "case-a", {"input_text": "v1"}).status_code == 200
-    assert client.delete(f"{BASE}/case-a").status_code == 204
+    assert client.delete(f"{BASE}/case-a", headers=FALLBACK_HEADERS).status_code == 204
     # Name is free again after delete.
     assert _create(client, "case-a", {"input_text": "v2"}).status_code == 200
 
@@ -113,6 +143,7 @@ def test_create_for_unknown_skill_is_skill_not_found(client: TestClient) -> None
     response = client.post(
         "/api/skills/no-such-skill/test_inputs",
         json={"name": "case-a", "content": {"input_text": "hi"}},
+        headers=FALLBACK_HEADERS,
     )
     assert response.status_code == 404
     assert response.json()["error_code"] == "SKILL_NOT_FOUND"

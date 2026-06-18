@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react"
 import type { Connection } from "@xyflow/react"
 import { toast } from "sonner"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
@@ -12,6 +12,7 @@ import { useRunStream } from "@/hooks/useRunStream"
 import { useGoldenDiff } from "@/hooks/useGoldenDiff"
 import { useSkills } from "@/hooks/useSkills"
 import { DiffView } from "@/components/diff/DiffView"
+import type { CopilotJudgeResponse } from "@/api/client"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
 import { compileSkill, getSkillDetail, resolveRunInput, serializeSkillGraph, writeSkillFile, wsUrl, postPredictRun, startRun, resumeRun } from "@/api/client"
 import { isTauriRuntime } from "@/config/runtime"
@@ -30,6 +31,7 @@ import { SettingsPage } from "./SettingsPage"
 import { SplitEditor } from "./SplitEditor"
 import { Toolbar, type PanelKind } from "./Toolbar"
 import type { FileMeta } from "./file-types"
+import { conflictFromSaveError, isSameSaveConflict, overwriteRetryPayload } from "./save-conflicts"
 import {
   WorkspaceProvider,
   type EditorSide,
@@ -44,6 +46,73 @@ interface WorkspaceProps {
   skillId: string | null
   onSelectSkill: (skillId: string) => void
   onCloseSkill: () => void
+}
+
+type CenterActionBarCreateProps = ComponentProps<typeof CenterActionBar> & {
+  onCreatePhase?: (kind: NewPhaseKind) => Promise<void> | void
+}
+
+const CenterActionBarWithCreate = CenterActionBar as (props: CenterActionBarCreateProps) => ReturnType<typeof CenterActionBar>
+
+interface CopilotJudgeReplayContext {
+  skillId: string | null
+  runId: string | null
+}
+
+function skillIdFromArtifactRef(ref: string | null | undefined): string | null {
+  if (!ref) {
+    return null
+  }
+  const [skillId] = ref.split("/", 1)
+  return skillId || null
+}
+
+function runIdFromRunResultsRef(ref: string | null | undefined): string | null {
+  if (!ref) {
+    return null
+  }
+  const runMatch = ref.match(/^[^/]+\/runs\/([^/]+)\/result\.json$/)
+  return runMatch?.[1] ?? null
+}
+
+export function isCopilotJudgeResultReplayable(
+  result: CopilotJudgeResponse | null,
+  context?: CopilotJudgeReplayContext,
+): boolean {
+  if (!result) {
+    return false
+  }
+
+  const runResultsRef = result.diff_summary.run_results_ref
+  const runSkillId = skillIdFromArtifactRef(runResultsRef)
+  const baselineSkillId = skillIdFromArtifactRef(result.baseline_ref)
+  const compareSkillId = skillIdFromArtifactRef(result.compare_result_ref)
+  const judgeContextSkillId = skillIdFromArtifactRef(result.judge_context_ref)
+  const judgedRunId = runIdFromRunResultsRef(runResultsRef)
+
+  if (!result.diff_summary.baseline_id || !judgedRunId) {
+    return false
+  }
+  if (!runSkillId || runSkillId !== baselineSkillId || runSkillId !== compareSkillId || runSkillId !== judgeContextSkillId) {
+    return false
+  }
+  if (!context) {
+    return true
+  }
+  return Boolean(context.skillId && context.runId && runSkillId === context.skillId && judgedRunId === context.runId)
+}
+
+export function compareReplayArgsForJudgeResult(
+  result: CopilotJudgeResponse | null,
+  context?: CopilotJudgeReplayContext,
+): { against: string | null; runId: string | null } {
+  if (!result || !isCopilotJudgeResultReplayable(result, context)) {
+    return { against: null, runId: null }
+  }
+  return {
+    against: result.diff_summary.baseline_id || null,
+    runId: runIdFromRunResultsRef(result.diff_summary.run_results_ref),
+  }
 }
 
 export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspaceProps) {
@@ -120,10 +189,53 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   }, [statusByNodeId])
 
   // Golden compare/promote for the active run (per-node diff surfaced as an overlay).
-  const goldenDiff = useGoldenDiff(currentSkillId, runId)
+  const goldenDiff = useGoldenDiff(currentSkillId, runId, currentWorkspaceRoot)
+  const [copilotJudgeResult, setCopilotJudgeResult] = useState<CopilotJudgeResponse | null>(null)
+  const clearCopilotJudgeResult = useCallback(() => {
+    setCopilotJudgeResult(null)
+  }, [])
+  const replayContext = useMemo<CopilotJudgeReplayContext>(() => ({
+    skillId: currentSkillId,
+    runId,
+  }), [currentSkillId, runId])
+  const replayableCopilotJudgeResult = useMemo(
+    () => isCopilotJudgeResultReplayable(copilotJudgeResult, replayContext) ? copilotJudgeResult : null,
+    [copilotJudgeResult, replayContext],
+  )
+
+  useEffect(() => {
+    if (copilotJudgeResult && !replayableCopilotJudgeResult) {
+      clearCopilotJudgeResult()
+    }
+  }, [clearCopilotJudgeResult, copilotJudgeResult, replayableCopilotJudgeResult])
+
+  const copilotJudgeRefs = useMemo(
+    () => goldenDiff.result
+      ? {
+          runResultsRef: goldenDiff.result.run_results_ref,
+          baselineRef: goldenDiff.result.baseline_ref,
+        }
+      : replayableCopilotJudgeResult
+        ? {
+            runResultsRef: replayableCopilotJudgeResult.diff_summary.run_results_ref,
+            baselineRef: replayableCopilotJudgeResult.baseline_ref,
+          }
+      : null,
+    [goldenDiff.result, replayableCopilotJudgeResult],
+  )
   const handleCompareToGolden = useCallback(() => {
+    const replay = compareReplayArgsForJudgeResult(copilotJudgeResult, replayContext)
+    if (replay.against && replay.runId) {
+      void goldenDiff.compare(replay.against, replay.runId)
+      return
+    }
+    clearCopilotJudgeResult()
     void goldenDiff.compare()
-  }, [goldenDiff])
+  }, [clearCopilotJudgeResult, copilotJudgeResult, goldenDiff, replayContext])
+  const handleCloseGoldenDiff = useCallback(() => {
+    clearCopilotJudgeResult()
+    goldenDiff.clear()
+  }, [clearCopilotJudgeResult, goldenDiff])
   const handlePromoteToGolden = useCallback(() => {
     void goldenDiff.promote().then((baseline) => {
       if (baseline) {
@@ -237,6 +349,37 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     return await writeSkillFile(currentSkillId, path, content, expectedHash)
   }, [currentSkillId, currentWorkspaceRoot])
 
+  const compileSkillById = useCallback(async (targetSkillId: string) => {
+    updateStage(targetSkillId, "compiling")
+    setCompileErrors((current) => ({ ...current, [targetSkillId]: [] }))
+    try {
+      const result = await compileSkill(targetSkillId)
+      if ("code" in result) {
+        updateStage(targetSkillId, "compile-fail")
+        setCompileErrors((current) => ({ ...current, [targetSkillId]: result.errors }))
+        const firstMessage = result.errors[0]?.message ?? result.detail
+        toast.error(`${result.errors.length} compile error${result.errors.length === 1 ? "" : "s"}: ${firstMessage}`)
+        return
+      }
+      if (result.status === "ok") {
+        updateStage(targetSkillId, "compile-pass")
+        setCompileErrors((current) => ({ ...current, [targetSkillId]: [] }))
+        toast.success(
+          `Compiled ${result.manifest_name} (${shortHash(result.artifact_ref.content_hash)}, fp ${shortHash(result.execution_fingerprint)})`,
+        )
+        void mutateSkillDetail()
+      }
+    } catch (error: unknown) {
+      updateStage(targetSkillId, "compile-fail")
+      const message = error instanceof Error ? error.message : "Compile request failed"
+      setCompileErrors((current) => ({
+        ...current,
+        [targetSkillId]: [{ file: null, line: null, field: null, severity: "fatal", message }],
+      }))
+      toast.error(message)
+    }
+  }, [mutateSkillDetail, updateStage])
+
   const handlePhaseFileSave = useCallback(async ({
     path,
     content,
@@ -273,16 +416,17 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     const graphContent = skillDetail.files?.["GRAPH.md"]
     const graphHash = graphContent === undefined ? null : await sha256Hex(graphContent)
     try {
-      await doWriteSkillFile(draft.filePath, draft.fileContent)
       const serialized = await serializeSkillGraph(currentSkillId, draft.phases, graphHash)
+      await doWriteSkillFile(draft.filePath, draft.fileContent)
       await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash)
+      await compileSkillById(currentSkillId)
       toast.success(`Created ${draft.phaseId}`)
       await mutateSkillDetail()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not create phase")
       void mutateSkillDetail()
     }
-  }, [currentSkillId, doWriteSkillFile, mutateSkillDetail, skillDetail])
+  }, [compileSkillById, currentSkillId, doWriteSkillFile, mutateSkillDetail, skillDetail])
 
   const handlePersistConnection = useCallback(async (connection: Connection) => {
     if (!currentSkillId || !skillDetail) {
@@ -297,12 +441,13 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     try {
       const serialized = await serializeSkillGraph(currentSkillId, result.phases, graphHash)
       await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash)
+      await compileSkillById(currentSkillId)
       await mutateSkillDetail()
     } catch (error) {
       void mutateSkillDetail()
       throw error
     }
-  }, [currentSkillId, doWriteSkillFile, mutateSkillDetail, skillDetail])
+  }, [compileSkillById, currentSkillId, doWriteSkillFile, mutateSkillDetail, skillDetail])
 
   const handleDisconnectConnection = useCallback(async (connection: { source: string; target: string }) => {
     if (!currentSkillId || !skillDetail) {
@@ -317,12 +462,13 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     try {
       const serialized = await serializeSkillGraph(currentSkillId, result.phases, graphHash)
       await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash)
+      await compileSkillById(currentSkillId)
       await mutateSkillDetail()
     } catch (error) {
       void mutateSkillDetail()
       throw error
     }
-  }, [currentSkillId, doWriteSkillFile, mutateSkillDetail, skillDetail])
+  }, [compileSkillById, currentSkillId, doWriteSkillFile, mutateSkillDetail, skillDetail])
 
   const setFileInFlight = useCallback((side: EditorSide, active: boolean) => {
     setInFlight((current) => ({ ...current, [side]: active }))
@@ -379,6 +525,38 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     }))
     setConflict(null)
   }, [conflict, currentWorkspaceRoot])
+
+  const handleOverwriteRetry = useCallback(async () => {
+    if (!conflict) return
+    try {
+      const payload = overwriteRetryPayload(conflict)
+      const result = await doWriteSkillFile(payload.path, payload.content, payload.expectedHash)
+      setActiveFileDetails((current) => {
+        const currentFile = current[conflict.side]
+        if (!currentFile || currentFile.path !== conflict.path) return current
+        return {
+          ...current,
+          [conflict.side]: {
+            ...currentFile,
+            content: payload.content,
+            hash: result.hash,
+            saveEnabled: true,
+            title: undefined,
+          },
+        }
+      })
+      setConflict((current) => isSameSaveConflict(current, conflict) ? null : current)
+      toast.success("Saved local changes")
+      void mutateSkillDetail()
+    } catch (error) {
+      const nextConflict = conflictFromSaveError(error, conflict)
+      if (nextConflict) {
+        setConflict((current) => isSameSaveConflict(current, conflict) ? nextConflict : current)
+        return
+      }
+      toast.error(errorMessage(error))
+    }
+  }, [conflict, doWriteSkillFile, mutateSkillDetail])
 
   const pushNavSkill = useCallback((nextSkillId: string) => {
     setNavStack((current) => [...current, nextSkillId])
@@ -480,35 +658,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
 
   const handleCompile = useCallback(() => {
     if (!currentSkillId) return
-    const targetSkillId = currentSkillId
-    updateStage(targetSkillId, "compiling")
-    setCompileErrors((current) => ({ ...current, [targetSkillId]: [] }))
-    void compileSkill(targetSkillId)
-      .then((result) => {
-        if ("code" in result) {
-          updateStage(targetSkillId, "compile-fail")
-          setCompileErrors((current) => ({ ...current, [targetSkillId]: result.errors }))
-          const firstMessage = result.errors[0]?.message ?? result.detail
-          toast.error(`${result.errors.length} compile error${result.errors.length === 1 ? "" : "s"}: ${firstMessage}`)
-          return
-        }
-        if (result.status === "ok") {
-          updateStage(targetSkillId, "compile-pass")
-          setCompileErrors((current) => ({ ...current, [targetSkillId]: [] }))
-          toast.success(`Compiled ${result.manifest_name}`)
-          void mutateSkillDetail()
-        }
-      })
-      .catch((error: unknown) => {
-        updateStage(targetSkillId, "compile-fail")
-        const message = error instanceof Error ? error.message : "Compile request failed"
-        setCompileErrors((current) => ({
-          ...current,
-          [targetSkillId]: [{ file: null, line: null, field: null, severity: "fatal", message }],
-        }))
-        toast.error(message)
-      })
-  }, [currentSkillId, mutateSkillDetail, updateStage])
+    void compileSkillById(currentSkillId)
+  }, [compileSkillById, currentSkillId])
 
   // F5/DEF-025: a copilot edit (Write/Edit / Accept / Reject) hit disk. Reflect it
   // in the open editor buffer, and on a settled review recompile so predict/run
@@ -551,6 +702,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     try {
       const inputData = await resolveRunInput(targetSkillId, selectedTestInputId)
       await postPredictRun(targetSkillId, inputData)
+      clearCopilotJudgeResult()
       updateStage(targetSkillId, "predict-pass")
       toast.success("Predict run completed successfully")
     } catch (error: unknown) {
@@ -592,6 +744,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     try {
       const inputData = await resolveRunInput(targetSkillId, selectedTestInputId)
       const result = await startRun(targetSkillId, inputData)
+      clearCopilotJudgeResult()
       setRunId(result.run_id)
       // F1: starting a run opens the timeline region to stream live trace events.
       setActivePanel("timeline")
@@ -613,6 +766,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       const result = await resumeRun(currentSkillId, runId)
       setActivePanel("timeline")
       // Re-subscribe the trace stream to the resumed run (new id, or re-attach).
+      clearCopilotJudgeResult()
       setRunId(null)
       setRunId(result.run_id)
       toast.success("Run resumed from checkpoint")
@@ -642,6 +796,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
       <Header
         skillId={currentSkillId}
+        workspaceRoot={currentWorkspaceRoot}
         navStack={displayNavStack}
         onBreadcrumbClick={popNavTo}
         copilotOpen={copilotOpen}
@@ -676,6 +831,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                 <Panels
                   activePanel={activePanel}
                   skillId={currentSkillId}
+                  workspaceRoot={currentWorkspaceRoot}
                   skillDetail={skillDetail}
                   selectedNode={selectedNode}
                   selectedTestInputId={selectedTestInputId}
@@ -742,11 +898,12 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   {currentCompileErrors.length > 0 ? (
                     <CompileErrorPanel errors={currentCompileErrors} />
                   ) : null}
-                  <CenterActionBar
+                  <CenterActionBarWithCreate
                     stage={deriveBuildStage(currentSkillId)}
                     onCompile={handleCompile}
                     onPredict={handlePredict}
                     onRun={handleRun}
+                    onCreatePhase={handleCreatePhase}
                   />
                 </>
               ) : null}
@@ -756,7 +913,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                     <span className="text-sm font-semibold text-foreground">Golden Diff</span>
                     <button
                       type="button"
-                      onClick={goldenDiff.clear}
+                      onClick={handleCloseGoldenDiff}
                       aria-label="Close golden diff"
                       className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
                     >
@@ -779,7 +936,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                 </div>
               ) : null}
               <PromptInspector
-                promptEvent={promptIndex != null ? runStream.events[promptIndex] ?? null : null}
+                promptEvent={promptIndex != null ? runStream.events[promptIndex]?.payload ?? null : null}
                 onClose={() => setPromptIndex(null)}
               />
             </div>
@@ -796,7 +953,11 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
               >
                 <CopilotPanel
                   skillId={currentSkillId}
+                  workspaceRoot={currentWorkspaceRoot}
+                  view={copilotJudgeRefs ? "eval" : "edit"}
+                  judgeRefs={copilotJudgeRefs}
                   completedRunId={completedRunId}
+                  onJudgePrepared={setCopilotJudgeResult}
                   onFileChanged={handleCopilotFileChanged}
                 />
               </ResizablePanel>
@@ -809,6 +970,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         onKeepLocal={() => setConflict(null)}
         onUseRemote={handleUseRemote}
         onViewDiff={handleViewDiff}
+        onOverwriteRetry={handleOverwriteRetry}
       />
     </div>
     </WorkspaceProvider>
@@ -842,4 +1004,10 @@ function languageForPath(path: string): string {
   if (path.endsWith(".json")) return "json"
   if (path.endsWith(".py")) return "python"
   return "markdown"
+}
+
+function shortHash(value: string): string {
+  const [algorithm, digest] = value.split(":", 2)
+  if (!algorithm || !digest) return value
+  return `${algorithm}:${digest.slice(0, 8)}`
 }

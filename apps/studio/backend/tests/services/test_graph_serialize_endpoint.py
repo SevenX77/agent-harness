@@ -91,3 +91,72 @@ def test_serialize_tolerates_a_phase_dir_not_yet_in_graph(
 
     assert response.status_code == 200, response.text
     assert "  - extra" in response.json()["markdown_content"]
+
+
+def test_serialize_preserves_unknown_graph_markdown_sections(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, _ = studio_roots
+    graph_md = skills_dir / "text-segmentation" / "GRAPH.md"
+    graph_md.write_text(
+        """---
+schema_version: "v0.3.0"
+name: text-segmentation
+description: Text segments
+x-ui-state:
+  nodes:
+    setup:
+      x: 10
+      y: 20
+metadata:
+  owner: studio
+iterate:
+  max: 3
+io:
+  inputs:
+    type: object
+    properties:
+      input_text:
+        type: string
+    required: [input_text]
+  outputs:
+    type: object
+    properties:
+      prepared:
+        type: boolean
+    required: [prepared]
+phases:
+  - setup
+---
+<!-- keep: intro comment -->
+<note>Preserve this unknown body block.</note>
+
+<phase depends_on="input" output>setup</phase>
+
+<!-- keep: trailing comment -->
+""",
+        encoding="utf-8",
+    )
+
+    response = client.post(
+        "/api/skills/text-segmentation/graph/serialize",
+        json={
+            "phases": [
+                {"id": "setup", "src": "phases/setup", "mode": "logic", "depends_on": []},
+                {"id": "review", "src": "phases/review", "mode": "logic", "depends_on": ["setup"]},
+            ],
+            "expected_hash": None,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    markdown = response.json()["markdown_content"]
+    assert "x-ui-state:" in markdown
+    assert "metadata:" in markdown
+    assert "iterate:" in markdown
+    assert "<!-- keep: intro comment -->" in markdown
+    assert "<note>Preserve this unknown body block.</note>" in markdown
+    assert "<!-- keep: trailing comment -->" in markdown
+    assert "  - review" in markdown
+    assert '<phase depends_on="setup" output>review</phase>' in markdown

@@ -38,11 +38,23 @@ export interface CompileError {
   message: string
 }
 
+export interface ArtifactRef {
+  artifact_id: string
+  content_hash: string
+  store: 'ephemeral' | 'product'
+  version: string | null
+  manifest_ref: string
+  source_map_ref: string
+}
+
 export interface CompileSuccess {
   skill_id: string
   status: 'ok'
   phase_count: number
   manifest_name: string
+  artifact_ref: ArtifactRef
+  source_map_ref: string
+  execution_fingerprint: string
 }
 
 export interface CompileFailure {
@@ -104,11 +116,38 @@ export interface PublishSkillReq {
   version?: string
 }
 
+export interface ReleaseArtifactRef {
+  artifact_id: string
+  content_hash: string
+  store: 'product'
+  manifest_ref: string
+  source_map_ref?: string | null
+}
+
+export interface ReleaseRemoteSync {
+  status: 'pending' | 'failed' | 'succeeded' | 'skipped'
+  reason?: string
+  error_type?: string
+  error?: string
+  details?: JsonObject
+}
+
+export interface ReleaseManifest {
+  release_version: string
+  artifact_id: string
+  content_hash: string
+  manifest_ref: string
+  artifact_ref: ReleaseArtifactRef
+  remote_sync?: ReleaseRemoteSync | null
+  idempotency_key?: string
+  created_at?: string
+}
+
 export interface PublishResult {
   status: 'ok' | 'error'
   message: string
   artifact_id?: string | null
-  extra?: Record<string, unknown>
+  extra?: Partial<ReleaseManifest> & Record<string, unknown>
 }
 
 export interface TokensMetrics {
@@ -177,7 +216,8 @@ export interface RunListResponse {
   total: number
 }
 
-export type GitHistoryKind = 'auto_run' | 'manual' | 'other'
+export type GitHistoryKind = 'auto_run' | 'manual' | 'other' | 'release'
+export type GitHistorySource = 'git' | 'manifest'
 
 export interface GitHistoryItem {
   sha: string
@@ -185,6 +225,12 @@ export interface GitHistoryItem {
   author: string
   timestamp: string
   kind: GitHistoryKind
+  source?: GitHistorySource
+  revertable?: boolean
+  release_version?: string | null
+  artifact_id?: string | null
+  content_hash?: string | null
+  manifest_ref?: string | null
 }
 
 export interface RevertSkillReq {
@@ -194,7 +240,7 @@ export interface RevertSkillReq {
 export interface RunDetail {
   metadata: RunMetadata
   input_data: JsonObject | null
-  events: CallbackEvent[]
+  events: EventEnvelope[]
   final_context: JsonObject | null
   artifacts: string[] | null
 }
@@ -226,10 +272,23 @@ export interface PredictDiagnosticExport {
 
 export interface GoldenBaseline {
   id: string
+  source_run_id: string | null
+  source_run_results_ref: string | null
+  baseline_ref: string | null
   linked_input_id: string
   created_at: string
   locked: boolean
   content_path: string
+}
+
+export interface GoldenBaselineFile {
+  path: string
+  content: string
+}
+
+export interface GoldenBaselinePlan {
+  baseline: GoldenBaseline
+  files: GoldenBaselineFile[]
 }
 
 export interface SetGoldenReq {
@@ -248,18 +307,26 @@ export interface FieldDifference {
   changed: boolean
 }
 
-export interface NodeGoldenResult {
+export interface NodeGoldenGroup {
   node_id: string
-  verdict: 'pass' | 'fail'
+  phase_id: string | null
+  status: 'pass' | 'fail'
   score: number
-  differences: FieldDifference[]
+  field_differences: FieldDifference[]
+  stale_fields: string[]
+  schema_status: 'valid' | 'stale' | 'missing'
+  baseline_ref: string
+  run_results_ref: string
 }
 
 export interface CompareResult {
-  differences: FieldDifference[]
+  baseline_id: string
+  source_run_id: string | null
+  source_run_results_ref: string | null
+  baseline_ref: string
+  run_results_ref: string
   total_score: number
-  golden_run_id: string
-  node_results: NodeGoldenResult[]
+  node_groups: NodeGoldenGroup[]
 }
 
 export interface TerminalSession {
@@ -483,6 +550,26 @@ export interface CallbackEventBase {
 }
 
 export type CallbackEvent = CallbackEventBase & Record<string, JsonValue | undefined>
+
+export interface TransportErrorPayload {
+  error_code: string
+  message: string
+  details: JsonObject
+  retryable: boolean
+}
+
+export interface EventEnvelope {
+  schema_version: 'studio.event.v1'
+  stream_id: string
+  seq: number
+  cursor: string
+  run_id: string
+  event_type: string
+  timestamp: string
+  payload: CallbackEvent
+  error_code?: string | null
+  error_payload?: TransportErrorPayload | null
+}
 
 export interface StudioGlobalEvent {
   type: 'skill_changed'

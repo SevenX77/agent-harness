@@ -25,6 +25,10 @@ from graph_agent_gateway.registry.schema import (
     RoleRouteEntry,
     RuntimePolicy,
 )
+from graph_agent_gateway.route_handoff import (
+    ResolvedRouteChain,
+    resolved_role_to_route_chain,
+)
 from graph_agent_gateway.storage_contracts import ConfigTruthStore
 
 
@@ -113,13 +117,13 @@ class ModelResolver:
         except RegistryResolutionError as exc:
             raise ResourceTerminalError(
                 error_code="resource.no_available_route",
-                error_payload={"role": role_name},
+                error_payload=_route_resolution_error_payload(role_name, exc),
             ) from exc
 
         if not resolved.routes:
             raise ResourceTerminalError(
                 error_code="resource.no_available_route",
-                error_payload={"role": role_name},
+                error_payload=resolved_role_to_route_chain(resolved).error_payload or {"role": role_name},
             )
 
         first_route = resolved.routes[0]
@@ -164,7 +168,7 @@ class ModelResolver:
         role_name: str,
         *,
         route_override: str | None = None,
-    ) -> ResolvedRole:
+    ) -> ResolvedRouteChain:
         with self._stats_lock:
             self.stats.total_resolves += 1
         try:
@@ -177,15 +181,15 @@ class ModelResolver:
         except RegistryResolutionError as exc:
             raise ResourceTerminalError(
                 error_code="resource.no_available_route",
-                error_payload={"role": role_name},
+                error_payload=_route_resolution_error_payload(role_name, exc),
             ) from exc
 
         if not resolved.routes:
             raise ResourceTerminalError(
                 error_code="resource.no_available_route",
-                error_payload={"role": role_name},
+                error_payload=resolved_role_to_route_chain(resolved).error_payload or {"role": role_name},
             )
-        return resolved
+        return resolved_role_to_route_chain(resolved)
 
     def mark_provider_down(self, route_id: str) -> None:
         """Manually mark a route down in the shared gateway cache."""
@@ -223,6 +227,25 @@ class ModelResolver:
             RuntimeError("manual mark down"),
             role.runtime_policy,
         )
+
+
+def _route_resolution_error_payload(
+    role_name: str,
+    exc: RegistryResolutionError,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"role": role_name}
+    skipped = getattr(exc, "skipped_diagnostics", None)
+    if skipped:
+        payload["skipped"] = [
+            {
+                "route_id": item.route_id,
+                "reason_code": item.reason_code,
+                "message": item.message,
+                "from_override": item.from_override,
+            }
+            for item in skipped
+        ]
+    return payload
 
 
 def _assert_v4_credentials(payload: dict[str, Any], path: Path) -> None:

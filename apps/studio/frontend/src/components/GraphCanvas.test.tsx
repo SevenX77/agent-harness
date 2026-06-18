@@ -347,17 +347,24 @@ describe('GraphCanvas', () => {
   })
 
   it('renders subgraph expand icon button when collapsed', () => {
-    const html = skillNodeHtml({ subgraphPath: 'subgraph.SKILL.md', isExpanded: false })
+    const html = skillNodeHtml({ subgraphPath: '/abs/subgraph', isExpanded: false })
 
     expect(html).toContain('aria-label="Expand subgraph"')
     expect(html).toContain('lucide-plus')
   })
 
   it('renders subgraph collapse icon button when expanded', () => {
-    const html = skillNodeHtml({ subgraphPath: 'subgraph.SKILL.md', isExpanded: true })
+    const html = skillNodeHtml({ subgraphPath: '/abs/subgraph', isExpanded: true })
 
     expect(html).toContain('aria-label="Collapse subgraph"')
     expect(html).toContain('lucide-minus')
+  })
+
+  it('does not render subgraph controls for non-absolute child references', () => {
+    const html = skillNodeHtml({ mode: 'subgraph', subgraphPath: 'legacy.registry.child', isExpanded: false })
+
+    expect(html).not.toContain('aria-label="Expand subgraph"')
+    expect(html).not.toContain('aria-label="Collapse subgraph"')
   })
 
   it('does not render a subgraph icon button for regular nodes', () => {
@@ -391,7 +398,7 @@ describe('GraphCanvas', () => {
     const stopPropagation = vi.fn()
     const onToggleSubgraph = vi.fn()
     const node = renderSkillNodeRoot({
-      subgraphPath: 'subgraph.SKILL.md',
+      subgraphPath: '/abs/subgraph',
       onToggleSubgraph,
     })
 

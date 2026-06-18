@@ -12,8 +12,8 @@
     "02_capabilities/compile-lint/mvp1-alignment.md": "c31b5ec77c435232eb8be4a31fd40b7b5d8ec360c7067bbda78c77d3821c7db3",
     "02_capabilities/conflict-overwrite/baseline.md": "295e7426da8f405dd5203ece8002749700eee5e99c985597ff634ec7992c0acd",
     "02_capabilities/conflict-overwrite/mvp1-alignment.md": "a5893c187d5bbbaa1db6b4cfd70b1fdcee206bb4d3e92e9f432b9fcd090f5827",
-    "02_capabilities/copilot-assist/baseline.md": "07ecd21042c9263713c5706ce230ec1750918c34319f5d043a7f02c7a4566b6a",
-    "02_capabilities/copilot-assist/mvp1-alignment.md": "67aaec737133062065213cbc496d002304c3e74b8afc01dab0f0885aa9863887",
+    "02_capabilities/copilot-assist/baseline.md": "65206d479caf684a7651a85635b1eaadb2336688ab2ca5b7e16ea0977b84dfb0",
+    "02_capabilities/copilot-assist/mvp1-alignment.md": "d2dfe80c200e4d1cb09df7e156b7af8e0c048e6d0e3e778aa0d27f0f8ae9b8d6",
     "02_capabilities/debug-resume/baseline.md": "4c3133686d6b7067c512b3ec29208f8258338ed4b84dad266ddae9a726634d8a",
     "02_capabilities/debug-resume/mvp1-alignment.md": "1421414ccc724883d8115a467c153289fc2245792c69916fe248a89b56e7fcfa",
     "02_capabilities/file-editing/baseline.md": "0d548d063c8e7f4479f9538b225a3cc62e5c9b32359e960a97289280b0ba04c9",
@@ -67,8 +67,8 @@
     "04_platform/i18n.md": "dc03e664cdf13b12684b1283cac2b73dc34407b34cce3009b69bee9a08dc0338",
     "04_platform/llm-copilot-http-api/baseline.md": "bf781e844fa54bc6bfa2191e22a6f01227d70cfee41e9ac2348e3a55398e08b7",
     "04_platform/llm-copilot-http-api/mvp1-alignment.md": "1548c53503819da9b8617f54f66d514f551aa3d10cf1245d3a48b708d41130d6",
-    "04_platform/native-fs/baseline.md": "df8604575be7a59501a0620cea74519dc8f72595ee41bf26fb32f98d7dbe6cc7",
-    "04_platform/native-fs/mvp1-alignment.md": "cd33fec3a034e0cc13ba81a6fdd35615e0c13f63d7870c5ac1f2a6aaf15057a8",
+    "04_platform/native-fs/baseline.md": "47d7eab8f9ebdf8fa60f7eb07080db0ddd5935267492bd5726a8ea8ac54cf8e4",
+    "04_platform/native-fs/mvp1-alignment.md": "e03903163f86bc6c19da4205515916f1831f54b265a58117edd3f10f1b2078f7",
     "04_platform/state-engine/baseline.md": "be167db7918d5e83f4931696e7ae582f90e698601aecce4069a2376e0444c771",
     "04_platform/state-engine/mvp1-alignment.md": "b1b10aa012b908c91f2983f5a282b20d70aa5c42a99647273370f68a507fd119"
   }

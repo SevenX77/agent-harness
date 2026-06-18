@@ -1,4 +1,5 @@
-import type { GraphTopologyItem, SkillDetail } from "@/api/types"
+import type { SkillDetail } from "@/api/types"
+import { resolveSubgraphReference, type SubgraphReferenceStatus } from "@/components/studio/subgraph-path"
 
 /**
  * Real subgraph membership for the Assets panel.
@@ -14,7 +15,7 @@ import type { GraphTopologyItem, SkillDetail } from "@/api/types"
  * references. The view is read-only: it reports what the skill actually
  * references, never fabricated membership.
  */
-export type SubgraphMembershipStatus = "resolved" | "missing"
+export type SubgraphMembershipStatus = SubgraphReferenceStatus
 
 export interface SubgraphMembership {
   /** Phase id of the subgraph phase (its label in the topology). */
@@ -23,14 +24,10 @@ export interface SubgraphMembership {
   label: string
   /** Absolute child-graph path, or null when the phase declares none. */
   path: string | null
+  /** Legacy registry id still present in SUBGRAPH.md before migration. */
+  legacyTargetSkill?: string | null
   /** `resolved` when a usable path is present, else `missing`. */
   status: SubgraphMembershipStatus
-}
-
-function normalizedPath(value: GraphTopologyItem["path"]): string | null {
-  if (typeof value !== "string") return null
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
 }
 
 /**
@@ -44,12 +41,13 @@ export function subgraphMembership(skillDetail?: SkillDetail): SubgraphMembershi
   const memberships: SubgraphMembership[] = []
   for (const row of topology) {
     if (row.mode !== "subgraph") continue
-    const path = normalizedPath(row.path)
+    const reference = resolveSubgraphReference(row, skillDetail?.files)
     memberships.push({
       id: row.id,
       label: row.id,
-      path,
-      status: path ? "resolved" : "missing",
+      path: reference.path,
+      ...(reference.legacyTargetSkill ? { legacyTargetSkill: reference.legacyTargetSkill } : {}),
+      status: reference.status,
     })
   }
   return memberships

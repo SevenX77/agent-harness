@@ -1,5 +1,6 @@
 import { toast } from 'sonner'
-import { isTauriRuntime } from '../config/runtime'
+import { getRuntimeStatus, isTauriRuntime } from '../config/runtime'
+import type { ReleaseArtifactRef } from '../api/types'
 
 export interface RecentWorkspaceEntry {
   absolutePath: string
@@ -10,6 +11,35 @@ export interface RecentWorkspaceEntry {
 
 type TauriCommand = 'open_in_cursor' | 'open_in_terminal' | 'open_in_codex' | 'reveal_in_file_manager'
 
+function desktopRuntimeUnavailableError(): Error {
+  const status = getRuntimeStatus()
+  return new Error(
+    status.message ? `Desktop runtime unavailable: ${status.message}` : 'Desktop runtime unavailable',
+  )
+}
+
+function toastDesktopRuntimeUnavailable(): void {
+  const status = getRuntimeStatus()
+  if (status.message) {
+    toast.error('Desktop runtime unavailable', { description: status.message })
+    return
+  }
+  toast.error('Desktop runtime unavailable')
+}
+
+function nativeHelpersAreAvailable(): boolean {
+  return getRuntimeStatus().nativeHelpersAvailable
+}
+
+function assertNativeHelpersAvailable(): void {
+  if (!isTauriRuntime()) {
+    throw new Error('Desktop only')
+  }
+  if (!nativeHelpersAreAvailable()) {
+    throw desktopRuntimeUnavailableError()
+  }
+}
+
 async function invokeShell(command: TauriCommand, path: string) {
   const targetPath = path.trim()
   if (!targetPath) {
@@ -19,6 +49,10 @@ async function invokeShell(command: TauriCommand, path: string) {
 
   if (!isTauriRuntime()) {
     toast.info('Desktop only')
+    return
+  }
+  if (!nativeHelpersAreAvailable()) {
+    toastDesktopRuntimeUnavailable()
     return
   }
 
@@ -50,6 +84,10 @@ export async function revealInFileManager(path: string) {
   }
 
   if (isTauriRuntime()) {
+    if (!nativeHelpersAreAvailable()) {
+      toastDesktopRuntimeUnavailable()
+      return
+    }
     try {
       const { invoke } = await import('@tauri-apps/api/core')
       await invoke('reveal_in_file_manager', { path: targetPath })
@@ -73,6 +111,10 @@ export async function selectSkillDirectory(defaultDirectory?: string | null): Pr
     toast.info('Desktop only')
     return null
   }
+  if (!nativeHelpersAreAvailable()) {
+    toastDesktopRuntimeUnavailable()
+    return null
+  }
 
   try {
     const { invoke } = await import('@tauri-apps/api/core')
@@ -92,16 +134,90 @@ export async function writeWorkspaceFile(
   path: string,
   content: string,
   expectedHash: string | null = null,
+  options: { createIfAbsent?: boolean } = {},
 ): Promise<{ path: string; hash: string }> {
-  if (!isTauriRuntime()) {
-    throw new Error('Desktop only')
-  }
+  assertNativeHelpersAvailable()
   const { invoke } = await import('@tauri-apps/api/core')
-  return await invoke<{ path: string; hash: string }>('write_workspace_file', {
+  const payload: {
+    workspaceRoot: string
+    relativePath: string
+    content: string
+    expectedHash: string | null
+    createIfAbsent?: boolean
+  } = {
     workspaceRoot,
-    path,
+    relativePath: path,
     content,
     expectedHash,
+  }
+  if (options.createIfAbsent) {
+    payload.createIfAbsent = true
+  }
+  return await invoke<{ path: string; hash: string }>('write_workspace_file', payload)
+}
+
+export interface WritePublishPackageRequest {
+  workspaceRoot: string
+  relativePath: string
+  releaseVersion: string
+  contentHash: string
+  manifestRef: string
+  artifactRef: ReleaseArtifactRef
+}
+
+export interface WritePublishPackageResult {
+  path: string
+  nativePath: string
+  hash: string
+  bytesWritten: number
+}
+
+export async function writePublishPackage(
+  request: WritePublishPackageRequest,
+): Promise<WritePublishPackageResult> {
+  assertNativeHelpersAvailable()
+  const { invoke } = await import('@tauri-apps/api/core')
+  return await invoke<WritePublishPackageResult>('publish_package_writer', {
+    workspaceRoot: request.workspaceRoot,
+    relativePath: request.relativePath,
+    releaseVersion: request.releaseVersion,
+    contentHash: request.contentHash,
+    manifestRef: request.manifestRef,
+    artifactRef: request.artifactRef,
+  })
+}
+
+export interface GoldenBaselineWritePayload {
+  resultPath: string
+  resultContent: string
+  metadataPath: string
+  metadataContent: string
+}
+
+export async function writeGoldenBaseline(
+  workspaceRoot: string,
+  payload: GoldenBaselineWritePayload,
+): Promise<void> {
+  assertNativeHelpersAvailable()
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('write_golden_baseline', {
+    workspaceRoot,
+    resultPath: payload.resultPath,
+    resultContent: payload.resultContent,
+    metadataPath: payload.metadataPath,
+    metadataContent: payload.metadataContent,
+  })
+}
+
+export async function deleteWorkspacePath(
+  workspaceRoot: string,
+  path: string,
+): Promise<void> {
+  assertNativeHelpersAvailable()
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('delete_workspace_path', {
+    workspaceRoot,
+    path,
   })
 }
 
@@ -111,7 +227,7 @@ export async function addRecentWorkspace(
   identity: string,
   lastOpenedAt: string,
 ): Promise<void> {
-  if (!isTauriRuntime()) return
+  if (!isTauriRuntime() || !nativeHelpersAreAvailable()) return
   const { invoke } = await import('@tauri-apps/api/core')
   await invoke('add_recent_workspace', {
     absolutePath,
@@ -122,7 +238,7 @@ export async function addRecentWorkspace(
 }
 
 export async function listRecentWorkspaces(): Promise<RecentWorkspaceEntry[]> {
-  if (!isTauriRuntime()) return []
+  if (!isTauriRuntime() || !nativeHelpersAreAvailable()) return []
   const { invoke } = await import('@tauri-apps/api/core')
   const raw = await invoke<Array<{
     absolute_path: string
@@ -139,13 +255,13 @@ export async function listRecentWorkspaces(): Promise<RecentWorkspaceEntry[]> {
 }
 
 export async function removeRecentWorkspace(identity: string): Promise<void> {
-  if (!isTauriRuntime()) return
+  if (!isTauriRuntime() || !nativeHelpersAreAvailable()) return
   const { invoke } = await import('@tauri-apps/api/core')
   await invoke('remove_recent_workspace', { identity })
 }
 
 export async function ensureWorkspaceSupportDirs(workspaceRoot: string): Promise<void> {
-  if (!isTauriRuntime()) return
+  if (!isTauriRuntime() || !nativeHelpersAreAvailable()) return
   const { invoke } = await import('@tauri-apps/api/core')
   await invoke('ensure_workspace_support_dirs', { workspaceRoot })
 }
@@ -160,9 +276,7 @@ export async function readWorkspaceFile(
   workspaceRoot: string,
   path: string,
 ): Promise<ReadWorkspaceFileResult> {
-  if (!isTauriRuntime()) {
-    throw new Error('Desktop only')
-  }
+  assertNativeHelpersAvailable()
   const { invoke } = await import('@tauri-apps/api/core')
   return await invoke<ReadWorkspaceFileResult>('read_workspace_file', {
     workspaceRoot,
@@ -179,7 +293,7 @@ export async function listWorkspaceDir(
   workspaceRoot: string,
   relativeDir: string,
 ): Promise<WorkspaceDirEntry[]> {
-  if (!isTauriRuntime()) return []
+  if (!isTauriRuntime() || !nativeHelpersAreAvailable()) return []
   const { invoke } = await import('@tauri-apps/api/core')
   return await invoke<WorkspaceDirEntry[]>('list_workspace_dir', {
     workspaceRoot,
@@ -206,9 +320,7 @@ export async function checkpointWorkspaceFile(
   workspaceRoot: string,
   path: string,
 ): Promise<CheckpointResult> {
-  if (!isTauriRuntime()) {
-    throw new Error('Desktop only')
-  }
+  assertNativeHelpersAvailable()
   const { invoke } = await import('@tauri-apps/api/core')
   return await invoke<CheckpointResult>('checkpoint_workspace_file', { workspaceRoot, path })
 }
@@ -224,9 +336,7 @@ export async function seedWorkspaceCheckpoint(
   content: string,
   existed: boolean,
 ): Promise<CheckpointResult> {
-  if (!isTauriRuntime()) {
-    throw new Error('Desktop only')
-  }
+  assertNativeHelpersAvailable()
   const { invoke } = await import('@tauri-apps/api/core')
   return await invoke<CheckpointResult>('seed_workspace_checkpoint', {
     workspaceRoot,
@@ -241,9 +351,7 @@ export async function restoreWorkspaceFile(
   workspaceRoot: string,
   path: string,
 ): Promise<RestoreResult> {
-  if (!isTauriRuntime()) {
-    throw new Error('Desktop only')
-  }
+  assertNativeHelpersAvailable()
   const { invoke } = await import('@tauri-apps/api/core')
   return await invoke<RestoreResult>('restore_workspace_file', { workspaceRoot, path })
 }
@@ -253,7 +361,7 @@ export async function clearWorkspaceCheckpoint(
   workspaceRoot: string,
   path: string,
 ): Promise<void> {
-  if (!isTauriRuntime()) return
+  assertNativeHelpersAvailable()
   const { invoke } = await import('@tauri-apps/api/core')
   await invoke('clear_workspace_checkpoint', { workspaceRoot, path })
 }

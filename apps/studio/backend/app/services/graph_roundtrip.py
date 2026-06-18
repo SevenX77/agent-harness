@@ -22,6 +22,7 @@ def serialize_graph_topology(
     description: str | None,
     io: PhaseIOSchema,
     phases: Sequence[GraphPhaseRef],
+    original_md: str | None = None,
 ) -> str:
     """Serialize a canvas topology (phase ids + real depends_on) to GRAPH.md.
 
@@ -36,16 +37,33 @@ def serialize_graph_topology(
         description=description,
         io=io,
         phases=phases,
+        original_md=original_md,
     )
 
 
 def execution_fingerprint(graph: dict[str, Any]) -> str:
-    g = copy.deepcopy(graph)
-    # Remove UI-only metadata from top-level
-    g.pop("ui", None)
-    g.pop("viewport", None)
-    g.pop("selected_nodes", None)
-    g.pop("editor_decorations", None)
+    g = _without_ui_metadata(copy.deepcopy(graph))
 
     canonical = json.dumps(g, sort_keys=True)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _without_ui_metadata(value: Any) -> Any:
+    ui_only_keys = {
+        "ui",
+        "metadata",
+        "comments",
+        "viewport",
+        "selected_nodes",
+        "editor_decorations",
+        "position",
+    }
+    if isinstance(value, dict):
+        return {
+            key: _without_ui_metadata(child)
+            for key, child in value.items()
+            if key not in ui_only_keys
+        }
+    if isinstance(value, list):
+        return [_without_ui_metadata(item) for item in value]
+    return value

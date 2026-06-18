@@ -79,12 +79,48 @@ describe('buildNodes', () => {
     expect(nodes[0].id).toBe(INPUT_ID)
     expect(nodes[nodes.length - 1].id).toBe(OUTPUT_ID)
   })
+
+  it('does not treat legacy SUBGRAPH target_skill as a drillable child path', () => {
+    const nodes = buildNodes('demo', skillDetail({
+      phases: ['legacy'],
+      graph_topology: [
+        { id: 'legacy', src: 'phases/legacy/SUBGRAPH.md', depends_on: [], mode: 'subgraph', path: null },
+      ],
+      files: {
+        'phases/legacy/SUBGRAPH.md': [
+          '---',
+          'target_skill: old.registry.child',
+          '---',
+          '',
+        ].join('\n'),
+      },
+    }), new Set(), () => {}, {})
+
+    const legacy = phaseNode(nodes, 'legacy')
+    expect(legacy.subgraphPath).toBeNull()
+    expect(legacy.onToggleSubgraph).toBeUndefined()
+  })
+
+  it('only exposes absolute subgraph paths for drill-down and trims surrounding whitespace', () => {
+    const nodes = buildNodes('demo', skillDetail({
+      phases: ['trimmed', 'relative'],
+      graph_topology: [
+        { id: 'trimmed', src: 'phases/trimmed/SUBGRAPH.md', depends_on: [], mode: 'subgraph', path: '  /abs/child  ' },
+        { id: 'relative', src: 'phases/relative/SUBGRAPH.md', depends_on: [], mode: 'subgraph', path: 'legacy.registry.child' },
+      ],
+    }), new Set(), () => {}, {})
+
+    expect(phaseNode(nodes, 'trimmed').subgraphPath).toBe('/abs/child')
+    expect(phaseNode(nodes, 'trimmed').onToggleSubgraph).toBeTypeOf('function')
+    expect(phaseNode(nodes, 'relative').subgraphPath).toBeNull()
+    expect(phaseNode(nodes, 'relative').onToggleSubgraph).toBeUndefined()
+  })
 })
 
 describe('buildNodesFromTopology (drilled child graph)', () => {
   const topology: GraphTopologyItem[] = [
     { id: 'plan', src: 'phases/plan/SKILL.md', depends_on: [], mode: 'agent' },
-    { id: 'nested', src: 'phases/nested/SUBGRAPH.md', depends_on: ['plan'], mode: 'subgraph', path: 'skills/grandchild' },
+    { id: 'nested', src: 'phases/nested/SUBGRAPH.md', depends_on: ['plan'], mode: 'subgraph', path: '/skills/grandchild' },
   ]
 
   it('brackets drilled phases with global input/output and preserves order + deps', () => {
@@ -102,7 +138,7 @@ describe('buildNodesFromTopology (drilled child graph)', () => {
 
   it('exposes a nested subgraph child path so deeper drilling is possible', () => {
     const nodes = buildNodesFromTopology('demo', ['plan', 'nested'], topology, {})
-    expect(phaseNode(nodes, 'nested').subgraphPath).toBe('skills/grandchild')
+    expect(phaseNode(nodes, 'nested').subgraphPath).toBe('/skills/grandchild')
     expect(phaseNode(nodes, 'plan').subgraphPath).toBeNull()
   })
 
@@ -124,6 +160,7 @@ function phaseNode(nodes: ReturnType<typeof buildNodes>, id: string): SkillGraph
 function skillDetail(overrides: {
   phases?: string[]
   graph_topology?: SkillDetail['graph_topology']
+  files?: SkillDetail['files']
 } = {}): SkillDetail {
   const phases = overrides.phases ?? []
 
@@ -142,7 +179,7 @@ function skillDetail(overrides: {
     node_schema_v21: {},
     io_schema: {},
     file_paths: {},
-    files: {},
+      files: overrides.files ?? {},
     manifest_errors: null,
     has_golden: false,
     latest_run_metadata: null,

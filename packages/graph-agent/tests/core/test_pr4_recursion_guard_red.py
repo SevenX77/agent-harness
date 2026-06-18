@@ -92,11 +92,11 @@ def _write_agent_phase(root: Path, phase: str, *, target_skill: str | None = Non
     )
 
 
-def _write_subgraph_phase(root: Path, phase: str, *, target_skill: str) -> None:
+def _write_subgraph_phase(root: Path, phase: str, *, child_path: Path) -> None:
     _write(
         root / "phases" / phase / "SUBGRAPH.md",
         f"""---
-target_skill: {target_skill}
+path: {child_path}
 io:
   inputs:
     {_schema_yaml()}
@@ -118,9 +118,9 @@ def _write_leaf_agent_skill(root: Path, *, name: str = "leaf") -> None:
     _write_agent_phase(root, "main")
 
 
-def _write_subgraph_skill(root: Path, *, name: str, target_skill: str) -> None:
+def _write_subgraph_skill(root: Path, *, name: str, child_path: Path) -> None:
     _write_graph(root, name=name, phases=["sub"])
-    _write_subgraph_phase(root, "sub", target_skill=target_skill)
+    _write_subgraph_phase(root, "sub", child_path=child_path)
 
 
 def _expect_payload_code(exc_info: pytest.ExceptionInfo[SkillLoadError], code: str) -> None:
@@ -165,13 +165,11 @@ def test_pr4_loader_rejects_compile_depth_over_twenty_with_v3_payload(tmp_path: 
 
 def test_pr4_assemble_subgraph_cycle_uses_v3_payload_not_recursionerror(tmp_path: Path) -> None:
     skill_a = tmp_path / "skill-a"
-    skill_b = tmp_path / "skill-b"
-    _write_subgraph_skill(skill_a, name="skill-a", target_skill="demo.b")
-    _write_subgraph_skill(skill_b, name="skill-b", target_skill="demo.a")
-    resolver = DictSkillResolver({"demo.a": skill_a, "demo.b": skill_b})
+    _write_subgraph_skill(skill_a, name="skill-a", child_path=skill_a)
+    resolver = DictSkillResolver({"demo.a": skill_a})
     subgraph_ast = SubgraphNodeAST(
         mode="subgraph",
-        target_skill="demo.b",
+        path=str(skill_a),
         io=PhaseIOSchema(
             inputs={"type": "object", "properties": {"text": {"type": "string"}}},
             outputs={"type": "object", "properties": {}},
@@ -180,7 +178,11 @@ def test_pr4_assemble_subgraph_cycle_uses_v3_payload_not_recursionerror(tmp_path
 
     with pytest.raises(SkillLoadError) as exc_info:
         _build_subgraph_node(
-            object(),  # phase_doc is not read before the recursive compile path.
+            type(
+                "PhaseDoc",
+                (),
+                {"path": skill_a / "phases" / "sub" / "SUBGRAPH.md"},
+            )(),
             subgraph_ast,
             None,
             1,
@@ -217,6 +219,7 @@ def test_pr4_assemble_subagent_runtime_cycle_uses_v3_payload_not_recursionerror(
             callbacks=None,
             max_patch_attempts=1,
             skill_resolver=resolver,
+            llm_provider=None,
         )
 
     _expect_payload_code(exc_info, "[F-v3-compile-recursion-cycle]")

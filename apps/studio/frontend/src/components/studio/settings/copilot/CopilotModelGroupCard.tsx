@@ -256,13 +256,13 @@ function RouteStatusLight({ status }: { status: CopilotRouteJobStatus }) {
   )
 }
 
-function agentStatusForRoute(
+export function agentStatusForRoute(
   initialStatus: CopilotAgentStatus,
   routeId: string,
   routeStatusOverrides: Record<string, CopilotRouteJobStatus>,
 ): CopilotRouteJobStatus {
   const override = routeStatusOverrides[routeId]
-  if (override) return override
+  if (override === "testing") return override
   return initialStatus
 }
 

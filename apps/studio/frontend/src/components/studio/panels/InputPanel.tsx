@@ -28,8 +28,9 @@ import {
   type IoFieldType,
   type IoSide,
 } from "@/lib/schema-infer"
+import { sha256Hex } from "@/lib/hash"
+import { isTauriRuntime } from "@/config/runtime"
 import { errorMessage } from "@/utils/errors"
-import { resolveWorkspaceIdentity } from "../workspace-identity"
 import { PanelHeader } from "./_shared/PanelHeader"
 import { SectionHeading } from "./_shared/SectionHeading"
 import { GoldenSection } from "./GoldenSection"
@@ -38,19 +39,39 @@ import { TestInputsSection } from "./TestInputsSection"
 
 interface InputPanelProps {
   skillId: string
+  workspaceRoot?: string | null
   skillDetail?: SkillDetail
   selectedTestInputId?: string | null
   onSelectTestInput?: (id: string | null) => void
 }
 
+async function writeGraphMd(
+  skillId: string,
+  workspaceRoot: string | null | undefined,
+  graphMd: string,
+  nextGraphMd: string,
+): Promise<void> {
+  // Tauri native writes target the imported workspace root; browser fallback
+  // writes still go through the backend skill id.
+  const target = isTauriRuntime() ? workspaceRoot ?? skillId : skillId
+  await writeSkillFile(target, "GRAPH.md", nextGraphMd, await sha256Hex(graphMd))
+}
+
 interface SchemaInferPanelProps {
   initialJson: string
   skillId: string
+  workspaceRoot?: string | null
   graphMd?: string
   onSaved?: () => void
 }
 
-function SchemaInferPanel({ initialJson, skillId, graphMd, onSaved }: SchemaInferPanelProps) {
+function SchemaInferPanel({
+  initialJson,
+  skillId,
+  workspaceRoot = null,
+  graphMd,
+  onSaved,
+}: SchemaInferPanelProps) {
   const [draft, setDraft] = useState(initialJson)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -75,12 +96,7 @@ function SchemaInferPanel({ initialJson, skillId, graphMd, onSaved }: SchemaInfe
     setSaved(false)
     try {
       const next = applyInputSchemaToGraph(graphMd, result.schema)
-      // In the desktop app skill files are written natively by workspace root,
-      // not skill id — pass `workspaceRoot ?? skillId` like the Monaco editor
-      // (LazyMonacoPanel) so the native write targets the right path. In the
-      // browser this resolves to skillId and writeSkillFile takes the HTTP path.
-      const target = resolveWorkspaceIdentity(skillId).workspaceRoot ?? skillId
-      await writeSkillFile(target, "GRAPH.md", next)
+      await writeGraphMd(skillId, workspaceRoot, graphMd, next)
       setSaved(true)
       onSaved?.()
     } catch (error) {
@@ -190,6 +206,7 @@ function outputArtifactFields(graphMd?: string): OutputArtifactField[] {
 interface OutputArtifactPathPanelProps {
   fields: OutputArtifactField[]
   skillId: string
+  workspaceRoot?: string | null
   graphMd?: string
   onSaved?: () => void
 }
@@ -197,6 +214,7 @@ interface OutputArtifactPathPanelProps {
 interface OutputPathRowProps {
   field: OutputArtifactField
   skillId: string
+  workspaceRoot?: string | null
   graphMd?: string
   onSaved?: () => void
 }
@@ -206,7 +224,7 @@ interface OutputPathRowProps {
 // resolves `path` to `runs/<id>/artifacts/<path>`). Mirrors the F2 save path:
 // reads GRAPH.md, applies a pure writeback, then writeSkillFile to the resolved
 // workspace root. An empty path clears the artifact target.
-function OutputPathRow({ field, skillId, graphMd, onSaved }: OutputPathRowProps) {
+function OutputPathRow({ field, skillId, workspaceRoot = null, graphMd, onSaved }: OutputPathRowProps) {
   const [draft, setDraft] = useState(field.path)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -221,8 +239,7 @@ function OutputPathRow({ field, skillId, graphMd, onSaved }: OutputPathRowProps)
     setSaved(false)
     try {
       const next = applyOutputArtifactPathToGraph(graphMd, field.name, draft)
-      const target = resolveWorkspaceIdentity(skillId).workspaceRoot ?? skillId
-      await writeSkillFile(target, "GRAPH.md", next)
+      await writeGraphMd(skillId, workspaceRoot, graphMd, next)
       setSaved(true)
       onSaved?.()
     } catch (error) {
@@ -272,7 +289,13 @@ function OutputPathRow({ field, skillId, graphMd, onSaved }: OutputPathRowProps)
   )
 }
 
-function OutputArtifactPathPanel({ fields, skillId, graphMd, onSaved }: OutputArtifactPathPanelProps) {
+function OutputArtifactPathPanel({
+  fields,
+  skillId,
+  workspaceRoot = null,
+  graphMd,
+  onSaved,
+}: OutputArtifactPathPanelProps) {
   if (fields.length === 0) {
     return null
   }
@@ -288,6 +311,7 @@ function OutputArtifactPathPanel({ fields, skillId, graphMd, onSaved }: OutputAr
             key={field.name}
             field={field}
             skillId={skillId}
+            workspaceRoot={workspaceRoot}
             graphMd={graphMd}
             onSaved={onSaved}
           />
@@ -301,6 +325,7 @@ interface IoSchemaFieldsPanelProps {
   side: IoSide
   fields: IoField[]
   skillId: string
+  workspaceRoot?: string | null
   graphMd?: string
   onSaved?: () => void
 }
@@ -309,6 +334,7 @@ interface IoFieldRowProps {
   side: IoSide
   field: IoField
   skillId: string
+  workspaceRoot?: string | null
   graphMd?: string
   onSaved?: () => void
 }
@@ -319,18 +345,18 @@ interface IoFieldRowProps {
 // other io side, every other frontmatter key, and the body (phase DAG) survive.
 async function saveGraph(
   skillId: string,
+  workspaceRoot: string | null | undefined,
   graphMd: string,
   next: (graphMd: string) => string,
 ): Promise<void> {
-  const target = resolveWorkspaceIdentity(skillId).workspaceRoot ?? skillId
-  await writeSkillFile(target, "GRAPH.md", next(graphMd))
+  await writeGraphMd(skillId, workspaceRoot, graphMd, next(graphMd))
 }
 
 // One declared io field as an editable row: rename (Input, save on blur/Enter),
 // change-type (Select), remove (Trash). Each commit goes through saveGraph onto
 // `io.<side>.properties.<field>` in GRAPH.md — the authoritative contract the
 // engine validates — so there are no fake-file dead paths to lose edits to.
-function IoFieldRow({ side, field, skillId, graphMd, onSaved }: IoFieldRowProps) {
+function IoFieldRow({ side, field, skillId, workspaceRoot = null, graphMd, onSaved }: IoFieldRowProps) {
   const [nameDraft, setNameDraft] = useState(field.name)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -342,7 +368,7 @@ function IoFieldRow({ side, field, skillId, graphMd, onSaved }: IoFieldRowProps)
     setBusy(true)
     setError(null)
     try {
-      await saveGraph(skillId, graphMd, next)
+      await saveGraph(skillId, workspaceRoot, graphMd, next)
       onSaved?.()
     } catch (caught) {
       setError(errorMessage(caught))
@@ -424,11 +450,13 @@ function IoFieldRow({ side, field, skillId, graphMd, onSaved }: IoFieldRowProps)
 function IoFieldAddRow({
   side,
   skillId,
+  workspaceRoot = null,
   graphMd,
   onSaved,
 }: {
   side: IoSide
   skillId: string
+  workspaceRoot?: string | null
   graphMd?: string
   onSaved?: () => void
 }) {
@@ -444,7 +472,7 @@ function IoFieldAddRow({
     setBusy(true)
     setError(null)
     try {
-      await saveGraph(skillId, graphMd, (graphMd) => addIoField(graphMd, side, name, type))
+      await saveGraph(skillId, workspaceRoot, graphMd, (graphMd) => addIoField(graphMd, side, name, type))
       setName("")
       onSaved?.()
     } catch (caught) {
@@ -511,7 +539,14 @@ function IoFieldAddRow({
 // with rename / change-type / remove, plus an add row. Writes back to GRAPH.md
 // `io.<side>.properties` frontmatter — the engine's authoritative contract —
 // complementing the F2 schema-infer and F3 artifact-path tools (which stay).
-function IoSchemaFieldsPanel({ side, fields, skillId, graphMd, onSaved }: IoSchemaFieldsPanelProps) {
+function IoSchemaFieldsPanel({
+  side,
+  fields,
+  skillId,
+  workspaceRoot = null,
+  graphMd,
+  onSaved,
+}: IoSchemaFieldsPanelProps) {
   const label = side === "inputs" ? "Input fields" : "Output fields"
   return (
     <section className="space-y-2">
@@ -526,11 +561,18 @@ function IoSchemaFieldsPanel({ side, fields, skillId, graphMd, onSaved }: IoSche
             side={side}
             field={field}
             skillId={skillId}
+            workspaceRoot={workspaceRoot}
             graphMd={graphMd}
             onSaved={onSaved}
           />
         ))}
-        <IoFieldAddRow side={side} skillId={skillId} graphMd={graphMd} onSaved={onSaved} />
+        <IoFieldAddRow
+          side={side}
+          skillId={skillId}
+          workspaceRoot={workspaceRoot}
+          graphMd={graphMd}
+          onSaved={onSaved}
+        />
       </div>
     </section>
   )
@@ -538,6 +580,7 @@ function IoSchemaFieldsPanel({ side, fields, skillId, graphMd, onSaved }: IoSche
 
 export function InputPanel({
   skillId,
+  workspaceRoot = null,
   skillDetail,
   selectedTestInputId = null,
   onSelectTestInput,
@@ -556,6 +599,7 @@ export function InputPanel({
         <div className="space-y-3 px-2 py-2 text-xs">
           <TestInputsSection
             skillId={skillId}
+            workspaceRoot={workspaceRoot}
             selectedId={selectedTestInputId}
             onSelect={onSelectTestInput}
           />
@@ -567,11 +611,13 @@ export function InputPanel({
             side="inputs"
             fields={inputIoFields}
             skillId={skillId}
+            workspaceRoot={workspaceRoot}
             graphMd={graphMd}
           />
           <SchemaInferPanel
             initialJson={contract.inputSampleJson}
             skillId={skillId}
+            workspaceRoot={workspaceRoot}
             graphMd={graphMd}
           />
 
@@ -580,6 +626,7 @@ export function InputPanel({
             side="outputs"
             fields={outputIoFields}
             skillId={skillId}
+            workspaceRoot={workspaceRoot}
             graphMd={graphMd}
           />
 
@@ -589,6 +636,7 @@ export function InputPanel({
               <OutputArtifactPathPanel
                 fields={outputFields}
                 skillId={skillId}
+                workspaceRoot={workspaceRoot}
                 graphMd={graphMd}
               />
             </>

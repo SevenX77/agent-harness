@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import type { CallbackEvent } from '@/api/types'
+import type { EventEnvelope } from '@/api/types'
 import { WorkspaceProvider, type WorkspaceContextValue } from '../WorkspaceContext'
 import { Panels } from './Panels'
 
@@ -28,7 +28,7 @@ const workspaceContextStub: WorkspaceContextValue = {
   popNavTo: () => undefined,
 }
 
-function renderTimelinePanel(props: { runId: string | null; traceEvents: CallbackEvent[] }): string {
+function renderTimelinePanel(props: { runId: string | null; traceEvents: EventEnvelope[] }): string {
   return renderToStaticMarkup(
     <WorkspaceProvider value={workspaceContextStub}>
       <Panels
@@ -42,13 +42,22 @@ function renderTimelinePanel(props: { runId: string | null; traceEvents: Callbac
   )
 }
 
-const oneEvent: CallbackEvent[] = [
+const oneEvent: EventEnvelope[] = [
   {
-    schema_version: '1.0',
+    schema_version: 'studio.event.v1',
+    stream_id: 'run:run-1',
+    seq: 1,
+    cursor: 'run:run-1:1',
+    run_id: 'run-1',
     event_type: 'phase_start',
     timestamp: '2026-06-13T00:00:00Z',
-    phase_name: 'draft',
-    run_id: 'run-1',
+    payload: {
+      schema_version: '1.0',
+      event_type: 'phase_start',
+      timestamp: '2026-06-13T00:00:00Z',
+      phase_name: 'draft',
+      run_id: 'run-1',
+    },
   },
 ]
 

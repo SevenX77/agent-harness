@@ -7,6 +7,7 @@
 //! expected-hash guard matches across writers, and the HashConflict error
 //! shape matches what the frontend (`api/client.ts`) parses.
 
+use std::io::Write as _;
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -96,7 +97,8 @@ pub fn sha256_hex(content: &str) -> String {
 }
 
 /// Join a workspace-relative path onto `root`, rejecting absolute paths and any
-/// parent (`..`) / root traversal so a write can never escape the workspace.
+/// parent (`..`) / root traversal. This is a lexical guard; callers that touch
+/// disk must also verify existing symlinks resolve inside the workspace.
 pub fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, String> {
     let trimmed = rel.trim();
     if trimmed.is_empty() {
@@ -119,10 +121,78 @@ pub fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, String> {
     Ok(result)
 }
 
+fn canonical_workspace_root(root: &Path) -> Result<PathBuf, String> {
+    root.canonicalize()
+        .map_err(|error| format!("cannot resolve workspace root: {error}"))
+}
+
+fn ensure_existing_path_components_inside_workspace(root: &Path, rel: &str) -> Result<(), String> {
+    let canonical_root = canonical_workspace_root(root)?;
+    let mut current = root.to_path_buf();
+    for component in Path::new(rel.trim()).components() {
+        match component {
+            Component::Normal(part) => current.push(part),
+            Component::CurDir => continue,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(format!("invalid path segment in: {}", rel.trim()));
+            }
+        }
+
+        match std::fs::symlink_metadata(&current) {
+            Ok(_) => {
+                let resolved = current.canonicalize().map_err(|error| {
+                    format!(
+                        "cannot resolve workspace path {}: {error}",
+                        current.display()
+                    )
+                })?;
+                if !resolved.starts_with(&canonical_root) {
+                    return Err(format!("path escapes workspace: {}", current.display()));
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => {
+                return Err(format!(
+                    "cannot inspect workspace path {}: {error}",
+                    current.display()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[derive(Serialize, Debug)]
 pub struct WriteOutcome {
     pub path: String,
     pub hash: String,
+}
+
+#[derive(Clone, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishPackageWriteRequest {
+    pub release_version: String,
+    pub content_hash: String,
+    pub manifest_ref: String,
+    pub artifact_ref: serde_json::Value,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishPackageWriteOutcome {
+    pub path: String,
+    pub native_path: String,
+    pub hash: String,
+    pub bytes_written: u64,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(tag = "type", content = "data")]
+pub enum PublishPackageWriteError {
+    PathEscape { message: String, path: String },
+    Conflict { message: String, path: String },
+    PermissionDenied { message: String, path: String },
+    IoFailed { message: String, path: String },
 }
 
 /// Serializes to the exact error shape the frontend parses:
@@ -143,6 +213,49 @@ fn write_failed(message: String) -> WriteWorkspaceError {
     WriteWorkspaceError::WriteFailed { message }
 }
 
+fn package_path_escape(path: &str, message: String) -> PublishPackageWriteError {
+    PublishPackageWriteError::PathEscape {
+        message,
+        path: path.to_string(),
+    }
+}
+
+fn package_io_error(path: &str, prefix: &str, error: std::io::Error) -> PublishPackageWriteError {
+    let message = format!("{prefix}: {error}");
+    match error.kind() {
+        std::io::ErrorKind::AlreadyExists => PublishPackageWriteError::Conflict {
+            message,
+            path: path.to_string(),
+        },
+        std::io::ErrorKind::PermissionDenied => PublishPackageWriteError::PermissionDenied {
+            message,
+            path: path.to_string(),
+        },
+        _ => PublishPackageWriteError::IoFailed {
+            message,
+            path: path.to_string(),
+        },
+    }
+}
+
+fn ensure_final_parent_inside_workspace(root: &Path, rel: &str) -> Result<(), String> {
+    let target = safe_join(root, rel)?;
+    let parent = target
+        .parent()
+        .ok_or_else(|| format!("path has no parent: {}", rel.trim()))?;
+    let canonical_root = canonical_workspace_root(root)?;
+    let resolved_parent = parent.canonicalize().map_err(|error| {
+        format!(
+            "cannot resolve workspace parent {}: {error}",
+            parent.display()
+        )
+    })?;
+    if !resolved_parent.starts_with(&canonical_root) {
+        return Err(format!("path escapes workspace: {}", parent.display()));
+    }
+    Ok(())
+}
+
 /// Sole-writer file write (D12). Mirrors Python `update_skill_file`: optimistic
 /// expected-hash guard, atomic temp+rename, returns the new content hash.
 pub fn write_workspace_file_impl(
@@ -151,21 +264,49 @@ pub fn write_workspace_file_impl(
     content: &str,
     expected_hash: Option<&str>,
 ) -> Result<WriteOutcome, WriteWorkspaceError> {
+    write_workspace_file_impl_inner(workspace_root, path, content, expected_hash, false)
+}
+
+/// No-clobber counterpart for create-only flows such as `.workspace/test_inputs`.
+/// The final publish uses a hard link from a sibling temp file so target
+/// existence is checked atomically by the filesystem instead of via read-then-write.
+pub fn create_workspace_file_if_absent_impl(
+    workspace_root: &str,
+    path: &str,
+    content: &str,
+) -> Result<WriteOutcome, WriteWorkspaceError> {
+    write_workspace_file_impl_inner(workspace_root, path, content, None, true)
+}
+
+fn write_workspace_file_impl_inner(
+    workspace_root: &str,
+    path: &str,
+    content: &str,
+    expected_hash: Option<&str>,
+    create_if_absent: bool,
+) -> Result<WriteOutcome, WriteWorkspaceError> {
     let root = PathBuf::from(workspace_root.trim());
     let target = safe_join(&root, path).map_err(write_failed)?;
+    ensure_existing_path_components_inside_workspace(&root, path).map_err(write_failed)?;
 
-    let current = match std::fs::read_to_string(&target) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(error) => return Err(write_failed(format!("cannot read current file: {error}"))),
-    };
-    let current_hash = sha256_hex(&current);
-    if let Some(expected) = expected_hash {
-        if current_hash != expected {
-            return Err(WriteWorkspaceError::HashConflict {
-                current_hash,
-                current_content: current,
-            });
+    if create_if_absent {
+        if target.exists() {
+            return Err(write_failed(format!("file already exists: {path}")));
+        }
+    } else {
+        let current = match std::fs::read_to_string(&target) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(error) => return Err(write_failed(format!("cannot read current file: {error}"))),
+        };
+        let current_hash = sha256_hex(&current);
+        if let Some(expected) = expected_hash {
+            if current_hash != expected {
+                return Err(WriteWorkspaceError::HashConflict {
+                    current_hash,
+                    current_content: current,
+                });
+            }
         }
     }
 
@@ -173,19 +314,144 @@ pub fn write_workspace_file_impl(
         std::fs::create_dir_all(parent)
             .map_err(|error| write_failed(format!("cannot create parent dir: {error}")))?;
     }
+    ensure_final_parent_inside_workspace(&root, path).map_err(write_failed)?;
 
     // Atomic publish: write a sibling temp file then rename over the target.
     let mut temp_os = target.clone().into_os_string();
     temp_os.push(".native-tmp");
     let temp = PathBuf::from(temp_os);
-    std::fs::write(&temp, content)
+    let mut temp_file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)
         .map_err(|error| write_failed(format!("cannot write temp file: {error}")))?;
-    std::fs::rename(&temp, &target)
-        .map_err(|error| write_failed(format!("cannot finalize write: {error}")))?;
+    if let Err(error) = temp_file.write_all(content.as_bytes()) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(write_failed(format!("cannot write temp file: {error}")));
+    }
+    drop(temp_file);
+    ensure_final_parent_inside_workspace(&root, path).map_err(|error| {
+        let _ = std::fs::remove_file(&temp);
+        write_failed(error)
+    })?;
+    if create_if_absent {
+        match std::fs::hard_link(&temp, &target) {
+            Ok(()) => {
+                let _ = std::fs::remove_file(&temp);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let _ = std::fs::remove_file(&temp);
+                return Err(write_failed(format!("file already exists: {path}")));
+            }
+            Err(error) => {
+                let _ = std::fs::remove_file(&temp);
+                return Err(write_failed(format!("cannot finalize create: {error}")));
+            }
+        }
+    } else if let Err(error) = std::fs::rename(&temp, &target) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(write_failed(format!("cannot finalize write: {error}")));
+    }
 
     Ok(WriteOutcome {
         path: path.to_string(),
         hash: sha256_hex(content),
+    })
+}
+
+pub fn publish_package_writer_impl(
+    workspace_root: &str,
+    relative_path: &str,
+    request: PublishPackageWriteRequest,
+) -> Result<PublishPackageWriteOutcome, PublishPackageWriteError> {
+    let root = PathBuf::from(workspace_root.trim());
+    let target = safe_join(&root, relative_path)
+        .map_err(|message| package_path_escape(relative_path, message))?;
+    ensure_existing_path_components_inside_workspace(&root, relative_path)
+        .map_err(|message| package_path_escape(relative_path, message))?;
+
+    let parent = target
+        .parent()
+        .ok_or_else(|| PublishPackageWriteError::PathEscape {
+            message: format!("path has no parent: {}", relative_path.trim()),
+            path: relative_path.to_string(),
+        })?;
+    std::fs::create_dir_all(parent)
+        .map_err(|error| package_io_error(relative_path, "cannot create package parent", error))?;
+    ensure_final_parent_inside_workspace(&root, relative_path)
+        .map_err(|message| package_path_escape(relative_path, message))?;
+
+    if target.exists() {
+        return Err(PublishPackageWriteError::Conflict {
+            message: format!("package target already exists: {}", relative_path.trim()),
+            path: relative_path.to_string(),
+        });
+    }
+
+    let package = serde_json::json!({
+        "schema": "studio.publish.package.v1",
+        "release_version": request.release_version,
+        "content_hash": request.content_hash,
+        "manifest_ref": request.manifest_ref,
+        "artifact_ref": request.artifact_ref,
+    });
+    let bytes =
+        serde_json::to_vec(&package).map_err(|error| PublishPackageWriteError::IoFailed {
+            message: format!("cannot encode publish package: {error}"),
+            path: relative_path.to_string(),
+        })?;
+
+    let file_name = target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("publish-package");
+    let temp = parent.join(format!(
+        ".{file_name}.{}.native-package-tmp",
+        std::process::id()
+    ));
+    {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)
+            .map_err(|error| {
+                package_io_error(relative_path, "cannot create package temp file", error)
+            })?;
+        file.write_all(&bytes).map_err(|error| {
+            package_io_error(relative_path, "cannot write package temp file", error)
+        })?;
+        file.sync_all().map_err(|error| {
+            package_io_error(relative_path, "cannot sync package temp file", error)
+        })?;
+    }
+
+    if let Err(error) = std::fs::hard_link(&temp, &target) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(package_io_error(
+            relative_path,
+            "cannot publish package without clobbering target",
+            error,
+        ));
+    }
+    let native_path = target
+        .canonicalize()
+        .map_err(|error| package_io_error(relative_path, "cannot resolve package target", error))?
+        .to_string_lossy()
+        .to_string();
+    std::fs::remove_file(&temp).map_err(|error| {
+        package_io_error(relative_path, "cannot remove package temp file", error)
+    })?;
+
+    let package_text =
+        String::from_utf8(bytes).map_err(|error| PublishPackageWriteError::IoFailed {
+            message: format!("cannot decode publish package for hash: {error}"),
+            path: relative_path.to_string(),
+        })?;
+    Ok(PublishPackageWriteOutcome {
+        path: relative_path.to_string(),
+        native_path,
+        hash: sha256_hex(&package_text),
+        bytes_written: package_text.as_bytes().len() as u64,
     })
 }
 
@@ -232,8 +498,11 @@ pub struct RestoreOutcome {
 /// Checkpoint record location: `<root>/.gemini/copilot/checkpoints/<sha(path)>.json`.
 /// Keyed by the hash of the relative path so any path maps to a safe filename.
 fn checkpoint_path(root: &Path, rel: &str) -> PathBuf {
-    root.join(CHECKPOINT_DIR)
-        .join(format!("{}.json", sha256_hex(rel)))
+    root.join(checkpoint_relative_path(rel))
+}
+
+fn checkpoint_relative_path(rel: &str) -> String {
+    format!("{CHECKPOINT_DIR}/{}.json", sha256_hex(rel))
 }
 
 fn write_atomic(target: &Path, bytes: &str) -> Result<(), String> {
@@ -244,9 +513,74 @@ fn write_atomic(target: &Path, bytes: &str) -> Result<(), String> {
     let mut temp_os = target.to_path_buf().into_os_string();
     temp_os.push(".native-tmp");
     let temp = PathBuf::from(temp_os);
-    std::fs::write(&temp, bytes).map_err(|error| format!("cannot write temp file: {error}"))?;
-    std::fs::rename(&temp, target).map_err(|error| format!("cannot finalize write: {error}"))?;
+    let mut temp_file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)
+        .map_err(|error| format!("cannot write temp file: {error}"))?;
+    if let Err(error) = temp_file.write_all(bytes.as_bytes()) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(format!("cannot write temp file: {error}"));
+    }
+    drop(temp_file);
+    if let Err(error) = std::fs::rename(&temp, target) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(format!("cannot finalize write: {error}"));
+    }
     Ok(())
+}
+
+fn read_checkpoint_record(root: &Path, path: &str) -> Result<CheckpointRecord, String> {
+    let trimmed = path.trim();
+    let ckpt_rel = checkpoint_relative_path(trimmed);
+    ensure_existing_path_components_inside_workspace(root, &ckpt_rel)?;
+    let ckpt = safe_join(root, &ckpt_rel)?;
+    let serialized = std::fs::read_to_string(&ckpt).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            format!("no checkpoint to restore for: {path}")
+        } else {
+            format!("cannot read checkpoint: {error}")
+        }
+    })?;
+    serde_json::from_str(&serialized).map_err(|error| format!("corrupt checkpoint record: {error}"))
+}
+
+fn write_checkpoint_record(root: &Path, path: &str, serialized: &str) -> Result<(), String> {
+    let ckpt_rel = checkpoint_relative_path(path.trim());
+    ensure_existing_path_components_inside_workspace(root, &ckpt_rel)?;
+    let ckpt = safe_join(root, &ckpt_rel)?;
+    if let Some(parent) = ckpt.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("cannot create parent dir: {error}"))?;
+    }
+    ensure_final_parent_inside_workspace(root, &ckpt_rel)?;
+    write_atomic(&ckpt, serialized)
+}
+
+fn remove_checkpoint_record(root: &Path, path: &str) -> Result<(), String> {
+    let ckpt_rel = checkpoint_relative_path(path.trim());
+    ensure_existing_path_components_inside_workspace(root, &ckpt_rel)?;
+    let ckpt = safe_join(root, &ckpt_rel)?;
+    match std::fs::remove_file(&ckpt) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("cannot clear checkpoint: {error}")),
+    }
+}
+
+fn write_restore_atomic(
+    root: &Path,
+    path: &str,
+    target: &Path,
+    content: &str,
+) -> Result<(), String> {
+    ensure_existing_path_components_inside_workspace(root, path)?;
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("cannot create parent dir: {error}"))?;
+    }
+    ensure_final_parent_inside_workspace(root, path)?;
+    write_atomic(target, content)
 }
 
 /// Capture the pre-edit state of `<root>/<path>` so it can be restored on
@@ -258,13 +592,11 @@ pub fn checkpoint_workspace_file_impl(
 ) -> Result<CheckpointOutcome, String> {
     let root = PathBuf::from(workspace_root.trim());
     let target = safe_join(&root, path)?;
+    ensure_existing_path_components_inside_workspace(&root, path)?;
     let ckpt = checkpoint_path(&root, path.trim());
 
     if ckpt.is_file() {
-        let existing = std::fs::read_to_string(&ckpt)
-            .map_err(|error| format!("cannot read existing checkpoint: {error}"))?;
-        let record: CheckpointRecord = serde_json::from_str(&existing)
-            .map_err(|error| format!("corrupt checkpoint record: {error}"))?;
+        let record = read_checkpoint_record(&root, path)?;
         return Ok(CheckpointOutcome {
             path: path.to_string(),
             existed: record.existed,
@@ -284,7 +616,7 @@ pub fn checkpoint_workspace_file_impl(
     };
     let serialized = serde_json::to_string(&record)
         .map_err(|error| format!("cannot serialize checkpoint: {error}"))?;
-    write_atomic(&ckpt, &serialized)?;
+    write_checkpoint_record(&root, path, &serialized)?;
     Ok(CheckpointOutcome {
         path: path.to_string(),
         existed,
@@ -305,6 +637,11 @@ pub fn seed_workspace_checkpoint_impl(
 ) -> Result<CheckpointOutcome, String> {
     let root = PathBuf::from(workspace_root.trim());
     safe_join(&root, path)?;
+    ensure_existing_path_components_inside_workspace(&root, path)?;
+    ensure_existing_path_components_inside_workspace(
+        &root,
+        &checkpoint_relative_path(path.trim()),
+    )?;
     let ckpt = checkpoint_path(&root, path.trim());
     if ckpt.is_file() {
         return Ok(CheckpointOutcome {
@@ -320,7 +657,7 @@ pub fn seed_workspace_checkpoint_impl(
     };
     let serialized = serde_json::to_string(&record)
         .map_err(|error| format!("cannot serialize checkpoint: {error}"))?;
-    write_atomic(&ckpt, &serialized)?;
+    write_checkpoint_record(&root, path, &serialized)?;
     Ok(CheckpointOutcome {
         path: path.to_string(),
         existed,
@@ -337,25 +674,25 @@ pub fn restore_workspace_file_impl(
 ) -> Result<RestoreOutcome, String> {
     let root = PathBuf::from(workspace_root.trim());
     let target = safe_join(&root, path)?;
-    let ckpt = checkpoint_path(&root, path.trim());
 
-    let serialized = std::fs::read_to_string(&ckpt).map_err(|error| {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            format!("no checkpoint to restore for: {path}")
-        } else {
-            format!("cannot read checkpoint: {error}")
-        }
-    })?;
-    let record: CheckpointRecord = serde_json::from_str(&serialized)
-        .map_err(|error| format!("corrupt checkpoint record: {error}"))?;
+    let record = read_checkpoint_record(&root, path)?;
 
     if record.existed {
-        write_atomic(&target, &record.content)?;
-    } else if target.exists() {
-        std::fs::remove_file(&target)
-            .map_err(|error| format!("cannot remove pending new file on restore: {error}"))?;
+        write_restore_atomic(&root, path, &target, &record.content)?;
+    } else {
+        ensure_existing_path_components_inside_workspace(&root, path)?;
+        match std::fs::symlink_metadata(&target) {
+            Ok(_) => std::fs::remove_file(&target)
+                .map_err(|error| format!("cannot remove pending new file on restore: {error}"))?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                    "cannot inspect pending new file on restore: {error}"
+                ));
+            }
+        }
     }
-    std::fs::remove_file(&ckpt)
+    remove_checkpoint_record(&root, path)
         .map_err(|error| format!("restored but cannot clear checkpoint: {error}"))?;
 
     Ok(RestoreOutcome {
@@ -370,12 +707,8 @@ pub fn restore_workspace_file_impl(
 pub fn clear_workspace_checkpoint_impl(workspace_root: &str, path: &str) -> Result<(), String> {
     let root = PathBuf::from(workspace_root.trim());
     safe_join(&root, path)?;
-    let ckpt = checkpoint_path(&root, path.trim());
-    match std::fs::remove_file(&ckpt) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(format!("cannot clear checkpoint: {error}")),
-    }
+    ensure_existing_path_components_inside_workspace(&root, path)?;
+    remove_checkpoint_record(&root, path)
 }
 
 /// Read outcome mirrors the writer (`WriteOutcome`): the caller gets both the
@@ -394,6 +727,7 @@ pub struct ReadOutcome {
 pub fn read_workspace_file_impl(workspace_root: &str, path: &str) -> Result<ReadOutcome, String> {
     let root = PathBuf::from(workspace_root.trim());
     let target = safe_join(&root, path)?;
+    ensure_existing_path_components_inside_workspace(&root, path)?;
     let content = std::fs::read_to_string(&target).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             format!("file not found: {path}")
@@ -406,6 +740,387 @@ pub fn read_workspace_file_impl(workspace_root: &str, path: &str) -> Result<Read
         hash: sha256_hex(&content),
         content,
     })
+}
+
+enum AllowedDeleteTarget {
+    TestInputJson,
+    GoldenBaselineDir,
+}
+
+fn allowed_delete_target(path: &str) -> Result<AllowedDeleteTarget, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("path is required".to_string());
+    }
+    let mut parts = Vec::new();
+    for component in Path::new(trimmed).components() {
+        match component {
+            Component::Normal(part) => parts.push(part.to_string_lossy().to_string()),
+            Component::CurDir
+            | Component::ParentDir
+            | Component::RootDir
+            | Component::Prefix(_) => {
+                return Err(format!("delete path not allowed: {trimmed}"));
+            }
+        }
+    }
+
+    if parts.len() == 3 && parts[0] == ".workspace" && parts[1] == "test_inputs" {
+        let file_name = &parts[2];
+        if let Some(stem) = file_name.strip_suffix(".json") {
+            if is_safe_test_input_name(stem) {
+                return Ok(AllowedDeleteTarget::TestInputJson);
+            }
+        }
+    }
+
+    if parts.len() == 3
+        && parts[0] == ".workspace"
+        && parts[1] == "golden"
+        && is_safe_golden_baseline_id(&parts[2])
+    {
+        return Ok(AllowedDeleteTarget::GoldenBaselineDir);
+    }
+
+    Err(format!("delete path not allowed: {trimmed}"))
+}
+
+fn is_safe_test_input_name(name: &str) -> bool {
+    if name.is_empty() || name.len() > 100 {
+        return false;
+    }
+    let mut chars = name.chars();
+    let first = match chars.next() {
+        Some(value) => value,
+        None => return false,
+    };
+    if !first.is_ascii_alphanumeric() {
+        return false;
+    }
+    chars.all(|value| value.is_ascii_alphanumeric() || value == '.' || value == '_' || value == '-')
+}
+
+fn is_safe_golden_baseline_id(id: &str) -> bool {
+    if id.is_empty() || id == "." || id == ".." {
+        return false;
+    }
+    let mut chars = id.chars();
+    let first = match chars.next() {
+        Some(value) => value,
+        None => return false,
+    };
+    if !(first.is_ascii_alphanumeric() || first == '_') {
+        return false;
+    }
+    chars.all(|value| {
+        value.is_ascii_alphanumeric()
+            || value == '.'
+            || value == '_'
+            || value == '-'
+            || value == ':'
+    })
+}
+
+/// Delete only the native-fs surfaces currently exposed by Studio:
+/// `.workspace/test_inputs/<safe>.json` files and `.workspace/golden/<safe-id>`
+/// baseline directories. This avoids exposing a general recursive delete.
+pub fn delete_workspace_path_impl(workspace_root: &str, path: &str) -> Result<(), String> {
+    let allowed = allowed_delete_target(path)?;
+    let root = PathBuf::from(workspace_root.trim());
+    let target = safe_join(&root, path)?;
+    ensure_existing_path_components_inside_workspace(&root, path)?;
+    let metadata = std::fs::symlink_metadata(&target).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            format!("path not found: {path}")
+        } else {
+            format!("cannot inspect workspace path: {error}")
+        }
+    })?;
+    let file_type = metadata.file_type();
+    match allowed {
+        AllowedDeleteTarget::TestInputJson => {
+            if !file_type.is_file() {
+                return Err(format!("delete path must be a file: {path}"));
+            }
+            std::fs::remove_file(&target).map_err(|error| format!("cannot remove file: {error}"))
+        }
+        AllowedDeleteTarget::GoldenBaselineDir => {
+            if !file_type.is_dir() {
+                return Err(format!("delete path must be a directory: {path}"));
+            }
+            std::fs::remove_dir_all(&target).map_err(|error| format!("cannot remove dir: {error}"))
+        }
+    }
+}
+
+fn golden_baseline_id_for_file(path: &str, expected_file_name: &str) -> Result<String, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("golden baseline path is required".to_string());
+    }
+    let mut parts = Vec::new();
+    for component in Path::new(trimmed).components() {
+        match component {
+            Component::Normal(part) => parts.push(part.to_string_lossy().to_string()),
+            Component::CurDir
+            | Component::ParentDir
+            | Component::RootDir
+            | Component::Prefix(_) => {
+                return Err(format!("golden baseline path not allowed: {trimmed}"));
+            }
+        }
+    }
+    if parts.len() != 4
+        || parts[0] != ".workspace"
+        || parts[1] != "golden"
+        || parts[3] != expected_file_name
+        || !is_safe_golden_baseline_id(&parts[2])
+    {
+        return Err(format!("golden baseline path not allowed: {trimmed}"));
+    }
+    Ok(parts[2].clone())
+}
+
+fn validate_golden_baseline_paths(
+    result_path: &str,
+    metadata_path: &str,
+) -> Result<String, String> {
+    let result_id = golden_baseline_id_for_file(result_path, "result.json")?;
+    let metadata_id = golden_baseline_id_for_file(metadata_path, "golden_metadata.json")?;
+    if result_id != metadata_id {
+        return Err("golden baseline paths must target the same baseline id".to_string());
+    }
+    Ok(result_id)
+}
+
+fn unique_sibling_path(target: &Path, label: &str) -> Result<PathBuf, String> {
+    let file_name = target
+        .file_name()
+        .ok_or_else(|| format!("path has no file name: {}", target.display()))?
+        .to_string_lossy();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    Ok(target.with_file_name(format!(
+        ".{file_name}.native-{label}-{}-{nanos}",
+        std::process::id()
+    )))
+}
+
+fn write_golden_temp_file(target: &Path, label: &str, content: &str) -> Result<PathBuf, String> {
+    let temp = unique_sibling_path(target, label)?;
+    let mut temp_file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)
+        .map_err(|error| format!("cannot write golden temp file: {error}"))?;
+    if let Err(error) = temp_file.write_all(content.as_bytes()) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(format!("cannot write golden temp file: {error}"));
+    }
+    drop(temp_file);
+    Ok(temp)
+}
+
+#[derive(Debug)]
+struct PublishedGoldenFile {
+    target: PathBuf,
+    backup: Option<PathBuf>,
+}
+
+fn publish_golden_file(target: &Path, temp: &Path) -> Result<PublishedGoldenFile, String> {
+    let backup = match std::fs::symlink_metadata(target) {
+        Ok(metadata) => {
+            if !metadata.file_type().is_file() {
+                return Err(format!(
+                    "golden target must be a regular file: {}",
+                    target.display()
+                ));
+            }
+            let backup = unique_sibling_path(target, "backup")?;
+            std::fs::rename(target, &backup)
+                .map_err(|error| format!("cannot backup golden file: {error}"))?;
+            Some(backup)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(format!("cannot inspect golden file: {error}")),
+    };
+
+    if let Err(error) = std::fs::rename(temp, target) {
+        if let Some(backup_path) = &backup {
+            let _ = std::fs::rename(backup_path, target);
+        }
+        return Err(format!("cannot publish golden file: {error}"));
+    }
+
+    Ok(PublishedGoldenFile {
+        target: target.to_path_buf(),
+        backup,
+    })
+}
+
+fn rollback_published_golden_file(published: &PublishedGoldenFile) -> Result<(), String> {
+    match std::fs::symlink_metadata(&published.target) {
+        Ok(metadata) => {
+            if metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+                std::fs::remove_file(&published.target)
+                    .map_err(|error| format!("cannot remove partial golden file: {error}"))?;
+            } else {
+                return Err(format!(
+                    "partial golden target is not a file: {}",
+                    published.target.display()
+                ));
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("cannot inspect partial golden file: {error}")),
+    }
+
+    if let Some(backup) = &published.backup {
+        if backup.exists() {
+            std::fs::rename(backup, &published.target)
+                .map_err(|error| format!("cannot restore golden backup: {error}"))?;
+        }
+    }
+    Ok(())
+}
+
+fn remove_golden_backup(published: &PublishedGoldenFile) -> Result<(), String> {
+    if let Some(backup) = &published.backup {
+        match std::fs::remove_file(backup) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("cannot remove golden backup: {error}")),
+        }
+    }
+    Ok(())
+}
+
+fn remove_empty_baseline_dir_if_new(baseline_preexisted: bool, baseline_dir: &Path) {
+    if !baseline_preexisted {
+        let _ = std::fs::remove_dir(baseline_dir);
+    }
+}
+
+pub fn write_golden_baseline_impl(
+    workspace_root: &str,
+    result_path: &str,
+    result_content: &str,
+    metadata_path: &str,
+    metadata_content: &str,
+) -> Result<(), String> {
+    write_golden_baseline_impl_inner(
+        workspace_root,
+        result_path,
+        result_content,
+        metadata_path,
+        metadata_content,
+        false,
+    )
+}
+
+#[cfg(test)]
+fn write_golden_baseline_impl_for_test(
+    workspace_root: &str,
+    result_path: &str,
+    result_content: &str,
+    metadata_path: &str,
+    metadata_content: &str,
+    inject_metadata_publish_failure: bool,
+) -> Result<(), String> {
+    write_golden_baseline_impl_inner(
+        workspace_root,
+        result_path,
+        result_content,
+        metadata_path,
+        metadata_content,
+        inject_metadata_publish_failure,
+    )
+}
+
+fn write_golden_baseline_impl_inner(
+    workspace_root: &str,
+    result_path: &str,
+    result_content: &str,
+    metadata_path: &str,
+    metadata_content: &str,
+    inject_metadata_publish_failure: bool,
+) -> Result<(), String> {
+    validate_golden_baseline_paths(result_path, metadata_path)?;
+    let root = PathBuf::from(workspace_root.trim());
+    let result_target = safe_join(&root, result_path)?;
+    let metadata_target = safe_join(&root, metadata_path)?;
+    ensure_existing_path_components_inside_workspace(&root, result_path)?;
+    ensure_existing_path_components_inside_workspace(&root, metadata_path)?;
+
+    let baseline_dir = result_target
+        .parent()
+        .ok_or_else(|| format!("path has no parent: {}", result_path.trim()))?
+        .to_path_buf();
+    if metadata_target.parent() != Some(baseline_dir.as_path()) {
+        return Err("golden baseline files must share the same directory".to_string());
+    }
+    let baseline_preexisted = std::fs::symlink_metadata(&baseline_dir).is_ok();
+    std::fs::create_dir_all(&baseline_dir)
+        .map_err(|error| format!("cannot create golden baseline dir: {error}"))?;
+    ensure_final_parent_inside_workspace(&root, result_path)?;
+    ensure_final_parent_inside_workspace(&root, metadata_path)?;
+
+    let result_temp = match write_golden_temp_file(&result_target, "result", result_content) {
+        Ok(temp) => temp,
+        Err(error) => {
+            remove_empty_baseline_dir_if_new(baseline_preexisted, &baseline_dir);
+            return Err(error);
+        }
+    };
+    let metadata_temp = match write_golden_temp_file(&metadata_target, "metadata", metadata_content)
+    {
+        Ok(temp) => temp,
+        Err(error) => {
+            let _ = std::fs::remove_file(&result_temp);
+            remove_empty_baseline_dir_if_new(baseline_preexisted, &baseline_dir);
+            return Err(error);
+        }
+    };
+
+    let published_result = match publish_golden_file(&result_target, &result_temp) {
+        Ok(published) => published,
+        Err(error) => {
+            let _ = std::fs::remove_file(&result_temp);
+            let _ = std::fs::remove_file(&metadata_temp);
+            remove_empty_baseline_dir_if_new(baseline_preexisted, &baseline_dir);
+            return Err(error);
+        }
+    };
+
+    if inject_metadata_publish_failure {
+        let _ = std::fs::remove_file(&metadata_temp);
+        let rollback_result = rollback_published_golden_file(&published_result);
+        remove_empty_baseline_dir_if_new(baseline_preexisted, &baseline_dir);
+        if let Err(error) = rollback_result {
+            return Err(format!(
+                "injected metadata publish failure; rollback failed: {error}"
+            ));
+        }
+        return Err("injected metadata publish failure".to_string());
+    }
+
+    let published_metadata = match publish_golden_file(&metadata_target, &metadata_temp) {
+        Ok(published) => published,
+        Err(error) => {
+            let rollback_result = rollback_published_golden_file(&published_result);
+            remove_empty_baseline_dir_if_new(baseline_preexisted, &baseline_dir);
+            if let Err(rollback_error) = rollback_result {
+                return Err(format!("{error}; rollback failed: {rollback_error}"));
+            }
+            return Err(error);
+        }
+    };
+
+    remove_golden_backup(&published_result)?;
+    remove_golden_backup(&published_metadata)?;
+    Ok(())
 }
 
 /// One directory entry — `kind` is `"file"` or `"dir"` (symlinks fold into the
@@ -427,6 +1142,7 @@ pub fn list_workspace_dir_impl(
 ) -> Result<Vec<WorkspaceDirEntry>, String> {
     let root = PathBuf::from(workspace_root.trim());
     let target = safe_join(&root, relative_dir)?;
+    ensure_existing_path_components_inside_workspace(&root, relative_dir)?;
     let read_dir = match std::fs::read_dir(&target) {
         Ok(iter) => iter,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -524,17 +1240,65 @@ fn recent_workspaces_file() -> PathBuf {
 #[tauri::command]
 pub fn write_workspace_file(
     workspace_root: String,
-    path: String,
+    relative_path: String,
     content: String,
     expected_hash: Option<String>,
+    create_if_absent: Option<bool>,
 ) -> Result<WriteOutcome, WriteWorkspaceError> {
     let config_dir = crate::resolve_config_dir();
     let resolved = resolve_workspace_root(&workspace_root, &config_dir).map_err(write_failed)?;
-    write_workspace_file_impl(
+    if create_if_absent.unwrap_or(false) {
+        create_workspace_file_if_absent_impl(&resolved.to_string_lossy(), &relative_path, &content)
+    } else {
+        write_workspace_file_impl(
+            &resolved.to_string_lossy(),
+            &relative_path,
+            &content,
+            expected_hash.as_deref(),
+        )
+    }
+}
+
+#[tauri::command]
+pub fn publish_package_writer(
+    workspace_root: String,
+    relative_path: String,
+    release_version: String,
+    content_hash: String,
+    manifest_ref: String,
+    artifact_ref: serde_json::Value,
+) -> Result<PublishPackageWriteOutcome, PublishPackageWriteError> {
+    let config_dir = crate::resolve_config_dir();
+    let resolved = resolve_workspace_root(&workspace_root, &config_dir)
+        .map_err(|message| package_path_escape(&relative_path, message))?;
+    publish_package_writer_impl(
         &resolved.to_string_lossy(),
-        &path,
-        &content,
-        expected_hash.as_deref(),
+        &relative_path,
+        PublishPackageWriteRequest {
+            release_version,
+            content_hash,
+            manifest_ref,
+            artifact_ref,
+        },
+    )
+}
+
+#[tauri::command]
+pub fn write_golden_baseline(
+    workspace_root: String,
+    result_path: String,
+    result_content: String,
+    metadata_path: String,
+    metadata_content: String,
+) -> Result<(), String> {
+    let config_dir = crate::resolve_config_dir();
+    let resolved = resolve_workspace_root(&workspace_root, &config_dir)?;
+    write_golden_baseline_impl(
+        &resolved.to_string_lossy(),
+        &result_path,
+        &result_content,
+        &metadata_path,
+        &metadata_content,
     )
 }
 
@@ -575,6 +1339,13 @@ pub fn read_workspace_file(workspace_root: String, path: String) -> Result<ReadO
     let config_dir = crate::resolve_config_dir();
     let resolved = resolve_workspace_root(&workspace_root, &config_dir)?;
     read_workspace_file_impl(&resolved.to_string_lossy(), &path)
+}
+
+#[tauri::command]
+pub fn delete_workspace_path(workspace_root: String, path: String) -> Result<(), String> {
+    let config_dir = crate::resolve_config_dir();
+    let resolved = resolve_workspace_root(&workspace_root, &config_dir)?;
+    delete_workspace_path_impl(&resolved.to_string_lossy(), &path)
 }
 
 #[tauri::command]
@@ -647,6 +1418,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("temp root");
         dir
+    }
+
+    #[cfg(unix)]
+    fn symlink_path(target: &Path, link: &Path) {
+        std::os::unix::fs::symlink(target, link).expect("symlink");
     }
 
     #[test]
@@ -726,6 +1502,254 @@ mod tests {
             "current"
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn create_workspace_file_if_absent_refuses_to_overwrite_existing_file() {
+        let root = temp_root("write-create-existing");
+        std::fs::create_dir_all(root.join(".workspace/test_inputs")).unwrap();
+        std::fs::write(
+            root.join(".workspace/test_inputs/case.json"),
+            "{\"existing\":true}",
+        )
+        .unwrap();
+
+        let error = create_workspace_file_if_absent_impl(
+            root.to_str().unwrap(),
+            ".workspace/test_inputs/case.json",
+            "{\"incoming\":true}",
+        )
+        .expect_err("existing file must reject no-clobber create");
+
+        match error {
+            WriteWorkspaceError::WriteFailed { message } => assert!(
+                message.contains("file already exists"),
+                "unexpected error: {message}"
+            ),
+            WriteWorkspaceError::HashConflict { .. } => panic!("unexpected hash conflict"),
+        }
+        assert_eq!(
+            std::fs::read_to_string(root.join(".workspace/test_inputs/case.json")).unwrap(),
+            "{\"existing\":true}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn create_workspace_file_if_absent_creates_missing_file() {
+        let root = temp_root("write-create-missing");
+
+        let outcome = create_workspace_file_if_absent_impl(
+            root.to_str().unwrap(),
+            ".workspace/test_inputs/case.json",
+            "{\"created\":true}",
+        )
+        .expect("create missing file");
+
+        assert_eq!(outcome.hash, sha256_hex("{\"created\":true}"));
+        assert_eq!(
+            std::fs::read_to_string(root.join(".workspace/test_inputs/case.json")).unwrap(),
+            "{\"created\":true}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn publish_package_request() -> PublishPackageWriteRequest {
+        PublishPackageWriteRequest {
+            release_version: "1.0.0".to_string(),
+            content_hash: format!("sha256:{}", "a".repeat(64)),
+            manifest_ref: "product/releases/text-segmentation/1.0.0.json".to_string(),
+            artifact_ref: serde_json::json!({
+                "artifact_id": "text-segmentation",
+                "store": "product",
+                "content_hash": format!("sha256:{}", "a".repeat(64)),
+                "manifest_ref": "product/manifests/text-segmentation.json",
+            }),
+        }
+    }
+
+    #[test]
+    fn publish_package_writer_writes_release_manifest_package_with_hash() {
+        let root = temp_root("publish-package-success");
+        let outcome = publish_package_writer_impl(
+            root.to_str().unwrap(),
+            ".workspace/releases/text-segmentation-1.0.0.package.json",
+            publish_package_request(),
+        )
+        .expect("write package");
+
+        let package_path = root.join(".workspace/releases/text-segmentation-1.0.0.package.json");
+        let package = std::fs::read_to_string(&package_path).expect("package bytes");
+        assert!(package.contains("\"release_version\":\"1.0.0\""));
+        assert!(package.contains("\"content_hash\":\"sha256:"));
+        assert!(
+            package.contains("\"manifest_ref\":\"product/releases/text-segmentation/1.0.0.json\"")
+        );
+        assert_eq!(
+            outcome.path,
+            ".workspace/releases/text-segmentation-1.0.0.package.json"
+        );
+        assert_eq!(
+            outcome.native_path,
+            package_path.canonicalize().unwrap().to_string_lossy()
+        );
+        assert_eq!(outcome.hash, sha256_hex(&package));
+        assert_eq!(outcome.bytes_written as usize, package.as_bytes().len());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn publish_package_writer_rejects_parent_traversal() {
+        let root = temp_root("publish-package-traversal");
+        let error = publish_package_writer_impl(
+            root.to_str().unwrap(),
+            "../release.package.json",
+            publish_package_request(),
+        )
+        .expect_err("traversal is rejected");
+
+        assert!(matches!(error, PublishPackageWriteError::PathEscape { .. }));
+        assert!(!root.join("../release.package.json").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn publish_package_writer_rejects_symlink_parent_escape() {
+        let root = temp_root("publish-package-symlink-root");
+        let outside = temp_root("publish-package-symlink-outside");
+        std::fs::create_dir_all(root.join(".workspace")).unwrap();
+        symlink_path(&outside, &root.join(".workspace/releases"));
+
+        let error = publish_package_writer_impl(
+            root.to_str().unwrap(),
+            ".workspace/releases/release.package.json",
+            publish_package_request(),
+        )
+        .expect_err("symlink escape is rejected");
+
+        assert!(matches!(error, PublishPackageWriteError::PathEscape { .. }));
+        assert!(!outside.join("release.package.json").exists());
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn publish_package_writer_refuses_to_overwrite_existing_target() {
+        let root = temp_root("publish-package-conflict");
+        let target = root.join(".workspace/releases/release.package.json");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, "existing").unwrap();
+
+        let error = publish_package_writer_impl(
+            root.to_str().unwrap(),
+            ".workspace/releases/release.package.json",
+            publish_package_request(),
+        )
+        .expect_err("existing target is a no-clobber conflict");
+
+        assert!(matches!(error, PublishPackageWriteError::Conflict { .. }));
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "existing");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn publish_package_writer_maps_permission_error() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temp_root("publish-package-permission");
+        let parent = root.join(".workspace/releases");
+        std::fs::create_dir_all(&parent).unwrap();
+        let original_mode = std::fs::metadata(&parent).unwrap().permissions().mode();
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        let error = publish_package_writer_impl(
+            root.to_str().unwrap(),
+            ".workspace/releases/release.package.json",
+            publish_package_request(),
+        )
+        .expect_err("read-only parent maps to permission");
+
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(original_mode)).unwrap();
+        assert!(matches!(
+            error,
+            PublishPackageWriteError::PermissionDenied { .. }
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn final_parent_check_refuses_symlink_parent_escape() {
+        let root = temp_root("write-final-parent-check");
+        let outside = temp_root("write-final-parent-outside");
+        std::fs::create_dir_all(root.join(".workspace")).unwrap();
+        symlink_path(&outside, &root.join(".workspace/test_inputs"));
+
+        let error = ensure_final_parent_inside_workspace(&root, ".workspace/test_inputs/case.json")
+            .expect_err("final parent symlink escape rejected");
+
+        assert!(
+            error.contains("escapes workspace"),
+            "unexpected error: {error}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_workspace_file_refuses_symlink_parent_escape() {
+        let root = temp_root("write-symlink-parent-escape");
+        let outside = temp_root("write-symlink-parent-outside");
+        symlink_path(&outside, &root.join("link"));
+
+        let error =
+            write_workspace_file_impl(root.to_str().unwrap(), "link/owned.md", "owned", None)
+                .expect_err("symlink parent escape rejected");
+
+        match error {
+            WriteWorkspaceError::WriteFailed { message } => assert!(
+                message.contains("escapes workspace"),
+                "unexpected error: {message}"
+            ),
+            WriteWorkspaceError::HashConflict { .. } => panic!("unexpected hash conflict"),
+        }
+        assert!(
+            !outside.join("owned.md").exists(),
+            "write must not create the outside file"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_workspace_file_refuses_preexisting_temp_symlink_escape() {
+        let root = temp_root("write-temp-symlink-escape");
+        let outside = temp_root("write-temp-symlink-outside");
+        let outside_file = outside.join("outside.md");
+        std::fs::write(&outside_file, "outside original").unwrap();
+        symlink_path(&outside_file, &root.join("GRAPH.md.native-tmp"));
+
+        let result = write_workspace_file_impl(root.to_str().unwrap(), "GRAPH.md", "new", None);
+
+        assert_eq!(
+            std::fs::read_to_string(&outside_file).unwrap(),
+            "outside original",
+            "temp symlink write must not overwrite the outside file"
+        );
+        let error = result.expect_err("pre-existing temp symlink rejected");
+        match error {
+            WriteWorkspaceError::WriteFailed { message } => assert!(
+                message.contains("cannot write temp file"),
+                "unexpected error: {message}"
+            ),
+            WriteWorkspaceError::HashConflict { .. } => panic!("unexpected hash conflict"),
+        }
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 
     #[test]
@@ -909,6 +1933,243 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn read_workspace_file_refuses_symlink_file_escape() {
+        let root = temp_root("read-symlink-file-escape");
+        let outside = temp_root("read-symlink-file-outside");
+        std::fs::write(outside.join("secret.md"), "outside secret").unwrap();
+        symlink_path(&outside.join("secret.md"), &root.join("secret.md"));
+
+        let error = read_workspace_file_impl(root.to_str().unwrap(), "secret.md")
+            .expect_err("symlink file escape rejected");
+
+        assert!(
+            error.contains("escapes workspace"),
+            "unexpected error: {error}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn delete_workspace_path_allows_test_input_file_and_golden_baseline_dir_only() {
+        let root = temp_root("delete-allowlist");
+        std::fs::create_dir_all(root.join(".workspace/test_inputs")).unwrap();
+        std::fs::create_dir_all(root.join(".workspace/golden/run-1")).unwrap();
+        std::fs::write(root.join(".workspace/test_inputs/case.json"), "{}").unwrap();
+        std::fs::write(root.join(".workspace/golden/run-1/result.json"), "{}").unwrap();
+
+        delete_workspace_path_impl(root.to_str().unwrap(), ".workspace/test_inputs/case.json")
+            .expect("delete test input file");
+        delete_workspace_path_impl(root.to_str().unwrap(), ".workspace/golden/run-1")
+            .expect("delete golden baseline dir");
+
+        assert!(!root.join(".workspace/test_inputs/case.json").exists());
+        assert!(!root.join(".workspace/golden/run-1").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn delete_workspace_path_refuses_workspace_root_dot() {
+        let root = temp_root("delete-dot");
+
+        let error = delete_workspace_path_impl(root.to_str().unwrap(), ".")
+            .expect_err("workspace root delete rejected");
+
+        assert!(error.contains("not allowed"), "unexpected error: {error}");
+        assert!(root.exists(), "workspace root must survive rejected delete");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn delete_workspace_path_refuses_arbitrary_dirs_and_files() {
+        let root = temp_root("delete-arbitrary");
+        std::fs::create_dir_all(root.join(".workspace/test_inputs/nested")).unwrap();
+        std::fs::write(root.join(".workspace/test_inputs/nested/child.json"), "{}").unwrap();
+        std::fs::write(root.join("GRAPH.md"), "graph").unwrap();
+
+        let dir_error =
+            delete_workspace_path_impl(root.to_str().unwrap(), ".workspace/test_inputs/nested")
+                .expect_err("arbitrary directory delete rejected");
+        let file_error = delete_workspace_path_impl(root.to_str().unwrap(), "GRAPH.md")
+            .expect_err("arbitrary file delete rejected");
+
+        assert!(
+            dir_error.contains("not allowed"),
+            "unexpected dir error: {dir_error}"
+        );
+        assert!(
+            file_error.contains("not allowed"),
+            "unexpected file error: {file_error}"
+        );
+        assert!(root.join(".workspace/test_inputs/nested").exists());
+        assert!(root.join("GRAPH.md").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn delete_workspace_path_refuses_traversal() {
+        let root = temp_root("delete-traversal");
+
+        assert!(delete_workspace_path_impl(root.to_str().unwrap(), "../escape.json").is_err());
+        assert!(delete_workspace_path_impl(root.to_str().unwrap(), "/etc/passwd").is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn delete_workspace_path_refuses_symlink_escape() {
+        let root = temp_root("delete-symlink-escape");
+        let outside = temp_root("delete-symlink-outside");
+        std::fs::write(outside.join("secret.json"), "{}").unwrap();
+        symlink_path(&outside.join("secret.json"), &root.join("secret.json"));
+
+        let error = delete_workspace_path_impl(root.to_str().unwrap(), "secret.json")
+            .expect_err("non-allowlisted symlink path rejected");
+
+        assert!(error.contains("not allowed"), "unexpected error: {error}");
+        assert!(
+            outside.join("secret.json").exists(),
+            "delete must not remove the outside file"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn write_golden_baseline_writes_result_and_metadata() {
+        let root = temp_root("golden-write-basic");
+        let rs = root.to_str().unwrap();
+
+        write_golden_baseline_impl(
+            rs,
+            ".workspace/golden/run-1/result.json",
+            "{\n  \"ok\": true\n}",
+            ".workspace/golden/run-1/golden_metadata.json",
+            "{\"id\":\"run-1\"}",
+        )
+        .expect("golden baseline write");
+
+        assert_eq!(
+            std::fs::read_to_string(root.join(".workspace/golden/run-1/result.json")).unwrap(),
+            "{\n  \"ok\": true\n}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join(".workspace/golden/run-1/golden_metadata.json"))
+                .unwrap(),
+            "{\"id\":\"run-1\"}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn write_golden_baseline_rolls_back_new_baseline_when_metadata_publish_fails() {
+        let root = temp_root("golden-new-rollback");
+        let rs = root.to_str().unwrap();
+
+        let error = write_golden_baseline_impl_for_test(
+            rs,
+            ".workspace/golden/run-1/result.json",
+            "{\"new\":true}",
+            ".workspace/golden/run-1/golden_metadata.json",
+            "{\"id\":\"run-1\"}",
+            true,
+        )
+        .expect_err("injected metadata publish failure");
+
+        assert!(
+            error.contains("injected metadata publish failure"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            !root.join(".workspace/golden/run-1").exists(),
+            "new baseline dir must not survive a partial publish"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn write_golden_baseline_rolls_back_existing_baseline_when_metadata_publish_fails() {
+        let root = temp_root("golden-existing-rollback");
+        let baseline = root.join(".workspace/golden/run-1");
+        std::fs::create_dir_all(&baseline).unwrap();
+        std::fs::write(baseline.join("result.json"), "{\"old\":true}").unwrap();
+        std::fs::write(baseline.join("golden_metadata.json"), "{\"id\":\"old\"}").unwrap();
+        let rs = root.to_str().unwrap();
+
+        let error = write_golden_baseline_impl_for_test(
+            rs,
+            ".workspace/golden/run-1/result.json",
+            "{\"new\":true}",
+            ".workspace/golden/run-1/golden_metadata.json",
+            "{\"id\":\"new\"}",
+            true,
+        )
+        .expect_err("injected metadata publish failure");
+
+        assert!(
+            error.contains("injected metadata publish failure"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(baseline.join("result.json")).unwrap(),
+            "{\"old\":true}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(baseline.join("golden_metadata.json")).unwrap(),
+            "{\"id\":\"old\"}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn write_golden_baseline_rejects_traversal_without_creating_baseline() {
+        let root = temp_root("golden-traversal");
+        let rs = root.to_str().unwrap();
+
+        assert!(write_golden_baseline_impl(
+            rs,
+            ".workspace/golden/run-1/result.json",
+            "{}",
+            ".workspace/golden/../run-1/golden_metadata.json",
+            "{}",
+        )
+        .is_err());
+        assert!(!root.join(".workspace/golden/run-1").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_golden_baseline_refuses_symlink_escape() {
+        let root = temp_root("golden-symlink-escape");
+        let outside = temp_root("golden-symlink-outside");
+        std::fs::create_dir_all(root.join(".workspace/golden")).unwrap();
+        symlink_path(&outside, &root.join(".workspace/golden/run-1"));
+        let rs = root.to_str().unwrap();
+
+        let error = write_golden_baseline_impl(
+            rs,
+            ".workspace/golden/run-1/result.json",
+            "{\"new\":true}",
+            ".workspace/golden/run-1/golden_metadata.json",
+            "{\"id\":\"run-1\"}",
+        )
+        .expect_err("symlink escape rejected");
+
+        assert!(
+            error.contains("escapes workspace"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            !outside.join("result.json").exists(),
+            "golden writer must not write through an escaping symlink"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
     #[test]
     fn list_workspace_dir_returns_sorted_files_and_dirs() {
         let root = temp_root("list-basic");
@@ -956,6 +2217,25 @@ mod tests {
         let root = temp_root("list-traversal");
         assert!(list_workspace_dir_impl(root.to_str().unwrap(), "../escape").is_err());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn list_workspace_dir_refuses_symlink_dir_escape() {
+        let root = temp_root("list-symlink-dir-escape");
+        let outside = temp_root("list-symlink-dir-outside");
+        std::fs::write(outside.join("outside.md"), "outside").unwrap();
+        symlink_path(&outside, &root.join("link"));
+
+        let error = list_workspace_dir_impl(root.to_str().unwrap(), "link")
+            .expect_err("symlink dir escape rejected");
+
+        assert!(
+            error.contains("escapes workspace"),
+            "unexpected error: {error}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 
     #[test]
@@ -1088,6 +2368,218 @@ mod tests {
         assert!(restore_workspace_file_impl(rs, "/etc/passwd").is_err());
         assert!(clear_workspace_checkpoint_impl(rs, "../escape.md").is_err());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checkpoint_refuses_symlink_file_escape() {
+        let root = temp_root("ckpt-read-symlink-file-escape");
+        let outside = temp_root("ckpt-read-symlink-file-outside");
+        let rs = root.to_str().unwrap();
+        std::fs::write(outside.join("secret.md"), "outside secret").unwrap();
+        symlink_path(&outside.join("secret.md"), &root.join("secret.md"));
+
+        let error = checkpoint_workspace_file_impl(rs, "secret.md")
+            .expect_err("checkpoint target symlink escape rejected");
+
+        assert!(
+            error.contains("escapes workspace"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            !checkpoint_path(&root, "secret.md").exists(),
+            "rejected checkpoint must not create a record"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn seed_checkpoint_refuses_symlink_file_escape() {
+        let root = temp_root("ckpt-seed-symlink-file-escape");
+        let outside = temp_root("ckpt-seed-symlink-file-outside");
+        let rs = root.to_str().unwrap();
+        std::fs::write(outside.join("secret.md"), "outside secret").unwrap();
+        symlink_path(&outside.join("secret.md"), &root.join("secret.md"));
+
+        let error = seed_workspace_checkpoint_impl(rs, "secret.md", "before", true)
+            .expect_err("seed target symlink escape rejected");
+
+        assert!(
+            error.contains("escapes workspace"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            !checkpoint_path(&root, "secret.md").exists(),
+            "rejected seed must not create a record"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn seed_checkpoint_refuses_existing_record_parent_symlink_escape() {
+        let root = temp_root("ckpt-seed-existing-parent-symlink-escape");
+        let outside = temp_root("ckpt-seed-existing-parent-symlink-outside");
+        let rs = root.to_str().unwrap();
+        symlink_path(&outside, &root.join(".gemini"));
+        let outside_ckpt = outside
+            .join("copilot")
+            .join("checkpoints")
+            .join(format!("{}.json", sha256_hex("GRAPH.md")));
+        std::fs::create_dir_all(outside_ckpt.parent().unwrap()).unwrap();
+        let record = CheckpointRecord {
+            path: "GRAPH.md".to_string(),
+            existed: true,
+            content: "outside checkpoint".to_string(),
+        };
+        std::fs::write(&outside_ckpt, serde_json::to_string(&record).unwrap()).unwrap();
+
+        let error = seed_workspace_checkpoint_impl(rs, "GRAPH.md", "before", true)
+            .expect_err("existing checkpoint parent symlink escape rejected");
+
+        assert!(
+            error.contains("escapes workspace"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            outside_ckpt.exists(),
+            "rejected seed must not remove or mutate the outside checkpoint"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_existing_file_refuses_symlink_parent_escape() {
+        let root = temp_root("ckpt-restore-parent-symlink-escape");
+        let outside = temp_root("ckpt-restore-parent-symlink-outside");
+        let rs = root.to_str().unwrap();
+        std::fs::write(outside.join("owned.md"), "outside current").unwrap();
+        symlink_path(&outside, &root.join("link"));
+
+        let record = CheckpointRecord {
+            path: "link/owned.md".to_string(),
+            existed: true,
+            content: "original workspace content".to_string(),
+        };
+        let ckpt = checkpoint_path(&root, "link/owned.md");
+        std::fs::create_dir_all(ckpt.parent().unwrap()).unwrap();
+        std::fs::write(&ckpt, serde_json::to_string(&record).unwrap()).unwrap();
+
+        let error = restore_workspace_file_impl(rs, "link/owned.md")
+            .expect_err("restore symlink parent escape rejected");
+
+        assert!(
+            error.contains("escapes workspace"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(outside.join("owned.md")).unwrap(),
+            "outside current",
+            "restore must not write through a symlink parent"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_new_file_refuses_symlink_file_escape_before_delete() {
+        let root = temp_root("ckpt-restore-delete-symlink-escape");
+        let outside = temp_root("ckpt-restore-delete-symlink-outside");
+        let rs = root.to_str().unwrap();
+        std::fs::write(outside.join("owned.md"), "outside current").unwrap();
+        symlink_path(&outside.join("owned.md"), &root.join("new.md"));
+
+        let record = CheckpointRecord {
+            path: "new.md".to_string(),
+            existed: false,
+            content: String::new(),
+        };
+        let ckpt = checkpoint_path(&root, "new.md");
+        std::fs::create_dir_all(ckpt.parent().unwrap()).unwrap();
+        std::fs::write(&ckpt, serde_json::to_string(&record).unwrap()).unwrap();
+
+        let error = restore_workspace_file_impl(rs, "new.md")
+            .expect_err("restore delete symlink file escape rejected");
+
+        assert!(
+            error.contains("escapes workspace"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(outside.join("owned.md")).unwrap(),
+            "outside current",
+            "restore delete must not affect the outside file"
+        );
+        assert!(
+            std::fs::symlink_metadata(root.join("new.md")).is_ok(),
+            "rejected restore must leave the workspace symlink in place"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn clear_checkpoint_refuses_checkpoint_parent_symlink_escape() {
+        let root = temp_root("ckpt-clear-parent-symlink-escape");
+        let outside = temp_root("ckpt-clear-parent-symlink-outside");
+        let rs = root.to_str().unwrap();
+        symlink_path(&outside, &root.join(".gemini"));
+        let outside_ckpt = checkpoint_path(&outside, "GRAPH.md");
+        std::fs::create_dir_all(outside_ckpt.parent().unwrap()).unwrap();
+        std::fs::write(&outside_ckpt, "{}").unwrap();
+
+        let error = clear_workspace_checkpoint_impl(rs, "GRAPH.md")
+            .expect_err("clear checkpoint symlink parent escape rejected");
+
+        assert!(
+            error.contains("escapes workspace"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            outside_ckpt.exists(),
+            "clear must not delete checkpoint through a symlink parent"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checkpoint_refuses_preexisting_temp_symlink_escape() {
+        let root = temp_root("ckpt-temp-symlink-escape");
+        let outside = temp_root("ckpt-temp-symlink-outside");
+        let rs = root.to_str().unwrap();
+        std::fs::write(root.join("GRAPH.md"), "checkpoint me").unwrap();
+        let outside_file = outside.join("outside.json");
+        std::fs::write(&outside_file, "outside original").unwrap();
+
+        let ckpt = checkpoint_path(&root, "GRAPH.md");
+        std::fs::create_dir_all(ckpt.parent().unwrap()).unwrap();
+        let mut temp_os = ckpt.clone().into_os_string();
+        temp_os.push(".native-tmp");
+        symlink_path(&outside_file, &PathBuf::from(temp_os));
+
+        let result = checkpoint_workspace_file_impl(rs, "GRAPH.md");
+
+        assert_eq!(
+            std::fs::read_to_string(&outside_file).unwrap(),
+            "outside original",
+            "checkpoint temp symlink write must not overwrite the outside file"
+        );
+        let error = result.expect_err("pre-existing checkpoint temp symlink rejected");
+        assert!(
+            error.contains("cannot write temp file"),
+            "unexpected error: {error}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 
     #[test]

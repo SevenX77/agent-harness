@@ -22,8 +22,7 @@ function visibleFields(result: CompareResult | null): FieldDifference[] {
   if (!result) {
     return []
   }
-  const fields = result.differences.filter((field) => field.field_path !== 'output')
-  return fields.length > 0 ? fields : result.differences
+  return result.node_groups.flatMap((group) => group.field_differences)
 }
 
 interface NodeGroup {
@@ -33,17 +32,17 @@ interface NodeGroup {
   fields: FieldDifference[]
 }
 
-// D7 / golden-per-agent-node: organize the diff by node so each agent node
-// carries its own pass/fail verdict and score, with field differences nested.
+// D7 / golden-per-agent-node: the backend owns grouping; the UI only renders
+// the node_groups contract and does not infer node identity from field paths.
 function buildNodeGroups(result: CompareResult | null): NodeGroup[] {
-  if (!result?.node_results?.length) {
+  if (!result?.node_groups?.length) {
     return []
   }
-  return result.node_results.map((node) => ({
+  return result.node_groups.map((node) => ({
     nodeId: node.node_id,
-    verdict: node.verdict,
+    verdict: node.status,
     score: node.score,
-    fields: node.differences.filter((field) => field.field_path !== 'output'),
+    fields: node.field_differences,
   }))
 }
 
@@ -138,8 +137,15 @@ export function DiffView({
           <DiffScore score={result?.total_score ?? 0} />
           <div>
             <h3 className="font-bold text-slate-800 dark:text-slate-100">Golden Diff</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              {result ? `Against ${result.golden_run_id}` : 'No comparison loaded'}
+            <p className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
+              {result ? (
+                <>
+                  <span>Baseline {result.baseline_id}</span>
+                  {result.source_run_id ? <span>Source run {result.source_run_id}</span> : null}
+                </>
+              ) : (
+                <span>No comparison loaded</span>
+              )}
             </p>
           </div>
         </div>
@@ -148,7 +154,7 @@ export function DiffView({
             label="Export Compare"
             title="Export comparison report"
             disabled={!result || !skillId}
-            filenameBase={reportFileBase(skillId, runId ?? 'compare', result?.golden_run_id)}
+            filenameBase={reportFileBase(skillId, runId ?? 'compare', result?.baseline_id)}
             buildContent={(format) => {
               if (!result || !skillId) {
                 throw new Error('Run a comparison before exporting.')

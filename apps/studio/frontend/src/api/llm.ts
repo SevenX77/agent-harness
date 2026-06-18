@@ -35,6 +35,7 @@ export interface ProviderEndpoint {
   display_name: string
   protocol: ProviderType
   base_url: string
+  credential_ref?: string | null
   api_key?: string | null
   status: RouteStatus
   last_test_at?: string | null
@@ -46,6 +47,8 @@ export interface ProviderEndpoint {
   proxy_env?: string | null
   metadata: Record<string, unknown>
 }
+
+export type ProviderEndpointWrite = Omit<ProviderEndpoint, 'status' | 'last_test_at' | 'last_test_message'>
 
 export interface VerifiedProfile {
   profile_id: string
@@ -535,107 +538,7 @@ function routesForEndpoint(registry: CredentialRegistryResponse, endpointId: str
 }
 
 export function modelGroupsFromRegistry(registry: RegistryResponse): ModelGroup[] {
-  if (registry.model_groups?.length) return registry.model_groups
-  return legacyModelGroupsFromRegistry(registry)
-}
-
-function legacyModelGroupsFromRegistry(registry: CredentialRegistryResponse): ModelGroup[] {
-  const routesByCanonical = new Map<string, ProviderRoute[]>()
-  for (const route of Object.values(registry.provider_routes)) {
-    const canonicalId = route.canonical_id || route.route_slug
-    routesByCanonical.set(canonicalId, [
-      ...(routesByCanonical.get(canonicalId) ?? []),
-      route,
-    ])
-  }
-  return [...routesByCanonical.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([canonicalId, routes]) => {
-      const providerModels = routes
-        .sort((left, right) => left.route_id.localeCompare(right.route_id))
-        .map((route) => legacyProviderModelOption(registry, route))
-        .filter((option): option is ProviderModelOption => option !== null)
-      return {
-        canonical_id: canonicalId,
-        display_name: routes[0]?.display_name ?? canonicalId,
-        provider_models: providerModels,
-        status_summary: summarizeProviderModelStates(providerModels),
-        capability_summary: summarizeProviderModelCapabilities(providerModels),
-      }
-    })
-}
-
-function legacyProviderModelOption(
-  registry: CredentialRegistryResponse,
-  route: ProviderRoute,
-): ProviderModelOption | null {
-  const endpoint = registry.provider_endpoints[route.endpoint_id]
-  if (!endpoint) return null
-  const modelType = capabilityString(route.capabilities, 'model_type')
-  const capabilityFamily = capabilityString(route.capabilities, 'capability_family') ?? modelType
-  return {
-    route_id: route.route_id,
-    endpoint_id: endpoint.endpoint_id,
-    provider_label: endpoint.display_name,
-    provider_kind: endpoint.provider_kind ?? 'third_party',
-    provider_model_id: route.provider_model_id,
-    model_type: modelType,
-    capability_family: capabilityFamily,
-    input_modalities: capabilityStringArray(route.capabilities, 'input_modalities'),
-    output_modalities: capabilityStringArray(route.capabilities, 'output_modalities'),
-    ui_state: legacyProviderUiState(endpoint, route),
-    ui_detail: legacyProviderUiDetail(endpoint, route),
-    retry_at: null,
-    reason_code: legacyProviderReasonCode(endpoint, route),
-    capability_state: Object.keys(route.capabilities).length > 0 ? 'known' : 'unknown',
-    capabilities: route.capabilities,
-  }
-}
-
-function capabilityString(
-  capabilities: Record<string, CapabilityValue>,
-  key: string,
-): string | null {
-  const value = capabilities[key]?.value
-  return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
-function capabilityStringArray(
-  capabilities: Record<string, CapabilityValue>,
-  key: string,
-): string[] {
-  const value = capabilities[key]?.value
-  if (Array.isArray(value)) {
-    return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-  }
-  return typeof value === 'string' && value.trim() ? [value.trim()] : []
-}
-
-function legacyProviderUiState(endpoint: ProviderEndpoint, route: ProviderRoute): ProviderUiState {
-  if (endpoint.status === 'disabled' || route.status === 'disabled') return 'off'
-  if (!endpoint.api_key || endpoint.status === 'failed' || route.status === 'failed') return 'failed'
-  if (endpoint.status === 'verified' && route.status === 'verified') return 'ready'
-  return 'untested'
-}
-
-function legacyProviderReasonCode(endpoint: ProviderEndpoint, route: ProviderRoute): string | null {
-  if (!endpoint.api_key) return 'missing_config'
-  const routeReason = stringMetadata(route.metadata, 'reason_code')
-  if (routeReason) return routeReason
-  const endpointReason = stringMetadata(endpoint.metadata, 'reason_code')
-  if (endpointReason) return endpointReason
-  if (route.status === 'failed') return 'model_failed'
-  if (endpoint.status === 'failed') return endpointErrorCode(endpoint) ?? 'endpoint_unreachable'
-  return null
-}
-
-function legacyProviderUiDetail(endpoint: ProviderEndpoint, route: ProviderRoute): string | null {
-  return stringMetadata(route.metadata, 'last_probe_message') ?? endpoint.last_test_message ?? null
-}
-
-function stringMetadata(metadata: Record<string, unknown>, key: string): string | null {
-  const value = metadata[key]
-  return typeof value === 'string' && value.trim() ? value : null
+  return registry.model_groups ?? []
 }
 
 function summarizeProviderModelStates(providerModels: ProviderModelOption[]): ModelGroupStatusSummary {
@@ -666,10 +569,9 @@ function summarizeProviderModelCapabilities(providerModels: ProviderModelOption[
 
 function modelBundleGroupsFromBackend(
   data: RolesData,
-  registry: RegistryResponse,
   baseModelGroups: ModelGroup[],
 ): ModelGroup[] {
-  const routeOptions = providerModelOptionsByRouteId(registry, baseModelGroups)
+  const routeOptions = providerModelOptionsByRouteId(baseModelGroups)
   return Object.entries(data.model_bundles ?? {}).flatMap(([bundleId, bundle]) => {
     const providerModels = bundleRouteIds(bundle)
       .map((routeId) => routeOptions.get(routeId) ?? null)
@@ -687,7 +589,6 @@ function modelBundleGroupsFromBackend(
 }
 
 function providerModelOptionsByRouteId(
-  registry: RegistryResponse,
   modelGroups: ModelGroup[],
 ): Map<string, ProviderModelOption> {
   const routeOptions = new Map<string, ProviderModelOption>()
@@ -695,11 +596,6 @@ function providerModelOptionsByRouteId(
     for (const option of group.provider_models) {
       routeOptions.set(option.route_id, option)
     }
-  }
-  for (const route of Object.values(registry.provider_routes)) {
-    if (routeOptions.has(route.route_id)) continue
-    const option = legacyProviderModelOption(registry, route)
-    if (option) routeOptions.set(route.route_id, option)
   }
   return routeOptions
 }
@@ -721,7 +617,7 @@ function rolesDataFromBackend(
 
   const registryModelGroups = registry ? modelGroupsFromRegistry(registry) : []
   const modelGroups = registry
-    ? [...modelBundleGroupsFromBackend(data, registry, registryModelGroups), ...registryModelGroups]
+    ? [...modelBundleGroupsFromBackend(data, registryModelGroups), ...registryModelGroups]
     : []
   const models = Object.fromEntries(
     modelGroups.map((group) => [
@@ -915,12 +811,6 @@ function cachedResultForCredentialUpdate(update: ProviderCredentialUpdate): Prov
   return null
 }
 
-function routeStatusFromTestStatus(status: TestStatus): RouteStatus {
-  if (status === 'ok') return 'verified'
-  if (status === 'untested') return 'unverified_manual'
-  return 'failed'
-}
-
 function modelInfoFromRoute(route: ProviderRoute): ModelInfo {
   const lastProbeMessage = route.metadata.last_probe_message
   const capabilities: Record<string, unknown> = { ...route.capabilities }
@@ -1094,37 +984,20 @@ function registryToCredentials(registry: CredentialRegistryResponse): Credential
 function endpointFromCredentialUpdate(
   update: ProviderCredentialUpdate,
   existing?: ProviderEndpoint,
-  cachedResult?: ProviderTestResult | null,
-): ProviderEndpoint {
+  _cachedResult?: ProviderTestResult | null,
+): ProviderEndpointWrite {
   const nextProtocol = update.provider_type ?? existing?.protocol ?? 'openai_compatible'
   const nextBaseUrl = update.base_url ?? existing?.base_url ?? ''
   const nextSecret = update.api_key === redactedSecret
     ? existing?.api_key === redactedSecret ? undefined : existing?.api_key
     : update.api_key ?? existing?.api_key ?? null
-  const secretChanged = Boolean(
-    existing &&
-    update.api_key &&
-    update.api_key !== '**********' &&
-    update.api_key !== (existing.api_key ?? ''),
-  )
-  const testParamsChanged = Boolean(
-    existing &&
-    (
-      nextProtocol !== existing.protocol ||
-      nextBaseUrl !== existing.base_url ||
-      secretChanged
-    ),
-  )
-  const restoredStatus = cachedResult ? routeStatusFromTestStatus(cachedResult.last_test_status) : null
   return {
     endpoint_id: update.id,
     display_name: update.name || existing?.display_name || update.id,
     protocol: nextProtocol,
     base_url: nextBaseUrl,
     api_key: nextSecret,
-    status: testParamsChanged ? restoredStatus ?? 'unverified_manual' : existing?.status ?? 'unverified_manual',
-    last_test_at: testParamsChanged ? cachedResult?.last_test_at ?? null : existing?.last_test_at ?? null,
-    last_test_message: testParamsChanged ? cachedResult?.last_test_message ?? null : existing?.last_test_message ?? null,
+    ...(existing?.credential_ref !== undefined ? { credential_ref: existing.credential_ref } : {}),
     timeout_seconds: existing?.timeout_seconds ?? 120,
     trust_env: existing?.trust_env ?? false,
     proxy_env: existing?.proxy_env ?? null,
@@ -1280,7 +1153,7 @@ async function hydrateEndpointSecrets<T extends CredentialRegistryResponse>(regi
 }
 
 export async function putRegistryEndpoints(
-  providerEndpoints: Record<string, ProviderEndpoint>,
+  providerEndpoints: Record<string, ProviderEndpointWrite>,
 ): Promise<CredentialRegistryResponse> {
   for (const [endpointId, endpoint] of Object.entries(providerEndpoints)) {
     rememberEndpointSecret(endpointId, endpoint.api_key)

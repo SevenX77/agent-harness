@@ -38,6 +38,7 @@ const EMPTY_CONTENT = "{\n  \n}"
 
 interface TestInputsSectionProps {
   skillId: string
+  workspaceRoot?: string | null
   // F4: which saved input feeds Predict/Run (null = empty payload).
   selectedId?: string | null
   onSelect?: (id: string | null) => void
@@ -45,6 +46,7 @@ interface TestInputsSectionProps {
 
 export function TestInputsSection({
   skillId,
+  workspaceRoot = null,
   selectedId = null,
   onSelect,
 }: TestInputsSectionProps) {
@@ -69,7 +71,7 @@ export function TestInputsSection({
     setError(null)
     setBusy(true)
     try {
-      await createTestInput(skillId, prepared.name, prepared.content)
+      await createTestInput(skillId, prepared.name, prepared.content, { workspaceRoot })
       setName("")
       setContent(EMPTY_CONTENT)
       await mutate()
@@ -85,7 +87,7 @@ export function TestInputsSection({
   const handleDelete = async (id: string) => {
     setError(null)
     try {
-      await deleteTestInput(skillId, id)
+      await deleteTestInput(skillId, id, { workspaceRoot })
       if (selectedId === id) {
         onSelect?.(null)
       }

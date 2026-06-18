@@ -20,12 +20,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.adapters.gateway import (
     CredentialProviderProtocol,
-    GatewayAdapter,
     GatewayProviderRoute,
     GatewayRoleEntry,
     ProfileSelectionError,
     ProviderModelStateProjection,
     RegistryResolutionError,
+    ResourceTerminalError,
     ResolvedRoute,
     RuntimeSettings,
     VerifiedProfile,
@@ -35,6 +35,7 @@ from app.core.adapters.gateway import (
     normalize_route_capabilities,
     select_verified_profile,
 )
+from app.core.adapters.transport_factory import build_gateway_adapter
 from app.models.llm_config import (
     CapabilityValue,
     EvidenceRecord,
@@ -67,7 +68,7 @@ from app.services.copilot_test import (
 from app.services.copilot_test import (
     _probe_official_call_method as _probe_official_call_method_request,
 )
-from app.services.gateway_resolver import build_gateway_model_resolver
+from app.services.gateway_resolver import build_gateway_route_runtime
 from app.services.llm_credentials import (
     _route_slug,
     credentials_path,
@@ -217,6 +218,8 @@ class RoleTestJobResponse(BaseModel):
     role_name: str
     status: Literal["queued", "running", "completed", "failed"]
     message: str | None = None
+    error_code: str | None = None
+    error_payload: dict[str, Any] | None = None
     provider_statuses: list[RoleTestProviderProgressInfo] = Field(default_factory=list)
     result: dict[str, Any] | None = None
 
@@ -741,21 +744,27 @@ async def test_endpoint_models(
         latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint
         save_credentials(latest_credentials)
     else:
-        latest_credentials = credentials
-        latest_endpoint = credentials.provider_endpoints.get(endpoint_id)
+        latest_credentials = load_credentials()
+        latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
         if latest_endpoint is not None and probe_results:
-            latest_credentials = latest_credentials.model_copy(
+            if latest_credentials.endpoint_fingerprint(endpoint_id) != starting_fingerprint:
+                results = [
+                    EndpointModelTestResult(
+                        model_id=result.model_id,
+                        status="error",
+                        message="Endpoint changed while model test was running.",
+                    )
+                    for result in probe_results
+                ]
+                return EndpointModelTestResponse(
+                    registry=_registry_response(latest_credentials, _load_roles_or_empty()),
+                    results=results,
+                )
+            latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint.model_copy(
                 update={
-                    "provider_endpoints": {
-                        **latest_credentials.provider_endpoints,
-                        endpoint_id: latest_endpoint.model_copy(
-                            update={
-                                "status": "failed",
-                                "last_test_at": _now_iso(),
-                                "last_test_message": _model_probe_failure_message(probe_results[0]),
-                            }
-                        ),
-                    }
+                    "status": "failed",
+                    "last_test_at": _now_iso(),
+                    "last_test_message": _model_probe_failure_message(probe_results[0]),
                 }
             )
             save_credentials(latest_credentials)
@@ -955,8 +964,18 @@ async def put_llm_role(role_name: str, request: RoleEntry) -> RoleEntry:
     """Full replace one role."""
     data = _load_roles_or_empty()
     credentials = load_credentials()
-    adapter = GatewayAdapter(transport="in_process")
-    role = adapter.materialize_role({"role": request, "credentials": credentials}) if request.model_groups else request
+    adapter = build_gateway_adapter()
+    role = (
+        adapter.materialize_role(
+            {
+                "role": request,
+                "credentials": credentials,
+                "evidence_records": _load_gateway_evidence_records(),
+            }
+        )
+        if request.model_groups
+        else request
+    )
     roles = dict(data.roles)
     roles[role_name] = role
     schema_version = 3 if role.model_groups else data.schema_version
@@ -1215,11 +1234,17 @@ async def _start_copilot_sdk_test_job(role_name: str) -> RoleTestJobResponse:
         routes, credential_provider = _resolve_copilot_test_routes(role_name)
     except Exception as exc:  # noqa: BLE001 — surfaced as a failed job, not swallowed
         logger.warning("copilot SDK test: cannot resolve routes for %s: %s", role_name, exc)
+        error_code = getattr(exc, "error_code", None)
+        error_payload = getattr(exc, "error_payload", None)
+        if not isinstance(error_payload, dict):
+            error_payload = None
         job = RoleTestJobResponse(
             job_id=job_id,
             role_name=role_name,
             status="failed",
             message=f"无法解析 copilot 路线: {exc}",
+            error_code=error_code,
+            error_payload=error_payload,
             provider_statuses=[],
             result=_build_copilot_sdk_result(role_name, [], []),
         )
@@ -1244,9 +1269,13 @@ async def _start_copilot_sdk_test_job(role_name: str) -> RoleTestJobResponse:
 def _resolve_copilot_test_routes(
     role_name: str,
 ) -> tuple[list[ResolvedRoute], CredentialProviderProtocol]:
-    resolver = build_gateway_model_resolver()
-    resolved = resolver.resolve_routes(role_name)
-    return list(resolved.routes), resolver.credential_provider
+    runtime = build_gateway_route_runtime(role_name)
+    if not runtime.routes:
+        raise ResourceTerminalError(
+            runtime.error_code or "resource.no_available_route",
+            runtime.error_payload or {"role": role_name},
+        )
+    return runtime.routes, runtime.credential_provider
 
 
 def _copilot_route_progress(
@@ -1899,13 +1928,14 @@ def _provider_model_option(
         rate_limit_bucket=endpoint.rate_limit_bucket or endpoint.endpoint_id,
         now=datetime.now(UTC),
     )
-    adapter = GatewayAdapter(transport="in_process")
+    adapter = build_gateway_adapter()
     projection = adapter.project_route_state(
         {
             "endpoint": endpoint,
             "route": route,
             "circuits": circuits,
             "now": datetime.now(UTC),
+            "evidence_records": _load_gateway_evidence_records(),
         }
     )
     capabilities = _provider_route_ui_capabilities(route, endpoint)
@@ -3745,7 +3775,12 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
         return
     starting_fingerprint = credentials.endpoint_fingerprint(endpoint_id)
     if not endpoint.api_key or not endpoint.api_key.get_secret_value():
-        await _record_endpoint_test_job_failure(job_id, endpoint_id, "API key is empty.")
+        await _record_endpoint_test_job_failure(
+            job_id,
+            endpoint_id,
+            "API key is empty.",
+            starting_fingerprint,
+        )
         return
 
     await _update_endpoint_test_job(job_id, status="running", message="Reading provider catalog.")
@@ -3762,6 +3797,7 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
             job_id,
             endpoint_id,
             _provider_error_message("Invalid API key", exc),
+            starting_fingerprint,
         )
         return
     except _RateLimited as exc:
@@ -3769,6 +3805,7 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
             job_id,
             endpoint_id,
             _provider_error_message("Provider rate limited the test request", exc),
+            starting_fingerprint,
         )
         return
     except _QuotaExceeded as exc:
@@ -3779,16 +3816,23 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
                 "Provider rejected the key because quota or billing is unavailable",
                 exc,
             ),
+            starting_fingerprint,
         )
         return
     except httpx.TimeoutException:
-        await _record_endpoint_test_job_failure(job_id, endpoint_id, "Endpoint test timed out.")
+        await _record_endpoint_test_job_failure(
+            job_id,
+            endpoint_id,
+            "Endpoint test timed out.",
+            starting_fingerprint,
+        )
         return
     except _NetworkError as exc:
         await _record_endpoint_test_job_failure(
             job_id,
             endpoint_id,
             _provider_error_message("Network error while testing endpoint", exc),
+            starting_fingerprint,
         )
         return
 
@@ -4022,10 +4066,26 @@ async def _record_endpoint_test_job_failure(
     job_id: str,
     endpoint_id: str,
     message: str,
+    starting_fingerprint: str | None = None,
 ) -> None:
     credentials = load_credentials()
     endpoint = credentials.provider_endpoints.get(endpoint_id)
     if endpoint is not None:
+        if (
+            starting_fingerprint is not None
+            and credentials.endpoint_fingerprint(endpoint_id) != starting_fingerprint
+        ):
+            discard_message = "Endpoint changed while endpoint test was running. Test result discarded."
+            credentials.provider_endpoints[endpoint_id] = endpoint.model_copy(
+                update={
+                    "status": "unverified_manual",
+                    "last_test_at": _now_iso(),
+                    "last_test_message": discard_message,
+                }
+            )
+            save_credentials(credentials)
+            await _finish_endpoint_test_job(job_id, "failed", discard_message)
+            return
         credentials.provider_endpoints[endpoint_id] = endpoint.model_copy(
             update={
                 "status": "failed",
@@ -4121,7 +4181,7 @@ def _provider_model_projection(
     endpoint: ProviderEndpoint,
 ) -> ProviderModelStateProjection:
     now = datetime.now(UTC)
-    adapter = GatewayAdapter(transport="in_process")
+    adapter = build_gateway_adapter()
     return adapter.project_route_state(
         {
             "endpoint": endpoint,
@@ -4133,6 +4193,7 @@ def _provider_model_projection(
                 now=now,
             ),
             "now": now,
+            "evidence_records": _load_gateway_evidence_records(),
         }
     )
 
@@ -4424,7 +4485,7 @@ def _role_effective_runtime_settings(
     credentials: LLMCredentialsFile,
     roles: RolesData,
 ) -> dict[str, dict[str, dict[str, Any]]]:
-    adapter = GatewayAdapter(transport="in_process")
+    adapter = build_gateway_adapter()
     result: dict[str, dict[str, dict[str, Any]]] = {}
     for role_name in roles.roles:
         try:
@@ -4463,18 +4524,31 @@ def _materialize_roles_for_response(
     if not has_role_authoring and not has_bundle_authoring:
         return data
     active_credentials = credentials or load_credentials()
-    adapter = GatewayAdapter(transport="in_process")
+    evidence_records = _load_gateway_evidence_records()
+    adapter = build_gateway_adapter()
     return data.model_copy(
         update={
             "schema_version": 3,
             "roles": {
-                role_name: adapter.materialize_role({"role": role, "credentials": active_credentials})
+                role_name: adapter.materialize_role(
+                    {
+                        "role": role,
+                        "credentials": active_credentials,
+                        "evidence_records": evidence_records,
+                    }
+                )
                 if role.model_groups
                 else role
                 for role_name, role in data.roles.items()
             },
             "model_bundles": {
-                bundle_id: adapter.materialize_model_bundle({"bundle": bundle, "credentials": active_credentials})
+                bundle_id: adapter.materialize_model_bundle(
+                    {
+                        "bundle": bundle,
+                        "credentials": active_credentials,
+                        "evidence_records": evidence_records,
+                    }
+                )
                 if bundle.model_groups
                 else bundle
                 for bundle_id, bundle in data.model_bundles.items()
@@ -4489,8 +4563,21 @@ def _materialize_role_for_response(
 ) -> RoleEntry:
     if not role.model_groups:
         return role
-    adapter = GatewayAdapter(transport="in_process")
-    return cast(RoleEntry, adapter.materialize_role({"role": role, "credentials": credentials or load_credentials()}))
+    adapter = build_gateway_adapter()
+    return cast(
+        RoleEntry,
+        adapter.materialize_role(
+            {
+                "role": role,
+                "credentials": credentials or load_credentials(),
+                "evidence_records": _load_gateway_evidence_records(),
+            }
+        ),
+    )
+
+
+def _load_gateway_evidence_records() -> list[EvidenceRecord]:
+    return list(load_evidence_library().evidence_records)
 
 
 def _save_roles_with_active_routes(data: RolesData) -> RolesData:

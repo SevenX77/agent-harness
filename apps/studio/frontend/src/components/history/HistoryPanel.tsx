@@ -45,6 +45,9 @@ function kindLabel(kind: GitHistoryItem['kind']): string {
   if (kind === 'manual') {
     return 'Manual'
   }
+  if (kind === 'release') {
+    return 'Release'
+  }
   return 'Other'
 }
 
@@ -59,6 +62,7 @@ export function LocalHistoryPanelView({
   onRevert,
 }: LocalHistoryPanelViewProps) {
   const selectedItem = history.find((item) => item.sha === selectedSha) ?? null
+  const selectedItemRevertable = selectedItem?.revertable ?? true
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -138,9 +142,9 @@ export function LocalHistoryPanelView({
         <Button
           type="button"
           variant="outline"
-          disabled={!selectedItem || revertingSha !== null}
+          disabled={!selectedItem || !selectedItemRevertable || revertingSha !== null}
           onClick={() => {
-            if (selectedItem) {
+            if (selectedItem && selectedItemRevertable) {
               onRevert(selectedItem.sha)
             }
           }}

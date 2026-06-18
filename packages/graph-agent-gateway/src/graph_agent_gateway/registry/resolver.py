@@ -218,9 +218,11 @@ def resolve_role(
             raise RegistryResolutionError(f"role '{role_name}' has an empty fallback chain.")
         else:
             summary = "; ".join(f"{item.route_id} ({item.reason_code}): {item.message}" for item in skipped_diagnostics)
-            raise RegistryResolutionError(
+            exc = RegistryResolutionError(
                 f"Registry resolution failed for role '{role_name}'. All routes were skipped: {summary}"
             )
+            exc.skipped_diagnostics = skipped_diagnostics  # type: ignore[attr-defined]
+            raise exc
 
     return ResolvedRole(
         role_name=role_name,

@@ -9,6 +9,7 @@ from typing import Any, cast
 from app.core.adapters.engine import (
     RunResult,
 )
+from app.core.adapters.transport_factory import build_engine_adapter
 from app.models.runs import PredictDiagnosticExport
 from app.services.diagnostic_export import export_predict_diagnostics
 from app.services.skills import ensure_workspace_skill_dir, workspace_dir_for
@@ -66,9 +67,7 @@ class PredictorService:
         """Resolve strategy, run graph_agent in Predict mode, and assemble result."""
         skill_dir = ensure_workspace_skill_dir(skill_id)
 
-        from app.core.adapters.engine import EngineAdapter
-
-        adapter = EngineAdapter(transport="in_process")
+        adapter = build_engine_adapter()
 
         art_ref = adapter.compile(
             {
@@ -121,7 +120,15 @@ class PredictorService:
     def _persist_predict_result(
         self, skill_dir: Path, run_id: str, result: RunResult, *, content_hash: str
     ) -> None:
-        run_dir = workspace_dir_for(skill_dir) / "runs" / run_id
+        workspace_dir = workspace_dir_for(skill_dir)
+        from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
+
+        store = LocalRunArtifactStore(root=workspace_dir)
+        store.begin_run(run_id, metadata={"artifact_id": result.skill_id, "source": "predict"})
+        store.put_batch(run_id, {"result.json": result.model_dump_json().encode("utf-8")})
+        store.seal_run(run_id)
+
+        run_dir = workspace_dir / "runs" / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "result.json").write_text(
             result.model_dump_json(),
@@ -144,9 +151,7 @@ class PredictorService:
 
 def _fallback_trace_from_skill(skill_dir: Path, raw_result: Any) -> list[dict[str, Any]]:
     del raw_result
-    from app.core.adapters.engine import EngineAdapter
-
-    adapter = EngineAdapter(transport="in_process")
+    adapter = build_engine_adapter()
     try:
         return adapter.get_fallback_trace(str(skill_dir))
     except Exception:

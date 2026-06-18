@@ -24,14 +24,14 @@
 - **前置条件**: 引擎在 phase/manifest schema 暴露 per-node output-artifact-path + run 时按它落产物;之后 Studio i/o 面板加编辑 UI 写该字段。
 - **来源**: input/mvp1-alignment §F3(line 38-43)+ 引擎 schema 核实(2026-06-14)。
 
-### DEF-027 — copilot F5 安全写:前向写未走 Rust(D12 偏离)— ✅ PM 放行(2026-06-14,接受偏离,不重构)
-- **PM 裁决(2026-06-14)**: **放行**。接受"前向写由 SDK CLI 直写、不重构成自定义 MCP propose-tools 走 Rust"这条偏离;不做下方"忠实修法"的再架构。Reject 还原仍经 Rust(忠实)。此条不再是待办,留作**已知已接受的设计偏离**记录。
+### DEF-027 — copilot F5 Write/Edit 自写例外 — ✅ PM 放行(2026-06-14,接受为 MVP1 口径)
+- **PM 裁决(2026-06-14)**: **放行**。MVP1 允许 Copilot SDK `Read/Write/Edit` 在 workspace/cwd/add_dirs 范围内自行读写;不重构成自定义 MCP propose-tools 走 Rust。D12 继续约束 Studio 自有写入(editor save / graph serialize / test_inputs / golden / runs / artifacts / publish package 等),但不把 Copilot SDK Write/Edit 直写列为 D12 阻断。此条不再是待办,留作**已接受的设计例外**记录。
 - **日期**: 2026-06-14
-- **事项**: 设计 §F5 + D12 要求 copilot 的 Write/Edit **前向写经 Rust autosave 落盘**(Rust 唯一写者)。当前实现:`can_use_tool`(`copilot.py:_make_safe_write_can_use_tool`)对 Write/Edit 返回 `PermissionResultAllow` → **是 SDK CLI 子进程自己把文件写到磁盘的,不是经 Rust**。只有 **Reject 还原**走了 Rust(`restore_workspace_file`,忠实)。所以**前向写偏离了"落盘走 Rust"/D12 唯一写者**。
+- **事项**: 原设计曾要求 copilot 的 Write/Edit **前向写经 Rust autosave 落盘**(Rust 唯一写者)。当前实现:`can_use_tool`(`copilot.py:_make_safe_write_can_use_tool`)对 Write/Edit 返回 `PermissionResultAllow` → **SDK CLI 子进程自己把文件写到磁盘**。该实现现在被 MVP1 设计接受,不再判为违规;Reject 还原仍经 Rust(`restore_workspace_file`)。
 - **为何不能用权限回调修**: 已 PoC 真跑核实——SDK 的 `can_use_tool` 和 `hooks`(PreToolUse)都只有 `allow|deny|ask` 三态,**只能放行/拦截,没有"我自己用 Rust 写、并告诉模型成功"的口子**;Allow=SDK 直写,Deny=模型看到工具失败。且 backend sidecar **调不了 Tauri Rust IPC**(只有前端能调)→ 前向写要走 Rust 必须经前端。
 - **忠实的修法(已核实 SDK 支持,但是再架构)**: 不给模型 SDK 原生 Write/Edit,改用**自定义 in-process MCP 工具**(SDK 的 `@tool` + `create_sdk_mcp_server` + `McpSdkServerConfig`,已确认 PRESENT):`propose_write(path,content)` / `propose_edit(...)` 的 handler = 我们的代码,**只 emit patch_proposed 事件 + 返回 success,不写文件**;前端收到事件后**经 Rust `write_workspace_file` 落盘**(= 前向写走 Rust,D12 忠实)。代价:模型从用原生 Write/Edit 改成用自定义工具,行为/质量有影响 = **架构/价值判断,需 PM 拍板**(接受当前 SDK 直写的偏离 / 还是切自定义工具走 Rust)。
-- **当前状态**: diff 审阅 + checkpoint 还原(经 Rust)已做;唯"前向写经 Rust"未做。功能上 copilot 能改、能看 diff、能还原;偏离的是 D12 写者归属。
-- **来源**: copilot-assist mvp1-alignment §F5(line 53「经 Rust autosave 落盘」、line 88「Rust autosave 落盘」)+ 01-design.md D12;本会话 PoC + SDK 能力核实(2026-06-14)。
+- **当前状态**: diff 审阅 + checkpoint 还原(经 Rust)已做;前向写由 SDK 直写是 MVP1 允许例外。后续只追踪 diff/summary/Open Compare 等审阅体验,不追踪"前向写必须经 Rust"。
+- **来源**: copilot-assist mvp1-alignment §F5 / native-fs mvp1-alignment D12 carve-out;本会话 PoC + SDK 能力核实(2026-06-14)。
 
 ### DEF-024 — copilot F5 安全写:Bash 交互审批往返(双向 WS 控制通道)— 后续
 - **日期**: 2026-06-14

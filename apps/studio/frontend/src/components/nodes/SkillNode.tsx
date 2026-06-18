@@ -1,6 +1,7 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { AlertTriangle, Bot, Briefcase, CheckCircle2, Circle, Code, Minus, Network, Pause, Plus, Radio, Workflow } from 'lucide-react'
 import { SubgraphInline } from '@/components/studio/SubgraphInline'
+import { normalizeAbsoluteSubgraphPath } from '@/components/studio/subgraph-path'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
@@ -58,6 +59,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
   const StatusIcon = style.icon
   const kind = phaseKindLabel(data)
   const KindIcon = phaseKindIcon(kind)
+  const resolvedSubgraphPath = normalizeAbsoluteSubgraphPath(data.subgraphPath)
   const subagentCount = data.subagents?.length ?? 0
   const compileErrorCount = data.compileErrors?.length ?? 0
 
@@ -65,7 +67,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
     <div
       className={[
         'group relative min-w-[240px] cursor-pointer rounded-md border bg-card p-3 text-card-foreground shadow-sm transition-colors',
-        data.subgraphPath ? 'pb-5' : '',
+        resolvedSubgraphPath ? 'pb-5' : '',
         data.isConflictCancelled
           ? 'border-destructive ring-2 ring-destructive/30'
           : data.activeConflict
@@ -75,7 +77,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
           : 'border-border',
       ].join(' ')}
       onDoubleClick={(event) => {
-        if (data.subgraphPath) {
+        if (resolvedSubgraphPath) {
           event.stopPropagation()
         }
       }}
@@ -128,7 +130,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
           <TooltipContent side="top">{style.label}</TooltipContent>
         </Tooltip>
       </div>
-      {data.subgraphPath ? (
+      {resolvedSubgraphPath ? (
         <button
           type="button"
           aria-label={data.isExpanded ? 'Collapse subgraph' : 'Expand subgraph'}
@@ -141,8 +143,8 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
           {data.isExpanded ? <Minus className="size-3" /> : <Plus className="size-3" />}
         </button>
       ) : null}
-      {data.subgraphPath && data.isExpanded ? (
-        <SubgraphInline skillId={data.skillId} path={data.subgraphPath} parentLabel={data.label} />
+      {resolvedSubgraphPath && data.isExpanded ? (
+        <SubgraphInline skillId={data.skillId} path={resolvedSubgraphPath} parentLabel={data.label} />
       ) : null}
       <Handle type="source" position={Position.Bottom} className="!size-2.5 !border-background !bg-primary opacity-60 group-hover:opacity-100 transition-opacity duration-200" />
     </div>

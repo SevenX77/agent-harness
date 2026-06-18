@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from graph_agent.core.manifest import SkillManifest
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -117,6 +117,9 @@ class CompileSuccess(BaseModel):
     status: Literal["ok"]
     phase_count: int
     manifest_name: str
+    artifact_ref: dict[str, Any]
+    source_map_ref: str
+    execution_fingerprint: str
 
 
 class CompileFailure(BaseModel):

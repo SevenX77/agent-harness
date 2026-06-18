@@ -35,9 +35,15 @@ from graph_agent.core.event_contracts import StreamCursorGapError as StreamCurso
 from graph_agent.core.event_contracts import TransportErrorPayload as TransportErrorPayload
 from graph_agent.core.event_contracts import make_event_envelope as make_event_envelope
 from graph_agent.core.exceptions import make_error_payload as make_error_payload
+from graph_agent.core.graph_serializer import (
+    GraphTopologySerializationError as GraphTopologySerializationError,
+)
 from graph_agent.core.graph_serializer import serialize_graph as serialize_graph
 from graph_agent.core.graph_serializer import (
     serialize_graph_topology as serialize_graph_topology,
+)
+from graph_agent.core.graph_serializer import (
+    serialize_graph_topology_from_markdown as serialize_graph_topology_from_markdown,
 )
 from graph_agent.core.llm_provider import LLMProviderError, LLMProviderRequest, LLMProviderResponse
 from graph_agent.core.loader import SkillLoader as SkillLoader
@@ -83,6 +89,21 @@ from graph_agent.core.runner import (
     predict_artifact,
     run_artifact,
 )
+from graph_agent.core.topology_projection import (
+    ChildGraphTopologyProjection as ChildGraphTopologyProjection,
+)
+from graph_agent.core.topology_projection import GraphTopologyProjection as GraphTopologyProjection
+from graph_agent.core.topology_projection import (
+    SubgraphTopologyProjectionError as SubgraphTopologyProjectionError,
+)
+from graph_agent.core.topology_projection import (
+    load_child_graph_topology_projection as load_child_graph_topology_projection,
+)
+from graph_agent.core.topology_projection import (
+    load_graph_topology_projection as load_graph_topology_projection,
+)
+from graph_agent.core.topology_projection import phase_mode_for as phase_mode_for
+from graph_agent.core.topology_projection import read_subgraph_path as read_subgraph_path
 
 from app.core.adapters.http_transport import HttpTransport, StudioAdapterError
 
@@ -544,21 +565,6 @@ def _tokens_metrics_payload(raw_metrics: Any) -> dict[str, Any] | None:
     }
 
 
-def _zip_directory(dir_path: Path) -> bytes:
-    # codeql[py/path-injection] Studio callers pass a resolved skill root; archive entries are made relative to it.
-    source_root = dir_path.resolve(strict=True)
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # codeql[py/path-injection] The directory is resolved above and archived without following user path segments.
-        for file in source_root.rglob("*"):
-            if file.is_file():
-                rel_path = file.relative_to(source_root)
-                if ".workspace" in rel_path.parts or any(part.startswith(".") for part in rel_path.parts):
-                    continue
-                zf.write(file, rel_path)
-    return buf.getvalue()
-
-
 def _unzip_directory(zip_bytes: bytes, target_dir: Path) -> None:
     target_root = target_dir.resolve(strict=False)
     target_root.mkdir(parents=True, exist_ok=True)
@@ -664,6 +670,7 @@ class EngineAdapter:
         skill_dir = payload["skill_dir"]
         skill_id = payload["skill_id"]
         store_type = payload.get("artifact_scope", "ephemeral")
+        storage_root = _studio_storage_root()
 
         resolver = self._build_studio_skill_resolver()
         try:
@@ -680,17 +687,22 @@ class EngineAdapter:
                 skill_resolver=resolver,
                 store="product" if store_type == "product" else "ephemeral",
                 version=payload.get("version") if isinstance(payload.get("version"), str) else None,
+                artifact_output_root=storage_root / "engine_artifacts",
             )
         except Exception as exc:
             raise StudioAdapterError("engine.compile_failed", {"detail": str(exc)}) from exc
 
-        zip_bytes = _zip_directory(Path(skill_dir))
+        artifact_bytes = getattr(compiled_manifest, "artifact_bytes", None)
+        if not isinstance(artifact_bytes, bytes):
+            raise StudioAdapterError(
+                "engine.compile_failed",
+                {"detail": "compiled artifact bytes are required for product artifact storage"},
+            )
 
         from app.core.adapters.product_store_local import LocalProductArtifactStore
 
-        storage_root = _studio_storage_root()
         product_store = LocalProductArtifactStore(root=storage_root)
-        artifact_ref = product_store.put(zip_bytes, artifact_id=skill_id, store=store_type)
+        artifact_ref = product_store.put(artifact_bytes, artifact_id=skill_id, store=store_type)
         core_artifact_ref = CoreArtifactRef(
             artifact_id=artifact_ref.artifact_id,
             content_hash=artifact_ref.content_hash,
@@ -705,7 +717,9 @@ class EngineAdapter:
             execution_fingerprint=compiled_manifest.execution_fingerprint,
             diagnostics=compiled_manifest.diagnostics,
         )
-        _file_uri_to_path(core_artifact_ref.manifest_ref).write_text(
+        manifest_path = _file_uri_to_path(core_artifact_ref.manifest_ref)
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(
             json.dumps(manifest.model_dump(mode="json"), ensure_ascii=False, indent=2, sort_keys=True),
             encoding="utf-8",
         )
@@ -868,9 +882,9 @@ class EngineAdapter:
                     llm_provider=None,
                     run_artifact_store=run_artifact_store,
                 )
-                payload = _bytes_result_payload(result, run_artifact_store)
-                if payload is not None:
-                    return payload
+                run_payload = _bytes_result_payload(result, run_artifact_store)
+                if run_payload is not None:
+                    return run_payload
                 _reject_file_result_ref(result)
                 return _jsonable(result)
             except SDKPredictDeadlockError as exc:

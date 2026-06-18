@@ -19,6 +19,7 @@ from app.models.runs import (
     RunListResponse,
     RunMetadata,
     RunRequest,
+    TokensMetrics,
 )
 from app.services.predictor import predictor_service
 from app.services.run_manager import run_manager
@@ -115,17 +116,17 @@ def _raise_state_error_response(exc: StudioAdapterError) -> NoReturn:
     )
 
 
-def _tokens_metrics_payload(raw: Any) -> dict[str, Any] | None:
+def _tokens_metrics_payload(raw: Any) -> TokensMetrics | None:
     if not isinstance(raw, dict):
         return None
     input_tokens = int(raw.get("total_input_tokens", raw.get("input_tokens", 0)) or 0)
     output_tokens = int(raw.get("total_output_tokens", raw.get("output_tokens", 0)) or 0)
-    return {
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "total_tokens": int(raw.get("total_tokens", input_tokens + output_tokens) or 0),
-        "cost_estimate": raw.get("cost_estimate"),
-    }
+    return TokensMetrics(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=int(raw.get("total_tokens", input_tokens + output_tokens) or 0),
+        cost_estimate=raw.get("cost_estimate"),
+    )
 
 
 @router.delete("/{run_id}", status_code=status.HTTP_204_NO_CONTENT)

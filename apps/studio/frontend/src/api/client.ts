@@ -555,6 +555,8 @@ export async function writeSkillFile(
   const response = await api.post<UpdateSkillFileRes>(`/skills/${skillId}/files/${encodedPath}`, {
     content,
     expected_hash: expectedHash ?? null,
+  }, {
+    headers: { 'X-Studio-Write-Fallback': 'browser' },
   })
   return response.data
 }

@@ -130,7 +130,7 @@
 - **Output token**：target 值 + `Use max` 开关。**downgrade 默认策略不需要 UI**〔#3〕——保持默认（allow），不暴露 block/warn 选择控件。
 - **Route max token 摘要**：投影 route capability，只读。
 - **布局**〔#4〕：现 intent 配置布局偏丑，**只调内部布局、不改逻辑**（轻量 UI 优化）。
-- **Token Intent 完整 schema（回填 B1+，2026-06-03）**：`target_output_tokens` 与 `target_context_tokens` 都是 `TokenIntent{mode, value?, downgrade?}`，`mode` 五档：`inherit`（**仅** Model-Group / provider 级可用，Role 级不可）/ `default` / `maximum_available`（=`Use max`）/ `target`（配 value）/ **`required_minimum`**（达不到 → role-fit 转 Not Fit）。**继承**：Model-Group 级 intent 默认继承 Role 级、可对该组覆盖；Role 级 mode 必须是具体档（不能 `inherit`）。§2.3 现有"target 值 + Use max 开关"只覆盖 `target`/`maximum_available` → UI 至少还要能表达 `required_minimum`（驱动 Not Fit）和 `default`，并补 `target_context_tokens`（现只有 output token）。
+- **Token Intent 完整 schema（回填 B1+，2026-06-03；2026-06-18 PM 修正为 role-only）**：`target_output_tokens` 与 `target_context_tokens` 都是 `TokenIntent{mode, value?, downgrade?}`，`mode` 四档：`default` / `maximum_available`（=`Use max`）/ `target`（配 value）/ **`required_minimum`**（达不到 → role-fit 转 Not Fit）。**intent 只在 role 级设（铁律）**：用户只对 **role** 提能力要求（thinking + token + provider_preference），**不逐 model-group、不逐 provider 配 intent**；加进 role 的 route，**匹配 role 要求就用、不匹配就不用**，逻辑到此为止。〔删原"Model-Group 级 intent 默认继承 role 级、可对该组覆盖"与 `inherit` 档——那是过度设计，与 role-only 原则相悖。〕§2.3 现有"target 值 + Use max 开关"只覆盖 `target`/`maximum_available` → UI 至少还要能表达 `required_minimum`（驱动 Not Fit）和 `default`，并补 `target_context_tokens`（现只有 output token）。
 - **downgrade**：是 `TokenIntent` 上的字段（allow / allow_with_warning / block），**schema 保留、默认 allow、不做 UI**（#3）。
 - **`cost_priority`：mvp1 砍掉（PM 2026-06-03 拍板）** —— 不做 UI，**schema 也不留**；等真有成本优化需求再加。
 
@@ -146,13 +146,19 @@
 - 未保存先拒测：draft 测试 = 先 `PUT` 保存再 test。
 
 ### 2.6 Model Bundle（与 Role 高度统一）
+- **统一模型（地基，2026-06-18 PM）**：**model-group、model-bundle、role 本质都是「一串 routes 的数组」**，最终都被 materializer **展开铺平成一条 fallback_chain**。所以三者特性应**一致**：bundle 在 role 里和 model-group **同级、可拖、可调序、可逐模型/逐 provider 配（因为它就是 routes）**；copilot role 也是这套（§3）。区别只在"谁拥有这串数组"：model-group=registry 归一出来的、bundle=用户自建可复用的、role=用户为某个用途编排的。**任何 group/bundle/role 的语义，先回到"它是一串 routes"去推。**
 - **定义**：Model Bundle = 自建的"已排好 fallback 的 model group"；与 model group 区别：可放**不同模型**、**预配 provider**；可像 model group 一样拖进 role card 解析成 route list。
 - **Pinned 置顶槽〔回填 B4，PM 2026-06-03 要〕**：已配好/已测的 Model Bundle 在 Available Models **顶部单独成槽、视觉区分**显示（置于 model-group 列表之上），强调可复用，与普通 model group 视觉区分开。
 - **统一原则**〔#6/#7/#9〕：bundle 的录入/测试/改名删除 UI **与 role 统一**——
   - `Add Model Bundle` 按钮放到**与 `Add Role` 同位置**〔#6〕。
   - 束 **Test 前端复用 role 的测试**（同组件 / 同路径，束也能独立测）〔#7〕。
   - 束 **Rename / Delete 与 role 统一**〔#9〕。
-- **拖进角色 = 引用（同步）**〔#8/#12〕：把束拖进角色后是**引用**，不是快照——**改束 → 所有引用它的角色同步跟着变**（像共享组件实例）。**此条覆盖 765 设计的"快照复制"方案**。落地含义：角色存的是 bundle 引用（bundle_id），materializer 在物化时**按引用拉取当前束内容**展开成 fallback_chain（不在拖入时复制）。
+- **拖进角色 = 引用（live 同步）**〔#8/#12〕：把束拖进角色后是**引用**，不是快照——**改束 → 所有引用它的角色同步跟着变**（像共享组件实例）。**此条覆盖 765 设计的"快照复制"方案**。落地含义（2026-06-18 PM 补全的边界）：
+  - 角色存的是 bundle 引用（`bundle_id`），materializer 物化时**按引用拉取当前束内容**展开成 fallback_chain（**不在拖入时复制**）。「同步」= 物化时永远读束的最新内容，所以束改了，下次物化/测试自然就是新的。
+  - **删除级联**：束被删 → 引用它的角色里**那一项引用也随之消失**（不是留个失效快照）；该角色重新物化时少了这串 route（可能转 not-fit，按 §2.5/§6.2 的可执行性判定）。
+  - **role 可覆盖**：因为束在 role 里就是一串 routes（与 model-group 同级），role 对它**照常可调序 / Add / 删 route / 配 provider**——这些是 role 自己的编排，不回写束本体（束是共享的；role 的局部调整只活在该 role 的 routes 数组里）。〔实现细节待定见 §2.6 末尾「待定」〕
+
+- **⚠️ 待定（PM 拍板项，实现前必须定）**：「引用 live 同步」与「role 可在引用上局部覆盖（调序/删/加 route）」二者交互的存储语义——role 对一个**被引用的束**做了局部改动后，是 ① 仍存 `bundle_id` 引用 + 一份"该 role 的覆盖 delta"（束再变时按 delta 叠加，冲突如何解？比如束删了 role 没动过的某条 route）；还是 ② 一旦局部改动即"脱离引用、固化成该 role 自己的 routes 快照"（不再随束同步）。两种都自洽但行为不同，**需 PM 定**；定不下来前，前后端会各按理解实现。
 
 ### 2.7 跨页：role 状态 + 快捷 Test 进 Properties 面板〔#11〕
 - **节点 Properties 面板**（作者 / 运行期给节点指定 `llm_role` 的地方）**每个 role 旁加 Test 键** + **展示 role 状态**——快捷验"能不能用"，**不必切到 Settings 再测**。
@@ -196,6 +202,7 @@
   - Claude：优先 **opus 4.8**，没有则退 **opus 4.7**（再往后退更旧）。
   - DeepSeek：优先 **V4 Pro**，没有则退 **V3.2 Pro**。
   - 都没有 → 不浮出默认，用户自建。现码硬编码映射 `copilot_opus_4_7`↔`claude-opus-4.7`（`CopilotTab.tsx:132-133`）需改为此动态择优。
+- **本质（2026-06-18 PM 澄清）：copilot 的"内置角色"= 自动选了一个 canonical model-group**（如名为 `opus4.7` 的组），**复用 model-group 现成的 canonical_id 归一化**（各 provider 五花八门的 opus4.7 model name 归一成同一个标准 name —— 这套 §2.1「相同模型合并 / singleton 按 canonical_id 键」已经有）。所以**「内置 vs 第三方」不需要新的后端 role 元数据契约**：内置 = 自动选了 canonical 组、third-party = 用户自建组；前端**不要靠硬编码 model-id 白名单 + `includes('Claude')` 套模板判定**（现码 #55 的脆做法），而是看这个 copilot role 选的是不是系统按阶梯自动浮出的 canonical 组。
 
 ### 3.3 配 copilot 角色
 - 新建第三方 copilot 角色草稿（`Add model`），id = `copilot_custom_N`（`CopilotTab.tsx:202`，带前缀✓）。
@@ -524,6 +531,7 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 | 13 | Choose 弹 OS 文件夹选择器(**settings 唯一走 native/Rust 的本地操作**) | skills-dir-native-picker | ✅ web 模式仅 toast "Desktop only" |
 | 14 | Reset 还原默认目录(回 runtime 默认 `configDir/Skills`) | skills-dir-reset | ✅ runtime config 不可用时 disabled |
 | 15 | 任意字段即填即存(300ms debounce `PUT /api/settings`)+ 徽章 | appsettings-save | ✅ |
+| 15.1 | 切界面语言(English / 简体中文 下拉, `i18n.changeLanguage`) | settings-language | ⚠️ 新增原子(2026-06-18 PM:语言**算 Settings**、之前漏写)。现仅切界面、**不持久化**;目标=和其它字段一样存进 `app_settings`(重开恢复上次语言),走同一条 `PUT /api/settings` + 即填即存 |
 
 > **机制**：三字段整体 PUT(无字段级 PATCH),`GET/PUT /api/settings`→`app_settings.json`。Gitea host 只是 publish 鉴权链的一半(token/凭据走另一套 credentials,且为 env-only `STUDIO_*`,见 [00_settings §git](./00_settings.md))。选目录是 settings 里唯一的 Rust 本地操作。**写入归属铁律**:credentials/roles/settings 走 gateway Python(`~/.studio/` + `routers/llm.py`),**settings 不适用 D12「写全量 Rust」**(那是 skill 源文件)——唯一 native 操作就是这条选目录。
 

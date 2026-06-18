@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from app.services.skills import _graph_content_hash
 from fastapi.testclient import TestClient
 
 _LOGIC_MD = (
@@ -160,3 +161,45 @@ phases:
     assert "<!-- keep: trailing comment -->" in markdown
     assert "  - review" in markdown
     assert '<phase depends_on="setup" output>review</phase>' in markdown
+
+
+def test_serialize_conflict_reports_current_disk_phase_count(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, _ = studio_roots
+    graph_md = skills_dir / "text-segmentation" / "GRAPH.md"
+    stale_content = graph_md.read_text(encoding="utf-8")
+    graph_md.write_text(
+        """---
+schema_version: "v0.3.0"
+name: text-segmentation
+io:
+  inputs:
+    type: object
+    properties: {}
+  outputs:
+    type: object
+    properties: {}
+phases:
+  - setup
+  - review
+---
+<phase depends_on="input">setup</phase>
+<phase depends_on="setup" output>review</phase>
+""",
+        encoding="utf-8",
+    )
+
+    response = client.post(
+        "/api/skills/text-segmentation/graph/serialize",
+        json={
+            "phases": [
+                {"id": "setup", "src": "phases/setup", "mode": "logic", "depends_on": []},
+            ],
+            "expected_hash": _graph_content_hash(stale_content),
+        },
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["current_phase_count"] == 2

@@ -1,4 +1,4 @@
-"""Error-handling tests for `_parse_broken_graph_topology_and_phases`.
+"""Error-handling tests for `_graph_topology_projection_or_empty`.
 
 This is the parser used to populate the repair-state view when a skill's
 GRAPH.md is broken/missing. Degradation to ``([], [])`` must stay graceful
@@ -34,7 +34,7 @@ def test_parse_broken_graph_logs_warning_and_degrades_on_malformed_yaml(
     )
 
     with caplog.at_level(logging.WARNING):
-        phases, topology = skill_service._parse_broken_graph_topology_and_phases(skill_dir)
+        phases, topology = skill_service._graph_topology_projection_or_empty(skill_dir)
 
     # Graceful degradation is preserved: repair view still renders.
     assert phases == []
@@ -58,7 +58,7 @@ def test_parse_broken_graph_silent_when_legitimately_absent(
     skill_dir.mkdir(parents=True)
 
     with caplog.at_level(logging.WARNING):
-        phases, topology = skill_service._parse_broken_graph_topology_and_phases(skill_dir)
+        phases, topology = skill_service._graph_topology_projection_or_empty(skill_dir)
 
     assert phases == []
     assert topology == []

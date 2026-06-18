@@ -7,6 +7,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
+import yaml
+
 from graph_agent.core.loader import PhaseTokenInfo
 from graph_agent.core.manifest import GraphManifest, GraphPhaseRef, PhaseIOSchema
 
@@ -23,6 +25,14 @@ class GraphToken:
     phase_info: PhaseTokenInfo | None = None
 
 
+class GraphTopologySerializationError(ValueError):
+    def __init__(self, code: str, message: str, detail: dict[str, object] | None = None) -> None:
+        self.code = code
+        self.message = message
+        self.detail = detail or {}
+        super().__init__(message)
+
+
 def serialize_graph(manifest: GraphManifest, original_md: str | None = None) -> str:
     """Serialize a GraphManifest back to canonical GRAPH.md Markdown."""
 
@@ -30,6 +40,26 @@ def serialize_graph(manifest: GraphManifest, original_md: str | None = None) -> 
     if original_md is None:
         return rendered
     return _preserve_graph_markdown_topology(original_md, rendered)
+
+
+def serialize_graph_topology_from_markdown(
+    *,
+    skill_id: str,
+    original_md: str,
+    phases: Sequence[GraphPhaseRef],
+) -> str:
+    """Serialize a canvas topology update using the current GRAPH.md frontmatter."""
+
+    frontmatter = _graph_frontmatter_from_markdown(original_md)
+    _validate_graph_phase_refs(phases)
+    description_raw = frontmatter.get("description")
+    return serialize_graph_topology(
+        name=str(frontmatter.get("name") or skill_id),
+        description=description_raw if isinstance(description_raw, str) else None,
+        io=_io_schema_from_frontmatter(frontmatter.get("io")),
+        phases=phases,
+        original_md=original_md,
+    )
 
 
 def serialize_graph_topology(
@@ -74,6 +104,79 @@ def serialize_graph_topology(
     if original_md is None:
         return rendered
     return _preserve_graph_markdown_topology(original_md, rendered)
+
+
+def _graph_frontmatter_from_markdown(markdown: str) -> dict[str, object]:
+    parts = markdown.split("---")
+    if len(parts) < 3:
+        return {}
+    try:
+        loaded = yaml.safe_load(parts[1])
+    except yaml.YAMLError:
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _io_schema_from_frontmatter(io_raw: object) -> PhaseIOSchema:
+    if isinstance(io_raw, dict):
+        inputs = io_raw.get("inputs")
+        outputs = io_raw.get("outputs")
+        if isinstance(inputs, dict) and isinstance(outputs, dict):
+            return PhaseIOSchema(inputs=inputs, outputs=outputs)
+    raise GraphTopologySerializationError(
+        code="serializer_io_invalid",
+        message="GRAPH.md frontmatter is missing a valid io.inputs/io.outputs block",
+        detail={},
+    )
+
+
+def _validate_graph_phase_refs(phases: Sequence[GraphPhaseRef]) -> None:
+    phase_ids = {phase.id for phase in phases}
+    for phase in phases:
+        for dep in phase.depends_on:
+            if dep not in phase_ids:
+                raise GraphTopologySerializationError(
+                    code="serializer_orphan",
+                    message=f"phase {phase.id!r} depends_on unknown phase {dep!r}",
+                    detail={"phase_id": phase.id, "dependency": dep},
+                )
+            if dep == phase.id:
+                raise GraphTopologySerializationError(
+                    code="serializer_cycle",
+                    message=f"phase {phase.id!r} cannot depend on itself",
+                    detail={"phase_id": phase.id},
+                )
+    _validate_graph_phase_refs_acyclic(phases)
+
+
+def _validate_graph_phase_refs_acyclic(phases: Sequence[GraphPhaseRef]) -> None:
+    adjacency: dict[str, list[str]] = {phase.id: [] for phase in phases}
+    for phase in phases:
+        for dep in phase.depends_on:
+            adjacency[dep].append(phase.id)
+    state: dict[str, str] = {}
+    stack: list[str] = []
+
+    def visit(node: str) -> None:
+        state[node] = "gray"
+        stack.append(node)
+        for nxt in adjacency[node]:
+            if state.get(nxt) == "gray":
+                start = stack.index(nxt)
+                cycle = stack[start:] + [nxt]
+                raise GraphTopologySerializationError(
+                    code="serializer_cycle",
+                    message="cycle detected: " + " -> ".join(cycle),
+                    detail={"cycle": cycle},
+                )
+            if state.get(nxt) is None:
+                visit(nxt)
+        stack.pop()
+        state[node] = "black"
+
+    for node in adjacency:
+        if state.get(node) is None:
+            visit(node)
 
 
 def _render_fresh_graph(manifest: GraphManifest) -> str:
@@ -255,4 +358,10 @@ def _scalar(value: object) -> str:
     return str(value)
 
 
-__all__ = ["GraphToken", "serialize_graph", "serialize_graph_topology"]
+__all__ = [
+    "GraphToken",
+    "GraphTopologySerializationError",
+    "serialize_graph",
+    "serialize_graph_topology",
+    "serialize_graph_topology_from_markdown",
+]

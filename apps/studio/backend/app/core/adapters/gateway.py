@@ -2,9 +2,18 @@ from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass, is_dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
+from graph_agent_gateway.credential_resolver import (
+    CredentialResolveError as GatewayCredentialResolveError,
+)
+from graph_agent_gateway.credential_resolver import (
+    CredentialResolveRequest as GatewayCredentialResolveRequest,
+)
+from graph_agent_gateway.credential_resolver import (
+    resolve_credential as gateway_resolve_credential,
+)
 from graph_agent_gateway.fallback_decision import (
     FallbackDecision as GatewayFallbackDecision,
 )
@@ -14,14 +23,18 @@ from graph_agent_gateway.fallback_decision import (
 from graph_agent_gateway.fallback_decision import (
     decide_fallback as gateway_decide_fallback,
 )
-from graph_agent_gateway.credential_resolver import (
-    CredentialResolveError as GatewayCredentialResolveError,
+from graph_agent_gateway.import_draft_store import (
+    EVIDENCE_LIBRARY_DRAFT_ID as EVIDENCE_LIBRARY_DRAFT_ID,
 )
-from graph_agent_gateway.credential_resolver import (
-    CredentialResolveRequest as GatewayCredentialResolveRequest,
+from graph_agent_gateway.import_draft_store import ImportDraftStore as ImportDraftStore
+from graph_agent_gateway.import_draft_store import (
+    materialize_import_draft_candidates as materialize_import_draft_candidates,
 )
-from graph_agent_gateway.credential_resolver import (
-    resolve_credential as gateway_resolve_credential,
+from graph_agent_gateway.import_draft_store import (
+    merge_evidence_library as merge_evidence_library,
+)
+from graph_agent_gateway.import_draft_store import (
+    new_evidence_library as new_evidence_library,
 )
 from graph_agent_gateway.registry.base_url import (
     canonicalize_base_url as canonicalize_base_url,
@@ -71,19 +84,10 @@ from graph_agent_gateway.registry.schema import (
     RuntimeSettings as RuntimeSettings,
 )
 from graph_agent_gateway.registry.schema import VerifiedProfile as VerifiedProfile
-from graph_agent_gateway.import_draft_store import (
-    EVIDENCE_LIBRARY_DRAFT_ID as EVIDENCE_LIBRARY_DRAFT_ID,
-)
-from graph_agent_gateway.import_draft_store import ImportDraftStore as ImportDraftStore
-from graph_agent_gateway.import_draft_store import (
-    merge_evidence_library as merge_evidence_library,
-)
-from graph_agent_gateway.import_draft_store import (
-    materialize_import_draft_candidates as materialize_import_draft_candidates,
-)
-from graph_agent_gateway.import_draft_store import (
-    new_evidence_library as new_evidence_library,
-)
+
+# Re-exports from graph_agent_gateway for services isolation
+from graph_agent_gateway.resolver import ModelResolver as ModelResolver
+from graph_agent_gateway.resolver import ResourceTerminalError as ResourceTerminalError
 from graph_agent_gateway.role_materialization import (
     MaterializeRoleRequest as GatewayMaterializeRoleRequest,
 )
@@ -91,10 +95,6 @@ from graph_agent_gateway.role_materialization import (
     materialize_role as gateway_materialize_role,
 )
 from graph_agent_gateway.route_handoff import ResolvedRouteChain
-
-# Re-exports from graph_agent_gateway for services isolation
-from graph_agent_gateway.resolver import ModelResolver as ModelResolver
-from graph_agent_gateway.resolver import ResourceTerminalError as ResourceTerminalError
 
 # Canonical 6-state route-state projector owned by the gateway package. Studio
 # renders gateway facts and must NOT recompute the state vocabulary inline.
@@ -430,11 +430,23 @@ class GatewayAdapter:
 
         # in_process
         fallback_chain = payload.get("fallback_chain") or []
-        route_ids = [self._route_id(entry) for entry in fallback_chain]
-        route_ids = [route_id for route_id in route_ids if route_id]
+        route_ids = [
+            route_id
+            for route_id in (self._route_id(entry) for entry in fallback_chain)
+            if route_id is not None
+        ]
 
-        failed_route_ids = list(payload.get("failed_route_ids") or [])
-        current_route_id = payload.get("current_route_id") or (route_ids[0] if route_ids else "")
+        failed_route_ids = [
+            route_id
+            for route_id in payload.get("failed_route_ids") or []
+            if isinstance(route_id, str)
+        ]
+        raw_current_route_id = payload.get("current_route_id")
+        current_route_id = (
+            raw_current_route_id
+            if isinstance(raw_current_route_id, str)
+            else (route_ids[0] if route_ids else "")
+        )
         owner_decision = gateway_decide_fallback(
             GatewayFallbackDecisionRequest(
                 route_ids=route_ids,
@@ -479,13 +491,17 @@ class GatewayAdapter:
             )
         except GatewayCredentialResolveError as exc:
             raise StudioAdapterError(exc.error_code, exc.error_payload) from exc
-        if hasattr(owner_response, "model_dump"):
-            owner_response = owner_response.model_dump()
-        expires_at = owner_response.get("expires_at") if isinstance(owner_response, dict) else None
+        owner_payload = owner_response.model_dump() if hasattr(owner_response, "model_dump") else owner_response
+        if not isinstance(owner_payload, dict):
+            raise StudioAdapterError(
+                "credential.invalid_owner_response",
+                {"detail": "Credential resolver response must be an object"},
+            )
+        expires_at = owner_payload.get("expires_at")
         if isinstance(expires_at, datetime):
-            owner_response = dict(owner_response)
-            owner_response["expires_at"] = expires_at.isoformat()
-        return _validate_credential_handle_response(owner_response)
+            owner_payload = dict(owner_payload)
+            owner_payload["expires_at"] = expires_at.isoformat()
+        return _validate_credential_handle_response(owner_payload)
 
     def _route_id(self, entry: Any) -> str | None:
         if isinstance(entry, dict):

@@ -282,6 +282,9 @@ def test_resolve_copilot_runtime_uses_gateway_model_resolver(
     monkeypatch.setattr(gateway_resolver, "default_roles_path", lambda: roles_path)
     monkeypatch.setattr(gateway_resolver, "load_roles_file", lambda _path: roles)
     monkeypatch.setattr(ModelResolver, "resolve_routes", recording_resolve_routes)
+    from app.core import config
+
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", tmp_path / "settings")
 
     routes, credential_provider = copilot._resolve_copilot_runtime(route_id)
 

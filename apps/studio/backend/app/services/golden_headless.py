@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path, PurePosixPath
-from typing import Any, Literal, cast
+from typing import Any, Literal, NoReturn, cast
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -686,7 +686,7 @@ def _raise_golden_error(
     http_status: int,
     message: str,
     details: dict[str, Any],
-) -> None:
+) -> NoReturn:
     response = error_response(
         error_code=error_code,
         http_status=http_status,

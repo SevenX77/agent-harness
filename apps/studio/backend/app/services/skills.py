@@ -15,7 +15,6 @@ from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 from typing import Any, NoReturn
 
-import yaml
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
 
@@ -27,12 +26,16 @@ from app.core.adapters.engine import (
     GraphCompileError,
     GraphManifest,
     GraphPhaseRef,
+    GraphTopologySerializationError,
     LogicNodeAST,
-    PhaseIOSchema,
     ResourceNotFoundError,
     SkillLoader,
     SubgraphNodeAST,
+    SubgraphTopologyProjectionError,
     compile_skill,
+    load_child_graph_topology_projection,
+    load_graph_topology_projection,
+    read_subgraph_path,
 )
 from app.core.adapters.transport_factory import build_engine_adapter
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
@@ -56,7 +59,7 @@ from app.services.canvas_errors import CanvasConflictError, CanvasSerializerFata
 from app.services.config_arbitration import detect_config_mismatch
 from app.services.file_watcher import record_api_write
 from app.services.git_local import GitLocalService, initialize_skill_repository
-from app.services.graph_roundtrip import serialize_graph_topology
+from app.services.graph_roundtrip import serialize_graph_topology_from_markdown
 from app.services.skill_resolver import build_studio_skill_resolver
 
 logger = logging.getLogger(__name__)
@@ -1066,63 +1069,17 @@ async def _detail_from_manifest_async(
     )
 
 
-def _parse_broken_graph_topology_and_phases(
+def _graph_topology_projection_or_empty(
     skill_dir: Path,
 ) -> tuple[list[str], list[dict[str, object]]]:
     graph_path = skill_dir / "GRAPH.md"
     if not graph_path.exists():
         return [], []
     try:
-        content = graph_path.read_text(encoding="utf-8")
-        parts = content.split("---")
-        if len(parts) < 3:
-            return [], []
-        frontmatter_raw = parts[1]
-        body = "---".join(parts[2:])
-
-        frontmatter = yaml.safe_load(frontmatter_raw) or {}
-        phases = frontmatter.get("phases", [])
-        if not isinstance(phases, list):
-            phases = []
-
-        phase_pattern = re.compile(r"<phase\b([^>]*?)>(.*?)</phase>", re.IGNORECASE | re.DOTALL)
-
-        topology: list[dict[str, object]] = []
-        for match in phase_pattern.finditer(body):
-            attributes = match.group(1).strip()
-            tag_content = match.group(2).strip()
-
-            dep_match = re.search(r'depends_on=["\']([^"\']+)["\']', attributes, re.IGNORECASE)
-            depends_on_list = []
-            if dep_match:
-                deps = dep_match.group(1).strip()
-                depends_on_list = [d.strip() for d in deps.split(",") if d.strip()]
-
-            mode = ""
-            phase_dir = skill_dir / "phases" / tag_content
-            if (phase_dir / "LOGIC.md").exists():
-                mode = "logic"
-            elif (phase_dir / "SUBGRAPH.md").exists():
-                mode = "subgraph"
-            elif (phase_dir / "SKILL.md").exists():
-                mode = "agent"
-
-            row: dict[str, object] = {
-                "id": tag_content,
-                "src": f"phases/{tag_content}",
-                "depends_on": depends_on_list,
-                "mode": mode,
-            }
-            if mode == "subgraph":
-                row["path"] = _subgraph_path_for_phase(skill_dir, tag_content)
-            topology.append(row)
-
-        return [str(p) for p in phases], topology
-    except (OSError, UnicodeDecodeError, yaml.YAMLError, AttributeError) as exc:
+        projection = load_graph_topology_projection(skill_dir)
+    except (OSError, UnicodeDecodeError, GraphAgentError, ValueError) as exc:
         # The repair-state view depends on this graceful ([], []) degradation,
-        # so we never raise here. But a genuine parse failure must be visible:
-        # otherwise an operator cannot tell a legitimately-empty graph from a
-        # crash (e.g. malformed frontmatter, non-dict frontmatter, bad encoding).
+        # so Studio only logs visibility while Engine/core owns GRAPH parsing.
         logger.warning(
             "Failed to parse broken GRAPH.md at %s: %s: %s; "
             "degrading to empty topology/phases for repair view",
@@ -1131,6 +1088,12 @@ def _parse_broken_graph_topology_and_phases(
             exc,
         )
         return [], []
+    return projection.phases, projection.graph_topology
+
+
+def _current_graph_phase_count(skill_dir: Path) -> int:
+    phases, _topology = _graph_topology_projection_or_empty(skill_dir)
+    return len(phases)
 
 
 async def _broken_detail_from_files_async(
@@ -1142,7 +1105,7 @@ async def _broken_detail_from_files_async(
     metadata: MetadataStore,
 ) -> SkillDetail:
     latest = await latest_run_metadata_async(user_id, skill_id, metadata)
-    phases, topology = _parse_broken_graph_topology_and_phases(skill_dir)
+    phases, topology = _graph_topology_projection_or_empty(skill_dir)
     return SkillDetail(
         manifest=GraphManifest(
             schema_version="v0.3.0",
@@ -1200,36 +1163,7 @@ def _read_current_graph_markdown(skill_dir: Path) -> str:
     return graph_path.read_text(encoding="utf-8")
 
 
-def _markdown_frontmatter(path: Path) -> dict[str, object]:
-    """Parse the YAML frontmatter block of a Studio markdown file."""
-    if not path.is_file():
-        return {}
-    content = path.read_text(encoding="utf-8")
-    parts = content.split("---")
-    if len(parts) < 3:
-        return {}
-    try:
-        loaded = yaml.safe_load(parts[1])
-    except yaml.YAMLError:
-        return {}
-    return loaded if isinstance(loaded, dict) else {}
-
-
-def _subgraph_path_for_phase(skill_dir: Path, phase_name: str) -> str | None:
-    """Read a subgraph phase's absolute child ``path`` from its SUBGRAPH.md.
-
-    Per engine skill-syntax §2.1, subgraphs reference the child graph by an
-    absolute ``path`` (no registry). The legacy ``target_skill`` field is never
-    surfaced here.
-    """
-    frontmatter = _markdown_frontmatter(skill_dir / "phases" / phase_name / "SUBGRAPH.md")
-    path_value = frontmatter.get("path")
-    if isinstance(path_value, str) and path_value.strip():
-        return path_value.strip()
-    return None
-
-
-def _child_graph_boundary_roots(parent_skill_dir: Path) -> list[Path]:
+def _allowed_child_graph_roots(parent_skill_dir: Path) -> list[Path]:
     """Allowed roots a subgraph child path may resolve inside (copilot cwd boundary).
 
     Per engine skill-syntax §2.1, a subgraph child path must fall within the
@@ -1273,57 +1207,31 @@ def _raise_subgraph_path_not_found(child_path: str) -> NoReturn:
     raise_error_response(response)
 
 
-async def resolve_child_graph_topology(
+async def get_child_graph_topology(
     user_id: str,
     skill_id: str,
     child_path: str,
     storage: StorageBackend,
     metadata: MetadataStore,
 ) -> ChildGraphTopology:
-    """Resolve and read a subgraph child GRAPH.md by absolute path.
-
-    Validates the path is absolute and within the copilot/workspace boundary
-    (path-traversal guard), then returns the child graph's phases/topology so the
-    frontend can render real inline subgraph content.
-    """
-    if not child_path or not child_path.strip():
-        _raise_subgraph_path_invalid(child_path, "path is empty")
-    if "\x00" in child_path:
-        _raise_subgraph_path_invalid(child_path, "path contains null byte")
-
-    candidate = Path(child_path)
-    if not candidate.is_absolute():
-        _raise_subgraph_path_invalid(child_path, "path must be absolute")
-
     parent_skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
-    resolved_child = candidate.resolve(strict=False)
-    boundary_roots = _child_graph_boundary_roots(parent_skill_dir)
-    if not any(_is_within(resolved_child, root) for root in boundary_roots):
-        _raise_subgraph_path_invalid(child_path, "path is outside the workspace boundary")
-
-    graph_md = resolved_child / "GRAPH.md"
-    if not graph_md.is_file():
-        _raise_subgraph_path_not_found(child_path)
-
-    frontmatter = _markdown_frontmatter(graph_md)
-    phases, topology = _parse_broken_graph_topology_and_phases(resolved_child)
-    name = frontmatter.get("name")
-    description = frontmatter.get("description")
-    return ChildGraphTopology(
-        path=str(resolved_child),
-        name=name if isinstance(name, str) and name else resolved_child.name,
-        description=description if isinstance(description, str) else "",
-        phases=phases,
-        graph_topology=topology,
-    )
-
-
-def _is_within(candidate: Path, root: Path) -> bool:
     try:
-        candidate.relative_to(root)
-    except ValueError:
-        return False
-    return True
+        projection = load_child_graph_topology_projection(
+            parent_skill_dir=parent_skill_dir,
+            child_path=child_path,
+            allowed_roots=_allowed_child_graph_roots(parent_skill_dir),
+        )
+    except SubgraphTopologyProjectionError as exc:
+        if exc.code == "SUBGRAPH_PATH_NOT_FOUND":
+            _raise_subgraph_path_not_found(child_path)
+        _raise_subgraph_path_invalid(child_path, exc.reason)
+    return ChildGraphTopology(
+        path=projection.path,
+        name=projection.name,
+        description=projection.description,
+        phases=projection.phases,
+        graph_topology=projection.graph_topology,
+    )
 
 
 def _graph_content_hash(content: str) -> str:
@@ -1347,37 +1255,6 @@ def _load_compiled(skill_path: Path) -> CompiledSkill:
         raise_error_response(response)
 
 
-def _graph_frontmatter_from_md(markdown: str) -> dict[str, object]:
-    """Parse the YAML frontmatter block of a GRAPH.md string (lenient)."""
-    parts = markdown.split("---")
-    if len(parts) < 3:
-        return {}
-    try:
-        loaded = yaml.safe_load(parts[1])
-    except yaml.YAMLError:
-        return {}
-    return loaded if isinstance(loaded, dict) else {}
-
-
-def _io_schema_from_frontmatter(io_raw: object) -> PhaseIOSchema:
-    """Build a PhaseIOSchema from GRAPH.md frontmatter `io`, or fail cleanly.
-
-    Canvas-save only mutates topology, never the IO schema, so we reuse the
-    current GRAPH.md `io` verbatim. A malformed/missing io is a serializer-fatal
-    (422) with a clear message rather than an uncaught 500.
-    """
-    if isinstance(io_raw, dict):
-        inputs = io_raw.get("inputs")
-        outputs = io_raw.get("outputs")
-        if isinstance(inputs, dict) and isinstance(outputs, dict):
-            return PhaseIOSchema(inputs=inputs, outputs=outputs)
-    raise CanvasSerializerFatal(
-        code="serializer_io_invalid",
-        message="GRAPH.md frontmatter is missing a valid io.inputs/io.outputs block",
-        detail={},
-    )
-
-
 async def serialize_skill_graph_markdown(
     user_id: str,
     skill_id: str,
@@ -1392,22 +1269,12 @@ async def serialize_skill_graph_markdown(
     original_md = await storage.read_text(str(graph_path))
     current_hash = _graph_content_hash(original_md)
     try:
-        # Read name/description/io straight from the current GRAPH.md frontmatter
-        # rather than full-compiling the skill. Serialize is ABOUT TO OVERWRITE
-        # GRAPH.md, so it must tolerate a transient on-disk inconsistency: the canvas
-        # writes the new phase dir BEFORE calling serialize, and a full compile would
-        # FATAL on the "phase dirs == frontmatter phases" check before this serializer
-        # ever runs (the second half of the orphan-phase bug).
-        frontmatter = _graph_frontmatter_from_md(original_md)
-        phases_fm = frontmatter.get("phases")
-        current_phase_count = len(phases_fm) if isinstance(phases_fm, list) else 0
         if request.expected_hash is not None and request.expected_hash != current_hash:
             raise CanvasConflictError(
                 current_hash=current_hash,
                 current_markdown_content=original_md,
-                current_phase_count=current_phase_count,
+                current_phase_count=_current_graph_phase_count(skill_dir),
             )
-        _validate_canvas_topology(request)
         # Build the canvas's desired topology (id + real depends_on) and serialize it.
         # NOTE: GraphManifest.phases is list[str] (no edges), so we MUST pass the full
         # phase refs to the topology serializer — cramming GraphPhaseRef into the
@@ -1421,19 +1288,24 @@ async def serialize_skill_graph_markdown(
             )
             for phase in request.phases
         ]
-        description_raw = frontmatter.get("description")
-        markdown = serialize_graph_topology(
-            name=str(frontmatter.get("name") or skill_id),
-            description=description_raw if isinstance(description_raw, str) else None,
-            io=_io_schema_from_frontmatter(frontmatter.get("io")),
-            phases=refs,
+        markdown = serialize_graph_topology_from_markdown(
+            skill_id=skill_id,
             original_md=original_md,
+            phases=refs,
         )
     except CanvasConflictError:
         raise
     except CanvasSerializerFatal as exc:
         exc.elapsed_ms = (time.perf_counter() - started) * 1000
         raise
+    except GraphTopologySerializationError as exc:
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        raise CanvasSerializerFatal(
+            code=exc.code,
+            message=exc.message,
+            detail=exc.detail,
+            elapsed_ms=elapsed_ms,
+        ) from exc
     except GraphAgentError as exc:
         elapsed_ms = (time.perf_counter() - started) * 1000
         raise _serializer_fatal_from_engine_error(exc, elapsed_ms) from exc
@@ -1444,56 +1316,6 @@ async def serialize_skill_graph_markdown(
         elapsed_ms=elapsed_ms,
         current_hash=current_hash,
     )
-
-
-def _validate_canvas_topology(request: SerializeGraphReq) -> None:
-    phase_ids = {phase.id for phase in request.phases}
-    for phase in request.phases:
-        for dep in phase.depends_on:
-            if dep not in phase_ids:
-                raise CanvasSerializerFatal(
-                    code="serializer_orphan",
-                    message=f"phase {phase.id!r} depends_on unknown phase {dep!r}",
-                    detail={"phase_id": phase.id, "dependency": dep},
-                )
-            if dep == phase.id:
-                raise CanvasSerializerFatal(
-                    code="serializer_cycle",
-                    message=f"phase {phase.id!r} cannot depend on itself",
-                    detail={"phase_id": phase.id},
-                )
-    _validate_canvas_acyclic(request)
-
-
-def _validate_canvas_acyclic(request: SerializeGraphReq) -> None:
-    adjacency: dict[str, list[str]] = {phase.id: [] for phase in request.phases}
-    for phase in request.phases:
-        for dep in phase.depends_on:
-            adjacency[dep].append(phase.id)
-    state: dict[str, str] = {}
-    stack: list[str] = []
-
-    def visit(node: str) -> None:
-        state[node] = "gray"
-        stack.append(node)
-        for nxt in adjacency[node]:
-            if state.get(nxt) == "gray":
-                start = stack.index(nxt)
-                cycle = stack[start:] + [nxt]
-                raise CanvasSerializerFatal(
-                    code="serializer_cycle",
-                    message="cycle detected: " + " -> ".join(cycle),
-                    detail={"cycle": cycle},
-                )
-            if state.get(nxt) is None:
-                visit(nxt)
-        stack.pop()
-        state[node] = "black"
-
-    for node in adjacency:
-        if state.get(node) is None:
-            visit(node)
-
 
 def _serializer_fatal_from_engine_error(exc: Exception, elapsed_ms: float) -> CanvasSerializerFatal:
     message = str(exc)
@@ -1554,7 +1376,7 @@ def _topology_row(
         "mode": mode,
     }
     if mode == "subgraph":
-        row["path"] = _subgraph_path_for_phase(skill_dir, phase_name)
+        row["path"] = read_subgraph_path(skill_dir, phase_name)
     return row
 
 

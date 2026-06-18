@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 BACKEND_ROOT = next(
     parent for parent in Path(__file__).resolve().parents if (parent / "app").is_dir() and (parent / "tests").is_dir()
@@ -124,3 +127,56 @@ def test_artifact_registry_release_sync_does_not_upload_product_blob_bytes() -> 
                 forbidden_calls.append(name)
 
     assert forbidden_calls == []
+
+
+def test_engine_compile_does_not_zip_live_skill_dir_for_product_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import graph_agent.core.artifacts as artifacts_module
+    from app.core.adapters.engine import EngineAdapter
+    import app.core.adapters.engine as engine_module
+
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "GRAPH.md").write_text("phases: []\n", encoding="utf-8")
+
+    def compile_without_source_archive(**_kwargs: object) -> object:
+        return SimpleNamespace(
+            artifact_ref=SimpleNamespace(
+                manifest_ref=(tmp_path / "product-store" / "manifests" / "demo.skill.json").as_uri(),
+            ),
+            source_map_ref=(tmp_path / "product-store" / "source-maps" / "demo.skill.json").as_uri(),
+            execution_fingerprint=f"sha256:{'e' * 64}",
+            diagnostics=[],
+            artifact_bytes=b"compiled artifact payload",
+        )
+
+    def build_manifest_stub(**kwargs: object) -> object:
+        return SimpleNamespace(
+            execution_fingerprint=kwargs["execution_fingerprint"],
+            model_dump=lambda **_dump_kwargs: {
+                "artifact_ref": kwargs["artifact_ref"].model_dump(mode="json"),
+                "execution_fingerprint": kwargs["execution_fingerprint"],
+                "diagnostics": kwargs["diagnostics"],
+            },
+        )
+
+    def fail_if_zip_source_dir(_source_dir: Path) -> bytes:
+        pytest.fail("D9.4 compile/publish must not zip live skill_dir as product source truth")
+
+    monkeypatch.setattr(artifacts_module, "compile_artifact", compile_without_source_archive)
+    monkeypatch.setattr(artifacts_module, "build_compiled_artifact_manifest", build_manifest_stub)
+    monkeypatch.setattr(engine_module, "_zip_directory", fail_if_zip_source_dir, raising=False)
+
+    result = EngineAdapter(transport="in_process").compile(
+        {
+            "skill_dir": str(skill_dir),
+            "skill_id": "demo.skill",
+            "artifact_scope": "product",
+            "version": "1.0.0",
+        }
+    )
+
+    assert result["store"] == "product"
+    assert result["manifest_ref"].endswith("/product-store/manifests/demo.skill.json")

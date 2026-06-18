@@ -171,7 +171,7 @@ def test_run_worker_reports_failed_when_result_unsuccessful(
         "store": "ephemeral",
         "manifest_ref": "some_manifest_ref",
     }
-    run_dir = tmp_path / "run"
+    run_dir = storage_root / "runs" / "run"
     queue = _Queue()
 
     run_manager_module._run_worker_main(
@@ -188,7 +188,13 @@ def test_run_worker_reports_failed_when_result_unsuccessful(
     assert status_events[-1]["status"] == "failed"
     assert "graph-root-missing" in str(status_events[-1].get("error"))
 
-    metrics = json.loads((run_dir / "metrics.json").read_text(encoding="utf-8"))
+    from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
+
+    metrics = json.loads(
+        LocalRunArtifactStore(root=storage_root)
+        .get_run_object("run", "metrics.json")
+        .decode("utf-8")
+    )
     assert metrics["status"] == "failed"
 
 

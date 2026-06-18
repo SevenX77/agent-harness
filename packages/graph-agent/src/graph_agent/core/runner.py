@@ -69,7 +69,7 @@ from graph_agent.core.local_workspace_resolver import LocalWorkspaceResolver
 from graph_agent.core.result import RunResult, WorkflowMetrics, WorkflowResult
 from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol, require_skill_resolver
 from graph_agent.core.state import BusinessData
-from graph_agent.core.storage_contracts import RunArtifactStore
+from graph_agent.core.storage_contracts import ObjectRef, RunArtifactStore
 from graph_agent.runtime.state import normalize_blackboard_data
 
 logger = logging.getLogger(__name__)
@@ -670,6 +670,12 @@ def _run_skill_dict(
 _LLM_PROVIDER_UNSET = object()
 
 
+def _optional_llm_provider(value: LLMProvider | None | object) -> LLMProvider | None:
+    if value is _LLM_PROVIDER_UNSET:
+        return None
+    return cast(LLMProvider | None, value)
+
+
 class RawSkillPathError(Exception):
     def __init__(self, message: str = "raw skill_path is not allowed") -> None:
         super().__init__(message)
@@ -971,13 +977,15 @@ def _run_artifact_store_result(
     return ref_val.bytes_ref
 
 
-def _outputs_object_ref(refs: Any, *, run_id: str) -> Any:
-    ref_val = None
+def _outputs_object_ref(refs: dict[str, ObjectRef] | list[ObjectRef], *, run_id: str) -> ObjectRef:
+    ref_val: ObjectRef | None = None
     if isinstance(refs, dict):
         ref_val = refs.get("outputs.json")
     elif isinstance(refs, list) and refs:
         ref_val = refs[0]
 
+    if ref_val is None:
+        raise MissingRunArtifactObjectRefError(run_id, "outputs.json")
     bytes_ref = getattr(ref_val, "bytes_ref", None)
     if not isinstance(bytes_ref, str) or not bytes_ref.startswith("bytes://"):
         raise MissingRunArtifactObjectRefError(run_id, "outputs.json")
@@ -1013,7 +1021,7 @@ def run_artifact(
             run_id=run_id,
             artifact_executor=artifact_executor,
             skill_resolver=skill_resolver,
-            llm_provider=(llm_provider if llm_provider is not _LLM_PROVIDER_UNSET else None),
+            llm_provider=_optional_llm_provider(llm_provider),
             model_resolver=model_resolver,
         )
         if isinstance(outputs, RunArtifactErrorResult):
@@ -1079,7 +1087,7 @@ def predict_artifact(
                 request,
                 run_id=run_id,
                 skill_resolver=skill_resolver,
-                llm_provider=(llm_provider if llm_provider is not _LLM_PROVIDER_UNSET else None),
+                llm_provider=_optional_llm_provider(llm_provider),
                 model_resolver=model_resolver,
             )
             if isinstance(result, RunArtifactErrorResult):

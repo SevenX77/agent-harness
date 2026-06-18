@@ -21,6 +21,52 @@ _STUDIO_WORKSPACE_DATA_PREFIXES = (
 _SOURCE_ROOT_FILES = {"GRAPH.md", "SKILL.md"}
 _SOURCE_ROOT_DIRS = {"phases", "io"}
 
+SKILL_FILE_SOURCE_WRITE_ROUTE = (
+    "POST",
+    "/api/skills/{skill_id}/files/{file_path:path}",
+)
+FULL_SKILL_SOURCE_WRITE_ROUTE = (
+    "PUT",
+    "/api/skills/{skill_id}",
+)
+
+NATIVE_FS_SOURCE_WRITE_ROUTE_ALLOWLIST = {
+    SKILL_FILE_SOURCE_WRITE_ROUTE: {
+        "owner": "D12/native-fs",
+        "reason": "Browser-only fallback for source file saves when Tauri native-fs is unavailable.",
+        "risk": "Python FastAPI fallback can bypass Rust native-fs unless guarded by explicit header and tests.",
+        "expiry": (
+            "Remove after browser authoring fallback is retired or replaced by a native-fs-equivalent "
+            "backend contract."
+        ),
+        "gate": "apps/studio/backend/tests/routers/test_skill_file_native_fs_guard_red.py",
+        "fallback_header": "X-Studio-Write-Fallback",
+        "fallback_value": "browser",
+    },
+    FULL_SKILL_SOURCE_WRITE_ROUTE: {
+        "owner": "D12/native-fs",
+        "reason": "Legacy full skill map update surface retained for backend compatibility tests.",
+        "risk": "Whole-skill Python rewrites can bypass Rust native-fs if production clients start using this route.",
+        "expiry": "Delete or convert to explicit browser fallback before D12 is marked fully closed.",
+        "gate": "apps/studio/backend/tests/routers/test_skill_file_native_fs_guard_red.py",
+        "fallback_header": "X-Studio-Write-Fallback",
+        "fallback_value": "browser",
+    },
+}
+
+
+def native_fs_source_write_route_metadata(route_key: tuple[str, str]) -> dict[str, str]:
+    metadata = NATIVE_FS_SOURCE_WRITE_ROUTE_ALLOWLIST[route_key]
+    return {str(key): str(value) for key, value in metadata.items()}
+
+
+def source_write_fallback_header(route_key: tuple[str, str]) -> str:
+    return native_fs_source_write_route_metadata(route_key)["fallback_header"]
+
+
+def source_write_fallback_value(route_key: tuple[str, str]) -> str:
+    return native_fs_source_write_route_metadata(route_key)["fallback_value"]
+
 
 def classify_workspace_write_path(path: str | Path) -> WorkspaceWriteClassification:
     parts = _path_parts(path)

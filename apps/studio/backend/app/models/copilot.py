@@ -28,6 +28,12 @@ class CopilotWsRequestPayload(BaseModel):
     # The selected copilot role (one per `role_kind=="copilot"` role in settings,
     # each auto-matched to its model group). Defaults to copilot_chat.
     role: str | None = None
+    # Absolute imported/local workspace root. When present, the backend validates
+    # it against Studio's skill index and uses it as the Copilot SDK cwd.
+    workspace_root: str | None = None
+    # Structured Golden-owned judge facts prepared before sending a Copilot Judge
+    # chat turn. These are prompt context, not opaque refs hidden in prose.
+    judge_context: dict[str, Any] | None = None
 
 
 class CopilotEventBase(BaseModel):
@@ -95,6 +101,10 @@ class CopilotEventPatchProposed(CopilotEventBase):
     before_existed: bool
     before_content: str
     after_content: str
+    before_hash: str | None
+    after_hash: str
+    diff: str
+    checkpoint_id: str
 
 
 class CopilotEventBashApprovalRequired(CopilotEventBase):
@@ -119,6 +129,8 @@ class CopilotEventDone(CopilotEventBase):
 class CopilotEventError(CopilotEventBase):
     type: Literal["error"] = "error"
     message: str
+    error_code: str | None = None
+    error_payload: dict[str, Any] | None = None
 
 
 CopilotEvent: TypeAlias = Annotated[
@@ -153,3 +165,27 @@ class ContextUpdateResponse(BaseModel):
     accepted: bool
     reason: Literal["out_of_order"] | None = None
     summary: str | None = None
+
+
+class CopilotBashApprovalRequest(BaseModel):
+    """Approve or reject a held Copilot Bash tool request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool_use_id: str
+    approve: bool
+
+
+class CopilotBashApprovalResponse(BaseModel):
+    """Result of resolving a held Copilot Bash tool request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool_use_id: str
+    approved: bool
+    executed: bool
+    success: bool
+    stdout: str = ""
+    stderr: str = ""
+    returncode: int | None = None
+    message: str | None = None

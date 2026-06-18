@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from graph_agent_gateway.registry.schema import ResolvedRoute
+from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute
 
 
 class RouteSkipDiagnostic(BaseModel):
@@ -38,3 +38,24 @@ class ResolvedRouteChain(BaseModel):
         if "exclude_none" not in kwargs:
             kwargs["exclude_none"] = True
         return super().model_dump(*args, **kwargs)
+
+
+def resolved_role_to_route_chain(resolved: ResolvedRole) -> ResolvedRouteChain:
+    skipped = [
+        RouteSkipDiagnostic(
+            route_id=diagnostic.route_id,
+            reason_code=diagnostic.reason_code,
+            message=diagnostic.message,
+            from_override=diagnostic.from_override,
+        )
+        for diagnostic in resolved.skipped_diagnostics
+    ]
+    error_code = "resource.no_available_route" if not resolved.routes else None
+    error_payload = {"role": resolved.role_name} if not resolved.routes else None
+    return ResolvedRouteChain(
+        role=resolved.role_name,
+        routes=resolved.routes,
+        skipped=skipped,
+        error_code=error_code,
+        error_payload=error_payload,
+    )

@@ -65,6 +65,34 @@ def test_get_or_create_session_reuses_same_key(
     assert len(created) == 1
 
 
+def test_get_or_create_session_keeps_imported_workspace_cwds_separate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created: list[FakeClient] = []
+    workspace_a = tmp_path / "imported-a"
+    workspace_b = tmp_path / "imported-b"
+    workspace_a.mkdir()
+    workspace_b.mkdir()
+
+    def factory(options: ClaudeAgentOptions) -> FakeClient:
+        client = FakeClient(options)
+        created.append(client)
+        return client
+
+    monkeypatch.setattr(copilot, "_session_factory", factory)
+
+    async def scenario() -> None:
+        first = await get_session("skill-a", "CL46T", "same-key", workspace_a)
+        second = await get_session("skill-a", "CL46T", "same-key", workspace_b)
+
+        assert first is not second
+        assert Path(first.options.cwd) == workspace_a
+        assert Path(second.options.cwd) == workspace_b
+
+    asyncio.run(scenario())
+    assert len(created) == 2
+
+
 def test_reset_session_can_delete_skill_backend_pairs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

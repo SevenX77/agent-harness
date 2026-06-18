@@ -19,7 +19,19 @@ type RuntimeOptions = {
   fallbackBaseURL?: string
 }
 
+export type RuntimeSidecarStatus = 'unknown' | 'ready' | 'degraded'
+
+export interface RuntimeStatus {
+  isTauri: boolean
+  sidecar: RuntimeSidecarStatus
+  nativeHelpersAvailable: boolean
+  message?: string
+}
+
 let runtimeConfig: SidecarConfig | null = null
+let runtimeIsTauri = false
+let runtimeSidecarStatus: RuntimeSidecarStatus = 'unknown'
+let runtimeStatusMessage: string | undefined
 
 export function isTauriRuntime(windowRef: RuntimeWindow | undefined = getRuntimeWindow()): boolean {
   return Boolean(windowRef && '__TAURI_INTERNALS__' in windowRef)
@@ -51,17 +63,39 @@ export async function resolveRuntimeConfig(options: RuntimeOptions = {}): Promis
 }
 
 export async function initializeRuntimeConfig(options: RuntimeOptions = {}): Promise<SidecarConfig> {
-  const config = await resolveRuntimeConfig(options)
-  runtimeConfig = config
-  configureApiBaseURL(config.baseURL)
-  if (!currentApiTokenIsSet()) {
-    configureApiToken(config.api_token ?? null)
+  runtimeIsTauri = isTauriRuntime(options.windowRef)
+  try {
+    const config = await resolveRuntimeConfig(options)
+    runtimeConfig = config
+    runtimeSidecarStatus = 'ready'
+    runtimeStatusMessage = undefined
+    configureApiBaseURL(config.baseURL)
+    if (!currentApiTokenIsSet()) {
+      configureApiToken(config.api_token ?? null)
+    }
+    return config
+  } catch (error) {
+    runtimeConfig = null
+    runtimeSidecarStatus = 'degraded'
+    runtimeStatusMessage = error instanceof Error ? error.message : String(error)
+    throw error
   }
-  return config
 }
 
 export function getRuntimeConfig(): SidecarConfig | null {
   return runtimeConfig
+}
+
+export function getRuntimeStatus(
+  windowRef: RuntimeWindow | undefined = getRuntimeWindow(),
+): RuntimeStatus {
+  const isTauri = runtimeIsTauri || isTauriRuntime(windowRef)
+  return {
+    isTauri,
+    sidecar: runtimeSidecarStatus,
+    nativeHelpersAvailable: isTauri,
+    ...(runtimeStatusMessage ? { message: runtimeStatusMessage } : {}),
+  }
 }
 
 async function loadTauriInvoke(): Promise<<T>(command: string) => Promise<T>> {

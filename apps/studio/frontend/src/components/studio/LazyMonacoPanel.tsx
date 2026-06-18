@@ -5,6 +5,8 @@ import { toast } from 'sonner'
 import { writeSkillFile } from '@/api/client'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { isTauriRuntime } from '@/config/runtime'
+import { sha256Hex } from '@/lib/hash'
 
 const MonacoEditor = lazy(async () => {
   const module = await import('@monaco-editor/react')
@@ -48,6 +50,57 @@ const RETRY_DELAYS = [250, 500, 1000]
 
 function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+interface SaveMonacoDraftArgs {
+  skillId: string
+  workspaceRoot?: string | null
+  filePath: string
+  content: string
+  savedContent: string
+  currentHash: string | null
+  onSaved: (hash: string) => void
+  onConflict: (conflict: SaveConflictPayload) => void
+}
+
+type SaveMonacoDraftResult =
+  | { status: 'saved'; hash: string; savedContent: string }
+  | { status: 'conflict' }
+
+export async function saveMonacoDraft({
+  skillId,
+  workspaceRoot,
+  filePath,
+  content,
+  savedContent,
+  currentHash,
+  onSaved,
+  onConflict,
+}: SaveMonacoDraftArgs): Promise<SaveMonacoDraftResult> {
+  const expectedHash = currentHash ?? await sha256Hex(savedContent)
+  try {
+    const saveTarget = isTauriRuntime() ? workspaceRoot ?? skillId : skillId
+    const result = await writeSkillFile(saveTarget, filePath, content, expectedHash)
+    onSaved(result.hash)
+    return { status: 'saved', hash: result.hash, savedContent: content }
+  } catch (error) {
+    const status = axios.isAxiosError(error) ? error.response?.status : undefined
+    if (status === 409 && axios.isAxiosError(error)) {
+      const data = error.response?.data as {
+        current_hash?: string
+        current_markdown_content?: string
+      }
+      onConflict({
+        skillId,
+        path: filePath,
+        localContent: content,
+        remoteContent: data.current_markdown_content ?? '',
+        remoteHash: data.current_hash ?? null,
+      })
+      return { status: 'conflict' }
+    }
+    throw error
+  }
 }
 
 export function LazyMonacoPanel({
@@ -117,10 +170,21 @@ export function LazyMonacoPanel({
     let attempts = 0
     while (attempts < 4) {
       try {
-        const result = await writeSkillFile(workspaceRoot ?? skillId, filePath, content, hashRef.current)
+        const result = await saveMonacoDraft({
+          skillId,
+          workspaceRoot,
+          filePath,
+          content,
+          savedContent: savedRef.current,
+          currentHash: hashRef.current,
+          onSaved: onSavedRef.current,
+          onConflict: onConflictRef.current,
+        })
+        if (result.status === 'conflict') {
+          return
+        }
         hashRef.current = result.hash
-        savedRef.current = content
-        onSavedRef.current(result.hash)
+        savedRef.current = result.savedContent
         if (failedToastRef.current !== null) {
           toast.dismiss(failedToastRef.current)
           failedToastRef.current = null
@@ -128,20 +192,6 @@ export function LazyMonacoPanel({
         return
       } catch (error) {
         const status = axios.isAxiosError(error) ? error.response?.status : undefined
-        if (status === 409 && axios.isAxiosError(error)) {
-          const data = error.response?.data as {
-            current_hash?: string
-            current_markdown_content?: string
-          }
-          onConflictRef.current({
-            skillId,
-            path: filePath,
-            localContent: content,
-            remoteContent: data.current_markdown_content ?? '',
-            remoteHash: data.current_hash ?? null,
-          })
-          return
-        }
         if (status && status < 500) {
           throw error
         }

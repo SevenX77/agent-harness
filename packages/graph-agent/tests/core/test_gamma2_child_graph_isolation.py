@@ -102,10 +102,11 @@ io:
 
 
 def _subgraph(root: Path, phase: str, ref: str = "child") -> None:
+    child_path = Path(ref) if Path(ref).is_absolute() else root / "phases" / phase / ref
     _write(
         root / "phases" / phase / "SUBGRAPH.md",
         f"""---
-target_skill: {ref}
+path: {child_path}
 io:
   inputs:
     type: object
@@ -286,7 +287,11 @@ def test_subgraph_child_flow_is_deep_copied_and_depth_increments(
             del args, kwargs
             return SimpleNamespace(manifest=SimpleNamespace(phases=[]))
 
-    monkeypatch.setattr(graph_assembler_module, "resolve_skill_root", lambda resolver, skill: tmp_path)
+    monkeypatch.setattr(
+        graph_assembler_module,
+        "_resolve_subgraph_path_root_for_assembly",
+        lambda source, value: tmp_path,
+    )
     monkeypatch.setattr(graph_assembler_module, "SkillLoader", FakeSkillLoader)
     monkeypatch.setattr(
         graph_assembler_module,
@@ -295,7 +300,7 @@ def test_subgraph_child_flow_is_deep_copied_and_depth_increments(
     )
     phase_ast = SubgraphNodeAST(
         mode="subgraph",
-        target_skill="child",
+        path=str(tmp_path),
         io=PhaseIOSchema(
             inputs={"type": "object", "properties": {"public": {"type": "string"}}},
             outputs={"type": "object", "properties": {}},

@@ -149,3 +149,53 @@ def test_credential_resolve_response_returns_handle_and_never_raw_secret() -> No
             redacted_label="sk-...prod",
             raw_secret="sk-live-secret",
         )
+
+
+def test_credential_resolver_owns_provider_lookup_handle_and_expiry() -> None:
+    from graph_agent_gateway.credential_resolver import (
+        CredentialResolveRequest,
+        resolve_credential,
+    )
+    from graph_agent_gateway.registry.contracts import CredentialDescriptor
+
+    now = datetime.now(UTC)
+    raw_secret = "sk-owner-secret"
+
+    class FakeProvider:
+        def __init__(self) -> None:
+            self.described_refs: list[str] = []
+
+        def describe(self, ref: str) -> CredentialDescriptor:
+            self.described_refs.append(ref)
+            return CredentialDescriptor(
+                ref=ref,
+                exists=True,
+                status="available",
+                fingerprint="fingerprint-owner",
+                scope="endpoint-openai",
+                metadata={"raw_secret": raw_secret},
+            )
+
+        def get(self, ref: str) -> str:
+            raise AssertionError(f"resolve_credential must not fetch raw secret for {ref}")
+
+    provider = FakeProvider()
+    response = resolve_credential(
+        CredentialResolveRequest(
+            user_id="user-a",
+            role="graph_agent",
+            credential_ref="endpoint:openai",
+            source="local_input",
+            ttl_seconds=60,
+            now=now,
+        ),
+        credential_provider=provider,
+    )
+
+    assert provider.described_refs == ["endpoint:openai"]
+    assert response.credential_ref == "endpoint:openai"
+    assert response.secret_handle.startswith("secret-handle://studio-local/")
+    assert raw_secret not in response.secret_handle
+    assert response.expires_at == now + timedelta(seconds=60)
+    assert response.fingerprint == "fingerprint-owner"
+    assert response.scope == "endpoint-openai"

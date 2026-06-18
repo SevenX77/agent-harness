@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from secrets import token_urlsafe
 
 from fastapi import Depends, Request
 from pydantic import Field
@@ -22,6 +23,8 @@ from app.services.artifact_registry import ArtifactRegistryClient
 from app.services.git_collab import GitCollaborateService, GiteaClient
 from app.services.git_local import GitLocalService
 
+_DEFAULT_LOOPBACK_TOKEN = token_urlsafe(32)
+
 
 class BackendConfig(BaseSettings):
     """Environment-driven backend selection for local-first Studio ports."""
@@ -39,6 +42,11 @@ class BackendConfig(BaseSettings):
     gitea_token: str = ""
     registry_host: str = ""
     registry_token: str = ""
+    engine_transport: str = "in_process"
+    engine_loopback_base_url: str = "http://127.0.0.1:8787"
+    gateway_transport: str = "in_process"
+    gateway_loopback_base_url: str = "http://127.0.0.1:8787"
+    loopback_token: str = Field(default_factory=lambda: _DEFAULT_LOOPBACK_TOKEN)
 
 
 @lru_cache

@@ -9,9 +9,11 @@ import type {
   CompileSuccess,
   GitHistoryItem,
   GoldenBaseline,
+  GoldenBaselinePlan,
   JsonObject,
   PublishResult,
   PublishSkillReq,
+  ReleaseManifest,
   RunDetail,
   RunMetadata,
   SerializeGraphRes,
@@ -23,9 +25,16 @@ import type {
   SerializableGraphPhaseRef,
 } from './types'
 import { isTauriRuntime } from '../config/runtime'
-import { writeWorkspaceFile } from '../lib/tauri'
+import { deleteWorkspacePath, writeWorkspaceFile } from '../lib/tauri'
+import { resolveWorkspaceIdentity } from '../components/studio/workspace-identity'
+import { BACKEND_UNAVAILABLE_MESSAGE, isBackendUnavailableError } from '../utils/errors'
 
 export const API_BASE_URL = import.meta.env.VITE_STUDIO_API_BASE_URL ?? 'http://localhost:8787/api'
+const BROWSER_WRITE_FALLBACK_CONFIG = {
+  headers: {
+    'X-Studio-Write-Fallback': 'browser',
+  },
+}
 
 let currentApiBaseURL = API_BASE_URL
 let currentApiToken: string | null = null
@@ -60,6 +69,15 @@ api.interceptors.request.use((config) => {
   config.headers = headers
   return config
 })
+
+api.interceptors.response.use(
+  (response) => response,
+  (error: unknown) => Promise.reject(
+    isBackendUnavailableError(error)
+      ? new Error(BACKEND_UNAVAILABLE_MESSAGE)
+      : error,
+  ),
+)
 
 export async function fetcher<T>(url: string): Promise<T> {
   const response = await api.get<T>(url)
@@ -111,6 +129,18 @@ export async function syncSkill(skillId: string, request: SyncSkillReq): Promise
 
 export async function publishSkill(skillId: string, request: PublishSkillReq = {}): Promise<PublishResult> {
   const response = await api.post<PublishResult>(`/skills/${skillId}/publish`, request)
+  return response.data
+}
+
+export async function listReleases(skillId: string): Promise<ReleaseManifest[]> {
+  const response = await api.get<ReleaseManifest[]>(`/skills/${skillId}/releases`)
+  return response.data
+}
+
+export async function getRelease(skillId: string, releaseVersion: string): Promise<ReleaseManifest> {
+  const response = await api.get<ReleaseManifest>(
+    `/skills/${skillId}/releases/${encodeURIComponent(releaseVersion)}`,
+  )
   return response.data
 }
 
@@ -172,11 +202,35 @@ export async function postPredictRun(skillId: string, inputData: JsonObject): Pr
   return response.data
 }
 
-export async function saveGoldenBaseline(skillId: string, runId: string, lock = false): Promise<GoldenBaseline> {
-  const response = await api.post<GoldenBaseline>(`/skills/${skillId}/golden`, {
+export async function saveGoldenBaseline(
+  skillId: string,
+  runId: string,
+  lock = false,
+  workspaceRoot?: string | null,
+): Promise<GoldenBaseline> {
+  const apiSkillId = resolveWorkspaceIdentity(skillId).skillId ?? skillId
+  if (isTauriRuntime()) {
+    const response = await api.post<GoldenBaselinePlan>(`/skills/${apiSkillId}/golden/plan`, {
+      run_id: runId,
+      lock,
+    })
+    const plan = response.data
+    const targetRoot = resolveGoldenWorkspaceRoot(skillId, workspaceRoot)
+    for (const file of plan.files) {
+      await writeWorkspaceFile(
+        targetRoot,
+        file.path,
+        file.content,
+        null,
+        { createIfAbsent: true },
+      )
+    }
+    return plan.baseline
+  }
+  const response = await api.post<GoldenBaseline>(`/skills/${apiSkillId}/golden`, {
     run_id: runId,
     lock,
-  })
+  }, BROWSER_WRITE_FALLBACK_CONFIG)
   return response.data
 }
 
@@ -189,6 +243,68 @@ export async function startRun(skillId: string, inputData: JsonObject): Promise<
   const response = await api.post<RunMetadata>(`/skills/${skillId}/runs`, {
     input_data: inputData,
   })
+  return response.data
+}
+
+export interface CopilotBashApprovalRequest {
+  toolUseId: string
+  approve: boolean
+}
+
+export interface CopilotBashApprovalResponse {
+  tool_use_id: string
+  approved: boolean
+  executed: boolean
+  success: boolean
+  stdout: string
+  stderr: string
+  returncode: number | null
+  message: string | null
+}
+
+export async function resolveCopilotBashApproval(
+  skillId: string,
+  request: CopilotBashApprovalRequest,
+): Promise<CopilotBashApprovalResponse> {
+  const response = await api.post<CopilotBashApprovalResponse>(
+    `/skills/${skillId}/copilot/bash-approval`,
+    {
+      tool_use_id: request.toolUseId,
+      approve: request.approve,
+    },
+  )
+  return response.data
+}
+
+export interface CopilotJudgeRequest {
+  runResultsRef: string
+  baselineRef: string
+}
+
+export interface CopilotJudgeResponse {
+  compare_result_ref: string
+  judge_context_ref: string
+  baseline_ref: string
+  diff_summary: {
+    baseline_id: string
+    run_results_ref: string
+    total_score: number
+    node_group_count: number
+    failed_node_count: number
+  }
+}
+
+export async function prepareCopilotJudgeContext(
+  skillId: string,
+  request: CopilotJudgeRequest,
+): Promise<CopilotJudgeResponse> {
+  const response = await api.post<CopilotJudgeResponse>(
+    `/skills/${skillId}/copilot/judge`,
+    {
+      run_results_ref: request.runResultsRef,
+      baseline_ref: request.baselineRef,
+    },
+  )
   return response.data
 }
 
@@ -216,16 +332,98 @@ export async function createTestInput(
   skillId: string,
   name: string,
   content: JsonObject,
+  options: { workspaceRoot?: string | null } = {},
 ): Promise<TestInputMetadata> {
+  if (isTauriRuntime()) {
+    const safeName = validateTestInputName(name)
+    const path = testInputPath(safeName)
+    const workspaceRoot = resolveTestInputWorkspaceRoot(skillId, options.workspaceRoot)
+    const payload = JSON.stringify(content, null, 2)
+    await writeWorkspaceFile(workspaceRoot, path, payload, null, { createIfAbsent: true })
+    return {
+      id: safeName,
+      name: safeName,
+      created_at: new Date().toISOString(),
+      size_bytes: utf8ByteLength(payload),
+      content_preview: previewJson(payload),
+    }
+  }
   const response = await api.post<TestInputMetadata>(`/skills/${skillId}/test_inputs`, {
     name,
     content,
-  })
+  }, BROWSER_WRITE_FALLBACK_CONFIG)
   return response.data
 }
 
-export async function deleteTestInput(skillId: string, inputId: string): Promise<void> {
-  await api.delete(`/skills/${skillId}/test_inputs/${encodeURIComponent(inputId)}`)
+export async function deleteTestInput(
+  skillId: string,
+  inputId: string,
+  options: { workspaceRoot?: string | null } = {},
+): Promise<void> {
+  if (isTauriRuntime()) {
+    const safeName = validateTestInputName(inputId)
+    await deleteWorkspacePath(
+      resolveTestInputWorkspaceRoot(skillId, options.workspaceRoot),
+      testInputPath(safeName),
+    )
+    return
+  }
+  await api.delete(
+    `/skills/${skillId}/test_inputs/${encodeURIComponent(inputId)}`,
+    BROWSER_WRITE_FALLBACK_CONFIG,
+  )
+}
+
+const TEST_INPUT_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+const MAX_TEST_INPUT_NAME_LENGTH = 100
+
+function validateTestInputName(raw: string): string {
+  let name = raw.trim()
+  if (name.toLowerCase().endsWith('.json')) {
+    name = name.slice(0, -'.json'.length)
+  }
+  if (!name || name.length > MAX_TEST_INPUT_NAME_LENGTH || !TEST_INPUT_NAME_RE.test(name)) {
+    throw new Error(`Invalid test input name: ${raw}`)
+  }
+  return name
+}
+
+function testInputPath(name: string): string {
+  return `.workspace/test_inputs/${name}.json`
+}
+
+function resolveTestInputWorkspaceRoot(skillId: string, workspaceRoot?: string | null): string {
+  if (workspaceRoot?.trim()) {
+    return workspaceRoot.trim()
+  }
+  return resolveWorkspaceRoot(skillId)
+}
+
+function resolveGoldenWorkspaceRoot(skillId: string, workspaceRoot?: string | null): string {
+  if (workspaceRoot?.trim()) {
+    return workspaceRoot.trim()
+  }
+  return resolveWorkspaceRoot(skillId)
+}
+
+function resolveWorkspaceRoot(skillId: string): string {
+  return resolveWorkspaceIdentity(skillId).workspaceRoot ?? skillId
+}
+
+function utf8ByteLength(value: string): number {
+  return new TextEncoder().encode(value).byteLength
+}
+
+function previewJson(raw: string): string {
+  try {
+    return truncatePreview(JSON.stringify(JSON.parse(raw)))
+  } catch {
+    return truncatePreview(raw.replace(/\n/g, ' '))
+  }
+}
+
+function truncatePreview(value: string): string {
+  return value.length > 120 ? `${value.slice(0, 120)}...` : value
 }
 
 export async function getTestInput(skillId: string, inputId: string): Promise<TestInputDetail> {

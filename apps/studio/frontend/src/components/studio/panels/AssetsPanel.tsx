@@ -131,6 +131,10 @@ export function AssetsPanel({ skillDetail }: AssetsPanelProps) {
                           <span className="text-[10px] text-emerald-500 bg-emerald-950/40 border border-emerald-900/40 px-1.5 py-0.5 rounded leading-none">
                             Linked
                           </span>
+                        ) : sub.status === "migration-required" ? (
+                          <span className="text-[10px] text-foreground bg-muted border border-border px-1.5 py-0.5 rounded leading-none">
+                            Migration needed
+                          </span>
                         ) : (
                           <span className="text-[10px] text-rose-400 bg-rose-950/40 border border-rose-900/40 px-1.5 py-0.5 rounded leading-none">
                             Missing path
@@ -142,6 +146,10 @@ export function AssetsPanel({ skillDetail }: AssetsPanelProps) {
                     {sub.path ? (
                       <div className="truncate pl-5 font-mono text-[10px] text-muted-foreground/80" title={sub.path}>
                         {sub.path}
+                      </div>
+                    ) : sub.status === "migration-required" && sub.legacyTargetSkill ? (
+                      <div className="pl-5 text-[10px] text-muted-foreground">
+                        Legacy child reference: <span className="font-mono">{sub.legacyTargetSkill}</span>. Save an absolute path to migrate this phase.
                       </div>
                     ) : (
                       <div className="pl-5 text-[10px] text-rose-400/80">
@@ -158,4 +166,3 @@ export function AssetsPanel({ skillDetail }: AssetsPanelProps) {
     </div>
   )
 }
-

@@ -152,12 +152,12 @@ io:
     )
     _write(
         parent / "phases" / "delegate" / "SUBGRAPH.md",
-        """---
-target_skill: child
+        f"""---
+path: {child}
 io:
   inputs:
     type: object
-    properties: {}
+    properties: {{}}
   outputs:
     type: object
     properties:
@@ -262,7 +262,7 @@ def test_run_skill_event_subscriber_receives_run_phase_llm_and_tool_events(
     mock_skill_resolver: object,
 ) -> None:
     parent = tmp_path / "parent"
-    child = tmp_path / "child"
+    child = parent / "subgraphs" / "child"
     workspace_dir = tmp_path / "workspace"
     _write_mixed_phase_skill(parent, child)
     subscriber_events: list[object] = []
@@ -294,7 +294,7 @@ def test_trace_phase_lifecycle_is_single_source_for_logic_agent_and_subgraph(
     mock_skill_resolver: object,
 ) -> None:
     parent = tmp_path / "parent"
-    child = tmp_path / "child"
+    child = parent / "subgraphs" / "child"
     workspace_dir = tmp_path / "workspace"
     _write_mixed_phase_skill(parent, child)
 
@@ -335,7 +335,7 @@ def test_model_resolver_gateway_fallback_event_reaches_subscriber_and_trace(
     mock_skill_resolver: object,
 ) -> None:
     parent = tmp_path / "parent"
-    child = tmp_path / "child"
+    child = parent / "subgraphs" / "child"
     workspace_dir = tmp_path / "workspace"
     _write_mixed_phase_skill(parent, child)
     subscriber_events: list[object] = []

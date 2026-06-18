@@ -41,7 +41,10 @@ export function GoldenSection({ skillId }: { skillId: string }) {
               title={baseline.content_path}
             >
               <span className="min-w-0 flex-1 truncate text-xs text-foreground">
-                {baseline.linked_input_id || baseline.id}
+                {baseline.id}
+                {baseline.source_run_id ? (
+                  <span className="text-muted-foreground"> - source {baseline.source_run_id}</span>
+                ) : null}
               </span>
               {baseline.locked ? <Lock className="size-3 text-muted-foreground" aria-label="locked" /> : null}
               <span className="text-[10px] text-muted-foreground">{relativeTime(baseline.created_at)}</span>

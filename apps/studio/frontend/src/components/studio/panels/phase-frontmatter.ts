@@ -172,6 +172,8 @@ function frontmatterFromForm(
     return next
   }
 
+  delete next.target_skill
+  delete next.targetSkill
   setOptionalString(next, 'path', form.path)
   setBoolean(next, 'validator', form.validator)
   return next

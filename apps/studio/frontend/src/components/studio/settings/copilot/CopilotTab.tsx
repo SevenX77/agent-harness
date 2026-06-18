@@ -54,6 +54,14 @@ import { getRoleTestResults } from "@/api/client"
 import type { CredentialsState, ModelGroup, RolesData } from "@/api/llm"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 
+export function copilotBackendReadyCount(
+  routes: Array<Pick<CopilotRoutePreview, "agentStatus" | "id">>,
+  routeStatusOverrides: Record<string, CopilotRouteJobStatus> = {},
+): number {
+  void routeStatusOverrides
+  return routes.filter((route) => route.agentStatus === "ready").length
+}
+
 export function CopilotTab({
   data = null,
   credentials = { providers: [] },
@@ -367,9 +375,7 @@ function CopilotRoleCard({
   onUpdateRouteOrder: (nextOrder: string[]) => void
 }) {
   const compatibleRoutes = compatibleRoutesForRole(modelGroup)
-  const readyCount = compatibleRoutes.filter((route) => (
-    (routeStatusOverrides[route.id] ?? route.agentStatus) === "ready"
-  )).length
+  const readyCount = copilotBackendReadyCount(compatibleRoutes, routeStatusOverrides)
 
   return (
     <Card

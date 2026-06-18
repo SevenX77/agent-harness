@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from graph_agent import PathDiff, PhaseRecord
-from graph_agent.callbacks.events import CallbackEvent
+from graph_agent.core.event_contracts import EventEnvelope
 from pydantic import BaseModel, ConfigDict
 
 
@@ -101,7 +101,7 @@ class RunDetail(BaseModel):
 
     metadata: RunMetadata
     input_data: dict[str, Any] | None = None
-    events: list[CallbackEvent]
+    events: list[EventEnvelope]
     final_context: dict[str, Any] | None = None
     artifacts: list[str] | None = None
 
@@ -109,5 +109,10 @@ class RunDetail(BaseModel):
 class ResumeReq(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    checkpoint_id: str | None = None
+    checkpoint_ns: str | None = None
+    resume_from_node_id: str | None = None
+    resume_to_node_id: str | None = None
     context_overrides: dict[str, Any] | None = None
     human_input: str | None = None
+    human_response: dict[str, Any] | None = None

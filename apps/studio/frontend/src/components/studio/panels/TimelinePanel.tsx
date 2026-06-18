@@ -3,7 +3,7 @@ import { AlertCircle, ArrowLeft, CheckCircle2, RefreshCw } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { TracePanel } from "@/components/TracePanel"
 import { getRunDetail } from "@/api/client"
-import type { CallbackEvent } from "@/api/types"
+import type { EventEnvelope } from "@/api/types"
 import { useRunHistory } from "../../../hooks/useRunHistory"
 import { errorMessage } from "../../../utils/errors"
 import { useWorkspaceContext } from "../WorkspaceContext"
@@ -39,7 +39,7 @@ export function TimelinePanel() {
   const { currentSkillId, selectedEdge, setSelectedEdge } = useWorkspaceContext()
   const { runs, isLoading, error, refresh } = useRunHistory(currentSkillId)
   // F2 (trace): clicking a past run loads its full trace (RunDetail.events) in place.
-  const [selected, setSelected] = useState<{ runId: string; events: CallbackEvent[] } | null>(null)
+  const [selected, setSelected] = useState<{ runId: string; events: EventEnvelope[] } | null>(null)
   const [traceError, setTraceError] = useState<string | null>(null)
   const [loadingRunId, setLoadingRunId] = useState<string | null>(null)
 

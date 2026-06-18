@@ -58,6 +58,10 @@ export interface CopilotPatchProposedEvent extends CopilotEventBase {
   beforeExisted: boolean
   beforeContent: string
   afterContent: string
+  beforeHash: string | null
+  afterHash: string
+  diff: string
+  checkpointId: string
   /** Review state, driven locally by Accept/Reject. */
   review: 'pending' | 'accepted' | 'rejected'
 }
@@ -170,6 +174,10 @@ export function normalizeCopilotEvent(raw: unknown, id: string): CopilotEvent {
       beforeExisted: record.before_existed === true,
       beforeContent: typeof record.before_content === 'string' ? record.before_content : '',
       afterContent: typeof record.after_content === 'string' ? record.after_content : '',
+      beforeHash: typeof record.before_hash === 'string' ? record.before_hash : null,
+      afterHash: typeof record.after_hash === 'string' ? record.after_hash : '',
+      diff: typeof record.diff === 'string' ? record.diff : '',
+      checkpointId: typeof record.checkpoint_id === 'string' ? record.checkpoint_id : '',
       review: 'pending',
     }
   }

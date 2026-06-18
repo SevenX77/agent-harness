@@ -1,4 +1,4 @@
-import type { CallbackEvent, SkillDetail } from "@/api/types"
+import type { EventEnvelope, SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData } from "@/components/GraphCanvas"
 import { TracePanel } from "@/components/TracePanel"
 import type { PanelKind } from "../Toolbar"
@@ -13,6 +13,7 @@ import { TimelinePanel } from "./TimelinePanel"
 interface PanelsProps {
   activePanel: PanelKind
   skillId: string | null
+  workspaceRoot?: string | null
   skillDetail?: SkillDetail
   selectedNode: { id: string; data: SkillGraphNodeData } | null
   // F4: i/o-panel test-input selection that feeds Predict/Run.
@@ -22,7 +23,7 @@ interface PanelsProps {
   // trace-observability F1: while a run is active the timeline region streams
   // live trace events (TracePanel); with no active run it shows run history (F2).
   runId?: string | null
-  traceEvents?: CallbackEvent[]
+  traceEvents?: EventEnvelope[]
   activeTracePhase?: string | null
   onSelectTracePrompt?: (index: number) => void
   traceCanCompare?: boolean
@@ -37,6 +38,7 @@ interface PanelsProps {
 export function Panels({
   activePanel,
   skillId,
+  workspaceRoot = null,
   skillDetail,
   selectedNode,
   selectedTestInputId,
@@ -71,6 +73,7 @@ export function Panels({
     return (
       <InputPanel
         skillId={skillId}
+        workspaceRoot={workspaceRoot}
         skillDetail={skillDetail}
         selectedTestInputId={selectedTestInputId ?? null}
         onSelectTestInput={onSelectTestInput}

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Any, NoReturn
+
 from fastapi import APIRouter, Response, status
 
+from app.core.adapters.http_transport import StudioAdapterError
+from app.core.exceptions import error_response, raise_error_response
 from app.models.errors import ErrorResponse
 from app.models.runs import (
     BatchRunRequest,
@@ -49,9 +53,79 @@ async def create_batch_run(skill_id: str, request: BatchRunRequest) -> BatchRunR
     return await run_manager.start_batch_run(skill_id, request.input_ids)
 
 
-@router.get("/{run_id}", response_model=RunDetail)
+@router.get(
+    "/{run_id}",
+    response_model=RunDetail,
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+    },
+)
 async def get_run(skill_id: str, run_id: str) -> RunDetail:
-    return run_manager.get_run_detail(skill_id=skill_id, run_id=run_id)
+    try:
+        return run_manager.get_run_detail(skill_id=skill_id, run_id=run_id)
+    except StudioAdapterError as exc:
+        if not exc.error_code.startswith("artifact."):
+            raise
+        _raise_artifact_error_response(exc)
+
+
+_ARTIFACT_ERROR_STATUS: dict[str, int] = {
+    "artifact.not_found": 404,
+    "artifact.run_not_sealed": 409,
+}
+
+_STATE_ERROR_STATUS: dict[str, int] = {
+    "state.lease_conflict": 409,
+    "state.lease_fenced": 409,
+    "state.lease_required": 409,
+    "state.release_failed": 409,
+    "state.not_found": 404,
+}
+
+
+def _raise_artifact_error_response(exc: StudioAdapterError) -> NoReturn:
+    http_status = _ARTIFACT_ERROR_STATUS.get(exc.error_code, 422)
+    detail = exc.error_payload.get("detail")
+    message = str(detail) if detail else f"Artifact error: {exc.error_code}"
+    raise_error_response(
+        error_response(
+            error_code=exc.error_code,
+            http_status=http_status,
+            message=message,
+            details=exc.error_payload,
+            retry_strategy="not_retryable",
+        )
+    )
+
+
+def _raise_state_error_response(exc: StudioAdapterError) -> NoReturn:
+    http_status = _STATE_ERROR_STATUS.get(exc.error_code, 422)
+    detail = exc.error_payload.get("detail")
+    message = str(detail) if detail else f"Runtime state error: {exc.error_code}"
+    raise_error_response(
+        error_response(
+            error_code=exc.error_code,
+            http_status=http_status,
+            message=message,
+            details=exc.error_payload,
+            retry_strategy="backoff" if http_status == 409 else "not_retryable",
+        )
+    )
+
+
+def _tokens_metrics_payload(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    input_tokens = int(raw.get("total_input_tokens", raw.get("input_tokens", 0)) or 0)
+    output_tokens = int(raw.get("total_output_tokens", raw.get("output_tokens", 0)) or 0)
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": int(raw.get("total_tokens", input_tokens + output_tokens) or 0),
+        "cost_estimate": raw.get("cost_estimate"),
+    }
 
 
 @router.delete("/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -63,24 +137,39 @@ async def delete_run(skill_id: str, run_id: str) -> Response:
 @router.post(
     "/{run_id}/resume",
     response_model=RunMetadata,
-    responses={501: {"model": ErrorResponse}},
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+    },
 )
 async def resume_run(skill_id: str, run_id: str, request: ResumeReq) -> RunMetadata:
-    from app.core.adapters.engine import EngineAdapter
     from app.core.adapters.http_transport import StudioAdapterError
+    from app.core.adapters.transport_factory import build_engine_adapter
     from app.core.exceptions import standard_http_exception
 
-    adapter = EngineAdapter(transport="in_process")
+    adapter = build_engine_adapter()
     try:
-        result = adapter.resume(
-            {
-                "skill_id": skill_id,
-                "run_id": run_id,
-                "context_overrides": request.context_overrides,
-                "human_input": request.human_input,
-            }
-        )
+        payload = {
+            "skill_id": skill_id,
+            "run_id": run_id,
+            "context_overrides": request.context_overrides,
+            "human_input": request.human_input,
+        }
+        if request.checkpoint_id is not None:
+            payload["checkpoint_id"] = request.checkpoint_id
+        if request.checkpoint_ns is not None:
+            payload["checkpoint_ns"] = request.checkpoint_ns
+        if request.resume_from_node_id is not None:
+            payload["resume_from_node_id"] = request.resume_from_node_id
+        if request.resume_to_node_id is not None:
+            payload["resume_to_node_id"] = request.resume_to_node_id
+        if request.human_response is not None:
+            payload["human_response"] = request.human_response
+        result = adapter.resume(payload)
     except StudioAdapterError as exc:
+        if exc.error_code.startswith("state."):
+            _raise_state_error_response(exc)
         raise standard_http_exception(
             "RESUME_CHECKPOINT_NOT_FOUND",
             f"Resume failed: {exc.error_payload.get('detail', str(exc))}",
@@ -91,7 +180,7 @@ async def resume_run(skill_id: str, run_id: str, request: ResumeReq) -> RunMetad
         status=result["status"],
         started_at=result["started_at"],
         input_summary=result.get("input_summary"),
-        metrics=result.get("metrics"),
+        metrics=_tokens_metrics_payload(result.get("metrics")),
         git_status=result.get("git_status"),
     )
 

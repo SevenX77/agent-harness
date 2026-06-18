@@ -13,9 +13,9 @@ import logging
 import re
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, Header, Response, status
 
-from app.core.exceptions import standard_http_exception
+from app.core.exceptions import error_response, raise_error_response, standard_http_exception
 from app.models.errors import ErrorResponse
 from app.models.test_inputs import (
     TestInputCreateRequest,
@@ -66,6 +66,7 @@ async def list_test_inputs(skill_id: str) -> list[TestInputMetadata]:
     response_model=TestInputDetail,
     responses={
         404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
         422: {"model": ErrorResponse},
     },
 )
@@ -111,8 +112,10 @@ async def get_test_input(skill_id: str, input_id: str) -> TestInputDetail:
 async def create_test_input(
     skill_id: str,
     request: TestInputCreateRequest,
+    write_fallback: str | None = Header(default=None, alias="X-Studio-Write-Fallback"),
 ) -> TestInputMetadata:
     name = _validated_input_name(request.name)
+    _require_browser_write_fallback(write_fallback)
     logger.info("test_input create: skill=%s name=%s", skill_id, name)
     inputs_dir = test_inputs_dir_for(skill_id)
     inputs_dir.mkdir(parents=True, exist_ok=True)
@@ -142,11 +145,17 @@ async def create_test_input(
     status_code=status.HTTP_204_NO_CONTENT,
     responses={
         404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
         422: {"model": ErrorResponse},
     },
 )
-async def delete_test_input(skill_id: str, input_id: str) -> Response:
+async def delete_test_input(
+    skill_id: str,
+    input_id: str,
+    write_fallback: str | None = Header(default=None, alias="X-Studio-Write-Fallback"),
+) -> Response:
     name = _validated_input_name(input_id)
+    _require_browser_write_fallback(write_fallback)
     logger.info("test_input delete: skill=%s id=%s", skill_id, name)
     path = test_inputs_dir_for(skill_id) / f"{name}.json"
     if not path.exists():
@@ -173,6 +182,23 @@ def _validated_input_name(raw: str) -> str:
             {"name": raw},
         )
     return name
+
+
+def _require_browser_write_fallback(write_fallback: str | None) -> None:
+    if write_fallback is not None and write_fallback.strip().lower() == "browser":
+        return
+    raise_error_response(
+        error_response(
+            error_code="NATIVE_FS_REQUIRED",
+            http_status=409,
+            message="Mutating workspace writes require native-fs unless browser fallback is explicit",
+            details={
+                "required_header": "X-Studio-Write-Fallback",
+                "required_value": "browser",
+            },
+            retry_strategy="not_retryable",
+        )
+    )
 
 
 def _preview_json(raw: str) -> str:

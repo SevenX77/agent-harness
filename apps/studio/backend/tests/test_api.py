@@ -24,8 +24,11 @@ from graph_agent.callbacks.events import (
     RunEndedEvent,
     RunStartedEvent,
 )
+from graph_agent.core.result_contracts import NodeRunResult, RunResultSnapshot, RunResultsRef
 
 from tests.conftest import copy_skill
+
+FALLBACK_HEADERS = {"X-Studio-Write-Fallback": "browser"}
 
 
 def _record_predict_pass(skill_id: str) -> None:
@@ -77,6 +80,16 @@ def test_openapi_registers_phase0_rest_surface(client: TestClient) -> None:
 
     assert expected_paths <= set(schema["paths"])
     assert "/api/_debug/value-error" not in schema["paths"]
+
+
+def test_openapi_declares_typed_resume_error_responses(client: TestClient) -> None:
+    schema = client.get("/openapi.json").json()
+
+    responses = schema["paths"]["/api/skills/{skill_id}/runs/{run_id}/resume"]["post"]["responses"]
+
+    for status_code in ("404", "409", "422"):
+        assert status_code in responses
+        assert responses[status_code]["content"]["application/json"]["schema"]["$ref"].endswith("/ErrorResponse")
 
 
 def test_skills_list_and_detail_use_real_skill_files(client: TestClient) -> None:
@@ -373,6 +386,108 @@ def test_request_validation_errors_use_error_response(client: TestClient) -> Non
     assert body["details"]["errors"]
 
 
+@pytest.mark.parametrize(
+    ("error_code", "payload", "expected_status"),
+    [
+        ("artifact.hash_mismatch", {"expected": "a", "actual": "b"}, 422),
+        ("artifact.not_found", {"hash": "sha256:missing"}, 404),
+    ],
+)
+def test_get_run_detail_maps_artifact_adapter_errors_to_typed_error_response(
+    monkeypatch: pytest.MonkeyPatch,
+    error_code: str,
+    payload: dict[str, Any],
+    expected_status: int,
+) -> None:
+    from app.core.adapters.http_transport import StudioAdapterError
+    from app.main import create_app
+
+    def raise_artifact_error(*_args: Any, **_kwargs: Any) -> None:
+        raise StudioAdapterError(error_code, payload)
+
+    monkeypatch.setattr(run_manager, "get_run_detail", raise_artifact_error)
+
+    with TestClient(create_app(), raise_server_exceptions=False) as api_client:
+        api_client.headers["Authorization"] = "Bearer studio-test-token"
+        response = api_client.get("/api/skills/text-segmentation/runs/run-1")
+
+    assert response.status_code == expected_status
+    body = response.json()
+    assert body["error_code"] == error_code
+    assert body["http_status"] == expected_status
+    assert body["details"] == payload
+
+
+def test_resume_maps_runtime_state_adapter_errors_to_typed_error_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.core.adapters.transport_factory as transport_factory
+    from app.core.adapters.http_transport import StudioAdapterError
+    from app.main import create_app
+
+    payload = {"run_id": "run-1", "active_owner": "worker-a"}
+
+    class FakeAdapter:
+        def resume(self, _payload: dict[str, Any]) -> dict[str, Any]:
+            raise StudioAdapterError("state.lease_conflict", payload)
+
+    monkeypatch.setattr(transport_factory, "build_engine_adapter", lambda: FakeAdapter())
+
+    with TestClient(create_app(), raise_server_exceptions=False) as api_client:
+        api_client.headers["Authorization"] = "Bearer studio-test-token"
+        response = api_client.post(
+            "/api/skills/text-segmentation/runs/run-1/resume",
+            json={"human_input": "continue"},
+        )
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body["error_code"] == "state.lease_conflict"
+    assert body["http_status"] == 409
+    assert body["details"] == payload
+
+
+@pytest.mark.parametrize(
+    ("error_code", "payload", "expected_status"),
+    [
+        ("state.invalid_checkpoint", {"run_id": "run-1", "detail": "Checkpoint is invalid"}, 422),
+        ("state.lease_conflict", {"run_id": "run-1", "active_owner": "worker-a"}, 409),
+        ("state.lease_fenced", {"run_id": "run-1", "action": "snapshot"}, 409),
+        ("state.not_found", {"run_id": "run-1", "detail": "Snapshot not found"}, 404),
+        ("state.release_failed", {"run_id": "run-1", "detail": "unlink failed"}, 409),
+    ],
+)
+def test_d10_resume_api_preserves_runtime_state_error_codes_without_checkpoint_wrapping(
+    monkeypatch: pytest.MonkeyPatch,
+    error_code: str,
+    payload: dict[str, Any],
+    expected_status: int,
+) -> None:
+    import app.core.adapters.transport_factory as transport_factory
+    from app.core.adapters.http_transport import StudioAdapterError
+    from app.main import create_app
+
+    class FakeAdapter:
+        def resume(self, _payload: dict[str, Any]) -> dict[str, Any]:
+            raise StudioAdapterError(error_code, payload)
+
+    monkeypatch.setattr(transport_factory, "build_engine_adapter", lambda: FakeAdapter())
+
+    with TestClient(create_app(), raise_server_exceptions=False) as api_client:
+        api_client.headers["Authorization"] = "Bearer studio-test-token"
+        response = api_client.post(
+            "/api/skills/text-segmentation/runs/run-1/resume",
+            json={"human_input": "continue"},
+        )
+
+    assert response.status_code == expected_status
+    body = response.json()
+    assert body["error_code"] == error_code
+    assert body["http_status"] == expected_status
+    assert body["details"] == payload
+    assert body["error_code"] != "RESUME_CHECKPOINT_NOT_FOUND"
+
+
 def test_run_endpoint_spawns_worker_and_ws_streams_events(
     client: TestClient,
     studio_roots: tuple[Path, Path],
@@ -395,7 +510,8 @@ def test_run_endpoint_spawns_worker_and_ws_streams_events(
     run_id = body["run_id"]
 
     with client.websocket_connect(f"/ws/runs/{run_id}") as websocket:
-        event_types = [websocket.receive_json()["event_type"] for _ in range(6)]
+        stream_events = [websocket.receive_json() for _ in range(6)]
+    event_types = [event["event_type"] for event in stream_events]
     assert event_types == [
         "run_started",
         "phase_start",
@@ -404,6 +520,14 @@ def test_run_endpoint_spawns_worker_and_ws_streams_events(
         "finish_task",
         "run_ended",
     ]
+    assert [event["schema_version"] for event in stream_events] == ["studio.event.v1"] * 6
+    assert [event["run_id"] for event in stream_events] == [run_id] * 6
+    assert [event["seq"] for event in stream_events] == [1, 2, 3, 4, 5, 6]
+    assert stream_events[0]["payload"]["event_type"] == "run_started"
+
+    with client.websocket_connect(f"/ws/runs/{run_id}?cursor={stream_events[1]['cursor']}") as websocket:
+        resumed_events = [websocket.receive_json() for _ in range(4)]
+    assert [event["seq"] for event in resumed_events] == [3, 4, 5, 6]
 
     detail: dict[str, Any] = {}
     for _ in range(20):
@@ -414,6 +538,8 @@ def test_run_endpoint_spawns_worker_and_ws_streams_events(
 
     assert detail["metadata"]["status"] == "success"
     assert [event["event_type"] for event in detail["events"]] == event_types
+    assert [event["seq"] for event in detail["events"]] == [1, 2, 3, 4, 5, 6]
+    assert detail["events"][1]["payload"]["phase_name"] == "setup"
     run_dir = _skills_dir / "text-segmentation" / ".workspace" / "runs" / run_id
     assert (run_dir / "final_state.json").exists()
     assert (run_dir / "trace.jsonl").exists()
@@ -593,28 +719,40 @@ def test_set_golden_and_compare_run_diff(
     studio_roots: tuple[Path, Path],
 ) -> None:
     _skills_dir, workspaces_dir = studio_roots
-    _write_final_state(
+    _write_result_snapshot(
         workspaces_dir,
         "text-segmentation",
         "golden-run",
-        {"answer": "hello world", "score": 10, "ok": True},
+        [
+            {"phase_name": "setup", "outputs": {"answer": "hello world", "score": 10, "ok": True}},
+        ],
     )
-    _write_final_state(
+    _write_result_snapshot(
         workspaces_dir,
         "text-segmentation",
         "current-run",
-        {"answer": "hello studio", "score": 8, "ok": False},
+        [
+            {"phase_name": "setup", "outputs": {"answer": "hello studio", "score": 8, "ok": False}},
+        ],
     )
 
     promote_response = client.post(
         "/api/skills/text-segmentation/golden",
         json={"run_id": "golden-run", "lock": False},
+        headers=FALLBACK_HEADERS,
     )
 
     assert promote_response.status_code == 200
     assert promote_response.json()["id"] == "golden-run"
+    assert promote_response.json()["source_run_id"] == "golden-run"
+    assert promote_response.json()["source_run_results_ref"] == "text-segmentation/runs/golden-run/result.json"
+    assert promote_response.json()["baseline_ref"] == ".workspace/golden/golden-run/baseline.json"
     golden_dir = _skills_dir / "text-segmentation" / ".workspace" / "golden" / "golden-run"
-    assert (golden_dir / "golden_metadata.json").exists()
+    assert (golden_dir / "baseline.json").exists()
+    assert (golden_dir / "report.json").exists()
+    assert (golden_dir / "cases" / "setup.json").exists()
+    assert json.loads((golden_dir / "baseline.json").read_text(encoding="utf-8"))["locked"] is False
+    assert not (golden_dir / "golden_metadata.json").exists()
 
     diff_response = client.get(
         "/api/skills/text-segmentation/runs/current-run/diff?against=golden-run",
@@ -622,14 +760,80 @@ def test_set_golden_and_compare_run_diff(
 
     assert diff_response.status_code == 200
     body = diff_response.json()
-    assert body["golden_run_id"] == "golden-run"
+    assert body["baseline_id"] == "golden-run"
+    assert body["source_run_id"] == "golden-run"
+    assert body["run_results_ref"] == "text-segmentation/runs/current-run/result.json"
     assert body["total_score"] < 100
+    assert "differences" not in body
+    assert "node_results" not in body
     answer_diff = next(
-        item for item in body["differences"] if item["field_path"] == "output.answer"
+        item for item in body["node_groups"][0]["field_differences"] if item["field_path"] == "nodes.setup.answer"
     )
     assert answer_diff["type"] == "text"
     assert answer_diff["changed"] is True
     assert answer_diff["score"] < 1
+
+
+def test_set_golden_requires_explicit_browser_fallback_header(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, workspaces_dir = studio_roots
+    _write_final_state(
+        workspaces_dir,
+        "text-segmentation",
+        "golden-run",
+        {"answer": "must use native fs unless browser fallback is explicit"},
+    )
+    golden_dir = skills_dir / "text-segmentation" / ".workspace" / "golden" / "golden-run"
+
+    response = client.post(
+        "/api/skills/text-segmentation/golden",
+        json={"run_id": "golden-run", "lock": False},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error_code"] == "NATIVE_FS_REQUIRED"
+    assert not golden_dir.exists()
+
+
+def test_golden_plan_prepares_native_fs_payload_without_writing_baseline(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    _skills_dir, workspaces_dir = studio_roots
+    _write_result_snapshot(
+        workspaces_dir,
+        "text-segmentation",
+        "plan-run",
+        [{"phase_name": "setup", "outputs": {"answer": "native writer owns golden"}}],
+    )
+    golden_dir = _skills_dir / "text-segmentation" / ".workspace" / "golden" / "plan-run"
+
+    response = client.post(
+        "/api/skills/text-segmentation/golden/plan",
+        json={"run_id": "plan-run", "lock": True},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["baseline"]["id"] == "plan-run"
+    assert body["baseline"]["source_run_id"] == "plan-run"
+    assert body["baseline"]["source_run_results_ref"] == "text-segmentation/runs/plan-run/result.json"
+    assert body["baseline"]["baseline_ref"] == ".workspace/golden/plan-run/baseline.json"
+    assert body["baseline"]["locked"] is True
+    files = {item["path"]: json.loads(item["content"]) for item in body["files"]}
+    assert files[".workspace/golden/plan-run/baseline.json"]["locked"] is True
+    assert files[".workspace/golden/plan-run/baseline.json"]["cases"][0]["node_id"] == "setup"
+    assert files[".workspace/golden/plan-run/report.json"]["case_count"] == 1
+    assert files[".workspace/golden/plan-run/cases/setup.json"]["expected_output"] == {
+        "answer": "native writer owns golden"
+    }
+    assert "result_path" not in body
+    assert "result_content" not in body
+    assert "metadata_path" not in body
+    assert "metadata_content" not in body
+    assert not golden_dir.exists()
 
 
 def test_compare_endpoint_returns_per_node_golden_diff(
@@ -659,6 +863,7 @@ def test_compare_endpoint_returns_per_node_golden_diff(
     promote_response = client.post(
         "/api/skills/text-segmentation/golden",
         json={"run_id": "golden-node-run", "lock": False},
+        headers=FALLBACK_HEADERS,
     )
     assert promote_response.status_code == 200
 
@@ -666,11 +871,11 @@ def test_compare_endpoint_returns_per_node_golden_diff(
 
     assert compare_response.status_code == 200
     body = compare_response.json()
-    assert [node["node_id"] for node in body["node_results"]] == ["setup", "review"]
-    assert body["node_results"][0]["verdict"] == "fail"
-    assert body["node_results"][0]["differences"][0]["field_path"] == "nodes.setup.answer"
-    assert body["node_results"][1]["verdict"] == "pass"
-    assert body["node_results"][1]["differences"] == []
+    assert [node["node_id"] for node in body["node_groups"]] == ["setup", "review"]
+    assert body["node_groups"][0]["status"] == "fail"
+    assert body["node_groups"][0]["field_differences"][0]["field_path"] == "nodes.setup.answer"
+    assert body["node_groups"][1]["status"] == "pass"
+    assert body["node_groups"][1]["field_differences"] == []
 
 
 def test_compare_missing_golden_returns_404(
@@ -683,7 +888,7 @@ def test_compare_missing_golden_returns_404(
     response = client.get("/api/skills/text-segmentation/runs/current-run/diff")
 
     assert response.status_code == 404
-    assert response.json()["error_code"] == "RESUME_CHECKPOINT_NOT_FOUND"
+    assert response.json()["error_code"] == "golden.baseline_not_found"
 
 
 def test_run_spawn_failure_maps_to_500(
@@ -783,18 +988,53 @@ def test_delete_golden_baseline_removes_persisted_baseline(
     studio_roots: tuple[Path, Path],
 ) -> None:
     _skills_dir, workspaces_dir = studio_roots
-    _write_final_state(workspaces_dir, "text-segmentation", "delete-golden-run", {"answer": "remove me"})
+    _write_result_snapshot(
+        workspaces_dir,
+        "text-segmentation",
+        "delete-golden-run",
+        [{"phase_name": "setup", "outputs": {"answer": "remove me"}}],
+    )
 
     promote_response = client.post(
         "/api/skills/text-segmentation/golden",
         json={"run_id": "delete-golden-run", "lock": False},
+        headers=FALLBACK_HEADERS,
     )
     assert promote_response.status_code == 200
 
-    delete_response = client.delete("/api/skills/text-segmentation/golden/delete-golden-run")
+    delete_response = client.delete(
+        "/api/skills/text-segmentation/golden/delete-golden-run",
+        headers=FALLBACK_HEADERS,
+    )
 
     assert delete_response.status_code == 204
     assert client.get("/api/skills/text-segmentation/golden").json() == []
+
+
+def test_delete_golden_requires_explicit_browser_fallback_header(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, _workspaces_dir = studio_roots
+    golden_dir = skills_dir / "text-segmentation" / ".workspace" / "golden" / "delete-golden-run"
+    golden_dir.mkdir(parents=True, exist_ok=True)
+    (golden_dir / "baseline.json").write_text(
+        json.dumps(
+            {
+                "baseline_id": "delete-golden-run",
+                "source_run_id": "source-run",
+                "source_run_results_ref": "text-segmentation/runs/source-run/result.json",
+                "cases": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.delete("/api/skills/text-segmentation/golden/delete-golden-run")
+
+    assert response.status_code == 409
+    assert response.json()["error_code"] == "NATIVE_FS_REQUIRED"
+    assert golden_dir.exists()
 
 
 def test_value_error_handler_returns_studio_error_response(client: TestClient) -> None:
@@ -898,11 +1138,11 @@ def fake_run_worker(
             wall_time_seconds=0.1,
         ),
     ]
-    (run_dir / "trace.jsonl").write_text(
-        "\n".join(event.model_dump_json() for event in events) + "\n",
-        encoding="utf-8",
-    )
-    (run_dir / "final_state.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
+    trace_jsonl = "\n".join(event.model_dump_json() for event in events) + "\n"
+    final_state = {"ok": True}
+    (run_dir / "trace.jsonl").write_text(trace_jsonl, encoding="utf-8")
+    (run_dir / "final_state.json").write_text(json.dumps(final_state), encoding="utf-8")
+    _write_run_artifact_store(run_dir, final_state=final_state, trace_jsonl=trace_jsonl)
     (run_dir / "metrics.json").write_text(json.dumps({"status": "success"}), encoding="utf-8")
     (run_dir / "checkpoints.db").touch()
     for event in events:
@@ -1022,6 +1262,19 @@ def _write_final_state(
     return run_dir
 
 
+def _write_result_state(
+    workspaces_dir: Path,
+    skill_id: str,
+    run_id: str,
+    payload: dict[str, Any],
+) -> Path:
+    del workspaces_dir
+    run_dir = config.SKILLS_DIR / skill_id / ".workspace" / "runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "result.json").write_text(json.dumps(payload), encoding="utf-8")
+    return run_dir
+
+
 def _write_result_snapshot(
     workspaces_dir: Path,
     skill_id: str,
@@ -1029,22 +1282,58 @@ def _write_result_snapshot(
     phases: list[dict[str, Any]],
 ) -> Path:
     del workspaces_dir
-    run_dir = config.SKILLS_DIR / skill_id / ".workspace" / "runs" / run_id
+    run_dir = resolve_skill_dir(skill_id) / ".workspace" / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "result.json").write_text(
-        json.dumps(
-            {
-                "run_id": run_id,
-                "success": True,
-                "skill_id": skill_id,
-                "context": {},
-                "metrics": {},
-                "phases": phases,
-            }
-        ),
-        encoding="utf-8",
+    node_outputs: dict[str, Any] = {}
+    for index, phase in enumerate(phases):
+        node_id = phase.get("phase_name") or phase.get("node_id") or f"node_{index}"
+        node_outputs[str(node_id)] = phase.get("outputs", {})
+    _write_run_result_snapshot_store(
+        run_dir,
+        skill_id=skill_id,
+        run_id=run_id,
+        node_outputs=node_outputs,
     )
     return run_dir
+
+
+def _write_run_result_snapshot_store(
+    run_dir: Path,
+    *,
+    skill_id: str,
+    run_id: str,
+    node_outputs: dict[str, Any],
+) -> None:
+    from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
+
+    store = LocalRunArtifactStore(root=run_dir.parent.parent)
+    object_payloads = {
+        f"nodes/{node_id}/outputs.json": json.dumps(outputs).encode("utf-8")
+        for node_id, outputs in node_outputs.items()
+    }
+    snapshot = RunResultSnapshot(
+        run_results_ref=RunResultsRef(
+            run_id=run_id,
+            uri=f"{skill_id}/runs/{run_id}/result.json",
+            content_hash="sha256:" + ("0" * 64),
+        ),
+        node_results=[
+            NodeRunResult(
+                agent_node_id=node_id,
+                status="success",
+                outputs_ref=f"{skill_id}/runs/{run_id}/nodes/{node_id}/outputs.json",
+                trace_refs=[f"{skill_id}/runs/{run_id}/trace/{node_id}.jsonl"],
+            )
+            for node_id in node_outputs
+        ],
+        status="success",
+        outputs_ref=f"{skill_id}/runs/{run_id}/outputs.json",
+        trace_refs=[f"{skill_id}/runs/{run_id}/trace.jsonl"],
+    )
+    object_payloads["result.json"] = snapshot.model_dump_json().encode("utf-8")
+    store.begin_run(run_id, metadata={"artifact_id": skill_id})
+    store.put_batch(run_id, object_payloads)
+    store.seal_run(run_id)
 
 
 def _write_run_record(
@@ -1055,8 +1344,46 @@ def _write_run_record(
     started_at: datetime,
     input_data: dict[str, Any],
 ) -> Path:
-    run_dir = _write_final_state(workspaces_dir, skill_id, run_id, {"ok": True})
+    final_state = {"ok": True}
+    run_dir = _write_final_state(workspaces_dir, skill_id, run_id, final_state)
     metadata = RunMetadata(run_id=run_id, status="success", started_at=started_at)
     (run_dir / "run_metadata.json").write_text(metadata.model_dump_json(), encoding="utf-8")
     (run_dir / "input_data.json").write_text(json.dumps(input_data), encoding="utf-8")
+    _write_run_artifact_store(run_dir, final_state=final_state, trace_jsonl="")
     return run_dir
+
+
+def _write_run_artifact_store(run_dir: Path, *, final_state: dict[str, Any], trace_jsonl: str) -> None:
+    from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
+
+    store = LocalRunArtifactStore(root=run_dir.parent.parent)
+    node_outputs = {"setup": final_state}
+    snapshot = RunResultSnapshot(
+        run_results_ref=RunResultsRef(
+            run_id=run_dir.name,
+            uri=f"{run_dir.parent.parent.parent.name}/runs/{run_dir.name}/result.json",
+            content_hash="sha256:" + ("0" * 64),
+        ),
+        node_results=[
+            NodeRunResult(
+                agent_node_id=node_id,
+                status="success",
+                outputs_ref=f"{run_dir.parent.parent.parent.name}/runs/{run_dir.name}/nodes/{node_id}/outputs.json",
+                trace_refs=[f"{run_dir.parent.parent.parent.name}/runs/{run_dir.name}/trace.jsonl"],
+            )
+            for node_id in node_outputs
+        ],
+        status="success",
+        outputs_ref=f"{run_dir.parent.parent.parent.name}/runs/{run_dir.name}/outputs.json",
+        trace_refs=[f"{run_dir.parent.parent.parent.name}/runs/{run_dir.name}/trace.jsonl"],
+    )
+    store.put_batch(
+        run_dir.name,
+        {
+            "result.json": snapshot.model_dump_json().encode("utf-8"),
+            "nodes/setup/outputs.json": json.dumps(final_state).encode("utf-8"),
+            "final_state.json": json.dumps(final_state).encode("utf-8"),
+            "trace.jsonl": trace_jsonl.encode("utf-8"),
+        },
+    )
+    store.seal_run(run_dir.name)

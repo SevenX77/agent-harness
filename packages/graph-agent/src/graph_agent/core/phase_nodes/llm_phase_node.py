@@ -39,6 +39,10 @@ from graph_agent.cognitive.prompt import (
     resolve_role_prefix_from_llm_role,
 )
 from graph_agent.core.callback_bridge import _extract_text_content, _HarnessCallbackBridge
+from graph_agent.core.llm_provider import (
+    LLMProviderChatModel,
+    LLMProviderMissingError,
+)
 from graph_agent.core.nudge_injector import NudgeInjector
 from graph_agent.core.phase_nodes._helpers import (
     _FINISH_TASK_RESULT_KEY,
@@ -130,11 +134,8 @@ class LLMPhaseNode(PhaseNode):
     def _prepare_phase_runtime(self, phase: Phase, state: WorkflowState) -> _PhaseRuntime:
         from graph_agent.core.state import _clone_state
 
-        resolver = self.container.resolver
-        if resolver is None:
-            from graph_agent_gateway.exceptions import GatewayResolverMissingError
-
-            raise GatewayResolverMissingError(phase_name=phase.name)
+        if self.container.llm_provider is None and self.container.legacy_model_resolver is None:
+            raise LLMProviderMissingError(phase.name)
         save_compaction_sidecar = self.container.save_compaction_sidecar
         assert save_compaction_sidecar is not None, (
             "execute_llm_phase requires a save_compaction_sidecar callable"
@@ -168,14 +169,24 @@ class LLMPhaseNode(PhaseNode):
         from graph_agent.callbacks.emit import _safe_emit_event
         from graph_agent.callbacks.events import ModelResolvedEvent
 
-        resolver = self.container.resolver
-        assert resolver is not None
-        model = resolver.resolve(
-            phase.tier,
-            model_override=phase.model_override,
-            callbacks=tuple(runtime.active_callbacks),
-            phase_name=phase.name,
-        )
+        provider = self.container.llm_provider
+        if provider is not None:
+            model = LLMProviderChatModel(
+                provider=provider,
+                role=phase.tier,
+                phase_name=phase.name,
+                model_override=phase.model_override,
+                callbacks=tuple(runtime.active_callbacks),
+            )
+        else:
+            resolver = self.container.legacy_model_resolver
+            assert resolver is not None
+            model = resolver.resolve(
+                phase.tier,
+                model_override=phase.model_override,
+                callbacks=tuple(runtime.active_callbacks),
+                phase_name=phase.name,
+            )
         resolved_model_name = _resolved_model_name(model)
         _safe_emit_event(
             runtime.active_callbacks,

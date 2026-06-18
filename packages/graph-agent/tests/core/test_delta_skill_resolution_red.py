@@ -72,19 +72,19 @@ io:
     )
 
 
-def _subgraph_parent(root: Path) -> None:
+def _subgraph_parent(root: Path, child: Path) -> None:
     _graph(root, name="parent", phase="child")
     _write(
         root / "phases" / "child" / "SUBGRAPH.md",
-        """---
-target_skill: demo.child
+        f"""---
+path: {child}
 io:
   inputs:
     type: object
-    properties: {}
+    properties: {{}}
   outputs:
     type: object
-    properties: {}
+    properties: {{}}
 ---
 """,
     )
@@ -138,8 +138,8 @@ def test_delta5_subgraph_ast_rejects_legacy_child_reference_field() -> None:
         SubgraphNodeAST.model_validate({"mode": "subgraph", "sub_skill" + "_ref": "child"})
 
 
-def test_delta5_subgraph_ast_requires_target_skill() -> None:
-    with pytest.raises(ValidationError, match="target_skill"):
+def test_delta5_subgraph_ast_requires_path() -> None:
+    with pytest.raises(ValidationError, match="path"):
         SubgraphNodeAST.model_validate({"mode": "subgraph", "name": "child"})
 
 
@@ -147,10 +147,10 @@ def test_delta5_graph_assembler_no_longer_exposes_sub_skill_path_resolver() -> N
     assert not hasattr(graph_assembler, "_resolve_sub_skill" + "_path")
 
 
-def test_delta5_subgraph_target_skill_compile_smoke(tmp_path: Path) -> None:
+def test_delta5_subgraph_path_compile_smoke(tmp_path: Path) -> None:
     parent = tmp_path / "parent"
-    child = tmp_path / "child"
-    _subgraph_parent(parent)
+    child = parent / "subgraphs" / "child"
+    _subgraph_parent(parent, child)
     _logic_skill(child)
     resolver: SkillResolverProtocol = DictSkillResolver({"demo.child": child})
 
@@ -165,7 +165,7 @@ def test_delta1_assemble_graph_missing_resolver_raises_v3_code(tmp_path: Path) -
         {
             "mode": "subgraph",
             "name": "child",
-            "target_skill": "demo.child",
+            "path": str(tmp_path / "parent" / "subgraphs" / "child"),
             "io": {"inputs": {"type": "object"}, "outputs": {"type": "object"}},
         }
     )

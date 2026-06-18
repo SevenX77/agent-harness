@@ -95,6 +95,20 @@ describe('PropertiesPanel — per-kind whitelist form (R3)', () => {
       expect(html).not.toContain(`>${label}<`)
     }
   })
+
+  it('subgraph node surfaces legacy target_skill as migration-needed instead of editable target_skill', () => {
+    const html = renderPanel({
+      id: 'child',
+      data: baseData({ mode: 'subgraph', filePath: 'phases/child/SUBGRAPH.md' }),
+      filePath: 'phases/child/SUBGRAPH.md',
+      content: ['---', 'name: child', 'target_skill: legacy.registry.child', '---', 'Body'].join('\n'),
+    })
+
+    expect(html).toContain('Legacy child reference')
+    expect(html).toContain('legacy.registry.child')
+    expect(html).toContain('absolute path')
+    expect(html).not.toContain('Target skill')
+  })
 })
 
 describe('PropertiesPanel — node role Test control (R23)', () => {

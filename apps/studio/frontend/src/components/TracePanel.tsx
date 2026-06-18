@@ -1,4 +1,4 @@
-import type { CallbackEvent } from '../api/types'
+import type { CallbackEvent, EventEnvelope } from '../api/types'
 import { useTraceFilter } from '../hooks/useTraceFilter'
 import { BadgeCheck, GitCompareArrows, Play } from 'lucide-react'
 import { TraceFilter } from './trace/TraceFilter'
@@ -6,7 +6,7 @@ import { TraceSearchBar } from './trace/TraceSearchBar'
 import { VirtualTraceList } from './trace/VirtualTraceList'
 
 interface TracePanelProps {
-  traceLogs: CallbackEvent[]
+  traceLogs: EventEnvelope[]
   activePhase?: string | null
   selectedEventId?: string | null
   linkEnabled?: boolean
@@ -20,6 +20,10 @@ interface TracePanelProps {
   canResume?: boolean
   resumeLoading?: boolean
   onResume?: () => void
+}
+
+function envelopePayload(event: EventEnvelope): CallbackEvent {
+  return event.payload as CallbackEvent
 }
 
 export function TracePanel({
@@ -38,9 +42,10 @@ export function TracePanel({
   resumeLoading = false,
   onResume,
 }: TracePanelProps) {
-  const filter = useTraceFilter(traceLogs, linkEnabled ? activePhase : null)
+  const traceEvents = traceLogs.map(envelopePayload)
+  const filter = useTraceFilter(traceEvents, linkEnabled ? activePhase : null)
 
-  if (traceLogs.length === 0) {
+  if (traceEvents.length === 0) {
     return (
       <div
         role="log"
@@ -113,7 +118,7 @@ export function TracePanel({
           onClear={filter.clearFilters}
         />
         <div className="text-xs font-medium text-muted-foreground">
-          Showing {filter.filteredEvents.length} of {traceLogs.length} events
+          Showing {filter.filteredEvents.length} of {traceEvents.length} events
         </div>
       </div>
       <div className="min-h-0 flex-1 p-4">

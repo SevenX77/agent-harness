@@ -185,7 +185,10 @@ def test_auto_commit_respects_gitignore_latest_but_commits_golden(
     (latest_dir / "run_metadata.json").write_text("{}", encoding="utf-8")
     golden_dir = skill_dir / ".workspace" / "golden" / "run-1"
     golden_dir.mkdir(parents=True)
-    (golden_dir / "golden_metadata.json").write_text("{}", encoding="utf-8")
+    (golden_dir / "baseline.json").write_text("{}", encoding="utf-8")
+    (golden_dir / "report.json").write_text("{}", encoding="utf-8")
+    (golden_dir / "cases").mkdir()
+    (golden_dir / "cases" / "setup.json").write_text("{}", encoding="utf-8")
 
     result = service.auto_commit_run(skill_dir, "run-1")
 
@@ -193,7 +196,9 @@ def test_auto_commit_respects_gitignore_latest_but_commits_golden(
     ignored_status = service.status(skill_dir, ignored=True).stdout
     assert "!! .workspace/runs/" in ignored_status
     committed_files = run_git(skill_dir, "show", "--name-only", "--format=", "HEAD").stdout
-    assert ".workspace/golden/run-1/golden_metadata.json" in committed_files
+    assert ".workspace/golden/run-1/baseline.json" in committed_files
+    assert ".workspace/golden/run-1/report.json" in committed_files
+    assert ".workspace/golden/run-1/cases/setup.json" in committed_files
     assert ".workspace/predict/" not in committed_files
     assert ".workspace/runs/latest" not in committed_files
 
@@ -236,6 +241,123 @@ def test_create_branch_checks_out_new_branch(tmp_path: Path) -> None:
     service.create_branch(skill_dir, "team-save/tester-1")
 
     assert run_git(skill_dir, "branch", "--show-current").stdout.strip() == "team-save/tester-1"
+
+
+def test_commit_empty_snapshot_retries_cas_when_head_advances(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("skill\n", encoding="utf-8")
+    service = GitLocalService(lock_retry_delays=())
+    service.init(skill_dir)
+    run_git(skill_dir, "config", "--local", "user.name", "tester")
+    run_git(skill_dir, "config", "--local", "user.email", "tester@studio.local")
+    service.add(skill_dir)
+    service.commit(skill_dir, "initial")
+    original_run = subprocess.run
+    advanced_head = False
+
+    def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        nonlocal advanced_head
+        if command[0:3] == ["git", "update-ref", "HEAD"] and not advanced_head:
+            advanced_head = True
+            original_run(
+                ["git", "commit", "--allow-empty", "-m", "manual-concurrent"],
+                cwd=kwargs["cwd"],
+                timeout=kwargs.get("timeout"),
+                capture_output=True,
+                text=True,
+            )
+        return original_run(command, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    service.commit_empty_snapshot(skill_dir, "release-1.0.0")
+
+    subjects = run_git(skill_dir, "log", "--format=%s").stdout.splitlines()
+    assert subjects.count("release-1.0.0") == 1
+    assert "manual-concurrent" in subjects
+
+
+def test_commit_empty_snapshot_does_not_reuse_non_empty_commit_with_same_subject(
+    tmp_path: Path,
+) -> None:
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("skill\n", encoding="utf-8")
+    service = GitLocalService(lock_retry_delays=())
+    service.init(skill_dir)
+    run_git(skill_dir, "config", "--local", "user.name", "tester")
+    run_git(skill_dir, "config", "--local", "user.email", "tester@studio.local")
+    service.add(skill_dir)
+    service.commit(skill_dir, "initial")
+    (skill_dir / "RELEASE_NOTES.md").write_text("user authored release notes\n", encoding="utf-8")
+    service.add(skill_dir)
+    service.commit(skill_dir, "release-1.0.0")
+    ordinary_sha = run_git(skill_dir, "rev-parse", "HEAD").stdout.strip()
+
+    marker_sha = service.commit_empty_snapshot(skill_dir, "release-1.0.0")
+
+    subjects = run_git(skill_dir, "log", "--format=%s").stdout.splitlines()
+    marker_changed_files = run_git(
+        skill_dir,
+        "diff-tree",
+        "--no-commit-id",
+        "--name-only",
+        "-r",
+        "--root",
+        marker_sha,
+    ).stdout.splitlines()
+    assert marker_sha != ordinary_sha
+    assert subjects.count("release-1.0.0") == 2
+    assert marker_changed_files == []
+
+
+def test_commit_empty_snapshot_uses_concurrent_existing_marker_after_cas_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("skill\n", encoding="utf-8")
+    service = GitLocalService(lock_retry_delays=())
+    service.init(skill_dir)
+    run_git(skill_dir, "config", "--local", "user.name", "tester")
+    run_git(skill_dir, "config", "--local", "user.email", "tester@studio.local")
+    service.add(skill_dir)
+    service.commit(skill_dir, "initial")
+    original_run = subprocess.run
+    concurrent_marker: dict[str, str] = {}
+
+    def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        if command[0:3] == ["git", "update-ref", "HEAD"] and not concurrent_marker:
+            result = original_run(
+                ["git", "commit", "--allow-empty", "-m", "release-1.0.0"],
+                cwd=kwargs["cwd"],
+                timeout=kwargs.get("timeout"),
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode == 0, result.stderr
+            sha_result = original_run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=kwargs["cwd"],
+                timeout=kwargs.get("timeout"),
+                capture_output=True,
+                text=True,
+            )
+            concurrent_marker["sha"] = sha_result.stdout.strip()
+        return original_run(command, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    marker_sha = service.commit_empty_snapshot(skill_dir, "release-1.0.0")
+
+    subjects = run_git(skill_dir, "log", "--format=%s").stdout.splitlines()
+    assert subjects.count("release-1.0.0") == 1
+    assert marker_sha == concurrent_marker["sha"]
 
 
 def test_studio_gitignore_template_is_exact(tmp_path: Path) -> None:

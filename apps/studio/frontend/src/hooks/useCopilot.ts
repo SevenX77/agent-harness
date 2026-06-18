@@ -22,6 +22,21 @@ export interface CopilotSendPayload {
   user_message: string
   model_override?: string
   role?: string
+  workspace_root?: string
+  judge_context?: CopilotJudgeContext
+}
+
+export interface CopilotJudgeContext {
+  compare_result_ref: string
+  judge_context_ref: string
+  baseline_ref: string
+  diff_summary: {
+    baseline_id: string
+    run_results_ref: string
+    total_score: number
+    node_group_count: number
+    failed_node_count: number
+  }
 }
 
 /** Build the ws send payload, attaching model_override / role only when present. */
@@ -29,6 +44,8 @@ export function buildCopilotSendPayload(
   userMessage: string,
   modelOverride?: string | null,
   role?: string | null,
+  workspaceRoot?: string | null,
+  judgeContext?: CopilotJudgeContext | null,
 ): CopilotSendPayload {
   const payload: CopilotSendPayload = { user_message: userMessage }
   if (modelOverride) {
@@ -36,6 +53,13 @@ export function buildCopilotSendPayload(
   }
   if (role) {
     payload.role = role
+  }
+  const trimmedWorkspaceRoot = workspaceRoot?.trim()
+  if (trimmedWorkspaceRoot) {
+    payload.workspace_root = trimmedWorkspaceRoot
+  }
+  if (judgeContext) {
+    payload.judge_context = judgeContext
   }
   return payload
 }
@@ -81,7 +105,7 @@ function flushTextQueue(
   })
 }
 
-export function useCopilot(skillId: string | null) {
+export function useCopilot(skillId: string | null, workspaceRootOverride?: string | null) {
   const snapshot = useSyncExternalStore(copilotStore.subscribe, copilotStore.getSnapshot)
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('idle')
   const [reconnectInMs, setReconnectInMs] = useState<number | null>(null)
@@ -120,7 +144,7 @@ export function useCopilot(skillId: string | null) {
     }
   }, [])
 
-  const workspaceRoot = resolveWorkspaceIdentity(skillId).workspaceRoot ?? ''
+  const workspaceRoot = workspaceRootOverride?.trim() || resolveWorkspaceIdentity(skillId).workspaceRoot || ''
 
   useEffect(() => {
     if (!skillId) {
@@ -212,7 +236,12 @@ export function useCopilot(skillId: string | null) {
     }
   }, [skillId, appendAssistantEvent])
 
-  const sendMessage = useCallback((content: string, modelOverride?: string | null, role?: string | null) => {
+  const sendMessage = useCallback((
+    content: string,
+    modelOverride?: string | null,
+    role?: string | null,
+    judgeContext?: CopilotJudgeContext | null,
+  ) => {
     const trimmed = content.trim()
     if (!trimmed || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
       return false
@@ -220,9 +249,9 @@ export function useCopilot(skillId: string | null) {
 
     assistantMessageIdRef.current = null
     copilotStore.appendMessage(createMessage('user', trimmed, 'success'))
-    socketRef.current.send(JSON.stringify(buildCopilotSendPayload(trimmed, modelOverride, role)))
+    socketRef.current.send(JSON.stringify(buildCopilotSendPayload(trimmed, modelOverride, role, workspaceRoot, judgeContext)))
     return true
-  }, [])
+  }, [workspaceRoot])
 
   return {
     messages: snapshot.messages,

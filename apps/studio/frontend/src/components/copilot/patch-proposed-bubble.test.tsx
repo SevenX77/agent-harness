@@ -1,8 +1,15 @@
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { CopilotPatchProposedEvent } from '../../types/copilot'
-import { PatchProposedBubble, copilotFileActionEffects } from './patch-proposed-bubble'
+import { createLocalWorkspaceSelection } from '../studio/workspace-identity'
+import {
+  PatchProposedBubble,
+  PatchProposedBubbleView,
+  copilotFileActionEffects,
+  resolveCopilotCheckpointRoot,
+  seedCopilotRestoreCheckpoint,
+} from './patch-proposed-bubble'
 
 function patchEvent(overrides: Partial<CopilotPatchProposedEvent> = {}): CopilotPatchProposedEvent {
   return {
@@ -17,6 +24,10 @@ function patchEvent(overrides: Partial<CopilotPatchProposedEvent> = {}): Copilot
     beforeExisted: true,
     beforeContent: 'alpha\noriginal\nomega',
     afterContent: 'alpha\nEDITED\nomega',
+    beforeHash: 'sha-before',
+    afterHash: 'sha-after',
+    diff: '@@ -1,3 +1,3 @@\n alpha\n-original\n+EDITED\n omega',
+    checkpointId: 'checkpoint-1',
     review: 'pending',
     ...overrides,
   }
@@ -47,6 +58,58 @@ describe('PatchProposedBubble', () => {
     expect(html).toContain('Created phases/p/LOGIC.md')
     expect(html).toContain('new body')
   })
+
+  it('renders checkpoint safety errors with Reject disabled', () => {
+    const html = renderToStaticMarkup(
+      <PatchProposedBubbleView
+        event={patchEvent()}
+        review="pending"
+        busy={false}
+        checkpointStatus={{
+          state: 'unsafe',
+          message: 'Checkpoint unavailable: this change cannot be safely restored.',
+        }}
+        showCompare={false}
+        onAccept={vi.fn()}
+        onReject={vi.fn()}
+        onShowCompare={vi.fn()}
+        onCloseCompare={vi.fn()}
+      />,
+    )
+
+    expect(html).toContain('Checkpoint unavailable')
+    expect(html).toContain('safely restored')
+    expect(html).toContain('aria-label="Reject change"')
+    expect(html).toContain('disabled=""')
+  })
+})
+
+describe('seedCopilotRestoreCheckpoint', () => {
+  it('does not publish applied when checkpoint seeding fails', async () => {
+    const seedWorkspaceCheckpoint = vi.fn().mockRejectedValue(new Error('checkpoint seed failed'))
+    const onApplied = vi.fn()
+
+    const result = await seedCopilotRestoreCheckpoint({
+      root: '/abs/demo',
+      event: patchEvent(),
+      seedWorkspaceCheckpoint,
+      onApplied,
+    })
+
+    expect(seedWorkspaceCheckpoint).toHaveBeenCalledWith(
+      '/abs/demo',
+      'GRAPH.md',
+      'alpha\noriginal\nomega',
+      true,
+    )
+    expect(onApplied).not.toHaveBeenCalled()
+    expect(result.state).toBe('unsafe')
+    if (result.state !== 'unsafe') {
+      throw new Error(`Expected unsafe checkpoint state, got ${result.state}`)
+    }
+    expect(result.message).toMatch(/checkpoint/i)
+    expect(result.message).toMatch(/safely restore/i)
+  })
 })
 
 describe('copilotFileActionEffects (F5/DEF-025)', () => {
@@ -60,5 +123,21 @@ describe('copilotFileActionEffects (F5/DEF-025)', () => {
 
   it('rejected → reload (file rewound) AND recompile', () => {
     expect(copilotFileActionEffects('rejected')).toEqual({ reload: true, recompile: true })
+  })
+})
+
+describe('resolveCopilotCheckpointRoot', () => {
+  it('prefers the imported workspace root over the backend skill id', () => {
+    expect(resolveCopilotCheckpointRoot('text-segmentation', '/abs/imported-skill')).toBe('/abs/imported-skill')
+  })
+
+  it('falls back to the workspace root encoded in a local workspace identity', () => {
+    const identity = createLocalWorkspaceSelection('text-segmentation', '/abs/imported-skill')
+
+    expect(resolveCopilotCheckpointRoot(identity, null)).toBe('/abs/imported-skill')
+  })
+
+  it('falls back to the short skill id for default workspace skills', () => {
+    expect(resolveCopilotCheckpointRoot('text-segmentation', null)).toBe('text-segmentation')
   })
 })

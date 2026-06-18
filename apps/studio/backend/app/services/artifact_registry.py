@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import io
 import json
 import logging
-import zipfile
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -15,10 +12,6 @@ import httpx
 from app.models.settings import AppSettings
 
 logger = logging.getLogger(__name__)
-
-PUBLISH_EXCLUDE_DIRS = frozenset({".workspace", ".git", ".kiro", "__pycache__"})
-PUBLISH_EXCLUDE_FILES = frozenset({".DS_Store", "Thumbs.db"})
-PUBLISH_EXCLUDE_SUFFIXES = frozenset({".pyc"})
 
 
 class ArtifactRegistryApiError(RuntimeError):
@@ -78,7 +71,13 @@ class ArtifactRegistryClient:
             )
             raise ArtifactRegistryApiError(status_code=response.status_code, body=response.text)
 
-        payload = response.json()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ArtifactRegistryApiError(
+                status_code=response.status_code,
+                body=response.text,
+            ) from exc
         if not isinstance(payload, dict):
             raise ArtifactRegistryApiError(status_code=response.status_code, body=response.text)
 
@@ -87,44 +86,59 @@ class ArtifactRegistryClient:
         )
         return payload
 
+    def sync_release_manifest(
+        self,
+        *,
+        skill_id: str,
+        release_manifest: dict[str, Any],
+        metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Sync release manifest metadata without uploading local package bytes."""
+        if not self.host:
+            raise ValueError("Artifact Registry host is not configured")
+        if not self.token:
+            raise ValueError("Artifact Registry token is not configured")
 
-def build_publish_package(skill_dir: Path) -> bytes:
-    """Zip a skill directory into bytes for Artifact Registry upload."""
-    if not skill_dir.exists() or not skill_dir.is_dir():
-        raise ValueError(f"Publish skill_dir must be an existing directory: {skill_dir}")
+        logger.info("artifact registry release sync start skill=%s", skill_id)
+        payload = {
+            "skill_id": skill_id,
+            "metadata": metadata,
+            "release_manifest": release_manifest,
+        }
+        try:
+            response = self._http.request(
+                "POST",
+                f"{self.host}/api/v1/releases",
+                headers={"Authorization": f"Bearer {self.token}"},
+                json=payload,
+            )
+        except httpx.RequestError as exc:
+            logger.error("artifact registry release sync network error skill=%s err=%s", skill_id, exc)
+            raise
 
-    logger.info("build publish package skill_dir=%s", skill_dir)
-    file_count = 0
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-        for path in sorted(skill_dir.rglob("*")):
-            rel_path = path.relative_to(skill_dir)
-            excluded, reason = _should_exclude(rel_path)
-            if excluded:
-                logger.debug("excluding from publish package path=%s reason=%s", rel_path, reason)
-                continue
+        if response.status_code >= 400:
+            logger.warning(
+                "artifact registry release sync failed skill=%s status=%d body=%s",
+                skill_id,
+                response.status_code,
+                response.text[:200],
+            )
+            raise ArtifactRegistryApiError(status_code=response.status_code, body=response.text)
 
-            if path.is_symlink():
-                target = path.readlink()
-                logger.warning(
-                    "symlink skipped in publish package path=%s target=%s", rel_path, target
-                )
-                continue
-            if not path.is_file():
-                continue
+        try:
+            response_payload = response.json()
+        except ValueError as exc:
+            raise ArtifactRegistryApiError(
+                status_code=response.status_code,
+                body=response.text,
+            ) from exc
+        if not isinstance(response_payload, dict):
+            raise ArtifactRegistryApiError(status_code=response.status_code, body=response.text)
 
-            try:
-                archive.write(path, rel_path.as_posix())
-                file_count += 1
-            except OSError:
-                logger.exception("failed reading publish package path=%s", rel_path)
-                raise
-
-    result = buffer.getvalue()
-    logger.info(
-        "publish package built skill_dir=%s files=%d bytes=%d", skill_dir, file_count, len(result)
-    )
-    return result
+        logger.info(
+            "artifact registry release sync ok skill=%s status=%d", skill_id, response.status_code
+        )
+        return response_payload
 
 
 def build_publish_metadata(
@@ -146,12 +160,30 @@ def build_publish_metadata(
     }
 
 
-def _should_exclude(rel_path: Path) -> tuple[bool, str]:
-    for part in rel_path.parts:
-        if part in PUBLISH_EXCLUDE_DIRS:
-            return True, f"excluded-dir:{part}"
-    if rel_path.name in PUBLISH_EXCLUDE_FILES:
-        return True, f"excluded-file:{rel_path.name}"
-    if rel_path.suffix in PUBLISH_EXCLUDE_SUFFIXES:
-        return True, f"excluded-suffix:{rel_path.suffix}"
-    return False, ""
+def sync_product_artifact_release(
+    *,
+    skill_id: str,
+    release_manifest: dict[str, Any],
+    store: Any,
+    registry: Any,
+    app_settings: AppSettings,
+    version: str,
+) -> dict[str, Any]:
+    """Sync a committed ProductArtifactStore release to the remote registry."""
+    artifact_ref = release_manifest["artifact_ref"]
+    if not isinstance(artifact_ref, dict):
+        raise ValueError("release manifest artifact_ref must be an object")
+    content_hash = artifact_ref["content_hash"]
+    if not isinstance(content_hash, str):
+        raise ValueError("release manifest content_hash must be a string")
+
+    store.get(content_hash)
+    metadata = build_publish_metadata(skill_id, app_settings, version=version)
+    metadata["artifact_ref"] = artifact_ref
+    metadata["package_kind"] = "product_artifact"
+    metadata["release_version"] = release_manifest["release_version"]
+    return registry.sync_release_manifest(
+        skill_id=skill_id,
+        release_manifest=release_manifest,
+        metadata=metadata,
+    )

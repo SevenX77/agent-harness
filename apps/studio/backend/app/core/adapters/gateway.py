@@ -1,9 +1,28 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
+from dataclasses import asdict, dataclass, is_dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, cast
 
+from graph_agent_gateway.fallback_decision import (
+    FallbackDecision as GatewayFallbackDecision,
+)
+from graph_agent_gateway.fallback_decision import (
+    FallbackDecisionRequest as GatewayFallbackDecisionRequest,
+)
+from graph_agent_gateway.fallback_decision import (
+    decide_fallback as gateway_decide_fallback,
+)
+from graph_agent_gateway.credential_resolver import (
+    CredentialResolveError as GatewayCredentialResolveError,
+)
+from graph_agent_gateway.credential_resolver import (
+    CredentialResolveRequest as GatewayCredentialResolveRequest,
+)
+from graph_agent_gateway.credential_resolver import (
+    resolve_credential as gateway_resolve_credential,
+)
 from graph_agent_gateway.registry.base_url import (
     canonicalize_base_url as canonicalize_base_url,
 )
@@ -30,9 +49,6 @@ from graph_agent_gateway.registry.schema import (
     CapabilitySource as CapabilitySource,
 )
 from graph_agent_gateway.registry.schema import (
-    CapabilityValue,
-)
-from graph_agent_gateway.registry.schema import (
     EvidenceRecord as EvidenceRecord,
 )
 from graph_agent_gateway.registry.schema import (
@@ -54,9 +70,27 @@ from graph_agent_gateway.registry.schema import (
 from graph_agent_gateway.registry.schema import (
     RuntimeSettings as RuntimeSettings,
 )
-from graph_agent_gateway.registry.schema import (
-    VerifiedProfile as VerifiedProfile,
+from graph_agent_gateway.registry.schema import VerifiedProfile as VerifiedProfile
+from graph_agent_gateway.import_draft_store import (
+    EVIDENCE_LIBRARY_DRAFT_ID as EVIDENCE_LIBRARY_DRAFT_ID,
 )
+from graph_agent_gateway.import_draft_store import ImportDraftStore as ImportDraftStore
+from graph_agent_gateway.import_draft_store import (
+    merge_evidence_library as merge_evidence_library,
+)
+from graph_agent_gateway.import_draft_store import (
+    materialize_import_draft_candidates as materialize_import_draft_candidates,
+)
+from graph_agent_gateway.import_draft_store import (
+    new_evidence_library as new_evidence_library,
+)
+from graph_agent_gateway.role_materialization import (
+    MaterializeRoleRequest as GatewayMaterializeRoleRequest,
+)
+from graph_agent_gateway.role_materialization import (
+    materialize_role as gateway_materialize_role,
+)
+from graph_agent_gateway.route_handoff import ResolvedRouteChain
 
 # Re-exports from graph_agent_gateway for services isolation
 from graph_agent_gateway.resolver import ModelResolver as ModelResolver
@@ -67,10 +101,14 @@ from graph_agent_gateway.resolver import ResourceTerminalError as ResourceTermin
 from graph_agent_gateway.state_projection import (
     project_route_state as gateway_project_route_state,
 )
+from graph_agent_gateway.state_projection import (
+    project_route_state_from_evidence as gateway_project_route_state_from_evidence,
+)
 
 from app.core.adapters.http_transport import HttpTransport, StudioAdapterError
 
 ProviderUiState = Literal["ready", "historical_ready", "untested", "cooling_down", "off", "failed"]
+_OPAQUE_SECRET_HANDLE_RE = re.compile(r"^secret-handle://studio-local/[a-f0-9]{32}$")
 
 
 @dataclass(frozen=True)
@@ -79,63 +117,6 @@ class ProviderModelStateProjection:
     reason_code: str | None = None
     retry_at: str | None = None
     ui_detail: str | None = None
-
-
-def _private_profile_supports_reasoning(profile: VerifiedProfile) -> bool:
-    haystack = " ".join(
-        [
-            profile.capability,
-            profile.profile_id,
-            profile.request_mapper_id,
-        ]
-    ).lower()
-    return "thinking" in haystack or "reasoning" in haystack
-
-
-def _private_verified_profile_route_capabilities(
-    profiles: list[VerifiedProfile],
-) -> dict[str, CapabilityValue]:
-    ready_profiles = [profile for profile in profiles if profile.status == "ready"]
-    if not ready_profiles:
-        return {}
-
-    input_modalities = sorted({modality for profile in ready_profiles for modality in (profile.input_modalities or [])})
-    output_modalities = sorted(
-        {modality for profile in ready_profiles for modality in (profile.output_modalities or [])}
-    )
-    capabilities: dict[str, CapabilityValue] = {
-        "verified_methods": CapabilityValue(
-            value=sorted({profile.method_id for profile in ready_profiles}),
-            source="probed_verified",
-        ),
-    }
-    if input_modalities:
-        capabilities["input_modalities"] = CapabilityValue(
-            value=input_modalities,
-            source="probed_verified",
-        )
-    if output_modalities:
-        capabilities["output_modalities"] = CapabilityValue(
-            value=output_modalities,
-            source="probed_verified",
-        )
-    if any(_private_profile_supports_reasoning(profile) for profile in ready_profiles):
-        capabilities["thinking_protocol"] = CapabilityValue(
-            value=True,
-            source="probed_verified",
-        )
-    return capabilities
-
-
-def _private_route_effective_capabilities(route: ProviderRoute) -> dict[str, CapabilityValue]:
-    return {
-        **route.capabilities,
-        **_private_verified_profile_route_capabilities(route.verified_profiles),
-    }
-
-
-def _private_route_thinking_capability(route: ProviderRoute) -> CapabilityValue | None:
-    return _private_route_effective_capabilities(route).get("thinking_protocol")
 
 
 class GatewayAdapter:
@@ -153,10 +134,22 @@ class GatewayAdapter:
         if self.transport == "http_loopback":
             if not self.http_transport:
                 raise ValueError("http_transport is required for http_loopback")
-            return self.http_transport.post("/gateway/resolve_routes", payload)
+            return ResolvedRouteChain.model_validate(
+                self.http_transport.post("/gateway/resolve_routes", _gateway_http_payload(payload))
+            )
 
         # in_process
         role_name = payload["role_name"]
+        from app.core import config
+
+        config_store = payload.get("config_store")
+        if config_store is not None:
+            resolver = ModelResolver(
+                config_store=config_store,
+                user_id=str(payload.get("user_id") or config.DEFAULT_USER_ID),
+            )
+            return resolver.resolve_routes(role_name, route_override=payload.get("route_override"))
+
         credentials = payload["credentials"]
         roles = payload["roles"]
 
@@ -175,25 +168,26 @@ class GatewayAdapter:
         import tempfile
         from pathlib import Path
 
-        from app.core import config
         from app.core.adapters.gateway_config_store_local import LocalGatewayConfigStore
         from app.services.llm_credentials import _credentials_payload_for_storage
 
         temp_dir = Path(tempfile.mkdtemp(prefix="studio-gateway-config-"))
         try:
             config_store = LocalGatewayConfigStore(root=temp_dir)
-            config_store.put_config(
+            _put_config_if_absent(
+                config_store,
                 config.DEFAULT_USER_ID,
                 "credentials",
                 _filter_gateway_credentials(_credentials_payload_for_storage(credentials_obj)),
             )
-            config_store.put_config(
+            _put_config_if_absent(
+                config_store,
                 config.DEFAULT_USER_ID,
                 "roles",
                 _filter_gateway_roles(roles_obj.model_dump(mode="json")),
             )
             resolver = ModelResolver(config_store=config_store, user_id=config.DEFAULT_USER_ID)
-            return resolver.resolve_routes(role_name)
+            return resolver.resolve_routes(role_name, route_override=payload.get("route_override"))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -201,13 +195,19 @@ class GatewayAdapter:
         if self.transport == "http_loopback":
             if not self.http_transport:
                 raise ValueError("http_transport is required for http_loopback")
-            return self.http_transport.post("/gateway/materialize_role", payload)
+            from app.models.llm_config import RoleEntry
+
+            return RoleEntry.model_validate(
+                self.http_transport.post(
+                    "/gateway/materialize_role",
+                    _gateway_http_payload(payload, exclude_keys={"health_store"}),
+                )
+            )
 
         # in_process
         from app.models.llm_config import (
             LLMCredentialsFile,
             RoleEntry,
-            RoleRouteEntry,
         )
 
         role = payload["role"]
@@ -225,72 +225,19 @@ class GatewayAdapter:
             db_path = credentials_path().with_name("llm_health.sqlite")
             health_store = SqliteLlmHealthStore(db_path)
 
-        fallback_chain: list[RoleRouteEntry] = []
-        report: dict[str, Any] = {
-            "entries": [],
-            "warnings": [],
-            "skipped_provider_details": [],
-        }
-        groups = role.model_groups if role.model_fallback_enabled else role.model_groups[:1]
-        for group in groups:
-            provider_models = list(group.provider_models)
-            for provider_model in provider_models:
-                route = credentials.provider_routes.get(provider_model.route_id)
-                if route is None:
-                    continue
-                endpoint = credentials.provider_endpoints.get(route.endpoint_id)
-                if endpoint is None:
-                    continue
-
-                projection = self._private_projection(route.route_id, credentials, health_store)
-                if projection is None:
-                    continue
-                if projection.ui_state in {"failed", "off"}:
-                    report["skipped_provider_details"].append(
-                        {
-                            "route_id": route.route_id,
-                            "ui_state": projection.ui_state,
-                            "reason_code": projection.reason_code,
-                        }
-                    )
-                    continue
-                entry_report: dict[str, Any] = {
-                    "canonical_id": group.canonical_id,
-                    "route_id": route.route_id,
-                    "requested": {},
-                    "resolved_settings": {},
-                    "warnings": [],
-                    "role_fit": "using",
-                }
-                if projection.ui_state == "cooling_down":
-                    warning = {
-                        "code": "cooling_down",
-                        "route_id": route.route_id,
-                        "retry_at": projection.retry_at,
-                        "message": projection.ui_detail,
-                    }
-                    entry_report["warnings"].append(warning)
-                    report["warnings"].append(warning)
-
-                role_fit = self._private_apply_intent(entry_report, role, group, route)
-                entry_report["role_fit"] = role_fit
-                for warning in entry_report["warnings"]:
-                    if warning not in report["warnings"]:
-                        report["warnings"].append(warning)
-                report["entries"].append(entry_report)
-                if role_fit in {"needs_test", "not_fit"}:
-                    continue
-                fallback_chain.append(
-                    RoleRouteEntry(
-                        route_id=route.route_id,
-                        runtime_settings=entry_report["resolved_settings"],
-                    )
-                )
+        materialized = gateway_materialize_role(
+            GatewayMaterializeRoleRequest(
+                role=role,
+                credentials=credentials,
+                evidence_records=list(payload.get("evidence_records") or []),
+                health_store=health_store,
+            )
+        )
 
         return role.model_copy(
             update={
-                "fallback_chain": fallback_chain,
-                "materialization_report": report,
+                "fallback_chain": materialized.fallback_chain,
+                "materialization_report": materialized.materialization_report,
             }
         )
 
@@ -298,7 +245,14 @@ class GatewayAdapter:
         if self.transport == "http_loopback":
             if not self.http_transport:
                 raise ValueError("http_transport is required for http_loopback")
-            return self.http_transport.post("/gateway/materialize_model_bundle", payload)
+            from app.models.llm_config import ModelBundle
+
+            return ModelBundle.model_validate(
+                self.http_transport.post(
+                    "/gateway/materialize_model_bundle",
+                    _gateway_http_payload(payload, exclude_keys={"health_store"}),
+                )
+            )
 
         # in_process
         from app.models.llm_config import LLMCredentialsFile, ModelBundle, RoleEntry
@@ -327,6 +281,7 @@ class GatewayAdapter:
                 "role": role_like_bundle,
                 "credentials": credentials,
                 "health_store": payload.get("health_store"),
+                "evidence_records": payload.get("evidence_records"),
             }
         )
         return bundle.model_copy(
@@ -340,7 +295,9 @@ class GatewayAdapter:
         if self.transport == "http_loopback":
             if not self.http_transport:
                 raise ValueError("http_transport is required for http_loopback")
-            return cast(ProviderModelStateProjection, self.http_transport.post("/gateway/project_route_state", payload))
+            return _provider_projection_from_response(
+                self.http_transport.post("/gateway/project_route_state", _gateway_http_payload(payload))
+            )
 
         # in_process — DELEGATE the 6-state vocabulary to the canonical gateway
         # projector. Studio only derives the projector's INPUTS from the stored
@@ -353,22 +310,24 @@ class GatewayAdapter:
 
         credential_available = bool(endpoint.api_key is not None and endpoint.api_key.get_secret_value())
         active_circuit = self._select_active_circuit(endpoint, route, circuits, current_time)
-        # draft_history drives the gateway's historical_ready state. The probe
-        # worker does not yet emit a draft-history signal on Studio routes, so we
-        # surface whatever the route already carries (endpoint/route metadata) and
-        # default to absent. When a real signal lands, set route.metadata
-        # ["draft_history"] (or endpoint.metadata) and historical_ready becomes
-        # reachable through the gateway projector below — we do NOT fabricate it.
-        draft_history = self._route_draft_history(endpoint, route)
-
-        gateway_projection = gateway_project_route_state(
-            route_id=route.route_id,
-            endpoint_status=endpoint.status,
-            route_status=route.status,
-            credential_available=credential_available,
-            circuit_retry_at=active_circuit.retry_at if active_circuit is not None else None,
-            draft_history=draft_history,
-        )
+        projector_payload = {
+            "route_id": route.route_id,
+            "endpoint_status": endpoint.status,
+            "route_status": route.status,
+            "credential_available": credential_available,
+            "circuit_retry_at": active_circuit.retry_at if active_circuit is not None else None,
+        }
+        evidence_records = list(payload.get("evidence_records") or [])
+        if evidence_records:
+            gateway_projection = gateway_project_route_state_from_evidence(
+                **projector_payload,
+                evidence_records=evidence_records,
+            )
+        else:
+            gateway_projection = gateway_project_route_state(
+                **projector_payload,
+                draft_history=False,
+            )
 
         return self._map_gateway_projection(
             gateway_projection,
@@ -463,189 +422,42 @@ class GatewayAdapter:
         effective_bucket = endpoint.rate_limit_bucket or endpoint.endpoint_id
         return bool(circuit.scope_id == effective_bucket)
 
-    def _private_projection(
-        self,
-        route_id: str,
-        credentials: Any,
-        health_store: Any,
-    ) -> ProviderModelStateProjection | None:
-        route = credentials.provider_routes.get(route_id)
-        if route is None:
-            return None
-        endpoint = credentials.provider_endpoints.get(route.endpoint_id)
-        if endpoint is None:
-            return None
-        now = datetime.now(UTC)
-        circuits = health_store.get_active_circuits(
-            route_id=route.route_id,
-            endpoint_id=endpoint.endpoint_id,
-            rate_limit_bucket=endpoint.rate_limit_bucket or endpoint.endpoint_id,
-            now=now,
-        )
-        return self.project_route_state(
-            {
-                "endpoint": endpoint,
-                "route": route,
-                "circuits": circuits,
-                "now": now,
-            }
-        )
-
-    def _private_apply_intent(
-        self,
-        entry_report: dict[str, Any],
-        role: Any,
-        group: Any,
-        route: Any,
-    ) -> str:
-        role_fit = "using"
-        thinking = group.intent.thinking
-        if thinking == "inherit":
-            thinking = role.intent.thinking
-        if thinking == "preferred":
-            capability = _private_route_thinking_capability(route)
-            if capability is None or capability.value is not True:
-                warning = {
-                    "code": "thinking_not_enabled",
-                    "route_id": route.route_id,
-                    "message": "Thinking was preferred but is not enabled for this provider model.",
-                }
-                entry_report["warnings"].append(warning)
-                role_fit = "downgraded"
-            else:
-                self._private_enable_reasoning(entry_report)
-        elif thinking == "required":
-            capability = _private_route_thinking_capability(route)
-            if capability is None:
-                self._private_enable_reasoning(entry_report)
-                entry_report["warnings"].append(
-                    {
-                        "code": "thinking_capability_unknown",
-                        "route_id": route.route_id,
-                        "message": "Thinking is required but capability is unknown.",
-                    }
-                )
-                return "needs_test"
-            if capability.value is not True:
-                entry_report["warnings"].append(
-                    {
-                        "code": "thinking_unsupported",
-                        "route_id": route.route_id,
-                        "message": "Thinking is required but unsupported.",
-                    }
-                )
-                return "not_fit"
-            self._private_enable_reasoning(entry_report)
-
-        token_intent = None
-        group_intent = group.intent.target_output_tokens
-        if group_intent is not None and group_intent.mode != "inherit":
-            token_intent = group_intent
-        else:
-            token_intent = role.intent.target_output_tokens
-
-        if token_intent is not None:
-            token_fit = self._private_apply_output_token_intent(entry_report, token_intent, route)
-            if token_fit == "not_fit":
-                return "not_fit"
-            if token_fit == "downgraded":
-                role_fit = "downgraded"
-        return role_fit
-
-    def _private_enable_reasoning(self, entry_report: dict[str, Any]) -> None:
-        reasoning = entry_report["resolved_settings"].setdefault("reasoning", {})
-        reasoning["enabled"] = True
-
-    def _private_apply_output_token_intent(
-        self,
-        entry_report: dict[str, Any],
-        token_intent: Any,
-        route: Any,
-    ) -> str:
-        if token_intent.mode == "maximum_available":
-            max_tokens = self._private_max_output_tokens(route)
-            if max_tokens is not None:
-                entry_report["resolved_settings"]["max_output_tokens"] = max_tokens
-            return "using"
-        if token_intent.mode != "target" or token_intent.value is None:
-            return "using"
-        max_tokens = self._private_max_output_tokens(route)
-        if max_tokens is None or token_intent.value <= max_tokens:
-            entry_report["resolved_settings"]["max_output_tokens"] = token_intent.value
-            return "using"
-        if token_intent.downgrade == "block":
-            warning = {
-                "code": "token_cap_blocked",
-                "route_id": route.route_id,
-                "message": (f"Requested {token_intent.value} output tokens exceeds this route limit of {max_tokens}."),
-            }
-            entry_report["warnings"].append(warning)
-            return "not_fit"
-        entry_report["resolved_settings"]["max_output_tokens"] = max_tokens
-        if token_intent.downgrade == "allow_with_warning":
-            warning = {
-                "code": "token_downgraded",
-                "route_id": route.route_id,
-                "message": f"Requested {token_intent.value} output tokens, using {max_tokens}.",
-            }
-            entry_report["warnings"].append(warning)
-        return "downgraded"
-
-    def _private_max_output_tokens(self, route: Any) -> int | None:
-        capability = route.capabilities.get("max_output_tokens")
-        if capability is None or not isinstance(capability.value, dict):
-            return None
-        max_value = capability.value.get("max")
-        return int(max_value) if isinstance(max_value, int | float) else None
-
     def decide_fallback(self, payload: dict[str, Any]) -> Any:
         if self.transport == "http_loopback":
             if not self.http_transport:
                 raise ValueError("http_transport is required for http_loopback")
-            return self.http_transport.post("/gateway/decide_fallback", payload)
+            return self.http_transport.post("/gateway/decide_fallback", _gateway_http_payload(payload))
 
         # in_process
         fallback_chain = payload.get("fallback_chain") or []
         route_ids = [self._route_id(entry) for entry in fallback_chain]
         route_ids = [route_id for route_id in route_ids if route_id]
-        if not route_ids:
-            raise StudioAdapterError("gateway.empty_fallback_chain", {"detail": "fallback_chain is empty"})
 
-        failed_route_ids = set(payload.get("failed_route_ids") or [])
-        current_route_id = payload.get("current_route_id") or route_ids[0]
-        status_code = (payload.get("error") or {}).get("status_code")
-
-        if current_route_id not in failed_route_ids and status_code in {429, 500, 502, 503, 504, 529}:
-            return {
-                "decision": "retry_same",
-                "route_id": current_route_id,
-                "retry_same": True,
-                "give_up": False,
-            }
-
-        for route_id in route_ids:
-            if route_id not in failed_route_ids and route_id != current_route_id:
-                return {
-                    "decision": "switch_route",
-                    "route_id": route_id,
-                    "retry_same": False,
-                    "give_up": False,
-                }
-
-        raise StudioAdapterError(
-            "gateway.fallback_exhausted",
-            {
-                "decision": "give_up",
-                "route_ids": route_ids,
-                "failed_route_ids": sorted(failed_route_ids),
-            },
+        failed_route_ids = list(payload.get("failed_route_ids") or [])
+        current_route_id = payload.get("current_route_id") or (route_ids[0] if route_ids else "")
+        owner_decision = gateway_decide_fallback(
+            GatewayFallbackDecisionRequest(
+                route_ids=route_ids,
+                role=payload.get("role"),
+                current_route_id=current_route_id,
+                attempt=int(payload.get("attempt") or 1),
+                failed_route_ids=failed_route_ids,
+                error_context=payload.get("error") or {},
+            )
+        )
+        return _legacy_fallback_decision_response(
+            owner_decision,
+            route_ids=route_ids,
+            failed_route_ids=failed_route_ids,
         )
 
     def resolve_credential(self, payload: dict[str, Any]) -> Any:
         if self.transport == "http_loopback":
             if not self.http_transport:
                 raise ValueError("http_transport is required for http_loopback")
-            return self.http_transport.post("/gateway/resolve_credential", payload)
+            return _validate_credential_handle_response(
+                self.http_transport.post("/gateway/resolve_credential", _gateway_http_payload(payload))
+            )
 
         # in_process
         from app.models.llm_config import LLMCredentialsFile
@@ -653,26 +465,27 @@ class GatewayAdapter:
         credentials = payload["credentials"]
         if isinstance(credentials, dict):
             credentials = LLMCredentialsFile.model_validate(credentials)
-        credential_ref = payload["credential_ref"]
-        ttl_seconds = int(payload.get("ttl_seconds") or 300)
-        now = payload.get("now") or datetime.now(UTC)
-
-        provider = EndpointCredentialProvider(credentials.provider_endpoints)
-        descriptor = provider.describe(credential_ref)
-        if not descriptor.exists:
-            raise StudioAdapterError(
-                "gateway.credential_missing",
-                {"credential_ref": credential_ref, "status": descriptor.status},
+        try:
+            owner_response = gateway_resolve_credential(
+                GatewayCredentialResolveRequest(
+                    user_id=str(payload.get("user_id") or "studio-local"),
+                    role=str(payload.get("role") or payload.get("role_name") or ""),
+                    credential_ref=payload["credential_ref"],
+                    source=payload.get("source") or "local_input",
+                    ttl_seconds=int(payload.get("ttl_seconds", 300)),
+                    now=payload.get("now"),
+                ),
+                credential_provider=EndpointCredentialProvider(credentials.provider_endpoints),
             )
-        secret = provider.get(credential_ref)
-        secret_value = secret.get_secret_value() if hasattr(secret, "get_secret_value") else str(secret)
-        return {
-            "credential_ref": credential_ref,
-            "secret_handle": secret_value,
-            "expires_at": (now + timedelta(seconds=ttl_seconds)).isoformat(),
-            "fingerprint": descriptor.fingerprint,
-            "scope": descriptor.scope,
-        }
+        except GatewayCredentialResolveError as exc:
+            raise StudioAdapterError(exc.error_code, exc.error_payload) from exc
+        if hasattr(owner_response, "model_dump"):
+            owner_response = owner_response.model_dump()
+        expires_at = owner_response.get("expires_at") if isinstance(owner_response, dict) else None
+        if isinstance(expires_at, datetime):
+            owner_response = dict(owner_response)
+            owner_response["expires_at"] = expires_at.isoformat()
+        return _validate_credential_handle_response(owner_response)
 
     def _route_id(self, entry: Any) -> str | None:
         if isinstance(entry, dict):
@@ -680,6 +493,147 @@ class GatewayAdapter:
         else:
             route_id = getattr(entry, "route_id", None)
         return route_id if isinstance(route_id, str) else None
+
+
+def _gateway_http_payload(
+    payload: dict[str, Any],
+    *,
+    exclude_keys: set[str] | None = None,
+) -> dict[str, Any]:
+    excluded = exclude_keys or set()
+    return {key: _json_compatible(value) for key, value in payload.items() if key not in excluded}
+
+
+def _json_compatible(value: Any) -> Any:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return value.isoformat()
+    if hasattr(value, "model_dump"):
+        return _json_compatible(value.model_dump(mode="json"))
+    if is_dataclass(value) and not isinstance(value, type):
+        return _json_compatible(asdict(value))
+    if isinstance(value, dict):
+        return {str(key): _json_compatible(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_compatible(item) for item in value]
+    if hasattr(value, "get_secret_value"):
+        return "**********"
+    if hasattr(value, "__dict__") and value.__class__.__module__ == "types":
+        return _json_compatible(vars(value))
+    return value
+
+
+def _put_config_if_absent(
+    config_store: Any,
+    user_id: str,
+    key: str,
+    value: dict[str, Any],
+) -> str:
+    try:
+        return str(config_store.get_config(user_id, key).etag)
+    except KeyError:
+        pass
+    except StudioAdapterError as exc:
+        if exc.error_code != "config.not_found":
+            raise
+    return str(config_store.put_config(user_id, key, value, if_none_match="*"))
+
+
+def _provider_projection_from_response(response: Any) -> ProviderModelStateProjection:
+    if isinstance(response, ProviderModelStateProjection):
+        return response
+    if not isinstance(response, dict):
+        raise StudioAdapterError(
+            "gateway.invalid_projection_response",
+            {"detail": "project_route_state response must be a dict"},
+        )
+    return ProviderModelStateProjection(
+        ui_state=cast(ProviderUiState, response["ui_state"]),
+        reason_code=response.get("reason_code"),
+        retry_at=response.get("retry_at"),
+        ui_detail=response.get("ui_detail"),
+    )
+
+
+def _validate_credential_handle_response(response: Any) -> dict[str, Any]:
+    if not isinstance(response, dict):
+        raise StudioAdapterError("credential.invalid_handle", {"detail": "credential response must be a dict"})
+    forbidden = {"raw_secret", "api_key", "secret"}
+    leaked = sorted(forbidden.intersection(response))
+    secret_handle = response.get("secret_handle")
+    expires_at = response.get("expires_at")
+    if isinstance(expires_at, str):
+        try:
+            parsed_expires_at = datetime.fromisoformat(expires_at)
+        except ValueError:
+            parsed_expires_at = None
+    else:
+        parsed_expires_at = None
+    if parsed_expires_at is not None and parsed_expires_at.tzinfo is None:
+        parsed_expires_at = parsed_expires_at.replace(tzinfo=UTC)
+    if (
+        leaked
+        or not isinstance(secret_handle, str)
+        or not _OPAQUE_SECRET_HANDLE_RE.fullmatch(secret_handle)
+        or parsed_expires_at is None
+        or parsed_expires_at <= datetime.now(UTC)
+    ):
+        raise StudioAdapterError(
+            "credential.invalid_handle",
+            {
+                "detail": "credential response must contain an opaque secret handle and expires_at",
+                "forbidden_fields": leaked,
+            },
+        )
+    return _credential_handle_contract_fields(response)
+
+
+def _credential_handle_contract_fields(response: dict[str, Any]) -> dict[str, Any]:
+    contract_fields = ("credential_ref", "secret_handle", "expires_at", "fingerprint", "scope")
+    return {field: response[field] for field in contract_fields if field in response}
+
+
+def _legacy_fallback_decision_response(
+    decision: GatewayFallbackDecision,
+    *,
+    route_ids: list[str],
+    failed_route_ids: list[str],
+) -> dict[str, Any]:
+    if decision.action == "retry_same":
+        return {
+            "decision": "retry_same",
+            "route_id": decision.next_route_id,
+            "retry_same": True,
+            "give_up": False,
+        }
+    if decision.action == "switch_route":
+        return {
+            "decision": "switch_route",
+            "route_id": decision.next_route_id,
+            "retry_same": False,
+            "give_up": False,
+        }
+    if decision.action == "fail_fast":
+        owner_payload = decision.error_payload or {}
+        raise StudioAdapterError(
+            decision.error_code or "gateway.fail_fast",
+            {
+                "decision": "fail_fast",
+                **owner_payload,
+            },
+        )
+
+    owner_payload = decision.error_payload or {}
+    raise StudioAdapterError(
+        decision.error_code or "resource.no_available_route",
+        {
+            "decision": "give_up",
+            "role": owner_payload.get("role"),
+            "route_ids": owner_payload.get("route_ids", route_ids),
+            "failed_route_ids": owner_payload.get("failed_route_ids", sorted(set(failed_route_ids))),
+        },
+    )
 
 
 def _filter_gateway_credentials(credentials: dict[str, Any]) -> dict[str, Any]:
@@ -691,7 +645,17 @@ def _filter_gateway_credentials(credentials: dict[str, Any]) -> dict[str, Any]:
         "endpoint_id",
         "protocol",
         "base_url",
+        "credential_ref",
         "api_key",
+        "status",
+        "last_test_at",
+        "last_test_message",
+        "provider_kind",
+        "rate_limit_bucket",
+        "timeout_seconds",
+        "trust_env",
+        "proxy_env",
+        "metadata",
     }
     route_keys = {
         "route_id",
@@ -700,8 +664,10 @@ def _filter_gateway_credentials(credentials: dict[str, Any]) -> dict[str, Any]:
         "provider_model_id",
         "canonical_id",
         "status",
+        "snapshot_version",
         "capabilities",
         "verified_profiles",
+        "metadata",
     }
 
     if "provider_endpoints" in credentials:
@@ -781,8 +747,13 @@ __all__ = [
     "CredentialProviderProtocol",
     "EndpointCredentialProvider",
     "EvidenceRecord",
+    "EVIDENCE_LIBRARY_DRAFT_ID",
+    "ImportDraftStore",
     "ProviderImportDraft",
     "RouteCandidate",
+    "materialize_import_draft_candidates",
+    "merge_evidence_library",
+    "new_evidence_library",
     "CapabilitySource",
     "canonicalize_base_url",
     "canonicalize_model",

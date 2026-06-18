@@ -3,6 +3,7 @@ import { AxiosError } from 'axios'
 import { FileCode2 } from 'lucide-react'
 import type { ChildGraphTopology, ErrorResponse } from '@/api/types'
 import { getChildGraphTopology } from '@/api/client'
+import { invalidSubgraphPathMessage, normalizeAbsoluteSubgraphPath } from '@/components/studio/subgraph-path'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 
@@ -119,11 +120,16 @@ function errorMessageFor(error: unknown, path: string): string {
 
 export function SubgraphInline({ skillId, path, parentLabel }: SubgraphInlineProps) {
   const [state, setState] = useState<ViewState>({ status: 'loading' })
+  const resolvedPath = normalizeAbsoluteSubgraphPath(path)
 
   useEffect(() => {
+    if (!resolvedPath) {
+      setState({ status: 'error', message: invalidSubgraphPathMessage(path) })
+      return
+    }
     let cancelled = false
     setState({ status: 'loading' })
-    getChildGraphTopology(skillId, path)
+    getChildGraphTopology(skillId, resolvedPath)
       .then((topology) => {
         if (cancelled) return
         const rows = childPhaseRows(topology)
@@ -135,12 +141,12 @@ export function SubgraphInline({ skillId, path, parentLabel }: SubgraphInlinePro
       })
       .catch((error: unknown) => {
         if (cancelled) return
-        setState({ status: 'error', message: errorMessageFor(error, path) })
+        setState({ status: 'error', message: errorMessageFor(error, resolvedPath) })
       })
     return () => {
       cancelled = true
     }
-  }, [skillId, path])
+  }, [path, resolvedPath, skillId])
 
-  return <SubgraphInlineView path={path} parentLabel={parentLabel} state={state} />
+  return <SubgraphInlineView path={resolvedPath ?? path.trim()} parentLabel={parentLabel} state={state} />
 }

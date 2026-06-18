@@ -178,6 +178,36 @@ describe('phase frontmatter helpers', () => {
     expect(next.markdown).toContain('x_internal: keep-me')
   })
 
+  it('migrates legacy subgraph target_skill to path on save and never writes target_skill back', () => {
+    const source = [
+      '---',
+      'name: child',
+      'target_skill: legacy.registry.child',
+      'io:',
+      '  inputs: {type: object}',
+      '---',
+      'Body',
+    ].join('\n')
+
+    const parsed = parsePhaseFrontmatter(source)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+
+    const form = phaseFrontmatterToForm(parsed.frontmatter)
+    expect(form.path).toBe('')
+
+    const next = applyPhaseFrontmatterForm(source, {
+      ...form,
+      path: '/abs/skills/child',
+    }, 'subgraph')
+
+    expect(next.ok).toBe(true)
+    if (!next.ok) return
+
+    expect(next.markdown).toContain('path: /abs/skills/child')
+    expect(next.markdown).not.toContain('target_skill:')
+  })
+
   it('drops validator when toggled off without touching other keys', () => {
     const source = [
       '---',

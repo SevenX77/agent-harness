@@ -1,4 +1,4 @@
-import type { CallbackEvent } from '@/api/types'
+import type { CallbackEvent, EventEnvelope } from '@/api/types'
 import type { EdgeContextJson } from '@/components/studio/WorkspaceContext'
 
 // The graph canvas models the two ends of a run with synthetic global node ids.
@@ -13,8 +13,22 @@ const OUTPUT_ID = '__global_output__'
 // INPUT_ID boundary to the same logical source before matching.
 const GRAPH_ENTRY_ALIASES = new Set([INPUT_ID, 'input'])
 
+type TraceEventInput = CallbackEvent | EventEnvelope
+
+function callbackPayload(event: TraceEventInput): CallbackEvent {
+  const maybeEnvelope = event as EventEnvelope
+  if (maybeEnvelope.schema_version === 'studio.event.v1' && maybeEnvelope.payload) {
+    return maybeEnvelope.payload as CallbackEvent
+  }
+  return event as CallbackEvent
+}
+
 function isInputDispatch(event: CallbackEvent): boolean {
   return event.event_type === 'input_dispatch'
+}
+
+function isEdgeTransition(event: CallbackEvent): boolean {
+  return event.event_type === 'edge_transition'
 }
 
 function phaseMatches(eventPhase: unknown, edgePhase: string): boolean {
@@ -40,7 +54,7 @@ function phaseMatches(eventPhase: unknown, edgePhase: string): boolean {
  * state instead of falling back to mock data).
  */
 export function edgeContextFromEvents(
-  events: CallbackEvent[],
+  events: TraceEventInput[],
   fromPhase: string,
   toPhase: string,
 ): EdgeContextJson | null {
@@ -51,8 +65,9 @@ export function edgeContextFromEvents(
   }
 
   let match: CallbackEvent | null = null
-  for (const event of events) {
-    if (!isInputDispatch(event)) {
+  for (const traceEvent of events) {
+    const event = callbackPayload(traceEvent)
+    if (!isInputDispatch(event) && !isEdgeTransition(event)) {
       continue
     }
     if (phaseMatches(event.from_phase, fromPhase) && phaseMatches(event.to_phase, toPhase)) {
@@ -64,8 +79,14 @@ export function edgeContextFromEvents(
     return null
   }
 
-  const snapshot = (match.blackboard_snapshot ?? {}) as Record<string, unknown>
-  const changedKeys = Array.isArray(match.changed_keys) ? match.changed_keys : []
+  const after = (match.after ?? null) as Record<string, unknown> | null
+  const diff = (match.diff ?? null) as Record<string, unknown> | null
+  const snapshot = (after ?? match.blackboard_snapshot ?? {}) as Record<string, unknown>
+  const changedKeys = Array.isArray(match.changed_keys)
+    ? match.changed_keys
+    : Array.isArray(diff?.changed_keys)
+      ? diff.changed_keys
+      : []
 
   // `blackboard_snapshot` is the flat dict dispatched INTO `toPhase`, so it maps
   // to the panel's Inputs subsection. A dispatch event carries no downstream
@@ -79,5 +100,12 @@ export function edgeContextFromEvents(
     changed_keys: changedKeys,
     branch_index: match.branch_index ?? null,
     blackboard_snapshot: snapshot,
+    edge_transition_id: match.edge_transition_id,
+    run_id: match.run_id,
+    execution_id: match.execution_id,
+    attempt: match.attempt,
+    before: match.before,
+    after: match.after,
+    diff: match.diff,
   }
 }

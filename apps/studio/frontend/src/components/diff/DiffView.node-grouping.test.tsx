@@ -4,24 +4,23 @@ import type { CompareResult } from '@/api/types'
 import { DiffView } from './DiffView'
 
 const result: CompareResult = {
+  baseline_id: 'golden-1',
+  source_run_id: 'run-golden',
+  source_run_results_ref: 'demo/runs/run-golden/result.json',
+  baseline_ref: 'demo/golden/golden-1/baseline.json',
+  run_results_ref: 'demo/runs/run-1/result.json',
   total_score: 75,
-  golden_run_id: 'golden-1',
-  differences: [
-    {
-      field_path: 'nodes.draft.answer',
-      type: 'text',
-      current_value: 'hello studio',
-      golden_value: 'hello world',
-      score: 0.5,
-      changed: true,
-    },
-  ],
-  node_results: [
+  node_groups: [
     {
       node_id: 'draft',
-      verdict: 'fail',
+      phase_id: 'draft',
+      status: 'fail',
       score: 0.5,
-      differences: [
+      stale_fields: [],
+      schema_status: 'valid',
+      baseline_ref: 'demo/golden/golden-1/baseline.json',
+      run_results_ref: 'demo/runs/run-1/result.json',
+      field_differences: [
         {
           field_path: 'nodes.draft.answer',
           type: 'text',
@@ -32,7 +31,17 @@ const result: CompareResult = {
         },
       ],
     },
-    { node_id: 'review', verdict: 'pass', score: 1, differences: [] },
+    {
+      node_id: 'review',
+      phase_id: 'review',
+      status: 'pass',
+      score: 1,
+      field_differences: [],
+      stale_fields: [],
+      schema_status: 'valid',
+      baseline_ref: 'demo/golden/golden-1/baseline.json',
+      run_results_ref: 'demo/runs/run-1/result.json',
+    },
   ],
 }
 
@@ -62,5 +71,12 @@ describe('DiffView — per-node golden grouping (D7 / golden-per-agent-node)', (
     // Per-node verdicts surfaced (pass node shown even with no differences).
     expect(html.toLowerCase()).toContain('pass')
     expect(html.toLowerCase()).toContain('fail')
+  })
+
+  it('surfaces the compared baseline and source run in the main header', () => {
+    const html = render()
+
+    expect(html).toContain('Baseline golden-1')
+    expect(html).toContain('Source run run-golden')
   })
 })

@@ -83,3 +83,5 @@ def test_resolver_missing_route_from_config_store_is_resource_terminal() -> None
 
     assert _error_code(exc_info.value) == "resource.no_available_route"
     assert _error_payload(exc_info.value)["role"] == "graph_agent"
+    assert _error_payload(exc_info.value)["skipped"][0]["route_id"] == "missing:gpt-5"
+    assert _error_payload(exc_info.value)["skipped"][0]["reason_code"] == "route_missing"

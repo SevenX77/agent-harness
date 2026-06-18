@@ -22,7 +22,11 @@ import pytest
 # source root that holds ``graph_agent/``.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from graph_agent.io.storage import StorageManager, sanitize_run_id  # noqa: E402
+from graph_agent.io.storage import (  # noqa: E402
+    LegacyRunArtifactReadForbiddenError,
+    StorageManager,
+    sanitize_run_id,
+)
 
 
 @pytest.fixture()
@@ -67,7 +71,7 @@ class TestStorageManagerBasics:
         assert path == workspace / "runs" / "s" / "r1" / "phases" / "extraction" / "out.txt"
         assert path.read_text(encoding="utf-8") == "hi"
 
-    def test_load_latest_returns_newest_run(self, workspace: Path) -> None:
+    def test_load_latest_rejects_bare_run_artifacts_by_default(self, workspace: Path) -> None:
         # Seed two runs; the lexicographically greater name should win.
         mgr_old = StorageManager(workspace, skill_id="s", run_id="20260101")
         mgr_old.get_output_dir()
@@ -79,9 +83,28 @@ class TestStorageManagerBasics:
 
         mgr_query = StorageManager(workspace, skill_id="s", run_id="_probe")
         mgr_query.get_output_dir()
-        # Sharing the cached run, load_latest still picks the newest artifact
-        # across all sibling runs.
-        assert mgr_query.load_latest(phase=None, name="report.md") == "new"
+        # Bare run files are legacy/export/cache files; default runtime reads
+        # must go through RunArtifactStore refs instead.
+        with pytest.raises(LegacyRunArtifactReadForbiddenError) as exc_info:
+            mgr_query.load_latest(phase=None, name="report.md")
+
+        assert exc_info.value.error_code == "artifact.legacy_storage_forbidden"
+        assert exc_info.value.details["path"].endswith("20260401/report.md")
+
+    def test_load_latest_legacy_returns_newest_run_for_migration(self, workspace: Path) -> None:
+        # Seed two runs; the lexicographically greater name should win.
+        mgr_old = StorageManager(workspace, skill_id="s", run_id="20260101")
+        mgr_old.get_output_dir()
+        mgr_old.save_artifact("report.md", "old")
+
+        mgr_new = StorageManager(workspace, skill_id="s", run_id="20260401")
+        mgr_new.get_output_dir()
+        mgr_new.save_artifact("report.md", "new")
+
+        mgr_query = StorageManager(workspace, skill_id="s", run_id="_probe")
+        mgr_query.get_output_dir()
+
+        assert mgr_query.load_latest_legacy(phase=None, name="report.md") == "new"
 
 
 class TestRetention:

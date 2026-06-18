@@ -93,7 +93,45 @@ describe('API Keys v4 registry adapter', () => {
       if (config.url === '/llm/registry/endpoints/openrouter-custom/secret') {
         return { endpoint_id: 'openrouter-custom', api_key: 'sk-openrouter-real' }
       }
-      return registry()
+      return registry({
+        model_groups: [
+          {
+            canonical_id: 'gpt-5',
+            display_name: 'GPT-5',
+            provider_models: [
+              {
+                route_id: route.route_id,
+                endpoint_id: endpoint.endpoint_id,
+                provider_label: 'OpenRouter Custom',
+                provider_kind: 'third_party',
+                provider_model_id: 'openai/gpt-5',
+                ui_state: 'ready',
+                ui_detail: null,
+                retry_at: null,
+                reason_code: null,
+                capability_state: 'known',
+                capabilities: route.capabilities,
+              },
+            ],
+            status_summary: {
+              ready: 1,
+              untested: 0,
+              cooling_down: 0,
+              historical_ready: 0,
+              failed: 0,
+              off: 0,
+            },
+            capability_summary: {
+              capability_known_count: 1,
+              thinking: 'unknown',
+              tools: 'unknown',
+              structured_output: 'unknown',
+              max_context_tokens: null,
+              max_output_tokens: null,
+            },
+          },
+        ],
+      })
     })
 
     const credentials = await getCredentials()
@@ -138,7 +176,45 @@ describe('API Keys v4 registry adapter', () => {
       if (config.url === '/llm/registry/endpoints/openrouter-custom/secret') {
         throw new Error('secret hydration should not run')
       }
-      return registry()
+      return registry({
+        model_groups: [
+          {
+            canonical_id: 'gpt-5',
+            display_name: 'GPT-5',
+            provider_models: [
+              {
+                route_id: route.route_id,
+                endpoint_id: endpoint.endpoint_id,
+                provider_label: 'OpenRouter Custom',
+                provider_kind: 'third_party',
+                provider_model_id: 'openai/gpt-5',
+                ui_state: 'ready',
+                ui_detail: null,
+                retry_at: null,
+                reason_code: null,
+                capability_state: 'known',
+                capabilities: route.capabilities,
+              },
+            ],
+            status_summary: {
+              ready: 1,
+              untested: 0,
+              cooling_down: 0,
+              historical_ready: 0,
+              failed: 0,
+              off: 0,
+            },
+            capability_summary: {
+              capability_known_count: 1,
+              thinking: 'unknown',
+              tools: 'unknown',
+              structured_output: 'unknown',
+              max_context_tokens: null,
+              max_output_tokens: null,
+            },
+          },
+        ],
+      })
     })
 
     const credentials = await getCredentials({ hydrateSecrets: false })
@@ -188,9 +264,17 @@ describe('API Keys v4 registry adapter', () => {
     expect(JSON.parse(String(seen[2].data))).toEqual({
       provider_endpoints: {
         'openrouter-custom': {
-          ...endpoint,
+          endpoint_id: endpoint.endpoint_id,
           display_name: 'OpenRouter Renamed',
+          protocol: endpoint.protocol,
+          base_url: endpoint.base_url,
           api_key: 'sk-openrouter-real',
+          provider_kind: endpoint.provider_kind,
+          rate_limit_bucket: endpoint.rate_limit_bucket,
+          timeout_seconds: endpoint.timeout_seconds,
+          trust_env: endpoint.trust_env,
+          proxy_env: endpoint.proxy_env,
+          metadata: endpoint.metadata,
         },
       },
     })
@@ -240,7 +324,45 @@ describe('API Keys v4 registry adapter', () => {
         last_test_at: '2026-05-25T12:10:00Z',
         last_test_message: 'Connected in 42ms. Model seen: openai/gpt-5.',
       }
-      return registry()
+      return registry({
+        model_groups: [
+          {
+            canonical_id: 'gpt-5',
+            display_name: 'GPT-5',
+            provider_models: [
+              {
+                route_id: route.route_id,
+                endpoint_id: endpoint.endpoint_id,
+                provider_label: 'OpenRouter Custom',
+                provider_kind: 'third_party',
+                provider_model_id: 'openai/gpt-5',
+                ui_state: 'ready',
+                ui_detail: null,
+                retry_at: null,
+                reason_code: null,
+                capability_state: 'known',
+                capabilities: route.capabilities,
+              },
+            ],
+            status_summary: {
+              ready: 1,
+              untested: 0,
+              cooling_down: 0,
+              historical_ready: 0,
+              failed: 0,
+              off: 0,
+            },
+            capability_summary: {
+              capability_known_count: 1,
+              thinking: 'unknown',
+              tools: 'unknown',
+              structured_output: 'unknown',
+              max_context_tokens: null,
+              max_output_tokens: null,
+            },
+          },
+        ],
+      })
     })
 
     const result = await testProvider({
@@ -618,7 +740,9 @@ describe('API Keys v4 registry adapter', () => {
       },
     ])
 
-    expect(putPayloads[1].provider_endpoints['openai-official'].status).toBe('verified')
+    expect(putPayloads[1].provider_endpoints['openai-official']).not.toHaveProperty('status')
+    expect(putPayloads[1].provider_endpoints['openai-official']).not.toHaveProperty('last_test_at')
+    expect(putPayloads[1].provider_endpoints['openai-official']).not.toHaveProperty('last_test_message')
   })
 
   it('restores official catalog-only route candidates from endpoint capability library', async () => {
@@ -735,14 +859,43 @@ describe('API Keys v4 registry adapter', () => {
     ])
 
     const autosavePayload = JSON.parse(String(seen[2].data))
-    expect(autosavePayload.provider_endpoints['openrouter-custom']).toMatchObject({
-      api_key: 'sk-live',
-      status: 'verified',
-      last_test_message: 'Connected in 42ms. Model seen: openai/gpt-5.',
-    })
+    const endpointPayload = autosavePayload.provider_endpoints['openrouter-custom']
+    expect(endpointPayload.api_key).toBe('sk-live')
+    expect(endpointPayload).not.toHaveProperty('status')
+    expect(endpointPayload).not.toHaveProperty('last_test_at')
+    expect(endpointPayload).not.toHaveProperty('last_test_message')
   })
 
-  it('restores a cached test result into the backend payload when edited params match again', async () => {
+  it('preserves existing credential refs in ordinary endpoint save payloads', async () => {
+    const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
+    api.defaults.adapter = adapter((config) => {
+      seen.push({ method: config.method, url: config.url, data: config.data })
+      return registry({
+        provider_endpoints: {
+          'openrouter-custom': {
+            ...endpoint,
+            credential_ref: 'credential:openrouter-prod',
+          },
+        },
+      })
+    })
+
+    await getCredentials({ hydrateSecrets: false })
+    await putCredentials([
+      {
+        id: 'openrouter-custom',
+        name: 'OpenRouter Custom',
+        api_key: 'sk-live',
+        base_url: 'https://openrouter.ai/api/v1',
+        provider_type: 'openai_compatible',
+      },
+    ])
+
+    const savePayload = JSON.parse(String(seen[1].data))
+    expect(savePayload.provider_endpoints['openrouter-custom'].credential_ref).toBe('credential:openrouter-prod')
+  })
+
+  it('does not restore cached test result facts into ordinary save payloads', async () => {
     const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
     api.defaults.adapter = adapter((config) => {
       seen.push({ method: config.method, url: config.url, data: config.data })
@@ -805,17 +958,13 @@ describe('API Keys v4 registry adapter', () => {
 
     const editedPayload = JSON.parse(String(seen[2].data)).provider_endpoints['openrouter-custom']
     const restoredPayload = JSON.parse(String(seen[3].data)).provider_endpoints['openrouter-custom']
-    expect(editedPayload).toMatchObject({
-      api_key: 'sk-liv',
-      status: 'unverified_manual',
-      last_test_message: null,
-    })
-    expect(restoredPayload).toMatchObject({
-      api_key: 'sk-live',
-      status: 'verified',
-      last_test_at: '2026-05-25T12:10:00Z',
-      last_test_message: 'Connected in 42ms. Model seen: openai/gpt-5.',
-    })
+    expect(editedPayload.api_key).toBe('sk-liv')
+    expect(restoredPayload.api_key).toBe('sk-live')
+    for (const payload of [editedPayload, restoredPayload]) {
+      expect(payload).not.toHaveProperty('status')
+      expect(payload).not.toHaveProperty('last_test_at')
+      expect(payload).not.toHaveProperty('last_test_message')
+    }
   })
 
   it('does not expose stale routes as available models after autosave invalidates test params', async () => {
@@ -992,7 +1141,7 @@ describe('API Keys v4 registry adapter', () => {
     ])
   })
 
-  it('projects legacy missing key and invalid model routes to top-level Needs Setup', () => {
+  it('does not derive provider model states from raw endpoint and route facts', () => {
     const missingKeyEndpoint: ProviderEndpoint = {
       ...endpoint,
       api_key: null,
@@ -1022,8 +1171,7 @@ describe('API Keys v4 registry adapter', () => {
       model_groups: [],
     }))
 
-    const states = groups.flatMap((group) => group.provider_models.map((option) => option.ui_state))
-    expect(states).toEqual(['failed', 'failed'])
+    expect(groups).toEqual([])
   })
 
   it('keeps backend Cooling Down projection and retry timestamp', () => {
@@ -1074,31 +1222,54 @@ describe('API Keys v4 registry adapter', () => {
     })
   })
 
-  it('maps a legacy registry without model group projection through compatibility fallback', () => {
+  it('uses non-empty backend model_groups without merging legacy provider_routes', () => {
+    const groups = modelGroupsFromRegistry(registry({
+      provider_routes: {
+        [route.route_id]: route,
+        'legacy-extra:gpt-5-mini': {
+          ...route,
+          route_id: 'legacy-extra:gpt-5-mini',
+          endpoint_id: endpoint.endpoint_id,
+          route_slug: 'gpt-5-mini',
+          provider_model_id: 'gpt-5-mini',
+          canonical_id: 'gpt-5-mini',
+          display_name: 'GPT-5 Mini',
+        },
+      },
+      model_groups: [
+        {
+          canonical_id: 'backend-only',
+          display_name: 'Backend Only',
+          provider_models: [],
+          status_summary: {
+            ready: 0,
+            untested: 0,
+            cooling_down: 0,
+            historical_ready: 0,
+            failed: 0,
+            off: 0,
+          },
+          capability_summary: {
+            capability_known_count: 0,
+            thinking: 'unknown',
+            tools: 'unknown',
+            structured_output: 'unknown',
+            max_context_tokens: null,
+            max_output_tokens: null,
+          },
+        },
+      ],
+    }))
+
+    expect(groups.map((group) => group.canonical_id)).toEqual(['backend-only'])
+  })
+
+  it('returns no model groups when backend projection is absent', () => {
     const legacyRegistry = registry()
     delete (legacyRegistry as Partial<RegistryResponse>).model_groups
     const groups = modelGroupsFromRegistry(legacyRegistry)
 
-    expect(groups).toHaveLength(1)
-    expect(groups[0]).toMatchObject({
-      canonical_id: 'gpt-5',
-      display_name: 'GPT-5',
-      status_summary: {
-        ready: 1,
-        untested: 0,
-        cooling_down: 0,
-        historical_ready: 0,
-        failed: 0,
-        off: 0,
-      },
-    })
-    expect(groups[0].provider_models[0]).toMatchObject({
-      route_id: 'openrouter-custom:gpt-5',
-      provider_label: 'OpenRouter Custom',
-      provider_kind: 'third_party',
-      ui_state: 'ready',
-      capability_state: 'known',
-    })
+    expect(groups).toEqual([])
   })
 
   it('loads v3 backend roles into the LLM Roles authoring shape', async () => {
@@ -1167,7 +1338,45 @@ describe('API Keys v4 registry adapter', () => {
           },
         }
       }
-      return registry()
+      return registry({
+        model_groups: [
+          {
+            canonical_id: 'gpt-5',
+            display_name: 'GPT-5',
+            provider_models: [
+              {
+                route_id: route.route_id,
+                endpoint_id: endpoint.endpoint_id,
+                provider_label: 'OpenRouter Custom',
+                provider_kind: 'third_party',
+                provider_model_id: 'openai/gpt-5',
+                ui_state: 'ready',
+                ui_detail: null,
+                retry_at: null,
+                reason_code: null,
+                capability_state: 'known',
+                capabilities: route.capabilities,
+              },
+            ],
+            status_summary: {
+              ready: 1,
+              untested: 0,
+              cooling_down: 0,
+              historical_ready: 0,
+              failed: 0,
+              off: 0,
+            },
+            capability_summary: {
+              capability_known_count: 1,
+              thinking: 'unknown',
+              tools: 'unknown',
+              structured_output: 'unknown',
+              max_context_tokens: null,
+              max_output_tokens: null,
+            },
+          },
+        ],
+      })
     })
 
     const roles = await getRoles()
@@ -1226,7 +1435,45 @@ describe('API Keys v4 registry adapter', () => {
           },
         }
       }
-      return registry()
+      return registry({
+        model_groups: [
+          {
+            canonical_id: 'gpt-5',
+            display_name: 'GPT-5',
+            provider_models: [
+              {
+                route_id: route.route_id,
+                endpoint_id: endpoint.endpoint_id,
+                provider_label: 'OpenRouter Custom',
+                provider_kind: 'third_party',
+                provider_model_id: 'openai/gpt-5',
+                ui_state: 'ready',
+                ui_detail: null,
+                retry_at: null,
+                reason_code: null,
+                capability_state: 'known',
+                capabilities: route.capabilities,
+              },
+            ],
+            status_summary: {
+              ready: 1,
+              untested: 0,
+              cooling_down: 0,
+              historical_ready: 0,
+              failed: 0,
+              off: 0,
+            },
+            capability_summary: {
+              capability_known_count: 1,
+              thinking: 'unknown',
+              tools: 'unknown',
+              structured_output: 'unknown',
+              max_context_tokens: null,
+              max_output_tokens: null,
+            },
+          },
+        ],
+      })
     })
 
     const roles = await getRoles()

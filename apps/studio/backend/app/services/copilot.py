@@ -11,6 +11,7 @@ NOTE (T0.1 base_url verify, 2026-05-09):
 from __future__ import annotations
 
 import asyncio
+import difflib
 import hashlib
 import inspect
 import json
@@ -49,6 +50,7 @@ from app.core.adapters.gateway import (
     GatewayAdapter,
     ResolvedRoute,
 )
+from app.core.adapters.transport_factory import build_gateway_adapter
 from app.models.copilot import (
     CopilotEvent,
     CopilotEventBashApprovalRequired,
@@ -64,6 +66,7 @@ from app.models.copilot import (
 )
 
 SessionKey = tuple[str, str, str]
+SessionCacheKey = tuple[str, str, str, str]
 logger = logging.getLogger(__name__)
 
 MAX_REFERENCE_BYTES = 5 * 1024
@@ -119,7 +122,7 @@ class ViewContext:
     timestamp_ms: int
 
 
-_sessions: dict[SessionKey, ClaudeSDKClient] = {}
+_sessions: dict[SessionCacheKey, ClaudeSDKClient] = {}
 _session_lock = asyncio.Lock()
 _session_factory: Callable[[ClaudeAgentOptions], ClaudeSDKClient] = ClaudeSDKClient
 _view_contexts: dict[str, ViewContext] = {}
@@ -131,8 +134,21 @@ _SESSION_KEY_SALT = secrets.token_bytes(16)
 _SESSION_KEY_ITERATIONS = 100_000
 
 
+class CopilotRouteResolutionError(ValueError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: str,
+        error_payload: dict[str, Any],
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.error_payload = error_payload
+
+
 def _default_gateway_adapter_factory() -> GatewayAdapter:
-    return GatewayAdapter(transport="in_process")
+    return build_gateway_adapter()
 
 
 _gateway_adapter_factory: Callable[[], GatewayAdapter] = _default_gateway_adapter_factory
@@ -156,9 +172,42 @@ class _SafeWriteSink:
     workspace_root: Path
 
 
+@dataclass(frozen=True)
+class _PendingBashApproval:
+    command: str
+    workspace_root: Path
+
+
+@dataclass(frozen=True)
+class BashApprovalResult:
+    tool_use_id: str
+    approved: bool
+    executed: bool
+    success: bool
+    stdout: str = ""
+    stderr: str = ""
+    returncode: int | None = None
+    message: str | None = None
+
+
 _safe_write_sinks: dict[str, _SafeWriteSink] = {}
+_pending_bash_approvals: dict[tuple[str, str], _PendingBashApproval] = {}
 
 _STREAM_SENTINEL = object()
+
+
+def _cleanup_pending_bash_approvals(skill_id: str | None = None) -> int:
+    """Drop held Bash approvals that no longer belong to a live session."""
+
+    if skill_id is None:
+        count = len(_pending_bash_approvals)
+        _pending_bash_approvals.clear()
+        return count
+
+    keys = [key for key in _pending_bash_approvals if key[0] == skill_id]
+    for key in keys:
+        _pending_bash_approvals.pop(key, None)
+    return len(keys)
 
 
 async def _drain_sdk_response(
@@ -181,25 +230,29 @@ async def _drain_sdk_response(
         await queue.put(_STREAM_SENTINEL)
 
 _BASH_HELD_MESSAGE = "Bash 命令需用户审批（审批 UI 待接入，命令已暂缓执行）"
+_SAFE_WRITE_OUTSIDE_WORKSPACE_MESSAGE = "Write/Edit 目标必须位于 workspace 内"
 
 
-def _relative_to_workspace(abs_path: Path, workspace_root: Path) -> str:
-    """Project an absolute tool path back to a workspace-relative path for the UI.
+def _resolve_safe_write_target(
+    raw_path: object, workspace_root: Path
+) -> tuple[Path, str] | None:
+    """Resolve a tool path and verify its real target stays inside workspace."""
 
-    Falls back to the bare filename if the edit targets a path outside the
-    workspace (the editor maps by relative path, and an out-of-tree edit cannot
-    be reflected there anyway — surfaced rather than silently dropped).
-    """
-
+    workspace_resolved = workspace_root.resolve(strict=False)
+    candidate = Path(str(raw_path))
+    target = candidate if candidate.is_absolute() else workspace_root / candidate
     try:
-        return str(abs_path.relative_to(workspace_root))
-    except ValueError:
+        target_resolved = target.resolve(strict=False)
+        relative_path = target_resolved.relative_to(workspace_resolved)
+    except (OSError, RuntimeError, ValueError) as exc:
         logger.warning(
-            "phase=copilot_safe_write edit target outside workspace: %s (root=%s)",
-            abs_path,
-            workspace_root,
+            "phase=copilot_safe_write target rejected outside workspace: %s (root=%s): %s",
+            target,
+            workspace_resolved,
+            exc,
         )
-        return abs_path.name
+        return None
+    return target_resolved, str(relative_path)
 
 
 def _compute_after_content(
@@ -220,7 +273,30 @@ def _compute_after_content(
     return before.replace(old, new, 1)
 
 
+def _sha256_text(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _patch_checkpoint_id(skill_id: str, tool_use_id: str, path: str) -> str:
+    payload = f"{skill_id}\0{tool_use_id}\0{path}"
+    return f"patch:{hashlib.sha256(payload.encode('utf-8')).hexdigest()}"
+
+
+def _unified_patch_diff(path: str, before: str, after: str, before_existed: bool) -> str:
+    fromfile = path if before_existed else "/dev/null"
+    return "\n".join(
+        difflib.unified_diff(
+            before.splitlines(),
+            after.splitlines(),
+            fromfile=fromfile,
+            tofile=path,
+            lineterm="",
+        )
+    )
+
+
 def _build_patch_proposed_event(
+    skill_id: str,
     tool_name: str,
     tool_input: Mapping[str, Any],
     tool_use_id: str,
@@ -231,7 +307,10 @@ def _build_patch_proposed_event(
     raw_path = tool_input.get("file_path") or tool_input.get("path")
     if not raw_path:
         return None
-    abs_path = Path(str(raw_path))
+    safe_target = _resolve_safe_write_target(raw_path, workspace_root)
+    if safe_target is None:
+        return None
+    abs_path, path = safe_target
     existed = abs_path.is_file()
     try:
         before = abs_path.read_text(encoding="utf-8") if existed else ""
@@ -239,13 +318,18 @@ def _build_patch_proposed_event(
         logger.warning("phase=copilot_safe_write cannot read pre-edit bytes %s: %s", abs_path, exc)
         before = ""
         existed = False
+    after = _compute_after_content(tool_name, tool_input, before)
     return CopilotEventPatchProposed(
         tool_use_id=tool_use_id,
         tool_name=cast(Literal["Write", "Edit"], tool_name),
-        path=_relative_to_workspace(abs_path, workspace_root),
+        path=path,
         before_existed=existed,
         before_content=before,
-        after_content=_compute_after_content(tool_name, tool_input, before),
+        after_content=after,
+        before_hash=_sha256_text(before) if existed else None,
+        after_hash=_sha256_text(after),
+        diff=_unified_patch_diff(path, before, after, existed),
+        checkpoint_id=_patch_checkpoint_id(skill_id, tool_use_id, path),
     )
 
 
@@ -263,8 +347,14 @@ def _make_safe_write_can_use_tool(
         tool_use_id = context.tool_use_id or ""
         if tool_name in ("Write", "Edit"):
             if sink is not None:
+                raw_path = tool_input.get("file_path") or tool_input.get("path")
+                if raw_path and _resolve_safe_write_target(raw_path, sink.workspace_root) is None:
+                    return PermissionResultDeny(
+                        message=_SAFE_WRITE_OUTSIDE_WORKSPACE_MESSAGE,
+                        interrupt=False,
+                    )
                 event = _build_patch_proposed_event(
-                    tool_name, tool_input, tool_use_id, sink.workspace_root
+                    skill_id, tool_name, tool_input, tool_use_id, sink.workspace_root
                 )
                 if event is not None:
                     logger.info(
@@ -278,6 +368,11 @@ def _make_safe_write_can_use_tool(
             command = str(tool_input.get("command", ""))
             logger.info("phase=copilot_safe_write action=bash_held command=%s", command)
             if sink is not None:
+                if tool_use_id:
+                    _pending_bash_approvals[(skill_id, tool_use_id)] = _PendingBashApproval(
+                        command=command,
+                        workspace_root=sink.workspace_root,
+                    )
                 await sink.queue.put(
                     CopilotEventBashApprovalRequired(tool_use_id=tool_use_id, command=command)
                 )
@@ -285,6 +380,69 @@ def _make_safe_write_can_use_tool(
         return PermissionResultAllow()
 
     return can_use_tool
+
+
+async def resolve_bash_approval(
+    skill_id: str,
+    tool_use_id: str,
+    *,
+    approve: bool,
+    timeout_s: float = 30.0,
+) -> BashApprovalResult:
+    """Resolve a held Copilot Bash command exactly once."""
+
+    pending = _pending_bash_approvals.pop((skill_id, tool_use_id), None)
+    if pending is None:
+        return BashApprovalResult(
+            tool_use_id=tool_use_id,
+            approved=approve,
+            executed=False,
+            success=False,
+            message="approval_not_found",
+        )
+    if not approve:
+        return BashApprovalResult(
+            tool_use_id=tool_use_id,
+            approved=False,
+            executed=False,
+            success=True,
+            message="rejected",
+        )
+
+    process = await asyncio.create_subprocess_shell(
+        pending.command,
+        cwd=pending.workspace_root,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout_s)
+    except TimeoutError:
+        process.kill()
+        stdout_bytes, stderr_bytes = await process.communicate()
+        return BashApprovalResult(
+            tool_use_id=tool_use_id,
+            approved=True,
+            executed=True,
+            success=False,
+            stdout=stdout_bytes.decode("utf-8", errors="replace"),
+            stderr=stderr_bytes.decode("utf-8", errors="replace"),
+            returncode=process.returncode,
+            message="timeout",
+        )
+
+    stdout = stdout_bytes.decode("utf-8", errors="replace")
+    stderr = stderr_bytes.decode("utf-8", errors="replace")
+    return BashApprovalResult(
+        tool_use_id=tool_use_id,
+        approved=True,
+        executed=True,
+        success=process.returncode == 0,
+        stdout=stdout,
+        stderr=stderr,
+        returncode=process.returncode,
+        message=None if process.returncode == 0 else "command_failed",
+    )
 
 
 def make_session_key(
@@ -304,6 +462,25 @@ def make_session_key(
     ).hex()[:16]
     model_provider = f"{model_code}:{provider_code}"
     return (skill_id, model_provider, api_key_hash)
+
+
+def _make_session_cache_key(
+    skill_id: str,
+    model_code: str,
+    provider_code: str,
+    api_key: str,
+    workspace_dir: str | Path,
+) -> SessionCacheKey:
+    base_skill_id, model_provider, api_key_hash = make_session_key(
+        skill_id,
+        model_code,
+        provider_code,
+        api_key,
+    )
+    workspace_hash = hashlib.sha256(
+        str(Path(workspace_dir).resolve(strict=False)).encode("utf-8")
+    ).hexdigest()[:16]
+    return (base_skill_id, model_provider, api_key_hash, workspace_hash)
 
 
 def build_options(
@@ -471,7 +648,11 @@ def build_system_prompt(skill_id: str) -> str:
     return prompt
 
 
-def _context_resolved_event(skill_id: str) -> CopilotEventContextResolved:
+def _context_resolved_event(
+    skill_id: str,
+    *,
+    judge_context: dict[str, Any] | None = None,
+) -> CopilotEventContextResolved:
     """F4: build the first-event echo of what context is injected this turn."""
     spec_mounted = _skill_spec_dir() is not None
     view_context = get_view_context(skill_id)
@@ -486,13 +667,36 @@ def _context_resolved_event(skill_id: str) -> CopilotEventContextResolved:
         )
     else:
         detail_lines.append("(无 view 上下文)")
+    if judge_context is not None:
+        parts.append("judge context")
+        detail_lines.append(render_copilot_judge_context_xml(judge_context))
     if spec_mounted:
         parts.append("skill-spec 已挂载")
     summary = "本轮注入: " + (" · ".join(parts) if parts else "仅 skill-authoring 基础上下文")
     return CopilotEventContextResolved(summary=summary, detail="\n".join(detail_lines))
 
 
-def _resolve_copilot_workspace_dir(skill_id: str) -> Path:
+def render_copilot_judge_context_xml(judge_context: dict[str, Any]) -> str:
+    """Render Golden-owned judge facts as structured prompt context."""
+
+    fields = (
+        "compare_result_ref",
+        "judge_context_ref",
+        "baseline_ref",
+        "diff_summary",
+    )
+    layers = [
+        _xml_leaf(field, judge_context[field])
+        for field in fields
+        if judge_context.get(field) is not None
+    ]
+    return "<judge_context>\n" + "\n".join(layers) + "\n</judge_context>"
+
+
+def _resolve_copilot_workspace_dir(
+    skill_id: str,
+    workspace_root: str | Path | None = None,
+) -> Path:
     """Resolve the copilot CLI's cwd to the skill's workspace dir.
 
     Never falls back to the process CWD: in the packaged app the sidecar's CWD is
@@ -503,6 +707,24 @@ def _resolve_copilot_workspace_dir(skill_id: str) -> Path:
     """
     from app.core import config
 
+    requested_workspace = _validate_requested_workspace_root(workspace_root)
+    if requested_workspace is not None:
+        registered_workspace = _registered_copilot_workspace_root(skill_id)
+        if registered_workspace is not None:
+            registered_resolved = registered_workspace.resolve(strict=False)
+            if requested_workspace != registered_resolved:
+                raise ValueError(
+                    "workspace_root does not match registered workspace "
+                    f"for skill {skill_id}: {requested_workspace}"
+                )
+            return requested_workspace
+        if not _looks_like_copilot_workspace(requested_workspace):
+            raise ValueError(
+                "workspace_root is not a registered Studio workspace "
+                f"for skill {skill_id}: {requested_workspace}"
+            )
+        return requested_workspace
+
     skills_root = config.default_workspace_skills_dir()
     skill_dir = skills_root / skill_id
     if skill_dir.is_dir():
@@ -511,12 +733,88 @@ def _resolve_copilot_workspace_dir(skill_id: str) -> Path:
     return skills_root
 
 
+def _validate_requested_workspace_root(workspace_root: str | Path | None) -> Path | None:
+    if workspace_root is None:
+        return None
+    raw_workspace_root = str(workspace_root).strip()
+    if not raw_workspace_root:
+        return None
+    candidate = Path(raw_workspace_root).expanduser()
+    if not candidate.is_absolute():
+        raise ValueError("workspace_root must be absolute")
+    try:
+        resolved = candidate.resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise ValueError(f"workspace_root does not exist: {candidate}") from exc
+    except OSError as exc:
+        raise ValueError(f"workspace_root cannot be resolved: {candidate}") from exc
+    if not resolved.is_dir():
+        raise ValueError(f"workspace_root is not a directory: {candidate}")
+    return resolved
+
+
+def _registered_copilot_workspace_root(skill_id: str) -> Path | None:
+    from app.core import config
+
+    index_path = config.SKILL_INDEX_PATH
+    if not index_path.exists():
+        return None
+    try:
+        raw = json.loads(index_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    entry = raw.get(skill_id)
+    if not isinstance(entry, dict):
+        return None
+    absolute_path = entry.get("absolute_path")
+    if not isinstance(absolute_path, str) or not absolute_path.strip():
+        return None
+    return Path(absolute_path).expanduser()
+
+
+def _looks_like_copilot_workspace(path: Path) -> bool:
+    return (
+        (path / "GRAPH.md").is_file()
+        or (path / "SKILL.md").is_file()
+        or (path / ".workspace").is_dir()
+    )
+
+
+def _copilot_failure_summary(route_id: str, exc: Exception) -> str:
+    return f"{route_id}: {type(exc).__name__}: {_safe_copilot_error_message(exc)}"
+
+
+def _safe_copilot_error_message(exc: Exception) -> str:
+    message = str(exc)
+    return "[redacted]" if _contains_sensitive_error_text(message) else message
+
+
+def _contains_sensitive_error_text(value: str) -> bool:
+    lowered = value.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "secret",
+            "api_key",
+            "apikey",
+            "authorization",
+            "traceback",
+            "token",
+            "sk-",
+        )
+    )
+
+
 async def stream_query(
     skill_id: str,
     user_message: str,
     model_override: str | None = None,
     workspace_dir: str | Path | None = None,
     role: str | None = None,
+    workspace_root: str | Path | None = None,
+    judge_context: dict[str, Any] | None = None,
 ) -> AsyncIterator[CopilotEvent]:
     """Stream one Copilot query using the selected copilot role (default
     copilot_chat) plus an optional finer-grained route override."""
@@ -527,12 +825,29 @@ async def stream_query(
     except KeyError as exc:
         yield CopilotEventError(message=f"未知模型: {exc}")
         return
+    except CopilotRouteResolutionError as exc:
+        yield CopilotEventError(
+            message=_safe_copilot_error_message(exc),
+            error_code=exc.error_code,
+            error_payload=exc.error_payload,
+        )
+        return
     except ValueError as exc:
-        yield CopilotEventError(message=str(exc))
+        yield CopilotEventError(message=_safe_copilot_error_message(exc))
+        return
+
+    try:
+        resolved_workspace = (
+            Path(workspace_dir).resolve(strict=False)
+            if workspace_dir is not None
+            else _resolve_copilot_workspace_dir(skill_id, workspace_root=workspace_root)
+        )
+    except ValueError as exc:
+        yield CopilotEventError(message=_safe_copilot_error_message(exc))
         return
 
     # F4: first event echoes the injected context (anti hidden-prompt-magic).
-    yield _context_resolved_event(skill_id)
+    yield _context_resolved_event(skill_id, judge_context=judge_context)
 
     failures: list[str] = []
     failed_route_ids: list[str] = []
@@ -547,9 +862,9 @@ async def stream_query(
             )
         except ValueError as exc:
             if len(routes) == 1:
-                yield CopilotEventError(message=str(exc))
+                yield CopilotEventError(message=_safe_copilot_error_message(exc))
                 return
-            failures.append(f"{route.route_id}: {exc}")
+            failures.append(_copilot_failure_summary(route.route_id, exc))
             route = _next_copilot_route(
                 routes=routes,
                 route_by_id=route_by_id,
@@ -575,9 +890,6 @@ async def stream_query(
             continue
 
         tool_names: dict[str, str] = {}
-        resolved_workspace = Path(
-            str(workspace_dir or _resolve_copilot_workspace_dir(skill_id))
-        )
         try:
             client = await get_or_create_session(
                 skill_id=skill_id,
@@ -600,7 +912,13 @@ async def stream_query(
             )
             consumer: asyncio.Task[None] | None = None
             try:
-                await client.query(_prompt_with_system_context(skill_id, user_message))
+                await client.query(
+                    _prompt_with_system_context(
+                        skill_id,
+                        user_message,
+                        judge_context=judge_context,
+                    )
+                )
                 consumer = asyncio.create_task(
                     _drain_sdk_response(client, tool_names, queue)
                 )
@@ -617,6 +935,9 @@ async def stream_query(
                     yield CopilotEventDone()
             finally:
                 _safe_write_sinks.pop(skill_id, None)
+                # Pending Bash approvals outlive the response stream so the UI can
+                # resolve the approval card once. They are cleared by the approval
+                # endpoint itself, reset_session, or cleanup_all_sessions.
                 if consumer is not None and not consumer.done():
                     consumer.cancel()
                     try:
@@ -628,7 +949,7 @@ async def stream_query(
             if len(routes) == 1:
                 yield _error_event_for_exception(exc)
                 return
-            failures.append(f"{route.route_id}: {type(exc).__name__}: {exc}")
+            failures.append(_copilot_failure_summary(route.route_id, exc))
             route = _next_copilot_route(
                 routes=routes,
                 route_by_id=route_by_id,
@@ -640,7 +961,11 @@ async def stream_query(
             continue
 
     yield CopilotEventError(
-        message="all configured Copilot providers failed" + (f": {'; '.join(failures)}" if failures else "")
+        message=_all_copilot_routes_failed_message(
+            failures=failures,
+            route_ids=[candidate.route_id for candidate in routes],
+            failed_route_ids=failed_route_ids,
+        )
     )
 
 
@@ -696,12 +1021,29 @@ def _fallback_error_context(error: Exception) -> dict[str, Any]:
     if status_code is None and response is not None:
         status_code = getattr(response, "status_code", None)
     payload: dict[str, Any] = {
+        "error_type": type(error).__name__,
         "exception_type": type(error).__name__,
-        "message": str(error),
+        "provider_error_type": type(error).__name__,
+        "message": _safe_copilot_error_message(error),
     }
     if isinstance(status_code, int):
         payload["status_code"] = status_code
     return payload
+
+
+def _all_copilot_routes_failed_message(
+    *,
+    failures: list[str],
+    route_ids: list[str],
+    failed_route_ids: list[str],
+) -> str:
+    payload = {
+        "error_code": "resource.no_available_route",
+        "route_ids": route_ids,
+        "failed_route_ids": failed_route_ids,
+    }
+    suffix = f": {'; '.join(failures)}" if failures else ""
+    return f"all configured Copilot providers failed ({json.dumps(payload, ensure_ascii=False)}){suffix}"
 
 
 async def get_or_create_session(
@@ -718,7 +1060,13 @@ async def get_or_create_session(
     if provider_code is None or api_key is None or workspace_dir is None:
         raise TypeError("provider_code, api_key, and workspace_dir are required")
 
-    session_key = make_session_key(skill_id, model_code, provider_code, api_key)
+    session_key = _make_session_cache_key(
+        skill_id,
+        model_code,
+        provider_code,
+        api_key,
+        workspace_dir,
+    )
     async with _session_lock:
         session = _sessions.get(session_key)
         if session is None:
@@ -751,6 +1099,10 @@ async def reset_session(
         sessions = [_sessions.pop(session_key) for session_key in matched_keys]
 
     await _close_sessions(sessions)
+    if skill_id is None:
+        _cleanup_pending_bash_approvals()
+    else:
+        _cleanup_pending_bash_approvals(skill_id)
     return len(sessions)
 
 
@@ -761,6 +1113,7 @@ async def cleanup_all_sessions() -> None:
         sessions = list(_sessions.values())
         _sessions.clear()
 
+    _cleanup_pending_bash_approvals()
     await _close_sessions(sessions)
 
 
@@ -785,8 +1138,16 @@ async def _ensure_client_connected(client: ClaudeSDKClient) -> None:
     await client.connect()
 
 
-def _prompt_with_system_context(skill_id: str, user_message: str) -> str:
-    return f"{build_system_prompt(skill_id)}\n\n## 用户消息\n{user_message}"
+def _prompt_with_system_context(
+    skill_id: str,
+    user_message: str,
+    *,
+    judge_context: dict[str, Any] | None = None,
+) -> str:
+    prompt = build_system_prompt(skill_id)
+    if judge_context is not None:
+        prompt += "\n\n## Copilot Judge Context\n" + render_copilot_judge_context_xml(judge_context)
+    return f"{prompt}\n\n## 用户消息\n{user_message}"
 
 
 def _translate_sdk_message(message: object, tool_names: dict[str, str]) -> list[CopilotEvent]:
@@ -877,11 +1238,10 @@ def _resolve_copilot_runtime(
     role: str = "copilot_chat",
 ) -> tuple[list[ResolvedRoute], CredentialProviderProtocol]:
     from app.core.adapters.gateway import RegistryResolutionError, ResourceTerminalError
-    from app.services.gateway_resolver import build_gateway_model_resolver
+    from app.services.gateway_resolver import build_gateway_route_runtime
 
-    resolver = build_gateway_model_resolver()
     try:
-        resolved = resolver.resolve_routes(
+        runtime = build_gateway_route_runtime(
             role,
             route_override=model_override,
         )
@@ -890,12 +1250,24 @@ def _resolve_copilot_runtime(
         # ValueError) when no copilot route resolves — e.g. the configured route
         # is missing/cooling-down. Left uncaught it propagates out of the ws
         # stream loop and the socket dies silently, so the user sees nothing.
-        # Convert to the domain ValueError that stream_query surfaces as a
-        # CopilotEventError, so the failure reason is shown in the panel.
-        raise ValueError(f"{role} 无可用 route: {exc}") from exc
-    if not resolved.routes:
-        raise ValueError(f"{role} role 无可用 route")
-    return list(resolved.routes), resolver.credential_provider
+        # Preserve the Gateway owner error code/payload while still surfacing a
+        # readable message in the panel.
+        error_code = getattr(exc, "error_code", "resource.no_available_route")
+        error_payload = getattr(exc, "error_payload", None)
+        if not isinstance(error_payload, dict):
+            error_payload = {"role": role}
+        raise CopilotRouteResolutionError(
+            f"{role} 无可用 route: {exc}",
+            error_code=error_code,
+            error_payload=error_payload,
+        ) from exc
+    if not runtime.routes:
+        raise CopilotRouteResolutionError(
+            f"{role} role 无可用 route",
+            error_code=runtime.error_code or "resource.no_available_route",
+            error_payload=runtime.error_payload or {"role": role},
+        )
+    return runtime.routes, runtime.credential_provider
 
 
 def _resolve_copilot_routes(
@@ -960,8 +1332,10 @@ def _error_event_for_exception(exc: Exception) -> CopilotEventError:
     if isinstance(exc, TimeoutError):
         return CopilotEventError(message="请求超时, 检查网络 / 代理")
     if isinstance(exc, (CLIConnectionError, ProcessError, ClaudeSDKError)):
-        return CopilotEventError(message=f"后端连接失败 (DeepSeek 端点不可达 / 大陆需代理): {exc}")
-    return CopilotEventError(message=f"Copilot 请求失败: {exc}")
+        return CopilotEventError(
+            message=f"后端连接失败 (DeepSeek 端点不可达 / 大陆需代理): {_safe_copilot_error_message(exc)}"
+        )
+    return CopilotEventError(message=f"Copilot 请求失败: {_safe_copilot_error_message(exc)}")
 
 
 # COPILOT_ASSIST-4: the copilot test must exercise the SAME path copilot uses at

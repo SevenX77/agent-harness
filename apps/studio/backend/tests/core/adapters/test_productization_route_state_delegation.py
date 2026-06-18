@@ -16,6 +16,7 @@ import app.core.adapters.gateway as gateway_module
 from app.core.adapters.gateway import GatewayAdapter, ProviderModelStateProjection
 from app.models.llm_config import ProviderEndpoint, ProviderRoute
 from app.services.llm_health_store import RuntimeCircuit
+from graph_agent_gateway.registry.schema import EvidenceRecord
 from graph_agent_gateway.state_projection import (
     ProviderModelStateProjection as GatewayProjection,
 )
@@ -69,13 +70,35 @@ def _circuit(*, retry_at: datetime, reason_code: str = "rate_limited", message: 
     )
 
 
-def _project(adapter: GatewayAdapter, *, endpoint: ProviderEndpoint, route: ProviderRoute, circuits: list[RuntimeCircuit], now: datetime) -> ProviderModelStateProjection:
+def _evidence_record() -> EvidenceRecord:
+    return EvidenceRecord(
+        evidence_id="probe-ep1-gpt5",
+        evidence_type="probe",
+        trust_state="probe-verified",
+        route_id="ep-1:gpt-5",
+        endpoint_id="ep-1",
+        model_id="gpt-5",
+        provider_model_id="gpt-5",
+        probe_status="ok",
+    )
+
+
+def _project(
+    adapter: GatewayAdapter,
+    *,
+    endpoint: ProviderEndpoint,
+    route: ProviderRoute,
+    circuits: list[RuntimeCircuit],
+    now: datetime,
+    evidence_records: list[EvidenceRecord] | None = None,
+) -> ProviderModelStateProjection:
     return adapter.project_route_state(
         {
             "endpoint": endpoint,
             "route": route,
             "circuits": circuits,
             "now": now,
+            "evidence_records": evidence_records or [],
         }
     )
 
@@ -110,23 +133,23 @@ def test_studio_delegates_to_gateway_projector_with_derived_inputs(monkeypatch) 
 def test_studio_renders_historical_ready_when_gateway_returns_it(monkeypatch) -> None:
     # historical_ready is only reachable through the gateway projector; Studio
     # must not fabricate it but MUST surface it when the projector returns it.
-    seen_draft_history: dict[str, Any] = {}
+    seen_evidence: dict[str, Any] = {}
 
     def _spy(**kwargs: Any) -> GatewayProjection:
-        seen_draft_history["draft_history"] = kwargs["draft_history"]
+        seen_evidence["evidence_records"] = kwargs["evidence_records"]
         return GatewayProjection(route_id=kwargs["route_id"], ui_state="historical_ready")
 
-    monkeypatch.setattr(gateway_module, "gateway_project_route_state", _spy)
+    monkeypatch.setattr(gateway_module, "gateway_project_route_state_from_evidence", _spy)
 
     adapter = GatewayAdapter(transport="in_process")
     now = datetime.now(UTC)
-    # A draft-history signal carried on route metadata flows through faithfully.
     endpoint = _endpoint(status="verified")
-    route = _route(status="unverified_manual", metadata={"draft_history": True})
+    route = _route(status="unverified_manual")
+    evidence = _evidence_record()
 
-    result = _project(adapter, endpoint=endpoint, route=route, circuits=[], now=now)
+    result = _project(adapter, endpoint=endpoint, route=route, circuits=[], now=now, evidence_records=[evidence])
 
-    assert seen_draft_history["draft_history"] is True
+    assert seen_evidence["evidence_records"] == [evidence]
     assert result.ui_state == "historical_ready"
 
 
@@ -233,11 +256,21 @@ def test_six_states_project_through_gateway_for_their_canonical_inputs() -> None
     )
     assert untested.ui_state == "untested"
 
-    historical = _project(
+    metadata_only = _project(
         adapter,
         endpoint=_endpoint(status="verified"),
         route=_route(status="unverified_manual", metadata={"draft_history": True}),
         circuits=[],
         now=now,
+    )
+    assert metadata_only.ui_state == "untested"
+
+    historical = _project(
+        adapter,
+        endpoint=_endpoint(status="verified"),
+        route=_route(status="unverified_manual"),
+        circuits=[],
+        now=now,
+        evidence_records=[_evidence_record()],
     )
     assert historical.ui_state == "historical_ready"

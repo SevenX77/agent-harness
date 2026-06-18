@@ -314,6 +314,35 @@ describe('AssetsPanel', () => {
     expect(html).toContain('Missing path')
     expect(html).toContain('unresolvable')
   })
+
+  it('surfaces a legacy subgraph target_skill as migration-needed, not linked', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceProvider value={workspaceContextStub}>
+        <AssetsPanel
+          skillDetail={{
+            ...skillDetailWithFiles({
+              'phases/translate/SUBGRAPH.md': [
+                '---',
+                'name: translate',
+                'target_skill: legacy.registry.child',
+                '---',
+                '',
+              ].join('\n'),
+            }),
+            graph_topology: [
+              { id: 'translate', src: 'phases/translate', depends_on: [], mode: 'subgraph', path: null },
+            ],
+          }}
+          selectedNode={null}
+        />
+      </WorkspaceProvider>,
+    )
+
+    expect(html).toContain('translate')
+    expect(html).toContain('Migration needed')
+    expect(html).toContain('legacy.registry.child')
+    expect(html).not.toContain('Linked')
+  })
 })
 
 function renderAssetsPanel(files: Record<string, string>): string {

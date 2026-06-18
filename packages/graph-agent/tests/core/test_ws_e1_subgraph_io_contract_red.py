@@ -74,7 +74,7 @@ phases:
 def _write_subgraph_phase(
     root: Path,
     *,
-    target_skill: str,
+    child_path: Path,
     input_properties: dict[str, Any],
     output_properties: dict[str, Any],
     input_required: list[str] | None = None,
@@ -85,7 +85,7 @@ def _write_subgraph_phase(
     _write(
         root / "phases" / "delegate" / "SUBGRAPH.md",
         f"""---
-target_skill: {target_skill}
+path: {child_path}
 io:
   inputs:
     {input_yaml}
@@ -135,7 +135,7 @@ def _subgraph_skill(
     action_body: str | None = None,
 ) -> tuple[Path, Path, DictSkillResolver]:
     parent = root / "parent"
-    child = root / "child"
+    child = parent / "subgraphs" / "child"
     child_outputs = child_outputs or parent_outputs
 
     _write_graph(
@@ -149,7 +149,7 @@ def _subgraph_skill(
     )
     _write_subgraph_phase(
         parent,
-        target_skill="child",
+        child_path=child,
         input_properties=parent_inputs,
         output_properties=parent_outputs,
         input_required=list(parent_inputs),

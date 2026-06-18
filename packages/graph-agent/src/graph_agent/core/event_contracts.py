@@ -6,6 +6,57 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+SENSITIVE_DETAIL_KEYS = frozenset(
+    {
+        "api_key",
+        "apikey",
+        "authorization",
+        "secret",
+        "token",
+        "traceback",
+    }
+)
+
+
+def _contains_sensitive_error_text(value: str) -> bool:
+    lowered = value.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "api_key",
+            "apikey",
+            "authorization",
+            "secret",
+            "sk-",
+            "token",
+            "traceback",
+        )
+    )
+
+
+def _sanitize_error_details(value: Any) -> Any:
+    if isinstance(value, dict):
+        sanitized: dict[str, Any] = {}
+        for key, item in value.items():
+            normalized = str(key).lower().replace("-", "_")
+            if normalized in SENSITIVE_DETAIL_KEYS or _contains_sensitive_error_text(normalized):
+                sanitized[str(key)] = "[redacted]"
+            else:
+                sanitized[str(key)] = _sanitize_error_details(item)
+        return sanitized
+    if isinstance(value, list):
+        return [_sanitize_error_details(item) for item in value]
+    if isinstance(value, str) and _contains_sensitive_error_text(value):
+        return "[redacted]"
+    return value
+
+
+def _sanitize_error_message(value: Any) -> Any:
+    if isinstance(value, str) and _contains_sensitive_error_text(value):
+        return "[redacted]"
+    return value
+
+
 class StreamCursor(BaseModel):
     model_config = ConfigDict(frozen=True)
     stream_id: str
@@ -16,6 +67,7 @@ class StreamCursor(BaseModel):
 
 class EventEnvelope(BaseModel):
     model_config = ConfigDict(frozen=True)
+    schema_version: str = "studio.event.v1"
     stream_id: str
     seq: int
     run_id: str
@@ -23,6 +75,8 @@ class EventEnvelope(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     cursor: str
     timestamp: datetime
+    error_code: str | None = None
+    error_payload: "TransportErrorPayload | None" = None
 
 
 class TransportErrorPayload(BaseModel):
@@ -31,6 +85,17 @@ class TransportErrorPayload(BaseModel):
     message: str
     details: dict[str, Any] = Field(default_factory=dict)
     retryable: bool
+
+    @field_validator("message", mode="before")
+    @classmethod
+    def sanitize_message(cls, value: Any) -> Any:
+        return _sanitize_error_message(value)
+
+    @field_validator("details", mode="before")
+    @classmethod
+    def sanitize_details(cls, value: Any) -> Any:
+        sanitized = _sanitize_error_details(value)
+        return sanitized if isinstance(sanitized, dict) else {}
 
 
 class ResponseEnvelope(BaseModel):
@@ -58,12 +123,16 @@ def make_event_envelope(
     payload: dict[str, Any],
     cursor: str | None = None,
     timestamp: datetime | None = None,
+    schema_version: str = "studio.event.v1",
+    error_code: str | None = None,
+    error_payload: TransportErrorPayload | None = None,
 ) -> EventEnvelope:
     if cursor is None:
         cursor = f"{stream_id}:{seq}"
     if timestamp is None:
         timestamp = datetime.now(UTC)
     return EventEnvelope(
+        schema_version=schema_version,
         stream_id=stream_id,
         seq=seq,
         run_id=run_id,
@@ -71,6 +140,8 @@ def make_event_envelope(
         payload=payload,
         cursor=cursor,
         timestamp=timestamp,
+        error_code=error_code,
+        error_payload=error_payload,
     )
 
 
@@ -177,4 +248,3 @@ class EventStreamBuffer:
             return EventStreamResumeResult(events=res_events, next_cursor=next_cursor)
 
         return EventStreamResumeResult(events=[], next_cursor=cursor)
-

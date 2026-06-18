@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 import json
+from types import SimpleNamespace
 from typing import Literal
-from unittest.mock import patch
 
-from graph_agent_gateway.client_manager import LLMClientManager
-from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute, RuntimePolicy
 from langchain_core.messages import HumanMessage
 
 from graph_agent.core._predict_internal.interception import PredictGatewayChatModel
@@ -53,8 +52,8 @@ class MemoryMockStrategy(BaseMockStrategy):
         return self.schemas.get(phase_name)
 
 
-def _route(endpoint_id: str, model_name: str) -> ResolvedRoute:
-    return ResolvedRoute(
+def _route(endpoint_id: str, model_name: str) -> SimpleNamespace:
+    return SimpleNamespace(
         role_name="writer",
         route_id=f"{endpoint_id}:{model_name}",
         endpoint_id=endpoint_id,
@@ -67,11 +66,11 @@ def _route(endpoint_id: str, model_name: str) -> ResolvedRoute:
     )
 
 
-def _role() -> ResolvedRole:
-    return ResolvedRole(
+def _role() -> SimpleNamespace:
+    return SimpleNamespace(
         role_name="writer",
         system_prompt_prefix="",
-        runtime_policy=RuntimePolicy(),
+        runtime_policy=SimpleNamespace(),
         routes=[_route("p1", "model-a")],
     )
 
@@ -153,14 +152,7 @@ def test_generate_falls_back_to_p2_heuristic_stub() -> None:
 def test_generate_sets_mock_metadata_and_zero_usage_without_provider_call() -> None:
     model = _model(MemoryMockStrategy(golden={"draft": {"text": "golden"}}))
 
-    with (
-        patch.object(LLMClientManager, "_probe_provider", side_effect=AssertionError("provider")),
-        patch(
-            "graph_agent_gateway.gateway_chat_model.RouteChatModelFactory.build",
-            side_effect=AssertionError("provider"),
-        ),
-    ):
-        result = model._generate([HumanMessage(content="hi")])
+    result = model._generate([HumanMessage(content="hi")])
 
     message = result.generations[0].message
     assert message.id is not None
@@ -181,6 +173,33 @@ def test_generate_sets_mock_metadata_and_zero_usage_without_provider_call() -> N
     assert result.llm_output["usage"]["total_cost"] == 0
     assert result.generations[0].generation_info is not None
     assert result.generations[0].generation_info["id"] == message.id
+
+
+def test_predict_mock_runs_when_gateway_package_is_unavailable(monkeypatch) -> None:
+    real_import = builtins.__import__
+
+    def guarded_import(name: str, *args: object, **kwargs: object) -> object:
+        if name.startswith("graph_agent_gateway"):
+            raise AssertionError(f"predict mock must not import {name}")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+    model = _model(MemoryMockStrategy(golden={"draft": {"text": "offline"}}))
+    bound = model.bind_tools(
+        [
+            {
+                "name": "finish_task",
+                "description": "finish",
+                "parameters": {"type": "object", "properties": {}},
+            }
+        ]
+    )
+
+    result = bound._generate([HumanMessage(content="hi")])
+
+    assert _payload(result.generations[0].message.content) == {"text": "offline"}
+    assert result.llm_output is not None
+    assert result.llm_output["provider"] == "predict_mock"
 
 
 def test_agenerate_matches_generate_behavior() -> None:
@@ -225,5 +244,17 @@ def test_bind_tools_preserves_predict_gateway_and_mock_strategy() -> None:
     assert isinstance(bound, PredictGatewayChatModel)
     assert bound.mock_strategy is strategy
     result = bound._generate([HumanMessage(content="hi")])
+    message = result.generations[0].message
     assert result.llm_output is not None
     assert result.llm_output["mocked_source"] == "golden_case"
+    assert message.tool_calls == [
+        {
+            "name": "finish_task",
+            "args": {
+                "reasoning": "Predict mock completed the phase.",
+                "business_data_md": "## item-1\n- text: golden\n",
+            },
+            "id": f"{message.id}_finish_task",
+            "type": "tool_call",
+        }
+    ]

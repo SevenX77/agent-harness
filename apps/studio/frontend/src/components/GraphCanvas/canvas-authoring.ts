@@ -145,7 +145,8 @@ function phaseDirectoryPath(phaseId: string): string {
 // FROZEN-clean per engine skill-syntax §2.3 (LOGIC), §2.5 (agent SKILL),
 // §2.4/§2.1 (SUBGRAPH) so the engine compiler accepts them with no
 // unknown-field FATAL. Deprecated fields (`mode`, `system_prompt`,
-// `exit_contract`, `python_callable`, `target_skill`) must never be emitted.
+// `exit_contract`, `python_callable`, legacy registry child-reference fields)
+// must never be emitted.
 const SUBGRAPH_PATH_PLACEHOLDER = '/absolute/path/to/child_skill'
 
 export function defaultPhaseMarkdown(

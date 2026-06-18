@@ -217,6 +217,36 @@ def test_upsert_endpoint_omitted_api_key_preserves_secret_and_empty_clears_secre
     assert endpoint.api_key is None
 
 
+def test_upsert_endpoint_omitted_credential_ref_preserves_existing_ref(tmp_path: Path) -> None:
+    path = tmp_path / "llm_credentials.json"
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "openai-direct": _endpoint().model_copy(
+                    update={"credential_ref": "credential:openai-prod"}
+                )
+            }
+        ),
+        path,
+    )
+
+    upsert_endpoints(
+        {
+            "openai-direct": {
+                "endpoint_id": "openai-direct",
+                "display_name": "OpenAI Renamed",
+                "protocol": "openai_compatible",
+                "base_url": "https://api.openai.example/v1",
+            }
+        },
+        path=path,
+    )
+
+    endpoint = load_credentials(path).provider_endpoints["openai-direct"]
+    assert endpoint.display_name == "OpenAI Renamed"
+    assert endpoint.credential_ref == "credential:openai-prod"
+
+
 def test_upsert_endpoint_redacted_api_key_placeholder_preserves_secret(tmp_path: Path) -> None:
     path = tmp_path / "llm_credentials.json"
     save_credentials(
@@ -240,6 +270,46 @@ def test_upsert_endpoint_redacted_api_key_placeholder_preserves_secret(tmp_path:
     endpoint = load_credentials(path).provider_endpoints["openai-direct"]
     assert endpoint.display_name == "OpenAI From Redacted Response"
     assert endpoint.api_key.get_secret_value() == "secret"
+
+
+def test_upsert_endpoint_ordinary_save_does_not_accept_test_status_facts(tmp_path: Path) -> None:
+    path = tmp_path / "llm_credentials.json"
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "openai-direct": _endpoint().model_copy(
+                    update={
+                        "status": "verified",
+                        "last_test_at": "2026-06-18T00:00:00Z",
+                        "last_test_message": "Backend probe succeeded.",
+                    }
+                )
+            }
+        ),
+        path,
+    )
+
+    upsert_endpoints(
+        {
+            "openai-direct": {
+                "endpoint_id": "openai-direct",
+                "display_name": "OpenAI User Edit",
+                "protocol": "openai_compatible",
+                "base_url": "https://api.openai.example/v1",
+                "api_key": "**********",
+                "status": "failed",
+                "last_test_at": "2026-06-18T01:00:00Z",
+                "last_test_message": "Frontend cache should not become fact.",
+            }
+        },
+        path=path,
+    )
+
+    endpoint = load_credentials(path).provider_endpoints["openai-direct"]
+    assert endpoint.display_name == "OpenAI User Edit"
+    assert endpoint.status == "verified"
+    assert endpoint.last_test_at == "2026-06-18T00:00:00Z"
+    assert endpoint.last_test_message == "Backend probe succeeded."
 
 
 def test_load_credentials_repairs_legacy_catalog_candidate_failed_status(tmp_path: Path) -> None:

@@ -64,7 +64,7 @@ from graph_agent.core.exceptions import (
     make_error_payload,
 )
 from graph_agent.core.graph_assembler import assemble_graph
-from graph_agent.core.llm_provider import LLMProvider
+from graph_agent.core.llm_provider import LLMProvider, LLMProviderError
 from graph_agent.core.local_workspace_resolver import LocalWorkspaceResolver
 from graph_agent.core.result import RunResult, WorkflowMetrics, WorkflowResult
 from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol, require_skill_resolver
@@ -201,6 +201,7 @@ def predict_skill(  # noqa: C901
     event_subscriber: Callable[[CallbackEvent], None] | None = None,
     skill_resolver: SkillResolverProtocol,
     model_resolver: Any | None = None,
+    llm_provider: LLMProvider | None = None,
     copilot_predict: Callable[..., Any] | None = None,
     **inputs: Any,
 ) -> RunResult:
@@ -269,6 +270,7 @@ def predict_skill(  # noqa: C901
         compiled,
         chat_model=None,
         model_resolver=model_resolver,
+        llm_provider=llm_provider,
         callbacks=cast(Any, event_sink),
         skill_resolver=resolver,
         predict_context=predict_context,
@@ -378,6 +380,7 @@ def run_skill(
     cleanup_checkpoints_on_finish: bool = True,
     skill_resolver: SkillResolverProtocol,
     model_resolver: Any | None = None,
+    llm_provider: LLMProvider | None = None,
     **inputs: Any,
 ) -> RunResult:
     """Execute a SKILL.md and return a typed workflow result."""
@@ -406,6 +409,7 @@ def run_skill(
             cleanup_checkpoints_on_finish=cleanup_checkpoints_on_finish,
             skill_resolver=resolver,
             model_resolver=model_resolver,
+            llm_provider=llm_provider,
             **inputs,
         )
     except GraphAgentError as exc:
@@ -455,10 +459,12 @@ def resume_skill(
     run_id: str,
     checkpoint_id: str | None = None,
     checkpoint_ns: str | None = None,
+    checkpointer: Any | None = None,
     context_overrides: dict[str, Any] | None = None,
     human_response: dict[str, Any] | None = None,
     skill_resolver: SkillResolverProtocol,
     model_resolver: Any | None = None,
+    llm_provider: LLMProvider | None = None,
     event_subscriber: Callable[[CallbackEvent], None] | None = None,
 ) -> RunResult:
     """Resume a previously interrupted skill run from a checkpoint."""
@@ -489,7 +495,7 @@ def resume_skill(
         checkpoint_id,
     )
 
-    active_checkpointer = _resolve_resume_checkpointer()
+    active_checkpointer = checkpointer if checkpointer is not None else _resolve_resume_checkpointer()
     invoke_config = _resolve_resume_config(
         active_checkpointer,
         run_id=run_id,
@@ -502,6 +508,7 @@ def resume_skill(
         assembled = assemble_graph(
             compiled,
             model_resolver=model_resolver,
+            llm_provider=llm_provider,
             callbacks=cast(Any, event_sink),
             skill_resolver=resolver,
             checkpointer=active_checkpointer,
@@ -601,6 +608,7 @@ def _run_skill_dict(
     cleanup_checkpoints_on_finish: bool = True,
     skill_resolver: SkillResolverProtocol,
     model_resolver: Any | None = None,
+    llm_provider: LLMProvider | None = None,
     **inputs: Any,
 ) -> dict[str, Any]:
     """Execute a SKILL.md with the given inputs. Pure document-driven.
@@ -641,6 +649,7 @@ def _run_skill_dict(
             callbacks=callbacks,
             skill_resolver=resolver,
             model_resolver=model_resolver,
+            llm_provider=llm_provider,
             **inputs,
         )
 
@@ -667,7 +676,28 @@ class RawSkillPathError(Exception):
         self.error_code = "runtime.raw_skill_path"
 
 
+class MissingRunArtifactObjectRefError(Exception):
+    def __init__(self, run_id: str, path: str) -> None:
+        super().__init__(f"Run artifact store did not return an object ref for {path}")
+        self.error_code = "artifact.missing_object_ref"
+        self.details = {"run_id": run_id, "path": path}
+
+
 _RUN_CACHE: dict[str, RunSession] = {}
+
+
+def _cached_session_for_materialization(
+    idempotency_key: str,
+    run_artifact_store: RunArtifactStore | None,
+) -> RunSession | None:
+    cached = _RUN_CACHE.get(idempotency_key)
+    if cached is None:
+        return None
+    if run_artifact_store is None:
+        return cached
+    if isinstance(cached.result_ref, str) and cached.result_ref.startswith("bytes://"):
+        return cached
+    return None
 
 
 def _artifact_run_id(request: RunArtifactRequest | PredictArtifactRequest) -> str:
@@ -728,6 +758,7 @@ def _run_compiled_artifact_graph(
     *,
     run_id: str,
     skill_resolver: SkillResolverProtocol | None,
+    llm_provider: LLMProvider | None,
     model_resolver: Any | None,
 ) -> RunResult | RunArtifactErrorResult:
     artifact_root = _resolve_artifact_root(request)
@@ -746,16 +777,38 @@ def _run_compiled_artifact_graph(
         )
 
     event_subscriber = request.execution_context.get("event_subscriber")
-    return run_skill(
+    checkpointer_spec = request.execution_context.get("checkpointer_spec")
+    if checkpointer_spec is None:
+        checkpointer_spec = request.execution_context.get("checkpointer")
+    started_at = datetime.now(UTC)
+    raw = _run_v030_skill_dict(
         artifact_root,
         workspace_dir=workspace_dir,
+        mock_llm=_NO_MOCK_LLM,
         thread_id=run_id,
-        unattended=True,
         event_subscriber=event_subscriber if callable(event_subscriber) else None,
         skill_resolver=_artifact_skill_resolver(artifact_root, skill_resolver),
+        llm_provider=llm_provider,
         model_resolver=model_resolver,
+        checkpointer_spec=checkpointer_spec or "auto",
         **request.inputs,
     )
+    wall_time = float(raw.get("wall_time_sec", 0.0))
+    workflow_result = WorkflowResult(
+        success=True,
+        run_id=str(raw.get("run_id") or run_id),
+        skill_id=artifact_root.name,
+        context=dict(raw.get("context", {})),
+        metrics=WorkflowMetrics.from_mapping(dict(raw.get("metrics", {})), wall_time_sec=wall_time),
+        trace_path=raw.get("trace_path"),
+        error=None,
+        started_at=started_at,
+        finished_at=datetime.now(UTC),
+        wall_time_sec=wall_time,
+    )
+    run_dir = Path(raw.get("run_dir") or workspace_dir / "runs" / workflow_result.run_id)
+    _write_workflow_result_artifacts(run_dir, workflow_result)
+    return workflow_result
 
 
 def _run_compiled_artifact_predict_graph(
@@ -763,6 +816,7 @@ def _run_compiled_artifact_predict_graph(
     *,
     run_id: str,
     skill_resolver: SkillResolverProtocol | None,
+    llm_provider: LLMProvider | None,
     model_resolver: Any | None,
 ) -> RunResult | RunArtifactErrorResult:
     artifact_root = _resolve_artifact_root(request)
@@ -786,6 +840,7 @@ def _run_compiled_artifact_predict_graph(
         thread_id=run_id,
         unattended=True,
         skill_resolver=_artifact_skill_resolver(artifact_root, skill_resolver),
+        llm_provider=llm_provider,
         model_resolver=model_resolver,
         mock_llm=request.execution_context.get("mock_llm"),
         current_hashes=request.execution_context.get("current_hashes") or {},
@@ -822,12 +877,59 @@ def _artifact_not_materialized_error(
     )
 
 
+def _safe_provider_error_details(raw_details: Any) -> dict[str, Any]:
+    if not isinstance(raw_details, dict):
+        return {}
+    safe: dict[str, Any] = {}
+    for key, value in raw_details.items():
+        key_text = str(key)
+        if _contains_sensitive_error_text(key_text):
+            continue
+        safe[key_text] = _sanitize_provider_error_value(value)
+    return safe
+
+
+def _sanitize_provider_error_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return _safe_provider_error_details(value)
+    if isinstance(value, list):
+        return [_sanitize_provider_error_value(item) for item in value]
+    if isinstance(value, str) and _contains_sensitive_error_text(value):
+        return "[redacted]"
+    return value
+
+
+def _safe_provider_error_message(exc: Exception) -> str:
+    error_code = str(getattr(exc, "error_code", ""))
+    if isinstance(exc, LLMProviderError) or error_code.startswith("llm."):
+        return "Provider invocation failed"
+    message = str(exc)
+    return "[redacted]" if _contains_sensitive_error_text(message) else message
+
+
+def _contains_sensitive_error_text(value: str) -> bool:
+    lowered = value.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "secret",
+            "api_key",
+            "apikey",
+            "authorization",
+            "traceback",
+            "token",
+            "sk-",
+        )
+    )
+
+
 def _execute_run_artifact_outputs(
     request: RunArtifactRequest,
     *,
     run_id: str,
     artifact_executor: Callable[[RunArtifactRequest], dict[str, Any]] | None,
     skill_resolver: SkillResolverProtocol | None,
+    llm_provider: LLMProvider | None,
     model_resolver: Any | None,
 ) -> dict[str, Any] | RunResult | RunArtifactErrorResult:
     if artifact_executor is not None:
@@ -839,6 +941,7 @@ def _execute_run_artifact_outputs(
             request,
             run_id=run_id,
             skill_resolver=skill_resolver,
+            llm_provider=llm_provider,
             model_resolver=model_resolver,
         )
 
@@ -849,7 +952,7 @@ def _run_artifact_store_result(
     *,
     run_artifact_store: RunArtifactStore,
     run_id: str,
-    request: RunArtifactRequest,
+    request: RunArtifactRequest | PredictArtifactRequest,
     outputs: Any,
 ) -> str:
     metadata = {"artifact_id": request.artifact_ref.artifact_id}
@@ -862,14 +965,23 @@ def _run_artifact_store_result(
     data_bytes = json.dumps(serializable_outputs, default=str).encode("utf-8")
     refs = run_artifact_store.put_batch(run_id, {"outputs.json": data_bytes})
 
+    ref_val = _outputs_object_ref(refs, run_id=run_id)
     run_artifact_store.seal_run(run_id)
 
+    return ref_val.bytes_ref
+
+
+def _outputs_object_ref(refs: Any, *, run_id: str) -> Any:
+    ref_val = None
     if isinstance(refs, dict):
-        ref_val = next(iter(refs.values()))
-        return ref_val.bytes_ref
-    if isinstance(refs, list) and refs:
-        return refs[0].bytes_ref
-    return f"bytes://{run_id}/outputs.json"
+        ref_val = refs.get("outputs.json")
+    elif isinstance(refs, list) and refs:
+        ref_val = refs[0]
+
+    bytes_ref = getattr(ref_val, "bytes_ref", None)
+    if not isinstance(bytes_ref, str) or not bytes_ref.startswith("bytes://"):
+        raise MissingRunArtifactObjectRefError(run_id, "outputs.json")
+    return ref_val
 
 
 def run_artifact(
@@ -890,8 +1002,9 @@ def run_artifact(
 
     run_id = _artifact_run_id(request)
 
-    if request.idempotency_key in _RUN_CACHE:
-        return _RUN_CACHE[request.idempotency_key]
+    cached = _cached_session_for_materialization(request.idempotency_key, run_artifact_store)
+    if cached is not None:
+        return cached
 
     workspace_dir = _resolve_artifact_workspace_dir(request)
     try:
@@ -900,14 +1013,15 @@ def run_artifact(
             run_id=run_id,
             artifact_executor=artifact_executor,
             skill_resolver=skill_resolver,
+            llm_provider=(llm_provider if llm_provider is not _LLM_PROVIDER_UNSET else None),
             model_resolver=model_resolver,
         )
         if isinstance(outputs, RunArtifactErrorResult):
             return outputs
     except Exception as exc:
         error_code = getattr(exc, "error_code", "llm.provider_invoke_failed")
-        message = str(exc)
-        details = getattr(exc, "details", {})
+        message = _safe_provider_error_message(exc)
+        details = _safe_provider_error_details(getattr(exc, "details", {}))
         retryable = getattr(exc, "retryable", False)
 
         return RunArtifactErrorResult(
@@ -957,21 +1071,23 @@ def predict_artifact(
 
     if isinstance(request, PredictArtifactRequest) and _resolve_artifact_root(request) is not None:
         run_id = _artifact_run_id(request)
-        if request.idempotency_key in _RUN_CACHE:
-            return _RUN_CACHE[request.idempotency_key]
+        cached = _cached_session_for_materialization(request.idempotency_key, run_artifact_store)
+        if cached is not None:
+            return cached
         try:
             result = _run_compiled_artifact_predict_graph(
                 request,
                 run_id=run_id,
                 skill_resolver=skill_resolver,
+                llm_provider=(llm_provider if llm_provider is not _LLM_PROVIDER_UNSET else None),
                 model_resolver=model_resolver,
             )
             if isinstance(result, RunArtifactErrorResult):
                 return result
         except Exception as exc:
             error_code = getattr(exc, "error_code", "llm.provider_invoke_failed")
-            message = str(exc)
-            details = getattr(exc, "details", {})
+            message = _safe_provider_error_message(exc)
+            details = _safe_provider_error_details(getattr(exc, "details", {}))
             retryable = getattr(exc, "retryable", False)
             return RunArtifactErrorResult(
                 error_code=error_code,
@@ -985,10 +1101,18 @@ def predict_artifact(
                 retryable=retryable,
             )
         workspace_dir = _resolve_artifact_workspace_dir(request)
+        result_ref = _workflow_result_ref(result, workspace_dir)
+        if run_artifact_store is not None:
+            result_ref = _run_artifact_store_result(
+                run_artifact_store=run_artifact_store,
+                run_id=run_id,
+                request=request,
+                outputs=result,
+            )
         session = RunSession(
             run_id=run_id,
             event_stream_ref=f"stream://{run_id}",
-            result_ref=_workflow_result_ref(result, workspace_dir),
+            result_ref=result_ref,
             status_ref=f"state://{run_id}/status",
         )
         _RUN_CACHE[request.idempotency_key] = session
@@ -1358,6 +1482,8 @@ def _run_v030_skill_dict(
     callbacks: list[Any] | None = None,
     skill_resolver: SkillResolverProtocol,
     model_resolver: Any | None = None,
+    llm_provider: LLMProvider | None = None,
+    checkpointer_spec: Any = "auto",
     **inputs: Any,
 ) -> dict[str, Any]:
     """Execute a V0.3.0 skill root through compile_skill + assemble_graph."""
@@ -1386,9 +1512,10 @@ def _run_v030_skill_dict(
     )
     chat_model = mock_llm if mock_llm is not _NO_MOCK_LLM else None
     active_model_resolver = model_resolver if mock_llm is _NO_MOCK_LLM else None
+    active_llm_provider = llm_provider if mock_llm is _NO_MOCK_LLM else None
 
     # Step 4.1: Dynamically resolve the checkpointer
-    active_checkpointer = resolve_checkpointer("auto")
+    active_checkpointer = resolve_checkpointer(checkpointer_spec)
 
     try:
         compiled = compile_skill(skill_root, skill_resolver=resolver)
@@ -1396,6 +1523,7 @@ def _run_v030_skill_dict(
             compiled,
             chat_model=chat_model,
             model_resolver=active_model_resolver,
+            llm_provider=active_llm_provider,
             callbacks=cast(Any, event_sink),
             skill_resolver=resolver,
             checkpointer=active_checkpointer,

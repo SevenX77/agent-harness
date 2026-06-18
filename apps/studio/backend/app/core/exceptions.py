@@ -125,6 +125,11 @@ def _json_response(response: ErrorResponse) -> JSONResponse:
 
 async def http_exception_handler(_request: Request, exc: HTTPException) -> JSONResponse:
     """Normalize HTTPException detail payloads into ErrorResponse."""
+    if isinstance(exc.detail, dict) and {"schema_version", "ok", "error_code", "error_payload"}.issubset(
+        exc.detail,
+    ):
+        return JSONResponse(status_code=exc.status_code, content=exc.detail)
+
     if isinstance(exc.detail, dict) and {"error_code", "http_status", "message"}.issubset(
         exc.detail,
     ):

@@ -382,7 +382,7 @@ def _field(value: Any, key: str) -> Any:
 def _field_names(value: Any) -> set[str]:
     if isinstance(value, dict):
         return set(value)
-    model_fields = getattr(value, "model_fields", None)
+    model_fields = getattr(type(value), "model_fields", None)
     if isinstance(model_fields, dict):
         return set(model_fields)
     dataclass_fields = getattr(value, "__dataclass_fields__", None)

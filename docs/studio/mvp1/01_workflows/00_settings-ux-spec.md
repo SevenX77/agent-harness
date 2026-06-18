@@ -130,7 +130,7 @@
 - **Output token**：target 值 + `Use max` 开关。**downgrade 默认策略不需要 UI**〔#3〕——保持默认（allow），不暴露 block/warn 选择控件。
 - **Route max token 摘要**：投影 route capability，只读。
 - **布局**〔#4〕：现 intent 配置布局偏丑，**只调内部布局、不改逻辑**（轻量 UI 优化）。
-- **Token Intent 完整 schema（回填 B1+，2026-06-03；2026-06-18 PM 修正为 role-only）**：`target_output_tokens` 与 `target_context_tokens` 都是 `TokenIntent{mode, value?, downgrade?}`，`mode` 四档：`default` / `maximum_available`（=`Use max`）/ `target`（配 value）/ **`required_minimum`**（达不到 → role-fit 转 Not Fit）。**intent 只在 role 级设（铁律）**：用户只对 **role** 提能力要求（thinking + token + provider_preference），**不逐 model-group、不逐 provider 配 intent**；加进 role 的 route，**匹配 role 要求就用、不匹配就不用**，逻辑到此为止。〔删原"Model-Group 级 intent 默认继承 role 级、可对该组覆盖"与 `inherit` 档——那是过度设计，与 role-only 原则相悖。〕§2.3 现有"target 值 + Use max 开关"只覆盖 `target`/`maximum_available` → UI 至少还要能表达 `required_minimum`（驱动 Not Fit）和 `default`，并补 `target_context_tokens`（现只有 output token）。
+- **Token Intent 完整 schema（回填 B1+，2026-06-03；2026-06-18 PM 修正为 role-only）**：`target_output_tokens` 与 `target_context_tokens` 都是 `TokenIntent{mode, value?, downgrade?}`，`mode` 四档：`default` / `maximum_available`（=`Use max`）/ `target`（配 value）/ **`required_minimum`**（配 value：要求该 route 的**最大可用输出 token ≥ value**；若 route 的输出上限 `< value` → 该 route 对此 role **not_fit、不进 fallback_chain**。语义是"输出下限要求"对比"route 的输出上限"，方向不要写反；`required_minimum` 只约束 output token，不涉 context）。〔实现待补：gateway `_apply_output_token_intent`（把 token 意图落到请求并判 fit 的函数）现仅实现 `maximum_available` / `target`，`required_minimum` 的"低于上限→not_fit"分支尚未落地，按此语义补。〕**intent 只在 role 级设（铁律）**：用户只对 **role** 提能力要求（thinking + token + provider_preference），**不逐 model-group、不逐 provider 配 intent**；加进 role 的 route，**匹配 role 要求就用、不匹配就不用**，逻辑到此为止。〔删原"Model-Group 级 intent 默认继承 role 级、可对该组覆盖"与 `inherit` 档——那是过度设计，与 role-only 原则相悖。〕§2.3 现有"target 值 + Use max 开关"只覆盖 `target`/`maximum_available` → UI 至少还要能表达 `required_minimum`（驱动 Not Fit）和 `default`，并补 `target_context_tokens`（现只有 output token）。
 - **downgrade**：是 `TokenIntent` 上的字段（allow / allow_with_warning / block），**schema 保留、默认 allow、不做 UI**（#3）。
 - **`cost_priority`：mvp1 砍掉（PM 2026-06-03 拍板）** —— 不做 UI，**schema 也不留**；等真有成本优化需求再加。
 
@@ -156,9 +156,11 @@
 - **拖进角色 = 引用（live 同步）**〔#8/#12〕：把束拖进角色后是**引用**，不是快照——**改束 → 所有引用它的角色同步跟着变**（像共享组件实例）。**此条覆盖 765 设计的"快照复制"方案**。落地含义（2026-06-18 PM 补全的边界）：
   - 角色存的是 bundle 引用（`bundle_id`），materializer 物化时**按引用拉取当前束内容**展开成 fallback_chain（**不在拖入时复制**）。「同步」= 物化时永远读束的最新内容，所以束改了，下次物化/测试自然就是新的。
   - **删除级联**：束被删 → 引用它的角色里**那一项引用也随之消失**（不是留个失效快照）；该角色重新物化时少了这串 route（可能转 not-fit，按 §2.5/§6.2 的可执行性判定）。
-  - **role 可覆盖**：因为束在 role 里就是一串 routes（与 model-group 同级），role 对它**照常可调序 / Add / 删 route / 配 provider**——这些是 role 自己的编排，不回写束本体（束是共享的；role 的局部调整只活在该 role 的 routes 数组里）。〔实现细节待定见 §2.6 末尾「待定」〕
+  - **role 可覆盖**：因为束在 role 里就是一串 routes（与 model-group 同级），role 对它**照常可调序 / Add / 删 route / 配 provider**——这些是 role 自己的编排，不回写束本体（束是共享的；role 的局部调整只活在该 role 的 routes 数组里）。〔存储语义见 §2.6 末尾「已定」〕
 
-- **⚠️ 待定（PM 拍板项，实现前必须定）**：「引用 live 同步」与「role 可在引用上局部覆盖（调序/删/加 route）」二者交互的存储语义——role 对一个**被引用的束**做了局部改动后，是 ① 仍存 `bundle_id` 引用 + 一份"该 role 的覆盖 delta"（束再变时按 delta 叠加，冲突如何解？比如束删了 role 没动过的某条 route）；还是 ② 一旦局部改动即"脱离引用、固化成该 role 自己的 routes 快照"（不再随束同步）。两种都自洽但行为不同，**需 PM 定**；定不下来前，前后端会各按理解实现。
+- **✅ 已定（PM 2026-06-18 拍板）：引用 + 局部覆盖的存储语义 = 方案①（引用 + delta），束为源头、删除同步优先。** role 对一个**被引用的束**做局部改动后：仍存 `bundle_id` 引用 + 一份"该 role 的覆盖 delta"（调序 / 删某条 / 加 route / 配 provider 都记成 delta）；物化时**先按引用拉取束的当前内容、再叠加该 role 的 delta**。
+  - **冲突解析铁律——束是源头**：束删掉某条 route，就从该 role 的链里移除，**哪怕 role 对它做过本地覆盖**；role 的局部覆盖只对"仍存在于束里的 route"生效，束里已不存在的 route 上的 delta 自动失效丢弃。
+  - 这样**不需要**"一改就脱离引用、固化成快照"的第二套机制；行为与上面「拖进角色 = 引用（live 同步）」「删除级联」完全一致——束永远是单一真相源，role 的 delta 只是叠加在它之上的局部编排。
 
 ### 2.7 跨页：role 状态 + 快捷 Test 进 Properties 面板〔#11〕
 - **节点 Properties 面板**（作者 / 运行期给节点指定 `llm_role` 的地方）**每个 role 旁加 Test 键** + **展示 role 状态**——快捷验"能不能用"，**不必切到 Settings 再测**。

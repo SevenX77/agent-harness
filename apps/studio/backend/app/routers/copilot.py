@@ -52,13 +52,14 @@ async def prepare_copilot_judge_context(
 ) -> CopilotJudgeResponse:
     """Prepare golden compare refs for Copilot Judge without starting a stream."""
 
-    if not request.run_results_ref:
+    run_results_ref = request.run_results_ref
+    if not run_results_ref:
         raise_missing_judge_ref("run_results_ref", skill_id)
     if not request.baseline_ref and not request.against:
         raise_missing_judge_ref("baseline_ref", skill_id)
     return CopilotJudgeAdapter().prepare(
         skill_id,
-        run_results_ref=request.run_results_ref,
+        run_results_ref=run_results_ref,
         baseline_ref=request.baseline_ref,
         against=request.against,
     )

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, overload
 
 from graph_agent.core.storage_contracts import ObjectRef, RunArtifactIndex
 
@@ -14,7 +14,7 @@ class LocalRunArtifactStore:
     def __init__(self, root: Path):
         self.root = Path(root)
 
-    def begin_run(self, run_id: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    def begin_run(self, run_id: str, metadata: dict[str, Any] | None = None) -> None:
         run_dir = self._run_dir(run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
         sealed_file = run_dir / "sealed"
@@ -34,7 +34,15 @@ class LocalRunArtifactStore:
             manifest = self._read_manifest(manifest_file)
             manifest["metadata"] = metadata
             self._write_manifest(manifest_file, manifest)
-        return {"run_id": run_id}
+        return None
+
+    @overload
+    def put_batch(self, run_id: str, objects: dict[str, bytes]) -> dict[str, ObjectRef]:
+        ...
+
+    @overload
+    def put_batch(self, run_id: str, objects: list[dict[str, Any]]) -> None:
+        ...
 
     def put_batch(
         self,
@@ -56,12 +64,12 @@ class LocalRunArtifactStore:
         blobs_dir.mkdir(parents=True, exist_ok=True)
 
         refs: dict[str, ObjectRef] = {}
-        legacy_objects = isinstance(objects, list)
-        object_items = (
-            ((str(obj["path"]), obj["content"]) for obj in objects)
-            if legacy_objects
-            else ((str(path), content) for path, content in objects.items())
-        )
+        if isinstance(objects, list):
+            legacy_objects = True
+            object_items = [(str(obj["path"]), obj["content"]) for obj in objects]
+        else:
+            legacy_objects = False
+            object_items = [(str(path), content) for path, content in objects.items()]
 
         for path, content in object_items:
             if isinstance(content, str):

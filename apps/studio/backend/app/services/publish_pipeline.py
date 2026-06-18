@@ -194,7 +194,12 @@ class ProductArtifactPublisher:
     def _get_release(self, skill_id: str, release_version: str) -> dict[str, Any] | None:
         get_release = getattr(self.store, "get_release", None)
         if callable(get_release):
-            return get_release(skill_id, release_version)
+            release = get_release(skill_id, release_version)
+            if release is None:
+                return None
+            if not isinstance(release, dict):
+                raise TypeError("store.get_release must return an object or None")
+            return release
         if self.store.has_release(skill_id, release_version):
             return {}
         return None

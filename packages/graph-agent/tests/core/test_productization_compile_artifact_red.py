@@ -4,6 +4,7 @@ import importlib
 import json
 import os
 import shutil
+import zipfile
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -84,6 +85,25 @@ def test_compile_artifact_hash_is_stable_across_temp_roots_and_mtime(
 
     assert first.artifact_ref.content_hash == second.artifact_ref.content_hash
     assert first.execution_fingerprint == second.execution_fingerprint
+
+
+def test_compile_artifact_archive_does_not_use_deflate_compression_for_identity_bytes(
+    tmp_path: Path,
+    mock_skill_resolver: Any,
+) -> None:
+    skill_root = tmp_path / "skill"
+    _write_logic_skill(skill_root)
+
+    manifest = _compile_artifact(skill_root, skill_resolver=mock_skill_resolver)
+
+    assert manifest.artifact_bytes is not None
+    archive_path = tmp_path / "artifact.zip"
+    archive_path.write_bytes(manifest.artifact_bytes)
+    with zipfile.ZipFile(archive_path) as archive:
+        compression = {info.filename: info.compress_type for info in archive.infolist()}
+
+    assert compression
+    assert set(compression.values()) == {zipfile.ZIP_STORED}
 
 
 def test_execution_fingerprint_ignores_ui_metadata(
@@ -238,6 +258,24 @@ def test_compile_artifact_writes_source_map_for_runtime_nodes(
 
     manifest_path = _file_uri_path(manifest.artifact_ref.manifest_ref)
     assert manifest_path.is_file()
+
+
+def test_compile_artifact_does_not_write_manifest_side_effects_into_source_root(
+    tmp_path: Path,
+    mock_skill_resolver: Any,
+) -> None:
+    skill_root = tmp_path / "skill"
+    _write_logic_skill(skill_root)
+
+    manifest = _compile_artifact(skill_root, skill_resolver=mock_skill_resolver)
+
+    manifest_path = _file_uri_path(manifest.artifact_ref.manifest_ref)
+    source_map_path = _file_uri_path(manifest.source_map_ref)
+    assert manifest_path.is_file()
+    assert source_map_path.is_file()
+    assert skill_root not in manifest_path.parents
+    assert skill_root not in source_map_path.parents
+    assert not (skill_root / ".graph_agent").exists()
 
 
 def _file_uri_path(ref: str) -> Path:

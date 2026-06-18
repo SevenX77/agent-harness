@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import copy
-import hashlib
-import json
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -41,29 +38,18 @@ def serialize_graph_topology(
     )
 
 
-def execution_fingerprint(graph: dict[str, Any]) -> str:
-    g = _without_ui_metadata(copy.deepcopy(graph))
+def serialize_graph_topology_from_markdown(
+    *,
+    skill_id: str,
+    original_md: str,
+    phases: Sequence[GraphPhaseRef],
+) -> str:
+    from app.core.adapters.engine import (
+        serialize_graph_topology_from_markdown as sdk_serialize_graph_topology_from_markdown,
+    )
 
-    canonical = json.dumps(g, sort_keys=True)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def _without_ui_metadata(value: Any) -> Any:
-    ui_only_keys = {
-        "ui",
-        "metadata",
-        "comments",
-        "viewport",
-        "selected_nodes",
-        "editor_decorations",
-        "position",
-    }
-    if isinstance(value, dict):
-        return {
-            key: _without_ui_metadata(child)
-            for key, child in value.items()
-            if key not in ui_only_keys
-        }
-    if isinstance(value, list):
-        return [_without_ui_metadata(item) for item in value]
-    return value
+    return sdk_serialize_graph_topology_from_markdown(
+        skill_id=skill_id,
+        original_md=original_md,
+        phases=phases,
+    )

@@ -6,7 +6,7 @@ import hmac
 from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
 from datetime import date, datetime
-from typing import Any
+from typing import Any, cast
 
 from fastapi.responses import JSONResponse
 from pydantic import SecretStr, ValidationError
@@ -36,9 +36,12 @@ def _invoke(call_owner: Callable[[], Any]) -> dict[str, Any]:
     except (ValueError, ValidationError) as exc:
         return _failure("loopback.validation_failed", _validation_payload(exc))
     except Exception:
-        return JSONResponse(
-            status_code=500,
-            content=_failure("loopback.internal_error", {"detail": "Loopback owner failed"}),
+        return cast(
+            dict[str, Any],
+            JSONResponse(
+                status_code=500,
+                content=_failure("loopback.internal_error", {"detail": "Loopback owner failed"}),
+            ),
         )
 
 

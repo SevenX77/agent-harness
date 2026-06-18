@@ -7,7 +7,7 @@ import time
 from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 from inspect import Parameter, Signature
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from langchain_core.callbacks.manager import (
     AsyncCallbackManagerForLLMRun,
@@ -36,15 +36,18 @@ class _PredictGatewayChatModelMixin:
     max_tokens: int
     temperature: float
     event_callbacks: Sequence[Callback]
+    bound_tools: tuple[Any, ...]
+    tool_choice: str | None
+    tool_kwargs: dict[str, object]
     probe_before_call: bool
     thinking_enabled: bool | None
     cache: Any
     verbose: bool
-    tags: list[str]
+    tags: list[str] | None
     metadata: dict[str, Any] | None
     custom_get_token_ids: Any
     rate_limiter: Any
-    disable_streaming: bool
+    disable_streaming: bool | Literal["tool_calling"]
     output_version: str | None
     profile: Any
 
@@ -246,7 +249,7 @@ class PredictGatewayChatModel(_PredictGatewayChatModelMixin, BaseChatModel):
         return cast(Runnable[LanguageModelInput, AIMessage], bound)
 
 
-PredictGatewayChatModel.__signature__ = Signature(  # type: ignore[attr-defined]
+PredictGatewayChatModel.__signature__ = Signature(
     parameters=[
         Parameter("role_name", Parameter.POSITIONAL_OR_KEYWORD, annotation="str"),
         Parameter("resolved_role", Parameter.POSITIONAL_OR_KEYWORD, annotation="Any"),

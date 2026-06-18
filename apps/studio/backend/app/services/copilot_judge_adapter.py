@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, NoReturn
 
 from app.core.exceptions import error_response, raise_error_response
 from app.models.golden import CopilotJudgeDiffSummary, CopilotJudgeResponse
@@ -114,7 +114,7 @@ def validate_copilot_judge_refs(
     run_id = run_parts[2]
 
     baseline_parts = _ref_parts(baseline_ref) if baseline_ref is not None else None
-    if baseline_parts is not None and (
+    if baseline_ref is not None and baseline_parts is not None and (
         len(baseline_parts) == 4
         and baseline_parts[0] == skill_id
         and baseline_parts[1] == "golden"
@@ -122,7 +122,7 @@ def validate_copilot_judge_refs(
     ):
         baseline_id = baseline_parts[2]
         normalized_baseline_ref = baseline_ref
-    elif baseline_parts is not None and (
+    elif baseline_ref is not None and baseline_parts is not None and (
         len(baseline_parts) == 4
         and baseline_parts[0] == ".workspace"
         and baseline_parts[1] == "golden"
@@ -147,7 +147,7 @@ def validate_copilot_judge_refs(
     )
 
 
-def raise_missing_judge_ref(ref_kind: str, skill_id: str) -> None:
+def raise_missing_judge_ref(ref_kind: str, skill_id: str) -> NoReturn:
     raise_error_response(
         error_response(
             error_code="copilot.judge_ref_missing",
@@ -171,7 +171,7 @@ def _ref_parts(ref: str) -> tuple[str, ...] | None:
     return path.parts
 
 
-def _raise_invalid_judge_ref(ref_kind: str, ref: str, skill_id: str) -> None:
+def _raise_invalid_judge_ref(ref_kind: str, ref: str, skill_id: str) -> NoReturn:
     raise_error_response(
         error_response(
             error_code="copilot.judge_ref_invalid",

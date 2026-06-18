@@ -7,10 +7,11 @@ import re
 import threading
 import time
 import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from app.core.adapters.http_transport import StudioAdapterError
 
@@ -258,7 +259,7 @@ class LocalRuntimeStateStore:
             from graph_agent.core.checkpointer import resolve_checkpointer
 
             active_checkpointer = resolve_checkpointer(checkpointer_spec)
-        if active_checkpointer is None or active_checkpointer is True:
+        if active_checkpointer is None or isinstance(active_checkpointer, bool):
             return None
 
         checkpoints = list(active_checkpointer.list({"configurable": {"thread_id": safe_run_id}}))
@@ -299,6 +300,17 @@ class LocalRuntimeStateStore:
                     "detail": "Lease could not be read",
                 },
             ) from exc
+
+        if not isinstance(data, dict):
+            raise StudioAdapterError(
+                "state.lease_fenced",
+                {
+                    "run_id": run_id,
+                    "lease_id": lease.lease_id,
+                    "action": action,
+                    "detail": "Lease record must be an object",
+                },
+            )
 
         self._assert_lease_matches(run_id, lease, data, action=action)
         return data

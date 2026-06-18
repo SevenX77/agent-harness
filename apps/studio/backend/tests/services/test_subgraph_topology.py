@@ -140,7 +140,7 @@ async def test_subgraph_path_for_phase_ignores_target_skill(tmp_path: Path) -> N
         "---\ntarget_skill: legacy-child\nvalidator: false\n---\n",
         encoding="utf-8",
     )
-    assert skill_service._subgraph_path_for_phase(tmp_path / "skill", "review") is None
+    assert skill_service.read_subgraph_path(tmp_path / "skill", "review") is None
 
 
 @pytest.mark.anyio
@@ -166,7 +166,7 @@ async def test_resolve_child_graph_topology_returns_child_phases(
     _write_child_graph(child_dir, "child-graph")
 
     storage = LocalFilesystemBackend(tmp_path)
-    result = await skill_service.resolve_child_graph_topology(
+    result = await skill_service.get_child_graph_topology(
         "default",
         "parent",
         str(child_dir),
@@ -202,7 +202,7 @@ async def test_resolve_child_graph_topology_rejects_relative_path(
 
     storage = LocalFilesystemBackend(tmp_path)
     with pytest.raises(HTTPException) as exc_info:
-        await skill_service.resolve_child_graph_topology(
+        await skill_service.get_child_graph_topology(
             "default",
             "parent",
             "relative/child",
@@ -237,7 +237,7 @@ async def test_resolve_child_graph_topology_rejects_path_outside_boundary(
 
     storage = LocalFilesystemBackend(tmp_path)
     with pytest.raises(HTTPException) as exc_info:
-        await skill_service.resolve_child_graph_topology(
+        await skill_service.get_child_graph_topology(
             "default",
             "parent",
             str(outside_dir),
@@ -271,7 +271,7 @@ async def test_resolve_child_graph_topology_missing_graph_md(
 
     storage = LocalFilesystemBackend(tmp_path)
     with pytest.raises(HTTPException) as exc_info:
-        await skill_service.resolve_child_graph_topology(
+        await skill_service.get_child_graph_topology(
             "default",
             "parent",
             str(empty_child),

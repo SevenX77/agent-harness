@@ -1,48 +1,49 @@
-from app.models.skills import SerializeGraphReq
-from app.services.canvas_errors import CanvasSerializerFatal
-from app.services.skills import _validate_canvas_topology
+from app.core.adapters.engine import (
+    GraphPhaseRef,
+    GraphTopologySerializationError,
+    serialize_graph_topology_from_markdown,
+)
+
+
+_GRAPH_MD = """---
+schema_version: "v0.3.0"
+name: serializer-validation
+io:
+  inputs:
+    type: object
+    properties: {}
+  outputs:
+    type: object
+    properties: {}
+phases:
+  - init
+---
+<phase depends_on="input" output>init</phase>
+"""
 
 
 def test_canvas_serializer_allows_disconnected_phase_nodes() -> None:
-    request = SerializeGraphReq.model_validate(
-        {
-            "phases": [
-                {
-                    "id": "init",
-                    "src": "phases/init/LOGIC.md",
-                    "mode": "logic",
-                    "depends_on": [],
-                },
-                {
-                    "id": "agent",
-                    "src": "phases/agent/SKILL.md",
-                    "mode": "skill",
-                    "depends_on": [],
-                },
-            ]
-        }
+    markdown = serialize_graph_topology_from_markdown(
+        skill_id="serializer-validation",
+        original_md=_GRAPH_MD,
+        phases=[
+            GraphPhaseRef(id="init", src="phases/init/LOGIC.md", depends_on=[]),
+            GraphPhaseRef(id="agent", src="phases/agent/SKILL.md", depends_on=[]),
+        ],
     )
 
-    _validate_canvas_topology(request)
+    assert '<phase depends_on="input" output>init</phase>' in markdown
+    assert '<phase depends_on="input" output>agent</phase>' in markdown
 
 
 def test_canvas_serializer_still_rejects_unknown_dependencies() -> None:
-    request = SerializeGraphReq.model_validate(
-        {
-            "phases": [
-                {
-                    "id": "agent",
-                    "src": "phases/agent/SKILL.md",
-                    "mode": "skill",
-                    "depends_on": ["missing"],
-                },
-            ]
-        }
-    )
-
     try:
-        _validate_canvas_topology(request)
-    except CanvasSerializerFatal as exc:
+        serialize_graph_topology_from_markdown(
+            skill_id="serializer-validation",
+            original_md=_GRAPH_MD,
+            phases=[GraphPhaseRef(id="agent", src="phases/agent/SKILL.md", depends_on=["missing"])],
+        )
+    except GraphTopologySerializationError as exc:
         assert exc.code == "serializer_orphan"
     else:
         raise AssertionError("expected unknown dependency to be rejected")

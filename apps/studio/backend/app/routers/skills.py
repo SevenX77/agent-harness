@@ -22,6 +22,12 @@ from app.core.backends import (
     get_storage,
 )
 from app.core.exceptions import error_response, raise_error_response
+from app.core.native_fs_write_boundary import (
+    FULL_SKILL_SOURCE_WRITE_ROUTE,
+    SKILL_FILE_SOURCE_WRITE_ROUTE,
+    source_write_fallback_header,
+    source_write_fallback_value,
+)
 from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
 from app.models.git_collab import SyncSkillReq
@@ -63,9 +69,9 @@ from app.services.skills import (
     create_new_skill,
     delete_skill,
     fork_skill,
+    get_child_graph_topology,
     get_skill_detail,
     list_skill_summaries,
-    resolve_child_graph_topology,
     resolve_skill_dir_async,
     serialize_skill_graph_markdown,
     update_skill_file,
@@ -76,6 +82,31 @@ from app.services.validator import ValidationHttpError, validate_skill_input_fil
 router = APIRouter(prefix="/api/skills", tags=["skills"])
 git_service = GitLocalService()
 RELEASE_SNAPSHOT_PREFIX = "release-"
+SKILL_FILE_WRITE_FALLBACK_HEADER = source_write_fallback_header(SKILL_FILE_SOURCE_WRITE_ROUTE)
+FULL_SKILL_WRITE_FALLBACK_HEADER = source_write_fallback_header(FULL_SKILL_SOURCE_WRITE_ROUTE)
+
+
+def _require_browser_write_fallback(
+    write_fallback: str | None,
+    *,
+    route_key: tuple[str, str],
+) -> None:
+    fallback_header = source_write_fallback_header(route_key)
+    fallback_value = source_write_fallback_value(route_key).strip().lower()
+    if write_fallback is not None and write_fallback.strip().lower() == fallback_value:
+        return
+    raise_error_response(
+        error_response(
+            error_code="NATIVE_FS_REQUIRED",
+            http_status=409,
+            message="Mutating workspace writes require native-fs unless browser fallback is explicit",
+            details={
+                "required_header": fallback_header,
+                "required_value": fallback_value,
+            },
+            retry_strategy="not_retryable",
+        )
+    )
 
 
 def _record_release_history_snapshot(skill_dir: Path | None, release_manifest: dict[str, object]) -> None:
@@ -326,7 +357,7 @@ async def get_subgraph_child_topology(
     metadata: MetadataStore = Depends(get_metadata),
 ) -> ChildGraphTopology:
     """Resolve a subgraph's child GRAPH.md by absolute path within the boundary."""
-    return await resolve_child_graph_topology(user_id, skill_id, path, storage, metadata)
+    return await get_child_graph_topology(user_id, skill_id, path, storage, metadata)
 
 
 @router.post("/{skill_id}/compile", response_model=CompileSuccess)
@@ -777,7 +808,9 @@ async def update_skill(
     user_id: str = Depends(get_auth_user_id),
     storage: StorageBackend = Depends(get_storage),
     metadata: MetadataStore = Depends(get_metadata),
+    write_fallback: str | None = Header(default=None, alias=FULL_SKILL_WRITE_FALLBACK_HEADER),
 ) -> SkillDetail | JSONResponse:
+    _require_browser_write_fallback(write_fallback, route_key=FULL_SKILL_SOURCE_WRITE_ROUTE)
     try:
         return await update_skill_files(
             user_id,
@@ -806,7 +839,9 @@ async def update_skill_file_endpoint(
     user_id: str = Depends(get_auth_user_id),
     storage: StorageBackend = Depends(get_storage),
     metadata: MetadataStore = Depends(get_metadata),
+    write_fallback: str | None = Header(default=None, alias=SKILL_FILE_WRITE_FALLBACK_HEADER),
 ) -> UpdateSkillFileRes | JSONResponse:
+    _require_browser_write_fallback(write_fallback, route_key=SKILL_FILE_SOURCE_WRITE_ROUTE)
     try:
         new_hash = await update_skill_file(
             user_id,

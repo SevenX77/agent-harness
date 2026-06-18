@@ -1475,11 +1475,12 @@ def _build_phase_document(
             ast: PhaseAST = logic_ast
         elif mode == "subgraph":
             if "target_skill" in data:
+                target_skill = data["target_skill"]
                 _fatal(
                     path,
                     _frontmatter_key_line(path, "target_skill"),
                     "[F-v3-subgraph-target-skill-invalid] "
-                    "SUBGRAPH.md target_skill is deprecated; migrate to absolute path: "
+                    f"SUBGRAPH.md target_skill={target_skill!r} is deprecated; migrate to absolute path: "
                     "path: /absolute/path/to/child",
                 )
             ast = SubgraphNodeAST.model_validate(data)

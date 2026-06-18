@@ -17,6 +17,7 @@ import {
   saveGoldenBaseline,
   serializeSkillGraph,
   startRun,
+  writeSkillFile,
   wsUrl,
 } from './client'
 
@@ -365,6 +366,30 @@ describe('api client auth token', () => {
       elapsed_ms: 1.5,
       current_hash: 'def456',
     })
+  })
+
+  it('browser writeSkillFile marks FastAPI writes as explicit fallback', async () => {
+    runtimeMocks.isTauriRuntime.mockReturnValue(false)
+    api.defaults.adapter = async (config): Promise<AxiosResponse> => {
+      expect(config.method).toBe('post')
+      expect(config.url).toBe('/skills/text-segmentation/files/GRAPH.md')
+      expect(config.headers.get('X-Studio-Write-Fallback')).toBe('browser')
+      expect(JSON.parse(String(config.data))).toEqual({
+        content: 'next graph',
+        expected_hash: 'old-hash',
+      })
+      return {
+        data: { path: 'GRAPH.md', hash: 'next-hash' },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    }
+
+    await expect(
+      writeSkillFile('text-segmentation', 'GRAPH.md', 'next graph', 'old-hash'),
+    ).resolves.toEqual({ path: 'GRAPH.md', hash: 'next-hash' })
   })
 
   it('posts Copilot Bash approval decisions to the safe-write endpoint', async () => {

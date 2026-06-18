@@ -182,8 +182,11 @@ def sync_product_artifact_release(
     metadata["artifact_ref"] = artifact_ref
     metadata["package_kind"] = "product_artifact"
     metadata["release_version"] = release_manifest["release_version"]
-    return registry.sync_release_manifest(
+    synced = registry.sync_release_manifest(
         skill_id=skill_id,
         release_manifest=release_manifest,
         metadata=metadata,
     )
+    if not isinstance(synced, dict):
+        raise ValueError("registry sync_release_manifest must return an object")
+    return synced

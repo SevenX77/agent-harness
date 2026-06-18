@@ -159,7 +159,7 @@ def test_put_updates_indexed_skill_atomically_and_invalid_content_preserves_file
     files = _agent_skill_files("idea-generator")
     files["GRAPH.md"] = updated
 
-    ok_response = client.put("/api/skills/idea-generator", json={"files": files})
+    ok_response = client.put("/api/skills/idea-generator", json={"files": files}, headers=FALLBACK_HEADERS)
 
     assert ok_response.status_code == 200
     assert ok_response.json()["manifest"]["description"] == "Updated ideas"
@@ -168,7 +168,7 @@ def test_put_updates_indexed_skill_atomically_and_invalid_content_preserves_file
 
     bad_files = dict(files)
     bad_files["GRAPH.md"] = "not yaml"
-    bad_response = client.put("/api/skills/idea-generator", json={"files": bad_files})
+    bad_response = client.put("/api/skills/idea-generator", json={"files": bad_files}, headers=FALLBACK_HEADERS)
 
     assert bad_response.status_code == 422
     assert "Updated ideas" in skill_path.read_text(encoding="utf-8")
@@ -1349,11 +1349,17 @@ def _write_run_record(
     metadata = RunMetadata(run_id=run_id, status="success", started_at=started_at)
     (run_dir / "run_metadata.json").write_text(metadata.model_dump_json(), encoding="utf-8")
     (run_dir / "input_data.json").write_text(json.dumps(input_data), encoding="utf-8")
-    _write_run_artifact_store(run_dir, final_state=final_state, trace_jsonl="")
+    _write_run_artifact_store(run_dir, final_state=final_state, trace_jsonl="", input_data=input_data)
     return run_dir
 
 
-def _write_run_artifact_store(run_dir: Path, *, final_state: dict[str, Any], trace_jsonl: str) -> None:
+def _write_run_artifact_store(
+    run_dir: Path,
+    *,
+    final_state: dict[str, Any],
+    trace_jsonl: str,
+    input_data: dict[str, Any] | None = None,
+) -> None:
     from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
 
     store = LocalRunArtifactStore(root=run_dir.parent.parent)
@@ -1383,6 +1389,7 @@ def _write_run_artifact_store(run_dir: Path, *, final_state: dict[str, Any], tra
             "result.json": snapshot.model_dump_json().encode("utf-8"),
             "nodes/setup/outputs.json": json.dumps(final_state).encode("utf-8"),
             "final_state.json": json.dumps(final_state).encode("utf-8"),
+            "input_data.json": json.dumps(input_data or {}).encode("utf-8"),
             "trace.jsonl": trace_jsonl.encode("utf-8"),
         },
     )

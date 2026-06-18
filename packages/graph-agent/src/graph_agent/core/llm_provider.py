@@ -56,7 +56,7 @@ class LLMProviderChatModel(BaseChatModel):
     role: str
     phase_name: str | None = None
     model_name: str | None = None
-    callbacks: tuple[Any, ...] = Field(default_factory=tuple)
+    callbacks: Any = Field(default_factory=tuple)
     model_override: str | None = None
     bound_tools: tuple[Any, ...] = Field(default_factory=tuple)
     tool_choice: str | None = None

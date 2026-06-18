@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { FlaskConical, Loader2, Plus, Trash2 } from "lucide-react"
+import { ChevronsUpDown, FlaskConical, Loader2, Plus, Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
@@ -27,18 +27,22 @@ import {
 } from "@/components/ui/field"
 import { requestDeleteConfirmationToast } from "@/components/ui/delete-confirm-toast"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { SaveStatusBadge } from "@/components/ui/save-status-badge"
 import { SectionTitle } from "../shared"
 import { CopilotModelGroupCard } from "./CopilotModelGroupCard"
 import {
   deriveCopilotCandidateGroups,
   applyCopilotModelGroupSelection,
+  buildCopilotRoleEntry,
+  pickDefaultCopilotGroupIds,
   type CopilotRolePreview,
   type CopilotRoutePreview,
 } from "./copilot-role-derivation"
@@ -107,6 +111,43 @@ export function CopilotTab({
           })
       : []
   }, [data, realCopilotRoles])
+
+  // #56 dynamic float: when the user has never created a copilot role, surface
+  // the family-ladder defaults (Claude opus-4.8→4.7, DeepSeek v4-pro→v3.2-pro)
+  // as built-in cards. These are RENDERED from candidates, not written to disk —
+  // they only enter the save chain when the user acts on one (atom-56 ①).
+  const floatedRoles = useMemo(() => {
+    return pickDefaultCopilotGroupIds(realCopilotRoles)
+      .map((id) => realCopilotRoles.find((candidate) => candidate.id === id))
+      .filter((group): group is CopilotRolePreview => Boolean(group))
+      .map((group) => ({
+        id: group.id,
+        title: group.title,
+        description: group.description,
+        source: group.source, // floated set == built_in set; single source = deriveCopilotCandidateGroups
+        modelGroupId: group.id,
+        fallback_chain: buildCopilotRoleEntry(group).fallback_chain ?? [],
+      }))
+  }, [realCopilotRoles])
+
+  const displayRoles = useMemo(
+    () => (activeRoles.length > 0 ? activeRoles : floatedRoles),
+    [activeRoles, floatedRoles],
+  )
+
+  const selectedModelGroupIds = useMemo(
+    () =>
+      new Set(
+        displayRoles
+          .map((role) => role.modelGroupId)
+          .filter((id): id is string => typeof id === "string" && id !== null),
+      ),
+    [displayRoles],
+  )
+  const modelGroupOptions = useMemo(
+    () => claudeModelGroups.filter((modelGroup) => !selectedModelGroupIds.has(modelGroup.id)),
+    [claudeModelGroups, selectedModelGroupIds],
+  )
 
   const [testingRoleIds, setTestingRoleIds] = useState<ReadonlySet<string>>(() => new Set())
   const [routeStatusOverrides, setRouteStatusOverrides] = useState<Record<string, CopilotRouteJobStatus>>({})
@@ -179,14 +220,30 @@ export function CopilotTab({
     )
   }
 
-  const selectedModelGroupIds = new Set(
-    activeRoles.map((role) => role.modelGroupId).filter((id): id is string => typeof id === "string" && id !== null),
-  )
-  const modelGroupOptions = claudeModelGroups.filter((modelGroup) => !selectedModelGroupIds.has(modelGroup.id))
+  // A floated built-in default is not persisted until acted on. Any edit (reorder,
+  // remove group, test) first materializes it into data.roles via buildCopilotRoleEntry.
+  function ensureRolePersisted(current: RolesData, roleId: string): RolesData {
+    if (current.roles[roleId]) return current
+    const group = claudeModelGroups.find((candidate) => candidate.id === roleId)
+    if (!group) return current
+    return { ...current, roles: { ...current.roles, [roleId]: buildCopilotRoleEntry(group) } }
+  }
+
+  function removeModelGroup(roleId: string) {
+    if (!data) return
+    const base = ensureRolePersisted(data, roleId)
+    const role = base.roles[roleId]
+    if (!role) return
+    // #61: single-group constraint → "remove group" = deselect back to an empty
+    // card (role + role_kind preserved), NOT deleting the role (#64).
+    const nextRoles = { ...base.roles, [roleId]: { ...role, active_model: "", models: {}, fallback_chain: [] } }
+    onChange({ ...base, roles: nextRoles })
+  }
 
   function updateRouteOrder(roleId: string, nextOrder: string[]) {
     if (!data) return
-    const nextRoles = { ...data.roles }
+    const base = ensureRolePersisted(data, roleId)
+    const nextRoles = { ...base.roles }
     const role = nextRoles[roleId]
     if (!role) return
 
@@ -204,7 +261,7 @@ export function CopilotTab({
         }
       }
     }
-    onChange({ ...data, roles: nextRoles })
+    onChange({ ...base, roles: nextRoles })
   }
 
   function addDraftCopilotRole() {
@@ -251,6 +308,10 @@ export function CopilotTab({
   }
 
   async function testRoleRoutes(role: { id: string; title: string }) {
+    // A floated built-in default enters the save chain when tested (atom-56 ①).
+    if (data && !data.roles[role.id]) {
+      onChange(ensureRolePersisted(data, role.id))
+    }
     setTestingRoleIds((current) => {
       const next = new Set(current)
       next.add(role.id)
@@ -296,7 +357,7 @@ export function CopilotTab({
             {t("copilot.claudeAgentSdk")}
           </CatalogAccordionTrigger>
           <CatalogAccordionContent className="-mx-2 space-y-4 pb-5">
-            {activeRoles.map((role) => {
+            {displayRoles.map((role) => {
               const modelGroup = role.modelGroupId
                 ? claudeModelGroups.find((candidate) => candidate.id === role.modelGroupId)
                 : null
@@ -331,6 +392,7 @@ export function CopilotTab({
                   onTest={() => testRoleRoutes(role)}
                   onDeleteRole={() => requestDeleteCopilotRole(role)}
                   onUpdateRouteOrder={(nextOrder) => updateRouteOrder(role.id, nextOrder)}
+                  onRemoveModelGroup={() => removeModelGroup(role.id)}
                 />
               )
             })}
@@ -362,6 +424,7 @@ function CopilotRoleCard({
   onTest,
   onDeleteRole,
   onUpdateRouteOrder,
+  onRemoveModelGroup,
 }: {
   role: { id: string; title: string; source: "built_in" | "third_party" }
   modelGroup: CopilotRolePreview
@@ -373,6 +436,7 @@ function CopilotRoleCard({
   onTest: () => void
   onDeleteRole: () => void
   onUpdateRouteOrder: (nextOrder: string[]) => void
+  onRemoveModelGroup: () => void
 }) {
   const compatibleRoutes = compatibleRoutesForRole(modelGroup)
   const readyCount = copilotBackendReadyCount(compatibleRoutes, routeStatusOverrides)
@@ -429,6 +493,7 @@ function CopilotRoleCard({
           routes={chainRoutes}
           appendableRoutes={appendableRoutes}
           routeStatusOverrides={routeStatusOverrides}
+          onRemoveModelGroup={onRemoveModelGroup}
           onAddRoute={(routeId) => onUpdateRouteOrder([...routeOrder, routeId])}
           onRemoveRoute={(routeId) => onUpdateRouteOrder(routeOrder.filter((candidate) => candidate !== routeId))}
           onReorderRoutes={(activeRouteId, overRouteId) => {
@@ -454,6 +519,9 @@ function EmptyCopilotRoleCard({
   onSelectModelGroup: (modelGroupId: string) => void
   onDeleteRole: () => void
 }) {
+  const [open, setOpen] = useState(false)
+  const hasGroups = modelGroups.length > 0
+
   return (
     <Card
       size="sm"
@@ -466,23 +534,25 @@ function EmptyCopilotRoleCard({
         <div className="min-w-0">
           <CardTitle className="flex min-w-0 flex-wrap items-center gap-2">
             {role.title}
-            <Badge variant="secondary">Third-party</Badge>
+            <Badge variant="secondary">{role.source === "built_in" ? "Built-in" : "Third-party"}</Badge>
           </CardTitle>
           <CardDescription>Select one model group to configure the Copilot fallback chain.</CardDescription>
         </div>
-        <CardAction className="row-start-2 justify-self-start sm:row-start-1 sm:justify-self-end">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label={`Delete ${role.title}`}
-            data-copilot-role-delete-trigger="true"
-            className="text-muted-foreground hover:text-destructive"
-            onClick={onDeleteRole}
-          >
-            <Trash2 data-role-icon="true" className="size-4" />
-          </Button>
-        </CardAction>
+        {role.source === "third_party" ? (
+          <CardAction className="row-start-2 justify-self-start sm:row-start-1 sm:justify-self-end">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Delete ${role.title}`}
+              data-copilot-role-delete-trigger="true"
+              className="text-muted-foreground hover:text-destructive"
+              onClick={onDeleteRole}
+            >
+              <Trash2 data-role-icon="true" className="size-4" />
+            </Button>
+          </CardAction>
+        ) : null}
       </CardHeader>
       <CardContent>
         <FieldGroup>
@@ -491,27 +561,75 @@ function EmptyCopilotRoleCard({
               <FieldLabel>Model group</FieldLabel>
               <FieldDescription>Only groups with Anthropic-compatible routes are listed.</FieldDescription>
             </FieldContent>
-            <Select onValueChange={onSelectModelGroup} disabled={modelGroups.length === 0}>
-              <SelectTrigger
-                size="sm"
-                className="w-full min-w-0 sm:w-64"
-                data-copilot-model-group-select="true"
-              >
-                <SelectValue placeholder={modelGroups.length > 0 ? "Choose model group" : "No compatible model groups"} />
-              </SelectTrigger>
-              <SelectContent>
-                {modelGroups.map((modelGroup) => (
-                  <SelectItem key={modelGroup.id} value={modelGroup.id} data-copilot-model-option={modelGroup.id}>
-                    {modelGroup.modelLabel}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Popover open={open} onOpenChange={setOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  role="combobox"
+                  aria-expanded={open}
+                  disabled={!hasGroups}
+                  data-copilot-model-group-select="true"
+                  className="w-full min-w-0 justify-between font-normal sm:w-64"
+                >
+                  <span className="truncate text-muted-foreground">
+                    {hasGroups ? "Choose model group" : "No compatible model groups"}
+                  </span>
+                  <ChevronsUpDown className="ml-2 size-3.5 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-[min(20rem,var(--radix-popover-trigger-width))] p-0">
+                <Command filter={copilotGroupComboboxFilter}>
+                  <CommandInput placeholder="Search model groups…" data-copilot-model-group-search="true" />
+                  <CommandList>
+                    <CommandEmpty>No model group found.</CommandEmpty>
+                    <CommandGroup>
+                      {modelGroups.map((modelGroup) => (
+                        <CommandItem
+                          key={modelGroup.id}
+                          value={copilotGroupSearchValue(modelGroup)}
+                          data-copilot-model-option={modelGroup.id}
+                          onSelect={() => {
+                            onSelectModelGroup(modelGroup.id)
+                            setOpen(false)
+                          }}
+                        >
+                          {modelGroup.modelLabel}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </Field>
         </FieldGroup>
       </CardContent>
     </Card>
   )
+}
+
+/** Compact, separator-insensitive normalization for combobox matching (§2.1 parity). */
+export function normalizeForSearch(value: string): string {
+  return value.toLowerCase().replace(/[\s\-_./:]+/g, "")
+}
+
+/** Searchable haystack for a copilot group: display name + canonical id + provider labels + model ids (atom-63 ②). */
+export function copilotGroupSearchValue(group: CopilotRolePreview): string {
+  return [
+    group.modelLabel,
+    group.id,
+    ...group.availableRoutes.flatMap((route) => [route.providerLabel, route.providerModelId]),
+  ].join(" ")
+}
+
+/** cmdk filter: every search token must appear in the haystack (multi-token AND, separator-insensitive). */
+export function copilotGroupComboboxFilter(value: string, search: string): number {
+  const haystack = normalizeForSearch(value)
+  const tokens = search.toLowerCase().split(/\s+/).filter(Boolean)
+  if (tokens.length === 0) return 1
+  return tokens.every((token) => haystack.includes(normalizeForSearch(token))) ? 1 : 0
 }
 
 function compatibleRoutesForRole(role: CopilotRolePreview): CopilotRoutePreview[] {

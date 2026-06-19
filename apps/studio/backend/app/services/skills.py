@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import shutil
+import tempfile
 import time
 import uuid
 from collections.abc import Iterable
@@ -320,6 +321,72 @@ def lint_skill_path(skill_path: Path) -> LintResult:
         errors=[],
         phases_summary=_phase_summary_from_compiled(compiled),
     )
+
+
+def lint_skill_changed_markdown(skill_id: str, markdown: str) -> LintResult:
+    """Lint the editor's *unsaved* GRAPH.md body for a skill (no disk write).
+
+    The lint kernel stays engine-owned (compile-lint F1/F5): we hand the changed
+    markdown to the engine compiler and surface its diagnostics. Persistence is
+    Autosave / native-fs's job, so the skill store on disk is never mutated. The
+    engine compiler is path-based and also reads sibling files (phase docs,
+    inline IO), so we materialize an *ephemeral* copy of the skill tree in the OS
+    temp dir, overwrite only GRAPH.md with the changed body, compile that copy
+    with caching off, and tear the copy down — nothing touches the skill store.
+    """
+    logger.info("lint changed-markdown skill_id=%s bytes=%d", skill_id, len(markdown))
+    disk_dir = _resolve_skill_dir_for_lint(skill_id)
+    with tempfile.TemporaryDirectory(prefix="studio-lint-") as tmp_root:
+        sandbox = Path(tmp_root) / "skill"
+        _materialize_lint_sandbox(disk_dir, markdown, sandbox)
+        result = lint_skill_path(sandbox)
+    logger.info("lint changed-markdown skill_id=%s status=%s", skill_id, result.status)
+    return _relocate_lint_files_to_skill_root(result, sandbox)
+
+
+def _resolve_skill_dir_for_lint(skill_id: str) -> Path | None:
+    """Resolve the on-disk skill dir, tolerating a not-yet-saved skill.
+
+    A brand-new skill the user is drafting may have no disk tree yet; linting its
+    unsaved body must still work, so a missing skill resolves to ``None`` and the
+    sandbox is built from the body alone.
+    """
+    try:
+        return resolve_skill_dir(skill_id)
+    except HTTPException:
+        logger.info("lint changed-markdown skill_id=%s has no disk tree; body-only sandbox", skill_id)
+        return None
+
+
+def _materialize_lint_sandbox(disk_dir: Path | None, markdown: str, sandbox: Path) -> None:
+    """Build an ephemeral compile sandbox: disk siblings + the changed GRAPH.md."""
+    if disk_dir is not None and disk_dir.exists():
+        shutil.copytree(disk_dir, sandbox)
+    else:
+        sandbox.mkdir(parents=True, exist_ok=True)
+    (sandbox / "GRAPH.md").write_text(markdown, encoding="utf-8")
+
+
+def _relocate_lint_files_to_skill_root(result: LintResult, sandbox: Path) -> LintResult:
+    """Strip the throwaway sandbox prefix from any absolute file in diagnostics.
+
+    Diagnostics file paths are already skill-relative (e.g. ``GRAPH.md``); this
+    only guards against an absolute sandbox path leaking into the response.
+    """
+    sandbox_str = str(sandbox)
+    relocated = [
+        error.model_copy(update={"file": _strip_sandbox_prefix(error.file, sandbox_str)})
+        if error.file and error.file.startswith(sandbox_str)
+        else error
+        for error in result.errors
+    ]
+    if relocated == result.errors:
+        return result
+    return result.model_copy(update={"errors": relocated})
+
+
+def _strip_sandbox_prefix(file_path: str, sandbox_str: str) -> str:
+    return file_path[len(sandbox_str) :].lstrip("/")
 
 
 async def compile_skill_for_studio(
@@ -1423,15 +1490,48 @@ def _lint_error_from_exception(exc: Exception) -> LintError:
     message = str(exc)
     match = _LOCATION_RE.search(message)
     line = int(match.group("line")) if match else None
+    payload = getattr(exc, "payload", None)
     return LintError(
-        file=_file_from_error_message(message),
+        file=_lint_file_from_payload(payload) or _file_from_error_message(message),
         line=line,
         column=None,
-        error_code=_error_code_from_message(message),
+        error_code=_lint_code_from_payload(payload) or _error_code_from_message(message),
         severity="error",
         message=message,
-        phase_name=_phase_from_location(match.group("loc") if match else None),
+        phase_name=(
+            _lint_phase_from_payload(payload)
+            or _phase_from_location(match.group("loc") if match else None)
+        ),
     )
+
+
+def _lint_code_from_payload(payload: object) -> str | None:
+    """Prefer the engine's typed error code over regex-scraping the message."""
+    code = getattr(payload, "code", None)
+    if not isinstance(code, str) or not code:
+        return None
+    return code.strip("[]") or None
+
+
+def _lint_file_from_payload(payload: object) -> str | None:
+    """Surface the engine's typed ``source_path`` as a skill-relative file."""
+    source_path = getattr(payload, "source_path", None)
+    if not isinstance(source_path, str) or not source_path:
+        return None
+    for candidate in ("GRAPH.md", "io/inputs.json", "io/outputs.json"):
+        if source_path.endswith(candidate):
+            return candidate
+    phase_match = re.search(r"(phases/[A-Za-z0-9_-]+/(?:LOGIC|SUBGRAPH|SKILL)\.md)", source_path)
+    if phase_match:
+        return phase_match.group(1)
+    return Path(source_path).name
+
+
+def _lint_phase_from_payload(payload: object) -> str | None:
+    phase_id = getattr(payload, "phase_id", None)
+    if isinstance(phase_id, str) and phase_id:
+        return phase_id
+    return None
 
 
 def _file_from_error_message(message: str) -> str | None:

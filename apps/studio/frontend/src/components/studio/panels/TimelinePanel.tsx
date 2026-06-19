@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { AlertCircle, ArrowLeft, CheckCircle2, RefreshCw } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { TracePanel } from "@/components/TracePanel"
+import { PromptInspector } from "@/components/PromptInspector"
 import { getRunDetail } from "@/api/client"
-import type { EventEnvelope, RunMetadata } from "@/api/types"
+import type { CallbackEvent, EventEnvelope, RunMetadata } from "@/api/types"
+import { findPromptEvent } from "@/utils/trace"
 import { useRunHistory } from "../../../hooks/useRunHistory"
 import { errorMessage } from "../../../utils/errors"
 import { useWorkspaceContext } from "../WorkspaceContext"
@@ -82,6 +84,14 @@ export function TimelinePanel() {
   const [selected, setSelected] = useState<{ runId: string; events: EventEnvelope[]; metadata: RunMetadata } | null>(null)
   const [traceError, setTraceError] = useState<string | null>(null)
   const [loadingRunId, setLoadingRunId] = useState<string | null>(null)
+  // D8 (prompt 回溯): the historical trace owns its own PromptInspector selection
+  // state. Clicking "Inspect prompt" on any row resolves — via findPromptEvent —
+  // back to the driving prompt_captured event in the same phase.
+  const [promptIndex, setPromptIndex] = useState<number | null>(null)
+  const promptEvent = useMemo<CallbackEvent | null>(() => {
+    if (!selected || promptIndex === null) return null
+    return findPromptEvent(selected.events.map((envelope) => envelope.payload as CallbackEvent), promptIndex)
+  }, [selected, promptIndex])
 
   // D14 mode precedence: the panel has three mutually-exclusive views (edge dot
   // context, a selected run's trace, the run list). A dot click (selectedEdge)
@@ -120,7 +130,10 @@ export function TimelinePanel() {
             type="button"
             variant="ghost"
             size="icon-lg"
-            onClick={() => setSelected(null)}
+            onClick={() => {
+              setSelected(null)
+              setPromptIndex(null)
+            }}
             aria-label="Back to timeline"
           >
             <ArrowLeft className="size-4" />
@@ -133,8 +146,9 @@ export function TimelinePanel() {
           </div>
         </div>
         <div className="min-h-0 flex-1">
-          <TracePanel traceLogs={selected.events} activePhase={null} onSelectPrompt={() => undefined} />
+          <TracePanel traceLogs={selected.events} activePhase={null} onSelectPrompt={setPromptIndex} />
         </div>
+        <PromptInspector promptEvent={promptEvent} onClose={() => setPromptIndex(null)} />
       </div>
     )
   }

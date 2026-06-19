@@ -3,10 +3,10 @@ import { useEffect, useMemo, useState } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 import type { ResumeRunOptions } from "@/api/client"
 import type { SelectedEdge } from "../WorkspaceContext"
 import { edgeTamperResumeOptionsFromJson } from "./edge-tamper"
+import { EdgeTamperEditor } from "./EdgeTamperEditor"
 
 /**
  * Trace-owned dot/context view (D14 / properties F3).
@@ -230,70 +230,34 @@ export function EdgeContextView({
                 </div>
               ) : null}
 
-              <div className="space-y-3 rounded-md border border-border bg-card p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="space-y-1">
-                    <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Tamper downstream resume context
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      Edit resume input only; the historical trace above stays read-only.
-                    </div>
-                    {recordOf(selectedEdge.contextJson).checkpoint_id ? (
-                      <div className="font-mono text-[10px] text-muted-foreground">
-                        {String(recordOf(selectedEdge.contextJson).checkpoint_id)}
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button type="button" variant="outline" size="xs" onClick={() => setTampering(true)}>
-                      Tamper
-                    </Button>
-                    {tampering ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => {
-                          setTamperJson(initialTamperJson)
-                          setTampering(false)
-                          setTamperError(null)
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                    ) : null}
-                  </div>
+              <EdgeTamperEditor
+                value={tamperJson}
+                writable={tampering}
+                onChange={setTamperJson}
+                onStartTamper={() => setTampering(true)}
+                onCancel={() => {
+                  setTamperJson(initialTamperJson)
+                  setTampering(false)
+                  setTamperError(null)
+                }}
+                onResume={() => void handleResumeDownstream()}
+                checkpointId={
+                  recordOf(selectedEdge.contextJson).checkpoint_id
+                    ? String(recordOf(selectedEdge.contextJson).checkpoint_id)
+                    : null
+                }
+                disabledReason={disabledReason}
+                resumeLoading={resumeLoading}
+                resumeDisabled={!onResumeDownstream}
+              />
+              {tamperError ? (
+                <div
+                  role="alert"
+                  className="rounded-md border border-destructive-border bg-destructive-background px-2 py-1 text-xs text-destructive-label"
+                >
+                  {tamperError}
                 </div>
-                {disabledReason ? (
-                  <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                    <Badge variant="destructive">{disabledReason}</Badge>
-                    <span>Checkpoint validity blocks downstream resume.</span>
-                  </div>
-                ) : null}
-                <Textarea
-                  aria-label="Tampered edge context JSON"
-                  value={tamperJson}
-                  readOnly={!tampering}
-                  onChange={(event) => setTamperJson(event.target.value)}
-                  className="min-h-32 font-mono text-xs"
-                />
-                {tamperError ? (
-                  <div className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive">
-                    {tamperError}
-                  </div>
-                ) : null}
-                <div className="flex justify-end">
-                  <Button
-                    type="button"
-                    size="sm"
-                    disabled={Boolean(disabledReason) || !tampering || resumeLoading || !onResumeDownstream}
-                    onClick={() => void handleResumeDownstream()}
-                  >
-                    {disabledReason ? "Resume disabled" : resumeLoading ? "Resuming" : "Resume downstream"}
-                  </Button>
-                </div>
-              </div>
+              ) : null}
 
               <div className="text-[11px] leading-relaxed text-muted-foreground/80">
                 Detailed reducer / filter / inject / persist operations are part of the run trace

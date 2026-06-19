@@ -54,6 +54,7 @@ function baseProps(overrides: Partial<SettingsPageContentProps> = {}): SettingsP
     onDeleteModelBundle: vi.fn(),
     onBeforeRoleTest: vi.fn().mockResolvedValue(null),
     onAfterRoleTest: vi.fn(),
+    onNavigateToApiKeys: vi.fn(),
     ...overrides,
   }
 }

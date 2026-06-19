@@ -469,10 +469,14 @@ function providerKindRank(kind: ModelGroup["provider_models"][number]["provider_
 }
 
 function providerStateRank(state: ModelGroup["provider_models"][number]["ui_state"]): number {
+  // #36 (spec §2.2 "默认选 Ready+Untested+🔵"): historical_ready (🔵, previously
+  // connected) ranks as a default-eligible candidate between ready and untested,
+  // so a group whose strongest provider is 🔵 is still picked by default.
   if (state === "ready") return 0
-  if (state === "untested") return 1
-  if (state === "cooling_down") return 2
-  return 3
+  if (state === "historical_ready") return 1
+  if (state === "untested") return 2
+  if (state === "cooling_down") return 3
+  return 4
 }
 
 function modelGroupSupportsThinking(modelGroup: ModelGroup): boolean {

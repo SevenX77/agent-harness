@@ -19,7 +19,7 @@ import type { SkillGraphNodeData, SkillNodeStatus, SubagentRef } from "@/compone
 import type { ResumeRunOptions } from "@/api/client"
 import { legacySubgraphTargetSkill } from "@/components/studio/subgraph-path"
 import { sha256Hex } from "@/lib/hash"
-import { runPersistedRoleTestJob } from "../settings/LlmRolesTab"
+import { runRoleTestJobToResult } from "../settings/llm-roles/role-test-store"
 import type { FileMeta } from "../file-types"
 import { PanelHeader } from "./_shared/PanelHeader"
 import { roleTestStatusBadge, type RoleTestStatusInput } from "./role-test-status"
@@ -217,9 +217,9 @@ export function PropertiesPanel({
     }
   }
 
-  // Reuses the settings role-test runner (runPersistedRoleTestJob) verbatim so the
-  // node Properties Test button verifies the same backend job + status projection
-  // the Settings page does (settings-ux-spec §2.7). No re-implementation.
+  // Reuses the settings role-test job runner (runRoleTestJobToResult) verbatim so
+  // the node Properties Test button verifies the same backend job + status the
+  // Settings page does (settings-ux-spec §2.7). No re-implementation.
   const handleRoleTest = useCallback(async (roleName: string) => {
     const trimmed = roleName.trim()
     if (!trimmed) {
@@ -228,7 +228,7 @@ export function PropertiesPanel({
     }
     setRoleTest({ running: true, status: null, error: null })
     try {
-      const result = await runPersistedRoleTestJob({ roleName: trimmed })
+      const result = await runRoleTestJobToResult(trimmed)
       setRoleTest({ running: false, status: result.status, error: null })
     } catch (error) {
       const message = error instanceof Error ? error.message : "Role test failed"

@@ -40,6 +40,7 @@ export function SettingsPageContent({
   onDeleteModelBundle,
   onBeforeRoleTest,
   onAfterRoleTest,
+  onNavigateToApiKeys,
 }: SettingsPageContentProps) {
   const { t } = useTranslation("settings")
 
@@ -104,6 +105,7 @@ export function SettingsPageContent({
                     onDeleteModelBundle={onDeleteModelBundle}
                     onBeforeRoleTest={onBeforeRoleTest}
                     onAfterRoleTest={onAfterRoleTest}
+                    onNavigateToApiKeys={onNavigateToApiKeys}
                   />
                 )}
               </SettingsErrorBoundary>

@@ -854,6 +854,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       onDeleteModelBundle={deleteModelBundleById}
       onBeforeRoleTest={flushRolesSave}
       onAfterRoleTest={refreshRolesProjection}
+      onNavigateToApiKeys={() => setActiveTab("api_keys")}
     />
   )
 }

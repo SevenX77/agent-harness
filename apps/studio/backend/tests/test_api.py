@@ -172,6 +172,66 @@ def test_lint_reports_failed_manifest_with_line_number(
     assert body["errors"][0]["error_code"]
 
 
+def test_lint_accepts_changed_markdown_body_without_writing_disk(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, _workspaces = studio_roots
+    skill_id = "text-segmentation"
+    graph_path = skills_dir / skill_id / "GRAPH.md"
+    original = graph_path.read_text(encoding="utf-8")
+    broken_body = original.replace("name: text-segmentation\n", "")
+    assert broken_body != original
+
+    response = client.post(
+        f"/api/skills/{skill_id}/lint",
+        json={"markdown": broken_body},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "failed"
+    assert body["errors"], "broken changed-markdown must surface a diagnostic"
+    assert body["errors"][0]["error_code"].startswith("F-")
+    # The unsaved body must never be persisted to the skill store on disk.
+    assert graph_path.read_text(encoding="utf-8") == original
+
+
+def test_lint_changed_markdown_passes_when_disk_would_fail(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    """A clean unsaved body lints green even if the disk copy is broken."""
+    skills_dir, workspaces_dir = studio_roots
+    skill_id = "text-segmentation"
+    skill_dir = copy_skill(skills_dir, workspaces_dir, skill_id)
+    good_graph = (skill_dir / "GRAPH.md").read_text(encoding="utf-8")
+    # Break the disk copy so a path-based lint would fail.
+    (skill_dir / "GRAPH.md").write_text(
+        good_graph.replace("name: text-segmentation\n", ""),
+        encoding="utf-8",
+    )
+
+    response = client.post(
+        f"/api/skills/{skill_id}/lint",
+        json={"markdown": good_graph},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "passed"
+
+
+def test_lint_without_body_still_lints_disk_path(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    """Backward-compat: no body falls back to linting the on-disk skill."""
+    response = client.post("/api/skills/text-segmentation/lint")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "passed"
+
+
 def test_put_updates_indexed_skill_atomically_and_invalid_content_preserves_file(
     client: TestClient,
     studio_roots: tuple[Path, Path],

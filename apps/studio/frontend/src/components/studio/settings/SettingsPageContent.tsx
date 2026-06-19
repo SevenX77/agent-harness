@@ -1,12 +1,16 @@
-import { Bot, KeyRound, Plug, Settings, X } from "lucide-react"
+import { Bot, KeyRound, Plug, Settings, WifiOff, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { SaveStatusBadge } from "@/components/ui/save-status-badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ApiKeysTab } from "./api-keys/ApiKeysTab"
 import { CopilotTab } from "./copilot/CopilotTab"
 import { GeneralTab } from "./GeneralTab"
 import { LlmRolesTab } from "./LlmRolesTab"
+import { RolesTabSkeleton } from "./RolesTabSkeleton"
 import { SettingsErrorBoundary } from "./SettingsErrorBoundary"
+import { mergeSaveStatuses } from "./save-status-merge"
 import { NavButton } from "./shared"
 import type { SettingsPageContentProps } from "./types"
 
@@ -22,6 +26,7 @@ export function SettingsPageContent({
   rolesSaveStatus,
   rolesError,
   appSettings,
+  connectionLost = false,
   onClose,
   onTabChange,
   onProviderFieldChange,
@@ -38,10 +43,28 @@ export function SettingsPageContent({
 }: SettingsPageContentProps) {
   const { t } = useTranslation("settings")
 
+  const globalSaveStatus = mergeSaveStatuses([saveStatus, rolesSaveStatus, appSettings.saveStatus])
+
   return (
     <div className="flex size-full flex-col bg-background">
       <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border pl-4 pr-2">
-        <span className="text-sm font-semibold text-foreground">{t("shell.title")}</span>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="text-sm font-semibold text-foreground">{t("shell.title")}</span>
+          <span data-shell-save-status={globalSaveStatus}>
+            <SaveStatusBadge status={globalSaveStatus} />
+          </span>
+          {connectionLost ? (
+            <Badge
+              variant="warning"
+              className="gap-1 text-[10px] font-normal"
+              data-shell-connection-lost="true"
+              aria-live="assertive"
+            >
+              <WifiOff className="size-3" aria-hidden="true" />
+              {t("shell.connectionLost")}
+            </Badge>
+          ) : null}
+        </div>
         <Button variant="ghost" size="icon" onClick={onClose} aria-label={t("shell.close")} className="size-7">
           <X className="size-4" />
         </Button>
@@ -67,18 +90,22 @@ export function SettingsPageContent({
           <div className="min-w-0 flex-1 overflow-y-auto lg:overflow-hidden">
             <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col px-4 py-6 sm:px-6 md:px-8 md:py-8 lg:h-full lg:min-h-0">
               <SettingsErrorBoundary label="LLM Roles">
-                <LlmRolesTab
-                  data={rolesData}
-                  credentials={credentials}
-                  modelGroups={modelGroups}
-                  saveStatus={rolesSaveStatus}
-                  error={rolesError}
-                  onChange={onRolesDataChange}
-                  onDeleteRole={onDeleteRole}
-                  onDeleteModelBundle={onDeleteModelBundle}
-                  onBeforeRoleTest={onBeforeRoleTest}
-                  onAfterRoleTest={onAfterRoleTest}
-                />
+                {rolesData === null && !rolesError ? (
+                  <RolesTabSkeleton />
+                ) : (
+                  <LlmRolesTab
+                    data={rolesData}
+                    credentials={credentials}
+                    modelGroups={modelGroups}
+                    saveStatus={rolesSaveStatus}
+                    error={rolesError}
+                    onChange={onRolesDataChange}
+                    onDeleteRole={onDeleteRole}
+                    onDeleteModelBundle={onDeleteModelBundle}
+                    onBeforeRoleTest={onBeforeRoleTest}
+                    onAfterRoleTest={onAfterRoleTest}
+                  />
+                )}
               </SettingsErrorBoundary>
             </div>
           </div>
@@ -86,14 +113,18 @@ export function SettingsPageContent({
           <ScrollArea className="flex-1">
             <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 md:px-8 md:py-8">
               <SettingsErrorBoundary label="Copilot">
-                <CopilotTab
-                  data={rolesData}
-                  credentials={credentials}
-                  modelGroups={modelGroups}
-                  onChange={onRolesDataChange}
-                  saveStatus={rolesSaveStatus}
-                  error={rolesError}
-                />
+                {rolesData === null && !rolesError ? (
+                  <RolesTabSkeleton />
+                ) : (
+                  <CopilotTab
+                    data={rolesData}
+                    credentials={credentials}
+                    modelGroups={modelGroups}
+                    onChange={onRolesDataChange}
+                    saveStatus={rolesSaveStatus}
+                    error={rolesError}
+                  />
+                )}
               </SettingsErrorBoundary>
             </div>
           </ScrollArea>
@@ -101,21 +132,27 @@ export function SettingsPageContent({
         ) : (
           <ScrollArea className="flex-1">
             <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 md:px-8 md:py-8">
-              {activeTab === "general" ? <GeneralTab appSettings={appSettings} /> : null}
+              {activeTab === "general" ? (
+                <SettingsErrorBoundary label="General">
+                  <GeneralTab appSettings={appSettings} />
+                </SettingsErrorBoundary>
+              ) : null}
               {activeTab === "api_keys" ? (
-                <ApiKeysTab
-                  credentials={credentials}
-                  credentialsLoading={credentialsLoading}
-                  credentialsError={credentialsError}
-                  drafts={drafts}
-                  saveStatus={saveStatus}
-                  onProviderFieldChange={onProviderFieldChange}
-                  onGetProviderModels={onGetProviderModels}
-                  onTestProviderEndpoint={onTestProviderEndpoint}
-                  onDeleteProvider={onDeleteProvider}
-                  onAddProvider={onAddProvider}
-                  onProviderModelsUpdated={onProviderModelsUpdated}
-                />
+                <SettingsErrorBoundary label="API Keys">
+                  <ApiKeysTab
+                    credentials={credentials}
+                    credentialsLoading={credentialsLoading}
+                    credentialsError={credentialsError}
+                    drafts={drafts}
+                    saveStatus={saveStatus}
+                    onProviderFieldChange={onProviderFieldChange}
+                    onGetProviderModels={onGetProviderModels}
+                    onTestProviderEndpoint={onTestProviderEndpoint}
+                    onDeleteProvider={onDeleteProvider}
+                    onAddProvider={onAddProvider}
+                    onProviderModelsUpdated={onProviderModelsUpdated}
+                  />
+                </SettingsErrorBoundary>
               ) : null}
             </div>
           </ScrollArea>

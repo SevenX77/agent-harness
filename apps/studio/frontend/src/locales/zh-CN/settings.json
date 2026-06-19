@@ -1,7 +1,8 @@
 {
   "shell": {
     "title": "设置",
-    "close": "关闭设置"
+    "close": "关闭设置",
+    "connectionLost": "连接不上"
   },
   "tabs": {
     "general": "通用",

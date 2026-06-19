@@ -1,7 +1,8 @@
 {
   "shell": {
     "title": "Settings",
-    "close": "Close settings"
+    "close": "Close settings",
+    "connectionLost": "Connection lost"
   },
   "tabs": {
     "general": "General",

@@ -40,6 +40,12 @@ export interface SettingsPageContentProps {
     setGiteaHost: (value: string) => void
     setDefaultSkillsDirectory: (value: string) => void
   }
+  /**
+   * N0 Settings · Shell (atoms #5/#6): true only after the /ws/events stream's
+   * reconnect backoff has consistently failed past the flicker threshold. The
+   * top bar shows a "connection lost" warning to the right of the save badge.
+   */
+  connectionLost?: boolean
   onClose: () => void
   onTabChange: (tab: SettingsTab) => void
   onProviderFieldChange: (providerId: string, patch: Partial<ProviderDraft>) => void

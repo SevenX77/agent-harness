@@ -17,6 +17,10 @@ class TokensMetrics(BaseModel):
     output_tokens: int
     total_tokens: int
     cost_estimate: float | None = None
+    # ⑧a: engine run wall-clock duration. Declared explicitly (keeping extra="forbid"
+    # for a controllable surface) so the engine's wall_time_sec survives the Studio
+    # projection and reaches the frontend run history instead of being stripped.
+    wall_time_sec: float | None = None
 
 
 class RunRequest(BaseModel):

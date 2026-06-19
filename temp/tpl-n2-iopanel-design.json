@@ -1,0 +1,168 @@
+{
+  "page_id": "n2_iopanel_design",
+  "title": "i/o 面板 · 操作设计",
+  "region": "authoring:input(→i/o panel)",
+  "intro": "本页是 i/o 面板(原 input 面板改名,逐节点设 io 输入输出 + artifact 落盘的面板)各操作的 MVP1 设计。核心:io.inputs/outputs 字段直写 GRAPH.md 的 inline JSON Schema(不再投影磁盘上不存在的假文件);input files 可导入(R3);io.outputs 字段可配 artifact 文件路径、跑时落 .workspace/artifacts(G3);删父子图 io 严格 1:1 校验(G2,导入文件=导入字段进状态机)。现状/差距见实施页;io 契约 / artifact / 子图引用机制见 mech_io。",
+  "atoms": [
+    {
+      "n": 25,
+      "cap": "input-field-edit",
+      "module": "io 字段编辑与导入",
+      "func": "设计:逐节点编辑 io.inputs 字段(增删/改名/改类型)直接写真契约 GRAPH.md 的 io.inputs.properties,不经投影假文件、不走死路径。",
+      "action": "用户在 i/o 面板里对某节点的 input 字段增删/改名/改类型。",
+      "fe_design": "面板里 input 字段增删改名改类型 → 直接写 GRAPH.md io.inputs.properties → serialize 落盘。投影层 inputContractView(只读投影 io 契约 + 出一个种子 JSON 给 schema-infer 文本框的接口)只读不写,已不再投影磁盘上不存在的 input/schema.json、input/sample.json 假文件(旧版那两个假文件会让 autosave 写进死路径、静默丢数据,已删)。字段编辑直写真契约。",
+      "fe_modules": [
+        {
+          "name": "io schema 推断"
+        },
+        {
+          "name": "graph round-trip 客户端"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{skill_id}/graph/serialize",
+          "purpose": "io.inputs 字段改动随 GRAPH.md serialize 写回(io 是 GRAPH.md frontmatter 的一部分,无独立 io 端点)。",
+          "mechanism_ref": "mech_io",
+          "iface_ref": "iface-io-2"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(io.inputs 字段直写 GRAPH.md,假文件投影已清)。",
+      "impl_ref": "fn-25"
+    },
+    {
+      "n": 26,
+      "cap": "input-files-import",
+      "module": "io 字段编辑与导入",
+      "func": "设计:把一段 JSON 文本/文件拖进来,自动推断 io.inputs schema 并写回 GRAPH.md(R3:i/o 面板加 input files 导入)。",
+      "action": "用户在 i/o 面板拖入一段 JSON 文本或文件 → 确认应用推断的 schema。",
+      "fe_design": "拖入 JSON → inferJsonSchemaFromText(从 JSON 文本推断字段 schema 的函数)推断字段 + 类型 → applyInputSchemaToGraph(把推断 schema 写进 GRAPH.md io.inputs 的纯函数)写回 → serialize 落盘。导入文件相当于把该文件的字段导入状态机(G2:可在任何 i/o 界面导入文件,本原子是 input 节点侧的导入,任意节点侧导入见 #28)。另有测试输入管理(TestInputsSection,走后端 createTestInput/deleteTestInput)与 io 契约分开,不混。",
+      "fe_modules": [
+        {
+          "name": "io schema 推断"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{skill_id}/graph/serialize",
+          "purpose": "推断出的 io.inputs schema 随 GRAPH.md serialize 写回。",
+          "mechanism_ref": "mech_io",
+          "iface_ref": "iface-io-2"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(拖 JSON 推断 schema 写回 io.inputs,R3 input files 导入 live)。",
+      "impl_ref": "fn-26"
+    },
+    {
+      "n": 27,
+      "cap": "io-panel-perfield",
+      "module": "io 字段编辑与导入",
+      "func": "设计:input 面板改名为 i/o 面板,逐节点都能设 io(输入输出)+ artifact,而不是只有整图级(graph-level)io(PM 锁定 target-design)。",
+      "action": "用户在任一节点上打开 i/o 面板,设该节点的 io 输入输出 + output artifact。",
+      "fe_design": "现状:面板已实现 graph-level io.inputs 和 io.outputs 的字段级编辑——IoSchemaFieldsPanel(逐字段编辑器、对 inputs/outputs 两侧都生效)+ IoFieldRow/IoFieldAddRow(增删/改字段)+ OutputArtifactPathPanel(output artifact 路径)。不是只有『起点 input + artifact』,output 字段编辑也有。真正缺口是『逐节点 i/o』:现状是整图级 io 编辑,还没做到选中任一节点都挂它自己的 i/o 面板编辑该节点的 io.inputs/outputs + artifact。目标:从 graph-level 扩成 per-node。",
+      "fe_modules": [
+        {
+          "name": "io schema 推断"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{skill_id}/graph/serialize",
+          "purpose": "逐节点 io 改动随 GRAPH.md serialize 写回(io 在各 phase frontmatter 与顶层 io)。",
+          "mechanism_ref": "mech_io",
+          "iface_ref": "iface-io-2"
+        }
+      ],
+      "fe_status": "偏差",
+      "be_status": "已实现",
+      "gap_brief": "现状 graph-level io.inputs/outputs 字段级编辑(IoSchemaFieldsPanel,inputs+outputs 两侧都有)+ output artifact 已实现;缺口是 per-node i/o(选中任一节点编辑该节点 io)。serialize 契约已就绪。不是『output 字段编辑不存在』。",
+      "impl_ref": "fn-27"
+    },
+    {
+      "n": 28,
+      "cap": "any-io-import-file",
+      "module": "io 字段编辑与导入",
+      "func": "设计:可在任何一个 i/o 界面导入文件,导入即把该文件的字段导入状态机(G2 新增),不只起点 input 节点能导入。",
+      "action": "用户在任一节点的 i/o 界面导入一个文件。",
+      "fe_design": "目标设计:任何节点的 i/o 界面都能导入文件,和起点 input 节点导入文件一样——导入文件 = 把这个文件的字段导入状态机;导入时机是『跑到该节点才注入』(运行期 a 注入)。现状导入入口主要在 input 节点侧(schema-infer 拖入),其它节点的 i/o 界面导入文件入口未铺开。",
+      "fe_modules": [
+        {
+          "name": "io schema 推断"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{skill_id}/graph/serialize",
+          "purpose": "任一节点导入的字段随该节点 io.inputs serialize 写回;运行期注入归引擎 io/manager(N4)。",
+          "mechanism_ref": "mech_io",
+          "iface_ref": "iface-io-2"
+        }
+      ],
+      "fe_status": "偏差",
+      "be_status": "契约问题",
+      "gap_brief": "现状导入入口主要在 input 节点侧;目标任一 i/o 界面都能导入文件=导入字段进状态机(G2)。需后端把『任一节点 io 导入字段→运行期跑到该节点才注入』的契约定下来(引擎 io/manager 注入时机)。",
+      "impl_ref": "fn-28"
+    },
+    {
+      "n": 29,
+      "cap": "output-artifact-path",
+      "module": "artifact 落盘",
+      "func": "设计:给 io.outputs 某字段配一个文件路径,跑时把它落盘成 artifact 到 .workspace/artifacts(G3:io.outputs schema 顶层加文件路径,默认落 .workspace 的 artifacts)。",
+      "action": "用户在 i/o 面板给某 output 字段填一个 artifact 文件路径(或清空)。",
+      "fe_design": "给 output 字段填路径 → applyOutputArtifactPathToGraph(往 io.outputs.<字段> 写 {target:'artifact', path} 的纯函数)写落盘目标,空 path 清除目标 → serialize 落盘。运行期引擎 io/manager(运行时 io 落盘管理器)认 target='artifact'/'artifact_manager' 走 artifact_saver,解析到 .workspace/runs/<id>/artifacts/<path>。格式只允许 md / json;只写文件名(不写前置路径)= 默认落 .workspace 的 artifacts。",
+      "fe_modules": [
+        {
+          "name": "io schema 推断"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{skill_id}/graph/serialize",
+          "purpose": "io.outputs 字段的 {target:'artifact', path} 随 GRAPH.md serialize 写回(配置期)。",
+          "mechanism_ref": "mech_io",
+          "iface_ref": "iface-io-2"
+        },
+        {
+          "endpoint": "引擎 io/manager(运行期落盘)",
+          "purpose": "运行期认 target='artifact' 走 artifact_saver 落 .workspace/runs/<id>/artifacts/<path>(真实落盘归 N4 运行,非配置期)。",
+          "mechanism_ref": "mech_io",
+          "iface_ref": null
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(前端 applyOutputArtifactPathToGraph 配 artifact 目标 + 引擎 io/manager 落盘契约均已落地,G3)。",
+      "impl_ref": "fn-29"
+    },
+    {
+      "n": 30,
+      "cap": "subgraph-io-no-1to1",
+      "track": "子图",
+      "module": "子图 io",
+      "func": "设计:改子图 io 不应触发父子 io 严格 1:1 校验(G2:数据流单向不可逆、无回写,父子 io 关系不绑死;子图 input 和别的节点一样从状态机过滤字段拿)。",
+      "action": "无显式动作(改子图 io 字段时不应被严格 1:1 校验挡住)。",
+      "fe_design": "目标设计:子图 io 改动不被父子严格 1:1 校验拦——父子 io 不绑死,子图 input 从父图状态机按 schema 过滤字段拿(和普通节点一样)。前端本身无该 1:1 校验。现状是引擎 loader 仍保留一条 FATAL:取父/子图的 io.outputs,若 parent_outputs ≠ child_outputs 报 F-v3-subgraph-io-mismatch——只比 outputs 集合是否相等(已弱化、非 inputs+outputs 全 1:1)。子图本身已按绝对 path 解析(SUBGRAPH.md 写 path;旧 target_skill 字面 key 已被 loader 拒为 deprecated、引导迁移到绝对 path)。删这条 outputs 1:1 校验、改为子图从状态机按 schema 过滤字段,是 G2 的后端待删项。",
+      "fe_modules": [
+        {
+          "name": "子图 path 解析"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "引擎 loader 子图 io 校验(待删)",
+          "purpose": "现状 F-v3-subgraph-io-mismatch 仍按父/子 io.outputs 严格比对(只比 outputs 集合是否相等);G2 要求删此校验,改为子图从状态机过滤字段。子图本身已按绝对 path 解析。",
+          "mechanism_ref": "mech_io",
+          "iface_ref": "iface-io-3"
+        }
+      ],
+      "fe_status": "偏差",
+      "be_status": "契约问题",
+      "gap_brief": "⚠️ 硬阻塞:引擎 skill-syntax §2.4 明写『子图和普通节点一样从黑板切片、不要求父子字段集合 1:1』,但引擎 loader 的 _validate_subgraph_io_contracts 仍 fatal(parent_outputs ≠ child_outputs 报 F-v3-subgraph-io-mismatch)——spec 与 code 硬冲突。这条 fatal 实际阻塞子图 io 编辑,必须保持硬阻塞直到 loader 实际删除/改造该校验(按 §2.10 切片规则校验字段)。前端无此校验、无活。子图已按绝对 path 解析。",
+      "impl_ref": "fn-30"
+    }
+  ]
+}

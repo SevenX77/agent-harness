@@ -1,0 +1,429 @@
+{
+  "id": "n2_canvas_impl",
+  "title": "画布搭建 · 实施详情",
+  "design_ref": "n2_canvas_design",
+  "intro": "本页是画布搭建前端的现状/差距/实施计划/测试,1:1 对应设计页 n2_canvas_design(原子 #1–#15)。代码一律按『文件名 + 函数/对象名』引用(可全局搜索,不写行号——行号会漂)。后端契约就绪情况引后端实施手册:D8『GRAPH parse/serialize』(同一棵可执行树)、D12『native-fs 本地持久化执行层』(Rust 单一写者)。底层序列化/写盘/冲突机制见后端接口契约页 mech_graph。",
+  "functions": [
+    {
+      "n": 1,
+      "cap": "canvas-projection",
+      "design_ref": "n2-atom-1",
+      "current": "现状:已实现且符合。getSkillDetail 拉 SkillDetail,后端 SkillLoader.compile_skill(把磁盘 GRAPH.md + phase 文件编译成 manifest 的引擎函数)+ _detail_from_manifest 调 _graph_topology(逐 phase 抽 mode/depends_on/path 拓扑行)并带回原始 files。前端 buildNodes(用 manifest.phases + graph_topology + files 拼 React Flow 节点的函数)+ buildEdges(按 depends_on 连边)投影成画布。两端共享同一份 GRAPH.md 语法、无中间 JSON 图模型。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。GET /skills/{id} 返回编译产物 manifest + graph_topology + files。后端实施手册 D8.1『roundtrip 一致』=ok。"
+    },
+    {
+      "n": 2,
+      "cap": "node-open-file",
+      "design_ref": "n2-atom-2",
+      "current": "现状:已实现且符合。双击节点取其 filePath(phases/<id>/<节点文件>)在 LazyMonacoPanel(懒加载的 Monaco 源码面板)打开;双击起点/终点/头部开 GRAPH.md。文件文本随 SkillDetail.files 返回,双击即取。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。文件文本随 GET /skills/{id} 的 files 返回。D8.1=ok。"
+    },
+    {
+      "n": 3,
+      "cap": "tb-layout",
+      "design_ref": "n2-atom-3",
+      "current": "现状:已实现且符合。getAutoLayoutedElements(把节点边塞进 dagre 图自动布局的函数,lib/layout.ts)以 rankdir='TB' 纵向布局,布局前用 graphlib.alg.isAcyclic 判无环。注:这与 02_authoring.md atom 决策表 REQ-1 那行标的『现 LR』已不符——worktree 真代码 rankdir 已是 'TB',REQ-1 已落地,spec 标注过时。",
+      "gap": "符合设计(rankdir 已 TB),无需改。",
+      "fe_status": "符合",
+      "be_dep": "n/a(纯前端布局,无后端)。"
+    },
+    {
+      "n": 4,
+      "cap": "create-node-is-file",
+      "design_ref": "n2-atom-4",
+      "current": "现状:已实现且符合。Add phase 下拉/右键 ContextMenu 给三 kind=skill/logic/subgraph 走 onCreatePhase;phaseFilePath(把 kind 映射成 phases/<id>/SKILL|LOGIC|SUBGRAPH.md 的函数)定路径;createPhaseDraft 生成去重 phaseId + fileContent=defaultPhaseMarkdown(...) + 空 depends_on 的 phaseRef。脚手架 FROZEN-clean:defaultPhaseMarkdown 三模板(logicPhaseMarkdown 只 name/io/actions/validator;agentPhaseMarkdown name/llm_role/io/tools/validator;subgraphPhaseMarkdown name/path(占位绝对路径)/io/validator)绝不写 mode/system_prompt/exit_contract/python_callable/target_skill。建节点先 create-if-absent 写 phase 文件、再 serialize 写 GRAPH.md。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。native-fs write_workspace_file(create-if-absent)+ POST /graph/serialize 均已实现。D12.1=ok、D8.2=partial(建节点这条已通)。"
+    },
+    {
+      "n": 5,
+      "cap": "io-endpoint-nodes",
+      "design_ref": "n2-atom-5",
+      "current": "现状:已实现且符合。buildNodes 渲染时把整图入口渲成 Input 起点节点(无依赖 phase 的 depends_on 渲染成入口哨兵 input)、叶子 phase 标 Output 终点;它们承载整图 io 契约(manifest.io),可双击开 GRAPH.md。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。整图 io 随 manifest 返回。D8.1=ok。"
+    },
+    {
+      "n": 6,
+      "cap": "connect-edge",
+      "design_ref": "n2-atom-6",
+      "current": "现状:已实现且符合。onConnect(GraphCanvas 里 React Flow 连线回调,端点合法性校验后乐观更新)→ handlePersistConnection(Workspace 里把连线落到源码的编排函数)→ connectPhaseRefs(往目标 phase 的 depends_on 追加来源 id 的纯函数)算新拓扑 → 对当前 GRAPH.md 算 graphHash(sha256Hex)→ serializeSkillGraph(POST /skills/{id}/graph/serialize)写回 → doWriteSkillFile 落盘 → compileSkillById 重编译。只动 depends_on。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。POST /graph/serialize(保留型 + 409 冲突)已实现。D8.1/D8.2=ok/partial、D12.3=ok。"
+    },
+    {
+      "n": 7,
+      "cap": "disconnect-edge",
+      "design_ref": "n2-atom-7",
+      "current": "现状:已实现且符合。右键边出 Disconnect 菜单 → onDisconnectConnection → disconnectPhaseRefs(从目标 phase 的 depends_on 过滤掉该依赖的纯函数)→ 带 graphHash serializeSkillGraph 写回 → 落盘 → 重编译。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。同 #6 走 serialize。D8.2=partial(断连这条已通)。"
+    },
+    {
+      "n": 8,
+      "cap": "reconnect-drag-disconnect",
+      "design_ref": "n2-atom-8",
+      "current": "现状:偏差——连线四操作(R4)只有新建 + 右键断连两个,重连 / 拖拽断线缺。GraphCanvas 给 React Flow 挂了 onConnect(新建)、onDisconnectConnection(右键断连),但未挂 onReconnect / onReconnectEnd、也未设 edgesReconnectable——把边端点拖到别的节点(重连)、把边端点拖离 handle 松手即断(拖拽断线)都没有写回路径。",
+      "gap": "差距:补两操作。① 给 React Flow 设 edgesReconnectable 并挂 onReconnect:把边端点改接到新目标后,等价于 disconnectPhaseRefs(旧目标移除依赖)+ connectPhaseRefs(新目标追加依赖),再 serialize 写回;② 挂 onReconnectEnd:端点拖离 handle 松手未命中新目标 → 判为 disconnectPhaseRefs。让四操作走同一套 depends_on 写回 + serialize。纯前端改动,serialize 契约不变。",
+      "fe_status": "偏差",
+      "be_dep": "已就绪可接(后端不需改)。重连/拖拽断线最终都落成 depends_on 改动、走现成 POST /graph/serialize。"
+    },
+    {
+      "n": 9,
+      "cap": "cycle-detection",
+      "design_ref": "n2-atom-9",
+      "current": "现状:已实现且符合。getAutoLayoutedElements 布局前调 graphlib.alg.isAcyclic,非 DAG 抛 CycleDetectedError(自定义错误类);layoutResult useMemo 捕获 → 返回空 nodes/edges + error → UI 铺全屏红遮罩『SKILL contains cyclic dependency』+ toast.error。后端 serialize 前 _validate_canvas_topology(查孤儿/自环/成环)再校验,不通过 → 422 CanvasSerializerFatal。注:任务旧线索说环检测在 GraphCanvas.tsx 某段,实测真正的环判定在 lib/layout.ts 的 isAcyclic,GraphCanvas 那段是 fit/toggle 工具函数,已纠正。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。serialize 的 422 拓扑校验已实现。D8.1/D8.2=ok/partial。"
+    },
+    {
+      "n": 10,
+      "cap": "data-gap-viz",
+      "design_ref": "n2-atom-10",
+      "current": "现状:偏差——前端无『供给断层』可视化。前端唯一字段级图分析是 checkSequentialOverwrites(检测顺序覆盖冲突),检的是『同字段被重复写』(覆盖冲突),不是『下游要的字段上游没给』(供给缺失)。真正的字段供需/类型断层校验在引擎编译期:写回后 compileSkillById 触发 compile,引擎吐 CompileError[] 经 compileErrorsByNodeId 按节点叠到画布;引擎 io/manager 有 io.output 字段 type mismatch 报错。但 REQ-2 要的是画布上的『黑板字段勾选』UI(io.inputs 从上游 io.outputs 勾选取得、删类型相等红叉),前端没有。",
+      "gap": "差距:① 前端做黑板字段勾选 UI——节点 io.inputs 字段从上游 io.outputs 可勾选取得、可视化字段供需;删旧的『按节点类型相等画红叉』。② 依赖后端把 io schema 的字段供需关系暴露成可勾选结构(现状只在 compile 时回吐字段 mismatch 错误,不是结构化供需图)。前端 UI 在后端供需契约定下来后做。",
+      "fe_status": "偏差",
+      "be_dep": "契约要先改 + BLOCKER。REQ-2 字段勾选需后端把各 phase io.inputs/outputs 供需关系暴露成结构化可勾选数据(不只 compile 回吐 mismatch);且 REQ-2/FROZEN-4 交互模型 spec 自述『待统一出 FROZEN 新版本』未 pin —— 等 FROZEN 定下再实现,属引擎 io schema 契约。"
+    },
+    {
+      "n": 11,
+      "cap": "seq-overwrite-conflict",
+      "design_ref": "n2-atom-11",
+      "current": "现状:已实现且符合。checkSequentialOverwrites(canvas-authoring.ts 检测顺序覆盖冲突的函数)对每个 phase 取 io.outputs.properties 字段、沿 depends_on 求传递祖先集,祖先也产出同名字段且不在 allow_sequential_overwrite 白名单 → 记 OverwriteConflict → 注入对应 SkillNode.data、fitView 平移聚焦 → 用户 Allow 写白名单 / Cancel 节点标红。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。Allow 后白名单随 serialize 写回。D8.2=partial(此项已通)。"
+    },
+    {
+      "n": 12,
+      "cap": "failure-paths",
+      "design_ref": "n2-atom-12",
+      "current": "现状:已实现且符合。写失败→hash 乐观锁回滚(画布拿旧版被 409 snapshot_conflict / Rust HashConflict 两道拦,不静默覆盖);phase frontmatter YAML 坏→parsePhaseFrontmatter 回不可解析→面板 error + Open file 跳源文件;环→全屏阻断(#9);Rust 写命令 safe_join 防穿越,越权/IO 失败回 WriteFailed{message} 前端弹错。每条退路都有可见反馈。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。native-fs WriteFailed/HashConflict + serialize 409/422 均已实现。D12.1/D12.3=ok。"
+    },
+    {
+      "n": 13,
+      "cap": "subgraph-inline-preview",
+      "design_ref": "n2-atom-13",
+      "current": "现状:已实现且符合。子图节点 toggle 展开 → SubgraphInline(子图 inline 预览组件)调 getChildGraphTopology(拉某子图真实拓扑的客户端函数)拿子图真实 phase 列表 → childPhaseRows(把真实拓扑组装成 name+kind 预览行的函数,注释明示『Never fabricates a phase that the child graph does not declare』)渲染只读预览;loading/error/empty/loaded 四态分呈现。注:这与旧审计说的『SubgraphInline 渲染假数据/mock』已不符——worktree 真代码已接真子拓扑,旧结论过时,已纠正。",
+      "gap": "符合设计(已接真子拓扑)。可继续打磨虚线容器 + 动态 group bbox 的视觉样式,但预览数据已真实,非阻塞。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。GET child-graph-topology 已实现。D8.4=partial(子图 path 收口中,但拓扑读已通)。"
+    },
+    {
+      "n": 14,
+      "cap": "subgraph-drilldown",
+      "design_ref": "n2-atom-14",
+      "current": "现状:多级下钻导航已实现,下钻后编辑写回未闭环。GraphCanvas.tsx 的 drillInto/drillNavigate + drill-stack.ts 的 drillStackReducer(push/pop/popTo 多级下钻栈)+ DrillBreadcrumb.tsx(逐级面包屑导航)+ 按 path 拉各级 child topology(getChildGraphTopology effect)+ 双击 subgraph 分支,已能多级下钻聚焦看子拓扑。但 build-nodes.ts 的 buildNodesFromTopology 把 drilled child 节点的 filePath 留空、GraphCanvas.tsx 非 subgraph 双击 fallback 仍拼父级 skillId 路径——即『进入子图后编辑子图节点并写回』未接线。",
+      "gap": "差距(收窄):引擎 io 切片契约已 pin(skill-syntax §2.10 io 切片 + §2.4 子图从黑板切片、不要求父子 1:1),无需再等切片契约。剩的是 Studio 下钻编辑 UX 闭环——① 子图根目录如何成为当前写入 root(child root identity);② 下钻后编辑保存走子图自己的 GRAPH.md(buildNodesFromTopology 给 child 节点补真实 filePath);③ 保存触发父图还是子图 compile(compile scope)、错误如何回滚。这些是 Studio 侧 UX/写回设计,不是引擎契约缺口。",
+      "fe_status": "偏差",
+      "be_dep": "引擎契约基本就绪。io 切片/合并契约已 pin(§2.10/§2.4),child topology 端点已实现。剩 #30 的 loader 子图 io 1:1 fatal 仍在(硬阻塞子图 io 编辑,见 #30);下钻编辑的 child root/save target/compile scope 偏 Studio UX 决策,非引擎契约。"
+    },
+    {
+      "n": 15,
+      "cap": "l3-step-edit",
+      "design_ref": "n2-atom-15",
+      "current": "现状:前端组件已存在但未接线。L3 步骤(正文 XML `<step>`/`<action>`)的内联组件 AgentStepsInlineView(AgentStepsInline.tsx)与 body 增删改序纯函数 agent-steps.ts(parseAgentSteps/addAgentStep/removeAgentStep/reorderAgentSteps/updateAgentStep)都已实现,但 AgentStepsInline 没有挂到画布/节点编辑入口(孤儿,仅自身+测试引用)。保存可复用现成 phase 文件保存路径 handlePhaseFileSave(Workspace.tsx)→ doWriteSkillFile → native-fs write_workspace_file(桌面)/ POST /skills/{id}/files/{path}(浏览器 fallback)。",
+      "gap": "差距:把 AgentStepsInline 接到画布内联编辑入口(节点右缘展开 body),增删改序复用 agent-steps.ts 纯函数,保存走现成 phase 文件保存路径。纯前端接线,不需新增后端 mutate 端点(现有 native-fs / fallback 写路径已够)。",
+      "fe_status": "未实施",
+      "be_dep": "已就绪可接(后端不需改)。phase body 保存复用现成 native-fs write_workspace_file(桌面)/ POST /skills/{id}/files/{path}(浏览器 fallback),无独立 mutate_phase_body 端点、也不需新增。把 AgentStepsInline 接线即可。"
+    }
+  ],
+  "plan": [
+    {
+      "step": 1,
+      "what": "#8 reconnect-drag-disconnect:给 React Flow 设 edgesReconnectable 并挂 onReconnect(重连=旧目标 disconnectPhaseRefs + 新目标 connectPhaseRefs 再 serialize)、onReconnectEnd(端点拖离 handle 松手未命中 → disconnectPhaseRefs)。让连线四操作走同一套 depends_on 写回。",
+      "depends_on": "前端依赖:复用现成 connectPhaseRefs/disconnectPhaseRefs + serializeSkillGraph 链路。后端不动(serialize 契约不变)。",
+      "why": "纯前端、零后端依赖、改动独立,最先做掉;补齐 R4 连线四操作。",
+      "block": "前端独立"
+    },
+    {
+      "step": 2,
+      "what": "#15 l3-step-edit(前端骨架):节点右缘加号展开 body,在画布内联对 `<step>`/`<action>` 增删改序,保存走 native-fs write_workspace_file 写 phase body(覆盖写带 expected_hash)。先做内联编辑 UI + 整文件覆盖写路径。",
+      "depends_on": "前端依赖:复用现成 write_workspace_file 落盘链路;UI 沿用 shadcn。后端:整文件覆盖写已就绪;若要 body 级结构 patch 则等后端(见 step 3)。",
+      "why": "phase body 写盘路径已就绪,L3 内联 UI 是纯前端骨架,可先落地基本增删改序;与 step 1 不冲突可并行。",
+      "block": "前端独立"
+    },
+    {
+      "step": 3,
+      "what": "后端先行:把画布依赖的两条后端契约落下来——① REQ-2 字段供需:把各 phase io.inputs/outputs 的字段供需关系暴露成结构化可勾选数据(供 #10 黑板字段勾选 UI),不只 compile 回吐 mismatch;② 子图下钻的父子 io 自动切片(StateMapper 按子图 io schema 过滤字段注入、无 context_bridge)契约(供 #14);③ (可选)phase body 级结构 patch 写接口(供 #15 结构化增删改序,替代整文件覆盖)。",
+      "depends_on": "后端契约(引擎 io schema 供需结构化、子图 io 切片;后端实施手册 D8 GRAPH parse/serialize 虽已收口=ok/partial,但字段供需结构化、子图切片这些需后端按设计补)。这是 #10/#14 的共同前置。",
+      "why": "后端先于前端铁律:#10 字段勾选、#14 自动切片的前端改法都取决于后端先把供需/切片数据结构定下来,后端没动就改前端=返工。排在依赖后端的前端项之前。",
+      "block": "等后端（后端先行）"
+    },
+    {
+      "step": 4,
+      "what": "#10 data-gap-viz(前端字段勾选):做黑板字段勾选 UI——节点 io.inputs 字段从上游 io.outputs 可勾选取得、可视化字段供需;删旧的『按节点类型相等画红叉』。",
+      "depends_on": "后端 step 3-①(字段供需结构化数据)。前端复用 io 字段编辑(见 i/o 面板)。",
+      "why": "REQ-2 字段勾选必须在后端供需契约(step 3)就位后做,否则前端无结构化数据可勾。",
+      "block": "等后端"
+    },
+    {
+      "step": 5,
+      "what": "#14 subgraph-drilldown(前端下钻):点下钻就地聚焦到子图拓扑视图(留同一画布、不切工程),进去能编辑子图节点;父子 io 按子图 io schema 自动切片注入。",
+      "depends_on": "后端 step 3-②(子图 io 切片契约);子图编辑落盘走现成 serialize。",
+      "why": "下钻的父子 io 自动切片依赖后端切片契约(step 3),就位后前端才能正确注入子图 input;放在后端先行之后做。",
+      "block": "等后端"
+    }
+  ],
+  "tests": [
+    {
+      "covers": "#1 canvas-projection + #2 node-open-file",
+      "atoms": [
+        1,
+        2
+      ],
+      "shots": [
+        "一个 skill 工程打开后画布按 GRAPH.md 渲染出节点 + 连线",
+        "双击一个节点打开它对应的 SKILL/LOGIC/SUBGRAPH.md"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "mock GET /skills/{id} 回 manifest + graph_topology + files。",
+        "断言 buildNodes 按 graph_topology 出对应数量节点、节点种类据文件类型。",
+        "断言 buildEdges 按 depends_on 连边。",
+        "断言双击节点取其 filePath、在编辑器打开对应文件文本。"
+      ],
+      "layer2": [
+        "真跑:打开一个真 skill 工程,看画布节点/连线与 GRAPH.md 一致。",
+        "双击各类节点,看打开对应文件。"
+      ]
+    },
+    {
+      "covers": "#3 tb-layout",
+      "atoms": [
+        3
+      ],
+      "shots": [
+        "画布纵向 TB 布局:上游在上、下游在下"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "断言 getAutoLayoutedElements 用 rankdir='TB'。",
+        "断言多节点链路纵向排布(下游 y 大于上游)。"
+      ],
+      "layer2": [
+        "看一个多节点 skill 的画布布局方向。"
+      ]
+    },
+    {
+      "covers": "#4 create-node-is-file + 脚手架 FROZEN-clean",
+      "atoms": [
+        4
+      ],
+      "shots": [
+        "右键新建 Logic 节点后,生成的 LOGIC.md frontmatter 只有 name/io/actions/validator",
+        "新建 Subgraph 节点用 path: 占位、非 target_skill"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "对三 kind 调 defaultPhaseMarkdown,断言输出不含 mode/system_prompt/exit_contract/python_callable/target_skill。",
+        "断言 logic 模板只 name/io/actions/validator;agent name/llm_role/io/tools/validator;subgraph name/path/io/validator。",
+        "断言 phaseFilePath 把 skill/logic/subgraph 映射成 SKILL/LOGIC/SUBGRAPH.md。",
+        "建节点契约测:先 create-if-absent 写 phase 文件、再 serialize 写 GRAPH.md。"
+      ],
+      "layer2": [
+        "真跑:右键各建一个 Agent/Logic/Subgraph 节点,打开生成文件看 frontmatter、确认可直接编译。"
+      ]
+    },
+    {
+      "covers": "#5 io-endpoint-nodes",
+      "atoms": [
+        5
+      ],
+      "shots": [
+        "画布有 Input 起点 + Output 终点独立节点,双击开 GRAPH.md"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "断言无依赖 phase 渲染 Input 起点(depends_on 入口哨兵 input)、叶子 phase 标 Output。",
+        "断言双击起点/终点开 GRAPH.md。"
+      ],
+      "layer2": [
+        "看画布起点/终点节点,双击开 GRAPH.md。"
+      ]
+    },
+    {
+      "covers": "#6 connect-edge + #7 disconnect-edge",
+      "atoms": [
+        6,
+        7
+      ],
+      "shots": [
+        "拖一条连线后 GRAPH.md 目标 phase 的 depends_on 加了来源 id",
+        "右键 Disconnect 后 depends_on 移除该来源"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "连线:断言 onConnect→connectPhaseRefs 往目标 depends_on 追加来源 id、带 graphHash 调 serializeSkillGraph。",
+        "断连:断言 onDisconnectConnection→disconnectPhaseRefs 从 depends_on 过滤该依赖。",
+        "契约测:serialize 请求带 expected_hash;只动 depends_on、不动别的字段。"
+      ],
+      "layer2": [
+        "真跑:拖一条连线,看 GRAPH.md depends_on 改动。",
+        "右键边断连,看 depends_on 移除。"
+      ]
+    },
+    {
+      "covers": "#8 reconnect-drag-disconnect(补四操作)",
+      "atoms": [
+        8
+      ],
+      "shots": [
+        "把一条边端点拖到别的节点(重连):旧目标 depends_on 移除、新目标追加",
+        "把边端点拖离 handle 松手:边被删、depends_on 移除"
+      ],
+      "fe_status": "偏差",
+      "layer1": [
+        "RED:当前 React Flow 未挂 onReconnect/onReconnectEnd、未设 edgesReconnectable → 断言『重连/拖拽断线有写回』失败。",
+        "GREEN:挂上后,断言重连 = 旧目标 disconnectPhaseRefs + 新目标 connectPhaseRefs 再 serialize。",
+        "断言拖拽断线 = onReconnectEnd 未命中新目标 → disconnectPhaseRefs。",
+        "回归:四操作(新建/断连/重连/拖拽断)都只动 depends_on、走同一 serialize。"
+      ],
+      "layer2": [
+        "真跑:把一条边改接到别的节点,看 depends_on 迁移。",
+        "把边端点拖离松手,看边删除。"
+      ]
+    },
+    {
+      "covers": "#9 cycle-detection",
+      "atoms": [
+        9
+      ],
+      "shots": [
+        "造一个环后全屏红遮罩『SKILL contains cyclic dependency』+ toast"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "喂一个有环的拓扑 → 断言 getAutoLayoutedElements 抛 CycleDetectedError、layoutResult 返回空 + error。",
+        "断言 UI 铺全屏红遮罩 + toast.error。",
+        "契约测:serialize 对孤儿/自环/成环回 422 CanvasSerializerFatal。"
+      ],
+      "layer2": [
+        "真跑:连出一个环,看全屏阻断 + 报错。"
+      ]
+    },
+    {
+      "covers": "#10 data-gap-viz(REQ-2 字段勾选)",
+      "atoms": [
+        10
+      ],
+      "shots": [
+        "节点 io.inputs 字段从上游 io.outputs 勾选取得的可视化(目标态)"
+      ],
+      "fe_status": "偏差",
+      "layer1": [
+        "RED:当前前端无『供给断层』字段勾选,只有 checkSequentialOverwrites(重复覆盖)→ 断言『有字段供需勾选 UI』失败。",
+        "GREEN(后端供需契约就位后):断言节点 io.inputs 字段能从上游 io.outputs 勾选、可视化供需。",
+        "断言删除了旧的『按节点类型相等画红叉』。"
+      ],
+      "layer2": [
+        "真跑(后端就位后):造一个上游缺供给的图,看黑板字段勾选可视化。"
+      ]
+    },
+    {
+      "covers": "#11 seq-overwrite-conflict",
+      "atoms": [
+        11
+      ],
+      "shots": [
+        "同字段被两节点重复写时弹 Allow/Cancel,Cancel 后冲突节点标红"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "造一个同名 io.outputs 字段被祖先重复写的图 → 断言 checkSequentialOverwrites 记一条 OverwriteConflict。",
+        "断言注入对应节点 + fitView 聚焦 + 弹 Allow/Cancel。",
+        "Allow → 写 allow_sequential_overwrite 白名单;Cancel → 节点标红。"
+      ],
+      "layer2": [
+        "真跑:造一个顺序覆盖,看 overlay,分别点 Allow/Cancel。"
+      ]
+    },
+    {
+      "covers": "#12 failure-paths",
+      "atoms": [
+        12
+      ],
+      "shots": [
+        "YAML 坏的 phase 文件:面板出 error + Open file",
+        "画布拿旧版写:被冲突 UI 拦、不静默覆盖"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "喂一个 frontmatter YAML 坏的 phase → 断言 parsePhaseFrontmatter 回不可解析、面板出 error + Open file。",
+        "契约测:expected_hash 不符 → serialize 409 / Rust HashConflict,前端走冲突 UI 不静默覆盖。",
+        "契约测:Rust 写越权/IO 失败 → WriteFailed,前端弹错。"
+      ],
+      "layer2": [
+        "真跑:手改坏一个 phase YAML,看 error + Open file。",
+        "造一个 stale 写,看冲突拦截。"
+      ]
+    },
+    {
+      "covers": "#13 subgraph-inline-preview(真子拓扑)",
+      "atoms": [
+        13
+      ],
+      "shots": [
+        "展开子图节点,inline 列出子图真实的 phase 名 + 类型(非 mock)"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "mock getChildGraphTopology 回一个子图真实拓扑 → 断言 SubgraphInline 调它、childPhaseRows 按真实 phase 名渲染。",
+        "断言不渲染子图未声明的 phase(防编造)。",
+        "断言 loading/error/empty/loaded 四态分别呈现。"
+      ],
+      "layer2": [
+        "真跑:展开一个真子图节点,看 inline 预览与子图真实 GRAPH.md 一致。"
+      ]
+    },
+    {
+      "covers": "#14 subgraph-drilldown(下钻 + 自动切片)",
+      "atoms": [
+        14
+      ],
+      "shots": [
+        "点子图下钻,就地聚焦进子图拓扑(同一画布、不切工程)",
+        "子图 input 按 schema 从父图状态机自动切片注入"
+      ],
+      "fe_status": "偏差",
+      "layer1": [
+        "RED:当前只有就地聚焦看子拓扑、无下钻进编辑 → 断言『下钻进子图编辑』失败。",
+        "GREEN(后端切片契约就位后):断言点下钻就地聚焦到子图、能编辑子图节点。",
+        "断言子图 input 按子图 io schema 从父状态机过滤字段注入(无 context_bridge)。"
+      ],
+      "layer2": [
+        "真跑(后端就位后):下钻进一个子图,编辑并看父子 io 切片。"
+      ]
+    },
+    {
+      "covers": "#15 l3-step-edit(L3 内联)",
+      "atoms": [
+        15
+      ],
+      "shots": [
+        "节点右缘加号展开 body,内联增删改序 `<step>`/`<action>`"
+      ],
+      "fe_status": "未实施",
+      "layer1": [
+        "RED:当前 AgentStepsInline 组件存在但未挂到画布/节点编辑入口(孤儿)→ 断言『画布上能展开 body 编辑步骤』失败。",
+        "GREEN:断言节点右缘加号展开 body 后挂上 AgentStepsInlineView、能增删/重排 `<step>`/`<action>`(复用 agent-steps.ts 纯函数)。",
+        "断言保存走现成 phase 文件保存路径(native-fs / 浏览器 fallback),不新增后端端点。"
+      ],
+      "layer2": [
+        "真跑(落地后):展开一个节点 body,增删改序步骤,看 phase 文件 body 落盘。"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,143 @@
+{
+  "page_id": "n2_properties_design",
+  "title": "Properties 节点属性 · 操作设计",
+  "region": "authoring:properties",
+  "intro": "本页是右侧 Properties 面板(选中画布节点后编辑该节点 frontmatter 属性的面板)各操作的 MVP1 设计。核心规则:节点类型由文件名(SKILL/LOGIC/SUBGRAPH.md)决定、不是可变 mode 字段;每类节点只露自己的白名单字段(对齐 engine skill-syntax §2.3 Logic / §2.4 Subgraph / §2.5 Agent);保存只写白名单、保留 name/io/未知键/body。io.inputs/outputs 归 i/o 面板、正文 XML 步骤归画布内联,都不在 Properties。字段集对齐与 round-trip 现状/差距见实施页。",
+  "atoms": [
+    {
+      "n": 16,
+      "cap": "node-type-derivation",
+      "module": "节点类型判定",
+      "func": "设计:选中一个节点,面板显示它是 LOGIC / AGENT / SUBGRAPH 哪一类——类型应由该 phase 目录下存在哪个节点文件(SKILL/LOGIC/SUBGRAPH.md)决定,不被可变的 mode 字段推翻(F1)。",
+      "action": "用户在画布选中一个节点,Properties 面板顶部显示其类型并据此渲染对应白名单。",
+      "fe_design": "现状:phaseKindLabel(PropertiesPanel.tsx,据 data.mode/data.subgraphPath 推 LOGIC/AGENT/SUBGRAPH 三类标签的函数)读 data.mode;data.mode 来自 build-nodes 的 topology.mode ?? phase.mode,而 topology.mode 是引擎按物理 phase 文件(LOGIC.md/SKILL.md/SUBGRAPH.md)经 _PHASE_FILE_TO_MODE 派生注入的,引擎还在 _reject_phase_forbidden_metadata 把作者写的 mode: 当禁止字段拒掉。所以主路径下类型已是『文件派生』、作者写 mode: 改不了类型(被引擎拒)。残留 F1 风险只有两点:① phase.mode 这个 fallback 兜底(topology.mode 缺时回退,可能 stale);② UI 标签叫『Mode』而非『节点类型/Kind』,误导用户以为可设。目标:类型派生显式以『该 phase 目录下存在哪个节点文件』为真相、去掉 phase.mode 兜底歧义,标签改『节点类型(由文件决定,不可编辑)』。",
+      "fe_modules": [
+        {
+          "name": "节点类型派生"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "GET /api/skills/{skill_id}",
+          "purpose": "编译产物里 graph_topology 行的 mode 正常由引擎按文件注入;前端应据文件存在性定类型、mode 仅 fallback。",
+          "mechanism_ref": "mech_graph",
+          "iface_ref": "iface-1"
+        }
+      ],
+      "fe_status": "偏差",
+      "be_status": "n/a",
+      "gap_brief": "纠偏:主路径类型已是引擎按文件派生(作者写 mode: 被 _reject_phase_forbidden_metadata 拒),不是『可变 mode 推翻类型』的主路径 bug;残留是 phase.mode fallback 兜底 + UI 标签叫『Mode』。目标:派生显式据文件、去 fallback 歧义、标签改『节点类型(由文件决定)』。",
+      "impl_ref": "fn-16"
+    },
+    {
+      "n": 17,
+      "cap": "readonly-mode-row",
+      "module": "节点类型判定",
+      "func": "设计:面板底部只读信息区不应暴露一个『Mode』行——它和『节点类型=文件名、作者不得写 mode』的口径冲突,会让用户误以为 mode 是个可设属性。应删掉该行,或改成『节点类型(由文件决定,不可编辑)』。",
+      "action": "无显式动作(选中节点时底部只读 DetailRow 区自动展示)。",
+      "fe_design": "目标设计:把底部只读区(DetailRow,展示 Phase ID / Depends On / Role / Tools / File 等只读信息的行)里的『Mode』行删掉,或改述为『节点类型(来自文件 SKILL/LOGIC/SUBGRAPH.md,不可编辑)』,强调类型由文件决定。现状底部 DetailRow 渲染了一个 label='Mode' 的只读行(值取派生的类型标签),措辞会误导用户以为 mode 可变。",
+      "fe_modules": [
+        {
+          "name": "节点类型派生"
+        }
+      ],
+      "be_contract": [],
+      "fe_status": "偏差",
+      "be_status": "n/a",
+      "gap_brief": "现状底部只读区暴露『Mode』行,与『类型=文件名、不得写 mode』口径冲突、误导用户;目标删该行或改述为『节点类型(由文件决定)』。纯前端文案/结构改动。",
+      "impl_ref": "fn-17"
+    },
+    {
+      "n": 18,
+      "cap": "agent-whitelist",
+      "track": "Agent",
+      "module": "三类节点白名单",
+      "func": "设计:选中 Agent 节点(SKILL.md),Properties 露 MVP 最小字段子集——llm_role / tools / subagents,不露任何旧 stale 字段。注:这是引擎 agent 语法的最小子集,非全集。",
+      "action": "用户选中一个 Agent 节点,面板渲染 agent 分支表单。",
+      "fe_design": "kind=agent 时只渲染 MVP 三字段:llm_role、tools、subagents(SubagentsField 子表单 name/target_skill/description)。绝不渲染 system_prompt/exit_contract/max_retries/python_callable/可编辑 mode(FROZEN 禁字段)。范围说明:引擎 AgentNodeAST(SKILL.md 的 agent 节点 AST)实际还支持 subgraphs[](agent 注册的子图,按 path,§2.4)、references、examples/examples_inline、max_iterations 等;MVP Properties 先收敛到 llm_role/tools/subagents 三个最常用字段,是引擎 agent 语法的『最小子集』、非完整对齐。subgraphs[].path 是引擎 SSOT 明确语法,后续可补编辑形态。subagents 的 target_skill 是 §2.5 合法保留(子代理与子图 path 两回事)。",
+      "fe_modules": [
+        {
+          "name": "phase 白名单序列化"
+        }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计(三字段白名单 = 引擎 agent 语法的 MVP 最小子集,旧 stale 字段全不渲染)。注:引擎 AgentNodeAST 还支持 subgraphs[](按 path)/references/examples/max_iterations,Properties 暂未覆盖——是 MVP 范围收敛、非对齐缺陷;subgraphs[].path 后续可补。不应表述成『完整对齐引擎语法』。",
+      "impl_ref": "fn-18"
+    },
+    {
+      "n": 19,
+      "cap": "logic-whitelist",
+      "track": "Logic",
+      "module": "三类节点白名单",
+      "func": "设计:选中 Logic 节点(LOGIC.md),只露两个白名单字段——actions(按执行顺序的确定性 Python action 列表)、validator(后置校验开关),对齐 engine §2.3。",
+      "action": "用户选中一个 Logic 节点,面板渲染 logic 分支表单。",
+      "fe_design": "kind=logic 时只渲染:actions(一行一 action、按执行顺序的 textarea,注册确定性 Python action + 顺序)、validator(开关,开启后置校验钩子,写回黑板前跑同级 validator.py)。绝不渲染 llm_role/tools/python_callable 等。io.outputs 的字段边界(action 回写字段须是 io.outputs.properties 子集)归 i/o 面板统一承载,Properties 不重复做,但应有指向 i/o 面板的提示,避免用户以为 logic 无 io 约束。",
+      "fe_modules": [
+        {
+          "name": "phase 白名单序列化"
+        }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计(白名单 actions/validator 已对齐 §2.3)。轻微:缺一个指向 i/o 面板的 io.outputs 边界提示(io 边界编辑归 i/o 面板),非阻塞。",
+      "impl_ref": "fn-19"
+    },
+    {
+      "n": 20,
+      "cap": "subgraph-whitelist",
+      "track": "Subgraph",
+      "module": "三类节点白名单",
+      "func": "设计:选中 Subgraph 节点(SUBGRAPH.md),只露两个白名单字段——path(子图根目录绝对路径)、validator(后置校验开关);path 找不到要标红 + 给『OS 选文件夹导入工作区』入口(F4/D7)。",
+      "action": "用户选中一个 Subgraph 节点,填/改子图绝对 path;path 失效时点导入入口选文件夹。",
+      "fe_design": "kind=subgraph 时只渲染:path(绝对路径输入框,占位 /absolute/path/to/child_graph;D7:子图按 path 解析、无注册表)、validator(开关)。子图引用状态由 resolveSubgraphReference(出 resolved/missing/migration-required 三态的函数)判定:仍用旧 target_skill 的给迁移提示。目标:path 解析不到(missing)时在 Properties + Assets 标红、并给『OS 选文件夹把子图导入工作区』入口(F4/R5);copilot 工作目录范围要把被引用子图 path 纳入(D7,否则读不到/改不到子图)。",
+      "fe_modules": [
+        {
+          "name": "子图 path 解析"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "GET child-graph-topology",
+          "purpose": "校验子图 path 是否解析得到(拉子图拓扑成功=resolved),失败据此标红。",
+          "mechanism_ref": "mech_io",
+          "iface_ref": "iface-io-1"
+        }
+      ],
+      "fe_status": "偏差",
+      "be_status": "契约问题",
+      "gap_brief": "现状 path 输入框 + 旧 target_skill 迁移提示已有,但『path 找不到 → 标红 → OS 选文件夹导入工作区』的 folder picker 导入入口缺(F4/R5);copilot cwd 纳入子图 path 的校验也未落,需后端把子图 path 解析/导入契约定下来。",
+      "impl_ref": "fn-20"
+    },
+    {
+      "n": 21,
+      "cap": "whitelist-roundtrip-save",
+      "module": "保存",
+      "func": "设计:在 Properties 改字段后保存,只写该类型白名单字段,name / io / 非本类型字段 / 任意未知键 / body 全部原样保留,不破坏文件。",
+      "action": "用户在 Properties 改完字段 → 点保存。",
+      "fe_design": "保存 → applyPhaseFrontmatterForm(把表单写回 phase 源码、保留白名单外内容的函数):先 parsePhaseFrontmatter 拆出 frontmatter + 原始 body,再 frontmatterFromForm 以原 frontmatter 浅拷贝为起点、按 kind 只 set/delete 白名单键(agent→llm_role/tools/subagents、logic→actions/validator、subgraph→path/validator),body 仅去前导多余换行原样拼回 → 带 expected_hash(对当前文件算 sha256)落盘。空值用 delete 不写 null,避免空字段污染。",
+      "fe_modules": [
+        {
+          "name": "phase 白名单序列化"
+        },
+        {
+          "name": "graph round-trip 客户端"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "native-fs write_workspace_file",
+          "purpose": "保存 phase 文件走统一写盘命令(覆盖写带 expected_hash 乐观锁),证明落盘内容来自白名单合并而非整文件重写。",
+          "mechanism_ref": "mech_graph",
+          "iface_ref": "iface-4"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(白名单 round-trip 保存:保留 name/io/未知键/body,空值 delete)。",
+      "impl_ref": "fn-21"
+    }
+  ]
+}

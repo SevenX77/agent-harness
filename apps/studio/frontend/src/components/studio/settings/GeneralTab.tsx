@@ -8,6 +8,7 @@ import { SaveStatusBadge } from "@/components/ui/save-status-badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { selectSkillDirectory } from "@/lib/tauri"
 import { effectiveDefaultSkillsDirectory } from "@/utils/skill-paths"
+import { applyLanguageChange } from "./language-switch"
 import { SectionTitle } from "./shared"
 import type { SettingsPageContentProps } from "./types"
 
@@ -16,7 +17,6 @@ export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appS
   const [selectingDefaultFolder, setSelectingDefaultFolder] = useState(false)
   const fallbackDefaultSkillsDirectory = effectiveDefaultSkillsDirectory(null) ?? ""
   const currentDefaultSkillsDirectory = effectiveDefaultSkillsDirectory(appSettings.defaultSkillsDirectory)
-  const currentLanguage = i18n.resolvedLanguage === "zh-CN" || i18n.language === "zh-CN" ? "zh-CN" : "en"
 
   async function chooseDefaultSkillsDirectory() {
     setSelectingDefaultFolder(true)
@@ -111,9 +111,13 @@ export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appS
           <Field>
             <FieldLabel htmlFor="studio-language">{t("general.language.label")}</FieldLabel>
             <Select
-              value={currentLanguage}
+              value={appSettings.language}
               onValueChange={(value) => {
-                i18n.changeLanguage(value).catch(() => undefined)
+                applyLanguageChange({
+                  changeLanguage: (next) => i18n.changeLanguage(next),
+                  setLanguage: appSettings.setLanguage,
+                  value,
+                })
               }}
             >
               <SelectTrigger

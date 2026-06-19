@@ -14,10 +14,12 @@ import type { SettingsPageContentProps } from "./types"
  * badge reflects status, and loading/disabled wiring is present — so a future
  * edit that unbinds a field or drops the badge is caught.
  *
- * #15.1 (language persistence into app_settings) is intentionally NOT covered
- * here: it is backend-blocked (AppSettings has extra="forbid" + no `language`
- * field) and deferred. The language dropdown's current presence is asserted so
- * it is not accidentally removed before the backend field lands.
+ * #15.1 (language persistence into app_settings) is now wired: the language
+ * dropdown is bound to `appSettings.language` (the persisted value) and, on
+ * change, both drives `i18n.changeLanguage` and persists via
+ * `appSettings.setLanguage` (the two-call behaviour is unit-tested in
+ * `language-switch.test.ts`). Here we lock the render contract: the dropdown is
+ * present and reflects the persisted language value.
  */
 
 type AppSettingsProp = SettingsPageContentProps["appSettings"]
@@ -27,11 +29,13 @@ function makeAppSettings(overrides: Partial<AppSettingsProp> = {}): AppSettingsP
     userId: "alice",
     giteaHost: "https://gitea.example.com",
     defaultSkillsDirectory: "/Users/alice/AgentStudio/Skills",
+    language: "en",
     isLoading: false,
     saveStatus: "saved",
     setUserId: vi.fn(),
     setGiteaHost: vi.fn(),
     setDefaultSkillsDirectory: vi.fn(),
+    setLanguage: vi.fn(),
     ...overrides,
   }
 }
@@ -103,7 +107,23 @@ describe("GeneralTab render contract", () => {
     expect(html).toContain("Studio User ID")
     expect(html).toContain("Gitea Host")
     expect(html).toContain("Default skill folder")
-    // #15.1 language dropdown is present today (i18n-only); persistence deferred.
+    // #15.1 language dropdown is wired to persisted appSettings.language.
     expect(html).toContain('aria-label="Studio language"')
+  })
+
+  it("#15.1 binds the language selector for the persisted language value", () => {
+    // Radix Select renders the chosen label and its options client-side / in a
+    // portal (the static select-value span is empty and SelectContent is not in
+    // static markup), so neither the selected text nor the option labels can be
+    // asserted from renderToStaticMarkup. What we can lock here: the language
+    // trigger mounts (bound by id + aria-label) for either persisted value — i.e.
+    // the persisted `appSettings.language` drives the control without throwing.
+    // The change-time two-call behaviour is unit-tested in language-switch.test.ts.
+    for (const language of ["en", "zh-CN"] as const) {
+      const html = renderTab({ language })
+      expect(html).toContain('id="studio-language"')
+      expect(html).toContain('aria-label="Studio language"')
+      expect(html).toContain("Switch Studio UI copy without restarting the app.")
+    }
   })
 })

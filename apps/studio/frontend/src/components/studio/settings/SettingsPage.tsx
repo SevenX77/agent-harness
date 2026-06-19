@@ -4,8 +4,8 @@ import { useAppSettings } from "@/hooks/useAppSettings"
 import { buildPutPayload, useDebouncedCredentialsSave } from "@/hooks/useDebouncedCredentialsSave"
 import { useDebouncedRolesSave } from "@/hooks/useDebouncedRolesSave"
 import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-error-messages"
+import { useStudioEventStream } from "@/hooks/useStudioEventStream"
 import { deleteModelBundle, deleteRole, getCredentials, getModelGroups, getProviderModels, getRoles, testProviderEndpoint, type CredentialsState, type EndpointTestJobResponse, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
-import { wsUrl } from "../../../api/client"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
 import { draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, providerCachedTestResult, providerDraftForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
@@ -365,6 +365,10 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   const invalidatedTestOutcomeIdsRef = useRef<Set<string>>(new Set())
   const credentialsHydratedRef = useRef(false)
   const pendingRoleProjectionRefreshRef = useRef(false)
+  // #6: a roles_changed event arrived while the Roles/Copilot tab had never been
+  // opened (rolesData still null). Instead of dropping it, set this flag so the
+  // lazy load refetches fresh the first time the tab opens.
+  const rolesDirtyRef = useRef(false)
 
   const handleSaved = useCallback((next: CredentialsState) => {
     setCredentials({
@@ -444,44 +448,54 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     }
   }, [activeTab])
 
-  useEffect(() => {
-    let cancelled = false
-    let socket: WebSocket | null = null
-    try {
-      socket = new WebSocket(wsUrl("/ws/events"))
-      socket.onmessage = (message) => {
-        try {
-          const event = JSON.parse(String(message.data)) as { type?: string }
-          if (cancelled) return
-          if (event.type === "registry_changed") {
-            getCredentials({ hydrateSecrets: credentialsHydratedRef.current })
-              .then((next) => {
-                if (cancelled) return
-                setCredentials(next)
-                setDrafts(draftsFromCredentials(next))
-              })
-              .catch(() => {})
-          } else if (event.type === "roles_changed" && rolesDataRef.current) {
-            Promise.all([getRoles(), getModelGroups()])
-              .then(([next, nextModelGroups]) => {
-                if (cancelled) return
-                setRolesData(next)
-                setModelGroups(nextModelGroups)
-              })
-              .catch(() => {})
-          }
-        } catch {
-          // ignore
-        }
-      }
-    } catch {
-      // ignore
-    }
-    return () => {
-      cancelled = true
-      if (socket) socket.close()
-    }
+  // #5/#6 WebSocket auto-refresh, extracted into useStudioEventStream (resilient
+  // reconnect + observable logging). registry_changed re-pulls credentials;
+  // roles_changed re-pulls roles+model-groups when loaded, else marks them dirty
+  // so the next Roles/Copilot tab open refetches (the event is no longer
+  // silently dropped). onResync runs on every (re)connect to backfill any gap.
+  const refetchCredentialsFromEvent = useCallback(() => {
+    getCredentials({ hydrateSecrets: credentialsHydratedRef.current })
+      .then((next) => {
+        setCredentials(next)
+        setDrafts(draftsFromCredentials(next))
+      })
+      .catch((error) => {
+        console.warn("phase=settings-event-refresh action=credentials-refetch-failed error=%o", error)
+      })
   }, [])
+
+  const refetchRolesFromEvent = useCallback(() => {
+    Promise.all([getRoles(), getModelGroups()])
+      .then(([next, nextModelGroups]) => {
+        setRolesData(next)
+        setModelGroups(nextModelGroups)
+      })
+      .catch((error) => {
+        console.warn("phase=settings-event-refresh action=roles-refetch-failed error=%o", error)
+      })
+  }, [])
+
+  const handleRolesChangedEvent = useCallback(() => {
+    if (rolesDataRef.current) {
+      refetchRolesFromEvent()
+      return
+    }
+    // Roles tab not opened yet: don't drop the event — mark dirty so the lazy
+    // load refetches fresh when the user first opens Roles/Copilot.
+    console.info("phase=settings-event-refresh action=roles-marked-dirty reason=roles-not-loaded")
+    rolesDirtyRef.current = true
+  }, [refetchRolesFromEvent])
+
+  const handleEventResync = useCallback(() => {
+    refetchCredentialsFromEvent()
+    if (rolesDataRef.current) refetchRolesFromEvent()
+  }, [refetchCredentialsFromEvent, refetchRolesFromEvent])
+
+  const { connectionLost } = useStudioEventStream({
+    onRegistryChanged: refetchCredentialsFromEvent,
+    onRolesChanged: handleRolesChangedEvent,
+    onResync: handleEventResync,
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -535,6 +549,12 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   useEffect(() => {
     if ((activeTab !== "llm_roles" && activeTab !== "copilot") || rolesData) return
     let cancelled = false
+    // #6: clear any pending roles-dirty flag — this lazy load IS the refetch the
+    // dropped roles_changed event was waiting for.
+    if (rolesDirtyRef.current) {
+      console.info("phase=settings-event-refresh action=roles-dirty-consumed reason=tab-open")
+      rolesDirtyRef.current = false
+    }
     Promise.all([getRoles(), getModelGroups()])
       .then(([next, nextModelGroups]) => {
         if (cancelled) return
@@ -820,6 +840,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         setGiteaHost: appSettings.setGiteaHost,
         setDefaultSkillsDirectory: appSettings.setDefaultSkillsDirectory,
       }}
+      connectionLost={connectionLost}
       onClose={onClose}
       onTabChange={setActiveTab}
       onProviderFieldChange={updateProviderField}

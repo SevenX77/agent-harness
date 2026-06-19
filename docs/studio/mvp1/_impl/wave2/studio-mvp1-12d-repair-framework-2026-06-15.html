@@ -864,7 +864,7 @@ const FOLLOWUPS = {
   d8:['G1 定位轴：GRAPH/编译错误填满 `field_path`/`source_path`，不在 sidecar 边界被降级'],
   d5:['test/probe 内核归 Gateway + 删官方-only 门禁 + 统一 test 入口 + 束 test 端点（Copilot SDK test 留 Studio）'],
   d6:['6 态投到裸 route DTO（`ProviderRoute.ui_state`）','束 = 引用 + delta materialize（`RoleEntry.bundle_id`）','role intent schema 清理（删 inherit / ModelGroupIntent / cost_priority）','P8 临时 role 解析路径（依赖束 materialize）'],
-  d7:['per-node golden 契约：`SetGoldenReq.node_id` + `GoldenBaseline.cases` 投影 + 单节点 plan（DTO 归 Studio sidecar；落盘走 Rust native-fs，sidecar 不直接写）','eval 期 `[F-v3-golden-stale-fields]` 错误码注册并发射'],
+  d7:['per-node golden：per-node 模型/cases/失效归 engine（F5/ENGINE-3）；写 .workspace/golden 走 Rust native-fs；③a 壳投影 `SetGoldenReq.node_id` + `GoldenBaseline.cases` DTO','eval 期 `[F-v3-golden-stale-fields]` 错误码注册并发射'],
   d10:['HitL Interrupted/ResumedEvent 真发射 + 事件带 `checkpoint_id`/ns','per-node checkpoint validity（脏态置灰，非全局判定）','节点级 1..X-1 不重跑编排'],
   d11:['HitL Interrupted/ResumedEvent 真发射 + 事件带 `checkpoint_id`/ns']
 };
@@ -874,6 +874,21 @@ function renderFollowups(id) {
   return '<div class="sec-label">MVP1 前端核验 follow-up · 未开始（同 S0 总章 Wave 5，本域 ' + items.length + ' 项）</div>' +
     '<div class="callout amber">前端逐节点实施核验（2026-06-19）暴露的、落在本域内但「ok 门」未 drill 到端点/字段粒度的后端 gap，需对应后端团队补。本域 `status:ok` 仍指域级边界清晰，不代表这些端点/字段已实现。</div>' +
     list(items, false);
+}
+// 导航 rollup：域边界 ok，但有未开始的 follow-up → 域点显示 partial（黄），并在子项里挂红色 follow-up。
+// 没 follow-up 的域保持自身 status（D1/D2/D4/D9/D12 = 绿）。这样 Wave5 的 11 红 ↔ 域内有红子项，状态一致。
+function navDomainStatus(d) {
+  return (FOLLOWUPS[d.id] && FOLLOWUPS[d.id].length) ? 'partial' : d.status;
+}
+function followupNavChildren(d) {
+  const items = FOLLOWUPS[d.id];
+  if (!items || !items.length) return '';
+  return items.map((t, i) => {
+    const short = esc(t.split('：')[0].split('（')[0].slice(0, 26));
+    return '<a class="progress-item" href="#' + d.id + '_logic" id="nav-' + d.id + '-fu' + i + '">' +
+      '<span class="dot-indicator"></span><span class="item-label">follow-up · ' + short + '</span>' +
+      '<span class="status-dot bad"></span></a>';
+  }).join('');
 }
 function moduleMap(d) {
   return '<div class="module-map"><div class="module-title"><span class="dots"><i></i><i></i><i></i></span><span class="tt">Boundary map · <b>' + d.code + '</b></span></div><div class="module-body">' +
@@ -2142,7 +2157,7 @@ function buildTOC() {
     const children = d.children.map(c =>
       '<a class="progress-item" href="#' + c.id + '" id="nav-' + c.id + '"><span class="dot-indicator"></span><span class="item-label">' + c.code + ' ' + esc(c.title) + '</span><span class="status-dot ' + statusClass(c.status) + '"></span></a>'
     ).join('');
-    return '<div class="toc-group"><a class="toc-parent" href="#' + d.id + '_overview" id="nav-' + d.id + '_overview"><span class="parent-node">' + d.code + '</span><span class="parent-title"><b>' + esc(displayTitle) + '</b><span>' + inlineCode(summary) + '</span></span><span class="status-dot ' + statusClass(d.status) + '"></span></a><div class="child-list">' + repair + children + '</div></div>';
+    return '<div class="toc-group"><a class="toc-parent" href="#' + d.id + '_overview" id="nav-' + d.id + '_overview"><span class="parent-node">' + d.code + '</span><span class="parent-title"><b>' + esc(displayTitle) + '</b><span>' + inlineCode(summary) + '</span></span><span class="status-dot ' + statusClass(navDomainStatus(d)) + '"></span></a><div class="child-list">' + repair + children + followupNavChildren(d) + '</div></div>';
   }).join('');
 }
 function buildDoc() {

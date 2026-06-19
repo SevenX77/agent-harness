@@ -91,10 +91,18 @@ export interface SkillTemplate {
   content: string
 }
 
+/**
+ * Studio UI language persisted in app settings. Mirrors the frontend
+ * `supportedLngs` (src/i18n.ts) and the backend `SupportedLanguage`
+ * (models/settings.py); keep the three in sync.
+ */
+export type AppLanguage = 'en' | 'zh-CN'
+
 export interface AppSettings {
   user_id: string
   gitea_host: string
   default_skills_directory: string
+  language: AppLanguage
 }
 
 export interface CollaborateResult {

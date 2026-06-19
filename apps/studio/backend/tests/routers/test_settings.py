@@ -16,6 +16,7 @@ def test_get_settings_returns_defaults(client: TestClient) -> None:
         "user_id": "",
         "gitea_host": "",
         "default_skills_directory": str(config.DEFAULT_SKILLS_ROOT),
+        "language": "en",
     }
 
 
@@ -24,6 +25,7 @@ def test_put_then_get_roundtrip(client: TestClient, tmp_path: Path) -> None:
         "user_id": "alice",
         "gitea_host": "https://gitea.example.com",
         "default_skills_directory": str(tmp_path / "graph-skills"),
+        "language": "en",
     }
 
     put_response = client.put("/api/settings", json=payload)
@@ -69,6 +71,54 @@ def test_put_validates_strip(client: TestClient) -> None:
     assert get_response.json()["default_skills_directory"] == "/tmp/studio-skills"
 
 
+def test_get_defaults_language_when_omitted(client: TestClient, tmp_path: Path) -> None:
+    """N0 i18n back-compat: a PUT without ``language`` defaults to English."""
+    put_response = client.put(
+        "/api/settings",
+        json={
+            "user_id": "dave",
+            "gitea_host": "",
+            "default_skills_directory": str(tmp_path / "skills"),
+        },
+    )
+    get_response = client.get("/api/settings")
+
+    assert put_response.status_code == 200
+    assert put_response.json()["language"] == "en"
+    assert get_response.json()["language"] == "en"
+
+
+def test_put_language_roundtrips(client: TestClient, tmp_path: Path) -> None:
+    """N0 i18n: the selected UI language survives PUT -> GET."""
+    payload = {
+        "user_id": "eve",
+        "gitea_host": "",
+        "default_skills_directory": str(tmp_path / "skills"),
+        "language": "zh-CN",
+    }
+
+    put_response = client.put("/api/settings", json=payload)
+    get_response = client.get("/api/settings")
+
+    assert put_response.status_code == 200
+    assert put_response.json()["language"] == "zh-CN"
+    assert get_response.json()["language"] == "zh-CN"
+
+
+def test_put_rejects_unsupported_language(client: TestClient, tmp_path: Path) -> None:
+    response = client.put(
+        "/api/settings",
+        json={
+            "user_id": "",
+            "gitea_host": "",
+            "default_skills_directory": str(tmp_path / "skills"),
+            "language": "fr-FR",
+        },
+    )
+
+    assert response.status_code == 422
+
+
 def test_put_persists_across_app_restart(
     studio_roots: tuple[Path, Path],
     tmp_path: Path,
@@ -78,6 +128,7 @@ def test_put_persists_across_app_restart(
         "user_id": "carol",
         "gitea_host": "https://gitea.example.net",
         "default_skills_directory": str(tmp_path / "team-skills"),
+        "language": "zh-CN",
     }
 
     first_client = TestClient(create_app())

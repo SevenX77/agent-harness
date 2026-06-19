@@ -834,11 +834,13 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         userId: appSettings.settings.user_id,
         giteaHost: appSettings.settings.gitea_host,
         defaultSkillsDirectory: appSettings.settings.default_skills_directory,
+        language: appSettings.settings.language,
         isLoading: appSettings.isLoading,
         saveStatus: appSettings.saveStatus,
         setUserId: appSettings.setUserId,
         setGiteaHost: appSettings.setGiteaHost,
         setDefaultSkillsDirectory: appSettings.setDefaultSkillsDirectory,
+        setLanguage: appSettings.setLanguage,
       }}
       connectionLost={connectionLost}
       onClose={onClose}

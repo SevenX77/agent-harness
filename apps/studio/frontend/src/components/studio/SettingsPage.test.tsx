@@ -788,10 +788,13 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).toContain('Test')
   })
 
-  it('renders API key inputs as native password values with password-manager ignore attributes', () => {
+  it('renders API key inputs as CSS-masked text values (never native password) with password-manager ignore attributes', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
 
-    expect(html).toContain('type="password"')
+    // atom-22 contract: secret field is always type=text + CSS masking, never password.
+    expect(html).toContain('type="text"')
+    expect(html).not.toContain('type="password"')
+    expect(html).toContain('mask-input')
     expect(html).toContain('value="sk-deepseek"')
     expect(html).toContain('name="provider-secret-DS"')
     expect(html).toContain('autoComplete="off"')

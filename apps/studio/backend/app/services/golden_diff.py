@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import json
 import shutil
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path, PurePath
-from typing import Any
-
-from graph_agent.core.result_contracts import RunResultSnapshot
+from typing import Any, Protocol
 
 from app.core.exceptions import error_response, raise_error_response
 from app.models.compare import CompareResult
@@ -141,8 +140,34 @@ def plan_golden_baseline_for_run(
     )
 
 
+class _NodeResultRow(Protocol):
+    @property
+    def agent_node_id(self) -> str: ...
+
+
+class _RunResultsRef(Protocol):
+    @property
+    def run_id(self) -> str: ...
+
+
+class _SealedRunSnapshot(Protocol):
+    """Structural view of the sealed-run snapshot this module consumes.
+
+    Avoids importing the engine SDK concrete ``RunResultSnapshot`` into the
+    Studio business layer (forbidden by the SDK-import boundary guard); the
+    snapshot enters through the ``golden_headless`` port and is read structurally.
+    Read-only properties so the concrete SDK types match covariantly.
+    """
+
+    @property
+    def node_results(self) -> Sequence[_NodeResultRow]: ...
+
+    @property
+    def run_results_ref(self) -> _RunResultsRef: ...
+
+
 def _select_target_node_ids(
-    snapshot: RunResultSnapshot,
+    snapshot: _SealedRunSnapshot,
     node_outputs: dict[str, Any],
     *,
     node_id: str | None,

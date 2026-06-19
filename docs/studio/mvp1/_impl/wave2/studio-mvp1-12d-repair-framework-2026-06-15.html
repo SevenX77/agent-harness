@@ -252,7 +252,8 @@ const S0_PAGE = {
       ['真 App 路径验收','ok'],
       ['reviewer findings 修复/关闭','ok'],
       ['HTML 状态页同步最终证据','ok']
-    ]}]
+    ]}],
+    ['Wave 5 · MVP1 前端驱动的后端 follow-up（来自前端逐节点实施核验 2026-06-19）','前端核验暴露的、落在 12D 域内但「ok 门」未 drill 到端点/字段粒度的后端 gap，需对应后端团队补。D3/D8：G1 定位轴——compile 错误填满 field_path/source_path 且不在 sidecar 边界(_safe_adapter_error_payload)降级。D5：test/probe 内核归 Gateway + 删官方-only 门禁 + 统一 test 入口 + 束 test 端点（Copilot SDK test 留 Studio）。D6：6 态投到裸 route DTO（ProviderRoute.ui_state）+ 束=引用 delta materialize（RoleEntry.bundle_id）+ role intent schema 清理 + P8 临时 role 解析路径。D7：per-node golden 写入（SetGoldenReq.node_id + GoldenBaseline.cases 投影 + 单节点 plan/set）+ eval 期 [F-v3-golden-stale-fields] 码注册并发射。D10/D11：HitL Interrupted/ResumedEvent 真发射 + 事件带 checkpoint_id/ns + per-node checkpoint validity + 节点级 1..X-1 不重跑编排。',{nodes:['d3','d8','d5','d6','d7','d10','d11']}]
   ],
   routine:[
     ['读设计与定级','先看父节点设计页，从 MVP1 第一性原理确认 owner、接口、边界和接入方；再把任务定级为小修、单点实现、跨 owner 迁移或高风险收敛。'],

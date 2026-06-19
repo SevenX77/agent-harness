@@ -1,4 +1,5 @@
 import type { ReactNode } from "react"
+import type { AppLanguage } from "@/api/types"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 import type { CredentialsState, ModelGroup, ModelInfo, ProviderType, RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
@@ -34,11 +35,13 @@ export interface SettingsPageContentProps {
     userId: string
     giteaHost: string
     defaultSkillsDirectory: string
+    language: AppLanguage
     isLoading: boolean
     saveStatus: SaveStatus
     setUserId: (value: string) => void
     setGiteaHost: (value: string) => void
     setDefaultSkillsDirectory: (value: string) => void
+    setLanguage: (value: AppLanguage) => void
   }
   /**
    * N0 Settings · Shell (atoms #5/#6): true only after the /ws/events stream's

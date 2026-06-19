@@ -104,6 +104,86 @@ export function mockedSourceClass(source: MockedSource): string {
   return 'border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-900/20 dark:text-violet-300'
 }
 
+export interface RetryBadge {
+  /** Human-facing label, e.g. "2/3" when a limit is known or "#2" when it is not. */
+  label: string
+  /** Current attempt number, 1-based. */
+  attempt: number
+  /** Max attempts when the engine reported a limit; null otherwise. */
+  limit: number | null
+  /** True once this is the final allowed attempt (attempt === limit). */
+  exhausted: boolean
+}
+
+/** Auto-expand a trace payload only when it is small enough to read inline (~2KB). */
+export const TRACE_PAYLOAD_AUTO_EXPAND_BYTES = 2048
+
+export interface PayloadPreview {
+  /** Serialized payload, truncated to a readable head when it exceeds the limit. */
+  text: string
+  /** True when the full payload is larger than the auto-expand limit. */
+  truncated: boolean
+  /** Byte size of the full serialized payload. */
+  sizeBytes: number
+  /** Human-readable size, e.g. "3.9 KB". */
+  sizeLabel: string
+}
+
+function numericField(value: JsonValue | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function readAttemptFields(source: Record<string, JsonValue | undefined>): { attempt: number | null; limit: number | null } {
+  // attempt/max_attempts are 1-based; retry_count is 0-based attempts already spent.
+  const attemptDirect = numericField(source.attempt)
+  const retryCount = numericField(source.retry_count)
+  const attempt = attemptDirect ?? (retryCount !== null ? retryCount + 1 : null)
+  const limit = numericField(source.max_attempts) ?? numericField(source.max_retries) ?? numericField(source.retry_limit)
+  return { attempt, limit }
+}
+
+export function retryBadge(event: CallbackEvent): RetryBadge | null {
+  let { attempt, limit } = readAttemptFields(event)
+  if (attempt === null && isJsonObject(event.metadata)) {
+    ({ attempt, limit } = readAttemptFields(event.metadata))
+  }
+  if (attempt === null && isJsonObject(event.metrics)) {
+    ({ attempt, limit } = readAttemptFields(event.metrics))
+  }
+  if (attempt === null) {
+    return null
+  }
+  const label = limit !== null ? `${attempt}/${limit}` : `#${attempt}`
+  return {
+    label,
+    attempt,
+    limit,
+    exhausted: limit !== null && attempt >= limit,
+  }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`
+  }
+  return `${(bytes / 1024).toFixed(1)} KB`
+}
+
+export function payloadPreview(event: CallbackEvent): PayloadPreview {
+  const full = JSON.stringify(event, null, 2)
+  const sizeBytes = full.length
+  const sizeLabel = formatBytes(sizeBytes)
+  if (sizeBytes <= TRACE_PAYLOAD_AUTO_EXPAND_BYTES) {
+    return { text: full, truncated: false, sizeBytes, sizeLabel }
+  }
+  return {
+    text: `${full.slice(0, TRACE_PAYLOAD_AUTO_EXPAND_BYTES)}…`,
+    truncated: true,
+    sizeBytes,
+    sizeLabel,
+  }
+}
+
 export function findPromptEvent(events: CallbackEvent[], selectedIndex: number): CallbackEvent | null {
   const selected = events[selectedIndex]
   if (!selected) {

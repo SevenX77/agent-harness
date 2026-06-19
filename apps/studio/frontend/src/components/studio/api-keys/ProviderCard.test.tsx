@@ -78,12 +78,15 @@ function routeTagHtml(html: string, modelId: string): string {
 }
 
 describe("ProviderCard API key masking", () => {
-  it("renders API key as a native password input by default", () => {
+  it("renders the API key as a CSS-masked text input by default (never a native password field)", () => {
     const html = renderCardHtml()
 
-    expect(html).toContain('type="password"')
+    // §1 contract: the secret field is ALWAYS type=text + CSS masking, so the
+    // browser/extension password manager is never triggered.
+    expect(html).toContain('type="text"')
+    expect(html).not.toContain('type="password"')
+    expect(html).toContain("mask-input")
     expect(html).toContain('value="sk-secret-123"')
-    expect(html).not.toContain("mask-input")
     expect(html).toContain('name="provider-secret-p1"')
     expect(html).toContain('data-1p-ignore=""')
     expect(html).toContain('data-lpignore="true"')
@@ -99,18 +102,17 @@ describe("ProviderCard API key masking", () => {
     expect(html).toContain(">Test</button>")
   })
 
-  it("visibility toggle changes only input type and does not mutate draft api key", () => {
+  it("keeps the input type=text in both hidden and visible states", () => {
     const onFieldChange = vi.fn()
-    const hiddenInputType = apiKeyInputType(false)
-    const visibleInputType = apiKeyInputType(true)
 
-    expect(hiddenInputType).toBe("password")
-    expect(visibleInputType).toBe("text")
+    expect(apiKeyInputType()).toBe("text")
     expect(onFieldChange).not.toHaveBeenCalled()
     expect(draft.api_key).toBe("sk-secret-123")
   })
 
-  it("uses muted text only while the API key is hidden", () => {
+  it("masks via the mask-input class only while hidden; muted text only while hidden", () => {
+    expect(apiKeyInputClassName(false)).toContain("mask-input")
+    expect(apiKeyInputClassName(true)).not.toContain("mask-input")
     expect(apiKeyInputClassName(false)).toContain("text-muted-foreground")
     expect(apiKeyInputClassName(false)).not.toContain("text-foreground")
     expect(apiKeyInputClassName(true)).toContain("text-foreground")

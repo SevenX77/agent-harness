@@ -10,11 +10,10 @@ import {
   CatalogAccordionTrigger,
 } from "@/components/ui/catalog-accordion"
 import { SaveStatusBadge } from "@/components/ui/save-status-badge"
-import { ProviderCard, ProviderListSkeleton } from "../../api-keys"
+import { AddProviderForm, ProviderCard, ProviderListSkeleton } from "../../api-keys"
 import { officialProviderDrafts, thirdPartyProviderDrafts, notableProviderKeyForDraft, shouldShowManualModelPanel } from "../provider-utils"
 import { SectionTitle } from "../shared"
 import type { SettingsPageContentProps } from "../types"
-import { RoleNameDialog } from "../llm-roles/RoleNameDialog"
 
 export function ApiKeysTab({
   credentials,
@@ -128,29 +127,21 @@ export function ApiKeysTab({
                     <p className="text-xs text-muted-foreground">{t("apiKeys.noThirdPartyProviders")}</p>
                   </div>
                 ) : null}
-                <Button type="button" variant="default" onClick={() => setAddProviderOpen(true)} className="gap-1">
-                  <Plus className="size-3.5" />
-                  {t("apiKeys.addProvider")}
-                </Button>
-                <RoleNameDialog
-                  title={t("apiKeys.addProviderDialogTitle")}
-                  initialName=""
-                  existingNames={thirdPartyDrafts.map((d) => d.name)}
-                  open={addProviderOpen}
-                  onOpenChange={setAddProviderOpen}
-                  onSubmit={(name: string) => {
-                    const code = `custom-${globalThis.crypto?.randomUUID?.() ?? Date.now()}`
-                    onAddProvider({
-                      providerCode: code,
-                      name: name,
-                      baseUrl: "",
-                      apiKey: "",
-                      type: "third-party",
-                    })
-                  }}
-                  fieldLabel={t("apiKeys.providerName")}
-                  submitLabel={t("apiKeys.add")}
-                />
+                {addProviderOpen ? (
+                  <AddProviderForm
+                    existingNames={thirdPartyDrafts.map((d) => d.name)}
+                    onSubmit={(submission) => {
+                      onAddProvider(submission)
+                      setAddProviderOpen(false)
+                    }}
+                    onCancel={() => setAddProviderOpen(false)}
+                  />
+                ) : (
+                  <Button type="button" variant="default" onClick={() => setAddProviderOpen(true)} className="gap-1">
+                    <Plus className="size-3.5" />
+                    {t("apiKeys.addProvider")}
+                  </Button>
+                )}
               </CatalogAccordionContent>
             </CatalogAccordionItem>
           </CatalogAccordion>

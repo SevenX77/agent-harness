@@ -1,15 +1,13 @@
-import { AlertCircle, AlertTriangle, Clock3, FolderOpen, Layers, Layers3, MoreVertical, Plus, Sparkles, Trash2 } from 'lucide-react'
-import { useMemo, useState, type FormEvent } from 'react'
+import { AlertCircle, Clock3, FolderOpen, Layers, Layers3, MoreVertical, Plus } from 'lucide-react'
+import { useState, type FormEvent } from 'react'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
 import type { SkillSummary } from '../../api/types'
 import { useAppSettings } from '../../hooks/useAppSettings'
 import { useRecentSkills } from '../../hooks/useRecentSkills'
 import { useSkills } from '../../hooks/useSkills'
-import { Badge } from '../ui/badge'
-import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { getRuntimeConfig } from '../../config/runtime'
-import { revealInFileManager, selectSkillDirectory, addRecentWorkspace, removeRecentWorkspace, ensureWorkspaceSupportDirs } from '../../lib/tauri'
+import { revealInFileManager, selectSkillDirectory, addRecentWorkspace, ensureWorkspaceSupportDirs } from '../../lib/tauri'
 import { errorMessage, isRecord } from '../../utils/errors'
 import { joinDirectoryPath } from '../../utils/skill-paths'
 import { Button } from '../ui/button'
@@ -19,19 +17,16 @@ import {
   CardHeader,
   CardTitle,
 } from '../ui/card'
-import { requestDeleteConfirmationToast } from '../ui/delete-confirm-toast'
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
-  ContextMenuSeparator,
   ContextMenuTrigger,
 } from '../ui/context-menu'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu'
 import {
@@ -41,12 +36,12 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '../ui/empty'
+import { Skeleton } from '../ui/skeleton'
 import { createLocalWorkspaceSelection, isAbsolutePath } from '../studio/workspace-identity'
 import { NewSkillDialog } from './NewSkillDialog'
 import { formatLastRun, normalizeSkillId, shortPath, skillIdFromPath } from './utils'
 
 export const REVEAL_ACTION_LABEL = 'Show in folder'
-export const REMOVE_WORKSPACE_ACTION_LABEL = 'Remove'
 export const ACTION_MENU_CLASSNAME = 'w-48'
 
 interface WelcomePageProps {
@@ -84,10 +79,6 @@ export function buildSkillImportPayload(directoryPath: string): CreateSkillPaylo
   }
 }
 
-function comparableDirectoryPath(path: string) {
-  return path.trim().replace(/\\/g, '/').replace(/\/+$/, '')
-}
-
 function ignorePromise(promise: Promise<unknown>) {
   promise.catch(() => undefined)
 }
@@ -97,18 +88,11 @@ export function registeredSkillIdForImport(): string | null {
   return null
 }
 
-export function requestSkillDeleteConfirmation(
-  skill: Pick<SkillSummary, 'id' | 'name'>,
-  onConfirm: () => void | Promise<void>,
-) {
-  const displayName = skill.name.trim() || skill.id
-  requestDeleteConfirmationToast({
-    id: `delete-skill-${skill.id}`,
-    title: `Remove ${displayName} from Studio?`,
-    description: 'This skill will be removed from Studio. Its source folder stays on disk.',
-    confirmLabel: REMOVE_WORKSPACE_ACTION_LABEL,
-    onConfirm,
-  })
+interface WorkspaceCardModel {
+  absolutePath: string
+  displayName: string
+  identity: string
+  lastOpenedAt: string
 }
 
 interface StudioErrorPayload {
@@ -245,52 +229,17 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
   const [newSkillError, setNewSkillError] = useState<string | null>(null)
   const appSettings = useAppSettings()
   const defaultSkillParentDirectory = defaultSkillsDirectory(appSettings.settings.default_skills_directory)
-  const { skills, skillListError, mutateSkills } = useSkills(null)
-  const { recentWorkspaces, rememberWorkspace, removeWorkspace } = useRecentSkills()
+  const { skillListError, mutateSkills } = useSkills(null)
+  const { recentWorkspaces, rememberWorkspace, isHydrating } = useRecentSkills()
 
-  const visibleWorkspaces = useMemo(() => {
-    const list: Array<{
-      absolutePath: string
-      displayName: string
-      identity: string
-      lastOpenedAt: string
-      phaseCount?: number
-      lastRunAt?: string | null
-      skillId?: string
-      matching?: SkillSummary
-    }> = recentWorkspaces.map((w) => {
-      const matching = skills.find((s) => s.directory_path && comparableDirectoryPath(s.directory_path) === comparableDirectoryPath(w.absolutePath))
-      return {
-        absolutePath: w.absolutePath,
-        displayName: w.displayName,
-        identity: w.identity,
-        lastOpenedAt: w.lastOpenedAt,
-        phaseCount: matching ? matching.phase_count : 0,
-        lastRunAt: matching ? matching.last_run_at : null,
-        skillId: matching?.id,
-        matching,
-      }
-    })
-
-    for (const skill of skills) {
-      if (skill.directory_path) {
-        const path = skill.directory_path
-        if (!list.some((w) => comparableDirectoryPath(w.absolutePath) === comparableDirectoryPath(path))) {
-          list.push({
-            absolutePath: path,
-            displayName: skill.name || skill.id,
-            identity: `local:${path}`,
-            lastOpenedAt: skill.last_run_at || '',
-            phaseCount: skill.phase_count,
-            lastRunAt: skill.last_run_at,
-            skillId: skill.id,
-            matching: skill,
-          })
-        }
-      }
-    }
-    return list
-  }, [recentWorkspaces, skills])
+  // Recent is a pure MRU projection (D11/D-1-1): each card is one localStorage
+  // recentWorkspaces entry, no registry-derived fields and no registry merge.
+  const visibleWorkspaces: WorkspaceCardModel[] = recentWorkspaces.map((w) => ({
+    absolutePath: w.absolutePath,
+    displayName: w.displayName,
+    identity: w.identity,
+    lastOpenedAt: w.lastOpenedAt,
+  }))
 
   const resolveBackendSkillIdForWorkspace = async (workspaceRoot: string, backendSkillId?: string) => {
     if (backendSkillId) {
@@ -326,8 +275,8 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
     )
   }
 
-  const openWorkspace = (workspace: { absolutePath: string; displayName: string; skillId?: string }) => {
-    openSkill(workspace.absolutePath, workspace.displayName, workspace.skillId).catch((error) => {
+  const openWorkspace = (workspace: WorkspaceCardModel) => {
+    openSkill(workspace.absolutePath, workspace.displayName).catch((error) => {
       toast.error('Open folder failed', { description: formatImportSkillError(error) })
     })
   }
@@ -353,27 +302,6 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
 
   const handleReveal = (workspace: { absolutePath: string }) => {
     ignorePromise(revealInFileManager(workspace.absolutePath))
-  }
-
-  const deleteSkill = async (workspace: { absolutePath: string; displayName: string; identity: string; skillId?: string }) => {
-    try {
-      if (workspace.skillId) {
-        await api.delete(`/skills/${workspace.skillId}`)
-      }
-      removeWorkspace(workspace.identity)
-      ignorePromise(removeRecentWorkspace(workspace.identity))
-      toast.success(`Removed ${workspace.displayName} from Studio`)
-      await mutateSkills()
-    } catch (error) {
-      toast.error('Remove failed', { description: errorMessage(error) })
-    }
-  }
-
-  const handleDelete = (workspace: { absolutePath: string; displayName: string; identity: string; skillId?: string }) => {
-    requestSkillDeleteConfirmation(
-      { id: workspace.identity, name: workspace.displayName },
-      () => deleteSkill(workspace)
-    )
   }
 
   const submitNewSkill = async (event?: FormEvent) => {
@@ -463,11 +391,7 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
         </div>
 
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-medium text-muted-foreground">Recent skills</h2>
-          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-            <Sparkles className="size-3.5" />
-            Desktop workspace
-          </span>
+          <h2 className="text-sm font-medium text-muted-foreground">Recent</h2>
         </div>
 
         {skillListError ? (
@@ -479,137 +403,91 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
           </div>
         ) : null}
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          {visibleWorkspaces.map((workspace) => (
-            <ContextMenu key={workspace.identity}>
-              <ContextMenuTrigger asChild>
-                <Card
-                  size="sm"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => openWorkspace(workspace)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      openWorkspace(workspace)
-                    }
-                  }}
-                  className="relative cursor-pointer select-none transition-colors hover:ring-2 hover:ring-primary/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                >
-                  <CardHeader className="px-3 pb-0">
-                    <div className="flex items-start gap-3">
-                      <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
-                        <Layers3 className="size-4" />
-                      </div>
-                      <div className="min-w-0 flex-1 pr-12">
-                        <CardTitle className="truncate text-sm">{workspace.displayName}</CardTitle>
-                        <p className="mt-1 line-clamp-2 min-h-10 break-all font-mono text-[11px] leading-5 text-muted-foreground">
-                          {shortPath(workspace.absolutePath)}
-                        </p>
-                        {workspace.matching && (workspace.matching.has_golden || workspace.matching.config_mismatch) ? (
-                          <div className="mt-2 flex flex-wrap items-center gap-1">
-                            {workspace.matching.has_golden ? <Badge>Golden</Badge> : null}
-                            {workspace.matching.config_mismatch ? (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Badge
-                                    variant="outline"
-                                    aria-label="Repo URL mismatch"
-                                    onClick={(event) => event.stopPropagation()}
-                                    className="border-destructive/40 bg-destructive/10 text-destructive"
-                                  >
-                                    <AlertTriangle />
-                                    Config drift
-                                  </Badge>
-                                </TooltipTrigger>
-                                <TooltipContent className="max-w-xs text-xs">
-                                  <div className="space-y-1.5">
-                                    <div>
-                                      <span className="font-medium">Actual:</span>{' '}
-                                      <span className="break-all font-mono">{workspace.matching.config_mismatch.actual_remote_url}</span>
-                                    </div>
-                                    <div>
-                                      <span className="font-medium">Expected:</span>{' '}
-                                      <span className="break-all font-mono">{workspace.matching.config_mismatch.expected_remote_url}</span>
-                                    </div>
-                                    <div className="pt-1 text-muted-foreground">{workspace.matching.config_mismatch.recommendation}</div>
-                                  </div>
-                                </TooltipContent>
-                              </Tooltip>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </div>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={`More actions for ${workspace.displayName}`}
-                            className="absolute right-2 top-2 z-10"
+        {!skillListError && isHydrating ? (
+          <RecentSkeleton />
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {visibleWorkspaces.map((workspace) => (
+              <ContextMenu key={workspace.identity}>
+                <ContextMenuTrigger asChild>
+                  <Card
+                    size="sm"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => openWorkspace(workspace)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        openWorkspace(workspace)
+                      }
+                    }}
+                    className="relative cursor-pointer select-none transition-colors hover:ring-2 hover:ring-primary/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  >
+                    <CardHeader className="px-3 pb-0">
+                      <div className="flex items-start gap-3">
+                        <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
+                          <Layers3 className="size-4" />
+                        </div>
+                        <div className="min-w-0 flex-1 pr-12">
+                          <CardTitle className="truncate text-sm">{workspace.displayName}</CardTitle>
+                          <p className="mt-1 line-clamp-2 min-h-10 break-all font-mono text-[11px] leading-5 text-muted-foreground">
+                            {shortPath(workspace.absolutePath)}
+                          </p>
+                        </div>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              aria-label={`More actions for ${workspace.displayName}`}
+                              className="absolute right-2 top-2 z-10"
+                              onClick={(event) => event.stopPropagation()}
+                              onPointerDown={(event) => event.stopPropagation()}
+                              onKeyDown={(event) => event.stopPropagation()}
+                            >
+                              <MoreVertical />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            align="end"
+                            className={ACTION_MENU_CLASSNAME}
                             onClick={(event) => event.stopPropagation()}
-                            onPointerDown={(event) => event.stopPropagation()}
-                            onKeyDown={(event) => event.stopPropagation()}
                           >
-                            <MoreVertical />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent
-                          align="end"
-                          className={ACTION_MENU_CLASSNAME}
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <DropdownMenuItem onSelect={() => handleReveal(workspace)}>
-                            <FolderOpen />
-                            {REVEAL_ACTION_LABEL}
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            variant="destructive"
-                            onSelect={() => handleDelete(workspace)}
-                          >
-                            <Trash2 />
-                            {REMOVE_WORKSPACE_ACTION_LABEL}
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </CardHeader>
-                  <CardFooter className="justify-between gap-3 px-3 pt-0 text-xs text-muted-foreground">
-                    <span>{workspace.phaseCount ?? 0} phases</span>
-                    <span className="inline-flex items-center gap-1">
-                      <Clock3 className="size-3.5" />
-                      {formatLastRun(workspace.lastRunAt ?? null)}
-                    </span>
-                  </CardFooter>
-                </Card>
-              </ContextMenuTrigger>
-              <ContextMenuContent className={ACTION_MENU_CLASSNAME}>
-                <ContextMenuItem onSelect={() => handleReveal(workspace)}>
-                  <FolderOpen />
-                  {REVEAL_ACTION_LABEL}
-                </ContextMenuItem>
-                <ContextMenuSeparator />
-                <ContextMenuItem
-                  variant="destructive"
-                  onSelect={() => handleDelete(workspace)}
-                >
-                  <Trash2 />
-                  {REMOVE_WORKSPACE_ACTION_LABEL}
-                </ContextMenuItem>
-              </ContextMenuContent>
-            </ContextMenu>
-          ))}
-        </div>
+                            <DropdownMenuItem onSelect={() => handleReveal(workspace)}>
+                              <FolderOpen />
+                              {REVEAL_ACTION_LABEL}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </CardHeader>
+                    <CardFooter className="justify-end gap-3 px-3 pt-0 text-xs text-muted-foreground">
+                      <span className="inline-flex items-center gap-1">
+                        <Clock3 className="size-3.5" />
+                        {formatLastRun(workspace.lastOpenedAt || null)}
+                      </span>
+                    </CardFooter>
+                  </Card>
+                </ContextMenuTrigger>
+                <ContextMenuContent className={ACTION_MENU_CLASSNAME}>
+                  <ContextMenuItem onSelect={() => handleReveal(workspace)}>
+                    <FolderOpen />
+                    {REVEAL_ACTION_LABEL}
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
+            ))}
+          </div>
+        )}
 
-        {!skillListError && visibleWorkspaces.length === 0 ? (
+        {!skillListError && !isHydrating && visibleWorkspaces.length === 0 ? (
           <Empty className="min-h-40 border border-dashed border-border">
             <EmptyHeader>
               <EmptyMedia variant="icon">
                 <FolderOpen />
               </EmptyMedia>
-              <EmptyTitle>No skills found</EmptyTitle>
-              <EmptyDescription>Create or import a skill to populate this workspace.</EmptyDescription>
+              <EmptyTitle>No recent skills</EmptyTitle>
+              <EmptyDescription>Create a new skill or open a folder to get started.</EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : null}
@@ -630,6 +508,33 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
         creating={creating}
         onSubmit={submitNewSkill}
       />
+    </div>
+  )
+}
+
+/**
+ * N1 Home · atom #8 (recent-skeleton).
+ *
+ * Loading placeholder for the Recent grid during the cold-start / pre-hydration
+ * window (D6), shown by WelcomePage while useRecentSkills reports isHydrating.
+ * Mirrors the recent-card shape — icon tile + name + path bars — using the
+ * shared shadcn Skeleton, the same primitive ProviderListSkeleton uses, so the
+ * first paint reads as the Recent grid rather than a blank flash.
+ */
+export function RecentSkeleton({ count = 2 }: { count?: number }) {
+  return (
+    <div data-recent-skeleton="true" className="grid gap-3 sm:grid-cols-2">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="rounded-md border p-3">
+          <div className="flex items-start gap-3">
+            <Skeleton className="size-8 shrink-0 rounded-md" />
+            <div className="min-w-0 flex-1 space-y-2">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-3 w-full" />
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

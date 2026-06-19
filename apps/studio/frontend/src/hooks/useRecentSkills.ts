@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 export interface RecentWorkspaceEntry {
   absolutePath: string
@@ -63,6 +63,15 @@ export function useRecentSkills() {
   const [recentWorkspaces, setRecentWorkspaces] = useState<RecentWorkspaceEntry[]>(() => {
     return readRecentWorkspaces()
   })
+  // Cold-start window: true for the first paint before the client has confirmed
+  // the localStorage MRU read. Home shows a Recent skeleton while this is true so
+  // the cold-start / pre-hydration moment is a placeholder, not a blank flash (D6).
+  const [isHydrating, setIsHydrating] = useState(true)
+
+  useEffect(() => {
+    setRecentWorkspaces(readRecentWorkspaces())
+    setIsHydrating(false)
+  }, [])
 
   const rememberWorkspace = useCallback((workspace: Pick<RecentWorkspaceEntry, 'absolutePath' | 'displayName'>) => {
     const entry = rememberRecentWorkspace(workspace)
@@ -79,5 +88,6 @@ export function useRecentSkills() {
     recentWorkspaces,
     rememberWorkspace,
     removeWorkspace,
+    isHydrating,
   }
 }

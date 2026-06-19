@@ -28,6 +28,7 @@ import { deriveNodeStatuses } from "./node-status"
 import { nodeResumeCheckpointFromEvents } from "./node-resume"
 import { hitlResumeOptionsFromRequest } from "./resume-options"
 import { compileErrorsByNode } from "./node-compile-errors"
+import { CompileErrorDrawer } from "./CompileErrorDrawer"
 import { ConflictDialog } from "./ConflictDialog"
 import { Header } from "./Header"
 import { Panels } from "./Panels"
@@ -159,6 +160,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const isLoading = useMemo(() => Boolean(currentSkillId && !skillDetail && !skillDetailError), [skillDetail, skillDetailError, currentSkillId])
   const [compileStages, setCompileStages] = useState<Record<string, SkillBuildStage>>({})
   const [compileErrors, setCompileErrors] = useState<Record<string, CompileError[]>>({})
+  const [compileDrawerOpen, setCompileDrawerOpen] = useState(false)
   const [runId, setRunId] = useState<string | null>(null)
   // F4: the test input selected in the i/o panel feeds Predict/Run (null = the
   // prior empty-payload behaviour). Reset when the active skill changes.
@@ -373,6 +375,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       if ("code" in result) {
         updateStage(targetSkillId, "compile-fail")
         setCompileErrors((current) => ({ ...current, [targetSkillId]: result.errors }))
+        setCompileDrawerOpen(true)
         const firstMessage = result.errors[0]?.message ?? result.detail
         toast.error(`${result.errors.length} compile error${result.errors.length === 1 ? "" : "s"}: ${firstMessage}`)
         return
@@ -380,6 +383,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       if (result.status === "ok") {
         updateStage(targetSkillId, "compile-pass")
         setCompileErrors((current) => ({ ...current, [targetSkillId]: [] }))
+        setCompileDrawerOpen(false)
         toast.success(
           `Compiled ${result.manifest_name} (${shortHash(result.artifact_ref.content_hash)}, fp ${shortHash(result.execution_fingerprint)})`,
         )
@@ -392,6 +396,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         ...current,
         [targetSkillId]: [{ file: null, line: null, field: null, severity: "fatal", message }],
       }))
+      setCompileDrawerOpen(true)
       toast.error(message)
     }
   }, [mutateSkillDetail, updateStage])
@@ -1012,9 +1017,11 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
               )}
               {currentSkillId && !settingsOpen ? (
                 <>
-                  {currentCompileErrors.length > 0 ? (
-                    <CompileErrorPanel errors={currentCompileErrors} />
-                  ) : null}
+                  <CompileErrorDrawer
+                    errors={currentCompileErrors}
+                    open={compileDrawerOpen && currentCompileErrors.length > 0}
+                    onOpenChange={setCompileDrawerOpen}
+                  />
                   <CenterActionBarWithCreate
                     stage={deriveBuildStage(currentSkillId)}
                     onCompile={handleCompile}
@@ -1091,29 +1098,6 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       />
     </div>
     </WorkspaceProvider>
-  )
-}
-
-function CompileErrorPanel({ errors }: { errors: CompileError[] }) {
-  const first = errors[0]
-  return (
-    <div className="absolute bottom-20 left-1/2 z-30 w-[min(560px,calc(100%-2rem))] -translate-x-1/2 rounded-md border border-destructive/40 bg-background/95 p-3 text-sm shadow-lg backdrop-blur">
-      <div className="font-medium text-destructive">
-        {errors.length} compile error{errors.length === 1 ? "" : "s"}: {first?.message ?? "Compilation failed"}
-      </div>
-      <div className="mt-2 max-h-36 space-y-2 overflow-auto">
-        {errors.map((error, index) => (
-          <div key={`${error.file ?? "compile"}-${error.line ?? "x"}-${index}`} className="text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">
-              {error.file ?? "unknown file"}
-              {error.line ? `:${error.line}` : ""}
-            </span>
-            {error.field ? <span> - {error.field}</span> : null}
-            <span> - {error.message}</span>
-          </div>
-        ))}
-      </div>
-    </div>
   )
 }
 

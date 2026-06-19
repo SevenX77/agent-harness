@@ -35,13 +35,13 @@
 
 | surface | 操作原子数 | 前端实施：符合/偏差/未实施 | 后端契约：已实现/未实现/契约问题/n/a |
 |---|---|---|---|
-| 画布搭建 | 15 | 11 符合 / 3 偏差 / 1 未实施 | 11 已实现 / 0 未实现 / 2 契约问题 / 2 n/a |
+| 画布搭建 | 15 | 11 符合 / 3 偏差 / 1 未实施 | 12 已实现 / 0 未实现 / 1 契约问题 / 2 n/a |
 | Properties 节点属性 | 6 | 3 符合 / 3 偏差 / 0 未实施 | 1 已实现 / 0 未实现 / 1 契约问题 / 4 n/a |
 | GRAPH.md 宏观契约 | 3 | 2 符合 / 1 偏差 / 0 未实施 | 3 已实现 / 0 未实现 / 0 契约问题 / 0 n/a |
 | i/o 面板 | 6 | 3 符合 / 3 偏差 / 0 未实施 | 4 已实现 / 0 未实现 / 2 契约问题 / 0 n/a |
-| **合计** | **30** | **19 符合 / 10 偏差 / 1 未实施** | **19 已实现 / 0 未实现 / 5 契约问题 / 6 n/a** |
+| **合计** | **30** | **19 符合 / 10 偏差 / 1 未实施** | **20 已实现 / 0 未实现 / 4 契约问题 / 6 n/a** |
 
-> 注：无「桩」状态原子（N2 的桩在 N0/N3 侧，不在本节点路径）。#15 L3 后端轴已改「已实现」（保存复用现成 native-fs / fallback 写路径，不需新增端点，见 §6）。
+> 注：无「桩」状态原子。后端轴两处随复审修正：#15 L3 改「已实现」（保存复用现成 native-fs / fallback 写路径，不需新增端点）；#14 子图下钻改「已实现」（引擎 io 切片契约已 pin、child topology/serialize/compile 端点都在，blocker 收窄到 Studio 前端 child-edit UX，非引擎契约缺口，见 §6/§9）。
 
 ## 4. 后端接口契约清单（逐条）
 > N2 对接的「后端」= Studio FastAPI sidecar（gateway/engine 的承载层）+ graph-agent 引擎内核 + Studio Rust native-fs。authoring 内核是 **graph-agent 引擎**，不是 gateway。
@@ -115,7 +115,7 @@
 - **#14 subgraph-drilldown 下钻编辑写回（blocker 已收窄，审计 F8）**：引擎 io 切片契约**已 pin**（`skill-syntax §2.10` + §2.4「不要求父子 1:1」），不再是「切片契约未定」。多级下钻导航（drill stack/breadcrumb/child topology）已实现；剩的是 **Studio child-edit UX**——子图根目录如何成为写入 root、保存走子图自己的 GRAPH.md、compile scope（父图还是子图）、错误回滚。属 Studio 侧设计，不是引擎契约缺口。
 - **硬阻塞 #30 子图 io 1:1（G2）**：引擎 `loader.py` `_validate_subgraph_io_contracts` 仍 FATAL，与 `skill-syntax §2.4`「不要求 1:1」**硬冲突**；后端删/改前子图 io 编辑被硬阻塞（前端无活）。
 - **等后端 #28 任一节点导入字段的运行期注入时机**：归引擎 `io/manager.py`，需后端定「跑到该节点才注入」契约。
-- **前端独立可做（不等后端）**：#8 重连/拖拽断（接 React Flow onReconnect）、#15 L3 内联骨架、#16/#17 类型派生改文件优先+删 Mode 行、#20 子图 path 标红+Tauri 选文件夹导入入口、#22 头部结构化表单、#27 逐节点 i/o 面板。
+- **前端独立可做（不等后端）**：#8 重连/拖拽断（接 React Flow onReconnect）、#15 L3 接线（AgentStepsInline 已存在、只差挂入口，保存走现成写路径）、#14 子图下钻编辑闭环（引擎 io 切片契约已 pin，剩 Studio child-edit UX：child filePath/save target/compile scope；子图内 io 字段编辑子集另受 #30 loader fatal 阻塞）、#16/#17 类型派生显式据文件+改 Mode 标签、#20 子图 path 标红+Tauri 选文件夹导入入口、#22 头部结构化表单、#27 逐节点 i/o 面板。
 - **无桩**：N2 路径上无后端桩（桩在 N0 的 draft probe、不在本节点）。
 - **R5 另一半**：「assets 文件树 ↔ 子图文件同步」归 asset-explorer（file-editing 能力），已在画布设计页 intro 声明不在 N2 范围。
 

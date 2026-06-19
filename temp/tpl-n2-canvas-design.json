@@ -345,14 +345,14 @@
       "be_contract": [
         {
           "endpoint": "GET child-graph-topology",
-          "purpose": "下钻聚焦需要子图真实拓扑;进一步的子图编辑落盘走子图自身工程的 GRAPH.md serialize(同 mech_graph 一套)。",
+          "purpose": "下钻聚焦/编辑需子图真实拓扑(已实现);进一步子图编辑落盘走子图自己的 GRAPH.md serialize(同 mech_graph 一套,已实现)。io 切片契约引擎已 pin。",
           "mechanism_ref": "mech_io",
           "iface_ref": "iface-io-1"
         }
       ],
       "fe_status": "偏差",
-      "be_status": "契约问题",
-      "gap_brief": "现状多级 drill focus + breadcrumb + child topology 预览已实现(非仅就地聚焦);缺口是下钻后的子图编辑写回闭环。⚠️ 注:引擎 io 切片契约已 pin(§2.10/§2.4 不要求 1:1),blocker 收窄到 Studio child-edit UX(child root 身份、编辑保存走哪棵 GRAPH.md、触发父图还是子图 compile),不是切片契约未定。",
+      "be_status": "已实现",
+      "gap_brief": "现状多级 drill focus + breadcrumb + child topology 预览已实现(非仅就地聚焦);缺口是下钻后的子图编辑写回闭环(child root 身份、保存走子图自己的 GRAPH.md、compile scope=compile 哪个 skill_id、错误回滚)——这是 Studio 前端 UX,不是引擎契约。⚠️ 引擎 io 切片契约已 pin(§2.10/§2.4 不要求 1:1);子图内 io 字段编辑的子集另受 #30 的 loader 1:1 fatal 阻塞(后端待删)。",
       "impl_ref": "fn-14"
     },
     {

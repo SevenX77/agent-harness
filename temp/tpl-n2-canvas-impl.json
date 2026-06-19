@@ -128,7 +128,7 @@
       "current": "现状:多级下钻导航已实现,下钻后编辑写回未闭环。GraphCanvas.tsx 的 drillInto/drillNavigate + drill-stack.ts 的 drillStackReducer(push/pop/popTo 多级下钻栈)+ DrillBreadcrumb.tsx(逐级面包屑导航)+ 按 path 拉各级 child topology(getChildGraphTopology effect)+ 双击 subgraph 分支,已能多级下钻聚焦看子拓扑。但 build-nodes.ts 的 buildNodesFromTopology 把 drilled child 节点的 filePath 留空、GraphCanvas.tsx 非 subgraph 双击 fallback 仍拼父级 skillId 路径——即『进入子图后编辑子图节点并写回』未接线。",
       "gap": "差距(收窄):引擎 io 切片契约已 pin(skill-syntax §2.10 io 切片 + §2.4 子图从黑板切片、不要求父子 1:1),无需再等切片契约。剩的是 Studio 下钻编辑 UX 闭环——① 子图根目录如何成为当前写入 root(child root identity);② 下钻后编辑保存走子图自己的 GRAPH.md(buildNodesFromTopology 给 child 节点补真实 filePath);③ 保存触发父图还是子图 compile(compile scope)、错误如何回滚。这些是 Studio 侧 UX/写回设计,不是引擎契约缺口。",
       "fe_status": "偏差",
-      "be_dep": "引擎契约基本就绪。io 切片/合并契约已 pin(§2.10/§2.4),child topology 端点已实现。剩 #30 的 loader 子图 io 1:1 fatal 仍在(硬阻塞子图 io 编辑,见 #30);下钻编辑的 child root/save target/compile scope 偏 Studio UX 决策,非引擎契约。"
+      "be_dep": "引擎契约已就绪。io 切片/合并契约已 pin(skill-syntax §2.10 + §2.4 不要求父子 1:1),child topology 端点 + 子图 GRAPH.md serialize + compile 端点均已实现。下钻编辑闭环(child root/filePath/save target/compile scope)是 Studio 前端 UX,非引擎契约缺口。注:子图内 io 字段编辑的子集受 #30 loader 1:1 fatal 阻塞(那条是后端待删,见 iopanel #30)。"
     },
     {
       "n": 15,
@@ -150,30 +150,30 @@
     },
     {
       "step": 2,
-      "what": "#15 l3-step-edit(前端骨架):节点右缘加号展开 body,在画布内联对 `<step>`/`<action>` 增删改序,保存走 native-fs write_workspace_file 写 phase body(覆盖写带 expected_hash)。先做内联编辑 UI + 整文件覆盖写路径。",
-      "depends_on": "前端依赖:复用现成 write_workspace_file 落盘链路;UI 沿用 shadcn。后端:整文件覆盖写已就绪;若要 body 级结构 patch 则等后端(见 step 3)。",
-      "why": "phase body 写盘路径已就绪,L3 内联 UI 是纯前端骨架,可先落地基本增删改序;与 step 1 不冲突可并行。",
+      "what": "#15 l3-step-edit(接线已有组件):把已存在但未挂载的 AgentStepsInline(AgentStepsInlineView 展示组件 + agent-steps.ts 的 parseAgentSteps/addAgentStep/removeAgentStep/reorderAgentSteps/updateAgentStep 增删改序纯函数)接到画布内联编辑入口(节点右缘展开 body),保存复用现成 phase 文件保存路径(handlePhaseFileSave → doWriteSkillFile → native-fs / 浏览器 fallback)。",
+      "depends_on": "前端依赖:AgentStepsInline 组件 + agent-steps.ts 已存在,只差接线;保存走现成 native-fs / 浏览器 fallback 写路径。后端不动、不需新增 mutate 端点。",
+      "why": "组件已写好、只差挂到画布入口,纯前端;与 step 1 不冲突可并行。",
       "block": "前端独立"
     },
     {
       "step": 3,
-      "what": "后端先行:把画布依赖的两条后端契约落下来——① REQ-2 字段供需:把各 phase io.inputs/outputs 的字段供需关系暴露成结构化可勾选数据(供 #10 黑板字段勾选 UI),不只 compile 回吐 mismatch;② 子图下钻的父子 io 自动切片(StateMapper 按子图 io schema 过滤字段注入、无 context_bridge)契约(供 #14);③ (可选)phase body 级结构 patch 写接口(供 #15 结构化增删改序,替代整文件覆盖)。",
-      "depends_on": "后端契约(引擎 io schema 供需结构化、子图 io 切片;后端实施手册 D8 GRAPH parse/serialize 虽已收口=ok/partial,但字段供需结构化、子图切片这些需后端按设计补)。这是 #10/#14 的共同前置。",
-      "why": "后端先于前端铁律:#10 字段勾选、#14 自动切片的前端改法都取决于后端先把供需/切片数据结构定下来,后端没动就改前端=返工。排在依赖后端的前端项之前。",
-      "block": "等后端（后端先行）"
+      "what": "#14 subgraph-drilldown(下钻编辑闭环,前端为主):引擎 io 切片契约已 pin(skill-syntax §2.10 io 切片 + §2.4 子图从黑板切片、不要求父子 1:1),多级下钻导航(drillStackReducer/DrillBreadcrumb/各级 child topology)也已实现。补 Studio child-edit UX 闭环:① buildNodesFromTopology 给 drilled child 节点补真实 filePath(现留空);② 下钻后编辑保存走子图自己的 GRAPH.md serialize(现成端点);③ 定 compile scope(保存触发父图还是子图 compile,即 compile 哪个 skill_id)+ 错误回滚。",
+      "depends_on": "前端为主:引擎 io 切片契约已 pin、child topology 端点 + 子图 GRAPH.md serialize + compile 端点都已实现,无需等后端切片契约。compile scope 是 Studio 侧设计决策(compile 哪个 skill_id)。注:在子图内编辑 io 字段的子集会撞 #30 的 loader 1:1 fatal(见 iopanel #30),那部分等后端删 fatal。",
+      "why": "下钻编辑闭环是 Studio child-edit UX(child root/filePath/save target/compile scope),引擎契约已就绪,作前端独立项推进;不必等后端切片契约(已 pin)。",
+      "block": "前端独立"
     },
     {
       "step": 4,
-      "what": "#10 data-gap-viz(前端字段勾选):做黑板字段勾选 UI——节点 io.inputs 字段从上游 io.outputs 可勾选取得、可视化字段供需;删旧的『按节点类型相等画红叉』。",
-      "depends_on": "后端 step 3-①(字段供需结构化数据)。前端复用 io 字段编辑(见 i/o 面板)。",
-      "why": "REQ-2 字段勾选必须在后端供需契约(step 3)就位后做,否则前端无结构化数据可勾。",
-      "block": "等后端"
+      "what": "后端先行:REQ-2 字段供需——把各 phase io.inputs/outputs 的字段供需关系暴露成结构化可勾选数据(供 #10 黑板字段勾选 UI),不只 compile 回吐 mismatch。注:#15 的 phase body 写不需新增后端端点(现成整文件覆盖写 native-fs / fallback 已够)。",
+      "depends_on": "后端契约:引擎 io schema 字段供需结构化(REQ-2/FROZEN-4,spec 自述待统一出 FROZEN 新版本、未 pin)。这是 #10 的前置。",
+      "why": "后端先于前端铁律:#10 字段勾选的前端改法取决于后端先把供需数据结构定下来,后端没动就改前端=返工。注:#14 的子图 io 切片契约已 pin、已从本步移除。",
+      "block": "等后端（后端先行）"
     },
     {
       "step": 5,
-      "what": "#14 subgraph-drilldown(前端下钻):点下钻就地聚焦到子图拓扑视图(留同一画布、不切工程),进去能编辑子图节点;父子 io 按子图 io schema 自动切片注入。",
-      "depends_on": "后端 step 3-②(子图 io 切片契约);子图编辑落盘走现成 serialize。",
-      "why": "下钻的父子 io 自动切片依赖后端切片契约(step 3),就位后前端才能正确注入子图 input;放在后端先行之后做。",
+      "what": "#10 data-gap-viz(前端字段勾选):做黑板字段勾选 UI——节点 io.inputs 字段从上游 io.outputs 可勾选取得、可视化字段供需;删旧的『按节点类型相等画红叉』。",
+      "depends_on": "后端 step 4(字段供需结构化数据)。前端复用 io 字段编辑(见 i/o 面板)。",
+      "why": "REQ-2 字段勾选必须在后端供需契约(step 4)就位后做,否则前端无结构化数据可勾。",
       "block": "等后端"
     }
   ],
@@ -394,17 +394,18 @@
         14
       ],
       "shots": [
-        "点子图下钻,就地聚焦进子图拓扑(同一画布、不切工程)",
-        "子图 input 按 schema 从父图状态机自动切片注入"
+        "多级下钻:drill 进各级子图 + 面包屑导航(已实现)",
+        "下钻后编辑子图节点并写回子图自己的 GRAPH.md(目标态)"
       ],
       "fe_status": "偏差",
       "layer1": [
-        "RED:当前只有就地聚焦看子拓扑、无下钻进编辑 → 断言『下钻进子图编辑』失败。",
-        "GREEN(后端切片契约就位后):断言点下钻就地聚焦到子图、能编辑子图节点。",
-        "断言子图 input 按子图 io schema 从父状态机过滤字段注入(无 context_bridge)。"
+        "断言多级下钻导航已实现:drillStackReducer push/pop/popTo、DrillBreadcrumb 逐级、按 path 拉各级 child topology(回归现状)。",
+        "RED:当前 buildNodesFromTopology 给 drilled child 节点 filePath 留空、无下钻编辑写回入口 → 断言『下钻后能编辑子图节点并保存到子图 GRAPH.md』失败。",
+        "GREEN(纯前端接线后,引擎 io 切片契约已 pin、无需等后端):断言 drilled child 节点有真实 filePath、编辑保存走子图自己的 GRAPH.md serialize、compile scope 命中子图 skill_id。",
+        "断言子图 input 按子图自己声明从黑板切片过滤字段(引擎 §2.10/§2.4 已 pin,前端只投影)。"
       ],
       "layer2": [
-        "真跑(后端就位后):下钻进一个子图,编辑并看父子 io 切片。"
+        "真跑:多级下钻进子图看面包屑;下钻后编辑一个子图节点保存,看落子图 GRAPH.md(子图内改 io 字段会撞 #30 loader fatal,属 #30 后端待删)。"
       ]
     },
     {

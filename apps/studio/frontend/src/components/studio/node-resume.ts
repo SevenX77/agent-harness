@@ -1,8 +1,30 @@
-import type { CallbackEvent, EventEnvelope } from '@/api/types'
+import type { CallbackEvent, EventEnvelope, ResumeValidityResponse } from '@/api/types'
+import type { ResumeRunOptions } from '@/api/client'
 
 export interface NodeResumeCheckpoint {
   checkpointId: string
   checkpointNs: string
+}
+
+/**
+ * Build the node-level Resume request from a checkpoint-validity response (debug F2).
+ *
+ * The failed-node Resume button must anchor the resume at THIS node so the engine
+ * reuses upstream checkpoints instead of replaying them (workflow 05 §"节点级 Resume").
+ * `resume_from_node_id` therefore always carries the node id (validity's value when
+ * present, the selected node id otherwise). Kept as a pure function so the
+ * "resume carries resume_from_node_id" contract is unit-testable without the panel.
+ */
+export function nodeResumeOptionsFromValidity(
+  validity: ResumeValidityResponse,
+  nodeId: string,
+): ResumeRunOptions {
+  return {
+    checkpointId: validity.checkpoint_id ?? undefined,
+    checkpointNs: validity.checkpoint_ns ?? undefined,
+    resumeFromNodeId: validity.resume_from_node_id ?? nodeId,
+    resumeToNodeId: validity.resume_to_node_id ?? undefined,
+  }
 }
 
 type TraceEventInput = CallbackEvent | EventEnvelope

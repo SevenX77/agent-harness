@@ -4,7 +4,18 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class GoldenBaselineCase(BaseModel):
+    """One agent node's golden case, projected from baseline.json for the UI badge."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    case_id: str
+    node_id: str
+    phase_id: str
+    expected_output_ref: str
 
 
 class GoldenBaseline(BaseModel):
@@ -18,6 +29,7 @@ class GoldenBaseline(BaseModel):
     created_at: datetime
     locked: bool
     content_path: str
+    cases: list[GoldenBaselineCase] = Field(default_factory=list)
 
 
 class GoldenBaselineFile(BaseModel):
@@ -39,6 +51,7 @@ class SetGoldenReq(BaseModel):
 
     run_id: str
     lock: bool
+    node_id: str | None = None
 
 
 class CopilotJudgeRequest(BaseModel):

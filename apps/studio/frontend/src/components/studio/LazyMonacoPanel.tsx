@@ -6,7 +6,9 @@ import { writeSkillFile } from '@/api/client'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { isTauriRuntime } from '@/config/runtime'
+import { useDebouncedLint } from '@/hooks/useDebouncedLint'
 import { sha256Hex } from '@/lib/hash'
+import { LintDiagnosticsPanel, type EditorOnMount, type MonacoEditor as MonacoEditorInstance } from '@/components/MonacoPanel'
 
 const MonacoEditor = lazy(async () => {
   const module = await import('@monaco-editor/react')
@@ -242,6 +244,29 @@ export function LazyMonacoPanel({
     }, 1500)
   }
 
+  // Realtime lint (workflow 03_compile F1): the live editor draft drives the debounced
+  // /lint call; its diagnostics are the single source of truth the panel below projects.
+  const { result: lintResult } = useDebouncedLint(skillId, draft)
+  const editorRef = useRef<MonacoEditorInstance | null>(null)
+
+  const handleEditorMount = useCallback<EditorOnMount>((editor) => {
+    editorRef.current = editor
+  }, [])
+
+  const handleJumpToLine = useCallback((line: number | null) => {
+    const editor = editorRef.current
+    if (!editor || !line) {
+      return
+    }
+    editor.revealLineInCenter(line)
+    editor.setPosition({ lineNumber: line, column: 1 })
+    editor.focus()
+  }, [])
+
+  const handleCopyDiagnostics = useCallback((message: string) => {
+    void navigator.clipboard?.writeText(message)
+  }, [])
+
   return (
     <section className="flex h-full min-h-0 flex-col bg-card">
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-3">
@@ -274,6 +299,11 @@ export function LazyMonacoPanel({
           ) : null}
         </div>
       </div>
+      <LintDiagnosticsPanel
+        lintResult={lintResult}
+        onJumpToLine={handleJumpToLine}
+        onCopyErrors={handleCopyDiagnostics}
+      />
       <div className="min-h-0 flex-1">
         <Suspense fallback={<MonacoSkeleton />}>
           <MonacoEditor
@@ -289,6 +319,7 @@ export function LazyMonacoPanel({
               automaticLayout: true,
               readOnly: !saveEnabled,
             }}
+            onMount={handleEditorMount}
             onChange={(nextValue) => handleChange(nextValue ?? '')}
           />
         </Suspense>

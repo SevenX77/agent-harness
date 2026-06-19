@@ -552,12 +552,12 @@ const D_TREE = [
         ['UI 不拥有状态规则。','新路径没有 needs_setup/mock role/routeStatusOverrides 事实源。','DTO 必须来自 Gateway-owned projection/materialization。']),
       child('d6_import_drafts','D6.5','llm_import_drafts 等公共内核下沉','ok',
         '导入草稿、capability 归一化、probe 策略、endpoint 标准化都是可复用 Gateway 能力，不应绑死 Studio router。',
-        'Gateway ③b 拥有 draft/evidence 知识库内核、标准化、capability/probe 公共规则；Studio ③a 保留 HTTP/job/status 包装、import/apply 用户工作流、远端源选择/配置、存储路径和 credentials writer 注入。',
+        'gateway 服务拥有 draft/evidence 知识库内核、标准化、capability/probe 公共规则；Studio 后端壳保留 HTTP/job/status 包装、import/apply 用户工作流、远端源选择/配置、存储路径和 credentials writer 注入。',
         '当前 draft/evidence 知识库内核已迁到 graph_agent_gateway：ImportDraftStore、append-only EvidenceRecord、new_evidence_library、candidate materialization 与 canonicalization、remote evidence merge、probe evidence -> historical_ready projection 均由 Gateway-owned contract 提供；Studio `llm_import_drafts.py` 作为 workflow glue 调用这些能力，并保留 apply 到 active credentials 的 Studio 写入边界。证据：D6.5 focused gate 82 passed，`git diff --check` clean；Descartes 最终复审 Critical/Important/Minor 均为 0。',
         '保持 draft/evidence 知识库内核在 graph_agent_gateway；Studio 只保留 HTTP/job/status、import/apply 工作流、远端源选择和 credentials writer 注入。',
         ['新增 `packages/graph-agent-gateway/tests/test_import_drafts_store.py`：覆盖 draft round-trip、legacy payload、append evidence 不覆盖旧证据、remote merge 按 evidence_id 去重、candidate 转 route 默认 unverified_manual。','收窄 `apps/studio/backend/tests/routers/test_llm_registry_api.py -k import_draft`：mock gateway import-draft service，只断言 DTO、404、409、job/status 包装，不断言内核规则。','扩展 `.importlinter`：root_packages 加 graph_agent_gateway，禁止 graph_agent_gateway -> app，并限制 app.routers.llm 直接 import draft 内核函数；运行 `uv run lint-imports`。','新增 AST 边界检查：`apps/studio/backend/app/services` 不得定义 append_evidence_record、remote merge/dedupe、probe strategy 等公共内核，只允许薄 adapter。','保留 Gateway base_url/capability/endpoint 标准化测试，并加 import draft apply 路径复用 gateway canonicalization 的回归测试。'],
         ['修复后启动 Studio，打开 Settings -> API Keys -> Import Draft，导入含 2 个 endpoint candidate 和 1 个 route candidate 的 draft；应显示隔离预览，不立即创建 active provider。','在 draft 预览点击 Probe Draft；成功时显示 Gateway 返回的 probe evidence 和状态，失败时显示可操作错误，不能仅把 draft 状态改成 probed。','已有同名 endpoint 时点击 Apply；应出现冲突处理选择，Cancel 后 active credentials 不变，Merge 后 route 进入 unverified_manual 或对应 Gateway DTO 状态，不能显示 ready。','Apply 后切到 LLM Roles / Available Models；候选 route 的状态只能来自后端/Gateway DTO，刷新页面后显示一致。'],
-        ['公共内核不留在 ③a router/service。','import/apply 工作流仍归 Studio ③a。','probe 不是静默占位。'])
+        ['公共内核不留在 Studio 后端壳 router/service。','import/apply 工作流仍归 Studio 后端壳。','probe 不是静默占位。'])
     ]
   },
   {
@@ -864,7 +864,7 @@ const FOLLOWUPS = {
   d8:['G1 定位轴：GRAPH/编译错误填满 `field_path`/`source_path`，不在 sidecar 边界被降级'],
   d5:['test/probe 内核归 Gateway + 删官方-only 门禁 + 统一 test 入口 + 束 test 端点（Copilot SDK test 留 Studio）'],
   d6:['6 态投到裸 route DTO（`ProviderRoute.ui_state`）','束 = 引用 + delta materialize（`RoleEntry.bundle_id`）','role intent schema 清理（删 inherit / ModelGroupIntent / cost_priority）','P8 临时 role 解析路径（依赖束 materialize）'],
-  d7:['per-node golden：per-node 模型/cases/失效归 engine（F5/ENGINE-3）；写 .workspace/golden 走 Rust native-fs；③a 壳投影 `SetGoldenReq.node_id` + `GoldenBaseline.cases` DTO','eval 期 `[F-v3-golden-stale-fields]` 错误码注册并发射'],
+  d7:['per-node golden：per-node 模型/cases/失效归 engine 服务（F5/ENGINE-3）；写 .workspace/golden 走 Rust 原生层（write_golden_baseline）；Studio 后端壳投影 `SetGoldenReq.node_id` + `GoldenBaseline.cases` DTO','eval 期 `[F-v3-golden-stale-fields]` 错误码注册并发射'],
   d10:['HitL Interrupted/ResumedEvent 真发射 + 事件带 `checkpoint_id`/ns','per-node checkpoint validity（脏态置灰，非全局判定）','节点级 1..X-1 不重跑编排'],
   d11:['HitL Interrupted/ResumedEvent 真发射 + 事件带 `checkpoint_id`/ns']
 };

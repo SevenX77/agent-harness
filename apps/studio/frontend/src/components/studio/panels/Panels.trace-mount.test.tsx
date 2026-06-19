@@ -28,15 +28,19 @@ const workspaceContextStub: WorkspaceContextValue = {
   popNavTo: () => undefined,
 }
 
-function renderTimelinePanel(props: { runId: string | null; traceEvents: EventEnvelope[] }): string {
+function renderTimelinePanel(
+  props: { runId: string | null; traceEvents: EventEnvelope[] },
+  context: WorkspaceContextValue = workspaceContextStub,
+): string {
   return renderToStaticMarkup(
-    <WorkspaceProvider value={workspaceContextStub}>
+    <WorkspaceProvider value={context}>
       <Panels
         activePanel="timeline"
         skillId="story-deconstruction"
         selectedNode={null}
         runId={props.runId}
         traceEvents={props.traceEvents}
+        onResumeEdgeDownstream={() => undefined}
       />
     </WorkspaceProvider>,
   )
@@ -76,5 +80,31 @@ describe('Panels timeline region — live trace mount (F1)', () => {
 
     expect(html).toContain('No runs recorded yet')
     expect(html).not.toContain('Showing 0 of 0 events')
+  })
+
+  it('gives an active selected edge precedence over the live trace stream', () => {
+    const html = renderTimelinePanel(
+      { runId: 'run-1', traceEvents: oneEvent },
+      {
+        ...workspaceContextStub,
+        selectedEdge: {
+          id: 'draft->review',
+          source: 'draft',
+          target: 'review',
+          contextJson: {
+            blackboard_snapshot: { topic: 'cats' },
+            changed_keys: ['topic'],
+            checkpoint_id: 'checkpoint-review',
+            checkpoint_ns: 'agent:review',
+          },
+        },
+        setSelectedEdge: () => undefined,
+      },
+    )
+
+    expect(html).toContain('Blackboard transition')
+    expect(html).toContain('draft')
+    expect(html).toContain('review')
+    expect(html).not.toContain('Showing 1 of 1 events')
   })
 })

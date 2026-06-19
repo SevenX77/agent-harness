@@ -9,11 +9,13 @@ import {
   createTestInput,
   deleteTestInput,
   getRelease,
+  getResumeValidity,
   listReleases,
   prepareCopilotJudgeContext,
   postPredictRun,
   publishSkill,
   resolveCopilotBashApproval,
+  resumeRun,
   saveGoldenBaseline,
   serializeSkillGraph,
   startRun,
@@ -326,6 +328,91 @@ describe('api client auth token', () => {
     }
 
     await expect(startRun('text-segmentation', { topic: 'mars' })).rejects.toThrow('Backend unavailable')
+  })
+
+  it('test_resume_run_posts_checkpoint_node_target_and_structured_human_response', async () => {
+    api.defaults.adapter = async (config): Promise<AxiosResponse> => {
+      expect(config.method).toBe('post')
+      expect(config.url).toBe('/skills/text-segmentation/runs/run-123/resume')
+      expect(JSON.parse(String(config.data))).toEqual({
+        checkpoint_id: 'checkpoint-review',
+        checkpoint_ns: 'agent:review',
+        resume_from_node_id: 'review',
+        resume_to_node_id: 'final',
+        context_overrides: { draft: 'manual' },
+        human_input: null,
+        human_response: { content: 'approved', tool_call_id: 'tool-1' },
+      })
+      return {
+        data: {
+          run_id: 'run-123',
+          status: 'success',
+          started_at: '2026-06-17T00:00:00Z',
+          input_summary: 'resumed',
+          metrics: null,
+        },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    }
+
+    await resumeRun('text-segmentation', 'run-123', {
+      checkpointId: 'checkpoint-review',
+      checkpointNs: 'agent:review',
+      resumeFromNodeId: 'review',
+      resumeToNodeId: 'final',
+      contextOverrides: { draft: 'manual' },
+      humanResponse: { content: 'approved', toolCallId: 'tool-1' },
+    })
+  })
+
+  it('test_resume_validity_posts_checkpoint_node_target_without_source_paths', async () => {
+    api.defaults.adapter = async (config): Promise<AxiosResponse> => {
+      expect(config.method).toBe('post')
+      expect(config.url).toBe('/skills/text-segmentation/runs/run-123/resume/validity')
+      const body = JSON.parse(String(config.data))
+      expect(body).toEqual({
+        checkpoint_id: 'checkpoint-review',
+        checkpoint_ns: 'agent:review',
+        resume_from_node_id: 'review',
+        resume_to_node_id: 'final',
+      })
+      expect(JSON.stringify(body)).not.toContain('source_path')
+      expect(JSON.stringify(body)).not.toContain('skill_path')
+      return {
+        data: {
+          run_id: 'run-123',
+          resume_allowed: false,
+          reason: 'dirty_upstream',
+          checkpoint_id: 'checkpoint-review',
+          checkpoint_ns: 'agent:review',
+          resume_from_node_id: 'review',
+          resume_to_node_id: 'final',
+          dirty_fields: ['execution_fingerprint'],
+          snapshot_content_hash: `sha256:${'1'.repeat(64)}`,
+          current_content_hash: `sha256:${'2'.repeat(64)}`,
+          snapshot_execution_fingerprint: `sha256:${'3'.repeat(64)}`,
+          current_execution_fingerprint: `sha256:${'4'.repeat(64)}`,
+        },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    }
+
+    await expect(getResumeValidity('text-segmentation', 'run-123', {
+      checkpointId: 'checkpoint-review',
+      checkpointNs: 'agent:review',
+      resumeFromNodeId: 'review',
+      resumeToNodeId: 'final',
+    })).resolves.toMatchObject({
+      resume_allowed: false,
+      reason: 'dirty_upstream',
+      dirty_fields: ['execution_fingerprint'],
+    })
   })
 
   it('test_serialize_skill_graph_posts_phase_refs_to_serializer_endpoint', async () => {

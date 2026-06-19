@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from graph_agent_gateway.registry.error_classification import (
     ErrorActionClassification,
     ErrorContext,
+    StreamPhase,
     classify_error_context,
 )
 from graph_agent_gateway.route_handoff import ResolvedRouteChain
@@ -155,10 +156,12 @@ def _string_context_value(error_context: dict[str, Any], key: str) -> str | None
     return value if isinstance(value, str) and value else None
 
 
-def _stream_phase(error_context: dict[str, Any]) -> str:
+def _stream_phase(error_context: dict[str, Any]) -> StreamPhase:
     value = error_context.get("stream_phase")
-    if value in {"before_headers", "after_200_sse", "non_stream"}:
-        return value
+    if value == "before_headers":
+        return "before_headers"
+    if value == "after_200_sse":
+        return "after_200_sse"
     return "non_stream"
 
 

@@ -114,6 +114,80 @@ validator: false
     )
 
 
+def _abc_resume_logic_skill(root: Path) -> None:
+    graph_input = _schema({"topic": {"type": "string"}}, required=["topic"])
+    graph_output = _schema(
+        {
+            "a": {"type": "string"},
+            "b": {"type": "string"},
+            "c": {"type": "string"},
+        },
+        required=["a", "b", "c"],
+    )
+    _write(
+        root / "GRAPH.md",
+        f"""---
+schema_version: "v0.3.0"
+name: ws-e7-abc-resume-red
+io:
+  inputs:
+    {graph_input}
+  outputs:
+    {graph_output}
+phases:
+  - alpha
+  - beta
+  - gamma
+---
+<phase depends_on="input">alpha</phase>
+<phase depends_on="alpha">beta</phase>
+<phase depends_on="beta" output>gamma</phase>
+""",
+    )
+
+    phase_specs = {
+        "alpha": (
+            _schema({"topic": {"type": "string"}}, required=["topic"]),
+            _schema({"a": {"type": "string"}}, required=["a"]),
+            'return {"a": f"a:{context[\'topic\']}"}',
+        ),
+        "beta": (
+            _schema({"a": {"type": "string"}}, required=["a"]),
+            _schema({"b": {"type": "string"}}, required=["b"]),
+            'return {"b": f"b:{context[\'a\']}"}',
+        ),
+        "gamma": (
+            _schema({"b": {"type": "string"}}, required=["b"]),
+            _schema({"c": {"type": "string"}}, required=["c"]),
+            'return {"c": f"c:{context[\'b\']}"}',
+        ),
+    }
+    for phase_name, (inputs_schema, outputs_schema, return_line) in phase_specs.items():
+        _write(
+            root / "phases" / phase_name / "LOGIC.md",
+            f"""---
+io:
+  inputs:
+    {inputs_schema}
+  outputs:
+    {outputs_schema}
+actions: [{phase_name}]
+validator: false
+---
+<action>{phase_name}</action>
+""",
+        )
+        _write(
+            root / "phases" / phase_name / "actions" / f"{phase_name}.py",
+            dedent(
+                f"""
+                def {phase_name}(context):
+                    {return_line}
+                """
+            ).lstrip(),
+        )
+
+
 def _checkpoint_id_with_draft_without_final(run_id: str) -> str:
     saver = get_checkpointer()
     for checkpoint in saver.list({"configurable": {"thread_id": run_id, "checkpoint_ns": ""}}):
@@ -124,6 +198,18 @@ def _checkpoint_id_with_draft_without_final(run_id: str) -> str:
         if isinstance(data, dict) and "draft" in data and "final" not in data:
             return str(checkpoint.checkpoint["id"])
     raise AssertionError("expected a checkpoint after prepare and before finish")
+
+
+def _checkpoint_id_with_b_without_c(run_id: str) -> str:
+    saver = get_checkpointer()
+    for checkpoint in saver.list({"configurable": {"thread_id": run_id, "checkpoint_ns": ""}}):
+        values = checkpoint.checkpoint.get("channel_values", {})
+        data = values.get("data")
+        if hasattr(data, "model_dump"):
+            data = data.model_dump()
+        if isinstance(data, dict) and "b" in data and "c" not in data:
+            return str(checkpoint.checkpoint["id"])
+    raise AssertionError("expected a checkpoint after beta and before gamma")
 
 
 def test_resume_skill_public_api_signature_is_locked() -> None:
@@ -137,6 +223,8 @@ def test_resume_skill_public_api_signature_is_locked() -> None:
     assert signature.parameters["run_id"].default is inspect.Signature.empty
     assert "checkpoint_id" in signature.parameters
     assert "checkpoint_ns" in signature.parameters
+    assert "resume_from_node_id" in signature.parameters
+    assert "resume_to_node_id" in signature.parameters
     assert "context_overrides" in signature.parameters
     assert "human_response" in signature.parameters
     assert signature.parameters["skill_resolver"].default is inspect.Signature.empty
@@ -203,6 +291,91 @@ def test_resume_from_checkpoint_applies_business_context_overrides_without_rerun
         assert (run_dir / "final_state.json").is_file()
         assert (run_dir / "metrics.json").is_file()
         assert (run_dir / "trace.jsonl").is_file()
+    finally:
+        reset_checkpointer()
+
+
+def test_node_resume_from_abc_checkpoint_reruns_only_downstream_node(
+    tmp_path: Path,
+    mock_skill_resolver: object,
+) -> None:
+    skill_root = tmp_path / "skill"
+    workspace_dir = tmp_path / "workspace"
+    run_id = "ws-e7-abc-node-resume"
+    _abc_resume_logic_skill(skill_root)
+    reset_checkpointer()
+    try:
+        resume_skill = _public_callable("resume_skill")
+        initial = run_skill(
+            skill_root,
+            workspace_dir=workspace_dir,
+            thread_id=run_id,
+            cleanup_checkpoints_on_finish=False,
+            skill_resolver=mock_skill_resolver,
+            topic="alpha",
+        )
+        assert initial.success is True
+        assert _business_context(initial)["c"] == "c:b:a:alpha"
+        checkpoint_id = _checkpoint_id_with_b_without_c(run_id)
+
+        resume_events: list[Any] = []
+        resumed = resume_skill(
+            skill_root,
+            workspace_dir=workspace_dir,
+            run_id=run_id,
+            checkpoint_id=checkpoint_id,
+            resume_from_node_id="beta",
+            resume_to_node_id="gamma",
+            context_overrides={"b": "b:manual"},
+            event_subscriber=resume_events.append,
+            skill_resolver=mock_skill_resolver,
+        )
+
+        assert resumed.success is True
+        assert resumed.context["c"] == "c:b:manual"
+        resumed_phase_starts = [
+            getattr(event, "phase_name", None)
+            for event in resume_events
+            if getattr(event, "event_type", None) == "phase_start"
+        ]
+        assert resumed_phase_starts == ["gamma"]
+    finally:
+        reset_checkpointer()
+
+
+def test_node_resume_rejects_context_override_from_dirty_upstream_node(
+    tmp_path: Path,
+    mock_skill_resolver: object,
+) -> None:
+    skill_root = tmp_path / "skill"
+    workspace_dir = tmp_path / "workspace"
+    run_id = "ws-e7-abc-dirty-upstream"
+    _abc_resume_logic_skill(skill_root)
+    reset_checkpointer()
+    try:
+        resume_skill = _public_callable("resume_skill")
+        initial = run_skill(
+            skill_root,
+            workspace_dir=workspace_dir,
+            thread_id=run_id,
+            cleanup_checkpoints_on_finish=False,
+            skill_resolver=mock_skill_resolver,
+            topic="alpha",
+        )
+        assert initial.success is True
+        checkpoint_id = _checkpoint_id_with_b_without_c(run_id)
+
+        with pytest.raises(ValueError, match="dirty upstream|context_overrides"):
+            resume_skill(
+                skill_root,
+                workspace_dir=workspace_dir,
+                run_id=run_id,
+                checkpoint_id=checkpoint_id,
+                resume_from_node_id="beta",
+                resume_to_node_id="gamma",
+                context_overrides={"a": "a:dirty"},
+                skill_resolver=mock_skill_resolver,
+            )
     finally:
         reset_checkpointer()
 

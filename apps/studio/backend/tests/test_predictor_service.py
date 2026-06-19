@@ -89,8 +89,11 @@ def test_dispatch_predict_job_delegates_to_engine_predict_artifact_and_persists_
         current_hashes={"draft": {"prompt_hash": "abc"}},
     )
 
-    # 验证返回值
-    assert result == mock_result
+    # 验证返回值携带本次 Predict 绑定的 artifact identity
+    assert result.model_dump(mode="json") == {
+        **mock_result.model_dump(mode="json"),
+        "artifact_ref": mock_art_ref,
+    }
 
     # 验证向 Engine artifact runtime 的参数传递
     assert len(calls) == 1

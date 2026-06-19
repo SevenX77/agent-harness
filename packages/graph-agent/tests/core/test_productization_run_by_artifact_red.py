@@ -21,8 +21,10 @@ class HashingFakeRunArtifactStore:
         self.objects: dict[str, bytes] = {}
         self.put_calls = 0
         self.sealed: list[str] = []
+        self.begin_metadata: list[dict[str, Any]] = []
 
     def begin_run(self, run_id: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+        self.begin_metadata.append(metadata or {})
         return {"run_id": run_id, "metadata": metadata or {}}
 
     def put_batch(self, run_id: str, objects: dict[str, bytes]) -> dict[str, Any]:
@@ -355,6 +357,54 @@ def test_run_artifact_replays_cached_file_result_through_run_artifact_store(
     result = json.loads(stored.decode("utf-8"))
     assert result["success"] is True
     assert result["context"]["prepared"] == "prepared:saturn"
+
+
+def test_run_artifact_store_metadata_records_dev_rebuild_audit() -> None:
+    runner = importlib.import_module("graph_agent.core.runner")
+    store = HashingFakeRunArtifactStore()
+    artifact_ref = _artifact_ref()
+    dev_rebuild = {
+        "reason": "ephemeral.artifact_missing",
+        "old_artifact_ref": {
+            "artifact_id": artifact_ref.artifact_id,
+            "content_hash": "sha256:old",
+            "store": "ephemeral",
+            "manifest_ref": artifact_ref.manifest_ref,
+            "source_map_ref": artifact_ref.source_map_ref,
+            "version": None,
+        },
+        "new_artifact_ref": {
+            "artifact_id": artifact_ref.artifact_id,
+            "content_hash": artifact_ref.content_hash,
+            "store": artifact_ref.store,
+            "manifest_ref": artifact_ref.manifest_ref,
+            "source_map_ref": artifact_ref.source_map_ref,
+            "version": artifact_ref.version,
+        },
+    }
+    request = RunArtifactRequest(
+        artifact_ref=artifact_ref,
+        inputs={"topic": "dev rebuild"},
+        execution_context={
+            "workspace_id": "local",
+            "artifact_dev_rebuild": dev_rebuild,
+        },
+        idempotency_key="idem-run-artifact-dev-rebuild-metadata",
+    )
+
+    session = runner.run_artifact(
+        request,
+        artifact_executor=CountingArtifactExecutor(),
+        run_artifact_store=store,
+    )
+
+    assert session.result_ref is not None
+    assert store.begin_metadata == [
+        {
+            "artifact_id": artifact_ref.artifact_id,
+            "artifact_dev_rebuild": dev_rebuild,
+        }
+    ]
 
 
 def test_predict_artifact_without_executor_executes_predict_graph_with_mock(

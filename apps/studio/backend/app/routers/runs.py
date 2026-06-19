@@ -15,6 +15,8 @@ from app.models.runs import (
     BatchRunStatus,
     PredictRunRequest,
     ResumeReq,
+    ResumeValidityReq,
+    ResumeValidityResponse,
     RunDetail,
     RunListResponse,
     RunMetadata,
@@ -136,6 +138,50 @@ async def delete_run(skill_id: str, run_id: str) -> Response:
 
 
 @router.post(
+    "/{run_id}/resume/validity",
+    response_model=ResumeValidityResponse,
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+    },
+)
+async def get_resume_validity(
+    skill_id: str,
+    run_id: str,
+    request: ResumeValidityReq,
+) -> ResumeValidityResponse:
+    from app.core.adapters.http_transport import StudioAdapterError
+    from app.core.adapters.transport_factory import build_engine_adapter
+    from app.core.exceptions import standard_http_exception
+
+    adapter = build_engine_adapter()
+    try:
+        payload = {
+            "skill_id": skill_id,
+            "run_id": run_id,
+        }
+        if request.checkpoint_id is not None:
+            payload["checkpoint_id"] = request.checkpoint_id
+        if request.checkpoint_ns is not None:
+            payload["checkpoint_ns"] = request.checkpoint_ns
+        if request.resume_from_node_id is not None:
+            payload["resume_from_node_id"] = request.resume_from_node_id
+        if request.resume_to_node_id is not None:
+            payload["resume_to_node_id"] = request.resume_to_node_id
+        result = adapter.resume_validity(payload)
+    except StudioAdapterError as exc:
+        if exc.error_code.startswith("state."):
+            _raise_state_error_response(exc)
+        raise standard_http_exception(
+            "RESUME_VALIDITY_FAILED",
+            f"Resume validity failed: {exc.error_payload.get('detail', str(exc))}",
+            exc.error_payload,
+        ) from exc
+    return ResumeValidityResponse.model_validate(result)
+
+
+@router.post(
     "/{run_id}/resume",
     response_model=RunMetadata,
     responses={
@@ -176,13 +222,19 @@ async def resume_run(skill_id: str, run_id: str, request: ResumeReq) -> RunMetad
             f"Resume failed: {exc.error_payload.get('detail', str(exc))}",
             exc.error_payload,
         ) from exc
-    return RunMetadata(
+    metadata = RunMetadata(
         run_id=result["run_id"],
         status=result["status"],
         started_at=result["started_at"],
         input_summary=result.get("input_summary"),
         metrics=_tokens_metrics_payload(result.get("metrics")),
         git_status=result.get("git_status"),
+    )
+    return await run_manager.record_resume_result(
+        skill_id=skill_id,
+        run_id=run_id,
+        request=request,
+        metadata=metadata,
     )
 
 

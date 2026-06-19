@@ -493,6 +493,44 @@ def _runtime_state_latest_checkpoint_state(
     }
 
 
+def _artifact_identity_value(artifact_ref: Any, key: str) -> str | None:
+    if not isinstance(artifact_ref, dict):
+        return None
+    value = artifact_ref.get(key)
+    return value if isinstance(value, str) and value else None
+
+
+def _resume_validity_payload(
+    *,
+    run_id: str,
+    resume_allowed: bool,
+    reason: str,
+    checkpoint_id: str | None,
+    checkpoint_ns: str | None,
+    resume_from_node_id: str | None,
+    resume_to_node_id: str | None,
+    dirty_fields: list[str] | None = None,
+    snapshot_content_hash: str | None = None,
+    current_content_hash: str | None = None,
+    snapshot_execution_fingerprint: str | None = None,
+    current_execution_fingerprint: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "run_id": run_id,
+        "resume_allowed": resume_allowed,
+        "reason": reason,
+        "checkpoint_id": checkpoint_id,
+        "checkpoint_ns": checkpoint_ns,
+        "resume_from_node_id": resume_from_node_id,
+        "resume_to_node_id": resume_to_node_id,
+        "dirty_fields": dirty_fields or [],
+        "snapshot_content_hash": snapshot_content_hash,
+        "current_content_hash": current_content_hash,
+        "snapshot_execution_fingerprint": snapshot_execution_fingerprint,
+        "current_execution_fingerprint": current_execution_fingerprint,
+    }
+
+
 def _adapter_error(exc: Exception, default_error_code: str) -> StudioAdapterError:
     if isinstance(exc, StudioAdapterError):
         return exc
@@ -765,6 +803,7 @@ class EngineAdapter:
             artifact_ref_data,
             allow_dev_refresh=bool(payload.get("dev_mode", True)),
         )
+        _attach_dev_rebuild_audit(execution_context, artifact_ref_data)
         if artifact_root is not None and "artifact_root" not in execution_context:
             execution_context["artifact_root"] = str(artifact_root)
         run_id_for_state = str(execution_context.get("thread_id") or execution_context.get("run_id") or idempotency_key)
@@ -849,6 +888,7 @@ class EngineAdapter:
             artifact_ref_data,
             allow_dev_refresh=bool(payload.get("dev_mode", True)),
         )
+        _attach_dev_rebuild_audit(execution_context, artifact_ref_data)
         if artifact_root is not None and "artifact_root" not in execution_context:
             execution_context["artifact_root"] = str(artifact_root)
 
@@ -930,6 +970,8 @@ class EngineAdapter:
             checkpoint_ns = _runtime_state_checkpoint_value(payload, "checkpoint_ns")
             if checkpoint_ns is None:
                 checkpoint_ns = _runtime_state_checkpoint_value(restored_state, "checkpoint_ns")
+            resume_from_node_id = _runtime_state_checkpoint_value(payload, "resume_from_node_id")
+            resume_to_node_id = _runtime_state_checkpoint_value(payload, "resume_to_node_id")
             if checkpoint_id is None:
                 raise StudioAdapterError(
                     "state.invalid_checkpoint",
@@ -975,6 +1017,8 @@ class EngineAdapter:
                 run_id=run_id,
                 checkpoint_id=checkpoint_id,
                 checkpoint_ns=checkpoint_ns,
+                resume_from_node_id=resume_from_node_id,
+                resume_to_node_id=resume_to_node_id,
                 checkpointer=checkpointer,
                 context_overrides=context_overrides,
                 human_response=human_response,
@@ -1028,6 +1072,134 @@ class EngineAdapter:
                         _attach_suppressed_adapter_error(primary_error, release_error)
                     else:
                         raise release_error from release_exc
+
+    def resume_validity(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.transport == "http_loopback":
+            if not self.http_transport:
+                raise ValueError("http_transport is required for http_loopback")
+            result = self.http_transport.post("/engine/resume_validity", payload)
+            if not isinstance(result, dict):
+                raise StudioAdapterError(
+                    "transport.serialization_failed",
+                    {"detail": "resume_validity response data is not a dict"},
+                )
+            return result
+
+        skill_id = payload["skill_id"]
+        run_id = payload["run_id"]
+        checkpoint_id = _runtime_state_checkpoint_value(payload, "checkpoint_id")
+        checkpoint_ns = _runtime_state_checkpoint_value(payload, "checkpoint_ns")
+        resume_from_node_id = _runtime_state_checkpoint_value(payload, "resume_from_node_id")
+        resume_to_node_id = _runtime_state_checkpoint_value(payload, "resume_to_node_id")
+
+        runtime_state_store = self._build_runtime_state_store()
+        try:
+            restored_snapshot = runtime_state_store.restore(run_id=run_id)
+        except StudioAdapterError as exc:
+            if exc.error_code == "state.not_found":
+                return _resume_validity_payload(
+                    run_id=run_id,
+                    resume_allowed=False,
+                    reason="state.not_found",
+                    checkpoint_id=checkpoint_id,
+                    checkpoint_ns=checkpoint_ns,
+                    resume_from_node_id=resume_from_node_id,
+                    resume_to_node_id=resume_to_node_id,
+                )
+            raise
+        restored_state = dict(getattr(restored_snapshot, "state", {}) or {})
+        if checkpoint_id is None:
+            checkpoint_id = _runtime_state_checkpoint_value(restored_state, "checkpoint_id")
+        if checkpoint_ns is None:
+            checkpoint_ns = _runtime_state_checkpoint_value(restored_state, "checkpoint_ns")
+
+        snapshot_artifact_ref = restored_state.get("artifact_ref")
+        snapshot_content_hash = _artifact_identity_value(snapshot_artifact_ref, "content_hash")
+        snapshot_execution_fingerprint = _artifact_identity_value(
+            snapshot_artifact_ref,
+            "execution_fingerprint",
+        ) or _artifact_identity_value(restored_state, "execution_fingerprint")
+
+        if checkpoint_id is None:
+            return _resume_validity_payload(
+                run_id=run_id,
+                resume_allowed=False,
+                reason="checkpoint.not_found",
+                checkpoint_id=None,
+                checkpoint_ns=checkpoint_ns,
+                resume_from_node_id=resume_from_node_id,
+                resume_to_node_id=resume_to_node_id,
+                snapshot_content_hash=snapshot_content_hash,
+                snapshot_execution_fingerprint=snapshot_execution_fingerprint,
+            )
+        if not isinstance(snapshot_artifact_ref, dict):
+            return _resume_validity_payload(
+                run_id=run_id,
+                resume_allowed=False,
+                reason="artifact.invalid_ref",
+                checkpoint_id=checkpoint_id,
+                checkpoint_ns=checkpoint_ns,
+                resume_from_node_id=resume_from_node_id,
+                resume_to_node_id=resume_to_node_id,
+            )
+        if snapshot_artifact_ref.get("artifact_id") != skill_id:
+            return _resume_validity_payload(
+                run_id=run_id,
+                resume_allowed=False,
+                reason="artifact.identity_mismatch",
+                checkpoint_id=checkpoint_id,
+                checkpoint_ns=checkpoint_ns,
+                resume_from_node_id=resume_from_node_id,
+                resume_to_node_id=resume_to_node_id,
+                snapshot_content_hash=snapshot_content_hash,
+                snapshot_execution_fingerprint=snapshot_execution_fingerprint,
+            )
+
+        from app.services.skills import resolve_skill_dir
+
+        try:
+            current_artifact_ref = self.compile(
+                {
+                    "skill_id": skill_id,
+                    "skill_dir": str(resolve_skill_dir(skill_id)),
+                    "artifact_scope": "ephemeral",
+                }
+            )
+        except Exception:
+            return _resume_validity_payload(
+                run_id=run_id,
+                resume_allowed=False,
+                reason="compile_failed",
+                checkpoint_id=checkpoint_id,
+                checkpoint_ns=checkpoint_ns,
+                resume_from_node_id=resume_from_node_id,
+                resume_to_node_id=resume_to_node_id,
+                snapshot_content_hash=snapshot_content_hash,
+                snapshot_execution_fingerprint=snapshot_execution_fingerprint,
+            )
+
+        current_content_hash = _artifact_identity_value(current_artifact_ref, "content_hash")
+        current_execution_fingerprint = _artifact_identity_value(current_artifact_ref, "execution_fingerprint")
+        dirty_fields: list[str] = []
+        if snapshot_content_hash != current_content_hash:
+            dirty_fields.append("content_hash")
+        if snapshot_execution_fingerprint != current_execution_fingerprint:
+            dirty_fields.append("execution_fingerprint")
+
+        return _resume_validity_payload(
+            run_id=run_id,
+            resume_allowed=not dirty_fields,
+            reason="dirty_upstream" if dirty_fields else "ok",
+            checkpoint_id=checkpoint_id,
+            checkpoint_ns=checkpoint_ns,
+            resume_from_node_id=resume_from_node_id,
+            resume_to_node_id=resume_to_node_id,
+            dirty_fields=dirty_fields,
+            snapshot_content_hash=snapshot_content_hash,
+            current_content_hash=current_content_hash,
+            snapshot_execution_fingerprint=snapshot_execution_fingerprint,
+            current_execution_fingerprint=current_execution_fingerprint,
+        )
 
     def get_fallback_trace(self, skill_dir: str) -> list[dict[str, Any]]:
         loader = SkillLoader()
@@ -1135,6 +1307,7 @@ class EngineAdapter:
             try:
                 from app.services.run_artifact_flow import compile_ephemeral_for_dev_missing_hash
 
+                old_artifact_ref = _artifact_ref_audit_snapshot(artifact_ref_data)
                 refreshed = compile_ephemeral_for_dev_missing_hash(str(artifact_ref_data.get("artifact_id", "")))
                 artifact_ref_data.update(
                     {
@@ -1145,6 +1318,11 @@ class EngineAdapter:
                         "source_map_ref": refreshed.source_map_ref,
                     }
                 )
+                artifact_ref_data["_dev_rebuild"] = {
+                    "reason": "ephemeral.artifact_missing",
+                    "old_artifact_ref": old_artifact_ref,
+                    "new_artifact_ref": _artifact_ref_audit_snapshot(artifact_ref_data),
+                }
                 refreshed_hash = _sha256_hex_from_content_hash(refreshed.content_hash)
                 if refreshed_hash is None:
                     return None
@@ -1163,6 +1341,23 @@ class EngineAdapter:
                 ) from refresh_exc
         _unzip_directory(zip_bytes, ephemeral_dir)
         return ephemeral_dir if (ephemeral_dir / "GRAPH.md").is_file() else None
+
+
+def _artifact_ref_audit_snapshot(artifact_ref_data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "artifact_id": artifact_ref_data.get("artifact_id"),
+        "content_hash": artifact_ref_data.get("content_hash"),
+        "store": artifact_ref_data.get("store"),
+        "manifest_ref": artifact_ref_data.get("manifest_ref"),
+        "source_map_ref": artifact_ref_data.get("source_map_ref"),
+        "version": artifact_ref_data.get("version"),
+    }
+
+
+def _attach_dev_rebuild_audit(execution_context: dict[str, Any], artifact_ref_data: dict[str, Any]) -> None:
+    dev_rebuild = artifact_ref_data.get("_dev_rebuild")
+    if isinstance(dev_rebuild, dict) and "artifact_dev_rebuild" not in execution_context:
+        execution_context["artifact_dev_rebuild"] = dev_rebuild
 
 
 def _missing_artifact_payload(artifact_ref_data: dict[str, Any]) -> dict[str, Any]:

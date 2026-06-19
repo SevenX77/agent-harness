@@ -3,7 +3,7 @@ import { AlertCircle, ArrowLeft, CheckCircle2, RefreshCw } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { TracePanel } from "@/components/TracePanel"
 import { getRunDetail } from "@/api/client"
-import type { EventEnvelope } from "@/api/types"
+import type { EventEnvelope, RunMetadata } from "@/api/types"
 import { useRunHistory } from "../../../hooks/useRunHistory"
 import { errorMessage } from "../../../utils/errors"
 import { useWorkspaceContext } from "../WorkspaceContext"
@@ -35,11 +35,51 @@ const relativeTime = (value: string): string => {
   return `${Math.floor(hours / 24)}d ago`
 }
 
+const shortHash = (value?: string | null): string | null => {
+  if (!value) return null
+  const normalized = value.startsWith("sha256:") ? value.slice("sha256:".length) : value
+  return normalized.slice(0, 8)
+}
+
+const shortRefTail = (value?: string | null): string | null => {
+  if (!value) return null
+  const parts = value.split("/")
+  return parts.at(-1) || value
+}
+
+function RunIdentityInline({ run }: { run: RunMetadata }) {
+  const artifactId = run.artifact_ref?.artifact_id ?? null
+  const contentHash = shortHash(run.artifact_ref?.content_hash)
+  const fingerprint = shortHash(run.execution_fingerprint ?? run.artifact_ref?.execution_fingerprint)
+  const sourceMap = shortRefTail(run.source_map_ref ?? run.artifact_ref?.source_map_ref)
+  if (!artifactId && !contentHash && !fingerprint && !sourceMap) return null
+  return (
+    <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+      {contentHash ? (
+        <span className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono">art {contentHash}</span>
+      ) : null}
+      {fingerprint ? (
+        <span className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono">fp {fingerprint}</span>
+      ) : null}
+      {artifactId ? (
+        <span className="max-w-[140px] truncate rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono">
+          {artifactId}
+        </span>
+      ) : null}
+      {sourceMap ? (
+        <span className="max-w-[140px] truncate rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono">
+          map {sourceMap}
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
 export function TimelinePanel() {
   const { currentSkillId, selectedEdge, setSelectedEdge } = useWorkspaceContext()
   const { runs, isLoading, error, refresh } = useRunHistory(currentSkillId)
   // F2 (trace): clicking a past run loads its full trace (RunDetail.events) in place.
-  const [selected, setSelected] = useState<{ runId: string; events: EventEnvelope[] } | null>(null)
+  const [selected, setSelected] = useState<{ runId: string; events: EventEnvelope[]; metadata: RunMetadata } | null>(null)
   const [traceError, setTraceError] = useState<string | null>(null)
   const [loadingRunId, setLoadingRunId] = useState<string | null>(null)
 
@@ -59,7 +99,7 @@ export function TimelinePanel() {
     setTraceError(null)
     try {
       const detail = await getRunDetail(currentSkillId, runId)
-      setSelected({ runId, events: detail.events })
+      setSelected({ runId, events: detail.events, metadata: detail.metadata })
     } catch (caught) {
       setTraceError(errorMessage(caught))
     } finally {
@@ -75,7 +115,7 @@ export function TimelinePanel() {
   if (selected) {
     return (
       <div className="flex h-full flex-col bg-background">
-        <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
+        <div className="flex shrink-0 items-start gap-2 border-b border-border px-3 py-2">
           <Button
             type="button"
             variant="ghost"
@@ -85,9 +125,12 @@ export function TimelinePanel() {
           >
             <ArrowLeft className="size-4" />
           </Button>
-          <span className="truncate font-mono text-xs text-muted-foreground">
-            Run {selected.runId.slice(0, 12)}…
-          </span>
+          <div className="min-w-0 flex-1">
+            <span className="block truncate font-mono text-xs text-muted-foreground">
+              Run {selected.runId.slice(0, 12)}…
+            </span>
+            <RunIdentityInline run={selected.metadata} />
+          </div>
         </div>
         <div className="min-h-0 flex-1">
           <TracePanel traceLogs={selected.events} activePhase={null} onSelectPrompt={() => undefined} />
@@ -162,6 +205,9 @@ export function TimelinePanel() {
               <div className="mt-1 flex items-center justify-between pl-6 text-[11px] text-muted-foreground">
                 <span>{formatDuration((run.metrics as unknown as Record<string, unknown>)?.wall_time_sec as number | null)}</span>
                 {run.metrics?.total_tokens ? <span>{run.metrics.total_tokens} tokens</span> : null}
+              </div>
+              <div className="pl-6">
+                <RunIdentityInline run={run} />
               </div>
             </button>
           ))}

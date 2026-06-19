@@ -44,6 +44,7 @@ const mocks = vi.hoisted(() => ({
   },
   goldenDiffCompare: vi.fn(),
   compileSkill: vi.fn(),
+  getResumeValidity: vi.fn(),
   postPredictRun: vi.fn(),
   resolveRunInput: vi.fn(),
   resumeRun: vi.fn(),
@@ -65,6 +66,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 vi.mock('@/api/client', () => ({
   compileSkill: mocks.compileSkill,
+  getResumeValidity: mocks.getResumeValidity,
   getSkillDetail: vi.fn(),
   postPredictRun: mocks.postPredictRun,
   resolveRunInput: mocks.resolveRunInput,
@@ -233,6 +235,21 @@ describe('Workspace WS-1 local writer contracts', () => {
       },
       source_map_ref: 'file:///tmp/source_map.json',
       execution_fingerprint: `sha256:${'2'.repeat(64)}`,
+    })
+    mocks.getResumeValidity.mockReset()
+    mocks.getResumeValidity.mockResolvedValue({
+      run_id: 'run-1',
+      resume_allowed: true,
+      reason: 'ok',
+      checkpoint_id: 'checkpoint-review',
+      checkpoint_ns: 'agent:review',
+      resume_from_node_id: 'review',
+      resume_to_node_id: null,
+      dirty_fields: [],
+      snapshot_content_hash: `sha256:${'1'.repeat(64)}`,
+      current_content_hash: `sha256:${'1'.repeat(64)}`,
+      snapshot_execution_fingerprint: `sha256:${'2'.repeat(64)}`,
+      current_execution_fingerprint: `sha256:${'2'.repeat(64)}`,
     })
     mocks.postPredictRun.mockReset()
     mocks.postPredictRun.mockResolvedValue({ run_id: 'predict-run', status: 'success' })

@@ -261,7 +261,7 @@ def test_resume_skill_accepts_provider_spi_and_forwards_to_assembler(
     monkeypatch.setattr(
         runner,
         "_apply_resume_context_overrides",
-        lambda _graph, _compiled, config, _overrides: config,
+        lambda _graph, _compiled, config, _overrides, **_kwargs: config,
     )
     monkeypatch.setattr(
         runner,

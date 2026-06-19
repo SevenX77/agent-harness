@@ -45,6 +45,7 @@ export interface ArtifactRef {
   version: string | null
   manifest_ref: string
   source_map_ref: string
+  execution_fingerprint?: string | null
 }
 
 export interface CompileSuccess {
@@ -122,6 +123,7 @@ export interface ReleaseArtifactRef {
   store: 'product'
   manifest_ref: string
   source_map_ref?: string | null
+  execution_fingerprint?: string | null
 }
 
 export interface ReleaseRemoteSync {
@@ -209,6 +211,10 @@ export interface RunMetadata {
   started_at: string
   metrics: TokensMetrics | null
   input_summary: string | null
+  git_status?: 'committed' | 'locked' | 'failed' | null
+  artifact_ref?: ArtifactRef | null
+  source_map_ref?: string | null
+  execution_fingerprint?: string | null
 }
 
 export interface RunListResponse {
@@ -243,6 +249,29 @@ export interface RunDetail {
   events: EventEnvelope[]
   final_context: JsonObject | null
   artifacts: string[] | null
+}
+
+export interface ResumeValidityResponse {
+  run_id: string
+  resume_allowed: boolean
+  reason:
+    | 'ok'
+    | 'dirty_upstream'
+    | 'checkpoint.not_found'
+    | 'checkpoint.invalid'
+    | 'state.not_found'
+    | 'artifact.invalid_ref'
+    | 'artifact.identity_mismatch'
+    | 'compile_failed'
+  checkpoint_id: string | null
+  checkpoint_ns: string | null
+  resume_from_node_id: string | null
+  resume_to_node_id: string | null
+  dirty_fields: Array<'content_hash' | 'execution_fingerprint'>
+  snapshot_content_hash: string | null
+  current_content_hash: string | null
+  snapshot_execution_fingerprint: string | null
+  current_execution_fingerprint: string | null
 }
 
 export type MockedSource = 'golden_case' | 'copilot' | 'heuristic_stub' | 'manual'

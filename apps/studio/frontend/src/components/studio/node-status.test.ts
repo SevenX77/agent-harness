@@ -10,16 +10,21 @@ function event(partial: Partial<CallbackEvent> & { event_type: string }): Callba
   } as CallbackEvent
 }
 
-function envelope(partial: Partial<CallbackEvent> & { event_type: string }): EventEnvelope {
+function envelope(
+  partial: Partial<CallbackEvent> & { event_type: string },
+  options: { runId?: string; seq?: number } = {},
+): EventEnvelope {
+  const runId = options.runId ?? partial.run_id ?? "run-1"
+  const seq = options.seq ?? 1
   return {
     schema_version: "studio.event.v1",
-    stream_id: "run:run-1",
-    seq: 1,
-    cursor: "run:run-1:1",
-    run_id: "run-1",
+    stream_id: `run:${runId}`,
+    seq,
+    cursor: `run:${runId}:${seq}`,
+    run_id: runId,
     event_type: partial.event_type,
     timestamp: "2026-06-15T00:00:00Z",
-    payload: event(partial),
+    payload: event({ run_id: runId, ...partial }),
   }
 }
 
@@ -91,5 +96,37 @@ describe("deriveNodeStatuses", () => {
     expect(
       deriveNodeStatuses([event({ event_type: "internal_error", error_type: "RuntimeError" })]),
     ).toEqual({})
+  })
+
+  it("resets node lights by run_id instead of letting stale run events overwrite the active run", () => {
+    const events = [
+      envelope({ event_type: "phase_start", phase_name: "review" }, { runId: "run-current", seq: 1 }),
+      envelope({ event_type: "interrupted", phase_name: "review", reason: "needs_human_input" }, { runId: "run-current", seq: 2 }),
+      envelope({ event_type: "phase_end", phase_name: "review" }, { runId: "run-stale", seq: 99 }),
+    ]
+
+    expect(deriveNodeStatuses(events, "run-current")).toEqual({ review: "paused" })
+  })
+
+  it("keeps the newest attempt for a phase when an older attempt arrives later", () => {
+    const events = [
+      envelope({ event_type: "phase_start", phase_name: "draft", attempt: 2 }, { runId: "run-1", seq: 10 }),
+      envelope({ event_type: "phase_end", phase_name: "draft", attempt: 1 }, { runId: "run-1", seq: 11 }),
+    ]
+
+    expect(deriveNodeStatuses(events, "run-1")).toEqual({ draft: "running" })
+  })
+
+  it("derives independent statuses for parallel branches from the same active run", () => {
+    const events = [
+      envelope({ event_type: "phase_start", phase_name: "planner" }, { runId: "run-1", seq: 1 }),
+      envelope({ event_type: "phase_start", phase_name: "executor" }, { runId: "run-1", seq: 2 }),
+      envelope({ event_type: "phase_end", phase_name: "planner" }, { runId: "run-1", seq: 3 }),
+    ]
+
+    expect(deriveNodeStatuses(events, "run-1")).toEqual({
+      planner: "success",
+      executor: "running",
+    })
   })
 })

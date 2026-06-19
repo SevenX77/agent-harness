@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from graph_agent_gateway.registry.schema import CapabilityValue, RoleRouteEntry
 from graph_agent_gateway.state_projection import project_route_state_from_evidence
+
+_FailedReasonCode = Literal["missing_config", "endpoint_unreachable", "model_failed"]
 
 
 @dataclass(frozen=True)
@@ -152,20 +154,42 @@ def _materialization_projection(
         endpoint_status = _value(endpoint, "status")
         route_status = _value(route, "status")
         if endpoint_status == "failed":
-            reason_code = str(
-                (_value(endpoint, "metadata", {}) or {}).get("reason_code")
-                or reason_code
-                or "endpoint_unreachable"
+            reason_code = _failure_reason_code(
+                _value(endpoint, "metadata", {}),
+                reason_code,
+                "endpoint_unreachable",
             )
         elif route_status == "failed":
-            reason_code = str(
-                (_value(route, "metadata", {}) or {}).get("reason_code")
-                or reason_code
-                or "model_failed"
+            reason_code = _failure_reason_code(
+                _value(route, "metadata", {}),
+                reason_code,
+                "model_failed",
             )
         return _ProjectionFacts(ui_state="failed", reason_code=reason_code)
 
     return _ProjectionFacts(ui_state=ui_state)
+
+
+def _failure_reason_code(
+    metadata: Any,
+    fallback: _FailedReasonCode | None,
+    default: _FailedReasonCode,
+) -> _FailedReasonCode:
+    metadata_reason = _metadata_reason_code(metadata)
+    if metadata_reason == "missing_config":
+        return "missing_config"
+    if metadata_reason == "endpoint_unreachable":
+        return "endpoint_unreachable"
+    if metadata_reason == "model_failed":
+        return "model_failed"
+    return fallback or default
+
+
+def _metadata_reason_code(metadata: Any) -> str | None:
+    if not isinstance(metadata, dict):
+        return None
+    reason_code = metadata.get("reason_code")
+    return reason_code if isinstance(reason_code, str) else None
 
 
 def _active_circuits(

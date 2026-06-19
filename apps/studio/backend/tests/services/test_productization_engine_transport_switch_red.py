@@ -227,11 +227,10 @@ def test_run_worker_uses_configured_http_loopback_engine_adapter(
     queue = _Queue()
     run_manager_module._run_worker_main(
         "demo.skill",
-        str(tmp_path / "skill"),
         str(run_dir),
         {"topic": "loopback"},
         queue,
-        art_ref=art_ref,
+        art_ref,
     )
 
     assert run_payloads[0]["artifact_ref"] == art_ref
@@ -276,11 +275,10 @@ def test_run_worker_http_loopback_payload_is_json_serializable_and_omits_callbac
 
     run_manager_module._run_worker_main(
         "demo.skill",
-        str(tmp_path / "skill"),
         str(run_dir),
         {"topic": "loopback"},
         queue,
-        art_ref=art_ref,
+        art_ref,
     )
 
     assert captured_requests[0]["url"] == "http://loopback.test/engine/run_artifact"

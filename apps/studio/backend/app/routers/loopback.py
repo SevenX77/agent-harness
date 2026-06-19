@@ -60,6 +60,11 @@ def engine_resume(payload: dict[str, Any]) -> dict[str, Any]:
     return invoke_engine("resume", payload)
 
 
+@router.post("/engine/resume_validity")
+def engine_resume_validity(payload: dict[str, Any]) -> dict[str, Any]:
+    return invoke_engine("resume_validity", payload)
+
+
 @router.post("/gateway/resolve_routes")
 def gateway_resolve_routes(payload: dict[str, Any]) -> dict[str, Any]:
     return invoke_gateway("resolve_routes", payload)

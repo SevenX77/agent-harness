@@ -1,12 +1,14 @@
-import type { EventEnvelope, SkillDetail } from "@/api/types"
-import type { SkillGraphNodeData } from "@/components/GraphCanvas"
-import { TracePanel } from "@/components/TracePanel"
+import type { ResumeRunOptions } from "@/api/client"
+import type { EventEnvelope, ResumeValidityResponse, SkillDetail } from "@/api/types"
+import type { SkillGraphNodeData, SkillNodeStatus } from "@/components/GraphCanvas"
+import { TracePanel, type TraceHitlResumeRequest } from "@/components/TracePanel"
 import type { PanelKind } from "../Toolbar"
 import { useWorkspaceContext } from "../WorkspaceContext"
 import { AssetsPanel } from "./AssetsPanel"
 import { HistoryPanel } from "./HistoryPanel"
 import { InputPanel } from "./InputPanel"
 import { PanelHeader } from "./_shared/PanelHeader"
+import { EdgeContextView } from "./EdgeContextView"
 import { PropertiesPanel } from "./PropertiesPanel"
 import { TimelinePanel } from "./TimelinePanel"
 
@@ -23,6 +25,10 @@ interface PanelsProps {
   // trace-observability F1: while a run is active the timeline region streams
   // live trace events (TracePanel); with no active run it shows run history (F2).
   runId?: string | null
+  selectedNodeStatus?: SkillNodeStatus | null
+  resumeValidity?: ResumeValidityResponse | null
+  resumeValidityLoading?: boolean
+  resumeValidityError?: string | null
   traceEvents?: EventEnvelope[]
   activeTracePhase?: string | null
   onSelectTracePrompt?: (index: number) => void
@@ -33,6 +39,9 @@ interface PanelsProps {
   traceCanResume?: boolean
   traceResumeLoading?: boolean
   onResumeRun?: () => void
+  onResumeNode?: (options: ResumeRunOptions) => Promise<void> | void
+  onSubmitHitlResponse?: (request: TraceHitlResumeRequest) => void
+  onResumeEdgeDownstream?: (options: ResumeRunOptions) => Promise<void> | void
 }
 
 export function Panels({
@@ -45,6 +54,10 @@ export function Panels({
   onSelectTestInput,
   onPhaseFileSave,
   runId,
+  selectedNodeStatus,
+  resumeValidity,
+  resumeValidityLoading,
+  resumeValidityError,
   traceEvents,
   activeTracePhase,
   onSelectTracePrompt,
@@ -55,8 +68,11 @@ export function Panels({
   traceCanResume,
   traceResumeLoading,
   onResumeRun,
+  onResumeNode,
+  onSubmitHitlResponse,
+  onResumeEdgeDownstream,
 }: PanelsProps) {
-  const { onFileOpen } = useWorkspaceContext()
+  const { onFileOpen, selectedEdge, setSelectedEdge } = useWorkspaceContext()
   if (!skillId) {
     return (
       <div className="flex h-full w-full flex-col bg-sidebar">
@@ -81,6 +97,16 @@ export function Panels({
     )
   }
   if (activePanel === "timeline") {
+    if (selectedEdge) {
+      return (
+        <EdgeContextView
+          selectedEdge={selectedEdge}
+          onClear={() => setSelectedEdge?.(null)}
+          onResumeDownstream={onResumeEdgeDownstream}
+          resumeLoading={traceResumeLoading}
+        />
+      )
+    }
     // Active run → live trace stream; otherwise the run-history list.
     if (runId) {
       return (
@@ -95,6 +121,8 @@ export function Panels({
           canResume={traceCanResume}
           resumeLoading={traceResumeLoading}
           onResume={onResumeRun}
+          hitlSubmitting={traceResumeLoading}
+          onSubmitHitlResponse={onSubmitHitlResponse}
         />
       )
     }
@@ -109,8 +137,15 @@ export function Panels({
         skillId={skillId}
         skillDetail={skillDetail}
         selectedNode={selectedNode}
+        runId={runId}
+        selectedNodeStatus={selectedNodeStatus}
+        resumeValidity={resumeValidity}
+        resumeValidityLoading={resumeValidityLoading}
+        resumeValidityError={resumeValidityError}
+        resumeLoading={traceResumeLoading}
         onFileOpen={onFileOpen}
         onPhaseFileSave={onPhaseFileSave}
+        onResumeNode={onResumeNode}
       />
     )
   }

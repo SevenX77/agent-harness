@@ -459,6 +459,8 @@ def resume_skill(
     run_id: str,
     checkpoint_id: str | None = None,
     checkpoint_ns: str | None = None,
+    resume_from_node_id: str | None = None,
+    resume_to_node_id: str | None = None,
     checkpointer: Any | None = None,
     context_overrides: dict[str, Any] | None = None,
     human_response: dict[str, Any] | None = None,
@@ -471,6 +473,8 @@ def resume_skill(
     workspace_root = _validate_workspace_dir(workspace_dir)
     _validate_resume_human_response(human_response)
     _validate_resume_context_overrides(context_overrides)
+    _validate_resume_node_selector(resume_from_node_id, "resume_from_node_id")
+    _validate_resume_node_selector(resume_to_node_id, "resume_to_node_id")
 
     resolver = require_skill_resolver(skill_resolver, caller="resume_skill")
     started_at = datetime.now(UTC)
@@ -514,8 +518,17 @@ def resume_skill(
             checkpointer=active_checkpointer,
         )
         graph = assembled.graph
+        _validate_resume_node_ids(compiled, resume_from_node_id, resume_to_node_id)
+        _validate_resume_context_override_scope(compiled, resume_from_node_id, context_overrides)
+        _validate_resume_checkpoint_targets(graph, invoke_config, resume_to_node_id)
 
-        invoke_config = _apply_resume_context_overrides(graph, compiled, invoke_config, context_overrides)
+        invoke_config = _apply_resume_context_overrides(
+            graph,
+            compiled,
+            invoke_config,
+            context_overrides,
+            resume_from_node_id=resume_from_node_id,
+        )
         invoke_config = _apply_resume_human_response(graph, invoke_config, human_response)
         result = graph.invoke(None, config=invoke_config)
 
@@ -961,7 +974,10 @@ def _run_artifact_store_result(
     request: RunArtifactRequest | PredictArtifactRequest,
     outputs: Any,
 ) -> str:
-    metadata = {"artifact_id": request.artifact_ref.artifact_id}
+    metadata: dict[str, Any] = {"artifact_id": request.artifact_ref.artifact_id}
+    dev_rebuild = request.execution_context.get("artifact_dev_rebuild")
+    if isinstance(dev_rebuild, dict):
+        metadata["artifact_dev_rebuild"] = dev_rebuild
     run_artifact_store.begin_run(run_id, metadata)
 
     if hasattr(outputs, "model_dump"):
@@ -1179,6 +1195,109 @@ def _validate_resume_context_overrides(context_overrides: dict[str, Any] | None)
         raise ValueError(f"context_overrides may only contain business fields; forbidden: {joined}")
 
 
+def _validate_resume_node_selector(value: str | None, field_name: str) -> None:
+    if value is None:
+        return
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} must be a non-empty string")
+
+
+def _compiled_phase_names(compiled: Any) -> set[str]:
+    names: set[str] = set()
+    for node in getattr(compiled, "nodes", []) or []:
+        phase_name = getattr(node, "phase_name", None)
+        if isinstance(phase_name, str):
+            names.add(phase_name)
+    return names
+
+
+def _validate_resume_node_ids(
+    compiled: Any,
+    resume_from_node_id: str | None,
+    resume_to_node_id: str | None,
+) -> None:
+    requested = {
+        field_name: value
+        for field_name, value in (
+            ("resume_from_node_id", resume_from_node_id),
+            ("resume_to_node_id", resume_to_node_id),
+        )
+        if value is not None
+    }
+    if not requested:
+        return
+    phase_names = _compiled_phase_names(compiled)
+    missing = {field_name: value for field_name, value in requested.items() if value not in phase_names}
+    if missing:
+        rendered = ", ".join(f"{field}={value!r}" for field, value in sorted(missing.items()))
+        raise _ResumeInputError(f"Resume node selector does not match compiled graph: {rendered}")
+
+
+def _validate_resume_checkpoint_targets(
+    graph: Any,
+    invoke_config: dict[str, Any],
+    resume_to_node_id: str | None,
+) -> None:
+    if resume_to_node_id is None:
+        return
+    current_state = graph.get_state(invoke_config)
+    next_nodes = tuple(str(node) for node in (current_state.next or ()))
+    if next_nodes and resume_to_node_id not in next_nodes:
+        raise _ResumeInputError(
+            f"resume_to_node_id {resume_to_node_id!r} does not match checkpoint next node(s): {next_nodes}"
+        )
+
+
+def _node_output_fields(node: Any) -> set[str]:
+    io = getattr(node, "frontmatter", {}).get("io") or {}
+    outputs = io.get("outputs") or {}
+    properties = outputs.get("properties") or {}
+    return {str(field) for field in properties}
+
+
+def _validate_resume_context_override_scope(
+    compiled: Any,
+    resume_from_node_id: str | None,
+    context_overrides: dict[str, Any] | None,
+) -> None:
+    if resume_from_node_id is None or not context_overrides:
+        return
+    phase_order = [name for name in _compiled_phase_names_in_order(compiled)]
+    try:
+        resume_index = phase_order.index(resume_from_node_id)
+    except ValueError:
+        return
+    producer_by_field: dict[str, str] = {}
+    for node in getattr(compiled, "nodes", []) or []:
+        phase_name = getattr(node, "phase_name", None)
+        if not isinstance(phase_name, str):
+            continue
+        for field in _node_output_fields(node):
+            producer_by_field[field] = phase_name
+
+    dirty_fields: list[str] = []
+    for field in context_overrides:
+        producer = producer_by_field.get(field)
+        if producer is None or producer == resume_from_node_id:
+            continue
+        if producer in phase_order and phase_order.index(producer) < resume_index:
+            dirty_fields.append(field)
+    if dirty_fields:
+        joined = ", ".join(sorted(dirty_fields))
+        raise _ResumeInputError(
+            f"context_overrides would dirty upstream checkpoint data before {resume_from_node_id!r}: {joined}"
+        )
+
+
+def _compiled_phase_names_in_order(compiled: Any) -> list[str]:
+    names: list[str] = []
+    for node in getattr(compiled, "nodes", []) or []:
+        phase_name = getattr(node, "phase_name", None)
+        if isinstance(phase_name, str):
+            names.append(phase_name)
+    return names
+
+
 def _resolve_resume_checkpointer() -> Any:
     active_checkpointer = resolve_checkpointer("auto")
     if active_checkpointer is None or active_checkpointer is True:
@@ -1227,6 +1346,8 @@ def _apply_resume_context_overrides(
     compiled: Any,
     invoke_config: dict[str, Any],
     context_overrides: dict[str, Any] | None,
+    *,
+    resume_from_node_id: str | None = None,
 ) -> dict[str, Any]:
     if not context_overrides:
         return invoke_config
@@ -1239,7 +1360,7 @@ def _apply_resume_context_overrides(
 
     as_node = None
     if not current_state.next:
-        as_node = _override_source_node(compiled, set(context_overrides.keys()))
+        as_node = resume_from_node_id or _override_source_node(compiled, set(context_overrides.keys()))
 
     return cast(dict[str, Any], graph.update_state(invoke_config, {"data": updated_data}, as_node=as_node))
 

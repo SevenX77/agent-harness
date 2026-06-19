@@ -12,9 +12,11 @@ import { useRunStream } from "@/hooks/useRunStream"
 import { useGoldenDiff } from "@/hooks/useGoldenDiff"
 import { useSkills } from "@/hooks/useSkills"
 import { DiffView } from "@/components/diff/DiffView"
-import type { CopilotJudgeResponse } from "@/api/client"
+import type { CopilotJudgeResponse, ResumeRunOptions } from "@/api/client"
+import type { TraceHitlResumeRequest } from "@/components/TracePanel"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
-import { compileSkill, getSkillDetail, resolveRunInput, serializeSkillGraph, writeSkillFile, wsUrl, postPredictRun, startRun, resumeRun } from "@/api/client"
+import { compileSkill, getResumeValidity, getSkillDetail, resolveRunInput, serializeSkillGraph, writeSkillFile, wsUrl, postPredictRun, startRun, resumeRun } from "@/api/client"
+import type { ResumeValidityResponse } from "@/api/types"
 import { isTauriRuntime } from "@/config/runtime"
 import { writeWorkspaceFile } from "@/lib/tauri"
 import { errorMessage } from "@/utils/errors"
@@ -23,6 +25,8 @@ import { connectPhaseRefs, createPhaseDraft, disconnectPhaseRefs, type NewPhaseK
 import { sha256Hex } from "@/lib/hash"
 import { CenterActionBar, type SkillBuildStage } from "./center-action-bar"
 import { deriveNodeStatuses } from "./node-status"
+import { nodeResumeCheckpointFromEvents } from "./node-resume"
+import { hitlResumeOptionsFromRequest } from "./resume-options"
 import { compileErrorsByNode } from "./node-compile-errors"
 import { ConflictDialog } from "./ConflictDialog"
 import { Header } from "./Header"
@@ -178,8 +182,20 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     : null
 
   const statusByNodeId = useMemo(
-    () => deriveNodeStatuses(runStream.events),
-    [runStream.events],
+    () => deriveNodeStatuses(runStream.events, runId),
+    [runId, runStream.events],
+  )
+  const selectedNodeStatus = useMemo(
+    () => selectedNodeId
+      ? statusByNodeId[selectedNodeId] ?? selectedNode?.data.status ?? null
+      : null,
+    [selectedNodeId, selectedNode?.data.status, statusByNodeId],
+  )
+  const selectedNodeCheckpoint = useMemo(
+    () => selectedNodeId
+      ? nodeResumeCheckpointFromEvents(runStream.events, selectedNodeId, runId)
+      : null,
+    [runId, runStream.events, selectedNodeId],
   )
 
   // The currently-running phase, used to highlight/link the live trace stream.
@@ -759,6 +775,49 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // checkpoint. The backend reports RESUME_CHECKPOINT_NOT_FOUND when a run has
   // nothing to continue (e.g. it already finished) — surfaced as a clear toast.
   const [resumeLoading, setResumeLoading] = useState(false)
+  const [resumeValidity, setResumeValidity] = useState<ResumeValidityResponse | null>(null)
+  const [resumeValidityLoading, setResumeValidityLoading] = useState(false)
+  const [resumeValidityError, setResumeValidityError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!currentSkillId || !runId || !selectedNodeId || selectedNodeStatus !== "error") {
+      setResumeValidity(null)
+      setResumeValidityLoading(false)
+      setResumeValidityError(null)
+      return () => {
+        cancelled = true
+      }
+    }
+    setResumeValidityLoading(true)
+    setResumeValidityError(null)
+    void getResumeValidity(currentSkillId, runId, {
+      checkpointId: selectedNodeCheckpoint?.checkpointId,
+      checkpointNs: selectedNodeCheckpoint?.checkpointNs,
+      resumeFromNodeId: selectedNodeId,
+    }).then((result) => {
+      if (cancelled) return
+      setResumeValidity(result)
+    }).catch((error) => {
+      if (cancelled) return
+      setResumeValidity(null)
+      setResumeValidityError(errorMessage(error))
+    }).finally(() => {
+      if (cancelled) return
+      setResumeValidityLoading(false)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [
+    currentSkillId,
+    runId,
+    selectedNodeCheckpoint?.checkpointId,
+    selectedNodeCheckpoint?.checkpointNs,
+    selectedNodeId,
+    selectedNodeStatus,
+  ])
+
   const handleResume = useCallback(async () => {
     if (!currentSkillId || !runId) return
     setResumeLoading(true)
@@ -778,6 +837,57 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       setResumeLoading(false)
     }
   }, [currentSkillId, runId, setRunId])
+
+  const handleSubmitHitlResponse = useCallback(async (request: TraceHitlResumeRequest) => {
+    if (!currentSkillId || !runId) return
+    setResumeLoading(true)
+    try {
+      const result = await resumeRun(currentSkillId, runId, hitlResumeOptionsFromRequest(request))
+      setActivePanel("timeline")
+      clearCopilotJudgeResult()
+      setRunId(null)
+      setRunId(result.run_id)
+      toast.success("Run resumed with human input")
+    } catch (error) {
+      toast.error(`Resume failed: ${errorMessage(error)}`)
+    } finally {
+      setResumeLoading(false)
+    }
+  }, [clearCopilotJudgeResult, currentSkillId, runId, setRunId])
+
+  const handleResumeEdgeDownstream = useCallback(async (options: ResumeRunOptions) => {
+    if (!currentSkillId || !runId) return
+    setResumeLoading(true)
+    try {
+      const result = await resumeRun(currentSkillId, runId, options)
+      setActivePanel("timeline")
+      clearCopilotJudgeResult()
+      setRunId(null)
+      setRunId(result.run_id)
+      toast.success("Run resumed from tampered edge context")
+    } catch (error) {
+      toast.error(`Resume failed: ${errorMessage(error)}`)
+    } finally {
+      setResumeLoading(false)
+    }
+  }, [clearCopilotJudgeResult, currentSkillId, runId, setRunId])
+
+  const handleResumeNode = useCallback(async (options: ResumeRunOptions) => {
+    if (!currentSkillId || !runId) return
+    setResumeLoading(true)
+    try {
+      const result = await resumeRun(currentSkillId, runId, options)
+      setActivePanel("timeline")
+      clearCopilotJudgeResult()
+      setRunId(null)
+      setRunId(result.run_id)
+      toast.success("Run resumed from selected node")
+    } catch (error) {
+      toast.error(`Resume failed: ${errorMessage(error)}`)
+    } finally {
+      setResumeLoading(false)
+    }
+  }, [clearCopilotJudgeResult, currentSkillId, runId, setRunId])
 
   const handleHome = useCallback(() => {
     setSettingsOpen(false)
@@ -834,10 +944,14 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   workspaceRoot={currentWorkspaceRoot}
                   skillDetail={skillDetail}
                   selectedNode={selectedNode}
+                  selectedNodeStatus={selectedNodeStatus}
                   selectedTestInputId={selectedTestInputId}
                   onSelectTestInput={setSelectedTestInputId}
                   onPhaseFileSave={handlePhaseFileSave}
                   runId={runId}
+                  resumeValidity={resumeValidity}
+                  resumeValidityLoading={resumeValidityLoading}
+                  resumeValidityError={resumeValidityError}
                   traceEvents={runStream.events}
                   activeTracePhase={activeTracePhase}
                   onSelectTracePrompt={setPromptIndex}
@@ -848,6 +962,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   traceCanResume={Boolean(runId)}
                   traceResumeLoading={resumeLoading}
                   onResumeRun={handleResume}
+                  onResumeNode={runId ? handleResumeNode : undefined}
+                  onSubmitHitlResponse={handleSubmitHitlResponse}
+                  onResumeEdgeDownstream={runId ? handleResumeEdgeDownstream : undefined}
                 />
               </ResizablePanel>
               <ResizableHandle />

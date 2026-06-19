@@ -1116,12 +1116,12 @@ class FailingProcess(InlineProcess):
 
 def fake_run_worker(
     skill_id: str,
-    skill_path_raw: str,
     run_dir_raw: str,
     inputs: dict[str, Any],
     process_queue: queue.Queue[dict[str, Any]],
+    art_ref: dict[str, Any],
 ) -> None:
-    del skill_path_raw, inputs
+    del art_ref, inputs
     run_dir = Path(run_dir_raw)
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "artifacts").mkdir(exist_ok=True)
@@ -1152,12 +1152,12 @@ def fake_run_worker(
 
 def fake_failed_run_worker(
     skill_id: str,
-    skill_path_raw: str,
     run_dir_raw: str,
     inputs: dict[str, Any],
     process_queue: queue.Queue[dict[str, Any]],
+    art_ref: dict[str, Any],
 ) -> None:
-    del skill_id, skill_path_raw, inputs
+    del skill_id, art_ref, inputs
     run_dir = Path(run_dir_raw)
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "final_state.json").write_text(json.dumps({}), encoding="utf-8")

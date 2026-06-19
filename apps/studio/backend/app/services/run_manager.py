@@ -41,6 +41,7 @@ from app.models.runs import (
     BatchRunItem,
     BatchRunResponse,
     BatchRunStatus,
+    ResumeReq,
     RunDetail,
     RunListResponse,
     RunMetadata,
@@ -56,6 +57,7 @@ _EVENT_ADAPTER: TypeAdapter[Any] = TypeAdapter(CallbackEvent)
 logger = logging.getLogger(__name__)
 _LATEST_SYNC_LOCK = threading.Lock()
 _SAFE_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
+_SAFE_SKILL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 @dataclass
@@ -71,6 +73,7 @@ class RunRecord:
     events: list[EventEnvelope] = field(default_factory=list)
     subscribers: list[asyncio.Queue[dict[str, Any] | None]] = field(default_factory=list)
     drain_task: asyncio.Task[None] | None = None
+    auto_commit: bool = True
 
 
 @dataclass
@@ -91,21 +94,11 @@ def _queue_event_subscriber(process_queue: Any) -> Any:
 
 def _run_worker_main(
     skill_id: str,
-    skill_dir_raw: str,
     run_dir_raw: str,
     inputs: dict[str, Any],
     process_queue: Any,
-    art_ref: dict[str, Any] | None = None,
+    art_ref: dict[str, Any],
 ) -> None:
-    if art_ref is None:
-        adapter = build_engine_adapter()
-        art_ref = adapter.compile(
-            {
-                "skill_dir": skill_dir_raw,
-                "skill_id": skill_id,
-                "artifact_scope": "ephemeral",
-            }
-        )
     """Subprocess entrypoint that executes EngineAdapter.run_artifact."""
     run_dir = Path(run_dir_raw)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -140,6 +133,7 @@ def _run_worker_main(
                 final_context=final_context,
                 metrics=metrics_payload,
                 result=result,
+                artifact_ref=art_ref,
             )
             process_queue.put({"type": "status", "status": "success", "metrics": metrics})
         else:
@@ -152,6 +146,7 @@ def _run_worker_main(
                 final_context=final_context,
                 metrics=metrics_payload,
                 result=result,
+                artifact_ref=art_ref,
             )
             process_queue.put(
                 {
@@ -175,6 +170,7 @@ def _run_worker_main(
                 "context": {},
                 "error": str(exc),
             },
+            artifact_ref=art_ref,
         )
         process_queue.put(
             {
@@ -277,6 +273,49 @@ def _ensure_run_files(run_dir: Path) -> None:
     (run_dir / "checkpoints.db").touch(exist_ok=True)
 
 
+_ARTIFACT_IDENTITY_KEYS = (
+    "artifact_id",
+    "content_hash",
+    "store",
+    "version",
+    "manifest_ref",
+    "source_map_ref",
+    "execution_fingerprint",
+)
+
+
+def _public_artifact_ref(artifact_ref: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(artifact_ref, dict):
+        return None
+    public = {key: artifact_ref[key] for key in _ARTIFACT_IDENTITY_KEYS if key in artifact_ref}
+    return public or None
+
+
+def _metadata_artifact_fields(artifact_ref: dict[str, Any] | None) -> dict[str, Any]:
+    public = _public_artifact_ref(artifact_ref)
+    if public is None:
+        return {}
+    fields: dict[str, Any] = {"artifact_ref": public}
+    source_map_ref = public.get("source_map_ref")
+    if isinstance(source_map_ref, str):
+        fields["source_map_ref"] = source_map_ref
+    execution_fingerprint = public.get("execution_fingerprint")
+    if isinstance(execution_fingerprint, str):
+        fields["execution_fingerprint"] = execution_fingerprint
+    return fields
+
+
+def _artifact_store_metadata(source: str, artifact_ref: dict[str, Any] | None) -> dict[str, Any]:
+    metadata: dict[str, Any] = {"source": source}
+    public = _public_artifact_ref(artifact_ref)
+    if public is None:
+        return metadata
+    metadata["artifact_ref"] = public
+    for key, value in public.items():
+        metadata[key] = value
+    return metadata
+
+
 def _persist_run_artifacts(
     skill_id: str,
     run_dir: Path,
@@ -285,11 +324,12 @@ def _persist_run_artifacts(
     final_context: dict[str, Any],
     metrics: dict[str, Any],
     result: Any,
+    artifact_ref: dict[str, Any] | None = None,
 ) -> None:
     from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
 
     store = LocalRunArtifactStore(root=run_dir.parent.parent)
-    store.begin_run(run_dir.name, metadata={"source": "run_manager"})
+    store.begin_run(run_dir.name, metadata=_artifact_store_metadata("run_manager", artifact_ref))
     status = "success" if _result_success(result) else "failed"
     trace_ref = f"{skill_id}/runs/{run_dir.name}/trace.jsonl"
     node_outputs = _result_node_outputs(result, final_context)
@@ -438,27 +478,22 @@ class RunManager:
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "artifacts").mkdir(exist_ok=True)
         _write_json(run_dir / "input_data.json", inputs)
-        _persist_run_input_artifact(run_dir, inputs)
+        _persist_run_input_artifact(run_dir, inputs, artifact_ref=art_ref)
         metadata = RunMetadata(
             run_id=run_id,
             status="running",
             started_at=datetime.now(UTC),
             input_summary=_input_summary(inputs),
+            **_metadata_artifact_fields(art_ref),
         )
         _write_run_metadata(run_dir, metadata)
         await self._save_run_metadata(skill_id, metadata)
 
         process_queue = self.queue_factory()
-        if self.worker is _run_worker_main:
-            process = self.process_factory(
-                target=self.worker,
-                args=(skill_id, str(skill_dir), str(run_dir), inputs, process_queue, art_ref),
-            )
-        else:
-            process = self.process_factory(
-                target=self.worker,
-                args=(skill_id, str(skill_dir), str(run_dir), inputs, process_queue),
-            )
+        process = self.process_factory(
+            target=self.worker,
+            args=(skill_id, str(run_dir), inputs, process_queue, art_ref),
+        )
         try:
             process.start()
         except Exception as exc:
@@ -477,6 +512,62 @@ class RunManager:
             run_dir=run_dir,
             process=process,
             process_queue=process_queue,
+        )
+        self._runs[run_id] = record
+        task = asyncio.create_task(self._drain_process_queue(record))
+        record.drain_task = task
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return metadata
+
+    async def start_run_from_artifact(
+        self,
+        skill_id: str,
+        request: RunRequest,
+        *,
+        artifact_ref: dict[str, Any],
+    ) -> RunMetadata:
+        inputs = _runtime_inputs_from_request(request)
+        run_id = _new_run_id()
+        run_dir = _source_less_run_dir_for(skill_id, run_id)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "artifacts").mkdir(exist_ok=True)
+        _write_json(run_dir / "input_data.json", inputs)
+        _persist_run_input_artifact(run_dir, inputs, artifact_ref=artifact_ref)
+        metadata = RunMetadata(
+            run_id=run_id,
+            status="running",
+            started_at=datetime.now(UTC),
+            input_summary=_input_summary(inputs),
+            **_metadata_artifact_fields(artifact_ref),
+        )
+        _write_run_metadata(run_dir, metadata)
+        await self._save_run_metadata(skill_id, metadata)
+
+        process_queue = self.queue_factory()
+        process = self.process_factory(
+            target=self.worker,
+            args=(skill_id, str(run_dir), inputs, process_queue, artifact_ref),
+        )
+        try:
+            process.start()
+        except Exception as exc:
+            response = error_response(
+                error_code="RUN_SPAWN_FAILED",
+                http_status=500,
+                message=f"Failed to spawn run for skill {skill_id}: {exc}",
+                details={"skill_id": skill_id},
+                retry_strategy="idempotent",
+            )
+            raise_error_response(response)
+
+        record = RunRecord(
+            metadata=metadata,
+            skill_id=skill_id,
+            run_dir=run_dir,
+            process=process,
+            process_queue=process_queue,
+            auto_commit=False,
         )
         self._runs[run_id] = record
         task = asyncio.create_task(self._drain_process_queue(record))
@@ -658,25 +749,18 @@ class RunManager:
             elif message_type == "status":
                 status: Literal["success", "failed"] = "success" if message.get("status") == "success" else "failed"
                 metrics = _tokens_metrics(message.get("metrics"))
-                terminal_metadata = RunMetadata(
-                    run_id=record.metadata.run_id,
-                    status=status,
-                    started_at=record.metadata.started_at,
-                    metrics=metrics,
-                    input_summary=record.metadata.input_summary,
+                terminal_metadata = record.metadata.model_copy(
+                    update={
+                        "status": status,
+                        "metrics": metrics,
+                    }
                 )
                 break
 
         if terminal_metadata is None and record.metadata.status == "running":
             exitcode = getattr(record.process, "exitcode", None)
             status_from_exit: Literal["success", "failed"] = "success" if exitcode == 0 else "failed"
-            terminal_metadata = RunMetadata(
-                run_id=record.metadata.run_id,
-                status=status_from_exit,
-                started_at=record.metadata.started_at,
-                metrics=record.metadata.metrics,
-                input_summary=record.metadata.input_summary,
-            )
+            terminal_metadata = record.metadata.model_copy(update={"status": status_from_exit})
         if terminal_metadata is not None:
             await self._finalize_terminal_run(record, terminal_metadata)
         await record.ws_queue.put(None)
@@ -688,7 +772,7 @@ class RunManager:
 
     async def _finalize_terminal_run(self, record: RunRecord, metadata: RunMetadata) -> None:
         await self._copy_final_state_to_storage(record)
-        if metadata.status == "success":
+        if metadata.status == "success" and record.auto_commit:
             metadata = await self._auto_commit_successful_run(record, metadata)
             _write_run_metadata(record.run_dir, metadata)
             await asyncio.to_thread(_sync_latest_run, record.run_dir)
@@ -700,6 +784,44 @@ class RunManager:
     async def _save_run_metadata(self, skill_id: str, metadata: RunMetadata) -> None:
         metadata_store = self._metadata_store()
         await metadata_store.save_run_metadata(config.DEFAULT_USER_ID, skill_id, metadata)
+
+    async def record_resume_result(
+        self,
+        *,
+        skill_id: str,
+        run_id: str,
+        request: ResumeReq,
+        metadata: RunMetadata,
+    ) -> RunMetadata:
+        record = self._runs.get(run_id)
+        if record is not None:
+            metadata = _preserve_resume_artifact_identity(record.metadata, metadata)
+            record.metadata = metadata
+            _write_run_metadata(record.run_dir, metadata)
+            await self._save_run_metadata(skill_id, metadata)
+            event = _resume_audit_event(
+                run_id=run_id,
+                seq=len(record.events) + 1,
+                request=request,
+                metadata=metadata,
+            )
+            record.events.append(event)
+            event_json = event.model_dump(mode="json")
+            await record.ws_queue.put(event_json)
+            for subscriber in list(record.subscribers):
+                await subscriber.put(event_json)
+            if metadata.status != "running":
+                await record.ws_queue.put(None)
+                for subscriber in list(record.subscribers):
+                    await subscriber.put(None)
+                record.subscribers.clear()
+            return metadata
+
+        run_dir = run_dir_for(skill_id, run_id)
+        if run_dir.exists():
+            _write_run_metadata(run_dir, metadata)
+            await self._save_run_metadata(skill_id, metadata)
+        return metadata
 
     async def _copy_final_state_to_storage(self, record: RunRecord) -> None:
         final_state_path = record.run_dir / "final_state.json"
@@ -744,6 +866,45 @@ def _runtime_inputs_from_request(request: RunRequest) -> dict[str, Any]:
     return dict(request.input_data or {})
 
 
+def _preserve_resume_artifact_identity(existing: RunMetadata, resumed: RunMetadata) -> RunMetadata:
+    updates: dict[str, Any] = {}
+    for field_name in ("artifact_ref", "source_map_ref", "execution_fingerprint"):
+        if getattr(resumed, field_name) is None and getattr(existing, field_name) is not None:
+            updates[field_name] = getattr(existing, field_name)
+    return resumed.model_copy(update=updates) if updates else resumed
+
+
+def _resume_audit_event(
+    *,
+    run_id: str,
+    seq: int,
+    request: ResumeReq,
+    metadata: RunMetadata,
+) -> EventEnvelope:
+    payload: dict[str, Any] = {
+        "schema_version": "studio.resume.audit.v1",
+        "event_type": "resume_applied",
+        "run_id": run_id,
+        "status": metadata.status,
+        "checkpoint_id": request.checkpoint_id,
+        "checkpoint_ns": request.checkpoint_ns,
+        "resume_from_node_id": request.resume_from_node_id,
+        "resume_to_node_id": request.resume_to_node_id,
+        "context_override_keys": sorted((request.context_overrides or {}).keys()),
+    }
+    human_response = request.human_response
+    if isinstance(human_response, dict) and isinstance(human_response.get("tool_call_id"), str):
+        payload["human_response_tool_call_id"] = human_response["tool_call_id"]
+    return make_event_envelope(
+        stream_id=f"run:{run_id}",
+        seq=seq,
+        run_id=run_id,
+        event_type="resume_applied",
+        payload=payload,
+        cursor=f"run:{run_id}:{seq}",
+    )
+
+
 def _new_run_id() -> str:
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%S")
     return f"{stamp}_{uuid.uuid4().hex[:8]}"
@@ -761,16 +922,41 @@ def _validate_run_id_segment(run_id: str) -> None:
         raise_error_response(response)
 
 
+def _source_less_run_dir_for(skill_id: str, run_id: str) -> Path:
+    if (
+        not skill_id
+        or skill_id in {".", ".."}
+        or "/" in skill_id
+        or "\\" in skill_id
+        or not _SAFE_SKILL_ID_RE.fullmatch(skill_id)
+    ):
+        response = error_response(
+            error_code="INVALID_SKILL_ID",
+            http_status=400,
+            message=f"Invalid skill id: {skill_id}",
+            details={"skill_id": skill_id},
+            retry_strategy="not_retryable",
+        )
+        raise_error_response(response)
+    _validate_run_id_segment(run_id)
+    return config.default_workspace_skills_dir() / skill_id / ".workspace" / "runs" / run_id
+
+
 def _write_run_metadata(run_dir: Path, metadata: RunMetadata) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "run_metadata.json").write_text(metadata.model_dump_json(), encoding="utf-8")
 
 
-def _persist_run_input_artifact(run_dir: Path, input_data: dict[str, Any]) -> None:
+def _persist_run_input_artifact(
+    run_dir: Path,
+    input_data: dict[str, Any],
+    *,
+    artifact_ref: dict[str, Any] | None = None,
+) -> None:
     from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
 
     store = LocalRunArtifactStore(root=run_dir.parent.parent)
-    store.begin_run(run_dir.name, metadata={"source": "run_manager"})
+    store.begin_run(run_dir.name, metadata=_artifact_store_metadata("run_manager", artifact_ref))
     store.put_batch(
         run_dir.name,
         {

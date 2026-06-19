@@ -114,7 +114,6 @@ def test_run_worker_treats_artifact_error_result_as_failed_and_preserves_payload
 
     run_manager_module._run_worker_main(
         "demo.skill",
-        str(tmp_path / "skills" / "demo.skill"),
         str(run_dir),
         {},
         queue,
@@ -184,7 +183,6 @@ def test_run_worker_persists_sealed_result_snapshot_and_per_node_outputs(
 
     run_manager_module._run_worker_main(
         "demo.skill",
-        str(tmp_path / "skills" / "demo.skill"),
         str(run_dir),
         {},
         queue,

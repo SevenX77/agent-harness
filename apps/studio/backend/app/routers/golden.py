@@ -37,7 +37,12 @@ async def set_golden_baseline(
     write_fallback: str | None = Header(default=None, alias="X-Studio-Write-Fallback"),
 ) -> GoldenBaseline:
     _require_browser_write_fallback(write_fallback)
-    return set_golden_baseline_for_run(skill_id, request.run_id, lock=request.lock)
+    return set_golden_baseline_for_run(
+        skill_id,
+        request.run_id,
+        lock=request.lock,
+        node_id=request.node_id,
+    )
 
 
 @router.post(
@@ -46,7 +51,12 @@ async def set_golden_baseline(
     responses={501: {"model": ErrorResponse}},
 )
 async def plan_golden_baseline(skill_id: str, request: SetGoldenReq) -> GoldenBaselinePlan:
-    return plan_golden_baseline_for_run(skill_id, request.run_id, lock=request.lock)
+    return plan_golden_baseline_for_run(
+        skill_id,
+        request.run_id,
+        lock=request.lock,
+        node_id=request.node_id,
+    )
 
 
 @router.delete(

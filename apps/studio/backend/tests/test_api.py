@@ -982,6 +982,149 @@ def test_compare_missing_golden_returns_404(
     assert response.json()["error_code"] == "golden.baseline_not_found"
 
 
+def test_set_golden_with_node_id_writes_only_that_node(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    """POST golden with node_id promotes one agent node, not the whole run (GOLDEN_EVAL-1)."""
+    skills_dir, workspaces_dir = studio_roots
+    _write_result_snapshot(
+        workspaces_dir,
+        "text-segmentation",
+        "node-set-run",
+        [
+            {"phase_name": "setup", "outputs": {"answer": "hello world"}},
+            {"phase_name": "review", "outputs": {"score": 10}},
+        ],
+    )
+
+    response = client.post(
+        "/api/skills/text-segmentation/golden",
+        json={"run_id": "node-set-run", "lock": False, "node_id": "review"},
+        headers=FALLBACK_HEADERS,
+    )
+
+    assert response.status_code == 200
+    golden_dir = skills_dir / "text-segmentation" / ".workspace" / "golden" / "node-set-run"
+    assert (golden_dir / "cases" / "review.json").exists()
+    assert not (golden_dir / "cases" / "setup.json").exists()
+    cases = response.json()["cases"]
+    assert [case["node_id"] for case in cases] == ["review"]
+
+
+def test_set_golden_second_node_merges_without_clobbering_first(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    """A node-scoped write must not auto-overwrite a sibling node's golden (F6)."""
+    skills_dir, workspaces_dir = studio_roots
+    _write_result_snapshot(
+        workspaces_dir,
+        "text-segmentation",
+        "node-merge-run",
+        [
+            {"phase_name": "setup", "outputs": {"answer": "hello world"}},
+            {"phase_name": "review", "outputs": {"score": 10}},
+        ],
+    )
+
+    first = client.post(
+        "/api/skills/text-segmentation/golden",
+        json={"run_id": "node-merge-run", "lock": False, "node_id": "setup"},
+        headers=FALLBACK_HEADERS,
+    )
+    assert first.status_code == 200
+    second = client.post(
+        "/api/skills/text-segmentation/golden",
+        json={"run_id": "node-merge-run", "lock": False, "node_id": "review"},
+        headers=FALLBACK_HEADERS,
+    )
+    assert second.status_code == 200
+
+    golden_dir = skills_dir / "text-segmentation" / ".workspace" / "golden" / "node-merge-run"
+    assert (golden_dir / "cases" / "setup.json").exists()
+    assert (golden_dir / "cases" / "review.json").exists()
+    cases = client.get("/api/skills/text-segmentation/golden").json()[0]["cases"]
+    assert sorted(case["node_id"] for case in cases) == ["review", "setup"]
+
+
+def test_list_golden_projects_cases(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    """GET golden projects per-node cases — the three-state badge's source of truth."""
+    _skills_dir, workspaces_dir = studio_roots
+    _write_result_snapshot(
+        workspaces_dir,
+        "text-segmentation",
+        "list-cases-run",
+        [
+            {"phase_name": "setup", "outputs": {"answer": "hello world"}},
+            {"phase_name": "review", "outputs": {"score": 10}},
+        ],
+    )
+    promote = client.post(
+        "/api/skills/text-segmentation/golden",
+        json={"run_id": "list-cases-run", "lock": False},
+        headers=FALLBACK_HEADERS,
+    )
+    assert promote.status_code == 200
+
+    listed = client.get("/api/skills/text-segmentation/golden")
+
+    assert listed.status_code == 200
+    body = listed.json()
+    assert len(body) == 1
+    assert sorted(case["node_id"] for case in body[0]["cases"]) == ["review", "setup"]
+
+
+def test_set_golden_node_scoped_still_runs_predict_guard(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F6 guard holds for node-scoped writes: the predict-trace 409 is not bypassed.
+
+    The guard verdict is exercised by its own unit tests; here we assert the
+    node-scoped promote path still routes the snapshot through the guard, so a
+    detected predict trace surfaces as 409 instead of being silently promoted.
+    """
+    _skills_dir, workspaces_dir = studio_roots
+    _write_result_snapshot(
+        workspaces_dir,
+        "text-segmentation",
+        "predict-node-run",
+        [{"phase_name": "setup", "outputs": {"answer": "fake"}}],
+    )
+
+    from app.services import golden_diff
+
+    def _reject_predict(trace_payload: dict[str, Any], *, skill_id: str, run_id: str) -> None:
+        del trace_payload, skill_id, run_id
+        from app.core.exceptions import error_response, raise_error_response
+
+        raise_error_response(
+            error_response(
+                error_code="PREDICT_TRACE_CANNOT_BE_GOLDEN",
+                http_status=409,
+                message="Predict traces cannot be saved as Golden baselines",
+                details={},
+                retry_strategy="not_retryable",
+            )
+        )
+
+    monkeypatch.setattr(golden_diff, "assert_trace_can_be_promoted_to_golden", _reject_predict)
+
+    response = client.post(
+        "/api/skills/text-segmentation/golden",
+        json={"run_id": "predict-node-run", "lock": False, "node_id": "setup"},
+        headers=FALLBACK_HEADERS,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error_code"] == "PREDICT_TRACE_CANNOT_BE_GOLDEN"
+
+
 def test_run_spawn_failure_maps_to_500(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

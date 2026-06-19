@@ -232,19 +232,26 @@ const S0_PAGE = {
   purpose:'这份手册不是普通状态表，而是 Studio MVP1 12D 修复的作战地图。读它时先确认当前实施环境、整体波次和固定 routine，再进入每个 D 的设计页与具体子问题页。这样可以避免只盯单点测试，而忘了每个设计点背后的 owner、接口和接入边界。',
   environment:[
     ['Worktree','/Users/sevenx/Documents/coding/agent-harness/.worktrees/studio-mvp1-mainbased'],
-    ['Branch','codex/studio-mvp1-12d-strict-tdd'],
+    ['Branch','feat/n0-settings-frontend'],
+    ['Current HEAD at final handoff','50d55e5e feat(studio): N0 LLM Roles — test SSOT, config-gap guide, deprecated区, blue default, bundle lights'],
+    ['Wave4 verified HEAD','4e6aa330 feat(studio): close mvp1 wave3 runtime gates'],
     ['Merge base','9f53d6f4bd3baf572d6e35c3e70743b0fa16a24c'],
-    ['Status page','temp/studio-mvp1-12d-repair-framework-2026-06-15.html']
+    ['Status page','docs/studio/mvp1/_impl/wave2/studio-mvp1-12d-repair-framework-2026-06-15.html'],
+    ['Wave4 full baseline @4e6aa330','HTML validator pass；backend 907 passed / 1 skipped；frontend 812 passed + typecheck；graph-agent 1351 passed / 2 skipped / 3 xfailed / 3 xpassed；gateway strict mypy success + gateway tests 224 passed / 1 xfailed；combined backend/graph-agent/gateway mypy success。'],
+    ['Wave4 focused guards @4e6aa330','Backend source-writer/runtime/gateway/store/resume/Copilot/Publish/native-fs gates green；graph-agent source-path/storage/public API gates green；frontend EventEnvelope、node lights、resume validity、HitL、edge tamper、Timeline artifact identity、Copilot judge、client guards green。'],
+    ['Wave4 browser验收 @4e6aa330','Clean 4e6aa330 snapshot + Vite 5175 + Chromium at 768x900：edge-publish、copilot-judge、hitl-resume 三段真页面点击均通过；截图证据在 /tmp/studio-wave4-edge-publish.png、/tmp/studio-wave4-copilot-judge.png、/tmp/studio-wave4-hitl-resume.png。'],
+    ['Wave4 reviewer closure @4e6aa330','Wave3 audit 两个 blocker 已关闭：graph-agent full suite 证明 story-deconstruction target_skill 回流已修；gateway strict mypy 证明 resolver 红灯已修。run-trace.spec.ts 仍是旧 raw CallbackEvent fixture，归类为 stale e2e fixture，不是当前 EventEnvelope 产品路径 blocker。'],
+    ['Settings stash status','Wave4 临时 stash 基于 4e6aa330；当前分支已前进到 50d55e5e，直接 pop 会与 Settings 文件冲突，所以未强行合并，stash 保留给 Settings 线单独处理。']
   ],
   waves:[
     ['Wave 1 · 边界先行','先修 D1、D4、D5、D6 这类能限制旧路复发的模块边界、provider/fallback/materialize owner。',{nodes:['d1','d4','d5','d6']}],
     ['Wave 2 · 存储与本地能力','集中处理 D2、D12、D8、D9：语义 Store、native-fs、本地写盘、GRAPH roundtrip、release/package。',{nodes:['d2','d12','d8','d9']}],
     ['Wave 3 · 运行态与可观测','推进 D3、D7、D10、D11：run-by-version、Golden、Trace/EventEnvelope、node/edge runtime observability。',{nodes:['d3','d7','d10','d11']}],
     ['Wave 4 · 收敛验收','复跑跨 D guard、真 App 路径、reviewer findings，并把 HTML 状态页同步到最终证据。',{tasks:[
-      ['复跑跨 D guard','pending'],
-      ['真 App 路径验收','pending'],
-      ['reviewer findings 修复/关闭','pending'],
-      ['HTML 状态页同步最终证据','pending']
+      ['复跑跨 D guard','ok'],
+      ['真 App 路径验收','ok'],
+      ['reviewer findings 修复/关闭','ok'],
+      ['HTML 状态页同步最终证据','ok']
     ]}]
   ],
   routine:[
@@ -1801,7 +1808,7 @@ function renderWaveTodoRow(item, kind) {
 }
 function renderWaveTaskRow(task) {
   const done = task[1] === 'ok';
-  return '<label class="wave-todo-row pending">' +
+  return '<label class="wave-todo-row ' + (done ? 'done' : 'pending') + '">' +
     '<input type="checkbox" disabled' + (done ? ' checked' : '') + '>' +
     '<span class="wave-todo-title">' + inlineCode(task[0]) + '</span>' +
     '<span class="state-badge ' + statusClass(done ? 'ok' : 'bad') + '">' + (done ? '已完成' : '未开始') + '</span>' +

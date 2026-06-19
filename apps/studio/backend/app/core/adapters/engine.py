@@ -600,6 +600,8 @@ def _tokens_metrics_payload(raw_metrics: Any) -> dict[str, Any] | None:
         "output_tokens": output_tokens,
         "total_tokens": int(raw_metrics.get("total_tokens", input_tokens + output_tokens) or 0),
         "cost_estimate": raw_metrics.get("cost_estimate"),
+        # ⑧a: carry the engine's wall_time_sec through the adapter wire so the resume DTO can surface 耗时.
+        "wall_time_sec": raw_metrics.get("wall_time_sec"),
     }
 
 

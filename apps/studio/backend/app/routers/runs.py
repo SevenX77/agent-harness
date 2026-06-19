@@ -123,11 +123,15 @@ def _tokens_metrics_payload(raw: Any) -> TokensMetrics | None:
         return None
     input_tokens = int(raw.get("total_input_tokens", raw.get("input_tokens", 0)) or 0)
     output_tokens = int(raw.get("total_output_tokens", raw.get("output_tokens", 0)) or 0)
+    raw_wall_time = raw.get("wall_time_sec")
     return TokensMetrics(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         total_tokens=int(raw.get("total_tokens", input_tokens + output_tokens) or 0),
         cost_estimate=raw.get("cost_estimate"),
+        # ⑧a: resume path mirror of run_manager — pass the engine's wall_time_sec through
+        # instead of stripping it, so resumed-run history shows real 耗时.
+        wall_time_sec=float(raw_wall_time) if raw_wall_time is not None else None,
     )
 
 

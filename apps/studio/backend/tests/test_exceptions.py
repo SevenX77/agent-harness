@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from app.core.exceptions import STANDARD_ERROR_MAP, standard_http_exception
 
 
@@ -16,6 +17,7 @@ def test_standard_error_codes_map_to_http_exceptions() -> None:
         "LLM_FALLBACK_EXHAUSTED": 502,
         "LLM_CREDENTIALS_SCHEMA": 422,
         "RESUME_CHECKPOINT_NOT_FOUND": 404,
+        "RESUME_VALIDITY_FAILED": 422,
         "TEST_INPUT_NOT_FOUND": 404,
         "TEST_INPUT_ALREADY_EXISTS": 409,
         "TEST_INPUT_VALIDATION_FAILED": 422,
@@ -30,3 +32,13 @@ def test_standard_error_codes_map_to_http_exceptions() -> None:
         assert exc.status_code == http_status
         assert exc.detail["error_code"] == error_code
         assert exc.detail["http_status"] == http_status
+
+
+def test_resume_validity_failed_is_not_retryable() -> None:
+    assert STANDARD_ERROR_MAP["RESUME_VALIDITY_FAILED"].retry_strategy == "not_retryable"
+
+
+def test_unregistered_error_code_fails_loudly_instead_of_slipping_through() -> None:
+    """An unregistered code must raise at construction, never produce a malformed response."""
+    with pytest.raises(KeyError):
+        standard_http_exception("DEFINITELY_NOT_REGISTERED", "message")

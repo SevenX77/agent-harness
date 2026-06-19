@@ -167,6 +167,126 @@ def test_release_list_and_detail_return_committed_product_manifest_identity(
     assert "staged-only" not in str(list_response.json())
 
 
+def test_release_run_starts_from_committed_product_artifact_without_recompiling_source(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import queue
+
+    from app.services.run_manager import run_manager
+
+    registry = FakeRegistry(host="", token="")
+    client.app.dependency_overrides[get_registry_client] = lambda: registry
+    _write_settings(client, user_id="alice")
+
+    publish_response = client.post("/api/skills/text-segmentation/publish", json={})
+    assert publish_response.status_code == 200
+    release = LocalProductArtifactStore(root=studio_roots[1] / "default").get_release(
+        "text-segmentation",
+        "1.0.0",
+    )
+    assert release is not None
+    release_artifact_ref = release["artifact_ref"]
+    expected_artifact_ref = {**release_artifact_ref, "version": "1.0.0"}
+    shutil.rmtree(studio_roots[0] / "text-segmentation")
+
+    class FailIfCompileAdapter:
+        def compile(self, _payload: dict[str, Any]) -> dict[str, Any]:
+            raise AssertionError("release run must not compile current workspace source")
+
+    class InlineProcess:
+        def __init__(self, target: Any, args: tuple[Any, ...]) -> None:
+            self.target = target
+            self.args = args
+
+        def start(self) -> None:
+            self.target(*self.args)
+
+        def is_alive(self) -> bool:
+            return False
+
+        def terminate(self) -> None:
+            return None
+
+    captured: dict[str, Any] = {}
+
+    def fake_release_worker(
+        skill_id: str,
+        run_dir_raw: str,
+        inputs: dict[str, Any],
+        process_queue: Any,
+        art_ref: dict[str, Any] | None = None,
+    ) -> None:
+        captured["skill_id"] = skill_id
+        captured["run_dir_raw"] = run_dir_raw
+        captured["inputs"] = inputs
+        captured["art_ref"] = art_ref
+        process_queue.put({"type": "status", "status": "success", "metrics": {}})
+
+    monkeypatch.setattr(run_manager, "process_factory", InlineProcess)
+    monkeypatch.setattr(run_manager, "queue_factory", queue.Queue)
+    monkeypatch.setattr(run_manager, "worker", fake_release_worker)
+    import app.core.adapters.transport_factory as transport_factory
+
+    monkeypatch.setattr(transport_factory, "build_engine_adapter", lambda: FailIfCompileAdapter())
+
+    response = client.post(
+        "/api/skills/text-segmentation/releases/1.0.0/runs",
+        json={"input_data": {"input_text": "from release"}},
+    )
+
+    assert response.status_code == 202, response.text
+    assert response.json()["status"] == "running"
+    assert captured["skill_id"] == "text-segmentation"
+    assert captured["inputs"] == {"input_text": "from release"}
+    assert captured["art_ref"] == expected_artifact_ref
+
+
+def test_release_run_missing_product_blob_returns_typed_artifact_not_found_without_source_fallback(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = FakeRegistry(host="", token="")
+    client.app.dependency_overrides[get_registry_client] = lambda: registry
+    _write_settings(client, user_id="alice")
+
+    publish_response = client.post("/api/skills/text-segmentation/publish", json={})
+    assert publish_response.status_code == 200
+    store = LocalProductArtifactStore(root=studio_roots[1] / "default")
+    release = store.get_release("text-segmentation", "1.0.0")
+    assert release is not None
+    artifact_ref = release["artifact_ref"]
+    store.blob_path(artifact_ref["content_hash"]).unlink()
+    shutil.rmtree(studio_roots[0] / "text-segmentation")
+
+    class FailIfCompileAdapter:
+        def compile(self, _payload: dict[str, Any]) -> dict[str, Any]:
+            raise AssertionError("missing product artifact must not compile current workspace source")
+
+    import app.core.adapters.transport_factory as transport_factory
+
+    monkeypatch.setattr(transport_factory, "build_engine_adapter", lambda: FailIfCompileAdapter())
+
+    response = client.post(
+        "/api/skills/text-segmentation/releases/1.0.0/runs",
+        json={"input_data": {"input_text": "from release"}},
+    )
+
+    assert response.status_code == 404
+    body = response.json()
+    assert body["error_code"] == "artifact.not_found"
+    assert body["details"] == {
+        "artifact_id": "text-segmentation",
+        "content_hash": artifact_ref["content_hash"],
+        "store": "product",
+        "version": "1.0.0",
+        "release_version": "1.0.0",
+        "detail": "Product artifact bytes are missing",
+    }
+
+
 def test_release_list_and_detail_require_current_user_skill_access(
     client: TestClient,
     studio_roots: tuple[Path, Path],

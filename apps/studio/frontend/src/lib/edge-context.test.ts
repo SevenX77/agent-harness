@@ -83,6 +83,52 @@ describe('edgeContextFromEvents', () => {
     expect(result?.diff).toEqual({ changed_keys: ['query', 'max_iterations'] })
   })
 
+  it('preserves checkpoint identity for downstream resume from edge context', () => {
+    const result = edgeContextFromEvents([
+      dispatchEvent('planner', 'executor', { query: 'new' }, {
+        checkpoint_id: 'checkpoint-executor',
+        checkpoint_ns: 'agent:executor',
+      }),
+    ], 'planner', 'executor')
+
+    expect(result?.checkpoint_id).toBe('checkpoint-executor')
+    expect(result?.checkpoint_ns).toBe('agent:executor')
+  })
+
+  it('preserves tamper diff, audit, and resume validity for the edge inspection panel', () => {
+    const result = edgeContextFromEvents([
+      dispatchEvent('planner', 'executor', { query: 'new' }, {
+        tamper_diff: {
+          changed_keys: ['query'],
+          before: { query: 'old' },
+          after: { query: 'new' },
+        },
+        tamper_audit: {
+          actor: 'manual-debugger',
+          reason: 'D10.4 browser validation',
+        },
+        resume_validity: {
+          resume_allowed: false,
+          reason: 'dirty_upstream',
+        },
+      }),
+    ], 'planner', 'executor')
+
+    expect(result?.tamper_diff).toEqual({
+      changed_keys: ['query'],
+      before: { query: 'old' },
+      after: { query: 'new' },
+    })
+    expect(result?.tamper_audit).toEqual({
+      actor: 'manual-debugger',
+      reason: 'D10.4 browser validation',
+    })
+    expect(result?.resume_validity).toEqual({
+      resume_allowed: false,
+      reason: 'dirty_upstream',
+    })
+  })
+
   it('picks the LAST matching event when several exist', () => {
     const events: CallbackEvent[] = [
       dispatchEvent('planner', 'executor', { attempt: 1 }),

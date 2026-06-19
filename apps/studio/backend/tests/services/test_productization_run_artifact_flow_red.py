@@ -359,6 +359,53 @@ def test_engine_adapter_artifact_methods_do_not_hide_source_runtime_calls() -> N
         assert offenders == [], f"EngineAdapter.{method_name} still references old source runtime path: {offenders}"
 
 
+def test_runtime_surface_discovery_forbids_source_path_parameters_and_payload_keys() -> None:
+    forbidden_path_names = {
+        "skill_dir",
+        "skill_dir_raw",
+        "skill_path",
+        "source_dir",
+        "source_path",
+        "workspace_source_path",
+    }
+    runtime_callees = {
+        "run_artifact",
+        "predict_artifact",
+        "resume_restored_runtime_state",
+        "evaluate_golden_headless",
+        "golden_headless_request_from_ref",
+        "start_run_from_artifact",
+    }
+    offenders: list[str] = []
+
+    for path in sorted((BACKEND_ROOT / "app").rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        parents: dict[ast.AST, ast.AST] = {}
+        for parent in ast.walk(tree):
+            for child in ast.iter_child_nodes(parent):
+                parents[child] = parent
+        function_nodes = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)]
+        for function in function_nodes:
+            if function.name == "_run_worker_main" or _function_calls_any(function, runtime_callees):
+                for arg in [*function.args.posonlyargs, *function.args.args, *function.args.kwonlyargs]:
+                    if arg.arg in forbidden_path_names:
+                        offenders.append(f"{path.relative_to(BACKEND_ROOT)}:{function.lineno}:{function.name}({arg.arg})")
+                for call in [node for node in ast.walk(function) if isinstance(node, ast.Call)]:
+                    if _call_name(call.func) not in runtime_callees:
+                        continue
+                    for dict_node in _dict_payloads(call):
+                        for key in dict_node.keys:
+                            if isinstance(key, ast.Constant) and key.value in forbidden_path_names:
+                                offenders.append(
+                                    f"{path.relative_to(BACKEND_ROOT)}:{key.lineno}:{function.name} payload[{key.value!r}]"
+                                )
+
+    assert offenders == []
+
+
 def test_engine_adapter_resume_preserves_structured_error_codes() -> None:
     from app.core.adapters.engine import EngineAdapter
     from app.core.adapters.http_transport import StudioAdapterError
@@ -441,6 +488,82 @@ def test_d10_resume_production_files_keep_naked_checkpointer_access_inside_runti
                 offenders.append(f"{path.relative_to(BACKEND_ROOT)}:{node.lineno}:checkpointer.list")
 
     assert offenders == []
+
+
+def test_engine_resume_validity_denies_dirty_upstream_when_current_artifact_identity_changed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core.adapters.engine import EngineAdapter
+    from app.core.adapters.runtime_state_store_local import StateSnapshot
+
+    old_hash = f"sha256:{'1' * 64}"
+    new_hash = f"sha256:{'2' * 64}"
+    old_fingerprint = f"sha256:{'3' * 64}"
+    new_fingerprint = f"sha256:{'4' * 64}"
+
+    class _RuntimeStateStore:
+        def restore(self, *, run_id: str) -> StateSnapshot:
+            return StateSnapshot(
+                run_id=run_id,
+                fencing_token=7,
+                state={
+                    "schema_version": "studio.runtime_state.v1",
+                    "run_id": run_id,
+                    "artifact_ref": {
+                        "artifact_id": "demo.skill",
+                        "content_hash": old_hash,
+                        "store": "ephemeral",
+                        "manifest_ref": "object://old-manifest",
+                        "source_map_ref": "object://old-source-map",
+                        "execution_fingerprint": old_fingerprint,
+                    },
+                    "checkpoint_id": "checkpoint-beta",
+                    "checkpoint_ns": "agent:beta",
+                },
+            )
+
+    adapter = EngineAdapter(transport="in_process")
+    monkeypatch.setattr(adapter, "_build_runtime_state_store", lambda: _RuntimeStateStore())
+    monkeypatch.setattr("app.services.skills.resolve_skill_dir", lambda _skill_id: Path("/tmp/demo"))
+    monkeypatch.setattr(
+        adapter,
+        "compile",
+        lambda payload: {
+            "artifact_id": payload["skill_id"],
+            "content_hash": new_hash,
+            "store": "ephemeral",
+            "version": None,
+            "manifest_ref": "object://new-manifest",
+            "source_map_ref": "object://new-source-map",
+            "execution_fingerprint": new_fingerprint,
+        },
+    )
+
+    result = adapter.resume_validity(
+        {
+            "skill_id": "demo.skill",
+            "run_id": "run-dirty",
+            "checkpoint_id": "checkpoint-beta",
+            "checkpoint_ns": "agent:beta",
+            "resume_from_node_id": "beta",
+            "resume_to_node_id": "gamma",
+        }
+    )
+
+    assert result == {
+        "run_id": "run-dirty",
+        "resume_allowed": False,
+        "reason": "dirty_upstream",
+        "checkpoint_id": "checkpoint-beta",
+        "checkpoint_ns": "agent:beta",
+        "resume_from_node_id": "beta",
+        "resume_to_node_id": "gamma",
+        "dirty_fields": ["content_hash", "execution_fingerprint"],
+        "snapshot_content_hash": old_hash,
+        "current_content_hash": new_hash,
+        "snapshot_execution_fingerprint": old_fingerprint,
+        "current_execution_fingerprint": new_fingerprint,
+    }
 
 
 def test_engine_adapter_artifact_runtime_uses_new_artifact_apis_not_source_skill_runtime(
@@ -823,6 +946,122 @@ def test_engine_adapter_ephemeral_missing_artifact_dev_rebuilds_once_and_runs_re
     assert rebuild_calls == ["demo.skill"]
     assert runtime_calls == [refreshed_ref.content_hash]
     assert result["context"] == {"rebuilt": True}
+
+
+def test_engine_adapter_ephemeral_missing_artifact_records_dev_rebuild_old_and_new_refs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.core.adapters.engine as engine_module
+    import app.services.run_artifact_flow as run_artifact_flow
+    from app.core import config
+    from app.core.adapters.engine import EngineAdapter
+    from app.core.adapters.product_store_local import LocalProductArtifactStore
+
+    monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
+    workspace_root = _storage_root(tmp_path)
+    product_store = LocalProductArtifactStore(root=workspace_root)
+    refreshed_ref = product_store.put(_zip_skill_bytes(), artifact_id="demo.skill", store="ephemeral")
+    stale_ref = {
+        "artifact_id": "demo.skill",
+        "content_hash": f"sha256:{'4' * 64}",
+        "store": "ephemeral",
+        "manifest_ref": "manifests/demo.skill.json",
+        "source_map_ref": "source-maps/demo.skill.json",
+        "version": None,
+    }
+    captured_context: dict[str, Any] = {}
+
+    def compile_dev_missing(artifact_id: str) -> object:
+        assert artifact_id == "demo.skill"
+        return refreshed_ref
+
+    def fake_run_artifact(request: object, **_kwargs: object) -> dict[str, Any]:
+        captured_context.update(dict(request.execution_context))
+        return {"run_id": "run-dev-rebuild-audit", "success": True, "context": {}, "metrics": {}}
+
+    monkeypatch.setattr(run_artifact_flow, "compile_ephemeral_for_dev_missing_hash", compile_dev_missing)
+    monkeypatch.setattr(engine_module, "run_artifact", fake_run_artifact)
+
+    EngineAdapter(transport="in_process").run_artifact(
+        {
+            "artifact_ref": dict(stale_ref),
+            "inputs": {},
+            "workspace_dir": str(tmp_path / "workspace"),
+            "idempotency_key": "idem-run-dev-rebuild-audit",
+        }
+    )
+
+    assert captured_context["artifact_dev_rebuild"] == {
+        "reason": "ephemeral.artifact_missing",
+        "old_artifact_ref": stale_ref,
+        "new_artifact_ref": {
+            "artifact_id": refreshed_ref.artifact_id,
+            "content_hash": refreshed_ref.content_hash,
+            "store": refreshed_ref.store,
+            "manifest_ref": refreshed_ref.manifest_ref,
+            "source_map_ref": refreshed_ref.source_map_ref,
+            "version": None,
+        },
+    }
+
+
+def test_engine_adapter_predict_ephemeral_missing_artifact_records_dev_rebuild_old_and_new_refs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.core.adapters.engine as engine_module
+    import app.services.run_artifact_flow as run_artifact_flow
+    from app.core import config
+    from app.core.adapters.engine import EngineAdapter
+    from app.core.adapters.product_store_local import LocalProductArtifactStore
+
+    monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
+    workspace_root = _storage_root(tmp_path)
+    product_store = LocalProductArtifactStore(root=workspace_root)
+    refreshed_ref = product_store.put(_zip_skill_bytes(), artifact_id="demo.skill", store="ephemeral")
+    stale_ref = {
+        "artifact_id": "demo.skill",
+        "content_hash": f"sha256:{'3' * 64}",
+        "store": "ephemeral",
+        "manifest_ref": "manifests/demo.skill.json",
+        "source_map_ref": "source-maps/demo.skill.json",
+        "version": None,
+    }
+    captured_context: dict[str, Any] = {}
+
+    def compile_dev_missing(artifact_id: str) -> object:
+        assert artifact_id == "demo.skill"
+        return refreshed_ref
+
+    def fake_predict_artifact(request: object, **_kwargs: object) -> dict[str, Any]:
+        captured_context.update(dict(request.execution_context))
+        return {"run_id": "predict-dev-rebuild-audit", "status": "success", "context": {}, "metrics": {}}
+
+    monkeypatch.setattr(run_artifact_flow, "compile_ephemeral_for_dev_missing_hash", compile_dev_missing)
+    monkeypatch.setattr(engine_module, "predict_artifact", fake_predict_artifact)
+
+    EngineAdapter(transport="in_process").predict_artifact(
+        {
+            "artifact_ref": dict(stale_ref),
+            "inputs": {},
+            "workspace_dir": str(tmp_path / "workspace"),
+            "idempotency_key": "idem-predict-dev-rebuild-audit",
+        }
+    )
+
+    assert captured_context["artifact_dev_rebuild"] == {
+        "reason": "ephemeral.artifact_missing",
+        "old_artifact_ref": stale_ref,
+        "new_artifact_ref": {
+            "artifact_id": refreshed_ref.artifact_id,
+            "content_hash": refreshed_ref.content_hash,
+            "store": refreshed_ref.store,
+            "manifest_ref": refreshed_ref.manifest_ref,
+            "source_map_ref": refreshed_ref.source_map_ref,
+            "version": None,
+        },
+    }
 
 
 def test_engine_adapter_ephemeral_missing_artifact_dev_mode_false_surfaces_not_found_without_rebuild(
@@ -2656,6 +2895,154 @@ def test_predictor_persists_predict_result_through_run_artifact_store(
     assert payload["context"] == {"prediction": "ok"}
 
 
+def test_predictor_preserves_artifact_identity_in_runtime_payload_and_predict_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.services.predictor as predictor_module
+    from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
+    from app.services.predictor import PredictorService
+    from graph_agent.core.result import RunResult
+
+    skill_dir = tmp_path / "skills" / "demo.skill"
+    skill_dir.mkdir(parents=True)
+    artifact_ref = {
+        "artifact_id": "demo.skill",
+        "content_hash": f"sha256:{'1' * 64}",
+        "store": "ephemeral",
+        "manifest_ref": "file:///tmp/manifest.json",
+        "source_map_ref": "file:///tmp/source-map.json",
+        "execution_fingerprint": f"sha256:{'2' * 64}",
+        "version": None,
+    }
+    captured_payload: dict[str, Any] = {}
+
+    class FakeAdapter:
+        def compile(self, payload: dict[str, Any]) -> dict[str, Any]:
+            assert payload["skill_id"] == "demo.skill"
+            return dict(artifact_ref)
+
+        def predict_artifact(self, payload: dict[str, Any]) -> RunResult:
+            captured_payload.update(payload)
+            return RunResult(
+                success=True,
+                run_id="predict-identity-run",
+                skill_id="demo.skill",
+                context={"prediction": "ok"},
+                source="predict",
+            )
+
+    monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda _skill_id: skill_dir)
+    monkeypatch.setattr(predictor_module, "build_engine_adapter", lambda: FakeAdapter())
+
+    result = PredictorService().dispatch_predict_job("demo.skill", input_data={"topic": "identity"})
+
+    assert captured_payload["artifact_ref"] == artifact_ref
+    result_payload = result.model_dump(mode="json")
+    assert result_payload["artifact_ref"] == artifact_ref
+    assert result_payload["source_map_ref"] == artifact_ref["source_map_ref"]
+    assert result_payload["execution_fingerprint"] == artifact_ref["execution_fingerprint"]
+
+    manifest_path = skill_dir / ".workspace" / "runs" / result.run_id / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["metadata"]["artifact_ref"] == artifact_ref
+    assert manifest["metadata"]["source_map_ref"] == artifact_ref["source_map_ref"]
+    assert manifest["metadata"]["execution_fingerprint"] == artifact_ref["execution_fingerprint"]
+
+    result_ref = manifest["object_refs"]["result.json"]
+    stored = LocalRunArtifactStore(root=skill_dir / ".workspace").get_object(hash=result_ref["content_hash"])
+    stored_payload = json.loads(stored.decode("utf-8"))
+    assert stored_payload["artifact_ref"] == artifact_ref
+    assert stored_payload["execution_fingerprint"] == artifact_ref["execution_fingerprint"]
+
+
+def test_run_metadata_preserves_artifact_identity_for_source_and_release_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.services.run_manager as run_manager_module
+    import app.services.skills as skills_module
+    from app.core import config
+    from app.services.predict_gate import record_predict_pass
+    from app.services.run_manager import RunManager
+
+    skill_dir = tmp_path / "workspaces" / "default" / "skills" / "demo.skill"
+    skill_dir.mkdir(parents=True)
+    monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
+    monkeypatch.setattr(config, "DEFAULT_SKILLS_ROOT", tmp_path / "Skills")
+    source_artifact_ref = {
+        "artifact_id": "demo.skill",
+        "content_hash": f"sha256:{'3' * 64}",
+        "store": "ephemeral",
+        "manifest_ref": "file:///tmp/source-manifest.json",
+        "source_map_ref": "file:///tmp/source-map.json",
+        "execution_fingerprint": f"sha256:{'4' * 64}",
+        "version": None,
+    }
+    release_artifact_ref = {
+        "artifact_id": "demo.skill",
+        "content_hash": f"sha256:{'5' * 64}",
+        "store": "product",
+        "manifest_ref": "file:///tmp/release-manifest.json",
+        "source_map_ref": "file:///tmp/release-source-map.json",
+        "execution_fingerprint": f"sha256:{'6' * 64}",
+        "version": "1.0.0",
+    }
+
+    class FakeAdapter:
+        def compile(self, _payload: dict[str, Any]) -> dict[str, Any]:
+            return dict(source_artifact_ref)
+
+    class InlineProcess:
+        def __init__(self, target: Any, args: tuple[Any, ...]) -> None:
+            self._target = target
+            self._args = args
+
+        def start(self) -> None:
+            return None
+
+        def join(self, timeout: float | None = None) -> None:
+            del timeout
+
+    manager = RunManager()
+    manager.process_factory = InlineProcess
+    manager.queue_factory = lambda: SimpleNamespace(put=lambda _item: None)
+    manager.worker = lambda *_args: None
+    async def noop_async(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    manager._save_run_metadata = noop_async  # type: ignore[method-assign]
+    manager._drain_process_queue = noop_async  # type: ignore[method-assign]
+    monkeypatch.setattr(run_manager_module, "build_engine_adapter", lambda: FakeAdapter())
+    monkeypatch.setattr(skills_module, "resolve_skill_dir", lambda _skill_id: skill_dir)
+    monkeypatch.setattr(run_manager_module, "resolve_skill_dir", lambda _skill_id: skill_dir)
+    record_predict_pass(skill_dir, "demo.skill", "predict-pass", content_hash=source_artifact_ref["content_hash"])
+
+    source_metadata = asyncio.run(
+        manager.start_run("demo.skill", run_manager_module.RunRequest(input_data={"topic": "source"}))
+    )
+    release_metadata = asyncio.run(
+        manager.start_run_from_artifact(
+            "demo.skill",
+            run_manager_module.RunRequest(input_data={"topic": "release"}),
+            artifact_ref=dict(release_artifact_ref),
+        )
+    )
+
+    for metadata, expected in (
+        (source_metadata, source_artifact_ref),
+        (release_metadata, release_artifact_ref),
+    ):
+        assert metadata.artifact_ref == expected
+        assert metadata.source_map_ref == expected["source_map_ref"]
+        assert metadata.execution_fingerprint == expected["execution_fingerprint"]
+        metadata_path = skill_dir / ".workspace" / "runs" / metadata.run_id / "run_metadata.json"
+        saved = json.loads(metadata_path.read_text(encoding="utf-8"))
+        assert saved["artifact_ref"] == expected
+        assert saved["source_map_ref"] == expected["source_map_ref"]
+        assert saved["execution_fingerprint"] == expected["execution_fingerprint"]
+
+
 def test_run_detail_reads_final_context_from_sealed_run_artifact_store_not_legacy_json(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3103,6 +3490,21 @@ def _call_name(func: ast.expr) -> str:
     if isinstance(func, ast.Attribute):
         return func.attr
     return ""
+
+
+def _function_calls_any(function: ast.FunctionDef | ast.AsyncFunctionDef, callee_names: set[str]) -> bool:
+    return any(
+        isinstance(node, ast.Call) and _call_name(node.func) in callee_names
+        for node in ast.walk(function)
+    )
+
+
+def _dict_payloads(call: ast.Call) -> list[ast.Dict]:
+    payloads: list[ast.Dict] = []
+    for value in [*call.args, *(keyword.value for keyword in call.keywords)]:
+        if isinstance(value, ast.Dict):
+            payloads.append(value)
+    return payloads
 
 
 def _write_text(path: Path, text: str) -> None:

@@ -33,6 +33,7 @@ from app.core.ports.storage import StorageBackend
 from app.models.git_collab import SyncSkillReq
 from app.models.git_history import GitHistoryItem, RevertSkillReq
 from app.models.publish import PublishResult, PublishSkillReq
+from app.models.runs import RunMetadata, RunRequest
 from app.models.skills import (
     ChildGraphTopology,
     CompileSuccess,
@@ -63,6 +64,7 @@ from app.services.git_local import (
     GitObjectNotFoundError,
     GitRevertConflictError,
 )
+from app.services.run_manager import run_manager
 from app.services.skills import (
     CompileFailedError,
     compile_skill_for_studio,
@@ -414,6 +416,38 @@ async def get_skill_release(
         )
         raise_error_response(response)
     return release
+
+
+@router.post("/{skill_id}/releases/{release_version}/runs", response_model=RunMetadata, status_code=202)
+async def run_skill_release(
+    skill_id: str,
+    release_version: str,
+    request: RunRequest,
+    user_id: str = Depends(get_auth_user_id),
+) -> RunMetadata:
+    del user_id
+    store = _product_artifact_store()
+    artifact_ref: dict[str, Any] | None = None
+    try:
+        release = await asyncio.to_thread(store.get_release, skill_id, release_version)
+        if release is None:
+            response = error_response(
+                error_code="RELEASE_NOT_FOUND",
+                http_status=404,
+                message=f"Release {release_version} not found for skill {skill_id}",
+                details={"skill_id": skill_id, "release_version": release_version},
+                retry_strategy="not_retryable",
+            )
+            raise_error_response(response)
+        artifact_ref = _release_run_artifact_ref(release, release_version)
+        await asyncio.to_thread(store.get, artifact_ref["content_hash"])
+    except StudioAdapterError as exc:
+        if exc.error_code.startswith("artifact."):
+            _raise_release_artifact_error(exc, artifact_ref, release_version)
+        _raise_release_store_error(exc)
+    if artifact_ref is None:
+        raise RuntimeError("release artifact_ref missing after validation")
+    return await run_manager.start_run_from_artifact(skill_id, request, artifact_ref=artifact_ref)
 
 
 @router.post("/{skill_id}/graph/serialize", response_model=SerializeGraphRes)
@@ -975,6 +1009,60 @@ def _product_artifact_store() -> LocalProductArtifactStore:
         else config.WORKSPACES_DIR / "default"
     )
     return LocalProductArtifactStore(root=storage_root)
+
+
+def _release_run_artifact_ref(release: dict[str, Any], release_version: str) -> dict[str, Any]:
+    artifact_ref = release.get("artifact_ref")
+    if not isinstance(artifact_ref, dict):
+        raise StudioAdapterError(
+            "release.invalid_manifest",
+            {"release_version": release_version, "field": "artifact_ref"},
+        )
+    content_hash = artifact_ref.get("content_hash")
+    if not isinstance(content_hash, str):
+        raise StudioAdapterError(
+            "release.invalid_manifest",
+            {"release_version": release_version, "field": "artifact_ref.content_hash"},
+        )
+    run_ref = dict(artifact_ref)
+    run_ref["store"] = "product"
+    run_ref["version"] = release_version
+    return run_ref
+
+
+def _raise_release_artifact_error(
+    exc: StudioAdapterError,
+    artifact_ref: dict[str, Any] | None,
+    release_version: str,
+) -> NoReturn:
+    details = dict(exc.error_payload)
+    details.pop("hash", None)
+    if artifact_ref is not None:
+        details.update(
+            {
+                "artifact_id": artifact_ref.get("artifact_id"),
+                "content_hash": artifact_ref.get("content_hash"),
+                "store": artifact_ref.get("store"),
+                "version": release_version,
+                "release_version": release_version,
+            }
+        )
+    details.setdefault(
+        "detail",
+        "Product artifact bytes are missing"
+        if exc.error_code == "artifact.not_found"
+        else f"Product artifact error: {exc.error_code}",
+    )
+    http_status = 404 if exc.error_code == "artifact.not_found" else 422
+    raise_error_response(
+        error_response(
+            error_code=exc.error_code,
+            http_status=http_status,
+            message=str(details["detail"]),
+            details=details,
+            retry_strategy="not_retryable",
+        )
+    )
 
 
 def _raise_release_store_error(exc: StudioAdapterError) -> NoReturn:

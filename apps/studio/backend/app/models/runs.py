@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from graph_agent import PathDiff, PhaseRecord
 from graph_agent.core.event_contracts import EventEnvelope
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class TokensMetrics(BaseModel):
@@ -59,6 +59,9 @@ class RunMetadata(BaseModel):
     metrics: TokensMetrics | None = None
     input_summary: str | None = None
     git_status: Literal["committed", "locked", "failed"] | None = None
+    artifact_ref: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
+    source_map_ref: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    execution_fingerprint: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class RunListResponse(BaseModel):
@@ -116,3 +119,38 @@ class ResumeReq(BaseModel):
     context_overrides: dict[str, Any] | None = None
     human_input: str | None = None
     human_response: dict[str, Any] | None = None
+
+
+class ResumeValidityReq(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    checkpoint_id: str | None = None
+    checkpoint_ns: str | None = None
+    resume_from_node_id: str | None = None
+    resume_to_node_id: str | None = None
+
+
+class ResumeValidityResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str
+    resume_allowed: bool
+    reason: Literal[
+        "ok",
+        "dirty_upstream",
+        "checkpoint.not_found",
+        "checkpoint.invalid",
+        "state.not_found",
+        "artifact.invalid_ref",
+        "artifact.identity_mismatch",
+        "compile_failed",
+    ]
+    checkpoint_id: str | None = None
+    checkpoint_ns: str | None = None
+    resume_from_node_id: str | None = None
+    resume_to_node_id: str | None = None
+    dirty_fields: list[Literal["content_hash", "execution_fingerprint"]] = Field(default_factory=list)
+    snapshot_content_hash: str | None = None
+    current_content_hash: str | None = None
+    snapshot_execution_fingerprint: str | None = None
+    current_execution_fingerprint: str | None = None

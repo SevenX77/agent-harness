@@ -14,8 +14,9 @@ import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
-import type { SkillDetail } from "@/api/types"
-import type { SkillGraphNodeData, SubagentRef } from "@/components/GraphCanvas"
+import type { ResumeValidityResponse, SkillDetail } from "@/api/types"
+import type { SkillGraphNodeData, SkillNodeStatus, SubagentRef } from "@/components/GraphCanvas"
+import type { ResumeRunOptions } from "@/api/client"
 import { legacySubgraphTargetSkill } from "@/components/studio/subgraph-path"
 import { sha256Hex } from "@/lib/hash"
 import { runPersistedRoleTestJob } from "../settings/LlmRolesTab"
@@ -110,19 +111,34 @@ interface PropertiesPanelProps {
   skillId?: string | null
   skillDetail?: SkillDetail
   selectedNode: { id: string; data: SkillGraphNodeData } | null
+  runId?: string | null
+  selectedNodeStatus?: SkillNodeStatus | null
+  resumeValidity?: ResumeValidityResponse | null
+  resumeValidityLoading?: boolean
+  resumeValidityError?: string | null
+  resumeLoading?: boolean
   onFileOpen?: (fileOrPath: FileMeta | string) => void
   onPhaseFileSave?: (payload: { path: string; content: string; expectedHash: string }) => Promise<void> | void
+  onResumeNode?: (options: ResumeRunOptions) => Promise<void> | void
 }
 
 export function PropertiesPanel({
   skillId = null,
   skillDetail,
   selectedNode,
+  runId = null,
+  selectedNodeStatus = null,
+  resumeValidity = null,
+  resumeValidityLoading = false,
+  resumeValidityError = null,
+  resumeLoading = false,
   onFileOpen,
   onPhaseFileSave,
+  onResumeNode,
 }: PropertiesPanelProps) {
 
   const modeLabel = selectedNode ? phaseKindLabel(selectedNode.data) : null
+  const effectiveNodeStatus = selectedNodeStatus ?? selectedNode?.data.status ?? null
   const kind: PhaseFrontmatterKind = phaseFrontmatterKind(modeLabel ?? "LOGIC")
   const filePath = selectedNode?.data.filePath ?? (selectedNode ? `phases/${selectedNode.id}/${phaseKindFile(selectedNode.data)}` : null)
   const fileContent = filePath ? skillDetail?.files?.[filePath] : undefined
@@ -232,6 +248,16 @@ export function PropertiesPanel({
               <span className="truncate text-xs font-medium text-foreground">{selectedNode.data.label}</span>
               {modeLabel ? <Badge variant="secondary">{modeLabel}</Badge> : null}
             </div>
+            <NodeResumeDebugBar
+              runId={runId}
+              nodeId={selectedNode.id}
+              nodeStatus={effectiveNodeStatus}
+              resumeValidity={resumeValidity}
+              loading={resumeValidityLoading}
+              error={resumeValidityError}
+              resumeLoading={resumeLoading}
+              onResumeNode={onResumeNode}
+            />
             {phaseFormState.ok && activeDraft ? (
               <PhaseFrontmatterForm
                 value={activeDraft}
@@ -281,6 +307,82 @@ export function PropertiesPanel({
         )}
       </ScrollArea>
     </div>
+  )
+}
+
+function NodeResumeDebugBar({
+  runId,
+  nodeId,
+  nodeStatus,
+  resumeValidity,
+  loading,
+  error,
+  resumeLoading,
+  onResumeNode,
+}: {
+  runId: string | null
+  nodeId: string
+  nodeStatus: SkillNodeStatus | null
+  resumeValidity: ResumeValidityResponse | null
+  loading: boolean
+  error: string | null
+  resumeLoading: boolean
+  onResumeNode?: (options: ResumeRunOptions) => Promise<void> | void
+}) {
+  if (!runId || nodeStatus !== "error") {
+    return null
+  }
+  const allowed = Boolean(resumeValidity?.resume_allowed)
+  const reason = loading
+    ? "checking"
+    : error
+      ? "checkpoint.invalid"
+      : resumeValidity?.reason ?? "checkpoint.not_found"
+  const dirtyFields = resumeValidity?.dirty_fields ?? []
+  const disabled = !allowed || loading || resumeLoading || !onResumeNode
+  const buttonLabel = allowed ? (resumeLoading ? "Resuming" : "Resume node") : "Resume disabled"
+
+  const handleResume = () => {
+    if (!allowed || !resumeValidity || !onResumeNode) {
+      return
+    }
+    const options: ResumeRunOptions = {
+      checkpointId: resumeValidity.checkpoint_id ?? undefined,
+      checkpointNs: resumeValidity.checkpoint_ns ?? undefined,
+      resumeFromNodeId: resumeValidity.resume_from_node_id ?? nodeId,
+      resumeToNodeId: resumeValidity.resume_to_node_id ?? undefined,
+    }
+    void onResumeNode(options)
+  }
+
+  return (
+    <section className="rounded-md border border-border bg-card px-3 py-2" aria-label="Checkpoint validity">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            Checkpoint validity
+          </div>
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-foreground">
+            <Badge variant={allowed ? "secondary" : "destructive"}>{reason}</Badge>
+            {dirtyFields.map((field) => (
+              <Badge key={field} variant="outline">{field}</Badge>
+            ))}
+          </div>
+          {error ? <div className="mt-1 text-xs text-muted-foreground">{error}</div> : null}
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          disabled={disabled}
+          onClick={handleResume}
+        >
+          {loading ? (
+            <Loader2 className="size-3 animate-spin" data-icon="inline-start" />
+          ) : null}
+          {buttonLabel}
+        </Button>
+      </div>
+    </section>
   )
 }
 

@@ -27,6 +27,23 @@ interface AutoGoldenDeps {
   workspaceRoot?: string | null
 }
 
+function assertCopilotJudgeContextForRun(
+  skillId: string,
+  runResultsRef: string,
+  judge: CopilotJudgeResponse,
+): void {
+  if (judge.diff_summary.run_results_ref !== runResultsRef) {
+    throw new Error('Copilot Judge run_results_ref mismatch')
+  }
+  const skillPrefix = `${skillId}/`
+  if (
+    !judge.compare_result_ref.startsWith(skillPrefix)
+    || !judge.judge_context_ref.startsWith(skillPrefix)
+  ) {
+    throw new Error('Copilot Judge refs must belong to the active skill')
+  }
+}
+
 /**
  * F7 "无 golden 节点自动写 golden(有的不动)": with a run-level golden model,
  * this means — if the skill has no golden baseline yet, promote this run as the
@@ -57,12 +74,14 @@ export async function autoWriteGoldenIfAbsent(
 
   const baselineRef = baseline?.baseline_ref
   if (deps.runResultsRef && baselineRef) {
+    const judgeResult = await judge(skillId, {
+      runResultsRef: deps.runResultsRef,
+      baselineRef,
+    })
+    assertCopilotJudgeContextForRun(skillId, deps.runResultsRef, judgeResult)
     return {
       written,
-      judge: await judge(skillId, {
-        runResultsRef: deps.runResultsRef,
-        baselineRef,
-      }),
+      judge: judgeResult,
     }
   }
   return { written }

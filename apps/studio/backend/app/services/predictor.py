@@ -83,12 +83,7 @@ class PredictorService:
         try:
             result = adapter.predict_artifact(
                 {
-                    "artifact_ref": {
-                        "artifact_id": art_ref["artifact_id"],
-                        "content_hash": art_ref["content_hash"],
-                        "store": art_ref["store"],
-                        "manifest_ref": art_ref["manifest_ref"],
-                    },
+                    "artifact_ref": _public_artifact_ref(art_ref),
                     "mock_llm": mock_param,
                     "current_hashes": current_hashes,
                     "inputs": input_data or {},
@@ -110,7 +105,14 @@ class PredictorService:
             )
         if isinstance(result, dict):
             result = RunResult.model_validate(result)
-        self._persist_predict_result(skill_dir, result.run_id, result, content_hash=art_ref["content_hash"])
+        result = result.model_copy(update=_result_artifact_fields(art_ref))
+        self._persist_predict_result(
+            skill_dir,
+            result.run_id,
+            result,
+            content_hash=art_ref["content_hash"],
+            artifact_ref=art_ref,
+        )
         return cast(RunResult, result)
 
     def export_diagnostics(self, result: RunResult) -> PredictDiagnosticExport:
@@ -118,13 +120,19 @@ class PredictorService:
         return export_predict_diagnostics(result)
 
     def _persist_predict_result(
-        self, skill_dir: Path, run_id: str, result: RunResult, *, content_hash: str
+        self,
+        skill_dir: Path,
+        run_id: str,
+        result: RunResult,
+        *,
+        content_hash: str,
+        artifact_ref: dict[str, Any],
     ) -> None:
         workspace_dir = workspace_dir_for(skill_dir)
         from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
 
         store = LocalRunArtifactStore(root=workspace_dir)
-        store.begin_run(run_id, metadata={"artifact_id": result.skill_id, "source": "predict"})
+        store.begin_run(run_id, metadata=_artifact_store_metadata("predict", artifact_ref))
         store.put_batch(run_id, {"result.json": result.model_dump_json().encode("utf-8")})
         store.seal_run(run_id)
 
@@ -159,6 +167,42 @@ def _fallback_trace_from_skill(skill_dir: Path, raw_result: Any) -> list[dict[st
 
 
 predictor_service = PredictorService()
+
+
+_ARTIFACT_IDENTITY_KEYS = (
+    "artifact_id",
+    "content_hash",
+    "store",
+    "version",
+    "manifest_ref",
+    "source_map_ref",
+    "execution_fingerprint",
+)
+
+
+def _public_artifact_ref(artifact_ref: dict[str, Any]) -> dict[str, Any]:
+    return {key: artifact_ref[key] for key in _ARTIFACT_IDENTITY_KEYS if key in artifact_ref}
+
+
+def _result_artifact_fields(artifact_ref: dict[str, Any]) -> dict[str, Any]:
+    public = _public_artifact_ref(artifact_ref)
+    fields: dict[str, Any] = {"artifact_ref": public}
+    source_map_ref = public.get("source_map_ref")
+    if isinstance(source_map_ref, str):
+        fields["source_map_ref"] = source_map_ref
+    execution_fingerprint = public.get("execution_fingerprint")
+    if isinstance(execution_fingerprint, str):
+        fields["execution_fingerprint"] = execution_fingerprint
+    return fields
+
+
+def _artifact_store_metadata(source: str, artifact_ref: dict[str, Any]) -> dict[str, Any]:
+    metadata: dict[str, Any] = {"source": source}
+    public = _public_artifact_ref(artifact_ref)
+    metadata["artifact_ref"] = public
+    for key, value in public.items():
+        metadata[key] = value
+    return metadata
 
 __all__ = [
     "MAX_PHASE_REVISITS",

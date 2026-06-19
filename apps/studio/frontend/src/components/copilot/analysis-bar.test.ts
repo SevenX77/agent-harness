@@ -92,4 +92,29 @@ describe('autoWriteGoldenIfAbsent (F7)', () => {
       },
     })
   })
+
+  it('rejects Copilot Judge context for a different run before it reaches chat', async () => {
+    const list = vi.fn().mockResolvedValue([baseline('run-9')])
+    const save = vi.fn()
+    const judge = vi.fn().mockResolvedValue({
+      compare_result_ref: 'skill-1/golden/run-9/compare/other-run/compare_result.json',
+      judge_context_ref: 'skill-1/runs/other-run/copilot_judge/run-9/judge_context.json',
+      baseline_ref: '.workspace/golden/run-9/baseline.json',
+      diff_summary: {
+        baseline_id: 'run-9',
+        run_results_ref: 'skill-1/runs/other-run/result.json',
+        total_score: 100,
+        node_group_count: 1,
+        failed_node_count: 0,
+      },
+    })
+
+    await expect(autoWriteGoldenIfAbsent('skill-1', 'run-9', {
+      list,
+      save,
+      judge,
+      runResultsRef: 'skill-1/runs/run-9/result.json',
+    })).rejects.toThrow('Copilot Judge run_results_ref mismatch')
+    expect(save).not.toHaveBeenCalled()
+  })
 })

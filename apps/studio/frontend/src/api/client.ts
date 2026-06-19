@@ -16,6 +16,7 @@ import type {
   ReleaseManifest,
   RunDetail,
   RunMetadata,
+  ResumeValidityResponse,
   SerializeGraphRes,
   SkillDetail,
   SyncSkillReq,
@@ -189,6 +190,9 @@ export interface PredictRunResponse {
   run_id?: string
   status?: RunMetadata['status']
   metadata?: RunMetadata
+  artifact_ref?: RunMetadata['artifact_ref']
+  source_map_ref?: string | null
+  execution_fingerprint?: string | null
   input_data?: JsonObject | null
   final_context?: JsonObject | null
   output?: JsonObject | null
@@ -313,17 +317,74 @@ export async function prepareCopilotJudgeContext(
  * Optional context_overrides / human_input feed an intervened resume; omitted
  * for a plain continue.
  */
+export interface ResumeHumanResponseInput {
+  content: string
+  toolCallId?: string | null
+}
+
+export interface ResumeRunOptions {
+  checkpointId?: string
+  checkpointNs?: string
+  resumeFromNodeId?: string
+  resumeToNodeId?: string
+  contextOverrides?: JsonObject
+  humanInput?: string
+  humanResponse?: ResumeHumanResponseInput
+}
+
+export interface ResumeValidityOptions {
+  checkpointId?: string
+  checkpointNs?: string
+  resumeFromNodeId?: string
+  resumeToNodeId?: string
+}
+
+function resumeHumanResponsePayload(response: ResumeHumanResponseInput | undefined): JsonObject | null {
+  if (!response) return null
+  const payload: JsonObject = { content: response.content }
+  if (response.toolCallId !== undefined) {
+    payload.tool_call_id = response.toolCallId
+  }
+  return payload
+}
+
 export async function resumeRun(
   skillId: string,
   runId: string,
-  options: { contextOverrides?: JsonObject; humanInput?: string } = {},
+  options: ResumeRunOptions = {},
 ): Promise<RunMetadata> {
+  const payload: JsonObject = {
+    context_overrides: options.contextOverrides ?? null,
+    human_input: options.humanInput ?? null,
+  }
+  if (options.checkpointId !== undefined) payload.checkpoint_id = options.checkpointId
+  if (options.checkpointNs !== undefined) payload.checkpoint_ns = options.checkpointNs
+  if (options.resumeFromNodeId !== undefined) payload.resume_from_node_id = options.resumeFromNodeId
+  if (options.resumeToNodeId !== undefined) payload.resume_to_node_id = options.resumeToNodeId
+  const humanResponse = resumeHumanResponsePayload(options.humanResponse)
+  if (humanResponse !== null) payload.human_response = humanResponse
+
   const response = await api.post<RunMetadata>(
     `/skills/${skillId}/runs/${encodeURIComponent(runId)}/resume`,
-    {
-      context_overrides: options.contextOverrides ?? null,
-      human_input: options.humanInput ?? null,
-    },
+    payload,
+  )
+  return response.data
+}
+
+export async function getResumeValidity(
+  skillId: string,
+  runId: string,
+  options: ResumeValidityOptions = {},
+): Promise<ResumeValidityResponse> {
+  const payload: JsonObject = {}
+  if (options.checkpointId !== undefined) payload.checkpoint_id = options.checkpointId
+  if (options.checkpointNs !== undefined) payload.checkpoint_ns = options.checkpointNs
+  if (options.resumeFromNodeId !== undefined) payload.resume_from_node_id = options.resumeFromNodeId
+  if (options.resumeToNodeId !== undefined) payload.resume_to_node_id = options.resumeToNodeId
+
+  const response = await api.post<ResumeValidityResponse>(
+    `/skills/${skillId}/runs/${encodeURIComponent(runId)}/resume/validity`,
+    payload,
   )
   return response.data
 }

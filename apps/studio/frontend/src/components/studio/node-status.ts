@@ -8,6 +8,13 @@ import type { SkillNodeStatus } from "@/components/GraphCanvas"
 // Neither contains the substring "error", so the older `.includes("error")`
 // check left their node green. They are matched explicitly here.
 const FAILURE_EVENT_TYPES: ReadonlySet<string> = new Set(["validation_fail", "retry_exhausted"])
+const PAUSED_EVENT_TYPES: ReadonlySet<string> = new Set([
+  "hitl",
+  "human_input_required",
+  "interrupted",
+  "pause",
+  "paused",
+])
 
 /**
  * Decide whether a single trace event should mark its phase as failed (red).
@@ -24,6 +31,13 @@ function isFailureEvent(type: string, status: string | null | undefined): boolea
   return false
 }
 
+function isPausedEvent(type: string, status: string | null | undefined): boolean {
+  if (PAUSED_EVENT_TYPES.has(type)) return true
+  if (type.includes("hitl") || type.includes("interrupt")) return true
+  if (status === "paused" || status === "waiting_for_human") return true
+  return false
+}
+
 type TraceEventInput = CallbackEvent | EventEnvelope
 
 function callbackPayload(event: TraceEventInput): CallbackEvent {
@@ -34,6 +48,31 @@ function callbackPayload(event: TraceEventInput): CallbackEvent {
   return event as CallbackEvent
 }
 
+function eventRunId(traceEvent: TraceEventInput, payload: CallbackEvent): string | null {
+  const maybeEnvelope = traceEvent as EventEnvelope
+  if (maybeEnvelope.schema_version === "studio.event.v1" && typeof maybeEnvelope.run_id === "string") {
+    return maybeEnvelope.run_id
+  }
+  return typeof payload.run_id === "string" ? payload.run_id : null
+}
+
+function numberField(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+function eventAttempt(event: CallbackEvent): number | null {
+  return numberField(event.attempt)
+    ?? numberField(event.attempt_number)
+    ?? numberField(event.retry_count)
+    ?? numberField(event.metadata?.attempt)
+    ?? numberField(event.metadata?.attempt_number)
+}
+
 /**
  * Derive the per-node status map from an ordered trace event stream.
  *
@@ -42,16 +81,28 @@ function callbackPayload(event: TraceEventInput): CallbackEvent {
  * validation_pass / phase_end) end up green, while a phase whose final state is
  * a failure (validation_fail with no recovery, or retry_exhausted) ends up red.
  */
-export function deriveNodeStatuses(events: readonly TraceEventInput[] | null | undefined): Record<string, SkillNodeStatus> {
+export function deriveNodeStatuses(
+  events: readonly TraceEventInput[] | null | undefined,
+  runId?: string | null,
+): Record<string, SkillNodeStatus> {
   const statuses: Record<string, SkillNodeStatus> = {}
+  const attempts: Record<string, number> = {}
   if (!events) return statuses
   for (const traceEvent of events) {
     const event = callbackPayload(traceEvent)
+    const eventRun = eventRunId(traceEvent, event)
+    if (runId && eventRun && eventRun !== runId) continue
     const phaseName = event.phase_name || event.current_phase
     if (!phaseName) continue
+    const attempt = eventAttempt(event)
+    const latestAttempt = attempts[phaseName]
+    if (attempt !== null && latestAttempt !== undefined && attempt < latestAttempt) continue
+    if (attempt !== null) attempts[phaseName] = attempt
     const type = event.event_type || ""
     if (isFailureEvent(type, event.status)) {
       statuses[phaseName] = "error"
+    } else if (isPausedEvent(type, event.status)) {
+      statuses[phaseName] = "paused"
     } else if (type === "phase_start") {
       statuses[phaseName] = "running"
     } else if (type === "phase_end") {

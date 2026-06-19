@@ -104,8 +104,15 @@ export function edgeContextFromEvents(
     run_id: match.run_id,
     execution_id: match.execution_id,
     attempt: match.attempt,
+    checkpoint_id: match.checkpoint_id,
+    checkpoint_ns: match.checkpoint_ns,
     before: match.before,
     after: match.after,
     diff: match.diff,
+    tamper_diff: match.tamper_diff,
+    resume_tamper_diff: match.resume_tamper_diff,
+    tamper_audit: match.tamper_audit,
+    resume_audit: match.resume_audit,
+    resume_validity: match.resume_validity,
   }
 }

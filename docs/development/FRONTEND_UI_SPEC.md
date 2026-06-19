@@ -168,6 +168,7 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - 后台 Playwright smoke test 如果需要临时启动 Vite/backend，必须记录自己启动的 PID 并只清理这些 PID；不得用宽泛的 `pgrep`/`kill` 模式清理 `cargo tauri dev`、Studio Vite 或 Tauri dynamic sidecar，否则会把仍在使用的桌面窗口后端端口杀掉，造成 Settings 等页面持续请求 stale sidecar port。
 - 必须覆盖被改动的主成功路径和明显的取消/清空/错误/空状态。对于搜索、选择、复制、显示/隐藏、展开/折叠等交互，要逐一点击验证。
 - 手动验证应包含窄宽度视口。至少检查页面级、侧栏级、卡片级没有横向溢出；选中 ring、hover/active、badge overflow 和按钮点击目标不能被裁剪或被其它元素拦截。
+- 全局 Sonner toast 不能占用固定底部主操作区；Studio 有底部居中的 action bar 时，通知默认放在顶部右侧，避免 success/error toast 拦截 Compile/Predict/Run 等连续点击路径。
 - 如果变更涉及 Tauri 文件系统能力（目录选择、Reveal、终端、外部编辑器、原生菜单等），必须在 Tauri 环境或等价的 Tauri bridge 路径下验证，不能只用普通浏览器 fallback 得出结论；只有这类 Playwright 无法覆盖的原生 shell 行为才允许使用桌面控制工具，并且最终说明必须写清楚为什么不能用后台 Playwright 覆盖。
 
 ## 3. GraphCanvas 画布样式覆写

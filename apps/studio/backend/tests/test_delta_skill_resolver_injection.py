@@ -119,11 +119,10 @@ def test_delta4_run_worker_passes_skill_resolver(tmp_path: Path, monkeypatch: An
 
     run_manager_module._run_worker_main(
         "demo.skill",
-        str(ephemeral_dir),
         str(tmp_path / "run"),
         {},
         queue,
-        art_ref=art_ref,
+        art_ref,
     )
 
     assert calls
@@ -176,11 +175,10 @@ def test_run_worker_reports_failed_when_result_unsuccessful(
 
     run_manager_module._run_worker_main(
         "demo.skill",
-        str(ephemeral_dir),
         str(run_dir),
         {},
         queue,
-        art_ref=art_ref,
+        art_ref,
     )
 
     status_events = [e for e in queue.items if e.get("type") == "status"]
@@ -240,11 +238,10 @@ def test_run_worker_passes_workspace_root_not_runs_dir(
 
     run_manager_module._run_worker_main(
         "demo.skill",
-        str(ephemeral_dir),
         str(run_dir),
         {},
         queue,
-        art_ref=art_ref,
+        art_ref,
     )
 
     assert calls

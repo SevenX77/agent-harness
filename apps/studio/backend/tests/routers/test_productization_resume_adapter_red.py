@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import zipfile
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -115,6 +117,189 @@ def test_resume_endpoint_forwards_checkpoint_selector_and_structured_human_respo
             "human_response": {"content": "approved", "tool_call_id": "tool-1"},
         }
     ]
+
+
+def test_resume_validity_reports_dirty_upstream_without_source_paths(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    import app.core.adapters.transport_factory as transport_factory
+
+    calls: list[dict[str, Any]] = []
+
+    class FakeAdapter:
+        def resume_validity(self, payload: dict[str, Any]) -> dict[str, Any]:
+            calls.append(payload)
+            return {
+                "run_id": payload["run_id"],
+                "resume_allowed": False,
+                "reason": "dirty_upstream",
+                "checkpoint_id": payload["checkpoint_id"],
+                "checkpoint_ns": payload["checkpoint_ns"],
+                "resume_from_node_id": payload["resume_from_node_id"],
+                "resume_to_node_id": payload["resume_to_node_id"],
+                "dirty_fields": ["execution_fingerprint"],
+                "snapshot_content_hash": f"sha256:{'1' * 64}",
+                "current_content_hash": f"sha256:{'2' * 64}",
+                "snapshot_execution_fingerprint": f"sha256:{'3' * 64}",
+                "current_execution_fingerprint": f"sha256:{'4' * 64}",
+            }
+
+    monkeypatch.setattr(transport_factory, "build_engine_adapter", lambda: FakeAdapter())
+
+    response = client.post(
+        "/api/skills/text-segmentation/runs/run-123/resume/validity",
+        json={
+            "checkpoint_id": "checkpoint-review",
+            "checkpoint_ns": "agent:review",
+            "resume_from_node_id": "review",
+            "resume_to_node_id": "final",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body == {
+        "run_id": "run-123",
+        "resume_allowed": False,
+        "reason": "dirty_upstream",
+        "checkpoint_id": "checkpoint-review",
+        "checkpoint_ns": "agent:review",
+        "resume_from_node_id": "review",
+        "resume_to_node_id": "final",
+        "dirty_fields": ["execution_fingerprint"],
+        "snapshot_content_hash": f"sha256:{'1' * 64}",
+        "current_content_hash": f"sha256:{'2' * 64}",
+        "snapshot_execution_fingerprint": f"sha256:{'3' * 64}",
+        "current_execution_fingerprint": f"sha256:{'4' * 64}",
+    }
+    assert calls == [
+        {
+            "skill_id": "text-segmentation",
+            "run_id": "run-123",
+            "checkpoint_id": "checkpoint-review",
+            "checkpoint_ns": "agent:review",
+            "resume_from_node_id": "review",
+            "resume_to_node_id": "final",
+        }
+    ]
+    serialized = response.text
+    assert "source_path" not in serialized
+    assert "skill_path" not in serialized
+    assert "/Users/" not in serialized
+
+
+def test_resume_validity_maps_non_state_adapter_error_to_structured_422(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    import app.core.adapters.transport_factory as transport_factory
+    from app.core.adapters.http_transport import StudioAdapterError
+
+    class FakeAdapter:
+        def resume_validity(self, _payload: dict[str, Any]) -> dict[str, Any]:
+            raise StudioAdapterError(
+                "transport.serialization_failed",
+                {"detail": "resume_validity response data is not a dict", "run_id": "run-123"},
+            )
+
+    monkeypatch.setattr(transport_factory, "build_engine_adapter", lambda: FakeAdapter())
+
+    response = client.post(
+        "/api/skills/text-segmentation/runs/run-123/resume/validity",
+        json={
+            "checkpoint_id": "checkpoint-review",
+            "checkpoint_ns": "agent:review",
+            "resume_from_node_id": "review",
+            "resume_to_node_id": "final",
+        },
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error_code"] == "RESUME_VALIDITY_FAILED"
+    assert body["http_status"] == 422
+    assert body["retry_strategy"] == "not_retryable"
+    assert "resume_validity response data is not a dict" in body["message"]
+    assert body["details"] == {
+        "detail": "resume_validity response data is not a dict",
+        "run_id": "run-123",
+    }
+
+
+def test_resume_endpoint_appends_resume_audit_event_to_active_run_stream(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    import app.core.adapters.transport_factory as transport_factory
+    from app.models.runs import RunMetadata
+    from app.services.run_manager import RunRecord, run_manager
+
+    run_id = "run-resume-audit"
+    subscriber: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+    class FakeProcess:
+        exitcode = 0
+
+        def is_alive(self) -> bool:
+            return False
+
+    record = RunRecord(
+        metadata=RunMetadata(
+            run_id=run_id,
+            status="running",
+            started_at=datetime(2026, 6, 18, tzinfo=UTC),
+            input_summary="topic=old",
+        ),
+        skill_id="text-segmentation",
+        run_dir=Path("/tmp/run-resume-audit"),
+        process=FakeProcess(),
+        process_queue=SimpleNamespace(),
+    )
+    record.subscribers.append(subscriber)
+    run_manager._runs[run_id] = record
+
+    class FakeAdapter:
+        def resume(self, payload: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "run_id": payload["run_id"],
+                "status": "success",
+                "started_at": "2026-06-18T00:00:00Z",
+                "input_summary": "resumed",
+                "metrics": {},
+            }
+
+    monkeypatch.setattr(transport_factory, "build_engine_adapter", lambda: FakeAdapter())
+
+    response = client.post(
+        f"/api/skills/text-segmentation/runs/{run_id}/resume",
+        json={
+            "checkpoint_id": "checkpoint-review",
+            "checkpoint_ns": "agent:review",
+            "resume_from_node_id": "review",
+            "resume_to_node_id": "final",
+            "context_overrides": {"topic": "tampered", "count": 2},
+            "human_response": {"content": "approved", "tool_call_id": "tool-1"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert record.metadata.status == "success"
+    assert record.events[-1].event_type == "resume_applied"
+    assert record.events[-1].payload == {
+        "schema_version": "studio.resume.audit.v1",
+        "event_type": "resume_applied",
+        "run_id": run_id,
+        "status": "success",
+        "checkpoint_id": "checkpoint-review",
+        "checkpoint_ns": "agent:review",
+        "resume_from_node_id": "review",
+        "resume_to_node_id": "final",
+        "context_override_keys": ["count", "topic"],
+        "human_response_tool_call_id": "tool-1",
+    }
+    streamed = subscriber.get_nowait()
+    assert streamed == record.events[-1].model_dump(mode="json")
 
 
 def test_resume_endpoint_maps_state_release_failed_to_retryable_conflict(

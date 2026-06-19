@@ -1,6 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server'
-import type { ReactNode } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ACTION_MENU_CLASSNAME,
   buildSkillCreatePayload,
@@ -8,12 +7,12 @@ import {
   defaultSkillsDirectory,
   formatCreateSkillError,
   formatImportSkillError,
+  RecentSkeleton,
   registeredSkillIdForImport,
-  REMOVE_WORKSPACE_ACTION_LABEL,
   REVEAL_ACTION_LABEL,
-  requestSkillDeleteConfirmation,
   WelcomePage,
 } from './WelcomePage'
+import type { RecentWorkspaceEntry } from '../../hooks/useRecentSkills'
 import type { SkillSummary } from '../../api/types'
 
 const toastMock = vi.hoisted(() => Object.assign(vi.fn(), {
@@ -22,6 +21,13 @@ const toastMock = vi.hoisted(() => Object.assign(vi.fn(), {
   success: vi.fn(),
 }))
 
+const recentMocks = vi.hoisted(() => ({
+  recentWorkspaces: [] as RecentWorkspaceEntry[],
+  isHydrating: false,
+}))
+
+// A registry skill carrying derived fields. After the N1 MRU rewrite Home no
+// longer projects these onto cards, so they must NOT surface in the render.
 const mismatchSkill: SkillSummary = {
   id: 'demo-skill',
   name: 'Demo skill',
@@ -37,6 +43,13 @@ const mismatchSkill: SkillSummary = {
   },
 }
 
+const recentEntry: RecentWorkspaceEntry = {
+  absolutePath: '/tmp/demo-skill',
+  displayName: 'Demo skill',
+  identity: 'local:/tmp/demo-skill',
+  lastOpenedAt: '2026-06-18T10:00:00.000Z',
+}
+
 vi.mock('../../hooks/useSkills', () => ({
   useSkills: () => ({
     skills: [mismatchSkill],
@@ -47,9 +60,10 @@ vi.mock('../../hooks/useSkills', () => ({
 
 vi.mock('../../hooks/useRecentSkills', () => ({
   useRecentSkills: () => ({
-    recentWorkspaces: [],
+    recentWorkspaces: recentMocks.recentWorkspaces,
     rememberWorkspace: vi.fn(),
     removeWorkspace: vi.fn(),
+    isHydrating: recentMocks.isHydrating,
   }),
 }))
 
@@ -74,27 +88,61 @@ vi.mock('../../config/runtime', () => ({
 vi.mock('../../lib/tauri', () => ({
   revealInFileManager: vi.fn(),
   selectSkillDirectory: vi.fn(),
+  addRecentWorkspace: vi.fn(),
+  ensureWorkspaceSupportDirs: vi.fn(),
 }))
 
-vi.mock('../ui/tooltip', () => ({
-  Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
-  TooltipContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  TooltipTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
-}))
+afterEach(() => {
+  recentMocks.recentWorkspaces = []
+  recentMocks.isHydrating = false
+})
+
+function renderHome() {
+  return renderToStaticMarkup(<WelcomePage onSelectSkill={vi.fn()} />)
+}
 
 describe('WelcomePage', () => {
-  it('re-attaches the gateway-truth Golden and Config drift badges on workspace cards', () => {
-    const html = renderToStaticMarkup(<WelcomePage onSelectSkill={vi.fn()} />)
+  it('drops the decorative "Desktop workspace" label and registry wording from the Recent header', () => {
+    const html = renderHome()
 
-    expect(html).toContain('Golden')
-    expect(html).toContain('aria-label="Repo URL mismatch"')
-    expect(html).toContain('Config drift')
-    expect(html).toContain('https://gitea.example.test/bob/demo-skill.git')
-    expect(html).toContain('https://gitea.example.test/alice/demo-skill.git')
+    expect(html).not.toContain('Desktop workspace')
+    expect(html).not.toContain('Recent skills')
+    expect(html).toContain('>Recent<')
+  })
+
+  it('renders Recent cards purely from the MRU store', () => {
+    recentMocks.recentWorkspaces = [recentEntry]
+    const html = renderHome()
+
+    expect(html).toContain('Demo skill')
+    expect(html).toContain('/tmp/demo-skill')
+  })
+
+  it('does not project registry-derived phase / Golden / Config drift fields onto Recent cards', () => {
+    recentMocks.recentWorkspaces = [recentEntry]
+    const html = renderHome()
+
+    expect(html).not.toContain('phases')
+    expect(html).not.toContain('Golden')
+    expect(html).not.toContain('Config drift')
+    expect(html).not.toContain('aria-label="Repo URL mismatch"')
+    expect(html).not.toContain('https://gitea.example.test/bob/demo-skill.git')
+  })
+
+  it('removes the Remove entry from the Recent card action menu (R1)', () => {
+    recentMocks.recentWorkspaces = [recentEntry]
+    const html = renderHome()
+
+    // Radix renders menu content into a portal only once opened, so the closed
+    // SSR markup shows the trigger but no item labels. The destructive Remove
+    // action and its DELETE /api/skills wiring are gone from the source, so
+    // "Remove" must not appear anywhere in the static render.
+    expect(html).toContain('aria-label="More actions for Demo skill"')
+    expect(html).not.toContain('Remove')
   })
 
   it('renders Open folder as the local workspace entry point', () => {
-    const html = renderToStaticMarkup(<WelcomePage onSelectSkill={vi.fn()} />)
+    const html = renderHome()
 
     expect(html).toContain('Open folder')
     expect(html).not.toContain('Import skill')
@@ -102,14 +150,16 @@ describe('WelcomePage', () => {
   })
 
   it('renders compact skill cards with the real folder path subtitle', () => {
-    const html = renderToStaticMarkup(<WelcomePage onSelectSkill={vi.fn()} />)
+    recentMocks.recentWorkspaces = [recentEntry]
+    const html = renderHome()
 
     expect(html).not.toContain('min-h-32')
     expect(html).toContain('/tmp/demo-skill')
   })
 
   it('keeps selectable skill cards on the local shadcn Card default surface', () => {
-    const html = renderToStaticMarkup(<WelcomePage onSelectSkill={vi.fn()} />)
+    recentMocks.recentWorkspaces = [recentEntry]
+    const html = renderHome()
 
     expect(html).toContain('ring-1 ring-foreground/10')
     expect(html).toContain('data-size="sm"')
@@ -119,7 +169,8 @@ describe('WelcomePage', () => {
   })
 
   it('fixes skill card actions while allowing two lines for the folder path', () => {
-    const html = renderToStaticMarkup(<WelcomePage onSelectSkill={vi.fn()} />)
+    recentMocks.recentWorkspaces = [recentEntry]
+    const html = renderHome()
 
     expect(html).toContain('absolute right-2 top-2 z-10')
     expect(html).toContain('min-w-0 flex-1 pr-12')
@@ -128,46 +179,36 @@ describe('WelcomePage', () => {
     expect(html).toContain('hover:ring-primary/70')
   })
 
+  it('shows an IDE-start empty state without "import" wording when the MRU is empty', () => {
+    recentMocks.recentWorkspaces = []
+    const html = renderHome()
+
+    expect(html).toContain('No recent skills')
+    expect(html).toContain('open a folder')
+    expect(html).not.toContain('import')
+    expect(html).not.toContain('Create or import')
+  })
+
+  it('renders a Recent skeleton placeholder during the cold-start hydration window', () => {
+    recentMocks.isHydrating = true
+    const html = renderHome()
+
+    expect(html).toContain('data-recent-skeleton="true"')
+    expect(html).toContain('animate-pulse')
+    expect(html).not.toContain('No recent skills')
+  })
+
+  it('renders the standalone RecentSkeleton from the shared shadcn Skeleton primitive', () => {
+    const html = renderToStaticMarkup(<RecentSkeleton />)
+
+    expect(html).toContain('data-recent-skeleton="true"')
+    expect(html).toContain('animate-pulse')
+    expect(html).toContain('data-slot="skeleton"')
+  })
+
   it('uses a short reveal action label in wider action menus', () => {
     expect(REVEAL_ACTION_LABEL).toBe('Show in folder')
     expect(ACTION_MENU_CLASSNAME).toBe('w-48')
-  })
-
-  it('labels workspace removal actions without implying disk deletion', () => {
-    expect(REMOVE_WORKSPACE_ACTION_LABEL).toBe('Remove')
-  })
-
-  it('uses a shadcn sonner confirmation toast before removing a workspace from Studio', () => {
-    const onConfirm = vi.fn()
-
-    requestSkillDeleteConfirmation(mismatchSkill, onConfirm)
-
-    expect(toastMock).toHaveBeenCalledWith(
-      'Remove Demo skill from Studio?',
-      expect.objectContaining({
-        description: 'This skill will be removed from Studio. Its source folder stays on disk.',
-        duration: Infinity,
-        action: expect.objectContaining({ label: 'Remove' }),
-        cancel: expect.objectContaining({ label: 'Cancel' }),
-        classNames: expect.objectContaining({
-          actionButton: expect.stringContaining('!bg-destructive'),
-        }),
-      }),
-    )
-    expect(onConfirm).not.toHaveBeenCalled()
-  })
-
-  it('wires the sonner remove action to the confirmed workspace removal callback', () => {
-    const onConfirm = vi.fn()
-
-    requestSkillDeleteConfirmation(mismatchSkill, onConfirm)
-    const options = toastMock.mock.calls.at(-1)?.[1] as {
-      action?: { onClick?: () => void }
-    }
-
-    options.action?.onClick?.()
-
-    expect(onConfirm).toHaveBeenCalledTimes(1)
   })
 
   it('builds create payload using the current /skills API contract', () => {
@@ -200,7 +241,7 @@ describe('WelcomePage', () => {
   })
 
   it('renders the concrete default skill parent path', () => {
-    const html = renderToStaticMarkup(<WelcomePage onSelectSkill={vi.fn()} />)
+    const html = renderHome()
 
     expect(html).toContain('Default: /studio/config/Skills')
   })

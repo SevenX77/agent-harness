@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { edgeTamperResumeOptionsFromJson } from './edge-tamper'
+import { edgeTamperResumeOptionsFromJson, validateTamperJson } from './edge-tamper'
 import type { SelectedEdge } from '../WorkspaceContext'
 
 const selectedEdge: SelectedEdge = {
@@ -33,5 +33,33 @@ describe('edgeTamperResumeOptionsFromJson', () => {
     if (!result.ok) {
       expect(result.error).toContain('Invalid JSON')
     }
+  })
+})
+
+describe('validateTamperJson', () => {
+  it('accepts a well-formed JSON object so the writable editor reads valid', () => {
+    expect(validateTamperJson('{"topic":"dogs"}')).toEqual({ ok: true })
+  })
+
+  it('rejects malformed JSON with the same syntax error the resume path uses', () => {
+    expect(validateTamperJson('{"topic":')).toEqual({
+      ok: false,
+      error: 'Invalid JSON: fix the edited context before resuming downstream.',
+    })
+  })
+
+  it('rejects valid JSON that is not a plain object (arrays / primitives)', () => {
+    expect(validateTamperJson('[1,2,3]')).toEqual({
+      ok: false,
+      error: 'Invalid JSON: edge context overrides must be a JSON object.',
+    })
+    expect(validateTamperJson('"just a string"').ok).toBe(false)
+  })
+
+  it('shares the accept/reject contract with the resume payload builder', () => {
+    const valid = '{"topic":"dogs"}'
+    const invalid = '{"topic":'
+    expect(validateTamperJson(valid).ok).toBe(edgeTamperResumeOptionsFromJson(selectedEdge, valid).ok)
+    expect(validateTamperJson(invalid).ok).toBe(edgeTamperResumeOptionsFromJson(selectedEdge, invalid).ok)
   })
 })

@@ -67,6 +67,7 @@ def test_resume_endpoint_delegates_to_configured_engine_adapter_resume(
         "output_tokens": 2,
         "total_tokens": 3,
         "cost_estimate": None,
+        "wall_time_sec": None,
     }
 
 
@@ -397,6 +398,7 @@ def test_resume_endpoint_accepts_real_engine_resume_wall_time_metrics(
         "output_tokens": 0,
         "total_tokens": 0,
         "cost_estimate": None,
+        "wall_time_sec": 0.125,
     }
 
 

@@ -27,6 +27,51 @@ class PublishArtifactRequest(BaseModel):
     atomic_stage: str
 
 
+_PACKAGE_PATH_SAFE = ("/", "\\", "..")
+
+
+def build_publish_package_payload(
+    *,
+    skill_id: str,
+    release_manifest: dict[str, Any],
+) -> dict[str, Any]:
+    """Produce the待写 payload for the Rust ``publish_package_writer``.
+
+    PUBLISH-2 / D12: the publish package is written only by Rust native-fs. This
+    is a pure transform (no disk I/O) that maps a committed release manifest to
+    the request fields the Rust writer expects, plus a safe workspace-relative
+    target path. The frontend forwards this payload to ``publish_package_writer``.
+    """
+    artifact_ref = release_manifest.get("artifact_ref")
+    if not isinstance(artifact_ref, dict):
+        raise ValueError("release manifest artifact_ref must be an object")
+    release_version = release_manifest.get("release_version")
+    if not isinstance(release_version, str) or not release_version:
+        raise ValueError("release manifest release_version must be a non-empty string")
+    content_hash = artifact_ref.get("content_hash") or release_manifest.get("content_hash")
+    manifest_ref = artifact_ref.get("manifest_ref") or release_manifest.get("manifest_ref")
+    if not isinstance(content_hash, str) or not content_hash:
+        raise ValueError("release manifest content_hash must be a non-empty string")
+    if not isinstance(manifest_ref, str) or not manifest_ref:
+        raise ValueError("release manifest manifest_ref must be a non-empty string")
+
+    relative_path = _package_relative_path(skill_id, release_version)
+    return {
+        "release_version": release_version,
+        "content_hash": content_hash,
+        "manifest_ref": manifest_ref,
+        "artifact_ref": artifact_ref,
+        "relative_path": relative_path,
+    }
+
+
+def _package_relative_path(skill_id: str, release_version: str) -> str:
+    for part in (skill_id, release_version):
+        if any(token in part for token in _PACKAGE_PATH_SAFE):
+            raise ValueError(f"unsafe publish package path component: {part!r}")
+    return f".workspace/releases/{skill_id}-{release_version}.package.json"
+
+
 class PublishReleaseConflict(Exception):
     def __init__(self, message: str, details: dict[str, Any] | None = None) -> None:
         super().__init__(message)
@@ -53,6 +98,54 @@ class ProductArtifactPublisher:
                 lock = threading.Lock()
                 _release_locks[key] = lock
             return lock
+
+    def precheck_release(
+        self,
+        *,
+        skill_id: str,
+        release_version: str,
+        artifact_ref: dict[str, Any],
+        idempotency_key: str,
+    ) -> None:
+        """Pre-publish read-only check against the product store ("成品库").
+
+        Rejects a release whose ``release_version`` already exists with a
+        *different* artifact identity (or a mismatched idempotency key) before
+        the publisher stages/writes anything. An identical existing release
+        (same artifact identity + idempotency key) is a benign idempotent pass.
+        Performs no writes.
+        """
+        existing = self._get_release(skill_id, release_version)
+        if existing is None:
+            logger.info(
+                "publish precheck ok: no existing release skill_id=%s release_version=%s",
+                skill_id,
+                release_version,
+            )
+            return
+        same_identity = self._artifact_identity(existing.get("artifact_ref")) == self._artifact_identity(
+            artifact_ref
+        )
+        if same_identity and existing.get("idempotency_key") == idempotency_key:
+            logger.info(
+                "publish precheck ok: idempotent re-publish skill_id=%s release_version=%s",
+                skill_id,
+                release_version,
+            )
+            return
+        logger.warning(
+            "publish precheck conflict skill_id=%s release_version=%s same_identity=%s",
+            skill_id,
+            release_version,
+            same_identity,
+        )
+        raise self._release_conflict(
+            skill_id,
+            release_version,
+            existing=existing,
+            artifact_ref=artifact_ref,
+            idempotency_key=idempotency_key,
+        )
 
     def publish_release(
         self,

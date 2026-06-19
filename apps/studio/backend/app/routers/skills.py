@@ -586,15 +586,11 @@ async def publish_skill(
 ) -> PublishResult:
     skill_dir: Path | None = None
     app_settings = await metadata.read_app_settings()
-    if not app_settings.user_id.strip():
-        response = error_response(
-            error_code="APP_SETTINGS_INCOMPLETE",
-            http_status=400,
-            message="User ID 未配置, 请到 Settings 设置",
-            details={"field": "user_id"},
-            retry_strategy="not_retryable",
-        )
-        raise_error_response(response)
+    # N6/F2 + 设计§4: publish (the local product safety net) must NOT be gated on
+    # Settings completeness. Only the remote registry sync leg needs an author
+    # (user_id); when it is missing, that leg is skipped — the local release
+    # still commits. The UI offers a one-click jump to Settings to reconfigure.
+    has_publish_identity = bool(app_settings.user_id.strip())
 
     try:
         from app.services.publish_pipeline import (
@@ -646,7 +642,17 @@ async def publish_skill(
             atomic_stage="stage_invisible",
         )
 
-        if registry.host.strip() and registry.token.strip():
+        # Registry precheck: reject a version/identity conflict against the local
+        # product store before staging or writing the package. Read-only.
+        await asyncio.to_thread(
+            publisher.precheck_release,
+            skill_id=skill_id,
+            release_version=request.version,
+            artifact_ref=req.artifact_ref,
+            idempotency_key=req.idempotency_key,
+        )
+
+        if has_publish_identity and registry.host.strip() and registry.token.strip():
             from app.services.artifact_registry import sync_product_artifact_release
 
             server_response: dict[str, object] = {}
@@ -720,9 +726,12 @@ async def publish_skill(
         )
         remote_sync = release_manifest.get("remote_sync")
         if not (isinstance(remote_sync, dict) and remote_sync.get("status") == "succeeded"):
+            skip_reason = (
+                "registry_not_configured" if has_publish_identity else "app_settings_incomplete"
+            )
             remote_sync = {
                 "status": "skipped",
-                "reason": "registry_not_configured",
+                "reason": skip_reason,
             }
             await asyncio.to_thread(
                 store.record_remote_sync_state,

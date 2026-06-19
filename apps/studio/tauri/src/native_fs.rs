@@ -1599,6 +1599,39 @@ mod tests {
     }
 
     #[test]
+    fn publish_package_writer_emits_full_publish_package_v1_schema() {
+        let root = temp_root("publish-package-schema");
+        publish_package_writer_impl(
+            root.to_str().unwrap(),
+            ".workspace/releases/text-segmentation-1.0.0.package.json",
+            publish_package_request(),
+        )
+        .expect("write package");
+
+        let package_path = root.join(".workspace/releases/text-segmentation-1.0.0.package.json");
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&package_path).expect("package bytes"))
+                .expect("package is valid json");
+
+        assert_eq!(parsed["schema"], "studio.publish.package.v1");
+        assert_eq!(parsed["release_version"], "1.0.0");
+        assert_eq!(parsed["content_hash"], format!("sha256:{}", "a".repeat(64)));
+        assert_eq!(
+            parsed["manifest_ref"],
+            "product/releases/text-segmentation/1.0.0.json"
+        );
+        // The full artifact_ref object must round-trip into the package, not be
+        // flattened or dropped — downstream release runs read it verbatim.
+        assert_eq!(parsed["artifact_ref"]["artifact_id"], "text-segmentation");
+        assert_eq!(parsed["artifact_ref"]["store"], "product");
+        assert_eq!(
+            parsed["artifact_ref"]["manifest_ref"],
+            "product/manifests/text-segmentation.json"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn publish_package_writer_rejects_parent_traversal() {
         let root = temp_root("publish-package-traversal");
         let error = publish_package_writer_impl(

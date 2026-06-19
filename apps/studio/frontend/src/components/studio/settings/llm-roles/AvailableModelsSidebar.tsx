@@ -8,8 +8,14 @@ import {
   type MouseEvent,
   type PointerEvent,
 } from "react"
-import { Search, X } from "lucide-react"
+import { ChevronDown, Copy, RotateCw, Search, Settings2, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import { Tag } from "@/components/ui/tag"
 import {
   InputGroup,
@@ -19,7 +25,9 @@ import {
 } from "@/components/ui/input-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
-import type { ModelGroup, ProviderUiState } from "@/api/llm"
+import { probeRoute, type ModelGroup, type ProviderUiState } from "@/api/llm"
+import { copyCredentialValue } from "@/components/studio/api-keys/ProviderCard"
+import { IconTooltip } from "./IconTooltip"
 import { ThinkingBadge } from "./RoleBadges"
 import { useLazyRenderCount } from "./useLazyRenderCount"
 
@@ -30,13 +38,17 @@ export interface AvailableModelProvider {
   detail?: string | null
   providerModelId: string
   retryAt?: string | null
+  reasonCode?: string | null
 }
 
 export interface AvailableModelEntry {
   id: string
   label: string
   section: string
+  /** Active (draggable) provider rows: every ui_state except "off". */
   providers: AvailableModelProvider[]
+  /** #35(b): off/disabled routes, surfaced in a collapsible "Deprecated" section. */
+  deprecatedProviders: AvailableModelProvider[]
   thinking: boolean
 }
 
@@ -53,10 +65,16 @@ export function AvailableModelsSidebar({
   modelGroups,
   pinnedModelGroups = [],
   onModelPointerDown,
+  onNavigateToApiKeys,
+  onReprobed,
 }: {
   modelGroups: ModelGroup[]
   pinnedModelGroups?: ModelGroup[]
   onModelPointerDown?: (modelId: string, event: PointerEvent<HTMLButtonElement>) => void
+  /** #35(a): jump to the API Keys tab to fix a missing_config provider route. */
+  onNavigateToApiKeys?: () => void
+  /** #35(b): called after a deprecated route is re-probed so the page can refresh. */
+  onReprobed?: () => void
 }) {
   const [query, setQuery] = useState("")
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null)
@@ -126,6 +144,21 @@ export function AvailableModelsSidebar({
     setQuery("")
     searchInputRef.current?.focus()
   }, [])
+  // #35(b): re-probe a deprecated (off) route to try to recover it, then refresh
+  // so the projection reflects the new route status. Failures are surfaced
+  // (no silent swallow) and never thrown out of the handler.
+  const handleReprobeRoute = useCallback(async (routeId: string) => {
+    try {
+      await probeRoute(routeId, { capabilities: [], force: true })
+      onReprobed?.()
+    } catch (error) {
+      console.warn(
+        "phase=available-models action=reprobe-failed route=%s reason=%s",
+        routeId,
+        error instanceof Error ? error.message : String(error),
+      )
+    }
+  }, [onReprobed])
 
   return (
     <aside className="w-full min-w-0 overflow-hidden lg:sticky lg:top-0 lg:h-full lg:min-h-0 lg:self-start">
@@ -182,6 +215,8 @@ export function AvailableModelsSidebar({
                   selectedModelId={selectedModelId}
                   onClickSelect={handleModelClick}
                   onPointerSelect={handleModelPointerDown}
+                  onNavigateToApiKeys={onNavigateToApiKeys}
+                  onReprobeRoute={handleReprobeRoute}
                 />
               ) : null}
               {visibleGroups.map((group) => (
@@ -195,6 +230,8 @@ export function AvailableModelsSidebar({
                         selected={selectedModelId === model.id}
                         onClickSelect={handleModelClick}
                         onPointerSelect={handleModelPointerDown}
+                        onNavigateToApiKeys={onNavigateToApiKeys}
+                        onReprobeRoute={handleReprobeRoute}
                       />
                     ))}
                   </div>
@@ -225,11 +262,15 @@ function AvailableModelSections({
   selectedModelId,
   onClickSelect,
   onPointerSelect,
+  onNavigateToApiKeys,
+  onReprobeRoute,
 }: {
   groups: AvailableModelGroup[]
   selectedModelId: string | null
   onClickSelect: (modelId: string, event: MouseEvent<HTMLButtonElement>) => void
   onPointerSelect: (modelId: string, event: PointerEvent<HTMLButtonElement>) => void
+  onNavigateToApiKeys?: () => void
+  onReprobeRoute: (routeId: string) => void
 }) {
   return (
     <>
@@ -244,6 +285,8 @@ function AvailableModelSections({
                 selected={selectedModelId === model.id}
                 onClickSelect={onClickSelect}
                 onPointerSelect={onPointerSelect}
+                onNavigateToApiKeys={onNavigateToApiKeys}
+                onReprobeRoute={onReprobeRoute}
               />
             ))}
           </div>
@@ -275,50 +318,68 @@ const AvailableModelCard = memo(function AvailableModelCard({
   selected,
   onClickSelect,
   onPointerSelect,
+  onNavigateToApiKeys,
+  onReprobeRoute,
 }: {
   model: AvailableModelEntry
   selected: boolean
   onClickSelect: (modelId: string, event: MouseEvent<HTMLButtonElement>) => void
   onPointerSelect: (modelId: string, event: PointerEvent<HTMLButtonElement>) => void
+  onNavigateToApiKeys?: () => void
+  onReprobeRoute: (routeId: string) => void
 }) {
   return (
-    <button
-      type="button"
-      draggable={false}
-      aria-pressed={selected}
-      data-available-model-drag-source="true"
-      data-available-model-pointer-drag-source="true"
-      data-available-model-native-dnd="off"
-      data-model-id={model.id}
-      data-selected={selected ? "true" : undefined}
-      onPointerDown={(event) => onPointerSelect(model.id, event)}
-      onClick={(event) => onClickSelect(model.id, event)}
-      className={cn(
-        "block w-full max-w-full cursor-grab select-none transform-gpu overflow-hidden rounded-md bg-card p-2 text-left ring-inset ring-1 ring-foreground/10 transition-[background-color,box-shadow,transform] duration-75 ease-out hover:bg-muted/25 active:scale-[0.99] active:cursor-grabbing active:bg-muted/40 data-[selected=true]:bg-muted/30 data-[selected=true]:ring-2 data-[selected=true]:ring-primary/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none",
-      )}
-    >
-      <div className="grid min-w-0 gap-1">
-        <div className="flex min-w-0 items-start gap-2">
-          <div
-            data-available-model-title="true"
-            className="min-w-0 flex-1 break-words text-xs font-medium leading-snug text-foreground [overflow-wrap:anywhere]"
-          >
-            {model.label}
+    <div className="w-full max-w-full overflow-hidden rounded-md ring-inset ring-1 ring-foreground/10">
+      <button
+        type="button"
+        draggable={false}
+        aria-pressed={selected}
+        data-available-model-drag-source="true"
+        data-available-model-pointer-drag-source="true"
+        data-available-model-native-dnd="off"
+        data-model-id={model.id}
+        data-selected={selected ? "true" : undefined}
+        onPointerDown={(event) => onPointerSelect(model.id, event)}
+        onClick={(event) => onClickSelect(model.id, event)}
+        className={cn(
+          "block w-full max-w-full cursor-grab select-none transform-gpu overflow-hidden rounded-md bg-card p-2 text-left transition-[background-color,box-shadow,transform] duration-75 ease-out hover:bg-muted/25 active:scale-[0.99] active:cursor-grabbing active:bg-muted/40 data-[selected=true]:bg-muted/30 data-[selected=true]:ring-2 data-[selected=true]:ring-primary/70 data-[selected=true]:ring-inset focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none",
+        )}
+      >
+        <div className="grid min-w-0 gap-1">
+          <div className="flex min-w-0 items-start gap-2">
+            <div
+              data-available-model-title="true"
+              className="min-w-0 flex-1 break-words text-xs font-medium leading-snug text-foreground [overflow-wrap:anywhere]"
+            >
+              {model.label}
+            </div>
+            {model.thinking ? <ThinkingBadge /> : null}
           </div>
-          {model.thinking ? <ThinkingBadge /> : null}
+          <ProviderLabelBadges
+            providers={model.providers}
+            expanded={selected}
+            onNavigateToApiKeys={onNavigateToApiKeys}
+          />
         </div>
-        <ProviderLabelBadges providers={model.providers} expanded={selected} />
-      </div>
-    </button>
+      </button>
+      {model.deprecatedProviders.length > 0 ? (
+        <DeprecatedProvidersSection
+          providers={model.deprecatedProviders}
+          onReprobeRoute={onReprobeRoute}
+        />
+      ) : null}
+    </div>
   )
 })
 
 function ProviderLabelBadges({
   providers,
   expanded,
+  onNavigateToApiKeys,
 }: {
   providers: AvailableModelProvider[]
   expanded: boolean
+  onNavigateToApiKeys?: () => void
 }) {
   if (!providers.length) {
     return <div className="text-[11px] text-muted-foreground">No provider label</div>
@@ -333,29 +394,50 @@ function ProviderLabelBadges({
     <div className="flex min-w-0 max-w-full flex-wrap gap-1 overflow-hidden">
       {visibleProviders.map((provider) => {
         const stateLabel = providerVisibleStateLabel(provider.state)
+        const showConfigure = provider.state === "failed" && provider.reasonCode === "missing_config"
         return (
-          <Tag
-            key={provider.id}
-            variant={providerStateTagVariant(provider.state)}
-            size="xs"
-            data-available-model-provider-label="true"
-            data-provider-state={provider.state}
-            aria-label={providerStateAriaLabel(provider)}
-            className={cn(
-              "max-w-full justify-start font-sans",
-              expanded ? "whitespace-normal [overflow-wrap:anywhere]" : "whitespace-nowrap",
-            )}
-          >
-            <span>{provider.label}</span>
-            {stateLabel ? (
-              <span
-                data-provider-state-text="true"
-                className="text-[0.5625rem] font-medium opacity-80"
+          <span key={provider.id} className="inline-flex min-w-0 max-w-full items-center gap-1">
+            <Tag
+              variant={providerStateTagVariant(provider.state)}
+              size="xs"
+              data-available-model-provider-label="true"
+              data-provider-state={provider.state}
+              aria-label={providerStateAriaLabel(provider)}
+              className={cn(
+                "max-w-full justify-start font-sans",
+                expanded ? "whitespace-normal [overflow-wrap:anywhere]" : "whitespace-nowrap",
+              )}
+            >
+              <span>{provider.label}</span>
+              {stateLabel ? (
+                <span
+                  data-provider-state-text="true"
+                  className="text-[0.5625rem] font-medium opacity-80"
+                >
+                  {stateLabel}
+                </span>
+              ) : null}
+            </Tag>
+            {showConfigure ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                data-available-model-provider-configure="true"
+                data-provider-reason-code={provider.reasonCode ?? undefined}
+                aria-label={`Configure ${provider.label} in API Keys`}
+                className="h-5 gap-1 px-1.5 text-[0.5625rem]"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onNavigateToApiKeys?.()
+                }}
               >
-                {stateLabel}
-              </span>
+                <Settings2 data-role-icon="true" className="size-3" />
+                Configure
+              </Button>
             ) : null}
-          </Tag>
+          </span>
         )
       })}
       {hiddenProviderCount > 0 ? (
@@ -374,23 +456,107 @@ function ProviderLabelBadges({
   )
 }
 
+function DeprecatedProvidersSection({
+  providers,
+  onReprobeRoute,
+}: {
+  providers: AvailableModelProvider[]
+  onReprobeRoute: (routeId: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger
+        type="button"
+        data-available-model-deprecated-toggle="true"
+        className="group flex w-full items-center gap-1.5 px-2 py-1 text-left text-[10px] font-medium uppercase tracking-wide text-muted-foreground/80 outline-none transition-colors hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <ChevronDown
+          aria-hidden="true"
+          className="size-3 shrink-0 transition-transform group-data-[state=open]:rotate-180"
+        />
+        <span>Deprecated ({providers.length})</span>
+      </CollapsibleTrigger>
+      <CollapsibleContent
+        forceMount
+        data-available-model-deprecated-section="true"
+        className="space-y-1 px-2 pb-2 pt-1 data-[state=closed]:hidden"
+      >
+        {providers.map((provider) => (
+          <div
+            key={provider.id}
+            data-available-model-deprecated-row="true"
+            data-provider-state={provider.state}
+            data-available-model-native-dnd="off"
+            aria-label={`${provider.label} deprecated`}
+            className="flex min-w-0 items-center gap-1.5 rounded-sm bg-muted/20 px-1.5 py-1 text-muted-foreground/70"
+          >
+            <span className="min-w-0 flex-1 truncate text-[11px]">{provider.label}</span>
+            <IconTooltip label={`Copy ${provider.label}`}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                data-available-model-deprecated-copy="true"
+                aria-label={`Copy ${provider.label}`}
+                className="size-5 text-muted-foreground hover:text-foreground"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  void copyCredentialValue(provider.label, "Provider name")
+                }}
+              >
+                <Copy data-role-icon="true" className="size-3" />
+              </Button>
+            </IconTooltip>
+            <IconTooltip label={`Re-probe ${provider.label}`}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                data-available-model-deprecated-reprobe="true"
+                aria-label={`Re-probe ${provider.label}`}
+                className="size-5 text-muted-foreground hover:text-foreground"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onReprobeRoute(provider.id)
+                }}
+              >
+                <RotateCw data-role-icon="true" className="size-3" />
+              </Button>
+            </IconTooltip>
+          </div>
+        ))}
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
 export function buildAvailableModelGroups(modelGroups: ModelGroup[]): AvailableModelGroup[] {
   const models = modelGroups
     .map((group): AvailableModelEntry => {
+      const allProviders = group.provider_models
+        .map((providerModel) => ({
+          id: providerModel.route_id,
+          label: providerModel.provider_label,
+          state: providerModel.ui_state,
+          detail: providerModel.ui_detail,
+          providerModelId: providerModel.provider_model_id,
+          retryAt: providerModel.retry_at,
+          reasonCode: providerModel.reason_code,
+        }))
+        .sort(compareAvailableModelProviders)
       return {
         id: group.canonical_id,
         label: group.display_name || group.canonical_id,
         section: group.section_label || fallbackModelGroupSection(group),
-        providers: group.provider_models
-          .map((providerModel) => ({
-            id: providerModel.route_id,
-            label: providerModel.provider_label,
-            state: providerModel.ui_state,
-            detail: providerModel.ui_detail,
-            providerModelId: providerModel.provider_model_id,
-            retryAt: providerModel.retry_at,
-          }))
-          .sort(compareAvailableModelProviders),
+        // #35(b): off/disabled routes move into the collapsible "Deprecated"
+        // section; all other 6-state routes stay in the draggable provider row.
+        providers: allProviders.filter((provider) => provider.state !== "off"),
+        deprecatedProviders: allProviders.filter((provider) => provider.state === "off"),
         thinking: group.capability_summary.thinking === "supported" ||
           group.capability_summary.thinking === "mixed" ||
           group.provider_models.some((providerModel) => Boolean(
@@ -450,7 +616,7 @@ export function filterAvailableModelGroups(
         sectionMatches ||
         matchesSearchText(model.label, normalizedQuery, compactQuery, queryTokens) ||
         matchesSearchText(model.id, normalizedQuery, compactQuery, queryTokens) ||
-        model.providers.some((provider) => (
+        [...model.providers, ...model.deprecatedProviders].some((provider) => (
           matchesSearchText(provider.label, normalizedQuery, compactQuery, queryTokens) ||
           matchesSearchText(provider.id, normalizedQuery, compactQuery, queryTokens) ||
           matchesSearchText(provider.providerModelId, normalizedQuery, compactQuery, queryTokens)

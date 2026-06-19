@@ -1,9 +1,9 @@
 import type { RoleTestStatus } from "@/api/llm"
 
 // Maps the node Properties role-test runner state (running / last result / error)
-// to a single status badge. Reuses the same overall RoleTestStatus vocabulary
-// the settings RoleTestResultPanel uses, projected to the badge variants the
-// shadcn Badge component exposes. Pure + framework-free so it can be unit tested
+// to a single status badge. Reuses the same overall RoleTestStatus vocabulary the
+// settings role test projection uses, projected to the badge variants the shadcn
+// Badge component exposes. Pure + framework-free so it can be unit tested
 // without a DOM (renderToStaticMarkup / element-walk convention).
 
 export type RoleTestBadgeVariant = "secondary" | "success" | "warning" | "destructive"

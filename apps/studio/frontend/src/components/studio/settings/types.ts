@@ -59,6 +59,12 @@ export interface SettingsPageContentProps {
   onDeleteModelBundle: (bundleId: string) => void
   onBeforeRoleTest: () => Promise<RolesData | null>
   onAfterRoleTest: () => Promise<void> | void
+  /**
+   * #35 (spec §2.1): a failed provider row with reason_code === "missing_config"
+   * offers a "Configure" affordance that jumps to the API Keys tab. SettingsPage
+   * owns the active tab, so the callback flows down through here to the sidebar.
+   */
+  onNavigateToApiKeys: () => void
 }
 
 export type { ReactNode }

@@ -1,0 +1,60 @@
+{
+  "page_id": "n2_graphmd_design",
+  "title": "GRAPH.md 宏观契约 · 操作设计",
+  "region": "authoring:editor",
+  "intro": "本页是 GRAPH.md 头部宏观契约(整图的全局契约:name / schema_version / llm_role / description / phases,以及顶层 io)各操作的 MVP1 设计。FROZEN 铁律:头部无 type 字段(节点类型=文件名、不是 mode/type 字段);io 是 inline JSON Schema。io 字段级编辑归 i/o 面板(N2.4),本页只讲头部宏观契约 + 裸编辑 + 保真 round-trip。现状/差距见实施页;序列化保真机制见 mech_graph。",
+  "atoms": [
+    {
+      "n": 22,
+      "cap": "macro-contract-form",
+      "module": "宏观契约",
+      "func": "设计:头部宏观契约(name / schema_version / llm_role / description / phases,无 type 字段)用结构化表单编辑,而不是只能裸改 GRAPH.md 文本(M1)。",
+      "action": "用户编辑整图头部:改 name / schema_version / llm_role / description,或增删 phases。",
+      "fe_design": "目标设计:给 GRAPH.md 头部一个结构化表单——name / schema_version / llm_role / description 各一个受控字段、phases 一个可增删列表,改完按 FROZEN 头部 schema 校验后 serialize 写回。FROZEN:头部无 type 字段(旧 doc 的 type=simple/graph 已废,节点类型=文件名)。现状没有头部结构化表单,只能双击进 GRAPH.md 裸文本编辑(见 #23)。",
+      "fe_modules": [
+        {"name": "graph round-trip 客户端"}
+      ],
+      "be_contract": [
+        {"endpoint": "POST /api/skills/{skill_id}/graph/serialize", "purpose": "头部表单改完后 serialize 写回 GRAPH.md(只换 phases 块 + body topology、保留其它字节);头部其它字段经裸编辑/未来表单直写。", "mechanism_ref": "mech_graph", "iface_ref": "iface-2"}
+      ],
+      "fe_status": "偏差",
+      "be_status": "已实现",
+      "gap_brief": "现状头部靠双击裸编辑 GRAPH.md(无结构化表单 M1);目标加 name/schema_version/llm_role/description/phases 结构化表单(无 type 字段)。后端 serialize 契约已就绪,差前端表单。",
+      "impl_ref": "fn-22"
+    },
+    {
+      "n": 23,
+      "cap": "graphmd-raw-roundtrip",
+      "module": "宏观契约",
+      "func": "设计:双击头部/画布空白能打开 GRAPH.md 做裸文本编辑,保存时保真 round-trip——只换拓扑相关块、其它内容(io / description / 正文)原样保留,带 hash 乐观锁防覆盖。",
+      "action": "用户双击头部/空白开 GRAPH.md,在源码编辑器里改文本后保存。",
+      "fe_design": "双击开 GRAPH.md(源码编辑器)→ 改文本 → 保存时对当前文本算 graphHash 当 expected_hash → serialize 写回:后端 _preserve_graph_markdown_topology(只替换原 GRAPH.md 的 phases frontmatter 块和 `<phase>` body 标签、其它字节原样保留的函数)做保留型合并 → 带 hash 落盘。改画布拓扑与裸改头部走同一套保真 round-trip,io / description / 正文非 `<phase>` 内容全部留存。",
+      "fe_modules": [
+        {"name": "graph round-trip 客户端"}
+      ],
+      "be_contract": [
+        {"endpoint": "POST /api/skills/{skill_id}/graph/serialize", "purpose": "保留型序列化:只换 phases 块 + `<phase>` 标签,保留 io/description/其它字节;hash 不符回 409 snapshot_conflict 不静默覆盖。", "mechanism_ref": "mech_graph", "iface_ref": "iface-2"}
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(双击裸编辑 GRAPH.md + 保真 round-trip + hash 乐观锁 live)。",
+      "impl_ref": "fn-23"
+    },
+    {
+      "n": 24,
+      "cap": "no-type-field",
+      "module": "宏观契约",
+      "func": "设计:GRAPH.md 头部契约里没有 type 字段(FROZEN)——节点类型由文件名决定,旧 doc 的 type=simple/graph 已废。",
+      "action": "无显式动作(头部契约 schema 本身不含 type)。",
+      "fe_design": "头部宏观契约字段集 = name / schema_version / llm_role / description / phases + 顶层 io,不含 type。脚手架与序列化都不产出 type;前端头部编辑(裸编辑/未来表单)也不提供 type 入口。这与三类节点『类型=文件名(SKILL/LOGIC/SUBGRAPH.md)』一致:type 属旧 V2.x stale,已 FROZEN 废除。",
+      "fe_modules": [],
+      "be_contract": [
+        {"endpoint": "GET /api/skills/{skill_id}", "purpose": "manifest 头部(name/io/phases)不带 type;引擎 loader 对 phase 文件 frontmatter 的禁止字段(含 type/mode)会拦截。", "mechanism_ref": "mech_graph", "iface_ref": "iface-1"}
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(头部契约无 type 字段,前端不提供 type 入口,FROZEN 合规)。",
+      "impl_ref": "fn-24"
+    }
+  ]
+}

@@ -88,12 +88,18 @@ const officialProviderBrandNames: Record<string, string> = {
   ark: "Ark",
 }
 
-export function apiKeyInputType(visible: boolean): "text" | "password" {
-  return visible ? "text" : "password"
+export function apiKeyInputType(): "text" {
+  // §1 / atom-22 contract: the secret field is ALWAYS a text input. Masking is
+  // done purely with CSS (see apiKeyInputClassName) so the browser/extension
+  // password manager is never triggered by a native type=password field.
+  return "text"
 }
 
 export function apiKeyInputClassName(visible: boolean): string {
-  return cn(scrollableInputClassName, visible ? "text-foreground" : "text-muted-foreground")
+  return cn(
+    scrollableInputClassName,
+    visible ? "text-foreground" : "text-muted-foreground mask-input",
+  )
 }
 
 export function providerProtocolLabel(value: ProviderType): string {
@@ -954,7 +960,7 @@ export function ProviderCard({
               <Input
                 ref={apiKeyInputRef}
                 id={`api-key-${draft.id}`}
-                type={apiKeyInputType(visible)}
+                type={apiKeyInputType()}
                 value={draft.api_key}
                 onChange={(event) => {
                   if (apiKeyError) setApiKeyError("")

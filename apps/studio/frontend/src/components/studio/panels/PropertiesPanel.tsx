@@ -18,6 +18,7 @@ import type { ResumeValidityResponse, SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData, SkillNodeStatus, SubagentRef } from "@/components/GraphCanvas"
 import type { ResumeRunOptions } from "@/api/client"
 import { legacySubgraphTargetSkill } from "@/components/studio/subgraph-path"
+import { nodeResumeOptionsFromValidity } from "@/components/studio/node-resume"
 import { sha256Hex } from "@/lib/hash"
 import { runRoleTestJobToResult } from "../settings/llm-roles/role-test-store"
 import type { FileMeta } from "../file-types"
@@ -346,13 +347,7 @@ function NodeResumeDebugBar({
     if (!allowed || !resumeValidity || !onResumeNode) {
       return
     }
-    const options: ResumeRunOptions = {
-      checkpointId: resumeValidity.checkpoint_id ?? undefined,
-      checkpointNs: resumeValidity.checkpoint_ns ?? undefined,
-      resumeFromNodeId: resumeValidity.resume_from_node_id ?? nodeId,
-      resumeToNodeId: resumeValidity.resume_to_node_id ?? undefined,
-    }
-    void onResumeNode(options)
+    void onResumeNode(nodeResumeOptionsFromValidity(resumeValidity, nodeId))
   }
 
   return (

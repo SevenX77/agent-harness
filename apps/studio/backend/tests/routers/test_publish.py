@@ -53,16 +53,23 @@ def test_publish_skill_success(client: TestClient) -> None:
     assert registry.calls[0]["metadata"]["artifact_ref"] == artifact_ref
 
 
-def test_publish_skill_app_settings_incomplete(client: TestClient) -> None:
+def test_publish_skill_app_settings_incomplete_is_not_gated(client: TestClient) -> None:
+    # N6/F2 + 设计§4: an incomplete Settings (missing user_id) no longer hard-blocks
+    # publish. The local product safety net still commits; only the registry sync
+    # leg is skipped (and the registry is never contacted without an author).
     registry = FakeRegistry()
     client.app.dependency_overrides[get_registry_client] = lambda: registry
     _write_settings(client, user_id="")
 
     response = client.post("/api/skills/text-segmentation/publish", json={})
 
-    assert response.status_code == 400
-    assert response.json()["error_code"] == "APP_SETTINGS_INCOMPLETE"
-    assert response.json()["details"] == {"field": "user_id"}
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["extra"]["remote_sync"] == {
+        "status": "skipped",
+        "reason": "app_settings_incomplete",
+    }
     assert registry.calls == []
 
 

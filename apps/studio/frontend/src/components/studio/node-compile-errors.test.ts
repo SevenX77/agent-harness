@@ -1,9 +1,21 @@
 import { describe, expect, it } from "vitest"
-import type { CompileError } from "@/api/types"
-import { compileErrorsByNode } from "./node-compile-errors"
+import type { CompileError, LintError } from "@/api/types"
+import { compileErrorsByNode, lintErrorsByNode } from "./node-compile-errors"
 
 function err(file: string | null, severity: CompileError["severity"] = "fatal"): CompileError {
   return { file, line: 1, field: null, severity, message: "boom" }
+}
+
+function lintErr(file: string | null | undefined): LintError {
+  return {
+    file,
+    line: 1,
+    column: null,
+    error_code: "F-v3-001",
+    severity: "error",
+    message: "boom",
+    phase_name: null,
+  }
 }
 
 describe("compileErrorsByNode", () => {
@@ -34,5 +46,33 @@ describe("compileErrorsByNode", () => {
       err("phases/2nd-pass/SKILL.md"),
     ])
     expect(Object.keys(byNode).sort()).toEqual(["2nd-pass", "Segment_1"])
+  })
+})
+
+describe("lintErrorsByNode", () => {
+  it("groups lint diagnostics by the phase id derived from the file path", () => {
+    const byNode = lintErrorsByNode([
+      lintErr("phases/segment/LOGIC.md"),
+      lintErr("phases/segment/actions/strip.py"),
+      lintErr("phases/expand/SKILL.md"),
+    ])
+    expect(Object.keys(byNode).sort()).toEqual(["expand", "segment"])
+    expect(byNode.segment).toHaveLength(2)
+    expect(byNode.expand).toHaveLength(1)
+  })
+
+  it("omits graph-level / unattributable diagnostics (GRAPH.md, null or undefined file)", () => {
+    const byNode = lintErrorsByNode([
+      lintErr("GRAPH.md"),
+      lintErr(null),
+      lintErr(undefined),
+      lintErr("phases/p/LOGIC.md"),
+    ])
+    expect(Object.keys(byNode)).toEqual(["p"])
+  })
+
+  it("returns an empty map for null/empty input", () => {
+    expect(lintErrorsByNode(null)).toEqual({})
+    expect(lintErrorsByNode([])).toEqual({})
   })
 })

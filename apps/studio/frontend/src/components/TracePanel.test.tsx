@@ -101,6 +101,24 @@ describe('TracePanel EventEnvelope contract', () => {
   })
 })
 
+describe('TracePanel focus granularity label (F3)', () => {
+  it('labels the trace as whole-run when no node is focused', () => {
+    const html = render({})
+    expect(html).toContain('Focus: whole run')
+  })
+
+  it('labels the trace with the focused node when link is on and a phase is active', () => {
+    const html = render({ activePhase: 'phase1', linkEnabled: true })
+    expect(html).toContain('Focus: phase1')
+  })
+
+  it('falls back to whole-run when link views is disabled even with an active phase', () => {
+    const html = render({ activePhase: 'phase1', linkEnabled: false })
+    expect(html).toContain('Focus: whole run')
+    expect(html).not.toContain('Focus: phase1')
+  })
+})
+
 describe('TracePanel Resume action', () => {
   it('shows a Resume button enabled when the run can be resumed', () => {
     const html = render({ canResume: true })

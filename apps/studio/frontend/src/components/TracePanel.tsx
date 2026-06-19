@@ -249,8 +249,20 @@ export function TracePanel({
           onTogglePhase={filter.togglePhase}
           onClear={filter.clearFilters}
         />
-        <div className="text-xs font-medium text-muted-foreground">
-          Showing {filter.filteredEvents.length} of {traceEvents.length} events
+        <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
+          <span
+            className="rounded-full border border-border bg-muted/40 px-2 py-0.5"
+            title={
+              linkEnabled && activePhase
+                ? `Focused on node "${activePhase}" — showing this node's executions`
+                : 'Whole-run trace — focus a node to narrow to its executions'
+            }
+          >
+            {linkEnabled && activePhase ? `Focus: ${activePhase}` : 'Focus: whole run'}
+          </span>
+          <span>
+            Showing {filter.filteredEvents.length} of {traceEvents.length} events
+          </span>
         </div>
         {hitlPrompt ? (
           <form

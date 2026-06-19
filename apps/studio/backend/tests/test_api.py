@@ -31,6 +31,32 @@ from tests.conftest import copy_skill
 FALLBACK_HEADERS = {"X-Studio-Write-Fallback": "browser"}
 
 
+def _open_skills_into_index(workspaces_dir: Path, dirs_by_id: dict[str, Path]) -> None:
+    """Record folders in the native-fs skill index so Home (IDE model) lists them.
+
+    Home stopped auto-scanning the bundled SKILLS_DIR registry (01_init.md D11);
+    a folder surfaces only after it is opened/imported, which the native-fs layer
+    records as a skill-index entry. Tests simulate that open by writing the entry.
+    """
+    import asyncio
+
+    from app.core.adapters.metadata_local import LocalJsonMetadataStore
+
+    metadata = LocalJsonMetadataStore(
+        global_config_dir=config.APP_SETTINGS_DIR,
+        workspaces_root=workspaces_dir,
+    )
+
+    async def _register() -> None:
+        for skill_id, skill_dir in dirs_by_id.items():
+            await metadata.save_skill_index_entry(
+                skill_id,
+                {"absolute_path": str(skill_dir), "l2_remote_url": ""},
+            )
+
+    asyncio.run(_register())
+
+
 def _record_predict_pass(skill_id: str) -> None:
     """Satisfy the server-side predict-pass run prerequisite for a skill.
 
@@ -92,16 +118,21 @@ def test_openapi_declares_typed_resume_error_responses(client: TestClient) -> No
         assert responses[status_code]["content"]["application/json"]["schema"]["$ref"].endswith("/ErrorResponse")
 
 
-def test_skills_list_and_detail_use_real_skill_files(client: TestClient) -> None:
+def test_skills_list_and_detail_use_real_skill_files(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    # IDE model (01_init.md D11 无注册表): Home lists only opened folders, so the
+    # bundled skills are opened into the workspace (recorded in the native-fs skill
+    # index) before they can surface — detail still compiles the real on-disk files.
+    skills_dir, workspaces_dir = studio_roots
+    bundled_ids = ["text-segmentation", "event-extraction", "batch-analysis", "global-synthesis"]
+    _open_skills_into_index(workspaces_dir, {skill_id: skills_dir / skill_id for skill_id in bundled_ids})
+
     skills_response = client.get("/api/skills")
     assert skills_response.status_code == 200
     skill_ids = {item["id"] for item in skills_response.json()}
-    assert {
-        "text-segmentation",
-        "event-extraction",
-        "batch-analysis",
-        "global-synthesis",
-    } <= skill_ids
+    assert set(bundled_ids) <= skill_ids
 
     detail_response = client.get("/api/skills/text-segmentation")
     assert detail_response.status_code == 200

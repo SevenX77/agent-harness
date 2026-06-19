@@ -186,72 +186,67 @@ async def list_skill_summaries(
     storage: StorageBackend,
     metadata: MetadataStore,
 ) -> list[SkillSummary]:
-    """Return public, workspace, and imported directory skills."""
-    summaries: dict[str, SkillSummary] = {}
+    """Return the folders the user has opened/imported, the IDE-workspace way.
+
+    MVP1 locks an IDE/workspace model over a registry browser (skill-workspace
+    alignment §F1/§8; 01_init.md D11 "无注册表" / D1). Home truth is therefore the
+    set of folders the user explicitly opened/imported/created — recorded in the
+    native-fs-owned skill index and the per-user saved summaries — not an auto-scan
+    of the bundled ``SKILLS_DIR`` registry or the workspace fork tree. Each entry's
+    recorded absolute path is summarized read-only; no folder is enumerated just
+    because it happens to sit under a managed root.
+    """
     app_settings = await metadata.read_app_settings()
     local_git = GitLocalService()
     unregistered_skill_ids = await metadata.list_unregistered_skill_ids(user_id)
-    public_ids = [
-        skill_id
-        for skill_id in await _list_skill_ids(config.SKILLS_DIR, storage)
-        if skill_id not in unregistered_skill_ids
-    ]
-    workspace_root = _workspace_skills_dir_for(user_id)
-    workspace_ids = [
-        skill_id
-        for skill_id in await _list_skill_ids(workspace_root, storage)
-        if skill_id not in unregistered_skill_ids
-    ]
-    metadata_summaries = [
-        summary for summary in await metadata.list_skills(user_id) if summary.id not in unregistered_skill_ids
-    ]
-    for skill_id in public_ids:
-        skill_dir = config.SKILLS_DIR / skill_id
+    opened_dirs = await _opened_skill_dirs(user_id, metadata, unregistered_skill_ids)
+    logger.info(
+        "list_skill_summaries user=%s opened_folders=%d (index+summaries, no registry scan)",
+        user_id,
+        len(opened_dirs),
+    )
+    summaries: dict[str, SkillSummary] = {}
+    for skill_id, skill_dir in opened_dirs.items():
         summary = await _summary_for_skill_dir_async(
             user_id,
             skill_dir,
             storage,
             metadata,
+            skill_id=skill_id,
         )
         summaries[skill_id] = _attach_config_mismatch(
             summary.model_copy(update={"directory_path": str(skill_dir)}),
-            skill_dir,
-            app_settings,
-            local_git,
-        )
-    for skill_id in workspace_ids:
-        skill_dir = workspace_root / skill_id
-        summary = await _summary_for_skill_dir_async(
-            user_id,
-            skill_dir,
-            storage,
-            metadata,
-        )
-        summaries[skill_id] = _attach_config_mismatch(
-            summary.model_copy(update={"directory_path": str(skill_dir)}),
-            skill_dir,
-            app_settings,
-            local_git,
-        )
-    for saved_summary in metadata_summaries:
-        if not saved_summary.directory_path:
-            continue
-        skill_dir = Path(saved_summary.directory_path)
-        summaries[saved_summary.id] = _attach_config_mismatch(
-            (
-                await _summary_for_skill_dir_async(
-                    user_id,
-                    skill_dir,
-                    storage,
-                    metadata,
-                    skill_id=saved_summary.id,
-                )
-            ).model_copy(update={"directory_path": saved_summary.directory_path}),
             skill_dir,
             app_settings,
             local_git,
         )
     return sorted(summaries.values(), key=lambda summary: summary.id)
+
+
+async def _opened_skill_dirs(
+    user_id: str,
+    metadata: MetadataStore,
+    unregistered_skill_ids: set[str],
+) -> dict[str, Path]:
+    """Map each opened/imported skill id to its recorded folder.
+
+    The native-fs skill index (Rust-owned MRU of opened folders) is authoritative,
+    so an index entry surfaces even before a summary JSON exists. Saved summaries
+    that carry a ``directory_path`` fill in any id not yet in the index. Unregistered
+    ("Remove from Studio") ids are excluded.
+    """
+    opened: dict[str, Path] = {}
+    for skill_id, entry in (await metadata.list_skill_index()).items():
+        if skill_id in unregistered_skill_ids:
+            continue
+        opened[skill_id] = Path(entry["absolute_path"])
+    for saved_summary in await metadata.list_skills(user_id):
+        if saved_summary.id in unregistered_skill_ids or saved_summary.id in opened:
+            continue
+        if not saved_summary.directory_path:
+            continue
+        opened[saved_summary.id] = Path(saved_summary.directory_path)
+    return opened
 
 
 def _attach_config_mismatch(

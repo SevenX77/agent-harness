@@ -49,7 +49,9 @@ def test_correct_token_passes(
         response = client.get("/api/skills", headers={"Authorization": "Bearer secret"})
 
     assert response.status_code == 200
-    assert response.json()
+    # IDE model (no registry auto-scan): empty list when no folder is opened.
+    # This test asserts auth passes, so a parseable list response is sufficient.
+    assert isinstance(response.json(), list)
 
 
 def test_health_endpoint_bypass(
@@ -88,7 +90,9 @@ def test_dev_mode_bypass_when_token_unset(
     assert wrong_response.status_code == 401
     assert wrong_response.json()["error_code"] == "INVALID_TOKEN"
     assert correct_response.status_code == 200
-    assert correct_response.json()
+    # IDE model (no registry auto-scan): the list is empty when no folder is opened.
+    # This test asserts auth passes, so a parseable list response is sufficient.
+    assert isinstance(correct_response.json(), list)
 
 
 def test_api_and_dev_tunnel_tokens_both_pass(

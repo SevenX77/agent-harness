@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Hash, MessageSquare } from 'lucide-react'
+import { ChevronDown, ChevronRight, Hash, MessageSquare, RotateCcw } from 'lucide-react'
 import { useState } from 'react'
 import type { CallbackEvent } from '../../api/types'
 import {
@@ -8,6 +8,8 @@ import {
   eventPhase,
   mockedSourceClass,
   mockedSourceLabel,
+  payloadPreview,
+  retryBadge,
   tokenText,
 } from '../../utils/trace'
 import { EventTypeBadge } from './EventTypeBadge'
@@ -41,6 +43,7 @@ export function TraceEventRow({
   const isExpanded = expanded ?? localExpanded
   const tokens = tokenText(event)
   const mockedSource = eventMockedSource(event)
+  const retry = retryBadge(event)
   const inspectable = event.event_type === 'prompt_captured' || event.event_type === 'llm_call'
   const isError = event.event_type === 'internal_error' || event.event_type === 'validation_fail'
 
@@ -81,6 +84,20 @@ export function TraceEventRow({
               {tokens}
             </span>
           ) : null}
+          {retry ? (
+            <span
+              aria-label={`Retry attempt ${retry.label}`}
+              title={retry.exhausted ? `Final attempt (${retry.label})` : `Retry attempt ${retry.label}`}
+              className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                retry.exhausted
+                  ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300'
+                  : 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+              }`}
+            >
+              <RotateCcw className="h-3 w-3" />
+              {retry.label}
+            </span>
+          ) : null}
           {mockedSource ? (
             <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${mockedSourceClass(mockedSource)}`}>
               {mockedSourceLabel(mockedSource)}
@@ -116,10 +133,33 @@ export function TraceEventRow({
           </span>
         ) : null}
       </button>
-      {isExpanded ? (
-        <pre className="mt-2 max-h-40 overflow-auto rounded-md border border-gray-200 bg-slate-950 p-3 text-xs leading-relaxed text-slate-100 shadow-sm dark:border-slate-800">
-          {JSON.stringify(event, null, 2)}
-        </pre>
+      {isExpanded ? <ExpandedPayload event={event} /> : null}
+    </div>
+  )
+}
+
+function ExpandedPayload({ event }: { event: CallbackEvent }) {
+  // §4: long payloads default to a collapsed ~2KB head; only the user opts in to
+  // the full dump so a multi-megabyte trace event never floods (or OOMs) the panel.
+  const [showFull, setShowFull] = useState(false)
+  const preview = payloadPreview(event)
+  const body = showFull ? JSON.stringify(event, null, 2) : preview.text
+  return (
+    <div className="mt-2">
+      <pre className="max-h-40 overflow-auto rounded-md border border-gray-200 bg-slate-950 p-3 text-xs leading-relaxed text-slate-100 shadow-sm dark:border-slate-800">
+        {body}
+      </pre>
+      {preview.truncated ? (
+        <button
+          type="button"
+          onClick={(clickEvent) => {
+            clickEvent.stopPropagation()
+            setShowFull((open) => !open)
+          }}
+          className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-sky-600 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300"
+        >
+          {showFull ? 'Collapse payload' : `Show full payload (${preview.sizeLabel})`}
+        </button>
       ) : null}
     </div>
   )

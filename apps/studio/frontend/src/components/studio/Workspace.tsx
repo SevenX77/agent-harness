@@ -6,6 +6,7 @@ import { GraphCanvas, type SkillGraphNodeData } from "@/components/GraphCanvas"
 import { CopilotPanel } from "@/components/copilot/copilot-panel"
 import { copilotFileActionEffects, type CopilotFileAction } from "@/components/copilot/patch-proposed-bubble"
 import { PromptInspector } from "@/components/PromptInspector"
+import { findPromptEvent } from "@/utils/trace"
 import { useCopilotContext } from "@/hooks/useCopilotContext"
 import { readLintStatus } from "@/hooks/useDebouncedLint"
 import { useRunStream } from "@/hooks/useRunStream"
@@ -1060,7 +1061,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                 </div>
               ) : null}
               <PromptInspector
-                promptEvent={promptIndex != null ? runStream.events[promptIndex]?.payload ?? null : null}
+                promptEvent={promptIndex != null
+                  ? findPromptEvent(runStream.events.map((envelope) => envelope.payload), promptIndex)
+                  : null}
                 onClose={() => setPromptIndex(null)}
               />
             </div>

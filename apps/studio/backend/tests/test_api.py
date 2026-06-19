@@ -1169,8 +1169,11 @@ class FakeGitService:
     def __init__(self, commits: list[tuple[Path, str]]) -> None:
         self._commits = commits
 
-    def auto_commit_run(self, skill_dir: Path, run_id: str) -> None:
+    def auto_commit_run(self, skill_dir: Path, run_id: str) -> object:
         self._commits.append((skill_dir, run_id))
+        # Non-None mirrors GitLocalService returning a commit result for a real
+        # git repo, so the run is reported committed (not the no_git boundary).
+        return object()
 
 
 class FakePty:

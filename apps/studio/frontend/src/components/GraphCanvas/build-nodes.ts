@@ -193,6 +193,18 @@ function toolsForPhase(
   return phase.mode === 'llm' ? phase.agent_tools : []
 }
 
+// N2 atom #15 (l3-step-edit): the canvas-owned inputs that mount the inline L3
+// step editor onto AGENT nodes. Grouped into one object so buildNodes' positional
+// signature (already at its limit) does not grow further. All optional so existing
+// callers / the drilled-child path render unchanged when steps editing is not wired.
+export interface AgentStepsInputs {
+  expandedSteps?: Set<string>
+  onToggleSteps?: (nodeId: string) => void
+  // Persist an edited agent body. The canvas binds the file path + the
+  // optimistic-lock hash (of the pre-edit body) and this forwards the result.
+  onStepsSave?: (nodeId: string, filePath: string, currentBody: string, nextBody: string) => void
+}
+
 export function buildNodes(
   skillId: string,
   detail: SkillDetail | undefined,
@@ -202,6 +214,7 @@ export function buildNodes(
   compileErrorsByNodeId: Record<string, CompileError[]> = {},
   goldenStateByNodeId: Record<string, GoldenNodeState> = {},
   errorMessageByNodeId: Record<string, string> = {},
+  agentSteps: AgentStepsInputs = {},
 ): GraphCanvasNode[] {
   const phases = phasesFromManifest(detail?.manifest, skillId)
   const io = ioFromManifest(detail?.manifest)
@@ -215,6 +228,11 @@ export function buildNodes(
     const subgraphPath = normalizeAbsoluteSubgraphPath(topology?.path)
     const filePath = `phases/${phase.name}/${phaseKindFile({ mode, subgraphPath })}`
     const frontmatter = phaseFrontmatter(detail?.files?.[filePath])
+    // N2 atom #15: AGENT nodes (SKILL.md) get the inline L3 step editor wired off
+    // the real on-disk body. Non-agent (logic/subgraph) nodes leave it undefined.
+    const isAgentNode = phaseKindFile({ mode, subgraphPath }) === 'SKILL.md'
+    const agentBody = isAgentNode ? detail?.files?.[filePath] : undefined
+    const { onToggleSteps, onStepsSave } = agentSteps
     return {
       id: phase.name,
       type: 'skill',
@@ -224,7 +242,7 @@ export function buildNodes(
         label: phase.name,
         mode,
         role: phase.mode === 'llm' ? phase.llm_role : null,
-        tools: toolsForPhase(phaseKindFile({ mode, subgraphPath }) === 'SKILL.md', frontmatter, phase),
+        tools: toolsForPhase(isAgentNode, frontmatter, phase),
         subagents: subagentsForPhase(detail, phase.name),
         filePath,
         status: statusByNodeId[phase.name] ?? 'idle',
@@ -236,6 +254,14 @@ export function buildNodes(
         isExpanded: expandedSubgraphs.has(phase.name),
         onToggleSubgraph: subgraphPath
           ? () => onToggleSubgraph(phase.name)
+          : undefined,
+        agentBody,
+        isStepsExpanded: isAgentNode ? (agentSteps.expandedSteps?.has(phase.name) ?? false) : false,
+        onToggleSteps: isAgentNode && onToggleSteps
+          ? () => onToggleSteps(phase.name)
+          : undefined,
+        onStepsSave: isAgentNode && onStepsSave && agentBody !== undefined
+          ? (nextBody: string) => onStepsSave(phase.name, filePath, agentBody, nextBody)
           : undefined,
       },
     }

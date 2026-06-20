@@ -23,6 +23,9 @@ interface SplitEditorProps {
   compileErrorsByNodeId?: Record<string, CompileError[]>
   goldenStateByNodeId?: Record<string, GoldenNodeState>
   errorMessageByNodeId?: Record<string, string>
+  // N4 atom #9 (run-focus-follow): threaded to the bottom mini-canvas so the
+  // split-editor canvas also auto-centers on the running node during a run.
+  activeTracePhase?: string | null
 }
 
 export function SplitEditor({
@@ -41,6 +44,7 @@ export function SplitEditor({
   compileErrorsByNodeId,
   goldenStateByNodeId,
   errorMessageByNodeId,
+  activeTracePhase,
 }: SplitEditorProps) {
   const {
     activeFileDetails,
@@ -125,6 +129,7 @@ export function SplitEditor({
             errorMessageByNodeId={errorMessageByNodeId}
             compileErrorsByNodeId={compileErrorsByNodeId}
             goldenStateByNodeId={goldenStateByNodeId}
+            activeTracePhase={activeTracePhase}
             compact
           />
         </div>

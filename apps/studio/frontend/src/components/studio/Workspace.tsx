@@ -1209,6 +1209,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   compileErrorsByNodeId={compileErrorsByNodeId}
                   goldenStateByNodeId={goldenStateByNodeId}
                   errorMessageByNodeId={errorMessageByNodeId}
+                  activeTracePhase={activeTracePhase}
                 />
               ) : currentSkillId === null ? (
                 <WelcomePage onSelectSkill={onSelectSkill} />
@@ -1230,6 +1231,14 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   compileErrorsByNodeId={compileErrorsByNodeId}
                   goldenStateByNodeId={goldenStateByNodeId}
                   errorMessageByNodeId={errorMessageByNodeId}
+                  activeTracePhase={activeTracePhase}
+                  runId={runId}
+                  resumeNodeStatus={selectedNodeStatus}
+                  resumeValidity={resumeValidity}
+                  resumeValidityLoading={resumeValidityLoading}
+                  resumeValidityError={resumeValidityError}
+                  resumeLoading={resumeLoading}
+                  onResumeNode={runId ? handleResumeNode : undefined}
                   onSubmitHitlResponse={handleSubmitHitlResponse}
                   hitlSubmitting={resumeLoading}
                 />

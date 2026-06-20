@@ -196,6 +196,50 @@ describe('buildNodes', () => {
     expect(phaseNode(nodes, 'relative').subgraphPath).toBeNull()
     expect(phaseNode(nodes, 'relative').onToggleSubgraph).toBeUndefined()
   })
+
+  // N2 atom #15 (l3-step-edit): the inline step editor is mounted only on AGENT
+  // nodes, fed off the REAL on-disk body, and its save forwards through the
+  // injected callback (which the canvas binds to the phase-file save path).
+  it('wires the inline L3 step editor onto an agent node from its real body, not logic/subgraph nodes', () => {
+    const agentBody = ['---', 'name: draft', 'llm_role: writer', '---', '<step id="S1" name="read">Read.</step>'].join('\n')
+    const toggles: string[] = []
+    const saves: Array<{ nodeId: string; filePath: string; currentBody: string; nextBody: string }> = []
+    const nodes = buildNodes('demo', skillDetail({
+      phases: ['draft', 'review'],
+      graph_topology: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'agent' },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'], mode: 'logic' },
+      ],
+      files: { 'phases/draft/SKILL.md': agentBody },
+    }), new Set(), () => {}, {}, {}, {}, {}, {
+      expandedSteps: new Set(['draft']),
+      onToggleSteps: (nodeId) => toggles.push(nodeId),
+      onStepsSave: (nodeId, filePath, currentBody, nextBody) => saves.push({ nodeId, filePath, currentBody, nextBody }),
+    })
+
+    const draft = phaseNode(nodes, 'draft')
+    // Body sourced from the real SkillDetail.files (NOT a hand-injected field).
+    expect(draft.agentBody).toBe(agentBody)
+    expect(draft.isStepsExpanded).toBe(true)
+    expect(draft.onToggleSteps).toBeTypeOf('function')
+    expect(draft.onStepsSave).toBeTypeOf('function')
+
+    // The bound onStepsSave carries the node id + file path + the pre-edit body
+    // (for the optimistic-lock hash) so the canvas can persist + hash correctly.
+    draft.onStepsSave?.('<step id="S1" name="read">Edited.</step>')
+    expect(saves).toEqual([
+      { nodeId: 'draft', filePath: 'phases/draft/SKILL.md', currentBody: agentBody, nextBody: '<step id="S1" name="read">Edited.</step>' },
+    ])
+    draft.onToggleSteps?.()
+    expect(toggles).toEqual(['draft'])
+
+    // A logic node never gets the step editor.
+    const review = phaseNode(nodes, 'review')
+    expect(review.agentBody).toBeUndefined()
+    expect(review.onToggleSteps).toBeUndefined()
+    expect(review.onStepsSave).toBeUndefined()
+    expect(review.isStepsExpanded).toBe(false)
+  })
 })
 
 describe('buildNodesFromTopology (drilled child graph)', () => {

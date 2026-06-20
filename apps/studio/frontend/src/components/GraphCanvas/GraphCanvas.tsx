@@ -19,8 +19,8 @@ import { FileCog, Plus } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type MouseEvent } from 'react'
 import { toast } from 'sonner'
 import { AxiosError } from 'axios'
-import type { ChildGraphTopology, CompileError, ErrorResponse, SkillDetail } from '@/api/types'
-import { getChildGraphTopology, writeSkillFile } from '@/api/client'
+import type { ChildGraphTopology, CompileError, ErrorResponse, ResumeValidityResponse, SkillDetail } from '@/api/types'
+import { getChildGraphTopology, writeSkillFile, type ResumeRunOptions } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import {
@@ -48,16 +48,19 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { CycleDetectedError, getAutoLayoutedElements } from '@/lib/layout'
+import { sha256Hex } from '@/lib/hash'
 import { ContextEdge, type ContextEdgeData } from '@/components/edges/ContextEdge'
 import { GlobalInputNode, GlobalOutputNode } from '@/components/nodes/GlobalInputOutputNode'
 import { buildEdges, INPUT_ID, OUTPUT_ID, SkillNode, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
 import type { GoldenNodeState } from '@/components/studio/node-golden'
 import { useOptionalWorkspaceContext } from '@/components/studio/WorkspaceContext'
 import { HitlNodeToolbar } from '@/components/studio/HitlNodeToolbar'
+import { ResumeNodeToolbar } from '@/components/studio/ResumeNodeToolbar'
 import type { TraceHitlResumeRequest } from '@/components/studio/hitl-prompt'
 import { normalizeAbsoluteSubgraphPath } from '@/components/studio/subgraph-path'
 import type { PanelKind } from '@/components/studio/Toolbar'
 import { buildNodes, buildNodesFromTopology, phaseKindFile } from './build-nodes'
+import { nodeToFocus } from './canvas-focus'
 import {
   type NewPhaseKind,
   checkSequentialOverwrites,
@@ -94,12 +97,29 @@ interface GraphCanvasProps {
   compileErrorsByNodeId?: Record<string, CompileError[]>
   goldenStateByNodeId?: Record<string, GoldenNodeState>
   errorMessageByNodeId?: Record<string, string>
+  // N4 atom #9 (run-focus-follow): the phase id of the node currently running,
+  // derived by Workspace from the same live run stream that colors the nodes
+  // (statusByNodeId -> the node whose status is 'running'). When it changes the
+  // canvas auto-centers on that node so the user's view follows the run. Not a
+  // new derivation — pure wiring of the existing activeTracePhase.
+  activeTracePhase?: string | null
   compact?: boolean
   onPhaseFileSave?: (args: { path: string; content: string; expectedHash: string }) => Promise<void> | void
   // F4: when the run pauses for human input, the node-anchored HitL box submits
   // the answer through this callback (the same resume path the side panel uses).
   onSubmitHitlResponse?: (request: TraceHitlResumeRequest) => void
   hitlSubmitting?: boolean
+  // N5 atom #2 (node-anchored-resume): when the selected node failed during a
+  // run, anchor the [Resume] control ON that node (NodeToolbar) in addition to
+  // the side panel. All driven by the same real run/validity state Workspace
+  // already computes; the click routes through onResumeNode -> resumeRun.
+  runId?: string | null
+  resumeNodeStatus?: SkillNodeStatus | null
+  resumeValidity?: ResumeValidityResponse | null
+  resumeValidityLoading?: boolean
+  resumeValidityError?: string | null
+  resumeLoading?: boolean
+  onResumeNode?: (options: ResumeRunOptions) => Promise<void> | void
 }
 
 const nodeTypes = {
@@ -151,13 +171,25 @@ export function GraphCanvas({
   compileErrorsByNodeId,
   goldenStateByNodeId,
   errorMessageByNodeId,
+  activeTracePhase,
   compact = false,
   onPhaseFileSave,
   onSubmitHitlResponse,
   hitlSubmitting = false,
+  runId,
+  resumeNodeStatus,
+  resumeValidity,
+  resumeValidityLoading = false,
+  resumeValidityError,
+  resumeLoading = false,
+  onResumeNode,
 }: GraphCanvasProps) {
   const workspace = useOptionalWorkspaceContext()
   const [expandedSubgraphs, setExpandedSubgraphs] = useState<Set<string>>(() => new Set())
+  // N2 atom #15 (l3-step-edit): canvas-owned open/closed state for each AGENT
+  // node's inline L3 step editor. Mirrors expandedSubgraphs; kept inside
+  // GraphCanvas so the toggle never crosses the canvas boundary.
+  const [expandedSteps, setExpandedSteps] = useState<Set<string>>(() => new Set())
   // R9: LOCAL drill-down focus stack. Empty = root graph (unchanged). When
   // non-empty the canvas focuses INTO the drilled child graph and a top-left
   // breadcrumb lets the user pop back up. Kept inside GraphCanvas (not lifted to
@@ -277,6 +309,36 @@ export function GraphCanvas({
     })
   }, [])
 
+  // N2 atom #15: open/close an AGENT node's inline L3 step editor.
+  const toggleSteps = useCallback((nodeId: string) => {
+    setExpandedSteps((current) => {
+      const next = new Set(current)
+      if (next.has(nodeId)) {
+        next.delete(nodeId)
+      } else {
+        next.add(nodeId)
+      }
+      return next
+    })
+  }, [])
+
+  // N2 atom #15: persist an edited agent body through the normal phase-file save
+  // path. The optimistic-lock hash is taken over the CURRENT (pre-edit) body —
+  // the same snapshot the step transforms ran on — so a stale concurrent edit is
+  // rejected by the backend hash guard rather than silently overwritten.
+  const handleStepsSave = useCallback(
+    async (_nodeId: string, filePath: string, currentBody: string, nextBody: string) => {
+      if (!onPhaseFileSave) return
+      try {
+        const expectedHash = await sha256Hex(currentBody)
+        await onPhaseFileSave({ path: filePath, content: nextBody, expectedHash })
+      } catch (saveError) {
+        toast.error('Could not save steps: ' + (saveError instanceof Error ? saveError.message : String(saveError)))
+      }
+    },
+    [onPhaseFileSave],
+  )
+
   // R9: drill INTO a subgraph node (push a focus level). The drilled child
   // topology is fetched by the effect below.
   const drillInto = useCallback((path: string, label: string) => {
@@ -336,6 +398,11 @@ export function GraphCanvas({
   }, [])
 
   const isDrilled = drilledPath !== null
+  // N2 atom #15: the inline L3 step-editor inputs threaded into AGENT nodes.
+  const agentStepsInputs = useMemo(
+    () => ({ expandedSteps, onToggleSteps: toggleSteps, onStepsSave: handleStepsSave }),
+    [expandedSteps, toggleSteps, handleStepsSave],
+  )
   const rawNodes = useMemo(() => {
     // R9: when focused into a child graph, render its real phases/topology;
     // status overlays (which key on root phase ids) are dropped at depth.
@@ -343,8 +410,8 @@ export function GraphCanvas({
       if (!childGraph) return []
       return buildNodesFromTopology(skillId, childGraph.phases, childGraph.graph_topology, {})
     }
-    return buildNodes(skillId, skillDetail, expandedSubgraphs, toggleSubgraph, safeStatusByNodeId, safeCompileErrorsByNodeId, safeGoldenStateByNodeId, safeErrorMessageByNodeId)
-  }, [childGraph, expandedSubgraphs, isDrilled, safeStatusByNodeId, safeCompileErrorsByNodeId, safeGoldenStateByNodeId, safeErrorMessageByNodeId, skillDetail, skillId, toggleSubgraph])
+    return buildNodes(skillId, skillDetail, expandedSubgraphs, toggleSubgraph, safeStatusByNodeId, safeCompileErrorsByNodeId, safeGoldenStateByNodeId, safeErrorMessageByNodeId, agentStepsInputs)
+  }, [agentStepsInputs, childGraph, expandedSubgraphs, isDrilled, safeStatusByNodeId, safeCompileErrorsByNodeId, safeGoldenStateByNodeId, safeErrorMessageByNodeId, skillDetail, skillId, toggleSubgraph])
   const phaseNodes = useMemo(
     () => rawNodes.filter((node): node is SkillGraphNode => node.type === 'skill'),
     [rawNodes],
@@ -385,6 +452,27 @@ export function GraphCanvas({
       console.error(layoutResult.error)
     }
   }, [layoutResult.error])
+
+  // N4 atom #9 (run-focus-follow): when the run advances to a new node,
+  // auto-center the viewport on it. `activeTracePhase` is the live "running"
+  // node Workspace derives from the run stream; nodeToFocus only confirms a
+  // matching node exists on the canvas before centering, so we never fitView
+  // onto a phase id with no node (e.g. drilled child, INPUT/OUTPUT). Mirrors the
+  // conflict-warning pan effect above; no timer/listener so no cleanup needed.
+  useEffect(() => {
+    if (!reactFlowInstance) {
+      return
+    }
+    const focusId = nodeToFocus(activeTracePhase, nodes.map((node) => node.id))
+    if (!focusId) {
+      return
+    }
+    reactFlowInstance.fitView({
+      nodes: [{ id: focusId }],
+      duration: 600,
+      padding: 0.8,
+    })
+  }, [activeTracePhase, nodes, reactFlowInstance])
 
   // Controlled effect to sync activeConflict, isConflictCancelled, and callbacks into the nodes state
   useEffect(() => {
@@ -701,6 +789,19 @@ export function GraphCanvas({
           traceEvents={workspace?.traceEvents ?? []}
           submitting={hitlSubmitting}
           onSubmitHitlResponse={onSubmitHitlResponse}
+        />
+        {/* N5 #2: node-anchored [Resume] for the selected failed node. Driven by
+            the same real run/validity state the side panel uses; coexists with
+            the global top-bar Resume. */}
+        <ResumeNodeToolbar
+          runId={runId ?? null}
+          nodeId={selectedNodeId ?? null}
+          nodeStatus={resumeNodeStatus ?? null}
+          resumeValidity={resumeValidity ?? null}
+          loading={resumeValidityLoading}
+          error={resumeValidityError ?? null}
+          resumeLoading={resumeLoading}
+          onResumeNode={onResumeNode}
         />
         <Controls position="bottom-left" />
         {!compact ? <MiniMap pannable zoomable position="bottom-right" style={{ height: 120, width: 200 }} /> : null}

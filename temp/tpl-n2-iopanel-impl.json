@@ -1,195 +1,195 @@
 {
-  "id": "n2_iopanel_impl",
-  "title": "i/o 面板 · 实施详情",
-  "design_ref": "n2_iopanel_design",
-  "intro": "本页是 i/o 面板前端的现状/差距/实施计划/测试,1:1 对应设计页 n2_iopanel_design(原子 #25–#30)。代码按名引用、不写行号。io 契约/artifact/子图引用机制见后端接口契约页 mech_io;后端引后端实施手册 D8(io schema/子图 path)、D2.2(RunArtifactStore artifact 落盘)。重要纠偏:io 投影假文件已清(02_authoring.md atom 决策表 M2+M3 那行标的 InputPanel stale 结论已过时)。",
-  "functions": [
-    {
-      "n": 25,
-      "cap": "input-field-edit",
-      "design_ref": "n2-atom-25",
-      "current": "现状:已实现且符合。io.inputs 字段增删/改名/改类型直接写真契约 GRAPH.md io.inputs.properties。投影层 IoContractView(panel-files.ts 里只读投影 io 契约的接口)+ inputContractView 注释明确:已删除旧版投影的 input/schema.json、input/sample.json 两个磁盘上不存在的假文件(旧版那两个假文件会让 edit autosave 写进死路径、静默丢数据),改为返回解析后的 io map + 一个种子字符串供 schema-infer 文本框预填,字段编辑直接写 GRAPH.md。注:这与 02_authoring.md atom 决策表 M2+M3 那行标的『InputPanel 投影 io 成假文件 stale』已不符,假文件已清,spec 标注过时。",
-      "gap": "符合设计,无需改。",
-      "fe_status": "符合",
-      "be_dep": "已就绪可接。io.inputs 随 POST /graph/serialize 写回(io 是 GRAPH.md frontmatter 的一部分、无独立 io 端点)。后端实施手册 D8=ok/partial。"
-    },
-    {
-      "n": 26,
-      "cap": "input-files-import",
-      "design_ref": "n2-atom-26",
-      "current": "现状:已实现且符合。SchemaInferPanel(拖 JSON 文本/文件推断 schema 的子面板)→ inferJsonSchemaFromText(从 JSON 文本推断字段 schema 的函数)推断 → applyInputSchemaToGraph(把推断 schema 写进 GRAPH.md io.inputs 的纯函数)写回(R3 input files 导入)。另有 TestInputsSection(测试输入管理)走后端 createTestInput/deleteTestInput,与 io 契约分开、不混。",
-      "gap": "符合设计,无需改。",
-      "fe_status": "符合",
-      "be_dep": "已就绪可接。推断的 io.inputs schema 随 serialize 写回。后端实施手册 D8=ok/partial。"
-    },
-    {
-      "n": 27,
-      "cap": "io-panel-perfield",
-      "design_ref": "n2-atom-27",
-      "current": "现状:graph-level io 字段编辑已实现(inputs+outputs),per-node 收敛中。IoSchemaFieldsPanel(InputPanel.tsx,逐字段编辑器对 io.inputs/io.outputs 两侧都生效)+ IoFieldRow/IoFieldAddRow(增删改字段)+ OutputArtifactPathPanel(output artifact 路径)已实现整图级 io 字段编辑——不只是『偏起点 input + artifact』,output 字段编辑也在。缺口是『逐节点 i/o』:现状整图级,还没做到选中任一节点都挂它自己的 i/o 面板。",
-      "gap": "差距:从 graph-level io 字段编辑(已实现 inputs+outputs 两侧 + artifact)扩成 per-node i/o(选中任一节点编辑该节点的 io.inputs/outputs + artifact)。沿用现有 IoSchemaFieldsPanel/IoFieldRow 组件,扩成按选中节点。纯前端,serialize 契约不变。",
-      "fe_status": "偏差",
-      "be_dep": "已就绪可接(后端不需改)。逐节点 io 改动随 GRAPH.md serialize 写回(各 phase frontmatter 的 io + 顶层 io)。"
-    },
-    {
-      "n": 28,
-      "cap": "any-io-import-file",
-      "design_ref": "n2-atom-28",
-      "current": "现状:偏差——导入入口主要在 input 节点侧。SchemaInferPanel 的拖入导入目前主要服务起点 input 节点;G2『可在任何一个 i/o 界面导入文件、导入即把该文件字段导入状态机(跑到该节点才注入)』里『任一节点 i/o 界面都能导入』这半还没铺开。",
-      "gap": "差距:① 前端让任一节点的 i/o 界面都能导入文件(复用 SchemaInferPanel,挂到每个节点的 i/o 面板);② 导入字段的运行期注入时机(跑到该节点才注入)需后端把『任一节点 io 导入字段→运行期注入』的契约定下来(引擎 io/manager 注入时机)。前端导入入口可随 #27 逐节点 i/o 面板做,运行期注入语义等后端。",
-      "fe_status": "偏差",
-      "be_dep": "契约要先改。任一节点导入字段→『跑到该节点才注入』的运行期注入时机归引擎 io/manager,需后端把注入契约定下来(D8.3 io schema 进 fingerprint 的边界相关)。"
-    },
-    {
-      "n": 29,
-      "cap": "output-artifact-path",
-      "design_ref": "n2-atom-29",
-      "current": "现状:已实现且符合。前端 applyOutputArtifactPathToGraph(往 io.outputs.<字段> 写 {target:'artifact', path} 的纯函数)给字段写 artifact 落盘目标,空 path 清除目标;OutputPathRow 提交。引擎契约已落地:io/manager 认 target in ('artifact','artifact_manager') 走 artifact_saver,解析到 .workspace/runs/<id>/artifacts/<path>。格式只允许 md/json;只写文件名=默认落 .workspace 的 artifacts(G3)。",
-      "gap": "符合设计,无需改。",
-      "fe_status": "符合",
-      "be_dep": "已就绪可接。前端配 artifact 目标(随 serialize)+ 引擎 io/manager 运行期落盘均已实现。后端实施手册 D2.2 RunArtifactStore=ok。"
-    },
-    {
-      "n": 30,
-      "cap": "subgraph-io-no-1to1",
-      "design_ref": "n2-atom-30",
-      "current": "现状:偏差——引擎 loader 仍保留子图 io outputs 1:1 FATAL,前端无此校验。引擎 loader 的 _validate_subgraph_io_contracts 取 parent_outputs(父 subgraph 节点 io.outputs)/child_outputs(子图 manifest io.outputs),parent_outputs ≠ child_outputs 报 [F-v3-subgraph-io-mismatch] FATAL——只比 outputs 集合是否相等(已弱化、非 inputs+outputs 全 1:1)。子图按绝对 path 解析:SUBGRAPH.md 的 path 字段(内部 Pydantic 字段名虽为 target_skill 但 alias='path',读的是 path key);旧 target_skill 字面 key 已被 loader 拒为 deprecated、引导迁移到绝对 path。前端本身没有该 1:1 校验。",
-      "gap": "差距:后端删这条 outputs 1:1 校验(loader _validate_subgraph_io_contracts 的 parent_outputs ≠ child_outputs FATAL),改为子图 input 和别的节点一样从父图状态机按 schema 过滤字段拿(G2:数据流单向、父子 io 不绑死)。前端无改动(本就没这校验);属后端待删项。",
-      "fe_status": "偏差",
-      "be_dep": "契约要先改(硬阻塞)。引擎 skill-syntax §2.4『不要求父子字段集合 1:1』与 loader 的 _validate_subgraph_io_contracts fatal 硬冲突;后端删/改这条 outputs 1:1 fatal(按 §2.10 切片规则校验)前,子图 io 编辑被硬阻塞。子图 path 已按绝对 path 解析。前端无活。"
-    }
-  ],
-  "plan": [
-    {
-      "step": 1,
-      "what": "#27 io-panel-perfield:把『input 面板』升级为逐节点的『i/o 面板』——选中任一节点都能编辑其 io.inputs/io.outputs 字段 + 配 artifact;沿用 InputPanel/SchemaInferPanel 组件扩成按选中节点编辑。",
-      "depends_on": "前端依赖:复用现成 io 字段编辑 + serialize 写回。后端不动(serialize 契约不变)。",
-      "why": "纯前端、后端契约不变;把面板从起点 input 扩成逐节点 i/o,是 #28 任一节点导入入口的承载基础,先做。",
-      "block": "前端独立"
-    },
-    {
-      "step": 2,
-      "what": "#28 any-io-import-file(前端导入入口):把 SchemaInferPanel 的导入入口挂到每个节点的 i/o 面板,任一节点 i/o 界面都能导入文件→写该节点 io.inputs。",
-      "depends_on": "前端依赖:step 1 的逐节点 i/o 面板;复用 SchemaInferPanel。运行期注入语义等后端(step 3)。",
-      "why": "导入入口随逐节点 i/o 面板(step 1)落地;紧随其后做,先把『任一节点可导入』的前端入口补上。",
-      "block": "前端独立"
-    },
-    {
-      "step": 3,
-      "what": "后端先行:① 删引擎 loader 的子图 io outputs 1:1 FATAL(F-v3-subgraph-io-mismatch 的 parent_outputs ≠ child_outputs),改子图从父状态机按 schema 过滤字段(G2,供 #30);子图 path 解析已收口到读绝对 path(D8.4,旧 target_skill 字面 key 已拒);② 把『任一节点 io 导入字段→运行期跑到该节点才注入』的注入时机契约定下来(引擎 io/manager,供 #28 运行期语义)。",
-      "depends_on": "后端契约(引擎 loader 子图 io 校验、io/manager 注入时机;后端实施手册 D8.4 子图 path 收口=partial)。这是 #30 与 #28 运行期语义的前置。",
-      "why": "后端先于前端铁律:#30 完全是后端待删项、#28 的运行期注入语义取决于后端 io/manager 注入契约;后端没动前端无活/会返工。排在依赖后端的项之前。",
-      "block": "等后端（后端先行）"
-    }
-  ],
-  "tests": [
-    {
-      "covers": "#25 input-field-edit(假文件已清)",
-      "atoms": [
-        25
-      ],
-      "shots": [
-        "改 io.inputs 字段名/类型直接落 GRAPH.md io.inputs.properties,无假文件死路径"
-      ],
-      "fe_status": "符合",
-      "layer1": [
-        "改 io.inputs 字段 → 断言直接写 GRAPH.md io.inputs.properties。",
-        "回归:断言不再投影 input/schema.json、input/sample.json 假文件(IoContractView 只读 + 种子串)。",
-        "断言字段编辑不走死路径、不丢数据。"
-      ],
-      "layer2": [
-        "真跑:改一个 input 字段名,看 GRAPH.md io.inputs 更新、无假文件。"
-      ]
-    },
-    {
-      "covers": "#26 input-files-import",
-      "atoms": [
-        26
-      ],
-      "shots": [
-        "拖一段 JSON 进来,推断出 io.inputs schema 并写回"
-      ],
-      "fe_status": "符合",
-      "layer1": [
-        "拖入 JSON 文本 → 断言 inferJsonSchemaFromText 推断字段 + 类型。",
-        "断言 applyInputSchemaToGraph 把 schema 写进 GRAPH.md io.inputs。",
-        "断言 TestInputsSection 与 io 契约分开(走 createTestInput/deleteTestInput)。"
-      ],
-      "layer2": [
-        "真跑:拖一个 JSON 文件,看 io.inputs schema 被推断写入。"
-      ]
-    },
-    {
-      "covers": "#27 io-panel-perfield(逐节点 i/o)",
-      "atoms": [
-        27
-      ],
-      "shots": [
-        "选中任一节点都能打开 i/o 面板编辑其 io.inputs/outputs + artifact(目标态)"
-      ],
-      "fe_status": "偏差",
-      "layer1": [
-        "RED:当前面板偏向起点 input + output artifact,非逐节点完整 i/o → 断言『任一节点都有 i/o 面板入口』失败。",
-        "GREEN:断言选中任一节点都能编辑其 io.inputs/io.outputs + artifact。",
-        "断言逐节点 io 改动随 serialize 写回对应 phase frontmatter。"
-      ],
-      "layer2": [
-        "真跑:选不同节点,看各自能开 i/o 面板编辑 io。"
-      ]
-    },
-    {
-      "covers": "#28 any-io-import-file(任一节点导入)",
-      "atoms": [
-        28
-      ],
-      "shots": [
-        "在一个非起点节点的 i/o 界面导入文件,写该节点 io.inputs"
-      ],
-      "fe_status": "偏差",
-      "layer1": [
-        "RED:当前导入入口主要在 input 节点侧 → 断言『任一节点 i/o 界面可导入』失败。",
-        "GREEN:断言任一节点 i/o 界面都能导入文件→写该节点 io.inputs。",
-        "运行期契约测(后端就位后):导入字段跑到该节点才注入状态机。"
-      ],
-      "layer2": [
-        "真跑:在一个中间节点 i/o 界面导入文件,看字段写入该节点 io.inputs。"
-      ]
-    },
-    {
-      "covers": "#29 output-artifact-path(G3)",
-      "atoms": [
-        29
-      ],
-      "shots": [
-        "给一个 output 字段配 xx.json 路径,跑后落 .workspace/artifacts/xx.json"
-      ],
-      "fe_status": "符合",
-      "layer1": [
-        "给 output 字段填路径 → 断言 applyOutputArtifactPathToGraph 写 {target:'artifact', path};空 path 清除。",
-        "契约测:引擎 io/manager 认 target='artifact' 走 artifact_saver、解析到 .workspace/runs/<id>/artifacts/<path>。",
-        "断言格式只允许 md/json。"
-      ],
-      "layer2": [
-        "真跑:给一个 output 配 artifact 路径,跑一次看 .workspace/artifacts 落盘。"
-      ]
-    },
-    {
-      "covers": "#30 subgraph-io-no-1to1(G2 删 1:1)",
-      "atoms": [
-        30
-      ],
-      "shots": [
-        "改子图 outputs 与父不同时,不再被 outputs 1:1 FATAL 挡(后端删校验后)"
-      ],
-      "fe_status": "偏差",
-      "layer1": [
-        "RED:当前引擎 loader 取 parent_outputs/child_outputs,不等就报 F-v3-subgraph-io-mismatch → 断言『子图 io 改动不触发 outputs 1:1』失败。",
-        "GREEN(后端删校验后):断言改子图 io.outputs 与父不同不被 1:1 校验挡,子图 input 从状态机按 schema 过滤字段拿。",
-        "回归:子图按绝对 path 解析(旧 target_skill 字面 key 被拒为 deprecated)。"
-      ],
-      "layer2": [
-        "真跑(后端删校验后):改一个子图 outputs 与父不同,看编译不报 1:1 mismatch。"
-      ]
-    }
-  ]
+ "id": "n2_iopanel_impl",
+ "title": "i/o 面板 · 实施详情",
+ "design_ref": "n2_iopanel_design",
+ "intro": "本页是 i/o 面板前端的现状/差距/实施计划/测试,1:1 对应设计页 n2_iopanel_design(原子 #25–#30)。代码按名引用、不写行号。io 契约/artifact/子图引用机制见后端接口契约页 mech_io;后端引后端实施手册 D8(io schema/子图 path)、D2.2(RunArtifactStore artifact 落盘)。重要纠偏:io 投影假文件已清(02_authoring.md atom 决策表 M2+M3 那行标的 InputPanel stale 结论已过时)。",
+ "functions": [
+  {
+   "n": 25,
+   "cap": "input-field-edit",
+   "design_ref": "n2-atom-25",
+   "current": "现状:已实现且符合。io.inputs 字段增删/改名/改类型直接写真契约 GRAPH.md io.inputs.properties。投影层 IoContractView(panel-files.ts 里只读投影 io 契约的接口)+ inputContractView 注释明确:已删除旧版投影的 input/schema.json、input/sample.json 两个磁盘上不存在的假文件(旧版那两个假文件会让 edit autosave 写进死路径、静默丢数据),改为返回解析后的 io map + 一个种子字符串供 schema-infer 文本框预填,字段编辑直接写 GRAPH.md。注:这与 02_authoring.md atom 决策表 M2+M3 那行标的『InputPanel 投影 io 成假文件 stale』已不符,假文件已清,spec 标注过时。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。io.inputs 随 POST /graph/serialize 写回(io 是 GRAPH.md frontmatter 的一部分、无独立 io 端点)。后端实施手册 D8=ok/partial。"
+  },
+  {
+   "n": 26,
+   "cap": "input-files-import",
+   "design_ref": "n2-atom-26",
+   "current": "现状:已实现且符合。SchemaInferPanel(拖 JSON 文本/文件推断 schema 的子面板)→ inferJsonSchemaFromText(从 JSON 文本推断字段 schema 的函数)推断 → applyInputSchemaToGraph(把推断 schema 写进 GRAPH.md io.inputs 的纯函数)写回(R3 input files 导入)。另有 TestInputsSection(测试输入管理)走后端 createTestInput/deleteTestInput,与 io 契约分开、不混。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。推断的 io.inputs schema 随 serialize 写回。后端实施手册 D8=ok/partial。"
+  },
+  {
+   "n": 27,
+   "cap": "io-panel-perfield",
+   "design_ref": "n2-atom-27",
+   "current": "现状:已实现且符合。i/o 面板按选中节点解析编辑目标(resolveIoEditTarget,io-target.ts):选中任一 phase 节点即对该节点自己的文件编辑 io.inputs/io.outputs + output-artifact;无选中/全局 io 节点回退整图 GRAPH.md。画布选中经 Panels 透传给 InputPanel,逐节点 i/o 端到端接线(io-target/InputPanel 测试绿)。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接(后端不需改)。逐节点 io 改动随 GRAPH.md serialize 写回(各 phase frontmatter 的 io + 顶层 io)。"
+  },
+  {
+   "n": 28,
+   "cap": "any-io-import-file",
+   "design_ref": "n2-atom-28",
+   "current": "现状:偏差——任一节点的 i/o 界面已能导入文件(SchemaInferPanel 写到 resolveIoEditTarget 的逐节点 relPath),但导入写回 applyInputSchemaToGraph(schema-infer.ts)把字段存成普通 inline io.inputs schema、未打 {source:'file',path} 标记,故引擎的逐节点文件注入(_inject_declared_input_files,仅对 source:file 字段触发)不会注入这些字段——G2『导入即把文件字段在跑到该节点时注入状态机』未达成。",
+   "gap": "差距:让导入写回给字段打 {source:'file',path} 标记,复用已上线的引擎注入(_wrap_declared_input_files)在跑到该节点时注入。纯前端 lib(schema-infer.ts)+ InputPanel 改动;引擎注入契约已存在、不卡后端(原 prose 说『等后端契约』已过时)。",
+   "fe_status": "偏差",
+   "be_dep": "引擎注入契约已就绪(graph_assembler 的 _inject_declared_input_files/_wrap_declared_input_files 已实现),非后端阻塞;前端导入写回打 source:file 标记即可闭环。"
+  },
+  {
+   "n": 29,
+   "cap": "output-artifact-path",
+   "design_ref": "n2-atom-29",
+   "current": "现状:已实现且符合。前端 applyOutputArtifactPathToGraph(往 io.outputs.<字段> 写 {target:'artifact', path} 的纯函数)给字段写 artifact 落盘目标,空 path 清除目标;OutputPathRow 提交。引擎契约已落地:io/manager 认 target in ('artifact','artifact_manager') 走 artifact_saver,解析到 .workspace/runs/<id>/artifacts/<path>。格式只允许 md/json;只写文件名=默认落 .workspace 的 artifacts(G3)。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。前端配 artifact 目标(随 serialize)+ 引擎 io/manager 运行期落盘均已实现。后端实施手册 D2.2 RunArtifactStore=ok。"
+  },
+  {
+   "n": 30,
+   "cap": "subgraph-io-no-1to1",
+   "design_ref": "n2-atom-30",
+   "current": "现状:已实现且符合。引擎已删子图 io.outputs 1:1 FATAL(loader _validate_subgraph_io_contracts 不再比 parent_outputs≠child_outputs 报 [F-v3-subgraph-io-mismatch],commit 98b636c9,符合 skill-syntax §2.4/cutover 第⑦条);子图 io 像普通节点按父声明切片/合并,运行期 StateMapper 限制 outputs 边界(越界报受控 [F-v3-runtime-state-mapping-failed] 非崩溃)。前端本就无该校验,子图 io 编辑不再被编译期 1:1 硬阻塞。",
+   "gap": "符合设计,无需改(后端 1:1 fatal 已删)。",
+   "fe_status": "符合",
+   "be_dep": "已就绪。引擎删除子图 outputs 1:1 fatal 已落地(commit 98b636c9),子图 io 编辑不再被硬阻塞;子图 path 已按绝对 path 解析。"
+  }
+ ],
+ "plan": [
+  {
+   "step": 1,
+   "what": "#27 io-panel-perfield:把『input 面板』升级为逐节点的『i/o 面板』——选中任一节点都能编辑其 io.inputs/io.outputs 字段 + 配 artifact;沿用 InputPanel/SchemaInferPanel 组件扩成按选中节点编辑。",
+   "depends_on": "前端依赖:复用现成 io 字段编辑 + serialize 写回。后端不动(serialize 契约不变)。",
+   "why": "纯前端、后端契约不变;把面板从起点 input 扩成逐节点 i/o,是 #28 任一节点导入入口的承载基础,先做。",
+   "block": "前端独立"
+  },
+  {
+   "step": 2,
+   "what": "#28 any-io-import-file(前端导入入口):把 SchemaInferPanel 的导入入口挂到每个节点的 i/o 面板,任一节点 i/o 界面都能导入文件→写该节点 io.inputs。",
+   "depends_on": "前端依赖:step 1 的逐节点 i/o 面板;复用 SchemaInferPanel。运行期注入语义等后端(step 3)。",
+   "why": "导入入口随逐节点 i/o 面板(step 1)落地;紧随其后做,先把『任一节点可导入』的前端入口补上。",
+   "block": "前端独立"
+  },
+  {
+   "step": 3,
+   "what": "后端先行:① 删引擎 loader 的子图 io outputs 1:1 FATAL(F-v3-subgraph-io-mismatch 的 parent_outputs ≠ child_outputs),改子图从父状态机按 schema 过滤字段(G2,供 #30);子图 path 解析已收口到读绝对 path(D8.4,旧 target_skill 字面 key 已拒);② 把『任一节点 io 导入字段→运行期跑到该节点才注入』的注入时机契约定下来(引擎 io/manager,供 #28 运行期语义)。",
+   "depends_on": "后端契约(引擎 loader 子图 io 校验、io/manager 注入时机;后端实施手册 D8.4 子图 path 收口=partial)。这是 #30 与 #28 运行期语义的前置。",
+   "why": "后端先于前端铁律:#30 完全是后端待删项、#28 的运行期注入语义取决于后端 io/manager 注入契约;后端没动前端无活/会返工。排在依赖后端的项之前。",
+   "block": "等后端（后端先行）"
+  }
+ ],
+ "tests": [
+  {
+   "covers": "#25 input-field-edit(假文件已清)",
+   "atoms": [
+    25
+   ],
+   "shots": [
+    "改 io.inputs 字段名/类型直接落 GRAPH.md io.inputs.properties,无假文件死路径"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "改 io.inputs 字段 → 断言直接写 GRAPH.md io.inputs.properties。",
+    "回归:断言不再投影 input/schema.json、input/sample.json 假文件(IoContractView 只读 + 种子串)。",
+    "断言字段编辑不走死路径、不丢数据。"
+   ],
+   "layer2": [
+    "真跑:改一个 input 字段名,看 GRAPH.md io.inputs 更新、无假文件。"
+   ]
+  },
+  {
+   "covers": "#26 input-files-import",
+   "atoms": [
+    26
+   ],
+   "shots": [
+    "拖一段 JSON 进来,推断出 io.inputs schema 并写回"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "拖入 JSON 文本 → 断言 inferJsonSchemaFromText 推断字段 + 类型。",
+    "断言 applyInputSchemaToGraph 把 schema 写进 GRAPH.md io.inputs。",
+    "断言 TestInputsSection 与 io 契约分开(走 createTestInput/deleteTestInput)。"
+   ],
+   "layer2": [
+    "真跑:拖一个 JSON 文件,看 io.inputs schema 被推断写入。"
+   ]
+  },
+  {
+   "covers": "#27 io-panel-perfield(逐节点 i/o)",
+   "atoms": [
+    27
+   ],
+   "shots": [
+    "选中任一节点都能打开 i/o 面板编辑其 io.inputs/outputs + artifact(目标态)"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "RED:当前面板偏向起点 input + output artifact,非逐节点完整 i/o → 断言『任一节点都有 i/o 面板入口』失败。",
+    "GREEN:断言选中任一节点都能编辑其 io.inputs/io.outputs + artifact。",
+    "断言逐节点 io 改动随 serialize 写回对应 phase frontmatter。"
+   ],
+   "layer2": [
+    "真跑:选不同节点,看各自能开 i/o 面板编辑 io。"
+   ]
+  },
+  {
+   "covers": "#28 any-io-import-file(任一节点导入)",
+   "atoms": [
+    28
+   ],
+   "shots": [
+    "在一个非起点节点的 i/o 界面导入文件,写该节点 io.inputs"
+   ],
+   "fe_status": "偏差",
+   "layer1": [
+    "RED:当前导入入口主要在 input 节点侧 → 断言『任一节点 i/o 界面可导入』失败。",
+    "GREEN:断言任一节点 i/o 界面都能导入文件→写该节点 io.inputs。",
+    "运行期契约测(后端就位后):导入字段跑到该节点才注入状态机。"
+   ],
+   "layer2": [
+    "真跑:在一个中间节点 i/o 界面导入文件,看字段写入该节点 io.inputs。"
+   ]
+  },
+  {
+   "covers": "#29 output-artifact-path(G3)",
+   "atoms": [
+    29
+   ],
+   "shots": [
+    "给一个 output 字段配 xx.json 路径,跑后落 .workspace/artifacts/xx.json"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "给 output 字段填路径 → 断言 applyOutputArtifactPathToGraph 写 {target:'artifact', path};空 path 清除。",
+    "契约测:引擎 io/manager 认 target='artifact' 走 artifact_saver、解析到 .workspace/runs/<id>/artifacts/<path>。",
+    "断言格式只允许 md/json。"
+   ],
+   "layer2": [
+    "真跑:给一个 output 配 artifact 路径,跑一次看 .workspace/artifacts 落盘。"
+   ]
+  },
+  {
+   "covers": "#30 subgraph-io-no-1to1(G2 删 1:1)",
+   "atoms": [
+    30
+   ],
+   "shots": [
+    "改子图 outputs 与父不同时,不再被 outputs 1:1 FATAL 挡(后端删校验后)"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "RED:当前引擎 loader 取 parent_outputs/child_outputs,不等就报 F-v3-subgraph-io-mismatch → 断言『子图 io 改动不触发 outputs 1:1』失败。",
+    "GREEN(后端删校验后):断言改子图 io.outputs 与父不同不被 1:1 校验挡,子图 input 从状态机按 schema 过滤字段拿。",
+    "回归:子图按绝对 path 解析(旧 target_skill 字面 key 被拒为 deprecated)。"
+   ],
+   "layer2": [
+    "真跑(后端删校验后):改一个子图 outputs 与父不同,看编译不报 1:1 mismatch。"
+   ]
+  }
+ ]
 }

@@ -9,7 +9,6 @@ import {
   moveProviderInRole,
   modelGroupsReferenceMissingCredentialProviders,
   notableProviderKeyForDraft,
-  officialProviderProgressToastMessage,
   officialProviderTestSummary,
   officialProviderDrafts,
   providerDraftForAction,
@@ -652,22 +651,6 @@ describe('Add Provider flow helpers', () => {
 })
 
 describe('SettingsPageContent (api_keys)', () => {
-  it('describes official provider catalog progress without generation-probe wording', () => {
-    expect(officialProviderProgressToastMessage('Anthropic Official', {
-      job_id: 'job-1',
-      endpoint_id: 'anthropic-official',
-      status: 'running',
-      total_model_count: 8,
-      tested_model_count: 0,
-      verified_route_count: 0,
-      failed_model_count: 0,
-      catalog_only_count: 0,
-      message: 'Reading provider catalog.',
-      available_models: [],
-      available_sdks: ['anthropic_compatible'],
-    })).toBe('Loading Anthropic Official route candidates (8 listed)...')
-  })
-
   it('summarizes official provider Test results as catalog hydration, not generation probing', () => {
     expect(officialProviderTestSummary([
       { id: 'claude-haiku', status: 'verified' },

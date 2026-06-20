@@ -6,6 +6,7 @@ import {
   apiKeyInputClassName,
   apiKeyInputType,
   copyAvailableModelId,
+  representativeProviderUiState,
   routeTooltipLineStatus,
   sortOfficialRouteInfos,
   sortModelInfos,
@@ -97,7 +98,8 @@ describe("ProviderCard API key masking", () => {
     expect(html).toContain('aria-label="Copy API key"')
     expect(html).toContain("transition-none")
     expect(html).toContain("text-muted-foreground")
-    expect(html).toContain("Get Models")
+    // apikeys#24/#25: the discover action is now a unified "Test" for both kinds.
+    expect(html).not.toContain("Get Models")
     expect(html).toContain("Endpoint test")
     expect(html).toContain(">Test</button>")
   })
@@ -394,7 +396,7 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
     expect(html).toContain(">Test</button>")
   })
 
-  it("renders third-party API key before protocol and keeps endpoint test below base URL", () => {
+  it("collapses third-party editable fields to API Key -> Base URL -> Endpoint test with no Protocol row (apikeys#20)", () => {
     const html = renderToStaticMarkup(
       <ProviderCard
         draft={makeDraft({ base_url: "https://api.qnaigc.com/v1" })}
@@ -408,15 +410,17 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
     )
 
     const apiKeyIndex = html.indexOf(">API Key</label>")
-    const protocolIndex = html.indexOf(">Protocol</label>")
     const baseUrlIndex = html.indexOf(">Base URL</label>")
     const endpointTestIndex = html.indexOf(">Endpoint test</label>")
     expect(apiKeyIndex).toBeGreaterThan(-1)
-    expect(protocolIndex).toBeGreaterThan(apiKeyIndex)
-    expect(baseUrlIndex).toBeGreaterThan(protocolIndex)
     expect(baseUrlIndex).toBeGreaterThan(apiKeyIndex)
     expect(endpointTestIndex).toBeGreaterThan(baseUrlIndex)
-    expect(html).toContain("Get Models")
+    // apikeys#20: protocol is backend-auto-detected now — no manual Protocol dropdown.
+    expect(html).not.toContain(">Protocol</label>")
+    expect(html).not.toContain(`provider-protocol-${draft.id}`)
+    // apikeys#24/#25: the discover action is a unified "Test".
+    expect(html).not.toContain("Get Models")
+    expect(html).toContain(">Test</button>")
   })
 
   it("shows models discovered for the current params without rendering Connected", () => {
@@ -1113,7 +1117,9 @@ describe("ProviderCard provider capabilities", () => {
 })
 
 describe("ProviderCard protocol controls", () => {
-  it("renders protocol selection for third-party providers", () => {
+  it("does not render a manual protocol selector for third-party providers (apikeys#20)", () => {
+    // apikeys#20: the backend test entry auto-detects the protocol, so the manual
+    // dropdown is removed and third-party editable fields are name/base_url/api_key.
     const html = renderToStaticMarkup(
       <ProviderCard
         draft={makeDraft({ provider_type: "anthropic_compatible" })}
@@ -1126,9 +1132,11 @@ describe("ProviderCard protocol controls", () => {
       />,
     )
 
-    expect(html).toContain("Protocol")
-    expect(html).toContain("Anthropic compatible")
-    expect(html).toContain('data-slot="select-trigger"')
+    expect(html).not.toContain(">Protocol</label>")
+    expect(html).not.toContain('data-slot="select-trigger"')
+    expect(html).not.toContain(`provider-protocol-${draft.id}`)
+    expect(html).toContain(">API Key</label>")
+    expect(html).toContain(">Base URL</label>")
   })
 
   it("does not render protocol selection for official providers", () => {
@@ -1146,6 +1154,84 @@ describe("ProviderCard protocol controls", () => {
 
     expect(html).not.toContain("Protocol")
     expect(html).not.toContain("Anthropic compatible")
+  })
+})
+
+describe("ProviderCard 6-state ui_state projection (apikeys#30)", () => {
+  it("renders the backend-projected route ui_state inline via ProviderStateBadge", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={draft}
+        persisted={makePersisted({
+          available_models: [
+            { id: "openai/gpt-5", route_id: "p1:gpt-5", status: "verified", ui_state: "ready" },
+          ],
+        })}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="third-party"
+      />,
+    )
+
+    // The inline connectivity badge is the shared 6-state ProviderStateBadge driven
+    // off the real route.ui_state threaded through ModelInfo.ui_state (not a 4-state tag).
+    expect(html).toContain('data-provider-state-label="ready"')
+    expect(html).toContain("Ready")
+  })
+
+  it("renders the blue 'Previously Connected' state for historical_ready routes", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={draft}
+        persisted={makePersisted({
+          available_models: [
+            { id: "openai/gpt-5", route_id: "p1:gpt-5", status: "unverified_manual", ui_state: "historical_ready" },
+          ],
+        })}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="third-party"
+      />,
+    )
+
+    expect(html).toContain('data-provider-state-label="historical_ready"')
+    expect(html).toContain("Previously Connected")
+  })
+
+  it("does not render a state badge when no route carries a backend ui_state", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={draft}
+        persisted={makePersisted({
+          available_models: [{ id: "openai/gpt-5", route_id: "p1:gpt-5", status: "unverified_manual" }],
+        })}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="third-party"
+      />,
+    )
+
+    expect(html).not.toContain("data-provider-state-label=")
+  })
+
+  it("picks the most-usable representative state across the endpoint's routes", () => {
+    expect(representativeProviderUiState([
+      { id: "a", ui_state: "failed" },
+      { id: "b", ui_state: "ready" },
+      { id: "c", ui_state: "untested" },
+    ])).toBe("ready")
+    expect(representativeProviderUiState([
+      { id: "a", ui_state: "failed" },
+      { id: "b", ui_state: "historical_ready" },
+    ])).toBe("historical_ready")
+    expect(representativeProviderUiState([{ id: "a", status: "verified" }])).toBeNull()
+    expect(representativeProviderUiState([])).toBeNull()
   })
 })
 

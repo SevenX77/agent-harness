@@ -5,7 +5,7 @@ import { buildPutPayload, useDebouncedCredentialsSave } from "@/hooks/useDebounc
 import { useDebouncedRolesSave } from "@/hooks/useDebouncedRolesSave"
 import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-error-messages"
 import { useStudioEventStream } from "@/hooks/useStudioEventStream"
-import { deleteModelBundle, deleteRole, getCredentials, getModelGroups, getProviderModels, getRoles, testProviderEndpoint, type CredentialsState, type EndpointTestJobResponse, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
+import { deleteModelBundle, deleteRole, getCredentials, getModelGroups, getProviderModels, getRoles, testProviderEndpoint, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
 import { draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, providerCachedTestResult, providerDraftForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
@@ -120,17 +120,6 @@ function mergeModelInfos(left: ModelInfo[] = [], right: ModelInfo[] = []): Model
 
 function mergeStrings(left: string[] = [], right: string[] = []): string[] {
   return Array.from(new Set([...left, ...right]))
-}
-
-export function officialProviderProgressToastMessage(
-  providerName: string,
-  job: EndpointTestJobResponse,
-): string {
-  const total = job.total_model_count
-  if (total > 0) {
-    return `Loading ${providerName} route candidates (${total} listed)...`
-  }
-  return `Checking ${providerName} endpoint and provider catalog...`
 }
 
 function resetProviderTestOutcome(
@@ -671,21 +660,15 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     )
 
     try {
-      const handleOfficialProgress = (progress: ProviderTestResponse, job: EndpointTestJobResponse) => {
-        const latestDraft = providerDraftForAction(draftsRef.current, providerId)
-        if (!latestDraft || !providerTestParamsMatch(latestDraft, testedParams)) return
-        setCredentials((current) => upsertProviderModelsListResponse(current, latestDraft, progress))
-        toast.loading(
-          officialProviderProgressToastMessage(latestDraft.name || "provider", job),
-          { id: toastId },
-        )
-      }
+      // apikeys#24/#25: official and third-party share the single synchronous
+      // /endpoints/{id}/test entry now, so there is no async job to stream
+      // progress from — the call resolves once with the authoritative result.
       const response = await getProviderModels({
         id: draft.id,
         provider_type: draft.provider_type,
         api_key: draft.api_key.trim(),
         base_url: draft.base_url || undefined,
-      }, isOfficial ? { onProgress: handleOfficialProgress } : undefined)
+      })
 
       const latestDraft = providerDraftForAction(draftsRef.current, providerId)
       if (!latestDraft || !providerTestParamsMatch(latestDraft, testedParams)) {

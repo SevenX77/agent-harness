@@ -8,8 +8,11 @@ from pathlib import Path
 from typing import Any
 
 from graph_agent.core.compiler import compile_skill
+from graph_agent.core.exceptions import ErrorPayload
 from graph_agent.core.runner import run_skill
 from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol
+
+_GOLDEN_STALE_FIELDS_CODE = "[F-v3-golden-stale-fields]"
 
 
 def _changed_diff(path: str, *, actual: Any, expected: Any) -> dict[str, Any]:
@@ -144,6 +147,49 @@ def get_required_outputs(compiled_skill: Any, phase_id: str) -> list[str]:
     return []
 
 
+def _output_fields(payload: Any) -> list[str]:
+    if not isinstance(payload, dict):
+        return []
+    return sorted(str(key) for key in payload)
+
+
+def _stale_fields(expected_output: Any, required_outputs: list[str]) -> list[str]:
+    if not isinstance(expected_output, dict):
+        return list(required_outputs)
+    return [field for field in required_outputs if field not in expected_output]
+
+
+def _golden_stale_fields_error(
+    *,
+    baseline_id: str,
+    case_id: str,
+    phase_id: str,
+    case_file: Path,
+    expected_output: Any,
+    required_outputs: list[str],
+    stale_fields: list[str],
+) -> dict[str, Any]:
+    payload = ErrorPayload(
+        code=_GOLDEN_STALE_FIELDS_CODE,
+        message=(
+            "Golden expected output is missing required output fields "
+            f"for phase {phase_id!r}: {', '.join(stale_fields)}"
+        ),
+        phase_id=phase_id,
+        field_path="expected_output",
+        source_path=str(case_file),
+        details={
+            "baseline_id": baseline_id,
+            "case_id": case_id,
+            "phase_id": phase_id,
+            "stale_fields": stale_fields,
+            "required_output_fields": list(required_outputs),
+            "expected_output_fields": _output_fields(expected_output),
+        },
+    )
+    return payload.model_dump(mode="json")
+
+
 def evaluate_golden_baseline_impl(
     skill_path: str | Path,
     *,
@@ -167,7 +213,7 @@ def evaluate_golden_baseline_impl(
         if not case_file.is_file():
             raise FileNotFoundError(f"case file not found: {case_file}")
         with open(case_file, encoding="utf-8") as f:
-            cases.append(json.load(f))
+            cases.append((case_file, json.load(f)))
 
     # Compile the skill using compiler
     compiled_skill = compile_skill(skill_path, skill_resolver=skill_resolver)
@@ -177,7 +223,7 @@ def evaluate_golden_baseline_impl(
     failed_count = 0
     stale_count = 0
 
-    for case in cases:
+    for case_file, case in cases:
         case_id = case["case_id"]
         phase_id = case["phase_id"]
         inputs = case["inputs"]
@@ -185,12 +231,22 @@ def evaluate_golden_baseline_impl(
 
         # 检查是否过期(stale)
         required_outputs = get_required_outputs(compiled_skill, phase_id)
-        stale_fields = [f for f in required_outputs if f not in expected_output]
+        stale_fields = _stale_fields(expected_output, required_outputs)
+        error = None
 
         if stale_fields:
             status = "stale"
             score = 0.0
             diff = []
+            error = _golden_stale_fields_error(
+                baseline_id=baseline_id,
+                case_id=case_id,
+                phase_id=phase_id,
+                case_file=case_file,
+                expected_output=expected_output,
+                required_outputs=required_outputs,
+                stale_fields=stale_fields,
+            )
             stale_count += 1
         else:
             # 运行 skill 获得实际输出
@@ -203,7 +259,7 @@ def evaluate_golden_baseline_impl(
                 **inputs
             )
 
-            actual_output = extract_actual_output(res.context, phase_id, list(expected_output.keys()))
+            actual_output = extract_actual_output(res.context, phase_id, _output_fields(expected_output))
             diff = diff_outputs(actual_output, expected_output)
             score = calculate_score(actual_output, expected_output)
 
@@ -221,6 +277,7 @@ def evaluate_golden_baseline_impl(
             "score": score,
             "diff": diff,
             "stale_fields": stale_fields,
+            "error": error,
         })
 
     report = {

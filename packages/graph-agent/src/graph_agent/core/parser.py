@@ -195,7 +195,31 @@ def _locate_list_segment(
 def _fatal(path: Path, line: int, message: str) -> NoReturn:
     code = "[F-v3-graph-phase-id-invalid]"
     detail = f"{path}:{line} {message}"
-    raise SkillLoadError(detail, payload=make_error_payload(code, detail, source_path=path))
+    raise SkillLoadError(
+        detail,
+        payload=make_error_payload(code, detail, source_path=_relative_source_path(path)),
+    )
+
+
+def _relative_source_path(path: Path) -> str:
+    parts = path.parts
+    if path.name == "GRAPH.md":
+        return "GRAPH.md"
+    for anchor in ("phases", "io"):
+        if anchor in parts:
+            index = len(parts) - 1 - parts[::-1].index(anchor)
+            return Path(*parts[index:]).as_posix()
+    return path.as_posix()
+
+
+def _parse_error_code(path: Path) -> str:
+    if path.name == "LOGIC.md":
+        return "[F-v3-logic-schema-unknown-field]"
+    if path.name == "SUBGRAPH.md":
+        return "[F-v3-subgraph-schema-unknown-field]"
+    if path.name == "SKILL.md":
+        return "[F-v3-agent-schema-unknown-field]"
+    return "[F-v3-graph-schema-unknown-field]"
 
 
 def parse_markdown_parts(path: Path | str) -> tuple[dict[str, Any], str, dict[str, int]]:
@@ -203,7 +227,20 @@ def parse_markdown_parts(path: Path | str) -> tuple[dict[str, Any], str, dict[st
     p = Path(path)
     content = p.read_text(encoding="utf-8")
 
-    frontmatter = _parse_frontmatter(content)
+    try:
+        frontmatter = _parse_frontmatter(content)
+    except SkillLoadError as exc:
+        if exc.payload is not None:
+            raise
+        message = str(exc)
+        raise SkillLoadError(
+            message,
+            payload=make_error_payload(
+                _parse_error_code(p),
+                message,
+                source_path=_relative_source_path(p),
+            ),
+        ) from exc
     if "schema_version" in frontmatter:
         frontmatter["schema_version"] = str(frontmatter["schema_version"]).strip()
     body = _strip_frontmatter(content)

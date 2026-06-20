@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
 import { toast } from 'sonner'
 import { initializeRuntimeConfig } from '../config/runtime'
+import * as tauriModule from './tauri'
 import {
   checkpointWorkspaceFile,
   clearWorkspaceCheckpoint,
@@ -16,7 +17,6 @@ import {
   selectSkillDirectory,
   workspacePathExists,
   writePublishPackage,
-  writeGoldenBaseline,
   writeWorkspaceFile,
 } from './tauri'
 
@@ -249,28 +249,9 @@ describe('writePublishPackage', () => {
   })
 })
 
-describe('writeGoldenBaseline', () => {
-  it('passes the complete golden baseline payload to one Tauri command', async () => {
-    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
-    await markRuntimeReady()
-    mockInvoke.mockResolvedValue(undefined)
-
-    await expect(
-      writeGoldenBaseline('/tmp/workspace', {
-        resultPath: '.workspace/golden/run-1/result.json',
-        resultContent: '{\n  "ok": true\n}',
-        metadataPath: '.workspace/golden/run-1/golden_metadata.json',
-        metadataContent: '{"id":"run-1"}',
-      }),
-    ).resolves.toBeUndefined()
-
-    expect(mockInvoke).toHaveBeenCalledWith('write_golden_baseline', {
-      workspaceRoot: '/tmp/workspace',
-      resultPath: '.workspace/golden/run-1/result.json',
-      resultContent: '{\n  "ok": true\n}',
-      metadataPath: '.workspace/golden/run-1/golden_metadata.json',
-      metadataContent: '{"id":"run-1"}',
-    })
+describe('legacy golden baseline writer', () => {
+  it('does not expose the obsolete dedicated writeGoldenBaseline helper', () => {
+    expect(tauriModule).not.toHaveProperty('writeGoldenBaseline')
   })
 })
 

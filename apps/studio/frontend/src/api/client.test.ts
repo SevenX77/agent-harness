@@ -32,7 +32,6 @@ const runtimeMocks = vi.hoisted(() => ({
 const tauriMocks = vi.hoisted(() => ({
   readWorkspaceFile: vi.fn(),
   writeWorkspaceFile: vi.fn(),
-  writeGoldenBaseline: vi.fn(),
   deleteWorkspacePath: vi.fn(),
 }))
 
@@ -62,7 +61,6 @@ describe('api client auth token', () => {
     runtimeMocks.isTauriRuntime.mockReturnValue(false)
     tauriMocks.readWorkspaceFile.mockReset()
     tauriMocks.writeWorkspaceFile.mockReset()
-    tauriMocks.writeGoldenBaseline.mockReset()
     tauriMocks.deleteWorkspacePath.mockReset()
   })
 
@@ -699,7 +697,6 @@ describe('api client auth token', () => {
       null,
       { createIfAbsent: true },
     )
-    expect(tauriMocks.writeGoldenBaseline).not.toHaveBeenCalled()
   })
 
   it('plans imported local-workspace golden promotion by API skill id and writes to the absolute root', async () => {
@@ -787,7 +784,6 @@ describe('api client auth token', () => {
       null,
       { createIfAbsent: true },
     )
-    expect(tauriMocks.writeGoldenBaseline).not.toHaveBeenCalled()
   })
 
   it('writes imported local-workspace test inputs to the absolute root with no-clobber', async () => {
@@ -974,7 +970,6 @@ describe('api client auth token', () => {
         fallbackHeader: 'browser',
       },
     ])
-    expect(tauriMocks.writeGoldenBaseline).not.toHaveBeenCalled()
   })
 
   it('includes node_id in the browser golden request for a per-node promote (atom #32)', async () => {

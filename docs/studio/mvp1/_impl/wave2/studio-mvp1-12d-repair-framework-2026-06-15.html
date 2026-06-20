@@ -241,7 +241,12 @@ const S0_PAGE = {
     ['Wave4 focused guards @4e6aa330','Backend source-writer/runtime/gateway/store/resume/Copilot/Publish/native-fs gates green；graph-agent source-path/storage/public API gates green；frontend EventEnvelope、node lights、resume validity、HitL、edge tamper、Timeline artifact identity、Copilot judge、client guards green。'],
     ['Wave4 browser验收 @4e6aa330','Clean 4e6aa330 snapshot + Vite 5175 + Chromium at 768x900：edge-publish、copilot-judge、hitl-resume 三段真页面点击均通过；截图证据在 /tmp/studio-wave4-edge-publish.png、/tmp/studio-wave4-copilot-judge.png、/tmp/studio-wave4-hitl-resume.png。'],
     ['Wave4 reviewer closure @4e6aa330','Wave3 audit 两个 blocker 已关闭：graph-agent full suite 证明 story-deconstruction target_skill 回流已修；gateway strict mypy 证明 resolver 红灯已修。run-trace.spec.ts 仍是旧 raw CallbackEvent fixture，归类为 stale e2e fixture，不是当前 EventEnvelope 产品路径 blocker。'],
-    ['Settings stash status','Wave4 临时 stash 基于 4e6aa330；当前分支已前进到 50d55e5e，直接 pop 会与 Settings 文件冲突，所以未强行合并，stash 保留给 Settings 线单独处理。']
+    ['Settings stash status','Wave4 临时 stash 基于 4e6aa330；当前分支已前进到 50d55e5e，直接 pop 会与 Settings 文件冲突，所以未强行合并，stash 保留给 Settings 线单独处理。'],
+    ['Wave5 Gateway D5 test/probe closure','D5 test/probe 已迁入正确 worktree：公共 endpoint/model/route probe 内核落在 packages/graph-agent-gateway，Studio llm.py 只保留 HTTP/DTO 转发，endpoint test job 官方-only 门禁已删除，非官方 provider 也走统一 Gateway test；Copilot SDK test 仍留 Studio 本地 SDK 会话边界。Focused gate：Gateway provider_probe 3 passed；Studio registry test/probe 25 passed；Copilot SDK boundary 12 passed。'],
+    ['Wave5 Gateway D6/P8 closure','D6 ⑦B/⑦F/⑦H 已迁入正确 worktree：ProviderRoute.ui_state 裸 route DTO 六态、RoleEntry.bundle_id + ModelBundle 引用/delta materialize、废字段拒收契约均落在 packages/graph-agent-gateway；P8 临时 role 解析路径随同一 materialize 内核变绿。Focused gate 80 passed；Gateway 全包 gate：.venv/bin/python -m pytest packages/graph-agent-gateway/tests => 240 passed / 1 xfailed。'],
+    ['Wave5 Engine D7 stale-fields closure','D7 eval 期 [F-v3-golden-stale-fields] 已迁入正确 worktree：错误码 registry + feature owner + headless golden eval report error details。RED 先行确认缺 case error/registry owner；focused gate：uv run pytest tests/core/test_ws_e7_golden_eval_red.py tests/core/test_error_payload_contract.py tests/core/test_ws_e3_error_registry_metadata_red.py tests/test_round28_invariant_guards.py::test_round28_error_registry_keeps_f_v3_metadata_shape -q => 34 passed；ruff check 相关实现/测试 => All checks passed。'],
+    ['Wave5 D3/D8 G1 closure','G1 定位轴已迁移到正确 worktree：graph-agent compile/parse 真实错误填充相对 source_path 与 field_path；public compile 的 typed payload 与 error_payload wire 字典均保留两轴。Focused gate：test_compiler_line_locations.py + test_error_payload_contract.py => 30 passed；compile/error 扩展集 => 62 passed。'],
+    ['Wave5 Engine D10/D11 HitL closure','HitL 暂停/恢复事件、per-node checkpoint validity 与 from_phase 节点续跑已迁入正确 worktree：InterruptedEvent/ResumedEvent/RunStartedEvent 真实发射并携带 checkpoint_id、checkpoint_ns、namespace/ns，暂停 RunEndedEvent 标记 interrupted，恢复在 ToolMessage 注入后、续跑前发 resumed；from_phase 选择目标节点前 checkpoint，真跑证明上游 prepare 不重跑。Graph-agent focused gate：160 passed；resume/golden e2e：1 passed；ruff 相关实现/测试：All checks passed。']
   ],
   waves:[
     ['Wave 1 · 边界先行','先修 D1、D4、D5、D6 这类能限制旧路复发的模块边界、provider/fallback/materialize owner。',{nodes:['d1','d4','d5','d6']}],
@@ -253,18 +258,18 @@ const S0_PAGE = {
       ['reviewer findings 修复/关闭','ok'],
       ['HTML 状态页同步最终证据','ok']
     ]}],
-    ['Wave 5 · MVP1 前端驱动的后端 follow-up（来自前端逐节点实施核验 2026-06-19）','前端逐节点核验暴露的、落在 12D 域内但「ok 门」未 drill 到端点/字段粒度的后端 gap，需对应后端团队补——下列 11 项均「未开始」。',{tasks:[
-      ['D3/D8 · G1 定位轴：compile 错误填满 field_path/source_path + 不在 sidecar 边界(_safe_adapter_error_payload)降级','todo'],
-      ['D5 · test/probe 内核归 Gateway + 删官方-only 门禁 + 统一 test 入口 + 束 test 端点（Copilot SDK test 留 Studio）','todo'],
-      ['D6 · 6 态投到裸 route DTO（ProviderRoute.ui_state）','todo'],
-      ['D6 · 束=引用 + delta materialize（RoleEntry.bundle_id）','todo'],
-      ['D6 · role intent schema 清理（删 inherit / ModelGroupIntent / cost_priority）','todo'],
-      ['D6 · P8 临时 role 解析路径（依赖束 materialize）','todo'],
+    ['Wave 5 · MVP1 前端驱动的后端 follow-up（来自前端逐节点实施核验 2026-06-19）','前端逐节点核验暴露的、落在 12D 域内但「ok 门」未 drill 到端点/字段粒度的后端 gap，需对应后端团队补——当前 10 项已完成，1 项仍未开始。',{tasks:[
+      ['D3/D8 · G1 定位轴：compile 错误填满 field_path/source_path + 不在 sidecar 边界(_safe_adapter_error_payload)降级','ok'],
+      ['D5 · test/probe 内核归 Gateway + 删官方-only 门禁 + 统一 test 入口 + 束 test 端点（Copilot SDK test 留 Studio）','ok'],
+      ['D6 · 6 态投到裸 route DTO（ProviderRoute.ui_state）','ok'],
+      ['D6 · 束=引用 + delta materialize（RoleEntry.bundle_id）','ok'],
+      ['D6 · role intent schema 清理（删 inherit / ModelGroupIntent / cost_priority）','ok'],
+      ['D6 · P8 临时 role 解析路径（依赖束 materialize）','ok'],
       ['D7 · per-node golden 契约（SetGoldenReq.node_id + GoldenBaseline.cases 投影 + 单节点 plan；DTO 归 sidecar、落盘走 Rust native-fs）','todo'],
-      ['D7 · eval 期 [F-v3-golden-stale-fields] 码注册并发射','todo'],
-      ['D10/D11 · HitL Interrupted/ResumedEvent 真发射 + 事件带 checkpoint_id/ns','todo'],
-      ['D10 · per-node checkpoint validity（脏态置灰，非全局判定）','todo'],
-      ['D10 · 节点级 1..X-1 不重跑编排','todo']
+      ['D7 · eval 期 [F-v3-golden-stale-fields] 码注册并发射','ok'],
+      ['D10/D11 · HitL Interrupted/ResumedEvent 真发射 + 事件带 checkpoint_id/ns','ok'],
+      ['D10 · per-node checkpoint validity（脏态置灰，非全局判定）','ok'],
+      ['D10 · 节点级 1..X-1 不重跑编排','ok']
     ]}]
   ],
   routine:[
@@ -466,7 +471,7 @@ const D_TREE = [
     id:'d5', code:'D5', title:'Gateway 凭证、route、fallback', status:'ok',
     why:'D5 把“选哪个模型、凭证怎么拿、失败后换谁”放到 Gateway。旧路让 Studio 或 Copilot 自己算 fallback，看似可控，实际会让每个消费方都复制一份路由大脑。',
     owner:'Gateway 拥有 credential resolver、route handoff、fallback decision。Studio Settings/Copilot/Engine SPI consumer 只提交意图、消费结果。',
-    current:'Wave 1 re-repair 已恢复 D5：`decide_fallback()` 消费 Gateway `registry/error_classification` contract，覆盖 fail-fast、fallback-allowed、retry-same、give-up，不在 Studio/Copilot 复制状态码策略。Studio adapter credential filtering 保留 `credential_ref`、runtime fields、metadata/snapshot_version，只剥 display/authoring 字段；no-secret `credential_ref` route 已作为 canary 覆盖 resolver/materialize/Copilot 消费。Gemini 只读审计确认 fallback SSOT 与 credential_ref propagation 无阻塞 finding。',
+    current:'Wave 1 re-repair 已恢复 D5：`decide_fallback()` 消费 Gateway `registry/error_classification` contract，覆盖 fail-fast、fallback-allowed、retry-same、give-up，不在 Studio/Copilot 复制状态码策略。Studio adapter credential filtering 保留 `credential_ref`、runtime fields、metadata/snapshot_version，只剥 display/authoring 字段；no-secret `credential_ref` route 已作为 canary 覆盖 resolver/materialize/Copilot 消费。Gemini 只读审计确认 fallback SSOT 与 credential_ref propagation 无阻塞 finding。2026-06-19 Wave5 follow-up 已把 provider endpoint/model/route test/probe 内核下沉到 `graph_agent_gateway.registry.provider_probe`：Studio `llm.py` 仅做 HTTP/DTO 转发，endpoint test job 不再有 official-only 门禁，统一 Gateway test 覆盖官方与非官方 provider，并按 endpoint/model/route 束级探测；Copilot SDK test 明确保留 Studio，因为它依赖 Studio 本地 SDK session 而非 Gateway provider route 模型。Focused gate：Gateway provider_probe 3 passed；Studio registry test/probe 25 passed；Copilot SDK boundary 12 passed。',
     plan:'先冻结 Gateway 的 RouteDecision、CredentialResolution、FallbackPlan 三个 request/result/error 合同；再把 resolve_routes、resolve_credential、decide_fallback 的 live path 全部迁到 Gateway owner；随后补 Studio consumption contract，Settings/Run/Trace 只能消费 Gateway projection，不能自算 ready/failed/needs_setup 或 fallback；最后用多 route、缺凭证、give_up 和 secret never leaves Gateway 的 App 验收闭环。',
     children:[
       child('d5_resolve_routes','D5.1','resolve_routes role 到 route chain','ok',
@@ -515,7 +520,7 @@ const D_TREE = [
     id:'d6', code:'D6', title:'6 态与 materialize', status:'ok',
     why:'D6 解决 Settings 里最容易漂移的状态问题。Provider 是否 ready、为何 failed、role 如何物化为 fallback_chain，必须由 Gateway 统一计算，否则前端、router、copilot 会各说各话。',
     owner:'Gateway 拥有 Projection state machine 和 materialize；Studio Settings UI 只渲染 DTO、保存用户意图、显示状态。',
-    current:'Wave 1 re-repair 已恢复 D6：credential_ref-only endpoint 可通过 Studio adapter filtering、Gateway materialize、projection/role-fit 和 Copilot runtime 消费；ordinary Settings save 的前端 payload 不含 `status/last_test_*`，后端普通 upsert 也会剥离这些测试事实并保留现有 backend-owned status。状态只能由 backend test/probe 写入口更新。Gemini 只读审计确认 endpoint facts save filtering 无阻塞 finding。',
+    current:'Wave 1 re-repair 已恢复 D6：credential_ref-only endpoint 可通过 Studio adapter filtering、Gateway materialize、projection/role-fit 和 Copilot runtime 消费；ordinary Settings save 的前端 payload 不含 `status/last_test_*`，后端普通 upsert 也会剥离这些测试事实并保留现有 backend-owned status。2026-06-19 ⑦B/⑦F/⑦H 已在正确 worktree 补齐：`ProviderRoute.ui_state` 显式承载 ready/historical_ready/untested/failed/cooling_down/off 六态，`RoleEntry.bundle_id` + `ModelBundle` 将束引用和角色 delta materialize 成最终 fallback/runtime_settings，Gateway 裸 DTO 继续拒收 inherit / ModelGroupIntent / cost_priority 等 authoring 废字段；P8 临时 role 解析路径随同一 materialize 内核通过。Gateway focused gate 80 passed，全包 gate 240 passed / 1 xfailed。',
     plan:'先把 D6 文档和测试门禁对齐 Gateway SSOT 六态：ready、historical_ready、untested、failed、cooling_down、off；再保持 materialize_role(request)、RoleIntent schema、RuntimeSettings schema 与 MaterializedRole result 的 owner 在 Gateway；随后清理 Settings/Copilot 的消费边界，确保 Studio 只渲染 DTO，不使用 routeStatusOverrides/mock roles/legacy mapper 参与事实判断；最后继续推进 import draft/evidence 公共内核下沉。',
     children:[
       child('d6_six_states','D6.1','Projection state machine canonical projection','ok',
@@ -709,17 +714,17 @@ const D_TREE = [
       child('d10_node_resume','D10.2','节点级 Resume 与 checkpoint 复用','ok',
         '用户修复失败节点后，不应该从 input 重新烧完整条链路。节点级 resume 的价值就是复用上游 checkpoint。',
         'Studio 到 Engine 的节点级 resume 请求必须携带 from_node 或外部别名 from=<node_id>|<node_id>:<iter_index>，Engine 通过 RuntimeStateStore/state history 定位该节点前一个有效 checkpoint，复用上游并重跑目标节点及下游。',
-        '当前 ok：底层 resume_skill、EngineAdapter.resume 与 Studio resume route 支持 checkpoint_id/checkpoint_ns、resume_from_node_id/resume_to_node_id 和 human_response；frontend resumeRun 也能发送这些字段。Wave3 新增真实 A->B->C 证据：resume_from_node_id="beta"、resume_to_node_id="gamma" 从 beta 后 checkpoint 恢复，只触发 gamma phase_start，alpha/beta 不重跑；resume_to_node_id 若不匹配 checkpoint next node 会结构化拒绝；从 beta checkpoint 覆盖 alpha 输出字段会被 dirty upstream guard 拒绝。Studio 新增 resume validity 查询/投影：EngineAdapter.resume_validity 对比 snapshot artifact identity 与当前 compile artifact identity，dirty upstream/source-change 返回 resume_allowed=false/reason=dirty_upstream；Properties failed-node debug bar 显示 Checkpoint validity，有效时 Resume node 可点，dirty/missing/invalid 时置灰。',
+        '当前 ok：底层 resume_skill、EngineAdapter.resume 与 Studio resume route 支持 checkpoint_id/checkpoint_ns、resume_from_node_id/resume_to_node_id、from_phase 和 human_response；frontend resumeRun 也能发送这些字段。Wave3 新增真实 A->B->C 证据：resume_from_node_id="beta"、resume_to_node_id="gamma" 从 beta 后 checkpoint 恢复，只触发 gamma phase_start，alpha/beta 不重跑；2026-06-19 续跑细化新增 from_phase="finish" 真跑证据，Engine 解析目标节点前 checkpoint 后只触发 finish phase_start，prepare 不重跑。resume_to_node_id 若不匹配 checkpoint next node 会结构化拒绝；从 beta checkpoint 覆盖 alpha 输出字段会被 dirty upstream guard 拒绝。Studio 新增 resume validity 查询/投影：EngineAdapter.resume_validity 对比 snapshot artifact identity 与当前 compile artifact identity，dirty upstream/source-change 返回 resume_allowed=false/reason=dirty_upstream；Properties failed-node debug bar 显示 Checkpoint validity，有效时 Resume node 可点，dirty/missing/invalid 时置灰。',
         '保持 checkpoint validity 查询/投影为只读解释层，不改变 production resume run-by-artifact；真正 resume 仍从 RuntimeStateStore artifact_ref/checkpointer 恢复，不因查询 current source 而重编译运行。',
-        ['后端 RED/GREEN：`test_resume_validity_reports_dirty_upstream_without_source_paths` 锁定 /resume/validity route payload/response，断言不出现 source_path/skill_path；`test_engine_resume_validity_denies_dirty_upstream_when_current_artifact_identity_changed` 证明 fingerprint/content_hash 漂移会 deny-by-default。','Frontend RED/GREEN：`client.test.ts` 覆盖 getResumeValidity POST checkpoint/from/to 且不发 source path；`node-resume.test.ts` 自动从 EventEnvelope 发现最新 node checkpoint；`PropertiesPanel.resume-validity.test.tsx` 覆盖 dirty_upstream disabled 与 ok enabled。','Graph-agent RED/GREEN：`test_node_resume_from_abc_checkpoint_reruns_only_downstream_node`、`test_node_resume_rejects_context_override_from_dirty_upstream_node`、`test_resume_skill_public_api_signature_is_locked` 保持真实节点 resume/dirty upstream guard。','Browser manual gate：Playwright+Vite mock backend 打开真实 Studio，Run 后点击 review failed node，Properties 显示 Checkpoint validity、dirty_upstream 和 Resume disabled；768x900 窄屏复验无横向溢出。','Focused/fresh gates：backend resume/validity gate 9 passed；backend loopback gate 20 passed；frontend D10 validity/debug focused gate 66 passed；2026-06-18 audit follow-up gates graph-agent full suite 1351 passed/2 skipped/3 xfailed/3 xpassed、gateway strict mypy 34 source files success、gateway pytest 224 passed/1 xfailed；此前 frontend 740 passed/typecheck 0、backend 904 passed/1 skipped 仍保持。'],
+        ['后端 RED/GREEN：`test_resume_validity_reports_dirty_upstream_without_source_paths` 锁定 /resume/validity route payload/response，断言不出现 source_path/skill_path；`test_engine_resume_validity_denies_dirty_upstream_when_current_artifact_identity_changed` 证明 fingerprint/content_hash 漂移会 deny-by-default。','Frontend RED/GREEN：`client.test.ts` 覆盖 getResumeValidity POST checkpoint/from/to 且不发 source path；`node-resume.test.ts` 自动从 EventEnvelope 发现最新 node checkpoint；`PropertiesPanel.resume-validity.test.tsx` 覆盖 dirty_upstream disabled 与 ok enabled。','Graph-agent RED/GREEN：`test_node_resume_from_abc_checkpoint_reruns_only_downstream_node`、`test_node_resume_rejects_context_override_from_dirty_upstream_node`、`test_resume_skill_public_api_signature_is_locked` 保持真实节点 resume/dirty upstream guard。','2026-06-19 续跑细化 RED/GREEN：`test_resume_from_phase_does_not_rerun_successful_upstream_phases` 证明从 finish 续跑不会重跑 prepare；`test_checkpoint_validity_is_node_scoped_not_global` 证明 branch_b 脏态只置灰 branch_b 与 assemble，prepare/branch_a 保持可恢复；`test_resume_events_include_resolved_checkpoint_id` 锁定 RunStarted/ResumedEvent checkpoint_id。','Browser manual gate：Playwright+Vite mock backend 打开真实 Studio，Run 后点击 review failed node，Properties 显示 Checkpoint validity、dirty_upstream 和 Resume disabled；768x900 窄屏复验无横向溢出。','Focused/fresh gates：backend resume/validity gate 9 passed；backend loopback gate 20 passed；frontend D10 validity/debug focused gate 66 passed；2026-06-19 graph-agent focused gate `uv run pytest packages/graph-agent/tests/core/test_ws_e7_resume_contract_red.py packages/graph-agent/tests/core/test_checkpoint_validity_red.py packages/graph-agent/tests/e2e/test_ws_e7_golden_resume.py packages/graph-agent/tests/core/test_ws_e5_checkpoint_inner_red.py packages/graph-agent/tests/callbacks/test_events.py packages/graph-agent/tests/callbacks/test_hitl_event_contracts.py packages/graph-agent/tests/core/test_hitl_event_emission.py packages/graph-agent/tests/test_public_api_contract.py -q` => 160 passed；2026-06-18 audit follow-up gates graph-agent full suite 1351 passed/2 skipped/3 xfailed/3 xpassed、gateway strict mypy 34 source files success、gateway pytest 224 passed/1 xfailed；此前 frontend 740 passed/typecheck 0、backend 904 passed/1 skipped 仍保持。'],
         ['启动 Studio，打开 A->B->C 测试 skill，让 B 失败；点击画布 B 节点，debug bar 出现 Resume；点击后请求含 B node id，Trace 中 A 不新增执行记录，B/C 新增。','同一 run 失败后修改 A 源码或输入，再选中 B/C；Resume 置灰，悬停/点击显示 checkpoint invalid/dirty upstream，不能发起 resume。','删除或破坏 checkpoint 后在失败节点点击 Resume；UI 显示 checkpoint.not_found/invalid，节点保持 failed，不退化为从原始 input 全量重跑。','2026-06-18 手工验收：Playwright 点击真实页面 failed review 节点，Resume disabled/dirty_upstream 可见。'],
         ['resume 精准到节点。','上游 checkpoint 可复用且可失效。','前端有真实失败节点 Resume 工作流。']),
       child('d10_hitl','D10.3','HitL answer injection','ok',
         'Agent 请求人工输入时，运行不是失败，而是暂停等待。UI 必须把用户答案注入后继续。',
         'Engine 暂停时应通过 EventEnvelope 发 hitl/interrupted payload，Studio 节点 debug bar 渲染问题/选项/输入框；提交 resume 时发送 human_response:{content, tool_call_id?}，并保留 from/checkpoint 定位。',
-        '当前 ok：Engine resume_skill 已接受 human_response 并把 content 写成 ToolMessage；Studio ResumeReq/route 和 frontend resumeRun 可传 checkpoint/from/to 与 human_response:{content,tool_call_id}；TracePanel 可从 interrupted/hitl/pause EventEnvelope 渲染问题、选项、输入框并提交结构化答案，Workspace 将其映射到同一 resume API。多个 pending_tool_calls 会显示 Pending tool calls 选择区，未选择具体 tool_call_id 时 Submit answer 禁用并提示，避免注入错误 checkpoint/tool call。POST resume 成功后 active stream 追加 `resume_applied` EventEnvelope，payload 含 checkpoint/from/to、context_override_keys、human_response_tool_call_id，并同步 metadata。',
+        '当前 ok：Engine resume_skill 已接受 human_response 并把 content 写成 ToolMessage；2026-06-19 引擎真发射补齐：run_skill 暂停时从 checkpointer 定位 pending HitL checkpoint，发 InterruptedEvent(checkpoint_id, checkpoint_ns, namespace/ns, question/options) 并以 RunEnded(interrupted) 收尾；resume_skill 在继续执行前发 ResumedEvent(checkpoint_id, checkpoint_ns, resumed_from_phase)。Studio ResumeReq/route 和 frontend resumeRun 可传 checkpoint/from/to 与 human_response:{content,tool_call_id}；TracePanel 可从 interrupted/hitl/pause EventEnvelope 渲染问题、选项、输入框并提交结构化答案，Workspace 将其映射到同一 resume API。多个 pending_tool_calls 会显示 Pending tool calls 选择区，未选择具体 tool_call_id 时 Submit answer 禁用并提示，避免注入错误 checkpoint/tool call。POST resume 成功后 active stream 追加 `resume_applied` EventEnvelope，payload 含 checkpoint/from/to、context_override_keys、human_response_tool_call_id，并同步 metadata。',
         '多个 pending tool call 必须显式选择 tool_call_id；续跑后通过同一 EventEnvelope/WS/trace 写入 answer injected/resumed 与后续 phase events。',
-        ['Engine 单测：含 pending tool call checkpoint 调 resume_skill(human_response={content,tool_call_id})，断言 ToolMessage 写入且只更新目标 checkpoint。','Engine 单测：多个 pending tool call 缺 tool_call_id 或 id 不匹配必须失败，并返回可映射结构化错误。','Studio TestClient：POST resume monkeypatch EngineAdapter.resume，断言 human_input/tool_call_id/from/checkpoint 按契约传递，不只断言非 501。','Wave3 RED/GREEN：`test_resume_endpoint_appends_resume_audit_event_to_active_run_stream` 证明 route 成功后 active stream 收到 `resume_applied` EventEnvelope 且 metadata 同步；frontend `TracePanel.test.tsx` 覆盖多个 pending_tool_calls 的选择/错误态，`client.test.ts`、`Panels.trace-hitl.test.tsx`、`resume-options.test.ts` 证明 HitL UI 到 resume API 透传 tool_call_id。','Browser manual gate：Playwright 点击 Pending tool calls，验证未选择 tool_call_id 时 Submit answer disabled，选择 tool-b 后提交，resume payload human_response.tool_call_id=`tool-b` 且不含 source_path/skill_path；768x900 窄屏同路径复验通过。','Focused gate：`pnpm vitest run src/components/TracePanel.test.tsx` => 8 passed；`pnpm exec playwright test tests/e2e/action-bar-toast.spec.ts --workers=1` => 1 passed，防止 toast 遮挡连续 Compile/Predict/Run 点击。'],
+        ['Engine 单测：含 pending tool call checkpoint 调 resume_skill(human_response={content,tool_call_id})，断言 ToolMessage 写入且只更新目标 checkpoint。','Engine 单测：多个 pending tool call 缺 tool_call_id 或 id 不匹配必须失败，并返回可映射结构化错误。','2026-06-19 Engine 事件单测：`test_hitl_pause_emits_interrupted_event_with_checkpoint_and_namespace` 覆盖真 run 暂停发 InterruptedEvent + checkpoint_id/ns；`test_resume_skill_emits_resumed_event_before_continuing_from_checkpoint` 覆盖 ResumedEvent 在 graph.invoke 前发出。','Studio TestClient：POST resume monkeypatch EngineAdapter.resume，断言 human_input/tool_call_id/from/checkpoint 按契约传递，不只断言非 501。','Wave3 RED/GREEN：`test_resume_endpoint_appends_resume_audit_event_to_active_run_stream` 证明 route 成功后 active stream 收到 `resume_applied` EventEnvelope 且 metadata 同步；frontend `TracePanel.test.tsx` 覆盖多个 pending_tool_calls 的选择/错误态，`client.test.ts`、`Panels.trace-hitl.test.tsx`、`resume-options.test.ts` 证明 HitL UI 到 resume API 透传 tool_call_id。','Browser manual gate：Playwright 点击 Pending tool calls，验证未选择 tool_call_id 时 Submit answer disabled，选择 tool-b 后提交，resume payload human_response.tool_call_id=`tool-b` 且不含 source_path/skill_path；768x900 窄屏同路径复验通过。','Focused gate：`pnpm vitest run src/components/TracePanel.test.tsx` => 8 passed；`pnpm exec playwright test tests/e2e/action-bar-toast.spec.ts --workers=1` => 1 passed，防止 toast 遮挡连续 Compile/Predict/Run 点击；2026-06-19 graph-agent focused gate 160 passed。'],
         ['运行会调用 ask_clarification/request_human_input 的 agent phase；对应节点显示 paused/waiting，不显示 failed。','节点 debug bar 上方显示问题、可选项和输入框；输入答案提交，请求携带答案和 pending_tool_call_id/checkpoint。','提交后 run 从暂停点继续，下游执行；Trace Timeline 依次显示 HitL pause、answer injected/resumed、后续 phase events。','多个 pending human input 不选择目标就提交时，UI 显示需要选择具体问题，不崩溃、不注入错误 checkpoint。','checkpoint missing/stale 时提交，UI 显示结构化 resume 错误，原 paused trace 保持可审计。','2026-06-18 手工验收：多 pending HitL 先禁用提交，选择 tool-b 后成功提交结构化 answer。'],
         ['暂停不是失败。','答案只注入目标 checkpoint。','HitL 走 EventEnvelope/WS/trace 闭环。']),
       child('d10_context_tamper','D10.4','edge dot context tamper','ok',
@@ -744,7 +749,7 @@ const D_TREE = [
     id:'d11', code:'D11', title:'Event stream', status:'ok',
     why:'D11 让 Studio 看到真实运行，而不是事后读一坨日志。EventEnvelope 是 Trace、节点灯、debug resume、edge blackboard 的共同事实源。',
     owner:'Engine owns envelope/cursor/seq/gap semantics；Studio owns websocket/transport UI 和可读展示。',
-    current:'D11 已完成事件主路径收敛：EventEnvelope 固定 schema_version、stream_id、seq、cursor、run_id、event_type、payload 与 error_code/error_payload；Studio run WebSocket 和 Run Detail 已适配 EventEnvelope；useRunStream 保存 cursor、按 seq 去重并暴露 gap/expired 错误；TracePanel 和 edge context 均从 EventEnvelope payload 派生，Workspace 把 useRunStream(activeRunId) 事件经 deriveNodeStatuses 投给 GraphCanvas。Wave3 补齐节点灯派生：HitL/pause -> paused、按 run_id 过滤/reset、attempt 最新优先、并行分支独立 running 均有 focused tests。RunArtifactStore 长期事件存储事实源仍归 D2/D12 收敛，不阻塞 D11 事件投影。',
+    current:'D11 已完成事件主路径收敛：EventEnvelope 固定 schema_version、stream_id、seq、cursor、run_id、event_type、payload 与 error_code/error_payload；Studio run WebSocket 和 Run Detail 已适配 EventEnvelope；useRunStream 保存 cursor、按 seq 去重并暴露 gap/expired 错误；TracePanel 和 edge context 均从 EventEnvelope payload 派生，Workspace 把 useRunStream(activeRunId) 事件经 deriveNodeStatuses 投给 GraphCanvas。Wave3 补齐节点灯派生：HitL/pause -> paused、按 run_id 过滤/reset、attempt 最新优先、并行分支独立 running 均有 focused tests。2026-06-19 引擎 resume 相关 CallbackEvent 增补 checkpoint_id/checkpoint_ns/namespace/ns，RunStartedEvent(is_resume)、InterruptedEvent、ResumedEvent 均可定位 checkpoint；graph-agent focused gate 160 passed。RunArtifactStore 长期事件存储事实源仍归 D2/D12 收敛，不阻塞 D11 事件投影。',
     plan:'先冻结 EventEnvelope schema 和 append_event(request) 写入语义：sequence、cursor、payload、error、sanitized error payload 都要可验证；再接 event sink，保证顺序、去重、gap/expired 和 RunArtifactStore ref 对齐；随后把 Timeline projection、Trace node detail、Run Detail、node lights、edge blackboard 全部改为从 EventEnvelope 派生；最后用 secret 清洗测试证明 raw API key、Authorization header 和 vendor traceback 不进入事件。',
     children:[
       child('d11_envelope','D11.1','EventEnvelope contract','ok',
@@ -857,37 +862,67 @@ function list(items, ordered) {
   const tag = ordered ? 'ol' : 'ul';
   return '<' + tag + '>' + items.map(item => '<li>' + inlineCode(item) + '</li>').join('') + '</' + tag + '>';
 }
-// 每个域自己的 MVP1 前端核验 follow-up（Wave 5 的同一批 11 项，按域拆到各自「怎么修复」页；
-// 域级 status 仍为 ok=边界清晰，这些是「ok 门未 drill 到端点/字段粒度」的待补 gap，全部未开始）。
+// 每个域自己的 MVP1 前端核验 follow-up（Wave 5 的同一批项，按域拆到各自「怎么修复」页；
+// 未完成项留在各自域内；已完成项可保留为 ['文本','ok']，在 S0 与域页同步标绿）。
 const FOLLOWUPS = {
-  d3:['G1 定位轴：compile 错误填满 `field_path`/`source_path`，且不在 sidecar 边界(`_safe_adapter_error_payload`)被降级'],
-  d8:['G1 定位轴：GRAPH/编译错误填满 `field_path`/`source_path`，不在 sidecar 边界被降级'],
-  d5:['test/probe 内核归 Gateway + 删官方-only 门禁 + 统一 test 入口 + 束 test 端点（Copilot SDK test 留 Studio）'],
-  d6:['6 态投到裸 route DTO（`ProviderRoute.ui_state`）','束 = 引用 + delta materialize（`RoleEntry.bundle_id`）','role intent schema 清理（删 inherit / ModelGroupIntent / cost_priority）','P8 临时 role 解析路径（依赖束 materialize）'],
-  d7:['per-node golden：per-node 模型/cases/失效归 engine 服务（F5/ENGINE-3）；写 .workspace/golden 走 Rust 原生层（write_golden_baseline）；Studio 后端壳投影 `SetGoldenReq.node_id` + `GoldenBaseline.cases` DTO','eval 期 `[F-v3-golden-stale-fields]` 错误码注册并发射'],
-  d10:['HitL Interrupted/ResumedEvent 真发射 + 事件带 `checkpoint_id`/ns','per-node checkpoint validity（脏态置灰，非全局判定）','节点级 1..X-1 不重跑编排'],
-  d11:['HitL Interrupted/ResumedEvent 真发射 + 事件带 `checkpoint_id`/ns']
+  d3:[],
+  d8:[],
+  d5:[['test/probe 内核归 Gateway + 删官方-only 门禁 + 统一 test 入口 + 束 test 端点（Copilot SDK test 留 Studio）','ok']],
+  d6:[['6 态投到裸 route DTO（`ProviderRoute.ui_state`）','ok'],['role intent schema 清理（删 inherit / ModelGroupIntent / cost_priority）','ok']],
+  d7:['per-node golden：per-node 模型/cases/失效归 engine 服务（F5/ENGINE-3）；写 .workspace/golden 走 Rust 原生层（write_golden_baseline）；Studio 后端壳投影 `SetGoldenReq.node_id` + `GoldenBaseline.cases` DTO',['eval 期 `[F-v3-golden-stale-fields]` 错误码注册并发射','ok']],
+  d10:[['HitL Interrupted/ResumedEvent 真发射 + 事件带 `checkpoint_id`/ns','ok'],['per-node checkpoint validity（脏态置灰，非全局判定）','ok'],['节点级 1..X-1 不重跑编排','ok']],
+  d11:[['HitL Interrupted/ResumedEvent 真发射 + 事件带 `checkpoint_id`/ns','ok']]
 };
+function followupText(item) {
+  return Array.isArray(item) ? item[0] : item;
+}
+function followupStatus(item) {
+  return Array.isArray(item) ? item[1] : 'todo';
+}
+function followupDone(item) {
+  return followupStatus(item) === 'ok';
+}
+function followupStats(items) {
+  const done = items.filter(followupDone).length;
+  return { done, pending: items.length - done, total: items.length };
+}
+function renderFollowupRows(items) {
+  return '<div class="wave-todo-list">' + items.map(item => {
+    const done = followupDone(item);
+    return '<label class="wave-todo-row ' + (done ? 'done' : 'pending') + '">' +
+      '<input type="checkbox" disabled' + (done ? ' checked' : '') + '>' +
+      '<span class="wave-todo-title">' + inlineCode(followupText(item)) + '</span>' +
+      '<span class="state-badge ' + statusClass(done ? 'ok' : 'bad') + '">' + (done ? '已完成' : '未开始') + '</span>' +
+    '</label>';
+  }).join('') + '</div>';
+}
 function renderFollowups(id) {
   const items = FOLLOWUPS[id];
   if (!items || !items.length) return '';
-  return '<div class="sec-label">MVP1 前端核验 follow-up · 未开始（同 S0 总章 Wave 5，本域 ' + items.length + ' 项）</div>' +
-    '<div class="callout amber">前端逐节点实施核验（2026-06-19）暴露的、落在本域内但「ok 门」未 drill 到端点/字段粒度的后端 gap，需对应后端团队补。本域 `status:ok` 仍指域级边界清晰，不代表这些端点/字段已实现。</div>' +
-    list(items, false);
+  const stats = followupStats(items);
+  const label = stats.pending === 0 ? '已完成' : stats.done > 0 ? '部分完成' : '未开始';
+  const calloutClass = stats.pending === 0 ? 'green' : 'amber';
+  return '<div class="sec-label">MVP1 前端核验 follow-up · ' + label + '（同 S0 总章 Wave 5，本域 ' + stats.done + '/' + stats.total + ' 项）</div>' +
+    '<div class="callout ' + calloutClass + '">前端逐节点实施核验（2026-06-19）暴露的、落在本域内但「ok 门」未 drill 到端点/字段粒度的后端 gap，需对应后端团队补。本域 `status:ok` 仍指域级边界清晰；已完成项以绿色留证，未完成项继续按本域跟进。</div>' +
+    renderFollowupRows(items);
 }
 // 导航 rollup：域边界 ok，但有未开始的 follow-up → 域点显示 partial（黄），并在子项里挂红色 follow-up。
-// 没 follow-up 的域保持自身 status（D1/D2/D4/D9/D12 = 绿）。这样 Wave5 的 11 红 ↔ 域内有红子项，状态一致。
+// 没 follow-up 或 follow-up 已全部完成的域保持自身 status（D1/D2/D4/D6/D9/D12 = 绿）。
 function navDomainStatus(d) {
-  return (FOLLOWUPS[d.id] && FOLLOWUPS[d.id].length) ? 'partial' : d.status;
+  const items = FOLLOWUPS[d.id];
+  if (!items || !items.length) return d.status;
+  return items.some(item => !followupDone(item)) ? 'partial' : d.status;
 }
 function followupNavChildren(d) {
   const items = FOLLOWUPS[d.id];
   if (!items || !items.length) return '';
-  return items.map((t, i) => {
-    const short = esc(t.split('：')[0].split('（')[0].slice(0, 26));
-    return '<a class="progress-item" href="#' + d.id + '_logic" id="nav-' + d.id + '-fu' + i + '">' +
+  return items.map((item, i) => {
+    const text = followupText(item);
+    const done = followupDone(item);
+    const short = esc(text.split('：')[0].split('（')[0].slice(0, 26));
+    return '<a class="progress-item ' + (done ? 'done' : '') + '" href="#' + d.id + '_logic" id="nav-' + d.id + '-fu' + i + '">' +
       '<span class="dot-indicator"></span><span class="item-label">follow-up · ' + short + '</span>' +
-      '<span class="status-dot bad"></span></a>';
+      '<span class="status-dot ' + (done ? 'ok' : 'bad') + '"></span></a>';
   }).join('');
 }
 function moduleMap(d) {

@@ -6,7 +6,7 @@ import pytest
 from app.core.adapters.metadata_local import LocalJsonMetadataStore
 from app.core.adapters.storage_local import LocalFilesystemBackend
 from app.models.skills import SkillSummary
-from app.services.skills import delete_skill, list_skill_summaries
+from app.services.skills import delete_skill
 from fastapi import HTTPException
 
 
@@ -56,8 +56,6 @@ async def test_delete_skill_unregisters_workspace_skill_without_removing_files(
     assert (skill_dir / ".workspace" / "runs").exists()
     assert await metadata.get_skill_index_entry(skill_id) is None
     assert await metadata.get_skill_summary(user_id, skill_id) is None
-    summaries = await list_skill_summaries(user_id, storage, metadata)
-    assert skill_id not in {summary.id for summary in summaries}
 
 
 @pytest.mark.anyio
@@ -78,8 +76,9 @@ async def test_delete_skill_unregisters_builtin_public_skill_without_removing_fi
 
     assert (skill_dir / "GRAPH.md").exists()
     assert skill_dir.exists()
-    summaries = await list_skill_summaries("default", storage, metadata)
-    assert skill_id not in {summary.id for summary in summaries}
+    # Unregister (so it no longer surfaces) without deleting files. Home no longer
+    # aggregates a Python skill list, so verify the unregister mark directly.
+    assert skill_id in await metadata.list_unregistered_skill_ids("default")
 
 
 @pytest.mark.anyio

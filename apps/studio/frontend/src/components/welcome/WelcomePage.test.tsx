@@ -50,14 +50,6 @@ const recentEntry: RecentWorkspaceEntry = {
   lastOpenedAt: '2026-06-18T10:00:00.000Z',
 }
 
-vi.mock('../../hooks/useSkills', () => ({
-  useSkills: () => ({
-    skills: [mismatchSkill],
-    skillListError: null,
-    mutateSkills: vi.fn(),
-  }),
-}))
-
 vi.mock('../../hooks/useRecentSkills', () => ({
   useRecentSkills: () => ({
     recentWorkspaces: recentMocks.recentWorkspaces,

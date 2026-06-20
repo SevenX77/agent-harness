@@ -1,10 +1,9 @@
-import { AlertCircle, Clock3, FolderOpen, Layers, Layers3, MoreVertical, Plus } from 'lucide-react'
+import { Clock3, FolderOpen, Layers, Layers3, MoreVertical, Plus } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { toast } from 'sonner'
 import type { SkillSummary } from '../../api/types'
 import { useAppSettings } from '../../hooks/useAppSettings'
 import { useRecentSkills } from '../../hooks/useRecentSkills'
-import { useSkills } from '../../hooks/useSkills'
 import { getRuntimeConfig } from '../../config/runtime'
 import { revealInFileManager, selectSkillDirectory, addRecentWorkspace, ensureWorkspaceSupportDirs, createSkillWorkspace, openSkillWorkspace } from '../../lib/tauri'
 import { errorMessage, isRecord } from '../../utils/errors'
@@ -155,7 +154,6 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
   const [newSkillError, setNewSkillError] = useState<string | null>(null)
   const appSettings = useAppSettings()
   const defaultSkillParentDirectory = defaultSkillsDirectory(appSettings.settings.default_skills_directory)
-  const { skillListError } = useSkills(null)
   const { recentWorkspaces, rememberWorkspace, isHydrating } = useRecentSkills()
 
   // Recent is a pure MRU projection (D11/D-1-1): each card is one localStorage
@@ -322,16 +320,7 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
           <h2 className="text-sm font-medium text-muted-foreground">Recent</h2>
         </div>
 
-        {skillListError ? (
-          <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-            <div className="flex items-center gap-2 font-medium">
-              <AlertCircle className="size-4" />
-              Could not load skills
-            </div>
-          </div>
-        ) : null}
-
-        {!skillListError && isHydrating ? (
+        {isHydrating ? (
           <RecentSkeleton />
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
@@ -408,7 +397,7 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
           </div>
         )}
 
-        {!skillListError && !isHydrating && visibleWorkspaces.length === 0 ? (
+        {!isHydrating && visibleWorkspaces.length === 0 ? (
           <Empty className="min-h-40 border border-dashed border-border">
             <EmptyHeader>
               <EmptyMedia variant="icon">

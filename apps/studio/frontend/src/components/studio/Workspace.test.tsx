@@ -87,9 +87,6 @@ vi.mock('@/hooks/useSkills', () => ({
   useSkills: (skillId: string | null) => {
     mocks.useSkillsIds.push(skillId)
     return {
-      skills: [],
-      skillListError: null,
-      mutateSkills: vi.fn(),
       skillDetail: skillId ? skillDetail(skillId) : undefined,
       skillDetailError: null,
       mutateSkillDetail: mocks.mutateSkillDetail,

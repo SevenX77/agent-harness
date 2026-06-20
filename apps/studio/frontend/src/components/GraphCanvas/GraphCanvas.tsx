@@ -93,6 +93,7 @@ interface GraphCanvasProps {
   statusByNodeId?: Record<string, SkillNodeStatus>
   compileErrorsByNodeId?: Record<string, CompileError[]>
   goldenStateByNodeId?: Record<string, GoldenNodeState>
+  errorMessageByNodeId?: Record<string, string>
   compact?: boolean
   onPhaseFileSave?: (args: { path: string; content: string; expectedHash: string }) => Promise<void> | void
   // F4: when the run pauses for human input, the node-anchored HitL box submits
@@ -149,6 +150,7 @@ export function GraphCanvas({
   statusByNodeId,
   compileErrorsByNodeId,
   goldenStateByNodeId,
+  errorMessageByNodeId,
   compact = false,
   onPhaseFileSave,
   onSubmitHitlResponse,
@@ -320,6 +322,7 @@ export function GraphCanvas({
   const safeStatusByNodeId = useMemo(() => statusByNodeId ?? {}, [statusByNodeId])
   const safeCompileErrorsByNodeId = useMemo(() => compileErrorsByNodeId ?? {}, [compileErrorsByNodeId])
   const safeGoldenStateByNodeId = useMemo(() => goldenStateByNodeId ?? {}, [goldenStateByNodeId])
+  const safeErrorMessageByNodeId = useMemo(() => errorMessageByNodeId ?? {}, [errorMessageByNodeId])
   const compactRatio = compact && canvasHeight > 0 && canvasHeight < 500 ? 0.2 : 0
 
   useEffect(() => {
@@ -340,8 +343,8 @@ export function GraphCanvas({
       if (!childGraph) return []
       return buildNodesFromTopology(skillId, childGraph.phases, childGraph.graph_topology, {})
     }
-    return buildNodes(skillId, skillDetail, expandedSubgraphs, toggleSubgraph, safeStatusByNodeId, safeCompileErrorsByNodeId, safeGoldenStateByNodeId)
-  }, [childGraph, expandedSubgraphs, isDrilled, safeStatusByNodeId, safeCompileErrorsByNodeId, safeGoldenStateByNodeId, skillDetail, skillId, toggleSubgraph])
+    return buildNodes(skillId, skillDetail, expandedSubgraphs, toggleSubgraph, safeStatusByNodeId, safeCompileErrorsByNodeId, safeGoldenStateByNodeId, safeErrorMessageByNodeId)
+  }, [childGraph, expandedSubgraphs, isDrilled, safeStatusByNodeId, safeCompileErrorsByNodeId, safeGoldenStateByNodeId, safeErrorMessageByNodeId, skillDetail, skillId, toggleSubgraph])
   const phaseNodes = useMemo(
     () => rawNodes.filter((node): node is SkillGraphNode => node.type === 'skill'),
     [rawNodes],

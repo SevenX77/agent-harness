@@ -27,7 +27,7 @@ import type { CompileError } from "@/api/types"
 import { connectPhaseRefs, createPhaseDraft, disconnectPhaseRefs, reconnectPhaseRefs, type NewPhaseKind } from "@/components/GraphCanvas/canvas-authoring"
 import { sha256Hex } from "@/lib/hash"
 import { CenterActionBar, type SkillBuildStage } from "./center-action-bar"
-import { deriveNodeStatuses } from "./node-status"
+import { deriveNodeErrorMessages, deriveNodeStatuses } from "./node-status"
 import { nodeResumeCheckpointFromEvents } from "./node-resume"
 import { hitlResumeOptionsFromRequest } from "./resume-options"
 import { compileErrorsByNode } from "./node-compile-errors"
@@ -240,6 +240,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
 
   const statusByNodeId = useMemo(
     () => deriveNodeStatuses(runStream.events, runId),
+    [runId, runStream.events],
+  )
+  const errorMessageByNodeId = useMemo(
+    () => deriveNodeErrorMessages(runStream.events, runId),
     [runId, runStream.events],
   )
   const selectedNodeStatus = useMemo(
@@ -1157,6 +1161,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   statusByNodeId={statusByNodeId}
                   compileErrorsByNodeId={compileErrorsByNodeId}
                   goldenStateByNodeId={goldenStateByNodeId}
+                  errorMessageByNodeId={errorMessageByNodeId}
                 />
               ) : currentSkillId === null ? (
                 <WelcomePage onSelectSkill={onSelectSkill} />
@@ -1177,6 +1182,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   statusByNodeId={statusByNodeId}
                   compileErrorsByNodeId={compileErrorsByNodeId}
                   goldenStateByNodeId={goldenStateByNodeId}
+                  errorMessageByNodeId={errorMessageByNodeId}
                   onSubmitHitlResponse={handleSubmitHitlResponse}
                   hitlSubmitting={resumeLoading}
                 />

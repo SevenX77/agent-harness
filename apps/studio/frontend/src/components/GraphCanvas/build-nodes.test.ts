@@ -106,6 +106,19 @@ describe('buildNodes', () => {
     expect(phaseNode(nodes, 'review').goldenState).toBeUndefined()
   })
 
+  it('threads a per-node error message into node data so the failed-node red light has a source', () => {
+    const nodes = buildNodes('demo', skillDetail({
+      phases: ['draft', 'review'],
+      graph_topology: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'agent' },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'], mode: 'logic' },
+      ],
+    }), new Set(), () => {}, {}, {}, {}, { draft: 'validator: missing field x' })
+
+    expect(phaseNode(nodes, 'draft').errorMessage).toBe('validator: missing field x')
+    expect(phaseNode(nodes, 'review').errorMessage).toBeUndefined()
+  })
+
   it('always brackets phase nodes with global input/output nodes', () => {
     const nodes = buildNodes('demo', skillDetail({
       phases: ['only'],

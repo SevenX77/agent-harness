@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { CallbackEvent, EventEnvelope } from "@/api/types"
-import { deriveNodeStatuses } from "./node-status"
+import { deriveNodeErrorMessages, deriveNodeStatuses } from "./node-status"
 
 function event(partial: Partial<CallbackEvent> & { event_type: string }): CallbackEvent {
   return {
@@ -128,5 +128,57 @@ describe("deriveNodeStatuses", () => {
       planner: "success",
       executor: "running",
     })
+  })
+})
+
+describe("deriveNodeErrorMessages", () => {
+  it("produces a per-node message from a validation_fail errors[] list (real event, not injected)", () => {
+    const events: CallbackEvent[] = [
+      event({ event_type: "phase_start", phase_name: "review" }),
+      event({ event_type: "validation_fail", phase_name: "review", errors: ["missing field x", "bad type y"] }),
+    ]
+
+    expect(deriveNodeErrorMessages(events)).toEqual({ review: "missing field x; bad type y" })
+  })
+
+  it("produces a message from retry_exhausted final_errors[] and from internal_error error_message", () => {
+    const events: CallbackEvent[] = [
+      event({ event_type: "retry_exhausted", phase_name: "draft", final_errors: ["attempt 1 failed", "attempt 2 failed"] }),
+      event({ event_type: "internal_error", phase_name: "plan", error_message: "boom" }),
+    ]
+
+    expect(deriveNodeErrorMessages(events)).toEqual({
+      draft: "attempt 1 failed; attempt 2 failed",
+      plan: "boom",
+    })
+  })
+
+  it("clears the message when the phase recovers (validation_fail then phase_end ends green)", () => {
+    const events: CallbackEvent[] = [
+      event({ event_type: "validation_fail", phase_name: "review", errors: ["transient"], attempt: 0 }),
+      event({ event_type: "phase_end", phase_name: "review", attempt: 1 }),
+    ]
+
+    // Consistent with deriveNodeStatuses: a recovered phase ends green with no error text.
+    expect(deriveNodeStatuses(events)).toEqual({ review: "success" })
+    expect(deriveNodeErrorMessages(events)).toEqual({})
+  })
+
+  it("returns an empty map when there are no failure events", () => {
+    const events: CallbackEvent[] = [
+      event({ event_type: "phase_start", phase_name: "draft" }),
+      event({ event_type: "phase_end", phase_name: "draft" }),
+    ]
+
+    expect(deriveNodeErrorMessages(events)).toEqual({})
+  })
+
+  it("honors the run filter like deriveNodeStatuses (drops events from other runs)", () => {
+    const events = [
+      envelope({ event_type: "validation_fail", phase_name: "review", errors: ["wrong run"] }, { runId: "run-2", seq: 1 }),
+      envelope({ event_type: "validation_fail", phase_name: "review", errors: ["right run"] }, { runId: "run-1", seq: 2 }),
+    ]
+
+    expect(deriveNodeErrorMessages(events, "run-1")).toEqual({ review: "right run" })
   })
 })

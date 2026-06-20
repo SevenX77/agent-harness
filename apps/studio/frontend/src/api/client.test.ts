@@ -974,4 +974,114 @@ describe('api client auth token', () => {
     ])
     expect(tauriMocks.writeGoldenBaseline).not.toHaveBeenCalled()
   })
+
+  it('includes node_id in the browser golden request for a per-node promote (atom #32)', async () => {
+    runtimeMocks.isTauriRuntime.mockReturnValue(false)
+    const requests: Array<{ url?: string; data?: unknown }> = []
+    api.defaults.adapter = async (config): Promise<AxiosResponse> => {
+      requests.push({
+        url: config.url,
+        data: config.data ? JSON.parse(String(config.data)) : undefined,
+      })
+      return {
+        data: {
+          id: 'run-1',
+          source_run_id: 'run-1',
+          source_run_results_ref: 'skill-a/runs/run-1/result.json',
+          baseline_ref: '.workspace/golden/run-1/baseline.json',
+          linked_input_id: 'run-1',
+          created_at: '2026-06-16T00:00:00Z',
+          locked: false,
+          content_path: '/workspace/.workspace/golden/run-1/baseline.json',
+        },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    }
+
+    await saveGoldenBaseline('skill-a', 'run-1', false, null, 'draft')
+
+    expect(requests).toEqual([
+      {
+        url: '/skills/skill-a/golden',
+        data: { run_id: 'run-1', lock: false, node_id: 'draft' },
+      },
+    ])
+  })
+
+  it('omits node_id from the request when no node is given (run-level baseline)', async () => {
+    runtimeMocks.isTauriRuntime.mockReturnValue(false)
+    const requests: Array<{ data?: unknown }> = []
+    api.defaults.adapter = async (config): Promise<AxiosResponse> => {
+      requests.push({ data: config.data ? JSON.parse(String(config.data)) : undefined })
+      return {
+        data: {
+          id: 'run-1',
+          source_run_id: 'run-1',
+          source_run_results_ref: 'skill-a/runs/run-1/result.json',
+          baseline_ref: '.workspace/golden/run-1/baseline.json',
+          linked_input_id: 'run-1',
+          created_at: '2026-06-16T00:00:00Z',
+          locked: false,
+          content_path: '/workspace/.workspace/golden/run-1/baseline.json',
+        },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    }
+
+    await saveGoldenBaseline('skill-a', 'run-1', false)
+
+    expect(requests[0].data).toEqual({ run_id: 'run-1', lock: false })
+    expect(requests[0].data).not.toHaveProperty('node_id')
+  })
+
+  it('threads node_id into the Tauri golden plan request for a per-node promote', async () => {
+    runtimeMocks.isTauriRuntime.mockReturnValue(true)
+    tauriMocks.writeWorkspaceFile.mockResolvedValue({
+      path: '.workspace/golden/run-1/baseline.json',
+      hash: 'golden-hash',
+    })
+    const requests: Array<{ url?: string; data?: unknown }> = []
+    api.defaults.adapter = async (config): Promise<AxiosResponse> => {
+      requests.push({
+        url: config.url,
+        data: config.data ? JSON.parse(String(config.data)) : undefined,
+      })
+      return {
+        data: {
+          baseline: {
+            id: 'run-1',
+            source_run_id: 'run-1',
+            source_run_results_ref: 'skill-a/runs/run-1/result.json',
+            baseline_ref: '.workspace/golden/run-1/baseline.json',
+            linked_input_id: 'run-1',
+            created_at: '2026-06-16T00:00:00Z',
+            locked: false,
+            content_path: '/workspace/.workspace/golden/run-1/baseline.json',
+          },
+          files: [
+            { path: '.workspace/golden/run-1/baseline.json', content: '{"baseline_id":"run-1"}' },
+          ],
+        },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    }
+
+    await saveGoldenBaseline('skill-a', 'run-1', false, '/abs/path', 'draft')
+
+    expect(requests).toEqual([
+      {
+        url: '/skills/skill-a/golden/plan',
+        data: { run_id: 'run-1', lock: false, node_id: 'draft' },
+      },
+    ])
+  })
 })

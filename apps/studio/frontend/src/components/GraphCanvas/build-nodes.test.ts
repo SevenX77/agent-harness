@@ -70,6 +70,19 @@ describe('buildNodes', () => {
     expect(phaseNode(nodes, 'second').status).toBe('idle')
   })
 
+  it('carries a per-node golden state through to node data, leaving others undefined', () => {
+    const nodes = buildNodes('demo', skillDetail({
+      phases: ['draft', 'review'],
+      graph_topology: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'agent' },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'], mode: 'logic' },
+      ],
+    }), new Set(), () => {}, {}, {}, { draft: 'has-golden' })
+
+    expect(phaseNode(nodes, 'draft').goldenState).toBe('has-golden')
+    expect(phaseNode(nodes, 'review').goldenState).toBeUndefined()
+  })
+
   it('always brackets phase nodes with global input/output nodes', () => {
     const nodes = buildNodes('demo', skillDetail({
       phases: ['only'],

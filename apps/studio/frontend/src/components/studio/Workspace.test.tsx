@@ -66,6 +66,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 vi.mock('@/api/client', () => ({
   compileSkill: mocks.compileSkill,
+  fetcher: vi.fn(async () => []),
   getResumeValidity: mocks.getResumeValidity,
   getSkillDetail: vi.fn(),
   postPredictRun: mocks.postPredictRun,

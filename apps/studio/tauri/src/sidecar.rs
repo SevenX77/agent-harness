@@ -73,7 +73,11 @@ impl SidecarLaunchConfig {
                 .join("resources")
                 .join("config"),
             startup_attempts: MAX_STARTUP_ATTEMPTS,
-            health_timeout: Duration::from_secs(5),
+            // Cold start (first launch after a vendor rebuild compiles .pyc for
+            // the engine + gateway import tree) routinely exceeds 5s under load;
+            // a warm start returns in ~1-2s so this only matters on a cold boot.
+            // 5s caused intermittent "sidecar health check timed out" failures.
+            health_timeout: Duration::from_secs(30),
             shutdown_timeout: Duration::from_secs(2),
         }
     }

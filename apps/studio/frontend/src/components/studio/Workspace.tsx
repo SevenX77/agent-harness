@@ -1305,6 +1305,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   onCreatePhase={handleCreatePhase}
                   onPersistConnection={handlePersistConnection}
                   onDisconnectConnection={handleDisconnectConnection}
+                  onReconnectConnection={handleReconnectConnection}
                   onPhaseFileSave={handlePhaseFileSave}
                   statusByNodeId={statusByNodeId}
                   compileErrorsByNodeId={compileErrorsByNodeId}

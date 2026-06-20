@@ -18,6 +18,14 @@ interface SplitEditorProps {
   onCreatePhase?: (kind: NewPhaseKind) => Promise<void> | void
   onPersistConnection?: (connection: Connection) => Promise<void> | void
   onDisconnectConnection?: (connection: { source: string; target: string }) => Promise<void> | void
+  // n2-canvas #8 (atomic reconnect): same single-serialize handler the main
+  // canvas uses. Threaded here so the bottom mini-canvas does NOT fall back to
+  // GraphCanvas' legacy disconnect-then-persist chain (two serialize round-trips
+  // → stale expected_hash → backend 409 that half-mutates GRAPH.md).
+  onReconnectConnection?: (
+    disconnect: { source: string; target: string },
+    connect: { source: string; target: string },
+  ) => Promise<void> | void
   onPhaseFileSave?: (args: { path: string; content: string; expectedHash: string }) => Promise<void> | void
   statusByNodeId?: Record<string, SkillNodeStatus>
   compileErrorsByNodeId?: Record<string, CompileError[]>
@@ -39,6 +47,7 @@ export function SplitEditor({
   onCreatePhase,
   onPersistConnection,
   onDisconnectConnection,
+  onReconnectConnection,
   onPhaseFileSave,
   statusByNodeId,
   compileErrorsByNodeId,
@@ -112,7 +121,6 @@ export function SplitEditor({
       <ResizableHandle />
       <ResizablePanel id="bottom-mini" defaultSize="30%" minSize="15%" maxSize="60%">
         <div className="size-full border-t border-border">
-          {/* TODO: switch to compact mode when GraphCanvas exposes a compact prop. */}
           <GraphCanvas
             skillId={skillId}
             skillDetail={skillDetail}
@@ -124,6 +132,7 @@ export function SplitEditor({
             onCreatePhase={onCreatePhase}
             onPersistConnection={onPersistConnection}
             onDisconnectConnection={onDisconnectConnection}
+            onReconnectConnection={onReconnectConnection}
             onPhaseFileSave={onPhaseFileSave}
             statusByNodeId={statusByNodeId}
             errorMessageByNodeId={errorMessageByNodeId}

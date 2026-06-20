@@ -26,6 +26,8 @@ function validity(overrides: Partial<ResumeValidityResponse> = {}): ResumeValidi
     resume_from_node_id: 'review',
     resume_to_node_id: null,
     dirty_fields: ['execution_fingerprint'],
+    dirty_node_ids: [],
+    affected_downstream: [],
     snapshot_content_hash: `sha256:${'1'.repeat(64)}`,
     current_content_hash: `sha256:${'2'.repeat(64)}`,
     snapshot_execution_fingerprint: `sha256:${'3'.repeat(64)}`,

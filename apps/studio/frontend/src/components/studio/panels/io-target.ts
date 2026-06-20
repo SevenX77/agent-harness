@@ -1,4 +1,4 @@
-import type { SkillDetail } from "@/api/types"
+import type { FieldSupplyEntry, SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData } from "@/components/GraphCanvas"
 import { INPUT_ID, OUTPUT_ID } from "@/components/nodes"
 
@@ -78,4 +78,29 @@ export function resolveIoEditTarget(
     label: selectedNode.data.label || selectedNode.id,
     isGraphLevel: false,
   }
+}
+
+/**
+ * n2-canvas#10 (data-gap-viz): resolve the per-input-field supply/demand
+ * projection for the i/o panel to render data-gap markers + producers.
+ *
+ * The selected node's `id` is the phase name, which is the join key into the
+ * backend's `graph_topology[].field_supply` (each row keyed by phase id, see
+ * services/skills.py `_topology_row`). This returns that REAL backend array so
+ * the panel can mark `supplied=false` input fields as data gaps and name the
+ * `producer_phase` of supplied ones — no second source of truth on the client.
+ *
+ * Graph-level io (no node / global input/output node) has no upstream producers
+ * to chart, so this returns an empty map there: the data-gap view is per-node.
+ */
+export function fieldSupplyByField(
+  selectedNode: SelectedNode,
+  skillDetail: SkillDetail | undefined,
+): Map<string, FieldSupplyEntry> {
+  if (!selectedNode || isGlobalIoNode(selectedNode)) {
+    return new Map()
+  }
+  const row = skillDetail?.graph_topology?.find((phase) => phase.id === selectedNode.id)
+  const supply = row?.field_supply ?? []
+  return new Map(supply.map((entry) => [entry.field, entry]))
 }

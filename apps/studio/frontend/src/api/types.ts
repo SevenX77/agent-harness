@@ -231,11 +231,48 @@ export interface RunMetadata {
   artifact_ref?: ArtifactRef | null
   source_map_ref?: string | null
   execution_fingerprint?: string | null
+  // n4-trace#23 (model-compare): set only on compare-fanned runs so the Trace
+  // can group/tab the per-candidate results; omitted on ordinary runs.
+  compare_group_id?: string | null
+  candidate_id?: string | null
+  candidate_role_name?: string | null
 }
 
 export interface RunListResponse {
   runs: RunMetadata[]
   total: number
+}
+
+/**
+ * n4-trace#23 (model-compare, P8): one candidate in a compare run. Each candidate
+ * references a role that already exists in the active llm_roles.yaml (built in
+ * Settings); the backend runs the same compiled artifact through that role.
+ * `target_role` optionally narrows the override to a single graph_agent role the
+ * skill's phases bind to (omitted = override every role).
+ */
+export interface RunCandidate {
+  candidate_id: string
+  role_name: string
+  target_role?: string | null
+}
+
+/** n4-trace#23: one candidate's spawned run inside a compare group. */
+export interface CompareCandidateRun {
+  candidate_id: string
+  role_name: string
+  metadata: RunMetadata
+}
+
+/** n4-trace#23 POST response: the compare group + the per-candidate runs it spawned. */
+export interface CompareRunResponse {
+  compare_group_id: string
+  runs: CompareCandidateRun[]
+}
+
+/** n4-trace#23 GET response: per-candidate runs for one compare group, for Trace tabs. */
+export interface CompareRunGroupResponse {
+  compare_group_id: string
+  runs: CompareCandidateRun[]
 }
 
 export type GitHistoryKind = 'auto_run' | 'manual' | 'other' | 'release'
@@ -284,6 +321,12 @@ export interface ResumeValidityResponse {
   resume_from_node_id: string | null
   resume_to_node_id: string | null
   dirty_fields: Array<'content_hash' | 'execution_fingerprint'>
+  // n5-node#3 (dirty-downstream-graying): the downstream node ids the resume node
+  // can dirty. The Studio shell slices these from the dependency graph when the
+  // whole-skill compare is dirty and `resume_from_node_id` is set; empty on the
+  // clean / no-resume-node paths. The frontend grays exactly these nodes.
+  dirty_node_ids: string[]
+  affected_downstream: string[]
   snapshot_content_hash: string | null
   current_content_hash: string | null
   snapshot_execution_fingerprint: string | null
@@ -594,6 +637,27 @@ export interface PersonaSkillDef extends BaseSkillManifest {
 
 export type SkillManifest = AgentSkillDef | GraphSkillDef | PersonaSkillDef | GraphManifestV030
 
+/**
+ * n2-canvas#10 (data-gap-viz): one entry per downstream INPUT field of a phase,
+ * resolving where that field is supplied from. Produced by the backend
+ * `compute_field_supply` (services/canvas_data_gap.py) and attached to each
+ * `graph_topology` row as `field_supply`. `supplied=false` (`source='none'`) is a
+ * data gap the i/o panel renders as a missing-input marker; a supplied field
+ * names its `producer_phase` (when `source='phase'`) so the user sees who feeds it.
+ */
+export interface FieldSupplyEntry {
+  field: string
+  supplied: boolean
+  source: 'phase' | 'graph_input' | 'none'
+  producer_phase: string | null
+}
+
+/** Per-phase io field schema projection (`graph_topology[].io_fields`). */
+export interface IoFieldsProjection {
+  inputs: Record<string, JsonObject>
+  outputs: Record<string, JsonObject>
+}
+
 export interface GraphTopologyItem {
   id: string
   src: string
@@ -601,6 +665,10 @@ export interface GraphTopologyItem {
   mode: 'logic' | 'subgraph' | 'skill' | string
   /** Absolute child-graph path, surfaced only for subgraph phases. */
   path?: string | null
+  /** n2-canvas#10: this phase's per-node io.inputs/io.outputs field schema. */
+  io_fields?: IoFieldsProjection
+  /** n2-canvas#10: per-input-field supply/demand projection for data-gap markers. */
+  field_supply?: FieldSupplyEntry[]
 }
 
 /**

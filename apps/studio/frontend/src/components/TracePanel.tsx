@@ -1,7 +1,8 @@
 import type { CallbackEvent, EventEnvelope } from '../api/types'
 import type { GoldenNodeState } from './studio/node-golden'
+import type { CompareTab } from './studio/run-compare'
 import { useTraceFilter } from '../hooks/useTraceFilter'
-import { BadgeCheck, GitCompareArrows, Play, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, BadgeCheck, GitCompareArrows, Play, ShieldCheck } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { HitlPromptForm } from './studio/HitlPromptForm'
 import { latestHitlPrompt, type TraceHitlResumeRequest } from './studio/hitl-prompt'
@@ -56,6 +57,16 @@ interface TracePanelProps {
   onResume?: () => void
   hitlSubmitting?: boolean
   onSubmitHitlResponse?: (request: TraceHitlResumeRequest) => void
+  /**
+   * n4-trace#23 (P8 model-compare): when a compare run is active, the per-candidate
+   * tabs (one per candidate_id) the user switches between. Each tab carries the
+   * candidate's spawned run id + a `failed` flag (read from the run's
+   * metadata.status) so a failed candidate's tab is marked. Absent on ordinary
+   * (non-compare) runs, where the panel renders without the tab strip.
+   */
+  compareTabs?: CompareTab[]
+  activeCandidateId?: string | null
+  onSelectCandidate?: (candidateId: string) => void
 }
 
 function envelopePayload(event: EventEnvelope): CallbackEvent {
@@ -103,6 +114,9 @@ export function TracePanel({
   onResume,
   hitlSubmitting = false,
   onSubmitHitlResponse,
+  compareTabs,
+  activeCandidateId = null,
+  onSelectCandidate,
 }: TracePanelProps) {
   const traceEvents = traceLogs.map(envelopePayload)
   // atom #17: a user-focused node decides trace granularity and wins over the
@@ -136,21 +150,60 @@ export function TracePanel({
     }
   }
 
+  // n4-trace#23: the per-candidate tab strip. Rendered whenever a compare run is
+  // active (even before its events stream in) so the user can switch candidates
+  // while a tab is still empty. Each tab shows the candidate's role and marks a
+  // failed candidate (metadata.status === 'failed') so the failure is visible.
+  const hasCompareTabs = Array.isArray(compareTabs) && compareTabs.length > 0
+  const compareTabStrip = hasCompareTabs ? (
+    <div
+      role="tablist"
+      aria-label="Model compare candidates"
+      className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-card px-2 py-1.5"
+    >
+      {compareTabs!.map((tab) => {
+        const isActive = tab.candidateId === activeCandidateId
+        return (
+          <button
+            key={tab.candidateId}
+            type="button"
+            role="tab"
+            aria-selected={isActive}
+            aria-label={`Candidate ${tab.roleName}${tab.failed ? ' (failed)' : ''}`}
+            onClick={() => onSelectCandidate?.(tab.candidateId)}
+            className={[
+              'flex items-center gap-1 whitespace-nowrap rounded-md border px-2 py-1 text-xs font-semibold transition-colors',
+              isActive
+                ? 'border-primary bg-primary/10 text-primary'
+                : 'border-border bg-card text-muted-foreground hover:bg-accent',
+              tab.failed ? 'text-destructive' : '',
+            ].join(' ')}
+          >
+            {tab.failed ? <AlertTriangle className="size-3" /> : null}
+            {tab.running ? (
+              <span aria-hidden className="size-1.5 animate-pulse rounded-full bg-primary" />
+            ) : null}
+            <span className="max-w-[140px] truncate">{tab.roleName}</span>
+          </button>
+        )
+      })}
+    </div>
+  ) : null
+
   if (traceEvents.length === 0) {
     return (
-      <div
-        role="log"
-        aria-live="polite"
-        aria-label="Event Trace"
-        className="flex h-full items-center justify-center text-sm font-medium text-slate-400 dark:text-slate-500"
-      >
-        Waiting for run events
+      <div role="log" aria-live="polite" aria-label="Event Trace" className="flex h-full min-h-0 flex-col">
+        {compareTabStrip}
+        <div className="flex flex-1 items-center justify-center text-sm font-medium text-slate-400 dark:text-slate-500">
+          Waiting for run events
+        </div>
       </div>
     )
   }
 
   return (
     <div role="log" aria-live="polite" aria-label="Event Trace" className="flex h-full min-h-0 flex-col">
+      {compareTabStrip}
       <div className="shrink-0 space-y-3 border-b border-border bg-card p-4">
         <div className="flex items-center justify-between gap-3">
           <h3 className="font-semibold text-foreground">Event Trace</h3>

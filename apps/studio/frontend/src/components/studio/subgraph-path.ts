@@ -53,6 +53,35 @@ export function invalidSubgraphPathMessage(path: string): string {
   return `Subgraph preview requires an absolute path. Legacy child reference ${path} must be migrated from target_skill to path.`
 }
 
+/**
+ * Classify the LIVE, user-edited `path` value in the Properties subgraph form
+ * (D7: subgraphs are resolved by absolute path, no registry). Mirrors
+ * `resolveSubgraphReference` but operates on the editable draft string rather
+ * than a topology row, so the Properties Path input can show its own red/missing
+ * state synchronously as the author types or loads SUBGRAPH.md `path:`.
+ *
+ * - `migration-required` when the path field is empty but a legacy
+ *   `target_skill` is still present (the phase must migrate to `path`).
+ * - `missing` when there is no usable absolute path (empty or not absolute).
+ * - `resolved` when the value is a usable absolute path. Note: this is a
+ *   SYNTACTIC resolve; whether that path actually exists on disk is confirmed
+ *   separately by the backend `getChildGraphTopology` probe (404 =
+ *   SUBGRAPH_PATH_NOT_FOUND), which the panel folds into the same red state.
+ */
+export function subgraphPathFieldState(
+  value: string,
+  legacyTargetSkill: string | null,
+): SubgraphReferenceState {
+  const path = normalizeAbsoluteSubgraphPath(value)
+  if (path) {
+    return { path, legacyTargetSkill: null, status: "resolved" }
+  }
+  if (legacyTargetSkill) {
+    return { path: null, legacyTargetSkill, status: "migration-required" }
+  }
+  return { path: null, legacyTargetSkill: null, status: "missing" }
+}
+
 function normalizedLegacyTargetSkill(value: unknown): string | null {
   if (typeof value !== "string") {
     return null

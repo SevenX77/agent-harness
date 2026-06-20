@@ -110,6 +110,39 @@ describe('PropertiesPanel — per-kind whitelist form (R3)', () => {
     expect(html).toContain('absolute path')
     expect(html).not.toContain('Target skill')
   })
+
+  // n2-properties #20: a subgraph phase whose SUBGRAPH.md declares no usable
+  // absolute `path` must render the Path input as invalid (red, via shadcn's
+  // aria-invalid styling) AND surface the OS folder-picker import affordance.
+  it('subgraph node with a missing path marks the Path input invalid and offers the folder import', () => {
+    const html = renderPanel({
+      id: 'child',
+      data: baseData({ mode: 'subgraph', filePath: 'phases/child/SUBGRAPH.md' }),
+      filePath: 'phases/child/SUBGRAPH.md',
+      content: ['---', 'name: child', '---', 'Body'].join('\n'),
+    })
+
+    // The Path input carries aria-invalid (shadcn Input maps this to the
+    // destructive border/ring tokens — no hand-rolled color).
+    expect(html).toMatch(/id="phase-path"[^>]*aria-invalid="true"|aria-invalid="true"[^>]*id="phase-path"/)
+    expect(html).toContain('Select folder to import subgraph')
+    expect(html).toContain('import its folder below')
+  })
+
+  // A subgraph phase with a usable absolute path resolves syntactically, so the
+  // Path input is NOT marked invalid and the import affordance stays hidden (the
+  // on-disk probe runs only client-side, never during this SSR render).
+  it('subgraph node with a usable absolute path is not marked invalid and hides the import affordance', () => {
+    const html = renderPanel({
+      id: 'child',
+      data: baseData({ mode: 'subgraph', subgraphPath: '/abs/child', filePath: 'phases/child/SUBGRAPH.md' }),
+      filePath: 'phases/child/SUBGRAPH.md',
+      content: ['---', 'name: child', 'path: /abs/child', '---', 'Body'].join('\n'),
+    })
+
+    expect(html).not.toContain('aria-invalid="true"')
+    expect(html).not.toContain('Select folder to import subgraph')
+  })
 })
 
 describe('PropertiesPanel — read-only node type row (n2-properties #17)', () => {

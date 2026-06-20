@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { AlertTriangle, Loader2, ShieldCheck } from "lucide-react"
+import { AxiosError } from "axios"
+import { AlertTriangle, FolderOpen, Loader2, ShieldCheck } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -19,8 +20,10 @@ import type { LintError, ResumeValidityResponse, SkillDetail } from "@/api/types
 import { fieldErrorsByKey } from "@/components/studio/field-compile-errors"
 import type { SkillGraphNodeData, SkillNodeStatus, SubagentRef } from "@/components/GraphCanvas"
 import type { ResumeRunOptions } from "@/api/client"
-import { legacySubgraphTargetSkill } from "@/components/studio/subgraph-path"
+import { legacySubgraphTargetSkill, subgraphPathFieldState } from "@/components/studio/subgraph-path"
 import { nodeResumeOptionsFromValidity } from "@/components/studio/node-resume"
+import { getChildGraphTopology } from "@/api/client"
+import { selectSkillDirectory } from "@/lib/tauri"
 import { sha256Hex } from "@/lib/hash"
 import { runRoleTestJobToResult } from "../settings/llm-roles/role-test-store"
 import type { FileMeta } from "../file-types"
@@ -260,6 +263,18 @@ export function PropertiesPanel({
     }
   }, [])
 
+  // Subgraph "import folder" affordance (n2-properties #20 / F4·R5): when the
+  // child-graph path is missing/unresolvable, let the author pick the child
+  // graph root via the native OS directory picker (Rust `select_directory`,
+  // Desktop-only with a graceful toast off-desktop) and write the chosen
+  // absolute path straight into the editable `path` field.
+  const handleImportSubgraphFolder = useCallback(async () => {
+    const selected = await selectSkillDirectory()
+    if (selected) {
+      setField("path", selected)
+    }
+  }, [])
+
   return (
     <div className="flex h-full flex-col bg-background">
       <PanelHeader title="Properties" />
@@ -299,6 +314,8 @@ export function PropertiesPanel({
                 roleTest={roleTest}
                 fieldErrors={fieldErrors}
                 legacyTargetSkill={phaseFormState.legacyTargetSkill ?? null}
+                skillId={skillId}
+                onImportSubgraphFolder={handleImportSubgraphFolder}
                 onFieldChange={setField}
                 onReset={handleReset}
                 onSave={() => {
@@ -487,6 +504,8 @@ function PhaseFrontmatterForm({
   roleTest,
   fieldErrors,
   legacyTargetSkill,
+  skillId,
+  onImportSubgraphFolder,
   onFieldChange,
   onReset,
   onSave,
@@ -500,6 +519,8 @@ function PhaseFrontmatterForm({
   roleTest: RoleTestStatusInput
   fieldErrors: Record<string, LintError[]>
   legacyTargetSkill: string | null
+  skillId: string | null
+  onImportSubgraphFolder: () => void
   onFieldChange: <Key extends keyof PhaseFrontmatterFormData>(field: Key, value: PhaseFrontmatterFormData[Key]) => void
   onReset: () => void
   onSave: () => void
@@ -581,24 +602,14 @@ function PhaseFrontmatterForm({
           ) : null}
           {kind === "subgraph" ? (
             <>
-              <Field>
-                <FieldLabel htmlFor="phase-path">
-                  Path
-                  <FieldErrorMarker errors={fieldErrors.path} />
-                </FieldLabel>
-                <Input
-                  id="phase-path"
-                  value={value.path}
-                  placeholder="/absolute/path/to/child_graph"
-                  onChange={(event) => onFieldChange("path", event.currentTarget.value)}
-                />
-                <FieldDescription>Absolute path to the child graph skill root.</FieldDescription>
-                {legacyTargetSkill ? (
-                  <div className="rounded-md border border-border bg-muted px-2 py-1 text-xs text-foreground">
-                    Legacy child reference <span className="font-mono">{legacyTargetSkill}</span> no longer resolves subgraphs. Save an absolute path to migrate this phase.
-                  </div>
-                ) : null}
-              </Field>
+              <SubgraphPathField
+                value={value.path}
+                errors={fieldErrors.path}
+                legacyTargetSkill={legacyTargetSkill}
+                skillId={skillId}
+                onChange={(next) => onFieldChange("path", next)}
+                onImportFolder={onImportSubgraphFolder}
+              />
               <ValidatorField
                 value={value.validator}
                 errors={fieldErrors.validator}
@@ -617,6 +628,108 @@ function PhaseFrontmatterForm({
         </div>
       </FieldSet>
     </form>
+  )
+}
+
+/**
+ * Subgraph `path` editor (n2-properties #20 / D7·F4·R5). Renders the single
+ * whitelisted absolute-path field for a SUBGRAPH.md phase and surfaces two
+ * unresolvable states in red, plus an OS folder-picker to fix them:
+ *
+ *  - SYNTACTIC missing (empty / non-absolute path, or a still-legacy
+ *    non-path child reference) is derived synchronously from the live value via
+ *    `subgraphPathFieldState`, so the input goes red as the author types.
+ *  - DISK missing (an absolute path that does not resolve to a child GRAPH.md)
+ *    is confirmed against the backend resolver `getChildGraphTopology`
+ *    (`GET /skills/{id}/subgraph` → 404 SUBGRAPH_PATH_NOT_FOUND). The probe runs
+ *    only client-side (effect) for a usable absolute path; it never fires during
+ *    SSR, so the synchronous state is what render-contract tests observe.
+ *
+ * When the path is unresolvable the author clicks "Select folder to import
+ * subgraph", which calls the native directory picker and writes the chosen
+ * absolute path back into the field.
+ */
+function SubgraphPathField({
+  value,
+  errors,
+  legacyTargetSkill,
+  skillId,
+  onChange,
+  onImportFolder,
+}: {
+  value: string
+  errors?: LintError[]
+  legacyTargetSkill: string | null
+  skillId: string | null
+  onChange: (next: string) => void
+  onImportFolder: () => void
+}) {
+  const fieldState = subgraphPathFieldState(value, legacyTargetSkill)
+  const [diskMissing, setDiskMissing] = useState(false)
+
+  // Confirm an absolute path actually resolves on disk via the backend child-graph
+  // resolver. A 404 (SUBGRAPH_PATH_NOT_FOUND) means the referenced path does not
+  // exist; any non-404/transport error is left un-flagged here (the syntactic
+  // state already covers empty/non-absolute paths).
+  useEffect(() => {
+    if (fieldState.status !== "resolved" || !skillId || !fieldState.path) {
+      setDiskMissing(false)
+      return
+    }
+    let cancelled = false
+    setDiskMissing(false)
+    getChildGraphTopology(skillId, fieldState.path)
+      .then(() => {
+        if (!cancelled) setDiskMissing(false)
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        if (error instanceof AxiosError && error.response?.status === 404) {
+          setDiskMissing(true)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [fieldState.status, fieldState.path, skillId])
+
+  const unresolved = fieldState.status !== "resolved" || diskMissing
+
+  return (
+    <Field>
+      <FieldLabel htmlFor="phase-path">
+        Path
+        <FieldErrorMarker errors={errors} />
+      </FieldLabel>
+      <Input
+        id="phase-path"
+        value={value}
+        placeholder="/absolute/path/to/child_graph"
+        aria-invalid={unresolved || undefined}
+        onChange={(event) => onChange(event.currentTarget.value)}
+      />
+      <FieldDescription>Absolute path to the child graph skill root.</FieldDescription>
+      {fieldState.status === "migration-required" && fieldState.legacyTargetSkill ? (
+        <div className="rounded-md border border-border bg-muted px-2 py-1 text-xs text-foreground">
+          Legacy child reference <span className="font-mono">{fieldState.legacyTargetSkill}</span> no longer resolves subgraphs. Save an absolute path to migrate this phase.
+        </div>
+      ) : null}
+      {unresolved ? (
+        <div className="space-y-1.5">
+          {fieldState.status !== "migration-required" ? (
+            <p className="text-xs text-destructive">
+              {diskMissing
+                ? "This path does not resolve to a child graph on disk. Pick the folder that contains its GRAPH.md."
+                : "Enter an absolute path to the child graph, or import its folder below."}
+            </p>
+          ) : null}
+          <Button type="button" size="sm" variant="secondary" onClick={onImportFolder}>
+            <FolderOpen className="size-3.5" aria-hidden />
+            Select folder to import subgraph
+          </Button>
+        </div>
+      ) : null}
+    </Field>
   )
 }
 

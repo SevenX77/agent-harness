@@ -98,6 +98,52 @@ describe("EdgeContextView", () => {
     expect(html).toContain("context_override_keys")
   })
 
+  it("renders the end -> start operation log (reduce / dispatch / inject / persist) from real operations", () => {
+    const html = render({
+      id: "planner->executor",
+      source: "planner",
+      target: "executor",
+      contextJson: {
+        blackboard_snapshot: { plan: "x" },
+        changed_keys: ["plan"],
+        operations: [
+          { kind: "reduce", reducer: "merge_dicts", changed_keys: ["plan"] },
+          { kind: "persist", name: "plan.json", path: "runs/r1/plan.json", size_bytes: 128 },
+          { kind: "inject", file_ref: "runs/r1/plan.json", target_field: "spec" },
+          { kind: "dispatch", dispatched_keys: ["plan", "spec"], changed_keys: ["plan", "spec"] },
+        ],
+      },
+    })
+
+    expect(html).toContain("Operations (end → start)")
+    // The stale target-design placeholder must be gone.
+    expect(html).not.toContain("target-design")
+    expect(html).toContain("reduce")
+    expect(html).toContain("merge_dicts")
+    expect(html).toContain("persist")
+    expect(html).toContain("plan.json")
+    expect(html).toContain("runs/r1/plan.json")
+    expect(html).toContain("inject")
+    expect(html).toContain("spec")
+    expect(html).toContain("dispatch")
+  })
+
+  it("shows an honest empty operation log when no operations were recorded", () => {
+    const html = render({
+      id: "planner->executor",
+      source: "planner",
+      target: "executor",
+      contextJson: {
+        blackboard_snapshot: { plan: "x" },
+        changed_keys: ["plan"],
+        operations: [],
+      },
+    })
+
+    expect(html).toContain("Operations (end → start)")
+    expect(html).toContain("No operations recorded for this transition")
+  })
+
   it("disables downstream resume when edge checkpoint validity is dirty upstream", () => {
     const html = render({
       id: "draft->review",

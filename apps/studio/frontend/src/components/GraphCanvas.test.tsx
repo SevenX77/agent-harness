@@ -25,6 +25,7 @@ vi.mock('@xyflow/react', () => ({
     return <div data-testid="react-flow" data-node-origin={JSON.stringify(props.nodeOrigin)}>{props.children}</div>
   },
   addEdge: vi.fn((edge, edges) => [...edges, edge]),
+  reconnectEdge: vi.fn((_oldEdge, newConnection, edges) => [...edges, newConnection]),
   useEdgesState: vi.fn((initialEdges) => [initialEdges, vi.fn(), vi.fn()]),
   useNodesState: vi.fn((initialNodes) => [initialNodes, vi.fn(), vi.fn()]),
 }))
@@ -275,6 +276,115 @@ describe('GraphCanvas', () => {
 
     contextMenuItems.find((item) => item.label === 'Disconnect')?.onSelect?.()
 
+    expect(onDisconnectConnection).toHaveBeenCalledWith({ source: 'draft', target: 'review' })
+  })
+
+  it('enables reconnectable edges on the canvas', () => {
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        skillDetail={graphSkillDetail([
+          { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+          { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+        ])}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as { edgesReconnectable?: boolean } | null
+    expect(props?.edgesReconnectable).toBe(true)
+  })
+
+  it('reconnects an edge by disconnecting the old target and persisting the new one', async () => {
+    const onDisconnectConnection = vi.fn().mockResolvedValue(undefined)
+    const onPersistConnection = vi.fn().mockResolvedValue(undefined)
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        skillDetail={graphSkillDetail([
+          { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+          { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+          { id: 'publish', src: 'phases/publish/SKILL.md', depends_on: [] },
+        ])}
+        onDisconnectConnection={onDisconnectConnection}
+        onPersistConnection={onPersistConnection}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as {
+      onReconnect?: (oldEdge: { source: string; target: string }, newConnection: { source: string; target: string }) => void
+    } | null
+    // Drag the target endpoint of draft→review across to publish.
+    props?.onReconnect?.({ source: 'draft', target: 'review' }, { source: 'draft', target: 'publish' })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(onDisconnectConnection).toHaveBeenCalledWith({ source: 'draft', target: 'review' })
+    expect(onPersistConnection).toHaveBeenCalledWith({ source: 'draft', target: 'publish' })
+  })
+
+  it('disconnects an edge dropped off a handle via onReconnectEnd', () => {
+    const onDisconnectConnection = vi.fn().mockResolvedValue(undefined)
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        skillDetail={graphSkillDetail([
+          { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+          { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+        ])}
+        onDisconnectConnection={onDisconnectConnection}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as {
+      onReconnectStart?: () => void
+      onReconnectEnd?: (
+        event: unknown,
+        edge: { id: string; source: string; target: string },
+        handleType: 'source' | 'target',
+        connectionState: { isValid: boolean | null },
+      ) => void
+    } | null
+    // Start the drag (no landing), then release off any handle (isValid null).
+    props?.onReconnectStart?.()
+    props?.onReconnectEnd?.({}, { id: 'draft->review', source: 'draft', target: 'review' }, 'target', { isValid: null })
+
+    expect(onDisconnectConnection).toHaveBeenCalledWith({ source: 'draft', target: 'review' })
+  })
+
+  it('does not disconnect on onReconnectEnd when the edge landed on a valid handle', () => {
+    const onDisconnectConnection = vi.fn().mockResolvedValue(undefined)
+    const onPersistConnection = vi.fn().mockResolvedValue(undefined)
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        skillDetail={graphSkillDetail([
+          { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+          { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+          { id: 'publish', src: 'phases/publish/SKILL.md', depends_on: [] },
+        ])}
+        onDisconnectConnection={onDisconnectConnection}
+        onPersistConnection={onPersistConnection}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as {
+      onReconnectStart?: () => void
+      onReconnect?: (oldEdge: { source: string; target: string }, newConnection: { source: string; target: string }) => void
+      onReconnectEnd?: (
+        event: unknown,
+        edge: { id: string; source: string; target: string },
+        handleType: 'source' | 'target',
+        connectionState: { isValid: boolean | null },
+      ) => void
+    } | null
+    // A successful reconnect fires onReconnect (landed=true) before onReconnectEnd.
+    props?.onReconnectStart?.()
+    onDisconnectConnection.mockClear()
+    props?.onReconnect?.({ source: 'draft', target: 'review' }, { source: 'draft', target: 'publish' })
+    props?.onReconnectEnd?.({}, { id: 'draft->review', source: 'draft', target: 'review' }, 'target', { isValid: true })
+
+    // onReconnectEnd must NOT add a second disconnect for the already-moved edge.
+    expect(onDisconnectConnection).toHaveBeenCalledTimes(1)
     expect(onDisconnectConnection).toHaveBeenCalledWith({ source: 'draft', target: 'review' })
   })
 

@@ -90,3 +90,31 @@ export function useLocalHistory(skillId: string | null) {
 export function runTokenTotal(run: RunMetadata): number | null {
   return run.metrics?.total_tokens ?? null
 }
+
+/**
+ * N6 #2 (history-auto-refresh) edge detector. A successful run autocommits a new
+ * "Auto run" snapshot on the backend, so when a run reaches `run_ended` the Local
+ * History list must be revalidated exactly once. This pure helper decides whether
+ * the not-ended → ended transition warrants a refresh for the given skill/run,
+ * given the key already refreshed last time. It owns the de-dupe rule so the
+ * effect in Workspace stays a thin wrapper and the rule itself is unit-testable
+ * under SSR (effects don't run during renderToStaticMarkup).
+ *
+ * Returns the new "refreshed" key when a refresh should fire (caller persists it
+ * and calls refresh), or `null` when nothing should happen.
+ */
+export function nextLocalHistoryRefreshKey(args: {
+  skillId: string | null
+  completedRunId: string | null
+  lastRefreshedKey: string | null
+}): string | null {
+  const { skillId, completedRunId, lastRefreshedKey } = args
+  if (!skillId || !completedRunId) {
+    return null
+  }
+  const key = `${skillId}::${completedRunId}`
+  if (key === lastRefreshedKey) {
+    return null
+  }
+  return key
+}

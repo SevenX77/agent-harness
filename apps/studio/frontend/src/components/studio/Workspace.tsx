@@ -12,6 +12,7 @@ import { useCopilotContext } from "@/hooks/useCopilotContext"
 import { lintStatusEvent, readLintStatus } from "@/hooks/useDebouncedLint"
 import { useRunStream } from "@/hooks/useRunStream"
 import { useGoldenDiff } from "@/hooks/useGoldenDiff"
+import { nextLocalHistoryRefreshKey, useLocalHistory } from "@/hooks/useRunHistory"
 import { useSkills } from "@/hooks/useSkills"
 import { DiffView } from "@/components/diff/DiffView"
 import type { CopilotJudgeResponse, ResumeRunOptions } from "@/api/client"
@@ -208,6 +209,34 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const completedRunId = runStream.events.some((event) => event.event_type === "run_ended")
     ? runId
     : null
+
+  // N6 #2 (history-auto-refresh): a successful run autocommits a new "Auto run"
+  // snapshot on the backend (GET /skills/{id}/history). Revalidate the Local
+  // History SWR cache when this run reaches run_ended so the snapshot appears
+  // without the user clicking Refresh. We only project the single backend truth —
+  // refresh asks SWR to re-fetch the same `/skills/{id}/history` key the panel
+  // consumes; we never build a snapshot locally.
+  const localHistory = useLocalHistory(currentSkillId)
+  const refreshLocalHistory = localHistory.refresh
+  // Track which (skill, run) pair has already triggered a refresh so the effect
+  // fires once on the not-ended → ended edge, not on every subsequent re-render
+  // while the terminated run keeps replaying its log. nextLocalHistoryRefreshKey
+  // owns the de-dupe rule (unit-tested); this effect is a thin wrapper that
+  // persists the key and asks SWR to revalidate the same `/skills/{id}/history`
+  // key the Local History panel consumes.
+  const refreshedRunRef = useRef<string | null>(null)
+  useEffect(() => {
+    const refreshKey = nextLocalHistoryRefreshKey({
+      skillId: currentSkillId,
+      completedRunId,
+      lastRefreshedKey: refreshedRunRef.current,
+    })
+    if (!refreshKey) {
+      return
+    }
+    refreshedRunRef.current = refreshKey
+    void refreshLocalHistory()
+  }, [completedRunId, currentSkillId, refreshLocalHistory])
 
   const statusByNodeId = useMemo(
     () => deriveNodeStatuses(runStream.events, runId),

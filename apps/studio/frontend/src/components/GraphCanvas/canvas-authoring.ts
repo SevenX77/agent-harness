@@ -126,6 +126,62 @@ export function disconnectPhaseRefs(
   }
 }
 
+/** An edge identified purely by its two phase endpoints. */
+export interface EdgeEndpoints {
+  source: string | null | undefined
+  target: string | null | undefined
+}
+
+/**
+ * Result of planning an edge reconnect (drag an existing edge endpoint onto a
+ * different node). A reconnect is the composition of two atomic depends_on
+ * mutations the canvas already supports: remove the old dependency, then add the
+ * new one. Both halves flow through the existing disconnect/connect → serialize
+ * path, so the serialize contract is unchanged (n2-canvas #8, R4).
+ */
+export type ReconnectPlan =
+  | { ok: true; disconnect: { source: string; target: string }; connect: { source: string; target: string } }
+  | { ok: false; reason: 'global-node' | 'self-dependency' | 'no-op'; message: string }
+
+/**
+ * Pure planner for a React Flow edge reconnect. Given the old edge and the new
+ * connection (either the source or the target endpoint may have moved), decide
+ * whether the move is a legal dependency edit and, if so, return the disconnect
+ * + connect operations to apply. Endpoint legality against the live graph
+ * (unknown phase, duplicate, missing dependency) is re-checked by
+ * disconnectPhaseRefs / connectPhaseRefs when the plan is applied, mirroring the
+ * onConnect validation reuse.
+ */
+export function planEdgeReconnect(oldEdge: EdgeEndpoints, newConnection: EdgeEndpoints): ReconnectPlan {
+  const oldSource = oldEdge.source
+  const oldTarget = oldEdge.target
+  const newSource = newConnection.source
+  const newTarget = newConnection.target
+  if (!oldSource || !oldTarget || !newSource || !newTarget) {
+    return { ok: false, reason: 'global-node', message: 'Edge endpoints must be phase nodes to reconnect.' }
+  }
+  if (
+    isGlobalNode(oldSource)
+    || isGlobalNode(oldTarget)
+    || isGlobalNode(newSource)
+    || isGlobalNode(newTarget)
+  ) {
+    return { ok: false, reason: 'global-node', message: 'Global input/output edges are derived and cannot be reconnected.' }
+  }
+  if (newSource === newTarget) {
+    return { ok: false, reason: 'self-dependency', message: 'A phase cannot depend on itself.' }
+  }
+  if (oldSource === newSource && oldTarget === newTarget) {
+    return { ok: false, reason: 'no-op', message: 'Edge was reconnected to the same endpoints.' }
+  }
+
+  return {
+    ok: true,
+    disconnect: { source: oldSource, target: oldTarget },
+    connect: { source: newSource, target: newTarget },
+  }
+}
+
 export function phaseFilePath(phaseId: string, kind: NewPhaseKind): string {
   if (kind === 'skill') {
     return `phases/${phaseId}/SKILL.md`

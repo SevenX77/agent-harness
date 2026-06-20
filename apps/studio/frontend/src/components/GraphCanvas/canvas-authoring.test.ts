@@ -8,6 +8,7 @@ import {
   phaseRefsFromSkillDetail,
   checkSequentialOverwrites,
   addSequentialOverwriteField,
+  planEdgeReconnect,
 } from './canvas-authoring'
 
 describe('canvas authoring helpers', () => {
@@ -218,6 +219,58 @@ allow_sequential_overwrite:
       fieldName: 'report',
       ancestorNodeId: 'draft',
     })
+  })
+
+  it('plans an edge reconnect as an old-target disconnect plus new-target connect', () => {
+    // Drag the target endpoint of draft→review over to publish: review loses the
+    // draft dependency, publish gains it. Both halves reuse disconnect/connect.
+    const plan = planEdgeReconnect(
+      { source: 'draft', target: 'review' },
+      { source: 'draft', target: 'publish' },
+    )
+
+    expect(plan).toEqual({
+      ok: true,
+      disconnect: { source: 'draft', target: 'review' },
+      connect: { source: 'draft', target: 'publish' },
+    })
+  })
+
+  it('plans a source-endpoint reconnect by swapping the dependency provider', () => {
+    // Drag the source endpoint of draft→publish over to review: publish stops
+    // depending on draft and starts depending on review.
+    const plan = planEdgeReconnect(
+      { source: 'draft', target: 'publish' },
+      { source: 'review', target: 'publish' },
+    )
+
+    expect(plan).toEqual({
+      ok: true,
+      disconnect: { source: 'draft', target: 'publish' },
+      connect: { source: 'review', target: 'publish' },
+    })
+  })
+
+  it('rejects reconnecting onto global nodes, onto itself, or back to the same endpoints', () => {
+    expect(planEdgeReconnect(
+      { source: 'draft', target: 'review' },
+      { source: 'draft', target: '__global_output__' },
+    )).toMatchObject({ ok: false, reason: 'global-node' })
+
+    expect(planEdgeReconnect(
+      { source: '__global_input__', target: 'review' },
+      { source: 'draft', target: 'review' },
+    )).toMatchObject({ ok: false, reason: 'global-node' })
+
+    expect(planEdgeReconnect(
+      { source: 'draft', target: 'review' },
+      { source: 'review', target: 'review' },
+    )).toMatchObject({ ok: false, reason: 'self-dependency' })
+
+    expect(planEdgeReconnect(
+      { source: 'draft', target: 'review' },
+      { source: 'draft', target: 'review' },
+    )).toMatchObject({ ok: false, reason: 'no-op' })
   })
 
   it('updates markdown frontmatter correctly via addSequentialOverwriteField', () => {

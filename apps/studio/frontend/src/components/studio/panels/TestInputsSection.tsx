@@ -1,6 +1,6 @@
 import { useState } from "react"
 import useSWR from "swr"
-import { ListChecks, Loader2, Plus, Trash2 } from "lucide-react"
+import { ListChecks, Loader2, Plus, Sparkles, Trash2 } from "lucide-react"
 import { createTestInput, deleteTestInput, fetcher } from "@/api/client"
 import type { JsonObject, TestInputMetadata } from "@/api/types"
 import { useBatchRun } from "@/hooks/useBatchRun"
@@ -34,6 +34,67 @@ export function prepareTestInputCreate(name: string, contentText: string): Prepa
   return { ok: true, name: trimmed, content: parsed }
 }
 
+interface NamingSequenceItem {
+  id: string
+  name: string
+}
+
+export interface NamingSequenceGroup {
+  /** Shared textual prefix, e.g. "chapter". */
+  prefix: string
+  /** Ids of the matched inputs, ordered by their numeric suffix. */
+  ids: string[]
+  /** Human label for the suggestion, e.g. "chapter1–3". */
+  label: string
+}
+
+const NAMING_SEQUENCE_PATTERN = /^(.*?)(\d+)$/
+
+/**
+ * C10: detect a numeric naming sequence across `items[].name` — a shared
+ * non-empty prefix followed by an incrementing integer suffix (chapter1 /
+ * chapter2 / chapter3, ep1 / ep2 …). Returns the largest such group with at
+ * least two members so the UI can suggest running it as a batch.
+ *
+ * Pure and exported so it is unit-testable under SSR (no `@testing-library`);
+ * the click-to-batch flow is covered by the panel e2e.
+ */
+export function detectNamingSequence(items: readonly NamingSequenceItem[]): NamingSequenceGroup | null {
+  const groups = new Map<string, { id: string; suffix: number }[]>()
+  for (const item of items) {
+    const match = NAMING_SEQUENCE_PATTERN.exec(item.name.trim())
+    if (!match) {
+      continue
+    }
+    const prefix = match[1]
+    if (!prefix) {
+      continue
+    }
+    const members = groups.get(prefix) ?? []
+    members.push({ id: item.id, suffix: Number.parseInt(match[2], 10) })
+    groups.set(prefix, members)
+  }
+
+  let best: NamingSequenceGroup | null = null
+  for (const [prefix, members] of groups) {
+    if (members.length < 2) {
+      continue
+    }
+    const ordered = [...members].sort((a, b) => a.suffix - b.suffix)
+    if (best && ordered.length <= best.ids.length) {
+      continue
+    }
+    const first = ordered[0].suffix
+    const last = ordered[ordered.length - 1].suffix
+    best = {
+      prefix,
+      ids: ordered.map((member) => member.id),
+      label: `${prefix}${first}–${last}`,
+    }
+  }
+  return best
+}
+
 const EMPTY_CONTENT = "{\n  \n}"
 
 interface TestInputsSectionProps {
@@ -61,6 +122,20 @@ export function TestInputsSection({
   const items = data ?? []
   // F6: batch run shares the same test_inputs SWR key, so the list is deduped.
   const batch = useBatchRun(skillId)
+
+  // C10: when inputs form a naming sequence (chapter1/2/3), suggest running the
+  // whole group as a batch. Hide the suggestion once the group is already fully
+  // selected so it doesn't compete with the manual "Run N as batch" action.
+  const sequence = detectNamingSequence(items)
+  const isSequenceFullySelected =
+    sequence !== null && sequence.ids.every((id) => batch.selectedInputIds.includes(id))
+  const sequenceSuggestion = sequence && !isSequenceFullySelected ? sequence : null
+
+  // Selecting the whole group + running happens atomically inside runBatch so we
+  // don't race the async selection setState.
+  const handleRunSequence = (group: NamingSequenceGroup) => {
+    void batch.runBatch(group.ids)
+  }
 
   const handleCreate = async () => {
     const prepared = prepareTestInputCreate(name, content)
@@ -148,6 +223,23 @@ export function TestInputsSection({
           })
         )}
       </div>
+
+      {sequenceSuggestion ? (
+        <button
+          type="button"
+          // C10: one click selects the whole detected naming sequence and runs
+          // it as a batch, sparing the user from ticking each input.
+          onClick={() => handleRunSequence(sequenceSuggestion)}
+          disabled={batch.batchRunning}
+          aria-label={`Run ${sequenceSuggestion.label} as batch`}
+          className="flex w-full items-center gap-1 rounded-md border border-dashed border-primary/50 bg-accent/40 px-2 py-1 text-left text-[11px] text-primary transition-opacity hover:opacity-80 disabled:opacity-50"
+        >
+          <Sparkles className="size-3.5 shrink-0" />
+          <span className="truncate">
+            Run {sequenceSuggestion.label} ({sequenceSuggestion.ids.length}) as batch
+          </span>
+        </button>
+      ) : null}
 
       {batch.selectedInputIds.length > 0 || batch.batchStatus ? (
         <div className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1 text-xs">

@@ -12,7 +12,7 @@ import { useCopilotContext } from "@/hooks/useCopilotContext"
 import { lintStatusEvent, readLintStatus } from "@/hooks/useDebouncedLint"
 import { useRunStream } from "@/hooks/useRunStream"
 import { useGoldenDiff } from "@/hooks/useGoldenDiff"
-import { nextLocalHistoryRefreshKey, useLocalHistory } from "@/hooks/useRunHistory"
+import { archiveFeedbackForGitStatus, nextLocalHistoryRefreshKey, useLocalHistory, useRunHistory } from "@/hooks/useRunHistory"
 import { useSkills } from "@/hooks/useSkills"
 import { DiffView } from "@/components/diff/DiffView"
 import type { CopilotJudgeResponse, ResumeRunOptions } from "@/api/client"
@@ -218,6 +218,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // consumes; we never build a snapshot locally.
   const localHistory = useLocalHistory(currentSkillId)
   const refreshLocalHistory = localHistory.refresh
+  const { fetchRunDetail } = useRunHistory(currentSkillId)
   // Track which (skill, run) pair has already triggered a refresh so the effect
   // fires once on the not-ended → ended edge, not on every subsequent re-render
   // while the terminated run keeps replaying its log. nextLocalHistoryRefreshKey
@@ -237,6 +238,52 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     refreshedRunRef.current = refreshKey
     void refreshLocalHistory()
   }, [completedRunId, currentSkillId, refreshLocalHistory])
+
+  // N6 #1 (autocommit-feedback): on the not-ended → ended edge, the run is done
+  // but the `run_ended` stream event carries no metadata, so we re-fetch the run
+  // detail (GET /skills/{id}/runs/{run_id}) to read the backend-recorded
+  // `git_status` and surface a one-shot archive toast (committed/no_git → success;
+  // locked/failed → warning, never pretending the archive happened). We reuse the
+  // same (skill, run) de-dupe key as the history refresh and guard the async race:
+  // if the run changes while the fetch is in flight, the stale result is dropped.
+  const archiveFeedbackRunRef = useRef<string | null>(null)
+  useEffect(() => {
+    const feedbackKey = nextLocalHistoryRefreshKey({
+      skillId: currentSkillId,
+      completedRunId,
+      lastRefreshedKey: archiveFeedbackRunRef.current,
+    })
+    if (!feedbackKey || !completedRunId) {
+      return
+    }
+    archiveFeedbackRunRef.current = feedbackKey
+    let cancelled = false
+    const announceArchiveOutcome = async () => {
+      try {
+        const detail = await fetchRunDetail(completedRunId)
+        if (cancelled || !detail) {
+          return
+        }
+        const feedback = archiveFeedbackForGitStatus(detail.metadata.git_status)
+        if (!feedback) {
+          return
+        }
+        if (feedback.variant === "success") {
+          toast.success(feedback.message)
+        } else {
+          toast.warning(feedback.message)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          toast.error(`Could not read archive status: ${errorMessage(error)}`)
+        }
+      }
+    }
+    void announceArchiveOutcome()
+    return () => {
+      cancelled = true
+    }
+  }, [completedRunId, currentSkillId, fetchRunDetail])
 
   const statusByNodeId = useMemo(
     () => deriveNodeStatuses(runStream.events, runId),

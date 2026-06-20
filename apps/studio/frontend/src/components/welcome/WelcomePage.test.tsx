@@ -36,11 +36,6 @@ const mismatchSkill: SkillSummary = {
   has_golden: true,
   last_run_at: null,
   directory_path: '/tmp/demo-skill',
-  config_mismatch: {
-    actual_remote_url: 'https://gitea.example.test/bob/demo-skill.git',
-    expected_remote_url: 'https://gitea.example.test/alice/demo-skill.git',
-    recommendation: 'Use .git/config as the source of truth, then adjust User ID / Gitea Host in Settings.',
-  },
 }
 
 const recentEntry: RecentWorkspaceEntry = {

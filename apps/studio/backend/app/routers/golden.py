@@ -8,6 +8,7 @@ from app.core.exceptions import error_response, raise_error_response
 from app.models.errors import ErrorResponse
 from app.models.golden import (
     GoldenBaseline,
+    GoldenBaselineContent,
     GoldenBaselinePlan,
     GoldenTemplate,
     SetGoldenReq,
@@ -18,6 +19,7 @@ from app.services.golden_diff import (
     list_golden_baselines_for_skill,
     plan_golden_baseline_for_run,
     plan_manual_golden_for_node,
+    read_golden_baseline_content,
     set_golden_baseline_for_run,
 )
 from app.services.golden_template import generate_golden_template
@@ -32,6 +34,22 @@ router = APIRouter(prefix="/api/skills/{skill_id}/golden", tags=["golden"])
 )
 async def list_golden_baselines(skill_id: str) -> list[GoldenBaseline]:
     return list_golden_baselines_for_skill(skill_id)
+
+
+@router.get(
+    "/{golden_id}/content",
+    response_model=GoldenBaselineContent,
+    responses={404: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
+)
+async def read_golden_content(
+    skill_id: str,
+    golden_id: str,
+    node_id: str | None = None,
+) -> GoldenBaselineContent:
+    # N4 atom #29 read path (read-only, no write guard): resolve each persisted case's
+    # expected_output_ref to its stored content so the I/O panel can open a golden file
+    # for editing. With ?node_id= only that node's case is returned.
+    return read_golden_baseline_content(skill_id, golden_id, node_id=node_id)
 
 
 @router.post(

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Loader2 } from "lucide-react"
+import { AlertTriangle, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -14,7 +14,9 @@ import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
-import type { ResumeValidityResponse, SkillDetail } from "@/api/types"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import type { LintError, ResumeValidityResponse, SkillDetail } from "@/api/types"
+import { fieldErrorsByKey } from "@/components/studio/field-compile-errors"
 import type { SkillGraphNodeData, SkillNodeStatus, SubagentRef } from "@/components/GraphCanvas"
 import type { ResumeRunOptions } from "@/api/client"
 import { legacySubgraphTargetSkill } from "@/components/studio/subgraph-path"
@@ -118,6 +120,9 @@ interface PropertiesPanelProps {
   resumeValidityLoading?: boolean
   resumeValidityError?: string | null
   resumeLoading?: boolean
+  // Realtime lint diagnostics (engine field axis). Projected per-field by `field_path`
+  // onto the matching frontmatter field below; no-field errors degrade to the node badge.
+  lintErrors?: LintError[] | null
   onFileOpen?: (fileOrPath: FileMeta | string) => void
   onPhaseFileSave?: (payload: { path: string; content: string; expectedHash: string }) => Promise<void> | void
   onResumeNode?: (options: ResumeRunOptions) => Promise<void> | void
@@ -133,6 +138,7 @@ export function PropertiesPanel({
   resumeValidityLoading = false,
   resumeValidityError = null,
   resumeLoading = false,
+  lintErrors = null,
   onFileOpen,
   onPhaseFileSave,
   onResumeNode,
@@ -144,6 +150,13 @@ export function PropertiesPanel({
   const filePath = selectedNode?.data.filePath ?? (selectedNode ? `phases/${selectedNode.id}/${phaseKindFile(selectedNode.data)}` : null)
   const fileContent = filePath ? skillDetail?.files?.[filePath] : undefined
   const subagents = selectedNode?.data.subagents ?? []
+  // Field-level near-projection (atom #5): group THIS node's lint errors by the engine's
+  // `field_path` so each frontmatter field can show its own marker; no-field errors are
+  // dropped here and stay on the node badge (atom #4).
+  const fieldErrors = useMemo(
+    () => (selectedNode ? fieldErrorsByKey(lintErrors, selectedNode.id) : {}),
+    [lintErrors, selectedNode],
+  )
   const phaseFormState = useMemo(() => {
     if (!filePath) {
       return { key: "none", ok: false as const, reason: "missing-node" as const, message: "Select a phase node to edit frontmatter." }
@@ -267,6 +280,7 @@ export function PropertiesPanel({
                 canSave={canSave}
                 canReset={dirty && !saving}
                 roleTest={roleTest}
+                fieldErrors={fieldErrors}
                 legacyTargetSkill={phaseFormState.legacyTargetSkill ?? null}
                 onFieldChange={setField}
                 onReset={handleReset}
@@ -388,6 +402,7 @@ function PhaseFrontmatterForm({
   canSave,
   canReset,
   roleTest,
+  fieldErrors,
   legacyTargetSkill,
   onFieldChange,
   onReset,
@@ -400,6 +415,7 @@ function PhaseFrontmatterForm({
   canSave: boolean
   canReset: boolean
   roleTest: RoleTestStatusInput
+  fieldErrors: Record<string, LintError[]>
   legacyTargetSkill: string | null
   onFieldChange: <Key extends keyof PhaseFrontmatterFormData>(field: Key, value: PhaseFrontmatterFormData[Key]) => void
   onReset: () => void
@@ -419,7 +435,10 @@ function PhaseFrontmatterForm({
           {kind === "agent" ? (
             <>
               <Field>
-                <FieldLabel htmlFor="phase-llm-role">LLM role</FieldLabel>
+                <FieldLabel htmlFor="phase-llm-role">
+                  LLM role
+                  <FieldErrorMarker errors={fieldErrors.llm_role} />
+                </FieldLabel>
                 <div className="flex items-center gap-2">
                   <Input
                     id="phase-llm-role"
@@ -437,7 +456,10 @@ function PhaseFrontmatterForm({
                 <FieldDescription>Routes model tier/policy. Inherits the graph default when blank.</FieldDescription>
               </Field>
               <Field>
-                <FieldLabel htmlFor="phase-tools">Tools</FieldLabel>
+                <FieldLabel htmlFor="phase-tools">
+                  Tools
+                  <FieldErrorMarker errors={fieldErrors.tools} />
+                </FieldLabel>
                 <Textarea
                   id="phase-tools"
                   value={value.tools}
@@ -455,7 +477,10 @@ function PhaseFrontmatterForm({
           {kind === "logic" ? (
             <>
               <Field>
-                <FieldLabel htmlFor="phase-actions">Actions</FieldLabel>
+                <FieldLabel htmlFor="phase-actions">
+                  Actions
+                  <FieldErrorMarker errors={fieldErrors.actions} />
+                </FieldLabel>
                 <Textarea
                   id="phase-actions"
                   value={value.actions}
@@ -466,6 +491,7 @@ function PhaseFrontmatterForm({
               </Field>
               <ValidatorField
                 value={value.validator}
+                errors={fieldErrors.validator}
                 onChange={(next) => onFieldChange("validator", next)}
               />
             </>
@@ -473,7 +499,10 @@ function PhaseFrontmatterForm({
           {kind === "subgraph" ? (
             <>
               <Field>
-                <FieldLabel htmlFor="phase-path">Path</FieldLabel>
+                <FieldLabel htmlFor="phase-path">
+                  Path
+                  <FieldErrorMarker errors={fieldErrors.path} />
+                </FieldLabel>
                 <Input
                   id="phase-path"
                   value={value.path}
@@ -489,6 +518,7 @@ function PhaseFrontmatterForm({
               </Field>
               <ValidatorField
                 value={value.validator}
+                errors={fieldErrors.validator}
                 onChange={(next) => onFieldChange("validator", next)}
               />
             </>
@@ -539,10 +569,21 @@ function RoleTestControl({
   )
 }
 
-function ValidatorField({ value, onChange }: { value: boolean; onChange: (next: boolean) => void }) {
+function ValidatorField({
+  value,
+  errors,
+  onChange,
+}: {
+  value: boolean
+  errors?: LintError[]
+  onChange: (next: boolean) => void
+}) {
   return (
     <Field orientation="horizontal" className="items-center justify-between gap-3">
-      <FieldLabel htmlFor="phase-validator" className="min-w-0">Validator</FieldLabel>
+      <FieldLabel htmlFor="phase-validator" className="min-w-0">
+        Validator
+        <FieldErrorMarker errors={errors} />
+      </FieldLabel>
       <Switch
         id="phase-validator"
         size="sm"
@@ -551,6 +592,46 @@ function ValidatorField({ value, onChange }: { value: boolean; onChange: (next: 
         aria-label="Validator"
       />
     </Field>
+  )
+}
+
+/**
+ * Per-field lint marker (authoring N3 atom #5): an inline warning/error glyph next to a
+ * frontmatter field whose engine `field_path` matched a diagnostic. Hover lists the
+ * message(s). Mirrors the canvas node badge idiom (SkillNode: AlertTriangle + Tooltip),
+ * reusing shadcn Tooltip and severity tokens — never a hand-rolled popover or raw color.
+ */
+function FieldErrorMarker({ errors }: { errors?: LintError[] | null }) {
+  if (!errors || errors.length === 0) {
+    return null
+  }
+  const hasError = errors.some((error) => error.severity === "error")
+  const tone = hasError ? "text-destructive" : "text-amber-500"
+  const count = errors.length === 1 ? "1 issue" : `${errors.length} issues`
+  const messages = errors.map((error) => error.message)
+  // The joined messages live on the trigger's accessible name + native title so the
+  // diagnostic is reachable without opening the styled Tooltip (and survives SSR).
+  const accessibleSummary = `Field has ${count}: ${messages.join("; ")}`
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          role="img"
+          aria-label={accessibleSummary}
+          title={accessibleSummary}
+          className={`ms-1 inline-flex items-center align-middle ${tone}`}
+        >
+          <AlertTriangle className="size-3.5" aria-hidden />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top">
+        <ul className="space-y-0.5">
+          {messages.map((message, index) => (
+            <li key={`${errors[index]?.error_code ?? "err"}-${index}`}>{message}</li>
+          ))}
+        </ul>
+      </TooltipContent>
+    </Tooltip>
   )
 }
 

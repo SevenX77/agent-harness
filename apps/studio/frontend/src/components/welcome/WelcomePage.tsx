@@ -1,13 +1,12 @@
 import { AlertCircle, Clock3, FolderOpen, Layers, Layers3, MoreVertical, Plus } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { toast } from 'sonner'
-import { api } from '../../api/client'
 import type { SkillSummary } from '../../api/types'
 import { useAppSettings } from '../../hooks/useAppSettings'
 import { useRecentSkills } from '../../hooks/useRecentSkills'
 import { useSkills } from '../../hooks/useSkills'
 import { getRuntimeConfig } from '../../config/runtime'
-import { revealInFileManager, selectSkillDirectory, addRecentWorkspace, ensureWorkspaceSupportDirs } from '../../lib/tauri'
+import { revealInFileManager, selectSkillDirectory, addRecentWorkspace, ensureWorkspaceSupportDirs, createSkillWorkspace, openSkillWorkspace } from '../../lib/tauri'
 import { errorMessage, isRecord } from '../../utils/errors'
 import { joinDirectoryPath } from '../../utils/skill-paths'
 import { Button } from '../ui/button'
@@ -170,15 +169,6 @@ function requestValidationMessage(payload: StudioErrorPayload): string {
   return 'the request did not match the /skills API contract.'
 }
 
-function existingSkillIdFromError(error: unknown): string | null {
-  const payload = studioErrorPayload(error)
-  if (payload?.error_code !== 'SKILL_ALREADY_EXISTS') {
-    return null
-  }
-  const existingSkillId = payload.details?.skill_id
-  return typeof existingSkillId === 'string' ? existingSkillId : null
-}
-
 export function formatCreateSkillError(error: unknown, skillId: string): string {
   const payload = studioErrorPayload(error)
   if (payload?.error_code === 'SKILL_ALREADY_EXISTS') {
@@ -229,7 +219,7 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
   const [newSkillError, setNewSkillError] = useState<string | null>(null)
   const appSettings = useAppSettings()
   const defaultSkillParentDirectory = defaultSkillsDirectory(appSettings.settings.default_skills_directory)
-  const { skillListError, mutateSkills } = useSkills(null)
+  const { skillListError } = useSkills(null)
   const { recentWorkspaces, rememberWorkspace, isHydrating } = useRecentSkills()
 
   // Recent is a pure MRU projection (D11/D-1-1): each card is one localStorage
@@ -248,18 +238,13 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
     if (!isAbsolutePath(workspaceRoot)) {
       return workspaceRoot
     }
-    try {
-      const response = await api.post<SkillSummary>('/skills', buildSkillImportPayload(workspaceRoot))
-      await mutateSkills()
-      return response.data.id
-    } catch (error) {
-      const existingSkillId = existingSkillIdFromError(error)
-      if (existingSkillId) {
-        await mutateSkills()
-        return existingSkillId
-      }
-      throw error
-    }
+    // D2/D12: opening a folder = register it via the Rust native-fs writer (OS
+    // checks only, no manifest validation, no backend registry). Rust derives the
+    // skill id from the path and writes the skill_index entry so the read-detail
+    // sidecar GET /api/skills/{id} resolves; we encode the SAME id into the
+    // local-workspace selection token below.
+    const result = await openSkillWorkspace(workspaceRoot)
+    return result.skillId
   }
 
   const openSkill = async (workspaceRoot: string, displayName?: string, backendSkillId?: string) => {
@@ -315,10 +300,14 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
     setCreating(true)
     setNewSkillError(null)
     try {
-      const response = await api.post<SkillSummary>('/skills', buildSkillCreatePayload(skillId, newSkillParentDirectory))
-      await mutateSkills()
+      // D12: build dir + scaffold + git init via the Rust native-fs sole writer
+      // (no Python POST /skills, no copilot, no manifest lint). Rust writes the
+      // skill_index entry keyed by skillId and returns {root, skillId}; openSkill
+      // encodes that same id into the local-workspace token so the detail GET
+      // resolves. Parent blank -> Rust defaults to the config Skills dir.
+      const result = await createSkillWorkspace(newSkillParentDirectory ?? '', skillId)
       setNewSkillOpen(false)
-      await openSkill(response.data.directory_path || response.data.id, response.data.name, response.data.id)
+      await openSkill(result.root, trimmed, result.skillId)
     } catch (error) {
       setNewSkillError(formatCreateSkillError(error, skillId))
     } finally {

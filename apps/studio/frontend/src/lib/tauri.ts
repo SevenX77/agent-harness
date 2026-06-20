@@ -129,6 +129,55 @@ export async function selectSkillDirectory(defaultDirectory?: string | null): Pr
   }
 }
 
+export interface SkillWorkspaceResult {
+  root: string
+  skillId: string
+}
+
+/**
+ * Create a new skill on disk via the Rust native-fs sole writer (D12): builds
+ * the skill dir + scaffold, runs git init, and writes the skill_index entry so
+ * the read-detail sidecar GET resolves id->dir. Replaces the Python POST /skills
+ * create path. `parentDirectory` blank -> Rust defaults to the config Skills dir.
+ */
+export async function createSkillWorkspace(
+  parentDirectory: string,
+  skillId: string,
+): Promise<SkillWorkspaceResult> {
+  assertNativeHelpersAvailable()
+  const { invoke } = await import('@tauri-apps/api/core')
+  const result = await invoke<{ root: string; skill_id: string }>('create_skill_workspace', {
+    parentDirectory,
+    skillId,
+  })
+  return { root: result.root, skillId: result.skill_id }
+}
+
+/**
+ * Register an opened folder as a workspace via the Rust native-fs writer (D2:
+ * OS checks only, no manifest validation): derives the skill id from the path
+ * and writes the skill_index entry. Replaces the Python POST /skills import path.
+ */
+export async function openSkillWorkspace(directory: string): Promise<SkillWorkspaceResult> {
+  assertNativeHelpersAvailable()
+  const { invoke } = await import('@tauri-apps/api/core')
+  const result = await invoke<{ root: string; skill_id: string }>('open_skill_workspace', {
+    directory,
+  })
+  return { root: result.root, skillId: result.skill_id }
+}
+
+/**
+ * Read-only existence check used by stale-MRU pruning. Degrades like the other
+ * read/list native helpers: outside the desktop runtime it returns `true` so a
+ * web session never prunes its localStorage MRU on a missing native channel.
+ */
+export async function workspacePathExists(path: string): Promise<boolean> {
+  if (!isTauriRuntime() || !nativeHelpersAreAvailable()) return true
+  const { invoke } = await import('@tauri-apps/api/core')
+  return await invoke<boolean>('workspace_path_exists', { path })
+}
+
 export async function writeWorkspaceFile(
   workspaceRoot: string,
   path: string,

@@ -70,6 +70,68 @@ describe('TraceEventRow payload collapse (D1 / §4)', () => {
   })
 })
 
+describe('TraceEventRow agent tool-call folding (D1/P2, n4-trace #16)', () => {
+  it('renders the classified verb headline (Explored · Read) for an agent tool_call instead of raw JSON', () => {
+    const html = renderRow(
+      event({ event_type: 'tool_call', phase_name: 'agent', tool_name: 'Read', args: { path: 'a.py' }, result: 'file body' }),
+    )
+
+    expect(html).toContain('Explored · Read')
+  })
+
+  it('renders the classified subtree (not a JSON.stringify dump) when an agent tool_call row is expanded', () => {
+    const html = renderRow(
+      event({ event_type: 'tool_call', phase_name: 'agent', tool_name: 'Bash', args: { cmd: 'ls -la' }, result: 'total 0' }),
+      true,
+    )
+
+    // The expanded view shows the classified Input/Result subtree, not a raw payload toggle.
+    expect(html).toContain('Input')
+    expect(html).toContain('Result')
+    expect(html).toContain('ls -la')
+    expect(html).not.toContain('Show full payload')
+  })
+})
+
+describe('TraceEventRow agent execution subtree inline expand (D9, n4-trace #24)', () => {
+  it("renders a '+' inline expand affordance on an agent tool_call row", () => {
+    const html = renderRow(event({ event_type: 'tool_call', phase_name: 'agent', tool_name: 'Read', result: 'x' }))
+
+    expect(html).toContain('aria-label="Expand execution subtree"')
+  })
+
+  it('does not render the subtree affordance for a non-tool event', () => {
+    const html = renderRow(event({ event_type: 'phase_start', phase_name: 'draft' }))
+
+    expect(html).not.toContain('execution subtree')
+  })
+})
+
+describe('TraceEventRow retry-exhausted Error Stack (D10, n4-trace #25)', () => {
+  it('renders an Error Stack listing each prior failure reason when retries are exhausted', () => {
+    const html = renderRow(
+      event({ event_type: 'retry_exhausted', phase_name: 'draft', max_retries: 3, final_errors: ['schema mismatch', 'missing field x'] }),
+    )
+
+    expect(html).toContain('Error Stack (2)')
+    expect(html).toContain('schema mismatch')
+    expect(html).toContain('missing field x')
+  })
+
+  it('surfaces the per-attempt errors list for a validation_fail event', () => {
+    const html = renderRow(event({ event_type: 'validation_fail', phase_name: 'draft', errors: ['line 3 invalid'] }))
+
+    expect(html).toContain('Error Stack (1)')
+    expect(html).toContain('line 3 invalid')
+  })
+
+  it('omits the Error Stack entirely for a passing phase event', () => {
+    const html = renderRow(event({ event_type: 'phase_end', phase_name: 'draft' }))
+
+    expect(html).not.toContain('Error Stack')
+  })
+})
+
 describe('TraceEventRow inspect-prompt affordance (D8 click target)', () => {
   it('renders the Inspect prompt control for an llm_call event', () => {
     const html = renderRow(event({ event_type: 'llm_call', phase_name: 'draft' }))

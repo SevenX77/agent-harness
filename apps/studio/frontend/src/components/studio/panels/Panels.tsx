@@ -119,6 +119,7 @@ export function Panels({
         <TracePanel
           traceLogs={traceEvents ?? []}
           activePhase={activeTracePhase ?? null}
+          selectedNode={selectedNode}
           onSelectPrompt={onSelectTracePrompt ?? (() => undefined)}
           canCompare={traceCanCompare}
           compareLoading={traceCompareLoading}

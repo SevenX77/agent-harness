@@ -184,6 +184,110 @@ export function payloadPreview(event: CallbackEvent): PayloadPreview {
   }
 }
 
+// ── Agent tool-call folding (D1/P2, n4-trace #16) ───────────────────────────
+// The engine emits a `tool_call` event (packages/graph-agent .../events.py
+// ToolCallEvent: tool_name / args / result / duration_ms) for every tool an
+// agent phase invokes. Instead of dumping it as raw JSON, the trace row folds
+// it under a semantic verb the same way copilot/tool-call-bubble.tsx does
+// (Read → Explored, Write/Edit → Worked, Bash → Ran), so the agent's actions
+// read like an agent IDE rather than a JSON blob.
+
+const TOOL_CALL_VERBS: Record<string, string> = {
+  Read: 'Explored',
+  Glob: 'Explored',
+  Grep: 'Explored',
+  LS: 'Explored',
+  Write: 'Worked',
+  Edit: 'Worked',
+  MultiEdit: 'Worked',
+  Bash: 'Ran',
+}
+
+export interface ToolCallSummary {
+  /** Semantic verb for the tool (Explored / Worked / Ran) or a fallback. */
+  verb: string
+  /** The raw tool name, e.g. "Read". */
+  toolName: string
+  /** One-line headline, e.g. "Explored · Read". */
+  headline: string
+  /** Serialized args (tool input), empty string when there are none. */
+  args: string
+  /** Result / output text, trimmed to the leading lines for the summary. */
+  resultSummary: string
+  /** Optional duration label, e.g. "120 ms". */
+  durationLabel: string | null
+}
+
+function isToolCallEvent(event: CallbackEvent): boolean {
+  return event.event_type === 'tool_call' && typeof event.tool_name === 'string'
+}
+
+function summariseResult(value: JsonValue | undefined): string {
+  if (typeof value !== 'string') {
+    return ''
+  }
+  const lines = value.split('\n')
+  if (lines.length <= 4) {
+    return value.trim()
+  }
+  return `${lines.slice(0, 4).join('\n').trim()}\n…`
+}
+
+/**
+ * Build a classified, foldable summary for an agent `tool_call` event.
+ *
+ * Returns null for any event that is not a tool_call, so callers can fall back
+ * to the generic payload renderer.
+ */
+export function toolCallSummary(event: CallbackEvent): ToolCallSummary | null {
+  if (!isToolCallEvent(event)) {
+    return null
+  }
+  const toolName = String(event.tool_name)
+  const verb = TOOL_CALL_VERBS[toolName] ?? 'Called'
+  const args = isJsonObject(event.args) && Object.keys(event.args).length > 0 ? JSON.stringify(event.args, null, 2) : ''
+  const durationLabel = typeof event.duration_ms === 'number' && Number.isFinite(event.duration_ms)
+    ? `${Math.round(event.duration_ms)} ms`
+    : null
+  return {
+    verb,
+    toolName,
+    headline: `${verb} · ${toolName}`,
+    args,
+    resultSummary: summariseResult(event.result),
+    durationLabel,
+  }
+}
+
+// ── Retry-exhausted Error Stack (D10, n4-trace #25) ─────────────────────────
+// When retries run out, the engine's retry_exhausted event carries
+// `final_errors: list[str]` (each prior attempt's failure reason); a
+// validation_fail carries `errors: list[str]` for that single attempt. The row
+// surfaces these as an explicit, expandable Error Stack so the user sees *why*
+// each attempt failed rather than just a red light.
+
+function stringList(value: JsonValue | undefined): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+}
+
+/**
+ * Collect the per-attempt failure reasons carried by a retry_exhausted /
+ * validation_fail event. Returns an empty array when the event is neither, or
+ * carries no error list.
+ */
+export function errorStack(event: CallbackEvent): string[] {
+  if (event.event_type === 'retry_exhausted') {
+    return stringList(event.final_errors)
+  }
+  if (event.event_type === 'validation_fail') {
+    return stringList(event.errors)
+  }
+  return []
+}
+
 export function findPromptEvent(events: CallbackEvent[], selectedIndex: number): CallbackEvent | null {
   const selected = events[selectedIndex]
   if (!selected) {

@@ -16,6 +16,14 @@ export type { TraceHitlResumeRequest }
 interface TracePanelProps {
   traceLogs: EventEnvelope[]
   activePhase?: string | null
+  /**
+   * The node the user has focused on the canvas (atom #17: focus decides trace
+   * granularity). When set, the trace narrows to that node's phase ("focus a
+   * node = its trace"); when null, the panel shows the whole-run overview
+   * ("focus empty canvas = run overview"). A node's phase key equals its id,
+   * matching how events carry `phase_name` and how `activeTracePhase` is keyed.
+   */
+  selectedNode?: { id: string; data: { label?: string } } | null
   selectedEventId?: string | null
   linkEnabled?: boolean
   onToggleLink?: (enabled: boolean) => void
@@ -39,6 +47,7 @@ function envelopePayload(event: EventEnvelope): CallbackEvent {
 export function TracePanel({
   traceLogs,
   activePhase = null,
+  selectedNode = null,
   selectedEventId = null,
   linkEnabled = true,
   onToggleLink,
@@ -55,7 +64,12 @@ export function TracePanel({
   onSubmitHitlResponse,
 }: TracePanelProps) {
   const traceEvents = traceLogs.map(envelopePayload)
-  const filter = useTraceFilter(traceEvents, linkEnabled ? activePhase : null)
+  // atom #17: a user-focused node decides trace granularity and wins over the
+  // running-phase link highlight. With no focused node we fall back to
+  // activePhase (the live link-views behavior) so existing wiring is unchanged.
+  const focusPhase = selectedNode?.id ?? activePhase
+  const focusLabel = selectedNode?.data.label ?? focusPhase
+  const filter = useTraceFilter(traceEvents, linkEnabled ? focusPhase : null)
   const hitlPrompt = useMemo(() => latestHitlPrompt(traceLogs), [traceLogs])
 
   if (traceEvents.length === 0) {
@@ -63,7 +77,7 @@ export function TracePanel({
       <div
         role="log"
         aria-live="polite"
-        aria-label="Trace Timeline"
+        aria-label="Event Trace"
         className="flex h-full items-center justify-center text-sm font-medium text-slate-400 dark:text-slate-500"
       >
         Waiting for run events
@@ -72,10 +86,10 @@ export function TracePanel({
   }
 
   return (
-    <div role="log" aria-live="polite" aria-label="Trace Timeline" className="flex h-full min-h-0 flex-col">
+    <div role="log" aria-live="polite" aria-label="Event Trace" className="flex h-full min-h-0 flex-col">
       <div className="shrink-0 space-y-3 border-b border-border bg-card p-4">
         <div className="flex items-center justify-between gap-3">
-          <h3 className="font-semibold text-foreground">Trace Timeline</h3>
+          <h3 className="font-semibold text-foreground">Event Trace</h3>
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -125,7 +139,7 @@ export function TracePanel({
           phases={filter.phases}
           selectedTypes={filter.selectedTypes}
           selectedPhases={filter.selectedPhases}
-          activePhase={activePhase}
+          activePhase={linkEnabled ? focusPhase : null}
           onToggleType={filter.toggleType}
           onTogglePhase={filter.togglePhase}
           onClear={filter.clearFilters}
@@ -134,12 +148,12 @@ export function TracePanel({
           <span
             className="rounded-full border border-border bg-muted/40 px-2 py-0.5"
             title={
-              linkEnabled && activePhase
-                ? `Focused on node "${activePhase}" — showing this node's executions`
+              linkEnabled && focusPhase
+                ? `Focused on node "${focusLabel}" — showing this node's executions`
                 : 'Whole-run trace — focus a node to narrow to its executions'
             }
           >
-            {linkEnabled && activePhase ? `Focus: ${activePhase}` : 'Focus: whole run'}
+            {linkEnabled && focusPhase ? `Focus: ${focusLabel}` : 'Focus: whole run'}
           </span>
           <span>
             Showing {filter.filteredEvents.length} of {traceEvents.length} events
@@ -156,7 +170,7 @@ export function TracePanel({
       <div className="min-h-0 flex-1 p-4">
         <VirtualTraceList
           events={filter.filteredEvents}
-          activePhase={activePhase}
+          activePhase={focusPhase}
           selectedEventId={selectedEventId}
           linkEnabled={linkEnabled}
           onSelectPrompt={onSelectPrompt}

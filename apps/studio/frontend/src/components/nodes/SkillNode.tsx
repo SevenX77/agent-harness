@@ -1,5 +1,6 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { AlertTriangle, Bot, Briefcase, CheckCircle2, Circle, Code, Minus, Network, Pause, Plus, Radio, ShieldCheck, ShieldHalf, Workflow } from 'lucide-react'
+import { AlertTriangle, Bot, Briefcase, CheckCircle2, Circle, Code, ListTree, Minus, Network, Pause, Plus, Radio, ShieldCheck, ShieldHalf, Workflow } from 'lucide-react'
+import { AgentStepsInline } from '@/components/studio/AgentStepsInline'
 import { SubgraphInline } from '@/components/studio/SubgraphInline'
 import { normalizeAbsoluteSubgraphPath } from '@/components/studio/subgraph-path'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -95,6 +96,11 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
   // on the node (not only the red badge, not only the Properties panel) so the user
   // sees why the run stopped right where it stopped.
   const inlineErrorMessage = data.status === 'error' && data.errorMessage ? data.errorMessage : null
+  // N2 atom #15 (l3-step-edit): an AGENT node with its body + save callback wired
+  // gets an inline L3 step editor — expand to add / remove / reorder / edit the
+  // body's `<step>` blocks right on the canvas (no Properties detour). Logic /
+  // subgraph nodes never get it (build-nodes leaves the callbacks undefined).
+  const canEditSteps = kind === 'AGENT' && typeof data.onToggleSteps === 'function' && typeof data.agentBody === 'string'
 
   const nodeContent = (
     <div
@@ -208,6 +214,33 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
         >
           <AlertTriangle className="mt-0.5 size-3 shrink-0" />
           <span className="min-w-0 break-words">{inlineErrorMessage}</span>
+        </div>
+      ) : null}
+      {canEditSteps ? (
+        <div className="mt-2">
+          <button
+            type="button"
+            aria-label={data.isStepsExpanded ? 'Collapse steps' : 'Edit steps'}
+            onClick={(event) => {
+              event.stopPropagation()
+              data.onToggleSteps?.()
+            }}
+            className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
+          >
+            <ListTree className="size-3" />
+            {data.isStepsExpanded ? 'Hide steps' : 'Edit steps'}
+          </button>
+          {data.isStepsExpanded ? (
+            <div
+              onClick={(event) => event.stopPropagation()}
+              onDoubleClick={(event) => event.stopPropagation()}
+            >
+              <AgentStepsInline
+                body={data.agentBody ?? ''}
+                onSave={(nextBody) => data.onStepsSave?.(nextBody)}
+              />
+            </div>
+          ) : null}
         </div>
       ) : null}
       {resolvedSubgraphPath ? (

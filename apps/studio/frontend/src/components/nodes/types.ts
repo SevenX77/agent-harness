@@ -40,6 +40,25 @@ export interface SkillGraphNodeData extends Record<string, unknown> {
   subagents?: SubagentRef[]
   isExpanded?: boolean
   onToggleSubgraph?: () => void
+  /**
+   * N2 atom #15 (l3-step-edit): the agent phase body (SKILL.md text, sans
+   * frontmatter handling — the full file content is fine since the step
+   * transforms only touch `<step>` blocks). Present only for AGENT nodes so the
+   * inline L3 step editor can parse/edit the `<step>` blocks. Sourced from the
+   * real SkillDetail.files in build-nodes — never a test-injected field.
+   */
+  agentBody?: string
+  /** Whether the node's inline L3 step editor is expanded (canvas-owned toggle). */
+  isStepsExpanded?: boolean
+  /** Toggle the inline L3 step editor open/closed (AGENT nodes only). */
+  onToggleSteps?: () => void
+  /**
+   * Persist an edited agent body through the normal phase-file save path
+   * (handlePhaseFileSave -> doWriteSkillFile -> native-fs / browser fallback).
+   * The canvas binds the file path + optimistic-lock hash; this only forwards the
+   * rewritten body string.
+   */
+  onStepsSave?: (nextBody: string) => void
   activeConflict?: { nodeId: string; fieldName: string; ancestorNodeId: string }
   isConflictCancelled?: boolean
   onAllowSequentialOverwrite?: (nodeId: string, fieldName: string) => void

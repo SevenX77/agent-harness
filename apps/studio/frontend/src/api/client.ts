@@ -260,21 +260,37 @@ export async function fetchGoldenTemplate(skillId: string, nodeId: string): Prom
 
 /**
  * N4 atom #33 manual write: save an author-defined golden keyed by node_id (run-less).
- * Browser mode carries the write-fallback header (atom #36 ②); this never rides the
- * run-keyed promote path. Tauri local-write parity is a follow-on (native plan path).
+ * D12: the manual golden write ALWAYS goes through the Rust native-fs sole writer — it
+ * asks the backend for the file plan (`/golden/manual/plan`, read-only, no disk write)
+ * and writes each plan file through `writeWorkspaceFile`. There is NO browser HTTP
+ * disk-write fallback: outside the desktop runtime `writeWorkspaceFile` throws
+ * "Desktop only" and nothing persists (the MVP1 desktop-first web boundary); the caller
+ * surfaces that as an error. This never rides the run-keyed promote path.
  */
 export async function saveManualGolden(
   skillId: string,
   nodeId: string,
   expectedOutput: JsonObject,
+  workspaceRoot?: string | null,
 ): Promise<GoldenBaseline> {
   const apiSkillId = resolveWorkspaceIdentity(skillId).skillId ?? skillId
-  const response = await api.post<GoldenBaseline>(
-    `/skills/${apiSkillId}/golden/manual`,
-    { node_id: nodeId, expected_output: expectedOutput },
-    BROWSER_WRITE_FALLBACK_CONFIG,
+  const manualRequest = { node_id: nodeId, expected_output: expectedOutput }
+  const response = await api.post<GoldenBaselinePlan>(
+    `/skills/${apiSkillId}/golden/manual/plan`,
+    manualRequest,
   )
-  return response.data
+  const plan = response.data
+  const targetRoot = resolveGoldenWorkspaceRoot(skillId, workspaceRoot)
+  for (const file of plan.files) {
+    await writeWorkspaceFile(
+      targetRoot,
+      file.path,
+      file.content,
+      null,
+      { createIfAbsent: true },
+    )
+  }
+  return plan.baseline
 }
 
 export async function startRun(skillId: string, inputData: JsonObject): Promise<RunMetadata> {

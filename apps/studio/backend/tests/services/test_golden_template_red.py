@@ -12,8 +12,12 @@ import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from app.models.golden import GoldenTemplate, SetManualGoldenReq
-from app.services.golden_diff import list_golden_baselines_for_skill, set_manual_golden_for_node
+from app.models.golden import GoldenBaselinePlan, GoldenTemplate, SetManualGoldenReq
+from app.services.golden_diff import (
+    list_golden_baselines_for_skill,
+    plan_manual_golden_for_node,
+    set_manual_golden_for_node,
+)
 from app.services.golden_template import generate_golden_template
 from app.services.skills import resolve_skill_dir
 
@@ -182,3 +186,87 @@ def test_set_manual_golden_does_not_use_run_snapshot_path(
         SetManualGoldenReq(node_id="segment", expected_output={"segments": [], "headline": "x"}),
     )
     assert baseline.cases[0].node_id == "segment"
+
+
+def test_plan_manual_golden_emits_baseline_report_and_case_files(agent_skill: str) -> None:
+    """The manual plan covers exactly baseline.json + report.json + cases/{node}.json.
+
+    Parity with the promote `/golden/plan` plan: the native-fs writer iterates these
+    files. The plan must NOT persist anything itself (plan-only).
+    """
+    expected = {"segments": [{"start": 0}], "headline": "Intro"}
+
+    plan = plan_manual_golden_for_node(agent_skill, "segment", expected)
+
+    assert isinstance(plan, GoldenBaselinePlan)
+    file_paths = [f.path for f in plan.files]
+    assert file_paths == [
+        ".workspace/golden/segment/baseline.json",
+        ".workspace/golden/segment/report.json",
+        ".workspace/golden/segment/cases/segment.json",
+    ]
+    # The case file content carries the author-defined expected output.
+    case_file = next(f for f in plan.files if f.path.endswith("/cases/segment.json"))
+    assert json.loads(case_file.content)["expected_output"] == expected
+    assert plan.baseline.source_run_id is None
+    assert [case.node_id for case in plan.baseline.cases] == ["segment"]
+
+    # Plan-only: nothing is written to disk by planning.
+    golden_dir = resolve_skill_dir(agent_skill) / ".workspace" / "golden" / "segment"
+    assert not golden_dir.exists()
+
+
+def _strip_clock(payload: object) -> object:
+    """Drop the wall-clock ``created_at`` so two independent plan builds compare equal."""
+    if isinstance(payload, dict):
+        return {key: value for key, value in payload.items() if key != "created_at"}
+    return payload
+
+
+def test_set_manual_golden_writes_exactly_the_plan_files(agent_skill: str) -> None:
+    """The disk write is single-sourced from the plan: same paths + same content shape.
+
+    This is the contract the browser-fallback path relies on (set = plan + write) and
+    that the Tauri path mirrors (plan + native writeWorkspaceFile per file). The plan
+    here is built independently from the write, so the only field that can differ is the
+    wall-clock ``created_at`` in report.json; everything else must match byte-for-byte.
+    """
+    expected = {"segments": [{"start": 0}], "headline": "Intro"}
+
+    plan = plan_manual_golden_for_node(agent_skill, "segment", expected)
+    set_manual_golden_for_node(
+        agent_skill,
+        SetManualGoldenReq(node_id="segment", expected_output=expected),
+    )
+
+    golden_dir = resolve_skill_dir(agent_skill) / ".workspace" / "golden" / "segment"
+    written_paths = [f.path for f in plan.files]
+    for plan_file in plan.files:
+        relative = plan_file.path.removeprefix(".workspace/golden/segment/")
+        on_disk = (golden_dir / relative).read_text(encoding="utf-8")
+        assert _strip_clock(json.loads(on_disk)) == _strip_clock(json.loads(plan_file.content)), (
+            plan_file.path
+        )
+    # The write touched exactly the plan's file set — no extra, no missing.
+    assert written_paths == [
+        ".workspace/golden/segment/baseline.json",
+        ".workspace/golden/segment/report.json",
+        ".workspace/golden/segment/cases/segment.json",
+    ]
+
+
+def test_plan_manual_golden_does_not_use_run_snapshot_path(
+    agent_skill: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Manual plan must not touch the sealed-run snapshot / promote-guard path."""
+    import app.services.golden_diff as golden_diff_module
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("manual golden plan must not read a sealed-run snapshot")
+
+    monkeypatch.setattr(golden_diff_module, "read_run_result_snapshot_for_golden", _boom)
+    monkeypatch.setattr(golden_diff_module, "assert_trace_can_be_promoted_to_golden", _boom)
+
+    plan = plan_manual_golden_for_node(agent_skill, "segment", {"segments": [], "headline": "x"})
+    assert plan.baseline.cases[0].node_id == "segment"

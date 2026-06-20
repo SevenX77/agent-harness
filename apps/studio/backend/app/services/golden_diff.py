@@ -74,19 +74,27 @@ def set_golden_baseline_for_run(
     return plan.baseline
 
 
-def set_manual_golden_for_node(skill_id: str, request: SetManualGoldenReq) -> GoldenBaseline:
-    """Persist an author-defined golden for one agent node (N4 atom #33 manual write).
+def plan_manual_golden_for_node(
+    skill_id: str,
+    node_id: str,
+    expected_output: dict[str, Any],
+) -> GoldenBaselinePlan:
+    """Build the author-defined golden payload for the native-fs writer (no persistence).
 
-    This is a FIRST-CLASS, run-less write: it does NOT read a sealed-run snapshot and
-    does NOT go through the predict-trace promote guard (a manual golden has no source
-    run; the expected output is author-defined). The baseline is keyed by ``node_id``
-    so the canvas/properties badge flips to 🟢 has-golden via the same ``cases``
-    projection used by run-promoted goldens.
+    Parity with ``plan_golden_baseline_for_run``: it returns the same
+    ``GoldenBaselinePlan`` shape (a ``baseline`` DTO + the ordered ``files`` to write —
+    ``baseline.json``/``report.json``/``cases/{case_id}.json``) so the Rust sole writer
+    can write each file on desktop. This is run-less: it does NOT read a sealed-run
+    snapshot and does NOT go through the predict-trace promote guard (a manual golden
+    has no source run; the expected output is author-defined).
+
+    This is the single source of file-content construction: the ``/golden/manual/plan``
+    endpoint returns this plan for the Rust native-fs sole writer (the desktop write path),
+    and the internal/test helper ``set_manual_golden_for_node`` writes exactly these files.
     """
-    node_id = request.node_id
     case_id = validate_run_id_segment(node_id)
     baseline_dir = _golden_dir_for(skill_id, node_id)
-    baseline_dir.mkdir(parents=True, exist_ok=True)
+    created_at = datetime.now(UTC)
 
     case_record = {
         "case_id": case_id,
@@ -107,38 +115,67 @@ def set_manual_golden_for_node(skill_id: str, request: SetManualGoldenReq) -> Go
         "source": "manual",
         "case_count": 1,
         "node_ids": [node_id],
-        "created_at": datetime.now(UTC).isoformat(),
+        "created_at": created_at.isoformat(),
     }
     case_payload = {
         "case_id": case_id,
         "node_id": node_id,
         "phase_id": node_id,
-        "expected_output": request.expected_output,
+        "expected_output": expected_output,
     }
 
-    (baseline_dir / BASELINE_FILENAME).write_text(
-        json.dumps(baseline_payload, ensure_ascii=False, sort_keys=True), encoding="utf-8"
-    )
-    (baseline_dir / REPORT_FILENAME).write_text(
-        json.dumps(report_payload, ensure_ascii=False, sort_keys=True), encoding="utf-8"
-    )
-    cases_dir = baseline_dir / CASES_DIRNAME
-    cases_dir.mkdir(parents=True, exist_ok=True)
-    (cases_dir / f"{case_id}.json").write_text(
-        json.dumps(case_payload, ensure_ascii=False, sort_keys=True), encoding="utf-8"
-    )
-
-    return GoldenBaseline(
+    baseline = GoldenBaseline(
         id=node_id,
         source_run_id=None,
         source_run_results_ref=None,
         baseline_ref=_workspace_golden_path(node_id, BASELINE_FILENAME),
         linked_input_id=node_id,
-        created_at=datetime.now(UTC),
+        created_at=created_at,
         locked=False,
         content_path=str(baseline_dir / BASELINE_FILENAME),
         cases=[_case_record_to_model(case_record)],
     )
+    return GoldenBaselinePlan(
+        baseline=baseline,
+        files=[
+            GoldenBaselineFile(
+                path=_workspace_golden_path(node_id, BASELINE_FILENAME),
+                content=json.dumps(baseline_payload, ensure_ascii=False, sort_keys=True),
+            ),
+            GoldenBaselineFile(
+                path=_workspace_golden_path(node_id, REPORT_FILENAME),
+                content=json.dumps(report_payload, ensure_ascii=False, sort_keys=True),
+            ),
+            GoldenBaselineFile(
+                path=_workspace_golden_path(node_id, f"{CASES_DIRNAME}/{case_id}.json"),
+                content=json.dumps(case_payload, ensure_ascii=False, sort_keys=True),
+            ),
+        ],
+    )
+
+
+def set_manual_golden_for_node(skill_id: str, request: SetManualGoldenReq) -> GoldenBaseline:
+    """Persist an author-defined golden for one agent node (N4 atom #33 manual write).
+
+    Internal/test helper only (NOT exposed as an HTTP write endpoint): it builds the plan
+    via ``plan_manual_golden_for_node`` (the single source of file content) and writes each
+    plan file to disk through the Python ``Path`` writer. In the product, the frontend writes
+    the same files through the Rust native-fs sole writer (D12) — it calls ``/golden/manual/plan``
+    and lets the Rust writer perform the write; web degrades to Desktop-only (no persist).
+    This helper exists so service-level tests can assert the on-disk result equals the plan.
+    The baseline is keyed by ``node_id`` so the canvas/properties badge flips to 🟢
+    has-golden via the same ``cases`` projection used by run-promoted goldens.
+    """
+    node_id = request.node_id
+    plan = plan_manual_golden_for_node(skill_id, node_id, request.expected_output)
+    baseline_dir = _golden_dir_for(skill_id, node_id)
+    baseline_dir.mkdir(parents=True, exist_ok=True)
+    for file in plan.files:
+        relative = _relative_workspace_golden_path(node_id, file.path)
+        target = baseline_dir / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(file.content, encoding="utf-8")
+    return plan.baseline
 
 
 def plan_golden_baseline_for_run(

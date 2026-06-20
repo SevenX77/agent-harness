@@ -1,8 +1,9 @@
-"""N4 atom #33 endpoints: GET golden template + POST manual golden write.
+"""N4 atom #33 endpoints: GET golden template + POST manual golden plan.
 
 GET /api/skills/{id}/golden/template?node_id= returns a schema-valid empty stub.
-POST /api/skills/{id}/golden/manual writes an author-defined golden keyed by node_id,
-behind the same browser-write-fallback guard as the run-promote write (atom #36 ②).
+POST /api/skills/{id}/golden/manual/plan returns the GoldenBaselinePlan (file set) the
+Rust native-fs sole writer writes per file on desktop (D12). Plan-only, no disk write —
+there is no Python HTTP disk-write endpoint for the manual golden (no browser fallback).
 """
 
 from __future__ import annotations
@@ -97,39 +98,55 @@ def test_get_golden_template_endpoint(agent_skill_dir: str, client: TestClient) 
     assert body["template"]["segments"] == []
 
 
-def test_post_manual_golden_requires_browser_write_fallback(
+def test_manual_golden_disk_write_endpoint_is_removed(
     agent_skill_dir: str,
     client: TestClient,
 ) -> None:
-    """Without the browser-write-fallback header the manual write is 409 (atom #36 ②)."""
+    """There is no Python HTTP disk-write endpoint for the manual golden (D12).
+
+    The manual golden write goes through the Rust native-fs sole writer via the
+    plan endpoint; the old browser-fallback POST /golden/manual disk-write route is
+    gone, so it must 404/405 rather than persist anything.
+    """
     response = client.post(
         f"/api/skills/{agent_skill_dir}/golden/manual",
         json={"node_id": "segment", "expected_output": {"segments": []}},
+        headers={"X-Studio-Write-Fallback": "browser"},
     )
 
-    assert response.status_code == 409
-    assert response.json()["error_code"] == "NATIVE_FS_REQUIRED"
+    assert response.status_code in (404, 405)
+
+    # Nothing was persisted by hitting the removed endpoint.
+    listing = client.get(f"/api/skills/{agent_skill_dir}/golden")
+    assert listing.json() == []
 
 
-def test_post_manual_golden_writes_node_golden(
+def test_post_manual_golden_plan_returns_plan_without_writing(
     agent_skill_dir: str,
     client: TestClient,
 ) -> None:
+    """The /manual/plan endpoint returns a GoldenBaselinePlan and is plan-only.
+
+    Parity with the promote /golden/plan endpoint: plan-only, no write guard (the
+    native-fs Rust writer performs the actual write per plan file on desktop), and it
+    must NOT persist the golden to disk.
+    """
     response = client.post(
-        f"/api/skills/{agent_skill_dir}/golden/manual",
+        f"/api/skills/{agent_skill_dir}/golden/manual/plan",
         json={"node_id": "segment", "expected_output": {"segments": [{"start": 0}]}},
-        headers={"X-Studio-Write-Fallback": "browser"},
     )
 
     assert response.status_code == 200
     body = response.json()
-    assert body["source_run_id"] is None
-    assert [case["node_id"] for case in body["cases"]] == ["segment"]
+    assert set(body.keys()) == {"baseline", "files"}
+    assert body["baseline"]["source_run_id"] is None
+    file_paths = [f["path"] for f in body["files"]]
+    assert file_paths == [
+        ".workspace/golden/segment/baseline.json",
+        ".workspace/golden/segment/report.json",
+        ".workspace/golden/segment/cases/segment.json",
+    ]
 
+    # Plan-only: no golden was written to disk by planning.
     listing = client.get(f"/api/skills/{agent_skill_dir}/golden")
-    node_ids = {
-        case["node_id"]
-        for baseline in listing.json()
-        for case in baseline.get("cases", [])
-    }
-    assert "segment" in node_ids
+    assert listing.json() == []

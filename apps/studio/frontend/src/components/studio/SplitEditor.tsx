@@ -1,9 +1,7 @@
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { GraphCanvas, type SkillGraphNodeData, type SkillNodeStatus } from "@/components/GraphCanvas"
-import type { Connection } from "@xyflow/react"
 import type { CompileError, SkillDetail } from "@/api/types"
 import type { GoldenNodeState } from "@/components/studio/node-golden"
-import type { NewPhaseKind } from "@/components/GraphCanvas/canvas-authoring"
 import { LazyMonacoPanel } from "./LazyMonacoPanel"
 import { useWorkspaceContext, type EditorSide, type OpenFile } from "./WorkspaceContext"
 
@@ -13,20 +11,14 @@ interface SplitEditorProps {
   isLoading?: boolean
   error?: unknown
   selectedNodeId?: string | null
+  // The bottom mini-canvas is a READ-ONLY projection of GRAPH.md (canvas =
+  // projection, per the canvas-projection design). It renders + navigates only;
+  // it deliberately receives NO graph-editing handlers (connect / reconnect /
+  // disconnect / create-phase / phase-file save). All graph editing happens on
+  // the main canvas, so two canvases can never race writes to GRAPH.md off
+  // independent snapshots. Only node selection / panel navigation is wired.
   onNodeSelect?: (node: { id: string; data: SkillGraphNodeData }) => void
   onPanelChange?: (panel: "assets" | "input" | "timeline" | "trace-doc" | "properties" | "local-history" | null) => void
-  onCreatePhase?: (kind: NewPhaseKind) => Promise<void> | void
-  onPersistConnection?: (connection: Connection) => Promise<void> | void
-  onDisconnectConnection?: (connection: { source: string; target: string }) => Promise<void> | void
-  // n2-canvas #8 (atomic reconnect): same single-serialize handler the main
-  // canvas uses. Threaded here so the bottom mini-canvas does NOT fall back to
-  // GraphCanvas' legacy disconnect-then-persist chain (two serialize round-trips
-  // → stale expected_hash → backend 409 that half-mutates GRAPH.md).
-  onReconnectConnection?: (
-    disconnect: { source: string; target: string },
-    connect: { source: string; target: string },
-  ) => Promise<void> | void
-  onPhaseFileSave?: (args: { path: string; content: string; expectedHash: string }) => Promise<void> | void
   statusByNodeId?: Record<string, SkillNodeStatus>
   compileErrorsByNodeId?: Record<string, CompileError[]>
   goldenStateByNodeId?: Record<string, GoldenNodeState>
@@ -44,11 +36,6 @@ export function SplitEditor({
   selectedNodeId,
   onNodeSelect,
   onPanelChange,
-  onCreatePhase,
-  onPersistConnection,
-  onDisconnectConnection,
-  onReconnectConnection,
-  onPhaseFileSave,
   statusByNodeId,
   compileErrorsByNodeId,
   goldenStateByNodeId,
@@ -129,11 +116,6 @@ export function SplitEditor({
             selectedNodeId={selectedNodeId}
             onNodeSelect={onNodeSelect}
             onPanelChange={onPanelChange}
-            onCreatePhase={onCreatePhase}
-            onPersistConnection={onPersistConnection}
-            onDisconnectConnection={onDisconnectConnection}
-            onReconnectConnection={onReconnectConnection}
-            onPhaseFileSave={onPhaseFileSave}
             statusByNodeId={statusByNodeId}
             errorMessageByNodeId={errorMessageByNodeId}
             compileErrorsByNodeId={compileErrorsByNodeId}

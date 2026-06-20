@@ -56,6 +56,7 @@ from app.models.skills import (
     SkillDetail,
     SkillSummary,
 )
+from app.services.canvas_data_gap import build_phase_io_index, compute_field_supply
 from app.services.canvas_errors import CanvasConflictError, CanvasSerializerFatal
 from app.services.config_arbitration import detect_config_mismatch
 from app.services.file_watcher import record_api_write
@@ -1493,20 +1494,46 @@ def _phase_summary_from_compiled(compiled: CompiledSkill) -> list[dict[str, Any]
 
 def _graph_topology(compiled: CompiledSkill, skill_dir: Path) -> list[dict[str, object]]:
     mode_by_phase = {node.phase_name: node.mode for node in compiled.nodes}
+    # n2-canvas#10: precompute the per-phase io field schema + graph-level input
+    # fields ONCE so each row can carry its own io fields and a supply/demand map
+    # for the Canvas data-gap view (read-only projection over compiled.nodes).
+    phase_io_index = build_phase_io_index(compiled)
+    graph_input_fields = _graph_input_field_names(compiled)
     topology = compiled.raw.get("graph_topology", {})
     rows = topology.get("phases", []) if isinstance(topology, dict) else []
     if isinstance(rows, list):
         return [
-            _topology_row(name, list(depends_on), mode_by_phase.get(name, ""), skill_dir)
+            _topology_row(
+                name,
+                list(depends_on),
+                mode_by_phase.get(name, ""),
+                skill_dir,
+                phase_io_index=phase_io_index,
+                graph_input_fields=graph_input_fields,
+            )
             for row in rows
             if isinstance(row, dict)
             and isinstance((name := row.get("name")), str)
             and isinstance((depends_on := row.get("depends_on")), list)
         ]
     return [
-        _topology_row(phase_name, [], mode_by_phase.get(phase_name, ""), skill_dir)
+        _topology_row(
+            phase_name,
+            [],
+            mode_by_phase.get(phase_name, ""),
+            skill_dir,
+            phase_io_index=phase_io_index,
+            graph_input_fields=graph_input_fields,
+        )
         for phase_name in compiled.manifest.phases
     ]
+
+
+def _graph_input_field_names(compiled: CompiledSkill) -> set[str]:
+    """Graph-level ``io.inputs`` field names (delegated to the data-gap projector)."""
+    from app.services.canvas_data_gap import _graph_input_fields
+
+    return _graph_input_fields(compiled)
 
 
 def _topology_row(
@@ -1514,8 +1541,17 @@ def _topology_row(
     depends_on: list[str],
     mode: str,
     skill_dir: Path,
+    *,
+    phase_io_index: dict[str, dict[str, dict[str, object]]] | None = None,
+    graph_input_fields: set[str] | None = None,
 ) -> dict[str, object]:
-    """Build one topology row, surfacing a subgraph phase's absolute child path."""
+    """Build one topology row.
+
+    Surfaces a subgraph phase's absolute child path AND (n2-canvas#10) the
+    phase's per-node io field schema plus a supply/demand map: for each input
+    field, which upstream phase or graph input supplies it, or whether it is a
+    data gap. All source data comes from the already-compiled graph.
+    """
     row: dict[str, object] = {
         "id": phase_name,
         "src": f"phases/{phase_name}",
@@ -1524,6 +1560,15 @@ def _topology_row(
     }
     if mode == "subgraph":
         row["path"] = read_subgraph_path(skill_dir, phase_name)
+    if phase_io_index is not None:
+        io_fields = phase_io_index.get(phase_name, {"inputs": {}, "outputs": {}})
+        row["io_fields"] = io_fields
+        row["field_supply"] = compute_field_supply(
+            phase_name=phase_name,
+            depends_on=depends_on,
+            phase_io_index=phase_io_index,
+            graph_input_fields=graph_input_fields or set(),
+        )
     return row
 
 

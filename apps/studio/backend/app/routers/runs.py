@@ -13,6 +13,8 @@ from app.models.runs import (
     BatchRunRequest,
     BatchRunResponse,
     BatchRunStatus,
+    CompareRunGroupResponse,
+    CompareRunResponse,
     PredictDiagnosticExport,
     PredictRunRequest,
     ResumeReq,
@@ -34,6 +36,28 @@ batch_router = APIRouter(prefix="/api/batch", tags=["batch"])
 @router.post("", response_model=RunMetadata, status_code=202)
 async def create_run(skill_id: str, request: RunRequest) -> RunMetadata:
     return await run_manager.start_run(skill_id, request)
+
+
+@router.post(
+    "/compare",
+    response_model=CompareRunResponse,
+    status_code=202,
+    responses={422: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+)
+async def create_compare_run(skill_id: str, request: RunRequest) -> CompareRunResponse:
+    # n4-trace#23: P8 model-compare fan-out. Each request.candidates[] entry runs
+    # the same compiled artifact through a different role; the response carries the
+    # compare_group_id the frontend polls via GET /compare/{compare_group_id}.
+    return await run_manager.start_compare_run(skill_id, request)
+
+
+@router.get(
+    "/compare/{compare_group_id}",
+    response_model=CompareRunGroupResponse,
+    responses={404: {"model": ErrorResponse}},
+)
+async def get_compare_group(skill_id: str, compare_group_id: str) -> CompareRunGroupResponse:
+    return run_manager.list_compare_group(skill_id, compare_group_id)
 
 
 @router.post("/predict", response_model=PredictDiagnosticExport)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import os
 import re
 import shutil
@@ -107,6 +108,8 @@ from graph_agent.core.topology_projection import phase_mode_for as phase_mode_fo
 from graph_agent.core.topology_projection import read_subgraph_path as read_subgraph_path
 
 from app.core.adapters.http_transport import HttpTransport, StudioAdapterError
+
+logger = logging.getLogger(__name__)
 
 _SAFE_STUDIO_SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _SHA256_HEX_RE = re.compile(r"^[A-Fa-f0-9]{64}$")
@@ -511,6 +514,8 @@ def _resume_validity_payload(
     resume_from_node_id: str | None,
     resume_to_node_id: str | None,
     dirty_fields: list[str] | None = None,
+    dirty_node_ids: list[str] | None = None,
+    affected_downstream: list[str] | None = None,
     snapshot_content_hash: str | None = None,
     current_content_hash: str | None = None,
     snapshot_execution_fingerprint: str | None = None,
@@ -525,6 +530,8 @@ def _resume_validity_payload(
         "resume_from_node_id": resume_from_node_id,
         "resume_to_node_id": resume_to_node_id,
         "dirty_fields": dirty_fields or [],
+        "dirty_node_ids": dirty_node_ids or [],
+        "affected_downstream": affected_downstream or [],
         "snapshot_content_hash": snapshot_content_hash,
         "current_content_hash": current_content_hash,
         "snapshot_execution_fingerprint": snapshot_execution_fingerprint,
@@ -1189,6 +1196,15 @@ class EngineAdapter:
         if snapshot_execution_fingerprint != current_execution_fingerprint:
             dirty_fields.append("execution_fingerprint")
 
+        # n5-node#3: when dirty and a resume node is named, slice the dirtiness by
+        # the compiled graph's depends_on order so the frontend grays only the
+        # downstream phases the resume node can dirty. Side-branches stay clean.
+        affected_downstream = self._affected_downstream_for_resume(
+            skill_id=skill_id,
+            resume_from_node_id=resume_from_node_id,
+            is_dirty=bool(dirty_fields),
+        )
+
         return _resume_validity_payload(
             run_id=run_id,
             resume_allowed=not dirty_fields,
@@ -1198,11 +1214,48 @@ class EngineAdapter:
             resume_from_node_id=resume_from_node_id,
             resume_to_node_id=resume_to_node_id,
             dirty_fields=dirty_fields,
+            dirty_node_ids=affected_downstream,
+            affected_downstream=affected_downstream,
             snapshot_content_hash=snapshot_content_hash,
             current_content_hash=current_content_hash,
             snapshot_execution_fingerprint=snapshot_execution_fingerprint,
             current_execution_fingerprint=current_execution_fingerprint,
         )
+
+    def _affected_downstream_for_resume(
+        self,
+        *,
+        skill_id: str,
+        resume_from_node_id: str | None,
+        is_dirty: bool,
+    ) -> list[str]:
+        """Downstream phases a dirty resume node can stale (n5-node#3 slice).
+
+        Empty when the graph is clean or no resume node is named. Compiles the
+        skill in-process (same boundary as the dirty compare above) and walks the
+        depends_on graph. Degrades to an empty slice -- never raises -- when the
+        skill cannot be compiled, so a slice failure never breaks resume validity.
+        """
+        if not is_dirty or not resume_from_node_id:
+            return []
+        from app.services.resume_downstream import affected_downstream_nodes
+        from app.services.skills import resolve_skill_dir
+
+        try:
+            loader = SkillLoader()
+            compiled = loader.compile_skill(
+                Path(resolve_skill_dir(skill_id)),
+                skill_resolver=self._build_studio_skill_resolver(),
+            )
+        except Exception as exc:  # noqa: BLE001 -- slice is best-effort, log + degrade
+            logger.warning(
+                "resume_validity downstream slice unavailable for skill=%s node=%s: %s",
+                skill_id,
+                resume_from_node_id,
+                exc,
+            )
+            return []
+        return affected_downstream_nodes(compiled, resume_from_node_id)
 
     def get_fallback_trace(self, skill_dir: str) -> list[dict[str, Any]]:
         loader = SkillLoader()

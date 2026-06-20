@@ -1411,8 +1411,8 @@ pub fn ensure_workspace_support_dirs(workspace_root: String) -> Result<(), Strin
 //
 // These move the new/open flows off the Python `POST /api/skills` writer onto
 // the native-fs Rust sole writer (D12). They build the skill dir, write the
-// scaffold byte-faithfully to the current Python `_SCAFFOLD_FILES` (the
-// logic-phase template; the D-1-4 agent-phase template is not yet defined), run
+// scaffold byte-faithfully to the current Python `_SCAFFOLD_FILES` (the D-1-4
+// minimal empty agent-phase template: GRAPH.md + phases/init/SKILL.md), run
 // `git init` faithfully to Python `initialize_skill_repository`, and write the
 // `skill_index.json` entry byte-for-byte to Python `_write_skill_index` so the
 // read-detail sidecar `GET /api/skills/{id}` still resolves id→dir. They do NOT
@@ -1434,22 +1434,21 @@ pub struct SkillWorkspaceOutcome {
     pub skill_id: String,
 }
 
-/// The current logic-phase scaffold, byte-for-byte to Python `_SCAFFOLD_FILES`
-/// (services/skills.py) with `name: new-skill` substituted to `name: <skill_id>`
-/// in GRAPH.md, exactly like Python `_scaffold_files_for`. Returned as
+/// The minimal empty agent-phase scaffold (D-1-4), byte-for-byte to Python
+/// `_SCAFFOLD_FILES` (services/skills.py) with `name: new-skill` substituted to
+/// `name: <skill_id>` in GRAPH.md, exactly like Python `_scaffold_files_for`.
+/// An agent phase needs one `phases/<id>/SKILL.md` file (the engine routes
+/// `SKILL.md` → agent mode, core/loader.py); the body carries placeholder
+/// `<role>/<goal>/<step>/<protocol>` for the user to fill. Returned as
 /// (relative_posix_path, content) pairs.
 fn scaffold_files_for(skill_id: &str) -> Vec<(String, String)> {
     let graph_md = format!(
         "---\nschema_version: \"v0.3.0\"\nname: {skill_id}\ndescription: \"New Studio skill\"\nio:\n  inputs:\n    type: object\n    properties: {{}}\n  outputs:\n    type: object\n    properties: {{}}\nphases:\n  - init\n---\n<phase depends_on=\"input\" output>init</phase>\n"
     );
-    let logic_md = "---\nio:\n  inputs:\n    type: object\n    properties: {}\n  outputs:\n    type: object\n    properties: {}\n---\n<action>initialize</action>\n\n# init phase logic\n\nDescribe what this phase does.\n".to_string();
-    let initialize_py =
-        "def initialize(context):\n    \"\"\"Starter logic action for a new Studio skill.\"\"\"\n    return None\n"
-            .to_string();
+    let skill_md = "---\nio:\n  inputs:\n    type: object\n    properties: {}\n  outputs:\n    type: object\n    properties: {}\ntools: []\nmax_iterations: 10\n---\n<role>TODO: describe who this agent is.</role>\n<goal>TODO: describe what this agent should produce.</goal>\n\n<step id=\"S1\" name=\"todo\">TODO: describe the first step.</step>\n\n<protocol id=\"P1\">TODO: describe a rule the agent must follow.</protocol>\n".to_string();
     vec![
         ("GRAPH.md".to_string(), graph_md),
-        ("phases/init/LOGIC.md".to_string(), logic_md),
-        ("phases/init/actions/initialize.py".to_string(), initialize_py),
+        ("phases/init/SKILL.md".to_string(), skill_md),
     ]
 }
 
@@ -3100,13 +3099,19 @@ mod tests {
         assert_eq!(root, parent.join("demo-skill"));
 
         // Scaffold files, byte-for-byte to Python _SCAFFOLD_FILES with name substituted.
+        // D-1-4: empty agent-phase template — GRAPH.md topology + phases/init/SKILL.md.
         let graph = std::fs::read_to_string(root.join("GRAPH.md")).unwrap();
         assert!(graph.contains("name: demo-skill"), "GRAPH.md name substituted");
         assert!(graph.contains("schema_version: \"v0.3.0\""));
         assert!(graph.trim_end().ends_with("<phase depends_on=\"input\" output>init</phase>"));
-        assert!(root.join("phases/init/LOGIC.md").is_file());
-        let initialize = std::fs::read_to_string(root.join("phases/init/actions/initialize.py")).unwrap();
-        assert!(initialize.contains("def initialize(context):"));
+        // Agent phase is a single SKILL.md (engine routes SKILL.md -> agent mode);
+        // the old logic-phase LOGIC.md + actions/initialize.py must NOT be written.
+        let skill = std::fs::read_to_string(root.join("phases/init/SKILL.md")).unwrap();
+        assert!(skill.contains("<role>"), "agent SKILL.md has a <role> block");
+        assert!(skill.contains("<goal>"), "agent SKILL.md has a <goal> block");
+        assert!(skill.contains("max_iterations: 10"));
+        assert!(!root.join("phases/init/LOGIC.md").exists(), "no logic-phase LOGIC.md");
+        assert!(!root.join("phases/init/actions").exists(), "no logic-phase actions dir");
 
         // .workspace dir and .gitignore.
         assert!(root.join(".workspace").is_dir());

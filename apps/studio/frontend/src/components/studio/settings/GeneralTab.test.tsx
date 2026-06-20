@@ -89,11 +89,15 @@ describe("GeneralTab render contract", () => {
     expect(renderTab({ saveStatus: "idle" })).not.toContain("data-save-status-badge")
   })
 
-  it("disables the editable inputs while settings are loading", () => {
+  it("never disables the editable inputs on loading (the shell renders GeneralTabSkeleton instead)", () => {
+    // B fix: General no longer disables its whole form while appSettings load —
+    // SettingsPageContent shows GeneralTabSkeleton during isLoading, consistent
+    // with the other tabs. So whenever GeneralTab itself renders, its inputs are
+    // editable regardless of the (incidental) isLoading flag value.
     const html = renderTab({ isLoading: true })
-    expect(inputTag(html, "studio-user-id")).toContain('disabled=""')
-    expect(inputTag(html, "gitea-host")).toContain('disabled=""')
-    expect(inputTag(html, "default-skill-folder")).toContain('disabled=""')
+    expect(inputTag(html, "studio-user-id")).not.toContain('disabled=""')
+    expect(inputTag(html, "gitea-host")).not.toContain('disabled=""')
+    expect(inputTag(html, "default-skill-folder")).not.toContain('disabled=""')
   })
 
   it("keeps the editable inputs enabled once loaded", () => {

@@ -48,7 +48,6 @@ export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appS
               placeholder={t("general.userId.placeholder")}
               className="h-8 text-xs"
               aria-label={t("general.userId.label")}
-              disabled={appSettings.isLoading}
             />
             <FieldDescription>{t("general.userId.description")}</FieldDescription>
           </Field>
@@ -63,7 +62,6 @@ export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appS
                 placeholder={t("general.defaultSkillFolder.placeholder")}
                 className="h-8 min-w-0 flex-1 text-xs"
                 aria-label={t("general.defaultSkillFolder.label")}
-                disabled={appSettings.isLoading}
                 title={appSettings.defaultSkillsDirectory}
               />
               <Button
@@ -73,7 +71,7 @@ export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appS
                 onClick={() => {
                   chooseDefaultSkillsDirectory().catch(() => undefined)
                 }}
-                disabled={appSettings.isLoading || selectingDefaultFolder}
+                disabled={selectingDefaultFolder}
                 className="h-8 shrink-0 text-xs"
               >
                 <FolderOpen />
@@ -84,7 +82,7 @@ export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appS
                 variant="ghost"
                 size="icon"
                 onClick={() => appSettings.setDefaultSkillsDirectory(fallbackDefaultSkillsDirectory)}
-                disabled={appSettings.isLoading || !fallbackDefaultSkillsDirectory}
+                disabled={!fallbackDefaultSkillsDirectory}
                 className="size-8 shrink-0"
                 aria-label={t("general.defaultSkillFolder.reset")}
               >
@@ -103,7 +101,6 @@ export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appS
               placeholder={t("general.giteaHost.placeholder")}
               className="h-8 text-xs"
               aria-label={t("general.giteaHost.label")}
-              disabled={appSettings.isLoading}
             />
             <FieldDescription>{t("general.giteaHost.description")}</FieldDescription>
           </Field>

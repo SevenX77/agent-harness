@@ -232,8 +232,11 @@ def test_create_skill_without_files_uses_valid_default_scaffold(
     assert response.status_code == 201, response.json()
     assert response.json()["directory_path"] == str(skill_dir)
     assert (skill_dir / "GRAPH.md").exists()
-    assert (skill_dir / "phases" / "init" / "LOGIC.md").exists()
-    assert (skill_dir / "phases" / "init" / "actions" / "initialize.py").exists()
+    # D-1-4: the default scaffold is an empty agent phase (single SKILL.md the
+    # engine routes to agent mode), not the old logic-phase LOGIC.md + actions.
+    assert (skill_dir / "phases" / "init" / "SKILL.md").exists()
+    assert not (skill_dir / "phases" / "init" / "LOGIC.md").exists()
+    assert not (skill_dir / "phases" / "init" / "actions").exists()
     assert (skill_dir / ".workspace").is_dir()
     assert (skill_dir / ".git").is_dir()
 

@@ -1,5 +1,5 @@
 import type { ResumeRunOptions } from "@/api/client"
-import type { EventEnvelope, ResumeValidityResponse, SkillDetail } from "@/api/types"
+import type { EventEnvelope, LintError, ResumeValidityResponse, SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData, SkillNodeStatus } from "@/components/GraphCanvas"
 import { TracePanel, type TraceHitlResumeRequest } from "@/components/TracePanel"
 import type { PanelKind } from "../Toolbar"
@@ -29,6 +29,8 @@ interface PanelsProps {
   resumeValidity?: ResumeValidityResponse | null
   resumeValidityLoading?: boolean
   resumeValidityError?: string | null
+  // Field-axis diagnostics for the Properties panel (engine field_path projection).
+  lintErrors?: LintError[] | null
   traceEvents?: EventEnvelope[]
   activeTracePhase?: string | null
   onSelectTracePrompt?: (index: number) => void
@@ -60,6 +62,7 @@ export function Panels({
   resumeValidity,
   resumeValidityLoading,
   resumeValidityError,
+  lintErrors,
   traceEvents,
   activeTracePhase,
   onSelectTracePrompt,
@@ -146,6 +149,7 @@ export function Panels({
         resumeValidityLoading={resumeValidityLoading}
         resumeValidityError={resumeValidityError}
         resumeLoading={traceResumeLoading}
+        lintErrors={lintErrors}
         onFileOpen={onFileOpen}
         onPhaseFileSave={onPhaseFileSave}
         onResumeNode={onResumeNode}

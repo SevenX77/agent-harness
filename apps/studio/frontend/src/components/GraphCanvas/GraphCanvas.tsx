@@ -81,6 +81,15 @@ interface GraphCanvasProps {
   onCreatePhase?: (kind: NewPhaseKind) => Promise<void> | void
   onPersistConnection?: (connection: Connection) => Promise<void> | void
   onDisconnectConnection?: (connection: { source: string; target: string }) => Promise<void> | void
+  // n2-canvas #8 (atomic reconnect): a single handler that applies BOTH the old
+  // depends_on removal and the new depends_on addition in one serialize/write.
+  // When provided it replaces the disconnect-then-persist chain (two round-trips)
+  // that caused a 409 lost-update. Optional so the compact SplitEditor canvas,
+  // which has not wired it, falls back to the legacy chained behavior.
+  onReconnectConnection?: (
+    disconnect: { source: string; target: string },
+    connect: { source: string; target: string },
+  ) => Promise<void> | void
   statusByNodeId?: Record<string, SkillNodeStatus>
   compileErrorsByNodeId?: Record<string, CompileError[]>
   goldenStateByNodeId?: Record<string, GoldenNodeState>
@@ -136,6 +145,7 @@ export function GraphCanvas({
   onCreatePhase,
   onPersistConnection,
   onDisconnectConnection,
+  onReconnectConnection,
   statusByNodeId,
   compileErrorsByNodeId,
   goldenStateByNodeId,
@@ -491,11 +501,17 @@ export function GraphCanvas({
     }
   }, [layoutResult.edges, layoutResult.nodes, onPersistConnection, phaseNodes, setEdges, setNodes])
 
-  // R4: drag an existing edge endpoint to a new node = remove the old
-  // dependency + add the new one. Both halves reuse the same disconnect/connect
-  // → serialize path the menu Disconnect and onConnect already use, so the
-  // serialize contract is unchanged. A reconnect that lands back on the same
-  // endpoints (no-op) just snaps the edge back without a write.
+  // R4 + n2-canvas #8: drag an existing edge endpoint to a new node = remove the
+  // old dependency + add the new one. planEdgeReconnect owns the DECISION (global
+  // node / self-dependency / no-op guards). The MUTATION is now a SINGLE atomic
+  // serialize/write through onReconnectConnection: the previous code chained
+  // onDisconnectConnection().then(onPersistConnection), two serialize round-trips
+  // against the same captured skillDetail closure, and the queued persist
+  // serialized the pre-disconnect phases with a stale expected_hash → backend 409
+  // lost-update that left the graph half-mutated. A reconnect that lands back on
+  // the same endpoints (no-op) just snaps the edge back without a write. When
+  // onReconnectConnection is not wired (the compact SplitEditor canvas), we keep
+  // the legacy chained fallback so that surface still functions.
   const onReconnect = useCallback((oldEdge: Edge<ContextEdgeData>, newConnection: Connection) => {
     reconnectLandedRef.current = true
     const plan = planEdgeReconnect(
@@ -516,17 +532,22 @@ export function GraphCanvas({
 
     // Optimistically move the edge to its new endpoints before the write lands.
     setEdges((current) => reconnectEdge(oldEdge, newConnection, current))
+    const rollback = (reconnectError: unknown) => {
+      toast.error(reconnectError instanceof Error ? reconnectError.message : 'Could not reconnect dependency')
+      setEdges(layoutResult.edges)
+      setNodes(layoutResult.nodes)
+    }
+    if (onReconnectConnection) {
+      Promise.resolve(onReconnectConnection(plan.disconnect, plan.connect)).catch(rollback)
+      return
+    }
     if (!onDisconnectConnection || !onPersistConnection) {
       return
     }
     Promise.resolve(onDisconnectConnection(plan.disconnect))
       .then(() => onPersistConnection({ ...newConnection, source: plan.connect.source, target: plan.connect.target }))
-      .catch((reconnectError: unknown) => {
-        toast.error(reconnectError instanceof Error ? reconnectError.message : 'Could not reconnect dependency')
-        setEdges(layoutResult.edges)
-        setNodes(layoutResult.nodes)
-      })
-  }, [layoutResult.edges, layoutResult.nodes, onDisconnectConnection, onPersistConnection, phaseNodes, setEdges, setNodes])
+      .catch(rollback)
+  }, [layoutResult.edges, layoutResult.nodes, onDisconnectConnection, onPersistConnection, onReconnectConnection, phaseNodes, setEdges, setNodes])
 
   const onReconnectStart = useCallback(() => {
     reconnectLandedRef.current = false

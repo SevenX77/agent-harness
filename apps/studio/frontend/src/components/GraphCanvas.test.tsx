@@ -294,7 +294,49 @@ describe('GraphCanvas', () => {
     expect(props?.edgesReconnectable).toBe(true)
   })
 
-  it('reconnects an edge by disconnecting the old target and persisting the new one', async () => {
+  it('reconnects an edge through a single atomic onReconnectConnection, not the disconnect-then-persist chain', async () => {
+    // n2-canvas #8 lost-update fix: when the single atomic handler is wired, the
+    // canvas must route the whole reconnect through it ONCE — never the
+    // disconnect().then(persist) chain that issued two serialize round-trips and
+    // hit a 409 on the second stale-hash write.
+    const onReconnectConnection = vi.fn().mockResolvedValue(undefined)
+    const onDisconnectConnection = vi.fn().mockResolvedValue(undefined)
+    const onPersistConnection = vi.fn().mockResolvedValue(undefined)
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        skillDetail={graphSkillDetail([
+          { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+          { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+          { id: 'publish', src: 'phases/publish/SKILL.md', depends_on: [] },
+        ])}
+        onReconnectConnection={onReconnectConnection}
+        onDisconnectConnection={onDisconnectConnection}
+        onPersistConnection={onPersistConnection}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as {
+      onReconnect?: (oldEdge: { source: string; target: string }, newConnection: { source: string; target: string }) => void
+    } | null
+    // Drag the target endpoint of draft→review across to publish.
+    props?.onReconnect?.({ source: 'draft', target: 'review' }, { source: 'draft', target: 'publish' })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(onReconnectConnection).toHaveBeenCalledTimes(1)
+    expect(onReconnectConnection).toHaveBeenCalledWith(
+      { source: 'draft', target: 'review' },
+      { source: 'draft', target: 'publish' },
+    )
+    // The two-round-trip chain must NOT be used when the atomic handler exists.
+    expect(onDisconnectConnection).not.toHaveBeenCalled()
+    expect(onPersistConnection).not.toHaveBeenCalled()
+  })
+
+  it('falls back to disconnect-then-persist when no atomic onReconnectConnection is wired', async () => {
+    // The compact SplitEditor canvas does not pass onReconnectConnection; the
+    // legacy chained path must still function so that surface keeps reconnecting.
     const onDisconnectConnection = vi.fn().mockResolvedValue(undefined)
     const onPersistConnection = vi.fn().mockResolvedValue(undefined)
     renderToStaticMarkup(

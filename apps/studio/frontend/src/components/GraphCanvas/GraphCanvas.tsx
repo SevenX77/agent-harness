@@ -13,14 +13,23 @@ import {
   type Edge,
   type ReactFlowInstance,
 } from '@xyflow/react'
-import { Plus } from 'lucide-react'
+import { FileCog, Plus } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type MouseEvent } from 'react'
 import { toast } from 'sonner'
 import { AxiosError } from 'axios'
 import type { ChildGraphTopology, CompileError, ErrorResponse, SkillDetail } from '@/api/types'
-import { getChildGraphTopology } from '@/api/client'
+import { getChildGraphTopology, writeSkillFile } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { MacroContractDrawer } from '@/components/macroform/MacroContractDrawer'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -143,6 +152,10 @@ export function GraphCanvas({
   const [childGraphError, setChildGraphError] = useState<string | null>(null)
   const [isChildGraphLoading, setIsChildGraphLoading] = useState(false)
   const [selectedCanvasNodeId, setSelectedCanvasNodeId] = useState<string | null>(null)
+  // n2 #22: the structured GRAPH.md macro-contract form (header scalars + phases
+  // list). Opened from the top-left toolbar; raw GRAPH.md double-click (#23)
+  // stays available untouched.
+  const [macroFormOpen, setMacroFormOpen] = useState(false)
   const [edgeMenuConnection, setEdgeMenuConnection] = useState<{ source: string; target: string } | null>(null)
   const [canvasHeight, setCanvasHeight] = useState(0)
   const canvasRef = useRef<HTMLElement | null>(null)
@@ -593,6 +606,19 @@ export function GraphCanvas({
                 </div>
               ) : null}
               {onCreatePhase && !isDrilled ? <AddPhaseControl onCreatePhase={onCreatePhase} /> : null}
+              {!isDrilled ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="shadow-sm"
+                  aria-label="Edit macro contract"
+                  onClick={() => setMacroFormOpen(true)}
+                >
+                  <FileCog className="size-3.5" />
+                  Macro contract
+                </Button>
+              ) : null}
             </div>
           </Panel>
         ) : null}
@@ -605,6 +631,25 @@ export function GraphCanvas({
         onDisconnectConnection={onDisconnectConnection}
         onCloseEdgeMenu={() => setEdgeMenuConnection(null)}
       />
+      <Sheet open={macroFormOpen} onOpenChange={setMacroFormOpen}>
+        <SheetContent side="right" className="w-[26rem] gap-0 p-0 sm:max-w-md">
+          <SheetHeader className="border-b border-border">
+            <SheetTitle>Macro contract</SheetTitle>
+            <SheetDescription>
+              Edit the GRAPH.md header (name, schema version, LLM role, description) and the phases list.
+            </SheetDescription>
+          </SheetHeader>
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="p-4">
+              <MacroContractDrawer
+                skillId={skillId}
+                skillDetail={skillDetail}
+                writeFile={(path, content, expectedHash) => writeSkillFile(skillId, path, content, expectedHash)}
+              />
+            </div>
+          </ScrollArea>
+        </SheetContent>
+      </Sheet>
     </ContextMenu>
   )
 }

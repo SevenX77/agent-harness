@@ -9,6 +9,7 @@ import type {
   CompileSuccess,
   GitHistoryItem,
   GoldenBaseline,
+  GoldenBaselineContent,
   GoldenBaselinePlan,
   GoldenTemplate,
   JsonObject,
@@ -243,6 +244,27 @@ export async function saveGoldenBaseline(
 
 export async function listGoldenBaselines(skillId: string): Promise<GoldenBaseline[]> {
   const response = await api.get<GoldenBaseline[]>(`/skills/${skillId}/golden`)
+  return response.data
+}
+
+/**
+ * N4 atom #29 read path: open an existing golden baseline's stored content for editing.
+ * The list endpoint only carries per-node case metadata (an `expected_output_ref`); this
+ * resolves the ref to the actual `expected_output` so the I/O panel can show an editable
+ * JSON view. With `nodeId` the backend scopes the response to that node's single case.
+ * Read-only — saving an edit still goes through `saveManualGolden`
+ * (`POST /golden/manual/plan` → Rust native-fs, D12); this adds NO new write path.
+ */
+export async function fetchGoldenContent(
+  skillId: string,
+  goldenId: string,
+  nodeId?: string | null,
+): Promise<GoldenBaselineContent> {
+  const apiSkillId = resolveWorkspaceIdentity(skillId).skillId ?? skillId
+  const response = await api.get<GoldenBaselineContent>(
+    `/skills/${apiSkillId}/golden/${encodeURIComponent(goldenId)}/content`,
+    nodeId ? { params: { node_id: nodeId } } : undefined,
+  )
   return response.data
 }
 

@@ -1,8 +1,13 @@
 import { useMemo, useState } from "react"
 import useSWR from "swr"
-import { Lock, Loader2, ShieldCheck, ShieldHalf } from "lucide-react"
-import { fetcher, fetchGoldenTemplate, saveManualGolden } from "@/api/client"
-import type { GoldenBaseline, JsonObject, SkillDetail } from "@/api/types"
+import { ChevronDown, ChevronRight, Lock, Loader2, ShieldCheck, ShieldHalf } from "lucide-react"
+import { fetcher, fetchGoldenContent, fetchGoldenTemplate, saveManualGolden } from "@/api/client"
+import type {
+  GoldenBaseline,
+  GoldenCaseContent,
+  JsonObject,
+  SkillDetail,
+} from "@/api/types"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { templatableAgentNodeIds } from "@/components/studio/node-golden"
@@ -50,20 +55,14 @@ export function GoldenSection({ skillId }: { skillId: string }) {
       ) : (
         <div className="space-y-1">
           {(baselines ?? []).map((baseline) => (
-            <div
+            <GoldenBaselineRow
               key={baseline.id}
-              className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1"
-              title={baseline.content_path}
-            >
-              <span className="min-w-0 flex-1 truncate text-xs text-foreground">
-                {baseline.id}
-                {baseline.source_run_id ? (
-                  <span className="text-muted-foreground"> - source {baseline.source_run_id}</span>
-                ) : null}
-              </span>
-              {baseline.locked ? <Lock className="size-3 text-muted-foreground" aria-label="locked" /> : null}
-              <span className="text-[10px] text-muted-foreground">{relativeTime(baseline.created_at)}</span>
-            </div>
+              skillId={skillId}
+              baseline={baseline}
+              onSaved={() => {
+                void mutateBaselines()
+              }}
+            />
           ))}
         </div>
       )}
@@ -84,6 +83,153 @@ export function GoldenSection({ skillId }: { skillId: string }) {
         </div>
       ) : null}
     </section>
+  )
+}
+
+/**
+ * N4 atom #29: one golden baseline row. Read-only summary (id / source run / locked /
+ * time); expanding it SWR-fetches the baseline's stored content
+ * (GET /golden/{id}/content) so each per-node case's `expected_output` opens in an
+ * editable JSON view. Saving an edit reuses the existing manual-golden write path
+ * (saveManualGolden -> POST /golden/manual/plan -> Rust native-fs, D12) — no new write
+ * endpoint.
+ */
+function GoldenBaselineRow({
+  skillId,
+  baseline,
+  onSaved,
+}: {
+  skillId: string
+  baseline: GoldenBaseline
+  onSaved: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  // Only fetch content once the row is expanded (conditional SWR key).
+  const { data: content, error } = useSWR(
+    open ? `/skills/${skillId}/golden/${baseline.id}/content` : null,
+    () => fetchGoldenContent(skillId, baseline.id),
+  )
+  const cases = content?.cases ?? []
+
+  return (
+    <div className="rounded-md border border-border bg-background">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center gap-2 px-2 py-1 text-left"
+        aria-expanded={open}
+        title={baseline.content_path}
+      >
+        {open ? (
+          <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
+        )}
+        <span className="min-w-0 flex-1 truncate text-xs text-foreground">
+          {baseline.id}
+          {baseline.source_run_id ? (
+            <span className="text-muted-foreground"> - source {baseline.source_run_id}</span>
+          ) : null}
+        </span>
+        {baseline.locked ? <Lock className="size-3 text-muted-foreground" aria-label="locked" /> : null}
+        <span className="text-[10px] text-muted-foreground">{relativeTime(baseline.created_at)}</span>
+      </button>
+      {open ? (
+        <div className="space-y-1.5 border-t border-border px-2 py-1.5">
+          {error ? (
+            <p className="text-[11px] text-destructive">
+              {error instanceof Error ? error.message : "Failed to load golden content"}
+            </p>
+          ) : content === undefined ? (
+            <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <Loader2 className="size-3 animate-spin" /> Loading content...
+            </p>
+          ) : cases.length === 0 ? (
+            <p className="text-[11px] text-muted-foreground">No node cases in this baseline.</p>
+          ) : (
+            cases.map((goldenCase) => (
+              <GoldenCaseEditor
+                key={goldenCase.case_id}
+                skillId={skillId}
+                goldenCase={goldenCase}
+                onSaved={onSaved}
+              />
+            ))
+          )}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * Edit one golden case's expected_output. The JSON is seeded from the backend
+ * GoldenCaseContent.expected_output (atom #29 read), hand-edited, then saved through the
+ * existing manual-golden write (saveManualGolden, keyed by node_id) — the same Rust
+ * native-fs sole writer the template-fill flow uses (D12). No new write path.
+ */
+export function GoldenCaseEditor({
+  skillId,
+  goldenCase,
+  onSaved,
+}: {
+  skillId: string
+  goldenCase: GoldenCaseContent
+  onSaved: () => void
+}) {
+  const [draft, setDraft] = useState(() => JSON.stringify(goldenCase.expected_output, null, 2))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleSave = async () => {
+    let parsed: JsonObject
+    try {
+      parsed = JSON.parse(draft) as JsonObject
+    } catch {
+      setError("Expected output is not valid JSON")
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      await saveManualGolden(skillId, goldenCase.node_id, parsed)
+      onSaved()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save golden")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="rounded-md border border-border bg-card px-2 py-1.5">
+      <div className="flex items-center gap-1.5 text-xs text-foreground">
+        <ShieldCheck className="size-3 shrink-0 text-emerald-600 dark:text-emerald-400" />
+        <span className="truncate">{goldenCase.node_id}</span>
+      </div>
+      <Textarea
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        spellCheck={false}
+        className="mt-1.5 min-h-[120px] font-mono text-[11px]"
+        aria-label={`Golden expected output for ${goldenCase.node_id}`}
+      />
+      <div className="mt-1.5 flex items-center justify-end gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="default"
+          disabled={busy}
+          onClick={() => {
+            void handleSave()
+          }}
+        >
+          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}
+          Save golden
+        </Button>
+      </div>
+      {error ? <p className="mt-1 text-[11px] text-destructive">{error}</p> : null}
+    </div>
   )
 }
 

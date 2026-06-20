@@ -8,6 +8,7 @@ import {
   configureApiToken,
   createTestInput,
   deleteTestInput,
+  fetchGoldenContent,
   getRelease,
   getResumeValidity,
   listReleases,
@@ -1239,5 +1240,89 @@ describe('api client auth token', () => {
     ])
     // The Rust writer was attempted and degraded (threw) — nothing persisted via HTTP.
     expect(tauriMocks.writeWorkspaceFile).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads golden baseline content for editing (atom #29) without a node filter', async () => {
+    const requests: Array<{ method?: string; url?: string; params?: unknown }> = []
+    api.defaults.adapter = async (config): Promise<AxiosResponse> => {
+      requests.push({ method: config.method, url: config.url, params: config.params })
+      return {
+        data: {
+          id: 'run-1',
+          source_run_id: 'run-1',
+          locked: false,
+          cases: [
+            {
+              case_id: 'segment',
+              node_id: 'segment',
+              phase_id: 'segment',
+              expected_output: { segments: ['a', 'b'] },
+            },
+          ],
+        },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    }
+
+    await expect(fetchGoldenContent('skill-a', 'run-1')).resolves.toEqual({
+      id: 'run-1',
+      source_run_id: 'run-1',
+      locked: false,
+      cases: [
+        {
+          case_id: 'segment',
+          node_id: 'segment',
+          phase_id: 'segment',
+          expected_output: { segments: ['a', 'b'] },
+        },
+      ],
+    })
+
+    // GET to the content endpoint; no node_id param when none is given.
+    expect(requests).toEqual([
+      {
+        method: 'get',
+        url: '/skills/skill-a/golden/run-1/content',
+        params: undefined,
+      },
+    ])
+  })
+
+  it('scopes golden content to a single node via the node_id query param (atom #29)', async () => {
+    const requests: Array<{ url?: string; params?: unknown }> = []
+    api.defaults.adapter = async (config): Promise<AxiosResponse> => {
+      requests.push({ url: config.url, params: config.params })
+      return {
+        data: {
+          id: 'run-1',
+          source_run_id: 'run-1',
+          locked: true,
+          cases: [
+            {
+              case_id: 'segment',
+              node_id: 'segment',
+              phase_id: 'segment',
+              expected_output: { segments: [] },
+            },
+          ],
+        },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    }
+
+    await fetchGoldenContent('skill-a', 'run-1', 'segment')
+
+    expect(requests).toEqual([
+      {
+        url: '/skills/skill-a/golden/run-1/content',
+        params: { node_id: 'segment' },
+      },
+    ])
   })
 })

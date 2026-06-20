@@ -6,6 +6,12 @@ function err(file: string | null, severity: CompileError["severity"] = "fatal"):
   return { file, line: 1, field: null, severity, message: "boom" }
 }
 
+// N4 atom #35: the golden-field compile gate emits a FILE-LESS error scoped by
+// field = "<node_id>.<missing_field>" (skills.py _validate_golden_against_output_schema).
+function goldenFieldErr(field: string): CompileError {
+  return { file: null, line: null, field, severity: "fatal", message: "golden missing field" }
+}
+
 function lintErr(file: string | null | undefined): LintError {
   return {
     file,
@@ -46,6 +52,26 @@ describe("compileErrorsByNode", () => {
       err("phases/2nd-pass/SKILL.md"),
     ])
     expect(Object.keys(byNode).sort()).toEqual(["2nd-pass", "Segment_1"])
+  })
+
+  it("attributes a file-less golden-field error to its node via the field prefix (atom #35)", () => {
+    // field = "<node_id>.<missing_field>"; the node id is the prefix before the first dot.
+    const byNode = compileErrorsByNode([goldenFieldErr("review.summary")])
+    expect(Object.keys(byNode)).toEqual(["review"])
+    expect(byNode.review).toHaveLength(1)
+    expect(byNode.review[0].field).toBe("review.summary")
+  })
+
+  it("prefers the file phase path over the field prefix when both are present", () => {
+    const byNode = compileErrorsByNode([
+      { file: "phases/expand/SKILL.md", line: 1, field: "review.summary", severity: "fatal", message: "x" },
+    ])
+    expect(Object.keys(byNode)).toEqual(["expand"])
+  })
+
+  it("omits a file-less error whose field carries no node-id prefix", () => {
+    // A bare field with no "<node>." prefix isn't node-attributable — stays in the drawer only.
+    expect(compileErrorsByNode([goldenFieldErr("summary")])).toEqual({})
   })
 })
 

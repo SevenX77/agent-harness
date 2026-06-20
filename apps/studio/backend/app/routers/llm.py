@@ -64,6 +64,7 @@ from app.models.llm_config import (
     ProviderEndpoint,
     ProviderImportDraft,
     ProviderRoute,
+    ProviderType,
     RegistryResponse,
     RoleEntry,
     RoleRouteEntry,
@@ -573,39 +574,66 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
             tested_endpoint_id=endpoint_id,
             discovered_model_count=0,
         )
+    endpoint_update: dict[str, Any] = {}
     if model_list_reached:
         route_ids_by_model: dict[str, str] = {}
-        if latest_endpoint.provider_kind == "official":
-            latest_credentials, route_ids_by_model = _upsert_discovered_routes(
-                latest_credentials,
-                endpoint=latest_endpoint,
-                model_ids=discovered_model_ids,
-                verified=False,
-                raw_capabilities_by_model=raw_capabilities_by_model,
-            )
-            if discovered_model_ids:
-                status = "verified"
-        else:
-            latest_credentials, route_ids_by_model = _upsert_discovered_routes(
-                latest_credentials,
-                endpoint=latest_endpoint,
-                model_ids=discovered_model_ids,
-                verified=False,
-                raw_capabilities_by_model=raw_capabilities_by_model,
-            )
+        latest_credentials, route_ids_by_model = _upsert_discovered_routes(
+            latest_credentials,
+            endpoint=latest_endpoint,
+            model_ids=discovered_model_ids,
+            verified=False,
+            raw_capabilities_by_model=raw_capabilities_by_model,
+        )
         _append_model_list_observation_evidence(
             latest_endpoint,
             discovered_model_ids,
             raw_capabilities_by_model,
             route_ids_by_model,
         )
-    updated = latest_endpoint.model_copy(
-        update={
+        if latest_endpoint.provider_kind == "official":
+            # Official endpoints are operator-controlled: a reachable get-models
+            # call is enough to verify (apikeys#24); no per-model probe required.
+            if discovered_model_ids:
+                status = "verified"
+        else:
+            # Third-party endpoints must prove the protocol matches AND that the
+            # endpoint can actually generate before reaching verified (apikeys#25).
+            verification = await _verify_third_party_endpoint_by_probe(
+                latest_endpoint,
+                discovered_model_ids,
+                raw_capabilities_by_model,
+            )
+            status = verification.status
+            message = verification.message
+            if verification.status == "verified" and verification.verified_model_id is not None:
+                if verification.detected_protocol != latest_endpoint.protocol:
+                    endpoint_update["protocol"] = verification.detected_protocol
+                    latest_endpoint = latest_endpoint.model_copy(
+                        update={"protocol": verification.detected_protocol}
+                    )
+                latest_credentials, verified_route_ids = _upsert_discovered_routes(
+                    latest_credentials,
+                    endpoint=latest_endpoint,
+                    model_ids=(verification.verified_model_id,),
+                    verified=True,
+                    raw_capabilities_by_model=verification.probe_capabilities,
+                )
+                _append_model_probe_evidence(
+                    latest_endpoint,
+                    ModelProbeResult(
+                        model_id=verification.verified_model_id,
+                        status="ok",
+                    ),
+                    route_id=verified_route_ids.get(verification.verified_model_id),
+                )
+    endpoint_update.update(
+        {
             "status": status,
             "last_test_at": _now_iso(),
             "last_test_message": message,
         }
     )
+    updated = latest_endpoint.model_copy(update=endpoint_update)
     latest_credentials.provider_endpoints[endpoint_id] = updated
     save_credentials(latest_credentials)
     return EndpointTestResponse(
@@ -747,13 +775,18 @@ async def test_endpoint_models(
                 registry=_registry_response(latest_credentials, _load_roles_or_empty()),
                 results=results,
             )
+        list_model_capabilities = await _list_model_capabilities_for_endpoint(latest_endpoint)
         latest_credentials, route_ids_by_model = _upsert_discovered_routes(
             latest_credentials,
             endpoint=latest_endpoint,
             model_ids=tuple(successful_model_ids),
             verified=True,
             raw_capabilities_by_model={
-                model_id: _successful_generation_probe_capabilities() for model_id in successful_model_ids
+                model_id: _third_party_probe_capabilities(
+                    model_id,
+                    list_model_capabilities.get(model_id),
+                )
+                for model_id in successful_model_ids
             },
         )
         latest_endpoint = latest_endpoint.model_copy(
@@ -1648,6 +1681,7 @@ def _registry_response(
     setup_required: bool = False,
 ) -> RegistryResponse:
     credentials = _normalize_credentials_for_registry_response(credentials)
+    credentials = _project_route_ui_states(credentials)
     roles = _materialize_roles_for_response(roles, credentials)
     routes_by_canonical: dict[str, list[str]] = {}
     for route_id, route in credentials.provider_routes.items():
@@ -1689,6 +1723,55 @@ def _registry_response(
         role_effective_runtime_settings=_role_effective_runtime_settings(credentials, roles),
         setup_required=setup_required,
     )
+
+
+def _project_route_ui_states(
+    credentials: LLMCredentialsFile,
+) -> LLMCredentialsFile:
+    """Stamp each route's 6-state ``ui_state`` onto the registry DTO (apikeys#30).
+
+    The registry snapshot must carry the same 6-state vocabulary LLM Roles already
+    shows, so the API Keys cards can render the authoritative state inline instead
+    of recomputing it. We reuse the canonical gateway projector via the in-process
+    adapter (``project_route_state``) — the identical call ``_provider_model_option``
+    makes — and never invent a new state vocabulary here.
+    """
+    if not credentials.provider_routes:
+        return credentials
+    adapter = build_gateway_adapter()
+    health_store = _health_store()
+    evidence_records = _load_gateway_evidence_records()
+    now = datetime.now(UTC)
+    projected_routes: dict[str, ProviderRoute] = {}
+    changed = False
+    for route_id, route in credentials.provider_routes.items():
+        endpoint = credentials.provider_endpoints.get(route.endpoint_id)
+        if endpoint is None:
+            projected_routes[route_id] = route
+            continue
+        circuits = health_store.get_active_circuits(
+            route_id=route.route_id,
+            endpoint_id=endpoint.endpoint_id,
+            rate_limit_bucket=endpoint.rate_limit_bucket or endpoint.endpoint_id,
+            now=now,
+        )
+        projection = adapter.project_route_state(
+            {
+                "endpoint": endpoint,
+                "route": route,
+                "circuits": circuits,
+                "now": now,
+                "evidence_records": evidence_records,
+            }
+        )
+        if projection.ui_state == route.ui_state:
+            projected_routes[route_id] = route
+            continue
+        projected_routes[route_id] = route.model_copy(update={"ui_state": projection.ui_state})
+        changed = True
+    if not changed:
+        return credentials
+    return credentials.model_copy(update={"provider_routes": projected_routes})
 
 
 def _normalize_credentials_for_registry_response(
@@ -4285,6 +4368,267 @@ def _successful_generation_probe_capabilities() -> dict[str, Any]:
         "input_modalities": ["text"],
         "output_modalities": ["text"],
     }
+
+
+# apikeys#25: candidate transport protocols tried, in order, when auto-detecting
+# a third-party endpoint's protocol. The endpoint's currently-stored protocol is
+# always tried first by _third_party_protocol_candidates; this tuple supplies the
+# fallback rotation. Each protocol maps (via endpoint_probe_backend) to a distinct
+# request shape + auth header, so probing all four covers the auth-header combos.
+_THIRD_PARTY_PROTOCOL_CANDIDATES: tuple[ProviderType, ...] = (
+    "openai_compatible",
+    "anthropic_compatible",
+    "google_genai",
+    "ark_runtime",
+)
+# apikeys#25: structural probe failures that will reject EVERY model on the
+# endpoint (bad key / billing), so the batch model-probe loop short-circuits
+# instead of burning a probe per model. invalid_model is NOT structural — it is
+# model-specific and means "this protocol reached the provider, that model id is
+# just wrong", so the loop keeps trying other models / counts the protocol as found.
+_STRUCTURAL_PROBE_STATUSES: frozenset[str] = frozenset(
+    {"invalid_key", "quota_exceeded"}
+)
+# How many candidate model ids the batch inference probe will try before giving
+# up on an otherwise-reachable third-party endpoint.
+_THIRD_PARTY_PROBE_MODEL_LIMIT = 6
+
+
+@dataclass(frozen=True)
+class ThirdPartyEndpointVerification:
+    """Outcome of the third-party protocol-detect + batch-inference verification.
+
+    ``status='verified'`` is set ONLY when a real generation probe (test_provider_route)
+    returned ``ok`` — get-models reachability alone never reaches verified for
+    third-party endpoints (apikeys#25).
+    """
+
+    status: Literal["verified", "failed"]
+    detected_protocol: ProviderType
+    verified_model_id: str | None
+    message: str
+    probe_capabilities: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+
+def _third_party_protocol_candidates(endpoint: ProviderEndpoint) -> tuple[ProviderType, ...]:
+    """Return the protocol rotation with the endpoint's stored protocol first."""
+    ordered: list[ProviderType] = [cast(ProviderType, endpoint.protocol)]
+    for candidate in _THIRD_PARTY_PROTOCOL_CANDIDATES:
+        if candidate not in ordered:
+            ordered.append(candidate)
+    return tuple(ordered)
+
+
+def _third_party_probe_model_ids(
+    endpoint: ProviderEndpoint,
+    discovered_model_ids: tuple[str, ...],
+) -> list[str]:
+    """Pick the model ids to drive the batch inference probe.
+
+    Discovered ids (from the get-models call) come first; when the endpoint
+    exposes no list API we fall back to the doc-maintained notable ids for its
+    probe backend so an unlistable-but-generating endpoint can still verify.
+    """
+    candidates = list(discovered_model_ids)
+    if not candidates:
+        candidates = notable_model_ids(_endpoint_probe_backend(endpoint))
+    return _requested_model_ids(candidates)[:_THIRD_PARTY_PROBE_MODEL_LIMIT]
+
+
+async def _detect_third_party_protocol(
+    endpoint: ProviderEndpoint,
+    probe_model_id: str,
+) -> tuple[ProviderType, RouteProbeResult] | None:
+    """Auto-detect the working protocol by probing one model per candidate.
+
+    For each candidate protocol we clone the endpoint with that protocol and run
+    a real generation probe for ``probe_model_id``. The FIRST candidate whose
+    probe is not a transport/protocol-level structural mismatch wins: an ``ok``
+    obviously wins, and an ``invalid_model`` also wins because it proves the
+    protocol/auth reached the provider (the model id is just wrong). Returns the
+    detected protocol plus that probe result, or ``None`` if every candidate
+    failed structurally (so the endpoint stays unverified).
+    """
+    last_result: RouteProbeResult | None = None
+    for candidate in _third_party_protocol_candidates(endpoint):
+        candidate_endpoint = endpoint.model_copy(update={"protocol": candidate})
+        logger.info(
+            "third-party protocol auto-detect: trying protocol=%s endpoint=%s",
+            candidate,
+            endpoint.endpoint_id,
+        )
+        result = _model_probe_result_from_route_probe(
+            await _gateway_test_provider_model(candidate_endpoint, probe_model_id)
+        )
+        route_probe = RouteProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            route_id=f"{endpoint.endpoint_id}:{_route_slug(probe_model_id)}",
+            provider_kind=endpoint.provider_kind,
+            backend=_endpoint_probe_backend(candidate_endpoint),
+            base_url=_endpoint_probe_base_url(candidate_endpoint),
+            model_id=probe_model_id,
+            status=result.status,
+            latency_ms=result.latency_ms,
+            message=result.message,
+        )
+        last_result = route_probe
+        if route_probe.status == "ok" or route_probe.status == "invalid_model":
+            logger.info(
+                "third-party protocol detected protocol=%s endpoint=%s probe_status=%s",
+                candidate,
+                endpoint.endpoint_id,
+                route_probe.status,
+            )
+            return candidate, route_probe
+        if route_probe.status in _STRUCTURAL_PROBE_STATUSES:
+            # invalid_key / quota_exceeded are protocol-agnostic — rotating the
+            # protocol cannot fix them, so stop probing further candidates.
+            logger.warning(
+                "third-party protocol auto-detect short-circuit endpoint=%s status=%s",
+                endpoint.endpoint_id,
+                route_probe.status,
+            )
+            return None
+    if last_result is not None:
+        logger.warning(
+            "third-party protocol auto-detect exhausted endpoint=%s last_status=%s",
+            endpoint.endpoint_id,
+            last_result.status,
+        )
+    return None
+
+
+async def _verify_third_party_endpoint_by_probe(
+    endpoint: ProviderEndpoint,
+    discovered_model_ids: tuple[str, ...],
+    raw_capabilities_by_model: dict[str, dict[str, Any]],
+) -> ThirdPartyEndpointVerification:
+    """Run protocol auto-detect + batch inference probing for a third-party endpoint.
+
+    apikeys#24/#25: get-models only proves key+URL reachability for third-party
+    endpoints, so it never promotes to verified. Here we (1) auto-detect the
+    transport protocol by probing a real generation call per candidate protocol,
+    then (2) batch-probe candidate model ids under the detected protocol, stopping
+    on the first ``ok`` and short-circuiting structural errors. The endpoint is
+    promoted to ``verified`` ONLY when a real generation probe returns ``ok``.
+    """
+    probe_model_ids = _third_party_probe_model_ids(endpoint, discovered_model_ids)
+    if not probe_model_ids:
+        return ThirdPartyEndpointVerification(
+            status="failed",
+            detected_protocol=cast(ProviderType, endpoint.protocol),
+            verified_model_id=None,
+            message="Endpoint reachable but no model ids were available to probe.",
+        )
+
+    detection = await _detect_third_party_protocol(endpoint, probe_model_ids[0])
+    if detection is None:
+        return ThirdPartyEndpointVerification(
+            status="failed",
+            detected_protocol=cast(ProviderType, endpoint.protocol),
+            verified_model_id=None,
+            message="Could not auto-detect a working protocol for this endpoint.",
+        )
+
+    detected_protocol, first_probe = detection
+    detected_endpoint = endpoint.model_copy(update={"protocol": detected_protocol})
+
+    last_failure: RouteProbeResult = first_probe
+    for index, model_id in enumerate(probe_model_ids):
+        if index == 0:
+            # The first model was already probed during protocol detection.
+            probe = first_probe
+        else:
+            probe = await _gateway_test_provider_route(
+                detected_endpoint,
+                _gateway_probe_route(detected_endpoint, model_id),
+            )
+        if probe.status == "ok":
+            logger.info(
+                "third-party batch probe verified endpoint=%s protocol=%s model=%s",
+                endpoint.endpoint_id,
+                detected_protocol,
+                model_id,
+            )
+            return ThirdPartyEndpointVerification(
+                status="verified",
+                detected_protocol=detected_protocol,
+                verified_model_id=model_id,
+                message=f"Generation verified via {detected_protocol}. Model: {model_id}.",
+                probe_capabilities={
+                    model_id: _third_party_probe_capabilities(
+                        model_id,
+                        raw_capabilities_by_model.get(model_id),
+                    )
+                },
+            )
+        last_failure = probe
+        if probe.status in _STRUCTURAL_PROBE_STATUSES:
+            logger.warning(
+                "third-party batch probe short-circuit endpoint=%s status=%s",
+                endpoint.endpoint_id,
+                probe.status,
+            )
+            break
+
+    return ThirdPartyEndpointVerification(
+        status="failed",
+        detected_protocol=detected_protocol,
+        verified_model_id=None,
+        message=_model_probe_failure_message(
+            _model_probe_result_from_route_probe(last_failure)
+        ),
+    )
+
+
+async def _list_model_capabilities_for_endpoint(
+    endpoint: ProviderEndpoint,
+) -> dict[str, dict[str, Any]]:
+    """Fetch the endpoint's list-models rich capabilities, keyed by model id.
+
+    apikeys#27: the third-party manual-model probe path derives capabilities from
+    the endpoint's list API (the same rich fields the official side normalizes),
+    so official and third-party return a symmetric capability structure. Returns
+    an empty mapping when the list call is unreachable — callers then fall back to
+    the generation-probe default per model.
+    """
+    result = await _gateway_test_provider_endpoint(endpoint)
+    if result.status != "ok":
+        logger.info(
+            "list-models capabilities unavailable endpoint=%s status=%s",
+            endpoint.endpoint_id,
+            result.status,
+        )
+        return {}
+    return dict(result.model_capabilities)
+
+
+def _gateway_probe_route(endpoint: ProviderEndpoint, model_id: str) -> ProviderRoute:
+    """Build a throwaway ProviderRoute used only to drive test_provider_route."""
+    route_slug = _route_slug(model_id)
+    return ProviderRoute(
+        route_id=f"{endpoint.endpoint_id}:{route_slug}",
+        endpoint_id=endpoint.endpoint_id,
+        route_slug=route_slug,
+        provider_model_id=model_id,
+        canonical_id=model_id,
+    )
+
+
+def _third_party_probe_capabilities(
+    model_id: str,
+    raw_capabilities: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Prefer the list-models rich capabilities; fall back to the text-only default.
+
+    apikeys#27: third-party capability must come from the endpoint's list-models
+    rich fields (normalized) when available, not be hard-coded text-only. The
+    generation-probe default is only used when the list API gave us nothing.
+    """
+    del model_id
+    if raw_capabilities:
+        return dict(raw_capabilities)
+    return _successful_generation_probe_capabilities()
 
 
 def _third_party_route_capability_values(

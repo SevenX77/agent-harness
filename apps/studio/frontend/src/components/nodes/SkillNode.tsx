@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { AlertTriangle, Bot, Briefcase, CheckCircle2, Circle, Code, Minus, Network, Pause, Plus, Radio, ShieldCheck, Workflow } from 'lucide-react'
+import { AlertTriangle, Bot, Briefcase, CheckCircle2, Circle, Code, Minus, Network, Pause, Plus, Radio, ShieldCheck, ShieldHalf, Workflow } from 'lucide-react'
 import { SubgraphInline } from '@/components/studio/SubgraphInline'
 import { normalizeAbsoluteSubgraphPath } from '@/components/studio/subgraph-path'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -63,6 +63,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
   const subagentCount = data.subagents?.length ?? 0
   const compileErrorCount = data.compileErrors?.length ?? 0
   const hasGolden = data.goldenState === 'has-golden'
+  const isLogicOk = data.goldenState === 'logic-ok'
 
   const nodeContent = (
     <div
@@ -130,6 +131,18 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
                   </span>
                 </TooltipTrigger>
                 <TooltipContent side="top">Golden captured for this node</TooltipContent>
+              </Tooltip>
+            ) : isLogicOk ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    aria-label="Logic OK (predict ran, no golden yet)"
+                    className="inline-flex size-5 items-center justify-center rounded-md border border-amber-500/45 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                  >
+                    <ShieldHalf className="size-3" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top">Predict ran this node — no golden yet</TooltipContent>
               </Tooltip>
             ) : null}
           </div>

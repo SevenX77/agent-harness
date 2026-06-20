@@ -6,13 +6,21 @@ from fastapi import APIRouter, Header, Response, status
 
 from app.core.exceptions import error_response, raise_error_response
 from app.models.errors import ErrorResponse
-from app.models.golden import GoldenBaseline, GoldenBaselinePlan, SetGoldenReq
+from app.models.golden import (
+    GoldenBaseline,
+    GoldenBaselinePlan,
+    GoldenTemplate,
+    SetGoldenReq,
+    SetManualGoldenReq,
+)
 from app.services.golden_diff import (
     delete_golden_baseline_for_skill,
     list_golden_baselines_for_skill,
     plan_golden_baseline_for_run,
     set_golden_baseline_for_run,
+    set_manual_golden_for_node,
 )
+from app.services.golden_template import generate_golden_template
 
 router = APIRouter(prefix="/api/skills/{skill_id}/golden", tags=["golden"])
 
@@ -57,6 +65,34 @@ async def plan_golden_baseline(skill_id: str, request: SetGoldenReq) -> GoldenBa
         lock=request.lock,
         node_id=request.node_id,
     )
+
+
+@router.get(
+    "/template",
+    response_model=GoldenTemplate,
+    responses={422: {"model": ErrorResponse}},
+)
+async def get_golden_template(skill_id: str, node_id: str) -> GoldenTemplate:
+    # N4 atom #33 create-path B: empty schema-valid template for an agent node so the
+    # author can hand-fill expected values without a copilot/run source.
+    return generate_golden_template(skill_id, node_id)
+
+
+@router.post(
+    "/manual",
+    response_model=GoldenBaseline,
+    responses={409: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
+)
+async def set_manual_golden(
+    skill_id: str,
+    request: SetManualGoldenReq,
+    write_fallback: str | None = Header(default=None, alias="X-Studio-Write-Fallback"),
+) -> GoldenBaseline:
+    # N4 atom #33 manual write: author-defined golden keyed by node_id (run-less).
+    # Behind the same browser-write-fallback guard as the run-promote write (atom #36 ②);
+    # it does NOT go through the predict-trace promote guard (no source run to promote).
+    _require_browser_write_fallback(write_fallback)
+    return set_manual_golden_for_node(skill_id, request)
 
 
 @router.delete(

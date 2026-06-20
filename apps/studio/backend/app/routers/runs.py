@@ -13,6 +13,7 @@ from app.models.runs import (
     BatchRunRequest,
     BatchRunResponse,
     BatchRunStatus,
+    PredictDiagnosticExport,
     PredictRunRequest,
     ResumeReq,
     ResumeValidityReq,
@@ -35,15 +36,18 @@ async def create_run(skill_id: str, request: RunRequest) -> RunMetadata:
     return await run_manager.start_run(skill_id, request)
 
 
-@router.post("/predict")
-async def predict_run(skill_id: str, request: PredictRunRequest) -> dict[str, object]:
+@router.post("/predict", response_model=PredictDiagnosticExport)
+async def predict_run(skill_id: str, request: PredictRunRequest) -> PredictDiagnosticExport:
+    # N4 atom #30: project the in-process diagnostic export (is_predict / status /
+    # phases / path_diff) instead of leaking the raw RunResult. The frontend reads
+    # which agent nodes ran from `phases` to drive the golden 🟡 logic-OK middle state.
     result = predictor_service.dispatch_predict_job(
         skill_id,
         request.mock_llm,
         input_data=request.input_data,
         current_hashes=request.current_hashes,
     )
-    return result.model_dump(mode="json")
+    return predictor_service.export_diagnostics(result)
 
 
 @router.get("", response_model=RunListResponse)

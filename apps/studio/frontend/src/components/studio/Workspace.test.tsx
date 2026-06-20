@@ -253,7 +253,12 @@ describe('Workspace WS-1 local writer contracts', () => {
       current_execution_fingerprint: `sha256:${'2'.repeat(64)}`,
     })
     mocks.postPredictRun.mockReset()
-    mocks.postPredictRun.mockResolvedValue({ run_id: 'predict-run', status: 'success' })
+    mocks.postPredictRun.mockResolvedValue({
+      is_predict: true,
+      status: 'success',
+      phases: [],
+      path_diff: null,
+    })
     mocks.resolveRunInput.mockReset()
     mocks.resolveRunInput.mockResolvedValue({ topic: 'mars' })
     mocks.resumeRun.mockReset()

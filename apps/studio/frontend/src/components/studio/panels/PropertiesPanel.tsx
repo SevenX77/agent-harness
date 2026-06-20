@@ -35,6 +35,11 @@ import {
   type PhaseSubagentRef,
 } from "./phase-frontmatter"
 
+// Node KIND is owned by the physical phase FILE (SKILL/LOGIC/SUBGRAPH.md) that
+// exists in the phase directory — `data.mode` is derived from that file in
+// build-nodes (phaseModeFromFiles), NOT from any author-writable `mode:`
+// frontmatter field (the engine rejects that). This label and the file picker
+// below therefore reflect the file on disk, never a settable mode property.
 function phaseKindLabel(data: Pick<SkillGraphNodeData, "mode" | "subgraphPath">): "LOGIC" | "AGENT" | "SUBGRAPH" {
   if (data.subgraphPath || data.mode === "subgraph") return "SUBGRAPH"
   if (data.mode === "skill" || data.mode === "llm" || data.mode === "agent") return "AGENT"
@@ -55,7 +60,7 @@ function phaseFrontmatterKind(label: "LOGIC" | "AGENT" | "SUBGRAPH"): PhaseFront
   return "logic"
 }
 
-function DetailRow({ label, value }: { label: string; value?: string | string[] | null }) {
+function DetailRow({ label, value, hint }: { label: string; value?: string | string[] | null; hint?: string }) {
   const values = Array.isArray(value) ? value : value ? [value] : []
   return (
     <div className="rounded-md border border-border bg-card px-3 py-2">
@@ -63,6 +68,7 @@ function DetailRow({ label, value }: { label: string; value?: string | string[] 
       <dd className="mt-1 text-xs text-foreground">
         {values.length > 0 ? values.join(", ") : <span className="text-muted-foreground">None</span>}
       </dd>
+      {hint ? <p className="mt-1 text-[10px] text-muted-foreground">{hint}</p> : null}
     </div>
   )
 }
@@ -320,7 +326,11 @@ export function PropertiesPanel({
             )}
             <dl className="space-y-3">
               <DetailRow label="Phase ID" value={selectedNode.id} />
-              <DetailRow label="Mode" value={modeLabel} />
+              <DetailRow
+                label="Node type"
+                value={modeLabel}
+                hint="Determined by the phase file (SKILL/LOGIC/SUBGRAPH.md) — not editable."
+              />
               <DetailRow label="Depends On" value={selectedNode.data.dependsOn} />
               <DetailRow label="Role" value={selectedNode.data.role} />
               <DetailRow label="Tools" value={selectedNode.data.tools} />

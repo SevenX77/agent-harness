@@ -9,7 +9,7 @@ import { copilotFileActionEffects, type CopilotFileAction } from "@/components/c
 import { PromptInspector } from "@/components/PromptInspector"
 import { findPromptEvent } from "@/utils/trace"
 import { useCopilotContext } from "@/hooks/useCopilotContext"
-import { readLintStatus } from "@/hooks/useDebouncedLint"
+import { lintStatusEvent, readLintStatus } from "@/hooks/useDebouncedLint"
 import { useRunStream } from "@/hooks/useRunStream"
 import { useGoldenDiff } from "@/hooks/useGoldenDiff"
 import { useSkills } from "@/hooks/useSkills"
@@ -166,6 +166,12 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const [compileErrors, setCompileErrors] = useState<Record<string, CompileError[]>>({})
   const [compileDrawerOpen, setCompileDrawerOpen] = useState(false)
   const [runId, setRunId] = useState<string | null>(null)
+  // N3 #12: realtime lint runs in the editor (useDebouncedLint) and publishes status to
+  // sessionStorage + a window event. deriveBuildStage reads that status, but Workspace
+  // does not otherwise re-render when it changes, so a clean edit never flipped Predict
+  // on until something else (e.g. Compile) re-rendered. This tick is bumped by the lint
+  // event subscriber below to force deriveBuildStage to re-read the latest lint status.
+  const [lintTick, setLintTick] = useState(0)
   // F4: the test input selected in the i/o panel feeds Predict/Run (null = the
   // prior empty-payload behaviour). Reset when the active skill changes.
   const [selectedTestInputId, setSelectedTestInputId] = useState<string | null>(null)
@@ -173,6 +179,22 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   useEffect(() => {
     setRunId(null)
     setSelectedTestInputId(null)
+  }, [currentSkillId])
+
+  // N3 #12: subscribe to realtime-lint status changes (published by useDebouncedLint as
+  // the `lintStatusEvent` window event). A matching skillId bumps lintTick so the
+  // CenterActionBar's stage (deriveBuildStage) re-reads readLintStatus and lights Predict
+  // the moment lint passes — without the user clicking Compile first.
+  useEffect(() => {
+    if (typeof window === "undefined" || !currentSkillId) return undefined
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ skillId?: string; status?: string }>).detail
+      if (detail?.skillId === currentSkillId) {
+        setLintTick((tick) => tick + 1)
+      }
+    }
+    window.addEventListener(lintStatusEvent, handler)
+    return () => window.removeEventListener(lintStatusEvent, handler)
   }, [currentSkillId])
 
   const updateStage = useCallback((id: string, stage: SkillBuildStage) => {
@@ -741,12 +763,16 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const deriveBuildStage = useCallback((id: string): SkillBuildStage => {
     const compileStage = compileStages[id]
     if (compileStage) return compileStage
+    // lintTick: bumped by the lint-event subscriber so a passed realtime lint re-derives
+    // the stage. readLintStatus reads sessionStorage (not React state), so this read is
+    // the dependency that re-runs the derivation when lint status changes.
+    void lintTick
     const lint = readLintStatus(id)
     if (lint === "checking") return "compiling"
     if (lint === "failed") return "compile-fail"
     if (lint === "passed") return "compile-pass"
     return "idle"
-  }, [compileStages])
+  }, [compileStages, lintTick])
 
   const handlePredict = useCallback(async () => {
     if (!currentSkillId) return
@@ -755,8 +781,25 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     try {
       const inputData = await resolveRunInput(targetSkillId, selectedTestInputId)
       const predict = await postPredictRun(targetSkillId, inputData)
+      // N4 #4: the backend projects business success into PredictDiagnosticExport.status
+      // ('success' | 'failed'); a 2xx response only means "predict ran", not "predict
+      // passed". Gate Run on status — a `failed` predict must keep Run locked (the backend
+      // also enforces this with 409 RUN_REQUIRES_PREDICT) and surface its diagnostics.
+      if (predict.status !== "success") {
+        // predict-fail: clear stale 🟡 logic-OK and show why the prediction failed.
+        setRanAgentNodesBySkill((prev) => ({ ...prev, [targetSkillId]: new Set<string>() }))
+        updateStage(targetSkillId, "predict-fail")
+        const mismatchedPaths = predict.path_diff
+          ? [...predict.path_diff.missing, ...predict.path_diff.extra]
+          : []
+        const detail = mismatchedPaths.length > 0
+          ? `path diff: ${mismatchedPaths.join(", ")}`
+          : "see predicted execution path"
+        toast.error(`Predict failed: ${detail}`)
+        return
+      }
       // N4 atom #30: cache the AGENT nodes that ran so the canvas can show 🟡 logic-OK.
-      // Only on predict-pass; predict-fail clears it (below) so stale 🟡 never lingers.
+      // Only on predict-pass; predict-fail clears it (above) so stale 🟡 never lingers.
       setRanAgentNodesBySkill((prev) => ({
         ...prev,
         [targetSkillId]: ranAgentNodesFromPredict(predict),

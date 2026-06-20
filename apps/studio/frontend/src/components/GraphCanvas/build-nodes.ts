@@ -13,6 +13,24 @@ export function phaseKindFile(data: Pick<SkillGraphNodeData, 'mode' | 'subgraphP
   return 'LOGIC.md'
 }
 
+// Node KIND is owned by the physical phase FILE that exists in the phase
+// directory — SUBGRAPH.md / SKILL.md / LOGIC.md — never an author-writable
+// `mode:` frontmatter field (engine `_reject_phase_forbidden_metadata` rejects
+// it). This mirrors the engine's `_PHASE_FILE_TO_MODE` projection on the FE so a
+// stale `topology.mode` (or the legacy `phase.mode` fallback) can never override
+// the kind that the file on disk actually declares. Returns null when none of the
+// three node files is present, so callers can fall back to the topology mode.
+function phaseModeFromFiles(
+  phaseId: string,
+  files: SkillDetail['files'] | undefined,
+): SkillGraphNodeData['mode'] | null {
+  if (!files) return null
+  if (files[`phases/${phaseId}/SUBGRAPH.md`] !== undefined) return 'subgraph'
+  if (files[`phases/${phaseId}/SKILL.md`] !== undefined) return 'agent'
+  if (files[`phases/${phaseId}/LOGIC.md`] !== undefined) return 'logic'
+  return null
+}
+
 function normalizeDependsOn(value: string | string[] | undefined): string[] {
   if (Array.isArray(value)) {
     return value.filter(Boolean)
@@ -171,7 +189,10 @@ export function buildNodes(
   const topologyById = new Map((detail?.graph_topology ?? []).map((phase) => [phase.id, phase]))
   const phaseNodes: SkillGraphNode[] = phases.map((phase, index) => {
     const topology = topologyById.get(phase.name)
-    const mode = topology?.mode ?? phase.mode
+    // Truth source for node KIND is the physical phase file on disk; the
+    // engine-injected `topology.mode` is only a fallback when no node file is
+    // loaded. The author-writable `phase.mode` is never trusted to set the kind.
+    const mode = phaseModeFromFiles(phase.name, detail?.files) ?? topology?.mode ?? phase.mode
     const subgraphPath = normalizeAbsoluteSubgraphPath(topology?.path)
     const filePath = `phases/${phase.name}/${phaseKindFile({ mode, subgraphPath })}`
     const frontmatter = phaseFrontmatter(detail?.files?.[filePath])

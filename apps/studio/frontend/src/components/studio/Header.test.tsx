@@ -220,6 +220,28 @@ describe('Header release status', () => {
     expect(html).not.toContain('stale-extra-artifact')
   })
 
+  it('exposes the Team menu trigger that gates the Artifact Registry release actions', () => {
+    const html = renderToStaticMarkup(
+      <TooltipProvider>
+        <Header
+          skillId="text-segmentation"
+          workspaceRoot="/tmp/workspace"
+          copilotOpen={false}
+          onCopilotToggle={vi.fn()}
+          onHome={vi.fn()}
+        />
+      </TooltipProvider>,
+    )
+
+    // Per repo convention, dropdown CONTENT (Save to Team / the
+    // `Artifact Registry (not git push)` separator+label / Release) lives in a
+    // Radix portal and is NOT emitted by renderToStaticMarkup, so the in-menu
+    // disambiguation (#5) is verified by the desktop screenshot + e2e, not here.
+    // This render-contract test locks that the Team menu trigger is present.
+    expect(html).toContain('data-slot="dropdown-menu-trigger"')
+    expect(html).toContain('Team')
+  })
+
   it('offers a native-fs Package release action only after release identity is complete', () => {
     const html = renderToStaticMarkup(
       <TooltipProvider>

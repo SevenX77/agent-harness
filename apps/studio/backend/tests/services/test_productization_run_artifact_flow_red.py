@@ -559,6 +559,11 @@ def test_engine_resume_validity_denies_dirty_upstream_when_current_artifact_iden
         "resume_from_node_id": "beta",
         "resume_to_node_id": "gamma",
         "dirty_fields": ["content_hash", "execution_fingerprint"],
+        # n5-node#3: the /tmp/demo skill does not compile in this unit, so the
+        # downstream slice degrades to empty (logged) -- the resume decision is
+        # unaffected. A real compiled graph populates these (see test_resume_downstream).
+        "dirty_node_ids": [],
+        "affected_downstream": [],
         "snapshot_content_hash": old_hash,
         "current_content_hash": new_hash,
         "snapshot_execution_fingerprint": old_fingerprint,

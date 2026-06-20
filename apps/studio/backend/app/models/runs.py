@@ -23,12 +23,33 @@ class TokensMetrics(BaseModel):
     wall_time_sec: float | None = None
 
 
+class RunCandidate(BaseModel):
+    """One model/role candidate in a P8 model-compare run (n4-trace#23).
+
+    ``role_name`` references a role that already exists in the active
+    ``llm_roles.yaml`` -- the candidate runs the same compiled artifact but
+    resolves its agent node(s) through this role. ``target_role`` optionally
+    narrows the override to a single role the skill's phases bind to; when
+    omitted, the candidate role overrides every graph_agent role.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: str = Field(..., min_length=1)
+    role_name: str = Field(..., min_length=1)
+    target_role: str | None = None
+
+
 class RunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     input_data: dict[str, Any] | None = None
     golden_id: str | None = None
     paste_json: str | None = None
+    # n4-trace#23: when present, fan the run out across candidate roles. Each
+    # candidate spawns its own worker (same artifact/inputs) tagged with a shared
+    # compare-group id, so the frontend Trace can tab between per-model results.
+    candidates: list[RunCandidate] | None = None
 
 
 class PredictRunRequest(BaseModel):
@@ -66,6 +87,11 @@ class RunMetadata(BaseModel):
     artifact_ref: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
     source_map_ref: str | None = Field(default=None, exclude_if=lambda value: value is None)
     execution_fingerprint: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    # n4-trace#23: model-compare grouping. Set only on compare-fanned runs so the
+    # frontend can group/tab the per-candidate results; omitted on ordinary runs.
+    compare_group_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    candidate_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    candidate_role_name: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class RunListResponse(BaseModel):
@@ -73,6 +99,34 @@ class RunListResponse(BaseModel):
 
     runs: list[RunMetadata]
     total: int
+
+
+class CompareCandidateRun(BaseModel):
+    """One candidate's spawned run within a model-compare group (n4-trace#23)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: str
+    role_name: str
+    metadata: RunMetadata
+
+
+class CompareRunResponse(BaseModel):
+    """POST response: the compare group and the per-candidate runs it spawned."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    compare_group_id: str
+    runs: list[CompareCandidateRun]
+
+
+class CompareRunGroupResponse(BaseModel):
+    """GET response: per-candidate runs for one compare group, for Trace tabs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    compare_group_id: str
+    runs: list[CompareCandidateRun]
 
 
 class BatchRunResponse(BaseModel):
@@ -154,6 +208,13 @@ class ResumeValidityResponse(BaseModel):
     resume_from_node_id: str | None = None
     resume_to_node_id: str | None = None
     dirty_fields: list[Literal["content_hash", "execution_fingerprint"]] = Field(default_factory=list)
+    # n5-node#3 (dirty-downstream-graying): per-node dirty slice. When the
+    # whole-skill compare is dirty and resume_from_node_id is set, the Studio
+    # shell projects which downstream phases the resume node can dirty so the
+    # frontend grays exactly those. Dependency-graph based (the engine has no
+    # per-node hash) -- empty on the clean / no-resume-node paths.
+    dirty_node_ids: list[str] = Field(default_factory=list)
+    affected_downstream: list[str] = Field(default_factory=list)
     snapshot_content_hash: str | None = None
     current_content_hash: str | None = None
     snapshot_execution_fingerprint: str | None = None

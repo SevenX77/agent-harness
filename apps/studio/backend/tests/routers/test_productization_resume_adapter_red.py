@@ -169,6 +169,10 @@ def test_resume_validity_reports_dirty_upstream_without_source_paths(
         "resume_from_node_id": "review",
         "resume_to_node_id": "final",
         "dirty_fields": ["execution_fingerprint"],
+        # n5-node#3: per-node slice fields default to [] when the fake adapter
+        # does not supply them (this stub returns the legacy whole-skill shape).
+        "dirty_node_ids": [],
+        "affected_downstream": [],
         "snapshot_content_hash": f"sha256:{'1' * 64}",
         "current_content_hash": f"sha256:{'2' * 64}",
         "snapshot_execution_fingerprint": f"sha256:{'3' * 64}",

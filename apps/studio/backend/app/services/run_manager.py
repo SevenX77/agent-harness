@@ -7,6 +7,7 @@ import contextlib
 import json
 import logging
 import multiprocessing
+import os
 import re
 import shutil
 import threading
@@ -41,6 +42,9 @@ from app.models.runs import (
     BatchRunItem,
     BatchRunResponse,
     BatchRunStatus,
+    CompareCandidateRun,
+    CompareRunGroupResponse,
+    CompareRunResponse,
     ResumeReq,
     RunDetail,
     RunListResponse,
@@ -98,13 +102,22 @@ def _run_worker_main(
     inputs: dict[str, Any],
     process_queue: Any,
     art_ref: dict[str, Any],
+    roles_path_override: str | None = None,
 ) -> None:
-    """Subprocess entrypoint that executes EngineAdapter.run_artifact."""
+    """Subprocess entrypoint that executes EngineAdapter.run_artifact.
+
+    ``roles_path_override`` (n4-trace#23): a model-compare candidate worker is
+    handed its own materialized ``llm_roles.yaml`` here; setting the env var in
+    THIS child process makes the in-process engine resolver load the candidate's
+    roles without touching the parent's active roles or the engine.
+    """
     run_dir = Path(run_dir_raw)
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "artifacts").mkdir(exist_ok=True)
     started = time.monotonic()
     emit_to_queue = _queue_event_subscriber(process_queue)
+    if roles_path_override:
+        os.environ["STUDIO_LLM_ROLES_PATH"] = roles_path_override
     try:
         adapter = build_engine_adapter()
         run_payload = {
@@ -519,6 +532,166 @@ class RunManager:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return metadata
+
+    async def start_compare_run(
+        self,
+        skill_id: str,
+        request: RunRequest,
+    ) -> CompareRunResponse:
+        """Fan a run out across model-compare candidates (n4-trace#23).
+
+        Compiles once, gates once (require_passing_predict), then spawns one
+        worker per candidate against the SAME artifact + inputs, each pointed at
+        a materialized per-candidate ``llm_roles.yaml`` via STUDIO_LLM_ROLES_PATH.
+        Every spawned run is tagged with a shared compare_group_id + candidate_id
+        so the frontend Trace can tab between per-model results. No engine edit.
+        """
+        from app.services.run_compare import (
+            new_compare_group_id,
+            write_candidate_roles_file,
+        )
+
+        candidates = request.candidates or []
+        if not candidates:
+            response = error_response(
+                error_code="COMPARE_REQUIRES_CANDIDATES",
+                http_status=422,
+                message="model-compare run requires at least one candidate",
+                details={"skill_id": skill_id},
+                retry_strategy="not_retryable",
+            )
+            raise_error_response(response)
+
+        skill_dir = resolve_skill_dir(skill_id)
+        adapter = build_engine_adapter()
+        art_ref = adapter.compile(
+            {
+                "skill_dir": str(skill_dir),
+                "skill_id": skill_id,
+                "artifact_scope": "ephemeral",
+            }
+        )
+        require_passing_predict(skill_id, content_hash=art_ref["content_hash"])
+
+        inputs = _runtime_inputs_from_request(request)
+        compare_group_id = new_compare_group_id()
+        group_dir = run_dir_for(skill_id, compare_group_id).parent / f"_compare_{compare_group_id}"
+        group_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(
+            "start_compare_run skill=%s group=%s candidates=%d",
+            skill_id,
+            compare_group_id,
+            len(candidates),
+        )
+
+        spawned: list[CompareCandidateRun] = []
+        for candidate in candidates:
+            roles_file = write_candidate_roles_file(
+                candidate=candidate,
+                group_dir=group_dir,
+            )
+            metadata = await self._spawn_candidate_run(
+                skill_id=skill_id,
+                inputs=inputs,
+                art_ref=art_ref,
+                compare_group_id=compare_group_id,
+                candidate_id=candidate.candidate_id,
+                candidate_role_name=candidate.role_name,
+                roles_path_override=str(roles_file),
+            )
+            spawned.append(
+                CompareCandidateRun(
+                    candidate_id=candidate.candidate_id,
+                    role_name=candidate.role_name,
+                    metadata=metadata,
+                )
+            )
+        return CompareRunResponse(compare_group_id=compare_group_id, runs=spawned)
+
+    async def _spawn_candidate_run(
+        self,
+        *,
+        skill_id: str,
+        inputs: dict[str, Any],
+        art_ref: dict[str, Any],
+        compare_group_id: str,
+        candidate_id: str,
+        candidate_role_name: str,
+        roles_path_override: str,
+    ) -> RunMetadata:
+        """Spawn one compare-candidate worker tagged with its compare group."""
+        run_id = _new_run_id()
+        run_dir = run_dir_for(skill_id, run_id)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "artifacts").mkdir(exist_ok=True)
+        _write_json(run_dir / "input_data.json", inputs)
+        _persist_run_input_artifact(run_dir, inputs, artifact_ref=art_ref)
+        metadata = RunMetadata(
+            run_id=run_id,
+            status="running",
+            started_at=datetime.now(UTC),
+            input_summary=_input_summary(inputs),
+            compare_group_id=compare_group_id,
+            candidate_id=candidate_id,
+            candidate_role_name=candidate_role_name,
+            **_metadata_artifact_fields(art_ref),
+        )
+        _write_run_metadata(run_dir, metadata)
+        await self._save_run_metadata(skill_id, metadata)
+
+        process_queue = self.queue_factory()
+        process = self.process_factory(
+            target=self.worker,
+            args=(skill_id, str(run_dir), inputs, process_queue, art_ref, roles_path_override),
+        )
+        try:
+            process.start()
+        except Exception as exc:
+            response = error_response(
+                error_code="RUN_SPAWN_FAILED",
+                http_status=500,
+                message=f"Failed to spawn compare run for skill {skill_id}: {exc}",
+                details={"skill_id": skill_id, "candidate_id": candidate_id},
+                retry_strategy="idempotent",
+            )
+            raise_error_response(response)
+
+        record = RunRecord(
+            metadata=metadata,
+            skill_id=skill_id,
+            run_dir=run_dir,
+            process=process,
+            process_queue=process_queue,
+        )
+        self._runs[run_id] = record
+        task = asyncio.create_task(self._drain_process_queue(record))
+        record.drain_task = task
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return metadata
+
+    def list_compare_group(self, skill_id: str, compare_group_id: str) -> CompareRunGroupResponse:
+        """Return the per-candidate runs of one compare group, for Trace tabs.
+
+        Reads the persisted run metadata (same store ``list_runs`` reads) and
+        filters to the requested compare group, surfacing each candidate's
+        current status (including a failed candidate) so the frontend can render
+        one tab per candidate with its result/failure state.
+        """
+        listing = self.list_runs(skill_id)
+        runs: list[CompareCandidateRun] = []
+        for metadata in listing.runs:
+            if metadata.compare_group_id != compare_group_id:
+                continue
+            runs.append(
+                CompareCandidateRun(
+                    candidate_id=metadata.candidate_id or "",
+                    role_name=metadata.candidate_role_name or "",
+                    metadata=metadata,
+                )
+            )
+        runs.sort(key=lambda item: item.candidate_id)
+        return CompareRunGroupResponse(compare_group_id=compare_group_id, runs=runs)
 
     async def start_run_from_artifact(
         self,

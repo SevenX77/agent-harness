@@ -512,7 +512,7 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 | # | 动作 | 能力 | 现状 |
 |---|---|---|---|
 | 1 | 点 Toolbar Settings 图标 → 打开面板(center overlay 盖画布,**不卸载工作区**) | open-settings-overlay | ✅ 非真 modal,左右栏仍挂载可交互,无 backdrop/focus-trap |
-| 2 | 数据未到显示骨架屏(available models 巨长列表是 NFR 首要) | settings-skeleton | ✅ ⚠️ 无壳层级骨架,完全下放各 tab 自管 |
+| 2 | 数据未到显示骨架屏(available models 巨长列表是 NFR 首要) | settings-skeleton | ✅ 壳层按 tab 就绪门控骨架:General=GeneralTabSkeleton、Roles/Copilot=RolesTabSkeleton(shell 级),API Keys=ProviderListSkeleton(tab 内),均 shadcn Skeleton;General 不再 disable 整表单 |
 | 3 | 四 tab(General/API Keys/Roles/Copilot)间切换(切到才懒加载) | settings-tab-switch | ✅ |
 | 4 | 改动后看右上保存徽章(Pending/Saving/Saved/Failed) | settings-save-badge | ✅ ⚠️ 三 tab 各画各的,顶栏无全局保存态 |
 | 5 | 外部改 credentials → WS `registry_changed` 自动刷新 | ws-registry-refresh | ✅ ⚠️ 空 catch 静默,无重连(违 logging 铁律) |

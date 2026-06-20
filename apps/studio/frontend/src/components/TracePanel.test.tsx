@@ -119,6 +119,122 @@ describe('TracePanel focus granularity label (F3)', () => {
   })
 })
 
+// Two phases (nodeA, nodeB) so focus narrowing is observable via the
+// "Showing N of M" count and the Focus chip (atom #17).
+const twoPhaseEvents: EventEnvelope[] = [
+  {
+    schema_version: 'studio.event.v1',
+    stream_id: 'run:run-2',
+    seq: 1,
+    cursor: 'run:run-2:1',
+    run_id: 'run-2',
+    event_type: 'phase_start',
+    timestamp: '2026-06-14T00:00:00Z',
+    payload: {
+      schema_version: '1.0',
+      event_type: 'phase_start',
+      phase_name: 'nodeA',
+      timestamp: '2026-06-14T00:00:00Z',
+    },
+  },
+  {
+    schema_version: 'studio.event.v1',
+    stream_id: 'run:run-2',
+    seq: 2,
+    cursor: 'run:run-2:2',
+    run_id: 'run-2',
+    event_type: 'phase_end',
+    timestamp: '2026-06-14T00:00:01Z',
+    payload: {
+      schema_version: '1.0',
+      event_type: 'phase_end',
+      phase_name: 'nodeA',
+      timestamp: '2026-06-14T00:00:01Z',
+    },
+  },
+  {
+    schema_version: 'studio.event.v1',
+    stream_id: 'run:run-2',
+    seq: 3,
+    cursor: 'run:run-2:3',
+    run_id: 'run-2',
+    event_type: 'phase_start',
+    timestamp: '2026-06-14T00:00:02Z',
+    payload: {
+      schema_version: '1.0',
+      event_type: 'phase_start',
+      phase_name: 'nodeB',
+      timestamp: '2026-06-14T00:00:02Z',
+    },
+  },
+]
+
+describe('TracePanel focus granularity (atom #17)', () => {
+  it('shows the whole-run overview (all events) when no node is focused', () => {
+    const html = renderToStaticMarkup(
+      <TracePanel traceLogs={twoPhaseEvents} selectedNode={null} onSelectPrompt={() => undefined} />,
+    )
+    expect(html).toContain('Showing 3 of 3 events')
+    expect(html).toContain('Focus: whole run')
+  })
+
+  it('narrows the trace to the focused node phase when a node is selected', () => {
+    const html = renderToStaticMarkup(
+      <TracePanel
+        traceLogs={twoPhaseEvents}
+        selectedNode={{ id: 'nodeA', data: { label: 'Node A' } }}
+        onSelectPrompt={() => undefined}
+      />,
+    )
+    // nodeA carries two events (phase_start + phase_end); nodeB's is excluded.
+    expect(html).toContain('Showing 2 of 3 events')
+    expect(html).toContain('Focus: Node A')
+  })
+
+  it('lets the focused node override the running activePhase for granularity', () => {
+    const html = renderToStaticMarkup(
+      <TracePanel
+        traceLogs={twoPhaseEvents}
+        activePhase="nodeB"
+        selectedNode={{ id: 'nodeA', data: { label: 'Node A' } }}
+        onSelectPrompt={() => undefined}
+      />,
+    )
+    // selectedNode (nodeA) wins over the running phase (nodeB): narrows to nodeA.
+    expect(html).toContain('Showing 2 of 3 events')
+    expect(html).toContain('Focus: Node A')
+  })
+
+  it('does not narrow when link views is disabled even with a focused node', () => {
+    const html = renderToStaticMarkup(
+      <TracePanel
+        traceLogs={twoPhaseEvents}
+        selectedNode={{ id: 'nodeA', data: { label: 'Node A' } }}
+        linkEnabled={false}
+        onSelectPrompt={() => undefined}
+      />,
+    )
+    expect(html).toContain('Showing 3 of 3 events')
+    expect(html).toContain('Focus: whole run')
+  })
+})
+
+describe('TracePanel naming (atom #28)', () => {
+  it('names the panel "Event Trace" rather than the ambiguous "Trace Timeline"', () => {
+    const html = render({})
+    expect(html).toContain('Event Trace')
+    expect(html).not.toContain('Trace Timeline')
+  })
+
+  it('uses "Event Trace" as the empty-state aria-label', () => {
+    const html = renderToStaticMarkup(
+      <TracePanel traceLogs={[]} onSelectPrompt={() => undefined} />,
+    )
+    expect(html).toContain('aria-label="Event Trace"')
+    expect(html).not.toContain('Trace Timeline')
+  })
+})
+
 describe('TracePanel Resume action', () => {
   it('shows a Resume button enabled when the run can be resumed', () => {
     const html = render({ canResume: true })

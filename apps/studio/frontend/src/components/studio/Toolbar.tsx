@@ -16,7 +16,7 @@ const tools: Array<{ id: PanelKind; icon: typeof Files; label: string; shortcut:
   { id: "assets", icon: Files, label: "Assets", shortcut: "1" },
   { id: "properties", icon: Settings2, label: "Properties", shortcut: "2" },
   { id: "input", icon: FileInput, label: "I/O", shortcut: "3" },
-  { id: "timeline", icon: Clock, label: "Trace Timeline", shortcut: "4" },
+  { id: "timeline", icon: Clock, label: "Event Trace", shortcut: "4" },
   { id: "local-history", icon: History, label: "Local History", shortcut: "5" },
 ]
 

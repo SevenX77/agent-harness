@@ -1,38 +1,17 @@
 import type { CallbackEvent, EventEnvelope } from '../api/types'
 import { useTraceFilter } from '../hooks/useTraceFilter'
 import { BadgeCheck, GitCompareArrows, Play } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
-import type { FormEvent } from 'react'
+import { useMemo } from 'react'
+import { HitlPromptForm } from './studio/HitlPromptForm'
+import { latestHitlPrompt, type TraceHitlResumeRequest } from './studio/hitl-prompt'
 import { TraceFilter } from './trace/TraceFilter'
 import { TraceSearchBar } from './trace/TraceSearchBar'
 import { VirtualTraceList } from './trace/VirtualTraceList'
-import { Button } from './ui/button'
-import { RadioGroup, RadioGroupItem } from './ui/radio-group'
-import { Textarea } from './ui/textarea'
 
-export interface TraceHitlResumeRequest {
-  content: string
-  phaseName: string | null
-  toolCallId: string | null
-  checkpointId: string | null
-  checkpointNs: string | null
-}
-
-interface PendingHitlPrompt {
-  phaseName: string | null
-  question: string
-  options: string[]
-  toolCallId: string | null
-  pendingToolCalls: PendingHitlToolCall[]
-  checkpointId: string | null
-  checkpointNs: string | null
-}
-
-interface PendingHitlToolCall {
-  toolCallId: string
-  question: string
-  options: string[]
-}
+// Re-exported so existing importers (`@/components/TracePanel`) keep working;
+// the canonical definition now lives in studio/hitl-prompt to give the
+// node-anchored box and this panel one shared source of truth.
+export type { TraceHitlResumeRequest }
 
 interface TracePanelProps {
   traceLogs: EventEnvelope[]
@@ -57,74 +36,6 @@ function envelopePayload(event: EventEnvelope): CallbackEvent {
   return event.payload as CallbackEvent
 }
 
-function stringField(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() !== '' ? value : null
-}
-
-function stringArrayField(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim() !== '') : []
-}
-
-function pendingToolCallsField(value: unknown): PendingHitlToolCall[] {
-  if (!Array.isArray(value)) return []
-  return value.flatMap((item): PendingHitlToolCall[] => {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) return []
-    const record = item as Record<string, unknown>
-    const toolCallId = stringField(record.id) ?? stringField(record.tool_call_id)
-    if (!toolCallId) return []
-    return [{
-      toolCallId,
-      question: stringField(record.question)
-        ?? stringField(record.prompt)
-        ?? stringField(record.message)
-        ?? toolCallId,
-      options: stringArrayField(record.options),
-    }]
-  })
-}
-
-function isHitlEvent(eventType: string, status: string | undefined): boolean {
-  if (eventType === 'interrupted' || eventType === 'hitl' || eventType === 'human_input_required') return true
-  if (eventType === 'pause' || eventType === 'paused') return true
-  if (eventType.includes('hitl') || eventType.includes('interrupt')) return true
-  return status === 'paused' || status === 'waiting_for_human'
-}
-
-function latestHitlPrompt(events: EventEnvelope[]): PendingHitlPrompt | null {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index]
-    const payload = envelopePayload(event)
-    const eventType = event.event_type || payload.event_type || ''
-    if (!isHitlEvent(eventType, payload.status)) continue
-    const toolCallId = stringField(payload.tool_call_id) ?? stringField(payload.pending_tool_call_id)
-    const pendingToolCalls = pendingToolCallsField(payload.pending_tool_calls)
-    return {
-      phaseName: payload.phase_name ?? payload.current_phase ?? null,
-      question: stringField(payload.question)
-        ?? stringField(payload.prompt)
-        ?? stringField(payload.message)
-        ?? 'Run paused for human input.',
-      options: stringArrayField(payload.options),
-      toolCallId,
-      pendingToolCalls: pendingToolCalls.length > 0
-        ? pendingToolCalls
-        : toolCallId
-          ? [{
-              toolCallId,
-              question: stringField(payload.question)
-                ?? stringField(payload.prompt)
-                ?? stringField(payload.message)
-                ?? toolCallId,
-              options: stringArrayField(payload.options),
-            }]
-          : [],
-      checkpointId: stringField(payload.checkpoint_id),
-      checkpointNs: stringField(payload.checkpoint_ns),
-    }
-  }
-  return null
-}
-
 export function TracePanel({
   traceLogs,
   activePhase = null,
@@ -146,36 +57,6 @@ export function TracePanel({
   const traceEvents = traceLogs.map(envelopePayload)
   const filter = useTraceFilter(traceEvents, linkEnabled ? activePhase : null)
   const hitlPrompt = useMemo(() => latestHitlPrompt(traceLogs), [traceLogs])
-  const [hitlDraft, setHitlDraft] = useState('')
-  const [selectedToolCallId, setSelectedToolCallId] = useState<string | null>(null)
-  const hitlPromptKey = hitlPrompt
-    ? `${hitlPrompt.phaseName ?? ''}:${hitlPrompt.checkpointId ?? ''}:${hitlPrompt.pendingToolCalls.map((toolCall) => toolCall.toolCallId).join('|')}`
-    : ''
-
-  useEffect(() => {
-    setSelectedToolCallId(null)
-    setHitlDraft('')
-  }, [hitlPromptKey])
-
-  const selectedPendingToolCall = hitlPrompt?.pendingToolCalls.find((toolCall) => toolCall.toolCallId === selectedToolCallId) ?? null
-  const effectiveToolCallId = hitlPrompt?.pendingToolCalls.length === 1
-    ? hitlPrompt.pendingToolCalls[0].toolCallId
-    : selectedToolCallId
-  const activeHitlOptions = selectedPendingToolCall?.options ?? hitlPrompt?.options ?? []
-  const needsToolCallSelection = Boolean(hitlPrompt && hitlPrompt.pendingToolCalls.length > 1 && !selectedToolCallId)
-
-  const submitHitlResponse = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const content = hitlDraft.trim()
-    if (!hitlPrompt || !content || needsToolCallSelection) return
-    onSubmitHitlResponse?.({
-      content,
-      phaseName: hitlPrompt.phaseName,
-      toolCallId: effectiveToolCallId ?? hitlPrompt.toolCallId,
-      checkpointId: hitlPrompt.checkpointId,
-      checkpointNs: hitlPrompt.checkpointNs,
-    })
-  }
 
   if (traceEvents.length === 0) {
     return (
@@ -265,72 +146,11 @@ export function TracePanel({
           </span>
         </div>
         {hitlPrompt ? (
-          <form
-            className="space-y-3 rounded-md border border-border bg-muted/30 p-3"
-            onSubmit={submitHitlResponse}
-          >
-            <div className="space-y-1">
-              <div className="text-xs font-semibold uppercase text-muted-foreground">Human input required</div>
-              <div className="text-sm font-medium text-foreground">{hitlPrompt.question}</div>
-              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                {hitlPrompt.phaseName ? <span>{hitlPrompt.phaseName}</span> : null}
-                {(effectiveToolCallId ?? hitlPrompt.toolCallId) ? <span>{effectiveToolCallId ?? hitlPrompt.toolCallId}</span> : null}
-                {hitlPrompt.checkpointId ? <span>{hitlPrompt.checkpointId}</span> : null}
-              </div>
-            </div>
-            {hitlPrompt.pendingToolCalls.length > 1 ? (
-              <div className="space-y-2">
-                <div className="text-xs font-semibold uppercase text-muted-foreground">Pending tool calls</div>
-                <RadioGroup value={selectedToolCallId ?? ''} onValueChange={setSelectedToolCallId}>
-                  {hitlPrompt.pendingToolCalls.map((toolCall) => (
-                    <label
-                      key={toolCall.toolCallId}
-                      className="flex cursor-pointer items-start gap-2 rounded-md border border-border bg-card px-2 py-2 text-xs text-foreground"
-                    >
-                      <RadioGroupItem value={toolCall.toolCallId} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block font-medium">{toolCall.question}</span>
-                        <span className="block text-muted-foreground">{toolCall.toolCallId}</span>
-                      </span>
-                    </label>
-                  ))}
-                </RadioGroup>
-                {needsToolCallSelection ? (
-                  <div className="text-xs text-destructive">Select a pending tool call before submitting.</div>
-                ) : null}
-              </div>
-            ) : null}
-            {activeHitlOptions.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {activeHitlOptions.map((option) => (
-                  <Button
-                    key={option}
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    onClick={() => setHitlDraft(option)}
-                  >
-                    {option}
-                  </Button>
-                ))}
-              </div>
-            ) : null}
-            <Textarea
-              aria-label={`Human response for ${hitlPrompt.phaseName ?? 'paused run'}`}
-              value={hitlDraft}
-              onChange={(event) => setHitlDraft(event.target.value)}
-              placeholder="Type the answer to resume this run"
-            />
-            <div className="flex justify-end">
-              <Button
-                type="submit"
-                size="sm"
-                disabled={!hitlDraft.trim() || needsToolCallSelection || hitlSubmitting || !onSubmitHitlResponse}
-              >
-                {hitlSubmitting ? 'Submitting' : 'Submit answer'}
-              </Button>
-            </div>
-          </form>
+          <HitlPromptForm
+            prompt={hitlPrompt}
+            submitting={hitlSubmitting}
+            onSubmitHitlResponse={onSubmitHitlResponse}
+          />
         ) : null}
       </div>
       <div className="min-h-0 flex-1 p-4">

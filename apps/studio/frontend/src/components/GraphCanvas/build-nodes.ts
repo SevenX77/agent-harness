@@ -175,6 +175,24 @@ function stringListFromUnknown(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
 }
 
+// Tools for an AGENT node come from the SKILL.md frontmatter `tools:` list (the
+// file on disk is the source of truth in the editor). `isSkillFile` is true for
+// the whole agent family (mode agent/skill/llm -> SKILL.md, see phaseKindFile);
+// the engine projects an agent phase's mode as 'agent' (never 'skill'), so the
+// old `mode === 'skill'` guard was dead and agent tools never rendered. Fall
+// back to the manifest `agent_tools` (legacy standalone-agent skills, mode 'llm')
+// only when the frontmatter declares none.
+function toolsForPhase(
+  isSkillFile: boolean,
+  frontmatter: Record<string, unknown> | null,
+  phase: PhaseDef,
+): string[] {
+  if (!isSkillFile) return []
+  const frontmatterTools = stringListFromUnknown(frontmatter?.tools)
+  if (frontmatterTools.length > 0) return frontmatterTools
+  return phase.mode === 'llm' ? phase.agent_tools : []
+}
+
 export function buildNodes(
   skillId: string,
   detail: SkillDetail | undefined,
@@ -205,7 +223,7 @@ export function buildNodes(
         label: phase.name,
         mode,
         role: phase.mode === 'llm' ? phase.llm_role : null,
-        tools: mode === 'skill' ? stringListFromUnknown(frontmatter?.tools) : phase.mode === 'llm' ? phase.agent_tools : [],
+        tools: toolsForPhase(phaseKindFile({ mode, subgraphPath }) === 'SKILL.md', frontmatter, phase),
         subagents: subagentsForPhase(detail, phase.name),
         filePath,
         status: statusByNodeId[phase.name] ?? 'idle',

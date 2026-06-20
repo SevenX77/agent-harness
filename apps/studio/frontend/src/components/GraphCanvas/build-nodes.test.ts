@@ -39,6 +39,29 @@ describe('buildNodes', () => {
     expect(review.filePath).toBe('phases/review/LOGIC.md')
   })
 
+  it('populates an agent node tools from its SKILL.md frontmatter (mode is "agent", never "skill")', () => {
+    const nodes = buildNodes('demo', skillDetail({
+      phases: ['draft', 'review'],
+      graph_topology: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'agent' },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'], mode: 'logic' },
+      ],
+      files: {
+        'phases/draft/SKILL.md': ['---', 'name: draft', 'llm_role: writer', 'tools: [read_file, run_tests]', '---', 'Body'].join('\n'),
+      },
+    }), new Set(), () => {}, {})
+
+    // The engine projects an agent phase's mode as 'agent', so tools must be read
+    // from the SKILL.md frontmatter — the old `mode === 'skill'` guard left this
+    // empty for every agent node.
+    const draft = phaseNode(nodes, 'draft')
+    expect(draft.mode).toBe('agent')
+    expect(draft.tools).toEqual(['read_file', 'run_tests'])
+
+    // A non-agent (logic) node exposes no tools.
+    expect(phaseNode(nodes, 'review').tools).toEqual([])
+  })
+
   it('defaults every node to idle (no fabricated success) before any run', () => {
     const nodes = buildNodes('demo', skillDetail({
       phases: ['first', 'second'],

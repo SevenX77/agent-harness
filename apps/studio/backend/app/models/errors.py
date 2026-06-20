@@ -27,3 +27,8 @@ class LintError(BaseModel):
     severity: Literal["error", "warning"]
     message: str
     phase_name: str | None = None
+    # Engine's typed nearest-field locator (compile-rules ErrorPayload). Forwarded
+    # verbatim so the Properties panel can mark the offending field; ``None`` when
+    # the engine attributes no field (degrade to node/file-level projection).
+    field_path: str | None = None
+    source_path: str | None = None

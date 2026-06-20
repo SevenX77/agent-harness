@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from app.core.adapters.engine import GraphCompileError, make_error_payload
 from app.services import skills as skill_service
 
 
@@ -107,3 +108,58 @@ def test_body_lint_diverges_from_stale_disk_state(
     assert body_result.status == "failed"
     # Disk untouched after the body lint.
     assert _disk_graph_text(skills_dir, skill_id) == original_on_disk
+
+
+class TestLintErrorFieldAxis:
+    """The realtime lint LintError must carry the engine's field axis.
+
+    The engine's ErrorPayload already pins ``field_path``/``source_path`` (the
+    typed nearest-field locator). The manual Compile path projects it into
+    CompileError.field; the realtime ``/lint`` path must mirror it so the
+    Properties panel can mark the offending field instead of only the node.
+    Source of truth stays the engine — Studio forwards, never re-derives.
+    """
+
+    def test_lint_error_carries_engine_field_path_and_source_path(self) -> None:
+        # A real engine compile error that pins a field on a phase doc.
+        detail = "file input field 'topic' has source='file' but no path"
+        exc = GraphCompileError(
+            detail,
+            payload=make_error_payload(
+                "[F-v3-runtime-state-mapping-failed]",
+                detail,
+                phase_id="setup",
+                field_path="topic",
+                source_path="phases/setup/LOGIC.md",
+            ),
+        )
+
+        lint_error = skill_service._lint_error_from_exception(exc)
+
+        # The typed nearest-field axis survives into the realtime DTO.
+        assert lint_error.field_path == "topic"
+        assert lint_error.source_path == "phases/setup/LOGIC.md"
+        # Pre-existing axes still resolve from the same payload.
+        assert lint_error.error_code == "F-v3-runtime-state-mapping-failed"
+        assert lint_error.phase_name == "setup"
+        assert lint_error.severity == "error"
+
+    def test_lint_error_degrades_to_none_when_engine_has_no_field(self) -> None:
+        # An engine error WITHOUT a field axis (GRAPH.md-level) must not invent one.
+        detail = "GRAPH.md is missing required key 'phases'"
+        exc = GraphCompileError(
+            detail,
+            payload=make_error_payload(
+                "[F-v3-runtime-state-mapping-failed]",
+                detail,
+                source_path="GRAPH.md",
+            ),
+        )
+
+        lint_error = skill_service._lint_error_from_exception(exc)
+
+        # No field → field_path stays None so projection degrades to node level.
+        assert lint_error.field_path is None
+        # source_path still forwarded; file axis (node projection) unaffected.
+        assert lint_error.source_path == "GRAPH.md"
+        assert lint_error.file == "GRAPH.md"

@@ -8,7 +8,8 @@ import { Button } from '@/components/ui/button'
 import { isTauriRuntime } from '@/config/runtime'
 import { useDebouncedLint } from '@/hooks/useDebouncedLint'
 import { sha256Hex } from '@/lib/hash'
-import { LintDiagnosticsPanel, type EditorOnMount, type MonacoEditor as MonacoEditorInstance } from '@/components/MonacoPanel'
+import { LintDiagnosticsPanel, type EditorOnMount, type MonacoApi, type MonacoEditor as MonacoEditorInstance } from '@/components/MonacoPanel'
+import { applyLintMarkers } from '@/components/studio/lint-monaco-markers'
 
 const MonacoEditor = lazy(async () => {
   const module = await import('@monaco-editor/react')
@@ -248,10 +249,21 @@ export function LazyMonacoPanel({
   // /lint call; its diagnostics are the single source of truth the panel below projects.
   const { result: lintResult } = useDebouncedLint(skillId, draft)
   const editorRef = useRef<MonacoEditorInstance | null>(null)
+  const monacoRef = useRef<MonacoApi | null>(null)
 
-  const handleEditorMount = useCallback<EditorOnMount>((editor) => {
+  const handleEditorMount = useCallback<EditorOnMount>((editor, monaco) => {
     editorRef.current = editor
-  }, [])
+    monacoRef.current = monaco
+    // Paint any diagnostics the lint hook already resolved before mount (atom #6).
+    applyLintMarkers(monaco, editor.getModel(), lintResult)
+  }, [lintResult])
+
+  // IDE-style inline markers (authoring N3 atom #6): project the engine's line-bearing
+  // diagnostics onto the Monaco model. Pure mapping in `lint-monaco-markers`; no second
+  // source of truth. Line-less diagnostics degrade to the strip above, never guess a line.
+  useEffect(() => {
+    applyLintMarkers(monacoRef.current, editorRef.current?.getModel() ?? null, lintResult)
+  }, [lintResult])
 
   const handleJumpToLine = useCallback((line: number | null) => {
     const editor = editorRef.current

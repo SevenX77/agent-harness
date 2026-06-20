@@ -1486,6 +1486,13 @@ def _lint_error_from_exception(exc: Exception) -> LintError:
     match = _LOCATION_RE.search(message)
     line = int(match.group("line")) if match else None
     payload = getattr(exc, "payload", None)
+    # Forward the engine's typed nearest-field locator verbatim (same getattr
+    # pattern the manual Compile path uses for CompileError.field). The engine's
+    # GraphAgentError surfaces payload.field_path/source_path onto the exception;
+    # ``None`` here means the engine attributed no field → field-level Properties
+    # projection degrades to the node/file axis (file/phase_name) downstream.
+    field_path = _lint_str_attr(exc, "field_path")
+    source_path = _lint_str_attr(exc, "source_path")
     return LintError(
         file=_lint_file_from_payload(payload) or _file_from_error_message(message),
         line=line,
@@ -1497,7 +1504,17 @@ def _lint_error_from_exception(exc: Exception) -> LintError:
             _lint_phase_from_payload(payload)
             or _phase_from_location(match.group("loc") if match else None)
         ),
+        field_path=field_path,
+        source_path=source_path,
     )
+
+
+def _lint_str_attr(exc: Exception, name: str) -> str | None:
+    """Read a non-empty str attribute off the engine exception, else ``None``."""
+    value = getattr(exc, name, None)
+    if not isinstance(value, str) or not value:
+        return None
+    return value
 
 
 def _lint_code_from_payload(payload: object) -> str | None:

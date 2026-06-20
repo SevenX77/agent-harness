@@ -22,6 +22,10 @@ export interface LintError {
   severity: 'error' | 'warning'
   message: string
   phase_name: string | null
+  // Engine's typed nearest-field locator, forwarded by the Studio shell. Drives
+  // field-level Properties projection; null/absent → degrade to node/file axis.
+  field_path?: string | null
+  source_path?: string | null
 }
 
 export interface LintResult {

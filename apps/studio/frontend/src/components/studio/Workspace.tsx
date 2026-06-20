@@ -29,6 +29,7 @@ import { deriveNodeStatuses } from "./node-status"
 import { nodeResumeCheckpointFromEvents } from "./node-resume"
 import { hitlResumeOptionsFromRequest } from "./resume-options"
 import { compileErrorsByNode } from "./node-compile-errors"
+import { compileErrorsToFieldLintErrors } from "./field-compile-errors"
 import { CompileErrorDrawer } from "./CompileErrorDrawer"
 import { ConflictDialog } from "./ConflictDialog"
 import { Header } from "./Header"
@@ -906,6 +907,13 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     () => compileErrorsByNode(currentSkillId ? compileErrors[currentSkillId] : []),
     [compileErrors, currentSkillId],
   )
+  // Field-axis source for the Properties panel: the field-bearing compile errors mapped
+  // onto the engine LintError shape (N3 atom #5). The realtime lint result lives in the
+  // editor's useDebouncedLint and is not lifted here, so compile is today's field source.
+  const propertiesFieldErrors = useMemo(
+    () => compileErrorsToFieldLintErrors(currentSkillId ? compileErrors[currentSkillId] : []),
+    [compileErrors, currentSkillId],
+  )
 
   return (
     <WorkspaceProvider value={contextValue}>
@@ -955,6 +963,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   onSelectTestInput={setSelectedTestInputId}
                   onPhaseFileSave={handlePhaseFileSave}
                   runId={runId}
+                  lintErrors={propertiesFieldErrors}
                   resumeValidity={resumeValidity}
                   resumeValidityLoading={resumeValidityLoading}
                   resumeValidityError={resumeValidityError}

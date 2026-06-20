@@ -57,6 +57,33 @@ from graph_agent_gateway.registry.profile_selector import (
 from graph_agent_gateway.registry.profile_selector import (
     select_verified_profile as select_verified_profile,
 )
+from graph_agent_gateway.registry.provider_probe import (
+    EndpointProbeResult as EndpointProbeResult,
+)
+from graph_agent_gateway.registry.provider_probe import (
+    OfficialCallMethod as OfficialCallMethod,
+)
+from graph_agent_gateway.registry.provider_probe import (
+    ProviderProbeBackend as ProviderProbeBackend,
+)
+from graph_agent_gateway.registry.provider_probe import (
+    RouteProbeResult as RouteProbeResult,
+)
+from graph_agent_gateway.registry.provider_probe import (
+    endpoint_probe_backend as endpoint_probe_backend,
+)
+from graph_agent_gateway.registry.provider_probe import (
+    endpoint_probe_base_url as endpoint_probe_base_url,
+)
+from graph_agent_gateway.registry.provider_probe import (
+    probe_official_call_method as probe_official_call_method,
+)
+from graph_agent_gateway.registry.provider_probe import (
+    test_provider_endpoint as test_provider_endpoint,
+)
+from graph_agent_gateway.registry.provider_probe import (
+    test_provider_route as test_provider_route,
+)
 from graph_agent_gateway.registry.resolver import RegistryResolutionError as RegistryResolutionError
 from graph_agent_gateway.registry.schema import (
     CapabilitySource as CapabilitySource,

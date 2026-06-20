@@ -32,6 +32,8 @@ from app.services.llm_import_drafts import append_evidence_record, load_evidence
 from app.services.llm_roles import load_roles_file, save_roles_file
 from app.services.llm_roles import roles_path as active_roles_path
 from fastapi.testclient import TestClient
+from graph_agent_gateway.registry import provider_probe as gateway_provider_probe
+from graph_agent_gateway.registry.provider_probe import EndpointProbeResult, RouteProbeResult
 from graph_agent_gateway.registry.schema import EvidenceRecord, VerifiedProfile
 
 
@@ -1574,6 +1576,111 @@ def test_endpoint_test_uses_real_provider_probe(
     assert calls == [("openai", "secret", "https://api.openai.example/v1")]
 
 
+def test_endpoint_test_delegates_unified_provider_probe_to_gateway(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+    gateway_calls: list[str] = []
+
+    async def fake_gateway_test_provider_endpoint(
+        endpoint: ProviderEndpoint,
+    ) -> EndpointProbeResult:
+        gateway_calls.append(endpoint.endpoint_id)
+        return EndpointProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            provider_kind=endpoint.provider_kind,
+            backend="openai",
+            base_url="https://api.openai.example/v1",
+            status="ok",
+            latency_ms=42,
+            model_ids=("gpt-5",),
+        )
+
+    async def fail_studio_probe(*_args: object, **_kwargs: object) -> PingResult:
+        raise AssertionError("Studio llm.py must forward endpoint test to Gateway.")
+
+    monkeypatch.setattr(
+        llm_router,
+        "_gateway_test_provider_endpoint",
+        fake_gateway_test_provider_endpoint,
+        raising=False,
+    )
+    monkeypatch.setattr(llm_router, "_ping_provider", fail_studio_probe)
+
+    response = client.post("/api/llm/endpoints/openai-direct/test")
+
+    assert response.status_code == 200
+    assert gateway_calls == ["openai-direct"]
+    body = response.json()
+    assert body["tested_endpoint_id"] == "openai-direct"
+    assert body["discovered_model_count"] == 1
+
+
+def test_endpoint_test_job_accepts_non_official_provider_via_gateway(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "openrouter": ProviderEndpoint(
+                    endpoint_id="openrouter",
+                    display_name="OpenRouter",
+                    protocol="openai_compatible",
+                    base_url="https://openrouter.ai/api/v1",
+                    api_key="secret",
+                    provider_kind="third_party",
+                )
+            }
+        ),
+        credentials_path(),
+    )
+    gateway_calls: list[str] = []
+
+    async def fake_gateway_test_provider_endpoint(
+        endpoint: ProviderEndpoint,
+    ) -> EndpointProbeResult:
+        gateway_calls.append(endpoint.endpoint_id)
+        return EndpointProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            provider_kind=endpoint.provider_kind,
+            backend="openai",
+            base_url="https://openrouter.ai/api/v1",
+            status="ok",
+            latency_ms=42,
+            model_ids=("anthropic/claude-sonnet",),
+        )
+
+    monkeypatch.setattr(
+        llm_router,
+        "_gateway_test_provider_endpoint",
+        fake_gateway_test_provider_endpoint,
+        raising=False,
+    )
+
+    start = client.post("/api/llm/endpoints/openrouter/test-jobs")
+
+    assert start.status_code == 200
+    job_id = start.json()["job_id"]
+    status = start.json()
+    for _ in range(50):
+        if status["status"] == "completed":
+            break
+        time.sleep(0.01)
+        poll = client.get(f"/api/llm/endpoint-test-jobs/{job_id}")
+        assert poll.status_code == 200
+        status = poll.json()
+
+    assert status["status"] == "completed"
+    assert gateway_calls == ["openrouter"]
+    assert status["total_model_count"] == 1
+
+
 def test_endpoint_test_does_not_require_one_token_model_probe_after_models_list(
     client: TestClient,
     tmp_path: Path,
@@ -1719,7 +1826,7 @@ def test_endpoint_test_preserves_protocol_version_path_for_provider_probe(
     ) -> ModelProbeResult:
         return ModelProbeResult(model_id=model_id, status="ok", latency_ms=21)
 
-    monkeypatch.setattr(copilot_test, "_request_models", fake_request_models)
+    monkeypatch.setattr(gateway_provider_probe, "_request_models", fake_request_models)
     monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     response = client.post("/api/llm/endpoints/qiniu/test")
@@ -3263,7 +3370,7 @@ def test_official_endpoint_failed_job_does_not_mark_changed_endpoint_failed(
 
     monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
 
-    asyncio.run(llm_router._run_official_endpoint_test_job_impl("job-red", "openai-official"))
+    asyncio.run(llm_router._run_endpoint_test_job_impl("job-red", "openai-official"))
 
     raw = json.loads(credentials_path().read_text(encoding="utf-8"))
     endpoint = raw["provider_endpoints"]["openai-official"]
@@ -3657,6 +3764,49 @@ def test_route_probe_force_true_calls_real_provider_probe(
             "model_id": "gpt-5",
         }
     ]
+    assert response.json()["status"] == "verified"
+
+
+def test_route_probe_force_true_delegates_scoped_route_probe_to_gateway(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+    gateway_calls: list[tuple[str, str]] = []
+
+    async def fake_gateway_test_provider_route(
+        endpoint: ProviderEndpoint,
+        route: ProviderRoute,
+        **_kwargs: object,
+    ) -> RouteProbeResult:
+        gateway_calls.append((endpoint.endpoint_id, route.route_id))
+        return RouteProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            route_id=route.route_id,
+            provider_kind=endpoint.provider_kind,
+            backend="openai",
+            base_url="https://api.openai.example/v1",
+            model_id=route.provider_model_id,
+            status="ok",
+            latency_ms=12,
+        )
+
+    async def fail_studio_route_probe(*_args: object, **_kwargs: object) -> ModelProbeResult:
+        raise AssertionError("Studio llm.py must forward route probe to Gateway.")
+
+    monkeypatch.setattr(
+        llm_router,
+        "_gateway_test_provider_route",
+        fake_gateway_test_provider_route,
+        raising=False,
+    )
+    monkeypatch.setattr(llm_router, "_probe_model", fail_studio_route_probe)
+
+    response = client.post("/api/llm/routes/openai-direct:gpt-5/probe?force=true", json={})
+
+    assert response.status_code == 200
+    assert gateway_calls == [("openai-direct", "openai-direct:gpt-5")]
     assert response.json()["status"] == "verified"
 
 

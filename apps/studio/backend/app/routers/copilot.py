@@ -31,6 +31,18 @@ _POLICY_CLOSE_CODE = status.WS_1008_POLICY_VIOLATION
 
 
 @router.post(
+    "/api/copilot/roles/{role_name}/test-sdk",
+    responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}},
+)
+async def test_copilot_sdk_role(role_name: str) -> Any:
+    """HTTP shell for the Studio-only Copilot SDK test path."""
+
+    from app.routers.llm import _start_copilot_sdk_test_job
+
+    return await _start_copilot_sdk_test_job(role_name)
+
+
+@router.post(
     "/api/skills/{skill_id}/copilot/dispatch",
     responses={501: {"model": ErrorResponse}},
 )

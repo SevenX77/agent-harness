@@ -221,6 +221,7 @@ def test_resume_skill_public_api_signature_is_locked() -> None:
     assert signature.parameters["workspace_dir"].default is inspect.Signature.empty
     assert signature.parameters["run_id"].kind is inspect.Parameter.KEYWORD_ONLY
     assert signature.parameters["run_id"].default is inspect.Signature.empty
+    assert "from_phase" in signature.parameters
     assert "checkpoint_id" in signature.parameters
     assert "checkpoint_ns" in signature.parameters
     assert "resume_from_node_id" in signature.parameters
@@ -295,6 +296,56 @@ def test_resume_from_checkpoint_applies_business_context_overrides_without_rerun
         reset_checkpointer()
 
 
+def test_resume_events_include_resolved_checkpoint_id(
+    tmp_path: Path,
+    mock_skill_resolver: object,
+) -> None:
+    skill_root = tmp_path / "skill"
+    workspace_dir = tmp_path / "workspace"
+    run_id = "ws-e7-resume-events-checkpoint"
+    _resume_logic_skill(skill_root)
+    reset_checkpointer()
+    try:
+        resume_skill = _public_callable("resume_skill")
+        run_skill(
+            skill_root,
+            workspace_dir=workspace_dir,
+            thread_id=run_id,
+            cleanup_checkpoints_on_finish=False,
+            skill_resolver=mock_skill_resolver,
+            topic="alpha",
+        )
+        checkpoint_id = _checkpoint_id_with_draft_without_final(run_id)
+        events: list[Any] = []
+
+        resumed = resume_skill(
+            skill_root,
+            workspace_dir=workspace_dir,
+            run_id=run_id,
+            checkpoint_id=checkpoint_id,
+            context_overrides={"draft": "event-draft"},
+            event_subscriber=events.append,
+            skill_resolver=mock_skill_resolver,
+        )
+
+        assert resumed.success is True
+        resume_started = [
+            event
+            for event in events
+            if getattr(event, "event_type", None) == "run_started"
+            and getattr(event, "is_resume", False)
+        ]
+        resumed_events = [
+            event for event in events if getattr(event, "event_type", None) == "resumed"
+        ]
+        assert resume_started
+        assert resumed_events
+        assert resume_started[0].checkpoint_id == checkpoint_id
+        assert resumed_events[0].checkpoint_id == checkpoint_id
+    finally:
+        reset_checkpointer()
+
+
 def test_node_resume_from_abc_checkpoint_reruns_only_downstream_node(
     tmp_path: Path,
     mock_skill_resolver: object,
@@ -339,6 +390,51 @@ def test_node_resume_from_abc_checkpoint_reruns_only_downstream_node(
             if getattr(event, "event_type", None) == "phase_start"
         ]
         assert resumed_phase_starts == ["gamma"]
+    finally:
+        reset_checkpointer()
+
+
+def test_resume_from_phase_does_not_rerun_successful_upstream_phases(
+    tmp_path: Path,
+    mock_skill_resolver: object,
+) -> None:
+    skill_root = tmp_path / "skill"
+    workspace_dir = tmp_path / "workspace"
+    run_id = "ws-e7-resume-from-phase"
+    _resume_logic_skill(skill_root)
+    reset_checkpointer()
+    try:
+        resume_skill = _public_callable("resume_skill")
+        initial = run_skill(
+            skill_root,
+            workspace_dir=workspace_dir,
+            thread_id=run_id,
+            cleanup_checkpoints_on_finish=False,
+            skill_resolver=mock_skill_resolver,
+            topic="alpha",
+        )
+        assert initial.success is True
+        events: list[Any] = []
+
+        resumed = resume_skill(
+            skill_root,
+            workspace_dir=workspace_dir,
+            run_id=run_id,
+            from_phase="finish",
+            context_overrides={"draft": "draft:manual"},
+            event_subscriber=events.append,
+            skill_resolver=mock_skill_resolver,
+        )
+
+        assert resumed.success is True
+        assert resumed.context["final"] == "final:draft:manual"
+        resumed_phase_starts = [
+            event.phase_name
+            for event in events
+            if getattr(event, "event_type", None) == "phase_start"
+        ]
+        assert "finish" in resumed_phase_starts
+        assert "prepare" not in resumed_phase_starts
     finally:
         reset_checkpointer()
 

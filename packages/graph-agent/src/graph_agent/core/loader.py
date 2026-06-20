@@ -31,6 +31,7 @@ from graph_agent.core.manifest import (
 from graph_agent.core.mentions import first_broken_mention, scan_mentions
 from graph_agent.core.parser import (
     extract_raw_blocks,
+    locate_line_for_pydantic_loc,
     parse_markdown_parts,
     scan_forbidden_topology_tags,
 )
@@ -161,7 +162,7 @@ class SkillLoader:
                 payload=make_error_payload(
                     "[F-v3-compile-recursion-cycle]",
                     detail,
-                    source_path=root,
+                    source_path=_payload_source_path(root / "GRAPH.md"),
                 ),
             )
         if len(_loading_stack) >= 20:
@@ -171,7 +172,7 @@ class SkillLoader:
                 payload=make_error_payload(
                     "[F-v3-compile-depth-exceeded]",
                     detail,
-                    source_path=root,
+                    source_path=_payload_source_path(root / "GRAPH.md"),
                 ),
             )
         if _compilation_cache is None:
@@ -325,22 +326,51 @@ def _fatal(
     message: str,
     *,
     code: str = "[F-v3-graph-root-missing]",
+    field_path: str | None = None,
 ) -> NoReturn:
     code, clean = _split_code_message(code, message)
     detail = f"{path}:{line} {clean}"
-    raise SkillLoadError(detail, payload=make_error_payload(code, detail, source_path=path))
+    raise SkillLoadError(
+        detail,
+        payload=make_error_payload(
+            code,
+            detail,
+            field_path=field_path,
+            source_path=_payload_source_path(path),
+        ),
+    )
 
 
-def _io_fatal(path: Path, line: int, message: str) -> NoReturn:
+def _io_fatal(
+    path: Path, line: int, message: str, *, field_path: str | None = None
+) -> NoReturn:
     code, clean = _split_code_message("[F-v3-graph-io-schema-invalid]", message)
     detail = f"{path}:{line} {clean}"
-    raise SkillLoadError(detail, payload=make_error_payload(code, detail, source_path=path))
+    raise SkillLoadError(
+        detail,
+        payload=make_error_payload(
+            code,
+            detail,
+            field_path=field_path,
+            source_path=_payload_source_path(path),
+        ),
+    )
 
 
-def _graph_fatal(path: Path, line: int, message: str) -> NoReturn:
+def _graph_fatal(
+    path: Path, line: int, message: str, *, field_path: str | None = None
+) -> NoReturn:
     code, clean = _split_code_message("[F-v3-graph-schema-unknown-field]", message)
     detail = f"{path}:{line} {clean}"
-    raise SkillLoadError(detail, payload=make_error_payload(code, detail, source_path=path))
+    raise SkillLoadError(
+        detail,
+        payload=make_error_payload(
+            code,
+            detail,
+            field_path=field_path,
+            source_path=_payload_source_path(path),
+        ),
+    )
 
 
 def _actions_fatal(
@@ -349,17 +379,30 @@ def _actions_fatal(
     message: str,
     *,
     code: str = "[F-v3-logic-action-not-found]",
+    field_path: str | None = None,
 ) -> NoReturn:
     code, clean = _split_code_message(code, message)
     detail = f"{path}:{line} {clean}"
-    raise SkillLoadError(detail, payload=make_error_payload(code, detail, source_path=path))
+    raise SkillLoadError(
+        detail,
+        payload=make_error_payload(
+            code,
+            detail,
+            field_path=field_path,
+            source_path=_payload_source_path(path),
+        ),
+    )
 
 
 def _actions_keys_fatal(path: Path, line: int, message: str) -> None:
     detail = f"{path}:{line} {message}"
     raise GraphAgentFatalError(
         detail,
-        payload=make_error_payload("[F-v3-logic-output-field-undeclared]", detail, source_path=path),
+        payload=make_error_payload(
+            "[F-v3-logic-output-field-undeclared]",
+            detail,
+            source_path=_payload_source_path(path),
+        ),
     )
 
 
@@ -368,9 +411,46 @@ def _purity_fatal(path: Path, line: int, message: str) -> None:
     raise SkillLoadError(
         detail,
         payload=make_error_payload(
-            "[F-v3-logic-action-purity-violation]", detail, source_path=path
+            "[F-v3-logic-action-purity-violation]",
+            detail,
+            source_path=_payload_source_path(path),
         ),
     )
+
+
+def _payload_source_path(path: Path) -> str:
+    parts = path.parts
+    if path.name == "GRAPH.md":
+        return "GRAPH.md"
+    for anchor in ("phases", "io"):
+        if anchor in parts:
+            index = len(parts) - 1 - parts[::-1].index(anchor)
+            return Path(*parts[index:]).as_posix()
+    return path.as_posix()
+
+
+def _first_validation_loc(exc: ValidationError) -> tuple[Any, ...]:
+    errors = exc.errors()
+    if not errors:
+        return ()
+    loc = errors[0].get("loc", ())
+    return tuple(loc) if isinstance(loc, (list, tuple)) else ()
+
+
+def _field_path_from_loc(loc: tuple[Any, ...]) -> str | None:
+    if not loc:
+        return None
+    return ".".join(str(segment) for segment in loc)
+
+
+def _frontmatter_loc_line(path: Path, frontmatter: dict[str, Any], loc: tuple[Any, ...]) -> int:
+    line = locate_line_for_pydantic_loc(frontmatter, loc)
+    if line is not None:
+        return line
+    first = loc[0] if loc else None
+    if isinstance(first, str):
+        return _frontmatter_key_line(path, first)
+    return 1
 
 
 def _guard_v030_root(skill_root: Path) -> None:
@@ -614,7 +694,8 @@ def _validate_agent_reference_paths(skill_root: Path, phase_docs: list[PhaseDocu
                     payload=make_error_payload(
                         "[F-v3-resource-reference-path-invalid]",
                         detail,
-                        source_path=doc.path,
+                        field_path="references",
+                        source_path=_payload_source_path(doc.path),
                     ),
                 )
             candidate = (skill_root / path).resolve()
@@ -630,7 +711,8 @@ def _validate_agent_reference_paths(skill_root: Path, phase_docs: list[PhaseDocu
                     payload=make_error_payload(
                         "[F-v3-resource-reference-path-invalid]",
                         detail,
-                        source_path=doc.path,
+                        field_path="references",
+                        source_path=_payload_source_path(doc.path),
                     ),
                 ) from exc
 def _compile_subagent_metadata(
@@ -916,6 +998,7 @@ def _reject_phase_forbidden_metadata(path: Path, frontmatter: dict[str, Any]) ->
             path,
             _frontmatter_key_line(path, key),
             f"{code} phase frontmatter field {key!r} is not allowed",
+            field_path=key,
         )
 
 
@@ -929,35 +1012,42 @@ def _build_graph_manifest(
             path,
             1,
             '[F-v3-graph-schema-version-mismatch] GRAPH.md schema_version must be exactly "v0.3.0"',
+            field_path="schema_version",
         )
     if "io_inputs_ref" in data or "io_outputs_ref" in data:
+        field_path = "io_inputs_ref" if "io_inputs_ref" in data else "io_outputs_ref"
         _graph_fatal(
             path,
             1,
             "[F-v3-graph-io-physical-file-deprecated] "
             "io_inputs_ref/io_outputs_ref are not supported",
+            field_path=field_path,
         )
     if "phases" not in data:
         _graph_fatal(
             path,
             1,
             "[F-v3-graph-phases-missing] GRAPH.md must declare YAML frontmatter phases",
+            field_path="phases",
         )
     if not isinstance(data.get("phases"), list):
         _graph_fatal(
             path,
             _frontmatter_key_line(path, "phases"),
             "[F-v3-graph-phases-missing] GRAPH.md phases must be a list[str]",
+            field_path="phases",
         )
 
     try:
         return GraphManifest.model_validate(data)
     except ValidationError as exc:
+        loc = _first_validation_loc(exc)
         _fatal(
             path,
-            1,
+            _frontmatter_loc_line(path, frontmatter, loc),
             f"GRAPH.md manifest validation failed: {exc}",
             code="[F-v3-graph-schema-unknown-field]",
+            field_path=_field_path_from_loc(loc),
         )
 
 
@@ -1287,12 +1377,18 @@ def _topological_order(adjacency: dict[str, list[str]], phases: list[str]) -> li
 
 
 def _validate_inline_io_schema(path: Path, schema: dict[str, Any], kind: str) -> dict[str, Any]:
+    field_path = f"io.{kind}s"
     if not isinstance(schema, dict):
-        _io_fatal(path, 1, f"inline {kind} schema must be an object")
+        _io_fatal(path, 1, f"inline {kind} schema must be an object", field_path=field_path)
     try:
         Draft202012Validator.check_schema(schema)
     except SchemaError as exc:
-        _io_fatal(path, 1, f"invalid inline {kind} JSON Schema: {exc.message}")
+        _io_fatal(
+            path,
+            1,
+            f"invalid inline {kind} JSON Schema: {exc.message}",
+            field_path=field_path,
+        )
     return schema
 
 
@@ -1331,6 +1427,7 @@ def _iterate_fields_fatal(path: Path, missing: str) -> NoReturn:
         "[F-v3-iterate-accumulate-fields-missing] "
         f"loop iterate io.inputs must declare {missing}",
         code="[F-v3-iterate-accumulate-fields-missing]",
+        field_path="iterate",
     )
 
 
@@ -1496,7 +1593,7 @@ def _build_phase_document(
                 code="[F-v3-graph-phase-node-missing]",
             )
     except ValidationError as exc:
-        _phase_validation_fatal(path, mode, exc)
+        _phase_validation_fatal(path, mode, frontmatter, exc)
 
     return PhaseDocument(
         phase_name=phase_name,
@@ -1516,6 +1613,7 @@ def _normalize_skill_node_frontmatter(path: Path, data: dict[str, Any]) -> dict[
             _frontmatter_key_line(path, "phase_config"),
             "phase_config must be an object",
             code="[F-v3-agent-schema-unknown-field]",
+            field_path="phase_config",
         )
     merged = dict(data)
     if "tools" in phase_config:
@@ -1544,20 +1642,33 @@ def _normalize_skill_node_frontmatter(path: Path, data: dict[str, Any]) -> dict[
             _frontmatter_key_line(path, "phase_config"),
             "unsupported phase_config keys: " + ", ".join(extra_keys),
             code="[F-v3-agent-schema-unknown-field]",
+            field_path=f"phase_config.{extra_keys[0]}",
         )
     return merged
 
-def _phase_validation_fatal(path: Path, mode: str, exc: ValidationError) -> NoReturn:
+def _phase_validation_fatal(
+    path: Path,
+    mode: str,
+    frontmatter: dict[str, Any],
+    exc: ValidationError,
+) -> NoReturn:
+    loc = _first_validation_loc(exc)
+    field_path = _field_path_from_loc(loc)
+    line = _frontmatter_loc_line(path, frontmatter, loc)
     text = str(exc)
     if mode == "logic" and "validator" in text:
         _fatal(
             path,
-            _frontmatter_key_line(path, "validator"),
+            line,
             "[F-v3-logic-validator-type-invalid] validator must be boolean",
+            field_path=field_path or "validator",
         )
     domain = {"agent": "agent", "logic": "logic", "subgraph": "subgraph"}.get(mode, "graph")
     _fatal(
-        path, 1, f"[F-v3-{domain}-schema-unknown-field] {path.name} AST validation failed: {exc}"
+        path,
+        line,
+        f"[F-v3-{domain}-schema-unknown-field] {path.name} AST validation failed: {exc}",
+        field_path=field_path,
     )
 
 

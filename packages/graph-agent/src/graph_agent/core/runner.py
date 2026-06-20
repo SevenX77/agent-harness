@@ -30,6 +30,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -45,6 +46,8 @@ from graph_agent.callbacks.emit import (
 )
 from graph_agent.callbacks.events import (
     CallbackEvent,
+    InterruptedEvent,
+    ResumedEvent,
     RunEndedEvent,
     RunStartedEvent,
 )
@@ -54,6 +57,7 @@ from graph_agent.core.adapter_contracts import (
     RunArtifactRequest,
     RunSession,
 )
+from graph_agent.core.checkpoint_validity import checkpoint_id_before_phase
 from graph_agent.core.checkpointer import resolve_checkpointer
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.exceptions import (
@@ -77,6 +81,17 @@ logger = logging.getLogger(__name__)
 _NO_MOCK_LLM = object()
 _RUNTIME_PHASE_FAILED_CODE = "[F-v3-runtime-phase-failed]"
 _SKILL_ENTRYPOINT_FILENAME = "SKILL.md"
+_HITL_TOOL_NAMES = {"ask_clarification", "request_human_input"}
+
+
+@dataclass(frozen=True)
+class _HitLInterruptCheckpoint:
+    checkpoint_id: str
+    checkpoint_ns: str
+    phase_name: str
+    question: str | None = None
+    clarification_type: str | None = None
+    options: list[str] | None = None
 
 
 class PredictDeadlockError(RuntimeError):
@@ -457,6 +472,7 @@ def resume_skill(
     *,
     workspace_dir: Path,
     run_id: str,
+    from_phase: str | None = None,
     checkpoint_id: str | None = None,
     checkpoint_ns: str | None = None,
     resume_from_node_id: str | None = None,
@@ -473,6 +489,7 @@ def resume_skill(
     workspace_root = _validate_workspace_dir(workspace_dir)
     _validate_resume_human_response(human_response)
     _validate_resume_context_overrides(context_overrides)
+    _validate_resume_node_selector(from_phase, "from_phase")
     _validate_resume_node_selector(resume_from_node_id, "resume_from_node_id")
     _validate_resume_node_selector(resume_to_node_id, "resume_to_node_id")
 
@@ -493,22 +510,42 @@ def resume_skill(
     )
 
     logger.info(
-        "[Resume] Resuming run_id=%s checkpoint_ns=%s checkpoint_id=%s",
+        "[Resume] Resuming run_id=%s from_phase=%s checkpoint_ns=%s checkpoint_id=%s",
         run_id,
+        from_phase,
         checkpoint_ns,
         checkpoint_id,
     )
 
     active_checkpointer = checkpointer if checkpointer is not None else _resolve_resume_checkpointer()
-    invoke_config = _resolve_resume_config(
-        active_checkpointer,
-        run_id=run_id,
-        checkpoint_ns=checkpoint_ns,
-        checkpoint_id=checkpoint_id,
-    )
 
     try:
         compiled = compile_skill(skill_path, skill_resolver=resolver)
+        invoke_config = _resolve_resume_config(
+            active_checkpointer,
+            compiled=compiled,
+            run_id=run_id,
+            from_phase=from_phase,
+            checkpoint_ns=checkpoint_ns,
+            checkpoint_id=checkpoint_id,
+        )
+        selected_checkpoint_id = _checkpoint_id_from_config(invoke_config)
+        selected_checkpoint_ns = _checkpoint_ns_from_config(invoke_config)
+        _emit_v030_event(
+            event_sink,
+            RunStartedEvent(
+                run_id=run_id,
+                thread_id=run_id,
+                is_resume=True,
+                checkpoint_id=selected_checkpoint_id,
+                checkpoint_ns=selected_checkpoint_ns,
+                initial_context={
+                    "checkpoint_id": selected_checkpoint_id,
+                    "checkpoint_ns": selected_checkpoint_ns,
+                    "from_phase": from_phase,
+                },
+            ),
+        )
         assembled = assemble_graph(
             compiled,
             model_resolver=model_resolver,
@@ -518,8 +555,12 @@ def resume_skill(
             checkpointer=active_checkpointer,
         )
         graph = assembled.graph
-        _validate_resume_node_ids(compiled, resume_from_node_id, resume_to_node_id)
-        _validate_resume_context_override_scope(compiled, resume_from_node_id, context_overrides)
+        _validate_resume_node_ids(compiled, from_phase, resume_from_node_id, resume_to_node_id)
+        _validate_resume_context_override_scope(
+            compiled,
+            resume_from_node_id or from_phase,
+            context_overrides,
+        )
         _validate_resume_checkpoint_targets(graph, invoke_config, resume_to_node_id)
 
         invoke_config = _apply_resume_context_overrides(
@@ -527,9 +568,26 @@ def resume_skill(
             compiled,
             invoke_config,
             context_overrides,
-            resume_from_node_id=resume_from_node_id,
+            resume_from_node_id=resume_from_node_id or from_phase,
         )
         invoke_config = _apply_resume_human_response(graph, invoke_config, human_response)
+        resumed_from_phase = (
+            from_phase
+            or resume_from_node_id
+            or _phase_name_from_checkpoint_ns(selected_checkpoint_ns)
+        )
+        _emit_v030_event(
+            event_sink,
+            ResumedEvent(
+                thread_id=run_id,
+                human_input=str((human_response or {}).get("content") or ""),
+                resumed_from_phase=resumed_from_phase,
+                checkpoint_id=selected_checkpoint_id,
+                checkpoint_ns=selected_checkpoint_ns,
+                namespace=selected_checkpoint_ns,
+                ns=selected_checkpoint_ns,
+            ),
+        )
         result = graph.invoke(None, config=invoke_config)
 
     except Exception as exc:
@@ -1213,12 +1271,14 @@ def _compiled_phase_names(compiled: Any) -> set[str]:
 
 def _validate_resume_node_ids(
     compiled: Any,
+    from_phase: str | None,
     resume_from_node_id: str | None,
     resume_to_node_id: str | None,
 ) -> None:
     requested = {
         field_name: value
         for field_name, value in (
+            ("from_phase", from_phase),
             ("resume_from_node_id", resume_from_node_id),
             ("resume_to_node_id", resume_to_node_id),
         )
@@ -1308,12 +1368,24 @@ def _resolve_resume_checkpointer() -> Any:
 def _resolve_resume_config(
     active_checkpointer: Any,
     *,
+    compiled: Any,
     run_id: str,
+    from_phase: str | None,
     checkpoint_ns: str | None,
     checkpoint_id: str | None,
 ) -> dict[str, Any]:
     ns = checkpoint_ns or ""
+    if from_phase and checkpoint_id:
+        raise ValueError("from_phase and checkpoint_id are mutually exclusive resume selectors")
     resolved_checkpoint_id = checkpoint_id
+    if from_phase:
+        resolved_checkpoint_id = checkpoint_id_before_phase(
+            active_checkpointer,
+            compiled,
+            run_id=run_id,
+            checkpoint_ns=ns,
+            phase_id=from_phase,
+        )
     if not resolved_checkpoint_id:
         search_config = {"configurable": {"thread_id": run_id, "checkpoint_ns": ns}}
         checkpoints = list(active_checkpointer.list(search_config))
@@ -1328,6 +1400,42 @@ def _resolve_resume_config(
             "checkpoint_id": resolved_checkpoint_id,
         }
     }
+
+
+def _checkpoint_id_from_config(config: dict[str, Any]) -> str:
+    return str(config.get("configurable", {}).get("checkpoint_id") or "")
+
+
+def _checkpoint_ns_from_config(config: dict[str, Any]) -> str:
+    return str(config.get("configurable", {}).get("checkpoint_ns") or "")
+
+
+def _phase_name_from_checkpoint_ns(checkpoint_ns: str) -> str | None:
+    for part in reversed([part for part in checkpoint_ns.split(".") if part]):
+        if part.startswith("agent:"):
+            return part.split(":", 1)[1] or None
+    return checkpoint_ns or None
+
+
+def _checkpoint_config(checkpoint_tuple: Any) -> dict[str, Any]:
+    config = getattr(checkpoint_tuple, "config", {}) or {}
+    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
+    return configurable if isinstance(configurable, dict) else {}
+
+
+def _checkpoint_tuple_id(checkpoint_tuple: Any) -> str:
+    configurable = _checkpoint_config(checkpoint_tuple)
+    checkpoint_id = configurable.get("checkpoint_id")
+    if checkpoint_id:
+        return str(checkpoint_id)
+    checkpoint = getattr(checkpoint_tuple, "checkpoint", {}) or {}
+    if isinstance(checkpoint, dict):
+        return str(checkpoint.get("id") or "")
+    return ""
+
+
+def _checkpoint_tuple_ns(checkpoint_tuple: Any) -> str:
+    return str(_checkpoint_config(checkpoint_tuple).get("checkpoint_ns") or "")
 
 
 def _override_source_node(compiled: Any, overridden_fields: set[str]) -> str | None:
@@ -1386,6 +1494,149 @@ def _pending_tool_calls(state_messages: list[Any]) -> list[dict[str, Any]]:
     ]
 
 
+def _hitl_tool_call_from_messages(messages: list[Any]) -> dict[str, Any] | None:
+    for tool_call in _pending_tool_calls(messages):
+        if str(tool_call.get("name") or "") in _HITL_TOOL_NAMES:
+            return tool_call
+    return None
+
+
+def _hitl_tool_call_from_pregel_tasks(tasks: Any) -> dict[str, Any] | None:
+    if not isinstance(tasks, (list, tuple)):
+        return None
+    for task in tasks:
+        arg = getattr(task, "arg", None)
+        if not isinstance(arg, dict):
+            continue
+        tool_call = arg.get("tool_call")
+        if isinstance(tool_call, dict) and str(tool_call.get("name") or "") in _HITL_TOOL_NAMES:
+            return tool_call
+    return None
+
+
+def _normalise_options(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    if isinstance(value, tuple):
+        return [str(item) for item in value]
+    return []
+
+
+def _hitl_checkpoint_from_tool_call(
+    checkpoint_tuple: Any,
+    tool_call: dict[str, Any],
+) -> _HitLInterruptCheckpoint | None:
+    checkpoint_id = _checkpoint_tuple_id(checkpoint_tuple)
+    if not checkpoint_id:
+        return None
+    checkpoint_ns = _checkpoint_tuple_ns(checkpoint_tuple)
+    args = tool_call.get("args")
+    args = args if isinstance(args, dict) else {}
+    question = args.get("question")
+    clarification_type = args.get("clarification_type")
+    return _HitLInterruptCheckpoint(
+        checkpoint_id=checkpoint_id,
+        checkpoint_ns=checkpoint_ns,
+        phase_name=_phase_name_from_checkpoint_ns(checkpoint_ns) or "",
+        question=str(question) if question is not None else None,
+        clarification_type=str(clarification_type) if clarification_type is not None else None,
+        options=_normalise_options(args.get("options")),
+    )
+
+
+def _interrupt_payload(value: Any) -> dict[str, Any] | None:
+    if not value:
+        return None
+    candidates = value if isinstance(value, (list, tuple)) else [value]
+    if not candidates:
+        return None
+    raw = getattr(candidates[0], "value", candidates[0])
+    if isinstance(raw, dict):
+        return raw
+    if raw is None:
+        return None
+    return {"question": str(raw), "clarification_type": "missing_info", "options": []}
+
+
+def _hitl_checkpoint_from_interrupt_payload(
+    checkpoint_tuple: Any,
+    payload: dict[str, Any],
+) -> _HitLInterruptCheckpoint | None:
+    checkpoint_id = _checkpoint_tuple_id(checkpoint_tuple)
+    if not checkpoint_id:
+        return None
+    checkpoint_ns = _checkpoint_tuple_ns(checkpoint_tuple)
+    question = payload.get("question")
+    clarification_type = payload.get("clarification_type")
+    return _HitLInterruptCheckpoint(
+        checkpoint_id=checkpoint_id,
+        checkpoint_ns=checkpoint_ns,
+        phase_name=str(payload.get("phase_name") or _phase_name_from_checkpoint_ns(checkpoint_ns) or ""),
+        question=str(question) if question is not None else None,
+        clarification_type=str(clarification_type) if clarification_type is not None else None,
+        options=_normalise_options(payload.get("options")),
+    )
+
+
+def _checkpoint_values(checkpoint_tuple: Any) -> dict[str, Any]:
+    checkpoint = getattr(checkpoint_tuple, "checkpoint", {}) or {}
+    if not isinstance(checkpoint, dict):
+        return {}
+    values = checkpoint.get("channel_values") or {}
+    return values if isinstance(values, dict) else {}
+
+
+def _iter_checkpoints_for_run(active_checkpointer: Any, run_id: str) -> list[Any]:
+    list_checkpoints = getattr(active_checkpointer, "list", None)
+    if not callable(list_checkpoints):
+        return []
+    try:
+        checkpoints = list(list_checkpoints({"configurable": {"thread_id": run_id}}))
+    except Exception:  # noqa: BLE001 - event detection must not crash a run
+        logger.warning("[HitL] failed to inspect checkpoints for run_id=%s", run_id, exc_info=True)
+        return []
+    latest_by_namespace: list[Any] = []
+    seen_namespaces: set[str] = set()
+    for checkpoint_tuple in checkpoints:
+        checkpoint_ns = _checkpoint_tuple_ns(checkpoint_tuple)
+        if checkpoint_ns in seen_namespaces:
+            continue
+        seen_namespaces.add(checkpoint_ns)
+        latest_by_namespace.append(checkpoint_tuple)
+    return latest_by_namespace
+
+
+def _find_hitl_interrupt_checkpoint(
+    active_checkpointer: Any,
+    run_id: str,
+    result: Any,
+) -> _HitLInterruptCheckpoint | None:
+    checkpoints = _iter_checkpoints_for_run(active_checkpointer, run_id)
+    result_payload = _interrupt_payload(result.get("__interrupt__") if isinstance(result, dict) else None)
+    for checkpoint_tuple in checkpoints:
+        values = _checkpoint_values(checkpoint_tuple)
+        payload = _interrupt_payload(values.get("__interrupt__")) or result_payload
+        if payload is not None:
+            hitl = _hitl_checkpoint_from_interrupt_payload(checkpoint_tuple, payload)
+            if hitl is not None:
+                return hitl
+
+        tool_call = _hitl_tool_call_from_pregel_tasks(values.get("__pregel_tasks"))
+        if tool_call is not None:
+            hitl = _hitl_checkpoint_from_tool_call(checkpoint_tuple, tool_call)
+            if hitl is not None:
+                return hitl
+
+        messages = values.get("messages") or []
+        if isinstance(messages, list):
+            tool_call = _hitl_tool_call_from_messages(messages)
+            if tool_call is not None:
+                hitl = _hitl_checkpoint_from_tool_call(checkpoint_tuple, tool_call)
+                if hitl is not None:
+                    return hitl
+    return None
+
+
 def _select_pending_tool_call_id(
     pending_tool_calls: list[dict[str, Any]],
     requested_tool_call_id: str | None,
@@ -1429,6 +1680,51 @@ def _resume_error_payload(exc: Exception) -> Any:
     if isinstance(exc, GraphAgentError) and exc.payload is not None:
         return exc.payload
     return make_error_payload(_RUNTIME_PHASE_FAILED_CODE, str(exc))
+
+
+def _business_context_from_graph_result(result: Any) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        return {}
+    data = result.get("data")
+    if hasattr(data, "model_dump"):
+        return cast(dict[str, Any], data.model_dump())
+    if isinstance(data, dict):
+        return dict(data)
+    return {}
+
+
+def _emit_v030_interrupted_run(
+    event_sink: Any,
+    *,
+    run_id: str,
+    hitl: _HitLInterruptCheckpoint,
+    final_context: dict[str, Any],
+    wall_time: float,
+) -> None:
+    _emit_v030_event(
+        event_sink,
+        InterruptedEvent(
+            phase_name=hitl.phase_name,
+            thread_id=run_id,
+            checkpoint_id=hitl.checkpoint_id,
+            checkpoint_ns=hitl.checkpoint_ns,
+            namespace=hitl.checkpoint_ns,
+            ns=hitl.checkpoint_ns,
+            question=hitl.question,
+            clarification_type=hitl.clarification_type,
+            options=list(hitl.options or []),
+        ),
+    )
+    _emit_v030_event(
+        event_sink,
+        RunEndedEvent(
+            run_id=run_id,
+            thread_id=run_id,
+            status="interrupted",
+            final_context=_v030_phase_context(final_context),
+            wall_time_seconds=wall_time,
+        ),
+    )
 
 
 def _finalize_successful_v030_run(
@@ -1676,6 +1972,26 @@ def _run_v030_skill_dict(
             initial_state,
             config={"configurable": {"thread_id": run_id}},
         )
+        hitl_interrupt = _find_hitl_interrupt_checkpoint(active_checkpointer, run_id, result)
+        if hitl_interrupt is not None:
+            wall_time = round(time.time() - t0, 3)
+            final_context = _business_context_from_graph_result(result)
+            _emit_v030_interrupted_run(
+                event_sink,
+                run_id=run_id,
+                hitl=hitl_interrupt,
+                final_context=final_context,
+                wall_time=wall_time,
+            )
+            saved_trace_path = str(event_sink.trace_path) if event_sink.trace_path is not None else None
+            return {
+                "run_id": run_id,
+                "context": final_context,
+                "metrics": {"wall_time_sec": wall_time},
+                "trace_path": saved_trace_path,
+                "run_dir": str(trace_output),
+                "wall_time_sec": wall_time,
+            }
     except Exception:
         wall_time = round(time.time() - t0, 3)
         _emit_v030_event(

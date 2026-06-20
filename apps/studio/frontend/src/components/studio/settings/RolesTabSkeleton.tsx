@@ -12,7 +12,8 @@ import { Skeleton } from "@/components/ui/skeleton"
  * first paint reads as the tab the user is opening.
  *
  * API Keys keeps its own ProviderListSkeleton (5 provider-card shapes); General
- * renders instantly with no skeleton.
+ * uses GeneralTabSkeleton (form-field-row shapes). Every settings tab now shows a
+ * shape-matched skeleton while its data loads — none renders disabled forms.
  */
 export function RolesTabSkeleton() {
   return (

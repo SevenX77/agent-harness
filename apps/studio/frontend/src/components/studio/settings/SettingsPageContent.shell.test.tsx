@@ -84,9 +84,29 @@ describe("Settings shell — #2 per-tab skeleton gate", () => {
     expect(html).not.toContain('data-roles-tab-skeleton="true"')
   })
 
-  it("never shows the roles skeleton on General (renders instantly, no skeleton)", () => {
+  it("never shows the roles skeleton on General (General has its own GeneralTabSkeleton)", () => {
     const html = render({ activeTab: "general", rolesData: null })
     expect(html).not.toContain('data-roles-tab-skeleton="true"')
+  })
+
+  it("shows the General-tab skeleton while appSettings are loading (consistent skeleton, not a disabled form)", () => {
+    const html = render({
+      activeTab: "general",
+      appSettings: { ...baseProps().appSettings, isLoading: true },
+    })
+    expect(html).toContain('data-general-tab-skeleton="true"')
+    expect(html).toContain('data-slot="skeleton"')
+    // While loading, the real form is not mounted — so it cannot be shown disabled.
+    expect(html).not.toContain('id="studio-user-id"')
+  })
+
+  it("replaces the General skeleton with the editable form once appSettings load", () => {
+    const html = render({
+      activeTab: "general",
+      appSettings: { ...baseProps().appSettings, isLoading: false },
+    })
+    expect(html).not.toContain('data-general-tab-skeleton="true"')
+    expect(html).toContain('id="studio-user-id"')
   })
 
   it("surfaces the roles error instead of a perpetual skeleton when the fetch failed (rolesData null + rolesError)", () => {

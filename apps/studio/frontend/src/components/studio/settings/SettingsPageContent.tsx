@@ -7,6 +7,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { ApiKeysTab } from "./api-keys/ApiKeysTab"
 import { CopilotTab } from "./copilot/CopilotTab"
 import { GeneralTab } from "./GeneralTab"
+import { GeneralTabSkeleton } from "./GeneralTabSkeleton"
 import { LlmRolesTab } from "./LlmRolesTab"
 import { RolesTabSkeleton } from "./RolesTabSkeleton"
 import { SettingsErrorBoundary } from "./SettingsErrorBoundary"
@@ -136,7 +137,11 @@ export function SettingsPageContent({
             <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 md:px-8 md:py-8">
               {activeTab === "general" ? (
                 <SettingsErrorBoundary label="General">
-                  <GeneralTab appSettings={appSettings} />
+                  {appSettings.isLoading ? (
+                    <GeneralTabSkeleton />
+                  ) : (
+                    <GeneralTab appSettings={appSettings} />
+                  )}
                 </SettingsErrorBoundary>
               ) : null}
               {activeTab === "api_keys" ? (

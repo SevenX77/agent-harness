@@ -7,10 +7,12 @@ import {
   Panel,
   ReactFlow,
   addEdge,
+  reconnectEdge,
   useEdgesState,
   useNodesState,
   type Connection,
   type Edge,
+  type FinalConnectionState,
   type ReactFlowInstance,
 } from '@xyflow/react'
 import { FileCog, Plus } from 'lucide-react'
@@ -62,6 +64,7 @@ import {
   addSequentialOverwriteField,
   phaseRefsFromSkillDetail,
   phaseFilePath,
+  planEdgeReconnect,
   type OverwriteConflict,
 } from './canvas-authoring'
 import { DrillBreadcrumb } from './DrillBreadcrumb'
@@ -159,6 +162,11 @@ export function GraphCanvas({
   const [edgeMenuConnection, setEdgeMenuConnection] = useState<{ source: string; target: string } | null>(null)
   const [canvasHeight, setCanvasHeight] = useState(0)
   const canvasRef = useRef<HTMLElement | null>(null)
+  // R4 reconnect: set true the moment a dragged edge endpoint lands on a valid
+  // handle (onReconnect). onReconnectEnd reads it to tell "moved to a new node"
+  // (reconnect, already handled) apart from "dropped off any handle"
+  // (drag-disconnect). Reset on every reconnect start.
+  const reconnectLandedRef = useRef(false)
 
   const [warningQueue, setWarningQueue] = useState<OverwriteConflict[]>([])
   const [activeWarningIndex, setActiveWarningIndex] = useState<number>(-1)
@@ -483,6 +491,74 @@ export function GraphCanvas({
     }
   }, [layoutResult.edges, layoutResult.nodes, onPersistConnection, phaseNodes, setEdges, setNodes])
 
+  // R4: drag an existing edge endpoint to a new node = remove the old
+  // dependency + add the new one. Both halves reuse the same disconnect/connect
+  // → serialize path the menu Disconnect and onConnect already use, so the
+  // serialize contract is unchanged. A reconnect that lands back on the same
+  // endpoints (no-op) just snaps the edge back without a write.
+  const onReconnect = useCallback((oldEdge: Edge<ContextEdgeData>, newConnection: Connection) => {
+    reconnectLandedRef.current = true
+    const plan = planEdgeReconnect(
+      { source: oldEdge.source, target: oldEdge.target },
+      { source: newConnection.source, target: newConnection.target },
+    )
+    if (!plan.ok) {
+      if (plan.reason !== 'no-op') {
+        toast.error(plan.message)
+      }
+      return
+    }
+    const targetNode = phaseNodes.find((node) => node.id === plan.connect.target)
+    if (targetNode && targetNode.data.dependsOn.includes(plan.connect.source)) {
+      toast.error('This dependency already exists')
+      return
+    }
+
+    // Optimistically move the edge to its new endpoints before the write lands.
+    setEdges((current) => reconnectEdge(oldEdge, newConnection, current))
+    if (!onDisconnectConnection || !onPersistConnection) {
+      return
+    }
+    Promise.resolve(onDisconnectConnection(plan.disconnect))
+      .then(() => onPersistConnection({ ...newConnection, source: plan.connect.source, target: plan.connect.target }))
+      .catch((reconnectError: unknown) => {
+        toast.error(reconnectError instanceof Error ? reconnectError.message : 'Could not reconnect dependency')
+        setEdges(layoutResult.edges)
+        setNodes(layoutResult.nodes)
+      })
+  }, [layoutResult.edges, layoutResult.nodes, onDisconnectConnection, onPersistConnection, phaseNodes, setEdges, setNodes])
+
+  const onReconnectStart = useCallback(() => {
+    reconnectLandedRef.current = false
+  }, [])
+
+  // R4: an edge endpoint dragged off every handle and released (isValid not
+  // true, and no onReconnect fired) = the user pulled the wire loose, so drop
+  // the dependency via the same disconnect → serialize path.
+  const onReconnectEnd = useCallback((
+    _event: globalThis.MouseEvent | globalThis.TouchEvent,
+    edge: Edge<ContextEdgeData>,
+    _handleType: 'source' | 'target',
+    connectionState: FinalConnectionState,
+  ) => {
+    if (reconnectLandedRef.current || connectionState.isValid === true) {
+      return
+    }
+    if (edge.source === INPUT_ID || edge.source === OUTPUT_ID || edge.target === INPUT_ID || edge.target === OUTPUT_ID) {
+      return
+    }
+    if (!onDisconnectConnection) {
+      return
+    }
+    setEdges((current) => current.filter((candidate) => candidate.id !== edge.id))
+    Promise.resolve(onDisconnectConnection({ source: edge.source, target: edge.target }))
+      .catch((disconnectError: unknown) => {
+        toast.error(disconnectError instanceof Error ? disconnectError.message : 'Could not disconnect dependency')
+        setEdges(layoutResult.edges)
+        setNodes(layoutResult.nodes)
+      })
+  }, [layoutResult.edges, layoutResult.nodes, onDisconnectConnection, setEdges, setNodes])
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -517,6 +593,10 @@ export function GraphCanvas({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        edgesReconnectable
+        onReconnectStart={onReconnectStart}
+        onReconnect={onReconnect}
+        onReconnectEnd={onReconnectEnd}
         onPaneContextMenu={(event) => {
           if (isEdgeContextTarget(event.target)) {
             return

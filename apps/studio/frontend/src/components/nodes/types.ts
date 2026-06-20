@@ -21,9 +21,10 @@ export interface SkillGraphNodeData extends Record<string, unknown> {
   /** Compile/lint errors attributed to this phase node (separate channel from run status). */
   compileErrors?: CompileError[]
   /**
-   * Golden acceptance state for this node (N4 atom #30), a separate channel from
-   * run status and compile health. Currently only 'has-golden' (node appears in a
-   * golden baseline's cases); undefined = not yet golden. See node-golden.ts.
+   * Golden acceptance tri-state for this node (N4 atom #30), a separate channel from
+   * run status and compile health: 'has-golden' (🟢, node in a golden baseline's cases)
+   * > 'logic-ok' (🟡, agent node ran in the most-recent predict) > undefined (🔘
+   * untested). See node-golden.ts.
    */
   goldenState?: GoldenNodeState
   dependsOn: string[]

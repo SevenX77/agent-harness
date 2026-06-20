@@ -10,7 +10,9 @@ import type {
   GitHistoryItem,
   GoldenBaseline,
   GoldenBaselinePlan,
+  GoldenTemplate,
   JsonObject,
+  PredictDiagnosticExport,
   PublishResult,
   PublishSkillReq,
   ReleaseManifest,
@@ -186,21 +188,16 @@ export function wsUrl(path: string): string {
   return `${protocol}//${base.host}${normalizedPath}${tokenQuery}`
 }
 
-export interface PredictRunResponse {
-  run_id?: string
-  status?: RunMetadata['status']
-  metadata?: RunMetadata
-  artifact_ref?: RunMetadata['artifact_ref']
-  source_map_ref?: string | null
-  execution_fingerprint?: string | null
-  input_data?: JsonObject | null
-  final_context?: JsonObject | null
-  output?: JsonObject | null
-  artifacts?: string[] | null
-}
-
-export async function postPredictRun(skillId: string, inputData: JsonObject): Promise<PredictRunResponse | RunDetail> {
-  const response = await api.post<PredictRunResponse | RunDetail>(`/skills/${skillId}/runs/predict`, {
+/**
+ * N4 atom #30: the predict endpoint returns the PredictDiagnosticExport (is_predict /
+ * status / phases / path_diff). The caller reads which AGENT nodes ran from `phases`
+ * (a phase is recorded only on completion) to drive the golden 🟡 logic-OK state.
+ */
+export async function postPredictRun(
+  skillId: string,
+  inputData: JsonObject,
+): Promise<PredictDiagnosticExport> {
+  const response = await api.post<PredictDiagnosticExport>(`/skills/${skillId}/runs/predict`, {
     input_data: inputData,
   })
   return response.data
@@ -246,6 +243,37 @@ export async function saveGoldenBaseline(
 
 export async function listGoldenBaselines(skillId: string): Promise<GoldenBaseline[]> {
   const response = await api.get<GoldenBaseline[]>(`/skills/${skillId}/golden`)
+  return response.data
+}
+
+/**
+ * N4 atom #33 create-path B: fetch a schema-valid empty golden template for an agent
+ * node (generated from its io.outputs schema) so the author can hand-fill it.
+ */
+export async function fetchGoldenTemplate(skillId: string, nodeId: string): Promise<GoldenTemplate> {
+  const apiSkillId = resolveWorkspaceIdentity(skillId).skillId ?? skillId
+  const response = await api.get<GoldenTemplate>(`/skills/${apiSkillId}/golden/template`, {
+    params: { node_id: nodeId },
+  })
+  return response.data
+}
+
+/**
+ * N4 atom #33 manual write: save an author-defined golden keyed by node_id (run-less).
+ * Browser mode carries the write-fallback header (atom #36 ②); this never rides the
+ * run-keyed promote path. Tauri local-write parity is a follow-on (native plan path).
+ */
+export async function saveManualGolden(
+  skillId: string,
+  nodeId: string,
+  expectedOutput: JsonObject,
+): Promise<GoldenBaseline> {
+  const apiSkillId = resolveWorkspaceIdentity(skillId).skillId ?? skillId
+  const response = await api.post<GoldenBaseline>(
+    `/skills/${apiSkillId}/golden/manual`,
+    { node_id: nodeId, expected_output: expectedOutput },
+    BROWSER_WRITE_FALLBACK_CONFIG,
+  )
   return response.data
 }
 

@@ -5,13 +5,16 @@ import { initializeRuntimeConfig } from '../config/runtime'
 import {
   checkpointWorkspaceFile,
   clearWorkspaceCheckpoint,
+  createSkillWorkspace,
   deleteWorkspacePath,
   openInCursor,
+  openSkillWorkspace,
   readWorkspaceFile,
   restoreWorkspaceFile,
   revealInFileManager,
   seedWorkspaceCheckpoint,
   selectSkillDirectory,
+  workspacePathExists,
   writePublishPackage,
   writeGoldenBaseline,
   writeWorkspaceFile,
@@ -379,6 +382,79 @@ describe('safe-write native helpers', () => {
       'Desktop only',
     )
 
+    expect(mockInvoke).not.toHaveBeenCalled()
+  })
+})
+
+describe('skill workspace native helpers', () => {
+  it('creates a skill via the Rust writer and maps the snake_case result', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
+    await markRuntimeReady()
+    mockInvoke.mockResolvedValue({ root: '/tmp/Skills/demo', skill_id: 'demo' })
+
+    await expect(createSkillWorkspace('/tmp/Skills', 'demo')).resolves.toEqual({
+      root: '/tmp/Skills/demo',
+      skillId: 'demo',
+    })
+
+    expect(mockInvoke).toHaveBeenCalledWith('create_skill_workspace', {
+      parentDirectory: '/tmp/Skills',
+      skillId: 'demo',
+    })
+  })
+
+  it('passes a blank parent through so Rust defaults to the config Skills dir', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
+    await markRuntimeReady()
+    mockInvoke.mockResolvedValue({ root: '/cfg/Skills/demo', skill_id: 'demo' })
+
+    await expect(createSkillWorkspace('', 'demo')).resolves.toEqual({
+      root: '/cfg/Skills/demo',
+      skillId: 'demo',
+    })
+
+    expect(mockInvoke).toHaveBeenCalledWith('create_skill_workspace', {
+      parentDirectory: '',
+      skillId: 'demo',
+    })
+  })
+
+  it('rejects createSkillWorkspace outside the desktop runtime', async () => {
+    vi.stubGlobal('window', { location: { origin: 'http://localhost:5173' } })
+    await resetRuntimeForTest()
+
+    await expect(createSkillWorkspace('/tmp/Skills', 'demo')).rejects.toThrow('Desktop only')
+    expect(mockInvoke).not.toHaveBeenCalled()
+  })
+
+  it('opens a folder via the Rust writer and maps the snake_case result', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
+    await markRuntimeReady()
+    mockInvoke.mockResolvedValue({ root: '/tmp/opened', skill_id: 'opened' })
+
+    await expect(openSkillWorkspace('/tmp/opened')).resolves.toEqual({
+      root: '/tmp/opened',
+      skillId: 'opened',
+    })
+
+    expect(mockInvoke).toHaveBeenCalledWith('open_skill_workspace', { directory: '/tmp/opened' })
+  })
+
+  it('checks workspace path existence via the Rust read-only command', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
+    await markRuntimeReady()
+    mockInvoke.mockResolvedValue(false)
+
+    await expect(workspacePathExists('/tmp/gone')).resolves.toBe(false)
+
+    expect(mockInvoke).toHaveBeenCalledWith('workspace_path_exists', { path: '/tmp/gone' })
+  })
+
+  it('keeps the MRU intact by returning true when the native check is unavailable', async () => {
+    vi.stubGlobal('window', { location: { origin: 'http://localhost:5173' } })
+    await resetRuntimeForTest()
+
+    await expect(workspacePathExists('/tmp/whatever')).resolves.toBe(true)
     expect(mockInvoke).not.toHaveBeenCalled()
   })
 })

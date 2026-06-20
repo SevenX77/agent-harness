@@ -90,6 +90,8 @@ vi.mock('../../lib/tauri', () => ({
   selectSkillDirectory: vi.fn(),
   addRecentWorkspace: vi.fn(),
   ensureWorkspaceSupportDirs: vi.fn(),
+  createSkillWorkspace: vi.fn(),
+  openSkillWorkspace: vi.fn(),
 }))
 
 afterEach(() => {

@@ -6,9 +6,10 @@ import { PropertiesPanel } from './PropertiesPanel'
 
 // Deprecated / FROZEN-violating frontmatter fields must never be EDITABLE in the
 // Properties form (any node kind). Asserted via their rendered field labels.
-// NOTE: the read-only inspection `dl` still shows a "Mode" row (the node KIND
-// label, not a `mode:` frontmatter field) — that is informational, not an
-// editor, so "Mode" is intentionally not in this deprecated-editor list.
+// NOTE: the read-only inspection `dl` shows a "Node type" row (the file-derived
+// KIND label, NOT a settable `mode:` frontmatter field) — informational only.
+// It used to be labelled "Mode", which wrongly implied mode was a settable
+// property; the row is now reworded to make the file-as-truth-source explicit.
 const DEPRECATED_LABELS = [
   'System prompt',
   'Exit contract',
@@ -108,6 +109,36 @@ describe('PropertiesPanel — per-kind whitelist form (R3)', () => {
     expect(html).toContain('legacy.registry.child')
     expect(html).toContain('absolute path')
     expect(html).not.toContain('Target skill')
+  })
+})
+
+describe('PropertiesPanel — read-only node type row (n2-properties #17)', () => {
+  it('shows a file-derived "Node type" row, not a misleading "Mode" row', () => {
+    const html = renderPanel({
+      id: 'review',
+      data: baseData({ mode: 'llm', filePath: 'phases/review/SKILL.md' }),
+      filePath: 'phases/review/SKILL.md',
+      content: ['---', 'name: review', 'llm_role: reviewer', '---', '<role>r</role>'].join('\n'),
+    })
+
+    // The old read-only inspection row was labelled "Mode" (implying a settable
+    // property). It is reworded to "Node type" with a file-as-truth-source hint.
+    expect(html).not.toContain('>Mode<')
+    expect(html).toContain('>Node type<')
+    expect(html).toContain('SKILL/LOGIC/SUBGRAPH.md')
+    expect(html).toContain('not editable')
+  })
+
+  it('keeps the type row file-derived for a logic node too', () => {
+    const html = renderPanel({
+      id: 'normalize',
+      data: baseData({ mode: 'logic', filePath: 'phases/normalize/LOGIC.md' }),
+      filePath: 'phases/normalize/LOGIC.md',
+      content: ['---', 'name: normalize', 'actions:', '  - strip_noise', '---', 'Body'].join('\n'),
+    })
+
+    expect(html).not.toContain('>Mode<')
+    expect(html).toContain('>Node type<')
   })
 })
 

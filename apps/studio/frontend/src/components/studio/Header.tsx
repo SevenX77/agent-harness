@@ -15,6 +15,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
@@ -235,6 +237,10 @@ export function Header({
                 {isSubmitting ? <Loader2 className="size-3 animate-spin" /> : null}
                 Submit for Review
               </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                Artifact Registry (not git push)
+              </DropdownMenuLabel>
               <DropdownMenuItem disabled={isPublishing || isPackaging} onClick={() => void publish.publish()}>
                 {isPublishing ? <Loader2 className="size-3 animate-spin" /> : null}
                 Release

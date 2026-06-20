@@ -53,6 +53,7 @@ const mocks = vi.hoisted(() => ({
   serializeSkillGraph: vi.fn(),
   mutateSkillDetail: vi.fn(),
   invoke: vi.fn(),
+  lintStatus: 'idle' as 'idle' | 'checking' | 'passed' | 'failed',
 }))
 
 const toastMocks = vi.hoisted(() => ({
@@ -97,7 +98,8 @@ vi.mock('@/hooks/useCopilotContext', () => ({
 }))
 
 vi.mock('@/hooks/useDebouncedLint', () => ({
-  readLintStatus: () => 'idle',
+  lintStatusEvent: 'studio-lint-status-changed',
+  readLintStatus: () => mocks.lintStatus,
 }))
 
 vi.mock('@/hooks/useGoldenDiff', () => ({
@@ -280,6 +282,7 @@ describe('Workspace WS-1 local writer contracts', () => {
     mocks.mutateSkillDetail.mockReset()
     mocks.invoke.mockReset()
     mocks.invoke.mockResolvedValue({ path: 'GRAPH.md', hash: 'native-hash' })
+    mocks.lintStatus = 'idle'
     toastMocks.error.mockReset()
     toastMocks.success.mockReset()
   })
@@ -533,6 +536,73 @@ describe('Workspace WS-1 local writer contracts', () => {
     renderWorkspace()
 
     expect(mocks.conflictDialogProps?.onOverwriteRetry).toBeTypeOf('function')
+  })
+
+  // N3 #12: a passing realtime lint must drive the build stage to 'compile-pass' (which
+  // is what unlocks Predict in the CenterActionBar) without the user clicking Compile.
+  // deriveBuildStage is the design atom — it reads readLintStatus and maps passed →
+  // compile-pass; Workspace subscribes to lintStatusEvent so the bar re-renders when it
+  // changes.
+  it('drives the build stage to compile-pass from a passing realtime lint', () => {
+    mocks.lintStatus = 'passed'
+
+    renderWorkspace()
+
+    expect(mocks.centerActionBarProps?.stage).toBe('compile-pass')
+  })
+
+  it('keeps the build stage idle while no lint has passed', () => {
+    mocks.lintStatus = 'idle'
+
+    renderWorkspace()
+
+    expect(mocks.centerActionBarProps?.stage).toBe('idle')
+  })
+
+  // N4 #4: a 2xx predict response carries PredictDiagnosticExport.status. A 'failed'
+  // status means the predicted path did not match — Run must stay locked. The handler
+  // must take the predict-fail branch: a diagnostic error toast naming the mismatched
+  // path, and NO "completed successfully" success toast (which is the predict-pass branch
+  // that would unlock Run). The success toast is the observable marker that the stage was
+  // advanced to predict-pass in this static-render harness.
+  it('takes the predict-fail branch and never unlocks Run when status is failed', async () => {
+    mocks.postPredictRun.mockResolvedValue({
+      is_predict: true,
+      status: 'failed',
+      phases: [],
+      path_diff: {
+        expected_path: ['draft', 'review'],
+        actual_path: ['draft'],
+        missing: ['review'],
+        extra: [],
+        order_mismatch: false,
+      },
+    })
+
+    renderWorkspace()
+    await mocks.centerActionBarProps?.onPredict?.()
+
+    expect(toastMocks.error).toHaveBeenCalledWith(expect.stringContaining('review'))
+    expect(toastMocks.success).not.toHaveBeenCalledWith(
+      expect.stringContaining('Predict run completed'),
+    )
+  })
+
+  it('takes the predict-pass branch only when status is success', async () => {
+    mocks.postPredictRun.mockResolvedValue({
+      is_predict: true,
+      status: 'success',
+      phases: [],
+      path_diff: null,
+    })
+
+    renderWorkspace()
+    await mocks.centerActionBarProps?.onPredict?.()
+
+    expect(toastMocks.success).toHaveBeenCalledWith(
+      expect.stringContaining('Predict run completed'),
+    )
+    expect(toastMocks.error).not.toHaveBeenCalled()
   })
 })
 

@@ -93,6 +93,38 @@ describe('buildNodes', () => {
     expect(nodes[nodes.length - 1].id).toBe(OUTPUT_ID)
   })
 
+  it('derives node kind from the phase FILE when topology.mode is absent (file is truth source)', () => {
+    const nodes = buildNodes('demo', skillDetail({
+      phases: ['draft'],
+      // No graph_topology row → topology.mode is undefined for this phase.
+      graph_topology: [],
+      files: {
+        'phases/draft/SKILL.md': ['---', 'name: draft', 'llm_role: writer', '---', 'Body'].join('\n'),
+      },
+    }), new Set(), () => {}, {})
+
+    const draft = phaseNode(nodes, 'draft')
+    expect(draft.mode).toBe('agent')
+    expect(draft.filePath).toBe('phases/draft/SKILL.md')
+  })
+
+  it('lets the phase FILE override a stale topology.mode rather than trusting the mutable mode', () => {
+    const nodes = buildNodes('demo', skillDetail({
+      phases: ['draft'],
+      // Stale topology.mode says "logic" but the directory only holds SKILL.md.
+      graph_topology: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'logic' },
+      ],
+      files: {
+        'phases/draft/SKILL.md': ['---', 'name: draft', 'llm_role: writer', '---', 'Body'].join('\n'),
+      },
+    }), new Set(), () => {}, {})
+
+    const draft = phaseNode(nodes, 'draft')
+    expect(draft.mode).toBe('agent')
+    expect(draft.filePath).toBe('phases/draft/SKILL.md')
+  })
+
   it('does not treat legacy SUBGRAPH target_skill as a drillable child path', () => {
     const nodes = buildNodes('demo', skillDetail({
       phases: ['legacy'],

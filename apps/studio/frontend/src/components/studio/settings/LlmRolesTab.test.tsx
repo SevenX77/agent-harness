@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { CredentialsState, ModelGroup, RolesData } from "../../../api/llm"
-import { roleChainStatusKey } from "../../../hooks/useRoleTestChainRunner"
+import { rolesDataToBackend } from "../../../api/llm"
+import { roleChainStatusKey, type RoleChainStatusMap } from "../../../hooks/useRoleTestChainRunner"
 import { AvailableModelDragPreview, LlmRolesTab, modelDropFailureMessage, roleIntentFromSettingsDraft, RoleSettingsFields } from "./LlmRolesTab"
 import {
   AvailableModelsSidebar,
@@ -13,7 +14,7 @@ import { ModelBundleCard } from "./llm-roles/ModelBundleCard"
 import { requestRoleDeleteConfirmation, RoleCard } from "./llm-roles/RoleCard"
 import { roleNameDisplayError, RoleNameDialog, RoleNameFields } from "./llm-roles/RoleNameDialog"
 import { roleTestStatusesByRole, __resetRoleTestStoreForTests, __setRoleTestStoreForTests } from "./llm-roles/role-test-store"
-import { appendAvailableModelToRole, appendModelGroupToRole, appendModelGroupToRoleWithResult, appendRole, normalizeRolesDraft, ownedProviderCodesForModel, pruneInvalidRoleProviders, removeModelFromRole, removeProviderFromRole, removeRole, renameRole, reorderModelInRole, reorderProviderInRole, toggleModelFallback, validateRolesDraft } from "./role-utils"
+import { appendAvailableModelToRole, appendModelGroupToRole, appendModelGroupToRoleWithResult, appendRole, attachBundleReferenceToRole, normalizeRolesDraft, ownedProviderCodesForModel, pruneInvalidRoleProviders, removeModelFromRole, removeProviderFromRole, removeRole, renameRole, reorderModelInRole, reorderProviderInRole, toggleModelFallback, validateRolesDraft } from "./role-utils"
 import { credentialsByProviderCode } from "./route-credentials"
 
 const toastMock = vi.hoisted(() => Object.assign(vi.fn(), {
@@ -2529,6 +2530,12 @@ describe("#50a model bundle status lights", () => {
 
   function renderBundleCardWithRoleFit(
     materializationReport: NonNullable<RolesData["model_bundles"]>[string]["materialization_report"],
+    extra?: {
+      onRunTest?: (bundleId: string) => void
+      testStatuses?: RoleChainStatusMap
+      testRunning?: boolean
+      bundleTestError?: string
+    },
   ): string {
     const bundle = {
       ...bundleData.model_bundles!.premium_stack,
@@ -2542,6 +2549,10 @@ describe("#50a model bundle status lights", () => {
         credentialsByCode={bundleCredentialsByCode}
         modelDisplayNamesByCode={new Map([["claude-sonnet-4-7", "Claude Sonnet 4.7"]])}
         providerModelsByRouteId={bundleProviderModelsByRouteId}
+        onRunTest={extra?.onRunTest}
+        testStatuses={extra?.testStatuses}
+        testRunning={extra?.testRunning}
+        bundleTestError={extra?.bundleTestError}
         getActiveAvailableModelDragId={() => null}
         getAvailableModelGroup={() => null}
         onChange={vi.fn()}
@@ -2550,17 +2561,13 @@ describe("#50a model bundle status lights", () => {
     )
   }
 
-  it("feeds bundle role-fit into ModelItem status lights and exposes no bundle test trigger", () => {
+  it("feeds bundle role-fit into ModelItem status lights (#50a)", () => {
     const html = renderBundleCardWithRoleFit(bundleData.model_bundles!.premium_stack.materialization_report)
 
     // Status light wiring present: role-fit drives a Can Run light fed via ModelItem.
     expect(html).toContain('data-role-route-status-light="true"')
     expect(html).toContain('aria-label="Role route status Can Run')
     expect(html).toContain('data-role-route-status="runnable"')
-    // #50b is 等后端: NO bundle test button / trigger.
-    expect(html).not.toContain('data-role-test-trigger="true"')
-    expect(html).not.toMatch(/>Test<\/button>/)
-    expect(html).not.toContain('aria-label="Test')
   })
 
   it("projects every backend role_fit verdict from the bundle materialization_report into the light", () => {
@@ -2642,6 +2649,41 @@ describe("#50a model bundle status lights", () => {
     expect(undefinedReport).toContain('data-role-route-status="runnable"')
     expect(undefinedReport).toContain('data-role-route-status-light="true"')
   })
+
+  it("renders a bundle Test button when onRunTest is wired (#50b)", () => {
+    const html = renderBundleCardWithRoleFit(
+      bundleData.model_bundles!.premium_stack.materialization_report,
+      { onRunTest: vi.fn() },
+    )
+    expect(html).toContain('data-model-bundle-test-trigger="true"')
+    expect(html).toMatch(/>Test<\/button>/)
+  })
+
+  it("shows Testing + projects live test statuses while a bundle test runs (#50b)", () => {
+    const html = renderBundleCardWithRoleFit(
+      bundleData.model_bundles!.premium_stack.materialization_report,
+      {
+        onRunTest: vi.fn(),
+        testRunning: true,
+        testStatuses: {
+          [roleChainStatusKey("claude-sonnet-4-7", "anthropic-official:claude-sonnet-4-7")]: {
+            status: "testing",
+          },
+        },
+      },
+    )
+    expect(html).toContain("Testing")
+    expect(html).toContain('data-role-route-status="testing"')
+  })
+
+  it("shows the bundle test error banner without a Test trigger when there is no handler", () => {
+    const html = renderBundleCardWithRoleFit(
+      bundleData.model_bundles!.premium_stack.materialization_report,
+      { bundleTestError: "probe exploded" },
+    )
+    expect(html).toContain('data-model-bundle-test-error="true"')
+    expect(html).toContain("probe exploded")
+  })
 })
 
 describe("#46 role test state projects from the module store on (re)mount", () => {
@@ -2714,5 +2756,79 @@ describe("#46 role test state projects from the module store on (re)mount", () =
 
     expect(html).toContain('data-role-test-error="true"')
     expect(html).toContain("Role Test failed: Save the role before testing:")
+  })
+})
+
+describe("#51 bundle drop creates a reference, not a snapshot", () => {
+  const referenceData: RolesData = {
+    models: {},
+    providers: {
+      "anthropic-official:claude-sonnet-4-7": {
+        name: "Anthropic Official",
+        type: "anthropic_compatible",
+        endpoint_id: "anthropic-official",
+      },
+    },
+    roles: {
+      analyst: { model_fallback_enabled: true, active_model: "", models: {} },
+    },
+    model_bundles: {
+      premium_stack: {
+        model_profile_id: "premium_stack",
+        display_name: "Premium Stack",
+        canonical_id: "bundle:premium_stack",
+        model_fallback_enabled: true,
+        intent: { provider_preference: "manual_order" },
+        model_groups: [{
+          canonical_id: "claude-sonnet-4-7",
+          display_name: "Claude Sonnet 4.7",
+          provider_models: [{ route_id: "anthropic-official:claude-sonnet-4-7" }],
+        }],
+        fallback_chain: [{ route_id: "anthropic-official:claude-sonnet-4-7" }],
+      },
+    },
+  }
+
+  it("sets role.bundle_id (reference) without snapshot-copying the bundle routes", () => {
+    const next = attachBundleReferenceToRole(referenceData, "analyst", "bundle:premium_stack")
+
+    // Reference, not snapshot: bundle_id points at the bundle, and the role's own
+    // model groups (the local delta layer) are NOT populated with the bundle routes.
+    expect(next.roles.analyst.bundle_id).toBe("premium_stack")
+    expect(Object.keys(next.roles.analyst.models)).toEqual([])
+    // The original is untouched (pure function).
+    expect(referenceData.roles.analyst.bundle_id).toBeUndefined()
+  })
+
+  it("ignores a non-bundle drag id (only bundle: ids attach a reference)", () => {
+    const next = attachBundleReferenceToRole(referenceData, "analyst", "claude-sonnet-4-7")
+    expect(next).toBe(referenceData)
+  })
+
+  it("round-trips bundle_id through the role serializer (reflects live bundle on re-projection)", () => {
+    const withReference = attachBundleReferenceToRole(referenceData, "analyst", "bundle:premium_stack")
+    const backend = rolesDataToBackend(withReference)
+    expect(backend.roles.analyst.bundle_id).toBe("premium_stack")
+  })
+
+  it("renders a 'Linked to bundle X' badge on a reference role (not a snapshot label)", () => {
+    const withReference = attachBundleReferenceToRole(referenceData, "analyst", "bundle:premium_stack")
+    const html = renderToStaticMarkup(
+      <RoleCard
+        data={withReference}
+        category="graph-agent"
+        credentialsByCode={{}}
+        modelDisplayNamesByCode={new Map()}
+        ownedProviderCodesByModel={new Map()}
+        roleName="analyst"
+        onRunTestChain={vi.fn()}
+        getActiveAvailableModelDragId={() => null}
+        getAvailableModelGroup={() => null}
+        onChange={vi.fn()}
+        onDeleteRole={vi.fn()}
+      />,
+    )
+    expect(html).toContain('data-role-linked-bundle="true"')
+    expect(html).toContain("Linked to bundle: Premium Stack")
   })
 })

@@ -1,5 +1,6 @@
 import type { Node } from '@xyflow/react'
 import type { CompileError, IoDeclaration } from '@/api/types'
+import type { GoldenNodeState } from '@/components/studio/node-golden'
 
 export type SkillNodeStatus = 'idle' | 'running' | 'success' | 'error' | 'paused' | 'breakpoint'
 
@@ -19,6 +20,12 @@ export interface SkillGraphNodeData extends Record<string, unknown> {
   status: SkillNodeStatus
   /** Compile/lint errors attributed to this phase node (separate channel from run status). */
   compileErrors?: CompileError[]
+  /**
+   * Golden acceptance state for this node (N4 atom #30), a separate channel from
+   * run status and compile health. Currently only 'has-golden' (node appears in a
+   * golden baseline's cases); undefined = not yet golden. See node-golden.ts.
+   */
+  goldenState?: GoldenNodeState
   dependsOn: string[]
   subgraphPath?: string | null
   subagents?: SubagentRef[]

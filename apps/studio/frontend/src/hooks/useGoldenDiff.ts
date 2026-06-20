@@ -40,14 +40,15 @@ export function useGoldenDiff(
     }
   }, [runId, skillId])
 
-  const promote = useCallback(async () => {
+  const promote = useCallback(async (nodeId?: string | null) => {
     if (!skillId || !runId) {
       return null
     }
 
     setState((current) => ({ ...current, error: null }))
     try {
-      return await saveGoldenBaseline(skillId, runId, false, workspaceRoot)
+      // nodeId set (atom #32) → per-node golden; omitted → run-level baseline.
+      return await saveGoldenBaseline(skillId, runId, false, workspaceRoot, nodeId)
     } catch (error) {
       const message = errorMessage(error)
       setState((current) => ({ ...current, error: message }))

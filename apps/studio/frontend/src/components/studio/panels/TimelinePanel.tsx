@@ -217,7 +217,7 @@ export function TimelinePanel() {
                 </span>
               </div>
               <div className="mt-1 flex items-center justify-between pl-6 text-[11px] text-muted-foreground">
-                <span>{formatDuration((run.metrics as unknown as Record<string, unknown>)?.wall_time_sec as number | null)}</span>
+                <span>{formatDuration(run.metrics?.wall_time_sec)}</span>
                 {run.metrics?.total_tokens ? <span>{run.metrics.total_tokens} tokens</span> : null}
               </div>
               <div className="pl-6">

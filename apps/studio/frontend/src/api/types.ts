@@ -165,6 +165,10 @@ export interface TokensMetrics {
   output_tokens: number
   total_tokens: number
   cost_estimate: number | null
+  // ⑧a: engine run wall-clock duration, projected through the Studio run history
+  // (backend models/runs.py declares it explicitly). Optional because older sealed
+  // runs may predate the field; the run list renders "n/a" when absent.
+  wall_time_sec?: number | null
 }
 
 export interface RunRequest {
@@ -307,6 +311,18 @@ export interface PredictDiagnosticExport {
   path_diff: PathDiff | null
 }
 
+/**
+ * One agent node's golden case, projected from baseline.json for the UI badge.
+ * Mirrors backend models/golden.py GoldenBaselineCase. Presence of a node_id in
+ * a baseline's `cases` is what drives the canvas golden 🟢 has-golden state.
+ */
+export interface GoldenBaselineCase {
+  case_id: string
+  node_id: string
+  phase_id: string
+  expected_output_ref: string
+}
+
 export interface GoldenBaseline {
   id: string
   source_run_id: string | null
@@ -316,6 +332,9 @@ export interface GoldenBaseline {
   created_at: string
   locked: boolean
   content_path: string
+  // Per-node cases projected from baseline.json. Optional/defaulted: older payloads
+  // may omit it — consumers treat an absent value as an empty list.
+  cases?: GoldenBaselineCase[]
 }
 
 export interface GoldenBaselineFile {
@@ -331,6 +350,10 @@ export interface GoldenBaselinePlan {
 export interface SetGoldenReq {
   run_id: string
   lock: boolean
+  // Per-node promote (atom #32): when set, the baseline is written for this agent
+  // node only (mirrors backend models/golden.py SetGoldenReq.node_id). Absent =
+  // run-level baseline over all agent nodes (existing behavior).
+  node_id?: string | null
 }
 
 export type FieldDiffType = 'text' | 'number' | 'bool' | 'list' | 'dict' | 'null' | 'unknown'

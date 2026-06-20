@@ -2,6 +2,7 @@ import yaml from 'js-yaml'
 import type { CompileError, IoDeclaration, PhaseDef, SkillDetail, SkillManifest, IoInput, IoOutput, GraphManifestV030, GraphTopologyItem } from '@/api/types'
 import { INPUT_ID, OUTPUT_ID, type GlobalNodeData, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus, type SubagentRef } from '@/components/nodes'
 import { normalizeAbsoluteSubgraphPath } from '@/components/studio/subgraph-path'
+import type { GoldenNodeState } from '@/components/studio/node-golden'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 
 const EMPTY_IO: IoDeclaration = { inputs: [], outputs: [] }
@@ -163,6 +164,7 @@ export function buildNodes(
   onToggleSubgraph: (nodeId: string) => void,
   statusByNodeId: Record<string, SkillNodeStatus>,
   compileErrorsByNodeId: Record<string, CompileError[]> = {},
+  goldenStateByNodeId: Record<string, GoldenNodeState> = {},
 ): GraphCanvasNode[] {
   const phases = phasesFromManifest(detail?.manifest, skillId)
   const io = ioFromManifest(detail?.manifest)
@@ -187,6 +189,7 @@ export function buildNodes(
         filePath,
         status: statusByNodeId[phase.name] ?? 'idle',
         compileErrors: compileErrorsByNodeId[phase.name] ?? [],
+        goldenState: goldenStateByNodeId[phase.name],
         dependsOn: topology?.depends_on ?? normalizeDependsOn(phase.depends_on),
         subgraphPath,
         isExpanded: expandedSubgraphs.has(phase.name),

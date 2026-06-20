@@ -2,6 +2,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { GraphCanvas, type SkillGraphNodeData, type SkillNodeStatus } from "@/components/GraphCanvas"
 import type { Connection } from "@xyflow/react"
 import type { CompileError, SkillDetail } from "@/api/types"
+import type { GoldenNodeState } from "@/components/studio/node-golden"
 import type { NewPhaseKind } from "@/components/GraphCanvas/canvas-authoring"
 import { LazyMonacoPanel } from "./LazyMonacoPanel"
 import { useWorkspaceContext, type EditorSide, type OpenFile } from "./WorkspaceContext"
@@ -20,6 +21,7 @@ interface SplitEditorProps {
   onPhaseFileSave?: (args: { path: string; content: string; expectedHash: string }) => Promise<void> | void
   statusByNodeId?: Record<string, SkillNodeStatus>
   compileErrorsByNodeId?: Record<string, CompileError[]>
+  goldenStateByNodeId?: Record<string, GoldenNodeState>
 }
 
 export function SplitEditor({
@@ -36,6 +38,7 @@ export function SplitEditor({
   onPhaseFileSave,
   statusByNodeId,
   compileErrorsByNodeId,
+  goldenStateByNodeId,
 }: SplitEditorProps) {
   const {
     activeFileDetails,
@@ -118,6 +121,7 @@ export function SplitEditor({
             onPhaseFileSave={onPhaseFileSave}
             statusByNodeId={statusByNodeId}
             compileErrorsByNodeId={compileErrorsByNodeId}
+            goldenStateByNodeId={goldenStateByNodeId}
             compact
           />
         </div>

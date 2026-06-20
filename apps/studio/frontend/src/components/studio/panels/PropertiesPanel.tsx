@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Loader2 } from "lucide-react"
+import { Loader2, ShieldCheck } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -121,6 +121,8 @@ interface PropertiesPanelProps {
   onFileOpen?: (fileOrPath: FileMeta | string) => void
   onPhaseFileSave?: (payload: { path: string; content: string; expectedHash: string }) => Promise<void> | void
   onResumeNode?: (options: ResumeRunOptions) => Promise<void> | void
+  /** Per-node golden promote (atom #32): write golden for just this node from the active run. */
+  onPromoteNode?: (nodeId: string) => Promise<void> | void
 }
 
 export function PropertiesPanel({
@@ -136,6 +138,7 @@ export function PropertiesPanel({
   onFileOpen,
   onPhaseFileSave,
   onResumeNode,
+  onPromoteNode,
 }: PropertiesPanelProps) {
 
   const modeLabel = selectedNode ? phaseKindLabel(selectedNode.data) : null
@@ -259,6 +262,14 @@ export function PropertiesPanel({
               resumeLoading={resumeLoading}
               onResumeNode={onResumeNode}
             />
+            {modeLabel === "AGENT" ? (
+              <NodeGoldenSection
+                runId={runId}
+                nodeId={selectedNode.id}
+                hasGolden={selectedNode.data.goldenState === "has-golden"}
+                onPromoteNode={onPromoteNode}
+              />
+            ) : null}
             {phaseFormState.ok && activeDraft ? (
               <PhaseFrontmatterForm
                 value={activeDraft}
@@ -307,6 +318,68 @@ export function PropertiesPanel({
           <div className="p-4 text-xs text-muted-foreground">Select a node to inspect</div>
         )}
       </ScrollArea>
+    </div>
+  )
+}
+
+/**
+ * Per-node golden promote (N4 atom #32). For an agent node, this writes a golden
+ * baseline for THIS node only from the active run (via the node_id-aware
+ * saveGoldenBaseline). Disabled until a run exists to promote from; once the node
+ * has a golden case it shows the captured state instead of the button.
+ */
+function NodeGoldenSection({
+  runId,
+  nodeId,
+  hasGolden,
+  onPromoteNode,
+}: {
+  runId: string | null
+  nodeId: string
+  hasGolden: boolean
+  onPromoteNode?: (nodeId: string) => Promise<void> | void
+}) {
+  const [promoting, setPromoting] = useState(false)
+
+  const handlePromote = async () => {
+    if (!onPromoteNode || !runId) return
+    setPromoting(true)
+    try {
+      await onPromoteNode(nodeId)
+    } finally {
+      setPromoting(false)
+    }
+  }
+
+  if (hasGolden) {
+    return (
+      <div className="flex items-center gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-600 dark:text-emerald-400">
+        <ShieldCheck className="size-3.5" />
+        <span>Golden captured for this node</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-md border border-border bg-card px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs text-muted-foreground">No golden for this node yet</span>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          disabled={!onPromoteNode || !runId || promoting}
+          onClick={() => {
+            void handlePromote()
+          }}
+        >
+          {promoting ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}
+          Promote to golden
+        </Button>
+      </div>
+      {!runId ? (
+        <p className="mt-1 text-[11px] text-muted-foreground">Run this skill first to capture a golden from its output.</p>
+      ) : null}
     </div>
   )
 }

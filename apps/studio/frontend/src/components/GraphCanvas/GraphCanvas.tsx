@@ -40,6 +40,7 @@ import { CycleDetectedError, getAutoLayoutedElements } from '@/lib/layout'
 import { ContextEdge, type ContextEdgeData } from '@/components/edges/ContextEdge'
 import { GlobalInputNode, GlobalOutputNode } from '@/components/nodes/GlobalInputOutputNode'
 import { buildEdges, INPUT_ID, OUTPUT_ID, SkillNode, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
+import type { GoldenNodeState } from '@/components/studio/node-golden'
 import { useOptionalWorkspaceContext } from '@/components/studio/WorkspaceContext'
 import { normalizeAbsoluteSubgraphPath } from '@/components/studio/subgraph-path'
 import type { PanelKind } from '@/components/studio/Toolbar'
@@ -68,6 +69,7 @@ interface GraphCanvasProps {
   onDisconnectConnection?: (connection: { source: string; target: string }) => Promise<void> | void
   statusByNodeId?: Record<string, SkillNodeStatus>
   compileErrorsByNodeId?: Record<string, CompileError[]>
+  goldenStateByNodeId?: Record<string, GoldenNodeState>
   compact?: boolean
   onPhaseFileSave?: (args: { path: string; content: string; expectedHash: string }) => Promise<void> | void
 }
@@ -118,6 +120,7 @@ export function GraphCanvas({
   onDisconnectConnection,
   statusByNodeId,
   compileErrorsByNodeId,
+  goldenStateByNodeId,
   compact = false,
   onPhaseFileSave,
 }: GraphCanvasProps) {
@@ -277,6 +280,7 @@ export function GraphCanvas({
   }, [skillId, drilledPath])
   const safeStatusByNodeId = useMemo(() => statusByNodeId ?? {}, [statusByNodeId])
   const safeCompileErrorsByNodeId = useMemo(() => compileErrorsByNodeId ?? {}, [compileErrorsByNodeId])
+  const safeGoldenStateByNodeId = useMemo(() => goldenStateByNodeId ?? {}, [goldenStateByNodeId])
   const compactRatio = compact && canvasHeight > 0 && canvasHeight < 500 ? 0.2 : 0
 
   useEffect(() => {
@@ -297,8 +301,8 @@ export function GraphCanvas({
       if (!childGraph) return []
       return buildNodesFromTopology(skillId, childGraph.phases, childGraph.graph_topology, {})
     }
-    return buildNodes(skillId, skillDetail, expandedSubgraphs, toggleSubgraph, safeStatusByNodeId, safeCompileErrorsByNodeId)
-  }, [childGraph, expandedSubgraphs, isDrilled, safeStatusByNodeId, safeCompileErrorsByNodeId, skillDetail, skillId, toggleSubgraph])
+    return buildNodes(skillId, skillDetail, expandedSubgraphs, toggleSubgraph, safeStatusByNodeId, safeCompileErrorsByNodeId, safeGoldenStateByNodeId)
+  }, [childGraph, expandedSubgraphs, isDrilled, safeStatusByNodeId, safeCompileErrorsByNodeId, safeGoldenStateByNodeId, skillDetail, skillId, toggleSubgraph])
   const phaseNodes = useMemo(
     () => rawNodes.filter((node): node is SkillGraphNode => node.type === 'skill'),
     [rawNodes],

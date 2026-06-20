@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { AlertTriangle, Bot, Briefcase, CheckCircle2, Circle, Code, Minus, Network, Pause, Plus, Radio, Workflow } from 'lucide-react'
+import { AlertTriangle, Bot, Briefcase, CheckCircle2, Circle, Code, Minus, Network, Pause, Plus, Radio, ShieldCheck, Workflow } from 'lucide-react'
 import { SubgraphInline } from '@/components/studio/SubgraphInline'
 import { normalizeAbsoluteSubgraphPath } from '@/components/studio/subgraph-path'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -62,6 +62,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
   const resolvedSubgraphPath = normalizeAbsoluteSubgraphPath(data.subgraphPath)
   const subagentCount = data.subagents?.length ?? 0
   const compileErrorCount = data.compileErrors?.length ?? 0
+  const hasGolden = data.goldenState === 'has-golden'
 
   const nodeContent = (
     <div
@@ -116,6 +117,19 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
                   </span>
                 </TooltipTrigger>
                 <TooltipContent side="top">{compileErrorCount} compile error(s) on this node</TooltipContent>
+              </Tooltip>
+            ) : null}
+            {hasGolden ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    aria-label="Golden captured"
+                    className="inline-flex size-5 items-center justify-center rounded-md border border-emerald-500/45 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                  >
+                    <ShieldCheck className="size-3" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top">Golden captured for this node</TooltipContent>
               </Tooltip>
             ) : null}
           </div>

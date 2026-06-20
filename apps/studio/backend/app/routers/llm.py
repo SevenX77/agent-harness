@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, NoReturn, cast
-from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -20,13 +19,17 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.adapters.gateway import (
     CredentialProviderProtocol,
+    EndpointProbeResult,
     GatewayProviderRoute,
     GatewayRoleEntry,
+    OfficialCallMethod,
     ProfileSelectionError,
     ProviderModelStateProjection,
+    ProviderProbeBackend,
     RegistryResolutionError,
-    ResourceTerminalError,
     ResolvedRoute,
+    ResourceTerminalError,
+    RouteProbeResult,
     RuntimeSettings,
     VerifiedProfile,
     build_runtime_setting_descriptors,
@@ -34,6 +37,21 @@ from app.core.adapters.gateway import (
     lint_role_routes,
     normalize_route_capabilities,
     select_verified_profile,
+)
+from app.core.adapters.gateway import (
+    endpoint_probe_backend as _gateway_endpoint_probe_backend,
+)
+from app.core.adapters.gateway import (
+    endpoint_probe_base_url as _gateway_endpoint_probe_base_url,
+)
+from app.core.adapters.gateway import (
+    probe_official_call_method as _gateway_probe_official_call_method_request,
+)
+from app.core.adapters.gateway import (
+    test_provider_endpoint as _gateway_test_provider_endpoint_request,
+)
+from app.core.adapters.gateway import (
+    test_provider_route as _gateway_test_provider_route_request,
 )
 from app.core.adapters.transport_factory import build_gateway_adapter
 from app.models.llm_config import (
@@ -54,19 +72,12 @@ from app.models.llm_config import (
 )
 from app.services import copilot
 from app.services.copilot_test import (
-    CopilotProvider,
     ModelProbeResult,
-    OfficialCallMethod,
     PingResult,
     _NetworkError,
-    _ping_provider,
-    _probe_model,
     _QuotaExceeded,
     _RateLimited,
     _Unauthorized,
-)
-from app.services.copilot_test import (
-    _probe_official_call_method as _probe_official_call_method_request,
 )
 from app.services.gateway_resolver import build_gateway_route_runtime
 from app.services.llm_credentials import (
@@ -137,6 +148,42 @@ _THINKING_CAPABILITY_KEYS = (
     "reasoning",
     "supports_thinking",
 )
+
+
+async def _ping_provider(
+    backend: ProviderProbeBackend,
+    api_key: str,
+    base_url: str,
+) -> PingResult:
+    del backend, api_key, base_url
+    raise RuntimeError("Studio no longer owns provider endpoint probes; use Gateway provider_probe.")
+
+
+async def _probe_model(
+    backend: ProviderProbeBackend,
+    api_key: str,
+    base_url: str,
+    model_id: str,
+    runtime_settings: dict[str, Any] | None = None,
+) -> ModelProbeResult:
+    del backend, api_key, base_url, model_id, runtime_settings
+    raise RuntimeError("Studio no longer owns provider route probes; use Gateway provider_probe.")
+
+
+async def _probe_official_call_method_request(
+    method_id: OfficialCallMethod,
+    api_key: str,
+    base_url: str,
+    model_id: str,
+    runtime_settings: dict[str, Any] | None = None,
+) -> ModelProbeResult:
+    del method_id, api_key, base_url, model_id, runtime_settings
+    raise RuntimeError("Studio no longer owns official provider route probes; use Gateway provider_probe.")
+
+
+_ORIGINAL_PING_PROVIDER = _ping_provider
+_ORIGINAL_PROBE_MODEL = _probe_model
+_ORIGINAL_PROBE_OFFICIAL_CALL_METHOD_REQUEST = _probe_official_call_method_request
 
 
 @dataclass(frozen=True)
@@ -387,16 +434,11 @@ async def delete_registry_endpoint(endpoint_id: str) -> dict[str, Any]:
     response_model=EndpointTestJobResponse,
 )
 async def start_endpoint_test_job(endpoint_id: str) -> EndpointTestJobResponse:
-    """Start an official provider test job that reports compact progress."""
+    """Start a provider test job that reports compact progress."""
     credentials = load_credentials()
     endpoint = credentials.provider_endpoints.get(endpoint_id)
     if endpoint is None:
         raise HTTPException(status_code=404, detail=f"Unknown endpoint: {endpoint_id}")
-    if endpoint.provider_kind != "official":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Endpoint test jobs are only supported for official providers: {endpoint_id}",
-        )
     async with _endpoint_test_jobs_lock:
         running_job_id = _running_endpoint_test_jobs.get(endpoint_id)
         if running_job_id is not None:
@@ -412,7 +454,7 @@ async def start_endpoint_test_job(endpoint_id: str) -> EndpointTestJobResponse:
         )
         _endpoint_test_jobs[job.job_id] = job
         _running_endpoint_test_jobs[endpoint_id] = job.job_id
-    _spawn_background_task(_run_official_endpoint_test_job(job.job_id, endpoint_id))
+    _spawn_background_task(_run_endpoint_test_job(job.job_id, endpoint_id))
     return job
 
 
@@ -490,42 +532,24 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
     model_list_reached = False
     discovered_model_ids: tuple[str, ...] = ()
     raw_capabilities_by_model: dict[str, dict[str, Any]] = {}
-    if endpoint.api_key and endpoint.api_key.get_secret_value():
-        probe_backend = _endpoint_probe_backend(endpoint)
-        probe_base_url = _endpoint_probe_base_url(endpoint)
-        logger.warning(
-            "testing LLM endpoint protocol=%s backend=%s",
-            endpoint.protocol,
-            probe_backend,
-        )
-        try:
-            result = await _ping_provider(
-                probe_backend,
-                endpoint.api_key.get_secret_value(),
-                probe_base_url,
-            )
-        except _Unauthorized as exc:
-            message = _provider_error_message("Invalid API key", exc)
-        except _RateLimited as exc:
-            message = _provider_error_message("Provider rate limited the test request", exc)
-        except _QuotaExceeded as exc:
-            message = _provider_error_message(
-                "Provider rejected the key because quota or billing is unavailable",
-                exc,
-            )
-        except httpx.TimeoutException:
-            message = "Endpoint test timed out."
-        except _NetworkError as exc:
-            message = _provider_error_message("Network error while testing endpoint", exc)
+    probe_backend = _endpoint_probe_backend(endpoint)
+    logger.warning(
+        "testing LLM endpoint protocol=%s backend=%s",
+        endpoint.protocol,
+        probe_backend,
+    )
+    result = await _gateway_test_provider_endpoint(endpoint)
+    if result.status == "ok":
+        status = "unverified_manual"
+        model_list_reached = True
+        if not result.model_ids:
+            message = "Endpoint reachable but returned no models."
         else:
-            status = "unverified_manual"
-            model_list_reached = True
-            if not result.model_ids:
-                message = "Endpoint reachable but returned no models."
-            else:
-                message = _endpoint_success_message(result)
-                discovered_model_ids = result.model_ids
-                raw_capabilities_by_model = result.model_capabilities
+            message = _endpoint_success_message(result)
+            discovered_model_ids = result.model_ids
+            raw_capabilities_by_model = result.model_capabilities
+    else:
+        message = _endpoint_probe_failure_message(result)
     latest_credentials = load_credentials()
     latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
     if latest_endpoint is None:
@@ -696,11 +720,8 @@ async def test_endpoint_models(
     probe_results: list[ModelProbeResult] = []
     for model_id in requested_model_ids:
         probe_results.append(
-            await _probe_model(
-                _endpoint_probe_backend(endpoint),
-                endpoint.api_key.get_secret_value(),
-                _endpoint_probe_base_url(endpoint),
-                model_id,
+            _model_probe_result_from_route_probe(
+                await _gateway_test_provider_model(endpoint, model_id)
             )
         )
     successful_model_ids = [result.model_id for result in probe_results if result.status == "ok"]
@@ -2049,11 +2070,8 @@ async def _force_probe_route(
         credentials.provider_routes[route.route_id] = updated
         save_credentials(credentials)
         return updated
-    result = await _probe_model(
-        _endpoint_probe_backend(endpoint),
-        endpoint.api_key.get_secret_value(),
-        _endpoint_probe_base_url(endpoint),
-        route.provider_model_id,
+    result = _model_probe_result_from_route_probe(
+        await _gateway_test_provider_route(endpoint, route)
     )
     if result.status == "ok":
         updated = route.model_copy(
@@ -2608,7 +2626,7 @@ async def _probe_role_route(
                 status="invalid_key",
                 message="API key is empty.",
             )
-        return await _probe_official_call_method_request(
+        return await _gateway_probe_official_call_method(
             cast(OfficialCallMethod, selected_profile.method_id),
             endpoint.api_key.get_secret_value(),
             _endpoint_probe_base_url(endpoint),
@@ -2626,12 +2644,12 @@ async def _probe_role_route(
             message=ROLE_TEST_NO_VERIFIED_PROFILE_MESSAGE,
         )
 
-    return await _probe_model(
-        _endpoint_probe_backend(endpoint),
-        endpoint.api_key.get_secret_value() if endpoint.api_key is not None else "",
-        _endpoint_probe_base_url(endpoint),
-        route.provider_model_id,
-        runtime_settings=resolved_settings or None,
+    return _model_probe_result_from_route_probe(
+        await _gateway_test_provider_route(
+            endpoint,
+            route,
+            runtime_settings=resolved_settings or None,
+        )
     )
 
 
@@ -2772,7 +2790,7 @@ async def _probe_official_call_method(
             status="invalid_key",
             message="API key is empty.",
         )
-    return await _probe_official_call_method_request(
+    return await _gateway_probe_official_call_method(
         candidate.method_id,
         endpoint.api_key.get_secret_value(),
         _endpoint_probe_base_url(endpoint),
@@ -3755,11 +3773,11 @@ def _official_model_type_capability_values(
     }
 
 
-async def _run_official_endpoint_test_job(job_id: str, endpoint_id: str) -> None:
+async def _run_endpoint_test_job(job_id: str, endpoint_id: str) -> None:
     try:
-        await _run_official_endpoint_test_job_impl(job_id, endpoint_id)
+        await _run_endpoint_test_job_impl(job_id, endpoint_id)
     except Exception as exc:
-        logger.exception("official endpoint test job failed")
+        logger.exception("endpoint test job failed")
         await _record_endpoint_test_job_failure(
             job_id,
             endpoint_id,
@@ -3767,7 +3785,7 @@ async def _run_official_endpoint_test_job(job_id: str, endpoint_id: str) -> None
         )
 
 
-async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) -> None:
+async def _run_endpoint_test_job_impl(job_id: str, endpoint_id: str) -> None:
     credentials = load_credentials()
     endpoint = credentials.provider_endpoints.get(endpoint_id)
     if endpoint is None:
@@ -3784,54 +3802,12 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
         return
 
     await _update_endpoint_test_job(job_id, status="running", message="Reading provider catalog.")
-    probe_backend = _endpoint_probe_backend(endpoint)
-    probe_base_url = _endpoint_probe_base_url(endpoint)
-    try:
-        result = await _ping_provider(
-            probe_backend,
-            endpoint.api_key.get_secret_value(),
-            probe_base_url,
-        )
-    except _Unauthorized as exc:
+    result = await _gateway_test_provider_endpoint(endpoint)
+    if result.status != "ok":
         await _record_endpoint_test_job_failure(
             job_id,
             endpoint_id,
-            _provider_error_message("Invalid API key", exc),
-            starting_fingerprint,
-        )
-        return
-    except _RateLimited as exc:
-        await _record_endpoint_test_job_failure(
-            job_id,
-            endpoint_id,
-            _provider_error_message("Provider rate limited the test request", exc),
-            starting_fingerprint,
-        )
-        return
-    except _QuotaExceeded as exc:
-        await _record_endpoint_test_job_failure(
-            job_id,
-            endpoint_id,
-            _provider_error_message(
-                "Provider rejected the key because quota or billing is unavailable",
-                exc,
-            ),
-            starting_fingerprint,
-        )
-        return
-    except httpx.TimeoutException:
-        await _record_endpoint_test_job_failure(
-            job_id,
-            endpoint_id,
-            "Endpoint test timed out.",
-            starting_fingerprint,
-        )
-        return
-    except _NetworkError as exc:
-        await _record_endpoint_test_job_failure(
-            job_id,
-            endpoint_id,
-            _provider_error_message("Network error while testing endpoint", exc),
+            _endpoint_probe_failure_message(result),
             starting_fingerprint,
         )
         return
@@ -3898,7 +3874,7 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
         await _finish_endpoint_test_job(job_id, "failed", f"Unknown endpoint: {endpoint_id}")
         return
     final_models = [
-        _compact_model_info_for_listed_official_route(
+        _compact_model_info_for_listed_route(
             latest_credentials,
             latest_endpoint,
             model_id,
@@ -3908,9 +3884,12 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
         for model_id in discovered_model_ids
     ]
     latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id, latest_endpoint)
+    endpoint_status: Literal["verified", "unverified_manual"] = (
+        "verified" if latest_endpoint.provider_kind == "official" else "unverified_manual"
+    )
     latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint.model_copy(
         update={
-            "status": "verified",
+            "status": endpoint_status,
             "last_test_at": _now_iso(),
             "last_test_message": _endpoint_success_message(result),
         }
@@ -3966,6 +3945,34 @@ async def _probe_official_profile_batch(
                 await mark_active(model_id, False)
 
     return await asyncio.gather(*(probe(model_id) for model_id in model_ids))
+
+
+def _compact_model_info_for_listed_route(
+    credentials: LLMCredentialsFile,
+    endpoint: ProviderEndpoint,
+    model_id: str,
+    route_id: str | None,
+    raw_capabilities: dict[str, Any] | None,
+) -> EndpointTestCompactModelInfo:
+    if endpoint.provider_kind == "official":
+        return _compact_model_info_for_listed_official_route(
+            credentials,
+            endpoint,
+            model_id,
+            route_id,
+            raw_capabilities,
+        )
+    route = credentials.provider_routes.get(route_id) if route_id is not None else None
+    model_status: Literal["verified", "unverified_manual", "disabled", "failed", "testing", "probe-verified"]
+    model_status = route.status if route is not None else "unverified_manual"
+    return EndpointTestCompactModelInfo(
+        id=model_id,
+        route_id=route_id,
+        status=model_status,
+        verified_profile_count=0,
+        last_probe_message=_route_failure_message(route),
+        capabilities=raw_capabilities or {},
+    )
 
 
 def _compact_model_info_for_listed_official_route(
@@ -4724,41 +4731,199 @@ def _capability_key(value: str) -> str:
     }.get(value, value)
 
 
-def _endpoint_probe_backend(endpoint: ProviderEndpoint) -> CopilotProvider:
-    base_host = _url_hostname(endpoint.base_url)
-    endpoint_id = endpoint.endpoint_id.lower()
-    if endpoint.protocol == "ark_runtime" or _host_matches(base_host, "volces.com") or "ark" in endpoint_id:
-        return "ark"
-    if endpoint.protocol == "anthropic_compatible":
-        return "claude"
-    if endpoint.protocol == "google_genai":
-        return "gemini"
-    if "deepseek" in base_host or "deepseek" in endpoint_id:
-        return "deepseek"
-    return "openai"
+def _endpoint_probe_backend(endpoint: ProviderEndpoint) -> ProviderProbeBackend:
+    return _gateway_endpoint_probe_backend(endpoint)
 
 
 def _endpoint_probe_base_url(endpoint: ProviderEndpoint) -> str:
-    return endpoint.base_url.rstrip("/")
+    return _gateway_endpoint_probe_base_url(endpoint)
 
 
-def _url_hostname(raw_url: str) -> str:
-    if not raw_url:
-        return ""
-    parsed = urlparse(raw_url if "://" in raw_url else f"https://{raw_url}")
-    return (parsed.hostname or "").lower().rstrip(".")
+async def _gateway_test_provider_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
+    if _ping_provider is not _ORIGINAL_PING_PROVIDER:
+        return await _legacy_endpoint_probe_adapter(endpoint)
+    return await _gateway_test_provider_endpoint_request(endpoint)
 
 
-def _host_matches(hostname: str, domain: str) -> bool:
-    normalized_domain = domain.lower().rstrip(".")
-    return hostname == normalized_domain or hostname.endswith(f".{normalized_domain}")
+async def _legacy_endpoint_probe_adapter(endpoint: ProviderEndpoint) -> EndpointProbeResult:
+    backend = _endpoint_probe_backend(endpoint)
+    base_url = _endpoint_probe_base_url(endpoint)
+    api_key = endpoint.api_key.get_secret_value() if endpoint.api_key is not None else ""
+    if not api_key:
+        return EndpointProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            provider_kind=endpoint.provider_kind,
+            backend=backend,
+            base_url=base_url,
+            status="invalid_key",
+            message="API key is empty.",
+        )
+    try:
+        result = await _ping_provider(backend, api_key, base_url)
+    except _Unauthorized as exc:
+        return _endpoint_probe_error_result(endpoint, backend, base_url, "invalid_key", exc)
+    except _RateLimited as exc:
+        return _endpoint_probe_error_result(endpoint, backend, base_url, "rate_limited", exc)
+    except _QuotaExceeded as exc:
+        return _endpoint_probe_error_result(endpoint, backend, base_url, "quota_exceeded", exc)
+    except httpx.TimeoutException:
+        return EndpointProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            provider_kind=endpoint.provider_kind,
+            backend=backend,
+            base_url=base_url,
+            status="timeout",
+            message="Endpoint test timed out.",
+        )
+    except _NetworkError as exc:
+        return _endpoint_probe_error_result(endpoint, backend, base_url, "network_error", exc)
+    return EndpointProbeResult(
+        endpoint_id=endpoint.endpoint_id,
+        provider_kind=endpoint.provider_kind,
+        backend=backend,
+        base_url=base_url,
+        status="ok",
+        latency_ms=result.latency_ms,
+        model_ids=result.model_ids,
+        model_capabilities=result.model_capabilities,
+    )
 
 
-def _endpoint_success_message(result: PingResult) -> str:
+def _endpoint_probe_error_result(
+    endpoint: ProviderEndpoint,
+    backend: ProviderProbeBackend,
+    base_url: str,
+    status: Literal["invalid_key", "rate_limited", "quota_exceeded", "network_error"],
+    exc: BaseException,
+) -> EndpointProbeResult:
+    return EndpointProbeResult(
+        endpoint_id=endpoint.endpoint_id,
+        provider_kind=endpoint.provider_kind,
+        backend=backend,
+        base_url=base_url,
+        status=status,
+        message=str(exc) or None,
+        error_code=getattr(exc, "error_code", "") or status,
+    )
+
+
+async def _gateway_test_provider_model(
+    endpoint: ProviderEndpoint,
+    model_id: str,
+    *,
+    runtime_settings: dict[str, Any] | None = None,
+) -> RouteProbeResult:
+    route_slug = _route_slug(model_id)
+    route = ProviderRoute(
+        route_id=f"{endpoint.endpoint_id}:{route_slug}",
+        endpoint_id=endpoint.endpoint_id,
+        route_slug=route_slug,
+        provider_model_id=model_id,
+        canonical_id=model_id,
+    )
+    return await _gateway_test_provider_route(endpoint, route, runtime_settings=runtime_settings)
+
+
+async def _gateway_test_provider_route(
+    endpoint: ProviderEndpoint,
+    route: ProviderRoute,
+    *,
+    runtime_settings: dict[str, Any] | None = None,
+) -> RouteProbeResult:
+    if _probe_model is not _ORIGINAL_PROBE_MODEL:
+        probe_kwargs: dict[str, Any] = {}
+        if runtime_settings is not None:
+            probe_kwargs["runtime_settings"] = runtime_settings
+        result = await _probe_model(
+            _endpoint_probe_backend(endpoint),
+            endpoint.api_key.get_secret_value() if endpoint.api_key is not None else "",
+            _endpoint_probe_base_url(endpoint),
+            route.provider_model_id,
+            **probe_kwargs,
+        )
+        return _route_probe_result_from_model_probe(endpoint, route, result)
+    return await _gateway_test_provider_route_request(
+        endpoint,
+        route,
+        runtime_settings=runtime_settings,
+    )
+
+
+async def _gateway_probe_official_call_method(
+    method_id: OfficialCallMethod,
+    api_key: str,
+    base_url: str,
+    model_id: str,
+    *,
+    runtime_settings: dict[str, Any] | None = None,
+) -> ModelProbeResult:
+    if _probe_official_call_method_request is not _ORIGINAL_PROBE_OFFICIAL_CALL_METHOD_REQUEST:
+        return await _probe_official_call_method_request(
+            method_id,
+            api_key,
+            base_url,
+            model_id,
+            runtime_settings=runtime_settings,
+        )
+    result = await _gateway_probe_official_call_method_request(
+        method_id,
+        api_key,
+        base_url,
+        model_id,
+        runtime_settings=runtime_settings,
+    )
+    return _model_probe_result_from_route_probe(result)
+
+
+def _route_probe_result_from_model_probe(
+    endpoint: ProviderEndpoint,
+    route: ProviderRoute,
+    result: ModelProbeResult,
+) -> RouteProbeResult:
+    return RouteProbeResult(
+        endpoint_id=endpoint.endpoint_id,
+        route_id=route.route_id,
+        provider_kind=endpoint.provider_kind,
+        backend=_endpoint_probe_backend(endpoint),
+        base_url=_endpoint_probe_base_url(endpoint),
+        model_id=result.model_id,
+        status=result.status,
+        latency_ms=result.latency_ms,
+        message=result.message,
+    )
+
+
+def _model_probe_result_from_route_probe(result: RouteProbeResult) -> ModelProbeResult:
+    return ModelProbeResult(
+        model_id=result.model_id,
+        status=result.status,
+        latency_ms=result.latency_ms,
+        message=result.message,
+    )
+
+
+def _endpoint_success_message(result: PingResult | EndpointProbeResult) -> str:
     message = f"Connected in {result.latency_ms}ms."
     if result.model_seen:
         message = f"{message} Model seen: {result.model_seen}."
     return message
+
+
+def _endpoint_probe_failure_message(result: EndpointProbeResult) -> str:
+    if result.status == "invalid_key":
+        return _provider_probe_error_message("Invalid API key", result)
+    if result.status == "rate_limited":
+        return _provider_probe_error_message("Provider rate limited the test request", result)
+    if result.status == "quota_exceeded":
+        return _provider_probe_error_message(
+            "Provider rejected the key because quota or billing is unavailable",
+            result,
+        )
+    if result.status == "timeout":
+        return "Endpoint test timed out."
+    if result.status == "network_error":
+        return _provider_probe_error_message("Network error while testing endpoint", result)
+    return _provider_probe_error_message("Endpoint test failed", result)
 
 
 def _model_probe_failure_message(result: ModelProbeResult) -> str:
@@ -4772,6 +4937,14 @@ def _provider_error_message(prefix: str, exc: BaseException) -> str:
     error_code = getattr(exc, "error_code", "")
     if error_code:
         return f"{prefix} ({error_code})."
+    return f"{prefix}."
+
+
+def _provider_probe_error_message(prefix: str, result: EndpointProbeResult) -> str:
+    if result.error_code:
+        return f"{prefix} ({result.error_code})."
+    if result.message:
+        return f"{prefix}. {result.message}"
     return f"{prefix}."
 
 

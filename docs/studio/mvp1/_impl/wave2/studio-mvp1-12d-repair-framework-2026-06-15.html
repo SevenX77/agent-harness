@@ -258,14 +258,14 @@ const S0_PAGE = {
       ['reviewer findings 修复/关闭','ok'],
       ['HTML 状态页同步最终证据','ok']
     ]}],
-    ['Wave 5 · MVP1 前端驱动的后端 follow-up（来自前端逐节点实施核验 2026-06-19）','前端逐节点核验暴露的、落在 12D 域内但「ok 门」未 drill 到端点/字段粒度的后端 gap，需对应后端团队补——当前 10 项已完成，1 项仍未开始。',{tasks:[
+    ['Wave 5 · MVP1 前端驱动的后端 follow-up（来自前端逐节点实施核验 2026-06-19）','前端逐节点核验暴露的、落在 12D 域内但「ok 门」未 drill 到端点/字段粒度的后端 gap，需对应后端团队补——当前 11 项已完成，0 项仍未开始。',{tasks:[
       ['D3/D8 · G1 定位轴：compile 错误填满 field_path/source_path + 不在 sidecar 边界(_safe_adapter_error_payload)降级','ok'],
       ['D5 · test/probe 内核归 Gateway + 删官方-only 门禁 + 统一 test 入口 + 束 test 端点（Copilot SDK test 留 Studio）','ok'],
       ['D6 · 6 态投到裸 route DTO（ProviderRoute.ui_state）','ok'],
       ['D6 · 束=引用 + delta materialize（RoleEntry.bundle_id）','ok'],
       ['D6 · role intent schema 清理（删 inherit / ModelGroupIntent / cost_priority）','ok'],
       ['D6 · P8 临时 role 解析路径（依赖束 materialize）','ok'],
-      ['D7 · per-node golden 契约（SetGoldenReq.node_id + GoldenBaseline.cases 投影 + 单节点 plan；DTO 归 sidecar、落盘走 Rust native-fs）','todo'],
+      ['D7 · per-node golden 契约（SetGoldenReq.node_id + GoldenBaseline.cases 投影 + 单节点 plan；DTO 归 sidecar、落盘走通用 Rust native-fs write_workspace_file；旧 write_golden_baseline 专用命令已删除）','ok'],
       ['D7 · eval 期 [F-v3-golden-stale-fields] 码注册并发射','ok'],
       ['D10/D11 · HitL Interrupted/ResumedEvent 真发射 + 事件带 checkpoint_id/ns','ok'],
       ['D10 · per-node checkpoint validity（脏态置灰，非全局判定）','ok'],
@@ -869,7 +869,7 @@ const FOLLOWUPS = {
   d8:[],
   d5:[['test/probe 内核归 Gateway + 删官方-only 门禁 + 统一 test 入口 + 束 test 端点（Copilot SDK test 留 Studio）','ok']],
   d6:[['6 态投到裸 route DTO（`ProviderRoute.ui_state`）','ok'],['role intent schema 清理（删 inherit / ModelGroupIntent / cost_priority）','ok']],
-  d7:['per-node golden：per-node 模型/cases/失效归 engine 服务（F5/ENGINE-3）；写 .workspace/golden 走 Rust 原生层（write_golden_baseline）；Studio 后端壳投影 `SetGoldenReq.node_id` + `GoldenBaseline.cases` DTO',['eval 期 `[F-v3-golden-stale-fields]` 错误码注册并发射','ok']],
+  d7:[['per-node golden：per-node 模型/cases/失效归 engine 服务（F5/ENGINE-3）；写 .workspace/golden 走通用 Rust 原生层（write_workspace_file）；Studio 后端壳投影 `SetGoldenReq.node_id` + `GoldenBaseline.cases` DTO；旧 `write_golden_baseline` 专用命令已删除','ok'],['eval 期 `[F-v3-golden-stale-fields]` 错误码注册并发射','ok']],
   d10:[['HitL Interrupted/ResumedEvent 真发射 + 事件带 `checkpoint_id`/ns','ok'],['per-node checkpoint validity（脏态置灰，非全局判定）','ok'],['节点级 1..X-1 不重跑编排','ok']],
   d11:[['HitL Interrupted/ResumedEvent 真发射 + 事件带 `checkpoint_id`/ns','ok']]
 };

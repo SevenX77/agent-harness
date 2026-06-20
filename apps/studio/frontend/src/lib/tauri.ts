@@ -236,28 +236,6 @@ export async function writePublishPackage(
   })
 }
 
-export interface GoldenBaselineWritePayload {
-  resultPath: string
-  resultContent: string
-  metadataPath: string
-  metadataContent: string
-}
-
-export async function writeGoldenBaseline(
-  workspaceRoot: string,
-  payload: GoldenBaselineWritePayload,
-): Promise<void> {
-  assertNativeHelpersAvailable()
-  const { invoke } = await import('@tauri-apps/api/core')
-  await invoke('write_golden_baseline', {
-    workspaceRoot,
-    resultPath: payload.resultPath,
-    resultContent: payload.resultContent,
-    metadataPath: payload.metadataPath,
-    metadataContent: payload.metadataContent,
-  })
-}
-
 export async function deleteWorkspacePath(
   workspaceRoot: string,
   path: string,

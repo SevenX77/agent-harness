@@ -332,7 +332,6 @@ pub fn run() {
             reveal_in_file_manager,
             native_fs::write_workspace_file,
             native_fs::publish_package_writer,
-            native_fs::write_golden_baseline,
             native_fs::read_workspace_file,
             native_fs::delete_workspace_path,
             native_fs::list_workspace_dir,

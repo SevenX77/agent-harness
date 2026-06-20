@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react"
 import type { Connection } from "@xyflow/react"
 import { toast } from "sonner"
+import useSWR from "swr"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { GraphCanvas, type SkillGraphNodeData } from "@/components/GraphCanvas"
 import { CopilotPanel } from "@/components/copilot/copilot-panel"
@@ -16,8 +17,8 @@ import { DiffView } from "@/components/diff/DiffView"
 import type { CopilotJudgeResponse, ResumeRunOptions } from "@/api/client"
 import type { TraceHitlResumeRequest } from "@/components/TracePanel"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
-import { compileSkill, getResumeValidity, getSkillDetail, resolveRunInput, serializeSkillGraph, writeSkillFile, wsUrl, postPredictRun, startRun, resumeRun } from "@/api/client"
-import type { ResumeValidityResponse } from "@/api/types"
+import { compileSkill, fetcher, getResumeValidity, getSkillDetail, resolveRunInput, serializeSkillGraph, writeSkillFile, wsUrl, postPredictRun, startRun, resumeRun } from "@/api/client"
+import type { GoldenBaseline, ResumeValidityResponse } from "@/api/types"
 import { isTauriRuntime } from "@/config/runtime"
 import { writeWorkspaceFile } from "@/lib/tauri"
 import { errorMessage } from "@/utils/errors"
@@ -29,6 +30,7 @@ import { deriveNodeStatuses } from "./node-status"
 import { nodeResumeCheckpointFromEvents } from "./node-resume"
 import { hitlResumeOptionsFromRequest } from "./resume-options"
 import { compileErrorsByNode } from "./node-compile-errors"
+import { goldenStateByNode } from "./node-golden"
 import { CompileErrorDrawer } from "./CompileErrorDrawer"
 import { ConflictDialog } from "./ConflictDialog"
 import { Header } from "./Header"
@@ -207,6 +209,14 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     return running?.[0] ?? null
   }, [statusByNodeId])
 
+  // N4 atom #30: per-node golden state badge. Fetch the skill's golden baselines
+  // (same SWR key the I/O panel's GoldenSection uses, so the request dedupes) and
+  // project their per-node `cases` into a has-golden map for the canvas.
+  const { data: goldenBaselines, mutate: mutateGoldenBaselines } = useSWR<GoldenBaseline[]>(
+    currentSkillId ? `/skills/${currentSkillId}/golden` : null,
+    fetcher,
+  )
+
   // Golden compare/promote for the active run (per-node diff surfaced as an overlay).
   const goldenDiff = useGoldenDiff(currentSkillId, runId, currentWorkspaceRoot)
   const [copilotJudgeResult, setCopilotJudgeResult] = useState<CopilotJudgeResponse | null>(null)
@@ -262,6 +272,20 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       }
     })
   }, [goldenDiff])
+  // Per-node golden promote (atom #32): write golden for one agent node, then
+  // revalidate the baseline list so the canvas + properties badge flip to 🟢.
+  const handlePromoteNode = useCallback(
+    async (nodeId: string) => {
+      const baseline = await goldenDiff.promote(nodeId)
+      if (baseline) {
+        toast.success(`Promoted "${nodeId}" to golden`)
+        void mutateGoldenBaselines()
+      } else if (goldenDiff.error) {
+        toast.error(`Promote failed: ${goldenDiff.error}`)
+      }
+    },
+    [goldenDiff, mutateGoldenBaselines],
+  )
 
   useCopilotContext({
     skillId: currentSkillId,
@@ -906,6 +930,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     () => compileErrorsByNode(currentSkillId ? compileErrors[currentSkillId] : []),
     [compileErrors, currentSkillId],
   )
+  const goldenStateByNodeId = useMemo(
+    () => goldenStateByNode(goldenBaselines),
+    [goldenBaselines],
+  )
 
   return (
     <WorkspaceProvider value={contextValue}>
@@ -965,6 +993,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   traceCompareLoading={goldenDiff.loading}
                   onCompareToGolden={handleCompareToGolden}
                   onPromoteToGolden={handlePromoteToGolden}
+                  onPromoteNode={handlePromoteNode}
                   traceCanResume={Boolean(runId)}
                   traceResumeLoading={resumeLoading}
                   onResumeRun={handleResume}
@@ -996,6 +1025,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   onPhaseFileSave={handlePhaseFileSave}
                   statusByNodeId={statusByNodeId}
                   compileErrorsByNodeId={compileErrorsByNodeId}
+                  goldenStateByNodeId={goldenStateByNodeId}
                 />
               ) : currentSkillId === null ? (
                 <WelcomePage onSelectSkill={onSelectSkill} />
@@ -1014,6 +1044,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   onPhaseFileSave={handlePhaseFileSave}
                   statusByNodeId={statusByNodeId}
                   compileErrorsByNodeId={compileErrorsByNodeId}
+                  goldenStateByNodeId={goldenStateByNodeId}
                 />
               )}
               {currentSkillId && !settingsOpen ? (

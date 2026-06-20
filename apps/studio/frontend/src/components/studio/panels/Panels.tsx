@@ -42,6 +42,8 @@ interface PanelsProps {
   onResumeNode?: (options: ResumeRunOptions) => Promise<void> | void
   onSubmitHitlResponse?: (request: TraceHitlResumeRequest) => void
   onResumeEdgeDownstream?: (options: ResumeRunOptions) => Promise<void> | void
+  /** Per-node golden promote (atom #32), surfaced in the node Properties panel. */
+  onPromoteNode?: (nodeId: string) => Promise<void> | void
 }
 
 export function Panels({
@@ -71,6 +73,7 @@ export function Panels({
   onResumeNode,
   onSubmitHitlResponse,
   onResumeEdgeDownstream,
+  onPromoteNode,
 }: PanelsProps) {
   const { onFileOpen, selectedEdge, setSelectedEdge } = useWorkspaceContext()
   if (!skillId) {
@@ -146,6 +149,7 @@ export function Panels({
         onFileOpen={onFileOpen}
         onPhaseFileSave={onPhaseFileSave}
         onResumeNode={onResumeNode}
+        onPromoteNode={onPromoteNode}
       />
     )
   }

@@ -211,13 +211,18 @@ export async function saveGoldenBaseline(
   runId: string,
   lock = false,
   workspaceRoot?: string | null,
+  nodeId?: string | null,
 ): Promise<GoldenBaseline> {
   const apiSkillId = resolveWorkspaceIdentity(skillId).skillId ?? skillId
+  // N4 atom #32: when nodeId is set, write golden for that agent node only
+  // (SetGoldenReq.node_id). Omitted entirely otherwise to preserve the existing
+  // run-level baseline request shape.
+  const goldenRequest: { run_id: string; lock: boolean; node_id?: string } = { run_id: runId, lock }
+  if (nodeId) {
+    goldenRequest.node_id = nodeId
+  }
   if (isTauriRuntime()) {
-    const response = await api.post<GoldenBaselinePlan>(`/skills/${apiSkillId}/golden/plan`, {
-      run_id: runId,
-      lock,
-    })
+    const response = await api.post<GoldenBaselinePlan>(`/skills/${apiSkillId}/golden/plan`, goldenRequest)
     const plan = response.data
     const targetRoot = resolveGoldenWorkspaceRoot(skillId, workspaceRoot)
     for (const file of plan.files) {
@@ -231,10 +236,11 @@ export async function saveGoldenBaseline(
     }
     return plan.baseline
   }
-  const response = await api.post<GoldenBaseline>(`/skills/${apiSkillId}/golden`, {
-    run_id: runId,
-    lock,
-  }, BROWSER_WRITE_FALLBACK_CONFIG)
+  const response = await api.post<GoldenBaseline>(
+    `/skills/${apiSkillId}/golden`,
+    goldenRequest,
+    BROWSER_WRITE_FALLBACK_CONFIG,
+  )
   return response.data
 }
 

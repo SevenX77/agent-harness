@@ -48,12 +48,36 @@ describe('useGoldenDiff promote', () => {
     expect(hook).not.toBeNull()
     await expect(hook!.promote()).resolves.toEqual(baseline('run-1'))
 
+    // Run-level promote: no node id threaded through (atom #32 leaves it undefined).
     expect(clientMocks.saveGoldenBaseline).toHaveBeenCalledWith(
       'skill-a',
       'run-1',
       false,
       '/abs/path',
+      undefined,
     )
     expect(clientMocks.api.post).not.toHaveBeenCalled()
+  })
+
+  it('threads a node id through saveGoldenBaseline for a per-node promote (atom #32)', async () => {
+    let hook: ReturnType<typeof useGoldenDiff> | null = null
+
+    function Probe() {
+      hook = useGoldenDiff('skill-a', 'run-1', '/abs/path')
+      return null
+    }
+
+    renderToStaticMarkup(createElement(Probe))
+
+    expect(hook).not.toBeNull()
+    await expect(hook!.promote('draft')).resolves.toEqual(baseline('run-1'))
+
+    expect(clientMocks.saveGoldenBaseline).toHaveBeenCalledWith(
+      'skill-a',
+      'run-1',
+      false,
+      '/abs/path',
+      'draft',
+    )
   })
 })

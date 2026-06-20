@@ -1406,6 +1406,420 @@ pub fn ensure_workspace_support_dirs(workspace_root: String) -> Result<(), Strin
         .map_err(|error| format!("cannot create support dirs: {error}"))
 }
 
+// ── New-skill / Open-folder native-fs (D12: Rust sole writer for build-dir +
+//    scaffold + git init + skill_index) ───────────────────────────────────────
+//
+// These move the new/open flows off the Python `POST /api/skills` writer onto
+// the native-fs Rust sole writer (D12). They build the skill dir, write the
+// scaffold byte-faithfully to the current Python `_SCAFFOLD_FILES` (the
+// logic-phase template; the D-1-4 agent-phase template is not yet defined), run
+// `git init` faithfully to Python `initialize_skill_repository`, and write the
+// `skill_index.json` entry byte-for-byte to Python `_write_skill_index` so the
+// read-detail sidecar `GET /api/skills/{id}` still resolves id→dir. They do NOT
+// register to a backend registry and do NOT validate the manifest (D2).
+
+/// Studio `.gitignore` body — byte-for-byte to Python `STUDIO_GITIGNORE`
+/// (services/git_local.py). Faithful copy so the initial commit and config
+/// arbitration stay identical across writers.
+const STUDIO_GITIGNORE: &str =
+    "/.workspace/*\n!/.workspace/golden/\n/.workspace/local_settings.json\n";
+
+/// Fallback git author when `app_settings.json` has no `user_id` — byte-for-byte
+/// to Python `FALLBACK_USER_ID` (services/git_local.py).
+const FALLBACK_USER_ID: &str = "studio-user";
+
+#[derive(Serialize, Debug)]
+pub struct SkillWorkspaceOutcome {
+    pub root: String,
+    pub skill_id: String,
+}
+
+/// The current logic-phase scaffold, byte-for-byte to Python `_SCAFFOLD_FILES`
+/// (services/skills.py) with `name: new-skill` substituted to `name: <skill_id>`
+/// in GRAPH.md, exactly like Python `_scaffold_files_for`. Returned as
+/// (relative_posix_path, content) pairs.
+fn scaffold_files_for(skill_id: &str) -> Vec<(String, String)> {
+    let graph_md = format!(
+        "---\nschema_version: \"v0.3.0\"\nname: {skill_id}\ndescription: \"New Studio skill\"\nio:\n  inputs:\n    type: object\n    properties: {{}}\n  outputs:\n    type: object\n    properties: {{}}\nphases:\n  - init\n---\n<phase depends_on=\"input\" output>init</phase>\n"
+    );
+    let logic_md = "---\nio:\n  inputs:\n    type: object\n    properties: {}\n  outputs:\n    type: object\n    properties: {}\n---\n<action>initialize</action>\n\n# init phase logic\n\nDescribe what this phase does.\n".to_string();
+    let initialize_py =
+        "def initialize(context):\n    \"\"\"Starter logic action for a new Studio skill.\"\"\"\n    return None\n"
+            .to_string();
+    vec![
+        ("GRAPH.md".to_string(), graph_md),
+        ("phases/init/LOGIC.md".to_string(), logic_md),
+        ("phases/init/actions/initialize.py".to_string(), initialize_py),
+    ]
+}
+
+/// Derive a workspace skill id from a folder path. Byte-for-byte port of the
+/// frontend `skillIdFromWorkspaceRoot` (components/studio/workspace-identity.ts)
+/// so the id Rust writes into `skill_index.json` equals the id the frontend
+/// decodes from the `local-workspace:` selection token — keeping a single
+/// derivation source across the boundary. Parity is asserted in tests.
+fn skill_id_from_workspace_root(path: &str) -> String {
+    let name = last_path_segment(path).unwrap_or("imported-skill");
+    let normalized = normalize_skill_id_segment(name);
+    let with_letter = if starts_with_ascii_letter(&normalized) {
+        normalized
+    } else {
+        format!("skill-{normalized}")
+    };
+    if with_letter.is_empty() {
+        "imported-skill".to_string()
+    } else {
+        with_letter
+    }
+}
+
+fn last_path_segment(path: &str) -> Option<&str> {
+    let mut last: Option<&str> = None;
+    let mut start = 0usize;
+    let bytes = path.as_bytes();
+    let mut segment_end = 0usize;
+    let mut have_segment = false;
+    for (idx, ch) in path.char_indices() {
+        if ch == '/' || ch == '\\' {
+            if have_segment {
+                last = Some(&path[start..segment_end]);
+            }
+            start = idx + ch.len_utf8();
+            have_segment = false;
+        } else {
+            segment_end = idx + ch.len_utf8();
+            have_segment = true;
+        }
+    }
+    if have_segment {
+        Some(&path[start..])
+    } else {
+        last
+    }
+    .filter(|segment| !segment.is_empty())
+}
+
+fn normalize_skill_id_segment(name: &str) -> String {
+    let mut normalized = String::new();
+    for ch in name.chars() {
+        let lower = ch.to_ascii_lowercase();
+        if lower.is_ascii_alphanumeric() {
+            normalized.push(lower);
+        } else if !normalized.is_empty() && !normalized.ends_with('-') {
+            normalized.push('-');
+        }
+    }
+    if normalized.ends_with('-') {
+        normalized.pop();
+    }
+    normalized
+}
+
+fn starts_with_ascii_letter(value: &str) -> bool {
+    value.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+}
+
+/// Resolve the new-skill parent dir. Byte-for-byte to Python `_default_skills_root`
+/// + `create_new_skill` parent handling: a blank parent falls back to
+/// `app_settings.json:default_skills_directory` (when set) else `<config_dir>/Skills`
+/// (Python `default_skills_root`); a non-blank parent is used as-is and must exist.
+fn resolve_new_skill_parent(parent_directory: &str, config_dir: &Path) -> Result<PathBuf, String> {
+    let trimmed = parent_directory.trim();
+    if trimmed.is_empty() {
+        return Ok(default_skills_root(config_dir));
+    }
+    let parent = PathBuf::from(trimmed);
+    if !parent.is_dir() {
+        return Err(format!("parent directory does not exist: {trimmed}"));
+    }
+    Ok(parent)
+}
+
+fn default_skills_root(config_dir: &Path) -> PathBuf {
+    if let Some(custom) = app_settings_default_skills_directory(config_dir) {
+        return custom;
+    }
+    config_dir.join("Skills")
+}
+
+/// Read `default_skills_directory` from `<config_dir>/app_settings.json`, mirroring
+/// Python `_default_skills_root` reading `AppSettings.default_skills_directory`.
+fn app_settings_default_skills_directory(config_dir: &Path) -> Option<PathBuf> {
+    let raw = std::fs::read_to_string(config_dir.join("app_settings.json")).ok()?;
+    let payload: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let value = payload.get("default_skills_directory")?.as_str()?.trim();
+    if value.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(value))
+}
+
+fn directory_is_nonempty(path: &Path) -> bool {
+    match std::fs::read_dir(path) {
+        Ok(mut entries) => entries.next().is_some(),
+        Err(_) => false,
+    }
+}
+
+/// Read the git author id from `<config_dir>/app_settings.json`, byte-for-byte to
+/// Python `_read_user_id_from_app_settings` (keys `user_id`/`User ID`/`userId`).
+fn read_user_id_from_app_settings(config_dir: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(config_dir.join("app_settings.json")).ok()?;
+    let payload: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let object = payload.as_object()?;
+    for key in ["user_id", "User ID", "userId"] {
+        if let Some(value) = object.get(key).and_then(|value| value.as_str()) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn run_git(skill_dir: &Path, args: &[&str]) -> Result<(), String> {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(skill_dir)
+        .output()
+        .map_err(|error| format!("git {} failed to spawn: {error}", args.join(" ")))?;
+    if !output.status.success() {
+        return Err(format!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(())
+}
+
+/// Initialize local git, faithful to Python `initialize_skill_repository`:
+/// write `.gitignore`, `git init`, set local `user.name`/`user.email` from the
+/// resolved user id (fallback `studio-user` with a warning, email
+/// `<id>@studio.local`), `git add -A`, and commit `initial-skill` only when the
+/// working tree has staged content.
+fn initialize_skill_repository(skill_dir: &Path, config_dir: &Path) -> Result<(), String> {
+    std::fs::write(skill_dir.join(".gitignore"), STUDIO_GITIGNORE)
+        .map_err(|error| format!("cannot write .gitignore: {error}"))?;
+    run_git(skill_dir, &["init"])?;
+    let user_id = read_user_id_from_app_settings(config_dir).unwrap_or_else(|| {
+        log::warn!("native_fs.initialize_skill_repository: user_id missing, using fallback");
+        FALLBACK_USER_ID.to_string()
+    });
+    run_git(skill_dir, &["config", "--local", "user.name", &user_id])?;
+    let email = format!("{user_id}@studio.local");
+    run_git(skill_dir, &["config", "--local", "user.email", &email])?;
+    run_git(skill_dir, &["add", "-A"])?;
+    if git_has_staged_changes(skill_dir)? {
+        run_git(skill_dir, &["commit", "-m", "initial-skill"])?;
+    }
+    Ok(())
+}
+
+/// True when `git status --porcelain` reports any entry — mirrors the Python
+/// `service.status(...).stdout.strip()` guard before committing `initial-skill`.
+fn git_has_staged_changes(skill_dir: &Path) -> Result<bool, String> {
+    let output = std::process::Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(skill_dir)
+        .output()
+        .map_err(|error| format!("git status failed to spawn: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "git status failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(!String::from_utf8_lossy(&output.stdout).trim().is_empty())
+}
+
+/// Upsert one `skill_index.json` entry, serialized byte-for-byte to Python
+/// `_write_skill_index` (metadata_local.py): a JSON object keyed by skill id,
+/// each value `{absolute_path, l2_remote_url}`, dumped with sorted keys + 2-space
+/// indent + a single trailing newline. serde_json's default `Map` is a `BTreeMap`,
+/// so both the top-level ids and the per-entry keys serialize in sorted order,
+/// matching Python `sort_keys=True`.
+fn upsert_skill_index_entry(config_dir: &Path, skill_id: &str, absolute_path: &str) -> Result<(), String> {
+    let index_path = config_dir.join("skill_index.json");
+    let mut index = read_skill_index(&index_path);
+    let mut entry = serde_json::Map::new();
+    entry.insert(
+        "absolute_path".to_string(),
+        serde_json::Value::String(absolute_path.to_string()),
+    );
+    entry.insert(
+        "l2_remote_url".to_string(),
+        serde_json::Value::String(String::new()),
+    );
+    index.insert(skill_id.to_string(), serde_json::Value::Object(entry));
+    write_skill_index(&index_path, &index)
+}
+
+/// Read the existing skill index, normalizing each entry to the
+/// `{absolute_path, l2_remote_url}` shape Python persists (drops malformed
+/// entries, defaults a missing/non-string `l2_remote_url` to ""), so a re-write
+/// is byte-stable against the Python writer.
+fn read_skill_index(index_path: &Path) -> serde_json::Map<String, serde_json::Value> {
+    let mut normalized = serde_json::Map::new();
+    let raw = match std::fs::read_to_string(index_path) {
+        Ok(raw) => raw,
+        Err(_) => return normalized,
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(value) => value,
+        Err(error) => {
+            log::warn!(
+                "native_fs.read_skill_index: corrupt {}, starting empty: {error}",
+                index_path.display()
+            );
+            return normalized;
+        }
+    };
+    let object = match parsed.as_object() {
+        Some(object) => object,
+        None => return normalized,
+    };
+    for (skill_id, value) in object {
+        let entry = match value.as_object() {
+            Some(entry) => entry,
+            None => continue,
+        };
+        let absolute_path = match entry.get("absolute_path").and_then(|value| value.as_str()) {
+            Some(path) if !path.is_empty() => path.to_string(),
+            _ => continue,
+        };
+        let l2_remote_url = entry
+            .get("l2_remote_url")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string();
+        let mut normalized_entry = serde_json::Map::new();
+        normalized_entry.insert(
+            "absolute_path".to_string(),
+            serde_json::Value::String(absolute_path),
+        );
+        normalized_entry.insert(
+            "l2_remote_url".to_string(),
+            serde_json::Value::String(l2_remote_url),
+        );
+        normalized.insert(skill_id.clone(), serde_json::Value::Object(normalized_entry));
+    }
+    normalized
+}
+
+fn write_skill_index(
+    index_path: &Path,
+    index: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
+    if let Some(parent) = index_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("cannot create config dir: {error}"))?;
+    }
+    // PrettyFormatter defaults to 2-space indent, matching Python json.dumps(indent=2).
+    let serialized = serde_json::to_string_pretty(&serde_json::Value::Object(index.clone()))
+        .map_err(|error| format!("cannot serialize skill index: {error}"))?;
+    std::fs::write(index_path, format!("{serialized}\n"))
+        .map_err(|error| format!("cannot write skill index: {error}"))
+}
+
+/// Build a new skill on disk (D12 sole writer): validate id, resolve parent,
+/// reject a non-empty target, write the scaffold + `.workspace/`, run `git init`,
+/// and write the `skill_index.json` entry. Returns `{root, skill_id}`.
+pub fn create_skill_workspace_impl(
+    parent_directory: &str,
+    skill_id: &str,
+    config_dir: &Path,
+) -> Result<SkillWorkspaceOutcome, String> {
+    if !is_valid_default_workspace_skill_id(skill_id) {
+        return Err(format!("invalid skill id: {skill_id}"));
+    }
+    let parent = resolve_new_skill_parent(parent_directory, config_dir)?;
+    let skill_dir = parent.join(skill_id);
+    if skill_dir.exists() && directory_is_nonempty(&skill_dir) {
+        return Err(format!(
+            "Cannot create a new skill in a non-empty folder: {}",
+            skill_dir.display()
+        ));
+    }
+    std::fs::create_dir_all(&skill_dir)
+        .map_err(|error| format!("cannot create skill dir: {error}"))?;
+
+    for (rel_path, content) in scaffold_files_for(skill_id) {
+        let target = safe_join(&skill_dir, &rel_path)?;
+        if let Some(file_parent) = target.parent() {
+            std::fs::create_dir_all(file_parent)
+                .map_err(|error| format!("cannot create scaffold dir: {error}"))?;
+        }
+        std::fs::write(&target, content)
+            .map_err(|error| format!("cannot write scaffold file {rel_path}: {error}"))?;
+    }
+    std::fs::create_dir_all(skill_dir.join(".workspace"))
+        .map_err(|error| format!("cannot create .workspace dir: {error}"))?;
+
+    initialize_skill_repository(&skill_dir, config_dir)?;
+
+    let root = skill_dir.to_string_lossy().to_string();
+    upsert_skill_index_entry(config_dir, skill_id, &root)?;
+    Ok(SkillWorkspaceOutcome {
+        root,
+        skill_id: skill_id.to_string(),
+    })
+}
+
+/// Register an opened folder as a workspace (D2: OS checks only, no manifest
+/// validation): verify it exists and is a directory, derive the skill id from the
+/// path, write the `skill_index.json` entry, and return `{root, skill_id}`.
+pub fn open_skill_workspace_impl(
+    directory: &str,
+    config_dir: &Path,
+) -> Result<SkillWorkspaceOutcome, String> {
+    let trimmed = directory.trim();
+    if trimmed.is_empty() {
+        return Err("directory is required".to_string());
+    }
+    let dir = PathBuf::from(trimmed);
+    if !dir.exists() {
+        return Err(format!("directory does not exist: {trimmed}"));
+    }
+    if !dir.is_dir() {
+        return Err(format!("not a directory: {trimmed}"));
+    }
+    let root = dir.to_string_lossy().to_string();
+    let skill_id = skill_id_from_workspace_root(&root);
+    upsert_skill_index_entry(config_dir, &skill_id, &root)?;
+    Ok(SkillWorkspaceOutcome { root, skill_id })
+}
+
+/// Read-only existence check for stale-MRU pruning. No side effects.
+pub fn workspace_path_exists_impl(path: &str) -> bool {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    Path::new(trimmed).exists()
+}
+
+#[tauri::command]
+pub fn create_skill_workspace(
+    parent_directory: String,
+    skill_id: String,
+) -> Result<SkillWorkspaceOutcome, String> {
+    let config_dir = crate::resolve_config_dir();
+    create_skill_workspace_impl(&parent_directory, &skill_id, &config_dir)
+}
+
+#[tauri::command]
+pub fn open_skill_workspace(directory: String) -> Result<SkillWorkspaceOutcome, String> {
+    let config_dir = crate::resolve_config_dir();
+    open_skill_workspace_impl(&directory, &config_dir)
+}
+
+#[tauri::command]
+pub fn workspace_path_exists(path: String) -> Result<bool, String> {
+    Ok(workspace_path_exists_impl(&path))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2656,5 +3070,283 @@ mod tests {
             resolve_workspace_root(&raw, Path::new("/nonexistent-config")).expect("trimmed path");
         assert_eq!(resolved, abs);
         let _ = std::fs::remove_dir_all(&abs);
+    }
+
+    // ── New-skill / Open-folder native-fs ───────────────────────────────────
+
+    fn git_available() -> bool {
+        std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+
+    #[test]
+    fn create_skill_workspace_writes_scaffold_workspace_gitignore_and_git_repo() {
+        if !git_available() {
+            eprintln!("skipping: git not available");
+            return;
+        }
+        let config = temp_root("create-full");
+        let parent = config.join("Skills");
+        std::fs::create_dir_all(&parent).unwrap();
+
+        let outcome = create_skill_workspace_impl("", "demo-skill", &config)
+            .expect("create skill workspace");
+        let root = PathBuf::from(&outcome.root);
+
+        assert_eq!(outcome.skill_id, "demo-skill");
+        assert_eq!(root, parent.join("demo-skill"));
+
+        // Scaffold files, byte-for-byte to Python _SCAFFOLD_FILES with name substituted.
+        let graph = std::fs::read_to_string(root.join("GRAPH.md")).unwrap();
+        assert!(graph.contains("name: demo-skill"), "GRAPH.md name substituted");
+        assert!(graph.contains("schema_version: \"v0.3.0\""));
+        assert!(graph.trim_end().ends_with("<phase depends_on=\"input\" output>init</phase>"));
+        assert!(root.join("phases/init/LOGIC.md").is_file());
+        let initialize = std::fs::read_to_string(root.join("phases/init/actions/initialize.py")).unwrap();
+        assert!(initialize.contains("def initialize(context):"));
+
+        // .workspace dir and .gitignore.
+        assert!(root.join(".workspace").is_dir());
+        assert_eq!(
+            std::fs::read_to_string(root.join(".gitignore")).unwrap(),
+            "/.workspace/*\n!/.workspace/golden/\n/.workspace/local_settings.json\n"
+        );
+
+        // Git repo exists with the "initial-skill" commit.
+        assert!(root.join(".git").is_dir(), "git repo initialized");
+        let log = std::process::Command::new("git")
+            .args(["log", "--oneline"])
+            .current_dir(&root)
+            .output()
+            .expect("git log");
+        let log_text = String::from_utf8_lossy(&log.stdout);
+        assert!(log_text.contains("initial-skill"), "initial-skill commit present: {log_text}");
+
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn create_skill_workspace_writes_byte_for_byte_skill_index_entry() {
+        if !git_available() {
+            eprintln!("skipping: git not available");
+            return;
+        }
+        let config = temp_root("create-index");
+        std::fs::create_dir_all(config.join("Skills")).unwrap();
+
+        let outcome = create_skill_workspace_impl("", "alpha", &config).expect("create");
+        let index_raw = std::fs::read_to_string(config.join("skill_index.json")).unwrap();
+        // Python `_write_skill_index`: sorted keys, 2-space indent, trailing newline.
+        let expected = format!(
+            "{{\n  \"alpha\": {{\n    \"absolute_path\": \"{}\",\n    \"l2_remote_url\": \"\"\n  }}\n}}\n",
+            outcome.root
+        );
+        assert_eq!(index_raw, expected, "skill_index.json byte shape must match Python");
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn create_skill_workspace_upsert_preserves_sorted_existing_entries() {
+        if !git_available() {
+            eprintln!("skipping: git not available");
+            return;
+        }
+        let config = temp_root("create-index-upsert");
+        std::fs::create_dir_all(&config).unwrap();
+        // Pre-seed an existing entry that should survive and stay sorted before "beta".
+        std::fs::write(
+            config.join("skill_index.json"),
+            "{\n  \"zeta\": {\n    \"absolute_path\": \"/existing/zeta\",\n    \"l2_remote_url\": \"\"\n  }\n}\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(config.join("Skills")).unwrap();
+
+        let outcome = create_skill_workspace_impl("", "beta", &config).expect("create");
+        let index_raw = std::fs::read_to_string(config.join("skill_index.json")).unwrap();
+        let expected = format!(
+            "{{\n  \"beta\": {{\n    \"absolute_path\": \"{}\",\n    \"l2_remote_url\": \"\"\n  }},\n  \"zeta\": {{\n    \"absolute_path\": \"/existing/zeta\",\n    \"l2_remote_url\": \"\"\n  }}\n}}\n",
+            outcome.root
+        );
+        assert_eq!(index_raw, expected, "upsert keeps sorted keys + existing entry");
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn create_skill_workspace_rejects_non_empty_target_dir() {
+        let config = temp_root("create-nonempty");
+        let parent = config.join("Skills");
+        let target = parent.join("taken");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("existing.txt"), "occupied").unwrap();
+
+        let error = create_skill_workspace_impl(parent.to_str().unwrap(), "taken", &config)
+            .expect_err("non-empty target rejected");
+        assert!(error.contains("non-empty"), "unexpected error: {error}");
+        // The pre-existing file must be untouched.
+        assert_eq!(std::fs::read_to_string(target.join("existing.txt")).unwrap(), "occupied");
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn create_skill_workspace_rejects_invalid_skill_id() {
+        let config = temp_root("create-badid");
+        std::fs::create_dir_all(config.join("Skills")).unwrap();
+        for bad in ["", "..", "a/b", "a\\b", "-leading", "."] {
+            assert!(
+                create_skill_workspace_impl("", bad, &config).is_err(),
+                "expected rejection for id {bad:?}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn create_skill_workspace_rejects_missing_explicit_parent() {
+        let config = temp_root("create-noparent");
+        let missing = config.join("nope").join("here");
+        let error = create_skill_workspace_impl(missing.to_str().unwrap(), "x", &config)
+            .expect_err("missing parent rejected");
+        assert!(error.contains("parent directory does not exist"), "unexpected: {error}");
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn create_skill_workspace_defaults_parent_to_config_skills() {
+        if !git_available() {
+            eprintln!("skipping: git not available");
+            return;
+        }
+        let config = temp_root("create-default-parent");
+        std::fs::create_dir_all(config.join("Skills")).unwrap();
+        let outcome = create_skill_workspace_impl("   ", "gamma", &config).expect("create default");
+        assert_eq!(PathBuf::from(&outcome.root), config.join("Skills").join("gamma"));
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn create_skill_workspace_honors_app_settings_default_skills_directory() {
+        if !git_available() {
+            eprintln!("skipping: git not available");
+            return;
+        }
+        let config = temp_root("create-settings-default");
+        let custom = temp_root("create-settings-target");
+        std::fs::create_dir_all(&config).unwrap();
+        std::fs::write(
+            config.join("app_settings.json"),
+            format!("{{\n  \"default_skills_directory\": \"{}\"\n}}\n", custom.display()),
+        )
+        .unwrap();
+
+        let outcome = create_skill_workspace_impl("", "delta", &config).expect("create");
+        assert_eq!(PathBuf::from(&outcome.root), custom.join("delta"));
+        let _ = std::fs::remove_dir_all(&config);
+        let _ = std::fs::remove_dir_all(&custom);
+    }
+
+    #[test]
+    fn create_skill_workspace_uses_app_settings_user_id_for_git_author() {
+        if !git_available() {
+            eprintln!("skipping: git not available");
+            return;
+        }
+        let config = temp_root("create-gitauthor");
+        std::fs::create_dir_all(config.join("Skills")).unwrap();
+        std::fs::write(
+            config.join("app_settings.json"),
+            "{\n  \"user_id\": \"alice\"\n}\n",
+        )
+        .unwrap();
+
+        let outcome = create_skill_workspace_impl("", "epsilon", &config).expect("create");
+        let root = PathBuf::from(&outcome.root);
+        let name = std::process::Command::new("git")
+            .args(["config", "--local", "user.name"])
+            .current_dir(&root)
+            .output()
+            .unwrap();
+        let email = std::process::Command::new("git")
+            .args(["config", "--local", "user.email"])
+            .current_dir(&root)
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&name.stdout).trim(), "alice");
+        assert_eq!(String::from_utf8_lossy(&email.stdout).trim(), "alice@studio.local");
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn open_skill_workspace_returns_root_for_dir_without_graph_md() {
+        let config = temp_root("open-no-graph");
+        let folder = temp_root("open-folder-bare");
+        // A bare folder with no GRAPH.md must still open (D2: no manifest check).
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::create_dir_all(&config).unwrap();
+
+        let outcome = open_skill_workspace_impl(folder.to_str().unwrap(), &config)
+            .expect("open bare folder");
+        assert_eq!(PathBuf::from(&outcome.root), folder);
+        // skill_id derived from the folder name via the TS-parity port.
+        assert_eq!(outcome.skill_id, skill_id_from_workspace_root(folder.to_str().unwrap()));
+        // The index entry is written so the detail GET can resolve id→dir.
+        let index_raw = std::fs::read_to_string(config.join("skill_index.json")).unwrap();
+        assert!(index_raw.contains(&outcome.skill_id));
+        assert!(index_raw.contains(&outcome.root));
+        let _ = std::fs::remove_dir_all(&config);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn open_skill_workspace_rejects_missing_or_file_path() {
+        let config = temp_root("open-bad");
+        let missing = config.join("ghost");
+        let file = config.join("a-file");
+        std::fs::create_dir_all(&config).unwrap();
+        std::fs::write(&file, "i am a file").unwrap();
+
+        assert!(open_skill_workspace_impl(missing.to_str().unwrap(), &config).is_err());
+        let file_error = open_skill_workspace_impl(file.to_str().unwrap(), &config)
+            .expect_err("file path rejected");
+        assert!(file_error.contains("not a directory"), "unexpected: {file_error}");
+        assert!(open_skill_workspace_impl("  ", &config).is_err());
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn workspace_path_exists_reports_true_and_false() {
+        let root = temp_root("exists-check");
+        assert!(workspace_path_exists_impl(root.to_str().unwrap()));
+        assert!(!workspace_path_exists_impl(&root.join("missing").to_string_lossy()));
+        assert!(!workspace_path_exists_impl("   "));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn skill_id_from_workspace_root_matches_frontend_derivation() {
+        // Parity with frontend `skillIdFromWorkspaceRoot`
+        // (components/studio/workspace-identity.ts). Expected values computed by
+        // hand from that function's spec; any drift breaks the registry-free
+        // token↔index key handoff.
+        let cases = [
+            ("/Users/me/My Skill", "my-skill"),
+            ("/Users/me/Already-Good", "already-good"),
+            ("/Users/me/123start", "skill-123start"),
+            ("/Users/me/  spaced  ", "spaced"),
+            ("/Users/me/weird__name!!", "weird-name"),
+            ("/Users/me/trailing/", "trailing"),
+            ("/Users/me/UPPER", "upper"),
+            ("/Users/me/9", "skill-9"),
+            ("C:\\Users\\me\\Win Skill", "win-skill"),
+        ];
+        for (path, expected) in cases {
+            assert_eq!(
+                skill_id_from_workspace_root(path),
+                expected,
+                "skill_id parity for {path:?}"
+            );
+        }
     }
 }

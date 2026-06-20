@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { workspacePathExists } from '../lib/tauri'
 
 export interface RecentWorkspaceEntry {
   absolutePath: string
@@ -59,6 +60,26 @@ export function pruneMissingRecentWorkspaces(exists: (absolutePath: string) => b
   return next
 }
 
+/**
+ * Async stale-MRU prune (R1 / N1 #6): drop Recent entries whose folder no longer
+ * exists on disk. The existence predicate is the Rust `workspace_path_exists`
+ * native-fs check (via lib/tauri.workspacePathExists), which degrades to `true`
+ * outside the desktop runtime so a web session never prunes its localStorage MRU.
+ * Keeps the localStorage write semantics of the sync variant.
+ */
+export async function pruneMissingRecentWorkspacesAsync(
+  exists: (absolutePath: string) => Promise<boolean> = workspacePathExists,
+): Promise<RecentWorkspaceEntry[]> {
+  if (typeof window === 'undefined') return []
+  const list = readRecentWorkspaces()
+  const flags = await Promise.all(list.map((w) => exists(w.absolutePath)))
+  const next = list.filter((_, index) => flags[index])
+  if (next.length !== list.length) {
+    localStorage.setItem('recentWorkspaces', JSON.stringify(next))
+  }
+  return next
+}
+
 export function useRecentSkills() {
   const [recentWorkspaces, setRecentWorkspaces] = useState<RecentWorkspaceEntry[]>(() => {
     return readRecentWorkspaces()
@@ -69,8 +90,24 @@ export function useRecentSkills() {
   const [isHydrating, setIsHydrating] = useState(true)
 
   useEffect(() => {
+    let cancelled = false
     setRecentWorkspaces(readRecentWorkspaces())
     setIsHydrating(false)
+    // R1 (N1 #6): on cold start, drop Recent cards whose folder is gone. The
+    // existence check is the Rust native-fs `workspace_path_exists` (web degrades
+    // to keep-all), so a missing folder is pruned from the MRU before the user
+    // clicks a dead card. Failures here are non-fatal — the unpruned MRU still
+    // renders.
+    pruneMissingRecentWorkspacesAsync()
+      .then((pruned) => {
+        if (!cancelled) {
+          setRecentWorkspaces(pruned)
+        }
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const rememberWorkspace = useCallback((workspace: Pick<RecentWorkspaceEntry, 'absolutePath' | 'displayName'>) => {

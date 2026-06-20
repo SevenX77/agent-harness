@@ -343,7 +343,10 @@ pub fn run() {
             native_fs::add_recent_workspace,
             native_fs::list_recent_workspaces,
             native_fs::remove_recent_workspace,
-            native_fs::ensure_workspace_support_dirs
+            native_fs::ensure_workspace_support_dirs,
+            native_fs::create_skill_workspace,
+            native_fs::open_skill_workspace,
+            native_fs::workspace_path_exists
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

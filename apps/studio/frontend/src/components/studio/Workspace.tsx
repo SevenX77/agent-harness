@@ -30,7 +30,7 @@ import { deriveNodeStatuses } from "./node-status"
 import { nodeResumeCheckpointFromEvents } from "./node-resume"
 import { hitlResumeOptionsFromRequest } from "./resume-options"
 import { compileErrorsByNode } from "./node-compile-errors"
-import { goldenStateByNode } from "./node-golden"
+import { goldenTriStateByNode, ranAgentNodesFromPredict } from "./node-golden"
 import { compileErrorsToFieldLintErrors } from "./field-compile-errors"
 import { CompileErrorDrawer } from "./CompileErrorDrawer"
 import { ConflictDialog } from "./ConflictDialog"
@@ -217,6 +217,12 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     currentSkillId ? `/skills/${currentSkillId}/golden` : null,
     fetcher,
   )
+
+  // N4 atom #30 🟡 logic-OK source: the AGENT nodes that ran in the most-recent predict
+  // (read from PredictDiagnosticExport.phases). Session-memory only — keyed by skill,
+  // set on predict-pass, cleared on predict-fail; never persisted across sessions
+  // (design: "most recent predict response").
+  const [ranAgentNodesBySkill, setRanAgentNodesBySkill] = useState<Record<string, Set<string>>>({})
 
   // Golden compare/promote for the active run (per-node diff surfaced as an overlay).
   const goldenDiff = useGoldenDiff(currentSkillId, runId, currentWorkspaceRoot)
@@ -748,11 +754,18 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     updateStage(targetSkillId, "predicting")
     try {
       const inputData = await resolveRunInput(targetSkillId, selectedTestInputId)
-      await postPredictRun(targetSkillId, inputData)
+      const predict = await postPredictRun(targetSkillId, inputData)
+      // N4 atom #30: cache the AGENT nodes that ran so the canvas can show 🟡 logic-OK.
+      // Only on predict-pass; predict-fail clears it (below) so stale 🟡 never lingers.
+      setRanAgentNodesBySkill((prev) => ({
+        ...prev,
+        [targetSkillId]: ranAgentNodesFromPredict(predict),
+      }))
       clearCopilotJudgeResult()
       updateStage(targetSkillId, "predict-pass")
       toast.success("Predict run completed successfully")
     } catch (error: unknown) {
+      setRanAgentNodesBySkill((prev) => ({ ...prev, [targetSkillId]: new Set<string>() }))
       updateStage(targetSkillId, "predict-fail")
       interface PredictErrorResponse {
         response?: {
@@ -932,8 +945,11 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     [compileErrors, currentSkillId],
   )
   const goldenStateByNodeId = useMemo(
-    () => goldenStateByNode(goldenBaselines),
-    [goldenBaselines],
+    () => goldenTriStateByNode(
+      goldenBaselines,
+      (currentSkillId ? ranAgentNodesBySkill[currentSkillId] : undefined) ?? new Set<string>(),
+    ),
+    [goldenBaselines, ranAgentNodesBySkill, currentSkillId],
   )
   // Field-axis source for the Properties panel: the field-bearing compile errors mapped
   // onto the engine LintError shape (N3 atom #5). The realtime lint result lives in the

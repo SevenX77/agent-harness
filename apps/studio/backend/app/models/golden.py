@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -52,6 +53,36 @@ class SetGoldenReq(BaseModel):
     run_id: str
     lock: bool
     node_id: str | None = None
+
+
+class GoldenTemplate(BaseModel):
+    """N4 atom #33: a schema-valid empty golden template for an agent node.
+
+    Generated from the node's ``io.outputs`` JSON schema so the author can hand-fill
+    expected values without a copilot/run source. The output schema serializes under the
+    wire key ``schema`` (the Python attribute is ``output_schema`` to avoid shadowing
+    ``BaseModel.schema``); ``template`` is the structure-valid empty stub matching it.
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    skill_id: str
+    node_id: str
+    output_schema: dict[str, Any] = Field(alias="schema")
+    template: dict[str, Any]
+
+
+class SetManualGoldenReq(BaseModel):
+    """N4 atom #33 manual write: author-defined golden, keyed by node_id, run-less.
+
+    First-class contract distinct from ``SetGoldenReq`` — it carries no ``run_id``
+    because a manual golden has no source run; the expected output is author-defined.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    node_id: str
+    expected_output: dict[str, Any]
 
 
 class CopilotJudgeRequest(BaseModel):

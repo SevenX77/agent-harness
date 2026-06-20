@@ -471,7 +471,11 @@ def test_subgraph_io_input_mismatch_is_allowed_at_compile_time(tmp_path: Path, m
     assert compiled.nodes[0].phase_name == "main"
 
 
-def test_subgraph_io_output_mismatch_is_rejected_at_compile_time(tmp_path: Path, mock_skill_resolver: object) -> None:
+def test_subgraph_io_output_mismatch_is_allowed_at_compile_time(tmp_path: Path, mock_skill_resolver: object) -> None:
+    # §2.4 / cutover item ⑦: the parent/child io.outputs 1:1 equality gate is
+    # relaxed. A subgraph whose declared outputs differ from the child's now
+    # compiles — StateMapper merges by the parent's declared outputs at runtime;
+    # no [F-v3-subgraph-io-mismatch] at compile time.
     parent = tmp_path / "parent"
     child = parent / "subgraphs" / "child"
     _graph(parent)
@@ -479,10 +483,9 @@ def test_subgraph_io_output_mismatch_is_rejected_at_compile_time(tmp_path: Path,
     _graph(child, inputs_field="text", outputs_field="child_output")
     _logic_phase(child)
 
-    with pytest.raises(SkillLoadError) as exc:
-        SkillLoader().compile_skill(parent, skill_resolver=DictSkillResolver({"child": child}))
+    compiled = SkillLoader().compile_skill(parent, skill_resolver=DictSkillResolver({"child": child}))
 
-    _expect_code(exc, "[F-v3-subgraph-io-mismatch]")
+    assert compiled.nodes[0].phase_name == "main"
 
 
 def test_graph_serializer_fresh_render_uses_v030_dual_track_graph() -> None:

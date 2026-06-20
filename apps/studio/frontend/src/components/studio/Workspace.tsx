@@ -1302,11 +1302,6 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   selectedNodeId={selectedNodeId}
                   onNodeSelect={handleNodeSelect}
                   onPanelChange={setActivePanel}
-                  onCreatePhase={handleCreatePhase}
-                  onPersistConnection={handlePersistConnection}
-                  onDisconnectConnection={handleDisconnectConnection}
-                  onReconnectConnection={handleReconnectConnection}
-                  onPhaseFileSave={handlePhaseFileSave}
                   statusByNodeId={statusByNodeId}
                   compileErrorsByNodeId={compileErrorsByNodeId}
                   goldenStateByNodeId={goldenStateByNodeId}

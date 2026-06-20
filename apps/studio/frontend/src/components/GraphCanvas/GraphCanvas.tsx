@@ -409,14 +409,18 @@ export function GraphCanvas({
 
   const isDrilled = drilledPath !== null
   // N2 atom #15: the inline L3 step-editor inputs threaded into AGENT nodes.
+  // compact = read-only projection: withhold the in-node edit callbacks so the
+  // "Edit steps" affordance never renders on the mini-canvas (canEditSteps keys
+  // on onToggleSteps being a function). Only the read-only dirty-downstream
+  // graying is kept — editing the body stays on the main canvas.
   const agentStepsInputs = useMemo(
     () => ({
-      expandedSteps,
-      onToggleSteps: toggleSteps,
-      onStepsSave: handleStepsSave,
+      expandedSteps: compact ? undefined : expandedSteps,
+      onToggleSteps: compact ? undefined : toggleSteps,
+      onStepsSave: compact ? undefined : handleStepsSave,
       dirtyDownstreamNodeIds: safeDirtyDownstreamNodeIds,
     }),
-    [expandedSteps, toggleSteps, handleStepsSave, safeDirtyDownstreamNodeIds],
+    [compact, expandedSteps, toggleSteps, handleStepsSave, safeDirtyDownstreamNodeIds],
   )
   const rawNodes = useMemo(() => {
     // R9: when focused into a child graph, render its real phases/topology;
@@ -722,6 +726,10 @@ export function GraphCanvas({
         </div>
       ) : null}
 
+      {/* compact = the SplitEditor mini-canvas: a READ-ONLY projection of
+          GRAPH.md, never a second editor. Editing (connect / reconnect / delete)
+          stays on the main canvas, so two canvases can't race writes to GRAPH.md
+          off independent snapshots (the stale-hash 409 class). */}
       <ReactFlow
         nodes={selectedNodes}
         edges={displayEdges}
@@ -729,11 +737,14 @@ export function GraphCanvas({
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        edgesReconnectable
-        onReconnectStart={onReconnectStart}
-        onReconnect={onReconnect}
-        onReconnectEnd={onReconnectEnd}
+        nodesConnectable={!compact}
+        nodesDraggable={!compact}
+        deleteKeyCode={compact ? null : undefined}
+        onConnect={compact ? undefined : onConnect}
+        edgesReconnectable={!compact}
+        onReconnectStart={compact ? undefined : onReconnectStart}
+        onReconnect={compact ? undefined : onReconnect}
+        onReconnectEnd={compact ? undefined : onReconnectEnd}
         onPaneContextMenu={(event) => {
           if (isEdgeContextTarget(event.target)) {
             return
@@ -743,7 +754,7 @@ export function GraphCanvas({
         onNodeContextMenu={() => {
           setEdgeMenuConnection(null)
         }}
-        onEdgeContextMenu={(event, edge) => {
+        onEdgeContextMenu={compact ? undefined : (event, edge) => {
           openEdgeContextMenu(event, { source: edge.source, target: edge.target })
         }}
         onNodeClick={(_, node) => {
@@ -851,8 +862,8 @@ export function GraphCanvas({
                   {childGraphError}
                 </div>
               ) : null}
-              {onCreatePhase && !isDrilled ? <AddPhaseControl onCreatePhase={onCreatePhase} /> : null}
-              {!isDrilled ? (
+              {onCreatePhase && !isDrilled && !compact ? <AddPhaseControl onCreatePhase={onCreatePhase} /> : null}
+              {!isDrilled && !compact ? (
                 <Button
                   type="button"
                   size="sm"
@@ -876,6 +887,7 @@ export function GraphCanvas({
         onCreatePhase={onCreatePhase}
         onDisconnectConnection={onDisconnectConnection}
         onCloseEdgeMenu={() => setEdgeMenuConnection(null)}
+        readOnly={compact}
       />
       <Sheet open={macroFormOpen} onOpenChange={setMacroFormOpen}>
         <SheetContent side="right" className="w-[26rem] gap-0 p-0 sm:max-w-md">
@@ -935,12 +947,19 @@ export function CanvasContextMenuContent({
   onCreatePhase,
   onDisconnectConnection,
   onCloseEdgeMenu,
+  readOnly,
 }: {
   edgeMenuConnection: { source: string; target: string } | null
   onCreatePhase?: (kind: NewPhaseKind) => Promise<void> | void
   onDisconnectConnection?: (connection: { source: string; target: string }) => Promise<void> | void
   onCloseEdgeMenu?: () => void
+  readOnly?: boolean
 }) {
+  // Read-only projection (compact mini-canvas): no edit affordances at all, so
+  // right-click offers neither Disconnect nor Add Phase Node.
+  if (readOnly) {
+    return null
+  }
   return (
     <ContextMenuContent>
       {edgeMenuConnection ? (

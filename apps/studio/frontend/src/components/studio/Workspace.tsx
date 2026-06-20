@@ -1014,6 +1014,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   onPhaseFileSave={handlePhaseFileSave}
                   statusByNodeId={statusByNodeId}
                   compileErrorsByNodeId={compileErrorsByNodeId}
+                  onSubmitHitlResponse={handleSubmitHitlResponse}
+                  hitlSubmitting={resumeLoading}
                 />
               )}
               {currentSkillId && !settingsOpen ? (

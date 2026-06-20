@@ -201,6 +201,7 @@ export function buildNodes(
   statusByNodeId: Record<string, SkillNodeStatus>,
   compileErrorsByNodeId: Record<string, CompileError[]> = {},
   goldenStateByNodeId: Record<string, GoldenNodeState> = {},
+  errorMessageByNodeId: Record<string, string> = {},
 ): GraphCanvasNode[] {
   const phases = phasesFromManifest(detail?.manifest, skillId)
   const io = ioFromManifest(detail?.manifest)
@@ -227,6 +228,7 @@ export function buildNodes(
         subagents: subagentsForPhase(detail, phase.name),
         filePath,
         status: statusByNodeId[phase.name] ?? 'idle',
+        errorMessage: errorMessageByNodeId[phase.name],
         compileErrors: compileErrorsByNodeId[phase.name] ?? [],
         goldenState: goldenStateByNodeId[phase.name],
         dependsOn: topology?.depends_on ?? normalizeDependsOn(phase.depends_on),

@@ -22,6 +22,7 @@ interface SplitEditorProps {
   statusByNodeId?: Record<string, SkillNodeStatus>
   compileErrorsByNodeId?: Record<string, CompileError[]>
   goldenStateByNodeId?: Record<string, GoldenNodeState>
+  errorMessageByNodeId?: Record<string, string>
 }
 
 export function SplitEditor({
@@ -39,6 +40,7 @@ export function SplitEditor({
   statusByNodeId,
   compileErrorsByNodeId,
   goldenStateByNodeId,
+  errorMessageByNodeId,
 }: SplitEditorProps) {
   const {
     activeFileDetails,
@@ -120,6 +122,7 @@ export function SplitEditor({
             onDisconnectConnection={onDisconnectConnection}
             onPhaseFileSave={onPhaseFileSave}
             statusByNodeId={statusByNodeId}
+            errorMessageByNodeId={errorMessageByNodeId}
             compileErrorsByNodeId={compileErrorsByNodeId}
             goldenStateByNodeId={goldenStateByNodeId}
             compact

@@ -111,3 +111,62 @@ export function deriveNodeStatuses(
   }
   return statuses
 }
+
+/**
+ * Extract the human-readable failure reason from a failure event. Mirrors the
+ * engine event shapes (events.py): internal_error carries `error_message`,
+ * validation_fail carries `errors: list[str]`, retry_exhausted carries
+ * `final_errors: list[str]`. Returns null when no usable text is present.
+ */
+function failureMessageFromEvent(event: CallbackEvent): string | null {
+  const direct = event.error_message
+  if (typeof direct === "string" && direct.trim() !== "") return direct.trim()
+  for (const list of [event.final_errors, event.errors]) {
+    if (Array.isArray(list)) {
+      const msgs = list.filter((item): item is string => typeof item === "string" && item.trim() !== "")
+      if (msgs.length > 0) return msgs.join("; ")
+    }
+  }
+  return null
+}
+
+/**
+ * Derive the per-node failure-message map from an ordered trace event stream,
+ * in lockstep with `deriveNodeStatuses`: same last-event-wins + run filter, so a
+ * phase that fails then recovers (validation_fail -> phase_end) clears its
+ * message, and a phase whose final state is a failure keeps the reason. This is
+ * the PRODUCER for SkillNode's inline error text (data.errorMessage); without it
+ * the failed-node red-light message has no source.
+ */
+export function deriveNodeErrorMessages(
+  events: readonly TraceEventInput[] | null | undefined,
+  runId?: string | null,
+): Record<string, string> {
+  const messages: Record<string, string> = {}
+  const attempts: Record<string, number> = {}
+  if (!events) return messages
+  for (const traceEvent of events) {
+    const event = callbackPayload(traceEvent)
+    const eventRun = eventRunId(traceEvent, event)
+    if (runId && eventRun && eventRun !== runId) continue
+    const phaseName = event.phase_name || event.current_phase
+    if (!phaseName) continue
+    const attempt = eventAttempt(event)
+    const latestAttempt = attempts[phaseName]
+    if (attempt !== null && latestAttempt !== undefined && attempt < latestAttempt) continue
+    if (attempt !== null) attempts[phaseName] = attempt
+    const type = event.event_type || ""
+    if (isFailureEvent(type, event.status)) {
+      const message = failureMessageFromEvent(event)
+      if (message) {
+        messages[phaseName] = message
+      } else {
+        delete messages[phaseName]
+      }
+    } else if (type === "phase_start" || type === "phase_end" || isPausedEvent(type, event.status)) {
+      // Phase progressed past / recovered from an earlier failure -> drop stale text.
+      delete messages[phaseName]
+    }
+  }
+  return messages
+}

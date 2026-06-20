@@ -6,6 +6,7 @@ import {
 } from "@/hooks/useRoleTestChainRunner"
 import {
   getRoleTestJob,
+  startBundleTestJob,
   startRoleTestJob,
   type RoleTestJobResponse,
   type RoleTestProviderProgress,
@@ -243,6 +244,46 @@ export async function runRoleTest(
       activeStatuses: undefined,
     })
   }
+}
+
+/**
+ * #50b: the store key for a bundle test — bundle results live under the
+ * __bundle__{id} namespace so they never collide with real role results in the
+ * same module mirror. Mirrors the backend bundle_role_name(bundle_id).
+ */
+export function bundleTestStoreKey(bundleId: string): string {
+  return `__bundle__${bundleId}`
+}
+
+/**
+ * #50b: run a bundle test, reusing the exact role-test orchestration (the backend
+ * keys it under __bundle__{id} and resolves the bundle via a transient role). The
+ * mirror entry is keyed by bundleTestStoreKey so the bundle card projects the same
+ * live progress / settled result / error a role card does.
+ */
+export async function runBundleTest(
+  bundleId: string,
+  {
+    beforeBundleTest,
+    afterBundleTest,
+    startBundleJob = startBundleTestJob,
+    getJob = getRoleTestJob,
+    sleep = defaultSleep,
+  }: {
+    beforeBundleTest?: () => Promise<unknown> | unknown
+    afterBundleTest?: () => Promise<unknown> | unknown
+    startBundleJob?: (bundleId: string) => Promise<RoleTestJobResponse>
+    getJob?: (jobId: string) => Promise<RoleTestJobResponse>
+    sleep?: (ms: number) => Promise<void>
+  } = {},
+): Promise<void> {
+  await runRoleTest(bundleTestStoreKey(bundleId), {
+    beforeRoleTest: beforeBundleTest,
+    afterRoleTest: afterBundleTest,
+    startJob: () => startBundleJob(bundleId),
+    getJob,
+    sleep,
+  })
 }
 
 /**

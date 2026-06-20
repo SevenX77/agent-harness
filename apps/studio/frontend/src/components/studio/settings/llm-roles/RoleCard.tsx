@@ -13,7 +13,7 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable"
-import { Bot, ChevronDown, Cog, Loader2, MoreVertical, Pencil, Trash2 } from "lucide-react"
+import { Bot, ChevronDown, Cog, Layers3, Loader2, MoreVertical, Pencil, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -103,6 +103,15 @@ export const RoleCard = memo(function RoleCard({
 }) {
   const role = data.roles[roleName]
   const modelCodes = useMemo(() => Object.keys(role.models), [role.models])
+  // #51: a role linked to a bundle by reference shows a "Linked to bundle X"
+  // badge. The chain is materialized from the live bundle (not a snapshot), so an
+  // edit to the bundle reflects here after re-projection.
+  const linkedBundle = useMemo(() => (
+    role.bundle_id ? data.model_bundles?.[role.bundle_id] ?? null : null
+  ), [data.model_bundles, role.bundle_id])
+  const linkedBundleLabel = role.bundle_id
+    ? linkedBundle?.display_name || role.bundle_id
+    : null
   const [editOpen, setEditOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
@@ -317,6 +326,16 @@ export const RoleCard = memo(function RoleCard({
             className="rounded-md border border-destructive-border bg-destructive-background/10 px-3 py-2 text-xs text-destructive"
           >
             Role Test failed: {roleTestError}
+          </div>
+        ) : null}
+        {linkedBundleLabel ? (
+          <div
+            data-role-linked-bundle="true"
+            data-linked-bundle-id={role.bundle_id ?? undefined}
+            className="flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground"
+          >
+            <Layers3 aria-hidden="true" className="size-3.5 shrink-0" />
+            <span className="min-w-0 break-all">Linked to bundle: {linkedBundleLabel}</span>
           </div>
         ) : null}
         <DndContext

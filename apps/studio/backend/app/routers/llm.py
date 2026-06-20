@@ -69,6 +69,7 @@ from app.models.llm_config import (
     RoleRouteEntry,
     RolesData,
     RouteCandidate,
+    overlay_bundle_reference_chain,
 )
 from app.services import copilot
 from app.services.copilot_test import (
@@ -1058,6 +1059,37 @@ async def start_role_test_job(role_name: str) -> RoleTestJobResponse:
     return job
 
 
+@router.post("/model-bundles/{bundle_id}/test-jobs", response_model=RoleTestJobResponse)
+async def start_bundle_test_job(bundle_id: str) -> RoleTestJobResponse:
+    """Start a bundle fallback test job, mirroring the role test (#50b).
+
+    The bundle is resolved through ``materialize_model_bundle`` which wraps it into
+    a TRANSIENT, never-persisted role-like entry — so the persisted roles store is
+    not polluted. The job is keyed under ``__bundle__{id}`` so its result lands in
+    the bundle namespace of the role-test results store, away from real roles.
+    """
+    data = _load_roles_or_empty()
+    bundle = data.model_bundles.get(bundle_id)
+    if bundle is None:
+        raise HTTPException(status_code=404, detail=f"Unknown model bundle: {bundle_id}")
+    credentials = load_credentials()
+    materialized = _materialize_bundle_for_response(bundle, credentials)
+    job_role_name = bundle_role_name(bundle_id)
+    targets = _build_role_test_targets(materialized, credentials)
+    job_id = str(uuid.uuid4())
+    job = RoleTestJobResponse(
+        job_id=job_id,
+        role_name=job_role_name,
+        status="queued",
+        message="Queued bundle test.",
+        provider_statuses=[_role_test_provider_progress(target, "queued") for target in targets],
+    )
+    async with _role_test_jobs_lock:
+        _role_test_jobs[job_id] = job
+    _spawn_background_task(_run_role_test_job_impl(job_id, job_role_name, targets))
+    return job
+
+
 @router.get("/role-test-jobs/{job_id}", response_model=RoleTestJobResponse)
 async def get_role_test_job(job_id: str) -> RoleTestJobResponse:
     """Return compact status for a role test job."""
@@ -1072,8 +1104,22 @@ def _role_test_targets(
     role: RoleEntry,
     credentials: LLMCredentialsFile,
 ) -> list[RoleTestTarget]:
+    return _build_role_test_targets(role, credentials)
+
+
+def _build_role_test_targets(
+    materialized: RoleEntry | ModelBundle,
+    credentials: LLMCredentialsFile,
+) -> list[RoleTestTarget]:
+    """Build per-route probe targets from a materialized role OR model bundle.
+
+    #50b: a materialized ModelBundle carries the same fallback_chain +
+    materialization_report shape a materialized role does, so the bundle Test path
+    (start_bundle_test_job) reuses this exact builder — one source of truth for the
+    role and bundle test orchestration.
+    """
     targets: list[RoleTestTarget] = []
-    for report_entry, fallback_entry in _role_test_entries(role):
+    for report_entry, fallback_entry in _role_test_entries(materialized):
         route_id = report_entry["route_id"]
         route = credentials.provider_routes.get(route_id)
         if route is None:
@@ -1483,15 +1529,32 @@ async def put_model_profiles(profiles: dict[str, ModelProfile]) -> dict[str, Mod
 
 @router.delete("/model-bundles/{bundle_id}", response_model=RolesData)
 async def delete_model_bundle(bundle_id: str) -> RolesData:
-    """Delete one persisted model bundle."""
+    """Delete one persisted model bundle and cascade off referencing roles.
+
+    #51/#52 delete cascade: the bundle is the source of truth. When it is removed,
+    a role that referenced it (bundle_id) must drop that reference (no dangling
+    failed snapshot is kept); on re-materialization the role loses that chain and
+    may become not-fit. The local delta on routes that no longer exist is
+    discarded with the reference.
+    """
     data = _load_roles_or_empty()
     bundles = dict(data.model_bundles)
     removed = bundles.pop(bundle_id, None)
     if removed is None:
         raise HTTPException(status_code=404, detail=f"Unknown model bundle: {bundle_id}")
     del removed
+    roles = {
+        role_name: (
+            role.model_copy(update={"bundle_id": None, "fallback_chain": []})
+            if role.bundle_id == bundle_id
+            else role
+        )
+        for role_name, role in data.roles.items()
+    }
     credentials = load_credentials()
-    saved = _save_roles_with_active_routes(data.model_copy(update={"model_bundles": bundles}))
+    saved = _save_roles_with_active_routes(
+        data.model_copy(update={"model_bundles": bundles, "roles": roles})
+    )
     return _materialize_roles_for_response(saved, credentials)
 
 
@@ -4146,7 +4209,9 @@ def _default_official_text_method(endpoint: ProviderEndpoint) -> tuple[str, str]
     return "openai_responses", "openai_responses_text"
 
 
-def _role_test_entries(role: RoleEntry) -> list[tuple[dict[str, Any], RoleRouteEntry | None]]:
+def _role_test_entries(
+    role: RoleEntry | ModelBundle,
+) -> list[tuple[dict[str, Any], RoleRouteEntry | None]]:
     fallback_by_route = {entry.route_id: entry for entry in role.fallback_chain}
     report = role.materialization_report if isinstance(role.materialization_report, dict) else {}
     report_entries = [
@@ -4528,38 +4593,98 @@ def _materialize_roles_for_response(
 ) -> RolesData:
     has_role_authoring = any(role.model_groups for role in data.roles.values())
     has_bundle_authoring = any(bundle.model_groups for bundle in data.model_bundles.values())
-    if not has_role_authoring and not has_bundle_authoring:
+    # #51: a pure bundle-reference role (bundle_id set, no own model_groups) also
+    # needs materialization — its chain comes from the referenced bundle.
+    has_reference_roles = any(role.bundle_id for role in data.roles.values())
+    if not has_role_authoring and not has_bundle_authoring and not has_reference_roles:
         return data
     active_credentials = credentials or load_credentials()
     evidence_records = _load_gateway_evidence_records()
     adapter = build_gateway_adapter()
+    materialized_bundles = {
+        bundle_id: adapter.materialize_model_bundle(
+            {
+                "bundle": bundle,
+                "credentials": active_credentials,
+                "evidence_records": evidence_records,
+            }
+        )
+        if bundle.model_groups
+        else bundle
+        for bundle_id, bundle in data.model_bundles.items()
+    }
     return data.model_copy(
         update={
             "schema_version": 3,
             "roles": {
-                role_name: adapter.materialize_role(
-                    {
-                        "role": role,
-                        "credentials": active_credentials,
-                        "evidence_records": evidence_records,
-                    }
+                role_name: _materialize_one_role_for_response(
+                    role,
+                    materialized_bundles,
+                    active_credentials,
+                    adapter,
+                    evidence_records,
                 )
-                if role.model_groups
-                else role
                 for role_name, role in data.roles.items()
             },
-            "model_bundles": {
-                bundle_id: adapter.materialize_model_bundle(
-                    {
-                        "bundle": bundle,
-                        "credentials": active_credentials,
-                        "evidence_records": evidence_records,
-                    }
-                )
-                if bundle.model_groups
-                else bundle
-                for bundle_id, bundle in data.model_bundles.items()
-            },
+            "model_bundles": materialized_bundles,
+        }
+    )
+
+
+def _materialize_one_role_for_response(
+    role: RoleEntry,
+    materialized_bundles: dict[str, ModelBundle],
+    credentials: LLMCredentialsFile,
+    adapter: Any,
+    evidence_records: list[EvidenceRecord],
+) -> RoleEntry:
+    """Materialize one role for the registry response.
+
+    A role with its own model_groups materializes directly (existing path). A
+    pure bundle-reference role (#51: bundle_id set, no own model_groups) delegates
+    the bundle+delta overlay to the gateway resolver's ``materialize_role_entry``:
+    we hand it a snapshot whose ``model_bundles`` already carry the bundle's
+    flattened chain + report, and the role's own ``fallback_chain`` is the local
+    delta the overlay applies. The shell never hand-rolls the merge.
+    """
+    if role.model_groups:
+        return cast(
+            RoleEntry,
+            adapter.materialize_role(
+                {
+                    "role": role,
+                    "credentials": credentials,
+                    "evidence_records": evidence_records,
+                }
+            ),
+        )
+    if not role.bundle_id:
+        return role
+    bundle = materialized_bundles.get(role.bundle_id)
+    if bundle is None:
+        # #52 delete cascade: the referenced bundle is gone. Surface a not-fit
+        # role with an empty chain rather than raising mid-response.
+        logger.warning(
+            "role references missing model bundle %s; materializing empty chain",
+            role.bundle_id,
+        )
+        return role.model_copy(update={"fallback_chain": []})
+    return _materialize_reference_role(role, bundle)
+
+
+def _materialize_reference_role(role: RoleEntry, bundle: ModelBundle) -> RoleEntry:
+    """Overlay a role's local delta onto a referenced bundle via the gateway.
+
+    The by-reference + delta overlay is owned by the gateway resolver
+    (materialize_role_entry); ``overlay_bundle_reference_chain`` plumbs the role +
+    materialized bundle into it. The bundle's materialization_report (role-fit per
+    route) is carried onto the role so the status lights project.
+    """
+    fallback_chain = overlay_bundle_reference_chain(role, bundle)
+    return role.model_copy(
+        update={
+            "fallback_chain": fallback_chain,
+            "materialization_report": dict(bundle.materialization_report),
         }
     )
 
@@ -4583,6 +4708,36 @@ def _materialize_role_for_response(
     )
 
 
+def bundle_role_name(bundle_id: str) -> str:
+    """The __bundle__ job key (#50b): keeps bundle test results out of the role
+    results namespace; mirrors the frontend bundleRoleName(bundleId)."""
+    return f"__bundle__{bundle_id}"
+
+
+def _materialize_bundle_for_response(
+    bundle: ModelBundle,
+    credentials: LLMCredentialsFile | None = None,
+) -> ModelBundle:
+    """Materialize a bundle into its flat chain + report via the gateway (#50b).
+
+    Wraps the bundle into a transient role-like entry (materialize_model_bundle);
+    the persisted roles store is never written.
+    """
+    if not bundle.model_groups:
+        return bundle
+    adapter = build_gateway_adapter()
+    return cast(
+        ModelBundle,
+        adapter.materialize_model_bundle(
+            {
+                "bundle": bundle,
+                "credentials": credentials or load_credentials(),
+                "evidence_records": _load_gateway_evidence_records(),
+            }
+        ),
+    )
+
+
 def _load_gateway_evidence_records() -> list[EvidenceRecord]:
     return list(load_evidence_library().evidence_records)
 
@@ -4590,9 +4745,21 @@ def _load_gateway_evidence_records() -> list[EvidenceRecord]:
 def _save_roles_with_active_routes(data: RolesData) -> RolesData:
     active_path = roles_path()
     active_route_ids = set(load_credentials().provider_routes)
+    # #51: bundle ids are slugged by model_profile_id; a role's bundle_id must
+    # point at one of these or it is a dangling reference.
+    known_bundle_ids = {bundle.model_profile_id for bundle in data.model_bundles.values()}
     try:
-        validate_references(data, known_route_ids=active_route_ids)
-        save_roles_file(active_path, data, known_route_ids=active_route_ids)
+        validate_references(
+            data,
+            known_route_ids=active_route_ids,
+            known_bundle_ids=known_bundle_ids,
+        )
+        save_roles_file(
+            active_path,
+            data,
+            known_route_ids=active_route_ids,
+            known_bundle_ids=known_bundle_ids,
+        )
         return load_roles_file(active_path)
     except InvalidRoleReference as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

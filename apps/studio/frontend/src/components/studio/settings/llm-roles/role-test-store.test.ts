@@ -5,10 +5,12 @@ import type { RoleTestResultsResponse } from "@/api/client"
 import {
   __getRoleTestStoreForTests,
   __resetRoleTestStoreForTests,
+  bundleTestStoreKey,
   mergePersistedRoleTestResults,
   roleTestStatusesByRole,
   roleTestStatusesFromJob,
   roleTestStatusesFromResult,
+  runBundleTest,
   runRoleTest,
   seedPersistedRoleTestResults,
   type RoleTestStore,
@@ -227,5 +229,34 @@ describe("runRoleTest", () => {
     await runRoleTest("analyst", { startJob, getJob, sleep: async () => {} })
 
     expect(__getRoleTestStoreForTests().analyst).toMatchObject({ running: false, error: "probe exploded" })
+  })
+})
+
+describe("runBundleTest (#50b)", () => {
+  afterEach(() => __resetRoleTestStoreForTests())
+
+  function jobResponse(overrides: Partial<RoleTestJobResponse>): RoleTestJobResponse {
+    return {
+      job_id: "bundle-job-1",
+      role_name: "__bundle__primary",
+      status: "running",
+      provider_statuses: [],
+      ...overrides,
+    }
+  }
+
+  it("keys bundle test state under __bundle__{id} via startBundleTestJob", async () => {
+    const startBundleJob = vi.fn().mockResolvedValue(jobResponse({ status: "queued" }))
+    const getJob = vi.fn().mockResolvedValue(jobResponse({ status: "completed", result: settledResult() }))
+
+    await runBundleTest("primary", { startBundleJob, getJob, sleep: async () => {} })
+
+    expect(startBundleJob).toHaveBeenCalledWith("primary")
+    const key = bundleTestStoreKey("primary")
+    expect(key).toBe("__bundle__primary")
+    const settled = __getRoleTestStoreForTests()[key]
+    expect(settled.running).toBe(false)
+    // The role results namespace is untouched.
+    expect(__getRoleTestStoreForTests().primary).toBeUndefined()
   })
 })

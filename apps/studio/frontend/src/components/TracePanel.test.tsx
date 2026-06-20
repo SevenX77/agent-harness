@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, expectTypeOf, it } from 'vitest'
 
 import type { CallbackEvent, EventEnvelope } from '../api/types'
-import { TracePanel } from './TracePanel'
+import { TracePanel, isGoldenlessAgentNode } from './TracePanel'
 
 const events = [
   {
@@ -289,5 +289,101 @@ describe('TracePanel Resume action', () => {
     expect(html).toContain('Select a pending tool call before submitting.')
     const submitSlice = html.slice(html.indexOf('Submit answer') - 240, html.indexOf('Submit answer') + 160)
     expect(submitSlice).toContain('disabled=""')
+  })
+})
+
+describe('isGoldenlessAgentNode (atom #32 entry① eligibility)', () => {
+  it('is true for an agent node without golden', () => {
+    expect(isGoldenlessAgentNode({ data: { mode: 'agent' } })).toBe(true)
+    expect(isGoldenlessAgentNode({ data: { mode: 'llm', goldenState: 'logic-ok' } })).toBe(true)
+    expect(isGoldenlessAgentNode({ data: { mode: 'skill' } })).toBe(true)
+  })
+
+  it('is false once the agent node already has golden', () => {
+    expect(isGoldenlessAgentNode({ data: { mode: 'agent', goldenState: 'has-golden' } })).toBe(false)
+  })
+
+  it('is false for non-agent nodes (logic/subgraph never get golden)', () => {
+    expect(isGoldenlessAgentNode({ data: { mode: 'logic' } })).toBe(false)
+    expect(isGoldenlessAgentNode({ data: { mode: 'subgraph' } })).toBe(false)
+  })
+
+  it('is false when there is no focused node', () => {
+    expect(isGoldenlessAgentNode(null)).toBe(false)
+    expect(isGoldenlessAgentNode(undefined)).toBe(false)
+  })
+})
+
+describe('TracePanel per-node golden promote (atom #32 entry①)', () => {
+  const goldenlessAgentNode = { id: 'nodeA', data: { label: 'Node A', mode: 'agent' as const } }
+
+  it('renders a per-node promote button beside the focused golden-less agent node', () => {
+    const html = renderToStaticMarkup(
+      <TracePanel
+        traceLogs={twoPhaseEvents}
+        selectedNode={goldenlessAgentNode}
+        canCompare
+        onPromoteNode={() => undefined}
+        onSelectPrompt={() => undefined}
+      />,
+    )
+    expect(html).toContain('Promote node to golden')
+    // The aria-label is node-anchored; the focused node label appears in it
+    // (double quotes around the label are HTML-escaped by the static renderer).
+    expect(html).toContain('aria-label="Promote node ')
+    expect(html).toContain('Node A')
+    expect(html).toContain(' to golden"')
+  })
+
+  it('omits the per-node button when the focused agent node already has golden', () => {
+    const html = renderToStaticMarkup(
+      <TracePanel
+        traceLogs={twoPhaseEvents}
+        selectedNode={{ id: 'nodeA', data: { label: 'Node A', mode: 'agent', goldenState: 'has-golden' } }}
+        canCompare
+        onPromoteNode={() => undefined}
+        onSelectPrompt={() => undefined}
+      />,
+    )
+    expect(html).not.toContain('Promote node to golden')
+  })
+
+  it('omits the per-node button with no run to promote from (canCompare false)', () => {
+    const html = renderToStaticMarkup(
+      <TracePanel
+        traceLogs={twoPhaseEvents}
+        selectedNode={goldenlessAgentNode}
+        canCompare={false}
+        onPromoteNode={() => undefined}
+        onSelectPrompt={() => undefined}
+      />,
+    )
+    expect(html).not.toContain('Promote node to golden')
+  })
+
+  it('omits the per-node button when no per-node promote handler is wired', () => {
+    const html = renderToStaticMarkup(
+      <TracePanel
+        traceLogs={twoPhaseEvents}
+        selectedNode={goldenlessAgentNode}
+        canCompare
+        onSelectPrompt={() => undefined}
+      />,
+    )
+    expect(html).not.toContain('Promote node to golden')
+  })
+
+  it('omits the per-node button when link views is off (no node focus)', () => {
+    const html = renderToStaticMarkup(
+      <TracePanel
+        traceLogs={twoPhaseEvents}
+        selectedNode={goldenlessAgentNode}
+        canCompare
+        linkEnabled={false}
+        onPromoteNode={() => undefined}
+        onSelectPrompt={() => undefined}
+      />,
+    )
+    expect(html).not.toContain('Promote node to golden')
   })
 })

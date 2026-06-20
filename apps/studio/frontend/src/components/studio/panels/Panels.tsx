@@ -126,6 +126,7 @@ export function Panels({
           compareLoading={traceCompareLoading}
           onCompareToGolden={onCompareToGolden}
           onPromoteToGolden={onPromoteToGolden}
+          onPromoteNode={onPromoteNode}
           canResume={traceCanResume}
           resumeLoading={traceResumeLoading}
           onResume={onResumeRun}

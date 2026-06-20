@@ -11,13 +11,15 @@ import { AdvancedModelBundlesSection, modelBundleGroupsFromData } from "./llm-ro
 import { AvailableModelsSidebar } from "./llm-roles/AvailableModelsSidebar"
 import { RoleCardList } from "./llm-roles/RoleCardList"
 import {
+  bundleTestStoreKey,
   roleTestStatusesByRole,
+  runBundleTest,
   runRoleTest,
   seedPersistedRoleTestResults,
   useRoleTestStore,
 } from "./llm-roles/role-test-store"
-import { appendModelGroupToBundle, removeModelBundle } from "./model-bundle-utils"
-import { appendModelGroupToRoleWithResult, modelDropFailureMessage, ownedProviderCodesForModel, pruneInvalidRoleProviders, removeRole } from "./role-utils"
+import { appendModelGroupToBundle, removeModelBundle, visibleModelBundleEntries } from "./model-bundle-utils"
+import { appendModelGroupToRoleWithResult, attachBundleReferenceToRole, BUNDLE_DRAG_PREFIX, modelDropFailureMessage, ownedProviderCodesForModel, pruneInvalidRoleProviders, removeRole } from "./role-utils"
 import { credentialsByProviderCode } from "./route-credentials"
 import { SectionTitle } from "./shared"
 
@@ -314,6 +316,13 @@ export function LlmRolesTab({
       clearPointerDrag({ suppressClick: true })
       if (!latestData) return
       if (roleName) {
+        // #51: a dragged bundle attaches as a LIVE REFERENCE (bundle_id), not a
+        // snapshot copy — so editing the bundle later reflects on every role that
+        // links to it after re-projection.
+        if (drag.modelId.startsWith(BUNDLE_DRAG_PREFIX)) {
+          onChangeRef.current(attachBundleReferenceToRole(latestData, roleName, drag.modelId))
+          return
+        }
         const modelGroup = modelGroupsByIdRef.current.get(drag.modelId)
         if (!modelGroup) {
           toast.error(modelDropFailureMessage({
@@ -414,6 +423,31 @@ export function LlmRolesTab({
     },
     [error, onAfterRoleTest, onBeforeRoleTest],
   )
+  // #50b: bundle test reuses the same backend mirror, keyed under __bundle__{id}.
+  const handleTestBundle = useCallback(
+    (bundleId: string) => {
+      void runBundleTest(bundleId, {
+        beforeBundleTest: onBeforeRoleTest,
+        afterBundleTest: onAfterRoleTest,
+      })
+    },
+    [onAfterRoleTest, onBeforeRoleTest],
+  )
+  // Project the bundle slice of the shared mirror into per-bundle props. The
+  // store keys bundle entries under __bundle__{id}; testStatusesByRole already
+  // projects every key (roles + bundles) into chain-status maps.
+  const bundleTestState = useMemo(() => {
+    const statusesByBundle: Record<string, (typeof testStatusesByRole)[string]> = {}
+    const runningByBundle: Record<string, boolean> = {}
+    const errorsByBundle: Record<string, string | undefined> = {}
+    for (const [bundleId] of visibleModelBundleEntries(normalizedData ?? { roles: {}, models: {}, providers: {} } as RolesData)) {
+      const key = bundleTestStoreKey(bundleId)
+      statusesByBundle[bundleId] = testStatusesByRole[key] ?? {}
+      runningByBundle[bundleId] = roleTestStore[key]?.running ?? false
+      errorsByBundle[bundleId] = roleTestStore[key]?.error
+    }
+    return { statusesByBundle, runningByBundle, errorsByBundle }
+  }, [normalizedData, roleTestStore, testStatusesByRole])
   if (!normalizedData) {
     return (
       <LlmRolesLayout sidebar={<LlmRolesModelsSkeleton />}>
@@ -466,6 +500,10 @@ export function LlmRolesTab({
           modelDisplayNamesByCode={modelDisplayNamesByCode}
           modelGroups={modelGroups}
           providerModelsByRouteId={providerModelsByRouteId}
+          testStatusesByBundle={bundleTestState.statusesByBundle}
+          testRunningByBundle={bundleTestState.runningByBundle}
+          bundleTestErrors={bundleTestState.errorsByBundle}
+          onTestBundle={handleTestBundle}
           getActiveAvailableModelDragId={getActiveAvailableModelDragId}
           onChange={onChange}
           onDeleteBundle={onDeleteModelBundle ?? ((bundleId) => onChange(removeModelBundle(normalizedData, bundleId)))}

@@ -739,14 +739,24 @@ def _filter_gateway_roles(roles: dict[str, Any]) -> dict[str, Any]:
         "system_prompt_prefix",
         "source_profile_id",
         "source_profile_snapshot",
+        # #51: keep bundle_id so the gateway resolver can resolve a role's
+        # by-reference bundle against model_bundles (it is dropped otherwise).
+        "bundle_id",
         "fallback_chain",
         "lint_requirements",
     }
-    
+
     route_entry_keys = {
         "route_id",
         "runtime_settings_source",
         "runtime_settings",
+    }
+
+    bundle_keys = {
+        "model_profile_id",
+        "bundle_id",
+        "fallback_chain",
+        "lint_requirements",
     }
 
     if "roles" in roles:
@@ -779,6 +789,16 @@ def _filter_gateway_roles(roles: dict[str, Any]) -> dict[str, Any]:
             if isinstance(p, dict):
                 filtered_profiles[p_id] = {k: v for k, v in p.items() if k in profile_keys}
         filtered["model_profiles"] = filtered_profiles
+
+    # #51: carry model_bundles through so a role's by-reference bundle resolves in
+    # the gateway resolver (_gateway_model_bundles_payload keys them by
+    # model_profile_id). Without this the resolver sees no bundles and raises.
+    if "model_bundles" in roles:
+        filtered_bundles = {}
+        for b_id, b in roles["model_bundles"].items():
+            if isinstance(b, dict):
+                filtered_bundles[b_id] = {k: v for k, v in b.items() if k in bundle_keys}
+        filtered["model_bundles"] = filtered_bundles
 
     return filtered
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
+from graph_agent_gateway.registry.resolver import materialize_role_entry
 from graph_agent_gateway.registry.schema import (
     CapabilityValue,
     EffectiveRuntimeSetting,
@@ -26,6 +27,9 @@ from graph_agent_gateway.registry.schema import (
     RouteCandidate,
     RuntimePolicy,
     RuntimeSettingDescriptor,
+)
+from graph_agent_gateway.registry.schema import (
+    ModelBundle as GatewayModelBundle,
 )
 from graph_agent_gateway.registry.schema import (
     ModelProfile as GatewayModelProfile,
@@ -111,10 +115,52 @@ def _gateway_role(role: RoleEntry) -> GatewayRoleEntry:
             include={
                 "system_prompt_prefix",
                 "source_profile_id",
+                "bundle_id",
                 "fallback_chain",
                 "lint_requirements",
             },
         )
+    )
+
+
+def overlay_bundle_reference_chain(
+    role: RoleEntry,
+    bundle: ModelBundle,
+) -> list[RoleRouteEntry]:
+    """Resolve a role's bundle reference into a flat route chain via the gateway.
+
+    #51 (束=引用): delegates the by-reference + delta overlay to the gateway
+    resolver's ``materialize_role_entry`` — the canonical owner of that merge. We
+    project the role + the already-materialized bundle onto a minimal
+    RegistrySnapshot (bundle keyed by its slug) and let the gateway pull the
+    bundle's flattened chain and overlay the role's ``fallback_chain`` delta. The
+    shell never hand-rolls the merge; this only plumbs the inputs.
+    """
+    gateway_role = _gateway_role(role)
+    snapshot = RegistrySnapshot(
+        model_bundles={bundle.model_profile_id: _gateway_model_bundle(bundle)},
+        roles={"__reference__": gateway_role},
+    )
+    merged = materialize_role_entry(snapshot, "__reference__", gateway_role)
+    return list(merged.fallback_chain)
+
+
+def _gateway_model_bundle(bundle: ModelBundle) -> GatewayModelBundle:
+    """Project a Studio ModelBundle onto the gateway runtime ModelBundle.
+
+    The Studio bundle is keyed by ``model_profile_id`` which is already a slug
+    (#49 generates it via lowercase/underscore normalization); the gateway uses
+    that same slug as ``bundle_id`` so a role's ``bundle_id`` reference resolves
+    against ``snapshot.model_bundles``. Studio-only authoring fields (display
+    name, model_groups, intent, materialization_report) are dropped — the gateway
+    only consumes the flattened ``fallback_chain`` + ``lint_requirements``.
+    """
+    return GatewayModelBundle.model_validate(
+        {
+            "bundle_id": bundle.model_profile_id,
+            "fallback_chain": [entry.model_dump(mode="python") for entry in bundle.fallback_chain],
+            "lint_requirements": dict(bundle.lint_requirements),
+        }
     )
 
 
@@ -292,6 +338,10 @@ class RolesData(BaseModel):
                 profile_id: _gateway_model_profile(profile)
                 for profile_id, profile in self.model_profiles.items()
             },
+            model_bundles={
+                bundle.model_profile_id: _gateway_model_bundle(bundle)
+                for bundle in self.model_bundles.values()
+            },
             roles={role_name: _gateway_role(role) for role_name, role in self.roles.items()},
         )
 
@@ -346,4 +396,5 @@ __all__ = [
     "RuntimeSettingDescriptor",
     "RuntimePolicy",
     "TestStatus",
+    "overlay_bundle_reference_chain",
 ]

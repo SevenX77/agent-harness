@@ -87,7 +87,7 @@ phases:
 ---
 <phase depends_on="input" output>init</phase>
 """,
-    "phases/init/LOGIC.md": """---
+    "phases/init/SKILL.md": """---
 io:
   inputs:
     type: object
@@ -95,16 +95,15 @@ io:
   outputs:
     type: object
     properties: {}
+tools: []
+max_iterations: 10
 ---
-<action>initialize</action>
+<role>TODO: describe who this agent is.</role>
+<goal>TODO: describe what this agent should produce.</goal>
 
-# init phase logic
+<step id="S1" name="todo">TODO: describe the first step.</step>
 
-Describe what this phase does.
-""",
-    "phases/init/actions/initialize.py": """def initialize(context):
-    \"\"\"Starter logic action for a new Studio skill.\"\"\"
-    return None
+<protocol id="P1">TODO: describe a rule the agent must follow.</protocol>
 """,
 }
 

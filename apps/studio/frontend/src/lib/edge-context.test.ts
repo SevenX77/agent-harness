@@ -181,4 +181,96 @@ describe('edgeContextFromEvents', () => {
 
     expect(edgeContextFromEvents([reduceEvent], 'planner', 'executor')).toBeNull()
   })
+
+  it('collects the end -> start operation log (reduce / dispatch / inject / persist) in stream order', () => {
+    const reduceEvent: CallbackEvent = {
+      schema_version: '1.0',
+      event_type: 'blackboard_reduce',
+      timestamp: '2026-06-14T00:00:00Z',
+      from_phase: 'planner',
+      to_phase: 'executor',
+      changed_keys: ['plan'],
+      blackboard_snapshot: { plan: 'x' },
+      reducer: 'merge_dicts',
+    } as CallbackEvent
+    const persistEvent: CallbackEvent = {
+      schema_version: '1.0',
+      event_type: 'artifact_saved',
+      timestamp: '2026-06-14T00:00:00Z',
+      phase_name: 'planner',
+      name: 'plan.json',
+      path: 'runs/r1/plan.json',
+      size_bytes: 128,
+    } as CallbackEvent
+    const injectEvent: CallbackEvent = {
+      schema_version: '1.0',
+      event_type: 'input_file_injected',
+      timestamp: '2026-06-14T00:00:00Z',
+      from_phase: 'planner',
+      to_phase: 'executor',
+      changed_keys: ['spec'],
+      blackboard_snapshot: { spec: '<file>' },
+      file_ref: 'runs/r1/plan.json',
+      target_field: 'spec',
+    } as CallbackEvent
+
+    const result = edgeContextFromEvents(
+      [
+        reduceEvent,
+        persistEvent,
+        injectEvent,
+        dispatchEvent('planner', 'executor', { plan: 'x', spec: '<file>' }, {
+          dispatched_keys: ['plan', 'spec'],
+          changed_keys: ['plan', 'spec'],
+        }),
+      ],
+      'planner',
+      'executor',
+    )
+
+    expect(result?.operations).toEqual([
+      { kind: 'reduce', reducer: 'merge_dicts', changed_keys: ['plan'] },
+      { kind: 'persist', name: 'plan.json', path: 'runs/r1/plan.json', size_bytes: 128 },
+      { kind: 'inject', file_ref: 'runs/r1/plan.json', target_field: 'spec' },
+      { kind: 'dispatch', dispatched_keys: ['plan', 'spec'], changed_keys: ['plan', 'spec'] },
+    ])
+  })
+
+  it('attributes artifact_saved to the edge whose upstream phase persisted it', () => {
+    const persistForOtherPhase: CallbackEvent = {
+      schema_version: '1.0',
+      event_type: 'artifact_saved',
+      timestamp: '2026-06-14T00:00:00Z',
+      phase_name: 'reviewer',
+      name: 'review.json',
+      path: 'runs/r1/review.json',
+      size_bytes: 64,
+    } as CallbackEvent
+
+    const result = edgeContextFromEvents(
+      [
+        persistForOtherPhase,
+        dispatchEvent('planner', 'executor', { plan: 'x' }),
+      ],
+      'planner',
+      'executor',
+    )
+
+    // The reviewer-owned artifact must NOT appear on the planner -> executor edge.
+    expect(result?.operations).toEqual([
+      { kind: 'dispatch', dispatched_keys: ['plan'], changed_keys: ['plan'] },
+    ])
+  })
+
+  it('returns an empty operation log when only the dispatch snapshot exists', () => {
+    const result = edgeContextFromEvents(
+      [dispatchEvent('planner', 'executor', { query: 'x' }, { dispatched_keys: ['query'] })],
+      'planner',
+      'executor',
+    )
+
+    expect(result?.operations).toEqual([
+      { kind: 'dispatch', dispatched_keys: ['query'], changed_keys: ['query'] },
+    ])
+  })
 })

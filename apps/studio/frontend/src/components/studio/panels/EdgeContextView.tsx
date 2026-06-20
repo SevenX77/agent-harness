@@ -4,7 +4,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { ResumeRunOptions } from "@/api/client"
-import type { SelectedEdge } from "../WorkspaceContext"
+import type { EdgeOperation, SelectedEdge } from "../WorkspaceContext"
 import { edgeTamperResumeOptionsFromJson } from "./edge-tamper"
 import { EdgeTamperEditor } from "./EdgeTamperEditor"
 
@@ -16,9 +16,13 @@ import { EdgeTamperEditor } from "./EdgeTamperEditor"
  * dump that used to live in Properties is removed; trace owns this interpretation
  * (capability: trace-observability, region: timeline). We frame the carried
  * `contextJson` as the transition blackboard (not relabeled node I/O) and surface
- * `changed_keys` as the available "what mutated at this transition" signal. The
- * detailed reduce/filter/inject/persist operation stream is a trace target-design
- * follow-up; it is not fabricated here.
+ * `changed_keys` as the available "what mutated at this transition" signal.
+ *
+ * The reduce / dispatch / inject / persist operation log is driven by the real
+ * micro-op events the engine emits on the run stream (blackboard_reduce /
+ * input_dispatch / input_file_injected / artifact_saved), resolved by
+ * edgeContextFromEvents into `contextJson.operations`. Nothing is fabricated:
+ * an empty `operations` list renders an explicit empty state.
  */
 
 function recordOf(contextJson: SelectedEdge["contextJson"]): Record<string, unknown> {
@@ -28,6 +32,16 @@ function recordOf(contextJson: SelectedEdge["contextJson"]): Record<string, unkn
 function changedKeysOf(contextJson: SelectedEdge["contextJson"]): string[] {
   const raw = recordOf(contextJson).changed_keys
   return Array.isArray(raw) ? raw.filter((key): key is string => typeof key === "string") : []
+}
+
+function operationsOf(contextJson: SelectedEdge["contextJson"]): EdgeOperation[] {
+  const raw = recordOf(contextJson).operations
+  if (!Array.isArray(raw)) {
+    return []
+  }
+  return raw.filter((op): op is EdgeOperation =>
+    op != null && typeof op === "object" && typeof (op as { kind?: unknown }).kind === "string",
+  )
 }
 
 function objectField(contextJson: SelectedEdge["contextJson"], key: string): Record<string, unknown> | null {
@@ -85,6 +99,7 @@ export function EdgeContextView({
   const tamperAudit = tamperAuditOf(selectedEdge.contextJson)
   const disabledReason = resumeDisabledReason(selectedEdge.contextJson)
   const changedKeys = changedKeysOf(selectedEdge.contextJson)
+  const operations = operationsOf(selectedEdge.contextJson)
   const entries = blackboard ? Object.entries(blackboard) : []
   const initialTamperJson = useMemo(() => JSON.stringify(blackboard ?? {}, null, 2), [blackboard])
   const [tampering, setTampering] = useState(false)
@@ -259,14 +274,86 @@ export function EdgeContextView({
                 </div>
               ) : null}
 
-              <div className="text-[11px] leading-relaxed text-muted-foreground/80">
-                Detailed reducer / filter / inject / persist operations are part of the run trace
-                (target-design); only the dispatched blackboard and changed keys are shown here.
+              <div className="rounded-md border border-border bg-card p-3">
+                <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Operations (end → start)
+                </div>
+                <div className="mb-3 text-xs text-muted-foreground">
+                  Reduce / dispatch / inject / persist recorded between {selectedEdge.source} end and{" "}
+                  {selectedEdge.target} start.
+                </div>
+                {operations.length > 0 ? (
+                  <ol className="space-y-1.5">
+                    {operations.map((operation, index) => (
+                      <li key={index} className="flex items-start gap-2">
+                        <span className="mt-0.5 w-4 shrink-0 text-right font-mono text-[10px] text-muted-foreground">
+                          {index + 1}
+                        </span>
+                        <OperationRow operation={operation} />
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <div className="text-xs text-muted-foreground">
+                    No operations recorded for this transition.
+                  </div>
+                )}
               </div>
             </>
           )}
         </div>
       </ScrollArea>
+    </div>
+  )
+}
+
+function OperationLabel({ text }: { text: string }) {
+  return (
+    <Badge variant="outline" className="shrink-0 px-1.5 py-0 font-mono text-[9px] uppercase tracking-wider">
+      {text}
+    </Badge>
+  )
+}
+
+function OperationRow({ operation }: { operation: EdgeOperation }) {
+  if (operation.kind === "reduce") {
+    return (
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+        <OperationLabel text="reduce" />
+        <span className="font-mono text-foreground">{operation.reducer}</span>
+        {operation.changed_keys.length > 0 ? (
+          <span className="break-all font-mono">→ {operation.changed_keys.join(", ")}</span>
+        ) : null}
+      </div>
+    )
+  }
+  if (operation.kind === "dispatch") {
+    return (
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+        <OperationLabel text="dispatch" />
+        <span className="break-all font-mono">
+          {operation.dispatched_keys.length > 0 ? operation.dispatched_keys.join(", ") : "(no keys)"}
+        </span>
+      </div>
+    )
+  }
+  if (operation.kind === "inject") {
+    return (
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+        <OperationLabel text="inject" />
+        <span className="break-all font-mono text-foreground">{operation.file_ref}</span>
+        <span className="font-mono">→ {operation.target_field}</span>
+      </div>
+    )
+  }
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+      <OperationLabel text="persist" />
+      <span className="break-all font-mono text-foreground">{operation.name}</span>
+      <span className="break-all font-mono">{operation.path}</span>
+      {operation.size_bytes != null ? (
+        <span className="font-mono">{operation.size_bytes} B</span>
+      ) : null}
     </div>
   )
 }

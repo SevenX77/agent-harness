@@ -617,27 +617,28 @@ def _validate_subgraph_io_contracts(
     _loading_stack: tuple[str, ...],
     _compilation_cache: dict[str, CompiledSkill],
 ) -> None:
+    """Compile each subgraph's child so a parent compile validates its children.
+
+    The old parent/child ``io.outputs`` schema-equality gate (which raised
+    ``[F-v3-subgraph-io-mismatch]``) was relaxed per mvp1 skill-syntax §2.4 /
+    cutover item ⑦: a SUBGRAPH node slices its inputs from, and merges its
+    declared outputs back into, the parent blackboard like any normal node —
+    ``StateMapper`` enforces that at runtime — so parent and child field sets are
+    NOT required to match 1:1. The recursive child compile is kept: a subgraph
+    that points at a non-compilable child still fails at the parent's compile
+    time (path resolution + child validity), only the field-equality gate is gone.
+    """
     for doc in phase_docs:
         if not isinstance(doc.ast, SubgraphNodeAST):
             continue
         resolver = require_skill_resolver(skill_resolver, caller="SkillLoader.compile_skill")
         child_root = _resolve_subgraph_path_root(skill_root, doc.path, doc.ast.path)
-        child = SkillLoader(validate_context_writes=False).compile_skill(
+        SkillLoader(validate_context_writes=False).compile_skill(
             child_root,
             skill_resolver=resolver,
             _loading_stack=_loading_stack,
             _compilation_cache=_compilation_cache,
         )
-        parent_outputs = doc.ast.io.outputs
-        child_outputs = child.manifest.io.outputs
-        if parent_outputs != child_outputs:
-            _fatal(
-                doc.path,
-                _frontmatter_key_line(doc.path, "io"),
-                "[F-v3-subgraph-io-mismatch] "
-                f"SUBGRAPH {doc.phase_name!r} outputs do not match "
-                f"path {doc.ast.path!r}",
-            )
 
 
 def _resolve_subgraph_path_root(skill_root: Path, source_path: Path, value: str) -> Path:

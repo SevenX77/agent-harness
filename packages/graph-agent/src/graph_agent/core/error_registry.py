@@ -89,6 +89,9 @@ ERROR_REGISTRY: dict[str, ErrorCodeMetadata] = {
     '[F-v3-subgraph-name-invalid]': ErrorCodeMetadata('[F-v3-subgraph-name-invalid]', 'FATAL', ('编译期',), 'docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态'),
     '[F-v3-subgraph-target-skill-invalid]': ErrorCodeMetadata('[F-v3-subgraph-target-skill-invalid]', 'FATAL', ('编译期',), _DOC_SUBGRAPH_PATH_CONTRACT),
     '[F-v3-subgraph-io-schema-invalid]': ErrorCodeMetadata('[F-v3-subgraph-io-schema-invalid]', 'FATAL', ('编译期',), _DOC_SUBGRAPH_PATH_CONTRACT),
+    # Retained for the round28 registry↔owner bijection. No longer emitted: the
+    # parent/child io.outputs 1:1 gate was relaxed (skill-syntax §2.4 / cutover
+    # item ⑦); subgraph io is sliced/merged by StateMapper like a normal node.
     '[F-v3-subgraph-io-mismatch]': ErrorCodeMetadata('[F-v3-subgraph-io-mismatch]', 'FATAL', ('编译期',), _DOC_SUBGRAPH_PATH_CONTRACT),
     '[F-v3-subgraph-io-schema-incompatible]': ErrorCodeMetadata('[F-v3-subgraph-io-schema-incompatible]', 'FATAL', ('编译期',), _DOC_SUBGRAPH_PATH_CONTRACT),
     '[F-v3-golden-stale-fields]': ErrorCodeMetadata('[F-v3-golden-stale-fields]', 'FATAL', ('eval 期',), 'docs/engine/mvp1/02-mechanism/05-run-inner/06-golden-eval/mvp1-alignment.md#3-接口契约'),

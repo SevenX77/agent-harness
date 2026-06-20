@@ -229,22 +229,6 @@ class EndpointTestCompactModelInfo(BaseModel):
     capabilities: dict[str, object] = Field(default_factory=dict)
 
 
-class EndpointTestJobResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    job_id: str
-    endpoint_id: str
-    status: Literal["queued", "running", "completed", "failed"]
-    total_model_count: int = 0
-    tested_model_count: int = 0
-    verified_route_count: int = 0
-    failed_model_count: int = 0
-    catalog_only_count: int = 0
-    message: str | None = None
-    available_models: list[EndpointTestCompactModelInfo] = Field(default_factory=list)
-    available_sdks: list[str] = Field(default_factory=list)
-
-
 class ProviderNotableModelsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -293,9 +277,6 @@ class RoleTestResultsResponse(BaseModel):
     results: dict[str, PersistedRoleTestResult] = Field(default_factory=dict)
 
 
-_endpoint_test_jobs: dict[str, EndpointTestJobResponse] = {}
-_running_endpoint_test_jobs: dict[str, str] = {}
-_endpoint_test_jobs_lock = asyncio.Lock()
 _role_test_jobs: dict[str, RoleTestJobResponse] = {}
 _role_test_jobs_lock = asyncio.Lock()
 # Keep strong references to fire-and-forget background tasks so the event loop
@@ -431,35 +412,6 @@ async def delete_registry_endpoint(endpoint_id: str) -> dict[str, Any]:
     return serialize_for_response(data)
 
 
-@router.post(
-    "/endpoints/{endpoint_id}/test-jobs",
-    response_model=EndpointTestJobResponse,
-)
-async def start_endpoint_test_job(endpoint_id: str) -> EndpointTestJobResponse:
-    """Start a provider test job that reports compact progress."""
-    credentials = load_credentials()
-    endpoint = credentials.provider_endpoints.get(endpoint_id)
-    if endpoint is None:
-        raise HTTPException(status_code=404, detail=f"Unknown endpoint: {endpoint_id}")
-    async with _endpoint_test_jobs_lock:
-        running_job_id = _running_endpoint_test_jobs.get(endpoint_id)
-        if running_job_id is not None:
-            running = _endpoint_test_jobs.get(running_job_id)
-            if running is not None and running.status in {"queued", "running"}:
-                return running
-        job = EndpointTestJobResponse(
-            job_id=uuid.uuid4().hex,
-            endpoint_id=endpoint_id,
-            status="queued",
-            message="Provider test queued.",
-            available_sdks=[endpoint.protocol],
-        )
-        _endpoint_test_jobs[job.job_id] = job
-        _running_endpoint_test_jobs[endpoint_id] = job.job_id
-    _spawn_background_task(_run_endpoint_test_job(job.job_id, endpoint_id))
-    return job
-
-
 @router.post("/catalog/sync")
 async def sync_catalog() -> dict[str, Any]:
     """Pull the remote evidence library and merge it locally."""
@@ -507,18 +459,6 @@ async def share_catalog() -> dict[str, Any]:
             status_code=500,
             detail=f"Failed to share catalog evidence: {exc}",
         ) from exc
-
-
-@router.get(
-    "/endpoint-test-jobs/{job_id}",
-    response_model=EndpointTestJobResponse,
-)
-async def get_endpoint_test_job(job_id: str) -> EndpointTestJobResponse:
-    """Return compact progress for one provider test job."""
-    job = _endpoint_test_jobs.get(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"Unknown endpoint test job: {job_id}")
-    return job
 
 
 @router.post("/endpoints/{endpoint_id}/test", response_model=EndpointTestResponse)
@@ -3919,148 +3859,6 @@ def _official_model_type_capability_values(
     }
 
 
-async def _run_endpoint_test_job(job_id: str, endpoint_id: str) -> None:
-    try:
-        await _run_endpoint_test_job_impl(job_id, endpoint_id)
-    except Exception as exc:
-        logger.exception("endpoint test job failed")
-        await _record_endpoint_test_job_failure(
-            job_id,
-            endpoint_id,
-            f"Endpoint test failed before completion: {exc}",
-        )
-
-
-async def _run_endpoint_test_job_impl(job_id: str, endpoint_id: str) -> None:
-    credentials = load_credentials()
-    endpoint = credentials.provider_endpoints.get(endpoint_id)
-    if endpoint is None:
-        await _finish_endpoint_test_job(job_id, "failed", f"Unknown endpoint: {endpoint_id}")
-        return
-    starting_fingerprint = credentials.endpoint_fingerprint(endpoint_id)
-    if not endpoint.api_key or not endpoint.api_key.get_secret_value():
-        await _record_endpoint_test_job_failure(
-            job_id,
-            endpoint_id,
-            "API key is empty.",
-            starting_fingerprint,
-        )
-        return
-
-    await _update_endpoint_test_job(job_id, status="running", message="Reading provider catalog.")
-    result = await _gateway_test_provider_endpoint(endpoint)
-    if result.status != "ok":
-        await _record_endpoint_test_job_failure(
-            job_id,
-            endpoint_id,
-            _endpoint_probe_failure_message(result),
-            starting_fingerprint,
-        )
-        return
-
-    discovered_model_ids = result.model_ids
-    raw_capabilities_by_model = result.model_capabilities
-    latest_credentials = load_credentials()
-    latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
-    if latest_endpoint is None:
-        await _finish_endpoint_test_job(job_id, "failed", f"Unknown endpoint: {endpoint_id}")
-        return
-    if latest_credentials.endpoint_fingerprint(endpoint_id) != starting_fingerprint:
-        latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint.model_copy(
-            update={
-                "status": "unverified_manual",
-                "last_test_at": _now_iso(),
-                "last_test_message": ("Endpoint changed while endpoint test was running. Test result discarded."),
-            }
-        )
-        save_credentials(latest_credentials)
-        await _finish_endpoint_test_job(
-            job_id,
-            "failed",
-            "Endpoint changed while endpoint test was running. Test result discarded.",
-        )
-        return
-
-    if not discovered_model_ids:
-        latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint.model_copy(
-            update={
-                "status": "unverified_manual",
-                "last_test_at": _now_iso(),
-                "last_test_message": "Endpoint reachable but returned no models.",
-            }
-        )
-        save_credentials(latest_credentials)
-        _append_model_list_observation_evidence(
-            latest_endpoint,
-            (),
-            raw_capabilities_by_model,
-            {},
-        )
-        await _finish_endpoint_test_job(
-            job_id,
-            "completed",
-            "Endpoint reachable but returned no models.",
-            total_model_count=0,
-            tested_model_count=0,
-            verified_route_count=0,
-            failed_model_count=0,
-            catalog_only_count=0,
-        )
-        return
-
-    latest_credentials, route_ids_by_model = _upsert_discovered_routes(
-        latest_credentials,
-        endpoint=latest_endpoint,
-        model_ids=discovered_model_ids,
-        verified=False,
-        raw_capabilities_by_model=raw_capabilities_by_model,
-    )
-    latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
-    if latest_endpoint is None:
-        await _finish_endpoint_test_job(job_id, "failed", f"Unknown endpoint: {endpoint_id}")
-        return
-    final_models = [
-        _compact_model_info_for_listed_route(
-            latest_credentials,
-            latest_endpoint,
-            model_id,
-            route_ids_by_model.get(model_id),
-            raw_capabilities_by_model.get(model_id),
-        )
-        for model_id in discovered_model_ids
-    ]
-    latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id, latest_endpoint)
-    endpoint_status: Literal["verified", "unverified_manual"] = (
-        "verified" if latest_endpoint.provider_kind == "official" else "unverified_manual"
-    )
-    latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint.model_copy(
-        update={
-            "status": endpoint_status,
-            "last_test_at": _now_iso(),
-            "last_test_message": _endpoint_success_message(result),
-        }
-    )
-    save_credentials(latest_credentials)
-    _append_model_list_observation_evidence(
-        latest_endpoint,
-        discovered_model_ids,
-        raw_capabilities_by_model,
-        route_ids_by_model,
-    )
-    await _finish_endpoint_test_job(
-        job_id,
-        "completed",
-        _endpoint_success_message(result),
-        total_model_count=len(discovered_model_ids),
-        tested_model_count=0,
-        verified_route_count=0,
-        failed_model_count=0,
-        catalog_only_count=0,
-        available_models=final_models,
-        available_sdks=[latest_endpoint.protocol],
-    )
-
-
 async def _probe_official_profile_batch(
     endpoint: ProviderEndpoint,
     model_ids: tuple[str, ...],
@@ -4213,65 +4011,6 @@ def _compact_model_infos_with_active_status(
         else:
             compact.append(model)
     return compact
-
-
-async def _record_endpoint_test_job_failure(
-    job_id: str,
-    endpoint_id: str,
-    message: str,
-    starting_fingerprint: str | None = None,
-) -> None:
-    credentials = load_credentials()
-    endpoint = credentials.provider_endpoints.get(endpoint_id)
-    if endpoint is not None:
-        if (
-            starting_fingerprint is not None
-            and credentials.endpoint_fingerprint(endpoint_id) != starting_fingerprint
-        ):
-            discard_message = "Endpoint changed while endpoint test was running. Test result discarded."
-            credentials.provider_endpoints[endpoint_id] = endpoint.model_copy(
-                update={
-                    "status": "unverified_manual",
-                    "last_test_at": _now_iso(),
-                    "last_test_message": discard_message,
-                }
-            )
-            save_credentials(credentials)
-            await _finish_endpoint_test_job(job_id, "failed", discard_message)
-            return
-        credentials.provider_endpoints[endpoint_id] = endpoint.model_copy(
-            update={
-                "status": "failed",
-                "last_test_at": _now_iso(),
-                "last_test_message": message,
-            }
-        )
-        save_credentials(credentials)
-    await _finish_endpoint_test_job(job_id, "failed", message)
-
-
-async def _update_endpoint_test_job(job_id: str, **updates: Any) -> None:
-    async with _endpoint_test_jobs_lock:
-        current = _endpoint_test_jobs.get(job_id)
-        if current is None:
-            return
-        _endpoint_test_jobs[job_id] = current.model_copy(update=updates)
-
-
-async def _finish_endpoint_test_job(
-    job_id: str,
-    status: Literal["completed", "failed"],
-    message: str,
-    **updates: Any,
-) -> None:
-    async with _endpoint_test_jobs_lock:
-        current = _endpoint_test_jobs.get(job_id)
-        if current is None:
-            return
-        finished = current.model_copy(update={"status": status, "message": message, **updates})
-        _endpoint_test_jobs[job_id] = finished
-        if _running_endpoint_test_jobs.get(finished.endpoint_id) == job_id:
-            _running_endpoint_test_jobs.pop(finished.endpoint_id, None)
 
 
 def _chunks(values: tuple[str, ...], size: int) -> list[tuple[str, ...]]:

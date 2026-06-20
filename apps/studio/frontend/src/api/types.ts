@@ -342,6 +342,34 @@ export interface GoldenBaseline {
 }
 
 /**
+ * N4 atom #29 read path: one agent node's stored golden case content — the editable
+ * `expected_output` the case file holds. Mirrors backend models/golden.py
+ * GoldenCaseContent. The list endpoint only projects per-node case METADATA
+ * (GoldenBaselineCase, with an `expected_output_ref`); this carries the resolved content
+ * the ref points at so the I/O panel can open a golden file for editing.
+ */
+export interface GoldenCaseContent {
+  case_id: string
+  node_id: string
+  phase_id: string
+  expected_output: JsonObject
+}
+
+/**
+ * N4 atom #29: a golden baseline with each case's resolved `expected_output`, returned by
+ * `GET /skills/{id}/golden/{golden_id}/content` (optionally `?node_id=` to scope to one
+ * node). Mirrors backend models/golden.py GoldenBaselineContent. Editing is read-only
+ * here — saving an edit still goes through the existing manual-golden write
+ * (`POST /golden/manual/plan` → Rust native-fs, D12), NOT a new write path.
+ */
+export interface GoldenBaselineContent {
+  id: string
+  source_run_id: string | null
+  locked: boolean
+  cases: GoldenCaseContent[]
+}
+
+/**
  * N4 atom #33: a schema-valid empty golden template for an agent node. Mirrors backend
  * models/golden.py GoldenTemplate — `schema` is the node's io.outputs JSON schema and
  * `template` is the structure-valid empty stub the author hand-fills.

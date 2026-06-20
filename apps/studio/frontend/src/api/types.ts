@@ -227,7 +227,7 @@ export interface RunMetadata {
   started_at: string
   metrics: TokensMetrics | null
   input_summary: string | null
-  git_status?: 'committed' | 'locked' | 'failed' | null
+  git_status?: 'committed' | 'locked' | 'failed' | 'no_git' | null
   artifact_ref?: ArtifactRef | null
   source_map_ref?: string | null
   execution_fingerprint?: string | null

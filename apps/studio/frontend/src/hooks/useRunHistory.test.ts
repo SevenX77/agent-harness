@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { nextLocalHistoryRefreshKey } from './useRunHistory'
+import { archiveFeedbackForGitStatus, nextLocalHistoryRefreshKey } from './useRunHistory'
 
 // N6 #2 (history-auto-refresh): when a run reaches run_ended the backend has
 // autocommitted a new "Auto run" snapshot, so the Local History list must be
@@ -65,5 +65,43 @@ describe('nextLocalHistoryRefreshKey', () => {
         lastRefreshedKey: null,
       }),
     ).toBeNull()
+  })
+})
+
+// N6 #1 (autocommit-feedback): after a successful run the backend records the
+// autocommit outcome on the run metadata's git_status, and Workspace re-fetches
+// the run detail to surface a one-shot toast. archiveFeedbackForGitStatus is the
+// pure projection behind that effect; these tests pin every contract branch so a
+// new/renamed status can never silently fall into the wrong message.
+describe('archiveFeedbackForGitStatus', () => {
+  it('reports a successful, revertable archive when committed', () => {
+    const feedback = archiveFeedbackForGitStatus('committed')
+    expect(feedback?.variant).toBe('success')
+    expect(feedback?.message).toMatch(/Local History/i)
+  })
+
+  it('reports a benign no-repo archive (no revertable snapshot) when no_git', () => {
+    const feedback = archiveFeedbackForGitStatus('no_git')
+    expect(feedback?.variant).toBe('success')
+    expect(feedback?.message).toMatch(/no git repo/i)
+    // must NOT claim a revertable snapshot exists
+    expect(feedback?.message).not.toMatch(/revert from Local History/i)
+  })
+
+  it('warns without claiming archive success when the git index was locked', () => {
+    const feedback = archiveFeedbackForGitStatus('locked')
+    expect(feedback?.variant).toBe('warning')
+    expect(feedback?.message).toMatch(/not archived/i)
+  })
+
+  it('warns without claiming archive success when auto-commit failed', () => {
+    const feedback = archiveFeedbackForGitStatus('failed')
+    expect(feedback?.variant).toBe('warning')
+    expect(feedback?.message).toMatch(/not archived/i)
+  })
+
+  it('stays silent (returns null) when git_status is null or absent', () => {
+    expect(archiveFeedbackForGitStatus(null)).toBeNull()
+    expect(archiveFeedbackForGitStatus(undefined)).toBeNull()
   })
 })

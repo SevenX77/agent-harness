@@ -371,6 +371,9 @@ export interface RoleEntry {
   source_profile_id?: string | null
   source_profile_snapshot?: Record<string, unknown> | null
   system_prompt_prefix?: string | null
+  // #51: a by-reference bundle link. When set the role's chain is materialized
+  // from the referenced bundle (live), not a snapshot copy of its routes.
+  bundle_id?: string | null
 }
 
 export interface ModelBundleEntry {
@@ -479,6 +482,7 @@ interface BackendRoleEntry {
   lint_requirements: Record<string, LintSeverity>
   source_profile_id?: string | null
   source_profile_snapshot?: Record<string, unknown> | null
+  bundle_id?: string | null
 }
 
 export interface ModelEntry {
@@ -678,10 +682,11 @@ function roleEntryFromBackend(roleName: string, role: RoleEntry, data: RolesData
     models,
     fallback_chain: role.fallback_chain ?? [],
     lint_requirements: role.lint_requirements ?? {},
+    bundle_id: role.bundle_id ?? null,
   }
 }
 
-function rolesDataToBackend(data: RolesData): BackendRolesData {
+export function rolesDataToBackend(data: RolesData): BackendRolesData {
   return {
     schema_version: 3,
     model_profiles: data.model_profiles ?? {},
@@ -717,6 +722,9 @@ function roleEntryToBackend(
   if (role.source_profile_snapshot !== undefined) {
     entry.source_profile_snapshot = role.source_profile_snapshot
   }
+  // #51: persist the bundle reference so the backend materializes the chain by
+  // reference (live bundle edits reflect; this role is not a snapshot copy).
+  if (role.bundle_id != null) entry.bundle_id = role.bundle_id
   return entry
 }
 
@@ -1578,6 +1586,17 @@ export async function testRole(roleName: string): Promise<RoleTestResponse> {
 
 export async function startRoleTestJob(roleName: string): Promise<RoleTestJobResponse> {
   const response = await api.post<RoleTestJobResponse>(`/llm/roles/${segment(roleName)}/test-jobs`, {})
+  return response.data
+}
+
+// #50b: bundle Test reuses the role test-job orchestration. The backend resolves
+// the bundle via a transient materialized role (no persisted-store pollution) and
+// keys the job under __bundle__{id}; the same getRoleTestJob poll loop applies.
+export async function startBundleTestJob(bundleId: string): Promise<RoleTestJobResponse> {
+  const response = await api.post<RoleTestJobResponse>(
+    `/llm/model-bundles/${segment(bundleId)}/test-jobs`,
+    {},
+  )
   return response.data
 }
 

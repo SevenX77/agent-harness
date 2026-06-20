@@ -2,6 +2,7 @@ import { Layers3, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import type { CredentialsState, ModelGroup, ProviderModelOption, RolesData } from "@/api/llm"
+import type { RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
 import {
   appendModelBundle,
   routeIdsFromBundle,
@@ -16,6 +17,10 @@ export function AdvancedModelBundlesSection({
   modelDisplayNamesByCode,
   modelGroups,
   providerModelsByRouteId,
+  testStatusesByBundle = {},
+  testRunningByBundle = {},
+  bundleTestErrors = {},
+  onTestBundle,
   getActiveAvailableModelDragId,
   onChange,
   onDeleteBundle,
@@ -25,6 +30,10 @@ export function AdvancedModelBundlesSection({
   modelDisplayNamesByCode: ReadonlyMap<string, string>
   modelGroups: ModelGroup[]
   providerModelsByRouteId: ReadonlyMap<string, ProviderModelOption>
+  testStatusesByBundle?: Record<string, RoleChainStatusMap>
+  testRunningByBundle?: Record<string, boolean>
+  bundleTestErrors?: Record<string, string | undefined>
+  onTestBundle?: (bundleId: string) => void
   getActiveAvailableModelDragId: () => string | null
   onChange: (next: RolesData) => void
   onDeleteBundle: (bundleId: string) => void
@@ -72,6 +81,10 @@ export function AdvancedModelBundlesSection({
               credentialsByCode={credentialsByCode}
               modelDisplayNamesByCode={modelDisplayNamesByCode}
               providerModelsByRouteId={providerModelsByRouteId}
+              testStatuses={testStatusesByBundle[bundleId] ?? {}}
+              testRunning={testRunningByBundle[bundleId] ?? false}
+              bundleTestError={bundleTestErrors[bundleId]}
+              onRunTest={onTestBundle}
               getActiveAvailableModelDragId={getActiveAvailableModelDragId}
               getAvailableModelGroup={(modelGroupId) => modelGroupsById.get(modelGroupId) ?? null}
               onChange={onChange}

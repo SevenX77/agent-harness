@@ -17,8 +17,8 @@ from app.services.golden_diff import (
     delete_golden_baseline_for_skill,
     list_golden_baselines_for_skill,
     plan_golden_baseline_for_run,
+    plan_manual_golden_for_node,
     set_golden_baseline_for_run,
-    set_manual_golden_for_node,
 )
 from app.services.golden_template import generate_golden_template
 
@@ -79,20 +79,17 @@ async def get_golden_template(skill_id: str, node_id: str) -> GoldenTemplate:
 
 
 @router.post(
-    "/manual",
-    response_model=GoldenBaseline,
-    responses={409: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
+    "/manual/plan",
+    response_model=GoldenBaselinePlan,
+    responses={422: {"model": ErrorResponse}},
 )
-async def set_manual_golden(
-    skill_id: str,
-    request: SetManualGoldenReq,
-    write_fallback: str | None = Header(default=None, alias="X-Studio-Write-Fallback"),
-) -> GoldenBaseline:
-    # N4 atom #33 manual write: author-defined golden keyed by node_id (run-less).
-    # Behind the same browser-write-fallback guard as the run-promote write (atom #36 ②);
-    # it does NOT go through the predict-trace promote guard (no source run to promote).
-    _require_browser_write_fallback(write_fallback)
-    return set_manual_golden_for_node(skill_id, request)
+async def plan_manual_golden(skill_id: str, request: SetManualGoldenReq) -> GoldenBaselinePlan:
+    # N4 atom #33 manual write (D12 Rust sole writer): return the file plan
+    # (baseline/report/cases) the Rust native-fs writer writes per file. Plan-only,
+    # so it carries no write guard — mirrors the run-promote /golden/plan endpoint.
+    # There is no Python HTTP disk-write endpoint for the manual golden: the frontend
+    # always writes via Rust (web degrades to Desktop-only, no persist).
+    return plan_manual_golden_for_node(skill_id, request.node_id, request.expected_output)
 
 
 @router.delete(

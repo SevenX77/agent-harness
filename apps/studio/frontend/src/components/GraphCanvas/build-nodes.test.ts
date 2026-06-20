@@ -210,6 +210,22 @@ describe('buildNodesFromTopology (drilled child graph)', () => {
     expect(phaseNode(nodes, 'plan').subgraphPath).toBeNull()
   })
 
+  it('gives each drilled child phase a real per-kind filePath (closing the drill-edit loop), never undefined', () => {
+    const mixed: GraphTopologyItem[] = [
+      { id: 'plan', src: 'phases/plan/SKILL.md', depends_on: [], mode: 'agent' },
+      { id: 'check', src: 'phases/check/LOGIC.md', depends_on: ['plan'], mode: 'logic' },
+      { id: 'nested', src: 'phases/nested/SUBGRAPH.md', depends_on: ['plan'], mode: 'subgraph', path: '/skills/grandchild' },
+    ]
+    const nodes = buildNodesFromTopology('demo', ['plan', 'check', 'nested'], mixed, {})
+
+    // filePath is RELATIVE to the child subgraph's own root, derived from the
+    // resolved topology mode — so entering the child as its own skill and
+    // opening this path lands on its real phase file (not a parent-scoped stub).
+    expect(phaseNode(nodes, 'plan').filePath).toBe('phases/plan/SKILL.md')
+    expect(phaseNode(nodes, 'check').filePath).toBe('phases/check/LOGIC.md')
+    expect(phaseNode(nodes, 'nested').filePath).toBe('phases/nested/SUBGRAPH.md')
+  })
+
   it('defaults drilled phases to idle and carries through a real status', () => {
     const nodes = buildNodesFromTopology('demo', ['plan', 'nested'], topology, { plan: 'success' })
     expect(phaseNode(nodes, 'plan').status).toBe('success')

@@ -64,6 +64,10 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
   const compileErrorCount = data.compileErrors?.length ?? 0
   const hasGolden = data.goldenState === 'has-golden'
   const isLogicOk = data.goldenState === 'logic-ok'
+  // N5 atom #1 (spec F1): when this node failed, surface its error summary in-place
+  // on the node (not only the red badge, not only the Properties panel) so the user
+  // sees why the run stopped right where it stopped.
+  const inlineErrorMessage = data.status === 'error' && data.errorMessage ? data.errorMessage : null
 
   const nodeContent = (
     <div
@@ -157,6 +161,16 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
           <TooltipContent side="top">{style.label}</TooltipContent>
         </Tooltip>
       </div>
+      {inlineErrorMessage ? (
+        <div
+          role="alert"
+          aria-label="Node error summary"
+          className="mt-2 flex items-start gap-1.5 rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive"
+        >
+          <AlertTriangle className="mt-0.5 size-3 shrink-0" />
+          <span className="min-w-0 break-words">{inlineErrorMessage}</span>
+        </div>
+      ) : null}
       {resolvedSubgraphPath ? (
         <button
           type="button"

@@ -638,6 +638,22 @@ export function GraphCanvas({
               drillInto(subgraphPath, node.data.label)
               return
             }
+            // R9 edit write-back: while drilled, a leaf (non-subgraph) child
+            // node belongs to the CHILD subgraph, not the parent `skillId`. Its
+            // file/GRAPH.md serialize/compile scope must run against the child's
+            // own identity, so entering it opens the child as its own editable
+            // skill (the nav-stack breadcrumb pops back up). Opening directly
+            // under the parent `skillId` would resolve a non-existent file in
+            // the wrong skill's file map. At root depth the in-place open path
+            // is unchanged.
+            if (isDrilled && drilledPath) {
+              // The child path is an absolute workspace root; `local:` marks it
+              // as a local-workspace selection (same form WelcomePage records),
+              // which `resolveWorkspaceIdentity` resolves to the child's own
+              // skillId + workspaceRoot.
+              workspace?.pushNavSkill(`local:${drilledPath}`)
+              return
+            }
             onNodeSelect?.({ id: node.id, data: node.data })
             workspace?.onFileOpen(`${skillId}/${node.data.filePath ?? `phases/${node.id}/${phaseKindFile(node.data)}`}`)
             onPanelChange?.('properties')

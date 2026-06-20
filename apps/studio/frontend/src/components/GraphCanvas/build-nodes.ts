@@ -271,7 +271,12 @@ function phaseKindFromTopologyMode(mode: string | undefined): SkillGraphNodeData
  *
  * No file frontmatter is available at this depth, so tools/subagents/role are
  * left empty — the drilled view shows real phase topology, not the editor-only
- * file-derived enrichments.
+ * file-derived enrichments. The per-phase `filePath`, however, IS derived (from
+ * the resolved topology mode via `phaseKindFile`): it is the path to the node's
+ * source file RELATIVE TO THE CHILD SUBGRAPH'S OWN ROOT, so that drilling into
+ * the child as its own skill and opening this file lands on the child's real
+ * `phases/<id>/{SKILL,LOGIC,SUBGRAPH}.md` (closing the drill-edit write-back
+ * loop) instead of a stale `undefined` that would resolve against the parent.
  */
 export function buildNodesFromTopology(
   skillId: string,
@@ -285,6 +290,7 @@ export function buildNodesFromTopology(
     const topology = topologyById.get(phaseName)
     const mode = phaseKindFromTopologyMode(topology?.mode)
     const subgraphPath = normalizeAbsoluteSubgraphPath(topology?.path)
+    const filePath = `phases/${phaseName}/${phaseKindFile({ mode, subgraphPath })}`
     return {
       id: phaseName,
       type: 'skill',
@@ -296,7 +302,7 @@ export function buildNodesFromTopology(
         role: null,
         tools: [],
         subagents: [],
-        filePath: undefined,
+        filePath,
         status: statusByNodeId[phaseName] ?? 'idle',
         dependsOn: topology?.depends_on ?? [],
         subgraphPath,

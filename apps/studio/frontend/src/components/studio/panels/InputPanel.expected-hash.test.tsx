@@ -2,6 +2,7 @@ import type { ReactNode } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { SkillDetail } from "@/api/types"
+import type { SkillGraphNodeData } from "@/components/GraphCanvas"
 import { writeSkillFile } from "@/api/client"
 import { isTauriRuntime } from "@/config/runtime"
 import { sha256Hex } from "@/lib/hash"
@@ -88,6 +89,53 @@ function skillDetailWithGraph(content: string): SkillDetail {
       "GRAPH.md": content,
     },
   } as unknown as SkillDetail
+}
+
+// A phase file (phases/<id>/SKILL.md) with its OWN frontmatter io, distinct from
+// the graph-level io, so a per-node edit can be verified to land on the phase
+// file's io.inputs (not GRAPH.md's). Field name `phase_field` is unique to the
+// phase so the remove-button lookup is unambiguous.
+const phaseSkillMd = [
+  "---",
+  "llm_role: analyst",
+  "io:",
+  "  inputs:",
+  "    type: object",
+  "    properties:",
+  "      phase_field:",
+  "        type: string",
+  "  outputs:",
+  "    type: object",
+  "    properties:",
+  "      phase_result:",
+  "        type: string",
+  "---",
+  "<role>phase</role>",
+].join("\n")
+
+const PHASE_FILE_PATH = "phases/analyze/SKILL.md"
+
+function skillDetailWithPhase(graphContent: string, phaseContent: string): SkillDetail {
+  return {
+    files: {
+      "GRAPH.md": graphContent,
+      [PHASE_FILE_PATH]: phaseContent,
+    },
+  } as unknown as SkillDetail
+}
+
+function selectedPhaseNode(): { id: string; data: SkillGraphNodeData } {
+  return {
+    id: "analyze",
+    data: {
+      skillId: "demo-skill",
+      label: "analyze",
+      mode: "agent",
+      status: "idle",
+      dependsOn: [],
+      filePath: PHASE_FILE_PATH,
+    },
+  }
 }
 
 async function flushPromises(): Promise<void> {
@@ -204,5 +252,106 @@ describe("InputPanel GRAPH.md writes", () => {
       skillId: "demo-skill",
       workspaceRoot: "/Users/sevenx/Projects/imported-skill",
     })
+  })
+
+  // Atom #27 (per-node i/o): selecting a phase node makes the panel edit THAT
+  // phase file's frontmatter io, writing back to phases/<id>/SKILL.md (not
+  // GRAPH.md), hashed over the phase file's own content.
+  it("writes a selected phase node's io edit back to the phase file, not GRAPH.md", async () => {
+    renderToStaticMarkup(
+      <InputPanel
+        skillId="demo-skill"
+        skillDetail={skillDetailWithPhase(graphMd, phaseSkillMd)}
+        selectedNode={selectedPhaseNode()}
+      />,
+    )
+
+    // The row exists because the panel read the PHASE file's io.inputs, whose
+    // field is `phase_field` (GRAPH.md's input field is `title`).
+    const removeButton = buttonProps.find(
+      (props) => props["aria-label"] === "Remove inputs field phase_field",
+    )
+    expect(removeButton).toBeTruthy()
+    expect(
+      buttonProps.find((props) => props["aria-label"] === "Remove inputs field title"),
+    ).toBeFalsy()
+
+    ;(removeButton?.onClick as () => void)()
+    await flushPromises()
+
+    expect(writeSkillFile).toHaveBeenCalledTimes(1)
+    expect(writeSkillFile).toHaveBeenCalledWith(
+      "demo-skill",
+      PHASE_FILE_PATH,
+      expect.any(String),
+      "current-graph-hash",
+    )
+    // Optimistic-lock hash is over the PHASE file's current content.
+    expect(sha256Hex).toHaveBeenCalledWith(phaseSkillMd)
+    expect(sha256Hex).not.toHaveBeenCalledWith(graphMd)
+    // The written content drops the removed field from the phase io.inputs.
+    const writtenContent = vi.mocked(writeSkillFile).mock.calls[0][2] as string
+    expect(writtenContent).not.toContain("phase_field")
+  })
+
+  it("targets a selected phase node's artifact-path save to the phase file", async () => {
+    const phaseWithArtifact = phaseSkillMd.replace(
+      "      phase_result:\n        type: string",
+      "      phase_result:\n        type: string\n        path: out.json",
+    )
+
+    renderToStaticMarkup(
+      <InputPanel
+        skillId="demo-skill"
+        skillDetail={skillDetailWithPhase(graphMd, phaseWithArtifact)}
+        selectedNode={selectedPhaseNode()}
+      />,
+    )
+
+    const saveButton = buttonProps.find(
+      (props) => props["aria-label"] === "Save artifact path for output phase_result",
+    )
+    expect(saveButton).toBeTruthy()
+
+    ;(saveButton?.onClick as () => void)()
+    await flushPromises()
+
+    expect(writeSkillFile).toHaveBeenCalledTimes(1)
+    expect(writeSkillFile).toHaveBeenCalledWith(
+      "demo-skill",
+      PHASE_FILE_PATH,
+      expect.any(String),
+      "current-graph-hash",
+    )
+    expect(sha256Hex).toHaveBeenCalledWith(phaseWithArtifact)
+  })
+
+  // Regression guard: with no node selected the panel still edits GRAPH.md's
+  // graph-level io (the global input/output node selection is handled the same
+  // way inside resolveIoEditTarget).
+  it("still writes graph-level io to GRAPH.md when no node is selected", async () => {
+    renderToStaticMarkup(
+      <InputPanel
+        skillId="demo-skill"
+        skillDetail={skillDetailWithPhase(graphMd, phaseSkillMd)}
+        selectedNode={null}
+      />,
+    )
+
+    const removeButton = buttonProps.find(
+      (props) => props["aria-label"] === "Remove inputs field title",
+    )
+    expect(removeButton).toBeTruthy()
+
+    ;(removeButton?.onClick as () => void)()
+    await flushPromises()
+
+    expect(writeSkillFile).toHaveBeenCalledWith(
+      "demo-skill",
+      "GRAPH.md",
+      expect.any(String),
+      "current-graph-hash",
+    )
+    expect(sha256Hex).toHaveBeenCalledWith(graphMd)
   })
 })

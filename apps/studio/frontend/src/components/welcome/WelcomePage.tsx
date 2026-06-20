@@ -111,64 +111,6 @@ function sentenceFragment(message: string) {
   return message ? `${message[0].toLowerCase()}${message.slice(1)}` : message
 }
 
-function relativeLintFile(value: string): string | null {
-  const match = value.match(/(?:^|[\\/])?((?:phases[\\/][A-Za-z0-9_-]+[\\/](?:LOGIC|SUBGRAPH|SKILL)\.md)|GRAPH\.md|io[\\/]inputs\.json|io[\\/]outputs\.json)/)
-  return match ? match[1].replace(/\\/g, '/') : null
-}
-
-function lineFromLintMessage(value: string): string | null {
-  const match = value.match(/(?:GRAPH\.md|io[\\/](?:inputs|outputs)\.json|phases[\\/][A-Za-z0-9_-]+[\\/](?:LOGIC|SUBGRAPH|SKILL)\.md):(?<line>\d+)/)
-  return match?.groups?.line ?? null
-}
-
-function isMissingPythonCallable(message: string) {
-  return /python_callable/.test(message) && /(Input should be a valid string|required)/.test(message)
-}
-
-function cleanLintMessage(message: string): string {
-  if (isMissingPythonCallable(message)) {
-    return 'LOGIC.md hit a legacy python_callable validator. MVP1 logic phases use actions/<phase>.py, not LOGIC.md python callable blocks.'
-  }
-  return message
-    .replace(/\s*For further information visit https:\/\/errors\.pydantic\.dev\/\S+/g, '')
-    .replace(/\[F-[^\]]+\]\s*/g, '')
-    .replace(/^.*(?:GRAPH\.md|io[\\/](?:inputs|outputs)\.json|phases[\\/][A-Za-z0-9_-]+[\\/](?:LOGIC|SUBGRAPH|SKILL)\.md):\d+\s*/s, '')
-    .trim()
-}
-
-function firstLintErrorMessage(payload: StudioErrorPayload): string | null {
-  const errors = payload.details?.errors
-  if (!Array.isArray(errors) || errors.length === 0) {
-    return null
-  }
-  const first = errors[0]
-  if (!isRecord(first) || typeof first.message !== 'string') {
-    return null
-  }
-  const file = typeof first.file === 'string'
-    ? relativeLintFile(first.file)
-    : relativeLintFile(first.message)
-  const line = typeof first.line === 'number'
-    ? String(first.line)
-    : lineFromLintMessage(first.message)
-  const location = [
-    file,
-    line,
-  ].filter(Boolean).join(':')
-  const message = cleanLintMessage(first.message)
-  return location ? `${location} ${message}` : message
-}
-
-function requestValidationMessage(payload: StudioErrorPayload): string {
-  const errors = payload.details?.errors
-  const first = Array.isArray(errors) && isRecord(errors[0]) ? errors[0] : null
-  const location = first && Array.isArray(first.loc) ? first.loc.join('.') : ''
-  if (location.includes('import_existing')) {
-    return 'the running backend does not support folder import yet. Quit and restart Studio so the updated sidecar is loaded.'
-  }
-  return 'the request did not match the /skills API contract.'
-}
-
 export function formatCreateSkillError(error: unknown, skillId: string): string {
   const payload = studioErrorPayload(error)
   if (payload?.error_code === 'SKILL_ALREADY_EXISTS') {
@@ -177,40 +119,34 @@ export function formatCreateSkillError(error: unknown, skillId: string): string 
   if (payload?.error_code === 'INVALID_DIRECTORY_PATH' && payload.message) {
     return `Cannot create "${skillId}": ${sentenceFragment(payload.message)}`
   }
-  if (payload?.error_code === 'MANIFEST_VALIDATION_FAILED') {
-    if (payload.message?.toLowerCase() === 'request validation failed') {
-      return `Cannot create "${skillId}": ${requestValidationMessage(payload)}`
-    }
-    return `Cannot create "${skillId}": ${firstLintErrorMessage(payload) ?? sentenceFragment(payload.message ?? 'manifest validation failed')}`
-  }
+  // D2 (不卡导入): new-skill creation now writes via the Studio Rust native-fs
+  // command, which rejects OS-level failures with a plain error string and emits
+  // no structured error_code. Manifest/lint validation copy belongs only to the
+  // Open-folder/import path, so the create path surfaces only OS-level reasons
+  // (SKILL_ALREADY_EXISTS, INVALID_DIRECTORY_PATH) and otherwise falls through to
+  // the raw error message.
   return errorMessage(error)
 }
 
+/**
+ * Format an Open-folder failure for the toast description.
+ *
+ * Under D2 (open any local folder, never reject for a missing GRAPH.md/SKILL.md)
+ * and D12 (local writes go through the Studio Rust native-fs writer), the open
+ * path runs openSkillWorkspace, whose Tauri `invoke` rejects with a PLAIN STRING
+ * (or plain object) on OS-level failure only — never the structured
+ * StudioErrorPayload that the retired Python POST /skills import returned. So the
+ * old manifest/registry rejection branches ("Cannot import this folder", missing
+ * GRAPH.md/SKILL.md, lint, request-validation) were unreachable dead copy and are
+ * removed. errorMessage surfaces the raw Rust reason directly (errors.ts handles
+ * both string and plain-object Tauri rejections).
+ */
 export function formatImportSkillError(error: unknown): string {
-  const payload = studioErrorPayload(error)
-  if (payload?.error_code === 'INVALID_DIRECTORY_PATH' && payload.message) {
-    if (payload.message.includes('missing GRAPH.md or SKILL.md')) {
-      return `Cannot import this folder: ${sentenceFragment(payload.message.replace(/: missing GRAPH\.md or SKILL\.md\./, ''))}`
-    }
-    return `Cannot import this folder: ${sentenceFragment(payload.message)}`
-  }
-  if (payload?.error_code === 'SKILL_ALREADY_EXISTS') {
-    const existingSkillId = payload.details?.skill_id
-    return typeof existingSkillId === 'string'
-      ? `Cannot import this folder: it is already registered as "${existingSkillId}".`
-      : 'Cannot import this folder: it is already registered.'
-  }
-  if (payload?.error_code === 'MANIFEST_VALIDATION_FAILED') {
-    if (payload.message?.toLowerCase() === 'request validation failed') {
-      return requestValidationMessage(payload)
-    }
-    return firstLintErrorMessage(payload) ?? sentenceFragment(payload.message ?? 'manifest validation failed')
-  }
   return errorMessage(error)
 }
 
 export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
-  const [importing, setImporting] = useState(false)
+  const [openingFolder, setOpeningFolder] = useState(false)
   const [creating, setCreating] = useState(false)
   const [newSkillOpen, setNewSkillOpen] = useState(false)
   const [newSkillName, setNewSkillName] = useState('new-skill')
@@ -315,8 +251,11 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
     }
   }
 
-  const importSkillDirectory = async () => {
-    setImporting(true)
+  // D2/D12: "Open folder" = pick any local folder, then open it through the Rust
+  // native-fs writer (no manifest validation, no registry import). On OS-level
+  // failure the toast surfaces the raw Rust reason via formatImportSkillError.
+  const openFolder = async () => {
+    setOpeningFolder(true)
     try {
       const directory = await selectSkillDirectory(defaultSkillParentDirectory)
       if (!directory) {
@@ -324,9 +263,9 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
       }
       await openSkill(directory)
     } catch (error) {
-      toast.error('Import failed', { description: formatImportSkillError(error) })
+      toast.error('Open folder failed', { description: formatImportSkillError(error) })
     } finally {
-      setImporting(false)
+      setOpeningFolder(false)
     }
   }
 
@@ -366,14 +305,14 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
             <Button
               variant="outline"
               size="lg"
-              disabled={importing}
+              disabled={openingFolder}
               onClick={() => {
-                ignorePromise(importSkillDirectory())
+                ignorePromise(openFolder())
               }}
               className="w-full justify-start"
             >
               <FolderOpen />
-              {importing ? 'Opening' : 'Open folder'}
+              {openingFolder ? 'Opening' : 'Open folder'}
             </Button>
             <p className="mt-1 truncate text-xs text-muted-foreground">Choose any local folder</p>
           </div>

@@ -269,16 +269,26 @@ describe('WelcomePage', () => {
   })
 
   it('does not present missing GRAPH.md or SKILL.md as a Home/Open folder blocker', () => {
-    const error = studioApiError({
-      error_code: 'INVALID_DIRECTORY_PATH',
-      message: 'Selected folder is not a Studio skill directory: missing GRAPH.md or SKILL.md.',
-      details: { directory_path: '/tmp/not-a-skill', required_entry: 'GRAPH.md or SKILL.md' },
-    })
+    // D2: Open folder runs through the Rust native-fs writer (openSkillWorkspace),
+    // which never rejects for a missing manifest — only OS-level failures bubble
+    // up, as a plain Rust string. So no manifest-rejection copy can ever surface.
+    const osError = 'Selected path is not a directory: /tmp/not-a-skill'
 
-    expect(formatImportSkillError(error)).not.toContain('missing GRAPH.md or SKILL.md')
+    expect(formatImportSkillError(osError)).toBe(osError)
+    expect(formatImportSkillError(osError)).not.toContain('missing GRAPH.md or SKILL.md')
   })
 
-  it('does not use import-time manifest lint failures to block Open folder', () => {
+  it('surfaces the raw OS-level reason from a Rust open-folder error string', () => {
+    // The open path rejects with a plain Rust string (no structured error_code),
+    // so formatImportSkillError must surface it verbatim via errorMessage.
+    const osError = 'Permission denied: /private/var/root'
+
+    expect(formatImportSkillError(osError)).toBe(osError)
+  })
+
+  it('no longer produces manifest/lint rejection copy for Open folder', () => {
+    // Even handed the retired structured MANIFEST payload, the dead "Cannot import
+    // this folder" / lint branches are gone, so that copy is never generated.
     const error = studioApiError({
       error_code: 'MANIFEST_VALIDATION_FAILED',
       message: 'Manifest validation failed',
@@ -292,12 +302,24 @@ describe('WelcomePage', () => {
     })
 
     expect(formatImportSkillError(error)).not.toContain('Cannot import this folder')
+    expect(formatImportSkillError(error)).not.toContain('python_callable validator')
+  })
+
+  it('surfaces the raw OS-level reason from a Rust create error string (no manifest/lint copy)', () => {
+    // D2 (不卡导入): native-fs create rejects with a plain Rust string and emits
+    // no structured error_code, so formatCreateSkillError must fall through to the
+    // raw message and never produce manifest/lint validation copy.
+    const error = 'Cannot create a new skill in a non-empty folder: /tmp/existing'
+
     expect(formatCreateSkillError(error, 'new-skill')).toBe(
-      'Cannot create "new-skill": phases/init/LOGIC.md:1 LOGIC.md hit a legacy python_callable validator. MVP1 logic phases use actions/<phase>.py, not LOGIC.md python callable blocks.',
+      'Cannot create a new skill in a non-empty folder: /tmp/existing',
     )
   })
 
-  it('turns old scaffold python_callable validation into MVP1 drift copy', () => {
+  it('does not emit MVP1 lint drift copy on the create path for a manifest payload', () => {
+    // A structured MANIFEST_VALIDATION_FAILED payload no longer maps to lint copy
+    // on create; it is unreachable for Rust string errors and the create branch
+    // was removed, so the fallback errorMessage is used.
     const error = studioApiError({
       error_code: 'MANIFEST_VALIDATION_FAILED',
       message: 'Manifest validation failed',
@@ -305,19 +327,20 @@ describe('WelcomePage', () => {
         errors: [{
           file: 'phases/init/LOGIC.md',
           line: 1,
-          message: '[F-v21-route] /tmp/.new-skill.tmp/phases/init/LOGIC.md:1 LOGIC.md AST validation failed: 1 validation error for LogicNodeAST\npython_callable\n  Input should be a valid string [type=string_type, input_value=None, input_type=None]\n    For further information visit https://errors.pydantic.dev/2.13/v/string_type',
+          message: 'LOGIC.md AST validation failed: python_callable is required',
         }],
       },
     })
 
     const message = formatCreateSkillError(error, 'new-skill')
-    expect(message).toBe(
-      'Cannot create "new-skill": phases/init/LOGIC.md:1 LOGIC.md hit a legacy python_callable validator. MVP1 logic phases use actions/<phase>.py, not LOGIC.md python callable blocks.',
-    )
-    expect(message).not.toContain('Add a <python_callable>')
+    expect(message).not.toContain('python_callable validator')
+    expect(message).not.toContain('phases/init/LOGIC.md:1')
   })
 
   it('does not show stale /skills import validation copy for Open folder', () => {
+    // The retired POST /skills import contract no longer drives Open folder, so
+    // the "/skills API contract" / "Cannot import this folder" copy is unreachable
+    // — even a structured request-validation payload falls through to errorMessage.
     const error = studioApiError({
       error_code: 'MANIFEST_VALIDATION_FAILED',
       message: 'Request validation failed',

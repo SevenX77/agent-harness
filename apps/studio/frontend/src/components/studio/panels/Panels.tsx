@@ -97,6 +97,7 @@ export function Panels({
         skillId={skillId}
         workspaceRoot={workspaceRoot}
         skillDetail={skillDetail}
+        selectedNode={selectedNode}
         selectedTestInputId={selectedTestInputId ?? null}
         onSelectTestInput={onSelectTestInput}
       />

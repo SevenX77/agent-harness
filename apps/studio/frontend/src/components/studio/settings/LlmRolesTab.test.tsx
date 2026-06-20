@@ -2514,32 +2514,44 @@ describe("#50a model bundle status lights", () => {
     },
   }
 
-  it("feeds bundle role-fit into ModelItem status lights and exposes no bundle test trigger", () => {
-    const html = renderToStaticMarkup(
+  const bundleCredentialsByCode = credentialsByProviderCode(bundleData, {
+    providers: [{
+      id: "anthropic-official",
+      name: "Anthropic Official",
+      api_key: "sk-anthropic",
+      provider_type: "anthropic_compatible",
+      last_test_status: "ok",
+    }],
+  })
+  const bundleProviderModelsByRouteId = new Map(
+    bundleModelGroups[0].provider_models.map((providerModel) => [providerModel.route_id, providerModel]),
+  )
+
+  function renderBundleCardWithRoleFit(
+    materializationReport: NonNullable<RolesData["model_bundles"]>[string]["materialization_report"],
+  ): string {
+    const bundle = {
+      ...bundleData.model_bundles!.premium_stack,
+      materialization_report: materializationReport,
+    }
+    return renderToStaticMarkup(
       <ModelBundleCard
-        bundle={bundleData.model_bundles!.premium_stack}
+        bundle={bundle}
         bundleId="premium_stack"
-        data={bundleData}
-        credentialsByCode={credentialsByProviderCode(bundleData, {
-          providers: [{
-            id: "anthropic-official",
-            name: "Anthropic Official",
-            api_key: "sk-anthropic",
-            provider_type: "anthropic_compatible",
-            last_test_status: "ok",
-          }],
-        })}
+        data={{ ...bundleData, model_bundles: { premium_stack: bundle } }}
+        credentialsByCode={bundleCredentialsByCode}
         modelDisplayNamesByCode={new Map([["claude-sonnet-4-7", "Claude Sonnet 4.7"]])}
-        providerModelsByRouteId={new Map(bundleModelGroups[0].provider_models.map((providerModel) => [
-          providerModel.route_id,
-          providerModel,
-        ]))}
+        providerModelsByRouteId={bundleProviderModelsByRouteId}
         getActiveAvailableModelDragId={() => null}
         getAvailableModelGroup={() => null}
         onChange={vi.fn()}
         onDeleteBundle={vi.fn()}
       />,
     )
+  }
+
+  it("feeds bundle role-fit into ModelItem status lights and exposes no bundle test trigger", () => {
+    const html = renderBundleCardWithRoleFit(bundleData.model_bundles!.premium_stack.materialization_report)
 
     // Status light wiring present: role-fit drives a Can Run light fed via ModelItem.
     expect(html).toContain('data-role-route-status-light="true"')
@@ -2549,6 +2561,86 @@ describe("#50a model bundle status lights", () => {
     expect(html).not.toContain('data-role-test-trigger="true"')
     expect(html).not.toMatch(/>Test<\/button>/)
     expect(html).not.toContain('aria-label="Test')
+  })
+
+  it("projects every backend role_fit verdict from the bundle materialization_report into the light", () => {
+    // #50/#45: role_fit is authoritative from the backend materialize report — the
+    // card only renders it, never re-derives fit client-side. Each verdict must map
+    // to the correct user state: using→Can Run, downgraded/needs_test→Limited,
+    // not_fit→Blocked.
+    const downgraded = renderBundleCardWithRoleFit({
+      entries: [{
+        canonical_id: "claude-sonnet-4-7",
+        route_id: "anthropic-official:claude-sonnet-4-7",
+        role_fit: "downgraded",
+        warnings: [{ code: "thinking_preferred_unsupported" }],
+      }],
+      warnings: [],
+      skipped_provider_details: [],
+    })
+    expect(downgraded).toContain('data-role-route-status="limited"')
+    expect(downgraded).toContain('aria-label="Role route status Limited')
+
+    const needsTest = renderBundleCardWithRoleFit({
+      entries: [{
+        canonical_id: "claude-sonnet-4-7",
+        route_id: "anthropic-official:claude-sonnet-4-7",
+        role_fit: "needs_test",
+        warnings: [{ code: "thinking_capability_unknown" }],
+      }],
+      warnings: [],
+      skipped_provider_details: [],
+    })
+    expect(needsTest).toContain('data-role-route-status="limited"')
+
+    const notFit = renderBundleCardWithRoleFit({
+      entries: [{
+        canonical_id: "claude-sonnet-4-7",
+        route_id: "anthropic-official:claude-sonnet-4-7",
+        role_fit: "not_fit",
+        warnings: [{ code: "output_tokens_below_required_minimum" }],
+      }],
+      warnings: [],
+      skipped_provider_details: [],
+    })
+    expect(notFit).toContain('data-role-route-status="blocked"')
+    expect(notFit).toContain('aria-label="Role route status Blocked')
+  })
+
+  it("renders a single top-level role-route diagnostic tooltip for a downgraded bundle route", () => {
+    // #45: the diagnostic is a single top-level tooltip wrapping the row (no nested
+    // tooltip, no separate result panel). The warning reason from the report drives
+    // the diagnostic text.
+    const html = renderBundleCardWithRoleFit({
+      entries: [{
+        canonical_id: "claude-sonnet-4-7",
+        route_id: "anthropic-official:claude-sonnet-4-7",
+        role_fit: "downgraded",
+        warnings: [{ code: "thinking_preferred_unsupported" }],
+      }],
+      warnings: [],
+      skipped_provider_details: [],
+    })
+
+    expect(html).toContain('data-provider-row-status-tooltip="true"')
+    // Single light per row — no parallel RoleTestResultPanel surface (spec §2.4 "不要").
+    expect(html).not.toContain('data-role-test-result-panel="true"')
+  })
+
+  it("still renders the light from ui_state when the bundle has no materialization_report (empty / undefined report)", () => {
+    // Empty report and a totally missing report must not crash and must still light
+    // the row from the 6-state ui_state alone (ready→Can Run). This guards the
+    // empty/error projection path the design requires.
+    const emptyReport = renderBundleCardWithRoleFit({
+      entries: [],
+      warnings: [],
+      skipped_provider_details: [],
+    })
+    expect(emptyReport).toContain('data-role-route-status="runnable"')
+
+    const undefinedReport = renderBundleCardWithRoleFit(undefined)
+    expect(undefinedReport).toContain('data-role-route-status="runnable"')
+    expect(undefinedReport).toContain('data-role-route-status-light="true"')
   })
 })
 

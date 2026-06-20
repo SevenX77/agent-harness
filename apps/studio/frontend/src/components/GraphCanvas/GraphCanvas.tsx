@@ -459,20 +459,29 @@ export function GraphCanvas({
   // matching node exists on the canvas before centering, so we never fitView
   // onto a phase id with no node (e.g. drilled child, INPUT/OUTPUT). Mirrors the
   // conflict-warning pan effect above; no timer/listener so no cleanup needed.
+  const lastFocusedPhaseRef = useRef<string | null>(null)
   useEffect(() => {
     if (!reactFlowInstance) {
       return
     }
-    const focusId = nodeToFocus(activeTracePhase, nodes.map((node) => node.id))
+    // Only re-center when the RUNNING phase actually changes — not on every status
+    // overlay tick or user node-drag (which both churn the `nodes` reference). Read
+    // node existence at fire time via getNodes() so `nodes` stays out of the deps,
+    // otherwise a live run would keep snapping the viewport back and fight a manual pan.
+    if ((activeTracePhase ?? null) === lastFocusedPhaseRef.current) {
+      return
+    }
+    const focusId = nodeToFocus(activeTracePhase, reactFlowInstance.getNodes().map((node) => node.id))
     if (!focusId) {
       return
     }
+    lastFocusedPhaseRef.current = activeTracePhase ?? null
     reactFlowInstance.fitView({
       nodes: [{ id: focusId }],
       duration: 600,
       padding: 0.8,
     })
-  }, [activeTracePhase, nodes, reactFlowInstance])
+  }, [activeTracePhase, reactFlowInstance])
 
   // Controlled effect to sync activeConflict, isConflictCancelled, and callbacks into the nodes state
   useEffect(() => {

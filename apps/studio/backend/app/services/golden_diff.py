@@ -14,6 +14,7 @@ from app.models.golden import (
     GoldenBaselineCase,
     GoldenBaselineFile,
     GoldenBaselinePlan,
+    SetManualGoldenReq,
 )
 from app.services.diagnostic_export import assert_trace_can_be_promoted_to_golden
 from app.services.golden_headless import (  # noqa: F401
@@ -71,6 +72,73 @@ def set_golden_baseline_for_run(
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(file.content, encoding="utf-8")
     return plan.baseline
+
+
+def set_manual_golden_for_node(skill_id: str, request: SetManualGoldenReq) -> GoldenBaseline:
+    """Persist an author-defined golden for one agent node (N4 atom #33 manual write).
+
+    This is a FIRST-CLASS, run-less write: it does NOT read a sealed-run snapshot and
+    does NOT go through the predict-trace promote guard (a manual golden has no source
+    run; the expected output is author-defined). The baseline is keyed by ``node_id``
+    so the canvas/properties badge flips to 🟢 has-golden via the same ``cases``
+    projection used by run-promoted goldens.
+    """
+    node_id = request.node_id
+    case_id = validate_run_id_segment(node_id)
+    baseline_dir = _golden_dir_for(skill_id, node_id)
+    baseline_dir.mkdir(parents=True, exist_ok=True)
+
+    case_record = {
+        "case_id": case_id,
+        "node_id": node_id,
+        "phase_id": node_id,
+        "expected_output_ref": f"{CASES_DIRNAME}/{case_id}.json",
+    }
+    baseline_payload = {
+        "baseline_id": node_id,
+        "source_run_id": None,
+        "source": "manual",
+        "locked": False,
+        "cases": [case_record],
+    }
+    report_payload = {
+        "baseline_id": node_id,
+        "source_run_id": None,
+        "source": "manual",
+        "case_count": 1,
+        "node_ids": [node_id],
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+    case_payload = {
+        "case_id": case_id,
+        "node_id": node_id,
+        "phase_id": node_id,
+        "expected_output": request.expected_output,
+    }
+
+    (baseline_dir / BASELINE_FILENAME).write_text(
+        json.dumps(baseline_payload, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+    )
+    (baseline_dir / REPORT_FILENAME).write_text(
+        json.dumps(report_payload, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+    )
+    cases_dir = baseline_dir / CASES_DIRNAME
+    cases_dir.mkdir(parents=True, exist_ok=True)
+    (cases_dir / f"{case_id}.json").write_text(
+        json.dumps(case_payload, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+    )
+
+    return GoldenBaseline(
+        id=node_id,
+        source_run_id=None,
+        source_run_results_ref=None,
+        baseline_ref=_workspace_golden_path(node_id, BASELINE_FILENAME),
+        linked_input_id=node_id,
+        created_at=datetime.now(UTC),
+        locked=False,
+        content_path=str(baseline_dir / BASELINE_FILENAME),
+        cases=[_case_record_to_model(case_record)],
+    )
 
 
 def plan_golden_baseline_for_run(

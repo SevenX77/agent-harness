@@ -341,6 +341,18 @@ export interface GoldenBaseline {
   cases?: GoldenBaselineCase[]
 }
 
+/**
+ * N4 atom #33: a schema-valid empty golden template for an agent node. Mirrors backend
+ * models/golden.py GoldenTemplate — `schema` is the node's io.outputs JSON schema and
+ * `template` is the structure-valid empty stub the author hand-fills.
+ */
+export interface GoldenTemplate {
+  skill_id: string
+  node_id: string
+  schema: JsonObject
+  template: JsonObject
+}
+
 export interface GoldenBaselineFile {
   path: string
   content: string

@@ -29,6 +29,7 @@ from graph_agent.callbacks.events import CallbackEvent as CallbackEvent
 from graph_agent.core._predict_internal.golden_eval import calculate_score as calculate_score
 from graph_agent.core._predict_internal.golden_eval import diff_outputs as diff_outputs
 from graph_agent.core._predict_internal.path_diff import compute_diff as compute_diff
+from graph_agent.core._predict_internal.stub import generate_heuristic_stub as generate_heuristic_stub
 from graph_agent.core.event_contracts import EventEnvelope as EventEnvelope
 from graph_agent.core.event_contracts import StreamCursorExpiredError as StreamCursorExpiredError
 from graph_agent.core.event_contracts import StreamCursorGapError as StreamCursorGapError
@@ -1219,6 +1220,35 @@ class EngineAdapter:
             }
             for phase_name in compiled.manifest.phases
         ]
+
+    def resolve_agent_node_output_schema(self, skill_dir: str, node_id: str) -> dict[str, Any] | None:
+        """Return an agent node's ``io.outputs`` JSON schema for golden-template generation.
+
+        Compiles the skill in-process (same boundary as ``get_fallback_trace``) and
+        resolves the named agent node's output schema, mirroring the predict runner's
+        per-node schema lookup. Returns ``None`` when the phase is absent or is not an
+        agent node (logic nodes never get golden — N4 #33/g-c), so the caller can map
+        that to a 422 without leaking SDK types past this port.
+        """
+        loader = SkillLoader()
+        compiled = loader.compile_skill(
+            Path(skill_dir),
+            skill_resolver=self._build_studio_skill_resolver(),
+        )
+        for node in compiled.nodes:
+            if node.phase_name != node_id:
+                continue
+            if node.mode != "agent":
+                return None
+            io = getattr(getattr(node, "ast", None), "io", None)
+            outputs = getattr(io, "outputs", None)
+            if outputs is None:
+                return None
+            if hasattr(outputs, "model_dump"):
+                dumped = outputs.model_dump()
+                return dumped if isinstance(dumped, dict) else None
+            return outputs if isinstance(outputs, dict) else None
+        return None
 
     def _build_studio_skill_resolver(self) -> Any:
         return _PrivateStudioSkillResolver()

@@ -913,17 +913,11 @@ function navDomainStatus(d) {
   if (!items || !items.length) return d.status;
   return items.some(item => !followupDone(item)) ? 'partial' : d.status;
 }
-function followupNavChildren(d) {
+function followupRepairSummary(d) {
   const items = FOLLOWUPS[d.id];
   if (!items || !items.length) return '';
-  return items.map((item, i) => {
-    const text = followupText(item);
-    const done = followupDone(item);
-    const short = esc(text.split('：')[0].split('（')[0].slice(0, 26));
-    return '<a class="progress-item ' + (done ? 'done' : '') + '" href="#' + d.id + '_logic" id="nav-' + d.id + '-fu' + i + '">' +
-      '<span class="dot-indicator"></span><span class="item-label">follow-up · ' + short + '</span>' +
-      '<span class="status-dot ' + (done ? 'ok' : 'bad') + '"></span></a>';
-  }).join('');
+  const stats = followupStats(items);
+  return ' · follow-up ' + stats.done + '/' + stats.total;
 }
 function moduleMap(d) {
   return '<div class="module-map"><div class="module-title"><span class="dots"><i></i><i></i><i></i></span><span class="tt">Boundary map · <b>' + d.code + '</b></span></div><div class="module-body">' +
@@ -2188,11 +2182,11 @@ function buildTOC() {
     const summary = MODULE_DEEP_DIVES[d.id]
       ? MODULE_DEEP_DIVES[d.id].sections.map(s => s.label.replace(' 标准','')).slice(0, 3).join(' / ')
       : spec ? spec.navSummary : '设计总览 · 修复路径 · ' + d.children.length + ' 个子节点 · ' + statusText(d.status);
-    const repair = '<a class="progress-item" href="#' + d.id + '_logic" id="nav-' + d.id + '_logic"><span class="dot-indicator"></span><span class="item-label">' + d.code + ' 怎么修复</span><span class="status-dot ' + statusClass(d.status) + '"></span></a>';
+    const repair = '<a class="progress-item" href="#' + d.id + '_logic" id="nav-' + d.id + '_logic"><span class="dot-indicator"></span><span class="item-label">' + d.code + ' 怎么修复' + followupRepairSummary(d) + '</span><span class="status-dot ' + statusClass(navDomainStatus(d)) + '"></span></a>';
     const children = d.children.map(c =>
       '<a class="progress-item" href="#' + c.id + '" id="nav-' + c.id + '"><span class="dot-indicator"></span><span class="item-label">' + c.code + ' ' + esc(c.title) + '</span><span class="status-dot ' + statusClass(c.status) + '"></span></a>'
     ).join('');
-    return '<div class="toc-group"><a class="toc-parent" href="#' + d.id + '_overview" id="nav-' + d.id + '_overview"><span class="parent-node">' + d.code + '</span><span class="parent-title"><b>' + esc(displayTitle) + '</b><span>' + inlineCode(summary) + '</span></span><span class="status-dot ' + statusClass(navDomainStatus(d)) + '"></span></a><div class="child-list">' + repair + children + followupNavChildren(d) + '</div></div>';
+    return '<div class="toc-group"><a class="toc-parent" href="#' + d.id + '_overview" id="nav-' + d.id + '_overview"><span class="parent-node">' + d.code + '</span><span class="parent-title"><b>' + esc(displayTitle) + '</b><span>' + inlineCode(summary) + '</span></span><span class="status-dot ' + statusClass(navDomainStatus(d)) + '"></span></a><div class="child-list">' + repair + children + '</div></div>';
   }).join('');
 }
 function buildDoc() {

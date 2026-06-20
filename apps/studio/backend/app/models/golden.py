@@ -40,6 +40,39 @@ class GoldenBaselineFile(BaseModel):
     content: str
 
 
+class GoldenCaseContent(BaseModel):
+    """One agent node's stored golden case content (the editable expected_output).
+
+    N4 atom #29 read path: the list endpoint only projects per-node case metadata
+    (``case_id``/``node_id``/``expected_output_ref``); this model carries the actual
+    ``expected_output`` the ref points at, so the I/O panel can open a golden file for
+    editing. Read-only — the editing write still goes through ``/golden/manual/plan``
+    (the Rust native-fs sole writer under D12).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    case_id: str
+    node_id: str
+    phase_id: str
+    expected_output: dict[str, Any]
+
+
+class GoldenBaselineContent(BaseModel):
+    """A golden baseline with each case's resolved expected_output content.
+
+    N4 atom #29: returned by ``GET /golden/{golden_id}/content`` so the frontend can open
+    an existing baseline (or a single node's case via ``?node_id=``) for editing.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    source_run_id: str | None = None
+    locked: bool
+    cases: list[GoldenCaseContent] = Field(default_factory=list)
+
+
 class GoldenBaselinePlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

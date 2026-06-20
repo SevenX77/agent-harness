@@ -399,6 +399,23 @@ async def compile_skill_for_studio(
         )
     except (GraphCompileError, ResourceNotFoundError) as exc:
         raise CompileFailedError(_compile_failure_from_exception(exc, skill_dir)) from exc
+
+    # N4 atom #35: Studio-layer business gate. A persisted golden case whose node's
+    # current io.outputs schema now requires fields the golden is missing (output-schema
+    # drift) must FAIL compile so the existing N3 compile-gating blocks predict until the
+    # golden is reconciled. Binds to the output schema only; the engine compile has no
+    # knowledge of Studio golden files, so this gate lives in the shell, after compile.
+    golden_errors = _validate_golden_against_output_schema(skill_id, str(skill_dir))
+    if golden_errors:
+        count = len(golden_errors)
+        noun = "field" if count == 1 else "fields"
+        raise CompileFailedError(
+            CompileFailure(
+                detail=f"Golden baseline is missing {count} required output {noun} after a schema change",
+                errors=golden_errors,
+            )
+        )
+
     artifact_ref = build_engine_adapter().compile(
         {
             "skill_dir": str(skill_dir),
@@ -415,6 +432,75 @@ async def compile_skill_for_studio(
         source_map_ref=artifact_ref["source_map_ref"],
         execution_fingerprint=artifact_ref["execution_fingerprint"],
     )
+
+
+def _validate_golden_against_output_schema(skill_id: str, skill_dir: str) -> list[CompileError]:
+    """N4 #35: compile gate — golden cases missing required output-schema fields are fatal.
+
+    For each agent node that has a persisted golden case, resolve the node's CURRENT
+    ``io.outputs`` schema via the allowlisted engine port and compare its ``required``
+    fields against the golden ``expected_output`` keys. A required field absent from the
+    golden = output-schema drift that must block predict. Binds to the output schema only:
+    prompt/agent-internal edits never appear in ``required`` so never trigger this. Returns
+    one fatal ``CompileError`` per missing field (empty list = no drift).
+    """
+    # Deferred import avoids the golden_diff -> skills import cycle (golden_diff imports
+    # resolve_skill_dir/golden_dir_for from this module).
+    from app.services.golden_diff import iter_golden_cases_for_skill
+
+    logger.info("golden_compile_gate action=start skill_id=%s", skill_id)
+    adapter = build_engine_adapter()
+    errors: list[CompileError] = []
+    checked = 0
+    for node_id, expected_output in iter_golden_cases_for_skill(Path(skill_dir)):
+        output_schema = adapter.resolve_agent_node_output_schema(skill_dir, node_id)
+        if output_schema is None:
+            # Logic node (no golden semantics) or a golden whose node was removed —
+            # not a schema-drift gap; the field-presence rule only applies to agent nodes.
+            logger.info(
+                "golden_compile_gate decision=skip skill_id=%s node_id=%s reason=no_agent_output_schema",
+                skill_id,
+                node_id,
+            )
+            continue
+        checked += 1
+        missing = _missing_required_golden_fields(output_schema, expected_output)
+        for field in missing:
+            logger.warning(
+                "golden_compile_gate decision=fail skill_id=%s node_id=%s field=%s reason=required_field_missing",
+                skill_id,
+                node_id,
+                field,
+            )
+            errors.append(
+                CompileError(
+                    severity="fatal",
+                    field=f"{node_id}.{field}",
+                    message=(
+                        f"Golden baseline for agent node '{node_id}' is missing required "
+                        f"output field '{field}'. Reconcile the golden before predict."
+                    ),
+                )
+            )
+    logger.info(
+        "golden_compile_gate action=end skill_id=%s checked_nodes=%d missing_fields=%d",
+        skill_id,
+        checked,
+        len(errors),
+    )
+    return errors
+
+
+def _missing_required_golden_fields(
+    output_schema: dict[str, Any],
+    expected_output: dict[str, Any],
+) -> list[str]:
+    """Required output-schema fields absent from the golden's top-level keys (ordered)."""
+    required = output_schema.get("required")
+    if not isinstance(required, list):
+        return []
+    present = set(expected_output.keys())
+    return [field for field in required if isinstance(field, str) and field not in present]
 
 
 async def update_skill_content(

@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path, PurePath
-from typing import Any, Protocol
+from typing import Any, NoReturn, Protocol
 
 from app.core.exceptions import error_response, raise_error_response
 from app.models.compare import CompareResult
 from app.models.golden import (
     GoldenBaseline,
     GoldenBaselineCase,
+    GoldenBaselineContent,
     GoldenBaselineFile,
     GoldenBaselinePlan,
+    GoldenCaseContent,
     SetManualGoldenReq,
 )
 from app.services.diagnostic_export import assert_trace_can_be_promoted_to_golden
@@ -26,6 +29,8 @@ from app.services.golden_headless import (  # noqa: F401
     read_run_result_snapshot_for_golden,
 )
 from app.services.skills import golden_dir_for, resolve_skill_dir, validate_run_id_segment
+
+logger = logging.getLogger(__name__)
 
 BASELINE_FILENAME = "baseline.json"
 REPORT_FILENAME = "report.json"
@@ -387,6 +392,224 @@ def delete_golden_baseline_for_skill(skill_id: str, golden_id: str) -> None:
         )
     # codeql[py/path-injection] baseline_dir is confined to the skill golden root by _golden_dir_for.
     shutil.rmtree(baseline_dir)
+
+
+def read_golden_baseline_content(
+    skill_id: str,
+    golden_id: str,
+    *,
+    node_id: str | None = None,
+) -> GoldenBaselineContent:
+    """Return a persisted baseline with each case's resolved ``expected_output``.
+
+    N4 atom #29 read path: the listing endpoint only projects per-node case metadata;
+    this resolves each case's ``expected_output_ref`` (``cases/{case_id}.json``) to the
+    stored case file and returns its ``expected_output`` so the I/O panel can open the
+    golden for editing. Read-only — no write guard. With ``node_id`` only that node's
+    case is returned (422 if it has no golden case in this baseline).
+
+    Errors:
+      - ``golden.baseline_not_found`` (404) when the baseline dir / ``baseline.json``
+        is absent (same shape as ``delete_golden_baseline_for_skill``).
+      - ``golden.case_not_found`` (422) when a referenced case file is missing or
+        does not carry a dict ``expected_output``.
+    """
+    logger.info(
+        "golden_content action=start skill_id=%s golden_id=%s node_id=%s",
+        skill_id,
+        golden_id,
+        node_id,
+    )
+    baseline_dir = _golden_dir_for(skill_id, golden_id)
+    baseline_path = baseline_dir / BASELINE_FILENAME
+    # codeql[py/path-injection] baseline_dir is confined to the skill golden root by _golden_dir_for.
+    if not baseline_path.exists():
+        logger.warning(
+            "golden_content decision=not_found skill_id=%s golden_id=%s reason=baseline_missing",
+            skill_id,
+            golden_id,
+        )
+        raise_error_response(
+            error_response(
+                error_code="golden.baseline_not_found",
+                http_status=404,
+                message=f"Golden baseline not found: {golden_id}",
+                details={"skill_id": skill_id, "golden_id": golden_id},
+                retry_strategy="not_retryable",
+            )
+        )
+
+    payload = _read_json(baseline_path)
+    records = payload.get("cases") if isinstance(payload, dict) else None
+    case_records = [record for record in records if isinstance(record, dict)] if isinstance(records, list) else []
+    if node_id is not None:
+        case_records = [record for record in case_records if record.get("node_id") == node_id]
+        if not case_records:
+            logger.warning(
+                "golden_content decision=case_not_found skill_id=%s golden_id=%s node_id=%s",
+                skill_id,
+                golden_id,
+                node_id,
+            )
+            raise_error_response(
+                error_response(
+                    error_code="golden.case_not_found",
+                    http_status=422,
+                    message=f"Golden case not found for node: {node_id}",
+                    details={"skill_id": skill_id, "golden_id": golden_id, "node_id": node_id},
+                    retry_strategy="not_retryable",
+                )
+            )
+
+    cases = [_read_golden_case_content(skill_id, golden_id, baseline_dir, record) for record in case_records]
+    source_run_id = payload.get("source_run_id") if isinstance(payload, dict) else None
+    locked = payload.get("locked") if isinstance(payload, dict) else None
+    logger.info(
+        "golden_content action=end skill_id=%s golden_id=%s case_count=%d",
+        skill_id,
+        golden_id,
+        len(cases),
+    )
+    return GoldenBaselineContent(
+        id=golden_id,
+        source_run_id=source_run_id if isinstance(source_run_id, str) else None,
+        locked=locked if isinstance(locked, bool) else False,
+        cases=cases,
+    )
+
+
+def iter_golden_cases_for_skill(skill_dir: Path) -> Iterator[tuple[str, dict[str, Any]]]:
+    """Yield ``(node_id, expected_output)`` for every persisted golden case of a skill.
+
+    Takes the ALREADY-RESOLVED ``skill_dir`` (the compile path resolved it once via the
+    async resolver) so the #35 gate never re-resolves the skill id — re-resolution would
+    raise SKILL_NOT_FOUND for a skill that compiled through a mocked/aliased adapter.
+    Used by the N4 #35 compile gate to check each golden node's stored expected output
+    against its current output schema. Reuses the same on-disk readers as the #29 content
+    endpoint (``baseline.json`` cases -> ``cases/{case_id}.json`` -> ``expected_output``).
+    Cases that cannot be resolved to a dict ``expected_output`` are skipped with a warning
+    rather than raising — a malformed/missing case file must not crash compile (the gate's
+    job is field-drift detection, not file-integrity enforcement).
+    """
+    golden_root = golden_dir_for(skill_dir)
+    # codeql[py/path-injection] golden_root is derived from the caller-resolved skill_dir.
+    if not golden_root.exists():
+        return
+    # codeql[py/path-injection] golden_root is the validated skill workspace golden directory.
+    for baseline_path in golden_root.glob(f"*/{BASELINE_FILENAME}"):
+        baseline_dir = baseline_path.parent
+        payload = _read_json(baseline_path)
+        records = payload.get("cases") if isinstance(payload, dict) else None
+        if not isinstance(records, list):
+            continue
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            resolved = _try_read_case_expected_output(skill_dir.name, baseline_dir.name, baseline_dir, record)
+            if resolved is not None:
+                yield resolved
+
+
+def _try_read_case_expected_output(
+    skill_id: str,
+    golden_id: str,
+    baseline_dir: Path,
+    record: dict[str, Any],
+) -> tuple[str, dict[str, Any]] | None:
+    """Resolve one case record to ``(node_id, expected_output)``; None (warn) if unreadable."""
+    node_id = record.get("node_id")
+    if not isinstance(node_id, str) or not node_id:
+        return None
+    case_id = record.get("case_id") if isinstance(record.get("case_id"), str) else node_id
+    expected_output_ref = record.get("expected_output_ref")
+    if not isinstance(expected_output_ref, str) or not expected_output_ref:
+        expected_output_ref = f"{CASES_DIRNAME}/{case_id}.json"
+    case_path = _resolve_case_path(baseline_dir, expected_output_ref)
+    # codeql[py/path-injection] case_path is confined to baseline_dir by _resolve_case_path.
+    if case_path is None or not case_path.exists():
+        logger.warning(
+            "golden_cases decision=skip skill_id=%s golden_id=%s node_id=%s reason=case_file_missing",
+            skill_id,
+            golden_id,
+            node_id,
+        )
+        return None
+    case_payload = _read_json(case_path)
+    expected_output = case_payload.get("expected_output") if isinstance(case_payload, dict) else None
+    if not isinstance(expected_output, dict):
+        logger.warning(
+            "golden_cases decision=skip skill_id=%s golden_id=%s node_id=%s reason=expected_output_invalid",
+            skill_id,
+            golden_id,
+            node_id,
+        )
+        return None
+    return node_id, expected_output
+
+
+def _read_golden_case_content(
+    skill_id: str,
+    golden_id: str,
+    baseline_dir: Path,
+    record: dict[str, Any],
+) -> GoldenCaseContent:
+    """Resolve one case record's ``expected_output_ref`` to its stored content."""
+    node_id = record.get("node_id")
+    if not isinstance(node_id, str) or not node_id:
+        _raise_golden_case_not_found(skill_id, golden_id, None, "case_missing_node_id")
+    raw_case_id = record.get("case_id")
+    case_id = raw_case_id if isinstance(raw_case_id, str) and raw_case_id else node_id
+    raw_phase_id = record.get("phase_id")
+    phase_id = raw_phase_id if isinstance(raw_phase_id, str) and raw_phase_id else node_id
+    expected_output_ref = record.get("expected_output_ref")
+    if not isinstance(expected_output_ref, str) or not expected_output_ref:
+        expected_output_ref = f"{CASES_DIRNAME}/{case_id}.json"
+    case_path = _resolve_case_path(baseline_dir, expected_output_ref)
+    # codeql[py/path-injection] case_path is confined to baseline_dir by _resolve_case_path.
+    if case_path is None or not case_path.exists():
+        _raise_golden_case_not_found(skill_id, golden_id, node_id, "case_file_missing")
+    case_payload = _read_json(case_path)
+    expected_output = case_payload.get("expected_output") if isinstance(case_payload, dict) else None
+    if not isinstance(expected_output, dict):
+        _raise_golden_case_not_found(skill_id, golden_id, node_id, "expected_output_invalid")
+    return GoldenCaseContent(
+        case_id=case_id,
+        node_id=node_id,
+        phase_id=phase_id,
+        expected_output=expected_output,
+    )
+
+
+def _resolve_case_path(baseline_dir: Path, expected_output_ref: str) -> Path | None:
+    """Join a case ref under the baseline dir, rejecting escapes/absolute refs."""
+    ref_path = PurePath(expected_output_ref)
+    if ref_path.is_absolute() or "\\" in expected_output_ref or ".." in ref_path.parts:
+        return None
+    return baseline_dir / ref_path
+
+
+def _raise_golden_case_not_found(
+    skill_id: str,
+    golden_id: str,
+    node_id: str | None,
+    reason: str,
+) -> NoReturn:
+    logger.warning(
+        "golden_content decision=case_not_found skill_id=%s golden_id=%s node_id=%s reason=%s",
+        skill_id,
+        golden_id,
+        node_id,
+        reason,
+    )
+    raise_error_response(
+        error_response(
+            error_code="golden.case_not_found",
+            http_status=422,
+            message=f"Golden case content is unavailable: {reason}",
+            details={"skill_id": skill_id, "golden_id": golden_id, "node_id": node_id, "reason": reason},
+            retry_strategy="not_retryable",
+        )
+    )
 
 
 def compare_run_to_golden(

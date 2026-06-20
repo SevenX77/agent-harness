@@ -87,8 +87,8 @@ interface GraphCanvasProps {
   // n2-canvas #8 (atomic reconnect): a single handler that applies BOTH the old
   // depends_on removal and the new depends_on addition in one serialize/write.
   // When provided it replaces the disconnect-then-persist chain (two round-trips)
-  // that caused a 409 lost-update. Optional so the compact SplitEditor canvas,
-  // which has not wired it, falls back to the legacy chained behavior.
+  // that caused a 409 lost-update. Optional only as a defensive fallback; both
+  // real consumers (main canvas + compact SplitEditor canvas) wire it.
   onReconnectConnection?: (
     disconnect: { source: string; target: string },
     connect: { source: string; target: string },
@@ -624,9 +624,10 @@ export function GraphCanvas({
   // against the same captured skillDetail closure, and the queued persist
   // serialized the pre-disconnect phases with a stale expected_hash → backend 409
   // lost-update that left the graph half-mutated. A reconnect that lands back on
-  // the same endpoints (no-op) just snaps the edge back without a write. When
-  // onReconnectConnection is not wired (the compact SplitEditor canvas), we keep
-  // the legacy chained fallback so that surface still functions.
+  // the same endpoints (no-op) just snaps the edge back without a write. Both
+  // real consumers (main canvas + compact SplitEditor canvas) now wire
+  // onReconnectConnection; the legacy chained fallback below is kept only as a
+  // defensive path for any future surface that mounts GraphCanvas without it.
   const onReconnect = useCallback((oldEdge: Edge<ContextEdgeData>, newConnection: Connection) => {
     reconnectLandedRef.current = true
     const plan = planEdgeReconnect(

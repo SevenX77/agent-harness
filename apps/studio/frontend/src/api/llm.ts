@@ -72,6 +72,8 @@ export interface ProviderRoute {
   canonical_id: string
   display_name?: string | null
   status: RouteStatus
+  /** Backend-projected 6-state UI status (apikeys#30); GET /llm/registry stamps it per route. */
+  ui_state: ProviderUiState
   capabilities: Record<string, CapabilityValue>
   verified_profiles?: VerifiedProfile[]
   metadata: Record<string, unknown>
@@ -201,6 +203,8 @@ export interface ModelInfo {
   id: string
   route_id?: string
   status?: ModelProbeStatus
+  /** Backend-projected 6-state UI status carried from the route (apikeys#30). */
+  ui_state?: ProviderUiState
   verified_profile_count?: number
   verified_profiles?: VerifiedProfile[]
   last_probe_message?: string | null
@@ -273,24 +277,6 @@ export interface ProviderTestResponse {
   error_code?: string | null
   available_models?: ModelInfo[]
   available_sdks?: string[]
-}
-
-export interface ProviderTestProgressOptions {
-  onProgress?: (response: ProviderTestResponse, job: EndpointTestJobResponse) => void
-}
-
-export interface EndpointTestJobResponse {
-  job_id: string
-  endpoint_id: string
-  status: 'queued' | 'running' | 'completed' | 'failed'
-  total_model_count: number
-  tested_model_count: number
-  verified_route_count: number
-  failed_model_count: number
-  catalog_only_count: number
-  message?: string | null
-  available_models: ModelInfo[]
-  available_sdks: string[]
 }
 
 export interface NotableModelsResponse {
@@ -828,6 +814,7 @@ function modelInfoFromRoute(route: ProviderRoute): ModelInfo {
     id: route.provider_model_id,
     route_id: route.route_id,
     status: route.status,
+    ui_state: route.ui_state,
     verified_profile_count: (route.verified_profiles ?? []).filter((profile) => profile.status === 'ready').length,
     verified_profiles: route.verified_profiles ?? [],
     last_probe_message: typeof lastProbeMessage === 'string' ? lastProbeMessage : null,
@@ -1326,7 +1313,6 @@ export async function testProvider(
 
 export async function getProviderModels(
   request: ProviderTestRequest,
-  options: ProviderTestProgressOptions = {},
 ): Promise<ProviderTestResponse> {
   if (!request.api_key.trim()) {
     return {
@@ -1340,7 +1326,9 @@ export async function getProviderModels(
   }
   rememberEndpointSecret(request.id, request.api_key)
   const existing = cachedRegistry?.provider_endpoints[request.id]
-  const savedRegistry = await putRegistryEndpoints({
+  // Pre-test upsert persists the edited draft (base_url normalized server-side)
+  // before the endpoint is exercised — see design atom #25 ("测试前置 upsert 落 endpoint").
+  await putRegistryEndpoints({
     [request.id]: endpointFromCredentialUpdate(
       {
         id: request.id,
@@ -1352,16 +1340,18 @@ export async function getProviderModels(
       existing,
     ),
   })
-  const savedEndpoint = savedRegistry.provider_endpoints[request.id]
-  if (savedEndpoint?.provider_kind === 'official') {
-    return testOfficialProviderModelsWithJob(request, savedEndpoint, options)
-  }
+  // apikeys#24/#25: official AND third-party now share the single POST
+  // /endpoints/{id}/test entry. The backend internally forks (official verifies on
+  // get-models reachability; third-party runs protocol auto-detect + a real
+  // batch-inference probe) and is the sole authority on whether the endpoint is
+  // verified. The FE no longer forks by provider_kind nor judges connectivity off
+  // a "not failed" heuristic — an endpoint is connected iff status === 'verified'.
   const response = await api.post<EndpointTestResponse>(`/llm/endpoints/${segment(request.id)}/test`)
   const registry = cacheRegistry(response.data.registry)
   const endpoint = registry.provider_endpoints[request.id]
   if (!endpoint) throw new Error(`Endpoint model list response omitted endpoint: ${request.id}`)
   const routes = routesForEndpoint(registry, request.id)
-  const modelListReachable = endpoint.status !== 'failed'
+  const isVerified = endpoint.status === 'verified'
   const models = routes.map(modelInfoFromRoute)
   upsertCachedResult(request.id, {
     params_fingerprint: paramsFingerprint({
@@ -1374,111 +1364,19 @@ export async function getProviderModels(
     last_test_status: statusToTestStatus(endpoint.status),
     last_test_at: endpoint.last_test_at ?? '',
     last_test_message: endpoint.last_test_message ?? '',
-    last_error_code: modelListReachable ? '' : endpointErrorCode(endpoint) ?? '',
+    last_error_code: isVerified ? '' : endpointErrorCode(endpoint) ?? '',
     available_models: models,
     available_sdks: models.length > 0 ? [endpoint.protocol] : [],
   })
   return {
-    status: modelListReachable ? 'ok' : endpointTestStatus(endpoint),
+    status: isVerified ? 'ok' : endpointTestStatus(endpoint),
     latency_ms: null,
     model_seen: models[0]?.id ?? null,
     message: endpoint.last_test_message ?? null,
-    error_code: modelListReachable ? null : endpointErrorCode(endpoint),
+    error_code: isVerified ? null : endpointErrorCode(endpoint),
     available_models: models,
     available_sdks: models.length > 0 ? [endpoint.protocol] : [],
   }
-}
-
-async function testOfficialProviderModelsWithJob(
-  request: ProviderTestRequest,
-  endpoint: ProviderEndpoint,
-  options: ProviderTestProgressOptions,
-): Promise<ProviderTestResponse> {
-  const started = await startEndpointTestJob(request.id)
-  options.onProgress?.(providerTestResponseFromEndpointTestJob(request, endpoint, started), started)
-  const completed = await waitForEndpointTestJob(started, (job) => {
-    options.onProgress?.(providerTestResponseFromEndpointTestJob(request, endpoint, job), job)
-  })
-  return providerTestResponseFromEndpointTestJob(request, endpoint, completed)
-}
-
-async function startEndpointTestJob(endpointId: string): Promise<EndpointTestJobResponse> {
-  const response = await api.post<EndpointTestJobResponse>(`/llm/endpoints/${segment(endpointId)}/test-jobs`)
-  return response.data
-}
-
-async function getEndpointTestJob(jobId: string): Promise<EndpointTestJobResponse> {
-  const response = await api.get<EndpointTestJobResponse>(`/llm/endpoint-test-jobs/${segment(jobId)}`)
-  return response.data
-}
-
-async function waitForEndpointTestJob(
-  job: EndpointTestJobResponse,
-  onProgress?: (job: EndpointTestJobResponse) => void,
-): Promise<EndpointTestJobResponse> {
-  let current = job
-  while (current.status === 'queued' || current.status === 'running') {
-    await delay(750)
-    current = await getEndpointTestJob(current.job_id)
-    onProgress?.(current)
-  }
-  return current
-}
-
-function providerTestResponseFromEndpointTestJob(
-  request: ProviderTestRequest,
-  endpoint: ProviderEndpoint,
-  job: EndpointTestJobResponse,
-): ProviderTestResponse {
-  const completed = job.status === 'completed'
-  const failed = job.status === 'failed'
-  const availableModels = job.available_models ?? []
-  const availableSdks = job.available_sdks?.length ? job.available_sdks : [endpoint.protocol]
-  const lastTestStatus: TestStatus = failed ? 'error' : completed ? 'ok' : 'untested'
-  const cachedResult: ProviderTestResult = {
-    params_fingerprint: paramsFingerprint({
-      api_key: request.api_key,
-      base_url: request.base_url ?? '',
-      provider_type: request.provider_type,
-    }),
-    base_url: request.base_url ?? '',
-    provider_type: request.provider_type,
-    last_test_status: lastTestStatus,
-    last_test_at: new Date().toISOString(),
-    last_test_message: job.message ?? '',
-    last_error_code: failed ? 'endpoint_test_failed' : '',
-    available_models: availableModels,
-    available_sdks: availableSdks,
-  }
-  upsertCachedResult(request.id, cachedResult)
-  if (cachedRegistry?.provider_endpoints[request.id]) {
-    const currentEndpoint = cachedRegistry.provider_endpoints[request.id]
-    cachedRegistry = {
-      ...cachedRegistry,
-      provider_endpoints: {
-        ...cachedRegistry.provider_endpoints,
-        [request.id]: {
-          ...currentEndpoint,
-          status: failed ? 'failed' : completed ? 'verified' : currentEndpoint.status,
-          last_test_at: cachedResult.last_test_at,
-          last_test_message: cachedResult.last_test_message,
-        },
-      },
-    }
-  }
-  return {
-    status: failed ? 'error' : 'ok',
-    latency_ms: null,
-    model_seen: availableModels[0]?.id ?? null,
-    message: job.message ?? null,
-    error_code: failed ? 'endpoint_test_failed' : null,
-    available_models: availableModels,
-    available_sdks: availableSdks,
-  }
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => globalThis.setTimeout(resolve, ms))
 }
 
 export async function testProviderEndpoint(

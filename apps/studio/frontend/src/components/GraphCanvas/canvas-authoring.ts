@@ -182,6 +182,91 @@ export function planEdgeReconnect(oldEdge: EdgeEndpoints, newConnection: EdgeEnd
   }
 }
 
+export type ReconnectPhaseRefsResult =
+  | { ok: true; phases: SerializableGraphPhaseRef[] }
+  | {
+    ok: false
+    reason: 'global-node' | 'self-dependency' | 'unknown-phase' | 'duplicate-dependency' | 'missing-dependency' | 'no-op'
+    message: string
+  }
+
+/**
+ * Compute the next phases for an edge reconnect as a SINGLE atomic depends_on
+ * mutation (n2-canvas #8 lost-update fix). The previous implementation ran the
+ * disconnect and the connect as TWO sequential serialize round-trips against the
+ * same captured skillDetail closure: the disconnect wrote a new GRAPH.md (hash
+ * changed) and revalidated, but the queued connect still serialized the
+ * PRE-disconnect phases with a now-stale expected_hash, so the backend hash
+ * guard rejected it with 409 and left the graph half-mutated.
+ *
+ * This helper instead derives ONE phases list off a single `phaseRefsFromSkillDetail`
+ * snapshot that BOTH drops the old dependency (disconnect.source from
+ * disconnect.target) AND adds the new dependency (connect.source to
+ * connect.target). The caller serializes + writes that single list once with a
+ * single expected_hash. It re-runs the same per-endpoint guards the standalone
+ * connect/disconnect helpers enforce (global node, self-dependency, unknown
+ * phase, duplicate, missing) so the validation contract is unchanged; only the
+ * round-trip count drops from two to one.
+ */
+export function reconnectPhaseRefs(
+  detail: SkillDetail | undefined,
+  disconnect: { source: string; target: string },
+  connect: { source: string; target: string },
+): ReconnectPhaseRefsResult {
+  if (
+    isGlobalNode(disconnect.source)
+    || isGlobalNode(disconnect.target)
+    || isGlobalNode(connect.source)
+    || isGlobalNode(connect.target)
+  ) {
+    return { ok: false, reason: 'global-node', message: 'Global input/output edges are derived and cannot be reconnected.' }
+  }
+  if (connect.source === connect.target) {
+    return { ok: false, reason: 'self-dependency', message: 'A phase cannot depend on itself.' }
+  }
+  if (disconnect.source === connect.source && disconnect.target === connect.target) {
+    return { ok: false, reason: 'no-op', message: 'Edge was reconnected to the same endpoints.' }
+  }
+
+  const phases = phaseRefsFromSkillDetail(detail)
+  const disconnectSource = phases.find((phase) => phase.id === disconnect.source)
+  const disconnectTarget = phases.find((phase) => phase.id === disconnect.target)
+  const connectSource = phases.find((phase) => phase.id === connect.source)
+  const connectTarget = phases.find((phase) => phase.id === connect.target)
+  if (!disconnectSource || !disconnectTarget || !connectSource || !connectTarget) {
+    return { ok: false, reason: 'unknown-phase', message: 'Both edge endpoints must be phase nodes.' }
+  }
+  if (!disconnectTarget.depends_on.includes(disconnectSource.id)) {
+    return { ok: false, reason: 'missing-dependency', message: 'This edge is not backed by a phase dependency.' }
+  }
+  // Duplicate check is taken AFTER the disconnect is applied: reconnecting an
+  // edge whose new target already has the dependency is a genuine duplicate,
+  // but a same-target reconnect (only the source moved on a shared target) must
+  // not flag the dependency we are about to remove as a duplicate.
+  const connectTargetDependsAfterDisconnect = connectTarget.id === disconnectTarget.id
+    ? connectTarget.depends_on.filter((dependency) => dependency !== disconnectSource.id)
+    : connectTarget.depends_on
+  if (connectTargetDependsAfterDisconnect.includes(connectSource.id)) {
+    return { ok: false, reason: 'duplicate-dependency', message: 'This dependency already exists.' }
+  }
+
+  // Single pass: drop the old dependency on disconnect.target, add the new one
+  // on connect.target. When both endpoints share a target the two edits compose
+  // on the same phase, still yielding one phases list.
+  const phasesAfterDisconnect = phases.map((phase) => (
+    phase.id === disconnectTarget.id
+      ? { ...phase, depends_on: phase.depends_on.filter((dependency) => dependency !== disconnectSource.id) }
+      : phase
+  ))
+  const nextPhases = phasesAfterDisconnect.map((phase) => (
+    phase.id === connectTarget.id
+      ? { ...phase, depends_on: [...phase.depends_on, connectSource.id] }
+      : phase
+  ))
+
+  return { ok: true, phases: nextPhases }
+}
+
 export function phaseFilePath(phaseId: string, kind: NewPhaseKind): string {
   if (kind === 'skill') {
     return `phases/${phaseId}/SKILL.md`

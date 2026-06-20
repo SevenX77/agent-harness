@@ -1,7 +1,9 @@
 import type { ResumeRunOptions } from "@/api/client"
-import type { EventEnvelope, LintError, ResumeValidityResponse, SkillDetail } from "@/api/types"
+import type { CallbackEvent, EventEnvelope, LintError, ResumeValidityResponse, SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData, SkillNodeStatus } from "@/components/GraphCanvas"
+import { TraceDocumentPanel } from "@/components/MonacoPanel"
 import { TracePanel, type TraceHitlResumeRequest } from "@/components/TracePanel"
+import { useThemeValue } from "@/store/themeStore"
 import type { PanelKind } from "../Toolbar"
 import { useWorkspaceContext } from "../WorkspaceContext"
 import { AssetsPanel } from "./AssetsPanel"
@@ -79,6 +81,7 @@ export function Panels({
   onPromoteNode,
 }: PanelsProps) {
   const { onFileOpen, selectedEdge, setSelectedEdge } = useWorkspaceContext()
+  const isDarkMode = useThemeValue() === "dark"
   if (!skillId) {
     return (
       <div className="flex h-full w-full flex-col bg-sidebar">
@@ -136,6 +139,21 @@ export function Panels({
       )
     }
     return <TimelinePanel />
+  }
+  if (activePanel === "trace-doc") {
+    // n4-trace #18: the same run-stream events the live Event Trace panel renders,
+    // projected into a read-only full-trace document. Run-stream payloads arrive as
+    // EventEnvelope; unwrap to the CallbackEvent the document builder consumes (same
+    // unwrap TracePanel does). Focus the document on the canvas-selected node so its
+    // line-jump stays in lockstep with node focus.
+    const traceDocumentEvents: CallbackEvent[] = (traceEvents ?? []).map((event) => event.payload)
+    return (
+      <TraceDocumentPanel
+        events={traceDocumentEvents}
+        isDarkMode={isDarkMode}
+        focusNodeId={selectedNode?.id ?? null}
+      />
+    )
   }
   if (activePanel === "local-history") {
     return <HistoryPanel skillId={skillId} />

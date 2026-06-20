@@ -14,7 +14,7 @@ interface SplitEditorProps {
   error?: unknown
   selectedNodeId?: string | null
   onNodeSelect?: (node: { id: string; data: SkillGraphNodeData }) => void
-  onPanelChange?: (panel: "assets" | "input" | "timeline" | "properties" | "local-history" | null) => void
+  onPanelChange?: (panel: "assets" | "input" | "timeline" | "trace-doc" | "properties" | "local-history" | null) => void
   onCreatePhase?: (kind: NewPhaseKind) => Promise<void> | void
   onPersistConnection?: (connection: Connection) => Promise<void> | void
   onDisconnectConnection?: (connection: { source: string; target: string }) => Promise<void> | void

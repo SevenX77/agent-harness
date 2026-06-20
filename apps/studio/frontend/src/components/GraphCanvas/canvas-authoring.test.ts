@@ -5,6 +5,7 @@ import {
   connectPhaseRefs,
   createPhaseDraft,
   disconnectPhaseRefs,
+  reconnectPhaseRefs,
   phaseRefsFromSkillDetail,
   checkSequentialOverwrites,
   addSequentialOverwriteField,
@@ -271,6 +272,76 @@ allow_sequential_overwrite:
       { source: 'draft', target: 'review' },
       { source: 'draft', target: 'review' },
     )).toMatchObject({ ok: false, reason: 'no-op' })
+  })
+
+  it('reconnects an edge as one combined phases list: old dependency removed and new one added', () => {
+    // n2-canvas #8: a reconnect is a SINGLE atomic depends_on mutation. Dragging
+    // the draft→review target over to publish must, in one pass, drop draft from
+    // review.depends_on AND add draft to publish.depends_on — never two serialize
+    // round-trips against separately-derived phase lists.
+    const detail = skillDetail({
+      phases: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+        { id: 'publish', src: 'phases/publish/SKILL.md', depends_on: [] },
+      ],
+    })
+
+    const result = reconnectPhaseRefs(
+      detail,
+      { source: 'draft', target: 'review' },
+      { source: 'draft', target: 'publish' },
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.phases.find((phase) => phase.id === 'review')?.depends_on).toEqual([])
+    expect(result.phases.find((phase) => phase.id === 'publish')?.depends_on).toEqual(['draft'])
+  })
+
+  it('reconnects a source-endpoint move on a shared target into one phases list', () => {
+    // Drag the source endpoint of draft→publish over to review: publish drops
+    // draft and gains review, all on the single publish phase, in one pass.
+    const detail = skillDetail({
+      phases: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: [] },
+        { id: 'publish', src: 'phases/publish/SKILL.md', depends_on: ['draft'] },
+      ],
+    })
+
+    const result = reconnectPhaseRefs(
+      detail,
+      { source: 'draft', target: 'publish' },
+      { source: 'review', target: 'publish' },
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.phases.find((phase) => phase.id === 'publish')?.depends_on).toEqual(['review'])
+  })
+
+  it('rejects reconnecting global nodes, self-dependencies, no-ops, missing old deps, and duplicates', () => {
+    const detail = skillDetail({
+      phases: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+        { id: 'publish', src: 'phases/publish/SKILL.md', depends_on: ['draft'] },
+      ],
+    })
+
+    expect(reconnectPhaseRefs(detail, { source: 'draft', target: 'review' }, { source: 'draft', target: '__global_output__' }))
+      .toMatchObject({ ok: false, reason: 'global-node' })
+    expect(reconnectPhaseRefs(detail, { source: 'draft', target: 'review' }, { source: 'review', target: 'review' }))
+      .toMatchObject({ ok: false, reason: 'self-dependency' })
+    expect(reconnectPhaseRefs(detail, { source: 'draft', target: 'review' }, { source: 'draft', target: 'review' }))
+      .toMatchObject({ ok: false, reason: 'no-op' })
+    // The old edge is not backed by a real dependency (review→draft does not exist).
+    expect(reconnectPhaseRefs(detail, { source: 'review', target: 'draft' }, { source: 'draft', target: 'publish' }))
+      .toMatchObject({ ok: false, reason: 'missing-dependency' })
+    // Moving draft→review's target onto publish, which already depends on draft.
+    expect(reconnectPhaseRefs(detail, { source: 'draft', target: 'review' }, { source: 'draft', target: 'publish' }))
+      .toMatchObject({ ok: false, reason: 'duplicate-dependency' })
   })
 
   it('updates markdown frontmatter correctly via addSequentialOverwriteField', () => {

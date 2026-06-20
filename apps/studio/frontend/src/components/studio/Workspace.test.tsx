@@ -13,6 +13,10 @@ const mocks = vi.hoisted(() => ({
   graphCanvasProps: null as null | {
     skillId?: string | null
     onPersistConnection?: (connection: { source: string; target: string }) => Promise<void> | void
+    onReconnectConnection?: (
+      disconnect: { source: string; target: string },
+      connect: { source: string; target: string },
+    ) => Promise<void> | void
   },
   centerActionBarProps: null as null | {
     stage?: string
@@ -125,7 +129,14 @@ vi.mock('@/lib/hash', () => ({
 }))
 
 vi.mock('@/components/GraphCanvas', () => ({
-  GraphCanvas: (props: { skillId?: string | null, onPersistConnection?: (connection: { source: string; target: string }) => Promise<void> | void }) => {
+  GraphCanvas: (props: {
+    skillId?: string | null
+    onPersistConnection?: (connection: { source: string; target: string }) => Promise<void> | void
+    onReconnectConnection?: (
+      disconnect: { source: string; target: string },
+      connect: { source: string; target: string },
+    ) => Promise<void> | void
+  }) => {
     mocks.graphCanvasProps = props
     return <div data-testid="graph-canvas" />
   },
@@ -532,6 +543,50 @@ describe('Workspace WS-1 local writer contracts', () => {
     expect(mocks.compileSkill).toHaveBeenCalledWith('writer-smoke')
   })
 
+  // n2-canvas #8 lost-update regression: an edge reconnect (drag the draft→review
+  // target over to publish) must serialize + write GRAPH.md EXACTLY ONCE with the
+  // combined phases — review loses the draft dependency AND publish gains it — and
+  // a SINGLE expected_hash. The old disconnect-then-persist chain issued TWO
+  // sequential serialize round-trips; the second held the pre-disconnect phases
+  // with a now-stale expected_hash and the backend hash guard rejected it (409),
+  // leaving the graph half-mutated. Asserting call count === 1 with the combined
+  // depends_on is the contract that would have caught that.
+  it('reconnects a dependency edge as a single atomic serialize/write with the combined phases', async () => {
+    renderWorkspace(RECONNECT_FIXTURE_SKILL_ID)
+
+    expect(mocks.graphCanvasProps?.onReconnectConnection).toBeTypeOf('function')
+    await mocks.graphCanvasProps?.onReconnectConnection?.(
+      { source: 'draft', target: 'review' },
+      { source: 'draft', target: 'publish' },
+    )
+
+    // Exactly one serialize round-trip, carrying the combined phases: review's
+    // draft dependency removed, publish's draft dependency added.
+    expect(mocks.serializeSkillGraph).toHaveBeenCalledTimes(1)
+    expect(mocks.serializeSkillGraph).toHaveBeenCalledWith(
+      RECONNECT_FIXTURE_SKILL_ID,
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'review', depends_on: [] }),
+        expect.objectContaining({ id: 'publish', depends_on: ['draft'] }),
+      ]),
+      'graph-hash',
+    )
+
+    // Exactly one GRAPH.md write, with a single expected_hash — not two writes.
+    const graphWrites = mocks.invoke.mock.calls.filter(
+      ([command, payload]) =>
+        command === 'write_workspace_file'
+        && (payload as { relativePath?: string }).relativePath === 'GRAPH.md',
+    )
+    expect(graphWrites).toHaveLength(1)
+    expect(graphWrites[0][1]).toMatchObject({
+      relativePath: 'GRAPH.md',
+      content: 'serialized graph\n',
+      expectedHash: 'graph-hash',
+    })
+    expect(toastMocks.error).not.toHaveBeenCalled()
+  })
+
   it('wires conflict overwrite retry into the shared conflict dialog', () => {
     renderWorkspace()
 
@@ -616,7 +671,46 @@ function renderWorkspace(skillId = 'writer-smoke') {
   )
 }
 
+// Reconnect-fixture skill id: a three-phase graph where review already depends
+// on draft and publish exists with no deps, so an edge reconnect (drag the
+// draft→review target over to publish) has a real old dependency to remove and a
+// real new one to add. Keyed by skill id so the shared writer-smoke fixture (and
+// every test that asserts review.depends_on starts empty) is untouched.
+const RECONNECT_FIXTURE_SKILL_ID = 'reconnect-fixture'
+
 function skillDetail(skillId = 'writer-smoke'): SkillDetail {
+  if (skillId === RECONNECT_FIXTURE_SKILL_ID) {
+    return {
+      manifest: {
+        schema_version: CURRENT_SCHEMA_VERSION,
+        name: skillId,
+        description: 'Reconnect fixture',
+        io: {
+          inputs: { type: 'object', properties: {} },
+          outputs: { type: 'object', properties: {} },
+        },
+        phases: ['draft', 'review', 'publish'],
+      },
+      graph_topology: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'skill' },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'], mode: 'logic' },
+        { id: 'publish', src: 'phases/publish/SKILL.md', depends_on: [], mode: 'skill' },
+      ],
+      node_schema_v21: {},
+      io_schema: {},
+      file_paths: {},
+      files: {
+        'GRAPH.md': 'graph before\n',
+        'phases/draft/SKILL.md': 'draft before\n',
+        'phases/review/LOGIC.md': 'review before\n',
+        'phases/publish/SKILL.md': 'publish before\n',
+      },
+      manifest_errors: null,
+      has_golden: false,
+      latest_run_metadata: null,
+      lint_result: null,
+    }
+  }
   return {
     manifest: {
       schema_version: CURRENT_SCHEMA_VERSION,

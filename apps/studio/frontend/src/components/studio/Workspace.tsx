@@ -24,7 +24,7 @@ import { isTauriRuntime } from "@/config/runtime"
 import { writeWorkspaceFile } from "@/lib/tauri"
 import { errorMessage } from "@/utils/errors"
 import type { CompileError } from "@/api/types"
-import { connectPhaseRefs, createPhaseDraft, disconnectPhaseRefs, type NewPhaseKind } from "@/components/GraphCanvas/canvas-authoring"
+import { connectPhaseRefs, createPhaseDraft, disconnectPhaseRefs, reconnectPhaseRefs, type NewPhaseKind } from "@/components/GraphCanvas/canvas-authoring"
 import { sha256Hex } from "@/lib/hash"
 import { CenterActionBar, type SkillBuildStage } from "./center-action-bar"
 import { deriveNodeStatuses } from "./node-status"
@@ -558,6 +558,40 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       throw new Error("Open a skill before disconnecting phases")
     }
     const result = disconnectPhaseRefs(skillDetail, connection.source, connection.target)
+    if (!result.ok) {
+      throw new Error(result.message)
+    }
+    const graphContent = skillDetail.files?.["GRAPH.md"]
+    const graphHash = graphContent === undefined ? null : await sha256Hex(graphContent)
+    try {
+      const serialized = await serializeSkillGraph(currentSkillId, result.phases, graphHash)
+      await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash)
+      await compileSkillById(currentSkillId)
+      await mutateSkillDetail()
+    } catch (error) {
+      void mutateSkillDetail()
+      throw error
+    }
+  }, [compileSkillById, currentSkillId, doWriteSkillFile, mutateSkillDetail, skillDetail])
+
+  // n2-canvas #8 (atomic reconnect): dragging an edge endpoint to a new node is
+  // BOTH a disconnect (drop the old depends_on) AND a connect (add the new one).
+  // The old canvas path chained onDisconnectConnection().then(onPersistConnection),
+  // i.e. TWO serialize round-trips against the SAME captured skillDetail closure;
+  // the disconnect wrote GRAPH.md + revalidated, then the queued persist
+  // serialized the PRE-disconnect phases with a now-stale expected_hash and the
+  // backend hash guard rejected it with 409, leaving the graph half-mutated.
+  // reconnectPhaseRefs folds both depends_on edits into ONE phases list off a
+  // single skillDetail snapshot, so we serialize + write GRAPH.md exactly once
+  // with a single expected_hash derived from the current GRAPH.md.
+  const handleReconnectConnection = useCallback(async (
+    disconnect: { source: string; target: string },
+    connect: { source: string; target: string },
+  ) => {
+    if (!currentSkillId || !skillDetail) {
+      throw new Error("Open a skill before reconnecting phases")
+    }
+    const result = reconnectPhaseRefs(skillDetail, disconnect, connect)
     if (!result.ok) {
       throw new Error(result.message)
     }
@@ -1138,6 +1172,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   onCreatePhase={handleCreatePhase}
                   onPersistConnection={handlePersistConnection}
                   onDisconnectConnection={handleDisconnectConnection}
+                  onReconnectConnection={handleReconnectConnection}
                   onPhaseFileSave={handlePhaseFileSave}
                   statusByNodeId={statusByNodeId}
                   compileErrorsByNodeId={compileErrorsByNodeId}

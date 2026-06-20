@@ -73,7 +73,6 @@ from app.services.skills import (
     fork_skill,
     get_child_graph_topology,
     get_skill_detail,
-    list_skill_summaries,
     resolve_skill_dir_async,
     serialize_skill_graph_markdown,
     update_skill_file,
@@ -311,15 +310,6 @@ def _merge_release_and_git_history(skill_id: str, history: list[GitHistoryItem])
         key=lambda item: item.timestamp,
         reverse=True,
     )
-
-
-@router.get("", response_model=list[SkillSummary])
-async def list_skills(
-    user_id: str = Depends(get_auth_user_id),
-    storage: StorageBackend = Depends(get_storage),
-    metadata: MetadataStore = Depends(get_metadata),
-) -> list[SkillSummary]:
-    return await list_skill_summaries(user_id, storage, metadata)
 
 
 @router.post("", response_model=SkillSummary, status_code=201)

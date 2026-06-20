@@ -321,38 +321,6 @@ def test_create_skill_with_missing_directory_path_scaffolds(
 
 
 @pytest.mark.anyio
-async def test_list_skill_summaries_returns_minimal_summary_for_v1_skill(
-    tmp_path: Path,
-    metadata_store: LocalJsonMetadataStore,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # IDE model: a manifest-less v1 folder surfaces on Home once it is opened
-    # (recorded in the skill index), not because it sits under SKILLS_DIR.
-    skills_root = tmp_path / "skills"
-    skill_dir = skills_root / "story-deconstruction"
-    skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text("# Story Deconstruction\n", encoding="utf-8")
-    monkeypatch.setattr(config, "SKILLS_DIR", skills_root)
-    monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
-    await metadata_store.save_skill_index_entry(
-        "story-deconstruction",
-        {"absolute_path": str(skill_dir), "l2_remote_url": ""},
-    )
-
-    summaries = await skill_service.list_skill_summaries(
-        "default",
-        LocalFilesystemBackend(tmp_path),
-        metadata_store,
-    )
-
-    assert [summary.id for summary in summaries] == ["story-deconstruction"]
-    assert summaries[0].name == "story-deconstruction"
-    assert summaries[0].description == ""
-    assert summaries[0].phase_count == 0
-    assert summaries[0].directory_path == str(skill_dir)
-
-
-@pytest.mark.anyio
 async def test_resolve_skill_dir_async_returns_v1_directory_without_graph(
     tmp_path: Path,
     metadata_store: LocalJsonMetadataStore,

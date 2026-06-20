@@ -118,21 +118,14 @@ def test_openapi_declares_typed_resume_error_responses(client: TestClient) -> No
         assert responses[status_code]["content"]["application/json"]["schema"]["$ref"].endswith("/ErrorResponse")
 
 
-def test_skills_list_and_detail_use_real_skill_files(
+def test_skill_detail_uses_real_skill_files(
     client: TestClient,
     studio_roots: tuple[Path, Path],
 ) -> None:
-    # IDE model (01_init.md D11 无注册表): Home lists only opened folders, so the
-    # bundled skills are opened into the workspace (recorded in the native-fs skill
-    # index) before they can surface — detail still compiles the real on-disk files.
+    # GET /api/skills/{id} detail compiles the real on-disk files of an opened skill
+    # (IDE model, 01_init.md D11 无注册表 — no Python LIST aggregation).
     skills_dir, workspaces_dir = studio_roots
-    bundled_ids = ["text-segmentation", "event-extraction", "batch-analysis", "global-synthesis"]
-    _open_skills_into_index(workspaces_dir, {skill_id: skills_dir / skill_id for skill_id in bundled_ids})
-
-    skills_response = client.get("/api/skills")
-    assert skills_response.status_code == 200
-    skill_ids = {item["id"] for item in skills_response.json()}
-    assert set(bundled_ids) <= skill_ids
+    _open_skills_into_index(workspaces_dir, {"text-segmentation": skills_dir / "text-segmentation"})
 
     detail_response = client.get("/api/skills/text-segmentation")
     assert detail_response.status_code == 200
@@ -327,9 +320,6 @@ def test_create_skill_with_directory_path_writes_to_user_dir(
     assert not (workspaces_dir / "default" / "skills" / "idea-generator" / "GRAPH.md").exists()
     index = json.loads(config.SKILL_INDEX_PATH.read_text(encoding="utf-8"))
     assert index["idea-generator"]["absolute_path"] == str(skill_dir)
-    assert "idea-generator" in {
-        item["id"] for item in client.get("/api/skills").json() if item["directory_path"]
-    }
 
 
 def test_create_skill_with_invalid_directory_path_returns_422(

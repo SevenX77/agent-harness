@@ -45,7 +45,6 @@ from app.core.ports.storage import StorageBackend
 from app.models.errors import LintError
 from app.models.lint import LintResult
 from app.models.runs import RunMetadata
-from app.models.settings import AppSettings
 from app.models.skills import (
     ChildGraphTopology,
     CompileError,
@@ -58,9 +57,8 @@ from app.models.skills import (
 )
 from app.services.canvas_data_gap import build_phase_io_index, compute_field_supply
 from app.services.canvas_errors import CanvasConflictError, CanvasSerializerFatal
-from app.services.config_arbitration import detect_config_mismatch
 from app.services.file_watcher import record_api_write
-from app.services.git_local import GitLocalService, initialize_skill_repository
+from app.services.git_local import initialize_skill_repository
 from app.services.graph_roundtrip import serialize_graph_topology_from_markdown
 from app.services.skill_resolver import build_studio_skill_resolver
 
@@ -180,92 +178,6 @@ def _scaffold_files_for(skill_id: str) -> dict[str, str]:
 def ensure_workspace_layout() -> None:
     """Create the writable Studio workspace skeleton."""
     config.default_workspace_skills_dir().mkdir(parents=True, exist_ok=True)
-
-
-async def list_skill_summaries(
-    user_id: str,
-    storage: StorageBackend,
-    metadata: MetadataStore,
-) -> list[SkillSummary]:
-    """Return the folders the user has opened/imported, the IDE-workspace way.
-
-    MVP1 locks an IDE/workspace model over a registry browser (skill-workspace
-    alignment §F1/§8; 01_init.md D11 "无注册表" / D1). Home truth is therefore the
-    set of folders the user explicitly opened/imported/created — recorded in the
-    native-fs-owned skill index and the per-user saved summaries — not an auto-scan
-    of the bundled ``SKILLS_DIR`` registry or the workspace fork tree. Each entry's
-    recorded absolute path is summarized read-only; no folder is enumerated just
-    because it happens to sit under a managed root.
-    """
-    app_settings = await metadata.read_app_settings()
-    local_git = GitLocalService()
-    unregistered_skill_ids = await metadata.list_unregistered_skill_ids(user_id)
-    opened_dirs = await _opened_skill_dirs(user_id, metadata, unregistered_skill_ids)
-    logger.info(
-        "list_skill_summaries user=%s opened_folders=%d (index+summaries, no registry scan)",
-        user_id,
-        len(opened_dirs),
-    )
-    summaries: dict[str, SkillSummary] = {}
-    for skill_id, skill_dir in opened_dirs.items():
-        summary = await _summary_for_skill_dir_async(
-            user_id,
-            skill_dir,
-            storage,
-            metadata,
-            skill_id=skill_id,
-        )
-        summaries[skill_id] = _attach_config_mismatch(
-            summary.model_copy(update={"directory_path": str(skill_dir)}),
-            skill_dir,
-            app_settings,
-            local_git,
-        )
-    return sorted(summaries.values(), key=lambda summary: summary.id)
-
-
-async def _opened_skill_dirs(
-    user_id: str,
-    metadata: MetadataStore,
-    unregistered_skill_ids: set[str],
-) -> dict[str, Path]:
-    """Map each opened/imported skill id to its recorded folder.
-
-    The native-fs skill index (Rust-owned MRU of opened folders) is authoritative,
-    so an index entry surfaces even before a summary JSON exists. Saved summaries
-    that carry a ``directory_path`` fill in any id not yet in the index. Unregistered
-    ("Remove from Studio") ids are excluded.
-    """
-    opened: dict[str, Path] = {}
-    for skill_id, entry in (await metadata.list_skill_index()).items():
-        if skill_id in unregistered_skill_ids:
-            continue
-        opened[skill_id] = Path(entry["absolute_path"])
-    for saved_summary in await metadata.list_skills(user_id):
-        if saved_summary.id in unregistered_skill_ids or saved_summary.id in opened:
-            continue
-        if not saved_summary.directory_path:
-            continue
-        opened[saved_summary.id] = Path(saved_summary.directory_path)
-    return opened
-
-
-def _attach_config_mismatch(
-    summary: SkillSummary,
-    skill_dir: Path,
-    app_settings: AppSettings,
-    local_git: GitLocalService,
-) -> SkillSummary:
-    return summary.model_copy(
-        update={
-            "config_mismatch": detect_config_mismatch(
-                summary.id,
-                skill_dir,
-                app_settings,
-                local_git=local_git,
-            ),
-        },
-    )
 
 
 async def get_skill_detail(

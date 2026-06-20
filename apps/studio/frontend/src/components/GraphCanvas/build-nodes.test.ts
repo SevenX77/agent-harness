@@ -240,6 +240,38 @@ describe('buildNodes', () => {
     expect(review.onStepsSave).toBeUndefined()
     expect(review.isStepsExpanded).toBe(false)
   })
+
+  it('flags only the affected-downstream nodes as dirty (N5 atom #3), leaving side branches normal', () => {
+    const nodes = buildNodes('demo', skillDetail({
+      phases: ['draft', 'review', 'sidebar'],
+      graph_topology: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'agent' },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'], mode: 'logic' },
+        { id: 'sidebar', src: 'phases/sidebar/LOGIC.md', depends_on: [], mode: 'logic' },
+      ],
+    }), new Set(), () => {}, {}, {}, {}, {}, {
+      // The resume-validity `affected_downstream` set the backend returned.
+      dirtyDownstreamNodeIds: new Set(['review']),
+    })
+
+    // Exactly the affected downstream node is grayed; the unrelated side branch is not.
+    expect(phaseNode(nodes, 'review').isDirtyDownstream).toBe(true)
+    expect(phaseNode(nodes, 'sidebar').isDirtyDownstream).toBe(false)
+    expect(phaseNode(nodes, 'draft').isDirtyDownstream).toBe(false)
+  })
+
+  it('leaves every node normal when no dirty-downstream set is provided', () => {
+    const nodes = buildNodes('demo', skillDetail({
+      phases: ['draft', 'review'],
+      graph_topology: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'agent' },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'], mode: 'logic' },
+      ],
+    }), new Set(), () => {}, {})
+
+    expect(phaseNode(nodes, 'draft').isDirtyDownstream).toBe(false)
+    expect(phaseNode(nodes, 'review').isDirtyDownstream).toBe(false)
+  })
 })
 
 describe('buildNodesFromTopology (drilled child graph)', () => {

@@ -1,6 +1,6 @@
 import { useMemo, useState, type DragEvent } from "react"
 import yaml from "js-yaml"
-import { Plus, Save, Trash2, Upload } from "lucide-react"
+import { ArrowRight, Plus, Save, Trash2, TriangleAlert, Upload } from "lucide-react"
 import { writeSkillFile } from "@/api/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -13,7 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import type { SkillDetail } from "@/api/types"
+import type { FieldSupplyEntry, SkillDetail } from "@/api/types"
 import {
   addIoField,
   applyInputSchemaToGraph,
@@ -34,7 +34,7 @@ import { errorMessage } from "@/utils/errors"
 import { PanelHeader } from "./_shared/PanelHeader"
 import { SectionHeading } from "./_shared/SectionHeading"
 import { GoldenSection } from "./GoldenSection"
-import { resolveIoEditTarget, type SelectedNode } from "./io-target"
+import { fieldSupplyByField, resolveIoEditTarget, type SelectedNode } from "./io-target"
 import { inputContractView } from "./panel-files"
 import { TestInputsSection } from "./TestInputsSection"
 
@@ -345,6 +345,9 @@ interface IoSchemaFieldsPanelProps {
   relPath: string
   graphMd?: string
   onSaved?: () => void
+  // n2-canvas#10: per-input-field supply/demand entries keyed by field name. Only
+  // the inputs side renders data-gap markers (outputs have no upstream supply).
+  supplyByField?: Map<string, FieldSupplyEntry>
 }
 
 interface IoFieldRowProps {
@@ -355,6 +358,45 @@ interface IoFieldRowProps {
   relPath: string
   graphMd?: string
   onSaved?: () => void
+  // n2-canvas#10: the backend supply/demand entry for THIS input field (keyed by
+  // field name out of graph_topology[].field_supply). undefined for output fields
+  // and graph-level io (no per-node supply projection there).
+  supply?: FieldSupplyEntry
+}
+
+// n2-canvas#10 (data-gap-viz): render the input field's supply state from the
+// backend `field_supply` entry. A `supplied=false` field is a DATA GAP — nothing
+// upstream feeds it — shown as a warning marker; a supplied field shows its
+// producer phase (source='phase') or that it comes from the run's external input
+// (source='graph_input'). Drives entirely off the real backend projection.
+function DataGapMarker({ supply }: { supply: FieldSupplyEntry }) {
+  if (!supply.supplied) {
+    return (
+      <div
+        className="flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-[11px] text-destructive"
+        role="status"
+        aria-label={`Data gap: input field ${supply.field} is not supplied by any upstream phase or graph input`}
+      >
+        <TriangleAlert className="size-3.5 shrink-0" />
+        <span>No upstream supplies this field</span>
+      </div>
+    )
+  }
+  const producerLabel =
+    supply.source === "graph_input"
+      ? "Graph input"
+      : supply.producer_phase ?? "upstream phase"
+  return (
+    <div
+      className="flex items-center gap-1.5 px-0.5 text-[11px] text-muted-foreground"
+      aria-label={`Input field ${supply.field} supplied by ${producerLabel}`}
+    >
+      <ArrowRight className="size-3.5 shrink-0" />
+      <span>
+        from <span className="font-mono text-foreground">{producerLabel}</span>
+      </span>
+    </div>
+  )
 }
 
 // Writes one mutation back to the targeted io file's frontmatter via the shared
@@ -376,7 +418,7 @@ async function saveGraph(
 // change-type (Select), remove (Trash). Each commit goes through saveGraph onto
 // `io.<side>.properties.<field>` in GRAPH.md — the authoritative contract the
 // engine validates — so there are no fake-file dead paths to lose edits to.
-function IoFieldRow({ side, field, skillId, workspaceRoot = null, relPath, graphMd, onSaved }: IoFieldRowProps) {
+function IoFieldRow({ side, field, skillId, workspaceRoot = null, relPath, graphMd, onSaved, supply }: IoFieldRowProps) {
   const [nameDraft, setNameDraft] = useState(field.name)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -461,6 +503,7 @@ function IoFieldRow({ side, field, skillId, workspaceRoot = null, relPath, graph
           {error}
         </div>
       ) : null}
+      {supply ? <DataGapMarker supply={supply} /> : null}
     </div>
   )
 }
@@ -569,6 +612,7 @@ function IoSchemaFieldsPanel({
   relPath,
   graphMd,
   onSaved,
+  supplyByField,
 }: IoSchemaFieldsPanelProps) {
   const label = side === "inputs" ? "Input fields" : "Output fields"
   return (
@@ -588,6 +632,7 @@ function IoSchemaFieldsPanel({
             relPath={relPath}
             graphMd={graphMd}
             onSaved={onSaved}
+            supply={side === "inputs" ? supplyByField?.get(field.name) : undefined}
           />
         ))}
         <IoFieldAddRow
@@ -622,6 +667,13 @@ export function InputPanel({
   const outputFields = useMemo(() => outputArtifactFields(graphMd), [graphMd])
   const inputIoFields = useMemo(() => (graphMd ? listIoFields(graphMd, "inputs") : []), [graphMd])
   const outputIoFields = useMemo(() => (graphMd ? listIoFields(graphMd, "outputs") : []), [graphMd])
+  // n2-canvas#10: per-input-field supply/demand projection for THIS selected node,
+  // read from the backend graph_topology[].field_supply (see fieldSupplyByField).
+  // Empty for graph-level io — the data-gap view is a per-node concern.
+  const supplyByField = useMemo(
+    () => fieldSupplyByField(selectedNode, skillDetail),
+    [selectedNode, skillDetail],
+  )
   const scopeLabel = target.isGraphLevel ? "Graph-level i/o" : `Node i/o · ${target.label}`
 
   return (
@@ -651,6 +703,7 @@ export function InputPanel({
             workspaceRoot={workspaceRoot}
             relPath={relPath}
             graphMd={graphMd}
+            supplyByField={supplyByField}
           />
           <SchemaInferPanel
             initialJson={contract.inputSampleJson}

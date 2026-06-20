@@ -57,6 +57,8 @@ function validity(overrides: Partial<ResumeValidityResponse> = {}): ResumeValidi
     resume_from_node_id: 'review',
     resume_to_node_id: null,
     dirty_fields: [],
+    dirty_node_ids: [],
+    affected_downstream: [],
     snapshot_content_hash: null,
     current_content_hash: null,
     snapshot_execution_fingerprint: null,

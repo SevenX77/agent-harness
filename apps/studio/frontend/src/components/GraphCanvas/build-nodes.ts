@@ -203,6 +203,12 @@ export interface AgentStepsInputs {
   // Persist an edited agent body. The canvas binds the file path + the
   // optimistic-lock hash (of the pre-edit body) and this forwards the result.
   onStepsSave?: (nodeId: string, filePath: string, currentBody: string, nextBody: string) => void
+  // N5 atom #3 (dirty-downstream-graying): the `affected_downstream` node ids the
+  // resume-validity endpoint returned for the node being resumed from. Each node
+  // in this set is grayed (its node-level Resume can't continue); unrelated
+  // branches are absent and stay normal. Carried here so buildNodes' positional
+  // signature (already at its limit) does not grow further.
+  dirtyDownstreamNodeIds?: ReadonlySet<string>
 }
 
 export function buildNodes(
@@ -249,6 +255,8 @@ export function buildNodes(
         errorMessage: errorMessageByNodeId[phase.name],
         compileErrors: compileErrorsByNodeId[phase.name] ?? [],
         goldenState: goldenStateByNodeId[phase.name],
+        // N5 atom #3: gray this node when it is in the resume's affected-downstream set.
+        isDirtyDownstream: agentSteps.dirtyDownstreamNodeIds?.has(phase.name) ?? false,
         dependsOn: topology?.depends_on ?? normalizeDependsOn(phase.depends_on),
         subgraphPath,
         isExpanded: expandedSubgraphs.has(phase.name),

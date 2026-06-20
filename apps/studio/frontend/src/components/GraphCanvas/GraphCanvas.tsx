@@ -97,6 +97,11 @@ interface GraphCanvasProps {
   compileErrorsByNodeId?: Record<string, CompileError[]>
   goldenStateByNodeId?: Record<string, GoldenNodeState>
   errorMessageByNodeId?: Record<string, string>
+  // N5 atom #3 (dirty-downstream-graying): the resume-validity `affected_downstream`
+  // node ids. Workspace derives this from the real validity response for the node
+  // being resumed from; the canvas grays exactly these nodes (unrelated branches
+  // stay normal). Empty/undefined when resume is clean or no node is being resumed.
+  dirtyDownstreamNodeIds?: ReadonlySet<string>
   // N4 atom #9 (run-focus-follow): the phase id of the node currently running,
   // derived by Workspace from the same live run stream that colors the nodes
   // (statusByNodeId -> the node whose status is 'running'). When it changes the
@@ -171,6 +176,7 @@ export function GraphCanvas({
   compileErrorsByNodeId,
   goldenStateByNodeId,
   errorMessageByNodeId,
+  dirtyDownstreamNodeIds,
   activeTracePhase,
   compact = false,
   onPhaseFileSave,
@@ -385,6 +391,10 @@ export function GraphCanvas({
   const safeCompileErrorsByNodeId = useMemo(() => compileErrorsByNodeId ?? {}, [compileErrorsByNodeId])
   const safeGoldenStateByNodeId = useMemo(() => goldenStateByNodeId ?? {}, [goldenStateByNodeId])
   const safeErrorMessageByNodeId = useMemo(() => errorMessageByNodeId ?? {}, [errorMessageByNodeId])
+  const safeDirtyDownstreamNodeIds = useMemo(
+    () => dirtyDownstreamNodeIds ?? new Set<string>(),
+    [dirtyDownstreamNodeIds],
+  )
   const compactRatio = compact && canvasHeight > 0 && canvasHeight < 500 ? 0.2 : 0
 
   useEffect(() => {
@@ -400,8 +410,13 @@ export function GraphCanvas({
   const isDrilled = drilledPath !== null
   // N2 atom #15: the inline L3 step-editor inputs threaded into AGENT nodes.
   const agentStepsInputs = useMemo(
-    () => ({ expandedSteps, onToggleSteps: toggleSteps, onStepsSave: handleStepsSave }),
-    [expandedSteps, toggleSteps, handleStepsSave],
+    () => ({
+      expandedSteps,
+      onToggleSteps: toggleSteps,
+      onStepsSave: handleStepsSave,
+      dirtyDownstreamNodeIds: safeDirtyDownstreamNodeIds,
+    }),
+    [expandedSteps, toggleSteps, handleStepsSave, safeDirtyDownstreamNodeIds],
   )
   const rawNodes = useMemo(() => {
     // R9: when focused into a child graph, render its real phases/topology;

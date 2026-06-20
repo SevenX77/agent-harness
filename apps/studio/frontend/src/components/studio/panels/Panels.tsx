@@ -3,6 +3,7 @@ import type { CallbackEvent, EventEnvelope, LintError, ResumeValidityResponse, S
 import type { SkillGraphNodeData, SkillNodeStatus } from "@/components/GraphCanvas"
 import { TraceDocumentPanel } from "@/components/MonacoPanel"
 import { TracePanel, type TraceHitlResumeRequest } from "@/components/TracePanel"
+import type { CompareTab } from "../run-compare"
 import { useThemeValue } from "@/store/themeStore"
 import type { PanelKind } from "../Toolbar"
 import { useWorkspaceContext } from "../WorkspaceContext"
@@ -48,6 +49,11 @@ interface PanelsProps {
   onResumeEdgeDownstream?: (options: ResumeRunOptions) => Promise<void> | void
   /** Per-node golden promote (atom #32), surfaced in the node Properties panel. */
   onPromoteNode?: (nodeId: string) => Promise<void> | void
+  // n4-trace#23 (P8 model-compare): per-candidate Trace tabs + selection, forwarded
+  // to the live TracePanel so the user can switch between candidate runs.
+  compareTabs?: CompareTab[]
+  activeCandidateId?: string | null
+  onSelectCandidate?: (candidateId: string) => void
 }
 
 export function Panels({
@@ -79,6 +85,9 @@ export function Panels({
   onSubmitHitlResponse,
   onResumeEdgeDownstream,
   onPromoteNode,
+  compareTabs,
+  activeCandidateId,
+  onSelectCandidate,
 }: PanelsProps) {
   const { onFileOpen, selectedEdge, setSelectedEdge } = useWorkspaceContext()
   const isDarkMode = useThemeValue() === "dark"
@@ -135,6 +144,9 @@ export function Panels({
           onResume={onResumeRun}
           hitlSubmitting={traceResumeLoading}
           onSubmitHitlResponse={onSubmitHitlResponse}
+          compareTabs={compareTabs}
+          activeCandidateId={activeCandidateId}
+          onSelectCandidate={onSelectCandidate}
         />
       )
     }

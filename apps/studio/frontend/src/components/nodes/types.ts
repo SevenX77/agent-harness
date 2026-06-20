@@ -35,6 +35,16 @@ export interface SkillGraphNodeData extends Record<string, unknown> {
    * untested). See node-golden.ts.
    */
   goldenState?: GoldenNodeState
+  /**
+   * N5 atom #3 (dirty-downstream-graying, spec F3): true when this node is in the
+   * `affected_downstream` set the resume-validity endpoint returned for the node
+   * the user is resuming from — i.e. an upstream edit made this downstream node's
+   * checkpoint stale, so its node-level Resume must NOT be offered. The canvas
+   * grays/dims the node and explains why (its Resume can't continue). Unrelated
+   * side-branches are absent from the set and stay normal. Driven only by the real
+   * backend slice — never set when resume is clean.
+   */
+  isDirtyDownstream?: boolean
   dependsOn: string[]
   subgraphPath?: string | null
   subagents?: SubagentRef[]

@@ -4,6 +4,8 @@ import type {
   AppSettings,
   ChildGraphTopology,
   CollaborateResult,
+  CompareRunGroupResponse,
+  CompareRunResponse,
   CompileFailure,
   CompileResult,
   CompileSuccess,
@@ -17,6 +19,7 @@ import type {
   PublishResult,
   PublishSkillReq,
   ReleaseManifest,
+  RunCandidate,
   RunDetail,
   RunMetadata,
   ResumeValidityResponse,
@@ -587,6 +590,42 @@ export async function resolveRunInput(
 export async function getRunDetail(skillId: string, runId: string): Promise<RunDetail> {
   const response = await api.get<RunDetail>(
     `/skills/${skillId}/runs/${encodeURIComponent(runId)}`,
+  )
+  return response.data
+}
+
+/**
+ * n4-trace#23 (P8 model-compare): start one run per candidate against the same
+ * compiled artifact/inputs. Each `candidates[]` entry references a role that
+ * already exists in Settings (llm_roles.yaml); the backend fans the run out,
+ * tags each spawned run with a shared `compare_group_id` + the candidate id, and
+ * returns the group so the Trace can tab between per-model results. Drives the
+ * real `POST /skills/{id}/runs/compare` → CompareRunResponse contract.
+ */
+export async function startCompareRun(
+  skillId: string,
+  inputData: JsonObject,
+  candidates: RunCandidate[],
+): Promise<CompareRunResponse> {
+  const response = await api.post<CompareRunResponse>(`/skills/${skillId}/runs/compare`, {
+    input_data: inputData,
+    candidates,
+  })
+  return response.data
+}
+
+/**
+ * n4-trace#23: fetch the per-candidate runs for one compare group so the Trace
+ * top tabs can render one tab per candidate (per-candidate failure read from
+ * each run's `metadata.status`). Reads the real
+ * `GET /skills/{id}/runs/compare/{compare_group_id}` → CompareRunGroupResponse.
+ */
+export async function getCompareGroup(
+  skillId: string,
+  compareGroupId: string,
+): Promise<CompareRunGroupResponse> {
+  const response = await api.get<CompareRunGroupResponse>(
+    `/skills/${skillId}/runs/compare/${encodeURIComponent(compareGroupId)}`,
   )
   return response.data
 }

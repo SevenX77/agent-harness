@@ -18,8 +18,9 @@ import { DiffView } from "@/components/diff/DiffView"
 import type { CopilotJudgeResponse, ResumeRunOptions } from "@/api/client"
 import type { TraceHitlResumeRequest } from "@/components/TracePanel"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
-import { compileSkill, fetcher, getResumeValidity, getSkillDetail, resolveRunInput, serializeSkillGraph, writeSkillFile, wsUrl, postPredictRun, startRun, resumeRun } from "@/api/client"
-import type { GoldenBaseline, ResumeValidityResponse } from "@/api/types"
+import { compileSkill, fetcher, getCompareGroup, getResumeValidity, getSkillDetail, resolveRunInput, serializeSkillGraph, startCompareRun, writeSkillFile, wsUrl, postPredictRun, startRun, resumeRun } from "@/api/client"
+import type { CompareCandidateRun, GoldenBaseline, ResumeValidityResponse } from "@/api/types"
+import { candidatesFromRoleNames, compareTabsFromGroup } from "./run-compare"
 import { isTauriRuntime } from "@/config/runtime"
 import { writeWorkspaceFile } from "@/lib/tauri"
 import { errorMessage } from "@/utils/errors"
@@ -33,6 +34,7 @@ import { hitlResumeOptionsFromRequest } from "./resume-options"
 import { compileErrorsByNode } from "./node-compile-errors"
 import { goldenTriStateByNode, ranAgentNodesFromPredict } from "./node-golden"
 import { compileErrorsToFieldLintErrors } from "./field-compile-errors"
+import { CompareRunDialog } from "./CompareRunDialog"
 import { CompileErrorDrawer } from "./CompileErrorDrawer"
 import { ConflictDialog } from "./ConflictDialog"
 import { Header } from "./Header"
@@ -167,6 +169,13 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const [compileErrors, setCompileErrors] = useState<Record<string, CompileError[]>>({})
   const [compileDrawerOpen, setCompileDrawerOpen] = useState(false)
   const [runId, setRunId] = useState<string | null>(null)
+  // n4-trace#23 (P8 model-compare): the active compare group + its per-candidate
+  // runs (from the real compare endpoints) and which candidate tab is selected.
+  // Selecting a candidate points `runId` at that candidate's spawned run so the
+  // trace stream re-subscribes to it. Null when no compare run is active.
+  const [compareGroupId, setCompareGroupId] = useState<string | null>(null)
+  const [compareRuns, setCompareRuns] = useState<CompareCandidateRun[]>([])
+  const [compareCandidateId, setCompareCandidateId] = useState<string | null>(null)
   // N3 #12: realtime lint runs in the editor (useDebouncedLint) and publishes status to
   // sessionStorage + a window event. deriveBuildStage reads that status, but Workspace
   // does not otherwise re-render when it changes, so a clean edit never flipped Predict
@@ -180,6 +189,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   useEffect(() => {
     setRunId(null)
     setSelectedTestInputId(null)
+    setCompareGroupId(null)
+    setCompareRuns([])
+    setCompareCandidateId(null)
   }, [currentSkillId])
 
   // N3 #12: subscribe to realtime-lint status changes (published by useDebouncedLint as
@@ -972,6 +984,82 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     }
   }, [currentSkillId, deriveBuildStage, selectedTestInputId, updateStage, setRunId])
 
+  // n4-trace#23 (P8 model-compare): fan a run out across the picked Settings roles.
+  // Builds candidates from existing role names (candidatesFromRoleNames), calls the
+  // real compare endpoint, then points the trace at the first candidate's spawned
+  // run so the user immediately sees a candidate's stream while the others fill in.
+  const [compareStarting, setCompareStarting] = useState(false)
+  const handleStartCompare = useCallback(
+    async (roleNames: string[]) => {
+      if (!currentSkillId) return
+      const candidates = candidatesFromRoleNames(roleNames)
+      if (candidates.length === 0) {
+        toast.error("Pick at least one role to compare")
+        return
+      }
+      const targetSkillId = currentSkillId
+      setCompareStarting(true)
+      try {
+        const inputData = await resolveRunInput(targetSkillId, selectedTestInputId)
+        const group = await startCompareRun(targetSkillId, inputData, candidates)
+        clearCopilotJudgeResult()
+        setCompareGroupId(group.compare_group_id)
+        setCompareRuns(group.runs)
+        const first = group.runs[0] ?? null
+        setCompareCandidateId(first?.candidate_id ?? null)
+        setRunId(first?.metadata.run_id ?? null)
+        setActivePanel("timeline")
+        toast.success(`Comparing ${candidates.length} candidate${candidates.length === 1 ? "" : "s"}`)
+      } catch (error) {
+        toast.error(`Compare failed: ${errorMessage(error)}`)
+      } finally {
+        setCompareStarting(false)
+      }
+    },
+    [currentSkillId, selectedTestInputId, setRunId],
+  )
+
+  // Switch the visible candidate: re-point the trace stream at that candidate's
+  // spawned run (the per-candidate run id from the real compare group).
+  const handleSelectCandidate = useCallback(
+    (candidateId: string) => {
+      const target = compareRuns.find((run) => run.candidate_id === candidateId)
+      if (!target) return
+      setCompareCandidateId(candidateId)
+      clearCopilotJudgeResult()
+      setRunId(target.metadata.run_id)
+    },
+    [compareRuns, clearCopilotJudgeResult],
+  )
+
+  // Poll the compare group while any candidate is still running so the tabs reflect
+  // per-candidate completion / failure (metadata.status). Stops once all candidates
+  // settle or the group is cleared.
+  useEffect(() => {
+    if (!currentSkillId || !compareGroupId) return undefined
+    const anyRunning = compareRuns.some((run) => run.metadata.status === "running")
+    if (!anyRunning) return undefined
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      void getCompareGroup(currentSkillId, compareGroupId)
+        .then((group) => {
+          if (cancelled) return
+          setCompareRuns(group.runs)
+        })
+        .catch((error) => {
+          if (cancelled) return
+          toast.error(`Could not refresh compare results: ${errorMessage(error)}`)
+        })
+    }, 2000)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [currentSkillId, compareGroupId, compareRuns])
+
+  // The per-candidate Trace tabs (one per candidate_id, failure from metadata.status).
+  const compareTabs = useMemo(() => compareTabsFromGroup(compareRuns), [compareRuns])
+
   // Headline lifecycle "resume": continue the active run from its last
   // checkpoint. The backend reports RESUME_CHECKPOINT_NOT_FOUND when a run has
   // nothing to continue (e.g. it already finished) — surfaced as a clear toast.
@@ -1108,6 +1196,16 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     ),
     [goldenBaselines, ranAgentNodesBySkill, currentSkillId],
   )
+  // N5 atom #3 (dirty-downstream-graying, spec F3): the downstream node ids the
+  // current resume-validity response says an upstream edit invalidated. Read
+  // straight from the real `affected_downstream` slice the backend computed for
+  // the node being resumed from, projected into a Set the canvas grays. Empty when
+  // resume is clean / no node is being resumed (the validity effect nulls it then),
+  // so unrelated branches stay normal.
+  const dirtyDownstreamNodeIds = useMemo(
+    () => new Set(resumeValidity?.affected_downstream ?? []),
+    [resumeValidity],
+  )
   // Field-axis source for the Properties panel: the field-bearing compile errors mapped
   // onto the engine LintError shape (N3 atom #5). The realtime lint result lives in the
   // editor's useDebouncedLint and is not lifted here, so compile is today's field source.
@@ -1182,6 +1280,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   onResumeNode={runId ? handleResumeNode : undefined}
                   onSubmitHitlResponse={handleSubmitHitlResponse}
                   onResumeEdgeDownstream={runId ? handleResumeEdgeDownstream : undefined}
+                  compareTabs={compareTabs}
+                  activeCandidateId={compareCandidateId}
+                  onSelectCandidate={handleSelectCandidate}
                 />
               </ResizablePanel>
               <ResizableHandle />
@@ -1231,6 +1332,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   compileErrorsByNodeId={compileErrorsByNodeId}
                   goldenStateByNodeId={goldenStateByNodeId}
                   errorMessageByNodeId={errorMessageByNodeId}
+                  dirtyDownstreamNodeIds={dirtyDownstreamNodeIds}
                   activeTracePhase={activeTracePhase}
                   runId={runId}
                   resumeNodeStatus={selectedNodeStatus}
@@ -1257,6 +1359,15 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                     onRun={handleRun}
                     onCreatePhase={handleCreatePhase}
                   />
+                  {/* n4-trace#23: launch a P8 model-compare run against Settings roles.
+                      Same readiness gate as Run (needs a predict-passed skill). */}
+                  <div className="absolute bottom-4 left-4 z-30">
+                    <CompareRunDialog
+                      disabled={deriveBuildStage(currentSkillId) !== "predict-pass" || compareStarting}
+                      starting={compareStarting}
+                      onStartCompare={handleStartCompare}
+                    />
+                  </div>
                 </>
               ) : null}
               {goldenDiff.result && !settingsOpen ? (

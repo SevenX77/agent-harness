@@ -96,6 +96,10 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
   // on the node (not only the red badge, not only the Properties panel) so the user
   // sees why the run stopped right where it stopped.
   const inlineErrorMessage = data.status === 'error' && data.errorMessage ? data.errorMessage : null
+  // N5 atom #3 (spec F3): an upstream edit invalidated this downstream node's
+  // checkpoint (it is in the resume-validity `affected_downstream` set), so its
+  // node-level Resume is grayed out. Dim the node and label why it can't continue.
+  const isDirtyDownstream = data.isDirtyDownstream === true
   // N2 atom #15 (l3-step-edit): an AGENT node with its body + save callback wired
   // gets an inline L3 step editor — expand to add / remove / reorder / edit the
   // body's `<step>` blocks right on the canvas (no Properties detour). Logic /
@@ -104,9 +108,12 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
 
   const nodeContent = (
     <div
+      aria-disabled={isDirtyDownstream || undefined}
+      data-dirty-downstream={isDirtyDownstream || undefined}
       className={[
         'group relative min-w-[240px] cursor-pointer rounded-md border bg-card p-3 text-card-foreground shadow-sm transition-colors',
         resolvedSubgraphPath ? 'pb-5' : '',
+        isDirtyDownstream ? 'opacity-50 grayscale' : '',
         data.isConflictCancelled
           ? 'border-destructive ring-2 ring-destructive/30'
           : data.activeConflict
@@ -214,6 +221,16 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
         >
           <AlertTriangle className="mt-0.5 size-3 shrink-0" />
           <span className="min-w-0 break-words">{inlineErrorMessage}</span>
+        </div>
+      ) : null}
+      {isDirtyDownstream ? (
+        <div
+          role="note"
+          aria-label="Resume unavailable: upstream changed"
+          className="mt-2 flex items-start gap-1.5 rounded-md border border-border bg-muted/50 px-2 py-1 text-xs text-muted-foreground"
+        >
+          <Pause className="mt-0.5 size-3 shrink-0" />
+          <span className="min-w-0 break-words">Resume unavailable — an upstream edit invalidated this node&apos;s checkpoint</span>
         </div>
       ) : null}
       {canEditSteps ? (

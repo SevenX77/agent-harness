@@ -242,6 +242,100 @@ def test_probe_verified_evidence_projects_historical_ready_with_evidence_ref() -
 
 
 @pytest.mark.parametrize(
+    ("route_status", "endpoint_status", "credential_available", "circuit_retry_at", "expected_state"),
+    [
+        ("verified", "verified", True, None, "ready"),
+        ("unverified_manual", "verified", True, None, "untested"),
+        ("failed", "verified", True, None, "failed"),
+        ("unverified_manual", "verified", False, None, "failed"),
+        ("unverified_manual", "disabled", True, None, "off"),
+        ("unverified_manual", "verified", True, datetime.now(UTC) + timedelta(seconds=30), "cooling_down"),
+    ],
+)
+def test_provider_route_dto_carries_explicit_six_state_ui_state(
+    route_status: str,
+    endpoint_status: str,
+    credential_available: bool,
+    circuit_retry_at: datetime | None,
+    expected_state: str,
+) -> None:
+    from graph_agent_gateway.registry.schema import ProviderRoute
+    from graph_agent_gateway.state_projection import (
+        project_provider_route_ui_state,
+        project_route_state_from_evidence,
+    )
+
+    route = ProviderRoute(
+        route_id="openai:gpt-5",
+        endpoint_id="openai",
+        route_slug="gpt-5",
+        provider_model_id="gpt-5",
+        canonical_id="gpt-5",
+        status=route_status,
+    )
+    projection = project_route_state_from_evidence(
+        route_id=route.route_id,
+        endpoint_status=endpoint_status,
+        route_status=route.status,
+        credential_available=credential_available,
+        evidence_records=[],
+        circuit_retry_at=circuit_retry_at,
+    )
+
+    projected = project_provider_route_ui_state(route, projection)
+
+    assert projected.ui_state == expected_state
+    assert projected.model_dump(mode="json")["ui_state"] == expected_state
+    assert route.ui_state == "untested"
+
+
+def test_route_state_projection_materializes_onto_provider_route_dto() -> None:
+    from graph_agent_gateway.registry.schema import ProviderRoute
+    from graph_agent_gateway.state_projection import (
+        ProviderModelStateProjection,
+        project_provider_route_ui_state,
+    )
+
+    route = ProviderRoute(
+        route_id="openai:gpt-5",
+        endpoint_id="openai",
+        route_slug="gpt-5",
+        provider_model_id="gpt-5",
+        canonical_id="gpt-5",
+    )
+
+    projected = project_provider_route_ui_state(
+        route,
+        ProviderModelStateProjection(route_id=route.route_id, ui_state="historical_ready"),
+    )
+
+    assert projected.ui_state == "historical_ready"
+    assert projected.status == route.status
+
+
+def test_route_state_projection_rejects_wrong_route_target() -> None:
+    from graph_agent_gateway.registry.schema import ProviderRoute
+    from graph_agent_gateway.state_projection import (
+        ProviderModelStateProjection,
+        project_provider_route_ui_state,
+    )
+
+    route = ProviderRoute(
+        route_id="openai:gpt-5",
+        endpoint_id="openai",
+        route_slug="gpt-5",
+        provider_model_id="gpt-5",
+        canonical_id="gpt-5",
+    )
+
+    with pytest.raises(ValueError, match="does not match"):
+        project_provider_route_ui_state(
+            route,
+            ProviderModelStateProjection(route_id="anthropic:claude", ui_state="ready"),
+        )
+
+
+@pytest.mark.parametrize(
     ("endpoint_status", "route_status", "credential_available", "circuit_retry_at", "expected_state"),
     [
         ("disabled", "unverified_manual", True, None, "off"),

@@ -1054,6 +1054,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   statusByNodeId={statusByNodeId}
                   compileErrorsByNodeId={compileErrorsByNodeId}
                   goldenStateByNodeId={goldenStateByNodeId}
+                  onSubmitHitlResponse={handleSubmitHitlResponse}
+                  hitlSubmitting={resumeLoading}
                 />
               )}
               {currentSkillId && !settingsOpen ? (

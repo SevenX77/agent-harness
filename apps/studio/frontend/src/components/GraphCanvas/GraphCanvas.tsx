@@ -42,6 +42,8 @@ import { GlobalInputNode, GlobalOutputNode } from '@/components/nodes/GlobalInpu
 import { buildEdges, INPUT_ID, OUTPUT_ID, SkillNode, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
 import type { GoldenNodeState } from '@/components/studio/node-golden'
 import { useOptionalWorkspaceContext } from '@/components/studio/WorkspaceContext'
+import { HitlNodeToolbar } from '@/components/studio/HitlNodeToolbar'
+import type { TraceHitlResumeRequest } from '@/components/studio/hitl-prompt'
 import { normalizeAbsoluteSubgraphPath } from '@/components/studio/subgraph-path'
 import type { PanelKind } from '@/components/studio/Toolbar'
 import { buildNodes, buildNodesFromTopology, phaseKindFile } from './build-nodes'
@@ -72,6 +74,10 @@ interface GraphCanvasProps {
   goldenStateByNodeId?: Record<string, GoldenNodeState>
   compact?: boolean
   onPhaseFileSave?: (args: { path: string; content: string; expectedHash: string }) => Promise<void> | void
+  // F4: when the run pauses for human input, the node-anchored HitL box submits
+  // the answer through this callback (the same resume path the side panel uses).
+  onSubmitHitlResponse?: (request: TraceHitlResumeRequest) => void
+  hitlSubmitting?: boolean
 }
 
 const nodeTypes = {
@@ -123,6 +129,8 @@ export function GraphCanvas({
   goldenStateByNodeId,
   compact = false,
   onPhaseFileSave,
+  onSubmitHitlResponse,
+  hitlSubmitting = false,
 }: GraphCanvasProps) {
   const workspace = useOptionalWorkspaceContext()
   const [expandedSubgraphs, setExpandedSubgraphs] = useState<Set<string>>(() => new Set())
@@ -553,6 +561,14 @@ export function GraphCanvas({
         maxZoom={1.4}
       >
         <Background gap={18} size={1} />
+        {/* F4: node-anchored HitL input. Reads the live run stream from the
+            workspace context (same array the edges already consume) and anchors
+            a floating answer box above whichever node paused for human input. */}
+        <HitlNodeToolbar
+          traceEvents={workspace?.traceEvents ?? []}
+          submitting={hitlSubmitting}
+          onSubmitHitlResponse={onSubmitHitlResponse}
+        />
         <Controls position="bottom-left" />
         {!compact ? <MiniMap pannable zoomable position="bottom-right" style={{ height: 120, width: 200 }} /> : null}
         {(onCreatePhase && !isDrilled) || drillStack.length > 0 ? (

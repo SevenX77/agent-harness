@@ -1,0 +1,78 @@
+{
+  "native_fs_boundary": {
+    "summary": "N6 有两条独立的写路径。(1) 真正的发布(点 Release → 后端 POST /skills/{id}/publish):全程走 PYTHON 后端,不经 Rust native-fs。后端 publish_skill 调 ProductArtifactPublisher.publish_release(用 LocalProductArtifactStore.stage_release/commit_release,os.open O_EXCL + os.link 做原子提交)落本地 product store;远程发布走 ArtifactRegistryClient(httpx POST)打到 Artifact Registry。autocommit(成功 run 后 git commit)也走 PYTHON 后端:RunManager._auto_commit_successful_run → GitLocalService.auto_commit_run(subprocess git),不经 native-fs。(2) Rust native-fs 里确有一个 publish_package_writer 命令,但它只被前端 Header.tsx 的『Package release』按钮(handlePackageRelease)调用,职责是把已发布 release 的引用(release_version/content_hash/manifest_ref/artifact_ref)序列化成一个 studio.publish.package.v1 的 JSON 包文件落到 skill 工作区,是发布之后的『导出包文件』辅助动作,不是发布提交主链路。所以:发布提交与 autocommit = python 后端;只有可选的『打包导出引用文件』走 native-fs。",
+    "evidence": [
+      ["apps/studio/backend/app/routers/skills.py:512", "@router.post('/{skill_id}/publish') publish_skill —— 发布主入口,纯 python 后端处理"],
+      ["apps/studio/backend/app/routers/skills.py:553", "publisher = ProductArtifactPublisher(store=store) —— 后端构造发布器(store=本地 product store)"],
+      ["apps/studio/backend/app/routers/skills.py:600", "await asyncio.to_thread(publisher.publish_release, ...) —— 在线程里跑本地 stage+commit 发布"],
+      ["apps/studio/backend/app/services/publish_pipeline.py:57", "ProductArtifactPublisher.publish_release —— 调 store.stage_release/commit_release,纯 python"],
+      ["apps/studio/backend/app/core/adapters/product_store_local.py:118", "LocalProductArtifactStore.stage_release —— os.open(O_CREAT|O_EXCL) 写 .stage 文件(python 直接写盘)"],
+      ["apps/studio/backend/app/core/adapters/product_store_local.py:173", "commit_release —— os.link(.stage → .json) 原子提交(python 直接写盘,不经 native-fs)"],
+      ["apps/studio/backend/app/services/artifact_registry.py:39", "ArtifactRegistryClient.upload_artifact —— httpx POST /api/v1/artifacts(远程发布,python)"],
+      ["apps/studio/backend/app/services/run_manager.py:719", "_auto_commit_successful_run —— 成功 run 后 git commit,python 后端,经 GitLocalService"],
+      ["apps/studio/backend/app/services/git_local.py:524", "auto_commit_run —— subprocess git add + commit -m auto-run-<run_id>(python,非 native-fs)"],
+      ["apps/studio/tauri/src/native_fs.rs:361", "publish_package_writer_impl —— native-fs 唯一与发布相关的写:写 release 引用包 JSON(发布后的导出,非提交主链路)"],
+      ["apps/studio/frontend/src/components/studio/Header.tsx:65", "writePublishPackage(...) 在 handlePackageRelease 里调用 —— 仅『Package release』按钮触发,与 POST /publish 是两个独立动作"],
+      ["apps/studio/frontend/src/api/client.ts:120", "publishSkill → api.post('/skills/{id}/publish') —— Release 发布走 HTTP 后端,不是 Tauri invoke"]
+    ]
+  },
+  "storage_paths": {
+    "headers": ["数据", "文件/路径/远程", "默认位置/环境变量", "写入方"],
+    "rows": [
+      ["product store 根目录 (storage_root)", "<storage_root> = config.settings.storage_root 若存在,否则 WORKSPACES_DIR/'default'", "默认 = RESOURCE_DIR/workspaces/default;RESOURCE_DIR 由 env STUDIO_RESOURCE_DIR 决定(否则 REPO_ROOT)。也受 BackendConfig env STUDIO_WORKSPACES_ROOT(workspaces_root, paths.py default_workspaces_dir = RESOURCE_DIR/workspaces)影响。注:_product_artifact_store() 读 config.settings.storage_root,当前 config 无 settings 属性 → 实际落 WORKSPACES_DIR/default", "python 后端 _product_artifact_store() (routers/skills.py:936)"],
+      ["product store release 清单 (ReleaseManifest .json)", "<storage_root>/releases/<skill_id>/<release_version>.json", "同 storage_root;skill_id/release_version 经 _release_path_part 单段校验", "LocalProductArtifactStore.commit_release(product_store_local.py:173,os.link 提交)"],
+      ["product store release 暂存 (.stage)", "<storage_root>/releases/<skill_id>/<release_version>.stage", "同上;os.open O_EXCL 防并发", "stage_release(product_store_local.py:118)"],
+      ["product store 制品字节 (blob)", "<storage_root>/blobs/<sha256(无前缀)>", "同 storage_root;put() 写 .tmp 再 replace", "LocalProductArtifactStore.put(product_store_local.py:27);compile(artifact_scope='product') 经引擎写入"],
+      ["remote_sync 远程同步状态", "<storage_root>/remote_sync/<skill_id>/<release_version>.json", "同 storage_root", "record_remote_sync_state(product_store_local.py:284,.tmp 再 replace)"],
+      ["Artifact Registry(远程制品仓库)", "POST <registry_host>/api/v1/artifacts(上传 zip);POST <registry_host>/api/v1/releases(同步清单)", "host/token 由 env STUDIO_REGISTRY_HOST / STUDIO_REGISTRY_TOKEN(BackendConfig env_prefix=STUDIO_);未配置则发布走纯本地 store,remote_sync=skipped(reason=registry_not_configured)", "ArtifactRegistryClient(artifact_registry.py:26),httpx 同步客户端;经 get_registry_client()(backends.py:101)"],
+      ["autocommit 提交 (git L1)", "skill 仓库本地 git:<skill_dir>/.git,提交信息 auto-run-<run_id>(allow_empty)", "skill_dir 由 skill_index/workspace/SKILLS_DIR 解析;无 env(本地 git 仓库)", "GitLocalService.auto_commit_run(git_local.py:524),subprocess git"],
+      ["release 历史快照 (git 空提交)", "<skill_dir>/.git,空提交 message=studio-release-<ver>,带 release-marker trailers", "仅当 skill_dir/.git 存在;无 env", "_record_release_history_snapshot(skills.py:81) → git_service.commit_empty_snapshot(git_local.py:167)"],
+      ["run 产物索引/制品 (run artifact store)", "<storage_root>/runs/<run_id>/manifest.json + <storage_root>/blobs/<sha256>;run 工作目录 = <skill_dir>/.workspace/runs/<run_id>", "storage_root = _studio_storage_root()(engine.py:486,同 WORKSPACES_DIR/default);run_dir 在 skill 工作区,默认随 RESOURCE_DIR", "LocalRunArtifactStore.put_batch/seal_run(run_artifact_store_local.py);run_manager._persist_run_artifacts(run_manager.py:287)"],
+      ["native-fs 发布包 (zip/导出引用 JSON)", "<workspaceRoot>/.workspace/releases/<skillId>-<version>.package.json(schema studio.publish.package.v1)", "workspaceRoot 由前端传(Header.tsx 用 workspaceRoot ?? skillId);写到 skill 工作区,不可覆盖已存在(Conflict)", "Rust native_fs::publish_package_writer_impl(native_fs.rs:361),hard_link 原子写,经前端『Package release』按钮"]
+    ]
+  },
+  "field_dict": {
+    "headers": ["保存物", "字段", "含义"],
+    "rows": [
+      ["ReleaseManifest(product store 里 <version>.json 经 _normalize_release_manifest 规整后的结构)", "release_version", "发布版本号(字符串,如 1.0.0);必须与文件名/请求一致,不一致报 release.invalid_manifest"],
+      ["ReleaseManifest", "artifact_id", "制品逻辑 id(顶层冗余,= artifact_ref.artifact_id)"],
+      ["ReleaseManifest", "content_hash", "制品内容哈希 sha256:<64hex>(顶层冗余,= artifact_ref.content_hash);经 _parse_content_hash 校验并小写归一"],
+      ["ReleaseManifest", "manifest_ref", "制品清单引用路径,如 manifests/<artifact_id>.json(顶层冗余)"],
+      ["ReleaseManifest", "artifact_ref", "嵌套对象:发布所指向制品的完整引用(见下 ArtifactRef)"],
+      ["ReleaseManifest", "idempotency_key", "幂等键;同 key+同制品身份再次发布 = 返回既有清单(幂等),不同则 release.conflict。idempotency_key 与 created_at 至少有一个,否则 invalid_manifest"],
+      ["ReleaseManifest", "created_at", "发布创建时间 ISO8601(由 publish_pipeline 写入 payload)"],
+      ["ArtifactRef(dataclass,product_store_local.py:14 + ReleaseManifest.artifact_ref 规整版)", "artifact_id", "制品逻辑标识(发布时由引擎 compile(artifact_scope='product') 产出)"],
+      ["ArtifactRef", "content_hash", "制品内容 sha256(sha256: 前缀);get(content_hash) 据此取 blob 并校验,不符报 artifact.hash_mismatch"],
+      ["ArtifactRef", "store", "存储类型字符串,固定 'product'(规整时强制写为 product)"],
+      ["ArtifactRef", "manifest_ref", "清单文件相对引用 manifests/<artifact_id>.json"],
+      ["ArtifactRef", "source_map_ref", "可选:source map 引用(有则保留,用于追溯编译源映射)"],
+      ["product store 条目(releases/<skill>/<ver>.json 落盘形态)", "(= ReleaseManifest 全字段)", "落盘即上面 ReleaseManifest;读时再附加 remote_sync(从 remote_sync/<skill>/<ver>.json 读入合并)"],
+      ["autocommit commit(git 提交,无 Pydantic;GitCommandResult 仅含执行结果)", "message", "提交信息 = auto-run-<run_id>(GitLocalService.auto_commit_run 固定前缀 auto-run-)"],
+      ["autocommit commit", "git_status(回填到 RunMetadata)", "committed / locked(GitFileLockedError) / failed(GitCommandError);记录 autocommit 结果,run_manager.py:737 model_copy 写入 RunMetadata.git_status"],
+      ["publish 回执(PublishResult,models/publish.py:28)", "status", "字面量 'ok' | 'error'"],
+      ["publish 回执 PublishResult", "message", "人类可读结果文案(如 Published to registry / Published to local product store; registry sync failed)"],
+      ["publish 回执 PublishResult", "artifact_id", "已提交制品 id(committed_artifact_id,可空)"],
+      ["publish 回执 PublishResult.extra", "release_version / version", "发布版本号(两键同值)"],
+      ["publish 回执 PublishResult.extra", "skill_id", "被发布的 skill id"],
+      ["publish 回执 PublishResult.extra", "artifact_ref", "完整制品引用对象(嵌 artifact_id/content_hash/manifest_ref/store)"],
+      ["publish 回执 PublishResult.extra", "content_hash / manifest_ref", "从 artifact_ref 提升的内容哈希与清单引用(前端 Header 徽标/toast 展示用)"],
+      ["publish 回执 PublishResult.extra", "package_kind", "固定 'product_artifact',标识包类型"],
+      ["publish 回执 PublishResult.extra", "remote_sync", "远程同步状态对象:status ∈ succeeded/failed/skipped/pending;failed 时含 error_type/error/details;skipped 时 reason=registry_not_configured"],
+      ["publish 回执 PublishResult.extra", "registry_artifact_id", "远端 registry 返回的 artifact_id(仅 remote_sync 未失败且 registry 有返回时写入)"],
+      ["native-fs 发布包(studio.publish.package.v1)", "schema", "固定 studio.publish.package.v1"],
+      ["native-fs 发布包", "release_version / content_hash / manifest_ref / artifact_ref", "从已发布 releaseIdentity 透传的发布引用四元组(前端 Header 取自 publish.lastResult)"]
+    ]
+  },
+  "op_field_map": {
+    "headers": ["前端操作", "写/读哪个保存物", "涉及字段", "file:line"],
+    "rows": [
+      ["成功 run 触发 autocommit(无显式按钮,run 成功后自动)", "写 git L1 提交(<skill_dir>/.git);回填 RunMetadata.git_status", "message=auto-run-<run_id>;git_status=committed/locked/failed", "run_manager.py:697 _finalize_terminal_run → :719 _auto_commit_successful_run → git_local.py:524 auto_commit_run"],
+      ["点 Release(Header 菜单 → usePublishSkill.publish)", "写 product store release(stage→commit)+ 可选远程 registry 同步;读回 ReleaseManifest", "release_version, artifact_ref{artifact_id,content_hash,manifest_ref,store}, idempotency_key, created_at, remote_sync.status", "frontend usePublishSkill.ts → api/client.ts:120 publishSkill → backend skills.py:512 publish_skill → :600 publisher.publish_release → product_store_local.py:118/173"],
+      ["点 Release 时 registry 已配置(host+token)", "ArtifactRegistryClient.sync_release_manifest 远程同步;写 remote_sync 状态文件", "remote_sync{status,error_type,error,details}, registry_artifact_id(server_response.artifact_id)", "skills.py:584-607 remote_sync 回调 → artifact_registry.py:163 sync_product_artifact_release → :89 sync_release_manifest;状态落 product_store_local.py:284"],
+      ["发布前置校验(user_id / registry host+token)", "读 AppSettings.user_id;读 BackendConfig.registry_host/registry_token", "app_settings.user_id(空则 APP_SETTINGS_INCOMPLETE 400);registry.host/registry.token(都非空才走远程,否则 remote_sync=skipped reason=registry_not_configured)", "skills.py:523-532(user_id 校验)、:584(registry.host/token 判断)、:656-668(未配置 skipped 分支);artifact_registry.py:47-50/97-100(host/token 必填)、:152(user_id 非空)"],
+      ["发布后『Package release』按钮(可选,native-fs)", "写 native-fs 发布引用包 JSON(<workspaceRoot>/.workspace/releases/<skill>-<ver>.package.json)", "schema, release_version, content_hash, manifest_ref, artifact_ref", "Header.tsx:60 handlePackageRelease → :65 writePublishPackage → tauri.ts:175 → native_fs.rs:361 publish_package_writer_impl"],
+      ["Local History 列表展示", "读 git 历史 + product store releases 合并成 GitHistoryItem", "sha, message, author, timestamp, kind, source(git/manifest), revertable, release_version, artifact_id, content_hash, manifest_ref", "useRunHistory.ts:55 useLocalHistory → GET /skills/{id}/history → skills.py:181 _release_history_item / :241 _release_history_items_from_manifests"],
+      ["Local History 点回滚(Revert)", "写 git(reset --hard 到目标 sha);读回 SkillDetail", "sha(目标提交);仅 source=git 的条目 revertable=true(manifest 来源的 release 条目 revertable=false 不可回滚)", "useRunHistory.ts:69 revert → revertSkill → backend revert → git_local.py:482 revert_to → :499 reset_hard"]
+    ]
+  }
+}

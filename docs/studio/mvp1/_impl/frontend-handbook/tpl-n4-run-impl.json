@@ -1,0 +1,258 @@
+{
+ "id": "n4_run_impl",
+ "title": "Run 控制 · 实施详情",
+ "design_ref": "n4_run_design",
+ "intro": "本页是 Run 控制 surface 的现状/差距/实施计划/测试，1:1 对应设计页 n4_run_design（原子 #6–#13）。代码按『文件名 + 函数/对象名』引用。底层 run 编排 + 服务端门 + 批量 + autocommit 见 n4_run_mech。现状：触发门控（#6）、真跑落盘（#7）、节点灯（#8）、批量（#11）、autocommit（#13，归 N6）已接实且符合（spec 标『桩/孤儿』已过时）；偏差/未实施有三：#9 focus 跟随（画布不自动定位 running 节点）、#10 run 历史耗时（TokensMetrics 无 wall_time_sec、耗时落 n/a）、#12 命名序列自动批量。",
+ "functions": [
+  {
+   "n": 6,
+   "cap": "run-trigger-gated",
+   "design_ref": "n4-atom-6",
+   "current": "现状：已实现且符合。Workspace.tsx handleRun 第一件事 deriveBuildStage(currentSkillId) 若 ≠ predict-pass 直接 return（前端硬门）；通过则 updateStage(running) → resolveRunInput → startRun(client.ts) → setRunId + setActivePanel('timeline')。后端 run_manager.start_run 调 require_passing_predict（predict_gate.py）比对 content_hash，不匹配抛 RUN_REQUIRES_PREDICT(409)。",
+   "gap": "符合设计，无需改。spec 标『onRun=桩/零 caller』过时。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。POST /runs（routers/runs.py create_run）+ require_passing_predict 服务端门已实现。"
+  },
+  {
+   "n": 7,
+   "cap": "run-realrun-persist",
+   "design_ref": "n4-atom-7",
+   "current": "现状：已实现且符合（后端 live）。run_manager.start_run 起子进程 _run_worker_main 跑 adapter.run_artifact；跑完落 final_state.json/metrics.json/trace.jsonl，_persist_run_artifacts 经 LocalRunArtifactStore put_batch + seal_run 封存（sealed 禁写、sha256 内容寻址）。前端只读封存结果。",
+   "gap": "符合设计，无需改。run-by-version 入口 / artifact identity 可见性是 D3 缺口（bad），不阻塞真跑落盘。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接（D2.2 ok）。run 产物 seal 落盘 live；D12.5 partial（生产仍裸 Path 写）前端无感。"
+  },
+  {
+   "n": 8,
+   "cap": "run-node-lights",
+   "design_ref": "n4-atom-8",
+   "current": "现状：已实现且符合。useRunStream(runId) 订阅事件 → deriveNodeStatuses（node-status.ts）折成每节点 6 态 → 画布 SkillNode（nodes/SkillNode.tsx）STATUS_STYLE 渲染：running=animate-pulse-primary 呼吸脉冲、success 绿、error 红、paused 琥珀、idle/breakpoint。isFailureEvent 显式判 validation_fail/retry_exhausted。",
+   "gap": "符合设计，无需改。旧审计『仅三态色无呼吸动画』过时——SkillNode 真有 running 脉冲 + 6 态。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。事件流 WS /ws/runs/{run_id}（D11 ok）live。"
+  },
+  {
+   "n": 9,
+   "cap": "run-focus-follow",
+   "design_ref": "n4-atom-9",
+   "current": "现状：偏差。Workspace.tsx 已算出 activeTracePhase（statusByNodeId 里 status==running 的节点，用于 trace 高亮联动），但画布不据它自动平移/居中——run 跨节点推进时 focus 不跟随当前 running 节点。",
+   "gap": "差距：用 activeTracePhase 驱动画布自动 focus——run 推进到某节点时把视口平移/居中到该节点（用 GraphCanvas 的 fitView/setCenter 类能力定位 running 节点）。纯前端，无后端依赖。",
+   "fe_status": "符合",
+   "be_dep": "无后端依赖（activeTracePhase 已由前端从事件流算出）。",
+   "fe_resync": "batch6c 已修复+测试通过(2026-06-20)"
+  },
+  {
+   "n": 10,
+   "cap": "run-history",
+   "design_ref": "n4-atom-10",
+   "current": "现状：偏差（耗时列落空）。timeline 面板（TimelinePanel.tsx）拉 GET /runs 列 run 历史，点某条用 getRunDetail（client.ts）回看——run_id/status/token 符合；但耗时一列读 run.metrics.wall_time_sec（经 unknown 强转），而后端 TokensMetrics（models/runs.py）无 wall_time_sec、RunManager._tokens_metrics 不投影它，所以耗时渲成 n/a。",
+   "gap": "差距：后端 metrics DTO 加 wall_time_sec（或 RunMetadata 加 duration_sec），RunManager._tokens_metrics 把 worker 原始 wall_time_sec 投影进去，前端类型同步；TimelinePanel 即可正常显耗时。列表/回看其余字段无需改。",
+   "fe_status": "符合",
+   "be_dep": "契约问题（DTO 投影）。GET /runs（list_runs）+ GET /runs/{run_id}（get_run）已实现；缺口在 metrics DTO 未投影 wall_time_sec。",
+   "fe_status_prev": "偏差",
+   "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
+  },
+  {
+   "n": 11,
+   "cap": "run-batch",
+   "design_ref": "n4-atom-11",
+   "current": "现状：已实现且符合。useBatchRun（hooks/useBatchRun.ts）toggleInput 勾选 → runBatch POST /runs/batch-run（input_ids）→ 每 1s 轮询 GET /batch/{id} 汇总 total/completed/status + batchError。后端 start_batch_run 逐个 start_run（各受服务端门）。TestInputsSection 显示『completed/total · status』。",
+   "gap": "符合设计，无需改。图级/节点级/嵌套 loop 高级批量归引擎 02-iterate，不在基础多选范围。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。POST /runs/batch-run + GET /batch/{id}（run_manager）已实现。"
+  },
+  {
+   "n": 12,
+   "cap": "run-batch-naming-sequence",
+   "design_ref": "n4-atom-12",
+   "current": "现状：未实施。批量需在 TestInputsSection 逐份手动勾选（useBatchRun.toggleInput）；无『检测命名序列（chapter1/2…）→ 建议自动组批量』入口。",
+   "gap": "差距：在 TestInputsSection 检测输入文件名的序列模式，识别到给『把这组当批量跑』建议入口，点一下自动勾选整组走 runBatch。target-design，纯前端便捷增强、无后端依赖。",
+   "fe_status": "符合",
+   "be_dep": "无后端依赖（复用已有 batch-run 契约）。",
+   "fe_status_prev": "未实施",
+   "fe_resync": "batch4 已修复+测试通过(2026-06-20)"
+  },
+  {
+   "n": 13,
+   "cap": "run-autocommit",
+   "design_ref": "n4-atom-13",
+   "current": "现状：已实现且符合（后端 live，归 N6）。run_manager._finalize_terminal_run 在 status==success 分支调 _auto_commit_successful_run（GitLocalService.auto_commit_run 提交成功产物），结果写 metadata.git_status（committed/locked/failed）；git 锁冲突/命令失败只降级 warning 不阻断；失败 run 不 commit。",
+   "gap": "符合设计（后端侧）。归属 N6 保存与发布——本 surface 仅标注触发点。前端 RunMetadata 类型已含 git_status（types.ts），类型已对齐；真实剩余项是 N6 侧 autocommit 结果的 UI 展示是否充分。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接（后端）。autocommit + git_status live；前端 types.ts RunMetadata 已含 git_status，UI 展示归 N6。"
+  }
+ ],
+ "plan": [
+  {
+   "step": 1,
+   "what": "#9 focus 跟随：用 Workspace 已算出的 activeTracePhase 驱动画布自动平移/居中到当前 running 节点（GraphCanvas setCenter/fitView 定位），run 跨节点推进时 focus 跟着走。",
+   "depends_on": "无（activeTracePhase 已由前端从事件流算出；只需把它接到画布视口控制）。",
+   "why": "前端独立、零后端依赖；是 Run surface 已接线项里的运行态体验缺口，优先做。",
+   "block": "前端独立"
+  },
+  {
+   "step": 2,
+   "what": "#12 命名序列自动批量：TestInputsSection 检测输入名序列模式（chapter1/2…）给『自动组批量』建议入口。target-design 便捷增强。",
+   "depends_on": "无（复用已有 useBatchRun/batch-run 契约）。",
+   "why": "前端独立但属增量价值，排在运行态体验缺口（#9）之后。",
+   "block": "前端独立"
+  },
+  {
+   "step": 3,
+   "what": "#10 run 历史耗时（偏差，需修）：后端 metrics DTO 加 wall_time_sec（或 RunMetadata 加 duration_sec），RunManager._tokens_metrics 把 worker 原始 wall_time_sec 投影进去，前端类型同步，TimelinePanel 即可正常显耗时。引擎已产出 wall_time_sec，缺口在 Studio sidecar DTO 投影。",
+   "depends_on": "等后端：metrics DTO 投影 wall_time_sec（前端类型随后同步）。",
+   "why": "后端先于前端：耗时列要真显示得先让 metrics DTO 带 wall_time_sec，否则前端只能渲 n/a。",
+   "block": "等后端（DTO 投影）"
+  },
+  {
+   "step": 4,
+   "what": "#6–#8/#11/#13 无功能性改动：触发门控、真跑落盘、节点灯、批量、autocommit 现状均已接实且符合设计。本步现状留底 + 测试方案。#13 autocommit 的 git_status 前端类型已含（types.ts），UI 展示归 N6。",
+   "depends_on": "无。",
+   "why": "这几项已 live，相较 spec『桩/孤儿』标注已领先；不开实施任务。",
+   "block": "前端独立"
+  }
+ ],
+ "tests": [
+  {
+   "covers": "#6 run-trigger-gated",
+   "atoms": [
+    6
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "mock deriveBuildStage 返回非 predict-pass → 点 Run → 断言 handleRun 直接 return、不调 startRun。",
+    "stage=predict-pass → 点 Run → 断言 updateStage(running)、startRun 被调、setRunId、切 timeline。",
+    "后端契约测：无 last_predict 记录 / content_hash 不匹配 → start_run 抛 RUN_REQUIRES_PREDICT(409)。"
+   ],
+   "layer2": [
+    "predict 通过后点 Run，看是否真起一次 run、切到 timeline。",
+    "真跑：用 curl 直接打 POST /runs 不经 predict，看后端是否回 409（服务端门挡非 UI caller）。"
+   ],
+   "shots": [
+    "predict-pass 后点 Run 起一次真跑、切 timeline",
+    "无 predict 直打 /runs 返回 RUN_REQUIRES_PREDICT(409)"
+   ]
+  },
+  {
+   "covers": "#7 run-realrun-persist + #8 node-lights",
+   "atoms": [
+    7,
+    8
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "mock 一串事件（phase_start/phase_end/validation_fail）喂 deriveNodeStatuses → 断言节点态 running→success / 失败节点 error。",
+    "validation_fail 后跟 phase_end（重试成功）→ 断言最终 success（last-event-wins）。",
+    "后端契约测：run 跑完 final_state/metrics/trace 落盘且 store seal（sealed 后再写抛 artifact.sealed_write）。"
+   ],
+   "layer2": [
+    "真跑一个多节点 skill，看节点灯逐个 running 脉冲→绿，失败节点变红。",
+    "截图运行中某节点的呼吸脉冲态。"
+   ],
+   "shots": [
+    "run 时节点逐个 running 脉冲→success 绿",
+    "失败节点亮红 error"
+   ]
+  },
+  {
+   "covers": "#9 run-focus-follow（偏差 · RED 待转 GREEN）",
+   "atoms": [
+    9
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "RED：当前画布不据 activeTracePhase 平移 → 断言『running 节点切换时画布 setCenter 被调』失败（待实现转 GREEN）。",
+    "实现后：mock activeTracePhase 从节点A→节点B → 断言画布视口定位到 B。"
+   ],
+   "layer2": [
+    "目标落地前对现状真跑取证：多节点 run 时 focus 不跟随、需手动找当前节点。",
+    "落地后：真跑长链 skill，看画布是否自动跟到当前 running 节点、截图。"
+   ],
+   "shots": [
+    "run 推进时画布自动居中到当前 running 节点"
+   ],
+   "fe_resync": "覆盖项已全绿(2026-06-20)"
+  },
+  {
+   "covers": "#10 run-history（偏差 · 耗时 RED 待转 GREEN）",
+   "atoms": [
+    10
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "mock GET /runs 返回 2 条 → 断言 timeline 列出 run_id/status/token（符合部分）。",
+    "点某条 → 断言 getRunDetail(run_id) 被调、回看其详情。",
+    "RED：mock metrics 无 wall_time_sec → 断言耗时列显 n/a（现状）；后端补 wall_time_sec 后断言耗时正常渲染（转 GREEN）。"
+   ],
+   "layer2": [
+    "跑几次后看 timeline 历史列表，点一条回看完整 trace。",
+    "看耗时列：现状落 n/a；后端补 wall_time_sec 投影后看真实耗时。"
+   ],
+   "shots": [
+    "timeline 列 run 历史（耗时现状 n/a）",
+    "后端补 wall_time_sec 后耗时正常显示"
+   ],
+   "fe_status_prev": "偏差",
+   "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
+  },
+  {
+   "covers": "#11 run-batch",
+   "atoms": [
+    11
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "勾 2 份输入 → runBatch → 断言 POST /runs/batch-run body.input_ids=[2 个]。",
+    "mock GET /batch/{id} 返回 total=2/completed=1 → 断言 UI 显示『1/2 · running』。",
+    "某子 run failed → 断言 batchError 显式上报、不静默。"
+   ],
+   "layer2": [
+    "真跑：勾 2-3 份输入点『Run N as batch』，看进度轮询『completed/total · status』推进。",
+    "造一份会失败的输入混进批量，看失败是否显式上报。"
+   ],
+   "shots": [
+    "勾多份跑批量、进度 completed/total 推进",
+    "批量某项失败显式上报不静默"
+   ]
+  },
+  {
+   "covers": "#12 run-batch-naming-sequence（未实施 · RED）",
+   "atoms": [
+    12
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "RED：输入名为 chapter1/2/3 → 断言『TestInputsSection 给出自动批量建议』失败（待实现转 GREEN）。",
+    "实现后：命名序列输入 → 断言建议入口出现、点击自动勾选整组。"
+   ],
+   "layer2": [
+    "目标落地前：命名序列输入需逐个手动勾。",
+    "落地后：导入 chapter1/2/3，看是否提示自动组批量、点一下整组勾选。"
+   ],
+   "shots": [
+    "命名序列输入出现『自动批量』建议"
+   ],
+   "fe_status_prev": "未实施",
+   "fe_resync": "覆盖项已全绿(2026-06-20)"
+  },
+  {
+   "covers": "#13 run-autocommit（归 N6）",
+   "atoms": [
+    13
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "后端契约测：run status==success → _auto_commit_successful_run 被调、metadata.git_status 写入；failed run → 不 commit。",
+    "git 锁冲突 → 断言降级 warning、不阻断、git_status=locked。"
+   ],
+   "layer2": [
+    "真跑一个成功 run，看产物是否自动 git 提交、git_status=committed。",
+    "失败 run 看是否不提交。"
+   ],
+   "shots": [
+    "成功 run 后 git_status=committed",
+    "失败 run 不 autocommit"
+   ]
+  }
+ ]
+}

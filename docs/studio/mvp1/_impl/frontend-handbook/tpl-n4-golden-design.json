@@ -1,0 +1,181 @@
+{
+  "page_id": "n4_golden_design",
+  "title": "Golden 验收 · 操作设计",
+  "region": "run-verify:golden",
+  "intro": "本页是 N4 第 4 个 surface「Golden 验收」的 MVP1 设计（应该怎样）：golden 是逐节点的作者期望值（取代旧的整次 run 快照，spec g-a），它一不是 run 的前提、二只决定 agent 节点 predict 时拿哪份 mock。用户在这一面给 agent 节点固化期望（两路创建：copilot 协作自动写 / 按输出 schema 手填空模版），run 跑完做实际输出 vs golden 的字段级 diff 验收。每张卡讲一个操作的设计；现状/差距见 n4_golden_impl，golden 存储 + headless 对比 + 409 两守卫见 n4_golden_mech。注：spec 把 useGoldenDiff 标『orphan』、E 段多标 target-design——真代码里 golden 列表、字段级 diff（editor 分屏覆盖层）、promote、copilot 分析 bar 已接线，缺口收敛到『agent 三态上画布 + 创建路 B 手填模版 + 失效编译联动』，本页以真代码为准。",
+  "atoms": [
+    {
+      "n": 29,
+      "cap": "golden-list",
+      "module": "Golden 基线与 agent 三态",
+      "func": "设计：golden 相关设置归 I/O 面板——I/O 面板列出该 skill 的 golden 基线（id / 源 run / 是否锁定 / 创建时间），是 golden 的归口入口。",
+      "action": "用户在 I/O 面板的 Golden 区看该 skill 的 golden 基线列表。",
+      "fe_design": "GoldenSection（I/O 面板里只读列基线的组件）用 SWR 拉 GET /skills/{id}/golden，列每条 baseline 的 id、源 run_id、locked（🔒）、相对时间。设计意图（spec E5『golden 设置/文件归 i/o 面板』）：golden 在 I/O 面板有唯一归口。打开 golden 文件编辑需要一个 golden-content read 端点（follow-on），当前只读列表。",
+      "fe_modules": [],
+      "be_contract": [
+        {
+          "endpoint": "GET /api/skills/{id}/golden",
+          "purpose": "列该 skill 的全部 golden 基线（id/源 run/locked/created_at）。",
+          "mechanism_ref": "n4_golden_mech",
+          "iface_ref": "iface-golden-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：列表 + 打开编辑都齐了——GoldenSection.tsx:97-234 里 GoldenBaselineRow（基线行组件）展开后用 SWR 经 fetchGoldenContent 拉 GET /golden/{id}/content，GoldenCaseEditor（golden case 编辑器）改 expected_output、经 saveManualGolden 保存；api/client.ts:261-308（fetchGoldenContent/saveManualGolden）；后端 routers/golden.py:39-52（GET /{golden_id}/content）+ services/golden_diff.py:397（read_golden_baseline_content，读基线内容）+ models/golden.py:43-73（GoldenCaseContent/GoldenBaselineContent DTO）。原『编辑需 golden-content read 端点（follow-on）』的唯一缺口已 shipped。",
+      "impl_ref": "fn-29"
+    },
+    {
+      "n": 30,
+      "cap": "golden-tristate",
+      "module": "Golden 基线与 agent 三态",
+      "func": "设计：每个 agent 节点在画布上有个 golden 状态机三态标签——🔘未测试 → 🟡逻辑OK（predict 跑通过逻辑）→ 🟢有golden（已固化期望），一眼知道这个 agent 节点验收到哪一步。",
+      "action": "无显式动作（predict 跑完 / golden 建好后，agent 节点的三态标签自动切换）。",
+      "fe_design": "agent 节点显一个 golden 三态：初始🔘未测试；predict 跑通该节点逻辑后切🟡逻辑OK；该节点有了 golden case 后切🟢有golden。判定阈值（写死）：『predict 跑通该节点』= 该节点在最近一次 predict response.phases 里有结果且非失败（status 为 success/validation_pass、无 error）；『该节点有 golden』= GET /golden 的某基线 cases 含该 node_id。前端把这两个布尔聚合成三态（有 golden → 🟢；无 golden 但 predict 跑通 → 🟡；都不满足 → 🔘），落到画布 SkillNode（加一个 golden 三态徽章，与 #8 的 run 状态灯并存、不冲突）。设计意图（spec E1）：agent 节点验收进度可视。",
+      "fe_modules": [],
+      "be_contract": [
+        {
+          "endpoint": "GET /api/skills/{id}/golden",
+          "purpose": "判某 agent 节点有无 golden。GoldenBaseline.cases（models/golden.py:33）已投影 node-level cases（golden_diff.py:697 的 _cases_from_payload），由 list_golden_baselines_for_skill 暴露。",
+          "mechanism_ref": "n4_golden_mech",
+          "iface_ref": "iface-golden-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：agent 节点 golden 三态已落地——node-golden.ts:25-97 的 goldenTriStateByNode（把每节点聚合成三态的函数）+ ranAgentNodesFromPredict（从 predict 结果取跑通的 agent 节点）；SkillNode.tsx:93-94,179-203 渲 🟢有golden（ShieldCheck）/ 🟡逻辑OK（ShieldHalf）徽章，与 run/compile 灯分通道；nodes/types.ts:33-37 加 goldenState prop；Workspace.tsx:1246-1251,1364-1387 把 goldenTriStateByNode 接到画布 + 929-947 仅在 predict-pass 时缓存跑通的 agent 节点、fail 时清。原『两个判据数据源都不存在』已过时：per-node golden 由 GoldenBaseline.cases（models/golden.py:33，golden_diff.py:697 投影、684-694 暴露）给出；per-node predict 成功从 PredictDiagnosticExport.phases（runs.py:63-74）读。",
+      "impl_ref": "fn-30"
+    },
+    {
+      "n": 31,
+      "cap": "golden-mock-auto",
+      "module": "Golden 基线与 agent 三态",
+      "func": "设计：predict 时 agent 节点 mock 由 golden 状态自动决定——无 golden 用启发式占位（heuristic_stub）、有 golden 吐 golden_case，全自动无手动选择器。",
+      "action": "无显式动作（predict 时引擎按节点有无 golden 自动选 mock）。",
+      "fe_design": "前端不参与——这条与 predict surface 的 mock-by-golden（#3）同源：引擎 runner.resolve_generation 按 has_golden_case 自动选 golden_case / heuristic_stub。本卡从 golden 视角登记『golden 的作用就是决定 agent 节点 predict 拿哪份 mock』（spec：有没有 golden 的区别只在于 predict 在 agent 节点拿哪个 mock 输出）。设计意图（spec E2/g-b）：mock 自动、零手动选择器；logic 节点不参与（g-c）。",
+      "fe_modules": [],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{id}/runs/predict",
+          "purpose": "predict 时引擎按 golden 状态自动选 agent 节点 mock（见 predict 机制 mock-by-golden）。",
+          "mechanism_ref": "n4_predict_mech",
+          "iface_ref": "iface-predict-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（mock 由 golden 状态自动决定、无手动选择器；引擎 resolve_generation 有 golden 吐 golden_case、否则 heuristic_stub，已核实）。前端不碰这层。",
+      "impl_ref": "fn-31"
+    },
+    {
+      "n": 32,
+      "cap": "golden-create-copilot",
+      "module": "Golden 创建两路",
+      "func": "设计：创建路 A（copilot 协作）——两个入口：① trace 内占位节点旁的按钮；② predict/run 跑完，copilot 输入框上方弹一个分析 bar，确认后对『还没 golden 的节点』自动写 golden。",
+      "action": "用户在 predict/run 跑完后点 copilot 分析 bar 的确认（或 trace 内占位节点旁按钮）。",
+      "fe_design": "入口②：run 跑完 completedRunId 通路（Workspace 检测 run_ended）→ 传给 CopilotPanel 渲 AnalysisBar（分析 bar 弹窗）→ 确认走 autoWriteGoldenIfAbsent（仅当该 skill 尚无 golden 时 promote、有则不动，spec F7）+ prepareCopilotJudgeContext 准备 judge。入口①：trace 内『逐占位节点旁』按钮。设计意图（spec E3）：copilot 协作把跑出的结果固化成 golden，两入口。",
+      "fe_modules": [
+        { "name": "golden 对比 hook（useGoldenDiff）" }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{id}/golden/plan",
+          "purpose": "Tauri 路径：拿待写入文件清单（不落盘），前端用 native-fs 逐个写。",
+          "mechanism_ref": "n4_golden_mech",
+          "iface_ref": "iface-golden-2"
+        },
+        {
+          "endpoint": "POST /api/skills/{id}/golden",
+          "purpose": "浏览器路径：带 X-Studio-Write-Fallback: browser 头让后端代写 golden。",
+          "mechanism_ref": "n4_golden_mech",
+          "iface_ref": "iface-golden-1"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：两入口都齐了。入口①per-node 按钮已 shipped——TracePanel.tsx:47-54,131-147,278-290（canPromoteFocusedNode + 『Promote node to golden』按钮，对 focus 的无 golden agent 节点调 onPromoteNode），Workspace.tsx:413-430,1334（handlePromoteNode 接线）。原『per-node 无法复用现契约』已过时：后端 per-node 写契约现已有——models/golden.py:83-88（SetGoldenReq.node_id）+ services/golden_diff.py:58-79（set_golden_baseline_for_run 带 node_id 时只写该节点 case，遵 F6）。入口②（AnalysisBar/autoWriteGoldenIfAbsent，无 golden 才写，F7）此前已符合。",
+      "impl_ref": "fn-32"
+    },
+    {
+      "n": 33,
+      "cap": "golden-create-template",
+      "module": "Golden 创建两路",
+      "func": "设计：创建路 B（手动）——某 agent 节点还没 golden 时，按它的 io.outputs schema 自动生成一个符合 schema 的空 golden 模版 json，放 I/O 面板让用户手填期望值。",
+      "action": "用户在 I/O 面板对无 golden 的节点点『生成空模版』，手填后保存为 golden。",
+      "fe_design": "无 golden 时按该节点 io.outputs（输出 schema）自动生成符合 schema 的空 golden 模版 json，在 I/O 面板手填、填好存为 golden。这需要一个『按输出 schema 生成空模版』的后端能力 + I/O 面板的模版编辑 UI（与 #29 golden 内容读/编辑端点配套）。设计意图（spec E4）：不靠 copilot 也能手动给节点定 golden。",
+      "fe_modules": [],
+      "be_contract": [
+        {
+          "endpoint": "GET /api/skills/{id}/golden/template",
+          "purpose": "按节点 io.outputs schema 生成符合 schema 的空 golden 模版供手填（routers/golden.py:88-96，generate_golden_template 已实现）。",
+          "mechanism_ref": "n4_golden_mech",
+          "iface_ref": "iface-golden-1"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：创建路 B 手填模版已 shipped——GoldenSection.tsx:36-87 的 templatableAgentNodeIds 驱动『Fill golden by template』区，239-349 的 GoldenTemplateRow（模版行：『Generate template』→ fetchGoldenTemplate → 编辑 JSON → saveManualGolden）；node-golden.ts:70-79（templatableAgentNodeIds = 无 golden 的 agent 节点）；api/client.ts:278-285（fetchGoldenTemplate → GET /golden/template）。后端：services/golden_template.py:23（generate_golden_template，按 io.outputs 建符合 schema 的空 stub）+ routers/golden.py:88-96（GET /template）+ models/golden.py:91-105（GoldenTemplate DTO）。原标『后端无此端点』已过时。",
+      "impl_ref": "fn-33"
+    },
+    {
+      "n": 34,
+      "cap": "golden-field-diff",
+      "module": "Golden 对比与守卫",
+      "func": "设计：run 跑完后，实际输出 vs golden 做字段级 diff——逐节点逐字段比对，详细 diff 在 editor 分屏全屏覆盖层显示（不在 properties 面板）。",
+      "action": "用户在 run 跑完后点 Compare（TracePanel 顶栏），看字段级 diff 覆盖层。",
+      "fe_design": "useGoldenDiff（compare/promote 封装的 hook）compare 调 GET/POST /runs/{run}/compare 拿 CompareResult.node_groups（逐节点 NodeGoldenGroup：status/score/field_differences/schema_status）。DiffView（字段级 diff 组件）在 Workspace 作为中央 editor 区的全屏覆盖层渲染（goldenDiff.result 为真时 absolute inset-0 z-40 盖在 canvas 上，带 Close），内部再用两栏分屏（左列字段、右按类型展开 current vs golden）。设计意图（spec E7『字段级 diff 在 editor 分屏，不在 properties』）。后端 headless 对比只比已封存的 sealed run 结果、不重跑。",
+      "fe_modules": [
+        { "name": "golden 对比 hook（useGoldenDiff）" }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "GET /api/skills/{id}/runs/{run_id}/compare",
+          "purpose": "拿 CompareResult（逐节点字段级 diff，不重跑、只比 sealed 结果）。",
+          "mechanism_ref": "n4_golden_mech",
+          "iface_ref": "iface-golden-5"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（useGoldenDiff compare + DiffView 全屏覆盖层 absolute inset-0 z-40 在 editor 区不在 properties、内部两栏字段级 diff；后端 headless 不重跑、只比 sealed 结果）。",
+      "impl_ref": "fn-34"
+    },
+    {
+      "n": 35,
+      "cap": "golden-invalidation",
+      "module": "Golden 对比与守卫",
+      "func": "设计：golden 失效条件收口——改 prompt、改 agent 内部设置都不让 golden 失效；只有改了 output schema 导致 golden 缺了需要的字段，才弹警告 ⚠️ 触发编译错误，必须补上才能跑 predict。",
+      "action": "无显式动作（改 output schema 致 golden 缺字段时，编译报错拦住 predict）。",
+      "fe_design": "golden 只绑 output schema：改 prompt/agent 内部不动 golden；改 output schema 致 golden 缺需要的字段 → 编译期检出、弹⚠️警告 + 触发编译错误，挡住 predict 直到补全 golden 字段。前端侧把这个编译错误显式呈现（与 compile 门控联动）。设计意图（spec E6/g-d『改 prompt、改 agent 内部都没事；只有改输出 schema 后 golden 字段缺失，需弹警告触发编译错误，必须补上才能 predict』）。",
+      "fe_modules": [],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：golden 失效编译联动已 shipped。后端编译门：services/skills.py:316-330 的 compile_studio_skill 在 _validate_golden_against_output_schema 返错时抛 CompileFailedError，经既有 N3 编译门挡住；350-416 的校验（_validate_golden_against_output_schema / _missing_required_golden_fields）比 golden expected_output 键 vs 节点 io.outputs 必填键、只绑 output schema（故改 prompt/agent 内部不触发，遵 E6/g-d），用 engine.py:1301 resolve_agent_node_output_schema + golden_diff.py:487/iter_golden_cases_for_skill。前端呈现：node-compile-errors.ts:14-50 的 compileErrorNodeId 对无文件的 golden 门错误回退用『<node_id>.<field>』把违规节点涂红，SkillNode.tsx:85-92,153-177 渲 per-node 编译错误徽章/tooltip，Workspace.tsx:969-972 predict 处理 compile_failed 并显消息。门按每个缺字段产一条致命 CompileError 挡 predict 且 on-node 显示——正是设计目标。原标『契约待理清』已过时。",
+      "impl_ref": "fn-35"
+    },
+    {
+      "n": 36,
+      "cap": "golden-409-guard",
+      "module": "Golden 对比与守卫",
+      "func": "设计：golden 必须作者定/手填，不能从 predict 来源的 trace 捕获晋升——后端两道 409 守卫：① 业务守卫（predict trace 不可晋升 golden）② 写守卫（改写工作区须带浏览器回退头）。",
+      "action": "无显式动作（晋升 predict trace / 缺写回退头时后端 409 拦截）。",
+      "fe_design": "前端只需『不去晋升 predict trace』+『浏览器模式带写回退头』，拦截在后端：① assert_trace_can_be_promoted_to_golden 检 trace 是否 is_predict，是则抛 409 PREDICT_TRACE_CANNOT_BE_GOLDEN（任何晋升路径都过这道检查）；② _require_browser_write_fallback：set/delete golden 须带 X-Studio-Write-Fallback: browser，否则 409 NATIVE_FS_REQUIRED。前端 saveGoldenBaseline 在浏览器模式带该头、Tauri 模式走 /plan 本地写（不带头）。设计意图（spec E8『golden 作者定/手填，非从 predict trace 捕获』）。",
+      "fe_modules": [
+        { "name": "golden 对比 hook（useGoldenDiff）" }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{id}/golden",
+          "purpose": "写 golden：业务守卫（predict trace 不可晋升，409 PREDICT_TRACE_CANNOT_BE_GOLDEN）+ 写守卫（缺浏览器回退头 409 NATIVE_FS_REQUIRED）。",
+          "mechanism_ref": "n4_golden_mech",
+          "iface_ref": "iface-golden-1"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（前端 promote 用 run trace 非 predict trace、浏览器模式带 X-Studio-Write-Fallback 头/Tauri 走 plan；后端两道 409 守卫 PREDICT_TRACE_CANNOT_BE_GOLDEN + NATIVE_FS_REQUIRED 已实现）。",
+      "impl_ref": "fn-36"
+    }
+  ]
+}

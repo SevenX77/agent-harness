@@ -1,0 +1,170 @@
+{
+  "id": "n1_mech_skills",
+  "title": "skill 发现 / 读写契约(gateway 后端 sidecar 侧 skills 路由)",
+  "owner_tag": "gateway 后端 sidecar",
+  "overview": {
+    "manages": "Home 屏现状对接的 skill 发现 / 建 / 删后端机制:gateway 后端 sidecar 侧(即 apps/studio/backend 这个 Python sidecar,是 gateway 后端的 HTTP 承载层)的 skills 路由(前缀 /api/skills),提供建/导入(POST)、注册表列举(GET)、注销(DELETE)、单 skill 详情(GET /{id})。",
+    "why_single": "这块机制是一整套「注册表模型」:MetadataStore(后端元数据存储)+ GET /api/skills 聚合 + 自动发现磁盘上未注册的 skill,跨多个端点协同。它与 N1 锁定的 D1/D11(去注册表决策、IDE/workspace 模型)方向冲突,是 Home 重塑的核心债,单列一页讲清「现状契约长啥样、哪几条要退役 / 改、后端实现到哪了」。",
+    "design_owner": "后端为主(gateway 后端 sidecar 侧)。前端只投影它返回的 SkillSummary(skill 摘要 DTO),不自存第二份真相。N1 目标是让 Home 不再依赖这套注册表(改读浏览器 localStorage 的 MRU 最近列表),写盘迁 Studio Rust 后端 native-fs(见机制 B)。",
+    "code_location": "后端:routers/skills.py(skills 路由,APIRouter 前缀 /api/skills)+ services/skills.py(建/导入/列举/注销/详情的服务实现,如 create_new_skill / list_skill_summaries / delete_skill)+ models/skills.py(CreateSkillReq 请求模型、SkillSummary 摘要模型)。前端对接:api/skills 相关调用 + useSkills(走 GET /api/skills 的 hook)。",
+    "dataflow": [
+      "打开文件夹 / 新建 → 前端 POST /api/skills(import_existing 选导入或新建)→ 后端 create_new_skill 建目录 / 注册 / 写脚手架 → 返回 SkillSummary",
+      "进 Home → 前端 useSkills 调 GET /api/skills → 后端 list_skill_summaries 扫 SKILLS_DIR + workspace 目录 + MetadataStore 聚合 + 自动发现 → 返回 SkillSummary[]",
+      "Remove → 前端 DELETE /api/skills/{id} → 后端 delete_skill 只注销不删盘",
+      "目标重塑:Home 改读 MRU(本地)→ 不再调 GET /api/skills;打开/新建落盘改走 Studio Rust 后端 native-fs → 不再经 POST /api/skills"
+    ]
+  },
+  "submodules": [
+    {
+      "name": "注册表模型(现状)",
+      "code": "backend: list_skill_summaries + MetadataStore",
+      "summary": "GET /api/skills 把三个来源聚合成一张列表:公共/内置 skills 目录(SKILLS_DIR)扫描、用户 workspace skills 目录扫描、MetadataStore 持久化摘要,再减去用户显式注销的 id;每条摘要从磁盘算出 phase_count / has_golden / last_run_at,并附 config_mismatch(git 远端 URL 不一致告警)。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "聚合 = 扫盘自动发现 + 持久注册表,不是手维护的清单——磁盘上出现一个 skill 文件夹就会被发现并列出。",
+        "派生字段:phase_count(编译出的相位数)/ has_golden(是否有 golden 基线目录)/ last_run_at(最近一次运行时间)/ config_mismatch(远端 URL 不匹配告警)全是后端算的,前端只展示。",
+        "前端 Home 的 Recent 卡片现状就靠这些派生字段挂徽章(phases / Golden / Config drift)。"
+      ],
+      "do": ["列举所有已知 skill(含自动发现的未注册项)", "为每条算派生字段供前端展示"],
+      "dont": ["不是 N1 目标想要的:它是注册表 + 自动发现,与 D1/D11 去注册表冲突"],
+      "deviation": "⚠ 与 D1(去注册表决策:skill 不用注册表,改 IDE 方式)/ D11(IDE/workspace 模型锁定决策:无聚合注册表)冲突。N1 目标:Home 改读 MRU(localStorage 最近列表,只路径+名),不再依赖这套聚合 + 自动发现。"
+    },
+    {
+      "name": "D2 导入放宽(已落)",
+      "code": "backend: create_new_skill 导入分支",
+      "summary": "打开文件夹经 POST /api/skills(import_existing=true)导入时,对缺 GRAPH.md/SKILL.md 的文件夹后端已不再硬拒:_is_importable_skill_directory(判断文件夹是否含 manifest 的函数)返回 false 时只 logger.warning(... importing into repair state),把文件夹导入成 repair-state(待修态),不抛错。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "缺 manifest → 不再 raise,改 warning 放行,导入成 repair-state(代码注释明确引 D2)。",
+        "只剩 OS 级守卫:directory_path 必填且必须是存在的目录,否则 INVALID_DIRECTORY_PATH。",
+        "含 GRAPH.md 时会 lint 但不 raise(只校验、不拦)。"
+      ],
+      "do": ["缺 manifest 也放行导入(交 compile + copilot 修)"],
+      "dont": ["不再因 manifest 形态硬拒导入"],
+      "deviation": "已符合 D2(不卡导入决策)。连带:前端 formatImportSkillError 里的 manifest/lint 拒绝文案在导入路径已不可达=死分支,应删(见 n1_home_design #2 / n1_newskill_design #14)。"
+    },
+    {
+      "name": "目标重塑(去注册表 + 写盘迁 Rust)",
+      "code": "design-locked: D1/D11/D12",
+      "summary": "N1 的目标契约方向:Home 读 MRU(本地)不读 GET /api/skills;打开/新建落盘走 Studio Rust 后端 native-fs(建目录/写脚手架/git init)不经 POST /api/skills;IDE 内不删 skill(R1),DELETE /api/skills 失去 N1 调用方。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "GET /api/skills 聚合 + 自动发现 → 退役(Home 改 MRU)。",
+        "POST /api/skills 的建/导入落盘 → 迁 Studio Rust 后端 native-fs(D12)。",
+        "DELETE /api/skills → N1 不再调(R1:不在 IDE 内删 skill)。",
+        "GET /api/skills/{id}(单 skill 详情)进工作区后仍用,manifest 坏时降级 broken detail——这条是 D2 repair-state 能打开的支撑,保留。"
+      ],
+      "do": ["把 Home 从注册表模型解耦成 MRU + Rust native-fs"],
+      "dont": ["不在 N1 保留对 GET/POST/DELETE /api/skills 的依赖(详情 GET /{id} 除外)"],
+      "deviation": "这是目标设计,后端尚未完成重塑——属待办契约,实现状态见末节「后端实现状态」。"
+    },
+    {
+      "name": "错误码与 D2 可达性",
+      "code": "backend: 错误码 raise 点",
+      "summary": "前端 formatImportSkillError / formatCreateSkillError 格式化的三个错误码,在 D2 放宽后哪些还可达。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "INVALID_DIRECTORY_PATH:路径非绝对 / 父目录不存在 / 新建时目标非空文件夹——仍可达,应保留(OS 级失败)。",
+        "SKILL_ALREADY_EXISTS:id 冲突 / 文件夹已索引——仍可达(前端还借它在重开已导入文件夹时取回既有 id)。",
+        "MANIFEST_VALIDATION_FAILED:导入路径已不可达(D2 放宽);仅在新建(脚手架 tmp 目录 lint)与 fork 路径仍可达——前端导入侧这套 lint 文案是死分支,应删。"
+      ],
+      "do": ["保留 OS 级失败文案(INVALID_DIRECTORY_PATH / SKILL_ALREADY_EXISTS)"],
+      "dont": ["不在导入路径保留 MANIFEST_VALIDATION_FAILED 的 lint 文案(死分支)"],
+      "deviation": "前端错误格式化应收缩到 OS 级失败(见 femod「新建/打开错误格式化」);后端新建路径仍在 tmp 目录 lint 脚手架并可 raise,与 D2 精神不完全一致,属契约问题。"
+    }
+  ],
+  "files": [],
+  "interface_groups": [
+    {
+      "key": "crud",
+      "title": "skill 注册 / 读写接口(注册表模型,N1 目标 retire / 改)",
+      "note": "这一组是 Home 现状对接的 skill CRUD:建/导入(POST)、列举(GET)、注销(DELETE)、详情(GET /{id})。前三条在 N1 目标里要退役 / 改(去注册表 + 写盘迁 Rust + R1 不删);详情(GET /{id})进工作区后仍用,保留。它们仍 live,但本节点标 retire-target,故前端两轴里 be 标「契约问题」(契约要改),不是「未实现」。"
+    }
+  ],
+  "interfaces": [
+    {
+      "group": "crud",
+      "endpoint": "POST /api/skills",
+      "req": "CreateSkillReq:skill_id(小写连字符)、files(文件映射,空则后端脚手架)、directory_path(目标绝对路径)、import_existing(true=导入已有文件夹 / false=新建)",
+      "resp": "SkillSummary(id / name / description / phase_count / has_golden / last_run_at / directory_path / config_mismatch),201",
+      "purpose": "建新 skill 或导入已有文件夹。新建分支写脚手架 + git init;导入分支 D2 已放宽(缺 manifest 不拒、导入成 repair-state)。N1 目标:落盘迁 Studio Rust 后端 native-fs、脚手架改 logic→agent 模板(D-1-4),此端点的建/导入职责退役。",
+      "provider": "gateway 后端 sidecar(create_skill 路由 → create_new_skill 服务函数)",
+      "id": "iface-create"
+    },
+    {
+      "group": "crud",
+      "endpoint": "GET /api/skills",
+      "req": "无业务入参(鉴权用户 id 来自依赖)",
+      "resp": "SkillSummary[](每条带 phase_count / has_golden / last_run_at / config_mismatch 派生字段)",
+      "purpose": "列举所有已知 skill(注册表聚合 + 自动发现磁盘未注册项),Home 现状的 Recent 卡片派生字段来源。N1 目标:Home 改读 MRU,去注册表 / 去自动发现,此端点 N1 退役。",
+      "provider": "gateway 后端 sidecar(list_skills 路由 → list_skill_summaries 服务函数)",
+      "id": "iface-list"
+    },
+    {
+      "group": "crud",
+      "endpoint": "DELETE /api/skills/{id}",
+      "req": "路径参数 skill_id",
+      "resp": "204(无内容)",
+      "purpose": "把 skill 从 Studio 注销(只移注册表条目、不删源文件夹)。N1 目标:R1 移除 IDE 内删除入口,此端点失去 N1 调用方,退役。",
+      "provider": "gateway 后端 sidecar(delete_skill_endpoint 路由 → delete_skill 服务函数)",
+      "id": "iface-delete"
+    },
+    {
+      "group": "crud",
+      "endpoint": "GET /api/skills/{id}",
+      "req": "路径参数 skill_id",
+      "resp": "SkillDetail(manifest / 图拓扑 / 文件映射 / lint 结果;manifest 坏时降级 broken detail)",
+      "purpose": "单 skill 详情,进工作区后用。manifest 坏时降级 broken detail——这是 D2 repair-state 文件夹仍能打开的支撑。N1 保留(进工作区后由 N2 起的编辑/编译用)。",
+      "provider": "gateway 后端 sidecar(get_skill 路由 → get_skill_detail 服务函数)",
+      "id": "iface-detail"
+    }
+  ],
+  "boundaries": {
+    "do": [
+      "建/导入 skill(POST)、列举(GET)、注销(DELETE)、单 skill 详情(GET /{id})",
+      "导入对缺 manifest 已放宽(D2:repair-state 放行)",
+      "为列表算派生字段(phase_count / has_golden / last_run_at / config_mismatch)供前端展示"
+    ],
+    "dont": [
+      "N1 目标不再让 Home 依赖 GET /api/skills 聚合(改 MRU)",
+      "N1 目标不再经 POST /api/skills 落盘(迁 Studio Rust 后端 native-fs)",
+      "N1 目标不在 IDE 内删 skill(R1,不调 DELETE /api/skills)",
+      "它是 gateway 后端 sidecar 的 HTTP 承载层,不是独立的「Studio 后端」第四层"
+    ]
+  },
+  "states_errors": "",
+  "backend_status": [
+    {
+      "item": "POST /api/skills 导入放宽(D2)",
+      "d12": "D2「不卡导入 / repair-state 打开」",
+      "status": "ok",
+      "note": "后端 create_new_skill 对缺 GRAPH.md/SKILL.md 的文件夹已改 warning 放行、导入成 repair-state(代码注释明确引 D2)。这部分已就绪;连带前端导入侧的 manifest 拒绝文案成死分支、应删。",
+      "ref": "d2"
+    },
+    {
+      "item": "POST /api/skills 写盘迁 Studio Rust 后端 native-fs(D12)",
+      "d12": "D12「本地写经 native-fs(Rust)」",
+      "status": "bad",
+      "note": "目标把建目录 / 写脚手架 / git init 从 Python POST /api/skills 迁到 Studio Rust 后端 native-fs;现 Rust 侧无对应建/打开 skill 命令,新建/打开仍走 Python。属契约缺口,卡住前端 #2/#4/#13 的解耦(后端先于前端)。",
+      "ref": "d12"
+    },
+    {
+      "item": "GET /api/skills 去注册表(D1/D11)",
+      "d12": "对应 N1 设计锁 D1/D11(去注册表 / IDE 模型)",
+      "status": "review",
+      "note": "Home 改读 MRU、弃 GET /api/skills 聚合 + 自动发现,属设计锁定的目标重塑,后端 skills 服务尚待按此调整。前端可先停读派生字段(#3 纯前端),完全去注册表收尾等后端。",
+      "ref": "d2"
+    },
+    {
+      "item": "DELETE /api/skills 退役(R1)",
+      "d12": "对应 N1 设计 R1(删 Delete)",
+      "status": "review",
+      "note": "R1 移除 IDE 内删除入口后,DELETE /api/skills 失去 N1 调用方(端点本身可留作其它用途)。前端移除 Remove 入口纯前端可做。",
+      "ref": "d2"
+    }
+  ]
+}

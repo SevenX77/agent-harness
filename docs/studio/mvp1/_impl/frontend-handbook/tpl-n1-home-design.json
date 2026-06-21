@@ -1,0 +1,214 @@
+{
+  "page_id": "n1_home_design",
+  "title": "Home/Welcome 屏 · 操作设计",
+  "region": "skill-workspace:welcome",
+  "intro": "本页是进入 Studio 后第一眼看到的「Home/Welcome 落地屏」(由 WelcomePage 这个 Home 屏根组件渲染:品牌头 + 两个入口按钮 New skill / Open folder + 下方 Recent 最近列表)的 MVP1 设计(应该怎样):每张卡只描述该屏上一个操作目标长啥样、用户怎么触发、前端该怎么做、依赖后端哪条契约;现状实现与差距见实施页(n1_impl),skill 发现/读写的后端契约见后端接口契约页(n1_contract)。本节点北极星=按 D11(IDE/workspace 模型锁定决策:skill=一个文件夹,Home=打开文件夹+Recent 最近列表,无聚合注册表,一窗口专注一个 skill)把 Home 从「注册表模型外壳」重塑为「纯 MRU(most-recently-used 最近使用,按路径+名记在浏览器 localStorage)的 IDE 起点」,抄 Cursor/VS Code(R2:欢迎屏抄 Cursor/VS Code 决策)。注:Home 屏对接的后端有两块——gateway 后端的 sidecar 侧(即 apps/studio/backend 这个 Python sidecar,是 gateway 后端的 HTTP 承载层)暴露的 skills 路由(现状的注册表来源),与 Studio Rust 后端(apps/studio/tauri)的 native-fs 本地文件命令(目录选择/定位/落盘)。",
+  "atoms": [
+    {
+      "n": 1,
+      "cap": "brand-head-three-entry",
+      "track": "welcome",
+      "module": "品牌头与入口",
+      "func": "设计:Home 顶部是品牌头(Layers 图标 + 标题 + 副标题),下面并列「New skill」「Open folder」两个入口按钮,再往下是「Recent」最近列表标题——三入口信息架构,抄 Cursor/VS Code 的欢迎屏(R2)。",
+      "action": "用户启动应用且当前没有打开任何 skill(currentSkillId 为 null)时,这是默认看到的屏。",
+      "fe_design": "WelcomePage(Home 屏根组件)在画布面板渲染:品牌头(Layers 图标 + GSkill Studio 标题 + 一句副标题)、一个两列 grid 放 New skill / Open folder 两个 Button、下方 Recent 区标题。设计意图:Home = 一个干净的 IDE 起点,New(新建)与 Open folder(打开文件夹)并列、Recent(最近)在下,与 Cursor/VS Code 的 Welcome 一致(R2)。要清掉 Recent 区标题右侧那枚无操作价值的「Desktop workspace」装饰标签(Sparkles 图标 + 文字,纯装饰、无 handler);并把「Recent skills」措辞收敛为去注册表语汇(skill 是一个文件夹,不是注册表条目)。品牌头/入口不依赖任何后端,纯前端布局。",
+      "fe_modules": [],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计(2026-06-20:代码已落地,design-audit vs code 核实,状态回填)。三入口信息架构已落地:品牌头(WelcomePage.tsx:274-282)、New skill / Open folder 两列 grid(WelcomePage.tsx:284-318)、下方 Recent 标题(WelcomePage.tsx:320-322)。装饰标签已删——Recent 头区只剩 <h2>Recent</h2>,无 Sparkles 图标、无「Desktop workspace」文字(源码 grep 为 0,只剩测试断言其缺席);措辞从「Recent skills」收敛为「Recent」。测试 WelcomePage.test.tsx:97-103「drops the decorative \"Desktop workspace\" label」通过。",
+      "impl_ref": "fn-1"
+    },
+    {
+      "n": 2,
+      "cap": "open-folder",
+      "track": "welcome",
+      "module": "打开文件夹",
+      "func": "设计:点 Open folder → OS 目录选择器选任意本地文件夹 → 直接进工作区。打开任意文件夹都不被拒(缺 GRAPH.md/SKILL.md 也进,交 compile + copilot 修),且「打开」只记 MRU + 进工作区,不先把文件夹注册到后端。",
+      "action": "用户点 Home 上的「Open folder」按钮。",
+      "fe_design": "点 Open folder → selectSkillDirectory(调 Studio Rust 后端的 select_directory 命令弹 OS 目录选择器的函数,默认目录来自 app 设置的 default_skills_directory)选一个文件夹 → openSkill(把一个工作区路径打开进工作区的例程)。设计意图分两条铁律:① D2(不卡导入决策:打开任意文件夹都不被拒,缺 manifest 交 compile + copilot 修)——前端绝不因「缺 GRAPH.md/SKILL.md」弹拒绝 toast,也不保留 manifest/lint 校验文案(那些分支在 D2 后是死代码);只在 OS 级失败(路径不存在/非目录)时报错。② D12(写盘全量走 Rust 决策:本地文件读写经 native-fs,仅 engine/gateway 用 Python sidecar)——「打开文件夹」应解耦成「记 MRU(rememberWorkspace 写 localStorage)+ 进工作区(onSelectSkill)」,落盘/解析走 Studio Rust 后端的 native-fs,不再先 POST /api/skills 把文件夹注册进后端注册表。术语统一为「打开文件夹」(Open folder),去掉「import」旧注册表词。",
+      "fe_modules": [
+        { "name": "Skill 打开例程", "ref": "femod-open-skill" },
+        { "name": "新建/打开错误格式化", "ref": "femod-error-format" }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills (import_existing=true)",
+          "purpose": "现状:打开文件夹时前端经此把文件夹「导入注册」到 gateway 后端 sidecar 侧(返回后端 skillId)。目标契约要改:打开应走 Studio Rust 后端 native-fs,不经此注册(retire-target)。",
+          "mechanism_ref": "n1_mech_skills",
+          "iface_ref": "iface-create"
+        },
+        {
+          "endpoint": "Rust select_directory / ensure_workspace_support_dirs",
+          "purpose": "Studio Rust 后端的目录选择器命令 + 建 .gemini 等支持目录命令(已实现);打开文件夹的目录选择与支持目录创建走它们。",
+          "mechanism_ref": "n1_mech_nativefs",
+          "iface_ref": "iface-dirpick"
+        },
+        {
+          "endpoint": "(目标)Rust open_skill_workspace",
+          "purpose": "目标契约:打开文件夹=登记 + 返回 workspace 标识、不校验 manifest(D2)、不注册(替代 POST /api/skills import)。方向锁于平台 spec native-rust-writer/F2,命令未实现(见契约页 gap 组)。",
+          "mechanism_ref": "n1_mech_nativefs",
+          "iface_ref": "iface-open"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(2026-06-20:代码已落地,design-audit vs code 核实,状态回填)。打开已与注册解耦、改走 Studio Rust 后端 native-fs:openFolder(WelcomePage.tsx:256-269)→ selectSkillDirectory → openSkill(185-196),openSkill 里 resolveBackendSkillIdForWorkspace 现调 openSkillWorkspace(Rust native-fs,WelcomePage.tsx:181;lib/tauri.ts:161-168),不再 POST /api/skills;并 rememberWorkspace 记 MRU(line 188)。Rust open_skill_workspace_impl(native_fs.rs:1483-1502)只做 OS 级检查、不校验 manifest(D2),命令已注册(lib.rs:347)——设计原标「命令未实现」的后端缺口已补齐。manifest 拒绝死文案已删:formatImportSkillError(144-146)只透传原始 OS 错误,WelcomePage 内无 live apiClient/fetch/.post(grep exit=1)。测试「renders Open folder as the local workspace entry point」「does not present missing GRAPH.md…as a blocker」通过。",
+      "impl_ref": "fn-2"
+    },
+    {
+      "n": 3,
+      "cap": "recent-mru-grid",
+      "track": "welcome",
+      "module": "Recent MRU 列表",
+      "func": "设计:Recent 卡片网格极简化——每张卡只显示「显示名 + 短路径 + 最近打开时间」,纯靠 MRU(localStorage 最近列表)渲染;去掉 phaseCount(阶段数)、lastRunAt(上次运行时间)、Golden(基线徽章)、Config drift(配置漂移徽章)等注册表派生字段。",
+      "action": "无显式动作(Home 加载时按 MRU 渲染 Recent 卡片网格)。",
+      "fe_design": "Recent 卡片只读 useRecentSkills(localStorage 里 recentWorkspaces 这条 MRU 的读写 hook,条目含 absolutePath 绝对路径 / displayName 显示名 / identity 去重键 / lastOpenedAt 最近打开时间,上限 10)。每张卡渲染:displayName(显示名)+ shortPath(短路径)+ 最近打开时间。设计意图按 D-1-1(Recent 卡片极简决策:只存路径 + 名,删 Config drift 徽章)与 D11(无聚合注册表):卡片是 MRU 投影,不挂任何要靠 GET /api/skills 聚合才有的派生字段。要拆掉现状 visibleWorkspaces(把 MRU 与注册表合并的 memo)里「按目录路径匹配 SkillSummary、再追加注册表里 MRU 没有的 skill」这套注册表合并逻辑——Recent 只来自 MRU,不来自注册表。",
+      "fe_modules": [
+        { "name": "Recent MRU 存储", "ref": "femod-recent-mru" }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "GET /api/skills",
+          "purpose": "现状:Recent 卡片的 phaseCount/lastRunAt/Golden/Config-drift 来自此注册表聚合接口。目标契约要改:Home 改读 MRU,去注册表/去自动发现,这些派生字段不再渲染(retire-target)。",
+          "mechanism_ref": "n1_mech_skills",
+          "iface_ref": "iface-list"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(2026-06-20:代码已落地,design-audit vs code 核实,状态回填)。Recent 已是纯 MRU 投影:visibleWorkspaces(WelcomePage.tsx:162-167)只把 recentWorkspaces 映射成 {absolutePath, displayName, identity, lastOpenedAt},不再 merge GET /api/skills、无 useSkills() 调用(grep exit=1),SkillSummary 仅作类型引用。卡片只渲 displayName(365)、shortPath(367)、lastOpenedAt(400)——源码无 phase_count/has_golden/config_mismatch/Golden/Config-drift 任何注册表派生字段(D-1-1)。注册表合并逻辑已拆除,去注册表收尾完成。测试 WelcomePage.test.tsx:113-122「does not project registry-derived phase / Golden / Config drift fields」通过。",
+      "impl_ref": "fn-3"
+    },
+    {
+      "n": 4,
+      "cap": "open-recent-card",
+      "track": "welcome",
+      "module": "Recent MRU 列表",
+      "func": "设计:点一张 Recent 卡片即回到那个 skill 的工作区。只靠 MRU(路径 + 名)就能进入,后端不可用时也能打开。",
+      "action": "用户点 Recent 网格里的某张卡片(或卡片主体)。",
+      "fe_design": "点卡片 → openWorkspace → openSkill(打开进工作区的例程,同 #2 复用)→ rememberWorkspace 刷新该条 MRU 的最近时间 → onSelectSkill 进工作区。设计意图(D11):进入只需 MRU 的路径 + 名,gateway 后端 sidecar 不可用也能进(后端只在进工作区后按需对接);打开失败(如路径已不存在)走失效路径处理(见 #6)。同 #2,目标是解耦 POST /api/skills 注册、落盘走 Rust。",
+      "fe_modules": [
+        { "name": "Recent MRU 存储", "ref": "femod-recent-mru" },
+        { "name": "Skill 打开例程", "ref": "femod-open-skill" }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills (import_existing=true)",
+          "purpose": "现状:点 Recent 卡进入仍经 resolveBackendSkillIdForWorkspace → POST /api/skills 解析后端 skillId。目标契约要改:纯 MRU 进入、走 Rust,不依赖此注册(retire-target)。",
+          "mechanism_ref": "n1_mech_skills",
+          "iface_ref": "iface-create"
+        },
+        {
+          "endpoint": "(目标)Rust open_skill_workspace",
+          "purpose": "目标契约:点 Recent 卡纯靠 MRU 路径打开、走 Rust open_skill_workspace 返回 workspace 标识、不注册。方向锁于平台 spec native-rust-writer/F2,命令未实现(见契约页 gap 组)。",
+          "mechanism_ref": "n1_mech_nativefs",
+          "iface_ref": "iface-open"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(2026-06-20:代码已落地,design-audit vs code 核实,状态回填)。点 Recent 卡 → onClick 调 openWorkspace(WelcomePage.tsx:350,198-202)→ openSkill,走与 #2 同一条 Rust openSkillWorkspace 路径(line 181)+ rememberWorkspace 刷新 MRU(188),不再 POST /api/skills;Rust native-fs 是本地命令,gateway 后端不可达也能进。Rust open_skill_workspace 已注册(lib.rs:347)、impl native_fs.rs:1483——设计原标「命令未实现」缺口已补齐。复用 openSkill,符合设计。",
+      "impl_ref": "fn-4"
+    },
+    {
+      "n": 5,
+      "cap": "recent-card-reveal",
+      "track": "welcome",
+      "module": "Recent MRU 列表",
+      "func": "设计:Recent 卡片的 ⋯ 菜单 / 右键菜单里有「Reveal(在系统文件管理器里定位这个文件夹)」,浏览器态降级为复制路径到剪贴板。",
+      "action": "用户点卡片右上 ⋯ 菜单或右键,选「Show in folder」。",
+      "fe_design": "点 Reveal → handleReveal → revealInFileManager(调 Studio Rust 后端 reveal_in_file_manager 命令在 Finder/Explorer 里定位路径的函数;非桌面态降级把路径复制到剪贴板)。纯定位操作,不改任何状态。设计意图:保留 Reveal(这是 Cursor 同款、无害的本地操作),它走 Studio Rust 后端 native-fs,不碰注册表。",
+      "fe_modules": [],
+      "be_contract": [
+        {
+          "endpoint": "Rust reveal_in_file_manager",
+          "purpose": "Studio Rust 后端在系统文件管理器里定位一个本地路径的命令(已实现);浏览器态降级复制路径。",
+          "mechanism_ref": "n1_mech_nativefs",
+          "iface_ref": "iface-reveal"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(Reveal 走 Rust reveal_in_file_manager 定位、浏览器降级复制路径,不碰注册表)。",
+      "impl_ref": "fn-5"
+    },
+    {
+      "n": 6,
+      "cap": "remove-skill-entry",
+      "track": "welcome",
+      "module": "Recent MRU 列表",
+      "func": "设计:移除 IDE 内的「删除 / 移除 skill」入口(不再调 DELETE /api/skills 注销)。抄 Cursor:不在 IDE 内删 skill(要删请去系统文件夹删)。Recent 里的失效条目(路径已不存在)改为「点击时报错 + 自动从 MRU 移除」。",
+      "action": "现状:用户点卡片 ⋯ 菜单的「Remove」。目标:无此删除入口;触发点变为「点一张失效卡片」。",
+      "fe_design": "目标(R1:删 Delete 决策——抄 Cursor,不在 IDE 内删 skill,要删去系统文件夹):移除卡片 ⋯ / 右键菜单里的 Remove 项,并停止调 DELETE /api/skills(delete_skill 只注销不删盘,但 R1 要 IDE 内根本不提供删除)。失效路径处理改为:点一张 Recent 卡片时若其 absolutePath 已不存在,弹一条「该文件夹已不存在」错误 toast,并把这条从 MRU 移除(removeWorkspace + 接上现成但当前未被调用的 pruneMissingRecentWorkspaces——按 exists 谓词剪掉 MRU 里路径失效条目的助手)。设计意图:IDE 不充当 skill 的生命周期管理器,只维护「最近打开过哪些文件夹」的轻量 MRU;失效项自然清理而非用户手动删。",
+      "fe_modules": [
+        { "name": "Recent MRU 存储", "ref": "femod-recent-mru" }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "DELETE /api/skills/{id}",
+          "purpose": "现状:Remove 经此把 skill 从注册表注销(不删盘)。目标契约要改:R1 移除 IDE 内删除入口,N1 不再调它(retire-target)。",
+          "mechanism_ref": "n1_mech_skills",
+          "iface_ref": "iface-delete"
+        },
+        {
+          "endpoint": "(目标)Rust workspace_path_exists",
+          "purpose": "目标契约:失效 Recent 自动移除——点卡前用它判路径是否还在,不存在则报错 + 从 MRU 移除。命令未实现(见契约页 gap 组)。",
+          "mechanism_ref": "n1_mech_nativefs",
+          "iface_ref": "iface-exists"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(2026-06-20:代码已落地,design-audit vs code 核实,状态回填)。R1 已满足:Recent 卡的 DropdownMenu/ContextMenu 只剩 Reveal 项(WelcomePage.tsx:389-393,406-409),全仓无 handleDelete/deleteSkill/requestSkillDeleteConfirmation/DELETE /api/skills(grep)——IDE 内删除入口已移除。失效 MRU 自动清理已接线:useRecentSkills 在挂载时 useEffect 调 pruneMissingRecentWorkspacesAsync(useRecentSkills.ts:127),底层走 Rust workspace_path_exists(native_fs.rs:1505,注册 lib.rs:348;lib/tauri.ts:175)——设计原标「命令未实现」的 exists 后端缺口已补齐。实现选了「冷启动主动剪枝」而非设计字面的「点击时报错+移除」,两者同一设计意图(自动清理失效、不提供手动删除)。测试「removes the Remove entry…(R1)」(WelcomePage.test.tsx:124)、「drops entries whose folder no longer exists」(useRecentSkills.test.ts:60)通过。",
+      "impl_ref": "fn-6"
+    },
+    {
+      "n": 7,
+      "cap": "recent-empty-state",
+      "track": "welcome",
+      "module": "空态与加载",
+      "func": "设计:首次没有任何最近 skill 时显示空态,引导用户新建或打开文件夹;文案术语统一「打开文件夹」,去掉「import」旧注册表词。",
+      "action": "无显式动作(MRU 与可见列表为空时自动渲染空态)。",
+      "fe_design": "可见列表为空且无加载错误时,渲染一张空态卡(Empty 系列组件:标题 + 说明 + 媒体图)。设计意图:空态文案应是 IDE 起点语气——引导「新建 skill / 打开文件夹」,与 Cursor 的「Open a folder / Open Recent」一致(R2)。要把现状「Create or import a skill to populate this workspace」里的「import」改成「打开文件夹」(open folder),术语与 D2/IDE 模型对齐;空态的可见性判断不应再依赖注册表(改看 MRU 是否为空)。",
+      "fe_modules": [],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计(2026-06-20:代码已落地,design-audit vs code 核实,状态回填)。空态(WelcomePage.tsx:416-426)在 !isHydrating && visibleWorkspaces.length===0(MRU 判定、非注册表)时渲染。文案已去注册表化、改 IDE 起点语气:标题「No recent skills」(422),说明「Create a new skill or open a folder to get started.」(423)——源码无「import」、无「No skills found」、无「Create or import」(grep 为 0)。测试「shows an IDE-start empty state without \"import\" wording when the MRU is empty」(WelcomePage.test.tsx:174-182)通过。",
+      "impl_ref": "fn-7"
+    },
+    {
+      "n": 8,
+      "cap": "recent-skeleton",
+      "track": "welcome",
+      "module": "空态与加载",
+      "func": "设计:sidecar(后端服务进程)拉起、Recent 相关数据未到位的瞬间,Recent 区显示骨架占位,不空白闪烁。",
+      "action": "无显式动作(Home 加载、数据未到位期间自动显示骨架)。",
+      "fe_design": "Recent 区数据未到位时(loading 态)先渲染若干卡形状的骨架占位条,数据到了换真卡。设计意图(D6:骨架 + 懒加载决策——后端相关组件在数据未到时显示骨架占位,避免空白闪烁):Home 在 sidecar 拉起期间不应是空白,用 shadcn Skeleton 占位(沿用 Settings 页 ProviderListSkeleton 的占位风格,不自造组件)。骨架是纯前端展示、不发请求。注:去注册表后 Recent 主要来自 localStorage MRU(本地秒读),骨架主要覆盖「冷启动 / 路径校验 / 进入工作区前」这段过渡态。",
+      "fe_modules": [
+        { "name": "Recent MRU 存储", "ref": "femod-recent-mru" }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计(2026-06-20:代码已落地,design-audit vs code 核实,状态回填)。RecentSkeleton 组件已存在(WelcomePage.tsx:457-473),用共享 shadcn Skeleton 原语(import line 38),在 isHydrating 为真时渲染(WelcomePage.tsx:339-340)。useRecentSkills 暴露 isHydrating,首次绘制起为真、直到确认读完 localStorage(useRecentSkills.ts:113,120),覆盖冷启动过渡态(D6)。测试「renders a Recent skeleton placeholder during the cold-start hydration window」「renders the standalone RecentSkeleton from the shared shadcn Skeleton primitive」(WelcomePage.test.tsx:184-199)通过。",
+      "impl_ref": "fn-8"
+    },
+    {
+      "n": 9,
+      "cap": "recent-load-failure-fallback",
+      "track": "welcome",
+      "module": "空态与加载",
+      "func": "设计:Recent 加载失败时显示一个局部红框提示,但不阻塞「新建 / 打开文件夹」两个入口——入口始终可用。",
+      "action": "无显式动作(Recent 数据源加载报错时自动显示局部错误框)。",
+      "fe_design": "Recent 数据源(现状 GET /api/skills)报错时,在 Recent 区显示一个局部红框错误提示;品牌头与 New skill / Open folder 入口照常可点。设计意图:失败退路是局部的——Recent 拉不到不该让整个 Home 不可用,新建/打开必须随时能用(D11 的「后端不可用也能新建/打开」)。这条是已符合的失败退路,去注册表后错误源从 GET /api/skills 变为 MRU/路径校验,但「局部红框 + 不阻塞入口」的设计不变。",
+      "fe_modules": [],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计(skillListError 时显示局部红框、不阻塞新建/打开入口)。去注册表后只需把错误源从 GET /api/skills 切到 MRU/路径校验,设计不变。",
+      "impl_ref": "fn-9"
+    }
+  ]
+}

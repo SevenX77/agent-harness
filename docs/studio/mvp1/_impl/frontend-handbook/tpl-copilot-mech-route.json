@@ -1,0 +1,375 @@
+{
+  "id": "copilot_mech_route",
+  "title": "copilot route 解析 + SDK 测试机制（设计）",
+  "overview": {
+    "manages": "一个 copilot 角色（如 Opus 4.8 编码助手）从它配的 model group 解析出有序的 route 兜底链 → 用 Claude Agent SDK（claude_agent_sdk 的 ClaudeSDKClient，spawn claude CLI 子进程跑真实对话）真正调用 → 测试时用同一条 SDK 路径发真工具调用验「能不能 spawn 起来、env 注进去、tool loop 跑通」，整条链。",
+    "unified_model": "两条地基约束先讲清，下面所有机制都建在它们上（§3.1 / §2.6 PM 2026-06-18 统一模型）：① 统一模型——model-group、model-bundle、graph role、copilot role 本质都是『一串 routes 的数组』，最终都被 materializer 展开铺平成一条 fallback_chain；copilot 角色不是特殊物种，就是 role_kind='copilot' 的一条 role，它的兜底链跟 graph role 同一套解析/物化机制（resolve_routes），区别只在『谁拥有这串数组』。② copilot 单 model-group 约束——copilot 角色只能配一个 model group（不像 graph role 可多组 / 可拖 bundle），所以它的 routes 数组永远来自单一 canonical 组内的若干 provider route，『换组』= 退选当前组再选另一组（见设计页 #61），不存在多组并存。这两条决定了：copilot 的『内置角色』= 自动选了一个 canonical model-group（如 canonical_id=claude-opus-4.8 的组），复用 §2.1 已有的 canonical_id 归一化，不需要新的后端 role 元数据契约。",
+    "why_single": "它横跨 3 个真实部件（前端 copilot tab 录入/触发 / gateway 后端 sidecar 侧的 copilot.py SDK 驱动 / gateway 库的 route 解析内核），牵涉一个关键反直觉点——copilot 的真实对话不走普通 LLM 的 HTTP 调用、而是 spawn 一个 claude CLI 子进程（base_url 只能经 ANTHROPIC_BASE_URL 环境变量 per-session 注入、构造器不收 base_url）。所以「测得准 ⟺ 跑得通」这件事，必须测试也走同一个 ClaudeSDKClient 子进程路径，不能用裸 HTTP 探针冒充——这条契约一两句说不清，故单列一页。",
+    "design_owner": "gateway 后端 sidecar 侧（apps/studio/backend 的 copilot.py，即 gateway 后端的 sidecar 侧）。copilot 的 SDK 调用 / session 缓存 / 事件翻译 / SDK 测试都属 Studio 应用领域——gateway 库（packages/graph-agent-gateway）按 MVP1 第四轮判据「不感知 copilot」，只负责把一个叫 copilot_chat 的 role 解析成有序 route 列表（route 级公共能力），谁拿去怎么用与库无关。",
+    "code_location": "route 解析内核（resolve_routes：把 role 的兜底链物化成有序 ResolvedRoute）归 gateway 库，由 Studio 经 GatewayAdapter 薄委托（gateway_resolver.py 的 build_gateway_route_runtime）；SDK 调用 / session / 事件翻译 / SDK 测试驱动全在 gateway 后端 sidecar 侧 的 copilot.py。base_url 按协议归一化的两条助手（_ark_anthropic_base_url / _deepseek_anthropic_base_url）按判据属 gateway 库 公共归一化原语、现仍残留 gateway 后端 sidecar 侧 待下沉。",
+    "dataflow": [
+      "前端 copilot tab 把用户配的角色（单 model group + route 兜底序）经 PUT /api/llm/roles 整表保存",
+      "运行/测试时 gateway 后端 sidecar 侧 调 build_gateway_route_runtime(role_name) → 委托 gateway 库 的 resolve_routes 物化出有序 ResolvedRoute 兜底链",
+      "gateway 后端 sidecar 侧 对链里每条 route 用 _resolve_route_runtime 取出 api_key / base_url / 特殊 env",
+      "真实对话：build_options 把 key/base_url 写进 ClaudeAgentOptions.env（不改全局 os.environ），get_or_create_session 建/复用 ClaudeSDKClient 子进程，connect/query/receive_response 跑一轮，全链失败才报错",
+      "SDK 测试：run_route_sdk_test 对每条 route 起一个临时 ClaudeSDKClient，写一个随机 token 到临时文件、逼模型用工具读回来——token 回显才算 tool loop 真跑通",
+      "SDK message（AssistantMessage/ResultMessage 的 TextBlock/ToolUseBlock/ToolResultBlock）经 _translate_sdk_message 翻成 websocket event 流给前端"
+    ]
+  },
+  "submodules": [
+    {
+      "name": "route 解析（role → 有序兜底链）",
+      "code": "gateway: resolve_routes（Studio 薄委托: gateway_resolver.py build_gateway_route_runtime）",
+      "summary": "把一个 copilot 角色（copilot_chat 或用户自建 copilot_custom_N）配的 model group + route 兜底序，物化成 gateway 运行时能直接消费的有序 ResolvedRoute 列表。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "Studio 侧 build_gateway_route_runtime(role_name)（gateway_resolver.py 里调 GatewayAdapter 解析一个 role 的 runtime route 列表的薄委托）转给 gateway 库 的 resolver.resolve_routes(role_name, route_override)。",
+        "resolve_routes 返回有序 ResolvedRoute（每条带 route_id / endpoint_id / provider_model_id / canonical_id / 运行时设置），顺序即兜底序。",
+        "无可用 route 时 runtime 带 error_code（resource.no_available_route）/ error_payload，由上层转成终态错误。",
+        "gateway 库 库完全不知道「copilot」是什么——它只解析一个普通 role 的 route，谁拿去用 SDK 调与它无关（gateway 模块 12「copilot-invocation」已于 2026-06-03 移除）。"
+      ],
+      "do": [
+        "role → 有序 ResolvedRoute 兜底链物化。",
+        "无 route 的终态错误码产出。"
+      ],
+      "dont": [
+        "不调 SDK、不 spawn 子进程、不知 copilot 语义（那是 gateway 后端 sidecar 侧）。",
+        "不决定哪些 route 对 copilot 合格（eligible 判据是 gateway 后端 sidecar 侧 读 capability 算）。"
+      ],
+      "deviation": ""
+    },
+    {
+      "name": "SDK 会话与 env 注入",
+      "code": "studio-backend(gateway 后端 sidecar 侧): copilot.py build_options + make_session_key + get_or_create_session",
+      "summary": "把一条 route 的凭证落成 Claude Agent SDK 的 per-session 配置——尤其 base_url 只能走环境变量注入，并按 skill/模型/endpoint/key 哈希缓存复用 ClaudeSDKClient 子进程。",
+      "formula": "session_cache_key = hash(skill_id, model_provider, api_key)；base_url 注入方式 = ClaudeAgentOptions.env['ANTHROPIC_BASE_URL']（不进构造器）",
+      "diagram": "",
+      "rules": [
+        "build_options（把 api_key / base_url / provider 特殊 env 写进 ClaudeAgentOptions.env、不改全局 os.environ 的函数，copilot.py）固定写 ANTHROPIC_API_KEY；route 有 base_url 时写 ANTHROPIC_BASE_URL。",
+        "关键约束：ClaudeSDKClient.__init__ 不接受 base_url 参数（文件头注释亲述 'accepts base_url=...: False'），只能 per-session env 注入——这正是裸 HTTP 探针测不到的差异。",
+        "make_session_key（用 skill、模型、endpoint、api_key 哈希出 SDK session 缓存键的函数，copilot.py）保证换 key 后不复用旧子进程。",
+        "get_or_create_session（按缓存键建/复用同一 skill/model/provider/key 组合的 ClaudeSDKClient 的函数，copilot.py）减少重复 spawn。",
+        "_resolve_route_runtime（把一条 ResolvedRoute 转成 api_key/base_url/env_overrides 的函数，copilot.py）从 credential provider 取 secret + 算特殊 env。"
+      ],
+      "do": [
+        "per-session env 注入（key + base_url + 特殊 env），不污染全局环境。",
+        "session 缓存键计算与子进程复用。"
+      ],
+      "dont": [
+        "不决定 route 顺序（解析归 gateway 库）、不算 6 态。",
+        "不持久化对话 session 落盘（那是 D8 copilot 聊天工作台 region，不在设置页）。"
+      ],
+      "deviation": "⚠️ base_url 按协议归一化的两条助手 _ark_anthropic_base_url（ark 去 /api/v3 补 /api/compatible）/ _deepseek_anthropic_base_url（deepseek 去 /v1 补 /anthropic，copilot.py）按第四轮判据属 gateway 库 公共 base_url 归一化原语（归 gateway 凭证/端点模块）、不该是 copilot 专属；MVP1 目标是保存时主归一化、copilot 拿到的 route 已 canonical，本地只做 env 映射——这两个助手随归一化下沉 gateway 库 后 copilot 端不再各写一份。"
+    },
+    {
+      "name": "一次消息主循环 + 全链兜底",
+      "code": "studio-backend(gateway 后端 sidecar 侧): copilot.py stream_query + _next_copilot_route",
+      "summary": "copilot 一次用户消息的真实对话主调用循环——沿有序兜底链逐条 route 尝试，单 route 失败立即报错、多 route 失败记录后退到下一条，全链失败才终态报错。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "stream_query（Copilot 一次消息的主调用循环，copilot.py）先调 _resolve_copilot_runtime（读 credentials + roles 解析出有序 ResolvedRoute 列表 + credential provider，copilot.py）。",
+        "从 routes[0] 起 while 循环：每条先 _resolve_route_runtime 取 key/base_url/env；缺 credential 或解析失败时——单 route 直接 yield CopilotEventError（Copilot 本地 fallback，不走 gateway 的 ChatModel），多 route 记录失败 + _next_copilot_route 退到下一条 continue。",
+        "_next_copilot_route（在兜底链里跳过已失败 route、返回下一条可试 route 的函数，copilot.py）实现真正的「按序尝试多条」，而非只取首条。",
+        "成功取到 runtime 后 get_or_create_session 建/复用 ClaudeSDKClient，再 connect/query/receive_response 跑一轮；没 yield 过 Done 则补 CopilotEventDone。",
+        "全 route 失败才 yield CopilotEventError（_all_copilot_routes_failed_message，带 failed_route_ids）。"
+      ],
+      "do": [
+        "沿兜底链逐条尝试 + 失败退避到下一条。",
+        "单/多 route 差异化错误处理（单 route 直接报、多 route 记录续试）。"
+      ],
+      "dont": [
+        "不做 route 排序（顺序来自 gateway 库 解析结果）。",
+        "不做对话 session 持久化（D8 chat region）。"
+      ],
+      "deviation": "⚠️ 历史遗留：_resolve_copilot_route（只取兜底链首条 routes[0] 的函数，copilot.py）现已是死代码——无任何调用方，且它唯一调用的 _resolve_copilot_routes（取全部 routes 的函数）也只被这条死函数引用，二者构成一座死代码孤岛。真实对话走 stream_query + _next_copilot_route 全链（运行期解析直接走 _resolve_copilot_runtime），SDK 测试走 build_gateway_route_runtime 全链。即 spec §3.5「fallback 只取首条」的旧 drift 在现码已消除，仅剩这座孤岛可顺手清理。"
+    },
+    {
+      "name": "SDK 测试驱动（真工具调用验证）",
+      "code": "studio-backend(gateway 后端 sidecar 侧): copilot.py run_route_sdk_test + _drive_sdk_test",
+      "summary": "对每条 route 起一个临时 ClaudeSDKClient 子进程、写一个随机 token 到临时文件、逼模型用工具读回来——token 真被回显才算 spawn/env 注入/tool loop 全跑通，这就是「测的 SDK == 跑的 SDK」。",
+      "formula": "通过判据：模型回显的文本里包含临时文件里写入的随机 token ⟺ tool loop 真跑通",
+      "diagram": "",
+      "rules": [
+        "run_route_sdk_test（对一条 route 跑真 ClaudeSDKClient 工具调用测试的函数，copilot.py）先 _resolve_route_runtime 取 key/base_url/env，缺 key 直接判 failed。",
+        "建临时工作目录、写随机 token 到 copilot_probe.txt（_SDK_TEST_FILE），用 build_options 起一个本测试自有生命周期的 ClaudeSDKClient（不碰全局 session 缓存）。",
+        "_drive_sdk_test（驱动一轮 SDK 对话、按 token 回显判通过的函数，copilot.py）发 _SDK_TEST_PROMPT（要求 Read 该文件并回复内容），遍历 receive_response。",
+        "token 出现在模型回复文本里 → status=ok；否则有错误就报最后一条错误、无错误就报「token 未回显, tool loop 未验证」。",
+        "中途单个工具错误不短路（模型自己恢复后仍可能回显 token），最终以 token 是否回显为唯一裁决。",
+        "测试经统一的 role test-job 入口触发：前端 startRoleTestJob → POST /api/llm/roles/{name}/test-jobs，后端 _start_role_test_job 见 role.role_kind=='copilot' 即分流到 _start_copilot_sdk_test_job（routers/llm.py），并发跑各 route（_COPILOT_SDK_TEST_CONCURRENCY=2）。"
+      ],
+      "do": [
+        "真 ClaudeSDKClient 子进程 + 真工具调用 + token 回显裁决。",
+        "测试自有 client 生命周期（不污染运行期 session 缓存）。",
+        "结果（含失败）落 sdk_evidence 证据 + 持久化 last 测试结果。"
+      ],
+      "dont": [
+        "不用裸 HTTP 客户端冒充 SDK 测试（这正是被修掉的旧 drift）。",
+        "不持久化对话 session（D8）。"
+      ],
+      "deviation": ""
+    },
+    {
+      "name": "SDK 消息翻译（→ websocket event）",
+      "code": "studio-backend(gateway 后端 sidecar 侧): copilot.py _translate_sdk_message",
+      "summary": "把 Claude Agent SDK 吐出的消息块翻成前端聊天 UI 能消费的 websocket event 流——这也是 copilot 不归 gateway 的 ChatModel 统一调的根本原因。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "_translate_sdk_message（把一条 SDK message 翻成 websocket event 列表的函数，copilot.py）把 AssistantMessage/ResultMessage 的 TextBlock→CopilotEventText、ToolUseBlock→CopilotEventToolUseStart、ToolResultBlock→CopilotEventToolUseResult、结束→CopilotEventDone。",
+        "输出是 websocket event（不是 LangChain ChatResult）——所以 copilot 不能套进 gateway 的 GatewayChatModel 统一调用路径，必须 gateway 后端 sidecar 侧 自己驱动。"
+      ],
+      "do": [
+        "SDK message → websocket event 流翻译。"
+      ],
+      "dont": [
+        "不产 ChatResult、不进 gateway ChatModel。"
+      ],
+      "deviation": ""
+    }
+  ],
+  "files": [
+    {
+      "name": "llm_credentials.json + roles（copilot 角色视角）",
+      "what": "copilot 角色和它要用的模型 route 都存在 Studio 本地的 roles / 凭证数据里：copilot 角色是 roles 表里一条 role_kind='copilot' 的记录（配一个 model group + 兜底序），它引用的 route/endpoint 在凭证文件里（与 API Keys / LLM Roles 同一份数据，copilot 不另起文件）。前端只投影、不直接碰文件。",
+      "version": "roles 与凭证 schema 同 mech_cred（凭证 schema_version=4）；copilot 角色只是 role_kind 取 'copilot' 的一条 role",
+      "structs": [
+        {
+          "name": "Copilot Role（roles 表里一条 role_kind='copilot' 的记录）",
+          "fields": [
+            {
+              "name": "role_kind",
+              "type": "Literal['copilot'|'graph_agent']",
+              "meaning": "区分 copilot 角色与普通 graph-agent 角色的判别字段；后端按它分流测试/物化（put_llm_roles 整表 merge、_start_role_test_job 见 'copilot' 即走 SDK 测试）。取代了旧的『按 copilot_ key 前缀分流』",
+              "sensitive": false
+            },
+            {
+              "name": "active_model",
+              "type": "string",
+              "meaning": "该 copilot 角色选中的 model group 的 canonical id（选组后由 applyCopilotModelGroupSelection 写入，role key 本身不变）",
+              "sensitive": false
+            },
+            {
+              "name": "models",
+              "type": "map<modelGroupId, {providers: route_id[]}>",
+              "meaning": "单个 model group → 它的 route 兜底序（copilot 只能配一个 model group，§3.1 单组约束）",
+              "sensitive": false
+            },
+            {
+              "name": "fallback_chain",
+              "type": "list<{route_id, runtime_settings}>",
+              "meaning": "物化出的有序兜底链，运行/测试按此序逐条尝试",
+              "sensitive": false
+            },
+            {
+              "name": "intent",
+              "type": "object",
+              "meaning": "角色意图（如 provider_preference='manual_order'），copilot 走手动兜底序",
+              "sensitive": false
+            }
+          ]
+        }
+      ],
+      "owns": "这份数据归 gateway 后端（凭证 + roles），schema 由 gateway 库的 role/route 模型定义。前端不拥有、不直接碰文件，只经 HTTP 投影。",
+      "crud_pointer": "前端从不直接读写文件；copilot 角色的读写全走下方「接口」一节：读走 GET /api/llm/registry（含 model_groups + 6 态原料）、写走 PUT /api/llm/roles（整表 upsert）、测试走 POST /api/llm/roles/{name}/test-jobs（copilot 分流到 SDK 测试）、最近结果走 GET /api/llm/roles/test-results。凭证/endpoint 的增删查改见 mech_cred，不在此重列。",
+      "storage_note": "存在哪、怎么落盘是 gateway 后端 sidecar 侧 后端实现细节，前端视角不关心（与 mech_cred 同一份凭证文件）。",
+      "security_fe": "前端拿到的 api_key 永远是 ********；copilot 角色里只有 route 引用、不直接持明文 key；明文只在 SDK 调用/测试时由后端在进程内经 env 注入子进程，绝不回前端。"
+    }
+  ],
+  "interface_groups": [
+    {
+      "key": "crud",
+      "title": "数据读写类（copilot 角色 / 注册表的增删查改）",
+      "note": "这一类是数据式接口：读注册表快照、整表 upsert roles、读最近测试结果。字段固定，不任意拼。copilot 角色就是 roles 表里 role_kind='copilot' 的一条，走与 LLM Roles 同一套 roles 端点。"
+    },
+    {
+      "key": "action",
+      "title": "测试/调用动作类（触发真实 SDK 子进程调用，结果写回证据/状态）",
+      "note": "这一类不是 CRUD：它真 spawn 一个 ClaudeSDKClient 子进程发真工具调用，把结果作为副作用写回 route 状态 / sdk_evidence / 持久化 last 结果。没有『填哪些字段』的数据语义，只有『测什么、怎么判通断、结果落哪』。"
+    }
+  ],
+  "interfaces": [
+    {
+      "group": "crud",
+      "endpoint": "GET /api/llm/registry",
+      "req": "无入参",
+      "resp": "RegistryResponse：含 model_groups（每组 provider_models 带 ui_state 6 态 + capabilities）、roles（已 materialize，含 copilot 角色）、provider_endpoints/routes（api_key redacted）",
+      "purpose": "查（读整表）——进 copilot tab 时拉快照，前端经 deriveCopilotCandidateGroups 从 model_groups + credentials 派生出「anthropic 兼容的候选 copilot 模型组」，并投影现有 copilot 角色卡；前端只投影、不持第二份真相",
+      "provider": "gateway 后端（routers/llm.py get_llm_registry）",
+      "id": "iface-c0"
+    },
+    {
+      "group": "crud",
+      "endpoint": "PUT /api/llm/roles",
+      "req": "RolesData{roles: dict[name → role]}（copilot 角色 role_kind='copilot'；缺席的 role 保留不动，整表 merge upsert）",
+      "resp": "物化后的 RolesData（fallback_chain 已展开）",
+      "purpose": "增/改（upsert 角色）——新建 copilot_custom_N、选 model group、调兜底序、删角色全走它。后端按 role_kind（非 key 前缀）分流 copilot 与 graph-agent，物化时展开兜底链",
+      "provider": "gateway 后端（routers/llm.py put_llm_roles）",
+      "id": "iface-c1"
+    },
+    {
+      "group": "crud",
+      "endpoint": "GET /api/llm/roles/test-results",
+      "req": "无入参",
+      "resp": "RoleTestResultsResponse{results: map<role_name → {result}>}；copilot 结果的 per-route 裁决在 result.sdk_evidence.routes（route_id → {status}）",
+      "purpose": "查（读最近测试结果）——前端 copilot tab 挂载时拉它，把持久化的 last SDK 测试结果投影成 route 状态灯（copilotRouteStatusesFromPersistedResult 读 sdk_evidence.routes），重开/重启后状态灯不丢",
+      "provider": "gateway 后端（routers/llm.py get_role_test_results）",
+      "id": "iface-c2"
+    },
+    {
+      "group": "action",
+      "endpoint": "POST /api/llm/roles/{role_name}/test-jobs（异步 job，前端轮询 GET /api/llm/role-test-jobs/{job_id}）",
+      "req": "路径参数 role_name（copilot 角色名）；前端按 500ms 轮询 job 进度",
+      "resp": "RoleTestJobResponse：每条 route 的 SDK 测试进度/裁决（queued→testing→ok/failed/blocked）+ 完成后 result（含 sdk_evidence）",
+      "purpose": "copilot 真 SDK 测试——_start_role_test_job 见 role_kind=='copilot' 即分流 _start_copilot_sdk_test_job，对每条 route 跑 run_route_sdk_test（真 ClaudeSDKClient + token 回显验 tool loop），并发 2 条；结果含失败写回 sdk_evidence + 持久化",
+      "provider": "gateway 后端（routers/llm.py _start_copilot_sdk_test_job → services copilot.run_route_sdk_test）；route 解析委托 gateway 库，SDK 驱动在 gateway 后端 sidecar 侧",
+      "id": "iface-c3"
+    },
+    {
+      "group": "action",
+      "endpoint": "POST /api/skills/{skill_id}/copilot/dispatch（⚠️ 现为 501 占位）",
+      "req": "路径参数 skill_id + request body",
+      "resp": "501 Not Implemented",
+      "purpose": "（现状）501 占位桩（dispatch_copilot 注释自述『Preserve the existing Copilot dispatch scaffold until T2.6 wires SDK events』）。它与 WebSocket /api/skills/{skill_id}/copilot/ws（当前真能跑真实对话的入口）两条并存——⚠️ 哪条是规范入口、501 这条补齐还是废弃，spec 未定（详见下方 backend_status『dispatch_copilot 一次性入口』条的设计待定说明，本页不替 PM 裁定）。两条都属 skill 工作台 region、不在设置页，不影响设置页配置/测试",
+      "provider": "gateway 后端（routers/copilot.py dispatch_copilot）",
+      "id": "iface-c4"
+    }
+  ],
+  "boundaries": {
+    "do": [
+      "gateway 后端 sidecar 侧：把 route 凭证落成 per-session SDK env（base_url 走 ANTHROPIC_BASE_URL）、spawn/复用 ClaudeSDKClient 子进程",
+      "gateway 后端 sidecar 侧：沿兜底链逐条尝试真实对话 + 失败退避（_next_copilot_route）",
+      "gateway 后端 sidecar 侧：真 SDK 测试（token 回显验 tool loop）、结果写 sdk_evidence + 持久化",
+      "gateway 后端 sidecar 侧：SDK message → websocket event 翻译",
+      "gateway 库：把 copilot_chat / copilot_custom_N 当普通 role 解析成有序 ResolvedRoute",
+      "gateway 库：route 是否 anthropic-messages 兼容的 capability（供 gateway 后端 sidecar 侧 判 eligible）"
+    ],
+    "dont": [
+      "gateway 库 不调 SDK、不 spawn 子进程、不知 copilot 是什么（只给 route）",
+      "gateway 后端 sidecar 侧 不决定 route 顺序（顺序来自 gateway 库 解析）、不算 6 态标准总结（归 gateway 库）",
+      "不在设置页做对话 session 持久化（落盘/退出恢复属 D8 copilot 聊天工作台 region）",
+      "不在前端持第二份状态真相（前端只投影 registry / test-results，切 tab/刷新不丢）",
+      "SDK 测试不用裸 HTTP 客户端冒充（必须走真 ClaudeSDKClient，否则测不到 spawn/env/tool loop）"
+    ]
+  },
+  "states_errors": {
+    "intro": "copilot 这套机制对外产出两层状态：① route 的 6 态 ui_state（与 mech_cred 同一套，从 registry 投影，决定模型在可用列表里的颜色），② 每条 route 的 SDK 测试裁决（ok/failed/testing/not_tested，来自真 SDK 测试，决定 SDK 状态灯）。两层正交：ui_state 说『这 route 能不能用』，SDK 裁决说『这 route 的 Claude Agent SDK 工具调用测过没、过没过』。",
+    "states": [
+      {
+        "code": "ready",
+        "dot": "🟢",
+        "name": "SDK 就绪",
+        "mean": "真 SDK 测试通过（token 回显、tool loop 验通）"
+      },
+      {
+        "code": "testing",
+        "dot": "🔵",
+        "name": "测试中",
+        "mean": "SDK 测试进行中（子进程已起，等裁决）"
+      },
+      {
+        "code": "not_tested",
+        "dot": "⚪",
+        "name": "未测",
+        "mean": "SDK 工具调用能力未知（未测时仍显示在可用列表、不预过滤，§3.2 #3）"
+      },
+      {
+        "code": "unsupported",
+        "dot": "🔴",
+        "name": "不支持/失败",
+        "mean": "SDK 测试失败或被拒（failed/blocked）"
+      }
+    ],
+    "projection": {
+      "owner": "gateway 后端 sidecar 侧 前端：agentStatusForRoute（按 route 的初始 ui_state + 本次测试 override 合成一个 SDK 状态灯码，CopilotModelGroupCard.tsx）",
+      "priority": "testing override > 持久化/本次 SDK 测试裁决 > 初始 ui_state",
+      "rules": [
+        [
+          "本次测试正在跑（override=testing）",
+          "testing 🔵（脉冲）"
+        ],
+        [
+          "有 SDK 测试裁决 ok",
+          "ready 🟢"
+        ],
+        [
+          "有 SDK 测试裁决 failed/blocked",
+          "unsupported 🔴"
+        ],
+        [
+          "未测过（仅初始 ui_state）",
+          "按 ui_state 投影（未测则 not_tested ⚪）"
+        ]
+      ]
+    },
+    "reason_codes": [
+      [
+        "missing_api_key",
+        "该 route 的 endpoint 未配 api_key → SDK 测试直接判 failed（Endpoint {id} 未配置 API key）"
+      ],
+      [
+        "token_not_echoed",
+        "SDK 起得来但模型没真读文件回显 token → tool loop 未验证、判 failed"
+      ],
+      [
+        "spawn_or_env_error",
+        "spawn 子进程 / env 注入 / 连接出错 → _error_event_for_exception 映射成明确消息、判 failed"
+      ]
+    ],
+    "probe_errors": {
+      "short_circuit": [
+        "缺 api_key → 直接 failed，不起子进程"
+      ],
+      "no_short_circuit": [
+        "对话中途单个工具错误（模型可能自行恢复，最终以 token 是否回显裁决）",
+        "多 route 链里单条失败（记录后退到下一条，不终止整链）"
+      ]
+    },
+    "terminal": "全兜底链 route 都失败时，stream_query yield CopilotEventError（_all_copilot_routes_failed_message，带 failed_route_ids）；SDK 测试 job 全 route failed 仍正常完成、把每条裁决落 sdk_evidence。"
+  },
+  "backend_status": [
+    {
+      "item": "route 解析（role → 有序兜底链）",
+      "d12": "D5.1",
+      "status": "ok",
+      "note": "copilot_chat / copilot_custom_N 经 build_gateway_route_runtime 委托 gateway 库 resolve_routes 解析成有序 ResolvedRoute 已就绪；真实对话与 SDK 测试都走全链（非只首条）。← #59 直接用。",
+      "ref": "d5"
+    },
+    {
+      "item": "真 SDK 测试（token 回显验 tool loop）",
+      "d12": "COPILOT_ASSIST-4",
+      "status": "ok",
+      "note": "run_route_sdk_test 已用真 ClaudeSDKClient 子进程 + 临时文件 token 回显验 spawn/env/tool loop，旧的 AsyncAnthropic 裸探针假测试已移除 → spec §3.4 核心 drift（测的 SDK ≠ 跑的 SDK）现码已修。← #58 直接用。",
+      "ref": "d5"
+    },
+    {
+      "item": "copilot/graph-agent 角色分流",
+      "d12": "D5.1",
+      "status": "ok",
+      "note": "put_llm_roles 整表 merge + _start_role_test_job 按 role.role_kind=='copilot' 分流（非 copilot_ key 前缀）→ spec §3.5/§7.4 的『选组后丢 copilot_ 前缀致后端误判』bug 在现码结构上已不存在（前端 applyCopilotModelGroupSelection 保留 role key、后端认 role_kind 字段）。← #62/#63 直接用。",
+      "ref": "d5"
+    },
+    {
+      "item": "per-session env 注入（base_url）",
+      "d12": "COPILOT_ASSIST-2",
+      "status": "ok",
+      "note": "build_options 把 base_url 经 ANTHROPIC_BASE_URL env per-session 注入（构造器不收 base_url）已就绪；session 缓存键含 key 哈希、换 key 不复用旧子进程。",
+      "ref": "d5"
+    },
+    {
+      "item": "base_url 协议归一化助手归位",
+      "d12": "D5.2",
+      "status": "partial",
+      "note": "缺口：_ark/_deepseek_anthropic_base_url 两条归一化助手按判据属 gateway 库 公共原语、现仍残留 gateway 后端 sidecar 侧 copilot.py，待随保存时主归一化下沉后 copilot 端不再各写一份（不影响功能，是归属/重复问题）。",
+      "ref": "d5"
+    },
+    {
+      "item": "dispatch_copilot 一次性入口（⚠️ 规范入口设计待定）",
+      "d12": "COPILOT_ASSIST-1",
+      "status": "partial",
+      "note": "现状两条并存的调用入口：① POST /api/skills/{skill_id}/copilot/dispatch 仍 501 占位（dispatch_copilot 注释自述待 T2.6 接 SDK 事件）；② WebSocket /api/skills/{skill_id}/copilot/ws 是当前真正能跑真实对话的入口（copilot_ws，已接 stream_query + SDK 事件翻译）。⚠️ 设计待定：spec 未拍板『dispatch（一次性 HTTP）与 ws（流式）谁是规范入口、501 那条是要补齐还是要废弃』——故此处不替 PM 裁定，只如实标两条都在、ws 可跑、dispatch 占位。无论怎么定，都属 skill 工作台 region（D8/聊天），设置页的配置/测试都不依赖它，对本页不阻塞。",
+      "ref": "d5"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+ "n2-canvas#14": {
+  "name": "subgraph-drilldown",
+  "fix_plan": "多级下钻导航已实现(GraphCanvas.tsx:141 drillStackReducer、:249 drillInto、:578 DrillBreadcrumb、:273 getChildGraphTopology)。剩下钻编辑写回闭环:① build-nodes.ts 的 buildNodesFromTopology(行 237,给 drilled child 建节点的函数)当前把 filePath 设为 undefined(行 260),需补真实 filePath;② GraphCanvas.tsx:549 的非 subgraph 双击 fallback 用 `${skillId}` 拼路径——drilled 时 skillId 仍是父 skill,需改用 drilled child 的 root identity 开子图自己的文件;③ 编辑保存走子图自己 GRAPH.md 的 serialize(现成端点),并定 compile scope(保存触发哪个 skill_id 的 compile)+ 错误回滚。注:子图内 io 字段编辑子集另受 iopanel #30 的 loader 1:1 fatal 阻塞(后端待删)。",
+  "verify": "build-nodes.test.ts:断言 drilled child 节点有真实 filePath(指向子图自己的 phases 路径)。UI:多级下钻进子图,双击一个子图节点编辑保存,看落子图自己的 GRAPH.md(子图内改 io 字段会撞 #30 fatal)。",
+  "evidence": "build-nodes.ts:260 `filePath: undefined`(注释 224-236 明示 drilled 层无 file frontmatter);GraphCanvas.tsx:549 双击 fallback `workspace?.onFileOpen(`${skillId}/${node.data.filePath ?? ...}`)` 永远用父 skillId。下钻导航已就绪:GraphCanvas.tsx:141/249/273/578。后端 child topology 已实现 skills.py:1271 get_child_graph_topology、client.ts:594;serialize 端点 skills.py:453 复用。",
+  "effort": "M"
+ },
+ "n4-golden#32": {
+  "name": "golden-create-copilot",
+  "fix_plan": "Backend per-node contract (the handbook's claimed blocker) is now DONE: SetGoldenReq.node_id + per-node set/plan + sibling-merge strategy all exist. A per-node 'Promote to golden' button also exists — but in the PROPERTIES panel (NodeGoldenSection), NOT in the trace beside placeholder nodes as design entry① specifies. To fully satisfy entry①, surface a per-node promote/create affordance inside the trace next to each golden-less agent node (e.g. a button in TracePanel.tsx / VirtualTraceList rows or a node-anchored toolbar calling the already-wired handlePromoteNode/onPromoteNode). Entry② (AnalysisBar/autoWriteGoldenIfAbsent) already 符合.",
+  "verify": "UI entry②: run a golden-less skill -> AnalysisBar -> confirm -> autoWriteGoldenIfAbsent writes golden (works). UI entry①: open trace, expect a per-node create button beside each golden-less agent node (absent today — per-node promote lives in Properties panel instead). Test: assert TracePanel renders a per-node promote affordance for placeholder nodes.",
+  "evidence": "backend per-node contract READY: models/golden.py:50-55 (SetGoldenReq.node_id); routers/golden.py:42-67 (set + plan pass node_id); golden_diff.py:274-298 (_select_target_node_ids) + 329-347 (_merge_case_records sibling union); FE per-node promote EXISTS but in Properties: PropertiesPanel.tsx:339-392 (NodeGoldenSection 'Promote to golden' button), Workspace.tsx:284-295 (handlePromoteNode -> goldenDiff.promote(nodeId)), useGoldenDiff.ts:43-51 (promote(nodeId) -> saveGoldenBaseline with node_id); BUT TracePanel.tsx:91-110 has ONLY run-level Compare/Promote/Golden toolbar buttons — no per-node button in trace (design entry① location); 30 backend golden node/template/manual tests passed",
+  "effort": "M"
+ },
+ "n5-node#1": {
+  "name": "failed-node-red-light (就地 Error Message)",
+  "fix_plan": "SkillNode.tsx 现状不渲任何失败事件的 message 文本(整文件 only 渲 status 徽章/conflict popover);SkillGraphNodeData 类型(nodes/types.ts:13-39)也无 errorMessage 字段。需:(1) 在 SkillGraphNodeData 加 errorMessage?:string;(2) 在节点数据构建处(GraphCanvas 把 deriveNodeStatuses 结果映射成节点 data 的地方)新增一个派生:扫 traceEvents 取该 phase 最后一条 validation_fail/retry_exhausted 事件的 error_message(events.py ValidationFailEvent/RetryExhaustedEvent 带 phase_name;前端 TraceEventRow.tsx:109 已证明 event.error_message 可读);(3) SkillNode.tsx 在 error 态时就地渲该 message(复用现有 destructive 配色 + AlertTriangle,不新造组件)。后端零改动。",
+  "verify": "新增 SkillNode 测试:喂 status=error + errorMessage 的 node data,断言 message 文本出现在节点 DOM。真跑:跑一条会 validation_fail 的 skill,截图确认失败节点既红又就地显示摘要。",
+  "evidence": "SkillNode.tsx:57-219 全文无 error message 渲染,error 态仅 STATUS_STYLE 红框徽章(line 28-32);nodes/types.ts:13-39 SkillGraphNodeData 无 errorMessage 字段;错误文本仅在 trace 时间线 TraceEventRow.tsx:109-111 渲(event.error_message),非画布节点;events.py ValidationFailEvent(line 95-97)/RetryExhaustedEvent(line 323-327)带 phase_name+message,WS 已推达。",
+  "effort": "M"
+ }
+}

@@ -1,0 +1,108 @@
+{
+  "page_id": "n5_trace_design",
+  "title": "Trace 时间线 · 运行流 / 全局续跑 / 重连补流 · 操作设计",
+  "region": "debug:trace",
+  "intro": "本页是「调试续跑」里 **Trace 面板**(运行时间线)这块面的 MVP1 设计(应该怎样):它是用户观察一次 run 流程的主面板——实时滚动事件、按 phase/关键词过滤、断线自动重连且不丢事件,以及顶栏一个全局 run 级[Resume](从最近 checkpoint 整体续)。每张卡只描述操作目标、用户怎么触发、前端怎么做、依赖后端哪条契约;现状与差距见实施页(n5_impl)。注:本面板只是运行事件流(EventEnvelope)的**展示与全局续跑入口**;「事件流信封 schema/cursor/seq/gap」与「事件→节点态/边黑板派生」这两块底层机制不在本页讲(它们是被多面共用的后端/派生机制,登记在契约页的 mech_n5_events 机制页 + 复用模块页的派生 femod),本页只讲用户在 Trace 面板上的操作。F8(进 debug 前置)的「全局续跑入口」落点在本页 #11;它作为「调试前置条件」的另一落点见 N5.1#4。",
+  "atoms": [
+    {
+      "n": 10,
+      "cap": "live-trace-stream",
+      "track": "底座",
+      "module": "运行流展示",
+      "func": "设计:一次 run 进行中,Trace 面板实时滚动展示事件流(每个 phase 开始/结束、校验、工具调用、暂停/续跑等),让用户跟住 run 当前跑到哪、发生了什么。",
+      "action": "无显式动作(run 进行中事件经 WS 实时流入 → Trace 面板自动追加滚动)。",
+      "fe_design": "useRunStream(订阅 WS /ws/runs/{run_id} 的事件流 hook)持续把 EventEnvelope(事件信封)批量刷进状态 → Trace 面板用 VirtualTraceList(虚拟滚动的事件列表组件,只渲可视区行、避免上千条事件卡顿)实时渲染。设计意图:事件量可能很大(实测一次 3-phase run 能涨到上千条),所以列表虚拟化、按批刷新(每 ~100ms flush 一次)避免抖动;展示是只读投影,不在前端拼造第二份运行真相。",
+      "fe_modules": [
+        {
+          "name": "运行事件流订阅（useRunStream）"
+        },
+        {
+          "name": "Trace 面板渲染（TracePanel + VirtualTraceList）"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "WS /ws/runs/{run_id}",
+          "purpose": "订阅该 run 的 EventEnvelope 流,实时驱动 Trace 面板滚动展示。",
+          "mechanism_ref": "mech_n5_events",
+          "iface_ref": "iface-stream"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计:useRunStream 订阅 WS /ws/runs/{run_id} 批量刷事件,VirtualTraceList 虚拟滚动实时渲染;只读投影不自存真相。",
+      "impl_ref": "fn-10"
+    },
+    {
+      "n": 11,
+      "cap": "global-resume-from-checkpoint",
+      "track": "底座",
+      "module": "全局续跑",
+      "func": "设计(spec F8,全局续跑入口落点):Trace 面板顶栏一个全局[Resume]按钮,点一下从最近 checkpoint 整体续跑这条 run(run 级续,不指定起始节点);当且仅当有可续的 run 时可点。这是与节点级 Resume(N5.1#2)并存的另一条续跑语义。",
+      "action": "用户点 Trace 面板顶栏的[Resume]按钮(全局,run 级)。",
+      "fe_design": "Trace 面板顶栏渲染[Resume]按钮,可点性 canResume=Boolean(runId)(有 run 才可点)→ 点击 onResume → Workspace 的 handleResume → 调 resumeRun(skillId, runId)**不带 options** → 后端 resume 端点用 restore 出的最近 checkpoint 整体续跑。设计意图:全局 Resume 是「从上次中断处整体续」的兜底入口,语义上区别于节点级(N5.1#2 带 resume_from_node_id 的精准续);二者并存——节点级用于精准修某节点续,全局用于整体续。续跑后续期事件经同一条 WS 流回 Trace 闭环。",
+      "fe_modules": [
+        {
+          "name": "Trace 面板渲染（TracePanel + VirtualTraceList）"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{skill_id}/runs/{run_id}/resume",
+          "purpose": "不带起始节点的全局续跑:后端用 restore 出的最近 checkpoint 整体续这条 run。",
+          "mechanism_ref": "mech_n5_resume",
+          "iface_ref": "iface-resume"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计:TracePanel 顶栏有全局[Resume](aria-label『Resume run from last checkpoint』),canResume=Boolean(runId)、resumeLoading 控制可点;handleResume 调 resumeRun(skillId, runId) 不带 options,后端用最近 checkpoint 整体续。run 级续跑入口对得上(节点级精准续是另一条语义,见 N5.1#2)。",
+      "impl_ref": "fn-11"
+    },
+    {
+      "n": 12,
+      "cap": "trace-reconnect-replay",
+      "track": "底座",
+      "module": "重连补流",
+      "func": "设计:WS 断开时按退避自动重连,重连用 cursor(断点游标 'stream_id:seq')续接、按 seq(流内单调序号)去重、检测 gap(序号缺口),做到看 trace 断线后不丢事件、不重复。",
+      "action": "无显式动作(WS 断开 → 自动按退避重连 → 用 cursor 续接补齐断线期间的事件)。",
+      "fe_design": "useRunStream 记 cursor(最后收到的 'stream_id:seq')→ 断开时按 nextBackoffMs(指数退避:1s 起、×2、封顶 30s)重连 → 重连 URL 带 ?cursor= 让后端从该游标之后补发 → 前端按 seq 去重(已见过的 seq 丢弃)、检测序号 gap(缺口)。后端 WS 续接的真实落点是 sidecar 的 run_manager.stream_run(run_id, cursor) → _events_after_cursor(从内存 record.events 按 cursor replay、解析 expired/gap),由 websockets.py 的 run_events 调用;注:engine 的 EventStreamBuffer/StreamCursor 已定义但未被该 WS 路由使用。设计意图:debug 常是长时间盯一条 run,WS 必须能断线自愈且不漏事件(漏事件 = 节点灯/黑板派生失真),所以重连 + cursor 续接 + seq 去重三件套是看 trace 的韧性底座。",
+      "fe_modules": [
+        {
+          "name": "运行事件流订阅（useRunStream）"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "WS /ws/runs/{run_id}?cursor=",
+          "purpose": "带 cursor 重连,后端从该游标之后补发事件;seq 去重 + gap 检测保证不丢不重。",
+          "mechanism_ref": "mech_n5_events",
+          "iface_ref": "iface-stream"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计:useRunStream 记 cursor、按 nextBackoffMs 指数退避重连、重连带 ?cursor= 续接、按 seq 去重并检测 gap;sidecar WS 续接由 run_manager.stream_run + _events_after_cursor 做(非 engine 的 EventStreamBuffer——后者已定义未接入)。重连补流功能成立。",
+      "impl_ref": "fn-12"
+    },
+    {
+      "n": 13,
+      "cap": "trace-search-filter",
+      "track": "底座",
+      "module": "运行流过滤",
+      "func": "设计:Trace 事件多时,用户能按关键词搜索、按 phase(节点/阶段)过滤,快速定位想看的那几条事件(如只看某节点的事件、只看失败事件)。",
+      "action": "用户在 Trace 面板的搜索框输入关键词 / 选 phase 过滤条件。",
+      "fe_design": "VirtualTraceList 接搜索词 + phase 过滤条件 → 在已收事件上做客户端过滤后渲染(仍虚拟滚动)。设计意图:debug 定位靠快速筛选,过滤是纯前端在已收事件上做(不重新请求),即筛即显。",
+      "fe_modules": [
+        {
+          "name": "Trace 面板渲染（TracePanel + VirtualTraceList）"
+        }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计:VirtualTraceList 支持搜索 + 按 phase 过滤,在已收事件上客户端即筛即显(无需重请求)。纯前端,无后端契约。",
+      "impl_ref": "fn-13"
+    }
+  ]
+}

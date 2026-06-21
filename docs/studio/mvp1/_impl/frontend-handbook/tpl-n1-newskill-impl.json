@@ -1,0 +1,179 @@
+{
+ "id": "n1_newskill_impl",
+ "title": "N1.2 新建 Skill 对话框 · 实施详情",
+ "design_ref": "n1_newskill_design",
+ "intro": "本页是新建 Skill 对话框前端的现状/差距/实施计划/测试,1:1 对应设计页 n1_newskill_design(原子 #10–#14)。代码按「文件名 + 函数/对象名」引用。对话框结构本身合理(开合 / 填名 / 选父目录已符合);偏差集中在「创建落地」:写盘走 Python POST /api/skills(应迁 Studio Rust 后端 native-fs,D12)、脚手架是 logic 相位模板(应改 logic→agent,D-1-4)、错误文案留 manifest/lint 死分支(D2 后应删)。后端契约见 n1_contract。",
+ "functions": [
+  {
+   "n": 10,
+   "cap": "open-new-skill-dialog",
+   "design_ref": "atom-10",
+   "current": "现状:已实现且符合。点 New skill → openNewSkillDialog(重置表单的函数)把 newSkillName 置「new-skill」、清 newSkillParentDirectory、清 newSkillError,再开对话框;NewSkillDialog 受控渲染。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_status": "n/a",
+   "be_dep": "n/a(纯前端对话框开合)。"
+  },
+  {
+   "n": 11,
+   "cap": "newskill-name-input",
+   "design_ref": "atom-11",
+   "current": "现状:已实现且符合。名字输入框双向绑 newSkillName;submitNewSkill 提交时 normalizeSkillId(规范成合法 skill id:小写、连字符、保证首字母,空则回退 new-skill);空名时报「Name is required」。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_status": "n/a",
+   "be_dep": "n/a(纯前端表单)。"
+  },
+  {
+   "n": 12,
+   "cap": "newskill-pick-parent-dir",
+   "design_ref": "atom-12",
+   "current": "现状:已实现且符合。点 Choose folder → chooseNewSkillParentDirectory → selectSkillDirectory(Rust select_directory 目录选择器,默认 defaultSkillParentDirectory 来自 app 设置 default_skills_directory)→ 选中写 newSkillParentDirectory,父目录输入框只读显示;父目录可空。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "be_dep": "已就绪:Studio Rust 后端 select_directory 已实现。"
+  },
+  {
+   "n": 13,
+   "cap": "newskill-create-scaffold",
+   "design_ref": "atom-13",
+   "current": "现状:偏差——写盘走 Python + 脚手架是 logic 模板。submitNewSkill → api.post('/skills', buildSkillCreatePayload(...)) 即 POST /api/skills(import_existing=false)→ 后端 create_new_skill 用 _scaffold_files_for 写脚手架(模板 = GRAPH.md 单 init 相位 + phases/init/LOGIC.md + phases/init/actions/initialize.py,即 logic 相位模板,非 D-1-4 要的 agent 模板)+ initialize_skill_repository(git init)+ 注册;写盘在 Python 侧。非空目标文件夹会被拒(_directory_is_nonempty)。建后 openSkill 进工作区。",
+   "gap": "差距:① 写盘迁 Studio Rust 后端 native-fs(建目录 + 写脚手架 + git init)——等机制 B 的 Rust 建命令(未实现)。② 脚手架模板改 logic→agent(D-1-4)——等后端脚手架契约。非空文件夹拒绝已符合,保留。",
+   "fe_status": "符合",
+   "be_status": "契约问题",
+   "be_dep": "等后端:Rust 建/写脚手架/git init 命令(机制 B 未实现)+ 脚手架 logic→agent 模板契约。",
+   "fe_status_prev": "偏差",
+   "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
+  },
+  {
+   "n": 14,
+   "cap": "newskill-create-error",
+   "design_ref": "atom-14",
+   "current": "现状:偏差——留 manifest/lint 死分支。formatCreateSkillError(格式化新建错误)含 MANIFEST_VALIDATION_FAILED 分支(走 firstLintErrorMessage 抽 lint 位置)。后端新建仍在 tmp 目录 lint 脚手架并可 raise MANIFEST_VALIDATION_FAILED(与 D2 精神不完全一致);前端这套 lint 文案在去校验门后是死/低价值分支。INVALID_DIRECTORY_PATH(非空/非法)与 SKILL_ALREADY_EXISTS 仍可达、应留。",
+   "gap": "差距:前端 formatCreateSkillError 收缩到只留 OS 级失败(INVALID_DIRECTORY_PATH / SKILL_ALREADY_EXISTS),删 MANIFEST_VALIDATION_FAILED 的 lint 文案分支(纯前端可做);后端新建路径的 tmp-lint raise 属契约问题、待后端放宽。",
+   "fe_status": "符合",
+   "be_status": "契约问题",
+   "be_dep": "前端删死分支独立可做;后端新建 tmp-lint raise 的放宽等后端。",
+   "fe_status_prev": "偏差",
+   "fe_resync": "batch3 已修复+测试通过(2026-06-20)"
+  }
+ ],
+ "plan": [
+  {
+   "step": 1,
+   "what": "#14 删 manifest/lint 死分支:formatCreateSkillError 去掉 MANIFEST_VALIDATION_FAILED 的 lint 文案分支,只留 INVALID_DIRECTORY_PATH / SKILL_ALREADY_EXISTS 等 OS 级失败。",
+   "depends_on": "前端:删 formatCreateSkillError 的 lint 分支(及只服务它的 firstLintErrorMessage/cleanLintMessage/relativeLintFile)。后端不动。",
+   "why": "纯前端清理、零依赖,先做掉(落地 D2:去校验门文案)。",
+   "block": "前端独立"
+  },
+  {
+   "step": 2,
+   "what": "#13 写盘迁 Rust:新建的建目录 + 写脚手架 + git init 从 Python POST /api/skills 迁到 Studio Rust 后端 native-fs 建命令,submitNewSkill 改调 Rust 建命令再 openSkill 进工作区。",
+   "depends_on": "等后端:机制 B 的 Rust 建/写脚手架/git init 命令(未实现)。",
+   "why": "后端先于前端:Rust 建命令没出来就改前端 = 返工。",
+   "block": "等后端"
+  },
+  {
+   "step": 3,
+   "what": "#13 脚手架模板 logic→agent(D-1-4):新建出的 skill 用 agent 模板脚手架(非 logic 相位模板)、新建不调 copilot。",
+   "depends_on": "等后端:脚手架模板契约(后端 _scaffold_files_for 改 agent 模板)。",
+   "why": "脚手架模板形态由后端定,前端只触发;契约定了前端才对齐。",
+   "block": "等后端"
+  }
+ ],
+ "tests": [
+  {
+   "covers": "#10 open-new-skill-dialog",
+   "atoms": [
+    10
+   ],
+   "shots": [
+    "点 New skill 弹出干净的新建对话框(默认名 new-skill)"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "渲染 WelcomePage,点 New skill → 断言 openNewSkillDialog 重置 newSkillName='new-skill'、清父目录与错误、对话框开。"
+   ],
+   "layer2": [
+    "点 New skill → 看到对话框含名字输入(默认 new-skill)+ Choose folder + Cancel/Create。"
+   ]
+  },
+  {
+   "covers": "#11 newskill-name-input",
+   "atoms": [
+    11
+   ],
+   "shots": [
+    "填名提交时规范化成合法 skill id;空名报 Name is required"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "输入「My Skill」提交 → 断言 normalizeSkillId 产出合法 id(小写连字符)。",
+    "空名提交 → 断言报「Name is required」、不发请求。"
+   ],
+   "layer2": [
+    "在名字框输入带空格/大写的名 → Create → 实际建出的是规范化 id。"
+   ]
+  },
+  {
+   "covers": "#12 newskill-pick-parent-dir",
+   "atoms": [
+    12
+   ],
+   "shots": [
+    "点 Choose folder 弹 OS 目录选择器,选中后父目录只读显示"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "mock selectSkillDirectory 返回一个目录 → 点 Choose folder → 断言 newSkillParentDirectory 被设、父目录框只读显示该路径。",
+    "断言不选(返回 null)时父目录保持空(后端用默认 skills 目录)。"
+   ],
+   "layer2": [
+    "真跑(桌面):点 Choose folder → OS 目录选择器弹出,选一个目录 → 父目录框显示它。"
+   ]
+  },
+  {
+   "covers": "#13 newskill-create-scaffold",
+   "atoms": [
+    13
+   ],
+   "shots": [
+    "Create 后建出非空 skill 文件夹并直接进工作区",
+    "脚手架为 agent 模板(目标)"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "mock 建命令,填名点 Create → 断言建后 openSkill 进工作区。",
+    "RED:当前走 POST /api/skills(Python 写盘 + logic 相位脚手架)→ 断言『写盘走 Rust』『脚手架为 agent 模板』失败。",
+    "GREEN(待后端):Rust 建命令 + agent 模板落地后断言 submitNewSkill 调 Rust 建命令、产出 agent 模板脚手架、不调 copilot。"
+   ],
+   "layer2": [
+    "真跑:New skill 填名选父目录 → Create → 应建出 skill 文件夹并直接进工作区;在非空文件夹建应被拒。",
+    "目标形态(Rust 写盘 + agent 模板)落地前先对现状路径真跑取证,落地后重跑断言脚手架是 agent 模板。"
+   ],
+   "fe_status_prev": "偏差",
+   "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
+  },
+  {
+   "covers": "#14 newskill-create-error",
+   "atoms": [
+    14
+   ],
+   "shots": [
+    "新建失败只显示 OS 级失败文案,无 manifest/lint 文案"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "mock 后端返回 INVALID_DIRECTORY_PATH(非空文件夹)→ 断言对话框显示 OS 级失败文案。",
+    "RED:当前 formatCreateSkillError 含 MANIFEST_VALIDATION_FAILED 的 lint 文案分支 → 断言『无 manifest/lint 文案』失败。",
+    "GREEN:删死分支后断言新建错误只产出 OS 级失败文案(INVALID_DIRECTORY_PATH / SKILL_ALREADY_EXISTS)。"
+   ],
+   "layer2": [
+    "在非空文件夹里 Create → 应报「不能在非空文件夹里新建」类 OS 级失败,不出现 manifest/lint 校验文案。"
+   ],
+   "fe_status_prev": "偏差",
+   "fe_resync": "覆盖项已全绿(2026-06-20)"
+  }
+ ]
+}

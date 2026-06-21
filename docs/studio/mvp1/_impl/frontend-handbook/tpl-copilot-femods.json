@@ -1,0 +1,46 @@
+[
+  {
+    "name": "保存状态徽章（SaveStatusBadge）",
+    "kind": "共享 UI 组件（跨节点）",
+    "what": "保存状态徽章（SaveStatusBadge，components/ui/save-status-badge.tsx 里把 SaveStatus 渲染成统一徽章的通用 UI 组件）：idle 态静默不显、pending/saving/saved 各自文案、失败显式告警。它和『copilot』本身无关——任何即填即存的 settings 表单页都能用。已在 Shell（设置页四 tab 的外壳）登记、本页复用，不在 copilot 节点新造。",
+    "where": "组件本体 save-status-badge.tsx（components/ui/save-status-badge.tsx）；Copilot 挂载点 CopilotTab.tsx（SectionTitle 的 trailing 槽位）。同一组件被 General（GeneralTab.tsx）、API Keys（ApiKeysTab.tsx）、LLM Roles（LlmRolesTab.tsx / RoleBadges.tsx）共用。",
+    "duties": [
+      "把 SaveStatus 类型（idle/pending/saving/saved/失败）映射成对应徽章文案与样式。",
+      "idle 态静默不显（不占视觉），pending/saving/saved 实时反映 debounce 保存进度。",
+      "保存失败时显式呈现错误态（不静默吞掉，符合 D8『失败显式告警』铁律）。"
+    ],
+    "used_by": "Copilot：#54（壳层 trailing 徽章）、#65（保存反馈）；并跨页服务 General / API Keys / LLM Roles 的同一保存反馈需求。",
+    "boundary": "做：把保存状态渲染成统一徽章。不做：不触发保存、不算 debounce、不决定保存成败（只读 status 渲染）。",
+    "reuse_note": "已在 Shell 登记、本页复用：四页（General / API Keys / LLM Roles / Copilot）共用单一组件。spec §3.5『统一组件（横切）』要求把旧的三份近重复 badge（SaveStatusBadge / RoleSaveStatusBadge / AppSettingsSaveStatusBadge）合并成一个共享保存状态徽章——现码已闭环（四页同用 components/ui/save-status-badge.tsx）。",
+    "api": "无 —— 它只读 saveStatus 渲染；真正的保存由各页 debounce 链做（copilot 走 PUT /api/llm/roles）。"
+  },
+  {
+    "name": "copilot 角色派生",
+    "what": "Copilot tab 一批前端纯函数集合,管『从后端 model_groups + 凭证派生出兼容的候选 copilot 模型组』『按 family 阶梯择优浮出默认内置角色』『选组时保住 copilot 语义』等,本身不发网络请求。",
+    "where": "copilot-role-derivation.ts(整文件);deriveCopilotCandidateGroups(派生候选组主函数)、pickDefaultCopilotGroupIds(择优默认,现孤儿待挂载)、applyCopilotModelGroupSelection(选组保 role key)。",
+    "duties": [
+      "派生候选组:deriveCopilotCandidateGroups 从 model_groups + credentials 滤出含 anthropic 兼容 endpoint(provider_type=='anthropic_compatible')的组、丢掉无可用 route 的组,产出 CopilotRolePreview(含 availableRoutes + 6 态 ui_state)。",
+      "eligible 判据:用真 capability(anthropic 兼容协议)判 route 是否可进 copilot,取代旧的按名字猜的启发式。",
+      "择优默认:pickDefaultCopilotGroupIds 按 family 偏好阶梯浮出默认 canonical 组(Claude opus4.8→4.7、DeepSeek V4Pro→V3.2Pro,逐档回退、每 family 独立、都没有则不浮出),返回浮出组的 canonical_id 列表——现全仓无任何调用方(连测试都未引用,孤儿;#56 待接进渲染链)。它既驱动 #56 浮出,又应作 #55 built_in 判定的唯一真相。",
+      "选组保语义:applyCopilotModelGroupSelection 选组时保留 role key、只写 active_model/models/fallback_chain(默认选 ready route),role_kind 仍 copilot——修掉旧的『丢 copilot_ 前缀致后端误判』bug。",
+      "Built-in 判定(偏差):现状 isBuiltIn 是一段与浮出阶梯重复的独立硬编码 canonical_id 白名单 + description 走 includes('Claude') 模板。#55 目标=收敛成『复用 pickDefaultCopilotGroupIds 判这个组在不在系统浮出的 canonical 组里』⟺ built_in、描述直接取归一化 display_name——纯前端收敛,不需后端补元数据契约(canonical_id 已在 registry model_group DTO,§3.2 PM 2026-06-18 澄清)。"
+    ],
+    "used_by": "#55(角色卡渲染)、#56(动态浮出)、#60(eligible 候选过滤)、#63(选组保前缀)。",
+    "boundary": "做:候选组派生、eligible 过滤、择优默认、选组建模等纯前端逻辑。不做:不发网络请求、不持久化、不调 SDK、不算 6 态(投影归后端)、不决定后端 role_kind(后端据 role_kind 字段分流)。",
+    "api": "无 —— 纯前端函数,不发任何网络请求(派生/过滤/选组全在内存算,数据来自 GET /registry 的投影)。"
+  },
+  {
+    "name": "copilot 状态投影",
+    "what": "把后端 copilot SDK 测试结果(本次进度 + 持久化 last 结果)投影成角色卡上每条 route 的 SDK 状态灯的前端逻辑,起测试 job、轮询进度、挂载回填。",
+    "where": "copilot-role-test.ts(起 job + 投影);runCopilotRoleTestJob(起 job + 轮询)、copilotRouteStatusesFromJob(本次进度→灯)、copilotRouteStatusesFromPersistedResult(读 sdk_evidence.routes→挂载回填灯);灯合成在 CopilotModelGroupCard.tsx agentStatusForRoute。",
+    "duties": [
+      "起测试 job + 轮询:runCopilotRoleTestJob 调 startRoleTestJob(POST /llm/roles/{name}/test-jobs)、按 500ms 轮询 getRoleTestJob,跑完返回结果。",
+      "本次进度→灯:copilotRouteStatusesFromJob 把 job 的 provider_statuses(per-route ok/failed/blocked/testing)映射成状态灯码(ready/unsupported/testing/not_tested)。",
+      "挂载回填:copilotRouteStatusesFromPersistedResult 读持久化 last 结果的 sdk_evidence.routes(per-route 裁决),把上次状态灯回填,重开 tab/重启不丢。",
+      "灯合成:agentStatusForRoute 按『本次 testing override > 初始 ui_state』合成最终灯码,RouteStatusLight 渲染颜色。"
+    ],
+    "used_by": "#57(状态徽章/灯 + 挂载回填)、#58(测试触发 + 进度刷灯)。",
+    "boundary": "做:只读地把后端 SDK 测试结果投影成 route 状态灯。不做:不发起真 SDK 调用(真 ClaudeSDKClient 在后端)、不改后端状态、不自造状态真相(权威来自后端 sdk_evidence + ui_state)。",
+    "api": "GET /api/llm/roles/test-results(挂载拉持久化 last 结果)、POST /api/llm/roles/{name}/test-jobs + GET /api/llm/role-test-jobs/{job_id}(起 job + 轮询进度)。"
+  }
+]

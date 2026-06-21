@@ -1,0 +1,102 @@
+{
+ "id": "n2_graphmd_impl",
+ "title": "GRAPH.md 宏观契约 · 实施详情",
+ "design_ref": "n2_graphmd_design",
+ "intro": "本页是 GRAPH.md 头部宏观契约前端的现状/差距/实施计划/测试,1:1 对应设计页 n2_graphmd_design(原子 #22–#24)。代码按名引用、不写行号。序列化保真机制见后端接口契约页 mech_graph;后端引后端实施手册 D8『GRAPH parse/serialize』。",
+ "functions": [
+  {
+   "n": 22,
+   "cap": "macro-contract-form",
+   "design_ref": "n2-atom-22",
+   "current": "现状:已实现且符合。GRAPH.md 头部经 MacroContractForm(结构化表单组件)编辑:name/schema_version/llm_role/description 受控字段 + phases 可增删列表,按 FROZEN 不提供 type 入口;由画布『Macro contract』按钮在 Sheet 里打开 MacroContractDrawer,头部与 phases 各自保留型写回 GRAPH.md。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接(后端不需改)。头部改动随 POST /graph/serialize 保留型写回(只换 phases 块、保留其它字节)。后端实施手册 D8.1=ok。"
+  },
+  {
+   "n": 23,
+   "cap": "graphmd-raw-roundtrip",
+   "design_ref": "n2-atom-23",
+   "current": "现状:已实现且符合。双击头部/空白开 GRAPH.md(源码编辑器)裸编辑 → 保存对当前文本算 graphHash 当 expected_hash → serializeSkillGraph 写回:后端 serialize_skill_graph_markdown 比对 hash、_validate_canvas_topology 校验后经 graph_roundtrip 透传引擎 serialize_graph_topology;引擎 _preserve_graph_markdown_topology(只替换 phases frontmatter 块和 `<phase>` body 标签、其它字节原样保留的函数)做保留型合并 → 带 hash 落盘。io/description/正文非 `<phase>` 内容全部留存。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。POST /graph/serialize(保留型 + 409 snapshot_conflict + 422 拓扑校验)已实现。后端实施手册 D8.1=ok、D12.3=ok。"
+  },
+  {
+   "n": 24,
+   "cap": "no-type-field",
+   "design_ref": "n2-atom-24",
+   "current": "现状:已实现且符合。头部宏观契约字段集 = name/schema_version/llm_role/description/phases + 顶层 io,不含 type;脚手架与序列化都不产出 type;引擎 loader 的 _reject_phase_forbidden_metadata 会拦 phase 文件 frontmatter 的禁止字段(含 type/mode)。前端头部裸编辑不提供 type 入口。type=simple/graph 属旧 V2.x stale,已 FROZEN 废除。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。引擎对禁止字段(含 type)的拦截已实现。后端实施手册 D8=ok/partial。"
+  }
+ ],
+ "plan": [
+  {
+   "step": 1,
+   "what": "#22 macro-contract-form:给 GRAPH.md 头部加结构化表单——name/schema_version/llm_role/description 受控字段 + phases 可增删列表;不提供 type 入口(FROZEN)。改完按头部 schema 校验后走 POST /graph/serialize 保留型写回。沿用 shadcn 表单组件。",
+   "depends_on": "前端依赖:复用现成 serializeSkillGraph 保留型写回链路。后端不动(serialize 契约已就绪)。",
+   "why": "纯前端、后端契约不变,直接把头部从裸编辑升级为结构化表单(M1),消除裸编辑易写坏 frontmatter 的风险。",
+   "block": "前端独立"
+  }
+ ],
+ "tests": [
+  {
+   "covers": "#22 macro-contract-form(头部结构化表单)",
+   "atoms": [
+    22
+   ],
+   "shots": [
+    "头部表单:name/schema_version/llm_role/description 字段 + phases 可增删列表,无 type 字段",
+    "改 name 保存后 GRAPH.md 头部更新、io/正文保留"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "RED:当前无头部结构化表单(只能裸编辑 GRAPH.md)→ 断言『头部有结构化表单』失败。",
+    "GREEN:断言头部表单渲染 name/schema_version/llm_role/description + phases 列表,无 type 入口。",
+    "断言改字段保存走 serialize 保留型写回(io/description/正文保留)。"
+   ],
+   "layer2": [
+    "真跑:在头部表单改 name + 增删一个 phase,看 GRAPH.md 头部更新、其它内容不破坏。"
+   ]
+  },
+  {
+   "covers": "#23 graphmd-raw-roundtrip(裸编辑保真)",
+   "atoms": [
+    23
+   ],
+   "shots": [
+    "双击开 GRAPH.md 改一行后保存,phases/topology 改动落盘、io/description 保留",
+    "画布拿旧版保存被 409 拦"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "双击开 GRAPH.md 改文本保存 → 断言带 graphHash 当 expected_hash 调 serialize。",
+    "契约测:_preserve_graph_markdown_topology 只换 phases 块 + `<phase>` 标签,io/description/正文非 phase 内容保留。",
+    "契约测:expected_hash 不符 → 409 snapshot_conflict,不静默覆盖。"
+   ],
+   "layer2": [
+    "真跑:裸改 GRAPH.md 一行保存,diff 确认只拓扑相关变、其它保留。"
+   ]
+  },
+  {
+   "covers": "#24 no-type-field(无 type 字段)",
+   "atoms": [
+    24
+   ],
+   "shots": [
+    "头部契约无 type 字段;手写 type 进 phase frontmatter 被引擎拦"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "断言头部契约字段集 = name/schema_version/llm_role/description/phases + io,无 type。",
+    "断言前端头部编辑不提供 type 入口。",
+    "契约测:phase frontmatter 写 type/mode 等禁止字段 → 引擎 _reject_phase_forbidden_metadata 拦(编译失败)。"
+   ],
+   "layer2": [
+    "真跑:看头部无 type 字段;手写一个 type 进 phase 文件,看编译报禁止字段。"
+   ]
+  }
+ ]
+}

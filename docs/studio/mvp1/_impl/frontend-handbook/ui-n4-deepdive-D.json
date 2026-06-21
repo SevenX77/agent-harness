@@ -1,0 +1,255 @@
+{
+  "meta": {
+    "topic": "Run/Verify interfaces converging across 3 modules (Studio FE / Studio BE / gateway-loopback / Engine)",
+    "workspace": "/Users/sevenx/Documents/coding/agent-harness/.worktrees/studio-mvp1-mainbased",
+    "modules": {
+      "1_studio_frontend": "apps/studio/frontend/src/api/{client.ts,types.ts}",
+      "3a_studio_backend": "apps/studio/backend/app/routers/* + app/services/* + app/core/adapters/engine.py (EngineAdapter)",
+      "3b_gateway": "http_loopback transport branch in EngineAdapter (POST /engine/run_artifact, /engine/predict_artifact, /engine/resume)",
+      "engine": "packages/graph-agent/src/graph_agent/core/{runner.py,event_contracts.py,result.py,adapter_contracts.py}"
+    },
+    "transport_note": "EngineAdapter has transport in {in_process, http_loopback}. in_process calls graph_agent.core.runner directly; http_loopback POSTs the same payload to the gateway (③b). Studio BE never imports runner directly outside the adapter."
+  },
+  "interfaces": [
+    {
+      "name": "start run",
+      "dock": "① startRun POST /api/skills/{id}/runs → ③a runs.create_run → run_manager.start_run spawns subprocess → EngineAdapter.compile + run_artifact → 引擎 runner.run_artifact",
+      "request": {
+        "endpoint": "POST /api/skills/{skill_id}/runs (202)",
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["input_data", "JsonObject | null", "运行输入业务数据（前端只发这一个字段）"],
+          ["golden_id", "str | null", "RunRequest 支持但前端 startRun 不发：可绑定 golden 基线"],
+          ["paste_json", "str | null", "RunRequest 支持但前端不发：原始 JSON 文本，优先于 input_data"]
+        ]
+      },
+      "response": {
+        "model": "RunMetadata (202 Accepted, 异步)",
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["run_id", "str", "新建运行 id，格式 <ISO时间戳>_<8位hex>"],
+          ["status", "'running'|'success'|'failed'", "创建时恒为 running（真跑在子进程异步进行）"],
+          ["started_at", "datetime", "运行发起时刻 UTC"],
+          ["metrics", "TokensMetrics | null", "创建时为 null，终态由 drain 回填"],
+          ["input_summary", "str | null", "输入前两键的摘要字符串"],
+          ["git_status", "'committed'|'locked'|'failed'|null", "成功后 auto_commit_run 的结果（前端 RunMetadata 类型未含此字段，BE 多发）"]
+        ]
+      },
+      "engine_payload": {
+        "note": "run_manager 子进程 → EngineAdapter.run_artifact payload → 引擎 RunArtifactRequest",
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["artifact_ref", "ArtifactRef{artifact_id,content_hash,store,manifest_ref,...}", "compile() 产出的已编译产物引用"],
+          ["workspace_dir", "str", ".workspace 根目录（非 runs 子目录）"],
+          ["thread_id", "str", "= run_id，作为 checkpoint thread / idempotency_key"],
+          ["inputs", "dict", "= input_data"],
+          ["event_subscriber", "callable", "仅 in_process：子进程把 CallbackEvent 推回 process_queue"]
+        ]
+      },
+      "gate_note": "start_run 前置门：require_passing_predict(skill_id, content_hash=art_ref.content_hash) 比对已记录 predict-pass 的 content_hash；不匹配抛 RUN_REQUIRES_PREDICT(409)。这是服务端硬门，非仅 UI。",
+      "evidence": [
+        ["前端 startRun POST /skills/{id}/runs body=input_data", "apps/studio/frontend/src/api/client.ts:232"],
+        ["RunMetadata 前端类型", "apps/studio/frontend/src/api/types.ts:206"],
+        ["路由 create_run → run_manager.start_run", "apps/studio/backend/app/routers/runs.py:30"],
+        ["RunRequest/RunMetadata 后端模型 (git_status 字段)", "apps/studio/backend/app/models/runs.py:22-61"],
+        ["start_run: compile + require_passing_predict + spawn", "apps/studio/backend/app/services/run_manager.py:422-491"],
+        ["子进程 run_artifact payload (artifact_ref/workspace_dir/thread_id/inputs/event_subscriber)", "apps/studio/backend/app/services/run_manager.py:113-126"],
+        ["EngineAdapter.run_artifact → RunArtifactRequest", "apps/studio/backend/app/core/adapters/engine.py:651-700"],
+        ["引擎 RunArtifactRequest 契约", "packages/graph-agent/src/graph_agent/core/adapter_contracts.py:10-16"]
+      ]
+    },
+    {
+      "name": "predict",
+      "dock": "① postPredictRun POST /api/skills/{id}/runs/predict → ③a runs.predict_run → predictor_service.dispatch_predict_job → EngineAdapter.compile + predict_artifact → 引擎 runner.predict_artifact，返回 RunResult(source=predict)",
+      "request": {
+        "endpoint": "POST /api/skills/{skill_id}/runs/predict",
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["input_data", "JsonObject | null", "试飞输入业务数据（前端只发这一个）"],
+          ["mock_llm", "Any", "PredictRunRequest 支持：LLM mock 配置（前端不发，默认 null）"],
+          ["current_hashes", "dict[str,dict[str,str]] | null", "节点当前 schema/example hash，用于判定 stale（前端不发）"]
+        ]
+      },
+      "response": {
+        "model": "RunResult.model_dump (前端按 PredictRunResponse|RunDetail 宽松解析)",
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["success", "bool", "试飞是否通过；path_diff 有缺失/多余/乱序时自动置 false"],
+          ["run_id", "str", "试飞运行 id"],
+          ["skill_id", "str", "技能/产物 id"],
+          ["context", "dict", "最终上下文（前端 final_context）"],
+          ["source", "'run'|'predict'", "此处恒为 predict"],
+          ["phases", "list[PhaseRecord] | null", "每节点 inputs/outputs/mocked_source 记录（节点灯/路径来源）"],
+          ["path_diff", "PathDiff | null", "expected vs actual 路径差异（缺失/多余/乱序）"],
+          ["metrics", "WorkflowMetrics", "token/耗时等"],
+          ["error / diagnostics", "ErrorPayload | list", "失败诊断，去重+计数"]
+        ]
+      },
+      "engine_payload": {
+        "note": "predictor → EngineAdapter.predict_artifact payload → 引擎 PredictArtifactRequest",
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["artifact_ref", "ArtifactRef{artifact_id,content_hash,store,manifest_ref}", "compile() 产出"],
+          ["mock_llm", "Any", "落到 execution_context.mock_llm"],
+          ["current_hashes", "dict | null", "落到 execution_context.current_hashes，做 schema stale 判定"],
+          ["inputs", "dict", "= input_data"],
+          ["workspace_dir", "str", "技能 .workspace 目录"]
+        ]
+      },
+      "side_effect": "predict 成功后 predictor._persist_predict_result → record_predict_pass(content_hash) 落盘，喂给 start run 的 require_passing_predict 门。deadlock 抛 engine.predict_deadlock。",
+      "evidence": [
+        ["前端 postPredictRun + PredictRunResponse 类型", "apps/studio/frontend/src/api/client.ts:178-193"],
+        ["路由 predict_run → dispatch_predict_job", "apps/studio/backend/app/routers/runs.py:35-43"],
+        ["PredictRunRequest 模型 (input_data/mock_llm/current_hashes)", "apps/studio/backend/app/models/runs.py:30-35"],
+        ["dispatch_predict_job: compile + predict_artifact + persist predict-pass", "apps/studio/backend/app/services/predictor.py:59-114"],
+        ["EngineAdapter.predict_artifact → PredictArtifactRequest, mock_llm/current_hashes 入 ctx", "apps/studio/backend/app/core/adapters/engine.py:728-775"],
+        ["RunResult 模型 (success/phases/path_diff/source)", "packages/graph-agent/src/graph_agent/core/result.py:68-90"],
+        ["引擎 PredictArtifactRequest 契约", "packages/graph-agent/src/graph_agent/core/adapter_contracts.py:19-25"]
+      ]
+    },
+    {
+      "name": "EventEnvelope",
+      "dock": "引擎/子进程发 CallbackEvent → run_manager._event_envelope_from_callback 包成 EventEnvelope（信封统一在 graph_agent.core.event_contracts 定义）→ ③a 经 trace.jsonl/WS 回放 → ① RunDetail.events / Trace / 节点灯 / dot 共同事实源",
+      "request": {
+        "endpoint": "N/A（事件契约，非 request）；信封由 make_event_envelope 生成",
+        "headers": ["—", "—", "—"],
+        "rows": []
+      },
+      "response": {
+        "model": "EventEnvelope（信封）",
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["schema_version", "str = 'studio.event.v1'", "事件契约版本（前端 literal 同名）"],
+          ["stream_id", "str", "流 id，run 域为 'run:<run_id>'"],
+          ["seq", "int", "流内单调序号，缺口/过期检测依据"],
+          ["run_id", "str", "所属运行"],
+          ["event_type", "str", "事件类型（phase_start/llm_call/... 决定节点灯与 dot）"],
+          ["payload", "dict[str,Any]", "= 原始 CallbackEvent（节点级真值，见下）"],
+          ["cursor", "str", "续流游标，默认 '<stream_id>:<seq>'"],
+          ["timestamp", "datetime", "事件时刻 UTC"],
+          ["error_code", "str | null", "传输/流错误码（如 stream.cursor_gap）"],
+          ["error_payload", "TransportErrorPayload | null", "错误详情（details 自动脱敏 token/secret）"]
+        ]
+      },
+      "payload_inner": {
+        "note": "payload 即 CallbackEvent（前端 CallbackEventBase）——节点灯/dot 读这里",
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["event_type", "str", "事件种类"],
+          ["phase_name / current_phase", "str | null", "节点名（决定哪盏灯亮）"],
+          ["status", "str", "节点状态"],
+          ["input_tokens / output_tokens", "int", "token 计量"],
+          ["mocked_source", "'golden_case'|'copilot'|'heuristic_stub'|'manual'|null", "predict 下 mock 来源（dot 颜色）"],
+          ["metrics / variables / resolved_prompt / messages / response_data", "dict/list/null", "诊断与 Trace 明细"]
+        ]
+      },
+      "transport_error": {
+        "model": "TransportErrorPayload",
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["error_code", "str", "错误码"],
+          ["message", "str", "人读消息"],
+          ["details", "dict", "上下文，sanitize_details 自动把 api_key/token/secret/traceback 替成 [redacted]"],
+          ["retryable", "bool", "是否可重试（cursor_expired=false）"]
+        ]
+      },
+      "evidence": [
+        ["EventEnvelope 引擎模型 (信封字段全集)", "packages/graph-agent/src/graph_agent/core/event_contracts.py:46-57"],
+        ["TransportErrorPayload + details 脱敏", "packages/graph-agent/src/graph_agent/core/event_contracts.py:60-71"],
+        ["make_event_envelope 工厂 (默认 cursor/timestamp)", "packages/graph-agent/src/graph_agent/core/event_contracts.py:90-118"],
+        ["BE 把 CallbackEvent 包成信封 stream_id='run:<id>'", "apps/studio/backend/app/services/run_manager.py:790-800"],
+        ["RunDetail.events: list[EventEnvelope]", "apps/studio/backend/app/models/runs.py:99-106"],
+        ["前端 EventEnvelope + CallbackEventBase 类型", "apps/studio/frontend/src/api/types.ts:532-572"]
+      ]
+    },
+    {
+      "name": "golden compare/promote",
+      "dock": "promote: ① saveGoldenBaseline POST /api/skills/{id}/golden(浏览器) 或 /golden/plan(Tauri) → ③a golden.set/plan → golden_diff.set_golden_baseline_for_run。 compare: ① POST/GET /api/skills/{id}/runs/{runId}/compare → ③a compare.compare_run → golden_diff.compare_run_to_golden → CompareResult（不直达引擎，BE 内 diff）",
+      "request": {
+        "endpoint": "POST /golden (promote, 需 X-Studio-Write-Fallback: browser) | POST /golden/plan (Tauri 返回待写文件) | POST/GET /runs/{runId}/compare",
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["run_id", "str", "promote: 以哪次运行结果做基线 (SetGoldenReq)"],
+          ["lock", "bool", "promote: 是否锁定基线"],
+          ["against", "str | null", "compare(GET): 指定对比的基线 id，缺省取该 input 的当前基线"]
+        ]
+      },
+      "response": {
+        "model": "promote→GoldenBaseline / GoldenBaselinePlan ; compare→CompareResult",
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["[GB] id / linked_input_id / locked / content_path", "str/str/bool/str", "基线身份、绑定的 test input、锁状态、落盘路径"],
+          ["[GB] source_run_id / source_run_results_ref / baseline_ref", "str|null", "来源运行、结果引用、基线引用"],
+          ["[Plan] baseline + files[{path,content}]", "GoldenBaseline + list", "Tauri 模式：基线元数据 + 前端需写入的文件清单"],
+          ["[CR] baseline_id / baseline_ref / run_results_ref", "str", "对比的基线与运行结果引用"],
+          ["[CR] total_score", "float", "整体得分"],
+          ["[CR] node_groups[]", "list[NodeGoldenGroup]", "逐节点分组对比（见下）"]
+        ]
+      },
+      "node_group": {
+        "model": "NodeGoldenGroup (compare 的节点级结果)",
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["node_id / phase_id", "str / str|null", "节点与 phase 标识"],
+          ["status", "'pass'|'fail'", "该节点是否通过"],
+          ["score", "float", "节点得分"],
+          ["field_differences[]", "list[FieldDifference]", "字段级差异 {field_path,type,current_value,golden_value,score,changed}"],
+          ["stale_fields", "list[str]", "schema 漂移导致失效的字段"],
+          ["schema_status", "'valid'|'stale'|'missing'", "该节点 schema 状态"],
+          ["baseline_ref / run_results_ref", "str", "对比两侧引用"]
+        ]
+      },
+      "evidence": [
+        ["前端 saveGoldenBaseline (browser→/golden, Tauri→/golden/plan)", "apps/studio/frontend/src/api/client.ts:195-225"],
+        ["golden 路由 set/plan/list/delete (browser write fallback 门)", "apps/studio/backend/app/routers/golden.py:29-64"],
+        ["GoldenBaseline/Plan/SetGoldenReq 模型", "apps/studio/backend/app/models/golden.py:10-42"],
+        ["golden_diff 服务: set/plan/list 签名", "apps/studio/backend/app/services/golden_diff.py:29-59"],
+        ["compare 路由 POST/GET /compare,/diff → compare_run_to_golden", "apps/studio/backend/app/routers/compare.py:13-39"],
+        ["CompareResult / NodeGoldenGroup / FieldDifference 模型", "apps/studio/backend/app/models/compare.py:12-50"],
+        ["前端 CompareResult/NodeGoldenGroup 类型", "apps/studio/frontend/src/api/types.ts:299-330"]
+      ]
+    },
+    {
+      "name": "resume",
+      "dock": "① resumeRun POST /api/skills/{id}/runs/{runId}/resume → ③a runs.resume_run → EngineAdapter.resume(payload) →（in_process）restore checkpoint + resume_restored_runtime_state → 引擎 runner.resume_skill(context_overrides/human_response)；契约属 run 域，N5 调试续跑用",
+      "request": {
+        "endpoint": "POST /api/skills/{skill_id}/runs/{run_id}/resume",
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["context_overrides", "JsonObject | null", "续跑前覆盖的业务字段；引擎校验仅允许业务字段（禁 '_' 前缀及保留键），更新进 BusinessData 后从对应输出节点重放"],
+          ["human_input", "str | null", "人类介入文本；BE/引擎包成 human_response={content:human_input} 回填待答 tool_call"]
+        ]
+      },
+      "response": {
+        "model": "RunMetadata",
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["run_id", "str", "续跑的运行 id（沿用原 id）"],
+          ["status", "'running'|'success'|'failed'", "续跑结果状态"],
+          ["started_at", "datetime", "续跑发起时刻"],
+          ["metrics", "TokensMetrics | null", "续跑 token 计量"],
+          ["input_summary", "str | null", "恒为 'resumed'"],
+          ["git_status", "字段透传 | null", "BE 从 result.get 透传"]
+        ]
+      },
+      "engine_payload": {
+        "note": "BE resume_run → EngineAdapter.resume payload",
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["skill_id / run_id", "str", "定位运行与 checkpoint"],
+          ["context_overrides", "dict | null", "透传引擎，经 _validate_resume_context_overrides 校验"],
+          ["human_input", "str | null", "→ human_response={content}"]
+        ]
+      },
+      "error_mapping": "EngineAdapter 抛 state.* → BE _raise_state_error_response 映 409/404；其它 → RESUME_CHECKPOINT_NOT_FOUND。续跑全程持 runtime_state lease(30s ttl) + heartbeat。",
+      "evidence": [
+        ["前端 resumeRun POST .../resume body=context_overrides/human_input", "apps/studio/frontend/src/api/client.ts:306-319"],
+        ["resume_run 路由 → adapter.resume + state.* 错误映射", "apps/studio/backend/app/routers/runs.py:124-163"],
+        ["ResumeReq 模型 (context_overrides/human_input)", "apps/studio/backend/app/models/runs.py:109-113"],
+        ["EngineAdapter.resume: restore checkpoint + lease + human_response 组装", "apps/studio/backend/app/core/adapters/engine.py:805-880"],
+        ["引擎 _validate_resume_context_overrides (仅业务字段) + _apply_resume_context_overrides", "packages/graph-agent/src/graph_agent/core/runner.py:1126-1203"],
+        ["resume_skill 引擎入口签名 (context_overrides)", "packages/graph-agent/src/graph_agent/core/runner.py:455-473"]
+      ]
+    }
+  ]
+}

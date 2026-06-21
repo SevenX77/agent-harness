@@ -108,6 +108,14 @@ export interface ProviderModelOption {
   reason_code?: string | null
   capability_state: CapabilityState
   capabilities: Record<string, CapabilityValue>
+  /**
+   * R-F8: the route's gateway call method id (e.g. `anthropic_messages`,
+   * `ark_anthropic_messages`). Used by CopilotTab to keep ONLY routes that
+   * the Claude Agent SDK / Anthropic Messages caller can actually drive.
+   * Optional for backward-compat with model groups built before the field
+   * was emitted; absent value means "not eligible for copilot".
+   */
+  call_method_id?: string | null
 }
 
 export interface ModelGroupStatusSummary {
@@ -455,13 +463,26 @@ export interface RoleTestResponse {
 }
 
 export type RoleTestJobStatus = 'queued' | 'running' | 'completed' | 'failed'
-export type RoleTestProviderProgressStatus = 'queued' | 'testing' | 'ok' | 'failed' | 'blocked' | 'untested'
+// R-F11: extend with "cooling_down" so the copilot SDK probe path can surface
+// rate-limit-driven cooldowns (anthropic 429) directly into the route lights.
+export type RoleTestProviderProgressStatus =
+  | 'queued'
+  | 'testing'
+  | 'ok'
+  | 'failed'
+  | 'blocked'
+  | 'untested'
+  | 'cooling_down'
 
 export interface RoleTestProviderProgress {
   canonical_id: string
   route_id: string
   status: RoleTestProviderProgressStatus
   message?: string | null
+  // R-F21: when status === 'cooling_down', the suggested cooldown in seconds so
+  // the Test Button can render a `Cooling down {n}s` countdown and stay disabled
+  // until it elapses. Optional/null for non-cooldown states.
+  retry_after_seconds?: number | null
 }
 
 export interface RoleTestJobResponse {
@@ -471,6 +492,13 @@ export interface RoleTestJobResponse {
   message?: string | null
   provider_statuses: RoleTestProviderProgress[]
   result?: RoleTestResponse | null
+  /**
+   * R-F9: gateway error code (e.g. "resource.no_available_route") attached
+   * when `status === 'failed'`. Pairs with `message` (human Chinese text)
+   * + `error_payload` (debug context). Optional/null for normal runs.
+   */
+  error_code?: string | null
+  error_payload?: Record<string, unknown> | null
 }
 
 interface BackendRolesData {

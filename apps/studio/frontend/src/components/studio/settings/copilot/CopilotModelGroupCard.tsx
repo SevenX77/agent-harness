@@ -123,6 +123,10 @@ export const CopilotModelGroupCard = memo(function CopilotModelGroupCard({
               className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,max(12rem,calc((100%_-_0.75rem)/3))),1fr))] justify-start gap-1.5"
               role="list"
               aria-label={`${modelName} copilot route fallback order`}
+              // R-F17: announce route light/order changes politely (e.g. when a
+              // probe updates a chip from "untested" → "ready", or the user
+              // reorders the fallback chain) without stealing focus.
+              aria-live="polite"
             >
               {routes.map((route, index) => (
                 <CopilotProviderTag
@@ -260,35 +264,76 @@ function RouteStatusLight({ status }: { status: CopilotRouteJobStatus }) {
   )
 }
 
+// The backend ui_state (initialStatus) is typed as a wide string; CopilotRouteJobStatus
+// is the narrowed light vocabulary. Every real ui_state value is a member, so coerce
+// the fallback to a valid member and default unknowns to "untested" rather than leak a
+// raw string into the typed light. (CopilotRouteJobStatus was narrowed from string in a
+// shared type; this keeps the ui_state fallback type-correct.)
+const ROUTE_JOB_STATUS_VALUES = new Set<CopilotRouteJobStatus>([
+  "ready", "historical_ready", "untested", "failed",
+  "cooling_down", "off", "testing", "not_tested", "unsupported",
+])
+function coerceRouteStatus(status: string): CopilotRouteJobStatus {
+  return ROUTE_JOB_STATUS_VALUES.has(status as CopilotRouteJobStatus)
+    ? (status as CopilotRouteJobStatus)
+    : "untested"
+}
+
 export function agentStatusForRoute(
   initialStatus: CopilotAgentStatus,
   routeId: string,
   routeStatusOverrides: Record<string, CopilotRouteJobStatus>,
 ): CopilotRouteJobStatus {
+  // atom-57 light authority: an in-flight re-test ('testing') is strictly highest
+  // so a stale persisted/seeded verdict can never mask it. Any other present
+  // override is the real SDK verdict (live-completed or persisted-and-seeded on
+  // mount) and beats the backend ui_state, so the light survives a tab reopen /
+  // backend restart. With no override at all, fall back to the initial ui_state.
   const override = routeStatusOverrides[routeId]
   if (override === "testing") return override
-  return initialStatus
+  if (override !== undefined) return override
+  return coerceRouteStatus(initialStatus)
 }
 
+// R-F11: 6-state route light vocabulary aligned with the shared
+// `llm-roles/role-route-status.tsx` Tailwind tokens (bg-success / bg-warning /
+// bg-destructive / bg-primary). We can't reuse `RoleRouteStatusLight` directly
+// because the shared widget is keyed by a 4-state `RoleRouteStatus`
+// ("runnable"/"limited"/"blocked"/"testing") and would collapse our 6 states
+// (ready / historical_ready / untested / failed / cooling_down / off) — so we
+// keep a local renderer but reuse the same color tokens for visual parity.
+// "not_tested" / "unsupported" are legacy aliases so persisted/seeded route
+// status maps from older sessions still light up correctly.
 function routeSurfaceClass(status: CopilotRouteJobStatus): string {
   if (status === "ready") return "border-success-border ring-1 ring-success/25"
+  if (status === "historical_ready") return "border-primary/40 ring-1 ring-primary/20"
   if (status === "testing") return "border-primary ring-1 ring-primary/30"
-  if (status === "not_tested") return "border-warning-border ring-1 ring-warning/25"
+  if (status === "untested" || status === "not_tested") return "border-warning-border ring-1 ring-warning/25"
+  if (status === "cooling_down") return "border-warning-border ring-1 ring-warning/30"
+  if (status === "off") return "border-border ring-1 ring-foreground/10"
+  // status === "failed" / "unsupported"
   return "border-destructive-border ring-1 ring-destructive/25"
 }
 
 function lightClass(status: CopilotRouteJobStatus): string {
   if (status === "ready") return "bg-success ring-success-border"
+  if (status === "historical_ready") return "bg-primary ring-primary/40"
   if (status === "testing") return "bg-primary ring-primary animate-pulse"
-  if (status === "not_tested") return "bg-warning ring-warning-border"
+  if (status === "untested" || status === "not_tested") return "bg-muted ring-foreground/20"
+  if (status === "cooling_down") return "bg-warning ring-warning-border animate-pulse"
+  if (status === "off") return "bg-muted ring-foreground/10"
+  // status === "failed" / "unsupported"
   return "bg-destructive ring-destructive-border"
 }
 
 function statusLabel(status: CopilotRouteJobStatus): string {
   if (status === "ready") return "Ready"
+  if (status === "historical_ready") return "Previously Connected"
   if (status === "testing") return "Testing"
-  if (status === "not_tested") return "Not tested"
-  return "Unsupported"
+  if (status === "untested" || status === "not_tested") return "Untested"
+  if (status === "cooling_down") return "Cooling Down"
+  if (status === "off") return "Off"
+  return "Failed"
 }
 
 function routeTooltip(route: CopilotRoutePreview, status: CopilotRouteJobStatus): string {

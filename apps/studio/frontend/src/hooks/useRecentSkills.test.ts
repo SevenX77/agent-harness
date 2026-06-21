@@ -3,6 +3,7 @@ import {
   pruneMissingRecentWorkspaces,
   pruneMissingRecentWorkspacesAsync,
   readRecentWorkspaces,
+  readRecentWorkspacesResult,
   rememberRecentWorkspace,
   type RecentWorkspaceEntry,
 } from './useRecentSkills'
@@ -92,5 +93,47 @@ describe('pruneMissingRecentWorkspacesAsync', () => {
     const list = readRecentWorkspaces()
     expect(list.map((w) => w.absolutePath)).toEqual(['/tmp/a', '/tmp/b'])
     expect(list[0].displayName).toBe('A2')
+  })
+})
+
+describe('readRecentWorkspacesResult (N1 atom #9 local error fallback)', () => {
+  it('returns the parsed MRU with no error on a clean read', () => {
+    const result = readRecentWorkspacesResult()
+
+    expect(result.error).toBeNull()
+    expect(result.entries).toEqual([present, missing])
+  })
+
+  it('surfaces a read error instead of silently swallowing a corrupt MRU blob', () => {
+    // A corrupt localStorage blob used to be caught and swallowed into [] (a
+    // zero-silent-failure violation). It must now surface a non-null error so
+    // Home can render the local red box, while still degrading entries to [].
+    storage.setItem('recentWorkspaces', '{not valid json')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const result = readRecentWorkspacesResult()
+
+    expect(result.entries).toEqual([])
+    expect(result.error).not.toBeNull()
+    expect(typeof result.error).toBe('string')
+    // The failure is logged, never silently swallowed.
+    expect(warnSpy).toHaveBeenCalled()
+  })
+
+  it('surfaces a read error when localStorage.getItem itself throws', () => {
+    const throwingStorage = {
+      ...storage,
+      getItem: () => {
+        throw new Error('SecurityError: localStorage blocked')
+      },
+    } as Storage
+    vi.stubGlobal('localStorage', throwingStorage)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const result = readRecentWorkspacesResult()
+
+    expect(result.entries).toEqual([])
+    expect(result.error).toContain('localStorage blocked')
+    expect(warnSpy).toHaveBeenCalled()
   })
 })

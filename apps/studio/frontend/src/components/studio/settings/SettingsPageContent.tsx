@@ -126,6 +126,15 @@ export function SettingsPageContent({
                     onChange={onRolesDataChange}
                     saveStatus={rolesSaveStatus}
                     error={rolesError}
+                    // R-F3: route delete through the real DELETE endpoint (LlmRolesTab
+                    // already uses it). Without this, the FE-only delete + PUT would
+                    // be merged additively by the backend and never drop the yaml key.
+                    onDeleteRole={onDeleteRole}
+                    // R-F7: flush any debounced roles save before the SDK Test so the
+                    // gateway snapshot is up to date and Test doesn't race the writer.
+                    onBeforeRoleTest={onBeforeRoleTest}
+                    // R-F12: empty-state + per-card warnings link to the API Keys tab.
+                    onNavigateToApiKeys={onNavigateToApiKeys}
                   />
                 )}
               </SettingsErrorBoundary>

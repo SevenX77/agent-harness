@@ -20,7 +20,9 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type Mou
 import { toast } from 'sonner'
 import { AxiosError } from 'axios'
 import type { ChildGraphTopology, CompileError, ErrorResponse, ResumeValidityResponse, SkillDetail } from '@/api/types'
-import { getChildGraphTopology, writeSkillFile, type ResumeRunOptions } from '@/api/client'
+import { getChildGraphTopology, getSkillDetail, writeSkillFile, type ResumeRunOptions } from '@/api/client'
+import { isTauriRuntime } from '@/config/runtime'
+import { resolveWorkspaceIdentity } from '@/components/studio/workspace-identity'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import {
@@ -72,9 +74,14 @@ import {
 } from './canvas-authoring'
 import { DrillBreadcrumb } from './DrillBreadcrumb'
 import { drillStackReducer, type DrillStack } from './drill-stack'
+import { isDrilledChildEditable, type ChildSaveTarget } from './drill-edit'
 
 interface GraphCanvasProps {
   skillId: string
+  // n2-canvas #14: the parent skill's absolute workspace root (its own skill dir).
+  // Used to decide whether a drilled child subgraph is EDITABLE (lives under the
+  // editable workspace) or READ-ONLY (a bundled/public skill) — see isDrilledChildEditable.
+  workspaceRoot?: string | null
   skillDetail?: SkillDetail
   isLoading?: boolean
   error?: unknown
@@ -82,8 +89,12 @@ interface GraphCanvasProps {
   onNodeSelect?: (node: { id: string, data: SkillGraphNodeData }) => void
   onPanelChange?: (panel: PanelKind | null) => void
   onCreatePhase?: (kind: NewPhaseKind) => Promise<void> | void
-  onPersistConnection?: (connection: Connection) => Promise<void> | void
-  onDisconnectConnection?: (connection: { source: string; target: string }) => Promise<void> | void
+  // n2-canvas #14: every save handler takes an optional drilled-child `target`. When
+  // editing INSIDE a drilled subgraph the canvas passes the child's own identity +
+  // SkillDetail + child-refetch so the write/serialize/compile route to the CHILD
+  // skill (not the parent). Absent target ⇒ parent/root edit, behaviour unchanged.
+  onPersistConnection?: (connection: Connection, target?: ChildSaveTarget) => Promise<void> | void
+  onDisconnectConnection?: (connection: { source: string; target: string }, target?: ChildSaveTarget) => Promise<void> | void
   // n2-canvas #8 (atomic reconnect): a single handler that applies BOTH the old
   // depends_on removal and the new depends_on addition in one serialize/write.
   // When provided it replaces the disconnect-then-persist chain (two round-trips)
@@ -92,6 +103,7 @@ interface GraphCanvasProps {
   onReconnectConnection?: (
     disconnect: { source: string; target: string },
     connect: { source: string; target: string },
+    target?: ChildSaveTarget,
   ) => Promise<void> | void
   statusByNodeId?: Record<string, SkillNodeStatus>
   compileErrorsByNodeId?: Record<string, CompileError[]>
@@ -109,7 +121,7 @@ interface GraphCanvasProps {
   // new derivation — pure wiring of the existing activeTracePhase.
   activeTracePhase?: string | null
   compact?: boolean
-  onPhaseFileSave?: (args: { path: string; content: string; expectedHash: string }) => Promise<void> | void
+  onPhaseFileSave?: (args: { path: string; content: string; expectedHash: string }, target?: ChildSaveTarget) => Promise<void> | void
   // F4: when the run pauses for human input, the node-anchored HitL box submits
   // the answer through this callback (the same resume path the side panel uses).
   onSubmitHitlResponse?: (request: TraceHitlResumeRequest) => void
@@ -162,6 +174,7 @@ function childGraphErrorMessage(error: unknown, path: string): string {
 
 export function GraphCanvas({
   skillId,
+  workspaceRoot,
   skillDetail,
   isLoading = false,
   error,
@@ -202,6 +215,12 @@ export function GraphCanvas({
   // Workspace) so the navigation state never crosses the canvas boundary.
   const [drillStack, dispatchDrill] = useReducer(drillStackReducer, [] as DrillStack)
   const [childGraph, setChildGraph] = useState<ChildGraphTopology | null>(null)
+  // n2-canvas #14: the drilled child's FULL SkillDetail (manifest/topology/files),
+  // fetched in parallel with childGraph. Option A renders the drilled nodes with
+  // buildNodes(childSkillId, childDetail, …) — reusing the root edit wiring — so the
+  // child is a first-class EDITABLE graph keyed to its own identity, not a read-only
+  // topology projection. Null until it resolves (the topology-only view renders meanwhile).
+  const [childDetail, setChildDetail] = useState<SkillDetail | null>(null)
   const [childGraphError, setChildGraphError] = useState<string | null>(null)
   const [isChildGraphLoading, setIsChildGraphLoading] = useState(false)
   const [selectedCanvasNodeId, setSelectedCanvasNodeId] = useState<string | null>(null)
@@ -335,9 +354,15 @@ export function GraphCanvas({
   const handleStepsSave = useCallback(
     async (_nodeId: string, filePath: string, currentBody: string, nextBody: string) => {
       if (!onPhaseFileSave) return
+      // n2-canvas #14: inside an editable drilled child, route the body save to the
+      // child target (read via ref so this stable callback need not depend on the
+      // drill state). At root depth the target is null → parent save, unchanged.
+      const childArgs = drilledChildTargetRef.current
+        ? ([drilledChildTargetRef.current] as const)
+        : ([] as const)
       try {
         const expectedHash = await sha256Hex(currentBody)
-        await onPhaseFileSave({ path: filePath, content: nextBody, expectedHash })
+        await onPhaseFileSave({ path: filePath, content: nextBody, expectedHash }, ...childArgs)
       } catch (saveError) {
         toast.error('Could not save steps: ' + (saveError instanceof Error ? saveError.message : String(saveError)))
       }
@@ -358,35 +383,77 @@ export function GraphCanvas({
   const drilledLevel = drillStack.length > 0 ? drillStack[drillStack.length - 1] : null
   const drilledPath = drilledLevel?.path ?? null
 
+  // n2-canvas #14: load the drilled child's topology AND its full SkillDetail
+  // (Option A). The detail is fetched against the CHILD's own resolved skillId
+  // (derived from the topology-reported absolute child path), so the drilled nodes
+  // become editable against the child identity. Extracted as a reusable callback so
+  // a child write can re-fetch the child on settle/rollback (NOT parent revalidate).
+  // `signal.cancelled` lets a superseded drill abort its late writes.
+  const loadChildGraph = useCallback(async (path: string, signal: { cancelled: boolean }) => {
+    setIsChildGraphLoading(true)
+    setChildGraphError(null)
+    try {
+      const topology = await getChildGraphTopology(skillId, path)
+      if (signal.cancelled) return
+      setChildGraph(topology)
+      const childSkillId = resolveWorkspaceIdentity(`local:${topology.path}`).skillId
+      if (childSkillId) {
+        try {
+          const detail = await getSkillDetail(childSkillId)
+          if (signal.cancelled) return
+          setChildDetail(detail)
+        } catch (detailError) {
+          // The child topology rendered; its full detail (needed for in-place
+          // editing) failed to load. Keep the read-only topology view and warn —
+          // never silently degrade to a non-editable canvas with no signal.
+          if (signal.cancelled) return
+          console.warn('subgraph child detail failed to load; drilled view stays read-only', detailError)
+          setChildDetail(null)
+        }
+      }
+      setIsChildGraphLoading(false)
+    } catch (error: unknown) {
+      if (signal.cancelled) return
+      setChildGraph(null)
+      setChildDetail(null)
+      setChildGraphError(childGraphErrorMessage(error, path))
+      setIsChildGraphLoading(false)
+    }
+  }, [skillId])
+
   // Fetch the drilled child graph whenever the focused path changes. Empty
   // stack clears the child state so the root graph renders unchanged.
+  const childLoadSignalRef = useRef<{ cancelled: boolean } | null>(null)
   useEffect(() => {
     if (!drilledPath) {
       setChildGraph(null)
+      setChildDetail(null)
       setChildGraphError(null)
       setIsChildGraphLoading(false)
+      childLoadSignalRef.current = null
       return
     }
-    let cancelled = false
-    setIsChildGraphLoading(true)
-    setChildGraphError(null)
+    const signal = { cancelled: false }
+    childLoadSignalRef.current = signal
     setChildGraph(null)
-    getChildGraphTopology(skillId, drilledPath)
-      .then((topology) => {
-        if (cancelled) return
-        setChildGraph(topology)
-        setIsChildGraphLoading(false)
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        setChildGraph(null)
-        setChildGraphError(childGraphErrorMessage(error, drilledPath))
-        setIsChildGraphLoading(false)
-      })
+    setChildDetail(null)
+    void loadChildGraph(drilledPath, signal)
     return () => {
-      cancelled = true
+      signal.cancelled = true
     }
-  }, [skillId, drilledPath])
+  }, [drilledPath, loadChildGraph])
+
+  // n2-canvas #14: re-fetch the drilled child after a child write settles (success
+  // or failure). The optimistic edge state is restored from layoutResult (built
+  // from childGraph) by the connect/reconnect catch handlers; this re-pulls the
+  // child's last-known-good topology + detail so the canvas reflects the real
+  // rolled-back / committed child state — the child analogue of mutateSkillDetail.
+  const refetchChildGraph = useCallback(async () => {
+    if (!drilledPath) return
+    const signal = { cancelled: false }
+    childLoadSignalRef.current = signal
+    await loadChildGraph(drilledPath, signal)
+  }, [drilledPath, loadChildGraph])
   const safeStatusByNodeId = useMemo(() => statusByNodeId ?? {}, [statusByNodeId])
   const safeCompileErrorsByNodeId = useMemo(() => compileErrorsByNodeId ?? {}, [compileErrorsByNodeId])
   const safeGoldenStateByNodeId = useMemo(() => goldenStateByNodeId ?? {}, [goldenStateByNodeId])
@@ -408,6 +475,45 @@ export function GraphCanvas({
   }, [])
 
   const isDrilled = drilledPath !== null
+
+  // n2-canvas #14: the drilled child's own save identity, derived purely on the FE
+  // from the backend-resolved absolute child path (childGraph.path) — the SAME
+  // resolution the removed project-switch escape hatch used. Null at root depth.
+  const drilledChildIdentity = useMemo(
+    () => (isDrilled && childGraph ? resolveWorkspaceIdentity(`local:${childGraph.path}`) : null),
+    [isDrilled, childGraph],
+  )
+  // n2-canvas #14 (PM decision): a drilled child that resolves to a READ-ONLY
+  // bundled/public skill (outside the editable workspace) is NOT editable in place
+  // — block, don't auto-fork, don't silently mutate. Determined up front, path-based.
+  const isDrilledChildReadOnly = useMemo(
+    () => (childGraph ? !isDrilledChildEditable(childGraph.path, workspaceRoot ?? null, isTauriRuntime()) : false),
+    [childGraph, workspaceRoot],
+  )
+  // n2-canvas #14: the child save target threaded into the save handlers when an
+  // edit happens inside an EDITABLE drilled child. Null when at root, when the
+  // child detail hasn't loaded, or when the child is read-only (edits are blocked).
+  const drilledChildTarget = useMemo<ChildSaveTarget | null>(
+    () => (isDrilled && !isDrilledChildReadOnly && childDetail && drilledChildIdentity?.skillId
+      ? {
+          skillId: drilledChildIdentity.skillId,
+          workspaceRoot: drilledChildIdentity.workspaceRoot,
+          detail: childDetail,
+          onSettled: refetchChildGraph,
+        }
+      : null),
+    [isDrilled, isDrilledChildReadOnly, childDetail, drilledChildIdentity, refetchChildGraph],
+  )
+  const drilledChildTargetRef = useRef<ChildSaveTarget | null>(null)
+  useEffect(() => {
+    drilledChildTargetRef.current = drilledChildTarget
+  }, [drilledChildTarget])
+  // n2-canvas #14: connect/reconnect affordances are live when the canvas is the
+  // main (non-compact) editor AND, if drilled, the child is editable (not a
+  // read-only bundled/public subgraph). A read-only drilled child renders but
+  // cannot start a structure edit (the PM read-only block).
+  const canEditCanvas = !compact && !(isDrilled && isDrilledChildReadOnly)
+
   // N2 atom #15: the inline L3 step-editor inputs threaded into AGENT nodes.
   // compact = read-only projection: withhold the in-node edit callbacks so the
   // "Edit steps" affordance never renders on the mini-canvas (canEditSteps keys
@@ -423,14 +529,25 @@ export function GraphCanvas({
     [compact, expandedSteps, toggleSteps, handleStepsSave, safeDirtyDownstreamNodeIds],
   )
   const rawNodes = useMemo(() => {
-    // R9: when focused into a child graph, render its real phases/topology;
-    // status overlays (which key on root phase ids) are dropped at depth.
+    // R9 / n2-canvas #14: when focused into a child graph, render its real phases.
+    // Status overlays (which key on ROOT phase ids) are dropped at depth.
     if (isDrilled) {
       if (!childGraph) return []
-      return buildNodesFromTopology(skillId, childGraph.phases, childGraph.graph_topology, {})
+      // The drilled nodes key to the CHILD's own skillId so edits/file opens resolve
+      // against the child, not the parent. Edit affordances are withheld for a
+      // read-only child (empty agentSteps), realising the PM read-only block.
+      const childNodeSkillId = drilledChildIdentity?.skillId ?? skillId
+      const childAgentSteps = isDrilledChildReadOnly ? {} : agentStepsInputs
+      // Option A: once the child's full SkillDetail loads, render it as a
+      // first-class editable graph with buildNodes (reusing the root edit wiring).
+      // Until then, render the topology-only projection (loading/fallback path).
+      if (childDetail && !isDrilledChildReadOnly) {
+        return buildNodes(childNodeSkillId, childDetail, expandedSubgraphs, toggleSubgraph, {}, {}, {}, {}, childAgentSteps)
+      }
+      return buildNodesFromTopology(childNodeSkillId, childGraph.phases, childGraph.graph_topology, {}, childAgentSteps)
     }
     return buildNodes(skillId, skillDetail, expandedSubgraphs, toggleSubgraph, safeStatusByNodeId, safeCompileErrorsByNodeId, safeGoldenStateByNodeId, safeErrorMessageByNodeId, agentStepsInputs)
-  }, [agentStepsInputs, childGraph, expandedSubgraphs, isDrilled, safeStatusByNodeId, safeCompileErrorsByNodeId, safeGoldenStateByNodeId, safeErrorMessageByNodeId, skillDetail, skillId, toggleSubgraph])
+  }, [agentStepsInputs, childDetail, childGraph, drilledChildIdentity, expandedSubgraphs, isDrilled, isDrilledChildReadOnly, safeStatusByNodeId, safeCompileErrorsByNodeId, safeGoldenStateByNodeId, safeErrorMessageByNodeId, skillDetail, skillId, toggleSubgraph])
   const phaseNodes = useMemo(
     () => rawNodes.filter((node): node is SkillGraphNode => node.type === 'skill'),
     [rawNodes],
@@ -576,6 +693,22 @@ export function GraphCanvas({
     [edges, openEdgeContextMenu],
   )
 
+  // n2-canvas #14: a drilled subgraph that is read-only (bundled/public) — or whose
+  // editable child detail has not resolved yet — must NOT accept a structure edit.
+  // Block BEFORE any optimistic mutation so the canvas never writes against the
+  // wrong identity nor silently mutates a bundle. Returns true when the edit is
+  // blocked. At root depth (not drilled) this is a no-op.
+  const blockDrilledEditIfUnwritable = useCallback((): boolean => {
+    if (!isDrilled) return false
+    if (drilledChildTarget) return false
+    if (isDrilledChildReadOnly) {
+      toast.error('This subgraph is read-only — fork it into your workspace to edit.')
+    } else {
+      toast.error('Loading subgraph — try again in a moment.')
+    }
+    return true
+  }, [isDrilled, drilledChildTarget, isDrilledChildReadOnly])
+
   const onConnect = useCallback((connection: Connection) => {
     const source = connection.source
     const target = connection.target
@@ -597,6 +730,9 @@ export function GraphCanvas({
       toast.error('This dependency already exists')
       return
     }
+    if (blockDrilledEditIfUnwritable()) {
+      return
+    }
 
     setEdges((current) => addEdge({ ...connection, type: 'contextEdge' }, current))
     setNodes((current) => current.map((node) => {
@@ -612,13 +748,17 @@ export function GraphCanvas({
       }
     }))
     if (onPersistConnection) {
-      Promise.resolve(onPersistConnection(connection)).catch((persistError: unknown) => {
+      // n2-canvas #14: pass the drilled-child target ONLY when drilled; at root
+      // depth the call is the original single-arg form (byte-identical, no
+      // trailing undefined), so root persist behavior is unchanged.
+      const childArgs = drilledChildTarget ? ([drilledChildTarget] as const) : ([] as const)
+      Promise.resolve(onPersistConnection(connection, ...childArgs)).catch((persistError: unknown) => {
         toast.error(persistError instanceof Error ? persistError.message : 'Could not persist dependency')
         setEdges(layoutResult.edges)
         setNodes(layoutResult.nodes)
       })
     }
-  }, [layoutResult.edges, layoutResult.nodes, onPersistConnection, phaseNodes, setEdges, setNodes])
+  }, [blockDrilledEditIfUnwritable, drilledChildTarget, layoutResult.edges, layoutResult.nodes, onPersistConnection, phaseNodes, setEdges, setNodes])
 
   // R4 + n2-canvas #8: drag an existing edge endpoint to a new node = remove the
   // old dependency + add the new one. planEdgeReconnect owns the DECISION (global
@@ -649,6 +789,9 @@ export function GraphCanvas({
       toast.error('This dependency already exists')
       return
     }
+    if (blockDrilledEditIfUnwritable()) {
+      return
+    }
 
     // Optimistically move the edge to its new endpoints before the write lands.
     setEdges((current) => reconnectEdge(oldEdge, newConnection, current))
@@ -657,21 +800,39 @@ export function GraphCanvas({
       setEdges(layoutResult.edges)
       setNodes(layoutResult.nodes)
     }
+    // n2-canvas #14: spread the child target ONLY when drilled; at root depth
+    // these stay the original arg forms (no trailing undefined), so the existing
+    // root reconnect/disconnect contract is byte-identical.
+    const childArgs = drilledChildTarget ? ([drilledChildTarget] as const) : ([] as const)
     if (onReconnectConnection) {
-      Promise.resolve(onReconnectConnection(plan.disconnect, plan.connect)).catch(rollback)
+      Promise.resolve(onReconnectConnection(plan.disconnect, plan.connect, ...childArgs)).catch(rollback)
       return
     }
     if (!onDisconnectConnection || !onPersistConnection) {
       return
     }
-    Promise.resolve(onDisconnectConnection(plan.disconnect))
-      .then(() => onPersistConnection({ ...newConnection, source: plan.connect.source, target: plan.connect.target }))
+    Promise.resolve(onDisconnectConnection(plan.disconnect, ...childArgs))
+      .then(() => onPersistConnection({ ...newConnection, source: plan.connect.source, target: plan.connect.target }, ...childArgs))
       .catch(rollback)
-  }, [layoutResult.edges, layoutResult.nodes, onDisconnectConnection, onPersistConnection, onReconnectConnection, phaseNodes, setEdges, setNodes])
+  }, [blockDrilledEditIfUnwritable, drilledChildTarget, layoutResult.edges, layoutResult.nodes, onDisconnectConnection, onPersistConnection, onReconnectConnection, phaseNodes, setEdges, setNodes])
 
   const onReconnectStart = useCallback(() => {
     reconnectLandedRef.current = false
   }, [])
+
+  // n2-canvas #14: the right-click "Disconnect" menu path. Routes through the same
+  // drilled-child target + read-only block as the drag-disconnect path so a menu
+  // disconnect inside a drilled child writes the CHILD's GRAPH.md, and a read-only
+  // child is blocked. At root depth this is the plain parent disconnect, unchanged.
+  const handleMenuDisconnect = useCallback((connection: { source: string; target: string }) => {
+    if (!onDisconnectConnection) return
+    if (blockDrilledEditIfUnwritable()) return
+    const childArgs = drilledChildTarget ? ([drilledChildTarget] as const) : ([] as const)
+    void Promise.resolve(onDisconnectConnection(connection, ...childArgs))
+      .catch((disconnectError: unknown) => {
+        toast.error(disconnectError instanceof Error ? disconnectError.message : 'Could not disconnect dependency')
+      })
+  }, [blockDrilledEditIfUnwritable, drilledChildTarget, onDisconnectConnection])
 
   // R4: an edge endpoint dragged off every handle and released (isValid not
   // true, and no onReconnect fired) = the user pulled the wire loose, so drop
@@ -691,14 +852,18 @@ export function GraphCanvas({
     if (!onDisconnectConnection) {
       return
     }
+    if (blockDrilledEditIfUnwritable()) {
+      return
+    }
     setEdges((current) => current.filter((candidate) => candidate.id !== edge.id))
-    Promise.resolve(onDisconnectConnection({ source: edge.source, target: edge.target }))
+    const childArgs = drilledChildTarget ? ([drilledChildTarget] as const) : ([] as const)
+    Promise.resolve(onDisconnectConnection({ source: edge.source, target: edge.target }, ...childArgs))
       .catch((disconnectError: unknown) => {
         toast.error(disconnectError instanceof Error ? disconnectError.message : 'Could not disconnect dependency')
         setEdges(layoutResult.edges)
         setNodes(layoutResult.nodes)
       })
-  }, [layoutResult.edges, layoutResult.nodes, onDisconnectConnection, setEdges, setNodes])
+  }, [blockDrilledEditIfUnwritable, drilledChildTarget, layoutResult.edges, layoutResult.nodes, onDisconnectConnection, setEdges, setNodes])
 
   return (
     <ContextMenu>
@@ -737,11 +902,11 @@ export function GraphCanvas({
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        nodesConnectable={!compact}
+        nodesConnectable={canEditCanvas}
         nodesDraggable={!compact}
         deleteKeyCode={compact ? null : undefined}
         onConnect={compact ? undefined : onConnect}
-        edgesReconnectable={!compact}
+        edgesReconnectable={canEditCanvas}
         onReconnectStart={compact ? undefined : onReconnectStart}
         onReconnect={compact ? undefined : onReconnect}
         onReconnectEnd={compact ? undefined : onReconnectEnd}
@@ -779,31 +944,25 @@ export function GraphCanvas({
             return
           }
           if (node.type === 'skill') {
-            // R9: double-clicking a subgraph node focuses INTO its child graph
-            // in-place; non-subgraph phases open their source file as before.
+            // R9: double-clicking a NESTED subgraph node focuses INTO its child
+            // graph in-place (drill DEEPER); non-subgraph phases open their source
+            // file as before. Unchanged at any depth.
             const subgraphPath = normalizeAbsoluteSubgraphPath(node.data.subgraphPath)
             if (subgraphPath) {
               drillInto(subgraphPath, node.data.label)
               return
             }
-            // R9 edit write-back: while drilled, a leaf (non-subgraph) child
-            // node belongs to the CHILD subgraph, not the parent `skillId`. Its
-            // file/GRAPH.md serialize/compile scope must run against the child's
-            // own identity, so entering it opens the child as its own editable
-            // skill (the nav-stack breadcrumb pops back up). Opening directly
-            // under the parent `skillId` would resolve a non-existent file in
-            // the wrong skill's file map. At root depth the in-place open path
-            // is unchanged.
-            if (isDrilled && drilledPath) {
-              // The child path is an absolute workspace root; `local:` marks it
-              // as a local-workspace selection (same form WelcomePage records),
-              // which `resolveWorkspaceIdentity` resolves to the child's own
-              // skillId + workspaceRoot.
-              workspace?.pushNavSkill(`local:${drilledPath}`)
-              return
-            }
+            // n2-canvas #14 (edit write-back): while drilled, a leaf (non-subgraph)
+            // child node belongs to the CHILD subgraph and is edited IN PLACE — no
+            // project switch. The node's data.skillId is already the CHILD's own id
+            // (the drilled build keys nodes to the child identity) and its filePath
+            // is child-relative, so opening `${node.data.skillId}/<filePath>`
+            // resolves the child's real file. The removed pushNavSkill escape hatch
+            // (which swapped the whole Workspace to the child as a standalone
+            // project) is gone — drilled editing stays on the same canvas.
             onNodeSelect?.({ id: node.id, data: node.data })
-            workspace?.onFileOpen(`${skillId}/${node.data.filePath ?? `phases/${node.id}/${phaseKindFile(node.data)}`}`)
+            const openSkillId = node.data.skillId || skillId
+            workspace?.onFileOpen(`${openSkillId}/${node.data.filePath ?? `phases/${node.id}/${phaseKindFile(node.data)}`}`)
             onPanelChange?.('properties')
           }
         }}
@@ -884,8 +1043,8 @@ export function GraphCanvas({
       </ContextMenuTrigger>
       <CanvasContextMenuContent
         edgeMenuConnection={edgeMenuConnection}
-        onCreatePhase={onCreatePhase}
-        onDisconnectConnection={onDisconnectConnection}
+        onCreatePhase={isDrilled ? undefined : onCreatePhase}
+        onDisconnectConnection={handleMenuDisconnect}
         onCloseEdgeMenu={() => setEdgeMenuConnection(null)}
         readOnly={compact}
       />

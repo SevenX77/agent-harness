@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react"
+import { toast } from "sonner"
 import { wsUrl } from "@/api/client"
 import {
+  isWsAuthRejection,
   nextReconnectDelay,
+  shouldGiveUpOnAuthFailures,
   shouldShowConnectionLost,
 } from "./event-stream-backoff"
 
@@ -45,6 +48,15 @@ interface StudioEventStreamState {
  * Subscribe to `/ws/events`. Pass stable-enough callbacks; the hook reads them
  * via a ref so changing callbacks never tears down the socket. The returned
  * `connectionLost` drives the shell's "connection lost" warning.
+ *
+ * R-F13 (token refresh on reconnect): the WebSocket URL is built by `wsUrl()`,
+ * which reads `currentApiToken` from the api/client module at call time. Because
+ * `connect()` re-invokes `wsUrl("/ws/events")` on every reconnect attempt, a token
+ * rotated via `configureApiToken()` (e.g. when the sidecar restarts and emits
+ * `sidecar-restarted` with a fresh token) is picked up automatically — there is
+ * no closure-cached token here. After
+ * `WS_AUTH_FAILURE_GIVEUP_THRESHOLD` consecutive 4401 closes the hook stops
+ * reconnecting and toasts the user instead of silently spinning forever.
  */
 export function useStudioEventStream(callbacks: StudioEventStreamCallbacks): StudioEventStreamState {
   const callbacksRef = useRef(callbacks)
@@ -56,6 +68,8 @@ export function useStudioEventStream(callbacks: StudioEventStreamCallbacks): Stu
     let cancelled = false
     let socket: WebSocket | null = null
     let attempt = 0
+    let consecutiveAuthFailures = 0
+    let gaveUpOnAuth = false
     let reconnectTimer: number | undefined
     let lostTicker: number | undefined
     let disconnectedSince: number | null = null
@@ -82,7 +96,7 @@ export function useStudioEventStream(callbacks: StudioEventStreamCallbacks): Stu
     }
 
     const scheduleReconnect = () => {
-      if (cancelled) return
+      if (cancelled || gaveUpOnAuth) return
       const delay = nextReconnectDelay(attempt)
       console.warn(
         "phase=studio-event-stream action=schedule-reconnect attempt=%d delay_ms=%d",
@@ -95,10 +109,32 @@ export function useStudioEventStream(callbacks: StudioEventStreamCallbacks): Stu
       reconnectTimer = window.setTimeout(connect, delay)
     }
 
-    const handleDrop = (reason: string) => {
+    const giveUpOnAuth = () => {
+      // R-F13: 5 consecutive 4401 closes means the cached token is stale and
+      // silent reconnects will spin forever. Stop the loop and surface the
+      // failure so the user can restart Studio (which re-runs the sidecar
+      // bootstrap and configures a fresh api token via get_sidecar_config IPC).
+      gaveUpOnAuth = true
+      stopLostTicker()
+      // Force the "connection lost" banner true regardless of the time/failure
+      // thresholds — we have explicit evidence the link is unrecoverable.
+      setConnectionLost((current) => (current ? current : true))
+      console.error(
+        "phase=studio-event-stream action=give-up reason=auth-rejected-threshold consecutive=%d",
+        consecutiveAuthFailures,
+      )
+      toast.error("与 sidecar 连接已断开，请重启 Studio")
+    }
+
+    const handleDrop = (reason: string, closeCode?: number) => {
       if (cancelled) return
       if (disconnectedSince === null) disconnectedSince = Date.now()
-      console.warn("phase=studio-event-stream action=disconnect reason=%s", reason)
+      console.warn(
+        "phase=studio-event-stream action=disconnect reason=%s close_code=%s consecutive_auth_failures=%d",
+        reason,
+        closeCode === undefined ? "n/a" : String(closeCode),
+        consecutiveAuthFailures,
+      )
       if (socket) {
         socket.onopen = null
         socket.onclose = null
@@ -106,11 +142,26 @@ export function useStudioEventStream(callbacks: StudioEventStreamCallbacks): Stu
         socket.onmessage = null
         socket = null
       }
+      // R-F13: 4401 from the sidecar's /ws/events auth gate is the signal that
+      // the bearer token is stale or wrong. Track it separately from generic
+      // transport drops so a transient 1006/1011 never trips the give-up logic.
+      if (isWsAuthRejection(closeCode)) {
+        consecutiveAuthFailures += 1
+        if (shouldGiveUpOnAuthFailures(consecutiveAuthFailures)) {
+          giveUpOnAuth()
+          return
+        }
+      }
       scheduleReconnect()
     }
 
     const connect = () => {
-      if (cancelled) return
+      if (cancelled || gaveUpOnAuth) return
+      // R-F13: wsUrl() reads `currentApiToken` from api/client at call time, so
+      // a token rotated between reconnect attempts (e.g. after the sidecar
+      // restarts and emits sidecar-restarted -> configureApiToken(new)) is
+      // picked up here without any extra plumbing. Do NOT capture the URL into
+      // a closure variable outside `connect()` or the freshness guarantee breaks.
       let nextSocket: WebSocket
       try {
         nextSocket = new WebSocket(wsUrl("/ws/events"))
@@ -126,7 +177,10 @@ export function useStudioEventStream(callbacks: StudioEventStreamCallbacks): Stu
         console.info("phase=studio-event-stream action=connect attempt=%d", attempt + 1)
         // Successful (re)connect: reset backoff + connection-lost tracking and
         // refetch once to fill any gap missed while the socket was down.
+        // The auth-failure counter resets too — getting an OPEN frame proves
+        // the current token was accepted, so any prior 4401s are stale.
         attempt = 0
+        consecutiveAuthFailures = 0
         disconnectedSince = null
         stopLostTicker()
         setConnectionLost((current) => (current ? false : current))
@@ -162,8 +216,12 @@ export function useStudioEventStream(callbacks: StudioEventStreamCallbacks): Stu
         console.warn("phase=studio-event-stream action=socket-error")
       }
 
-      nextSocket.onclose = () => {
-        handleDrop("socket-closed")
+      nextSocket.onclose = (event) => {
+        // The browser hands us a CloseEvent with `code` so we can distinguish
+        // a 4401 auth rejection (R-F13) from a normal/abnormal transport close.
+        // `event` may be a plain Event in test environments; coerce defensively.
+        const closeCode = typeof (event as CloseEvent).code === "number" ? (event as CloseEvent).code : undefined
+        handleDrop("socket-closed", closeCode)
       }
     }
 

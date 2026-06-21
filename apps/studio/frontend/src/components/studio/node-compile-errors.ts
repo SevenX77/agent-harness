@@ -1,4 +1,4 @@
-import type { CompileError, LintError } from "@/api/types"
+import type { CompileError, GraphTopologyItem, LintError } from "@/api/types"
 
 /**
  * Per-node compile-error channel (authoring R10 / canvas REQ).
@@ -91,6 +91,116 @@ export function lintErrorsByNode(
     const phaseId = match[1]
     const bucket = byNode[phaseId] ?? (byNode[phaseId] = [])
     bucket.push(error)
+  }
+  return byNode
+}
+
+/**
+ * Adapt a realtime/first-screen `LintError` onto the `CompileError` shape the canvas node
+ * tooltip renders (N3 atom #4). SkillNode's {@link import("@/components/nodes/SkillNode")
+ * .formatNodeCompileError} reads `field`/`line`/`message`, so feeding lint into the node
+ * channel only renames the engine's nearest-field locator (`field_path` → `field`) — NO
+ * client-side field re-derivation, no second source of truth. Lint severity ('error'|
+ * 'warning') maps to the CompileError axis ('fatal'|'warning'); a missing `field_path`
+ * degrades to a node-level (field-less) badge entry, mirroring the manual-Compile path.
+ */
+export function lintErrorToCompileError(error: LintError): CompileError {
+  return {
+    file: error.file ?? null,
+    line: error.line,
+    field: error.field_path ?? null,
+    severity: error.severity === "warning" ? "warning" : "fatal",
+    message: error.message,
+  }
+}
+
+interface ActiveLintSources {
+  /** SkillDetail.lint_result.errors — the backend's first-screen lint of the on-disk skill. */
+  firstScreenLint: readonly LintError[] | null | undefined
+  /** SkillDetail.manifest_errors — first-screen manifest/graph-level diagnostics. */
+  manifestErrors: readonly LintError[] | null | undefined
+  /**
+   * The realtime LintResult.errors lifted from the editor (null until the first debounced
+   * lint resolves). An EMPTY array is a resolved-clean lint and overrides first screen.
+   */
+  realtime: readonly LintError[] | null | undefined
+}
+
+/**
+ * Pick the active lint diagnostics for the canvas/properties projection (N3 atom #4).
+ *
+ * Three parallel sources, with realtime taking precedence (overlay semantics): the moment a
+ * realtime lint has resolved (its errors array is non-null — even when empty/clean), it owns
+ * the projection so the editor's live edits replace the stale first-screen snapshot. Before
+ * any realtime lint, the first-screen SkillDetail sources (`lint_result` + `manifest_errors`)
+ * seed the initial projection so a freshly-opened skill already shows its node badges.
+ */
+export function activeLintErrors({ firstScreenLint, manifestErrors, realtime }: ActiveLintSources): LintError[] {
+  if (realtime != null) {
+    return [...realtime]
+  }
+  return [...(firstScreenLint ?? []), ...(manifestErrors ?? [])]
+}
+
+/**
+ * Merge the manual-Compile node channel ({@link compileErrorsByNode}) with the lint node
+ * channel ({@link lintErrorsByNode}, pre-adapted via {@link lintErrorToCompileError}) per node,
+ * keeping BOTH — neither source is dropped (N3 atom #4). The canvas today fed nodes from manual
+ * Compile only; this lets first-screen + realtime lint co-exist with an outstanding Compile run.
+ *
+ * n2-canvas#10 (data-gap-viz): the data-gap channel ({@link dataGapErrorsByNode}) is also a
+ * CompileError-by-node map, so the same merge folds it into the node's conflict-error channel —
+ * a node then shows compile + lint + data-gap together. The merge is variadic-friendly: chain
+ * `mergeNodeErrors(mergeNodeErrors(compile, lint), dataGap)`.
+ */
+export function mergeNodeErrors(
+  compileByNode: Record<string, CompileError[]>,
+  lintByNode: Record<string, CompileError[]>,
+): Record<string, CompileError[]> {
+  const merged: Record<string, CompileError[]> = {}
+  for (const [nodeId, errors] of Object.entries(compileByNode)) {
+    merged[nodeId] = [...errors]
+  }
+  for (const [nodeId, errors] of Object.entries(lintByNode)) {
+    const bucket = merged[nodeId] ?? (merged[nodeId] = [])
+    bucket.push(...errors)
+  }
+  return merged
+}
+
+/**
+ * Project the backend per-phase field-supply (graph_topology[].field_supply) onto the
+ * canvas node conflict-error channel (n2-canvas#10 data-gap-viz, PM 2026-06-20).
+ *
+ * The PM's pinned model: the CANVAS node's ONLY data-gap job is to display a compile-style
+ * CONFLICT ERROR when a required input field is NOT supplied by the upstream blackboard — no
+ * checkbox UI, no type-equality red-X. Field SELECTION stays in the i/o panel and is resolved
+ * against the blackboard/state fields, not a specific upstream node's outputs.
+ *
+ * `compute_field_supply` (services/canvas_data_gap.py) already flags each input field
+ * `supplied=false` (`source='none'`) when no upstream producer AND no graph-level input
+ * supplies it. This collects those gaps and emits a CompileError per gap, keyed by the phase
+ * id, in the SAME shape {@link compileErrorsByNode} / {@link lintErrorsByNode} produce, so it
+ * merges into the existing node-error channel via {@link mergeNodeErrors} and renders through
+ * the node badge/tooltip the canvas already has. A gap is not a source-location error, so it
+ * carries no `file`/`line`; the offending input field is named on `field`.
+ */
+export function dataGapErrorsByNode(
+  topology: readonly GraphTopologyItem[] | null | undefined,
+): Record<string, CompileError[]> {
+  const byNode: Record<string, CompileError[]> = {}
+  for (const row of topology ?? []) {
+    const gaps = (row.field_supply ?? []).filter((entry) => entry.supplied === false)
+    if (gaps.length === 0) {
+      continue
+    }
+    byNode[row.id] = gaps.map((entry) => ({
+      file: null,
+      line: null,
+      field: entry.field,
+      severity: "fatal",
+      message: `Input field '${entry.field}' has no upstream supply (missing from blackboard)`,
+    }))
   }
   return byNode
 }

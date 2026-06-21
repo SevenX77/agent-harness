@@ -112,7 +112,7 @@ vi.mock('../api/client', () => ({
   api: { post: apiHarness.post },
 }))
 
-const { useDebouncedLint, lintStatusStorageKey, lintStatusEvent, LINT_DEBOUNCE_MS } = await import(
+const { useDebouncedLint, lintStatusStorageKey, lintStatusEvent, lintResultEvent, LINT_DEBOUNCE_MS } = await import(
   './useDebouncedLint'
 )
 
@@ -202,8 +202,16 @@ describe('useDebouncedLint real hook path', () => {
     expect(deriveLintDiagnostics(result)).toHaveLength(1)
     const store = Reflect.get(globalThis, '__lintStore') as Map<string, string>
     expect(store.get(lintStatusStorageKey('skill-1'))).toBe('failed')
-    const dispatched = Reflect.get(globalThis, '__lintDispatched') as Array<{ type: string }>
+    const dispatched = Reflect.get(globalThis, '__lintDispatched') as Array<{ type: string; detail: unknown }>
     expect(dispatched.some((event) => event.type === lintStatusEvent)).toBe(true)
+    // N3 atom #4: the full LintResult is lifted on a sibling event so the workspace can
+    // overlay these errors onto the canvas-node / properties projection.
+    const resultEvent = dispatched.find(
+      (event) => event.type === lintResultEvent && (event.detail as { result?: unknown }).result,
+    )
+    expect(resultEvent).toBeDefined()
+    expect((resultEvent!.detail as { skillId: string }).skillId).toBe('skill-1')
+    expect((resultEvent!.detail as { result: LintResult }).result.errors).toHaveLength(1)
   })
 
   it('a passed lint publishes passed with no diagnostics', async () => {

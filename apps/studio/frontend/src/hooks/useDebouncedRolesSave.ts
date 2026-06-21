@@ -31,6 +31,33 @@ export function rolesSaveErrorDisposition(
   return isRecoverableError?.(error) ? "recoverable" : "fatal"
 }
 
+/**
+ * R-F19.1 — best-effort flush at hook teardown (or before-quit). Called from
+ * the hook's useEffect cleanup with the live `pendingSnapshotRef` value; also
+ * directly callable from tests so we don't need `@testing-library/react` to
+ * cover the unmount path. Returns the in-flight Promise (or null if nothing
+ * was pending) so callers can optionally await it — the hook itself does not
+ * await because React cleanups are synchronous.
+ *
+ * Failures are logged at warn (per rules/logging.md "no silent degradation")
+ * but do not throw: the hook is being torn down and there is no UI surface
+ * left to surface the error to.
+ */
+export function flushPendingRolesSaveOnUnmount(
+  pendingSnapshot: (() => RolesData | null) | null,
+  putFn: (data: RolesData) => Promise<RolesData>,
+  log: (message: string, error: unknown) => void = (message, error) =>
+    console.warn(message, error),
+): Promise<RolesData> | null {
+  if (!pendingSnapshot) return null
+  const payload = pendingSnapshot()
+  if (!payload) return null
+  return putFn(payload).catch((error) => {
+    log("phase=roles-save action=cleanup-flush-failed reason=%o", error)
+    throw error
+  })
+}
+
 export function useDebouncedRolesSave(
   options: UseDebouncedRolesSaveOptions = {},
 ): UseDebouncedRolesSaveResult {
@@ -130,9 +157,22 @@ export function useDebouncedRolesSave(
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current)
       timerRef.current = null
+      // R-F19.1: on unmount, if a debounced payload is still buffered (e.g. the
+      // user closed the Settings dialog or quit the app while the 300ms timer
+      // was pending) and no save is in flight yet, fire a best-effort save so
+      // the yaml isn't left missing the latest in-memory edit. The helper is
+      // pure-ish so it can be unit-tested without `@testing-library/react`.
+      const pendingSnapshot = pendingSnapshotRef.current
       pendingSnapshotRef.current = null
+      // If a save is already in flight, the existing `inflightRef` chain will
+      // pick up `pendingSnapshotRef` in its `finally` — but we just nulled it.
+      // That's intentional: by the time cleanup runs, the component owning
+      // the snapshot getter is unmounting and the closure may capture stale
+      // state, so we prefer firing one extra PUT with the latest snapshot
+      // over silently dropping it.
+      void flushPendingRolesSaveOnUnmount(pendingSnapshot, putFn)
     }
-  }, [])
+  }, [putFn])
 
   return { queue, cancel, flush, status, lastError }
 }

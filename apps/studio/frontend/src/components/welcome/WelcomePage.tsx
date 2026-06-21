@@ -1,4 +1,4 @@
-import { Clock3, FolderOpen, Layers, Layers3, MoreVertical, Plus } from 'lucide-react'
+import { AlertTriangle, Clock3, FolderOpen, Layers, Layers3, MoreVertical, Plus } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { toast } from 'sonner'
 import type { SkillSummary } from '../../api/types'
@@ -8,6 +8,7 @@ import { getRuntimeConfig } from '../../config/runtime'
 import { revealInFileManager, selectSkillDirectory, addRecentWorkspace, ensureWorkspaceSupportDirs, createSkillWorkspace, openSkillWorkspace } from '../../lib/tauri'
 import { errorMessage, isRecord } from '../../utils/errors'
 import { joinDirectoryPath } from '../../utils/skill-paths'
+import { Alert, AlertDescription, AlertTitle } from '../ui/alert'
 import { Button } from '../ui/button'
 import {
   Card,
@@ -154,7 +155,7 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
   const [newSkillError, setNewSkillError] = useState<string | null>(null)
   const appSettings = useAppSettings()
   const defaultSkillParentDirectory = defaultSkillsDirectory(appSettings.settings.default_skills_directory)
-  const { recentWorkspaces, rememberWorkspace, isHydrating } = useRecentSkills()
+  const { recentWorkspaces, rememberWorkspace, isHydrating, recentError } = useRecentSkills()
 
   // Recent is a pure MRU projection (D11/D-1-1): each card is one localStorage
   // recentWorkspaces entry, no registry-derived fields and no registry merge.
@@ -319,6 +320,21 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-medium text-muted-foreground">Recent</h2>
         </div>
+
+        {/*
+          N1 atom #9: when the Recent MRU read / path-validation fails, surface a
+          LOCAL red box here. It sits below the always-available New skill / Open
+          folder entries, so a Recent failure never blocks creating or opening a
+          workspace (D11 不阻塞入口). The reason comes from useRecentSkills, which
+          logs the failure rather than swallowing it.
+        */}
+        {recentError ? (
+          <Alert variant="destructive" className="mb-3 border-destructive-border bg-destructive-background">
+            <AlertTriangle />
+            <AlertTitle>Could not load recent skills</AlertTitle>
+            <AlertDescription>{recentError}</AlertDescription>
+          </Alert>
+        ) : null}
 
         {isHydrating ? (
           <RecentSkeleton />

@@ -70,6 +70,15 @@
   "copilot": {
     "title": "Copilot",
     "description": "使用与 LLM Roles 相同的模型组 fallback 模式配置 copilot 角色。",
-    "claudeAgentSdk": "Claude Agent SDK"
+    "claudeAgentSdk": "Claude Agent SDK",
+    "testToast": {
+      "passed": "{{title}} 测试通过",
+      "needsAttention": "{{title}} 测试需要注意",
+      "failed": "{{title}} 测试失败"
+    },
+    "aria": {
+      "testing": "正在测试 {{title}}...",
+      "ready": "{{title}} 就绪：{{ready}}/{{total}} 条 route"
+    }
   }
 }

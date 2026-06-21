@@ -124,8 +124,19 @@ interface CopilotBackendState {
   lastPut: unknown
 }
 
-async function mockCopilotBackend(page: Page, rolesBody: object): Promise<CopilotBackendState> {
+interface MockCopilotBackendOptions {
+  // #57: persisted last-known SDK test results, keyed by role name. CopilotTab seeds
+  // the route lights from these on mount so they survive a tab reopen / backend restart.
+  testResults?: object
+}
+
+async function mockCopilotBackend(
+  page: Page,
+  rolesBody: object,
+  options: MockCopilotBackendOptions = {},
+): Promise<CopilotBackendState> {
   const state: CopilotBackendState = { putCount: 0, lastPut: null }
+  const testResults = options.testResults ?? { results: {} }
   await page.route("**/api/skills", (route) => fulfillJson(route, []))
   await page.route("**/api/settings", (route) =>
     fulfillJson(route, { user_id: "e2e", gitea_host: "", default_skills_directory: "/tmp/skills" }),
@@ -136,7 +147,7 @@ async function mockCopilotBackend(page: Page, rolesBody: object): Promise<Copilo
     const request = route.request()
     const pathname = new URL(request.url()).pathname
     if (pathname.endsWith("/test-results")) {
-      await fulfillJson(route, { results: {} })
+      await fulfillJson(route, testResults)
       return
     }
     if (request.method() === "PUT" && pathname === "/api/llm/roles") {
@@ -195,6 +206,66 @@ test.describe("Copilot settings", () => {
     // copilot-role-derivation.test.ts — cmdk item selection is not reliably driveable in
     // headless Playwright, so this e2e asserts only the searchable picker behaviour.
     void state
+  })
+
+  test("#57 a persisted SDK verdict paints the route status light on (re)open, overriding the backend ui_state", async ({ page }) => {
+    // The route's backend ui_state is "ready", but the last real SDK test for it
+    // FAILED. CopilotTab seeds the light from the persisted test result on mount,
+    // so reopening the tab must show the persisted verdict (unsupported), not the
+    // stale ui_state. This is the status-light persistence contract (atom #57).
+    const persistedResults = {
+      results: {
+        copilot_custom_1: {
+          result: {
+            sdk_evidence: {
+              routes: {
+                "anthropic:claude-opus-4.8": { status: "failed" },
+              },
+            },
+          },
+        },
+      },
+    }
+    await mockCopilotBackend(page, rolesWithCopilot, { testResults: persistedResults })
+    await openCopilot(page)
+
+    const providerCard = page.locator(
+      '[data-copilot-provider-card="true"]',
+      { has: page.locator('[data-copilot-route-status-light="true"]') },
+    ).first()
+    await expect(providerCard).toBeVisible()
+    // The persisted real SDK verdict (failed → unsupported) wins over ui_state="ready".
+    await expect(providerCard).toHaveAttribute("data-agent-sdk-status", "unsupported")
+    await expect(providerCard.locator('[data-copilot-route-status-light="true"]')).toHaveAttribute(
+      "aria-label",
+      "Claude Agent SDK Unsupported",
+    )
+    await page.screenshot({ path: "test-results/copilot-status-light-persist.png" })
+
+    // Reopen the tab (navigate away and back) → the light still shows the persisted
+    // verdict, proving it survives a remount rather than resetting to ui_state.
+    await page.getByRole("button", { name: "General", exact: true }).click()
+    await page.getByRole("button", { name: "Copilot", exact: true }).click()
+    await expect(page.locator('[data-copilot-settings-page="true"]')).toBeVisible()
+    const reopenedCard = page.locator(
+      '[data-copilot-provider-card="true"]',
+      { has: page.locator('[data-copilot-route-status-light="true"]') },
+    ).first()
+    await expect(reopenedCard).toHaveAttribute("data-agent-sdk-status", "unsupported")
+  })
+
+  test("#57 with no persisted SDK test result, the route light falls back to the backend ui_state", async ({ page }) => {
+    // No persisted verdict → the light shows the backend ui_state ("ready" here),
+    // confirming the seed only fills routes that have a real prior SDK result.
+    await mockCopilotBackend(page, rolesWithCopilot)
+    await openCopilot(page)
+
+    const providerCard = page.locator(
+      '[data-copilot-provider-card="true"]',
+      { has: page.locator('[data-copilot-route-status-light="true"]') },
+    ).first()
+    await expect(providerCard).toBeVisible()
+    await expect(providerCard).toHaveAttribute("data-agent-sdk-status", "ready")
   })
 
   test("#61 group Remove deselects the model group back to an empty card", async ({ page }) => {

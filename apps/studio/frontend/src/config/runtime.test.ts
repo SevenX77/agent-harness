@@ -1,11 +1,18 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { configureApiToken, currentApiTokenIsSet } from '../api/client'
 import {
+  api,
+  configureApiBaseURL,
+  configureApiToken,
+  currentApiTokenIsSet,
+} from '../api/client'
+import {
+  applySidecarConfig,
   fallbackSidecarConfig,
   getRuntimeStatus,
   initializeRuntimeConfig,
   isTauriRuntime,
   resolveRuntimeConfig,
+  subscribeToSidecarRestart,
 } from './runtime'
 
 describe('runtime config', () => {
@@ -96,5 +103,65 @@ describe('runtime config', () => {
 
     expect(currentApiTokenIsSet()).toBe(true)
     configureApiToken(null)
+  })
+
+  it('R-F13 applySidecarConfig rotates the bearer token and base URL', () => {
+    configureApiToken('stale-token')
+    configureApiBaseURL('http://127.0.0.1:1111/api')
+
+    applySidecarConfig({
+      port: 49317,
+      baseURL: 'http://127.0.0.1:49317/api',
+      wsURL: 'ws://127.0.0.1:49317/ws',
+      resourceDir: '/tmp/studio',
+      configDir: '/tmp/studio-config',
+      api_token: 'fresh-token',
+    })
+
+    expect(api.defaults.baseURL).toBe('http://127.0.0.1:49317/api')
+    expect(currentApiTokenIsSet()).toBe(true)
+  })
+
+  it('R-F13 applySidecarConfig OVERRIDES an existing token (unlike initialize)', () => {
+    // Initialize preserves a tunnel-bootstrapped token by design. Restart MUST
+    // override — the old token is provably stale after a sidecar process swap.
+    configureApiToken('old-token-from-tunnel')
+
+    applySidecarConfig({
+      port: 49317,
+      baseURL: 'http://127.0.0.1:49317/api',
+      wsURL: 'ws://127.0.0.1:49317/ws',
+      resourceDir: '/tmp/studio',
+      configDir: '/tmp/studio-config',
+      api_token: 'new-token-after-restart',
+    })
+
+    // Make sure the token actually changed: send a request and inspect headers.
+    let observedAuth: string | undefined
+    api.defaults.adapter = async (config) => {
+      observedAuth = config.headers.get('Authorization')?.toString()
+      return {
+        data: {},
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    }
+    return api.get('/probe').then(() => {
+      expect(observedAuth).toBe('Bearer new-token-after-restart')
+      api.defaults.adapter = undefined
+    })
+  })
+
+  it('R-F13 subscribeToSidecarRestart is a no-op outside the Tauri runtime', async () => {
+    // No __TAURI_INTERNALS__ on the window → there is nothing to listen to;
+    // returning a no-op unlisten function keeps the caller simple (call/await).
+    const unlisten = await subscribeToSidecarRestart(() => {
+      throw new Error('callback should not fire in non-Tauri mode')
+    }, { windowRef: {} })
+
+    expect(typeof unlisten).toBe('function')
+    unlisten()
   })
 })

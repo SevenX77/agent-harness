@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import type { GraphTopologyItem, SkillDetail } from '@/api/types'
+import type { GraphTopologyItem, ResumeValidityResponse, SkillDetail } from '@/api/types'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 import { INPUT_ID, OUTPUT_ID, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
+import { dirtyDownstreamFromValidity } from '@/components/studio/node-resume'
 import { buildNodes, buildNodesFromTopology, phaseKindFile } from './build-nodes'
 
 describe('phaseKindFile', () => {
@@ -161,6 +162,24 @@ describe('buildNodes', () => {
     expect(draft.filePath).toBe('phases/draft/SKILL.md')
   })
 
+  // N2 atom #16 (node-type-derivation, F1): node KIND must derive strictly from
+  // FILE EXISTENCE, falling back to topology.mode when no node file is loaded —
+  // and must NEVER fall back to the manifest-projected `phase.mode`. The legacy
+  // standalone-agent manifest projects `phase.mode = 'llm'`; if that leaks into
+  // the kind when neither a phase file nor a topology row exists, F1 is violated.
+  it('never falls back to the manifest-projected phase.mode for node kind (F1)', () => {
+    // A legacy standalone-agent skill: phasesFromManifest projects ONE phase with
+    // mode 'llm'. We give it NO topology row and NO phase file, so the only thing
+    // that could set the kind is the (forbidden) manifest phase.mode fallback.
+    const nodes = buildNodes('demo', agentSkillDetail(), new Set(), () => {}, {})
+
+    const phase = phaseNode(nodes, 'demo')
+    // File-existence → (absent) → topology.mode → (absent) → default kind.
+    // The manifest projection 'llm' (which maps to SKILL.md / agent) must NOT win.
+    expect(phase.mode).toBe('logic')
+    expect(phase.filePath).toBe('phases/demo/LOGIC.md')
+  })
+
   it('does not treat legacy SUBGRAPH target_skill as a drillable child path', () => {
     const nodes = buildNodes('demo', skillDetail({
       phases: ['legacy'],
@@ -260,6 +279,42 @@ describe('buildNodes', () => {
     expect(phaseNode(nodes, 'draft').isDirtyDownstream).toBe(false)
   })
 
+  it('auto-derives graying from a resume-validity response: affected downstream grayed, side branch not (N5 atom #3)', () => {
+    // F-n5 end-to-end: an upstream edit makes the backend return a per-node affected_downstream
+    // slice; dirtyDownstreamFromValidity projects it and buildNodes grays exactly those nodes.
+    const validity: ResumeValidityResponse = {
+      run_id: 'run-1',
+      resume_allowed: false,
+      reason: 'dirty_upstream',
+      checkpoint_id: 'cp',
+      checkpoint_ns: 'agent:draft',
+      resume_from_node_id: 'draft',
+      resume_to_node_id: null,
+      dirty_fields: ['content_hash'],
+      dirty_node_ids: ['draft', 'review'],
+      affected_downstream: ['draft', 'review'],
+      snapshot_content_hash: 'a',
+      current_content_hash: 'b',
+      snapshot_execution_fingerprint: null,
+      current_execution_fingerprint: null,
+    }
+    const nodes = buildNodes('demo', skillDetail({
+      phases: ['draft', 'review', 'sidebar'],
+      graph_topology: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'agent' },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'], mode: 'logic' },
+        { id: 'sidebar', src: 'phases/sidebar/LOGIC.md', depends_on: [], mode: 'logic' },
+      ],
+    }), new Set(), () => {}, {}, {}, {}, {}, {
+      dirtyDownstreamNodeIds: dirtyDownstreamFromValidity(validity),
+    })
+
+    expect(phaseNode(nodes, 'draft').isDirtyDownstream).toBe(true)
+    expect(phaseNode(nodes, 'review').isDirtyDownstream).toBe(true)
+    // The unrelated side branch is absent from the per-node slice (B1) -> stays runnable.
+    expect(phaseNode(nodes, 'sidebar').isDirtyDownstream).toBe(false)
+  })
+
   it('leaves every node normal when no dirty-downstream set is provided', () => {
     const nodes = buildNodes('demo', skillDetail({
       phases: ['draft', 'review'],
@@ -320,6 +375,30 @@ describe('buildNodesFromTopology (drilled child graph)', () => {
     expect(phaseNode(nodes, 'plan').status).toBe('success')
     expect(phaseNode(nodes, 'nested').status).toBe('idle')
   })
+
+  it('withholds the step-edit toggle by default (no agentSteps = read-only/loading projection)', () => {
+    // n2-canvas #14: with no agentSteps the topology-only view stays non-editable
+    // (no onToggleSteps on AGENT nodes) — this is the read-only drilled projection.
+    const nodes = buildNodesFromTopology('demo', ['plan', 'nested'], topology, {})
+    expect(phaseNode(nodes, 'plan').onToggleSteps).toBeUndefined()
+  })
+
+  it('wires the AGENT step-edit toggle when agentSteps is supplied (editable loading path)', () => {
+    // n2-canvas #14: the topology-only loading/fallback path threads the step-editor
+    // open/close toggle on AGENT (SKILL.md) nodes; non-agent nodes stay untoggled.
+    let toggled: string | null = null
+    const nodes = buildNodesFromTopology('demo', ['plan', 'nested'], topology, {}, {
+      expandedSteps: new Set(['plan']),
+      onToggleSteps: (id) => { toggled = id },
+    })
+    const plan = phaseNode(nodes, 'plan')
+    expect(plan.isStepsExpanded).toBe(true)
+    expect(typeof plan.onToggleSteps).toBe('function')
+    plan.onToggleSteps?.()
+    expect(toggled).toBe('plan')
+    // The nested subgraph (non-agent) node never gets a step toggle.
+    expect(phaseNode(nodes, 'nested').onToggleSteps).toBeUndefined()
+  })
 })
 
 function phaseNode(nodes: ReturnType<typeof buildNodes>, id: string): SkillGraphNodeData {
@@ -353,6 +432,50 @@ function skillDetail(overrides: {
     io_schema: {},
     file_paths: {},
       files: overrides.files ?? {},
+    manifest_errors: null,
+    has_golden: false,
+    latest_run_metadata: null,
+    lint_result: null,
+  }
+}
+
+// A legacy standalone-agent skill (manifest.type === 'agent'). phasesFromManifest
+// projects exactly ONE phase named after the manifest, with the manifest-derived
+// mode 'llm'. Used to prove node-kind derivation does NOT leak that projection
+// (atom #16 / F1) when no phase file and no topology row exist.
+function agentSkillDetail(): SkillDetail {
+  return {
+    manifest: {
+      type: 'agent',
+      schema_version: '2.0',
+      name: 'demo',
+      description: 'Demo',
+      license: null,
+      version: null,
+      author: null,
+      metadata: null,
+      agent_profile: {
+        role: 'Agent',
+        goal: 'Draft',
+        steps: ['Draft'],
+        constraints: [],
+        domain_protocols: [],
+        references: [],
+        few_shot_examples: [],
+        context_access: ['working_memory'],
+        llm_role: 'Agent',
+      },
+      model_override: null,
+      agent_tools: [],
+      adopted_persona: null,
+      user_prompt_template: null,
+      context_mapping: {},
+    },
+    graph_topology: [],
+    node_schema_v21: {},
+    io_schema: {},
+    file_paths: {},
+    files: {},
     manifest_errors: null,
     has_golden: false,
     latest_run_metadata: null,

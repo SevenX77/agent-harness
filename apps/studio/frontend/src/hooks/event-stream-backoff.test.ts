@@ -3,8 +3,12 @@ import {
   CONNECTION_LOST_FAILURE_THRESHOLD,
   CONNECTION_LOST_TIME_THRESHOLD_MS,
   RECONNECT_MAX_DELAY_MS,
+  WS_AUTH_FAILURE_GIVEUP_THRESHOLD,
+  WS_AUTH_REJECTED_CLOSE_CODE,
+  isWsAuthRejection,
   nextReconnectDelay,
   nextReconnectDelayBase,
+  shouldGiveUpOnAuthFailures,
   shouldShowConnectionLost,
 } from "./event-stream-backoff"
 
@@ -80,5 +84,40 @@ describe("shouldShowConnectionLost", () => {
 
   it("returns to false immediately when both inputs reset to 0 (reconnect)", () => {
     expect(shouldShowConnectionLost(0, 0)).toBe(false)
+  })
+})
+
+describe("isWsAuthRejection (R-F13)", () => {
+  it("flags 4401 (sidecar auth-gate Unauthorized) as an auth rejection", () => {
+    expect(isWsAuthRejection(WS_AUTH_REJECTED_CLOSE_CODE)).toBe(true)
+    expect(isWsAuthRejection(4401)).toBe(true)
+  })
+
+  it("does NOT flag normal/abnormal transport closes as auth rejections", () => {
+    // 1000 = normal, 1006 = abnormal (no close frame), 1011 = server error,
+    // 1013 = try again later. Counting these as auth failures would falsely
+    // give up the reconnect loop on a transient sidecar restart.
+    expect(isWsAuthRejection(1000)).toBe(false)
+    expect(isWsAuthRejection(1001)).toBe(false)
+    expect(isWsAuthRejection(1006)).toBe(false)
+    expect(isWsAuthRejection(1011)).toBe(false)
+    expect(isWsAuthRejection(1013)).toBe(false)
+  })
+
+  it("treats undefined close code as non-auth (constructor failures, etc.)", () => {
+    expect(isWsAuthRejection(undefined)).toBe(false)
+  })
+})
+
+describe("shouldGiveUpOnAuthFailures (R-F13)", () => {
+  it("does NOT give up before the threshold (5 consecutive 4401s)", () => {
+    expect(shouldGiveUpOnAuthFailures(0)).toBe(false)
+    expect(shouldGiveUpOnAuthFailures(1)).toBe(false)
+    expect(shouldGiveUpOnAuthFailures(WS_AUTH_FAILURE_GIVEUP_THRESHOLD - 1)).toBe(false)
+  })
+
+  it("gives up at and beyond the threshold", () => {
+    expect(shouldGiveUpOnAuthFailures(WS_AUTH_FAILURE_GIVEUP_THRESHOLD)).toBe(true)
+    expect(shouldGiveUpOnAuthFailures(WS_AUTH_FAILURE_GIVEUP_THRESHOLD + 3)).toBe(true)
   })
 })

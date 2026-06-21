@@ -29,8 +29,8 @@ from graph_agent_gateway.protocol import ModelResolverProtocol
 from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute
 from graph_agent_gateway.resolver import ModelResolver
 from graph_agent_gateway.role_materialization import (
-    MaterializeRoleRequest,
     MaterializedRoleResult,
+    MaterializeRoleRequest,
     materialize_role,
 )
 from graph_agent_gateway.route_handoff import ResolvedRouteChain, RouteSkipDiagnostic

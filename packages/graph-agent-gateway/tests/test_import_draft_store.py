@@ -5,7 +5,6 @@ import time
 from pathlib import Path
 
 import pytest
-
 from graph_agent_gateway.registry.schema import (
     CapabilityValue,
     EndpointCandidate,

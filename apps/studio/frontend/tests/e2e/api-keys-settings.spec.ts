@@ -70,7 +70,7 @@ test.describe("API Keys settings", () => {
   })
 
   test("#19 Add Provider is a one-step inline form (name + base_url + api_key) that saves in one go", async ({ page }) => {
-    const state = await mockApiKeysBackend(page)
+    await mockApiKeysBackend(page)
     await openApiKeys(page)
 
     await page.getByRole("button", { name: "Add Provider" }).click()

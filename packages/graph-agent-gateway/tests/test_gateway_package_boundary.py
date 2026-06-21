@@ -71,8 +71,8 @@ def test_gateway_public_facade_exports_mvp1_owner_api() -> None:
         merge_evidence_library,
     )
     from graph_agent_gateway.role_materialization import (
-        MaterializeRoleRequest,
         MaterializedRoleResult,
+        MaterializeRoleRequest,
         materialize_role,
     )
     from graph_agent_gateway.route_handoff import ResolvedRouteChain, RouteSkipDiagnostic

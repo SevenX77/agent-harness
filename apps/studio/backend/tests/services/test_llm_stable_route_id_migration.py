@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -196,7 +196,7 @@ def test_migration_rewrites_random_custom_route_ids_across_all_llm_stores(tmp_pa
                         scope={"endpoint_id": orphan_endpoint_id},
                         model_list_observation={
                             "base_url_fingerprint": hashlib.sha256(
-                                "https://openrouter.ai/api".encode("utf-8")
+                                b"https://openrouter.ai/api"
                             ).hexdigest()[:16],
                             "observed_model_ids": ["anthropic/claude-sonnet-4.6"],
                         },

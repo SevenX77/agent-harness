@@ -60,16 +60,13 @@ export async function autoWriteGoldenIfAbsent(
   const judge = deps.judge ?? prepareCopilotJudgeContext
   const existing = await list(skillId)
   let baseline = existing[0] ?? null
-  let written = false
-  if (existing.length > 0) {
-    written = false
-  } else {
+  const written = existing.length === 0
+  if (written) {
     if (deps.workspaceRoot?.trim()) {
       baseline = await save(skillId, runId, false, deps.workspaceRoot)
     } else {
       baseline = await save(skillId, runId, false)
     }
-    written = true
   }
 
   const baselineRef = baseline?.baseline_ref

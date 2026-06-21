@@ -5,6 +5,7 @@ import importlib
 import json
 import multiprocessing
 import os
+import queue
 import threading
 from pathlib import Path
 from typing import Any
@@ -860,7 +861,7 @@ def test_runtime_state_store_multiprocess_expired_takeover_allows_only_one_owner
             errors.append((owner_id, value, exc_type))
 
     final_lease = json.loads(lease_path.read_text(encoding="utf-8"))
-    assert acquired == [(final_lease["owner_id"], getattr(stale, "fencing_token") + 1)]
+    assert acquired == [(final_lease["owner_id"], stale.fencing_token + 1)]
     assert len(errors) == worker_count - 1
     assert {error_code for _, error_code, _ in errors} == {"state.lease_conflict"}
     assert {exc_type for _, _, exc_type in errors} == {"StudioAdapterError"}
@@ -889,7 +890,7 @@ def test_runtime_state_store_acquire_obeys_cross_process_run_file_lock(
     assert contender_ready.get(timeout=2) == "ready"
     start_acquire.set()
 
-    with pytest.raises(Exception):
+    with pytest.raises(queue.Empty):
         results.get(timeout=0.5)
 
     release.set()
@@ -1459,7 +1460,7 @@ def _runtime_state_acquire_worker(
     except Exception as exc:  # noqa: BLE001 - the contract asserts this is the typed adapter error.
         results.put(("error", owner_id, _error_code(exc), type(exc).__name__))
         return
-    results.put(("ok", owner_id, getattr(lease, "fencing_token"), ""))
+    results.put(("ok", owner_id, lease.fencing_token, ""))
 
 
 def _runtime_state_slow_expired_takeover_worker(
@@ -1494,7 +1495,7 @@ def _runtime_state_slow_expired_takeover_worker(
     except Exception as exc:  # noqa: BLE001 - the contract asserts this is the typed adapter error.
         results.put(("error", owner_id, _error_code(exc), type(exc).__name__))
         return
-    results.put(("ok", owner_id, getattr(lease, "fencing_token"), ""))
+    results.put(("ok", owner_id, lease.fencing_token, ""))
 
 
 def _runtime_state_file_lock_holder(run_dir: Path, ready: Any, release: Any) -> None:
@@ -1526,7 +1527,7 @@ def _runtime_state_ready_acquire_worker(
     except Exception as exc:  # noqa: BLE001 - the contract asserts this is the typed adapter error.
         results.put(("error", owner_id, _error_code(exc), type(exc).__name__))
         return
-    results.put(("ok", owner_id, getattr(lease, "fencing_token"), ""))
+    results.put(("ok", owner_id, lease.fencing_token, ""))
 
 
 def _release_payload(release_version: str = "v1") -> dict[str, Any]:

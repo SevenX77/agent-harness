@@ -4,7 +4,6 @@ from app.core.adapters.engine import (
     serialize_graph_topology_from_markdown,
 )
 
-
 _GRAPH_MD = """---
 schema_version: "v0.3.0"
 name: serializer-validation

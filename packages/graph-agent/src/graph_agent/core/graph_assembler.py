@@ -47,6 +47,7 @@ from graph_agent.cognitive.prompt import (
 from graph_agent.core.actions import ToolDef, _structured_tool
 from graph_agent.core.builtin_subagents import ReferenceReaderRuntime
 from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError, make_error_payload
+from graph_agent.core.llm_provider import LLMProvider, LLMProviderChatModel
 from graph_agent.core.loader import CompiledSkill, CompiledSubagent, PhaseDocument, SkillLoader
 from graph_agent.core.manifest import (
     AgentNodeAST,
@@ -60,7 +61,6 @@ from graph_agent.core.skill_resolver_protocol import (
     SkillResolverProtocol,
     require_skill_resolver,
 )
-from graph_agent.core.llm_provider import LLMProvider, LLMProviderChatModel
 from graph_agent.core.state import BusinessData, FrameworkState, StateManager, WorkflowState
 from graph_agent.core.subagents import (
     SubagentValidationFailure,

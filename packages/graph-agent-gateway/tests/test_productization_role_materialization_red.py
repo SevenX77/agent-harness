@@ -13,7 +13,7 @@ class NoCircuits:
 
 
 def test_gateway_materializer_blocks_required_thinking_when_route_is_not_fit() -> None:
-    from graph_agent_gateway.registry.schema import CapabilityValue, ProviderEndpoint, ProviderRoute
+    from graph_agent_gateway.registry.schema import CapabilityValue, ProviderEndpoint
     from graph_agent_gateway.role_materialization import MaterializeRoleRequest, materialize_role
 
     role = _role(
@@ -50,7 +50,7 @@ def test_gateway_materializer_blocks_required_thinking_when_route_is_not_fit() -
 
 
 def test_gateway_materializer_applies_output_token_intent_from_route_capability() -> None:
-    from graph_agent_gateway.registry.schema import CapabilityValue, ProviderEndpoint, ProviderRoute
+    from graph_agent_gateway.registry.schema import CapabilityValue, ProviderEndpoint
     from graph_agent_gateway.role_materialization import MaterializeRoleRequest, materialize_role
 
     role = _role(

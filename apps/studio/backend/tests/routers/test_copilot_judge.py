@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 from app.models.copilot import CopilotEventDone
-from app.services import copilot as copilot_service
 from app.routers import copilot as copilot_router
+from app.services import copilot as copilot_service
 from fastapi.testclient import TestClient
 from graph_agent.core.result_contracts import NodeRunResult, RunResultSnapshot, RunResultsRef
 

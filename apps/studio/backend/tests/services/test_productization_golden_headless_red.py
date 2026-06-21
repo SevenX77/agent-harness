@@ -52,7 +52,7 @@ def test_golden_headless_reads_run_result_snapshot_refs_and_returns_node_groups(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from app.services.golden_headless import GoldenHeadlessRequest, evaluate_golden_headless
+    from app.services.golden_headless import evaluate_golden_headless
 
     current_ref = _write_sealed_snapshot(
         tmp_path,
@@ -309,7 +309,7 @@ def test_golden_headless_rejects_whole_run_payload_without_snapshot_contract(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from app.services.golden_headless import GoldenHeadlessRequest, evaluate_golden_headless
+    from app.services.golden_headless import evaluate_golden_headless
 
     current_ref = _write_sealed_current_result(
         tmp_path,
@@ -339,7 +339,7 @@ def test_golden_headless_missing_baseline_returns_golden_baseline_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from app.services.golden_headless import GoldenHeadlessRequest, evaluate_golden_headless
+    from app.services.golden_headless import evaluate_golden_headless
 
     current_ref = _write_sealed_snapshot(
         tmp_path,
@@ -368,7 +368,7 @@ def test_golden_headless_rejects_case_refs_outside_baseline_cases_dir(
     monkeypatch: pytest.MonkeyPatch,
     case_ref_kind: str,
 ) -> None:
-    from app.services.golden_headless import GoldenHeadlessRequest, evaluate_golden_headless
+    from app.services.golden_headless import evaluate_golden_headless
 
     current_ref = _write_sealed_snapshot(
         tmp_path,
@@ -432,7 +432,7 @@ def test_golden_headless_returns_per_node_verdicts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from app.services.golden_headless import GoldenHeadlessRequest, evaluate_golden_headless
+    from app.services.golden_headless import evaluate_golden_headless
 
     current_ref = _write_sealed_snapshot(
         tmp_path,
@@ -479,7 +479,7 @@ def test_golden_headless_returns_per_node_verdicts_for_real_run_shape(
     the synthetic top-level `phases` list. Without this, real runs silently degrade
     to a single run-level `output` verdict.
     """
-    from app.services.golden_headless import GoldenHeadlessRequest, evaluate_golden_headless
+    from app.services.golden_headless import evaluate_golden_headless
 
     current_ref = _write_sealed_snapshot(
         tmp_path,
@@ -523,7 +523,7 @@ def test_golden_headless_missing_result_ref_does_not_fallback_to_legacy_final_st
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
-    from app.services.golden_headless import GoldenHeadlessRequest, evaluate_golden_headless
+    from app.services.golden_headless import evaluate_golden_headless
 
     skill_dir = _prepare_demo_skill_dir(tmp_path, monkeypatch)
     store = LocalRunArtifactStore(root=skill_dir / ".workspace")
@@ -556,7 +556,7 @@ def test_golden_headless_missing_result_ref_does_not_fallback_to_legacy_final_st
 def test_golden_headless_rejects_current_run_result_from_mutable_run_dir_path(
     tmp_path: Path,
 ) -> None:
-    from app.services.golden_headless import GoldenHeadlessRequest, evaluate_golden_headless
+    from app.services.golden_headless import evaluate_golden_headless
 
     run_path = tmp_path / "demo.skill" / ".workspace" / "runs" / "run-mutable" / "result.json"
     golden_path = tmp_path / "demo.skill" / ".workspace" / "golden" / "golden-run" / "result.json"
@@ -584,7 +584,7 @@ def test_golden_headless_rejects_current_run_result_from_mutable_run_dir_path(
 def test_golden_headless_rejects_current_run_result_from_plain_file_path(
     tmp_path: Path,
 ) -> None:
-    from app.services.golden_headless import GoldenHeadlessRequest, evaluate_golden_headless
+    from app.services.golden_headless import evaluate_golden_headless
 
     current_path = tmp_path / "current" / "result.json"
     golden_path = tmp_path / "golden" / "result.json"
@@ -615,7 +615,7 @@ def test_golden_headless_reads_run_result_from_sealed_run_artifact_store_ref(
 ) -> None:
     from app.core import config
     from app.services import skills as skills_service
-    from app.services.golden_headless import GoldenHeadlessRequest, evaluate_golden_headless
+    from app.services.golden_headless import evaluate_golden_headless
 
     monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
     skill_dir = tmp_path / "workspaces" / "default" / "skills" / "demo.skill"
@@ -653,7 +653,7 @@ def test_golden_headless_exposes_run_artifact_hash_mismatch_without_legacy_fallb
     from app.core import config
     from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
     from app.services import skills as skills_service
-    from app.services.golden_headless import GoldenHeadlessRequest, evaluate_golden_headless
+    from app.services.golden_headless import evaluate_golden_headless
 
     monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
     skill_dir = tmp_path / "workspaces" / "default" / "skills" / "demo.skill"
@@ -702,7 +702,7 @@ def test_golden_headless_invalid_result_ref_returns_stable_error_code(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from app.services.golden_headless import GoldenHeadlessRequest, evaluate_golden_headless
+    from app.services.golden_headless import evaluate_golden_headless
 
     golden_path = tmp_path / "golden" / "result.json"
     golden_path.parent.mkdir()
@@ -729,7 +729,7 @@ def test_golden_headless_marks_schema_drift_stale_and_missing_nodes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from app.services.golden_headless import GoldenHeadlessRequest, evaluate_golden_headless
+    from app.services.golden_headless import evaluate_golden_headless
 
     current_ref = _write_sealed_snapshot(
         tmp_path,

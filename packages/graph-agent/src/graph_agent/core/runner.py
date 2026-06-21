@@ -1506,11 +1506,18 @@ def _hitl_tool_call_from_pregel_tasks(tasks: Any) -> dict[str, Any] | None:
         return None
     for task in tasks:
         arg = getattr(task, "arg", None)
-        if not isinstance(arg, dict):
+        # langgraph <=1.2.2 wrapped a single tool call in a dict under
+        # "tool_call"; >=1.2.6 carries a list of tool-call dicts directly
+        # (Send(node="tools", arg=[{...tool_call...}])).
+        if isinstance(arg, dict):
+            candidates: list[Any] = [arg.get("tool_call")]
+        elif isinstance(arg, (list, tuple)):
+            candidates = list(arg)
+        else:
             continue
-        tool_call = arg.get("tool_call")
-        if isinstance(tool_call, dict) and str(tool_call.get("name") or "") in _HITL_TOOL_NAMES:
-            return tool_call
+        for tool_call in candidates:
+            if isinstance(tool_call, dict) and str(tool_call.get("name") or "") in _HITL_TOOL_NAMES:
+                return tool_call
     return None
 
 

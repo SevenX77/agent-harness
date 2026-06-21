@@ -1621,9 +1621,11 @@ def _build_skill_node(
                 return dispatch_func
 
             if tool.args_schema is not None and not isinstance(tool.args_schema, dict):
-                from pydantic import ConfigDict, Field, create_model
+                from pydantic import BaseModel, ConfigDict, Field, create_model
                 inputs_desc = ""
-                original_inputs_field = tool.args_schema.model_fields.get("inputs")
+                # langchain-core 1.4 widened args_schema to v1|v2 BaseModel; this
+                # branch only handles v2 schemas (create_model below is v2).
+                original_inputs_field = cast(type[BaseModel], tool.args_schema).model_fields.get("inputs")
                 if original_inputs_field and original_inputs_field.description:
                     inputs_desc = original_inputs_field.description
 

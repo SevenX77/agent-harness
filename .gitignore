@@ -1,3 +1,7 @@
+# Local dev (git worktrees container + IDE config)
+.worktrees/
+.cursor/
+
 # Python
 .coverage
 coverage/

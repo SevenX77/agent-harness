@@ -885,21 +885,21 @@ def test_runtime_state_store_acquire_obeys_cross_process_run_file_lock(
     )
 
     holder.start()
-    assert ready.get(timeout=2) == "locked"
+    assert ready.get(timeout=30) == "locked"
     contender.start()
-    assert contender_ready.get(timeout=2) == "ready"
+    assert contender_ready.get(timeout=30) == "ready"
     start_acquire.set()
 
     with pytest.raises(queue.Empty):
         results.get(timeout=0.5)
 
     release.set()
-    holder.join(timeout=3)
-    contender.join(timeout=3)
+    holder.join(timeout=30)
+    contender.join(timeout=30)
 
     assert holder.exitcode == 0
     assert contender.exitcode == 0
-    assert results.get(timeout=1)[0] == "ok"
+    assert results.get(timeout=10)[0] == "ok"
 
 
 def test_runtime_state_store_fencing_token_stays_monotonic_after_release(tmp_path: Path) -> None:

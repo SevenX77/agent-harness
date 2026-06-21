@@ -13,6 +13,7 @@ from pathlib import Path
 from app.services.resume_downstream import (
     affected_downstream_nodes,
     is_resume_node_affected,
+    resume_allowed_for_node,
 )
 from app.services.skill_resolver import build_studio_skill_resolver
 from graph_agent.core.loader import SkillLoader
@@ -127,3 +128,94 @@ def test_unknown_node_yields_empty_slice(tmp_path: Path) -> None:
     compiled = _compile(skill_dir)
 
     assert affected_downstream_nodes(compiled, "does-not-exist") == []
+
+
+# --- B1 (n5-node fn#3): per-node resume_allowed gate ---------------------------
+# resume_allowed must stop being a GLOBAL "not dirty" flag once a resume node is
+# named. These tests pin spec F3's three cases: an unrelated side-branch stays
+# resumable even when a sibling upstream changed, an affected downstream is
+# blocked, and the no-node (global Trace Resume) path keeps gating on any dirt.
+
+
+def test_resume_allowed_for_unrelated_sidebranch_when_sibling_changed(
+    tmp_path: Path,
+) -> None:
+    """spec F3 (a): change upstream sibling b -> resuming side-branch c is allowed."""
+    skill_dir = tmp_path / "fanout"
+    _write_fanout_skill(skill_dir)
+    compiled = _compile(skill_dir)
+
+    # Editing b dirties b and its dependent d (NOT the side-branch c).
+    dirty = affected_downstream_nodes(compiled, "b")
+
+    assert resume_allowed_for_node(
+        resume_from_node_id="c",
+        is_dirty=True,
+        affected_downstream=dirty,
+    )
+
+
+def test_resume_blocked_for_affected_downstream_node(tmp_path: Path) -> None:
+    """spec F3 (b): change upstream b -> resuming affected downstream d is blocked."""
+    skill_dir = tmp_path / "fanout"
+    _write_fanout_skill(skill_dir)
+    compiled = _compile(skill_dir)
+
+    dirty = affected_downstream_nodes(compiled, "b")
+
+    assert not resume_allowed_for_node(
+        resume_from_node_id="d",
+        is_dirty=True,
+        affected_downstream=dirty,
+    )
+
+
+def test_resume_allowed_for_node_clean_skill_is_always_true(tmp_path: Path) -> None:
+    """A clean skill resumes from any node regardless of the (empty) slice."""
+    assert resume_allowed_for_node(
+        resume_from_node_id="d",
+        is_dirty=False,
+        affected_downstream=[],
+    )
+
+
+def test_global_resume_gates_on_any_dirt_when_no_node(tmp_path: Path) -> None:
+    """spec F3 (c): no resume node (global Trace Resume) stays globally gated.
+
+    With no node target, the per-node predicate must NOT silently flip a dirty
+    skill to resumable -- it falls back to the global dirty gate (dirty => blocked,
+    clean => allowed).
+    """
+    assert not resume_allowed_for_node(
+        resume_from_node_id=None,
+        is_dirty=True,
+        affected_downstream=[],
+    )
+    assert resume_allowed_for_node(
+        resume_from_node_id=None,
+        is_dirty=False,
+        affected_downstream=[],
+    )
+
+
+def test_per_node_resume_blocked_when_slice_unavailable() -> None:
+    """Regression: an UNAVAILABLE slice (None) must degrade to a conservative block.
+
+    When the skill cannot be compiled, the affected-downstream slice is unknown
+    (``None``, distinct from an empty list). We cannot prove the resume node is an
+    unrelated side-branch, so a dirty skill must stay BLOCKED -- a slice failure must
+    never silently flip per-node resume to allowed. (Previously an unavailable slice
+    was returned as ``[]``, which let any node resume because it was "not in" the
+    empty set; this is exactly the false-allow this test pins shut.)
+    """
+    assert not resume_allowed_for_node(
+        resume_from_node_id="beta",
+        is_dirty=True,
+        affected_downstream=None,
+    )
+    # A clean skill with an unknown slice still resumes (no dirt to gate on).
+    assert resume_allowed_for_node(
+        resume_from_node_id="beta",
+        is_dirty=False,
+        affected_downstream=None,
+    )

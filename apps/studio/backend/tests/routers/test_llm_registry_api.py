@@ -3903,12 +3903,16 @@ def test_role_test_job_reports_active_route_progress(
         assert running.status_code == 200
         running_body = running.json()
         assert running_body["status"] == "running"
+        # R-F21: provider_statuses now carries retry_after_seconds alongside
+        # status so a cooling_down route can drive the FE Test Button countdown.
+        # The field is None for non-cooldown progress entries.
         assert running_body["provider_statuses"] == [
             {
                 "canonical_id": "gpt-5",
                 "route_id": "openai-direct:gpt-5",
                 "status": "testing",
                 "message": None,
+                "retry_after_seconds": None,
             }
         ]
     finally:

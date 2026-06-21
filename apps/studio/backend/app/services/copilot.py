@@ -1359,11 +1359,72 @@ def _sdk_test_token() -> str:
 
 @dataclass(frozen=True)
 class RouteSdkTestResult:
-    """Outcome of a real ClaudeSDKClient tool-call test for one route."""
+    """Outcome of a real ClaudeSDKClient tool-call test for one route.
+
+    R-F21: ``"cooling_down"`` is a distinct outcome from ``"failed"`` — it means
+    the upstream provider explicitly throttled us (429 / rate-limit), so the FE
+    can render a gray light + countdown instead of pretending the route is
+    broken. ``retry_after_seconds`` carries the suggested cooldown when known.
+    """
 
     route_id: str
-    status: Literal["ok", "failed"]
+    status: Literal["ok", "failed", "cooling_down"]
     message: str | None = None
+    retry_after_seconds: int | None = None
+
+
+# R-F21: substrings observed in CLI subprocess error output that signal upstream
+# throttling. Kept narrow to avoid false positives on unrelated 4xx surfaces.
+_RATE_LIMIT_HINTS: tuple[str, ...] = (
+    "rate limit",
+    "rate_limit",
+    "ratelimiterror",
+    "rate-limit",
+    "429",
+    "too many requests",
+)
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    """Heuristic: does the SDK/process error message look like a 429?
+
+    The Claude Agent SDK wraps the CLI subprocess, so a provider 429 surfaces
+    as a ``ProcessError`` / ``ClaudeSDKError`` whose ``str(exc)`` carries the
+    upstream message. We pattern-match a few stable substrings rather than
+    binding to an ``anthropic.RateLimitError`` class (anthropic SDK is not a
+    direct dep — the CLI is the only consumer).
+    """
+    text = (str(exc) or "").lower()
+    if any(hint in text for hint in _RATE_LIMIT_HINTS):
+        return True
+    # Some SDK errors expose an ``error_code`` attr from the CLI envelope.
+    code_attr = getattr(exc, "error_code", None)
+    if isinstance(code_attr, str) and any(hint in code_attr.lower() for hint in _RATE_LIMIT_HINTS):
+        return True
+    return False
+
+
+def _retry_after_from_exception(exc: Exception) -> int | None:
+    """Extract a ``Retry-After`` hint from the CLI error string, if present."""
+    text = str(exc) or ""
+    import re
+
+    # Common shapes: "retry after 42s" / "retry-after: 42" / "in 42 seconds".
+    match = re.search(r"retry[\s\-_]*after[^0-9]*(\d{1,5})", text, re.IGNORECASE)
+    if match:
+        try:
+            value = int(match.group(1))
+            return value if value > 0 else None
+        except ValueError:
+            return None
+    match = re.search(r"in\s+(\d{1,5})\s*seconds?", text, re.IGNORECASE)
+    if match:
+        try:
+            value = int(match.group(1))
+            return value if value > 0 else None
+        except ValueError:
+            return None
+    return None
 
 
 async def run_route_sdk_test(
@@ -1400,6 +1461,27 @@ async def run_route_sdk_test(
                 return await _drive_sdk_test(client, route.route_id, token)
         except Exception as exc:  # noqa: BLE001 — mapped to a clear message, not swallowed
             event = _error_event_for_exception(exc)
+            # R-F21: a provider 429 / rate-limit surface should NOT light the
+            # route red — it's a transient cooldown, not a broken route. We
+            # detect it via a small substring heuristic on the wrapped CLI
+            # error (anthropic SDK isn't a direct dep, so there's no concrete
+            # `RateLimitError` class to bind to). Carries an optional retry-
+            # after seconds field so the FE can render a countdown.
+            if _is_rate_limit_error(exc):
+                retry_after = _retry_after_from_exception(exc)
+                logger.warning(
+                    "phase=sdk_test route=%s cooling_down type=%s retry_after=%s: %s",
+                    route.route_id,
+                    type(exc).__name__,
+                    retry_after,
+                    event.message,
+                )
+                return RouteSdkTestResult(
+                    route.route_id,
+                    "cooling_down",
+                    event.message,
+                    retry_after_seconds=retry_after,
+                )
             logger.warning(
                 "phase=sdk_test route=%s failed type=%s: %s",
                 route.route_id,

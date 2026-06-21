@@ -47,13 +47,16 @@ def test_build_copilot_sdk_result_any_ok_is_pass() -> None:
     out = llm._build_copilot_sdk_result("copilot_chat", routes, results)
 
     assert out["status"] == "ok"  # copilot needs only one working route (fallback)
+    # R-F21: routes_evidence now carries retry_after_seconds alongside status
+    # so a remount can rehydrate a cooldown countdown via the R20 seed path.
+    # The field is None for ok/failed verdicts (they have no cooldown window).
     assert out["sdk_evidence"] == {
         "tested": True,
         "passed": 1,
         "total": 2,
         "routes": {
-            "r1": {"status": "failed", "message": "boom"},
-            "r2": {"status": "ok", "message": None},
+            "r1": {"status": "failed", "message": "boom", "retry_after_seconds": None},
+            "r2": {"status": "ok", "message": None, "retry_after_seconds": None},
         },
     }
 
@@ -89,6 +92,34 @@ def test_start_copilot_sdk_test_job_preserves_gateway_terminal_error(
     assert job.status == "failed"
     assert job.error_code == "resource.no_available_route"
     assert job.error_payload == {"role": "copilot_chat", "route_ids": []}
+    # R-F9: the user-visible message is the human Chinese rendering, not
+    # the raw `ResourceTerminalError: ...` repr.
+    assert "ResourceTerminalError" not in (job.message or "")
+    assert "暂无可用模型路由" in (job.message or "")
+    assert "copilot_chat" in (job.message or "")
+
+
+def test_human_message_for_error_code_covers_known_codes() -> None:
+    """R-F9 acceptance #1 — every error_code surfaced by the gateway path has a
+    human Chinese rendering keyed off the same table the frontend mirrors."""
+    assert "暂无可用模型路由" in llm._human_message_for_error_code(
+        "resource.no_available_route", "X"
+    )
+    assert "不存在或已被删除" in llm._human_message_for_error_code(
+        "resource.role_unknown", "X"
+    )
+    assert "不是 copilot 角色" in llm._human_message_for_error_code(
+        "resource.role_invalid_kind", "X"
+    )
+    assert "缺少必需的 API key" in llm._human_message_for_error_code(
+        "resource.credential_missing", "X"
+    )
+    # Unknown code → still human, never leaks "ResourceTerminalError" or repr.
+    msg_unknown = llm._human_message_for_error_code("some.new.code", "X")
+    assert "测试失败" in msg_unknown and "some.new.code" in msg_unknown
+    # None code → fallback to generic message, role still mentioned.
+    msg_none = llm._human_message_for_error_code(None, "X")
+    assert "X" in msg_none and "无法解析" in msg_none
 
 
 def test_run_copilot_sdk_test_job_updates_each_route_light_and_result(
@@ -155,3 +186,82 @@ def test_persist_copilot_sdk_evidence_skips_unknown_route(monkeypatch: pytest.Mo
     llm._persist_copilot_sdk_evidence([RouteSdkTestResult("missing", "ok", None)])
 
     assert saved == [], "nothing to persist when the route is unknown"
+
+
+def test_provider_model_option_emits_call_method_id_from_verified_profile() -> None:
+    """R-F8 acceptance #2 — `_model_group_response` (via `_provider_model_option`)
+    must include `call_method_id` so the frontend CopilotTab can filter copilot
+    eligibility by anthropic-messages capability instead of by provider_type.
+    The id is derived from the route's preferred ready `VerifiedProfile`.
+    """
+    from app.models.llm_config import ProviderEndpoint, ProviderRoute
+    from app.core.adapters.gateway import VerifiedProfile
+
+    endpoint = ProviderEndpoint(
+        endpoint_id="ark-official",
+        display_name="Ark Official",
+        protocol="openai_compatible",  # non-anthropic provider type — old heuristic would miss it
+        base_url="https://ark.example/v1",
+        api_key="x",
+        status="verified",
+    )
+    route = ProviderRoute(
+        route_id="ark-official:claude-opus-4-8",
+        endpoint_id="ark-official",
+        route_slug="claude-opus-4-8",
+        provider_model_id="claude-opus-4-8",
+        canonical_id="claude-opus-4.8",
+        verified_profiles=[
+            VerifiedProfile(
+                profile_id="ark-official:claude-opus-4-8:anthropic_messages:default",
+                method_id="ark_anthropic_messages",
+                capability="anthropic_messages",
+                request_mapper_id="ark_anthropic_messages",
+                status="ready",
+                default=True,
+                input_modalities=["text"],
+            )
+        ],
+    )
+    creds = LLMCredentialsFile(
+        provider_endpoints={endpoint.endpoint_id: endpoint},
+        provider_routes={route.route_id: route},
+    )
+
+    option = llm._provider_model_option(route, creds)
+    assert option is not None
+    assert option["call_method_id"] == "ark_anthropic_messages"
+    # The legacy provider_type heuristic would have excluded this — proving
+    # that downstream filtering must rely on call_method_id, not protocol.
+    assert endpoint.protocol == "openai_compatible"
+
+
+def test_provider_model_option_call_method_id_none_for_route_without_verified_profile() -> None:
+    """Routes without any ready verified profile emit `call_method_id: None`;
+    CopilotTab treats this as 'not eligible for copilot', degrading visibly."""
+    from app.models.llm_config import ProviderEndpoint, ProviderRoute
+
+    endpoint = ProviderEndpoint(
+        endpoint_id="legacy",
+        display_name="Legacy",
+        protocol="openai_compatible",
+        base_url="https://x",
+        api_key="x",
+        status="verified",
+    )
+    route = ProviderRoute(
+        route_id="legacy:gpt-5",
+        endpoint_id="legacy",
+        route_slug="gpt-5",
+        provider_model_id="gpt-5",
+        canonical_id="gpt-5",
+        # No verified_profiles → call_method_id resolves to None.
+    )
+    creds = LLMCredentialsFile(
+        provider_endpoints={endpoint.endpoint_id: endpoint},
+        provider_routes={route.route_id: route},
+    )
+
+    option = llm._provider_model_option(route, creds)
+    assert option is not None
+    assert option["call_method_id"] is None

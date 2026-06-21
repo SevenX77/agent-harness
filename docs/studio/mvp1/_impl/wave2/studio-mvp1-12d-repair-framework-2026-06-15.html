@@ -231,7 +231,7 @@ const S0_PAGE = {
   id:'s0', code:'S0', title:'总章：实施环境与修复 routine', pageId:'s0_overview',
   purpose:'这份手册不是普通状态表，而是 Studio MVP1 12D 修复的作战地图。读它时先确认当前实施环境、整体波次和固定 routine，再进入每个 D 的设计页与具体子问题页。这样可以避免只盯单点测试，而忘了每个设计点背后的 owner、接口和接入边界。',
   environment:[
-    ['Worktree','/Users/sevenx/Documents/coding/agent-harness/.worktrees/studio-mvp1-mainbased'],
+    ['工作区（从 main 切）','后端工作从 origin/main 切自己的 worktree：git worktree add <路径> origin/main（不要复用旧集成 worktree）。main 检出在 .worktrees/main-gateway-integration（永远 = origin/main）。'],
     ['Branch','main（唯一权威基准，origin/main CI 全绿）；集成线 feat/n0-settings-frontend 已经 PR #151 并入 main 并清理'],
     ['Current HEAD','origin/main = 76781284（MVP1 + 三模块整合 + 全部修复，CI 全绿）；后端工作一律从 main 切分支'],
     ['Wave4 verified HEAD','4e6aa330 feat(studio): close mvp1 wave3 runtime gates'],

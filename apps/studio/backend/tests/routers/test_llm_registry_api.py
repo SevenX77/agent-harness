@@ -4762,7 +4762,15 @@ def test_sync_catalog_endpoint(client: TestClient, tmp_path: Path, monkeypatch) 
     _seed(tmp_path, monkeypatch)
     
     from app.services.llm_import_drafts import ProviderImportDraft
-    async def mock_sync():
+    seen: dict[str, object] = {}
+
+    class FakeGitHubCatalogClient:
+        def __init__(self, *args, **kwargs) -> None:
+            raise AssertionError("catalog sync must read the public raw URL without GitHub token")
+
+    async def mock_sync(*, data=None, url=None):
+        seen["data"] = data
+        seen["url"] = url
         return ProviderImportDraft(
             draft_id="studio-evidence-library",
             source={"kind": "studio_evidence_library"},
@@ -4772,12 +4780,28 @@ def test_sync_catalog_endpoint(client: TestClient, tmp_path: Path, monkeypatch) 
         )
     
     import app.routers.llm as llm_router
+    monkeypatch.setattr(
+        llm_router,
+        "get_backend_config",
+        lambda: SimpleNamespace(
+            github_token="ghp-test",
+            github_owner="sevenx",
+            llm_catalog_repo="studio-llm-model-catalog",
+            llm_catalog_branch="main",
+            llm_catalog_path="llm_import_drafts.json",
+        ),
+    )
+    monkeypatch.setattr(llm_router, "GitHubCatalogClient", FakeGitHubCatalogClient)
     monkeypatch.setattr(llm_router, "sync_remote_evidence_library", mock_sync)
     
     response = client.post("/api/llm/catalog/sync")
     assert response.status_code == 200
     assert response.json()["status"] == "success"
     assert "Catalog synced successfully" in response.json()["message"]
+    assert seen["data"] is None
+    assert seen["url"] == (
+        "https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_import_drafts.json"
+    )
 
 
 def test_share_catalog_endpoint(client: TestClient, tmp_path: Path, monkeypatch) -> None:
@@ -4787,3 +4811,30 @@ def test_share_catalog_endpoint(client: TestClient, tmp_path: Path, monkeypatch)
     assert response.status_code == 200
     assert response.json()["status"] == "success"
     assert "Local verified catalog evidence exported successfully" in response.json()["message"]
+
+
+def test_ensure_catalog_repository_endpoint(client: TestClient, tmp_path: Path, monkeypatch) -> None:
+    _seed(tmp_path, monkeypatch)
+
+    import app.routers.llm as llm_router
+
+    def fake_ensure_catalog_repository():
+        return {
+            "status": "success",
+            "owner": "sevenx",
+            "repo": "studio-llm-model-catalog",
+            "html_url": "https://github.com/sevenx/studio-llm-model-catalog",
+            "raw_url": "https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_import_drafts.json",
+            "catalog_path": "llm_import_drafts.json",
+            "branch": "main",
+            "repository_created": True,
+            "catalog_created": True,
+        }
+
+    monkeypatch.setattr(llm_router, "ensure_catalog_repository", fake_ensure_catalog_repository, raising=False)
+
+    response = client.post("/api/llm/catalog/repository/ensure")
+
+    assert response.status_code == 200
+    assert response.json() == fake_ensure_catalog_repository()
+    assert "ghp-" not in response.text

@@ -2,10 +2,11 @@ import { useState } from "react"
 import { FolderOpen, RotateCcw } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
-import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field"
+import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { SaveStatusBadge } from "@/components/ui/save-status-badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
 import { selectSkillDirectory } from "@/lib/tauri"
 import { effectiveDefaultSkillsDirectory } from "@/utils/skill-paths"
 import { applyLanguageChange } from "./language-switch"
@@ -103,6 +104,22 @@ export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appS
               aria-label={t("general.giteaHost.label")}
             />
             <FieldDescription>{t("general.giteaHost.description")}</FieldDescription>
+          </Field>
+
+          <Field orientation="horizontal" className="items-start justify-between rounded-md bg-muted/30 p-3">
+            <FieldContent>
+              <FieldLabel htmlFor="remote-model-catalog-enabled">
+                {t("general.remoteModelCatalog.label")}
+              </FieldLabel>
+              <FieldDescription>{t("general.remoteModelCatalog.description")}</FieldDescription>
+            </FieldContent>
+            <Switch
+              id="remote-model-catalog-enabled"
+              checked={appSettings.remoteModelCatalogEnabled}
+              onCheckedChange={appSettings.setRemoteModelCatalogEnabled}
+              aria-label={t("general.remoteModelCatalog.label")}
+              className="mt-0.5"
+            />
           </Field>
 
           <Field>

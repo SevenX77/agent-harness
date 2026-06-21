@@ -36,12 +36,14 @@ export interface SettingsPageContentProps {
     giteaHost: string
     defaultSkillsDirectory: string
     language: AppLanguage
+    remoteModelCatalogEnabled: boolean
     isLoading: boolean
     saveStatus: SaveStatus
     setUserId: (value: string) => void
     setGiteaHost: (value: string) => void
     setDefaultSkillsDirectory: (value: string) => void
     setLanguage: (value: AppLanguage) => void
+    setRemoteModelCatalogEnabled: (value: boolean) => void
   }
   /**
    * N0 Settings · Shell (atoms #5/#6): true only after the /ws/events stream's

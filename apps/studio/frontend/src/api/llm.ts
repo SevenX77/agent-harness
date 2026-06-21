@@ -182,6 +182,13 @@ export interface EndpointSecretResponse {
   api_key: string
 }
 
+export interface CatalogSyncResponse {
+  status: 'success'
+  message: string
+  route_candidates_count: number
+  evidence_records_count: number
+}
+
 /**
  * Test outcome status projected for the restored API Keys page.
  *
@@ -1106,6 +1113,12 @@ export function apiKeysCredentialsFromRegistry(registry: CredentialRegistryRespo
 export async function getRegistry(): Promise<RegistryResponse> {
   const response = await api.get<RegistryResponse>('/llm/registry')
   return cacheRegistry(response.data)
+}
+
+export async function syncRemoteModelCatalog(): Promise<CatalogSyncResponse> {
+  const response = await api.post<CatalogSyncResponse>('/llm/catalog/sync')
+  cachedRegistry = null
+  return response.data
 }
 
 export async function getModelGroups(): Promise<ModelGroup[]> {

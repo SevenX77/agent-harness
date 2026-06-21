@@ -17,6 +17,7 @@ def test_get_settings_returns_defaults(client: TestClient) -> None:
         "gitea_host": "",
         "default_skills_directory": str(config.DEFAULT_SKILLS_ROOT),
         "language": "en",
+        "remote_model_catalog_enabled": True,
     }
 
 
@@ -26,6 +27,7 @@ def test_put_then_get_roundtrip(client: TestClient, tmp_path: Path) -> None:
         "gitea_host": "https://gitea.example.com",
         "default_skills_directory": str(tmp_path / "graph-skills"),
         "language": "en",
+        "remote_model_catalog_enabled": False,
     }
 
     put_response = client.put("/api/settings", json=payload)
@@ -44,6 +46,7 @@ def test_put_blank_default_skills_directory_uses_effective_default(client: TestC
             "user_id": "alice",
             "gitea_host": "",
             "default_skills_directory": "",
+            "remote_model_catalog_enabled": True,
         },
     )
     get_response = client.get("/api/settings")
@@ -60,6 +63,7 @@ def test_put_validates_strip(client: TestClient) -> None:
             "user_id": "  bob  ",
             "gitea_host": "",
             "default_skills_directory": "  /tmp/studio-skills  ",
+            "remote_model_catalog_enabled": True,
         },
     )
     get_response = client.get("/api/settings")
@@ -79,6 +83,7 @@ def test_get_defaults_language_when_omitted(client: TestClient, tmp_path: Path) 
             "user_id": "dave",
             "gitea_host": "",
             "default_skills_directory": str(tmp_path / "skills"),
+            "remote_model_catalog_enabled": True,
         },
     )
     get_response = client.get("/api/settings")
@@ -95,6 +100,7 @@ def test_put_language_roundtrips(client: TestClient, tmp_path: Path) -> None:
         "gitea_host": "",
         "default_skills_directory": str(tmp_path / "skills"),
         "language": "zh-CN",
+        "remote_model_catalog_enabled": True,
     }
 
     put_response = client.put("/api/settings", json=payload)
@@ -113,6 +119,7 @@ def test_put_rejects_unsupported_language(client: TestClient, tmp_path: Path) ->
             "gitea_host": "",
             "default_skills_directory": str(tmp_path / "skills"),
             "language": "fr-FR",
+            "remote_model_catalog_enabled": True,
         },
     )
 
@@ -129,6 +136,7 @@ def test_put_persists_across_app_restart(
         "gitea_host": "https://gitea.example.net",
         "default_skills_directory": str(tmp_path / "team-skills"),
         "language": "zh-CN",
+        "remote_model_catalog_enabled": False,
     }
 
     first_client = TestClient(create_app())

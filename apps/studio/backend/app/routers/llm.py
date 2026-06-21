@@ -55,6 +55,7 @@ from app.core.adapters.gateway import (
     test_provider_route as _gateway_test_provider_route_request,
 )
 from app.core.adapters.transport_factory import build_gateway_adapter
+from app.core.backends import get_backend_config
 from app.models.llm_config import (
     CapabilityValue,
     EvidenceRecord,
@@ -83,6 +84,7 @@ from app.services.copilot_test import (
     _Unauthorized,
 )
 from app.services.gateway_resolver import build_gateway_route_runtime
+from app.services.github_catalog import GitHubCatalogApiError, GitHubCatalogClient
 from app.services.llm_credentials import (
     _route_slug,
     credentials_path,
@@ -367,6 +369,18 @@ class EndpointModelTestResponse(BaseModel):
     results: list[EndpointModelTestResult]
 
 
+def _remote_catalog_sync_inputs() -> tuple[dict[str, Any] | None, str | None]:
+    """Return the configured remote catalog payload or raw URL for sync."""
+    cfg = get_backend_config()
+    if cfg.github_owner.strip():
+        owner = cfg.github_owner.strip()
+        repo = cfg.llm_catalog_repo.strip() or "studio-llm-model-catalog"
+        branch = cfg.llm_catalog_branch.strip() or "main"
+        catalog_path = cfg.llm_catalog_path.strip() or "llm_import_drafts.json"
+        return None, f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{catalog_path}"
+    return None, None
+
+
 @router.get("/registry", response_model=RegistryResponse)
 async def get_llm_registry() -> RegistryResponse:
     """Return the joined redacted endpoint/route/role registry."""
@@ -417,17 +431,50 @@ async def delete_registry_endpoint(endpoint_id: str) -> dict[str, Any]:
 async def sync_catalog() -> dict[str, Any]:
     """Pull the remote evidence library and merge it locally."""
     try:
-        updated = await sync_remote_evidence_library()
+        data, url = _remote_catalog_sync_inputs()
+        updated = await sync_remote_evidence_library(data=data, url=url)
         return {
             "status": "success",
             "message": "Catalog synced successfully with remote repository.",
             "route_candidates_count": len(updated.route_candidates),
             "evidence_records_count": len(updated.evidence_records),
         }
+    except GitHubCatalogApiError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"GitHub catalog API failed: {exc.status_code}",
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=500,
             detail=f"Failed to sync catalog: {exc}",
+        ) from exc
+
+
+def ensure_catalog_repository() -> dict[str, Any]:
+    """Ensure the configured GitHub remote catalog repository exists."""
+    cfg = get_backend_config()
+    result = GitHubCatalogClient(
+        token=cfg.github_token,
+        owner=cfg.github_owner,
+        repo=cfg.llm_catalog_repo,
+        branch=cfg.llm_catalog_branch,
+        catalog_path=cfg.llm_catalog_path,
+    ).ensure_repository()
+    return {"status": "success", **result.model_dump(mode="json")}
+
+
+@router.post("/catalog/repository/ensure")
+async def ensure_catalog_repository_endpoint() -> dict[str, Any]:
+    """Create or validate the GitHub-backed remote model catalog repository."""
+    try:
+        return ensure_catalog_repository()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except GitHubCatalogApiError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"GitHub catalog API failed: {exc.status_code}",
         ) from exc
 
 

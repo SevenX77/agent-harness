@@ -32,6 +32,10 @@ class AppSettings(BaseModel):
         default="en",
         description="Studio UI language, applied via react-i18next on the frontend.",
     )
+    remote_model_catalog_enabled: bool = Field(
+        default=True,
+        description="Whether Studio automatically reads the remote model catalog.",
+    )
 
     @field_validator("user_id", "gitea_host", "default_skills_directory")
     @classmethod

@@ -24,6 +24,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   gitea_host: '',
   default_skills_directory: '',
   language: 'en',
+  remote_model_catalog_enabled: true,
 }
 
 const APP_SETTINGS_SAVE_DELAY_MS = 300
@@ -43,6 +44,7 @@ export function appSettingsEqual(left: AppSettings, right: AppSettings) {
     && left.gitea_host === right.gitea_host
     && left.default_skills_directory === right.default_skills_directory
     && left.language === right.language
+    && left.remote_model_catalog_enabled === right.remote_model_catalog_enabled
 }
 
 export async function loadAppSettings(): Promise<AppSettings> {
@@ -168,6 +170,10 @@ export function useAppSettings() {
     updateSettings({ language })
   }, [updateSettings])
 
+  const setRemoteModelCatalogEnabled = useCallback((remoteModelCatalogEnabled: boolean) => {
+    updateSettings({ remote_model_catalog_enabled: remoteModelCatalogEnabled })
+  }, [updateSettings])
+
   const save = useCallback(async () => {
     if (timerRef.current) {
       clearTimeout(timerRef.current)
@@ -191,6 +197,7 @@ export function useAppSettings() {
     setGiteaHost,
     setDefaultSkillsDirectory,
     setLanguage,
+    setRemoteModelCatalogEnabled,
     save,
     isLoading,
     error,

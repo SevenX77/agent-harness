@@ -30,12 +30,14 @@ function makeAppSettings(overrides: Partial<AppSettingsProp> = {}): AppSettingsP
     giteaHost: "https://gitea.example.com",
     defaultSkillsDirectory: "/Users/alice/AgentStudio/Skills",
     language: "en",
+    remoteModelCatalogEnabled: true,
     isLoading: false,
     saveStatus: "saved",
     setUserId: vi.fn(),
     setGiteaHost: vi.fn(),
     setDefaultSkillsDirectory: vi.fn(),
     setLanguage: vi.fn(),
+    setRemoteModelCatalogEnabled: vi.fn(),
     ...overrides,
   }
 }
@@ -129,5 +131,13 @@ describe("GeneralTab render contract", () => {
       expect(html).toContain('aria-label="Studio language"')
       expect(html).toContain("Switch Studio UI copy without restarting the app.")
     }
+  })
+
+  it("renders the remote model catalog switch using the local shadcn switch primitive", () => {
+    const html = renderTab({ remoteModelCatalogEnabled: true })
+    expect(html).toContain("Remote model info")
+    expect(html).toContain("Read remote model catalog before showing route candidates.")
+    expect(html).toContain('data-slot="switch"')
+    expect(html).toContain('aria-label="Remote model info"')
   })
 })

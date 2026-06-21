@@ -77,9 +77,9 @@
           "iface_ref": "iface-io-2"
         }
       ],
-      "fe_status": "偏差",
+      "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "现状 graph-level io.inputs/outputs 字段级编辑(IoSchemaFieldsPanel,inputs+outputs 两侧都有)+ output artifact 已实现;缺口是 per-node i/o(选中任一节点编辑该节点 io)。serialize 契约已就绪。不是『output 字段编辑不存在』。",
+      "gap_brief": "符合设计。2026-06-20:代码已落地(design-audit vs code 核实),状态回填。per-node i/o 已端到端打通:resolveIoEditTarget(io-target.ts:61-81)对 phase 节点返回该 phase 自己的文件(phases/<id>/SKILL.md|LOGIC.md|SUBGRAPH.md)、对无选中/全局 io 节点才返回 GRAPH.md;InputPanel.tsx:801-803 调 resolveIoEditTarget(selectedNode, skillDetail),整个面板(IoSchemaFieldsPanel inputs+outputs :836/:860、SchemaInfer/FileImport/OutputArtifact)读写该节点的 target.relPath/target.content。画布选中贯穿:Workspace.tsx:455-456 节点点击设 selectedNode → :1317 传给 Panels → Panels.tsx:112 传给 InputPanel。已是 per-node、非仅 graph-level。",
       "impl_ref": "fn-27"
     },
     {
@@ -102,9 +102,9 @@
           "iface_ref": "iface-io-2"
         }
       ],
-      "fe_status": "偏差",
-      "be_status": "契约问题",
-      "gap_brief": "现状导入入口主要在 input 节点侧;目标任一 i/o 界面都能导入文件=导入字段进状态机(G2)。需后端把『任一节点 io 导入字段→运行期跑到该节点才注入』的契约定下来(引擎 io/manager 注入时机)。",
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计。2026-06-20:代码已落地(design-audit vs code 核实),状态回填。FileImportPanel('Import file as input field',InputPanel.tsx:202-320)无条件渲染在 per-node 解析出的 relPath+graphMd 上(:852-857),因此对任意选中节点都生效、不再只限起点 input;Import 时调 applyImportedFileFieldToGraph(schema-infer.ts:277-296)往 io.inputs.properties.<field> 写 {type, source:'file', path}——正是引擎 per-node 注入器(graph_assembler 的 _declared_input_file_specs/_inject_declared_input_files + io/manager 认 source=='file')读取的标记。引擎注入契约本就 live 且未变,FE 侧已闭合。",
       "impl_ref": "fn-28"
     },
     {
@@ -153,15 +153,15 @@
       ],
       "be_contract": [
         {
-          "endpoint": "引擎 loader 子图 io 校验(待删)",
-          "purpose": "现状 F-v3-subgraph-io-mismatch 仍按父/子 io.outputs 严格比对(只比 outputs 集合是否相等);G2 要求删此校验,改为子图从状态机过滤字段。子图本身已按绝对 path 解析。",
+          "endpoint": "引擎 loader 子图 io 校验(已删)",
+          "purpose": "原 F-v3-subgraph-io-mismatch 按父/子 io.outputs 严格 1:1 比对的 fatal 已删除(loader.py _validate_subgraph_io_contracts 不再比 parent_outputs vs child_outputs,仅做递归子图编译);改为子图和普通节点一样从黑板按 schema 切片字段。子图按绝对 path 解析。",
           "mechanism_ref": "mech_io",
           "iface_ref": "iface-io-3"
         }
       ],
-      "fe_status": "偏差",
-      "be_status": "契约问题",
-      "gap_brief": "⚠️ 硬阻塞:引擎 skill-syntax §2.4 明写『子图和普通节点一样从黑板切片、不要求父子字段集合 1:1』,但引擎 loader 的 _validate_subgraph_io_contracts 仍 fatal(parent_outputs ≠ child_outputs 报 F-v3-subgraph-io-mismatch)——spec 与 code 硬冲突。这条 fatal 实际阻塞子图 io 编辑,必须保持硬阻塞直到 loader 实际删除/改造该校验(按 §2.10 切片规则校验字段)。前端无此校验、无活。子图已按绝对 path 解析。",
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计。2026-06-20:代码已落地(design-audit vs code 核实),状态回填。原硬阻塞已解除:引擎 loader 的 _validate_subgraph_io_contracts(loader.py:612-641)不再比对 parent_outputs vs child_outputs,docstring(:622-629)说明按 skill-syntax §2.4 / cutover ⑦ 放宽了旧的 io.outputs 集合相等 fatal,循环体只做递归子图编译(path 解析 + 子图有效性);grep 确认 src 内无任何 _fatal/raise 发 [F-v3-subgraph-io-mismatch]。测试已翻转:test_ws_e1_subgraph_io_contract_red.py:258(test_subgraph_output_mismatch_now_compiles_without_1to1_gate)与 test_round14_skill_compilation_cutover.py:475 断言 outputs 不匹配现在能编译通过。前端本就无此校验、无活;子图按绝对 path 解析。",
       "impl_ref": "fn-30"
     }
   ]

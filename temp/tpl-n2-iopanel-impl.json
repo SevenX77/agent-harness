@@ -35,10 +35,11 @@
    "n": 28,
    "cap": "any-io-import-file",
    "design_ref": "n2-atom-28",
-   "current": "现状:偏差——任一节点的 i/o 界面已能导入文件(SchemaInferPanel 写到 resolveIoEditTarget 的逐节点 relPath),但导入写回 applyInputSchemaToGraph(schema-infer.ts)把字段存成普通 inline io.inputs schema、未打 {source:'file',path} 标记,故引擎的逐节点文件注入(_inject_declared_input_files,仅对 source:file 字段触发)不会注入这些字段——G2『导入即把文件字段在跑到该节点时注入状态机』未达成。",
-   "gap": "差距:让导入写回给字段打 {source:'file',path} 标记,复用已上线的引擎注入(_wrap_declared_input_files)在跑到该节点时注入。纯前端 lib(schema-infer.ts)+ InputPanel 改动;引擎注入契约已存在、不卡后端(原 prose 说『等后端契约』已过时)。",
-   "fe_status": "偏差",
-   "be_dep": "引擎注入契约已就绪(graph_assembler 的 _inject_declared_input_files/_wrap_declared_input_files 已实现),非后端阻塞;前端导入写回打 source:file 标记即可闭环。"
+   "current": "现状:已实现且符合。新增 applyImportedFileFieldToGraph(schema-infer.ts 里把『从文件导入的字段』写进 GRAPH.md io.inputs.properties.<字段> 的纯函数):它给该字段打上引擎逐节点文件注入认的标记 {source:'file', path:<文件路径>},并 upsert(字段不存在则建、已存在则标记为 file-sourced)、保留 type/其它字段/另一 io 侧/其它 frontmatter/GRAPH.md body。前端入口 FileImportPanel(InputPanel.tsx 里『导入文件作为输入字段』的小节,渲染在 inputs 侧 SchemaInferPanel 之后)挂在 resolveIoEditTarget 解析出的逐节点 relPath+graphMd 上,因此任一节点的 i/o 面板都能导入文件(不止起点 input 节点);填字段名+类型+路径(或拖文件预填路径)→ Import → 经 writeIoFile 写回该节点 io 文件。与 SchemaInferPanel(从粘贴的 JSON 样本推断 schema,#26)区分:导入文件=运行期跑到该节点才把文件内容注入字段,SchemaInferPanel=配置期从样本推断字段表。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "fe_resync": "2026-06-20:偏差→符合。红先行两层测试:先在 schema-infer.test.ts 加 applyImportedFileFieldToGraph 的断言(导入字段后 io.inputs.properties.<字段> 带 source:'file' + path),确认因函数不存在先 RED(6 例全红、原 23 例仍绿),再实现该纯函数使其转绿(29 例全绿)。标记形状 {source:'file', path} 是对照引擎已上线的两处消费者逐行确认、非臆测:graph_assembler.py 的 _declared_input_file_specs(读 io.inputs.properties 各字段,schema.get('source')!='file' 则跳过,否则取 schema.get('path') 必须非空)+ _inject_declared_input_files(跑到该节点时 read_workspace_text_file 把文件内容注入该字段),以及 io/manager.py(source=='file' 时 input_spec.get('path') 取文件路径)。引擎注入侧本就已上线、本次零改动(未碰 packages/graph-agent),仅前端写回补打标记即闭环。",
+   "be_dep": "引擎注入契约已就绪且本次零改动(graph_assembler 的 _wrap_declared_input_files/_declared_input_file_specs/_inject_declared_input_files、io/manager 的 source=='file' 分支均已实现),非后端阻塞;前端导入写回打 {source:'file',path} 标记后即闭环。"
   },
   {
    "n": 29,
@@ -143,16 +144,17 @@
     28
    ],
    "shots": [
-    "在一个非起点节点的 i/o 界面导入文件,写该节点 io.inputs"
+    "在任一节点的 i/o 界面导入文件→该字段写 io.inputs 并带 source:'file'+path,运行期跑到该节点由引擎从文件注入"
    ],
-   "fe_status": "偏差",
+   "fe_status": "符合",
    "layer1": [
-    "RED:当前导入入口主要在 input 节点侧 → 断言『任一节点 i/o 界面可导入』失败。",
-    "GREEN:断言任一节点 i/o 界面都能导入文件→写该节点 io.inputs。",
-    "运行期契约测(后端就位后):导入字段跑到该节点才注入状态机。"
+    "RED(已确认先红):applyImportedFileFieldToGraph 未实现时,断言导入字段后 io.inputs.properties.<字段> 带 source:'file' + path 因函数不存在而全部失败(6 例红、原有 23 例绿)。",
+    "GREEN:实现纯函数后,断言导入字段后 io.inputs.properties.<字段>.source=='file'、.path==文件路径、.type 保留;upsert(新建/标记已有);路径 trim;保留另一 io 侧+其它 frontmatter+body;空字段名/空路径各自抛错(空路径因引擎对 source='file' 无 path 会 FATAL,前端先拒)。schema-infer.test.ts 共 29 例全绿。",
+    "标记形状对照引擎消费者确认:graph_assembler _declared_input_file_specs 读 schema.get('source')!='file' 则跳过、否则取非空 schema.get('path');io/manager source=='file' 取 input_spec.get('path')。",
+    "回归:InputPanel 既有测试(data-gap / expected-hash)仍绿,新增 FileImportPanel 不破坏既有 i/o 面板。"
    ],
    "layer2": [
-    "真跑:在一个中间节点 i/o 界面导入文件,看字段写入该节点 io.inputs。"
+    "真跑:在一个非起点(中间)节点的 i/o 面板用 FileImportPanel 导入文件,看该节点 io 文件 io.inputs.<字段> 落 {type, source:'file', path};引擎逐节点注入(_inject_declared_input_files)本就已上线,跑到该节点时按 path 读文件注入该字段。"
    ]
   },
   {

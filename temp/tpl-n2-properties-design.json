@@ -24,9 +24,9 @@
           "iface_ref": "iface-1"
         }
       ],
-      "fe_status": "偏差",
-      "be_status": "n/a",
-      "gap_brief": "纠偏:主路径类型已是引擎按文件派生(作者写 mode: 被 _reject_phase_forbidden_metadata 拒),不是『可变 mode 推翻类型』的主路径 bug;残留是 phase.mode fallback 兜底 + UI 标签叫『Mode』。目标:派生显式据文件、去 fallback 歧义、标签改『节点类型(由文件决定)』。",
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计。2026-06-20:代码已落地(design-audit vs code 核实),状态回填。两个目标都已实现:(a)去掉 manifest phase.mode 兜底——build-nodes.ts:239 节点类型推导链改为 phaseModeFromFiles(按 phase 目录下存在哪个文件派生,:24-33) ?? phaseKindFromTopologyMode(topology.mode),即『文件存在性→topology.mode→logic 默认』,旧的 ?? phase.mode 已删,manifest 投影的 phase.mode 再不能推翻文件真相(F1 闭合);(b)UI 标签改述——PropertiesPanel.tsx:346-350 只读行 label 改为 'Node type'、hint 写 '由 phase 文件(SKILL/LOGIC/SUBGRAPH.md)决定,不可编辑'。测试断言节点类型不回退 manifest phase.mode(build-nodes.test.ts:170)+ 显示 'Node type' 行(PropertiesPanel.fields.test.tsx:170),48/48 绿。",
       "impl_ref": "fn-16"
     },
     {
@@ -42,9 +42,9 @@
         }
       ],
       "be_contract": [],
-      "fe_status": "偏差",
+      "fe_status": "符合",
       "be_status": "n/a",
-      "gap_brief": "现状底部只读区暴露『Mode』行,与『类型=文件名、不得写 mode』口径冲突、误导用户;目标删该行或改述为『节点类型(由文件决定)』。纯前端文案/结构改动。",
+      "gap_brief": "符合设计。2026-06-20:代码已落地(design-audit vs code 核实),状态回填。底部误导性『Mode』只读行已去除——PropertiesPanel.tsx:346-350 该行改为 label='Node type'、value 取派生类型标签、hint '由 phase 文件(SKILL/LOGIC/SUBGRAPH.md)决定,不可编辑',全文件再无 label='Mode'。测试 PropertiesPanel.fields.test.tsx:170 断言存在 'Node type' 行而非误导的 'Mode' 行(not.toContain('>Mode<') + toContain('>Node type<')),通过。",
       "impl_ref": "fn-17"
     },
     {
@@ -106,9 +106,9 @@
           "iface_ref": "iface-io-1"
         }
       ],
-      "fe_status": "偏差",
+      "fe_status": "符合",
       "be_status": "契约问题",
-      "gap_brief": "现状 path 输入框 + 旧 target_skill 迁移提示已有,但『path 找不到 → 标红 → OS 选文件夹导入工作区』的 folder picker 导入入口缺(F4/R5);copilot cwd 纳入子图 path 的校验也未落,需后端把子图 path 解析/导入契约定下来。",
+      "gap_brief": "前端符合设计。2026-06-20:代码已落地(design-audit vs code 核实),fe_status 回填。所有 FE 可做的目标均已落地:(1)白名单 path 字段 + validator(PropertiesPanel.tsx SubgraphPathField :660-742 + kind==='subgraph' 分支的 ValidatorField);(2)path 缺失标红——Properties 侧 aria-invalid + destructive 文案(:716/:728,unresolved = 语法缺失 subgraphPathFieldState 或磁盘 404 来自 getChildGraphTopology 探测),Assets 侧 AssetsPanel.tsx:124-142 rose AlertCircle + 'Missing path' badge;(3)『OS 选文件夹导入工作区』入口——'Select folder to import subgraph' 按钮(:734-737)→ handleImportSubgraphFolder(:271-276)→ selectSkillDirectory → Rust select_directory;(4)旧 target_skill 迁移提示(:720-724 + legacySubgraphTargetSkill)。测试 PropertiesPanel.fields.test.tsx:137-149 + subgraph-path.test.ts 通过(48/48)。残留仅 (c)『copilot cwd 纳入被引用子图 path』(D7)——这是后端契约项、记在 be_status='契约问题',不属 FE 偏差,故不再拖住 fe_status。",
       "impl_ref": "fn-20"
     },
     {

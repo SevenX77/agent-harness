@@ -450,6 +450,62 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     }
   }, [activeTab])
 
+  // R-F19.2 — when the Tauri shell intercepts `WindowEvent::CloseRequested`
+  // (Cmd+Q / window close / Quit menu) it emits `before-quit` and blocks the
+  // shutdown for `QUIT_FLUSH_BUDGET` (1500ms) waiting for the FE to ack via
+  // `confirm_quit_ready`. We flush any debounced/in-flight roles save first,
+  // then ack — so a yaml edit that was still sitting in the 300ms debounce
+  // window doesn't get lost on Quit. Browser-mode (no Tauri) gracefully
+  // no-ops: the dynamic import resolves but `listen` never fires.
+  useEffect(() => {
+    let cancelled = false
+    let unlisten: (() => void) | null = null
+    void (async () => {
+      try {
+        const [{ listen }, { invoke }] = await Promise.all([
+          import("@tauri-apps/api/event"),
+          import("@tauri-apps/api/core"),
+        ])
+        if (cancelled) return
+        unlisten = await listen("before-quit", async () => {
+          try {
+            await flushRolesSave()
+          } catch (error) {
+            // Surfacing via warn so silent loss is observable
+            // (rules/logging.md). We still ack so the shell isn't blocked
+            // for the full budget; the unmount cleanup helper also takes a
+            // best-effort pass if anything is still buffered.
+            console.warn(
+              "phase=quit action=flush-before-quit-failed reason=%o",
+              error,
+            )
+          }
+          try {
+            await invoke("confirm_quit_ready")
+          } catch (error) {
+            console.warn(
+              "phase=quit action=confirm-quit-ready-invoke-failed reason=%o",
+              error,
+            )
+          }
+        })
+      } catch (error) {
+        // Not running under Tauri (e.g. dev browser tab). Quietly skip —
+        // this is expected and not a degradation.
+        if (import.meta.env.DEV) {
+          console.info(
+            "phase=quit action=before-quit-listener-unavailable reason=%o",
+            error,
+          )
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+      if (unlisten) unlisten()
+    }
+  }, [flushRolesSave])
+
   // #5/#6 WebSocket auto-refresh, extracted into useStudioEventStream (resilient
   // reconnect + observable logging). registry_changed re-pulls credentials;
   // roles_changed re-pulls roles+model-groups when loaded, else marks them dirty

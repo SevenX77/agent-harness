@@ -257,6 +257,44 @@ export function renameIoField(graphMd: string, side: IoSide, from: string, to: s
   return dumpGraph(data, body)
 }
 
+/**
+ * #28 (any-io-import-file, G2): persist a file IMPORT onto an `io.inputs.<field>`
+ * schema in GRAPH.md frontmatter. Importing a file on any node's i/o panel means
+ * "import this file's field into the state machine, injected when the run reaches
+ * this node" — so the field's schema must carry the marker the engine's per-node
+ * file injection reads: `source: 'file'` + a non-empty `path`. The engine
+ * (graph_assembler `_declared_input_file_specs`/`_inject_declared_input_files` and
+ * io/manager) only injects a field whose schema has `source === 'file'` and a
+ * `path`; without this marker the imported field is an ordinary inline-schema input
+ * the engine never reads from disk. The field is upserted (created if absent, or
+ * marked file-sourced if already declared) keyed by name; its `type` is set and the
+ * `{source:'file', path}` marker stamped. Every other field, the other io side,
+ * each other frontmatter key, and the GRAPH.md body (phase DAG) are preserved. Pure
+ * + exported so the writeback is unit-testable without driving the live panel.
+ * Throws if GRAPH.md has no frontmatter, the name is blank, or the path is blank
+ * (the engine FATALs on `source='file'` with no path, so we reject it up front).
+ */
+export function applyImportedFileFieldToGraph(
+  graphMd: string,
+  fieldName: string,
+  type: IoFieldType,
+  path: string,
+): string {
+  const name = fieldName.trim()
+  if (name === '') {
+    throw new Error('imported file input field name cannot be empty')
+  }
+  const filePath = path.trim()
+  if (filePath === '') {
+    throw new Error("imported file input field requires a non-empty path (engine needs source='file' + path)")
+  }
+  const { data, body } = loadGraphFrontmatter(graphMd)
+  const { properties } = frontmatterIoProperties(data, 'inputs')
+  const existing = properties[name] && typeof properties[name] === 'object' ? (properties[name] as Record<string, unknown>) : {}
+  properties[name] = { ...existing, type, source: 'file', path: filePath }
+  return dumpGraph(data, body)
+}
+
 /** Change a declared field's json-schema `type` on one io side, preserving its other schema keys. */
 export function setIoFieldType(graphMd: string, side: IoSide, name: string, type: IoFieldType): string {
   const { data, body } = loadGraphFrontmatter(graphMd)

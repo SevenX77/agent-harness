@@ -5,6 +5,18 @@ import type { LintStatus } from '../types/studio'
 
 export const lintStatusEvent = 'studio-lint-status-changed'
 
+/**
+ * Sibling of {@link lintStatusEvent} carrying the FULL realtime LintResult (N3 atom #4).
+ *
+ * The status event only broadcasts a coarse `passed/failed/checking/idle` string — enough to
+ * gate the action bar, but not enough for the canvas-node / properties projection, which needs
+ * the per-error file/line/field_path. This event lifts the actual `LintResult | null` up to the
+ * workspace so it can overlay the first-screen SkillDetail lint onto the node badges in real
+ * time. `result` is null when the editor is empty/in-flight or the lint request itself failed
+ * (those carry no projectable compile errors).
+ */
+export const lintResultEvent = 'studio-lint-result-changed'
+
 /** Realtime-lint debounce window: edit → wait → POST /lint (workflow 03_compile A1: 800ms). */
 export const LINT_DEBOUNCE_MS = 800
 
@@ -19,6 +31,20 @@ function publishLintStatus(skillId: string, status: LintStatus) {
 
   sessionStorage.setItem(lintStatusStorageKey(skillId), status)
   window.dispatchEvent(new CustomEvent(lintStatusEvent, { detail: { skillId, status } }))
+}
+
+/**
+ * Broadcast the full realtime LintResult (N3 atom #4) so the workspace can overlay its errors
+ * onto the canvas-node / properties projection. Always paired with a `publishLintStatus` call so
+ * the status gate and the error projection stay in lockstep. `result` is null when the lint is
+ * idle/in-flight or the request failed — there are no projectable compile errors in those states.
+ */
+function publishLintResult(skillId: string, result: LintResult | null) {
+  if (typeof window === 'undefined' || !skillId) {
+    return
+  }
+
+  window.dispatchEvent(new CustomEvent(lintResultEvent, { detail: { skillId, result } }))
 }
 
 export function readLintStatus(skillId: string): LintStatus {
@@ -71,6 +97,8 @@ export function useDebouncedLint(skillId: string, markdown: string) {
       setResult(null)
       setMessage(null)
       publishLintStatus(skillId, 'idle')
+      // Empty/idle content has no projectable errors — clear any stale node projection too.
+      publishLintResult(skillId, null)
       return undefined
     }
 
@@ -85,12 +113,17 @@ export function useDebouncedLint(skillId: string, markdown: string) {
           setResult(response.data)
           setStatus(nextStatus)
           publishLintStatus(skillId, nextStatus)
+          // Lift the resolved LintResult (passed=clean or failed=errors) to the projection.
+          publishLintResult(skillId, response.data)
         })
         .catch((error: unknown) => {
           setResult(null)
           setStatus('failed')
           setMessage(error instanceof Error ? error.message : 'Lint request failed')
           publishLintStatus(skillId, 'failed')
+          // A failed REQUEST (network/engine down) carries no compile errors — don't project
+          // stale errors onto the nodes; the status gate already flags the failure.
+          publishLintResult(skillId, null)
         })
     }, LINT_DEBOUNCE_MS)
 

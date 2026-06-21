@@ -7,7 +7,7 @@ import {
 } from "./copilot-role-derivation"
 import type { CredentialsState, ModelGroup, RolesData } from "@/api/llm"
 
-function route(endpointId: string, modelId: string, uiState: string) {
+function route(endpointId: string, modelId: string, uiState: string, callMethodId: string = "anthropic_messages") {
   return {
     route_id: `${endpointId}:${modelId}`,
     endpoint_id: endpointId,
@@ -20,6 +20,10 @@ function route(endpointId: string, modelId: string, uiState: string) {
     reason_code: null,
     capability_state: "known",
     capabilities: {},
+    // R-F8: backend now emits call_method_id on every route; copilot
+    // eligibility is determined by this field belonging to the
+    // anthropic-messages family, not by `provider_type==='anthropic_compatible'`.
+    call_method_id: callMethodId,
   }
 }
 
@@ -99,12 +103,47 @@ describe("deriveCopilotCandidateGroups — Built-in detection (floated-set, sing
     expect(candidates[0].description).toBe("Claude Opus 4.8")
   })
 
-  it("only lists groups that have at least one Anthropic-compatible route", () => {
-    const candidates = deriveCopilotCandidateGroups(
-      [group("claude-opus-4.8", "Claude Opus 4.8")],
-      { providers: [{ id: "openai-key", name: "OpenAI", provider_type: "openai_compatible", api_key: "x" }] },
-    )
+  it("only lists groups whose routes carry an anthropic-messages call_method_id", () => {
+    // R-F8: eligibility is now driven by the route's call_method_id, not by the
+    // credential provider_type. A route with `openai_chat_completions` is
+    // filtered out even when the credential set is anthropic-compatible.
+    const openaiOnlyGroup = {
+      canonical_id: "claude-opus-4.8",
+      display_name: "Claude Opus 4.8",
+      provider_models: [route("anthropic-official", "claude-opus-4.8", "ready", "openai_chat_completions")],
+      status_summary: { ready: 1, untested: 0, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
+      capability_summary: {
+        capability_known_count: 1,
+        thinking: "unknown",
+        tools: "unknown",
+        structured_output: "unknown",
+        max_context_tokens: null,
+        max_output_tokens: null,
+      },
+    } as ModelGroup
+    const candidates = deriveCopilotCandidateGroups([openaiOnlyGroup], anthropicCredentials)
     expect(candidates).toEqual([])
+  })
+
+  it("accepts ark/deepseek/openrouter anthropic-messages variants alongside the official call method", () => {
+    // R-F8: the whitelist covers all four anthropic-messages call methods.
+    const arkGroup = {
+      canonical_id: "claude-opus-4.8",
+      display_name: "Claude Opus 4.8",
+      provider_models: [route("ark-official", "claude-opus-4.8", "ready", "ark_anthropic_messages")],
+      status_summary: { ready: 1, untested: 0, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
+      capability_summary: {
+        capability_known_count: 1,
+        thinking: "unknown",
+        tools: "unknown",
+        structured_output: "unknown",
+        max_context_tokens: null,
+        max_output_tokens: null,
+      },
+    } as ModelGroup
+    const candidates = deriveCopilotCandidateGroups([arkGroup], anthropicCredentials)
+    expect(candidates).toHaveLength(1)
+    expect(candidates[0].availableRoutes).toHaveLength(1)
   })
 })
 
@@ -120,16 +159,21 @@ describe("buildCopilotRoleEntry — materialize a floated/selected group into a 
     ])
   })
 
-  it("excludes non-ready routes from the default fallback chain", () => {
+  it("R-F4: keeps untested routes in the default fallback chain so Test can run them", () => {
+    // R-F4 / spec §3.2 #3: do NOT pre-filter the chain by uiState. Untested
+    // routes must be in the chain so the user can drive Test against them;
+    // otherwise no route ever gets to ready.
     const [candidate] = deriveCopilotCandidateGroups(
       [group("claude-opus-4.8", "Claude Opus 4.8", "untested")],
       anthropicCredentials,
     )
     const entry = buildCopilotRoleEntry(candidate)
-    expect(entry.fallback_chain).toEqual([])
+    expect(entry.fallback_chain).toEqual([
+      { route_id: "anthropic-official:claude-opus-4.8", runtime_settings: {} },
+    ])
   })
 
-  it("keeps only the ready routes when a group mixes ready and non-ready", () => {
+  it("R-F4: keeps both ready and non-ready routes when a group mixes states", () => {
     const mixedGroup = {
       canonical_id: "claude-opus-4.8",
       display_name: "Claude Opus 4.8",
@@ -157,8 +201,12 @@ describe("buildCopilotRoleEntry — materialize a floated/selected group into a 
     const entry = buildCopilotRoleEntry(candidate)
     expect(entry.fallback_chain).toEqual([
       { route_id: "anthropic-official:claude-opus-4.8", runtime_settings: {} },
+      { route_id: "qiniu-anthropic:claude-opus-4.8", runtime_settings: {} },
     ])
-    expect(entry.models["claude-opus-4.8"].providers).toEqual(["anthropic-official:claude-opus-4.8"])
+    expect(entry.models["claude-opus-4.8"].providers).toEqual([
+      "anthropic-official:claude-opus-4.8",
+      "qiniu-anthropic:claude-opus-4.8",
+    ])
   })
 })
 

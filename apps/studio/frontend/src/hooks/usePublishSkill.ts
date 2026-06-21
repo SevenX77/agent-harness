@@ -22,9 +22,18 @@ interface ExecutePublishSkillOptions {
   onOpenSettings?: () => void
 }
 
-// Publish preconditions that the user resolves in Settings — when these fail,
-// the error toast offers a one-click shortcut to Settings (publish design §6).
-const SETTINGS_FIXABLE_ERROR_CODES = new Set(['REGISTRY_NOT_CONFIGURED', 'APP_SETTINGS_INCOMPLETE'])
+// 读法 B (PM 2026-06-20): publish keeps the local-only safety net. When the
+// registry/identity config is missing, the LOCAL release still succeeds and the
+// remote sync leg is marked `skipped` with one of these reasons (backend
+// skills.py:710-732). The FE surfaces a NON-blocking notice keyed on the reason —
+// the backend never throws an error code for these, so there is no catch-path
+// whitelist. This set MUST equal exactly the reasons the backend emits.
+export const FE_HANDLED_SKIP_REASONS = new Set(['registry_not_configured', 'app_settings_incomplete'])
+
+// app_settings_incomplete is fixable in General settings (author identity / user_id),
+// so the success toast offers a one-click jump there. registry_not_configured has no
+// Settings field yet → informational only.
+const SETTINGS_FIXABLE_SKIP_REASON = 'app_settings_incomplete'
 
 const DEFAULT_RESET_DELAY_MS = 200
 export const ERROR_TOAST_MESSAGE = 'Release validation failed or the network is unavailable. The draft version is unchanged.'
@@ -53,6 +62,20 @@ function remoteSyncSummary(value: unknown): string | null {
   return reason ? `remote sync ${status} (${reason})` : `remote sync ${status}`
 }
 
+// The skip reason on an OK result whose remote sync was skipped — but only when it
+// is one the FE knows how to surface (read法 B). Returns null otherwise.
+function handledSkipReason(result: PublishResult): string | null {
+  const remoteSync = result.extra?.remote_sync
+  if (typeof remoteSync !== 'object' || remoteSync === null) {
+    return null
+  }
+  if (stringField(remoteSync, 'status') !== 'skipped') {
+    return null
+  }
+  const reason = stringField(remoteSync, 'reason')
+  return reason && FE_HANDLED_SKIP_REASONS.has(reason) ? reason : null
+}
+
 function releaseSuccessMessage(result: PublishResult): string {
   const releaseVersion = stringField(result.extra, 'release_version')
   const artifactRef = typeof result.extra?.artifact_ref === 'object' ? result.extra.artifact_ref : null
@@ -72,13 +95,29 @@ function releaseSuccessMessage(result: PublishResult): string {
     ].filter(Boolean).join(', ')
   }
 
+  if (remoteSync) {
+    return `Released to production: artifact published, ${remoteSync}`
+  }
+
   return 'Released to production: artifact published'
 }
 
-// Surface the backend's clear, typed error (e.g. REGISTRY_NOT_CONFIGURED —
-// "Artifact Registry Host 未配置") instead of a generic toast, per publish
-// design F2 ("missing settings gives a clear error"). Returns null for plain
-// network errors so the generic fallback still applies.
+// 读法 B: when the remote sync was skipped because the author identity is missing,
+// the (still successful) toast offers a one-click jump to Settings to set it. Other
+// skip reasons (registry_not_configured) have no Settings field yet → no action.
+function successToastOptions(
+  result: PublishResult,
+  onOpenSettings: (() => void) | undefined,
+): { action: { label: string; onClick: () => void } } | undefined {
+  if (!onOpenSettings || handledSkipReason(result) !== SETTINGS_FIXABLE_SKIP_REASON) {
+    return undefined
+  }
+  return { action: { label: 'Open Settings', onClick: onOpenSettings } }
+}
+
+// Surface the backend's clear, typed thrown error (e.g. a genuine PUBLISH_FAILED /
+// PUBLISH_CONFLICT) instead of a generic toast. Returns null for plain network
+// errors so the generic fallback still applies.
 function backendErrorMessage(error: unknown): string | null {
   if (typeof error !== 'object' || error === null || !('response' in error)) {
     return null
@@ -89,29 +128,6 @@ function backendErrorMessage(error: unknown): string | null {
   }
   const message = (data as { message?: unknown }).message
   return typeof message === 'string' && message.trim() ? message : null
-}
-
-function backendErrorCode(error: unknown): string | null {
-  if (typeof error !== 'object' || error === null || !('response' in error)) {
-    return null
-  }
-  const data = (error as { response?: { data?: unknown } }).response?.data
-  if (typeof data !== 'object' || data === null || !('error_code' in data)) {
-    return null
-  }
-  const code = (data as { error_code?: unknown }).error_code
-  return typeof code === 'string' ? code : null
-}
-
-function settingsToastOptions(
-  error: unknown,
-  onOpenSettings: (() => void) | undefined,
-): { action: { label: string; onClick: () => void } } | undefined {
-  const code = backendErrorCode(error)
-  if (!onOpenSettings || !code || !SETTINGS_FIXABLE_ERROR_CODES.has(code)) {
-    return undefined
-  }
-  return { action: { label: 'Open Settings', onClick: onOpenSettings } }
 }
 
 export async function executePublishSkill({
@@ -136,7 +152,7 @@ export async function executePublishSkill({
     setLastResult(result)
     if (result.status === 'ok') {
       setStatus('success')
-      toast.success(releaseSuccessMessage(result))
+      toast.success(releaseSuccessMessage(result), successToastOptions(result, onOpenSettings))
       scheduleReset(() => setStatus('idle'), resetDelayMs)
       return result
     }
@@ -149,7 +165,7 @@ export async function executePublishSkill({
     const backendMessage = backendErrorMessage(error)
     setStatus('error')
     setError(backendMessage ?? messageFromError(error))
-    toast.error(backendMessage ?? ERROR_TOAST_MESSAGE, settingsToastOptions(error, onOpenSettings))
+    toast.error(backendMessage ?? ERROR_TOAST_MESSAGE)
     return null
   }
 }

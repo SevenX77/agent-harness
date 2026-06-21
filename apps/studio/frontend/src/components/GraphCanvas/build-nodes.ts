@@ -17,9 +17,10 @@ export function phaseKindFile(data: Pick<SkillGraphNodeData, 'mode' | 'subgraphP
 // directory — SUBGRAPH.md / SKILL.md / LOGIC.md — never an author-writable
 // `mode:` frontmatter field (engine `_reject_phase_forbidden_metadata` rejects
 // it). This mirrors the engine's `_PHASE_FILE_TO_MODE` projection on the FE so a
-// stale `topology.mode` (or the legacy `phase.mode` fallback) can never override
-// the kind that the file on disk actually declares. Returns null when none of the
-// three node files is present, so callers can fall back to the topology mode.
+// stale `topology.mode` can never override the kind the file on disk declares.
+// Returns null when none of the three node files is present, so callers fall back
+// to the topology mode (and a 'logic' default) — but NEVER to the manifest-
+// projected `phase.mode`, which would re-open the F1 ambiguity (atom #16).
 function phaseModeFromFiles(
   phaseId: string,
   files: SkillDetail['files'] | undefined,
@@ -227,10 +228,15 @@ export function buildNodes(
   const topologyById = new Map((detail?.graph_topology ?? []).map((phase) => [phase.id, phase]))
   const phaseNodes: SkillGraphNode[] = phases.map((phase, index) => {
     const topology = topologyById.get(phase.name)
-    // Truth source for node KIND is the physical phase file on disk; the
-    // engine-injected `topology.mode` is only a fallback when no node file is
-    // loaded. The author-writable `phase.mode` is never trusted to set the kind.
-    const mode = phaseModeFromFiles(phase.name, detail?.files) ?? topology?.mode ?? phase.mode
+    // N2 atom #16 (node-type-derivation, F1): node KIND derives strictly from
+    // FILE EXISTENCE (which SKILL/LOGIC/SUBGRAPH.md is on disk), falling back to
+    // the engine-injected `topology.mode` (itself file-derived via
+    // `_PHASE_FILE_TO_MODE`) only when no node file is loaded, and to the 'logic'
+    // default when neither exists. The manifest-projected `phase.mode` is NEVER a
+    // fallback for the kind — trusting it would let a stale/mutable manifest mode
+    // override the file truth (the F1 ambiguity). This mirrors the drilled-child
+    // path's `phaseKindFromTopologyMode(topology?.mode)`.
+    const mode = phaseModeFromFiles(phase.name, detail?.files) ?? phaseKindFromTopologyMode(topology?.mode)
     const subgraphPath = normalizeAbsoluteSubgraphPath(topology?.path)
     const filePath = `phases/${phase.name}/${phaseKindFile({ mode, subgraphPath })}`
     const frontmatter = phaseFrontmatter(detail?.files?.[filePath])
@@ -319,6 +325,7 @@ export function buildNodesFromTopology(
   phases: string[],
   graphTopology: GraphTopologyItem[],
   statusByNodeId: Record<string, SkillNodeStatus>,
+  agentSteps: AgentStepsInputs = {},
 ): GraphCanvasNode[] {
   const io = EMPTY_IO
   const topologyById = new Map(graphTopology.map((row) => [row.id, row]))
@@ -327,6 +334,13 @@ export function buildNodesFromTopology(
     const mode = phaseKindFromTopologyMode(topology?.mode)
     const subgraphPath = normalizeAbsoluteSubgraphPath(topology?.path)
     const filePath = `phases/${phaseName}/${phaseKindFile({ mode, subgraphPath })}`
+    // n2-canvas #14: the topology-only (drill loading / fallback) view has no file
+    // body, so the AGENT step-editor open/close toggle is wired but the body-bound
+    // save (onStepsSave / agentBody) is not — that is supplied by the Option-A
+    // loaded path (buildNodes with the child's full SkillDetail). The toggle is
+    // withheld entirely on the read-only/compact projection (agentSteps left {}).
+    const isAgentNode = phaseKindFile({ mode, subgraphPath }) === 'SKILL.md'
+    const { onToggleSteps } = agentSteps
     return {
       id: phaseName,
       type: 'skill',
@@ -344,6 +358,10 @@ export function buildNodesFromTopology(
         subgraphPath,
         isExpanded: false,
         onToggleSubgraph: undefined,
+        isStepsExpanded: isAgentNode ? (agentSteps.expandedSteps?.has(phaseName) ?? false) : false,
+        onToggleSteps: isAgentNode && onToggleSteps
+          ? () => onToggleSteps(phaseName)
+          : undefined,
       },
     }
   })

@@ -79,6 +79,27 @@ describe('PropertiesPanel — per-kind whitelist form (R3)', () => {
     }
   })
 
+  // n2-properties #19 (atom #19): io.outputs field boundaries are owned by the
+  // I/O panel, NOT Properties. A logic node must still carry a NON-blocking hint
+  // pointing the author to the I/O panel so they don't assume "logic has no io
+  // constraint". The hint is additive (a FieldDescription affordance) and must
+  // not introduce any editable io field here.
+  it('logic node surfaces a non-blocking io.outputs hint pointing to the I/O panel', () => {
+    const html = renderPanel({
+      id: 'normalize',
+      data: baseData({ mode: 'logic', filePath: 'phases/normalize/LOGIC.md' }),
+      filePath: 'phases/normalize/LOGIC.md',
+      content: ['---', 'name: normalize', 'actions:', '  - strip_noise', '---', 'Body'].join('\n'),
+    })
+
+    // Mentions the io.outputs boundary and points to the I/O panel.
+    expect(html).toContain('io.outputs')
+    expect(html).toContain('I/O panel')
+    // The hint is informational only — it must not add an editable output field
+    // (those live in the I/O panel).
+    expect(html).not.toContain('id="phase-outputs"')
+  })
+
   it('subgraph node shows only path / validator, never deprecated fields', () => {
     const html = renderPanel({
       id: 'child',

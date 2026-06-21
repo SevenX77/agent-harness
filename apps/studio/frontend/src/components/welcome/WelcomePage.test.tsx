@@ -24,6 +24,7 @@ const toastMock = vi.hoisted(() => Object.assign(vi.fn(), {
 const recentMocks = vi.hoisted(() => ({
   recentWorkspaces: [] as RecentWorkspaceEntry[],
   isHydrating: false,
+  recentError: null as string | null,
 }))
 
 // A registry skill carrying derived fields. After the N1 MRU rewrite Home no
@@ -51,6 +52,7 @@ vi.mock('../../hooks/useRecentSkills', () => ({
     rememberWorkspace: vi.fn(),
     removeWorkspace: vi.fn(),
     isHydrating: recentMocks.isHydrating,
+    recentError: recentMocks.recentError,
   }),
 }))
 
@@ -84,6 +86,7 @@ vi.mock('../../lib/tauri', () => ({
 afterEach(() => {
   recentMocks.recentWorkspaces = []
   recentMocks.isHydrating = false
+  recentMocks.recentError = null
 })
 
 function renderHome() {
@@ -193,6 +196,38 @@ describe('WelcomePage', () => {
     expect(html).toContain('data-recent-skeleton="true"')
     expect(html).toContain('animate-pulse')
     expect(html).toContain('data-slot="skeleton"')
+  })
+
+  it('renders a local red error box when the Recent MRU read/path check fails (atom #9)', () => {
+    recentMocks.recentError = 'Could not read recent skills'
+    const html = renderHome()
+
+    // The failure退路 is local: a destructive shadcn Alert in the Recent region
+    // carrying the read/path-validation reason.
+    expect(html).toContain('role="alert"')
+    expect(html).toContain('text-destructive')
+    expect(html).toContain('Could not read recent skills')
+  })
+
+  it('keeps the New skill and Open folder entries usable when Recent fails (不阻塞入口)', () => {
+    recentMocks.recentError = 'Could not read recent skills'
+    const html = renderHome()
+
+    // Both top-level entries stay present and enabled — a Recent read failure
+    // must never block creating or opening a workspace (D11). The buttons carry
+    // a `disabled:` Tailwind utility either way, so assert on the rendered HTML
+    // attribute (`disabled=""`), which only appears when actually disabled.
+    expect(html).toContain('New skill')
+    expect(html).toContain('Open folder')
+    expect(html).not.toContain('disabled=""')
+  })
+
+  it('does not render the Recent error box when the MRU read succeeds', () => {
+    recentMocks.recentWorkspaces = [recentEntry]
+    recentMocks.recentError = null
+    const html = renderHome()
+
+    expect(html).not.toContain('role="alert"')
   })
 
   it('uses a short reveal action label in wider action menus', () => {

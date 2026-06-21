@@ -1,5 +1,6 @@
 import type { CallbackEvent, EventEnvelope, ResumeValidityResponse } from '@/api/types'
 import type { ResumeRunOptions } from '@/api/client'
+import type { SkillNodeStatus } from '@/components/nodes'
 
 export interface NodeResumeCheckpoint {
   checkpointId: string
@@ -25,6 +26,58 @@ export function nodeResumeOptionsFromValidity(
     resumeFromNodeId: validity.resume_from_node_id ?? nodeId,
     resumeToNodeId: validity.resume_to_node_id ?? undefined,
   }
+}
+
+/**
+ * Pick the node to anchor the resume-validity slice on for the AUTO dirty-downstream
+ * graying (N5 atom #3, spec F3).
+ *
+ * The validity endpoint needs a `resume_from_node_id` to compute the affected-downstream
+ * set. Pre-F-n5 that anchor was the node the user *selected* (so graying only happened on a
+ * manual selection); F-n5 derives it automatically from the run: a failed run resumes from
+ * its failed node, so that node is the natural anchor. Returns the first phase in `error`
+ * state (deterministic over insertion order), or null when nothing failed.
+ */
+export function resumeAnchorNodeId(
+  statusByNodeId: Record<string, SkillNodeStatus>,
+): string | null {
+  for (const [nodeId, status] of Object.entries(statusByNodeId)) {
+    if (status === 'error') {
+      return nodeId
+    }
+  }
+  return null
+}
+
+interface DirtyDownstreamGate {
+  skillId: string | null
+  runId: string | null
+  anchorNodeId: string | null
+}
+
+/**
+ * Gate for the auto edit-watcher that derives the dirty-downstream set (N5 atom #3).
+ *
+ * Fires whenever an active skill + run + a resume anchor node all exist — independent of
+ * which node the user has selected (removing the old `selectedNodeStatus === 'error'`
+ * single-point trigger). The effect itself re-runs on an upstream edit because the skill
+ * content hash it reads changes; this pure gate only encodes the always-on precondition.
+ */
+export function shouldDeriveDirtyDownstream({ skillId, runId, anchorNodeId }: DirtyDownstreamGate): boolean {
+  return Boolean(skillId && runId && anchorNodeId)
+}
+
+/**
+ * Project a resume-validity response into the set of nodes the canvas grays (N5 atom #3).
+ *
+ * Reads the backend's per-node `affected_downstream` slice verbatim (B1 made it per-node so
+ * unrelated side-branches are absent and stay runnable). Empty for a clean / null validity,
+ * so no node is grayed when there is nothing to resume from.
+ */
+export function dirtyDownstreamFromValidity(
+  validity: ResumeValidityResponse | null | undefined,
+): Set<string> {
+  return new Set(validity?.affected_downstream ?? [])
 }
 
 type TraceEventInput = CallbackEvent | EventEnvelope

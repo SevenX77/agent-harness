@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { EventEnvelope, ResumeValidityResponse } from '@/api/types'
-import { nodeResumeCheckpointFromEvents, nodeResumeOptionsFromValidity } from './node-resume'
+import type { SkillNodeStatus } from '@/components/nodes'
+import {
+  dirtyDownstreamFromValidity,
+  nodeResumeCheckpointFromEvents,
+  nodeResumeOptionsFromValidity,
+  resumeAnchorNodeId,
+  shouldDeriveDirtyDownstream,
+} from './node-resume'
 
 function envelope(seq: number, phaseName: string, checkpointId: string, runId = 'run-1'): EventEnvelope {
   return {
@@ -66,6 +73,70 @@ function validity(overrides: Partial<ResumeValidityResponse> = {}): ResumeValidi
     ...overrides,
   }
 }
+
+describe('resumeAnchorNodeId (N5 atom #3 — auto dirty-downstream anchor)', () => {
+  it('anchors on the failed node so the affected-downstream slice can be derived without a manual selection', () => {
+    const statusByNodeId: Record<string, SkillNodeStatus> = {
+      draft: 'success',
+      review: 'error',
+      publish: 'idle',
+    }
+    expect(resumeAnchorNodeId(statusByNodeId)).toBe('review')
+  })
+
+  it('returns null when no node is in a failed state (nothing to anchor the auto-derive on)', () => {
+    expect(resumeAnchorNodeId({ draft: 'success', review: 'idle' })).toBeNull()
+    expect(resumeAnchorNodeId({})).toBeNull()
+  })
+})
+
+describe('shouldDeriveDirtyDownstream (N5 atom #3 — auto edit-watcher gate)', () => {
+  it('fires when a run + an anchor node exist, independent of which node is selected', () => {
+    expect(
+      shouldDeriveDirtyDownstream({ skillId: 'demo', runId: 'run-1', anchorNodeId: 'review' }),
+    ).toBe(true)
+  })
+
+  it('does not fire when there is no run to derive validity against', () => {
+    expect(
+      shouldDeriveDirtyDownstream({ skillId: 'demo', runId: null, anchorNodeId: 'review' }),
+    ).toBe(false)
+  })
+
+  it('does not fire when no node can anchor the slice (no failed node)', () => {
+    expect(
+      shouldDeriveDirtyDownstream({ skillId: 'demo', runId: 'run-1', anchorNodeId: null }),
+    ).toBe(false)
+  })
+
+  it('does not fire without an active skill', () => {
+    expect(
+      shouldDeriveDirtyDownstream({ skillId: null, runId: 'run-1', anchorNodeId: 'review' }),
+    ).toBe(false)
+  })
+})
+
+describe('dirtyDownstreamFromValidity (N5 atom #3 — gray affected, keep unrelated runnable)', () => {
+  it('grays exactly the affected-downstream set after an upstream edit', () => {
+    // Upstream edit at `draft` reaches review+publish; `sidebranch` is unrelated.
+    const dirty = dirtyDownstreamFromValidity(
+      validity({ resume_allowed: false, reason: 'dirty_upstream', affected_downstream: ['draft', 'review', 'publish'] }),
+    )
+    expect(dirty.has('draft')).toBe(true)
+    expect(dirty.has('review')).toBe(true)
+    expect(dirty.has('publish')).toBe(true)
+    // Unrelated side-branch stays non-grayed.
+    expect(dirty.has('sidebranch')).toBe(false)
+  })
+
+  it('grays nothing when resume is clean (no affected downstream)', () => {
+    expect(dirtyDownstreamFromValidity(validity({ resume_allowed: true, affected_downstream: [] })).size).toBe(0)
+  })
+
+  it('grays nothing for a null validity (no resume in progress)', () => {
+    expect(dirtyDownstreamFromValidity(null).size).toBe(0)
+  })
+})
 
 describe('nodeResumeOptionsFromValidity', () => {
   it('anchors the node-level resume request at the validity node id (resume_from_node_id)', () => {

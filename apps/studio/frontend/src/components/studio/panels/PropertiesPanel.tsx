@@ -598,6 +598,14 @@ function PhaseFrontmatterForm({
                 errors={fieldErrors.validator}
                 onChange={(next) => onFieldChange("validator", next)}
               />
+              {/* n2-properties #19 (atom #19): the fields an action may write back
+                  are bounded by io.outputs.properties, but that boundary is edited
+                  in the I/O panel — not here. Surface a NON-blocking hint so the
+                  author doesn't assume a logic node has no io constraint. */}
+              <FieldDescription>
+                Output fields an action writes are bounded by io.outputs — edit those field
+                boundaries in the I/O panel (toolbar tab 3).
+              </FieldDescription>
             </>
           ) : null}
           {kind === "subgraph" ? (

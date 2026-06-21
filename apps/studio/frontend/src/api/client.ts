@@ -36,7 +36,35 @@ import { deleteWorkspacePath, writeWorkspaceFile } from '../lib/tauri'
 import { resolveWorkspaceIdentity } from '../components/studio/workspace-identity'
 import { BACKEND_UNAVAILABLE_MESSAGE, isBackendUnavailableError } from '../utils/errors'
 
-export const API_BASE_URL = import.meta.env.VITE_STUDIO_API_BASE_URL ?? 'http://localhost:8787/api'
+// API base URL is set explicitly by the dev launcher (vite via .env.local) or by the
+// Tauri runtime gate (configureApiBaseURL after get_sidecar_config IPC resolves).
+// In dev, a missing VITE_STUDIO_API_BASE_URL means the launcher forgot to align with
+// the sidecar's dynamic port: silently falling back to a hardcoded 8787 hides the
+// misconfig and causes 502s deep in the UI (R-F2). We surface it loudly instead.
+// Tests configure the base URL explicitly via configureApiBaseURL — they set
+// import.meta.env.VITEST so the throw stays out of the way.
+function resolveInitialApiBaseURL(): string {
+  const fromEnv = import.meta.env.VITE_STUDIO_API_BASE_URL
+  if (typeof fromEnv === 'string' && fromEnv.length > 0) {
+    return fromEnv
+  }
+  // Vitest test runs: keep a sane default; tests override via configureApiBaseURL.
+  if (import.meta.env.MODE === 'test' || (import.meta.env as Record<string, unknown>).VITEST) {
+    return 'http://localhost:8787/api'
+  }
+  if (import.meta.env.DEV) {
+    const message =
+      'VITE_STUDIO_API_BASE_URL is undefined. Launch via Tauri (which injects the dynamic sidecar port) or set VITE_STUDIO_API_BASE_URL in apps/studio/frontend/.env.local to match STUDIO_SIDECAR_PORT.'
+    // eslint-disable-next-line no-console
+    console.error('[studio-client]', message)
+    throw new Error(message)
+  }
+  // Production builds (Tauri webview) replace this at runtime via configureApiBaseURL;
+  // the placeholder is intentionally invalid to force the runtime gate.
+  return 'http://localhost:8787/api'
+}
+
+export const API_BASE_URL = resolveInitialApiBaseURL()
 const BROWSER_WRITE_FALLBACK_CONFIG = {
   headers: {
     'X-Studio-Write-Fallback': 'browser',

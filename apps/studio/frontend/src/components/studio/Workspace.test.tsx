@@ -1,9 +1,14 @@
+// @vitest-environment jsdom
 import { renderToStaticMarkup } from 'react-dom/server'
-import type { ReactNode } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, createElement, type ReactNode } from 'react'
+import { createRoot } from 'react-dom/client'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { compareReplayArgsForJudgeResult, Workspace } from './Workspace'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
-import type { SkillDetail } from '@/api/types'
+import type { EventEnvelope, RunDetail, SkillDetail } from '@/api/types'
+
+// React 19's act() warns unless the environment opts in.
+;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 const mocks = vi.hoisted(() => ({
   panelsProps: null as null | {
@@ -58,11 +63,17 @@ const mocks = vi.hoisted(() => ({
   mutateSkillDetail: vi.fn(),
   invoke: vi.fn(),
   lintStatus: 'idle' as 'idle' | 'checking' | 'passed' | 'failed',
+  // T-n6hist test#1/#2: the run trace stream + history hooks are driven through
+  // mocks so we can flip a run to run_ended and assert the resulting effect wiring.
+  runStreamEvents: [] as EventEnvelope[],
+  fetchRunDetail: vi.fn(),
+  refreshLocalHistory: vi.fn(),
 }))
 
 const toastMocks = vi.hoisted(() => ({
   error: vi.fn(),
   success: vi.fn(),
+  warning: vi.fn(),
 }))
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -100,6 +111,7 @@ vi.mock('@/hooks/useCopilotContext', () => ({
 
 vi.mock('@/hooks/useDebouncedLint', () => ({
   lintStatusEvent: 'studio-lint-status-changed',
+  lintResultEvent: 'studio-lint-result-changed',
   readLintStatus: () => mocks.lintStatus,
 }))
 
@@ -120,6 +132,45 @@ vi.mock('@/hooks/useGoldenDiff', () => ({
     }
   },
 }))
+
+// useRunStream is mocked so the run trace is fully controllable (no real WebSocket
+// under jsdom) and a run can be flipped to run_ended on demand.
+vi.mock('@/hooks/useRunStream', () => ({
+  useRunStream: () => ({
+    events: mocks.runStreamEvents,
+    status: 'open',
+    reconnectInMs: null,
+    error: null,
+    cursor: null,
+  }),
+}))
+
+// Keep the real pure projections (archiveFeedbackForGitStatus / nextLocalHistoryRefreshKey)
+// so the run_ended → toast wording is exercised end-to-end; only the SWR-backed hooks
+// (useRunHistory / useLocalHistory) are stubbed with controllable spies.
+vi.mock('@/hooks/useRunHistory', async (importActual) => {
+  const actual = await importActual<typeof import('@/hooks/useRunHistory')>()
+  return {
+    ...actual,
+    useRunHistory: () => ({
+      runs: [],
+      total: 0,
+      error: null,
+      isLoading: false,
+      refresh: vi.fn(),
+      startOptimisticRun: vi.fn(),
+      deleteRun: vi.fn(),
+      fetchRunDetail: mocks.fetchRunDetail,
+    }),
+    useLocalHistory: () => ({
+      history: [],
+      isLoading: false,
+      error: null,
+      refresh: mocks.refreshLocalHistory,
+      revert: vi.fn(),
+    }),
+  }
+})
 
 vi.mock('@/lib/hash', () => ({
   sha256Hex: vi.fn(async () => 'graph-hash'),
@@ -217,7 +268,22 @@ vi.mock('sonner', () => ({
 
 describe('Workspace WS-1 local writer contracts', () => {
   beforeEach(() => {
-    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
+    // Mark the runtime as Tauri without clobbering the jsdom window (createRoot
+    // needs the real DOM). isTauriRuntime only checks for this key on window.
+    ;(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {}
+    // jsdom has no WebSocket; the file-change watcher effect opens one. Stub it so
+    // effects can run without a real socket.
+    vi.stubGlobal(
+      'WebSocket',
+      class {
+        onmessage: ((event: { data: string }) => void) | null = null
+        close() {}
+      },
+    )
+    mocks.runStreamEvents = []
+    mocks.fetchRunDetail.mockReset()
+    mocks.refreshLocalHistory.mockReset()
+    toastMocks.warning.mockReset()
     mocks.panelsProps = null
     mocks.graphCanvasProps = null
     mocks.centerActionBarProps = null
@@ -657,6 +723,165 @@ describe('Workspace WS-1 local writer contracts', () => {
     expect(toastMocks.error).not.toHaveBeenCalled()
   })
 })
+
+// T-n6hist test#1/#2 (n6-history): the autocommit-feedback toast and the
+// Local-History auto-refresh both live in run_ended useEffects, which SSR never
+// runs. These drive a real client render (createRoot + act so effects fire),
+// flip the run to run_ended, and assert the wiring end-to-end: fetchRunDetail →
+// archiveFeedbackForGitStatus → toast (test#1), and refreshLocalHistory exactly
+// once on the not-ended → ended edge (test#2).
+describe('Workspace run_ended history wiring (integration)', () => {
+  let container: HTMLDivElement
+  let root: ReturnType<typeof createRoot>
+
+  beforeEach(() => {
+    ;(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {}
+    vi.stubGlobal(
+      'WebSocket',
+      class {
+        onmessage: ((event: { data: string }) => void) | null = null
+        close() {}
+      },
+    )
+    mocks.runStreamEvents = []
+    mocks.fetchRunDetail.mockReset()
+    mocks.refreshLocalHistory.mockReset()
+    mocks.resolveRunInput.mockReset()
+    mocks.resolveRunInput.mockResolvedValue({ topic: 'mars' })
+    mocks.postPredictRun.mockReset()
+    mocks.postPredictRun.mockResolvedValue({
+      is_predict: true,
+      status: 'success',
+      phases: [],
+      path_diff: null,
+    })
+    mocks.startRun.mockReset()
+    mocks.startRun.mockResolvedValue({
+      run_id: 'run-1',
+      status: 'running',
+      started_at: '2026-06-17T00:00:00Z',
+      metrics: null,
+      input_summary: null,
+    })
+    mocks.lintStatus = 'passed'
+    mocks.useSkillsIds.length = 0
+    mocks.copilotProps.length = 0
+    mocks.goldenDiffCalls.length = 0
+    mocks.goldenDiffResult = null
+    mocks.goldenDiffCompare.mockReset()
+    mocks.goldenDiffCompare.mockResolvedValue(null)
+    toastMocks.success.mockReset()
+    toastMocks.error.mockReset()
+    toastMocks.warning.mockReset()
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+  })
+
+  afterEach(() => {
+    act(() => {
+      root.unmount()
+    })
+    container.remove()
+  })
+
+  function renderWithEffects() {
+    act(() => {
+      root.render(
+        createElement(Workspace, {
+          skillId: 'writer-smoke',
+          onSelectSkill: vi.fn(),
+          onCloseSkill: vi.fn(),
+        }),
+      )
+    })
+  }
+
+  // Predict → Run sets runId='run-1' (the run trace stream already carries the
+  // run_ended event), flipping completedRunId on the not-ended → ended edge so
+  // the history effects fire under a real client render.
+  async function startRunToCompletion(gitStatus: RunDetail['metadata']['git_status']) {
+    mocks.runStreamEvents = [runEndedEvent('run-1')]
+    mocks.fetchRunDetail.mockResolvedValue(runDetailWithGitStatus('run-1', gitStatus))
+    renderWithEffects()
+    await act(async () => {
+      await mocks.centerActionBarProps?.onPredict?.()
+    })
+    await act(async () => {
+      await mocks.centerActionBarProps?.onRun?.()
+    })
+    // Let the run_ended effects (fetchRunDetail microtask chain) settle.
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+  }
+
+  it('re-fetches the run detail and surfaces a successful, revertable archive toast when committed', async () => {
+    await startRunToCompletion('committed')
+
+    expect(mocks.fetchRunDetail).toHaveBeenCalledWith('run-1')
+    expect(toastMocks.success).toHaveBeenCalledWith(expect.stringMatching(/Local History/i))
+    expect(toastMocks.warning).not.toHaveBeenCalled()
+  })
+
+  it('does not promise a revertable snapshot when the skill has no git repo (no_git)', async () => {
+    await startRunToCompletion('no_git')
+
+    expect(mocks.fetchRunDetail).toHaveBeenCalledWith('run-1')
+    const noGitToast = toastMocks.success.mock.calls
+      .map((call) => String(call[0]))
+      .find((message) => /no git repo/i.test(message))
+    expect(noGitToast).toBeDefined()
+    expect(noGitToast).not.toMatch(/revert from Local History/i)
+  })
+
+  it('warns (never claims success) when the git index was locked', async () => {
+    await startRunToCompletion('locked')
+
+    expect(mocks.fetchRunDetail).toHaveBeenCalledWith('run-1')
+    expect(toastMocks.warning).toHaveBeenCalledWith(expect.stringMatching(/not archived/i))
+  })
+
+  it('refreshes Local History exactly once on the run_ended edge', async () => {
+    await startRunToCompletion('committed')
+
+    expect(mocks.refreshLocalHistory).toHaveBeenCalledTimes(1)
+  })
+})
+
+function runEndedEvent(runId: string): EventEnvelope {
+  return {
+    schema_version: 'studio.event.v1',
+    stream_id: `${runId}-stream`,
+    seq: 1,
+    cursor: '1',
+    run_id: runId,
+    event_type: 'run_ended',
+    timestamp: '2026-06-17T00:00:01Z',
+    payload: {} as EventEnvelope['payload'],
+  }
+}
+
+function runDetailWithGitStatus(
+  runId: string,
+  gitStatus: RunDetail['metadata']['git_status'],
+): RunDetail {
+  return {
+    metadata: {
+      run_id: runId,
+      status: 'success',
+      started_at: '2026-06-17T00:00:00Z',
+      metrics: null,
+      input_summary: null,
+      git_status: gitStatus,
+    },
+    input_data: null,
+    events: [],
+    final_context: null,
+    artifacts: null,
+  }
+}
 
 function renderWorkspace(skillId = 'writer-smoke') {
   renderToStaticMarkup(

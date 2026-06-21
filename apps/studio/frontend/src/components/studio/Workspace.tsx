@@ -9,7 +9,7 @@ import { copilotFileActionEffects, type CopilotFileAction } from "@/components/c
 import { PromptInspector } from "@/components/PromptInspector"
 import { findPromptEvent } from "@/utils/trace"
 import { useCopilotContext } from "@/hooks/useCopilotContext"
-import { lintStatusEvent, readLintStatus } from "@/hooks/useDebouncedLint"
+import { lintResultEvent, lintStatusEvent, readLintStatus } from "@/hooks/useDebouncedLint"
 import { useRunStream } from "@/hooks/useRunStream"
 import { useGoldenDiff } from "@/hooks/useGoldenDiff"
 import { archiveFeedbackForGitStatus, nextLocalHistoryRefreshKey, useLocalHistory, useRunHistory } from "@/hooks/useRunHistory"
@@ -19,19 +19,20 @@ import type { CopilotJudgeResponse, ResumeRunOptions } from "@/api/client"
 import type { TraceHitlResumeRequest } from "@/components/TracePanel"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
 import { compileSkill, fetcher, getCompareGroup, getResumeValidity, getSkillDetail, resolveRunInput, serializeSkillGraph, startCompareRun, writeSkillFile, wsUrl, postPredictRun, startRun, resumeRun } from "@/api/client"
-import type { CompareCandidateRun, GoldenBaseline, ResumeValidityResponse } from "@/api/types"
+import type { CompareCandidateRun, GoldenBaseline, LintResult, ResumeValidityResponse, SerializableGraphPhaseRef, SkillDetail } from "@/api/types"
 import { candidatesFromRoleNames, compareTabsFromGroup } from "./run-compare"
 import { isTauriRuntime } from "@/config/runtime"
 import { writeWorkspaceFile } from "@/lib/tauri"
 import { errorMessage } from "@/utils/errors"
 import type { CompileError } from "@/api/types"
 import { connectPhaseRefs, createPhaseDraft, disconnectPhaseRefs, reconnectPhaseRefs, type NewPhaseKind } from "@/components/GraphCanvas/canvas-authoring"
+import { isReadOnlySkillError, type ChildSaveTarget } from "@/components/GraphCanvas/drill-edit"
 import { sha256Hex } from "@/lib/hash"
 import { CenterActionBar, type SkillBuildStage } from "./center-action-bar"
 import { deriveNodeErrorMessages, deriveNodeStatuses } from "./node-status"
-import { nodeResumeCheckpointFromEvents } from "./node-resume"
+import { dirtyDownstreamFromValidity, nodeResumeCheckpointFromEvents, resumeAnchorNodeId, shouldDeriveDirtyDownstream } from "./node-resume"
 import { hitlResumeOptionsFromRequest } from "./resume-options"
-import { compileErrorsByNode } from "./node-compile-errors"
+import { activeLintErrors, compileErrorsByNode, dataGapErrorsByNode, lintErrorToCompileError, lintErrorsByNode, mergeNodeErrors } from "./node-compile-errors"
 import { goldenTriStateByNode, ranAgentNodesFromPredict } from "./node-golden"
 import { compileErrorsToFieldLintErrors } from "./field-compile-errors"
 import { CompareRunDialog } from "./CompareRunDialog"
@@ -182,6 +183,11 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // on until something else (e.g. Compile) re-rendered. This tick is bumped by the lint
   // event subscriber below to force deriveBuildStage to re-read the latest lint status.
   const [lintTick, setLintTick] = useState(0)
+  // N3 atom #4: the realtime LintResult lifted from the editor (LazyMonacoPanel's
+  // useDebouncedLint publishes it on the `lintResultEvent` window event). Null until the
+  // first realtime lint resolves for the active skill; once present it overlays the
+  // first-screen SkillDetail lint onto the canvas-node / properties projection.
+  const [realtimeLint, setRealtimeLint] = useState<LintResult | null>(null)
   // F4: the test input selected in the i/o panel feeds Predict/Run (null = the
   // prior empty-payload behaviour). Reset when the active skill changes.
   const [selectedTestInputId, setSelectedTestInputId] = useState<string | null>(null)
@@ -208,6 +214,23 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     }
     window.addEventListener(lintStatusEvent, handler)
     return () => window.removeEventListener(lintStatusEvent, handler)
+  }, [currentSkillId])
+
+  // N3 atom #4: subscribe to the full realtime LintResult (published alongside the status
+  // event by useDebouncedLint). A matching skillId stores the result so the node/properties
+  // projection overlays the editor's live diagnostics on top of the first-screen SkillDetail
+  // lint. Reset to null when the active skill changes (the new skill has no realtime lint yet).
+  useEffect(() => {
+    setRealtimeLint(null)
+    if (typeof window === "undefined" || !currentSkillId) return undefined
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ skillId?: string; result?: LintResult | null }>).detail
+      if (detail?.skillId === currentSkillId) {
+        setRealtimeLint(detail.result ?? null)
+      }
+    }
+    window.addEventListener(lintResultEvent, handler)
+    return () => window.removeEventListener(lintResultEvent, handler)
   }, [currentSkillId])
 
   const updateStage = useCallback((id: string, stage: SkillBuildStage) => {
@@ -311,13 +334,6 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       : null,
     [selectedNodeId, selectedNode?.data.status, statusByNodeId],
   )
-  const selectedNodeCheckpoint = useMemo(
-    () => selectedNodeId
-      ? nodeResumeCheckpointFromEvents(runStream.events, selectedNodeId, runId)
-      : null,
-    [runId, runStream.events, selectedNodeId],
-  )
-
   // The currently-running phase, used to highlight/link the live trace stream.
   const activeTracePhase = useMemo(() => {
     const running = Object.entries(statusByNodeId).find(([, status]) => status === "running")
@@ -499,18 +515,27 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     void mutateSkillDetail()
   }, [mutateSkillDetail])
 
+  // n2-canvas #14 (drilled-subgraph edit-writeback): an optional identity override
+  // routes the write to a DRILLED CHILD skill instead of the parent. When absent
+  // the behaviour is byte-identical to the pre-drill path (parent identity). The
+  // child override carries the child's own skillId (browser write target) and
+  // workspaceRoot (Tauri native write target), so a drilled-child edit lands on the
+  // child's own files, never the parent's file map / workspace root.
   const doWriteSkillFile = useCallback(async (
     path: string,
     content: string,
     expectedHash?: string | null,
+    override?: { skillId: string; workspaceRoot: string | null },
   ) => {
-    if (!currentSkillId) {
+    const targetSkillId = override?.skillId ?? currentSkillId
+    const targetWorkspaceRoot = override ? override.workspaceRoot : currentWorkspaceRoot
+    if (!targetSkillId) {
       throw new Error("No active workspace")
     }
     if (isTauriRuntime()) {
-      return await writeWorkspaceFile(currentWorkspaceRoot ?? currentSkillId, path, content, expectedHash ?? null)
+      return await writeWorkspaceFile(targetWorkspaceRoot ?? targetSkillId, path, content, expectedHash ?? null)
     }
-    return await writeSkillFile(currentSkillId, path, content, expectedHash)
+    return await writeSkillFile(targetSkillId, path, content, expectedHash)
   }, [currentSkillId, currentWorkspaceRoot])
 
   const compileSkillById = useCallback(async (targetSkillId: string) => {
@@ -555,7 +580,24 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     path: string
     content: string
     expectedHash: string
-  }) => {
+  }, target?: ChildSaveTarget) => {
+    // n2-canvas #14: with a drilled-child `target`, the agent-body / phase-file
+    // save routes to the CHILD skill (its own files), refetching the child on
+    // settle. Without a target the parent/root behaviour below is unchanged.
+    if (target) {
+      try {
+        await doWriteSkillFile(path, content, expectedHash, { skillId: target.skillId, workspaceRoot: target.workspaceRoot })
+        toast.success("Saved phase properties")
+      } catch (error) {
+        if (isReadOnlySkillError(error)) {
+          toast.error("This subgraph is read-only — fork it into your workspace to edit.")
+        }
+        throw error
+      } finally {
+        void target.onSettled()
+      }
+      return
+    }
     if (!currentSkillId) {
       throw new Error("Open a skill before saving phase properties")
     }
@@ -595,47 +637,68 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     }
   }, [compileSkillById, currentSkillId, doWriteSkillFile, mutateSkillDetail, skillDetail])
 
-  const handlePersistConnection = useCallback(async (connection: Connection) => {
-    if (!currentSkillId || !skillDetail) {
+  // n2-canvas #14: the shared serialize → write GRAPH.md → compile → settle tail of
+  // every graph-structure edit (connect / disconnect / reconnect). `editDetail` is
+  // the snapshot the refs were computed from (parent skillDetail, or the drilled
+  // child's detail). With a `target` the whole write routes to the CHILD skill and
+  // re-fetches the child on settle; without it the PARENT path is byte-identical to
+  // before (serialize/write/compile against currentSkillId, revalidate via
+  // mutateSkillDetail). `parentSkillId` is asserted non-null by the callers' guard.
+  const writeGraphEdit = useCallback(async (
+    parentSkillId: string,
+    editDetail: SkillDetail,
+    phases: SerializableGraphPhaseRef[],
+    target?: ChildSaveTarget,
+  ) => {
+    const targetSkillId = target?.skillId ?? parentSkillId
+    const override = target ? { skillId: target.skillId, workspaceRoot: target.workspaceRoot } : undefined
+    const graphContent = editDetail.files?.["GRAPH.md"]
+    const graphHash = graphContent === undefined ? null : await sha256Hex(graphContent)
+    try {
+      const serialized = await serializeSkillGraph(targetSkillId, phases, graphHash)
+      await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash, override)
+      await compileSkillById(targetSkillId)
+      if (target) {
+        await target.onSettled()
+      } else {
+        await mutateSkillDetail()
+      }
+    } catch (error) {
+      if (target) {
+        if (isReadOnlySkillError(error)) {
+          toast.error("This subgraph is read-only — fork it into your workspace to edit.")
+        }
+        void target.onSettled()
+      } else {
+        void mutateSkillDetail()
+      }
+      throw error
+    }
+  }, [compileSkillById, doWriteSkillFile, mutateSkillDetail])
+
+  const handlePersistConnection = useCallback(async (connection: Connection, target?: ChildSaveTarget) => {
+    const editDetail = target?.detail ?? skillDetail
+    if (!currentSkillId || !editDetail) {
       throw new Error("Open a skill before connecting phases")
     }
-    const result = connectPhaseRefs(skillDetail, connection.source, connection.target)
+    const result = connectPhaseRefs(editDetail, connection.source, connection.target)
     if (!result.ok) {
       throw new Error(result.message)
     }
-    const graphContent = skillDetail.files?.["GRAPH.md"]
-    const graphHash = graphContent === undefined ? null : await sha256Hex(graphContent)
-    try {
-      const serialized = await serializeSkillGraph(currentSkillId, result.phases, graphHash)
-      await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash)
-      await compileSkillById(currentSkillId)
-      await mutateSkillDetail()
-    } catch (error) {
-      void mutateSkillDetail()
-      throw error
-    }
-  }, [compileSkillById, currentSkillId, doWriteSkillFile, mutateSkillDetail, skillDetail])
+    await writeGraphEdit(currentSkillId, editDetail, result.phases, target)
+  }, [currentSkillId, skillDetail, writeGraphEdit])
 
-  const handleDisconnectConnection = useCallback(async (connection: { source: string; target: string }) => {
-    if (!currentSkillId || !skillDetail) {
+  const handleDisconnectConnection = useCallback(async (connection: { source: string; target: string }, target?: ChildSaveTarget) => {
+    const editDetail = target?.detail ?? skillDetail
+    if (!currentSkillId || !editDetail) {
       throw new Error("Open a skill before disconnecting phases")
     }
-    const result = disconnectPhaseRefs(skillDetail, connection.source, connection.target)
+    const result = disconnectPhaseRefs(editDetail, connection.source, connection.target)
     if (!result.ok) {
       throw new Error(result.message)
     }
-    const graphContent = skillDetail.files?.["GRAPH.md"]
-    const graphHash = graphContent === undefined ? null : await sha256Hex(graphContent)
-    try {
-      const serialized = await serializeSkillGraph(currentSkillId, result.phases, graphHash)
-      await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash)
-      await compileSkillById(currentSkillId)
-      await mutateSkillDetail()
-    } catch (error) {
-      void mutateSkillDetail()
-      throw error
-    }
-  }, [compileSkillById, currentSkillId, doWriteSkillFile, mutateSkillDetail, skillDetail])
+    await writeGraphEdit(currentSkillId, editDetail, result.phases, target)
+  }, [currentSkillId, skillDetail, writeGraphEdit])
 
   // n2-canvas #8 (atomic reconnect): dragging an edge endpoint to a new node is
   // BOTH a disconnect (drop the old depends_on) AND a connect (add the new one).
@@ -650,26 +713,18 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const handleReconnectConnection = useCallback(async (
     disconnect: { source: string; target: string },
     connect: { source: string; target: string },
+    target?: ChildSaveTarget,
   ) => {
-    if (!currentSkillId || !skillDetail) {
+    const editDetail = target?.detail ?? skillDetail
+    if (!currentSkillId || !editDetail) {
       throw new Error("Open a skill before reconnecting phases")
     }
-    const result = reconnectPhaseRefs(skillDetail, disconnect, connect)
+    const result = reconnectPhaseRefs(editDetail, disconnect, connect)
     if (!result.ok) {
       throw new Error(result.message)
     }
-    const graphContent = skillDetail.files?.["GRAPH.md"]
-    const graphHash = graphContent === undefined ? null : await sha256Hex(graphContent)
-    try {
-      const serialized = await serializeSkillGraph(currentSkillId, result.phases, graphHash)
-      await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash)
-      await compileSkillById(currentSkillId)
-      await mutateSkillDetail()
-    } catch (error) {
-      void mutateSkillDetail()
-      throw error
-    }
-  }, [compileSkillById, currentSkillId, doWriteSkillFile, mutateSkillDetail, skillDetail])
+    await writeGraphEdit(currentSkillId, editDetail, result.phases, target)
+  }, [currentSkillId, skillDetail, writeGraphEdit])
 
   const setFileInFlight = useCallback((side: EditorSide, active: boolean) => {
     setInFlight((current) => ({ ...current, [side]: active }))
@@ -1068,9 +1123,21 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const [resumeValidityLoading, setResumeValidityLoading] = useState(false)
   const [resumeValidityError, setResumeValidityError] = useState<string | null>(null)
 
+  // N5 atom #3 (dirty-downstream-graying, spec F3): AUTO edit-watcher. The affected-downstream
+  // graying must NOT wait for the user to select the failed node — it should follow an upstream
+  // edit on its own. We anchor the resume-validity probe on the run's failed node (the natural
+  // resume target) and re-run it whenever the skill content changes (skillDetail.files flips on
+  // SWR revalidation after a save). The backend per-node slice (B1) keeps unrelated side-branches
+  // out of `affected_downstream`, so graying stays scoped to nodes the edit actually reaches.
+  const resumeAnchorId = useMemo(() => resumeAnchorNodeId(statusByNodeId), [statusByNodeId])
+  const resumeAnchorCheckpoint = useMemo(
+    () => (resumeAnchorId ? nodeResumeCheckpointFromEvents(runStream.events, resumeAnchorId, runId) : null),
+    [resumeAnchorId, runStream.events, runId],
+  )
+  const skillContentSignature = skillDetail?.files
   useEffect(() => {
     let cancelled = false
-    if (!currentSkillId || !runId || !selectedNodeId || selectedNodeStatus !== "error") {
+    if (!shouldDeriveDirtyDownstream({ skillId: currentSkillId, runId, anchorNodeId: resumeAnchorId })) {
       setResumeValidity(null)
       setResumeValidityLoading(false)
       setResumeValidityError(null)
@@ -1080,10 +1147,11 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     }
     setResumeValidityLoading(true)
     setResumeValidityError(null)
-    void getResumeValidity(currentSkillId, runId, {
-      checkpointId: selectedNodeCheckpoint?.checkpointId,
-      checkpointNs: selectedNodeCheckpoint?.checkpointNs,
-      resumeFromNodeId: selectedNodeId,
+    // Non-null asserted: shouldDeriveDirtyDownstream guards skillId/runId/resumeAnchorId above.
+    void getResumeValidity(currentSkillId!, runId!, {
+      checkpointId: resumeAnchorCheckpoint?.checkpointId,
+      checkpointNs: resumeAnchorCheckpoint?.checkpointNs,
+      resumeFromNodeId: resumeAnchorId!,
     }).then((result) => {
       if (cancelled) return
       setResumeValidity(result)
@@ -1101,10 +1169,11 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   }, [
     currentSkillId,
     runId,
-    selectedNodeCheckpoint?.checkpointId,
-    selectedNodeCheckpoint?.checkpointNs,
-    selectedNodeId,
-    selectedNodeStatus,
+    resumeAnchorId,
+    resumeAnchorCheckpoint?.checkpointId,
+    resumeAnchorCheckpoint?.checkpointNs,
+    // Upstream-edit signal: SWR returns a fresh files object when the on-disk skill changes.
+    skillContentSignature,
   ])
 
   const handleResume = useCallback(async () => {
@@ -1185,10 +1254,35 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
 
   const hasOpenFile = Boolean(activeFileDetails.left || activeFileDetails.right)
   const currentCompileErrors = currentSkillId ? compileErrors[currentSkillId] ?? [] : []
-  const compileErrorsByNodeId = useMemo(
-    () => compileErrorsByNode(currentSkillId ? compileErrors[currentSkillId] : []),
-    [compileErrors, currentSkillId],
+  // N3 atom #4: the active lint diagnostics for the canvas/properties projection — the
+  // first-screen SkillDetail sources (lint_result + manifest_errors) seed the initial badges,
+  // and the realtime LintResult (lifted from the editor) overlays them once it resolves.
+  const activeLint = useMemo(
+    () => activeLintErrors({
+      firstScreenLint: skillDetail?.lint_result?.errors,
+      manifestErrors: skillDetail?.manifest_errors,
+      realtime: realtimeLint?.errors,
+    }),
+    [skillDetail?.lint_result, skillDetail?.manifest_errors, realtimeLint],
   )
+  // N3 atom #4: feed the canvas node channel from BOTH manual Compile AND lint — the lint
+  // diagnostics are adapted onto the CompileError shape the node tooltip renders, grouped by
+  // node, and merged with the compile errors (neither dropped). Previously fed by Compile only.
+  // n2-canvas#10 (data-gap-viz, PM 2026-06-20): also fold in the data-gap channel — each phase
+  // input field the backend flagged `supplied=false` (graph_topology[].field_supply) becomes a
+  // node conflict error, so a missing-blackboard-supply gap shows on the canvas node exactly like
+  // a compile conflict (no checkbox UI, no red-X — selection stays in the i/o panel).
+  const compileErrorsByNodeId = useMemo(() => {
+    const compileByNode = compileErrorsByNode(currentSkillId ? compileErrors[currentSkillId] : [])
+    const lintByNode = lintErrorsByNode(activeLint)
+    const lintAsCompileByNode: Record<string, CompileError[]> = {}
+    for (const [nodeId, errors] of Object.entries(lintByNode)) {
+      lintAsCompileByNode[nodeId] = errors.map(lintErrorToCompileError)
+    }
+    const compileWithLint = mergeNodeErrors(compileByNode, lintAsCompileByNode)
+    const dataGapByNode = dataGapErrorsByNode(skillDetail?.graph_topology)
+    return mergeNodeErrors(compileWithLint, dataGapByNode)
+  }, [activeLint, compileErrors, currentSkillId, skillDetail?.graph_topology])
   const goldenStateByNodeId = useMemo(
     () => goldenTriStateByNode(
       goldenBaselines,
@@ -1203,16 +1297,20 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   // resume is clean / no node is being resumed (the validity effect nulls it then),
   // so unrelated branches stay normal.
   const dirtyDownstreamNodeIds = useMemo(
-    () => new Set(resumeValidity?.affected_downstream ?? []),
+    () => dirtyDownstreamFromValidity(resumeValidity),
     [resumeValidity],
   )
-  // Field-axis source for the Properties panel: the field-bearing compile errors mapped
-  // onto the engine LintError shape (N3 atom #5). The realtime lint result lives in the
-  // editor's useDebouncedLint and is not lifted here, so compile is today's field source.
-  const propertiesFieldErrors = useMemo(
-    () => compileErrorsToFieldLintErrors(currentSkillId ? compileErrors[currentSkillId] : []),
-    [compileErrors, currentSkillId],
-  )
+  // Field-axis source for the Properties panel (N3 atom #5): the realtime lint diagnostics
+  // carry the engine's nearest-field locator (field_path), so they are the field source the
+  // moment a realtime lint has resolved; before that (or when lint is clean) we fall back to
+  // the field-bearing manual-Compile errors mapped onto the same LintError shape. Either way
+  // the panel reads one DTO with a field_path axis — no client-side field re-derivation.
+  const propertiesFieldErrors = useMemo(() => {
+    if (realtimeLint != null) {
+      return realtimeLint.errors
+    }
+    return compileErrorsToFieldLintErrors(currentSkillId ? compileErrors[currentSkillId] : [])
+  }, [compileErrors, currentSkillId, realtimeLint])
 
   return (
     <WorkspaceProvider value={contextValue}>
@@ -1313,6 +1411,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
               ) : (
                 <GraphCanvas
                   skillId={currentSkillId}
+                  workspaceRoot={currentWorkspaceRoot}
                   skillDetail={skillDetail}
                   isLoading={isLoading}
                   error={skillDetailError}

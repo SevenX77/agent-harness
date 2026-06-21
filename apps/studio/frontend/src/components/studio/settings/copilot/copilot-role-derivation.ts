@@ -1,4 +1,28 @@
-import type { CredentialsState, ModelGroup, RoleEntry, RolesData } from '@/api/llm'
+import type { CredentialsState, ModelGroup, ProviderModelOption, RoleEntry, RolesData } from '@/api/llm'
+
+/**
+ * R-F8: an eligible copilot route is one whose backend `call_method_id` is in
+ * the Anthropic-messages family — i.e. the route can actually be driven by
+ * ClaudeSDKClient. The old heuristic (`endpoint.provider_type ===
+ * 'anthropic_compatible'`) missed ark-official + deepseek-official + openrouter
+ * routes whose endpoints expose multiple call methods including
+ * anthropic-messages but live behind a non-`anthropic_compatible` provider type.
+ *
+ * The whitelist mirrors the backend method_id set used by the gateway resolver
+ * + copilot test orchestrator.
+ */
+export const COPILOT_ANTHROPIC_MESSAGES_METHODS = [
+  'anthropic_messages',
+  'ark_anthropic_messages',
+  'deepseek_anthropic_messages',
+  'openrouter_anthropic_messages',
+] as const
+
+export function routeSupportsAnthropicMessages(pm: ProviderModelOption): boolean {
+  const m = (pm as { call_method_id?: string | null }).call_method_id
+  if (typeof m !== 'string') return false
+  return (COPILOT_ANTHROPIC_MESSAGES_METHODS as readonly string[]).includes(m)
+}
 
 export interface CopilotRoutePreview {
   id: string
@@ -35,15 +59,18 @@ export function deriveCopilotCandidateGroups(
   modelGroups: ModelGroup[],
   credentials: CredentialsState,
 ): CopilotRolePreview[] {
-  const anthropicProviderIds = new Set(
-    (credentials?.providers || [])
-      .filter((p) => p.provider_type === 'anthropic_compatible')
-      .map((p) => p.id)
-  )
+  // R-F8: only keep routes whose `call_method_id` is in the anthropic-messages
+  // family (i.e. ClaudeSDKClient can drive them). The old heuristic — filter
+  // by `endpoint.provider_type === 'anthropic_compatible'` — missed ark /
+  // deepseek / openrouter routes that expose anthropic-messages under a
+  // different provider_type.
+  // `credentials` is no longer required for eligibility (every backend route
+  // already carries the method id), but we keep the parameter for compat.
+  void credentials
 
   const candidates = (modelGroups || []).map((group) => {
     const availableRoutes: CopilotRoutePreview[] = (group.provider_models || [])
-      .filter((pm) => pm.endpoint_id && anthropicProviderIds.has(pm.endpoint_id))
+      .filter((pm) => routeSupportsAnthropicMessages(pm))
       .map((pm) => ({
         id: pm.route_id,
         route_id: pm.route_id,
@@ -56,7 +83,7 @@ export function deriveCopilotCandidateGroups(
         capabilities: pm.capabilities || {},
         provider: pm.provider_label,
         modelId: pm.provider_model_id,
-        methodId: (pm as unknown as Record<string, unknown>).call_method_id as string | null || null,
+        methodId: pm.call_method_id ?? null,
         note: (pm as unknown as Record<string, unknown>).note as string | null || null,
       }))
 
@@ -119,7 +146,10 @@ export function pickDefaultCopilotGroupIds(candidates: CopilotRolePreview[]): st
  * selected group. The default fallback chain is the group's ready routes.
  */
 export function buildCopilotRoleEntry(group: CopilotRolePreview): RoleEntry {
-  const readyRouteIds = group.availableRoutes.filter((route) => route.uiState === 'ready').map((route) => route.id)
+  // R-F4 / spec §3.2 #3: include ALL eligible routes (already filtered by
+  // anthropic-messages capability upstream), not just `ui_state === 'ready'`.
+  // Untested/failed routes must still be in the chain so Test can drive them.
+  const allRouteIds = group.availableRoutes.map((route) => route.id)
   return {
     role_kind: 'copilot',
     system_prompt_prefix: '',
@@ -128,9 +158,9 @@ export function buildCopilotRoleEntry(group: CopilotRolePreview): RoleEntry {
     model_groups: [],
     active_model: group.id,
     models: {
-      [group.id]: { providers: readyRouteIds },
+      [group.id]: { providers: allRouteIds },
     },
-    fallback_chain: readyRouteIds.map((routeId) => ({ route_id: routeId, runtime_settings: {} })),
+    fallback_chain: allRouteIds.map((routeId) => ({ route_id: routeId, runtime_settings: {} })),
   }
 }
 
@@ -148,9 +178,11 @@ export function applyCopilotModelGroupSelection(
   const role = nextRoles[roleId]
   if (!role) return roles
 
-  const defaultRouteIds = availableRoutes
-    .filter((r) => r.uiState === 'ready')
-    .map((r) => r.id)
+  // R-F4: include ALL eligible routes (anthropic-messages capable), not just
+  // ready ones. Untested/failed routes must enter the chain so Test can run
+  // them. Spec §3.2 #3 (`00_settings-ux-spec.md:201-202`): never pre-filter
+  // by `uiState === 'ready'` on the derivation side.
+  const defaultRouteIds = availableRoutes.map((r) => r.id)
 
   nextRoles[roleId] = {
     ...role,

@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactElement, type ReactNode } from 'react'
-import { initializeRuntimeConfig } from '../config/runtime'
+import { initializeRuntimeConfig, subscribeToSidecarRestart } from '../config/runtime'
 
 type RuntimeStatus = 'loading' | 'ready' | 'error'
 
@@ -74,6 +74,27 @@ export function RuntimeGate({ children }: RuntimeGateProps) {
       cancelled = true
     }
   }, [attempt])
+
+  // R-F13 — listen for `sidecar-restarted` Tauri events so a sidecar token
+  // rotation propagates into `currentApiToken` before `useStudioEventStream`
+  // schedules its next reconnect attempt (which reads the token via wsUrl()).
+  // The subscription survives across RuntimeGate retries; in non-Tauri builds
+  // `subscribeToSidecarRestart` is a no-op.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined
+    let cancelled = false
+    subscribeToSidecarRestart().then((dispose) => {
+      if (cancelled) {
+        dispose()
+      } else {
+        unlisten = dispose
+      }
+    })
+    return () => {
+      cancelled = true
+      if (unlisten) unlisten()
+    }
+  }, [])
 
   return (
     <RuntimeShell status={status} message={message} onRetry={() => setAttempt((value) => value + 1)}>

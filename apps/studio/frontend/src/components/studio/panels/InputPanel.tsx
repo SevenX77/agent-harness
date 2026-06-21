@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea"
 import type { FieldSupplyEntry, SkillDetail } from "@/api/types"
 import {
   addIoField,
+  applyImportedFileFieldToGraph,
   applyInputSchemaToGraph,
   applyOutputArtifactPathToGraph,
   inferJsonSchemaFromText,
@@ -175,6 +176,142 @@ function SchemaInferPanel({
         {saved && !saveError ? (
           <div className="px-1 text-[11px] text-muted-foreground">
             Saved to {relPath} io.inputs.
+          </div>
+        ) : null}
+      </div>
+    </section>
+  )
+}
+
+interface FileImportPanelProps {
+  skillId: string
+  workspaceRoot?: string | null
+  relPath: string
+  graphMd?: string
+  onSaved?: () => void
+}
+
+// #28 (any-io-import-file, G2): import a FILE as a declared input field on whatever
+// node the i/o panel currently targets (resolveIoEditTarget already scopes relPath +
+// graphMd to the selected node, so this entry works on ANY node, not just the start
+// input). Unlike SchemaInferPanel (which infers a schema from a pasted JSON SAMPLE),
+// importing a file means "inject this file's content into the field when the run
+// reaches this node". applyImportedFileFieldToGraph stamps the engine's marker
+// (source:'file' + path) onto io.inputs.<field>, which the engine's per-node file
+// injection reads to inject the file at run time. Drag a file to prefill its path.
+function FileImportPanel({ skillId, workspaceRoot = null, relPath, graphMd, onSaved }: FileImportPanelProps) {
+  const [fieldName, setFieldName] = useState("")
+  const [type, setType] = useState<IoFieldType>("string")
+  const [path, setPath] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  const handleImport = async () => {
+    if (!graphMd || fieldName.trim() === "" || path.trim() === "") {
+      return
+    }
+    setSaving(true)
+    setSaveError(null)
+    setSaved(false)
+    try {
+      const next = applyImportedFileFieldToGraph(graphMd, fieldName, type, path)
+      await writeIoFile(skillId, workspaceRoot, relPath, graphMd, next)
+      setSaved(true)
+      setFieldName("")
+      setPath("")
+      onSaved?.()
+    } catch (error) {
+      setSaveError(errorMessage(error))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    const file = event.dataTransfer.files.item(0)
+    if (file) {
+      // Prefill the path with the dropped file name; the user can adjust it to the
+      // workspace-relative path the engine resolves against at run time.
+      setPath(file.name)
+      if (fieldName.trim() === "") {
+        setFieldName(file.name.replace(/\.[^.]+$/, ""))
+      }
+      setSaved(false)
+    }
+  }
+
+  return (
+    <section className="space-y-2">
+      <div className="flex items-center gap-2 px-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        <Upload className="size-3.5" />
+        Import file as input field
+      </div>
+      <div
+        className="space-y-2 rounded-md border border-dashed border-border bg-background p-3"
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={handleDrop}
+        aria-label="Import a file as an input field for this node"
+      >
+        <div className="flex items-center gap-2">
+          <Input
+            value={fieldName}
+            onChange={(event) => {
+              setFieldName(event.target.value)
+              setSaved(false)
+            }}
+            placeholder="field_name"
+            className="font-mono"
+            spellCheck={false}
+            aria-label="Imported file input field name"
+            disabled={saving || !graphMd}
+          />
+          <Select value={type} onValueChange={(value) => setType(value as IoFieldType)} disabled={saving || !graphMd}>
+            <SelectTrigger className="w-28 font-mono" aria-label="Imported file input field type">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {IO_FIELD_TYPES.map((option) => (
+                <SelectItem key={option} value={option} className="font-mono">
+                  {option}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-center gap-2">
+          <Input
+            value={path}
+            onChange={(event) => {
+              setPath(event.target.value)
+              setSaved(false)
+            }}
+            placeholder="inputs/brief.md"
+            className="font-mono"
+            spellCheck={false}
+            aria-label="Imported file path"
+            disabled={saving || !graphMd}
+          />
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => void handleImport()}
+            disabled={saving || !graphMd || fieldName.trim() === "" || path.trim() === ""}
+            aria-label="Import file as input field"
+          >
+            <Upload className="size-3.5" />
+            {saving ? "Importing…" : "Import"}
+          </Button>
+        </div>
+        {saveError ? (
+          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">
+            {saveError}
+          </div>
+        ) : null}
+        {saved && !saveError ? (
+          <div className="px-1 text-[11px] text-muted-foreground">
+            Imported to {relPath} io.inputs (injected from file at run time).
           </div>
         ) : null}
       </div>
@@ -707,6 +844,12 @@ export function InputPanel({
           />
           <SchemaInferPanel
             initialJson={contract.inputSampleJson}
+            skillId={skillId}
+            workspaceRoot={workspaceRoot}
+            relPath={relPath}
+            graphMd={graphMd}
+          />
+          <FileImportPanel
             skillId={skillId}
             workspaceRoot={workspaceRoot}
             relPath={relPath}

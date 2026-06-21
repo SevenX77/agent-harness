@@ -253,6 +253,31 @@ The default remote catalog repository is public. Studio must read it through the
 
 The existing share behavior that returns every local `probe-verified` record is not acceptable as product behavior. It must filter, sanitize, and label what is safe to publish.
 
+### REQ-21a: public URL safety is explicit and testable
+
+The public catalog may include URL-derived stable endpoint IDs only when the endpoint URL is public-safe. Public-safe means:
+
+- host is not localhost or loopback;
+- host is not private RFC1918, link-local, carrier NAT, or unique-local IPv6;
+- host is not a bare internal hostname without a public suffix;
+- URL does not include username/password, query, fragment, tenant IDs, workspace IDs, or local paths;
+- provider-specific path is generic API surface only, for example `/v1`, `/api`, `/api/v1`.
+
+If public-safety cannot be proven, the record must be excluded from public writeback with an explicit exclusion reason.
+
+### REQ-21b: writeback produces deterministic catalog patches
+
+Sanitized writeback must produce a deterministic patch or merged JSON payload:
+
+- stable sorted object keys;
+- deterministic evidence ordering by `observed_at`, then `evidence_id`;
+- idempotent re-running does not duplicate evidence;
+- conflicts are reported as review-required instead of silently overwriting remote evidence.
+
+### REQ-21c: GitHub writeback must use branch or PR, not main
+
+When GitHub write credentials are configured, Studio may create a branch and draft PR against the catalog repository. It must not push directly to `main`. The returned response must include branch name, commit SHA, PR URL when created, and all excluded records.
+
 ## 7. UI State Requirements
 
 ### REQ-22: frontend consumes backend 6-state projection
@@ -283,6 +308,22 @@ The MVP1 design docs, gateway alignment doc, and frontend UI spec must agree on:
 - blue semantics;
 - compact response migration away from old `status = "probe-verified"` as final UI truth.
 
+### REQ-26: catalog population is separate from endpoint testing
+
+Provider model-list observations may populate route candidates and capability candidates in the remote catalog, but they must remain visually distinct from historical successful probes. A user can see model-list candidates as available candidate routes, but they must not be labeled connected, previously connected, or ready unless matching probe evidence exists.
+
+### REQ-27: migration health is observable
+
+The hard stable-ID migration must expose a report that can be inspected by tests and logs:
+
+- old endpoint ID -> new endpoint ID;
+- old route ID -> new route ID;
+- files/databases rewritten;
+- validation failures;
+- backup paths.
+
+Startup and registry endpoints must surface migration failure clearly instead of producing partial settings UI state.
+
 ## 8. Acceptance Criteria
 
 - GitHub raw URL for `llm_import_drafts.json` returns HTTP 200.
@@ -294,3 +335,5 @@ The MVP1 design docs, gateway alignment doc, and frontend UI spec must agree on:
 - A route with only `provider-list-observed` evidence does not show "Previously Connected".
 - API Keys route chip color is driven by backend `ui_state`.
 - Share/export output contains no API keys, private base URLs, raw request bodies, or random `custom-<uuid>` catalog identities by default.
+- Public writeback excludes private/internal URLs with machine-readable exclusion reasons.
+- A generated catalog patch can be applied twice without duplicating evidence.

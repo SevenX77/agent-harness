@@ -321,6 +321,77 @@ off > failed > cooling_down > ready > historical_ready > untested
 
 Provider-list observations may enrich candidates and capability tooltips but must not produce "Previously Connected".
 
+### 9.1 Blue-State End-to-End Contract
+
+The API Keys and LLM Roles UI must never infer blue state from frontend-only fields. Backend registry projection owns the state:
+
+```text
+ProviderRoute.status        local active status
+ProviderRoute.ui_state      backend-projected UI state
+ModelInfo.ui_state          compact frontend-friendly projection
+ProviderModelOption.ui_state model group projection
+```
+
+The projection algorithm:
+
+```text
+if endpoint disabled or missing credential:
+  ui_state = off
+elif runtime circuit says failed/cooling:
+  ui_state = failed/cooling_down
+elif route.status == verified:
+  ui_state = ready
+elif remote/local evidence has matching probe-verified route_id:
+  ui_state = historical_ready
+elif route is catalog/provider-list candidate:
+  ui_state = untested
+else:
+  ui_state = untested
+```
+
+Frontend mapping:
+
+- `ready` -> green tag text such as `Ready`;
+- `historical_ready` -> blue tag text such as `Previously connected`;
+- `untested` -> neutral candidate tag;
+- `failed` -> red failed tag;
+- `cooling_down` -> warning/cooldown tag;
+- `off` -> disabled/off tag.
+
+The frontend must remove `status === "probe-verified"` as a required render path. If a compact response still includes old `status`, the UI may ignore it once `ui_state` is present.
+
+### 9.2 Candidate Population Contract
+
+Model-list observations create candidate routes but not historical readiness:
+
+```text
+model_list_observation -> route_candidates + provider-list evidence
+probe success           -> probe-verified evidence + possible historical_ready
+probe failure           -> probe-failed evidence + failed history, not blue
+```
+
+API Keys "Get models" may add many route candidates. Those candidates should be grouped under the provider and can carry capability hints, but they stay neutral until a real route probe succeeds.
+
+### 9.3 Catalog Source Metadata
+
+Every registry response that consumed remote catalog data should be able to expose non-secret catalog metadata for debugging:
+
+```json
+{
+  "catalog_source": {
+    "enabled": true,
+    "source_url": "https://raw.githubusercontent.com/...",
+    "fetched_at": "2026-06-20T23:00:00Z",
+    "etag": "optional",
+    "route_candidates_count": 0,
+    "evidence_records_count": 0,
+    "last_error": null
+  }
+}
+```
+
+This metadata is not necessary for route execution, but it prevents future ambiguity about whether the page read the remote catalog or only local cache.
+
 ## 10. Writeback Flow
 
 Local probing writes local evidence immediately so the current session can use it. Publishing to GitHub is separate:
@@ -335,6 +406,88 @@ Local probing writes local evidence immediately so the current session can use i
 8. Return a PR-ready payload.
 
 Default MVP1 behavior is not direct push. A later optional integration may create a branch and draft PR when GitHub credentials are explicitly configured.
+
+### 10.1 Writeback API Shape
+
+Add a writeback preview endpoint first:
+
+```http
+POST /api/llm/catalog/writeback/preview
+```
+
+Input:
+
+```json
+{
+  "target": "public",
+  "base_remote_sha": "optional remote file sha or etag",
+  "include_failed_probe_evidence": true
+}
+```
+
+Output:
+
+```json
+{
+  "status": "success",
+  "target": "public",
+  "base_remote_sha": "...",
+  "publishable_records_count": 0,
+  "excluded_records_count": 0,
+  "excluded_records": [
+    {
+      "evidence_id": "evidence-...",
+      "reason_code": "private_base_url",
+      "message": "Endpoint URL is not public-safe."
+    }
+  ],
+  "catalog_patch": {
+    "draft_id": "studio-evidence-library",
+    "route_candidates": {},
+    "evidence_records": []
+  },
+  "merged_catalog": {}
+}
+```
+
+Then add an explicit PR endpoint:
+
+```http
+POST /api/llm/catalog/writeback/pr
+```
+
+It must:
+
+1. Re-fetch remote catalog before writing.
+2. Re-run sanitizer against the fresh remote base.
+3. Create a branch named `studio-catalog/<timestamp>-<short-hash>`.
+4. Commit updated `llm_import_drafts.json` to that branch.
+5. Open a draft PR.
+6. Return branch, commit SHA, PR URL, and exclusions.
+
+It must not push directly to `main`.
+
+### 10.2 Merge and Dedupe Rules
+
+Merging local sanitized evidence with remote catalog is deterministic:
+
+```text
+record key = evidence_id
+route candidate key = route_id
+```
+
+If a local record has the same `evidence_id` as remote:
+
+- identical payload: keep one;
+- different payload: exclude local record with `reason_code = evidence_id_conflict`.
+
+If a local record has no `evidence_id`, it is not publishable. Evidence IDs are generated when evidence is first written locally, not during publication.
+
+Output ordering:
+
+1. `route_candidates` sorted by route ID.
+2. `evidence_records` sorted by `observed_at`, then `attempted_at`, then `evidence_id`.
+3. JSON serialized with stable indentation and sorted object keys.
 
 ## 11. Sanitization Rules
 
@@ -380,6 +533,89 @@ Forbidden fields or values:
 - local filesystem paths;
 - raw provider error objects;
 - any metadata value matching secret-like patterns.
+
+### 11.1 Public URL Safety Classifier
+
+Public writeback needs a deterministic classifier:
+
+```text
+classify_catalog_url(base_url) -> public_safe | private_or_internal | malformed | review_required
+```
+
+Rules:
+
+- `localhost`, `.local`, `.internal`, `.lan`, `.home`, `.corp`, and hostnames without a public suffix are private/internal.
+- Loopback, link-local, multicast, RFC1918, carrier NAT, and unique-local IPv6 addresses are private/internal.
+- URLs with username/password are malformed for catalog publication.
+- URLs with query or fragment are review-required by default.
+- Paths longer than a generic API prefix are review-required unless provider allowlist says otherwise.
+- Official provider URLs are public-safe through curated endpoint mapping.
+
+The classifier must return both a boolean decision and a `reason_code`. The sanitizer must persist only the reason code and a generic message, not the raw private URL.
+
+### 11.2 Sanitizer Pipeline
+
+The sanitizer operates on one evidence record plus the active route/endpoint context:
+
+```text
+sanitize(record, route, endpoint, target="public")
+  1. verify stable route_id and endpoint_id
+  2. reject random custom/UUID-like endpoint IDs
+  3. classify endpoint base_url
+  4. remove secrets and raw request/response payloads
+  5. keep only allowlisted evidence fields
+  6. rewrite metadata to safe summaries
+  7. validate ProviderImportDraft schema
+```
+
+Each rejected record returns:
+
+```json
+{
+  "evidence_id": "...",
+  "route_id": "...",
+  "reason_code": "secret_like_value",
+  "message": "Record contains a secret-like value."
+}
+```
+
+Required reason codes:
+
+- `random_legacy_route_id`
+- `private_base_url`
+- `malformed_base_url`
+- `review_required_url`
+- `secret_like_value`
+- `raw_request_body`
+- `raw_response_body`
+- `missing_route_context`
+- `evidence_id_conflict`
+- `unsupported_evidence_type`
+
+### 11.3 Route Candidate Sanitization
+
+Route candidates are publishable only when referenced by at least one publishable evidence record or when produced by a public provider model-list observation. The published candidate must include:
+
+- `endpoint_id`
+- `route_slug`
+- `provider_model_id`
+- `canonical_id`
+- `display_name`
+- safe capability values
+- source URLs only if public documentation URLs
+
+It must not include API keys, raw base URLs for private endpoints, user display names, local provider names, or probe request/response bodies.
+
+### 11.4 Failed Probe Evidence
+
+Failed probes are publishable when sanitized. They should preserve:
+
+- route identity;
+- provider model ID;
+- method/request mapper candidate;
+- high-level reason code such as `unauthorized`, `rate_limited`, `timeout`, `unsupported_method`, `provider_error`.
+
+They must not preserve raw provider error text unless the text passes the secret scanner and account-ID scanner. Default behavior is to store normalized reason code only.
 
 ## 12. API Adjustments
 

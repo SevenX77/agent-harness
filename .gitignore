@@ -137,3 +137,7 @@ code-diagnostics/scratch/
 # studio-mvp1 goal Stop-hook control files (machine-local, transient)
 docs/studio-mvp1-execution/.goal-active
 docs/studio-mvp1-execution/.stop-allowed
+
+# studio LLM runtime artifact written when the backend runs from the repo root;
+# the real store lives under ~/Library/Application Support/AgentStudio/llm/
+llm_import_drafts.json

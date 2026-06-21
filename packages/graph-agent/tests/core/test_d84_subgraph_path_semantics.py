@@ -139,12 +139,24 @@ def test_subgraph_ast_accepts_absolute_path() -> None:
     assert ast.model_dump(mode="json")["path"] == "/workspace/child"
 
 
-def test_subgraph_ast_rejects_relative_path() -> None:
-    with pytest.raises(ValidationError, match="absolute"):
+def test_subgraph_ast_accepts_relative_path() -> None:
+    # In-skill subgraphs may declare a path relative to the skill root; the AST
+    # accepts it and the loader resolves it against the root (and enforces it
+    # stays within the root). Only blank paths are rejected at the AST layer.
+    ast = SubgraphNodeAST.model_validate(
+        {
+            "mode": "subgraph",
+            "path": "children/demo",
+            "io": {"inputs": {"type": "object"}, "outputs": {"type": "object"}},
+        }
+    )
+    assert ast.path == "children/demo"
+
+    with pytest.raises(ValidationError):
         SubgraphNodeAST.model_validate(
             {
                 "mode": "subgraph",
-                "path": "children/demo",
+                "path": "   ",
                 "io": {"inputs": {"type": "object"}, "outputs": {"type": "object"}},
             }
         )

@@ -167,11 +167,11 @@ def test_full_pipeline_skill_compiles_into_expected_products(pipeline_root: Path
     assert sorted(score.io.outputs["properties"]) == ["report"]
     assert "score" in compiled.actions.for_phase("score")
 
-    # Subgraph phase products: absolute path + phase IO (which the compiler has
-    # already proven aligns 1:1 with the child GRAPH IO).
+    # Subgraph phase products: in-skill relative path + phase IO (which the
+    # compiler has already proven aligns 1:1 with the child GRAPH IO).
     expand = next(node.ast for node in compiled.nodes if node.phase_name == "expand")
     assert isinstance(expand, SubgraphNodeAST)
-    assert expand.path == str(pipeline_root / "registry" / "expander")
+    assert expand.path == "registry/expander"
     assert sorted(expand.io.inputs["properties"]) == ["brief"]
     assert sorted(expand.io.outputs["properties"]) == ["report"]
 

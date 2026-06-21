@@ -191,73 +191,31 @@ class GatewayAdapter:
         else:
             roles_obj = roles
 
-        import shutil
-        import tempfile
-        from pathlib import Path
+        from graph_agent_gateway.storage_contracts import InMemoryConfigTruthStore
 
-        from app.core.adapters.gateway_config_store_local import LocalGatewayConfigStore
         from app.services.llm_credentials import _credentials_payload_for_storage
 
-        temp_dir = Path(tempfile.mkdtemp(prefix="studio-gateway-config-"))
-        try:
-            config_store = LocalGatewayConfigStore(root=temp_dir)
-            _put_config_if_absent(
-                config_store,
-                config.DEFAULT_USER_ID,
-                "credentials",
-                _filter_gateway_credentials(_credentials_payload_for_storage(credentials_obj)),
-            )
-            _put_config_if_absent(
-                config_store,
-                config.DEFAULT_USER_ID,
-                "roles",
-                _filter_gateway_roles(roles_obj.model_dump(mode="json")),
-            )
-            resolver = ModelResolver(config_store=config_store, user_id=config.DEFAULT_USER_ID)
-            return resolver.resolve_routes(role_name, route_override=payload.get("route_override"))
-        finally:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-
-    def build_role_config_store(self, credentials: Any, roles: Any) -> tuple[Any, Any]:
-        """Build a populated in-process gateway config store from credentials+roles.
-
-        Returns ``(config_store, temp_dir)``; the caller owns ``temp_dir`` and MUST
-        ``shutil.rmtree`` it. This is the request-invariant half of
-        ``resolve_routes``'s in_process path, hoisted so a caller that resolves many
-        roles serialises the (large) credentials/roles into the throwaway store ONCE
-        instead of once per role. Resolve each role against the returned store with
-        ``resolve_routes({"role_name": ..., "config_store": config_store})``.
-        """
-        import tempfile
-        from pathlib import Path
-
-        from app.core import config
-        from app.core.adapters.gateway_config_store_local import LocalGatewayConfigStore
-        from app.models.llm_config import LLMCredentialsFile, RolesData
-        from app.services.llm_credentials import _credentials_payload_for_storage
-
-        credentials_obj = (
-            LLMCredentialsFile.model_validate(credentials)
-            if isinstance(credentials, dict)
-            else credentials
-        )
-        roles_obj = RolesData.model_validate(roles) if isinstance(roles, dict) else roles
-
-        temp_dir = Path(tempfile.mkdtemp(prefix="studio-gateway-config-"))
-        config_store = LocalGatewayConfigStore(root=temp_dir)
-        _put_config_if_absent(
-            config_store,
+        # ModelResolver reads the config store once into an in-memory RegistrySnapshot
+        # at construction, so this transient resolve-time store never needs to touch
+        # disk. Use the gateway's own in-memory ConfigTruthStore instead of
+        # serialising the full registry to a throwaway temp dir (D2.1: resolve_routes
+        # consumes a truth store; create-if-absent write semantics preserved). The
+        # durable APP_SETTINGS_DIR config truth (gateway_resolver/engine) is separate.
+        config_store = InMemoryConfigTruthStore()
+        config_store.put_config(
             config.DEFAULT_USER_ID,
             "credentials",
             _filter_gateway_credentials(_credentials_payload_for_storage(credentials_obj)),
+            if_none_match="*",
         )
-        _put_config_if_absent(
-            config_store,
+        config_store.put_config(
             config.DEFAULT_USER_ID,
             "roles",
             _filter_gateway_roles(roles_obj.model_dump(mode="json")),
+            if_none_match="*",
         )
-        return config_store, temp_dir
+        resolver = ModelResolver(config_store=config_store, user_id=config.DEFAULT_USER_ID)
+        return resolver.resolve_routes(role_name, route_override=payload.get("route_override"))
 
     def materialize_role(self, payload: dict[str, Any]) -> Any:
         if self.transport == "http_loopback":

@@ -165,16 +165,6 @@ def test_role_effective_runtime_settings_projects_no_available_route(
     class FailingGatewayAdapter:
         resolve_routes = raise_no_available_route
 
-        def build_role_config_store(self, credentials, roles):
-            # _role_effective_runtime_settings now builds the shared gateway config
-            # store once before resolving each role; resolve_routes (above) still
-            # raises, so the store content is irrelevant — return a real temp dir so
-            # the caller's finally-block rmtree is a no-op-safe cleanup.
-            import tempfile
-            from pathlib import Path
-
-            return None, Path(tempfile.mkdtemp(prefix="test-gateway-config-"))
-
     monkeypatch.setattr(
         llm_router,
         "build_gateway_adapter",

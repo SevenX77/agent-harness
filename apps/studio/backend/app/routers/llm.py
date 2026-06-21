@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from app.core.adapters.gateway import (
     CredentialProviderProtocol,
     EndpointProbeResult,
+    GatewayAdapter,
     GatewayProviderRoute,
     GatewayRoleEntry,
     OfficialCallMethod,
@@ -1816,11 +1817,20 @@ def _model_groups_response(credentials: LLMCredentialsFile) -> list[dict[str, An
             _model_group_identity_key(route, credentials),
             [],
         ).append(route)
+    # Load the evidence library and build the gateway adapter ONCE for the whole
+    # response. Both are request-invariant; the route-state projection filters the
+    # evidence list by route_id internally, so a single shared load is identical to
+    # re-loading per route — but avoids re-reading + re-validating the entire
+    # evidence file once per provider-model option (the O(routes) blow-up).
+    adapter = build_gateway_adapter()
+    evidence_records = _load_gateway_evidence_records()
     model_groups = [
         _model_group_response(
             _representative_canonical_id(routes, credentials),
             routes,
             credentials,
+            adapter=adapter,
+            evidence_records=evidence_records,
         )
         for routes in routes_by_identity.values()
     ]
@@ -1931,11 +1941,22 @@ def _model_group_response(
     canonical_id: str,
     routes: list[ProviderRoute],
     credentials: LLMCredentialsFile,
+    *,
+    adapter: GatewayAdapter | None = None,
+    evidence_records: list[EvidenceRecord] | None = None,
 ) -> dict[str, Any]:
     provider_models = [
         option
         for route in sorted(routes, key=lambda item: item.route_id)
-        if (option := _provider_model_option(route, credentials)) is not None
+        if (
+            option := _provider_model_option(
+                route,
+                credentials,
+                adapter=adapter,
+                evidence_records=evidence_records,
+            )
+        )
+        is not None
     ]
     status_summary = {state: 0 for state in ["ready", "historical_ready", "untested", "cooling_down", "off", "failed"]}
     for option in provider_models:
@@ -2025,24 +2046,33 @@ def _section_label_from_display_name(display_name: str) -> str:
 def _provider_model_option(
     route: ProviderRoute,
     credentials: LLMCredentialsFile,
+    *,
+    adapter: GatewayAdapter | None = None,
+    evidence_records: list[EvidenceRecord] | None = None,
 ) -> dict[str, Any] | None:
     endpoint = credentials.provider_endpoints.get(route.endpoint_id)
     if endpoint is None:
         return None
+    # adapter + evidence_records are request-invariant; registry-build callers pass
+    # shared instances so the whole response loads the evidence library once. Fall
+    # back to per-call loads when invoked standalone.
+    if adapter is None:
+        adapter = build_gateway_adapter()
+    if evidence_records is None:
+        evidence_records = _load_gateway_evidence_records()
     circuits = _health_store().get_active_circuits(
         route_id=route.route_id,
         endpoint_id=endpoint.endpoint_id,
         rate_limit_bucket=endpoint.rate_limit_bucket or endpoint.endpoint_id,
         now=datetime.now(UTC),
     )
-    adapter = build_gateway_adapter()
     projection = adapter.project_route_state(
         {
             "endpoint": endpoint,
             "route": route,
             "circuits": circuits,
             "now": datetime.now(UTC),
-            "evidence_records": _load_gateway_evidence_records(),
+            "evidence_records": evidence_records,
         }
     )
     capabilities = _provider_route_ui_capabilities(route, endpoint)

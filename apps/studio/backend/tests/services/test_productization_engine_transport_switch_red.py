@@ -136,8 +136,8 @@ def test_predictor_uses_configured_http_loopback_engine_adapter(
     }
 
     def fake_init(self: object, transport: str, http_transport: object | None = None) -> None:
-        setattr(self, "transport", transport)
-        setattr(self, "http_transport", http_transport)
+        self.transport = transport
+        self.http_transport = http_transport
         init_calls.append(
             {
                 "transport": transport,
@@ -203,8 +203,8 @@ def test_run_worker_uses_configured_http_loopback_engine_adapter(
     }
 
     def fake_init(self: object, transport: str, http_transport: object | None = None) -> None:
-        setattr(self, "transport", transport)
-        setattr(self, "http_transport", http_transport)
+        self.transport = transport
+        self.http_transport = http_transport
         init_calls.append(
             {
                 "transport": transport,

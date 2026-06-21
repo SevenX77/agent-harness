@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 STATUS_PAGE = (
     Path(__file__).resolve().parents[5]
     / "docs/studio/mvp1/_impl/wave2/studio-mvp1-12d-repair-framework-2026-06-15.html"

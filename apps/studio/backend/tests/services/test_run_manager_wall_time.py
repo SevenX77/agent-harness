@@ -7,6 +7,8 @@ so `_tokens_metrics` silently dropped the field and the frontend read n/a.
 
 from __future__ import annotations
 
+from datetime import UTC
+
 
 def test_tokens_metrics_projection_carries_wall_time_sec() -> None:
     from app.services.run_manager import _tokens_metrics
@@ -39,7 +41,7 @@ def test_tokens_metrics_projection_wall_time_absent_is_none() -> None:
 
 def test_run_metadata_serialization_exposes_wall_time_sec() -> None:
     """End-to-end: the value the frontend reads (RunMetadata.metrics.wall_time_sec)."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.models import RunMetadata
     from app.services.run_manager import _tokens_metrics
@@ -53,7 +55,7 @@ def test_run_metadata_serialization_exposes_wall_time_sec() -> None:
     metadata = RunMetadata(
         run_id="run-1",
         status="success",
-        started_at=datetime(2026, 6, 19, tzinfo=timezone.utc),
+        started_at=datetime(2026, 6, 19, tzinfo=UTC),
         metrics=_tokens_metrics(raw),
     )
 

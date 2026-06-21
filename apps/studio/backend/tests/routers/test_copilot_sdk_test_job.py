@@ -194,8 +194,8 @@ def test_provider_model_option_emits_call_method_id_from_verified_profile() -> N
     eligibility by anthropic-messages capability instead of by provider_type.
     The id is derived from the route's preferred ready `VerifiedProfile`.
     """
-    from app.models.llm_config import ProviderEndpoint, ProviderRoute
     from app.core.adapters.gateway import VerifiedProfile
+    from app.models.llm_config import ProviderEndpoint, ProviderRoute
 
     endpoint = ProviderEndpoint(
         endpoint_id="ark-official",

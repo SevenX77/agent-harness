@@ -133,9 +133,9 @@ def test_engine_compile_does_not_zip_live_skill_dir_for_product_artifact(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import app.core.adapters.engine as engine_module
     import graph_agent.core.artifacts as artifacts_module
     from app.core.adapters.engine import EngineAdapter
-    import app.core.adapters.engine as engine_module
 
     skill_dir = tmp_path / "skill"
     skill_dir.mkdir()

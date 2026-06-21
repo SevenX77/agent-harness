@@ -1,5 +1,5 @@
 import { ArrowLeft } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -101,7 +101,7 @@ export function EdgeContextView({
   const changedKeys = changedKeysOf(selectedEdge.contextJson)
   const operations = operationsOf(selectedEdge.contextJson)
   const entries = blackboard ? Object.entries(blackboard) : []
-  const initialTamperJson = useMemo(() => JSON.stringify(blackboard ?? {}, null, 2), [blackboard])
+  const initialTamperJson = JSON.stringify(blackboard ?? {}, null, 2)
   const [tampering, setTampering] = useState(false)
   const [tamperJson, setTamperJson] = useState(initialTamperJson)
   const [tamperError, setTamperError] = useState<string | null>(null)

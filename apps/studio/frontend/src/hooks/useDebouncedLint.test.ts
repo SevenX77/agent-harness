@@ -118,6 +118,7 @@ const { useDebouncedLint, lintStatusStorageKey, lintStatusEvent, lintResultEvent
 
 function run(skillId: string, markdown: string) {
   reactHarness.cursor = 0
+  // eslint-disable-next-line react-hooks/rules-of-hooks -- test harness drives the hook through a mocked React runtime
   useDebouncedLint(skillId, markdown)
 }
 

@@ -842,19 +842,6 @@ function upsertCachedResult(endpointId: string, result: ProviderTestResult | nul
   return next
 }
 
-function cachedResultForCredentialUpdate(update: ProviderCredentialUpdate): ProviderTestResult | null {
-  const fingerprint = paramsFingerprint({
-    api_key: update.api_key,
-    base_url: update.base_url ?? '',
-    provider_type: update.provider_type ?? null,
-  })
-  const results = testResultCacheByEndpoint[update.id] ?? []
-  for (let index = results.length - 1; index >= 0; index -= 1) {
-    if (results[index].params_fingerprint === fingerprint) return results[index]
-  }
-  return null
-}
-
 function modelInfoFromRoute(route: ProviderRoute): ModelInfo {
   const lastProbeMessage = route.metadata.last_probe_message
   const capabilities: Record<string, unknown> = { ...route.capabilities }
@@ -1029,7 +1016,6 @@ function registryToCredentials(registry: CredentialRegistryResponse): Credential
 function endpointFromCredentialUpdate(
   update: ProviderCredentialUpdate,
   existing?: ProviderEndpoint,
-  _cachedResult?: ProviderTestResult | null,
 ): ProviderEndpointWrite {
   const nextProtocol = update.provider_type ?? existing?.protocol ?? 'openai_compatible'
   const nextBaseUrl = update.base_url ?? existing?.base_url ?? ''
@@ -1317,7 +1303,6 @@ export async function putCredentials(
       endpointFromCredentialUpdate(
         update,
         existingEndpoints[update.id],
-        cachedResultForCredentialUpdate(update),
       ),
     ]),
   )

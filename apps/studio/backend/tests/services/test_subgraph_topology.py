@@ -188,9 +188,8 @@ async def test_resolve_child_graph_topology_rejects_relative_path(
     metadata_store: LocalJsonMetadataStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fastapi import HTTPException
-
     from app.core import config
+    from fastapi import HTTPException
 
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir()
@@ -219,9 +218,8 @@ async def test_resolve_child_graph_topology_rejects_path_outside_boundary(
     metadata_store: LocalJsonMetadataStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fastapi import HTTPException
-
     from app.core import config
+    from fastapi import HTTPException
 
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir()
@@ -254,9 +252,8 @@ async def test_resolve_child_graph_topology_missing_graph_md(
     metadata_store: LocalJsonMetadataStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fastapi import HTTPException
-
     from app.core import config
+    from fastapi import HTTPException
 
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir()

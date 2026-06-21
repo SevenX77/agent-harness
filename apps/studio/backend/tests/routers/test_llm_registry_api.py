@@ -4847,8 +4847,8 @@ def test_registry_includes_last_remote_catalog_source(
 ) -> None:
     _seed(tmp_path, monkeypatch)
 
-    import app.services.llm_import_drafts as import_drafts
     import app.routers.llm as llm_router
+    import app.services.llm_import_drafts as import_drafts
 
     source_model = getattr(import_drafts, "RemoteCatalogSourceMetadata", None)
     remember = getattr(import_drafts, "remember_remote_catalog_source", None)

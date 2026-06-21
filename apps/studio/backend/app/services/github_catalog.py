@@ -147,7 +147,7 @@ class GitHubCatalogClient:
     ) -> None:
         payload = self._catalog_seed(owner, repo)
         serialized = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
-        encoded = base64.b64encode(f"{serialized}\n".encode("utf-8")).decode("ascii")
+        encoded = base64.b64encode(f"{serialized}\n".encode()).decode("ascii")
         self._request(
             "PUT",
             f"/repos/{owner}/{repo}/contents/{catalog_path}",

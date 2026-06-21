@@ -5,7 +5,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
 SENSITIVE_DETAIL_KEYS = frozenset(
     {
         "api_key",
@@ -76,7 +75,7 @@ class EventEnvelope(BaseModel):
     cursor: str
     timestamp: datetime
     error_code: str | None = None
-    error_payload: "TransportErrorPayload | None" = None
+    error_payload: TransportErrorPayload | None = None
 
 
 class TransportErrorPayload(BaseModel):

@@ -63,7 +63,7 @@ def _fake_compare_worker(
     skill_id: str,
     run_dir_raw: str,
     inputs: dict[str, Any],
-    process_queue: "queue.Queue[dict[str, Any]]",
+    process_queue: queue.Queue[dict[str, Any]],
     art_ref: dict[str, Any],
     roles_path_override: str | None = None,
 ) -> None:

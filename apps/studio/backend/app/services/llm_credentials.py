@@ -12,6 +12,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from graph_agent_gateway.registry.route_identity import (
+    route_slug as identity_route_slug,
+)
+from graph_agent_gateway.registry.route_identity import (
+    stable_endpoint_id as url_stable_endpoint_id,
+)
 from pydantic import SecretStr, ValidationError
 
 from app.core.adapters.gateway import (
@@ -22,10 +28,6 @@ from app.core.adapters.gateway import (
 )
 from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint, ProviderRoute
 from app.services.llm_paths import credentials_path
-from graph_agent_gateway.registry.route_identity import (
-    route_slug as identity_route_slug,
-    stable_endpoint_id as url_stable_endpoint_id,
-)
 
 _WRITE_LOCK = threading.Lock()
 _credentials_lock = _WRITE_LOCK

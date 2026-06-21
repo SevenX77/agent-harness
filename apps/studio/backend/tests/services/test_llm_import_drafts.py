@@ -181,7 +181,7 @@ def test_sync_remote_evidence_library_raises_on_remote_404(
         def __init__(self, *args: object, **kwargs: object) -> None:
             pass
 
-        async def __aenter__(self) -> "FakeAsyncClient":
+        async def __aenter__(self) -> FakeAsyncClient:
             return self
 
         async def __aexit__(self, *args: object) -> None:
@@ -276,7 +276,6 @@ def test_apply_draft_marks_applied_without_losing_interleaved_evidence_append(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import app.services.llm_import_drafts as import_drafts
-
     from app.services.llm_import_drafts import apply_draft
 
     store_path = tmp_path / "import_drafts.json"

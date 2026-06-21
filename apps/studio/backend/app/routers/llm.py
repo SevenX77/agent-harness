@@ -4670,26 +4670,36 @@ def _role_effective_runtime_settings(
     credentials: LLMCredentialsFile,
     roles: RolesData,
 ) -> dict[str, dict[str, dict[str, Any]]]:
+    import shutil
+
     adapter = build_gateway_adapter()
     result: dict[str, dict[str, dict[str, Any]]] = {}
-    for role_name in roles.roles:
-        try:
-            resolved = adapter.resolve_routes(
-                {
-                    "role_name": role_name,
-                    "credentials": credentials,
-                    "roles": roles,
-                }
-            )
-        except RegistryResolutionError:
-            result[role_name] = {}
-            continue
-        except Exception as exc:
-            if getattr(exc, "error_code", None) != "resource.no_available_route":
-                raise
-            result[role_name] = {}
-            continue
-        result[role_name] = {route.route_id: route.effective_runtime_settings for route in resolved.routes}
+    # Build the gateway config store ONCE; resolve_routes() otherwise re-serialises
+    # the full credentials + roles into a throwaway temp dir per role (O(roles) of
+    # the same request-invariant write). Resolve every role against the shared store.
+    config_store, temp_dir = adapter.build_role_config_store(credentials, roles)
+    try:
+        for role_name in roles.roles:
+            try:
+                resolved = adapter.resolve_routes(
+                    {
+                        "role_name": role_name,
+                        "config_store": config_store,
+                    }
+                )
+            except RegistryResolutionError:
+                result[role_name] = {}
+                continue
+            except Exception as exc:
+                if getattr(exc, "error_code", None) != "resource.no_available_route":
+                    raise
+                result[role_name] = {}
+                continue
+            result[role_name] = {
+                route.route_id: route.effective_runtime_settings for route in resolved.routes
+            }
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
     return result
 
 

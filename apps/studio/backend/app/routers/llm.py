@@ -84,10 +84,7 @@ from app.services.copilot_test import (
     _Unauthorized,
 )
 from app.services.event_bus import STUDIO_EVENTS_TOPIC, event_bus
-from app.services.gateway_resolver import (
-    build_gateway_route_runtime,
-    refresh_default_gateway_config_store,
-)
+from app.services.gateway_resolver import build_gateway_route_runtime
 from app.services.github_catalog import GitHubCatalogApiError, GitHubCatalogClient
 from app.services.llm_credentials import (
     _route_slug,
@@ -108,12 +105,12 @@ from app.services.llm_import_drafts import (
     append_evidence_record,
     apply_draft,
     create_draft,
-    load_remote_catalog_source_metadata,
     load_draft,
     load_evidence_library,
+    load_remote_catalog_source_metadata,
     new_evidence_id,
     remember_remote_catalog_source,
-    sync_remote_evidence_library,
+    sync_remote_evidence_library,  # noqa: F401 — module attr for test_sync_catalog_endpoint monkeypatch
     sync_remote_evidence_library_with_metadata,
 )
 from app.services.llm_model_groups import (
@@ -5032,20 +5029,9 @@ def _save_roles_with_active_routes(data: RolesData) -> RolesData:
     except InvalidRoleReference as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    # R-F1: keep the in-process gateway config snapshot in sync with the yaml
-    # so that the next ``build_gateway_route_runtime`` (e.g. copilot test-sdk)
-    # sees the just-saved roles. Failure is a real bug; do not swallow.
-    try:
-        refresh_default_gateway_config_store(active_path)
-    except Exception:
-        logger.exception(
-            "phase=save_roles action=refresh_gateway_config_store status=failed"
-        )
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to refresh gateway config snapshot after roles save.",
-        )
-
+    # 底座一: no gateway snapshot to refresh — build_gateway_route_runtime now reads
+    # the on-disk truth fresh on every call, so the just-saved roles are seen
+    # immediately (e.g. by the next copilot test-sdk) without a sync hook.
     return reloaded
 
 

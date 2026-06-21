@@ -1,12 +1,13 @@
-"""R-F1 + R-F10 — PUT/DELETE roles strong-refreshes the gateway snapshot
-and publishes a ``roles_changed`` event on the studio events topic.
+"""R-F10 — PUT/DELETE roles publishes a ``roles_changed`` event on the studio
+events topic, and the saved roles are immediately visible to the next gateway
+resolver build (底座一: the resolver reads the on-disk config truth fresh, so
+there is no persistent snapshot to refresh).
 
 These tests use the unit-level approach (call the FastAPI route coroutines
 directly) so they do not depend on the full sidecar TestClient fixture,
 keeping them fast and hermetic. The websocket smoke path is exercised by
 ``test_api.test_events_ws_broadcasts_to_multiple_clients`` so we focus
-here on: (1) the event payload shape and (2) the snapshot freshness
-contract.
+here on: (1) the event payload shape and (2) the freshness contract.
 """
 
 from __future__ import annotations
@@ -16,7 +17,6 @@ from pathlib import Path
 
 import pytest
 from app.core import config
-from app.core.adapters.gateway_config_store_local import LocalGatewayConfigStore
 from app.models.llm_config import (
     LLMCredentialsFile,
     ProviderEndpoint,
@@ -27,6 +27,7 @@ from app.models.llm_config import (
 )
 from app.routers import llm as llm_router
 from app.services.event_bus import STUDIO_EVENTS_TOPIC, event_bus
+from app.services.gateway_resolver import build_gateway_model_resolver
 from app.services.llm_credentials import save_credentials
 from app.services.llm_roles import save_roles_file
 
@@ -87,7 +88,7 @@ class _DirectSubscriber:
     def __init__(self) -> None:
         self.queue: asyncio.Queue[dict[str, object]] = asyncio.Queue()
 
-    def __enter__(self) -> "_DirectSubscriber":
+    def __enter__(self) -> _DirectSubscriber:
         event_bus._subscribers.setdefault(STUDIO_EVENTS_TOPIC, set()).add(self.queue)
         return self
 
@@ -127,12 +128,11 @@ def test_put_llm_roles_publishes_roles_changed(
     assert isinstance(event["timestamp"], str) and event["timestamp"]
 
 
-def test_put_llm_roles_refreshes_gateway_snapshot(
+def test_put_llm_roles_visible_to_next_resolver_build(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     roles_path, route_id = _seed(tmp_path, monkeypatch)
-    settings_dir = roles_path.parent.parent
 
     request = RolesData(
         roles={
@@ -144,20 +144,20 @@ def test_put_llm_roles_refreshes_gateway_snapshot(
 
     asyncio.run(llm_router.put_llm_roles(request))
 
-    config_store = LocalGatewayConfigStore(root=settings_dir)
-    roles_record = config_store.get_config(config.DEFAULT_USER_ID, "roles")
-    assert "copilot_custom_test" in roles_record.value["roles"]
+    # 底座一: no persistent snapshot to refresh — the next resolver build reads the
+    # just-saved roles straight from the on-disk truth.
+    resolver = build_gateway_model_resolver(roles_path)
+    assert "copilot_custom_test" in resolver.registry_snapshot.roles
 
 
-def test_delete_llm_role_publishes_and_refreshes(
+def test_delete_llm_role_publishes_and_drops_from_next_build(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     roles_path, route_id = _seed(tmp_path, monkeypatch)
-    settings_dir = roles_path.parent.parent
 
-    # First seed a role via PUT, then delete it and assert both the event
-    # and the snapshot reflect the removal.
+    # First seed a role via PUT, then delete it and assert both the event fires
+    # and the next resolver build no longer sees it.
     asyncio.run(
         llm_router.put_llm_roles(
             RolesData(
@@ -179,9 +179,8 @@ def test_delete_llm_role_publishes_and_refreshes(
     assert event["type"] == "roles_changed"
     assert event["source"] == "http_api"
 
-    config_store = LocalGatewayConfigStore(root=settings_dir)
-    roles_record = config_store.get_config(config.DEFAULT_USER_ID, "roles")
-    assert "copilot_custom_test" not in roles_record.value["roles"]
+    resolver = build_gateway_model_resolver(roles_path)
+    assert "copilot_custom_test" not in resolver.registry_snapshot.roles
 
 
 def test_publish_failure_does_not_break_save(
@@ -193,7 +192,6 @@ def test_publish_failure_does_not_break_save(
     success and the failure is logged via ``logger.exception``.
     """
     roles_path, route_id = _seed(tmp_path, monkeypatch)
-    settings_dir = roles_path.parent.parent
 
     async def _boom(*_args, **_kwargs):
         raise RuntimeError("event bus offline")
@@ -212,9 +210,10 @@ def test_publish_failure_does_not_break_save(
         result = asyncio.run(llm_router.put_llm_roles(request))
 
     assert "copilot_custom_test" in result.roles
-    config_store = LocalGatewayConfigStore(root=settings_dir)
-    roles_record = config_store.get_config(config.DEFAULT_USER_ID, "roles")
-    assert "copilot_custom_test" in roles_record.value["roles"]
+    # The saved roles are still visible to a fresh resolver build despite the
+    # event-bus failure.
+    resolver = build_gateway_model_resolver(roles_path)
+    assert "copilot_custom_test" in resolver.registry_snapshot.roles
     # The exception should have been logged but not raised.
     assert any(
         "publish_roles_changed" in record.getMessage() for record in caplog.records

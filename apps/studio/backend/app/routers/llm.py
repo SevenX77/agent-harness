@@ -4331,7 +4331,7 @@ class ThirdPartyEndpointVerification:
 
 def _third_party_protocol_candidates(endpoint: ProviderEndpoint) -> tuple[ProviderType, ...]:
     """Return the protocol rotation with the endpoint's stored protocol first."""
-    ordered: list[ProviderType] = [cast(ProviderType, endpoint.protocol)]
+    ordered: list[ProviderType] = [endpoint.protocol]
     for candidate in _THIRD_PARTY_PROTOCOL_CANDIDATES:
         if candidate not in ordered:
             ordered.append(candidate)
@@ -4435,7 +4435,7 @@ async def _verify_third_party_endpoint_by_probe(
     if not probe_model_ids:
         return ThirdPartyEndpointVerification(
             status="failed",
-            detected_protocol=cast(ProviderType, endpoint.protocol),
+            detected_protocol=endpoint.protocol,
             verified_model_id=None,
             message="Endpoint reachable but no model ids were available to probe.",
         )
@@ -4444,7 +4444,7 @@ async def _verify_third_party_endpoint_by_probe(
     if detection is None:
         return ThirdPartyEndpointVerification(
             status="failed",
-            detected_protocol=cast(ProviderType, endpoint.protocol),
+            detected_protocol=endpoint.protocol,
             verified_model_id=None,
             message="Could not auto-detect a working protocol for this endpoint.",
         )
@@ -5421,10 +5421,6 @@ def _raise_conflict(error_code: str, message: str, details: dict[str, Any]) -> N
             "retry_strategy": "not_retryable",
         },
     )
-
-
-def _now_iso() -> str:
-    return datetime.now(tz=UTC).isoformat()
 
 
 __all__ = ["router"]

@@ -78,7 +78,7 @@ async def test_provider_endpoint(
     endpoint: ProviderEndpoint,
     *,
     api_key: str | None = None,
-    transport: httpx.AsyncBaseTransport | httpx.BaseTransport | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
     timeout: float = 8.0,
 ) -> EndpointProbeResult:
     """Test one endpoint by asking its provider protocol for a model list."""
@@ -126,7 +126,7 @@ async def test_provider_route(
     *,
     api_key: str | None = None,
     runtime_settings: Mapping[str, Any] | None = None,
-    transport: httpx.AsyncBaseTransport | httpx.BaseTransport | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
     timeout: float = 15.0,
 ) -> RouteProbeResult:
     """Probe one concrete provider route with a minimal generation request."""
@@ -183,7 +183,7 @@ async def probe_official_call_method(
     model_id: str,
     *,
     runtime_settings: Mapping[str, Any] | None = None,
-    transport: httpx.AsyncBaseTransport | httpx.BaseTransport | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
     timeout: float | None = None,
 ) -> RouteProbeResult:
     """Probe one official provider API method for one concrete model."""
@@ -318,7 +318,7 @@ async def _request_model_generation(
             },
         )
     if backend == "ark":
-        payload: dict[str, object] = {
+        payload = {
             "model": model_id,
             "input": [{"role": "user", "content": [{"type": "input_text", "text": "."}]}],
             "max_output_tokens": max_tokens,

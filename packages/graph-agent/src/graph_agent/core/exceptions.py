@@ -150,7 +150,7 @@ class GraphAgentError(Exception):
                 actual_payload.details = _normalize_details_val(details)
         self.payload = actual_payload
         if actual_payload is not None:
-            self.error_payload = actual_payload.model_dump(mode="json")
+            self.error_payload: dict[str, Any] | None = actual_payload.model_dump(mode="json")
             self.skill_id = actual_payload.skill_id
             self.phase_id = actual_payload.phase_id
             self.field_path = actual_payload.field_path

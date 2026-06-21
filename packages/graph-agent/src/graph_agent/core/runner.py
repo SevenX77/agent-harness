@@ -1686,7 +1686,7 @@ def _business_context_from_graph_result(result: Any) -> dict[str, Any]:
     if not isinstance(result, dict):
         return {}
     data = result.get("data")
-    if hasattr(data, "model_dump"):
+    if data is not None and hasattr(data, "model_dump"):
         return cast(dict[str, Any], data.model_dump())
     if isinstance(data, dict):
         return dict(data)

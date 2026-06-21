@@ -11,7 +11,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 from graph_agent_gateway.import_draft_store import ImportDraftStore
 from graph_agent_gateway.registry.route_identity import route_slug, stable_endpoint_id
@@ -21,7 +21,11 @@ from app.services.llm_credentials import load_credentials, save_credentials
 from app.services.llm_role_test_results import load_all as load_role_test_results
 from app.services.llm_roles import load_roles_file, save_roles_file
 
-_LEGACY_ENDPOINT_SPECS = {
+_ProviderProtocol = Literal[
+    "openai_compatible", "anthropic_compatible", "google_genai", "ark_runtime"
+]
+
+_LEGACY_ENDPOINT_SPECS: dict[str, tuple[_ProviderProtocol, str]] = {
     "openrouter-prod": ("anthropic_compatible", "https://openrouter.ai/api"),
     "qiniu-anthropic": ("anthropic_compatible", "https://anthropic.qnaigc.com"),
     "qiniu-openai": ("openai_compatible", "https://api.qnaigc.com/v1"),
@@ -144,10 +148,10 @@ def _draft_fingerprint_endpoint_id_map(
         target_endpoint_id = endpoint_id_map.get(endpoint_id, endpoint_id)
         fingerprint_targets.setdefault(fingerprint, set()).add(target_endpoint_id)
     for legacy_endpoint_id, (_protocol, base_url) in _LEGACY_ENDPOINT_SPECS.items():
-        target_endpoint_id = endpoint_id_map.get(legacy_endpoint_id)
-        if target_endpoint_id is None:
+        legacy_target_endpoint_id = endpoint_id_map.get(legacy_endpoint_id)
+        if legacy_target_endpoint_id is None:
             continue
-        fingerprint_targets.setdefault(_base_url_fingerprint(base_url), set()).add(target_endpoint_id)
+        fingerprint_targets.setdefault(_base_url_fingerprint(base_url), set()).add(legacy_target_endpoint_id)
     unique_fingerprint_targets = {
         fingerprint: next(iter(targets))
         for fingerprint, targets in fingerprint_targets.items()
@@ -157,18 +161,18 @@ def _draft_fingerprint_endpoint_id_map(
     inferred: dict[str, str] = {}
     for draft in ImportDraftStore(path).load_all().values():
         for record in draft.evidence_records:
-            endpoint_id = record.endpoint_id
-            if not endpoint_id or endpoint_id in endpoint_id_map:
+            record_endpoint_id = record.endpoint_id
+            if not record_endpoint_id or record_endpoint_id in endpoint_id_map:
                 continue
             observation = record.model_list_observation
             if not isinstance(observation, dict):
                 continue
-            fingerprint = observation.get("base_url_fingerprint")
-            if not isinstance(fingerprint, str):
+            obs_fingerprint = observation.get("base_url_fingerprint")
+            if not isinstance(obs_fingerprint, str):
                 continue
-            target_endpoint_id = unique_fingerprint_targets.get(fingerprint)
-            if target_endpoint_id is not None and target_endpoint_id != endpoint_id:
-                inferred[endpoint_id] = target_endpoint_id
+            matched_endpoint_id = unique_fingerprint_targets.get(obs_fingerprint)
+            if matched_endpoint_id is not None and matched_endpoint_id != record_endpoint_id:
+                inferred[record_endpoint_id] = matched_endpoint_id
     return inferred
 
 
@@ -285,7 +289,10 @@ def _load_migrated_role_test_results(
     if not path.exists():
         return None
     results = load_role_test_results(path=path)
-    return _replace_ids(results, endpoint_id_map, route_id_map)
+    return cast(
+        "dict[str, dict[str, Any]] | None",
+        _replace_ids(results, endpoint_id_map, route_id_map),
+    )
 
 
 def _save_migrated_role_test_results(

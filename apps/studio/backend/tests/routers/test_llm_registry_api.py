@@ -4769,14 +4769,37 @@ def test_sync_catalog_endpoint(client: TestClient, tmp_path: Path, monkeypatch) 
             raise AssertionError("catalog sync must read the public raw URL without GitHub token")
 
     async def mock_sync(*, data=None, url=None):
+        raise AssertionError("catalog sync endpoint must call the metadata-aware sync service")
+
+    class FakeCatalogSource:
+        new_records_count = 0
+
+        def model_dump(self, *, mode: str = "json") -> dict[str, object]:
+            assert mode == "json"
+            return {
+                "enabled": True,
+                "source_url": "https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_import_drafts.json",
+                "fetched_at": "2026-06-20T23:00:00+00:00",
+                "etag": "W/test",
+                "cache": False,
+                "route_candidates_count": 0,
+                "evidence_records_count": 0,
+                "new_records_count": 0,
+                "last_error": None,
+            }
+
+    async def mock_sync_with_metadata(*, data=None, url=None):
         seen["data"] = data
         seen["url"] = url
-        return ProviderImportDraft(
-            draft_id="studio-evidence-library",
-            source={"kind": "studio_evidence_library"},
-            status="pending",
-            route_candidates={},
-            evidence_records=[],
+        return SimpleNamespace(
+            draft=ProviderImportDraft(
+                draft_id="studio-evidence-library",
+                source={"kind": "studio_evidence_library"},
+                status="pending",
+                route_candidates={},
+                evidence_records=[],
+            ),
+            catalog_source=FakeCatalogSource(),
         )
     
     import app.routers.llm as llm_router
@@ -4793,15 +4816,70 @@ def test_sync_catalog_endpoint(client: TestClient, tmp_path: Path, monkeypatch) 
     )
     monkeypatch.setattr(llm_router, "GitHubCatalogClient", FakeGitHubCatalogClient)
     monkeypatch.setattr(llm_router, "sync_remote_evidence_library", mock_sync)
+    monkeypatch.setattr(
+        llm_router,
+        "sync_remote_evidence_library_with_metadata",
+        mock_sync_with_metadata,
+        raising=False,
+    )
     
     response = client.post("/api/llm/catalog/sync")
     assert response.status_code == 200
-    assert response.json()["status"] == "success"
-    assert "Catalog synced successfully" in response.json()["message"]
+    body = response.json()
+    assert body["status"] == "success"
+    assert "Catalog synced successfully" in body["message"]
     assert seen["data"] is None
     assert seen["url"] == (
         "https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_import_drafts.json"
     )
+    assert body["new_records_count"] == 0
+    assert body["catalog_source"] == {
+        "enabled": True,
+        "source_url": "https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_import_drafts.json",
+        "fetched_at": "2026-06-20T23:00:00+00:00",
+        "etag": "W/test",
+        "cache": False,
+        "route_candidates_count": 0,
+        "evidence_records_count": 0,
+        "new_records_count": 0,
+        "last_error": None,
+    }
+
+
+def test_registry_includes_last_remote_catalog_source(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+
+    import app.services.llm_import_drafts as import_drafts
+    import app.routers.llm as llm_router
+
+    source_model = getattr(import_drafts, "RemoteCatalogSourceMetadata", None)
+    remember = getattr(import_drafts, "remember_remote_catalog_source", None)
+    assert source_model is not None
+    assert remember is not None
+    source = source_model(
+        enabled=True,
+        source_url="https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_import_drafts.json",
+        fetched_at="2026-06-20T23:00:00+00:00",
+        etag="W/test",
+        cache=False,
+        route_candidates_count=3,
+        evidence_records_count=5,
+        new_records_count=2,
+        last_error=None,
+    )
+
+    try:
+        remember(source)
+        monkeypatch.setattr(llm_router, "_role_effective_runtime_settings", lambda *_args, **_kwargs: {})
+        response = client.get("/api/llm/registry")
+        assert response.status_code == 200
+        assert response.json()["catalog_source"] == source.model_dump(mode="json")
+    finally:
+        remember(None)
 
 
 def test_share_catalog_endpoint(client: TestClient, tmp_path: Path, monkeypatch) -> None:

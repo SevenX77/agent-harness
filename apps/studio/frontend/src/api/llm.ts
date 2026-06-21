@@ -173,6 +173,7 @@ export interface RegistryResponse extends CredentialRegistryResponse {
   canonical_groups: CanonicalGroup[]
   lint_results: LintResult[]
   route_runtime_settings?: Record<string, Record<string, RuntimeSettingDescriptor>>
+  catalog_source?: CatalogSourceMetadata | null
   role_effective_runtime_settings?: Record<string, Record<string, Record<string, EffectiveRuntimeSetting>>>
   setup_required: boolean
 }
@@ -182,11 +183,25 @@ export interface EndpointSecretResponse {
   api_key: string
 }
 
+export interface CatalogSourceMetadata {
+  enabled: boolean
+  source_url: string
+  fetched_at: string
+  etag: string | null
+  cache: boolean
+  route_candidates_count: number
+  evidence_records_count: number
+  new_records_count: number
+  last_error: string | null
+}
+
 export interface CatalogSyncResponse {
   status: 'success'
   message: string
   route_candidates_count: number
   evidence_records_count: number
+  new_records_count: number
+  catalog_source: CatalogSourceMetadata
 }
 
 /**

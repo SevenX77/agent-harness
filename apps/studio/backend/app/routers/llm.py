@@ -104,10 +104,13 @@ from app.services.llm_import_drafts import (
     append_evidence_record,
     apply_draft,
     create_draft,
+    load_remote_catalog_source_metadata,
     load_draft,
     load_evidence_library,
     new_evidence_id,
+    remember_remote_catalog_source,
     sync_remote_evidence_library,
+    sync_remote_evidence_library_with_metadata,
 )
 from app.services.llm_model_groups import (
     normalize_model_group_key,
@@ -432,12 +435,16 @@ async def sync_catalog() -> dict[str, Any]:
     """Pull the remote evidence library and merge it locally."""
     try:
         data, url = _remote_catalog_sync_inputs()
-        updated = await sync_remote_evidence_library(data=data, url=url)
+        result = await sync_remote_evidence_library_with_metadata(data=data, url=url)
+        remember_remote_catalog_source(result.catalog_source)
+        updated = result.draft
         return {
             "status": "success",
             "message": "Catalog synced successfully with remote repository.",
             "route_candidates_count": len(updated.route_candidates),
             "evidence_records_count": len(updated.evidence_records),
+            "new_records_count": result.catalog_source.new_records_count,
+            "catalog_source": result.catalog_source.model_dump(mode="json"),
         }
     except GitHubCatalogApiError as exc:
         raise HTTPException(
@@ -1688,6 +1695,7 @@ def _registry_response(
                 cast(list[GatewayProviderRoute], role_routes),
             )
         )
+    catalog_source = load_remote_catalog_source_metadata()
     return RegistryResponse(
         provider_endpoints=credentials.provider_endpoints,
         provider_routes=credentials.provider_routes,
@@ -1708,6 +1716,7 @@ def _registry_response(
             route_id: build_runtime_setting_descriptors(route)
             for route_id, route in credentials.provider_routes.items()
         },
+        catalog_source=catalog_source.model_dump(mode="json") if catalog_source is not None else None,
         role_effective_runtime_settings=_role_effective_runtime_settings(credentials, roles),
         setup_required=setup_required,
     )

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import httpx
+from pydantic import BaseModel, ConfigDict
 
 from app.core.adapters.gateway import (
     EVIDENCE_LIBRARY_DRAFT_ID,
@@ -32,6 +33,8 @@ from app.services.llm_paths import import_drafts_path
 
 ConflictMode = Literal["merge"]
 _APPLY_LOCK = threading.Lock()
+_CATALOG_SOURCE_LOCK = threading.Lock()
+_LAST_REMOTE_CATALOG_SOURCE: RemoteCatalogSourceMetadata | None = None
 
 
 class DraftNotFound(KeyError):
@@ -48,6 +51,44 @@ class DraftApplyConflict(ValueError):
 
 class RemoteCatalogSyncError(RuntimeError):
     """Raised when the remote evidence catalog cannot be fetched or parsed."""
+
+
+class RemoteCatalogSourceMetadata(BaseModel):
+    """Non-secret diagnostics for the remote catalog used during sync."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    source_url: str
+    fetched_at: str
+    etag: str | None = None
+    cache: bool = False
+    route_candidates_count: int = 0
+    evidence_records_count: int = 0
+    new_records_count: int = 0
+    last_error: str | None = None
+
+
+class RemoteCatalogSyncResult(BaseModel):
+    """Remote catalog sync result plus source metadata for UI diagnostics."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    draft: ProviderImportDraft
+    catalog_source: RemoteCatalogSourceMetadata
+
+
+def remember_remote_catalog_source(source: RemoteCatalogSourceMetadata | None) -> None:
+    """Store the last successful remote catalog source for registry diagnostics."""
+    global _LAST_REMOTE_CATALOG_SOURCE
+    with _CATALOG_SOURCE_LOCK:
+        _LAST_REMOTE_CATALOG_SOURCE = source
+
+
+def load_remote_catalog_source_metadata() -> RemoteCatalogSourceMetadata | None:
+    """Return the last successful remote catalog source, if any."""
+    with _CATALOG_SOURCE_LOCK:
+        return _LAST_REMOTE_CATALOG_SOURCE
 
 
 def drafts_path() -> Path:
@@ -211,13 +252,32 @@ async def sync_remote_evidence_library(
     draft_id: str = EVIDENCE_LIBRARY_DRAFT_ID,
 ) -> ProviderImportDraft:
     """Pull the remote evidence library and merge it into the local store."""
+    result = await sync_remote_evidence_library_with_metadata(
+        data=data,
+        url=url,
+        path=path,
+        draft_id=draft_id,
+    )
+    return result.draft
+
+
+async def sync_remote_evidence_library_with_metadata(
+    *,
+    data: dict[str, Any] | None = None,
+    url: str | None = None,
+    path: Path | None = None,
+    draft_id: str = EVIDENCE_LIBRARY_DRAFT_ID,
+) -> RemoteCatalogSyncResult:
+    """Pull the remote evidence library and return source diagnostics."""
     target_url = url or os.getenv("STUDIO_CATALOG_URL") or DEFAULT_CATALOG_URL
+    etag: str | None = None
     if data is None:
         logger.info("Syncing remote evidence library from %s", target_url)
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(target_url)
                 response.raise_for_status()
+                etag = response.headers.get("etag")
                 data = response.json()
         except Exception as exc:
             logger.error("Failed to fetch remote evidence library: %s", exc)
@@ -253,7 +313,22 @@ async def sync_remote_evidence_library(
         len(updated.evidence_records),
         len(updated.route_candidates),
     )
-    return updated
+    result = RemoteCatalogSyncResult(
+        draft=updated,
+        catalog_source=RemoteCatalogSourceMetadata(
+            enabled=True,
+            source_url=target_url,
+            fetched_at=_now_iso(),
+            etag=etag,
+            cache=False,
+            route_candidates_count=len(updated.route_candidates),
+            evidence_records_count=len(updated.evidence_records),
+            new_records_count=new_records_count,
+            last_error=None,
+        ),
+    )
+    remember_remote_catalog_source(result.catalog_source)
+    return result
 
 
 __all__ = [
@@ -261,14 +336,19 @@ __all__ = [
     "DraftExpired",
     "DraftNotFound",
     "EVIDENCE_LIBRARY_DRAFT_ID",
+    "RemoteCatalogSourceMetadata",
     "RemoteCatalogSyncError",
+    "RemoteCatalogSyncResult",
     "append_evidence_record",
     "apply_draft",
     "create_draft",
     "drafts_path",
     "load_evidence_library",
     "load_draft",
+    "load_remote_catalog_source_metadata",
     "new_evidence_id",
+    "remember_remote_catalog_source",
     "save_draft",
     "sync_remote_evidence_library",
+    "sync_remote_evidence_library_with_metadata",
 ]

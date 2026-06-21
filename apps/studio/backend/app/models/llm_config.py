@@ -362,6 +362,7 @@ class RegistryResponse(BaseModel):
     route_runtime_settings: dict[str, dict[str, RuntimeSettingDescriptor]] = Field(
         default_factory=dict
     )
+    catalog_source: dict[str, Any] | None = None
     role_effective_runtime_settings: dict[
         str,
         dict[str, dict[str, EffectiveRuntimeSetting]],

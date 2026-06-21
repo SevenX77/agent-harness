@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -202,6 +203,72 @@ def test_sync_remote_evidence_library_raises_on_remote_404(
         )
 
     assert load_evidence_library(path=store_path).route_candidates == cached.route_candidates
+
+
+def test_sync_remote_evidence_library_with_metadata_reports_source_and_new_records(
+    tmp_path: Path,
+) -> None:
+    import app.services.llm_import_drafts as import_drafts
+
+    sync_with_metadata = getattr(import_drafts, "sync_remote_evidence_library_with_metadata", None)
+    assert sync_with_metadata is not None
+
+    store_path = tmp_path / "import_drafts.json"
+    source_url = "https://raw.githubusercontent.com/SevenX77/studio-llm-model-catalog/main/llm_import_drafts.json"
+    remote_draft = ProviderImportDraft(
+        draft_id="studio-evidence-library",
+        source={"kind": "studio_evidence_library", "location": "github"},
+        status="pending",
+        route_candidates={
+            "openai-official:gpt-5": RouteCandidate(
+                endpoint_id="openai-official",
+                route_slug="gpt-5",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
+                display_name="GPT-5",
+            )
+        },
+        evidence_records=[
+            EvidenceRecord(
+                evidence_id="evidence-remote",
+                evidence_type="probe",
+                trust_state="probe-verified",
+                observed_at="2026-05-31T10:00:00+00:00",
+                endpoint_id="openai-official",
+                route_id="openai-official:gpt-5",
+                model_id="gpt-5",
+                provider_model_id="gpt-5",
+                method_id="openai_responses",
+                request_mapper_id="openai_responses_text",
+                probe_status="ok",
+                scope={"endpoint_id": "openai-official", "route_id": "openai-official:gpt-5"},
+                successful_probe={"profile_count": 1},
+            )
+        ],
+    )
+
+    result = asyncio.run(
+        sync_with_metadata(
+            data={"drafts": {"studio-evidence-library": remote_draft.model_dump(mode="json")}},
+            url=source_url,
+            path=store_path,
+        )
+    )
+
+    assert result.draft.draft_id == "studio-evidence-library"
+    source = result.catalog_source.model_dump(mode="json")
+    assert source == {
+        "enabled": True,
+        "source_url": source_url,
+        "fetched_at": source["fetched_at"],
+        "etag": None,
+        "cache": False,
+        "route_candidates_count": 1,
+        "evidence_records_count": 1,
+        "new_records_count": 1,
+        "last_error": None,
+    }
+    datetime.fromisoformat(source["fetched_at"])
 
 
 def test_apply_draft_marks_applied_without_losing_interleaved_evidence_append(

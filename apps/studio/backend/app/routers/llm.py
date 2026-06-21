@@ -83,7 +83,11 @@ from app.services.copilot_test import (
     _RateLimited,
     _Unauthorized,
 )
-from app.services.gateway_resolver import build_gateway_route_runtime
+from app.services.event_bus import STUDIO_EVENTS_TOPIC, event_bus
+from app.services.gateway_resolver import (
+    build_gateway_route_runtime,
+    refresh_default_gateway_config_store,
+)
 from app.services.github_catalog import GitHubCatalogApiError, GitHubCatalogClient
 from app.services.llm_credentials import (
     _route_slug,
@@ -246,8 +250,15 @@ class RoleTestProviderProgressInfo(BaseModel):
 
     canonical_id: str
     route_id: str
-    status: Literal["queued", "testing", "ok", "failed", "blocked", "untested"]
+    # R-F11: 6-state light alignment with ProviderUiState. The SDK probe path
+    # emits "cooling_down" when the upstream surface (e.g. anthropic 429) signals
+    # rate limiting, so the FE can render a gray light + retry countdown instead
+    # of a generic "failed".
+    status: Literal["queued", "testing", "ok", "failed", "blocked", "untested", "cooling_down"]
     message: str | None = None
+    # R-F21: when status == "cooling_down", carry the suggested cooldown so the
+    # FE Test Button can render a countdown and stay disabled until it elapses.
+    retry_after_seconds: int | None = None
 
 
 class RoleTestJobResponse(BaseModel):
@@ -390,7 +401,13 @@ async def get_llm_registry() -> RegistryResponse:
     setup_required = not credentials_path().exists()
     credentials = load_credentials()
     roles = _load_roles_or_empty()
-    return _registry_response(credentials, roles, setup_required=setup_required)
+    # The registry projection is a synchronous, CPU-bound join (route-state
+    # projection + model-group grouping over every route). Run it off the event
+    # loop so a slow build never starves other requests / the WS on the single
+    # asyncio thread.
+    return await asyncio.to_thread(
+        _registry_response, credentials, roles, setup_required=setup_required
+    )
 
 
 @router.get("/registry/endpoints/{endpoint_id}/secret", response_model=EndpointSecretResponse)
@@ -977,6 +994,7 @@ async def put_llm_roles(request: RolesData) -> RolesData:
     credentials = load_credentials()
     materialized = _materialize_roles_for_response(merged, credentials)
     saved = _save_roles_with_active_routes(materialized)
+    await _publish_roles_changed()
     return _materialize_roles_for_response(saved, credentials)
 
 
@@ -1030,6 +1048,7 @@ async def put_llm_role(role_name: str, request: RoleEntry) -> RoleEntry:
     roles[role_name] = role
     schema_version = 3 if role.model_groups else data.schema_version
     saved = _save_roles_with_active_routes(data.model_copy(update={"schema_version": schema_version, "roles": roles}))
+    await _publish_roles_changed()
     return _materialize_role_for_response(saved.roles[role_name], credentials)
 
 
@@ -1043,6 +1062,7 @@ async def delete_llm_role(role_name: str) -> RolesData:
     del roles[role_name]
     credentials = load_credentials()
     saved = _save_roles_with_active_routes(data.model_copy(update={"roles": roles}))
+    await _publish_roles_changed()
     return _materialize_roles_for_response(saved, credentials)
 
 
@@ -1323,6 +1343,29 @@ async def _update_role_test_job_provider(
 _COPILOT_SDK_TEST_CONCURRENCY = 2
 
 
+def _human_message_for_error_code(error_code: str | None, role_name: str) -> str:
+    """R-F9: map gateway error codes to human-readable Chinese copilot test
+    toast messages. Raw `ResourceTerminalError: resource.no_available_route`
+    leaks an internal exception class name + dict payload to the user; this
+    helper returns a sentence the operator can act on.
+
+    Front-end `ERROR_CODE_MAP` in `copilot-role-test.ts` mirrors this table
+    for the cases where the FE chooses the fallback message (e.g. transport
+    error before the BE could attach `error_code`).
+    """
+    if error_code == "resource.no_available_route":
+        return f"{role_name} 暂无可用模型路由：请先在 API Keys 配置 Anthropic-compatible 凭证并测试通过"
+    if error_code == "resource.role_unknown":
+        return f"{role_name} 不存在或已被删除：请刷新页面后重试"
+    if error_code == "resource.role_invalid_kind":
+        return f"{role_name} 不是 copilot 角色，无法用 Claude SDK 测试"
+    if error_code == "resource.credential_missing":
+        return f"{role_name} 缺少必需的 API key：请到 API Keys 填写后重试"
+    if error_code:
+        return f"{role_name} 测试失败 ({error_code})"
+    return f"{role_name} 测试失败：无法解析模型路由"
+
+
 async def _start_copilot_sdk_test_job(role_name: str) -> RoleTestJobResponse:
     job_id = str(uuid.uuid4())
     try:
@@ -1333,11 +1376,16 @@ async def _start_copilot_sdk_test_job(role_name: str) -> RoleTestJobResponse:
         error_payload = getattr(exc, "error_payload", None)
         if not isinstance(error_payload, dict):
             error_payload = None
+        # R-F9: replace the raw `f'无法解析 copilot 路线: {exc}'` (which leaks
+        # the exception class name and a Python-repr payload) with the human
+        # message derived from the gateway error code. `error_code` +
+        # `error_payload` stay on the job for FE debugging.
+        message = _human_message_for_error_code(error_code, role_name)
         job = RoleTestJobResponse(
             job_id=job_id,
             role_name=role_name,
             status="failed",
-            message=f"无法解析 copilot 路线: {exc}",
+            message=message,
             error_code=error_code,
             error_payload=error_payload,
             provider_statuses=[],
@@ -1375,14 +1423,18 @@ def _resolve_copilot_test_routes(
 
 def _copilot_route_progress(
     route: ResolvedRoute,
-    status: Literal["queued", "testing", "ok", "failed", "blocked", "untested"],
+    status: Literal[
+        "queued", "testing", "ok", "failed", "blocked", "untested", "cooling_down"
+    ],
     message: str | None = None,
+    retry_after_seconds: int | None = None,
 ) -> RoleTestProviderProgressInfo:
     return RoleTestProviderProgressInfo(
         canonical_id=route.canonical_id,
         route_id=route.route_id,
         status=status,
         message=message,
+        retry_after_seconds=retry_after_seconds,
     )
 
 
@@ -1399,7 +1451,15 @@ async def _run_copilot_sdk_test_job(
         async with semaphore:
             await _update_copilot_route(job_id, route, "testing", None)
             result = await copilot.run_route_sdk_test(route, credential_provider)
-            await _update_copilot_route(job_id, route, result.status, result.message)
+            # R-F21: surface cooling_down + retry_after_seconds so the FE Test
+            # Button can show "Cooling down {n}s" and stay disabled.
+            await _update_copilot_route(
+                job_id,
+                route,
+                result.status,
+                result.message,
+                retry_after_seconds=result.retry_after_seconds,
+            )
             return result
 
     try:
@@ -1428,15 +1488,16 @@ async def _run_copilot_sdk_test_job(
 async def _update_copilot_route(
     job_id: str,
     route: ResolvedRoute,
-    status: Literal["testing", "ok", "failed", "blocked", "untested"],
+    status: Literal["testing", "ok", "failed", "blocked", "untested", "cooling_down"],
     message: str | None,
+    retry_after_seconds: int | None = None,
 ) -> None:
     async with _role_test_jobs_lock:
         current = _role_test_jobs.get(job_id)
         if current is None:
             return
         provider_statuses = [
-            _copilot_route_progress(route, status, message)
+            _copilot_route_progress(route, status, message, retry_after_seconds)
             if provider.route_id == route.route_id
             else provider
             for provider in current.provider_statuses
@@ -1455,8 +1516,14 @@ def _build_copilot_sdk_result(
     # Copilot only needs one working route at runtime (fallback chain), so any
     # passing route makes the role usable.
     overall = "ok" if passed > 0 else "failed"
+    # R-F21: persist retry_after_seconds alongside cooling_down so a remount
+    # can re-hydrate the gray light + countdown (R20 seed path).
     routes_evidence = {
-        result.route_id: {"status": result.status, "message": result.message}
+        result.route_id: {
+            "status": result.status,
+            "message": result.message,
+            "retry_after_seconds": result.retry_after_seconds,
+        }
         for result in results
     }
     return {
@@ -2150,7 +2217,37 @@ def _provider_model_option(
         "reason_code": projection.reason_code,
         "capability_state": _capability_state(capabilities),
         "capabilities": capabilities,
+        # R-F8: CopilotTab filters candidate model groups by call_method_id
+        # (anthropic-messages family) instead of the old provider_type
+        # heuristic. The field is None for routes without a verified profile
+        # (i.e. no resolved call method), which is treated as "not copilot-
+        # eligible" by the FE filter.
+        "call_method_id": _preferred_route_call_method_id(route),
     }
+
+
+def _preferred_route_call_method_id(route: ProviderRoute) -> str | None:
+    """R-F8: pick the method_id of this route's preferred verified profile so
+    the FE can decide copilot eligibility without re-running the gateway
+    resolver. Mirrors `select_verified_profile(route, RuntimeSettings())`:
+    among `status=='ready'` profiles, prefer `default=True`, then
+    `fallback_rank`, then `profile_id`. Returns None when no profile is
+    ready — equivalent to "not yet verified, not yet eligible".
+    """
+    try:
+        selected = select_verified_profile(route, RuntimeSettings())
+    except Exception as exc:  # noqa: BLE001 — degradation must be observable
+        # rules/logging.md: never silently swallow. A profile-selection error
+        # at this point means the route's verified_profiles don't satisfy
+        # default settings — degrade to None (FE shows as not-copilot-eligible)
+        # and log the reason so operators can fix the credential record.
+        logger.warning(
+            "phase=copilot-route-call-method-id route_id=%s degraded=true reason=%s",
+            route.route_id,
+            exc,
+        )
+        return None
+    return selected.method_id if selected is not None else None
 
 
 def _health_store() -> SqliteLlmHealthStore:
@@ -4931,9 +5028,50 @@ def _save_roles_with_active_routes(data: RolesData) -> RolesData:
             known_route_ids=active_route_ids,
             known_bundle_ids=known_bundle_ids,
         )
-        return load_roles_file(active_path)
+        reloaded = load_roles_file(active_path)
     except InvalidRoleReference as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # R-F1: keep the in-process gateway config snapshot in sync with the yaml
+    # so that the next ``build_gateway_route_runtime`` (e.g. copilot test-sdk)
+    # sees the just-saved roles. Failure is a real bug; do not swallow.
+    try:
+        refresh_default_gateway_config_store(active_path)
+    except Exception:
+        logger.exception(
+            "phase=save_roles action=refresh_gateway_config_store status=failed"
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to refresh gateway config snapshot after roles save.",
+        )
+
+    return reloaded
+
+
+def _now_iso() -> str:
+    """R-F10: ISO-8601 UTC timestamp for roles_changed broadcast payloads."""
+    return datetime.now(UTC).isoformat()
+
+
+async def _publish_roles_changed() -> None:
+    """R-F10: broadcast a ``roles_changed`` event on the studio events topic
+    after a PUT/DELETE roles endpoint successfully writes to disk. Failure
+    here is logged via ``logger.exception`` but never propagates — a downed
+    event bus must not corrupt the just-completed write.
+    """
+    payload: dict[str, Any] = {
+        "type": "roles_changed",
+        "timestamp": _now_iso(),
+        "source": "http_api",
+    }
+    try:
+        await event_bus.publish(STUDIO_EVENTS_TOPIC, payload)
+    except Exception:
+        logger.exception(
+            "phase=publish_roles_changed action=publish status=failed payload=%s",
+            payload,
+        )
 
 
 def _endpoint_references(

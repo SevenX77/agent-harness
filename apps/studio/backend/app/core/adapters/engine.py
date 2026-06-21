@@ -1199,23 +1199,42 @@ class EngineAdapter:
         # n5-node#3: when dirty and a resume node is named, slice the dirtiness by
         # the compiled graph's depends_on order so the frontend grays only the
         # downstream phases the resume node can dirty. Side-branches stay clean.
+        is_dirty = bool(dirty_fields)
         affected_downstream = self._affected_downstream_for_resume(
             skill_id=skill_id,
             resume_from_node_id=resume_from_node_id,
-            is_dirty=bool(dirty_fields),
+            is_dirty=is_dirty,
         )
+
+        # n5-node#3 (spec F3): resume_allowed is PER-NODE once a resume node is
+        # named -- an unrelated side-branch stays resumable even when the whole
+        # skill is dirty. With no node target (global Trace Resume) the gate stays
+        # whole-skill: any dirt blocks. resume_allowed_for_node branches explicitly
+        # so a per-node predicate never silently flips the global resume.
+        from app.services.resume_downstream import resume_allowed_for_node
+
+        resume_allowed = resume_allowed_for_node(
+            resume_from_node_id=resume_from_node_id,
+            is_dirty=is_dirty,
+            affected_downstream=affected_downstream,
+        )
+        # `affected_downstream is None` means the slice was unavailable (compile
+        # failed). The gate already degraded to a conservative block above; the
+        # payload's node lists must stay a real list (the FE grays from them), so
+        # project the unknown slice as empty -- nothing to gray when unknown.
+        slice_for_payload = affected_downstream if affected_downstream is not None else []
 
         return _resume_validity_payload(
             run_id=run_id,
-            resume_allowed=not dirty_fields,
+            resume_allowed=resume_allowed,
             reason="dirty_upstream" if dirty_fields else "ok",
             checkpoint_id=checkpoint_id,
             checkpoint_ns=checkpoint_ns,
             resume_from_node_id=resume_from_node_id,
             resume_to_node_id=resume_to_node_id,
             dirty_fields=dirty_fields,
-            dirty_node_ids=affected_downstream,
-            affected_downstream=affected_downstream,
+            dirty_node_ids=slice_for_payload,
+            affected_downstream=slice_for_payload,
             snapshot_content_hash=snapshot_content_hash,
             current_content_hash=current_content_hash,
             snapshot_execution_fingerprint=snapshot_execution_fingerprint,
@@ -1228,13 +1247,17 @@ class EngineAdapter:
         skill_id: str,
         resume_from_node_id: str | None,
         is_dirty: bool,
-    ) -> list[str]:
+    ) -> list[str] | None:
         """Downstream phases a dirty resume node can stale (n5-node#3 slice).
 
-        Empty when the graph is clean or no resume node is named. Compiles the
-        skill in-process (same boundary as the dirty compare above) and walks the
-        depends_on graph. Degrades to an empty slice -- never raises -- when the
-        skill cannot be compiled, so a slice failure never breaks resume validity.
+        Returns an empty *list* when the graph is clean or no resume node is named
+        (nothing downstream). Returns ``None`` when the slice is UNAVAILABLE -- the
+        skill could not be compiled to walk its ``depends_on`` graph. The caller
+        must treat ``None`` differently from ``[]``: an empty list means "computed,
+        nothing affected" (so a side-branch resume is allowed), while ``None`` means
+        "unknown", which degrades resume to the conservative whole-skill gate rather
+        than silently allowing. Compiles in-process (same boundary as the dirty
+        compare above); never raises.
         """
         if not is_dirty or not resume_from_node_id:
             return []
@@ -1249,12 +1272,13 @@ class EngineAdapter:
             )
         except Exception as exc:  # noqa: BLE001 -- slice is best-effort, log + degrade
             logger.warning(
-                "resume_validity downstream slice unavailable for skill=%s node=%s: %s",
+                "resume_validity downstream slice unavailable for skill=%s node=%s: %s "
+                "-> resume degrades to conservative whole-skill gate",
                 skill_id,
                 resume_from_node_id,
                 exc,
             )
-            return []
+            return None
         return affected_downstream_nodes(compiled, resume_from_node_id)
 
     def get_fallback_trace(self, skill_dir: str) -> list[dict[str, Any]]:

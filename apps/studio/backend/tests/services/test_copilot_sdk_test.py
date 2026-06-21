@@ -163,6 +163,68 @@ def test_fails_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "请求超时" in (result.message or ""), result.message
 
 
+def test_rate_limit_error_surfaces_as_cooling_down(monkeypatch: pytest.MonkeyPatch) -> None:
+    """R-F21: a provider 429 / rate-limit must NOT light the route red.
+
+    The anthropic CLI wraps the upstream HTTP status in a ProcessError-like
+    exception; we detect "rate limit" / "429" / "rate_limit" in the error text
+    and return ``cooling_down`` so the FE can render a gray light + countdown.
+    """
+    # A bare RuntimeError carrying a recognizable rate-limit substring + a
+    # parseable retry-after — both _is_rate_limit_error and
+    # _retry_after_from_exception must trigger.
+    rate_limit_error = RuntimeError("HTTP 429 rate limit exceeded; retry after 42 seconds")
+    client = FakeClient(error=rate_limit_error)
+    monkeypatch.setattr(copilot, "_session_factory", lambda _options: client)
+
+    result = _run(_route(), _CredProvider())
+
+    assert result.status == "cooling_down"
+    assert result.retry_after_seconds == 42
+    assert result.message  # message preserved for debug
+
+
+def test_rate_limit_error_without_retry_after_has_none_seconds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R-F21: cooling_down still surfaces even when the upstream omits the
+    Retry-After hint — the FE renders the disabled state without a countdown.
+    """
+    client = FakeClient(error=RuntimeError("rate_limit_exceeded; please slow down"))
+    monkeypatch.setattr(copilot, "_session_factory", lambda _options: client)
+
+    result = _run(_route(), _CredProvider())
+
+    assert result.status == "cooling_down"
+    assert result.retry_after_seconds is None
+
+
+def test_is_rate_limit_error_matches_common_substrings() -> None:
+    """R-F21 helper guard: the substring set we match on is narrow enough not
+    to catch unrelated 4xx surfaces while still covering common 429 phrasings.
+    """
+    assert copilot._is_rate_limit_error(RuntimeError("HTTP 429 too many requests"))
+    assert copilot._is_rate_limit_error(RuntimeError("Anthropic RateLimitError"))
+    assert copilot._is_rate_limit_error(RuntimeError("rate limit exceeded"))
+    assert copilot._is_rate_limit_error(RuntimeError("rate_limit_exceeded"))
+    # Non-rate-limit errors must not be misclassified.
+    assert not copilot._is_rate_limit_error(RuntimeError("invalid_api_key"))
+    assert not copilot._is_rate_limit_error(RuntimeError("HTTP 500 server error"))
+    assert not copilot._is_rate_limit_error(RuntimeError("connection reset"))
+
+
+def test_retry_after_parses_common_shapes() -> None:
+    """R-F21 helper: handle "retry after Ns" and "in N seconds" shapes."""
+    assert copilot._retry_after_from_exception(RuntimeError("retry after 60s")) == 60
+    assert copilot._retry_after_from_exception(RuntimeError("Retry-After: 30")) == 30
+    assert (
+        copilot._retry_after_from_exception(RuntimeError("rate limited; in 15 seconds"))
+        == 15
+    )
+    # Missing hint → None (the FE renders the disabled state without a number).
+    assert copilot._retry_after_from_exception(RuntimeError("rate limit exceeded")) is None
+
+
 def test_fails_without_spawning_when_api_key_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     spawned = {"called": False}
 

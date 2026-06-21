@@ -99,3 +99,59 @@ def is_resume_node_affected(
     itself is one of them; resuming from a node on an unrelated branch is allowed.
     """
     return resume_from_node_id in set(dirty_node_ids)
+
+
+def resume_allowed_for_node(
+    *,
+    resume_from_node_id: str | None,
+    is_dirty: bool,
+    affected_downstream: list[str] | None,
+) -> bool:
+    """Decide ``resume_allowed`` per spec F3, branching on whether a node is named.
+
+    Two distinct semantics, by design (n5-node fn#3):
+
+    * **No resume node** (``resume_from_node_id is None`` -- the global Trace Resume
+      that continues a run from its last checkpoint): keep the whole-skill gate.
+      A clean skill resumes; any dirt blocks. The per-node slice must NOT silently
+      flip a globally-dirty skill back to resumable.
+    * **A resume node is named** (per-node Resume anchored on the canvas node): a
+      clean skill always resumes; when dirty, resume is allowed iff the node sits
+      OUTSIDE the affected-downstream slice -- so an unrelated side-branch stays
+      resumable while a node the change reaches is blocked.
+
+    ``affected_downstream is None`` means the slice could NOT be computed (the skill
+    would not compile). An empty *list* means "computed, nothing downstream"; ``None``
+    means "unknown". When the slice is unknown we cannot prove the node sits outside
+    the dirtied set, so a dirty skill degrades to the conservative whole-skill gate
+    (blocked) -- a slice failure must never silently weaken the gate to "allowed".
+    """
+    if not is_dirty:
+        return True
+    if resume_from_node_id is None:
+        # Global Trace Resume: dirty skill stays blocked (whole-skill semantics).
+        logger.info(
+            "resume_downstream: global resume gate -> blocked (skill dirty, no node target)"
+        )
+        return False
+    if affected_downstream is None:
+        # Slice unavailable (skill did not compile): cannot prove the node is an
+        # unrelated side-branch, so degrade to the conservative whole-skill gate.
+        logger.warning(
+            "resume_downstream: per-node slice unavailable for node=%s -> blocked "
+            "(conservative; skill is dirty)",
+            resume_from_node_id,
+        )
+        return False
+    affected = is_resume_node_affected(
+        None,
+        resume_from_node_id=resume_from_node_id,
+        dirty_node_ids=affected_downstream,
+    )
+    logger.info(
+        "resume_downstream: per-node resume gate node=%s affected=%s -> %s",
+        resume_from_node_id,
+        affected,
+        "blocked" if affected else "allowed",
+    )
+    return not affected

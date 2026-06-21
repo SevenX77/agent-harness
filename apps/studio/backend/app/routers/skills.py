@@ -716,6 +716,12 @@ async def publish_skill(
         )
         remote_sync = release_manifest.get("remote_sync")
         if not (isinstance(remote_sync, dict) and remote_sync.get("status") == "succeeded"):
+            # N6/#7 读法 B (PM 2026-06-20): the local release already committed;
+            # the remote sync leg is recorded as `skipped` rather than failing the
+            # publish. The reason is one of {registry_not_configured,
+            # app_settings_incomplete} — the frontend keys a NON-blocking notice
+            # (and an Open Settings shortcut for the identity case) on this reason
+            # (usePublishSkill.ts FE_HANDLED_SKIP_REASONS). No error code is thrown.
             skip_reason = (
                 "registry_not_configured" if has_publish_identity else "app_settings_incomplete"
             )

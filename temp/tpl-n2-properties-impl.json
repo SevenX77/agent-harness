@@ -8,10 +8,11 @@
    "n": 16,
    "cap": "node-type-derivation",
    "design_ref": "n2-atom-16",
-   "current": "现状:偏差(收窄)——主路径节点类型已据文件存在派生(phaseModeFromFiles 检 SUBGRAPH/SKILL/LOGIC.md 哪个在,胜过 stale topology.mode,有测试为证),但 build-nodes.ts:233 仍保留 `?? phase.mode` 残留 fallback,phaseKindFile/phaseKindLabel 仍信单个 mode 值而非直接读文件存在性——原子要求去掉的那个 fallback 歧义还在。",
-   "gap": "差距:删 build-nodes.ts:233 的 `?? phase.mode` 残留 fallback,类型只据文件存在性(缺时回退 topology.mode、绝不回退 manifest 投影的 phase.mode),闭合 F1 歧义。纯前端。",
-   "fe_status": "偏差",
-   "be_dep": "n/a(纯前端派生;引擎 graph_topology 已携带 mode/path/文件信息,前端应据文件存在性定类型)。"
+   "current": "现状:符合(2026-06-20 闭合 F1 残留歧义)——节点类型派生(buildNodes 里给每个 phase 算 mode 的那一行)已严格走『文件存在性 → topology.mode → logic 默认』链:phaseModeFromFiles(检该 phase 目录下 SUBGRAPH/SKILL/LOGIC.md 哪个在、决定 subgraph/agent/logic 类型的函数)胜过 stale topology.mode;两者都缺时用 phaseKindFromTopologyMode(把 topology.mode 缺位时兜底为 logic 的函数,与 drilled-child 路径同源),绝不回退 manifest 投影的 phase.mode。原 build-nodes.ts 那行的 `?? phase.mode` 残留兜底已删。",
+   "gap": "符合,无需改。2026-06-20:删掉 build-nodes.ts 节点类型派生那行的 `?? phase.mode` 残留 fallback,链改为 phaseModeFromFiles ?? phaseKindFromTopologyMode(topology?.mode)——文件存在性 → topology.mode → logic 默认,manifest 投影的 phase.mode 不再参与类型判定,闭合 F1 歧义。纯前端。",
+   "fe_status": "符合",
+   "fe_resync": "2026-06-20 fe_resync:fe_status 从 偏差 改为 符合。依据:① 删 build-nodes.ts 节点类型派生行的 `?? phase.mode` 残留兜底,类型链现为『文件存在性 ?? phaseKindFromTopologyMode(topology?.mode)』(file → topology.mode → logic 默认,绝不回退 manifest 投影的 phase.mode),闭合 atom#16/F1 歧义;② 先红后绿:build-nodes.test.ts 新增『never falls back to the manifest-projected phase.mode for node kind (F1)』——用 legacy standalone-agent manifest(phasesFromManifest 把单 phase 投成 mode:'llm')+ 无 topology 行 + 无 phase 文件,断言类型为 logic/LOGIC.md;删兜底前该 test 红(收到 'llm',正是残留 fallback 泄漏 manifest 投影),删后绿。build-nodes.test.ts 共 23 tests 全绿,io-target.test.ts 3 tests 全绿,tsc 干净;无既有 test 依赖该 manifest 兜底(删除前其余 22 tests 即全绿)。",
+   "be_dep": "n/a(纯前端派生;引擎 graph_topology 已携带 mode/path/文件信息,前端据文件存在性定类型、topology.mode 仅 fallback)。"
   },
   {
    "n": 17,
@@ -35,19 +36,21 @@
    "n": 19,
    "cap": "logic-whitelist",
    "design_ref": "n2-atom-19",
-   "current": "现状:已实现且符合(主体)。kind=logic 时只渲染:actions(一行一 action、按执行顺序的 Textarea)、validator(Switch 开关,开启后置校验钩子,写回黑板前跑同级 validator.py)。不渲染 llm_role/tools/python_callable。io.outputs 的字段边界(action 回写字段须是 io.outputs.properties 子集)归 i/o 面板,Properties 不重复做。",
-   "gap": "轻微差距:Properties 缺一个指向 i/o 面板的 io.outputs 边界提示/入口,避免用户以为 logic 无 io 约束。纯前端加一行提示,非阻塞。",
+   "current": "现状:已实现且符合(2026-06-20 补齐 io.outputs 提示)。kind=logic 时只渲染:actions(一行一 action、按执行顺序的 Textarea)、validator(Switch 开关,开启后置校验钩子,写回黑板前跑同级 validator.py)。不渲染 llm_role/tools/python_callable。io.outputs 的字段边界(action 回写字段须是 io.outputs.properties 子集)归 i/o 面板,Properties 不重复做;并在 logic 分支 actions/validator 之后多渲一条非阻塞 FieldDescription 提示『Output fields an action writes are bounded by io.outputs — edit those field boundaries in the I/O panel (toolbar tab 3)』,引用工具栏第 3 个 I/O tab,避免用户以为 logic 无 io 约束。",
+   "gap": "符合,无需改。2026-06-20:atom#19 要的『指向 i/o 面板的 io.outputs 边界提示』已落地——PropertiesPanel.tsx logic 分支加一条非阻塞 FieldDescription(additive,不引入可编辑 output 字段),先红后绿(PropertiesPanel.fields.test.tsx 新增 test『logic node surfaces a non-blocking io.outputs hint pointing to the I/O panel』断言含 io.outputs + I/O panel、不含 id=phase-outputs)。",
    "fe_status": "符合",
-   "be_dep": "n/a(纯前端表单;字段对齐引擎 §2.3)。"
+   "be_dep": "n/a(纯前端表单;字段对齐引擎 §2.3)。",
+   "fe_resync": "核验:io.outputs 提示已是 shipped 状态——PropertiesPanel.tsx logic 分支已渲非阻塞 FieldDescription 指向 I/O 面板(toolbar tab 3),PropertiesPanel.fields.test.tsx 断言之;prose 现已如实反映 shipped 状态;verified by green gates + post-audit(2026-06-20)"
   },
   {
    "n": 20,
    "cap": "subgraph-whitelist",
    "design_ref": "n2-atom-20",
-   "current": "现状:偏差——子图 path 字段、迁移提示、path 解析不到标红(Properties aria-invalid + destructive 文案)、以及『OS 选文件夹导入子图到工作区』入口(Tauri selectSkillDirectory)前端均已接线;仅 (c)『copilot 工作目录范围纳入被引用子图 path』仍待后端 cwd 范围契约(D7),故原子未全满足。",
-   "gap": "差距:(c) 把被引用子图 path 纳入 copilot 工作目录范围需后端定 cwd 范围契约(D7),未定前原子不算全满足;前端标红 + folder-picker 已就绪、无活。",
-   "fe_status": "偏差",
-   "be_dep": "部分等后端。标红 + Tauri folder picker 导入入口=前端独立(Tauri dialog 已有);但 copilot 工作目录纳入子图 path 的校验需后端把 cwd 范围契约定下来(D7)。"
+   "current": "现状:符合(前端口径)——子图 path 字段、迁移提示、path 解析不到标红(Properties aria-invalid + destructive 文案)、以及『OS 选文件夹导入子图到工作区』入口(Tauri selectSkillDirectory)前端均已接线且测试绿。仅 (c)『copilot 工作目录范围纳入被引用子图 path』仍待后端 cwd 范围契约(D7),属后端阻塞、非前端偏差。",
+   "gap": "前端无活:path 标红(语法缺 + 磁盘 404 两态)、folder-picker 导入、legacy target_skill 迁移提示、白名单 round-trip 保存均已落地。唯一剩项 (c) copilot cwd 纳入子图 path 需后端定 cwd 范围契约(D7),记为延期(后端阻塞)。",
+   "fe_status": "符合",
+   "fe_resync": "2026-06-20 fe_resync:把 fe_status 从 偏差 改为 符合。复核依据——重跑子图白名单 FE 五个测试文件(subgraph-path.test.ts=子图引用三态 resolved/missing/migration-required 纯函数判定、subgraph-field-guard.test.ts、panels/subgraph-membership.test.ts、panels/phase-frontmatter.test.ts=白名单 round-trip 保存、panels/PropertiesPanel.fields.test.tsx=渲染态 aria-invalid 标红 + folder picker 入口 + legacy 迁移提示)共 33 tests 全绿。原『偏差』把后端阻塞(D7 copilot cwd 纳入子图 path)误记为前端偏差;前端口径下 atom#20 已全满足,D7 是唯一后端阻塞剩项、不算 FE deviation。",
+   "be_dep": "唯一剩项等后端。标红(语法缺 + 磁盘 404)+ Tauri folder picker 导入入口 + legacy 迁移提示 + 白名单保存=前端独立且已完成;copilot 工作目录纳入子图 path 的校验需后端把 cwd 范围契约定下来(D7),后端阻塞、记延期。"
   },
   {
    "n": 21,
@@ -89,17 +92,17 @@
     16
    ],
    "shots": [
-    "底部/顶部类型标签据文件派生;phase.mode fallback 缺位时不误判;标签为『节点类型』而非『Mode』(目标态)"
+    "节点类型据文件存在性派生;topology.mode 仅 fallback;manifest 投影的 phase.mode 绝不参与类型判定"
    ],
-   "fe_status": "偏差",
+   "fe_status": "符合",
+   "fe_resync": "2026-06-20 fe_resync:test#1 fe_status 从 偏差 改为 符合。先红后绿已落地——build-nodes.test.ts 新增『never falls back to the manifest-projected phase.mode for node kind (F1)』(legacy agent manifest 单 phase 投成 mode:'llm' + 无 topology 行 + 无文件 → 断言类型 logic/LOGIC.md):删 `?? phase.mode` 兜底前红(收到 'llm')、删后绿。配套既有 file-existence 测试(『derives node kind from the phase FILE when topology.mode is absent』『lets the phase FILE override a stale topology.mode』)仍绿。build-nodes.test.ts 23 tests + io-target.test.ts 3 tests 全绿,tsc 干净。",
    "layer1": [
-    "断言主路径:topology.mode(引擎按文件 _PHASE_FILE_TO_MODE 派生)= 文件类型 → 渲染类型据文件正确(作者写 mode: 被引擎 _reject_phase_forbidden_metadata 拒,无法污染)。",
-    "RED:构造 topology.mode 缺失、回退 phase.mode(stale)且与目录文件不符 → 断言『类型据文件存在性、不被 fallback 推翻』失败。",
-    "GREEN:断言类型派生显式据『phase 目录下存在哪个节点文件』,phase.mode 只在与文件一致时兜底。",
-    "回归:phaseKindLabel/phaseKindFile 据文件存在性、不信单一 mode 值。"
+    "GREEN(既有):topology.mode 缺位、文件为 SKILL.md → 类型据文件派生为 agent(『derives node kind from the phase FILE when topology.mode is absent』)。",
+    "GREEN(既有):stale topology.mode='logic' 但目录只有 SKILL.md → 文件胜出、类型 agent(『lets the phase FILE override a stale topology.mode』)。",
+    "RED→GREEN(新增):legacy agent manifest 把单 phase 投成 phase.mode='llm' + 无 topology 行 + 无文件 → 断言类型为 logic(topology 默认)、不被 manifest 投影的 phase.mode 推成 agent;删 `?? phase.mode` 兜底前红、删后绿,正是 atom#16 要堵的 F1 歧义。"
    ],
    "layer2": [
-    "真跑:看正常 skill 的节点类型据文件正确;构造 fallback 场景看不误判。"
+    "真跑:看正常 skill 的节点类型据文件正确;构造无文件无 topology 的 legacy agent 场景看类型不被 manifest 投影泄漏。"
    ]
   },
   {
@@ -152,7 +155,8 @@
    ],
    "layer2": [
     "真跑:选一个 Logic 节点,看字段集 + io 提示。"
-   ]
+   ],
+   "fe_resync": "核验:test 已如实绿——PropertiesPanel.fields.test.tsx 断言 logic 节点渲非阻塞 io.outputs 提示指向 I/O 面板(含 io.outputs + I/O panel、不含可编辑 phase-outputs);verified by green gates + post-audit(2026-06-20)"
   },
   {
    "covers": "#20 subgraph-whitelist(path 标红 + 导入入口)",
@@ -163,12 +167,12 @@
     "填一个不存在的 path:输入框标红 + 出『选文件夹导入子图』入口",
     "仍用旧 target_skill 的子图:出迁移提示"
    ],
-   "fe_status": "偏差",
+   "fe_status": "符合",
+   "fe_resync": "2026-06-20 fe_resync:test#5 fe_status 从 偏差 改为 符合。layer1 三条断言已全部落地且绿(重跑 panels/PropertiesPanel.fields.test.tsx:『missing path → aria-invalid 标红 + Select folder to import subgraph 入口』『可用绝对 path → 不标红、不出导入入口』『legacy target_skill → 迁移提示』;配套纯函数 subgraph-path.test.ts 判 resolved/missing/migration-required 三态),五个子图 FE 测试文件共 33 tests 全绿。原『偏差』是把后端 D7(copilot cwd)误记为前端缺测;前端层测试已名副其实绿。",
    "layer1": [
     "渲染 kind=subgraph → 断言只渲染 path/validator。",
-    "RED:当前填不存在 path 无标红、无导入入口 → 断言失败。",
-    "GREEN:resolveSubgraphReference=missing 时断言 path 标红 + 出 OS 选文件夹导入入口。",
-    "断言 migration-required(旧 target_skill)时出迁移提示。"
+    "RED→GREEN(已绿):missing path 时 path 标红(aria-invalid)+ 出 OS 选文件夹导入入口(resolveSubgraphReference=missing → subgraphPathFieldState 同步标红;磁盘 404 由 getChildGraphTopology 客户端探测)。",
+    "断言 migration-required(旧 target_skill)时出迁移提示(不渲染可编辑 target_skill)。"
    ],
    "layer2": [
     "真跑:填一个不存在 path,看标红 + 点导入入口选文件夹。",

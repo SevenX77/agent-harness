@@ -7,14 +7,30 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc, Arc, Mutex,
 };
+use std::time::{Duration, Instant};
 #[cfg(target_os = "macos")]
 use tauri::menu::{AboutMetadata, Menu, PredefinedMenuItem, Submenu};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
+
+/// R-F19.2 — `RunEvent::ExitRequested` blocks the shutdown for up to this long
+/// while the frontend flushes any in-flight debounced roles save and acks via
+/// `confirm_quit_ready`. Chosen to comfortably cover the 300ms debounce timer
+/// + a typical local PUT round-trip (sidecar is in-process loopback), without
+/// making the user wait noticeably if the FE is gone.
+const QUIT_FLUSH_BUDGET: Duration = Duration::from_millis(1500);
+const QUIT_FLUSH_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 struct SidecarAppState {
     manager: Mutex<Option<sidecar::SidecarManager>>,
     startup_error: Mutex<Option<String>>,
+}
+
+/// Set to true by the `confirm_quit_ready` tauri command after the FE has
+/// awaited `flushRolesSave()`. The exit handler polls this to know when it
+/// can proceed without dropping a pending in-memory edit.
+struct QuitFlushState {
+    ready: AtomicBool,
 }
 
 #[tauri::command]
@@ -35,6 +51,57 @@ fn get_sidecar_config(
         .expect("sidecar error state poisoned")
         .clone()
         .unwrap_or_else(|| "Python sidecar is not running".to_string()))
+}
+
+/// R-F19.2 — the frontend calls this after `flushRolesSave()` resolves in its
+/// `before-quit` listener. The exit handler polls `QuitFlushState::ready` and
+/// proceeds with sidecar shutdown + `exit(0)` as soon as it's set, or after
+/// `QUIT_FLUSH_BUDGET` lapses (so a stuck FE can't trap the user in the app).
+#[tauri::command]
+fn confirm_quit_ready(state: tauri::State<'_, QuitFlushState>) {
+    state.ready.store(true, Ordering::SeqCst);
+    log::info!("phase=quit action=flush-ready source=frontend");
+}
+
+/// R-F13 — tear down the current Python sidecar process and spawn a fresh one,
+/// then emit `SIDECAR_RESTARTED_EVENT` so the frontend's `sidecar-restarted`
+/// listener rotates `currentApiToken` / `currentApiBaseURL`. The next
+/// `useStudioEventStream` reconnect picks up the new token via `wsUrl()` instead
+/// of looping on 4401 closes (the auth gate's "Unauthorized" close code).
+///
+/// Intended trigger: a future watchdog / FE recovery flow. Wiring it up now means
+/// the moment a trigger exists, token rotation is end-to-end without a second
+/// landing.
+#[tauri::command]
+fn restart_sidecar(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, SidecarAppState>,
+) -> Result<sidecar::SidecarRuntimeConfig, String> {
+    let runtime_config = {
+        let guard = state.manager.lock().expect("sidecar state poisoned");
+        let manager = guard
+            .as_ref()
+            .ok_or_else(|| "Python sidecar is not running".to_string())?;
+        manager
+            .restart()
+            .map_err(|err| format!("failed to restart Python sidecar: {err}"))?
+    };
+    if let Err(err) = app_handle.emit(sidecar::SIDECAR_RESTARTED_EVENT, &runtime_config) {
+        // Don't fail the command on emit error: the sidecar IS restarted; the
+        // frontend just won't auto-rotate the token until a manual refresh. Log
+        // loudly so this never goes silent (logging-rule iron rule).
+        log::error!(
+            "phase=sidecar-restart action=emit-failed event={} error={err}",
+            sidecar::SIDECAR_RESTARTED_EVENT
+        );
+    } else {
+        log::info!(
+            "phase=sidecar-restart action=emit-ok event={} port={}",
+            sidecar::SIDECAR_RESTARTED_EVENT,
+            runtime_config.port
+        );
+    }
+    Ok(runtime_config)
 }
 
 #[tauri::command]
@@ -325,6 +392,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_sidecar_config,
             get_sidecar_stderr,
+            confirm_quit_ready,
+            restart_sidecar,
             open_in_cursor,
             open_in_codex,
             select_directory,
@@ -355,6 +424,12 @@ pub fn run() {
                         .build(),
                 )?;
             }
+            // R-F19.2 — shared state polled by the exit handler after emitting
+            // `before-quit`; reset to false here so a previous quit cycle never
+            // leaks readiness into a fresh session.
+            app.manage(QuitFlushState {
+                ready: AtomicBool::new(false),
+            });
             if std::env::var("STUDIO_TAURI_DISABLE_SIDECAR").as_deref() != Ok("1") {
                 let resolved_resource_root = app
                     .path()
@@ -395,6 +470,16 @@ pub fn run() {
             api.prevent_exit();
             let app_handle = app_handle.clone();
             std::thread::spawn(move || {
+                // R-F19.2 — give the frontend a budgeted window to flush any
+                // in-flight debounced roles save before we tear down the
+                // sidecar. We emit `before-quit`, then poll a shared
+                // `QuitFlushState::ready` flag set by the `confirm_quit_ready`
+                // tauri command (FE calls it after `flushRolesSave()`
+                // resolves). If the flag isn't set within `QUIT_FLUSH_BUDGET`
+                // (e.g. the FE is gone or hung), we proceed anyway so the user
+                // is never trapped — and log a warning so silent loss is
+                // visible per rules/logging.md.
+                wait_for_quit_flush(&app_handle, QUIT_FLUSH_BUDGET);
                 if let Some(state) = app_handle.try_state::<SidecarAppState>() {
                     if let Some(manager) =
                         state.manager.lock().expect("sidecar state poisoned").take()
@@ -406,6 +491,48 @@ pub fn run() {
             });
         }
     });
+}
+
+/// R-F19.2 helper — emit `before-quit` to all windows and block (up to
+/// `budget`) waiting for the frontend to ack via `confirm_quit_ready`.
+/// Returns true if the FE acked in time, false on timeout.
+fn wait_for_quit_flush<R: tauri::Runtime>(app: &tauri::AppHandle<R>, budget: Duration) -> bool {
+    let Some(state) = app.try_state::<QuitFlushState>() else {
+        // Quit-flush state was never managed (e.g. setup failed); skip the
+        // handshake instead of blocking forever.
+        log::warn!("phase=quit action=flush-skip reason=quit_flush_state_missing");
+        return false;
+    };
+    // Reset before emitting so a stale ack from a previous session can't be
+    // mistaken for the current cycle's ack.
+    state.ready.store(false, Ordering::SeqCst);
+    if let Err(error) = app.emit("before-quit", ()) {
+        log::warn!("phase=quit action=emit-before-quit-failed reason={error}");
+        return false;
+    }
+    log::info!(
+        "phase=quit action=emit-before-quit budget_ms={}",
+        budget.as_millis()
+    );
+
+    let deadline = Instant::now() + budget;
+    while Instant::now() < deadline {
+        if state.ready.load(Ordering::SeqCst) {
+            log::info!(
+                "phase=quit action=flush-acked waited_ms={}",
+                budget
+                    .saturating_sub(deadline.saturating_duration_since(Instant::now()))
+                    .as_millis()
+            );
+            return true;
+        }
+        std::thread::sleep(QUIT_FLUSH_POLL_INTERVAL);
+    }
+    log::warn!(
+        "phase=quit action=flush-timeout budget_ms={} note=proceeding_without_ack",
+        budget.as_millis()
+    );
+    false
 }
 
 #[cfg(test)]
@@ -456,6 +583,28 @@ mod tests {
             source.contains("native_fs::publish_package_writer"),
             "publish package writer must be registered in the Tauri invoke handler"
         );
+    }
+
+    /// R-F19.2 — make sure the `confirm_quit_ready` command stays wired into
+    /// the invoke handler (it's the frontend's only way to ack the
+    /// `before-quit` flush handshake before sidecar shutdown).
+    #[test]
+    fn invoke_handler_registers_confirm_quit_ready_command() {
+        let source = include_str!("lib.rs");
+        assert!(
+            source.contains("confirm_quit_ready,"),
+            "confirm_quit_ready must be registered in the Tauri invoke handler"
+        );
+    }
+
+    /// R-F19.2 — quit-flush handshake budget is small enough to never trap a
+    /// user (well under 5s) but large enough to comfortably cover the 300ms
+    /// debounce + a local loopback PUT round-trip.
+    #[test]
+    fn quit_flush_budget_is_bounded() {
+        assert!(QUIT_FLUSH_BUDGET >= Duration::from_millis(500));
+        assert!(QUIT_FLUSH_BUDGET <= Duration::from_millis(5000));
+        assert!(QUIT_FLUSH_POLL_INTERVAL < QUIT_FLUSH_BUDGET);
     }
 
     #[test]

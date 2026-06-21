@@ -206,9 +206,9 @@
           "iface_ref": "iface-2"
         }
       ],
-      "fe_status": "偏差",
+      "fe_status": "符合",
       "be_status": "n/a",
-      "gap_brief": "现状只有新建 + 右键断连两操作;重连 / 拖拽断线缺(React Flow 的 onReconnect / onReconnectEnd / edgesReconnectable 完全没接)。纯前端改动,serialize 契约不变。",
+      "gap_brief": "符合设计(连线四操作全闭环)。2026-06-20: 代码已落地(design-audit vs code 核实),状态回填。重连/拖拽断线已接 React Flow:GraphCanvas.tsx:744-747 开 edgesReconnectable={!compact} 并挂 onReconnectStart/onReconnect/onReconnectEnd;onReconnect(GraphCanvas.tsx:635-670)走 planEdgeReconnect(canvas-authoring.ts:155,把端点改接算成旧目标 depends_on 移除+新目标追加的纯函数)+ 原子 onReconnectConnection;onReconnectEnd(GraphCanvas.tsx:679-701)实现拖端点离 handle 松手即断;Workspace.handleReconnectConnection(:665-687)把断连+连接折成一次 serialize(reconnectPhaseRefs,canvas-authoring.ts:211)。四操作共用同一套 depends_on 写回 + serialize,后端契约不变。canvas-authoring.test.ts 通过(33 绿测之一)。",
       "impl_ref": "fn-8"
     },
     {
@@ -236,9 +236,9 @@
       "n": 10,
       "cap": "data-gap-viz",
       "module": "拓扑与冲突校验",
-      "func": "设计:数据断层可视化(REQ-2)——用「改黑板字段勾选」表达上下游字段供需,删掉旧的『节点类型相等就画红叉』那套;上游没产出下游要的字段,要在画布上看得见。",
-      "action": "用户在节点的 io 字段勾选/连线时(REQ-2 黑板字段勾选 UI)。",
-      "fe_design": "目标设计:把字段级供需做成黑板字段勾选(io.inputs 字段从上游 io.outputs 勾选取得),删掉旧的『按节点类型相等画红叉』。现状前端只有『重复覆盖』冲突检测(见 #11),没有『上游缺供给』的断层可视化;真正的字段供需/类型断层校验目前在引擎编译期(写回后 compileSkillById 回吐 CompileError 按节点叠到画布,但那是 compile 报错呈现、归 N3,不是画布的字段勾选 UI)。",
+      "func": "设计:数据断层可视化(REQ-2)——画布节点只显示『缺字段』的 compile 冲突报错(上一个黑板节点里没有 input 需要的字段),字段选取在 io panel 从黑板字段选、与画布无关;删掉旧的『勾选 UI / 按节点类型相等画红叉』那套。",
+      "action": "用户在 io panel 选输入字段(从黑板/state 字段选,不是从某个上游节点的 io.outputs 选);画布节点在某 input 字段无黑板供给时显示 compile 冲突报错。",
+      "fe_design": "PM 决定 2026-06-20 的目标设计:画布节点的数据断层职责只有一个——把后端 field_supply 里 supplied=false 的输入字段(上一个黑板节点/graph 输入都没供给)投影成节点的 compile 冲突报错,复用画布已有的 node 错误徽标+tooltip(走 compileErrors 通道,与 compile/lint 同一条通道、同一处 merge)。字段选取不在画布上:它在 io panel,输入字段从黑板/state 字段选(io-target/InputPanel 已实现:节点自身 io.inputs 字段 + field_supply 标记供给来源),不是从某个上游节点的 io.outputs 勾选。删掉旧的『勾选 UI / 按节点类型相等画红叉』模型。落地:node-compile-errors.ts 新增纯函数 dataGapErrorsByNode(从 graph_topology[].field_supply 收集 supplied=false 字段→生成 file-less/line-less 的 CompileError,message='Input field X has no upstream supply (missing from blackboard)'),在 Workspace 的 compileErrorsByNodeId 里 mergeNodeErrors 折进节点错误通道,SkillNode 经现有 compileErrors 通道把它当冲突报错渲染。",
       "fe_modules": [],
       "be_contract": [
         {
@@ -248,9 +248,9 @@
           "iface_ref": "iface-1"
         }
       ],
-      "fe_status": "偏差",
-      "be_status": "契约问题",
-      "gap_brief": "现状前端无『供给断层』的黑板字段勾选可视化,只有重复覆盖检测(#11);供需校验靠引擎 compile 回吐(归 N3 呈现)。⚠️ BLOCKER:REQ-2/FROZEN-4『黑板字段勾选』的交互模型(勾选 UI、断层怎么在画布呈现、后端怎么暴露字段供需结构)spec 自述『待统一出 FROZEN 新版本』(02_authoring.md),尚未 pin —— 落地前不实现,等 FROZEN 定下交互模型与后端供需契约。",
+      "fe_status": "符合",
+      "be_status": "符合",
+      "gap_brief": "PM 决定 2026-06-20: 画布只显缺字段 compile 冲突报错;字段选取在 io panel 从黑板字段选,与画布无关。已落地:后端 compute_field_supply(canvas_data_gap.py)按 phase 算出每个输入字段的供给(supplied=false=断层),随 graph_topology[].field_supply 返回;前端 dataGapErrorsByNode 把 supplied=false 字段投成节点 compile 冲突报错,merge 进画布节点错误通道(compile+lint+data-gap 同显),SkillNode 渲染。字段选取在 io panel 从黑板/state 字段选(io-target/InputPanel),不从上游节点 io.outputs 勾选。旧『勾选 UI / 按类型相等画红叉』模型已删除。不再是 BLOCKER。测试:node-data-gap.test.ts(纯函数 supplied=false→节点错误 / supplied=true→无)+ SkillNode.data-gap.test.tsx(数据断层冲突报错在 tooltip 渲染),先 RED 后 GREEN。",
       "impl_ref": "fn-10"
     },
     {
@@ -350,9 +350,9 @@
           "iface_ref": "iface-io-1"
         }
       ],
-      "fe_status": "偏差",
+      "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "现状多级 drill focus + breadcrumb + child topology 预览已实现(非仅就地聚焦);缺口是下钻后的子图编辑写回闭环(child root 身份、保存走子图自己的 GRAPH.md、compile scope=compile 哪个 skill_id、错误回滚)——这是 Studio 前端 UX,不是引擎契约。⚠️ 引擎 io 切片契约已 pin(§2.10/§2.4 不要求 1:1);子图内 io 字段编辑的子集另受 #30 的 loader 1:1 fatal 阻塞(后端待删)。",
+      "gap_brief": "2026-06-20 edit-writeback shipped:下钻后『进入子图就地编辑并写回』闭环已落地(前端,无后端改动)。(1) 就地编辑不切工程——删除了 GraphCanvas.tsx onNodeDoubleClick 里的 pushNavSkill 逃逸口(原来双击叶子节点会把整个 Workspace 切到子图『作为独立 skill』),改为按子图自己的 skillId 就地打开子文件;嵌套 subgraph 双击仍 drillInto 继续深钻。(2) child-root 身份——drilledChildIdentity(由 childGraph.path 经 resolveWorkspaceIdentity 解析出子图 skillId+workspaceRoot 的 memo);下钻后用 buildNodes(childSkillId, childDetail, …)(Option A:拉子图完整 SkillDetail 复用根图编辑接线)渲染,节点 data.skillId=子图、filePath 为子图相对路径。(3) 保存目标=子图自己的 GRAPH.md——四个 Workspace 保存 handler(handlePhaseFileSave/handlePersistConnection/handleDisconnectConnection/handleReconnectConnection)+ doWriteSkillFile 增可选 child target,serialize/write/compile 全打子图 skillId+workspaceRoot,父分支字节级不变(无根图回归)。(4) 错误回滚——子图写失败 refetch 子图(refetchChildGraph),不动父 mutateSkillDetail。(5) 只读阻断(PM 决策)——子图若解析到只读 bundled/public skill(不在可编辑 workspace 下),isDrilledChildEditable 前置判定(路径谓词:在父 skill 树或可编辑 workspace skills 目录下=可编,否则只读;父根为空时 Tauri 默认只读、浏览器靠 update_skill_file 403 兜底),撤销编辑能力 + 提示『fork to edit』,绝不自动 fork、绝不静默改 bundle。测试:drill-edit.test.ts(child 身份派生 / resolveSaveTarget 路由 / isDrilledChildEditable 只读谓词 / isReadOnlySkillError)+ build-nodes.test.ts(下钻节点 data.skillId/filePath、agentSteps 接线)+ e2e tests/e2e/subgraph-drill-edit.spec.ts(下钻就地编辑写子图不写父 / 强制 409 回滚)。引擎 io 切片契约 §2.10/§2.4 已 pin(不要求父子 1:1),纯前端 UX。",
       "impl_ref": "fn-14"
     },
     {
@@ -371,9 +371,9 @@
           "iface_ref": "iface-4"
         }
       ],
-      "fe_status": "未实施",
+      "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "现状 AgentStepsInlineView 组件 + agent-steps body 增删改序纯函数已存在但未接线(孤儿);差距是把它挂到画布内联编辑入口,保存复用现成 phase 文件保存路径(native-fs / 浏览器 fallback),无需新增后端端点。",
+      "gap_brief": "符合设计(L3 步骤画布内联增删改序已接线落盘)。2026-06-20: 代码已落地(design-audit vs code 核实),状态回填。AgentStepsInline 不再是孤儿:SkillNode.tsx:107 canEditSteps 门控,:255-257 渲染 <AgentStepsInline body=data.agentBody onSave=data.onStepsSave>;build-nodes.ts:272-278 给 AGENT 节点传 agentBody/onToggleSteps/onStepsSave;GraphCanvas.tsx:319-346 toggleSteps + handleStepsSave(带 expectedHash 调 onPhaseFileSave),:419-420 接好(仅 compact 模式禁用)。保存复用现成 phase 文件保存路径:Workspace onPhaseFileSave={handlePhaseFileSave}(:1321/:1384)→ handlePhaseFileSave(:565)→ doWriteSkillFile(:577,native-fs / 浏览器 fallback),无新增后端端点。增删改序纯函数 parseAgentSteps/addAgentStep/removeAgentStep/reorderAgentSteps/updateAgentStep(AgentStepsInline.tsx:136-159)。测试绿:AgentStepsInline.test.tsx + agent-steps.test.ts + SkillNode.steps.test.tsx(33 通过)。",
       "impl_ref": "fn-15"
     }
   ]

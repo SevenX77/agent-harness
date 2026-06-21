@@ -17,9 +17,9 @@
       "be_contract": [
         {"endpoint": "POST /api/skills/{skill_id}/graph/serialize", "purpose": "头部表单改完后 serialize 写回 GRAPH.md(只换 phases 块 + body topology、保留其它字节);头部其它字段经裸编辑/未来表单直写。", "mechanism_ref": "mech_graph", "iface_ref": "iface-2"}
       ],
-      "fe_status": "偏差",
+      "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "现状头部靠双击裸编辑 GRAPH.md(无结构化表单 M1);目标加 name/schema_version/llm_role/description/phases 结构化表单(无 type 字段)。后端 serialize 契约已就绪,差前端表单。",
+      "gap_brief": "符合设计。2026-06-20:代码已落地(design-audit vs code 核实),状态回填。GRAPH.md 头部结构化表单已完整落地:MacroContractForm 组件(macroform/MacroContractForm.tsx:33-149,渲染 name/schema_version/llm_role/description 四个受控 scalar 字段 + phases 增删 Badge 列表,无 type/mode 入口,FROZEN 合规);graph-header.ts(:80-93 graphHeaderToForm 解析 GRAPH.md frontmatter 进表单,:105-129 applyGraphHeaderForm 写回四字段同时保留 phases/io/body、绝不产出 type);MacroContractDrawer.tsx(:59-100 接两条保存路径——scalar 走 writeFile+graphHash、phases 走 serializeSkillGraph)。从画布可达:GraphCanvas.tsx:867-878 'Macro contract' 按钮开 Sheet 挂载 Drawer。后端 serialize 契约 live(POST /{skill_id}/graph/serialize,skills.py:443)。测试断言四字段 + phases 列表、无 type/mode、round-trip 保留 io/phases/body。",
       "impl_ref": "fn-22"
     },
     {

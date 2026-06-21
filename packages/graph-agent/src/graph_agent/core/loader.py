@@ -644,13 +644,10 @@ def _validate_subgraph_io_contracts(
 def _resolve_subgraph_path_root(skill_root: Path, source_path: Path, value: str) -> Path:
     root_resolved = skill_root.resolve()
     candidate = Path(value)
-    if not candidate.is_absolute():
-        _fatal(
-            source_path,
-            _frontmatter_key_line(source_path, "path"),
-            "[F-v3-subgraph-target-skill-invalid] subgraph path must be absolute",
-        )
-    resolved = candidate.resolve()
+    if candidate.is_absolute():
+        resolved = candidate.resolve()
+    else:
+        resolved = (root_resolved / candidate).resolve()
     try:
         resolved.relative_to(root_resolved)
     except ValueError as exc:
@@ -1578,8 +1575,8 @@ def _build_phase_document(
                     path,
                     _frontmatter_key_line(path, "target_skill"),
                     "[F-v3-subgraph-target-skill-invalid] "
-                    f"SUBGRAPH.md target_skill={target_skill!r} is deprecated; migrate to absolute path: "
-                    "path: /absolute/path/to/child",
+                    f"SUBGRAPH.md target_skill={target_skill!r} is deprecated; migrate to a path "
+                    "relative to the skill root (e.g. path: subskills/<child>) or an absolute path",
                 )
             ast = SubgraphNodeAST.model_validate(data)
         elif is_agent:

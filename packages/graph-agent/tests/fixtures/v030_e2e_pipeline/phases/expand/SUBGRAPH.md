@@ -1,5 +1,5 @@
 ---
-path: /Users/sevenx/Documents/coding/agent-harness/.worktrees/studio-mvp1-mainbased/packages/graph-agent/tests/fixtures/v030_e2e_pipeline/registry/expander
+path: registry/expander
 allow_sequential_overwrite: [report]
 io:
   inputs:

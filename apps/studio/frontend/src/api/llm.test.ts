@@ -180,6 +180,18 @@ describe('API Keys v4 registry adapter', () => {
         message: 'Catalog synced successfully with remote repository.',
         route_candidates_count: 3,
         evidence_records_count: 5,
+        new_records_count: 2,
+        catalog_source: {
+          enabled: true,
+          source_url: 'https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_import_drafts.json',
+          fetched_at: '2026-06-20T23:00:00+00:00',
+          etag: 'W/test',
+          cache: false,
+          route_candidates_count: 3,
+          evidence_records_count: 5,
+          new_records_count: 2,
+          last_error: null,
+        },
       }
     })
 
@@ -188,6 +200,18 @@ describe('API Keys v4 registry adapter', () => {
       message: 'Catalog synced successfully with remote repository.',
       route_candidates_count: 3,
       evidence_records_count: 5,
+      new_records_count: 2,
+      catalog_source: {
+        enabled: true,
+        source_url: 'https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_import_drafts.json',
+        fetched_at: '2026-06-20T23:00:00+00:00',
+        etag: 'W/test',
+        cache: false,
+        route_candidates_count: 3,
+        evidence_records_count: 5,
+        new_records_count: 2,
+        last_error: null,
+      },
     })
 
     expect(seen).toEqual(['post /llm/catalog/sync'])

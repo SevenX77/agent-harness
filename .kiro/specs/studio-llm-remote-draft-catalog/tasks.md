@@ -106,15 +106,15 @@ date: 2026-06-20
   - Acceptance: service tests prove missing `llm_import_drafts.json` is created through Contents API with a valid seed.
   - Acceptance: router test returns raw URL and does not expose the token.
 
-- [ ] 3.1 Tighten `sync_remote_evidence_library`.
+- [x] 3.1 Tighten `sync_remote_evidence_library`.
   - Public catalog reads use the raw GitHub URL and must not require `STUDIO_GITHUB_TOKEN`.
   - Treat HTTP 404 as sync error in API response.
   - Do not treat stale local cache as remote truth.
   - Record source metadata: source URL, fetched time, ETag/commit if available.
   - Acceptance: test 404 returns clear remote catalog failure instead of silent success.
-  - Current status: public raw read and 404 error behavior are implemented; source metadata is still missing.
+  - Current status: public raw read, 404 error behavior, and sync source metadata are implemented.
 
-- [ ] 3.2 Make `/api/llm/catalog/sync` return source metadata.
+- [x] 3.2 Make `/api/llm/catalog/sync` return source metadata.
   - Include counts, source URL, cache flag, and new record count.
   - Acceptance: router test asserts metadata fields.
 
@@ -211,7 +211,7 @@ date: 2026-06-20
   - Add `ui_state` to compact model info or map compact results through backend projection before frontend render.
   - Acceptance: frontend no longer needs `status=probe-verified` to show blue.
 
-- [ ] 6.2.1 Add catalog source metadata to registry response.
+- [x] 6.2.1 Add catalog source metadata to registry response.
   - Include enabled/source URL/fetched_at/counts/last_error.
   - Acceptance: manual/API tests can tell whether Settings read remote catalog or only local cache.
 

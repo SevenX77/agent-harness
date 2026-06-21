@@ -1,0 +1,61 @@
+{
+  "roundtrip": {
+    "summary": "是『同一棵可执行树』，没有独立的双向转换层。画布上的节点/连线本质就是 GRAPH.md 里 phases 列表 + <phase depends_on=...> 标签的可视化投影；改画布 = 改这两段源码。写回方向（canvas→源码）由后端引擎序列化器 serialize_graph_topology（把 canvas 拓扑快照渲染成 GRAPH.md 文本的函数）完成，关键在于它走 _preserve_graph_markdown_topology（只外科式替换原 GRAPH.md 里的 phases frontmatter 块和 <phase> body 标签、其它字节原样保留的函数）——不是把内存对象整体重新 dump 成全新文件。读回方向（源码→canvas）由后端 SkillLoader.compile_skill（把磁盘 GRAPH.md+phase 文件编译成 manifest 的引擎函数）+ _graph_topology（从编译产物抽出每个 phase 的 mode/depends_on/path 拓扑行的函数）产出 SkillDetail，前端 buildNodes（把 SkillDetail 的 manifest.phases + graph_topology + files 拼成 React Flow 节点的函数）+ buildEdges 渲染。两端共享同一份 GRAPH.md 语法，没有中间 JSON 图模型在两个方向各转一次。",
+    "evidence": [
+      ["serialize_graph_topology 直接把 phase.id 写进 frontmatter phases 列表、把 depends_on 写进 <phase depends_on=\"...\"> body 标签，无 depends_on 的 phase 渲染为 depends_on=\"input\"、叶子 phase 加 output 标记", "packages/graph-agent/src/graph_agent/core/graph_serializer.py:35-76"],
+      ["_preserve_graph_markdown_topology 只替换 frontmatter 的 phases 块(_replace_or_append_frontmatter_phases)和 body 的 <phase> 标签(_replace_body_phase_tags)，其余 frontmatter/正文原样保留——证明写回是改源码本身而非重建", "packages/graph-agent/src/graph_agent/core/graph_serializer.py:104-121"],
+      ["Studio 后端 graph_roundtrip.serialize_graph_topology 只是薄转发到引擎 SDK 的同名函数(『Studio 永不直接 import 引擎序列化器』的边界层)", "apps/studio/backend/app/services/graph_roundtrip.py:19-41"],
+      ["读回侧：_detail_from_manifest 用 _graph_topology(compiled, skill_dir) 从编译产物抽拓扑行喂给 SkillDetail.graph_topology", "apps/studio/backend/app/services/skills.py:1011-1019"],
+      ["前端 buildNodes 从 detail.manifest.phases + detail.graph_topology(每行带 mode/depends_on/path) 还原节点，depends_on 直接来自 topology 行", "apps/studio/frontend/src/components/GraphCanvas/build-nodes.ts:166-210"],
+      ["serialize 端只动拓扑、刻意不重编译整个 skill：直接从当前 GRAPH.md frontmatter 读 name/description/io，避免 canvas 已写新 phase 目录但 frontmatter 未更新时的瞬时不一致 FATAL", "apps/studio/backend/app/services/skills.py:1394-1431"]
+    ]
+  },
+  "roundtrip_flow": {
+    "headers": ["链路", "步骤", "关键函数 file:line"],
+    "rows": [
+      [
+        "canvas→源码",
+        "用户拖连线 onConnect 触发 → handlePersistConnection 用 connectPhaseRefs 在内存里给 target.depends_on 追加 source → 读当前 GRAPH.md 算 graphHash → 调 serializeSkillGraph(POST /graph/serialize) 把 phases 数组+expected_hash 发后端 → 后端 serialize_skill_graph_markdown 比对 hash、_validate_canvas_topology 查环/孤儿、serialize_graph_topology 渲染新 GRAPH.md 文本 → 前端 doWriteSkillFile('GRAPH.md', markdown, graphHash) 落盘 → compileSkillById 重编译",
+        "onConnect: apps/studio/frontend/src/components/GraphCanvas/GraphCanvas.tsx:416-458; handlePersistConnection: apps/studio/frontend/src/components/studio/Workspace.tsx:342-361; connectPhaseRefs: apps/studio/frontend/src/components/GraphCanvas/canvas-authoring.ts:68-98; serialize_skill_graph_markdown: apps/studio/backend/app/services/skills.py:1381-1446; serialize_graph_topology(engine): packages/graph-agent/src/graph_agent/core/graph_serializer.py:35-76"
+      ],
+      [
+        "源码→canvas",
+        "getSkillDetail 拉 SkillDetail(后端 SkillLoader.compile_skill 编译 GRAPH.md+phase 文件 → _detail_from_manifest 用 _graph_topology 抽出每 phase 的 mode/depends_on/path、并把原始 files 文本一并带回) → 前端 buildNodes 从 manifest.phases+graph_topology+files 拼节点(phase 文件类型决定 LOGIC/SKILL/SUBGRAPH 节点种类) → buildEdges 由 dependsOn 连边 → 自动布局渲染到 React Flow",
+        "_detail_from_manifest: apps/studio/backend/app/services/skills.py:1011-1019; _graph_topology(parse): apps/studio/backend/app/services/skills.py:1069-1099; buildNodes: apps/studio/frontend/src/components/GraphCanvas/build-nodes.ts:166-226; phaseKindFile: apps/studio/frontend/src/components/GraphCanvas/build-nodes.ts:8-12; rawNodes useMemo: apps/studio/frontend/src/components/GraphCanvas/GraphCanvas.tsx:292-300"
+      ]
+    ]
+  },
+  "nativefs": {
+    "summary": "走 Rust native-fs。N2 的全部写盘（GRAPH.md 拓扑、phase 文件 SKILL/LOGIC/SUBGRAPH.md 的 frontmatter、L3 正文 body）在桌面(Tauri)运行时都最终落到 Rust 命令 write_workspace_file（Rust 端做 expected-hash 乐观锁 + 临时文件+rename 原子写的唯一写者命令）。前端有两条入口但都汇聚到 Rust：(a) 画布/属性面板走 doWriteSkillFile，桌面态直接调 writeWorkspaceFile→invoke('write_workspace_file')；(b) Monaco 正文编辑器走 writeSkillFile，而 writeSkillFile 自身在 isTauriRuntime() 为真时也转调 writeWorkspaceFile（同一个 Rust 命令），只有非桌面(纯浏览器)态才退化成 HTTP POST 给 Python 后端。这正好和 N0 Settings 对比：Settings 的 PUT /settings 永远只走 Python 后端 _write_app_settings_sync（Python 进程内用 tempfile.mkstemp+os.replace 自己原子写 app_settings.json 的函数），从不经过 Rust native-fs。所以 D12『Rust 唯一写者』在 N2 authoring 写路径上成立，而 N0 配置写是 Python 直接写、不进 Rust。",
+    "evidence": [
+      ["doWriteSkillFile 在 isTauriRuntime() 时调 writeWorkspaceFile(走 Rust)，否则 writeSkillFile", "apps/studio/frontend/src/components/studio/Workspace.tsx:249-261"],
+      ["writeWorkspaceFile 前端封装 invoke('write_workspace_file', payload) 进 Rust", "apps/studio/frontend/src/lib/tauri.ts:132-157"],
+      ["Rust #[tauri::command] write_workspace_file → write_workspace_file_impl(唯一写者，注释明确 D12『单一写者拥有本地文件系统，禁止 Python+Rust 双写』)", "apps/studio/tauri/src/native_fs.rs:1-8, 1233-1253, 258-359"],
+      ["L3 正文：LazyMonacoPanel 保存调 writeSkillFile(saveTarget, filePath, content, expectedHash)", "apps/studio/frontend/src/components/studio/LazyMonacoPanel.tsx:80-85"],
+      ["writeSkillFile 自身在 isTauriRuntime() 时也转调 writeWorkspaceFile(同一 Rust 命令)，仅非桌面态才 HTTP POST /skills/{id}/files/{path} 给 Python", "apps/studio/frontend/src/api/client.ts:500-549"],
+      ["对比 N0：PUT /settings 调 metadata.write_app_settings", "apps/studio/backend/app/routers/settings.py:36-43"],
+      ["N0 Settings 实际落盘 _write_app_settings_sync 在 Python 进程内 tempfile.mkstemp+os.replace 写 app_settings.json，全程不经 Rust native-fs", "apps/studio/backend/app/core/adapters/metadata_local.py:221-247"]
+    ]
+  },
+  "hash_guard": {
+    "summary": "带 hash/expectedHash，三层防并发覆盖。连线写回前：前端先对当前内存里的 GRAPH.md 文本算 sha256 得 graphHash，作为 expected_hash 既传给 serialize 接口、又传给落盘写。后端 serialize_skill_graph_markdown 会先比对磁盘现 GRAPH.md 的 hash≠expected 就抛 CanvasConflictError(409，并回传 current_hash/current_markdown_content/current_phase_count 供前端展示)。真正落盘的 Rust write_workspace_file_impl 再做一次：读目标现内容算 hash，≠expected 就返回 HashConflict(带 current_hash/current_content)，错误形状和前端 api/client.ts 解析的一致。因此『画布拿旧版覆盖磁盘新版』在 serialize 与 write 两道都会被 409 拦下，而不是静默覆盖。phase 文件保存同理(PropertiesPanel/sequential-overwrite 都把 sha256Hex(当前内容) 当 expectedHash 传)。",
+    "evidence": [
+      ["连线写回处：handlePersistConnection 对当前 GRAPH.md 算 graphHash 后既传 serializeSkillGraph 又传 doWriteSkillFile 当 expected_hash", "apps/studio/frontend/src/components/studio/Workspace.tsx:350-354"],
+      ["GraphCanvas 内 sequential-overwrite 白名单写回也先 sha256Hex(currentContent) 作 expectedHash 传 onPhaseFileSave", "apps/studio/frontend/src/components/GraphCanvas/GraphCanvas.tsx:183-194"],
+      ["后端 serialize 阶段：expected_hash≠当前 GRAPH.md hash 抛 CanvasConflictError(含 current_hash/current_markdown_content/current_phase_count)", "apps/studio/backend/app/services/skills.py:1393-1409"],
+      ["路由把 CanvasConflictError 映射成 409 snapshot_conflict 响应回前端", "apps/studio/backend/app/routers/skills.py:404-413"],
+      ["Rust 落盘再校验一次：读现内容 sha256≠expected → 返回 HashConflict{current_hash,current_content}，与 Python _graph_content_hash 字节兼容", "apps/studio/tauri/src/native_fs.rs:296-310, 85-97"],
+      ["Python 侧 update_skill_file 同样 expected_hash≠current_hash 抛 CanvasConflictError(非桌面态等价保护)", "apps/studio/backend/app/services/skills.py:416-435"]
+    ]
+  },
+  "roundtrip_safety": {
+    "summary": "保存 frontmatter 只改白名单字段、不破坏 body/未知键，由 phase-frontmatter.ts 的 applyPhaseFrontmatterForm+frontmatterFromForm 保证。applyPhaseFrontmatterForm 先 parsePhaseFrontmatter 把文件拆成『已解析 frontmatter 对象 + 原始 body 字符串』，frontmatterFromForm 以 next={...frontmatter}(原 frontmatter 整体浅拷贝、含 name/io/未知键全部保留) 为起点，按 node 种类(agent/logic/subgraph)只 set/delete 各自白名单键(agent: llm_role/tools/subagents；logic: actions/validator；subgraph: path/validator)，从不触碰 name、io、不属于本类型的键、任何未知键；空值用 delete 而非写 null，避免污染。body 原样拼回(只去开头多余换行)。GRAPH.md 拓扑保存同理：serialize_graph_topology 只重写 phases 列表与 <phase> 标签，io/description/正文其它部分由 _preserve_graph_markdown_topology 原样保留。所以一次保存只动该动的字段，round-trip 不丢数据。",
+    "evidence": [
+      ["frontmatterFromForm 以 next={...frontmatter} 起手保留所有原键，再按 kind 只 set 白名单字段(agent/logic/subgraph 各自分支)", "apps/studio/frontend/src/components/studio/panels/phase-frontmatter.ts:155-178"],
+      ["applyPhaseFrontmatterForm 文档化 round-trip 契约：name/io/非本类 llm_role/任何未知键都不碰；body 仅去前导换行后原样拼回", "apps/studio/frontend/src/components/studio/panels/phase-frontmatter.ts:93-125"],
+      ["setOptionalString/setBoolean/setOptionalList 空值走 delete(不写 null)，避免在 frontmatter 留下空字段", "apps/studio/frontend/src/components/studio/panels/phase-frontmatter.ts:211-238"],
+      ["PropertiesPanel.handleSave 调 applyPhaseFrontmatterForm 生成 next.markdown 再带 expectedHash=sha256Hex(fileContent) 保存，证明保存内容来自白名单合并而非整文件重写", "apps/studio/frontend/src/components/studio/panels/PropertiesPanel.tsx:175-196"],
+      ["GRAPH.md 拓扑写回同样靠 _preserve_graph_markdown_topology 只换 phases 块与 <phase> 标签、其它 frontmatter/正文字节保留", "packages/graph-agent/src/graph_agent/core/graph_serializer.py:104-121"]
+    ]
+  }
+}

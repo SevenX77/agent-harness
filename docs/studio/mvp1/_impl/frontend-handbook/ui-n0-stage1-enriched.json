@@ -1,0 +1,78 @@
+{
+  "stage": 1,
+  "region": "settings:general",
+  "atoms": [
+    {
+      "n": 10,
+      "cap": "studio-user-id",
+      "track": null,
+      "marker": "live",
+      "func": "让用户设置 Studio User ID(本地 Git 提交时用作 author name 的身份标识),决定产物提交署名。",
+      "action": "在 General tab 的 Studio User ID 文本框里直接输入/编辑。",
+      "fe": "受控 Input 绑 appSettings.userId,onChange 调 setUserId 写状态(GeneralTab.tsx:44-52);setUserId(useAppSettings.ts:138-140)经 updateSettings 把 {user_id} 合进整份 settings 并排入 debounce 保存队列。",
+      "be": "GET/PUT /api/settings 由 settings 路由处理:put_settings(持久化整份 AppSettings 到 app_settings.json,settings.py:35-54)把 user_id 写盘,经 MetadataStore.write_app_settings。",
+      "api": "PUT /api/settings(api.put('/settings'),client.ts:120-123)",
+      "gap": "符合设计(§7.1 #10 ✅;走 gateway Python 写 app_settings.json,符合写入归属铁律)"
+    },
+    {
+      "n": 11,
+      "cap": "gitea-host",
+      "track": null,
+      "marker": "live",
+      "func": "让用户填 Gitea Host(用户自建 Gitea 实例的 base URL),作为 publish/sync 的硬依赖——缺它 sync 会报错。",
+      "action": "在 General tab 的 Gitea Host 文本框里输入实例地址。",
+      "fe": "受控 Input 绑 appSettings.giteaHost,onChange 调 setGiteaHost(GeneralTab.tsx:99-107);setGiteaHost(useAppSettings.ts:142-144)经 updateSettings 把 {gitea_host} 合进 settings 并 debounce 保存。",
+      "be": "GET/PUT /api/settings → put_settings(settings.py:35-54)把 gitea_host 写进 app_settings.json;Pydantic AppSettings.gitea_host 字段 + strip_string_fields 校验器去空白(models/settings.py)。",
+      "api": "PUT /api/settings(client.ts:120-123)",
+      "gap": "符合设计(§7.1 #11 ✅;机制注:Gitea host 只是 publish 鉴权链一半,token/凭据走另一套 env-only STUDIO_* credentials,本字段只管 host URL)"
+    },
+    {
+      "n": 12,
+      "cap": "skills-dir-manual",
+      "track": null,
+      "marker": "live",
+      "func": "让用户手动输入默认 skills 目录的绝对路径(Studio 新建 skill 时落地的目录)。",
+      "action": "在 General tab 的 Default Skill Folder 文本框里手动键入路径。",
+      "fe": "受控 Input 绑 appSettings.defaultSkillsDirectory,onChange 调 setDefaultSkillsDirectory(GeneralTab.tsx:59-68);setDefaultSkillsDirectory(useAppSettings.ts:146-148)经 updateSettings 把 {default_skills_directory} 合进 settings 并 debounce 保存;空值时 withRuntimeDefaults(useAppSettings.ts:16-24)用 runtimeDefaultSkillsDirectory()(configDir/Skills)兜底。",
+      "be": "GET/PUT /api/settings → put_settings(settings.py:35-54)写 app_settings.json;后端 _with_effective_defaults(settings.py:20-24)对空目录补 config.DEFAULT_SKILLS_ROOT 兜底返回。",
+      "api": "PUT /api/settings(client.ts:120-123)",
+      "gap": "符合设计(§7.1 #12 ✅;手填路径走同一整体 PUT 通道)"
+    },
+    {
+      "n": 13,
+      "cap": "skills-dir-native-picker",
+      "track": null,
+      "marker": "live",
+      "func": "让用户点 Choose 弹出 OS 原生文件夹选择器挑默认 skills 目录,免去手敲路径——这是 settings 里唯一走 native/Rust 的本地操作。",
+      "action": "点 General tab 里 Default Skill Folder 旁的 Choose 按钮(FolderOpen 图标)。",
+      "fe": "Choose Button onClick 调 chooseDefaultSkillsDirectory(GeneralTab.tsx:69-81),它 await selectSkillDirectory(当前默认目录)拿到选中路径后调 setDefaultSkillsDirectory 回写并触发保存(GeneralTab.tsx:21-31);selectSkillDirectory(lib/tauri.ts:109-130)非 Tauri 运行时只 toast 'Desktop only' 返回 null。",
+      "be": "无(目录选择不经 HTTP 后端;选完拿到路径后才由 #15 的 PUT /api/settings 持久化)。",
+      "api": "native — Rust Tauri command select_directory(用 app.dialog().file().pick_folder() 弹原生文件夹选择器,picker_starting_directory 处理默认路径,lib.rs:107-127),前端经 @tauri-apps/api/core invoke('select_directory', {defaultPath}) 调用(tauri.ts:120-123)。",
+      "gap": "符合设计(§7.1 #13 ✅;web 模式仅 toast \"Desktop only\",与文档一致;确属 settings 唯一 native 操作)"
+    },
+    {
+      "n": 14,
+      "cap": "skills-dir-reset",
+      "track": null,
+      "marker": "live",
+      "func": "让用户一键 Reset 把默认 skills 目录还原为 runtime 默认(configDir/Skills)。",
+      "action": "点 General tab 里 Default Skill Folder 旁的 Reset 按钮(RotateCcw 图标)。",
+      "fe": "Reset Button onClick 调 setDefaultSkillsDirectory(fallbackDefaultSkillsDirectory)(GeneralTab.tsx:82-92),fallbackDefaultSkillsDirectory = effectiveDefaultSkillsDirectory(null)(GeneralTab.tsx:17)即 runtimeDefaultSkillsDirectory()(configDir/Skills,skill-paths.ts:8-15);runtime 默认取不到(空)时按钮 disabled(GeneralTab.tsx:87)。回写后照常 debounce 保存。",
+      "be": "GET/PUT /api/settings → put_settings(settings.py:35-54)把还原后的目录写 app_settings.json(还原本质是写一个新值,走同一 PUT)。",
+      "api": "PUT /api/settings(client.ts:120-123)",
+      "gap": "符合设计(§7.1 #14 ✅;runtime config 不可用时 Reset disabled,与文档一致)"
+    },
+    {
+      "n": 15,
+      "cap": "appsettings-save",
+      "track": null,
+      "marker": "live",
+      "func": "让用户任意字段即填即存:改完 300ms 后自动保存,顶部徽章实时显示 Pending/Saving/Saved/Failed 保存态,无独立 Save 按钮。",
+      "action": "改 General tab 任意字段(User ID / Gitea Host / Skills Dir)即触发,无需点保存;看 SectionTitle trailing 的 SaveStatusBadge。",
+      "fe": "每个 setter 经 updateSettings → queueSave(useAppSettings.ts:116-127):clearTimeout 重置计时器、setSaveStatus('pending')、300ms(APP_SETTINGS_SAVE_DELAY_MS,:14)后调 performSave;performSave(:88-113)setSaveStatus('saving')→await updateAppSettings→'saved'/失败'error'+toast;有 inflight 则缓冲 pendingSettingsRef 串行重发(:121-125, :106-111)。徽章 SaveStatusBadge 绑 appSettings.saveStatus 挂 SectionTitle trailing(GeneralTab.tsx:38)。",
+      "be": "PUT /api/settings → put_settings(settings.py:35-54)整份 AppSettings(user_id+gitea_host+default_skills_directory 三字段)一次性写 app_settings.json,无字段级 PATCH;写失败抛 SETTINGS_WRITE_FAILED(http 500,settings.py:44-53)。",
+      "api": "PUT /api/settings(client.ts:120-123;debounce 300ms 在前端 useAppSettings.ts)",
+      "gap": "符合设计(§7.1 #15 ✅ + 机制注:三字段整体 PUT 无字段级 PATCH,与文档一致;符合 FRONTEND_UI_SPEC 实时保存显徽章、不放独立 Save 按钮)"
+    }
+  ]
+}

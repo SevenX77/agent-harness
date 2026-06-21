@@ -1,0 +1,83 @@
+{
+  "page_id": "n3_drawer_design",
+  "title": "Compile drawer · 操作设计",
+  "region": "authoring:compile-drawer",
+  "intro": "本页是 N3 · Compile 节点里「点 Compile 主动看完整错误清单」这一 surface 的 MVP1 设计(应该怎样)。编辑期的就近标红(见 n3_lint_design)只给上下文,不给汇总;想看全部编译错误、复制去排查,用户主动点 Compile —— 弹出一个 drawer(抽屉式面板),不覆盖左侧栏,列出每条 file:line-field-message,可一键复制。spec 明令删除旧的底部浮层卡片。本页三件事:点 Compile 触发完整编译并收集错误、错误结构化进 drawer(可复制、不盖侧栏)、删除旧浮层。接口契约与错误形状见 n3_compile_contract;前端只触发 + 呈现,编译规则归 engine。",
+  "atoms": [
+    {
+      "n": 7,
+      "cap": "compile-trigger",
+      "track": "A6/A8",
+      "module": "Compile 触发",
+      "func": "设计:点动作条的 Compile 按钮,主动对当前 skill 跑一次完整编译;成功则把 build stage 推进到 compile-pass(解锁 Predict),失败则收集结构化错误供 drawer 展示。",
+      "action": "用户点动作条(画布下方居中的 Compile / Predict / Run 动作条)的 Compile 按钮(带 Hammer 锤子图标)。",
+      "fe_design": "点 Compile → handleCompile → compileSkillById(targetId):先把该 skill 的错误清空、build stage 置 compiling → 调 POST /api/skills/:id/compile → 成功(200 CompileSuccess)则 stage 置 compile-pass、错误清空;失败(422 CompileFailure)则把 result.errors(CompileError[])写进 Workspace 的 compileErrors[skillId]、stage 置 compile-fail;网络/异常也置 compile-fail。设计意图:Compile 是用户主动的「完整查错」动作,区别于编辑期的静默 lint;它既驱动门控(compile-pass 解锁 Predict),又为 drawer 备好结构化错误。",
+      "fe_modules": [
+        {
+          "name": "build stage 派生（deriveBuildStage / deriveButtons）",
+          "ref": "femod-n3-build-stage"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{id}/compile",
+          "purpose": "主动触发完整编译;返回 CompileSuccess 或 422 CompileFailure(含 CompileError[])。",
+          "mechanism_ref": "n3_compile_contract",
+          "iface_ref": "iface-compile"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计:handleCompile → compileSkillById 已实现,POST /compile、按 200/422 落 compile-pass/compile-fail、把 CompileError[] 写进 compileErrors 都到位。后端 /compile(compile_skill_endpoint → compile_skill_for_studio)已就绪。",
+      "impl_ref": "fn-7"
+    },
+    {
+      "n": 8,
+      "cap": "compile-drawer",
+      "track": "A6",
+      "module": "Compile drawer",
+      "func": "设计(能力模块 compile-lint COMPILE_LINT-1):点 Compile 编译出错时**自动弹出**一个底部 drawer,列出全部编译错误(file:line - field - message),可一键复制全部错误文本(方便喂 Copilot),且**只盖画布、不覆盖左右侧栏**(用户能边看错误边操作文件树/画布)。",
+      "action": "用户点 Compile 按钮(承接 #7);编译出错时 drawer 自动弹出。drawer 内点「复制」按钮复制全部错误。",
+      "fe_design": "点 Compile 触发编译(见 #7)→ 若有错误,自动打开底部 drawer 展示 compileErrors[skillId]:逐条渲染 file:line - field - message;顶部一个「复制」按钮,把全部错误拼成可读文本复制到剪贴板。设计意图:drawer 是「主动查看详细错误」的归处(编辑期就近标红只给上下文,汇总在这);只盖画布让用户对照着改;可复制方便贴去排查/问 copilot。⚠ 实现关键(能力模块决策 + 本地组件落差):目标是「画布作用域的 scoped bottom drawer」——可复用 Radix/Dialog 行为与本地设计 token,但**不能直接套本地 ui/sheet.tsx**:它的 SheetOverlay / SheetContent 是 `fixed inset-0` 全 viewport 语义,直接用会盖住左右侧栏、违背『只盖画布』。需要一个画布作用域变体(overlay/content 限定在画布容器内、不 fixed inset-0)。焦点陷阱、Escape、移动端高度作为实现细节进验收。",
+      "fe_modules": [
+        {
+          "name": "Compile drawer 组件（目标）",
+          "ref": "femod-n3-compile-drawer"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{id}/compile",
+          "purpose": "drawer 展示的就是 /compile 返回的 CompileFailure.errors(CompileError[]),含 file/line/field/message。",
+          "mechanism_ref": "n3_compile_contract",
+          "iface_ref": "iface-compile"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(2026-06-20:代码已落地,design-audit vs code 核实,状态回填)。CompileErrorDrawer.tsx:56-137 已实现画布作用域底部 drawer:逐条渲 file:line - field - message(120-133),顶部「Copy all errors」按钮 → buildCompileErrorClipboardText → navigator.clipboard.writeText(43-48,67-77,98-107)。画布作用域而非全 viewport:无 Portal、modal={false}、用 'absolute inset-x-0 bottom-0'(82-91),裁剪在画布容器内、不盖左右侧栏——避开了 ui/sheet.tsx 的 `fixed inset-0` 陷阱。Workspace.tsx:1404-1408 把 <CompileErrorDrawer> 渲染在画布 ResizablePanel 的 <div className=\"relative size-full\">(:1351)内;422 CompileFailure(:539)与网络异常(:560)时自动弹出(COMPILE_LINT-1)。CompileError DTO(api/types.ts:37-43)带 file/line/field/severity/message。10/10 测试通过(CompileErrorDrawer.test.tsx,含 'absolute inset-x-0 bottom-0, never fixed' 断言 95-107)。",
+      "impl_ref": "fn-8"
+    },
+    {
+      "n": 9,
+      "cap": "remove-floating-panel",
+      "track": "A7",
+      "module": "Compile drawer",
+      "func": "设计:删除旧的底部浮层错误卡片(CompileErrorPanel),它是 spec 明令废弃的旧呈现方式;错误一律改走 Compile drawer。",
+      "action": "无显式动作(实现层面删除旧浮层组件;用户侧表现为不再有遮挡画布的底部浮层)。",
+      "fe_design": "把 Workspace 里条件渲染 CompileErrorPanel 的分支与该组件本身移除,错误呈现统一收口到 Compile drawer(见 #8)。设计意图:同一份编译错误只有一个呈现入口(drawer),避免「浮层自动浮现 + drawer」两套并存导致用户困惑;且浮层遮画布、无复制,本就是要替换的旧形态。",
+      "fe_modules": [
+        {
+          "name": "Compile drawer 组件（目标）",
+          "ref": "femod-n3-compile-drawer"
+        }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计(2026-06-20:代码已落地,design-audit vs code 核实,状态回填)。旧浮层已彻底移除:全仓 grep 'CompileErrorPanel' 零命中——absolute-bottom 浮层卡片组件及其条件渲染分支都已删除。错误呈现唯一入口收口到 drawer(Workspace.tsx:1404),compileErrors 状态只驱动 drawer(compileDrawerOpen 在 Workspace.tsx:170,539,547,560;渲染 :1404-1407)。画布内仅剩的 'absolute bottom-*' 元素(Workspace.tsx:1418-1424)是无关的 CompareRunDialog,非编译错误浮层。纯前端,无后端。",
+      "impl_ref": "fn-9"
+    }
+  ],
+  "fe_defs": []
+}

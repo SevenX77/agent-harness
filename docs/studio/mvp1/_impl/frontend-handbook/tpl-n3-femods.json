@@ -1,0 +1,81 @@
+[
+  {
+    "name": "编译错误按节点分组（compileErrorsByNode）",
+    "kind": "纯逻辑工具",
+    "what": "一个无状态纯函数(compileErrorsByNode,node-compile-errors.ts):把一批扁平的编译错误(CompileError[])按所属 phase(画布上一个节点)分组成 Record<节点名, 错误[]>,供 canvas 节点投影逐节点取自己的错误。",
+    "where": "components/studio/node-compile-errors.ts 的 compileErrorsByNode;被 Workspace.tsx 经 useMemo 调用,结果以 compileErrorsByNodeId 透传给 GraphCanvas/build-nodes.ts 的 buildNodes,再灌进每个节点的 data.compileErrors。",
+    "duties": [
+      "用正则从每条错误的 file 路径里抠出 phases/<id>/ 的节点名,按它归组(支持大写/数字开头的节点名)。",
+      "无 file、或 GRAPH.md 级(不属任何单节点)的错误不归到任何节点(图级错误另行处理)。",
+      "对 null/空输入返回空分组(防御)。"
+    ],
+    "used_by": "canvas-node-projection(#4,把错误分到节点);目标上 Compile drawer 也可复用它做按节点分组展示。",
+    "boundary": "做:把扁平错误按节点名分组。不做:不渲染、不判 severity、不解析 field/line(只按 file 路径分组)。",
+    "reuse_note": "N3 节点内复用:canvas 投影现用、drawer 可复用。已有单测 node-compile-errors.test.ts 覆盖分组/大小写/null。",
+    "api": "无 —— 纯函数,入参错误数组,出参分组对象。"
+  },
+  {
+    "name": "build stage 派生（deriveBuildStage / deriveButtons）",
+    "kind": "业务逻辑",
+    "what": "一组驱动动作条门控的派生逻辑:deriveBuildStage(Workspace 里据 compileStages / lint 状态算出当前 build stage 的函数)+ deriveButtons(center-action-bar 里据 stage 算三按钮 highlight/disabled 的纯函数)+ SkillBuildStage(9 态枚举)。",
+    "where": "components/studio/Workspace.tsx 的 deriveBuildStage(持 compileStages 状态、读 readLintStatus 兜底);components/studio/center-action-bar.tsx 的 SkillBuildStage 类型 + deriveButtons 函数。",
+    "duties": [
+      "deriveBuildStage:优先取显式 compileStages[id],否则据 lint 状态兜底(checking→compiling/failed→compile-fail/passed→compile-pass/无→idle)。",
+      "deriveButtons:据 9 态算 Compile/Predict/Run 的 highlight(主色实心)与 disabled(置灰),实现逐级解锁。",
+      "SkillBuildStage:idle/compiling/compile-fail/compile-pass/predicting/predict-fail/predict-pass/running/run-fail 9 态枚举。"
+    ],
+    "used_by": "build-stage-buttons(#A2a)、stage-gating(#A8)、lint-drives-stage(#A2b)、lock-reason-hint(目标补原因文案)、predict-pass-unlock(#A9);Compile 触发(drawer 页 #compile-trigger)也驱动它。",
+    "boundary": "做:据三端点结果派生 stage、据 stage 派生按钮态。不做:不发请求(请求在各 handle* 里)、不持后端真相。",
+    "reuse_note": "N3 节点内复用:门控页全部原子 + drawer 页的 Compile 触发都依赖它。",
+    "api": "无 —— 纯派生逻辑;stage 推进由 handleCompile/handlePredict/handleRun 设置。",
+    "design_note": "目标:lock-reason-hint 在 deriveButtons 的置灰分支上补一句原因(按 stage 给 Predict/Run 锁着的理由),门控链逻辑不动、只加文案。"
+  },
+  {
+    "name": "实时 lint hook（useDebouncedLint）",
+    "kind": "现存 hook（未接线）",
+    "what": "一个 React hook(useDebouncedLint,hooks/useDebouncedLint.ts):对编辑内容防抖 800ms 调 POST /lint 查错,把 lint 状态(idle/checking/passed/failed)写 sessionStorage + 派自定义事件广播,供门控读取。",
+    "where": "hooks/useDebouncedLint.ts:useDebouncedLint(hook 本体)、publishLintStatus(写 sessionStorage + 派事件)、readLintStatus(读 sessionStorage 状态)、lintStatusEvent(事件名)。",
+    "duties": [
+      "防抖 800ms 后 POST /api/skills/:id/lint {markdown},期间置 checking。",
+      "成功落 passed/failed 并广播;空内容→idle、请求失败→failed+message。",
+      "readLintStatus 供 Workspace 的 deriveBuildStage 读取 lint 状态做门控兜底。"
+    ],
+    "used_by": "lint-trigger(#1)、lint-empty-idle(#2)、lint-fail-fallback(#3)、lint-drives-stage(门控页 #A2b);三处就近投影的目标数据源也是它。",
+    "boundary": "做:防抖触发 lint、广播状态。不做:不渲染就近标记(投影由各 surface 组件做)、不判规则(归引擎)。",
+    "reuse_note": "N3 节点内复用:实时 lint 与门控驱动共用它。",
+    "api": "WS 无;走 POST /api/skills/:id/lint。",
+    "design_note": "⚠ 现状:hook 本体在整个前端没有任何组件调用(全仓只 import readLintStatus + 测试 mock),实时 lint 实际未接线、readLintStatus 恒返回 idle。目标:把它接到编辑器内容流上,真正驱动编辑期查错 + 三处投影 + 门控。"
+  },
+  {
+    "name": "编译错误就近投影映射（目标）",
+    "kind": "（目标）纯逻辑映射",
+    "what": "(目标新模块)一个把单条错误按定位轴(file/phase→哪个节点、field→哪个字段、line→哪一行)路由到三处就近投影位置的共享映射,让 canvas / properties / editor 三个 surface 用同一套定位口径,不各算各的。",
+    "where": "(目标)N3 内新增,如 components/studio/ 下一个 compile-error-projection 模块;消费实时 lint 的 LintError(或手动 compile 的 CompileError),输出「这条错误该标到哪个节点/字段/行」。",
+    "duties": [
+      "按 file/phase_name 定位到 canvas 节点(可复用 compileErrorsByNode)。",
+      "按 field 定位到 properties 字段(依赖错误带 field 轴)。",
+      "按 line + severity 定位到编辑器行内 marker。"
+    ],
+    "used_by": "canvas-node-projection(#4)、properties-projection(#5)、editor-inline-projection(#6)。",
+    "boundary": "做:把一条错误映射到三处投影位置。不做:不渲染(各 surface 组件渲)、不发请求。",
+    "reuse_note": "N3 节点内复用:三处投影共用同一套定位映射,避免三处各写一份定位逻辑导致口径漂移。",
+    "api": "无 —— 纯映射;输入错误 + 当前选中节点,输出投影目标。",
+    "design_note": "（目标)新模块;落地时 field 级投影受限:engine 方向已定 ErrorPayload 的 field_path/source_path,但 Studio LintError 未采纳(drift,见 n3_compile_contract),先做 canvas/editor、实时 lint 字段级投影等 Studio 采纳 engine 定位轴。无法定位时降级文件/节点级。"
+  },
+  {
+    "name": "Compile drawer 组件（目标）",
+    "kind": "（目标）共享 UI",
+    "what": "(目标新组件)一个画布作用域的底部抽屉错误面板:编译出错自动弹出,列出全部编译错误(file:line-field-message),带一键复制(喂 Copilot),**只盖画布、不盖左右侧栏**(能力模块 COMPILE_LINT-1)。可复用 Radix/Dialog 行为 + 本地设计 token,但不能直接套本地 ui/sheet.tsx(它 `fixed inset-0` 会盖侧栏),需 scoped 变体。",
+    "where": "(目标)N3 内新增,替换 Workspace.tsx 现有的 CompileErrorPanel 底部浮层卡片;数据源是 Workspace 的 compileErrors[skillId](CompileError[])。",
+    "duties": [
+      "点 Compile 触发编译 → 编译出错时自动弹出(能力模块 COMPILE_LINT-1：自动弹,区别于旧浮层的是 drawer 形态 + 只盖画布 + 可复制)。",
+      "逐条列 file:line - field - message;顶部「复制」按钮复制全部错误文本(喂 Copilot)。",
+      "底部 drawer、只盖画布、不盖左右侧栏(画布作用域,不用 fixed inset-0),让用户对照着改。"
+    ],
+    "used_by": "compile-drawer(#8)、remove-floating-panel(#9,删旧浮层后由它收口)。",
+    "boundary": "做:展示 + 复制 compile 错误。不做:不发编译请求(走 #compile-trigger)、不判规则。",
+    "reuse_note": "N3 节点内复用:drawer 页两原子共用;同一份 compile 错误只此一个呈现入口。",
+    "api": "无 —— 纯展示组件,收 CompileError[] 渲染。",
+    "design_note": "（目标)新组件;可复用 Radix/Dialog 行为 + 本地设计 token,但不能直接套本地 ui/sheet.tsx(其 fixed inset-0 会盖侧栏),需画布作用域 scoped 变体;落地时一并删除旧 CompileErrorPanel 浮层(spec A7)。"
+  }
+]

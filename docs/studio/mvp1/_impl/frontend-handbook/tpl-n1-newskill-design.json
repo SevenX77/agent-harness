@@ -1,0 +1,114 @@
+{
+  "page_id": "n1_newskill_design",
+  "title": "新建 Skill 对话框 · 操作设计",
+  "region": "skill-workspace:welcome",
+  "intro": "本页是 Home 上点「New skill」弹出的「新建 Skill 对话框」(由 NewSkillDialog 这个受控对话框组件渲染:skill 名输入框 + 只读的父目录输入框 + Choose folder 按钮 + Cancel/Create 底栏)的 MVP1 设计(应该怎样):每张卡描述该对话框上一个操作目标、用户怎么触发、前端怎么做、依赖后端哪条契约;现状实现与差距见实施页(n1_impl),建/写盘的后端契约见后端接口契约页(n1_contract)。它是 Home 屏之外的一个独立模态 surface,故单列一页。核心设计:极简新建——只要「名 + 父目录」,脚手架由后端按 logic→agent 模板生成(D-1-4),写盘走 Studio Rust 后端 native-fs(D12),不卡 manifest 校验(D2)。",
+  "atoms": [
+    {
+      "n": 10,
+      "cap": "open-new-skill-dialog",
+      "track": "新建",
+      "module": "对话框开合",
+      "func": "设计:点 Home 的「New skill」按钮打开 NewSkillDialog,打开时重置默认名为「new-skill」、清空已选父目录与错误信息。",
+      "action": "用户点 Home 上的「New skill」按钮。",
+      "fe_design": "点 New skill → openNewSkillDialog(打开新建对话框前重置表单的函数):把 newSkillName 置为「new-skill」、清 newSkillParentDirectory(已选父目录)、清 newSkillError(上次错误),再把对话框开关置 true。NewSkillDialog 以受控对话框渲染。设计意图:每次打开都是干净表单,不带上次的残留;对话框是覆盖在 Home 上的模态,Cancel 关闭、Create 提交。",
+      "fe_modules": [],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计(openNewSkillDialog 重置默认名/父目录/错误后打开受控对话框)。",
+      "impl_ref": "fn-10"
+    },
+    {
+      "n": 11,
+      "cap": "newskill-name-input",
+      "track": "新建",
+      "module": "表单输入",
+      "func": "设计:在对话框里填 skill 名;提交时把名规范化成合法 skill id(小写、连字符、保证以字母开头)。",
+      "action": "用户在 NewSkillDialog 的名字输入框里输入 skill 名。",
+      "fe_design": "名字输入框双向绑 newSkillName 状态;提交时 normalizeSkillId(把任意输入规范成合法 skill id 的纯函数:小写化、空格转连字符、保证首字符是字母,空则回退「new-skill」)。设计意图:用户填的是人类可读名,后端要的是规范 id;规范化在前端做、即时可预期。名字为空时提交报「Name is required」。",
+      "fe_modules": [],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计(newSkillName 受控 + 提交走 normalizeSkillId 规范化 + 空名拦截)。",
+      "impl_ref": "fn-11"
+    },
+    {
+      "n": 12,
+      "cap": "newskill-pick-parent-dir",
+      "track": "新建",
+      "module": "表单输入",
+      "func": "设计:点「Choose folder」用 OS 目录选择器选新建 skill 的父目录;默认目录来自 app 设置的 default_skills_directory。",
+      "action": "用户点对话框里父目录旁的「Choose folder」按钮。",
+      "fe_design": "点 Choose folder → chooseNewSkillParentDirectory → selectSkillDirectory(调 Studio Rust 后端 select_directory 命令弹 OS 目录选择器的函数,默认目录传 defaultSkillParentDirectory,来自 app 设置 default_skills_directory)→ 选中则写 newSkillParentDirectory,父目录输入框只读显示。设计意图:父目录选择走 Studio Rust 后端 native-fs 的目录选择器(已实现),前端只持有选中路径;父目录可空(空则后端按默认 skills 目录建)。",
+      "fe_modules": [],
+      "be_contract": [
+        {
+          "endpoint": "Rust select_directory",
+          "purpose": "Studio Rust 后端弹 OS 目录选择器、返回选中目录(或 null)的命令(已实现)。",
+          "mechanism_ref": "n1_mech_nativefs",
+          "iface_ref": "iface-dirpick"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(Choose folder 走 Rust select_directory、默认目录来自 app 设置;父目录可空)。",
+      "impl_ref": "fn-12"
+    },
+    {
+      "n": 13,
+      "cap": "newskill-create-scaffold",
+      "track": "新建",
+      "module": "创建落地",
+      "func": "设计:点 Create → 建 skill 文件夹 + 写脚手架(按 logic→agent 模板)+ git init + 直接进工作区。脚手架是非空文件夹、且新建不调 copilot;写盘走 Studio Rust 后端 native-fs。",
+      "action": "用户在对话框填好名(可选父目录)后点「Create」。",
+      "fe_design": "点 Create → submitNewSkill(提交新建的函数):规范化名 → 建 skill(目标走 Studio Rust 后端 native-fs 的建目录/写脚手架/git init 命令)→ openSkill 直接进工作区。设计意图两条:① D-1-4(脚手架 logic→agent 模板决策):新建出来的 skill 不是空文件夹,而是一份可直接编辑的 agent 模板脚手架,且新建过程不调 copilot(脚手架是模板生成、非 AI 生成)。② D12(写盘全量走 Rust 决策):建目录、写脚手架文件、git init 都应是 Studio Rust 后端的本地文件命令,不再走 Python 的 POST /api/skills 落盘。非空目标文件夹应被拒(不在已有内容上建新 skill)。",
+      "fe_modules": [
+        { "name": "Skill 打开例程", "ref": "femod-open-skill" }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills (import_existing=false)",
+          "purpose": "现状:新建经此让 gateway 后端 sidecar 写脚手架 + git init + 注册。目标契约要改:建/写盘迁 Studio Rust 后端 native-fs,脚手架改 logic→agent 模板(retire-target)。",
+          "mechanism_ref": "n1_mech_skills",
+          "iface_ref": "iface-create"
+        },
+        {
+          "endpoint": "Rust 新建/打开 skill 落盘命令",
+          "purpose": "D12 目标:Studio Rust 后端建目录 + 写脚手架 + git init 的本地文件命令。现状未实现(仍走 Python),是契约缺口。",
+          "mechanism_ref": "n1_mech_nativefs",
+          "iface_ref": "iface-scaffold"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(2026-06-20:代码已落地,design-audit vs code 核实,状态回填)。submitNewSkill 已改走 Studio Rust 后端 native-fs、不再 POST /api/skills:WelcomePage.tsx:243 调 createSkillWorkspace(...) → 包装器 lib/tauri.ts:149 调 Rust create_skill_workspace;Rust 独占写盘 create_skill_workspace_impl(native_fs.rs:1439)建目录 + 脚手架循环(native_fs.rs:1458)+ git init,设计原标「未实现」的 Rust 落盘命令已补齐(D12)。脚手架是 D-1-4 的 AGENT 模板(GRAPH.md + phases/init/SKILL.md 含 <role>/<goal>/<step>/<protocol>),非 logic 相位(scaffold_files_for native_fs.rs:1155-1163;测试断言生成 agent SKILL.md 且无 LOGIC.md/actions,native_fs.rs:2680-2692,通过)。新建不调 copilot(WelcomePage.tsx:239 注释 + grep 零 copilot 调用);非空目标文件夹被拒(native_fs.rs:2761 测试通过)。buildSkillCreatePayload/api.post('/skills') 已不在创建流中。实测:9/9 Rust create_skill_workspace 测试 + 30/30 WelcomePage.test.tsx 通过。",
+      "impl_ref": "fn-13"
+    },
+    {
+      "n": 14,
+      "cap": "newskill-create-error",
+      "track": "新建",
+      "module": "创建落地",
+      "func": "设计:新建失败时只显示 OS 级失败(路径无效 / 在非空文件夹里建);移除 manifest/lint 校验类错误文案——D2 后这些不该出现在新建路径。",
+      "action": "无显式动作(Create 失败时在对话框里显示错误文案)。",
+      "fe_design": "Create 失败 → 在对话框内显示一条精炼错误。设计意图(D2:不卡导入决策):新建只应因 OS 级原因失败——父目录不存在、路径非法、目标文件夹非空(不在已有内容上建);不应再用 manifest/lint 校验类文案(那是注册表/校验门时代的退路)。要把 formatCreateSkillError(格式化新建错误的函数)里走 firstLintErrorMessage(从后端 lint 详情里抽第一条错误的函数)的 MANIFEST_VALIDATION_FAILED 分支收掉,只留 OS 级失败。",
+      "fe_modules": [
+        { "name": "新建/打开错误格式化", "ref": "femod-error-format" }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills 错误码",
+          "purpose": "新建错误码:INVALID_DIRECTORY_PATH(路径无效/非空)= 应保留;MANIFEST_VALIDATION_FAILED(脚手架 tmp-lint 失败)= D2 后端应放宽、前端死分支应删(契约问题)。",
+          "mechanism_ref": "n1_mech_skills",
+          "iface_ref": "iface-create"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(2026-06-20:代码已落地,design-audit vs code 核实,状态回填)。formatCreateSkillError 现只处理 OS 级码(SKILL_ALREADY_EXISTS、INVALID_DIRECTORY_PATH)再 fall through 到 errorMessage,MANIFEST_VALIDATION_FAILED / lint 分支已删(WelcomePage.tsx:114-129,注释 122-127「create path surfaces only OS-level reasons」);firstLintErrorMessage / cleanLintMessage / relativeLintFile 符号在 apps/studio/frontend/src 已全无(grep 0,D2 死分支清除)。后端「tmp-lint raise」缺口已变 moot:创建不再走 Python POST /api/skills,改走 Rust native-fs(不做 manifest lint),唯一可达错误码即 OS 级。测试 WelcomePage.test.tsx:330-339(原始 Rust 串原样透出)、:341-360(结构化 MANIFEST 负载不再产出 lint 文案)通过(30/30)。",
+      "impl_ref": "fn-14"
+    }
+  ]
+}

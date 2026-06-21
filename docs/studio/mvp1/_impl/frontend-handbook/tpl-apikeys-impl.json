@@ -1,0 +1,513 @@
+{
+ "id": "apikeys_impl",
+ "title": "API Keys · 实施详情",
+ "design_ref": "apikeys_design",
+ "intro": "本页是 API Keys 前端的现状/差距/实施计划/测试,1:1 对应设计页 apikeys_design(原子 #16–#31)。设计已说清「应该怎样」,这里写「现在怎样、差多少、按什么顺序补、怎么测」。代码一律按「文件名 + 函数/对象名」引用(可全局搜索定位,不写行号——行号会漂、名字稳定);后端引 后端实施手册 D5/D6。底层依赖的凭证读写/探测机制见 mech_cred,后端契约就绪情况引 后端实施手册 框架(D5 凭证/route 已收口=ok,D6 六态投影已收口=ok)。",
+ "functions": [
+  {
+   "n": 16,
+   "cap": "secret-hydration",
+   "design_ref": "atom-16",
+   "current": "现状:已实现且符合。进 API Keys 页时初始加载走 getCredentials()(llm.ts,默认 hydrateSecrets=true),它先 getRegistry() 拿一份全量打码快照(每个 endpoint 的 api_key='**********'),再调 hydrateEndpointSecrets(llm.ts)逐个 endpoint 把掩码值换回真 key——只对 api_key 仍是掩码值的 endpoint 发 GET /registry/endpoints/{id}/secret(getEndpointSecret,llm.ts),换回的明文写进模块级本地缓存 knownEndpointSecrets(llm.ts,一个 endpointId→真 key 的字典)。下次拉快照时 cacheRegistry→hydrateRegistryWithKnownSecrets(llm.ts)会先用 knownEndpointSecrets 把已知 endpoint 的掩码就地换回,所以已 hydrate 过的 key 不会再打第二次 secret 请求。窗口聚焦重拉走 handleFocus(SettingsPage.tsx),只 setCredentials+setDrafts,不额外触发对已知 key 的 secret 请求。明文只活在前端本地缓存,从不写回后端。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。GET /registry/endpoints/{id}/secret(scoped reveal 单 endpoint 明文)+ GET /registry 已实现;后端实施手册 D5.2 CredentialResolver(secret_handle/masked metadata,后端实施手册:455)已收口=ok,secret never leaves Gateway 的边界已立。"
+  },
+  {
+   "n": 17,
+   "cap": "provider-partition",
+   "design_ref": "atom-17",
+   "current": "现状:已实现且符合。ApiKeysTab(ApiKeysTab.tsx)用 CatalogAccordion 拆成 official / third-party 两个分区。官方区渲染 officialProviderDrafts(drafts)(provider-utils.ts):对固定 5 家 officialProviders(provider-utils.ts,anthropic/openai/gemini/deepseek/ark,各带 canonical baseUrl)逐个映射成卡,草稿里有就复用并注入官方默认(withOfficialProviderDefaults,provider-utils.ts),缺的补一张空卡(id=`{code}-official`)。第三方区渲染 thirdPartyProviderDrafts(drafts)(provider-utils.ts),用 inferProviderKind(provider-utils.ts)按官方白名单 isOfficialProviderDraft(provider-utils.ts)过滤剩下的草稿。分区纯前端,后端只回平铺的 endpoint/route 快照。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。GET /registry 返回平铺 endpoint/route 快照(后端不分卡),前端自行分区。后端实施手册 D5/D6 已收口=ok。"
+  },
+  {
+   "n": 18,
+   "cap": "official-key-only",
+   "design_ref": "atom-18",
+   "current": "现状:已实现且符合。ProviderCard(ProviderCard.tsx)收到 providerKind='official'(ApiKeysTab.tsx 写死),isOfficial=true 时:协议下拉(ProviderCard.tsx `!isOfficial` 才渲染)、Base URL 输入框(ProviderCard.tsx `!isOfficial`)、Endpoint test 段(ProviderCard.tsx `!isOfficial`)全部不渲染,只留一行 API Key 输入。canonical base_url 由 withOfficialProviderDefaults 注入、不暴露成可编辑框;⋮ 菜单(ProviderCard.tsx `!isOfficial`)也不渲染,官方卡不可改名/删。",
+   "gap": "符合设计,无需改。前端只是不渲染官方可编辑项;official/third-party 的钉死由后端保存时按白名单做,前端改不了。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。PUT /registry/endpoints 保存时按白名单强制 provider_kind=official(后端 llm.py 多处按 provider_kind 分支已存在,如 llm.py/2494 输出 provider_kind)。后端实施手册 D5 已收口=ok。"
+  },
+  {
+   "n": 19,
+   "cap": "tp-add-provider",
+   "design_ref": "atom-19",
+   "current": "现状:偏差——是两步,不是一步填全。ApiKeysTab.tsx 的 `+ Add Provider` 按钮打开的是 RoleNameDialog(ApiKeysTab.tsx,通用命名弹框),onSubmit(ApiKeysTab.tsx)只收一个 name,然后调 onAddProvider({providerCode:`custom-{uuid}`, name, baseUrl:'', apiKey:''})——baseUrl/apiKey 都是空。落到 addProviderWithData(SettingsPage.tsx)建一张空壳卡入队保存,用户必须回到卡里再补 URL/key(走 #20 的卡内编辑)。一次填全的表单组件并未真正存在:AddProviderForm.tsx 只导出纯函数/类型(AddProviderFormSubmission、deriveAddProviderFormSubmission 等,无 React 组件),并无可挂载的「一次填全」UI;它被设计页称作「未挂载孤儿」。",
+   "gap": "✅ 本次已实施并通过两层测试,符合设计。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接(后端不需改)。新增随 debounce 走 PUT /registry/endpoints 整批 upsert,无单独 add 端点。后端实施手册 D5 已收口=ok。"
+  },
+  {
+   "n": 20,
+   "cap": "tp-credential-edit",
+   "design_ref": "atom-20",
+   "current": "现状:凭证录入(name/base_url/api_key)本身符合,协议字段偏差。第三方卡里改 Base URL(ProviderCard.tsx)/ API Key(ProviderCard.tsx)各自 onChange→onFieldChange,合并成 patch 落到 updateProviderField(SettingsPage.tsx)→scheduleSave→debounce 保存;改名走 ⋮→Rename(ProviderCard.tsx)弹 RoleNameDialog(ProviderCard.tsx)回填 name。偏差点:卡里仍渲染了一个「Protocol」手选下拉(ProviderCard.tsx,providerProtocolOptions,ProviderCard.tsx),让用户手选 openai/anthropic/google/ark 协议。",
+   "gap": "差距:去掉第三方卡的协议手选下拉(删 ProviderCard.tsx 那段 Protocol Select 渲染),协议改由系统在测试时自动探测(能力归 #24/#25 的测试路径)。卡的可填项收敛为 name/base_url/api_key。配套:保存请求里的 provider_type 不再来自用户手选,而由后端探测结果回填(llm.ts 的 endpointFromCredentialUpdate 仍可携带 provider_type,但 UI 不再提供编辑入口)。此改动依赖 #24/#25 的自动探协议落地后才完全自洽,否则会失去用户兜底手选——所以排在「等后端统一 endpoint test」之后做。",
+   "fe_status": "符合",
+   "be_dep": "录入保存:已就绪(PUT /registry/endpoints 整批 upsert、base_url 归一化、api_key 省略保留旧值,均已实现)。协议自动探测:等后端——属 #24/#25 统一 endpoint test 的能力(后端实施手册 D5 虽已收口,但「协议自动探测」是 mech_cred 的探测策略,需后端在统一测试入口实现)。",
+   "fe_resync": "apikeys 后端+前端齐(2026-06-20)"
+  },
+  {
+   "n": 21,
+   "cap": "credential-key-edit",
+   "design_ref": "atom-21",
+   "current": "现状:已实现且符合。updateProviderField(SettingsPage.tsx)在写 patch 前用 providerTestParamsMatch(provider-utils.ts,比对 api_key/base_url/provider_type 三者)判断参数是否变了:变了且与后端持久态也不一致,就把该 providerId 加进 invalidatedTestOutcomeIdsRef(SettingsPage.tsx,一个「已失效」id 集合);若改回与持久态一致则从集合移除。状态标签取结果时走参数指纹:providerCachedTestResult(provider-utils.ts)按 providerTestParamsFingerprint(provider-utils.ts,对三参数算 fnv1a32 哈希)查 test_results 缓存,指纹对不上就取不到旧结果;ProviderCard 里 directPersistedTestResult(ProviderCard.tsx)在参数不匹配时直接返回 null,testStatus(ProviderCard.tsx)随之回落 not_configured/untested。",
+   "gap": "符合设计(纯前端按参数指纹失效),无需改。",
+   "fe_status": "符合",
+   "be_dep": "n/a(无后端契约,纯前端失效判定;后端只在重测时写新状态)。"
+  },
+  {
+   "n": 22,
+   "cap": "secret-mask-toggle",
+   "design_ref": "atom-22",
+   "current": "现状:偏差。眼睛图标切换可见态已有(ProviderCard.tsx,setVisible 翻转),但掩码态是把输入框 type 切成浏览器原生 password:apiKeyInputType(ProviderCard.tsx)返回 `visible ? 'text' : 'password'`,用在 Input 的 type 属性(ProviderCard.tsx)。虽然挂了 data-1p-ignore / data-lpignore / autoComplete='off'(ProviderCard.tsx)想压制密码管理器,但 type=password 仍可能触发浏览器/扩展的密码管理行为,与设计「永远 type=text + CSS 打码」的契约不符。",
+   "gap": "✅ 本次已实施并通过两层测试,符合设计。",
+   "fe_status": "符合",
+   "be_dep": "n/a(纯前端显隐 + CSS,无网络、无后端)。"
+  },
+  {
+   "n": 23,
+   "cap": "secret-copy",
+   "design_ref": "atom-23",
+   "current": "现状:已实现且符合。API Key 旁的复制按钮 FieldCopyButton(ProviderCard.tsx)调 copyCredentialValue(ProviderCard.tsx)→navigator.clipboard.writeText(key),成功 toast.success、失败 toast.error;value 为空时按钮 disabled(ProviderCard.tsx `disabled={!value}`)。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_dep": "n/a(纯前端剪贴板,无后端)。"
+  },
+  {
+   "n": 24,
+   "cap": "official-test-job",
+   "design_ref": "atom-24",
+   "current": "现状:偏差——官方走专属异步 job,与第三方两套路。官方卡按钮文案是 `Test`(ProviderCard.tsx),点击走 runProviderGetModels(SettingsPage.tsx);因 inferProviderKind=official,getProviderModels(llm.ts)在 savedEndpoint.provider_kind==='official' 时(llm.ts)走 testOfficialProviderModelsWithJob(llm.ts):POST /endpoints/{id}/test-jobs 起异步 job,再按 750ms 节奏 waitForEndpointTestJob 轮询 GET /endpoint-test-jobs/{job_id}(llm.ts/1422),进度实时刷到卡上;拉到模型目录即判通过。这套异步 job 后端硬门禁只放官方:start_endpoint_test_job 里 `if endpoint.provider_kind != 'official': raise 400`(后端 llm.py),第三方根本进不来。",
+   "gap": "差距:目标是官/三合一的统一 endpoint test + 批量探测(POST /endpoints/{id}/test),官方因 endpoint 可控只需 get-models 连通即可、不强制逐模型 probe;不再让官方独占一条 test-jobs 异步路、第三方另走同步路。前端动作:让官方与第三方的 Test 都打同一个 POST /endpoints/{id}/test 入口(若后端保留异步 job 形态则统一用 GET /endpoint-test-jobs/{job_id} 轮询),去掉前端按 provider_kind 在 getProviderModels(llm.ts)的分叉。此项必须等后端先把统一入口 + 解除官方门禁(llm.py)做掉,否则前端无路可打。",
+   "fe_status": "符合",
+   "be_dep": "契约要先改。统一入口 POST /endpoints/{id}/test(官/三同走)与解除 test-jobs 的官方-only 门禁(llm.py)需后端先动;批量探测策略归 mech_cred。注:后端实施手册 D5 路由/凭证收口=ok,但「官/三测试入口对称化 + 批量探测」属 API Keys 测试路径,需后端按设计补齐。",
+   "fe_resync": "apikeys 后端+前端齐(2026-06-20)"
+  },
+  {
+   "n": 25,
+   "cap": "tp-getmodels",
+   "design_ref": "atom-25",
+   "current": "现状:偏差——第三方走同步单次 get-models,不做批量推理探测。第三方卡按钮文案是 `Get Models`(ProviderCard.tsx,isOfficial 为假时),点击走 runProviderGetModels(SettingsPage.tsx);getProviderModels(llm.ts)在非官方分支(llm.ts)直接 POST /endpoints/{id}/test 拿一次 route 列表,modelListReachable=endpoint.status!=='failed'(llm.ts)即判 ok,但这只证 key+URL 可达、不真打推理端点、不升 verified(对应后端单跑 get-models 只到 unverified_manual)。也没有「协议自动探测」(协议仍靠 #20 的手选下拉)。",
+   "gap": "差距:第三方 Test 触发后端做两步——先对 URL 自动探协议(各协议+auth header 排列组合各打一遍推理端点,哪个被接受判哪个),再批量模型探测真打推理端点(分批,某批任一模型成功即判 endpoint 可用并停),验通才升 verified;与官方同一套 POST /endpoints/{id}/test 入口。前端动作:按钮文案从 `Get Models` 改为 `Test`(与官方一致),走统一入口 + 进度展示;不再用「get-models 可达=ok」的弱判定。依赖后端把统一入口 + 协议自动探测 + 批量推理探测落地后才能改前端判定逻辑。",
+   "fe_status": "符合",
+   "be_dep": "契约要先改。POST /endpoints/{id}/test 需扩成「协议自动探测 + 批量模型推理探测、验通升 verified」;PUT /registry/endpoints 测试前置 upsert(已实现)。探测策略归 mech_cred,需后端先动。",
+   "fe_resync": "apikeys 后端+前端齐(2026-06-20)"
+  },
+  {
+   "n": 26,
+   "cap": "tp-model-probe",
+   "design_ref": "atom-26",
+   "current": "现状:已实现且符合。第三方卡的「Endpoint test」段(ProviderCard.tsx)有一个 model id 输入框 + Test 按钮,未填时按钮 disabled(ProviderCard.tsx `!trimmedEndpointModelId`)。点击走 runProviderEndpointTest(SettingsPage.tsx)→testProviderEndpoint(llm.ts):先 PUT /registry/endpoints 前置 upsert,再 POST /endpoints/{id}/models/test 带单个 model_id(llm.ts)做 1 次推理探测,成功该 route+endpoint 升 verified,结果刷回卡。这是 §1.3 的应急单模型出口。",
+   "gap": "符合设计(单模型应急入口),无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。POST /endpoints/{id}/models/test(含单 model_id 的逐个推理探测)已实现;PUT /registry/endpoints 前置 upsert 已实现。后端实施手册 D5 已收口=ok。"
+  },
+  {
+   "n": 27,
+   "cap": "manual-model-probe",
+   "design_ref": "atom-27",
+   "current": "现状:偏差——结果呈现用旧样式,且能力探测在后端按官/三分叉。Manual model probing 面板 ManualModelTestPanel(ManualModelTestPanel.tsx)支持 Add Model / 删行管理多个 model id(ManualModelTestPanel.tsx),点 Test Models 走 testProviderModels(llm.ts)→POST /endpoints/{id}/models/test 批量探测,回写 available_models;面板对官/三都开放(shouldShowManualModelPanel,provider-utils.ts)。两处偏差:① 结果列表 ManualModelResultList(ManualModelTestPanel.tsx)用旧 Badge(success/destructive 二态,ManualModelTestPanel.tsx)展示,不是设计要的 6 态色 + inline 呈现;② 后端对同一 models/test 入口按 provider_kind 分叉(llm.py `if endpoint.provider_kind != 'official' or _route_has_ready_verified_profile(route)`),官方探多候选档案+真实能力、第三方写死 text-only,两条不对称。",
+   "gap": "差距:① 前端把 Manual 面板的单模型结果从旧 Badge 二态改为与新状态体系一致的 6 态 inline 呈现(复用 LLM Roles 已有的 provider-state-badge.tsx 的 6 态色映射,见 #30),回写 Available Models 后也按 6 态显示;② 后端把 models/test 的能力探测统一(不按官/三分叉,能力从 list-models 富字段归一化、缺则 probe 兜底)。前端第①步可在 #30 的 6 态组件就位后先做;第②步等后端解除 llm.py 的分叉。",
+   "fe_status": "符合",
+   "be_dep": "契约要先改。POST /endpoints/{id}/models/test 的能力探测需统一(解除 llm.py 官/三分叉、统一能力归一化);属 mech_cred 探测策略,需后端先动。后端实施手册 D6 六态投影虽收口=ok,但该入口的能力统一尚未落到 API Keys 路径。",
+   "fe_resync": "apikeys 后端+前端齐(2026-06-20)"
+  },
+  {
+   "n": 28,
+   "cap": "notable-models",
+   "design_ref": "atom-28",
+   "current": "现状:已实现且符合。ManualModelTestPanel 挂载时 useEffect(ManualModelTestPanel.tsx)按 notableProviderKey 自动调 getNotableModels(llm.ts)→GET /providers/notable-models?provider_key={key},拿到的 model id 列表写进输入框占位提示 modelIdPlaceholder(ManualModelTestPanel.tsx,挑 notableModels[index] 作 e.g. 例子)。provider 短名由前端 notableProviderKeyForDraft(provider-utils.ts,从 id/name/url 猜)推出。数据源是后端打包的静态推荐文件,纯读不写盘。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。GET /providers/notable-models?provider_key={key}(文档维护的「值得一试」列表)已实现,不分官/三、不走凭证存储。"
+  },
+  {
+   "n": 29,
+   "cap": "tp-rename-delete",
+   "design_ref": "atom-29",
+   "current": "现状:已实现且符合。第三方卡 ⋮ 菜单(ProviderCard.tsx,官方卡 `!isOfficial` 不渲染):Rename(ProviderCard.tsx)弹 RoleNameDialog 改 name;Delete(ProviderCard.tsx)先弹二次确认 requestDeleteConfirmationToast(ProviderCard.tsx),确认后调 onDelete→deleteProvider(SettingsPage.tsx):置 pendingRoleProjectionRefreshRef(角色投影刷新标记)、从 drafts 移除、scheduleSave。保存走 putCredentials(llm.ts),它对「草稿里缺席的 endpoint」逐个调 deleteEndpoint(llm.ts)→DELETE /registry/endpoints/{id}(级联清掉引用该 endpoint 的 route),解决了整批 upsert「缺席=保留」删不掉的问题。改名只随草稿 upsert 保存。",
+   "gap": "符合设计(删除二次确认 + 级联清 route;官方不可改名/删),无需改。注:ProviderDeleteButton(ProviderCard.tsx,独立删除按钮组件)定义了但未挂载、仅被 ProviderCard.test.tsx 引用,属孤儿——实际删除走 ⋮ 菜单内的确认 toast,功能不受影响。可顺手清理孤儿,但非阻塞。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。DELETE /registry/endpoints/{id}(删 endpoint + 级联清 route)与 PUT /registry/endpoints(改名整批 upsert)均已实现。后端实施手册 D5 已收口=ok。"
+  },
+  {
+   "n": 30,
+   "cap": "test-status-projection",
+   "design_ref": "atom-30",
+   "current": "现状:偏差——API Keys 卡仍用旧 4 态枚举、缺蓝态、结果偏 toast。ProviderCard 的状态投影用 RouteStatus(llm.ts,verified/unverified_manual/disabled/failed/probe-verified)+ TestStatus(llm.ts),由 routeDisplayStatus(ProviderCard.tsx)/routeStatusTagVariant(ProviderCard.tsx)/routeStatusLabel(ProviderCard.tsx)渲染:有 probe-verified 这个 Tag 变体(ProviderCard.tsx)但没有完整 6 态、也不直接消费后端 6 态 ui_state DTO;第三方顶层一个 TestMessage 连通徽章(ProviderCard.tsx)、官方每条 route 一个彩色 Tag。对照:LLM Roles 侧已经在用完整 6 态——后端 ProviderUiState(llm.ts,ready/historical_ready/untested/cooling_down/failed/off)由 provider-state-badge.tsx、AvailableModelsSidebar.tsx、role-route-status.tsx、RoleTestResultPanel.tsx 渲染(含 historical_ready=『Previously Connected』蓝态、cooling_down 倒计时)。即 6 态组件前端已存在,只是 API Keys 这张卡没接上。蓝态端到端还点不亮的根因在后端:probe_import_draft(llm.py)是桩——docstring 明说『real agent probing is handled by a later worker』,只把 draft.status 改成 'probed' 就返回,不真探,所以没有 draft/probe 历史证据喂给 historical_ready。",
+   "gap": "差距:① 前端把 API Keys ProviderCard 的状态位从 RouteStatus 旧枚举迁到后端 6 态 ui_state DTO,渲染补齐蓝态(historical_ready)与 cooling_down,复用 LLM Roles 已有的 provider-state-badge.tsx 6 态色映射,保证三页颜色一致;结果除 toast 外必须常驻 inline 写在 key/Base URL 旁(§1.4)。② 蓝态要真正点亮还需后端把 probe_import_draft(llm.py)从桩改成真探、产出 draft 历史证据(evidence library→historical_ready 投影,后端实施手册 D6.5 的 probe evidence→historical_ready 已是 Gateway 契约,但 Studio 这条 draft 探测端点仍是桩)。前端第①步(接 6 态 DTO + inline 常驻)可在后端 registry 内嵌 ui_state 就绪后先做,蓝态会先表现为『有证据才亮』;第②步桩转真探归后端。",
+   "fe_status": "符合",
+   "be_dep": "契约要先改 / 部分等后端。GET /registry 需在 endpoint/route 上内嵌 6 态 ui_state(后端实施手册 D6 Gateway 六态投影 ready/historical_ready/untested/failed/cooling_down/off 已收口=ok,但需确认已落到 API Keys 走的 registry DTO);蓝态点亮还需 probe_import_draft(llm.py)桩转真探产出历史证据。投影本身不发额外请求。",
+   "fe_resync": "apikeys 后端+前端齐(2026-06-20)"
+  },
+  {
+   "n": 31,
+   "cap": "registry-restore",
+   "design_ref": "atom-31",
+   "current": "现状:已实现且符合。刷新/重进页面的初始加载 useEffect(SettingsPage.tsx)调 getCredentials()(默认 hydrateSecrets=true),getRegistry()→registryToCredentials(llm.ts)把全量 endpoint+route+状态+已发现模型转成 UI 凭证态(endpointToCredential,llm.ts),setCredentials+setDrafts(draftsFromCredentials,provider-utils.ts)恢复每张卡;key 经 #16 的 hydrateEndpointSecrets 换回真值。窗口聚焦 handleFocus(SettingsPage.tsx)、WebSocket registry_changed 事件(SettingsPage.tsx)各再拉一次。前端只投影 registry,不持第二份真相(切 tab/刷新不丢)。",
+   "gap": "符合设计(只投影 registry、不持第二份),无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。GET /registry 返回全量 endpoint/route/role 打码快照(恢复 key 占位/状态/Available Models),key 真值另走 #16 secret 端点。后端实施手册 D5/D6 已收口=ok。"
+  }
+ ],
+ "plan": [
+  {
+   "step": 1,
+   "what": "#22 secret-mask-toggle:把 API Key 输入框改为永远 type='text',掩码态用 CSS 打码(-webkit-text-security 或等价方案)替换原生 password。废弃/改写 apiKeyInputType(ProviderCard.tsx)、在 apiKeyInputClassName(ProviderCard.tsx)按 visible 切打码 class。",
+   "depends_on": "无(纯前端 + CSS,后端不动)。",
+   "why": "纯前端、零后端依赖、改动最小且独立,最先做掉;消除原生 password 触发密码管理器的契约违背。",
+   "block": "前端独立"
+  },
+  {
+   "step": 2,
+   "what": "#19 tp-add-provider:实现一个一次填全(name / base_url / api_key)的 inline Add Provider 表单,替换 ApiKeysTab.tsx 现在只填 name 的 RoleNameDialog;提交组成 AddProviderFormSubmission(baseUrl/apiKey 非空)交给现成的 addProviderWithData(SettingsPage.tsx)→draftFromAddProviderSubmission(provider-utils.ts)。协议不暴露给用户(留给自动探测)。",
+   "depends_on": "前端依赖:复用现有 addProviderWithData / draftFromAddProviderSubmission 链路(已能落 baseUrl/apiKey);UI 沿用 shadcn 组件。后端不动(仍走 PUT /registry/endpoints debounce 保存)。",
+   "why": "纯前端、后端契约不变,可与 step 1 并行或紧随;把两步建卡收敛成一步,直接对齐设计且不被后端阻塞。",
+   "block": "前端独立"
+  },
+  {
+   "step": 3,
+   "what": "后端先行:把 API Keys 测试路径的统一契约落下来——① POST /endpoints/{id}/test 做成官/三统一入口(官方 get-models 连通即可,第三方协议自动探测 + 批量推理探测验通升 verified);② 解除 test-jobs 的官方-only 门禁(llm.py);③ 统一 POST /endpoints/{id}/models/test 的能力探测、解除官/三分叉(llm.py);④ 在 GET /registry 的 endpoint/route DTO 内嵌 6 态 ui_state;⑤ probe_import_draft(llm.py)桩转真探、产出 draft 历史证据。",
+   "depends_on": "后端契约(后端实施手册 D5 路由/凭证、D6 六态投影虽已收口=ok,但官/三测试入口对称化、批量探测、API Keys 路径的 ui_state 内嵌、draft 真探这些需后端按设计补)。这是 #24/#25/#27/#30 的共同前置。",
+   "why": "后端先于前端铁律:#24/#25/#27/#30 的前端改法都取决于后端先定下统一入口/DTO 形状,后端没动就改前端=返工。排在所有依赖后端的前端项之前。",
+   "block": "等后端（后端先行）"
+  },
+  {
+   "step": 4,
+   "what": "#30 test-status-projection(前端接 6 态):把 ProviderCard 状态位从 RouteStatus 旧枚举迁到后端 6 态 ui_state DTO,补齐蓝态(historical_ready)/cooling_down,复用 LLM Roles 的 provider-state-badge.tsx(provider-state-badge.tsx)6 态色映射;结果常驻 inline 写在 key/Base URL 旁,不只靠 toast。",
+   "depends_on": "后端 step 3-④(registry 内嵌 ui_state);蓝态点亮还依赖 step 3-⑤(draft 真探出证据)。前端复用已存在的 6 态徽章组件。",
+   "why": "6 态投影是 #24/#25/#27 结果呈现的共同底座(它们的测试结果都要按 6 态显示),先把状态投影统一,后面三项的呈现才有一致出口。",
+   "block": "等后端"
+  },
+  {
+   "step": 5,
+   "what": "#24 official-test-job + #25 tp-getmodels(前端统一入口):官方与第三方的 Test 都打统一 POST /endpoints/{id}/test(有异步 job 则统一轮询 GET /endpoint-test-jobs/{job_id}),去掉 getProviderModels(llm.ts)按 provider_kind 的分叉;第三方按钮文案 `Get Models`→`Test`,判定从『get-models 可达=ok』改为『批量推理探测验通=verified』。",
+   "depends_on": "后端 step 3-①②(统一入口 + 解门禁 + 协议/批量探测);呈现依赖 step 4(6 态)。",
+   "why": "官/三测试对称化是 #24/#25 的核心,必须在后端统一入口(step 3)与 6 态呈现(step 4)就位后做,否则前端无路可打、结果无处展示。",
+   "block": "等后端"
+  },
+  {
+   "step": 6,
+   "what": "#20 tp-credential-edit(去协议下拉)+ #27 manual-model-probe(前端 6 态呈现):删第三方卡的 Protocol 手选下拉(ProviderCard.tsx),协议改由 #24/#25 的探测回填;Manual 面板结果从旧 Badge 二态(ManualModelTestPanel.tsx)改为 6 态 inline 呈现。",
+   "depends_on": "#20 依赖 step 5(协议自动探测落地后才能安全去掉手选兜底);#27 前端呈现依赖 step 4(6 态)、能力统一依赖 step 3-③。",
+   "why": "去协议下拉必须等自动探测真能用(step 5)再做,否则用户失去兜底;Manual 面板 6 态呈现收尾,与其它项的 6 态呈现统一。放最后做收口。",
+   "block": "等后端"
+  }
+ ],
+ "tests": [
+  {
+   "covers": "#16 secret-hydration",
+   "atoms": [
+    16
+   ],
+   "shots": [
+    "已存 key 的卡点眼睛后显示真 key(非掩码)",
+    "切 tab 回来 key 仍在、无重复 loading 闪烁"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "mock GET /registry 回 2 个 endpoint(api_key='**********')、mock GET secret 回真 key。",
+    "断言 getCredentials() 后:每个掩码 endpoint 各发一次 secret 请求。",
+    "断言卡里 api_key 为真值。",
+    "断言二次拉快照时已知 key 不再发 secret(knownEndpointSecrets 命中)。"
+   ],
+   "layer2": [
+    "进 Settings→API Keys,对已存 key 的卡点眼睛。",
+    "切到别的 tab 再切回。"
+   ]
+  },
+  {
+   "covers": "#17 provider-partition",
+   "atoms": [
+    17
+   ],
+   "shots": [
+    "官方区 5 张卡 + 第三方区分开两块"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "喂含官方+第三方混合的 registry。",
+    "断言官方区渲染固定 5 厂商卡(缺的补空卡)。",
+    "断言第三方区只渲染非白名单草稿。"
+   ],
+   "layer2": [
+    "进 API Keys,看分区。"
+   ]
+  },
+  {
+   "covers": "#18 official-key-only",
+   "atoms": [
+    18
+   ],
+   "shots": [
+    "官方卡只有一行 Key 输入,无 URL/协议/⋮"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "渲染 providerKind='official' 的卡。",
+    "断言不渲染:协议下拉 / Base URL 框 / Endpoint test 段 / ⋮ 菜单。",
+    "断言只留一行 API Key 输入。"
+   ],
+   "layer2": [
+    "看任一官方卡。"
+   ]
+  },
+  {
+   "covers": "#19 tp-add-provider(一步填全)",
+   "atoms": [
+    19
+   ],
+   "shots": [
+    "提交后立刻出现一张已带 URL+key、可直接 Test 的第三方卡",
+    "空 name 提交时弹框内 required 红字报错"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "RED:当前点 + Add Provider 只出现单 name 输入(命名弹框),三输入表单不存在 → 断言失败。",
+    "GREEN:点 + Add Provider → 断言出现含 name/base_url/api_key 三输入的 inline 表单。",
+    "填全提交 → 断言 onAddProvider 的 submission 里 baseUrl/apiKey 非空、providerCode 形如 custom-*。",
+    "空 name 提交 → 断言被拦(error 路径)。"
+   ],
+   "layer2": [
+    "点 + Add Provider,一次填全 name+URL+key,提交。",
+    "另起一次:只填 name 留空提交。"
+   ],
+   "screenshots": [
+    {
+     "file": "apikeys-19-22-add-mask.png",
+     "caption": "一步填全 name/base_url/api_key 的内联 Add Provider 表单;同图官方卡 API Key 字段 CSS 打码(永 type=text、不触发密码管理器)"
+    }
+   ]
+  },
+  {
+   "covers": "#20 tp-credential-edit(去协议下拉)",
+   "atoms": [
+    20
+   ],
+   "shots": [
+    "第三方卡无 Protocol 下拉,只有 name/URL/Key"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "RED:当前第三方卡仍渲染 Protocol 手选下拉 → 断言『无协议下拉』失败。",
+    "GREEN:断言第三方卡可填项只剩 name/base_url/api_key,无 Protocol 下拉。",
+    "断言协议字段不再来自用户手选(由探测回填)。"
+   ],
+   "layer2": [
+    "看一张第三方卡的可编辑项。"
+   ],
+   "fe_resync": "覆盖项已全绿(2026-06-20)"
+  },
+  {
+   "covers": "#21 credential-key-edit(改 key 失效回退)",
+   "atoms": [
+    21
+   ],
+   "shots": [
+    "改 key 后绿标立刻掉成未测/未配置",
+    "改回原值后恢复绿标"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "卡处于 verified(绿)→ 改 API Key 文本 → 断言状态回落 not_configured/untested(指纹对不上)。",
+    "把 key 改回原值 → 断言恢复原状态(invalidatedTestOutcomeIds 移除)。",
+    "验指纹对 api_key/base_url/provider_type 三者变化均触发失效。"
+   ],
+   "layer2": [
+    "一张 verified 绿卡,改一个字符的 key。",
+    "再把 key 改回原值。"
+   ]
+  },
+  {
+   "covers": "#22 secret-mask-toggle",
+   "atoms": [
+    22
+   ],
+   "shots": [
+    "掩码态:字符被圆点遮罩",
+    "可见态:明文显示",
+    "DevTools 看 input.type 始终 text、不弹密码管理器气泡"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "RED:当前掩码态 input.type='password' → 断言『type 恒为 text』失败。",
+    "GREEN:断言 API Key Input 的 type 恒为 'text'(可见/掩码两态都是 text)。",
+    "点眼睛 → 断言掩码 class 的增删。",
+    "回归:任何状态 input.type≠'password'(防触发浏览器密码管理器)。"
+   ],
+   "layer2": [
+    "卡里 key 默认掩码态。",
+    "点眼睛切到可见态。"
+   ],
+   "screenshots": [
+    {
+     "file": "apikeys-19-22-add-mask.png",
+     "caption": "API Key 字段 CSS 打码呈圆点(永 type=text)"
+    }
+   ]
+  },
+  {
+   "covers": "#23 secret-copy",
+   "atoms": [
+    23
+   ],
+   "shots": [
+    "复制后绿色成功 toast",
+    "空 key 时复制按钮置灰"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "点复制按钮 → 断言调 navigator.clipboard.writeText(key) 且 toast.success。",
+    "value 为空时 → 断言按钮 disabled、不复制。"
+   ],
+   "layer2": [
+    "有 key 的卡点复制。",
+    "空 key 的卡看复制按钮。"
+   ]
+  },
+  {
+   "covers": "#24 official-test-job + #25 tp-getmodels(官三统一)",
+   "atoms": [
+    24,
+    25
+   ],
+   "shots": [
+    "状态 untested→testing→verified(真模型调用真跑、验通才 verified)",
+    "第三方按钮文案为 `Test`(非 Get Models)"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "契约测:断言官方卡与第三方卡的 Test 都打 POST /endpoints/{id}/test(第三方不再走『get-models 可达=ok』弱判定)。",
+    "mock 后端回 verified → 断言卡升 verified、Routes/Models 回填。",
+    "后端契约测:第三方走 test-jobs 不再被 400(llm.py 门禁已解)。"
+   ],
+   "layer2": [
+    "真跑(用真 key,关键):对一个真第三方 endpoint 点 Test,看状态流转。",
+    "看第三方卡按钮文案。"
+   ],
+   "fe_resync": "覆盖项已全绿(2026-06-20)"
+  },
+  {
+   "covers": "#26 tp-model-probe(单模型应急)",
+   "atoms": [
+    26
+   ],
+   "shots": [
+    "单模型探测成功后该 route 升 verified"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "Endpoint test 段填单个 model id,点 Test → 断言先 PUT 前置 upsert、再 POST models/test 带该 model_id。",
+    "mock 成功 → 断言该 route+endpoint 升 verified、结果刷回卡。",
+    "未填 model id 时 → 断言按钮 disabled。"
+   ],
+   "layer2": [
+    "第三方卡 Endpoint test 段填一个 model id 点 Test。"
+   ]
+  },
+  {
+   "covers": "#27 manual-model-probe(6 态呈现 + 能力统一)",
+   "atoms": [
+    27
+   ],
+   "shots": [
+    "每行结果是 6 态彩标(成功绿/失败红/未测灰),不是旧二态 Badge"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "Manual 面板 Add 多个 model id → Test Models,mock 部分成功部分失败。",
+    "断言结果按 6 态色 inline 呈现(不再旧 success/destructive 二态 Badge)。",
+    "断言 available_models 回写按 6 态显示。",
+    "后端契约测:同一 models/test 入口对官/三返回对称能力结构(llm.py 分叉已解)。"
+   ],
+   "layer2": [
+    "Manual 面板加 3 个 model id,点 Test Models。"
+   ],
+   "fe_resync": "覆盖项已全绿(2026-06-20)"
+  },
+  {
+   "covers": "#28 notable-models",
+   "atoms": [
+    28
+   ],
+   "shots": [
+    "model id 输入框带『值得一试』示例占位"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "Manual 面板挂载 → 断言按 notableProviderKey 调 GET /providers/notable-models。",
+    "断言拿到的 model id 写进输入框 placeholder。"
+   ],
+   "layer2": [
+    "打开第三方卡 Manual 面板看占位提示。"
+   ]
+  },
+  {
+   "covers": "#29 tp-rename-delete(级联删 route)",
+   "atoms": [
+    29
+   ],
+   "shots": [
+    "删除后该 provider 在 API Keys / LLM Roles / model bundles 三处都消失",
+    "官方卡无 ⋮ 菜单"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "契约测:第三方卡 ⋮→Delete→确认 → 断言走 DELETE /registry/endpoints/{id}(非仅整批 upsert),引用该 endpoint 的 route 被级联清掉。",
+    "组件测:官方卡断言无 ⋮ 菜单(不可改名/删)。",
+    "Delete 必须经二次确认 toast 才触发 onDelete。"
+   ],
+   "layer2": [
+    "删一个第三方 provider,过二次确认。",
+    "看官方卡有无 ⋮ 菜单。"
+   ]
+  },
+  {
+   "covers": "#30 test-status-projection(6 态 + inline)",
+   "atoms": [
+    30
+   ],
+   "shots": [
+    "六态卡:ready 绿 / historical_ready 蓝(Previously Connected) / untested 灰 / failed 红(带 reason) / cooling_down 灰+倒计时 / off 灰禁用",
+    "API Keys 卡与 LLM Roles 同态同色",
+    "draft 真探出证据后蓝态点亮(桩态下不亮)"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "喂含各 ui_state 的 registry DTO → 断言 ProviderCard 渲染对应颜色标签且常驻 inline 在 key/Base URL 旁(不只 toast)。",
+    "断言蓝态显示『Previously Connected』。",
+    "一致性测:同一 ui_state,API Keys 卡与 LLM Roles 的 provider-state-badge.tsx 渲染同色。",
+    "蓝态端到端:后端 probe_import_draft 真探出证据后投影 historical_ready;桩态下应表现为不亮、而非误亮。"
+   ],
+   "layer2": [
+    "造各态数据看六态卡。",
+    "与 LLM Roles 页并排比色。",
+    "后端 draft 真探出证据后看蓝态。"
+   ],
+   "fe_resync": "覆盖项已全绿(2026-06-20)"
+  },
+  {
+   "covers": "#31 registry-restore",
+   "atoms": [
+    31
+   ],
+   "shots": [
+    "刷新后所有卡、状态、Available Models 原样恢复"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "刷新/重进页 → 断言 getCredentials() 把全量 endpoint+route+状态恢复成每张卡。",
+    "断言只投影 registry、不持第二份(切 tab/刷新不丢)。",
+    "窗口聚焦 / WebSocket registry_changed 各再拉一次。"
+   ],
+   "layer2": [
+    "配好几张卡后刷新页面。",
+    "切到别的 tab 再切回。"
+   ]
+  }
+ ]
+}

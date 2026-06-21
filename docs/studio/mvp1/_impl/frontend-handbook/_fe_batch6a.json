@@ -1,0 +1,14 @@
+{
+ "n6-history#1": {
+  "name": "autocommit-feedback (成功 run 后存档感知)",
+  "fix_plan": "在 Workspace.tsx 的 run 完成监听点接存档反馈。当前 completedRunId(Workspace.tsx:186,只判断 runStream.events 里有没有 run_ended,有则把 runId 透传给 CopilotPanel)仅驱动 copilot 分析栏,既不读 git_status 也不调 fetchRunDetail。改法:在 run_ended 到达时(可用 useEffect 监听 completedRunId 由 null→runId 的边沿),调 useRunHistory(currentSkillId).fetchRunDetail(runId)(useRunHistory.ts:35,GET /skills/{id}/runs/{run_id} 返回 RunDetail)→ 读 detail.metadata.git_status → committed→toast/inline『已自动存档,可在 Local History 回滚』;locked/failed→『本次未存档(原因)』;no_git→『已存档(本 skill 无 git 仓,未生成可回滚快照)』。注意先在 Workspace 实例化 useRunHistory 以拿到 fetchRunDetail(目前 Workspace 没用这个 hook)。同时见下 BE-drift:frontend git_status 类型缺 no_git。",
+  "verify": "Vitest:mock run_ended + mock GET /runs/{run_id} 返 metadata.git_status='committed' → 断言先调 fetchRunDetail、再出现『已自动存档』反馈;git_status='locked'/'failed'/'no_git' → 断言对应『未存档/无仓』提示且不出『已存档』。UI:对有 .git 的 skill 真跑一次成功 run,看『已自动存档』toast。",
+  "evidence": "Workspace.tsx:186 completedRunId 只用于 CopilotPanel(Workspace.tsx:1144);grep 全 src/ 无 git_status 消费者(仅 api/types.ts:230 类型定义),fetchRunDetail 仅在 useRunHistory.ts:35 定义、无任何调用处。run_ended 在 useRunStream.ts:88 仅置 runEnded 停重连、不带 metadata。后端 GET /runs/{run_id}→get_run_detail→RunDetail 已就绪(runs.py:72-74, run_manager.py:652-656),git_status 回填已实现(run_manager.py:833-861)。"
+ },
+ "n6-history#1-bedrift": {
+  "name": "git_status 前端类型缺 no_git (契约漂移,#1 子项)",
+  "fix_plan": "后端 RunMetadata.git_status 枚举已扩为 committed|locked|failed|no_git(backend/app/models/runs.py:65),但前端 frontend/src/api/types.ts:230 仍是 'committed'|'locked'|'failed'|null,缺 'no_git'。把前端类型补成 'committed'|'locked'|'failed'|'no_git'|null,并在 #1 的文案分支里覆盖 no_git。这是纯前端类型/文案对齐,后端无需再改(后端已是权威)。注:handbook 把无 .git 仍标 committed 列为待修 MAJOR,但当前后端已修复为返回 no_git(run_manager.py:844-852),handbook 该 MAJOR 描述已 stale。",
+  "verify": "tsc 类型检查通过且 #1 的 switch/if 覆盖 no_git;Vitest 断言 git_status='no_git' 时出『无 git 仓』文案而非崩溃或落入 failed 分支。",
+  "evidence": "backend models/runs.py:65 git_status: Literal['committed','locked','failed','no_git']|None;run_manager.py:852 commit_result is None→git_status='no_git'。frontend api/types.ts:230 git_status?: 'committed'|'locked'|'failed'|null(无 no_git);grep 'no_git' 全 frontend/src 零命中。"
+ }
+}

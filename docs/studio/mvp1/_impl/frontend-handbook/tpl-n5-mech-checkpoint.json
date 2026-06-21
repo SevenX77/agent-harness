@@ -1,0 +1,239 @@
+{
+  "id": "mech_n5_checkpoint",
+  "title": "checkpoint 与运行态存储 + 脏态判定(机制)",
+  "overview": {
+    "manages": "续跑的两层「存储事实源」:① checkpoint(检查点)——LangGraph 在每个 super-step(图节点执行完)自动落的状态快照,存在每个 run 独立的 SQLite 库,是『从某点续』的数据底座;② 运行态快照(snapshot.json/lease.json)——sidecar 侧 RuntimeStateStore 写的续跑控制态(checkpoint 指针 + 租约 + 栅栏)。外加脏态判定:续跑前比对快照与当前 skill 的内容哈希/执行指纹,判该 checkpoint 还能不能续。",
+    "why_single": "checkpoint 粒度、per-run 存储位置、运行态快照与 checkpoint 的两层关系、以及『脏态怎么判』这几件事是节点级续跑(N5.1#2)和脏态置灰(N5.1#3)共同依赖的底座,容易写糊,单列讲清。续跑端点本身在 mech_n5_resume,本页只讲它脚下的存储与判定机制。",
+    "design_owner": "engine 后端为主(LangGraph checkpointer 注入与解析、RuntimeStateStore Protocol 定义、脏态比对都在 engine / 引擎契约);sidecar(gateway 后端 HTTP 承载层)注入 LocalRuntimeStateStore 生产实现并经 resume/validity 端点暴露判定。",
+    "code_location": "engine:core/graph_assembler.py(编译时注入 checkpointer)、core/runner.py resolve_checkpointer、core/checkpointer.py(memory/sqlite/postgres 三 backend)、core/storage_contracts.py(RuntimeStateStore Protocol + LeaseToken/StateRef/StateVersionRef)。sidecar:core/adapters/runtime_state_store_local.py(LocalRuntimeStateStore 生产实现)、core/adapters/engine.py(脏态比对:重编译比 content_hash/execution_fingerprint)。",
+    "dataflow": [
+      "run 执行:graph.compile(checkpointer=resolve_checkpointer(spec)) → 每个 super-step LangGraph 自动写一条 checkpoint 到 per-run SQLite(sqlite:<workspace>/runs/<run_id>/checkpoints.db)",
+      "续跑取点:restore 运行态快照取 checkpoint_id/checkpoint_ns;缺省用 checkpointer.list 的最新一条",
+      "脏态判定:resume/validity 重编译当前 skill → 比对快照 content_hash/execution_fingerprint 与当前 → 一致=ok、不一致=dirty_upstream",
+      "并发态:RuntimeStateStore 写 snapshot.json(checkpoint 指针 + 状态)+ lease.json(租约)+ fencing_counter(单调栅栏)"
+    ]
+  },
+  "submodules": [
+    {
+      "name": "LangGraph per-run checkpointer",
+      "code": "engine: graph_assembler.py compile(checkpointer=...) + runner.py resolve_checkpointer + checkpointer.py",
+      "summary": "编译图时注入 checkpointer,引擎每跑完一个节点(super-step)自动落一条 checkpoint;Studio 默认每个 run 一个独立 SQLite 库。",
+      "formula": "checkpointer_spec 默认 sqlite:<workspace>/runs/<run_id>/checkpoints.db",
+      "diagram": "",
+      "rules": [
+        "graph.compile(checkpointer=checkpointer):编译时注入,之后每个 super-step 自动落盘一条 checkpoint。",
+        "resolve_checkpointer(spec):把 spec 解析成具体 saver,支持 memory / sqlite / postgres 三 backend;Studio 默认 per-run sqlite。",
+        "粒度:thread_id = run_id;同一 thread 下逐节点累积多条 checkpoint(每条对应执行到某节点的快照)。",
+        "编译图无 interrupt_before/interrupt_after 静态暂停点 —— 中断靠运行时动态产生(tool-call / interrupt,即 HitL)。"
+      ],
+      "do": [
+        "编译时注入 checkpointer,逐 super-step 自动落 checkpoint。",
+        "每个 run 一个独立 SQLite checkpoint 库。"
+      ],
+      "dont": [
+        "不用静态 interrupt 点(中断动态产生)。"
+      ],
+      "deviation": "无(checkpointer 注入与 per-run sqlite 已实现);『对外暴露任意指定历史节点续』受限于 checkpoint 定位与节点级编排(见 mech_n5_resume 的节点级定位 partial)。"
+    },
+    {
+      "name": "RuntimeStateStore 运行态存储 Protocol",
+      "code": "engine: core/storage_contracts.py(Protocol)；sidecar: core/adapters/runtime_state_store_local.py(LocalRuntimeStateStore)",
+      "summary": "定义续跑控制态的读写契约:租约(lease)、心跳(heartbeat)、快照(snapshot)、恢复(restore)、释放(release),配 LeaseToken/StateRef/StateVersionRef 三个 frozen 值对象。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "acquire_lease(run_id, *, owner_id, ttl_ms) → LeaseToken:取租约,活跃租约被别 owner 抢 → LeaseConflictError(state.lease_conflict)。",
+        "heartbeat(run_id, *, lease_token) → LeaseToken:续租;lease 已非活跃 → LeaseFencingError(state.lease_fenced)。",
+        "snapshot(run_id, state, *, lease_token) → StateVersionRef:写状态快照;fencing_token 比当前小 → state.lease_fenced。",
+        "restore(run_id, *, state_ref=None) → dict:恢复最新或指定版本状态(只读,不要求租约)。",
+        "release(run_id, *, lease_token):释放租约。",
+        "值对象:LeaseToken(lease_id/owner_id/fencing_token:int/ttl_ms/safety_margin_ms)、StateRef(run_id/version)、StateVersionRef(run_id/version/fencing_token)。"
+      ],
+      "do": [
+        "提供 lease/heartbeat/snapshot/restore/release 五原语。",
+        "fencing token 单调递增防旧 worker。"
+      ],
+      "dont": [
+        "restore 不要求租约(只读);其余写操作要求租约匹配。"
+      ],
+      "deviation": "无 —— Protocol + 引擎 InMemory 实现 + sidecar LocalRuntimeStateStore(fcntl.flock 跨进程锁)均已实现。"
+    },
+    {
+      "name": "脏态判定(checkpoint validity)",
+      "code": "sidecar: core/adapters/engine.py(resume/validity:重编译比对) + routers/runs.py resume_validity",
+      "summary": "续跑前判这个 checkpoint 还能不能用:重编译当前 skill,比对快照里存的 content_hash / execution_fingerprint 与当前值;变了就是上游脏(dirty_upstream),前端据此置灰[Resume]。",
+      "formula": "resume_allowed = (reason == 'ok')",
+      "diagram": "",
+      "rules": [
+        "重编译当前 skill 取 current content_hash(内容哈希,GRAPH.md/skill 文件改动会变)/ current execution_fingerprint(执行指纹,编译产物拓扑改动会变)。",
+        "⚠ 判定粒度是**全局 artifact 级**:只比对快照 vs 当前的 content_hash/execution_fingerprint,回答『整份编译产物变没变』。",
+        "⚠ resume_from_node_id 虽进了 validity 请求与响应,但**只被回显、不参与判定**——EngineAdapter.resume_validity 未据它做节点依赖切片/祖先后代/旁支影响范围。",
+        "其它否决:checkpoint.not_found / checkpoint.invalid / state.not_found / artifact.invalid_ref / artifact.identity_mismatch / compile_failed。",
+        "判定是**按需**的(前端查 validity 才算),无后台自动失效广播。"
+      ],
+      "do": [
+        "按需比对快照与当前 content_hash/execution_fingerprint 判脏。",
+        "返回 resume_allowed + reason + 脏字段供前端置灰。"
+      ],
+      "dont": [
+        "不做后台自动失效/不主动推『某下游 checkpoint 失效』事件(前端需主动查 validity)。",
+        "不做版本血缘追踪(只二元『匹配/不匹配』)。"
+      ],
+      "deviation": "⚠ 契约缺口(对 spec F3):validity 是**全局 artifact 级**(content_hash/execution_fingerprint 比对),不是 per-node。skill 任意内容/拓扑变动 → hash 变 → **无关旁支也会被判 dirty**,无法满足 F3『改上游后受影响下游置灰、无关节点仍可 Resume』。要落地 F3 需补 per-node validity:节点依赖切片 + checkpoint 绑定的 graph/source fingerprint + 旁支判定 + resume_from_node_id 对 resume_allowed 的真实影响。"
+    }
+  ],
+  "files": [
+    {
+      "name": "per-run checkpoint 库 + 运行态快照",
+      "version": "存储位置:<workspace>/runs/<run_id>/",
+      "what": "每个 run 一套续跑存储:checkpoints.db(LangGraph 写的逐节点 checkpoint)+ snapshot.json/lease.json/fencing_counter.json(RuntimeStateStore 写的续跑控制态)。",
+      "structs": [
+        {
+          "name": "RuntimeState 快照(snapshot.json,前端经端点间接读,不直读文件)",
+          "fields": [
+            {
+              "name": "checkpoint_id",
+              "type": "str",
+              "meaning": "续跑定位的 LangGraph checkpoint 标识(restore 出后传引擎)"
+            },
+            {
+              "name": "checkpoint_ns",
+              "type": "str",
+              "meaning": "checkpoint 命名空间(节点级粒度用)"
+            },
+            {
+              "name": "artifact_ref",
+              "type": "ref",
+              "meaning": "编译产物引用(续跑时校验 skill 身份)"
+            },
+            {
+              "name": "content_hash",
+              "type": "str",
+              "meaning": "skill 内容哈希(脏态判定比对项)"
+            },
+            {
+              "name": "execution_fingerprint",
+              "type": "str",
+              "meaning": "执行指纹/编译拓扑指纹(脏态判定比对项)"
+            },
+            {
+              "name": "status",
+              "type": "str",
+              "meaning": "运行态(running/success/failed)"
+            }
+          ]
+        },
+        {
+          "name": "LeaseToken(lease.json,并发控制)",
+          "fields": [
+            {
+              "name": "lease_id",
+              "type": "str",
+              "meaning": "租约标识"
+            },
+            {
+              "name": "owner_id",
+              "type": "str",
+              "meaning": "持租约的 worker 标识"
+            },
+            {
+              "name": "fencing_token",
+              "type": "int",
+              "meaning": "单调递增栅栏令牌,防旧 worker 写入"
+            },
+            {
+              "name": "ttl_ms",
+              "type": "int",
+              "meaning": "租约存活时长(ms)"
+            }
+          ]
+        }
+      ],
+      "owns": "运行态存储归 engine 后端(契约)+ sidecar(LocalRuntimeStateStore 生产实现);checkpoint 库归 LangGraph SqliteSaver。",
+      "crud_pointer": "前端**不直读这些文件**;只经 resume 端点(restore 在后端发生)与 resume/validity 端点间接用到其中的 checkpoint 指针与脏态比对结果。",
+      "storage_note": "落盘细节(SQLite per-run 库、原子 rename、fcntl 锁)是后端实现,不归前端;前端只关心『续跑点/能否续』经端点返回。",
+      "security_fe": "前端不接触这些文件路径或锁;只通过鉴权后的 HTTP/WS 端点交互。"
+    }
+  ],
+  "interface_groups": [
+    {
+      "key": "action",
+      "title": "运行启动(checkpoint 源,debug 前置)",
+      "note": "这一类点了会**真发起一次运行**:进 debug 的前置是先有一次真实 Run,它产出 trace + 每节点 checkpoint(本机制管的就是这些 checkpoint)。run 启动本体属 N4 运行节点,这里只列它作为『checkpoint 从哪来』的源。"
+    }
+  ],
+  "interfaces": [
+    {
+      "group": "action",
+      "endpoint": "POST /api/skills/{skill_id}/runs",
+      "req": "body{input_data:dict}(skill 入参)",
+      "resp": "RunMetadata{run_id, status, started_at, ...};随后引擎按 per-run checkpointer 在每个 super-step 落 checkpoint,事件经 WS /ws/runs/{run_id} 推回",
+      "purpose": "发起一次真实 run,产出 debug 所需的 trace + per-run checkpoint(N5.1#4 的前置);run 控制本体见 N4。",
+      "provider": "gateway 后端 sidecar 的 start_run 路由(前端 startRun)→ 引擎按 per-run checkpointer 执行",
+      "id": "iface-startrun"
+    }
+  ],
+  "boundaries": {
+    "do": [
+      "engine 注入 checkpointer 逐节点落 checkpoint(per-run sqlite)",
+      "RuntimeStateStore 提供 lease/heartbeat/snapshot/restore/release 并发控制",
+      "resume/validity 重编译比对 content_hash/execution_fingerprint 判脏态"
+    ],
+    "dont": [
+      "前端不直读 checkpoint 库 / 运行态文件(只经端点)",
+      "不做静态 interrupt 暂停点(中断动态产生)",
+      "不做后台自动失效广播(脏态按需查 validity)"
+    ]
+  },
+  "rule_sections": [
+    {
+      "title": "resume/validity 判定 → reason(能否续 + 为什么)",
+      "note": "脏态判定把『快照 vs 当前』的比对结果映射成可续判定(条件 → 结果),前端据 resume_allowed/reason 决定是否置灰[Resume]:",
+      "rules": [
+        [
+          "快照与当前 content_hash + execution_fingerprint 都一致",
+          "ok(resume_allowed=true 可续)"
+        ],
+        [
+          "上游改了:content_hash 或 execution_fingerprint 变了",
+          "dirty_upstream(置灰 + 标 dirty_fields)"
+        ],
+        [
+          "该 checkpoint 不存在 / 结构损坏",
+          "checkpoint.not_found / checkpoint.invalid"
+        ],
+        [
+          "无运行态快照 / 编译产物引用损坏",
+          "state.not_found / artifact.invalid_ref"
+        ],
+        [
+          "skill 身份变了 / 重编译失败",
+          "artifact.identity_mismatch / compile_failed"
+        ]
+      ]
+    }
+  ],
+  "backend_status": [
+    {
+      "item": "per-run checkpointer + RuntimeStateStore lease/fencing(D10.1 / D10.5)",
+      "d12": "D10「Resume/checkpoint」",
+      "status": "ok",
+      "note": "LangGraph per-run sqlite checkpointer(graph_assembler 注入 + resolve_checkpointer)与 RuntimeStateStore Protocol + LocalRuntimeStateStore(fcntl 跨进程锁)均已落地,lease/fencing 错误码完整。",
+      "ref": "d10"
+    },
+    {
+      "item": "checkpoint validity 脏态判定端点(D10.2 的 validity 段)",
+      "d12": "D10「Resume/checkpoint」",
+      "status": "partial",
+      "note": "resume/validity 端点已实现:重编译比对 content_hash/execution_fingerprint,reason 含 dirty_upstream、dirty_fields 标脏字段。⚠ 但判定是**全局 artifact 级**(resume_from_node_id 仅回显不参与判定),任意改动会让无关旁支也判 dirty——不满足 spec F3『无关旁支仍可续』。F3 落地需补 per-node validity(节点依赖切片/旁支判定),故标 partial 而非 ok。",
+      "ref": "d10"
+    },
+    {
+      "item": "节点级 checkpoint 定位『1..X-1 不重跑』(D10.2)",
+      "d12": "D10「Resume/checkpoint」",
+      "status": "partial",
+      "note": "checkpoint 逐节点累积已有,但对外『从任意指定历史节点续、上游严格走 checkpoint 不重跑』的定位+编排引擎侧仍 partial(见 mech_n5_resume 节点级定位子模块)。",
+      "ref": "d10"
+    }
+  ]
+}

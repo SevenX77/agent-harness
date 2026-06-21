@@ -1,0 +1,43 @@
+[
+  {
+    "name": "发布 hook",
+    "what": "驱动『发布上线』整条前端流程的 hook:维护发布状态机、调发布端点、按结果出 toast,并在可修复失败上挂 Open Settings 指引 —— 发布 surface 各操作经它统一对接后端,不各自发请求。",
+    "where": "usePublishSkill.ts 的 `usePublishSkill`(发布 hook,返回 status/error/lastResult/publish);核心流程 `executePublishSkill`(调 `publishSkill(skillId)` → 成功走 `releaseSuccessMessage` toast、失败走错误 toast);`SETTINGS_FIXABLE_ERROR_CODES`(可在 Settings 修复的错误码集合:APP_SETTINGS_INCOMPLETE、REGISTRY_NOT_CONFIGURED);`settingsToastOptions`(命中可修复码时给错误 toast 挂『Open Settings』动作);`backendErrorCode`/`backendErrorMessage`(从后端错误体取 error_code / 人读 message)。",
+    "duties": [
+      "维护发布状态机 idle → publishing → success / error,并在卸载时清理 reset 定时器。",
+      "`executePublishSkill` 调 `publishSkill(skillId)`(POST /publish):status==='ok' 走成功分支(releaseSuccessMessage toast),否则走失败分支(优先后端 message,否则泛化文案)。",
+      "失败时取 error_code,命中 SETTINGS_FIXABLE_ERROR_CODES 就经 `settingsToastOptions` 在 toast 上挂『Open Settings』动作(原子 #7)。",
+      "把发布结果(PublishResult)暴露成 lastResult,供 Header 回执徽章(经『发布回执解析』)消费。"
+    ],
+    "used_by": "#5(Release 入口触发 publish)、#6(成功提示 releaseSuccessMessage + lastResult 喂回执)、#7(失败按可修复码挂 Open Settings)。",
+    "boundary": "做:发布状态机、调发布端点、成功/失败 toast、可修复码→Open Settings 指引。不做:不做 git push、不打包(那是后端)、不自造发布结果、不直接调外部 registry。",
+    "api": "POST /api/skills/{id}/publish(经 api/client 的 publishSkill);不直接调外部 registry 端点。"
+  },
+  {
+    "name": "发布回执解析",
+    "what": "把后端发布结果解析成『回执』展示字段的前端逻辑 —— 从 PublishResult 里抽出版本 / artifact id / 内容哈希 / manifest / 远端同步状态,供成功提示与 Header 徽章如实表达发布=Artifact Registry artifact(非 git)。",
+    "where": "usePublishSkill.ts 的 `releaseSuccessMessage`(把 PublishResult.extra 拼成成功 toast 文案:Released {version}: {artifactId}, {contentHash}, {manifestRef}, {remoteSync});Header.tsx 的 `getReleaseIdentity`(从 lastResult/PublishResult.extra 取 release_version / artifactId / contentHash / manifestRef / remoteSyncLabel 渲染回执徽章与 tooltip);辅以 `remoteSyncSummary`/`stringField`(安全取字段)。",
+    "duties": [
+      "从 PublishResult.extra 安全取出 release_version、artifact_ref.artifact_id、content_hash、manifest_ref、remote_sync 摘要。",
+      "`releaseSuccessMessage` 把这几项拼成一条成功 toast(字段齐全才给详细回执,否则回退泛化文案)。",
+      "`getReleaseIdentity` 把同一组字段渲成 Header 回执徽章 + tooltip,如实表达 artifact/hash/manifest/remote sync(消除『发布=git push』误导,呼应原子 #5)。"
+    ],
+    "used_by": "#5(回执文案点明 Artifact 性质以消歧)、#6(成功提示 + Header 回执徽章)。",
+    "boundary": "做:只读地把 PublishResult 解析成回执展示字段。不做:不发起发布、不改后端结果、不自造回执(字段缺则回退泛化文案,不编造)。",
+    "api": "无 —— 纯解析/呈现,数据来自『发布 hook』的 PublishResult。"
+  },
+  {
+    "name": "native-fs 打包导出",
+    "what": "把已发布的 release 包经 Studio Rust 后端 native-fs 落地到工作区文件的前端编排 —— 用发布回执触发 Tauri 命令写盘,并处理成功 Reveal 与 typed 错误的换路径重试。",
+    "where": "Header.tsx 的 `executePackageRelease`(打包导出编排:用 releaseIdentity 调 writePublishPackage、成功/失败 toast、Conflict/PermissionDenied/PathEscape 可重试)、`packageRelativePath`(默认工作区相对路径 `.workspace/releases/{skill}-{version}.package.json`)、`handlePackageRelease`(按钮/菜单点击入口)、`Package target` 路径弹框;lib/tauri.ts 的 `writePublishPackage`(invoke Tauri 命令 `publish_package_writer`,请求/结果类型 WritePublishPackageRequest/Result)。",
+    "duties": [
+      "用上一次发布回执(release_version/content_hash/manifest_ref/artifact_ref)+ 工作区相对路径调 `writePublishPackage` → Tauri `publish_package_writer` 写盘。",
+      "成功:弹『Packaged release {version}: {hash}, {manifestRef}』+ native 路径 + 『Reveal』(在文件管理器定位)。",
+      "失败:按 native-fs typed 错误(Conflict/PermissionDenied/PathEscape)给可重试 toast + 『Choose path』动作打开 Package target 弹框换路径重试;非可重试给普通错误 toast。",
+      "路径默认由 `packageRelativePath` 算(对 skill/version 做安全字符替换)。"
+    ],
+    "used_by": "#10(Package release——native-fs 打包导出)。",
+    "boundary": "做:用回执触发 native-fs 写盘、投影结果、错误换路径重试。不做:前端不自己写盘(走 Tauri Rust 命令)、不做 git push、不改发布回执(只读 releaseIdentity)。",
+    "api": "Tauri 命令 publish_package_writer(Studio Rust 后端 native-fs);经 lib/tauri.ts writePublishPackage 调,非 sidecar HTTP。"
+  }
+]

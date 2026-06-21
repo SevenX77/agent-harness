@@ -1,0 +1,115 @@
+{
+  "code": "N0",
+  "title": "Settings · 设置与配置",
+  "status": "partial",
+  "intent_oneliner": "用户在这里配好「让其余节点能跑」的运行底座（凭证 / 角色→模型映射 / copilot / 身份路径）；UI 必须让 endpoint 与每条 route 的真实可用状态（6 态：绿 ready / 蓝 historical / 灰 untested / 红 failed / 熔断 / off）显而易见，且测试结果以后端 SSOT 为准、切 tab 刷新不丢。",
+  "role_table": {
+    "headers": ["界面单元", "在用户工作流里的作用", "MVP1 要它表达什么"],
+    "rows": [
+      ["四 tab 左导航（General / API Keys / LLM Roles / Copilot）", "用户在覆盖层里切换四条配置旅程，不卸载工作区", "settings 是「运行底座」，可在装配/试飞途中随手进出（00_settings §2.1）"],
+      ["General Tab", "填 User ID / Gitea 主机 / 默认 skills 目录（即填即存）", "身份与产物落点；唯一走 native 文件选择器的地方（00_settings §3.1）"],
+      ["API Keys Tab", "配 provider 凭证、验 endpoint 可连通", "endpoint 验证主战场（非 model 保证）；official 只 get-models、third-party 加批量探（ux-spec §1）"],
+      ["LLM Roles Tab", "把抽象角色映射到 model group 兜底链并真实测通", "predict/run 命脉；左角色卡 + 右可用模型，存结构化、执行平铺（ux-spec §2）"],
+      ["Copilot Tab", "给 copilot 配单个 model group", "与 roles 同构但单组；测试走真 SDK（ux-spec §3）"],
+      ["Available Models 侧栏（Roles/Copilot 复用）", "拖模型进角色，按 6 态色看每个 provider 行能不能用", "endpoint 状态投影；family 可折叠 + 弃用区（ux-spec §2.1）"]
+    ]
+  },
+  "surfaces_table": {
+    "headers": ["界面 / 状态", "用户在此做什么", "期望得到什么", "当前不合理点"],
+    "rows": [
+      ["API Keys · official 卡", "填 key 点 Test", "get-models 即验通、模型标签变蓝（historical）", "按钮叫「Test」走异步批量 job；与第三方机制不对称（ux-spec §7.2 drift）"],
+      ["API Keys · third-party 卡", "填 URL+key、选协议、填一个 model id 做 endpoint test", "系统自动探协议 + 自动批量探模型判 endpoint 通否", "协议仍是手动 Select；endpoint test 仍要用户手填单个 model id，非自动批量探（ux-spec §1.2）"],
+      ["LLM Roles · 可用模型侧栏", "看模型卡里各 provider 6 态、拖进角色", "6 态色齐全；family 可折叠；弃用模型进弃用区可 re-probe 捞回", "6 态色已齐（含蓝）；但无 family 折叠、无弃用区（ux-spec §2.1 #1 + 弃用区）"],
+      ["LLM Roles · 角色测试", "点 Test 批量探角色内所有模型", "状态灯实时刷 + 结果落后端、切 tab 不丢", "前端仍持 roleTestStates 易失副本（违 ux-spec §6.5 检查 2）"],
+      ["LLM Roles · Model Bundle 卡", "建可复用束、测试、拖进角色", "束有 Test 按钮 + 状态灯；拖进角色是引用（改束同步）", "束卡无 Test 按钮、status 写死空（testStatuses={{}}）（ux-spec §2.6 / §7.3 #50）"],
+      ["Copilot · 选组器", "给空 copilot 角色选一个 model group", "可搜索的选组器", "仍是裸 Select 下拉，不可搜索（ux-spec §3.3 #C10）"],
+      ["Copilot · 内置角色浮出", "看默认浮出的 Claude/DeepSeek 最优模型", "动态择优 opus4.8→4.7、V4Pro→V3.2Pro", "靠硬编码 canonical_id 命中判 built_in，非按 available 动态择优（copilot-role-derivation.ts:65-69）"]
+    ]
+  },
+  "actions_table": {
+    "headers": ["用户动作", "经由哪个界面", "MVP1 约束 / 禁止"],
+    "rows": [
+      ["填 official key + Test", "API Keys official 卡", "只 get-models 即验通，不逐模型 probe（ux-spec §1.1）"],
+      ["填 third-party URL", "API Keys 第三方卡", "协议应自动探（打推理端点），不让用户手选（ux-spec §1.2）；现仍手选"],
+      ["拖 model group 进角色", "Roles 角色卡", "默认选 ready+untested+蓝、排除 failed/off（ux-spec §2.2）"],
+      ["点角色 Test", "Roles 角色卡", "批量探所有模型、结果回写后端 draft、前端不持第二份（ux-spec §2.5 / §6.5）"],
+      ["选 copilot model group", "Copilot 空角色卡", "role key 必须保 copilot_ 前缀，否则后端误判 graph-agent（ux-spec §3.5 bug）"],
+      ["改任意 General 字段", "General Tab", "debounce 即存、无 Save 按钮（ux-spec §7.1）"]
+    ]
+  },
+  "plan": "先后端再前端。① 后端：endpoint test 统一成 POST /endpoints/{id}/test + 批量探测（消除 official/third-party drift），protocol 自动探测落地，project_provider_model_state 已基本到 6 态可保留。② 前端依赖后端契约后：A) 删 LlmRolesTab 的 roleTestStates 易失层、改纯投影后端 role-test 结果；B) 给 Available Models 侧栏加 family 折叠 + 弃用区；C) 第三方 API Keys 卡把「手填单 model id + 手选协议」换成「自动探协议 + 自动批量探」；D) Copilot 选组器换可搜索组件、内置浮出改动态择优；E) ModelBundleCard 接 Test 按钮 + 真 status；F) 校验 copilot 选组保前缀（已在 applyCopilotModelGroupSelection 修，复核即可）。",
+  "current_risk": "头号 UX 逻辑问题是「测试态真相源不统一」：LLM Roles 仍在前端组件态里持有 roleTestStates（LlmRolesTab.tsx:162 起）这份易失测试副本，靠 useEffect 从 getRoleTestResults 做 best-effort 种子回填（:171-184），但运行期状态仍主要活在前端 state 里。这直接违反 ux-spec §6.5 检查 2「前端只投影、不持第二份真相」。后果：用户测完一个角色、切到别的 tab 再回来，或刷新 app，看到的角色状态灯可能和后端真实持久化的探测结果不一致——用户无法信任「我刚才测过、它是绿的」这件事，破坏了 settings 全节点的灵魂机制（测了就别再丢）。Copilot 侧同样有 routeStatusOverrides 这份会话级覆盖态（CopilotTab.tsx:112）。",
+  "issues_table": {
+    "headers": ["不合理点", "应如何改（处理原则）"],
+    "rows": [
+      ["前端 roleTestStates / routeStatusOverrides 易失副本，测试态真相分裂", "删前端易失层，角色/route 状态一律从后端 registry + role-test 结果投影；切 tab/刷新读回后端 SSOT（ux-spec §6.5 检查 2）"],
+      ["API Keys official/third-party 测试机制不对称（Test 异步 job vs Get Models 同步单次 + 手填 model id）", "统一 POST /endpoints/{id}/test + 批量探测；官/三差异只剩身份与 canonical 默认，测试路径同一套（ux-spec §1.2 / §7.2 drift 铁律）"],
+      ["第三方 protocol 仍是手动 Select，未自动探测", "系统对 URL 排列组合各协议打推理端点 + 对应 auth header，连通即判协议，UI 去掉手选（ux-spec §1.2）"],
+      ["Available Models 侧栏无 family 折叠、无弃用区", "加 per-family 折叠（localStorage 视图态）；disabled 模型入可折叠弃用区、灰显不可拖、可复制名 + re-probe 捞回（ux-spec §2.1）"],
+      ["Model Bundle 卡无 Test 按钮、状态写死空", "复用 role 测试路径给束加 Test + 真 status 灯；拖进角色是引用非快照（ux-spec §2.6）"],
+      ["Copilot 选组器不可搜索 + 内置浮出靠硬编码 id", "选组器换可搜索组件；内置浮出按 available 动态择优 opus4.8→4.7 / V4Pro→V3.2Pro（ux-spec §3.2/§3.3）"]
+    ]
+  },
+  "gates_table": {
+    "headers": ["验证项", "现状 = 不合理", "目标 = 合理"],
+    "rows": [
+      ["角色测试态持久性", "测完切 tab/刷新可能回退（前端 roleTestStates 易失）", "切 tab/刷新后状态灯仍准（纯投影后端 SSOT）"],
+      ["官/三测试一致性", "official=Test 异步 job、third-party=Get Models+手填 model", "两者同走 endpoint test + 批量探测，仅身份不同"],
+      ["第三方协议探测", "用户手动 Select 协议", "填 URL 后系统自动探出协议"],
+      ["失败 route 仍可用", "buildAvailableModelGroups 保留全部 provider_models（已对）", "failed 标红、仍列出、仍可拖（维持）"],
+      ["family 折叠 / 弃用区", "都不存在", "family 可整体折叠；弃用模型入弃用区可 re-probe 捞回"],
+      ["copilot 选组前缀", "applyCopilotModelGroupSelection 已保 copilot_ 前缀", "选组后 role key 仍带 copilot_，后端不误判（复核维持）"]
+    ]
+  },
+  "children": [
+    {
+      "code": "N0.1",
+      "title": "General（身份与产物路径）",
+      "status": "ok",
+      "problem": "无明显违反。即填即存、无 Save 按钮、选目录走 native、Reset 回默认，均符合 MVP1。",
+      "design": "User ID / Gitea 主机 / 默认 skills 目录 debounce auto-save；选目录唤 OS 文件夹选择器；Reset 回落计算默认（00_settings §3.1 / ux-spec §7.1）。",
+      "current": "GeneralTab.tsx:33-135：三字段 + 语言选择，均 onChange 即调 appSettings.setX（debounce 由上层 PUT /api/settings 处理）；Choose 调 selectSkillDirectory（:21-31）；Reset 回 fallbackDefaultSkillsDirectory（:82-92）；右上 SaveStatusBadge（:38）。",
+      "fix": "维持现状即可；无改动项。",
+      "auto": ["grep 确认无独立 Save 按钮", "确认 SaveStatusBadge 接 appSettings.saveStatus"],
+      "manual": ["打开 General → 改 User ID → 不应出现 Save 按钮、应看到右上保存徽章转 Saving→Saved", "点 Choose → web 模式应 toast『Desktop only』"],
+      "pass": ["三字段即填即存且有保存徽章", "选目录走 native、Reset 回默认"]
+    },
+    {
+      "code": "N0.2",
+      "title": "API Keys（凭证 + 测试状态）",
+      "status": "partial",
+      "problem": "官/三测试机制不对称（official 按钮『Test』走异步批量 job、third-party 按钮『Get Models』同步单次 + 还要用户手填一个 model id 做 endpoint test），且第三方协议仍是手动 Select——这两点都违反 ux-spec §1.2「统一 endpoint test + 批量探测」「协议自动探测」。",
+      "design": "official 填 key 点 Test → get-models 即验通 + draft 回填变蓝；third-party 填 URL → 系统自动排列组合探协议（打推理端点 + 对应 auth header）→ 自动分批探模型、命中即停判 endpoint 通；测试路径官/三同一套，差异只剩身份与 canonical 默认（ux-spec §1.1/§1.2/§7.2 drift 铁律）。",
+      "current": "ApiKeysTab.tsx 渲染 official/third-party 两区 ProviderCard。ProviderCard.tsx:994-1004 按钮文案随 isOfficial 在『Test』/『Get Models』间切；:1010-1031 third-party 仍渲染手动 Protocol Select（onValueChange 写 provider_type）；:1068-1079 third-party『Endpoint test』要用户手填 single model id（『Please choose one model from Available Models for endpoint testing』）。6 态标签投影已在（routeStatusTagVariant :350，含 probe-verified=蓝）。",
+      "current_extra": "inline 常驻状态：ProviderCard 有 FieldReachabilityCheck（:1037）在 Base URL 旁显勾，部分满足 §1.4 #2.1『结果常驻原地』。",
+      "fix": "后端先统一 POST /endpoints/{id}/test + 批量探测策略与协议自动探测；前端再：① 两区按钮统一为 endpoint Test（去掉 official/third-party 文案与机制分叉）② 去掉手动 Protocol Select，改为填 URL 后展示自动探出的协议 ③ 去掉『手填单 model id』endpoint test，改为自动批量探 + inline 进度。",
+      "auto": ["grep ProviderCard 确认按钮文案不再随 isOfficial 分叉", "确认无手动 Protocol Select", "确认 6 态 Tag variant 映射覆盖 ready/probe-verified/failed/cooling/off"],
+      "manual": ["打开 API Keys → 第三方卡填 URL+key → 应自动探出协议、点测试自动批量探模型，不应要求手填单个 model id", "official 卡填 key 点 Test → 模型标签应出现蓝色『Previously Connected』（draft 回填）"],
+      "pass": ["官/三测试路径统一（同走 endpoint test 批量探测）", "第三方协议自动探出、无需手选", "6 态标签 inline 常驻、含蓝态"]
+    },
+    {
+      "code": "N0.3",
+      "title": "LLM Roles（角色→模型映射 / model group / fallback / 测试态）",
+      "status": "partial",
+      "problem": "三处缺口：① 前端仍持 roleTestStates 易失测试态（违『只投影、不持第二份』）② Available Models 侧栏无 family 折叠、无弃用区 ③ Model Bundle 卡无 Test 按钮、状态写死空。6 态体系、thinking 三档、Role Intent required_minimum、单顶层 tooltip、删 RoleTestResultPanel 这些已达标。",
+      "design": "角色存 model_groups[] 后端物化平铺链；侧栏 6 态色 + family 可折叠 + 弃用区（re-probe 捞回）；角色 Test 批量探所有模型、结果回写后端 draft、前端纯投影；bundle 复用 role 测试/改名、拖进角色=引用；fail/downgrade 只在单一顶层 tooltip（ux-spec §2.1-§2.6 / §6.5 检查 2）。",
+      "current": "LlmRolesTab.tsx:162 useState roleTestStates（易失），:171-184 useEffect best-effort 种子回填，:444-506 handleRunTestChain 把测试结果写进前端 state；AvailableModelsSidebar.tsx 6 态色齐全（providerStateTagVariant :519，含 historical_ready=probe-verified 蓝）但 buildAvailableModelGroups（:377）只按 section 分组无折叠、无弃用区分流；RoleSettingsDialog.tsx:125-144 thinking 是 off/preferred/required 三态 RadioGroup（达标），:40 token mode 含 required_minimum（达标）；ProviderChain.tsx:246-252 整行包一个顶层 Tooltip、状态灯 showTooltip={false}（嵌套已清，达标）；RoleTestResultPanel 仅自身文件引用、未挂载（达标，PM 已删）；ModelBundleCard.tsx:289 testStatuses={{}} 写死、无 Test 按钮。",
+      "fix": "① 删 roleTestStates，角色/route 状态全从后端 registry + role-test 持久结果投影；② 侧栏加 per-family 折叠（localStorage 视图态）+ 弃用区（disabled 入区、灰显不可拖、可复制名 + re-probe 捞回）；③ ModelBundleCard 接 role 测试路径的 Test 按钮 + 真 testStatuses。",
+      "auto": ["grep 确认 LlmRolesTab 不再有 roleTestStates useState", "grep 侧栏出现 family 折叠态 + 弃用区渲染", "grep ModelBundleCard 出现 Test 触发 + 非空 testStatuses", "确认 RoleTestResultPanel 仍未挂载"],
+      "manual": ["打开 Roles → 测一个角色 → 切到 Copilot tab 再切回 → 状态灯应仍为刚测结果（不回退 untested）", "侧栏点 anthropic family 头 → 应整体折叠隐藏其下模型", "provider 明确无此模型 → 该模型应入弃用区、灰显不可拖、可 re-probe", "hover provider 行 → 只弹一个顶层 tooltip（无嵌套）"],
+      "pass": ["切 tab/刷新后角色测试态不丢（纯后端投影）", "family 可折叠 + 弃用区可 re-probe 捞回", "bundle 有 Test + 真状态灯", "failed 标红仍可拖、单顶层 tooltip"]
+    },
+    {
+      "code": "N0.4",
+      "title": "Copilot（助手配置）",
+      "status": "partial",
+      "problem": "选组器仍是裸 Select 不可搜索（违 §3.3 #C10）；内置角色浮出靠硬编码 canonical_id 命中判 built_in，非按 available 动态择优（违 §3.2/§3.3）；route 状态仍持 routeStatusOverrides 会话级覆盖态（违『只投影』）。注：mock 已去、saveStatus 已接、『Backend Integration』假徽章已去、copilot_ 前缀已在 applyCopilotModelGroupSelection 保住——这几项比 ux-spec 旧现状描述已改善。",
+      "design": "copilot 单 model group；选组器可搜索；内置动态浮出（Claude opus4.8→4.7、DeepSeek V4Pro→V3.2Pro，按 available 最优）；eligible 不预过滤未测 route；测试走真 ClaudeSDKClient；save-status badge 四页共用；选组保 copilot_ 前缀（ux-spec §3.1-§3.5）。",
+      "current": "CopilotTab.tsx:494-509 EmptyCopilotRoleCard 用裸 Select（不可搜索）；copilot-role-derivation.ts:65-69 isBuiltIn 靠硬编码 canonical_id（claude-opus-4.7/4.8、deepseek-v4-pro/v3.2-pro）命中判定，pickDefaultCopilotGroupIds（:90-109）有择优阶梯但 isBuiltIn 判定与之脱节；CopilotTab.tsx:112 routeStatusOverrides 会话态、:118-136 best-effort 种子；applyCopilotModelGroupSelection（copilot-role-derivation.ts:114-148）选组后写 active_model=modelGroupId 但 role key 由调用方保持不变（前缀保住，bug 已修）；saveStatus 已接 SaveStatusBadge（:144/:289）；deriveCopilotCandidateGroups 从真 modelGroups+credentials 派生（无 mock）。",
+      "fix": "① 选组器换可搜索组件（同侧栏搜索体验）② built_in 判定改为按 available 动态择优结果驱动（与 pickDefaultCopilotGroupIds 对齐），不硬编码 id ③ 删 routeStatusOverrides 易失层、route SDK 状态纯投影后端真 SDK 测试结果（依赖后端把假测试 AsyncAnthropic 换成 ClaudeSDKClient）。",
+      "auto": ["grep CopilotTab 选组器是否可搜索（非裸 Select）", "grep copilot-role-derivation 是否仍硬编码 canonical_id 判 built_in", "确认无 mock-copilot-data 引用、无 Backend Integration 徽章", "确认选组后 role key 保 copilot_ 前缀"],
+      "manual": ["打开 Copilot → 新建角色 → 选组器应可输入搜索过滤", "available 里有 opus4.8 → 应浮出 4.8；只有 4.7 → 浮出 4.7", "点 Test → 应走真 SDK（spawn）验证、状态灯来自真测试", "选组后保存 → 后端应归 copilot 不错存 graph-agent"],
+      "pass": ["选组器可搜索", "内置按 available 动态择优、非硬编码", "route 状态纯投影真 SDK 测试", "选组保 copilot_ 前缀"]
+    }
+  ]
+}

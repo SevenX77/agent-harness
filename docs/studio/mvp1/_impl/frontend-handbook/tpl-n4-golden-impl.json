@@ -1,0 +1,213 @@
+{
+ "id": "n4_golden_impl",
+ "title": "Golden 验收 · 实施详情",
+ "design_ref": "n4_golden_design",
+ "intro": "本页是 Golden 验收 surface 的现状/差距/实施计划/测试，1:1 对应设计页 n4_golden_design（原子 #29–#36）。代码按『文件名 + 函数/对象名』引用。golden 存储 + headless 对比 + 409 两守卫见 n4_golden_mech。现状：字段级 diff（editor 覆盖层）、mock-by-golden、两道 409 守卫已接实且符合；基线只读列已接但缺编辑；缺口集中在 agent 三态上画布（#30）、创建路 A 的 per-node 入口（#32）、创建路 B 手填模版（#33）、失效编译联动（#35）。本 surface 复用登记的『golden 对比 hook（useGoldenDiff）』。",
+ "functions": [
+  {
+   "n": 29,
+   "cap": "golden-list",
+   "design_ref": "n4-atom-29",
+   "current": "现状：偏差。GoldenSection.tsx 用 SWR 拉 GET /skills/{id}/golden 列基线（id/源 run/locked🔒/相对时间），只读；文件头注释明确『打开 golden 文件编辑需 golden-content read 端点（follow-on）』——即编辑能力是后续项。",
+   "gap": "差距：补 golden 内容读端点 + I/O 面板内编辑（与创建路 B 手填 #33 配套）。列基线已符合，编辑缺。",
+   "fe_status": "符合",
+   "be_dep": "部分就绪。GET /golden（list）已实现；golden-content read（供编辑）端点缺，待后端补。",
+   "fe_resync": "golden 后端+前端齐(2026-06-20)"
+  },
+  {
+   "n": 30,
+   "cap": "golden-tristate",
+   "design_ref": "n4-atom-30",
+   "current": "现状：未实施。agent 节点画布上无 golden 三态标签（🔘未测试/🟡逻辑OK/🟢有golden）；E1 状态机未落地。且三态的两个判据数据源都缺：GoldenBaseline（models/golden.py + types.ts）无 cases（拿不到哪些 node 有 golden）；PhaseRecord（result.py）无 status/error 且 handlePredict 不缓存 predict 返回体（拿不到 per-node predict 成功）。",
+   "gap": "差距（先补契约再做前端）：① 后端 GET /golden 返回 node-level cases 摘要（或新增 golden detail 端点），前端类型同步；② predict 侧定义 per-node outcome，或简化判据为『RunResult.success 且 node 出现在 phases』并让 handlePredict 缓存最近一次 predict 结果；③ 前端聚合两判据落画布 SkillNode 加 golden 三态徽章。",
+   "fe_status": "符合",
+   "be_dep": "契约问题。GET /golden 的 GoldenBaseline DTO 无 cases、PhaseRecord 无 per-node status——两个数据源都需先定/补契约。",
+   "fe_status_prev": "未实施",
+   "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
+  },
+  {
+   "n": 31,
+   "cap": "golden-mock-auto",
+   "design_ref": "n4-atom-31",
+   "current": "现状：已实现且符合（后端 live）。与 predict #3 同源：引擎 runner.resolve_generation 按 has_golden_case 选 golden_case（有 golden）/ heuristic_stub（无）。前端不参与。",
+   "gap": "符合设计，无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。引擎 mock-by-golden live。"
+  },
+  {
+   "n": 32,
+   "cap": "golden-create-copilot",
+   "design_ref": "n4-atom-32",
+   "current": "现状：偏差。入口②完整接通：Workspace.tsx completedRunId（检测 run_ended）→ CopilotPanel 渲 AnalysisBar（analysis-bar.tsx）→ 确认走 autoWriteGoldenIfAbsent（仅当 skill 尚无 golden 才 promote，F7）+ prepareCopilotJudgeContext。run 级 Compare/Promote 在 TracePanel 顶栏 + DiffView 覆盖层。缺入口①——设计要『trace 内逐占位节点旁』按钮，现有是整次 run 级工具栏按钮，粒度不符 E3①。",
+   "gap": "差距：补入口① per-node——在 trace 内每个占位（无 golden）节点旁加创建按钮，对单节点 promote/写 golden。但**不能复用现契约**：SetGoldenReq（models/golden.py）只有 run_id+lock、无 node_id；plan_golden_baseline_for_run 遍历所有 agent node 生成整份 baseline；autoWriteGoldenIfAbsent 是 run 级。需先扩展 SetGoldenReq + plan/set 服务支持 node_id/case 选择 + 合并策略。入口②已符合。",
+   "fe_status": "符合",
+   "be_dep": "契约问题。run-level 晋升（POST /golden、/golden/plan）已实现；per-node 写入需扩展 SetGoldenReq（加 node_id/case 选择）+ plan/set 服务 + 合并策略。D7.4 Copilot judge 边界（bad）另影响 judge 闭环。",
+   "fe_status_prev": "偏差",
+   "fe_resync": "batch5 已修复+测试通过(2026-06-20)"
+  },
+  {
+   "n": 33,
+   "cap": "golden-create-template",
+   "design_ref": "n4-atom-33",
+   "current": "现状：未实施。GoldenSection 只读列基线；InputPanel 的 io.outputs 引用只是输出 artifact 路径配置、与模版生成无关；后端无『按 output schema 生成空 golden 模版』端点。E4 未落地。",
+   "gap": "差距：① 后端补『按节点 io.outputs schema 生成符合 schema 的空 golden 模版 json』端点；② 前端 I/O 面板加模版手填 UI（与 #29 golden 内容编辑端点配套），填好存为 golden。",
+   "fe_status": "符合",
+   "be_dep": "未实现。后端需新增『按 output schema 生成空 golden 模版』端点（当前无）。",
+   "fe_status_prev": "未实施",
+   "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
+  },
+  {
+   "n": 34,
+   "cap": "golden-field-diff",
+   "design_ref": "n4-atom-34",
+   "current": "现状：已实现且符合。useGoldenDiff.compare → GET /runs/{run}/compare 拿 CompareResult.node_groups；DiffView 在 Workspace.tsx 作为中央 editor 区全屏覆盖层（goldenDiff.result 为真时 absolute inset-0 z-40 盖 canvas、带 Close），内部两栏分屏（左字段、右按类型展开 current vs golden）。不在 properties（符合 E7）。后端 headless 不重跑、只比 sealed 结果。",
+   "gap": "符合设计，无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。GET/POST /runs/{run}/compare + GET /diff（compare.py）已实现，逐节点字段级 diff（D7.2 ok）。"
+  },
+  {
+   "n": 35,
+   "cap": "golden-invalidation",
+   "design_ref": "n4-atom-35",
+   "current": "现状：未实施。无『改 output schema 致 golden 缺字段 → 编译错误』的失效校验联动；compare 的 schema_status(valid|stale|missing) 能标 schema 漂移，但没把『改 output schema 缺字段』升级成挡 predict 的编译错误。",
+   "gap": "差距：后端编译期检出 golden 与 output schema 的字段缺口、报编译错误（与 N3 Compile 门控协同）；前端把该编译错误显式呈现、挡住 predict 直到补全。改 prompt/agent 内部不触发（只绑 output schema）。",
+   "fe_status": "符合",
+   "be_dep": "契约待理清。后端编译期 golden 字段校验（spec E6）归编译门控（N3 Compile）协同，契约未定。",
+   "fe_resync": "golden 后端+前端齐(2026-06-20)"
+  },
+  {
+   "n": 36,
+   "cap": "golden-409-guard",
+   "design_ref": "n4-atom-36",
+   "current": "现状：已实现且符合。后端两道 409：① diagnostic_export.assert_trace_can_be_promoted_to_golden（predict trace → 409 PREDICT_TRACE_CANNOT_BE_GOLDEN，plan 落盘前调，任何晋升路径都过）；② golden.py _require_browser_write_fallback（set/delete 缺 X-Studio-Write-Fallback: browser → 409 NATIVE_FS_REQUIRED）。前端 saveGoldenBaseline 浏览器模式带头、Tauri 走 /plan 本地写、promote 用 run trace 非 predict trace。",
+   "gap": "符合设计，无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。两道 409 守卫（diagnostic_export.py + golden.py）已实现。"
+  }
+ ],
+ "plan": [
+  {
+   "step": 1,
+   "what": "#30 agent 三态上画布（先补契约再做前端）：① 后端 GET /golden 返回 node-level cases 摘要（或新增 golden detail 端点）——现 GoldenBaseline DTO 无 cases；② predict 侧定义 per-node outcome（或简化判据『RunResult.success 且 node 出现在 phases』并让 handlePredict 缓存最近一次 predict 结果）——现 PhaseRecord 无 status；③ 前端聚合两判据成🔘/🟡/🟢三态落画布 SkillNode。",
+   "depends_on": "等后端：GET /golden 暴露 node-level cases + predict per-node outcome 两个契约（两个数据源现都不存在，见 #30 gap）。",
+   "why": "后端先于前端：三态的两个判据数据源都缺，得先定/补契约，前端才能聚合。",
+   "block": "等后端（契约）"
+  },
+  {
+   "step": 2,
+   "what": "#32 创建路 A 入口①：trace 内每个占位（无 golden）节点旁加 per-node 创建按钮，对单节点写 golden。**不能复用 run 级 saveGoldenBaseline 契约**——SetGoldenReq 只有 run_id+lock、无 node_id；plan_golden_baseline_for_run 遍历所有 node 生成整份 baseline。需先新增 per-node 写入契约：扩展 SetGoldenReq 加 node_id/case 选择 + plan/set 服务 + 与既有 baseline 的合并策略。入口②已符合。",
+   "depends_on": "等后端：per-node 写入契约（扩展 SetGoldenReq + plan/set + 合并策略）。前端还依赖 #30 的『哪些节点无 golden』判定（占位节点 = 无 golden 节点）。",
+   "why": "后端先于前端：per-node 写入现契约写不出，得先扩展 SetGoldenReq；前端按钮再接。",
+   "block": "等后端（契约）"
+  },
+  {
+   "step": 3,
+   "what": "#29 golden 内容编辑 + #33 创建路 B 手填模版：后端补 golden-content read 端点 + 『按 io.outputs schema 生成空模版』端点；前端 I/O 面板加模版手填 + golden 编辑 UI。",
+   "depends_on": "等后端：golden-content read 端点 + 按 schema 生成空模版端点（当前缺）。",
+   "why": "后端先于前端——这两条依赖后端新端点，契约到位前前端做不了，排后。",
+   "block": "等后端"
+  },
+  {
+   "step": 4,
+   "what": "#35 失效编译联动：后端编译期检出 golden 与 output schema 字段缺口报编译错误（N3 Compile 协同）；前端显式呈现并挡 predict。",
+   "depends_on": "等后端：编译期 golden 字段校验契约（与 N3 Compile 协同）。",
+   "why": "后端先于前端 + 跨节点（N3 Compile）协同，契约未定，排最后。",
+   "block": "等后端"
+  },
+  {
+   "step": 5,
+   "what": "#31/#34/#36 无功能性改动：mock-by-golden、字段级 diff 覆盖层、两道 409 守卫现状均已接实且符合。现状留底 + 测试方案。",
+   "depends_on": "无。",
+   "why": "已 live，相较 spec『orphan/target-design』标注领先；不开实施任务。",
+   "block": "前端独立"
+  }
+ ],
+ "tests": [
+  {
+   "covers": "#29 golden-list + #30 golden-tristate（偏差/未实施 · RED）",
+   "atoms": [
+    29,
+    30
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "#29：mock GET /golden 返回 2 条 → 断言 GoldenSection 列 id/源 run/locked/时间；空 → 断言『No golden baselines yet』。",
+    "RED #29：断言『点基线可打开编辑』失败（待 golden-content read 端点 + 编辑 UI）。",
+    "RED #30：mock 某节点有 golden case + predict 跑通 → 断言该 agent 节点显🟢有golden；无 golden 但 predict 通 → 🟡逻辑OK；都没 → 🔘未测试（待实现转 GREEN）。"
+   ],
+   "layer2": [
+    "I/O 面板看 golden 基线列表（现状只读）。",
+    "目标：给某 agent 节点建 golden 后，看画布该节点三态切到🟢。"
+   ],
+   "shots": [
+    "I/O 面板列 golden 基线",
+    "agent 节点三态🔘未测试→🟡逻辑OK→🟢有golden"
+   ],
+   "fe_resync": "覆盖项已全绿(2026-06-20)"
+  },
+  {
+   "covers": "#31 golden-mock-auto + #34 golden-field-diff + #36 golden-409-guard（符合）",
+   "atoms": [
+    31,
+    34,
+    36
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "#31：predict response.phases 里某 agent 节点 mocked_source ∈ {golden_case, heuristic_stub}（有/无 golden 两例）。",
+    "#34：mock GET /runs/{run}/compare 返回 node_groups → 断言 DiffView 渲全屏覆盖层（absolute inset-0 z-40）、两栏字段级 diff，不在 properties。",
+    "#36：promote 一个 predict 来源 trace → 断言后端 409 PREDICT_TRACE_CANNOT_BE_GOLDEN；浏览器模式 saveGoldenBaseline 带 X-Studio-Write-Fallback 头；不带头直打 → 409 NATIVE_FS_REQUIRED。"
+   ],
+   "layer2": [
+    "真跑：run 跑完点 Compare，看字段级 diff 覆盖层在 editor 区分屏、逐字段 current vs golden。",
+    "真跑 409：用 predict trace 试晋升 golden，看后端回 PREDICT_TRACE_CANNOT_BE_GOLDEN；浏览器无 native-fs 写 golden 看是否要回退头。"
+   ],
+   "shots": [
+    "run 后字段级 diff 全屏覆盖层（editor 区两栏）",
+    "predict trace 晋升 golden 被 409 拦"
+   ]
+  },
+  {
+   "covers": "#32 golden-create-copilot（偏差 · 入口①缺）",
+   "atoms": [
+    32
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "入口②：run 跑完 completedRunId → 断言 AnalysisBar 渲出；确认 → autoWriteGoldenIfAbsent 仅当无 golden 才 promote（有则不动，F7）。",
+    "RED 入口①：断言『trace 内无 golden 节点旁有 per-node 创建按钮』失败（现是 run 级工具栏按钮，待实现 per-node 转 GREEN）。"
+   ],
+   "layer2": [
+    "真跑一个无 golden 的 skill，跑完看 copilot 分析 bar 弹出、确认后自动写 golden（入口②真跑）。",
+    "目标：trace 内某占位节点旁点创建按钮，对该单节点写 golden。"
+   ],
+   "shots": [
+    "predict/run 跑完 copilot 分析 bar 弹窗、确认自动写 golden",
+    "trace 内占位节点旁 per-node 创建按钮"
+   ],
+   "fe_status_prev": "偏差",
+   "fe_resync": "覆盖项已全绿(2026-06-20)"
+  },
+  {
+   "covers": "#33 golden-create-template + #35 golden-invalidation（未实施 · RED，等后端）",
+   "atoms": [
+    33,
+    35
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "RED #33：断言『无 golden 节点按 io.outputs schema 生成空模版供手填』失败——后端无生成端点（待后端补 + 前端手填 UI 转 GREEN）。",
+    "RED #35：mock 改 output schema 致 golden 缺字段 → 断言『编译报错挡住 predict』失败——后端无编译期 golden 字段校验（待后端 + N3 Compile 协同转 GREEN）。"
+   ],
+   "layer2": [
+    "目标落地前：无『生成空模版手填』入口；改 output schema 缺字段不报编译错误。",
+    "落地后：对无 golden 节点生成空模版手填存 golden；改 output schema 缺字段看是否弹⚠️编译错误挡 predict。"
+   ],
+   "shots": [
+    "按 output schema 生成空 golden 模版手填",
+    "改 output schema 缺字段触发编译错误挡 predict"
+   ],
+   "fe_resync": "覆盖项已全绿(2026-06-20)"
+  }
+ ]
+}

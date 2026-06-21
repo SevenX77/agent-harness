@@ -1,0 +1,168 @@
+{
+  "page_id": "n3_lint_design",
+  "title": "实时 lint 与编译错误就近投影 · 操作设计",
+  "region": "authoring:lint-projection",
+  "intro": "本页是 N3 · Compile 节点里「编辑时实时查错 + 把错误就近标在出错的位置」这一 surface 的 MVP1 设计(应该怎样)。它管两件事:① 编辑 markdown 时后台静默防抖 lint(防抖=改完停顿一下才发请求),不打断输入;② 查出来的错误就近标在三处——出错的 canvas 节点上、出错字段旁的 properties/io 面板里、编辑器对应行做 IDE 式行内标记——让用户精准定位「改哪、为什么」。就近投影的错误有三个来源(并列):首屏打开 skill 时 GET /skills/{id} 返回的 SkillDetail.lint_result(后端已 lint 一次)建立初始投影 → 编辑期实时 lint 覆盖 → 详细汇总走 Compile drawer(见 n3_drawer_design)。本页只管首屏初始化 + 编辑期就近上下文标记。设计权威:能力模块 compile-lint(02_capabilities/compile-lint/mvp1-alignment.md,FROZEN)+ 工作流 spec 03_compile.md;接口契约与错误形状见 n3_compile_contract。前端只触发 + 投影,编译规则与错误码归 engine,不在前端判合法性。",
+  "atoms": [
+    {
+      "n": 1,
+      "cap": "lint-trigger",
+      "track": "A1",
+      "module": "实时 lint 引擎驱动",
+      "func": "设计:编辑 markdown 时,后台防抖 800ms 自动把当前内容发给引擎查错,期间界面切到「编译中」态,不打断用户输入。这是编辑期的静默查错入口,真正的就近标记由下面三个投影原子消费它的结果。",
+      "action": "无显式动作(用户在编辑器里打字,停顿约 800ms 后自动触发一次 lint;继续打字会重置防抖计时)。",
+      "fe_design": "编辑器内容变化 → 触发实时 lint hook(防抖 800ms 后调 POST /api/skills/:id/lint,按已定设计发送 changed markdown)→ 期间 lint 状态置 checking(对应「编译中」)→ 引擎返回 LintResult{status, errors} → 状态落到 passed / failed,并把状态广播出去(写 sessionStorage + 派发自定义事件)供动作条门控读取。设计意图:编辑期查错必须静默(只改状态、就近标红),不弹全局面板/toast。⚠ 后端 drift(非待定):能力模块 compile-lint §3 已定『lint 发送 changed markdown』,前端 hook 已按此 POST {markdown};但真后端 lint_skill 只收 skill_id、lint 磁盘 skill、忽略 body——后端实现偏离已定契约,修复方向是后端补齐接受 body,见 n3_compile_contract。",
+      "fe_modules": [
+        {
+          "name": "实时 lint hook（useDebouncedLint）",
+          "ref": "femod-n3-lint-hook"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{id}/lint",
+          "purpose": "防抖触发的实时编译查错,引擎返回 LintResult(status + 逐条 LintError)。后端现 lint 磁盘上的 skill、不消费请求体。",
+          "mechanism_ref": "n3_compile_contract",
+          "iface_ref": "iface-lint"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(2026-06-20:代码已落地,design-audit vs code 核实,状态回填)。前端已接线:LazyMonacoPanel.tsx:250 调 useDebouncedLint(skillId, draft),hook 本体防抖 800ms 后 POST {markdown} 并广播 status/result 事件(useDebouncedLint.ts:89-131,POST 在 :110)——设计原标「hook 无调用方、readLintStatus 恒 idle」不再成立。后端 changed-markdown drift 已闭合:routers/lint.py:28-31 现消费 body.markdown(body.markdown 非 None → lint_skill_changed_markdown),services/skills.py:233-251 用改动后的 GRAPH.md 物化临时 sandbox 再 lint(对齐已定 changed-markdown 决策)。测试 useDebouncedLint.test.ts:181-215 驱动真 hook,断言防抖后 POST /skills/skill-1/lint {markdown} + checking→failed + 事件派发。",
+      "impl_ref": "fn-1"
+    },
+    {
+      "n": 2,
+      "cap": "lint-empty-idle",
+      "track": "A12",
+      "module": "实时 lint 引擎驱动",
+      "func": "设计:编辑器为空(没东西可编译)时,lint 回到 idle,不报错、不残留上一次的错误标记——空内容不是错误。",
+      "action": "无显式动作(用户清空内容 / 进入一个空 skill 时自动判定)。",
+      "fe_design": "实时 lint hook 在发请求前先判:skillId 为空或 markdown.trim() 为空 → 直接把状态置 idle、清空上次结果、广播 idle,提前 return,不发请求。设计意图:空内容应是中性 idle 态(动作条不点亮 Predict、也不显示编译错误),而不是 failed;避免空 skill 被误标成「编译失败」。",
+      "fe_modules": [
+        {
+          "name": "实时 lint hook（useDebouncedLint）",
+          "ref": "femod-n3-lint-hook"
+        }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计(2026-06-20:代码已落地,design-audit vs code 核实,状态回填)。空内容→idle 判定已生效:useDebouncedLint.ts:95-103 在 !skillId || markdown.trim().length===0 时置 idle、清空 result、广播 idle 状态 + null result 并提前 return(不发 POST)。随 #1 接线(LazyMonacoPanel.tsx:250)此路径已在运行时执行,推翻设计原标「hook 从不运行」。测试 useDebouncedLint.test.ts:172-176「empty content stays idle and never calls /lint」通过。纯前端,无后端。",
+      "impl_ref": "fn-2"
+    },
+    {
+      "n": 3,
+      "cap": "lint-fail-fallback",
+      "track": "A11",
+      "module": "实时 lint 引擎驱动",
+      "func": "设计:lint 请求本身失败时(网络错、引擎不可达、请求异常),把状态落到 failed 并带一条可读信息,而不是静默卡在「编译中」让用户干等。",
+      "action": "无显式动作(后台 lint 请求抛错时自动走退路)。",
+      "fe_design": "实时 lint hook 的请求 catch 到异常 → 清空结果、状态置 failed、记下 message(取 error.message,否则给默认「Lint request failed」)、广播 failed。设计意图:把「编译查出错误(status=failed)」与「lint 请求本身失败」都收敛到 failed 态,但后者要带一条网络/请求层面的信息,让用户知道是「连不上/请求挂了」而非「内容有编译错」。",
+      "fe_modules": [
+        {
+          "name": "实时 lint hook（useDebouncedLint）",
+          "ref": "femod-n3-lint-hook"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{id}/lint",
+          "purpose": "lint 请求的失败退路对应这条端点的网络/异常分支。",
+          "mechanism_ref": "n3_compile_contract",
+          "iface_ref": "iface-lint"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(2026-06-20:代码已落地,design-audit vs code 核实,状态回填)。失败退路已生效:useDebouncedLint.ts:119-127 的请求 .catch 清空 result、置 status=failed、setMessage(error.message || 'Lint request failed')、广播 failed + null result(不投影残留错误)。随 #1 接线(LazyMonacoPanel.tsx:250)运行时已执行。测试 useDebouncedLint.test.ts:230-240「a failed /lint request degrades to failed with a message and no stale diagnostics」断言 message='network down'、result null,通过。",
+      "impl_ref": "fn-3"
+    },
+    {
+      "n": 4,
+      "cap": "canvas-node-projection",
+      "track": "A3",
+      "module": "三处就近投影",
+      "func": "设计:在出错的那个 canvas 节点上显示一个警告/错误小标志,悬停 tooltip 列出该节点的具体错误(字段-行-原因),让用户在画布上就能定位是哪个节点、错在哪。",
+      "action": "无显式动作(lint/编译查出错误后,出错节点上自动出现小标志;悬停看详情)。",
+      "fe_design": "把一批错误按所属 phase(阶段=画布上一个节点)分组 → 灌进每个节点的数据 → 节点组件(SkillNode)在该节点错误数>0 时渲染 AlertTriangle 小标志 + 计数,tooltip 展开为该节点的错误列表(每条 field-line-message)。分组用一个纯函数(compileErrorsByNode:从错误的 file 路径里用正则抠出 phases/<id>/ 的节点名来归组;GRAPH.md 级、无 file 的错误不归到任何节点)。设计意图:画布是搭图的主视图,出错节点就地标记 + 悬停看因,是最直接的定位。",
+      "fe_modules": [
+        {
+          "name": "编译错误按节点分组（compileErrorsByNode）",
+          "ref": "femod-n3-errors-by-node"
+        },
+        {
+          "name": "编译错误就近投影映射（目标）",
+          "ref": "femod-n3-projection-map"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{id}/lint",
+          "purpose": "实时 lint 错误(含 file/phase_name/line)是节点投影的目标数据源。",
+          "mechanism_ref": "n3_compile_contract",
+          "iface_ref": "iface-lint"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(2026-06-20:代码已落地,design-audit vs code 核实,状态回填)。tooltip 已从单计数展开为逐条错误列表:SkillNode.tsx:169-176 对每条错误渲 <li>formatNodeCompileError(error)</li>,formatNodeCompileError(SkillNode.tsx:21-31)产出「field · L<line> — message」。数据源已三路合并(首屏 + 实时 lint + 手动 compile + 数据缺口):Workspace.tsx:1220-1245(activeLintErrors:1221、lintErrorsByNode/lintErrorToCompileError/mergeNodeErrors:1237-1244)与 node-compile-errors.ts:78-169;实时 lint 经 lintResultEvent 订阅上抬(Workspace.tsx:222-233)。测试 SkillNode.lint-projection.test.tsx:55-67 断言 tooltip 出现「tools · L9 — unknown tool `frobnicate`」「validator · L14 — ...」;node-compile-errors.test.ts 在列。",
+      "impl_ref": "fn-4"
+    },
+    {
+      "n": 5,
+      "cap": "properties-projection",
+      "track": "A4",
+      "module": "三处就近投影",
+      "func": "设计:在 properties / io 设置面板里,把错误就近标在出错的那个具体属性(字段)旁,悬停 tooltip 显示此处的错误/警告。",
+      "action": "无显式动作(选中某节点后,properties 面板里出错的字段旁自动出现错误标记)。",
+      "fe_design": "把当前选中节点的错误按 field(字段名)归位 → properties 面板(PropertiesPanel)在渲染每个属性时,若该字段有对应错误,就在字段旁挂一个错误/警告标记 + tooltip(显示 message)。设计意图:properties 是逐字段编辑处,把错误标到具体字段旁,比只在节点上给个计数更精准——用户直接看到「这个字段填错了」。错误按 field 匹配字段;无 field 的错误退到节点级标记(见 #4)。",
+      "fe_modules": [
+        {
+          "name": "编译错误就近投影映射（目标）",
+          "ref": "femod-n3-projection-map"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{id}/lint",
+          "purpose": "字段旁投影需要错误带 field 定位轴;实时 lint 的 LintError 当前无 field(见后端契约缺口)。",
+          "mechanism_ref": "n3_compile_contract",
+          "iface_ref": "iface-lint"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(2026-06-20:代码已落地,design-audit vs code 核实,状态回填)。PropertiesPanel 现接 lintErrors prop(PropertiesPanel.tsx:134),经 fieldErrorsByKey(:168-171,helper field-compile-errors.ts:46-63)按 engine field_path 归位,并在每个 frontmatter 字段旁渲 FieldErrorMarker(AlertTriangle + shadcn Tooltip,PropertiesPanel.tsx:808-840;llm_role:544、tools:565、actions:586、path:710、validator:789)。field_path drift 已闭合:后端 LintError(models/errors.py:33)与前端 LintError(api/types.ts:27)都已带 field 定位轴,engine 在 skills.py:1536-1549 输出。Workspace 在 Workspace.tsx:1268-1273 喂 propertiesFieldErrors(优先实时 lint、否则 compile 映射),:1323 传 lintErrors={propertiesFieldErrors}。测试 PropertiesPanel.lint-fields.test.tsx + field-compile-errors.test.ts。",
+      "impl_ref": "fn-5"
+    },
+    {
+      "n": 6,
+      "cap": "editor-inline-projection",
+      "track": "A5",
+      "module": "三处就近投影",
+      "func": "设计:在编辑器里,像 IDE 那样把出错的行做行内标记(红色波浪线/行标),悬停看错误原因——和写代码时编辑器报错的体验一致。",
+      "action": "无显式动作(编辑出错内容后,编辑器对应行自动出现行内标记;悬停看原因)。",
+      "fe_design": "把有 line 的错误按 line + severity 传进编辑器(Monaco),用 monaco.editor.setModelMarkers 给对应行打 marker(severity 映射成 error/warning 级别),message 作悬停提示;有 column 才精确定列、否则整行标。LintError.line/column 可为 null(后端从异常 message 尽力解析)——无 line 的错误不落行内 marker,降级到文件级 banner / Compile drawer。设计意图:编辑器是改 markdown 的主战场,IDE 式行内标记把(有行号的)错误定位到行,用户改起来最直接。需要编辑器组件新增接收错误的 prop。",
+      "fe_modules": [
+        {
+          "name": "编译错误就近投影映射（目标）",
+          "ref": "femod-n3-projection-map"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{id}/lint",
+          "purpose": "行内标记需要错误带 line;LintError 含 line/column 但可为 null——有 line 落 marker、无 line 降级文件级。",
+          "mechanism_ref": "n3_compile_contract",
+          "iface_ref": "iface-lint"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(2026-06-20:代码已落地,design-audit vs code 核实,状态回填)。IDE 式行内标记已落地:lint-monaco-markers.ts:36-54 调 monaco.editor.setModelMarkers(line 53,owner LINT_MARKER_OWNER),由 LazyMonacoPanel.tsx:258(onMount)与 :264-266(lintResult 变化的 effect)触发,驱动源是面板自身的 useDebouncedLint 结果(:250)。marker 计算纯函数化于 field-compile-errors.ts:108-131 lintErrorsToMarkers(映射 line+severity、列感知,DROP 无 line 错误降级到文件级 strip);severity error/warning → Monaco MarkerSeverity(lint-monaco-markers.ts:20-27)。无需改后端。测试 lint-monaco-markers.test.ts:36-72 断言有 line 时 setModelMarkers 被调、无 line 时不调。",
+      "impl_ref": "fn-6"
+    }
+  ],
+  "fe_defs": []
+}

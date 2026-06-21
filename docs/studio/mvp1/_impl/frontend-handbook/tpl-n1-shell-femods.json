@@ -1,0 +1,19 @@
+[
+  {
+    "name": "Workspace 外壳容器",
+    "kind": "前端逻辑(N1 自有)",
+    "what": "Workspace 沉浸式外壳的整条编排:Workspace(工作区根组件)持 navStack(导航栈)/ activePanel(当前左面板)/ settingsOpen(Settings 是否开)/ copilotOpen(Copilot 是否展开)等状态,管 Home↔工作区强隔离切换、三栏布局、面板开合、Back-to-Home 卸载、Settings overlay 不卸载、进入挂 Copilot。",
+    "where": "components/studio/Workspace.tsx(根组件:currentSkillId 从 navStack 末项经 resolveWorkspaceIdentity 解析;skillId 依赖的 useEffect 做强隔离重置;handleHome 先收 Settings 再 onCloseSkill;画布面板按 settingsOpen/currentSkillId/打开文件 渲 Settings/WelcomePage/SplitEditor/GraphCanvas);components/studio/Header.tsx(顶栏:Layers logo→onHome、Sparkles→Copilot 开关、Settings 入口);components/studio/Toolbar.tsx(左竖条:五面板按钮 toggle activePanel + Settings 齿轮)。",
+    "duties": [
+      "Home↔工作区:currentSkillId 为 null 在画布渲 WelcomePage,否则渲工作区内容(同壳换画布面板)。",
+      "强隔离:skillId 切换的 useEffect 重置 navStack/activePanel/copilotOpen;nav 推退清打开文件/分屏/选中(D11)。",
+      "三栏布局 + 面板开合:Header + 12px Toolbar + ResizablePanelGroup(左面板按 activePanel 挂载、画布常在、Copilot 按 copilotOpen 挂载);Toolbar 五按钮 toggle activePanel。",
+      "两条退出语义:Back-to-Home(handleHome 先收 Settings 再 onCloseSkill 卸载工作区退首页)vs Settings overlay(settingsOpen 只换画布面板内容、不卸载左右栏)。",
+      "进入挂 Copilot:copilotOpen 进入置 true 挂 CopilotPanel、Home 置 false 无 Copilot。"
+    ],
+    "used_by": "#15(home-workspace-render-switch)、#16(strong-isolation-skill-switch)、#17(workspace-shell-layout)、#18(panel-switch)、#19(back-to-home-unload)、#20(settings-overlay-non-unload)、#21(enter-mounts-copilot)、#23(app-startup-banner,壳在 RuntimeShell 内立即渲染)。",
+    "boundary": "做:壳开合 / 布局 / 强隔离切换 / 面板开合 / 两条退出语义 / 进入挂 Copilot。不做:不管 Copilot 对话本身(归 copilot-assist 的 copilotStore,#22)、不持 skill 数据真相(进工作区后由各面板拉)、不是后端(纯前端壳)。",
+    "reuse_note": "N1 自有。本页(Workspace 外壳)登记;#15–#21、#23 都复用同一外壳容器,只登记一次。",
+    "design_note": "本壳已符合 D11(强隔离)/ D10(非全屏启动)/ 配合 D8(copilot 退出恢复,会话落盘归 copilotStore);设计页只记稳定设计,现状证据归实施页。边角:WelcomeScreen.tsx no-op 孤儿包装待删。"
+  }
+]

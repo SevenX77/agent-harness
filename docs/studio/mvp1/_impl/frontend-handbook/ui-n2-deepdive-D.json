@@ -1,0 +1,163 @@
+{
+  "scope": "Studio N2 (Authoring) — 三模块接口收敛 + 12D(d8/d12/d2) 交叉核对",
+  "modules": {
+    "module1_frontend": "Studio 前端 (apps/studio/frontend) — React Canvas + Monaco 源码编辑器，只表达编辑意图，消费 serialize/compile 边界，写盘走 native-fs",
+    "module3a_backend_shell": "Studio 后端薄壳 (apps/studio/backend) — FastAPI router + service，只做 serialize/compile/lint 计算边界,透传 original_md,不拥有 parser/serializer owner",
+    "module3b_engine_core": "引擎内核 (packages/graph-agent) — GRAPH.md 可执行语法的唯一 parser/serializer/assembler/compiler owner (注意 authoring 内核是 graph-agent 引擎,不是 gateway)"
+  },
+  "interfaces": [
+    {
+      "name": "graph serialize / round-trip (画布写回源码)",
+      "dock": "① 前端 Workspace.tsx 调 serializeSkillGraph(POST /skills/{id}/graph/serialize) 把 Canvas 拓扑交给 ③a → ③a serialize_skill_graph_markdown() 读盘上 GRAPH.md 做 expected_hash 守卫,再经 graph_roundtrip.serialize_graph_topology() 透传 original_md 委托 ③b graph_serializer.serialize_graph_topology() 算出保留型 markdown → ③a 把 markdown_content 回前端 → ① 再调 native-fs write_workspace_file 真写盘(见 native-fs 接口)",
+      "request": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["phases", "list[PhaseRef]", "Canvas 当前全部节点;每项含 id/src/depends_on/mode,是序列化的拓扑输入"],
+          ["phases[].id", "str(min_len=1)", "phase 唯一标识,作为 GRAPH.md frontmatter phases: 列表项和 body <phase> 名"],
+          ["phases[].src", "str(min_len=1)", "该 phase 对应的源文件相对路径(phases/<id>)"],
+          ["phases[].depends_on", "list[str]", "该 phase 的真实上游依赖;空表示入口,序列化时渲染成 depends_on=\"input\""],
+          ["phases[].mode", "Literal[logic|subgraph|skill]", "节点类型;serialize 校验白名单(三类节点)"],
+          ["expected_hash", "str | None", "前端持有的 GRAPH.md 旧内容 hash;乐观锁,服务端比对当前盘上 hash 不符则 409"]
+        ]
+      },
+      "response": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["markdown_content", "str", "序列化后的完整 GRAPH.md 文本(保留非拓扑 frontmatter/body,只换 phases: 块和 body <phase> 标签)"],
+          ["phase_count", "int", "序列化后的 phase 数,前端核对拓扑"],
+          ["elapsed_ms", "float", "服务端耗时"],
+          ["current_hash", "str", "服务端读到的当前 GRAPH.md 内容 hash,前端用作下次写盘/序列化的 expected_hash"],
+          ["[409 conflict]", "snapshot_conflict", "expected_hash 不符时返回 code/current_hash/current_markdown_content/current_phase_count,不静默覆盖"],
+          ["[422 fatal]", "CanvasSerializerFatal", "orphan/self-cycle/cycle 等返回 code/message/detail/skill_id/elapsed_ms"]
+        ]
+      },
+      "evidence": [
+        ["前端 serialize 调用点", "apps/studio/frontend/src/api/client.ts:149"],
+        ["前端 Workspace 序列化+写盘编排", "apps/studio/frontend/src/components/studio/Workspace.tsx:348"],
+        ["③a router 端点", "apps/studio/backend/app/routers/skills.py:388"],
+        ["③a service serialize_skill_graph_markdown", "apps/studio/backend/app/services/skills.py:1381"],
+        ["③a→③b 透传边界 graph_roundtrip.serialize_graph_topology", "apps/studio/backend/app/services/graph_roundtrip.py:19"],
+        ["③b 内核保留型序列化器 serialize_graph_topology", "packages/graph-agent/src/graph_agent/core/graph_serializer.py:35"],
+        ["③b 保留型 frontmatter/body 合并 _preserve_graph_markdown_topology", "packages/graph-agent/src/graph_agent/core/graph_serializer.py:104"],
+        ["请求 schema SerializeGraphReq/PhaseRef", "apps/studio/backend/app/models/skills.py:54"],
+        ["响应 schema SerializeGraphRes", "apps/studio/backend/app/models/skills.py:94"]
+      ]
+    },
+    {
+      "name": "compile / lint (编译校验)",
+      "dock": "① 前端调 POST /skills/{id}/compile → ③a compile_skill_for_studio() 先用 ③b compile_skill() 做 parse+拓扑+IO 全量校验(失败抛 GraphCompileError→422 CompileFailure),再经 EngineAdapter.compile() 封 artifact 取 execution_fingerprint → 返回 CompileSuccess。lint 是更轻的 POST /skills/{id}/lint,直接走 ③a service。compile 也有 loopback transport 旁路 POST /engine/compile(invoke_engine)",
+      "request": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["skill_id", "path str", "compile/lint 目标 skill;服务端按 user_id 解析 skill_dir"],
+          ["[compile body]", "(无显式 body)", "compile 端点无请求体,从已解析 skill_dir 全量读盘编译"],
+          ["[loopback payload]", "dict", "/engine/compile 旁路:{skill_dir, skill_id, artifact_scope};带 LOOPBACK_TOKEN_HEADER"]
+        ]
+      },
+      "response": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["skill_id", "str", "回显"],
+          ["status", "Literal[ok]", "编译成功标记"],
+          ["phase_count", "int", "编译后 manifest.phases 数"],
+          ["manifest_name", "str", "GRAPH.md frontmatter name"],
+          ["artifact_ref", "dict", "EngineAdapter 封出的冻结产物引用(artifact_id/content_hash/store/manifest_ref/source_map_ref/execution_fingerprint)"],
+          ["source_map_ref", "str", "源码↔产物映射引用,供错误定位"],
+          ["execution_fingerprint", "str", "运行语义指纹(剔除 UI metadata 后);depends_on/action/io 变则变,UI 布局变则不变 — d8.3 约束"],
+          ["[422 failure]", "CompileFailure", "code=compile_failed + detail + errors[](file/line/field/severity/message)"]
+        ]
+      },
+      "evidence": [
+        ["③a compile router", "apps/studio/backend/app/routers/skills.py:332"],
+        ["③a compile_skill_for_studio (调 ③b compile_skill + EngineAdapter)", "apps/studio/backend/app/services/skills.py:322"],
+        ["③a lint router", "apps/studio/backend/app/routers/lint.py:13"],
+        ["③a lint_skill service", "apps/studio/backend/app/services/skills.py:304"],
+        ["loopback /engine/compile 旁路", "apps/studio/backend/app/routers/loopback.py:38"],
+        ["③b compiler", "packages/graph-agent/src/graph_agent/core/compiler.py"],
+        ["CompileSuccess/CompileFailure/CompileError schema", "apps/studio/backend/app/models/skills.py:103"]
+      ]
+    },
+    {
+      "name": "GRAPH.md / phase 文件 parse → 节点模型",
+      "dock": "纯 ③b 内核职责:loader.load() 用 parse_markdown_parts() 拆 GRAPH.md frontmatter/body → _build_graph_manifest() 出 GraphManifest → _extract_body_phase_refs() 解析 body <phase depends_on=...> 出 PhaseTokenInfo → _validate_graph_topology() 出 graph_topology(phase→depends_on)→ 逐个 phase 文件 parse 出 PhaseDocument;assemble_graph() 再把这棵树编成可执行 LangGraph。前端/③a 不解析,只消费 compile 出来的 graph_topology",
+      "request": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["GRAPH.md frontmatter.phases", "list[str]", "声明 phase 清单;loader 要求与 body <phase> 和 phase 目录三方一致"],
+          ["GRAPH.md frontmatter.io", "mapping(inputs/outputs)", "图级 IO schema,解析成 PhaseIOSchema"],
+          ["body <phase depends_on=\"a,b\">id</phase>", "tag", "body DAG 边声明;depends_on 必填(空报 F-v3-graph-depends-unknown),逗号/空白分隔"],
+          ["phase 文件 frontmatter", "mapping", "每个 phases/<id> 的元数据;禁止某些字段(_reject_phase_forbidden_metadata)"]
+        ]
+      },
+      "response": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["GraphManifest", "dataclass/model", "name/description/io/phases(list[str]) — 注意 manifest.phases 不带边"],
+          ["PhaseTokenInfo", "dataclass", "一条 body <phase> 拓扑声明:depends_on(tuple) + token 位置,供保留型序列化复用"],
+          ["graph_topology", "dict[str,list[str]]", "phase_id → depends_on 列表;input 为保留入口哨兵,是真实 DAG"],
+          ["PhaseDocument", "dataclass", "单个 phase 的 frontmatter+body+mode 解析结果"],
+          ["CompiledSkill", "dataclass", "raw{graph,graph_topology,...} + nodes,assemble_graph 的输入"]
+        ]
+      },
+      "evidence": [
+        ["③b loader.load 主流程(parse→manifest→body refs→topology)", "packages/graph-agent/src/graph_agent/core/loader.py:185"],
+        ["③b body <phase> 正则与 depends_on 解析", "packages/graph-agent/src/graph_agent/core/loader.py:963"],
+        ["③b PhaseTokenInfo 模型", "packages/graph-agent/src/graph_agent/core/loader.py:112"],
+        ["③b assemble_graph(CompiledSkill→LangGraph)", "packages/graph-agent/src/graph_agent/core/graph_assembler.py:150"],
+        ["③b _graph_topology(读 graph_topology.phases)", "packages/graph-agent/src/graph_agent/core/graph_assembler.py:2616"]
+      ]
+    },
+    {
+      "name": "native-fs 写 (本地持久化执行层)",
+      "dock": "① 前端 lib/tauri.ts writeWorkspaceFile() invoke Rust tauri command write_workspace_file → ③(Rust native_fs.rs) write_workspace_file 按 create_if_absent 分流:false 走 write_workspace_file_impl(expected_hash 守卫+atomic temp+rename),true 走 create_workspace_file_if_absent_impl(no-clobber 硬链)→ 返回 {path,hash}。建节点=先 create_if_absent 写 phase 文件,再 serialize 写 GRAPH.md。无独立 mutate_phase_body command,phase body 写也走 write_workspace_file",
+      "request": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["workspaceRoot / workspace_root", "String", "工作区根;Rust resolve_workspace_root 解析并做越界检查"],
+          ["relativePath / relative_path", "String", "写入目标相对路径;safe_join 防 .. 路径穿越和 symlink 逃逸"],
+          ["content", "String", "要写入的全文(GRAPH.md / phase.md / test_input 等)"],
+          ["expectedHash / expected_hash", "Option<String>", "乐观锁;非 create 模式下比对当前盘上 sha256,不符返回 HashConflict"],
+          ["createIfAbsent / create_if_absent", "Option<bool>", "true=建节点 no-clobber 创建(已存在报错);false=覆盖写带 hash 守卫"]
+        ]
+      },
+      "response": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["WriteOutcome.path", "String", "实际写入路径"],
+          ["WriteOutcome.hash", "String", "写入后内容 sha256,前端更新为新 expected_hash"],
+          ["[err]WriteWorkspaceError::HashConflict", "{current_hash,current_content}", "stale hash;前端打开冲突 UI(Use Remote/Keep Local/Overwrite),不静默覆盖"],
+          ["[err]WriteWorkspaceError::WriteFailed", "{message}", "路径越界/IO/权限等失败,带具体原因"]
+        ]
+      },
+      "evidence": [
+        ["① 前端 typed wrapper writeWorkspaceFile(camelCase payload)", "apps/studio/frontend/src/lib/tauri.ts:132"],
+        ["① 建节点 createIfAbsent 写 phase 文件", "apps/studio/frontend/src/api/client.ts:210"],
+        ["③ Rust tauri command write_workspace_file(分流 create/overwrite)", "apps/studio/tauri/src/native_fs.rs:1240"],
+        ["③ write_workspace_file_impl_inner(create-if-absent / expected_hash 守卫 / atomic temp+rename)", "apps/studio/tauri/src/native_fs.rs:281"],
+        ["③ WriteOutcome 响应结构", "apps/studio/tauri/src/native_fs.rs:165"],
+        ["③ WriteWorkspaceError(HashConflict/WriteFailed)", "apps/studio/tauri/src/native_fs.rs:200"],
+        ["③ safe_join 路径安全", "apps/studio/tauri/src/native_fs.rs:102"]
+      ]
+    }
+  ],
+  "d12_crosscheck": {
+    "related_ds": {
+      "d8": "标题=GRAPH parse/serialize(status:bad)。本体:让 Canvas 和源码不再是两套世界 — 拖线/加节点/编辑 GRAPH.md 本质都在改同一棵可执行语法树。owner=Engine/shared parser 拥有 executable syntax,Studio canvas/source editor 只消费 parse/serialize 边界,native-fs 负责写盘。子节点 d8.1 GRAPH roundtrip 一致(ok)/d8.2 Canvas 拖线加节点写回 GRAPH.md(partial)/d8.3 UI metadata 不进 execution fingerprint(partial)/d8.4 Subgraph 绝对 path 语义(partial)。证据 temp/studio-mvp1-12d-repair-framework-2026-06-15.html:560",
+      "d12": "标题=native-fs 本地持久化执行层(status:partial)。本体:约束 Studio desktop 本地数据操作 — 用户文件/workspace 数据/本地 Store adapter 文件落盘都用同一套安全执行能力(read/write/list/delete/checkpoint/restore + 路径安全/hash/atomic/错误映射)。owner=native-fs/Rust 拥有本地持久化执行,业务模块拥有数据语义和 Store interface,本地 adapter 只把语义翻成 NativeFsRequest,Copilot SDK Read/Write/Edit 是受控例外。子节点 d12.1 Studio local persistence via native-fs(ok)/d12.2 native-fs provider 能力面(ok)/d12.3 expected-hash 冲突保护(ok)/d12.4 Copilot Write/Edit carve-out(ok)/d12.5 runtime artifacts 排除出 native-fs gate(partial)。证据 temp/studio-mvp1-12d-repair-framework-2026-06-15.html:748",
+      "d2": "标题=存储三线 + 成品库(status:partial)。本体:拆掉'所有状态都是一堆本地文件'的旧心智 — 运行产物/运行态/配置真相/成品发布是四种不同生命周期的数据。owner=Engine 拥有运行产物线+运行态线,Gateway 拥有配置真相线,Studio publish 拥有 release decision,native-fs 提供本地工作区读写能力但不决定业务语义。子节点 d2.1 ConfigTruthStore(ok)/d2.2 RunArtifactStore(ok)/d2.3 RuntimeStateStore(ok)/d2.4 ProductArtifactStore(ok)/d2.5 Workspace runtime storage 路径(partial)。证据 temp/studio-mvp1-12d-repair-framework-2026-06-15.html:290。注:d2 主体是运行期存储四线,与 N2 Authoring(编辑期)只在 d2.5 的 .workspace owner/writer 矩阵处相切"
+    },
+    "mapping": {
+      "headers": ["N2 实现项", "落在哪个 D", "该 D 计划怎么说"],
+      "rows": [
+        ["画布↔源码往返(serialize/round-trip 保真)", "d8 (d8.1)", "保留型 GRAPH.md roundtrip owner 沉到 Engine/core serialize_graph_topology(...,original_md=...),只换 phases: 和 body topology,保留非拓扑 frontmatter/body;Studio backend 经 graph_roundtrip.py 透传 original_md,不再本地拥有 _preserve_graph_markdown_unknowns"],
+        ["三类节点白名单(logic/subgraph/skill)", "d8 (d8.2 + d8.4)", "d8.2:Canvas 连线/断线/加 phase 经 serializer 计算边界;d8.4:subgraph 引用收口为绝对 path,旧 target_skill 在子图语义中编译失败/迁移诊断,subagents[] 仍保留 target_skill 不混淆。白名单本身由 ③a PhaseRef.mode Literal + ③b loader 校验落地"],
+        ["建节点=建文件(先写 phase 文件再 serialize)", "d8 (d8.2) + d12 (d12.1)", "d8.2:Add phase 写 phase 文件并把 src: phases/<new-id> 登记进 GRAPH.md,失败不留 orphan phase 目录;d12.1:创建用 create-if-absent,覆盖写带 expectedHash,统一走 native-fs write_workspace_file"],
+        ["native-fs 写(workspaceRoot/relativePath/content/expectedHash)", "d12 (d12.1/d12.2/d12.3)", "d12.1:桌面主写路径走 native-fs;d12.2:Rust command 已注册+测试已运行+前端主路径已调用+后端裸 Path I/O 被 guard;d12.3:所有保存入口携带 expectedHash,Rust HashConflict 与 FastAPI snapshot_conflict 统一冲突 UI,最终写盘由 native writer 再校验 expectedHash"],
+        ["拓扑校验(orphan/self-cycle/cycle/depends_on 必填)", "d8 (d8.1/d8.2)", "先冻结 parse_graph(text) contract(Semantic AST/diagnostics/sourceMap/graph.* typed errors 可测),serializer/fingerprint 保证 roundtrip invariant;d8.2:serializer 422/compile 422 显示具体节点或 GRAPH.md 错误,不留 orphan phase。落地于 ③b loader._validate_graph_topology + ③a _validate_canvas_topology"],
+        ["i/o artifact(图级 IO schema + execution fingerprint)", "d8 (d8.3) 为主, run 产物侧归 d2 (d2.2)", "d8.3:UI metadata(布局/选中/面包屑)不进 execution_fingerprint,core compile 与 Studio graph roundtrip 共用同一 canonicalizer,CompileSuccess/artifact detail/run detail 暴露 execution_fingerprint,depends_on/action/io schema 变则 fingerprint 必变;运行产物事实源(result_ref/content_hash)归 d2.2 RunArtifactStore,不属编辑期"],
+        [".workspace 编辑期数据落盘(golden/test_inputs/copilot session)", "d2 (d2.5) + d12 (d12.1)", "d2.5:.workspace owner/writer 矩阵 — golden baseline/test_inputs/copilot session/local_settings 属 Studio workspace 数据,用已注册 native-fs/Tauri bridge 写并提供 read/list/hydrate;d12.1 提供这些写入的 native-fs 执行能力"]
+      ]
+    },
+    "answer": "N2(Authoring)的核心编辑期实现项主要落在 d8(GRAPH parse/serialize)和 d12(native-fs 本地持久化执行层)两个 D 上,d8 管'同一棵可执行语法树'的解析/序列化/保真往返/三类节点白名单/拓扑校验/execution fingerprint 边界(语义层),d12 管'画布动作真落盘'的 native-fs 写、expected-hash 冲突保护、建节点=建文件的执行层(物理层)。d2 与 N2 只在 d2.5(.workspace owner/writer 矩阵)相切 —— 编辑期产生的 golden/test_inputs/copilot session 等 Studio 自有工作区数据归 native-fs 写者,而 d2 的主体(RunArtifactStore/RuntimeStateStore/ConfigTruthStore/ProductArtifactStore 四线)是运行期/配置/发布存储,不属 Authoring。一句话:N2 = d8(语义)+ d12(执行),d2 仅在 d2.5 边缘相关。"
+  }
+}

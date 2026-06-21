@@ -1,0 +1,485 @@
+{
+  "id": "roles_mech_materialize",
+  "title": "角色物化机制（materialize_role 设计）",
+  "overview": {
+    "unified_model": "统一模型（地基，2026-06-18 PM 拍板，所有物化的最高前提）：model-group、model-bundle、role 本质都是「一串 routes 的数组」，最终都被 materializer 展开铺平成同一种 fallback_chain。三者只差「谁拥有这串数组」——model-group=registry 按 canonical_id 归一出来的同模型跨 endpoint 合集、model-bundle=用户自建可复用、可放不同模型/预配 provider 的束、role=用户为某个用途编排的候选。所以物化内核对三者是同一套：同一套 6 态投影、同一套意图过滤/降级、同一套排序、同一套 role-fit 诊断；不为 group/bundle/role 各写一套。下面 submodules 里凡出现 group/bundle/role，先回到「它是一串 routes」去理解：bundle 物化复用角色物化内核（submodule「Model Bundle 物化」）、bundle 拖进 role 后在 role 里就是与 model-group 同级的一串 routes（可调序/增删/配 provider）。",
+    "manages": "一个抽象角色（如 graph 节点的 llm_role）从用户在前端拖出来的「结构化模型组列表」→ 后端按意图过滤/降级/排序 → 物化成 gateway 运行时真正消费的「平铺兜底链 fallback_chain」+ 一份 role-fit/降级诊断报告，整条链。前端看 Group（每个模型一张卡，下面挂多 provider），引擎跑 Chain（一条拉平的 route 兜底序）。",
+    "why_single": "它不是一个 CRUD：同一条角色数据要被「结构化编辑视图（前端）」和「平铺执行视图（引擎）」两种形态消费，中间靠 materialize_role（把结构化 model_groups 物化成平铺 fallback_chain 的函数）翻译。这块翻译牵涉 6 态投影、熔断读取、draft 历史证据、意图（thinking / token）过滤与降级、role-fit 诊断——一两句说不清，且 UI 测试态与引擎编排必须用同一套判断（不能前端绿了引擎却拒），所以单列一页。",
+    "design_owner": "gateway 库（packages/graph-agent-gateway）。materialize 编排内核（按意图过滤路线 + 降级 + 排 fallback 链 + role-fit/downgrade 诊断）、6 态标准总结、draft 知识库都是「换个 app 还能用」的公共能力，按 MVP1 第四轮判据归 gateway。Studio 侧只做薄委托 + HTTP 壳 + 拖拽编辑 UI + 默认选择产品策略。",
+    "code_location": "核心物化在 gateway role_materialization.py（materialize_role / materialize_model_bundle / _apply_intent / _materialization_projection）；Studio 侧 llm_role_materializer.py（materialize_role / materialize_model_bundle，仅 build_gateway_adapter 后 cast 调 gateway，不含编排逻辑）是薄委托；HTTP 壳与 role 测试 job 在 routers/llm.py（put_llm_role / start_role_test_job / _run_role_test_job_impl）。注：架构口径只有三后端，apps/studio/backend 这侧 = gateway 后端的 sidecar 承载层，不是第四层「Studio 后端」。",
+    "dataflow": [
+      "前端把角色的结构化 model_groups[]（每组 canonical_id + 各 provider 的 route_id）交给后端 sidecar（即 gateway 后端的承载层）",
+      "sidecar 的 materialize_role（薄委托）调 gateway adapter 的 materialize_role",
+      "gateway materialize_role 遍历每个 model group 的每条 route，先用 project_route_state_from_evidence 投影出该 route 的 6 态 ui_state（读 endpoint/route 状态 + 凭证在不在 + 熔断 retry_at + draft 历史证据）",
+      "ui_state ∈ {failed, off} 的 route 直接跳过、记进 skipped_provider_details（不入链）；cooling_down 的 route 记一条 warning 但继续",
+      "_apply_intent 按角色意图（thinking 三档 / output token 四档；intent 只在 role 级，不逐 model-group/provider 配）算这条 route 的 role_fit（using / downgraded / needs_test / not_fit），把降级写进 warnings",
+      "role_fit ∈ {needs_test, not_fit} 的 route 不入 fallback_chain（但仍写进 report.entries 供前端显示诊断灯）；其余 route 按遍历序追加进 fallback_chain，带物化好的 runtime_settings",
+      "返回 fallback_chain（引擎消费）+ materialization_report（前端 role-fit 灯 / 降级 tooltip 消费）"
+    ]
+  },
+  "submodules": [
+    {
+      "name": "model group 遍历 + fallback 开关",
+      "code": "gateway: role_materialization.py materialize_role",
+      "summary": "拿到角色的结构化 model_groups[]，按「模型先后序 × 组内 provider 先后序」遍历每条 route，决定哪些进平铺兜底链。",
+      "formula": "fallback_chain = [ route | route ∈ 各 model_group.provider_models，且未被状态跳过、未被意图判 not_fit/needs_test ]，顺序 = 模型序 → 组内 provider 序。",
+      "diagram": "",
+      "rules": [
+        "model group 的顺序 = 模型兜底序（谁先试），组内 provider_models 的顺序 = 该模型的 provider 兜底序；遍历严格按这两层顺序，决定 fallback_chain 的先后。",
+        "Model Fallback 开关关闭（model_fallback_enabled=false）时只取第一个 model group（groups[:1]）——provider 兜底永远在，关的只是「多模型兜底」。",
+        "route_id 在 credentials.provider_routes 里查不到、或其 endpoint 在 provider_endpoints 里查不到 → 静默跳过该 route（数据不完整，不报错、不入链）。",
+        "每条考察过的 route 都写一条 entry 进 report.entries（含 canonical_id / route_id / role_fit / warnings），无论它最终入不入链——前端 role-fit 灯按 route_id 查这份 report。"
+      ],
+      "do": [
+        "按两层顺序（模型序 × provider 序）遍历 route。",
+        "尊重 model_fallback_enabled 开关（关则只取首组）。",
+        "产出 fallback_chain（引擎用）+ materialization_report（前端用）两份输出。"
+      ],
+      "dont": [
+        "不决定默认选哪些 provider（那是前端拖入时的默认选择产品策略，见 femod 默认选择算法）。",
+        "不渲染卡片/颜色/折叠（前端 UI）。",
+        "不发真模型请求（那是 route probe / role 测试 job 的事）。"
+      ],
+      "deviation": ""
+    },
+    {
+      "name": "6 态投影（物化用）",
+      "code": "gateway: role_materialization.py _materialization_projection + state_projection.project_route_state_from_evidence",
+      "summary": "对每条 route 合成它此刻的 6 态 ui_state，作为「这条 route 能不能入链」的第一道闸——失败/关闭直接挡，熔断记警告。",
+      "formula": "ui_state ∈ {ready / historical_ready / untested / failed / cooling_down / off}；优先级 off > failed > cooling_down > ready > historical_ready > untested。",
+      "diagram": "",
+      "rules": [
+        "project_route_state_from_evidence（gateway 6 态投影函数）读 endpoint 状态 + route 状态 + 凭证在不在（_credential_available）+ 熔断 retry_at（从 health_store 取活跃熔断 _select_active_circuit）+ draft 历史证据（evidence_records），按优先级合出一态。",
+        "ui_state ∈ {failed, off} → 跳过该 route、记进 report.skipped_provider_details（带 ui_state + reason_code），不入 fallback_chain。",
+        "ui_state == cooling_down → 不跳过，但记一条 cooling_down warning（带 retry_at + message）进 entry 和顶层 report.warnings。",
+        "failed 必带 reason_code：endpoint 级失败取 endpoint.metadata.reason_code 或兜底 endpoint_unreachable；route 级失败取 route.metadata.reason_code 或兜底 model_failed；缺凭证则投影层给 missing_config。",
+        "historical_ready（🔵 蓝）来自 draft 历史连通证据（evidence_records 里 probe-verified 的记录）——endpoint 验通 + 有历史证据但当前未真测，投蓝态。"
+      ],
+      "do": [
+        "合成 route 的 6 态 ui_state（含蓝态 historical_ready）。",
+        "failed 带 reason_code、cooling_down 带 retry_at。",
+        "把 failed/off 挡在链外、cooling_down 记警告。"
+      ],
+      "dont": [
+        "不决定状态色/文案怎么渲染（前端 display mapping）。",
+        "不自己发探测请求产生证据（证据由 route probe / role 测试写入 draft，投影只读）。"
+      ],
+      "deviation": ""
+    },
+    {
+      "name": "意图过滤 + role-fit 诊断",
+      "code": "gateway: role_materialization.py _apply_intent + _apply_output_token_intent",
+      "summary": "把角色意图（thinking 偏好、output token 目标）落到每条 route 上，算出这条 route 对本角色「合不合适」（role_fit 四态），并把降级原因写进 warnings。intent 只在 role 级设（铁律，2026-06-18 PM）：用户只对 role 提能力要求（thinking + token + provider_preference），加进 role 的每条 route 拿 role 这一份意图来判——匹配就用、不匹配就降级/不用，逻辑到此为止；不逐 model-group、不逐 provider 各配一份意图。",
+      "formula": "role_fit ∈ {using / downgraded / needs_test / not_fit}；not_fit / needs_test → 不入链；using / downgraded → 入链（downgraded 带 warning）。",
+      "diagram": "",
+      "rules": [
+        "intent 来源唯一 = role 级：每条 route 用所属 role 的同一份 intent（thinking / target_output_tokens / target_context_tokens / provider_preference）来算 role_fit，没有「这条 route / 这个 model-group 自带的 intent」。bundle 拖进 role 后它的 routes 也照用 role 的 intent（bundle 本体不带意图判据）。",
+        "thinking 三档：preferred 但该 route 不支持思考 → role_fit=downgraded + thinking_not_enabled warning；required 但能力未知 → needs_test（不入链）；required 但明确不支持 → not_fit（不入链）。",
+        "output token 四档（default / maximum_available / target / required_minimum）；只约束 output token，不涉 context：required_minimum{value} = 要求该 route 的最大可用输出 token ≥ value（语义是「输出下限要求」对比「route 输出上限」），route 输出上限 < value → 该 route 对此 role not_fit、不进 fallback_chain（方向别写反：是 role 的下限要求高于 route 的上限才判不合适，不是 route 上限低于某固定值）；target 超 route 上限按 downgrade 策略处理（block→not_fit、allow_with_warning→记 token_downgraded warning 后 downgraded、allow→静默 downgraded）；default / maximum_available 不设硬下限，不因 token 判 not_fit。实现待补：gateway _apply_output_token_intent（把 token 意图落到请求并判 fit 的函数）现仅实现 maximum_available / target 两档，required_minimum 的「route 输出上限低于 value → not_fit」这条分支尚未落地，按此语义补。",
+        "role_fit ∈ {needs_test, not_fit} 的 route 写进 report.entries（带诊断）但不追加进 fallback_chain——前端显示「Limited / Blocked」诊断灯，引擎不会拿它当兜底。",
+        "role_fit ∈ {using, downgraded} 的 route 入链，物化好的参数写进 entry.resolved_settings、随 RoleRouteEntry.runtime_settings 一起进 fallback_chain。"
+      ],
+      "do": [
+        "按 thinking / token 意图算 role_fit 四态。",
+        "把降级原因（thinking_not_enabled / token_downgraded 等 warning code）写进 entry.warnings。",
+        "把物化后的 runtime_settings 落进入链 route 的 entry。"
+      ],
+      "dont": [
+        "不暴露 downgrade 策略给用户选 UI（mvp1 schema 保留默认 allow，不做控件）。",
+        "不做 cost_priority（mvp1 砍掉、schema 不留）。",
+        "不渲染诊断 tooltip（前端按 report 渲染）。"
+      ],
+      "deviation": ""
+    },
+    {
+      "name": "Model Bundle 物化",
+      "code": "gateway: role_materialization.py materialize_model_bundle（Studio 薄委托 llm_role_materializer.py materialize_model_bundle）",
+      "summary": "把用户自建的「已排好兜底的 model bundle」（可放不同模型、预配 provider）物化成一条平铺 route 链，复用与角色同一套物化逻辑。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "bundle 与 model group 的区别：bundle 可放不同模型、可预配 provider 顺序；物化路径与角色共用同一套过滤/降级/排序内核（不另写一套）。按统一模型（overview.unified_model），bundle 就是「一串 routes」，拖进 role 后与 model-group 同级。",
+        "拖进角色 = 引用（live 同步，2026-06-18 PM，覆盖早期「快照复制」）：角色存 bundle 引用（bundle_id），materialize 物化时按引用拉取当前 bundle 内容展开成 fallback_chain（不在拖入时复制）。「同步」= 物化永远读束的最新内容，所以改束 → 下次物化/测试自然就是新的，所有引用它的角色一起变（像共享组件实例）。",
+        "删除级联：束被删 → 引用它的角色里那一项引用随之消失（不留失效快照）；该角色重新物化时少了这串 route，可能因可执行 route 不足转 not-fit（按 6 态 + role_fit 判定）。",
+        "role 可覆盖（存储语义已定，PM 2026-06-18 方案①引用+delta，见本 submodule）：因为束在 role 里就是一串 routes（与 model-group 同级），role 对它照常可调序 / Add / 删 route / 配 provider——这些局部改动记成「该 role 的覆盖 delta」存在 role 上，不回写束本体（束是共享的）、也不固化成脱离引用的快照。物化时先按 bundle_id 引用拉束的当前内容、再叠加 delta。冲突铁律——束是源头：束删某条 route 就从 role 链移除，哪怕 role 覆盖过它；delta 只对仍存在于束里的 route 生效，束里已没的 route 上的 delta 自动失效丢弃。意图仍只在 role 级（role 的 intent 套到展开+叠加 delta 后的这串 route 上，束本体不带意图）。",
+        "现状偏差：前端把 bundle 拖进角色时是把 bundle 当成一张 canonical_id='bundle:{id}' 的普通 model group、把它当时的 route_ids 快照进角色（appendModelGroupToRoleWithResult），不存 bundle 引用 → 改 bundle 不同步、删束不级联（详见实施页 #51）。"
+      ],
+      "do": [
+        "把 bundle 物化成平铺 route 链，复用角色物化内核。",
+        "目标：角色存 bundle_id 引用时，物化按引用拉当前束内容展开（改束/删束在下次物化时生效）。"
+      ],
+      "dont": [
+        "不做 bundle 的录入/改名/删除 UI（前端，复用 role 的编辑器）。",
+        "不把 role 在引用上的局部覆盖回写束本体（束是共享的，覆盖只活在该 role）。"
+      ],
+      "deviation": "⚠️ 设计要求「拖进角色=引用、改束同步 + 删束级联 + role 可覆盖」，现状前端是「快照复制」（拖入时把 bundle 当时的 route_ids 拍进角色，不存 bundle_id 引用）——materialize 按引用展开的目标链路尚未端到端（前端存引用 + 物化按引用拉取两侧都要改）。",
+      "override_storage": "存储语义已定（PM 2026-06-18 拍板，方案①：引用 + delta）：role 存 bundle_id 引用 + 一份「该 role 的覆盖 delta」——对引用束的任何局部改动（调序、删某条 route、加 route、配 provider）都记成 delta，不固化快照；物化时先按引用拉束的当前内容、再叠加该 role 的 delta 得到这串 route。冲突解析铁律——束是源头：束删掉某条 route，就从该 role 链里移除该 route，哪怕 role 对它做过本地覆盖；role 的 delta 只对「仍存在于束里的 route」生效，束里已不存在的 route 上的 delta 自动失效丢弃。不需要方案②那种「一改就脱离引用、固化快照」的第二套机制——局部覆盖始终活在 delta 里、始终随束 live 同步。"
+    }
+  ],
+  "files": [
+    {
+      "name": "llm_credentials.json（角色片段）",
+      "what": "Studio 本地存放 LLM 凭证与角色的文件；角色相关存 roles（角色→结构化 model_groups + 意图）、model_bundles（可复用模型束）两组，与凭证 endpoint/route 同文件平铺存放，给 gateway 物化时解析用。",
+      "version": "schema_version = 4 (Literal[4], 固定)",
+      "structs": [
+        {
+          "name": "RoleEntry（角色，前端 RolesData.roles[name]）",
+          "fields": [
+            {
+              "name": "model_groups",
+              "type": "list<RoleModelGroup>",
+              "meaning": "角色的结构化模型组列表，每组 = canonical_id + 该模型挑中的各 provider route（前端编辑/存储的主形态，gateway 物化的输入）",
+              "sensitive": false
+            },
+            {
+              "name": "model_fallback_enabled",
+              "type": "bool(默认true)",
+              "meaning": "模型兜底开关；关则物化只取第一个 model group（provider 兜底永远在）",
+              "sensitive": false
+            },
+            {
+              "name": "intent",
+              "type": "RoleIntent",
+              "meaning": "角色意图：provider_preference（排序偏好）/ thinking（off|preferred|required 三档）/ target_context_tokens / target_output_tokens（各为 TokenIntent）",
+              "sensitive": false
+            },
+            {
+              "name": "fallback_chain",
+              "type": "list<RoleRouteEntry>",
+              "meaning": "materialize 物化产出的平铺兜底链（route_id + runtime_settings），引擎运行时消费；前端不直接编辑，是物化输出回填",
+              "sensitive": false
+            },
+            {
+              "name": "materialization_report",
+              "type": "MaterializationReport",
+              "meaning": "物化诊断报告：entries（每 route 的 role_fit + warnings）/ warnings（顶层降级/熔断）/ skipped_provider_details（被跳过的 failed/off route）；前端 role-fit 灯 + 降级 tooltip 的数据源",
+              "sensitive": false
+            }
+          ]
+        },
+        {
+          "name": "RoleModelGroup（角色内一个模型组）",
+          "fields": [
+            {
+              "name": "canonical_id",
+              "type": "string",
+              "meaning": "跨 provider 归一化的模型标识（同模型跨多 endpoint 合并的键）；bundle 拖入时为 'bundle:{id}'。归一化算法 = 复用现成两个函数的两层，不另写一套模糊/子串匹配：(1) 执行用的分组键 canonicalize_model（在 packages/graph-agent-gateway 的 registry/canonical.py，算 fallback_chain 真正消费的归并键）走保守合并——只按显式别名表、或去掉 'anthropic/' 前缀来归并，其余模型各自成 orphan slug（即 claude-opus-4.7 与 opus-4.7 不会自动合并，除非别名表里登记了）；(2) 展示用的分组身份 _split_model_group_tokens（在 sidecar 的 services/llm_model_groups.py，决定侧栏把哪些 route 显示成同一张 model-group 卡）走 token 剥离——把 release-snapshot token、capability token、route-channel token、preview 的月/年对剥离后再归类。两层各司其职：执行用保守 canonical（宁可不合也不错合）、展示用 token-split（卡片身份更聚合）。copilot 内置组也复用同一套，不为内置组另写归一逻辑。",
+              "sensitive": false
+            },
+            {
+              "name": "provider_models",
+              "type": "list<RoleProviderModel>",
+              "meaning": "该模型组选中的 provider route 列表（带 route_id + provider_model_id），顺序 = provider 兜底序",
+              "sensitive": false
+            }
+          ]
+        },
+        {
+          "name": "RoleTokenIntent（token 意图，target_context/output_tokens 的值）",
+          "fields": [
+            {
+              "name": "mode",
+              "type": "enum<default|maximum_available|target|required_minimum>",
+              "meaning": "token 意图档位，四档（2026-06-18 PM 修正：删 inherit 档——intent 只在 role 级，没有「组/provider 级继承」就不需要 inherit）；只约束 output token、不涉 context；default=不设目标 / maximum_available=尽量用满 route 上限（Use Max）/ target=配 value 作目标，超限按 downgrade 策略 / required_minimum=配 value 作输出下限要求，语义 = 要求该 route 的最大可用输出 token ≥ value，route 输出上限 < value → role_fit not_fit、不进 fallback_chain（是 role 下限要求高于 route 上限才判不合适，方向别写反）。实现待补：gateway _apply_output_token_intent 现只实现 maximum_available / target，required_minimum 的「route 输出上限低于 value → not_fit」分支尚未落地。",
+              "sensitive": false
+            },
+            {
+              "name": "value",
+              "type": "int|null",
+              "meaning": "目标 token 数（mode=target / required_minimum 时配）",
+              "sensitive": false
+            },
+            {
+              "name": "downgrade",
+              "type": "enum<allow|allow_with_warning|block>",
+              "meaning": "超限降级策略，schema 保留、默认 allow、mvp1 不做 UI（block→not_fit、allow_with_warning→记 warning）",
+              "sensitive": false
+            }
+          ]
+        },
+        {
+          "name": "MaterializationReportEntry（report.entries 一条，前端 role-fit 灯输入）",
+          "fields": [
+            {
+              "name": "route_id",
+              "type": "string",
+              "meaning": "这条诊断对应的 route（前端按 route_id 查 entry 渲染该 provider 行的 role-fit 灯）",
+              "sensitive": false
+            },
+            {
+              "name": "role_fit",
+              "type": "enum<using|downgraded|needs_test|not_fit>",
+              "meaning": "这条 route 对本角色合不合适；前端映射成 Can Run / Limited / Blocked 灯；needs_test/not_fit 不入链",
+              "sensitive": false
+            },
+            {
+              "name": "warnings",
+              "type": "list<map>",
+              "meaning": "降级/熔断原因码（thinking_not_enabled / token_downgraded / cooling_down 等），前端进 tooltip",
+              "sensitive": false
+            },
+            {
+              "name": "resolved_settings",
+              "type": "map<string, any>",
+              "meaning": "物化后落给这条 route 的运行参数（随 fallback_chain 的 runtime_settings 一起进引擎）",
+              "sensitive": false
+            }
+          ]
+        }
+      ],
+      "owns": "这份数据归 gateway —— roles / model_bundles 的 schema 由 gateway 库定义、物化也归 gateway。前端不拥有、不直接碰文件，只通过 HTTP 投影 + 编辑提交。",
+      "crud_pointer": "前端从不直接读写这个文件；roles/bundles 的全部读写都走后端 HTTP 接口（见下方「接口」一节：registry 读 + roles 整表/单角色读写 + role/bundle 测试动作）。这里不重列，避免和接口表重复。",
+      "storage_note": "文件存在哪、怎么落盘是后端实现细节，从前端视角不关心。",
+      "security_fe": "角色片段不含明文 key（key 只挂 endpoint，route 只引 route_id）；前端拿到的整表里 endpoint.api_key 仍是 **********。"
+    }
+  ],
+  "interface_groups": [
+    {
+      "key": "crud",
+      "title": "数据读写类（对 roles / model_bundles 的增删查改）",
+      "note": "这一类是数据库式接口：资源固定（registry / roles 整表 / 单角色 / bundle），请求字段固定。前端「读写角色」指的就是调这几条——字段定死，不是任意拼。读取整表用 GET /registry（内嵌 model_groups DTO + 6 态 ui_state），编辑提交用整表 PUT /roles（现状）或单角色 PUT /roles/{name}（带 materialize，现状前端未调）。"
+    },
+    {
+      "key": "action",
+      "title": "测试动作类（触发真实模型探测，结果写回 job/draft）",
+      "note": "这一类不是 CRUD：它不是「填字段存进去」，而是「对角色里所有 route 发真实模型探测验连通，把结果作为副作用写回测试 job（内存 SSOT）+ draft 证据库」。没有「该填哪些字段」的数据语义，只有「探什么、怎么判通断、结果落哪」。"
+    }
+  ],
+  "interfaces": [
+    {
+      "group": "crud",
+      "endpoint": "GET /api/llm/registry",
+      "req": "无入参",
+      "resp": "RegistryResponse：provider_endpoints / provider_routes（api_key 全 redacted）、roles（已 materialize：带 fallback_chain + materialization_report）、model_groups（内嵌 6 态 ui_state 的 provider_models DTO）、model_profiles、canonical_groups、model_bundles、lint_results",
+      "purpose": "查（读整表）——进 LLM Roles tab 时一次性拉「角色 + 可用模型组（含 6 态原料）+ bundle」快照，前端只投影、不持第二份真相",
+      "provider": "gateway 后端（routers/llm.py get_llm_registry，内部对每个角色调 _materialize_roles_for_response）",
+      "id": "iface-0"
+    },
+    {
+      "group": "crud",
+      "endpoint": "PUT /api/llm/roles",
+      "req": "RolesData（roles + model_bundles + models + providers 整表）",
+      "resp": "RolesData（已 materialize：每角色带回 fallback_chain + materialization_report）",
+      "purpose": "增/改（整表 upsert 角色与 bundle）——前端 debounce 自动保存走它；保存后后端对全部角色重新 materialize 再回投影。现状前端的角色保存唯一入口",
+      "provider": "gateway 后端（routers/llm.py put_llm_roles → _materialize_roles_for_response）",
+      "id": "iface-1"
+    },
+    {
+      "group": "crud",
+      "endpoint": "PUT /api/llm/roles/{role_name}",
+      "req": "路径参数 role_name + RoleEntry（单角色结构化定义）",
+      "resp": "RoleEntry（该角色 materialize 后的 fallback_chain + report）",
+      "purpose": "改（单角色 upsert，带 materialize）——后端已实现、内部直接调 adapter.materialize_role。现状前端不调（只用整表 PUT），属 backend-only 入口",
+      "provider": "gateway 后端（routers/llm.py put_llm_role → adapter.materialize_role）",
+      "id": "iface-2"
+    },
+    {
+      "group": "crud",
+      "endpoint": "DELETE /api/llm/roles/{role_name}",
+      "req": "路径参数 role_name",
+      "resp": "RolesData（删后整表，已 materialize）",
+      "purpose": "删（删一个角色）——从 roles 移除该角色后重新 materialize 回投影",
+      "provider": "gateway 后端（routers/llm.py delete_llm_role）",
+      "id": "iface-3"
+    },
+    {
+      "group": "crud",
+      "endpoint": "GET /api/llm/roles/test-results",
+      "req": "无入参",
+      "resp": "RoleTestResultsResponse{results: map<role_name, {result: RoleTestResponse}>}：每角色最近一次持久化的 role 测试结果",
+      "purpose": "查（读持久化测试结果）——挂载时拉「上次测过的结果」种子回 badge，让重开/重启后显历史状态而非全退未测；是测试态 SSOT 的持久层",
+      "provider": "gateway 后端（routers/llm.py get_role_test_results → llm_role_test_results.py）",
+      "id": "iface-4"
+    },
+    {
+      "group": "action",
+      "endpoint": "POST /api/llm/roles/{role_name}/test-jobs（+ GET /role-test-jobs/{job_id} 轮询）",
+      "req": "路径参数 role_name（异步起 job，前端按 500ms 节奏轮询 job_id）",
+      "resp": "RoleTestJobResponse：status（queued/running/completed/failed）+ provider_statuses（逐 route 实时进度）+ result（RoleTestResponse：各 model group 各 provider 的 status / role_fit / ui_state / warnings）",
+      "purpose": "role 测试 = 对角色里所有模型批量真 probe（不停在第一条成功），实时回填状态灯 + 降级 tooltip，结果（含失败）写回 draft 证据库 + 持久化测试结果；未保存先拒测（先 PUT 再 test）",
+      "provider": "gateway 后端做 job/进度/HTTP 包装（routers/llm.py start_role_test_job / _run_role_test_job_impl，job 存内存字典 _role_test_jobs）；批量 route probe + draft 写语义在 gateway 内核",
+      "id": "iface-5"
+    },
+    {
+      "group": "action",
+      "endpoint": "POST /api/llm/roles/{role_name}/test（同步）",
+      "req": "路径参数 role_name",
+      "resp": "RoleTestResponse（一次性返回各 model group 各 provider 结果）",
+      "purpose": "role 测试的同步形态（不起 job、不轮询）；前端主路径用异步 test-jobs，这条是同步备用入口",
+      "provider": "gateway 后端（routers/llm.py test_llm_role）",
+      "id": "iface-6"
+    },
+    {
+      "group": "action",
+      "endpoint": "POST /api/llm/model-bundles/{bundle_id}/test",
+      "req": "路径参数 bundle_id",
+      "resp": "RoleTestResponse（束内各 route 的探测结果，复用 role 测试形态）",
+      "purpose": "束测试——把 bundle 当临时角色解析成 route list 后批量真 probe，复用 role 的测试组件/路径（设计要求束也能独立测）；现状束卡无 Test 按钮（前端未挂，见实施页 #50）",
+      "provider": "gateway 后端（复用 role 测试编排）",
+      "id": "iface-7"
+    }
+  ],
+  "boundaries": {
+    "do": [
+      "把角色的结构化 model_groups 物化成平铺 fallback_chain（按两层顺序遍历、尊重 fallback 开关）",
+      "对每条 route 合成 6 态 ui_state（含蓝态 historical_ready）作为入链第一道闸",
+      "按意图（thinking 三档 / token 四档，intent 只在 role 级）算 role_fit 四态 + 降级诊断 warning",
+      "跳过 failed/off、cooling_down 记警告、只把 fit 的 route 入链",
+      "产出 materialization_report 供前端 role-fit 灯 + 降级 tooltip 渲染",
+      "role 测试批量 route probe（不停首条成功）+ 结果写回 draft + 持久化",
+      "UI 测试态与引擎编排用同一套 6 态/role_fit 判断（前端绿 ⟺ 引擎入链）"
+    ],
+    "dont": [
+      "不决定默认选哪些 provider（拖入时的默认选择是前端产品策略）",
+      "不渲染卡片/颜色/折叠/弃用区/拖拽交互（前端 UI）",
+      "不在前端持第二份测试态真相（前端只投影后端 job/持久化结果）",
+      "不暴露 downgrade / cost_priority 给用户 UI（schema 默认 allow / mvp1 砍 cost_priority）",
+      "不发 copilot SDK 调用（copilot 拿 route 自己用 ClaudeSDKClient，属 gateway 后端 sidecar 侧）"
+    ]
+  },
+  "states_errors": {
+    "intro": "物化这条链对外产两套状态码：route 级 6 态 ui_state（这条 route 此刻能不能用，决定入不入链）+ route 级 role_fit 4 态（这条 route 对本角色合不合适，决定入链后前端显什么灯）。两套正交，别混。三页（设计 / 机制 / 实施）共用同一套定义。",
+    "states": [
+      {
+        "code": "ready",
+        "dot": "🟢",
+        "name": "就绪",
+        "mean": "真 probe 打通过；入链"
+      },
+      {
+        "code": "historical_ready",
+        "dot": "🔵",
+        "name": "历史就绪",
+        "mean": "draft 有历史连通证据但当前未真测；入链"
+      },
+      {
+        "code": "untested",
+        "dot": "⚪",
+        "name": "未测",
+        "mean": "没测过；入链（可试）"
+      },
+      {
+        "code": "failed",
+        "dot": "🔴",
+        "name": "失败",
+        "mean": "出错要修，必带 reason_code；跳过不入链、记 skipped"
+      },
+      {
+        "code": "cooling_down",
+        "dot": "⏳",
+        "name": "熔断冷却",
+        "mean": "灰 + 倒计时；记 warning 但仍入链（除非另被 role_fit 挡）"
+      },
+      {
+        "code": "off",
+        "dot": "⚫",
+        "name": "关闭",
+        "mean": "灰 + 不可选；跳过不入链、记 skipped"
+      }
+    ],
+    "projection": {
+      "owner": "gateway _materialization_projection → project_route_state_from_evidence（把下面几个事实源按优先级合成一个态，再据态决定入链/跳过/记警告）",
+      "priority": "off > failed > cooling_down > ready > historical_ready > untested",
+      "rules": [
+        [
+          "ui_state ∈ {failed, off}",
+          "跳过该 route、记进 skipped_provider_details（不入链）"
+        ],
+        [
+          "ui_state = cooling_down",
+          "记 cooling_down warning（带 retry_at），但 route 仍进入意图过滤"
+        ],
+        [
+          "ui_state ∈ {ready, historical_ready, untested}",
+          "进入 _apply_intent 算 role_fit"
+        ],
+        [
+          "role_fit ∈ {using, downgraded}",
+          "追加进 fallback_chain（downgraded 带 warning）"
+        ],
+        [
+          "role_fit ∈ {needs_test, not_fit}",
+          "写进 report.entries 但不入链（前端显 Limited/Blocked 灯）"
+        ]
+      ]
+    },
+    "reason_codes": [
+      [
+        "missing_config",
+        "缺 / 错 key、base_url、protocol、model id 这类配置缺口 → 去 API Keys 修（取代旧 needs_setup）"
+      ],
+      [
+        "endpoint_unreachable",
+        "endpoint 本身连不通（endpoint 级 failed 兜底码）"
+      ],
+      [
+        "model_failed",
+        "endpoint 通了但这个 model 这条 route 没跑通（route 级 failed 兜底码）"
+      ]
+    ],
+    "probe_errors": {
+      "short_circuit": [
+        "thinking required 但能力未知 → role_fit needs_test（不入链）",
+        "thinking required 但明确不支持 → role_fit not_fit（不入链）",
+        "required_minimum{value} token：route 最大可用输出 token < value（route 输出上限低于 role 的输出下限要求）→ role_fit not_fit（不入链）"
+      ],
+      "no_short_circuit": [
+        "thinking preferred 但不支持 → downgraded（仍入链 + warning）",
+        "target token 超限且 downgrade=allow / allow_with_warning → downgraded（仍入链）",
+        "cooling_down（瞬时熔断）→ 记 warning 但仍入链"
+      ]
+    },
+    "terminal": "role 测试里逐 route 的终态错误（连不上 / 生成失败）回写 draft 证据库（成功 + 失败都记），下次批量探测可据历史优先试/跳过；role_fit 诊断挂在 materialization_report.entries 供前端常驻显示，不只 toast。"
+  },
+  "backend_status": [
+    {
+      "item": "materialize_role + role-fit",
+      "d12": "D6.2 / D6.3",
+      "status": "ok",
+      "note": "角色编排→fallback 链 + role_fit/降级诊断已就绪(gateway role_materialization.py);Studio 侧薄委托。← #32/#36–#45 直接用。",
+      "ref": "d6"
+    },
+    {
+      "item": "6 态投影（含蓝态）",
+      "d12": "D6.1",
+      "status": "ok",
+      "note": "六态(含蓝态 historical_ready、cooling_down)的后端投影已就绪,已内嵌进 registry 的 model_groups DTO(provider_models[].ui_state),前端侧栏直接渲染。← #35 直接用。",
+      "ref": "d6"
+    },
+    {
+      "item": "role 测试 job + 持久化",
+      "d12": "D6.3 / D8",
+      "status": "ok",
+      "note": "异步 test-jobs(内存字典 _role_test_jobs 为活跃 job SSOT)+ 批量 route probe + 结果持久化(GET /roles/test-results)均已实现;evidence 回写在。← #46/#47 用,且是测试 SSOT 落差的后端底座(后端是 SSOT,前端 roleTestStates 易失要删)。",
+      "ref": "d6"
+    },
+    {
+      "item": "draft 历史证据库",
+      "d12": "D6.5",
+      "status": "ok",
+      "note": "append-only 历史证据库已就绪,是蓝态 historical_ready 的数据来源,role 测试结果(含失败)回写它。",
+      "ref": "d6"
+    },
+    {
+      "item": "draft probe 真 worker",
+      "d12": "D6.5",
+      "status": "partial",
+      "note": "缺口:probe_import_draft 仍是桩,不真探、不产历史证据 → 仅靠 role 测试产证据;不影响 role 物化主链,但 draft 端到端赋能尚缺一环。",
+      "ref": "d6"
+    },
+    {
+      "item": "单角色 PUT(带 materialize)",
+      "d12": "D6.2",
+      "status": "ok",
+      "note": "PUT /roles/{name}(单角色物化)后端已实现;现状前端只用整表 PUT,这条是 backend-only 入口(非阻塞,整表 PUT 已覆盖保存)。",
+      "ref": "d6"
+    },
+    {
+      "item": "bundle 引用同步(拖进角色=引用 + 删束级联 + role 可覆盖)",
+      "d12": "D6.2",
+      "status": "partial",
+      "note": "缺口:设计要求束拖进角色是引用、改束同步、删束级联、role 可在引用上局部覆盖;现状前端是快照复制(拖入拍 route_ids 进角色,不存 bundle_id 引用)→ 前端存引用 + 物化按引用展开两侧都要补。存储语义已定(PM 2026-06-18,方案①引用+delta):role 存 bundle_id 引用 + 一份覆盖 delta,物化时先按引用拉束当前内容再叠加 delta;束删某条 route 则该 route 从 role 链移除(束是源头),束里已不存在的 route 上的 delta 自动失效,不另搞「改即固化快照」机制,见 submodule「Model Bundle 物化」。",
+      "ref": "d6"
+    }
+  ]
+}

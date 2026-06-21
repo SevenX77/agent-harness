@@ -1,0 +1,18 @@
+[
+  {
+    "name": "HitL prompt 提取与提交（latestHitlPrompt + resume-options）",
+    "kind": "绑定 HitL 场景的业务逻辑",
+    "what": "一组支撑「agent 请求人类输入 → 作答 → 注入续跑」的前端逻辑:从事件流取最新暂停 prompt(问题/可选项/挂起工具调用),把用户答案打包成 resume 的 human_response 注入续跑。",
+    "where": "TracePanel.tsx 的 latestHitlPrompt(扫事件取最新暂停 prompt 的函数,取 question/prompt/message/options/pending_tool_calls)+ submitHitlResponse(打包回调)+ TraceHitlResumeRequest 类型;resume-options.ts 的 hitlResumeOptionsFromRequest(把 HitL 请求转成 resumeRun options 的函数);Workspace.tsx 的 handleSubmitHitlResponse。",
+    "duties": [
+      "latestHitlPrompt:从事件流取最近一条 HitL/interrupted 事件的问题文本、可选项、挂起工具调用列表 + phase 名 + checkpoint 元数据。",
+      "渲染 HitL 表单:问题 + 可选项按钮 + 多挂起工具调用时的单选选择器 + 文本输入。",
+      "submitHitlResponse:产出 {content, phaseName, toolCallId, checkpointId, checkpointNs}。",
+      "hitlResumeOptionsFromRequest:转成 resumeRun 的 options.humanResponse={content, toolCallId},调 resumeRun 注入续跑。"
+    ],
+    "used_by": "#5(hitl-node-anchored-input,取 prompt 渲染输入框)、#6(hitl-answer-inject-resume,提交注入续跑)。",
+    "boundary": "做:取暂停 prompt、渲表单、打包答案调 resume。不做:不做注入本身(引擎 _apply_resume_human_response 把答案写成 ToolMessage)、不判暂停态(暂停态来自 deriveNodeStatuses)。目标偏差:输入框现状在 TracePanel(固定面板),应锚定暂停节点浮在其上方(N5.2#5)。",
+    "reuse_note": "节点内共享:取 prompt(#5)与提交注入(#6)是同一条 HitL 链的两端,共用同一份 prompt 提取 + options 转换。",
+    "api": "动作类:POST /api/skills/{skill_id}/runs/{run_id}/resume(带 human_response={content, tool_call_id?})。见 mech_n5_resume。"
+  }
+]

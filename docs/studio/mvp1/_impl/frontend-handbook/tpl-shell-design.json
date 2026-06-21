@@ -1,0 +1,237 @@
+{
+  "page_id": "shell_design",
+  "title": "Settings 壳层 · 操作设计",
+  "region": "settings:shell",
+  "intro": "本页是进入 Settings 这层「壳」(overlay 容器 + tab 切换 + 保存徽章 + WebSocket 自动刷新 + 错误兜底)的 MVP1 设计(应该怎样):每张卡只描述该壳层操作目标长啥样、用户怎么触发、前端该怎么做、依赖后端哪条契约;现状实现与差距见实施页(shell_impl),overlay 生命周期 + WebSocket 自动刷新 + 全局保存徽章这块单列的机制见壳层机制页(shell_mech_overlay)。注:Settings 壳层不是独立后端,它只对接 gateway 后端的 sidecar 侧(即 apps/studio/backend 这个 Python sidecar,是 gateway 后端的 HTTP 承载层)的 WebSocket 推送;overlay/tab/保存徽章本身全是前端自身行为。",
+  "atoms": [
+    {
+      "n": 1,
+      "cap": "open-settings-overlay",
+      "track": "共",
+      "module": "壳层容器",
+      "func": "设计:点 Toolbar 的 Settings 图标打开 Settings 面板,面板盖在画布上但不卸载工作区(左文件树、右 Copilot 仍挂载可交互)。",
+      "action": "用户点左侧 Toolbar(竖排工具条)底部的 Settings 齿轮图标。",
+      "fe_design": "点 Toolbar 的 Settings 图标 → 把工作区的 settingsOpen 状态置 true → 在画布区(canvas 这块面板)渲染 SettingsPage(Settings 壳层根组件),它只替换画布里原本的编辑器/图,左侧 Panels(文件树等工具面板)和右侧 Copilot 面板照常挂载、照常可点。这是有意设计成「非真 modal」:不铺全屏 backdrop、不做 focus-trap,因为 Settings 要让用户一边配置一边还能看/操作工作区,而不是把工作区锁死。Header 的 onOpenSettings(顶栏也能开 Settings 的回调,如 publish 缺凭证时引导)与 Toolbar 的 onSettingsOpen 共用同一个置 true 动作。",
+      "fe_modules": [
+        {
+          "name": "Settings overlay 容器",
+          "ref": "femod-settings-overlay"
+        }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计(overlay 只占画布面板、工作区不卸载、非真 modal 无 backdrop/focus-trap)。",
+      "impl_ref": "fn-1"
+    },
+    {
+      "n": 2,
+      "cap": "settings-skeleton",
+      "track": "共",
+      "module": "壳层容器",
+      "func": "设计:数据没到位时先显示骨架屏占位,别让用户看空白——尤其 API Keys 的 available models 可能是巨长列表,首屏加载体验是壳层的首要 NFR(非功能需求)。",
+      "action": "无显式动作(打开 Settings / 切到某 tab 时,数据加载期间自动显示骨架)。",
+      "fe_design": "打开 Settings 或切到某 tab 时,若该 tab 的数据还在拉取(loading 态),先渲染该 tab 的骨架占位,数据到了再换成真内容。设计意图:壳层统一「数据未到 → 骨架」收口,避免每个 tab 各自为政、有的有骨架有的空白;但骨架形状按 tab 各自的真实布局,不是一套通用骨架硬套所有 tab。骨架是纯前端展示,不发请求。各 tab 骨架形状(最终矩阵):API Keys 复用现成 ProviderListSkeleton(占位 5 张 provider 卡形状);General 秒开、不显示骨架,直接渲染(数据轻、无需占位);LLM Roles / Copilot 用「角色卡占位」骨架——若干角色卡形状的占位条 + 右侧 Available Models 侧栏的占位块(与该 tab 真实布局同形,不套用 provider 卡形状)。",
+      "fe_modules": [
+        {
+          "name": "Settings overlay 容器",
+          "ref": "femod-settings-overlay"
+        }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "现状没有壳层级骨架,完全下放给各 tab 自管(只有 API Keys 用 ProviderListSkeleton 占位,其余 tab 各画各的或空白);目标是壳层统一收口「数据未到→骨架」,但骨架形状按 tab 各自真实布局:API Keys 复用 ProviderListSkeleton(5 张 provider 卡)、General 不显示骨架直接渲染、LLM Roles / Copilot 用角色卡占位 + 右侧 Available Models 侧栏占位块。",
+      "impl_ref": "fn-2"
+    },
+    {
+      "n": 3,
+      "cap": "settings-tab-switch",
+      "track": "共",
+      "module": "壳层容器",
+      "func": "设计:在四个 tab(General / API Keys / LLM Roles / Copilot)之间切换,且切到哪个才懒加载哪个的数据,不一进 Settings 就把四套数据全拉一遍。",
+      "action": "用户点 Settings 左侧导航栏里的某个 tab(General / API Keys / LLM Roles / Copilot)。",
+      "fe_design": "点导航栏某 tab → 更新 activeTab(当前激活 tab 的状态)→ SettingsPageContent(壳层内容区,按 activeTab 渲染对应 tab)切到该 tab。数据懒加载用绑 activeTab 的 useEffect(React 副作用钩子)实现:切到 api_keys 才首次 hydrate(把掩码 key 换回真值的明文回填)、切到 llm_roles/copilot 才首次拉 roles(角色)+ model groups(模型组)。已加载过的 tab 不重复拉。注:凭证的「打码快照」在壳层挂载时即拉一次(供各 tab 共用),真正按 tab 懒加载的是 API Keys 的明文 hydration 与 Roles 的角色/模型组。设计意图:成本最高的数据按需加载,降低首屏开销(尤其 API Keys 的明文 hydration、Roles 的大列表)。",
+      "fe_modules": [
+        {
+          "name": "Settings overlay 容器",
+          "ref": "femod-settings-overlay"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "GET /api/llm/registry",
+          "purpose": "切到 API Keys tab 时首次拉凭证/路由快照(懒加载),供该 tab 渲染。",
+          "mechanism_ref": "mech_cred",
+          "iface_ref": "iface-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(四 tab 切换 + 切到才懒加载该 tab 数据)。",
+      "impl_ref": "fn-3"
+    },
+    {
+      "n": 4,
+      "cap": "settings-save-badge",
+      "track": "共",
+      "module": "保存状态",
+      "func": "设计:用户改动后,在面板右上看到一个全局保存徽章(Pending 待保存 / Saving 保存中 / Saved 已保存 / Failed 失败),一眼知道自己的改动有没有落库。",
+      "action": "无显式动作(用户在任意 tab 改字段后,保存徽章自动随 debounce 保存的状态流转)。",
+      "fe_design": "用户在某 tab 改字段 → 入队 debounce(防抖,改完停顿一下才发请求)自动保存 → 保存状态(idle 空闲 / pending 待保存 / saving 保存中 / saved 已保存 / error 失败)经 SaveStatusBadge(把保存态渲染成带图标徽章的组件:pending/saving 转圈、saved 打勾、error 三角警告)显示。设计意图:壳层顶栏应有一个「全局」保存态,把三套即填即存(凭证 / 角色 / app 设置)的保存状态统一汇到一处,用户不用在各 tab 里找各自的徽章。徽章是纯前端展示,保存动作本身走各自的 debounce 保存 hook(防抖保存逻辑)。",
+      "fe_modules": [
+        {
+          "name": "保存状态徽章（SaveStatusBadge）",
+          "ref": "femod-save-badge"
+        }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "现状三套数据(API Keys 凭证、LLM Roles 角色、General app 设置)各画各的 SaveStatusBadge、各挂在各 tab 标题栏,顶栏没有一个全局保存态;目标是壳层顶栏统一一个全局保存徽章。",
+      "impl_ref": "fn-4"
+    },
+    {
+      "n": 5,
+      "cap": "ws-registry-refresh",
+      "track": "共",
+      "module": "WebSocket 自动刷新",
+      "func": "设计:别的进程/窗口在外部改了凭证文件,Settings 收到 WebSocket 的 registry_changed 事件后自动重拉凭证刷新界面,用户不用手动刷新。",
+      "action": "无显式动作(外部改动 credentials 文件 → 后端推 registry_changed → 前端自动刷新)。",
+      "fe_design": "Settings 壳层挂载时开一条 WebSocket(长连事件通道)连到 /ws/events(后端事件通道)→ 收到 type=registry_changed 的事件 → 调 getCredentials(拉凭证快照的 API 函数)重新拉一份凭证快照并刷新卡片/草稿。事件由 gateway 后端 sidecar 侧的文件监听器(监视凭证文件 llm_credentials.json 改动)在文件落盘时广播。设计意图:多窗口/多进程下凭证文件是单一真相,任一处改了,所有打开 Settings 的界面自动跟上,不持第二份过期状态。设计要求 WebSocket 断开要能重连、错误要可观测(不能空 catch 静默吞掉,违 logging 铁律)。",
+      "fe_modules": [
+        {
+          "name": "Settings WebSocket 刷新",
+          "ref": "femod-ws-refresh"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "WS /ws/events (type=registry_changed)",
+          "purpose": "凭证文件外部变更时,后端 sidecar 文件监听器经此通道广播 registry_changed,触发前端重拉。",
+          "mechanism_ref": "shell_mech_overlay",
+          "iface_ref": "iface-ws"
+        },
+        {
+          "endpoint": "GET /api/llm/registry",
+          "purpose": "收到 registry_changed 后重拉的凭证/路由快照。",
+          "mechanism_ref": "mech_cred",
+          "iface_ref": "iface-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "刷新本身可用(收 registry_changed 即重拉);偏差在韧性:WebSocket 的 onmessage 解析、onerror/onclose 全是空 catch 静默,且断开后不重连——违 logging 铁律(降级必须可观测)、且断线后自动刷新永久失效。",
+      "impl_ref": "fn-5"
+    },
+    {
+      "n": 6,
+      "cap": "ws-roles-refresh",
+      "track": "共",
+      "module": "WebSocket 自动刷新",
+      "func": "设计:别的进程/窗口在外部改了角色文件,Settings 收到 WebSocket 的 roles_changed 事件后自动重拉角色 + 模型组刷新界面。",
+      "action": "无显式动作(外部改动 roles 文件 → 后端推 roles_changed → 前端自动刷新)。",
+      "fe_design": "同一条 /ws/events WebSocket → 收到 type=roles_changed 的事件 → 重拉角色(getRoles)+ 模型组(getModelGroups)刷新 LLM Roles / Copilot 视图。事件由 sidecar 文件监听器在角色文件落盘时广播。设计意图:与 registry 自动刷新同源,角色文件外部变更时界面自动跟上。设计要求:刷新不应被「这个 tab 还没打开过」吞掉——只要 Settings 开着就该让角色数据保持新鲜(或至少标记下次进 tab 时重拉),并同样满足重连 + 可观测要求。",
+      "fe_modules": [
+        {
+          "name": "Settings WebSocket 刷新",
+          "ref": "femod-ws-refresh"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "WS /ws/events (type=roles_changed)",
+          "purpose": "角色文件外部变更时,后端 sidecar 文件监听器经此通道广播 roles_changed,触发前端重拉角色 + 模型组。",
+          "mechanism_ref": "shell_mech_overlay",
+          "iface_ref": "iface-ws"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "现状仅当角色数据已加载过(rolesDataRef 非空)才响应 roles_changed,没开过 Roles tab 则事件被直接吞掉;加上与 #5 同源的空 catch 静默、无重连。目标是角色刷新不被「未打开过 tab」吞、且断线能重连、降级可观测。",
+      "impl_ref": "fn-6"
+    },
+    {
+      "n": 7,
+      "cap": "close-settings-overlay",
+      "track": "共",
+      "module": "壳层容器",
+      "func": "设计:点面板右上角的 X 关闭 Settings,回到工作区画布;关闭只是收起 overlay,不卸载工作区。",
+      "action": "用户点 Settings 面板标题栏右上角的 X 按钮。",
+      "fe_design": "点 X → 调用 onClose → 把工作区的 settingsOpen 置 false → 画布区从 SettingsPage 换回原本的编辑器/图,左右栏一直没动过,等于「无缝回到工作区」。设计意图:关闭是纯前端收起 overlay,工作区状态(打开的文件、Copilot 会话)全程不丢。注意:即填即存语义下,关闭时若还有在途的 PUT 保存请求(in-flight),它仍会照常落地——关闭不取消、不丢改动;也不弹「未保存」确认(因为即填即存已经在存了,没有「未保存」概念)。",
+      "fe_modules": [
+        {
+          "name": "Settings overlay 容器",
+          "ref": "femod-settings-overlay"
+        }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计(X 收起 overlay、工作区不卸载、in-flight PUT 仍落地、无未保存确认因即填即存)。",
+      "impl_ref": "fn-7"
+    },
+    {
+      "n": 8,
+      "cap": "home-closes-settings",
+      "track": "共",
+      "module": "壳层容器",
+      "func": "设计:Settings 打开时点 Header(顶栏)的 Home 图标,在退回首页的同时连带把 Settings 一起关掉,不留一个盖在首页上的孤儿 overlay。",
+      "action": "用户在 Settings 打开状态下点 Header 左上角的 Home(返回首页)图标。",
+      "fe_design": "点 Header Home → 调 handleHome → 先把 settingsOpen 置 false(收起 Settings overlay)→ 再调 onCloseSkill(卸载当前工作区、退回首页)。设计意图:Home 与 X 是两条不同语义——X 只收起 Settings 回到工作区(工作区还在);Home 不仅关 Settings,还要卸载工作区退回首页。两者都先把 Settings 关掉,区别在 Home 多走一步卸载工作区,避免「退了首页但 Settings 还盖在上面」的孤儿态。",
+      "fe_modules": [
+        {
+          "name": "Settings overlay 容器",
+          "ref": "femod-settings-overlay"
+        }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计(Home 连带关 Settings + 卸载工作区退首页;与 X 两条语义清晰)。",
+      "impl_ref": "fn-8"
+    },
+    {
+      "n": 9,
+      "cap": "settings-error-boundary",
+      "track": "共",
+      "module": "错误兜底",
+      "func": "设计:某个 tab 渲染崩溃时,用错误兜底卡(显示错误信息 + Retry 按钮)兜住,不让整个 Settings(乃至工作区)白屏。",
+      "action": "无显式动作(某 tab 组件渲染抛错时,错误边界自动捕获并显示兜底卡)。",
+      "fe_design": "每个 tab 内容外包一层 SettingsErrorBoundary(React 错误边界类组件:子树渲染抛错时捕获,改渲染一张带错误信息 + Retry 的兜底卡,Retry 清掉错误重试渲染)。设计意图:壳层应对所有四个 tab 都包错误边界——任一 tab 渲染崩了只塌成一张兜底卡、其它 tab 和工作区不受牵连,绝不白屏。崩溃信息应记录(componentDidCatch 里 console.error),便于排查。",
+      "fe_modules": [
+        {
+          "name": "Settings 错误边界",
+          "ref": "femod-error-boundary"
+        }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "现状只有 LLM Roles 和 Copilot 两个 tab 包了 SettingsErrorBoundary,General 和 API Keys 没包;目标是四个 tab 全包,任一崩溃都有兜底不白屏。",
+      "impl_ref": "fn-9"
+    }
+  ],
+  "fe_defs": [
+    {
+      "id": "femod-settings-overlay",
+      "name": "Settings overlay 容器",
+      "explain": "前端共享逻辑:Settings 壳层的 overlay 生命周期——工作区 Workspace 用 settingsOpen 状态控制是否在画布面板渲染 SettingsPage(壳层根组件);SettingsPageContent 按 activeTab 渲染对应 tab + 处理 tab 切换/懒加载;onClose(X 收起 overlay)、handleHome(Home 连带关 Settings + 卸载工作区)。overlay 只占画布面板、不卸载左右栏、非真 modal。"
+    },
+    {
+      "id": "femod-save-badge",
+      "name": "保存状态徽章（SaveStatusBadge）",
+      "explain": "前端共享 UI 组件:SaveStatusBadge(把一个保存态值渲成带图标小徽章的纯展示组件),把 debounce 保存的状态(idle 空闲 / pending 待保存 / saving 保存中 / saved 已保存 / error 失败)渲染成右上角带图标徽章(pending/saving 转圈 Loader2、saved 打勾 Check、error 三角警告 TriangleAlert 配 warning 琥珀色)。当前被三套数据(API Keys 凭证、LLM Roles 角色、General app 设置)各自复用,目标是壳层顶栏统一一个全局保存态。本页（Settings 壳层）是它的首登记处,General(#15)、Copilot(#65)复用同一卡。"
+    },
+    {
+      "id": "femod-ws-refresh",
+      "name": "Settings WebSocket 刷新",
+      "explain": "前端共享逻辑:SettingsPage 里那条连 /ws/events 的 WebSocket,收 registry_changed 重拉凭证、收 roles_changed 重拉角色+模型组,实现外部文件变更自动刷新界面。现状空 catch 静默、不重连;目标补重连 + 可观测日志。"
+    },
+    {
+      "id": "femod-error-boundary",
+      "name": "Settings 错误边界",
+      "explain": "前端共享 UI 组件:SettingsErrorBoundary(React 类组件错误边界),getDerivedStateFromError 捕获子树渲染异常、componentDidCatch 记日志,改渲染一张带错误信息 + Retry 按钮的兜底卡。当前只包 Roles/Copilot 两 tab,目标四 tab 全包。"
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "event_source": {
+    "summary": "EventEnvelope(studio.event.v1 信封:schema_version/stream_id/seq/cursor/run_id/event_type/payload)是 Trace 面板、画布节点灯、边 dot 黑板、Prompt 透视的唯一事实源(SSOT)。引擎在子进程里通过回调把每个领域事件(events.py 里 ~30 种 Literal[event_type] 的 _EventBase 子类)塞进 process_queue;run_manager._drain_process_queue(后端排空子进程事件队列的协程)逐条 _event_envelope_from_callback 把裸 callback 包成 EventEnvelope、按到达顺序 seq=len(events)+1 编号并 append 进 record.events,再 fan-out 给 ws_queue 和每个 subscriber 队列;/ws/runs/{run_id}(stream_run 建队列、按 cursor 回放已存事件 + running 时挂 subscriber)把信封 send_json 推给前端;前端 useRunStream(订阅运行事件流的 hook)用 WebSocket 连 runEventsWsUrl、按 seq 去重 + 校验连续性(gap 报错)+ 100ms 批量 flush 进 events[],run_ended 后停止重连防回放重复累积;消费者各自从 events[] 取 payload 渲染。事件类型含 phase_start / phase_end / predict_chain_start / llm_call / tool_call / prompt_captured / validation_fail / validation_pass / retry / retry_exhausted / finish_task / nudge / input_dispatch / blackboard_reduce / run_started / run_ended / internal_error / model_resolved / artifact_saved / working_memory_update 等。",
+    "evidence": [
+      ["EventEnvelope 信封模型:schema_version='studio.event.v1' + stream_id/seq/run_id/event_type/payload/cursor/timestamp,frozen 不可变", "packages/graph-agent/src/graph_agent/core/event_contracts.py:45-57"],
+      ["前端镜像同一信封类型 EventEnvelope(payload: CallbackEvent),CallbackEvent 是 CallbackEventBase + 任意扩展字段", "apps/studio/frontend/src/api/types.ts:561-572"],
+      ["事件类型枚举:每个领域事件用 Literal[event_type] 打标签(phase_start/phase_end/llm_call/tool_call/prompt_captured/validation_fail/input_dispatch/run_ended/...)", "packages/graph-agent/src/graph_agent/callbacks/events.py:55-355"],
+      ["引擎→信封落地:_drain_process_queue 排空子进程 process_queue,逐条包成 EventEnvelope、seq=len(events)+1、append 进 record.events,再推给 ws_queue + 所有 subscriber", "apps/studio/backend/app/services/run_manager.py:642-665"],
+      ["裸 callback → 信封的转换器 _event_envelope_from_callback(stream_id=run:{run_id}、cursor={stream_id}:{seq})", "apps/studio/backend/app/services/run_manager.py:790-801"],
+      ["stream_run:按 cursor 回放 record.events(_events_after_cursor),running 时把 replay 队列挂为 subscriber 接续新事件,否则补 None 收尾", "apps/studio/backend/app/services/run_manager.py:595-616"],
+      ["websocket 端点 /ws/runs/{run_id}:鉴权后建 queue=stream_run(...),循环 queue.get→send_json,None 即关闭", "apps/studio/backend/app/routers/websockets.py:27-39"],
+      ["前端 useRunStream:WebSocket 连 runEventsWsUrl,onmessage 解析信封→按 event.seq 去重(seenSeqs)+ 连续性校验(seq!=lastSeq+1 报 gap)+ 100ms 批量 flush 进 events[];run_ended 置 runEnded 停止重连防回放重复累积", "apps/studio/frontend/src/hooks/useRunStream.ts:41-122"],
+      ["ws url 构造 runEventsWsUrl(带 cursor query)+ 指数退避 nextBackoffMs", "apps/studio/frontend/src/lib/websocket.ts:5-12"]
+    ]
+  },
+  "consumers": {
+    "headers": ["消费者", "消费哪些事件", "渲染成什么", "file:line"],
+    "rows": [
+      [
+        "TracePanel(运行/历史 trace 时间线面板)+ 其子件 VirtualTraceList/TraceFilter/TraceSearchBar",
+        "全部事件(traceLogs: EventEnvelope[] → 取 payload 成 CallbackEvent),按 useTraceFilter 过滤(事件类型 + 关键字 + activePhase 联动)",
+        "虚拟滚动的事件时间线:每行一个事件(类型徽章/phase/token/mocked-source);顶栏 Resume/Compare/Golden 按钮 + Link views 开关 + 'Showing N of M events' 统计",
+        "apps/studio/frontend/src/components/TracePanel.tsx:29-135"
+      ],
+      [
+        "node-status(事件→节点态派生器)+ SkillNode(画布节点灯)",
+        "phase_start / phase_end / validation_fail / retry_exhausted / internal_error / status 字段(按到达顺序 last-event-wins per phase)",
+        "deriveNodeStatuses 把事件流归约成 {phaseName: running|success|error} 节点态映射;SkillNode 用 STATUS_STYLE 渲染呼吸灯/红绿边框;activeTracePhase 取第一个 running 节点用于联动高亮",
+        "apps/studio/frontend/src/components/studio/node-status.ts:46-67"
+      ],
+      [
+        "EdgeContextView(dot 黑板转移视图)+ edge-context.ts(选择器)",
+        "input_dispatch / edge_transition(取 from_phase→to_phase 匹配该边的最后一次转移)",
+        "edgeContextFromEvents 从事件提取该边 dispatch 的扁平黑板 snapshot + changed_keys;EdgeContextView 渲染 'source→target 转移' 头 + 'Keys changed' 徽章 + 'Blackboard dispatched into target' 键值列表",
+        "apps/studio/frontend/src/lib/edge-context.ts:56-111"
+      ],
+      [
+        "PromptInspector(llm_call/prompt_captured 三视图弹窗)",
+        "prompt_captured / llm_call(从 TraceEventRow 的 'Inspect prompt' 入口选中,findPromptEvent 回溯同 phase 的 prompt_captured)",
+        "Dialog + Tabs 三视图:Template(template_source)/ Variables(variables)/ Rendered(prompt_captured 用 resolved_prompt、llm_call 用 messages)",
+        "apps/studio/frontend/src/components/PromptInspector.tsx:20-75"
+      ],
+      [
+        "TimelinePanel(timeline 面板:run 历史 + 单 run 回看 + dot 三态切换)",
+        "run_ended(由 useRunStream 判完成)+ getRunDetail 拉历史 RunDetail.events;selectedEdge 触发 dot 视图",
+        "三互斥视图:selectedEdge→EdgeContextView;selected run→TracePanel(传 events、activePhase=null);否则 run 列表(run_id/状态/耗时/token)",
+        "apps/studio/frontend/src/components/studio/panels/TimelinePanel.tsx:38-172"
+      ]
+    ]
+  },
+  "deblackbox_gaps": {
+    "summary": "三处去黑盒缺口:① agent/任意事件输出无分类折叠摘要——TraceEventRow 展开后直接倾倒原始 JSON,不是 agent IDE 那种「Worked for ▾ / Explored ▾ / Thought ▾」一行摘要点开看详情 + 末尾自然语言总结(违 D 段 P2 / D1);② focus 节点不收窄 trace、且无 run 概要——TracePanel 根本没有 selectedNode prop,TimelinePanel 历史回看写死 activePhase=null,既做不到「点节点→只显该节点 trace」(D5)也做不到「focus 空画布=run_id 概要 / 全局」(D3);③ 无只读完整 trace 文档编辑器——完整 trace 应是「人能读、轻度格式化」的只读文档(D4/D7),但代码里没有任何把整条 trace 渲染成可读文档的只读编辑器,MonacoPanel 是通用编辑器、没接 trace。",
+    "evidence": [
+      ["缺口①:TraceEventRow 展开态就是 <pre>{JSON.stringify(event, null, 2)}</pre> 原始 JSON 倾倒,无分类折叠摘要、无自然语言总结(应参考 agent IDE 折叠)", "apps/studio/frontend/src/components/trace/TraceEventRow.tsx:119-123"],
+      ["缺口①佐证:eventMessage 仅给单行枚举式文案(Phase started/LLM call completed/...),不是 agent 流式输出的分类摘要", "apps/studio/frontend/src/utils/trace.ts:21-42"],
+      ["缺口②:TracePanelProps 无 selectedNode/run 概要入参,只有 activePhase(用于 Link views 高亮,非收窄粒度)", "apps/studio/frontend/src/components/TracePanel.tsx:8-23"],
+      ["缺口②:历史回看把 activePhase 写死 null、不接 selectedNode,无法按 focus 节点收窄,也无 run_id 概要视图", "apps/studio/frontend/src/components/studio/panels/TimelinePanel.tsx:93"],
+      ["缺口②佐证:Workspace 已算出 selectedNode/selectedNodeId/activeTracePhase,但没有任何路径把 selectedNode 喂给 TracePanel 去收窄 trace", "apps/studio/frontend/src/components/studio/Workspace.tsx:101-141"],
+      ["缺口③:无只读完整 trace 文档编辑器——通篇 trace 渲染只有 VirtualTraceList 的事件行 + 展开 JSON,没有「人能读、轻度格式化」的只读文档视图;MonacoPanel 是通用编辑器、与 trace 无连接", "apps/studio/frontend/src/components/MonacoPanel.tsx:10-28"],
+      ["缺口③设计依据(D4 看完整 trace=timeline+只读编辑器 / D7 点状态→只读看完整黑板 / 完整 trace 文档=人能读轻度格式化)", "docs/studio/mvp1/01_workflows/04_run-and-verify.md (D 段 D1/D3/D4/D5/D7)"]
+    ]
+  }
+}

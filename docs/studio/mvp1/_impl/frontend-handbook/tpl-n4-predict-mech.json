@@ -1,0 +1,120 @@
+{
+  "id": "n4_predict_mech",
+  "title": "predict 试飞编排 + mock-by-golden + predict-pass 门（设计）",
+  "overview": {
+    "manages": "用户点 Predict 后，一份输入怎么走完『试飞』整条链：取选中输入 → 发 predict 请求 → 后端把 skill 编成临时产物 → 引擎按节点分流（logic 真跑 / agent 走 mock）→ 试飞成功落盘结果并记录一个绑 content_hash 的 predict-pass，供 Run 真跑的服务端门校验。",
+    "why_single": "predict 不是一句『发个请求』：它牵涉 logic/agent 两类节点的分流、agent 节点 mock 由 golden 状态自动决定（无手动选择器）、以及『predict 认证的是当前这张图』要靠 content_hash 绑定才成立——这一整块机制被 predict(#1–#4) 多个操作共享，单列一页讲清。",
+    "design_owner": "engine 后端（试飞执行 + mock 解析在引擎 runner）+ gateway 后端 sidecar 侧（编排入口 + predict-pass 记录）。前端只发请求、读结果，不参与 mock 选择。",
+    "code_location": "前端 handlePredict（Workspace.tsx）→ resolveRunInput（client.ts，解析选中输入）→ postPredictRun（client.ts，发 predict 请求）；gateway 后端 sidecar 侧 predict_run（routers/runs.py）→ dispatch_predict_job（services/predictor.py，predict 编排入口）→ EngineAdapter.compile + predict_artifact（core/adapters/engine.py，对引擎的统一边界）→ 引擎 runner.predict_artifact（packages/graph-agent）；predict-pass 记录在 services/predict_gate.py（record_predict_pass）。",
+    "dataflow": [
+      "前端 handlePredict 取选中测试输入（resolveRunInput：选了 fetch content、没选回退空对象 {}）",
+      "postPredictRun POST /api/skills/{id}/runs/predict，body 只带 input_data（不带 mock_llm，把 mock 决策交给后端）",
+      "gateway 后端 sidecar 侧 dispatch_predict_job：先 EngineAdapter.compile 把 skill 编成 ephemeral artifact（临时编译产物），再 predict_artifact 把 inputs 发给引擎",
+      "引擎 runner.predict_artifact 装配带 SDKPredictContext 的图：logic 节点真跑确定性代码不烧 token；agent 节点经 resolve_generation 按 has_golden_case 选 golden_case（有 golden）或 heuristic_stub（无 golden，按输出 schema 造占位）",
+      "试飞跑完 _persist_predict_result 落盘 result.json；仅当 result.success 为真才 record_predict_pass 把这次 pass 绑编译 content_hash 存 .workspace/last_predict.json",
+      "前端 postPredictRun 成功 resolve → updateStage 推档 predict-pass → 动作条点亮 Run（前端门）；Run 真跑时后端再用 last_predict.json 的 content_hash 二次校验（服务端门，见 run 机制）"
+    ]
+  },
+  "submodules": [
+    {
+      "name": "mock-by-golden（agent 节点 mock 自动选择）",
+      "code": "engine: runner.resolve_generation（packages/graph-agent core/runner.py）",
+      "summary": "agent 节点试飞时不真调 LLM，由引擎按该节点有没有 golden 自动决定吐哪份 mock——有 golden 吐 golden_case、无 golden 一路降级到 heuristic_stub（按输出 schema 造占位），全程无手动选择器。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "logic 节点（确定性代码节点）真跑自己代码、不经模型、不烧 token——根本不走 mock。",
+        "agent 节点经 resolve_generation：先 strategy.has_golden_case(phase) 判该节点有无 golden case。",
+        "有 golden → 吐 golden_case 输出，mocked_source 记 'golden_case'。",
+        "无 golden → 一路降级到 generate_heuristic_stub（按节点输出 schema 造符合 schema 的占位数据），mocked_source 记 'heuristic_stub'。",
+        "整个选择由引擎自动完成；前端 predict 请求不带 mock_llm、不参与选择。"
+      ],
+      "do": [
+        "logic 真跑 / agent 走 mock 的节点级分流。",
+        "agent 节点按 golden 状态自动选 golden_case / heuristic_stub。",
+        "把 mocked_source 标进 trace 事件（trace 行据此标 golden_case/heuristic_stub 来源）。"
+      ],
+      "dont": [
+        "不给用户手动 mock 选择器（mock 完全由 golden 状态决定，spec g-b）。",
+        "logic 节点不参与 mock（spec g-c：logic 不用 golden）。"
+      ],
+      "deviation": ""
+    },
+    {
+      "name": "predict-pass 记录（绑 content_hash 的服务端凭据）",
+      "code": "gateway 后端 sidecar 侧: predict_gate.record_predict_pass / has_passing_predict（services/predict_gate.py）",
+      "summary": "把一次成功的 predict 绑定到当前编译产物的 content_hash 落盘 last_predict.json，作为 Run 真跑的服务端前提——改了图 content_hash 变了，旧 pass 判 stale、强制重 predict。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "仅当 predict 的 result.success 为真才 record_predict_pass，写 last_predict.json（skill_id / run_id / success=true / content_hash / recorded_at）。",
+        "has_passing_predict 校验：存在成功记录 AND 记录的 content_hash == 当前新编译的 hash，才算有效 pass。",
+        "hash 不匹配 = 图被改过 → 记录 stale → 门重新要求 predict（predict 认证的是当前这张图，不是上次过的那张）。",
+        "缺 content_hash 字段的旧记录一律按 stale 处理。"
+      ],
+      "do": [
+        "成功 predict 才记录、并绑当前编译 content_hash。",
+        "改图后旧 pass 自动失效，强制重 predict。"
+      ],
+      "dont": [
+        "前端不直接读写 last_predict.json（它是服务端门的内部凭据，前端只通过 predict/run 端点间接驱动）。"
+      ],
+      "deviation": ""
+    }
+  ],
+  "interface_groups": [
+    {
+      "key": "action",
+      "title": "试飞动作类（真跑一次 predict，有副作用）",
+      "note": "predict 不是幂等 CRUD：它真把 skill 编成临时产物、真跑一遍逻辑、对 agent 节点取 mock，并在成功时落盘 result.json + 记录 predict-pass。前端『点 Predict 试飞』指的就是调这一条。"
+    }
+  ],
+  "interfaces": [
+    {
+      "group": "action",
+      "endpoint": "POST /api/skills/{id}/runs/predict",
+      "req": "PredictRunRequest{input_data}（前端只发 input_data；mock_llm / current_hashes 模型支持但前端不发）",
+      "resp": "RunResult.model_dump（前端按 PredictRunResponse|RunDetail 宽松解析）：success（path_diff 有缺失/多余/乱序则自动 false）/ run_id / context / source='predict' / phases（逐节点 inputs/outputs/mocked_source）/ path_diff / metrics / error+diagnostics",
+      "purpose": "发起一次试飞——logic 真跑、agent 走 mock；成功后后端 record_predict_pass 绑 content_hash，前端推档 predict-pass 解锁 Run",
+      "provider": "gateway 后端 sidecar 侧（routers/runs.py predict_run → services/predictor.py dispatch_predict_job → 引擎 runner.predict_artifact）",
+      "id": "iface-predict-0"
+    }
+  ],
+  "boundaries": {
+    "do": [
+      "取选中输入（resolveRunInput）→ POST /runs/predict 发起试飞",
+      "logic 真跑 / agent mock-by-golden 的节点级分流（引擎）",
+      "成功 predict 落盘 result.json + record_predict_pass 绑 content_hash（服务端 predict-pass 凭据）",
+      "前端 predict 成功推档 predict-pass、动作条点亮 Run"
+    ],
+    "dont": [
+      "前端不带 mock_llm、不参与 mock 选择（mock 完全由 golden 状态自动决定）",
+      "predict 不真调 LLM、不烧 token（agent 节点走 mock；只有 Run 才真烧）",
+      "predict 来源的 trace 不能晋升 golden（409，见 golden 机制 PREDICT_TRACE_CANNOT_BE_GOLDEN）",
+      "前端不直接读写 last_predict.json（服务端门的内部凭据）"
+    ]
+  },
+  "backend_status": [
+    {
+      "item": "predict 试飞编排 + mock-by-golden（logic 真跑 / agent 走 mock）",
+      "d12": "D7『golden 逐节点评估事实合同』(D7.1 RunResultSnapshot / D7.2 per-node diff 已 ok)",
+      "status": "ok",
+      "note": "predict 试飞 + agent mock-by-golden 已 live：引擎 runner.resolve_generation 有 golden 吐 golden_case、否则 heuristic_stub；dispatch_predict_job 编排已接。← #1–#3 直接用。",
+      "ref": "d7"
+    },
+    {
+      "item": "predict-pass 服务端记录（绑 content_hash）",
+      "d12": "—",
+      "status": "ok",
+      "note": "predict_gate.record_predict_pass / has_passing_predict 已实现：成功 predict 绑 content_hash 落 last_predict.json，改图后旧 pass 自动 stale。供 Run 服务端门（require_passing_predict）消费，见 run 机制。← #4 后端侧直接用。",
+      "ref": "d7"
+    },
+    {
+      "item": "predict 结果 DTO 投影（success/phases/path_diff 透给前端）",
+      "d12": "不在 12D 范围；归 Studio sidecar DTO 投影层",
+      "status": "review",
+      "note": "根因（#4 偏差）：引擎 RunResult（packages/graph-agent core/result.py）的 success/phases/path_diff/error 是真字段、model_dump 会序列化进 predict_run 的 HTTP 响应（status 是 @property、不序列化、响应里没有）；但 client.ts 的 PredictRunResponse 类型未透出 success 等字段，导致 handlePredict 只能按 HTTP 成功放行 predict-pass、与后端『仅 result.success 才记录』的门不一致。修复在 Studio sidecar DTO 投影 + 前端类型透出 success（不是 status），不是引擎缺字段。",
+      "ref": "d7"
+    }
+  ]
+}

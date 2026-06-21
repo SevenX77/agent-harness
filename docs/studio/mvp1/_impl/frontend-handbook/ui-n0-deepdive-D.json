@@ -1,0 +1,372 @@
+{
+  "meta": {
+    "title": "三模块接口收敛 + Settings-gateway 设计考据 + 12D 交叉核对 (D 深挖)",
+    "worktree": "/Users/sevenx/Documents/coding/agent-harness/.worktrees/studio-mvp1-mainbased",
+    "modules": {
+      "①": "Studio 前端 (apps/studio/frontend) — 只渲染 DTO，不算事实",
+      "③a": "Studio 后端适配层 (apps/studio/backend/app/core/adapters/gateway.py + routers/llm.py) — 薄壳：DTO 转换 / HTTP·job 包装 / 存储介质注入",
+      "③b": "Gateway 公共内核 (packages/graph-agent-gateway) — 拥有 route 解析 / 6 态投影 / 凭证 / fallback / materialize / 协议标准化等机制"
+    },
+    "generated": "2026-06-17"
+  },
+
+  "interfaces": [
+    {
+      "name": "endpoint test (单端点验证)",
+      "dock": "① 点 Test → ③a `POST /api/llm/endpoints/{endpoint_id}/test`(test_endpoint，routers/llm.py:480) → ③a 直接用 endpoint 既存 protocol 打 models-list(_ping_provider)；当前未委托 ③b 协议探测，是设计要去分叉的点",
+      "request": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["endpoint_id", "str (path param)", "要验证的端点 id（无 body；端点 protocol/base_url/key 从已存 credentials 读）"]
+        ]
+      },
+      "response": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["registry", "RegistryResponse", "刷新后的整份 registry（含该端点更新后的 status）"],
+          ["tested_endpoint_id", "str", "本次测的端点 id"],
+          ["discovered_model_count", "int", "models-list 返回的模型数；连通即写 endpoint.status=verified/unverified_manual，失败=failed + last_test_message"]
+        ]
+      },
+      "evidence": [
+        ["EndpointTestResponse 定义", "apps/studio/backend/app/routers/llm.py:300-306"],
+        ["test_endpoint 实现（读既存 protocol、打 models-list、写 status/last_test_*）", "apps/studio/backend/app/routers/llm.py:480-590"],
+        ["设计目标：endpoint 验证应改为协议自动探测 + 批量模型探测", "docs/studio/mvp1/01_workflows/00_settings-ux-spec.md:42-50"]
+      ]
+    },
+    {
+      "name": "batch endpoint test job (批量探测，异步轮询)",
+      "dock": "① 触发 → ③a `POST /api/llm/endpoints/{endpoint_id}/test-jobs`(start_endpoint_test_job，llm.py:385) 起后台 job，① 轮询 `GET /api/llm/endpoint-test-jobs/{job_id}`(get_endpoint_test_job，llm.py:468)；进度/job 包装=③a，探测编排内核设计归 ③b(模块07 F8)",
+      "request": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["endpoint_id", "str (path param)", "起 job：对该端点下模型批量探测"],
+          ["job_id", "str (path param, 轮询)", "查询某 job 的进度/结果"]
+        ]
+      },
+      "response": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["job_id", "str", "本次批量探测 job id"],
+          ["endpoint_id", "str", "被探端点"],
+          ["status", "Literal[queued|running|completed|failed]", "job 状态"],
+          ["total_model_count / tested_model_count", "int", "总模型数 / 已测数（进度）"],
+          ["verified_route_count / failed_model_count / catalog_only_count", "int", "探通 route 数 / 失败模型数 / 仅目录数"],
+          ["available_models", "list[EndpointTestCompactModelInfo]", "每模型 {id, route_id, status(6 态相关), verified_profile_count, last_probe_message, capabilities}"],
+          ["available_sdks", "list[str]", "该端点可用 SDK 协议列表"]
+        ]
+      },
+      "evidence": [
+        ["EndpointTestJobResponse / EndpointTestCompactModelInfo schema", "apps/studio/backend/app/routers/llm.py:172-196"],
+        ["start_endpoint_test_job / get_endpoint_test_job", "apps/studio/backend/app/routers/llm.py:385-417, 468-478"],
+        ["批量探测策略设计归 ③b（编排）+ ③a 只留进度 UI", "docs/graph-agent-gateway/mvp1/07-orch-fallback-circuit-probe/mvp1-alignment.md:30"]
+      ]
+    },
+    {
+      "name": "6 态投影 (ProviderModelStateProjection)",
+      "dock": "① 渲染颜色 ← ③a `GatewayAdapter.project_route_state`(gateway.py:294，只派生 endpoint/route/circuit 输入) → ③b `project_route_state` / `project_route_state_from_evidence`(state_projection.py:68/109，产 6 态)",
+      "request": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["route_id", "str", "要投影的 route id"],
+          ["endpoint_status", "str", "端点状态（verified/failed/disabled…），由 ③a 从存储派生"],
+          ["route_status", "str", "route 状态（verified/failed/disabled…）"],
+          ["credential_available", "bool", "该端点是否有可用 key（③a 算：api_key 非空且非空串）"],
+          ["circuit_retry_at", "datetime|None", "若熔断中，重试时间（来自 health store 的 active circuit）"],
+          ["draft_history / evidence_records", "bool / list[EvidenceRecord]", "该 route 是否有历史 probe-verified 证据（决定蓝态 historical_ready）"]
+        ]
+      },
+      "response": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["route_id", "str", "对应 route"],
+          ["ui_state", "Literal[ready|historical_ready|untested|failed|cooling_down|off]", "canonical 6 态（绿/蓝/灰/红/熔断/关）"],
+          ["reason_code", "Literal[missing_config|endpoint_unreachable|model_failed]|None", "仅 failed 时必填，区分配置缺口 vs 端点不可达 vs 模型失败"],
+          ["retry_at", "datetime|None", "仅 cooling_down 时给重试时间"],
+          ["ui_detail", "str|None", "可选展示文案"],
+          ["evidence_refs", "list[str]", "historical_ready 时携带支撑该蓝态的 probe 证据 id"]
+        ]
+      },
+      "evidence": [
+        ["ProviderModelStateProjection schema + reason 校验（failed 必带 reason，其余必无）", "packages/graph-agent-gateway/src/graph_agent_gateway/state_projection.py:11-29"],
+        ["project_route_state（6 态判定优先级 off>failed>cooling>ready>蓝>untested）", "packages/graph-agent-gateway/src/graph_agent_gateway/state_projection.py:68-106"],
+        ["project_route_state_from_evidence（probe-verified 证据→蓝态）", "packages/graph-agent-gateway/src/graph_agent_gateway/state_projection.py:109-135"],
+        ["③a 委托：只派生输入、不内联算 ui_state", "apps/studio/backend/app/core/adapters/gateway.py:294-319"],
+        ["设计：6 态投影内核反转为 ③b 公共，取消 needs_setup、补蓝态、failed 带 reason", "docs/graph-agent-gateway/mvp1/08-orch-test-status-ssot/mvp1-alignment.md:44-46"]
+      ]
+    },
+    {
+      "name": "凭证解析 (CredentialResolveRequest/Response)",
+      "dock": "③a `GatewayAdapter.resolve_credential`(gateway.py:454，转 DTO + 注 EndpointCredentialProvider) → ③b `resolve_credential`(credential_resolver.py:43，产 opaque handle)；raw secret 永不进 ① / 日志 / trace",
+      "request": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["user_id", "str", "用户标识（多租户隔离；③a 默认 studio-local）"],
+          ["role", "str", "请求凭证的角色名"],
+          ["credential_ref", "str", "凭证引用（不是明文 key），用它去 provider 换 secret"],
+          ["source", "Literal[local_input|remote_vault]", "凭证来源：本地输入 / 远端金库"],
+          ["ttl_seconds", "int = 300", "handle 有效期秒数（<=0 抛 credential.invalid_ttl）"],
+          ["now", "datetime|None", "可选注入当前时间（带漂移容忍 5s，防伪造）"]
+        ]
+      },
+      "response": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["secret_handle", "str", "opaque handle（secret-handle://studio-local/<sha32>），不可反解出明文，不等于 secret"],
+          ["credential_ref", "str|None", "回带的凭证引用"],
+          ["expires_at", "datetime|None", "handle 过期时间（now + ttl）"],
+          ["redacted_label", "str|None", "脱敏展示标签"],
+          ["fingerprint", "str|None", "凭证指纹（变更检测，非明文）"],
+          ["scope", "str|None", "凭证作用域"],
+          ["[error] CredentialResolveError", "{error_code, error_payload}", "credential.invalid_ttl / credential.missing 等结构化错误（凭证不存在/过期/vault 不可达）"]
+        ]
+      },
+      "evidence": [
+        ["CredentialResolveRequest / CredentialResolveResponse / CredentialResolveError schema", "packages/graph-agent-gateway/src/graph_agent_gateway/credential_resolver.py:14-40"],
+        ["resolve_credential（产 opaque handle，缺失抛 credential.missing）", "packages/graph-agent-gateway/src/graph_agent_gateway/credential_resolver.py:43-76"],
+        ["③a 薄壳委托 + StudioAdapterError 映射", "apps/studio/backend/app/core/adapters/gateway.py:454-484"],
+        ["设计：secret_handle 是 opaque handle、过期/vault 不可达由 error_code 表达、前端日志 trace 永不出现 raw secret", "temp/studio-mvp1-12d-repair-framework-2026-06-15.html:435-442 (D5.2)"]
+      ]
+    },
+    {
+      "name": "route 解析 (ResolvedRouteChain)",
+      "dock": "① 用 role → ③a `GatewayAdapter.resolve_routes`(gateway.py:133，喂 config_store/credentials) → ③b ModelResolver.resolve_routes → ResolvedRole，再经 `resolved_role_to_route_chain`(route_handoff.py:43) 转成 ResolvedRouteChain",
+      "request": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["role_name", "str", "要解析的角色名（如 graph_agent / copilot_chat）"],
+          ["user_id", "str", "用户标识（走 ConfigTruthStore 时定位配置真相）"],
+          ["config_store / credentials+roles", "ConfigTruthStore | (LLMCredentialsFile, RolesData)", "配置真相来源：优先 truth store；否则 ③a 用临时 store bootstrap"],
+          ["route_override", "list[str]|None", "可选：强制指定 route 顺序（Test 时用）"]
+        ]
+      },
+      "response": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["role", "str", "角色名"],
+          ["routes", "list[ResolvedRoute]", "有序 fallback 执行链；每条带 route_id/protocol/base_url/credential_ref/credential_fingerprint/capabilities/runtime_settings（无明文 api_key）"],
+          ["skipped", "list[RouteSkipDiagnostic]", "被跳过的 route：{route_id, reason_code, message, from_override}（disabled/缺凭证/lint_blocked 等）"],
+          ["error_code", "str|None", "空 routes 时必为 resource.no_available_route"],
+          ["error_payload", "dict|None", "空 routes 时必非空（含 role）"]
+        ]
+      },
+      "evidence": [
+        ["ResolvedRouteChain / RouteSkipDiagnostic schema + 空链强制 error_code 校验", "packages/graph-agent-gateway/src/graph_agent_gateway/route_handoff.py:10-40"],
+        ["resolved_role_to_route_chain（ResolvedRole→Chain，空 routes 写 no_available_route）", "packages/graph-agent-gateway/src/graph_agent_gateway/route_handoff.py:43-61"],
+        ["ResolvedRoute 字段权威源（credential_ref 必填、无 api_key）", "packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:417-447"],
+        ["③a resolve_routes 委托（http_loopback 验 ResolvedRouteChain；in_process 走 ModelResolver）", "apps/studio/backend/app/core/adapters/gateway.py:133-192"]
+      ]
+    },
+    {
+      "name": "fallback 决策 (FallbackDecisionRequest/FallbackDecision)",
+      "dock": "③a `GatewayAdapter.decide_fallback`(gateway.py:425，转 route_ids/failed/error) → ③b `decide_fallback`(fallback_decision.py:49)；Studio/Copilot 不维护第二套状态码策略",
+      "request": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["chain / route_ids", "ResolvedRouteChain|None / list[str]", "候选 route 来源：整链或显式 id 列表（二选一）"],
+          ["role", "str|None", "角色名（give_up payload 用）"],
+          ["current_route_id", "str", "当前正在用的 route id"],
+          ["attempt", "int = 1", "第几次尝试"],
+          ["failed_route_ids", "list[str]", "已失败的 route id（不再回选）"],
+          ["error_context", "dict", "本次错误上下文（含 status_code，决定是否 retry_same）"],
+          ["retryable_status_codes", "set[int]", "默认 {429,500,502,503,504,529}：命中且当前 route 未失败 → retry_same"]
+        ]
+      },
+      "response": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["action", "Literal[retry_same|switch_route|give_up]", "同 route 重试 / 切下一条 / 放弃"],
+          ["reason_code", "str", "retryable_current_error / switch_to_next_route / all_routes_failed"],
+          ["next_route_id", "str|None", "switch_route 时必填，下一条 route"],
+          ["retry_after", "datetime|None", "可选重试时间"],
+          ["error_code", "str|None", "give_up 时必为 resource.no_available_route"],
+          ["error_payload", "dict|None", "give_up 时必非空（含 role/route_ids/failed_route_ids）"]
+        ]
+      },
+      "evidence": [
+        ["FallbackDecision / FallbackDecisionRequest schema + action 字段校验", "packages/graph-agent-gateway/src/graph_agent_gateway/fallback_decision.py:11-46"],
+        ["decide_fallback（retryable 短路 retry_same，否则切下一条，尽则 give_up）", "packages/graph-agent-gateway/src/graph_agent_gateway/fallback_decision.py:49-135"],
+        ["③a decide_fallback 委托 gateway_decide_fallback，不内联状态码策略", "apps/studio/backend/app/core/adapters/gateway.py:425-452"],
+        ["设计：fallback 语义只在 ③b，Studio/Copilot 不含状态码策略，give_up 有稳定 error_code", "temp/studio-mvp1-12d-repair-framework-2026-06-15.html:443-450 (D5.3)"]
+      ]
+    },
+    {
+      "name": "materialize_role (角色物化为 fallback_chain，含 role-fit/runtime_settings)",
+      "dock": "① 渲染 materialization report ← ③a `GatewayAdapter.materialize_role`(gateway.py:194，注 health_store) → ③b `materialize_role`(role_materialization.py:34，跑 _apply_intent 算 role-fit + runtime_settings)",
+      "request": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["role", "RoleEntry", "角色配置（含 model_groups / intent / model_fallback_enabled）"],
+          ["credentials", "LLMCredentialsFile", "凭证文件（provider_routes / provider_endpoints / api_key）"],
+          ["evidence_records", "list[EvidenceRecord]", "历史证据（决定蓝态 historical_ready）"],
+          ["health_store", "SqliteLlmHealthStore|None", "熔断状态源（active circuits → cooling_down）"],
+          ["now", "datetime|None", "当前时间（判断熔断是否仍生效）"]
+        ]
+      },
+      "response": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["fallback_chain", "list[RoleRouteEntry]", "可执行链：每条 {route_id, runtime_settings}（已落 reasoning.enabled / max_output_tokens 等解析后参数）"],
+          ["materialization_report", "dict", "{entries[], warnings[], skipped_provider_details[]}：每 entry 带 role_fit(using/downgraded/needs_test/not_fit)、requested、resolved_settings、warnings"],
+          ["[role-fit 语义]", "using|downgraded|needs_test|not_fit", "thinking required 不支持→not_fit / 未知→needs_test / preferred 不支持→downgraded；token 超 cap→downgraded 或 not_fit(block)"],
+          ["[空链]", "error_code=resource.no_available_route", "无可执行 route 时（见 state_projection.MaterializedRole 强制校验）"]
+        ]
+      },
+      "evidence": [
+        ["materialize_role（遍历 model_groups×provider_models，跳过 failed/off，组 fallback_chain + report）", "packages/graph-agent-gateway/src/graph_agent_gateway/role_materialization.py:34-115"],
+        ["_apply_intent（thinking/token intent → role_fit + resolved_settings）", "packages/graph-agent-gateway/src/graph_agent_gateway/role_materialization.py:244-346"],
+        ["MaterializeRoleRequest / MaterializedRoleResult dataclass", "packages/graph-agent-gateway/src/graph_agent_gateway/role_materialization.py:11-24"],
+        ["MaterializedRole(state_projection 版) + 空链强制 no_available_route 校验", "packages/graph-agent-gateway/src/graph_agent_gateway/state_projection.py:40-57"],
+        ["RoleRouteEntry schema（route_id + runtime_settings）", "packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:248-262"],
+        ["③a materialize_role 薄委托（不循环 provider_models 算规则）", "apps/studio/backend/app/core/adapters/gateway.py:194-242"]
+      ]
+    },
+    {
+      "name": "[未实现-目标] 协议自动探测 (protocol auto-probe)",
+      "dock": "目标：① 录入多 URL+key → ③b `standardize_endpoint_candidates`(endpoints.py:92，对每 URL×每协议试探，通的建 endpoint) → ③a upsert_endpoints + 存储。现状：③b 函数已在并导出，但探测 callable(ProtocolProbe) 无生产实现、且未接进 ③a test_endpoint HTTP 路径",
+      "request": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["raw: RawProviderEndpointInput", "{display_name, urls[], provider_slug?, api_key?, credential_ref?, provider_kind, ...}", "用户录入的原始混合凭证（多 URL + 一把 key）"],
+          ["probe: ProtocolProbe", "Callable[[base_url, protocol, api_key], ProtocolProbeResult]", "注入的协议探测器：用某协议打某 URL 的推理端点(openai→/chat/completions, anthropic→/messages)+对应 auth header，看是否被接受（=未实现的活探测器）"],
+          ["protocols", "Sequence[Protocol]=DEFAULT_PROTOCOL_PROBES", "要试的协议集合（排列组合各试一遍）"],
+          ["reserved_endpoint_ids", "Iterable[str]", "已占用 id（防 canonical id 撞名）"]
+        ]
+      },
+      "response": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["EndpointStandardizationResult.endpoint_candidates", "dict[endpoint_id, EndpointCandidate]", "拆出的标准端点：canonical endpoint_id={slug}-{protocol}[-n]、canonical base_url、探通的 protocol、status"],
+          ["EndpointStandardizationResult.probe_results", "dict[\"{url}#{protocol}\", ProbeResult]", "每次协议试探结果（成功/失败，含失败也写——喂证据库）"],
+          ["[ProtocolProbeResult]", "{protocol, ok, message?, observed_at?, metadata}", "单次试探结论：哪个协议通"]
+        ]
+      },
+      "evidence": [
+        ["standardize_endpoint_candidates（URL×protocol 笛卡尔试探→拆 endpoint）", "packages/graph-agent-gateway/src/graph_agent_gateway/registry/endpoints.py:92-165"],
+        ["ProtocolProbe 类型 / ProtocolProbeResult / EndpointStandardizationResult", "packages/graph-agent-gateway/src/graph_agent_gateway/registry/endpoints.py:41-89"],
+        ["GAP：Studio backend 无任何 standardize_endpoint_candidates 调用方（grep 0 命中）", "apps/studio/backend/ (无命中)"],
+        ["设计：协议系统自动测=排列组合各试一遍、打推理端点不打/models、每协议带对的 auth header", "docs/studio/mvp1/01_workflows/00_settings-ux-spec.md:42-50"],
+        ["设计：多 URL×多协议→多 endpoint 的拆分+协议匹配+生成 canonical endpoint_id = ③b 公共", "docs/graph-agent-gateway/mvp1/03-orch-credentials-endpoints/mvp1-alignment.md:28,34,42-45"]
+      ]
+    },
+    {
+      "name": "[未实现-目标] model bundle test (模型束测试)",
+      "dock": "目标：bundle 与 role 测试统一——bundle 拖进 role 后按引用展开成 route list，复用 role test 的批量 probe；无独立 bundle-test 端点。现状：bundle 有 CRUD + materialize_model_bundle，但测试只能经 role test，无 bundle 专用 test API",
+      "request": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["[目标-复用 role test] role_name 或临时包装 role", "str / RoleEntry-like", "bundle 解析成临时(未保存) role-like，复用 llm_role_materializer 的批量 probe 路径"],
+          ["[现状-materialize] bundle: ModelBundle", "{model_groups, model_fallback_enabled, intent, fallback_chain, ...}", "③a materialize_model_bundle(gateway.py:244) 把 bundle 当 role-like 物化"],
+          ["credentials / health_store / evidence_records", "LLMCredentialsFile / health_store / list", "同 materialize_role 的依赖"]
+        ]
+      },
+      "response": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["[目标] RoleTestJobResponse（复用 role test job）", "{job_id, role_name, status, provider_statuses[], result, error_code?}", "bundle 内所有模型批量 probe，结果回写 draft；走 role test 同一异步轮询"],
+          ["[现状] materialize_model_bundle → ModelBundle", "{fallback_chain, materialization_report}", "只物化、不真测；测试要靠把 bundle 拖进 role 后 role test"]
+        ]
+      },
+      "evidence": [
+        ["materialize_model_bundle（bundle 当 role-like 物化，③a 委托 materialize_role）", "apps/studio/backend/app/core/adapters/gateway.py:244-292"],
+        ["bundle CRUD（delete/upsert）存在，但 grep 无 bundle 专用 test 端点", "apps/studio/backend/app/routers/llm.py:1457-1467 (delete)；无 .../bundles/.../test"],
+        ["设计：bundle 录入/测试/改名删除 UI 与 role 统一；拖进 role=引用、materializer 按引用展开 route list", "docs/studio/mvp1/01_workflows/00_settings-ux-spec.md:148-155,171"],
+        ["设计：run 模型对比测试复用 model-group/bundle→临时 role，复用同一 materializer", "docs/studio/mvp1/01_workflows/00_settings-ux-spec.md:161-163"]
+      ]
+    },
+    {
+      "name": "[未实现-目标] 统一 endpoint test 去分叉 (official vs third-party)",
+      "dock": "目标：endpoint 验证统一走 ③b 协议探测，official=只 get-models、third-party=协议自动探测+批量模型探测，但同一条 ③a 端点+同一 ③b 内核。现状：test_endpoint 用既存 protocol 打 models-list（official/third-party 分支只差是否 verified），未接 ③b 协议探测，未做批量",
+      "request": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["endpoint_id", "str (path)", "目标同现状入口，但内部据 provider_kind 选验证策略"],
+          ["[目标-third_party] 协议探测 + 批量模型探测", "(经 ③b standardize + 批量 probe)", "third-party：先协议自动探测，再批量模型探推理端点（任一批成功→endpoint 可用）"],
+          ["[目标-official] get-models 即验通", "(经 ③b 或最小请求)", "official：只要 /models 连通即验证通过，不逐模型 probe"]
+        ]
+      },
+      "response": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["[目标] 统一 EndpointTestResponse + 协议/批量证据", "{registry, tested_endpoint_id, discovered_model_count, probe_evidence}", "official/third-party 返回同形 DTO，证据（含失败）回写 draft"],
+          ["[现状] EndpointTestResponse", "{registry, tested_endpoint_id, discovered_model_count}", "无协议探测证据、无批量；official 有 model→verified，third-party 仅 unverified_manual"]
+        ]
+      },
+      "evidence": [
+        ["现状 test_endpoint：用 endpoint.protocol 打 models-list，official/third 仅差 verified 判定", "apps/studio/backend/app/routers/llm.py:480-590"],
+        ["设计：official 只 get-models 不 probe；third-party 加协议自动探测 + 批量模型探测", "docs/studio/mvp1/01_workflows/00_settings-ux-spec.md:11-13,28-50"],
+        ["设计：API Keys 页验 endpoint（轻量）、role 页才对模型真 probe（保证能用）", "docs/studio/mvp1/01_workflows/00_settings-ux-spec.md:287-290"]
+      ]
+    }
+  ],
+
+  "unimpl_design": {
+    "headers": ["未实现项", "目标机制", "目标端点 / schema", "文档证据"],
+    "rows": [
+      [
+        "协议自动探测 (protocol auto-probe)",
+        "用户填多 URL+一把 key；③b 对每 (URL × 每种协议) 排列组合各试一遍，打『推理端点』(openai→POST /v1/chat/completions, anthropic→POST /v1/messages)、每协议带对的 auth header(anthropic 兼容网关实走 Authorization: Bearer)，哪个被接受判哪个 protocol；结构性错配码(404/500 'use /v1/messages')可短路，瞬时类(401/429/timeout)不可短路继续试；通的 (URL×协议) 各建一个 canonical endpoint",
+        "③b: standardize_endpoint_candidates(raw, probe, protocols, reserved_endpoint_ids) → EndpointStandardizationResult{endpoint_candidates: dict[endpoint_id, EndpointCandidate], probe_results: dict[ProbeResult]}；endpoint_id 规则 {slug}-{protocol}[-n]。注入 probe: ProtocolProbe=Callable[[url,protocol,key], ProtocolProbeResult]（活探测器待实现并接进 ③a test_endpoint）",
+        "00_settings-ux-spec.md:42-50,56-60；03-orch-credentials-endpoints/mvp1-alignment.md:28,34,42-45；endpoints.py:41-165（内核已在、活探测器+③a 接线未实现）"
+      ],
+      [
+        "model bundle test (模型束测试)",
+        "bundle = 自建的已排好 fallback 的 model group（可放不同模型、配好 provider）。测试与 role 完全统一：拖进 role 后是『引用』(改 bundle→所有引用它的 role 同步)，materializer 按 bundle_id 拉当前内容展开成 fallback_chain；测试复用 role test 的批量 probe（对束内所有模型真 probe、回写 draft），不另起 bundle 专用测试入口",
+        "复用 RoleTestJobResponse 路径（POST /api/llm/roles/{name}/test + /test-jobs 异步轮询）；物化用 ③a GatewayAdapter.materialize_model_bundle → ③b materialize_role。无独立 /bundles/{id}/test 端点（设计上不需要，统一进 role）",
+        "00_settings-ux-spec.md:15,85-86,148-155,161-163,171；gateway.py:244-292（materialize 已在、统一测试接线未完）"
+      ],
+      [
+        "统一 endpoint test 去分叉",
+        "endpoint 验证按 provider_kind 分策略但同一内核：official 只 get-models 连通即验通（不逐模型 probe）；third-party 先协议自动探测（上条）再批量模型探推理端点（自动分批~3个/批、优先可靠模型、任一批任一模型成功→endpoint 可用且停、探尽全失败→不可用）。两路返回同形 DTO，所有探测结果(含失败)写回 draft 证据库",
+        "统一 POST /api/llm/endpoints/{endpoint_id}/test（③a 薄壳）→ ③b 协议探测 + 批量 probe 内核；EndpointTestResponse 增协议/批量证据；批量进度走 EndpointTestJobResponse(已在 schema)",
+        "00_settings-ux-spec.md:11-13,28-50,46-49,287-290；07-orch-fallback-circuit-probe/mvp1-alignment.md:30（批量探测策略=③b 公共）；llm.py:480-590（现状用既存 protocol 打 models-list、未去分叉）"
+      ]
+    ]
+  },
+
+  "d12_crosscheck": {
+    "d7_is": "d7 = D7 『Golden headless』(status: bad)。模块本体是『Golden 评估事实层』——把输入/预期/运行产物/评估结果连成可审计事实(比较已有 run result 与 baseline，而非为评估再跑一次 run)。owner: Engine 提供 RunResultSnapshot；headless golden component 消费 run_results_ref + baseline_ref；Studio 拥有 UX。子节点 D7.1 RunResultSnapshot contract(ok)、D7.2 per-node golden diff(ok)、D7.3 baseline_ref 与 storage(ok)、D7.4 Copilot judge 数据流边界(bad，唯一红点)。d7 与 Settings/gateway 完全无关，纯属 Golden 评估/Engine run artifact 线。",
+    "mapping": {
+      "headers": ["Settings-gateway 实现项", "落在哪个 D", "该 D 计划怎么说", "在不在 d7"],
+      "rows": [
+        [
+          "协议自动探测 / 统一 endpoint test",
+          "D5（Gateway 凭证、route、fallback，含 endpoint/凭证解析）+ 现状代码线在 D2.1 ConfigTruthStore / D1 adapter 边界；纯探测策略内核归 gateway 模块 03/07 设计",
+          "D5 owner: Gateway 拥有 credential resolver、route handoff、fallback decision；冻结 RouteDecision/CredentialResolution/FallbackPlan 三合同，把 resolve_routes/resolve_credential/decide_fallback live path 迁到 Gateway。协议探测本身在 12D 里没有专门子节点逐字列出——它是 gateway 设计单元 03(endpoint 标准化拆分+canonical id)/07(批量探测策略)的内核，12D 只在 D5 收口 endpoint/credential 的 owner 边界。",
+          "否（在 D5 + gateway 模块 03/07，不在 d7）"
+        ],
+        [
+          "model bundle test",
+          "D6（6 态与 materialize）——bundle 物化复用 materialize_role；测试统一进 role 测试线",
+          "D6 owner: Gateway 拥有 Projection state machine 和 materialize。D6.2 materialize_role 下沉 Gateway 输入 RoleIntent/route health/credential handles 输出 fallback_chain。bundle 当 role-like 物化、复用同一 materialization result，正是 D6.2 的覆盖范围；12D 没有为 bundle test 单列子节点。",
+          "否（在 D6.2，不在 d7）"
+        ],
+        [
+          "6 态投影 (ProviderModelStateProjection)",
+          "D6.1 Projection state machine canonical projection",
+          "D6.1: Gateway canonical projection 只产六态 ready/historical_ready/untested/failed/cooling_down/off，失败用 reason_code(missing_config/endpoint_unreachable/model_failed)，前端只 display mapping 不推 readiness；graph_agent_gateway/state_projection.py 定义六态，Studio 后端 project_provider_model_state 委托 GatewayAdapter。",
+          "否（在 D6.1，不在 d7）"
+        ],
+        [
+          "凭证解析 (CredentialResolve)",
+          "D5.2 CredentialResolver secret_handle/expires_at",
+          "D5.2: Gateway CredentialResolver 接受 source/user/role 返回不可反解 secret_handle、expires_at 与错误码；handle 不等于 raw secret、不进前端/日志/trace；过期/vault 不可达由 Gateway 错误码表达。",
+          "否（在 D5.2，不在 d7）"
+        ],
+        [
+          "route 解析 / fallback 决策",
+          "D5.1 resolve_routes role 到 route chain + D5.3 decide_fallback 收口 Gateway + D5.4 空 route/give_up 显式错误",
+          "D5.1: Gateway ModelResolver 解析 route 返回 ResolvedRole.routes/fallback_chain/skipped；D5.3: Gateway 导出 decide_fallback，含状态码重试/failed_route_ids/give_up，Studio adapter 只调用；D5.4: 空 route/give_up 是资源终态、唯一 canonical error_code resource.no_available_route。",
+          "否（在 D5.1/D5.3/D5.4，不在 d7）"
+        ],
+        [
+          "角色测试 SSOT (role test / 测试状态唯一事实源)",
+          "D6（6 态/materialize 投影即 test-status SSOT 的消费）+ gateway 模块 08 test-status-ssot；role test 探测回写 draft 属 D6.5 import drafts",
+          "D6.5: Gateway ③b 拥有 draft/evidence 知识库内核、capability 归一化、probe 策略；ImportDraftStore/append-only EvidenceRecord/probe evidence→historical_ready projection 由 Gateway-owned contract 提供，Studio llm_import_drafts.py 作 workflow glue。role test 批量 probe 的状态投影走 D6.1 六态。gateway 设计单元 08 即『Test Status SSOT：6 态投影 + draft/证据库』。",
+          "否（在 D6.1/D6.5 + gateway 模块 08，不在 d7）"
+        ]
+      ]
+    },
+    "answer_to_user": "明确回答：这些 Settings-gateway 未实现/实现项【都不在 d7 的计划里】。d7(D7 『Golden headless』)讲的是 Golden 评估事实层——比较已有 run result 与 baseline 的可审计评估，owner 是 Engine RunResultSnapshot + headless golden component + Studio UX，唯一红点 D7.4 是 Copilot judge 数据流边界，跟 Settings/gateway 八竿子打不着。Settings-gateway 这几条实质落在：6 态投影=D6.1、materialize/model bundle=D6.2、role 测试 SSOT/draft 证据=D6.1+D6.5（对应 gateway 设计单元 08 test-status-ssot）；凭证解析=D5.2、route 解析=D5.1、fallback 决策=D5.3、空 route 终态=D5.4；协议自动探测/统一 endpoint test 去分叉=D5 的 endpoint/credential owner 收口线，其探测内核归 gateway 设计单元 03(endpoint 标准化)/07(批量探测策略)——12D 没有为『协议探测』单列子节点，它藏在 gateway 模块设计里、由 D5 兜 owner 边界。一句话：Settings 相关全在 D5（凭证/route/fallback/endpoint）和 D6（6 态/materialize/draft），d7 是 Golden 评估，不沾边。"
+  }
+}

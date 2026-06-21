@@ -1,0 +1,292 @@
+{
+  "page_id": "n4_trace_design",
+  "title": "Trace 去黑盒 · 操作设计",
+  "region": "run-verify:trace",
+  "intro": "本页是 N4 第 3 个 surface「Trace 去黑盒」的 MVP1 设计（应该怎样）：run 跑起来时事件流式进 Trace 面板、run 后能从历史回看，用户靠它把『黑板里发生了什么』看明白。spec 04 D 段定义『线上 dot = 节点间状态机转移点』（上节点 end 后、下节点 start 前的所有操作：黑板 reduce、文件注入、落盘、截断摘要），并要求 agent 输出流式 + 分类折叠摘要、focus 决定 trace 粒度（空画布=run 概要 / 节点=该节点 trace）。每张卡讲一个操作的设计；现状/差距见 n4_trace_impl，事件契约 EventEnvelope（所有消费者的唯一事实源）+ 消费者图见 n4_trace_mech。注：spec 把 TracePanel/useRunStream/PromptInspector 标『全套已建却零挂载』已过时——事件流式、dot 黑板、prompt 三视图、检索、失败红灯均已接线；真实缺口收敛到『agent 折叠 + focus 粒度 + 完整 trace 文档 + dot 操作记录』，本页以真代码为准。",
+  "atoms": [
+    {
+      "n": 14,
+      "cap": "trace-live-stream",
+      "module": "Trace 面板 · 流式与回看",
+      "func": "设计：run 一起来就自动打开 Trace 面板，事件实时流式进来（去重、按序、断流可观测），用户边跑边看。",
+      "action": "无显式动作（点 Run 后自动切到 timeline 面板，事件随 run 推进流式进入）。",
+      "fe_design": "handleRun 成功后 setActivePanel('timeline') 自动开面板；useRunStream(runId) 连 WS /ws/runs/{run_id}，onmessage 解析 EventEnvelope（事件信封）→ 按 seq 去重 + 连续性校验（缺口报 Run stream gap，可观测）+ 100ms 批量 flush 进 events[] → TracePanel 经 VirtualTraceList（虚拟滚动事件列表）渲染。设计意图：run 时自动开面板、流式进事件，且去重/缺口检测让流可靠。",
+      "fe_modules": [
+        { "name": "运行事件流订阅（useRunStream）" }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "WS /ws/runs/{run_id}",
+          "purpose": "run 事件流式推送（phase_start/llm_call/prompt_captured 等约 30 种），前端 useRunStream 订阅。",
+          "mechanism_ref": "n4_trace_mech",
+          "iface_ref": "iface-trace-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（run 自动开面板 + useRunStream 流式 + seq 去重/gap 检测/终态停重连）。spec 标『零挂载』过时。",
+      "impl_ref": "fn-14"
+    },
+    {
+      "n": 15,
+      "cap": "trace-history-replay",
+      "module": "Trace 面板 · 流式与回看",
+      "func": "设计：run 跑完后，从 predict/run 历史列表点某一次，回看它的完整 trace（不只当前这次）。",
+      "action": "用户在 timeline 面板的 run 历史列表点某一次历史 run。",
+      "fe_design": "timeline 面板点历史 run → getRunDetail（client.ts，按 run_id 拉含 events 的详情）拿该次封存的 trace 事件 → TracePanel 用同一套 VirtualTraceList 渲染（历史态不再流式、读封存 events）。设计意图：run 后能回看任意一次完整 trace。",
+      "fe_modules": [
+        { "name": "运行事件流订阅（useRunStream）" }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "GET /api/skills/{id}/runs/{run_id}",
+          "purpose": "拉某次历史 run 的完整详情（含封存 events 回放）。",
+          "mechanism_ref": "n4_trace_mech",
+          "iface_ref": "iface-trace-1"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（历史列表点击 → getRunDetail 回看完整 trace 已接）。",
+      "impl_ref": "fn-15"
+    },
+    {
+      "n": 27,
+      "cap": "trace-resilience",
+      "module": "Trace 面板 · 流式与回看",
+      "func": "设计：trace 的失败退路要稳——没事件时显空态、超大 payload 要截断不撑爆内存、从『实时(live)』切到『历史(history)』源时以 runId 重置不串台。",
+      "action": "无显式动作（无事件 / 超大 payload / 源切换时面板自动稳态处理）。",
+      "fe_design": "三条韧性：① 空态——traceEvents 为空时 TracePanel 渲『Waiting for run events』占位；② 源切换重置——useRunStream 以 runId 为依赖，runId 变（live run → 点历史 run）时整体重置 events/seq，不把上一个 run 的事件串进来；③ payload 截断——单条事件 payload 过大时在展开/渲染前截断（防 OOM），截断显式标注。设计意图（spec D15）：失败退路完整，超大 trace 不撑爆、源切换干净。",
+      "fe_modules": [
+        { "name": "运行事件流订阅（useRunStream）" }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：三条韧性齐了。原缺口 payload 截断已补——utils/trace.ts:172-185 的 payloadPreview()（把单条事件 payload 序列化并按上限截断的函数）对任何超过 TRACE_PAYLOAD_AUTO_EXPAND_BYTES（=2048，trace.ts:119）的序列化 payload 截断、返回 truncated=true + sizeLabel；TraceEventRow.tsx:248-273 的 GenericPayload（通用 payload 渲染组件）默认渲截断预览、仅在用户显式点『Show full payload』才展开完整 dump（防 OOM）。空态（TracePanel.tsx:193-202『Waiting for run events』占位）与源切换 runId 重置（useRunStream 以 runId 为依赖整体重置）此前已 shipped。",
+      "impl_ref": "fn-27"
+    },
+    {
+      "n": 16,
+      "cap": "trace-agent-folding",
+      "module": "agent 输出可读化（折叠 / 展开 / 重试）",
+      "func": "设计：agent 节点的输出要像 agent IDE 那样分类折叠摘要——『Worked for ▾ / Explored ▾ / Thought ▾』一行摘要点开看详情 + 末尾自然语言总结，而不是只能展开成一坨原始 JSON。",
+      "action": "用户在 Trace 面板点某条 agent 事件，看到分类折叠摘要、可逐项展开。",
+      "fe_design": "agent 流式输出做『一行摘要可折叠 + 末尾自然语言总结』：复用 copilot 侧已有的折叠思路（tool-call-bubble 把 Read/Write/Bash 等映射成 Explored/Worked/Ran 的摘要折叠）接进 TracePanel 的事件行，让 agent 的 tool_call/思考/输出按类归并成可折叠摘要。设计意图（spec D1/P2『agent 输出流式 + 分类折叠摘要，就和所有 copilot 输出一样』）。",
+      "fe_modules": [],
+      "be_contract": [
+        {
+          "endpoint": "WS /ws/runs/{run_id}",
+          "purpose": "agent 节点的 tool_call/llm_call/输出事件经事件流到达，前端据此做分类折叠（数据已有，折叠是前端的活）。",
+          "mechanism_ref": "n4_trace_mech",
+          "iface_ref": "iface-trace-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：agent 输出已做分类折叠摘要——utils/trace.ts:195-260 的 TOOL_CALL_VERBS（把工具名映成动词的表）将 Read/Glob/Grep→Explored、Write/Edit→Worked、Bash→Ran，toolCallSummary()（把一次 tool_call 折成一行摘要的函数）拼出『verb · tool』标题 + 参数 + resultSummary；TraceEventRow.tsx:144-176 渲染这条折叠一行摘要，TraceEventRow.tsx:238-246 的 ExpandedPayload 把 tool_call 事件路由到 ToolCallSubtree（工具调用子树组件）而非原始 JSON `<pre>` 倾倒。原『展开 = 原始 JSON』已不复存在。",
+      "impl_ref": "fn-16"
+    },
+    {
+      "n": 24,
+      "cap": "trace-agent-inline-expand",
+      "module": "agent 输出可读化（折叠 / 展开 / 重试）",
+      "func": "设计：agent 节点旁有个 '+'，点开能在画布/面板里内联展开它的执行子树（这一步调了哪些 tool、走了哪些子节点），不用跳走。",
+      "action": "用户点 agent 节点旁的 '+' 内联展开其执行子树。",
+      "fe_design": "agent 节点提供一个 '+' 内联展开入口，展开后就地显示该 agent 这次执行的子树（tool 调用序列 / 子步骤），与 #16 的『面板内事件折叠』互补——#16 是 Trace 面板里 agent 输出的折叠摘要，#24 是画布/节点侧把 agent 执行子树就地展开。设计意图（spec D9）：agent 内部不是黑盒，能就地展开看它干了什么。",
+      "fe_modules": [],
+      "be_contract": [
+        {
+          "endpoint": "WS /ws/runs/{run_id}",
+          "purpose": "agent 子步骤（tool_call 等）事件经事件流到达，内联子树据此渲染。",
+          "mechanism_ref": "n4_trace_mech",
+          "iface_ref": "iface-trace-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：agent 事件行现有 '+' 内联展开入口——TraceEventRow.tsx:155-175 一个 Plus 图标的可点入口（aria-label 'Expand execution subtree'）切换 subtreeOpen；line 179 就地渲染 <ToolCallSubtree>（工具调用执行子树组件：输入参数 → 结果），即该 agent tool_call 的内联执行子树。数据来自引擎 tool_call 事件（trace.ts:221-223）。",
+      "impl_ref": "fn-24"
+    },
+    {
+      "n": 25,
+      "cap": "trace-retry-nudge",
+      "module": "agent 输出可读化（折叠 / 展开 / 重试）",
+      "func": "设计：validator 重试 nudge 要可见——显示『2/3』这类重试次数徽章，重试用尽失败时给一个 Error Stack（错误堆栈）让人看清为什么失败。",
+      "action": "无显式动作（节点发生 validator 重试时显重试徽章；失败显 Error Stack）。",
+      "fe_design": "事件流里 validation_fail/retry/retry_exhausted 携带 attempt（第几次重试）。设计要：在 Trace 行/节点上显示『当前重试 / 上限』徽章（如 2/3），retry_exhausted（重试用尽）时展开一个 Error Stack 列出每次失败原因。设计意图（spec D10）：重试过程与最终失败原因不黑盒。",
+      "fe_modules": [
+        { "name": "事件→节点态派生（deriveNodeStatuses）" }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "WS /ws/runs/{run_id}",
+          "purpose": "validation_fail/retry/retry_exhausted 事件带 attempt，前端据此显重试徽章 + Error Stack。",
+          "mechanism_ref": "n4_trace_mech",
+          "iface_ref": "iface-trace-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：重试徽章 + Error Stack 都补上了——utils/trace.ts:145-163 的 retryBadge()（生成重试次数徽章文案的函数）在上限已知时吐『2/3』、否则吐『#n』并带 exhausted 标志，渲为徽章（TraceEventRow.tsx:96-109）；errorStack()（trace.ts:281-289，从失败事件抽错误列表的函数）读 retry_exhausted.final_errors / validation_fail.errors，ErrorStack 组件（TraceEventRow.tsx:188-208）逐条列每次失败。引擎供字段：RetryExhaustedEvent.final_errors + max_retries（packages/graph-agent/.../callbacks/events.py:326-329）、ValidationFailEvent.retry_count（events.py:96-99）。",
+      "impl_ref": "fn-25"
+    },
+    {
+      "n": 17,
+      "cap": "trace-focus-granularity",
+      "module": "focus 粒度与完整 trace 文档",
+      "func": "设计：focus 决定 trace 粒度——focus 在空画布 = 看这次 run 的整体概要（全局）；focus 在某个节点 = trace 收窄到只显该节点的 trace。",
+      "action": "用户在画布上点选某节点（focus 该节点）/ 点空白（focus 空画布）。",
+      "fe_design": "TracePanel 接 selectedNode（当前 focus 的节点）入参：selectedNode 为空（focus 空画布）→ 显 run_id 概要（整张图全局）；selectedNode 为某节点 → 把事件流过滤到该节点的 trace（按 phase 收窄）。Workspace 已算出 selectedNode/selectedNodeId/activeTracePhase，要把节点焦点下传给 TracePanel 收窄粒度。设计意图（spec D3/D5『概要是这一次 run_id 的概要，focus 空画布=全局；focus 节点就直接显示该节点的 trace』）。",
+      "fe_modules": [
+        { "name": "运行事件流订阅（useRunStream）" }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：TracePanel 已接 selectedNode 入参（TracePanel.tsx:28-36）；TracePanel.tsx:125-127 用 focusPhase = selectedNode?.id ?? activePhase 驱动 useTraceFilter 把事件收窄到该节点 phase；focus chip 在 TracePanel.tsx:264-274 显『Focus: <label>』vs『Focus: whole run』。已 live 接线：Panels.tsx:135 传 selectedNode={selectedNode}，Workspace 派生 selectedNode 并在面板重置时清成 null（Workspace.tsx:781-782,789-790 → focus 空画布 = run 概要）。",
+      "impl_ref": "fn-17"
+    },
+    {
+      "n": 18,
+      "cap": "trace-doc-editor",
+      "module": "focus 粒度与完整 trace 文档",
+      "func": "设计：看完整 trace = 事件 timeline + 一个只读编辑器渲染『人能读、轻度格式化』的完整 trace 文档（不是原始 jsonl）；点某节点编辑器跳到该节点范围，点状态可只读看完整黑板详情（深层可折叠）。",
+      "action": "用户点『看完整 trace』，在只读编辑器里读格式化后的 trace 文档；点节点编辑器跳范围。",
+      "fe_design": "补一个只读编辑器视图（复用 MonacoPanel 这类通用代码编辑器，只读模式）把整条 trace 渲成轻度格式化、人能读的文档；focus 某节点时编辑器跳到该节点范围（与 #17 focus 粒度联动）；点某状态可只读展开看完整黑板详情、深层可折叠。设计意图（spec D4/D7『完整 trace 文档 = 人能读、简单调整格式；点状态→编辑器只读看完整黑板详情』）。",
+      "fe_modules": [
+        { "name": "运行事件流订阅（useRunStream）" }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：只读 trace 文档编辑器已补——MonacoPanel.tsx:156-209 的 TraceDocumentPanel（只读 Monaco 渲完整 trace 文档的面板）以 readOnly:true、markdown 渲染构建出的文档，并按 focusNodeId 用 revealLineInCenter 把视口跳到该节点的行范围；utils/trace-document.ts:90-129 的 buildTraceDocument（把事件流编织成可读文档的函数）按 node/phase 分组、记 nodeRanges、并内联每个状态的 Blackboard/Inputs/Variables/Resolved-prompt 详情（D7）且带深度预算（line 30）。挂载为『trace-doc』/『Full Trace』面板（Panels.tsx:155-168、Toolbar.tsx:20）。",
+      "impl_ref": "fn-18"
+    },
+    {
+      "n": 19,
+      "cap": "trace-dot-blackboard",
+      "module": "线上 dot 与 Prompt 透视",
+      "func": "设计：点画布连线上的 dot（节点间状态机转移点），看那一刻的黑板内容 + 『上节点 end → 下节点 start』之间的全部操作记录（黑板 reduce / 截断摘要 / 输入文件注入 / 输出落盘）。",
+      "action": "用户点画布连线中间的 dot。",
+      "fe_design": "点 dot → EdgeContextView（dot 黑板转移视图）：从事件流取该边最后一次转移的扁平黑板 snapshot + changed_keys（这次转移改了哪些键），渲 source→target 头 + 『Keys changed』徽章 + 『Blackboard dispatched into target』键值列表。设计还要：补『上节点 end→下节点 start』的操作记录流（reduce/截断/注入/落盘），它依赖引擎推送节点间 micro 操作事件。设计意图（spec D6『dot = langgraph 中间节点，点 dot 看黑板状态机当时内容 + 上节点 end 到下节点 start 之间所有操作记录』）。",
+      "fe_modules": [
+        { "name": "运行事件流订阅（useRunStream）" }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "WS /ws/runs/{run_id}",
+          "purpose": "input_dispatch/edge_transition 事件供 EdgeContextView 取黑板 snapshot + changed_keys；节点间 micro 操作记录（reduce/dispatch/inject/persist）经引擎 micro-op 事件已推送。",
+          "mechanism_ref": "n4_trace_mech",
+          "iface_ref": "iface-trace-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：『上节点 end→下节点 start』操作记录流已补——EdgeContextView.tsx:277-301 渲『Operations (end → start)』列出 reduce/dispatch/inject/persist（经 OperationRow 行组件）；lib/edge-context.ts:44-118 的 collectEdgeOperations()/operationFromEvent()（把引擎 micro-op 事件映成操作行的函数）做映射。原标『契约待引擎定』已过时——依赖已满足：BlackboardReduceEvent/InputDispatchEvent/InputFileInjectedEvent/ArtifactSavedEvent 既在 packages/graph-agent/.../callbacks/events.py:256-282,350-361 定义，也在运行时真发（graph_assembler.py:715,750,1156；io/storage.py:190）。",
+      "impl_ref": "fn-19"
+    },
+    {
+      "n": 20,
+      "cap": "trace-prompt-inspector",
+      "module": "线上 dot 与 Prompt 透视",
+      "func": "设计：点某条 llm_call 事件，看 Prompt 透视——模板 / 喂入的变量 / 渲染后 三视图，看清这次模型调用到底喂了什么。",
+      "action": "用户在 Trace 面板点某条 llm_call/prompt_captured 事件的『Inspect prompt』。",
+      "fe_design": "点『Inspect prompt』→ PromptInspector（三视图弹窗）：Dialog + Tabs——Template（template_source 模板原文）/ Variables（variables 喂入变量）/ Rendered（prompt_captured 的 resolved_prompt 或 llm_call 的 messages 渲染后）。正确设计：点一条 llm_call 时要用 findPromptEvent（trace.ts 里从 llm_call 回溯同 phase 的 prompt_captured 的函数）把数据补全，否则 llm_call 自身 payload 没有 template_source/variables、三视图只能渲 Rendered 一半；live trace 与历史 trace 都要能 Inspect。设计意图（spec D8）：模型调用的 prompt 不黑盒，模板/变量/渲染分层可查。",
+      "fe_modules": [
+        { "name": "运行事件流订阅（useRunStream）" }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "WS /ws/runs/{run_id}",
+          "purpose": "prompt_captured 事件带 template_source/variables/resolved_prompt；llm_call 带 messages。三视图需把 llm_call 回溯到同 phase 的 prompt_captured 才完整。",
+          "mechanism_ref": "n4_trace_mech",
+          "iface_ref": "iface-trace-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：findPromptEvent（utils/trace.ts:291-307，从 llm_call 回溯同 phase 的 prompt_captured 的函数）不再是死代码——live 在 Workspace.tsx:1457（PromptInspector promptEvent）调用、历史在 TimelinePanel.tsx:93 调用。历史 TimelinePanel 现自己持 promptIndex 选择态并渲 PromptInspector（TimelinePanel.tsx:90-94,149,151），替掉旧的 onSelectPrompt no-op。PromptInspector.tsx:50-60 三视图齐全：Template(template_source)/Variables(variables)/Rendered(resolved_prompt)。",
+      "impl_ref": "fn-20"
+    },
+    {
+      "n": 21,
+      "cap": "trace-filter",
+      "module": "检索 · 失败 · 净化 · 模型对比",
+      "func": "设计：Trace 面板能按事件类型 + 关键字检索/筛选，并与当前 focus 的 phase 联动高亮（Link views）。",
+      "action": "用户在 Trace 面板用搜索框输关键字 / 勾选事件类型 / 切 Link views。",
+      "fe_design": "useTraceFilter（按类型 + 关键字 + activePhase 联动过滤的 hook）：TraceSearchBar 关键字 + TraceFilter 事件类型/phase 多选 → 过滤 events，顶栏显『Showing N of M events』；Link views 开时把 activePhase 高亮联动。设计意图：大量事件里快速定位关注的那几条。",
+      "fe_modules": [],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（useTraceFilter 类型+关键字+activePhase 联动过滤 + 'Showing N of M' 已接）。",
+      "impl_ref": "fn-21"
+    },
+    {
+      "n": 22,
+      "cap": "trace-fail-redlight",
+      "module": "检索 · 失败 · 净化 · 模型对比",
+      "func": "设计：节点失败时 Timeline 停在失败处、画布该节点亮红灯、并显 Error Message。",
+      "action": "无显式动作（节点 validation_fail/retry_exhausted/internal_error 时自动红灯 + 错误信息）。",
+      "fe_design": "deriveNodeStatuses 的 isFailureEvent 把 validation_fail/retry_exhausted 显式列入失败集（这两类不含 'error' 子串、必须显式列），internal_error 则经 'error' 子串命中——三者都判节点 error 红灯；TraceEventRow 对 internal_error/validation_fail 显 error_message。设计意图（spec D12『失败节点亮红灯 + Error Message』）。",
+      "fe_modules": [
+        { "name": "事件→节点态派生（deriveNodeStatuses）" }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "WS /ws/runs/{run_id}",
+          "purpose": "validation_fail/retry_exhausted/internal_error 事件供失败判定 + Error Message 渲染。",
+          "mechanism_ref": "n4_trace_mech",
+          "iface_ref": "iface-trace-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（isFailureEvent 显式判 validation_fail/retry_exhausted → 红灯；TraceEventRow 显 error_message）。",
+      "impl_ref": "fn-22"
+    },
+    {
+      "n": 26,
+      "cap": "trace-properties-clean",
+      "module": "检索 · 失败 · 净化 · 模型对比",
+      "func": "设计：PropertiesPanel 不再倾倒 selectedEdge 的原始 JSON——边/dot 的黑板信息改道到本 surface 的 dot 黑板视图（EdgeContextView），Properties 保持干净。",
+      "action": "无显式动作（点边/dot 走 EdgeContextView，不再在 Properties 倒 JSON）。",
+      "fe_design": "把旧的『点边在 PropertiesPanel 倒 selectedEdge 原始 JSON』清掉，边/dot 的黑板转移信息统一改道 EdgeContextView（#19）。设计意图（spec D14『净化 PropertiesPanel，移除 selectedEdge JSON 倾倒，dot 改道本能力』）。",
+      "fe_modules": [],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计（已清：PropertiesPanel.tsx 已无 selectedEdge / JSON.stringify / edge 倾倒，dot 黑板改道 EdgeContextView）。",
+      "impl_ref": "fn-26"
+    },
+    {
+      "n": 28,
+      "cap": "trace-panel-naming",
+      "module": "检索 · 失败 · 净化 · 模型对比",
+      "func": "设计：Toolbar / 面板上『Trace Timeline』这个命名要正名，消除与其它 timeline 概念的混淆，让用户一眼知道这是事件 trace 时间线。",
+      "action": "无显式动作（面板/工具条标题正名）。",
+      "fe_design": "把 Toolbar/面板里混淆的『Trace Timeline』命名按统一术语正名（与 run 历史 timeline、事件 trace 区分清楚），命名逐字与导航/标题一致。设计意图（spec C8『Toolbar Trace Timeline 命名混淆 → 正名』）。",
+      "fe_modules": [],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：已正名为『Event Trace』——TracePanel.tsx:195,205 aria-label='Event Trace'、line 209 <h3>Event Trace</h3>（不再是『Trace Timeline』）；Toolbar.tsx:19 把 timeline 面板标为『Event Trace』、line 20 另加独立的『Full Trace』（trace-doc）面板，与 run 历史 timeline 区分清楚。测试断言：TracePanel.test.tsx:223『names the panel \"Event Trace\" rather than the ambiguous \"Trace Timeline\"』。",
+      "impl_ref": "fn-28"
+    },
+    {
+      "n": 23,
+      "cap": "trace-model-compare",
+      "module": "检索 · 失败 · 净化 · 模型对比",
+      "func": "设计（P8 跨页耦合）：run 的模型对比测试——用户可选 role / model-group / model-bundle（从 settings 里建好的），解析成一个临时（未保存）包装的 role 去跑，用顶部 tab 切换看同一步在不同候选下的结果。",
+      "action": "用户在 run 模型对比里选 role/model-group/bundle（引用 settings 已建的），跑完在 Trace 面板顶部 tab 切换不同候选结果。",
+      "fe_design": "完整纵切（Settings/全局 UX 规范 00_settings-ux-spec.md §2.8 P8 + 本节点 workflow spec 04_run-and-verify.md D13）：① 选择 UI——run 页引用 settings 里建好的 model-group / model-bundle / role（不在 run 页另存），可多选作对比候选；② 请求——把选中的 group/bundle/role 携带给后端，后端复用同一套 materializer（llm_role_materializer.py，把角色意图物化成 fallback_chain 的物化器）+ 新增一条『临时 role』解析路径，把每个候选解析成临时未保存的 role → endpoint/fallback；③ 跑对比——各候选对同一步各跑一遍；④ 展示——Trace 面板顶部 tab 切换，按候选分组键映射结果，每 tab 看该候选的输出/指标，含失败态。设计意图（spec 00 P8『run 的模型对比测试可选 role/model-group/bundle → 解析成临时 role，复用同一 materializer』；spec 04 D13『顶部 tab 切不同 llm 结果』）。",
+      "fe_modules": [],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：完整纵切已 shipped。① 选择 UI——CompareRunDialog.tsx（shadcn Dialog+Checkbox 多选 Settings 已建 role，经 getRoles 拉），在 Workspace.tsx:1419 渲染；② 请求——candidatesFromRoleNames（run-compare.ts）→ startCompareRun → 后端 POST /runs/compare（backend/app/routers/runs.py:42-51），DTO RunCandidate/CompareCandidateRun/CompareRunResponse（backend/app/models/runs.py:26-129）；③ 临时 role 物化——run_compare.py:54-132 的临时 role materializer 复用 roles 基础设施、按候选写 llm_roles__<id>.yaml 并经 STUDIO_LLM_ROLES_PATH 指向，不改 frozen engine/gateway；④ 结果 tab——compareTabsFromGroup → TracePanel 顶部 compareTabs 条（TracePanel.tsx:157-191），按 metadata.status 显每候选 failed/running，候选切换 handleSelectCandidate（Workspace.tsx:1039-1048）。原标『未建契约』已过时。",
+      "impl_ref": "fn-23"
+    }
+  ]
+}

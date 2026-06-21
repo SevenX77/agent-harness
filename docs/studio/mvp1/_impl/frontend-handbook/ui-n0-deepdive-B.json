@@ -1,0 +1,41 @@
+{
+  "backend_source": {
+    "summary": "6 态 (ready/historical_ready/untested/failed/cooling_down/off) 由 gateway 的 project_route_state 纯函数算出: off(endpoint/route disabled) -> failed(无凭证missing_config / endpoint失败endpoint_unreachable / route失败model_failed, 仅 failed 携带 reason_code) -> cooling_down(熔断 circuit_retry_at) -> ready(endpoint+route 双 verified) -> historical_ready(endpoint verified 且有历史 probe 证据 draft_history) -> 兜底 untested。Studio 封装 project_provider_model_state 调 gateway adapter。两个端点把 6 态吐给前端: (1) 模型分组列表里每条 provider_model 带字段 ui_state(还有 ui_detail/retry_at/reason_code), 并聚合成 status_summary{6态: 计数}; (2) 角色测试结果里每个 provider 带字段 provider_ui_state。admission_decision 由 ui_state 推: cooling_down->temporary_skip, failed/off->block, 其余->admit。",
+    "evidence": [
+      ["project_route_state 6 态分支与 reason_code 校验", "packages/graph-agent-gateway/src/graph_agent_gateway/state_projection.py:73-119"],
+      ["ProviderModelStateProjection.ui_state Literal 6 态定义", "packages/graph-agent-gateway/src/graph_agent_gateway/state_projection.py:11-18"],
+      ["historical_ready 需 probe 证据 draft_history", "packages/graph-agent-gateway/src/graph_agent_gateway/state_projection.py:121-150"],
+      ["Studio 封装 project_provider_model_state 调 gateway adapter", "apps/studio/backend/app/services/llm_state_projection.py:11-37"],
+      ["端点A: _provider_model_option 输出 ui_state 字段", "apps/studio/backend/app/routers/llm.py:1948"],
+      ["端点A: status_summary 聚合 6 态计数", "apps/studio/backend/app/routers/llm.py:1827-1836"],
+      ["端点B: _role_test_provider_result 输出 provider_ui_state 字段", "apps/studio/backend/app/routers/llm.py:2105,2142"],
+      ["_admission_decision 据 ui_state 推 admit/block/temporary_skip", "apps/studio/backend/app/routers/llm.py:4165-4169"],
+      ["前端 ProviderUiState 6 态枚举", "apps/studio/frontend/src/api/llm.ts:12"]
+    ]
+  },
+  "display_usage": {
+    "headers": ["组件/标签", "消费的状态", "显示成什么", "file:line"],
+    "rows": [
+      ["ProviderStateBadge (徽章: 6 态各一套 label+variant+图标+tooltip 描述)", "ProviderUiState 全 6 态", "ready=绿Ready✓ / historical_ready=Previously Connected(History图标,带 multimodal 边框) / untested=Untested圈 / cooling_down=黄Cooling Down计时器(tooltip 拼 Retry at) / failed=红Failed✗(tooltip 拼 reason_code 文案) / off=灰Off暂停。纯染色+文案+tooltip", "apps/studio/frontend/src/components/studio/settings/llm-roles/provider-state-badge.tsx:15-58"],
+      ["AvailableModelsSidebar 状态标签 (Tag)", "provider.state(= ui_state)", "providerStateTagVariant 给颜色(ready=success/historical=probe-verified/untested=default/failed=destructive/cooling=warning/off=muted); providerVisibleStateLabel: ready 不显标签, 其余显文案", "apps/studio/frontend/src/components/studio/settings/llm-roles/AvailableModelsSidebar.tsx:339,363,519-538"],
+      ["AvailableModelsSidebar aria-label 无障碍文案", "provider.state", "ready='label available', 其余='label <状态文案>'", "apps/studio/frontend/src/components/studio/settings/llm-roles/AvailableModelsSidebar.tsx:541-545"],
+      ["AvailableModelsSidebar 排序优先级 (展示顺序)", "provider.state", "providerDisplayStatePriority/providerStatePriority/dominantProviderState 据 6 态排序, 决定 provider 在侧栏的先后与分组主状态", "apps/studio/frontend/src/components/studio/settings/llm-roles/AvailableModelsSidebar.tsx:503,510-516,547-559"],
+      ["RoleTestResultPanel 第二个 outline 徽章", "provider_ui_state", "providerUiStateLabel: 6 态各自文案(Ready/Previously Connected/Cooling Down/Failed/Off/Untested), 纯展示", "apps/studio/frontend/src/components/studio/settings/llm-roles/RoleTestResultPanel.tsx:49,113-121"],
+      ["role-route-status 详情文案 providerUiStateDetail", "ui_state(cooling_down/untested/historical_ready/failed/off)", "为 cooling_down/untested/historical_ready/failed/off 各生成一段 tooltip 详情文字(failed/off 解释需修复或已禁用); 纯文案", "apps/studio/frontend/src/components/studio/settings/llm-roles/role-route-status.tsx:251-274"],
+      ["role-route-status 标题 providerRouteStateHeadline", "ui_state", "ready=Verified / historical_ready=Previously Connected / failed=Failed / 其余 humanize; 纯文案", "apps/studio/frontend/src/components/studio/settings/llm-roles/role-route-status.tsx:327,330-335"],
+      ["role-utils 默认 provider 排序", "ui_state", "providerStateRank(ready=0/untested=1/cooling=2/其余3) 决定分组内默认 provider 顺序(影响默认选中); 排序非禁用", "apps/studio/frontend/src/components/studio/settings/role-utils.ts:458,464-470"],
+      ["AdvancedModelBundlesSection / api.llm 前端兜底聚合 status_summary", "ui_state", "summarizeProviderStates / summarizeProviderModelStates 按 6 态计数(后端缺失时前端补算), 喂给 ModelGroup.status_summary", "apps/studio/frontend/src/components/studio/settings/llm-roles/AdvancedModelBundlesSection.tsx:136; apps/studio/frontend/src/api/llm.ts:551,582"],
+      ["CopilotModelGroupCard 路由状态灯/边框", "agentStatus(= ui_state, 经 agentStatusForRoute 透传, 仅被 testing override)", "routeSurfaceClass/lightClass/statusLabel 据状态染色(ready=绿/not_tested=黄/testing=蓝/其余=红); 纯展示", "apps/studio/frontend/src/components/studio/settings/copilot/CopilotModelGroupCard.tsx:128,259-300"]
+    ]
+  },
+  "logic_usage": {
+    "headers": ["功能判断", "据哪个状态分支", "判断结果(启用/禁用/解锁/显错因等)", "file:line"],
+    "rows": [
+      ["后端: 路由准入 admission_decision", "ui_state == cooling_down / failed / off / 其余", "cooling_down->temporary_skip(临时跳过), failed/off->block(拉黑该路由), 其余->admit(放行测试/参与回退)。这是 6 态唯一真正的后端功能闸门", "apps/studio/backend/app/routers/llm.py:4165-4169 (被 2108,2118 _role_test_provider_result 使用)"],
+      ["后端: materialize_role 角色回退链构建", "projection.ui_state in (failed/off) / cooling_down / 其余", "failed/off 的路由被剔出 fallback_chain(不进角色回退链); cooling_down 进 warnings 但仍排除; 其余入链。决定一条 provider 能否成为角色的可用回退路由", "packages/graph-agent-gateway/src/graph_agent_gateway/state_projection.py:153-191"],
+      ["前端: deriveRoleRouteStatus 角色路由可用性判定", "ui_state failed/off->blocked; cooling_down(且未测过ok)->blocked; historical_ready(未ok)->limited; untested(未ok)->limited", "把 6 态折成 blocked/limited/runnable/testing。blocked=该路由在角色里被标红判为不可用, limited=黄色受限, runnable=绿可用。驱动 ProviderChain 行的 data-role-route-status 与边框/状态灯", "apps/studio/frontend/src/components/studio/settings/llm-roles/role-route-status.tsx:44-59 (ProviderChain.tsx:161 调用)"],
+      ["Copilot: SDK 就绪计数 copilotBackendReadyCount", "agentStatus(=ui_state) === 'ready'", "只统计 ready 的路由数, 渲染成 'N/M SDK Ready' 徽章并据 readyCount===total 决定徽章 success/outline。是 ready 解锁/达标的判断", "apps/studio/frontend/src/components/studio/settings/copilot/CopilotTab.tsx:57-62,378,396-397"],
+      ["Copilot: activeRouteIds 活跃路由集", "route.uiState === 'ready'", "派生 copilot 角色时只把 ui_state===ready 的路由收进 activeRouteIds(代表该 Claude Agent 角色当前激活/可用的路由)", "apps/studio/frontend/src/components/studio/settings/copilot/copilot-role-derivation.ts:63,80"]
+    ]
+  }
+}

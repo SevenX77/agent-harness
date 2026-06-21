@@ -1,0 +1,499 @@
+{
+  "page_id": "apikeys_design",
+  "title": "API Keys 设置页 · 操作设计",
+  "region": "settings:api-keys",
+  "intro": "本页是 API Keys 各操作的 MVP1 设计(应该怎样):每张卡只描述该操作目标长啥样、用户怎么触发、前端该怎么做、依赖后端哪条契约;现状实现与差距见实施页,依赖的凭证读写/探测机制见凭证读写机制页(mech_cred)。",
+  "atoms": [
+    {
+      "n": 16,
+      "cap": "secret-hydration",
+      "track": "共",
+      "module": "凭证录入与管理",
+      "func": "设计:让用户进 API Keys 页时就能看到/编辑自己之前存过的真实 key,而不是一排掩码占位符。",
+      "action": "用户切到 API Keys tab(首次进入自动触发,无需点按钮)。",
+      "fe_design": "进 tab 先拉一份 registry 快照(里面 key 全是 '**********' 掩码,后端默认不外泄明文)→ 前端发现哪些 endpoint 的 key 是掩码值,就对这些 endpoint 各发一次「取明文」请求把真 key 换回来 → 写进前端本地缓存,用户即可查看/修改。这是纯展示层的回填(hydration):明文只在本地 settings UI 内换回,前端不把它当第二份真相、不写回后端。窗口聚焦重新拉取时只取掩码快照、不重复换明文。",
+      "fe_modules": [
+        {
+          "name": "凭证 hydration",
+          "ref": "femod-hydration"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "GET /api/llm/registry/endpoints/{endpoint_id}/secret",
+          "purpose": "按 endpoint_id 返回单个 endpoint 的明文 key(仅本地 settings UI 用,scoped reveal),不探测不改状态不写盘。",
+          "mechanism_ref": "mech_cred",
+          "iface_ref": "iface-1"
+        },
+        {
+          "endpoint": "GET /api/llm/registry",
+          "purpose": "先拿全量打码快照,前端据此判断哪些 endpoint 需要换明文。",
+          "mechanism_ref": "mech_cred",
+          "iface_ref": "iface-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计。",
+      "impl_ref": "fn-16"
+    },
+    {
+      "n": 17,
+      "cap": "provider-partition",
+      "track": "共",
+      "module": "凭证录入与管理",
+      "func": "设计:把页面拆成「官方区(固定 5 厂商)」和「第三方区(用户自增)」,让用户一眼分清谁是官方可控、谁是自己加的。",
+      "action": "无显式动作(进 tab 自动按分区渲染)。",
+      "fe_design": "进 tab 自动渲染 → 上半官方区把 5 家固定厂商(anthropic / openai / gemini / deepseek / ark)各映射成一张卡(缺的补空卡,canonical base_url 用各家默认值注入)→ 下半第三方区把用户自增的草稿过滤出来逐张渲染。分区是纯前端行为(靠前端白名单判官方),后端只回平铺的 endpoint 列表、不感知「卡片」概念。",
+      "fe_modules": [
+        {
+          "name": "provider-utils",
+          "ref": "femod-provider-utils"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "GET /api/llm/registry",
+          "purpose": "返回平铺的 endpoint/route 快照供前端分区渲染(后端不分卡)。",
+          "mechanism_ref": "mech_cred",
+          "iface_ref": "iface-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计。",
+      "impl_ref": "fn-17"
+    },
+    {
+      "n": 18,
+      "cap": "official-key-only",
+      "track": "官",
+      "module": "凭证录入与管理",
+      "func": "设计:官方卡只让用户填 API Key,地址和协议用 canonical 默认值且隐藏,避免误改官方端点参数。",
+      "action": "用户在官方卡里只填一个 API Key(没有其它可填项)。",
+      "fe_design": "官方卡识别为 official → 协议下拉、Base URL 输入、Endpoint test 三段全部不渲染,只留一行 API Key 输入 → canonical base_url 由白名单默认值注入、不暴露成可编辑框 → 官方卡也没有 ⋮ 菜单、不可改名/删。背后契约:endpoint 的 official/第三方 标记(provider_kind)由后端保存时按白名单钉死,命中官方白名单强制标 official,前端改不了。",
+      "fe_modules": [
+        {
+          "name": "provider-utils",
+          "ref": "femod-provider-utils"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "PUT /api/llm/registry/endpoints",
+          "purpose": "保存草稿时整批 upsert endpoint;官方 endpoint 命中白名单强制 provider_kind=official。",
+          "mechanism_ref": "mech_cred",
+          "iface_ref": "iface-2"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计。",
+      "impl_ref": "fn-18"
+    },
+    {
+      "n": 19,
+      "cap": "tp-add-provider",
+      "track": "三",
+      "module": "凭证录入与管理",
+      "func": "设计:让用户新增一个第三方 provider,一次把它的 name / base_url / 协议 / key 填全,立刻成为一张可测试的卡。",
+      "action": "用户点 `+ Add Provider`,在表单里一次填全 provider 信息后提交。",
+      "fe_design": "点 + Add Provider → 弹出一个 inline 表单一次填全 name / base_url / api_key(协议不让用户选,留给系统自动探测,见 #24/#25)→ 提交时生成 custom-{uuid} 作 code、建一张已带 URL+key 的第三方卡 → 入队等 debounce 自动保存。设计目标是「一步填全」,不是「先建空壳再回卡补填」两步。",
+      "fe_modules": [
+        {
+          "name": "命名弹框",
+          "ref": "femod-rolenamedialog"
+        },
+        {
+          "name": "provider-utils",
+          "ref": "femod-provider-utils"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "PUT /api/llm/registry/endpoints",
+          "purpose": "草稿保存时整批 upsert(新增不另设 add 端点,随 debounce 落库)。",
+          "mechanism_ref": "mech_cred",
+          "iface_ref": "iface-2"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "现状是两步(先弹框只填名建空壳、再回卡补 URL/key),目标是 inline 一次填全;一次填全的表单组件 AddProviderForm 现为未挂载孤儿。",
+      "impl_ref": "fn-19"
+    },
+    {
+      "n": 20,
+      "cap": "tp-credential-edit",
+      "track": "三",
+      "module": "凭证录入与管理",
+      "func": "设计:让用户填/改第三方 provider 的 name、base_url、api_key,改完即填即存。",
+      "action": "用户在第三方卡内编辑 Base URL / API Key;改名走 ⋮ → Rename。",
+      "fe_design": "在第三方卡里改 Base URL / API Key 任一项 → 每次改动合并成一个 patch 落到 SettingsPage → debounce 自动保存;改名走 ⋮ → Rename 弹命名弹框回填 name。保存时后端把 base_url 按协议归一化、api_key 省略时保留旧值。协议字段在目标设计里不由用户手选,而是系统自动探测(见 #24/#25),所以这张卡的可填项是 name/base_url/api_key。",
+      "fe_modules": [
+        {
+          "name": "provider-utils",
+          "ref": "femod-provider-utils"
+        },
+        {
+          "name": "命名弹框",
+          "ref": "femod-rolenamedialog"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "PUT /api/llm/registry/endpoints",
+          "purpose": "编辑触发的 debounce 保存走它(整批 upsert,base_url 保存时归一化)。",
+          "mechanism_ref": "mech_cred",
+          "iface_ref": "iface-2"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计。2026-06-20:代码已落地(design-audit vs code 核实),状态回填。第三方卡的协议手选下拉已删——ProviderCard.tsx 仅剩 :1041 一处移除注释,grep 确认 api-keys 目录内无 providerProtocolOptions/Protocol-Select;可编辑项收敛为 API Key(:982-1037)+ Base URL(:1044-1077)+ Endpoint test(:1079-1116)。协议改为后端自动探测(经 #25 的 _verify_third_party_endpoint_by_probe,llm.py:4287-4367)。name/base_url/api_key 录入保存路径不变。",
+      "impl_ref": "fn-20"
+    },
+    {
+      "n": 21,
+      "cap": "credential-key-edit",
+      "track": "共",
+      "module": "凭证录入与管理",
+      "func": "设计:改 API Key 后让旧测试结果立即失效、状态退回未测,避免拿旧 key 的「已连通」误导用户。",
+      "action": "用户在 API Key 输入框里修改 key 文本(官方/第三方共用)。",
+      "fe_design": "改 API Key 文本 → 前端比对新旧参数(key / URL / 协议)是否一致 → 参数变了就把该 provider 加进「已失效」集合 → 状态标签按「参数指纹」查缓存结果,指纹对不上就取不到旧结果、自动回落未配置/未测(对齐 6 态里的 untested)。失效判定纯前端按参数指纹算,后端只在重测时写新状态。",
+      "fe_modules": [
+        {
+          "name": "状态投影",
+          "ref": "femod-x"
+        },
+        {
+          "name": "provider-utils",
+          "ref": "femod-provider-utils"
+        }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计(纯前端失效判定,无后端契约)。",
+      "impl_ref": "fn-21"
+    },
+    {
+      "n": 22,
+      "cap": "secret-mask-toggle",
+      "track": "共",
+      "module": "凭证录入与管理",
+      "func": "设计:用眼睛图标在明文与掩码间切换 API Key 显示,方便核对又默认不外泄。",
+      "action": "用户点 API Key 输入框旁的 Eye / EyeOff 图标。",
+      "fe_design": "点眼睛图标 → 翻转可见态 → 输入框始终是 type=text,掩码态用 CSS 把字符遮成圆点(不切浏览器原生 password 输入框)。这样既能切换显隐,又不触发浏览器密码管理器、不与「抑制密码管理器」属性冲突。配合复制按钮(#23)使用。",
+      "fe_modules": [
+        {
+          "name": "provider-utils",
+          "ref": "femod-provider-utils"
+        }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计。2026-06-20:代码已落地(design-audit vs code 核实),状态回填。输入框已永远 type=text + CSS 打码——apiKeyInputType()(ProviderCard.tsx:79-91)恒返回字面 'text'(再无 'password'),掩码态由 apiKeyInputClassName 切 mask-input class,Input 用 type={apiKeyInputType()}(:987);掩码经 index.css:365-369 的 -webkit-text-security: disc + text-security-disc webfont 兜底实现。无原生 type=password 残留,不触发浏览器密码管理器,符合『永 type=text + CSS 打码』。",
+      "impl_ref": "fn-22"
+    },
+    {
+      "n": 23,
+      "cap": "secret-copy",
+      "track": "共",
+      "module": "凭证录入与管理",
+      "func": "设计:一键把 API Key 复制到剪贴板,省去手动选中长串密钥。",
+      "action": "用户点 API Key 旁的 Copy 图标。",
+      "fe_design": "点 Copy 图标 → 调浏览器剪贴板写入 key → 成功/失败各弹一条提示;key 为空时按钮禁用。纯前端剪贴板操作,无网络、无后端。",
+      "fe_modules": [
+        {
+          "name": "provider-utils",
+          "ref": "femod-provider-utils"
+        }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计。",
+      "impl_ref": "fn-23"
+    },
+    {
+      "n": 24,
+      "cap": "official-test-job",
+      "track": "官",
+      "module": "测试与模型探测",
+      "func": "设计:官方卡点 Test 验证 endpoint 可连通——拉一遍模型目录(get-models),连通即验证通过,并给用户进度反馈而不是干等。",
+      "action": "用户在官方卡点 `Test` 按钮。",
+      "fe_design": "官方卡点 Test → 前端起一个后端测试任务、按节奏轮询进度实时刷到卡上 → 任务拉到模型目录(get-models)即判 endpoint 验证通过、把 draft 历史已证实的能力回填进 model list(蓝标签,见 #30)。设计目标:官方与第三方走同一套测试入口 POST /endpoints/{id}/test + 批量探测,官/三只在「身份与 canonical 默认」上有别(§1.1 vs §1.2),测试路径同一套;官方因 endpoint 可控,只需 get-models 连通即可,不强制逐模型 probe。前端只负责触发 + 展示进度,批量探测策略归后端机制(mech_cred)。",
+      "fe_modules": [
+        {
+          "name": "状态投影",
+          "ref": "femod-x"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/llm/endpoints/{endpoint_id}/test",
+          "purpose": "官/三统一测试入口:对该 endpoint 跑连通 + 批量模型探测,返回模型列表与新状态(目标统一路径)。",
+          "mechanism_ref": "mech_cred",
+          "iface_ref": "iface-4"
+        },
+        {
+          "endpoint": "GET /api/llm/endpoint-test-jobs/{job_id}",
+          "purpose": "若走异步 job,按节奏轮询该 job 的进度/结果。",
+          "mechanism_ref": "mech_cred",
+          "iface_ref": null
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计。2026-06-20:代码已落地(design-audit vs code 核实),状态回填。官/三测试入口已统一:POST /endpoints/{id}/test(llm.py:511)是唯一入口,旧的官方专属 POST /endpoints/{id}/test-jobs 路由及其 provider_kind!='official' 拒第三方门禁已删(路由表无 test-jobs/endpoint-test-jobs);官方因 endpoint 可控仅需 get-models 连通即验证(llm.py:580-584,不逐模型 probe)。前端 getProviderModels(api/llm.ts:1356-1362)去掉了 provider_kind 分叉与 testOfficialProviderModelsWithJob,官/三都 POST /llm/endpoints/{id}/test,按钮文案两类都是 'Test'(ProviderCard.tsx:1035)。",
+      "impl_ref": "fn-24"
+    },
+    {
+      "n": 25,
+      "cap": "tp-getmodels",
+      "track": "三",
+      "module": "测试与模型探测",
+      "func": "设计:第三方卡点 Test 验证 endpoint——系统自动探协议 + 批量模型探测真打推理端点,真能生成才判 endpoint 可用。",
+      "action": "用户在第三方卡点 `Test` 按钮(填好 URL+key 后)。",
+      "fe_design": "第三方卡点 Test → 触发后端:先对 URL 自动探协议(各协议排列组合各打一遍推理端点 + 对应 auth header,哪个被接受判哪个,不让用户手选)→ 再批量模型探测(自动分批真打推理端点,某批任一模型成功即判 endpoint 可用并停;遇结构性错配码短路、瞬时类不短路)→ 连通后把 draft 历史能力回填(蓝标签)。设计统一为「官/三同一套 endpoint test + 批量探测」:官方因可控只需 get-models 连通,第三方必须用模型打推理端点才算验通(get-models 只证 key+URL 可达、不证协议匹配/能生成)。前端只触发 + 显示进度,探测策略归后端(mech_cred)。",
+      "fe_modules": [
+        {
+          "name": "状态投影",
+          "ref": "femod-x"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/llm/endpoints/{endpoint_id}/test",
+          "purpose": "官/三统一入口:第三方在此跑协议自动探测 + 批量模型探测真打推理端点,验通才升 verified。",
+          "mechanism_ref": "mech_cred",
+          "iface_ref": "iface-4"
+        },
+        {
+          "endpoint": "PUT /api/llm/registry/endpoints",
+          "purpose": "测试前置 upsert 落 endpoint(base_url 归一化)。",
+          "mechanism_ref": "mech_cred",
+          "iface_ref": "iface-2"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计。2026-06-20:代码已落地(design-audit vs code 核实),状态回填。第三方路径已调 _verify_third_party_endpoint_by_probe(llm.py:588,定义 4287-4367):(1)协议自动探测——对每个候选协议各拿一个模型发真生成调用判定(_detect_third_party_protocol,4224-4284,遇结构性错配短路);(2)批量推理探测,首个 ok 即停,仅在真 ok 生成才升 'verified'(4332-4350)。弱 get-models 判定被取代:前端按 status==='verified' 判连通(llm.ts:1367),按钮文案 'Get Models'→'Test'(ProviderCard.tsx:1035),探测到的协议回写(llm.py:596-600)。已与官方同一套入口。",
+      "impl_ref": "fn-25"
+    },
+    {
+      "n": 26,
+      "cap": "tp-model-probe",
+      "track": "三",
+      "module": "测试与模型探测",
+      "func": "设计:在第三方卡的「Endpoint test」填一个 model id 单独探它能否真生成,作为 endpoint 验证的轻量应急入口。",
+      "action": "用户在第三方卡「Endpoint test」输入一个 model id → 点 `Test`。",
+      "fe_design": "在 Endpoint test 段填一个 model id → 点 Test(未填禁用)→ 对这个单模型发 1 次推理探测 → 结果刷回卡上(成功则该 route+endpoint 升 verified)。这是 §1.3 留的应急出口(escape hatch):主路径是批量探测,但需要时也能手挑单个模型试。单模型探测本身不可靠(瞬时抖动),所以它只作辅助、不是判 endpoint 生死的主战场。",
+      "fe_modules": [
+        {
+          "name": "状态投影",
+          "ref": "femod-x"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/llm/endpoints/{endpoint_id}/models/test",
+          "purpose": "对给定 model_ids 逐个打推理探测、回填各模型结果 + endpoint 状态(此入口含单个 model_id)。",
+          "mechanism_ref": "mech_cred",
+          "iface_ref": null
+        },
+        {
+          "endpoint": "PUT /api/llm/registry/endpoints",
+          "purpose": "探测前置 upsert 落 endpoint。",
+          "mechanism_ref": "mech_cred",
+          "iface_ref": "iface-2"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(单模型形态的应急入口)。",
+      "impl_ref": "fn-26"
+    },
+    {
+      "n": 27,
+      "cap": "manual-model-probe",
+      "track": "共",
+      "module": "测试与模型探测",
+      "func": "设计:在「Manual model probing」面板加多个 model id 一次性批量探测,自动列模型不可用时手动喂候选,且统一做能力探测。",
+      "action": "用户在 Manual model probing 面板点 `Add Model` 填多个 model id → 点 `Test Models`。",
+      "fe_design": "在面板里 Add Model / 删行管理一组 model id → 点 Test Models 批量发探测 → 结果以与新状态体系一致的呈现列出(对齐 6 态色 + inline,不用旧 model-badge)、并回写 Available Models。面板对官/三都开放(§1.3 留的批量探单模型入口)。设计目标:不分官/三都做统一的批量探测 + 统一能力探测(能力从 list-models 富字段归一化,缺则 probe 兜底),不再官方探多档案、第三方写死 text-only。前端只触发 + 展示,能力归一化与批量策略归后端(mech_cred)。",
+      "fe_modules": [
+        {
+          "name": "provider-utils",
+          "ref": "femod-provider-utils"
+        },
+        {
+          "name": "状态投影",
+          "ref": "femod-x"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/llm/endpoints/{endpoint_id}/models/test",
+          "purpose": "多 model_ids 逐个批量探测 + 统一能力探测/归一化(目标:不按官/三分叉)。",
+          "mechanism_ref": "mech_cred",
+          "iface_ref": null
+        }
+      ],
+      "fe_status": "偏差",
+      "be_status": "契约问题",
+      "gap_brief": "保持偏差——后端阻塞、非前端可闭合(2026-06-20 design-audit vs code 核实)。前端那一半已落地:ManualModelTestPanel.tsx:136-156 的 ManualModelResultList 已把每条结果经共享 6 态 ProviderStateBadge 渲染(manualModelResultUiState 把 status→ready/failed,:60-62),旧的 2 态 success/destructive Badge 已去。但本原子的核心目标『统一能力探测、不按官/三分叉』未闭合:后端 llm.py:667 仍 `if endpoint.provider_kind == 'official':` 走多档案 _probe_official_model_profile_result,第三方路径(llm.py:736)走单次 _gateway_test_provider_model + list-models 能力,两条探测路径结构上不对称。收口需统一后端 models/test 能力探测(消除 :667 与 :736 的 provider_kind 分叉)——这是后端契约改造,非前端可关闭。已缩小的部分:第三方不再硬写 text-only(_third_party_probe_capabilities,llm.py:4411-4424,现优先用 list-models 富能力),偏差收窄到结构性官/三分叉本身,但分叉统一仍是未完成的后端工作。",
+      "impl_ref": "fn-27"
+    },
+    {
+      "n": 28,
+      "cap": "notable-models",
+      "track": "共",
+      "module": "测试与模型探测",
+      "func": "设计:Manual 面板自动拉该 provider 的「值得一试」候选 model id,作为输入框占位建议,降低手填门槛。",
+      "action": "无显式动作(Manual 面板挂载时自动拉取)。",
+      "fe_design": "Manual 面板出现时按 provider 短名自动拉一份「值得一试」的 model id 列表 → 写进输入框占位提示,帮用户少手敲。provider 短名由前端工具从 id/name/url 猜出。数据源是随后端打包的静态推荐文件,不分官/三、纯读不写盘、不走凭证存储。",
+      "fe_modules": [
+        {
+          "name": "provider-utils",
+          "ref": "femod-provider-utils"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "GET /api/llm/providers/notable-models?provider_key={key}",
+          "purpose": "按 provider 短名返回文档维护的「值得一试」model id 列表(输入建议用)。",
+          "mechanism_ref": "mech_cred",
+          "iface_ref": null
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计。",
+      "impl_ref": "fn-28"
+    },
+    {
+      "n": 29,
+      "cap": "tp-rename-delete",
+      "track": "三",
+      "module": "凭证录入与管理",
+      "func": "设计:第三方卡的 ⋮ 菜单改名/删除(删除带二次确认),让用户管理自增的第三方 provider;官方卡无此菜单、不可改名/删。",
+      "action": "用户点第三方卡 `⋮` → Rename(弹框改名)/ Delete(确认后删)。",
+      "fe_design": "第三方卡 ⋮ 菜单(官方卡无)→ Rename 弹命名弹框改 name;Delete 先弹二次确认 → 确认后从草稿移除、标记角色投影需刷新、debounce 落库。删除走专门的删除端点,删 endpoint 并级联清掉角色里引用该 endpoint 的 route(因为整批 upsert 是「缺席即保留」语义、单靠它删不掉)。改名只改显示名随草稿保存。",
+      "fe_modules": [
+        {
+          "name": "命名弹框",
+          "ref": "femod-rolenamedialog"
+        },
+        {
+          "name": "provider-utils",
+          "ref": "femod-provider-utils"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "DELETE /api/llm/registry/endpoints/{endpoint_id}",
+          "purpose": "删该 endpoint 并级联清掉角色里引用它的 route。",
+          "mechanism_ref": "mech_cred",
+          "iface_ref": "iface-3"
+        },
+        {
+          "endpoint": "PUT /api/llm/registry/endpoints",
+          "purpose": "改名随草稿整批 upsert(缺席=保留,非删除)。",
+          "mechanism_ref": "mech_cred",
+          "iface_ref": "iface-2"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(删除二次确认 + 级联清 route;官方不可改名/删)。独立删除按钮 ProviderDeleteButton 定义未挂载,属孤儿。",
+      "impl_ref": "fn-29"
+    },
+    {
+      "n": 30,
+      "cap": "test-status-projection",
+      "track": "共",
+      "module": "状态投影",
+      "func": "设计:把后端测试结果投影成 6 态状态标签,常驻 inline 显示在 key/URL 旁,三页颜色一致。",
+      "action": "无显式动作(测试/加载后自动投影;含改 key 失效回退见 #21)。",
+      "fe_design": "前端把后端每条 route 的状态投影成 UI 标签,用 §4.2 的 6 态:🟢 ready=真测通、🔵 historical_ready=以前联通过(draft 回填)、⚪ untested=没测、🔴 failed=出错要修(配置缺口 ∪ 测试失败,reason 区分,红但不挡)、⚪+倒计时 cooling_down=熔断中、⚪+不可选 off=禁用。第三方顶层一个连通徽章(按参数指纹取缓存结果),官方每条 route 一个彩色 Tag(信后端权威)。结果除 toast 外必须常驻写在 key/Base URL 旁的状态位(inline,§1.4),鼠标无需追 toast。状态权威来自后端 6 态总结转的 DTO,前端只读渲染、不持第二份。",
+      "fe_modules": [
+        {
+          "name": "状态投影",
+          "ref": "femod-x"
+        },
+        {
+          "name": "provider-utils",
+          "ref": "femod-provider-utils"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "GET /api/llm/registry",
+          "purpose": "返回内嵌 6 态 ui_state 的 endpoint/route 快照供前端渲染(投影本身不发额外请求)。",
+          "mechanism_ref": "mech_cred",
+          "iface_ref": "iface-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计。2026-06-20:代码已落地(design-audit vs code 核实),状态回填。前端 6 态接通:ProviderCard.tsx:931-937 在 CardHeader 内常驻 inline 渲染 ProviderStateBadge(挨着 name/key),由 representativeProviderUiState(:338-361,读 model.ui_state)驱动。后端把每条 route 的 ui_state 内嵌进 registry DTO,经规范 gateway 投影器:llm.py:1719-1766 _project_route_ui_states 调 adapter.project_route_state(与 LLM Roles 同一投影器);蓝态 historical_ready 由 probe-verified 证据产出(state_projection.py:114-140),API Keys 测试路径正好追加该证据(evidence_type='probe'、trust_state='probe-verified',llm.py:2537-2538/2461-2462),蓝态对 API Keys 卡端到端点亮。6 态色表复用 settings/llm-roles/provider-state-badge.tsx,三页同色。注:probe_import_draft(llm.py:929-933)仍是桩,但那是 import-draft 特性路径、非本原子的 API Keys 测试路径,不影响 API Keys 卡蓝态。",
+      "impl_ref": "fn-30"
+    },
+    {
+      "n": 31,
+      "cap": "registry-restore",
+      "track": "共",
+      "module": "凭证录入与管理",
+      "func": "设计:刷新/重开页面后从后端 registry 恢复每个 provider 的 key、状态、Available Models,不丢已配凭证与探测结果。",
+      "action": "无显式动作(刷新或重进页面自动恢复;其它窗口改动聚焦回来也重拉)。",
+      "fe_design": "刷新或重进页面 → 拉一份全量 registry 快照(含 endpoint+route+状态+已发现模型)→ 转成 UI 凭证态恢复每张卡 → key 再经 #16 的 hydration 换回真值。初始与窗口聚焦时各拉一次。前端只投影 registry、不持第二份真相(切 tab/刷新状态不丢)。",
+      "fe_modules": [
+        {
+          "name": "凭证 hydration",
+          "ref": "femod-hydration"
+        },
+        {
+          "name": "状态投影",
+          "ref": "femod-x"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "GET /api/llm/registry",
+          "purpose": "返回全量 endpoint/route/role 打码快照(恢复 key 占位/状态/Available Models),key 真值另走 #16 secret 端点。",
+          "mechanism_ref": "mech_cred",
+          "iface_ref": "iface-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(只投影 registry、不持第二份)。",
+      "impl_ref": "fn-31"
+    }
+  ],
+  "fe_defs": [
+    {
+      "id": "femod-hydration",
+      "name": "凭证 hydration",
+      "explain": "前端共享逻辑：hydrateEndpointSecrets,逐 endpoint 把掩码 key 换回真值的前端逻辑；secret-hydration"
+    },
+    {
+      "id": "femod-provider-utils",
+      "name": "provider-utils",
+      "explain": "前端共享逻辑：第三方共享工具集:官方 5 卡映射 + 第三方过滤 + 指纹缓存的纯函数；判定 isOfficial + 注入 canonical 默认值；生成 custom-{uuid} 草稿；patch 合并 + 指纹缓存；参数指纹缓存；InputGroup 内的显隐 + CSS 掩码,本地实现；copyCredentialValue,剪贴板写入 + toast 反馈；面板显示条件判定；从 id/name/url 推 provider 短名；草稿移除 + 刷新标记"
+    },
+    {
+      "id": "femod-rolenamedialog",
+      "name": "命名弹框",
+      "explain": "前端共享逻辑：通用命名弹框,复用作 provider 命名；改名弹框"
+    },
+    {
+      "id": "femod-x",
+      "name": "状态投影",
+      "explain": "前端共享逻辑：test-status-projection,把后端状态按参数指纹投影成 UI 标签；test-status-projection,轮询进度喂状态标签；test-status-projection；test-status-projection,结果转 6 态呈现"
+    }
+  ]
+}

@@ -1,0 +1,167 @@
+{
+  "page_id": "n6_publish_design",
+  "title": "发布(Release) · 操作设计",
+  "region": "header:team-release",
+  "intro": "本页是「把当前 skill 发布上线」这一 surface 的 MVP1 设计(应该怎样):Release 入口、发布回执、前置校验失败指引、发布后闭环,以及已删虚需求的负向约束。现状/差距见实施页(n6_publish_impl),底层发布机制见后端接口契约页(n6_publish_mech)。定性(引 06_eval.md + capability spec `publish/mvp1-alignment.md` F2):发布=占坑低优先;**设计目标**=打包 zip『上传 package + metadata』到 **Artifact Registry**(**非 git push**)。⚠️ **现状 code↔design drift**:真代码 publish 路径只同步 release manifest(`sync_release_manifest`),**未上传 zip package**(`upload_artifact` 无 publish 生产调用),且 zip 构建仍在 Python(D12 Rust 写者未收口);各原子的『现状 vs 设计目标』差距逐条标在 gap 与契约页。commit-msg 托底 / 撒花 / 独立 Publish 按钮都是已删虚需求。",
+  "atoms": [
+    {
+      "n": 5,
+      "cap": "release-entry",
+      "module": "发布入口与回执",
+      "func": "设计:给用户一个发布上线的入口,把当前 skill 打包发布;入口最小化(占坑低优先),但不能让用户误以为发布=git/团队推送。",
+      "action": "用户点 Header 顶栏 `Team` 下拉 → `Release`。",
+      "fe_design": "Header 的 Team 下拉里有 Release 项,点它触发发布 hook 的 publish()。入口最小化、藏在 Team 下拉合理(占坑低优先);但 Release(及其姊妹项 Package release——把发布包以 native-fs 落地到本地,见 #10)现与 Save to Team / Sync from Team / Submit for Review(真 git/团队操作)同列同一 Team 下拉,语义上易把『发布=Artifact Registry 打包上传』误读成 git push。设计要求:在 Release 项或回执文案上点明『打包上传 Artifact Registry(非 git push)』,或在信息架构上把发布(Release / Package release)与团队 git 操作分组区隔,消除误导。发布底层非 git 见后端契约页机制 B。",
+      "fe_modules": [
+        {
+          "name": "发布 hook",
+          "ref": "femod-usepublishskill"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{skill_id}/publish",
+          "purpose": "把当前 skill 编译、打包成 product artifact 提交本地 product store(配置了 registry 才另发远端 release manifest 同步),返回 PublishResult。底层非 git push。注:设计目标的 zip package 上传(upload_artifact)当前 publish 路径未接,见契约页 drift。",
+          "mechanism_ref": "n6_publish_mech",
+          "iface_ref": "iface-publish"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(发布入口已分组区隔、点明非 git push)。2026-06-20: 代码已落地(design-audit vs code 核实),状态回填。Header.tsx:240-247 的 Team 下拉现渲一个 <DropdownMenuSeparator/>(:240)+ 一个文案为『Artifact Registry (not git push)』的 <DropdownMenuLabel>(:241-243),把 Release 项(:244-247,调 publish.publish())与 Package release(:248-254)同团队 git 操作 Save to Team / Sync from Team / Submit for Review(:228-239)分组区隔——正是设计要求的『点明打包上传 Artifact Registry(非 git push)』+『把发布与团队 git 操作分组区隔』。Header.test.tsx:223-243 锁住 Team trigger,菜单内消歧由 e2e/截图覆盖(Radix portal 内容不被 renderToStaticMarkup 捕获)。(发布底层 zip-package 上传 drift 属契约页范畴,不改本入口前端结论。)实施页 n6_publish_impl fn-5 已记 fe_status 符合(fe_resync batch1 2026-06-20)。",
+      "impl_ref": "fn-5"
+    },
+    {
+      "n": 6,
+      "cap": "release-receipt",
+      "module": "发布入口与回执",
+      "func": "设计:发布成功后给用户一份回执,清楚表达这是『内容寻址的 product artifact + manifest』(给出版本 / artifact id / 内容哈希 / manifest / 远端同步状态),而不是一次 git 提交。",
+      "action": "无显式动作(发布成功后自动呈现:成功 toast + Header 回执徽章)。",
+      "fe_design": "发布成功后,发布 hook 用 PublishResult 里的字段拼一条成功 toast(release_version + artifact_id + content_hash + manifest_ref + 远端同步摘要),Header 的发布回执徽章同样从 PublishResult.extra 取这几项渲染(版本 / artifact id / content hash / manifest ref / remote sync『状态(原因)』)。这套回执如实表达了发布底层=内容寻址的 artifact + manifest(不是 git push);其中 remote_sync 状态会如实显示 succeeded / skipped(无 registry)/ failed(远端失败),即回执本身就把『远端是否真同步』暴露给用户。前端只读 PublishResult 投影,不自造发布结果。",
+      "fe_modules": [
+        {
+          "name": "发布回执解析",
+          "ref": "femod-releaseidentity"
+        },
+        {
+          "name": "发布 hook",
+          "ref": "femod-usepublishskill"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{skill_id}/publish",
+          "purpose": "成功返回 PublishResult{status,message,artifact_id,extra{release_version,artifact_ref{artifact_id,content_hash,manifest_ref,store},content_hash,manifest_ref,package_kind,remote_sync{...}}}。",
+          "mechanism_ref": "n6_publish_mech",
+          "iface_ref": "iface-publish"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(回执如实展示 artifact/hash/manifest/remote sync,正确表达 Artifact 性质而非 git)。",
+      "impl_ref": "fn-6"
+    },
+    {
+      "n": 7,
+      "cap": "publish-precheck-settings",
+      "module": "发布前置校验",
+      "func": "设计目标(spec P4 + capability F2):发布前置校验失败——**user_id 缺 或 registry host+token 缺**——都要给明确报错 + 一键去 Settings 补,绝不静默失败;远端同步失败也应让用户感知(不能伪装成功)。",
+      "action": "无显式动作(发布失败时在错误 toast 上挂 `Open Settings` 动作)。",
+      "fe_design": "读法 B(PM 2026-06-20):发布 hook 在 ok 结果上读 remote_sync.reason —— reason=app_settings_incomplete 时在**成功** toast 上挂『Open Settings』动作(去 General 配 user_id),reason=registry_not_configured 时仅把 reason 写进成功消息、不挂按钮;成功消息始终含 skip 状态/原因(remoteSyncSummary)。FE 处理的 skip-reason 集合(FE_HANDLED_SKIP_REASONS)= {registry_not_configured, app_settings_incomplete},与后端 ok+skip 实际发的 reason 相等。真正抛出的错误(网络/校验)走普通错误 toast。原『可修复错误码白名单(SETTINGS_FIXABLE_ERROR_CODES)』因后端从不抛这些码而删除。",
+      "fe_modules": [
+        {
+          "name": "发布 hook",
+          "ref": "femod-usepublishskill"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{skill_id}/publish",
+          "purpose": "前置校验失败时返回 typed 错误体{error_code,message}。publish 路径**实际只**抛:APP_SETTINGS_INCOMPLETE(缺 user_id)/ PUBLISH_CONFLICT / PUBLISH_FAILED / SKILL_DIR_MISSING / REGISTRY_API_ERROR / REGISTRY_NETWORK_ERROR。registry host/token 缺**不抛错**(降级本地、remote_sync=skipped、PublishResult ok);远端同步异常被当 soft-failure(remote_sync=failed)、**不抛给前端**。",
+          "mechanism_ref": "n6_publish_mech",
+          "iface_ref": "iface-publish"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "符合",
+      "gap_brief": "已按 PM 决定(2026-06-20)解决 drift —— 选读法 B:发布缺 registry/身份配置时本地照常发布成功,远端同步标 remote_sync=skipped(reason ∈ {registry_not_configured, app_settings_incomplete}),返回 PublishResult ok,前端给非阻塞的 Settings 提示(reason=app_settings_incomplete 挂可点 Open Settings;registry_not_configured 仅信息提示,目前无 registry 的 Settings 入口)。**不硬失败、不抛 REGISTRY_NOT_CONFIGURED**。原 spec P4/F2『registry 缺→硬失败抛 typed error』一读不采纳。因此前端不再保留 catch 路径的 REGISTRY_NOT_CONFIGURED 错误码白名单(死分支已删),改为按 ok+skip 的 reason 给提示;对应实施页 fn-7。① user_id 缺仍可在 Settings 补(成功 toast 的 Open Settings);② 若将来要『无 registry 也跳 Settings 配仓库』,需另立 Settings 加 registry 配置任务(本轮不做)。",
+      "impl_ref": "fn-7",
+      "pm_decision": "PM 决定 2026-06-20:读法 B,保留本地-only 发布,缺 registry/身份非阻塞提示,不硬失败。",
+      "be_status_prev": "契约问题"
+    },
+    {
+      "n": 8,
+      "cap": "publish-loopback",
+      "module": "发布后闭环",
+      "func": "设计:发布成功后,用户回主页开始新探索,形成『配置→搭图→编译→运行→存档/发布→回主页』的闭环。",
+      "action": "用户发布成功后自行回主页(现不自动跳转)。",
+      "fe_design": "发布成功后,工作流期望回到主页(01_init 的发现/初始化)开始下一轮探索。MVP1 把『发布成功自动跳主页』列为占坑低优先——现状不自动跳,由用户手动返回,是已知的占坑、不是 bug。本卡记录这条闭环语义,标明其占坑状态,避免后人误把『不自动跳』当缺陷去补。",
+      "fe_modules": [],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合 MVP1 决策(06_eval.md P5 明列『现不自动跳主页 = 已知占坑』);自动跳主页为低优先未来项,非现阶段缺陷。",
+      "impl_ref": "fn-8"
+    },
+    {
+      "n": 9,
+      "cap": "no-virtual-requirements",
+      "module": "发布后闭环",
+      "func": "设计:发布相关界面不得出现已删的虚需求——无 commit message 输入/生成 UI、无发布成功撒花特效、无独立 Publish 按钮(Release 合并在 Team 下拉即可);并清除残留的撒花孤儿文件。",
+      "action": "无用户动作(负向约束 + 死代码清理)。",
+      "fe_design": "这是一条负向设计约束 + 一项清理,分两部分:① 负向约束(保持不出现)——发布流程不出 commit-message 弹窗/输入框(P6 删)、不接撒花(P7 删)、不另起独立 Publish 按钮(Release 留在 Team 下拉,占坑低优先);这三者现状均合规。② 死代码清理——撒花源文件 `lib/confetti.ts`(celebrateSuccess,撒花特效函数)与类型声明 `types/canvas-confetti.d.ts` 全仓 0 import = orphan,设计明示『不接入』,应一并删除,避免 stale 误导后人以为发布要撒花。",
+      "fe_modules": [],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计(虚需求负向约束 + 死代码清理均达成)。2026-06-20: 代码已落地(design-audit vs code 核实),状态回填。原子点名的两个孤儿死代码文件已删:`lib/confetti.ts` 与 `types/canvas-confetti.d.ts` 均 'No such file or directory';grep confetti|celebrateSuccess 全 src 仅命中负向断言测试文件 no-confetti-orphan.test.ts、零生产引用,该专用测试(no-confetti-orphan.test.ts:31-47)断言两文件不存在且全树无 /canvas-confetti/ 与 /celebrateSuccess/ import。负向约束亦保持:无 commit-message UI(grep commitMessage|commit message → 0)、无独立 Publish 按钮(Release 留在 Team 下拉 Header.tsx:244-247)。残留(非本原子标的、不改判定):package.json:55 仍列 'canvas-confetti' 依赖项,但本原子清理标的=两个源文件(已删)+ 零 import(已满足),故不影响 符合。实施页 fn-9 已记 符合(fe_resync batch1 2026-06-20)。",
+      "impl_ref": "fn-9"
+    },
+    {
+      "n": 10,
+      "cap": "package-release-native-fs",
+      "module": "发布入口与回执",
+      "func": "设计:让用户把已发布的 release 包以 native-fs 落地到本地工作区文件(.workspace/releases/ 下),作为发布包的本地导出/留存——这是 D12『发布打包落盘走 native-fs』在前端的落地。",
+      "action": "用户在 Header 点 Package 图标按钮,或 Team 下拉 → `Package release`(仅在已有一次成功发布、拿到 release 回执后可用)。",
+      "fe_design": "Package release 复用上一次发布的回执标识(release_version / content_hash / manifest_ref / artifact_ref,取自发布 hook 的 lastResult,经发布回执解析得出)→ 调 Studio Rust 后端 native-fs 把发布包写到工作区相对路径(默认 `.workspace/releases/{skill}-{version}.package.json`)→ 成功弹『Packaged release {version}: {hash}, {manifestRef}』并带 native 路径 + 『Reveal』(在文件管理器里定位)→ 失败按 native-fs typed 错误(Conflict/PermissionDenied/PathEscape)给可重试 toast,带『Choose path』动作打开『Package target』路径弹框换路径重试。写盘走 Studio Rust 后端 native-fs(非 sidecar HTTP);前端只触发 + 投影结果,不自己写盘。",
+      "fe_modules": [
+        {
+          "name": "native-fs 打包导出",
+          "ref": "femod-packagerelease"
+        },
+        {
+          "name": "发布回执解析",
+          "ref": "femod-releaseidentity"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "Tauri 命令 publish_package_writer(Studio Rust 后端 native-fs)",
+          "purpose": "把发布包(release_version/content_hash/manifest_ref/artifact_ref)以 native-fs 原子写到工作区相对路径,返回 {path, nativePath, hash, bytesWritten};拒绝路径穿越/符号链接逃逸。",
+          "mechanism_ref": "n6_publish_mech",
+          "iface_ref": "iface-package-writer"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计:Package 按钮 + Team 下拉 Package release + Package target 路径弹框 + 冲突重试均已实现,经 Tauri native-fs `publish_package_writer` 落盘(D9.4 已实现,含路径穿越/符号链接逃逸拒绝)。",
+      "impl_ref": "fn-10"
+    }
+  ],
+  "fe_defs": [
+    {
+      "id": "femod-usepublishskill",
+      "name": "发布 hook",
+      "explain": "前端共享逻辑:usePublishSkill,发布状态机(idle/publishing/success/error)+ executePublishSkill(调 publishSkill 端点、成功/失败 toast)+ settingsToastOptions(可修复码挂 Open Settings)。"
+    },
+    {
+      "id": "femod-releaseidentity",
+      "name": "发布回执解析",
+      "explain": "前端共享逻辑:getReleaseIdentity + releaseSuccessMessage,从 PublishResult.extra 取 release_version/artifact_id/content_hash/manifest_ref/remote_sync 拼回执徽章与成功提示。"
+    },
+    {
+      "id": "femod-packagerelease",
+      "name": "native-fs 打包导出",
+      "explain": "前端共享逻辑:executePackageRelease + writePublishPackage,把 release 回执经 Tauri native-fs 命令 publish_package_writer 落盘到工作区文件,含成功 Reveal、typed 错误重试与换路径。"
+    }
+  ]
+}

@@ -131,6 +131,9 @@ from graph_agent_gateway.state_projection import (
 from graph_agent_gateway.state_projection import (
     project_route_state_from_evidence as gateway_project_route_state_from_evidence,
 )
+from graph_agent_gateway.storage_contracts import (
+    InMemoryConfigTruthStore as InMemoryConfigTruthStore,
+)
 
 from app.core.adapters.http_transport import HttpTransport, StudioAdapterError
 
@@ -190,8 +193,6 @@ class GatewayAdapter:
             roles_obj = RolesData.model_validate(roles)
         else:
             roles_obj = roles
-
-        from graph_agent_gateway.storage_contracts import InMemoryConfigTruthStore
 
         from app.services.llm_credentials import _credentials_payload_for_storage
 
@@ -804,6 +805,7 @@ def _filter_gateway_roles(roles: dict[str, Any]) -> dict[str, Any]:
 
 __all__ = [
     "GatewayAdapter",
+    "InMemoryConfigTruthStore",
     "ModelResolver",
     "ResolvedRoute",
     "CredentialProviderProtocol",

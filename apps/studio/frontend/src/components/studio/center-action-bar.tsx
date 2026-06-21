@@ -1,5 +1,11 @@
+import type { ReactNode } from "react"
 import { Hammer, Play, Zap } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 export type SkillBuildStage =
   | "idle"
@@ -27,6 +33,11 @@ interface ButtonDerivation {
   runHighlight: boolean
   runDisabled: boolean
 }
+
+// Visible UI copy stays English to match the Compile/Predict/Run buttons and the
+// product's English surface. Shown when a gate keeps the button locked.
+const PREDICT_LOCK_REASON = "Compile must pass first"
+const RUN_LOCK_REASON = "Predict must pass first"
 
 function deriveButtons(stage: SkillBuildStage): ButtonDerivation {
   if (stage === "idle" || stage === "compiling" || stage === "compile-fail") {
@@ -59,40 +70,71 @@ function deriveButtons(stage: SkillBuildStage): ButtonDerivation {
   }
 }
 
+interface LockableButtonProps {
+  disabled: boolean
+  lockReason: string
+  children: ReactNode
+}
+
+// Wraps a gated button so a hover Tooltip explains why it is still locked.
+// A disabled button swallows pointer events, so the Tooltip trigger is a focusable
+// span carrying the reason as aria-label for screen readers and hover discovery.
+function LockableButton({ disabled, lockReason, children }: LockableButtonProps) {
+  if (!disabled) {
+    return <>{children}</>
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span aria-label={lockReason} tabIndex={0} className="inline-flex">
+          {children}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" sideOffset={8}>
+        {lockReason}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 export function CenterActionBar({ stage, onCompile, onPredict, onRun }: CenterActionBarProps) {
   const d = deriveButtons(stage)
   return (
-    <div className="absolute bottom-6 left-1/2 z-30 inline-flex -translate-x-1/2 items-center gap-1 rounded-full border border-border bg-card px-1.5 py-1 shadow-lg">
+    <div className="absolute bottom-6 left-1/2 z-30 inline-flex -translate-x-1/2 items-center gap-1 rounded-md border border-border bg-card px-1.5 py-1 shadow-lg">
       <Button
         variant={d.compileHighlight ? "default" : "ghost"}
         size="default"
         disabled={d.compileDisabled}
         onClick={onCompile}
-        className="h-9 gap-1.5 rounded-full px-3.5 text-xs"
+        className="h-9 gap-1.5 rounded-md px-3.5 text-xs"
       >
         <Hammer className="size-3.5" />
         Compile
       </Button>
-      <Button
-        variant={d.predictHighlight ? "default" : "ghost"}
-        size="default"
-        disabled={d.predictDisabled}
-        onClick={onPredict}
-        className="h-9 gap-1.5 rounded-full px-3.5 text-xs"
-      >
-        <Zap className="size-3.5" />
-        Predict
-      </Button>
-      <Button
-        variant={d.runHighlight ? "default" : "ghost"}
-        size="default"
-        disabled={d.runDisabled}
-        onClick={onRun}
-        className="h-9 gap-1.5 rounded-full px-3.5 text-xs"
-      >
-        <Play fill="currentColor" className="size-3.5" />
-        Run
-      </Button>
+      <LockableButton disabled={d.predictDisabled} lockReason={PREDICT_LOCK_REASON}>
+        <Button
+          variant={d.predictHighlight ? "default" : "ghost"}
+          size="default"
+          disabled={d.predictDisabled}
+          onClick={onPredict}
+          className="h-9 gap-1.5 rounded-md px-3.5 text-xs"
+        >
+          <Zap className="size-3.5" />
+          Predict
+        </Button>
+      </LockableButton>
+      <LockableButton disabled={d.runDisabled} lockReason={RUN_LOCK_REASON}>
+        <Button
+          variant={d.runHighlight ? "default" : "ghost"}
+          size="default"
+          disabled={d.runDisabled}
+          onClick={onRun}
+          className="h-9 gap-1.5 rounded-md px-3.5 text-xs"
+        >
+          <Play fill="currentColor" className="size-3.5" />
+          Run
+        </Button>
+      </LockableButton>
     </div>
   )
 }

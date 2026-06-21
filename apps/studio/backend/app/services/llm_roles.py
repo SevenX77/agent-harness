@@ -35,9 +35,14 @@ def save_roles_file(
     data: RolesData,
     *,
     known_route_ids: set[str] | None = None,
+    known_bundle_ids: set[str] | None = None,
 ) -> None:
-    """Atomically save roles YAML after route reference validation."""
-    validate_references(data, known_route_ids=known_route_ids)
+    """Atomically save roles YAML after route + bundle reference validation."""
+    validate_references(
+        data,
+        known_route_ids=known_route_ids,
+        known_bundle_ids=known_bundle_ids,
+    )
     payload = _quote_lint_values(
         data.model_dump(mode="json", exclude=_runtime_response_exclude(data))
     )
@@ -64,8 +69,23 @@ def validate_references(
     data: RolesData,
     *,
     known_route_ids: set[str] | None = None,
+    known_bundle_ids: set[str] | None = None,
 ) -> None:
-    """Validate all role/profile route references against known routes."""
+    """Validate all role/profile route + bundle references.
+
+    ``known_bundle_ids`` validates #51 by-reference roles: a role whose
+    ``bundle_id`` has no backing model_bundle is an InvalidRoleReference. When a
+    bundle is deleted (#52 delete cascade) the referencing role's bundle_id would
+    dangle, so this guard surfaces it instead of letting the gateway raise a raw
+    resolution error deep in materialization. ``None`` skips the check (callers
+    that don't have the bundle set in scope), mirroring ``known_route_ids``.
+    """
+    if known_bundle_ids is not None:
+        for role_name, role in data.roles.items():
+            if role.bundle_id is not None and role.bundle_id not in known_bundle_ids:
+                raise InvalidRoleReference(
+                    f"role {role_name} references unknown model bundle {role.bundle_id}"
+                )
     if known_route_ids is None:
         return
     for role_name, role in data.roles.items():

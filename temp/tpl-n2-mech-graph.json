@@ -1,0 +1,339 @@
+{
+  "id": "mech_graph",
+  "title": "graph 搭图读写与序列化机制（设计）",
+  "owner_tag": "engine 内核",
+  "overview": {
+    "manages": "画布上一组节点 + 连线，怎么和 GRAPH.md 源码保持是『同一棵可执行树』——读：源码编译成节点模型投影到画布；写：画布动作序列化回源码、保真落盘、重编译；中间用 hash 乐观锁防覆盖。",
+    "why_single": "它横跨 4 个真实部件（前端 React Canvas / Studio FastAPI sidecar(薄壳) / graph-agent 引擎内核 / Rust native-fs），牵涉 serialize / parse / 拓扑校验 / 原子写 / 两道 hash 冲突保护，一两句说不清，所以单列一页。注意：authoring 的『内核』是 graph-agent 引擎，不是 gateway。",
+    "design_owner": "graph-agent 引擎（packages/graph-agent）——GRAPH.md 可执行语法的唯一 parser / serializer / assembler / compiler owner；Studio sidecar 只做 expected-hash 守卫 + 透传边界，native-fs（Rust）拥有本地写盘执行。",
+    "code_location": "graph-agent 引擎内核：graph_serializer.py(序列化)/ loader.py(解析)/ graph_assembler.py(编译装配)；Studio FastAPI sidecar：skills.py(serialize/compile service)/ graph_roundtrip.py(不直接 import 引擎序列化器的透传边界)；Rust native-fs：native_fs.rs(write_workspace_file 单一写者)；前端：Workspace.tsx / build-nodes.ts / GraphCanvas.tsx。",
+    "dataflow": [
+      "读：GET /skills/{id} 拉 SkillDetail（引擎 compile_skill 编译 + _graph_topology 抽真实 DAG），前端 buildNodes/buildEdges 投影成节点/连线",
+      "写：画布动作改 depends_on（connectPhaseRefs/disconnectPhaseRefs）→ 对当前 GRAPH.md 算 graphHash 当 expected_hash",
+      "POST /skills/{id}/graph/serialize：Studio _validate_canvas_topology 查孤儿/自环/成环，经 graph_roundtrip 透传引擎 serialize_graph_topology",
+      "引擎 _preserve_graph_markdown_topology 只换 phases 块 + body `<phase>` 标签、其它字节原样保留，回前端新 markdown",
+      "落盘：桌面态 Rust write_workspace_file 原子写 + expected_hash 守卫；浏览器态退化 HTTP POST 给 Python",
+      "落盘后 compileSkillById 重编译（编译门控呈现归 N3 Compile）"
+    ]
+  },
+  "submodules": [
+    {
+      "name": "画布↔源码投影（读回）",
+      "code": "engine: loader.py + graph_assembler.py；前端 build-nodes.ts",
+      "owner": "engine 内核 / 前端",
+      "summary": "把磁盘 GRAPH.md + phase 文件编译成节点模型，前端据此投影成画布，没有独立的双向转换层。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "引擎 loader.load 解析 GRAPH.md：parse_markdown_parts 拆 frontmatter/body → _build_graph_manifest 出 manifest → _extract_body_phase_refs 解析 body `<phase depends_on=...>` → _validate_graph_topology 出真实 DAG graph_topology（input 为入口哨兵）。",
+        "graph_assembler 把编译产物组装成可执行结构；_graph_topology 逐 phase 抽 mode/depends_on/path 拓扑行。",
+        "前端 buildNodes 用 manifest.phases + graph_topology + 原始 files 拼 React Flow 节点；节点种类由 phase 目录下文件类型决定（理想），现状 data.mode 取 topology.mode ?? phase.mode。",
+        "buildEdges 按各节点 depends_on 连边；两端共享同一份 GRAPH.md 语法，无中间 JSON 图模型。"
+      ],
+      "do": [
+        "GRAPH.md/phase 文件 parse → 节点模型",
+        "manifest + graph_topology + files 投影成画布"
+      ],
+      "dont": [
+        "不在前端二次解析 GRAPH.md 语法（前端只消费编译产物）",
+        "不持第二份图真相"
+      ],
+      "deviation": "节点类型现状据可变 data.mode 派生（topology.mode ?? phase.mode），理想应据 phase 目录下落地文件名定类型（违 F1，见设计页 #16）。"
+    },
+    {
+      "name": "serialize 保真 round-trip（写回）",
+      "code": "engine: graph_serializer.py；Studio: graph_roundtrip.py + skills.py",
+      "owner": "engine 内核",
+      "summary": "把画布拓扑序列化回 GRAPH.md，只换 phases 块和 body `<phase>` 标签、其它字节原样保留，是『就地改源码』而非整体 dump。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "引擎 serialize_graph_topology：phases 列表逐行写 `- <id>`，body 逐行写 `<phase depends_on=\"...\">id</phase>`，无依赖渲染成 depends_on=\"input\"（保留入口哨兵），叶子 phase 加 output 标记。",
+        "_preserve_graph_markdown_topology：只替换原 GRAPH.md 的 phases frontmatter 块和 `<phase>` body 标签，io / description / 正文非 `<phase>` 内容全部原样保留。",
+        "Studio sidecar 经 graph_roundtrip.serialize_graph_topology 透传、不直接 import 引擎序列化器（薄边界层）。",
+        "serialize 前 Studio _validate_canvas_topology 查孤儿依赖/自环/成环，不通过 → 422 CanvasSerializerFatal（orphan/self-cycle/cycle，带具体节点）。"
+      ],
+      "do": [
+        "画布拓扑 → GRAPH.md 文本（保留型合并）",
+        "序列化前拓扑校验"
+      ],
+      "dont": [
+        "不把内存对象整体 dump 成全新文件（保留非拓扑内容）",
+        "不在 Studio 本地拥有保留逻辑（透传引擎）"
+      ],
+      "deviation": ""
+    },
+    {
+      "name": "native-fs 写（D12 单一写者）",
+      "code": "Rust: native_fs.rs write_workspace_file",
+      "owner": "Rust native-fs",
+      "summary": "搭图所有写盘（GRAPH.md 拓扑、phase frontmatter、L3 body）在桌面态最终都落到同一个 Rust 命令，原子写 + 路径安全 + expected-hash 守卫。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "前端 doWriteSkillFile 在桌面态调 writeWorkspaceFile → invoke Rust write_workspace_file；非桌面（浏览器）态退化 HTTP POST 给 Python（与 N0 Settings 走 Python 写不同）。",
+        "建节点用 create-if-absent（no-clobber 不覆盖）写 phase 文件，再 serialize 写 GRAPH.md；覆盖写带 expected_hash。",
+        "无独立 mutate_phase_body 命令，phase body 写也走 write_workspace_file。",
+        "safe_join 防路径穿越/symlink 逃逸，resolve_workspace_root 越界检查。",
+        "文件头注释明确 D12『禁止 Python+Rust 双写、单一写者拥有本地 FS』。"
+      ],
+      "do": [
+        "桌面态本地写盘的唯一执行者（原子写 + 路径安全）"
+      ],
+      "dont": [
+        "不决定写什么内容（数据语义归业务）",
+        "不在 Python 与 Rust 间双写同一文件"
+      ],
+      "deviation": "落盘内部细节（临时文件+rename 原子写、文件权限）是后端实现细节，从前端视角只关心 expected_hash → 冲突/成功的契约（见下方接口与后端状态，不在前端侧展开内部实现）。"
+    },
+    {
+      "name": "hash 冲突两道拦",
+      "code": "Studio: skills.py（serialize 409）；Rust: native_fs.rs（HashConflict）",
+      "owner": "Studio sidecar / Rust native-fs",
+      "summary": "带 expected_hash 在 serialize 与 write 两道都拦，防『画布拿旧版覆盖磁盘新版』，不静默覆盖。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "第一道（serialize）：后端读磁盘现 GRAPH.md 算 hash，≠ expected → CanvasConflictError → 路由映射成 409 snapshot_conflict（回传 current_hash / current_markdown_content / current_phase_count 供前端展示）。",
+        "第二道（write）：Rust write_workspace_file 落盘前再读目标现内容算 hash，≠ expected → 返回 HashConflict{current_hash, current_content}；其 sha256 与 Python 的字节兼容。",
+        "非桌面态等价保护在 Python update_skill_file：expected_hash ≠ current_hash 同样抛 CanvasConflictError。",
+        "前端拿后端回的新 current_hash 更新为下次 expected_hash，串起连续编辑的乐观锁链。"
+      ],
+      "do": [
+        "serialize + write 两道 expected-hash 冲突保护",
+        "冲突回当前 hash/内容供冲突 UI"
+      ],
+      "dont": [
+        "不静默用旧画布覆盖新磁盘"
+      ],
+      "deviation": ""
+    }
+  ],
+  "files": [
+    {
+      "name": "GRAPH.md（+ phase 文件）",
+      "what": "搭图骨架文件：YAML frontmatter 列整图契约（name/schema_version/llm_role/description/phases）+ 顶层 io；body 用 `<phase depends_on=...>` 标签写依赖拓扑。每个 phase 一个子目录，下有 SKILL.md / LOGIC.md / SUBGRAPH.md 之一（文件名=节点类型）。",
+      "version": "schema_version = v0.3.0（CURRENT_SCHEMA_VERSION，读取层已 v030-aware）",
+      "structs": [
+        {
+          "name": "GRAPH.md 头部（GraphManifest，宏观契约）",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "meaning": "整图名字（无 type 字段，FROZEN）",
+              "sensitive": false
+            },
+            {
+              "name": "schema_version",
+              "type": "string(v0.3.0)",
+              "meaning": "契约版本号；读取层 v030-aware",
+              "sensitive": false
+            },
+            {
+              "name": "llm_role",
+              "type": "string|null",
+              "meaning": "整图默认 LLM 角色，phase 未填 llm_role 时继承",
+              "sensitive": false
+            },
+            {
+              "name": "description",
+              "type": "string",
+              "meaning": "整图描述，序列化时原样保留",
+              "sensitive": false
+            },
+            {
+              "name": "phases",
+              "type": "list<string>",
+              "meaning": "phase id 列表（list[str]，不带边）；需与 body topology + 目录三方一致",
+              "sensitive": false
+            },
+            {
+              "name": "io",
+              "type": "{inputs, outputs}",
+              "meaning": "整图 io 契约 inline JSON Schema（详见 i/o 面板机制 mech_io）",
+              "sensitive": false
+            }
+          ]
+        },
+        {
+          "name": "GRAPH.md body（拓扑声明）",
+          "fields": [
+            {
+              "name": "<phase depends_on=\"a,b\">id</phase>",
+              "type": "body tag",
+              "meaning": "一条拓扑声明：该 phase 依赖 a、b；depends_on 必填，空报 F-v3-graph-depends-unknown，无依赖写 depends_on=\"input\"",
+              "sensitive": false
+            },
+            {
+              "name": "graph_topology",
+              "type": "dict<str,list<str>>",
+              "meaning": "编译出的真实 DAG（input 为入口哨兵），前端连边的依据",
+              "sensitive": false
+            }
+          ]
+        },
+        {
+          "name": "phase 文件 frontmatter（三类白名单，文件名=类型）",
+          "fields": [
+            {
+              "name": "SKILL.md → llm_role/tools/subagents",
+              "type": "agent 白名单",
+              "meaning": "Agent 节点白名单（§2.5），subagents 保留 target_skill",
+              "sensitive": false
+            },
+            {
+              "name": "LOGIC.md → actions/validator",
+              "type": "logic 白名单",
+              "meaning": "Logic 节点白名单（§2.3）",
+              "sensitive": false
+            },
+            {
+              "name": "SUBGRAPH.md → path/validator",
+              "type": "subgraph 白名单",
+              "meaning": "Subgraph 节点白名单（§2.4），path=子图根绝对路径（D7）",
+              "sensitive": false
+            },
+            {
+              "name": "(禁止字段)",
+              "type": "FROZEN",
+              "meaning": "mode/system_prompt/exit_contract/python_callable/max_retries/type 等被 _reject_phase_forbidden_metadata 拦",
+              "sensitive": false
+            }
+          ]
+        }
+      ],
+      "owns": "这份数据归 graph-agent 引擎——GRAPH.md 可执行语法、parser/serializer/compiler 都归引擎。前端不拥有、不直接解析语法，只投影编译产物。",
+      "crud_pointer": "前端从不直接解析 GRAPH.md 语法；读走 GET /skills/{id}（编译产物）、写走 POST /skills/{id}/graph/serialize（拓扑）+ native-fs write_workspace_file（落盘）——完整读写面 = 下方接口表，这里不重列。",
+      "storage_note": "文件存哪、怎么落盘（原子写、权限）是 Rust native-fs 实现细节，从前端视角只关心 expected_hash → 冲突/成功契约。",
+      "security_fe": "GRAPH.md / phase 文件无机密字段（凭证在 N0 的 llm_credentials.json，不在搭图文件里）；前端写盘带 expected_hash 防覆盖。"
+    }
+  ],
+  "interface_groups": [
+    {
+      "key": "crud",
+      "title": "数据读写类（读编译产物 / 写源码拓扑 / 落盘）",
+      "note": "这一类是『读编译产物 + 写回源码 + 落盘』：资源固定（skill detail / graph serialize / native-fs write），请求字段固定。前端搭图『读写源码』指的就是这几条。"
+    },
+    {
+      "key": "action",
+      "title": "触发动作类（触发引擎编译）",
+      "note": "这一类触发真实引擎编译，把源码 parse + 拓扑 + IO 全量校验，结果作为副作用回吐 CompileError。编译门控的呈现（绿灯解锁 Predict）归 N3 Compile，本页只标它是写回后的下游触发。"
+    }
+  ],
+  "interfaces": [
+    {
+      "group": "crud",
+      "endpoint": "GET /api/skills/{skill_id}",
+      "req": "路径参数 skill_id（服务端按 user_id 解析 skill_dir）",
+      "resp": "SkillDetail：manifest（name/description/io/phases）+ graph_topology（真实 DAG）+ 原始 files 文本（GRAPH.md + 各 phase 文件）",
+      "purpose": "读（编译产物）——进 skill 工程时拉编译后的 manifest + graph_topology + 原始文件文本，前端 buildNodes/buildEdges 投影成画布，只投影、不二次解析语法",
+      "provider": "Studio sidecar（skills.py compile_skill_for_studio → 引擎 SkillLoader.compile_skill + _detail_from_manifest）",
+      "id": "iface-1"
+    },
+    {
+      "group": "crud",
+      "endpoint": "POST /api/skills/{skill_id}/graph/serialize",
+      "req": "SerializeGraphReq{phases:[{id, src, depends_on, mode}], expected_hash}（phases=画布当前全部节点；mode∈logic|subgraph|skill；expected_hash=画布持有的旧 GRAPH.md hash，乐观锁）",
+      "resp": "SerializeGraphRes{markdown_content（保留非拓扑内容的新 GRAPH.md）, phase_count, current_hash（下次 expected_hash）, elapsed_ms}；[409] snapshot_conflict（current_hash/current_markdown_content/current_phase_count）；[422] CanvasSerializerFatal（orphan/self-cycle/cycle）",
+      "purpose": "写（源码拓扑）——把画布拓扑序列化回 GRAPH.md（保留型：只换 phases 块 + body `<phase>` 标签），带 expected_hash 乐观锁；连线/断连/建节点/改头部都走它",
+      "provider": "Studio sidecar（skills.py serialize_skill_graph_markdown → graph_roundtrip 透传 → 引擎 graph_serializer）",
+      "id": "iface-2"
+    },
+    {
+      "group": "crud",
+      "endpoint": "native-fs write_workspace_file（Rust command，桌面态）",
+      "req": "{workspaceRoot, relativePath, content, expectedHash?, createIfAbsent?}（createIfAbsent=true 建节点 no-clobber；false 覆盖写带 hash 守卫）",
+      "resp": "WriteOutcome{path, hash（写入后 sha256，更新为新 expected_hash）}；错误 HashConflict{current_hash, current_content}（stale 冲突 UI，不静默覆盖）/ WriteFailed{message}（路径越界/IO/权限）",
+      "purpose": "落盘（桌面态唯一写者）——GRAPH.md 拓扑 / phase frontmatter / L3 body 写盘都走它（D12 单一写者，原子写 + 路径安全）；非桌面态退化为 HTTP POST 给 Python",
+      "provider": "Studio Rust 后端（native_fs.rs write_workspace_file → write_workspace_file_impl / create_workspace_file_if_absent_impl）",
+      "id": "iface-4"
+    },
+    {
+      "group": "action",
+      "endpoint": "POST /api/skills/{skill_id}/compile（写回后触发，门控归 N3）",
+      "req": "路径参数 skill_id；无显式 body",
+      "resp": "CompileSuccess{phase_count, manifest_name, artifact_ref, source_map_ref, execution_fingerprint}；[422] CompileFailure（code=compile_failed + errors[]：file/line/field/severity/message）",
+      "purpose": "触发编译——画布写回后调它重编译，引擎 parse + 拓扑 + IO 全量校验；CompileError 按节点叠到画布。编译门控（绿灯解锁 Predict、Compile drawer、三处投影）的呈现归 N3 Compile，本页只标它是写回后的下游触发",
+      "provider": "Studio sidecar（skills.py compile_skill_for_studio → 引擎 compile_skill）",
+      "id": "iface-3"
+    },
+    {
+      "group": "crud",
+      "endpoint": "POST /api/skills/{skill_id}/files/{file_path:path}（浏览器 fallback 写）",
+      "req": "路径 skill_id + file_path；body UpdateSkillFileReq{content, expected_hash}；必须带 header X-Studio-Write-Fallback: browser",
+      "resp": "UpdateSkillFileRes{hash(写入后 sha256)}；缺 fallback header → error_code NATIVE_FS_REQUIRED(强制走 native-fs);hash 不符 → snapshot_conflict(不静默覆盖)",
+      "purpose": "落盘(非桌面 fallback)——非 Tauri(纯浏览器)态时,前端 writeSkillFile 走它把 phase 文件/GRAPH.md 写回 Python;桌面态默认走 native-fs write_workspace_file,这条是 fallback。默认拒 Python source write,只有显式 fallback header 才放行",
+      "provider": "Studio sidecar(skills.py update_skill_file_endpoint → service update_skill_file;边界 native_fs_write_boundary.py)；前端 client.ts writeSkillFile",
+      "id": "iface-5"
+    }
+  ],
+  "boundaries": {
+    "do": [
+      "GRAPH.md / phase 文件的 parse（引擎）→ 节点模型，投影到画布",
+      "画布拓扑 serialize 回 GRAPH.md（保留型 round-trip）",
+      "序列化前拓扑校验（孤儿/自环/成环 → 422）",
+      "native-fs 原子写 + 路径安全（D12 桌面态单一写者）",
+      "serialize + write 两道 expected-hash 冲突保护（409 / HashConflict）"
+    ],
+    "dont": [
+      "不在前端二次解析 GRAPH.md 可执行语法（前端只消费编译产物）",
+      "不在 Python 与 Rust 间双写同一文件（D12）",
+      "不决定编译门控的产品呈现（绿灯/Predict 解锁归 N3 Compile）",
+      "不持第二份图真相（前端只投影，切 tab/刷新以源码为准）",
+      "不把 UI metadata 算进 execution_fingerprint（d8.3：depends_on/action/io 变才变 fingerprint）"
+    ]
+  },
+  "states_errors": "",
+  "backend_status": [
+    {
+      "item": "roundtrip 保真一致（serialize/parse 同一棵树）",
+      "d12": "D8.1",
+      "status": "ok",
+      "note": "保留型 roundtrip owner 已沉到引擎 core serialize_graph_topology（只换 phases+body topology）；Studio 经 graph_roundtrip 透传。← 设计页 #1/#6/#7/#23 直接用。",
+      "ref": "d8"
+    },
+    {
+      "item": "Canvas 写回 GRAPH.md（连/断/加 phase 经 serializer 边界）",
+      "d12": "D8.2",
+      "status": "partial",
+      "note": "连/断/建节点已经 serializer 边界写回；缺口在连线四操作只到新建+断连（重连/拖拽断未接，#8）、L3 内联未落（#15）。",
+      "ref": "d8"
+    },
+    {
+      "item": "UI metadata 不进 execution_fingerprint",
+      "d12": "D8.3",
+      "status": "partial",
+      "note": "core compile 与 graph roundtrip 共用 canonicalizer，depends_on/action/io 变则 fingerprint 必变；UI metadata 排除仍在收口。",
+      "ref": "d8"
+    },
+    {
+      "item": "Subgraph 绝对 path 收口",
+      "d12": "D8.4",
+      "status": "partial",
+      "note": "脚手架/Properties 已写 path(非 target_skill),子图按绝对 path 解析已收口(旧 target_skill 字面 key 被 loader 拒为 deprecated);剩引擎 loader 子图 io outputs 1:1 校验待删(见 mech_io #30)、path 找不到 OS 导入入口未落(F4,#20)。",
+      "ref": "d8"
+    },
+    {
+      "item": "Studio 本地写经 native-fs（桌面态单一写者）",
+      "d12": "D12.1",
+      "status": "ok",
+      "note": "Rust write_workspace_file 已注册+测试+前端主路径已调用；建节点 create-if-absent、覆盖写带 expectedHash。← #4/#15/#21 落盘用。",
+      "ref": "d12"
+    },
+    {
+      "item": "expected-hash 冲突保护",
+      "d12": "D12.3",
+      "status": "ok",
+      "note": "Rust HashConflict 与 FastAPI snapshot_conflict 统一冲突 UI，serialize+write 两道拦，不静默覆盖。← #6/#7/#12 用。",
+      "ref": "d12"
+    },
+    {
+      "item": "Copilot SDK 写受控例外（carve-out）",
+      "d12": "D12.4",
+      "status": "ok",
+      "note": "Copilot 的 Write/Edit 是 native-fs 单一写者的受控例外，已收口；与搭图主写路径不冲突。",
+      "ref": "d12"
+    }
+  ]
+}

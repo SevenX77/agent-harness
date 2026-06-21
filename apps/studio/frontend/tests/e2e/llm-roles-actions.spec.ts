@@ -105,7 +105,7 @@ async function mockSettingsBackend(
   overrides: {
     registry?: typeof registry
     roles?: typeof roles
-    roleTest?: unknown
+    roleTest?: { role_name: string; status: string; warnings: unknown[]; model_groups: unknown[] }
     onRolesPut?: (payload: unknown) => void
     onRoleTest?: (roleName: string) => void
     onRoleDelete?: (roleName: string) => void
@@ -129,21 +129,11 @@ async function mockSettingsBackend(
   await page.route('**/api/llm/registry', async (route) => {
     await fulfillJson(route, registryBody)
   })
+  // Broad catch-all FIRST so the specific job/result routes below win (Playwright
+  // matches last-registered routes first).
   await page.route('**/api/llm/roles**', async (route) => {
     const request = route.request()
     const pathname = new URL(request.url()).pathname
-    const testMatch = pathname.match(/\/api\/llm\/roles\/([^/]+)\/test$/)
-    if (request.method() === 'POST' && testMatch) {
-      const roleName = decodeURIComponent(testMatch[1])
-      overrides.onRoleTest?.(roleName)
-      await fulfillJson(route, overrides.roleTest ?? {
-        role_name: roleName,
-        status: 'ok',
-        warnings: [],
-        model_groups: [],
-      })
-      return
-    }
     if (request.method() === 'PUT' && pathname === '/api/llm/roles') {
       const payload = request.postDataJSON()
       overrides.onRolesPut?.(payload)
@@ -164,6 +154,45 @@ async function mockSettingsBackend(
       return
     }
     await fulfillJson(route, rolesBody)
+  })
+  // #46: the role test is now job-based. Persisted results seed empty; POST opens a
+  // job whose poll completes immediately with the supplied roleTest result.
+  await page.route('**/api/llm/roles/test-results', async (route) => {
+    await fulfillJson(route, { results: {} })
+  })
+  await page.route('**/api/llm/roles/*/test-jobs', async (route) => {
+    const pathname = new URL(route.request().url()).pathname
+    const roleName = decodeURIComponent(pathname.match(/\/roles\/([^/]+)\/test-jobs$/)?.[1] ?? '')
+    overrides.onRoleTest?.(roleName)
+    await fulfillJson(route, {
+      job_id: `job-${roleName}`,
+      role_name: roleName,
+      status: 'completed',
+      provider_statuses: [],
+      result: overrides.roleTest ?? {
+        role_name: roleName,
+        status: 'ok',
+        warnings: [],
+        model_groups: [],
+      },
+    })
+  })
+  await page.route('**/api/llm/role-test-jobs/*', async (route) => {
+    const pathname = new URL(route.request().url()).pathname
+    const jobId = decodeURIComponent(pathname.match(/\/role-test-jobs\/([^/]+)$/)?.[1] ?? '')
+    const roleName = jobId.replace(/^job-/, '')
+    await fulfillJson(route, {
+      job_id: jobId,
+      role_name: roleName,
+      status: 'completed',
+      provider_statuses: [],
+      result: overrides.roleTest ?? {
+        role_name: roleName,
+        status: 'ok',
+        warnings: [],
+        model_groups: [],
+      },
+    })
   })
 }
 
@@ -294,6 +323,48 @@ test.describe('LLM Roles actions menu', () => {
           metadata: {},
         },
       },
+      model_groups: [{
+        canonical_id: 'deepseek-v4-pro',
+        display_name: 'DeepSeek V4 Pro',
+        section_label: 'deepseek',
+        provider_models: [
+          {
+            route_id: routeId,
+            endpoint_id: 'deepseek-official',
+            provider_label: 'DeepSeek Official',
+            provider_kind: 'official',
+            provider_model_id: 'deepseek-chat',
+            ui_state: 'ready',
+            ui_detail: null,
+            retry_at: null,
+            reason_code: null,
+            capability_state: 'unknown',
+            capabilities: {},
+          },
+          {
+            route_id: 'openrouter:deepseek-v4-pro',
+            endpoint_id: 'openrouter',
+            provider_label: 'OpenRouter',
+            provider_kind: 'third_party',
+            provider_model_id: 'deepseek/deepseek-v4-pro',
+            ui_state: 'ready',
+            ui_detail: null,
+            retry_at: null,
+            reason_code: null,
+            capability_state: 'unknown',
+            capabilities: {},
+          },
+        ],
+        status_summary: { ready: 2, untested: 0, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
+        capability_summary: {
+          capability_known_count: 0,
+          thinking: 'unknown',
+          tools: 'unknown',
+          structured_output: 'unknown',
+          max_context_tokens: null,
+          max_output_tokens: null,
+        },
+      }],
     }
     const routeBackedRoles: typeof roles = {
       ...roles,
@@ -337,7 +408,7 @@ test.describe('LLM Roles actions menu', () => {
       registry: routeBackedRegistry,
       roles: routeBackedRoles,
       onRolesPut: () => requestOrder.push('PUT /api/llm/roles'),
-      onRoleTest: (roleName) => requestOrder.push(`POST /api/llm/roles/${roleName}/test`),
+      onRoleTest: (roleName) => requestOrder.push(`POST /api/llm/roles/${roleName}/test-jobs`),
       roleTest: {
         role_name: 'Analyst',
         status: 'warning',
@@ -380,22 +451,22 @@ test.describe('LLM Roles actions menu', () => {
     await expect(roleCard.getByLabel('Provider status Connected')).toHaveCount(0)
     await expect(roleCard.locator('[data-role-route-status-light="true"][data-role-route-status="runnable"]')).toHaveCount(2)
 
+    // Expand the role settings panel so the (force-mounted, hidden-when-closed)
+    // Model fallback switch is interactable, then toggle it to dirty a draft.
+    await roleCard.locator('[data-role-settings-toggle="true"]').click()
     await roleCard.getByRole('switch', { name: 'Model fallback for Analyst' }).click()
     await roleCard.getByRole('button', { name: 'Test' }).click()
 
+    // #46: the test is a backend job (PUT save first, then POST test-jobs); the
+    // result projects to per-route status lights, NOT a RoleTestResultPanel (§2.4).
     await expect.poll(() => requestOrder).toEqual([
       'PUT /api/llm/roles',
-      'POST /api/llm/roles/Analyst/test',
+      'POST /api/llm/roles/Analyst/test-jobs',
     ])
-    const resultPanel = roleCard.locator('[data-role-test-result="true"]')
-    await expect(resultPanel).toBeVisible()
-    await expect(resultPanel.getByText('Needs Attention')).toBeVisible()
-    await expect(resultPanel.getByText('DeepSeek Official')).toBeVisible()
-    await expect(resultPanel.getByText('OpenRouter')).toBeVisible()
-    await expect(resultPanel.getByText('Cooling Down')).toBeVisible()
-    await expect(resultPanel.getByText('Needs Test')).toBeVisible()
-    await expect(resultPanel.getByText('Retry after transient rate limit.')).toBeVisible()
+    await expect(page.locator('[data-role-test-result="true"]')).toHaveCount(0)
     await expect(roleCard.getByText(routeId)).toHaveCount(0)
+    // The job result projects per route: DeepSeek Official (role_fit using / ok) →
+    // Can Run; OpenRouter (needs_test / blocked) → Blocked. No RoleTestResultPanel.
     await expect(roleCard.locator('[data-role-route-status-light="true"][data-role-route-status="runnable"]')).toHaveCount(1)
     await expect(roleCard.locator('[data-role-route-status-light="true"][data-role-route-status="blocked"]')).toHaveCount(1)
   })

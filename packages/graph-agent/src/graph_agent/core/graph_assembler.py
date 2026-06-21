@@ -59,8 +59,8 @@ from graph_agent.core.manifest import (
 from graph_agent.core.skill_resolver_protocol import (
     SkillResolverProtocol,
     require_skill_resolver,
-    resolve_skill_root,
 )
+from graph_agent.core.llm_provider import LLMProvider, LLMProviderChatModel
 from graph_agent.core.state import BusinessData, FrameworkState, StateManager, WorkflowState
 from graph_agent.core.subagents import (
     SubagentValidationFailure,
@@ -154,6 +154,7 @@ def assemble_graph(
     max_patch_attempts: int = 3,
     callbacks: list[Any] | None = None,
     skill_resolver: SkillResolverProtocol,
+    llm_provider: LLMProvider | None = None,
     checkpointer: Any = None,
     predict_context: Any = None,
     _loading_stack: tuple[str, ...] = (),
@@ -186,6 +187,7 @@ def assemble_graph(
                 max_patch_attempts,
                 callbacks,
                 resolver,
+                llm_provider,
                 checkpointer,
                 _loading_stack,
                 _compilation_cache,
@@ -235,6 +237,7 @@ def _build_phase_node(
     max_patch_attempts: int,
     callbacks: Any | None,
     skill_resolver: SkillResolverProtocol,
+    llm_provider: LLMProvider | None,
     checkpointer: Any,
     _loading_stack: tuple[str, ...],
     _compilation_cache: dict[str, CompiledSkill],
@@ -262,6 +265,7 @@ def _build_phase_node(
                 model_resolver=model_resolver,
                 callbacks=callbacks,
                 checkpointer=checkpointer,
+                llm_provider=llm_provider,
                 _loading_stack=_loading_stack,
                 _compilation_cache=_compilation_cache,
                 predict_context=predict_context,
@@ -283,6 +287,7 @@ def _build_phase_node(
                 max_patch_attempts,
                 callbacks,
                 skill_resolver,
+                llm_provider,
                 _loading_stack,
                 _compilation_cache,
                 checkpointer=checkpointer,
@@ -396,7 +401,14 @@ def _phase_result_payload(
     result_state = _coerce_workflow_state(result)
     after_data = result_state["data"].model_dump()
     if output_keys is None:
-        return _dict_delta(before["data"].model_dump(), after_data)
+        delta = _dict_delta(before["data"].model_dump(), after_data)
+        # phase_outputs is a reserved meta-accumulator (D7 per-node golden), never a
+        # business output. Exclude it from the open-schema delta so a batch/iterate
+        # per-item payload does not carry a spurious nested phase_outputs aggregate
+        # into this node's golden entry. The declared-schema branch below is already
+        # safe (phase_outputs is not a declared output key).
+        delta.pop("phase_outputs", None)
+        return delta
     return {key: after_data[key] for key in output_keys if key in after_data}
 
 
@@ -1235,13 +1247,14 @@ def _build_subgraph_node(
     model_resolver: Any = None,
     callbacks: Any | None = None,
     checkpointer: Any = None,
+    llm_provider: LLMProvider | None = None,
     _loading_stack: tuple[str, ...] = (),
     _compilation_cache: dict[str, CompiledSkill] | None = None,
     predict_context: Any = None,
 ) -> Any:
     if _compilation_cache is None:
         _compilation_cache = {}
-    sub_root = resolve_skill_root(skill_resolver, phase_ast.target_skill)
+    sub_root = _resolve_subgraph_path_root_for_assembly(phase_doc.path, phase_ast.path)
     sub_root_key = str(Path(sub_root).resolve())
     sub_compiled = _compilation_cache.get(sub_root_key)
     if sub_compiled is None:
@@ -1258,6 +1271,7 @@ def _build_subgraph_node(
         max_patch_attempts=max_patch_attempts,
         callbacks=callbacks,
         skill_resolver=skill_resolver,
+        llm_provider=llm_provider,
         checkpointer=checkpointer,
         predict_context=predict_context,
         _loading_stack=_loading_stack,
@@ -1283,6 +1297,39 @@ def _build_subgraph_node(
         }
 
     return _subgraph_node
+
+
+def _resolve_subgraph_path_root_for_assembly(source_path: Path, value: str) -> Path:
+    parent_root = source_path.parent.parent.parent.resolve()
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        _subgraph_path_fatal(source_path, f"subgraph path {value!r} must be absolute")
+    resolved = candidate.resolve()
+    try:
+        resolved.relative_to(parent_root)
+    except ValueError as exc:
+        _subgraph_path_fatal(
+            source_path,
+            f"subgraph path {value!r} escapes skill root {parent_root}",
+        )
+        raise AssertionError("unreachable") from exc
+    if not resolved.is_dir():
+        _subgraph_path_fatal(source_path, f"subgraph path {value!r} is not a directory")
+    if not (resolved / "GRAPH.md").is_file():
+        _subgraph_path_fatal(source_path, f"subgraph path {value!r} has no GRAPH.md")
+    return resolved
+
+
+def _subgraph_path_fatal(source_path: Path, message: str) -> NoReturn:
+    detail = f"{source_path}:1 {message}"
+    raise GraphAgentFatalError(
+        detail,
+        payload=make_error_payload(
+            "[F-v3-subgraph-target-skill-invalid]",
+            detail,
+            source_path=source_path,
+        ),
+    )
 
 active_outer_ns: contextvars.ContextVar[str] = contextvars.ContextVar("active_outer_ns", default="")
 
@@ -1445,6 +1492,7 @@ def _build_skill_node(
     max_patch_attempts: int,
     callbacks: Any | None,
     skill_resolver: SkillResolverProtocol,
+    llm_provider: LLMProvider | None,
     _loading_stack: tuple[str, ...],
     _compilation_cache: dict[str, CompiledSkill],
     *,
@@ -1456,6 +1504,7 @@ def _build_skill_node(
         phase_ast,
         chat_model=chat_model,
         model_resolver=model_resolver,
+        llm_provider=llm_provider,
         callbacks=_callback_tuple(callbacks),
         predict_context=predict_context,
     )
@@ -1474,6 +1523,7 @@ def _build_skill_node(
         subagent_by_tool_name,
         chat_model=phase_chat_model,
         model_resolver=model_resolver,
+        llm_provider=llm_provider,
         callbacks=callbacks,
         max_patch_attempts=max_patch_attempts,
         skill_resolver=skill_resolver,
@@ -1795,11 +1845,33 @@ def _resolve_phase_chat_model(
     *,
     chat_model: Any,
     model_resolver: Any,
+    llm_provider: LLMProvider | None,
     callbacks: tuple[Any, ...],
     predict_context: Any = None,
 ) -> Any:
-    if chat_model is not None or model_resolver is None:
+    predict_strategy = getattr(predict_context, "strategy", None)
+    if predict_strategy is not None:
+        from graph_agent.core._predict_internal.interception import PredictGatewayChatModel
+
+        role_name = phase_ast.llm_role or "graph_agent"
+        return PredictGatewayChatModel(
+            role_name,
+            {"role_name": role_name},
+            mock_strategy=predict_strategy,
+            callbacks=callbacks,
+            phase_name=phase_id,
+        )
+    if chat_model is not None:
         return chat_model
+    if llm_provider is not None:
+        return LLMProviderChatModel(
+            provider=llm_provider,
+            role=phase_ast.llm_role or "graph_agent",
+            phase_name=phase_id,
+            callbacks=callbacks,
+        )
+    if model_resolver is None:
+        return None
     import inspect
     sig = inspect.signature(model_resolver.resolve)
     kwargs = {
@@ -2338,6 +2410,7 @@ def _subagent_runtime_map(
     *,
     chat_model: Any,
     model_resolver: Any,
+    llm_provider: LLMProvider | None,
     callbacks: Any | None,
     max_patch_attempts: int,
     skill_resolver: SkillResolverProtocol,
@@ -2361,6 +2434,7 @@ def _subagent_runtime_map(
             sub_compiled,
             chat_model=chat_model,
             model_resolver=model_resolver,
+            llm_provider=llm_provider,
             callbacks=callbacks,
             max_patch_attempts=max_patch_attempts,
             skill_resolver=skill_resolver,

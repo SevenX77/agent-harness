@@ -88,7 +88,7 @@ def _open_materializer_route_circuit(
     )
 
 
-def test_put_role_v3_skips_needs_setup_and_off_provider_models(
+def test_put_role_v3_skips_failed_and_off_provider_models(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
@@ -137,7 +137,7 @@ def test_put_role_v3_skips_needs_setup_and_off_provider_models(
         for item in response.json()["materialization_report"]["skipped_provider_details"]
     }
     assert skipped == {
-        "missing-key-provider:gpt-5": "needs_setup",
+        "missing-key-provider:gpt-5": "failed",
         "disabled-provider:gpt-5": "off",
     }
 

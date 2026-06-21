@@ -5,9 +5,11 @@ import {
   connectPhaseRefs,
   createPhaseDraft,
   disconnectPhaseRefs,
+  reconnectPhaseRefs,
   phaseRefsFromSkillDetail,
   checkSequentialOverwrites,
   addSequentialOverwriteField,
+  planEdgeReconnect,
 } from './canvas-authoring'
 
 describe('canvas authoring helpers', () => {
@@ -42,34 +44,51 @@ describe('canvas authoring helpers', () => {
       filePath: 'phases/agent/SKILL.md',
       phaseRef: { id: 'agent', src: 'phases/agent', depends_on: [], mode: 'skill' },
     })
-    expect(createPhaseDraft(detail, 'subgraph', 'demo-skill')).toMatchObject({
+    expect(createPhaseDraft(detail, 'subgraph')).toMatchObject({
       phaseId: 'subgraph',
       filePath: 'phases/subgraph/SUBGRAPH.md',
       phaseRef: { id: 'subgraph', src: 'phases/subgraph', depends_on: [], mode: 'subgraph' },
     })
   })
 
-  it('creates phase files that match the node AST fields', () => {
+  it('scaffolds FROZEN-clean phase files with no deprecated frontmatter fields', () => {
     const detail = skillDetail()
     const logic = createPhaseDraft(detail, 'logic')
     const skill = createPhaseDraft(detail, 'skill')
-    const subgraph = createPhaseDraft(detail, 'subgraph', 'demo-skill')
+    const subgraph = createPhaseDraft(detail, 'subgraph')
 
-    expect(logic.fileContent).toContain('mode: logic')
-    expect(logic.fileContent).toContain('<python_callable>')
-    expect(logic.fileContent).not.toContain('execute_steps')
+    // No scaffold may emit any FROZEN-violating field.
+    for (const content of [logic.fileContent, skill.fileContent, subgraph.fileContent]) {
+      expect(content).not.toContain('mode:')
+      expect(content).not.toContain('system_prompt')
+      expect(content).not.toContain('exit_contract')
+      expect(content).not.toContain('python_callable')
+      expect(content).not.toContain('target_skill')
+    }
 
-    expect(skill.fileContent).toContain('mode: skill')
+    // LOGIC.md: io slices + actions registry + validator; body <action>. No mode.
+    expect(logic.fileContent).toContain('name: logic')
+    expect(logic.fileContent).toContain('io:')
+    expect(logic.fileContent).toContain('actions: [logic_action]')
+    expect(logic.fileContent).toContain('validator: false')
+    expect(logic.fileContent).toContain('<action>logic_action</action>')
+
+    // Agent SKILL.md: llm_role + tools + io + validator; body role/goal/step/protocol.
+    expect(skill.fileContent).toContain('name: agent')
+    expect(skill.fileContent).toContain('llm_role: analyst')
     expect(skill.fileContent).toContain('tools: []')
-    expect(skill.fileContent).toContain('<system_prompt>')
-    expect(skill.fileContent).toContain('<exit_contract>')
-    expect(skill.fileContent).not.toContain('llm_role')
-    expect(skill.fileContent).not.toContain('agent_tools')
-    expect(skill.fileContent).not.toContain('prompt:')
+    expect(skill.fileContent).toContain('io:')
+    expect(skill.fileContent).toContain('validator: false')
+    expect(skill.fileContent).toContain('<role>')
+    expect(skill.fileContent).toContain('<goal>')
+    expect(skill.fileContent).toContain('<step id="S1"')
+    expect(skill.fileContent).toContain('<protocol id="P1">')
 
-    expect(subgraph.fileContent).toContain('mode: subgraph')
-    expect(subgraph.fileContent).toContain('target_skill: demo-skill')
-    expect(subgraph.fileContent).not.toContain('sub_skill_ref')
+    // SUBGRAPH.md: absolute path placeholder + io + validator. Uses path, not target_skill.
+    expect(subgraph.fileContent).toContain('name: subgraph')
+    expect(subgraph.fileContent).toContain('path: /absolute/path/to/child_skill')
+    expect(subgraph.fileContent).toContain('io:')
+    expect(subgraph.fileContent).toContain('validator: false')
   })
 
   it('appends a numeric suffix when the readable phase id already exists', () => {
@@ -201,6 +220,128 @@ allow_sequential_overwrite:
       fieldName: 'report',
       ancestorNodeId: 'draft',
     })
+  })
+
+  it('plans an edge reconnect as an old-target disconnect plus new-target connect', () => {
+    // Drag the target endpoint of draft→review over to publish: review loses the
+    // draft dependency, publish gains it. Both halves reuse disconnect/connect.
+    const plan = planEdgeReconnect(
+      { source: 'draft', target: 'review' },
+      { source: 'draft', target: 'publish' },
+    )
+
+    expect(plan).toEqual({
+      ok: true,
+      disconnect: { source: 'draft', target: 'review' },
+      connect: { source: 'draft', target: 'publish' },
+    })
+  })
+
+  it('plans a source-endpoint reconnect by swapping the dependency provider', () => {
+    // Drag the source endpoint of draft→publish over to review: publish stops
+    // depending on draft and starts depending on review.
+    const plan = planEdgeReconnect(
+      { source: 'draft', target: 'publish' },
+      { source: 'review', target: 'publish' },
+    )
+
+    expect(plan).toEqual({
+      ok: true,
+      disconnect: { source: 'draft', target: 'publish' },
+      connect: { source: 'review', target: 'publish' },
+    })
+  })
+
+  it('rejects reconnecting onto global nodes, onto itself, or back to the same endpoints', () => {
+    expect(planEdgeReconnect(
+      { source: 'draft', target: 'review' },
+      { source: 'draft', target: '__global_output__' },
+    )).toMatchObject({ ok: false, reason: 'global-node' })
+
+    expect(planEdgeReconnect(
+      { source: '__global_input__', target: 'review' },
+      { source: 'draft', target: 'review' },
+    )).toMatchObject({ ok: false, reason: 'global-node' })
+
+    expect(planEdgeReconnect(
+      { source: 'draft', target: 'review' },
+      { source: 'review', target: 'review' },
+    )).toMatchObject({ ok: false, reason: 'self-dependency' })
+
+    expect(planEdgeReconnect(
+      { source: 'draft', target: 'review' },
+      { source: 'draft', target: 'review' },
+    )).toMatchObject({ ok: false, reason: 'no-op' })
+  })
+
+  it('reconnects an edge as one combined phases list: old dependency removed and new one added', () => {
+    // n2-canvas #8: a reconnect is a SINGLE atomic depends_on mutation. Dragging
+    // the draft→review target over to publish must, in one pass, drop draft from
+    // review.depends_on AND add draft to publish.depends_on — never two serialize
+    // round-trips against separately-derived phase lists.
+    const detail = skillDetail({
+      phases: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+        { id: 'publish', src: 'phases/publish/SKILL.md', depends_on: [] },
+      ],
+    })
+
+    const result = reconnectPhaseRefs(
+      detail,
+      { source: 'draft', target: 'review' },
+      { source: 'draft', target: 'publish' },
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.phases.find((phase) => phase.id === 'review')?.depends_on).toEqual([])
+    expect(result.phases.find((phase) => phase.id === 'publish')?.depends_on).toEqual(['draft'])
+  })
+
+  it('reconnects a source-endpoint move on a shared target into one phases list', () => {
+    // Drag the source endpoint of draft→publish over to review: publish drops
+    // draft and gains review, all on the single publish phase, in one pass.
+    const detail = skillDetail({
+      phases: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: [] },
+        { id: 'publish', src: 'phases/publish/SKILL.md', depends_on: ['draft'] },
+      ],
+    })
+
+    const result = reconnectPhaseRefs(
+      detail,
+      { source: 'draft', target: 'publish' },
+      { source: 'review', target: 'publish' },
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.phases.find((phase) => phase.id === 'publish')?.depends_on).toEqual(['review'])
+  })
+
+  it('rejects reconnecting global nodes, self-dependencies, no-ops, missing old deps, and duplicates', () => {
+    const detail = skillDetail({
+      phases: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+        { id: 'publish', src: 'phases/publish/SKILL.md', depends_on: ['draft'] },
+      ],
+    })
+
+    expect(reconnectPhaseRefs(detail, { source: 'draft', target: 'review' }, { source: 'draft', target: '__global_output__' }))
+      .toMatchObject({ ok: false, reason: 'global-node' })
+    expect(reconnectPhaseRefs(detail, { source: 'draft', target: 'review' }, { source: 'review', target: 'review' }))
+      .toMatchObject({ ok: false, reason: 'self-dependency' })
+    expect(reconnectPhaseRefs(detail, { source: 'draft', target: 'review' }, { source: 'draft', target: 'review' }))
+      .toMatchObject({ ok: false, reason: 'no-op' })
+    // The old edge is not backed by a real dependency (review→draft does not exist).
+    expect(reconnectPhaseRefs(detail, { source: 'review', target: 'draft' }, { source: 'draft', target: 'publish' }))
+      .toMatchObject({ ok: false, reason: 'missing-dependency' })
+    // Moving draft→review's target onto publish, which already depends on draft.
+    expect(reconnectPhaseRefs(detail, { source: 'draft', target: 'review' }, { source: 'draft', target: 'publish' }))
+      .toMatchObject({ ok: false, reason: 'duplicate-dependency' })
   })
 
   it('updates markdown frontmatter correctly via addSequentialOverwriteField', () => {

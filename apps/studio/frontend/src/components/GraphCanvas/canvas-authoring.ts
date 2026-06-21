@@ -46,7 +46,7 @@ export function phaseRefsFromSkillDetail(detail: SkillDetail | undefined): Seria
   })
 }
 
-export function createPhaseDraft(detail: SkillDetail | undefined, kind: NewPhaseKind, skillId?: string): PhaseDraft {
+export function createPhaseDraft(detail: SkillDetail | undefined, kind: NewPhaseKind): PhaseDraft {
   const phases = phaseRefsFromSkillDetail(detail)
   const phaseId = nextPhaseId(phases.map((phase) => phase.id), basePhaseId(kind))
   const filePath = phaseFilePath(phaseId, kind)
@@ -59,7 +59,7 @@ export function createPhaseDraft(detail: SkillDetail | undefined, kind: NewPhase
   return {
     phaseId,
     filePath,
-    fileContent: defaultPhaseMarkdown(phaseId, kind, skillId),
+    fileContent: defaultPhaseMarkdown(phaseId, kind),
     phaseRef,
     phases: [...phases, phaseRef],
   }
@@ -126,6 +126,147 @@ export function disconnectPhaseRefs(
   }
 }
 
+/** An edge identified purely by its two phase endpoints. */
+export interface EdgeEndpoints {
+  source: string | null | undefined
+  target: string | null | undefined
+}
+
+/**
+ * Result of planning an edge reconnect (drag an existing edge endpoint onto a
+ * different node). A reconnect is the composition of two atomic depends_on
+ * mutations the canvas already supports: remove the old dependency, then add the
+ * new one. Both halves flow through the existing disconnect/connect → serialize
+ * path, so the serialize contract is unchanged (n2-canvas #8, R4).
+ */
+export type ReconnectPlan =
+  | { ok: true; disconnect: { source: string; target: string }; connect: { source: string; target: string } }
+  | { ok: false; reason: 'global-node' | 'self-dependency' | 'no-op'; message: string }
+
+/**
+ * Pure planner for a React Flow edge reconnect. Given the old edge and the new
+ * connection (either the source or the target endpoint may have moved), decide
+ * whether the move is a legal dependency edit and, if so, return the disconnect
+ * + connect operations to apply. Endpoint legality against the live graph
+ * (unknown phase, duplicate, missing dependency) is re-checked by
+ * disconnectPhaseRefs / connectPhaseRefs when the plan is applied, mirroring the
+ * onConnect validation reuse.
+ */
+export function planEdgeReconnect(oldEdge: EdgeEndpoints, newConnection: EdgeEndpoints): ReconnectPlan {
+  const oldSource = oldEdge.source
+  const oldTarget = oldEdge.target
+  const newSource = newConnection.source
+  const newTarget = newConnection.target
+  if (!oldSource || !oldTarget || !newSource || !newTarget) {
+    return { ok: false, reason: 'global-node', message: 'Edge endpoints must be phase nodes to reconnect.' }
+  }
+  if (
+    isGlobalNode(oldSource)
+    || isGlobalNode(oldTarget)
+    || isGlobalNode(newSource)
+    || isGlobalNode(newTarget)
+  ) {
+    return { ok: false, reason: 'global-node', message: 'Global input/output edges are derived and cannot be reconnected.' }
+  }
+  if (newSource === newTarget) {
+    return { ok: false, reason: 'self-dependency', message: 'A phase cannot depend on itself.' }
+  }
+  if (oldSource === newSource && oldTarget === newTarget) {
+    return { ok: false, reason: 'no-op', message: 'Edge was reconnected to the same endpoints.' }
+  }
+
+  return {
+    ok: true,
+    disconnect: { source: oldSource, target: oldTarget },
+    connect: { source: newSource, target: newTarget },
+  }
+}
+
+export type ReconnectPhaseRefsResult =
+  | { ok: true; phases: SerializableGraphPhaseRef[] }
+  | {
+    ok: false
+    reason: 'global-node' | 'self-dependency' | 'unknown-phase' | 'duplicate-dependency' | 'missing-dependency' | 'no-op'
+    message: string
+  }
+
+/**
+ * Compute the next phases for an edge reconnect as a SINGLE atomic depends_on
+ * mutation (n2-canvas #8 lost-update fix). The previous implementation ran the
+ * disconnect and the connect as TWO sequential serialize round-trips against the
+ * same captured skillDetail closure: the disconnect wrote a new GRAPH.md (hash
+ * changed) and revalidated, but the queued connect still serialized the
+ * PRE-disconnect phases with a now-stale expected_hash, so the backend hash
+ * guard rejected it with 409 and left the graph half-mutated.
+ *
+ * This helper instead derives ONE phases list off a single `phaseRefsFromSkillDetail`
+ * snapshot that BOTH drops the old dependency (disconnect.source from
+ * disconnect.target) AND adds the new dependency (connect.source to
+ * connect.target). The caller serializes + writes that single list once with a
+ * single expected_hash. It re-runs the same per-endpoint guards the standalone
+ * connect/disconnect helpers enforce (global node, self-dependency, unknown
+ * phase, duplicate, missing) so the validation contract is unchanged; only the
+ * round-trip count drops from two to one.
+ */
+export function reconnectPhaseRefs(
+  detail: SkillDetail | undefined,
+  disconnect: { source: string; target: string },
+  connect: { source: string; target: string },
+): ReconnectPhaseRefsResult {
+  if (
+    isGlobalNode(disconnect.source)
+    || isGlobalNode(disconnect.target)
+    || isGlobalNode(connect.source)
+    || isGlobalNode(connect.target)
+  ) {
+    return { ok: false, reason: 'global-node', message: 'Global input/output edges are derived and cannot be reconnected.' }
+  }
+  if (connect.source === connect.target) {
+    return { ok: false, reason: 'self-dependency', message: 'A phase cannot depend on itself.' }
+  }
+  if (disconnect.source === connect.source && disconnect.target === connect.target) {
+    return { ok: false, reason: 'no-op', message: 'Edge was reconnected to the same endpoints.' }
+  }
+
+  const phases = phaseRefsFromSkillDetail(detail)
+  const disconnectSource = phases.find((phase) => phase.id === disconnect.source)
+  const disconnectTarget = phases.find((phase) => phase.id === disconnect.target)
+  const connectSource = phases.find((phase) => phase.id === connect.source)
+  const connectTarget = phases.find((phase) => phase.id === connect.target)
+  if (!disconnectSource || !disconnectTarget || !connectSource || !connectTarget) {
+    return { ok: false, reason: 'unknown-phase', message: 'Both edge endpoints must be phase nodes.' }
+  }
+  if (!disconnectTarget.depends_on.includes(disconnectSource.id)) {
+    return { ok: false, reason: 'missing-dependency', message: 'This edge is not backed by a phase dependency.' }
+  }
+  // Duplicate check is taken AFTER the disconnect is applied: reconnecting an
+  // edge whose new target already has the dependency is a genuine duplicate,
+  // but a same-target reconnect (only the source moved on a shared target) must
+  // not flag the dependency we are about to remove as a duplicate.
+  const connectTargetDependsAfterDisconnect = connectTarget.id === disconnectTarget.id
+    ? connectTarget.depends_on.filter((dependency) => dependency !== disconnectSource.id)
+    : connectTarget.depends_on
+  if (connectTargetDependsAfterDisconnect.includes(connectSource.id)) {
+    return { ok: false, reason: 'duplicate-dependency', message: 'This dependency already exists.' }
+  }
+
+  // Single pass: drop the old dependency on disconnect.target, add the new one
+  // on connect.target. When both endpoints share a target the two edits compose
+  // on the same phase, still yielding one phases list.
+  const phasesAfterDisconnect = phases.map((phase) => (
+    phase.id === disconnectTarget.id
+      ? { ...phase, depends_on: phase.depends_on.filter((dependency) => dependency !== disconnectSource.id) }
+      : phase
+  ))
+  const nextPhases = phasesAfterDisconnect.map((phase) => (
+    phase.id === connectTarget.id
+      ? { ...phase, depends_on: [...phase.depends_on, connectSource.id] }
+      : phase
+  ))
+
+  return { ok: true, phases: nextPhases }
+}
+
 export function phaseFilePath(phaseId: string, kind: NewPhaseKind): string {
   if (kind === 'skill') {
     return `phases/${phaseId}/SKILL.md`
@@ -140,50 +281,95 @@ function phaseDirectoryPath(phaseId: string): string {
   return `phases/${phaseId}`
 }
 
-export function defaultPhaseMarkdown(phaseId: string, kind: NewPhaseKind, skillId = 'placeholder.child_skill'): string {
+// Node type is determined by the phase FILE KIND (LOGIC.md / SKILL.md /
+// SUBGRAPH.md), never a `mode:` frontmatter field. The scaffolds below stay
+// FROZEN-clean per engine skill-syntax §2.3 (LOGIC), §2.5 (agent SKILL),
+// §2.4/§2.1 (SUBGRAPH) so the engine compiler accepts them with no
+// unknown-field FATAL. Deprecated fields (`mode`, `system_prompt`,
+// `exit_contract`, `python_callable`, legacy registry child-reference fields)
+// must never be emitted.
+const SUBGRAPH_PATH_PLACEHOLDER = '/absolute/path/to/child_skill'
+
+export function defaultPhaseMarkdown(
+  phaseId: string,
+  kind: NewPhaseKind,
+  subgraphPath = SUBGRAPH_PATH_PLACEHOLDER,
+): string {
   if (kind === 'skill') {
-    return [
-      '---',
-      `name: ${phaseId}`,
-      'mode: skill',
-      'tools: []',
-      '---',
-      '',
-      '<system_prompt>',
-      `Describe what ${phaseId} should do.`,
-      '</system_prompt>',
-      '',
-      '<exit_contract>',
-      'Call finish_task when this phase is complete.',
-      '</exit_contract>',
-      '',
-      `# ${phaseId}`,
-      '',
-    ].join('\n')
+    return agentPhaseMarkdown(phaseId)
   }
   if (kind === 'subgraph') {
-    return [
-      '---',
-      `name: ${phaseId}`,
-      'mode: subgraph',
-      `target_skill: ${skillId}`,
-      '---',
-      '',
-      `# ${phaseId}`,
-      '',
-    ].join('\n')
+    return subgraphPhaseMarkdown(phaseId, subgraphPath)
   }
+  return logicPhaseMarkdown(phaseId)
+}
+
+function logicPhaseMarkdown(phaseId: string): string {
+  const actionName = `${phaseId.replaceAll('-', '_')}_action`
   return [
     '---',
     `name: ${phaseId}`,
-    'mode: logic',
+    'io:',
+    '  inputs:',
+    '    type: object',
+    '    properties: {}',
+    '  outputs:',
+    '    type: object',
+    '    properties: {}',
+    `actions: [${actionName}]`,
+    'validator: false',
     '---',
     '',
-    '<python_callable>',
-    phaseId.replaceAll('-', '_'),
-    '</python_callable>',
+    `<action>${actionName}</action>`,
     '',
-    `# ${phaseId}`,
+  ].join('\n')
+}
+
+function agentPhaseMarkdown(phaseId: string): string {
+  return [
+    '---',
+    `name: ${phaseId}`,
+    'llm_role: analyst',
+    'io:',
+    '  inputs:',
+    '    type: object',
+    '    properties: {}',
+    '  outputs:',
+    '    type: object',
+    '    properties: {}',
+    'tools: []',
+    'validator: false',
+    '---',
+    '',
+    '<role>',
+    `Describe the professional identity ${phaseId} should adopt.`,
+    '</role>',
+    '',
+    '<goal>',
+    `Describe what ${phaseId} must produce, then call finish_task.`,
+    '</goal>',
+    '',
+    '<step id="S1" name="plan">Outline the approach before acting.</step>',
+    '',
+    '<protocol id="P1">State the rule each key judgement relies on.</protocol>',
+    '',
+  ].join('\n')
+}
+
+function subgraphPhaseMarkdown(phaseId: string, subgraphPath: string): string {
+  return [
+    '---',
+    `name: ${phaseId}`,
+    `path: ${subgraphPath}`,
+    'io:',
+    '  inputs:',
+    '    type: object',
+    '    properties: {}',
+    '  outputs:',
+    '    type: object',
+    '    properties: {}',
+    'validator: false',
+    '---',
     '',
   ].join('\n')
 }

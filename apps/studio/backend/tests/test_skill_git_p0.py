@@ -13,7 +13,14 @@ from app.services.local_settings import read_local_settings, write_local_setting
 from app.services.run_manager import run_manager
 from fastapi.testclient import TestClient
 
-from tests.test_api import InlineProcess, _agent_skill_files, fake_run_worker
+from tests.test_api import (
+    InlineProcess,
+    _agent_skill_files,
+    _record_predict_pass,
+    fake_run_worker,
+)
+
+FALLBACK_HEADERS = {"X-Studio-Write-Fallback": "browser"}
 
 
 def test_p0_skill_git_directory_index_and_workspace_flow(
@@ -69,6 +76,7 @@ def test_p0_skill_git_directory_index_and_workspace_flow(
     assert "predict_dir" not in file_paths
     assert file_paths["local_settings"] == str(workspace_dir / "local_settings.json")
 
+    _record_predict_pass("p0-skill")
     run_response = client.post("/api/skills/p0-skill/runs", json={"input_data": {"topic": "p0"}})
     assert run_response.status_code == 202
     run_id = run_response.json()["run_id"]
@@ -101,8 +109,15 @@ def test_p0_skill_git_directory_index_and_workspace_flow(
     assert ".workspace/runs/latest" not in committed_files
 
     golden_response = client.post(
-        "/api/skills/p0-skill/golden", json={"run_id": run_id, "lock": False}
+        "/api/skills/p0-skill/golden",
+        json={"run_id": run_id, "lock": False},
+        headers=FALLBACK_HEADERS,
     )
 
     assert golden_response.status_code == 200
-    assert (workspace_dir / "golden" / run_id / "golden_metadata.json").exists()
+    assert golden_response.json()["baseline_ref"] == f".workspace/golden/{run_id}/baseline.json"
+    assert golden_response.json()["source_run_results_ref"] == f"p0-skill/runs/{run_id}/result.json"
+    assert (workspace_dir / "golden" / run_id / "baseline.json").exists()
+    assert (workspace_dir / "golden" / run_id / "report.json").exists()
+    assert (workspace_dir / "golden" / run_id / "cases" / "setup.json").exists()
+    assert not (workspace_dir / "golden" / run_id / "golden_metadata.json").exists()

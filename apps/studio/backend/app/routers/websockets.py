@@ -30,7 +30,7 @@ async def run_events(websocket: WebSocket, run_id: str) -> None:
         await _close_unauthorized(websocket)
         return
     await websocket.accept()
-    queue = await run_manager.stream_run(run_id)
+    queue = await run_manager.stream_run(run_id, cursor=websocket.query_params.get("cursor"))
     while True:
         event = await queue.get()
         if event is None:

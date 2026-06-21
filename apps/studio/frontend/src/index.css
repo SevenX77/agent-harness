@@ -256,7 +256,8 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   }
 }
 
-[data-provider-card="true"][data-provider-test-status="testing"]::after {
+[data-provider-card="true"][data-provider-test-status="testing"]::after,
+[data-copilot-provider-card="true"][data-agent-sdk-status="testing"]::after {
   animation: provider-card-border-flow 1.1s linear infinite;
   background:
     linear-gradient(

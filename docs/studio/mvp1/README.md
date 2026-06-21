@@ -16,7 +16,7 @@ studio 文档**永远分四层**（权威：gateway `packages/graph-agent-gatewa
 | 层 | 是什么 | 代码 |
 |---|---|---|
 | ① 前端 | UI + 录入 + 渲染（只投影后端） | `apps/studio/frontend` |
-| ② 后端(rust) | 本地写(D12) + sidecar 拉起 + copilot session 落盘；设置数据永不 Rust | tauri |
+| ② 后端(rust) | Studio 自有本地写(D12; Copilot SDK Write/Edit 例外) + sidecar 拉起 + copilot session 落盘；设置数据永不 Rust | tauri |
 | **③a Studio 应用加工** | **studio 文档主战场** | `apps/studio/backend` |
 | **③b gateway 公共内核** | **studio 不拥有，只引用** | `packages/graph-agent-gateway` |
 

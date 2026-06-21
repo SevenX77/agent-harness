@@ -89,8 +89,11 @@ def test_dispatch_predict_job_delegates_to_engine_predict_artifact_and_persists_
         current_hashes={"draft": {"prompt_hash": "abc"}},
     )
 
-    # 验证返回值
-    assert result == mock_result
+    # 验证返回值携带本次 Predict 绑定的 artifact identity
+    assert result.model_dump(mode="json") == {
+        **mock_result.model_dump(mode="json"),
+        "artifact_ref": mock_art_ref,
+    }
 
     # 验证向 Engine artifact runtime 的参数传递
     assert len(calls) == 1
@@ -107,6 +110,16 @@ def test_dispatch_predict_job_delegates_to_engine_predict_artifact_and_persists_
     saved_data = json.loads(expected_result_json.read_text(encoding="utf-8"))
     assert saved_data["run_id"] == "predict-run-777"
     assert saved_data["success"] is True
+
+    # 验证成功 predict 在 .workspace 落了 predict-pass 记录(供 run-spawn gate 消费)
+    from app.services.predict_gate import last_predict_path_for
+
+    predict_pass_record = json.loads(
+        last_predict_path_for(skill_dir).read_text(encoding="utf-8")
+    )
+    assert predict_pass_record["success"] is True
+    assert predict_pass_record["skill_id"] == "skill"
+    assert predict_pass_record["run_id"] == "predict-run-777"
 
 
 def test_dispatch_predict_job_translates_sdk_deadlock_error(

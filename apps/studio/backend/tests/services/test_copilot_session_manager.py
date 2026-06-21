@@ -65,6 +65,34 @@ def test_get_or_create_session_reuses_same_key(
     assert len(created) == 1
 
 
+def test_get_or_create_session_keeps_imported_workspace_cwds_separate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created: list[FakeClient] = []
+    workspace_a = tmp_path / "imported-a"
+    workspace_b = tmp_path / "imported-b"
+    workspace_a.mkdir()
+    workspace_b.mkdir()
+
+    def factory(options: ClaudeAgentOptions) -> FakeClient:
+        client = FakeClient(options)
+        created.append(client)
+        return client
+
+    monkeypatch.setattr(copilot, "_session_factory", factory)
+
+    async def scenario() -> None:
+        first = await get_session("skill-a", "CL46T", "same-key", workspace_a)
+        second = await get_session("skill-a", "CL46T", "same-key", workspace_b)
+
+        assert first is not second
+        assert Path(first.options.cwd) == workspace_a
+        assert Path(second.options.cwd) == workspace_b
+
+    asyncio.run(scenario())
+    assert len(created) == 2
+
+
 def test_reset_session_can_delete_skill_backend_pairs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -190,3 +218,30 @@ def test_build_options_sets_provider_base_url(tmp_path: Path) -> None:
     assert options.env["ANTHROPIC_BASE_URL"] == "https://provider.example/anthropic"
     assert options.allowed_tools == ["Read", "Write", "Edit", "Bash"]
     assert options.permission_mode == "acceptEdits"
+
+
+def test_build_options_enables_full_thinking(tmp_path: Path) -> None:
+    # F1: thinking must be enabled and shown in full (never summarized/omitted),
+    # otherwise the SDK emits no ThinkingBlock and the streamed Thought is empty.
+    options = copilot.build_options(None, "claude-key", tmp_path)
+
+    assert options.thinking == {"type": "adaptive"}
+
+
+def test_build_options_mounts_skill_spec(tmp_path: Path) -> None:
+    # F3: the authoritative graph_skill spec is mounted so the copilot can Read it.
+    # The spec dir exists in this repo, so add_dirs must include it.
+    options = copilot.build_options(None, "claude-key", tmp_path)
+
+    assert any("02-skill-syntax" in entry for entry in options.add_dirs), options.add_dirs
+
+
+def test_build_system_prompt_has_skill_authoring_brain() -> None:
+    # F3: the prompt must teach the v0.3.0 graph_skill format (not the old 3-line
+    # generic prompt) and point to the mounted spec.
+    prompt = copilot.build_system_prompt("nonexistent-skill")
+
+    assert "graph_skill" in prompt
+    assert "v0.3.0" in prompt
+    assert "phases" in prompt
+    assert "skill-spec" in prompt  # mounted-spec pointer

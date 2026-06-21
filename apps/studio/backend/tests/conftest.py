@@ -14,8 +14,9 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 STUDIO_BACKEND = REPO_ROOT / "apps" / "studio" / "backend"
 SRC_CORE = REPO_ROOT / "src" / "core"
 GRAPH_AGENT_SRC = REPO_ROOT / "packages" / "graph-agent" / "src"
+GRAPH_AGENT_GATEWAY_SRC = REPO_ROOT / "packages" / "graph-agent-gateway" / "src"
 
-for path in (STUDIO_BACKEND, SRC_CORE, GRAPH_AGENT_SRC):
+for path in (STUDIO_BACKEND, SRC_CORE, GRAPH_AGENT_SRC, GRAPH_AGENT_GATEWAY_SRC):
     path_str = str(path)
     if path_str not in sys.path:
         sys.path.insert(0, path_str)

@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
-import { api } from '../api/client'
-import type { CompareResult, GoldenBaseline } from '../api/types'
+import { api, saveGoldenBaseline } from '../api/client'
+import type { CompareResult } from '../api/types'
 import { errorMessage } from '../utils/errors'
 
 interface GoldenDiffState {
@@ -9,7 +9,11 @@ interface GoldenDiffState {
   error: string | null
 }
 
-export function useGoldenDiff(skillId: string | null, runId: string | null) {
+export function useGoldenDiff(
+  skillId: string | null,
+  runId: string | null,
+  workspaceRoot?: string | null,
+) {
   const [state, setState] = useState<GoldenDiffState>({
     result: null,
     loading: false,
@@ -36,24 +40,21 @@ export function useGoldenDiff(skillId: string | null, runId: string | null) {
     }
   }, [runId, skillId])
 
-  const promote = useCallback(async () => {
+  const promote = useCallback(async (nodeId?: string | null) => {
     if (!skillId || !runId) {
       return null
     }
 
     setState((current) => ({ ...current, error: null }))
     try {
-      const response = await api.post<GoldenBaseline>(`/skills/${skillId}/golden`, {
-        run_id: runId,
-        lock: false,
-      })
-      return response.data
+      // nodeId set (atom #32) → per-node golden; omitted → run-level baseline.
+      return await saveGoldenBaseline(skillId, runId, false, workspaceRoot, nodeId)
     } catch (error) {
       const message = errorMessage(error)
       setState((current) => ({ ...current, error: message }))
       return null
     }
-  }, [runId, skillId])
+  }, [runId, skillId, workspaceRoot])
 
   const clear = useCallback(() => {
     setState({ result: null, loading: false, error: null })

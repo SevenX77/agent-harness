@@ -1,7 +1,7 @@
 import { isValidElement, type ReactElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildEdges, CanvasContextMenuContent, GraphCanvas, SkillNode, type SkillGraphNode } from './GraphCanvas'
+import { AddPhaseControl, buildEdges, CanvasContextMenuContent, GraphCanvas, SkillNode, type SkillGraphNode } from './GraphCanvas'
 import { CycleDetectedError, getAutoLayoutedElements } from '../lib/layout'
 import type { Edge, Node } from '@xyflow/react'
 import type { SkillDetail } from '@/api/types'
@@ -18,12 +18,14 @@ vi.mock('@xyflow/react', () => ({
   Handle: () => <span data-testid="handle" />,
   MarkerType: { ArrowClosed: 'arrowclosed' },
   MiniMap: () => <div data-testid="minimap" />,
+  Panel: ({ children }: { children: ReactNode }) => <div data-testid="panel">{children}</div>,
   Position: { Left: 'left', Right: 'right', Top: 'top', Bottom: 'bottom' },
   ReactFlow: (props: { children: ReactNode; nodeOrigin?: [number, number] }) => {
     reactFlowPropsRef.current = props
     return <div data-testid="react-flow" data-node-origin={JSON.stringify(props.nodeOrigin)}>{props.children}</div>
   },
   addEdge: vi.fn((edge, edges) => [...edges, edge]),
+  reconnectEdge: vi.fn((_oldEdge, newConnection, edges) => [...edges, newConnection]),
   useEdgesState: vi.fn((initialEdges) => [initialEdges, vi.fn(), vi.fn()]),
   useNodesState: vi.fn((initialNodes) => [initialNodes, vi.fn(), vi.fn()]),
 }))
@@ -77,6 +79,7 @@ function phaseNode(id: string, dependsOn: string[] = []): SkillGraphNode {
     type: 'skill',
     position: { x: 0, y: 0 },
     data: {
+      skillId: 'demo',
       label: id,
       mode: 'llm',
       status: 'idle',
@@ -90,6 +93,7 @@ function skillNodeProps(overrides: Partial<SkillGraphNode['data']> = {}): Parame
     id: 'phase',
     type: 'skill',
     data: {
+      skillId: 'demo',
       label: 'Phase',
       mode: 'llm',
       status: 'idle',
@@ -275,6 +279,157 @@ describe('GraphCanvas', () => {
     expect(onDisconnectConnection).toHaveBeenCalledWith({ source: 'draft', target: 'review' })
   })
 
+  it('enables reconnectable edges on the canvas', () => {
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        skillDetail={graphSkillDetail([
+          { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+          { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+        ])}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as { edgesReconnectable?: boolean } | null
+    expect(props?.edgesReconnectable).toBe(true)
+  })
+
+  it('reconnects an edge through a single atomic onReconnectConnection, not the disconnect-then-persist chain', async () => {
+    // n2-canvas #8 lost-update fix: when the single atomic handler is wired, the
+    // canvas must route the whole reconnect through it ONCE — never the
+    // disconnect().then(persist) chain that issued two serialize round-trips and
+    // hit a 409 on the second stale-hash write.
+    const onReconnectConnection = vi.fn().mockResolvedValue(undefined)
+    const onDisconnectConnection = vi.fn().mockResolvedValue(undefined)
+    const onPersistConnection = vi.fn().mockResolvedValue(undefined)
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        skillDetail={graphSkillDetail([
+          { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+          { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+          { id: 'publish', src: 'phases/publish/SKILL.md', depends_on: [] },
+        ])}
+        onReconnectConnection={onReconnectConnection}
+        onDisconnectConnection={onDisconnectConnection}
+        onPersistConnection={onPersistConnection}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as {
+      onReconnect?: (oldEdge: { source: string; target: string }, newConnection: { source: string; target: string }) => void
+    } | null
+    // Drag the target endpoint of draft→review across to publish.
+    props?.onReconnect?.({ source: 'draft', target: 'review' }, { source: 'draft', target: 'publish' })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(onReconnectConnection).toHaveBeenCalledTimes(1)
+    expect(onReconnectConnection).toHaveBeenCalledWith(
+      { source: 'draft', target: 'review' },
+      { source: 'draft', target: 'publish' },
+    )
+    // The two-round-trip chain must NOT be used when the atomic handler exists.
+    expect(onDisconnectConnection).not.toHaveBeenCalled()
+    expect(onPersistConnection).not.toHaveBeenCalled()
+  })
+
+  it('falls back to disconnect-then-persist when no atomic onReconnectConnection is wired', async () => {
+    // The compact SplitEditor canvas does not pass onReconnectConnection; the
+    // legacy chained path must still function so that surface keeps reconnecting.
+    const onDisconnectConnection = vi.fn().mockResolvedValue(undefined)
+    const onPersistConnection = vi.fn().mockResolvedValue(undefined)
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        skillDetail={graphSkillDetail([
+          { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+          { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+          { id: 'publish', src: 'phases/publish/SKILL.md', depends_on: [] },
+        ])}
+        onDisconnectConnection={onDisconnectConnection}
+        onPersistConnection={onPersistConnection}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as {
+      onReconnect?: (oldEdge: { source: string; target: string }, newConnection: { source: string; target: string }) => void
+    } | null
+    // Drag the target endpoint of draft→review across to publish.
+    props?.onReconnect?.({ source: 'draft', target: 'review' }, { source: 'draft', target: 'publish' })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(onDisconnectConnection).toHaveBeenCalledWith({ source: 'draft', target: 'review' })
+    expect(onPersistConnection).toHaveBeenCalledWith({ source: 'draft', target: 'publish' })
+  })
+
+  it('disconnects an edge dropped off a handle via onReconnectEnd', () => {
+    const onDisconnectConnection = vi.fn().mockResolvedValue(undefined)
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        skillDetail={graphSkillDetail([
+          { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+          { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+        ])}
+        onDisconnectConnection={onDisconnectConnection}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as {
+      onReconnectStart?: () => void
+      onReconnectEnd?: (
+        event: unknown,
+        edge: { id: string; source: string; target: string },
+        handleType: 'source' | 'target',
+        connectionState: { isValid: boolean | null },
+      ) => void
+    } | null
+    // Start the drag (no landing), then release off any handle (isValid null).
+    props?.onReconnectStart?.()
+    props?.onReconnectEnd?.({}, { id: 'draft->review', source: 'draft', target: 'review' }, 'target', { isValid: null })
+
+    expect(onDisconnectConnection).toHaveBeenCalledWith({ source: 'draft', target: 'review' })
+  })
+
+  it('does not disconnect on onReconnectEnd when the edge landed on a valid handle', () => {
+    const onDisconnectConnection = vi.fn().mockResolvedValue(undefined)
+    const onPersistConnection = vi.fn().mockResolvedValue(undefined)
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        skillDetail={graphSkillDetail([
+          { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+          { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+          { id: 'publish', src: 'phases/publish/SKILL.md', depends_on: [] },
+        ])}
+        onDisconnectConnection={onDisconnectConnection}
+        onPersistConnection={onPersistConnection}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as {
+      onReconnectStart?: () => void
+      onReconnect?: (oldEdge: { source: string; target: string }, newConnection: { source: string; target: string }) => void
+      onReconnectEnd?: (
+        event: unknown,
+        edge: { id: string; source: string; target: string },
+        handleType: 'source' | 'target',
+        connectionState: { isValid: boolean | null },
+      ) => void
+    } | null
+    // A successful reconnect fires onReconnect (landed=true) before onReconnectEnd.
+    props?.onReconnectStart?.()
+    onDisconnectConnection.mockClear()
+    props?.onReconnect?.({ source: 'draft', target: 'review' }, { source: 'draft', target: 'publish' })
+    props?.onReconnectEnd?.({}, { id: 'draft->review', source: 'draft', target: 'review' }, 'target', { isValid: true })
+
+    // onReconnectEnd must NOT add a second disconnect for the already-moved edge.
+    expect(onDisconnectConnection).toHaveBeenCalledTimes(1)
+    expect(onDisconnectConnection).toHaveBeenCalledWith({ source: 'draft', target: 'review' })
+  })
+
   it('keeps the loading overlay', () => {
     const html = renderToStaticMarkup(<GraphCanvas skillId="demo-skill" isLoading />)
 
@@ -344,17 +499,24 @@ describe('GraphCanvas', () => {
   })
 
   it('renders subgraph expand icon button when collapsed', () => {
-    const html = skillNodeHtml({ subgraphPath: 'subgraph.SKILL.md', isExpanded: false })
+    const html = skillNodeHtml({ subgraphPath: '/abs/subgraph', isExpanded: false })
 
     expect(html).toContain('aria-label="Expand subgraph"')
     expect(html).toContain('lucide-plus')
   })
 
   it('renders subgraph collapse icon button when expanded', () => {
-    const html = skillNodeHtml({ subgraphPath: 'subgraph.SKILL.md', isExpanded: true })
+    const html = skillNodeHtml({ subgraphPath: '/abs/subgraph', isExpanded: true })
 
     expect(html).toContain('aria-label="Collapse subgraph"')
     expect(html).toContain('lucide-minus')
+  })
+
+  it('does not render subgraph controls for non-absolute child references', () => {
+    const html = skillNodeHtml({ mode: 'subgraph', subgraphPath: 'legacy.registry.child', isExpanded: false })
+
+    expect(html).not.toContain('aria-label="Expand subgraph"')
+    expect(html).not.toContain('aria-label="Collapse subgraph"')
   })
 
   it('does not render a subgraph icon button for regular nodes', () => {
@@ -388,7 +550,7 @@ describe('GraphCanvas', () => {
     const stopPropagation = vi.fn()
     const onToggleSubgraph = vi.fn()
     const node = renderSkillNodeRoot({
-      subgraphPath: 'subgraph.SKILL.md',
+      subgraphPath: '/abs/subgraph',
       onToggleSubgraph,
     })
 
@@ -396,5 +558,24 @@ describe('GraphCanvas', () => {
 
     expect(stopPropagation).toHaveBeenCalledOnce()
     expect(onToggleSubgraph).not.toHaveBeenCalled()
+  })
+})
+
+describe('AddPhaseControl', () => {
+  it('invokes onCreatePhase with the chosen kind when a menu item is selected', () => {
+    const onCreatePhase = vi.fn()
+    // Walk the element tree (no DOM): DropdownMenu > [trigger, content];
+    // content children = the ADD_PHASE_OPTIONS items keyed by kind.
+    const element = AddPhaseControl({ onCreatePhase }) as ReactElement<{ children: ReactNode[] }>
+    const content = element.props.children[1] as ReactElement<{ children: ReactNode[] }>
+    const items = content.props.children.flat() as ReactElement<{ onSelect?: () => void }>[]
+
+    const logicItem = items.find((item) => item.key === 'logic')
+    logicItem?.props.onSelect?.()
+    expect(onCreatePhase).toHaveBeenCalledWith('logic')
+
+    const agentItem = items.find((item) => item.key === 'skill')
+    agentItem?.props.onSelect?.()
+    expect(onCreatePhase).toHaveBeenCalledWith('skill')
   })
 })

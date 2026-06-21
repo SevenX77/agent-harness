@@ -149,6 +149,22 @@ class GraphAgentError(Exception):
                     details["context"] = normalized_exc_ctx
                 actual_payload.details = _normalize_details_val(details)
         self.payload = actual_payload
+        if actual_payload is not None:
+            self.error_payload = actual_payload.model_dump(mode="json")
+            self.skill_id = actual_payload.skill_id
+            self.phase_id = actual_payload.phase_id
+            self.field_path = actual_payload.field_path
+            self.source_path = actual_payload.source_path
+            self.skill_path = (
+                Path(actual_payload.source_path) if actual_payload.source_path else None
+            )
+        else:
+            self.skill_id = getattr(self, "skill_id", None)
+            self.phase_id = getattr(self, "phase_id", None)
+            self.field_path = getattr(self, "field_path", None)
+            self.source_path = getattr(self, "source_path", None)
+            self.skill_path = getattr(self, "skill_path", None)
+            self.error_payload = getattr(self, "error_payload", None)
 
 
 class GraphCompileError(GraphAgentError):

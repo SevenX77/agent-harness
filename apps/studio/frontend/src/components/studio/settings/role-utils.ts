@@ -417,6 +417,34 @@ export function appendModelGroupToRoleWithResult(
   return { data: next, error: null }
 }
 
+export const BUNDLE_DRAG_PREFIX = "bundle:"
+
+/**
+ * #51: attach a bundle to a role as a LIVE REFERENCE, not a snapshot copy.
+ *
+ * Dragging a bundle (drag id "bundle:{id}") into a role sets role.bundle_id to the
+ * referenced bundle. The role's own model_groups (role.models here) stay as the
+ * local DELTA layer — they are NOT populated with a frozen copy of the bundle's
+ * routes. The backend materializes the chain by reference (live bundle edits +
+ * delete cascade reflect on re-projection); the role applies its delta on top.
+ *
+ * A drag id that is not a bundle id leaves the data untouched (caller handles
+ * the normal model-group snapshot path).
+ */
+export function attachBundleReferenceToRole(
+  data: RolesData,
+  roleName: string,
+  dragModelId: string,
+): RolesData {
+  if (!dragModelId.startsWith(BUNDLE_DRAG_PREFIX)) return data
+  if (!data.roles[roleName]) return data
+  const bundleId = dragModelId.slice(BUNDLE_DRAG_PREFIX.length)
+  if (!bundleId) return data
+  const next = cloneRolesData(data)
+  next.roles[roleName] = { ...next.roles[roleName], bundle_id: bundleId }
+  return next
+}
+
 export function modelDropFailureMessage({
   modelId,
   destination,
@@ -469,10 +497,14 @@ function providerKindRank(kind: ModelGroup["provider_models"][number]["provider_
 }
 
 function providerStateRank(state: ModelGroup["provider_models"][number]["ui_state"]): number {
+  // #36 (spec §2.2 "默认选 Ready+Untested+🔵"): historical_ready (🔵, previously
+  // connected) ranks as a default-eligible candidate between ready and untested,
+  // so a group whose strongest provider is 🔵 is still picked by default.
   if (state === "ready") return 0
-  if (state === "untested") return 1
-  if (state === "cooling_down") return 2
-  return 3
+  if (state === "historical_ready") return 1
+  if (state === "untested") return 2
+  if (state === "cooling_down") return 3
+  return 4
 }
 
 function modelGroupSupportsThinking(modelGroup: ModelGroup): boolean {

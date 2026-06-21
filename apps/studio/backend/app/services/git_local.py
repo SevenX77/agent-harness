@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+import threading
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from app.core import config
 from app.models.git_history import GitHistoryItem, GitHistoryKind
@@ -17,6 +19,13 @@ from app.models.git_history import GitHistoryItem, GitHistoryKind
 logger = logging.getLogger(__name__)
 DEFAULT_GIT_TIMEOUT_SECONDS = 30
 DEFAULT_LOCK_RETRY_DELAYS = (0.1, 0.3, 0.6)
+EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+RELEASE_MARKER_TRAILER = "Studio-Release-Marker"
+RELEASE_VERSION_TRAILER = "Studio-Release-Version"
+RELEASE_ARTIFACT_ID_TRAILER = "Studio-Release-Artifact-Id"
+RELEASE_CONTENT_HASH_TRAILER = "Studio-Release-Content-Hash"
+RELEASE_MANIFEST_REF_TRAILER = "Studio-Release-Manifest-Ref"
+RELEASE_SNAPSHOT_PREFIX = "release-"
 
 STUDIO_GITIGNORE = "\n".join(
     [
@@ -80,6 +89,9 @@ class GitRevertConflictError(GitCommandError):
 class GitLocalService:
     """Small wrapper around local Git commands scoped to one skill repository."""
 
+    _snapshot_lock_guard: ClassVar[threading.Lock] = threading.Lock()
+    _snapshot_locks: ClassVar[dict[tuple[str, str], threading.Lock]] = {}
+
     def __init__(
         self,
         *,
@@ -88,6 +100,16 @@ class GitLocalService:
     ) -> None:
         self.timeout_seconds = timeout_seconds
         self.lock_retry_delays = lock_retry_delays
+
+    @classmethod
+    def _snapshot_lock(cls, skill_dir: Path, message: str) -> threading.Lock:
+        key = (str(skill_dir.resolve()), message)
+        with cls._snapshot_lock_guard:
+            lock = cls._snapshot_locks.get(key)
+            if lock is None:
+                lock = threading.Lock()
+                cls._snapshot_locks[key] = lock
+            return lock
 
     def init(self, skill_dir: Path) -> GitCommandResult:
         return run_git(
@@ -142,6 +164,176 @@ class GitLocalService:
             lock_retry_delays=self.lock_retry_delays,
         )
 
+    def commit_empty_snapshot(
+        self,
+        skill_dir: Path,
+        message: str,
+        *,
+        trailers: Mapping[str, object] | None = None,
+    ) -> str:
+        expected_trailers = _normalize_commit_trailers(trailers)
+        with self._snapshot_lock(skill_dir, message):
+            existing = self.find_empty_snapshot_commit_with_exact_subject(
+                skill_dir,
+                message,
+                trailers=expected_trailers,
+            )
+            if existing is not None:
+                return existing
+
+            last_cas_error: GitCommandError | None = None
+            for _attempt in range(3):
+                try:
+                    return self._commit_empty_snapshot_once(
+                        skill_dir,
+                        message,
+                        trailers=expected_trailers,
+                    )
+                except GitCommandError as exc:
+                    if not _is_update_ref_cas_error(exc.result.stderr):
+                        raise
+                    last_cas_error = exc
+                    existing = self.find_empty_snapshot_commit_with_exact_subject(
+                        skill_dir,
+                        message,
+                        trailers=expected_trailers,
+                    )
+                    if existing is not None:
+                        return existing
+            if last_cas_error is not None:
+                raise last_cas_error
+            raise AssertionError("unreachable empty snapshot state")
+
+    def _commit_empty_snapshot_once(
+        self,
+        skill_dir: Path,
+        message: str,
+        *,
+        trailers: Mapping[str, str] | None = None,
+    ) -> str:
+        parent_args: list[str] = []
+        tree_sha = EMPTY_TREE_SHA
+        head_sha = ""
+        try:
+            head_sha = run_git(
+                skill_dir,
+                "rev-parse",
+                "--verify",
+                "HEAD^{commit}",
+                timeout_seconds=self.timeout_seconds,
+                lock_retry_delays=self.lock_retry_delays,
+            ).stdout.strip()
+        except GitCommandError as exc:
+            if not _is_unborn_head_error(exc.result.stderr):
+                raise
+        else:
+            tree_sha = run_git(
+                skill_dir,
+                "rev-parse",
+                f"{head_sha}^{{tree}}",
+                timeout_seconds=self.timeout_seconds,
+                lock_retry_delays=self.lock_retry_delays,
+            ).stdout.strip()
+            parent_args = ["-p", head_sha]
+
+        commit_args = ["commit-tree", tree_sha, *parent_args, "-m", message]
+        trailer_body = _format_commit_trailers(trailers)
+        if trailer_body:
+            commit_args.extend(["-m", trailer_body])
+        commit = run_git(
+            skill_dir,
+            *commit_args,
+            timeout_seconds=self.timeout_seconds,
+            lock_retry_delays=self.lock_retry_delays,
+        )
+        marker_sha = commit.stdout.strip()
+        run_git(
+            skill_dir,
+            "update-ref",
+            "HEAD",
+            marker_sha,
+            head_sha,
+            timeout_seconds=self.timeout_seconds,
+            lock_retry_delays=self.lock_retry_delays,
+        )
+        return marker_sha
+
+    def find_empty_snapshot_commit_with_exact_subject(
+        self,
+        skill_dir: Path,
+        subject: str,
+        *,
+        trailers: Mapping[str, object] | None = None,
+    ) -> str | None:
+        expected_trailers = _normalize_commit_trailers(trailers)
+        try:
+            result = run_git(
+                skill_dir,
+                "log",
+                "--format=%H%x1f%s%x1f%B%x1e",
+                timeout_seconds=self.timeout_seconds,
+                lock_retry_delays=self.lock_retry_delays,
+            )
+        except GitCommandError as exc:
+            if _is_empty_or_damaged_history_error(exc.result.stderr):
+                return None
+            raise
+        for record in result.stdout.split("\x1e"):
+            record = record.strip("\n")
+            if not record:
+                continue
+            fields = record.split("\x1f", 2)
+            if len(fields) != 3:
+                continue
+            sha, message, body = fields
+            if message != subject:
+                continue
+            if not self._is_empty_snapshot_commit(skill_dir, sha):
+                continue
+            if not _commit_message_has_trailers(body, expected_trailers):
+                continue
+            return sha
+        return None
+
+    def find_commit_with_exact_subject(self, skill_dir: Path, subject: str) -> str | None:
+        try:
+            result = run_git(
+                skill_dir,
+                "log",
+                "--format=%H%x1f%s",
+                timeout_seconds=self.timeout_seconds,
+                lock_retry_delays=self.lock_retry_delays,
+            )
+        except GitCommandError as exc:
+            if _is_empty_or_damaged_history_error(exc.result.stderr):
+                return None
+            raise
+        for row in result.stdout.splitlines():
+            sha, separator, message = row.partition("\x1f")
+            if separator and message == subject:
+                return sha
+        return None
+
+    def _is_empty_snapshot_commit(self, skill_dir: Path, sha: str) -> bool:
+        try:
+            result = run_git(
+                skill_dir,
+                "diff-tree",
+                "--no-commit-id",
+                "--name-only",
+                "-r",
+                "--root",
+                sha,
+                timeout_seconds=self.timeout_seconds,
+                lock_retry_delays=self.lock_retry_delays,
+            )
+        except GitCommandError:
+            return False
+        return not result.stdout.strip()
+
+    def has_commit_with_exact_subject(self, skill_dir: Path, subject: str) -> bool:
+        return self.find_commit_with_exact_subject(skill_dir, subject) is not None
+
     def log(self, skill_dir: Path, *, limit: int = 50) -> list[str]:
         result = run_git(
             skill_dir,
@@ -159,7 +351,7 @@ class GitLocalService:
                 skill_dir,
                 "log",
                 f"-n{limit}",
-                "--pretty=format:%H%x1f%an%x1f%aI%x1f%s%x1e",
+                "--pretty=format:%H%x1f%an%x1f%aI%x1f%s%x1f%B%x1e",
                 timeout_seconds=self.timeout_seconds,
                 lock_retry_delays=self.lock_retry_delays,
             )
@@ -173,20 +365,56 @@ class GitLocalService:
             record = record.strip()
             if not record:
                 continue
-            fields = record.split("\x1f")
-            if len(fields) != 4:
+            fields = record.split("\x1f", 4)
+            if len(fields) != 5:
                 continue
-            sha, author, timestamp_raw, message = fields
+            sha, author, timestamp_raw, message, body = fields
+            release_marker = self._release_marker_metadata(skill_dir, sha, message, body)
             history.append(
                 GitHistoryItem(
                     sha=sha,
                     message=message,
                     author=author,
                     timestamp=datetime.fromisoformat(timestamp_raw),
-                    kind=_history_kind(message),
+                    kind="release" if release_marker is not None else _history_kind(message),
+                    release_version=release_marker.get("release_version") if release_marker else None,
+                    artifact_id=release_marker.get("artifact_id") if release_marker else None,
+                    content_hash=release_marker.get("content_hash") if release_marker else None,
+                    manifest_ref=release_marker.get("manifest_ref") if release_marker else None,
                 )
             )
         return history
+
+    def _release_marker_metadata(
+        self,
+        skill_dir: Path,
+        sha: str,
+        subject: str,
+        body: str,
+    ) -> dict[str, str] | None:
+        release_version = _release_version_from_marker_subject(subject)
+        if release_version is None:
+            return None
+        trailers = _parse_commit_trailers(body)
+        if trailers.get(RELEASE_MARKER_TRAILER, "").lower() != "true":
+            return None
+        if trailers.get(RELEASE_VERSION_TRAILER) != release_version:
+            return None
+        content_hash = trailers.get(RELEASE_CONTENT_HASH_TRAILER)
+        manifest_ref = trailers.get(RELEASE_MANIFEST_REF_TRAILER)
+        if not content_hash or not manifest_ref:
+            return None
+        if not self._is_empty_snapshot_commit(skill_dir, sha):
+            return None
+        marker = {
+            "release_version": release_version,
+            "content_hash": content_hash,
+            "manifest_ref": manifest_ref,
+        }
+        artifact_id = trailers.get(RELEASE_ARTIFACT_ID_TRAILER)
+        if artifact_id:
+            marker["artifact_id"] = artifact_id
+        return marker
 
     def reset_hard(self, skill_dir: Path, sha: str) -> GitCommandResult:
         return run_git(
@@ -400,9 +628,67 @@ def _is_empty_or_damaged_history_error(stderr: str) -> bool:
     )
 
 
+def _is_unborn_head_error(stderr: str) -> bool:
+    lowered = stderr.lower()
+    return _is_empty_or_damaged_history_error(stderr) or "needed a single revision" in lowered
+
+
+def _is_update_ref_cas_error(stderr: str) -> bool:
+    lowered = stderr.lower()
+    return "cannot lock ref" in lowered and "but expected" in lowered
+
+
 def _is_revert_conflict_error(stderr: str) -> bool:
     lowered = stderr.lower()
     return "conflict" in lowered or "merge" in lowered and "in progress" in lowered
+
+
+def _normalize_commit_trailers(trailers: Mapping[str, object] | None) -> dict[str, str]:
+    if not trailers:
+        return {}
+    normalized: dict[str, str] = {}
+    for key, value in trailers.items():
+        normalized_key = str(key).strip()
+        normalized_value = " ".join(str(value).splitlines()).strip()
+        if normalized_key and normalized_value:
+            normalized[normalized_key] = normalized_value
+    return normalized
+
+
+def _format_commit_trailers(trailers: Mapping[str, str] | None) -> str:
+    if not trailers:
+        return ""
+    return "\n".join(f"{key}: {value}" for key, value in trailers.items())
+
+
+def _commit_message_has_trailers(message: str, expected: Mapping[str, str]) -> bool:
+    if not expected:
+        return True
+    actual = _parse_commit_trailers(message)
+    return all(actual.get(key) == value for key, value in expected.items())
+
+
+def _parse_commit_trailers(message: str) -> dict[str, str]:
+    trailers: dict[str, str] = {}
+    for raw_line in message.splitlines():
+        line = raw_line.strip()
+        if not line or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+        if key:
+            trailers[key] = value
+    return trailers
+
+
+def _release_version_from_marker_subject(subject: str) -> str | None:
+    if not subject.startswith(RELEASE_SNAPSHOT_PREFIX):
+        return None
+    release_version = subject.removeprefix(RELEASE_SNAPSHOT_PREFIX)
+    if release_version != release_version.strip() or any(char.isspace() for char in release_version):
+        return None
+    return release_version or None
 
 
 def _history_kind(message: str) -> GitHistoryKind:

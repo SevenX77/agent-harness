@@ -20,19 +20,31 @@ class FieldDifference(BaseModel):
     changed: bool
 
 
-class NodeGoldenResult(BaseModel):
+NodeGroupStatus = Literal["pass", "fail"]
+NodeSchemaStatus = Literal["valid", "stale", "missing"]
+
+
+class NodeGoldenGroup(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     node_id: str
-    verdict: Literal["pass", "fail"]
+    phase_id: str | None = None
+    status: NodeGroupStatus
     score: float
-    differences: list[FieldDifference] = Field(default_factory=list)
+    field_differences: list[FieldDifference] = Field(default_factory=list)
+    stale_fields: list[str] = Field(default_factory=list)
+    schema_status: NodeSchemaStatus = "valid"
+    baseline_ref: str
+    run_results_ref: str
 
 
 class CompareResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    differences: list[FieldDifference]
+    baseline_id: str
+    source_run_id: str | None = None
+    source_run_results_ref: str | None = None
+    baseline_ref: str
+    run_results_ref: str
     total_score: float
-    golden_run_id: str
-    node_results: list[NodeGoldenResult] = Field(default_factory=list)
+    node_groups: list[NodeGoldenGroup] = Field(default_factory=list)

@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { AxiosError } from "axios"
+import { AlertTriangle, FolderOpen, Loader2, ShieldCheck } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -11,27 +13,36 @@ import {
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
-import type { SkillDetail } from "@/api/types"
-import type { SkillGraphNodeData, SubagentRef } from "@/components/GraphCanvas"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import type { LintError, ResumeValidityResponse, SkillDetail } from "@/api/types"
+import { fieldErrorsByKey } from "@/components/studio/field-compile-errors"
+import type { SkillGraphNodeData, SkillNodeStatus, SubagentRef } from "@/components/GraphCanvas"
+import type { ResumeRunOptions } from "@/api/client"
+import { legacySubgraphTargetSkill, subgraphPathFieldState } from "@/components/studio/subgraph-path"
+import { nodeResumeOptionsFromValidity } from "@/components/studio/node-resume"
+import { getChildGraphTopology } from "@/api/client"
+import { selectSkillDirectory } from "@/lib/tauri"
 import { sha256Hex } from "@/lib/hash"
+import { runRoleTestJobToResult } from "../settings/llm-roles/role-test-store"
 import type { FileMeta } from "../file-types"
 import { PanelHeader } from "./_shared/PanelHeader"
-import { useOptionalWorkspaceContext } from "../WorkspaceContext"
+import { roleTestStatusBadge, type RoleTestStatusInput } from "./role-test-status"
 import {
   applyPhaseFrontmatterForm,
   parsePhaseFrontmatter,
   phaseFrontmatterToForm,
   type PhaseFrontmatterFormData,
+  type PhaseFrontmatterKind,
+  type PhaseSubagentRef,
 } from "./phase-frontmatter"
 
+// Node KIND is owned by the physical phase FILE (SKILL/LOGIC/SUBGRAPH.md) that
+// exists in the phase directory — `data.mode` is derived from that file in
+// build-nodes (phaseModeFromFiles), NOT from any author-writable `mode:`
+// frontmatter field (the engine rejects that). This label and the file picker
+// below therefore reflect the file on disk, never a settable mode property.
 function phaseKindLabel(data: Pick<SkillGraphNodeData, "mode" | "subgraphPath">): "LOGIC" | "AGENT" | "SUBGRAPH" {
   if (data.subgraphPath || data.mode === "subgraph") return "SUBGRAPH"
   if (data.mode === "skill" || data.mode === "llm" || data.mode === "agent") return "AGENT"
@@ -45,7 +56,14 @@ function phaseKindFile(data: Pick<SkillGraphNodeData, "mode" | "subgraphPath">):
   return "LOGIC.md"
 }
 
-function DetailRow({ label, value }: { label: string; value?: string | string[] | null }) {
+// Node kind is derived from the phase FILE KIND, never a `mode:` frontmatter field.
+function phaseFrontmatterKind(label: "LOGIC" | "AGENT" | "SUBGRAPH"): PhaseFrontmatterKind {
+  if (label === "SUBGRAPH") return "subgraph"
+  if (label === "AGENT") return "agent"
+  return "logic"
+}
+
+function DetailRow({ label, value, hint }: { label: string; value?: string | string[] | null; hint?: string }) {
   const values = Array.isArray(value) ? value : value ? [value] : []
   return (
     <div className="rounded-md border border-border bg-card px-3 py-2">
@@ -53,6 +71,7 @@ function DetailRow({ label, value }: { label: string; value?: string | string[] 
       <dd className="mt-1 text-xs text-foreground">
         {values.length > 0 ? values.join(", ") : <span className="text-muted-foreground">None</span>}
       </dd>
+      {hint ? <p className="mt-1 text-[10px] text-muted-foreground">{hint}</p> : null}
     </div>
   )
 }
@@ -104,24 +123,52 @@ interface PropertiesPanelProps {
   skillId?: string | null
   skillDetail?: SkillDetail
   selectedNode: { id: string; data: SkillGraphNodeData } | null
+  runId?: string | null
+  selectedNodeStatus?: SkillNodeStatus | null
+  resumeValidity?: ResumeValidityResponse | null
+  resumeValidityLoading?: boolean
+  resumeValidityError?: string | null
+  resumeLoading?: boolean
+  // Realtime lint diagnostics (engine field axis). Projected per-field by `field_path`
+  // onto the matching frontmatter field below; no-field errors degrade to the node badge.
+  lintErrors?: LintError[] | null
   onFileOpen?: (fileOrPath: FileMeta | string) => void
   onPhaseFileSave?: (payload: { path: string; content: string; expectedHash: string }) => Promise<void> | void
+  onResumeNode?: (options: ResumeRunOptions) => Promise<void> | void
+  /** Per-node golden promote (atom #32): write golden for just this node from the active run. */
+  onPromoteNode?: (nodeId: string) => Promise<void> | void
 }
 
 export function PropertiesPanel({
   skillId = null,
   skillDetail,
   selectedNode,
+  runId = null,
+  selectedNodeStatus = null,
+  resumeValidity = null,
+  resumeValidityLoading = false,
+  resumeValidityError = null,
+  resumeLoading = false,
+  lintErrors = null,
   onFileOpen,
   onPhaseFileSave,
+  onResumeNode,
+  onPromoteNode,
 }: PropertiesPanelProps) {
-  const workspace = useOptionalWorkspaceContext()
-  const selectedEdge = workspace?.selectedEdge
 
   const modeLabel = selectedNode ? phaseKindLabel(selectedNode.data) : null
+  const effectiveNodeStatus = selectedNodeStatus ?? selectedNode?.data.status ?? null
+  const kind: PhaseFrontmatterKind = phaseFrontmatterKind(modeLabel ?? "LOGIC")
   const filePath = selectedNode?.data.filePath ?? (selectedNode ? `phases/${selectedNode.id}/${phaseKindFile(selectedNode.data)}` : null)
   const fileContent = filePath ? skillDetail?.files?.[filePath] : undefined
   const subagents = selectedNode?.data.subagents ?? []
+  // Field-level near-projection (atom #5): group THIS node's lint errors by the engine's
+  // `field_path` so each frontmatter field can show its own marker; no-field errors are
+  // dropped here and stay on the node badge (atom #4).
+  const fieldErrors = useMemo(
+    () => (selectedNode ? fieldErrorsByKey(lintErrors, selectedNode.id) : {}),
+    [lintErrors, selectedNode],
+  )
   const phaseFormState = useMemo(() => {
     if (!filePath) {
       return { key: "none", ok: false as const, reason: "missing-node" as const, message: "Select a phase node to edit frontmatter." }
@@ -133,22 +180,26 @@ export function PropertiesPanel({
     if (!parsed.ok) {
       return { key: `${filePath}:${fileContent}`, ok: false as const, reason: parsed.reason, message: parsed.message }
     }
-    const form = phaseFrontmatterToForm(parsed.frontmatter, parsed.body)
-    if (typeof parsed.frontmatter.mode !== "string") {
-      form.mode = modeLabel === "SUBGRAPH" ? "subgraph" : modeLabel === "AGENT" ? "agent" : "logic"
+    const form = phaseFrontmatterToForm(parsed.frontmatter)
+    return {
+      key: `${filePath}:${fileContent}`,
+      ok: true as const,
+      form,
+      legacyTargetSkill: kind === "subgraph" ? legacySubgraphTargetSkill(fileContent) : null,
     }
-    return { key: `${filePath}:${fileContent}`, ok: true as const, form }
-  }, [fileContent, filePath, modeLabel])
+  }, [fileContent, filePath])
   const [loadedFormKey, setLoadedFormKey] = useState(phaseFormState.key)
   const [draft, setDraft] = useState<PhaseFrontmatterFormData | null>(() => (
     phaseFormState.ok ? phaseFormState.form : null
   ))
   const [saving, setSaving] = useState(false)
+  const [roleTest, setRoleTest] = useState<RoleTestStatusInput>({ running: false })
 
   useEffect(() => {
     setLoadedFormKey(phaseFormState.key)
     setDraft(phaseFormState.ok ? phaseFormState.form : null)
     setSaving(false)
+    setRoleTest({ running: false })
   }, [phaseFormState])
 
   const activeDraft = phaseFormState.ok
@@ -173,7 +224,7 @@ export function PropertiesPanel({
     if (!onPhaseFileSave || !filePath || fileContent === undefined || !activeDraft) {
       return
     }
-    const next = applyPhaseFrontmatterForm(fileContent, activeDraft)
+    const next = applyPhaseFrontmatterForm(fileContent, activeDraft, kind)
     if (!next.ok) {
       toast.error(`Frontmatter error: ${next.message}`)
       return
@@ -192,92 +243,37 @@ export function PropertiesPanel({
     }
   }
 
-  if (selectedEdge) {
-    return (
-      <div className="flex h-full flex-col bg-background">
-        <PanelHeader title="Connection Trace" />
-        <ScrollArea className="flex-1">
-          <div className="space-y-4 px-3 py-3 animate-in fade-in duration-200">
-            <div className="flex flex-col gap-1.5 rounded-md border border-border bg-card p-3 shadow-md">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Path Route
-              </div>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="font-mono text-xs text-indigo-400 bg-indigo-950/40 px-2 py-0.5 rounded border border-indigo-900/50">
-                  {selectedEdge.source}
-                </span>
-                <span className="text-muted-foreground text-xs">→</span>
-                <span className="font-mono text-xs text-emerald-400 bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-900/50">
-                  {selectedEdge.target}
-                </span>
-              </div>
-              <div className="mt-2 text-xs text-muted-foreground leading-relaxed">
-                Transferred context package captured during run execution.
-              </div>
-            </div>
+  // Reuses the settings role-test job runner (runRoleTestJobToResult) verbatim so
+  // the node Properties Test button verifies the same backend job + status the
+  // Settings page does (settings-ux-spec §2.7). No re-implementation.
+  const handleRoleTest = useCallback(async (roleName: string) => {
+    const trimmed = roleName.trim()
+    if (!trimmed) {
+      toast.error("Set an LLM role before testing.")
+      return
+    }
+    setRoleTest({ running: true, status: null, error: null })
+    try {
+      const result = await runRoleTestJobToResult(trimmed)
+      setRoleTest({ running: false, status: result.status, error: null })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Role test failed"
+      setRoleTest({ running: false, status: null, error: message })
+      toast.error(message)
+    }
+  }, [])
 
-            {/* Rich formatted subsections */}
-            <div className="space-y-3">
-              {/* Inputs Segment */}
-              {selectedEdge.contextJson?.inputs != null && (
-                <div className="rounded-md border border-border bg-zinc-900/40 p-3">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center justify-between">
-                    <span>Input Arguments</span>
-                    <Badge variant="outline" className="text-[9px] px-1 py-0 border-zinc-700 text-zinc-400">Inputs</Badge>
-                  </div>
-                  <pre className="text-[11px] font-mono text-zinc-300 bg-zinc-950 p-2.5 rounded border border-zinc-800/80 overflow-x-auto whitespace-pre-wrap break-all leading-normal">
-                    {JSON.stringify(selectedEdge.contextJson.inputs, null, 2)}
-                  </pre>
-                </div>
-              )}
-
-              {/* Phase Outputs Segment */}
-              {selectedEdge.contextJson?.phase_outputs && Object.keys(selectedEdge.contextJson.phase_outputs).length > 0 && (
-                <div className="rounded-md border border-border bg-zinc-900/40 p-3">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center justify-between">
-                    <span>Phase Outputs</span>
-                    <Badge variant="outline" className="text-[9px] px-1 py-0 border-zinc-700 text-zinc-400">Outputs</Badge>
-                  </div>
-                  <pre className="text-[11px] font-mono text-zinc-300 bg-zinc-950 p-2.5 rounded border border-zinc-800/80 overflow-x-auto whitespace-pre-wrap break-all leading-normal">
-                    {JSON.stringify(selectedEdge.contextJson.phase_outputs, null, 2)}
-                  </pre>
-                </div>
-              )}
-
-              {/* Full Trace JSON */}
-              <div className="rounded-md border border-border bg-zinc-900/40 p-3">
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center justify-between">
-                  <span>Full Frame Trace</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(JSON.stringify(selectedEdge.contextJson, null, 2))
-                      toast.success("Trace JSON copied to clipboard!")
-                    }}
-                    className="text-[10px] text-primary hover:underline flex items-center gap-1 cursor-pointer bg-transparent border-none p-0 outline-none"
-                  >
-                    Copy JSON
-                  </button>
-                </div>
-                <pre className="max-h-72 text-[11px] font-mono text-zinc-400 bg-zinc-950 p-2.5 rounded border border-zinc-800/80 overflow-auto whitespace-pre leading-normal">
-                  {JSON.stringify(selectedEdge.contextJson, null, 2)}
-                </pre>
-              </div>
-            </div>
-
-            <Button
-              type="button"
-              variant="secondary"
-              className="w-full text-xs"
-              onClick={() => workspace?.setSelectedEdge?.(null)}
-            >
-              Clear Inspector Selection
-            </Button>
-          </div>
-        </ScrollArea>
-      </div>
-    )
-  }
+  // Subgraph "import folder" affordance (n2-properties #20 / F4·R5): when the
+  // child-graph path is missing/unresolvable, let the author pick the child
+  // graph root via the native OS directory picker (Rust `select_directory`,
+  // Desktop-only with a graceful toast off-desktop) and write the chosen
+  // absolute path straight into the editable `path` field.
+  const handleImportSubgraphFolder = useCallback(async () => {
+    const selected = await selectSkillDirectory()
+    if (selected) {
+      setField("path", selected)
+    }
+  }, [])
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -290,17 +286,43 @@ export function PropertiesPanel({
               <span className="truncate text-xs font-medium text-foreground">{selectedNode.data.label}</span>
               {modeLabel ? <Badge variant="secondary">{modeLabel}</Badge> : null}
             </div>
+            <NodeResumeDebugBar
+              runId={runId}
+              nodeId={selectedNode.id}
+              nodeStatus={effectiveNodeStatus}
+              resumeValidity={resumeValidity}
+              loading={resumeValidityLoading}
+              error={resumeValidityError}
+              resumeLoading={resumeLoading}
+              onResumeNode={onResumeNode}
+            />
+            {modeLabel === "AGENT" ? (
+              <NodeGoldenSection
+                runId={runId}
+                nodeId={selectedNode.id}
+                hasGolden={selectedNode.data.goldenState === "has-golden"}
+                onPromoteNode={onPromoteNode}
+              />
+            ) : null}
             {phaseFormState.ok && activeDraft ? (
               <PhaseFrontmatterForm
                 value={activeDraft}
-                modeLabel={modeLabel}
+                kind={kind}
                 saving={saving}
                 canSave={canSave}
                 canReset={dirty && !saving}
+                roleTest={roleTest}
+                fieldErrors={fieldErrors}
+                legacyTargetSkill={phaseFormState.legacyTargetSkill ?? null}
+                skillId={skillId}
+                onImportSubgraphFolder={handleImportSubgraphFolder}
                 onFieldChange={setField}
                 onReset={handleReset}
                 onSave={() => {
                   void handleSave()
+                }}
+                onRoleTest={(roleName) => {
+                  void handleRoleTest(roleName)
                 }}
               />
             ) : (
@@ -321,7 +343,11 @@ export function PropertiesPanel({
             )}
             <dl className="space-y-3">
               <DetailRow label="Phase ID" value={selectedNode.id} />
-              <DetailRow label="Mode" value={modeLabel} />
+              <DetailRow
+                label="Node type"
+                value={modeLabel}
+                hint="Determined by the phase file (SKILL/LOGIC/SUBGRAPH.md) — not editable."
+              />
               <DetailRow label="Depends On" value={selectedNode.data.dependsOn} />
               <DetailRow label="Role" value={selectedNode.data.role} />
               <DetailRow label="Tools" value={selectedNode.data.tools} />
@@ -337,27 +363,169 @@ export function PropertiesPanel({
   )
 }
 
+/**
+ * Per-node golden promote (N4 atom #32). For an agent node, this writes a golden
+ * baseline for THIS node only from the active run (via the node_id-aware
+ * saveGoldenBaseline). Disabled until a run exists to promote from; once the node
+ * has a golden case it shows the captured state instead of the button.
+ */
+function NodeGoldenSection({
+  runId,
+  nodeId,
+  hasGolden,
+  onPromoteNode,
+}: {
+  runId: string | null
+  nodeId: string
+  hasGolden: boolean
+  onPromoteNode?: (nodeId: string) => Promise<void> | void
+}) {
+  const [promoting, setPromoting] = useState(false)
+
+  const handlePromote = async () => {
+    if (!onPromoteNode || !runId) return
+    setPromoting(true)
+    try {
+      await onPromoteNode(nodeId)
+    } finally {
+      setPromoting(false)
+    }
+  }
+
+  if (hasGolden) {
+    return (
+      <div className="flex items-center gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-600 dark:text-emerald-400">
+        <ShieldCheck className="size-3.5" />
+        <span>Golden captured for this node</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-md border border-border bg-card px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs text-muted-foreground">No golden for this node yet</span>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          disabled={!onPromoteNode || !runId || promoting}
+          onClick={() => {
+            void handlePromote()
+          }}
+        >
+          {promoting ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}
+          Promote to golden
+        </Button>
+      </div>
+      {!runId ? (
+        <p className="mt-1 text-[11px] text-muted-foreground">Run this skill first to capture a golden from its output.</p>
+      ) : null}
+    </div>
+  )
+}
+
+function NodeResumeDebugBar({
+  runId,
+  nodeId,
+  nodeStatus,
+  resumeValidity,
+  loading,
+  error,
+  resumeLoading,
+  onResumeNode,
+}: {
+  runId: string | null
+  nodeId: string
+  nodeStatus: SkillNodeStatus | null
+  resumeValidity: ResumeValidityResponse | null
+  loading: boolean
+  error: string | null
+  resumeLoading: boolean
+  onResumeNode?: (options: ResumeRunOptions) => Promise<void> | void
+}) {
+  if (!runId || nodeStatus !== "error") {
+    return null
+  }
+  const allowed = Boolean(resumeValidity?.resume_allowed)
+  const reason = loading
+    ? "checking"
+    : error
+      ? "checkpoint.invalid"
+      : resumeValidity?.reason ?? "checkpoint.not_found"
+  const dirtyFields = resumeValidity?.dirty_fields ?? []
+  const disabled = !allowed || loading || resumeLoading || !onResumeNode
+  const buttonLabel = allowed ? (resumeLoading ? "Resuming" : "Resume node") : "Resume disabled"
+
+  const handleResume = () => {
+    if (!allowed || !resumeValidity || !onResumeNode) {
+      return
+    }
+    void onResumeNode(nodeResumeOptionsFromValidity(resumeValidity, nodeId))
+  }
+
+  return (
+    <section className="rounded-md border border-border bg-card px-3 py-2" aria-label="Checkpoint validity">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            Checkpoint validity
+          </div>
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-foreground">
+            <Badge variant={allowed ? "secondary" : "destructive"}>{reason}</Badge>
+            {dirtyFields.map((field) => (
+              <Badge key={field} variant="outline">{field}</Badge>
+            ))}
+          </div>
+          {error ? <div className="mt-1 text-xs text-muted-foreground">{error}</div> : null}
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          disabled={disabled}
+          onClick={handleResume}
+        >
+          {loading ? (
+            <Loader2 className="size-3 animate-spin" data-icon="inline-start" />
+          ) : null}
+          {buttonLabel}
+        </Button>
+      </div>
+    </section>
+  )
+}
+
 function PhaseFrontmatterForm({
   value,
-  modeLabel,
+  kind,
   saving,
   canSave,
   canReset,
+  roleTest,
+  fieldErrors,
+  legacyTargetSkill,
+  skillId,
+  onImportSubgraphFolder,
   onFieldChange,
   onReset,
   onSave,
+  onRoleTest,
 }: {
   value: PhaseFrontmatterFormData
-  modeLabel: "LOGIC" | "AGENT" | "SUBGRAPH" | null
+  kind: PhaseFrontmatterKind
   saving: boolean
   canSave: boolean
   canReset: boolean
+  roleTest: RoleTestStatusInput
+  fieldErrors: Record<string, LintError[]>
+  legacyTargetSkill: string | null
+  skillId: string | null
+  onImportSubgraphFolder: () => void
   onFieldChange: <Key extends keyof PhaseFrontmatterFormData>(field: Key, value: PhaseFrontmatterFormData[Key]) => void
   onReset: () => void
   onSave: () => void
+  onRoleTest: (roleName: string) => void
 }) {
-  const kind = value.mode === "subgraph" ? "subgraph" : value.mode === "skill" || value.mode === "llm" || value.mode === "agent" ? "agent" : modeLabel === "SUBGRAPH" ? "subgraph" : modeLabel === "AGENT" ? "agent" : "logic"
-
   return (
     <form
       className="rounded-md border border-border bg-card px-3 py-3"
@@ -368,60 +536,34 @@ function PhaseFrontmatterForm({
     >
       <FieldSet>
         <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor="phase-name">Name</FieldLabel>
-            <Input
-              id="phase-name"
-              value={value.name}
-              onChange={(event) => onFieldChange("name", event.currentTarget.value)}
-            />
-          </Field>
-          <Field>
-            <FieldLabel>Mode</FieldLabel>
-            <Select value={value.mode || kind} onValueChange={(next) => onFieldChange("mode", next)}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Mode" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="logic">Logic</SelectItem>
-                <SelectItem value="agent">Agent</SelectItem>
-                <SelectItem value="subgraph">Subgraph</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          {kind === "logic" ? (
-            <Field>
-              <FieldLabel htmlFor="phase-python-callable">Python callable</FieldLabel>
-              <Input
-                id="phase-python-callable"
-                value={value.pythonCallable}
-                onChange={(event) => onFieldChange("pythonCallable", event.currentTarget.value)}
-              />
-              <FieldDescription>Function name exposed by this LOGIC phase.</FieldDescription>
-            </Field>
-          ) : null}
           {kind === "agent" ? (
             <>
               <Field>
-                <FieldLabel htmlFor="phase-system-prompt">System prompt</FieldLabel>
-                <Textarea
-                  id="phase-system-prompt"
-                  value={value.systemPrompt}
-                  onChange={(event) => onFieldChange("systemPrompt", event.currentTarget.value)}
-                  rows={5}
-                />
+                <FieldLabel htmlFor="phase-llm-role">
+                  LLM role
+                  <FieldErrorMarker errors={fieldErrors.llm_role} />
+                </FieldLabel>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="phase-llm-role"
+                    className="flex-1"
+                    value={value.llmRole}
+                    placeholder="analyst"
+                    onChange={(event) => onFieldChange("llmRole", event.currentTarget.value)}
+                  />
+                  <RoleTestControl
+                    roleName={value.llmRole}
+                    roleTest={roleTest}
+                    onRoleTest={onRoleTest}
+                  />
+                </div>
+                <FieldDescription>Routes model tier/policy. Inherits the graph default when blank.</FieldDescription>
               </Field>
               <Field>
-                <FieldLabel htmlFor="phase-exit-contract">Exit contract</FieldLabel>
-                <Textarea
-                  id="phase-exit-contract"
-                  value={value.exitContract}
-                  onChange={(event) => onFieldChange("exitContract", event.currentTarget.value)}
-                  rows={4}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="phase-tools">Tools</FieldLabel>
+                <FieldLabel htmlFor="phase-tools">
+                  Tools
+                  <FieldErrorMarker errors={fieldErrors.tools} />
+                </FieldLabel>
                 <Textarea
                   id="phase-tools"
                   value={value.tools}
@@ -430,17 +572,58 @@ function PhaseFrontmatterForm({
                 />
                 <FieldDescription>One tool name per line.</FieldDescription>
               </Field>
+              <SubagentsField
+                value={value.subagents}
+                onChange={(next) => onFieldChange("subagents", next)}
+              />
+            </>
+          ) : null}
+          {kind === "logic" ? (
+            <>
+              <Field>
+                <FieldLabel htmlFor="phase-actions">
+                  Actions
+                  <FieldErrorMarker errors={fieldErrors.actions} />
+                </FieldLabel>
+                <Textarea
+                  id="phase-actions"
+                  value={value.actions}
+                  onChange={(event) => onFieldChange("actions", event.currentTarget.value)}
+                  rows={4}
+                />
+                <FieldDescription>One action name per line, in execution order.</FieldDescription>
+              </Field>
+              <ValidatorField
+                value={value.validator}
+                errors={fieldErrors.validator}
+                onChange={(next) => onFieldChange("validator", next)}
+              />
+              {/* n2-properties #19 (atom #19): the fields an action may write back
+                  are bounded by io.outputs.properties, but that boundary is edited
+                  in the I/O panel — not here. Surface a NON-blocking hint so the
+                  author doesn't assume a logic node has no io constraint. */}
+              <FieldDescription>
+                Output fields an action writes are bounded by io.outputs — edit those field
+                boundaries in the I/O panel (toolbar tab 3).
+              </FieldDescription>
             </>
           ) : null}
           {kind === "subgraph" ? (
-            <Field>
-              <FieldLabel htmlFor="phase-target-skill">Target skill</FieldLabel>
-              <Input
-                id="phase-target-skill"
-                value={value.targetSkill}
-                onChange={(event) => onFieldChange("targetSkill", event.currentTarget.value)}
+            <>
+              <SubgraphPathField
+                value={value.path}
+                errors={fieldErrors.path}
+                legacyTargetSkill={legacyTargetSkill}
+                skillId={skillId}
+                onChange={(next) => onFieldChange("path", next)}
+                onImportFolder={onImportSubgraphFolder}
               />
-            </Field>
+              <ValidatorField
+                value={value.validator}
+                errors={fieldErrors.validator}
+                onChange={(next) => onFieldChange("validator", next)}
+              />
+            </>
           ) : null}
         </FieldGroup>
         <div className="flex justify-end gap-2">
@@ -456,8 +639,284 @@ function PhaseFrontmatterForm({
   )
 }
 
+/**
+ * Subgraph `path` editor (n2-properties #20 / D7·F4·R5). Renders the single
+ * whitelisted absolute-path field for a SUBGRAPH.md phase and surfaces two
+ * unresolvable states in red, plus an OS folder-picker to fix them:
+ *
+ *  - SYNTACTIC missing (empty / non-absolute path, or a still-legacy
+ *    non-path child reference) is derived synchronously from the live value via
+ *    `subgraphPathFieldState`, so the input goes red as the author types.
+ *  - DISK missing (an absolute path that does not resolve to a child GRAPH.md)
+ *    is confirmed against the backend resolver `getChildGraphTopology`
+ *    (`GET /skills/{id}/subgraph` → 404 SUBGRAPH_PATH_NOT_FOUND). The probe runs
+ *    only client-side (effect) for a usable absolute path; it never fires during
+ *    SSR, so the synchronous state is what render-contract tests observe.
+ *
+ * When the path is unresolvable the author clicks "Select folder to import
+ * subgraph", which calls the native directory picker and writes the chosen
+ * absolute path back into the field.
+ */
+function SubgraphPathField({
+  value,
+  errors,
+  legacyTargetSkill,
+  skillId,
+  onChange,
+  onImportFolder,
+}: {
+  value: string
+  errors?: LintError[]
+  legacyTargetSkill: string | null
+  skillId: string | null
+  onChange: (next: string) => void
+  onImportFolder: () => void
+}) {
+  const fieldState = subgraphPathFieldState(value, legacyTargetSkill)
+  const [diskMissing, setDiskMissing] = useState(false)
+
+  // Confirm an absolute path actually resolves on disk via the backend child-graph
+  // resolver. A 404 (SUBGRAPH_PATH_NOT_FOUND) means the referenced path does not
+  // exist; any non-404/transport error is left un-flagged here (the syntactic
+  // state already covers empty/non-absolute paths).
+  useEffect(() => {
+    if (fieldState.status !== "resolved" || !skillId || !fieldState.path) {
+      setDiskMissing(false)
+      return
+    }
+    let cancelled = false
+    setDiskMissing(false)
+    getChildGraphTopology(skillId, fieldState.path)
+      .then(() => {
+        if (!cancelled) setDiskMissing(false)
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        if (error instanceof AxiosError && error.response?.status === 404) {
+          setDiskMissing(true)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [fieldState.status, fieldState.path, skillId])
+
+  const unresolved = fieldState.status !== "resolved" || diskMissing
+
+  return (
+    <Field>
+      <FieldLabel htmlFor="phase-path">
+        Path
+        <FieldErrorMarker errors={errors} />
+      </FieldLabel>
+      <Input
+        id="phase-path"
+        value={value}
+        placeholder="/absolute/path/to/child_graph"
+        aria-invalid={unresolved || undefined}
+        onChange={(event) => onChange(event.currentTarget.value)}
+      />
+      <FieldDescription>Absolute path to the child graph skill root.</FieldDescription>
+      {fieldState.status === "migration-required" && fieldState.legacyTargetSkill ? (
+        <div className="rounded-md border border-border bg-muted px-2 py-1 text-xs text-foreground">
+          Legacy child reference <span className="font-mono">{fieldState.legacyTargetSkill}</span> no longer resolves subgraphs. Save an absolute path to migrate this phase.
+        </div>
+      ) : null}
+      {unresolved ? (
+        <div className="space-y-1.5">
+          {fieldState.status !== "migration-required" ? (
+            <p className="text-xs text-destructive">
+              {diskMissing
+                ? "This path does not resolve to a child graph on disk. Pick the folder that contains its GRAPH.md."
+                : "Enter an absolute path to the child graph, or import its folder below."}
+            </p>
+          ) : null}
+          <Button type="button" size="sm" variant="secondary" onClick={onImportFolder}>
+            <FolderOpen className="size-3.5" aria-hidden />
+            Select folder to import subgraph
+          </Button>
+        </div>
+      ) : null}
+    </Field>
+  )
+}
+
+function RoleTestControl({
+  roleName,
+  roleTest,
+  onRoleTest,
+}: {
+  roleName: string
+  roleTest: RoleTestStatusInput
+  onRoleTest: (roleName: string) => void
+}) {
+  const badge = roleTestStatusBadge(roleTest)
+  const showBadge = badge.running || roleTest.status != null || Boolean(roleTest.error)
+  return (
+    <div className="flex shrink-0 items-center gap-2">
+      {showBadge ? (
+        <Badge variant={badge.variant} className="h-6">
+          {badge.running ? <Loader2 className="size-3 animate-spin" aria-hidden /> : null}
+          {badge.label}
+        </Badge>
+      ) : null}
+      <Button
+        type="button"
+        size="sm"
+        variant="secondary"
+        disabled={badge.running || roleName.trim().length === 0}
+        onClick={() => onRoleTest(roleName)}
+      >
+        Test
+      </Button>
+    </div>
+  )
+}
+
+function ValidatorField({
+  value,
+  errors,
+  onChange,
+}: {
+  value: boolean
+  errors?: LintError[]
+  onChange: (next: boolean) => void
+}) {
+  return (
+    <Field orientation="horizontal" className="items-center justify-between gap-3">
+      <FieldLabel htmlFor="phase-validator" className="min-w-0">
+        Validator
+        <FieldErrorMarker errors={errors} />
+      </FieldLabel>
+      <Switch
+        id="phase-validator"
+        size="sm"
+        checked={value}
+        onCheckedChange={onChange}
+        aria-label="Validator"
+      />
+    </Field>
+  )
+}
+
+/**
+ * Per-field lint marker (authoring N3 atom #5): an inline warning/error glyph next to a
+ * frontmatter field whose engine `field_path` matched a diagnostic. Hover lists the
+ * message(s). Mirrors the canvas node badge idiom (SkillNode: AlertTriangle + Tooltip),
+ * reusing shadcn Tooltip and severity tokens — never a hand-rolled popover or raw color.
+ */
+function FieldErrorMarker({ errors }: { errors?: LintError[] | null }) {
+  if (!errors || errors.length === 0) {
+    return null
+  }
+  const hasError = errors.some((error) => error.severity === "error")
+  const tone = hasError ? "text-destructive" : "text-amber-500"
+  const count = errors.length === 1 ? "1 issue" : `${errors.length} issues`
+  const messages = errors.map((error) => error.message)
+  // The joined messages live on the trigger's accessible name + native title so the
+  // diagnostic is reachable without opening the styled Tooltip (and survives SSR).
+  const accessibleSummary = `Field has ${count}: ${messages.join("; ")}`
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          role="img"
+          aria-label={accessibleSummary}
+          title={accessibleSummary}
+          className={`ms-1 inline-flex items-center align-middle ${tone}`}
+        >
+          <AlertTriangle className="size-3.5" aria-hidden />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top">
+        <ul className="space-y-0.5">
+          {messages.map((message, index) => (
+            <li key={`${errors[index]?.error_code ?? "err"}-${index}`}>{message}</li>
+          ))}
+        </ul>
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+function SubagentsField({
+  value,
+  onChange,
+}: {
+  value: PhaseSubagentRef[]
+  onChange: (next: PhaseSubagentRef[]) => void
+}) {
+  const update = (index: number, patch: Partial<PhaseSubagentRef>) => {
+    onChange(value.map((entry, idx) => (idx === index ? { ...entry, ...patch } : entry)))
+  }
+  const remove = (index: number) => {
+    onChange(value.filter((_, idx) => idx !== index))
+  }
+  const add = () => {
+    onChange([...value, { name: "", target_skill: "", description: "" }])
+  }
+
+  return (
+    <Field>
+      <FieldLabel>Subagents</FieldLabel>
+      <div className="space-y-2">
+        {value.map((entry, index) => (
+          <div key={index} className="space-y-1.5 rounded-md border border-border bg-background px-2 py-2">
+            <Input
+              aria-label={`Subagent ${index + 1} name`}
+              value={entry.name}
+              placeholder="name"
+              onChange={(event) => update(index, { name: event.currentTarget.value })}
+            />
+            <Input
+              aria-label={`Subagent ${index + 1} target skill`}
+              value={entry.target_skill}
+              placeholder="target_skill"
+              onChange={(event) => update(index, { target_skill: event.currentTarget.value })}
+            />
+            <Input
+              aria-label={`Subagent ${index + 1} description`}
+              value={entry.description}
+              placeholder="description"
+              onChange={(event) => update(index, { description: event.currentTarget.value })}
+            />
+            <div className="flex justify-end">
+              <Button type="button" size="sm" variant="ghost" onClick={() => remove(index)}>
+                Remove
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <Button type="button" size="sm" variant="secondary" className="mt-1" onClick={add}>
+        Add subagent
+      </Button>
+    </Field>
+  )
+}
+
 function formsEqual(left: PhaseFrontmatterFormData, right: PhaseFrontmatterFormData): boolean {
-  return Object.keys(left).every((key) => (
-    left[key as keyof PhaseFrontmatterFormData] === right[key as keyof PhaseFrontmatterFormData]
-  ))
+  return (
+    left.llmRole === right.llmRole
+    && left.tools === right.tools
+    && left.actions === right.actions
+    && left.path === right.path
+    && left.validator === right.validator
+    && subagentsEqual(left.subagents, right.subagents)
+  )
+}
+
+function subagentsEqual(left: PhaseSubagentRef[], right: PhaseSubagentRef[]): boolean {
+  if (left.length !== right.length) {
+    return false
+  }
+  return left.every((entry, index) => {
+    const other = right[index]
+    return (
+      other !== undefined
+      && entry.name === other.name
+      && entry.target_skill === other.target_skill
+      && entry.description === other.description
+    )
+  })
 }

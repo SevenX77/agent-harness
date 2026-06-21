@@ -1,11 +1,25 @@
 import { createContext, useContext } from 'react'
+import type { EventEnvelope } from '@/api/types'
 import type { FileMeta } from './file-types'
 
 export type EditorSide = 'left' | 'right'
 export type WorkspacePanelKind = 'assets' | 'input' | 'timeline' | 'properties' | 'local-history' | null
+
+// One node-to-node micro operation recorded between the upstream phase end and
+// the downstream phase start. The engine already emits each of these on the run
+// event stream (blackboard_reduce / input_dispatch / input_file_injected /
+// artifact_saved); EdgeContextView renders the ordered list as the dot's
+// "what happened across this transition" operation log.
+export type EdgeOperation =
+  | { kind: 'reduce'; reducer: string; changed_keys: string[] }
+  | { kind: 'dispatch'; dispatched_keys: string[]; changed_keys: string[] }
+  | { kind: 'inject'; file_ref: string; target_field: string }
+  | { kind: 'persist'; name: string; path: string; size_bytes: number | null }
+
 export interface EdgeContextJson {
   inputs?: unknown
   phase_outputs?: Record<string, unknown>
+  operations?: EdgeOperation[]
   [key: string]: unknown
 }
 
@@ -18,6 +32,7 @@ export interface SelectedEdge {
 
 export interface OpenFile extends FileMeta {
   skillId: string
+  workspaceRoot?: string | null
   hash: string | null
   title?: string
   saveEnabled?: boolean
@@ -51,6 +66,9 @@ export interface WorkspaceContextValue {
   selectedEdge?: SelectedEdge | null
   setSelectedEdge?: (edge: SelectedEdge | null) => void
   onPanelChange?: (panel: WorkspacePanelKind) => void
+  // Unfiltered trace events for the active run. The edge dot reads these to
+  // resolve the real blackboard snapshot dispatched across the clicked edge.
+  traceEvents?: EventEnvelope[]
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null)

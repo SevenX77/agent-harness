@@ -34,6 +34,14 @@ def import_drafts_path() -> Path:
     )
 
 
+def role_test_results_path() -> Path:
+    """Return the active Studio LLM role/copilot test-result store path."""
+    return _env_or_default(
+        "STUDIO_LLM_ROLE_TEST_RESULTS_PATH",
+        "llm_role_test_results.json",
+    )
+
+
 def canonical_rules_path() -> Path:
     """Return the active Studio LLM canonical rules path."""
     return _env_or_default(
@@ -53,5 +61,6 @@ __all__ = [
     "canonical_rules_path",
     "credentials_path",
     "import_drafts_path",
+    "role_test_results_path",
     "roles_path",
 ]

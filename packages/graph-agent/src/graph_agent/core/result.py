@@ -81,6 +81,9 @@ class RunResult(BaseModel):
     finished_at: datetime | None = None
     wall_time_sec: float = 0.0
     source: Literal["run", "predict"] = "run"
+    artifact_ref: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
+    source_map_ref: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    execution_fingerprint: str | None = Field(default=None, exclude_if=lambda value: value is None)
     phases: list[PhaseRecord] | None = None
     path_diff: PathDiff | None = None
     diagnostics: list[ErrorPayload] = Field(default_factory=list)

@@ -1,0 +1,260 @@
+"""N4 golden atoms #29 (content READ) + #35 (compile-time field-drift gate).
+
+#29: GET /api/skills/{id}/golden/{golden_id}/content returns the persisted per-node
+golden ``expected_output`` so the I/O panel can open a golden for editing (read-only,
+no write guard). ``?node_id=`` narrows to one node's case.
+
+#35: a persisted golden whose node's CURRENT io.outputs schema now ``required``s a field
+the golden is missing (output-schema drift) FAILS compile with a fatal CompileError, so
+the N3 compile-gating blocks predict until the golden is reconciled. The gate binds to the
+output schema only (prompt/agent-internal edits never appear in ``required``).
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import pytest
+from app.models.golden import SetManualGoldenReq
+from app.services.golden_diff import set_manual_golden_for_node
+from fastapi.testclient import TestClient
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+AGENT_SKILL = "agent-golden-skill"
+
+
+def _write_agent_skill(skills_dir: Path, *, required_outputs: str) -> None:
+    """Register an agent-node skill whose io.outputs ``required`` is parametrizable.
+
+    ``required_outputs`` is the YAML array literal for the SKILL.md output ``required``
+    (e.g. ``[segments]`` or ``[segments, headline]``), letting a test add a required
+    field after a golden was written to simulate output-schema drift.
+    """
+    skill_dir = skills_dir / AGENT_SKILL
+    (skill_dir / "phases" / "segment").mkdir(parents=True)
+    (skill_dir / "GRAPH.md").write_text(
+        """---
+schema_version: "v0.3.0"
+name: agent-golden-skill
+description: Agent node with output schema
+io:
+  inputs:
+    type: object
+    required: [chapter_content]
+    properties:
+      chapter_content:
+        type: string
+    additionalProperties: false
+  outputs:
+    type: object
+    required: [segments]
+    properties:
+      segments:
+        type: array
+        items:
+          type: object
+    additionalProperties: true
+phases:
+  - segment
+---
+<phase depends_on="input" output>segment</phase>
+""",
+        encoding="utf-8",
+    )
+    (skill_dir / "phases" / "segment" / "SKILL.md").write_text(
+        f"""---
+llm_role: analyst
+phase_config:
+  io:
+    inputs:
+      type: object
+      required: [chapter_content]
+      properties:
+        chapter_content:
+          type: string
+    outputs:
+      type: object
+      required: {required_outputs}
+      properties:
+        segments:
+          type: array
+          items:
+            type: object
+        headline:
+          type: string
+  tools: []
+  max_iterations: 5
+---
+<role>seg editor</role>
+<goal>segment</goal>
+<step id="S1" name="segment">do it</step>
+""",
+        encoding="utf-8",
+    )
+
+
+@pytest.fixture
+def agent_skill(studio_roots: tuple[Path, Path]) -> str:
+    skills_dir, _workspaces = studio_roots
+    _write_agent_skill(skills_dir, required_outputs="[segments]")
+    return AGENT_SKILL
+
+
+# --------------------------------------------------------------------------- #29
+
+
+def test_read_golden_content_returns_expected_output(agent_skill: str, client: TestClient) -> None:
+    """After a manual golden write, GET /content returns that node's expected_output."""
+    expected = {"segments": [{"start": 0}], "headline": "Intro"}
+    set_manual_golden_for_node(agent_skill, SetManualGoldenReq(node_id="segment", expected_output=expected))
+
+    response = client.get(f"/api/skills/{agent_skill}/golden/segment/content")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == "segment"
+    assert body["source_run_id"] is None
+    assert body["locked"] is False
+    assert len(body["cases"]) == 1
+    case = body["cases"][0]
+    assert case["node_id"] == "segment"
+    assert case["expected_output"] == expected
+
+
+def test_read_golden_content_node_filter(agent_skill: str, client: TestClient) -> None:
+    """?node_id= narrows the returned cases to the requested node only."""
+    set_manual_golden_for_node(
+        agent_skill,
+        SetManualGoldenReq(node_id="segment", expected_output={"segments": []}),
+    )
+
+    response = client.get(
+        f"/api/skills/{agent_skill}/golden/segment/content",
+        params={"node_id": "segment"},
+    )
+
+    assert response.status_code == 200
+    cases = response.json()["cases"]
+    assert [c["node_id"] for c in cases] == ["segment"]
+
+
+def test_read_golden_content_unknown_baseline_404(agent_skill: str, client: TestClient) -> None:
+    response = client.get(f"/api/skills/{agent_skill}/golden/ghost/content")
+    assert response.status_code == 404
+    assert response.json()["error_code"] == "golden.baseline_not_found"
+
+
+def test_read_golden_content_unknown_node_422(agent_skill: str, client: TestClient) -> None:
+    set_manual_golden_for_node(
+        agent_skill,
+        SetManualGoldenReq(node_id="segment", expected_output={"segments": []}),
+    )
+
+    response = client.get(
+        f"/api/skills/{agent_skill}/golden/segment/content",
+        params={"node_id": "ghost"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error_code"] == "golden.case_not_found"
+
+
+def test_read_golden_content_is_read_only_no_write_guard(agent_skill: str, client: TestClient) -> None:
+    """The content read needs no X-Studio-Write-Fallback header (it is read-only)."""
+    set_manual_golden_for_node(
+        agent_skill,
+        SetManualGoldenReq(node_id="segment", expected_output={"segments": []}),
+    )
+
+    # No write-guard header supplied -> still 200 (would be 409 NATIVE_FS_REQUIRED on a write route).
+    response = client.get(f"/api/skills/{agent_skill}/golden/segment/content")
+    assert response.status_code == 200
+
+
+# --------------------------------------------------------------------------- #35
+
+
+def test_compile_passes_when_golden_satisfies_output_schema(
+    agent_skill: str,
+    client: TestClient,
+) -> None:
+    """A golden carrying every required output field compiles cleanly."""
+    set_manual_golden_for_node(
+        agent_skill,
+        SetManualGoldenReq(node_id="segment", expected_output={"segments": [{"start": 0}]}),
+    )
+
+    response = client.post(f"/api/skills/{agent_skill}/compile")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+
+
+def test_compile_passes_when_no_golden_exists(agent_skill: str, client: TestClient) -> None:
+    """No golden persisted -> the field-drift gate is a no-op, compile succeeds."""
+    response = client.post(f"/api/skills/{agent_skill}/compile")
+    assert response.status_code == 200
+
+
+def test_compile_fails_when_golden_missing_newly_required_field(
+    studio_roots: tuple[Path, Path],
+    client: TestClient,
+) -> None:
+    """Output-schema drift: add a required field after the golden was written -> fatal.
+
+    The golden has only ``segments``; the schema later requires ``segments`` AND
+    ``headline``. The missing ``headline`` must fail compile with a fatal CompileError
+    keyed ``segment.headline``, blocking predict.
+    """
+    skills_dir, _workspaces = studio_roots
+    _write_agent_skill(skills_dir, required_outputs="[segments, headline]")
+    # Golden written WITHOUT the (later) required headline field.
+    set_manual_golden_for_node(
+        AGENT_SKILL,
+        SetManualGoldenReq(node_id="segment", expected_output={"segments": [{"start": 0}]}),
+    )
+
+    response = client.post(f"/api/skills/{AGENT_SKILL}/compile")
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["code"] == "compile_failed"
+    assert "missing" in body["detail"].lower()
+    fields = {error["field"] for error in body["errors"]}
+    assert "segment.headline" in fields
+    assert all(error["severity"] == "fatal" for error in body["errors"])
+    # The satisfied field never appears as a gap.
+    assert "segment.segments" not in fields
+
+
+def test_compile_gate_binds_to_output_schema_not_prompt(
+    studio_roots: tuple[Path, Path],
+    client: TestClient,
+) -> None:
+    """Changing only the agent prompt (not the output schema) must NOT trip the gate.
+
+    The golden satisfies the output schema; editing the <role>/<goal>/<step> body leaves
+    the io.outputs ``required`` untouched, so compile still succeeds.
+    """
+    skills_dir, _workspaces = studio_roots
+    _write_agent_skill(skills_dir, required_outputs="[segments]")
+    set_manual_golden_for_node(
+        AGENT_SKILL,
+        SetManualGoldenReq(node_id="segment", expected_output={"segments": [{"start": 0}]}),
+    )
+
+    skill_md = skills_dir / AGENT_SKILL / "phases" / "segment" / "SKILL.md"
+    skill_md.write_text(
+        skill_md.read_text(encoding="utf-8").replace(
+            "<role>seg editor</role>",
+            "<role>a completely rewritten narrative segmentation persona</role>",
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.post(f"/api/skills/{AGENT_SKILL}/compile")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"

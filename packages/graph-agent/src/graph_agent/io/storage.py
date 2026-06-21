@@ -44,6 +44,15 @@ _GOLDEN_SUFFIX = ".golden"
 _DEFAULT_HISTORY_RETENTION = 10
 
 
+class LegacyRunArtifactReadForbiddenError(Exception):
+    """Raised when runtime code tries to use bare run files as artifact truth."""
+
+    def __init__(self, message: str, *, path: Path | None = None) -> None:
+        super().__init__(message)
+        self.error_code = "artifact.legacy_storage_forbidden"
+        self.details = {"path": str(path)} if path is not None else {}
+
+
 def _dir_size_bytes(path: Path) -> int:
     """Return the total size in bytes of all files under ``path``."""
     total = 0
@@ -205,13 +214,32 @@ class StorageManager:
         return target
 
     def load_latest(self, phase: str | None, name: str) -> Any:
-        """Load the most recent artifact with the given ``(phase, name)``.
+        """Refuse runtime reads from bare run-scoped artifact files.
 
-        Scans sibling run directories (same ``skill_id`` / ``pipeline_prefix``)
-        in descending lexicographic order — which, because callers are
-        expected to pass timestamped run_ids, amounts to most-recent-first.
-        Golden directories are included in the search.
+        D2.2 requires run/predict artifacts to be business-readable through
+        ``RunArtifactStore`` refs and content hashes. Files written by
+        :meth:`save_artifact` remain available as legacy/export/cache files,
+        but this default runtime read path must not promote them to truth.
+        Use :meth:`load_latest_legacy` only for explicit migration/legacy code.
         """
+        artifact = self._find_latest_artifact_path(phase, name)
+        if artifact is None:
+            return None
+
+        raise LegacyRunArtifactReadForbiddenError(
+            "StorageManager run artifact reads require RunArtifactStore ref/hash; "
+            "bare run files are legacy/export/cache only.",
+            path=artifact,
+        )
+
+    def load_latest_legacy(self, phase: str | None, name: str) -> Any:
+        """Load a bare run artifact for explicit legacy or migration flows only."""
+        artifact = self._find_latest_artifact_path(phase, name)
+        if artifact is None:
+            return None
+        return self._read_artifact(artifact, legacy_migration=True)
+
+    def _find_latest_artifact_path(self, phase: str | None, name: str) -> Path | None:
         runs_dir = self._runs_dir()
         if not runs_dir.exists():
             return None
@@ -232,7 +260,7 @@ class StorageManager:
                     name,
                     artifact,
                 )
-                return self._read_artifact(artifact)
+                return artifact
 
         logger.info(
             "StorageManager load_latest miss: skill_id=%s phase=%s name=%s",
@@ -280,7 +308,13 @@ class StorageManager:
         return self._artifact_path_under(base_dir, name)
 
     @staticmethod
-    def _read_artifact(path: Path) -> Any:
+    def _read_artifact(path: Path, *, legacy_migration: bool = False) -> Any:
+        if not legacy_migration:
+            raise LegacyRunArtifactReadForbiddenError(
+                "StorageManager._read_artifact is legacy/migration-only; "
+                "runtime artifact reads require RunArtifactStore ref/hash.",
+                path=path,
+            )
         if path.suffix.lower() == ".json":
             try:
                 return json.loads(path.read_text(encoding="utf-8"))
@@ -363,4 +397,4 @@ def sanitize_run_id(raw: str) -> str:
     return cleaned or "run"
 
 
-__all__ = ["StorageManager", "sanitize_run_id"]
+__all__ = ["LegacyRunArtifactReadForbiddenError", "StorageManager", "sanitize_run_id"]

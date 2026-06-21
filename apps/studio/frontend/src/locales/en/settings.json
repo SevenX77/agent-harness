@@ -1,0 +1,84 @@
+{
+  "shell": {
+    "title": "Settings",
+    "close": "Close settings",
+    "connectionLost": "Connection lost"
+  },
+  "tabs": {
+    "general": "General",
+    "apiKeys": "API Keys",
+    "llmRoles": "LLM Roles",
+    "copilot": "Copilot"
+  },
+  "saveStatus": {
+    "pending": "Pending",
+    "saving": "Saving",
+    "saved": "Saved",
+    "error": "Save failed"
+  },
+  "general": {
+    "title": "General",
+    "description": "Application defaults and collaboration identity. Changes auto-save.",
+    "userId": {
+      "label": "Studio User ID",
+      "placeholder": "your-username",
+      "description": "Used as the local Git author and team owner."
+    },
+    "defaultSkillFolder": {
+      "label": "Default skill folder",
+      "placeholder": "Select a folder path",
+      "choose": "Choose",
+      "reset": "Reset default skill folder",
+      "description": "New skills are created here when no folder is chosen."
+    },
+    "giteaHost": {
+      "label": "Gitea Host",
+      "placeholder": "https://gitea.example.com",
+      "description": "Private Gitea host used for team collaboration."
+    },
+    "remoteModelCatalog": {
+      "label": "Remote model info",
+      "description": "Read remote model catalog before showing route candidates."
+    },
+    "language": {
+      "label": "Language",
+      "description": "Switch Studio UI copy without restarting the app.",
+      "ariaLabel": "Studio language",
+      "english": "English",
+      "simplifiedChinese": "Simplified Chinese"
+    }
+  },
+  "apiKeys": {
+    "title": "API Keys",
+    "description": "Local LLM provider credentials used by Studio runtime. Changes auto-save.",
+    "loadFailedTitle": "API Keys load failed",
+    "loadFailedDescription": "{{error}}. Stored provider values are not shown until the credentials document loads.",
+    "officialProviders": "Official Providers",
+    "thirdPartyProviders": "Third-party Providers",
+    "noThirdPartyProviders": "No third-party providers configured.",
+    "addProvider": "Add Provider",
+    "addProviderDialogTitle": "Add provider",
+    "providerName": "Provider name",
+    "add": "Add"
+  },
+  "llmRoles": {
+    "title": "LLM Roles",
+    "loadingDescription": "Edit model and provider fallback order.",
+    "description": "Edit model and provider fallback order. Changes auto-save.",
+    "validationFailed": "Validation failed: {{error}}"
+  },
+  "copilot": {
+    "title": "Copilot",
+    "description": "Configure copilot roles with the same model group fallback pattern used by LLM Roles.",
+    "claudeAgentSdk": "Claude Agent SDK",
+    "testToast": {
+      "passed": "{{title}} test passed",
+      "needsAttention": "{{title}} test needs attention",
+      "failed": "{{title}} test failed"
+    },
+    "aria": {
+      "testing": "Testing {{title}}...",
+      "ready": "{{title}} ready: {{ready}}/{{total}} routes"
+    }
+  }
+}

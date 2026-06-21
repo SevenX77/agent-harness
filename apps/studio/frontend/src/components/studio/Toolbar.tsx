@@ -1,10 +1,10 @@
-import { Clock, FileInput, Files, History, Moon, Settings, Settings2, Sun } from "lucide-react"
+import { Clock, FileInput, Files, FileText, History, Moon, Settings, Settings2, Sun } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { toggleTheme, useThemeValue } from "@/store/themeStore"
 
-export type PanelKind = "assets" | "input" | "timeline" | "properties" | "local-history"
+export type PanelKind = "assets" | "input" | "timeline" | "trace-doc" | "properties" | "local-history"
 
 interface ToolbarProps {
   activePanel: PanelKind | null
@@ -15,9 +15,10 @@ interface ToolbarProps {
 const tools: Array<{ id: PanelKind; icon: typeof Files; label: string; shortcut: string }> = [
   { id: "assets", icon: Files, label: "Assets", shortcut: "1" },
   { id: "properties", icon: Settings2, label: "Properties", shortcut: "2" },
-  { id: "input", icon: FileInput, label: "Input", shortcut: "3" },
-  { id: "timeline", icon: Clock, label: "Trace Timeline", shortcut: "4" },
-  { id: "local-history", icon: History, label: "Local History", shortcut: "5" },
+  { id: "input", icon: FileInput, label: "I/O", shortcut: "3" },
+  { id: "timeline", icon: Clock, label: "Event Trace", shortcut: "4" },
+  { id: "trace-doc", icon: FileText, label: "Full Trace", shortcut: "5" },
+  { id: "local-history", icon: History, label: "Local History", shortcut: "6" },
 ]
 
 export function Toolbar({ activePanel, onPanelChange, onSettingsOpen }: ToolbarProps) {

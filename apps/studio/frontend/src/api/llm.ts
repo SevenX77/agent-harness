@@ -9,7 +9,7 @@ export type ProviderType =
 export type RouteStatus = 'verified' | 'unverified_manual' | 'disabled' | 'failed' | 'probe-verified'
 export type ModelProbeStatus = RouteStatus | 'testing'
 export type ProviderKind = 'official' | 'third_party' | 'custom'
-export type ProviderUiState = 'ready' | 'untested' | 'cooling_down' | 'needs_setup' | 'off'
+export type ProviderUiState = 'ready' | 'historical_ready' | 'untested' | 'cooling_down' | 'failed' | 'off'
 export type RoleFitState = 'using' | 'downgraded' | 'needs_test' | 'not_fit'
 export type CapabilityState = 'unknown' | 'callable_only' | 'partial' | 'known'
 export type CapabilitySummaryState = 'supported' | 'unsupported' | 'mixed' | 'unknown'
@@ -35,6 +35,7 @@ export interface ProviderEndpoint {
   display_name: string
   protocol: ProviderType
   base_url: string
+  credential_ref?: string | null
   api_key?: string | null
   status: RouteStatus
   last_test_at?: string | null
@@ -46,6 +47,8 @@ export interface ProviderEndpoint {
   proxy_env?: string | null
   metadata: Record<string, unknown>
 }
+
+export type ProviderEndpointWrite = Omit<ProviderEndpoint, 'status' | 'last_test_at' | 'last_test_message'>
 
 export interface VerifiedProfile {
   profile_id: string
@@ -69,6 +72,8 @@ export interface ProviderRoute {
   canonical_id: string
   display_name?: string | null
   status: RouteStatus
+  /** Backend-projected 6-state UI status (apikeys#30); GET /llm/registry stamps it per route. */
+  ui_state: ProviderUiState
   capabilities: Record<string, CapabilityValue>
   verified_profiles?: VerifiedProfile[]
   metadata: Record<string, unknown>
@@ -103,13 +108,22 @@ export interface ProviderModelOption {
   reason_code?: string | null
   capability_state: CapabilityState
   capabilities: Record<string, CapabilityValue>
+  /**
+   * R-F8: the route's gateway call method id (e.g. `anthropic_messages`,
+   * `ark_anthropic_messages`). Used by CopilotTab to keep ONLY routes that
+   * the Claude Agent SDK / Anthropic Messages caller can actually drive.
+   * Optional for backward-compat with model groups built before the field
+   * was emitted; absent value means "not eligible for copilot".
+   */
+  call_method_id?: string | null
 }
 
 export interface ModelGroupStatusSummary {
   ready: number
+  historical_ready: number
   untested: number
   cooling_down: number
-  needs_setup: number
+  failed: number
   off: number
 }
 
@@ -167,6 +181,7 @@ export interface RegistryResponse extends CredentialRegistryResponse {
   canonical_groups: CanonicalGroup[]
   lint_results: LintResult[]
   route_runtime_settings?: Record<string, Record<string, RuntimeSettingDescriptor>>
+  catalog_source?: CatalogSourceMetadata | null
   role_effective_runtime_settings?: Record<string, Record<string, Record<string, EffectiveRuntimeSetting>>>
   setup_required: boolean
 }
@@ -174,6 +189,27 @@ export interface RegistryResponse extends CredentialRegistryResponse {
 export interface EndpointSecretResponse {
   endpoint_id: string
   api_key: string
+}
+
+export interface CatalogSourceMetadata {
+  enabled: boolean
+  source_url: string
+  fetched_at: string
+  etag: string | null
+  cache: boolean
+  route_candidates_count: number
+  evidence_records_count: number
+  new_records_count: number
+  last_error: string | null
+}
+
+export interface CatalogSyncResponse {
+  status: 'success'
+  message: string
+  route_candidates_count: number
+  evidence_records_count: number
+  new_records_count: number
+  catalog_source: CatalogSourceMetadata
 }
 
 /**
@@ -197,6 +233,8 @@ export interface ModelInfo {
   id: string
   route_id?: string
   status?: ModelProbeStatus
+  /** Backend-projected 6-state UI status carried from the route (apikeys#30). */
+  ui_state?: ProviderUiState
   verified_profile_count?: number
   verified_profiles?: VerifiedProfile[]
   last_probe_message?: string | null
@@ -269,24 +307,6 @@ export interface ProviderTestResponse {
   error_code?: string | null
   available_models?: ModelInfo[]
   available_sdks?: string[]
-}
-
-export interface ProviderTestProgressOptions {
-  onProgress?: (response: ProviderTestResponse, job: EndpointTestJobResponse) => void
-}
-
-export interface EndpointTestJobResponse {
-  job_id: string
-  endpoint_id: string
-  status: 'queued' | 'running' | 'completed' | 'failed'
-  total_model_count: number
-  tested_model_count: number
-  verified_route_count: number
-  failed_model_count: number
-  catalog_only_count: number
-  message?: string | null
-  available_models: ModelInfo[]
-  available_sdks: string[]
 }
 
 export interface NotableModelsResponse {
@@ -367,6 +387,9 @@ export interface RoleEntry {
   source_profile_id?: string | null
   source_profile_snapshot?: Record<string, unknown> | null
   system_prompt_prefix?: string | null
+  // #51: a by-reference bundle link. When set the role's chain is materialized
+  // from the referenced bundle (live), not a snapshot copy of its routes.
+  bundle_id?: string | null
 }
 
 export interface ModelBundleEntry {
@@ -440,13 +463,26 @@ export interface RoleTestResponse {
 }
 
 export type RoleTestJobStatus = 'queued' | 'running' | 'completed' | 'failed'
-export type RoleTestProviderProgressStatus = 'queued' | 'testing' | 'ok' | 'failed' | 'blocked' | 'untested'
+// R-F11: extend with "cooling_down" so the copilot SDK probe path can surface
+// rate-limit-driven cooldowns (anthropic 429) directly into the route lights.
+export type RoleTestProviderProgressStatus =
+  | 'queued'
+  | 'testing'
+  | 'ok'
+  | 'failed'
+  | 'blocked'
+  | 'untested'
+  | 'cooling_down'
 
 export interface RoleTestProviderProgress {
   canonical_id: string
   route_id: string
   status: RoleTestProviderProgressStatus
   message?: string | null
+  // R-F21: when status === 'cooling_down', the suggested cooldown in seconds so
+  // the Test Button can render a `Cooling down {n}s` countdown and stay disabled
+  // until it elapses. Optional/null for non-cooldown states.
+  retry_after_seconds?: number | null
 }
 
 export interface RoleTestJobResponse {
@@ -456,6 +492,13 @@ export interface RoleTestJobResponse {
   message?: string | null
   provider_statuses: RoleTestProviderProgress[]
   result?: RoleTestResponse | null
+  /**
+   * R-F9: gateway error code (e.g. "resource.no_available_route") attached
+   * when `status === 'failed'`. Pairs with `message` (human Chinese text)
+   * + `error_payload` (debug context). Optional/null for normal runs.
+   */
+  error_code?: string | null
+  error_payload?: Record<string, unknown> | null
 }
 
 interface BackendRolesData {
@@ -475,6 +518,7 @@ interface BackendRoleEntry {
   lint_requirements: Record<string, LintSeverity>
   source_profile_id?: string | null
   source_profile_snapshot?: Record<string, unknown> | null
+  bundle_id?: string | null
 }
 
 export interface ModelEntry {
@@ -534,115 +578,16 @@ function routesForEndpoint(registry: CredentialRegistryResponse, endpointId: str
 }
 
 export function modelGroupsFromRegistry(registry: RegistryResponse): ModelGroup[] {
-  if (registry.model_groups?.length) return registry.model_groups
-  return legacyModelGroupsFromRegistry(registry)
-}
-
-function legacyModelGroupsFromRegistry(registry: CredentialRegistryResponse): ModelGroup[] {
-  const routesByCanonical = new Map<string, ProviderRoute[]>()
-  for (const route of Object.values(registry.provider_routes)) {
-    const canonicalId = route.canonical_id || route.route_slug
-    routesByCanonical.set(canonicalId, [
-      ...(routesByCanonical.get(canonicalId) ?? []),
-      route,
-    ])
-  }
-  return [...routesByCanonical.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([canonicalId, routes]) => {
-      const providerModels = routes
-        .sort((left, right) => left.route_id.localeCompare(right.route_id))
-        .map((route) => legacyProviderModelOption(registry, route))
-        .filter((option): option is ProviderModelOption => option !== null)
-      return {
-        canonical_id: canonicalId,
-        display_name: routes[0]?.display_name ?? canonicalId,
-        provider_models: providerModels,
-        status_summary: summarizeProviderModelStates(providerModels),
-        capability_summary: summarizeProviderModelCapabilities(providerModels),
-      }
-    })
-}
-
-function legacyProviderModelOption(
-  registry: CredentialRegistryResponse,
-  route: ProviderRoute,
-): ProviderModelOption | null {
-  const endpoint = registry.provider_endpoints[route.endpoint_id]
-  if (!endpoint) return null
-  const modelType = capabilityString(route.capabilities, 'model_type')
-  const capabilityFamily = capabilityString(route.capabilities, 'capability_family') ?? modelType
-  return {
-    route_id: route.route_id,
-    endpoint_id: endpoint.endpoint_id,
-    provider_label: endpoint.display_name,
-    provider_kind: endpoint.provider_kind ?? 'third_party',
-    provider_model_id: route.provider_model_id,
-    model_type: modelType,
-    capability_family: capabilityFamily,
-    input_modalities: capabilityStringArray(route.capabilities, 'input_modalities'),
-    output_modalities: capabilityStringArray(route.capabilities, 'output_modalities'),
-    ui_state: legacyProviderUiState(endpoint, route),
-    ui_detail: legacyProviderUiDetail(endpoint, route),
-    retry_at: null,
-    reason_code: legacyProviderReasonCode(endpoint, route),
-    capability_state: Object.keys(route.capabilities).length > 0 ? 'known' : 'unknown',
-    capabilities: route.capabilities,
-  }
-}
-
-function capabilityString(
-  capabilities: Record<string, CapabilityValue>,
-  key: string,
-): string | null {
-  const value = capabilities[key]?.value
-  return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
-function capabilityStringArray(
-  capabilities: Record<string, CapabilityValue>,
-  key: string,
-): string[] {
-  const value = capabilities[key]?.value
-  if (Array.isArray(value)) {
-    return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-  }
-  return typeof value === 'string' && value.trim() ? [value.trim()] : []
-}
-
-function legacyProviderUiState(endpoint: ProviderEndpoint, route: ProviderRoute): ProviderUiState {
-  if (endpoint.status === 'disabled' || route.status === 'disabled') return 'off'
-  if (!endpoint.api_key || endpoint.status === 'failed' || route.status === 'failed') return 'needs_setup'
-  if (endpoint.status === 'verified' && route.status === 'verified') return 'ready'
-  return 'untested'
-}
-
-function legacyProviderReasonCode(endpoint: ProviderEndpoint, route: ProviderRoute): string | null {
-  if (!endpoint.api_key) return 'missing_key'
-  const routeReason = stringMetadata(route.metadata, 'reason_code')
-  if (routeReason) return routeReason
-  const endpointReason = stringMetadata(endpoint.metadata, 'reason_code')
-  if (endpointReason) return endpointReason
-  if (route.status === 'failed') return 'route_failed'
-  if (endpoint.status === 'failed') return endpointErrorCode(endpoint) ?? 'endpoint_failed'
-  return null
-}
-
-function legacyProviderUiDetail(endpoint: ProviderEndpoint, route: ProviderRoute): string | null {
-  return stringMetadata(route.metadata, 'last_probe_message') ?? endpoint.last_test_message ?? null
-}
-
-function stringMetadata(metadata: Record<string, unknown>, key: string): string | null {
-  const value = metadata[key]
-  return typeof value === 'string' && value.trim() ? value : null
+  return registry.model_groups ?? []
 }
 
 function summarizeProviderModelStates(providerModels: ProviderModelOption[]): ModelGroupStatusSummary {
   const summary: ModelGroupStatusSummary = {
     ready: 0,
+    historical_ready: 0,
     untested: 0,
     cooling_down: 0,
-    needs_setup: 0,
+    failed: 0,
     off: 0,
   }
   for (const option of providerModels) {
@@ -664,10 +609,9 @@ function summarizeProviderModelCapabilities(providerModels: ProviderModelOption[
 
 function modelBundleGroupsFromBackend(
   data: RolesData,
-  registry: RegistryResponse,
   baseModelGroups: ModelGroup[],
 ): ModelGroup[] {
-  const routeOptions = providerModelOptionsByRouteId(registry, baseModelGroups)
+  const routeOptions = providerModelOptionsByRouteId(baseModelGroups)
   return Object.entries(data.model_bundles ?? {}).flatMap(([bundleId, bundle]) => {
     const providerModels = bundleRouteIds(bundle)
       .map((routeId) => routeOptions.get(routeId) ?? null)
@@ -685,7 +629,6 @@ function modelBundleGroupsFromBackend(
 }
 
 function providerModelOptionsByRouteId(
-  registry: RegistryResponse,
   modelGroups: ModelGroup[],
 ): Map<string, ProviderModelOption> {
   const routeOptions = new Map<string, ProviderModelOption>()
@@ -693,11 +636,6 @@ function providerModelOptionsByRouteId(
     for (const option of group.provider_models) {
       routeOptions.set(option.route_id, option)
     }
-  }
-  for (const route of Object.values(registry.provider_routes)) {
-    if (routeOptions.has(route.route_id)) continue
-    const option = legacyProviderModelOption(registry, route)
-    if (option) routeOptions.set(route.route_id, option)
   }
   return routeOptions
 }
@@ -719,7 +657,7 @@ function rolesDataFromBackend(
 
   const registryModelGroups = registry ? modelGroupsFromRegistry(registry) : []
   const modelGroups = registry
-    ? [...modelBundleGroupsFromBackend(data, registry, registryModelGroups), ...registryModelGroups]
+    ? [...modelBundleGroupsFromBackend(data, registryModelGroups), ...registryModelGroups]
     : []
   const models = Object.fromEntries(
     modelGroups.map((group) => [
@@ -780,10 +718,11 @@ function roleEntryFromBackend(roleName: string, role: RoleEntry, data: RolesData
     models,
     fallback_chain: role.fallback_chain ?? [],
     lint_requirements: role.lint_requirements ?? {},
+    bundle_id: role.bundle_id ?? null,
   }
 }
 
-function rolesDataToBackend(data: RolesData): BackendRolesData {
+export function rolesDataToBackend(data: RolesData): BackendRolesData {
   return {
     schema_version: 3,
     model_profiles: data.model_profiles ?? {},
@@ -819,6 +758,9 @@ function roleEntryToBackend(
   if (role.source_profile_snapshot !== undefined) {
     entry.source_profile_snapshot = role.source_profile_snapshot
   }
+  // #51: persist the bundle reference so the backend materializes the chain by
+  // reference (live bundle edits reflect; this role is not a snapshot copy).
+  if (role.bundle_id != null) entry.bundle_id = role.bundle_id
   return entry
 }
 
@@ -913,12 +855,6 @@ function cachedResultForCredentialUpdate(update: ProviderCredentialUpdate): Prov
   return null
 }
 
-function routeStatusFromTestStatus(status: TestStatus): RouteStatus {
-  if (status === 'ok') return 'verified'
-  if (status === 'untested') return 'unverified_manual'
-  return 'failed'
-}
-
 function modelInfoFromRoute(route: ProviderRoute): ModelInfo {
   const lastProbeMessage = route.metadata.last_probe_message
   const capabilities: Record<string, unknown> = { ...route.capabilities }
@@ -928,6 +864,7 @@ function modelInfoFromRoute(route: ProviderRoute): ModelInfo {
     id: route.provider_model_id,
     route_id: route.route_id,
     status: route.status,
+    ui_state: route.ui_state,
     verified_profile_count: (route.verified_profiles ?? []).filter((profile) => profile.status === 'ready').length,
     verified_profiles: route.verified_profiles ?? [],
     last_probe_message: typeof lastProbeMessage === 'string' ? lastProbeMessage : null,
@@ -1092,37 +1029,20 @@ function registryToCredentials(registry: CredentialRegistryResponse): Credential
 function endpointFromCredentialUpdate(
   update: ProviderCredentialUpdate,
   existing?: ProviderEndpoint,
-  cachedResult?: ProviderTestResult | null,
-): ProviderEndpoint {
+  _cachedResult?: ProviderTestResult | null,
+): ProviderEndpointWrite {
   const nextProtocol = update.provider_type ?? existing?.protocol ?? 'openai_compatible'
   const nextBaseUrl = update.base_url ?? existing?.base_url ?? ''
   const nextSecret = update.api_key === redactedSecret
     ? existing?.api_key === redactedSecret ? undefined : existing?.api_key
     : update.api_key ?? existing?.api_key ?? null
-  const secretChanged = Boolean(
-    existing &&
-    update.api_key &&
-    update.api_key !== '**********' &&
-    update.api_key !== (existing.api_key ?? ''),
-  )
-  const testParamsChanged = Boolean(
-    existing &&
-    (
-      nextProtocol !== existing.protocol ||
-      nextBaseUrl !== existing.base_url ||
-      secretChanged
-    ),
-  )
-  const restoredStatus = cachedResult ? routeStatusFromTestStatus(cachedResult.last_test_status) : null
   return {
     endpoint_id: update.id,
     display_name: update.name || existing?.display_name || update.id,
     protocol: nextProtocol,
     base_url: nextBaseUrl,
     api_key: nextSecret,
-    status: testParamsChanged ? restoredStatus ?? 'unverified_manual' : existing?.status ?? 'unverified_manual',
-    last_test_at: testParamsChanged ? cachedResult?.last_test_at ?? null : existing?.last_test_at ?? null,
-    last_test_message: testParamsChanged ? cachedResult?.last_test_message ?? null : existing?.last_test_message ?? null,
+    ...(existing?.credential_ref !== undefined ? { credential_ref: existing.credential_ref } : {}),
     timeout_seconds: existing?.timeout_seconds ?? 120,
     trust_env: existing?.trust_env ?? false,
     proxy_env: existing?.proxy_env ?? null,
@@ -1238,6 +1158,12 @@ export async function getRegistry(): Promise<RegistryResponse> {
   return cacheRegistry(response.data)
 }
 
+export async function syncRemoteModelCatalog(): Promise<CatalogSyncResponse> {
+  const response = await api.post<CatalogSyncResponse>('/llm/catalog/sync')
+  cachedRegistry = null
+  return response.data
+}
+
 export async function getModelGroups(): Promise<ModelGroup[]> {
   const registry = cachedRegistry ?? await getRegistry()
   return modelGroupsFromRegistry(registry)
@@ -1278,7 +1204,7 @@ async function hydrateEndpointSecrets<T extends CredentialRegistryResponse>(regi
 }
 
 export async function putRegistryEndpoints(
-  providerEndpoints: Record<string, ProviderEndpoint>,
+  providerEndpoints: Record<string, ProviderEndpointWrite>,
 ): Promise<CredentialRegistryResponse> {
   for (const [endpointId, endpoint] of Object.entries(providerEndpoints)) {
     rememberEndpointSecret(endpointId, endpoint.api_key)
@@ -1443,7 +1369,6 @@ export async function testProvider(
 
 export async function getProviderModels(
   request: ProviderTestRequest,
-  options: ProviderTestProgressOptions = {},
 ): Promise<ProviderTestResponse> {
   if (!request.api_key.trim()) {
     return {
@@ -1457,7 +1382,9 @@ export async function getProviderModels(
   }
   rememberEndpointSecret(request.id, request.api_key)
   const existing = cachedRegistry?.provider_endpoints[request.id]
-  const savedRegistry = await putRegistryEndpoints({
+  // Pre-test upsert persists the edited draft (base_url normalized server-side)
+  // before the endpoint is exercised — see design atom #25 ("测试前置 upsert 落 endpoint").
+  await putRegistryEndpoints({
     [request.id]: endpointFromCredentialUpdate(
       {
         id: request.id,
@@ -1469,16 +1396,18 @@ export async function getProviderModels(
       existing,
     ),
   })
-  const savedEndpoint = savedRegistry.provider_endpoints[request.id]
-  if (savedEndpoint?.provider_kind === 'official') {
-    return testOfficialProviderModelsWithJob(request, savedEndpoint, options)
-  }
+  // apikeys#24/#25: official AND third-party now share the single POST
+  // /endpoints/{id}/test entry. The backend internally forks (official verifies on
+  // get-models reachability; third-party runs protocol auto-detect + a real
+  // batch-inference probe) and is the sole authority on whether the endpoint is
+  // verified. The FE no longer forks by provider_kind nor judges connectivity off
+  // a "not failed" heuristic — an endpoint is connected iff status === 'verified'.
   const response = await api.post<EndpointTestResponse>(`/llm/endpoints/${segment(request.id)}/test`)
   const registry = cacheRegistry(response.data.registry)
   const endpoint = registry.provider_endpoints[request.id]
   if (!endpoint) throw new Error(`Endpoint model list response omitted endpoint: ${request.id}`)
   const routes = routesForEndpoint(registry, request.id)
-  const modelListReachable = endpoint.status !== 'failed'
+  const isVerified = endpoint.status === 'verified'
   const models = routes.map(modelInfoFromRoute)
   upsertCachedResult(request.id, {
     params_fingerprint: paramsFingerprint({
@@ -1491,111 +1420,19 @@ export async function getProviderModels(
     last_test_status: statusToTestStatus(endpoint.status),
     last_test_at: endpoint.last_test_at ?? '',
     last_test_message: endpoint.last_test_message ?? '',
-    last_error_code: modelListReachable ? '' : endpointErrorCode(endpoint) ?? '',
+    last_error_code: isVerified ? '' : endpointErrorCode(endpoint) ?? '',
     available_models: models,
     available_sdks: models.length > 0 ? [endpoint.protocol] : [],
   })
   return {
-    status: modelListReachable ? 'ok' : endpointTestStatus(endpoint),
+    status: isVerified ? 'ok' : endpointTestStatus(endpoint),
     latency_ms: null,
     model_seen: models[0]?.id ?? null,
     message: endpoint.last_test_message ?? null,
-    error_code: modelListReachable ? null : endpointErrorCode(endpoint),
+    error_code: isVerified ? null : endpointErrorCode(endpoint),
     available_models: models,
     available_sdks: models.length > 0 ? [endpoint.protocol] : [],
   }
-}
-
-async function testOfficialProviderModelsWithJob(
-  request: ProviderTestRequest,
-  endpoint: ProviderEndpoint,
-  options: ProviderTestProgressOptions,
-): Promise<ProviderTestResponse> {
-  const started = await startEndpointTestJob(request.id)
-  options.onProgress?.(providerTestResponseFromEndpointTestJob(request, endpoint, started), started)
-  const completed = await waitForEndpointTestJob(started, (job) => {
-    options.onProgress?.(providerTestResponseFromEndpointTestJob(request, endpoint, job), job)
-  })
-  return providerTestResponseFromEndpointTestJob(request, endpoint, completed)
-}
-
-async function startEndpointTestJob(endpointId: string): Promise<EndpointTestJobResponse> {
-  const response = await api.post<EndpointTestJobResponse>(`/llm/endpoints/${segment(endpointId)}/test-jobs`)
-  return response.data
-}
-
-async function getEndpointTestJob(jobId: string): Promise<EndpointTestJobResponse> {
-  const response = await api.get<EndpointTestJobResponse>(`/llm/endpoint-test-jobs/${segment(jobId)}`)
-  return response.data
-}
-
-async function waitForEndpointTestJob(
-  job: EndpointTestJobResponse,
-  onProgress?: (job: EndpointTestJobResponse) => void,
-): Promise<EndpointTestJobResponse> {
-  let current = job
-  while (current.status === 'queued' || current.status === 'running') {
-    await delay(750)
-    current = await getEndpointTestJob(current.job_id)
-    onProgress?.(current)
-  }
-  return current
-}
-
-function providerTestResponseFromEndpointTestJob(
-  request: ProviderTestRequest,
-  endpoint: ProviderEndpoint,
-  job: EndpointTestJobResponse,
-): ProviderTestResponse {
-  const completed = job.status === 'completed'
-  const failed = job.status === 'failed'
-  const availableModels = job.available_models ?? []
-  const availableSdks = job.available_sdks?.length ? job.available_sdks : [endpoint.protocol]
-  const lastTestStatus: TestStatus = failed ? 'error' : completed ? 'ok' : 'untested'
-  const cachedResult: ProviderTestResult = {
-    params_fingerprint: paramsFingerprint({
-      api_key: request.api_key,
-      base_url: request.base_url ?? '',
-      provider_type: request.provider_type,
-    }),
-    base_url: request.base_url ?? '',
-    provider_type: request.provider_type,
-    last_test_status: lastTestStatus,
-    last_test_at: new Date().toISOString(),
-    last_test_message: job.message ?? '',
-    last_error_code: failed ? 'endpoint_test_failed' : '',
-    available_models: availableModels,
-    available_sdks: availableSdks,
-  }
-  upsertCachedResult(request.id, cachedResult)
-  if (cachedRegistry?.provider_endpoints[request.id]) {
-    const currentEndpoint = cachedRegistry.provider_endpoints[request.id]
-    cachedRegistry = {
-      ...cachedRegistry,
-      provider_endpoints: {
-        ...cachedRegistry.provider_endpoints,
-        [request.id]: {
-          ...currentEndpoint,
-          status: failed ? 'failed' : completed ? 'verified' : currentEndpoint.status,
-          last_test_at: cachedResult.last_test_at,
-          last_test_message: cachedResult.last_test_message,
-        },
-      },
-    }
-  }
-  return {
-    status: failed ? 'error' : 'ok',
-    latency_ms: null,
-    model_seen: availableModels[0]?.id ?? null,
-    message: job.message ?? null,
-    error_code: failed ? 'endpoint_test_failed' : null,
-    available_models: availableModels,
-    available_sdks: availableSdks,
-  }
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => globalThis.setTimeout(resolve, ms))
 }
 
 export async function testProviderEndpoint(
@@ -1703,6 +1540,17 @@ export async function testRole(roleName: string): Promise<RoleTestResponse> {
 
 export async function startRoleTestJob(roleName: string): Promise<RoleTestJobResponse> {
   const response = await api.post<RoleTestJobResponse>(`/llm/roles/${segment(roleName)}/test-jobs`, {})
+  return response.data
+}
+
+// #50b: bundle Test reuses the role test-job orchestration. The backend resolves
+// the bundle via a transient materialized role (no persisted-store pollution) and
+// keys the job under __bundle__{id}; the same getRoleTestJob poll loop applies.
+export async function startBundleTestJob(bundleId: string): Promise<RoleTestJobResponse> {
+  const response = await api.post<RoleTestJobResponse>(
+    `/llm/model-bundles/${segment(bundleId)}/test-jobs`,
+    {},
+  )
   return response.data
 }
 

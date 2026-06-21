@@ -14,9 +14,10 @@ interface ConflictDialogProps {
   onKeepLocal: () => void
   onUseRemote: () => void
   onViewDiff: () => void
+  onOverwriteRetry: () => void
 }
 
-export function ConflictDialog({ conflict, onKeepLocal, onUseRemote, onViewDiff }: ConflictDialogProps) {
+export function ConflictDialog({ conflict, onKeepLocal, onUseRemote, onViewDiff, onOverwriteRetry }: ConflictDialogProps) {
   return (
     <Dialog open={Boolean(conflict)}>
       <DialogContent showCloseButton={false}>
@@ -32,6 +33,9 @@ export function ConflictDialog({ conflict, onKeepLocal, onUseRemote, onViewDiff 
           </Button>
           <Button type="button" variant="outline" onClick={onUseRemote}>
             Use Remote
+          </Button>
+          <Button type="button" variant="outline" onClick={onOverwriteRetry}>
+            Overwrite/Retry Save
           </Button>
           <Button type="button" onClick={onKeepLocal}>
             Keep Local

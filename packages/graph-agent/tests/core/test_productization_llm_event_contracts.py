@@ -4,6 +4,7 @@ import builtins
 import dataclasses
 import importlib
 import inspect
+import json
 from datetime import UTC, datetime
 from typing import Any
 
@@ -51,6 +52,7 @@ def test_event_envelope_and_stream_cursor_expose_resume_and_gap_contract() -> No
     StreamCursor = event_contracts.StreamCursor
 
     assert {
+        "schema_version",
         "stream_id",
         "seq",
         "run_id",
@@ -58,6 +60,8 @@ def test_event_envelope_and_stream_cursor_expose_resume_and_gap_contract() -> No
         "payload",
         "cursor",
         "timestamp",
+        "error_code",
+        "error_payload",
     } <= _fields(EventEnvelope)
     assert {
         "stream_id",
@@ -73,6 +77,7 @@ def test_event_envelope_and_stream_cursor_expose_resume_and_gap_contract() -> No
         window_start_seq=1,
     )
     event = EventEnvelope(
+        schema_version="studio.event.v1",
         stream_id="stream-run-1",
         seq=42,
         run_id="run-1",
@@ -84,6 +89,43 @@ def test_event_envelope_and_stream_cursor_expose_resume_and_gap_contract() -> No
 
     assert event.seq == cursor.next_seq
     assert event.cursor == "stream-run-1:41"
+    assert event.schema_version == "studio.event.v1"
+
+
+def test_event_error_payload_is_structured_and_sanitized() -> None:
+    event_contracts = importlib.import_module("graph_agent.core.event_contracts")
+
+    TransportErrorPayload = event_contracts.TransportErrorPayload
+    make_event_envelope = event_contracts.make_event_envelope
+
+    event = make_event_envelope(
+        stream_id="stream-run-1",
+        seq=7,
+        run_id="run-1",
+        event_type="stream.error",
+        payload={},
+        error_code="stream.cursor_gap",
+        error_payload=TransportErrorPayload(
+            error_code="stream.cursor_gap",
+            message="cursor gap sk-live-secret Traceback (most recent call last)",
+            details={
+                "api_key": "sk-live-secret",
+                "traceback": "Traceback (most recent call last):\nboom",
+                "safe": "visible",
+            },
+            retryable=True,
+        ),
+    )
+
+    dumped = json.dumps(event.model_dump(mode="json"), sort_keys=True)
+
+    assert event.error_payload is not None
+    assert event.error_payload.message == "[redacted]"
+    assert event.error_payload.details["api_key"] == "[redacted]"
+    assert event.error_payload.details["traceback"] == "[redacted]"
+    assert event.error_payload.details["safe"] == "visible"
+    assert "sk-live-secret" not in dumped
+    assert "Traceback (most recent call last)" not in dumped
 
 
 def test_response_envelope_has_schema_version_and_structured_error_payload() -> None:

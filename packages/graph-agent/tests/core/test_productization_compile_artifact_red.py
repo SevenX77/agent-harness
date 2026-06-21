@@ -4,6 +4,7 @@ import importlib
 import json
 import os
 import shutil
+import zipfile
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -86,6 +87,25 @@ def test_compile_artifact_hash_is_stable_across_temp_roots_and_mtime(
     assert first.execution_fingerprint == second.execution_fingerprint
 
 
+def test_compile_artifact_archive_does_not_use_deflate_compression_for_identity_bytes(
+    tmp_path: Path,
+    mock_skill_resolver: Any,
+) -> None:
+    skill_root = tmp_path / "skill"
+    _write_logic_skill(skill_root)
+
+    manifest = _compile_artifact(skill_root, skill_resolver=mock_skill_resolver)
+
+    assert manifest.artifact_bytes is not None
+    archive_path = tmp_path / "artifact.zip"
+    archive_path.write_bytes(manifest.artifact_bytes)
+    with zipfile.ZipFile(archive_path) as archive:
+        compression = {info.filename: info.compress_type for info in archive.infolist()}
+
+    assert compression
+    assert set(compression.values()) == {zipfile.ZIP_STORED}
+
+
 def test_execution_fingerprint_ignores_ui_metadata(
     tmp_path: Path,
     mock_skill_resolver: Any,
@@ -99,6 +119,117 @@ def test_execution_fingerprint_ignores_ui_metadata(
     second = _compile_artifact(second_root, skill_resolver=mock_skill_resolver)
 
     assert first.execution_fingerprint == second.execution_fingerprint
+
+
+def test_execution_fingerprint_changes_when_graph_execution_semantics_change(
+    tmp_path: Path,
+    mock_skill_resolver: Any,
+) -> None:
+    first_root = tmp_path / "semantic-a" / "skill"
+    second_root = tmp_path / "semantic-b" / "skill"
+    _write_logic_skill(first_root)
+    shutil.copytree(first_root, second_root)
+
+    graph_path = second_root / "GRAPH.md"
+    graph_path.write_text(
+        """---
+schema_version: "v0.3.0"
+name: productization-compile-artifact
+metadata: {'ui': {'nodes': {'draft': {'x': 1, 'y': 2}}}}
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+  outputs:
+    type: object
+    properties:
+      answer:
+        type: string
+phases:
+  - review
+  - draft
+---
+<phase depends_on="input">review</phase>
+<phase depends_on="review" output>draft</phase>
+""",
+        encoding="utf-8",
+    )
+    _write_text(
+        second_root / "phases" / "review" / "LOGIC.md",
+        """---
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+  outputs:
+    type: object
+    properties:
+      topic:
+        type: string
+---
+<action>review</action>
+""",
+    )
+    _write_text(
+        second_root / "phases" / "review" / "actions" / "review.py",
+        "def review(context):\n"
+        "    return {'topic': context.get('topic', '')}\n",
+    )
+
+    first = _compile_artifact(first_root, skill_resolver=mock_skill_resolver)
+    second = _compile_artifact(second_root, skill_resolver=mock_skill_resolver)
+
+    assert first.execution_fingerprint != second.execution_fingerprint
+
+
+def test_execution_fingerprint_changes_when_phase_io_schema_changes(
+    tmp_path: Path,
+    mock_skill_resolver: Any,
+) -> None:
+    first_root = tmp_path / "io-a" / "skill"
+    second_root = tmp_path / "io-b" / "skill"
+    _write_logic_skill(first_root)
+    shutil.copytree(first_root, second_root)
+
+    logic_path = second_root / "phases" / "draft" / "LOGIC.md"
+    logic_path.write_text(
+        logic_path.read_text(encoding="utf-8").replace(
+            "answer:\n        type: string",
+            "answer:\n        type: number",
+        ),
+        encoding="utf-8",
+    )
+
+    first = _compile_artifact(first_root, skill_resolver=mock_skill_resolver)
+    second = _compile_artifact(second_root, skill_resolver=mock_skill_resolver)
+
+    assert first.execution_fingerprint != second.execution_fingerprint
+
+
+def test_execution_fingerprint_changes_when_action_code_changes(
+    tmp_path: Path,
+    mock_skill_resolver: Any,
+) -> None:
+    first_root = tmp_path / "action-a" / "skill"
+    second_root = tmp_path / "action-b" / "skill"
+    _write_logic_skill(first_root)
+    shutil.copytree(first_root, second_root)
+
+    action_path = second_root / "phases" / "draft" / "actions" / "draft.py"
+    action_path.write_text(
+        "def draft(context):\n"
+        "    return {'answer': 'changed:' + str(context.get('topic', ''))}\n",
+        encoding="utf-8",
+    )
+
+    first = _compile_artifact(first_root, skill_resolver=mock_skill_resolver)
+    second = _compile_artifact(second_root, skill_resolver=mock_skill_resolver)
+
+    assert first.execution_fingerprint != second.execution_fingerprint
 
 
 def test_compile_artifact_writes_source_map_for_runtime_nodes(
@@ -127,6 +258,24 @@ def test_compile_artifact_writes_source_map_for_runtime_nodes(
 
     manifest_path = _file_uri_path(manifest.artifact_ref.manifest_ref)
     assert manifest_path.is_file()
+
+
+def test_compile_artifact_does_not_write_manifest_side_effects_into_source_root(
+    tmp_path: Path,
+    mock_skill_resolver: Any,
+) -> None:
+    skill_root = tmp_path / "skill"
+    _write_logic_skill(skill_root)
+
+    manifest = _compile_artifact(skill_root, skill_resolver=mock_skill_resolver)
+
+    manifest_path = _file_uri_path(manifest.artifact_ref.manifest_ref)
+    source_map_path = _file_uri_path(manifest.source_map_ref)
+    assert manifest_path.is_file()
+    assert source_map_path.is_file()
+    assert skill_root not in manifest_path.parents
+    assert skill_root not in source_map_path.parents
+    assert not (skill_root / ".graph_agent").exists()
 
 
 def _file_uri_path(ref: str) -> Path:

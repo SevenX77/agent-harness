@@ -1,5 +1,6 @@
 import type { Node } from '@xyflow/react'
-import type { IoDeclaration } from '@/api/types'
+import type { CompileError, IoDeclaration } from '@/api/types'
+import type { GoldenNodeState } from '@/components/studio/node-golden'
 
 export type SkillNodeStatus = 'idle' | 'running' | 'success' | 'error' | 'paused' | 'breakpoint'
 
@@ -10,17 +11,64 @@ export interface SubagentRef {
 }
 
 export interface SkillGraphNodeData extends Record<string, unknown> {
+  skillId: string
   label: string
   mode: string
   role?: string | null
   tools?: string[]
   filePath?: string
   status: SkillNodeStatus
+  /**
+   * N5 atom #1 (spec F1): one-line error summary for a failed/halted node, derived
+   * from this phase's last failure event (validation_fail / retry_exhausted) by the
+   * same event→node-status derivation that drives the red light. Rendered in-place on
+   * the node so the user sees *why* the run stopped without opening the Properties
+   * panel. Only meaningful when `status === 'error'`.
+   */
+  errorMessage?: string
+  /** Compile/lint errors attributed to this phase node (separate channel from run status). */
+  compileErrors?: CompileError[]
+  /**
+   * Golden acceptance tri-state for this node (N4 atom #30), a separate channel from
+   * run status and compile health: 'has-golden' (🟢, node in a golden baseline's cases)
+   * > 'logic-ok' (🟡, agent node ran in the most-recent predict) > undefined (🔘
+   * untested). See node-golden.ts.
+   */
+  goldenState?: GoldenNodeState
+  /**
+   * N5 atom #3 (dirty-downstream-graying, spec F3): true when this node is in the
+   * `affected_downstream` set the resume-validity endpoint returned for the node
+   * the user is resuming from — i.e. an upstream edit made this downstream node's
+   * checkpoint stale, so its node-level Resume must NOT be offered. The canvas
+   * grays/dims the node and explains why (its Resume can't continue). Unrelated
+   * side-branches are absent from the set and stay normal. Driven only by the real
+   * backend slice — never set when resume is clean.
+   */
+  isDirtyDownstream?: boolean
   dependsOn: string[]
   subgraphPath?: string | null
   subagents?: SubagentRef[]
   isExpanded?: boolean
   onToggleSubgraph?: () => void
+  /**
+   * N2 atom #15 (l3-step-edit): the agent phase body (SKILL.md text, sans
+   * frontmatter handling — the full file content is fine since the step
+   * transforms only touch `<step>` blocks). Present only for AGENT nodes so the
+   * inline L3 step editor can parse/edit the `<step>` blocks. Sourced from the
+   * real SkillDetail.files in build-nodes — never a test-injected field.
+   */
+  agentBody?: string
+  /** Whether the node's inline L3 step editor is expanded (canvas-owned toggle). */
+  isStepsExpanded?: boolean
+  /** Toggle the inline L3 step editor open/closed (AGENT nodes only). */
+  onToggleSteps?: () => void
+  /**
+   * Persist an edited agent body through the normal phase-file save path
+   * (handlePhaseFileSave -> doWriteSkillFile -> native-fs / browser fallback).
+   * The canvas binds the file path + optimistic-lock hash; this only forwards the
+   * rewritten body string.
+   */
+  onStepsSave?: (nextBody: string) => void
   activeConflict?: { nodeId: string; fieldName: string; ancestorNodeId: string }
   isConflictCancelled?: boolean
   onAllowSequentialOverwrite?: (nodeId: string, fieldName: string) => void

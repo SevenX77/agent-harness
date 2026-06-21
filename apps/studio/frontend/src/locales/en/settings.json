@@ -36,6 +36,10 @@
       "placeholder": "https://gitea.example.com",
       "description": "Private Gitea host used for team collaboration."
     },
+    "remoteModelCatalog": {
+      "label": "Remote model info",
+      "description": "Read remote model catalog before showing route candidates."
+    },
     "language": {
       "label": "Language",
       "description": "Switch Studio UI copy without restarting the app.",

@@ -21,6 +21,7 @@ const serverSettings: AppSettings = {
   gitea_host: 'https://gitea.example.com',
   default_skills_directory: '/Users/alice/AgentStudio/Skills',
   language: 'zh-CN',
+  remote_model_catalog_enabled: true,
 }
 
 describe('useAppSettings helpers', () => {
@@ -45,6 +46,7 @@ describe('useAppSettings helpers', () => {
       gitea_host: 'https://git.internal.example',
       default_skills_directory: '/Users/bob/Skills',
       language: 'en',
+      remote_model_catalog_enabled: false,
     }
     vi.mocked(updateAppSettings).mockResolvedValue(draft)
 
@@ -60,6 +62,7 @@ describe('useAppSettings helpers', () => {
       gitea_host: 'https://git.internal.example',
       default_skills_directory: '/Users/bob/Skills',
       language: 'en',
+      remote_model_catalog_enabled: true,
     }
     vi.mocked(updateAppSettings).mockRejectedValue(new Error('write failed'))
 
@@ -74,6 +77,7 @@ describe('useAppSettings helpers', () => {
       gitea_host: '',
       default_skills_directory: '/Users/bob/Skills',
       language: 'zh-CN',
+      remote_model_catalog_enabled: true,
     }
     vi.mocked(updateAppSettings).mockResolvedValue(draft)
 
@@ -95,10 +99,31 @@ describe('useAppSettings language field', () => {
       gitea_host: '',
       default_skills_directory: '/Skills',
       language: 'en',
+      remote_model_catalog_enabled: true,
     }
     const switched: AppSettings = { ...base, language: 'zh-CN' }
 
     expect(appSettingsEqual(base, base)).toBe(true)
     expect(appSettingsEqual(base, switched)).toBe(false)
+  })
+})
+
+describe('useAppSettings remote model catalog flag', () => {
+  it('defaults automatic remote model catalog reads to enabled', () => {
+    expect(DEFAULT_APP_SETTINGS.remote_model_catalog_enabled).toBe(true)
+  })
+
+  it('treats the remote catalog toggle as a settings change (drives a save)', () => {
+    const base: AppSettings = {
+      user_id: 'alice',
+      gitea_host: '',
+      default_skills_directory: '/Skills',
+      language: 'en',
+      remote_model_catalog_enabled: true,
+    }
+    const disabled: AppSettings = { ...base, remote_model_catalog_enabled: false }
+
+    expect(appSettingsEqual(base, base)).toBe(true)
+    expect(appSettingsEqual(base, disabled)).toBe(false)
   })
 })

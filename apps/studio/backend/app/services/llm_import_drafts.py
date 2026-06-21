@@ -8,7 +8,7 @@ import threading
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 
@@ -44,6 +44,10 @@ class DraftExpired(ValueError):
 
 class DraftApplyConflict(ValueError):
     """Import draft collides with active config and needs explicit choice."""
+
+
+class RemoteCatalogSyncError(RuntimeError):
+    """Raised when the remote evidence catalog cannot be fetched or parsed."""
 
 
 def drafts_path() -> Path:
@@ -196,26 +200,30 @@ def _store(path: Path | None = None) -> ImportDraftStore:
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CATALOG_URL = "https://raw.githubusercontent.com/SevenX77/agent-harness/main/llm_import_drafts.json"
+DEFAULT_CATALOG_URL = "https://raw.githubusercontent.com/SevenX77/studio-llm-model-catalog/main/llm_import_drafts.json"
 
 
 async def sync_remote_evidence_library(
     *,
+    data: dict[str, Any] | None = None,
     url: str | None = None,
     path: Path | None = None,
     draft_id: str = EVIDENCE_LIBRARY_DRAFT_ID,
 ) -> ProviderImportDraft:
     """Pull the remote evidence library and merge it into the local store."""
     target_url = url or os.getenv("STUDIO_CATALOG_URL") or DEFAULT_CATALOG_URL
-    logger.info("Syncing remote evidence library from %s", target_url)
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(target_url)
-            response.raise_for_status()
-            data = response.json()
-    except Exception as exc:
-        logger.error("Failed to fetch remote evidence library: %s", exc)
-        return load_evidence_library(path=path, draft_id=draft_id)
+    if data is None:
+        logger.info("Syncing remote evidence library from %s", target_url)
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(target_url)
+                response.raise_for_status()
+                data = response.json()
+        except Exception as exc:
+            logger.error("Failed to fetch remote evidence library: %s", exc)
+            raise RemoteCatalogSyncError(f"failed to fetch remote evidence library from {target_url}: {exc}") from exc
+    else:
+        logger.info("Syncing remote evidence library from provided catalog payload")
 
     try:
         raw_drafts = data.get("drafts", data)
@@ -223,12 +231,11 @@ async def sync_remote_evidence_library(
             raise ValueError("Invalid remote draft payload structure")
         remote_draft_raw = raw_drafts.get(draft_id)
         if not remote_draft_raw:
-            logger.warning("Remote evidence library not found in payload for draft_id=%s", draft_id)
-            return load_evidence_library(path=path, draft_id=draft_id)
+            raise ValueError(f"remote evidence library not found for draft_id={draft_id}")
         remote_draft = ProviderImportDraft.model_validate(remote_draft_raw)
     except Exception as exc:
         logger.error("Failed to parse remote evidence library: %s", exc)
-        return load_evidence_library(path=path, draft_id=draft_id)
+        raise RemoteCatalogSyncError(f"failed to parse remote evidence library from {target_url}: {exc}") from exc
 
     store_path = path or drafts_path()
     store = ImportDraftStore(store_path)
@@ -254,6 +261,7 @@ __all__ = [
     "DraftExpired",
     "DraftNotFound",
     "EVIDENCE_LIBRARY_DRAFT_ID",
+    "RemoteCatalogSyncError",
     "append_evidence_record",
     "apply_draft",
     "create_draft",

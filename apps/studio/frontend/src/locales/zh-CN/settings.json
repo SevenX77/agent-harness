@@ -36,6 +36,10 @@
       "placeholder": "https://gitea.example.com",
       "description": "用于团队协作的私有 Gitea 主机。"
     },
+    "remoteModelCatalog": {
+      "label": "远端模型信息",
+      "description": "显示 route 候选前读取远端模型 catalog。"
+    },
     "language": {
       "label": "语言",
       "description": "无需重启即可切换 Studio 界面文案。",

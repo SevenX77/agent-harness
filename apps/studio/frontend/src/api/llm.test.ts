@@ -14,6 +14,7 @@ import {
   resetLlmApiCachesForTests,
   getRoleTestJob,
   startRoleTestJob,
+  syncRemoteModelCatalog,
   testRole,
   testProviderModels,
   testProvider,
@@ -168,6 +169,28 @@ describe('API Keys v4 registry adapter', () => {
       last_test_status: 'ok',
       available_sdks: ['openai_compatible'],
     })
+  })
+
+  it('syncs the remote model catalog through the backend catalog sync endpoint', async () => {
+    const seen: string[] = []
+    api.defaults.adapter = adapter((config) => {
+      seen.push(`${config.method} ${config.url}`)
+      return {
+        status: 'success',
+        message: 'Catalog synced successfully with remote repository.',
+        route_candidates_count: 3,
+        evidence_records_count: 5,
+      }
+    })
+
+    await expect(syncRemoteModelCatalog()).resolves.toEqual({
+      status: 'success',
+      message: 'Catalog synced successfully with remote repository.',
+      route_candidates_count: 3,
+      evidence_records_count: 5,
+    })
+
+    expect(seen).toEqual(['post /llm/catalog/sync'])
   })
 
   it('can load endpoint summaries without hydrating API key secrets', async () => {

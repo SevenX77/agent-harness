@@ -100,6 +100,7 @@ export interface AppSettings {
   gitea_host: string
   default_skills_directory: string
   language: AppLanguage
+  remote_model_catalog_enabled: boolean
 }
 
 export interface CollaborateResult {

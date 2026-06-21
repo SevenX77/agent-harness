@@ -1,19 +1,23 @@
 from __future__ import annotations
 
+import asyncio
 import threading
 from pathlib import Path
 
+import httpx
 import pytest
 from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint, ProviderRoute
 from app.services.llm_credentials import load_credentials, save_credentials
 from app.services.llm_import_drafts import (
     DraftApplyConflict,
     DraftExpired,
+    RemoteCatalogSyncError,
     append_evidence_record,
     create_draft,
     load_draft,
     load_evidence_library,
     save_draft,
+    sync_remote_evidence_library,
 )
 from graph_agent_gateway.registry.schema import (
     CapabilityValue,
@@ -146,6 +150,58 @@ def test_evidence_library_appends_probe_failure_without_overwriting_success(
     ]
     assert library.evidence_records[0].successful_probe == {"profile_count": 1}
     assert library.evidence_records[1].reason == "provider rejected the request"
+
+
+def test_sync_remote_evidence_library_raises_on_remote_404(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store_path = tmp_path / "import_drafts.json"
+    cached = ProviderImportDraft(
+        draft_id="studio-evidence-library",
+        source={"kind": "studio_evidence_library"},
+        status="pending",
+        route_candidates={
+            "openai-official:gpt-5": RouteCandidate(
+                endpoint_id="openai-official",
+                route_slug="gpt-5",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
+                display_name="GPT-5",
+            )
+        },
+    )
+    save_draft(cached, path=store_path)
+
+    request = httpx.Request("GET", "https://example.invalid/llm_import_drafts.json")
+    response = httpx.Response(404, request=request)
+
+    class FakeAsyncClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> "FakeAsyncClient":
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            pass
+
+        async def get(self, _url: str) -> httpx.Response:
+            return response
+
+    import app.services.llm_import_drafts as import_drafts
+
+    monkeypatch.setattr(import_drafts.httpx, "AsyncClient", FakeAsyncClient)
+
+    with pytest.raises(RemoteCatalogSyncError, match="404"):
+        asyncio.run(
+            sync_remote_evidence_library(
+                url=str(request.url),
+                path=store_path,
+            )
+        )
+
+    assert load_evidence_library(path=store_path).route_candidates == cached.route_candidates
 
 
 def test_apply_draft_marks_applied_without_losing_interleaved_evidence_append(

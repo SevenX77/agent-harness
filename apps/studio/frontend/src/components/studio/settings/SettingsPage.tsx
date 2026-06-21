@@ -5,7 +5,7 @@ import { buildPutPayload, useDebouncedCredentialsSave } from "@/hooks/useDebounc
 import { useDebouncedRolesSave } from "@/hooks/useDebouncedRolesSave"
 import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-error-messages"
 import { useStudioEventStream } from "@/hooks/useStudioEventStream"
-import { deleteModelBundle, deleteRole, getCredentials, getModelGroups, getProviderModels, getRoles, testProviderEndpoint, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
+import { deleteModelBundle, deleteRole, getCredentials, getModelGroups, getProviderModels, getRoles, syncRemoteModelCatalog, testProviderEndpoint, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
 import { draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, providerCachedTestResult, providerDraftForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
@@ -55,6 +55,18 @@ export function modelGroupsReferenceMissingCredentialProviders(
     const endpointId = providerModel.endpoint_id ?? providerModel.route_id.split(":")[0]
     return Boolean(endpointId && !providerIds.has(endpointId))
   }))
+}
+
+export function shouldSyncRemoteModelCatalog({
+  settingsLoading,
+  enabled,
+  alreadySynced,
+}: {
+  settingsLoading: boolean
+  enabled: boolean
+  alreadySynced: boolean
+}): boolean {
+  return !settingsLoading && enabled && !alreadySynced
 }
 
 function errorText(error: unknown): string {
@@ -358,6 +370,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   // opened (rolesData still null). Instead of dropping it, set this flag so the
   // lazy load refetches fresh the first time the tab opens.
   const rolesDirtyRef = useRef(false)
+  const remoteModelCatalogSyncedRef = useRef(false)
 
   const handleSaved = useCallback((next: CredentialsState) => {
     setCredentials({
@@ -485,6 +498,33 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     onRolesChanged: handleRolesChangedEvent,
     onResync: handleEventResync,
   })
+
+  useEffect(() => {
+    const enabled = appSettings.settings.remote_model_catalog_enabled
+    if (!enabled) {
+      remoteModelCatalogSyncedRef.current = false
+      return
+    }
+    if (!shouldSyncRemoteModelCatalog({
+      settingsLoading: appSettings.isLoading,
+      enabled,
+      alreadySynced: remoteModelCatalogSyncedRef.current,
+    })) {
+      return
+    }
+    remoteModelCatalogSyncedRef.current = true
+    syncRemoteModelCatalog()
+      .then(() => {
+        refetchCredentialsFromEvent()
+      })
+      .catch((error) => {
+        console.warn("phase=settings-catalog action=remote-model-catalog-sync-failed error=%o", error)
+      })
+  }, [
+    appSettings.isLoading,
+    appSettings.settings.remote_model_catalog_enabled,
+    refetchCredentialsFromEvent,
+  ])
 
   useEffect(() => {
     let cancelled = false
@@ -818,12 +858,14 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         giteaHost: appSettings.settings.gitea_host,
         defaultSkillsDirectory: appSettings.settings.default_skills_directory,
         language: appSettings.settings.language,
+        remoteModelCatalogEnabled: appSettings.settings.remote_model_catalog_enabled,
         isLoading: appSettings.isLoading,
         saveStatus: appSettings.saveStatus,
         setUserId: appSettings.setUserId,
         setGiteaHost: appSettings.setGiteaHost,
         setDefaultSkillsDirectory: appSettings.setDefaultSkillsDirectory,
         setLanguage: appSettings.setLanguage,
+        setRemoteModelCatalogEnabled: appSettings.setRemoteModelCatalogEnabled,
       }}
       connectionLost={connectionLost}
       onClose={onClose}

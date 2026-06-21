@@ -45,6 +45,7 @@ date: 2026-06-20
   - Acceptance: docs say custom/third-party route IDs are derived from canonical URL + protocol, not random endpoint ID.
   - Acceptance: docs say no backwards-compatible old-ID matching is allowed after migration.
   - Acceptance: docs no longer claim real draft probe worker is landed until code proves it.
+  - Current status: `FRONTEND_UI_SPEC.md` blue tag semantics are corrected; Studio workflow and gateway alignment docs still need sync.
 
 ## Phase 1 - Hard Local Data Migration
 
@@ -71,16 +72,16 @@ date: 2026-06-20
 
 ## Phase 2 - Remote Catalog Seed
 
-- [x] 2.1 Create repository-root `llm_import_drafts.json`.
+- [x] 2.1 Create remote GitHub catalog repository and initialize `llm_import_drafts.json`.
   - Shape: top-level `drafts.studio-evidence-library`.
   - Start with an empty valid catalog or a sanitized official-provider seed.
-  - Acceptance: raw GitHub URL returns HTTP 200 after merge to main.
+  - Acceptance: raw GitHub URL returns HTTP 200.
 
-- [x] 2.2 Add schema validation tests for the seed file.
-  - Test path: gateway or backend tests.
-  - Acceptance: root `llm_import_drafts.json` validates as `ProviderImportDraft`.
+- [x] 2.2 Add schema validation tests for generated seed payload.
+  - Test path: backend GitHub catalog service tests.
+  - Acceptance: generated `llm_import_drafts.json` validates as `ProviderImportDraft`.
 
-- [x] 2.3 Add a catalog lint script or test.
+- [ ] 2.3 Add a catalog lint script or test.
   - Checks:
     - no random `custom-*` endpoint IDs used as persisted or catalog identity;
     - URL-derived stable endpoint IDs / route IDs present for custom/third-party records;
@@ -92,7 +93,7 @@ date: 2026-06-20
 
 ## Phase 3 - Remote-First Sync
 
-- [ ] 3.0 Add GitHub catalog repository API.
+- [x] 3.0 Add GitHub catalog repository API.
   - Backend config:
     - `STUDIO_GITHUB_TOKEN`
     - `STUDIO_GITHUB_OWNER`
@@ -111,6 +112,7 @@ date: 2026-06-20
   - Do not treat stale local cache as remote truth.
   - Record source metadata: source URL, fetched time, ETag/commit if available.
   - Acceptance: test 404 returns clear remote catalog failure instead of silent success.
+  - Current status: public raw read and 404 error behavior are implemented; source metadata is still missing.
 
 - [ ] 3.2 Make `/api/llm/catalog/sync` return source metadata.
   - Include counts, source URL, cache flag, and new record count.
@@ -122,11 +124,18 @@ date: 2026-06-20
 
 ## Phase 4 - Evidence Writeback and Sanitized Share
 
+- [ ] 4.0 Add public URL safety classifier.
+  - Classify endpoint URLs as `public_safe`, `private_or_internal`, `malformed`, or `review_required`.
+  - Reject localhost, RFC1918, link-local, unique-local IPv6, bare internal hostnames, userinfo, query, and fragment.
+  - Allow official providers through curated mapping.
+  - Acceptance: unit tests cover public OpenAI/OpenRouter/WaveSpeed-style URLs and private/internal URLs.
+
 - [ ] 4.1 Add public evidence sanitizer.
   - Input: local `EvidenceRecord` + route candidate map.
   - Output: publishable record or exclusion reason.
   - Acceptance: secrets, private base URLs, raw request/response bodies, and random `custom-*` identities are excluded.
   - Acceptance: public custom/third-party records use URL-derived stable route IDs.
+  - Acceptance: exclusion reason codes include `random_legacy_route_id`, `private_base_url`, `malformed_base_url`, `review_required_url`, `secret_like_value`, `raw_request_body`, `raw_response_body`, `missing_route_context`, `evidence_id_conflict`, and `unsupported_evidence_type`.
 
 - [ ] 4.2 Replace unsafe `/api/llm/catalog/share` behavior.
   - Return sanitized publish preview.
@@ -139,6 +148,19 @@ date: 2026-06-20
   - If a publishable evidence references a route, include the corresponding sanitized `RouteCandidate`.
   - Route candidates must use URL-derived stable route IDs.
   - Acceptance: exported catalog can be validated and synced on a clean machine.
+
+- [ ] 4.4 Add deterministic merge/dedupe.
+  - Deduplicate by `evidence_id`.
+  - Exclude conflicting same-id records with `evidence_id_conflict`.
+  - Sort route candidates and evidence records deterministically.
+  - Acceptance: applying the same writeback preview twice produces the same catalog.
+
+- [ ] 4.5 Add GitHub draft PR writeback endpoint.
+  - Add `POST /api/llm/catalog/writeback/preview`.
+  - Add `POST /api/llm/catalog/writeback/pr`.
+  - Create branch `studio-catalog/<timestamp>-<short-hash>`.
+  - Open draft PR; never push directly to `main`.
+  - Acceptance: tests prove token is used only for branch/commit/PR writes, not public reads.
 
 ## Phase 5 - Real Draft Probe Worker
 
@@ -163,7 +185,7 @@ date: 2026-06-20
 
 ## Phase 6 - Unified 6-State UI Consumption
 
-- [ ] 6.0 Add General setting for automatic remote catalog reads.
+- [x] 6.0 Add General setting for automatic remote catalog reads.
   - Add backend `AppSettings.remote_model_catalog_enabled: bool = true`.
   - Add frontend `AppSettings.remote_model_catalog_enabled`.
   - Add Settings General `Remote Model Catalog` switch using local `Switch`.
@@ -173,7 +195,7 @@ date: 2026-06-20
   - Acceptance: `useAppSettings` equality treats the flag as save-worthy.
   - Acceptance: General tab renders an on-by-default switch and calls `setRemoteModelCatalogEnabled(false)` when toggled off.
 
-- [ ] 6.0.1 Wire the setting to automatic sync.
+- [x] 6.0.1 Wire the setting to automatic sync.
   - Add frontend API wrapper for `POST /api/llm/catalog/sync`.
   - Settings load triggers one background sync only when `remote_model_catalog_enabled` is `true`.
   - Turning the setting off prevents automatic sync on later Settings opens.
@@ -183,10 +205,15 @@ date: 2026-06-20
 - [ ] 6.1 Change API Keys route chip rendering to use `ui_state`.
   - Remove old `status=probe-verified` as a UI truth path.
   - Acceptance: `historical_ready` route renders blue in API Keys without old status.
+  - Acceptance: provider-list-only candidate renders neutral even when present in remote catalog.
 
 - [ ] 6.2 Align compact endpoint test response with 6-state vocabulary.
   - Add `ui_state` to compact model info or map compact results through backend projection before frontend render.
   - Acceptance: frontend no longer needs `status=probe-verified` to show blue.
+
+- [ ] 6.2.1 Add catalog source metadata to registry response.
+  - Include enabled/source URL/fetched_at/counts/last_error.
+  - Acceptance: manual/API tests can tell whether Settings read remote catalog or only local cache.
 
 - [ ] 6.3 Update frontend tests.
   - API Keys ProviderCard tests must assert route tag color from `ui_state`.

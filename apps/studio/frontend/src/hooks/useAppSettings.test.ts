@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppSettings } from '../api/types'
-import { loadAppSettings, saveAppSettings } from './useAppSettings'
+import { appSettingsEqual, DEFAULT_APP_SETTINGS, loadAppSettings, saveAppSettings } from './useAppSettings'
 import { getAppSettings, updateAppSettings } from '../api/client'
 import { toast } from 'sonner'
 
@@ -20,6 +20,8 @@ const serverSettings: AppSettings = {
   user_id: 'alice',
   gitea_host: 'https://gitea.example.com',
   default_skills_directory: '/Users/alice/AgentStudio/Skills',
+  language: 'zh-CN',
+  remote_model_catalog_enabled: true,
 }
 
 describe('useAppSettings helpers', () => {
@@ -43,6 +45,8 @@ describe('useAppSettings helpers', () => {
       user_id: 'bob',
       gitea_host: 'https://git.internal.example',
       default_skills_directory: '/Users/bob/Skills',
+      language: 'en',
+      remote_model_catalog_enabled: false,
     }
     vi.mocked(updateAppSettings).mockResolvedValue(draft)
 
@@ -57,11 +61,69 @@ describe('useAppSettings helpers', () => {
       user_id: 'bob',
       gitea_host: 'https://git.internal.example',
       default_skills_directory: '/Users/bob/Skills',
+      language: 'en',
+      remote_model_catalog_enabled: true,
     }
     vi.mocked(updateAppSettings).mockRejectedValue(new Error('write failed'))
 
     await expect(saveAppSettings(draft)).rejects.toThrow('write failed')
 
     expect(toast.error).toHaveBeenCalledWith('Failed to save settings')
+  })
+
+  it('round-trips the selected UI language through the settings store', async () => {
+    const draft: AppSettings = {
+      user_id: 'bob',
+      gitea_host: '',
+      default_skills_directory: '/Users/bob/Skills',
+      language: 'zh-CN',
+      remote_model_catalog_enabled: true,
+    }
+    vi.mocked(updateAppSettings).mockResolvedValue(draft)
+
+    const saved = await saveAppSettings(draft)
+
+    expect(updateAppSettings).toHaveBeenCalledWith(draft)
+    expect(saved.language).toBe('zh-CN')
+  })
+})
+
+describe('useAppSettings language field', () => {
+  it('defaults the UI language to English', () => {
+    expect(DEFAULT_APP_SETTINGS.language).toBe('en')
+  })
+
+  it('treats a language change as a settings change (drives a save)', () => {
+    const base: AppSettings = {
+      user_id: 'alice',
+      gitea_host: '',
+      default_skills_directory: '/Skills',
+      language: 'en',
+      remote_model_catalog_enabled: true,
+    }
+    const switched: AppSettings = { ...base, language: 'zh-CN' }
+
+    expect(appSettingsEqual(base, base)).toBe(true)
+    expect(appSettingsEqual(base, switched)).toBe(false)
+  })
+})
+
+describe('useAppSettings remote model catalog flag', () => {
+  it('defaults automatic remote model catalog reads to enabled', () => {
+    expect(DEFAULT_APP_SETTINGS.remote_model_catalog_enabled).toBe(true)
+  })
+
+  it('treats the remote catalog toggle as a settings change (drives a save)', () => {
+    const base: AppSettings = {
+      user_id: 'alice',
+      gitea_host: '',
+      default_skills_directory: '/Skills',
+      language: 'en',
+      remote_model_catalog_enabled: true,
+    }
+    const disabled: AppSettings = { ...base, remote_model_catalog_enabled: false }
+
+    expect(appSettingsEqual(base, base)).toBe(true)
+    expect(appSettingsEqual(base, disabled)).toBe(false)
   })
 })

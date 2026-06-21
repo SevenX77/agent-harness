@@ -136,14 +136,15 @@ def _subgraph_phase(
     root: Path,
     phase_id: str = "main",
     *,
-    target_skill: str = "child",
+    child_path: Path | None = None,
     input_field: str = "text",
     output_field: str = "result",
 ) -> None:
+    child_path = child_path or root / "subgraphs" / "child"
     _write(
         root / "phases" / phase_id / "SUBGRAPH.md",
         f"""---
-target_skill: {target_skill}
+path: {child_path}
 io:
   inputs:
     {_schema_yaml(input_field)}
@@ -459,9 +460,9 @@ def test_missing_mention_target_is_rejected(tmp_path: Path, mock_skill_resolver:
 
 def test_subgraph_io_input_mismatch_is_allowed_at_compile_time(tmp_path: Path, mock_skill_resolver: object) -> None:
     parent = tmp_path / "parent"
-    child = tmp_path / "child"
+    child = parent / "subgraphs" / "child"
     _graph(parent)
-    _subgraph_phase(parent, input_field="parent_input", output_field="result")
+    _subgraph_phase(parent, child_path=child, input_field="parent_input", output_field="result")
     _graph(child, inputs_field="child_input", outputs_field="result")
     _logic_phase(child, input_field="child_input")
 
@@ -470,18 +471,21 @@ def test_subgraph_io_input_mismatch_is_allowed_at_compile_time(tmp_path: Path, m
     assert compiled.nodes[0].phase_name == "main"
 
 
-def test_subgraph_io_output_mismatch_is_rejected_at_compile_time(tmp_path: Path, mock_skill_resolver: object) -> None:
+def test_subgraph_io_output_mismatch_is_allowed_at_compile_time(tmp_path: Path, mock_skill_resolver: object) -> None:
+    # §2.4 / cutover item ⑦: the parent/child io.outputs 1:1 equality gate is
+    # relaxed. A subgraph whose declared outputs differ from the child's now
+    # compiles — StateMapper merges by the parent's declared outputs at runtime;
+    # no [F-v3-subgraph-io-mismatch] at compile time.
     parent = tmp_path / "parent"
-    child = tmp_path / "child"
+    child = parent / "subgraphs" / "child"
     _graph(parent)
-    _subgraph_phase(parent, input_field="text", output_field="parent_output")
+    _subgraph_phase(parent, child_path=child, input_field="text", output_field="parent_output")
     _graph(child, inputs_field="text", outputs_field="child_output")
     _logic_phase(child)
 
-    with pytest.raises(SkillLoadError) as exc:
-        SkillLoader().compile_skill(parent, skill_resolver=DictSkillResolver({"child": child}))
+    compiled = SkillLoader().compile_skill(parent, skill_resolver=DictSkillResolver({"child": child}))
 
-    _expect_code(exc, "[F-v3-subgraph-io-mismatch]")
+    assert compiled.nodes[0].phase_name == "main"
 
 
 def test_graph_serializer_fresh_render_uses_v030_dual_track_graph() -> None:

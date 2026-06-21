@@ -63,7 +63,19 @@ def _resolver_for(root: Path) -> DictSkillResolver:
 def _copy_pipeline(tmp_path: Path) -> Path:
     root = tmp_path / "skill"
     shutil.copytree(FIXTURE, root)
+    _rewrite_copied_subgraph_paths(root)
     return root
+
+
+def _rewrite_copied_subgraph_paths(root: Path) -> None:
+    expander = root / "registry" / "expander"
+    for path in (
+        root / "phases" / "expand" / "SUBGRAPH.md",
+        root / "phases" / "segment" / "SKILL.md",
+    ):
+        text = path.read_text(encoding="utf-8")
+        text = re.sub(r"path: .*/registry/expander", f"path: {expander}", text)
+        path.write_text(text, encoding="utf-8")
 
 
 @pytest.fixture
@@ -141,7 +153,9 @@ def test_full_pipeline_skill_compiles_into_expected_products(pipeline_root: Path
     assert [example.id for example in segment.examples_inline] == ["E1"]
     assert segment.tools == ["finish_task"]
     assert [(s.name, s.target_skill) for s in segment.subagents] == [("echo_helper", "e2e.echo")]
-    assert [(s.name, s.target_skill) for s in segment.subgraphs] == [("deep_dive", "e2e.expander")]
+    assert [(s.name, s.path) for s in segment.subgraphs] == [
+        ("deep_dive", str(pipeline_root / "registry" / "expander"))
+    ]
     assert segment.max_iterations == 8
 
     # Logic phase products: phase-level IO + discovered action registry.
@@ -153,11 +167,11 @@ def test_full_pipeline_skill_compiles_into_expected_products(pipeline_root: Path
     assert sorted(score.io.outputs["properties"]) == ["report"]
     assert "score" in compiled.actions.for_phase("score")
 
-    # Subgraph phase products: target_skill + phase IO (which the compiler has
-    # already proven aligns 1:1 with the e2e.expander child GRAPH IO).
+    # Subgraph phase products: absolute path + phase IO (which the compiler has
+    # already proven aligns 1:1 with the child GRAPH IO).
     expand = next(node.ast for node in compiled.nodes if node.phase_name == "expand")
     assert isinstance(expand, SubgraphNodeAST)
-    assert expand.target_skill == "e2e.expander"
+    assert expand.path == str(pipeline_root / "registry" / "expander")
     assert sorted(expand.io.inputs["properties"]) == ["brief"]
     assert sorted(expand.io.outputs["properties"]) == ["report"]
 
@@ -314,13 +328,6 @@ def _empty_logic_actions(root: Path) -> None:
     _write(logic, _read(logic).replace("<action>score</action>", ""))
 
 
-def _mismatch_subgraph_outputs(root: Path) -> None:
-    subgraph = root / "phases" / "expand" / "SUBGRAPH.md"
-    text = _read(subgraph).replace("required: [report]", "required: [expanded_report]")
-    text = text.replace("report:", "expanded_report:")
-    _write(subgraph, text)
-
-
 def _add_deprecated_physical_io(root: Path) -> None:
     (root / "io").mkdir()
     _write(root / "io" / "inputs.json", "{}\n")
@@ -356,7 +363,10 @@ _LOCATED_ERROR_CASES: list[tuple[str, Callable[[Path], None], str]] = [
     ("mention-syntax-invalid", _break_mention_syntax, "[F-v3-mention-syntax-invalid]"),
     ("logic-validator-type-invalid", _bad_logic_validator_type, "[F-v3-logic-validator-type-invalid]"),
     ("logic-actions-empty", _empty_logic_actions, "[F-v3-logic-actions-empty]"),
-    ("subgraph-io-mismatch", _mismatch_subgraph_outputs, "[F-v3-subgraph-io-mismatch]"),
+    # subgraph-io-mismatch removed: the parent/child io.outputs 1:1 gate is
+    # relaxed (skill-syntax §2.4 / cutover item ⑦), so mismatched subgraph
+    # outputs now compile (covered by the round14 cutover + ws-e1 "allowed"
+    # tests) rather than raising [F-v3-subgraph-io-mismatch].
     (
         "graph-io-physical-file-deprecated",
         _add_deprecated_physical_io,
@@ -415,9 +425,9 @@ def test_corrupted_skill_raises_dedicated_located_code(
     assert any(marker in message for marker in _SOURCE_FILE_MARKERS), message
 
 
-def test_unresolvable_subgraph_target_raises_skill_not_registered(corrupt_root: Path) -> None:
-    # Resolver knows the echo subagent but not the expander subgraph target.
-    resolver = DictSkillResolver({"e2e.echo": corrupt_root / "registry" / "echo"})
+def test_unresolvable_subagent_target_raises_skill_not_registered(corrupt_root: Path) -> None:
+    # Subgraphs use absolute path; resolver remains required for subagents.
+    resolver = DictSkillResolver({})
 
     with pytest.raises(SkillResolutionError) as exc:
         SkillLoader().compile_skill(corrupt_root, skill_resolver=resolver)

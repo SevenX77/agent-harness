@@ -320,9 +320,9 @@ def test_model_override_is_exact_route_id() -> None:
         resolver.resolve("graph_agent", model_override="gpt-5")
 
 
-def test_model_resolver_resolve_routes_returns_resolved_role_without_provider_call() -> None:
+def test_model_resolver_resolve_routes_returns_route_chain_without_provider_call() -> None:
     from graph_agent_gateway.gateway_chat_model import GatewayChatModel
-    from graph_agent_gateway.registry.schema import ResolvedRole
+    from graph_agent_gateway.route_handoff import ResolvedRouteChain
 
     client_manager = RecordingClientManager()
     resolver = _resolver_from_snapshot(
@@ -332,12 +332,15 @@ def test_model_resolver_resolve_routes_returns_resolved_role_without_provider_ca
 
     resolved = resolver.resolve_routes("graph_agent")
 
-    assert isinstance(resolved, ResolvedRole)
+    assert isinstance(resolved, ResolvedRouteChain)
     assert not isinstance(resolved, GatewayChatModel)
+    assert resolved.role == "graph_agent"
     assert [route.route_id for route in resolved.routes] == [
         "openai-direct:gpt-5",
         "openrouter-prod:openai.gpt-5",
     ]
+    assert not hasattr(resolved, "role_name")
+    assert not hasattr(resolved, "lint_results")
     assert client_manager.probes == []
     assert client_manager.marked_down == []
 

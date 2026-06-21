@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { Loader2, Plus, Trash2 } from "lucide-react"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { composeRequestErrorMessage } from "@/lib/llm-error-messages"
-import { getNotableModels, testProviderModels, type ModelInfo, type ProviderModelTestResult } from "../../../api/llm"
+import { getNotableModels, testProviderModels, type ModelInfo, type ProviderModelTestResult, type ProviderUiState } from "../../../api/llm"
+import { ProviderStateBadge } from "../settings/llm-roles/provider-state-badge"
 
 interface Props {
   providerKey: string
@@ -49,6 +49,29 @@ export function manualModelStatusLabel(status: ProviderModelTestResult["status"]
       return "Test failed"
     default:
       return "Test failed"
+  }
+}
+
+// apikeys#27: manual probe results render through the SAME 6-state
+// ProviderStateBadge used across LLM Roles / API Keys, replacing the old
+// ad-hoc 2-state success/destructive Badge. A manual probe only resolves to a
+// reachable model (ready) or a failure (failed); the badge component carries the
+// full 6-state map so colors stay consistent with the rest of the status system.
+export function manualModelResultUiState(status: ProviderModelTestResult["status"]): ProviderUiState {
+  return status === "ok" ? "ready" : "failed"
+}
+
+export function manualModelResultReasonCode(status: ProviderModelTestResult["status"]): string | null {
+  switch (status) {
+    case "invalid_model":
+      return "invalid_model"
+    case "invalid_key":
+      return "invalid_key"
+    case "rate_limited":
+    case "quota_exceeded":
+      return "rate_limited"
+    default:
+      return null
   }
 }
 
@@ -116,16 +139,17 @@ export function ManualModelResultList({ results }: { results: ProviderModelTestR
   }
 
   return (
-    <div className="flex flex-wrap gap-1">
+    <div className="flex flex-col gap-1.5">
       {results.map((result) => (
-        <Badge
-          key={result.model_id}
-          variant={result.status === "ok" ? "success" : "destructive"}
-          className="font-mono text-[11px]"
-          title={result.message ?? undefined}
-        >
-          {result.model_id}: {manualModelStatusLabel(result.status)}
-        </Badge>
+        <div key={result.model_id} className="flex items-center gap-2">
+          <span className="font-mono text-[11px] text-foreground">{result.model_id}</span>
+          <ProviderStateBadge
+            state={manualModelResultUiState(result.status)}
+            reasonCode={manualModelResultReasonCode(result.status)}
+            detail={result.message ?? manualModelStatusLabel(result.status)}
+          />
+          <span className="text-[11px] text-muted-foreground">{manualModelStatusLabel(result.status)}</span>
+        </div>
       ))}
     </div>
   )

@@ -46,9 +46,9 @@ def compile_ephemeral_for_dev_missing_hash(artifact_id: str) -> ArtifactRef:
 
     skill_dir = resolve_skill_dir(artifact_id)
 
-    from app.core.adapters.engine import EngineAdapter
+    from app.core.adapters.transport_factory import build_engine_adapter
 
-    adapter = EngineAdapter(transport="in_process")
+    adapter = build_engine_adapter()
     artifact_ref_dict = adapter.compile(
         {"skill_dir": str(skill_dir), "skill_id": artifact_id, "artifact_scope": "ephemeral"}
     )

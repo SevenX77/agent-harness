@@ -207,6 +207,7 @@
 - **裁定覆盖**: skill-lifecycle D1(Python 独占 .workspace 写)、copilot-chat P0-A 的"复用 Python `POST /skills/files`"实现细节(这些 spec 各自只关注自己的点, 没统筹写归属)。**对齐**: canvas DECISION-08 + INDEX D10 + 后端三分(D10)。
 - **copilot UX 不变**: "patch proposal → 编辑器内存 apply(变 dirty)→ 用户 save" 流程照旧, 只是最终 save 落盘命令换 **Rust**(不再走 Python `POST /skills/files`)。
 - **对文档的影响**: `native-fs`(Rust)平台文档 = **唯一写者**收口; `graph-authoring`/`file-editing`/`phase-editing`/`predict`/`run-execution`/`golden-eval` 的所有写步骤统一标"经 Rust 文件命令"; Python 端点退为只读 + 编译/装配。需在 INDEX §6 平台表 + §11 NFR 补一句"写入唯一权威=Rust"。
+- **2026-06-14 Copilot 例外**: PM 放行 Copilot SDK `Read/Write/Edit` 自行读写 workspace,不再把 SDK Write/Edit 直写列为 D12 阻断;D12 仍覆盖 Studio 自有写入(editor save / graph serialize / `.workspace` / publish package 等)。最终 SSOT 已回写 `docs/studio/mvp1/02_capabilities/copilot-assist/mvp1-alignment.md` 与 `docs/studio/mvp1/04_platform/native-fs/mvp1-alignment.md`。
 
 ---
 

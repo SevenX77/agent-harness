@@ -1,6 +1,7 @@
 import * as ReactFlow from '@xyflow/react'
 import type { Edge, EdgeProps } from '@xyflow/react'
 import type { MouseEvent } from 'react'
+import { edgeContextFromEvents } from '@/lib/edge-context'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { useOptionalWorkspaceContext } from '../studio/WorkspaceContext'
 
@@ -21,86 +22,14 @@ type GlobalWithProcess = typeof globalThis & {
   }
 }
 
-const HORIZONTAL_EDGE_EPSILON = 0.5
+const STRAIGHT_EDGE_EPSILON = 0.5
 
 function isHorizontalHandlePosition(position: ReactFlow.Position): boolean {
   return position === ReactFlow.Position.Left || position === ReactFlow.Position.Right
 }
 
-function getMockEdgeContext(source: string, target: string) {
-  const defaultContext = {
-    "timestamp": new Date().toISOString(),
-    "agent_state": {
-      "status": "success",
-      "current_phase": target,
-      "previous_phase": source
-    },
-    "inputs": {
-      "query": "Develop a high-performance backend routing module for the user workspace.",
-      "max_iterations": 5
-    },
-    "phase_outputs": {
-      [source]: {
-        "status": "completed",
-        "confidence": 0.94,
-        "summary": `Execution completed in phase ${source}. Refined payload forwarded to ${target}.`
-      }
-    },
-    "scratch": {
-      "tokens_consumed": 1280,
-      "elapsed_seconds": 1.45,
-      "tool_calls": [
-        {
-          "tool": "directory_search",
-          "args": { "pattern": "route" },
-          "status": "success"
-        }
-      ]
-    }
-  };
-
-  if (source.includes('input') || source.toLowerCase() === 'input') {
-    return {
-      ...defaultContext,
-      "inputs": {
-        "query": "Develop a high-performance backend routing module for the user workspace.",
-        "user_role": "admin",
-        "environment": "production"
-      },
-      "phase_outputs": {},
-      "scratch": {
-        "initiated_at": new Date().toISOString(),
-        "auth_validated": true
-      }
-    };
-  }
-
-  if (target.includes('output') || target.toLowerCase() === 'output') {
-    return {
-      ...defaultContext,
-      "inputs": {
-        "query": "Develop a high-performance backend routing module for the user workspace."
-      },
-      "phase_outputs": {
-        "planner": {
-          "plan": ["Retrieve files", "Refactor workspace routes", "Verify compilation"],
-          "confidence": 0.98
-        },
-        "executor": {
-          "modified_files": ["apps/studio/frontend/src/lib/tauri.ts"],
-          "compilation": "pass",
-          "test_results": "1620 passed"
-        }
-      },
-      "scratch": {
-        "tokens_consumed": 4820,
-        "elapsed_seconds": 5.82,
-        "final_summary": "Successfully integrated native directory selection into Assets panel and verified state persistence."
-      }
-    };
-  }
-
-  return defaultContext;
+function isVerticalHandlePosition(position: ReactFlow.Position): boolean {
+  return position === ReactFlow.Position.Top || position === ReactFlow.Position.Bottom
 }
 
 export function ContextEdge({
@@ -116,10 +45,18 @@ export function ContextEdge({
 }: EdgeProps<ContextEdgeModel>) {
   const workspace = useOptionalWorkspaceContext()
 
-  const [edgePath, labelX, labelY] = Math.abs(sourceY - targetY) <= HORIZONTAL_EDGE_EPSILON
+  const isHorizontalStraight =
+    Math.abs(sourceY - targetY) <= STRAIGHT_EDGE_EPSILON
     && isHorizontalHandlePosition(sourcePosition)
     && isHorizontalHandlePosition(targetPosition)
-    ? [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, (sourceX + targetX) / 2, sourceY]
+  // TB layout: a node and its single child share an X, so draw a clean vertical
+  // line instead of a bezier (mirrors the horizontal-straight case for LR).
+  const isVerticalStraight =
+    Math.abs(sourceX - targetX) <= STRAIGHT_EDGE_EPSILON
+    && isVerticalHandlePosition(sourcePosition)
+    && isVerticalHandlePosition(targetPosition)
+  const [edgePath, labelX, labelY] = isHorizontalStraight || isVerticalStraight
+    ? [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, (sourceX + targetX) / 2, (sourceY + targetY) / 2]
     : ReactFlow.getBezierPath({
         sourceX,
         sourceY,
@@ -213,14 +150,25 @@ export function ContextEdge({
                 onClick={(event) => {
                   event.stopPropagation()
                   if (workspace?.setSelectedEdge && workspace?.onPanelChange) {
-                    const mockJson = getMockEdgeContext(data?.sourcePhaseId || '', data?.targetPhaseId || '')
+                    const source = data?.sourcePhaseId || ''
+                    const target = data?.targetPhaseId || ''
+                    // Resolve the REAL blackboard snapshot dispatched across this
+                    // edge for the active run. No matching event -> undefined,
+                    // and the Properties panel renders an empty state.
+                    const contextJson = edgeContextFromEvents(
+                      workspace.traceEvents ?? [],
+                      source,
+                      target,
+                    ) ?? undefined
                     workspace.setSelectedEdge({
                       id,
-                      source: data?.sourcePhaseId || '',
-                      target: data?.targetPhaseId || '',
-                      contextJson: mockJson
+                      source,
+                      target,
+                      contextJson,
                     })
-                    workspace.onPanelChange('properties')
+                    // D14: the dot is trace-owned. Route to the timeline (trace)
+                    // panel, not Properties, which no longer renders edge JSON.
+                    workspace.onPanelChange('timeline')
                   }
                 }}
                 onContextMenu={(event) => {

@@ -31,7 +31,8 @@ describe('PropertiesPanel', () => {
         selectedNode={{
           id: 'setup',
           data: {
-            label: 'setup',
+            skillId: 'demo',
+            label:'setup',
             mode: 'logic',
             status: 'idle',
             dependsOn: ['input'],
@@ -45,7 +46,10 @@ describe('PropertiesPanel', () => {
 
     expect(html).toContain('setup')
     expect(html).toContain('LOGIC')
-    expect(html).toContain('Python callable')
+    // FROZEN whitelist: a logic node edits Actions + Validator, never the
+    // deprecated mode/python_callable/system_prompt fields.
+    expect(html).toContain('Actions')
+    expect(html).not.toContain('Python callable')
     expect(html).not.toContain('System prompt')
     expect(html).toContain('input')
     expect(html).toContain('prepare')
@@ -77,7 +81,8 @@ describe('PropertiesPanel', () => {
         selectedNode={{
           id: 'review',
           data: {
-            label: 'review',
+            skillId: 'demo',
+            label:'review',
             mode: 'skill',
             status: 'idle',
             dependsOn: [],
@@ -89,9 +94,13 @@ describe('PropertiesPanel', () => {
       />,
     )
 
-    expect(html).toContain('System prompt')
-    expect(html).toContain('Exit contract')
+    // FROZEN whitelist: an agent node edits LLM role + Tools + Subagents, never
+    // the deprecated system_prompt/exit_contract/python_callable fields.
+    expect(html).toContain('LLM role')
     expect(html).toContain('Tools')
+    expect(html).toContain('Subagents')
+    expect(html).not.toContain('System prompt')
+    expect(html).not.toContain('Exit contract')
     expect(html).not.toContain('Python callable')
   })
 
@@ -111,7 +120,8 @@ describe('PropertiesPanel', () => {
         selectedNode={{
           id: 'child',
           data: {
-            label: 'child',
+            skillId: 'demo',
+            label:'child',
             mode: 'subgraph',
             status: 'idle',
             dependsOn: [],
@@ -123,7 +133,10 @@ describe('PropertiesPanel', () => {
       />,
     )
 
-    expect(html).toContain('Target skill')
+    // FROZEN whitelist: a subgraph node edits Path (absolute) + Validator, never
+    // the deprecated target_skill/system_prompt fields.
+    expect(html).toContain('>Path<')
+    expect(html).not.toContain('Target skill')
     expect(html).not.toContain('System prompt')
     expect(html).not.toContain('phase-tools')
   })
@@ -142,7 +155,8 @@ describe('PropertiesPanel', () => {
         selectedNode={{
           id: 'broken',
           data: {
-            label: 'broken',
+            skillId: 'demo',
+            label:'broken',
             mode: 'logic',
             status: 'idle',
             dependsOn: [],
@@ -165,7 +179,8 @@ describe('PropertiesPanel', () => {
         selectedNode={{
           id: 'main',
           data: {
-            label: 'main',
+            skillId: 'demo',
+            label:'main',
             mode: 'skill',
             status: 'idle',
             dependsOn: [],
@@ -238,6 +253,95 @@ describe('AssetsPanel', () => {
     expect(html).toContain('Skill Files')
     expect(html).not.toContain('GRAPH.md')
     expect(html).not.toContain('SKILL.md')
+  })
+
+  it('shows no subgraphs (no hardcoded mock) when the skill has none', () => {
+    const html = renderAssetsPanel({ 'phases/step1/LOGIC.md': '---\nname: step1\n---\n' })
+
+    // The panel must render gateway/skill facts only — never the old hardcoded
+    // intent_classifier / translator_subgraph fallback.
+    expect(html).not.toContain('intent_classifier')
+    expect(html).not.toContain('translator_subgraph')
+    expect(html).toContain('Subgraphs')
+  })
+
+  it('renders REAL subgraph membership from the topology (label + absolute path)', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceProvider value={workspaceContextStub}>
+        <AssetsPanel
+          skillDetail={{
+            ...skillDetailWithFiles({}),
+            graph_topology: [
+              { id: 'setup', src: 'phases/setup', depends_on: [], mode: 'logic' },
+              {
+                id: 'translate',
+                src: 'phases/translate',
+                depends_on: ['setup'],
+                mode: 'subgraph',
+                path: '/abs/skills/translator',
+              },
+            ],
+          }}
+          selectedNode={null}
+        />
+      </WorkspaceProvider>,
+    )
+
+    // Real phase label + real absolute path are surfaced; resolved → "Linked".
+    expect(html).toContain('translate')
+    expect(html).toContain('/abs/skills/translator')
+    expect(html).toContain('Linked')
+    // Logic phases are not subgraph members.
+    expect(html).not.toContain('phases/setup')
+  })
+
+  it('surfaces a referenced subgraph with no path honestly as missing', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceProvider value={workspaceContextStub}>
+        <AssetsPanel
+          skillDetail={{
+            ...skillDetailWithFiles({}),
+            graph_topology: [
+              { id: 'translate', src: 'phases/translate', depends_on: [], mode: 'subgraph', path: null },
+            ],
+          }}
+          selectedNode={null}
+        />
+      </WorkspaceProvider>,
+    )
+
+    expect(html).toContain('translate')
+    expect(html).toContain('Missing path')
+    expect(html).toContain('unresolvable')
+  })
+
+  it('surfaces a legacy subgraph target_skill as migration-needed, not linked', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceProvider value={workspaceContextStub}>
+        <AssetsPanel
+          skillDetail={{
+            ...skillDetailWithFiles({
+              'phases/translate/SUBGRAPH.md': [
+                '---',
+                'name: translate',
+                'target_skill: legacy.registry.child',
+                '---',
+                '',
+              ].join('\n'),
+            }),
+            graph_topology: [
+              { id: 'translate', src: 'phases/translate', depends_on: [], mode: 'subgraph', path: null },
+            ],
+          }}
+          selectedNode={null}
+        />
+      </WorkspaceProvider>,
+    )
+
+    expect(html).toContain('translate')
+    expect(html).toContain('Migration needed')
+    expect(html).toContain('legacy.registry.child')
+    expect(html).not.toContain('Linked')
   })
 })
 

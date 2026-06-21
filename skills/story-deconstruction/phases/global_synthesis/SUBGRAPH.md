@@ -1,6 +1,6 @@
 ---
 name: global_synthesis
-target_skill: global-synthesis
+path: /Users/sevenx/Documents/coding/agent-harness/.worktrees/studio-mvp1-mainbased/skills/story-deconstruction/subskills/global-synthesis
 io:
   inputs:
     type: object

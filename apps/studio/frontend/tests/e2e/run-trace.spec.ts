@@ -136,4 +136,66 @@ test.describe('Run trace workflow smoke', () => {
     await page.locator('html').evaluate((node) => node.classList.add('dark'))
     await expect(page.locator('html')).toHaveClass(/dark/)
   })
+
+  // n5-trace atom #13 (trace-search-filter): the panel narrows the events it has
+  // ALREADY received via a search box + per-phase chips, client-side (no fetch).
+  // The mock streams 1000 events split evenly draft/review with 100 `llm_call`
+  // rows, so each filter has a deterministic surviving count.
+  test('search box and phase chip narrow the received trace events client-side', async ({ page }) => {
+    test.setTimeout(60_000)
+    await page.addInitScript(() => {
+      window.sessionStorage.setItem('studio-lint-status-smoke', 'passed')
+      class MockWebSocket extends EventTarget {
+        static CONNECTING = 0
+        static OPEN = 1
+        static CLOSING = 2
+        static CLOSED = 3
+        readyState = MockWebSocket.OPEN
+        onopen: ((event: Event) => void) | null = null
+        onclose: ((event: Event) => void) | null = null
+        onmessage: ((event: MessageEvent) => void) | null = null
+        onerror: ((event: Event) => void) | null = null
+        constructor() {
+          super()
+          setTimeout(() => {
+            this.readyState = MockWebSocket.OPEN
+            this.onopen?.(new Event('open'))
+          }, 0)
+        }
+        close() {
+          this.readyState = MockWebSocket.CLOSED
+        }
+        send() {}
+      }
+      Object.defineProperty(window, 'WebSocket', { value: MockWebSocket })
+    })
+    await mockRunApi(page)
+
+    await page.goto(`${baseURL}/#/skill/smoke/run/run-1`)
+    await expect(page.locator('[data-virtualized-count="1000"]')).toBeVisible()
+    // Baseline: the whole received batch is shown.
+    await expect(page.getByText('Showing 1000 of 1000 events')).toBeVisible()
+
+    // Clause 1 — a search term shows only matching events. 100 of 1000 rows are
+    // `llm_call`; the search projects in place over the received batch.
+    const searchBox = page.getByPlaceholder('Search trace events')
+    await searchBox.fill('llm_call')
+    await expect(page.getByText('Showing 100 of 1000 events')).toBeVisible()
+    await expect(page.locator('[data-virtualized-count="100"]')).toBeVisible()
+
+    // Clearing the search restores the full received batch (no re-request).
+    await searchBox.fill('')
+    await expect(page.getByText('Showing 1000 of 1000 events')).toBeVisible()
+
+    // Clause 2 — selecting a phase shows only that phase's events. 500 of 1000
+    // rows are in the `review` phase.
+    await page.getByRole('button', { name: 'review', exact: true }).click()
+    await expect(page.getByText('Showing 500 of 1000 events')).toBeVisible()
+    await expect(page.locator('[data-virtualized-count="500"]')).toBeVisible()
+
+    // Clause 1 + 2 combine as AND on the same received batch: `review` carries no
+    // `llm_call` rows (those land on even/draft indices), so the result is empty.
+    await searchBox.fill('llm_call')
+    await expect(page.getByText('Showing 0 of 1000 events')).toBeVisible()
+  })
 })

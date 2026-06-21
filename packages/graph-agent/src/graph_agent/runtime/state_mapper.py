@@ -66,8 +66,13 @@ class StateMapper:
             flow_obj = FrameworkState()
 
         raw_data = data_obj.model_dump()
+        # phase_outputs is a reserved meta-accumulator (D7 per-node golden), not a
+        # business input field. Strip it so it is never passed to a node and so a
+        # parent's phase_outputs cannot leak into a child subgraph (whose input
+        # schema may be empty/open) and corrupt the child's own accumulation.
+        raw_data.pop("phase_outputs", None)
         filtered = filter_runtime_inputs(raw_data, self.input_schema)
-        
+
         return WorkflowState(
             data=BusinessData.model_validate(filtered),
             flow=flow_obj.model_copy(),
@@ -122,6 +127,14 @@ class StateMapper:
         if not isinstance(updates_dict, dict):
             updates_dict = {}
 
+        # Drop the reserved phase_outputs meta-accumulator from a node/subgraph's
+        # returned updates: a child graph's internal phase_outputs must not cross the
+        # subgraph IO boundary into the parent's business namespace or output-schema
+        # validation. The child's declared outputs remain as top-level flat fields,
+        # so nothing real is lost; this phase's phase_outputs is re-derived below.
+        if "phase_outputs" in updates_dict:
+            updates_dict = {k: v for k, v in updates_dict.items() if k != "phase_outputs"}
+
         if "phase_outputs" in updates_dict or "inputs" in updates_dict:
             flat_updates = {}
             if "phase_outputs" in updates_dict and isinstance(updates_dict["phase_outputs"], dict):
@@ -167,6 +180,20 @@ class StateMapper:
 
         # Update current phase in framework state
         new_state = StateManager.update_framework(new_state, current_phase=self.phase_id)
+
+        # Record this phase's outputs into the phase_outputs map keyed by phase_id
+        # (D7 per-node golden). Simple linear / agent / logic / subgraph / reference
+        # phases route through wrap_phase_output exclusively; batch/iterate/loop
+        # phases populate phase_outputs via graph_assembler._with_phase_outputs
+        # instead — the two sets are mutually exclusive per phase, so no double write.
+        # This MUST be the final mutation: phase_outputs is not an output-schema key,
+        # so it is written after the schema gate (above) and bypasses the updates
+        # flatten path, mirroring _with_phase_outputs' accumulate semantics. An empty
+        # phase records an empty entry (consistent with the batch/terminal path).
+        existing_outputs = new_state["data"].model_dump().get("phase_outputs")
+        merged_outputs = dict(existing_outputs) if isinstance(existing_outputs, dict) else {}
+        merged_outputs[self.phase_id] = dict(updates_dict)
+        new_state = StateManager.update_business(new_state, phase_outputs=merged_outputs)
         return new_state
 
 

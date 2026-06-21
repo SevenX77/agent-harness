@@ -4,8 +4,8 @@ import { useAppSettings } from "@/hooks/useAppSettings"
 import { buildPutPayload, useDebouncedCredentialsSave } from "@/hooks/useDebouncedCredentialsSave"
 import { useDebouncedRolesSave } from "@/hooks/useDebouncedRolesSave"
 import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-error-messages"
-import { deleteModelBundle, deleteRole, getCredentials, getModelGroups, getProviderModels, getRoles, testProviderEndpoint, type CredentialsState, type EndpointTestJobResponse, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
-import { wsUrl } from "../../../api/client"
+import { useStudioEventStream } from "@/hooks/useStudioEventStream"
+import { deleteModelBundle, deleteRole, getCredentials, getModelGroups, getProviderModels, getRoles, syncRemoteModelCatalog, testProviderEndpoint, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
 import { draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, providerCachedTestResult, providerDraftForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
@@ -57,6 +57,18 @@ export function modelGroupsReferenceMissingCredentialProviders(
   }))
 }
 
+export function shouldSyncRemoteModelCatalog({
+  settingsLoading,
+  enabled,
+  alreadySynced,
+}: {
+  settingsLoading: boolean
+  enabled: boolean
+  alreadySynced: boolean
+}): boolean {
+  return !settingsLoading && enabled && !alreadySynced
+}
+
 function errorText(error: unknown): string {
   if (typeof error === "string") return error
   if (typeof error !== "object" || error === null) return ""
@@ -80,6 +92,7 @@ function errorText(error: unknown): string {
 function modelInfoEvidenceRank(model: ModelInfo): number {
   if (
     model.status === "verified" ||
+    model.status === "probe-verified" ||
     (model.verified_profile_count ?? 0) > 0 ||
     (model.verified_profiles ?? []).some((profile) => profile.status === "ready")
   ) return 4
@@ -121,17 +134,6 @@ function mergeStrings(left: string[] = [], right: string[] = []): string[] {
   return Array.from(new Set([...left, ...right]))
 }
 
-export function officialProviderProgressToastMessage(
-  providerName: string,
-  job: EndpointTestJobResponse,
-): string {
-  const total = job.total_model_count
-  if (total > 0) {
-    return `Loading ${providerName} route candidates (${total} listed)...`
-  }
-  return `Checking ${providerName} endpoint and provider catalog...`
-}
-
 function resetProviderTestOutcome(
   provider: CredentialsState["providers"][number],
 ): CredentialsState["providers"][number] {
@@ -150,7 +152,9 @@ export function officialProviderTestSummary(models: ModelInfo[]): {
   kind: "success" | "warning"
   message: string
 } {
-  const verifiedCount = models.filter((model) => model.status === "verified").length
+  const verifiedCount = models.filter((model) => (
+    model.status === "verified" || model.status === "probe-verified"
+  )).length
   const notVerifiedCount = Math.max(0, models.length - verifiedCount)
   if (verifiedCount === 0) {
     return {
@@ -362,6 +366,11 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   const invalidatedTestOutcomeIdsRef = useRef<Set<string>>(new Set())
   const credentialsHydratedRef = useRef(false)
   const pendingRoleProjectionRefreshRef = useRef(false)
+  // #6: a roles_changed event arrived while the Roles/Copilot tab had never been
+  // opened (rolesData still null). Instead of dropping it, set this flag so the
+  // lazy load refetches fresh the first time the tab opens.
+  const rolesDirtyRef = useRef(false)
+  const remoteModelCatalogSyncedRef = useRef(false)
 
   const handleSaved = useCallback((next: CredentialsState) => {
     setCredentials({
@@ -426,7 +435,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         })
         .catch(() => {})
 
-      if (activeTab === "llm_roles" && rolesDataRef.current) {
+      if ((activeTab === "llm_roles" || activeTab === "copilot") && rolesDataRef.current) {
         Promise.all([getRoles(), getModelGroups()])
           .then(([next, nextModelGroups]) => {
             setRolesData(next)
@@ -441,44 +450,137 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     }
   }, [activeTab])
 
+  // R-F19.2 — when the Tauri shell intercepts `WindowEvent::CloseRequested`
+  // (Cmd+Q / window close / Quit menu) it emits `before-quit` and blocks the
+  // shutdown for `QUIT_FLUSH_BUDGET` (1500ms) waiting for the FE to ack via
+  // `confirm_quit_ready`. We flush any debounced/in-flight roles save first,
+  // then ack — so a yaml edit that was still sitting in the 300ms debounce
+  // window doesn't get lost on Quit. Browser-mode (no Tauri) gracefully
+  // no-ops: the dynamic import resolves but `listen` never fires.
   useEffect(() => {
     let cancelled = false
-    let socket: WebSocket | null = null
-    try {
-      socket = new WebSocket(wsUrl("/ws/events"))
-      socket.onmessage = (message) => {
-        try {
-          const event = JSON.parse(String(message.data)) as { type?: string }
-          if (cancelled) return
-          if (event.type === "registry_changed") {
-            getCredentials({ hydrateSecrets: credentialsHydratedRef.current })
-              .then((next) => {
-                if (cancelled) return
-                setCredentials(next)
-                setDrafts(draftsFromCredentials(next))
-              })
-              .catch(() => {})
-          } else if (event.type === "roles_changed" && rolesDataRef.current) {
-            Promise.all([getRoles(), getModelGroups()])
-              .then(([next, nextModelGroups]) => {
-                if (cancelled) return
-                setRolesData(next)
-                setModelGroups(nextModelGroups)
-              })
-              .catch(() => {})
+    let unlisten: (() => void) | null = null
+    void (async () => {
+      try {
+        const [{ listen }, { invoke }] = await Promise.all([
+          import("@tauri-apps/api/event"),
+          import("@tauri-apps/api/core"),
+        ])
+        if (cancelled) return
+        unlisten = await listen("before-quit", async () => {
+          try {
+            await flushRolesSave()
+          } catch (error) {
+            // Surfacing via warn so silent loss is observable
+            // (rules/logging.md). We still ack so the shell isn't blocked
+            // for the full budget; the unmount cleanup helper also takes a
+            // best-effort pass if anything is still buffered.
+            console.warn(
+              "phase=quit action=flush-before-quit-failed reason=%o",
+              error,
+            )
           }
-        } catch {
-          // ignore
+          try {
+            await invoke("confirm_quit_ready")
+          } catch (error) {
+            console.warn(
+              "phase=quit action=confirm-quit-ready-invoke-failed reason=%o",
+              error,
+            )
+          }
+        })
+      } catch (error) {
+        // Not running under Tauri (e.g. dev browser tab). Quietly skip —
+        // this is expected and not a degradation.
+        if (import.meta.env.DEV) {
+          console.info(
+            "phase=quit action=before-quit-listener-unavailable reason=%o",
+            error,
+          )
         }
       }
-    } catch {
-      // ignore
-    }
+    })()
     return () => {
       cancelled = true
-      if (socket) socket.close()
+      if (unlisten) unlisten()
     }
+  }, [flushRolesSave])
+
+  // #5/#6 WebSocket auto-refresh, extracted into useStudioEventStream (resilient
+  // reconnect + observable logging). registry_changed re-pulls credentials;
+  // roles_changed re-pulls roles+model-groups when loaded, else marks them dirty
+  // so the next Roles/Copilot tab open refetches (the event is no longer
+  // silently dropped). onResync runs on every (re)connect to backfill any gap.
+  const refetchCredentialsFromEvent = useCallback(() => {
+    getCredentials({ hydrateSecrets: credentialsHydratedRef.current })
+      .then((next) => {
+        setCredentials(next)
+        setDrafts(draftsFromCredentials(next))
+      })
+      .catch((error) => {
+        console.warn("phase=settings-event-refresh action=credentials-refetch-failed error=%o", error)
+      })
   }, [])
+
+  const refetchRolesFromEvent = useCallback(() => {
+    Promise.all([getRoles(), getModelGroups()])
+      .then(([next, nextModelGroups]) => {
+        setRolesData(next)
+        setModelGroups(nextModelGroups)
+      })
+      .catch((error) => {
+        console.warn("phase=settings-event-refresh action=roles-refetch-failed error=%o", error)
+      })
+  }, [])
+
+  const handleRolesChangedEvent = useCallback(() => {
+    if (rolesDataRef.current) {
+      refetchRolesFromEvent()
+      return
+    }
+    // Roles tab not opened yet: don't drop the event — mark dirty so the lazy
+    // load refetches fresh when the user first opens Roles/Copilot.
+    console.info("phase=settings-event-refresh action=roles-marked-dirty reason=roles-not-loaded")
+    rolesDirtyRef.current = true
+  }, [refetchRolesFromEvent])
+
+  const handleEventResync = useCallback(() => {
+    refetchCredentialsFromEvent()
+    if (rolesDataRef.current) refetchRolesFromEvent()
+  }, [refetchCredentialsFromEvent, refetchRolesFromEvent])
+
+  const { connectionLost } = useStudioEventStream({
+    onRegistryChanged: refetchCredentialsFromEvent,
+    onRolesChanged: handleRolesChangedEvent,
+    onResync: handleEventResync,
+  })
+
+  useEffect(() => {
+    const enabled = appSettings.settings.remote_model_catalog_enabled
+    if (!enabled) {
+      remoteModelCatalogSyncedRef.current = false
+      return
+    }
+    if (!shouldSyncRemoteModelCatalog({
+      settingsLoading: appSettings.isLoading,
+      enabled,
+      alreadySynced: remoteModelCatalogSyncedRef.current,
+    })) {
+      return
+    }
+    remoteModelCatalogSyncedRef.current = true
+    syncRemoteModelCatalog()
+      .then(() => {
+        refetchCredentialsFromEvent()
+      })
+      .catch((error) => {
+        console.warn("phase=settings-catalog action=remote-model-catalog-sync-failed error=%o", error)
+      })
+  }, [
+    appSettings.isLoading,
+    appSettings.settings.remote_model_catalog_enabled,
+    refetchCredentialsFromEvent,
+  ])
 
   useEffect(() => {
     let cancelled = false
@@ -530,8 +632,14 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   }, [activeTab])
 
   useEffect(() => {
-    if (activeTab !== "llm_roles" || rolesData) return
+    if ((activeTab !== "llm_roles" && activeTab !== "copilot") || rolesData) return
     let cancelled = false
+    // #6: clear any pending roles-dirty flag — this lazy load IS the refetch the
+    // dropped roles_changed event was waiting for.
+    if (rolesDirtyRef.current) {
+      console.info("phase=settings-event-refresh action=roles-dirty-consumed reason=tab-open")
+      rolesDirtyRef.current = false
+    }
     Promise.all([getRoles(), getModelGroups()])
       .then(([next, nextModelGroups]) => {
         if (cancelled) return
@@ -547,7 +655,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   }, [activeTab, rolesData])
 
   useEffect(() => {
-    if (activeTab !== "llm_roles" || !rolesData) return
+    if ((activeTab !== "llm_roles" && activeTab !== "copilot") || !rolesData) return
     if (!modelGroupsReferenceMissingCredentialProviders(modelGroups, credentials)) return
     void refreshLoadedLlmRolesProjection({
       rolesLoaded: true,
@@ -648,21 +756,15 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     )
 
     try {
-      const handleOfficialProgress = (progress: ProviderTestResponse, job: EndpointTestJobResponse) => {
-        const latestDraft = providerDraftForAction(draftsRef.current, providerId)
-        if (!latestDraft || !providerTestParamsMatch(latestDraft, testedParams)) return
-        setCredentials((current) => upsertProviderModelsListResponse(current, latestDraft, progress))
-        toast.loading(
-          officialProviderProgressToastMessage(latestDraft.name || "provider", job),
-          { id: toastId },
-        )
-      }
+      // apikeys#24/#25: official and third-party share the single synchronous
+      // /endpoints/{id}/test entry now, so there is no async job to stream
+      // progress from — the call resolves once with the authoritative result.
       const response = await getProviderModels({
         id: draft.id,
         provider_type: draft.provider_type,
         api_key: draft.api_key.trim(),
         base_url: draft.base_url || undefined,
-      }, isOfficial ? { onProgress: handleOfficialProgress } : undefined)
+      })
 
       const latestDraft = providerDraftForAction(draftsRef.current, providerId)
       if (!latestDraft || !providerTestParamsMatch(latestDraft, testedParams)) {
@@ -786,6 +888,15 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     }
   }, [cancelRolesSave, flushRolesSave])
 
+  const refreshRolesProjection = useCallback(async () => {
+    await refreshLoadedLlmRolesProjection({
+      rolesLoaded: Boolean(rolesDataRef.current),
+      setModelGroups,
+      setRolesData,
+      setRolesError,
+    })
+  }, [])
+
   return (
     <SettingsPageContent
       activeTab={activeTab}
@@ -802,12 +913,17 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         userId: appSettings.settings.user_id,
         giteaHost: appSettings.settings.gitea_host,
         defaultSkillsDirectory: appSettings.settings.default_skills_directory,
+        language: appSettings.settings.language,
+        remoteModelCatalogEnabled: appSettings.settings.remote_model_catalog_enabled,
         isLoading: appSettings.isLoading,
         saveStatus: appSettings.saveStatus,
         setUserId: appSettings.setUserId,
         setGiteaHost: appSettings.setGiteaHost,
         setDefaultSkillsDirectory: appSettings.setDefaultSkillsDirectory,
+        setLanguage: appSettings.setLanguage,
+        setRemoteModelCatalogEnabled: appSettings.setRemoteModelCatalogEnabled,
       }}
+      connectionLost={connectionLost}
       onClose={onClose}
       onTabChange={setActiveTab}
       onProviderFieldChange={updateProviderField}
@@ -820,6 +936,8 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       onDeleteRole={deleteRoleByName}
       onDeleteModelBundle={deleteModelBundleById}
       onBeforeRoleTest={flushRolesSave}
+      onAfterRoleTest={refreshRolesProjection}
+      onNavigateToApiKeys={() => setActiveTab("api_keys")}
     />
   )
 }

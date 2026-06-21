@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# UI languages Studio's react-i18next bundle ships. Mirrors the frontend
+# `supportedLngs` in apps/studio/frontend/src/i18n.ts; keep the two in sync.
+SupportedLanguage = Literal["en", "zh-CN"]
 
 
 class AppSettings(BaseModel):
@@ -21,6 +27,14 @@ class AppSettings(BaseModel):
     default_skills_directory: str = Field(
         default="",
         description="Absolute directory where Studio creates new skills by default.",
+    )
+    language: SupportedLanguage = Field(
+        default="en",
+        description="Studio UI language, applied via react-i18next on the frontend.",
+    )
+    remote_model_catalog_enabled: bool = Field(
+        default=True,
+        description="Whether Studio automatically reads the remote model catalog.",
     )
 
     @field_validator("user_id", "gitea_host", "default_skills_directory")

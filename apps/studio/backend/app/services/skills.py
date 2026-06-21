@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
+import tempfile
 import time
 import uuid
 from collections.abc import Iterable
@@ -25,20 +27,26 @@ from app.core.adapters.engine import (
     GraphCompileError,
     GraphManifest,
     GraphPhaseRef,
+    GraphTopologySerializationError,
     LogicNodeAST,
     ResourceNotFoundError,
     SkillLoader,
     SubgraphNodeAST,
+    SubgraphTopologyProjectionError,
     compile_skill,
+    load_child_graph_topology_projection,
+    load_graph_topology_projection,
+    read_subgraph_path,
 )
+from app.core.adapters.transport_factory import build_engine_adapter
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
 from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
 from app.models.errors import LintError
 from app.models.lint import LintResult
 from app.models.runs import RunMetadata
-from app.models.settings import AppSettings
 from app.models.skills import (
+    ChildGraphTopology,
     CompileError,
     CompileFailure,
     CompileSuccess,
@@ -47,12 +55,14 @@ from app.models.skills import (
     SkillDetail,
     SkillSummary,
 )
+from app.services.canvas_data_gap import build_phase_io_index, compute_field_supply
 from app.services.canvas_errors import CanvasConflictError, CanvasSerializerFatal
-from app.services.config_arbitration import detect_config_mismatch
 from app.services.file_watcher import record_api_write
-from app.services.git_local import GitLocalService, initialize_skill_repository
-from app.services.graph_roundtrip import serialize_graph
+from app.services.git_local import initialize_skill_repository
+from app.services.graph_roundtrip import serialize_graph_topology_from_markdown
 from app.services.skill_resolver import build_studio_skill_resolver
+
+logger = logging.getLogger(__name__)
 
 _LOCATION_RE = re.compile(r":(?P<line>\d+)(?::(?P<loc>.*))?")
 _SAFE_SKILL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -76,7 +86,7 @@ phases:
 ---
 <phase depends_on="input" output>init</phase>
 """,
-    "phases/init/LOGIC.md": """---
+    "phases/init/SKILL.md": """---
 io:
   inputs:
     type: object
@@ -84,16 +94,15 @@ io:
   outputs:
     type: object
     properties: {}
+tools: []
+max_iterations: 10
 ---
-<action>initialize</action>
+<role>TODO: describe who this agent is.</role>
+<goal>TODO: describe what this agent should produce.</goal>
 
-# init phase logic
+<step id="S1" name="todo">TODO: describe the first step.</step>
 
-Describe what this phase does.
-""",
-    "phases/init/actions/initialize.py": """def initialize(context):
-    \"\"\"Starter logic action for a new Studio skill.\"\"\"
-    return None
+<protocol id="P1">TODO: describe a rule the agent must follow.</protocol>
 """,
 }
 
@@ -171,97 +180,6 @@ def ensure_workspace_layout() -> None:
     config.default_workspace_skills_dir().mkdir(parents=True, exist_ok=True)
 
 
-async def list_skill_summaries(
-    user_id: str,
-    storage: StorageBackend,
-    metadata: MetadataStore,
-) -> list[SkillSummary]:
-    """Return public, workspace, and imported directory skills."""
-    summaries: dict[str, SkillSummary] = {}
-    app_settings = await metadata.read_app_settings()
-    local_git = GitLocalService()
-    unregistered_skill_ids = await metadata.list_unregistered_skill_ids(user_id)
-    public_ids = [
-        skill_id
-        for skill_id in await _list_skill_ids(config.SKILLS_DIR, storage)
-        if skill_id not in unregistered_skill_ids
-    ]
-    workspace_root = _workspace_skills_dir_for(user_id)
-    workspace_ids = [
-        skill_id
-        for skill_id in await _list_skill_ids(workspace_root, storage)
-        if skill_id not in unregistered_skill_ids
-    ]
-    metadata_summaries = [
-        summary for summary in await metadata.list_skills(user_id) if summary.id not in unregistered_skill_ids
-    ]
-    for skill_id in public_ids:
-        skill_dir = config.SKILLS_DIR / skill_id
-        summary = await _summary_for_skill_dir_async(
-            user_id,
-            skill_dir,
-            storage,
-            metadata,
-        )
-        summaries[skill_id] = _attach_config_mismatch(
-            summary.model_copy(update={"directory_path": str(skill_dir)}),
-            skill_dir,
-            app_settings,
-            local_git,
-        )
-    for skill_id in workspace_ids:
-        skill_dir = workspace_root / skill_id
-        summary = await _summary_for_skill_dir_async(
-            user_id,
-            skill_dir,
-            storage,
-            metadata,
-        )
-        summaries[skill_id] = _attach_config_mismatch(
-            summary.model_copy(update={"directory_path": str(skill_dir)}),
-            skill_dir,
-            app_settings,
-            local_git,
-        )
-    for saved_summary in metadata_summaries:
-        if not saved_summary.directory_path:
-            continue
-        skill_dir = Path(saved_summary.directory_path)
-        summaries[saved_summary.id] = _attach_config_mismatch(
-            (
-                await _summary_for_skill_dir_async(
-                    user_id,
-                    skill_dir,
-                    storage,
-                    metadata,
-                    skill_id=saved_summary.id,
-                )
-            ).model_copy(update={"directory_path": saved_summary.directory_path}),
-            skill_dir,
-            app_settings,
-            local_git,
-        )
-    return sorted(summaries.values(), key=lambda summary: summary.id)
-
-
-def _attach_config_mismatch(
-    summary: SkillSummary,
-    skill_dir: Path,
-    app_settings: AppSettings,
-    local_git: GitLocalService,
-) -> SkillSummary:
-    return summary.model_copy(
-        update={
-            "config_mismatch": detect_config_mismatch(
-                summary.id,
-                skill_dir,
-                app_settings,
-                local_git=local_git,
-            ),
-        },
-    )
-
-
 async def get_skill_detail(
     user_id: str,
     skill_id: str,
@@ -312,6 +230,72 @@ def lint_skill_path(skill_path: Path) -> LintResult:
     )
 
 
+def lint_skill_changed_markdown(skill_id: str, markdown: str) -> LintResult:
+    """Lint the editor's *unsaved* GRAPH.md body for a skill (no disk write).
+
+    The lint kernel stays engine-owned (compile-lint F1/F5): we hand the changed
+    markdown to the engine compiler and surface its diagnostics. Persistence is
+    Autosave / native-fs's job, so the skill store on disk is never mutated. The
+    engine compiler is path-based and also reads sibling files (phase docs,
+    inline IO), so we materialize an *ephemeral* copy of the skill tree in the OS
+    temp dir, overwrite only GRAPH.md with the changed body, compile that copy
+    with caching off, and tear the copy down — nothing touches the skill store.
+    """
+    logger.info("lint changed-markdown skill_id=%s bytes=%d", skill_id, len(markdown))
+    disk_dir = _resolve_skill_dir_for_lint(skill_id)
+    with tempfile.TemporaryDirectory(prefix="studio-lint-") as tmp_root:
+        sandbox = Path(tmp_root) / "skill"
+        _materialize_lint_sandbox(disk_dir, markdown, sandbox)
+        result = lint_skill_path(sandbox)
+    logger.info("lint changed-markdown skill_id=%s status=%s", skill_id, result.status)
+    return _relocate_lint_files_to_skill_root(result, sandbox)
+
+
+def _resolve_skill_dir_for_lint(skill_id: str) -> Path | None:
+    """Resolve the on-disk skill dir, tolerating a not-yet-saved skill.
+
+    A brand-new skill the user is drafting may have no disk tree yet; linting its
+    unsaved body must still work, so a missing skill resolves to ``None`` and the
+    sandbox is built from the body alone.
+    """
+    try:
+        return resolve_skill_dir(skill_id)
+    except HTTPException:
+        logger.info("lint changed-markdown skill_id=%s has no disk tree; body-only sandbox", skill_id)
+        return None
+
+
+def _materialize_lint_sandbox(disk_dir: Path | None, markdown: str, sandbox: Path) -> None:
+    """Build an ephemeral compile sandbox: disk siblings + the changed GRAPH.md."""
+    if disk_dir is not None and disk_dir.exists():
+        shutil.copytree(disk_dir, sandbox)
+    else:
+        sandbox.mkdir(parents=True, exist_ok=True)
+    (sandbox / "GRAPH.md").write_text(markdown, encoding="utf-8")
+
+
+def _relocate_lint_files_to_skill_root(result: LintResult, sandbox: Path) -> LintResult:
+    """Strip the throwaway sandbox prefix from any absolute file in diagnostics.
+
+    Diagnostics file paths are already skill-relative (e.g. ``GRAPH.md``); this
+    only guards against an absolute sandbox path leaking into the response.
+    """
+    sandbox_str = str(sandbox)
+    relocated = [
+        error.model_copy(update={"file": _strip_sandbox_prefix(error.file, sandbox_str)})
+        if error.file and error.file.startswith(sandbox_str)
+        else error
+        for error in result.errors
+    ]
+    if relocated == result.errors:
+        return result
+    return result.model_copy(update={"errors": relocated})
+
+
+def _strip_sandbox_prefix(file_path: str, sandbox_str: str) -> str:
+    return file_path[len(sandbox_str) :].lstrip("/")
+
+
 async def compile_skill_for_studio(
     user_id: str,
     skill_id: str,
@@ -328,12 +312,108 @@ async def compile_skill_for_studio(
         )
     except (GraphCompileError, ResourceNotFoundError) as exc:
         raise CompileFailedError(_compile_failure_from_exception(exc, skill_dir)) from exc
+
+    # N4 atom #35: Studio-layer business gate. A persisted golden case whose node's
+    # current io.outputs schema now requires fields the golden is missing (output-schema
+    # drift) must FAIL compile so the existing N3 compile-gating blocks predict until the
+    # golden is reconciled. Binds to the output schema only; the engine compile has no
+    # knowledge of Studio golden files, so this gate lives in the shell, after compile.
+    golden_errors = _validate_golden_against_output_schema(skill_id, str(skill_dir))
+    if golden_errors:
+        count = len(golden_errors)
+        noun = "field" if count == 1 else "fields"
+        raise CompileFailedError(
+            CompileFailure(
+                detail=f"Golden baseline is missing {count} required output {noun} after a schema change",
+                errors=golden_errors,
+            )
+        )
+
+    artifact_ref = build_engine_adapter().compile(
+        {
+            "skill_dir": str(skill_dir),
+            "skill_id": skill_id,
+            "artifact_scope": "ephemeral",
+        }
+    )
     return CompileSuccess(
         skill_id=skill_id,
         status="ok",
         phase_count=len(compiled.manifest.phases),
         manifest_name=compiled.manifest.name,
+        artifact_ref=artifact_ref,
+        source_map_ref=artifact_ref["source_map_ref"],
+        execution_fingerprint=artifact_ref["execution_fingerprint"],
     )
+
+
+def _validate_golden_against_output_schema(skill_id: str, skill_dir: str) -> list[CompileError]:
+    """N4 #35: compile gate — golden cases missing required output-schema fields are fatal.
+
+    For each agent node that has a persisted golden case, resolve the node's CURRENT
+    ``io.outputs`` schema via the allowlisted engine port and compare its ``required``
+    fields against the golden ``expected_output`` keys. A required field absent from the
+    golden = output-schema drift that must block predict. Binds to the output schema only:
+    prompt/agent-internal edits never appear in ``required`` so never trigger this. Returns
+    one fatal ``CompileError`` per missing field (empty list = no drift).
+    """
+    # Deferred import avoids the golden_diff -> skills import cycle (golden_diff imports
+    # resolve_skill_dir/golden_dir_for from this module).
+    from app.services.golden_diff import iter_golden_cases_for_skill
+
+    logger.info("golden_compile_gate action=start skill_id=%s", skill_id)
+    adapter = build_engine_adapter()
+    errors: list[CompileError] = []
+    checked = 0
+    for node_id, expected_output in iter_golden_cases_for_skill(Path(skill_dir)):
+        output_schema = adapter.resolve_agent_node_output_schema(skill_dir, node_id)
+        if output_schema is None:
+            # Logic node (no golden semantics) or a golden whose node was removed —
+            # not a schema-drift gap; the field-presence rule only applies to agent nodes.
+            logger.info(
+                "golden_compile_gate decision=skip skill_id=%s node_id=%s reason=no_agent_output_schema",
+                skill_id,
+                node_id,
+            )
+            continue
+        checked += 1
+        missing = _missing_required_golden_fields(output_schema, expected_output)
+        for field in missing:
+            logger.warning(
+                "golden_compile_gate decision=fail skill_id=%s node_id=%s field=%s reason=required_field_missing",
+                skill_id,
+                node_id,
+                field,
+            )
+            errors.append(
+                CompileError(
+                    severity="fatal",
+                    field=f"{node_id}.{field}",
+                    message=(
+                        f"Golden baseline for agent node '{node_id}' is missing required "
+                        f"output field '{field}'. Reconcile the golden before predict."
+                    ),
+                )
+            )
+    logger.info(
+        "golden_compile_gate action=end skill_id=%s checked_nodes=%d missing_fields=%d",
+        skill_id,
+        checked,
+        len(errors),
+    )
+    return errors
+
+
+def _missing_required_golden_fields(
+    output_schema: dict[str, Any],
+    expected_output: dict[str, Any],
+) -> list[str]:
+    """Required output-schema fields absent from the golden's top-level keys (ordered)."""
+    required = output_schema.get("required")
+    if not isinstance(required, list):
+        return []
+    present = set(expected_output.keys())
+    return [field for field in required if isinstance(field, str) and field not in present]
 
 
 async def update_skill_content(
@@ -528,13 +608,20 @@ async def create_new_skill(
         if not skill_dir.exists() or not skill_dir.is_dir():
             _raise_invalid_directory_path(str(skill_dir), "selected folder does not exist")
         if not await _is_importable_skill_directory(skill_dir, storage):
-            _raise_invalid_directory_path(
-                str(skill_dir),
-                "Selected folder is not a Studio skill directory: missing GRAPH.md or SKILL.md.",
-                required_entry="GRAPH.md or SKILL.md",
+            # WELCOME-2 / welcome F2 / 01_init.md D2 (FROZEN): "Open folder" must not
+            # block on file shape. A folder lacking a Studio manifest (GRAPH.md/SKILL.md)
+            # — empty or non-skill — imports into a repair state (compile/copilot
+            # normalize it later) instead of being hard-rejected. Only OS-level guards
+            # (path missing / not a directory, above) remain. The summary + detail paths
+            # already degrade gracefully for a manifest-less folder.
+            logger.warning(
+                "import skill_id=%s dir=%s: no GRAPH.md/SKILL.md manifest; "
+                "importing into repair state (D2: do not block on file shape)",
+                skill_id,
+                skill_dir,
             )
-        if await storage.exists(str(skill_dir / "GRAPH.md")):
-            # Validate but do not raise validation error on import, allowing users to upgrade/correct it later
+        elif await storage.exists(str(skill_dir / "GRAPH.md")):
+            # Validate but do not raise on import, letting users upgrade/correct later.
             lint_skill_path(skill_dir)
         summary = (
             await _summary_for_skill_dir_async(
@@ -992,7 +1079,7 @@ def _detail_from_manifest(
 ) -> SkillDetail:
     return SkillDetail(
         manifest=compiled.manifest,
-        graph_topology=_graph_topology(compiled),
+        graph_topology=_graph_topology(compiled, skill_dir),
         node_schema_v21=_node_schema_v21(),
         io_schema=_io_schema(compiled),
         file_paths={
@@ -1023,7 +1110,7 @@ async def _detail_from_manifest_async(
     latest = await latest_run_metadata_async(user_id, skill_id, metadata)
     return SkillDetail(
         manifest=compiled.manifest,
-        graph_topology=_graph_topology(compiled),
+        graph_topology=_graph_topology(compiled, skill_dir),
         node_schema_v21=_node_schema_v21(),
         io_schema=_io_schema(compiled),
         file_paths={
@@ -1042,63 +1129,31 @@ async def _detail_from_manifest_async(
     )
 
 
-def _parse_broken_graph_topology_and_phases(
+def _graph_topology_projection_or_empty(
     skill_dir: Path,
 ) -> tuple[list[str], list[dict[str, object]]]:
     graph_path = skill_dir / "GRAPH.md"
     if not graph_path.exists():
         return [], []
     try:
-        content = graph_path.read_text(encoding="utf-8")
-        parts = content.split("---")
-        if len(parts) < 3:
-            return [], []
-        frontmatter_raw = parts[1]
-        body = "---".join(parts[2:])
-
-        import yaml
-
-        frontmatter = yaml.safe_load(frontmatter_raw) or {}
-        phases = frontmatter.get("phases", [])
-        if not isinstance(phases, list):
-            phases = []
-
-        import re
-
-        phase_pattern = re.compile(r"<phase\b([^>]*?)>(.*?)</phase>", re.IGNORECASE | re.DOTALL)
-
-        topology = []
-        for match in phase_pattern.finditer(body):
-            attributes = match.group(1).strip()
-            tag_content = match.group(2).strip()
-
-            dep_match = re.search(r'depends_on=["\']([^"\']+)["\']', attributes, re.IGNORECASE)
-            depends_on_list = []
-            if dep_match:
-                deps = dep_match.group(1).strip()
-                depends_on_list = [d.strip() for d in deps.split(",") if d.strip()]
-
-            mode = ""
-            phase_dir = skill_dir / "phases" / tag_content
-            if (phase_dir / "LOGIC.md").exists():
-                mode = "logic"
-            elif (phase_dir / "SUBGRAPH.md").exists():
-                mode = "subgraph"
-            elif (phase_dir / "SKILL.md").exists():
-                mode = "agent"
-
-            topology.append(
-                {
-                    "id": tag_content,
-                    "src": f"phases/{tag_content}",
-                    "depends_on": depends_on_list,
-                    "mode": mode,
-                }
-            )
-
-        return [str(p) for p in phases], topology
-    except Exception:
+        projection = load_graph_topology_projection(skill_dir)
+    except (OSError, UnicodeDecodeError, GraphAgentError, ValueError) as exc:
+        # The repair-state view depends on this graceful ([], []) degradation,
+        # so Studio only logs visibility while Engine/core owns GRAPH parsing.
+        logger.warning(
+            "Failed to parse broken GRAPH.md at %s: %s: %s; "
+            "degrading to empty topology/phases for repair view",
+            graph_path,
+            type(exc).__name__,
+            exc,
+        )
         return [], []
+    return projection.phases, projection.graph_topology
+
+
+def _current_graph_phase_count(skill_dir: Path) -> int:
+    phases, _topology = _graph_topology_projection_or_empty(skill_dir)
+    return len(phases)
 
 
 async def _broken_detail_from_files_async(
@@ -1110,7 +1165,7 @@ async def _broken_detail_from_files_async(
     metadata: MetadataStore,
 ) -> SkillDetail:
     latest = await latest_run_metadata_async(user_id, skill_id, metadata)
-    phases, topology = _parse_broken_graph_topology_and_phases(skill_dir)
+    phases, topology = _graph_topology_projection_or_empty(skill_dir)
     return SkillDetail(
         manifest=GraphManifest(
             schema_version="v0.3.0",
@@ -1168,6 +1223,77 @@ def _read_current_graph_markdown(skill_dir: Path) -> str:
     return graph_path.read_text(encoding="utf-8")
 
 
+def _allowed_child_graph_roots(parent_skill_dir: Path) -> list[Path]:
+    """Allowed roots a subgraph child path may resolve inside (copilot cwd boundary).
+
+    Per engine skill-syntax §2.1, a subgraph child path must fall within the
+    copilot working-directory boundary. In Studio that boundary is the managed
+    skill roots: the parent skill's own tree plus the workspace and bundled
+    skill roots.
+    """
+    roots = [
+        parent_skill_dir,
+        config.default_workspace_skills_dir(),
+        config.SKILLS_DIR,
+    ]
+    resolved: list[Path] = []
+    for root in roots:
+        try:
+            resolved.append(root.resolve(strict=False))
+        except OSError:
+            continue
+    return resolved
+
+
+def _raise_subgraph_path_invalid(child_path: str, reason: str) -> NoReturn:
+    response = error_response(
+        error_code="SUBGRAPH_PATH_INVALID",
+        http_status=422,
+        message=f"Invalid subgraph child path: {reason}",
+        details={"path": child_path, "reason": reason},
+        retry_strategy="not_retryable",
+    )
+    raise_error_response(response)
+
+
+def _raise_subgraph_path_not_found(child_path: str) -> NoReturn:
+    response = error_response(
+        error_code="SUBGRAPH_PATH_NOT_FOUND",
+        http_status=404,
+        message=f"Subgraph child graph not found at path: {child_path}",
+        details={"path": child_path},
+        retry_strategy="not_retryable",
+    )
+    raise_error_response(response)
+
+
+async def get_child_graph_topology(
+    user_id: str,
+    skill_id: str,
+    child_path: str,
+    storage: StorageBackend,
+    metadata: MetadataStore,
+) -> ChildGraphTopology:
+    parent_skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
+    try:
+        projection = load_child_graph_topology_projection(
+            parent_skill_dir=parent_skill_dir,
+            child_path=child_path,
+            allowed_roots=_allowed_child_graph_roots(parent_skill_dir),
+        )
+    except SubgraphTopologyProjectionError as exc:
+        if exc.code == "SUBGRAPH_PATH_NOT_FOUND":
+            _raise_subgraph_path_not_found(child_path)
+        _raise_subgraph_path_invalid(child_path, exc.reason)
+    return ChildGraphTopology(
+        path=projection.path,
+        name=projection.name,
+        description=projection.description,
+        phases=projection.phases,
+        graph_topology=projection.graph_topology,
+    )
+
+
 def _graph_content_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
@@ -1175,23 +1301,6 @@ def _graph_content_hash(content: str) -> str:
 def _load_compiled(skill_path: Path) -> CompiledSkill:
     try:
         return SkillLoader().compile_skill(
-            skill_path,
-            skill_resolver=build_studio_skill_resolver(),
-        )
-    except Exception as exc:
-        response = error_response(
-            error_code="MANIFEST_VALIDATION_FAILED",
-            http_status=422,
-            message=str(exc),
-            details={"errors": []},
-            retry_strategy="not_retryable",
-        )
-        raise_error_response(response)
-
-
-def _load_compiled_for_graph_serializer(skill_path: Path) -> CompiledSkill:
-    try:
-        return SkillLoader(validate_context_writes=False).compile_skill(
             skill_path,
             skill_resolver=build_studio_skill_resolver(),
         )
@@ -1220,32 +1329,43 @@ async def serialize_skill_graph_markdown(
     original_md = await storage.read_text(str(graph_path))
     current_hash = _graph_content_hash(original_md)
     try:
-        compiled = _load_compiled_for_graph_serializer(skill_dir)
         if request.expected_hash is not None and request.expected_hash != current_hash:
             raise CanvasConflictError(
                 current_hash=current_hash,
                 current_markdown_content=original_md,
-                current_phase_count=len(compiled.manifest.phases),
+                current_phase_count=_current_graph_phase_count(skill_dir),
             )
-        _validate_canvas_topology(request)
-        manifest = compiled.manifest.model_copy(
-            update={
-                "phases": [
-                    GraphPhaseRef(
-                        id=phase.id,
-                        src=phase.src,
-                        depends_on=list(phase.depends_on),
-                    )
-                    for phase in request.phases
-                ]
-            }
+        # Build the canvas's desired topology (id + real depends_on) and serialize it.
+        # NOTE: GraphManifest.phases is list[str] (no edges), so we MUST pass the full
+        # phase refs to the topology serializer — cramming GraphPhaseRef into the
+        # manifest's phases and re-validating raises ValidationError (the first half of
+        # the bug that 500'd every canvas topology save and left orphan phase dirs).
+        refs = [
+            GraphPhaseRef(
+                id=phase.id,
+                src=phase.src,
+                depends_on=list(phase.depends_on),
+            )
+            for phase in request.phases
+        ]
+        markdown = serialize_graph_topology_from_markdown(
+            skill_id=skill_id,
+            original_md=original_md,
+            phases=refs,
         )
-        markdown = serialize_graph(GraphManifest.model_validate(manifest.model_dump()), original_md)
     except CanvasConflictError:
         raise
     except CanvasSerializerFatal as exc:
         exc.elapsed_ms = (time.perf_counter() - started) * 1000
         raise
+    except GraphTopologySerializationError as exc:
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        raise CanvasSerializerFatal(
+            code=exc.code,
+            message=exc.message,
+            detail=exc.detail,
+            elapsed_ms=elapsed_ms,
+        ) from exc
     except GraphAgentError as exc:
         elapsed_ms = (time.perf_counter() - started) * 1000
         raise _serializer_fatal_from_engine_error(exc, elapsed_ms) from exc
@@ -1256,56 +1376,6 @@ async def serialize_skill_graph_markdown(
         elapsed_ms=elapsed_ms,
         current_hash=current_hash,
     )
-
-
-def _validate_canvas_topology(request: SerializeGraphReq) -> None:
-    phase_ids = {phase.id for phase in request.phases}
-    for phase in request.phases:
-        for dep in phase.depends_on:
-            if dep not in phase_ids:
-                raise CanvasSerializerFatal(
-                    code="serializer_orphan",
-                    message=f"phase {phase.id!r} depends_on unknown phase {dep!r}",
-                    detail={"phase_id": phase.id, "dependency": dep},
-                )
-            if dep == phase.id:
-                raise CanvasSerializerFatal(
-                    code="serializer_cycle",
-                    message=f"phase {phase.id!r} cannot depend on itself",
-                    detail={"phase_id": phase.id},
-                )
-    _validate_canvas_acyclic(request)
-
-
-def _validate_canvas_acyclic(request: SerializeGraphReq) -> None:
-    adjacency: dict[str, list[str]] = {phase.id: [] for phase in request.phases}
-    for phase in request.phases:
-        for dep in phase.depends_on:
-            adjacency[dep].append(phase.id)
-    state: dict[str, str] = {}
-    stack: list[str] = []
-
-    def visit(node: str) -> None:
-        state[node] = "gray"
-        stack.append(node)
-        for nxt in adjacency[node]:
-            if state.get(nxt) == "gray":
-                start = stack.index(nxt)
-                cycle = stack[start:] + [nxt]
-                raise CanvasSerializerFatal(
-                    code="serializer_cycle",
-                    message="cycle detected: " + " -> ".join(cycle),
-                    detail={"cycle": cycle},
-                )
-            if state.get(nxt) is None:
-                visit(nxt)
-        stack.pop()
-        state[node] = "black"
-
-    for node in adjacency:
-        if state.get(node) is None:
-            visit(node)
-
 
 def _serializer_fatal_from_engine_error(exc: Exception, elapsed_ms: float) -> CanvasSerializerFatal:
     message = str(exc)
@@ -1334,32 +1404,84 @@ def _phase_summary_from_compiled(compiled: CompiledSkill) -> list[dict[str, Any]
     ]
 
 
-def _graph_topology(compiled: CompiledSkill) -> list[dict[str, object]]:
+def _graph_topology(compiled: CompiledSkill, skill_dir: Path) -> list[dict[str, object]]:
     mode_by_phase = {node.phase_name: node.mode for node in compiled.nodes}
+    # n2-canvas#10: precompute the per-phase io field schema + graph-level input
+    # fields ONCE so each row can carry its own io fields and a supply/demand map
+    # for the Canvas data-gap view (read-only projection over compiled.nodes).
+    phase_io_index = build_phase_io_index(compiled)
+    graph_input_fields = _graph_input_field_names(compiled)
     topology = compiled.raw.get("graph_topology", {})
     rows = topology.get("phases", []) if isinstance(topology, dict) else []
     if isinstance(rows, list):
         return [
-            {
-                "id": name,
-                "src": f"phases/{name}",
-                "depends_on": list(depends_on),
-                "mode": mode_by_phase.get(name, ""),
-            }
+            _topology_row(
+                name,
+                list(depends_on),
+                mode_by_phase.get(name, ""),
+                skill_dir,
+                phase_io_index=phase_io_index,
+                graph_input_fields=graph_input_fields,
+            )
             for row in rows
             if isinstance(row, dict)
             and isinstance((name := row.get("name")), str)
             and isinstance((depends_on := row.get("depends_on")), list)
         ]
     return [
-        {
-            "id": phase_name,
-            "src": f"phases/{phase_name}",
-            "depends_on": [],
-            "mode": mode_by_phase.get(phase_name, ""),
-        }
+        _topology_row(
+            phase_name,
+            [],
+            mode_by_phase.get(phase_name, ""),
+            skill_dir,
+            phase_io_index=phase_io_index,
+            graph_input_fields=graph_input_fields,
+        )
         for phase_name in compiled.manifest.phases
     ]
+
+
+def _graph_input_field_names(compiled: CompiledSkill) -> set[str]:
+    """Graph-level ``io.inputs`` field names (delegated to the data-gap projector)."""
+    from app.services.canvas_data_gap import _graph_input_fields
+
+    return _graph_input_fields(compiled)
+
+
+def _topology_row(
+    phase_name: str,
+    depends_on: list[str],
+    mode: str,
+    skill_dir: Path,
+    *,
+    phase_io_index: dict[str, dict[str, dict[str, object]]] | None = None,
+    graph_input_fields: set[str] | None = None,
+) -> dict[str, object]:
+    """Build one topology row.
+
+    Surfaces a subgraph phase's absolute child path AND (n2-canvas#10) the
+    phase's per-node io field schema plus a supply/demand map: for each input
+    field, which upstream phase or graph input supplies it, or whether it is a
+    data gap. All source data comes from the already-compiled graph.
+    """
+    row: dict[str, object] = {
+        "id": phase_name,
+        "src": f"phases/{phase_name}",
+        "depends_on": depends_on,
+        "mode": mode,
+    }
+    if mode == "subgraph":
+        row["path"] = read_subgraph_path(skill_dir, phase_name)
+    if phase_io_index is not None:
+        io_fields = phase_io_index.get(phase_name, {"inputs": {}, "outputs": {}})
+        row["io_fields"] = io_fields
+        row["field_supply"] = compute_field_supply(
+            phase_name=phase_name,
+            depends_on=depends_on,
+            phase_io_index=phase_io_index,
+            graph_input_fields=graph_input_fields or set(),
+        )
+    return row
 
 
 def _node_schema_v21() -> dict[str, dict[str, object]]:
@@ -1405,15 +1527,65 @@ def _lint_error_from_exception(exc: Exception) -> LintError:
     message = str(exc)
     match = _LOCATION_RE.search(message)
     line = int(match.group("line")) if match else None
+    payload = getattr(exc, "payload", None)
+    # Forward the engine's typed nearest-field locator verbatim (same getattr
+    # pattern the manual Compile path uses for CompileError.field). The engine's
+    # GraphAgentError surfaces payload.field_path/source_path onto the exception;
+    # ``None`` here means the engine attributed no field → field-level Properties
+    # projection degrades to the node/file axis (file/phase_name) downstream.
+    field_path = _lint_str_attr(exc, "field_path")
+    source_path = _lint_str_attr(exc, "source_path")
     return LintError(
-        file=_file_from_error_message(message),
+        file=_lint_file_from_payload(payload) or _file_from_error_message(message),
         line=line,
         column=None,
-        error_code=_error_code_from_message(message),
+        error_code=_lint_code_from_payload(payload) or _error_code_from_message(message),
         severity="error",
         message=message,
-        phase_name=_phase_from_location(match.group("loc") if match else None),
+        phase_name=(
+            _lint_phase_from_payload(payload)
+            or _phase_from_location(match.group("loc") if match else None)
+        ),
+        field_path=field_path,
+        source_path=source_path,
     )
+
+
+def _lint_str_attr(exc: Exception, name: str) -> str | None:
+    """Read a non-empty str attribute off the engine exception, else ``None``."""
+    value = getattr(exc, name, None)
+    if not isinstance(value, str) or not value:
+        return None
+    return value
+
+
+def _lint_code_from_payload(payload: object) -> str | None:
+    """Prefer the engine's typed error code over regex-scraping the message."""
+    code = getattr(payload, "code", None)
+    if not isinstance(code, str) or not code:
+        return None
+    return code.strip("[]") or None
+
+
+def _lint_file_from_payload(payload: object) -> str | None:
+    """Surface the engine's typed ``source_path`` as a skill-relative file."""
+    source_path = getattr(payload, "source_path", None)
+    if not isinstance(source_path, str) or not source_path:
+        return None
+    for candidate in ("GRAPH.md", "io/inputs.json", "io/outputs.json"):
+        if source_path.endswith(candidate):
+            return candidate
+    phase_match = re.search(r"(phases/[A-Za-z0-9_-]+/(?:LOGIC|SUBGRAPH|SKILL)\.md)", source_path)
+    if phase_match:
+        return phase_match.group(1)
+    return Path(source_path).name
+
+
+def _lint_phase_from_payload(payload: object) -> str | None:
+    phase_id = getattr(payload, "phase_id", None)
+    if isinstance(phase_id, str) and phase_id:
+        return phase_id
+    return None
 
 
 def _file_from_error_message(message: str) -> str | None:

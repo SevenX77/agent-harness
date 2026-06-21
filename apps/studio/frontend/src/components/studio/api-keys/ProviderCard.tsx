@@ -30,13 +30,6 @@ import { Label } from "@/components/ui/label"
 import { Tag } from "@/components/ui/tag"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -45,7 +38,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { translateErrorCode, translateTestStatus } from "@/lib/llm-error-messages"
 import { cn } from "@/lib/utils"
-import type { CredentialsState, ModelInfo, ModelProbeStatus, ProviderTestResult, ProviderType, RouteStatus } from "../../../api/llm"
+import type { CredentialsState, ModelInfo, ModelProbeStatus, ProviderTestResult, ProviderType, ProviderUiState, RouteStatus } from "../../../api/llm"
+import { ProviderStateBadge } from "../settings/llm-roles/provider-state-badge"
 import { providerCachedTestResult, providerTestParamsMatch } from "../settings/provider-utils"
 import type { ProviderDraft } from "../settings/types"
 import { ManualModelTestPanel } from "./ManualModelTestPanel"
@@ -57,12 +51,6 @@ const availableModelsPreviewLimit = 12
 const fieldRowClassName = "grid grid-cols-[minmax(0,1fr)_11.5rem] items-center gap-2"
 const fieldActionClassName = "flex min-w-0 items-center justify-start gap-2"
 const scrollableInputClassName = "overflow-x-auto whitespace-nowrap text-clip"
-const providerProtocolOptions: Array<{ value: ProviderType; label: string }> = [
-  { value: "openai_compatible", label: "OpenAI compatible" },
-  { value: "anthropic_compatible", label: "Anthropic compatible" },
-  { value: "google_genai", label: "Google GenAI" },
-  { value: "ark_runtime", label: "Ark Runtime" },
-]
 const endpointModelExamplesByProvider: Record<string, string> = {
   anthropic: "claude-opus-4-7",
   openai: "gpt-5",
@@ -88,16 +76,18 @@ const officialProviderBrandNames: Record<string, string> = {
   ark: "Ark",
 }
 
-export function apiKeyInputType(visible: boolean): "text" | "password" {
-  return visible ? "text" : "password"
+export function apiKeyInputType(): "text" {
+  // §1 / atom-22 contract: the secret field is ALWAYS a text input. Masking is
+  // done purely with CSS (see apiKeyInputClassName) so the browser/extension
+  // password manager is never triggered by a native type=password field.
+  return "text"
 }
 
 export function apiKeyInputClassName(visible: boolean): string {
-  return cn(scrollableInputClassName, visible ? "text-foreground" : "text-muted-foreground")
-}
-
-export function providerProtocolLabel(value: ProviderType): string {
-  return providerProtocolOptions.find((option) => option.value === value)?.label ?? "OpenAI compatible"
+  return cn(
+    scrollableInputClassName,
+    visible ? "text-foreground" : "text-muted-foreground mask-input",
+  )
 }
 
 export async function copyCredentialValue(value: string, label: string): Promise<void> {
@@ -338,6 +328,36 @@ function humanizeOfficialProviderName(value: string): string {
 
 function modelRouteStatus(model: ModelInfo): ModelProbeStatus | "unknown" {
   return model.status ?? "unknown"
+}
+
+// apikeys#30: the API Keys card surfaces the backend's authoritative 6-state
+// ui_state (projected per route in GET /llm/registry) as an inline connectivity
+// badge. We pick the most-usable state across the endpoint's routes so the card
+// reads green the moment any route is connectable, blue when only historical
+// evidence exists, and so on. Priority is highest-confidence first.
+const providerUiStatePriority: ProviderUiState[] = [
+  "ready",
+  "historical_ready",
+  "untested",
+  "cooling_down",
+  "failed",
+  "off",
+]
+
+export function representativeProviderUiState(models: ModelInfo[]): ProviderUiState | null {
+  let best: ProviderUiState | null = null
+  let bestRank = providerUiStatePriority.length
+  for (const model of models) {
+    const state = model.ui_state
+    if (!state) continue
+    const rank = providerUiStatePriority.indexOf(state)
+    if (rank === -1) continue
+    if (rank < bestRank) {
+      bestRank = rank
+      best = state
+    }
+  }
+  return best
 }
 
 function routeDisplayStatus(model: ModelInfo, isTesting: boolean): RouteDisplayStatus {
@@ -769,6 +789,9 @@ export function ProviderCard({
     ? sortOfficialRouteInfos(matchedResult?.available_models ?? [])
     : sortModelInfos(matchedResult?.available_models ?? [])
   const hasAvailableModels = availableModels.length > 0
+  // apikeys#30: drive an inline 6-state connectivity badge off the backend's
+  // per-route ui_state (threaded through ModelInfo.ui_state from GET /llm/registry).
+  const providerUiState = representativeProviderUiState(availableModels)
   const hasVerifiedModel = availableModels.some((model) => modelRouteStatus(model) === "verified")
   const availableModelsLabel = isOfficial ? "Available Routes:" : "Available Models:"
   const copyTargetLabel = isOfficial ? "route" : "model"
@@ -905,6 +928,13 @@ export function ProviderCard({
           </Badge>
         ) : null}
         {!isOfficial ? <TestMessage status={testStatus} latencyMs={null} errorCode={matchedErrorCode ?? null} /> : null}
+        {providerUiState ? (
+          <ProviderStateBadge
+            state={providerUiState}
+            reasonCode={matchedErrorCode ?? null}
+            detail={matchedResult?.last_test_message ?? null}
+          />
+        ) : null}
         <div className="flex-1" />
         {!isOfficial ? (
           <DropdownMenu>
@@ -954,7 +984,7 @@ export function ProviderCard({
               <Input
                 ref={apiKeyInputRef}
                 id={`api-key-${draft.id}`}
-                type={apiKeyInputType(visible)}
+                type={apiKeyInputType()}
                 value={draft.api_key}
                 onChange={(event) => {
                   if (apiKeyError) setApiKeyError("")
@@ -998,38 +1028,19 @@ export function ProviderCard({
               >
                 {isGettingModels ? (
                   <Loader2 data-icon="inline-start" className="size-3.5 animate-spin shrink-0" />
-                ) : isOfficial ? (
+                ) : (
                   <FlaskConical data-icon="inline-start" className="size-3.5 shrink-0" />
-                ) : null}
-                {isOfficial ? "Test" : "Get Models"}
+                )}
+                {/* apikeys#24/#25: official and third-party share one real connectivity Test entry. */}
+                Test
               </Button>
             </div>
           </div>
           {apiKeyError ? <p id={`api-key-error-${draft.id}`} className="text-xs text-destructive">{apiKeyError}</p> : null}
         </div>
-        {!isOfficial ? (
-          <div className="space-y-2">
-            <Label htmlFor={`provider-protocol-${draft.id}`}>Protocol</Label>
-            <div className={fieldRowClassName}>
-              <Select
-                value={draft.provider_type}
-                onValueChange={(value) => onFieldChange({ provider_type: value as ProviderType })}
-              >
-                <SelectTrigger id={`provider-protocol-${draft.id}`} className="w-full justify-between">
-                  <SelectValue>{providerProtocolLabel(draft.provider_type)}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {providerProtocolOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <div aria-hidden="true" />
-            </div>
-          </div>
-        ) : null}
+        {/* apikeys#20: the manual Protocol dropdown is removed — the backend test
+            entry (#25) auto-detects the transport protocol, so the third-party
+            card's editable fields collapse to name / base_url / api_key. */}
         {!isOfficial ? (
           <div className="space-y-2">
             <div className="flex items-center gap-1.5">

@@ -122,6 +122,52 @@ def test_runtime_schema_rejects_display_name_fields() -> None:
         )
 
 
+def test_gateway_role_schema_rejects_deprecated_authoring_intent_fields() -> None:
+    from graph_agent_gateway.registry.schema import ModelBundle, RoleEntry, RuntimeSettings
+
+    with pytest.raises(ValidationError, match="cost_priority"):
+        RoleEntry.model_validate(
+            {
+                "bundle_id": "analysis",
+                "cost_priority": "cheap_first",
+                "fallback_chain": [],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="ModelGroupIntent"):
+        RoleEntry.model_validate(
+            {
+                "bundle_id": "analysis",
+                "ModelGroupIntent": {"thinking": "inherit"},
+                "fallback_chain": [],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="inherit"):
+        RuntimeSettings.model_validate(
+            {
+                "reasoning": {"enabled": True},
+                "inherit": {"target_output_tokens": True},
+            }
+        )
+
+    with pytest.raises(ValidationError, match="target_output_tokens"):
+        RuntimeSettings.model_validate(
+            {
+                "target_output_tokens": {"mode": "inherit"},
+            }
+        )
+
+    with pytest.raises(ValidationError, match="intent"):
+        ModelBundle.model_validate(
+            {
+                "bundle_id": "analysis",
+                "intent": {"cost_priority": "cheap_first"},
+                "fallback_chain": [],
+            }
+        )
+
+
 def test_invalid_route_id_or_mismatched_parts_fail_validation() -> None:
     from graph_agent_gateway.registry.schema import ProviderRoute
 

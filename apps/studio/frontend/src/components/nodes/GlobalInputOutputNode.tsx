@@ -26,9 +26,9 @@ export function GlobalInputOutputNode({ data, selected }: NodeProps<GlobalNode>)
       ].join(' ')}
     >
       {isInput ? (
-        <Handle type="source" position={Position.Right} className="!size-2.5 !border-background !bg-primary opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+        <Handle type="source" position={Position.Bottom} className="!size-2.5 !border-background !bg-primary opacity-60 group-hover:opacity-100 transition-opacity duration-200" />
       ) : (
-        <Handle type="target" position={Position.Left} className="!size-2.5 !border-background !bg-primary opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+        <Handle type="target" position={Position.Top} className="!size-2.5 !border-background !bg-primary opacity-60 group-hover:opacity-100 transition-opacity duration-200" />
       )}
 
       <div className="flex items-start justify-between gap-3">

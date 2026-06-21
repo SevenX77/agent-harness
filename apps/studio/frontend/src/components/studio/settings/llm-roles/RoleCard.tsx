@@ -13,7 +13,7 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable"
-import { Bot, ChevronDown, Cog, Loader2, MoreVertical, Pencil, Trash2 } from "lucide-react"
+import { Bot, ChevronDown, Cog, Layers3, Loader2, MoreVertical, Pencil, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -49,7 +49,7 @@ import {
 } from "../role-utils"
 import { ModelItem } from "./ModelItem"
 import { RoleNameDialog } from "./RoleNameDialog"
-import { RoleSettingsPanel, type OutputLimitSummary } from "./RoleSettingsDialog"
+import { RoleSettingsPanel, type RoleTokenLimitSummary } from "./RoleSettingsDialog"
 
 export type RoleCategory = "graph-agent" | "copilot"
 
@@ -103,6 +103,15 @@ export const RoleCard = memo(function RoleCard({
 }) {
   const role = data.roles[roleName]
   const modelCodes = useMemo(() => Object.keys(role.models), [role.models])
+  // #51: a role linked to a bundle by reference shows a "Linked to bundle X"
+  // badge. The chain is materialized from the live bundle (not a snapshot), so an
+  // edit to the bundle reflects here after re-projection.
+  const linkedBundle = useMemo(() => (
+    role.bundle_id ? data.model_bundles?.[role.bundle_id] ?? null : null
+  ), [data.model_bundles, role.bundle_id])
+  const linkedBundleLabel = role.bundle_id
+    ? linkedBundle?.display_name || role.bundle_id
+    : null
   const [editOpen, setEditOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
@@ -111,8 +120,8 @@ export const RoleCard = memo(function RoleCard({
   const roleFitByRouteId = useMemo<ReadonlyMap<string, MaterializationReportEntry>>(() => (
     new Map((role.materialization_report?.entries ?? []).map((entry) => [entry.route_id, entry]))
   ), [role.materialization_report?.entries])
-  const outputLimitSummary = useMemo(
-    () => roleOutputLimitSummary(role, providerModelsByRouteId),
+  const tokenLimitSummary = useMemo(
+    () => roleTokenLimitSummary(role, providerModelsByRouteId),
     [providerModelsByRouteId, role],
   )
   const sensors = useSensors(
@@ -298,7 +307,7 @@ export const RoleCard = memo(function RoleCard({
             roleName={roleName}
             modelFallbackEnabled={role.model_fallback_enabled}
             intent={role.intent}
-            outputLimitSummary={outputLimitSummary}
+            tokenLimitSummary={tokenLimitSummary}
             onModelFallbackChange={(checked) => onChange(toggleModelFallback(data, roleName, checked))}
             onSubmit={(intent) => onChange(updateRoleIntent(data, roleName, intent))}
           />
@@ -317,6 +326,16 @@ export const RoleCard = memo(function RoleCard({
             className="rounded-md border border-destructive-border bg-destructive-background/10 px-3 py-2 text-xs text-destructive"
           >
             Role Test failed: {roleTestError}
+          </div>
+        ) : null}
+        {linkedBundleLabel ? (
+          <div
+            data-role-linked-bundle="true"
+            data-linked-bundle-id={role.bundle_id ?? undefined}
+            className="flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground"
+          >
+            <Layers3 aria-hidden="true" className="size-3.5 shrink-0" />
+            <span className="min-w-0 break-all">Linked to bundle: {linkedBundleLabel}</span>
           </div>
         ) : null}
         <DndContext
@@ -379,13 +398,25 @@ export const RoleCard = memo(function RoleCard({
   )
 })
 
-export function roleOutputLimitSummary(
+export function roleTokenLimitSummary(
   role: RolesData["roles"][string],
   providerModelsByRouteId: ReadonlyMap<string, ProviderModelOption>,
-): OutputLimitSummary {
+): RoleTokenLimitSummary {
   const routeIds = Object.values(role.models).flatMap((model) => model.providers)
+
+  return {
+    context: routeTokenLimitSummary(routeIds, providerModelsByRouteId, "max_input_tokens"),
+    output: routeTokenLimitSummary(routeIds, providerModelsByRouteId, "max_output_tokens"),
+  }
+}
+
+function routeTokenLimitSummary(
+  routeIds: string[],
+  providerModelsByRouteId: ReadonlyMap<string, ProviderModelOption>,
+  capabilityKey: "max_input_tokens" | "max_output_tokens",
+): RoleTokenLimitSummary["context"] {
   const values = routeIds
-    .map((routeId) => providerMaxOutputTokens(providerModelsByRouteId.get(routeId)))
+    .map((routeId) => providerMaxTokens(providerModelsByRouteId.get(routeId), capabilityKey))
     .filter((value): value is number => value !== null)
 
   return {
@@ -396,8 +427,12 @@ export function roleOutputLimitSummary(
   }
 }
 
-function providerMaxOutputTokens(providerModel?: ProviderModelOption): number | null {
-  const value = providerModel?.capabilities.max_output_tokens?.value
+function providerMaxTokens(
+  providerModel: ProviderModelOption | undefined,
+  capabilityKey: "max_input_tokens" | "max_output_tokens",
+): number | null {
+  const value = providerModel?.capabilities[capabilityKey]?.value
+  if (typeof value === "number" && Number.isFinite(value)) return value
   if (!value || typeof value !== "object" || Array.isArray(value)) return null
   const max = (value as { max?: unknown }).max
   return typeof max === "number" && Number.isFinite(max) ? max : null

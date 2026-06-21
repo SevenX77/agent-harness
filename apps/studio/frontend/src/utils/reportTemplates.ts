@@ -2,6 +2,7 @@ import type {
   BatchRunStatus,
   CallbackEvent,
   CompareResult,
+  EventEnvelope,
   FieldDifference,
   JsonValue,
   RunDetail,
@@ -77,17 +78,19 @@ function renderRunReportMarkdown({ skillId, run }: RunReportData): string {
 }
 
 function renderCompareReportMarkdown({ skillId, runId, result }: CompareReportData): string {
+  const fields = compareFields(result)
   return [
     `# Golden Diff Report: ${escapeMarkdown(skillId)}`,
     '',
     runId ? `- **Run ID**: ${escapeMarkdown(runId)}` : null,
-    `- **Golden Run ID**: ${escapeMarkdown(result.golden_run_id)}`,
-    `- **Similarity Score**: ${Math.round(result.total_score * 100)}%`,
-    `- **Fields Compared**: ${result.differences.length}`,
+    `- **Baseline ID**: ${escapeMarkdown(result.baseline_id)}`,
+    result.source_run_id ? `- **Source Run ID**: ${escapeMarkdown(result.source_run_id)}` : null,
+    `- **Similarity Score**: ${Math.round(result.total_score)}%`,
+    `- **Fields Compared**: ${fields.length}`,
     '',
     '## Differences',
-    result.differences.length > 0
-      ? result.differences.map(diffMarkdown).join('\n\n')
+    fields.length > 0
+      ? fields.map(diffMarkdown).join('\n\n')
       : 'No differences recorded.',
   ].filter((line): line is string => line !== null).join('\n')
 }
@@ -127,12 +130,13 @@ function renderRunReportHtml(data: RunReportData): string {
 }
 
 function renderCompareReportHtml(data: CompareReportData): string {
+  const fields = compareFields(data.result)
   return htmlDocument(
     `Golden Diff Report: ${data.skillId}`,
     [
       `<h1>Golden Diff Report: ${escapeHtml(data.skillId)}</h1>`,
-      `<section class="meta">${data.runId ? metaRow('Run ID', data.runId) : ''}${metaRow('Golden Run ID', data.result.golden_run_id)}${metaRow('Similarity Score', `${Math.round(data.result.total_score * 100)}%`)}${metaRow('Fields Compared', String(data.result.differences.length))}</section>`,
-      sectionHtml('Differences', data.result.differences.length ? data.result.differences.map(diffHtml).join('') : '<p>No differences recorded.</p>'),
+      `<section class="meta">${data.runId ? metaRow('Run ID', data.runId) : ''}${metaRow('Baseline ID', data.result.baseline_id)}${data.result.source_run_id ? metaRow('Source Run ID', data.result.source_run_id) : ''}${metaRow('Similarity Score', `${Math.round(data.result.total_score)}%`)}${metaRow('Fields Compared', String(fields.length))}</section>`,
+      sectionHtml('Differences', fields.length ? fields.map(diffHtml).join('') : '<p>No differences recorded.</p>'),
     ].join('\n'),
   )
 }
@@ -166,9 +170,18 @@ function metricsHtml(metrics: TokensMetrics | null): string {
   return metaRow('Total Tokens', `${metrics.total_tokens.toLocaleString()} (${cost})`)
 }
 
-function traceSummary(events: CallbackEvent[]): string[] {
-  const errors = events.filter((event) => event.event_type === 'internal_error' || event.event_type === 'validation_fail')
-  const firstEvents = events.slice(0, TRACE_LIMIT)
+function tracePayloads(events: EventEnvelope[] | CallbackEvent[]): CallbackEvent[] {
+  return events.map((event) => (
+    event.schema_version === 'studio.event.v1' && 'payload' in event
+      ? event.payload
+      : event
+  )) as CallbackEvent[]
+}
+
+function traceSummary(events: EventEnvelope[] | CallbackEvent[]): string[] {
+  const payloads = tracePayloads(events)
+  const errors = payloads.filter((event) => event.event_type === 'internal_error' || event.event_type === 'validation_fail')
+  const firstEvents = payloads.slice(0, TRACE_LIMIT)
   const merged = [...firstEvents]
   for (const event of errors) {
     if (!merged.includes(event)) {
@@ -182,13 +195,13 @@ function traceSummary(events: CallbackEvent[]): string[] {
       : ''
     return `[${phase}] ${event.event_type}${tokens}`
   })
-  if (events.length > TRACE_LIMIT) {
-    lines.push(`Trace truncated to ${TRACE_LIMIT} entries plus error events (${events.length} total).`)
+  if (payloads.length > TRACE_LIMIT) {
+    lines.push(`Trace truncated to ${TRACE_LIMIT} entries plus error events (${payloads.length} total).`)
   }
   return lines
 }
 
-function traceListHtml(events: CallbackEvent[]): string {
+function traceListHtml(events: EventEnvelope[] | CallbackEvent[]): string {
   const items = traceSummary(events).map((line) => `<li>${escapeHtml(line)}</li>`).join('')
   return items ? `<ul>${items}</ul>` : '<p>No trace events recorded.</p>'
 }
@@ -211,6 +224,10 @@ function diffMarkdown(field: FieldDifference): string {
 
 function diffHtml(field: FieldDifference): string {
   return `<article class="diff"><h3>${escapeHtml(field.field_path)}</h3><p>Type: ${escapeHtml(field.type)} / Changed: ${field.changed ? 'yes' : 'no'} / Score: ${Math.round(field.score * 100)}%</p><div class="columns"><div><h4>Current</h4><pre>${escapeHtml(jsonBlock(field.current_value))}</pre></div><div><h4>Golden</h4><pre>${escapeHtml(jsonBlock(field.golden_value))}</pre></div></div></article>`
+}
+
+function compareFields(result: CompareResult): FieldDifference[] {
+  return result.node_groups.flatMap((group) => group.field_differences)
 }
 
 function htmlDocument(title: string, body: string): string {
@@ -296,4 +313,3 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
 }
-

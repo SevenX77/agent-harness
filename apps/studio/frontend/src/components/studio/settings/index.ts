@@ -1,4 +1,4 @@
-export { SettingsPage, isStaleRouteReferenceError, modelGroupsReferenceMissingCredentialProviders, officialProviderProgressToastMessage, officialProviderTestSummary, refreshLoadedLlmRolesProjection, upsertProviderModels, upsertProviderModelsListResponse, upsertProviderTestResponse } from "./SettingsPage"
+export { SettingsPage, isStaleRouteReferenceError, modelGroupsReferenceMissingCredentialProviders, officialProviderTestSummary, refreshLoadedLlmRolesProjection, shouldSyncRemoteModelCatalog, upsertProviderModels, upsertProviderModelsListResponse, upsertProviderTestResponse } from "./SettingsPage"
 export { SettingsPageContent } from "./SettingsPageContent"
 export { CopilotTab } from "./copilot/CopilotTab"
 export { LlmRolesTab } from "./LlmRolesTab"

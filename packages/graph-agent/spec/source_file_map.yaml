@@ -103,6 +103,10 @@ files:
   classification: feature
   feature_ids:
   - F-predict-internal-mocking
+- path: packages/graph-agent/src/graph_agent/core/_predict_internal/golden_eval.py
+  classification: feature
+  feature_ids:
+  - F-predict-internal-mocking
 - path: packages/graph-agent/src/graph_agent/core/_predict_internal/hash.py
   classification: feature
   feature_ids:

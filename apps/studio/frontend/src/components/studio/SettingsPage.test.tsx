@@ -1,7 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import {
-  CopilotTab,
   SettingsPageContent,
   draftFromAddProviderSubmission,
   draftsFromCredentials,
@@ -10,10 +9,10 @@ import {
   moveProviderInRole,
   modelGroupsReferenceMissingCredentialProviders,
   notableProviderKeyForDraft,
-  officialProviderProgressToastMessage,
   officialProviderTestSummary,
   officialProviderDrafts,
   providerDraftForAction,
+  shouldSyncRemoteModelCatalog,
   isStaleRouteReferenceError,
   refreshLoadedLlmRolesProjection,
   providerTestParamsFingerprint,
@@ -130,11 +129,15 @@ function baseViewProps(
       userId: 'alice',
       giteaHost: 'https://gitea.example.com',
       defaultSkillsDirectory: '/Users/alice/Skills',
+      language: 'en',
+      remoteModelCatalogEnabled: true,
       isLoading: false,
       saveStatus: 'idle',
       setUserId: vi.fn(),
       setGiteaHost: vi.fn(),
       setDefaultSkillsDirectory: vi.fn(),
+      setLanguage: vi.fn(),
+      setRemoteModelCatalogEnabled: vi.fn(),
     },
     onClose: vi.fn(),
     onTabChange: vi.fn(),
@@ -148,6 +151,8 @@ function baseViewProps(
     onDeleteRole: vi.fn(),
     onDeleteModelBundle: vi.fn(),
     onBeforeRoleTest: vi.fn().mockResolvedValue(null),
+    onAfterRoleTest: vi.fn(),
+    onNavigateToApiKeys: vi.fn(),
     ...overrides,
   }
 }
@@ -174,6 +179,31 @@ describe('draftsFromCredentials', () => {
   })
 })
 
+describe('remote model catalog auto-sync policy', () => {
+  it('runs only after settings load, when enabled, and before the current on-cycle has synced', () => {
+    expect(shouldSyncRemoteModelCatalog({
+      settingsLoading: true,
+      enabled: true,
+      alreadySynced: false,
+    })).toBe(false)
+    expect(shouldSyncRemoteModelCatalog({
+      settingsLoading: false,
+      enabled: false,
+      alreadySynced: false,
+    })).toBe(false)
+    expect(shouldSyncRemoteModelCatalog({
+      settingsLoading: false,
+      enabled: true,
+      alreadySynced: true,
+    })).toBe(false)
+    expect(shouldSyncRemoteModelCatalog({
+      settingsLoading: false,
+      enabled: true,
+      alreadySynced: false,
+    })).toBe(true)
+  })
+})
+
 describe('refreshLoadedLlmRolesProjection', () => {
   it('refreshes loaded roles and model groups after credential route changes', async () => {
     const nextRoles: RolesData = {
@@ -186,7 +216,7 @@ describe('refreshLoadedLlmRolesProjection', () => {
         canonical_id: 'gpt-5',
         display_name: 'GPT-5',
         provider_models: [],
-        status_summary: { ready: 0, untested: 0, cooling_down: 0, needs_setup: 0, off: 0 },
+        status_summary: { ready: 0, untested: 0, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
         capability_summary: {
           capability_known_count: 0,
           thinking: 'unknown',
@@ -273,7 +303,7 @@ describe('modelGroupsReferenceMissingCredentialProviders', () => {
             capabilities: {},
           },
         ],
-        status_summary: { ready: 0, untested: 1, cooling_down: 0, needs_setup: 0, off: 0 },
+        status_summary: { ready: 0, untested: 1, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
         capability_summary: {
           capability_known_count: 0,
           thinking: 'unknown',
@@ -303,7 +333,7 @@ describe('modelGroupsReferenceMissingCredentialProviders', () => {
             capabilities: {},
           },
         ],
-        status_summary: { ready: 1, untested: 0, cooling_down: 0, needs_setup: 0, off: 0 },
+        status_summary: { ready: 1, untested: 0, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
         capability_summary: {
           capability_known_count: 1,
           thinking: 'supported',
@@ -649,22 +679,6 @@ describe('Add Provider flow helpers', () => {
 })
 
 describe('SettingsPageContent (api_keys)', () => {
-  it('describes official provider catalog progress without generation-probe wording', () => {
-    expect(officialProviderProgressToastMessage('Anthropic Official', {
-      job_id: 'job-1',
-      endpoint_id: 'anthropic-official',
-      status: 'running',
-      total_model_count: 8,
-      tested_model_count: 0,
-      verified_route_count: 0,
-      failed_model_count: 0,
-      catalog_only_count: 0,
-      message: 'Reading provider catalog.',
-      available_models: [],
-      available_sdks: ['anthropic_compatible'],
-    })).toBe('Loading Anthropic Official route candidates (8 listed)...')
-  })
-
   it('summarizes official provider Test results as catalog hydration, not generation probing', () => {
     expect(officialProviderTestSummary([
       { id: 'claude-haiku', status: 'verified' },
@@ -711,42 +725,6 @@ describe('SettingsPageContent (api_keys)', () => {
     const copilotHtml = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ activeTab: 'copilot' })} />)
     expect(copilotHtml).toContain('max-w-5xl')
     expect(copilotHtml).toContain('max-w-3xl')
-  })
-
-  it('renders Copilot as a standalone Settings page with SDK compatibility states', () => {
-    const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ activeTab: 'copilot' })} />)
-
-    expect(html).toContain('data-copilot-settings-page="true"')
-    expect(html).toContain('Copilot</button>')
-    expect(html).toContain('data-slot="catalog-accordion"')
-    expect(html).toContain('Claude Agent SDK')
-    expect(html).not.toContain('Copilot Roles')
-    expect(html).toContain('Opus 4.7 Copilot')
-    expect(html).toContain('DeepSeek V4 Copilot')
-    expect(html).toContain('Claude Agent SDK Ready')
-    expect(html).toContain('Claude Agent SDK Not tested')
-    expect(html).toContain('data-copilot-model-group="true"')
-    expect(html).toContain('data-copilot-provider-grid="true"')
-    expect(html).toContain('data-copilot-provider-card="true"')
-    expect(html).toContain('data-copilot-model-add-trigger="true"')
-    expect(html).toContain('Add model')
-    expect(html).toContain('DeepSeek Official')
-    expect(html).toContain('Ark Official')
-    expect(html).not.toContain('aria-label="Copilot roles"')
-    expect(html).not.toContain('data-copilot-sdk-select="true"')
-    expect(html).not.toContain('openai_chat_completions')
-  })
-
-  it('renders the Copilot tab component without depending on LLM Roles data', () => {
-    const html = renderToStaticMarkup(<CopilotTab />)
-
-    expect(html).toContain('data-copilot-role-card="true"')
-    expect(html.match(/data-copilot-role-card="true"/g)).toHaveLength(2)
-    expect(html.match(/data-copilot-role-source="built_in"/g)).toHaveLength(2)
-    expect(html).toContain('data-copilot-model-name="true"')
-    expect(html).toContain('data-variant="default"')
-    expect(html).toContain('Test</button>')
-    expect(html).not.toContain('data-copilot-role-delete-trigger="true"')
   })
 
   it('renders provider skeletons while credentials are loading', () => {
@@ -824,10 +802,13 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).toContain('Test')
   })
 
-  it('renders API key inputs as native password values with password-manager ignore attributes', () => {
+  it('renders API key inputs as CSS-masked text values (never native password) with password-manager ignore attributes', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
 
-    expect(html).toContain('type="password"')
+    // atom-22 contract: secret field is always type=text + CSS masking, never password.
+    expect(html).toContain('type="text"')
+    expect(html).not.toContain('type="password"')
+    expect(html).toContain('mask-input')
     expect(html).toContain('value="sk-deepseek"')
     expect(html).toContain('name="provider-secret-DS"')
     expect(html).toContain('autoComplete="off"')

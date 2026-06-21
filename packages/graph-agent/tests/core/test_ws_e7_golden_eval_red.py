@@ -181,6 +181,7 @@ def test_deterministic_logic_case_exact_match_writes_passed_report(
     assert report["cases"][0]["score"] == 1.0
     assert report["cases"][0]["diff"] == []
     assert report["cases"][0]["stale_fields"] == []
+    assert report["cases"][0]["error"] is None
     assert json.loads((workspace_dir / "golden" / baseline_id / "report.json").read_text()) == report
 
 
@@ -213,6 +214,7 @@ def test_golden_value_mismatch_returns_failed_case_with_field_diff(
     assert case["status"] == "failed"
     assert case["score"] < 1.0
     assert case["stale_fields"] == []
+    assert case["error"] is None
     assert case["diff"] == [
         {
             "path": "answer",
@@ -251,8 +253,25 @@ def test_required_output_missing_from_expected_marks_case_stale_not_compile_fata
     )
 
     assert report["summary"] == {"total_cases": 1, "passed": 0, "failed": 0, "stale": 1}
-    assert report["cases"][0]["status"] == "stale"
-    assert report["cases"][0]["stale_fields"] == ["confidence"]
+    case = report["cases"][0]
+    assert case["status"] == "stale"
+    assert case["stale_fields"] == ["confidence"]
+    assert case["error"]["code"] == "[F-v3-golden-stale-fields]"
+    assert case["error"]["level"] == "FATAL"
+    assert case["error"]["stage"] == ["eval 期"]
+    assert case["error"]["phase_id"] == "score"
+    assert case["error"]["field_path"] == "expected_output"
+    assert case["error"]["source_path"] == str(
+        workspace_dir / "golden" / baseline_id / "cases" / "case-stale.json"
+    )
+    assert case["error"]["details"] == {
+        "baseline_id": baseline_id,
+        "case_id": "case-stale",
+        "phase_id": "score",
+        "stale_fields": ["confidence"],
+        "required_output_fields": ["answer", "confidence"],
+        "expected_output_fields": ["answer"],
+    }
 
 
 def test_golden_eval_uses_workspace_golden_not_skill_source_or_predict_latest(

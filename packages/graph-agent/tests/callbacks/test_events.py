@@ -201,6 +201,37 @@ class TestUnionDiscriminator:
             )
 
 
+def test_resume_related_events_carry_checkpoint_identity() -> None:
+    started = RunStartedEvent(
+        run_id="run-1",
+        thread_id="thread-1",
+        is_resume=True,
+        checkpoint_id="cp-1",
+        checkpoint_ns="",
+    )
+    interrupted = InterruptedEvent(
+        phase_name="review",
+        thread_id="thread-1",
+        checkpoint_id="cp-1",
+        checkpoint_ns="",
+        namespace="",
+        ns="",
+    )
+    resumed = ResumedEvent(
+        thread_id="thread-1",
+        human_input="approved",
+        resumed_from_phase="review",
+        checkpoint_id="cp-1",
+        checkpoint_ns="",
+        namespace="",
+        ns="",
+    )
+
+    assert started.checkpoint_id == "cp-1"
+    assert interrupted.checkpoint_id == "cp-1"
+    assert resumed.checkpoint_id == "cp-1"
+
+
 class TestParallelMapGrouping:
     def test_sub_run_id_and_group_key_preserved(self) -> None:
         ev = PromptCapturedEvent(

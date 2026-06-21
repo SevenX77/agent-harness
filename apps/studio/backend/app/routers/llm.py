@@ -12,19 +12,25 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, NoReturn, cast
-from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.adapters.gateway import (
+    CredentialProviderProtocol,
+    EndpointProbeResult,
     GatewayAdapter,
     GatewayProviderRoute,
     GatewayRoleEntry,
+    OfficialCallMethod,
     ProfileSelectionError,
     ProviderModelStateProjection,
+    ProviderProbeBackend,
     RegistryResolutionError,
+    ResolvedRoute,
+    ResourceTerminalError,
+    RouteProbeResult,
     RuntimeSettings,
     VerifiedProfile,
     build_runtime_setting_descriptors,
@@ -33,6 +39,23 @@ from app.core.adapters.gateway import (
     normalize_route_capabilities,
     select_verified_profile,
 )
+from app.core.adapters.gateway import (
+    endpoint_probe_backend as _gateway_endpoint_probe_backend,
+)
+from app.core.adapters.gateway import (
+    endpoint_probe_base_url as _gateway_endpoint_probe_base_url,
+)
+from app.core.adapters.gateway import (
+    probe_official_call_method as _gateway_probe_official_call_method_request,
+)
+from app.core.adapters.gateway import (
+    test_provider_endpoint as _gateway_test_provider_endpoint_request,
+)
+from app.core.adapters.gateway import (
+    test_provider_route as _gateway_test_provider_route_request,
+)
+from app.core.adapters.transport_factory import build_gateway_adapter
+from app.core.backends import get_backend_config
 from app.models.llm_config import (
     CapabilityValue,
     EvidenceRecord,
@@ -43,27 +66,26 @@ from app.models.llm_config import (
     ProviderEndpoint,
     ProviderImportDraft,
     ProviderRoute,
+    ProviderType,
     RegistryResponse,
     RoleEntry,
     RoleRouteEntry,
     RolesData,
     RouteCandidate,
+    overlay_bundle_reference_chain,
 )
+from app.services import copilot
 from app.services.copilot_test import (
-    CopilotProvider,
     ModelProbeResult,
-    OfficialCallMethod,
     PingResult,
     _NetworkError,
-    _ping_provider,
-    _probe_model,
     _QuotaExceeded,
     _RateLimited,
     _Unauthorized,
 )
-from app.services.copilot_test import (
-    _probe_official_call_method as _probe_official_call_method_request,
-)
+from app.services.event_bus import STUDIO_EVENTS_TOPIC, event_bus
+from app.services.gateway_resolver import build_gateway_route_runtime
+from app.services.github_catalog import GitHubCatalogApiError, GitHubCatalogClient
 from app.services.llm_credentials import (
     _route_slug,
     credentials_path,
@@ -85,8 +107,11 @@ from app.services.llm_import_drafts import (
     create_draft,
     load_draft,
     load_evidence_library,
+    load_remote_catalog_source_metadata,
     new_evidence_id,
-    sync_remote_evidence_library,
+    remember_remote_catalog_source,
+    sync_remote_evidence_library,  # noqa: F401 — module attr for test_sync_catalog_endpoint monkeypatch
+    sync_remote_evidence_library_with_metadata,
 )
 from app.services.llm_model_groups import (
     normalize_model_group_key,
@@ -94,6 +119,12 @@ from app.services.llm_model_groups import (
 )
 from app.services.llm_model_identity import project_model_identity
 from app.services.llm_notable_models import notable_model_ids
+from app.services.llm_role_test_results import (
+    load_all as load_role_test_results,
+)
+from app.services.llm_role_test_results import (
+    save_result as save_role_test_result,
+)
 from app.services.llm_roles import (
     InvalidRoleReference,
     get_role,
@@ -126,6 +157,42 @@ _THINKING_CAPABILITY_KEYS = (
     "reasoning",
     "supports_thinking",
 )
+
+
+async def _ping_provider(
+    backend: ProviderProbeBackend,
+    api_key: str,
+    base_url: str,
+) -> PingResult:
+    del backend, api_key, base_url
+    raise RuntimeError("Studio no longer owns provider endpoint probes; use Gateway provider_probe.")
+
+
+async def _probe_model(
+    backend: ProviderProbeBackend,
+    api_key: str,
+    base_url: str,
+    model_id: str,
+    runtime_settings: dict[str, Any] | None = None,
+) -> ModelProbeResult:
+    del backend, api_key, base_url, model_id, runtime_settings
+    raise RuntimeError("Studio no longer owns provider route probes; use Gateway provider_probe.")
+
+
+async def _probe_official_call_method_request(
+    method_id: OfficialCallMethod,
+    api_key: str,
+    base_url: str,
+    model_id: str,
+    runtime_settings: dict[str, Any] | None = None,
+) -> ModelProbeResult:
+    del method_id, api_key, base_url, model_id, runtime_settings
+    raise RuntimeError("Studio no longer owns official provider route probes; use Gateway provider_probe.")
+
+
+_ORIGINAL_PING_PROVIDER = _ping_provider
+_ORIGINAL_PROBE_MODEL = _probe_model
+_ORIGINAL_PROBE_OFFICIAL_CALL_METHOD_REQUEST = _probe_official_call_method_request
 
 
 @dataclass(frozen=True)
@@ -169,22 +236,6 @@ class EndpointTestCompactModelInfo(BaseModel):
     capabilities: dict[str, object] = Field(default_factory=dict)
 
 
-class EndpointTestJobResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    job_id: str
-    endpoint_id: str
-    status: Literal["queued", "running", "completed", "failed"]
-    total_model_count: int = 0
-    tested_model_count: int = 0
-    verified_route_count: int = 0
-    failed_model_count: int = 0
-    catalog_only_count: int = 0
-    message: str | None = None
-    available_models: list[EndpointTestCompactModelInfo] = Field(default_factory=list)
-    available_sdks: list[str] = Field(default_factory=list)
-
-
 class ProviderNotableModelsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -196,8 +247,15 @@ class RoleTestProviderProgressInfo(BaseModel):
 
     canonical_id: str
     route_id: str
-    status: Literal["queued", "testing", "ok", "failed", "blocked", "untested"]
+    # R-F11: 6-state light alignment with ProviderUiState. The SDK probe path
+    # emits "cooling_down" when the upstream surface (e.g. anthropic 429) signals
+    # rate limiting, so the FE can render a gray light + retry countdown instead
+    # of a generic "failed".
+    status: Literal["queued", "testing", "ok", "failed", "blocked", "untested", "cooling_down"]
     message: str | None = None
+    # R-F21: when status == "cooling_down", carry the suggested cooldown so the
+    # FE Test Button can render a countdown and stay disabled until it elapses.
+    retry_after_seconds: int | None = None
 
 
 class RoleTestJobResponse(BaseModel):
@@ -207,13 +265,32 @@ class RoleTestJobResponse(BaseModel):
     role_name: str
     status: Literal["queued", "running", "completed", "failed"]
     message: str | None = None
+    error_code: str | None = None
+    error_payload: dict[str, Any] | None = None
     provider_statuses: list[RoleTestProviderProgressInfo] = Field(default_factory=list)
     result: dict[str, Any] | None = None
 
 
-_endpoint_test_jobs: dict[str, EndpointTestJobResponse] = {}
-_running_endpoint_test_jobs: dict[str, str] = {}
-_endpoint_test_jobs_lock = asyncio.Lock()
+class PersistedRoleTestResult(BaseModel):
+    """R20: one durably stored LAST completed role/copilot test result."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role_name: str
+    status: str
+    message: str | None = None
+    result: dict[str, Any]
+    updated_at: str
+
+
+class RoleTestResultsResponse(BaseModel):
+    """R20: persisted last test results keyed by role name for mount re-seed."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    results: dict[str, PersistedRoleTestResult] = Field(default_factory=dict)
+
+
 _role_test_jobs: dict[str, RoleTestJobResponse] = {}
 _role_test_jobs_lock = asyncio.Lock()
 # Keep strong references to fire-and-forget background tasks so the event loop
@@ -303,13 +380,31 @@ class EndpointModelTestResponse(BaseModel):
     results: list[EndpointModelTestResult]
 
 
+def _remote_catalog_sync_inputs() -> tuple[dict[str, Any] | None, str | None]:
+    """Return the configured remote catalog payload or raw URL for sync."""
+    cfg = get_backend_config()
+    if cfg.github_owner.strip():
+        owner = cfg.github_owner.strip()
+        repo = cfg.llm_catalog_repo.strip() or "studio-llm-model-catalog"
+        branch = cfg.llm_catalog_branch.strip() or "main"
+        catalog_path = cfg.llm_catalog_path.strip() or "llm_import_drafts.json"
+        return None, f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{catalog_path}"
+    return None, None
+
+
 @router.get("/registry", response_model=RegistryResponse)
 async def get_llm_registry() -> RegistryResponse:
     """Return the joined redacted endpoint/route/role registry."""
     setup_required = not credentials_path().exists()
     credentials = load_credentials()
     roles = _load_roles_or_empty()
-    return _registry_response(credentials, roles, setup_required=setup_required)
+    # The registry projection is a synchronous, CPU-bound join (route-state
+    # projection + model-group grouping over every route). Run it off the event
+    # loop so a slow build never starves other requests / the WS on the single
+    # asyncio thread.
+    return await asyncio.to_thread(
+        _registry_response, credentials, roles, setup_required=setup_required
+    )
 
 
 @router.get("/registry/endpoints/{endpoint_id}/secret", response_model=EndpointSecretResponse)
@@ -349,55 +444,58 @@ async def delete_registry_endpoint(endpoint_id: str) -> dict[str, Any]:
     return serialize_for_response(data)
 
 
-@router.post(
-    "/endpoints/{endpoint_id}/test-jobs",
-    response_model=EndpointTestJobResponse,
-)
-async def start_endpoint_test_job(endpoint_id: str) -> EndpointTestJobResponse:
-    """Start an official provider test job that reports compact progress."""
-    credentials = load_credentials()
-    endpoint = credentials.provider_endpoints.get(endpoint_id)
-    if endpoint is None:
-        raise HTTPException(status_code=404, detail=f"Unknown endpoint: {endpoint_id}")
-    if endpoint.provider_kind != "official":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Endpoint test jobs are only supported for official providers: {endpoint_id}",
-        )
-    async with _endpoint_test_jobs_lock:
-        running_job_id = _running_endpoint_test_jobs.get(endpoint_id)
-        if running_job_id is not None:
-            running = _endpoint_test_jobs.get(running_job_id)
-            if running is not None and running.status in {"queued", "running"}:
-                return running
-        job = EndpointTestJobResponse(
-            job_id=uuid.uuid4().hex,
-            endpoint_id=endpoint_id,
-            status="queued",
-            message="Provider test queued.",
-            available_sdks=[endpoint.protocol],
-        )
-        _endpoint_test_jobs[job.job_id] = job
-        _running_endpoint_test_jobs[endpoint_id] = job.job_id
-    _spawn_background_task(_run_official_endpoint_test_job(job.job_id, endpoint_id))
-    return job
-
-
 @router.post("/catalog/sync")
 async def sync_catalog() -> dict[str, Any]:
     """Pull the remote evidence library and merge it locally."""
     try:
-        updated = await sync_remote_evidence_library()
+        data, url = _remote_catalog_sync_inputs()
+        result = await sync_remote_evidence_library_with_metadata(data=data, url=url)
+        remember_remote_catalog_source(result.catalog_source)
+        updated = result.draft
         return {
             "status": "success",
             "message": "Catalog synced successfully with remote repository.",
             "route_candidates_count": len(updated.route_candidates),
             "evidence_records_count": len(updated.evidence_records),
+            "new_records_count": result.catalog_source.new_records_count,
+            "catalog_source": result.catalog_source.model_dump(mode="json"),
         }
+    except GitHubCatalogApiError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"GitHub catalog API failed: {exc.status_code}",
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=500,
             detail=f"Failed to sync catalog: {exc}",
+        ) from exc
+
+
+def ensure_catalog_repository() -> dict[str, Any]:
+    """Ensure the configured GitHub remote catalog repository exists."""
+    cfg = get_backend_config()
+    result = GitHubCatalogClient(
+        token=cfg.github_token,
+        owner=cfg.github_owner,
+        repo=cfg.llm_catalog_repo,
+        branch=cfg.llm_catalog_branch,
+        catalog_path=cfg.llm_catalog_path,
+    ).ensure_repository()
+    return {"status": "success", **result.model_dump(mode="json")}
+
+
+@router.post("/catalog/repository/ensure")
+async def ensure_catalog_repository_endpoint() -> dict[str, Any]:
+    """Create or validate the GitHub-backed remote model catalog repository."""
+    try:
+        return ensure_catalog_repository()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except GitHubCatalogApiError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"GitHub catalog API failed: {exc.status_code}",
         ) from exc
 
 
@@ -432,18 +530,6 @@ async def share_catalog() -> dict[str, Any]:
         ) from exc
 
 
-@router.get(
-    "/endpoint-test-jobs/{job_id}",
-    response_model=EndpointTestJobResponse,
-)
-async def get_endpoint_test_job(job_id: str) -> EndpointTestJobResponse:
-    """Return compact progress for one provider test job."""
-    job = _endpoint_test_jobs.get(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"Unknown endpoint test job: {job_id}")
-    return job
-
-
 @router.post("/endpoints/{endpoint_id}/test", response_model=EndpointTestResponse)
 async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
     """Verify an endpoint by making the provider's minimal models-list call."""
@@ -457,42 +543,24 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
     model_list_reached = False
     discovered_model_ids: tuple[str, ...] = ()
     raw_capabilities_by_model: dict[str, dict[str, Any]] = {}
-    if endpoint.api_key and endpoint.api_key.get_secret_value():
-        probe_backend = _endpoint_probe_backend(endpoint)
-        probe_base_url = _endpoint_probe_base_url(endpoint)
-        logger.warning(
-            "testing LLM endpoint protocol=%s backend=%s",
-            endpoint.protocol,
-            probe_backend,
-        )
-        try:
-            result = await _ping_provider(
-                probe_backend,
-                endpoint.api_key.get_secret_value(),
-                probe_base_url,
-            )
-        except _Unauthorized as exc:
-            message = _provider_error_message("Invalid API key", exc)
-        except _RateLimited as exc:
-            message = _provider_error_message("Provider rate limited the test request", exc)
-        except _QuotaExceeded as exc:
-            message = _provider_error_message(
-                "Provider rejected the key because quota or billing is unavailable",
-                exc,
-            )
-        except httpx.TimeoutException:
-            message = "Endpoint test timed out."
-        except _NetworkError as exc:
-            message = _provider_error_message("Network error while testing endpoint", exc)
+    probe_backend = _endpoint_probe_backend(endpoint)
+    logger.warning(
+        "testing LLM endpoint protocol=%s backend=%s",
+        endpoint.protocol,
+        probe_backend,
+    )
+    result = await _gateway_test_provider_endpoint(endpoint)
+    if result.status == "ok":
+        status = "unverified_manual"
+        model_list_reached = True
+        if not result.model_ids:
+            message = "Endpoint reachable but returned no models."
         else:
-            status = "unverified_manual"
-            model_list_reached = True
-            if not result.model_ids:
-                message = "Endpoint reachable but returned no models."
-            else:
-                message = _endpoint_success_message(result)
-                discovered_model_ids = result.model_ids
-                raw_capabilities_by_model = result.model_capabilities
+            message = _endpoint_success_message(result)
+            discovered_model_ids = result.model_ids
+            raw_capabilities_by_model = result.model_capabilities
+    else:
+        message = _endpoint_probe_failure_message(result)
     latest_credentials = load_credentials()
     latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
     if latest_endpoint is None:
@@ -515,39 +583,66 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
             tested_endpoint_id=endpoint_id,
             discovered_model_count=0,
         )
+    endpoint_update: dict[str, Any] = {}
     if model_list_reached:
         route_ids_by_model: dict[str, str] = {}
-        if latest_endpoint.provider_kind == "official":
-            latest_credentials, route_ids_by_model = _upsert_discovered_routes(
-                latest_credentials,
-                endpoint=latest_endpoint,
-                model_ids=discovered_model_ids,
-                verified=False,
-                raw_capabilities_by_model=raw_capabilities_by_model,
-            )
-            if discovered_model_ids:
-                status = "verified"
-        else:
-            latest_credentials, route_ids_by_model = _upsert_discovered_routes(
-                latest_credentials,
-                endpoint=latest_endpoint,
-                model_ids=discovered_model_ids,
-                verified=False,
-                raw_capabilities_by_model=raw_capabilities_by_model,
-            )
+        latest_credentials, route_ids_by_model = _upsert_discovered_routes(
+            latest_credentials,
+            endpoint=latest_endpoint,
+            model_ids=discovered_model_ids,
+            verified=False,
+            raw_capabilities_by_model=raw_capabilities_by_model,
+        )
         _append_model_list_observation_evidence(
             latest_endpoint,
             discovered_model_ids,
             raw_capabilities_by_model,
             route_ids_by_model,
         )
-    updated = latest_endpoint.model_copy(
-        update={
+        if latest_endpoint.provider_kind == "official":
+            # Official endpoints are operator-controlled: a reachable get-models
+            # call is enough to verify (apikeys#24); no per-model probe required.
+            if discovered_model_ids:
+                status = "verified"
+        else:
+            # Third-party endpoints must prove the protocol matches AND that the
+            # endpoint can actually generate before reaching verified (apikeys#25).
+            verification = await _verify_third_party_endpoint_by_probe(
+                latest_endpoint,
+                discovered_model_ids,
+                raw_capabilities_by_model,
+            )
+            status = verification.status
+            message = verification.message
+            if verification.status == "verified" and verification.verified_model_id is not None:
+                if verification.detected_protocol != latest_endpoint.protocol:
+                    endpoint_update["protocol"] = verification.detected_protocol
+                    latest_endpoint = latest_endpoint.model_copy(
+                        update={"protocol": verification.detected_protocol}
+                    )
+                latest_credentials, verified_route_ids = _upsert_discovered_routes(
+                    latest_credentials,
+                    endpoint=latest_endpoint,
+                    model_ids=(verification.verified_model_id,),
+                    verified=True,
+                    raw_capabilities_by_model=verification.probe_capabilities,
+                )
+                _append_model_probe_evidence(
+                    latest_endpoint,
+                    ModelProbeResult(
+                        model_id=verification.verified_model_id,
+                        status="ok",
+                    ),
+                    route_id=verified_route_ids.get(verification.verified_model_id),
+                )
+    endpoint_update.update(
+        {
             "status": status,
             "last_test_at": _now_iso(),
             "last_test_message": message,
         }
     )
+    updated = latest_endpoint.model_copy(update=endpoint_update)
     latest_credentials.provider_endpoints[endpoint_id] = updated
     save_credentials(latest_credentials)
     return EndpointTestResponse(
@@ -663,11 +758,8 @@ async def test_endpoint_models(
     probe_results: list[ModelProbeResult] = []
     for model_id in requested_model_ids:
         probe_results.append(
-            await _probe_model(
-                _endpoint_probe_backend(endpoint),
-                endpoint.api_key.get_secret_value(),
-                _endpoint_probe_base_url(endpoint),
-                model_id,
+            _model_probe_result_from_route_probe(
+                await _gateway_test_provider_model(endpoint, model_id)
             )
         )
     successful_model_ids = [result.model_id for result in probe_results if result.status == "ok"]
@@ -692,13 +784,18 @@ async def test_endpoint_models(
                 registry=_registry_response(latest_credentials, _load_roles_or_empty()),
                 results=results,
             )
+        list_model_capabilities = await _list_model_capabilities_for_endpoint(latest_endpoint)
         latest_credentials, route_ids_by_model = _upsert_discovered_routes(
             latest_credentials,
             endpoint=latest_endpoint,
             model_ids=tuple(successful_model_ids),
             verified=True,
             raw_capabilities_by_model={
-                model_id: _successful_generation_probe_capabilities() for model_id in successful_model_ids
+                model_id: _third_party_probe_capabilities(
+                    model_id,
+                    list_model_capabilities.get(model_id),
+                )
+                for model_id in successful_model_ids
             },
         )
         latest_endpoint = latest_endpoint.model_copy(
@@ -711,21 +808,27 @@ async def test_endpoint_models(
         latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint
         save_credentials(latest_credentials)
     else:
-        latest_credentials = credentials
-        latest_endpoint = credentials.provider_endpoints.get(endpoint_id)
+        latest_credentials = load_credentials()
+        latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
         if latest_endpoint is not None and probe_results:
-            latest_credentials = latest_credentials.model_copy(
+            if latest_credentials.endpoint_fingerprint(endpoint_id) != starting_fingerprint:
+                results = [
+                    EndpointModelTestResult(
+                        model_id=result.model_id,
+                        status="error",
+                        message="Endpoint changed while model test was running.",
+                    )
+                    for result in probe_results
+                ]
+                return EndpointModelTestResponse(
+                    registry=_registry_response(latest_credentials, _load_roles_or_empty()),
+                    results=results,
+                )
+            latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint.model_copy(
                 update={
-                    "provider_endpoints": {
-                        **latest_credentials.provider_endpoints,
-                        endpoint_id: latest_endpoint.model_copy(
-                            update={
-                                "status": "failed",
-                                "last_test_at": _now_iso(),
-                                "last_test_message": _model_probe_failure_message(probe_results[0]),
-                            }
-                        ),
-                    }
+                    "status": "failed",
+                    "last_test_at": _now_iso(),
+                    "last_test_message": _model_probe_failure_message(probe_results[0]),
                 }
             )
             save_credentials(latest_credentials)
@@ -888,7 +991,27 @@ async def put_llm_roles(request: RolesData) -> RolesData:
     credentials = load_credentials()
     materialized = _materialize_roles_for_response(merged, credentials)
     saved = _save_roles_with_active_routes(materialized)
+    await _publish_roles_changed()
     return _materialize_roles_for_response(saved, credentials)
+
+
+@router.get("/roles/test-results", response_model=RoleTestResultsResponse)
+async def get_role_test_results() -> RoleTestResultsResponse:
+    """R20: return the durably persisted LAST test result per role.
+
+    The settings UI seeds role/copilot badges from this on mount so the
+    last-known status survives a server restart or a tab remount; live tests
+    still update + re-persist through the existing test-job endpoints. This is
+    declared before ``/roles/{role_name}`` so FastAPI does not capture the
+    literal ``test-results`` path segment as a role name.
+    """
+    persisted = load_role_test_results()
+    return RoleTestResultsResponse(
+        results={
+            role_name: PersistedRoleTestResult.model_validate(entry)
+            for role_name, entry in persisted.items()
+        }
+    )
 
 
 @router.get("/roles/{role_name}", response_model=RoleEntry)
@@ -906,12 +1029,23 @@ async def put_llm_role(role_name: str, request: RoleEntry) -> RoleEntry:
     """Full replace one role."""
     data = _load_roles_or_empty()
     credentials = load_credentials()
-    adapter = GatewayAdapter(transport="in_process")
-    role = adapter.materialize_role({"role": request, "credentials": credentials}) if request.model_groups else request
+    adapter = build_gateway_adapter()
+    role = (
+        adapter.materialize_role(
+            {
+                "role": request,
+                "credentials": credentials,
+                "evidence_records": _load_gateway_evidence_records(),
+            }
+        )
+        if request.model_groups
+        else request
+    )
     roles = dict(data.roles)
     roles[role_name] = role
     schema_version = 3 if role.model_groups else data.schema_version
     saved = _save_roles_with_active_routes(data.model_copy(update={"schema_version": schema_version, "roles": roles}))
+    await _publish_roles_changed()
     return _materialize_role_for_response(saved.roles[role_name], credentials)
 
 
@@ -925,6 +1059,7 @@ async def delete_llm_role(role_name: str) -> RolesData:
     del roles[role_name]
     credentials = load_credentials()
     saved = _save_roles_with_active_routes(data.model_copy(update={"roles": roles}))
+    await _publish_roles_changed()
     return _materialize_roles_for_response(saved, credentials)
 
 
@@ -950,6 +1085,10 @@ async def start_role_test_job(role_name: str) -> RoleTestJobResponse:
         raise HTTPException(status_code=404, detail=f"Unknown LLM role: {role_name}")
     credentials = load_credentials()
     role = _materialize_role_for_response(role, credentials)
+    # COPILOT_ASSIST-4: copilot's test走 copilot 自己的真实 ClaudeSDKClient 调用
+    # (发真工具调用、验 spawn/env/tool loop), not the httpx connectivity probe.
+    if role.role_kind == "copilot":
+        return await _start_copilot_sdk_test_job(role_name)
     targets = _role_test_targets(role, credentials)
     job_id = str(uuid.uuid4())
     job = RoleTestJobResponse(
@@ -962,6 +1101,37 @@ async def start_role_test_job(role_name: str) -> RoleTestJobResponse:
     async with _role_test_jobs_lock:
         _role_test_jobs[job_id] = job
     _spawn_background_task(_run_role_test_job_impl(job_id, role_name, targets))
+    return job
+
+
+@router.post("/model-bundles/{bundle_id}/test-jobs", response_model=RoleTestJobResponse)
+async def start_bundle_test_job(bundle_id: str) -> RoleTestJobResponse:
+    """Start a bundle fallback test job, mirroring the role test (#50b).
+
+    The bundle is resolved through ``materialize_model_bundle`` which wraps it into
+    a TRANSIENT, never-persisted role-like entry — so the persisted roles store is
+    not polluted. The job is keyed under ``__bundle__{id}`` so its result lands in
+    the bundle namespace of the role-test results store, away from real roles.
+    """
+    data = _load_roles_or_empty()
+    bundle = data.model_bundles.get(bundle_id)
+    if bundle is None:
+        raise HTTPException(status_code=404, detail=f"Unknown model bundle: {bundle_id}")
+    credentials = load_credentials()
+    materialized = _materialize_bundle_for_response(bundle, credentials)
+    job_role_name = bundle_role_name(bundle_id)
+    targets = _build_role_test_targets(materialized, credentials)
+    job_id = str(uuid.uuid4())
+    job = RoleTestJobResponse(
+        job_id=job_id,
+        role_name=job_role_name,
+        status="queued",
+        message="Queued bundle test.",
+        provider_statuses=[_role_test_provider_progress(target, "queued") for target in targets],
+    )
+    async with _role_test_jobs_lock:
+        _role_test_jobs[job_id] = job
+    _spawn_background_task(_run_role_test_job_impl(job_id, job_role_name, targets))
     return job
 
 
@@ -979,8 +1149,22 @@ def _role_test_targets(
     role: RoleEntry,
     credentials: LLMCredentialsFile,
 ) -> list[RoleTestTarget]:
+    return _build_role_test_targets(role, credentials)
+
+
+def _build_role_test_targets(
+    materialized: RoleEntry | ModelBundle,
+    credentials: LLMCredentialsFile,
+) -> list[RoleTestTarget]:
+    """Build per-route probe targets from a materialized role OR model bundle.
+
+    #50b: a materialized ModelBundle carries the same fallback_chain +
+    materialization_report shape a materialized role does, so the bundle Test path
+    (start_bundle_test_job) reuses this exact builder — one source of truth for the
+    role and bundle test orchestration.
+    """
     targets: list[RoleTestTarget] = []
-    for report_entry, fallback_entry in _role_test_entries(role):
+    for report_entry, fallback_entry in _role_test_entries(materialized):
         route_id = report_entry["route_id"]
         route = credentials.provider_routes.get(route_id)
         if route is None:
@@ -1097,6 +1281,7 @@ async def _run_role_test_job_impl(
         )
         return
 
+    _persist_completed_role_test_result(role_name, result)
     await _update_role_test_job(
         job_id,
         status="completed",
@@ -1148,6 +1333,279 @@ async def _update_role_test_job_provider(
         _role_test_jobs[job_id] = current.model_copy(update={"provider_statuses": provider_statuses})
 
 
+# COPILOT_ASSIST-4: copilot test orchestration — resolve the role's routes via the
+# gateway role→routes API, run the real ClaudeSDKClient tool-call test per route
+# (full fallback chain, bounded concurrency), and project per-route lights +
+# structured sdk_evidence into the same job contract the LLM-Roles UI consumes.
+_COPILOT_SDK_TEST_CONCURRENCY = 2
+
+
+def _human_message_for_error_code(error_code: str | None, role_name: str) -> str:
+    """R-F9: map gateway error codes to human-readable Chinese copilot test
+    toast messages. Raw `ResourceTerminalError: resource.no_available_route`
+    leaks an internal exception class name + dict payload to the user; this
+    helper returns a sentence the operator can act on.
+
+    Front-end `ERROR_CODE_MAP` in `copilot-role-test.ts` mirrors this table
+    for the cases where the FE chooses the fallback message (e.g. transport
+    error before the BE could attach `error_code`).
+    """
+    if error_code == "resource.no_available_route":
+        return f"{role_name} 暂无可用模型路由：请先在 API Keys 配置 Anthropic-compatible 凭证并测试通过"
+    if error_code == "resource.role_unknown":
+        return f"{role_name} 不存在或已被删除：请刷新页面后重试"
+    if error_code == "resource.role_invalid_kind":
+        return f"{role_name} 不是 copilot 角色，无法用 Claude SDK 测试"
+    if error_code == "resource.credential_missing":
+        return f"{role_name} 缺少必需的 API key：请到 API Keys 填写后重试"
+    if error_code:
+        return f"{role_name} 测试失败 ({error_code})"
+    return f"{role_name} 测试失败：无法解析模型路由"
+
+
+async def _start_copilot_sdk_test_job(role_name: str) -> RoleTestJobResponse:
+    job_id = str(uuid.uuid4())
+    try:
+        routes, credential_provider = _resolve_copilot_test_routes(role_name)
+    except Exception as exc:  # noqa: BLE001 — surfaced as a failed job, not swallowed
+        logger.warning("copilot SDK test: cannot resolve routes for %s: %s", role_name, exc)
+        error_code = getattr(exc, "error_code", None)
+        error_payload = getattr(exc, "error_payload", None)
+        if not isinstance(error_payload, dict):
+            error_payload = None
+        # R-F9: replace the raw `f'无法解析 copilot 路线: {exc}'` (which leaks
+        # the exception class name and a Python-repr payload) with the human
+        # message derived from the gateway error code. `error_code` +
+        # `error_payload` stay on the job for FE debugging.
+        message = _human_message_for_error_code(error_code, role_name)
+        job = RoleTestJobResponse(
+            job_id=job_id,
+            role_name=role_name,
+            status="failed",
+            message=message,
+            error_code=error_code,
+            error_payload=error_payload,
+            provider_statuses=[],
+            result=_build_copilot_sdk_result(role_name, [], []),
+        )
+        async with _role_test_jobs_lock:
+            _role_test_jobs[job_id] = job
+        return job
+    job = RoleTestJobResponse(
+        job_id=job_id,
+        role_name=role_name,
+        status="queued",
+        message="Queued copilot SDK test.",
+        provider_statuses=[_copilot_route_progress(route, "queued") for route in routes],
+    )
+    async with _role_test_jobs_lock:
+        _role_test_jobs[job_id] = job
+    _spawn_background_task(
+        _run_copilot_sdk_test_job(job_id, role_name, routes, credential_provider)
+    )
+    return job
+
+
+def _resolve_copilot_test_routes(
+    role_name: str,
+) -> tuple[list[ResolvedRoute], CredentialProviderProtocol]:
+    runtime = build_gateway_route_runtime(role_name)
+    if not runtime.routes:
+        raise ResourceTerminalError(
+            runtime.error_code or "resource.no_available_route",
+            runtime.error_payload or {"role": role_name},
+        )
+    return runtime.routes, runtime.credential_provider
+
+
+def _copilot_route_progress(
+    route: ResolvedRoute,
+    status: Literal[
+        "queued", "testing", "ok", "failed", "blocked", "untested", "cooling_down"
+    ],
+    message: str | None = None,
+    retry_after_seconds: int | None = None,
+) -> RoleTestProviderProgressInfo:
+    return RoleTestProviderProgressInfo(
+        canonical_id=route.canonical_id,
+        route_id=route.route_id,
+        status=status,
+        message=message,
+        retry_after_seconds=retry_after_seconds,
+    )
+
+
+async def _run_copilot_sdk_test_job(
+    job_id: str,
+    role_name: str,
+    routes: list[ResolvedRoute],
+    credential_provider: CredentialProviderProtocol,
+) -> None:
+    await _update_role_test_job(job_id, status="running", message="Testing copilot SDK routes.")
+    semaphore = asyncio.Semaphore(_COPILOT_SDK_TEST_CONCURRENCY)
+
+    async def test_route(route: ResolvedRoute) -> copilot.RouteSdkTestResult:
+        async with semaphore:
+            await _update_copilot_route(job_id, route, "testing", None)
+            result = await copilot.run_route_sdk_test(route, credential_provider)
+            # R-F21: surface cooling_down + retry_after_seconds so the FE Test
+            # Button can show "Cooling down {n}s" and stay disabled.
+            await _update_copilot_route(
+                job_id,
+                route,
+                result.status,
+                result.message,
+                retry_after_seconds=result.retry_after_seconds,
+            )
+            return result
+
+    try:
+        results = await asyncio.gather(*(test_route(route) for route in routes))
+    except Exception as exc:  # pragma: no cover - defensive job boundary
+        logger.exception("Copilot SDK test job failed: %s", job_id)
+        await _update_role_test_job(job_id, status="failed", message=str(exc))
+        return
+
+    results_list = list(results)
+    try:
+        _persist_copilot_sdk_evidence(results_list)
+    except Exception as exc:  # noqa: BLE001 — evidence persistence is best-effort
+        logger.warning("copilot SDK evidence persist failed (non-fatal): %s", exc)
+
+    copilot_result = _build_copilot_sdk_result(role_name, routes, results_list)
+    _persist_completed_role_test_result(role_name, copilot_result)
+    await _update_role_test_job(
+        job_id,
+        status="completed",
+        message="Copilot SDK test completed.",
+        result=copilot_result,
+    )
+
+
+async def _update_copilot_route(
+    job_id: str,
+    route: ResolvedRoute,
+    status: Literal["testing", "ok", "failed", "blocked", "untested", "cooling_down"],
+    message: str | None,
+    retry_after_seconds: int | None = None,
+) -> None:
+    async with _role_test_jobs_lock:
+        current = _role_test_jobs.get(job_id)
+        if current is None:
+            return
+        provider_statuses = [
+            _copilot_route_progress(route, status, message, retry_after_seconds)
+            if provider.route_id == route.route_id
+            else provider
+            for provider in current.provider_statuses
+        ]
+        _role_test_jobs[job_id] = current.model_copy(
+            update={"provider_statuses": provider_statuses}
+        )
+
+
+def _build_copilot_sdk_result(
+    role_name: str,
+    routes: list[ResolvedRoute],
+    results: list[copilot.RouteSdkTestResult],
+) -> dict[str, Any]:
+    passed = sum(1 for result in results if result.status == "ok")
+    # Copilot only needs one working route at runtime (fallback chain), so any
+    # passing route makes the role usable.
+    overall = "ok" if passed > 0 else "failed"
+    # R-F21: persist retry_after_seconds alongside cooling_down so a remount
+    # can re-hydrate the gray light + countdown (R20 seed path).
+    routes_evidence = {
+        result.route_id: {
+            "status": result.status,
+            "message": result.message,
+            "retry_after_seconds": result.retry_after_seconds,
+        }
+        for result in results
+    }
+    return {
+        "role_name": role_name,
+        "status": overall,
+        "warnings": [],
+        "model_groups": _copilot_sdk_model_groups(routes, results),
+        "sdk_evidence": {
+            "tested": bool(results),
+            "passed": passed,
+            "total": len(results),
+            "routes": routes_evidence,
+        },
+    }
+
+
+def _copilot_sdk_model_groups(
+    routes: list[ResolvedRoute],
+    results: list[copilot.RouteSdkTestResult],
+) -> list[dict[str, Any]]:
+    by_route = {result.route_id: result for result in results}
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for route in routes:
+        result = by_route.get(route.route_id)
+        groups.setdefault(route.canonical_id, []).append(
+            {
+                "route_id": route.route_id,
+                "status": result.status if result else "untested",
+                "message": result.message if result else None,
+            }
+        )
+    return [
+        {"canonical_id": canonical_id, "provider_results": provider_results}
+        for canonical_id, provider_results in groups.items()
+    ]
+
+
+def _persist_copilot_sdk_evidence(results: list[copilot.RouteSdkTestResult]) -> None:
+    # COPILOT_ASSIST-4: write the high-order SDK tool-call evidence back to
+    # credentials so the route's verified state survives reload and isn't
+    # re-derived from a transient run (§3.4 "成功写高阶证据回 credentials").
+    credentials = load_credentials()
+    verified_at = datetime.now(UTC).isoformat()
+    changed = False
+    for result in results:
+        route = credentials.provider_routes.get(result.route_id)
+        if route is None:
+            continue
+        metadata = dict(route.metadata)
+        metadata["sdk_tool_call_verified"] = {
+            "verified": result.status == "ok",
+            "status": result.status,
+            "verified_at": verified_at,
+        }
+        credentials.provider_routes[result.route_id] = route.model_copy(
+            update={"metadata": metadata}
+        )
+        changed = True
+    if changed:
+        save_credentials(credentials)
+        logger.info("copilot SDK evidence persisted for %d route(s)", len(results))
+
+
+def _persist_completed_role_test_result(role_name: str, result: dict[str, Any]) -> None:
+    """R20: durably persist the LAST completed role/copilot test result per role.
+
+    Role-test jobs live in transient in-memory dicts; persisting the finished
+    result keyed by role name lets the settings UI re-seed badges after a
+    server restart or a tab remount instead of resetting to untested.
+    """
+    status = str(result.get("status") or "")
+    message = result.get("message")
+    try:
+        save_role_test_result(
+            role_name,
+            result,
+            status=status,
+            message=message if isinstance(message, str) else None,
+        )
+    except Exception as exc:  # noqa: BLE001 — persistence is best-effort, never fail the job
+        logger.warning(
+            "role test result persist failed (non-fatal) role=%s: %s", role_name, exc
+        )
+
+
 @router.get("/model-profiles")
 async def get_model_profiles() -> dict[str, ModelProfile]:
     """Return model profiles."""
@@ -1163,15 +1621,32 @@ async def put_model_profiles(profiles: dict[str, ModelProfile]) -> dict[str, Mod
 
 @router.delete("/model-bundles/{bundle_id}", response_model=RolesData)
 async def delete_model_bundle(bundle_id: str) -> RolesData:
-    """Delete one persisted model bundle."""
+    """Delete one persisted model bundle and cascade off referencing roles.
+
+    #51/#52 delete cascade: the bundle is the source of truth. When it is removed,
+    a role that referenced it (bundle_id) must drop that reference (no dangling
+    failed snapshot is kept); on re-materialization the role loses that chain and
+    may become not-fit. The local delta on routes that no longer exist is
+    discarded with the reference.
+    """
     data = _load_roles_or_empty()
     bundles = dict(data.model_bundles)
     removed = bundles.pop(bundle_id, None)
     if removed is None:
         raise HTTPException(status_code=404, detail=f"Unknown model bundle: {bundle_id}")
     del removed
+    roles = {
+        role_name: (
+            role.model_copy(update={"bundle_id": None, "fallback_chain": []})
+            if role.bundle_id == bundle_id
+            else role
+        )
+        for role_name, role in data.roles.items()
+    }
     credentials = load_credentials()
-    saved = _save_roles_with_active_routes(data.model_copy(update={"model_bundles": bundles}))
+    saved = _save_roles_with_active_routes(
+        data.model_copy(update={"model_bundles": bundles, "roles": roles})
+    )
     return _materialize_roles_for_response(saved, credentials)
 
 
@@ -1265,6 +1740,7 @@ def _registry_response(
     setup_required: bool = False,
 ) -> RegistryResponse:
     credentials = _normalize_credentials_for_registry_response(credentials)
+    credentials = _project_route_ui_states(credentials)
     roles = _materialize_roles_for_response(roles, credentials)
     routes_by_canonical: dict[str, list[str]] = {}
     for route_id, route in credentials.provider_routes.items():
@@ -1283,6 +1759,7 @@ def _registry_response(
                 cast(list[GatewayProviderRoute], role_routes),
             )
         )
+    catalog_source = load_remote_catalog_source_metadata()
     return RegistryResponse(
         provider_endpoints=credentials.provider_endpoints,
         provider_routes=credentials.provider_routes,
@@ -1303,9 +1780,59 @@ def _registry_response(
             route_id: build_runtime_setting_descriptors(route)
             for route_id, route in credentials.provider_routes.items()
         },
+        catalog_source=catalog_source.model_dump(mode="json") if catalog_source is not None else None,
         role_effective_runtime_settings=_role_effective_runtime_settings(credentials, roles),
         setup_required=setup_required,
     )
+
+
+def _project_route_ui_states(
+    credentials: LLMCredentialsFile,
+) -> LLMCredentialsFile:
+    """Stamp each route's 6-state ``ui_state`` onto the registry DTO (apikeys#30).
+
+    The registry snapshot must carry the same 6-state vocabulary LLM Roles already
+    shows, so the API Keys cards can render the authoritative state inline instead
+    of recomputing it. We reuse the canonical gateway projector via the in-process
+    adapter (``project_route_state``) — the identical call ``_provider_model_option``
+    makes — and never invent a new state vocabulary here.
+    """
+    if not credentials.provider_routes:
+        return credentials
+    adapter = build_gateway_adapter()
+    health_store = _health_store()
+    evidence_records = _load_gateway_evidence_records()
+    now = datetime.now(UTC)
+    projected_routes: dict[str, ProviderRoute] = {}
+    changed = False
+    for route_id, route in credentials.provider_routes.items():
+        endpoint = credentials.provider_endpoints.get(route.endpoint_id)
+        if endpoint is None:
+            projected_routes[route_id] = route
+            continue
+        circuits = health_store.get_active_circuits(
+            route_id=route.route_id,
+            endpoint_id=endpoint.endpoint_id,
+            rate_limit_bucket=endpoint.rate_limit_bucket or endpoint.endpoint_id,
+            now=now,
+        )
+        projection = adapter.project_route_state(
+            {
+                "endpoint": endpoint,
+                "route": route,
+                "circuits": circuits,
+                "now": now,
+                "evidence_records": evidence_records,
+            }
+        )
+        if projection.ui_state == route.ui_state:
+            projected_routes[route_id] = route
+            continue
+        projected_routes[route_id] = route.model_copy(update={"ui_state": projection.ui_state})
+        changed = True
+    if not changed:
+        return credentials
+    return credentials.model_copy(update={"provider_routes": projected_routes})
 
 
 def _normalize_credentials_for_registry_response(
@@ -1410,11 +1937,20 @@ def _model_groups_response(credentials: LLMCredentialsFile) -> list[dict[str, An
             _model_group_identity_key(route, credentials),
             [],
         ).append(route)
+    # Load the evidence library and build the gateway adapter ONCE for the whole
+    # response. Both are request-invariant; the route-state projection filters the
+    # evidence list by route_id internally, so a single shared load is identical to
+    # re-loading per route — but avoids re-reading + re-validating the entire
+    # evidence file once per provider-model option (the O(routes) blow-up).
+    adapter = build_gateway_adapter()
+    evidence_records = _load_gateway_evidence_records()
     model_groups = [
         _model_group_response(
             _representative_canonical_id(routes, credentials),
             routes,
             credentials,
+            adapter=adapter,
+            evidence_records=evidence_records,
         )
         for routes in routes_by_identity.values()
     ]
@@ -1525,13 +2061,24 @@ def _model_group_response(
     canonical_id: str,
     routes: list[ProviderRoute],
     credentials: LLMCredentialsFile,
+    *,
+    adapter: GatewayAdapter | None = None,
+    evidence_records: list[EvidenceRecord] | None = None,
 ) -> dict[str, Any]:
     provider_models = [
         option
         for route in sorted(routes, key=lambda item: item.route_id)
-        if (option := _provider_model_option(route, credentials)) is not None
+        if (
+            option := _provider_model_option(
+                route,
+                credentials,
+                adapter=adapter,
+                evidence_records=evidence_records,
+            )
+        )
+        is not None
     ]
-    status_summary = {state: 0 for state in ["ready", "untested", "cooling_down", "needs_setup", "off", "failed"]}
+    status_summary = {state: 0 for state in ["ready", "historical_ready", "untested", "cooling_down", "off", "failed"]}
     for option in provider_models:
         status_summary[option["ui_state"]] += 1
     identity = _model_group_identity(canonical_id, routes, credentials)
@@ -1619,23 +2166,33 @@ def _section_label_from_display_name(display_name: str) -> str:
 def _provider_model_option(
     route: ProviderRoute,
     credentials: LLMCredentialsFile,
+    *,
+    adapter: GatewayAdapter | None = None,
+    evidence_records: list[EvidenceRecord] | None = None,
 ) -> dict[str, Any] | None:
     endpoint = credentials.provider_endpoints.get(route.endpoint_id)
     if endpoint is None:
         return None
+    # adapter + evidence_records are request-invariant; registry-build callers pass
+    # shared instances so the whole response loads the evidence library once. Fall
+    # back to per-call loads when invoked standalone.
+    if adapter is None:
+        adapter = build_gateway_adapter()
+    if evidence_records is None:
+        evidence_records = _load_gateway_evidence_records()
     circuits = _health_store().get_active_circuits(
         route_id=route.route_id,
         endpoint_id=endpoint.endpoint_id,
         rate_limit_bucket=endpoint.rate_limit_bucket or endpoint.endpoint_id,
         now=datetime.now(UTC),
     )
-    adapter = GatewayAdapter(transport="in_process")
     projection = adapter.project_route_state(
         {
             "endpoint": endpoint,
             "route": route,
             "circuits": circuits,
             "now": datetime.now(UTC),
+            "evidence_records": evidence_records,
         }
     )
     capabilities = _provider_route_ui_capabilities(route, endpoint)
@@ -1657,7 +2214,37 @@ def _provider_model_option(
         "reason_code": projection.reason_code,
         "capability_state": _capability_state(capabilities),
         "capabilities": capabilities,
+        # R-F8: CopilotTab filters candidate model groups by call_method_id
+        # (anthropic-messages family) instead of the old provider_type
+        # heuristic. The field is None for routes without a verified profile
+        # (i.e. no resolved call method), which is treated as "not copilot-
+        # eligible" by the FE filter.
+        "call_method_id": _preferred_route_call_method_id(route),
     }
+
+
+def _preferred_route_call_method_id(route: ProviderRoute) -> str | None:
+    """R-F8: pick the method_id of this route's preferred verified profile so
+    the FE can decide copilot eligibility without re-running the gateway
+    resolver. Mirrors `select_verified_profile(route, RuntimeSettings())`:
+    among `status=='ready'` profiles, prefer `default=True`, then
+    `fallback_rank`, then `profile_id`. Returns None when no profile is
+    ready — equivalent to "not yet verified, not yet eligible".
+    """
+    try:
+        selected = select_verified_profile(route, RuntimeSettings())
+    except Exception as exc:  # noqa: BLE001 — degradation must be observable
+        # rules/logging.md: never silently swallow. A profile-selection error
+        # at this point means the route's verified_profiles don't satisfy
+        # default settings — degrade to None (FE shows as not-copilot-eligible)
+        # and log the reason so operators can fix the credential record.
+        logger.warning(
+            "phase=copilot-route-call-method-id route_id=%s degraded=true reason=%s",
+            route.route_id,
+            exc,
+        )
+        return None
+    return selected.method_id if selected is not None else None
 
 
 def _health_store() -> SqliteLlmHealthStore:
@@ -1741,7 +2328,7 @@ async def _force_probe_route(
                 "status": "failed",
                 "metadata": {
                     **route.metadata,
-                    "reason_code": "missing_key",
+                    "reason_code": "missing_config",
                     "last_probe_message": "API key is empty.",
                 },
             }
@@ -1749,11 +2336,8 @@ async def _force_probe_route(
         credentials.provider_routes[route.route_id] = updated
         save_credentials(credentials)
         return updated
-    result = await _probe_model(
-        _endpoint_probe_backend(endpoint),
-        endpoint.api_key.get_secret_value(),
-        _endpoint_probe_base_url(endpoint),
-        route.provider_model_id,
+    result = _model_probe_result_from_route_probe(
+        await _gateway_test_provider_route(endpoint, route)
     )
     if result.status == "ok":
         updated = route.model_copy(
@@ -1942,6 +2526,8 @@ def _persist_official_role_test_verified_profile(
         probe_attempts_by_model=probe_attempts_by_model,
     )
     updated_route_id = route_ids_by_model.get(profile_result.model_id, route.route_id)
+    if updated_route_id is None:
+        return route
     updated_route = credentials.provider_routes.get(updated_route_id)
     if updated_route is None:
         return route
@@ -2306,7 +2892,7 @@ async def _probe_role_route(
                 status="invalid_key",
                 message="API key is empty.",
             )
-        return await _probe_official_call_method_request(
+        return await _gateway_probe_official_call_method(
             cast(OfficialCallMethod, selected_profile.method_id),
             endpoint.api_key.get_secret_value(),
             _endpoint_probe_base_url(endpoint),
@@ -2324,12 +2910,12 @@ async def _probe_role_route(
             message=ROLE_TEST_NO_VERIFIED_PROFILE_MESSAGE,
         )
 
-    return await _probe_model(
-        _endpoint_probe_backend(endpoint),
-        endpoint.api_key.get_secret_value() if endpoint.api_key is not None else "",
-        _endpoint_probe_base_url(endpoint),
-        route.provider_model_id,
-        runtime_settings=resolved_settings or None,
+    return _model_probe_result_from_route_probe(
+        await _gateway_test_provider_route(
+            endpoint,
+            route,
+            runtime_settings=resolved_settings or None,
+        )
     )
 
 
@@ -2470,7 +3056,7 @@ async def _probe_official_call_method(
             status="invalid_key",
             message="API key is empty.",
         )
-    return await _probe_official_call_method_request(
+    return await _gateway_probe_official_call_method(
         candidate.method_id,
         endpoint.api_key.get_secret_value(),
         _endpoint_probe_base_url(endpoint),
@@ -3453,173 +4039,6 @@ def _official_model_type_capability_values(
     }
 
 
-async def _run_official_endpoint_test_job(job_id: str, endpoint_id: str) -> None:
-    try:
-        await _run_official_endpoint_test_job_impl(job_id, endpoint_id)
-    except Exception as exc:
-        logger.exception("official endpoint test job failed")
-        await _record_endpoint_test_job_failure(
-            job_id,
-            endpoint_id,
-            f"Endpoint test failed before completion: {exc}",
-        )
-
-
-async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) -> None:
-    credentials = load_credentials()
-    endpoint = credentials.provider_endpoints.get(endpoint_id)
-    if endpoint is None:
-        await _finish_endpoint_test_job(job_id, "failed", f"Unknown endpoint: {endpoint_id}")
-        return
-    starting_fingerprint = credentials.endpoint_fingerprint(endpoint_id)
-    if not endpoint.api_key or not endpoint.api_key.get_secret_value():
-        await _record_endpoint_test_job_failure(job_id, endpoint_id, "API key is empty.")
-        return
-
-    await _update_endpoint_test_job(job_id, status="running", message="Reading provider catalog.")
-    probe_backend = _endpoint_probe_backend(endpoint)
-    probe_base_url = _endpoint_probe_base_url(endpoint)
-    try:
-        result = await _ping_provider(
-            probe_backend,
-            endpoint.api_key.get_secret_value(),
-            probe_base_url,
-        )
-    except _Unauthorized as exc:
-        await _record_endpoint_test_job_failure(
-            job_id,
-            endpoint_id,
-            _provider_error_message("Invalid API key", exc),
-        )
-        return
-    except _RateLimited as exc:
-        await _record_endpoint_test_job_failure(
-            job_id,
-            endpoint_id,
-            _provider_error_message("Provider rate limited the test request", exc),
-        )
-        return
-    except _QuotaExceeded as exc:
-        await _record_endpoint_test_job_failure(
-            job_id,
-            endpoint_id,
-            _provider_error_message(
-                "Provider rejected the key because quota or billing is unavailable",
-                exc,
-            ),
-        )
-        return
-    except httpx.TimeoutException:
-        await _record_endpoint_test_job_failure(job_id, endpoint_id, "Endpoint test timed out.")
-        return
-    except _NetworkError as exc:
-        await _record_endpoint_test_job_failure(
-            job_id,
-            endpoint_id,
-            _provider_error_message("Network error while testing endpoint", exc),
-        )
-        return
-
-    discovered_model_ids = result.model_ids
-    raw_capabilities_by_model = result.model_capabilities
-    latest_credentials = load_credentials()
-    latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
-    if latest_endpoint is None:
-        await _finish_endpoint_test_job(job_id, "failed", f"Unknown endpoint: {endpoint_id}")
-        return
-    if latest_credentials.endpoint_fingerprint(endpoint_id) != starting_fingerprint:
-        latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint.model_copy(
-            update={
-                "status": "unverified_manual",
-                "last_test_at": _now_iso(),
-                "last_test_message": ("Endpoint changed while endpoint test was running. Test result discarded."),
-            }
-        )
-        save_credentials(latest_credentials)
-        await _finish_endpoint_test_job(
-            job_id,
-            "failed",
-            "Endpoint changed while endpoint test was running. Test result discarded.",
-        )
-        return
-
-    if not discovered_model_ids:
-        latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint.model_copy(
-            update={
-                "status": "unverified_manual",
-                "last_test_at": _now_iso(),
-                "last_test_message": "Endpoint reachable but returned no models.",
-            }
-        )
-        save_credentials(latest_credentials)
-        _append_model_list_observation_evidence(
-            latest_endpoint,
-            (),
-            raw_capabilities_by_model,
-            {},
-        )
-        await _finish_endpoint_test_job(
-            job_id,
-            "completed",
-            "Endpoint reachable but returned no models.",
-            total_model_count=0,
-            tested_model_count=0,
-            verified_route_count=0,
-            failed_model_count=0,
-            catalog_only_count=0,
-        )
-        return
-
-    latest_credentials, route_ids_by_model = _upsert_discovered_routes(
-        latest_credentials,
-        endpoint=latest_endpoint,
-        model_ids=discovered_model_ids,
-        verified=False,
-        raw_capabilities_by_model=raw_capabilities_by_model,
-    )
-    latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
-    if latest_endpoint is None:
-        await _finish_endpoint_test_job(job_id, "failed", f"Unknown endpoint: {endpoint_id}")
-        return
-    final_models = [
-        _compact_model_info_for_listed_official_route(
-            latest_credentials,
-            latest_endpoint,
-            model_id,
-            route_ids_by_model.get(model_id),
-            raw_capabilities_by_model.get(model_id),
-        )
-        for model_id in discovered_model_ids
-    ]
-    latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id, latest_endpoint)
-    latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint.model_copy(
-        update={
-            "status": "verified",
-            "last_test_at": _now_iso(),
-            "last_test_message": _endpoint_success_message(result),
-        }
-    )
-    save_credentials(latest_credentials)
-    _append_model_list_observation_evidence(
-        latest_endpoint,
-        discovered_model_ids,
-        raw_capabilities_by_model,
-        route_ids_by_model,
-    )
-    await _finish_endpoint_test_job(
-        job_id,
-        "completed",
-        _endpoint_success_message(result),
-        total_model_count=len(discovered_model_ids),
-        tested_model_count=0,
-        verified_route_count=0,
-        failed_model_count=0,
-        catalog_only_count=0,
-        available_models=final_models,
-        available_sdks=[latest_endpoint.protocol],
-    )
-
-
 async def _probe_official_profile_batch(
     endpoint: ProviderEndpoint,
     model_ids: tuple[str, ...],
@@ -3650,6 +4069,34 @@ async def _probe_official_profile_batch(
                 await mark_active(model_id, False)
 
     return await asyncio.gather(*(probe(model_id) for model_id in model_ids))
+
+
+def _compact_model_info_for_listed_route(
+    credentials: LLMCredentialsFile,
+    endpoint: ProviderEndpoint,
+    model_id: str,
+    route_id: str | None,
+    raw_capabilities: dict[str, Any] | None,
+) -> EndpointTestCompactModelInfo:
+    if endpoint.provider_kind == "official":
+        return _compact_model_info_for_listed_official_route(
+            credentials,
+            endpoint,
+            model_id,
+            route_id,
+            raw_capabilities,
+        )
+    route = credentials.provider_routes.get(route_id) if route_id is not None else None
+    model_status: Literal["verified", "unverified_manual", "disabled", "failed", "testing", "probe-verified"]
+    model_status = route.status if route is not None else "unverified_manual"
+    return EndpointTestCompactModelInfo(
+        id=model_id,
+        route_id=route_id,
+        status=model_status,
+        verified_profile_count=0,
+        last_probe_message=_route_failure_message(route),
+        capabilities=raw_capabilities or {},
+    )
 
 
 def _compact_model_info_for_listed_official_route(
@@ -3746,49 +4193,6 @@ def _compact_model_infos_with_active_status(
     return compact
 
 
-async def _record_endpoint_test_job_failure(
-    job_id: str,
-    endpoint_id: str,
-    message: str,
-) -> None:
-    credentials = load_credentials()
-    endpoint = credentials.provider_endpoints.get(endpoint_id)
-    if endpoint is not None:
-        credentials.provider_endpoints[endpoint_id] = endpoint.model_copy(
-            update={
-                "status": "failed",
-                "last_test_at": _now_iso(),
-                "last_test_message": message,
-            }
-        )
-        save_credentials(credentials)
-    await _finish_endpoint_test_job(job_id, "failed", message)
-
-
-async def _update_endpoint_test_job(job_id: str, **updates: Any) -> None:
-    async with _endpoint_test_jobs_lock:
-        current = _endpoint_test_jobs.get(job_id)
-        if current is None:
-            return
-        _endpoint_test_jobs[job_id] = current.model_copy(update=updates)
-
-
-async def _finish_endpoint_test_job(
-    job_id: str,
-    status: Literal["completed", "failed"],
-    message: str,
-    **updates: Any,
-) -> None:
-    async with _endpoint_test_jobs_lock:
-        current = _endpoint_test_jobs.get(job_id)
-        if current is None:
-            return
-        finished = current.model_copy(update={"status": status, "message": message, **updates})
-        _endpoint_test_jobs[job_id] = finished
-        if _running_endpoint_test_jobs.get(finished.endpoint_id) == job_id:
-            _running_endpoint_test_jobs.pop(finished.endpoint_id, None)
-
-
 def _chunks(values: tuple[str, ...], size: int) -> list[tuple[str, ...]]:
     return [values[index : index + size] for index in range(0, len(values), size)]
 
@@ -3807,7 +4211,9 @@ def _default_official_text_method(endpoint: ProviderEndpoint) -> tuple[str, str]
     return "openai_responses", "openai_responses_text"
 
 
-def _role_test_entries(role: RoleEntry) -> list[tuple[dict[str, Any], RoleRouteEntry | None]]:
+def _role_test_entries(
+    role: RoleEntry | ModelBundle,
+) -> list[tuple[dict[str, Any], RoleRouteEntry | None]]:
     fallback_by_route = {entry.route_id: entry for entry in role.fallback_chain}
     report = role.materialization_report if isinstance(role.materialization_report, dict) else {}
     report_entries = [
@@ -3849,7 +4255,7 @@ def _provider_model_projection(
     endpoint: ProviderEndpoint,
 ) -> ProviderModelStateProjection:
     now = datetime.now(UTC)
-    adapter = GatewayAdapter(transport="in_process")
+    adapter = build_gateway_adapter()
     return adapter.project_route_state(
         {
             "endpoint": endpoint,
@@ -3861,6 +4267,7 @@ def _provider_model_projection(
                 now=now,
             ),
             "now": now,
+            "evidence_records": _load_gateway_evidence_records(),
         }
     )
 
@@ -3868,7 +4275,7 @@ def _provider_model_projection(
 def _admission_decision(ui_state: str) -> str:
     if ui_state == "cooling_down":
         return "temporary_skip"
-    if ui_state in {"needs_setup", "off"}:
+    if ui_state in {"failed", "off"}:
         return "block"
     return "admit"
 
@@ -3880,6 +4287,267 @@ def _successful_generation_probe_capabilities() -> dict[str, Any]:
         "input_modalities": ["text"],
         "output_modalities": ["text"],
     }
+
+
+# apikeys#25: candidate transport protocols tried, in order, when auto-detecting
+# a third-party endpoint's protocol. The endpoint's currently-stored protocol is
+# always tried first by _third_party_protocol_candidates; this tuple supplies the
+# fallback rotation. Each protocol maps (via endpoint_probe_backend) to a distinct
+# request shape + auth header, so probing all four covers the auth-header combos.
+_THIRD_PARTY_PROTOCOL_CANDIDATES: tuple[ProviderType, ...] = (
+    "openai_compatible",
+    "anthropic_compatible",
+    "google_genai",
+    "ark_runtime",
+)
+# apikeys#25: structural probe failures that will reject EVERY model on the
+# endpoint (bad key / billing), so the batch model-probe loop short-circuits
+# instead of burning a probe per model. invalid_model is NOT structural — it is
+# model-specific and means "this protocol reached the provider, that model id is
+# just wrong", so the loop keeps trying other models / counts the protocol as found.
+_STRUCTURAL_PROBE_STATUSES: frozenset[str] = frozenset(
+    {"invalid_key", "quota_exceeded"}
+)
+# How many candidate model ids the batch inference probe will try before giving
+# up on an otherwise-reachable third-party endpoint.
+_THIRD_PARTY_PROBE_MODEL_LIMIT = 6
+
+
+@dataclass(frozen=True)
+class ThirdPartyEndpointVerification:
+    """Outcome of the third-party protocol-detect + batch-inference verification.
+
+    ``status='verified'`` is set ONLY when a real generation probe (test_provider_route)
+    returned ``ok`` — get-models reachability alone never reaches verified for
+    third-party endpoints (apikeys#25).
+    """
+
+    status: Literal["verified", "failed"]
+    detected_protocol: ProviderType
+    verified_model_id: str | None
+    message: str
+    probe_capabilities: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+
+def _third_party_protocol_candidates(endpoint: ProviderEndpoint) -> tuple[ProviderType, ...]:
+    """Return the protocol rotation with the endpoint's stored protocol first."""
+    ordered: list[ProviderType] = [cast(ProviderType, endpoint.protocol)]
+    for candidate in _THIRD_PARTY_PROTOCOL_CANDIDATES:
+        if candidate not in ordered:
+            ordered.append(candidate)
+    return tuple(ordered)
+
+
+def _third_party_probe_model_ids(
+    endpoint: ProviderEndpoint,
+    discovered_model_ids: tuple[str, ...],
+) -> list[str]:
+    """Pick the model ids to drive the batch inference probe.
+
+    Discovered ids (from the get-models call) come first; when the endpoint
+    exposes no list API we fall back to the doc-maintained notable ids for its
+    probe backend so an unlistable-but-generating endpoint can still verify.
+    """
+    candidates = list(discovered_model_ids)
+    if not candidates:
+        candidates = notable_model_ids(_endpoint_probe_backend(endpoint))
+    return _requested_model_ids(candidates)[:_THIRD_PARTY_PROBE_MODEL_LIMIT]
+
+
+async def _detect_third_party_protocol(
+    endpoint: ProviderEndpoint,
+    probe_model_id: str,
+) -> tuple[ProviderType, RouteProbeResult] | None:
+    """Auto-detect the working protocol by probing one model per candidate.
+
+    For each candidate protocol we clone the endpoint with that protocol and run
+    a real generation probe for ``probe_model_id``. The FIRST candidate whose
+    probe is not a transport/protocol-level structural mismatch wins: an ``ok``
+    obviously wins, and an ``invalid_model`` also wins because it proves the
+    protocol/auth reached the provider (the model id is just wrong). Returns the
+    detected protocol plus that probe result, or ``None`` if every candidate
+    failed structurally (so the endpoint stays unverified).
+    """
+    last_result: RouteProbeResult | None = None
+    for candidate in _third_party_protocol_candidates(endpoint):
+        candidate_endpoint = endpoint.model_copy(update={"protocol": candidate})
+        logger.info(
+            "third-party protocol auto-detect: trying protocol=%s endpoint=%s",
+            candidate,
+            endpoint.endpoint_id,
+        )
+        result = _model_probe_result_from_route_probe(
+            await _gateway_test_provider_model(candidate_endpoint, probe_model_id)
+        )
+        route_probe = RouteProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            route_id=f"{endpoint.endpoint_id}:{_route_slug(probe_model_id)}",
+            provider_kind=endpoint.provider_kind,
+            backend=_endpoint_probe_backend(candidate_endpoint),
+            base_url=_endpoint_probe_base_url(candidate_endpoint),
+            model_id=probe_model_id,
+            status=result.status,
+            latency_ms=result.latency_ms,
+            message=result.message,
+        )
+        last_result = route_probe
+        if route_probe.status == "ok" or route_probe.status == "invalid_model":
+            logger.info(
+                "third-party protocol detected protocol=%s endpoint=%s probe_status=%s",
+                candidate,
+                endpoint.endpoint_id,
+                route_probe.status,
+            )
+            return candidate, route_probe
+        if route_probe.status in _STRUCTURAL_PROBE_STATUSES:
+            # invalid_key / quota_exceeded are protocol-agnostic — rotating the
+            # protocol cannot fix them, so stop probing further candidates.
+            logger.warning(
+                "third-party protocol auto-detect short-circuit endpoint=%s status=%s",
+                endpoint.endpoint_id,
+                route_probe.status,
+            )
+            return None
+    if last_result is not None:
+        logger.warning(
+            "third-party protocol auto-detect exhausted endpoint=%s last_status=%s",
+            endpoint.endpoint_id,
+            last_result.status,
+        )
+    return None
+
+
+async def _verify_third_party_endpoint_by_probe(
+    endpoint: ProviderEndpoint,
+    discovered_model_ids: tuple[str, ...],
+    raw_capabilities_by_model: dict[str, dict[str, Any]],
+) -> ThirdPartyEndpointVerification:
+    """Run protocol auto-detect + batch inference probing for a third-party endpoint.
+
+    apikeys#24/#25: get-models only proves key+URL reachability for third-party
+    endpoints, so it never promotes to verified. Here we (1) auto-detect the
+    transport protocol by probing a real generation call per candidate protocol,
+    then (2) batch-probe candidate model ids under the detected protocol, stopping
+    on the first ``ok`` and short-circuiting structural errors. The endpoint is
+    promoted to ``verified`` ONLY when a real generation probe returns ``ok``.
+    """
+    probe_model_ids = _third_party_probe_model_ids(endpoint, discovered_model_ids)
+    if not probe_model_ids:
+        return ThirdPartyEndpointVerification(
+            status="failed",
+            detected_protocol=cast(ProviderType, endpoint.protocol),
+            verified_model_id=None,
+            message="Endpoint reachable but no model ids were available to probe.",
+        )
+
+    detection = await _detect_third_party_protocol(endpoint, probe_model_ids[0])
+    if detection is None:
+        return ThirdPartyEndpointVerification(
+            status="failed",
+            detected_protocol=cast(ProviderType, endpoint.protocol),
+            verified_model_id=None,
+            message="Could not auto-detect a working protocol for this endpoint.",
+        )
+
+    detected_protocol, first_probe = detection
+    detected_endpoint = endpoint.model_copy(update={"protocol": detected_protocol})
+
+    last_failure: RouteProbeResult = first_probe
+    for index, model_id in enumerate(probe_model_ids):
+        if index == 0:
+            # The first model was already probed during protocol detection.
+            probe = first_probe
+        else:
+            probe = await _gateway_test_provider_route(
+                detected_endpoint,
+                _gateway_probe_route(detected_endpoint, model_id),
+            )
+        if probe.status == "ok":
+            logger.info(
+                "third-party batch probe verified endpoint=%s protocol=%s model=%s",
+                endpoint.endpoint_id,
+                detected_protocol,
+                model_id,
+            )
+            return ThirdPartyEndpointVerification(
+                status="verified",
+                detected_protocol=detected_protocol,
+                verified_model_id=model_id,
+                message=f"Generation verified via {detected_protocol}. Model: {model_id}.",
+                probe_capabilities={
+                    model_id: _third_party_probe_capabilities(
+                        model_id,
+                        raw_capabilities_by_model.get(model_id),
+                    )
+                },
+            )
+        last_failure = probe
+        if probe.status in _STRUCTURAL_PROBE_STATUSES:
+            logger.warning(
+                "third-party batch probe short-circuit endpoint=%s status=%s",
+                endpoint.endpoint_id,
+                probe.status,
+            )
+            break
+
+    return ThirdPartyEndpointVerification(
+        status="failed",
+        detected_protocol=detected_protocol,
+        verified_model_id=None,
+        message=_model_probe_failure_message(
+            _model_probe_result_from_route_probe(last_failure)
+        ),
+    )
+
+
+async def _list_model_capabilities_for_endpoint(
+    endpoint: ProviderEndpoint,
+) -> dict[str, dict[str, Any]]:
+    """Fetch the endpoint's list-models rich capabilities, keyed by model id.
+
+    apikeys#27: the third-party manual-model probe path derives capabilities from
+    the endpoint's list API (the same rich fields the official side normalizes),
+    so official and third-party return a symmetric capability structure. Returns
+    an empty mapping when the list call is unreachable — callers then fall back to
+    the generation-probe default per model.
+    """
+    result = await _gateway_test_provider_endpoint(endpoint)
+    if result.status != "ok":
+        logger.info(
+            "list-models capabilities unavailable endpoint=%s status=%s",
+            endpoint.endpoint_id,
+            result.status,
+        )
+        return {}
+    return dict(result.model_capabilities)
+
+
+def _gateway_probe_route(endpoint: ProviderEndpoint, model_id: str) -> ProviderRoute:
+    """Build a throwaway ProviderRoute used only to drive test_provider_route."""
+    route_slug = _route_slug(model_id)
+    return ProviderRoute(
+        route_id=f"{endpoint.endpoint_id}:{route_slug}",
+        endpoint_id=endpoint.endpoint_id,
+        route_slug=route_slug,
+        provider_model_id=model_id,
+        canonical_id=model_id,
+    )
+
+
+def _third_party_probe_capabilities(
+    model_id: str,
+    raw_capabilities: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Prefer the list-models rich capabilities; fall back to the text-only default.
+
+    apikeys#27: third-party capability must come from the endpoint's list-models
+    rich fields (normalized) when available, not be hard-coded text-only. The
+    generation-probe default is only used when the list API gave us nothing.
+    """
+    del model_id
+    if raw_capabilities:
+        return dict(raw_capabilities)
+    return _successful_generation_probe_capabilities()
 
 
 def _third_party_route_capability_values(
@@ -4152,7 +4820,7 @@ def _role_effective_runtime_settings(
     credentials: LLMCredentialsFile,
     roles: RolesData,
 ) -> dict[str, dict[str, dict[str, Any]]]:
-    adapter = GatewayAdapter(transport="in_process")
+    adapter = build_gateway_adapter()
     result: dict[str, dict[str, dict[str, Any]]] = {}
     for role_name in roles.roles:
         try:
@@ -4171,7 +4839,9 @@ def _role_effective_runtime_settings(
                 raise
             result[role_name] = {}
             continue
-        result[role_name] = {route.route_id: route.effective_runtime_settings for route in resolved.routes}
+        result[role_name] = {
+            route.route_id: route.effective_runtime_settings for route in resolved.routes
+        }
     return result
 
 
@@ -4188,25 +4858,98 @@ def _materialize_roles_for_response(
 ) -> RolesData:
     has_role_authoring = any(role.model_groups for role in data.roles.values())
     has_bundle_authoring = any(bundle.model_groups for bundle in data.model_bundles.values())
-    if not has_role_authoring and not has_bundle_authoring:
+    # #51: a pure bundle-reference role (bundle_id set, no own model_groups) also
+    # needs materialization — its chain comes from the referenced bundle.
+    has_reference_roles = any(role.bundle_id for role in data.roles.values())
+    if not has_role_authoring and not has_bundle_authoring and not has_reference_roles:
         return data
     active_credentials = credentials or load_credentials()
-    adapter = GatewayAdapter(transport="in_process")
+    evidence_records = _load_gateway_evidence_records()
+    adapter = build_gateway_adapter()
+    materialized_bundles = {
+        bundle_id: adapter.materialize_model_bundle(
+            {
+                "bundle": bundle,
+                "credentials": active_credentials,
+                "evidence_records": evidence_records,
+            }
+        )
+        if bundle.model_groups
+        else bundle
+        for bundle_id, bundle in data.model_bundles.items()
+    }
     return data.model_copy(
         update={
             "schema_version": 3,
             "roles": {
-                role_name: adapter.materialize_role({"role": role, "credentials": active_credentials})
-                if role.model_groups
-                else role
+                role_name: _materialize_one_role_for_response(
+                    role,
+                    materialized_bundles,
+                    active_credentials,
+                    adapter,
+                    evidence_records,
+                )
                 for role_name, role in data.roles.items()
             },
-            "model_bundles": {
-                bundle_id: adapter.materialize_model_bundle({"bundle": bundle, "credentials": active_credentials})
-                if bundle.model_groups
-                else bundle
-                for bundle_id, bundle in data.model_bundles.items()
-            },
+            "model_bundles": materialized_bundles,
+        }
+    )
+
+
+def _materialize_one_role_for_response(
+    role: RoleEntry,
+    materialized_bundles: dict[str, ModelBundle],
+    credentials: LLMCredentialsFile,
+    adapter: Any,
+    evidence_records: list[EvidenceRecord],
+) -> RoleEntry:
+    """Materialize one role for the registry response.
+
+    A role with its own model_groups materializes directly (existing path). A
+    pure bundle-reference role (#51: bundle_id set, no own model_groups) delegates
+    the bundle+delta overlay to the gateway resolver's ``materialize_role_entry``:
+    we hand it a snapshot whose ``model_bundles`` already carry the bundle's
+    flattened chain + report, and the role's own ``fallback_chain`` is the local
+    delta the overlay applies. The shell never hand-rolls the merge.
+    """
+    if role.model_groups:
+        return cast(
+            RoleEntry,
+            adapter.materialize_role(
+                {
+                    "role": role,
+                    "credentials": credentials,
+                    "evidence_records": evidence_records,
+                }
+            ),
+        )
+    if not role.bundle_id:
+        return role
+    bundle = materialized_bundles.get(role.bundle_id)
+    if bundle is None:
+        # #52 delete cascade: the referenced bundle is gone. Surface a not-fit
+        # role with an empty chain rather than raising mid-response.
+        logger.warning(
+            "role references missing model bundle %s; materializing empty chain",
+            role.bundle_id,
+        )
+        return role.model_copy(update={"fallback_chain": []})
+    return _materialize_reference_role(role, bundle)
+
+
+def _materialize_reference_role(role: RoleEntry, bundle: ModelBundle) -> RoleEntry:
+    """Overlay a role's local delta onto a referenced bundle via the gateway.
+
+    The by-reference + delta overlay is owned by the gateway resolver
+    (materialize_role_entry); ``overlay_bundle_reference_chain`` plumbs the role +
+    materialized bundle into it. The bundle's materialization_report (role-fit per
+    route) is carried onto the role so the status lights project.
+    """
+    fallback_chain = overlay_bundle_reference_chain(role, bundle)
+    return role.model_copy(
+        update={
+            "fallback_chain": fallback_chain,
+            "materialization_report": dict(bundle.materialization_report),
         }
     )
 
@@ -4217,19 +4960,104 @@ def _materialize_role_for_response(
 ) -> RoleEntry:
     if not role.model_groups:
         return role
-    adapter = GatewayAdapter(transport="in_process")
-    return cast(RoleEntry, adapter.materialize_role({"role": role, "credentials": credentials or load_credentials()}))
+    adapter = build_gateway_adapter()
+    return cast(
+        RoleEntry,
+        adapter.materialize_role(
+            {
+                "role": role,
+                "credentials": credentials or load_credentials(),
+                "evidence_records": _load_gateway_evidence_records(),
+            }
+        ),
+    )
+
+
+def bundle_role_name(bundle_id: str) -> str:
+    """The __bundle__ job key (#50b): keeps bundle test results out of the role
+    results namespace; mirrors the frontend bundleRoleName(bundleId)."""
+    return f"__bundle__{bundle_id}"
+
+
+def _materialize_bundle_for_response(
+    bundle: ModelBundle,
+    credentials: LLMCredentialsFile | None = None,
+) -> ModelBundle:
+    """Materialize a bundle into its flat chain + report via the gateway (#50b).
+
+    Wraps the bundle into a transient role-like entry (materialize_model_bundle);
+    the persisted roles store is never written.
+    """
+    if not bundle.model_groups:
+        return bundle
+    adapter = build_gateway_adapter()
+    return cast(
+        ModelBundle,
+        adapter.materialize_model_bundle(
+            {
+                "bundle": bundle,
+                "credentials": credentials or load_credentials(),
+                "evidence_records": _load_gateway_evidence_records(),
+            }
+        ),
+    )
+
+
+def _load_gateway_evidence_records() -> list[EvidenceRecord]:
+    return list(load_evidence_library().evidence_records)
 
 
 def _save_roles_with_active_routes(data: RolesData) -> RolesData:
     active_path = roles_path()
     active_route_ids = set(load_credentials().provider_routes)
+    # #51: bundle ids are slugged by model_profile_id; a role's bundle_id must
+    # point at one of these or it is a dangling reference.
+    known_bundle_ids = {bundle.model_profile_id for bundle in data.model_bundles.values()}
     try:
-        validate_references(data, known_route_ids=active_route_ids)
-        save_roles_file(active_path, data, known_route_ids=active_route_ids)
-        return load_roles_file(active_path)
+        validate_references(
+            data,
+            known_route_ids=active_route_ids,
+            known_bundle_ids=known_bundle_ids,
+        )
+        save_roles_file(
+            active_path,
+            data,
+            known_route_ids=active_route_ids,
+            known_bundle_ids=known_bundle_ids,
+        )
+        reloaded = load_roles_file(active_path)
     except InvalidRoleReference as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # 底座一: no gateway snapshot to refresh — build_gateway_route_runtime now reads
+    # the on-disk truth fresh on every call, so the just-saved roles are seen
+    # immediately (e.g. by the next copilot test-sdk) without a sync hook.
+    return reloaded
+
+
+def _now_iso() -> str:
+    """R-F10: ISO-8601 UTC timestamp for roles_changed broadcast payloads."""
+    return datetime.now(UTC).isoformat()
+
+
+async def _publish_roles_changed() -> None:
+    """R-F10: broadcast a ``roles_changed`` event on the studio events topic
+    after a PUT/DELETE roles endpoint successfully writes to disk. Failure
+    here is logged via ``logger.exception`` but never propagates — a downed
+    event bus must not corrupt the just-completed write.
+    """
+    payload: dict[str, Any] = {
+        "type": "roles_changed",
+        "timestamp": _now_iso(),
+        "source": "http_api",
+    }
+    try:
+        await event_bus.publish(STUDIO_EVENTS_TOPIC, payload)
+    except Exception:
+        logger.exception(
+            "phase=publish_roles_changed action=publish status=failed payload=%s",
+            payload,
+        )
 
 
 def _endpoint_references(
@@ -4365,41 +5193,199 @@ def _capability_key(value: str) -> str:
     }.get(value, value)
 
 
-def _endpoint_probe_backend(endpoint: ProviderEndpoint) -> CopilotProvider:
-    base_host = _url_hostname(endpoint.base_url)
-    endpoint_id = endpoint.endpoint_id.lower()
-    if endpoint.protocol == "ark_runtime" or _host_matches(base_host, "volces.com") or "ark" in endpoint_id:
-        return "ark"
-    if endpoint.protocol == "anthropic_compatible":
-        return "claude"
-    if endpoint.protocol == "google_genai":
-        return "gemini"
-    if "deepseek" in base_host or "deepseek" in endpoint_id:
-        return "deepseek"
-    return "openai"
+def _endpoint_probe_backend(endpoint: ProviderEndpoint) -> ProviderProbeBackend:
+    return _gateway_endpoint_probe_backend(endpoint)
 
 
 def _endpoint_probe_base_url(endpoint: ProviderEndpoint) -> str:
-    return endpoint.base_url.rstrip("/")
+    return _gateway_endpoint_probe_base_url(endpoint)
 
 
-def _url_hostname(raw_url: str) -> str:
-    if not raw_url:
-        return ""
-    parsed = urlparse(raw_url if "://" in raw_url else f"https://{raw_url}")
-    return (parsed.hostname or "").lower().rstrip(".")
+async def _gateway_test_provider_endpoint(endpoint: ProviderEndpoint) -> EndpointProbeResult:
+    if _ping_provider is not _ORIGINAL_PING_PROVIDER:
+        return await _legacy_endpoint_probe_adapter(endpoint)
+    return await _gateway_test_provider_endpoint_request(endpoint)
 
 
-def _host_matches(hostname: str, domain: str) -> bool:
-    normalized_domain = domain.lower().rstrip(".")
-    return hostname == normalized_domain or hostname.endswith(f".{normalized_domain}")
+async def _legacy_endpoint_probe_adapter(endpoint: ProviderEndpoint) -> EndpointProbeResult:
+    backend = _endpoint_probe_backend(endpoint)
+    base_url = _endpoint_probe_base_url(endpoint)
+    api_key = endpoint.api_key.get_secret_value() if endpoint.api_key is not None else ""
+    if not api_key:
+        return EndpointProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            provider_kind=endpoint.provider_kind,
+            backend=backend,
+            base_url=base_url,
+            status="invalid_key",
+            message="API key is empty.",
+        )
+    try:
+        result = await _ping_provider(backend, api_key, base_url)
+    except _Unauthorized as exc:
+        return _endpoint_probe_error_result(endpoint, backend, base_url, "invalid_key", exc)
+    except _RateLimited as exc:
+        return _endpoint_probe_error_result(endpoint, backend, base_url, "rate_limited", exc)
+    except _QuotaExceeded as exc:
+        return _endpoint_probe_error_result(endpoint, backend, base_url, "quota_exceeded", exc)
+    except httpx.TimeoutException:
+        return EndpointProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            provider_kind=endpoint.provider_kind,
+            backend=backend,
+            base_url=base_url,
+            status="timeout",
+            message="Endpoint test timed out.",
+        )
+    except _NetworkError as exc:
+        return _endpoint_probe_error_result(endpoint, backend, base_url, "network_error", exc)
+    return EndpointProbeResult(
+        endpoint_id=endpoint.endpoint_id,
+        provider_kind=endpoint.provider_kind,
+        backend=backend,
+        base_url=base_url,
+        status="ok",
+        latency_ms=result.latency_ms,
+        model_ids=result.model_ids,
+        model_capabilities=result.model_capabilities,
+    )
 
 
-def _endpoint_success_message(result: PingResult) -> str:
+def _endpoint_probe_error_result(
+    endpoint: ProviderEndpoint,
+    backend: ProviderProbeBackend,
+    base_url: str,
+    status: Literal["invalid_key", "rate_limited", "quota_exceeded", "network_error"],
+    exc: BaseException,
+) -> EndpointProbeResult:
+    return EndpointProbeResult(
+        endpoint_id=endpoint.endpoint_id,
+        provider_kind=endpoint.provider_kind,
+        backend=backend,
+        base_url=base_url,
+        status=status,
+        message=str(exc) or None,
+        error_code=getattr(exc, "error_code", "") or status,
+    )
+
+
+async def _gateway_test_provider_model(
+    endpoint: ProviderEndpoint,
+    model_id: str,
+    *,
+    runtime_settings: dict[str, Any] | None = None,
+) -> RouteProbeResult:
+    route_slug = _route_slug(model_id)
+    route = ProviderRoute(
+        route_id=f"{endpoint.endpoint_id}:{route_slug}",
+        endpoint_id=endpoint.endpoint_id,
+        route_slug=route_slug,
+        provider_model_id=model_id,
+        canonical_id=model_id,
+    )
+    return await _gateway_test_provider_route(endpoint, route, runtime_settings=runtime_settings)
+
+
+async def _gateway_test_provider_route(
+    endpoint: ProviderEndpoint,
+    route: ProviderRoute,
+    *,
+    runtime_settings: dict[str, Any] | None = None,
+) -> RouteProbeResult:
+    if _probe_model is not _ORIGINAL_PROBE_MODEL:
+        probe_kwargs: dict[str, Any] = {}
+        if runtime_settings is not None:
+            probe_kwargs["runtime_settings"] = runtime_settings
+        result = await _probe_model(
+            _endpoint_probe_backend(endpoint),
+            endpoint.api_key.get_secret_value() if endpoint.api_key is not None else "",
+            _endpoint_probe_base_url(endpoint),
+            route.provider_model_id,
+            **probe_kwargs,
+        )
+        return _route_probe_result_from_model_probe(endpoint, route, result)
+    return await _gateway_test_provider_route_request(
+        endpoint,
+        route,
+        runtime_settings=runtime_settings,
+    )
+
+
+async def _gateway_probe_official_call_method(
+    method_id: OfficialCallMethod,
+    api_key: str,
+    base_url: str,
+    model_id: str,
+    *,
+    runtime_settings: dict[str, Any] | None = None,
+) -> ModelProbeResult:
+    if _probe_official_call_method_request is not _ORIGINAL_PROBE_OFFICIAL_CALL_METHOD_REQUEST:
+        return await _probe_official_call_method_request(
+            method_id,
+            api_key,
+            base_url,
+            model_id,
+            runtime_settings=runtime_settings,
+        )
+    result = await _gateway_probe_official_call_method_request(
+        method_id,
+        api_key,
+        base_url,
+        model_id,
+        runtime_settings=runtime_settings,
+    )
+    return _model_probe_result_from_route_probe(result)
+
+
+def _route_probe_result_from_model_probe(
+    endpoint: ProviderEndpoint,
+    route: ProviderRoute,
+    result: ModelProbeResult,
+) -> RouteProbeResult:
+    return RouteProbeResult(
+        endpoint_id=endpoint.endpoint_id,
+        route_id=route.route_id,
+        provider_kind=endpoint.provider_kind,
+        backend=_endpoint_probe_backend(endpoint),
+        base_url=_endpoint_probe_base_url(endpoint),
+        model_id=result.model_id,
+        status=result.status,
+        latency_ms=result.latency_ms,
+        message=result.message,
+    )
+
+
+def _model_probe_result_from_route_probe(result: RouteProbeResult) -> ModelProbeResult:
+    return ModelProbeResult(
+        model_id=result.model_id,
+        status=result.status,
+        latency_ms=result.latency_ms,
+        message=result.message,
+    )
+
+
+def _endpoint_success_message(result: PingResult | EndpointProbeResult) -> str:
     message = f"Connected in {result.latency_ms}ms."
     if result.model_seen:
         message = f"{message} Model seen: {result.model_seen}."
     return message
+
+
+def _endpoint_probe_failure_message(result: EndpointProbeResult) -> str:
+    if result.status == "invalid_key":
+        return _provider_probe_error_message("Invalid API key", result)
+    if result.status == "rate_limited":
+        return _provider_probe_error_message("Provider rate limited the test request", result)
+    if result.status == "quota_exceeded":
+        return _provider_probe_error_message(
+            "Provider rejected the key because quota or billing is unavailable",
+            result,
+        )
+    if result.status == "timeout":
+        return "Endpoint test timed out."
+    if result.status == "network_error":
+        return _provider_probe_error_message("Network error while testing endpoint", result)
+    return _provider_probe_error_message("Endpoint test failed", result)
 
 
 def _model_probe_failure_message(result: ModelProbeResult) -> str:
@@ -4413,6 +5399,14 @@ def _provider_error_message(prefix: str, exc: BaseException) -> str:
     error_code = getattr(exc, "error_code", "")
     if error_code:
         return f"{prefix} ({error_code})."
+    return f"{prefix}."
+
+
+def _provider_probe_error_message(prefix: str, result: EndpointProbeResult) -> str:
+    if result.error_code:
+        return f"{prefix} ({result.error_code})."
+    if result.message:
+        return f"{prefix}. {result.message}"
     return f"{prefix}."
 
 

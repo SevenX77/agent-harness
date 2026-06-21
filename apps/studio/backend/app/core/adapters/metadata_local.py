@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import aiofiles  # type: ignore[import-untyped]
+from pydantic import ValidationError
 
 from app.core.ports.metadata import SkillIndexEntry
 from app.models.runs import RunMetadata
@@ -216,7 +217,51 @@ class LocalJsonMetadataStore:
             except json.JSONDecodeError:
                 logger.warning("Invalid app settings JSON at %s; using defaults", settings_path)
                 return AppSettings()
-            return AppSettings.model_validate(raw)
+            try:
+                return AppSettings.model_validate(raw)
+            except ValidationError as exc:
+                return self._salvage_app_settings(raw, settings_path, exc)
+
+    def _salvage_app_settings(
+        self,
+        raw: object,
+        settings_path: Path,
+        error: ValidationError,
+    ) -> AppSettings:
+        """Recover usable settings from a forward-incompatible app_settings.json.
+
+        A settings file written by a newer Studio (or hand-edited) can carry keys
+        this build's strict ``extra="forbid"`` AppSettings model does not know —
+        e.g. an older bundled backend reading a ``language`` key a later release
+        added — or an out-of-range value on a key it does know. Letting that
+        ValidationError propagate would 422 every endpoint that reads settings (the
+        skill list reads them first), blanking the whole Home screen for an
+        unrelated, recoverable reason. Drop only the offending keys/values and keep
+        every other valid setting; fall back to defaults only if the survivors are
+        still unusable.
+        """
+        if not isinstance(raw, dict):
+            logger.warning("App settings at %s are invalid (%s); using defaults", settings_path, error)
+            return AppSettings()
+        # Unknown future keys fall away with the model-fields filter; KNOWN keys
+        # whose VALUE is invalid fall away via the error locs — so one bad field
+        # never discards the user's other valid settings.
+        usable = {key: value for key, value in raw.items() if key in AppSettings.model_fields}
+        for entry in error.errors():
+            location = entry.get("loc") or ()
+            if location and location[0] in usable:
+                usable.pop(location[0], None)
+        try:
+            salvaged = AppSettings.model_validate(usable)
+        except ValidationError as inner:
+            logger.warning("App settings at %s are invalid (%s); using defaults", settings_path, inner)
+            return AppSettings()
+        logger.warning(
+            "App settings at %s had unusable keys/values (%s); kept the valid known fields, dropped the rest",
+            settings_path,
+            error,
+        )
+        return salvaged
 
     def _write_app_settings_sync(self, settings: AppSettings) -> None:
         settings_path = self._app_settings_path()

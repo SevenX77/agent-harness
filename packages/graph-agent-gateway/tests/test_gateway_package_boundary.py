@@ -52,6 +52,62 @@ def test_gateway_runtime_surface_exports_route_handoff_dtos() -> None:
     assert "ResolvedRoute" in graph_agent_gateway.__all__
 
 
+def test_gateway_public_facade_exports_mvp1_owner_api() -> None:
+    import graph_agent_gateway as gw
+    from graph_agent_gateway.credential_resolver import (
+        CredentialResolveError,
+        CredentialResolveRequest,
+        CredentialResolveResponse,
+    )
+    from graph_agent_gateway.fallback_decision import (
+        FallbackDecision,
+        FallbackDecisionRequest,
+        decide_fallback,
+    )
+    from graph_agent_gateway.import_draft_store import (
+        ImportDraftStore,
+        MaterializedImportDraftCandidates,
+        materialize_import_draft_candidates,
+        merge_evidence_library,
+    )
+    from graph_agent_gateway.role_materialization import (
+        MaterializeRoleRequest,
+        MaterializedRoleResult,
+        materialize_role,
+    )
+    from graph_agent_gateway.route_handoff import ResolvedRouteChain, RouteSkipDiagnostic
+    from graph_agent_gateway.state_projection import (
+        ProviderModelStateProjection,
+        project_route_state,
+        project_route_state_from_evidence,
+    )
+
+    expected_exports = {
+        "ResolvedRouteChain": ResolvedRouteChain,
+        "RouteSkipDiagnostic": RouteSkipDiagnostic,
+        "FallbackDecision": FallbackDecision,
+        "FallbackDecisionRequest": FallbackDecisionRequest,
+        "decide_fallback": decide_fallback,
+        "CredentialResolveRequest": CredentialResolveRequest,
+        "CredentialResolveResponse": CredentialResolveResponse,
+        "CredentialResolveError": CredentialResolveError,
+        "ProviderModelStateProjection": ProviderModelStateProjection,
+        "project_route_state": project_route_state,
+        "project_route_state_from_evidence": project_route_state_from_evidence,
+        "MaterializeRoleRequest": MaterializeRoleRequest,
+        "MaterializedRoleResult": MaterializedRoleResult,
+        "materialize_role": materialize_role,
+        "ImportDraftStore": ImportDraftStore,
+        "MaterializedImportDraftCandidates": MaterializedImportDraftCandidates,
+        "materialize_import_draft_candidates": materialize_import_draft_candidates,
+        "merge_evidence_library": merge_evidence_library,
+    }
+
+    for public_name, expected_symbol in expected_exports.items():
+        assert getattr(gw, public_name) is expected_symbol
+        assert public_name in gw.__all__
+
+
 def test_registry_surface_exports_skipped_route_diagnostics() -> None:
     import graph_agent_gateway.registry as registry
     from graph_agent_gateway.registry.schema import SkippedRoute

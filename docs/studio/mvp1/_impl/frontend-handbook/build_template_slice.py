@@ -637,7 +637,12 @@ def render_tests(im, ns, label, n_atoms, apfx=""):
             label_row = "预期截图"
         atoms = t.get("atoms") or []
         anchor = f"{apfx}test-{atoms[0]}" if atoms else ""
+        design_link = (
+            f'<a class="xlink" href="#{apfx}atom-{atoms[0]}">设计页 #{atoms[0]} · 看这条的设计意图 →</a>'
+            if atoms else ""
+        )
         items += card(code(t.get("covers", "")), [
+            ("对应设计", design_link),
             ("① 静态测试 (RED→GREEN)", duty_ol(t.get("layer1", []))),
             ("② e2e 真实测试", duty_ol(t.get("layer2", []))),
             (label_row, shots),
@@ -654,6 +659,7 @@ def two_layer_explainer():
     tl = card_grid([
         card("① 业务逻辑静态测试（红 → 绿）", [("", v_ul([
             "先写能复现缺口的失败测试（RED），实现后变绿（GREEN）。",
+            "<b>什么叫 mock</b>：用一个<b>假替身</b>替掉真后端 / 真文件系统 / 真点击，这样能<b>单独</b>验前端这一步的接线对不对——点了按钮有没有调对函数、状态有没有刷新、错误文案对不对——不用等后端、不依赖磁盘，跑得快又稳。真连通留给 ② 去真跑。",
             "纯展示 / 状态改动则列出要断言的 DOM / 文本 / 状态证据。",
             "组件测覆盖 success / empty / error；契约测断言打对端点、收对 DTO。",
         ]))], mono=False),

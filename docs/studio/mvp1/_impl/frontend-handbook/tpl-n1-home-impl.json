@@ -271,12 +271,7 @@
       "layer2": [
         "真跑(桌面):点卡片 ⋯ Show in folder → Finder/Explorer 定位到该文件夹。"
       ],
-      "screenshots": [
-        {
-          "file": "n1-02-card-menu.png",
-          "caption": "卡片 ⋯ 菜单展开:Show in folder + Remove from recent(headless 无系统文件管理器,仅示菜单展开)"
-        }
-      ]
+      "shot_na": "Show in folder 是去调系统的文件管理器(Finder / 资源管理器)定位到这个 skill 的文件夹——headless 虚拟显示器里根本没有系统文件管理器,这个『跳出 Studio、打开系统文件夹』的动作截不到图、也没法真机验证。前端只负责发起调用:已读码确认点卡片 ⋯ → Show in folder 会调 revealInFileManager(该卡的 absolutePath),由组件测试断言覆盖。"
     },
     {
       "covers": "#6 remove-skill-entry",

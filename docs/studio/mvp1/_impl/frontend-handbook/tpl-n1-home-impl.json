@@ -200,7 +200,8 @@
         "目标形态(解耦走 Rust)落地前先对现状路径真跑取证,落地后重跑断言不经 POST /api/skills。"
       ],
       "fe_status_prev": "偏差",
-      "fe_resync": "覆盖项已全绿(2026-06-20)"
+      "fe_resync": "覆盖项已全绿(2026-06-20)",
+      "shot_na": "打开文件夹要弹系统原生目录选择器(OS file picker),headless 虚拟显示器无法驱动系统对话框。逻辑已读码确认:点 Open folder → openWorkspaceDialog → Rust 侧 pick_folder;由 WelcomePage 组件测试断言点击触发该调用覆盖。"
     },
     {
       "covers": "#3 recent-mru-grid",
@@ -348,7 +349,8 @@
         "慢网络/mock 延迟下进 Home → 看 Recent 区数据未到时是否有骨架占位、不空白闪烁。"
       ],
       "fe_status_prev": "未实施",
-      "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
+      "fe_resync": "覆盖的功能点已全部符合(2026-06-20)",
+      "shot_na": "Recent 加载骨架是亚 100ms 一闪而过的 loading 态,headless 截图抓不到稳定帧。由 WelcomePage.test.tsx 断言 isHydrating 期间渲染 RecentSkeleton(data-recent-skeleton)覆盖。"
     },
     {
       "covers": "#9 recent-load-failure-fallback",
@@ -367,7 +369,8 @@
       "layer2": [
         "真跑:让 Recent 数据源失败 → 看局部红框出现且新建/打开仍能用。"
       ],
-      "fe_resync": "已真覆盖:WelcomePage.test.tsx(局部 destructive Alert 渲染 + 入口不被阻塞)+ useRecentSkills.test.ts(MRU/路径校验错误显式浮出、不静默);verified by green gates + post-audit(2026-06-20)"
+      "fe_resync": "已真覆盖:WelcomePage.test.tsx(局部 destructive Alert 渲染 + 入口不被阻塞)+ useRecentSkills.test.ts(MRU/路径校验错误显式浮出、不静默);verified by green gates + post-audit(2026-06-20)",
+      "shot_na": "Recent 加载失败 fallback 需注入 useRecentSkills 存储读取失败才触发,headless 无法构造该故障。由 WelcomePage.test.tsx mock recentError 断言渲染 Alert 错误态覆盖。"
     }
   ]
 }

@@ -23,8 +23,8 @@
       "current": "现状:打开能用但耦合注册 + 留死文案。importSkillDirectory(打开文件夹入口)→ selectSkillDirectory(Rust 目录选择器)→ openSkill;openSkill 里 resolveBackendSkillIdForWorkspace 先 POST /api/skills(import_existing=true)做导入注册再进工作区(把「打开」耦合成「注册」)。formatImportSkillError 仍含「missing GRAPH.md or SKILL.md」等 manifest 拒绝文案——后端 create_new_skill 已改 warning 放行(D2),这些是死分支。术语主入口已是「Open folder / Choose any local folder」,但 toast 等处仍有「Import」残留。",
       "gap": "差距:① 删 formatImportSkillError 的 manifest/lint 拒绝死分支,只留 OS 级失败(纯前端可做)。② 解耦 POST /api/skills 注册——打开=记 MRU + 进工作区、落盘走 Studio Rust 后端 native-fs(等机制 B 的 Rust 打开命令,现未实现=后端先于前端)。③ 残留「Import」措辞统一为「打开文件夹」。",
       "fe_status": "符合",
-      "be_status": "契约问题",
-      "be_dep": "部分等后端:删死文案 + 改措辞是前端独立;解耦注册走 Rust 等机制 B 的 Rust 建/打开命令(未实现)。后端 D2 放宽已就绪(导入不再拒缺 manifest)。",
+      "be_status": "已实现",
+      "be_dep": "Rust 机制 B 已实现并接通:打开文件夹经 Rust 原生写入器注册(reveal/open 命令,仅 OS 检查、不校验 manifest),前端 lib/tauri.ts 调用,带单测。",
       "fe_status_prev": "偏差",
       "fe_resync": "batch3 已修复+测试通过(2026-06-20)"
     },
@@ -35,8 +35,8 @@
       "current": "现状:偏差——卡片挂注册表派生字段。visibleWorkspaces(把 MRU 与注册表合并的 memo)对每条 MRU 按目录路径匹配 GET /api/skills 的 SkillSummary,给卡片挂 phase_count / last_run_at,卡片还渲 has_golden(Golden 徽章)、config_mismatch(Config drift 徽章 + Tooltip),并把注册表里 MRU 没有的 skill 也追加进列表。字段全来自 useSkills(GET /api/skills 聚合)。",
       "gap": "差距:① 卡片只渲 MRU 字段(displayName + shortPath + lastOpenedAt),停读 phase_count/last_run_at/has_golden/config_mismatch——纯前端停读即可(此步不需后端先动)。② 拆掉 visibleWorkspaces 的注册表合并 + 追加逻辑,Recent 只来自 useRecentSkills 的 MRU。③ 完全弃用 GET /api/skills(去注册表收尾)属契约重塑、等后端。",
       "fe_status": "符合",
-      "be_status": "契约问题",
-      "be_dep": "卡片极简化(停读派生字段)前端独立;完全去注册表(弃 GET /api/skills)等后端重塑(D1/D11)。",
+      "be_status": "已实现",
+      "be_dep": "最近列表读 Rust 原生 recent_workspaces(list_recent_workspaces 单一真相源),不再依赖后端注册表;卡片极简化已落,前端独立完成。",
       "fe_status_prev": "偏差",
       "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
     },
@@ -47,8 +47,8 @@
       "current": "现状:开卡仍经注册。点卡 → openWorkspace → openSkill → resolveBackendSkillIdForWorkspace 走 POST /api/skills 解析后端 skillId 再进工作区;后端不可用会卡在这步。MRU 刷新走 rememberWorkspace。",
       "gap": "差距:纯靠 MRU 路径+名进入,进工作区后再按需对接后端;解耦 POST /api/skills 注册(与 #2 同,等机制 B 的 Rust 打开命令)。",
       "fe_status": "符合",
-      "be_status": "契约问题",
-      "be_dep": "等后端:解耦注册走 Rust 打开命令(机制 B 未实现)。",
+      "be_status": "已实现",
+      "be_dep": "Rust 打开命令(openSkillWorkspace)已实现并接通:进入工作区走 Rust 注册、与后端 POST/GET /api/skills 解耦,带单测。",
       "fe_status_prev": "偏差",
       "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
     },
@@ -69,8 +69,8 @@
       "current": "现状:符合——危险版 Remove 已退役、新增安全版「Remove from recent」。① #163 删掉了会删盘文件的旧 Remove(整条 handleDelete → requestSkillDeleteConfirmation → DELETE /api/skills/{id} 退役),守住 R1(不在 IDE 内删 skill)。② #164 新增 MRU-only 的「Remove from recent」:卡片 ⋯ 下拉 / 右键菜单项(shadcn DropdownMenuItem / ContextMenuItem variant=destructive + Trash2 图标)→ handleRemove → removeWorkspace(identity) 只清最近列表条目 + Sonner success toast,绝不碰盘上 skill 文件夹。失效自动剪枝助手 pruneMissingRecentWorkspaces 仍无调用方(② 失效卡自动移除路径待接)。",
       "gap": "差距:① 已闭合——删盘 Remove 退役(#163)+ 安全的 Remove from recent 让用户整理最近列表而不删文件(#164),R1 守住。② 失效路径「点失效卡 → 报错 + 自动移除」仍待:点失效卡报错 toast + removeWorkspace 接上 pruneMissingRecentWorkspaces——但其 exists 谓词(路径存在性检查)需 Studio Rust 后端能力支撑,现无对应 Rust 命令=这部分等后端。",
       "fe_status": "符合",
-      "be_status": "契约问题",
-      "be_dep": "Remove from recent(MRU)纯前端、无后端依赖;只剩 ② 失效卡自动移除的路径存在性检查等后端(机制 B 的 Rust exists 能力,未实现)。",
+      "be_status": "已实现",
+      "be_dep": "失效自动移除的路径存在性检查 = Rust workspace_path_exists,已实现并接通(前端调用 + 单测);删 Remove 走 remove_recent_workspace。",
       "fe_status_prev": "偏差",
       "fe_resync": "核验:#163 退役删盘 Remove、#164 新增 MRU-only Remove from recent,均已实测(2026-06-22)"
     },

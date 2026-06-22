@@ -53,6 +53,7 @@
 1. 读 `FRONTEND_UI_SPEC.md`(尤其 §2)+ 看现有相关组件 / token。
 2. `wt-new.sh` 切分支,自己直接改前端代码。
 3. `npm run dev`(或 Tauri 壳)跑起来,**亲眼点过**受影响界面。
+   - **多 agent 同仓时必须跑自己的独立实例**:从**自己的 worktree** 启动(不是仓库根),给 sidecar 端口 / Vite 端口(`--strictPort`)/ Xvfb display / `VITE_CACHE_DIR` 各分一套独一无二的值,别和别人的 app 抢端口/显示。动手前先 `git worktree list`,**别碰**别人「有未提交改动 + open PR + 文件刚改过」的活跃 worktree,只清自己已合并的旧 worktree。完整隔离配方见 `docs/development/RUN_AND_SCREENSHOT.md` §3。
 4. 本地跑 lint / typecheck / test / build 四件套全绿。
 5. `wt-ship.sh` 开 PR,CI 绿后 auto-merge。
 6. 有可复用规则 → 回写 `FRONTEND_UI_SPEC.md`。

@@ -9,6 +9,7 @@ import {
   formatImportSkillError,
   RecentSkeleton,
   registeredSkillIdForImport,
+  REMOVE_ACTION_LABEL,
   REVEAL_ACTION_LABEL,
   WelcomePage,
 } from './WelcomePage'
@@ -121,16 +122,22 @@ describe('WelcomePage', () => {
     expect(html).not.toContain('https://gitea.example.test/bob/demo-skill.git')
   })
 
-  it('removes the Remove entry from the Recent card action menu (R1)', () => {
+  it('offers an MRU-only "Remove from recent" in the Recent card action menu (R1 follow-up)', () => {
     recentMocks.recentWorkspaces = [recentEntry]
     const html = renderHome()
 
-    // Radix renders menu content into a portal only once opened, so the closed
-    // SSR markup shows the trigger but no item labels. The destructive Remove
-    // action and its DELETE /api/skills wiring are gone from the source, so
-    // "Remove" must not appear anywhere in the static render.
+    // The Recent card carries a ⋮ action-menu trigger. Radix portals the menu
+    // content only once it is opened, so the closed SSR markup shows the trigger
+    // but not the item labels — the item itself is contract-locked via the
+    // exported label below and exercised interactively by the home Playwright
+    // e2e, per the repo's "static render + e2e for interaction" convention.
     expect(html).toContain('aria-label="More actions for Demo skill"')
-    expect(html).not.toContain('Remove')
+
+    // The remove action is MRU-only: the wording says "from recent", and it is
+    // wired to the recent-store `removeWorkspace` hook (see handleRemove), NOT
+    // to skill deletion. The destructive `DELETE /api/skills` action that #163
+    // retired stays retired — removing a card never deletes the skill on disk.
+    expect(REMOVE_ACTION_LABEL).toBe('Remove from recent')
   })
 
   it('renders Open folder as the local workspace entry point', () => {

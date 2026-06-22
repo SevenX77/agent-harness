@@ -107,8 +107,12 @@
   "tests": [
     {
       "covers": "#15 home-workspace-render-switch",
-      "atoms": [15],
-      "shots": ["currentSkillId 为 null 渲 Home;进入 skill 渲工作区内容(同壳换画布)"],
+      "atoms": [
+        15
+      ],
+      "shots": [
+        "currentSkillId 为 null 渲 Home;进入 skill 渲工作区内容(同壳换画布)"
+      ],
       "fe_status": "符合",
       "layer1": [
         "渲染 Workspace,currentSkillId=null → 断言画布面板渲 WelcomePage。",
@@ -116,12 +120,22 @@
       ],
       "layer2": [
         "启动到 Home → 画布是 WelcomePage;进入一个 skill → 画布变工作区,顶栏不变。"
+      ],
+      "screenshots": [
+        {
+          "file": "n1-03-workspace-open.png",
+          "caption": "currentSkillId=null 渲 Home;进入 skill 同一外壳换成画布内容"
+        }
       ]
     },
     {
       "covers": "#16 strong-isolation-skill-switch",
-      "atoms": [16],
-      "shots": ["进 skill 开面板后回 Home → navStack/面板/copilot 全卸载"],
+      "atoms": [
+        16
+      ],
+      "shots": [
+        "进 skill 开面板后回 Home → navStack/面板/copilot 全卸载"
+      ],
       "fe_status": "符合",
       "layer1": [
         "进入 skillA(开面板/Copilot)→ 切 skillId=null → 断言 navStack 空、activePanel=null、copilotOpen=false。",
@@ -129,36 +143,66 @@
       ],
       "layer2": [
         "真跑:进 skill → 开面板 → 点左上 logo 回 Home → 工作区全卸载;再进另一 skill → 干净工作台、无上个 skill 残留。"
+      ],
+      "screenshots": [
+        {
+          "file": "n1-08-back-home.png",
+          "caption": "进 skill 开面板后点 Header logo 回 Home → 面板 / Copilot 全卸载(干净 Home)"
+        }
       ]
     },
     {
       "covers": "#17 workspace-shell-layout",
-      "atoms": [17],
-      "shots": ["进入 skill 后 Header + 左 Toolbar + 三栏(左面板/画布/Copilot)"],
+      "atoms": [
+        17
+      ],
+      "shots": [
+        "进入 skill 后 Header + 左 Toolbar + 三栏(左面板/画布/Copilot)"
+      ],
       "fe_status": "符合",
       "layer1": [
         "进入 skill → 断言渲 Header + Toolbar + ResizablePanelGroup;activePanel 为 null 时左栏不挂载、为某面板时挂载。"
       ],
       "layer2": [
         "进入 skill → 看到顶栏 + 左竖条 + 中间画布 + 右 Copilot。"
+      ],
+      "screenshots": [
+        {
+          "file": "n1-03-workspace-open.png",
+          "caption": "工作区外壳 = Header + 左 Toolbar + 三栏(左面板 / 画布 / Copilot)"
+        }
       ]
     },
     {
       "covers": "#18 panel-switch",
-      "atoms": [18],
-      "shots": ["点 Toolbar 面板按钮切左 dock 内容;再点同一个收起左栏"],
+      "atoms": [
+        18
+      ],
+      "shots": [
+        "点 Toolbar 面板按钮切左 dock 内容;再点同一个收起左栏"
+      ],
       "fe_status": "符合",
       "layer1": [
         "点 Toolbar 的 properties → 断言 activePanel=properties、左栏渲 Properties;再点 properties → 断言 activePanel=null、左栏收起。"
       ],
       "layer2": [
         "依次点 Toolbar 五个面板图标看左 dock 内容切换;点当前激活的收起左栏。"
+      ],
+      "screenshots": [
+        {
+          "file": "n1-04-panel-switch.png",
+          "caption": "点 Toolbar 面板按钮切换左 dock 内容(切到 I/O 面板)"
+        }
       ]
     },
     {
       "covers": "#19 back-to-home-unload",
-      "atoms": [19],
-      "shots": ["点 Header logo 回 Home 并连带关 Settings,无孤儿 overlay"],
+      "atoms": [
+        19
+      ],
+      "shots": [
+        "点 Header logo 回 Home 并连带关 Settings,无孤儿 overlay"
+      ],
       "fe_status": "符合",
       "layer1": [
         "Settings 打开态,点 Header logo → 断言 handleHome 先 setSettingsOpen(false) 再 onCloseSkill()。",
@@ -166,24 +210,44 @@
       ],
       "layer2": [
         "进 skill 开 Settings → 点顶栏 logo → 回到 Home 且 Settings 已关、无残留浮层。"
+      ],
+      "screenshots": [
+        {
+          "file": "n1-08-back-home.png",
+          "caption": "点 Header 的 Layers logo 回 Home,连带关闭 Settings,无孤儿 overlay"
+        }
       ]
     },
     {
       "covers": "#20 settings-overlay-non-unload",
-      "atoms": [20],
-      "shots": ["打开 Settings 只换画布面板,左文件树/右 Copilot 仍在"],
+      "atoms": [
+        20
+      ],
+      "shots": [
+        "打开 Settings 只换画布面板,左文件树/右 Copilot 仍在"
+      ],
       "fe_status": "符合",
       "layer1": [
         "进入 skill 开 Settings → 断言 settingsOpen=true、画布渲 SettingsPage,left-panel/copilot 仍挂载、currentSkillId 不变。"
       ],
       "layer2": [
         "进 skill → 开 Settings → 左文件树/右 Copilot 仍可见可点,工作区未退出。"
+      ],
+      "screenshots": [
+        {
+          "file": "n1-05-settings-overlay.png",
+          "caption": "打开 Settings 只替换画布面板,工作区外壳(左树 / 右 Copilot)仍挂载"
+        }
       ]
     },
     {
       "covers": "#21 enter-mounts-copilot",
-      "atoms": [21],
-      "shots": ["进入 skill 右侧出现 Copilot;Home 无 Copilot"],
+      "atoms": [
+        21
+      ],
+      "shots": [
+        "进入 skill 右侧出现 Copilot;Home 无 Copilot"
+      ],
       "fe_status": "符合",
       "layer1": [
         "进入 skill → 断言 copilotOpen=true、右侧挂 CopilotPanel;切 Home → 断言 copilotOpen=false、无 Copilot 栏。",
@@ -191,12 +255,22 @@
       ],
       "layer2": [
         "进入 skill 看右侧 Copilot;回 Home 无 Copilot;新建空 skill 进入也立即有 Copilot。"
+      ],
+      "screenshots": [
+        {
+          "file": "n1-03-workspace-open.png",
+          "caption": "进入 skill 右侧出现 Copilot 面板(Home 屏无 Copilot)"
+        }
       ]
     },
     {
       "covers": "#22 copilot-exit-restore",
-      "atoms": [22],
-      "shots": ["与 copilot 对话后回 Home 再进同一 skill → 对话与上次活跃 tab 一模一样恢复"],
+      "atoms": [
+        22
+      ],
+      "shots": [
+        "与 copilot 对话后回 Home 再进同一 skill → 对话与上次活跃 tab 一模一样恢复"
+      ],
       "fe_status": "符合",
       "layer1": [
         "mock native-fs 读写,与 copilot 对话(含 AI 回答)→ 断言 persistSessionToDisk 把会话写到 .gemini/copilot/sessions/<skillId>/<id>.json、_active.json 记活跃 tab。",
@@ -207,12 +281,22 @@
       "layer2": [
         "真跑(关键,桌面):进 skill → 与 copilot 对几句(等 AI 回答完)→ 回 Home → 再进同一 skill → 应看到原对话(含 AI 回答)与上次活跃 tab,不应是空白会话。",
         "真跑:对话后冷启动应用 → 再进同一 skill → 对话仍恢复(冷启动 hydrate 读盘)。"
+      ],
+      "screenshots": [
+        {
+          "file": "n1-07-copilot-collapsed.png",
+          "caption": "Copilot 收起态(画布回流占满);展开 / 折叠切换正常"
+        }
       ]
     },
     {
       "covers": "#23 app-startup-banner",
-      "atoms": [23],
-      "shots": ["启动即渲染壳(无全屏 splash);后端不可用时底部非阻塞横幅 + Retry"],
+      "atoms": [
+        23
+      ],
+      "shots": [
+        "启动即渲染壳(无全屏 splash);后端不可用时底部非阻塞横幅 + Retry"
+      ],
       "fe_status": "符合",
       "layer1": [
         "渲染 RuntimeGate/RuntimeShell → 断言始终渲染壳 children(无全屏门);initializeRuntimeConfig 失败 → 断言只渲底部横幅 + Retry、不挡壳。",

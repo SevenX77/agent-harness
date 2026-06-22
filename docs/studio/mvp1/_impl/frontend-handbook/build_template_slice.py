@@ -369,7 +369,7 @@ def render_fe_modules(reg, nctx):
     code_, name = nctx["code"], nctx["name"]
     cards = "".join(_module_card(g, anchor, g.get("kind", "前端模块")) for anchor, g in reg)
     content = (
-        f'<div class="callout">这一页是整个 <b>{ESC(code_)} · {ESC(name)} 的可复用前端模块登记处</b>：凡是能被<b>多个操作 / 多个页面引用</b>的前端模块都登记在这里，各操作卡里的 chip 链进来复用（同一组件只登记一次）。它们纯前端、不碰后端；每个模块的「功能」是它自己的卡内字段。复用模块是<b>本节点自己的</b>，不和别的节点共享通用组件。</div>'
+        f'<div class="callout">这一页登记 <b>{ESC(code_)} · {ESC(name)} 里能被多个操作 / 多个页面共用的前端模块</b>，各操作卡用 chip 链进来复用（同一组件只登记一次）。它们是<b>真实的功能代码</b>，不是只挂名的目录——每张卡的「定义在哪」字段直接指向源码文件，缺了对应模块界面就渲染不出来。导航上这一页的状态点 = 这些模块<b>是否都已实现并符合设计</b>（和「后端接口契约」页对称：那页看后端那一半建好没，这页看前端模块建好没）；每个模块自己干啥看卡内「功能」字段。复用模块是<b>本节点自己的</b>，不和别的节点共享通用组件。</div>'
         + cards
     )
     return section(nctx["pages"]["fe_modules"], "可复用前端模块 · 登记处", f"可复用前端模块（{code_} 登记处）",
@@ -1232,7 +1232,8 @@ def main():
 
     def _page_status_map(full):
         # 设计页 N.i = 该 surface 全功能 fe_status；实施/测试页 = 全节点 fe_status；
-        # 契约页 = 全功能 be_status（后端进度）；复用模块 = 登记/目录页，不是合规页，不显示状态点。
+        # 契约页 = 全功能 be_status（后端实现状态）；复用模块 = 全节点 fe_status（前端实现状态）。
+        # 契约页 ↔ 复用模块页 对称：一个显示「后端那一半建好没」，一个显示「前端模块建好没」。
         nc = full["nctx"]; p = nc["pages"]; stages = full["stages"]
         m = {}; all_fn = []; all_ts = []; all_be = []
         for s in stages:
@@ -1242,10 +1243,14 @@ def main():
             all_fn += [f.get("fe_status", "") for f in fns]
             all_ts += [t.get("fe_status", "") for t in tss]
             all_be += [f.get("be_status", "") for f in fns]
-        m[p["impl"]] = _rollup(all_fn, {"符合"}, {"偏差", "未实施"})
+        fe_roll = _rollup(all_fn, {"符合"}, {"偏差", "未实施"})
+        m[p["impl"]] = fe_roll
         m[p["tests"]] = _rollup(all_ts, {"符合"}, {"偏差", "未实施"})
         m[p["contract"]] = _rollup(all_be, {"已实现"}, {"契约问题"})
-        m[p["fe_modules"]] = "none"
+        # 复用模块 = 本节点可复用前端模块是否实现并符合设计（= 全节点前端 rollup）。
+        # 它们是真实功能代码、登记表「定义在哪」字段指向源码文件，缺了对应界面就渲染不出，
+        # 不是只挂名的目录；故和契约页一样显示实现状态，绿=都已实现。
+        m[p["fe_modules"]] = fe_roll
         return m
 
     def _pitem(pid, label, st):

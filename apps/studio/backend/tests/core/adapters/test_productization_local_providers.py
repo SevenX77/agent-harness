@@ -775,7 +775,12 @@ def test_runtime_state_store_multiprocess_first_acquire_allows_only_one_owner(
     for process in processes:
         process.start()
     for process in processes:
-        process.join(timeout=10)
+        # 60s, not 10s: a loaded CI runner spawning 8 fresh interpreters (each
+        # re-imports the whole backend under the "spawn" context) can legitimately
+        # take well over 10s to finish, leaving a still-running worker that trips
+        # `assert alive == []`. The processes complete correctly; only the wait
+        # was too tight.
+        process.join(timeout=60)
 
     alive = [process.pid for process in processes if process.is_alive()]
     for process in processes:
@@ -840,7 +845,12 @@ def test_runtime_state_store_multiprocess_expired_takeover_allows_only_one_owner
     for process in processes:
         process.start()
     for process in processes:
-        process.join(timeout=10)
+        # 60s, not 10s: a loaded CI runner spawning 8 fresh interpreters (each
+        # re-imports the whole backend under the "spawn" context) can legitimately
+        # take well over 10s to finish, leaving a still-running worker that trips
+        # `assert alive == []`. The processes complete correctly; only the wait
+        # was too tight.
+        process.join(timeout=60)
 
     alive = [process.pid for process in processes if process.is_alive()]
     for process in processes:

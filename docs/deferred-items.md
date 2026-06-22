@@ -175,6 +175,7 @@
 - **延期原因**: `cargo update -p glib` 锁在 0.18.5 没动 —— 上层 tauri 2.x / GTK 栈把 glib 约束在 0.18.x，升到 0.20 要连带 bump 整个 GTK/tauri Rust 依赖栈，是破坏性大改、需单独回归测桌面外壳，不在本轮「快速安全修」范围。
 - **前置条件**: tauri/wry/GTK 栈整体升级排期（确认 0.20 兼容性 + 桌面端回归测试）。
 - **来源**: 2026-06-04 dependabot 27 条漏洞修复批；其余 26 条已修，仅此 1 条受栈约束阻塞。
+- **2026-06-22 复核（仍阻塞，证据更新）**: `cargo update -p glib --precise 0.20.0` 实测报错——`gtk 0.18.2` 要求 `glib = "^0.18"`，由 `tauri 2.11.1` 锁定（链：glib←atk/gtk 0.18.2←muda/tao/webkit2gtk←tauri）。补充：glib **仅 Linux 构建用到**（macOS 走 WKWebView，`cargo tree -i glib` 默认 target 为空），实际影响面更低。本轮 2026-06-22 又一批 35 条 dependabot 漏洞（npm 30 + pip 4 + rust 1）已清掉 npm/pip 全部 34 条，仅此 1 条（GHSA-wrw7-89jp-8q8g）受上游栈约束阻塞；PM 决定继续 deferred 跟踪、不 dismiss 告警，待 tauri 升级 GTK 0.20 栈再随之修复。
 
 ### DEF-017 — mvp0 `04-subgraph-md-spec` 退役受「引用未清零」阻塞（PM 2026-06-05 三步）
 - **日期**: 2026-06-05

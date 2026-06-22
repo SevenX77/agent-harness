@@ -96,6 +96,7 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - 图标、按钮和徽章要使用 lucide + 本地 `Button`/`Badge` wrapper；文本型按钮只用于清晰命令，不用于图标已有行业惯例的动作。
 - Provider、model、vendor 等实体标签使用本地 `Tag` wrapper；绿色可用态使用 `Tag variant="success"` 的圆角 outline 样式，不在业务组件里手写 `border-success` / `bg-success` 标签外观。`Tag` 的 `success` / `warning` / `destructive` / `multimodal` 只用边框表达语义差异，底色保持同一种轻量可用态底色；warning 使用 yellow 边框，destructive 使用专用 shadcn red tag token，multimodal 使用独立 blue 边框。`Badge` 继续用于状态徽章，例如 Connected、Test failed、Saving。
 - 使用本地 Radix/shadcn `Tooltip` 的同一个 trigger 元素不得同时保留原生 `title` 属性，避免桌面 WebView 同时显示系统 tooltip 和 shadcn tooltip；需要可访问说明时用 `aria-label` / `aria-describedby`，视觉说明交给 `TooltipContent`。
+- 卡片 `⋮` / 右键菜单里**移除/删除类**的菜单项必须用本地 `DropdownMenuItem` / `ContextMenuItem` 的 `variant="destructive"` 拿语义化销毁色（`data-[variant=destructive]:text-destructive`），**不要硬编码 red / 一次性 Tailwind 调色**；配一个 lucide 销毁图标（如 `Trash2`）。是否二次确认按**破坏性**分级：删除持久化配置/数据（如角色 DELETE，见 §2.9）必须走 Sonner action/cancel 二次确认 toast；只是清理一条列表项、底层数据/文件原样保留且可轻易恢复的低风险操作（如「从最近移除」——skill 文件不删、随时能再 Open folder 打开），用一个 `toast.success` 通知即可，不必拦一道确认弹窗。
 
 ### 2.8 输入框、搜索与行内动作
 - 带图标、清空、复制、显示/隐藏等行内动作的输入框，优先使用本地 `InputGroup` / `InputGroupButton` / `InputGroupAddon`。不要用绝对定位按钮硬盖在 `Input` 上；这种做法容易被 input 拦截点击，也更难保证窄宽度布局。

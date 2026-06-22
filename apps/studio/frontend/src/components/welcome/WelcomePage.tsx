@@ -1,4 +1,4 @@
-import { AlertTriangle, Clock3, FolderOpen, Layers, Layers3, MoreVertical, Plus } from 'lucide-react'
+import { AlertTriangle, Clock3, FolderOpen, Layers, Layers3, MoreVertical, Plus, Trash2 } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { toast } from 'sonner'
 import type { SkillSummary } from '../../api/types'
@@ -41,6 +41,7 @@ import { NewSkillDialog } from './NewSkillDialog'
 import { formatLastRun, normalizeSkillId, shortPath, skillIdFromPath } from './utils'
 
 export const REVEAL_ACTION_LABEL = 'Show in folder'
+export const REMOVE_ACTION_LABEL = 'Remove from recent'
 export const ACTION_MENU_CLASSNAME = 'w-48'
 
 interface WelcomePageProps {
@@ -159,7 +160,7 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
   const [newSkillError, setNewSkillError] = useState<string | null>(null)
   const appSettings = useAppSettings()
   const defaultSkillParentDirectory = defaultSkillsDirectory(appSettings.settings.default_skills_directory)
-  const { recentWorkspaces, rememberWorkspace, isHydrating, recentError } = useRecentSkills()
+  const { recentWorkspaces, rememberWorkspace, removeWorkspace, isHydrating, recentError } = useRecentSkills()
 
   // Recent is a pure MRU projection (D11/D-1-1): each card is one entry from the
   // Rust native-fs recent_workspaces store, no registry-derived fields and no
@@ -229,6 +230,11 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
 
   const handleReveal = (workspace: { absolutePath: string }) => {
     ignorePromise(revealInFileManager(workspace.absolutePath))
+  }
+
+  const handleRemove = (workspace: { identity: string; displayName: string }) => {
+    removeWorkspace(workspace.identity)
+    toast.success(`Removed "${workspace.displayName}" from recent`)
   }
 
   const submitNewSkill = async (event?: FormEvent) => {
@@ -397,6 +403,13 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
                               <FolderOpen />
                               {REVEAL_ACTION_LABEL}
                             </DropdownMenuItem>
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onSelect={() => handleRemove(workspace)}
+                            >
+                              <Trash2 />
+                              {REMOVE_ACTION_LABEL}
+                            </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
@@ -413,6 +426,13 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
                   <ContextMenuItem onSelect={() => handleReveal(workspace)}>
                     <FolderOpen />
                     {REVEAL_ACTION_LABEL}
+                  </ContextMenuItem>
+                  <ContextMenuItem
+                    variant="destructive"
+                    onSelect={() => handleRemove(workspace)}
+                  >
+                    <Trash2 />
+                    {REMOVE_ACTION_LABEL}
                   </ContextMenuItem>
                 </ContextMenuContent>
               </ContextMenu>

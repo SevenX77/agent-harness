@@ -104,6 +104,15 @@ CSS = """
   .shot-fig { margin:0 0 10px; border:1px solid var(--border-hover); border-radius:10px; overflow:hidden; background:#fff; box-shadow:0 1px 3px rgba(20,30,50,.06); }
   .shot-img { display:block; width:100%; height:auto; }
   .shot-figcap { font-size:12px; color:#1f7a3d; background:#f0faf3; border-top:1px solid var(--border-hover); padding:6px 11px; }
+  /* ── screenshot not capturable in headless (reason in place of shot) ── */
+  .shot-na { display:flex; align-items:flex-start; gap:9px; border:1px solid #e6c9c9; border-left:3px solid #d35555; border-radius:8px; background:#fdf5f5; padding:9px 12px; margin-bottom:6px; }
+  .shot-na-tag { font-size:11px; font-weight:800; color:#b23b3b; background:#f7e3e3; border-radius:5px; padding:2px 8px; flex:none; white-space:nowrap; }
+  .shot-na-why { font-size:12.3px; color:#5a4a4a; line-height:1.5; }
+  /* ── sidebar status legend ── */
+  .sb-legend-title { font-size:11.5px; font-weight:800; color:var(--text-strong,#1f2733); margin-bottom:6px; }
+  .sb-legend-row { display:flex; align-items:center; gap:7px; font-size:11.5px; color:#49515d; margin:3px 0; }
+  .sb-legend-row .status-dot { margin:0; flex:none; }
+  .sb-legend-note { font-size:10.6px; color:var(--text-muted); line-height:1.5; margin-top:6px; padding-top:6px; border-top:1px solid var(--border-hover); }
   /* ── transformation diagram ── */
   .diagram { border:1px solid var(--border-color); border-radius:10px; background:#fafbfe; padding:12px 14px; margin:4px 0; }
   .transform { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
@@ -557,14 +566,26 @@ def render_mech(m, label=""):
 # ───────────────────────── implementation page ─────────────────────────
 def render_impl(im, ns, label, nctx):
     apfx = nctx["apfx"]
+    # atom → 覆盖它的 test 卡主锚点（test 卡按首 atom 命名；多 atom test 时其余 atom 也映射到同一锚点，避免死链）。
+    tested_map = {}
+    for t in im.get("tests", []):
+        ats = t.get("atoms", [])
+        if ats:
+            primary = f'{apfx}test-{ats[0]}'
+            for a in ats:
+                tested_map.setdefault(a, primary)
     funcs = ""
     for f in im["functions"]:
-        funcs += card(f'#{f["n"]} · {ESC(f["cap"])}', [
+        rows = [
             ("现状", listify(f.get("current", ""))),
             ("差距 / 要改", listify(f.get("gap", ""))),
             ("后端依赖", listify(f.get("be_dep", ""))),
             ("对应设计", f'<a class="xlink" href="#{apfx}atom-{f["n"]}">设计页 #{f["n"]} · {ESC(f["cap"])} →</a>'),
-        ], tag=fe_badge(f.get("fe_status", "")), anchor=f"{apfx}fn-{f['n']}", mono=False)
+        ]
+        if f["n"] in tested_map:
+            rows.append(("对应实测", f'<a class="xlink" href="#{tested_map[f["n"]]}">实测页 #{f["n"]}（真机截图 / 截不到的附原因）→</a>'))
+        funcs += card(f'#{f["n"]} · {ESC(f["cap"])}', rows,
+                      tag=fe_badge(f.get("fe_status", "")), anchor=f"{apfx}fn-{f['n']}", mono=False)
     plan = ""
     for s in im["plan"]:
         blk = s.get("block", "")
@@ -583,24 +604,36 @@ def render_impl(im, ns, label, nctx):
 
 
 # ───────────────────────── testing page ─────────────────────────
-def render_tests(im, ns, label, n_atoms):
+def render_tests(im, ns, label, n_atoms, apfx=""):
     tests = im.get("tests", [])
     covered = sorted({a for t in tests for a in t.get("atoms", [])})
     items = ""
     for t in tests:
         figs = "".join(embed_shot(s["file"], s.get("caption", "")) for s in t.get("screenshots", []))
         captured = bool(t.get("screenshots"))
+        na = (t.get("shot_na") or "").strip()
         todo = "已实测" if captured else "截图待贴"
-        shots = figs + "".join(
+        # headless 截不到的功能：把原因写在截图位置（替代占位），不再显示「截图待贴」
+        na_box = (f'<div class="shot-na"><span class="shot-na-tag">🚫 headless 截不到</span>'
+                  f'<span class="shot-na-why">{code(na)}</span></div>') if na else ""
+        phs = "" if na else "".join(
             f'<div class="shot-ph"><span class="shot-cap">📷 {code(s)}</span><span class="shot-todo">{todo}</span></div>'
             for s in t.get("shots", [])
         )
-        label_row = "预期截图（真机实测）" if captured else "预期截图"
+        shots = figs + na_box + phs
+        if captured:
+            label_row = "预期截图（真机实测）"
+        elif na:
+            label_row = "真机截图（headless 不可截 · 附原因 + 替代验证）"
+        else:
+            label_row = "预期截图"
+        atoms = t.get("atoms") or []
+        anchor = f"{apfx}test-{atoms[0]}" if atoms else ""
         items += card(code(t.get("covers", "")), [
             ("① 静态测试 (RED→GREEN)", duty_ol(t.get("layer1", []))),
             ("② e2e 真实测试", duty_ol(t.get("layer2", []))),
             (label_row, shots),
-        ], tag=fe_badge(t.get("fe_status", "")), mono=False)
+        ], tag=fe_badge(t.get("fe_status", "")), anchor=anchor, mono=False)
     cov = "".join(f'<span class="cov-chip">#{a}</span>' for a in covered)
     content = (
         f'<div class="callout"><b>覆盖 {len(covered)} / {n_atoms}</b>：本页的设计原子里有 {len(covered)} 个配了两层测试（每张卡标题 = 它覆盖的原子）。「有测试」≠「已通过」，通过以真跑结果为准。{cov}</div>'
@@ -660,7 +693,7 @@ def render_impl_all(stages, nctx):
 def render_tests_all(stages, nctx):
     code_ = nctx["code"]
     body = "".join(
-        _part_div(s["label"]) + render_tests(s["impl"], s["ns"], s["label"], len(s["design"]["atoms"]))
+        _part_div(s["label"]) + render_tests(s["impl"], s["ns"], s["label"], len(s["design"]["atoms"]), nctx["apfx"])
         for s in stages if s["impl"]
     )
     return section(nctx["pages"]["tests"], f"测试 · {code_}", f"前端测试（{code_} 汇总）",
@@ -1165,6 +1198,42 @@ def main():
     def _node_stext(st):
         return {"ok": "前端已实施", "partial": "前端部分实施", "bad": "前端未开始"}.get(st, "前端部分实施")
 
+    # ---- per-page 状态规则（导航旁状态点 = 本页状态，不再全节点共用一个 rollup） ----
+    # rollup：有效项全 ok→ok；全 bad→bad；混合→partial；无量化数据→review（中性蓝）。
+    def _rollup(vals, ok_set, bad_set):
+        norm = []
+        for v in vals:
+            v = (v or "").strip()
+            if v in ok_set:
+                norm.append("ok")
+            elif v in bad_set:
+                norm.append("bad")
+        if not norm:
+            return "review"
+        if all(x == "ok" for x in norm):
+            return "ok"
+        if all(x == "bad" for x in norm):
+            return "bad"
+        return "partial"
+
+    def _page_status_map(full):
+        # 设计页 N.i = 该 surface 全功能 fe_status；实施/测试页 = 全节点 fe_status；
+        # 契约页 = 全功能 be_status（后端进度）；复用模块 = 登记页（review 中性）。
+        nc = full["nctx"]; p = nc["pages"]; stages = full["stages"]
+        m = {}; all_fn = []; all_ts = []; all_be = []
+        for s in stages:
+            im = s.get("impl") or {}
+            fns = im.get("functions", []); tss = im.get("tests", [])
+            m[s["design"]["page_id"]] = _rollup([f.get("fe_status", "") for f in fns], {"符合"}, {"偏差", "未实施"})
+            all_fn += [f.get("fe_status", "") for f in fns]
+            all_ts += [t.get("fe_status", "") for t in tss]
+            all_be += [f.get("be_status", "") for f in fns]
+        m[p["impl"]] = _rollup(all_fn, {"符合"}, {"偏差", "未实施"})
+        m[p["tests"]] = _rollup(all_ts, {"符合"}, {"偏差", "未实施"})
+        m[p["contract"]] = _rollup(all_be, {"已实现"}, {"契约问题"})
+        m[p["fe_modules"]] = "review"
+        return m
+
     def _pitem(pid, label, st):
         return ('<a class="progress-item" href="#%s" id="nav-%s">'
                 '<span class="dot-indicator"></span>'
@@ -1184,7 +1253,8 @@ def main():
                   (p["impl"], "%s.%d" % (code_, base + 3), "实施"),
                   (p["tests"], "%s.%d" % (code_, base + 4), "测试")]
         st = _node_st(code_)
-        children = "".join(_pitem(pid, "%s %s" % (c, lbl), st) for pid, c, lbl in items)
+        psmap = _page_status_map(full)
+        children = "".join(_pitem(pid, "%s %s" % (c, lbl), psmap.get(pid, st)) for pid, c, lbl in items)
         parent = ('<a class="toc-parent" href="#%s" id="nav-%s">'
                   '<span class="parent-node">%s</span><span class="parent-title">'
                   '<b>%s</b>'
@@ -1258,6 +1328,13 @@ window.addEventListener('load', ()=>{
         '<div class="sb-card sb-progress">'
         '<div class="sb-progress-row"><span>阅读进度</span><b id="progress-pct">0%</b></div>'
         '<div class="sb-progress-track"><div class="sb-progress-fill" id="progress-fill"></div></div></div>'
+        '<div class="sb-card sb-legend">'
+        '<div class="sb-legend-title">导航状态点 = 本页状态</div>'
+        '<div class="sb-legend-row"><span class="status-dot ok"></span>符合设计</div>'
+        '<div class="sb-legend-row"><span class="status-dot partial"></span>部分符合</div>'
+        '<div class="sb-legend-row"><span class="status-dot bad"></span>有偏差 / 未实施</div>'
+        '<div class="sb-legend-row"><span class="status-dot review"></span>登记页 / 无量化数据</div>'
+        '<div class="sb-legend-note">节点行=该节点整体实施度；子页各取本页状态：设计 / 实施 / 测试页取功能「符合设计」度，后端接口契约页取后端 be_status，前端复用模块为登记页。</div></div>'
         '<nav class="sb-card toc" id="toc">' + toc + '</nav></aside>'
         '<main class="viewport"><article class="reading-column"><div id="docInner">' + sections + '</div>'
         '<nav class="paginator">'

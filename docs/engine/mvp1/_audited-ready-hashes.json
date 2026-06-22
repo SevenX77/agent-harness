@@ -7,7 +7,7 @@
   },
   "hashes": {
     "01-contract/01-physical-layout/baseline.md": "ab7e5c104053f5fbf1395e95d5549068a9758ffd2512c4587c1d1b9d521c12ab",
-    "01-contract/01-physical-layout/mvp1-alignment.md": "3843cc0d2ad8cb5b7c45927d0553d4fda22f72f7660a5a2b23278667b2e99383",
+    "01-contract/01-physical-layout/mvp1-alignment.md": "43600524b5ca85ba5a7ffe4628987fc905650611353868716563382cfff94100",
     "01-contract/05-invalidation/baseline.md": "2fbe87d807eafd621336ccc069f0e54f08e673cc484d5e444cebb6da527485b8",
     "01-contract/05-invalidation/mvp1-alignment.md": "1d7e0549174933332da5808aef85690d1a2c07ac4d505f42539009920be4bd9e",
     "02-mechanism/01-compile/baseline.md": "e20a6187c32265768043ca3df4d2dcec7f0c66f9a298b22764684dcf4f85edaa",

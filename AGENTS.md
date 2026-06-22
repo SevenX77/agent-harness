@@ -8,16 +8,48 @@
 
 - **Canonical base = `main`.** As of 2026-06-21 the full Studio MVP1 +
   three-module integration lives on `main` (`origin/main`). ALWAYS branch new
-  work from `main`: `git fetch origin && git switch -c <type>/<short-desc> origin/main`.
+  work from `main` — easiest is `scripts/wt-new.sh <type>/<short-desc>` (see
+  "Workflow Pipeline" below), or by hand
+  `git fetch origin && git switch -c <type>/<short-desc> origin/main`.
   Do NOT base work on the older `codex/*` or `feat/studio-mvp1-*` branches /
   worktrees — they predate the integration and cause drift and conflicts.
-- **Worktrees** live under `.worktrees/`. `main` itself is checked out at
-  `.worktrees/main-gateway-integration`. Use one worktree per parallel task.
+- **`main` is protected and PR-only.** Direct pushes are rejected for everyone,
+  admins included. Every change lands through a PR that passes CI and
+  squash-merges (usually via auto-merge). See "Workflow Pipeline" below.
+- **Worktrees** live under `.worktrees/` (gitignored). `main` is checked out in
+  the repo root itself; use one worktree per parallel task, made by
+  `scripts/wt-new.sh`.
 - **Python is one uv workspace** with a SINGLE root `uv.lock` shared by all
   three modules. Refresh with `uv sync --all-packages --all-extras --group dev`.
   Never hand-edit `uv.lock`; change a module's `pyproject.toml`, then `uv lock`.
 - **Run the app**: `cd apps/studio/tauri && cargo tauri dev` (owns both Vite and
   the FastAPI sidecar). Details in `apps/studio/tauri/README.md`.
+
+## Workflow Pipeline (branch → PR → auto-merge → cleanup)
+
+The whole loop is automated; use the helper scripts so every task runs the same
+way and nothing drifts onto stray branches/worktrees.
+
+1. **Start** — `scripts/wt-new.sh <type>/<short-desc>` cuts a fresh worktree +
+   branch from `origin/main` under `.worktrees/<type>-<desc>/` (first tidying any
+   already-merged worktrees).
+2. **Code** — work inside that worktree; run the CI Gates locally before shipping.
+3. **Ship** — `scripts/wt-ship.sh ["PR title"]` pushes the branch, opens a PR to
+   `main`, and arms GitHub **auto-merge** (squash).
+4. **CI + merge** — CI runs on the PR. When the 5 required checks pass
+   (`quality-gates`, `graph-agent-tests` ×3 Python, `frontend-gates`), GitHub
+   squash-merges into `main` automatically — no approval, no manual click. To
+   review before it lands, skip `wt-ship` (or `gh pr merge --disable-auto`) and
+   merge from the PR page yourself.
+5. **Cleanup** — on merge GitHub deletes the remote branch; `scripts/wt-clean.sh`
+   then removes the orphaned local worktree + branch (it also runs at the start
+   of the next `wt-new`).
+
+**Repo settings backing this** (already configured): `main` protected with
+`enforce_admins` on (no bypass), PR required with **0** approvals, the 5 checks
+above required (security scanners CodeQL / Scorecard / SonarCloud and the
+manual-only `e2e-tests` are NOT required); squash-only merges; auto-merge and
+delete-branch-on-merge on. The only path onto `main` is a green PR.
 
 ## CI Gates — run locally BEFORE pushing
 

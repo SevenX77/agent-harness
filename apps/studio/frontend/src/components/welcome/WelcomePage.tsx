@@ -5,7 +5,7 @@ import type { SkillSummary } from '../../api/types'
 import { useAppSettings } from '../../hooks/useAppSettings'
 import { useRecentSkills } from '../../hooks/useRecentSkills'
 import { getRuntimeConfig } from '../../config/runtime'
-import { revealInFileManager, selectSkillDirectory, addRecentWorkspace, ensureWorkspaceSupportDirs, createSkillWorkspace, openSkillWorkspace } from '../../lib/tauri'
+import { revealInFileManager, selectSkillDirectory, ensureWorkspaceSupportDirs, createSkillWorkspace, openSkillWorkspace } from '../../lib/tauri'
 import { errorMessage, isRecord } from '../../utils/errors'
 import { joinDirectoryPath } from '../../utils/skill-paths'
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert'
@@ -59,7 +59,11 @@ export function defaultSkillsDirectory(customDirectory?: string | null): string 
   if (config?.configDir) {
     return `${config.configDir}/Skills`
   }
-  return '/studio/config/Skills'
+  // No real default folder is known yet (no app setting, no runtime config dir).
+  // Return null so the UI shows an honest "Default: AgentStudio/Skills" hint and
+  // the Rust native-fs writer picks the OS config Skills dir at create time —
+  // never a fabricated, non-existent `/studio/config/Skills` placeholder path.
+  return null
 }
 
 export function buildSkillCreatePayload(name: string, parentDirectory?: string | null): CreateSkillPayload {
@@ -157,8 +161,9 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
   const defaultSkillParentDirectory = defaultSkillsDirectory(appSettings.settings.default_skills_directory)
   const { recentWorkspaces, rememberWorkspace, isHydrating, recentError } = useRecentSkills()
 
-  // Recent is a pure MRU projection (D11/D-1-1): each card is one localStorage
-  // recentWorkspaces entry, no registry-derived fields and no registry merge.
+  // Recent is a pure MRU projection (D11/D-1-1): each card is one entry from the
+  // Rust native-fs recent_workspaces store, no registry-derived fields and no
+  // registry merge.
   const visibleWorkspaces: WorkspaceCardModel[] = recentWorkspaces.map((w) => ({
     absolutePath: w.absolutePath,
     displayName: w.displayName,
@@ -185,8 +190,10 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
   const openSkill = async (workspaceRoot: string, displayName?: string, backendSkillId?: string) => {
     const name = displayName || skillIdFromPath(workspaceRoot)
     const resolvedSkillId = await resolveBackendSkillIdForWorkspace(workspaceRoot, backendSkillId)
+    // Single source of truth: rememberWorkspace writes the MRU entry to the Rust
+    // native-fs store (recent_workspaces.json) AND updates the local projection.
+    // No second localStorage write — the prior dual-write could diverge.
     rememberWorkspace({ absolutePath: workspaceRoot, displayName: name })
-    ignorePromise(addRecentWorkspace(workspaceRoot, name, `local:${workspaceRoot}`, new Date().toISOString()))
     ignorePromise(ensureWorkspaceSupportDirs(workspaceRoot))
     onSelectSkill(
       isAbsolutePath(workspaceRoot)

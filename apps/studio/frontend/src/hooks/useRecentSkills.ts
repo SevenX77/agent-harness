@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { workspacePathExists } from '../lib/tauri'
+import {
+  addRecentWorkspace,
+  listRecentWorkspaces,
+  removeRecentWorkspace as removeRecentWorkspaceNative,
+  workspacePathExists,
+} from '../lib/tauri'
 import { errorMessage } from '../utils/errors'
 
 export interface RecentWorkspaceEntry {
@@ -9,28 +14,86 @@ export interface RecentWorkspaceEntry {
   lastOpenedAt: string
 }
 
-export interface RecentWorkspacesReadResult {
+/** MRU cap — Home shows at most this many recent skills, most-recent first. */
+export const RECENT_CAP = 10
+
+export function recentWorkspaceIdentity(absolutePath: string): string {
+  return `local:${absolutePath}`
+}
+
+export function buildRecentEntry(
+  workspace: Pick<RecentWorkspaceEntry, 'absolutePath' | 'displayName'>,
+  lastOpenedAt: string,
+): RecentWorkspaceEntry {
+  return {
+    absolutePath: workspace.absolutePath,
+    displayName: workspace.displayName,
+    identity: recentWorkspaceIdentity(workspace.absolutePath),
+    lastOpenedAt,
+  }
+}
+
+/** Dedupe by identity, prepend the most-recent entry, cap the list. */
+export function mergeRecent(
+  list: RecentWorkspaceEntry[],
+  entry: RecentWorkspaceEntry,
+  cap = RECENT_CAP,
+): RecentWorkspaceEntry[] {
+  return [entry, ...list.filter((w) => w.identity !== entry.identity)].slice(0, cap)
+}
+
+export interface RecentWorkspacesLoad {
   entries: RecentWorkspaceEntry[]
   error: string | null
 }
 
+export interface RecentLoadDeps {
+  list: () => Promise<RecentWorkspaceEntry[]>
+  exists: (absolutePath: string) => Promise<boolean>
+  remove: (identity: string) => Promise<void>
+}
+
+const defaultLoadDeps: RecentLoadDeps = {
+  list: listRecentWorkspaces,
+  exists: workspacePathExists,
+  remove: removeRecentWorkspaceNative,
+}
+
+/** Fire a best-effort native MRU write, logging (never swallowing) any failure. */
+function logRecentWriteFailure(action: string, promise: Promise<unknown>): void {
+  promise.catch((error: unknown) => {
+    console.warn('phase=recent-skills action=%s reason=%s', action, errorMessage(error))
+  })
+}
+
 /**
- * Read the localStorage MRU, surfacing any read/parse failure instead of
- * swallowing it (N1 atom #9 + zero-silent-failure). A corrupt blob or a
- * blocked/throwing localStorage degrades `entries` to [] AND reports a non-null
- * `error` so Home can render the local red-box fallback over the still-usable
- * New/Open entries. The failure is logged at WARN — never silently dropped.
+ * Read the Recent MRU from the Rust native-fs store (`recent_workspaces.json`),
+ * which is now the SINGLE source of truth (option B) — there is no second
+ * localStorage copy to diverge from. Entries whose folder is gone from disk are
+ * dropped from the rendered list AND pruned out of the same store, so a dead
+ * card never lingers. Outside the desktop runtime the native list is empty and
+ * the existence check degrades to "keep", so a web session simply shows no
+ * Recent rather than mutating anything.
+ *
+ * A read failure surfaces a non-null `error` (logged at WARN, never silently
+ * swallowed) while degrading `entries` to []. A per-entry existence-check
+ * failure is treated as "keep" so a flaky check never wrongly hides a live
+ * workspace.
  */
-export function readRecentWorkspacesResult(): RecentWorkspacesReadResult {
-  if (typeof window === 'undefined') {
-    return { entries: [], error: null }
-  }
+export async function loadRecentWorkspaces(
+  deps: RecentLoadDeps = defaultLoadDeps,
+): Promise<RecentWorkspacesLoad> {
   try {
-    const parsed = JSON.parse(localStorage.getItem('recentWorkspaces') || '[]') as unknown
-    const entries = Array.isArray(parsed) ? parsed.filter((w): w is RecentWorkspaceEntry => (
-      w && typeof w === 'object' && 'absolutePath' in w && 'displayName' in w && 'identity' in w
-    )) : []
-    return { entries, error: null }
+    const entries = (await deps.list()).slice(0, RECENT_CAP)
+    const flags = await Promise.all(
+      entries.map((entry) => deps.exists(entry.absolutePath).catch(() => true)),
+    )
+    const present = entries.filter((_, index) => flags[index])
+    const missing = entries.filter((_, index) => !flags[index])
+    for (const dead of missing) {
+      logRecentWriteFailure('prune', deps.remove(dead.identity))
+    }
+    return { entries: present, error: null }
   } catch (error) {
     const reason = errorMessage(error)
     console.warn('phase=recent-skills action=read-failed reason=%s', reason)
@@ -38,120 +101,52 @@ export function readRecentWorkspacesResult(): RecentWorkspacesReadResult {
   }
 }
 
-export function readRecentWorkspaces(): RecentWorkspaceEntry[] {
-  return readRecentWorkspacesResult().entries
-}
-
-export function rememberRecentWorkspace(workspace: Pick<RecentWorkspaceEntry, 'absolutePath' | 'displayName'>): RecentWorkspaceEntry {
-  const absolutePath = workspace.absolutePath
-  const displayName = workspace.displayName
-  const identity = `local:${absolutePath}`
-  const lastOpenedAt = new Date().toISOString()
-
-  const entry: RecentWorkspaceEntry = {
-    absolutePath,
-    displayName,
-    identity,
-    lastOpenedAt,
-  }
-
-  if (typeof window !== 'undefined') {
-    const list = readRecentWorkspaces()
-    const filtered = list.filter((w) => w.identity !== identity)
-    const next = [entry, ...filtered].slice(0, 10)
-    localStorage.setItem('recentWorkspaces', JSON.stringify(next))
-  }
-
-  return entry
-}
-
-export function removeRecentWorkspace(identity: string): void {
-  if (typeof window === 'undefined') return
-  const list = readRecentWorkspaces()
-  const next = list.filter((w) => w.identity !== identity)
-  localStorage.setItem('recentWorkspaces', JSON.stringify(next))
-}
-
-export function pruneMissingRecentWorkspaces(exists: (absolutePath: string) => boolean): RecentWorkspaceEntry[] {
-  if (typeof window === 'undefined') return []
-  const list = readRecentWorkspaces()
-  const next = list.filter((w) => exists(w.absolutePath))
-  localStorage.setItem('recentWorkspaces', JSON.stringify(next))
-  return next
-}
-
-/**
- * Async stale-MRU prune (R1 / N1 #6): drop Recent entries whose folder no longer
- * exists on disk. The existence predicate is the Rust `workspace_path_exists`
- * native-fs check (via lib/tauri.workspacePathExists), which degrades to `true`
- * outside the desktop runtime so a web session never prunes its localStorage MRU.
- * Keeps the localStorage write semantics of the sync variant.
- */
-export async function pruneMissingRecentWorkspacesAsync(
-  exists: (absolutePath: string) => Promise<boolean> = workspacePathExists,
-): Promise<RecentWorkspaceEntry[]> {
-  if (typeof window === 'undefined') return []
-  const list = readRecentWorkspaces()
-  const flags = await Promise.all(list.map((w) => exists(w.absolutePath)))
-  const next = list.filter((_, index) => flags[index])
-  if (next.length !== list.length) {
-    localStorage.setItem('recentWorkspaces', JSON.stringify(next))
-  }
-  return next
-}
-
 export function useRecentSkills() {
-  const initial = readRecentWorkspacesResult()
-  const [recentWorkspaces, setRecentWorkspaces] = useState<RecentWorkspaceEntry[]>(initial.entries)
+  const [recentWorkspaces, setRecentWorkspaces] = useState<RecentWorkspaceEntry[]>([])
   // N1 atom #9: local error fallback. Holds the MRU read / path-validation
   // failure reason so Home renders a local red box (over the still-usable
   // New/Open entries) instead of silently swallowing the failure.
-  const [recentError, setRecentError] = useState<string | null>(initial.error)
-  // Cold-start window: true for the first paint before the client has confirmed
-  // the localStorage MRU read. Home shows a Recent skeleton while this is true so
-  // the cold-start / pre-hydration moment is a placeholder, not a blank flash (D6).
+  const [recentError, setRecentError] = useState<string | null>(null)
+  // Cold-start window: true for the first paint before the native MRU read
+  // resolves. Home shows a Recent skeleton while this is true so the cold-start
+  // moment is a placeholder, not a blank flash (D6).
   const [isHydrating, setIsHydrating] = useState(true)
 
   useEffect(() => {
     let cancelled = false
-    const read = readRecentWorkspacesResult()
-    setRecentWorkspaces(read.entries)
-    setRecentError(read.error)
-    setIsHydrating(false)
-    // R1 (N1 #6): on cold start, drop Recent cards whose folder is gone. The
-    // existence check is the Rust native-fs `workspace_path_exists` (web degrades
-    // to keep-all), so a missing folder is pruned from the MRU before the user
-    // clicks a dead card. A prune (path-validation) failure is non-fatal for the
-    // entries — the unpruned MRU still renders — but it is surfaced as the local
-    // error and logged, never silently swallowed (atom #9 / zero-silent-failure).
-    pruneMissingRecentWorkspacesAsync()
-      .then((pruned) => {
-        if (!cancelled) {
-          setRecentWorkspaces(pruned)
-        }
+    loadRecentWorkspaces()
+      .then((result) => {
+        if (cancelled) return
+        setRecentWorkspaces(result.entries)
+        setRecentError(result.error)
       })
-      .catch((error: unknown) => {
-        if (cancelled) {
-          return
-        }
-        const reason = errorMessage(error)
-        console.warn('phase=recent-skills action=prune-failed reason=%s', reason)
-        setRecentError(reason)
+      .finally(() => {
+        if (!cancelled) setIsHydrating(false)
       })
     return () => {
       cancelled = true
     }
   }, [])
 
-  const rememberWorkspace = useCallback((workspace: Pick<RecentWorkspaceEntry, 'absolutePath' | 'displayName'>) => {
-    const entry = rememberRecentWorkspace(workspace)
-    setRecentWorkspaces(readRecentWorkspaces())
-    return entry
-  }, [])
+  const rememberWorkspace = useCallback(
+    (workspace: Pick<RecentWorkspaceEntry, 'absolutePath' | 'displayName'>) => {
+      const entry = buildRecentEntry(workspace, new Date().toISOString())
+      // Optimistic local projection (snappy, survives the immediate navigate-away);
+      // the Rust store is the persistent single source of truth and is re-read on
+      // the next Home mount.
+      setRecentWorkspaces((prev) => mergeRecent(prev, entry))
+      logRecentWriteFailure(
+        'remember',
+        addRecentWorkspace(entry.absolutePath, entry.displayName, entry.identity, entry.lastOpenedAt),
+      )
+      return entry
+    },
+    [],
+  )
 
   const removeWorkspace = useCallback((identity: string) => {
-    removeRecentWorkspace(identity)
-    setRecentWorkspaces(readRecentWorkspaces())
+    setRecentWorkspaces((prev) => prev.filter((w) => w.identity !== identity))
+    logRecentWriteFailure('remove', removeRecentWorkspaceNative(identity))
   }, [])
 
   return {

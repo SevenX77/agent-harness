@@ -132,3 +132,83 @@ backend check: if the page loads real data, the sidecar + gateway are alive.
 ```bash
 pkill -f 'cargo tauri dev'; pkill -f Xvfb   # when done
 ```
+
+---
+
+## 3. Multi-agent isolation — run YOUR OWN instance, don't collide
+
+When **several agents work the repo at once** (each on its own task), every agent
+must launch a **fully independent** app instance. The `:99` display / default
+ports in §2 are a single-tenant convenience; the moment a second agent is active,
+hardcoding them makes two apps fight over the same display, ports, and Vite cache.
+Treat the rules below as mandatory whenever you are not certain you are alone.
+
+### 3.1 Run the app from YOUR OWN worktree, never the shared root
+
+The repo root has `main` checked out; each task runs in its own
+`.worktrees/<type>-<desc>/` (see AGENTS.md "Workflow Pipeline"). **Launch the app
+from inside your worktree**, not the root — otherwise you are verifying the root's
+code, not the change you just made. Pointing the dev command at your worktree's
+`frontend/` is what makes the screenshots actually prove *your* edits.
+
+### 3.2 Give every shared resource a unique, per-instance value
+
+Pick numbers nobody else is using and keep them constant for your whole session:
+
+| Resource | Env / flag | Example (mine) | Why unique |
+|---|---|---|---|
+| Sidecar (FastAPI) port | `STUDIO_SIDECAR_PORT` | `8795` | two sidecars can't bind the same port |
+| Vite dev port | `--port <n> --strictPort` | `5199` | `--strictPort` fails loud instead of silently hopping onto another agent's port |
+| Virtual display | `DISPLAY` / `Xvfb :<n>` | `:91` | screenshots/clicks of one app must not land on another's window |
+| Vite cache dir | `VITE_CACHE_DIR` | `/tmp/vite-mine-5199` | sharing root's `.vite` cross-contaminates dep optimization |
+
+### 3.3 Share the heavy build artifacts read-only (fast isolated launch)
+
+A fresh worktree's Rust/Python source is identical to root — only `frontend/` and
+docs differ — so you can borrow root's compiled outputs instead of rebuilding the
+world:
+
+- `CARGO_TARGET_DIR=<root>/apps/studio/tauri/target` → near cache-hit; only the
+  final crate recompiles (~30–40s, because `CARGO_MANIFEST_DIR` path changed).
+- Symlink `node_modules` and `apps/studio/tauri/vendor` from root (read-only share)
+  so you skip `npm install` + re-vendoring.
+- But keep `VITE_CACHE_DIR` **unique** (§3.2) — that one must not be shared.
+
+Drive it with a per-instance Tauri config override instead of editing the checked-in
+config:
+
+```bash
+# /tmp/tauri-isolated.conf.json  (your ports baked in)
+{
+  "build": {
+    "devUrl": "http://127.0.0.1:5199",
+    "beforeDevCommand": "node tauri/scripts/sync_resources.js && cd frontend && env VITE_STUDIO_API_BASE_URL=/api STUDIO_SIDECAR_PORT=8795 VITE_CACHE_DIR=/tmp/vite-mine-5199 npm run dev -- --host 127.0.0.1 --port 5199 --strictPort"
+  }
+}
+# launch from YOUR worktree's apps/studio dir:
+cd <worktree>/apps/studio/tauri \
+  && CARGO_TARGET_DIR=<root>/apps/studio/tauri/target \
+     DISPLAY=:91 WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1 \
+     cargo tauri dev --config /tmp/tauri-isolated.conf.json >/tmp/tauri-mine.log 2>&1 &
+```
+
+### 3.4 Before running OR touching anything: `git worktree list`
+
+Other agents working the **same** repo show up as registered worktrees. An agent's
+worktree is **ACTIVE — do not touch** when it has *uncommitted changes + an open PR
++ recently-modified files* (check `git -C <wt> status` and file mtimes). Never edit
+its files, never launch on its ports/display, never `wt-clean` it. Clean up only
+**your own** stale worktrees (yours, and the PR already merged).
+
+### 3.5 Footguns
+
+- **`pgrep -f <pattern>` matches your own command line.** A grep for the port/app
+  string counts the very bash you're running, so it lies about "leftover"
+  processes. The real evidence a port is taken/free is
+  `ss -ltn | grep -c ':<port>'`, not a process-name grep.
+- **`pkill -f 'cargo tauri dev'` kills EVERY agent's app.** In a shared repo use a
+  pattern unique to your instance (e.g. your log path / config name) or kill by the
+  PID you backgrounded — never the broad `-f 'cargo tauri dev'`.
+- Software-rendering noise (`libEGL warning`, `MESA: dri` lines) under Xvfb is
+  harmless; the `WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1` env is
+  what keeps the webview painting.

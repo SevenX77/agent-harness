@@ -41,8 +41,8 @@
       "current": "现状:偏差——写盘走 Python + 脚手架是 logic 模板。submitNewSkill → api.post('/skills', buildSkillCreatePayload(...)) 即 POST /api/skills(import_existing=false)→ 后端 create_new_skill 用 _scaffold_files_for 写脚手架(模板 = GRAPH.md 单 init 相位 + phases/init/LOGIC.md + phases/init/actions/initialize.py,即 logic 相位模板,非 D-1-4 要的 agent 模板)+ initialize_skill_repository(git init)+ 注册;写盘在 Python 侧。非空目标文件夹会被拒(_directory_is_nonempty)。建后 openSkill 进工作区。",
       "gap": "差距:① 写盘迁 Studio Rust 后端 native-fs(建目录 + 写脚手架 + git init)——等机制 B 的 Rust 建命令(未实现)。② 脚手架模板改 logic→agent(D-1-4)——等后端脚手架契约。非空文件夹拒绝已符合,保留。",
       "fe_status": "符合",
-      "be_status": "契约问题",
-      "be_dep": "等后端:Rust 建/写脚手架/git init 命令(机制 B 未实现)+ 脚手架 logic→agent 模板契约。",
+      "be_status": "已实现",
+      "be_dep": "Rust create_skill_workspace 已实现并接通(建目录 / 写脚手架 / git init,带多条单测);脚手架产物已是 agent 模板(GRAPH.md v0.3.0 + phases/init/SKILL.md 的 role/goal/step/protocol)。",
       "fe_status_prev": "偏差",
       "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
     },
@@ -53,8 +53,8 @@
       "current": "现状:偏差——留 manifest/lint 死分支。formatCreateSkillError(格式化新建错误)含 MANIFEST_VALIDATION_FAILED 分支(走 firstLintErrorMessage 抽 lint 位置)。后端新建仍在 tmp 目录 lint 脚手架并可 raise MANIFEST_VALIDATION_FAILED(与 D2 精神不完全一致);前端这套 lint 文案在去校验门后是死/低价值分支。INVALID_DIRECTORY_PATH(非空/非法)与 SKILL_ALREADY_EXISTS 仍可达、应留。",
       "gap": "差距:前端 formatCreateSkillError 收缩到只留 OS 级失败(INVALID_DIRECTORY_PATH / SKILL_ALREADY_EXISTS),删 MANIFEST_VALIDATION_FAILED 的 lint 文案分支(纯前端可做);后端新建路径的 tmp-lint raise 属契约问题、待后端放宽。",
       "fe_status": "符合",
-      "be_status": "契约问题",
-      "be_dep": "前端删死分支独立可做;后端新建 tmp-lint raise 的放宽等后端。",
+      "be_status": "已实现",
+      "be_dep": "新建经 Rust create_skill_workspace,非空目录在文件系统层被拒(已实现并接通,带单测 create_skill_workspace_rejects_non_empty_target_dir);不再走后端 lint 报错分支。",
       "fe_status_prev": "偏差",
       "fe_resync": "batch3 已修复+测试通过(2026-06-20)"
     }

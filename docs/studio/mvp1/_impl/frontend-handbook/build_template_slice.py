@@ -1213,7 +1213,7 @@ def main():
         return {"ok": "前端已实施", "partial": "前端部分实施", "bad": "前端未开始"}.get(st, "前端部分实施")
 
     # ---- per-page 状态规则（导航旁状态点 = 本页状态，不再全节点共用一个 rollup） ----
-    # rollup：有效项全 ok→ok；全 bad→bad；混合→partial；无量化数据→review（中性蓝）。
+    # rollup：有效项全 ok→ok；全 bad→bad；混合→partial；无量化数据→none（不显示点）。
     def _rollup(vals, ok_set, bad_set):
         norm = []
         for v in vals:
@@ -1223,7 +1223,7 @@ def main():
             elif v in bad_set:
                 norm.append("bad")
         if not norm:
-            return "review"
+            return "none"
         if all(x == "ok" for x in norm):
             return "ok"
         if all(x == "bad" for x in norm):
@@ -1232,7 +1232,7 @@ def main():
 
     def _page_status_map(full):
         # 设计页 N.i = 该 surface 全功能 fe_status；实施/测试页 = 全节点 fe_status；
-        # 契约页 = 全功能 be_status（后端进度）；复用模块 = 登记页（review 中性）。
+        # 契约页 = 全功能 be_status（后端进度）；复用模块 = 登记/目录页，不是合规页，不显示状态点。
         nc = full["nctx"]; p = nc["pages"]; stages = full["stages"]
         m = {}; all_fn = []; all_ts = []; all_be = []
         for s in stages:
@@ -1245,15 +1245,17 @@ def main():
         m[p["impl"]] = _rollup(all_fn, {"符合"}, {"偏差", "未实施"})
         m[p["tests"]] = _rollup(all_ts, {"符合"}, {"偏差", "未实施"})
         m[p["contract"]] = _rollup(all_be, {"已实现"}, {"契约问题"})
-        m[p["fe_modules"]] = "review"
+        m[p["fe_modules"]] = "none"
         return m
 
     def _pitem(pid, label, st):
+        # 登记/目录页或无可量化数据 → 不显示状态点（只剩红/黄/绿交通灯，含义自明）。
+        dot = "" if st in (None, "", "none") else '<span class="status-dot %s"></span>' % _scls(st)
         return ('<a class="progress-item" href="#%s" id="nav-%s">'
                 '<span class="dot-indicator"></span>'
                 '<span class="item-label">%s</span>'
-                '<span class="status-dot %s"></span></a>'
-                % (pid, pid, ESC(label), _scls(st)))
+                '%s</a>'
+                % (pid, pid, ESC(label), dot))
 
     def _grp(parent, children):
         return '<div class="toc-group">%s<div class="child-list">%s</div></div>' % (parent, children)

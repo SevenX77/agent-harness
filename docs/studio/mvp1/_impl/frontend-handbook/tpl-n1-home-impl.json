@@ -250,8 +250,12 @@
       "fe_resync": "覆盖的功能点已全部符合(2026-06-20)",
       "screenshots": [
         {
+          "file": "n1-01-home.png",
+          "caption": "① 前态:Home 列出 Recent 卡(只有名 + 路径 + 最近打开时间,无多余装饰)。"
+        },
+        {
           "file": "n1-03-workspace-open.png",
-          "caption": "点 Recent 卡进入工作区(图中 Copilot 后端不可用,工作区仍正常进入)"
+          "caption": "② 后态:点这张卡 → 直接进入工作区。图中 Copilot 后端不可用,工作区仍正常进入,印证「进入不依赖后端」。"
         }
       ]
     },
@@ -280,8 +284,16 @@
       ],
       "screenshots": [
         {
+          "file": "n1-02-card-menu.png",
+          "caption": "① 中态:点卡片右上 ⋯ 展开菜单,出现 Show in folder + Remove from recent(红)两项。"
+        },
+        {
           "file": "n1-13-remove-toast.png",
-          "caption": "⋯ → Remove from recent → 成功 toast「Removed n1-test-skill from recent」+ 卡片移除,盘上文件不删"
+          "caption": "② 后态:点 Remove from recent → 右上成功 toast「Removed …」+ 该卡从 Recent 移除(盘上文件不删,只是不再出现在最近列表)。"
+        },
+        {
+          "file": "n1-13b-toast-closeup.png",
+          "caption": "特写:成功 toast —— Removed \"n1-test-skill\" from recent。"
         }
       ],
       "shots": [

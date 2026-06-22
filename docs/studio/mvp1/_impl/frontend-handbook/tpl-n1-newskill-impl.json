@@ -123,8 +123,12 @@
       ],
       "screenshots": [
         {
+          "file": "n1-09-newskill-dialog.png",
+          "caption": "① 前态:刚点开 New skill,默认名 new-skill。"
+        },
+        {
           "file": "n1-10-newskill-typed.png",
-          "caption": "输入 n1-test-skill → Folder name 实时预览同步规范化结果"
+          "caption": "② 后态:输入 n1-test-skill → 下方 Folder name 实时同步规范化后的结果(看得到输入驱动预览变化)。"
         }
       ]
     },
@@ -169,8 +173,12 @@
       "fe_resync": "覆盖的功能点已全部符合(2026-06-20)",
       "screenshots": [
         {
+          "file": "n1-10-newskill-typed.png",
+          "caption": "① 前态:对话框填好名字、待 Create。"
+        },
+        {
           "file": "n1-11-newskill-created.png",
-          "caption": "Create → 建出 skill 文件夹并直接进工作区(脚手架含 draft / review 阶段)"
+          "caption": "② 后态:Create 后建出 skill 文件夹并直接进入工作区,左侧脚手架已含 draft / review 阶段。"
         }
       ]
     },
@@ -195,8 +203,16 @@
       "fe_resync": "覆盖项已全绿(2026-06-20)",
       "screenshots": [
         {
+          "file": "n1-10-newskill-typed.png",
+          "caption": "① 前态:填了与「已建好的」skill 同名的名字 n1-test-skill,此时看起来一切正常。"
+        },
+        {
           "file": "n1-12-newskill-error.png",
-          "caption": "填了与已有 skill 同名的名字 → Create 被文件系统拒绝(目标文件夹已存在且非空),红框报错「Cannot create … non-empty folder」。这是文件系统层面『目标已被占用』的拒绝,不是 manifest / lint 内容校验,也不出现相关文案。"
+          "caption": "② 后态:点 Create → 因为目标文件夹 n1-test-skill 已存在且非空,文件系统拒绝,弹红框报错(不是 manifest/lint 内容校验)。"
+        },
+        {
+          "file": "n1-12b-error-closeup.png",
+          "caption": "特写:红框报错「Cannot create a new skill in a non-empty folder: …/Skills/n1-test-skill」—— 目标已被占用、文件系统层面的拒绝。"
         }
       ]
     }

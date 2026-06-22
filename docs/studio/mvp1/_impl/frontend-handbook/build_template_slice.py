@@ -102,17 +102,25 @@ CSS = """
   .shot-cap { font-size:12.3px; color:#49515d; } .shot-todo { font-size:10.5px; font-weight:700; color:var(--text-muted); background:#eef1f6; border-radius:5px; padding:1px 7px; flex:none; }
   /* ── real test screenshot (base64-inlined) ── */
   .shot-fig { margin:0 0 10px; border:1px solid var(--border-hover); border-radius:10px; overflow:hidden; background:#fff; box-shadow:0 1px 3px rgba(20,30,50,.06); }
-  .shot-img { display:block; width:100%; height:auto; }
+  .shot-img { display:block; width:100%; height:auto; cursor:zoom-in; }
   .shot-figcap { font-size:12px; color:#1f7a3d; background:#f0faf3; border-top:1px solid var(--border-hover); padding:6px 11px; }
   /* ── screenshot not capturable in headless (reason in place of shot) ── */
   .shot-na { display:flex; align-items:flex-start; gap:9px; border:1px solid #e6c9c9; border-left:3px solid #d35555; border-radius:8px; background:#fdf5f5; padding:9px 12px; margin-bottom:6px; }
   .shot-na-tag { font-size:11px; font-weight:800; color:#b23b3b; background:#f7e3e3; border-radius:5px; padding:2px 8px; flex:none; white-space:nowrap; }
   .shot-na-why { font-size:12.3px; color:#5a4a4a; line-height:1.5; }
-  /* ── sidebar status legend ── */
-  .sb-legend-title { font-size:11.5px; font-weight:800; color:var(--text-strong,#1f2733); margin-bottom:6px; }
-  .sb-legend-row { display:flex; align-items:center; gap:7px; font-size:11.5px; color:#49515d; margin:3px 0; }
-  .sb-legend-row .status-dot { margin:0; flex:none; }
-  .sb-legend-note { font-size:10.6px; color:var(--text-muted); line-height:1.5; margin-top:6px; padding-top:6px; border-top:1px solid var(--border-hover); }
+  /* ── lightbox：点击截图放大 + 缩放 ── */
+  .lightbox { display:none; position:fixed; inset:0; z-index:9999; background:rgba(12,16,24,.93); touch-action:none; -webkit-user-select:none; user-select:none; }
+  .lightbox.open { display:block; }
+  .lb-stage { position:absolute; inset:0; overflow:hidden; cursor:grab; }
+  .lightbox.dragging .lb-stage { cursor:grabbing; }
+  .lb-img { position:absolute; top:50%; left:50%; max-width:none; transform-origin:center center; will-change:transform; box-shadow:0 10px 40px rgba(0,0,0,.5); }
+  .lb-bar { position:absolute; top:14px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:6px; background:rgba(28,34,46,.92); border:1px solid rgba(255,255,255,.14); border-radius:10px; padding:6px 8px; z-index:2; }
+  .lb-bar button { width:34px; height:30px; border:none; border-radius:7px; background:rgba(255,255,255,.1); color:#eef2f8; font-size:17px; font-weight:700; cursor:pointer; line-height:1; }
+  .lb-bar button:hover { background:rgba(255,255,255,.22); }
+  .lb-pct { min-width:50px; text-align:center; font-size:12.5px; color:#cdd6e4; font-variant-numeric:tabular-nums; }
+  .lb-close { position:absolute; top:14px; right:18px; width:38px; height:34px; border:none; border-radius:8px; background:rgba(28,34,46,.92); color:#eef2f8; font-size:20px; cursor:pointer; z-index:2; }
+  .lb-close:hover { background:rgba(210,85,85,.85); }
+  .lb-hint { position:absolute; bottom:16px; left:50%; transform:translateX(-50%); font-size:11.5px; color:#8b97a8; background:rgba(28,34,46,.8); padding:4px 12px; border-radius:8px; z-index:2; }
   /* ── transformation diagram ── */
   .diagram { border:1px solid var(--border-color); border-radius:10px; background:#fafbfe; padding:12px 14px; margin:4px 0; }
   .transform { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
@@ -1315,6 +1323,34 @@ window.addEventListener('load', ()=>{
   }));
   const h=location.hash?location.hash.slice(1):PAGES[0]; const s=PAGES.indexOf(h); showPage(s>=0?s:0,false);
 });
+// ── lightbox：点击 .shot-img 放大，滚轮/按钮缩放 + 拖动平移（iPad 友好）──
+(function(){
+  var lb=document.getElementById('lightbox'); if(!lb) return;
+  var img=document.getElementById('lb-img'), stage=document.getElementById('lb-stage'), pct=document.getElementById('lb-pct');
+  var scale=1, tx=0, ty=0, baseW=0, baseH=0;
+  function apply(){ img.style.transform='translate(-50%%,-50%%) translate('+tx+'px,'+ty+'px) scale('+scale+')'; pct.textContent=Math.round(scale*100)+'%%'; }
+  function fit(){ var vw=window.innerWidth*0.92, vh=window.innerHeight*0.84; var s=Math.min(vw/(baseW||1), vh/(baseH||1), 1); scale=s>0?s:1; tx=0; ty=0; apply(); }
+  function open(src,alt){ img.src=src; img.alt=alt||''; lb.classList.add('open');
+    if(img.complete && img.naturalWidth){ baseW=img.naturalWidth; baseH=img.naturalHeight; fit(); }
+    else { img.onload=function(){ baseW=img.naturalWidth; baseH=img.naturalHeight; fit(); }; } }
+  function close(){ lb.classList.remove('open'); img.src=''; }
+  function zoom(f){ scale=Math.min(8, Math.max(0.2, scale*f)); apply(); }
+  document.addEventListener('click', function(e){ var t=e.target;
+    if(t && t.classList && t.classList.contains('shot-img')){ e.preventDefault(); open(t.getAttribute('src'), t.getAttribute('alt')); } });
+  document.getElementById('lb-in').onclick=function(){ zoom(1.25); };
+  document.getElementById('lb-out').onclick=function(){ zoom(0.8); };
+  document.getElementById('lb-reset').onclick=function(){ fit(); };
+  document.getElementById('lb-close').onclick=close;
+  stage.addEventListener('click', function(e){ if(e.target===stage) close(); });
+  lb.addEventListener('wheel', function(e){ e.preventDefault(); zoom(e.deltaY<0?1.12:0.89); }, {passive:false});
+  document.addEventListener('keydown', function(e){ if(!lb.classList.contains('open')) return;
+    if(e.key==='Escape') close(); else if(e.key==='+'||e.key==='=') zoom(1.25); else if(e.key==='-') zoom(0.8); });
+  var drag=false, sx=0, sy=0;
+  stage.addEventListener('pointerdown', function(e){ if(e.target!==img && e.target!==stage) return; drag=true; sx=e.clientX-tx; sy=e.clientY-ty; lb.classList.add('dragging'); try{ stage.setPointerCapture(e.pointerId); }catch(_){} });
+  stage.addEventListener('pointermove', function(e){ if(!drag) return; tx=e.clientX-sx; ty=e.clientY-sy; apply(); });
+  stage.addEventListener('pointerup', function(){ drag=false; lb.classList.remove('dragging'); });
+  window.addEventListener('resize', function(){ if(lb.classList.contains('open') && baseW) fit(); });
+})();
 """ % (pages_js, labels_js)
 
     out = (
@@ -1328,19 +1364,21 @@ window.addEventListener('load', ()=>{
         '<div class="sb-card sb-progress">'
         '<div class="sb-progress-row"><span>阅读进度</span><b id="progress-pct">0%</b></div>'
         '<div class="sb-progress-track"><div class="sb-progress-fill" id="progress-fill"></div></div></div>'
-        '<div class="sb-card sb-legend">'
-        '<div class="sb-legend-title">导航状态点 = 本页状态</div>'
-        '<div class="sb-legend-row"><span class="status-dot ok"></span>符合设计</div>'
-        '<div class="sb-legend-row"><span class="status-dot partial"></span>部分符合</div>'
-        '<div class="sb-legend-row"><span class="status-dot bad"></span>有偏差 / 未实施</div>'
-        '<div class="sb-legend-row"><span class="status-dot review"></span>登记页 / 无量化数据</div>'
-        '<div class="sb-legend-note">节点行=该节点整体实施度；子页各取本页状态：设计 / 实施 / 测试页取功能「符合设计」度，后端接口契约页取后端 be_status，前端复用模块为登记页。</div></div>'
         '<nav class="sb-card toc" id="toc">' + toc + '</nav></aside>'
         '<main class="viewport"><article class="reading-column"><div id="docInner">' + sections + '</div>'
         '<nav class="paginator">'
         '<button class="nav-btn" id="prev-btn" onclick="prevPage()"><span>&larr;</span><span class="nb-label" id="prev-label"></span></button>'
         '<button class="nav-btn" id="next-btn" onclick="nextPage()"><span class="nb-label" id="next-label"></span><span>&rarr;</span></button>'
         '</nav></article></main></div>'
+        '<div class="lightbox" id="lightbox">'
+        '<div class="lb-stage" id="lb-stage"><img class="lb-img" id="lb-img" alt=""/></div>'
+        '<div class="lb-bar"><button id="lb-out" title="缩小">−</button>'
+        '<span class="lb-pct" id="lb-pct">100%</span>'
+        '<button id="lb-in" title="放大">+</button>'
+        '<button id="lb-reset" title="适配窗口">⤢</button></div>'
+        '<button class="lb-close" id="lb-close" title="关闭 (Esc)">×</button>'
+        '<div class="lb-hint">滚轮 / ± 缩放 · 拖动平移 · 点背景或 Esc 关闭</div>'
+        '</div>'
         "<script>" + js + "</script></body></html>"
     )
     OUT.write_text(out, encoding="utf-8")

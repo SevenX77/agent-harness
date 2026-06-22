@@ -40,7 +40,9 @@
 
 ## 三、样式/布局判断基准
 
-- **`docs/development/FRONTEND_UI_SPEC.md` 为唯一真相**,改前先读,**尤其 §2「UI 组件与样式基准规范」**。
+- **大方向以 MVP1 设计为真理(看齐设计、不看代码)** —— 设计与代码冲突时设计赢;入口见 `AGENTS.md`「Standard Documents → MVP1 design = source of truth」。
+- **前端实施持续围绕《前端实施说明书》(N6 手册)进行** —— 已提交的权威实施指南:`docs/studio/mvp1/_impl/frontend-handbook/index.html`。它讲「做什么 / 怎么实施」,与下面讲「样式怎么对齐」的 `FRONTEND_UI_SPEC.md` 互补。
+- **`docs/development/FRONTEND_UI_SPEC.md` 为样式/组件唯一真相**,改前先读,**尤其 §2「UI 组件与样式基准规范」**。
 - 优先复用 `src/components/ui/` 下已有的 shadcn/ui / Radix 封装;缺哪个原语就先在 `src/components/ui/` 补 shadcn 风格封装再用。
 - 用语义化 design token 和现有 variant,**不硬编码 hex 颜色 / 一次性 Tailwind 调色**。
 - 折叠/弹窗/下拉/select/tooltip/tabs/alert/确认 这类交互,用本地 `@/components/ui/*` 封装。

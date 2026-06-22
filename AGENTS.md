@@ -74,7 +74,9 @@ before you push or you WILL turn `main` red:
 ## Three-Module Architecture (division of labor)
 
 Two pure-SDK libraries + a desktop shell. Respect the boundaries; the
-authoritative design is `docs/design/productization-architecture-2026-06-11.md`.
+authoritative design is the MVP1 design body (see "Standard Documents" → *MVP1
+design = source of truth*), not the code. The architecture-overview doc is a
+one-page orientation, not the full design.
 
 - **engine** (`packages/graph-agent`): pure SDK that compiles a skill directory
   into a runnable graph and executes phases. No HTTP API of its own. Owns the
@@ -97,17 +99,38 @@ authoritative design is `docs/design/productization-architecture-2026-06-11.md`.
 
 ## Standard Documents
 
-- **MVP1 + three-module design (authoritative)**:
-  `docs/design/productization-architecture-2026-06-11.md`
+- **MVP1 design = source of truth — align to the design, NOT the code.** When the
+  code and the MVP1 design disagree, the design wins: fix the code, do not
+  retrofit the design to match drift. The design body lives in two places:
+  - **Three-module interface design + change set (the body)**:
+    `docs/mvp1-three-module-interface-design-and-changes-2026-06-11/`
+    (`01-design.md` + `02-implementation-plan.md` + per-module
+    `pm-{engine,gateway,studio}-work-order.md`).
+  - **Per-module MVP1 design** — each module dir holds `mvp1-alignment.md` (the
+    V4 target design = truth) next to `baseline.md` (current / migration state):
+    engine `docs/engine/mvp1/` (`INDEX.md` + `00-architecture-overview.md`),
+    gateway `docs/graph-agent-gateway/mvp1/` (`README.md`), studio
+    `docs/studio/mvp1/` (`README.md` + `DESIGN_UNITS_INDEX.md`).
+  - `docs/design/productization-architecture-2026-06-11.md` is the one-page
+    global overview — read it first for orientation, then the body above.
 - **MVP1 integration baseline**:
   `docs/studio/mvp1/_impl/STUDIO-MVP1-INTEGRATION-BASELINE.md`
-- **12D repair framework (status handbook, HTML)**:
+- **12D node repair handbook (HTML)**:
   `docs/studio/mvp1/_impl/wave2/studio-mvp1-12d-repair-framework-2026-06-15.html`
+  — parent/child node interface + repair guide.
+- **N6 frontend implementation handbook (HTML, committed & authoritative)**:
+  `docs/studio/mvp1/_impl/frontend-handbook/index.html` — the guide future
+  frontend work continues to follow. (Different from the local-only `temp/`
+  handbook noted below — that one is NOT it.)
 - **Frontend UI spec**: `docs/development/FRONTEND_UI_SPEC.md`
+- **Run + headless-screenshot guide**: `docs/development/RUN_AND_SCREENSHOT.md`
+  — fresh-machine startup (vendor deps + warm `.pyc`) and the VPS-only headless
+  verify method (Xvfb + screenshot + synthetic clicks).
 - **Handbook authoring methodology**: `docs/studio/mvp1/handbook-methodology/`
-- Note: the live "N-node implementation handbook" (`#handbook_overview`) is
-  generated locally by `temp/build_ux_handbook.py` into `temp/` (gitignored) —
-  it is NOT committed, so it exists only on the authoring machine.
+- Note: a separate live "N-node implementation handbook" (`#handbook_overview`)
+  is generated locally by `temp/build_ux_handbook.py` into `temp/` (gitignored)
+  — NOT committed, exists only on the authoring machine. Follow the committed N6
+  handbook above instead.
 
 ## Studio Frontend UI
 
@@ -138,6 +161,12 @@ authoritative design is `docs/design/productization-architecture-2026-06-11.md`.
 
 - Standard startup is documented in `apps/studio/tauri/README.md`:
   `cd apps/studio/tauri && cargo tauri dev`.
+- **Fresh machine? Provision the sidecar first.** `cargo tauri dev` alone shows a
+  red "Backend unavailable" banner until the Python sidecar is vendored: run
+  `apps/studio/backend/scripts/build_vendor.py` (installs the dep closure into
+  `apps/studio/tauri/vendor/site-packages`), then pre-warm `.pyc` so the first
+  cold start doesn't exceed the health-check timeout. Full steps + the headless
+  VPS verify method: `docs/development/RUN_AND_SCREENSHOT.md`.
 - Prefer one Tauri dev session only. It owns both Vite and the dynamic FastAPI
   sidecar.
 - If using a non-default Vite port, ensure backend CORS allows the exact frontend

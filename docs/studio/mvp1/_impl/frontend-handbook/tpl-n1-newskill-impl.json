@@ -144,12 +144,7 @@
       "layer2": [
         "真跑(桌面):点 Choose folder → OS 目录选择器弹出,选一个目录 → 父目录框显示它。"
       ],
-      "screenshots": [
-        {
-          "file": "n1-09-newskill-dialog.png",
-          "caption": "Parent folder 只读路径显示 + Choose folder 按钮(点击弹 OS 目录选择器)"
-        }
-      ]
+      "shot_na": "Choose folder 点了会弹系统原生的『选择目录』对话框(OS 目录选择器)——headless 无法驱动系统对话框,这个选父目录的动作截不到图。对话框里 Parent folder 只读路径 + Choose folder 按钮长什么样,见 #10『新建对话框』那张真机图;点击发起 OS 选择器的接线逻辑由组件测试覆盖。"
     },
     {
       "covers": "#13 newskill-create-scaffold",
@@ -189,19 +184,19 @@
       ],
       "fe_status": "符合",
       "layer1": [
-        "mock 后端返回 INVALID_DIRECTORY_PATH(非空文件夹)→ 断言对话框显示 OS 级失败文案。",
-        "RED:当前 formatCreateSkillError 含 MANIFEST_VALIDATION_FAILED 的 lint 文案分支 → 断言『无 manifest/lint 文案』失败。",
-        "GREEN:删死分支后断言新建错误只产出 OS 级失败文案(INVALID_DIRECTORY_PATH / SKILL_ALREADY_EXISTS)。"
+        "mock 让后端返回『目标文件夹已存在且非空』这种文件系统层面的失败 → 断言对话框只显示这类文件系统失败文案。",
+        "RED:当前 formatCreateSkillError 里还有一条会冒出 MANIFEST_VALIDATION_FAILED(内容/lint 校验)文案的分支 → 断言『新建失败时错误地显示了 lint 文案』,先让它红。",
+        "GREEN:删掉那条 lint 分支后,断言新建失败只产出文件系统层面的失败码——目标文件夹已存在且非空(INVALID_DIRECTORY_PATH)/ 已有同名 skill(SKILL_ALREADY_EXISTS)。"
       ],
       "layer2": [
-        "在非空文件夹里 Create → 应报「不能在非空文件夹里新建」类 OS 级失败,不出现 manifest/lint 校验文案。"
+        "填一个跟已存在 skill 同名的名字去 Create → 因为那个文件夹已经在、里面还有文件,系统拒绝在它上面重建,弹红框报『目标文件夹已存在且非空,无法新建』;不应出现 manifest / lint 这类内容校验文案。"
       ],
       "fe_status_prev": "偏差",
       "fe_resync": "覆盖项已全绿(2026-06-20)",
       "screenshots": [
         {
           "file": "n1-12-newskill-error.png",
-          "caption": "重名 → 红框 OS 级错误「Cannot create ... non-empty folder」,无 manifest / lint 文案"
+          "caption": "填了与已有 skill 同名的名字 → Create 被文件系统拒绝(目标文件夹已存在且非空),红框报错「Cannot create … non-empty folder」。这是文件系统层面『目标已被占用』的拒绝,不是 manifest / lint 内容校验,也不出现相关文案。"
         }
       ]
     }

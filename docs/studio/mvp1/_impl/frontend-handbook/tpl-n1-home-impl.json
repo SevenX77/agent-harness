@@ -1,347 +1,373 @@
 {
- "id": "n1_home_impl",
- "title": "N1.1 Home/Welcome 屏 · 实施详情",
- "design_ref": "n1_home_design",
- "intro": "本页是 Home/Welcome 屏前端的现状/差距/实施计划/测试,1:1 对应设计页 n1_home_design(原子 #1–#9)。代码一律按「文件名 + 函数/对象名」引用(可全局搜索定位,不写行号)。Home 现状的核心债=仍是「注册表模型外壳套了一层 Recent」:卡片派生字段、打开/删除的后端调用都依赖 GET/POST/DELETE /api/skills,与 D1/D11(去注册表 / IDE 模型)冲突;skill 发现/读写后端契约见 n1_contract 机制 A,native-fs 命令见机制 B。",
- "functions": [
-  {
-   "n": 1,
-   "cap": "brand-head-three-entry",
-   "design_ref": "atom-1",
-   "current": "现状:信息架构已在、偏差在装饰与措辞。WelcomePage(Home 屏根组件)渲品牌头(Layers 图标 + GSkill Studio 标题 + 副标题)+ 两列 grid 放 New skill / Open folder + Recent 区标题。偏差:Recent 头区右侧挂一枚无操作价值的「Desktop workspace」装饰标签(Sparkles 图标 + 文字,无 handler);标题用「Recent skills」措辞。",
-   "gap": "差距:删 Recent 头区的「Desktop workspace」装饰标签;措辞去注册表化(skill 是文件夹,非注册表条目)。纯前端、零后端依赖。",
-   "fe_status": "符合",
-   "be_status": "n/a",
-   "be_dep": "n/a(纯前端布局/文案)。",
-   "fe_status_prev": "偏差",
-   "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
-  },
-  {
-   "n": 2,
-   "cap": "open-folder",
-   "design_ref": "atom-2",
-   "current": "现状:打开能用但耦合注册 + 留死文案。importSkillDirectory(打开文件夹入口)→ selectSkillDirectory(Rust 目录选择器)→ openSkill;openSkill 里 resolveBackendSkillIdForWorkspace 先 POST /api/skills(import_existing=true)做导入注册再进工作区(把「打开」耦合成「注册」)。formatImportSkillError 仍含「missing GRAPH.md or SKILL.md」等 manifest 拒绝文案——后端 create_new_skill 已改 warning 放行(D2),这些是死分支。术语主入口已是「Open folder / Choose any local folder」,但 toast 等处仍有「Import」残留。",
-   "gap": "差距:① 删 formatImportSkillError 的 manifest/lint 拒绝死分支,只留 OS 级失败(纯前端可做)。② 解耦 POST /api/skills 注册——打开=记 MRU + 进工作区、落盘走 Studio Rust 后端 native-fs(等机制 B 的 Rust 打开命令,现未实现=后端先于前端)。③ 残留「Import」措辞统一为「打开文件夹」。",
-   "fe_status": "符合",
-   "be_status": "契约问题",
-   "be_dep": "部分等后端:删死文案 + 改措辞是前端独立;解耦注册走 Rust 等机制 B 的 Rust 建/打开命令(未实现)。后端 D2 放宽已就绪(导入不再拒缺 manifest)。",
-   "fe_status_prev": "偏差",
-   "fe_resync": "batch3 已修复+测试通过(2026-06-20)"
-  },
-  {
-   "n": 3,
-   "cap": "recent-mru-grid",
-   "design_ref": "atom-3",
-   "current": "现状:偏差——卡片挂注册表派生字段。visibleWorkspaces(把 MRU 与注册表合并的 memo)对每条 MRU 按目录路径匹配 GET /api/skills 的 SkillSummary,给卡片挂 phase_count / last_run_at,卡片还渲 has_golden(Golden 徽章)、config_mismatch(Config drift 徽章 + Tooltip),并把注册表里 MRU 没有的 skill 也追加进列表。字段全来自 useSkills(GET /api/skills 聚合)。",
-   "gap": "差距:① 卡片只渲 MRU 字段(displayName + shortPath + lastOpenedAt),停读 phase_count/last_run_at/has_golden/config_mismatch——纯前端停读即可(此步不需后端先动)。② 拆掉 visibleWorkspaces 的注册表合并 + 追加逻辑,Recent 只来自 useRecentSkills 的 MRU。③ 完全弃用 GET /api/skills(去注册表收尾)属契约重塑、等后端。",
-   "fe_status": "符合",
-   "be_status": "契约问题",
-   "be_dep": "卡片极简化(停读派生字段)前端独立;完全去注册表(弃 GET /api/skills)等后端重塑(D1/D11)。",
-   "fe_status_prev": "偏差",
-   "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
-  },
-  {
-   "n": 4,
-   "cap": "open-recent-card",
-   "design_ref": "atom-4",
-   "current": "现状:开卡仍经注册。点卡 → openWorkspace → openSkill → resolveBackendSkillIdForWorkspace 走 POST /api/skills 解析后端 skillId 再进工作区;后端不可用会卡在这步。MRU 刷新走 rememberWorkspace。",
-   "gap": "差距:纯靠 MRU 路径+名进入,进工作区后再按需对接后端;解耦 POST /api/skills 注册(与 #2 同,等机制 B 的 Rust 打开命令)。",
-   "fe_status": "符合",
-   "be_status": "契约问题",
-   "be_dep": "等后端:解耦注册走 Rust 打开命令(机制 B 未实现)。",
-   "fe_status_prev": "偏差",
-   "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
-  },
-  {
-   "n": 5,
-   "cap": "recent-card-reveal",
-   "design_ref": "atom-5",
-   "current": "现状:已实现且符合。卡片 ⋯ / 右键菜单的「Show in folder」→ handleReveal → revealInFileManager(Rust reveal_in_file_manager 命令;浏览器降级复制路径)。纯定位、不碰注册表。",
-   "gap": "符合设计,无需改。",
-   "fe_status": "符合",
-   "be_status": "已实现",
-   "be_dep": "已就绪:Studio Rust 后端 reveal_in_file_manager 已实现。"
-  },
-  {
-   "n": 6,
-   "cap": "remove-skill-entry",
-   "design_ref": "atom-6",
-   "current": "现状:符合——危险版 Remove 已退役、新增安全版「Remove from recent」。① #163 删掉了会删盘文件的旧 Remove(整条 handleDelete → requestSkillDeleteConfirmation → DELETE /api/skills/{id} 退役),守住 R1(不在 IDE 内删 skill)。② #164 新增 MRU-only 的「Remove from recent」:卡片 ⋯ 下拉 / 右键菜单项(shadcn DropdownMenuItem / ContextMenuItem variant=destructive + Trash2 图标)→ handleRemove → removeWorkspace(identity) 只清最近列表条目 + Sonner success toast,绝不碰盘上 skill 文件夹。失效自动剪枝助手 pruneMissingRecentWorkspaces 仍无调用方(② 失效卡自动移除路径待接)。",
-   "gap": "差距:① 已闭合——删盘 Remove 退役(#163)+ 安全的 Remove from recent 让用户整理最近列表而不删文件(#164),R1 守住。② 失效路径「点失效卡 → 报错 + 自动移除」仍待:点失效卡报错 toast + removeWorkspace 接上 pruneMissingRecentWorkspaces——但其 exists 谓词(路径存在性检查)需 Studio Rust 后端能力支撑,现无对应 Rust 命令=这部分等后端。",
-   "fe_status": "符合",
-   "be_status": "契约问题",
-   "be_dep": "Remove from recent(MRU)纯前端、无后端依赖;只剩 ② 失效卡自动移除的路径存在性检查等后端(机制 B 的 Rust exists 能力,未实现)。",
-   "fe_status_prev": "偏差",
-   "fe_resync": "核验:#163 退役删盘 Remove、#164 新增 MRU-only Remove from recent,均已实测(2026-06-22)"
-  },
-  {
-   "n": 7,
-   "cap": "recent-empty-state",
-   "design_ref": "atom-7",
-   "current": "现状:偏差——文案用旧词。空态(Empty 系列组件)标题「No skills found」、说明「Create or import a skill to populate this workspace.」用「import」旧注册表词;可见性靠 visibleWorkspaces(含注册表)判断。",
-   "gap": "差距:文案改「打开文件夹」(open folder)、IDE 起点语气(R2);空态判断改看 MRU 是否为空。纯前端。",
-   "fe_status": "符合",
-   "be_status": "n/a",
-   "be_dep": "n/a(纯前端文案/判断)。",
-   "fe_status_prev": "偏差",
-   "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
-  },
-  {
-   "n": 8,
-   "cap": "recent-skeleton",
-   "design_ref": "atom-8",
-   "current": "现状:未实施——无骨架。WelcomePage 无任何 skeleton / loading 分支(grep skeleton/isLoading/animate-pulse 在 welcome 目录无命中),useSkills 只暴露 skillListError、无 isLoading;Recent 网格直接 map 渲染,GET /api/skills 在途时靠 MRU 渲或空白。",
-   "gap": "差距:加 Recent 加载骨架占位(D6),沿用 Settings 页 ProviderListSkeleton 风格、用 shadcn Skeleton,不自造组件。纯前端。",
-   "fe_status": "符合",
-   "be_status": "n/a",
-   "be_dep": "n/a(纯前端骨架展示)。",
-   "fe_status_prev": "未实施",
-   "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
-  },
-  {
-   "n": 9,
-   "cap": "recent-load-failure-fallback",
-   "design_ref": "atom-9",
-   "current": "现状:已实现且符合(去注册表后局部红框已重建)。错误源已从 GET /api/skills 切到 MRU/路径校验:useRecentSkills.ts(读最近打开列表的 hook)现把 MRU 读取 / 路径有效性校验的错误显式抛出(不再用静默 .catch 吞掉、并记 WARN 日志),WelcomePage.tsx 在始终可点的 New skill / Open folder 入口下方渲一条局部 destructive Alert(shadcn 红框告警)——符合设计『局部红框 + 不阻塞入口』:品牌头与新建/打开入口照常可用。",
-   "gap": "符合设计,无需改。错误源已切到 MRU/路径校验,局部红框 + 不阻塞入口已落地。",
-   "fe_status": "符合",
-   "be_status": "n/a",
-   "be_dep": "n/a(纯前端失败退路)。",
-   "fe_resync": "已落地:useRecentSkills.ts 显式浮出 MRU 读取 / 路径校验错误(去静默 .catch、记 WARN),WelcomePage.tsx 在常驻入口下方渲局部 destructive Alert(不阻塞)。测试 WelcomePage.test.tsx + useRecentSkills.test.ts 覆盖;verified by green gates + post-audit(2026-06-20)"
-  }
- ],
- "plan": [
-  {
-   "step": 1,
-   "what": "#1 去装饰 + #7 空态术语:删 Recent 头区「Desktop workspace」装饰标签;空态文案「Create or import」→「打开文件夹」、IDE 起点语气;#2 残留「Import」措辞统一「打开文件夹」。",
-   "depends_on": "无(纯文案/装饰,零后端依赖)。",
-   "why": "改动最小、零依赖、消除注册表语汇噪音,最先做掉。",
-   "block": "前端独立"
-  },
-  {
-   "step": 2,
-   "what": "#3 Recent 卡极简化:卡片只渲 displayName + shortPath + lastOpenedAt,停读 phase_count/last_run_at/has_golden/config_mismatch;拆 visibleWorkspaces 的注册表合并 + 追加逻辑,Recent 只来自 useRecentSkills 的 MRU。",
-   "depends_on": "前端:停读派生字段、改 visibleWorkspaces 只读 MRU。后端不动(完全弃用 GET /api/skills 留到 Step 6)。",
-   "why": "纯前端停读即落地 D-1-1(卡片极简);可与 Step 1 并行。",
-   "block": "前端独立"
-  },
-  {
-   "step": 3,
-   "what": "#6 删 Remove 入口:移除卡片 ⋯ / 右键菜单的 Remove 项 + 停调 DELETE /api/skills(R1);#2/#14 删 formatImportSkillError/formatCreateSkillError 的 manifest/lint 拒绝死分支(D2 后已不可达),只留 OS 级失败。",
-   "depends_on": "前端:删菜单项/调用/死分支。后端不动。",
-   "why": "纯前端清理,落地 R1(不在 IDE 删)+ D2(删校验门死文案);可与 Step 1/2 并行。",
-   "block": "前端独立"
-  },
-  {
-   "step": 4,
-   "what": "#8 Recent skeleton:加 Recent 加载骨架占位(D6),沿用 ProviderListSkeleton 风格、用 shadcn Skeleton。",
-   "depends_on": "前端:加骨架分支。后端不动。",
-   "why": "纯前端 NFR 补齐,独立可做。",
-   "block": "前端独立"
-  },
-  {
-   "step": 5,
-   "what": "#6 失效自动移除:点失效 Recent 卡时报错 toast + removeWorkspace,接上 pruneMissingRecentWorkspaces——其 exists 谓词的路径存在性检查需 Studio Rust 后端命令。",
-   "depends_on": "等后端:Studio Rust 后端的路径存在性检查能力(机制 B,现未实现)。",
-   "why": "失效自动移除的「路径存在性检查」是 native-fs 依赖,与前端清理(Step 3)解耦单列——避免把不同依赖打包成一步(谁阻塞谁一眼清)。",
-   "block": "等后端"
-  },
-  {
-   "step": 6,
-   "what": "#2/#4 解耦注册 + 去注册表收尾:打开/开卡解耦 POST /api/skills,改走 Studio Rust 后端 native-fs 打开命令、不注册;Home 完全弃用 GET /api/skills(去注册表),Recent 纯 MRU。",
-   "depends_on": "等后端:机制 B 的 Rust 建/打开命令(未实现)+ skills 服务去注册表重塑(D1/D11)。",
-   "why": "后端先于前端:契约没定就改前端 = 返工。等 Rust 打开命令 + 去注册表方向落地后再解耦。",
-   "block": "等后端"
-  }
- ],
- "tests": [
-  {
-   "covers": "#1 brand-head-three-entry",
-   "atoms": [
-    1
-   ],
-   "shots": [
-    "Home 顶部品牌头 + New skill/Open folder 并列 + Recent 标题(无「Desktop workspace」装饰标签)"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "渲染 WelcomePage,断言存在 New skill / Open folder 两按钮与 Recent 标题。",
-    "RED:当前 Recent 头区含「Desktop workspace」装饰标签 → 断言『无该装饰标签』失败。",
-    "GREEN:删标签后断言 Recent 头区不含「Desktop workspace」文本。"
-   ],
-   "layer2": [
-    "启动应用(currentSkillId=null)→ 看到品牌头 + New skill + Open folder + Recent → 不应看到「Desktop workspace」装饰标签或注册表统计标语。"
-   ],
-   "fe_status_prev": "偏差",
-   "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
-  },
-  {
-   "covers": "#2 open-folder",
-   "atoms": [
-    2
-   ],
-   "shots": [
-    "选一个缺 GRAPH.md/SKILL.md 的空目录 → 进入工作区(不弹 missing-manifest 拒绝 toast)"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "mock selectSkillDirectory 返回一个普通空目录路径,模拟点 Open folder。",
-    "RED:当前 openSkill 仍走 POST /api/skills import + formatImportSkillError 留 manifest 拒绝分支 → 断言『打开不经注册』『无 manifest 拒绝文案』失败。",
-    "GREEN(前端可做部分):删死分支后断言不再产生 manifest 拒绝文案;解耦注册部分待 Rust 打开命令后断言不调 POST /api/skills。"
-   ],
-   "layer2": [
-    "真跑(关键,D2):Open folder → 选一个缺 GRAPH.md/SKILL.md 的空目录 → 应进入工作区(交 compile/copilot)→ 不应看到「Cannot import this folder: missing GRAPH.md or SKILL.md」。",
-    "目标形态(解耦走 Rust)落地前先对现状路径真跑取证,落地后重跑断言不经 POST /api/skills。"
-   ],
-   "fe_status_prev": "偏差",
-   "fe_resync": "覆盖项已全绿(2026-06-20)"
-  },
-  {
-   "covers": "#3 recent-mru-grid",
-   "atoms": [
-    3
-   ],
-   "shots": [
-    "打开几个 skill 后回 Home → Recent 卡只显示名+路径+最近时间(无 phases/Golden/Config-drift)"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "mock 无后端(GET /api/skills 失败 / 空),MRU 有 2 条 → 断言 Recent 卡仍渲染(纯 MRU)。",
-    "RED:当前卡片渲 phaseCount/has_golden/config_mismatch → 断言『卡片不含这些派生字段』失败。",
-    "GREEN:卡片只渲 displayName/shortPath/lastOpenedAt 后断言不含 phases/Golden/Config-drift 文案/徽章。"
-   ],
-   "layer2": [
-    "打开几个 skill 后回 Home → Recent 卡只显示名+路径+最近时间 → 不应看到 0 phases / Golden / Config drift 徽章。"
-   ],
-   "fe_status_prev": "偏差",
-   "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
-  },
-  {
-   "covers": "#4 open-recent-card",
-   "atoms": [
-    4
-   ],
-   "shots": [
-    "后端不可用时点 Recent 卡仍能进工作区"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "mock 点 Recent 卡 → 断言 openSkill 被调、rememberWorkspace 刷新最近时间。",
-    "RED:当前进入前走 POST /api/skills(后端不可用会卡)→ 断言『后端不可用也能进入』失败。",
-    "GREEN(待 Rust 打开命令):解耦后断言纯 MRU 进入、不依赖 POST /api/skills。"
-   ],
-   "layer2": [
-    "真跑:断开后端,点一张 Recent 卡 → 目标应仍能进工作区(现状会卡在注册,取证后端解耦前的差距)。"
-   ],
-   "fe_status_prev": "偏差",
-   "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
-  },
-  {
-   "covers": "#5 recent-card-reveal",
-   "atoms": [
-    5
-   ],
-   "shots": [
-    "点卡片 ⋯ Show in folder → 系统文件管理器定位该文件夹"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "mock revealInFileManager,点 ⋯ Show in folder → 断言以该卡 absolutePath 调用 revealInFileManager。",
-    "断言浏览器态降级复制路径到剪贴板。"
-   ],
-   "layer2": [
-    "真跑(桌面):点卡片 ⋯ Show in folder → Finder/Explorer 定位到该文件夹。"
-   ]
-  },
-  {
-   "covers": "#6 remove-skill-entry",
-   "atoms": [
-    6
-   ],
-   "screenshots": [
+  "id": "n1_home_impl",
+  "title": "N1.1 Home/Welcome 屏 · 实施详情",
+  "design_ref": "n1_home_design",
+  "intro": "本页是 Home/Welcome 屏前端的现状/差距/实施计划/测试,1:1 对应设计页 n1_home_design(原子 #1–#9)。代码一律按「文件名 + 函数/对象名」引用(可全局搜索定位,不写行号)。Home 现状的核心债=仍是「注册表模型外壳套了一层 Recent」:卡片派生字段、打开/删除的后端调用都依赖 GET/POST/DELETE /api/skills,与 D1/D11(去注册表 / IDE 模型)冲突;skill 发现/读写后端契约见 n1_contract 机制 A,native-fs 命令见机制 B。",
+  "functions": [
     {
-     "file": "n1-recent-remove-menu.png",
-     "caption": "卡片 ⋯ 菜单的「Remove from recent」项(shadcn variant=destructive + Trash2 图标);#163 退役的删盘 Remove 不在,此项 MRU-only 不碰盘文件"
+      "n": 1,
+      "cap": "brand-head-three-entry",
+      "design_ref": "atom-1",
+      "current": "现状:信息架构已在、偏差在装饰与措辞。WelcomePage(Home 屏根组件)渲品牌头(Layers 图标 + GSkill Studio 标题 + 副标题)+ 两列 grid 放 New skill / Open folder + Recent 区标题。偏差:Recent 头区右侧挂一枚无操作价值的「Desktop workspace」装饰标签(Sparkles 图标 + 文字,无 handler);标题用「Recent skills」措辞。",
+      "gap": "差距:删 Recent 头区的「Desktop workspace」装饰标签;措辞去注册表化(skill 是文件夹,非注册表条目)。纯前端、零后端依赖。",
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "be_dep": "n/a(纯前端布局/文案)。",
+      "fe_status_prev": "偏差",
+      "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
     },
     {
-     "file": "n1-recent-removed-toast.png",
-     "caption": "点「Remove from recent」→ 该卡从最近列表移除 + Sonner success toast;盘上 skill 文件夹原样保留(守住 R1:不在 IDE 内删 skill)"
+      "n": 2,
+      "cap": "open-folder",
+      "design_ref": "atom-2",
+      "current": "现状:打开能用但耦合注册 + 留死文案。importSkillDirectory(打开文件夹入口)→ selectSkillDirectory(Rust 目录选择器)→ openSkill;openSkill 里 resolveBackendSkillIdForWorkspace 先 POST /api/skills(import_existing=true)做导入注册再进工作区(把「打开」耦合成「注册」)。formatImportSkillError 仍含「missing GRAPH.md or SKILL.md」等 manifest 拒绝文案——后端 create_new_skill 已改 warning 放行(D2),这些是死分支。术语主入口已是「Open folder / Choose any local folder」,但 toast 等处仍有「Import」残留。",
+      "gap": "差距:① 删 formatImportSkillError 的 manifest/lint 拒绝死分支,只留 OS 级失败(纯前端可做)。② 解耦 POST /api/skills 注册——打开=记 MRU + 进工作区、落盘走 Studio Rust 后端 native-fs(等机制 B 的 Rust 打开命令,现未实现=后端先于前端)。③ 残留「Import」措辞统一为「打开文件夹」。",
+      "fe_status": "符合",
+      "be_status": "契约问题",
+      "be_dep": "部分等后端:删死文案 + 改措辞是前端独立;解耦注册走 Rust 等机制 B 的 Rust 建/打开命令(未实现)。后端 D2 放宽已就绪(导入不再拒缺 manifest)。",
+      "fe_status_prev": "偏差",
+      "fe_resync": "batch3 已修复+测试通过(2026-06-20)"
+    },
+    {
+      "n": 3,
+      "cap": "recent-mru-grid",
+      "design_ref": "atom-3",
+      "current": "现状:偏差——卡片挂注册表派生字段。visibleWorkspaces(把 MRU 与注册表合并的 memo)对每条 MRU 按目录路径匹配 GET /api/skills 的 SkillSummary,给卡片挂 phase_count / last_run_at,卡片还渲 has_golden(Golden 徽章)、config_mismatch(Config drift 徽章 + Tooltip),并把注册表里 MRU 没有的 skill 也追加进列表。字段全来自 useSkills(GET /api/skills 聚合)。",
+      "gap": "差距:① 卡片只渲 MRU 字段(displayName + shortPath + lastOpenedAt),停读 phase_count/last_run_at/has_golden/config_mismatch——纯前端停读即可(此步不需后端先动)。② 拆掉 visibleWorkspaces 的注册表合并 + 追加逻辑,Recent 只来自 useRecentSkills 的 MRU。③ 完全弃用 GET /api/skills(去注册表收尾)属契约重塑、等后端。",
+      "fe_status": "符合",
+      "be_status": "契约问题",
+      "be_dep": "卡片极简化(停读派生字段)前端独立;完全去注册表(弃 GET /api/skills)等后端重塑(D1/D11)。",
+      "fe_status_prev": "偏差",
+      "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
+    },
+    {
+      "n": 4,
+      "cap": "open-recent-card",
+      "design_ref": "atom-4",
+      "current": "现状:开卡仍经注册。点卡 → openWorkspace → openSkill → resolveBackendSkillIdForWorkspace 走 POST /api/skills 解析后端 skillId 再进工作区;后端不可用会卡在这步。MRU 刷新走 rememberWorkspace。",
+      "gap": "差距:纯靠 MRU 路径+名进入,进工作区后再按需对接后端;解耦 POST /api/skills 注册(与 #2 同,等机制 B 的 Rust 打开命令)。",
+      "fe_status": "符合",
+      "be_status": "契约问题",
+      "be_dep": "等后端:解耦注册走 Rust 打开命令(机制 B 未实现)。",
+      "fe_status_prev": "偏差",
+      "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
+    },
+    {
+      "n": 5,
+      "cap": "recent-card-reveal",
+      "design_ref": "atom-5",
+      "current": "现状:已实现且符合。卡片 ⋯ / 右键菜单的「Show in folder」→ handleReveal → revealInFileManager(Rust reveal_in_file_manager 命令;浏览器降级复制路径)。纯定位、不碰注册表。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "be_dep": "已就绪:Studio Rust 后端 reveal_in_file_manager 已实现。"
+    },
+    {
+      "n": 6,
+      "cap": "remove-skill-entry",
+      "design_ref": "atom-6",
+      "current": "现状:符合——危险版 Remove 已退役、新增安全版「Remove from recent」。① #163 删掉了会删盘文件的旧 Remove(整条 handleDelete → requestSkillDeleteConfirmation → DELETE /api/skills/{id} 退役),守住 R1(不在 IDE 内删 skill)。② #164 新增 MRU-only 的「Remove from recent」:卡片 ⋯ 下拉 / 右键菜单项(shadcn DropdownMenuItem / ContextMenuItem variant=destructive + Trash2 图标)→ handleRemove → removeWorkspace(identity) 只清最近列表条目 + Sonner success toast,绝不碰盘上 skill 文件夹。失效自动剪枝助手 pruneMissingRecentWorkspaces 仍无调用方(② 失效卡自动移除路径待接)。",
+      "gap": "差距:① 已闭合——删盘 Remove 退役(#163)+ 安全的 Remove from recent 让用户整理最近列表而不删文件(#164),R1 守住。② 失效路径「点失效卡 → 报错 + 自动移除」仍待:点失效卡报错 toast + removeWorkspace 接上 pruneMissingRecentWorkspaces——但其 exists 谓词(路径存在性检查)需 Studio Rust 后端能力支撑,现无对应 Rust 命令=这部分等后端。",
+      "fe_status": "符合",
+      "be_status": "契约问题",
+      "be_dep": "Remove from recent(MRU)纯前端、无后端依赖;只剩 ② 失效卡自动移除的路径存在性检查等后端(机制 B 的 Rust exists 能力,未实现)。",
+      "fe_status_prev": "偏差",
+      "fe_resync": "核验:#163 退役删盘 Remove、#164 新增 MRU-only Remove from recent,均已实测(2026-06-22)"
+    },
+    {
+      "n": 7,
+      "cap": "recent-empty-state",
+      "design_ref": "atom-7",
+      "current": "现状:偏差——文案用旧词。空态(Empty 系列组件)标题「No skills found」、说明「Create or import a skill to populate this workspace.」用「import」旧注册表词;可见性靠 visibleWorkspaces(含注册表)判断。",
+      "gap": "差距:文案改「打开文件夹」(open folder)、IDE 起点语气(R2);空态判断改看 MRU 是否为空。纯前端。",
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "be_dep": "n/a(纯前端文案/判断)。",
+      "fe_status_prev": "偏差",
+      "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
+    },
+    {
+      "n": 8,
+      "cap": "recent-skeleton",
+      "design_ref": "atom-8",
+      "current": "现状:未实施——无骨架。WelcomePage 无任何 skeleton / loading 分支(grep skeleton/isLoading/animate-pulse 在 welcome 目录无命中),useSkills 只暴露 skillListError、无 isLoading;Recent 网格直接 map 渲染,GET /api/skills 在途时靠 MRU 渲或空白。",
+      "gap": "差距:加 Recent 加载骨架占位(D6),沿用 Settings 页 ProviderListSkeleton 风格、用 shadcn Skeleton,不自造组件。纯前端。",
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "be_dep": "n/a(纯前端骨架展示)。",
+      "fe_status_prev": "未实施",
+      "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
+    },
+    {
+      "n": 9,
+      "cap": "recent-load-failure-fallback",
+      "design_ref": "atom-9",
+      "current": "现状:已实现且符合(去注册表后局部红框已重建)。错误源已从 GET /api/skills 切到 MRU/路径校验:useRecentSkills.ts(读最近打开列表的 hook)现把 MRU 读取 / 路径有效性校验的错误显式抛出(不再用静默 .catch 吞掉、并记 WARN 日志),WelcomePage.tsx 在始终可点的 New skill / Open folder 入口下方渲一条局部 destructive Alert(shadcn 红框告警)——符合设计『局部红框 + 不阻塞入口』:品牌头与新建/打开入口照常可用。",
+      "gap": "符合设计,无需改。错误源已切到 MRU/路径校验,局部红框 + 不阻塞入口已落地。",
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "be_dep": "n/a(纯前端失败退路)。",
+      "fe_resync": "已落地:useRecentSkills.ts 显式浮出 MRU 读取 / 路径校验错误(去静默 .catch、记 WARN),WelcomePage.tsx 在常驻入口下方渲局部 destructive Alert(不阻塞)。测试 WelcomePage.test.tsx + useRecentSkills.test.ts 覆盖;verified by green gates + post-audit(2026-06-20)"
     }
-   ],
-   "shots": [
-    "点一张失效卡 → 报错 toast + 该卡从 Recent 自动移除(② 待 Rust exists)"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "GREEN(#163 R1):断言 ⋯ / 右键菜单不含会删盘的旧 Remove、点卡不调 DELETE /api/skills。",
-    "GREEN(#164 MRU remove):静态渲染断言导出 REMOVE_ACTION_LABEL='Remove from recent' + 卡带 aria-label『More actions for …』;e2e 点该项 → handleRemove → removeWorkspace(identity) 把卡移出最近列表 + success toast,且全程不发 DELETE /api/skills。",
-    "GREEN(失效自动移除,待 Rust exists):mock exists 谓词判路径不存在 → 断言点失效卡报错 + removeWorkspace 把它从 MRU 移除。"
-   ],
-   "layer2": [
-    "打开几个 skill 回 Home → 卡片 ⋯ / 右键菜单有「Remove from recent」(无删盘 Remove);点它 → 卡从最近列表消失 + toast,磁盘 skill 文件夹仍在。",
-    "真跑(待 Rust exists):把某 skill 文件夹在系统里删掉后点其 Recent 卡 → 应报「文件夹已不存在」并自动从 Recent 移除。"
-   ],
-   "fe_status_prev": "偏差",
-   "fe_resync": "覆盖点已符合:#163 退役删盘 Remove + #164 新增 MRU-only Remove from recent(真机实测 2026-06-22);② 失效自动移除待 Rust exists"
-  },
-  {
-   "covers": "#7 recent-empty-state",
-   "atoms": [
-    7
-   ],
-   "shots": [
-    "首次无任何最近 skill → 空态引导新建/打开,文案用「打开文件夹」"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "mock MRU 为空 → 断言渲染空态卡。",
-    "RED:当前空态文案含「import」→ 断言『文案用打开文件夹、无 import』失败。",
-    "GREEN:改文案后断言空态说明含「打开文件夹」、不含「import」。"
-   ],
-   "layer2": [
-    "清空 MRU 进 Home → 看到空态引导新建/打开 → 文案应是「打开文件夹」语气、不含「import」。"
-   ],
-   "fe_status_prev": "偏差",
-   "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
-  },
-  {
-   "covers": "#8 recent-skeleton",
-   "atoms": [
-    8
-   ],
-   "shots": [
-    "数据未到位时 Recent 区显示骨架占位(非空白)",
-    "数据到位后骨架换真卡"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "RED:当前 WelcomePage 无 skeleton 分支 → 断言『加载态渲染骨架』失败。",
-    "GREEN:mock 加载态 → 断言 Recent 区渲染 shadcn Skeleton 占位条;数据到位后断言换成真卡。"
-   ],
-   "layer2": [
-    "慢网络/mock 延迟下进 Home → 看 Recent 区数据未到时是否有骨架占位、不空白闪烁。"
-   ],
-   "fe_status_prev": "未实施",
-   "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
-  },
-  {
-   "covers": "#9 recent-load-failure-fallback",
-   "atoms": [
-    9
-   ],
-   "shots": [
-    "Recent 加载失败显示局部红框,New skill/Open folder 入口仍可用"
-   ],
-   "fe_status": "符合",
-   "layer1": [
-    "mock useRecentSkills 的 MRU 读取 / 路径校验报错 → 断言 WelcomePage 在入口下方渲局部 destructive Alert。",
-    "断言品牌头 + New skill / Open folder 入口仍渲染且可点(不被阻塞)。",
-    "断言错误被显式浮出(不被静默 .catch 吞)。"
-   ],
-   "layer2": [
-    "真跑:让 Recent 数据源失败 → 看局部红框出现且新建/打开仍能用。"
-   ],
-   "fe_resync": "已真覆盖:WelcomePage.test.tsx(局部 destructive Alert 渲染 + 入口不被阻塞)+ useRecentSkills.test.ts(MRU/路径校验错误显式浮出、不静默);verified by green gates + post-audit(2026-06-20)"
-  }
- ]
+  ],
+  "plan": [
+    {
+      "step": 1,
+      "what": "#1 去装饰 + #7 空态术语:删 Recent 头区「Desktop workspace」装饰标签;空态文案「Create or import」→「打开文件夹」、IDE 起点语气;#2 残留「Import」措辞统一「打开文件夹」。",
+      "depends_on": "无(纯文案/装饰,零后端依赖)。",
+      "why": "改动最小、零依赖、消除注册表语汇噪音,最先做掉。",
+      "block": "前端独立"
+    },
+    {
+      "step": 2,
+      "what": "#3 Recent 卡极简化:卡片只渲 displayName + shortPath + lastOpenedAt,停读 phase_count/last_run_at/has_golden/config_mismatch;拆 visibleWorkspaces 的注册表合并 + 追加逻辑,Recent 只来自 useRecentSkills 的 MRU。",
+      "depends_on": "前端:停读派生字段、改 visibleWorkspaces 只读 MRU。后端不动(完全弃用 GET /api/skills 留到 Step 6)。",
+      "why": "纯前端停读即落地 D-1-1(卡片极简);可与 Step 1 并行。",
+      "block": "前端独立"
+    },
+    {
+      "step": 3,
+      "what": "#6 删 Remove 入口:移除卡片 ⋯ / 右键菜单的 Remove 项 + 停调 DELETE /api/skills(R1);#2/#14 删 formatImportSkillError/formatCreateSkillError 的 manifest/lint 拒绝死分支(D2 后已不可达),只留 OS 级失败。",
+      "depends_on": "前端:删菜单项/调用/死分支。后端不动。",
+      "why": "纯前端清理,落地 R1(不在 IDE 删)+ D2(删校验门死文案);可与 Step 1/2 并行。",
+      "block": "前端独立"
+    },
+    {
+      "step": 4,
+      "what": "#8 Recent skeleton:加 Recent 加载骨架占位(D6),沿用 ProviderListSkeleton 风格、用 shadcn Skeleton。",
+      "depends_on": "前端:加骨架分支。后端不动。",
+      "why": "纯前端 NFR 补齐,独立可做。",
+      "block": "前端独立"
+    },
+    {
+      "step": 5,
+      "what": "#6 失效自动移除:点失效 Recent 卡时报错 toast + removeWorkspace,接上 pruneMissingRecentWorkspaces——其 exists 谓词的路径存在性检查需 Studio Rust 后端命令。",
+      "depends_on": "等后端:Studio Rust 后端的路径存在性检查能力(机制 B,现未实现)。",
+      "why": "失效自动移除的「路径存在性检查」是 native-fs 依赖,与前端清理(Step 3)解耦单列——避免把不同依赖打包成一步(谁阻塞谁一眼清)。",
+      "block": "等后端"
+    },
+    {
+      "step": 6,
+      "what": "#2/#4 解耦注册 + 去注册表收尾:打开/开卡解耦 POST /api/skills,改走 Studio Rust 后端 native-fs 打开命令、不注册;Home 完全弃用 GET /api/skills(去注册表),Recent 纯 MRU。",
+      "depends_on": "等后端:机制 B 的 Rust 建/打开命令(未实现)+ skills 服务去注册表重塑(D1/D11)。",
+      "why": "后端先于前端:契约没定就改前端 = 返工。等 Rust 打开命令 + 去注册表方向落地后再解耦。",
+      "block": "等后端"
+    }
+  ],
+  "tests": [
+    {
+      "covers": "#1 brand-head-three-entry",
+      "atoms": [
+        1
+      ],
+      "shots": [
+        "Home 顶部品牌头 + New skill/Open folder 并列 + Recent 标题(无「Desktop workspace」装饰标签)"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "渲染 WelcomePage,断言存在 New skill / Open folder 两按钮与 Recent 标题。",
+        "RED:当前 Recent 头区含「Desktop workspace」装饰标签 → 断言『无该装饰标签』失败。",
+        "GREEN:删标签后断言 Recent 头区不含「Desktop workspace」文本。"
+      ],
+      "layer2": [
+        "启动应用(currentSkillId=null)→ 看到品牌头 + New skill + Open folder + Recent → 不应看到「Desktop workspace」装饰标签或注册表统计标语。"
+      ],
+      "fe_status_prev": "偏差",
+      "fe_resync": "覆盖的功能点已全部符合(2026-06-20)",
+      "screenshots": [
+        {
+          "file": "n1-01-home.png",
+          "caption": "Home 顶部品牌头 + New skill / Open folder 双入口 + Recent 区(无多余装饰标签)"
+        }
+      ]
+    },
+    {
+      "covers": "#2 open-folder",
+      "atoms": [
+        2
+      ],
+      "shots": [
+        "选一个缺 GRAPH.md/SKILL.md 的空目录 → 进入工作区(不弹 missing-manifest 拒绝 toast)"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "mock selectSkillDirectory 返回一个普通空目录路径,模拟点 Open folder。",
+        "RED:当前 openSkill 仍走 POST /api/skills import + formatImportSkillError 留 manifest 拒绝分支 → 断言『打开不经注册』『无 manifest 拒绝文案』失败。",
+        "GREEN(前端可做部分):删死分支后断言不再产生 manifest 拒绝文案;解耦注册部分待 Rust 打开命令后断言不调 POST /api/skills。"
+      ],
+      "layer2": [
+        "真跑(关键,D2):Open folder → 选一个缺 GRAPH.md/SKILL.md 的空目录 → 应进入工作区(交 compile/copilot)→ 不应看到「Cannot import this folder: missing GRAPH.md or SKILL.md」。",
+        "目标形态(解耦走 Rust)落地前先对现状路径真跑取证,落地后重跑断言不经 POST /api/skills。"
+      ],
+      "fe_status_prev": "偏差",
+      "fe_resync": "覆盖项已全绿(2026-06-20)"
+    },
+    {
+      "covers": "#3 recent-mru-grid",
+      "atoms": [
+        3
+      ],
+      "shots": [
+        "打开几个 skill 后回 Home → Recent 卡只显示名+路径+最近时间(无 phases/Golden/Config-drift)"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "mock 无后端(GET /api/skills 失败 / 空),MRU 有 2 条 → 断言 Recent 卡仍渲染(纯 MRU)。",
+        "RED:当前卡片渲 phaseCount/has_golden/config_mismatch → 断言『卡片不含这些派生字段』失败。",
+        "GREEN:卡片只渲 displayName/shortPath/lastOpenedAt 后断言不含 phases/Golden/Config-drift 文案/徽章。"
+      ],
+      "layer2": [
+        "打开几个 skill 后回 Home → Recent 卡只显示名+路径+最近时间 → 不应看到 0 phases / Golden / Config drift 徽章。"
+      ],
+      "fe_status_prev": "偏差",
+      "fe_resync": "覆盖的功能点已全部符合(2026-06-20)",
+      "screenshots": [
+        {
+          "file": "n1-01-home.png",
+          "caption": "Recent 卡只显示名称 + 路径 + 最近时间,无 phases / Golden / Config-drift 装饰"
+        }
+      ]
+    },
+    {
+      "covers": "#4 open-recent-card",
+      "atoms": [
+        4
+      ],
+      "shots": [
+        "后端不可用时点 Recent 卡仍能进工作区"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "mock 点 Recent 卡 → 断言 openSkill 被调、rememberWorkspace 刷新最近时间。",
+        "RED:当前进入前走 POST /api/skills(后端不可用会卡)→ 断言『后端不可用也能进入』失败。",
+        "GREEN(待 Rust 打开命令):解耦后断言纯 MRU 进入、不依赖 POST /api/skills。"
+      ],
+      "layer2": [
+        "真跑:断开后端,点一张 Recent 卡 → 目标应仍能进工作区(现状会卡在注册,取证后端解耦前的差距)。"
+      ],
+      "fe_status_prev": "偏差",
+      "fe_resync": "覆盖的功能点已全部符合(2026-06-20)",
+      "screenshots": [
+        {
+          "file": "n1-03-workspace-open.png",
+          "caption": "点 Recent 卡进入工作区(图中 Copilot 后端不可用,工作区仍正常进入)"
+        }
+      ]
+    },
+    {
+      "covers": "#5 recent-card-reveal",
+      "atoms": [
+        5
+      ],
+      "shots": [
+        "点卡片 ⋯ Show in folder → 系统文件管理器定位该文件夹"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "mock revealInFileManager,点 ⋯ Show in folder → 断言以该卡 absolutePath 调用 revealInFileManager。",
+        "断言浏览器态降级复制路径到剪贴板。"
+      ],
+      "layer2": [
+        "真跑(桌面):点卡片 ⋯ Show in folder → Finder/Explorer 定位到该文件夹。"
+      ],
+      "screenshots": [
+        {
+          "file": "n1-02-card-menu.png",
+          "caption": "卡片 ⋯ 菜单展开:Show in folder + Remove from recent(headless 无系统文件管理器,仅示菜单展开)"
+        }
+      ]
+    },
+    {
+      "covers": "#6 remove-skill-entry",
+      "atoms": [
+        6
+      ],
+      "screenshots": [
+        {
+          "file": "n1-13-remove-toast.png",
+          "caption": "⋯ → Remove from recent → 成功 toast「Removed n1-test-skill from recent」+ 卡片移除,盘上文件不删"
+        }
+      ],
+      "shots": [
+        "点一张失效卡 → 报错 toast + 该卡从 Recent 自动移除(② 待 Rust exists)"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "GREEN(#163 R1):断言 ⋯ / 右键菜单不含会删盘的旧 Remove、点卡不调 DELETE /api/skills。",
+        "GREEN(#164 MRU remove):静态渲染断言导出 REMOVE_ACTION_LABEL='Remove from recent' + 卡带 aria-label『More actions for …』;e2e 点该项 → handleRemove → removeWorkspace(identity) 把卡移出最近列表 + success toast,且全程不发 DELETE /api/skills。",
+        "GREEN(失效自动移除,待 Rust exists):mock exists 谓词判路径不存在 → 断言点失效卡报错 + removeWorkspace 把它从 MRU 移除。"
+      ],
+      "layer2": [
+        "打开几个 skill 回 Home → 卡片 ⋯ / 右键菜单有「Remove from recent」(无删盘 Remove);点它 → 卡从最近列表消失 + toast,磁盘 skill 文件夹仍在。",
+        "真跑(待 Rust exists):把某 skill 文件夹在系统里删掉后点其 Recent 卡 → 应报「文件夹已不存在」并自动从 Recent 移除。"
+      ],
+      "fe_status_prev": "偏差",
+      "fe_resync": "覆盖点已符合:#163 退役删盘 Remove + #164 新增 MRU-only Remove from recent(真机实测 2026-06-22);② 失效自动移除待 Rust exists"
+    },
+    {
+      "covers": "#7 recent-empty-state",
+      "atoms": [
+        7
+      ],
+      "shots": [
+        "首次无任何最近 skill → 空态引导新建/打开,文案用「打开文件夹」"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "mock MRU 为空 → 断言渲染空态卡。",
+        "RED:当前空态文案含「import」→ 断言『文案用打开文件夹、无 import』失败。",
+        "GREEN:改文案后断言空态说明含「打开文件夹」、不含「import」。"
+      ],
+      "layer2": [
+        "清空 MRU 进 Home → 看到空态引导新建/打开 → 文案应是「打开文件夹」语气、不含「import」。"
+      ],
+      "fe_status_prev": "偏差",
+      "fe_resync": "覆盖的功能点已全部符合(2026-06-20)",
+      "screenshots": [
+        {
+          "file": "n1-14-empty-state.png",
+          "caption": "无最近 skill 时空态:No recent skills + 新建/打开引导"
+        }
+      ]
+    },
+    {
+      "covers": "#8 recent-skeleton",
+      "atoms": [
+        8
+      ],
+      "shots": [
+        "数据未到位时 Recent 区显示骨架占位(非空白)",
+        "数据到位后骨架换真卡"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "RED:当前 WelcomePage 无 skeleton 分支 → 断言『加载态渲染骨架』失败。",
+        "GREEN:mock 加载态 → 断言 Recent 区渲染 shadcn Skeleton 占位条;数据到位后断言换成真卡。"
+      ],
+      "layer2": [
+        "慢网络/mock 延迟下进 Home → 看 Recent 区数据未到时是否有骨架占位、不空白闪烁。"
+      ],
+      "fe_status_prev": "未实施",
+      "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
+    },
+    {
+      "covers": "#9 recent-load-failure-fallback",
+      "atoms": [
+        9
+      ],
+      "shots": [
+        "Recent 加载失败显示局部红框,New skill/Open folder 入口仍可用"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "mock useRecentSkills 的 MRU 读取 / 路径校验报错 → 断言 WelcomePage 在入口下方渲局部 destructive Alert。",
+        "断言品牌头 + New skill / Open folder 入口仍渲染且可点(不被阻塞)。",
+        "断言错误被显式浮出(不被静默 .catch 吞)。"
+      ],
+      "layer2": [
+        "真跑:让 Recent 数据源失败 → 看局部红框出现且新建/打开仍能用。"
+      ],
+      "fe_resync": "已真覆盖:WelcomePage.test.tsx(局部 destructive Alert 渲染 + 入口不被阻塞)+ useRecentSkills.test.ts(MRU/路径校验错误显式浮出、不静默);verified by green gates + post-audit(2026-06-20)"
+    }
+  ]
 }

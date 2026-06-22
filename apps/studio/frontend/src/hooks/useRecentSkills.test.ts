@@ -1,33 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  pruneMissingRecentWorkspaces,
-  pruneMissingRecentWorkspacesAsync,
-  readRecentWorkspaces,
-  readRecentWorkspacesResult,
-  rememberRecentWorkspace,
+  buildRecentEntry,
+  loadRecentWorkspaces,
+  mergeRecent,
+  recentWorkspaceIdentity,
+  RECENT_CAP,
+  type RecentLoadDeps,
   type RecentWorkspaceEntry,
 } from './useRecentSkills'
-
-// The default vitest environment here is node (no jsdom), and the MRU helpers
-// guard on `typeof window` / use `localStorage`. Stub a minimal in-memory
-// localStorage + a window global so the real helpers exercise their disk path.
-function createMemoryStorage(): Storage {
-  const store = new Map<string, string>()
-  return {
-    get length() {
-      return store.size
-    },
-    clear: () => store.clear(),
-    getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
-    setItem: (key: string, value: string) => {
-      store.set(key, value)
-    },
-    removeItem: (key: string) => {
-      store.delete(key)
-    },
-    key: (index: number) => Array.from(store.keys())[index] ?? null,
-  } as Storage
-}
 
 const present: RecentWorkspaceEntry = {
   absolutePath: '/tmp/present',
@@ -42,98 +22,127 @@ const missing: RecentWorkspaceEntry = {
   lastOpenedAt: '2026-06-18T09:00:00.000Z',
 }
 
-let storage: Storage
-
-beforeEach(() => {
-  storage = createMemoryStorage()
-  vi.stubGlobal('window', {})
-  vi.stubGlobal('localStorage', storage)
-  storage.setItem('recentWorkspaces', JSON.stringify([present, missing]))
-})
+function makeDeps(over: Partial<RecentLoadDeps> = {}): RecentLoadDeps {
+  return {
+    list: vi.fn(async () => [present, missing]),
+    exists: vi.fn(async () => true),
+    remove: vi.fn(async () => undefined),
+    ...over,
+  }
+}
 
 afterEach(() => {
-  vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
 
-describe('pruneMissingRecentWorkspacesAsync', () => {
-  it('drops entries whose folder no longer exists and rewrites the MRU', async () => {
-    const exists = vi.fn(async (path: string) => path === '/tmp/present')
-
-    const next = await pruneMissingRecentWorkspacesAsync(exists)
-
-    expect(next).toEqual([present])
-    expect(readRecentWorkspaces()).toEqual([present])
-    expect(exists).toHaveBeenCalledTimes(2)
+describe('mergeRecent (dedupe + prepend most-recent + cap)', () => {
+  it('prepends a new entry', () => {
+    const next = mergeRecent([present], { ...missing })
+    expect(next.map((w) => w.absolutePath)).toEqual(['/tmp/missing', '/tmp/present'])
   })
 
-  it('leaves the MRU untouched when every folder still exists', async () => {
-    const setItem = vi.spyOn(storage, 'setItem')
-    const exists = vi.fn(async () => true)
-
-    const next = await pruneMissingRecentWorkspacesAsync(exists)
-
-    expect(next).toEqual([present, missing])
-    // No rewrite when nothing was pruned, so the MRU store is not churned.
-    expect(setItem).not.toHaveBeenCalled()
+  it('dedupes by identity, keeping the freshly-prepended copy', () => {
+    const updated = { ...present, displayName: 'Present v2' }
+    const next = mergeRecent([present, missing], updated)
+    expect(next.map((w) => w.absolutePath)).toEqual(['/tmp/present', '/tmp/missing'])
+    expect(next[0].displayName).toBe('Present v2')
   })
 
-  it('keeps the sync predicate variant working for callers that have one', () => {
-    const next = pruneMissingRecentWorkspaces((path) => path === '/tmp/present')
-    expect(next).toEqual([present])
-    expect(readRecentWorkspaces()).toEqual([present])
-  })
-
-  it('rememberRecentWorkspace dedupes by identity and prepends most-recent', () => {
-    storage.removeItem('recentWorkspaces')
-    rememberRecentWorkspace({ absolutePath: '/tmp/a', displayName: 'A' })
-    rememberRecentWorkspace({ absolutePath: '/tmp/b', displayName: 'B' })
-    rememberRecentWorkspace({ absolutePath: '/tmp/a', displayName: 'A2' })
-
-    const list = readRecentWorkspaces()
-    expect(list.map((w) => w.absolutePath)).toEqual(['/tmp/a', '/tmp/b'])
-    expect(list[0].displayName).toBe('A2')
+  it('caps the list at RECENT_CAP, dropping the oldest', () => {
+    const list: RecentWorkspaceEntry[] = Array.from({ length: RECENT_CAP }, (_, i) => ({
+      absolutePath: `/tmp/skill-${i}`,
+      displayName: `Skill ${i}`,
+      identity: `local:/tmp/skill-${i}`,
+      lastOpenedAt: '2026-06-18T00:00:00.000Z',
+    }))
+    const fresh = buildRecentEntry({ absolutePath: '/tmp/new', displayName: 'New' }, '2026-06-19T00:00:00.000Z')
+    const next = mergeRecent(list, fresh)
+    expect(next).toHaveLength(RECENT_CAP)
+    expect(next[0].absolutePath).toBe('/tmp/new')
+    expect(next.map((w) => w.absolutePath)).not.toContain(`/tmp/skill-${RECENT_CAP - 1}`)
   })
 })
 
-describe('readRecentWorkspacesResult (N1 atom #9 local error fallback)', () => {
-  it('returns the parsed MRU with no error on a clean read', () => {
-    const result = readRecentWorkspacesResult()
+describe('buildRecentEntry / recentWorkspaceIdentity', () => {
+  it('derives the local: identity from the absolute path', () => {
+    expect(recentWorkspaceIdentity('/tmp/x')).toBe('local:/tmp/x')
+  })
+
+  it('builds an entry with the local identity and the given timestamp', () => {
+    const entry = buildRecentEntry({ absolutePath: '/tmp/x', displayName: 'X' }, '2026-06-20T00:00:00.000Z')
+    expect(entry).toEqual({
+      absolutePath: '/tmp/x',
+      displayName: 'X',
+      identity: 'local:/tmp/x',
+      lastOpenedAt: '2026-06-20T00:00:00.000Z',
+    })
+  })
+})
+
+describe('loadRecentWorkspaces (Rust store = single source of truth)', () => {
+  it('returns the native MRU on a clean read with no error', async () => {
+    const deps = makeDeps({ exists: vi.fn(async () => true) })
+    const result = await loadRecentWorkspaces(deps)
 
     expect(result.error).toBeNull()
     expect(result.entries).toEqual([present, missing])
+    expect(deps.remove).not.toHaveBeenCalled()
   })
 
-  it('surfaces a read error instead of silently swallowing a corrupt MRU blob', () => {
-    // A corrupt localStorage blob used to be caught and swallowed into [] (a
-    // zero-silent-failure violation). It must now surface a non-null error so
-    // Home can render the local red box, while still degrading entries to [].
-    storage.setItem('recentWorkspaces', '{not valid json')
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  it('drops entries whose folder is gone AND prunes them from the native store', async () => {
+    const remove = vi.fn(async () => undefined)
+    const deps = makeDeps({
+      exists: vi.fn(async (path: string) => path === '/tmp/present'),
+      remove,
+    })
 
-    const result = readRecentWorkspacesResult()
+    const result = await loadRecentWorkspaces(deps)
 
-    expect(result.entries).toEqual([])
-    expect(result.error).not.toBeNull()
-    expect(typeof result.error).toBe('string')
-    // The failure is logged, never silently swallowed.
-    expect(warnSpy).toHaveBeenCalled()
+    expect(result.entries).toEqual([present])
+    expect(remove).toHaveBeenCalledTimes(1)
+    expect(remove).toHaveBeenCalledWith('local:/tmp/missing')
   })
 
-  it('surfaces a read error when localStorage.getItem itself throws', () => {
-    const throwingStorage = {
-      ...storage,
-      getItem: () => {
-        throw new Error('SecurityError: localStorage blocked')
-      },
-    } as Storage
-    vi.stubGlobal('localStorage', throwingStorage)
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  it('keeps an entry when its existence check throws (flaky check never hides a live workspace)', async () => {
+    const deps = makeDeps({
+      exists: vi.fn(async (path: string) => {
+        if (path === '/tmp/missing') throw new Error('fs hiccup')
+        return true
+      }),
+    })
 
-    const result = readRecentWorkspacesResult()
+    const result = await loadRecentWorkspaces(deps)
+
+    expect(result.entries).toEqual([present, missing])
+    expect(deps.remove).not.toHaveBeenCalled()
+  })
+
+  it('caps the native list at RECENT_CAP', async () => {
+    const big: RecentWorkspaceEntry[] = Array.from({ length: RECENT_CAP + 5 }, (_, i) => ({
+      absolutePath: `/tmp/skill-${i}`,
+      displayName: `Skill ${i}`,
+      identity: `local:/tmp/skill-${i}`,
+      lastOpenedAt: '2026-06-18T00:00:00.000Z',
+    }))
+    const deps = makeDeps({ list: vi.fn(async () => big) })
+
+    const result = await loadRecentWorkspaces(deps)
+
+    expect(result.entries).toHaveLength(RECENT_CAP)
+  })
+
+  it('surfaces a non-null error (and logs it) instead of swallowing a read failure', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const deps = makeDeps({
+      list: vi.fn(async () => {
+        throw new Error('native list unavailable')
+      }),
+    })
+
+    const result = await loadRecentWorkspaces(deps)
 
     expect(result.entries).toEqual([])
-    expect(result.error).toContain('localStorage blocked')
+    expect(result.error).toContain('native list unavailable')
     expect(warnSpy).toHaveBeenCalled()
   })
 })

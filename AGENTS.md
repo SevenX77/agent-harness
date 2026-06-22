@@ -134,6 +134,13 @@ one-page orientation, not the full design.
 
 ## Studio Frontend UI
 
+- **Load the frontend SOP FIRST.** Before planning or touching
+  `apps/studio/frontend`, read `apps/studio/frontend/CLAUDE.md` — a
+  directory-scoped override that replaces the global heavy multi-agent PM
+  workflow with a lightweight single-agent loop for frontend work. Claude Code
+  only auto-loads that nested file *lazily* (once you read a file in that
+  subtree), so a session starting at the repo root won't have it until then —
+  read it explicitly at the start of any frontend task.
 - Before planning, reviewing, or changing `apps/studio/frontend` UI, read
   `docs/development/FRONTEND_UI_SPEC.md`, especially section 2. Treat it as the
   source of truth for Studio frontend layout, interaction, and verification rules.

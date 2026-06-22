@@ -367,3 +367,14 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   /* Firefox fallback (-webkit-text-security is unsupported). */
   font-family: 'text-security-disc', -apple-system, sans-serif;
 }
+
+/* Keep the placeholder readable. The disc font above (a Firefox fallback) would
+   otherwise render the empty-state hint as a row of bullets, making an EMPTY
+   field look like it already holds a masked secret. Force the placeholder back
+   to the normal UI font (and disable text-security) so an empty input shows its
+   hint text, not fake dots. Real typed/saved values still mask via the rules
+   above. */
+.mask-input::placeholder {
+  font-family: var(--font-sans);
+  -webkit-text-security: none;
+}

@@ -66,13 +66,13 @@
    "n": 6,
    "cap": "remove-skill-entry",
    "design_ref": "atom-6",
-   "current": "现状:偏差——Remove 仍在且违 R1。卡片 ⋯ / 右键菜单有 Remove 项 → handleDelete → requestSkillDeleteConfirmation(弹「Remove from Studio?」确认 toast)→ deleteSkill 调 DELETE /api/skills/{id} 注销 + removeWorkspace 删 MRU。失效自动剪枝助手 pruneMissingRecentWorkspaces 已写好但全程无调用方=死代码。",
-   "gap": "差距分两块:① 删 Remove 菜单项 + 停调 DELETE /api/skills(R1:不在 IDE 内删 skill)——纯前端可做。② 失效路径改「点击报错 + 自动移除」:点失效卡时报错 toast + removeWorkspace,接上 pruneMissingRecentWorkspaces——但其 exists 谓词(路径存在性检查)需 Studio Rust 后端能力支撑,现无对应 Rust 命令=这部分等后端。",
+   "current": "现状:符合——危险版 Remove 已退役、新增安全版「Remove from recent」。① #163 删掉了会删盘文件的旧 Remove(整条 handleDelete → requestSkillDeleteConfirmation → DELETE /api/skills/{id} 退役),守住 R1(不在 IDE 内删 skill)。② #164 新增 MRU-only 的「Remove from recent」:卡片 ⋯ 下拉 / 右键菜单项(shadcn DropdownMenuItem / ContextMenuItem variant=destructive + Trash2 图标)→ handleRemove → removeWorkspace(identity) 只清最近列表条目 + Sonner success toast,绝不碰盘上 skill 文件夹。失效自动剪枝助手 pruneMissingRecentWorkspaces 仍无调用方(② 失效卡自动移除路径待接)。",
+   "gap": "差距:① 已闭合——删盘 Remove 退役(#163)+ 安全的 Remove from recent 让用户整理最近列表而不删文件(#164),R1 守住。② 失效路径「点失效卡 → 报错 + 自动移除」仍待:点失效卡报错 toast + removeWorkspace 接上 pruneMissingRecentWorkspaces——但其 exists 谓词(路径存在性检查)需 Studio Rust 后端能力支撑,现无对应 Rust 命令=这部分等后端。",
    "fe_status": "符合",
    "be_status": "契约问题",
-   "be_dep": "拆分:删 Remove + 停调 DELETE 前端独立;失效自动移除的路径存在性检查等后端(机制 B 的 Rust exists 能力,未实现)。",
+   "be_dep": "Remove from recent(MRU)纯前端、无后端依赖;只剩 ② 失效卡自动移除的路径存在性检查等后端(机制 B 的 Rust exists 能力,未实现)。",
    "fe_status_prev": "偏差",
-   "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
+   "fe_resync": "核验:#163 退役删盘 Remove、#164 新增 MRU-only Remove from recent,均已实测(2026-06-22)"
   },
   {
    "n": 7,
@@ -258,22 +258,31 @@
    "atoms": [
     6
    ],
+   "screenshots": [
+    {
+     "file": "n1-recent-remove-menu.png",
+     "caption": "卡片 ⋯ 菜单的「Remove from recent」项(shadcn variant=destructive + Trash2 图标);#163 退役的删盘 Remove 不在,此项 MRU-only 不碰盘文件"
+    },
+    {
+     "file": "n1-recent-removed-toast.png",
+     "caption": "点「Remove from recent」→ 该卡从最近列表移除 + Sonner success toast;盘上 skill 文件夹原样保留(守住 R1:不在 IDE 内删 skill)"
+    }
+   ],
    "shots": [
-    "卡片 ⋯ 菜单无 Remove 项",
-    "点一张失效卡 → 报错 toast + 该卡从 Recent 自动移除"
+    "点一张失效卡 → 报错 toast + 该卡从 Recent 自动移除(② 待 Rust exists)"
    ],
    "fe_status": "符合",
    "layer1": [
-    "RED:当前 ⋯ 菜单有 Remove → handleDelete → DELETE /api/skills → 断言『无 Remove 项』『不调 DELETE /api/skills』失败。",
-    "GREEN(前端):删 Remove 后断言菜单无 Remove、点卡不再调 DELETE /api/skills。",
+    "GREEN(#163 R1):断言 ⋯ / 右键菜单不含会删盘的旧 Remove、点卡不调 DELETE /api/skills。",
+    "GREEN(#164 MRU remove):静态渲染断言导出 REMOVE_ACTION_LABEL='Remove from recent' + 卡带 aria-label『More actions for …』;e2e 点该项 → handleRemove → removeWorkspace(identity) 把卡移出最近列表 + success toast,且全程不发 DELETE /api/skills。",
     "GREEN(失效自动移除,待 Rust exists):mock exists 谓词判路径不存在 → 断言点失效卡报错 + removeWorkspace 把它从 MRU 移除。"
    ],
    "layer2": [
-    "打开几个 skill 回 Home → 卡片 ⋯ 菜单不应有 Remove 项。",
+    "打开几个 skill 回 Home → 卡片 ⋯ / 右键菜单有「Remove from recent」(无删盘 Remove);点它 → 卡从最近列表消失 + toast,磁盘 skill 文件夹仍在。",
     "真跑(待 Rust exists):把某 skill 文件夹在系统里删掉后点其 Recent 卡 → 应报「文件夹已不存在」并自动从 Recent 移除。"
    ],
    "fe_status_prev": "偏差",
-   "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
+   "fe_resync": "覆盖点已符合:#163 退役删盘 Remove + #164 新增 MRU-only Remove from recent(真机实测 2026-06-22);② 失效自动移除待 Rust exists"
   },
   {
    "covers": "#7 recent-empty-state",

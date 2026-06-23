@@ -122,11 +122,6 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
           ? 'border-primary ring-2 ring-primary/30'
           : 'border-border',
       ].join(' ')}
-      onDoubleClick={(event) => {
-        if (resolvedSubgraphPath) {
-          event.stopPropagation()
-        }
-      }}
     >
       <Handle type="target" position={Position.Top} className="!size-2.5 !border-background !bg-primary opacity-60 group-hover:opacity-100 transition-opacity duration-200" />
       <div className="flex items-start gap-3">

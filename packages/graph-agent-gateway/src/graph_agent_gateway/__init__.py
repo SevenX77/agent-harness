@@ -22,8 +22,13 @@ from graph_agent_gateway.gateway_chat_model import GatewayChatModel
 from graph_agent_gateway.import_draft_store import (
     ImportDraftStore,
     MaterializedImportDraftCandidates,
+    PromotableRouteUpdate,
+    known_model_ids_for_endpoint,
+    known_verified_capabilities,
     materialize_import_draft_candidates,
     merge_evidence_library,
+    probe_priority,
+    promotable_route_update,
 )
 from graph_agent_gateway.protocol import ModelResolverProtocol
 from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute
@@ -58,14 +63,19 @@ __all__ = [
     "ModelResolver",
     "ModelResolverProtocol",
     "ProviderModelStateProjection",
+    "PromotableRouteUpdate",
     "ResolvedRole",
     "ResolvedRoute",
     "ResolvedRouteChain",
     "RouteSkipDiagnostic",
     "decide_fallback",
+    "known_model_ids_for_endpoint",
+    "known_verified_capabilities",
     "materialize_import_draft_candidates",
     "materialize_role",
     "merge_evidence_library",
+    "probe_priority",
     "project_route_state",
     "project_route_state_from_evidence",
+    "promotable_route_update",
 ]

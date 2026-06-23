@@ -241,6 +241,33 @@ def test_probe_verified_evidence_projects_historical_ready_with_evidence_ref() -
     assert projection.evidence_refs == ["probe-openai-gpt5"]
 
 
+def test_model_list_observation_never_projects_historical_ready() -> None:
+    from graph_agent_gateway.registry.schema import EvidenceRecord
+    from graph_agent_gateway.state_projection import project_route_state_from_evidence
+
+    projection = project_route_state_from_evidence(
+        route_id="openai:gpt-5",
+        endpoint_status="verified",
+        route_status="unverified_manual",
+        credential_available=True,
+        evidence_records=[
+            EvidenceRecord(
+                evidence_id="model-list-openai-gpt5",
+                evidence_type="model_list_observation",
+                trust_state="provider-list-observed",
+                endpoint_id="openai",
+                route_id="openai:gpt-5",
+                model_id="gpt-5",
+                provider_model_id="gpt-5",
+                model_list_observation={"observed_model_ids": ["gpt-5"]},
+            )
+        ],
+    )
+
+    assert projection.ui_state == "untested"
+    assert projection.evidence_refs == []
+
+
 @pytest.mark.parametrize(
     ("route_status", "endpoint_status", "credential_available", "circuit_retry_at", "expected_state"),
     [

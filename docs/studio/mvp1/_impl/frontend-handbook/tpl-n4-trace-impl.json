@@ -108,9 +108,9 @@
    "n": 24,
    "cap": "trace-agent-inline-expand",
    "design_ref": "n4-atom-24",
-   "current": "现状：未实施。无 agent 节点 '+' 内联展开执行子树入口。",
-   "gap": "差距：agent 节点侧提供 '+' 内联展开，就地显示该次执行的 tool/子步骤子树（数据已在事件流，渲染前端）。与 #16 面板内折叠互补。target-design。",
-   "fe_status": "符合",
+   "current": "现状：偏差。无 agent **节点侧** '+' 内联展开执行子树入口；仅 Trace 面板事件行有 '+'（TraceEventRow.tsx:155-179）展开**单条 tool_call** 的 input/result（ToolCallSubtree，:213-241），落在 #16 面板侧、且只一条 tool 调用，缺设计要的节点侧载体 +『走了哪些子节点』维度。（旧标 fe_status=符合 与本 current=未实施 自相矛盾，已据代码改判偏差。）",
+   "gap": "差距：agent **节点侧** 提供 '+' 内联展开，就地显示该次执行的 tool / 子步骤子树（含走了哪些子节点；数据已在事件流，缺的是节点侧渲染）。与 #16 面板内折叠互补、是不同载体。target-design 未落地。",
+   "fe_status": "偏差",
    "be_dep": "已就绪可接（agent 子步骤事件已在流里）。",
    "fe_status_prev": "未实施",
    "fe_resync": "batch2 已修复+测试通过(2026-06-20)"

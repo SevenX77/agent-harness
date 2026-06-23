@@ -103,9 +103,9 @@
           "iface_ref": "iface-trace-0"
         }
       ],
-      "fe_status": "符合",
+      "fe_status": "偏差",
       "be_status": "已实现",
-      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：agent 事件行现有 '+' 内联展开入口——TraceEventRow.tsx:155-175 一个 Plus 图标的可点入口（aria-label 'Expand execution subtree'）切换 subtreeOpen；line 179 就地渲染 <ToolCallSubtree>（工具调用执行子树组件：输入参数 → 结果），即该 agent tool_call 的内联执行子树。数据来自引擎 tool_call 事件（trace.ts:221-223）。",
+      "gap_brief": "偏差（2026-06-23 据代码 + 设计 + 跨节点审计核实，撤销旧的反向纠正）。设计（spec D9 + 本卡 fe_design）要的是**画布/节点侧**的 '+'：在 agent 节点旁就地展开它这次执行的子树——调了哪些 tool、**走了哪些子节点**，与 #16『Trace 面板内事件折叠』互补（两个不同载体）。当前实现只有 **Trace 面板事件行**里的 '+'（TraceEventRow.tsx:155-179），展开渲染的是**单条 tool_call** 的 ToolCallSubtree（headline + Input + Result，TraceEventRow.tsx:213-241），既落在 #16 的面板侧、又只展开一条 tool 调用，没有节点侧载体、也没有『执行子树 / 子节点路径』维度；components/GraphCanvas/ 内 grep 无任何 agent 运行时执行子树入口（节点侧画布 '+' 是 N2 静态子图 SubgraphInline，非运行时子树）。之前那条『2026-06-20 已落地、符合』是把面板侧单条 tool_call 展开误当成了设计要的节点侧 agent 执行子树（与 #13 子图 inline 同类错标）。be 保持已实现（引擎 tool_call 事件已发）。",
       "impl_ref": "fn-24"
     },
     {

@@ -41,10 +41,11 @@
 ## 三、样式/布局判断基准
 
 - **大方向以 MVP1 设计为真理(看齐设计、不看代码)** —— 设计与代码冲突时设计赢;入口见 `AGENTS.md`「Standard Documents → MVP1 design = source of truth」。
-- **N6 手册是活的实施追踪器,不是只读说明书** —— `docs/studio/mvp1/_impl/frontend-handbook/index.html`(由 `tpl-*.json` 切片经 `build_template_slice.py` 生成)。它讲「做什么 / 怎么实施 / 现在到哪了」,与讲「样式怎么对齐」的 `FRONTEND_UI_SPEC.md` 互补。三条铁律:
+- **N6 手册是活的实施追踪器,不是只读说明书** —— `docs/studio/mvp1/_impl/frontend-handbook/index.html`(由 `tpl-*.json` 切片经 `build_template_slice.py` 生成)。它讲「做什么 / 怎么实施 / 现在到哪了」,与讲「样式怎么对齐」的 `FRONTEND_UI_SPEC.md` 互补。四条铁律:
   - **入口读它 + 缺了向上补**:动手前读被指派节点/surface 的设计页(应该长啥样)+ 实施页/测试页(当前状态);**手册设计页缺/不全/和 MVP1 设计文档打架,就去设计源补对**(完整级联见下「四」Phase 2)。手册设计页是 MVP1 设计文档的**派生视图**,不是设计真相本身。
   - **它的状态标签会滞后代码**:`fe_status`/`be_status`/`be_dep` 是手维护的,默认当它可能过时,**用代码核对**再信(见根记忆 `feedback_no_overclaim_verify_status_against_code`)。
   - **出口回写它**:改了代码就在**同一个 PR**里把对应切片状态改对 + 重生成 `index.html`(见下「四」Phase 6)。
+  - **唯一真相源 + 唯一网络出口 = `main` 主仓根**:手册(切片 + `screenshots/` 真机图 + `index.html`)只认 `main` 这一份。改手册照常走 worktree→PR→`main`,**但不在 worktree / `/tmp` 留第二份手册副本、也不为它单开第二条隧道**;对外网页固定从主仓根伺服,合并后主仓根 `git pull` 即刷新。截图必须随切片一起进 git(不许只烤进 `index.html` 而源 PNG 不入库)。这跟 §三「多 agent 各跑各的 app 实例」不冲突——那是说**跑应用**要隔离,手册这份**文档产物**反过来要收敛到 `main` 一份。伺服配方见 `docs/development/RUN_AND_SCREENSHOT.md` §4。
   - 手册的看/改/何时改/截图/字段 schema/配色,全在 `docs/studio/mvp1/handbook-methodology/` 两份方法论文档(`frontend-page-authoring-methodology.md` + `handbook-operations-schema-lifecycle.md`)。
 - **`docs/development/FRONTEND_UI_SPEC.md` 为样式/组件唯一真相**,改前先读,**尤其 §2「UI 组件与样式基准规范」**。
 - 优先复用 `src/components/ui/` 下已有的 shadcn/ui / Radix 封装;缺哪个原语就先在 `src/components/ui/` 补 shadcn 风格封装再用。

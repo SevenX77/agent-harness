@@ -10,6 +10,7 @@ from graph_agent.core.compiler import compile_skill
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.graph_assembler import assemble_graph
 from graph_agent.core.manifest import AgentNodeAST, SubgraphNodeAST
+from graph_agent.core.topology_projection import read_subgraph_path
 
 
 class ExplodingResolver:
@@ -287,3 +288,35 @@ def test_agent_subgraphs_reject_target_skill_registry_id(tmp_path: Path) -> None
 
     with pytest.raises(ValidationError, match="path"):
         AgentNodeAST.model_validate(payload)
+
+
+def test_read_subgraph_path_resolves_relative_to_absolute(tmp_path: Path) -> None:
+    # The topology projection (consumed by Studio's Subgraph Library + inline
+    # drill-down) must surface a RESOLVED ABSOLUTE child path even when the
+    # author declared the recommended relative-to-skill-root form. Returning the
+    # raw "subgraph/child" string makes the frontend's absolute-path check fall
+    # through to "missing", so a perfectly valid in-skill subgraph renders red.
+    skill_root = tmp_path / "parent"
+    _logic_child(skill_root / "subgraph" / "child")
+    _subgraph_parent(skill_root, "subgraph/child")
+
+    resolved = read_subgraph_path(skill_root, "delegate")
+
+    assert resolved == str((skill_root / "subgraph" / "child").resolve())
+    assert Path(resolved).is_absolute()
+
+
+def test_read_subgraph_path_passes_absolute_through(tmp_path: Path) -> None:
+    skill_root = tmp_path / "parent"
+    child = skill_root / "subgraph" / "child"
+    _logic_child(child)
+    _subgraph_parent(skill_root, str(child))
+
+    assert read_subgraph_path(skill_root, "delegate") == str(child)
+
+
+def test_read_subgraph_path_returns_none_without_path(tmp_path: Path) -> None:
+    skill_root = tmp_path / "parent"
+    _target_skill_parent(skill_root)
+
+    assert read_subgraph_path(skill_root, "delegate") is None

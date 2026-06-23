@@ -28,6 +28,15 @@ from graph_agent_gateway.import_draft_store import (
 )
 from graph_agent_gateway.import_draft_store import ImportDraftStore as ImportDraftStore
 from graph_agent_gateway.import_draft_store import (
+    PromotableRouteUpdate as PromotableRouteUpdate,
+)
+from graph_agent_gateway.import_draft_store import (
+    known_model_ids_for_endpoint as known_model_ids_for_endpoint,
+)
+from graph_agent_gateway.import_draft_store import (
+    known_verified_capabilities as known_verified_capabilities,
+)
+from graph_agent_gateway.import_draft_store import (
     materialize_import_draft_candidates as materialize_import_draft_candidates,
 )
 from graph_agent_gateway.import_draft_store import (
@@ -35,6 +44,12 @@ from graph_agent_gateway.import_draft_store import (
 )
 from graph_agent_gateway.import_draft_store import (
     new_evidence_library as new_evidence_library,
+)
+from graph_agent_gateway.import_draft_store import (
+    probe_priority as probe_priority,
+)
+from graph_agent_gateway.import_draft_store import (
+    promotable_route_update as promotable_route_update,
 )
 from graph_agent_gateway.registry.base_url import (
     canonicalize_base_url as canonicalize_base_url,
@@ -814,10 +829,15 @@ __all__ = [
     "EVIDENCE_LIBRARY_DRAFT_ID",
     "ImportDraftStore",
     "ProviderImportDraft",
+    "PromotableRouteUpdate",
     "RouteCandidate",
+    "known_model_ids_for_endpoint",
+    "known_verified_capabilities",
     "materialize_import_draft_candidates",
     "merge_evidence_library",
     "new_evidence_library",
+    "probe_priority",
+    "promotable_route_update",
     "CapabilitySource",
     "canonicalize_base_url",
     "canonicalize_model",

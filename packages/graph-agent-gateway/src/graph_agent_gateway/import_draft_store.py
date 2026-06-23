@@ -13,11 +13,13 @@ from pathlib import Path
 
 from graph_agent_gateway.registry.base_url import canonicalize_base_url
 from graph_agent_gateway.registry.schema import (
+    CapabilityValue,
     EvidenceRecord,
     ProviderEndpoint,
     ProviderImportDraft,
     ProviderRoute,
     RouteCandidate,
+    VerifiedProfile,
 )
 
 EVIDENCE_LIBRARY_DRAFT_ID = "studio-evidence-library"
@@ -31,6 +33,13 @@ class MaterializedImportDraftCandidates:
     provider_routes: dict[str, ProviderRoute]
     endpoint_display_names: dict[str, str]
     route_display_names: dict[str, str]
+
+
+@dataclass(frozen=True)
+class PromotableRouteUpdate:
+    capabilities: dict[str, CapabilityValue]
+    verified_profiles: list[VerifiedProfile]
+    evidence_refs: list[str]
 
 
 class ImportDraftStore:
@@ -241,6 +250,136 @@ def materialize_import_draft_candidates(
     )
 
 
+def known_verified_capabilities(
+    library: ProviderImportDraft,
+    endpoint_id: str,
+    model_id: str,
+) -> dict[str, CapabilityValue]:
+    """Return probe-verified capabilities previously observed for one model."""
+    capabilities: dict[str, CapabilityValue] = {}
+    for record in _probe_records_for_model(
+        library,
+        endpoint_id=endpoint_id,
+        model_id=model_id,
+        trust_state="probe-verified",
+    ):
+        capabilities.update(record.candidate_capabilities)
+        if record.input_modalities and "input_modalities" not in capabilities:
+            capabilities["input_modalities"] = CapabilityValue(
+                value=list(record.input_modalities),
+                source="probed_verified",
+                observed_at=record.observed_at,
+            )
+        if record.output_modalities and "output_modalities" not in capabilities:
+            capabilities["output_modalities"] = CapabilityValue(
+                value=list(record.output_modalities),
+                source="probed_verified",
+                observed_at=record.observed_at,
+            )
+        if record.method_id:
+            existing_methods = capabilities.get("verified_methods")
+            method_values = (
+                list(existing_methods.value)
+                if existing_methods is not None and isinstance(existing_methods.value, list)
+                else []
+            )
+            if record.method_id not in method_values:
+                method_values.append(record.method_id)
+            capabilities["verified_methods"] = CapabilityValue(
+                value=method_values,
+                source="probed_verified",
+                observed_at=record.observed_at,
+            )
+    return capabilities
+
+
+def known_model_ids_for_endpoint(
+    library: ProviderImportDraft,
+    endpoint_id: str,
+) -> list[str]:
+    """Return draft-known provider model ids for an endpoint in stable order."""
+    model_ids: list[str] = []
+    seen: set[str] = set()
+    for route in library.route_candidates.values():
+        if route.endpoint_id == endpoint_id and route.provider_model_id not in seen:
+            model_ids.append(route.provider_model_id)
+            seen.add(route.provider_model_id)
+    for record in library.evidence_records:
+        model_id = _record_model_id(record)
+        if record.endpoint_id == endpoint_id and model_id and model_id not in seen:
+            model_ids.append(model_id)
+            seen.add(model_id)
+    return model_ids
+
+
+def probe_priority(
+    library: ProviderImportDraft,
+    endpoint_id: str,
+    candidate_model_ids: list[str],
+) -> list[str]:
+    """Skip known-good probe models and put known failures after unknowns."""
+    verified = _known_probe_model_ids(library, endpoint_id, "probe-verified")
+    failed = _known_probe_model_ids(library, endpoint_id, "probe-failed")
+    unknown_candidates: list[str] = []
+    failed_candidates: list[str] = []
+    for model_id in candidate_model_ids:
+        if model_id in verified:
+            continue
+        if model_id in failed:
+            failed_candidates.append(model_id)
+            continue
+        unknown_candidates.append(model_id)
+    return [*unknown_candidates, *failed_candidates]
+
+
+def promotable_route_update(
+    library: ProviderImportDraft,
+    route: ProviderRoute,
+) -> PromotableRouteUpdate:
+    """Derive credential-route capability/profile updates from verified draft evidence."""
+    capabilities = known_verified_capabilities(
+        library,
+        route.endpoint_id,
+        route.provider_model_id,
+    )
+    profiles: list[VerifiedProfile] = []
+    evidence_refs: list[str] = []
+    seen_profile_keys: set[tuple[str, str]] = set()
+    for record in _probe_records_for_model(
+        library,
+        endpoint_id=route.endpoint_id,
+        model_id=route.provider_model_id,
+        trust_state="probe-verified",
+    ):
+        evidence_refs.append(record.evidence_id)
+        if not record.method_id:
+            continue
+        request_mapper_id = record.request_mapper_id or record.method_id
+        profile_key = (record.method_id, request_mapper_id)
+        if profile_key in seen_profile_keys:
+            continue
+        seen_profile_keys.add(profile_key)
+        profiles.append(
+            VerifiedProfile(
+                profile_id=record.method_id,
+                capability=record.capability_family or record.model_type or "text_chat",
+                method_id=record.method_id,
+                request_mapper_id=request_mapper_id,
+                status="ready",
+                default=not profiles,
+                fallback_rank=len(profiles) + 1,
+                input_modalities=record.input_modalities or ["text"],
+                output_modalities=record.output_modalities or ["text"],
+                metadata={"evidence_id": record.evidence_id},
+            )
+        )
+    return PromotableRouteUpdate(
+        capabilities=capabilities,
+        verified_profiles=profiles,
+        evidence_refs=evidence_refs,
+    )
+
+
 def merge_evidence_library(
     local: ProviderImportDraft,
     remote: ProviderImportDraft,
@@ -280,6 +419,42 @@ def merge_evidence_library(
             "evidence_records": merged_records,
         }
     )
+
+
+def _probe_records_for_model(
+    library: ProviderImportDraft,
+    *,
+    endpoint_id: str,
+    model_id: str,
+    trust_state: str,
+) -> list[EvidenceRecord]:
+    return [
+        record
+        for record in library.evidence_records
+        if record.evidence_type == "probe"
+        and record.trust_state == trust_state
+        and record.endpoint_id == endpoint_id
+        and _record_model_id(record) == model_id
+    ]
+
+
+def _known_probe_model_ids(
+    library: ProviderImportDraft,
+    endpoint_id: str,
+    trust_state: str,
+) -> set[str]:
+    return {
+        model_id
+        for record in library.evidence_records
+        if record.evidence_type == "probe"
+        and record.trust_state == trust_state
+        and record.endpoint_id == endpoint_id
+        if (model_id := _record_model_id(record)) is not None
+    }
+
+
+def _record_model_id(record: EvidenceRecord) -> str | None:
+    return record.model_id or record.provider_model_id
 
 
 def _now_iso() -> str:

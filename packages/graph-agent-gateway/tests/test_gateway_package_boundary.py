@@ -67,8 +67,13 @@ def test_gateway_public_facade_exports_mvp1_owner_api() -> None:
     from graph_agent_gateway.import_draft_store import (
         ImportDraftStore,
         MaterializedImportDraftCandidates,
+        PromotableRouteUpdate,
+        known_model_ids_for_endpoint,
+        known_verified_capabilities,
         materialize_import_draft_candidates,
         merge_evidence_library,
+        probe_priority,
+        promotable_route_update,
     )
     from graph_agent_gateway.role_materialization import (
         MaterializedRoleResult,
@@ -99,8 +104,13 @@ def test_gateway_public_facade_exports_mvp1_owner_api() -> None:
         "materialize_role": materialize_role,
         "ImportDraftStore": ImportDraftStore,
         "MaterializedImportDraftCandidates": MaterializedImportDraftCandidates,
+        "PromotableRouteUpdate": PromotableRouteUpdate,
         "materialize_import_draft_candidates": materialize_import_draft_candidates,
         "merge_evidence_library": merge_evidence_library,
+        "known_model_ids_for_endpoint": known_model_ids_for_endpoint,
+        "known_verified_capabilities": known_verified_capabilities,
+        "probe_priority": probe_priority,
+        "promotable_route_update": promotable_route_update,
     }
 
     for public_name, expected_symbol in expected_exports.items():

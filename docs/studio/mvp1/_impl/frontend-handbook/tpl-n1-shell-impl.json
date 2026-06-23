@@ -312,7 +312,12 @@
       "layer2": [
         "真跑:启动应用 → 壳立即可见(无全屏 splash);断开后端启动 → 底部出现「Backend unavailable」+ Retry,界面其余仍可用。"
       ],
-      "shot_na": "启动横幅只在『后端不可用冷启动』时出现:需 backend 进程起不来 + 全新 webview 挂载。headless 无窗口管理器,新窗口无法贴上 Xvfb 截图。已读 RuntimeGate.tsx 确认触发逻辑(status!=='ready' 时渲红横幅+Retry)+ sidecar 日志实证端口绑定失败 + RuntimeGate 组件测试覆盖。"
+      "screenshots": [
+        {
+          "file": "n1-17-startup-banner.png",
+          "caption": "RuntimeShell error 态:应用壳保持可见,底部只显示非阻塞 Backend unavailable + Retry 横幅。"
+        }
+      ]
     }
   ]
 }

@@ -201,7 +201,7 @@
       ],
       "fe_status_prev": "偏差",
       "fe_resync": "覆盖项已全绿(2026-06-20)",
-      "shot_na": "打开文件夹要弹系统原生目录选择器(OS file picker),headless 虚拟显示器无法驱动系统对话框。逻辑已读码确认:点 Open folder → openWorkspaceDialog → Rust 侧 pick_folder;由 WelcomePage 组件测试断言点击触发该调用覆盖。"
+      "shot_na": "Open folder 会弹系统原生目录选择器(OS file picker/AppKit sheet),不属于浏览器 DOM,后台 Playwright 无法稳定驱动或截取,截图也无法证明命令参数正确。替代验证:WelcomePage 组件测试断言点击 Open folder 调 selectSkillDirectory/openSkillWorkspace,并断言无 missing GRAPH.md/SKILL.md 拒绝文案。"
     },
     {
       "covers": "#3 recent-mru-grid",
@@ -275,7 +275,7 @@
       "layer2": [
         "真跑(桌面):点卡片 ⋯ Show in folder → Finder/Explorer 定位到该文件夹。"
       ],
-      "shot_na": "Show in folder 是去调系统的文件管理器(Finder / 资源管理器)定位到这个 skill 的文件夹——headless 虚拟显示器里根本没有系统文件管理器,这个『跳出 Studio、打开系统文件夹』的动作截不到图、也没法真机验证。前端只负责发起调用:已读码确认点卡片 ⋯ → Show in folder 会调 revealInFileManager(该卡的 absolutePath),由组件测试断言覆盖。"
+      "shot_na": "Show in folder 的真实效果是跳出 Studio 调 Finder/Explorer 定位本地文件夹,不属于 Studio DOM,截图无法证明前端命令参数是否正确。替代验证:组件测试断言点卡片 ⋯ → Show in folder 会以该卡 absolutePath 调 revealInFileManager;Tauri wrapper 测试断言调用 reveal_in_file_manager。"
     },
     {
       "covers": "#6 remove-skill-entry",
@@ -357,7 +357,12 @@
       ],
       "fe_status_prev": "未实施",
       "fe_resync": "覆盖的功能点已全部符合(2026-06-20)",
-      "shot_na": "Recent 加载骨架是亚 100ms 一闪而过的 loading 态,headless 截图抓不到稳定帧。由 WelcomePage.test.tsx 断言 isHydrating 期间渲染 RecentSkeleton(data-recent-skeleton)覆盖。"
+      "screenshots": [
+        {
+          "file": "n1-15-recent-skeleton.png",
+          "caption": "Recent 冷启动/预水合窗口显示骨架卡,不是空白闪烁。"
+        }
+      ]
     },
     {
       "covers": "#9 recent-load-failure-fallback",
@@ -377,7 +382,12 @@
         "真跑:让 Recent 数据源失败 → 看局部红框出现且新建/打开仍能用。"
       ],
       "fe_resync": "已真覆盖:WelcomePage.test.tsx(局部 destructive Alert 渲染 + 入口不被阻塞)+ useRecentSkills.test.ts(MRU/路径校验错误显式浮出、不静默);verified by green gates + post-audit(2026-06-20)",
-      "shot_na": "Recent 加载失败 fallback 需注入 useRecentSkills 存储读取失败才触发,headless 无法构造该故障。由 WelcomePage.test.tsx mock recentError 断言渲染 Alert 错误态覆盖。"
+      "screenshots": [
+        {
+          "file": "n1-16-recent-load-failure.png",
+          "caption": "Recent 数据源失败时只在 Recent 区显示局部红框;New skill / Open folder 入口仍可用。"
+        }
+      ]
     }
   ]
 }

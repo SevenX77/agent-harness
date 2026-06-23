@@ -641,7 +641,13 @@ def render_tests(im, ns, label, n_atoms, apfx=""):
             f'<a class="xlink" href="#{apfx}atom-{atoms[0]}">设计页 #{atoms[0]} · 看这条的设计意图 →</a>'
             if atoms else ""
         )
-        verify_tag = badge("⚠ 无真机实测", "a") if na else ""
+        if na:
+            verify_tag = badge("⚠ 无真机实测", "a")
+        elif (t.get("fe_status") or "").strip() == "符合" and not captured:
+            # 代码符合设计、但没有真机端到端截图为证 —— 显式标黄，不让绿徽章独占视觉
+            verify_tag = badge("⚠ 待真机实测（截图未贴）", "a")
+        else:
+            verify_tag = ""
         items += card(code(t.get("covers", "")), [
             ("对应设计", design_link),
             ("① 静态测试 (RED→GREEN)", duty_ol(t.get("layer1", []))),
@@ -657,9 +663,22 @@ def render_tests(im, ns, label, n_atoms, apfx=""):
         f'只能由<b>自动化单测 / 组件测试 + 读码</b>覆盖（卡内已注明替代验证），<b>没有真机端到端截图为证</b>。'
         f'故本页状态点标<b>琥珀（部分实测）</b>，不是全绿。</div>'
     ) if na_n else ""
+    pend_n = sum(
+        1 for t in tests
+        if (t.get("fe_status") or "").strip() == "符合"
+        and not t.get("screenshots")
+        and not (t.get("shot_na") or "").strip()
+    )
+    pend_note = (
+        f'<div class="callout amber">另有 <b>{pend_n} 项</b>标 <b>⚠ 待真机实测（截图未贴）</b>：'
+        f'代码层面符合设计、有自动化单测/组件测试覆盖，但<b>尚无真机端到端截图为证</b>，'
+        f'未达「真机实测」绿线。<b>「代码符合」≠「真机验证过」</b>，故这些项不计为绿、'
+        f'本页状态点随之标<b>琥珀</b>；补上真机截图后方可转绿。</div>'
+    ) if pend_n else ""
     content = (
         f'<div class="callout"><b>覆盖 {len(covered)} / {n_atoms}</b>：本页的设计原子里有 {len(covered)} 个配了两层测试（每张卡标题 = 它覆盖的原子）。「有测试」≠「已通过」，通过以真跑结果为准。{cov}</div>'
         + na_note
+        + pend_note
         + items
     )
     return content
@@ -1243,16 +1262,19 @@ def main():
 
     def _test_roll(tests):
         # 测试页 = 「真机实测完整性」：偏差/未实施=红；标 shot_na（系统级/瞬态，无法真机端到端、
-        # 只有自动化单测+读码覆盖）=黄（部分实测）；符合且可真机实测=绿。混合→黄，全黄/全绿各取其色。
+        # 只有自动化单测+读码覆盖）=黄（部分实测）；符合 **且有真机截图为证** =绿；
+        # 符合但未贴真机截图（又非 shot_na）= 待真机实测 → 黄（代码符合 ≠ 真机验证过，不许涂绿）。
+        # 混合→黄，全黄/全绿各取其色。
         lv = []
         for t in tests:
             fs = (t.get("fe_status") or "").strip()
+            captured = bool(t.get("screenshots"))
             if fs in ("偏差", "未实施"):
                 lv.append("bad")
             elif (t.get("shot_na") or "").strip():
                 lv.append("partial")
             elif fs == "符合":
-                lv.append("ok")
+                lv.append("ok" if captured else "partial")
         if not lv:
             return "none"
         if all(x == "ok" for x in lv):

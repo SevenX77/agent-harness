@@ -83,10 +83,16 @@ export function apiKeyInputType(): "text" {
   return "text"
 }
 
-export function apiKeyInputClassName(visible: boolean): string {
+export function apiKeyInputClassName(visible: boolean, hasValue = true): string {
+  // mask-input applies `-webkit-text-security: disc` + a disc font, which also
+  // masks the *placeholder* text. Only mask when there is an actual secret to
+  // hide; an empty field must keep its placeholder readable (otherwise empty
+  // official cards render their "Enter your X API Key" hint as •••).
+  const masked = !visible && hasValue
   return cn(
     scrollableInputClassName,
-    visible ? "text-foreground" : "text-muted-foreground mask-input",
+    visible ? "text-foreground" : "text-muted-foreground",
+    masked && "mask-input",
   )
 }
 
@@ -375,6 +381,31 @@ function routeStatusTagVariant(status: RouteDisplayStatus): "success" | "destruc
   if (status === "probe-verified") return "probe-verified"
   if (status === "unverified_manual" || status === "unknown") return "default"
   return "default"
+}
+
+// apikeys#30 / UI-spec §143: official route tags take their colour from the
+// backend 6-state ui_state. A historically probe-verified route is persisted
+// with RouteStatus "unverified_manual" this session but projects ui_state
+// "historical_ready" — it must read as the blue "Previously Connected" tag
+// (same border-multimodal-border token ProviderStateBadge uses), not the
+// neutral tag its session-level RouteStatus would otherwise produce.
+function routeTagVariantFromUiState(
+  uiState: ProviderUiState,
+): "success" | "destructive" | "muted" | "default" | "warning" | "probe-verified" {
+  switch (uiState) {
+    case "ready":
+      return "success"
+    case "historical_ready":
+      return "probe-verified"
+    case "failed":
+      return "destructive"
+    case "cooling_down":
+      return "warning"
+    case "off":
+      return "muted"
+    case "untested":
+      return "default"
+  }
 }
 
 function routeStatusLabel(status: RouteDisplayStatus): string {
@@ -843,7 +874,12 @@ export function ProviderCard({
   )
   const renderAvailableModelTag = (model: ModelInfo): ReactElement => {
     const status = isOfficial ? routeDisplayStatus(model, isGettingModels) : modelRouteStatus(model)
-    const statusLabel = routeStatusLabel(status)
+    // Official route colour comes from the backend 6-state ui_state when present
+    // (UI-spec §143: historical_ready -> blue "Previously Connected"); fall back
+    // to the session RouteStatus only when ui_state is absent.
+    const uiState = isOfficial ? model.ui_state : undefined
+    const tagVariant = uiState ? routeTagVariantFromUiState(uiState) : routeStatusTagVariant(status)
+    const statusLabel = uiState === "historical_ready" ? "Previously Connected" : routeStatusLabel(status)
     const modelType = isOfficial ? officialModelType(model) : null
     const modelTypeLabel = isOfficial ? officialModelTypeLabel(model) : null
     const isCapabilityModel = isOfficial && isCapabilityLibraryModel(model)
@@ -882,7 +918,7 @@ export function ProviderCard({
       <Tag
         key={tagKey}
         asChild
-        variant={routeStatusTagVariant(status)}
+        variant={tagVariant}
         size="xs"
         className={cn(
           isDisabled ? "cursor-not-allowed opacity-40 font-mono" : "cursor-pointer font-mono hover:bg-muted/40",
@@ -895,6 +931,7 @@ export function ProviderCard({
           onClick={isDisabled ? undefined : () => void copyAvailableModelId(model.id)}
           aria-label={ariaLabel}
           data-route-status={isOfficial ? status : undefined}
+          data-route-ui-state={isOfficial ? uiState : undefined}
           data-model-type={modelType ?? undefined}
           data-reasoning-route={hasReasoningProfile ? true : undefined}
           data-input-modalities={inputModalities.length > 0 ? inputModalities.join(",") : undefined}
@@ -928,7 +965,11 @@ export function ProviderCard({
           </Badge>
         ) : null}
         {!isOfficial ? <TestMessage status={testStatus} latencyMs={null} errorCode={matchedErrorCode ?? null} /> : null}
-        {providerUiState ? (
+        {/* UI-spec §140: official provider card titles carry NO connection-status
+            badge — reachability shows on the API-key row icon + per-route tags.
+            The 6-state badge (incl. blue historical_ready) belongs on the route
+            tags, not rolled up to the title. Third-party keeps its inline badge. */}
+        {!isOfficial && providerUiState ? (
           <ProviderStateBadge
             state={providerUiState}
             reasonCode={matchedErrorCode ?? null}
@@ -1002,7 +1043,7 @@ export function ProviderCard({
                 aria-invalid={apiKeyError ? true : undefined}
                 aria-describedby={apiKeyError ? `api-key-error-${draft.id}` : undefined}
                 onWheel={scrollInputContentOnWheel}
-                className={apiKeyInputClassName(visible)}
+                className={apiKeyInputClassName(visible, hasApiKey)}
               />
               <div className="flex shrink-0 items-center gap-0.5">
                 <Button

@@ -186,15 +186,17 @@ test.describe('N2 canvas real-machine screenshots', () => {
     await open(page, state, child)
     await page.getByRole('button', { name: 'Expand subgraph' }).click()
     await expect(page.getByRole('button', { name: 'Collapse subgraph' })).toBeVisible()
-    // The child graph renders as REAL canvas nodes inside a dashed container —
-    // not a mock name+kind row list. Assert the container + the child's real
-    // plan/write phase nodes (namespaced ids) exist on the canvas.
+    // The child renders with the SAME recursive pipeline as the main canvas: its
+    // OWN global input/output nodes + real plan/write phase nodes inside a dashed
+    // container, connected by contextEdge connectors (dotted midpoint). Assert the
+    // container, the child's in/out + phase nodes, and a contextEdge connector.
     await expect(page.locator('.react-flow__node[data-id="__subpreview__::group::expand"]')).toBeVisible({ timeout: 10_000 })
-    await expect(page.locator('.react-flow__node[data-id="__subpreview__::node::expand::plan"]')).toBeVisible()
-    await expect(page.locator('.react-flow__node[data-id="__subpreview__::node::expand::write"]')).toBeVisible()
-    // The intra-child dependency edge (plan → write) is drawn with the same edge
-    // mechanism as the main canvas.
-    await expect(page.locator('.react-flow__edge[data-id="__subpreview__::intra::__subpreview__::node::expand::plan->__subpreview__::node::expand::write"]')).toBeVisible()
+    await expect(page.locator('.react-flow__node[data-id="__subpreview__::expand::__global_input__"]')).toBeVisible()
+    await expect(page.locator('.react-flow__node[data-id="__subpreview__::expand::__global_output__"]')).toBeVisible()
+    await expect(page.locator('.react-flow__node[data-id="__subpreview__::expand::plan"]')).toBeVisible()
+    await expect(page.locator('.react-flow__node[data-id="__subpreview__::expand::write"]')).toBeVisible()
+    // The child's plan → write dependency edge is a contextEdge, same as the main graph.
+    await expect(page.locator('.react-flow__edge[data-id="__subpreview__::expand::plan->write"]')).toBeVisible()
     await page.waitForTimeout(500)
     await page.screenshot({ path: 'test-results/n2-13-subgraph-inline.png' })
   })

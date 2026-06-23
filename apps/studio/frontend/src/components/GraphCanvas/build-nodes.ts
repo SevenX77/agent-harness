@@ -266,7 +266,12 @@ export function buildNodes(
         dependsOn: topology?.depends_on ?? normalizeDependsOn(phase.depends_on),
         subgraphPath,
         isExpanded: expandedSubgraphs.has(phase.name),
-        onToggleSubgraph: subgraphPath
+        // Every SUBGRAPH-kind node gets the expand toggle — including ones whose
+        // path is unresolved/missing (subgraphPath null). Expanding an unresolved
+        // node surfaces the recovery state inline (F4: "unresolved path shows
+        // recovery state"); gating on a resolved path is what made the "+" vanish
+        // from such nodes (PM 2026-06-23).
+        onToggleSubgraph: mode === 'subgraph'
           ? () => onToggleSubgraph(phase.name)
           : undefined,
         agentBody,

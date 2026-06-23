@@ -59,7 +59,7 @@
       ],
       "do": ["把 Home 从注册表模型解耦成 MRU + Rust native-fs"],
       "dont": ["不在 N1 保留对 GET/POST/DELETE /api/skills 的依赖(详情 GET /{id} 除外)"],
-      "deviation": "这是目标设计,后端尚未完成重塑——属待办契约,实现状态见末节「后端实现状态」。"
+      "deviation": "进展(2026-06-23 据代码核对):写盘迁 native-fs(D12,POST 解耦)前后端均已落地;去注册表(D1/D11,GET)与 R1(DELETE)的前端那半也已落,仅余后端聚合/删除端点正式退役待跟进。逐条实现状态见末节「后端实现状态」。"
     },
     {
       "name": "错误码与 D2 可达性",
@@ -148,22 +148,22 @@
     {
       "item": "POST /api/skills 写盘迁 Studio Rust 后端 native-fs(D12)",
       "d12": "D12「本地写经 native-fs(Rust)」",
-      "status": "bad",
-      "note": "目标把建目录 / 写脚手架 / git init 从 Python POST /api/skills 迁到 Studio Rust 后端 native-fs;现 Rust 侧无对应建/打开 skill 命令,新建/打开仍走 Python。属契约缺口,卡住前端 #2/#4/#13 的解耦(后端先于前端)。",
+      "status": "ok",
+      "note": "已落地(2026-06-23 据代码核对订正,原标 bad 系滞后):Rust 侧已建 create_skill_workspace / open_skill_workspace 两命令(native_fs.rs,写脚手架 + git init + skill_index 登记,带单测),已注册进 Tauri invoke_handler(lib.rs)。前端 Home(WelcomePage.tsx)新建走 createSkillWorkspace、打开文件夹走 openSkillWorkspace(lib/tauri.ts 封装,注释明确『Replaces the Python POST /skills create/import path』),前端已无 POST /api/skills 建/导入调用。D12 写盘迁 native-fs 前后端均已完成。",
       "ref": "d12"
     },
     {
       "item": "GET /api/skills 去注册表(D1/D11)",
       "d12": "对应 N1 设计锁 D1/D11(去注册表 / IDE 模型)",
       "status": "review",
-      "note": "Home 改读 MRU、弃 GET /api/skills 聚合 + 自动发现,属设计锁定的目标重塑,后端 skills 服务尚待按此调整。前端可先停读派生字段(#3 纯前端),完全去注册表收尾等后端。",
+      "note": "前端那半已落(据代码核对):Home(WelcomePage.tsx)已改读本地 MRU(useRecentSkills → Rust recent_workspaces.json),不再调 GET /api/skills 聚合 + 自动发现;残留的 useSkills 只用于单 skill 详情 GET /{id}(Workspace.tsx)。但后端 list_skill_summaries 聚合端点仍 live、未退役——完全去注册表的收尾仍等后端,故保留 review(待后端跟进,非缺口)。",
       "ref": "d2"
     },
     {
       "item": "DELETE /api/skills 退役(R1)",
       "d12": "对应 N1 设计 R1(删 Delete)",
       "status": "review",
-      "note": "R1 移除 IDE 内删除入口后,DELETE /api/skills 失去 N1 调用方(端点本身可留作其它用途)。前端移除 Remove 入口纯前端可做。",
+      "note": "前端那半已落(据代码核对):前端已无任何 DELETE /api/skills 调用(Remove 入口已移除,Home 的『Remove from recent』只删本地 MRU、不打后端)。后端 delete_skill 端点(skills.py:988)按设计保留它用。N1 调用方已退役,故保留 review(端点处置中性待定,非缺口)。",
       "ref": "d2"
     }
   ]

@@ -3,7 +3,7 @@ import type { SkillGraphNodeData } from "@/components/GraphCanvas"
 import type { FileMeta } from "../file-types"
 import { CURRENT_SCHEMA_VERSION } from "@/config/schema"
 
-function languageForPath(path: string): string {
+export function languageForPath(path: string): string {
   if (path.endsWith(".json")) return "json"
   if (path.endsWith(".py")) return "python"
   return "markdown"

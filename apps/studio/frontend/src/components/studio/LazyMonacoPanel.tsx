@@ -247,7 +247,7 @@ export function LazyMonacoPanel({
 
   // Realtime lint (workflow 03_compile F1): the live editor draft drives the debounced
   // /lint call; its diagnostics are the single source of truth the panel below projects.
-  const { result: lintResult } = useDebouncedLint(skillId, draft)
+  const { result: lintResult } = useDebouncedLint(saveEnabled ? skillId : "", draft)
   const editorRef = useRef<MonacoEditorInstance | null>(null)
   const monacoRef = useRef<MonacoApi | null>(null)
 

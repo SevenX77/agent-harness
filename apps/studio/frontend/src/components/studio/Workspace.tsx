@@ -466,13 +466,17 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     const path = rawPath.startsWith(prefix) ? rawPath.slice(prefix.length) : rawPath
     const content = typeof fileOrPath === "string" ? currentFiles[path] ?? "" : fileOrPath.content
     const language = typeof fileOrPath === "string" ? languageForPath(path) : fileOrPath.language
+    const fileSkillId = typeof fileOrPath === "string" ? currentSkillId : fileOrPath.skillId ?? currentSkillId
+    const fileWorkspaceRoot = typeof fileOrPath === "string" ? currentWorkspaceRoot : fileOrPath.workspaceRoot ?? currentWorkspaceRoot
     return {
       path,
       language,
       content,
-      hash: await sha256Hex(content),
-      skillId: currentSkillId,
-      workspaceRoot: currentWorkspaceRoot,
+      hash: typeof fileOrPath === "string" ? await sha256Hex(content) : fileOrPath.hash ?? await sha256Hex(content),
+      skillId: fileSkillId,
+      workspaceRoot: fileWorkspaceRoot,
+      title: typeof fileOrPath === "string" ? undefined : fileOrPath.title,
+      saveEnabled: typeof fileOrPath === "string" ? undefined : fileOrPath.saveEnabled,
     }
   }, [currentSkillId, currentWorkspaceRoot, skillDetail?.files])
 
@@ -1349,6 +1353,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                 defaultSize="20%"
                 minSize="14%"
                 maxSize="35%"
+                className="min-w-[300px]"
               >
                 <Panels
                   activePanel={activePanel}
@@ -1511,6 +1516,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                 defaultSize="20%"
                 minSize="18%"
                 maxSize="35%"
+                className="min-w-[340px]"
               >
                 <CopilotPanel
                   skillId={currentSkillId}

@@ -77,12 +77,19 @@ unavailable" banner is gone; settings / API-keys pages load real data.
 
 ### 2.1 Virtual display + launch
 
+> **Solo on the box?** the fixed `:99` / default ports below are fine.
+> **Sharing the box with other agents?** STOP — do not use `:99` or the default
+> port; each agent needs its own display / port / cache / worktree. Jump to
+> **§3 Multi-agent isolation** and launch the way it shows, then come back here
+> for screenshot/click.
+
 ```bash
 # start a virtual X display once
 Xvfb :99 -screen 0 1600x1000x24 >/tmp/xvfb.log 2>&1 &
 
-# launch the app against it
+# launch the app against it — RECORD the pid; it is the only process you may kill
 cd apps/studio/tauri && DISPLAY=:99 cargo tauri dev >/tmp/tauri-dev.log 2>&1 &
+echo "tauri pid = $!"
 ```
 
 If the webview paints blank, set the usual WebKit-headless env vars
@@ -129,9 +136,17 @@ backend check: if the page loads real data, the sidecar + gateway are alive.
 
 ### 2.4 Cleanup
 
+Kill **only the pid you recorded at launch** — never a pattern:
+
 ```bash
-pkill -f 'cargo tauri dev'; pkill -f Xvfb   # when done
+kill "$TAURI_PID"            # the $! you saved in 2.1; not a pattern
+kill "$XVFB_PID"             # only if YOU started that Xvfb
 ```
+
+> ⚠️ **`pkill -f 'cargo tauri dev'` / `pkill -f Xvfb` are SAFE ONLY when you are
+> the sole user of the box.** If any other agent shares the repo, those patterns
+> kill *every* agent's app and display at once. When in doubt, kill by pid — see
+> §3.5 (footguns).
 
 ---
 
@@ -157,10 +172,18 @@ Pick numbers nobody else is using and keep them constant for your whole session:
 
 | Resource | Env / flag | Example (mine) | Why unique |
 |---|---|---|---|
-| Sidecar (FastAPI) port | `STUDIO_SIDECAR_PORT` | `8795` | two sidecars can't bind the same port |
 | Vite dev port | `--port <n> --strictPort` | `5199` | `--strictPort` fails loud instead of silently hopping onto another agent's port |
 | Virtual display | `DISPLAY` / `Xvfb :<n>` | `:91` | screenshots/clicks of one app must not land on another's window |
 | Vite cache dir | `VITE_CACHE_DIR` | `/tmp/vite-mine-5199` | sharing root's `.vite` cross-contaminates dep optimization |
+| Backend CORS allow-origin | `STUDIO_CORS_EXTRA_ORIGINS` | `http://127.0.0.1:5199` | backend only allows `5173`/`5174` by default → any other Vite port gets CORS-rejected (`Preflight not successful`) unless you allow it |
+| Sidecar (FastAPI) port | `STUDIO_SIDECAR_PORT` | `8795` | **only if you pin it** — see note below |
+
+> **Sidecar port is the one knob you can usually skip.** Leave `STUDIO_SIDECAR_PORT`
+> **unset** and the Rust process auto-allocates a *free dynamic* port per instance
+> (`allocate_loopback_port()` in `sidecar.rs`) — two agents never collide. Pin it to
+> a unique value **only** when something external needs a fixed port (the
+> browser-tunnel `/api` proxy in `scripts/dev-tunnel.py`); if two agents both pin
+> the *same* value, their sidecars collide — so a pinned value must also be unique.
 
 ### 3.3 Share the heavy build artifacts read-only (fast isolated launch)
 
@@ -189,8 +212,15 @@ config:
 cd <worktree>/apps/studio/tauri \
   && CARGO_TARGET_DIR=<root>/apps/studio/tauri/target \
      DISPLAY=:91 WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1 \
+     STUDIO_CORS_EXTRA_ORIGINS=http://127.0.0.1:5199 \
      cargo tauri dev --config /tmp/tauri-isolated.conf.json >/tmp/tauri-mine.log 2>&1 &
+echo "MY tauri pid = $!"   # record it — the ONLY process you may kill later (§3.5)
 ```
+
+`STUDIO_CORS_EXTRA_ORIGINS` goes in the **outer** env (not `beforeDevCommand`): the
+Rust process spawns the sidecar and the sidecar inherits it, so the FastAPI backend
+allows your `:5199` origin. Put it only on the Vite line and the backend still rejects
+your preflight.
 
 ### 3.4 Before running OR touching anything: `git worktree list`
 

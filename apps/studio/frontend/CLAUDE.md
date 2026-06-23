@@ -81,7 +81,7 @@
 
 **Phase 4 · 亲眼验证(顺手产出手册要用的真机图)**
 - 跑 app 亲眼点过受影响界面(主成功路径 + 取消/错误态);agent reply / diff / typecheck 通过都**不等于**视觉验证。
-- **多 agent 同仓 → 跑自己 worktree 的独立实例**:sidecar 端口 / Vite 端口(`--strictPort`)/ Xvfb display / `VITE_CACHE_DIR` 各一套独有值;`git worktree list` 先看,**别碰**别人「有未提交 + open PR + 刚改过」的活跃 worktree。隔离配方见 `RUN_AND_SCREENSHOT.md §3`,headless 截图法见 §2。
+- **多 agent 同仓 → 跑自己 worktree 的独立实例**:必须各 agent 唯一的 4 个旋钮 = Vite 端口(`--strictPort`,撞了直接挂)/ Xvfb display `:N` / `VITE_CACHE_DIR` / CORS 放行该端口(`STUDIO_CORS_EXTRA_ORIGINS`);**sidecar 端口 Tauri 自动动态分配、不用设也不会撞**(只有走浏览器隧道 `dev-tunnel.py` 那条路才需 pin `STUDIO_SIDECAR_PORT`)。`git worktree list` 先看,**别碰**别人「有未提交 + open PR + 刚改过」的活跃 worktree;查残留用 `ss -ltn` 看真实监听(别信 `pgrep -f` 会匹配自己 argv 的假残留),**杀进程只杀自己启动时记下的 PID,绝不 `pkill -f 'cargo tauri dev'`**(杀全场)。完整隔离配方 + 启动命令见 `RUN_AND_SCREENSHOT.md §3`,headless 截图法见 §2。
 - 【手册触点】这一步的截图**就是手册测试页要挂的真机图** → 按 ops 文档 §4 命名(`n<节点>-<序号>-<语义>.png`,特写 `-closeup`)存进 handbook 的 `screenshots/`;截不到的(系统对话框/文件管理器/瞬态帧)记下来,Phase 6 在切片标 `shot_na` + 原因。
 
 **Phase 5 · 本地 CI 门禁(改了前端 src 才需要)**

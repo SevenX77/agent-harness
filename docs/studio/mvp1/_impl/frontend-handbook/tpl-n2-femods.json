@@ -97,6 +97,21 @@
     "api": "GET child-graph-topology（拉子图真实拓扑）；详见后端接口契约页 mech_io。"
   },
   {
+    "name": "资产与子图文件浏览",
+    "what": "Assets 面板的真实文件树：Skill Files 展示当前 skill 根目录完整目录树（含隐藏文件），Subgraphs 以可折叠文件夹显示每个 subgraph path 指向的完整目录树；文件可打开到 Monaco，子图文件默认只读打开，避免误写父 skill。",
+    "where": "AssetsPanel.tsx：buildAssetTree 是浏览器态 fallback；useNativeDirectoryTree / loadNativeDirectoryTree / appendNativeDirectory 在 Tauri runtime 下通过 native-fs 递归 workspaceRoot 或 subgraph.path；SubgraphFolder 把每个 resolved 子图渲染成 FolderRow；SubgraphLinkBadge 显示 linked/missing/migration 状态并给 missing/migration 入口。FileRow.tsx / FolderRow.tsx 负责窄栏 truncation、title 与可折叠交互。Workspace.tsx 给左 Assets、右 Copilot ResizePanel 加 min-w，避免百分比侧栏过窄。",
+    "duties": [
+      "Skill Files：优先按 workspaceRoot 递归读磁盘文件夹，不过滤隐藏文件（.worktree 等也显示）；非 Tauri / 读不到时保留 skillDetail.files 投影 fallback。",
+      "Subgraphs：根据 subgraphMembership 从 graph_topology 找 SUBGRAPH phase 的 path/filePath；resolved path 下递归显示整个子图文件夹，missing/migration 状态可选择文件夹并写回 SUBGRAPH.md。",
+      "打开文件：openFile 先读对应 workspaceRoot + relative path 的真实内容与 hash，再交给 Workspace/LazyMonacoPanel；子图目录文件 saveEnabled=false，只读查看且不触发父 skill lint。",
+      "布局：左右侧栏在百分比 resize 基础上加最小宽度，文件/文件夹行稳定 truncate，窄窗口不把关键信息挤没。"
+    ],
+    "used_by": "N2.5（Assets 面板：Skill Files / Subgraphs 文件浏览）；也服务 #20 subgraph-whitelist 的 missing/migration 导入路径。",
+    "boundary": "做：浏览当前 skill 与子图的真实文件夹树、打开文件、给 missing/migration 子图选 path 并写回对应 SUBGRAPH.md。不做：不编译子图、不修改子图目录文件（只读打开）、不自己越过 native-fs 边界访问磁盘。",
+    "api": "Tauri native-fs：listWorkspaceDir / readWorkspaceFile / writeWorkspaceFile / selectSkillDirectory；浏览器 fallback 读 SkillDetail.files。",
+    "design_note": "2026-06-23 快速前端迭代按产品反馈修正：Skill Files 必须是整个 skill 文件夹（含隐藏文件，尤其 .worktree）；Subgraphs 参考 VS Code/Cursor explorer，可收起到底部，展开后显示子图完整文件夹而不是只有 linked 状态。"
+  },
+  {
     "name": "命名弹框",
     "kind": "共享 UI 组件（跨节点）",
     "what": "一个通用的「给东西起名 / 改名」弹框：单输入框 + 重名/空名校验，提交只吐 trim 后的名字。它和「角色」「节点」本身无关——任何需要命名/改名的地方都能用。",

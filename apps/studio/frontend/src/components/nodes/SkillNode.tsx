@@ -1,7 +1,6 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { AlertTriangle, Bot, Briefcase, CheckCircle2, Circle, Code, ListTree, Minus, Network, Pause, Plus, Radio, ShieldCheck, ShieldHalf, Workflow } from 'lucide-react'
 import { AgentStepsInline } from '@/components/studio/AgentStepsInline'
-import { SubgraphInline } from '@/components/studio/SubgraphInline'
 import { normalizeAbsoluteSubgraphPath } from '@/components/studio/subgraph-path'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover'
@@ -268,9 +267,10 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
           {data.isExpanded ? <Minus className="size-3" /> : <Plus className="size-3" />}
         </button>
       ) : null}
-      {resolvedSubgraphPath && data.isExpanded ? (
-        <SubgraphInline skillId={data.skillId} path={resolvedSubgraphPath} parentLabel={data.label} />
-      ) : null}
+      {/* N2 atom #13: expanding a subgraph node now renders a canvas-level dashed
+          container with the child's REAL nodes/edges (see GraphCanvas
+          subgraphExpansion), not an in-node row list. The toggle above only flips
+          the expand state; the container is drawn beside this node on the canvas. */}
       <Handle type="source" position={Position.Bottom} className="!size-2.5 !border-background !bg-primary opacity-60 group-hover:opacity-100 transition-opacity duration-200" />
     </div>
   )

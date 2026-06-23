@@ -181,6 +181,7 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - **节点主体 (`SkillNode`)**: 应用统一的背景令牌 (`bg-card`) (见 `GraphCanvas.tsx:143`)；处于执行态时，采用呼吸式的高亮效果，但仅应用在节点内部的 Status 徽章上 (通过 Tailwind `animate-pulse-primary` 实现，见 `GraphCanvas.tsx:186`)。
 - **连接线 (Edges)**: `[TODO: 设计意图未实现]` 当前仅实现了基础连线和数据包中心点 (见 `ContextEdge.tsx:37`)，原设计的浅灰色常态及数据流动画渐变色均未实现。
 - **连接点 (Handles)**: `[TODO: 设计意图未实现]` 目前已覆写基础样式 (如 `!size-2.5 !bg-primary`，见 `GraphCanvas.tsx:155`)，但未实现“仅 hover 时激活显示”的隐藏防噪逻辑。
+- **叠加（overlay）节点必须自带显式 `width`/`height`**: 凡是不进 `useNodesState`、而是直接拼进 `displayNodes` 叠在受控节点之上的「临时/预览」节点（如子图 inline 展开的子节点 `subgraph-expansion.ts`），**必须在节点对象上写死 `width`/`height`**。原因：React Flow v12 对没量过尺寸的节点保持 `visibility: hidden`，要等它把测量结果通过 `onNodesChange` 回写进受控 state 才显形；但这些 overlay 节点根本不在 `useNodesState` 里，它们的测量 change 会被 `onNodesChange` 丢弃 → 永远量不到 → 永远 `visibility: hidden`（DOM 里在、但看不见）。带显式尺寸的容器节点（如 `SubgraphGroupNode` 自带 group bbox）能正常显示，正好掩盖这个坑，造成「虚线容器出来了、里面空的」。这是 2026-06-23 子图 inline 展开真机调出来的真实 bug，单测 `subgraph-expansion.test.ts` 用「每个子节点都带数值型 width/height」这条断言守护。
 
 ## 4. 面板拖拽系统与自适应重绘
 Studio 必须表现得像一个原生桌面应用，核心支撑是灵活的分屏拖拽框架。

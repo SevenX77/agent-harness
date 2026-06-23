@@ -51,6 +51,13 @@ export interface SkillGraphNodeData extends Record<string, unknown> {
   isExpanded?: boolean
   onToggleSubgraph?: () => void
   /**
+   * N2 atom #13 (subgraph-inline-preview): true for the read-only child phase
+   * nodes rendered inside an expanded subgraph's inline container. The canvas
+   * interaction handlers (select / drill / double-click open-file) skip these so
+   * a synthetic preview node never routes to a real phase file or selection.
+   */
+  isSubgraphPreview?: boolean
+  /**
    * N2 atom #15 (l3-step-edit): the agent phase body (SKILL.md text, sans
    * frontmatter handling — the full file content is fine since the step
    * transforms only touch `<step>` blocks). Present only for AGENT nodes so the
@@ -82,7 +89,22 @@ export interface GlobalNodeData extends Record<string, unknown> {
   schema: IoDeclaration
 }
 
+/**
+ * N2 atom #13 (subgraph-inline-preview): data for the dashed container node that
+ * frames an expanded subgraph's inline child topology. Carries the resolve state
+ * so the container can render loading / error / loaded affordances; the child
+ * phase nodes/edges are emitted as siblings (see subgraph-expansion.ts).
+ */
+export interface SubgraphGroupNodeData extends Record<string, unknown> {
+  parentLabel: string
+  path: string
+  status: 'loading' | 'error' | 'loaded'
+  childName?: string
+  message?: string
+}
+
 export type GraphCanvasNode =
   | Node<SkillGraphNodeData, 'skill'>
   | Node<GlobalNodeData, 'globalInput'>
   | Node<GlobalNodeData, 'globalOutput'>
+  | Node<SubgraphGroupNodeData, 'subgraphGroup'>

@@ -126,7 +126,11 @@ one-page orientation, not the full design.
 - **Run + headless-screenshot guide**: `docs/development/RUN_AND_SCREENSHOT.md`
   — fresh-machine startup (vendor deps + warm `.pyc`) and the VPS-only headless
   verify method (Xvfb + screenshot + synthetic clicks).
-- **Handbook authoring methodology**: `docs/studio/mvp1/handbook-methodology/`
+- **Handbook authoring methodology**: `docs/studio/mvp1/handbook-methodology/` —
+  `frontend-page-authoring-methodology.md` (内容/页面骨架/写作规则/一色一义) +
+  `handbook-operations-schema-lifecycle.md` (怎么看/怎么改/何时改跟代码 reconcile/
+  测试截图怎么截/切片字段 schema/状态点配色锁定). Read these before editing the N6
+  handbook (`tpl-*.json` slices → `build_template_slice.py` → `index.html`).
 - Note: a separate live "N-node implementation handbook" (`#handbook_overview`)
   is generated locally by `temp/build_ux_handbook.py` into `temp/` (gitignored)
   — NOT committed, exists only on the authoring machine. Follow the committed N6

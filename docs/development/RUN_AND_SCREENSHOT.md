@@ -268,3 +268,34 @@ exception to the per-worktree isolation in §3: the **app** runs per-worktree, b
   root**: after a handbook PR merges, `git -C "$ROOT" pull` and the live URL shows it.
   Keep exactly one such serve + tunnel; tear down any extra handbook tunnels you
   started for review (`§3` isolation is for the app, not for spawning more exits).
+
+> **If the live URL returns `502 Bad gateway`** the tunnel is up but its origin
+> `http.server` died (a bare `nohup python -m http.server` does not survive a crash
+> or reboot). The fix is to **restart the origin on the same port** — the existing
+> `cloudflared` keeps the same public URL, so you do not re-open the tunnel. Confirm
+> with `ss -ltnp | grep 890x` (nothing listening = origin dead) before restarting.
+
+### 4.1 12D node-repair handbook (a *separate* document, its own exit)
+
+The 12D node-repair handbook
+(`docs/studio/mvp1/_impl/wave2/studio-mvp1-12d-repair-framework-2026-06-15.html`) is a
+**different document** from the N6 handbook, so it gets its own serve + tunnel on a
+**separate port**. This does **not** violate the "single network exit" rule above —
+that rule forbids a *second copy / second tunnel of the same N6 handbook*, not a
+distinct handbook. Same discipline still applies: serve the **`main` repo-root copy**
+(self-contained single HTML, committed), never a `/tmp` or worktree copy.
+
+```bash
+ROOT=/home/sevenx/coding/agent-harness          # the main working tree (repo root)
+HB12=$ROOT/docs/studio/mvp1/_impl/wave2
+
+python3 -m http.server 8903 --directory "$HB12" >/tmp/handbook12d-serve.log 2>&1 &
+cloudflared tunnel --url http://127.0.0.1:8903 >/tmp/handbook12d-tunnel.log 2>&1 &
+# entry URL = <printed trycloudflare host>/studio-mvp1-12d-repair-framework-2026-06-15.html
+grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/handbook12d-tunnel.log | head -1
+```
+
+The `wave2/` dir has no `index.html`, so the file is reached by its full name in the
+URL path (the `grep` above prints only the host — append the filename). Refresh = same
+as N6: after a wave2 PR merges, `git -C "$ROOT" pull`. Keep one 8903 serve + tunnel;
+if it 502s, restart the origin on 8903 (the tunnel URL is unchanged).

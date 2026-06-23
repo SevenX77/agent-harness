@@ -10,6 +10,7 @@ from graph_agent.core.compiler import compile_skill
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.graph_assembler import assemble_graph
 from graph_agent.core.manifest import AgentNodeAST, SubgraphNodeAST
+from graph_agent.core.topology_projection import read_subgraph_path
 
 
 class ExplodingResolver:
@@ -190,6 +191,51 @@ def test_subgraph_absolute_path_compiles_and_assembles_without_registry_resolver
     assert assembled.phase_ids == ["delegate"]
 
 
+def test_subgraph_relative_path_compiles_and_assembles_within_root(tmp_path: Path) -> None:
+    # A SUBGRAPH.md `path` declared relative to the skill root must resolve at
+    # ASSEMBLY time exactly as it does at compile time (against the skill root
+    # derived from the SUBGRAPH.md location), not be rejected for "must be
+    # absolute". This is what lets a skill survive being relocated (e.g. Studio
+    # copying it into an ephemeral run dir): the relative path re-resolves against
+    # wherever the skill root currently is.
+    parent = tmp_path / "parent"
+    child = parent / "subgraphs" / "child"
+    _logic_child(child)
+    _subgraph_parent(parent, "subgraphs/child")
+    resolver = ExplodingResolver()
+
+    compiled = compile_skill(parent, cache=False, skill_resolver=resolver)
+    assembled = assemble_graph(compiled, skill_resolver=resolver)
+
+    assert resolver.calls == []
+    assert assembled.phase_ids == ["delegate"]
+
+
+def test_subgraph_relative_path_assembles_after_skill_root_relocation(tmp_path: Path) -> None:
+    # Faithful reproduction of the Studio predict/run failure: compile the skill
+    # in place, then copy the whole tree to a different absolute location (as the
+    # ephemeral run sandbox does) and assemble from the copy. A relative subgraph
+    # path must re-resolve against the relocated root; an absolute path baked at
+    # authoring time would "escape" the new root and fail.
+    import shutil
+
+    origin = tmp_path / "origin" / "parent"
+    child = origin / "subgraphs" / "child"
+    _logic_child(child)
+    _subgraph_parent(origin, "subgraphs/child")
+    resolver = ExplodingResolver()
+    compile_skill(origin, cache=False, skill_resolver=resolver)
+
+    relocated = tmp_path / "ephemeral_run_skills" / "deadbeef" / "parent"
+    shutil.copytree(origin, relocated)
+
+    compiled = compile_skill(relocated, cache=False, skill_resolver=resolver)
+    assembled = assemble_graph(compiled, skill_resolver=resolver)
+
+    assert resolver.calls == []
+    assert assembled.phase_ids == ["delegate"]
+
+
 @pytest.mark.parametrize(
     ("case_name", "make_child_path", "expected"),
     [
@@ -242,3 +288,35 @@ def test_agent_subgraphs_reject_target_skill_registry_id(tmp_path: Path) -> None
 
     with pytest.raises(ValidationError, match="path"):
         AgentNodeAST.model_validate(payload)
+
+
+def test_read_subgraph_path_resolves_relative_to_absolute(tmp_path: Path) -> None:
+    # The topology projection (consumed by Studio's Subgraph Library + inline
+    # drill-down) must surface a RESOLVED ABSOLUTE child path even when the
+    # author declared the recommended relative-to-skill-root form. Returning the
+    # raw "subgraph/child" string makes the frontend's absolute-path check fall
+    # through to "missing", so a perfectly valid in-skill subgraph renders red.
+    skill_root = tmp_path / "parent"
+    _logic_child(skill_root / "subgraph" / "child")
+    _subgraph_parent(skill_root, "subgraph/child")
+
+    resolved = read_subgraph_path(skill_root, "delegate")
+
+    assert resolved == str((skill_root / "subgraph" / "child").resolve())
+    assert Path(resolved).is_absolute()
+
+
+def test_read_subgraph_path_passes_absolute_through(tmp_path: Path) -> None:
+    skill_root = tmp_path / "parent"
+    child = skill_root / "subgraph" / "child"
+    _logic_child(child)
+    _subgraph_parent(skill_root, str(child))
+
+    assert read_subgraph_path(skill_root, "delegate") == str(child)
+
+
+def test_read_subgraph_path_returns_none_without_path(tmp_path: Path) -> None:
+    skill_root = tmp_path / "parent"
+    _target_skill_parent(skill_root)
+
+    assert read_subgraph_path(skill_root, "delegate") is None

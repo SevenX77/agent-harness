@@ -1302,9 +1302,17 @@ def _build_subgraph_node(
 def _resolve_subgraph_path_root_for_assembly(source_path: Path, value: str) -> Path:
     parent_root = source_path.parent.parent.parent.resolve()
     candidate = Path(value)
-    if not candidate.is_absolute():
-        _subgraph_path_fatal(source_path, f"subgraph path {value!r} must be absolute")
-    resolved = candidate.resolve()
+    # Mirror the compile-time resolver (loader._resolve_subgraph_path_root): a
+    # relative path resolves against the skill root derived from this
+    # SUBGRAPH.md's location, an absolute path is taken as-is. Resolving against
+    # the *current* root (not a path baked at authoring time) is what lets a
+    # compiled skill survive relocation — e.g. Studio copying it into an
+    # ephemeral run dir — instead of failing with "must be absolute" / "escapes
+    # skill root".
+    if candidate.is_absolute():
+        resolved = candidate.resolve()
+    else:
+        resolved = (parent_root / candidate).resolve()
     try:
         resolved.relative_to(parent_root)
     except ValueError as exc:

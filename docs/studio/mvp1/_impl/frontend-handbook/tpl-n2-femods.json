@@ -85,7 +85,7 @@
   },
   {
     "name": "子图 inline 预览",
-    "what": "在画布上把一个 subgraph 节点 inline 展开成它真实子拓扑的预览组件——拉子图真实 phase 列表渲染，绝不编造子图里没声明的 phase。",
+    "what": "在画布上把一个 subgraph 节点 inline 展开：拉子图真实 phase 列表，渲染成 name+kind 只读预览行（数据真、绝不编造子图未声明的 phase）。⚠️ 当前是『行列表』形态，不是设计要求的画布级子拓扑展开（虚线容器 + 动态 group bbox + 真 React Flow 子节点/边）——见 #13 偏差。",
     "where": "SubgraphInline.tsx：组件本体 + childPhaseRows（把子图真实拓扑 join 成 (name+kind) 预览行的函数，注释明示『Never fabricates a phase that the child graph does not declare』）；数据源 getChildGraphTopology（api/client.ts 里拉某子图真实拓扑的客户端函数）。",
     "duties": [
       "subgraph 节点 toggle 展开时调 getChildGraphTopology 拉该子图的真实 phase 列表 + 拓扑。",

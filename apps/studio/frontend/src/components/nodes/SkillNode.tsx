@@ -1,7 +1,6 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { AlertTriangle, Bot, Briefcase, CheckCircle2, Circle, Code, ListTree, Minus, Network, Pause, Plus, Radio, ShieldCheck, ShieldHalf, Workflow } from 'lucide-react'
 import { AgentStepsInline } from '@/components/studio/AgentStepsInline'
-import { normalizeAbsoluteSubgraphPath } from '@/components/studio/subgraph-path'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
@@ -79,7 +78,6 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
   const StatusIcon = style.icon
   const kind = phaseKindLabel(data)
   const KindIcon = phaseKindIcon(kind)
-  const resolvedSubgraphPath = normalizeAbsoluteSubgraphPath(data.subgraphPath)
   const subagentCount = data.subagents?.length ?? 0
   const compileErrors = data.compileErrors ?? []
   const compileErrorCount = compileErrors.length
@@ -111,7 +109,6 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
       data-dirty-downstream={isDirtyDownstream || undefined}
       className={[
         'group relative min-w-[240px] cursor-pointer rounded-md border bg-card p-3 text-card-foreground shadow-sm transition-colors',
-        resolvedSubgraphPath ? 'pb-5' : '',
         isDirtyDownstream ? 'opacity-50 grayscale' : '',
         data.isConflictCancelled
           ? 'border-destructive ring-2 ring-destructive/30'
@@ -254,7 +251,12 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
           ) : null}
         </div>
       ) : null}
-      {resolvedSubgraphPath ? (
+      {typeof data.onToggleSubgraph === 'function' ? (
+        // Right-edge center expand toggle (设计 "右缘加号"). Shown on EVERY editable
+        // SUBGRAPH node — including unresolved-path ones, which expand to the inline
+        // recovery state — never on read-only preview children (their callback is
+        // stripped). `top-1/2 -translate-y-1/2 translate-x-1/2` centers it on, and
+        // half-overhangs, the node's right border.
         <button
           type="button"
           aria-label={data.isExpanded ? 'Collapse subgraph' : 'Expand subgraph'}
@@ -262,7 +264,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
             event.stopPropagation()
             data.onToggleSubgraph?.()
           }}
-          className="absolute bottom-0 right-3 inline-flex size-5 translate-y-1/2 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-sm transition-colors hover:border-primary"
+          className="absolute right-0 top-1/2 inline-flex size-5 -translate-y-1/2 translate-x-1/2 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-sm transition-colors hover:border-primary"
         >
           {data.isExpanded ? <Minus className="size-3" /> : <Plus className="size-3" />}
         </button>

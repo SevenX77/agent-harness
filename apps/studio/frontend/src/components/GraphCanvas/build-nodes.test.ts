@@ -197,8 +197,12 @@ describe('buildNodes', () => {
     }), new Set(), () => {}, {})
 
     const legacy = phaseNode(nodes, 'legacy')
+    // Drill-down still requires an ABSOLUTE child path, so a legacy target_skill
+    // exposes no drillable path…
     expect(legacy.subgraphPath).toBeNull()
-    expect(legacy.onToggleSubgraph).toBeUndefined()
+    // …but the inline expand toggle IS wired (it surfaces the recovery state for
+    // exactly this unresolved case — F4, PM 2026-06-23).
+    expect(legacy.onToggleSubgraph).toBeTypeOf('function')
   })
 
   it('only exposes absolute subgraph paths for drill-down and trims surrounding whitespace', () => {
@@ -212,8 +216,11 @@ describe('buildNodes', () => {
 
     expect(phaseNode(nodes, 'trimmed').subgraphPath).toBe('/abs/child')
     expect(phaseNode(nodes, 'trimmed').onToggleSubgraph).toBeTypeOf('function')
+    // A relative path is still NOT drillable (subgraphPath null)…
     expect(phaseNode(nodes, 'relative').subgraphPath).toBeNull()
-    expect(phaseNode(nodes, 'relative').onToggleSubgraph).toBeUndefined()
+    // …yet every SUBGRAPH-kind node now gets the expand toggle, so the unresolved
+    // one opens its inline recovery state instead of silently offering nothing.
+    expect(phaseNode(nodes, 'relative').onToggleSubgraph).toBeTypeOf('function')
   })
 
   // N2 atom #15 (l3-step-edit): the inline step editor is mounted only on AGENT

@@ -759,7 +759,21 @@ export function GraphCanvas({
     for (const node of nodes) {
       if (node.type !== 'skill' || !expandedSubgraphs.has(node.id)) continue
       const path = normalizeAbsoluteSubgraphPath(node.data.subgraphPath)
-      if (!path) continue
+      if (!path) {
+        // No usable child path: there is nothing to fetch, so expand straight to the
+        // inline recovery state (F4 "unresolved path shows recovery state"). Since
+        // #199 the backend resolves a declared relative/absolute path to absolute, so
+        // this branch is reached only when SUBGRAPH.md declares no path at all. This
+        // is why the "+" now appears on these nodes too (PM 2026-06-23) — it used to
+        // be hidden, leaving no way to surface the recovery affordance.
+        requests.push({
+          parentNodeId: node.id,
+          parentLabel: node.data.label,
+          path: node.data.subgraphPath ?? '',
+          view: { status: 'error', message: '子图未声明 path —— 在该节点的 SUBGRAPH.md 里声明子图根目录的 path（推荐相对 skill 根，绝对亦可，均须落在 skill 根内）后即可展开真实子拓扑。' },
+        })
+        continue
+      }
       const entry = expandedTopologies[node.id]
       const view: ExpandedSubgraphView = entry && entry.path === path ? entry.view : { status: 'loading' }
       requests.push({ parentNodeId: node.id, parentLabel: node.data.label, path, view })

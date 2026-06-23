@@ -77,7 +77,16 @@ def read_subgraph_path(skill_dir: Path, phase_name: str) -> str | None:
     frontmatter, _body, _line_meta = parse_markdown_parts(phase_path)
     path_value = frontmatter.get("path")
     if isinstance(path_value, str) and path_value.strip():
-        return path_value.strip()
+        value = path_value.strip()
+        candidate = Path(value)
+        # Surface a RESOLVED ABSOLUTE child path so consumers (Studio Subgraph
+        # Library + inline drill-down) get a usable location regardless of whether
+        # the author wrote the recommended relative-to-skill-root form or an
+        # absolute path. Relative paths resolve against the skill root, matching
+        # the compile/assembly resolvers (loader._resolve_subgraph_path_root).
+        if candidate.is_absolute():
+            return str(candidate)
+        return str((skill_dir.resolve() / candidate).resolve())
     return None
 
 

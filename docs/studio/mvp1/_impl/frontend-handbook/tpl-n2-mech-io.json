@@ -6,7 +6,7 @@
     "manages": "节点的 io.inputs/outputs 字段契约怎么以 inline JSON Schema 存在 GRAPH.md 里、output 字段怎么配 artifact 落盘到 .workspace、子图怎么按绝对 path 引用并解析它的真实子拓扑。",
     "why_single": "io 字段编辑、artifact 落盘、子图 path 解析三件事都不是简单 CRUD：io 是 GRAPH.md frontmatter 的一部分（随 serialize 走，无独立端点）、artifact 落盘的事实源在运行期引擎 io/manager、子图 io 1:1 校验是引擎 loader 的编译期 FATAL——牵涉引擎 io/manager + loader 两个内核点，单列一页讲清。",
     "design_owner": "graph-agent 引擎（packages/graph-agent）——io schema 校验、artifact 落盘、子图 io 关系、SUBGRAPH path 解析都归引擎内核；前端只编辑 io 字段（写回 GRAPH.md）+ 配 artifact 目标 + 判子图 path 状态。",
-    "code_location": "graph-agent 引擎内核：io/manager.py（运行期 io 落盘/artifact_saver）/ loader.py（子图 io 1:1 校验 F-v3-subgraph-io-mismatch、读 SUBGRAPH path）；① 前端：schema-infer.ts（io 推断/写回/artifact 目标）/ panel-files.ts（inputContractView 只读投影）/ subgraph-path.ts（resolveSubgraphReference）/ SubgraphInline.tsx（子图真子拓扑预览）。",
+    "code_location": "graph-agent 引擎内核：io/manager.py（运行期 io 落盘/artifact_saver）/ loader.py（子图 io 1:1 校验 F-v3-subgraph-io-mismatch、读 SUBGRAPH path）；① 前端：schema-infer.ts（io 推断/写回/artifact 目标）/ panel-files.ts（inputContractView 只读投影）/ subgraph-path.ts（resolveSubgraphReference）/ subgraph-expansion.ts + SubgraphGroupNode.tsx（子图真子拓扑 inline 展开预览）。",
     "dataflow": [
       "io 字段编辑：前端改 io.inputs/outputs → applyInputSchemaToGraph/直写 → 随 GRAPH.md serialize 落盘（无独立 io 端点）",
       "artifact 配置：applyOutputArtifactPathToGraph 给 io.outputs.<字段> 写 {target:'artifact', path} → serialize 落盘（配置期）",
@@ -64,7 +64,7 @@
     },
     {
       "name": "子图 path 解析",
-      "code": "engine: loader.py（读 SUBGRAPH path）；前端 subgraph-path.ts + SubgraphInline.tsx",
+      "code": "engine: loader.py（读 SUBGRAPH path）；前端 subgraph-path.ts + subgraph-expansion.ts + SubgraphGroupNode.tsx",
       "owner": "engine 内核 / 前端",
       "summary": "子图按绝对 path 引用、无注册表（D7）；前端判 path 解析状态并拉子图真实拓扑预览。",
       "formula": "",
@@ -72,7 +72,7 @@
       "rules": [
         "SUBGRAPH.md 写 path（子图根目录绝对路径，含 GRAPH.md）；引擎 SkillResolverProtocol.resolve 退化为读 path、无注册表（D7）。",
         "前端 resolveSubgraphReference 判 resolved（有绝对 path）/ migration-required（仍用旧 target_skill）/ missing（都没有）。",
-        "SubgraphInline 经 GET child-graph-topology 拉子图真实 phase 列表预览（childPhaseRows 绝不编造未声明 phase）。",
+        "buildSubgraphExpansion（subgraph-expansion.ts）经 GET child-graph-topology 拉子图真实拓扑，在 SubgraphGroupNode 虚线容器内用主画布同款 dagre TB + React Flow node/edge 渲染真实 phase 真节点真边（绝不编造未声明 phase）。",
         "copilot 工作目录范围必须把被引用子图 path 纳入（D7，否则读不到/改不到子图）。"
       ],
       "do": [
@@ -177,7 +177,7 @@
       "endpoint": "GET child-graph-topology",
       "req": "子图绝对 path(来自 SUBGRAPH.md 的 path 字段);后端只接受三类 allowed roots:父 skill 自身目录树 + workspace skills + bundled skills(_allowed_child_graph_roots)",
       "resp": "ChildGraphTopology{phases:[name...], graph_topology:[{id,mode,path}]};path 非法/不在 allowed roots → 422 SUBGRAPH_PATH_INVALID;path 合法但找不到子图 → 404 SUBGRAPH_PATH_NOT_FOUND",
-      "purpose": "查(子图真实拓扑)——子图 inline 预览 / 下钻按 path 拉子图真实 phase 列表,childPhaseRows 据此渲染(绝不编造),也校验 path 是否解析得到。注:引擎语法说 path 是磁盘绝对路径、copilot cwd 必须覆盖;但 Studio endpoint 现只放行父 skill/workspace/bundled 三类根——『任意绝对路径』需后端把 allowed roots 扩成配置化 copilot cwd 边界",
+      "purpose": "查(子图真实拓扑)——子图 inline 展开预览 / 下钻按 path 拉子图真实 phase 列表,据此在虚线容器内用 React Flow 渲染真实 phase 节点(绝不编造),也校验 path 是否解析得到。注:引擎语法说 path 是磁盘绝对路径、copilot cwd 必须覆盖;但 Studio endpoint 现只放行父 skill/workspace/bundled 三类根——『任意绝对路径』需后端把 allowed roots 扩成配置化 copilot cwd 边界",
       "provider": "Studio sidecar(skills.py get_subgraph_child_topology → service get_child_graph_topology + _allowed_child_graph_roots);前端 client.ts getChildGraphTopology",
       "id": "iface-io-1"
     },

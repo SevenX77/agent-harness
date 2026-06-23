@@ -117,10 +117,10 @@
       "n": 13,
       "cap": "subgraph-inline-preview",
       "design_ref": "n2-atom-13",
-      "current": "现状:偏差(2026-06-23 据代码 + 设计 + codex/agy 双评审纠正)。后端真:子图节点 toggle 展开 → SubgraphInline 调 getChildGraphTopology 拿真子拓扑 phase 列表,数据不编造(childPhaseRows 注释 Never fabricates)。但渲染形态错:childPhaseRows→rows.map 只把子 phase 渲染成 name+kind 静态行列表(loading/error/empty/loaded 四态),这正是设计 §6.3/§8 自标 ⚠️ 的 `SubgraphInline mock rows` 基线,不是设计要求的『inline 展开子拓扑』(虚线容器 + 动态 group bbox + 真 React Flow 子节点/边 + 父图依赖边接驳到子图首末)。⚠ 撤销旧的反向纠正:之前那条『真代码已接真子拓扑、旧 mock 结论过时已纠正』把『数据真』误当成『渲染对』——数据确实真,但渲染仍是 mock 形态的行列表,画布级子拓扑展开缺口未闭。下钻(#14)渲染真拓扑、方向正确,与本条不同。",
-      "gap": "偏差:渲染形态不符设计。当前 = name+kind 静态行列表(= 设计标 ⚠️ 的 mock rows 形态);目标 = 在 expand 节点旁起虚线容器(动态 group bbox),容器内用主画布同款 node/edge 机制渲染真子图(plan→write 真节点真边),父图依赖边接驳到子图首/末节点。数据已真,缺的是画布级子拓扑渲染。",
-      "fe_status": "偏差",
-      "be_dep": "已就绪可接。GET child-graph-topology 已实现。D8.4=partial(子图 path 收口中,但拓扑读已通)。"
+      "current": "现状：符合（2026-06-23 实现 + 真机验证）。点子图节点展开 toggle → 按绝对 path 调 getChildGraphTopology 拉真子拓扑 → buildSubgraphExpansion（新增纯构建函数，subgraph-expansion.ts）在 expand 节点旁靠右起虚线容器（subgraphGroup 节点，SubgraphGroupNode.tsx，动态 group bbox），容器内用主画布同款 getAutoLayoutedElements（dagre TB）布局 + React Flow node/edge 渲染子图真实 phase（真节点带 AGENT/LOGIC 种类、只读），子图内部 depends_on 连真边，父图依赖边以虚线 bridge 接驳到子图首（entry）/末（terminal）节点；loading/error/loaded 三态。GraphCanvas 把 overlay 叠在受控 displayNodes 之上（不进 useNodesState），并在 click/drag/drill/edge-menu 处守 isSubgraphPreviewId 跳过 __subpreview__ 预览 id。旧 SubgraphInline name+kind 行列表组件已删。",
+      "gap": "无——已闭合。画布级子拓扑展开（虚线容器 + 真 React Flow 子节点/边 + 父图依赖 bridge 接驳）已落地并真机验证。修复：overlay 预览节点不在 useNodesState 内、其量尺 change 被 onNodesChange 丢弃 → 无显式 width/height 会一直 visibility:hidden（容器尺寸对但内部空）；已给预览子节点显式 width/height 闭合。",
+      "fe_status": "符合",
+      "be_dep": "已就绪并在用。GET child-graph-topology 已实现，按绝对子图 path 返回真子拓扑（phase 列表 + graph_topology）。D8.4 子图 path 收口中，拓扑读已通。"
     },
     {
       "n": 14,
@@ -441,26 +441,28 @@
       ]
     },
     {
-      "covers": "#13 subgraph-inline-preview(真子拓扑)",
+      "covers": "#13 subgraph-inline-preview（画布级 inline 子拓扑展开）",
       "atoms": [
         13
       ],
       "shots": [
-        "展开子图节点,inline 列出子图真实的 phase 名 + 类型(非 mock)"
+        "展开子图节点，在节点旁靠右起虚线容器，容器内用真 React Flow 节点+边渲染子图真实子拓扑（非 mock 行列表）",
+        "子图内部依赖连真边、父图依赖边以虚线 bridge 接驳到子图首/末节点；再折叠回到干净父图"
       ],
       "fe_status": "符合",
       "layer1": [
-        "mock getChildGraphTopology 回一个子图真实拓扑 → 断言 SubgraphInline 调它、childPhaseRows 按真实 phase 名渲染。",
-        "断言不渲染子图未声明的 phase(防编造)。",
-        "断言 loading/error/empty/loaded 四态分别呈现。"
+        "mock getChildGraphTopology 回真子拓扑 → 断言 buildSubgraphExpansion 出 subgraphGroup 容器节点 + 每个子 phase 一个真节点（type=skill、isSubgraphPreview、命名空间 id）。",
+        "断言子预览节点带显式 width/height（overlay 不进 useNodesState、量尺 change 被 onNodesChange 丢，无显式尺寸会一直 visibility:hidden、容器空）。",
+        "断言子图内部 depends_on 连 intra 真边、父图 expand 节点 bridge 接驳子图首（entry）/末（terminal）。",
+        "断言不渲染子图未声明的 phase（防编造）、loading/error/loaded 三态分别呈现。"
       ],
       "layer2": [
-        "真跑:展开一个真子图节点,看 inline 预览与子图真实 GRAPH.md 一致。"
+        "真跑：展开一个真子图节点（sd-v3-n4 的 global_synthesis），看节点旁起虚线容器、容器内渲染出 global_analysis/retroactive/scene_assembly/export 四真节点+真依赖边，与子图真实 GRAPH.md 一致；再点折叠回到干净父图。"
       ],
       "screenshots": [
         {
           "file": "n2-13-subgraph-inline.png",
-          "caption": "展开子图节点，inline 列出子图真实 phase 名 + 类型"
+          "caption": "展开 sd-v3-n4 的 global_synthesis 子图节点：节点旁靠右起虚线容器，容器内用真 React Flow 节点渲染子图真实子拓扑（global_analysis/retroactive 为 AGENT、scene_assembly/export 为 LOGIC）+ 真依赖边"
         }
       ]
     },

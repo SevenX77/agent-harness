@@ -85,15 +85,15 @@
   },
   {
     "name": "子图 inline 预览",
-    "what": "在画布上把一个 subgraph 节点 inline 展开：拉子图真实 phase 列表，渲染成 name+kind 只读预览行（数据真、绝不编造子图未声明的 phase）。⚠️ 当前是『行列表』形态，不是设计要求的画布级子拓扑展开（虚线容器 + 动态 group bbox + 真 React Flow 子节点/边）——见 #13 偏差。",
-    "where": "SubgraphInline.tsx：组件本体 + childPhaseRows（把子图真实拓扑 join 成 (name+kind) 预览行的函数，注释明示『Never fabricates a phase that the child graph does not declare』）；数据源 getChildGraphTopology（api/client.ts 里拉某子图真实拓扑的客户端函数）。",
+    "what": "在画布上把一个 subgraph 节点 inline 展开成画布级子拓扑：拉子图真实 phase 列表 + DAG，在 expand 节点旁靠右起虚线容器（动态 group bbox），容器内用主画布同款 React Flow 节点+边渲染子图真实子拓扑（真节点带种类/状态灯、只读），父图依赖边以虚线 bridge 接驳到子图首/末节点。数据真、绝不编造子图未声明的 phase。",
+    "where": "subgraph-expansion.ts：buildSubgraphExpansion（画布级子拓扑展开纯构建函数——给定已布局父节点 + 各展开子图真实拓扑，产出 subgraphGroup 容器节点 + 子 phase 真节点 + intra/bridge 边；子节点带显式 width/height 避免 React Flow overlay 量尺丢失而 visibility:hidden）、isSubgraphPreviewId（判 __subpreview__ 预览 id 的函数）；SubgraphGroupNode.tsx（虚线容器节点，头部 FileCode2 + 父名 + 绝对 path 徽标，loading/error 态）。数据源 getChildGraphTopology（api/client.ts 拉某子图真实拓扑的客户端函数）。布局复用 lib/layout.ts getAutoLayoutedElements（dagre TB）。",
     "duties": [
-      "subgraph 节点 toggle 展开时调 getChildGraphTopology 拉该子图的真实 phase 列表 + 拓扑。",
-      "childPhaseRows 以子图真实 phase 名为顺序/存在性真相、行 mode 供节点种类，组装成 (name+kind) 预览行。",
-      "loading / error / empty / loaded 四态分别渲染骨架 / 错误 / 空 / 真实预览行。"
+      "subgraph 节点 toggle 展开时按绝对 path 调 getChildGraphTopology 拉子图真实 phase 列表 + DAG。",
+      "buildSubgraphExpansion 以子图真实 phase 为存在性/顺序真相，用 dagre TB 布局成虚线容器内的真 React Flow 子节点 + intra 真边，父图 expand 节点 bridge 接驳子图首（entry）/末（terminal）。",
+      "子预览节点带显式 width/height（overlay 不进 useNodesState、量尺 change 被丢，无显式尺寸会一直 visibility:hidden）；loading/error/loaded 三态分别渲染。"
     ],
     "used_by": "#13（subgraph-inline-preview 子图 inline 展开真子拓扑预览）。",
-    "boundary": "做：拉子图真实拓扑、渲染只读预览行。不做：不编造子图未声明的 phase（注释明示）、不做子图下钻聚焦（#13 是另一回事）、不改子图源码。",
+    "boundary": "做：拉子图真实拓扑、画布级 inline 渲染（虚线容器 + 真子节点/边 + 父图 bridge 接驳）、只读预览。不做：不编造子图未声明的 phase、不做子图下钻聚焦（#14 是另一回事）、预览子节点不可拖/选/连/删、不改子图源码。",
     "api": "GET child-graph-topology（拉子图真实拓扑）；详见后端接口契约页 mech_io。"
   },
   {

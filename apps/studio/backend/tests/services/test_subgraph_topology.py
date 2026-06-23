@@ -132,6 +132,29 @@ def test_subgraph_phase_topology_surfaces_absolute_path(
     assert rows["review"]["path"] == str(child_dir)
 
 
+def test_subgraph_phase_topology_resolves_relative_path_to_absolute(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    # The recommended in-skill form declares `path` relative to the skill root
+    # (portable across machines / ephemeral relocation). The topology row must
+    # still surface a RESOLVED ABSOLUTE path so the frontend's absolute-path
+    # check renders the subgraph as resolved (green) instead of "missing".
+    skills_dir, workspaces_dir = studio_roots
+    parent_dir = copy_skill(skills_dir, workspaces_dir, "text-segmentation")
+    child_dir = parent_dir / "subgraph" / "review_child"
+    child_dir.mkdir(parents=True)
+    _write_child_graph(child_dir, "review-child")
+    _add_subgraph_phase(parent_dir, "review", "subgraph/review_child")
+
+    response = client.get("/api/skills/text-segmentation")
+
+    assert response.status_code == 200
+    rows = {row["id"]: row for row in response.json()["graph_topology"]}
+    assert rows["review"]["mode"] == "subgraph"
+    assert rows["review"]["path"] == str(child_dir.resolve())
+
+
 @pytest.mark.anyio
 async def test_subgraph_path_for_phase_ignores_target_skill(tmp_path: Path) -> None:
     phase_dir = tmp_path / "skill" / "phases" / "review"

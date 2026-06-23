@@ -84,7 +84,7 @@
    "current": "现状:偏差——官方走专属异步 job,与第三方两套路。官方卡按钮文案是 `Test`(ProviderCard.tsx),点击走 runProviderGetModels(SettingsPage.tsx);因 inferProviderKind=official,getProviderModels(llm.ts)在 savedEndpoint.provider_kind==='official' 时(llm.ts)走 testOfficialProviderModelsWithJob(llm.ts):POST /endpoints/{id}/test-jobs 起异步 job,再按 750ms 节奏 waitForEndpointTestJob 轮询 GET /endpoint-test-jobs/{job_id}(llm.ts/1422),进度实时刷到卡上;拉到模型目录即判通过。这套异步 job 后端硬门禁只放官方:start_endpoint_test_job 里 `if endpoint.provider_kind != 'official': raise 400`(后端 llm.py),第三方根本进不来。",
    "gap": "差距:目标是官/三合一的统一 endpoint test + 批量探测(POST /endpoints/{id}/test),官方因 endpoint 可控只需 get-models 连通即可、不强制逐模型 probe;不再让官方独占一条 test-jobs 异步路、第三方另走同步路。前端动作:让官方与第三方的 Test 都打同一个 POST /endpoints/{id}/test 入口(若后端保留异步 job 形态则统一用 GET /endpoint-test-jobs/{job_id} 轮询),去掉前端按 provider_kind 在 getProviderModels(llm.ts)的分叉。此项必须等后端先把统一入口 + 解除官方门禁(llm.py)做掉,否则前端无路可打。",
    "fe_status": "符合",
-   "be_dep": "契约要先改。统一入口 POST /endpoints/{id}/test(官/三同走)与解除 test-jobs 的官方-only 门禁(llm.py)需后端先动;批量探测策略归 mech_cred。注:后端实施手册 D5 路由/凭证收口=ok,但「官/三测试入口对称化 + 批量探测」属 API Keys 测试路径,需后端按设计补齐。",
+   "be_dep": "契约要先改。统一入口 POST /endpoints/{id}/test(官/三同走)与解除 test-jobs 的官方-only 门禁(llm.py)需后端先动;批量探测策略归 mech_cred。注:后端实施手册 D5 路由/凭证收口=ok,但「官/三测试入口对称化 + 批量探测」属 API Keys 测试路径,需后端按设计补齐。 另:官方 Test 拉模型这步还应读 draft 做「回填已证实能力 / get-models 拿不到清单用 draft 补 / 批量探测前免盲测」，现状全程不读 draft、属未实现缺口(记在 mech_cred「后端实现状态」)。",
    "fe_resync": "apikeys 后端+前端齐(2026-06-20)"
   },
   {
@@ -139,9 +139,9 @@
    "cap": "test-status-projection",
    "design_ref": "atom-30",
    "current": "现状:偏差——API Keys 卡仍用旧 4 态枚举、缺蓝态、结果偏 toast。ProviderCard 的状态投影用 RouteStatus(llm.ts,verified/unverified_manual/disabled/failed/probe-verified)+ TestStatus(llm.ts),由 routeDisplayStatus(ProviderCard.tsx)/routeStatusTagVariant(ProviderCard.tsx)/routeStatusLabel(ProviderCard.tsx)渲染:有 probe-verified 这个 Tag 变体(ProviderCard.tsx)但没有完整 6 态、也不直接消费后端 6 态 ui_state DTO;第三方顶层一个 TestMessage 连通徽章(ProviderCard.tsx)、官方每条 route 一个彩色 Tag。对照:LLM Roles 侧已经在用完整 6 态——后端 ProviderUiState(llm.ts,ready/historical_ready/untested/cooling_down/failed/off)由 provider-state-badge.tsx、AvailableModelsSidebar.tsx、role-route-status.tsx、RoleTestResultPanel.tsx 渲染(含 historical_ready=『Previously Connected』蓝态、cooling_down 倒计时)。即 6 态组件前端已存在,只是 API Keys 这张卡没接上。蓝态端到端还点不亮的根因在后端:probe_import_draft(llm.py)是桩——docstring 明说『real agent probing is handled by a later worker』,只把 draft.status 改成 'probed' 就返回,不真探,所以没有 draft/probe 历史证据喂给 historical_ready。",
-   "gap": "差距:① 前端把 API Keys ProviderCard 的状态位从 RouteStatus 旧枚举迁到后端 6 态 ui_state DTO,渲染补齐蓝态(historical_ready)与 cooling_down,复用 LLM Roles 已有的 provider-state-badge.tsx 6 态色映射,保证三页颜色一致;结果除 toast 外必须常驻 inline 写在 key/Base URL 旁(§1.4)。② 蓝态要真正点亮还需后端把 probe_import_draft(llm.py)从桩改成真探、产出 draft 历史证据(evidence library→historical_ready 投影,后端实施手册 D6.5 的 probe evidence→historical_ready 已是 Gateway 契约,但 Studio 这条 draft 探测端点仍是桩)。前端第①步(接 6 态 DTO + inline 常驻)可在后端 registry 内嵌 ui_state 就绪后先做,蓝态会先表现为『有证据才亮』;第②步桩转真探归后端。",
+   "gap": "差距:① 前端把 API Keys ProviderCard 的状态位从 RouteStatus 旧枚举迁到后端 6 态 ui_state DTO,渲染补齐蓝态(historical_ready)与 cooling_down,复用 LLM Roles 已有的 provider-state-badge.tsx 6 态色映射,保证三页颜色一致;结果除 toast 外必须常驻 inline 写在 key/Base URL 旁(§1.4)。② 蓝态要真正点亮还需后端把 probe_import_draft(llm.py)从桩改成真探、产出 draft 历史证据(evidence library→historical_ready 投影,后端实施手册 D6.5 的 probe evidence→historical_ready 已是 Gateway 契约,但 Studio 这条 draft 探测端点仍是桩)。前端第①步(接 6 态 DTO + inline 常驻)可在后端 registry 内嵌 ui_state 就绪后先做,蓝态会先表现为『有证据才亮』;第②步桩转真探归后端。 ③ 蓝态口径要收回到「真探历史」:现有一处改动把 get-models 观测(provider-list-observed)也算成蓝，按设计观测只能出灰、绝不出蓝(看到 ≠ 连通过)，这处要回退。④ 蓝态的真探历史不止来自本地 probe，也来自云端知识库已带的 probe-verified 记录——所以即便本地 probe_import_draft 仍是桩，只要云端知识库同步进来、且口径正确，官方卡也能凭历史出蓝。",
    "fe_status": "符合",
-   "be_dep": "契约要先改 / 部分等后端。GET /registry 需在 endpoint/route 上内嵌 6 态 ui_state(后端实施手册 D6 Gateway 六态投影 ready/historical_ready/untested/failed/cooling_down/off 已收口=ok,但需确认已落到 API Keys 走的 registry DTO);蓝态点亮还需 probe_import_draft(llm.py)桩转真探产出历史证据。投影本身不发额外请求。",
+   "be_dep": "契约要先改 / 部分等后端。GET /registry 需在 endpoint/route 上内嵌 6 态 ui_state(后端实施手册 D6 Gateway 六态投影 ready/historical_ready/untested/failed/cooling_down/off 已收口=ok,但需确认已落到 API Keys 走的 registry DTO);蓝态点亮还需 probe_import_draft(llm.py)桩转真探产出历史证据。投影本身不发额外请求。 另:蓝态判定口径需收回到真探连通(probe-verified)历史，观测不得出蓝(回退点见 mech_cred「后端实现状态」)。",
    "fe_resync": "apikeys 后端+前端齐(2026-06-20)"
   },
   {
@@ -195,6 +195,13 @@
    "what": "#20 tp-credential-edit(去协议下拉)+ #27 manual-model-probe(前端 6 态呈现):删第三方卡的 Protocol 手选下拉(ProviderCard.tsx),协议改由 #24/#25 的探测回填;Manual 面板结果从旧 Badge 二态(ManualModelTestPanel.tsx)改为 6 态 inline 呈现。",
    "depends_on": "#20 依赖 step 5(协议自动探测落地后才能安全去掉手选兜底);#27 前端呈现依赖 step 4(6 态)、能力统一依赖 step 3-③。",
    "why": "去协议下拉必须等自动探测真能用(step 5)再做,否则用户失去兜底;Manual 面板 6 态呈现收尾,与其它项的 6 态呈现统一。放最后做收口。",
+   "block": "等后端"
+  },
+  {
+   "step": 7,
+   "what": "后端 · draft 知识库生命周期补齐(本轮新增):① 测试路径读 draft——回填已证实能力、get-models 拿不到清单用 draft 补、批量探测前免盲测;② 云端知识库同步从「进设置页」移到后端启动 lifespan;③ 蓝态判定口径收回到真探连通(probe-verified)历史，回退「观测也算蓝」;④ 知识库证据 → 配置档案晋升规则落地。",
+   "depends_on": "纯后端(gateway / Studio 后端);前端 6 态投影就绪后即可受益，无需前端再改判定。",
+   "why": "兑现拉云端知识库「免重探」的意义，并把蓝 / 灰红线钉死，防「看到 = 蓝」误判。",
    "block": "等后端"
   }
  ],
@@ -474,14 +481,16 @@
    "shots": [
     "六态卡:ready 绿 / historical_ready 蓝(Previously Connected) / untested 灰 / failed 红(带 reason) / cooling_down 灰+倒计时 / off 灰禁用",
     "API Keys 卡与 LLM Roles 同态同色",
-    "draft 真探出证据后蓝态点亮(桩态下不亮)"
+    "draft 真探出证据后蓝态点亮(桩态下不亮)",
+    "观测不误亮蓝:只被清单看到的模型停留灰，唯有真探历史才出蓝"
    ],
    "fe_status": "符合",
    "layer1": [
     "喂含各 ui_state 的 registry DTO → 断言 ProviderCard 渲染对应颜色标签且常驻 inline 在 key/Base URL 旁(不只 toast)。",
     "断言蓝态显示『Previously Connected』。",
     "一致性测:同一 ui_state,API Keys 卡与 LLM Roles 的 provider-state-badge.tsx 渲染同色。",
-    "蓝态端到端:后端 probe_import_draft 真探出证据后投影 historical_ready;桩态下应表现为不亮、而非误亮。"
+    "蓝态端到端:后端 probe_import_draft 真探出证据后投影 historical_ready;桩态下应表现为不亮、而非误亮。",
+    "蓝 / 灰红线:喂「只被 get-models 清单看到(provider-list-observed)、无真探历史」的 route → 断言出灰 untested、绝不误亮蓝;喂「draft 有真探连通(probe-verified)历史、当前非绿」→ 断言出蓝 historical_ready。"
    ],
    "layer2": [
     "造各态数据看六态卡。",

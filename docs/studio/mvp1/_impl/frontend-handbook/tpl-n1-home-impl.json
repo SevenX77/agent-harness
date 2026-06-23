@@ -201,7 +201,12 @@
       ],
       "fe_status_prev": "偏差",
       "fe_resync": "覆盖项已全绿(2026-06-20)",
-      "shot_na": "Open folder 会弹系统原生目录选择器(OS file picker/AppKit sheet),不属于浏览器 DOM,后台 Playwright 无法稳定驱动或截取,截图也无法证明命令参数正确。替代验证:WelcomePage 组件测试断言点击 Open folder 调 selectSkillDirectory/openSkillWorkspace,并断言无 missing GRAPH.md/SKILL.md 拒绝文案。"
+      "screenshots": [
+        {
+          "file": "n1-02-open-folder-native-picker.png",
+          "caption": "macOS 原生 Open 目录选择器由 Home 的 Open folder 触发;截图中选中缺 GRAPH.md/SKILL.md 的 open-empty-skill 空目录,Open 按钮可用。组件测试继续断言 openSkillWorkspace 不再走 missing-manifest 拒绝文案。"
+        }
+      ]
     },
     {
       "covers": "#3 recent-mru-grid",
@@ -275,7 +280,12 @@
       "layer2": [
         "真跑(桌面):点卡片 ⋯ Show in folder → Finder/Explorer 定位到该文件夹。"
       ],
-      "shot_na": "Show in folder 的真实效果是跳出 Studio 调 Finder/Explorer 定位本地文件夹,不属于 Studio DOM,截图无法证明前端命令参数是否正确。替代验证:组件测试断言点卡片 ⋯ → Show in folder 会以该卡 absolutePath 调 revealInFileManager;Tauri wrapper 测试断言调用 reveal_in_file_manager。"
+      "screenshots": [
+        {
+          "file": "n1-05-recent-finder-reveal.png",
+          "caption": "macOS Finder reveal 结果:对应 Recent workspace 文件夹被定位并选中。截图证明系统文件管理器可见结果;命令参数由 WelcomePage 组件测试和 Tauri wrapper 测试守护。"
+        }
+      ]
     },
     {
       "covers": "#6 remove-skill-entry",

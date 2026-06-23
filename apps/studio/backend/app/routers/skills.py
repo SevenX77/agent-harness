@@ -247,13 +247,10 @@ def _studio_error_code(exc: Exception) -> str | None:
 
 
 async def _has_current_user_skill_ownership_evidence(
-    user_id: str,
     skill_id: str,
     metadata: MetadataStore,
 ) -> bool:
-    if skill_id in await metadata.list_unregistered_skill_ids(user_id):
-        return False
-    return await metadata.get_skill_summary(user_id, skill_id) is not None
+    return await metadata.get_skill_index_entry(skill_id) is not None
 
 
 def _committed_artifact_id(release_manifest: dict[str, object]) -> str | None:
@@ -598,7 +595,7 @@ async def publish_skill(
         except Exception as resolve_exc:
             if _studio_error_code(resolve_exc) != "SKILL_NOT_FOUND":
                 raise
-            if not await _has_current_user_skill_ownership_evidence(user_id, skill_id, metadata):
+            if not await _has_current_user_skill_ownership_evidence(skill_id, metadata):
                 raise
             store = _product_artifact_store()
             publisher = ProductArtifactPublisher(store=store)

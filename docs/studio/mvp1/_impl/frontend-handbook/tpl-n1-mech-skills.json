@@ -28,7 +28,7 @@
       ],
       "do": ["列举所有已知 skill(含自动发现的未注册项)", "为每条算派生字段供前端展示"],
       "dont": ["不是 N1 目标想要的:它是注册表 + 自动发现,与 D1/D11 去注册表冲突"],
-      "deviation": "⚠ 与 D1(去注册表决策:skill 不用注册表,改 IDE 方式)/ D11(IDE/workspace 模型锁定决策:无聚合注册表)冲突。N1 目标:Home 改读 MRU(localStorage 最近列表,只路径+名),不再依赖这套聚合 + 自动发现。"
+      "deviation": "✓ 已退役(2026-06-23)。这套旧聚合注册表(GET 列表 + MetadataStore 摘要 + unregistered 隐藏集 + 自动发现)曾与 D1/D11 冲突,现已拆:GET 列表路由早移除,本轮再退掉残留状态机(7 个 MetadataStore 方法删除,建/fork 只写 skill_index)。Home 读 MRU、解析走路径式 skill_index 完成。本节保留以说明被退役的旧契约长啥样。"
     },
     {
       "name": "D2 导入放宽(已落)",
@@ -59,7 +59,7 @@
       ],
       "do": ["把 Home 从注册表模型解耦成 MRU + Rust native-fs"],
       "dont": ["不在 N1 保留对 GET/POST/DELETE /api/skills 的依赖(详情 GET /{id} 除外)"],
-      "deviation": "进展(2026-06-23 据代码核对):写盘迁 native-fs(D12,POST 解耦)前后端均已落地;去注册表(D1/D11,GET)与 R1(DELETE)的前端那半也已落,仅余后端聚合/删除端点正式退役待跟进。逐条实现状态见末节「后端实现状态」。"
+      "deviation": "✓ 已全部落地(2026-06-23):写盘迁 native-fs(D12,POST 解耦)、去注册表(D1/D11,GET 收敛到 skill_index)、R1(DELETE 只从 skill_index 注销)前后端均完成。逐条实现状态见末节「后端实现状态」。"
     },
     {
       "name": "错误码与 D2 可达性",
@@ -155,15 +155,15 @@
     {
       "item": "GET /api/skills 去注册表(D1/D11)",
       "d12": "对应 N1 设计锁 D1/D11(去注册表 / IDE 模型)",
-      "status": "review",
-      "note": "前端那半已落(据代码核对):Home(WelcomePage.tsx)已改读本地 MRU(useRecentSkills → Rust recent_workspaces.json),残留 useSkills 只取单 skill 详情 GET /{id}(Workspace.tsx)。后端核对(2026-06-23 订正,原说『聚合端点仍 live』有误):GET /api/skills 列表/聚合 HTTP 路由其实已拆——skills router 只剩 POST(建)/ GET /{id}(详情)/ DELETE /{id},无返回 SkillSummary[] 的列表端点。后端要跟进的是『残留的旧注册表状态机』:每次建 skill 仍写 skill_summary.json(save_skill_summary)、建时『目录占用』冲突检查仍多扫一遍 metadata.list_skills(skills.py:1040,与路径式 skill_index 重复)、unregistered_skill_ids 隐藏集仍过滤详情/解析(skills.py:254/729/773)。D1/D11 收尾 = 退掉这套 per-skill 摘要注册 + 隐藏集,只留路径式 skill_index(Rust native-fs 写的 IDE 模型)。故仍 review。",
+      "status": "ok",
+      "note": "已完成(2026-06-23 后端退役旧注册表 + 据代码核对)。前端:Home(WelcomePage.tsx)读本地 MRU(useRecentSkills → Rust recent_workspaces.json),不依赖注册表。后端:GET /api/skills 列表/聚合 HTTP 路由早已拆(skills router 只剩 POST/GET{id}/DELETE{id});本轮进一步退掉残留的旧注册表状态机——MetadataStore 删去 7 个方法(list_skills、get/save/remove_skill_summary、list_unregistered_skill_ids、register/unregister_skill);建/fork 不再写 skill_summary.json(只写 skill_index);建时『目录占用』冲突检查只扫 skill_index;resolve/ensure 只走 skill_index→workspace→public(去掉 unregistered 隐藏集 + summary 兜底)。D1/D11 收敛到路径式 skill_index(Rust native-fs 写的 IDE 模型)完成。",
       "ref": "d2"
     },
     {
       "item": "DELETE /api/skills 退役(R1)",
       "d12": "对应 N1 设计 R1(删 Delete)",
-      "status": "review",
-      "note": "前端那半已落(据代码核对):前端已无任何 DELETE /api/skills 调用(Remove 入口已移除,Home 的『Remove from recent』只删本地 MRU、不打后端)。后端核对:DELETE /{id} 路由仍在(skills.py:988 → delete_skill,skills.py:505),实际只『注销不删盘』——unregister_skill + remove_skill_index_entry + remove_skill_summary,纯改注册表状态、从不删源文件。后端要跟进的:这端点只服务上面那套旧摘要注册表,等 D1/D11 把注册表退掉后它即失去依托;届时 R1 收尾 = 删此 DELETE 路由 + delete_skill(或明确改作它用)。与 GET 那条是同一笔注册表退役,故仍 review。",
+      "status": "ok",
+      "note": "已完成(2026-06-23 随注册表退役一起收敛)。前端早已无任何 DELETE /api/skills 调用(Remove 入口已移除,Home 的『Remove from recent』只删本地 MRU)。后端:delete_skill 现只做 remove_skill_index_entry(从路径式 skill_index 注销、不删源文件),不再碰已删除的旧摘要/隐藏集;publish 里那处『源目录已删仍能重发已有 release』的 ownership 证据改用 skill_index 条目存在性(行为等价、功能不丢)。R1 收尾完成。",
       "ref": "d2"
     }
   ]

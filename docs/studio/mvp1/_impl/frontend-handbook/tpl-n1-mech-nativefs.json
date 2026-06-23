@@ -172,15 +172,15 @@
     {
       "item": "新建/打开 skill 落盘命令(create/open_skill_workspace)",
       "d12": "04_platform/native-fs native-rust-writer F1/F2 + D12「本地写经 native-fs」",
-      "status": "bad",
-      "note": "方向已锁(mvp1-alignment.md F1 status=target-design、F2=partial live),但 create_skill_workspace / open_skill_workspace 命令未实现,新建/打开仍走 Python POST /api/skills——卡住前端 #2/#4/#13 解耦。命令级目标契约见本页 gap 组接口卡;最终命令名/DTO 由 04_platform/native-fs 平台 spec pin(后端先于前端)。",
+      "status": "ok",
+      "note": "已落地(2026-06-23 据代码核对订正,原标 bad 系滞后)。Rust 已实现 create_skill_workspace / open_skill_workspace(native_fs.rs:写脚手架 + git init + skill_index 登记,带单测),已注册进 Tauri invoke_handler(lib.rs:415-416);前端 Home 新建走 createSkillWorkspace、打开走 openSkillWorkspace(lib/tauri.ts:149/164),已无 POST /api/skills 建/导入调用。与本页『POST 写盘迁 native-fs(D12)』ok 同一笔事实。F1/F2 命令级目标契约已满足。",
       "ref": "d12"
     },
     {
       "item": "失效路径存在性检查 + D3 死代码清理",
       "d12": "对应 N1 设计 R1(失效自动移除)/ D3(删外部 IDE 联动)",
       "status": "review",
-      "note": "失效 Recent 自动移除需 Rust 路径存在性检查(现 pruneMissingRecentWorkspaces 的 exists 谓词无 Rust 接入);open_in_cursor/terminal/codex 死代码待删(D3)。均属待办,不阻塞主线。",
+      "note": "路径存在性那半已接入(2026-06-23 据代码核对):Rust workspace_path_exists 已注册(lib.rs:417),前端 workspacePathExists 已调(lib/tauri.ts:178)供 stale-MRU pruning。仍 review 的唯一原因是 D3 死代码未删:open_in_cursor / open_in_terminal / open_in_codex 仍在(lib/tauri.ts:67-76 + Rust shell 命令),待删。不阻塞主线。",
       "ref": "d12"
     }
   ]

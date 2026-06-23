@@ -95,8 +95,8 @@
       "track": "shell-layout",
       "module": "退出与不退出",
       "func": "设计:打开 Settings 不算退出工作区——它只是个盖在画布面板上的 center overlay(中央浮层),左面板与 Copilot 栏不卸载,工作态全程不丢。",
-      "action": "用户点 Header 或 Toolbar 的 Settings 入口。",
-      "fe_design": "点 Settings 入口 → setSettingsOpen(true) → 仅在画布面板里把内容换成 SettingsPage(Settings 壳层根组件),左面板(left-panel)与 Copilot 栏(copilot)是同级的兄弟 ResizablePanel、settingsOpen 不动它们,故照常挂载;currentSkillId 不变,工作区不卸载。打开文件也会顺手 setSettingsOpen(false) 收起 Settings。设计意图(D11/Q3):Settings 是工作区内的一个浮层配置态,不是退出工作区;与 Back-to-Home(#19,卸载工作区)语义相反。(Settings 这层壳本身的设计见 N0 Settings 节点。)",
+      "action": "用户点 Header 或 Toolbar 的 Settings 入口;其中 Toolbar 的 Settings 齿轮是 toggle,打开后再点一次会关闭。",
+      "fe_design": "Header 的 Settings 入口 → setSettingsOpen(true) 单向打开;Toolbar 的 Settings 齿轮 → setSettingsOpen(open => !open) 做 toggle。打开时仅在画布面板里把内容换成 SettingsPage(Settings 壳层根组件),左面板(left-panel)与 Copilot 栏(copilot)是同级的兄弟 ResizablePanel、settingsOpen 不动它们,故照常挂载;currentSkillId 不变,工作区不卸载。再次点 Toolbar 齿轮或打开文件都会 setSettingsOpen(false) 收起 Settings,只把画布换回原内容。设计意图(D11/Q3):Settings 是工作区内的一个浮层配置态,不是退出工作区;与 Back-to-Home(#19,卸载工作区)语义相反。(Settings 这层壳本身的设计见 N0 Settings 节点。)",
       "fe_modules": [
         { "name": "Workspace 外壳容器", "ref": "femod-workspace-shell" }
       ],

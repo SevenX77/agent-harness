@@ -239,7 +239,19 @@ vi.mock('./SplitEditor', () => ({
 }))
 
 vi.mock('./Toolbar', () => ({
-  Toolbar: () => <nav data-testid="toolbar" />,
+  Toolbar: (props: {
+    settingsOpen: boolean
+    onSettingsToggle: () => void
+  }) => (
+    <button
+      type="button"
+      data-testid="settings-toggle"
+      aria-pressed={props.settingsOpen}
+      onClick={props.onSettingsToggle}
+    >
+      Settings
+    </button>
+  ),
 }))
 
 vi.mock('./ConflictDialog', () => ({
@@ -654,6 +666,42 @@ describe('Workspace WS-1 local writer contracts', () => {
     renderWorkspace()
 
     expect(mocks.conflictDialogProps?.onOverwriteRetry).toBeTypeOf('function')
+  })
+
+  it('toggles the settings page off from the same toolbar button that opened it', () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      act(() => {
+        root.render(
+          createElement(Workspace, {
+            skillId: 'writer-smoke',
+            onSelectSkill: vi.fn(),
+            onCloseSkill: vi.fn(),
+          }),
+        )
+      })
+
+      const toggle = container.querySelector('[data-testid="settings-toggle"]')
+      expect(toggle).not.toBeNull()
+      expect(container.querySelector('[data-testid="settings"]')).toBeNull()
+
+      act(() => {
+        toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      })
+      expect(container.querySelector('[data-testid="settings"]')).not.toBeNull()
+
+      act(() => {
+        toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      })
+      expect(container.querySelector('[data-testid="settings"]')).toBeNull()
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+    }
   })
 
   // N3 #12: a passing realtime lint must drive the build stage to 'compile-pass' (which

@@ -9,9 +9,9 @@
       "cap": "open-settings-overlay",
       "track": "共",
       "module": "壳层容器",
-      "func": "设计:点 Toolbar 的 Settings 图标打开 Settings 面板,面板盖在画布上但不卸载工作区(左文件树、右 Copilot 仍挂载可交互)。",
+      "func": "设计:点 Toolbar 的 Settings 图标切换 Settings 面板:未打开时打开,已打开时再次点击关闭;面板盖在画布上但不卸载工作区(左文件树、右 Copilot 仍挂载可交互)。",
       "action": "用户点左侧 Toolbar(竖排工具条)底部的 Settings 齿轮图标。",
-      "fe_design": "点 Toolbar 的 Settings 图标 → 把工作区的 settingsOpen 状态置 true → 在画布区(canvas 这块面板)渲染 SettingsPage(Settings 壳层根组件),它只替换画布里原本的编辑器/图,左侧 Panels(文件树等工具面板)和右侧 Copilot 面板照常挂载、照常可点。这是有意设计成「非真 modal」:不铺全屏 backdrop、不做 focus-trap,因为 Settings 要让用户一边配置一边还能看/操作工作区,而不是把工作区锁死。Header 的 onOpenSettings(顶栏也能开 Settings 的回调,如 publish 缺凭证时引导)与 Toolbar 的 onSettingsOpen 共用同一个置 true 动作。",
+      "fe_design": "点 Toolbar 的 Settings 图标 → 对工作区的 settingsOpen 状态做 toggle(false→true 打开,true→false 关闭)。打开时在画布区(canvas 这块面板)渲染 SettingsPage(Settings 壳层根组件),它只替换画布里原本的编辑器/图,左侧 Panels(文件树等工具面板)和右侧 Copilot 面板照常挂载、照常可点;关闭时只把画布区换回原工作区内容,不卸载工作区。这是有意设计成「非真 modal」:不铺全屏 backdrop、不做 focus-trap,因为 Settings 要让用户一边配置一边还能看/操作工作区,而不是把工作区锁死。Header 的 onOpenSettings(顶栏也能开 Settings 的回调,如 publish 缺凭证时引导)仍是单向打开动作,不承担 toggle。",
       "fe_modules": [
         {
           "name": "Settings overlay 容器",

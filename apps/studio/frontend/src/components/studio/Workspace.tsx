@@ -1333,7 +1333,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         <Toolbar
           activePanel={activePanel}
           onPanelChange={setActivePanel}
-          onSettingsOpen={() => setSettingsOpen(true)}
+          settingsOpen={settingsOpen}
+          onSettingsToggle={() => setSettingsOpen((open) => !open)}
         />
 
         <ResizablePanelGroup

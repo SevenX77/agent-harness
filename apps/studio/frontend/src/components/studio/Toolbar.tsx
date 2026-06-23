@@ -9,7 +9,8 @@ export type PanelKind = "assets" | "input" | "timeline" | "trace-doc" | "propert
 interface ToolbarProps {
   activePanel: PanelKind | null
   onPanelChange: (panel: PanelKind | null) => void
-  onSettingsOpen: () => void
+  settingsOpen: boolean
+  onSettingsToggle: () => void
 }
 
 const tools: Array<{ id: PanelKind; icon: typeof Files; label: string; shortcut: string }> = [
@@ -21,7 +22,7 @@ const tools: Array<{ id: PanelKind; icon: typeof Files; label: string; shortcut:
   { id: "local-history", icon: History, label: "Local History", shortcut: "6" },
 ]
 
-export function Toolbar({ activePanel, onPanelChange, onSettingsOpen }: ToolbarProps) {
+export function Toolbar({ activePanel, onPanelChange, settingsOpen, onSettingsToggle }: ToolbarProps) {
   const theme = useThemeValue()
 
   return (
@@ -81,11 +82,12 @@ export function Toolbar({ activePanel, onPanelChange, onSettingsOpen }: ToolbarP
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              variant="ghost"
+              variant={settingsOpen ? "secondary" : "ghost"}
               size="icon"
-              onClick={onSettingsOpen}
+              onClick={onSettingsToggle}
               className="size-8"
               aria-label="Settings"
+              aria-pressed={settingsOpen}
             >
               <Settings className="size-4" strokeWidth={1.75} />
             </Button>

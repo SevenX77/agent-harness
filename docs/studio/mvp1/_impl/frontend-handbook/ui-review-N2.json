@@ -8,7 +8,7 @@
     "rows": [
       ["GraphCanvas 画布", "拖连建节点、看拓扑、双击进文件", "节点=文件，连线=depends_on，环/数据断层可视报错"],
       ["Properties 面板（节点属性）", "选中节点后编辑该节点允许的字段并保存", "按三类节点（Agent/Logic/Subgraph）白名单显示，按文件类型决定字段集"],
-      ["AssetsPanel（左侧 skill 文件树）", "浏览 skill 工程文件、打开编辑", "工程目录即真相，子图按 path 引用"],
+      ["AssetsPanel（左侧 skill / subgraph 文件树）", "浏览 skill 根目录与子图目录文件、打开编辑", "工程目录即真相：Skill Files 显示整个 skill 文件夹（含隐藏文件），Subgraphs 按 path 展开完整子图文件夹"],
       ["GRAPH.md 头部（宏观契约）", "改 name/schema_version/llm_role/io", "无 type 字段；io 为 inline JSON Schema"],
       ["i/o 面板", "逐节点设 input files 导入 + output artifact", "io.outputs 顶层加文件路径落 .workspace/artifacts"]
     ]
@@ -20,7 +20,9 @@
       ["选中 Logic 节点", "改 actions（按顺序） / validator 开关", "只看到 actions + validator", "缺 io.outputs 字段边界编辑（FROZEN logic 要求声明回写字段）"],
       ["选中 Subgraph 节点", "填子图 path / validator", "path 输入框 + 校验提示", "占位写 '/absolute/path'，但缺 path 找不到→标红→导入入口（F4 未落）"],
       ["面板底部 DetailRow 区", "只读看 Phase ID / Mode / Depends / Role / Tools / File", "辅助只读信息", "暴露 'Mode' 只读行，与 FROZEN「节点类型=文件名、非 mode 字段」口径矛盾，易误导用户以为 mode 可变"],
-      ["frontmatter 解析失败", "看到 error + Open file", "明确报错 + 跳源文件修", "无：失败退路 live"]
+      ["frontmatter 解析失败", "看到 error + Open file", "明确报错 + 跳源文件修", "无：失败退路 live"],
+      ["Assets / Skill Files", "浏览当前 skill 文件夹下所有文件", "像传统 IDE Explorer 一样展示完整目录树，含隐藏文件（尤其 .worktree），窄栏仍可读", "无：Tauri 下走 native-fs 递归 workspaceRoot；浏览器态保留 skillDetail.files fallback；左侧栏加最小宽度"],
+      ["Assets / Subgraphs", "收起/展开子图库，打开每个子图 path 指向的文件夹", "Subgraphs 可收到面板底部，展开后显示子图完整文件夹（含隐藏文件），而不是只显示连接状态", "无：Subgraphs 现为可折叠 FolderRow，resolved 子图递归读 path 文件夹；missing/migration 可选择文件夹写回 SUBGRAPH.md"]
     ]
   },
   "actions_table": {
@@ -29,12 +31,13 @@
       ["新建节点（选建哪个文件）", "画布右键/加号", "Agent=SKILL.md / Logic=LOGIC.md / Subgraph=SUBGRAPH.md；脚手架禁写 mode/system_prompt/exit_contract/python_callable（已合规）"],
       ["编辑节点字段并保存", "Properties 面板", "只写该类节点白名单字段；不得碰 name/io/未知键（applyPhaseFrontmatterForm 保 round-trip，合规）"],
       ["填子图引用", "Properties subgraph path", "必须绝对路径、无注册表（D7）；占位文案已是绝对路径口径"],
+      ["浏览 skill / subgraph 文件树", "Assets 面板", "Skill Files 必须展示当前 skill 根目录完整文件树（含隐藏文件）；Subgraphs 必须像 IDE Explorer 一样可折叠并展示每个子图完整文件夹"],
       ["改 io schema / artifact", "i/o 面板", "io.outputs 顶层文件路径落 artifacts；删父子 io 1:1（G2）"],
       ["编辑 L3 步骤（step/action）", "画布内联子节点（非 Properties）", "Properties 只管 frontmatter，正文 XML 结构走画布内联（F5），目前无 L3 内联编辑"]
     ]
   },
-  "plan": "本节点 Properties 面板已从旧通用 frontmatter 编辑器重建为三类节点白名单表单，且新建脚手架已 FROZEN-clean。重点核对白名单字段集是否对齐 engine skill-syntax §2.3/§2.4/§2.5，并查残留的只读 Mode 行、子图 path 找不到入口、L3 内联缺位等信息架构问题。",
-  "current_risk": "Properties 主体表单已合规（这点比 02_authoring.md:28-29 标注的 stale 结论更新——worktree 后端优化已推进过该点）。残留风险集中在：1) 只读 'Mode' 行与「类型=文件名」口径冲突，误导用户；2) 节点类型派生 phaseKindLabel 仍读 data.mode（来自 topology.mode/manifest），文件类型与 mode 不一致时以 mode 为准，违 F1「文件类型决定节点类型」；3) 子图 path 校验/导入入口缺位；4) Logic 节点缺 io.outputs 字段边界编辑。",
+  "plan": "本节点 Properties 面板已从旧通用 frontmatter 编辑器重建为三类节点白名单表单，且新建脚手架已 FROZEN-clean。2026-06-23 快速前端迭代补齐 Assets 文件浏览：左右侧栏最小宽度、Skill Files 读整个 skill 根目录（含隐藏文件）、Subgraphs 以可折叠文件夹树显示每个子图 path 指向目录。后续重点仍是 N2 剩余结构化编辑面。",
+  "current_risk": "Assets 面板本轮已按设计补齐（Tauri native-fs 递归目录树 + 子图目录树 + 侧栏最小宽度）。Properties 主体表单已合规（这点比 02_authoring.md:28-29 标注的 stale 结论更新——worktree 后端优化已推进过该点）。残留风险集中在：1) 只读 'Mode' 行与「类型=文件名」口径冲突，误导用户；2) 节点类型派生 phaseKindLabel 仍读 data.mode（来自 topology.mode/manifest），文件类型与 mode 不一致时以 mode 为准，违 F1「文件类型决定节点类型」；3) Logic 节点缺 io.outputs 字段边界编辑。",
   "issues_table": {
     "headers": ["不合理点", "应如何改（处理原则）"],
     "rows": [
@@ -52,6 +55,7 @@
       ["Logic 节点字段集", "只 actions/validator，缺 io.outputs 边界", "actions/validator 在 Properties，io.outputs 在 i/o 面板可设且有交叉提示"],
       ["Subgraph 节点字段集", "只 path/validator 文本框，无 path 找不到导入入口", "path 绝对路径 + 找不到标红 + 导入入口（F4）"],
       ["节点类型来源", "phaseKindLabel 优先读可变 mode 字段", "以文件类型为唯一真相，mode 不参与决定类型"],
+      ["Assets 文件树", "此前 Skill Files 只来自编译返回 files，Subgraphs 只显示连接状态", "Skill Files / Subgraphs 都显示真实目录树（含隐藏文件），Subgraphs 可折叠到底部"],
       ["只读信息区", "暴露 'Mode' 只读行误导用户", "改为「节点类型（由文件决定）」不可编辑表述"],
       ["脚手架 FROZEN 洁净", "defaultPhaseMarkdown 已不写 mode/system_prompt/exit_contract/python_callable", "= 合理，可直接编译"]
     ]
@@ -122,6 +126,28 @@
       "auto": [],
       "manual": ["打开 i/o 面板 → 应能逐节点导入 input file、设 output artifact 文件路径 → 跑后落 .workspace/artifacts"],
       "pass": ["io.outputs 可配文件路径", "子图 io 改动不触发 1:1 校验"]
+    },
+    {
+      "code": "N2.5",
+      "title": "Assets 面板（Skill Files / Subgraphs 文件浏览）",
+      "status": "ok",
+      "problem": "已修：此前 Skill Files 只投影编译产物 files，无法保证看到整个 skill 文件夹和隐藏文件；Subgraphs 只显示是否 linked，不能像 IDE Explorer 一样收起并浏览子图目录。",
+      "design": "02_authoring R5 / asset-explorer 口径：工程目录即真相，子图按 path 引用；Assets 面板负责文件浏览与未解析子图导入入口。产品要求：Skill Files 显示完整 skill 文件夹（含隐藏文件，尤其 .worktree）；Subgraphs 可折叠到底部，展开后显示每个子图完整文件夹（含隐藏文件）。",
+      "current": "AssetsPanel.tsx 在 Tauri runtime 下用 listWorkspaceDir 递归 workspaceRoot 构建真实文件树，隐藏文件不被过滤；浏览器态 fallback 到 skillDetail.files。Subgraphs 通过 subgraphMembership 取每个 SUBGRAPH phase 的 path/filePath，resolved path 下同样递归显示完整文件夹；missing/migration 状态可选择文件夹并写回该 phase 的 SUBGRAPH.md。Workspace.tsx 给左右侧栏加 min-w，FileRow/FolderRow 增 truncation/title，窄栏不再把关键内容挤没。",
+      "fix": "本轮已完成，无后续前端动作。",
+      "auto": [
+        "subgraph-membership.test.ts 覆盖 resolved/missing/migration-required、空白 path trim、filePath 派生。"
+      ],
+      "manual": [
+        "真机打开 story-deconstruction skill → Assets → Skill Files 能看到 data/phases/subskills/__init__.py/GRAPH.md 以及根目录隐藏文件（含 .worktree）。",
+        "展开 Subgraphs → 每个 resolved 子图显示 Linked + path，并在其下显示子图目录树；可收起到一行 Subgraphs。",
+        "窄窗口下左 Assets 与右 Copilot 面板保持最小可读宽度。"
+      ],
+      "pass": [
+        "Skill Files / Subgraphs 都以磁盘目录树为真相且不跳过隐藏文件",
+        "Subgraphs 不再只是连接状态列表",
+        "左右侧栏最小宽度生效"
+      ]
     }
   ]
 }

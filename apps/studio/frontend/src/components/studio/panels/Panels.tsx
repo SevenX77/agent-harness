@@ -101,7 +101,14 @@ export function Panels({
   }
 
   if (activePanel === "assets") {
-    return <AssetsPanel skillDetail={skillDetail} selectedNode={selectedNode} />
+    return (
+      <AssetsPanel
+        skillId={skillId}
+        workspaceRoot={workspaceRoot}
+        skillDetail={skillDetail}
+        selectedNode={selectedNode}
+      />
+    )
   }
   if (activePanel === "input") {
     return (
@@ -190,5 +197,5 @@ export function Panels({
       />
     )
   }
-  return <AssetsPanel skillDetail={skillDetail} selectedNode={selectedNode} />
+  return <AssetsPanel skillId={skillId} workspaceRoot={workspaceRoot} skillDetail={skillDetail} selectedNode={selectedNode} />
 }

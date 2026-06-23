@@ -60,6 +60,7 @@ describe("subgraphMembership", () => {
       {
         id: "translate",
         label: "translate",
+        filePath: "phases/translate/SUBGRAPH.md",
         path: "/abs/skills/translator",
         status: "resolved",
       },
@@ -74,7 +75,13 @@ describe("subgraphMembership", () => {
     )
 
     expect(memberships).toEqual([
-      { id: "translate", label: "translate", path: null, status: "missing" },
+      {
+        id: "translate",
+        label: "translate",
+        filePath: "phases/translate/SUBGRAPH.md",
+        path: null,
+        status: "missing",
+      },
     ])
   })
 
@@ -100,6 +107,7 @@ describe("subgraphMembership", () => {
       {
         id: "translate",
         label: "translate",
+        filePath: "phases/translate/SUBGRAPH.md",
         path: null,
         status: "migration-required",
         legacyTargetSkill: "legacy.registry.child",
@@ -116,9 +124,37 @@ describe("subgraphMembership", () => {
     )
 
     expect(memberships).toEqual([
-      { id: "blank", label: "blank", path: null, status: "missing" },
-      { id: "padded", label: "padded", path: "/abs/child", status: "resolved" },
+      {
+        id: "blank",
+        label: "blank",
+        filePath: "phases/blank/SUBGRAPH.md",
+        path: null,
+        status: "missing",
+      },
+      {
+        id: "padded",
+        label: "padded",
+        filePath: "phases/padded/SUBGRAPH.md",
+        path: "/abs/child",
+        status: "resolved",
+      },
     ])
+  })
+
+  it("keeps a topology src that already points at SUBGRAPH.md as the editable file path", () => {
+    const memberships = subgraphMembership(
+      skillDetailWithTopology([
+        {
+          id: "translate",
+          src: "phases/translate/SUBGRAPH.md",
+          depends_on: [],
+          mode: "subgraph",
+          path: "/abs/skills/translator",
+        },
+      ]),
+    )
+
+    expect(memberships[0]?.filePath).toBe("phases/translate/SUBGRAPH.md")
   })
 
   it("derives membership only from subgraph rows, preserving topology order", () => {

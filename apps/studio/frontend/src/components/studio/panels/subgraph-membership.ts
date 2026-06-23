@@ -22,6 +22,8 @@ export interface SubgraphMembership {
   id: string
   /** Display label — the subgraph phase name. */
   label: string
+  /** The parent skill's phase file that stores the subgraph path. */
+  filePath: string
   /** Absolute child-graph path, or null when the phase declares none. */
   path: string | null
   /** Legacy registry id still present in SUBGRAPH.md before migration. */
@@ -45,10 +47,22 @@ export function subgraphMembership(skillDetail?: SkillDetail): SubgraphMembershi
     memberships.push({
       id: row.id,
       label: row.id,
+      filePath: subgraphFilePath(row),
       path: reference.path,
       ...(reference.legacyTargetSkill ? { legacyTargetSkill: reference.legacyTargetSkill } : {}),
       status: reference.status,
     })
   }
   return memberships
+}
+
+function subgraphFilePath(row: Pick<NonNullable<SkillDetail["graph_topology"]>[number], "id" | "src">): string {
+  const trimmedSrc = row.src.trim()
+  if (!trimmedSrc) {
+    return `phases/${row.id}/SUBGRAPH.md`
+  }
+  if (trimmedSrc.endsWith("/SUBGRAPH.md")) {
+    return trimmedSrc
+  }
+  return `${trimmedSrc.replace(/\/+$/, "")}/SUBGRAPH.md`
 }

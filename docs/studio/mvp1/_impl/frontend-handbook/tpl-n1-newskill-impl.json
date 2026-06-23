@@ -148,7 +148,12 @@
       "layer2": [
         "真跑(桌面):点 Choose folder → OS 目录选择器弹出,选一个目录 → 父目录框显示它。"
       ],
-      "shot_na": "Choose folder 会弹系统原生目录选择器(OS file picker/AppKit sheet),不属于浏览器 DOM,后台 Playwright 无法稳定驱动或截取,截图也无法证明命令参数正确。替代验证:NewSkillDialog 真机图覆盖对话框内 Parent folder + Choose folder 入口,组件测试断言 selectSkillDirectory 返回目录后父目录只读框显示该路径。"
+      "screenshots": [
+        {
+          "file": "n1-12-newskill-parent-picker.png",
+          "caption": "New skill 对话框的 Choose folder 触发 macOS 原生目录选择器;parent-folder 可作为父目录选择,Open 按钮可用。组件测试继续断言返回路径会写入只读 Parent folder 输入框。"
+        }
+      ]
     },
     {
       "covers": "#13 newskill-create-scaffold",

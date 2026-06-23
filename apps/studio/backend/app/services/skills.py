@@ -511,9 +511,7 @@ async def delete_skill(
     """Unregister a skill from Studio without deleting its source directory."""
     _validate_skill_id_segment(skill_id)
     await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
-    await metadata.unregister_skill(user_id, skill_id)
     await metadata.remove_skill_index_entry(skill_id)
-    await metadata.remove_skill_summary(user_id, skill_id)
 
 
 def _validate_skill_id_segment(skill_id: str) -> str:
@@ -576,9 +574,8 @@ async def create_new_skill(
     import_existing: bool = False,
 ) -> SkillSummary:
     """Create a new directory-based V2.1 skill."""
-    saved_summary = await metadata.get_skill_summary(user_id, skill_id)
     index_entry = await metadata.get_skill_index_entry(skill_id)
-    if saved_summary is not None or index_entry is not None:
+    if index_entry is not None:
         raise standard_http_exception(
             "SKILL_ALREADY_EXISTS",
             f"Skill already exists: {skill_id}",
@@ -638,7 +635,6 @@ async def create_new_skill(
             skill_id,
             {"absolute_path": str(skill_dir), "l2_remote_url": ""},
         )
-        await metadata.save_skill_summary(user_id, summary)
         return summary
 
     if directory_path and await _directory_is_nonempty(skill_dir):
@@ -669,7 +665,6 @@ async def create_new_skill(
         skill_id,
         {"absolute_path": str(skill_dir), "l2_remote_url": ""},
     )
-    await metadata.save_skill_summary(user_id, summary)
     return summary
 
 
@@ -711,7 +706,10 @@ async def fork_skill(
         if lint.status == "failed":
             _raise_manifest_validation_failed(lint)
         summary = await _summary_for_skill_dir_async(user_id, target_dir, storage, metadata)
-        await metadata.save_skill_summary(user_id, summary)
+        await metadata.save_skill_index_entry(
+            new_skill_id,
+            {"absolute_path": str(target_dir), "l2_remote_url": ""},
+        )
         return summary
     except Exception:
         await storage.delete(str(target_dir))
@@ -726,18 +724,9 @@ async def ensure_workspace_skill_dir_async(
 ) -> Path:
     """Return the writable skill body directory without creating workspace forks."""
     safe_skill_id = _validate_skill_id_segment(skill_id)
-    if safe_skill_id in await metadata.list_unregistered_skill_ids(user_id):
-        _raise_skill_not_found(safe_skill_id)
-
     indexed = await metadata.get_skill_index_entry(safe_skill_id)
     if indexed:
         skill_dir = Path(indexed["absolute_path"])
-        if await storage.exists(str(skill_dir / "GRAPH.md")):
-            return skill_dir
-
-    saved_summary = await metadata.get_skill_summary(user_id, safe_skill_id)
-    if saved_summary and saved_summary.directory_path:
-        skill_dir = Path(saved_summary.directory_path)
         if await storage.exists(str(skill_dir / "GRAPH.md")):
             return skill_dir
 
@@ -770,18 +759,9 @@ async def resolve_skill_dir_async(
 ) -> Path:
     """Resolve a skill id through the global index, then legacy and builtin paths."""
     safe_skill_id = _validate_skill_id_segment(skill_id)
-    if safe_skill_id in await metadata.list_unregistered_skill_ids(user_id):
-        _raise_skill_not_found(safe_skill_id)
-
     indexed = await metadata.get_skill_index_entry(safe_skill_id)
     if indexed:
         skill_dir = Path(indexed["absolute_path"])
-        if await storage.exists(str(skill_dir)):
-            return skill_dir
-
-    saved_summary = await metadata.get_skill_summary(user_id, safe_skill_id)
-    if saved_summary and saved_summary.directory_path:
-        skill_dir = Path(saved_summary.directory_path)
         if await storage.exists(str(skill_dir)):
             return skill_dir
 
@@ -1034,18 +1014,6 @@ async def _validated_directory_path(
                 http_status=409,
                 message=f"Directory path is already used by skill {indexed_skill_id}",
                 details={"skill_id": indexed_skill_id, "directory_path": str(resolved_skill_dir)},
-                retry_strategy="not_retryable",
-            )
-            raise_error_response(response)
-    for summary in await metadata.list_skills(user_id):
-        if summary.id == skill_id or not summary.directory_path:
-            continue
-        if Path(summary.directory_path).resolve() == resolved_skill_dir:
-            response = error_response(
-                error_code="SKILL_ALREADY_EXISTS",
-                http_status=409,
-                message=f"Directory path is already used by skill {summary.id}",
-                details={"skill_id": summary.id, "directory_path": str(resolved_skill_dir)},
                 retry_strategy="not_retryable",
             )
             raise_error_response(response)

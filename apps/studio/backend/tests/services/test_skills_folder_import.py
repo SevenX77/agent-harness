@@ -76,10 +76,9 @@ async def test_create_new_skill_imports_existing_nonempty_directory_without_writ
         "absolute_path": str(skill_dir),
         "l2_remote_url": "",
     }
-    assert (
-        await metadata_store.get_skill_summary("default", "story-deconstruction-imported")
-        == summary
-    )
+    # The legacy per-user summary registry is retired: the skill_index is the only
+    # persisted truth and no skill_summary.json is written.
+    assert not list(skill_dir.rglob("skill_summary.json"))
 
 
 def test_create_skill_import_allows_non_skill_directory_into_repair_state(

@@ -310,7 +310,7 @@
       "module": "子图",
       "func": "设计:子图节点能 inline 展开,就地预览它真实的子拓扑(子图里有哪几个 phase、各是什么类型),不切换到子图工程。",
       "action": "用户点子图节点的展开 toggle。",
-      "fe_design": "当前前端逻辑:toggle 展开 → SubgraphInline(子图 inline 预览组件)调 getChildGraphTopology(拉某子图真实拓扑的客户端函数)拿子图真实 phase 列表 → childPhaseRows(把真实拓扑组装成 name+kind 预览行的函数,注释明示『绝不编造子图未声明的 phase』)渲染成只读 name+kind 预览行(loading/error/empty/loaded 四态)。⚠️ 数据虽真(不编造),但这是『行列表』形态,不是设计要的画布级子拓扑展开(虚线容器 + 真 React Flow 子节点/边)——详见下方现状偏差。",
+      "fe_design": "点子图节点的展开 toggle → 取该 subgraph phase 的绝对 path（normalizeAbsoluteSubgraphPath 解析、非绝对则不出 toggle）→ 调 getChildGraphTopology（拉某子图真实拓扑的客户端函数）拿子图真实 phase 列表 + DAG → buildSubgraphExpansion（画布级子拓扑展开的纯构建函数，subgraph-expansion.ts）在 expand 节点旁（靠父图最右、CONTAINER_GAP 间隔）起一个虚线容器节点（subgraphGroup，动态 group bbox=按子图布局算宽高），容器内用与主画布一致的 dagre TB 自动布局 + React Flow node/edge 机制渲染子图真实 phase（真节点带 AGENT/LOGIC/SUBGRAPH 种类 + 状态灯，只读不可拖/选/连/删），子图内部 depends_on 连真边；父图依赖边以虚线 bridge 接驳：expand 节点→子图首节点（无依赖的 entry）、子图末节点（无被依赖的 terminal）→expand。loading/error/loaded 三态：容器头常驻（父名 + 绝对 path 徽标），loading 转圈、error 显错、loaded 出真子节点。预览节点叠在主画布受控节点之上（独立 overlay、不进 useNodesState），故必须显式带 width/height——否则 React Flow 量不到尺寸会让它一直 visibility:hidden（容器尺寸对但内部空）。",
       "fe_modules": [
         {
           "name": "子图 inline 预览"
@@ -324,9 +324,9 @@
           "iface_ref": "iface-io-1"
         }
       ],
-      "fe_status": "偏差",
+      "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "偏差(2026-06-23 codex gpt-5.5 + agy/antigravity 双评审 + 设计 F4/CANVAS-3 核实)。后端 getChildGraphTopology 返回的是真子拓扑(数据真),但前端 SubgraphInline 把它渲染成 name+kind 静态行列表(childPhaseRows→rows.map),这正是设计 §6.3/§8 自标 ⚠️ 的 `SubgraphInline mock rows` 基线形态,不是设计要求的『inline 展开子拓扑』。设计要求(F4『subgraph node can expand inline...』+ CANVAS-3『主画布 inline 展开子拓扑、虚线容器靠父图最右』+ 测试锁『inline content is real, not mock』):点展开时在 expand 节点旁(靠右)起一个虚线容器(动态 group bbox),容器内用与主画布一致的 node/edge 机制渲染真子图(plan→write 真 React Flow 节点+真边、可选可拖带状态灯),父图依赖边(review→expand、expand→Output)接驳到子图首/末节点。当前缺这套画布级子拓扑渲染,故 fe=偏差。注:下钻(#14)渲染的是真拓扑、方向正确,与本条不同。",
+      "gap_brief": "符合设计（2026-06-23 实现并真机验证）。点展开在 expand 节点旁靠右起虚线容器（动态 group bbox），容器内用主画布同款 dagre TB + React Flow node/edge 机制渲染子图真实 phase（真节点真边、带种类/状态灯、只读），父图依赖边以虚线 bridge 接驳到子图首/末节点——即设计 F4『subgraph node can expand inline…inline content is real, not mock』+ CANVAS-3『主画布 inline 展开子拓扑、虚线容器靠父图最右』。旧 SubgraphInline name+kind 行列表组件已删。真机验证：sd-v3-n4 的 global_synthesis 展开出 global_analysis/retroactive/scene_assembly/export 四真节点（见 n2-13 截图）。实现中并修了 React Flow 一个真 bug：overlay 预览节点不在 useNodesState 内、其量尺 change 被 onNodesChange 丢弃，无显式 width/height 会一直 visibility:hidden——已用显式尺寸闭合。注：下钻（#14）渲染真拓扑、方向正确，与本条不同。",
       "impl_ref": "fn-13"
     },
     {

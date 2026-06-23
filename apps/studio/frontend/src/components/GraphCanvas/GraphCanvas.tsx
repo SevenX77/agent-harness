@@ -53,7 +53,9 @@ import { CycleDetectedError, getAutoLayoutedElements } from '@/lib/layout'
 import { sha256Hex } from '@/lib/hash'
 import { ContextEdge, type ContextEdgeData } from '@/components/edges/ContextEdge'
 import { GlobalInputNode, GlobalOutputNode } from '@/components/nodes/GlobalInputOutputNode'
+import { SubgraphGroupNode } from '@/components/nodes/SubgraphGroupNode'
 import { buildEdges, INPUT_ID, OUTPUT_ID, SkillNode, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
+import { buildSubgraphExpansion, isSubgraphPreviewId, type ExpandedSubgraphView, type SubgraphExpansionRequest } from '@/components/GraphCanvas/subgraph-expansion'
 import type { GoldenNodeState } from '@/components/studio/node-golden'
 import { useOptionalWorkspaceContext } from '@/components/studio/WorkspaceContext'
 import { HitlNodeToolbar } from '@/components/studio/HitlNodeToolbar'
@@ -143,6 +145,7 @@ const nodeTypes = {
   skill: SkillNode,
   globalInput: GlobalInputNode,
   globalOutput: GlobalOutputNode,
+  subgraphGroup: SubgraphGroupNode,
 }
 
 const edgeTypes = {
@@ -205,6 +208,11 @@ export function GraphCanvas({
 }: GraphCanvasProps) {
   const workspace = useOptionalWorkspaceContext()
   const [expandedSubgraphs, setExpandedSubgraphs] = useState<Set<string>>(() => new Set())
+  // N2 atom #13 (subgraph-inline-preview): resolved child topology per expanded
+  // subgraph node, keyed by the parent node id. Drives the canvas-level inline
+  // expansion (dashed container + real child nodes/edges). Each entry also stores
+  // the source `path` so a path change re-fetches rather than showing a stale child.
+  const [expandedTopologies, setExpandedTopologies] = useState<Record<string, { path: string; view: ExpandedSubgraphView }>>({})
   // N2 atom #15 (l3-step-edit): canvas-owned open/closed state for each AGENT
   // node's inline L3 step editor. Mirrors expandedSubgraphs; kept inside
   // GraphCanvas so the toggle never crosses the canvas boundary.
@@ -552,6 +560,86 @@ export function GraphCanvas({
     () => rawNodes.filter((node): node is SkillGraphNode => node.type === 'skill'),
     [rawNodes],
   )
+  // N2 atom #13 (subgraph-inline-preview): the (parent node id → absolute path)
+  // pairs to resolve for inline expansion. Inline expansion runs at ROOT depth
+  // only — a drilled child already shows real topology. A stable string key drives
+  // the fetch effect so it fires only when the expanded-path SET changes, never on
+  // layout churn (which would cancel in-flight fetches and strand a loading state).
+  const expandedPathPairs = useMemo(() => {
+    if (isDrilled) return [] as { id: string; path: string }[]
+    return phaseNodes
+      .filter((node) => expandedSubgraphs.has(node.id))
+      .map((node) => ({ id: node.id, path: normalizeAbsoluteSubgraphPath(node.data.subgraphPath) }))
+      .filter((pair): pair is { id: string; path: string } => Boolean(pair.path))
+      .sort((a, b) => a.id.localeCompare(b.id))
+  }, [phaseNodes, expandedSubgraphs, isDrilled])
+  const expandedPathKey = useMemo(
+    () => expandedPathPairs.map((pair) => `${pair.id} ${pair.path}`).join('|'),
+    [expandedPathPairs],
+  )
+  const expandedPathPairsRef = useRef(expandedPathPairs)
+  useEffect(() => {
+    expandedPathPairsRef.current = expandedPathPairs
+  }, [expandedPathPairs])
+  const expandedTopologiesRef = useRef(expandedTopologies)
+  useEffect(() => {
+    expandedTopologiesRef.current = expandedTopologies
+  }, [expandedTopologies])
+  useEffect(() => {
+    const targets = expandedPathPairsRef.current
+    const allowed = new Set(targets.map((target) => target.id))
+    // Drop resolved entries for subgraphs that collapsed / are no longer expanded.
+    setExpandedTopologies((current) => {
+      let changed = false
+      const next: typeof current = {}
+      for (const [id, entry] of Object.entries(current)) {
+        if (allowed.has(id)) next[id] = entry
+        else changed = true
+      }
+      return changed ? next : current
+    })
+    let cancelled = false
+    for (const target of targets) {
+      const existing = expandedTopologiesRef.current[target.id]
+      // Already resolved for this exact path → keep it. A 'loading' entry is
+      // re-fetched because its prior in-flight request belonged to a now-cancelled
+      // effect closure (the key changed), so it would otherwise hang.
+      if (existing && existing.path === target.path && existing.view.status !== 'loading') {
+        continue
+      }
+      setExpandedTopologies((current) => ({
+        ...current,
+        [target.id]: { path: target.path, view: { status: 'loading' } },
+      }))
+      getChildGraphTopology(skillId, target.path)
+        .then((topology) => {
+          if (cancelled) return
+          setExpandedTopologies((current) => {
+            if (current[target.id]?.path !== target.path) return current
+            return {
+              ...current,
+              [target.id]: {
+                path: target.path,
+                view: { status: 'loaded', name: topology.name, phases: topology.phases, graphTopology: topology.graph_topology },
+              },
+            }
+          })
+        })
+        .catch((error: unknown) => {
+          if (cancelled) return
+          setExpandedTopologies((current) => {
+            if (current[target.id]?.path !== target.path) return current
+            return {
+              ...current,
+              [target.id]: { path: target.path, view: { status: 'error', message: childGraphErrorMessage(error, target.path) } },
+            }
+          })
+        })
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [expandedPathKey, skillId])
   // Trace events drive hasTraceData: an edge lights up only when the active run
   // actually dispatched data across it (matching input_dispatch event).
   const traceEvents = workspace?.traceEvents
@@ -660,6 +748,32 @@ export function GraphCanvas({
     () => nodes.map((node) => ({ ...node, selected: node.id === (selectedCanvasNodeId ?? selectedNodeId) })),
     [nodes, selectedCanvasNodeId, selectedNodeId],
   )
+  // N2 atom #13 (subgraph-inline-preview): the canvas-level inline expansion
+  // overlay (dashed container + real child nodes/edges + bridge edges) for every
+  // currently-expanded subgraph node. Layered ON TOP of the live (post-layout,
+  // possibly dragged) nodes — never fed back into the main dagre layout — so
+  // toggling expand never reflows the parent graph.
+  const subgraphExpansion = useMemo(() => {
+    if (isDrilled) return { nodes: [] as GraphCanvasNode[], edges: [] as Edge<ContextEdgeData>[] }
+    const requests: SubgraphExpansionRequest[] = []
+    for (const node of nodes) {
+      if (node.type !== 'skill' || !expandedSubgraphs.has(node.id)) continue
+      const path = normalizeAbsoluteSubgraphPath(node.data.subgraphPath)
+      if (!path) continue
+      const entry = expandedTopologies[node.id]
+      const view: ExpandedSubgraphView = entry && entry.path === path ? entry.view : { status: 'loading' }
+      requests.push({ parentNodeId: node.id, parentLabel: node.data.label, path, view })
+    }
+    if (requests.length === 0) return { nodes: [], edges: [] }
+    const parentNodes = nodes.map((node) => ({ id: node.id, type: node.type, position: node.position }))
+    return buildSubgraphExpansion(parentNodes, requests)
+  }, [nodes, expandedSubgraphs, expandedTopologies, isDrilled])
+  const displayNodes = useMemo(
+    () => (subgraphExpansion.nodes.length === 0
+      ? selectedNodes
+      : [...selectedNodes, ...subgraphExpansion.nodes.map((node) => ({ ...node, selected: false }))]),
+    [selectedNodes, subgraphExpansion.nodes],
+  )
   const openEdgeContextMenu = useCallback((
     _event: MouseEvent,
     connection: { source: string; target: string },
@@ -669,6 +783,9 @@ export function GraphCanvas({
       || connection.source === OUTPUT_ID
       || connection.target === INPUT_ID
       || connection.target === OUTPUT_ID
+      // N2 atom #13: inline-preview / bridge edges are read-only — no disconnect menu.
+      || isSubgraphPreviewId(connection.source)
+      || isSubgraphPreviewId(connection.target)
     ) {
       setEdgeMenuConnection(null)
       return
@@ -676,21 +793,26 @@ export function GraphCanvas({
     setEdgeMenuConnection(connection)
   }, [])
   const displayEdges = useMemo<Edge<ContextEdgeData>[]>(
-    () => edges.map((edge) => {
-      const edgeData = edge.data
-      return {
-        ...edge,
-        data: {
-          ...edgeData,
-          hasTraceData: edgeData?.hasTraceData === true,
-          contextJson: edgeData?.contextJson,
-          sourcePhaseId: edgeData?.sourcePhaseId ?? edge.source,
-          targetPhaseId: edgeData?.targetPhaseId ?? edge.target,
-          onEdgeContextMenu: openEdgeContextMenu,
-        },
-      }
-    }),
-    [edges, openEdgeContextMenu],
+    () => [
+      ...edges.map((edge) => {
+        const edgeData = edge.data
+        return {
+          ...edge,
+          data: {
+            ...edgeData,
+            hasTraceData: edgeData?.hasTraceData === true,
+            contextJson: edgeData?.contextJson,
+            sourcePhaseId: edgeData?.sourcePhaseId ?? edge.source,
+            targetPhaseId: edgeData?.targetPhaseId ?? edge.target,
+            onEdgeContextMenu: openEdgeContextMenu,
+          },
+        }
+      }),
+      // N2 atom #13: inline-expansion edges render as-is (read-only smoothstep
+      // lines) without the interactive contextEdge data/menu wiring.
+      ...subgraphExpansion.edges,
+    ],
+    [edges, openEdgeContextMenu, subgraphExpansion.edges],
   )
 
   // n2-canvas #14: a drilled subgraph that is read-only (bundled/public) — or whose
@@ -896,7 +1018,7 @@ export function GraphCanvas({
           stays on the main canvas, so two canvases can't race writes to GRAPH.md
           off independent snapshots (the stale-hash 409 class). */}
       <ReactFlow
-        nodes={selectedNodes}
+        nodes={displayNodes}
         edges={displayEdges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
@@ -923,6 +1045,9 @@ export function GraphCanvas({
           openEdgeContextMenu(event, { source: edge.source, target: edge.target })
         }}
         onNodeClick={(_, node) => {
+          // N2 atom #13: read-only inline-preview nodes (child phases + the dashed
+          // container) never select or route to a real phase.
+          if (isSubgraphPreviewId(node.id)) return
           setSelectedCanvasNodeId(node.id)
           if (node.type === 'skill') {
             onNodeSelect?.({ id: node.id, data: node.data })
@@ -930,6 +1055,7 @@ export function GraphCanvas({
           }
         }}
         onNodeDragStart={(_, node) => {
+          if (isSubgraphPreviewId(node.id)) return
           setSelectedCanvasNodeId(node.id)
           if (node.type === 'skill') {
             onNodeSelect?.({ id: node.id, data: node.data })
@@ -937,6 +1063,7 @@ export function GraphCanvas({
         }}
         selectNodesOnDrag
         onNodeDoubleClick={(_, node) => {
+          if (isSubgraphPreviewId(node.id)) return
           setSelectedCanvasNodeId(node.id)
           if (node.type === 'globalInput' || node.type === 'globalOutput') {
             workspace?.onFileOpen(`${skillId}/GRAPH.md`)

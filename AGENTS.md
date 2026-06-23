@@ -133,6 +133,10 @@ one-page orientation, not the full design.
 - **Run + headless-screenshot guide**: `docs/development/RUN_AND_SCREENSHOT.md`
   — fresh-machine startup (vendor deps + warm `.pyc`) and the VPS-only headless
   verify method (Xvfb + screenshot + synthetic clicks).
+- **Frontend handoff prompt (template, single source)**:
+  `docs/development/FRONTEND_HANDOFF_PROMPT.md` — the canonical copy-paste brief
+  for handing an `apps/studio/frontend` UI task to an agent (必读清单 + 边界纪律 +
+  收尾回写手册/状态点)。Rule changes update this file via PR, not chat.
 - **Handbook authoring methodology**: `docs/studio/mvp1/handbook-methodology/` —
   `frontend-page-authoring-methodology.md` (内容/页面骨架/写作规则/一色一义) +
   `handbook-operations-schema-lifecycle.md` (怎么看/怎么改/何时改跟代码 reconcile/

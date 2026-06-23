@@ -546,7 +546,12 @@ describe('GraphCanvas', () => {
     expect(html).not.toContain('lucide-briefcase')
   })
 
-  it('does not propagate double-click on subgraph nodes', () => {
+  it('lets double-click on a subgraph node propagate so ReactFlow can drill in', () => {
+    // Regression (2026-06-23): the node must NOT swallow the double-click. Drill-
+    // down is routed by ReactFlow's onNodeDoubleClick on the canvas; if SkillNode
+    // calls stopPropagation for subgraph nodes, that handler never fires and
+    // double-clicking a subgraph node silently fails to drill in. Inline expand is
+    // a separate affordance (the explicit Expand-subgraph button), not double-click.
     const stopPropagation = vi.fn()
     const onToggleSubgraph = vi.fn()
     const node = renderSkillNodeRoot({
@@ -554,9 +559,10 @@ describe('GraphCanvas', () => {
       onToggleSubgraph,
     })
 
+    // Either there is no root onDoubleClick at all, or it does not stop the event.
     node.props.onDoubleClick?.({ stopPropagation })
 
-    expect(stopPropagation).toHaveBeenCalledOnce()
+    expect(stopPropagation).not.toHaveBeenCalled()
     expect(onToggleSubgraph).not.toHaveBeenCalled()
   })
 })

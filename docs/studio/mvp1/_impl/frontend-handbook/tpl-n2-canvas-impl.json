@@ -200,6 +200,16 @@
       "layer2": [
         "真跑:打开一个真 skill 工程,看画布节点/连线与 GRAPH.md 一致。",
         "双击各类节点,看打开对应文件。"
+      ],
+      "screenshots": [
+        {
+          "file": "n2-01-projection.png",
+          "caption": "打开 skill 工程后画布按 GRAPH.md 渲染出 Input/draft/review/expand/Output 节点 + 依赖连线"
+        },
+        {
+          "file": "n2-02-open-file.png",
+          "caption": "双击 draft 节点打开 phases/draft/SKILL.md（Monaco 编辑器）"
+        }
       ]
     },
     {
@@ -217,6 +227,12 @@
       ],
       "layer2": [
         "看一个多节点 skill 的画布布局方向。"
+      ],
+      "screenshots": [
+        {
+          "file": "n2-01-projection.png",
+          "caption": "纵向 TB 布局：上游在上、下游在下（Input→draft→review→expand→Output）"
+        }
       ]
     },
     {
@@ -237,6 +253,12 @@
       ],
       "layer2": [
         "真跑:右键各建一个 Agent/Logic/Subgraph 节点,打开生成文件看 frontmatter、确认可直接编译。"
+      ],
+      "screenshots": [
+        {
+          "file": "n2-04-create-node.png",
+          "caption": "右键画布 → Add Phase Node → Logic Phase 新建 logic 节点，原有 draft/review/expand 节点保留"
+        }
       ]
     },
     {
@@ -254,6 +276,12 @@
       ],
       "layer2": [
         "看画布起点/终点节点,双击开 GRAPH.md。"
+      ],
+      "screenshots": [
+        {
+          "file": "n2-01-projection.png",
+          "caption": "画布带 Input 起点 + Output 终点两个独立端点节点"
+        }
       ]
     },
     {
@@ -275,6 +303,16 @@
       "layer2": [
         "真跑:拖一条连线,看 GRAPH.md depends_on 改动。",
         "右键边断连,看 depends_on 移除。"
+      ],
+      "screenshots": [
+        {
+          "file": "n2-06-connect.png",
+          "caption": "拖 draft 底部 handle 到 review 顶部 handle，新增 draft→review 依赖边"
+        },
+        {
+          "file": "n2-07-disconnect.png",
+          "caption": "右键 draft→review 边 → Disconnect 移除该依赖（review 变根节点）"
+        }
       ]
     },
     {
@@ -296,6 +334,12 @@
       "layer2": [
         "真跑:把一条边改接到别的节点,看 depends_on 迁移。",
         "把边端点拖离松手,看边删除。"
+      ],
+      "screenshots": [
+        {
+          "file": "n2-08-reconnect.png",
+          "caption": "拖 draft→review 边的目标端点到 extra 节点：旧目标 review 移除、新目标 extra 追加（变 draft→extra）"
+        }
       ]
     },
     {
@@ -314,6 +358,12 @@
       ],
       "layer2": [
         "真跑:连出一个环,看全屏阻断 + 报错。"
+      ],
+      "screenshots": [
+        {
+          "file": "n2-09-cycle.png",
+          "caption": "a↔b 造环后全屏红遮罩『SKILL contains cyclic dependency』"
+        }
       ]
     },
     {
@@ -332,6 +382,12 @@
       ],
       "layer2": [
         "两层渲染验证:dataGapErrorsByNode 纯函数→Workspace mergeNodeErrors→build-nodes 透传 compileErrors→SkillNode 经 renderToStaticMarkup 渲染冲突报错,端到端在测试里走通(无 @testing-library,纯函数 + SSR)。"
+      ],
+      "screenshots": [
+        {
+          "file": "n2-10-data-gap.png",
+          "caption": "上游黑板缺供给的输入字段，节点上投影为 compile 冲突报错"
+        }
       ]
     },
     {
@@ -350,6 +406,12 @@
       ],
       "layer2": [
         "真跑:造一个顺序覆盖,看 overlay,分别点 Allow/Cancel。"
+      ],
+      "screenshots": [
+        {
+          "file": "n2-11-seq-overwrite.png",
+          "caption": "draft 与 review 都输出 result 字段时弹『Sequential Overwrite Detected』+ Allow Overwrite/Cancel，冲突节点琥珀描边"
+        }
       ]
     },
     {
@@ -370,6 +432,12 @@
       "layer2": [
         "真跑:手改坏一个 phase YAML,看 error + Open file。",
         "造一个 stale 写,看冲突拦截。"
+      ],
+      "screenshots": [
+        {
+          "file": "n2-12-failure-path.png",
+          "caption": "review phase frontmatter 失效（manifest error）→ 该节点投影红色错误徽章（io · L4 — Invalid YAML frontmatter）"
+        }
       ]
     },
     {
@@ -388,6 +456,12 @@
       ],
       "layer2": [
         "真跑:展开一个真子图节点,看 inline 预览与子图真实 GRAPH.md 一致。"
+      ],
+      "screenshots": [
+        {
+          "file": "n2-13-subgraph-inline.png",
+          "caption": "展开子图节点，inline 列出子图真实 phase 名 + 类型"
+        }
       ]
     },
     {
@@ -409,7 +483,13 @@
       "layer2": [
         "真跑:多级下钻进子图看面包屑;下钻后编辑一个子图节点保存,看落子图 GRAPH.md(子图内改 io 字段会撞 #30 loader fatal,属 #30 后端待删)。"
       ],
-      "fe_resync": "2026-06-20 fe_resync 偏差→符合:下钻编辑写回闭环已实现(前端,无后端)。就地编辑不切工程(删 pushNavSkill 逃逸口,改按子图 skillId 就地开子文件;嵌套 subgraph 仍 drillInto 深钻);child-root 身份(drilledChildIdentity= childGraph.path 经 resolveWorkspaceIdentity 解析子 skillId+workspaceRoot);下钻用 buildNodes(childSkillId, childDetail, …)(Option A 复用根图编辑接线)渲染,节点 data.skillId=子图、filePath 子图相对;四个 Workspace 保存 handler + doWriteSkillFile 增可选 child target,serialize/write/compile 全打子图身份,父分支字节级不变;失败 refetch 子图(refetchChildGraph)不动父 mutate;只读 bundled/public 子图前置阻断(isDrilledChildEditable 路径谓词,父根空时 Tauri 只读、浏览器 403 兜底)+ fork-to-edit 提示,绝不自动 fork/静默改 bundle(PM 决策)。测试:drill-edit.test.ts + build-nodes.test.ts(focused vitest 全绿)+ e2e subgraph-drill-edit.spec.ts(已写未跑,门禁真机)。新增/改文件:drill-edit.ts(resolveSaveTarget/isDrilledChildEditable/isReadOnlySkillError/ChildSaveTarget)、GraphCanvas.tsx、Workspace.tsx、build-nodes.ts(buildNodesFromTopology 增 agentSteps)。"
+      "fe_resync": "2026-06-20 fe_resync 偏差→符合:下钻编辑写回闭环已实现(前端,无后端)。就地编辑不切工程(删 pushNavSkill 逃逸口,改按子图 skillId 就地开子文件;嵌套 subgraph 仍 drillInto 深钻);child-root 身份(drilledChildIdentity= childGraph.path 经 resolveWorkspaceIdentity 解析子 skillId+workspaceRoot);下钻用 buildNodes(childSkillId, childDetail, …)(Option A 复用根图编辑接线)渲染,节点 data.skillId=子图、filePath 子图相对;四个 Workspace 保存 handler + doWriteSkillFile 增可选 child target,serialize/write/compile 全打子图身份,父分支字节级不变;失败 refetch 子图(refetchChildGraph)不动父 mutate;只读 bundled/public 子图前置阻断(isDrilledChildEditable 路径谓词,父根空时 Tauri 只读、浏览器 403 兜底)+ fork-to-edit 提示,绝不自动 fork/静默改 bundle(PM 决策)。测试:drill-edit.test.ts + build-nodes.test.ts(focused vitest 全绿)+ e2e subgraph-drill-edit.spec.ts(已写未跑,门禁真机)。新增/改文件:drill-edit.ts(resolveSaveTarget/isDrilledChildEditable/isReadOnlySkillError/ChildSaveTarget)、GraphCanvas.tsx、Workspace.tsx、build-nodes.ts(buildNodesFromTopology 增 agentSteps)。",
+      "screenshots": [
+        {
+          "file": "n2-14-drilldown.png",
+          "caption": "双击子图节点下钻进子图 + 面包屑导航回根"
+        }
+      ]
     },
     {
       "covers": "#15 l3-step-edit(L3 内联)",
@@ -427,6 +507,12 @@
       ],
       "layer2": [
         "真跑(落地后):展开一个节点 body,增删改序步骤,看 phase 文件 body 落盘。"
+      ],
+      "screenshots": [
+        {
+          "file": "n2-15-l3-steps.png",
+          "caption": "节点 Edit steps 展开 body，内联编辑 <step>（Step s1/s2 name）"
+        }
       ]
     }
   ]

@@ -42,9 +42,9 @@
 
 - **大方向以 MVP1 设计为真理(看齐设计、不看代码)** —— 设计与代码冲突时设计赢;入口见 `AGENTS.md`「Standard Documents → MVP1 design = source of truth」。
 - **N6 手册是活的实施追踪器,不是只读说明书** —— `docs/studio/mvp1/_impl/frontend-handbook/index.html`(由 `tpl-*.json` 切片经 `build_template_slice.py` 生成)。它讲「做什么 / 怎么实施 / 现在到哪了」,与讲「样式怎么对齐」的 `FRONTEND_UI_SPEC.md` 互补。三条铁律:
-  - **入口读它**:动手前读被指派节点/surface 的设计页(应该长啥样)+ 实施页/测试页(当前状态),理解契约再写。
+  - **入口读它 + 缺了向上补**:动手前读被指派节点/surface 的设计页(应该长啥样)+ 实施页/测试页(当前状态);**手册设计页缺/不全/和 MVP1 设计文档打架,就去设计源补对**(完整级联见下「四」Phase 2)。手册设计页是 MVP1 设计文档的**派生视图**,不是设计真相本身。
   - **它的状态标签会滞后代码**:`fe_status`/`be_status`/`be_dep` 是手维护的,默认当它可能过时,**用代码核对**再信(见根记忆 `feedback_no_overclaim_verify_status_against_code`)。
-  - **出口回写它**:改了代码就在**同一个 PR**里把对应切片改对 + 重生成 `index.html`(见下「四」的 Phase 5)。
+  - **出口回写它**:改了代码就在**同一个 PR**里把对应切片状态改对 + 重生成 `index.html`(见下「四」Phase 6)。
   - 手册的看/改/何时改/截图/字段 schema/配色,全在 `docs/studio/mvp1/handbook-methodology/` 两份方法论文档(`frontend-page-authoring-methodology.md` + `handbook-operations-schema-lifecycle.md`)。
 - **`docs/development/FRONTEND_UI_SPEC.md` 为样式/组件唯一真相**,改前先读,**尤其 §2「UI 组件与样式基准规范」**。
 - 优先复用 `src/components/ui/` 下已有的 shadcn/ui / Radix 封装;缺哪个原语就先在 `src/components/ui/` 补 shadcn 风格封装再用。
@@ -66,28 +66,37 @@
 **Phase 1 · 切分支**
 - `scripts/wt-new.sh <type>/<short-desc>` 从 **fetch 过的** `origin/main` 切;每个新 scope 一个新 worktree(别在刚合并的旧分支上堆改动)。
 
-**Phase 2 · 实施(自己直接写)**
-- 复用 `src/components/ui/` 已有封装;缺原语先补 shadcn 风格封装;语义 token,不硬编码颜色。
-- 真功能逻辑补测试(纯视觉/样式不强制 TDD)。
+**Phase 2 · 设计对齐:先把权威设计立起来,再动手** 【手册触点·核心前置】
+- **铁律:绝不对着"缺失的设计"或"自己临时编的设计"写代码。** 设计真相在 MVP1 设计文档,手册设计页只是它的**派生视图**。动手前按这条级联把"它应该长啥样"确立成权威设计:
+  1. **手册设计页已有这条 + 与 MVP1 设计文档一致** → 对齐它,直接进 Phase 3。
+  2. **手册设计页缺 / 不全** → 去 MVP1 设计源(`AGENTS.md` Standard Documents →「MVP1 design = source of truth」;studio 在 `docs/studio/mvp1/` 的 `README.md` + `DESIGN_UNITS_INDEX.md` + 设计单元)找,据它**补全手册设计页切片**(`atoms`:cap/func/action/fe_design/fe_modules/be_contract)。
+  3. **手册设计页与 MVP1 设计文档打架** → **设计文档赢**(看齐设计、不看代码、不看旧手册),把手册设计页改成跟设计文档一致。
+  4. **MVP1 设计文档也没有这条** → 真·设计缺口,不能硬写:① 先**设计**它(对齐现有设计语言 / 交互范式 / design token);② 若是**全新方向 / 取舍**(不是工程细节),按「需求+方向归 PM」先用文字跟 PM 对齐方向再定;③ 把定下来的设计**写回 MVP1 设计源**(让设计文档成为真相),**再**据它补手册设计页。
+  5. 设计页定稿后 → **补对应的实施页 + 测试页骨架**:实施页列要做的 `functions` 条目,测试页列 `tests` 覆盖点 / `layer1` / `layer2` 测试计划——给 Phase 3 一个明确靶子。
+- 一句话:**设计页 = 动手前的靶子(应该长啥样);实施/测试页的状态 = 动手后的结果(做到没 / 测到没,Phase 6 回填)**。缺了就沿级联向上补,补到 MVP1 设计源为止;设计源缺就先设计再写回源,绝不跳过。
 
-**Phase 3 · 亲眼验证(顺手产出手册要用的真机图)**
+**Phase 3 · 实施(自己直接写)**
+- 复用 `src/components/ui/` 已有封装;缺原语先补 shadcn 风格封装;语义 token,不硬编码颜色。
+- 真功能逻辑补测试(纯视觉/样式不强制 TDD);照 Phase 2 定稿的设计页 + 测试页骨架做,不偏靶。
+
+**Phase 4 · 亲眼验证(顺手产出手册要用的真机图)**
 - 跑 app 亲眼点过受影响界面(主成功路径 + 取消/错误态);agent reply / diff / typecheck 通过都**不等于**视觉验证。
 - **多 agent 同仓 → 跑自己 worktree 的独立实例**:sidecar 端口 / Vite 端口(`--strictPort`)/ Xvfb display / `VITE_CACHE_DIR` 各一套独有值;`git worktree list` 先看,**别碰**别人「有未提交 + open PR + 刚改过」的活跃 worktree。隔离配方见 `RUN_AND_SCREENSHOT.md §3`,headless 截图法见 §2。
-- 【手册触点】这一步的截图**就是手册测试页要挂的真机图** → 按 ops 文档 §4 命名(`n<节点>-<序号>-<语义>.png`,特写 `-closeup`)存进 handbook 的 `screenshots/`;截不到的(系统对话框/文件管理器/瞬态帧)记下来,Phase 5 在切片标 `shot_na` + 原因。
+- 【手册触点】这一步的截图**就是手册测试页要挂的真机图** → 按 ops 文档 §4 命名(`n<节点>-<序号>-<语义>.png`,特写 `-closeup`)存进 handbook 的 `screenshots/`;截不到的(系统对话框/文件管理器/瞬态帧)记下来,Phase 6 在切片标 `shot_na` + 原因。
 
-**Phase 4 · 本地 CI 门禁(改了前端 src 才需要)**
+**Phase 5 · 本地 CI 门禁(改了前端 src 才需要)**
 - `apps/studio/frontend` 下 `npm run lint && npm run typecheck && npm test && npm run build` 四件全绿才推。
 
-**Phase 5 · 回写手册切片(与代码改动同一个 PR,不许拖到以后)** 【手册触点·核心】
-- 据**代码真相**(不抄旧文案)更新这个 surface 的切片:`fe_status`/`current`/`gap`、`be_status`/`be_dep`、`tests[]`、把 Phase 3 的图挂进 `screenshots:[{file,caption}]`、截不到的标 `shot_na`。
+**Phase 6 · 回写手册切片状态(与代码改动同一个 PR,不许拖到以后)** 【手册触点·核心】
+- Phase 2 已立好"应该长啥样"的设计页;这一步据**代码真相**(不抄旧文案)回填"做到没 / 测到没"的状态:`fe_status`/`current`/`gap`、`be_status`/`be_dep`、`tests[]`、把 Phase 4 的图挂进 `screenshots:[{file,caption}]`、截不到的标 `shot_na`。
 - 自检 design 切片 vs impl 切片状态**不打架**(打架=漂移信号,拿代码裁决)。
 - 跑 `python3 build_template_slice.py` **重生成 `index.html`**,和切片 JSON 一起提交。
 - 生成自检:无蓝点(`grep -c 'status-dot review'`=0)、无死链、截图数对得上。字段 schema / 枚举 / 配色锁定见 ops 文档 §2 §3 §5。
 
-**Phase 6 · 发 PR & 合并**
-- `scripts/wt-ship.sh "PR title"`;**PR 同时含 前端 src + 切片 JSON + 重生成的 index.html**。CI 5 个必过 check 绿后 GitHub 自动 squash 进 main。
+**Phase 7 · 发 PR & 合并**
+- `scripts/wt-ship.sh "PR title"`;**PR 同时含 前端 src + 切片 JSON + 重生成的 index.html**(若 Phase 2 改了 MVP1 设计源,也一并带上)。CI 5 个必过 check 绿后 GitHub 自动 squash 进 main。
 
-**Phase 7 · 沉淀(同一次改动里,别只留对话)**
+**Phase 8 · 沉淀(同一次改动里,别只留对话)**
 - 可复用**样式规则** → `FRONTEND_UI_SPEC.md`;**手册方法论/坑** → 方法论文档;**行为类教训** → 记忆。
 - 报 done:自然语言 + 附**亲眼验证的截图/描述**,对齐「设计是什么 / 是否按设计做到 / 做完什么效果」三段;不问「是否继续」。
 

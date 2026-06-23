@@ -151,25 +151,6 @@ fn existing_path(path: &str) -> Result<PathBuf, String> {
     Ok(target)
 }
 
-fn spawn_tool(bin: &str, path: &str) -> Result<(), String> {
-    let target = existing_path(path)?;
-    Command::new(bin)
-        .arg(target)
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| format!("failed to spawn {bin}: {error}"))
-}
-
-#[tauri::command]
-fn open_in_cursor(path: String) -> Result<(), String> {
-    spawn_tool("cursor", &path)
-}
-
-#[tauri::command]
-fn open_in_codex(path: String) -> Result<(), String> {
-    spawn_tool("codex", &path)
-}
-
 #[tauri::command]
 async fn select_directory(
     app: tauri::AppHandle,
@@ -239,58 +220,6 @@ fn reveal_in_file_manager(path: String) -> Result<(), String> {
     }
 
     Err("revealing in file manager is not supported on this platform".to_string())
-}
-
-#[tauri::command]
-fn open_in_terminal(path: String) -> Result<(), String> {
-    let target = existing_path(&path)?;
-    if cfg!(target_os = "macos") {
-        return Command::new("open")
-            .arg("-a")
-            .arg("Terminal")
-            .arg(target)
-            .spawn()
-            .map(|_| ())
-            .map_err(|error| format!("failed to open Terminal: {error}"));
-    }
-
-    if cfg!(target_os = "linux") {
-        return Command::new("gnome-terminal")
-            .arg("--working-directory")
-            .arg(&target)
-            .spawn()
-            .or_else(|_| {
-                Command::new("xterm")
-                    .args([
-                        "-e",
-                        "sh",
-                        "-lc",
-                        "cd \"$1\" && exec \"${SHELL:-sh}\"",
-                        "sh",
-                    ])
-                    .arg(&target)
-                    .spawn()
-            })
-            .map(|_| ())
-            .map_err(|error| format!("failed to open terminal: {error}"));
-    }
-
-    if cfg!(target_os = "windows") {
-        return Command::new("wt.exe")
-            .arg("-d")
-            .arg(&target)
-            .spawn()
-            .or_else(|_| {
-                Command::new("cmd")
-                    .args(["/c", "start", "cmd", "/k", "cd", "/d"])
-                    .arg(&target)
-                    .spawn()
-            })
-            .map(|_| ())
-            .map_err(|error| format!("failed to open terminal: {error}"));
-    }
-
-    Err("opening a terminal is not supported on this platform".to_string())
 }
 
 #[cfg(all(target_os = "macos", test))]
@@ -394,10 +323,7 @@ pub fn run() {
             get_sidecar_stderr,
             confirm_quit_ready,
             restart_sidecar,
-            open_in_cursor,
-            open_in_codex,
             select_directory,
-            open_in_terminal,
             reveal_in_file_manager,
             native_fs::write_workspace_file,
             native_fs::publish_package_writer,

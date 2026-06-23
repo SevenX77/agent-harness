@@ -179,8 +179,8 @@
     {
       "item": "失效路径存在性检查 + D3 死代码清理",
       "d12": "对应 N1 设计 R1(失效自动移除)/ D3(删外部 IDE 联动)",
-      "status": "review",
-      "note": "路径存在性那半已接入(2026-06-23 据代码核对):Rust workspace_path_exists 已注册(lib.rs:417),前端 workspacePathExists 已调(lib/tauri.ts:178)供 stale-MRU pruning。仍 review 的唯一原因是 D3 死代码未删:open_in_cursor / open_in_terminal / open_in_codex 仍在(lib/tauri.ts:67-76 + Rust shell 命令),待删。不阻塞主线。",
+      "status": "ok",
+      "note": "两半均已落地(2026-06-23 据代码核对)。R1 路径存在性:Rust workspace_path_exists 已注册(lib.rs)、前端 workspacePathExists 已调(lib/tauri.ts)供 stale-MRU pruning。D3 删外部 IDE 联动:open_in_cursor / open_in_codex / open_in_terminal 三个 Rust 命令 + spawn_tool 辅助 + 前端 invokeShell/openInCursor/openInTerminal/openInCodex 死代码全部删除,invoke_handler 注册同步移除(本 PR);残留引用 grep 为 0,前端 lint/typecheck/test/build 全绿、cargo check Finished。",
       "ref": "d12"
     }
   ]

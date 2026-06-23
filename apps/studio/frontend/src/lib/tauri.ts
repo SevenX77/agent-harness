@@ -9,8 +9,6 @@ export interface RecentWorkspaceEntry {
   lastOpenedAt: string
 }
 
-type TauriCommand = 'open_in_cursor' | 'open_in_terminal' | 'open_in_codex' | 'reveal_in_file_manager'
-
 function desktopRuntimeUnavailableError(): Error {
   const status = getRuntimeStatus()
   return new Error(
@@ -38,42 +36,6 @@ function assertNativeHelpersAvailable(): void {
   if (!nativeHelpersAreAvailable()) {
     throw desktopRuntimeUnavailableError()
   }
-}
-
-async function invokeShell(command: TauriCommand, path: string) {
-  const targetPath = path.trim()
-  if (!targetPath) {
-    toast.error('No skill path available')
-    return
-  }
-
-  if (!isTauriRuntime()) {
-    toast.info('Desktop only')
-    return
-  }
-  if (!nativeHelpersAreAvailable()) {
-    toastDesktopRuntimeUnavailable()
-    return
-  }
-
-  try {
-    const { invoke } = await import('@tauri-apps/api/core')
-    await invoke(command, { path: targetPath })
-  } catch {
-    toast.error('Failed to open desktop tool')
-  }
-}
-
-export function openInCursor(path: string) {
-  return invokeShell('open_in_cursor', path)
-}
-
-export function openInTerminal(path: string) {
-  return invokeShell('open_in_terminal', path)
-}
-
-export function openInCodex(path: string) {
-  return invokeShell('open_in_codex', path)
 }
 
 export async function revealInFileManager(path: string) {

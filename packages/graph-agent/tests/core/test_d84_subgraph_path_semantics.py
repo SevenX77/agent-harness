@@ -190,6 +190,51 @@ def test_subgraph_absolute_path_compiles_and_assembles_without_registry_resolver
     assert assembled.phase_ids == ["delegate"]
 
 
+def test_subgraph_relative_path_compiles_and_assembles_within_root(tmp_path: Path) -> None:
+    # A SUBGRAPH.md `path` declared relative to the skill root must resolve at
+    # ASSEMBLY time exactly as it does at compile time (against the skill root
+    # derived from the SUBGRAPH.md location), not be rejected for "must be
+    # absolute". This is what lets a skill survive being relocated (e.g. Studio
+    # copying it into an ephemeral run dir): the relative path re-resolves against
+    # wherever the skill root currently is.
+    parent = tmp_path / "parent"
+    child = parent / "subgraphs" / "child"
+    _logic_child(child)
+    _subgraph_parent(parent, "subgraphs/child")
+    resolver = ExplodingResolver()
+
+    compiled = compile_skill(parent, cache=False, skill_resolver=resolver)
+    assembled = assemble_graph(compiled, skill_resolver=resolver)
+
+    assert resolver.calls == []
+    assert assembled.phase_ids == ["delegate"]
+
+
+def test_subgraph_relative_path_assembles_after_skill_root_relocation(tmp_path: Path) -> None:
+    # Faithful reproduction of the Studio predict/run failure: compile the skill
+    # in place, then copy the whole tree to a different absolute location (as the
+    # ephemeral run sandbox does) and assemble from the copy. A relative subgraph
+    # path must re-resolve against the relocated root; an absolute path baked at
+    # authoring time would "escape" the new root and fail.
+    import shutil
+
+    origin = tmp_path / "origin" / "parent"
+    child = origin / "subgraphs" / "child"
+    _logic_child(child)
+    _subgraph_parent(origin, "subgraphs/child")
+    resolver = ExplodingResolver()
+    compile_skill(origin, cache=False, skill_resolver=resolver)
+
+    relocated = tmp_path / "ephemeral_run_skills" / "deadbeef" / "parent"
+    shutil.copytree(origin, relocated)
+
+    compiled = compile_skill(relocated, cache=False, skill_resolver=resolver)
+    assembled = assemble_graph(compiled, skill_resolver=resolver)
+
+    assert resolver.calls == []
+    assert assembled.phase_ids == ["delegate"]
+
+
 @pytest.mark.parametrize(
     ("case_name", "make_child_path", "expected"),
     [

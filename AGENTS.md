@@ -122,6 +122,13 @@ one-page orientation, not the full design.
   `docs/studio/mvp1/_impl/frontend-handbook/index.html` — the guide future
   frontend work continues to follow. (Different from the local-only `temp/`
   handbook noted below — that one is NOT it.)
+  - **唯一真相源 + 唯一网络出口 = `main` 主仓根。** 手册(`tpl-*.json` 切片 +
+    `screenshots/` 真机图 + 生成出的 `index.html`)只认 `main` 这一份。改手册跟
+    改代码一样:在 worktree 里改切片 / 加截图 / 重生成,走 PR 合进 `main` —— **不在
+    worktree 或 `/tmp` 留第二份手册、也不为它单开第二条隧道**。对外那一个网页固定从
+    **主仓根**(`main` 工作树)伺服;合并后主仓根 `git pull` 即刷新。截图必须随切片一起
+    提交进 git(不许只烤进 `index.html` 而源 PNG 不入库)。操作配方见
+    `docs/development/RUN_AND_SCREENSHOT.md` §4。
 - **Frontend UI spec**: `docs/development/FRONTEND_UI_SPEC.md`
 - **Run + headless-screenshot guide**: `docs/development/RUN_AND_SCREENSHOT.md`
   — fresh-machine startup (vendor deps + warm `.pyc`) and the VPS-only headless

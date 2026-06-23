@@ -89,23 +89,27 @@
     {
       "name": "draft 知识库内核",
       "code": "gateway: import_draft_store.py",
-      "summary": "provider 的历史探测证据库，append-only，既给当前 model list 回填已证实能力（出蓝态），也把本次新发现写回沉淀成下次历史。",
+      "summary": "provider 的历史探测知识库，append-only、可跨机共享。它唯一的目的是「免重探」:把以前真探连通过的模型 / 能力记下来，下次别再一个一个盲测——拉云端知识库正是为了跳过全量重测，不是拉下来再测一遍。三条赋能(回填能力 / 清单兜底 / 免盲测) + 一条写回 + 一条共享。",
       "formula": "",
       "diagram": "",
       "rules": [
-        "证据 append-only：append_evidence_record 只追加、不覆盖旧证据，连失败结果也记。",
-        "赋能方向：读 draft 把已证实的模型/能力回填进当前 model list，让对应 route 出 historical_ready 蓝态。",
-        "写回方向：本次发现的新模型 / 新 capability（含失败）都 append 进 draft。",
-        "materialize_import_draft_candidates 把候选物化成 route，默认 status=unverified_manual。",
-        "merge_evidence_library 合并远端证据时按 evidence_id 去重。",
+        "证据 append-only:append_evidence_record 只追加、不覆盖旧证据，连失败结果也记(失败也是「别再白试」的知识)。",
+        "赋能① 回填能力:读 draft，把以前真探连通过的模型能力回填进当前 model list——不是拿本次 get-models 的实时能力顶替。",
+        "赋能② 清单兜底:get-models 拿不到模型清单(空 / 失败)时，用 draft 里这个 provider 的已知模型补出清单——别让「列不出模型」变成死路。",
+        "赋能③ 免盲测:批量探测前先读 draft，已知通过的优先信 / 可跳、已知失败的往后排——不再从头一个一个盲试(这正是拉云端知识库的意义:跳过全量重测)。",
+        "出蓝态红线:只有真探连通(probe-verified)的历史才让 route 出蓝(historical_ready);只被 get-models 清单看到过(provider-list-observed)= 仅观测，停留灰(untested)，绝不出蓝。「看到 ≠ 连通过」。",
+        "写回方向:本次新发现的模型 / 新 capability(含失败)都 append 进 draft，沉淀成下次的历史。",
+        "共享方向:merge_evidence_library 合并远端知识库时按 evidence_id 去重;远端同步应在后端启动时跑一次(现状错放在进设置页才跑，见「后端实现状态」)。",
+        "candidate 物化:materialize_import_draft_candidates 把候选物化成 route，默认 status=unverified_manual。",
         "D6.5 已把这套内核从 Studio 下沉到 gateway。"
       ],
       "do": [
-        "证据记录 / 复用 / 共享 / 去重。",
-        "candidate 物化、probe 证据 → historical_ready 投影的输入。"
+        "证据记录 / 复用(回填能力·清单兜底·免盲测)/ 共享 / 去重。",
+        "candidate 物化、真探(probe-verified)证据 → historical_ready 蓝态投影的输入。"
       ],
       "dont": [
-        "不做 import/apply 用户工作流、远端源选择、credentials writer 注入——这些留 Studio（llm_import_drafts.py 作 workflow glue）。"
+        "不做 import/apply 用户工作流、远端源选择、credentials writer 注入——这些留 Studio(llm_import_drafts.py 作 workflow glue)。",
+        "不把「只被 get-models 清单看到」的观测(provider-list-observed)当成连通证据出蓝。"
       ],
       "deviation": ""
     },
@@ -476,13 +480,13 @@
         "code": "historical_ready",
         "dot": "🔵",
         "name": "历史就绪",
-        "mean": "draft 有历史连通证据，但当前没真测"
+        "mean": "draft 有真探连通(probe-verified)历史，但当前没真测;只被 get-models 清单看到过不算，那是灰。"
       },
       {
         "code": "untested",
         "dot": "⚪",
         "name": "未测",
-        "mean": "没测过"
+        "mean": "没真探过 —— 含「只被 get-models 清单看到、还没真测」这种;看到 ≠ 连通过。"
       },
       {
         "code": "failed",
@@ -532,8 +536,8 @@
           "ready"
         ],
         [
-          "endpoint verified 且 draft 有历史证据",
-          "historical_ready（蓝，挂 evidence_refs）"
+          "endpoint verified 且 draft 有真探连通历史(probe-verified，不含仅清单观测)",
+          "historical_ready(蓝，挂 evidence_refs)"
         ],
         [
           "以上都不满足",
@@ -626,6 +630,62 @@
       "status": "ok",
       "note": "角色编排→fallback 链已就绪;服务 LLM Roles,API Keys 不直接用。",
       "ref": "d6"
+    },
+    {
+      "item": "测试时读 draft 回填 / 清单兜底 / 免盲测",
+      "d12": "D6.5",
+      "status": "bad",
+      "note": "缺口:官方 / 三方测试路径都不读 draft——① 不回填 draft 已证实能力(写的是本次 get-models 实时能力);② get-models 拿不到清单时不从 draft 补清单、直接判「无模型」;③ 批量探测前不查 draft 历史、仍全量盲测。拉云端知识库「免重探」的意义没兑现。← #24 / #25 的这层设计意图尚未落地。",
+      "ref": "d6"
+    },
+    {
+      "item": "云端知识库同步时机(启动 vs 进设置页)",
+      "d12": "D6.5",
+      "status": "bad",
+      "note": "缺口:远端知识库同步只在用户「进设置页」时由前端触发，后端启动 lifespan 不跑。这种前置数据应在后端一启动就同步好，而不是等用户点进设置页才补。",
+      "ref": "d6"
+    },
+    {
+      "item": "蓝态数据来源口径(看到 ≠ 连通过)",
+      "d12": "D6.1",
+      "status": "review",
+      "note": "要回退对齐:现有一处改动把 get-models 观测(provider-list-observed)也算成蓝。按设计蓝只认真探连通(probe-verified)历史，只被清单看到要停留灰。蓝的判定口径要收回到「真探历史」。",
+      "ref": "d6"
+    },
+    {
+      "item": "知识库证据 → 配置档案晋升规则",
+      "d12": "D6.5",
+      "status": "review",
+      "note": "待明确 → 待落地:四条对应关系(回填能力 / 绿 / 蓝 / 灰)+ 清单兜底已在本页「知识库 ↔ 配置档案」定清楚，后端把知识库证据晋升进当前配置档案的写入尚未实现。",
+      "ref": "d6"
+    }
+  ],
+  "rule_sections": [
+    {
+      "title": "知识库 ↔ 配置档案:四条对应关系 + 清单兜底",
+      "note": "draft(历史探测知识库)和 credential(当前配置档案)是两本账:知识库记「以前探到过什么」，配置档案记「现在这把 key 配成什么、是什么颜色」。测试 / 投影时按下面把知识库的料用到配置档案上，绿蓝灰各有红线。",
+      "rules": [
+        [
+          "draft 有某模型真探连通过的能力",
+          "回填进配置档案该 route 的能力清单(不是拿本次 get-models 实时能力顶替)"
+        ],
+        [
+          "当前刚真探通过(本次 probe 通)",
+          "route 显绿 ready —— 与蓝互斥:刚真探通了就是绿，不是蓝"
+        ],
+        [
+          "draft 有真探连通历史 且 当前没真测(非绿)",
+          "route 显蓝 historical_ready，挂 evidence_refs"
+        ],
+        [
+          "只被 get-models 清单看到、无真探历史",
+          "route 显灰 untested —— 看到不算连通过，绝不出蓝"
+        ],
+        [
+          "get-models 拿不到清单(空 / 失败)",
+          "用 draft 里该 provider 的已知模型补出清单(清单兜底，第 4 维)"
+        ]
+      ]
     }
   ]
 }

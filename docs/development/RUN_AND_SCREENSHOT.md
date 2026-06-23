@@ -242,3 +242,29 @@ its files, never launch on its ports/display, never `wt-clean` it. Clean up only
 - Software-rendering noise (`libEGL warning`, `MESA: dri` lines) under Xvfb is
   harmless; the `WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1` env is
   what keeps the webview painting.
+
+## 4. Handbook webpage — single source, single network exit (`main` only)
+
+The N6 frontend handbook (`docs/studio/mvp1/_impl/frontend-handbook/`) is the one
+exception to the per-worktree isolation in §3: the **app** runs per-worktree, but the
+**handbook** is a published doc artifact that must converge to **one** copy. Rule:
+
+- **Source of truth = `main` repo root.** Edit slices / add screenshots / regenerate
+  in a worktree and land via PR like any change — but do **not** keep a second
+  handbook copy in a worktree or `/tmp`, and do **not** open a second tunnel for it.
+  Screenshots ride into git next to the slices (never baked into `index.html` only).
+- **One network exit, served from the repo root** so a `main` update refreshes it:
+
+  ```bash
+  ROOT=/home/sevenx/coding/agent-harness          # the main working tree (repo root)
+  HB=$ROOT/docs/studio/mvp1/_impl/frontend-handbook
+
+  # serve the repo-root handbook (NOT a /tmp or worktree copy)
+  python3 -m http.server 8902 --directory "$HB" >/tmp/handbook-serve.log 2>&1 &
+  cloudflared tunnel --url http://127.0.0.1:8902 >/tmp/handbook-tunnel.log 2>&1 &
+  ```
+
+  `http.server` reads `index.html` fresh per request, so **refresh = update the repo
+  root**: after a handbook PR merges, `git -C "$ROOT" pull` and the live URL shows it.
+  Keep exactly one such serve + tunnel; tear down any extra handbook tunnels you
+  started for review (`§3` isolation is for the app, not for spawning more exits).

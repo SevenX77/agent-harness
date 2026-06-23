@@ -224,7 +224,7 @@
       "module": "测试与模型探测",
       "func": "设计:官方卡点 Test 验证 endpoint 可连通——拉一遍模型目录(get-models),连通即验证通过,并给用户进度反馈而不是干等。",
       "action": "用户在官方卡点 `Test` 按钮。",
-      "fe_design": "官方卡点 Test → 前端起一个后端测试任务、按节奏轮询进度实时刷到卡上 → 任务拉到模型目录(get-models)即判 endpoint 验证通过、把 draft 历史已证实的能力回填进 model list(蓝标签,见 #30)。设计目标:官方与第三方走同一套测试入口 POST /endpoints/{id}/test + 批量探测,官/三只在「身份与 canonical 默认」上有别(§1.1 vs §1.2),测试路径同一套;官方因 endpoint 可控,只需 get-models 连通即可,不强制逐模型 probe。前端只负责触发 + 展示进度,批量探测策略归后端机制(mech_cred)。",
+      "fe_design": "官方卡点 Test → 前端起一个后端测试任务、按节奏轮询进度实时刷到卡上 → 任务拉到模型目录(get-models)即判 endpoint 验证通过。拉模型这步同时要吃 draft(历史探测知识库)的料:① 把 draft 里真探连通过的能力回填进 model list(出蓝见 #30);② get-models 拿不到清单(空 / 失败)时，用 draft 里该 provider 的已知模型补出清单(清单兜底);③ 批量探测前先查 draft 历史，已知通过的可跳 / 优先信，不全量盲测——拉云端知识库就是为了免重探。设计目标:官方与第三方走同一套测试入口 + 批量探测，官 / 三只在「身份与 canonical 默认」上有别(§1.1 vs §1.2);官方因 endpoint 可控，只需 get-models 连通即可，不强制逐模型 probe。前端只负责触发 + 展示进度，读 draft 回填 / 兜底 / 免盲测的策略归后端机制(mech_cred)。",
       "fe_modules": [
         {
           "name": "状态投影",
@@ -247,7 +247,7 @@
       ],
       "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "符合设计。2026-06-20:代码已落地(design-audit vs code 核实),状态回填。官/三测试入口已统一:POST /endpoints/{id}/test(llm.py:511)是唯一入口,旧的官方专属 POST /endpoints/{id}/test-jobs 路由及其 provider_kind!='official' 拒第三方门禁已删(路由表无 test-jobs/endpoint-test-jobs);官方因 endpoint 可控仅需 get-models 连通即验证(llm.py:580-584,不逐模型 probe)。前端 getProviderModels(api/llm.ts:1356-1362)去掉了 provider_kind 分叉与 testOfficialProviderModelsWithJob,官/三都 POST /llm/endpoints/{id}/test,按钮文案两类都是 'Test'(ProviderCard.tsx:1035)。",
+      "gap_brief": "符合设计。2026-06-20:代码已落地(design-audit vs code 核实),状态回填。官/三测试入口已统一:POST /endpoints/{id}/test(llm.py:511)是唯一入口,旧的官方专属 POST /endpoints/{id}/test-jobs 路由及其 provider_kind!='official' 拒第三方门禁已删(路由表无 test-jobs/endpoint-test-jobs);官方因 endpoint 可控仅需 get-models 连通即验证(llm.py:580-584,不逐模型 probe)。前端 getProviderModels(api/llm.ts:1356-1362)去掉了 provider_kind 分叉与 testOfficialProviderModelsWithJob,官/三都 POST /llm/endpoints/{id}/test,按钮文案两类都是 'Test'(ProviderCard.tsx:1035)。 补(2026-06-22 代码核实):上面「读 draft 回填已证实能力 / get-models 拿不到清单用 draft 补 / 批量探测前免盲测」这三件后端测试路径都没做——官方 test 路径(test_endpoint)get-models 成功后写的是本次实时能力、只追加观测证据，全程不读 draft;属未实现缺口，状态记在 mech_cred「后端实现状态」。",
       "impl_ref": "fn-24"
     },
     {
@@ -418,7 +418,7 @@
       "module": "状态投影",
       "func": "设计:把后端测试结果投影成 6 态状态标签,常驻 inline 显示在 key/URL 旁,三页颜色一致。",
       "action": "无显式动作(测试/加载后自动投影;含改 key 失效回退见 #21)。",
-      "fe_design": "前端把后端每条 route 的状态投影成 UI 标签,用 §4.2 的 6 态:🟢 ready=真测通、🔵 historical_ready=以前联通过(draft 回填)、⚪ untested=没测、🔴 failed=出错要修(配置缺口 ∪ 测试失败,reason 区分,红但不挡)、⚪+倒计时 cooling_down=熔断中、⚪+不可选 off=禁用。第三方顶层一个连通徽章(按参数指纹取缓存结果),官方每条 route 一个彩色 Tag(信后端权威)。结果除 toast 外必须常驻写在 key/Base URL 旁的状态位(inline,§1.4),鼠标无需追 toast。状态权威来自后端 6 态总结转的 DTO,前端只读渲染、不持第二份。",
+      "fe_design": "前端把后端每条 route 的状态投影成 UI 标签，用 §4.2 的 6 态:🟢 ready=刚真测通过、🔵 historical_ready=知识库有真探连通历史、当前非绿(只被 get-models 清单看到过不算，那是灰)、⚪ untested=没真探过(含只被清单看到过)、🔴 failed=出错要修(配置缺口 ∪ 测试失败，reason 区分，红但不挡)、⚪+倒计时 cooling_down=熔断中、⚪+不可选 off=禁用。红线:绿 = 刚真探通过;蓝 = 知识库有真探历史但当前非绿;灰 = 只被清单看到、没真探历史。「看到 ≠ 连通过」，观测绝不出蓝。第三方顶层一个连通徽章(按参数指纹取缓存结果)，官方每条 route 一个彩色 Tag(信后端权威)。结果除 toast 外必须常驻写在 key/Base URL 旁的状态位(inline，§1.4)。状态权威来自后端 6 态总结转的 DTO，前端只读渲染、不持第二份。",
       "fe_modules": [
         {
           "name": "状态投影",
@@ -439,7 +439,7 @@
       ],
       "fe_status": "符合",
       "be_status": "已实现",
-      "gap_brief": "符合设计。2026-06-20:代码已落地(design-audit vs code 核实),状态回填。前端 6 态接通:ProviderCard.tsx:931-937 在 CardHeader 内常驻 inline 渲染 ProviderStateBadge(挨着 name/key),由 representativeProviderUiState(:338-361,读 model.ui_state)驱动。后端把每条 route 的 ui_state 内嵌进 registry DTO,经规范 gateway 投影器:llm.py:1719-1766 _project_route_ui_states 调 adapter.project_route_state(与 LLM Roles 同一投影器);蓝态 historical_ready 由 probe-verified 证据产出(state_projection.py:114-140),API Keys 测试路径正好追加该证据(evidence_type='probe'、trust_state='probe-verified',llm.py:2537-2538/2461-2462),蓝态对 API Keys 卡端到端点亮。6 态色表复用 settings/llm-roles/provider-state-badge.tsx,三页同色。注:probe_import_draft(llm.py:929-933)仍是桩,但那是 import-draft 特性路径、非本原子的 API Keys 测试路径,不影响 API Keys 卡蓝态。",
+      "gap_brief": "符合设计。2026-06-20:代码已落地(design-audit vs code 核实),状态回填。前端 6 态接通:ProviderCard.tsx:931-937 在 CardHeader 内常驻 inline 渲染 ProviderStateBadge(挨着 name/key),由 representativeProviderUiState(:338-361,读 model.ui_state)驱动。后端把每条 route 的 ui_state 内嵌进 registry DTO,经规范 gateway 投影器:llm.py:1719-1766 _project_route_ui_states 调 adapter.project_route_state(与 LLM Roles 同一投影器);蓝态 historical_ready 由 probe-verified 证据产出(state_projection.py:114-140),API Keys 测试路径正好追加该证据(evidence_type='probe'、trust_state='probe-verified',llm.py:2537-2538/2461-2462),蓝态对 API Keys 卡端到端点亮。6 态色表复用 settings/llm-roles/provider-state-badge.tsx,三页同色。注:probe_import_draft(llm.py:929-933)仍是桩,但那是 import-draft 特性路径、非本原子的 API Keys 测试路径,不影响 API Keys 卡蓝态。 补(2026-06-22):蓝态口径要收回——有一处改动把 get-models 观测(provider-list-observed)也算成蓝，按设计只有真探连通(probe-verified)历史才出蓝、只被清单看到要停留灰，这处要回退。详见 mech_cred「后端实现状态」。",
       "impl_ref": "fn-30"
     },
     {

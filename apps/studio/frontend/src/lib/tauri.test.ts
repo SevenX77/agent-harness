@@ -8,7 +8,6 @@ import {
   clearWorkspaceCheckpoint,
   createSkillWorkspace,
   deleteWorkspacePath,
-  openInCursor,
   openSkillWorkspace,
   readWorkspaceFile,
   restoreWorkspaceFile,
@@ -121,16 +120,14 @@ describe('selectSkillDirectory', () => {
 })
 
 describe('desktop shell helpers', () => {
-  it('invokes shell and reveal commands when only the sidecar is degraded', async () => {
+  it('invokes the reveal command when only the sidecar is degraded', async () => {
     vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
     await markRuntimeDegraded()
     mockInvoke.mockResolvedValue(undefined)
 
-    await expect(openInCursor('/tmp/workspace')).resolves.toBeUndefined()
     await expect(revealInFileManager('/tmp/workspace')).resolves.toBeUndefined()
 
-    expect(mockInvoke).toHaveBeenNthCalledWith(1, 'open_in_cursor', { path: '/tmp/workspace' })
-    expect(mockInvoke).toHaveBeenNthCalledWith(2, 'reveal_in_file_manager', {
+    expect(mockInvoke).toHaveBeenCalledWith('reveal_in_file_manager', {
       path: '/tmp/workspace',
     })
     expect(toast.error).not.toHaveBeenCalled()

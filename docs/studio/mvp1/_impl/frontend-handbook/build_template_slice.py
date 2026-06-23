@@ -641,15 +641,25 @@ def render_tests(im, ns, label, n_atoms, apfx=""):
             f'<a class="xlink" href="#{apfx}atom-{atoms[0]}">设计页 #{atoms[0]} · 看这条的设计意图 →</a>'
             if atoms else ""
         )
+        verify_tag = badge("⚠ 无真机实测", "a") if na else ""
         items += card(code(t.get("covers", "")), [
             ("对应设计", design_link),
             ("① 静态测试 (RED→GREEN)", duty_ol(t.get("layer1", []))),
             ("② e2e 真实测试", duty_ol(t.get("layer2", []))),
             (label_row, shots),
-        ], tag=fe_badge(t.get("fe_status", "")), anchor=anchor, mono=False)
+        ], tag=fe_badge(t.get("fe_status", "")) + verify_tag, anchor=anchor, mono=False)
     cov = "".join(f'<span class="cov-chip">#{a}</span>' for a in covered)
+    na_n = sum(1 for t in tests if (t.get("shot_na") or "").strip())
+    na_note = (
+        f'<div class="callout amber">其中 <b>{na_n} 项</b>标 <b>⚠ 无真机实测</b>：'
+        f'它们是<b>系统级 / 瞬态行为</b>（弹系统目录选择器、跳系统文件管理器、亚百毫秒一闪的加载骨架、'
+        f'需注入故障的 fallback、冷启动横幅）——headless 虚拟显示器驱动不了、截不到稳定帧，'
+        f'只能由<b>自动化单测 / 组件测试 + 读码</b>覆盖（卡内已注明替代验证），<b>没有真机端到端截图为证</b>。'
+        f'故本页状态点标<b>琥珀（部分实测）</b>，不是全绿。</div>'
+    ) if na_n else ""
     content = (
         f'<div class="callout"><b>覆盖 {len(covered)} / {n_atoms}</b>：本页的设计原子里有 {len(covered)} 个配了两层测试（每张卡标题 = 它覆盖的原子）。「有测试」≠「已通过」，通过以真跑结果为准。{cov}</div>'
+        + na_note
         + items
     )
     return content
@@ -1230,10 +1240,30 @@ def main():
             return "bad"
         return "partial"
 
+    def _test_roll(tests):
+        # 测试页 = 「真机实测完整性」：偏差/未实施=红；标 shot_na（系统级/瞬态，无法真机端到端、
+        # 只有自动化单测+读码覆盖）=黄（部分实测）；符合且可真机实测=绿。混合→黄，全黄/全绿各取其色。
+        lv = []
+        for t in tests:
+            fs = (t.get("fe_status") or "").strip()
+            if fs in ("偏差", "未实施"):
+                lv.append("bad")
+            elif (t.get("shot_na") or "").strip():
+                lv.append("partial")
+            elif fs == "符合":
+                lv.append("ok")
+        if not lv:
+            return "none"
+        if all(x == "ok" for x in lv):
+            return "ok"
+        if all(x == "bad" for x in lv):
+            return "bad"
+        return "partial"
+
     def _page_status_map(full):
-        # 设计页 N.i = 该 surface 全功能 fe_status；实施/测试页 = 全节点 fe_status；
-        # 契约页 = 全功能 be_status（后端实现状态）；复用模块 = 全节点 fe_status（前端实现状态）。
-        # 契约页 ↔ 复用模块页 对称：一个显示「后端那一半建好没」，一个显示「前端模块建好没」。
+        # 设计页 N.i = 该 surface 全功能 fe_status；实施页 = 全节点 fe_status（前端实现状态）；
+        # 测试页 = 全节点测试的真机实测完整性（见 _test_roll）；契约页 = 全功能 be_status（后端实现状态）；
+        # 复用模块 = 全节点 fe_status。契约页 ↔ 复用模块页 对称：后端那一半建好没 / 前端模块建好没。
         nc = full["nctx"]; p = nc["pages"]; stages = full["stages"]
         m = {}; all_fn = []; all_ts = []; all_be = []
         for s in stages:
@@ -1241,11 +1271,11 @@ def main():
             fns = im.get("functions", []); tss = im.get("tests", [])
             m[s["design"]["page_id"]] = _rollup([f.get("fe_status", "") for f in fns], {"符合"}, {"偏差", "未实施"})
             all_fn += [f.get("fe_status", "") for f in fns]
-            all_ts += [t.get("fe_status", "") for t in tss]
+            all_ts += tss
             all_be += [f.get("be_status", "") for f in fns]
         fe_roll = _rollup(all_fn, {"符合"}, {"偏差", "未实施"})
         m[p["impl"]] = fe_roll
-        m[p["tests"]] = _rollup(all_ts, {"符合"}, {"偏差", "未实施"})
+        m[p["tests"]] = _test_roll(all_ts)
         m[p["contract"]] = _rollup(all_be, {"已实现"}, {"契约问题"})
         # 复用模块 = 本节点可复用前端模块是否实现并符合设计（= 全节点前端 rollup）。
         # 它们是真实功能代码、登记表「定义在哪」字段指向源码文件，缺了对应界面就渲染不出，

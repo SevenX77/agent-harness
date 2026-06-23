@@ -35,8 +35,11 @@ from app.core.adapters.gateway import (
     VerifiedProfile,
     build_runtime_setting_descriptors,
     canonicalize_model,
+    known_model_ids_for_endpoint,
     lint_role_routes,
     normalize_route_capabilities,
+    probe_priority,
+    promotable_route_update,
     select_verified_profile,
 )
 from app.core.adapters.gateway import (
@@ -4348,10 +4351,20 @@ def _third_party_probe_model_ids(
     exposes no list API we fall back to the doc-maintained notable ids for its
     probe backend so an unlistable-but-generating endpoint can still verify.
     """
+    library = load_evidence_library()
     candidates = list(discovered_model_ids)
     if not candidates:
+        candidates = known_model_ids_for_endpoint(library, endpoint.endpoint_id)
+    if not candidates:
         candidates = notable_model_ids(_endpoint_probe_backend(endpoint))
-    return _requested_model_ids(candidates)[:_THIRD_PARTY_PROBE_MODEL_LIMIT]
+    prioritized = probe_priority(
+        library,
+        endpoint.endpoint_id,
+        _requested_model_ids(candidates),
+    )
+    if not prioritized and candidates:
+        prioritized = _requested_model_ids(candidates)
+    return prioritized[:_THIRD_PARTY_PROBE_MODEL_LIMIT]
 
 
 async def _detect_third_party_protocol(
@@ -4641,6 +4654,7 @@ def _upsert_discovered_routes(
 ) -> tuple[LLMCredentialsFile, dict[str, str]]:
     routes = dict(credentials.provider_routes)
     route_ids_by_model: dict[str, str] = {}
+    library = load_evidence_library()
     for model_id in model_ids:
         route_id = _route_id(endpoint.endpoint_id, model_id, routes)
         route_ids_by_model[model_id] = route_id
@@ -4648,7 +4662,7 @@ def _upsert_discovered_routes(
         status: Literal["verified", "unverified_manual"] = "verified" if verified else "unverified_manual"
         capability_source: Literal["api_list", "probed_verified"] = "probed_verified" if verified else "api_list"
         if existing is None:
-            routes[route_id] = _provider_route(
+            route = _provider_route(
                 endpoint=endpoint,
                 model_id=model_id,
                 status=status,
@@ -4657,6 +4671,7 @@ def _upsert_discovered_routes(
                 probe_attempts=(probe_attempts_by_model or {}).get(model_id, []),
                 raw_capabilities=(raw_capabilities_by_model or {}).get(model_id, {}),
             )
+            routes[route_id] = _apply_promotable_route_update(route, library)
             continue
         updates: dict[str, Any] = {}
         if verified:
@@ -4703,7 +4718,8 @@ def _upsert_discovered_routes(
             }
         if verified_profiles_by_model and model_id in verified_profiles_by_model:
             updates["verified_profiles"] = verified_profiles_by_model[model_id]
-        routes[route_id] = existing.model_copy(update=updates) if updates else existing
+        route = existing.model_copy(update=updates) if updates else existing
+        routes[route_id] = _apply_promotable_route_update(route, library)
     if replace_endpoint_routes:
         discovered_model_ids = set(model_ids)
         routes = {
@@ -4712,6 +4728,35 @@ def _upsert_discovered_routes(
             if route.endpoint_id != endpoint.endpoint_id or route.provider_model_id in discovered_model_ids
         }
     return credentials.model_copy(update={"provider_routes": routes}), route_ids_by_model
+
+
+def _apply_promotable_route_update(
+    route: ProviderRoute,
+    library: ProviderImportDraft,
+) -> ProviderRoute:
+    update = promotable_route_update(library, route)
+    if not update.capabilities and not update.verified_profiles:
+        return route
+    profiles = list(route.verified_profiles)
+    profile_keys = {
+        (profile.method_id, profile.request_mapper_id)
+        for profile in profiles
+    }
+    for profile in update.verified_profiles:
+        key = (profile.method_id, profile.request_mapper_id)
+        if key in profile_keys:
+            continue
+        profiles.append(profile)
+        profile_keys.add(key)
+    return route.model_copy(
+        update={
+            "capabilities": {
+                **route.capabilities,
+                **update.capabilities,
+            },
+            "verified_profiles": profiles,
+        }
+    )
 
 
 def _provider_route(

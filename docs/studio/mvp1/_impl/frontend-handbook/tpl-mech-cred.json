@@ -634,29 +634,29 @@
     {
       "item": "测试时读 draft 回填 / 清单兜底 / 免盲测",
       "d12": "D6.5",
-      "status": "bad",
-      "note": "缺口:官方 / 三方测试路径都不读 draft——① 不回填 draft 已证实能力(写的是本次 get-models 实时能力);② get-models 拿不到清单时不从 draft 补清单、直接判「无模型」;③ 批量探测前不查 draft 历史、仍全量盲测。拉云端知识库「免重探」的意义没兑现。← #24 / #25 的这层设计意图尚未落地。",
+      "status": "ok",
+      "note": "已落地(三条子能力全做 + TDD 测试)。gateway 侧新增三个纯函数 known_verified_capabilities / known_model_ids_for_endpoint / probe_priority(import_draft_store.py,无 IO);backend 侧在 _upsert_discovered_routes 回填 draft 已证实能力(子①)、_third_party_probe_model_ids 用 draft 已知模型补清单(子②)并按 probe_priority 跳过已 verified / 把已 failed 排后(子③免盲测)。注:子③有候选就绝不返回空(避免历史全验过的 endpoint 复测误判失败)。测试见 gateway test_import_draft_derivation.py + backend test_llm_registry_api.py。",
       "ref": "d6"
     },
     {
       "item": "云端知识库同步时机(启动 vs 进设置页)",
       "d12": "D6.5",
-      "status": "bad",
-      "note": "缺口:远端知识库同步只在用户「进设置页」时由前端触发，后端启动 lifespan 不跑。这种前置数据应在后端一启动就同步好，而不是等用户点进设置页才补。",
+      "status": "ok",
+      "note": "已落地(纯 backend 接线)。后端启动 lifespan(main.py)新增 _sync_remote_evidence_library_on_startup:仅当配置了远端源(load_remote_catalog_source_metadata 非空且 enabled)才跑一次,best-effort——同步失败只记 warning、绝不挡启动。复用已有 sync_remote_evidence_library + gateway merge_evidence_library 去重,不新写同步逻辑。测试见 backend test_main_remote_catalog_sync.py(断言启动触发一次同步 + 同步抛错时仍正常启动)。",
       "ref": "d6"
     },
     {
       "item": "蓝态数据来源口径(看到 ≠ 连通过)",
       "d12": "D6.1",
-      "status": "review",
-      "note": "要回退对齐:现有一处改动把 get-models 观测(provider-list-observed)也算成蓝。按设计蓝只认真探连通(probe-verified)历史，只被清单看到要停留灰。蓝的判定口径要收回到「真探历史」。",
+      "status": "ok",
+      "note": "口径已钉死 + 真机验证。state_projection 出蓝(historical_ready)只认 draft 里 evidence_type==probe 且 trust_state==probe-verified 的历史;get-models 观测写的是 provider-list-observed,永不出蓝、只停留灰(untested)。新增不变量回归测试(gateway test_productization_route_state_contracts.py + backend test_model_list_observation_keeps_registry_route_untested)锁住「观测不出蓝」。真机:dev-harness + Playwright 驱动真前端,官方卡确实渲染蓝色『Previously Connected』徽章(截图 apikeys-30-historical-blue.png)。",
       "ref": "d6"
     },
     {
       "item": "知识库证据 → 配置档案晋升规则",
       "d12": "D6.5",
-      "status": "review",
-      "note": "待明确 → 待落地:四条对应关系(回填能力 / 绿 / 蓝 / 灰)+ 清单兜底已在本页「知识库 ↔ 配置档案」定清楚，后端把知识库证据晋升进当前配置档案的写入尚未实现。",
+      "status": "ok",
+      "note": "已落地。gateway 新增纯函数 promotable_route_update(import_draft_store.py):从 draft 里 probe-verified 的记录算出该 route 应晋升的 capabilities + verified_profiles + evidence_refs;backend 在 _upsert_discovered_routes 对新建/已存 route 都调 _apply_promotable_route_update 写回。红线:只晋升能力 / 档案 / 证据引用,绝不改 route.status 假绿——状态仍由真探结果决定。测试见 backend test_endpoint_test_promotes_probe_verified_draft_capabilities_and_profiles(断言 capabilities 晋升 + verified_profiles 落盘 + ui_state==historical_ready 蓝态 + 持久化)。",
       "ref": "d6"
     }
   ],

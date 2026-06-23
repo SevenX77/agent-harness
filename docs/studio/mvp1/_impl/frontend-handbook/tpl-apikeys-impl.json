@@ -139,10 +139,10 @@
    "n": 30,
    "cap": "test-status-projection",
    "design_ref": "atom-30",
-   "current": "现状:偏差——API Keys 卡仍用旧 4 态枚举、缺蓝态、结果偏 toast。ProviderCard 的状态投影用 RouteStatus(llm.ts,verified/unverified_manual/disabled/failed/probe-verified)+ TestStatus(llm.ts),由 routeDisplayStatus(ProviderCard.tsx)/routeStatusTagVariant(ProviderCard.tsx)/routeStatusLabel(ProviderCard.tsx)渲染:有 probe-verified 这个 Tag 变体(ProviderCard.tsx)但没有完整 6 态、也不直接消费后端 6 态 ui_state DTO;第三方顶层一个 TestMessage 连通徽章(ProviderCard.tsx)、官方每条 route 一个彩色 Tag。对照:LLM Roles 侧已经在用完整 6 态——后端 ProviderUiState(llm.ts,ready/historical_ready/untested/cooling_down/failed/off)由 provider-state-badge.tsx、AvailableModelsSidebar.tsx、role-route-status.tsx、RoleTestResultPanel.tsx 渲染(含 historical_ready=『Previously Connected』蓝态、cooling_down 倒计时)。即 6 态组件前端已存在,只是 API Keys 这张卡没接上。蓝态端到端还点不亮的根因在后端:probe_import_draft(llm.py)是桩——docstring 明说『real agent probing is handled by a later worker』,只把 draft.status 改成 'probed' 就返回,不真探,所以没有 draft/probe 历史证据喂给 historical_ready。",
-   "gap": "差距:① 前端把 API Keys ProviderCard 的状态位从 RouteStatus 旧枚举迁到后端 6 态 ui_state DTO,渲染补齐蓝态(historical_ready)与 cooling_down,复用 LLM Roles 已有的 provider-state-badge.tsx 6 态色映射,保证三页颜色一致;结果除 toast 外必须常驻 inline 写在 key/Base URL 旁(§1.4)。② 蓝态要真正点亮还需后端把 probe_import_draft(llm.py)从桩改成真探、产出 draft 历史证据(evidence library→historical_ready 投影,后端实施手册 D6.5 的 probe evidence→historical_ready 已是 Gateway 契约,但 Studio 这条 draft 探测端点仍是桩)。前端第①步(接 6 态 DTO + inline 常驻)可在后端 registry 内嵌 ui_state 就绪后先做,蓝态会先表现为『有证据才亮』;第②步桩转真探归后端。 ③ 蓝态口径要收回到「真探历史」:现有一处改动把 get-models 观测(provider-list-observed)也算成蓝，按设计观测只能出灰、绝不出蓝(看到 ≠ 连通过)，这处要回退。④ 蓝态的真探历史不止来自本地 probe，也来自云端知识库已带的 probe-verified 记录——所以即便本地 probe_import_draft 仍是桩，只要云端知识库同步进来、且口径正确，官方卡也能凭历史出蓝。",
+   "current": "现状:已接 6 态 + 蓝态可点亮(本轮后端补齐后端到端打通)。前端半——ProviderCard(ProviderCard.tsx)已从旧 RouteStatus 枚举迁到后端 6 态:representativeProviderUiState(ProviderCard.tsx)取 route.ui_state,渲染复用 LLM Roles 同一套 provider-state-badge.tsx 六态色映射(ready 绿 / historical_ready 蓝『Previously Connected』/ untested 灰 / failed 红 / cooling_down 灰+倒计时 / off 灰禁用),三页颜色一致(FE 半见 commit 5d7413cd)。蓝态的证据来源——本轮后端 draft 知识库生命周期补齐后,云端知识库里 probe-verified 历史经启动同步(mech_cred『后端实现状态』gap②)进 draft、并经晋升规则(gap④)写回 route,投影即出蓝;口径已收回真探历史(gap③,观测 provider-list-observed 永不出蓝)。真机验证:dev-harness + Playwright 驱动真前端,官方卡确实渲染蓝色『Previously Connected』徽章(本页实测条 #30 截图 apikeys-30-historical-blue.png)。注:本地 probe_import_draft(llm.py)仍是桩(不在本地真探),但蓝态不依赖它——云端 probe-verified 历史即可点亮。",
+   "gap": "差距(已基本收口):前端 6 态迁移 + 蓝态/cooling_down 渲染 + 结果常驻 inline(§1.4)已落(FE 半,commit 5d7413cd);后端蓝态证据链——测试路径读 draft、云端知识库启动同步、蓝态口径收回真探历史、知识库证据→配置档案晋升——本轮全部补齐(见 mech_cred『后端实现状态』对应四项 = ok)。仅剩一项不阻塞:本地 draft 探测端点 probe_import_draft(llm.py)仍是桩、不在本地真探,蓝态目前靠云端 probe-verified 历史点亮;本地真探出证据归后端后续 worker。",
    "fe_status": "符合",
-   "be_dep": "契约要先改 / 部分等后端。GET /registry 需在 endpoint/route 上内嵌 6 态 ui_state(后端实施手册 D6 Gateway 六态投影 ready/historical_ready/untested/failed/cooling_down/off 已收口=ok,但需确认已落到 API Keys 走的 registry DTO);蓝态点亮还需 probe_import_draft(llm.py)桩转真探产出历史证据。投影本身不发额外请求。 另:蓝态判定口径需收回到真探连通(probe-verified)历史，观测不得出蓝(回退点见 mech_cred「后端实现状态」)。",
+   "be_dep": "契约已就绪 + 蓝态证据链已补。GET /registry 在 endpoint/route 上内嵌 6 态 ui_state(后端实施手册 D6 Gateway 六态投影已收口=ok,API Keys 走的 registry DTO 已确认内嵌)。蓝态点亮的后端证据链(读 draft / 启动同步云端知识库 / 口径收回真探连通 probe-verified / 证据→配置档案晋升)本轮补齐;观测(provider-list-observed)不得出蓝的口径已钉死并加回归测试。本地 probe_import_draft 真探出证据属后续 worker,蓝态已可经云端历史点亮、不卡此项。",
    "fe_resync": "apikeys 后端+前端齐(2026-06-20)",
    "be_status": "契约问题"
   },
@@ -204,7 +204,7 @@
    "what": "后端 · draft 知识库生命周期补齐(本轮新增):① 测试路径读 draft——回填已证实能力、get-models 拿不到清单用 draft 补、批量探测前免盲测;② 云端知识库同步从「进设置页」移到后端启动 lifespan;③ 蓝态判定口径收回到真探连通(probe-verified)历史，回退「观测也算蓝」;④ 知识库证据 → 配置档案晋升规则落地。",
    "depends_on": "纯后端(gateway / Studio 后端);前端 6 态投影就绪后即可受益，无需前端再改判定。",
    "why": "兑现拉云端知识库「免重探」的意义，并把蓝 / 灰红线钉死，防「看到 = 蓝」误判。",
-   "block": "等后端"
+   "block": "已交付 · 本 PR(draft 知识库生命周期补齐)"
   }
  ],
  "tests": [
@@ -499,7 +499,13 @@
     "与 LLM Roles 页并排比色。",
     "后端 draft 真探出证据后看蓝态。"
    ],
-   "fe_resync": "覆盖项已全绿(2026-06-20)"
+   "fe_resync": "覆盖项已全绿(2026-06-20)",
+   "screenshots": [
+    {
+     "file": "apikeys-30-historical-blue.png",
+     "caption": "真机(dev-harness + Playwright,mock GET /registry 回 ui_state=historical_ready):官方卡 OpenAI Official 渲染蓝色『Previously Connected』徽章(History 图标),下方 Available Routes 列 gpt-5。证明后端蓝态投影经前端 6 态徽章真渲染成蓝。看到≠连通过——此处蓝来自 draft 的 probe-verified 真探历史,不是 get-models 观测。"
+    }
+   ]
   },
   {
    "covers": "#31 registry-restore",

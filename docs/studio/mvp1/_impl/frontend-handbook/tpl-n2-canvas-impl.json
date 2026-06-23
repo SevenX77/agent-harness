@@ -117,8 +117,8 @@
       "n": 13,
       "cap": "subgraph-inline-preview",
       "design_ref": "n2-atom-13",
-      "current": "现状：符合（2026-06-23 实现 + 真机验证）。点子图节点展开 toggle → 按绝对 path 调 getChildGraphTopology 拉真子拓扑 → buildSubgraphExpansion（新增纯构建函数，subgraph-expansion.ts）在 expand 节点旁靠右起虚线容器（subgraphGroup 节点，SubgraphGroupNode.tsx，动态 group bbox），容器内用主画布同款 getAutoLayoutedElements（dagre TB）布局 + React Flow node/edge 渲染子图真实 phase（真节点带 AGENT/LOGIC 种类、只读），子图内部 depends_on 连真边，父图依赖边以虚线 bridge 接驳到子图首（entry）/末（terminal）节点；loading/error/loaded 三态。GraphCanvas 把 overlay 叠在受控 displayNodes 之上（不进 useNodesState），并在 click/drag/drill/edge-menu 处守 isSubgraphPreviewId 跳过 __subpreview__ 预览 id。旧 SubgraphInline name+kind 行列表组件已删。",
-      "gap": "无——已闭合。画布级子拓扑展开（虚线容器 + 真 React Flow 子节点/边 + 父图依赖 bridge 接驳）已落地并真机验证。修复：overlay 预览节点不在 useNodesState 内、其量尺 change 被 onNodesChange 丢弃 → 无显式 width/height 会一直 visibility:hidden（容器尺寸对但内部空）；已给预览子节点显式 width/height 闭合。",
+      "current": "现状：符合（2026-06-23 实现 + 真机验证，含 PM 三处订正）。子图节点右缘垂直居中出 +／− toggle（SkillNode 据 data.onToggleSubgraph 是否接线判出不出；build-nodes 对 mode==='subgraph' 的节点一律接线，故所有子图节点都有，预览子节点的回调被剥离故不出）。点开 → 按 path 调 getChildGraphTopology 拉真子拓扑 → buildSubgraphExpansion（subgraph-expansion.ts）用与主画布同款递归三件套构建子图：buildNodesFromTopology（含子图自己的 __global_input__/__global_output__ 节点）+ buildEdges（contextEdge，带中点圆点）+ getAutoLayoutedElements（dagre TB），再整体偏移进 expand 节点旁靠右的虚线容器（subgraphGroup，SubgraphGroupNode.tsx，动态 group bbox），所有 id 命名空间化为 __subpreview__、只读、带显式 width/height；父图依赖以虚线 bridge 接驳 expand↔子图 INPUT/OUTPUT。未声明 path（normalize 回 null）→ recovery(error) 容器；loading/error/loaded 三态。GraphCanvas 把 overlay 叠在受控 displayNodes 之上（不进 useNodesState），并在 click/drag/drill/edge-menu 处守 isSubgraphPreviewId 跳过预览 id。配 #199：后端 read_subgraph_path 把相对子图 path 解析成绝对回传，故相对 path 子图前端也判 resolved。旧 SubgraphInline 行列表 + 旧只铺 phase 的局部 layoutChild builder 已删。",
+      "gap": "无——已闭合。递归渲染（子图自己的 in/out + contextEdge 圆点 + dagre 布局 + bridge 接驳 IN/OUT）+ 右缘居中 toggle + 对所有子图节点出 toggle（未解析→recovery）三处订正已落地并真机验证。修复：overlay 预览节点不在 useNodesState 内、量尺 change 被 onNodesChange 丢弃 → 无显式 width/height 会一直 visibility:hidden；已给预览子节点显式 width/height 闭合。",
       "fe_status": "符合",
       "be_dep": "已就绪并在用。GET child-graph-topology 已实现，按绝对子图 path 返回真子拓扑（phase 列表 + graph_topology）。D8.4 子图 path 收口中，拓扑读已通。"
     },
@@ -446,23 +446,28 @@
         13
       ],
       "shots": [
-        "展开子图节点，在节点旁靠右起虚线容器，容器内用真 React Flow 节点+边渲染子图真实子拓扑（非 mock 行列表）",
-        "子图内部依赖连真边、父图依赖边以虚线 bridge 接驳到子图首/末节点；再折叠回到干净父图"
+        "展开已解析子图节点（右缘居中 + 触发），节点旁靠右起虚线容器，容器内用主画布同款递归算法渲染子图自己的 Input/Output + 真 phase + 带中点圆点的 contextEdge 连接边",
+        "父图依赖以虚线 bridge 接驳 expand↔子图 INPUT/OUTPUT；未声明 path 的子图节点点 + 展开成 recovery 提示；再折叠回到干净父图"
       ],
       "fe_status": "符合",
       "layer1": [
-        "mock getChildGraphTopology 回真子拓扑 → 断言 buildSubgraphExpansion 出 subgraphGroup 容器节点 + 每个子 phase 一个真节点（type=skill、isSubgraphPreview、命名空间 id）。",
-        "断言子预览节点带显式 width/height（overlay 不进 useNodesState、量尺 change 被 onNodesChange 丢，无显式尺寸会一直 visibility:hidden、容器空）。",
-        "断言子图内部 depends_on 连 intra 真边、父图 expand 节点 bridge 接驳子图首（entry）/末（terminal）。",
-        "断言不渲染子图未声明的 phase（防编造）、loading/error/loaded 三态分别呈现。"
+        "mock getChildGraphTopology 回真子拓扑 → 断言 buildSubgraphExpansion 出 subgraphGroup 容器 + 子图自己的 globalInput/globalOutput 节点（__subpreview__::<parent>::__global_input__/__global_output__）+ 每个子 phase 一个真节点（type=skill、isSubgraphPreview、命名空间 id）。",
+        "断言子图内部连接边是 contextEdge（带中点圆点，与主画布同款）：input→plan→write→output；bridge 接驳 expand↔子图 INPUT/OUTPUT。",
+        "断言所有预览节点带显式 width/height（overlay 不进 useNodesState、量尺 change 被丢，无显式尺寸会一直 visibility:hidden）。",
+        "断言 build-nodes 对所有 mode==='subgraph' 节点接线 onToggleSubgraph（含相对/未解析 path）；SkillNode 据回调出右缘 toggle、预览子节点回调被剥离故不出。",
+        "断言 loading/error(recovery)/loaded 三态分别呈现，error 态携带 recovery 文案、无子节点。"
       ],
       "layer2": [
-        "真跑：展开一个真子图节点（sd-v3-n4 的 global_synthesis），看节点旁起虚线容器、容器内渲染出 global_analysis/retroactive/scene_assembly/export 四真节点+真依赖边，与子图真实 GRAPH.md 一致；再点折叠回到干净父图。"
+        "真跑（真 #199 后端）：展开 n4-sg-probe 的 delegate（相对 path registry/echoer，经 #199 解析为绝对、Subgraph Library 由红 Missing path 转绿勾）→ 节点旁起虚线容器、容器内渲染子图自己的 Input/emit/Output + 带圆点的 contextEdge 连接边，与 echoer 真实 GRAPH.md 一致；右缘 + 居中；再折叠回干净父图。"
       ],
       "screenshots": [
         {
           "file": "n2-13-subgraph-inline.png",
-          "caption": "展开 sd-v3-n4 的 global_synthesis 子图节点：节点旁靠右起虚线容器，容器内用真 React Flow 节点渲染子图真实子拓扑（global_analysis/retroactive 为 AGENT、scene_assembly/export 为 LOGIC）+ 真依赖边"
+          "caption": "展开 n4-sg-probe 的 delegate 子图（相对 path 经 #199 解析）：虚线容器内用主画布同款递归算法渲染子图自己的 Input/Output 节点 + emit 真 phase + 带中点圆点的 contextEdge 连接边"
+        },
+        {
+          "file": "n2-13b-subgraph-toggle.png",
+          "caption": "子图节点 delegate：右缘垂直居中的展开 + 号；左侧 Subgraph Library 经 #199 把相对 path registry/echoer 解析为绝对、由红『Missing path』转绿勾"
         }
       ]
     },

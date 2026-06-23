@@ -499,21 +499,32 @@ describe('GraphCanvas', () => {
   })
 
   it('renders subgraph expand icon button when collapsed', () => {
-    const html = skillNodeHtml({ subgraphPath: '/abs/subgraph', isExpanded: false })
+    const html = skillNodeHtml({ subgraphPath: '/abs/subgraph', isExpanded: false, onToggleSubgraph: () => {} })
 
     expect(html).toContain('aria-label="Expand subgraph"')
     expect(html).toContain('lucide-plus')
   })
 
   it('renders subgraph collapse icon button when expanded', () => {
-    const html = skillNodeHtml({ subgraphPath: '/abs/subgraph', isExpanded: true })
+    const html = skillNodeHtml({ subgraphPath: '/abs/subgraph', isExpanded: true, onToggleSubgraph: () => {} })
 
     expect(html).toContain('aria-label="Collapse subgraph"')
     expect(html).toContain('lucide-minus')
   })
 
-  it('does not render subgraph controls for non-absolute child references', () => {
-    const html = skillNodeHtml({ mode: 'subgraph', subgraphPath: 'legacy.registry.child', isExpanded: false })
+  it('renders the expand toggle even for an unresolved subgraph node (so its recovery state can be opened)', () => {
+    // Point 3 (PM 2026-06-23): the toggle gate is the wired callback, NOT a
+    // resolved absolute path. build-nodes wires onToggleSubgraph for every
+    // SUBGRAPH-kind node, so even a non-absolute reference shows the "+".
+    const html = skillNodeHtml({ mode: 'subgraph', subgraphPath: 'legacy.registry.child', isExpanded: false, onToggleSubgraph: () => {} })
+
+    expect(html).toContain('aria-label="Expand subgraph"')
+  })
+
+  it('does not render the expand toggle on a read-only preview child (no toggle callback)', () => {
+    // Preview children inside an expanded container have their callback stripped,
+    // so they never offer a re-expand control.
+    const html = skillNodeHtml({ mode: 'subgraph', subgraphPath: '/abs/child', isSubgraphPreview: true })
 
     expect(html).not.toContain('aria-label="Expand subgraph"')
     expect(html).not.toContain('aria-label="Collapse subgraph"')

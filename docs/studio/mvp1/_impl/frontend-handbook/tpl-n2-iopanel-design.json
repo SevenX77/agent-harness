@@ -63,7 +63,7 @@
       "module": "io 字段编辑与导入",
       "func": "设计:input 面板改名为 i/o 面板,逐节点都能设 io(输入输出)+ artifact,而不是只有整图级(graph-level)io(PM 锁定 target-design)。",
       "action": "用户在任一节点上打开 i/o 面板,设该节点的 io 输入输出 + output artifact。",
-      "fe_design": "现状:面板已实现 graph-level io.inputs 和 io.outputs 的字段级编辑——IoSchemaFieldsPanel(逐字段编辑器、对 inputs/outputs 两侧都生效)+ IoFieldRow/IoFieldAddRow(增删/改字段)+ OutputArtifactPathPanel(output artifact 路径)。不是只有『起点 input + artifact』,output 字段编辑也有。真正缺口是『逐节点 i/o』:现状是整图级 io 编辑,还没做到选中任一节点都挂它自己的 i/o 面板编辑该节点的 io.inputs/outputs + artifact。目标:从 graph-level 扩成 per-node。",
+      "fe_design": "现状:面板已是『逐节点 i/o』(per-node),非仅整图级(graph-level)。字段级编辑——IoSchemaFieldsPanel(逐字段编辑器、对 inputs/outputs 两侧都生效)+ IoFieldRow/IoFieldAddRow(增删/改字段)+ OutputArtifactPathPanel(output artifact 路径);不是只有『起点 input + artifact』,output 字段编辑也有。per-node 收窄:resolveIoEditTarget(panels/io-target.ts:61-81)按画布选中节点把面板收窄到该 phase 自己的文件(phases/<id>/SKILL.md|LOGIC.md|SUBGRAPH.md),无选中/全局 io 节点才落 GRAPH.md;InputPanel.tsx:801 调 resolveIoEditTarget(selectedNode, skillDetail),整个面板读写该节点的 io.inputs/outputs + artifact。(2026-06-23 据代码核实,旧 fe_design『真正缺口是逐节点 i/o、现状整图级还没做到 per-node』已过时并订正——per-node 已端到端打通,详见 gap_brief。)",
       "fe_modules": [
         {
           "name": "io schema 推断"

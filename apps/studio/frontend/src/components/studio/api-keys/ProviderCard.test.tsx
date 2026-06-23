@@ -113,12 +113,37 @@ describe("ProviderCard API key masking", () => {
   })
 
   it("masks via the mask-input class only while hidden; muted text only while hidden", () => {
-    expect(apiKeyInputClassName(false)).toContain("mask-input")
-    expect(apiKeyInputClassName(true)).not.toContain("mask-input")
-    expect(apiKeyInputClassName(false)).toContain("text-muted-foreground")
-    expect(apiKeyInputClassName(false)).not.toContain("text-foreground")
-    expect(apiKeyInputClassName(true)).toContain("text-foreground")
-    expect(apiKeyInputClassName(true)).not.toContain("text-muted-foreground")
+    expect(apiKeyInputClassName(false, true)).toContain("mask-input")
+    expect(apiKeyInputClassName(true, true)).not.toContain("mask-input")
+    expect(apiKeyInputClassName(false, true)).toContain("text-muted-foreground")
+    expect(apiKeyInputClassName(false, true)).not.toContain("text-foreground")
+    expect(apiKeyInputClassName(true, true)).toContain("text-foreground")
+    expect(apiKeyInputClassName(true, true)).not.toContain("text-muted-foreground")
+  })
+
+  it("never masks an empty field, so the placeholder stays readable (not •••)", () => {
+    // -webkit-text-security masks placeholder text too; an empty official card
+    // must keep "Enter your X API Key" legible instead of rendering it as dots.
+    expect(apiKeyInputClassName(false, false)).not.toContain("mask-input")
+    expect(apiKeyInputClassName(true, false)).not.toContain("mask-input")
+  })
+
+  it("does not mask the placeholder of an empty official provider card", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({ id: "anthropic-official", name: "Anthropic Official", api_key: "" })}
+        persisted={null}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="official"
+      />,
+    )
+    // The only secret field on an empty official card has no value, so the
+    // whole card must contain no mask-input at all (placeholder stays readable).
+    expect(html).toContain('placeholder="Enter your Anthropic API Key"')
+    expect(html).not.toContain("mask-input")
   })
 })
 
@@ -763,6 +788,41 @@ describe("ProviderCard provider capabilities", () => {
     const tag = routeTagHtml(html, "gpt-5-probe-verified")
     expect(tag).toContain('data-variant="probe-verified"')
     expect(tag).toContain('data-route-status="probe-verified"')
+  })
+
+  it("renders a historical_ready route (backend 6-state ui_state) as the blue Previously Connected tag, not at the card title", () => {
+    // Real backend data for a historically probe-verified route this session:
+    // RouteStatus "unverified_manual" + ui_state "historical_ready". The blue
+    // must come from ui_state on the ROUTE tag (UI-spec §143), and must NOT be
+    // rolled up to a card-title badge (UI-spec §140).
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({ id: "openai-official", name: "OpenAI Official" })}
+        persisted={makePersisted({
+          id: "openai-official",
+          name: "OpenAI Official",
+          available_models: [
+            {
+              id: "gpt-5",
+              route_id: "openai-official:gpt-5",
+              status: "unverified_manual",
+              ui_state: "historical_ready",
+            },
+          ],
+        })}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="official"
+      />,
+    )
+
+    const tag = routeTagHtml(html, "gpt-5")
+    expect(tag).toContain('data-variant="probe-verified"')
+    expect(tag).toContain('data-route-ui-state="historical_ready"')
+    // §140: no connection-status badge in the official card title.
+    expect(html).not.toContain('data-provider-state-label="historical_ready"')
   })
 
   it("describes verified route profile capability types instead of profile counts", () => {

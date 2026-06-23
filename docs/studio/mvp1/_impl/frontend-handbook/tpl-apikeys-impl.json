@@ -139,7 +139,7 @@
    "n": 30,
    "cap": "test-status-projection",
    "design_ref": "atom-30",
-   "current": "现状:已接 6 态 + 蓝态可点亮(本轮后端补齐后端到端打通)。前端半——ProviderCard(ProviderCard.tsx)已从旧 RouteStatus 枚举迁到后端 6 态:representativeProviderUiState(ProviderCard.tsx)取 route.ui_state,渲染复用 LLM Roles 同一套 provider-state-badge.tsx 六态色映射(ready 绿 / historical_ready 蓝『Previously Connected』/ untested 灰 / failed 红 / cooling_down 灰+倒计时 / off 灰禁用),三页颜色一致(FE 半见 commit 5d7413cd)。蓝态的证据来源——本轮后端 draft 知识库生命周期补齐后,云端知识库里 probe-verified 历史经启动同步(mech_cred『后端实现状态』gap②)进 draft、并经晋升规则(gap④)写回 route,投影即出蓝;口径已收回真探历史(gap③,观测 provider-list-observed 永不出蓝)。真机验证:dev-harness + Playwright 驱动真前端,官方卡确实渲染蓝色『Previously Connected』徽章(本页实测条 #30 截图 apikeys-30-historical-blue.png)。注:本地 probe_import_draft(llm.py)仍是桩(不在本地真探),但蓝态不依赖它——云端 probe-verified 历史即可点亮。",
+   "current": "现状:已接 6 态(本轮后端 draft 生命周期补齐 + 前端蓝态层级订正后端到端打通)。前端半——ProviderCard(ProviderCard.tsx)已从旧 RouteStatus 枚举迁到后端 6 态。**蓝态层级(2026-06-23 订正,关键)**:蓝(historical_ready『Previously Connected』)落在**路由标签**上——routeTagVariantFromUiState 据 route.ui_state 给标签着色(§143);**provider 标题不挂 6 态徽章**(§140 官方),按下 Test 后官方卡的连通状态显示在『API Key』旁的**绿色 ✓**(可达),不是蓝。第三方卡标题仍挂 Connected/Ready/failed 徽章(§143)。六态色映射复用 LLM Roles 同一套 provider-state-badge.tsx(ready 绿 / historical_ready 蓝 / untested 灰 / failed 红 / cooling_down 灰+倒计时 / off 灰禁用)。蓝态证据来源:云端知识库 probe-verified 历史经启动同步(mech_cred gap②)进 draft、晋升规则(gap④)写回 route,投影出蓝;口径收回真探历史(gap③,观测 provider-list-observed 永不出蓝)。真机验证(真后端 :8795 + .env 真 key 按 Test):OpenAI/Anthropic/Gemini/OpenRouter 真 verified→provider 绿 ✓、路由灰 untested;WaveSpeed 两 base 真 401→红 failed + 真错误码;空卡 placeholder 可读(见 #30 四张真机图)。蓝态(historical_ready)路由标签渲染由单测守(本轮真探路由均 untested/ready,不强造蓝图)。注:本地 probe_import_draft(llm.py)仍是桩,蓝态靠云端 probe-verified 历史点亮、不依赖它。",
    "gap": "差距(已基本收口):前端 6 态迁移 + 蓝态/cooling_down 渲染 + 结果常驻 inline(§1.4)已落(FE 半,commit 5d7413cd);后端蓝态证据链——测试路径读 draft、云端知识库启动同步、蓝态口径收回真探历史、知识库证据→配置档案晋升——本轮全部补齐(见 mech_cred『后端实现状态』对应四项 = ok)。仅剩一项不阻塞:本地 draft 探测端点 probe_import_draft(llm.py)仍是桩、不在本地真探,蓝态目前靠云端 probe-verified 历史点亮;本地真探出证据归后端后续 worker。",
    "fe_status": "符合",
    "be_dep": "契约已就绪 + 蓝态证据链已补。GET /registry 在 endpoint/route 上内嵌 6 态 ui_state(后端实施手册 D6 Gateway 六态投影已收口=ok,API Keys 走的 registry DTO 已确认内嵌)。蓝态点亮的后端证据链(读 draft / 启动同步云端知识库 / 口径收回真探连通 probe-verified / 证据→配置档案晋升)本轮补齐;观测(provider-list-observed)不得出蓝的口径已钉死并加回归测试。本地 probe_import_draft 真探出证据属后续 worker,蓝态已可经云端历史点亮、不卡此项。",
@@ -499,11 +499,23 @@
     "与 LLM Roles 页并排比色。",
     "后端 draft 真探出证据后看蓝态。"
    ],
-   "fe_resync": "覆盖项已全绿(2026-06-20)",
+   "fe_resync": "覆盖项已全绿;2026-06-23 订正:蓝态层级修正——蓝(historical_ready)落在**路由标签**(§143,route.ui_state 驱动),不在 provider 标题;官方标题无 6 态徽章(§140),连通改由 key 行绿 ✓。前次误把蓝渲染在 provider 标题、配 mock 假数据的截图已撤。本轮真机图(真后端真探测)覆盖 verified(绿 ✓ + 灰路由)/ failed(红徽章 + 真错误码)/ 空卡 placeholder;蓝态(historical_ready)的路由标签渲染由 ProviderCard.test.tsx 单测守(真 historical 态需『上次真探过、本次端点未验证』的 draft 历史,本轮真探路由均 untested/ready,故不强造蓝图)。",
    "screenshots": [
     {
-     "file": "apikeys-30-historical-blue.png",
-     "caption": "真机(dev-harness + Playwright,mock GET /registry 回 ui_state=historical_ready):官方卡 OpenAI Official 渲染蓝色『Previously Connected』徽章(History 图标),下方 Available Routes 列 gpt-5。证明后端蓝态投影经前端 6 态徽章真渲染成蓝。看到≠连通过——此处蓝来自 draft 的 probe-verified 真探历史,不是 get-models 观测。"
+     "file": "apikeys-30-official-verified-real.png",
+     "caption": "真机(真后端 :8795 + 真 OPENAI_API_KEY 按 Test):OpenAI Official 卡——标题区**不挂连接徽章**(§140),连通状态落在『API Key』旁的**绿色 ✓**(可达图标);get-models 列出的 118 条路由标签**全为中性灰 untested**(看到≠连通过,绝不误亮蓝)。这是按下 Test 后官方卡的正确呈现:provider 绿、route 灰。"
+    },
+    {
+     "file": "apikeys-30-thirdparty-verified-real.png",
+     "caption": "真机(真后端 + 真 OpenRouter key,base https://openrouter.ai/api/v1):第三方卡 verified——标题区保留『Third-party』+ 绿『Connected』+ 绿『Ready』徽章(§143 第三方仍在标题挂态),API Key / Base URL 各带绿 ✓。与官方卡对比可见官/三呈现差异(官方标题无徽章、第三方有)。"
+    },
+    {
+     "file": "apikeys-30-thirdparty-failed-real.png",
+     "caption": "真机错误态实况(真后端 + WaveSpeed key,base https://llm.wavespeed.ai/v1):provider 真回 401,卡标题挂红『Test failed』徽章;真实错误码 `Invalid API key (wavespeed_error)` 在徽章 hover tooltip(原生 title)。两个 WaveSpeed base 都用同一 key 试过、均 401(api.wavespeed.ai/api/v3 回 `Endpoint test failed (error)`)。"
+    },
+    {
+     "file": "apikeys-30-empty-placeholder-real.png",
+     "caption": "真机(空卡):DeepSeek Official 未填 key——『API Key』输入框 placeholder『Enter your DeepSeek API Key』**清晰可读**,不再被 mask-input 涂成 •••(回归修复:mask 只在有值时施加)。空卡无绿 ✓。"
     }
    ]
   },

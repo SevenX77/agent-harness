@@ -649,7 +649,7 @@
       "item": "蓝态数据来源口径(看到 ≠ 连通过)",
       "d12": "D6.1",
       "status": "ok",
-      "note": "口径已钉死 + 真机验证。state_projection 出蓝(historical_ready)只认 draft 里 evidence_type==probe 且 trust_state==probe-verified 的历史;get-models 观测写的是 provider-list-observed,永不出蓝、只停留灰(untested)。新增不变量回归测试(gateway test_productization_route_state_contracts.py + backend test_model_list_observation_keeps_registry_route_untested)锁住「观测不出蓝」。真机:dev-harness + Playwright 驱动真前端,官方卡确实渲染蓝色『Previously Connected』徽章(截图 apikeys-30-historical-blue.png)。",
+      "note": "口径已钉死 + 不变量回归测试守。state_projection 出蓝(historical_ready)只认 draft 里 evidence_type==probe 且 trust_state==probe-verified 的历史;get-models 观测写的是 provider-list-observed,永不出蓝、只停留灰(untested)。新增不变量回归测试(gateway test_productization_route_state_contracts.py + backend test_model_list_observation_keeps_registry_route_untested)锁住「观测不出蓝」。2026-06-23 订正:蓝(historical_ready)渲染在**路由标签**(§143),不在 provider 标题——前次误把蓝渲染在 provider 标题、配 mock 假数据的截图已撤(见 apikeys #30 测试页订正说明)。蓝态路由标签渲染由 ProviderCard.test.tsx 单测守;本轮真机(真后端真探测)路由均 untested/ready,未强造蓝图。",
       "ref": "d6"
     },
     {

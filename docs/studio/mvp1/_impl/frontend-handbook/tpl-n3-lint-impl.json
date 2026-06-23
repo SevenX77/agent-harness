@@ -11,8 +11,8 @@
    "current": "现状:未实施(hook 已写但未接线)。useDebouncedLint(hooks/useDebouncedLint.ts:防抖 800ms 调 POST /skills/:id/lint、置 checking、结果落 passed/failed 并 publishLintStatus 写 sessionStorage + 派 lintStatusEvent 的 hook)代码完整,但全前端 grep 无任何组件调用 useDebouncedLint();只有 Workspace.tsx import 了它导出的 readLintStatus(读 sessionStorage 状态的函数)+ Workspace.test.tsx 里 mock。结果:hook 本体从不运行,readLintStatus 恒返回 idle,编辑期实时 lint 实际不发生。另外即便接线:hook POST 的 {markdown} 会被后端忽略——后端 /lint(lint_skill 只收 skill_id)lint 的是磁盘已持久化的 skill,不消费请求体。",
    "gap": "差距(两重):① 前端——把 useDebouncedLint 接到编辑器内容流(在渲染编辑器的组件里调用 useDebouncedLint(skillId, markdown)),让编辑→防抖→POST /lint→广播状态真正跑起来;② 后端 drift——changed-markdown lint 是已定设计(能力模块 compile-lint §3),前端 hook 已 POST {markdown},但后端 lint_skill 只收 skill_id、lint 磁盘 skill、忽略 body;修复方向是后端补齐接受 body markdown 对齐已定契约。前端接线属前端独立,后端补 body 属后端 drift 修复。",
    "fe_status": "符合",
-   "be_status": "契约问题",
-   "be_dep": "后端 drift(非待定)。endpoint 本体已就绪(POST /api/skills/:id/lint,routers/lint.py 的 lint_skill,返回 LintResult),但它只 lint 磁盘上已持久化的 skill(resolve_skill_dir)、忽略请求体——前端 hook 现 POST {markdown} 被忽略。设计已定『lint 发送 changed markdown』(能力模块 compile-lint §3),后端实现偏离=drift;修复方向是后端补齐接受 body markdown,对齐已定的 changed-markdown 契约。",
+   "be_status": "已实现",
+   "be_dep": "已就绪(2026-06-23 核验代码,原 drift 已闭合)。routers/lint.py 现判 body.markdown 非空 → lint_skill_changed_markdown(skill_id, markdown);services/skills.py:233 用改动后的内容物化临时 sandbox 再 lint,changed-markdown 契约(能力模块 compile-lint §3)已落地。原『后端 lint_skill 只收 skill_id、忽略请求体』drift 已修复——前端 hook 的 POST {markdown} 现被真正消费。",
    "fe_status_prev": "未实施",
    "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
   },
@@ -58,8 +58,8 @@
    "current": "现状:未实施。PropertiesPanel.tsx(properties/io 面板)的 props 列表完全不含 compileErrors,字段旁零编译错误投影——它只显示 frontmatter/roleTest 校验(经 role-test-status.ts、phase-frontmatter.ts)。",
    "gap": "差距:① 给 PropertiesPanel 增加接收当前选中节点错误的入参;② 渲染每个属性时按 error.field 把对应错误就近标到字段旁(标记 + tooltip 显 message);无 field 的错误退到节点级(#4)。受 drift 限制:engine 方向已定 ErrorPayload 的 field_path/source_path,但 Studio LintError 未采纳、无 field,字段级投影只能先消费有 field 的 CompileError,实时 lint 字段投影等 Studio 采纳 engine 定位轴(见 be_dep)。沿用现有字段渲染 + Tooltip 组件,复用目标投影映射模块。",
    "fe_status": "符合",
-   "be_status": "契约问题",
-   "be_dep": "后端 drift(等 Studio 采纳 engine 定位轴)。engine 方向已定:engine compile-rules baseline 的 ErrorPayload 带 field_path/source_path,mvp1-alignment G1 细化 source_span/phase_path。但 Studio LintError(models/errors.py、api/types.ts)未采纳,只有 file/line/column/error_code/phase_name(无 field_path);只有手动 Compile 的 CompileError 有 field。所以字段级投影只能先消费有 field 的 CompileError,实时 lint 字段投影要等 Studio LintError 采纳 engine field_path。无法定位时降级文件/节点级。",
+   "be_status": "已实现",
+   "be_dep": "已就绪(2026-06-23 核验代码,原 drift 已闭合)。后端 LintError(models/errors.py:33-34)与前端 LintError(api/types.ts:27-28)均已带 field_path / source_path,engine 定位轴已被 Studio 采纳。实时 lint 的字段级投影已真跑:field_path=tools 驱动 Properties 的 Tools 字段标记(真机实测见实测页 #5);无 field 的错误(如 model)降级到节点小标志。原『Studio LintError 未采纳 field_path、字段投影只能先消费 CompileError』drift 已修复。",
    "fe_resync": "batch6b:#4 修复 / #5 核实已满足(2026-06-20)"
   },
   {
@@ -117,6 +117,12 @@
     "编辑内容后约 800ms 动作条进入「编译中」,随后落 通过/失败",
     "清空内容后回到 idle(无残留错误)"
    ],
+   "screenshots": [
+    {
+     "file": "n3-lint-05-trigger-banner.png",
+     "caption": "真机(dev-harness 挂真 Workspace + page.route mock 引擎):编辑 phase 文件 → 防抖 800ms 触发实时 lint → 引擎判失败,编辑器顶部「Lint found errors」就近列出 Line 6 / Line 4 两条错误。空内容→idle、请求失败→failed+message 是动作条瞬态,由单测 useDebouncedLint.test.ts 端到端覆盖。"
+    }
+   ],
    "fe_status": "符合",
    "layer1": [
     "RED:当前无组件调用 useDebouncedLint → 断言『编辑触发 POST /lint』失败(hook 未接线)。",
@@ -140,6 +146,16 @@
     "出错节点上 AlertTriangle 小标志",
     "悬停节点小标志,tooltip 列出该节点逐条 field-line-message(非只计数)"
    ],
+   "screenshots": [
+    {
+     "file": "n3-lint-01-canvas-overview.png",
+     "caption": "真机:首屏 lint_result + manifest_errors 投影 → draft(AGENT)与 review(LOGIC)两个出错节点各挂 AlertTriangle ⚠1 红色小标志。"
+    },
+    {
+     "file": "n3-lint-02-node-badge.png",
+     "caption": "真机:悬停 draft 节点小标志,tooltip 逐条展开「model · L12 — Unknown model alias」(非只计数)。"
+    }
+   ],
    "fe_status": "符合",
    "layer1": [
     "渲染带 compileErrors 的节点,断言 AlertTriangle + 计数渲染(现状已过)。",
@@ -161,6 +177,12 @@
    "shots": [
     "properties 面板里出错字段旁出现错误标记 + tooltip"
    ],
+   "screenshots": [
+    {
+     "file": "n3-lint-03-properties-field.png",
+     "caption": "真机:选中 draft 节点,Properties 里出错的 Tools 字段标题旁出现 ⚠ 标记(实时 lint field_path=tools 就近投影到字段);model 错误无对应字段→降级到节点小标志。"
+    }
+   ],
    "fe_status": "符合",
    "layer1": [
     "RED:当前 PropertiesPanel 不接 compileErrors → 断言『字段旁有错误标记』失败(零投影)。",
@@ -180,6 +202,12 @@
    ],
    "shots": [
     "编辑器出错行出现 IDE 式行内红标,悬停看 message"
+   ],
+   "screenshots": [
+    {
+     "file": "n3-lint-04-editor-markers.png",
+     "caption": "真机:编辑器对应行做 IDE 式行内红波浪线(L4 model、L6 tools)+ 右侧 overview ruler 红标 + 顶部错误汇总(monaco.editor.setModelMarkers,owner studio-lint)。"
+    }
    ],
    "fe_status": "符合",
    "layer1": [

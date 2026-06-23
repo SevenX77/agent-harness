@@ -18,8 +18,8 @@
    "n": 8,
    "cap": "compile-drawer",
    "design_ref": "atom-8",
-   "current": "现状:偏差——用底部浮层而非 drawer。Workspace.tsx 在 currentCompileErrors.length>0 时渲染 CompileErrorPanel(同文件内组件):一个 absolute bottom 居中的浮层卡片,逐条列 file:line - field - message,但① 无复制按钮;② 不是点 Compile 才弹,而是只要有错误就自动浮现;③ 居中浮层会遮挡画布。",
-   "gap": "差距:新建 Compile drawer——编译出错时**自动弹出**的底部 drawer,列 compileErrors[skillId] 的 file:line-field-message,顶部加「复制」按钮把全部错误拼成可读文本复制,**只盖画布、不盖左右侧栏**(能力模块 COMPILE_LINT-1)。⚠ 不能直接套本地 ui/sheet.tsx:其 SheetOverlay / SheetContent 是 `fixed inset-0` 全 viewport,会盖住侧栏;要做画布作用域变体(可复用 Radix/Dialog 行为 + 本地设计 token,但 overlay/content 限定在画布容器内)。后端数据(CompileError[])已够、不动。",
+   "current": "现状:符合。Workspace.tsx 在 compileDrawerOpen && currentCompileErrors.length>0 时渲染 CompileErrorDrawer.tsx(画布作用域底部 drawer):编译失败(422)时 compileSkillById 置 compileDrawerOpen=true 自动弹出,逐条列 file:line - field - message(formatCompileErrorLine),顶部『Copy all errors』把全部错误拼成可读文本写剪贴板。基于 Radix Dialog 但 modal=false + 无 Portal + absolute inset-x-0 bottom-0,只盖画布、不遮挡左右侧栏。",
+   "gap": "符合设计(能力模块 COMPILE_LINT-1 已落地),无需改。",
    "fe_status": "符合",
    "be_status": "已实现",
    "be_dep": "已就绪。drawer 展示的 CompileError[] 来自 /compile 的 422 CompileFailure.errors,后端无需改。",
@@ -30,8 +30,8 @@
    "n": 9,
    "cap": "remove-floating-panel",
    "design_ref": "atom-9",
-   "current": "现状:偏差——旧浮层仍在。Workspace.tsx 仍条件渲染 CompileErrorPanel(currentCompileErrors>0),且该组件本体仍在文件内。spec A7 明令删除它。",
-   "gap": "差距:随 #8 drawer 落地,移除 Workspace 里渲染 CompileErrorPanel 的分支与该组件本体,错误呈现只剩 drawer 一条路径。纯前端。",
+   "current": "现状:符合。旧底部浮层 CompileErrorPanel 已删除(全仓 grep 0 引用),编译错误呈现只剩 CompileErrorDrawer 一条路径。",
+   "gap": "符合设计,无需改。",
    "fe_status": "符合",
    "be_status": "n/a",
    "be_dep": "n/a(纯前端删除浮层)。",
@@ -73,6 +73,12 @@
    ],
    "layer2": [
     "真跑(关键):造一个真 skill,点 Compile 真发 /compile;造一个含编译错误的 skill,确认拿回真 CompileError、stage 落 compile-fail。"
+   ],
+   "screenshots": [
+    {
+     "file": "n3-drawer-02-compile-pass.png",
+     "caption": "真机(dev-harness 挂真 Workspace + page.route mock 后端):点动作条 Compile → compileSkillById 调 POST /skills/:id/compile,成功(CompileSuccess)→ build stage 落 compile-pass、Predict 点亮、成功 toast 显示编译指纹(sha256/fp);失败(422 CompileFailure)→ compile-fail(见下条 drawer 截图)。"
+    }
    ]
   },
   {
@@ -98,7 +104,13 @@
     "目标路径(改后真跑):点 Compile 弹 drawer,确认列全、点复制粘贴出全部错误、drawer 不盖左侧栏、旧浮层消失。"
    ],
    "fe_status_prev": "偏差",
-   "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
+   "fe_resync": "覆盖的功能点已全部符合(2026-06-20)",
+   "screenshots": [
+    {
+     "file": "n3-drawer-01-fail-drawer.png",
+     "caption": "真机:点 Compile 且编译失败 → 底部 CompileErrorDrawer 自动弹出,标题『3 compile errors』,顶部『Copy all errors』复制按钮(把全部错误拼成可读文本写剪贴板),逐条列 file:line - field - message。drawer 只盖画布、不遮挡左侧 Assets 文件树与右侧 Copilot 栏(Radix Dialog modal=false + 无 Portal + absolute inset-x-0 bottom-0);旧底部浮层 CompileErrorPanel 已删除(全仓 0 引用)。"
+    }
+   ]
   }
  ]
 }

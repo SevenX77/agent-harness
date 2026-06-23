@@ -8,7 +8,7 @@
       "n": 1,
       "cap": "open-settings-overlay",
       "design_ref": "atom-1",
-      "current": "现状:已实现且符合。Workspace(工作区根组件)持 settingsOpen 状态(useState),Toolbar(左侧竖排工具条)的 onSettingsOpen 与 Header(顶栏)的 onOpenSettings 都把它置 true。settingsOpen=true 时,Workspace 只在画布区(canvas 这块 ResizablePanel)渲染 SettingsPage(壳层根组件)替换编辑器/图;左侧 Panels(文件树等工具面板)与右侧 Copilot 面板照常挂载——工作区不卸载。SettingsPage 不铺全屏 backdrop、不做 focus-trap,是有意的「非真 modal」。",
+      "current": "现状:已实现且符合。Workspace(工作区根组件)持 settingsOpen 状态(useState),Toolbar(左侧竖排工具条)接收 settingsOpen/onSettingsToggle,onSettingsToggle 用 setSettingsOpen(open => !open) 把 Settings 齿轮做成 toggle;按钮带 aria-pressed=settingsOpen 并在打开态用 secondary 变体显示按下状态。Header(顶栏)的 onOpenSettings 仍是单向 setSettingsOpen(true),供 publish 缺配置等指引打开 Settings。settingsOpen=true 时,Workspace 只在画布区(canvas 这块 ResizablePanel)渲染 SettingsPage(壳层根组件)替换编辑器/图;再次点 Toolbar 齿轮置 false 后画布换回原工作区内容;左侧 Panels(文件树等工具面板)与右侧 Copilot 面板照常挂载——工作区不卸载。SettingsPage 不铺全屏 backdrop、不做 focus-trap,是有意的「非真 modal」。",
       "gap": "符合设计,无需改。",
       "fe_status": "符合",
       "be_status": "n/a",
@@ -132,18 +132,31 @@
         1
       ],
       "shots": [
-        "点 Toolbar Settings 图标后,画布换成 Settings 面板,左文件树/右 Copilot 仍在"
+        "点 Toolbar Settings 图标后,画布换成 Settings 面板,左文件树/右 Copilot 仍在",
+        "Settings 已打开时再次点 Toolbar Settings 图标,面板关闭并回到工作区画布"
       ],
       "fe_status": "符合",
       "layer1": [
         "渲染 Workspace,模拟点 Toolbar 的 Settings 图标。",
-        "断言 settingsOpen 置 true、画布区渲染 SettingsPage。",
+        "断言 settingsOpen 置 true、画布区渲染 SettingsPage、Toolbar Settings 按钮 aria-pressed=true。",
+        "再次点同一个 Toolbar Settings 图标 → 断言 settingsOpen 置 false、SettingsPage 不再渲染、aria-pressed=false。",
         "断言左侧 Panels 与右侧 Copilot 面板仍挂载(工作区不卸载)。",
         "断言无全屏 backdrop / 无 focus-trap(非真 modal)。"
       ],
       "layer2": [
         "进工作区,点左侧 Toolbar 底部 Settings 齿轮。",
-        "确认面板盖在画布上、左文件树仍可点、右 Copilot 仍在。"
+        "确认面板盖在画布上、左文件树仍可点、右 Copilot 仍在。",
+        "再次点同一个齿轮,确认 Settings 面板关闭、回到原画布。"
+      ],
+      "screenshots": [
+        {
+          "file": "settings-shell-toggle-open.png",
+          "caption": "点 Toolbar Settings 齿轮后,画布换成 Settings 面板且齿轮处于按下态"
+        },
+        {
+          "file": "settings-shell-toggle-closed.png",
+          "caption": "Settings 已打开时再次点同一齿轮,面板关闭并回到工作区画布"
+        }
       ]
     },
     {

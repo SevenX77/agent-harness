@@ -270,7 +270,7 @@
         5
       ],
       "shots": [
-        "点卡片 ⋯ Show in folder → 系统文件管理器定位该文件夹"
+        "点卡片 ⋯ 展开 Show in folder 入口 → 选择后系统文件管理器定位该文件夹"
       ],
       "fe_status": "符合",
       "layer1": [
@@ -282,8 +282,12 @@
       ],
       "screenshots": [
         {
+          "file": "n1-02-card-menu.png",
+          "caption": "① 入口:点 Recent 卡片右上 ⋯ 展开菜单,第一项就是 Show in folder;同一菜单下方是安全的 Remove from recent。"
+        },
+        {
           "file": "n1-05-recent-finder-reveal.png",
-          "caption": "macOS Finder reveal 结果:对应 Recent workspace 文件夹被定位并选中。截图证明系统文件管理器可见结果;命令参数由 WelcomePage 组件测试和 Tauri wrapper 测试守护。"
+          "caption": "② 结果:选择 Show in folder 后,macOS Finder reveal 到对应 Recent workspace 文件夹并选中。命令参数由 WelcomePage 组件测试和 Tauri wrapper 测试守护。"
         }
       ]
     },

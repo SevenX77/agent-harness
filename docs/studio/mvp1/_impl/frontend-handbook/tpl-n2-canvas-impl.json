@@ -117,9 +117,9 @@
       "n": 13,
       "cap": "subgraph-inline-preview",
       "design_ref": "n2-atom-13",
-      "current": "现状:已实现且符合。子图节点 toggle 展开 → SubgraphInline(子图 inline 预览组件)调 getChildGraphTopology(拉某子图真实拓扑的客户端函数)拿子图真实 phase 列表 → childPhaseRows(把真实拓扑组装成 name+kind 预览行的函数,注释明示『Never fabricates a phase that the child graph does not declare』)渲染只读预览;loading/error/empty/loaded 四态分呈现。注:这与旧审计说的『SubgraphInline 渲染假数据/mock』已不符——worktree 真代码已接真子拓扑,旧结论过时,已纠正。",
-      "gap": "符合设计(已接真子拓扑)。可继续打磨虚线容器 + 动态 group bbox 的视觉样式,但预览数据已真实,非阻塞。",
-      "fe_status": "符合",
+      "current": "现状:偏差(2026-06-23 据代码 + 设计 + codex/agy 双评审纠正)。后端真:子图节点 toggle 展开 → SubgraphInline 调 getChildGraphTopology 拿真子拓扑 phase 列表,数据不编造(childPhaseRows 注释 Never fabricates)。但渲染形态错:childPhaseRows→rows.map 只把子 phase 渲染成 name+kind 静态行列表(loading/error/empty/loaded 四态),这正是设计 §6.3/§8 自标 ⚠️ 的 `SubgraphInline mock rows` 基线,不是设计要求的『inline 展开子拓扑』(虚线容器 + 动态 group bbox + 真 React Flow 子节点/边 + 父图依赖边接驳到子图首末)。⚠ 撤销旧的反向纠正:之前那条『真代码已接真子拓扑、旧 mock 结论过时已纠正』把『数据真』误当成『渲染对』——数据确实真,但渲染仍是 mock 形态的行列表,画布级子拓扑展开缺口未闭。下钻(#14)渲染真拓扑、方向正确,与本条不同。",
+      "gap": "偏差:渲染形态不符设计。当前 = name+kind 静态行列表(= 设计标 ⚠️ 的 mock rows 形态);目标 = 在 expand 节点旁起虚线容器(动态 group bbox),容器内用主画布同款 node/edge 机制渲染真子图(plan→write 真节点真边),父图依赖边接驳到子图首/末节点。数据已真,缺的是画布级子拓扑渲染。",
+      "fe_status": "偏差",
       "be_dep": "已就绪可接。GET child-graph-topology 已实现。D8.4=partial(子图 path 收口中,但拓扑读已通)。"
     },
     {

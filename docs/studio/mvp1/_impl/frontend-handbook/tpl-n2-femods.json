@@ -30,17 +30,17 @@
   },
   {
     "name": "节点类型派生",
-    "what": "把一个 phase 算成 LOGIC / AGENT / SUBGRAPH 三类之一、并反算它对应哪个文件名的前端逻辑。⚠️ 现状以可变的 mode 字段为准，与「类型=文件名」的 FROZEN 口径相反（违 F1）。",
-    "where": "PropertiesPanel.tsx 的 phaseKindLabel（据 data.mode / data.subgraphPath 推三类标签的函数）/ phaseKindFile（由标签反算文件名的函数）；同名实现也在 build-nodes.ts；节点 data.mode 的源头是 build-nodes.ts 里 `mode = topology?.mode ?? phase.mode`（取拓扑行 mode、回退 manifest phase.mode，是一个值、不是读真实落地文件）。",
+    "what": "把一个 phase 算成 LOGIC / AGENT / SUBGRAPH 三类之一、并反算它对应哪个文件名的前端逻辑。类型派生以**该 phase 目录下落地的节点文件名为先**（SUBGRAPH/SKILL/LOGIC.md），符合「类型=文件名」的 FROZEN 口径（F1 已闭合，2026-06-23 核实）。",
+    "where": "PropertiesPanel.tsx 的 phaseKindLabel（据 data.mode / data.subgraphPath 推三类标签的函数）/ phaseKindFile（由标签反算文件名的函数）；节点 data.mode 的源头是 build-nodes.ts:239 `phaseModeFromFiles(phase.name, detail?.files) ?? phaseKindFromTopologyMode(topology?.mode)`——**先按落地的 SUBGRAPH/SKILL/LOGIC.md 文件名派生**（phaseModeFromFiles），文件缺失才回退引擎注入的 topology.mode（与文件名一致），旧的 `?? phase.mode`（读可变 manifest mode）已删。phaseKindLabel 因此吃的是文件派生出来的 data.mode。",
     "duties": [
-      "phaseKindLabel：subgraphPath 或 mode==='subgraph' → SUBGRAPH；mode ∈ {skill,llm,agent} → AGENT；否则 → LOGIC。",
-      "phaseKindFile：由上面标签反算 SUBGRAPH.md / SKILL.md / LOGIC.md 文件名（不读磁盘真实文件）。",
-      "节点 data.mode 取自 build-nodes 的 topology.mode ?? phase.mode：正常路径下 topology.mode 由引擎按文件注入、与文件名一致；只有作者手写 mode 与文件名不一致时才暴露分歧。"
+      "phaseKindLabel：subgraphPath 或 mode==='subgraph' → SUBGRAPH；mode ∈ {skill,llm,agent} → AGENT；否则 → LOGIC（其输入 data.mode 已是文件派生）。",
+      "phaseKindFile：由上面标签反算 SUBGRAPH.md / SKILL.md / LOGIC.md 文件名。",
+      "节点 data.mode 取自 build-nodes 的 phaseModeFromFiles(...) ?? phaseKindFromTopologyMode(topology.mode)：先按 phase 目录下落地的节点文件派生，文件缺失才回退引擎注入的 topology.mode（与文件名一致），不再读可变的 manifest phase.mode。"
     ],
-    "used_by": "#1（canvas-projection 投影节点种类）、#16（node-type-derivation 显示类型，违 F1）。",
-    "boundary": "做：把 phase 算成三类标签 + 反算文件名。不做：不读磁盘真实文件名（这正是 F1 要它改的缺陷——应以「该 phase 目录下存在哪个节点文件」为唯一真相、mode 仅 fallback）。",
+    "used_by": "#1（canvas-projection 投影节点种类）、#16（node-type-derivation 显示类型，F1 已闭合）。",
+    "boundary": "做：把 phase 算成三类标签 + 反算文件名（以落地文件名为先）。不做：不写盘——节点类型真相是「该 phase 目录下存在哪个节点文件」，mode 仅文件缺失时的 fallback（F1 已满足）。",
     "api": "无 —— 纯前端派生，输入来自编译产物的 graph_topology + manifest。",
-    "design_note": "F1（phase-editing 能力文档里『节点类型据文件、非可变 mode 字段』那条不变量）要求：改旧 mode frontmatter 不应改变渲染的节点类型，只有文件类型才改。现状 mode 驱动派生不满足，是 N2 真实未修缺陷。"
+    "design_note": "F1（phase-editing 能力文档里『节点类型据文件、非可变 mode 字段』那条不变量）要求：改旧 mode frontmatter 不应改变渲染的节点类型，只有文件类型才改。现状已满足——build-nodes.ts:239 文件名优先派生（phaseModeFromFiles），旧的 `?? phase.mode` 兜底已删，F1 在代码侧已闭合（2026-06-23 核实）。此前本卡『以可变 mode 为准、违 F1、N2 真实未修缺陷』是旧代码的滞后描述，已纠正。"
   },
   {
     "name": "phase 白名单序列化",
@@ -85,7 +85,7 @@
   },
   {
     "name": "子图 inline 预览",
-    "what": "在画布上把一个 subgraph 节点 inline 展开成它真实子拓扑的预览组件——拉子图真实 phase 列表渲染，绝不编造子图里没声明的 phase。",
+    "what": "在画布上把一个 subgraph 节点 inline 展开：拉子图真实 phase 列表，渲染成 name+kind 只读预览行（数据真、绝不编造子图未声明的 phase）。⚠️ 当前是『行列表』形态，不是设计要求的画布级子拓扑展开（虚线容器 + 动态 group bbox + 真 React Flow 子节点/边）——见 #13 偏差。",
     "where": "SubgraphInline.tsx：组件本体 + childPhaseRows（把子图真实拓扑 join 成 (name+kind) 预览行的函数，注释明示『Never fabricates a phase that the child graph does not declare』）；数据源 getChildGraphTopology（api/client.ts 里拉某子图真实拓扑的客户端函数）。",
     "duties": [
       "subgraph 节点 toggle 展开时调 getChildGraphTopology 拉该子图的真实 phase 列表 + 拓扑。",

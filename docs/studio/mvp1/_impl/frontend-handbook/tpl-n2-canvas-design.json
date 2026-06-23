@@ -310,7 +310,7 @@
       "module": "子图",
       "func": "设计:子图节点能 inline 展开,就地预览它真实的子拓扑(子图里有哪几个 phase、各是什么类型),不切换到子图工程。",
       "action": "用户点子图节点的展开 toggle。",
-      "fe_design": "toggle 展开 → SubgraphInline(子图 inline 预览组件)调 getChildGraphTopology(拉某子图真实拓扑的客户端函数)拿子图真实 phase 列表 → childPhaseRows(把真实拓扑组装成 name+kind 预览行的函数,注释明示『绝不编造子图未声明的 phase』)渲染只读预览行;loading/error/empty/loaded 四态分别呈现。预览数据全部来自子图真实拓扑,不是 mock。",
+      "fe_design": "当前前端逻辑:toggle 展开 → SubgraphInline(子图 inline 预览组件)调 getChildGraphTopology(拉某子图真实拓扑的客户端函数)拿子图真实 phase 列表 → childPhaseRows(把真实拓扑组装成 name+kind 预览行的函数,注释明示『绝不编造子图未声明的 phase』)渲染成只读 name+kind 预览行(loading/error/empty/loaded 四态)。⚠️ 数据虽真(不编造),但这是『行列表』形态,不是设计要的画布级子拓扑展开(虚线容器 + 真 React Flow 子节点/边)——详见下方现状偏差。",
       "fe_modules": [
         {
           "name": "子图 inline 预览"
@@ -324,9 +324,9 @@
           "iface_ref": "iface-io-1"
         }
       ],
-      "fe_status": "符合",
+      "fe_status": "偏差",
       "be_status": "已实现",
-      "gap_brief": "符合设计(子图 inline 展开已接 getChildGraphTopology 真子拓扑、不编造)。注:虚线容器 + 动态 group bbox 的视觉容器样式可继续打磨,但预览数据已是真实的。",
+      "gap_brief": "偏差(2026-06-23 codex gpt-5.5 + agy/antigravity 双评审 + 设计 F4/CANVAS-3 核实)。后端 getChildGraphTopology 返回的是真子拓扑(数据真),但前端 SubgraphInline 把它渲染成 name+kind 静态行列表(childPhaseRows→rows.map),这正是设计 §6.3/§8 自标 ⚠️ 的 `SubgraphInline mock rows` 基线形态,不是设计要求的『inline 展开子拓扑』。设计要求(F4『subgraph node can expand inline...』+ CANVAS-3『主画布 inline 展开子拓扑、虚线容器靠父图最右』+ 测试锁『inline content is real, not mock』):点展开时在 expand 节点旁(靠右)起一个虚线容器(动态 group bbox),容器内用与主画布一致的 node/edge 机制渲染真子图(plan→write 真 React Flow 节点+真边、可选可拖带状态灯),父图依赖边(review→expand、expand→Output)接驳到子图首/末节点。当前缺这套画布级子拓扑渲染,故 fe=偏差。注:下钻(#14)渲染的是真拓扑、方向正确,与本条不同。",
       "impl_ref": "fn-13"
     },
     {

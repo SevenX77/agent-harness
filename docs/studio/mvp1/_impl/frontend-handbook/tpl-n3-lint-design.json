@@ -21,7 +21,7 @@
       "be_contract": [
         {
           "endpoint": "POST /api/skills/{id}/lint",
-          "purpose": "防抖触发的实时编译查错,引擎返回 LintResult(status + 逐条 LintError)。后端现 lint 磁盘上的 skill、不消费请求体。",
+          "purpose": "防抖触发的实时编译查错,引擎返回 LintResult(status + 逐条 LintError)。后端按 changed-markdown 契约消费请求体里编辑中的内容(routers/lint.py 判 body.markdown 非空 → lint_skill_changed_markdown,物化临时 sandbox 再 lint)。",
           "mechanism_ref": "n3_compile_contract",
           "iface_ref": "iface-lint"
         }
@@ -126,7 +126,7 @@
       "be_contract": [
         {
           "endpoint": "POST /api/skills/{id}/lint",
-          "purpose": "字段旁投影需要错误带 field 定位轴;实时 lint 的 LintError 当前无 field(见后端契约缺口)。",
+          "purpose": "字段旁投影需要错误带 field 定位轴;实时 lint 的 LintError 已带 field_path / source_path(models/errors.py 与 api/types.ts),字段级就近投影已落地(field_path=tools 驱动 Tools 字段标记)。",
           "mechanism_ref": "n3_compile_contract",
           "iface_ref": "iface-lint"
         }

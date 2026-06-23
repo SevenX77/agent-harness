@@ -1220,7 +1220,8 @@ def main():
         return node_impl_status.get(code_.lower(), "partial")
 
     def _node_stext(st):
-        return {"ok": "前端已实施", "partial": "前端部分实施", "bad": "前端未开始"}.get(st, "前端部分实施")
+        # 圆点 = 本节点全部子页（前端/后端/测试各轴）里最差的那个，故措辞用整体口径，不再只说「前端」。
+        return {"ok": "全部子页已达标", "partial": "尚有子页未完成", "bad": "整体未开始"}.get(st, "尚有子页未完成")
 
     # ---- per-page 状态规则（导航旁状态点 = 本页状态，不再全节点共用一个 rollup） ----
     # rollup：有效项全 ok→ok；全 bad→bad；混合→partial；无量化数据→none（不显示点）。
@@ -1260,27 +1261,58 @@ def main():
             return "bad"
         return "partial"
 
+    # ── 状态点 = 该页面上「所有状态徽章里最差的那个」，全绿才绿（覆盖前端+后端两轴 + 机制卡） ──
+    def _kfe(v):  # fe_status → ok/partial/bad/none
+        return {"符合": "ok", "偏差": "partial", "未实施": "bad"}.get((v or "").strip(), "none")
+
+    def _kbe(v):  # be_status → ok/partial/bad/none（n/a / 空 = none，不参与）
+        return {"已实现": "ok", "符合": "ok", "契约问题": "partial", "未实现": "bad"}.get((v or "").strip(), "none")
+
+    def _kmech(mechs):  # 机制卡 backend_status[].status → 状态项（review=待证据，按琥珀计）
+        out = []
+        for mm in mechs or []:
+            for b in mm.get("backend_status", []):
+                out.append({"ok": "ok", "partial": "partial", "bad": "bad", "review": "partial"}.get(
+                    (b.get("status") or "").strip(), "none"))
+        return out
+
+    def _roll3(items):  # 全 ok→ok；全 bad→bad；有任何非 ok（含 partial）→partial；无数据→none
+        xs = [x for x in items if x in ("ok", "partial", "bad")]
+        if not xs:
+            return "none"
+        if all(x == "ok" for x in xs):
+            return "ok"
+        if all(x == "bad" for x in xs):
+            return "bad"
+        return "partial"
+
+    def _worst3(sts):  # 取最差：ok < partial < bad；无数据→none
+        rank = {"ok": 0, "partial": 1, "bad": 2}
+        xs = [s for s in sts if s in rank]
+        return max(xs, key=lambda s: rank[s]) if xs else "none"
+
     def _page_status_map(full):
-        # 设计页 N.i = 该 surface 全功能 fe_status；实施页 = 全节点 fe_status（前端实现状态）；
-        # 测试页 = 全节点测试的真机实测完整性（见 _test_roll）；契约页 = 全功能 be_status（后端实现状态）；
-        # 复用模块 = 全节点 fe_status。契约页 ↔ 复用模块页 对称：后端那一半建好没 / 前端模块建好没。
+        # 每页状态点 = 本页面上「全部状态徽章里最差的那个」，绿仅当全绿：
+        #   设计页 = 该 surface 全原子 fe_status + be_status（两轴都要符合才绿）；
+        #   实施页 = 全节点功能 fe_status + be_status；
+        #   后端接口契约页 = 全节点功能 be_status + 全机制 backend_status（机制 partial/bad 也算进来）；
+        #   测试页 = 真机实测完整性（_test_roll）；复用模块页 = 全节点前端 fe_status。
         nc = full["nctx"]; p = nc["pages"]; stages = full["stages"]
-        m = {}; all_fn = []; all_ts = []; all_be = []
+        m = {}; all_fe = []; all_be = []; all_ts = []; all_mech = []
         for s in stages:
             im = s.get("impl") or {}
             fns = im.get("functions", []); tss = im.get("tests", [])
-            m[s["design"]["page_id"]] = _rollup([f.get("fe_status", "") for f in fns], {"符合"}, {"偏差", "未实施"})
-            all_fn += [f.get("fe_status", "") for f in fns]
+            atoms = (s.get("design") or {}).get("atoms", [])
+            di = [_kfe(a.get("fe_status", "")) for a in atoms] + [_kbe(a.get("be_status", "")) for a in atoms]
+            m[s["design"]["page_id"]] = _roll3(di)
+            all_fe += [_kfe(f.get("fe_status", "")) for f in fns]
+            all_be += [_kbe(f.get("be_status", "")) for f in fns]
             all_ts += tss
-            all_be += [f.get("be_status", "") for f in fns]
-        fe_roll = _rollup(all_fn, {"符合"}, {"偏差", "未实施"})
-        m[p["impl"]] = fe_roll
+            all_mech += _kmech(s.get("mechs", []))
+        m[p["impl"]] = _roll3(all_fe + all_be)
         m[p["tests"]] = _test_roll(all_ts)
-        m[p["contract"]] = _rollup(all_be, {"已实现"}, {"契约问题"})
-        # 复用模块 = 本节点可复用前端模块是否实现并符合设计（= 全节点前端 rollup）。
-        # 它们是真实功能代码、登记表「定义在哪」字段指向源码文件，缺了对应界面就渲染不出，
-        # 不是只挂名的目录；故和契约页一样显示实现状态，绿=都已实现。
-        m[p["fe_modules"]] = fe_roll
+        m[p["contract"]] = _roll3(all_be + all_mech)
+        m[p["fe_modules"]] = _roll3(all_fe)
         return m
 
     def _pitem(pid, label, st):
@@ -1303,9 +1335,12 @@ def main():
                   (p["fe_modules"], "%s.%d" % (code_, base + 2), "前端复用模块"),
                   (p["impl"], "%s.%d" % (code_, base + 3), "实施"),
                   (p["tests"], "%s.%d" % (code_, base + 4), "测试")]
-        st = _node_st(code_)
         psmap = _page_status_map(full)
-        children = "".join(_pitem(pid, "%s %s" % (c, lbl), psmap.get(pid, st)) for pid, c, lbl in items)
+        # 父节点状态点 = 子页里最差的那个（子页本身已据页面内容算）。无任何子页数据才退回旧表。
+        st = _worst3([psmap.get(pid, "none") for pid, _c, _lbl in items])
+        if st == "none":
+            st = _node_st(code_)
+        children = "".join(_pitem(pid, "%s %s" % (c, lbl), psmap.get(pid, "none")) for pid, c, lbl in items)
         parent = ('<a class="toc-parent" href="#%s" id="nav-%s">'
                   '<span class="parent-node">%s</span><span class="parent-title">'
                   '<b>%s</b>'

@@ -76,12 +76,13 @@ describe("AddProviderForm component (atom-19 one-step inline form)", () => {
     expect(html).toContain('data-add-provider-submit="true"')
   })
 
-  it("masks the api_key field with type=text + CSS (never a native password field)", () => {
+  it("keeps the empty api_key placeholder readable while still using type=text", () => {
     const html = renderForm()
     const apiKeyInput = html.match(/<input[^>]*id="add-provider-api-key"[^>]*>/)
     expect(apiKeyInput).not.toBeNull()
     expect(apiKeyInput?.[0]).toContain('type="text"')
-    expect(apiKeyInput?.[0]).toContain("mask-input")
+    expect(apiKeyInput?.[0]).toContain('placeholder="Enter the provider API Key"')
+    expect(apiKeyInput?.[0]).not.toContain("mask-input")
     expect(apiKeyInput?.[0]).not.toContain('type="password"')
   })
 })

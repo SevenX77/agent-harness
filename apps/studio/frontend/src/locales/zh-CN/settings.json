@@ -71,10 +71,24 @@
     "title": "Copilot",
     "description": "使用与 LLM Roles 相同的模型组 fallback 模式配置 copilot 角色。",
     "claudeAgentSdk": "Claude Agent SDK",
+    "addModelDisabledTooltip": "先给现有空卡选择模型组，再新建。",
+    "emptyState": {
+      "title": "还没有支持 Anthropic Messages 的 route",
+      "description": "去 API Keys 添加支持 anthropic-messages 协议的凭证（Anthropic Official / Ark / DeepSeek / OpenRouter 等），完成 provider 或 role 测试验证后会在这里显示。",
+      "cta": "去 API Keys 配置"
+    },
+    "untestedRoutesCta_one": "{{count}} 条 route 未测试，去 API Keys 测试",
+    "untestedRoutesCta_other": "{{count}} 条 route 未测试，去 API Keys 测试",
     "testToast": {
       "passed": "{{title}} 测试通过",
       "needsAttention": "{{title}} 测试需要注意",
       "failed": "{{title}} 测试失败"
+    },
+    "testErrors": {
+      "noAvailableRoute": "{{title}} 暂无可用模型路由：请先在 API Keys 配置 Anthropic-compatible 凭证并测试通过",
+      "roleUnknown": "{{title}} 不存在或已被删除：请刷新页面后重试",
+      "invalidKind": "{{title}} 不是 copilot 角色，无法用 Claude SDK 测试",
+      "credentialMissing": "{{title}} 缺少必需的 API key：请到 API Keys 填写后重试"
     },
     "aria": {
       "testing": "正在测试 {{title}}...",

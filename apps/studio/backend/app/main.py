@@ -39,9 +39,9 @@ from app.routers import (
 )
 from app.services.copilot import cleanup_all_sessions
 from app.services.file_watcher import file_watcher
-from app.services.llm_import_drafts import (
+from app.services.llm_probe_catalog import (
     load_remote_catalog_source_metadata,
-    sync_remote_evidence_library,
+    sync_remote_probe_catalog,
 )
 from app.services.run_manager import run_manager
 from app.services.skills import ensure_workspace_layout
@@ -57,7 +57,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     start_orphan_parent_monitor()
     clear_backend_caches()
     ensure_workspace_layout()
-    await _sync_remote_evidence_library_on_startup()
+    await _sync_remote_probe_catalog_on_startup()
     terminal_manager.start_reaper()
     file_watcher.start(asyncio.get_running_loop())
     try:
@@ -69,14 +69,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await run_manager.shutdown()
 
 
-async def _sync_remote_evidence_library_on_startup() -> None:
+async def _sync_remote_probe_catalog_on_startup() -> None:
     catalog_source = load_remote_catalog_source_metadata()
     if catalog_source is None or not getattr(catalog_source, "enabled", True):
         return
     try:
-        await sync_remote_evidence_library()
+        await sync_remote_probe_catalog()
     except Exception:
-        logger.warning("Remote LLM evidence library sync failed during startup", exc_info=True)
+        logger.warning("Remote LLM probe catalog sync failed during startup", exc_info=True)
 
 
 def configure_api_auth(studio_app: FastAPI) -> None:

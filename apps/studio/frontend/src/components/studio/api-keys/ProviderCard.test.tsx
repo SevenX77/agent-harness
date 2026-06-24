@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest"
 import {
   ProviderCard,
   ProviderDeleteButton,
+  aggregateThirdPartyModelInfos,
+  apiKeyDisplayValue,
   apiKeyInputClassName,
   apiKeyInputType,
   copyAvailableModelId,
@@ -11,7 +13,7 @@ import {
   sortOfficialRouteInfos,
   sortModelInfos,
 } from "./ProviderCard"
-import type { CredentialsState, TestStatus } from "../../../api/llm"
+import type { CredentialsState, ModelInfo, TestStatus } from "../../../api/llm"
 import { providerTestParamsFingerprint } from "../settings/provider-utils"
 import type { ProviderDraft } from "../settings/types"
 
@@ -79,16 +81,23 @@ function routeTagHtml(html: string, modelId: string): string {
 }
 
 describe("ProviderCard API key masking", () => {
-  it("renders the API key as a CSS-masked text input by default (never a native password field)", () => {
+  it("renders a same-length mask value by default (never a native password field)", () => {
     const html = renderCardHtml()
+    const maskedValue = apiKeyDisplayValue("sk-secret-123", false)
 
-    // §1 contract: the secret field is ALWAYS type=text + CSS masking, so the
-    // browser/extension password manager is never triggered.
+    // §1 contract: the secret field is ALWAYS type=text, so the browser /
+    // extension password manager is never triggered. Hidden provider cards render
+    // an explicit same-length mask value instead of relying on CSS text-security;
+    // WebKit can otherwise make long secrets look like only a few bullets.
     expect(html).toContain('type="text"')
     expect(html).not.toContain('type="password"')
-    expect(html).toContain("mask-input")
-    expect(html).toContain('value="sk-secret-123"')
+    expect(maskedValue).toHaveLength("sk-secret-123".length)
+    expect(maskedValue).not.toContain("sk")
+    expect(html).toContain(`value="${maskedValue}"`)
+    expect(html).not.toContain('value="sk-secret-123"')
+    expect(html).not.toContain("mask-input")
     expect(html).toContain('name="provider-secret-p1"')
+    expect(html).toContain('readOnly=""')
     expect(html).toContain('data-1p-ignore=""')
     expect(html).toContain('data-lpignore="true"')
     expect(html).toContain('data-form-type="other"')
@@ -100,8 +109,14 @@ describe("ProviderCard API key masking", () => {
     expect(html).toContain("text-muted-foreground")
     // apikeys#24/#25: the discover action is now a unified "Test" for both kinds.
     expect(html).not.toContain("Get Models")
-    expect(html).toContain("Endpoint test")
+    expect(html).not.toContain("Endpoint test")
     expect(html).toContain(">Test</button>")
+  })
+
+  it("returns the real API key only when the field is visible", () => {
+    expect(apiKeyDisplayValue("sk-secret-123", false)).toBe("\u2022".repeat("sk-secret-123".length))
+    expect(apiKeyDisplayValue("sk-secret-123", true)).toBe("sk-secret-123")
+    expect(apiKeyDisplayValue("", false)).toBe("")
   })
 
   it("keeps the input type=text in both hidden and visible states", () => {
@@ -317,9 +332,9 @@ describe("ProviderCard provider kind badge", () => {
 
     expect(html).toContain("OpenAI Official")
     expect(html).not.toContain('data-variant="outline">Official</span>')
-    expect(html).not.toContain("Not configured")
+    expect(html).toContain("Available Endpoints:")
     expect(html).not.toContain('aria-label="More actions for OpenAI Official"')
-    expect(html).not.toContain("Base URL")
+    expect(html).not.toContain(">Base URL</label>")
   })
 
   it("normalizes official provider card titles from persisted endpoint ids", () => {
@@ -336,9 +351,14 @@ describe("ProviderCard provider kind badge", () => {
       />,
     )
 
+    const headerStart = html.indexOf('data-slot="card-header"')
+    const headerEnd = html.indexOf('data-slot="card-content"')
+    const headerHtml = html.slice(headerStart, headerEnd)
+
     expect(html).toContain("Anthropic Official")
-    expect(html).not.toContain(">anthropic-official<")
-    expect(html).not.toContain("Connected")
+    expect(headerHtml).not.toContain("anthropic-official")
+    expect(headerHtml).not.toContain("Connected")
+    expect(html).toContain("Available Endpoints:")
   })
 
   it("renders Third-party badge when providerKind is third-party", () => {
@@ -391,7 +411,8 @@ describe("ProviderCard provider kind badge", () => {
     )
 
     expect(html).not.toContain("Not configured")
-    expect(html).not.toContain("Untested")
+    expect(html).toContain("Available Endpoints:")
+    expect(html).toContain("Untested")
   })
 })
 
@@ -421,7 +442,7 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
     expect(html).toContain(">Test</button>")
   })
 
-  it("collapses third-party editable fields to API Key -> Base URL -> Endpoint test with no Protocol row (apikeys#20)", () => {
+  it("collapses third-party editable fields to API Key -> Base URL, with one Test and available endpoint details", () => {
     const html = renderToStaticMarkup(
       <ProviderCard
         draft={makeDraft({ base_url: "https://api.qnaigc.com/v1" })}
@@ -436,16 +457,119 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
 
     const apiKeyIndex = html.indexOf(">API Key</label>")
     const baseUrlIndex = html.indexOf(">Base URL</label>")
-    const endpointTestIndex = html.indexOf(">Endpoint test</label>")
+    const availableEndpointIndex = html.indexOf("Available Endpoints:")
     expect(apiKeyIndex).toBeGreaterThan(-1)
     expect(baseUrlIndex).toBeGreaterThan(apiKeyIndex)
-    expect(endpointTestIndex).toBeGreaterThan(baseUrlIndex)
+    expect(availableEndpointIndex).toBeGreaterThan(baseUrlIndex)
     // apikeys#20: protocol is backend-auto-detected now — no manual Protocol dropdown.
     expect(html).not.toContain(">Protocol</label>")
     expect(html).not.toContain(`provider-protocol-${draft.id}`)
-    // apikeys#24/#25: the discover action is a unified "Test".
+    // apikeys#24/#25: the discover action is a unified "Test"; the old one-model
+    // Endpoint test escape hatch no longer appears in the provider card.
     expect(html).not.toContain("Get Models")
+    expect(html).not.toContain(">Endpoint test</label>")
+    expect(html).not.toContain('title="Provider:')
     expect(html).toContain(">Test</button>")
+    expect(html).toContain("https://api.qnaigc.com/v1")
+    expect(html).toContain("Protocol: OpenAI-compatible")
+    expect(html).toContain("OpenAI / api.qnaigc")
+    expect(html).not.toContain("OpenAI / api.qnaigc.com")
+    expect(html).not.toContain("OpenAI / api.qnaigc Connected")
+    expect(html).not.toContain("OpenAI / api.qnaigc Failed")
+  })
+
+  it("shows protocol-normalized runtime URL separately from the input URL", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({ base_url: "https://api.qnaigc.com/v1" })}
+        persisted={makePersisted({
+          base_url: "https://api.qnaigc.com/v1",
+          runtime_base_url: "https://api.qnaigc.com",
+          provider_type: "anthropic_compatible",
+          last_test_status: "error",
+        })}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="third-party"
+      />,
+    )
+
+    expect(html).toContain("Input URL: https://api.qnaigc.com/v1")
+    expect(html).toContain("Runtime URL: https://api.qnaigc.com")
+    expect(html).toContain("Protocol: Anthropic-compatible")
+  })
+
+  it("summarizes official endpoint methods, request mappers, and tool protocol in Available Endpoints", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({
+          id: "ark-official",
+          name: "Ark Official",
+          provider_type: "ark_runtime",
+          base_url: "https://ark.cn-beijing.volces.com",
+        })}
+        persisted={makePersisted({
+          id: "ark-official",
+          name: "Ark Official",
+          provider_type: "ark_runtime",
+          base_url: "https://ark.cn-beijing.volces.com",
+          last_test_status: "ok",
+          available_models: [
+            {
+              id: "doubao-seed-1-6",
+              status: "verified",
+              verified_profiles: [
+                {
+                  profile_id: "text:ark_chat",
+                  capability: "text_chat",
+                  method_id: "ark_chat",
+                  request_mapper_id: "ark_chat_text",
+                  status: "ready",
+                },
+                {
+                  profile_id: "text:ark_responses",
+                  capability: "reasoning",
+                  method_id: "ark_responses",
+                  request_mapper_id: "ark_responses_text",
+                  status: "ready",
+                },
+              ],
+              capabilities: { tool_protocol: true },
+            },
+            {
+              id: "claude-opus-4-1",
+              status: "verified",
+              verified_profiles: [
+                {
+                  profile_id: "tool:ark_anthropic_messages",
+                  capability: "tool_calling",
+                  method_id: "ark_anthropic_messages",
+                  request_mapper_id: "ark_anthropic_tools",
+                  status: "ready",
+                },
+              ],
+            },
+          ],
+        })}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="official"
+        notableProviderKey="ark"
+      />,
+    )
+
+    expect(html).toContain("Available Endpoints:")
+    expect(html).toContain("3m")
+    expect(html).toContain("Protocol: Ark runtime")
+    expect(html).toContain("Profiles: 3")
+    expect(html).toContain("Methods: ark_anthropic_messages, ark_chat, ark_responses")
+    expect(html).toContain("Request mappers: ark_anthropic_tools, ark_chat_text, ark_responses_text")
+    expect(html).toContain("Profile capabilities: reasoning, text chat, tool calling")
+    expect(html).toContain("Tool protocol: supported")
   })
 
   it("shows models discovered for the current params without rendering Connected", () => {
@@ -1046,8 +1170,100 @@ describe("ProviderCard provider capabilities", () => {
     })
 
     expect(html).toContain('type="button"')
-    expect(html).toContain('aria-label="Copy model deepseek/deepseek-v3.1-terminus"')
+    expect(html).toContain('aria-label="Copy model deepseek/deepseek-v3.1-terminus. Route status unknown"')
     expect(html).toContain("cursor-pointer")
+  })
+
+  it("surfaces third-party model probe status and error details", () => {
+    const html = renderCardHtml({
+      persisted: makePersisted({
+        available_models: [{
+          id: "deepseek/deepseek-v3.1-terminus-thinking",
+          endpoint_id: "api-qnaigc-com-v1-openai-cd4c26a12b",
+          route_id: "api-qnaigc-com-v1-openai-cd4c26a12b:deepseek.deepseek-v3.1-terminus-thinking",
+          status: "failed",
+          ui_state: "failed",
+          last_probe_message: "Provider returned HTTP 502.",
+        }],
+      }),
+    })
+
+    expect(html).toContain('data-route-status="failed"')
+    expect(html).toContain('data-route-ui-state="failed"')
+    expect(html).toContain('aria-label="Copy model deepseek/deepseek-v3.1-terminus-thinking. Route test failed"')
+    expect(html).toContain("border-tag-destructive-border")
+  })
+
+  it("collapses duplicate third-party routes into one model tag and prefers a verified endpoint", () => {
+    const duplicateModels: ModelInfo[] = [
+      {
+        id: "deepseek/deepseek-v3",
+        endpoint_id: "qiniu-anthropic",
+        route_id: "qiniu-anthropic:deepseek.deepseek-v3",
+        status: "failed",
+        ui_state: "failed",
+        last_probe_message: "Use /v1/messages instead.",
+      },
+      {
+        id: "deepseek/deepseek-v3",
+        endpoint_id: "qiniu-openai",
+        route_id: "qiniu-openai:deepseek.deepseek-v3",
+        status: "verified",
+        ui_state: "ready",
+      },
+      {
+        id: "deepseek/deepseek-v3",
+        endpoint_id: "qiniu-google",
+        route_id: "qiniu-google:deepseek.deepseek-v3",
+        status: "unverified_manual",
+        ui_state: "untested",
+      },
+    ]
+
+    const aggregated = aggregateThirdPartyModelInfos(duplicateModels)
+    expect(aggregated).toHaveLength(1)
+    expect(aggregated[0].status).toBe("verified")
+    expect(aggregated[0].ui_state).toBe("ready")
+
+    const html = renderCardHtml({
+      persisted: makePersisted({ available_models: duplicateModels }),
+    })
+    const tags = html.match(/data-route-count="3"/g) ?? []
+    expect(tags).toHaveLength(1)
+    expect(html).toContain('data-route-status="verified"')
+    expect(html).toContain('data-route-ui-state="ready"')
+    expect(html).toContain('aria-label="Copy model deepseek/deepseek-v3. Verified route"')
+  })
+
+  it("collapses duplicate third-party routes and keeps historical-ready blue when no endpoint is currently verified", () => {
+    const aggregated = aggregateThirdPartyModelInfos([
+      {
+        id: "anthropic/claude-fable-5",
+        endpoint_id: "qiniu-anthropic",
+        route_id: "qiniu-anthropic:anthropic.claude-fable-5",
+        status: "unverified_manual",
+        ui_state: "historical_ready",
+      },
+      {
+        id: "anthropic/claude-fable-5",
+        endpoint_id: "qiniu-openai",
+        route_id: "qiniu-openai:anthropic.claude-fable-5",
+        status: "failed",
+        ui_state: "failed",
+      },
+    ])
+
+    expect(aggregated).toHaveLength(1)
+    expect(aggregated[0].status).toBe("probe-verified")
+    expect(aggregated[0].ui_state).toBe("historical_ready")
+
+    const html = renderCardHtml({
+      persisted: makePersisted({ available_models: aggregated }),
+    })
+    expect(html).toContain('data-route-status="probe-verified"')
+    expect(html).toContain('data-route-ui-state="historical_ready"')
+    expect(html).toContain('aria-label="Copy model anthropic/claude-fable-5. Previously Connected"')
+    expect(html).toContain("border-multimodal-border")
   })
 
   it("copies the available model real id", async () => {
@@ -1212,17 +1428,22 @@ describe("ProviderCard protocol controls", () => {
       />,
     )
 
-    expect(html).not.toContain("Protocol")
+    expect(html).not.toContain(">Protocol</label>")
+    expect(html).not.toContain('data-slot="select-trigger"')
+    expect(html).not.toContain(`provider-protocol-${draft.id}`)
     expect(html).not.toContain("Anthropic compatible")
   })
 })
 
 describe("ProviderCard 6-state ui_state projection (apikeys#30)", () => {
-  it("renders the backend-projected route ui_state inline via ProviderStateBadge", () => {
+  it("does not duplicate route connectivity as a third-party header badge", () => {
     const html = renderToStaticMarkup(
       <ProviderCard
-        draft={draft}
+        draft={makeDraft({ base_url: "https://api.example.com/v1" })}
         persisted={makePersisted({
+          base_url: "https://api.example.com/v1",
+          last_test_status: "error",
+          last_error_code: "endpoint_test_failed",
           available_models: [
             { id: "openai/gpt-5", route_id: "p1:gpt-5", status: "verified", ui_state: "ready" },
           ],
@@ -1235,17 +1456,17 @@ describe("ProviderCard 6-state ui_state projection (apikeys#30)", () => {
       />,
     )
 
-    // The inline connectivity badge is the shared 6-state ProviderStateBadge driven
-    // off the real route.ui_state threaded through ModelInfo.ui_state (not a 4-state tag).
-    expect(html).toContain('data-provider-state-label="ready"')
-    expect(html).toContain("Ready")
+    expect(html).not.toContain('data-provider-state-label="ready"')
+    expect(html).not.toContain(">Ready</")
+    expect(html).toContain(">Test failed</")
   })
 
-  it("renders the blue 'Previously Connected' state for historical_ready routes", () => {
+  it("does not show historical route state as the provider test state", () => {
     const html = renderToStaticMarkup(
       <ProviderCard
         draft={draft}
         persisted={makePersisted({
+          last_test_status: "untested",
           available_models: [
             { id: "openai/gpt-5", route_id: "p1:gpt-5", status: "unverified_manual", ui_state: "historical_ready" },
           ],
@@ -1258,8 +1479,9 @@ describe("ProviderCard 6-state ui_state projection (apikeys#30)", () => {
       />,
     )
 
-    expect(html).toContain('data-provider-state-label="historical_ready"')
-    expect(html).toContain("Previously Connected")
+    expect(html).not.toContain('data-provider-state-label="historical_ready"')
+    expect(html).toContain(">Not configured</")
+    expect(html).toContain('aria-label="Copy model openai/gpt-5. Previously Connected"')
   })
 
   it("does not render a state badge when no route carries a backend ui_state", () => {

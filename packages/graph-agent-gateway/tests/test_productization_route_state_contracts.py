@@ -214,54 +214,30 @@ def test_cooling_down_projection_carries_retry_at_without_failed_reason() -> Non
     assert projection.reason_code is None
 
 
-def test_probe_verified_evidence_projects_historical_ready_with_evidence_ref() -> None:
-    from graph_agent_gateway.registry.schema import EvidenceRecord
-    from graph_agent_gateway.state_projection import project_route_state_from_evidence
+def test_credential_evidence_refs_project_historical_ready_with_evidence_ref() -> None:
+    from graph_agent_gateway.state_projection import project_route_state
 
-    projection = project_route_state_from_evidence(
+    projection = project_route_state(
         route_id="openai:gpt-5",
         endpoint_status="verified",
         route_status="unverified_manual",
         credential_available=True,
-        evidence_records=[
-            EvidenceRecord(
-                evidence_id="probe-openai-gpt5",
-                evidence_type="probe",
-                trust_state="probe-verified",
-                route_id="openai:gpt-5",
-                endpoint_id="openai",
-                model_id="gpt-5",
-                provider_model_id="gpt-5",
-                probe_status="ok",
-            )
-        ],
+        credential_evidence_refs=["probe-openai-gpt5"],
     )
 
     assert projection.ui_state == "historical_ready"
     assert projection.evidence_refs == ["probe-openai-gpt5"]
 
 
-def test_model_list_observation_never_projects_historical_ready() -> None:
-    from graph_agent_gateway.registry.schema import EvidenceRecord
-    from graph_agent_gateway.state_projection import project_route_state_from_evidence
+def test_no_credential_evidence_refs_never_projects_historical_ready() -> None:
+    from graph_agent_gateway.state_projection import project_route_state
 
-    projection = project_route_state_from_evidence(
+    projection = project_route_state(
         route_id="openai:gpt-5",
         endpoint_status="verified",
         route_status="unverified_manual",
         credential_available=True,
-        evidence_records=[
-            EvidenceRecord(
-                evidence_id="model-list-openai-gpt5",
-                evidence_type="model_list_observation",
-                trust_state="provider-list-observed",
-                endpoint_id="openai",
-                route_id="openai:gpt-5",
-                model_id="gpt-5",
-                provider_model_id="gpt-5",
-                model_list_observation={"observed_model_ids": ["gpt-5"]},
-            )
-        ],
+        credential_evidence_refs=[],
     )
 
     assert projection.ui_state == "untested"
@@ -289,7 +265,7 @@ def test_provider_route_dto_carries_explicit_six_state_ui_state(
     from graph_agent_gateway.registry.schema import ProviderRoute
     from graph_agent_gateway.state_projection import (
         project_provider_route_ui_state,
-        project_route_state_from_evidence,
+        project_route_state,
     )
 
     route = ProviderRoute(
@@ -300,12 +276,12 @@ def test_provider_route_dto_carries_explicit_six_state_ui_state(
         canonical_id="gpt-5",
         status=route_status,
     )
-    projection = project_route_state_from_evidence(
+    projection = project_route_state(
         route_id=route.route_id,
         endpoint_status=endpoint_status,
         route_status=route.status,
         credential_available=credential_available,
-        evidence_records=[],
+        credential_evidence_refs=[],
         circuit_retry_at=circuit_retry_at,
     )
 
@@ -371,56 +347,34 @@ def test_route_state_projection_rejects_wrong_route_target() -> None:
         ("verified", "unverified_manual", True, datetime.now(UTC) + timedelta(seconds=30), "cooling_down"),
     ],
 )
-def test_probe_verified_evidence_does_not_override_terminal_or_cooling_states(
+def test_credential_evidence_refs_do_not_override_terminal_or_cooling_states(
     endpoint_status: str,
     route_status: str,
     credential_available: bool,
     circuit_retry_at: datetime | None,
     expected_state: str,
 ) -> None:
-    from graph_agent_gateway.registry.schema import EvidenceRecord
-    from graph_agent_gateway.state_projection import project_route_state_from_evidence
+    from graph_agent_gateway.state_projection import project_route_state
 
-    projection = project_route_state_from_evidence(
+    projection = project_route_state(
         route_id="openai:gpt-5",
         endpoint_status=endpoint_status,
         route_status=route_status,
         credential_available=credential_available,
         circuit_retry_at=circuit_retry_at,
-        evidence_records=[
-            EvidenceRecord(
-                evidence_id="probe-openai-gpt5",
-                evidence_type="probe",
-                trust_state="probe-verified",
-                route_id="openai:gpt-5",
-                endpoint_id="openai",
-                model_id="gpt-5",
-                provider_model_id="gpt-5",
-                probe_status="ok",
-            )
-        ],
+        credential_evidence_refs=["probe-openai-gpt5"],
     )
 
     assert projection.ui_state == expected_state
     assert projection.evidence_refs == []
 
 
-def test_role_materialization_delegates_probe_evidence_to_gateway_projection(monkeypatch) -> None:
+def test_role_materialization_uses_credential_evidence_refs_for_historical_ready(monkeypatch) -> None:
     import graph_agent_gateway.role_materialization as role_materialization
-    from graph_agent_gateway.registry.schema import EvidenceRecord, ProviderEndpoint, ProviderRoute
+    from graph_agent_gateway.registry.schema import ProviderEndpoint, ProviderRoute
     from graph_agent_gateway.role_materialization import MaterializeRoleRequest, materialize_role
     from graph_agent_gateway.state_projection import ProviderModelStateProjection
 
-    evidence = EvidenceRecord(
-        evidence_id="probe-openai-gpt5",
-        evidence_type="probe",
-        trust_state="probe-verified",
-        route_id="openai:gpt-5",
-        endpoint_id="openai",
-        model_id="gpt-5",
-        provider_model_id="gpt-5",
-        probe_status="ok",
-    )
     captured: dict[str, Any] = {}
 
     def _spy(**kwargs: Any) -> ProviderModelStateProjection:
@@ -428,10 +382,9 @@ def test_role_materialization_delegates_probe_evidence_to_gateway_projection(mon
         return ProviderModelStateProjection(
             route_id=kwargs["route_id"],
             ui_state="historical_ready",
-            evidence_refs=[record.evidence_id for record in kwargs["evidence_records"]],
         )
 
-    monkeypatch.setattr(role_materialization, "project_route_state_from_evidence", _spy)
+    monkeypatch.setattr(role_materialization, "project_route_state", _spy)
 
     result = materialize_role(
         MaterializeRoleRequest(
@@ -462,14 +415,15 @@ def test_role_materialization_delegates_probe_evidence_to_gateway_projection(mon
                         provider_model_id="gpt-5",
                         canonical_id="gpt-5",
                         status="unverified_manual",
+                        metadata={"evidence_refs": ["probe-openai-gpt5"]},
                     )
                 },
             ),
-            evidence_records=[evidence],
             health_store=SimpleNamespace(get_active_circuits=lambda **_: []),
             now=datetime.now(UTC),
         )
     )
 
-    assert captured["evidence_records"] == [evidence]
+    assert captured["credential_evidence_refs"] == ["probe-openai-gpt5"]
+    assert "evidence_records" not in captured
     assert result.fallback_chain[0].route_id == "openai:gpt-5"

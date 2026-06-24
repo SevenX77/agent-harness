@@ -43,31 +43,9 @@ export function AdvancedModelBundlesSection({
 
   return (
     <section data-advanced-model-bundles="true" className="space-y-4 pt-2">
-      <div className="flex min-w-0 items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <Layers3 aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
-          <h3 className="min-w-0 text-sm font-semibold text-foreground">Model Bundles</h3>
-        </div>
-        <RoleNameDialog
-          title="New model bundle"
-          fieldLabel="Bundle name"
-          initialName=""
-          existingNames={bundles.map(([, bundle]) => bundle.display_name)}
-          submitLabel="Add"
-          trigger={(
-            <Button
-              type="button"
-              size="default"
-              variant="default"
-              data-model-bundle-create="true"
-              className="gap-1"
-            >
-              <Plus data-role-icon="true" className="size-3.5 text-primary-foreground/80" />
-              Add Model Bundle
-            </Button>
-          )}
-          onSubmit={(bundleName) => onChange(appendModelBundle(data, bundleName))}
-        />
+      <div className="flex min-w-0 items-center gap-2">
+        <Layers3 aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+        <h3 className="min-w-0 text-sm font-semibold text-foreground">Model Bundles</h3>
       </div>
 
       {bundles.length > 0 ? (
@@ -99,6 +77,27 @@ export function AdvancedModelBundlesSection({
           </EmptyHeader>
         </Empty>
       )}
+
+      <RoleNameDialog
+        title="New model bundle"
+        fieldLabel="Bundle name"
+        initialName=""
+        existingNames={bundles.map(([, bundle]) => bundle.display_name)}
+        submitLabel="Add"
+        trigger={(
+          <Button
+            type="button"
+            size="default"
+            variant="default"
+            data-model-bundle-create="true"
+            className="gap-1"
+          >
+            <Plus data-role-icon="true" className="size-3.5 text-primary-foreground/80" />
+            Add Model Bundle
+          </Button>
+        )}
+        onSubmit={(bundleName) => onChange(appendModelBundle(data, bundleName))}
+      />
     </section>
   )
 }

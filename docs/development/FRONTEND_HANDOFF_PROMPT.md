@@ -52,19 +52,19 @@
   lifecycle.md §5.3)。
 
 - 改完必须把 app 真跑起来、亲眼点过受影响界面才报「完成」;typecheck/diff 通过不算
-  视觉验证。我在 VPS 无头机上:隔离启动见 docs/development/RUN_AND_SCREENSHOT.md §3,
-  截图 + 模拟点击见 §2。
+  视觉验证。当前快速迭代阶段优先复用主仓根已启动的 Studio app / Vite 热更新做验证;
+  确实没 app 时再按 apps/studio/tauri/README.md 启动。不要为小改另开第二套长期
+  dev server;需要查端口用 lsof -nP -iTCP -sTCP:LISTEN,只处理自己确认属于旧 Studio
+  实例的 PID。
 
-- 多 agent 同仓 → 跑自己的独立实例(不可省):从自己 worktree 启动(不是仓库根),
-  Vite 端口(--port <n> --strictPort)/ Xvfb display :N / VITE_CACHE_DIR / CORS
-  (STUDIO_CORS_EXTRA_ORIGINS 放行该端口)各给独有值;sidecar 端口 Tauri 自动动态
-  分配、不用设。动手前 git worktree list,别碰别人「有未提交 + open PR + 刚改过」的
-  活跃 worktree;查残留用 ss -ltn(别信 pgrep -f 的假残留),杀进程只杀自己记下的
-  PID,绝不 pkill -f 'cargo tauri dev'(会杀全场)。完整配方见 RUN_AND_SCREENSHOT.md §3。
+- 当前快速迭代阶段直接在主仓根 main 改,不开 worktree。开工前用
+  git status --short --branch 识别已有未提交改动,把它们当作同仓协作上下文保留原样;
+  不要为了干净工作区去 reset / checkout / pull / 新开 worktree。本轮只碰被指派的
+  前端文件和必要手册切片。
 
 - 推送前在 apps/studio/frontend 下本地跑通 npm run lint / typecheck / test / build
-  四件套全绿;走 scripts/wt-new.sh 切 worktree → 改 → scripts/wt-ship.sh 开 PR +
-  auto-merge,不在 main 直接改。
+  四件套全绿。准备发 PR 时,再从当前核对过的改动创建普通分支并推送 PR;远端 main
+  仍 protected,不要直接 push。
 
 任务:<在这里写你这次要做的前端改动>
 

@@ -46,7 +46,7 @@ class BackendConfig(BaseSettings):
     github_owner: str = ""
     llm_catalog_repo: str = "studio-llm-model-catalog"
     llm_catalog_branch: str = "main"
-    llm_catalog_path: str = "llm_import_drafts.json"
+    llm_catalog_path: str = "llm_probe_catalog.json"
     engine_transport: str = "in_process"
     engine_loopback_base_url: str = "http://127.0.0.1:8787"
     gateway_transport: str = "in_process"

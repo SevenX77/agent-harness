@@ -7,6 +7,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from app.core import config
 from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint, ProviderRoute
 from app.services.llm_credentials import load_credentials, save_credentials
 from app.services.llm_import_drafts import (
@@ -63,6 +64,26 @@ def _draft() -> ProviderImportDraft:
             )
         },
     )
+
+
+def test_probe_catalog_path_uses_probe_catalog_filename_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import llm_paths
+
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", tmp_path)
+
+    probe_catalog_path = getattr(llm_paths, "probe_catalog_path", None)
+    assert probe_catalog_path is not None
+    assert probe_catalog_path() == tmp_path / "llm" / "llm_probe_catalog.json"
+
+
+def test_llm_probe_catalog_service_is_canonical_backend_import() -> None:
+    from app.services import llm_probe_catalog
+
+    assert llm_probe_catalog.load_evidence_library is load_evidence_library
+    assert llm_probe_catalog.sync_remote_probe_catalog is not None
 
 
 def test_import_draft_store_round_trips_multi_endpoint_draft(tmp_path: Path) -> None:
@@ -174,7 +195,7 @@ def test_sync_remote_evidence_library_raises_on_remote_404(
     )
     save_draft(cached, path=store_path)
 
-    request = httpx.Request("GET", "https://example.invalid/llm_import_drafts.json")
+    request = httpx.Request("GET", "https://example.invalid/llm_probe_catalog.json")
     response = httpx.Response(404, request=request)
 
     class FakeAsyncClient:
@@ -214,7 +235,7 @@ def test_sync_remote_evidence_library_with_metadata_reports_source_and_new_recor
     assert sync_with_metadata is not None
 
     store_path = tmp_path / "import_drafts.json"
-    source_url = "https://raw.githubusercontent.com/SevenX77/studio-llm-model-catalog/main/llm_import_drafts.json"
+    source_url = "https://raw.githubusercontent.com/SevenX77/studio-llm-model-catalog/main/llm_probe_catalog.json"
     remote_draft = ProviderImportDraft(
         draft_id="studio-evidence-library",
         source={"kind": "studio_evidence_library", "location": "github"},

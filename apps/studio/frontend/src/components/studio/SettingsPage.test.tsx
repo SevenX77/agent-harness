@@ -143,7 +143,6 @@ function baseViewProps(
     onTabChange: vi.fn(),
     onProviderFieldChange: vi.fn(),
     onGetProviderModels: vi.fn(),
-    onTestProviderEndpoint: vi.fn(),
     onDeleteProvider: vi.fn(),
     onAddProvider: vi.fn(),
     onProviderModelsUpdated: vi.fn(),
@@ -367,10 +366,34 @@ describe('Add Provider flow helpers', () => {
       name: 'My OpenRouter',
       provider_type: 'openai_compatible',
       base_url: 'https://openrouter.ai/api/v1',
+      base_urls: [{
+        id: 'custom-test',
+        value: 'https://openrouter.ai/api/v1',
+        provider_type: 'openai_compatible',
+        endpoint_ids: { openai_compatible: 'custom-test' },
+      }],
       api_key: 'sk-openrouter',
       isTesting: false,
       testingAction: null,
     })
+  })
+
+  it('keeps ark_runtime scoped to the official Ark provider, not third-party URLs', () => {
+    expect(inferProviderType('ark', 'https://ark.cn-beijing.volces.com/api/v3', 'Ark Official')).toBe('ark_runtime')
+    expect(draftFromAddProviderSubmission({
+      providerCode: 'my-ark-proxy',
+      name: 'My Ark Proxy',
+      baseUrl: 'https://ark.example.test/v1',
+      apiKey: 'sk-proxy',
+      type: 'third-party',
+    }, 'custom-ark-proxy').provider_type).toBe('openai_compatible')
+    expect(draftFromAddProviderSubmission({
+      providerCode: 'my-volces-proxy',
+      name: 'My Volces Proxy',
+      baseUrl: 'https://volces.example.test/v1',
+      apiKey: 'sk-proxy',
+      type: 'third-party',
+    }, 'custom-volces-proxy').provider_type).toBe('openai_compatible')
   })
 
   it('infers anthropic-compatible protocol from third-party name or base URL', () => {
@@ -409,13 +432,21 @@ describe('Add Provider flow helpers', () => {
       isTesting: false,
     })).toBe('official')
     expect(inferProviderKind({
-      id: 'ark-123',
-      name: 'Ark',
+      id: 'ark-official',
+      name: 'Ark Official',
       provider_type: 'ark_runtime',
       base_url: 'https://ark.cn-beijing.volces.com/api/v3',
       api_key: 'sk',
       isTesting: false,
     })).toBe('official')
+    expect(inferProviderKind({
+      id: 'ark-123',
+      name: 'Ark proxy',
+      provider_type: 'openai_compatible',
+      base_url: 'https://ark.example.test/v1',
+      api_key: 'sk',
+      isTesting: false,
+    })).toBe('third-party')
     expect(inferProviderKind({
       id: 'custom-1',
       name: 'OpenRouter',
@@ -692,6 +723,16 @@ describe('SettingsPageContent (api_keys)', () => {
     })
   })
 
+  it('treats reachable official provider catalogs as success even before route verification', () => {
+    expect(officialProviderTestSummary([
+      { id: 'claude-opus-4-1', status: 'unverified_manual' },
+      { id: 'claude-sonnet' },
+    ])).toEqual({
+      kind: 'success',
+      message: 'Catalog loaded. Route candidates are listed.',
+    })
+  })
+
   it('renders General settings as auto-saved shadcn fields without manual save buttons', () => {
     const html = renderToStaticMarkup(
       <SettingsPageContent
@@ -773,7 +814,7 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).toContain('Gemini Official')
     expect(html).toContain('DeepSeek Official')
     expect(html).toContain('Ark Official')
-    expect(html).not.toContain('Not configured')
+    expect(html).toContain('Available Endpoints:')
     expect(html).toContain('Third-party Providers')
     expect(html).toContain('No third-party providers configured.')
     expect(html).toContain('Add Provider')
@@ -802,15 +843,61 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).toContain('Test')
   })
 
-  it('renders API key inputs as CSS-masked text values (never native password) with password-manager ignore attributes', () => {
+  it('renders local probe catalog status without implying automatic sharing', () => {
+    const html = renderToStaticMarkup(
+      <SettingsPageContent
+        {...baseViewProps({
+          credentials: {
+            ...credentials,
+            probe_catalog: {
+              local_evidence_records_count: 3,
+              local_verified_records_count: 2,
+              local_failed_records_count: 1,
+              local_route_candidates_count: 0,
+              remote_catalog_source: {
+                enabled: true,
+                source_url: 'https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_probe_catalog.json',
+                fetched_at: '2026-06-20T23:00:00+00:00',
+                etag: 'W/test',
+                cache: false,
+                route_candidates_count: 7,
+                evidence_records_count: 11,
+                new_records_count: 4,
+                last_error: null,
+              },
+              sharing: {
+                mode: 'local_export_only',
+                auto_upload_enabled: false,
+                message: 'Local probe evidence is recorded on this machine. MVP1 does not auto-upload community catalog evidence.',
+              },
+            },
+          },
+        })}
+      />,
+    )
+
+    expect(html).toContain('Local probe evidence')
+    expect(html).toContain('2 verified')
+    expect(html).toContain('1 failed')
+    expect(html).toContain('Remote catalog synced')
+    expect(html).toContain('Local only')
+    expect(html).toContain('MVP1 does not auto-upload')
+    expect(html).not.toContain('Pull Request')
+  })
+
+  it('renders API key inputs as explicit masked text values (never native password) with password-manager ignore attributes', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
 
-    // atom-22 contract: secret field is always type=text + CSS masking, never password.
+    // atom-22 contract: secret field is always type=text, never password. Hidden
+    // fields render same-length bullets so the real secret is not present in DOM
+    // text while browser/extension password managers still ignore the field.
     expect(html).toContain('type="text"')
     expect(html).not.toContain('type="password"')
-    expect(html).toContain('mask-input')
-    expect(html).toContain('value="sk-deepseek"')
+    expect(html).not.toContain('mask-input')
+    expect(html).not.toContain('value="sk-deepseek"')
+    expect(html).toContain(`value="${'•'.repeat('sk-deepseek'.length)}"`)
     expect(html).toContain('name="provider-secret-DS"')
+    expect(html).toContain('readOnly=""')
     expect(html).toContain('autoComplete="off"')
     expect(html).toContain('data-1p-ignore=""')
     expect(html).toContain('data-lpignore="true"')
@@ -821,7 +908,10 @@ describe('SettingsPageContent (api_keys)', () => {
 
   it('hides official Test outcome badges but keeps third-party outcomes visible', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
-    expect(html).not.toContain('Connected')
+    const officialHeaderStart = html.indexOf('DeepSeek Official')
+    const officialHeaderEnd = html.indexOf('data-slot="card-content"', officialHeaderStart)
+    const officialHeaderHtml = html.slice(officialHeaderStart, officialHeaderEnd)
+    expect(officialHeaderHtml).not.toContain('Connected')
 
     const withThirdPartyOutcome: CredentialsState = {
       providers: credentials.providers.map((provider) => (
@@ -839,7 +929,10 @@ describe('SettingsPageContent (api_keys)', () => {
       />,
     )
 
-    expect(htmlWithThirdPartyOutcome).toContain('Connected')
+    const thirdPartyHeaderStart = htmlWithThirdPartyOutcome.indexOf('My Custom OpenAI')
+    const thirdPartyHeaderEnd = htmlWithThirdPartyOutcome.indexOf('data-slot="card-content"', thirdPartyHeaderStart)
+    const thirdPartyHeaderHtml = htmlWithThirdPartyOutcome.slice(thirdPartyHeaderStart, thirdPartyHeaderEnd)
+    expect(thirdPartyHeaderHtml).toContain('Connected')
   })
 
   it('renders a Delete button/action menu for each user-owned provider', () => {

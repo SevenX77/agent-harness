@@ -661,7 +661,7 @@ describe("LlmRolesTab controls", () => {
 
     expect(html).toContain('data-slot="card"')
     expect(html).toContain("Add Graph Agent Role")
-    expect(html).toContain("Add Copilot Role")
+    expect(html).not.toContain("Add Copilot Role")
     expect(html).toContain('data-role-add-trigger="true"')
     expect(html).toContain('data-slot="empty"')
     expect(html).toContain("Drop model")
@@ -1725,7 +1725,7 @@ describe("LlmRolesTab controls", () => {
     expect(dialogHtml).not.toContain("disabled")
   })
 
-  it("groups roles into graph agent and copilot accordion sections", () => {
+  it("shows only the graph agent accordion section in LLM Roles", () => {
     const groupedData: RolesData = {
       ...rolesData,
       roles: {
@@ -1743,15 +1743,16 @@ describe("LlmRolesTab controls", () => {
     expect(html).toContain('data-slot="catalog-accordion-trigger"')
     expect(html).toContain('data-role-category="graph-agent"')
     expect(html).toContain("Graph Agent Roles")
-    expect(html).toContain('data-role-category="copilot"')
-    expect(html).toContain("Copilot Roles")
-    expect(html.indexOf("Graph Agent Roles")).toBeLessThan(html.indexOf("Copilot Roles"))
+    expect(html).not.toContain('data-role-category="copilot"')
+    expect(html).not.toContain("Copilot Roles")
+    expect(html).not.toContain("Add Copilot Role")
+    expect(html).toContain('data-role-name="copilot_chat"')
     expect(html.indexOf("catalog-accordion-state-icon")).toBeLessThan(html.indexOf("Graph Agent Roles"))
     expect(html.indexOf("Graph Agent Roles")).toBeLessThan(html.indexOf("lucide-cog"))
     expect(html).not.toContain("lucide-workflow")
   })
 
-  it("uses role_kind instead of role name when grouping roles", () => {
+  it("uses role_kind to keep graph-agent roles with copilot-like names visible", () => {
     const groupedData: RolesData = {
       ...rolesData,
       roles: {
@@ -1771,16 +1772,14 @@ describe("LlmRolesTab controls", () => {
     }
     const html = renderRolesHtml({ data: groupedData })
     const graphSectionStart = html.indexOf('data-role-category="graph-agent"')
-    const copilotSectionStart = html.indexOf('data-role-category="copilot"')
-    const graphSection = html.slice(graphSectionStart, copilotSectionStart)
-    const copilotSection = html.slice(copilotSectionStart)
+    const graphSection = html.slice(graphSectionStart)
 
     expect(graphSection).toContain('data-role-name="copilot_planner"')
     expect(graphSection).not.toContain('data-role-name="assistant"')
-    expect(copilotSection).toContain('data-role-name="assistant"')
+    expect(html).not.toContain('data-role-category="copilot"')
   })
 
-  it("keeps empty role categories visible and uses default title typography", () => {
+  it("keeps the graph-agent category visible and uses default title typography", () => {
     const graphOnlyData: RolesData = {
       ...rolesData,
       roles: {
@@ -1797,10 +1796,10 @@ describe("LlmRolesTab controls", () => {
     const titleHtml = html.slice(titleIndex, titleEnd)
 
     expect(html).toContain('data-role-category="graph-agent"')
-    expect(html).toContain('data-role-category="copilot"')
-    expect(html).toContain("No Copilot roles configured.")
     expect(html).toContain("Add Graph Agent Role")
-    expect(html).toContain("Add Copilot Role")
+    expect(html).not.toContain('data-role-category="copilot"')
+    expect(html).not.toContain("No Copilot roles configured.")
+    expect(html).not.toContain("Add Copilot Role")
     expect(titleHtml).not.toContain("font-mono")
   })
 
@@ -1946,7 +1945,7 @@ describe("LlmRolesTab controls", () => {
     expect(renderedRoles.length).toBeGreaterThan(0)
     expect(renderedRoles.length).toBeLessThan(12)
     expect(html).toContain("Add Graph Agent Role")
-    expect(html).toContain("Add Copilot Role")
+    expect(html).not.toContain("Add Copilot Role")
   })
 
   it("shows readable model names instead of active model controls or model abbreviations", () => {

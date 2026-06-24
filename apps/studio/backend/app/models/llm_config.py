@@ -346,6 +346,32 @@ class RolesData(BaseModel):
         )
 
 
+class ProbeCatalogSharingSummary(BaseModel):
+    """MVP1 probe catalog sharing mode exposed to Studio UI."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["local_export_only"] = "local_export_only"
+    auto_upload_enabled: bool = False
+    message: str = (
+        "Local probe evidence is recorded on this machine. "
+        "MVP1 does not auto-upload community catalog evidence."
+    )
+
+
+class ProbeCatalogSummary(BaseModel):
+    """Local + remote Probe Knowledge Catalog status for Settings UI."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    local_evidence_records_count: int = 0
+    local_verified_records_count: int = 0
+    local_failed_records_count: int = 0
+    local_route_candidates_count: int = 0
+    remote_catalog_source: dict[str, Any] | None = None
+    sharing: ProbeCatalogSharingSummary = Field(default_factory=ProbeCatalogSharingSummary)
+
+
 class RegistryResponse(BaseModel):
     """Redacted registry response plus grouped display metadata."""
 
@@ -363,6 +389,7 @@ class RegistryResponse(BaseModel):
         default_factory=dict
     )
     catalog_source: dict[str, Any] | None = None
+    probe_catalog: ProbeCatalogSummary = Field(default_factory=ProbeCatalogSummary)
     role_effective_runtime_settings: dict[
         str,
         dict[str, dict[str, EffectiveRuntimeSetting]],
@@ -381,6 +408,8 @@ __all__ = [
     "ModelInfo",
     "ModelBundle",
     "ModelProfile",
+    "ProbeCatalogSharingSummary",
+    "ProbeCatalogSummary",
     "ProbeResult",
     "ProviderEndpoint",
     "ProviderImportDraft",

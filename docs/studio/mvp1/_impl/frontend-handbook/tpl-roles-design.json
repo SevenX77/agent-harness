@@ -1,599 +1,599 @@
 {
-  "page_id": "roles_design",
-  "title": "LLM 角色设置页 · 操作设计",
-  "region": "settings:llm-roles",
-  "intro": "本页是 LLM Roles(角色→模型兜底链)各操作的 MVP1 设计(应该怎样):每张卡只描述该操作目标长啥样、用户怎么触发、前端该怎么做、依赖后端哪条契约;现状实现与差距见实施页,依赖的「结构化 model_groups → 平铺 fallback_chain」物化机制见角色物化机制页(roles_mech_materialize)。核心心智:用户在前端编辑「结构化的模型组(每个模型一张卡、下挂多 provider)」,后端 materialize_role 物化成引擎消费的「平铺兜底链」——前端看 Group,引擎跑 Chain,UI 测试态与引擎编排同一套判断。",
-  "atoms": [
+ "page_id": "roles_design",
+ "title": "LLM 角色设置页 · 操作设计",
+ "region": "settings:llm-roles",
+ "intro": "本页是 LLM Roles(角色→模型兜底链)各操作的 MVP1 设计(应该怎样):每张卡只描述该操作目标长啥样、用户怎么触发、前端该怎么做、依赖后端哪条契约;现状实现与差距见实施页,依赖的「结构化 model_groups → 平铺 fallback_chain」物化机制见角色物化机制页(roles_mech_materialize)。核心心智:用户在前端编辑「结构化的模型组(每个模型一张卡、下挂多 provider)」,后端 materialize_role 物化成引擎消费的「平铺兜底链」——前端看 Group,引擎跑 Chain,UI 测试态与引擎编排同一套判断。",
+ "atoms": [
+  {
+   "n": 32,
+   "cap": "role-list-load",
+   "track": "共",
+   "module": "角色与可用模型加载",
+   "func": "设计:进 tab 时加载 Graph Agent 角色卡(显式 role_kind=copilot 的角色归 Copilot tab) + 右侧 Available Models 侧栏,让用户一进来就看到现有图角色与可拖的模型组。",
+   "action": "用户切到 LLM Roles tab(首次进入自动触发,无需点按钮)。",
+   "fe_design": "进 tab 拉一份 registry 快照(含 roles + model_groups DTO + 6 态原料)→ 角色区只渲染 Graph Agent Roles 分区;role_kind === \"copilot\" 的角色不在 LLM Roles 页重复渲染,归独立 Copilot tab;没有 role_kind 的历史角色按 graph-agent 兼容显示,避免仅凭名称误删旧图角色→ 右侧渲染 Available Models 侧栏。角色与侧栏都是后端 registry 的纯投影,前端不持第二份;角色数据加载前先经 pruneInvalidRoleProviders(把引用了已删 endpoint 的 route 从角色里剔掉)归一化。",
+   "fe_modules": [
     {
-      "n": 32,
-      "cap": "role-list-load",
-      "track": "共",
-      "module": "角色与可用模型加载",
-      "func": "设计:进 tab 时加载 Graph Agent 角色卡(滤掉 copilot_ 前缀的)+ 右侧 Available Models 侧栏,让用户一进来就看到现有角色与可拖的模型组。",
-      "action": "用户切到 LLM Roles tab(首次进入自动触发,无需点按钮)。",
-      "fe_design": "进 tab 拉一份 registry 快照(含 roles + model_groups DTO + 6 态原料)→ 角色区只渲染 graph-agent 角色(按前缀过滤掉 copilot_ 角色,那些归 Copilot tab)→ 右侧渲染 Available Models 侧栏(可拖的 model group 卡)。角色与侧栏都是后端 registry 的纯投影,前端不持第二份;角色数据加载前先经 pruneInvalidRoleProviders(把引用了已删 endpoint 的 route 从角色里剔掉)归一化。",
-      "fe_modules": [
-        {
-          "name": "role 测试态投影",
-          "ref": "femod-roletest"
-        }
-      ],
-      "be_contract": [
-        {
-          "endpoint": "GET /api/llm/registry",
-          "purpose": "一次性拉角色 + 可用模型组(含 6 态 ui_state)+ bundle 快照供前端投影渲染。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-0"
-        }
-      ],
-      "fe_status": "符合",
-      "be_status": "已实现",
-      "gap_brief": "符合设计。",
-      "impl_ref": "fn-32"
-    },
-    {
-      "n": 33,
-      "cap": "role-create",
-      "track": "共",
-      "module": "角色编辑",
-      "func": "设计:点 `Add Graph Agent Role` → 弹框命名 → 新建一个空角色(允许建无模型空壳),让用户先起个角色名再往里拖模型。",
-      "action": "用户点 `Add Graph Agent Role` 按钮,在命名弹框里填角色名后提交。",
-      "fe_design": "点 Add Graph Agent Role → 弹命名弹框(复用通用命名弹框)→ 提交后在 roles 里新建一个空角色(无 model group 的空壳合法,稍后拖模型补)→ 入队 debounce 自动保存。命名弹框校验空名/重名。新建后角色卡立刻出现,可直接往里拖模型。",
-      "fe_modules": [
-        {
-          "name": "命名弹框",
-          "ref": "femod-rolenamedialog"
-        }
-      ],
-      "be_contract": [
-        {
-          "endpoint": "PUT /api/llm/roles",
-          "purpose": "整表 upsert 角色(新建随 debounce 落库,无单独 add 端点),保存后后端 materialize 回投影。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-1"
-        }
-      ],
-      "fe_status": "符合",
-      "be_status": "已实现",
-      "gap_brief": "符合设计(允许建无模型空壳)。",
-      "impl_ref": "fn-33"
-    },
-    {
-      "n": 34,
-      "cap": "available-models-search",
-      "track": "共",
-      "module": "角色与可用模型加载",
-      "func": "设计:侧栏按 model / provider / id 多词搜可用模型,长列表里快速找到要拖的模型。",
-      "action": "用户在 Available Models 侧栏顶部搜索框输入关键词。",
-      "fe_design": "在侧栏搜索框输入 → 纯前端按多词匹配过滤可用模型(匹配模型显示名 / canonical id / 各 provider 标签 / provider model id),支持紧凑匹配(忽略分隔符)与多 token 全含。过滤纯前端、不发请求;清空按钮一键复位。匹配结果实时刷新模型计数徽章。",
-      "fe_modules": [],
-      "be_contract": [],
-      "fe_status": "符合",
-      "be_status": "n/a",
-      "gap_brief": "符合设计(纯前端多词搜索,无后端契约)。",
-      "impl_ref": "fn-34"
-    },
-    {
-      "n": 35,
-      "cap": "available-model-provider-states",
-      "track": "共",
-      "module": "状态投影",
-      "func": "设计:展开模型卡看各 provider 的 6 态状态(含配置缺口红显引导),不再静默过滤掉缺配置/关闭的 provider。",
-      "action": "用户点侧栏某张模型卡展开(或鼠标悬停看各 provider 行)。",
-      "fe_design": "模型卡内每个 provider 行显该 route 的 6 态色(🟢 ready / 🔵 historical_ready 以前联通过 / ⚪ untested / 🔴 failed 带 reason / 灰+倒计时 cooling_down / 灰 off)。状态权威来自后端 model_groups DTO 内嵌的 ui_state,前端只读渲染、不持第二份。设计目标一:配置缺口(缺/错 key、base_url、protocol、model id)的 provider 行标红(failed + reason=missing_config)+「去配置」引导,点击跳 API Keys 页修,不静默过滤、不默认选中。设计目标二:failed 不被滤掉(仍列、标红、仍可拖,换 role 配置/重试可能就好)。",
-      "fe_modules": [
-        {
-          "name": "6 态徽章 provider-state-badge",
-          "ref": "femod-statebadge"
-        }
-      ],
-      "be_contract": [
-        {
-          "endpoint": "GET /api/llm/registry",
-          "purpose": "返回 model_groups DTO,每个 provider_model 内嵌 6 态 ui_state + reason_code 供前端着色(投影不发额外请求)。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-0"
-        }
-      ],
-      "fe_status": "符合",
-      "be_status": "已实现",
-      "gap_brief": "侧栏 6 态色已含 failed/off 且 failed 不被过滤(保留可拖),符合设计主体;尚缺的是 failed 行的「去配置」跳转引导与「弃用区」(off/disabled 折叠区),属增量 UI。",
-      "impl_ref": "fn-35"
-    },
-    {
-      "n": 36,
-      "cap": "role-model-map-drag",
-      "track": "共",
-      "module": "角色编辑",
-      "func": "设计:把模型从侧栏拖进角色卡 → 自动挂成一个 model group + 默认选可用 provider 在前,一步建好该模型的兜底组。",
-      "action": "用户从侧栏按住一张模型卡拖到某角色卡里松手。",
-      "fe_design": "拖模型进角色卡 → 取该 model group → 按默认选择算法选可用 provider(ready+untested+🔵 蓝优先、official 优先、排除 failed/off)并按状态/kind 排序 → 写成角色里一个 model group(结构化 model_groups,canonical_id + 各 provider route)→ active_model 同步首位 → 入队保存。重复拖入已在该角色的 model group 不建副本(合并新可用 provider)。设计分工:前端存的是结构化 model group(给用户编辑),后端 materialize 才物化成平铺兜底链。",
-      "fe_modules": [
-        {
-          "name": "默认 provider 选择算法",
-          "ref": "femod-defaultselect"
-        }
-      ],
-      "be_contract": [
-        {
-          "endpoint": "PUT /api/llm/roles",
-          "purpose": "拖入后角色结构变了,随 debounce 整表 upsert,后端 materialize 回投影。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-1"
-        }
-      ],
-      "fe_status": "符合",
-      "be_status": "已实现",
-      "gap_brief": "符合设计(拖入自动挂组 + 默认选 + 去重);默认选择对蓝态的显式优先可在算法补权重(现蓝态落默认桶)。",
-      "impl_ref": "fn-36"
-    },
-    {
-      "n": 37,
-      "cap": "role-model-reorder",
-      "track": "共",
-      "module": "角色编辑",
-      "func": "设计:拖动调整角色里多个 model 的兜底序(谁先试),active_model 永远同步第一个。",
-      "action": "用户在角色卡内上下拖动 model 卡调整顺序。",
-      "fe_design": "在角色卡内拖动 model 卡 → 改 model 之间的兜底序(谁先试谁后试)→ active_model 同步成第一个 model(syncActiveModelToFirst)→ 入队保存。模型序就是引擎物化 fallback_chain 时的模型层顺序(见机制页:遍历按模型序 → 组内 provider 序)。",
-      "fe_modules": [],
-      "be_contract": [
-        {
-          "endpoint": "PUT /api/llm/roles",
-          "purpose": "调序后整表 upsert,顺序随结构化 model_groups 持久化,materialize 按此序排链。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-1"
-        }
-      ],
-      "fe_status": "符合",
-      "be_status": "已实现",
-      "gap_brief": "符合设计(active_model 同步首位)。",
-      "impl_ref": "fn-37"
-    },
-    {
-      "n": 38,
-      "cap": "role-provider-reorder",
-      "track": "共",
-      "module": "角色编辑",
-      "func": "设计:拖动 provider 标签调整某模型组内的 provider 兜底序(只改这个模型的 provider 顺序)。",
-      "action": "用户在某 model 组内拖动 provider 标签调整顺序。",
-      "fe_design": "在 model 组的 provider 链里拖动某 provider 标签 → 只改该模型组内 provider 的先后(组间不影响)→ 入队保存。provider 序是引擎物化时该模型组内的 provider 层兜底顺序。provider 链用网格 + 拖拽排序,每行带序号 + role-route 状态灯。",
-      "fe_modules": [],
-      "be_contract": [
-        {
-          "endpoint": "PUT /api/llm/roles",
-          "purpose": "provider 序变更随整表 upsert 持久化,materialize 按组内序排该模型的 provider 兜底。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-1"
-        }
-      ],
-      "fe_status": "符合",
-      "be_status": "已实现",
-      "gap_brief": "符合设计。",
-      "impl_ref": "fn-38"
-    },
-    {
-      "n": 39,
-      "cap": "role-provider-add-remove",
-      "track": "共",
-      "module": "角色编辑",
-      "func": "设计:`Add provider` 给某模型补加一个 provider / 垃圾桶移除单个 provider,微调该模型的 provider 候选。",
-      "action": "用户在某 model 组点 `Add provider` 选一个补加,或点某 provider 行的垃圾桶移除。",
-      "fe_design": "点 Add provider → 下拉列出该模型还没加的可补 provider → 选一个补进组(去重)→ 入队保存;点垃圾桶 → 从该模型组移除这个 provider → 入队保存。Add 的候选来自该模型尚未入选的 owned provider;移除不影响其它模型组。",
-      "fe_modules": [
-        {
-          "name": "默认 provider 选择算法",
-          "ref": "femod-defaultselect"
-        }
-      ],
-      "be_contract": [
-        {
-          "endpoint": "PUT /api/llm/roles",
-          "purpose": "增删 provider 后整表 upsert 持久化。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-1"
-        }
-      ],
-      "fe_status": "符合",
-      "be_status": "已实现",
-      "gap_brief": "符合设计。",
-      "impl_ref": "fn-39"
-    },
-    {
-      "n": 40,
-      "cap": "role-model-remove",
-      "track": "共",
-      "module": "角色编辑",
-      "func": "设计:删掉角色里整个 model group(这个模型连同其所有 provider 兜底一起移除)。",
-      "action": "用户在角色卡内点某 model 卡的移除(或经 model 卡操作删整组)。",
-      "fe_design": "在角色卡内移除某 model group → 把这个模型连同它下面所有 provider route 从角色里删掉 → active_model 重算同步首位 → 入队保存。删整组只动这个角色,不影响别的角色或侧栏可用模型。",
-      "fe_modules": [],
-      "be_contract": [
-        {
-          "endpoint": "PUT /api/llm/roles",
-          "purpose": "删组后整表 upsert 持久化。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-1"
-        }
-      ],
-      "fe_status": "符合",
-      "be_status": "已实现",
-      "gap_brief": "符合设计。",
-      "impl_ref": "fn-40"
-    },
-    {
-      "n": 41,
-      "cap": "role-model-fallback-toggle",
-      "track": "共",
-      "module": "角色编辑",
-      "func": "设计:切 `Model Fallback` 开关——关则只用第一个 model group(provider 兜底永远在),控制要不要多模型兜底。",
-      "action": "用户切角色设置里的 `Model Fallback` 开关。",
-      "fe_design": "切 Model Fallback 开关 → 写进角色的 model_fallback_enabled → 入队保存。语义:关闭时引擎物化只取第一个 model group(provider 层兜底永远在,关的只是「多模型」那层);开启时多个 model group 都进兜底链。开关由角色设置面板里的 Switch 呈现。",
-      "fe_modules": [],
-      "be_contract": [
-        {
-          "endpoint": "PUT /api/llm/roles",
-          "purpose": "开关变更整表 upsert,materialize 读 model_fallback_enabled 决定是否只取首组。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-1"
-        }
-      ],
-      "fe_status": "符合",
-      "be_status": "已实现",
-      "gap_brief": "符合设计(materialize 尊重 fallback 开关,关则 groups[:1])。",
-      "impl_ref": "fn-41"
-    },
-    {
-      "n": 42,
-      "cap": "role-thinking-intent",
-      "track": "共",
-      "module": "角色意图",
-      "func": "设计:配 Thinking 偏好——off / preferred / required 三档互斥,用单一三态控件表达(不用两个开关)。",
-      "action": "用户在角色设置面板点 Thinking 的三档单选之一。",
-      "fe_design": "Thinking 用一个三档互斥的单选控件(off / preferred / required)→ 选哪档写进角色 intent.thinking → 入队保存。三档语义:off 不要思考;preferred 偏好但不支持只降级(downgraded + warning,仍入链);required 必须支持,能力未知→needs_test、明确不支持→not_fit(不入链)。控件应由后端 build_runtime_setting_descriptors(把 route capability 投影成控件描述符)驱动,前端不硬编码各 provider 规则。",
-      "fe_modules": [],
-      "be_contract": [
-        {
-          "endpoint": "PUT /api/llm/roles",
-          "purpose": "thinking 偏好随 intent 整表 upsert,materialize 的 _apply_intent 据此算 role_fit。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-1"
-        }
-      ],
-      "fe_status": "符合",
-      "be_status": "已实现",
-      "gap_brief": "符合设计:thinking 已是 off/preferred/required 三档互斥单选(RadioGroup),required 档已落地;后端 _apply_intent 已支持三档 role_fit。",
-      "impl_ref": "fn-42"
-    },
-    {
-      "n": 43,
-      "cap": "role-output-token-intent",
-      "track": "共",
-      "module": "角色意图",
-      "func": "设计:配 Output Token 目标——用档位选择器表达 default / Use Max / target(配值)/ required_minimum(达不到判 Not Fit);downgrade 默认 allow、不暴露 UI。",
-      "action": "用户在角色设置面板选 Output Token 档位,target/required_minimum 档再填值。",
-      "fe_design": "Output Token 用「档位下拉 + 值输入」组合:档位 = default / maximum_available(Use Max)/ target / required_minimum → target 与 required_minimum 档才启用值输入 → 写进角色 intent.target_output_tokens(TokenIntent{mode, value?, downgrade})→ 入队保存。downgrade 策略 schema 保留、默认 allow、mvp1 不做 UI;required_minimum{value} 语义 = 要求该 route 最大可用输出 token ≥ value(只约束 output、不涉 context),route 输出上限 < value → role_fit 转 not_fit、不进 fallback_chain(是 role 下限要求高于 route 上限才判不合适,方向别写反);同步配 target_context_tokens(同一套档位控件)。cost_priority mvp1 砍掉、schema 不留。",
-      "fe_modules": [],
-      "be_contract": [
-        {
-          "endpoint": "PUT /api/llm/roles",
-          "purpose": "token 意图随 intent 整表 upsert,materialize 的 _apply_output_token_intent 据 mode/value/downgrade 算 role_fit。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-1"
-        }
-      ],
-      "fe_status": "符合",
-      "be_status": "已实现",
-      "gap_brief": "符合设计:已是档位下拉(Default/Use Max/Target/Required Min)+ 值输入,且补了 context token 档;downgrade 默认 allow 不暴露、cost_priority 未做,均符合;后端 token 意图 role_fit 已落地。",
-      "impl_ref": "fn-43"
-    },
-    {
-      "n": 44,
-      "cap": "role-output-limit-summary",
-      "track": "共",
-      "module": "角色意图",
-      "func": "设计:看 `Route max token` 摘要——只读地投影角色里各 route 的 token 上限(min/max 范围),帮用户判断填多少合理。",
-      "action": "无显式动作(角色设置面板里随意图控件一起显示)。",
-      "fe_design": "角色设置面板里只读显示该角色当前各 route 的 token 上限摘要:从 providerModelsByRouteId(route→能力)取每条 route 的 max_input/max_output_tokens,聚合成 min/max 范围 + 已知/未知计数 → 渲染成一句摘要(如「Output route max token range: min … / max …」)。纯前端投影 route capability、只读,不发请求。",
-      "fe_modules": [],
-      "be_contract": [
-        {
-          "endpoint": "GET /api/llm/registry",
-          "purpose": "route 的 token 上限来自 model_groups DTO 里 provider_model 的 capabilities(投影,不发额外请求)。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-0"
-        }
-      ],
-      "fe_status": "符合",
-      "be_status": "已实现",
-      "gap_brief": "符合设计(context + output 双摘要,只读投影 route capability)。",
-      "impl_ref": "fn-44"
-    },
-    {
-      "n": 45,
-      "cap": "role-route-status-light",
-      "track": "共",
-      "module": "状态投影",
-      "func": "设计:悬停 provider 行的状态灯看 role-match(Can Run / Limited / Blocked)+ 诊断,一眼知道这条 route 对本角色合不合适。",
-      "action": "用户鼠标悬停某 provider 行的 role-route 状态灯。",
-      "fe_design": "每个 provider 行显一个 role-route 状态灯(Can Run 绿 / Limited 黄 / Blocked 红 / Testing),由 deriveRoleRouteStatus 把后端 materialization_report 的 role_fit(using/downgraded/needs_test/not_fit)+ 该 route 的 6 态 ui_state + 实时测试态合成 → 悬停显单一顶层 tooltip:route 模型名 + role-match 诊断行(fail/downgrade 原因)+ 能力/token 上限。role_fit 权威来自后端 materialize report,前端只渲染、不自己判 fit。tooltip 是单层顶层(无嵌套、无独立 panel)。",
-      "fe_modules": [
-        {
-          "name": "role 测试态投影",
-          "ref": "femod-roletest"
-        }
-      ],
-      "be_contract": [
-        {
-          "endpoint": "GET /api/llm/registry",
-          "purpose": "角色已 materialize,materialization_report.entries 内嵌每 route 的 role_fit + warnings 供前端渲染灯/tooltip(投影不发额外请求)。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-0"
-        }
-      ],
-      "fe_status": "符合",
-      "be_status": "已实现",
-      "gap_brief": "符合设计:role_fit 来自后端 materialize report,灯 + 单一顶层 tooltip 已实现(无独立 RoleTestResultPanel、无嵌套 tooltip)。",
-      "impl_ref": "fn-45"
-    },
-    {
-      "n": 46,
-      "cap": "role-test",
-      "track": "共",
-      "module": "角色测试",
-      "func": "设计:点 `Test` → 后端 job 对角色里所有模型批量真 probe(不停在第一条成功),实时回填状态灯 + 降级,结果(含失败)写回 draft;测试态以后端 job/持久化为准、切 tab 不丢。",
-      "action": "用户点角色卡上的 `Test` 按钮。",
-      "fe_design": "点 Test → 起一个后端异步 role 测试 job(POST /roles/{name}/test-jobs)→ 按 500ms 节奏轮询 job 进度(GET /role-test-jobs/{job_id})实时把逐 route 状态刷到角色卡的状态灯 → 完成后用 result 刷新各 provider 行的测试态 + role-fit + 降级(进 tooltip)。设计要点:① 对角色里所有模型批量真 probe,不停在第一条成功;② 结果(含失败)回写 draft 证据库 + 持久化;③ 测试态 SSOT 在后端,前端不持易失第二份——切 tab/刷新不丢。未保存先拒测(先 PUT 保存再 test)。\n\n测试态 SSOT 落地(可落地,不靠猜):\n- 后端两个 SSOT 层,前端只读两者、不再自存:(a)活跃 job SSOT = 内存字典 _role_test_jobs(routers/llm.py),正在跑的 live 进度的唯一真相,经 GET /role-test-jobs/{job_id} 投影;(b)持久层 SSOT = /roles/test-results(每角色最近一次完成结果),经 GET /api/llm/roles/test-results 投影。「live 进度」读 (a),「上次结果」读 (b);两者都在后端,前端任何时刻的测试态都是这两者的纯投影。\n- 前端易失层要删:LlmRolesTab 的组件 useState roleTestStates(切 tab 卸载即丢的并行真相)整层删掉,不再在前端缓存 live 进度/结果。改为:① 有活跃 job → 用 job_id 轮询 (a) 投影 live 灯;② 无活跃 job(刚挂载/切回/刷新)→ 从 (b) 投影上次结果。错误条文案也从后端 job 的 status=failed+message 投影,不再走易失层。\n- 切 tab/刷新怎么重投影:组件重挂载时,先拉 (b) GET /roles/test-results 把上次结果种子进灯(覆盖该角色全部 provider 行);若该角色此刻仍有未完成 job(后端 job 未到 completed/failed)→ 用其 job_id 续轮询 (a) 接上 live。即「切走再回」= 重新从 (a)+(b) 投影,不依赖任何前端残留。判据:切 tab 后回来,跑完的显结果、还在跑的显进度,都来自后端,不丢。\n- 测试态 DTO 形状(前端投影什么,不另立结构):① job 轮询返回 RoleTestJobResponse{status: queued|running|completed|failed, provider_statuses: 逐 route 实时态, result?: RoleTestResponse}——live 灯读 provider_statuses。② 完成结果 RoleTestResponse 按「model group → 各 provider」给每条 route 的 {status(testing|ok|failed|blocked|untested), role_fit(using|downgraded|needs_test|not_fit), ui_state(6 态), warnings[]}。③ 持久层 GET /roles/test-results 返回 RoleTestResultsResponse{results: map<role_name, {result: RoleTestResponse}>}。前端 deriveRoleRouteStatus 吃 (ui_state + role_fit + 测试 status) 合成 Can Run/Limited/Blocked/Testing 灯——三个输入全来自上面 DTO,无前端自造字段。",
-      "fe_modules": [
-        {
-          "name": "role 测试态投影",
-          "ref": "femod-roletest"
-        }
-      ],
-      "be_contract": [
-        {
-          "endpoint": "POST /api/llm/roles/{role_name}/test-jobs",
-          "purpose": "起异步 role 测试 job,对角色全部 route 批量真 probe,结果写回 draft + 持久化。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-5"
-        },
-        {
-          "endpoint": "GET /api/llm/roles/test-results",
-          "purpose": "挂载时拉上次持久化测试结果种子回 badge(测试态 SSOT 持久层)。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-4"
-        }
-      ],
-      "fe_status": "符合",
-      "be_status": "已实现",
-      "gap_brief": "后端批量探测 + job + 持久化已就位、挂载已从持久化种子回填(切 tab 显历史);但 live 测试态仍存组件易失 useState(roleTestStates),未完全删易失层改纯后端 job 投影(测试 SSOT 落差的前端收尾),且 RoleTestResultPanel 仍孤儿未挂。",
-      "impl_ref": "fn-46"
-    },
-    {
-      "n": 47,
-      "cap": "role-test-error-banner",
-      "track": "共",
-      "module": "角色测试",
-      "func": "设计:Test 失败时显红色错误条;未保存先拒测(先存再测),把失败显式告诉用户不静默。",
-      "action": "无显式动作(点 Test 后若校验失败/未保存/测试出错自动显条)。",
-      "fe_design": "点 Test 时若角色有未保存校验错误 → 不发测试、直接显红条提示「先保存再测试」;测试 job 失败 → 显红条带失败原因。错误条在角色卡内常驻(不只 toast),显式告警不静默。失败不抹掉上次的结果(保留 last-known result)。",
-      "fe_modules": [
-        {
-          "name": "role 测试态投影",
-          "ref": "femod-roletest"
-        }
-      ],
-      "be_contract": [
-        {
-          "endpoint": "POST /api/llm/roles/{role_name}/test-jobs",
-          "purpose": "job 失败回 status=failed + message,前端据此显错误条。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-5"
-        }
-      ],
-      "fe_status": "符合",
-      "be_status": "已实现",
-      "gap_brief": "符合设计(未保存先拒测 + 红错误条 + 保留上次结果)。",
-      "impl_ref": "fn-47"
-    },
-    {
-      "n": 48,
-      "cap": "role-rename-delete",
-      "track": "共",
-      "module": "角色编辑",
-      "func": "设计:角色卡 `⋮` → Rename(弹框改名)/ Delete(确认后删),管理已建角色。",
-      "action": "用户点角色卡 `⋮` → Rename(弹命名弹框)/ Delete(二次确认后删)。",
-      "fe_design": "角色卡 ⋮ 菜单 → Rename 弹命名弹框回填新名(校验空/重名)→ 改名随整表 upsert;Delete 先弹二次确认 toast → 确认后从 roles 移除该角色 → 入队保存(整表 upsert 缺席即删)/ 或走 DELETE /roles/{name}。改名只改显示名;删除从角色列表移除。",
-      "fe_modules": [
-        {
-          "name": "命名弹框",
-          "ref": "femod-rolenamedialog"
-        }
-      ],
-      "be_contract": [
-        {
-          "endpoint": "DELETE /api/llm/roles/{role_name}",
-          "purpose": "删一个角色后整表重新 materialize 回投影。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-3"
-        },
-        {
-          "endpoint": "PUT /api/llm/roles",
-          "purpose": "改名随整表 upsert 持久化。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-1"
-        }
-      ],
-      "fe_status": "符合",
-      "be_status": "已实现",
-      "gap_brief": "符合设计(改名弹框 + 删除二次确认)。",
-      "impl_ref": "fn-48"
-    },
-    {
-      "n": 49,
-      "cap": "model-bundle-create",
-      "track": "共",
-      "module": "Model Bundle",
-      "func": "设计:`Add Model Bundle`(可复用、跨角色的模型束)——按钮放在与 `Add Role` 统一的位置,新建一个空束。",
-      "action": "用户点 `Add Model Bundle` 按钮,命名后新建空束。",
-      "fe_design": "Add Model Bundle 按钮放到与 Add Role 同位置(统一入口)→ 弹命名弹框 → 新建一个空 bundle(canonical_id='bundle:{id}',可放不同模型、预配 provider)→ 入队保存。束 = 自建的「已排好 fallback 的 model group」,可像 model group 一样拖进角色;已配好/已测的束在 Available Models 顶部 Pinned 槽单独显示(强调可复用)。录入/测试/改名删除 UI 与 role 统一。",
-      "fe_modules": [
-        {
-          "name": "命名弹框",
-          "ref": "femod-rolenamedialog"
-        }
-      ],
-      "be_contract": [
-        {
-          "endpoint": "PUT /api/llm/roles",
-          "purpose": "bundle 随 roles 整表 upsert(model_bundles 同文件),后端 materialize_model_bundle 物化成束的 route 链。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-1"
-        }
-      ],
-      "fe_status": "符合",
-      "be_status": "已实现",
-      "gap_brief": "符合设计(Add Model Bundle 与 Add Role 同位、新建空束);Pinned 顶部槽已有(bundle groups 置顶渲染)。",
-      "impl_ref": "fn-49"
-    },
-    {
-      "n": 50,
-      "cap": "model-bundle-edit",
-      "track": "共",
-      "module": "Model Bundle",
-      "func": "设计:拖模型进束 / 束内编辑(复用角色卡编辑器,束不可嵌套束);束卡也应显状态灯、有 Test 按钮(与 role 统一)。",
-      "action": "用户拖模型进束卡,或在束卡内调序/增删 provider/改意图。",
-      "fe_design": "束卡复用角色卡的编辑器(同一套 model 调序 / provider 链拖序 / 增删 / 意图面板)→ 拖模型进束自动挂组(束不可嵌套束,拖束进束报错)→ 入队保存。设计要求束的测试/状态展示也与 role 统一:束卡应显 role-route 状态灯 + 有 Test 按钮(复用 role 测试)。束内编辑改 bundle 内容。",
-      "fe_modules": [
-        {
-          "name": "默认 provider 选择算法",
-          "ref": "femod-defaultselect"
-        },
-        {
-          "name": "role 测试态投影",
-          "ref": "femod-roletest"
-        }
-      ],
-      "be_contract": [
-        {
-          "endpoint": "PUT /api/llm/roles",
-          "purpose": "束编辑随整表 upsert,materialize_model_bundle 物化束的 route 链。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-1"
-        },
-        {
-          "endpoint": "POST /api/llm/model-bundles/{bundle_id}/test",
-          "purpose": "束 Test(复用 role 测试编排)验束内 route 真连通。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-7"
-        }
-      ],
-      "fe_status": "符合",
-      "be_status": "已实现",
-      "gap_brief": "符合设计(2026-06-20 代码已落地,design-audit vs code 核实,状态回填):原偏差『束卡不显状态灯、无 Test』已闭——ModelBundleCard.tsx(束卡组件)渲真 Test 按钮(data-model-bundle-test-trigger,行 217-230),并把真 testStatuses + roleFitByRouteId(取自 bundle.materialization_report,行 114-116)传进 ModelItem(行 313-326),不再是设计 gap 描述的空 {}。父层接线已 live:AdvancedModelBundlesSection.tsx 传 testStatusesByBundle/onTestBundle(行 84-87);LlmRolesTab.tsx 从真测试 store 经 runBundleTest 算 bundleTestState(行 428-450,503-505)。后端束测试 job 存在:routers/llm.py:1089 POST /model-bundles/{bundle_id}/test-jobs。测试断言:LlmRolesTab.test.tsx:2653(onRunTest 接通时渲束 Test 按钮,#50b)、:2662(live 测试态)、:2591-2601(束 role-route 状态灯)。",
-      "impl_ref": "fn-50"
-    },
-    {
-      "n": 51,
-      "cap": "bundle-as-role-source",
-      "track": "共",
-      "module": "Model Bundle",
-      "func": "设计:把已建束整体拖进角色作一组兜底——是引用(改束 → 所有引用它的角色同步跟着变),不是快照复制;含删束级联 + role 可在引用上局部覆盖。",
-      "action": "用户把一个 Pinned 束拖进某角色卡。",
-      "fe_design": "把束拖进角色 → 角色里挂这个束作一组兜底。设计目标(2026-06-18 PM,统一模型下束=一串 routes,拖进 role 后与 model-group 同级):(1)引用 live 同步——前端拖入时不复制束当时的 route 快照,而存 bundle 引用(bundle_id);materialize 物化时按引用拉取当前束内容展开成 fallback_chain → 改束 → 所有引用它的角色物化出的链跟着变(像共享组件实例)。(2)删束级联——束被删,引用它的角色里那一项引用随之消失(不留失效快照),该角色重物化时少这串 route(可能转 not-fit)。(3)role 可覆盖——束在 role 里就是一串 routes,role 对它照常可调序/Add/删 route/配 provider(role 自己的编排,不回写束本体);意图仍只在 role 级。此条覆盖早期「快照复制」方案。\n局部覆盖存储语义已定(PM 2026-06-18,方案①引用+delta,见机制页 submodule「Model Bundle 物化」):role 存 bundle_id 引用 + 一份「该 role 的覆盖 delta」,role 对引用束的调序/删/加 route/配 provider 都记成 delta、不固化快照;物化时先按引用拉束的当前内容、再叠加该 role 的 delta。冲突铁律——束是源头:束删某条 route 就从该 role 链移除,哪怕 role 覆盖过它;delta 只对仍存在于束里的 route 生效,束里已没的 route 上的 delta 自动失效丢弃。不需要「一改即脱离引用固化快照」的第二套机制。",
-      "fe_modules": [
-        {
-          "name": "默认 provider 选择算法",
-          "ref": "femod-defaultselect"
-        }
-      ],
-      "be_contract": [
-        {
-          "endpoint": "PUT /api/llm/roles",
-          "purpose": "角色存束引用(bundle_id)随整表 upsert,materialize 按引用拉当前束内容展开成 fallback_chain(已实现)。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-1"
-        }
-      ],
-      "fe_status": "符合",
-      "be_status": "已实现",
-      "gap_brief": "符合设计(2026-06-20 代码已落地,design-audit vs code 核实,状态回填):原『快照复制、契约要改』已过时——按引用(非快照)端到端实现完毕。前端:attachBundleReferenceToRole(role-utils.ts:434-446)设 role.bundle_id 且不快照复制 routes;handlePointerUp 命中 BUNDLE_DRAG_PREFIX 时调它并在快照路径前 return(LlmRolesTab.tsx:319-325)。契约往返:RoleEntry.bundle_id 类型(api/llm.ts:369/478),PUT 时序列化(llm.ts:720)、从 registry 读回(llm.ts:678)。后端按引用物化:_materialize_one_role_for_response(routers/llm.py:4798-4809)用 role.bundle_id 解析 materialized_bundles;_materialize_roles_for_response 含纯引用 role(llm.py:4733-4735)。合并归 FROZEN gateway resolver materialize_role_entry(registry/resolver.py:244-270)实时拉 bundle.fallback_chain;_materialize_bundle_chain(resolver.py:273-287)只遍历束当前链、delta 仅对仍存在的 route 生效(束是源头,落到已删 route 的 delta 丢弃)。删束级联:缺束 → 空链(llm.py:4800-4808),delete_model_bundle 清引用它的 role 上 bundle_id(llm.py:1557-1576)。bundle_id 是 frozen GatewayRoleEntry schema 上的真字段(registry/schema.py:275)。测试:LlmRolesTab.test.tsx:2762『#51 bundle drop creates a reference, not a snapshot』断言设 role.bundle_id 而不快照复制(:2792-2800);frozen gateway 有 resolver/schema/临时 role 解析对 bundle_id 引用的测试。",
-      "impl_ref": "fn-51"
-    },
-    {
-      "n": 52,
-      "cap": "model-bundle-rename-delete",
-      "track": "共",
-      "module": "Model Bundle",
-      "func": "设计:束 `⋮` → Edit 改名 / Delete 删束,与 role 的改名删除统一。",
-      "action": "用户点束卡 `⋮` → Edit(弹框改名)/ Delete(确认后删)。",
-      "fe_design": "束卡 ⋮ 菜单 → Edit 弹命名弹框改束名(字段标签 Bundle name,校验空/重名)→ 改名随整表 upsert;Delete 先弹二次确认 → 确认后从 model_bundles 移除 → 入队保存。改名删除 UI 与 role 统一(同一套命名弹框 + 确认 toast)。",
-      "fe_modules": [
-        {
-          "name": "命名弹框",
-          "ref": "femod-rolenamedialog"
-        }
-      ],
-      "be_contract": [
-        {
-          "endpoint": "PUT /api/llm/roles",
-          "purpose": "束改名/删除随 roles 整表 upsert(model_bundles 同文件)持久化。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-1"
-        }
-      ],
-      "fe_status": "符合",
-      "be_status": "已实现",
-      "gap_brief": "符合设计(束改名弹框 + 删除二次确认,与 role 统一)。",
-      "impl_ref": "fn-52"
-    },
-    {
-      "n": 53,
-      "cap": "role-projection-refresh",
-      "track": "共",
-      "module": "角色与可用模型加载",
-      "func": "设计:(被动)其它窗口改了 roles / 窗口聚焦回来 → 自动重投影刷新角色与可用模型,不丢、不显旧数据。",
-      "action": "无显式动作(其它窗口改 roles / 窗口聚焦 / WebSocket roles_changed 事件自动触发)。",
-      "fe_design": "其它窗口改 roles 或本窗口聚焦回来 / 收到 WebSocket roles_changed 事件 → 重拉 registry 快照 → 重投影角色卡 + 可用模型 + 测试态(测试态从后端持久化种子回填)。前端只投影 registry、不持第二份真相,所以重投影即与后端一致;切 tab / 刷新 / 多窗口改动都收敛到后端 SSOT。",
-      "fe_modules": [
-        {
-          "name": "role 测试态投影",
-          "ref": "femod-roletest"
-        }
-      ],
-      "be_contract": [
-        {
-          "endpoint": "GET /api/llm/registry",
-          "purpose": "重拉全量快照(roles + model_groups + bundle)重投影。",
-          "mechanism_ref": "roles_mech_materialize",
-          "iface_ref": "iface-0"
-        }
-      ],
-      "fe_status": "符合",
-      "be_status": "已实现",
-      "gap_brief": "符合设计(被动重投影,只读 registry)。",
-      "impl_ref": "fn-53"
+     "name": "role 测试态投影",
+     "ref": "femod-roletest"
     }
-  ],
-  "fe_defs": [
+   ],
+   "be_contract": [
     {
-      "id": "femod-statebadge",
-      "name": "6 态徽章 provider-state-badge",
-      "explain": "前端共享 UI 组件（跨页）：把后端 route 的 6 态 ui_state 渲染成统一彩色徽章 + 诊断 tooltip（ready🟢/historical_ready🔵/untested⚪/cooling_down 灰+倒计时/failed🔴 带 reason/off 灰），三页同态同色；侧栏可用模型卡的各 provider 行也用这套色（failed 标红不过滤、仍可拖）"
-    },
-    {
-      "id": "femod-rolenamedialog",
-      "name": "命名弹框",
-      "explain": "前端共享 UI 组件（跨页，已在 API Keys 登记）：通用命名/改名弹框，单输入框 + 空名/重名校验，复用作角色命名（#33）、角色改名（#48）、束命名（#49）、束改名（#52）；本页只引用不重造"
-    },
-    {
-      "id": "femod-defaultselect",
-      "name": "默认 provider 选择算法",
-      "explain": "前端共享逻辑（产品策略）：拖模型进角色时自动从该组多 provider 里挑「默认入选哪些 + 按什么序」（ready+untested+🔵 优先、official 优先、排除 failed/off）、active_model 同步首位、重复拖入去重合并；纯前端纯函数，不发请求、不做 materialize"
-    },
-    {
-      "id": "femod-roletest",
-      "name": "role 测试态投影",
-      "explain": "前端共享逻辑：把后端 role 测试 job 实时进度 / 持久化结果 / materialize 报告投影成角色卡每行的测试灯 + role-fit 灯（Can Run/Limited/Blocked）+ 单一顶层降级 tooltip；挂载从持久化种子回填、live 态由 job 轮询驱动；目标删前端易失 roleTestStates、纯投影后端 SSOT；跨页复用进节点 Properties 面板的快捷 Test"
+     "endpoint": "GET /api/llm/registry",
+     "purpose": "一次性拉角色 + 可用模型组(含 6 态 ui_state)+ bundle 快照供前端投影渲染。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-0"
     }
-  ]
+   ],
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "gap_brief": "符合设计。",
+   "impl_ref": "fn-32"
+  },
+  {
+   "n": 33,
+   "cap": "role-create",
+   "track": "共",
+   "module": "角色编辑",
+   "func": "设计:点 `Add Graph Agent Role` → 弹框命名 → 新建一个空角色(允许建无模型空壳),让用户先起个角色名再往里拖模型。",
+   "action": "用户点 `Add Graph Agent Role` 按钮,在命名弹框里填角色名后提交。",
+   "fe_design": "点 Add Graph Agent Role → 弹命名弹框(复用通用命名弹框)→ 提交后在 roles 里新建一个空角色(无 model group 的空壳合法,稍后拖模型补)→ 入队 debounce 自动保存。命名弹框校验空名/重名。新建后角色卡立刻出现,可直接往里拖模型。",
+   "fe_modules": [
+    {
+     "name": "命名弹框",
+     "ref": "femod-rolenamedialog"
+    }
+   ],
+   "be_contract": [
+    {
+     "endpoint": "PUT /api/llm/roles",
+     "purpose": "整表 upsert 角色(新建随 debounce 落库,无单独 add 端点),保存后后端 materialize 回投影。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-1"
+    }
+   ],
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "gap_brief": "符合设计(允许建无模型空壳)。",
+   "impl_ref": "fn-33"
+  },
+  {
+   "n": 34,
+   "cap": "available-models-search",
+   "track": "共",
+   "module": "角色与可用模型加载",
+   "func": "设计:侧栏按 model / provider / id 多词搜可用模型,长列表里快速找到要拖的模型。",
+   "action": "用户在 Available Models 侧栏顶部搜索框输入关键词。",
+   "fe_design": "在侧栏搜索框输入 → 纯前端按多词匹配过滤可用模型(匹配模型显示名 / canonical id / 各 provider 标签 / provider model id),支持紧凑匹配(忽略分隔符)与多 token 全含。过滤纯前端、不发请求;清空按钮一键复位。匹配结果实时刷新模型计数徽章。",
+   "fe_modules": [],
+   "be_contract": [],
+   "fe_status": "符合",
+   "be_status": "n/a",
+   "gap_brief": "符合设计(纯前端多词搜索,无后端契约)。",
+   "impl_ref": "fn-34"
+  },
+  {
+   "n": 35,
+   "cap": "available-model-provider-states",
+   "track": "共",
+   "module": "状态投影",
+   "func": "设计:展开模型卡看各 provider 的 6 态状态(含配置缺口红显引导),不再静默过滤掉缺配置/关闭的 provider。",
+   "action": "用户点侧栏某张模型卡展开(或鼠标悬停看各 provider 行)。",
+   "fe_design": "模型卡内每个 provider 行显该 route 的 6 态色(🟢 ready / 🔵 historical_ready 以前联通过 / ⚪ untested / 🔴 failed 带 reason / 灰+倒计时 cooling_down / 灰 off)。状态权威来自后端 model_groups DTO 内嵌的 ui_state,前端只读渲染、不持第二份。设计目标一:配置缺口(缺/错 key、base_url、protocol、model id)的 provider 行标红(failed + reason=missing_config)+「去配置」引导,点击跳 API Keys 页修,不静默过滤、不默认选中。设计目标二:failed 不被滤掉(仍列、标红、仍可拖,换 role 配置/重试可能就好)。",
+   "fe_modules": [
+    {
+     "name": "6 态徽章 provider-state-badge",
+     "ref": "femod-statebadge"
+    }
+   ],
+   "be_contract": [
+    {
+     "endpoint": "GET /api/llm/registry",
+     "purpose": "返回 model_groups DTO,每个 provider_model 内嵌 6 态 ui_state + reason_code 供前端着色(投影不发额外请求)。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-0"
+    }
+   ],
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "gap_brief": "侧栏 6 态色已含 failed/off 且 failed 不被过滤(保留可拖),符合设计主体;尚缺的是 failed 行的「去配置」跳转引导与「弃用区」(off/disabled 折叠区),属增量 UI。",
+   "impl_ref": "fn-35"
+  },
+  {
+   "n": 36,
+   "cap": "role-model-map-drag",
+   "track": "共",
+   "module": "角色编辑",
+   "func": "设计:把模型从侧栏拖进角色卡 → 自动挂成一个 model group + 默认选可用 provider 在前,一步建好该模型的兜底组。",
+   "action": "用户从侧栏按住一张模型卡拖到某角色卡里松手。",
+   "fe_design": "拖模型进角色卡 → 取该 model group → 按默认选择算法选可用 provider(ready+untested+🔵 蓝优先、official 优先、排除 failed/off)并按状态/kind 排序 → 写成角色里一个 model group(结构化 model_groups,canonical_id + 各 provider route)→ active_model 同步首位 → 入队保存。重复拖入已在该角色的 model group 不建副本(合并新可用 provider)。设计分工:前端存的是结构化 model group(给用户编辑),后端 materialize 才物化成平铺兜底链。",
+   "fe_modules": [
+    {
+     "name": "默认 provider 选择算法",
+     "ref": "femod-defaultselect"
+    }
+   ],
+   "be_contract": [
+    {
+     "endpoint": "PUT /api/llm/roles",
+     "purpose": "拖入后角色结构变了,随 debounce 整表 upsert,后端 materialize 回投影。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-1"
+    }
+   ],
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "gap_brief": "符合设计(拖入自动挂组 + 默认选 + 去重);默认选择对蓝态的显式优先可在算法补权重(现蓝态落默认桶)。",
+   "impl_ref": "fn-36"
+  },
+  {
+   "n": 37,
+   "cap": "role-model-reorder",
+   "track": "共",
+   "module": "角色编辑",
+   "func": "设计:拖动调整角色里多个 model 的兜底序(谁先试),active_model 永远同步第一个。",
+   "action": "用户在角色卡内上下拖动 model 卡调整顺序。",
+   "fe_design": "在角色卡内拖动 model 卡 → 改 model 之间的兜底序(谁先试谁后试)→ active_model 同步成第一个 model(syncActiveModelToFirst)→ 入队保存。模型序就是引擎物化 fallback_chain 时的模型层顺序(见机制页:遍历按模型序 → 组内 provider 序)。",
+   "fe_modules": [],
+   "be_contract": [
+    {
+     "endpoint": "PUT /api/llm/roles",
+     "purpose": "调序后整表 upsert,顺序随结构化 model_groups 持久化,materialize 按此序排链。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-1"
+    }
+   ],
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "gap_brief": "符合设计(active_model 同步首位)。",
+   "impl_ref": "fn-37"
+  },
+  {
+   "n": 38,
+   "cap": "role-provider-reorder",
+   "track": "共",
+   "module": "角色编辑",
+   "func": "设计:拖动 provider 标签调整某模型组内的 provider 兜底序(只改这个模型的 provider 顺序)。",
+   "action": "用户在某 model 组内拖动 provider 标签调整顺序。",
+   "fe_design": "在 model 组的 provider 链里拖动某 provider 标签 → 只改该模型组内 provider 的先后(组间不影响)→ 入队保存。provider 序是引擎物化时该模型组内的 provider 层兜底顺序。provider 链用网格 + 拖拽排序,每行带序号 + role-route 状态灯。",
+   "fe_modules": [],
+   "be_contract": [
+    {
+     "endpoint": "PUT /api/llm/roles",
+     "purpose": "provider 序变更随整表 upsert 持久化,materialize 按组内序排该模型的 provider 兜底。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-1"
+    }
+   ],
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "gap_brief": "符合设计。",
+   "impl_ref": "fn-38"
+  },
+  {
+   "n": 39,
+   "cap": "role-provider-add-remove",
+   "track": "共",
+   "module": "角色编辑",
+   "func": "设计:`Add provider` 给某模型补加一个 provider / 垃圾桶移除单个 provider,微调该模型的 provider 候选。",
+   "action": "用户在某 model 组点 `Add provider` 选一个补加,或点某 provider 行的垃圾桶移除。",
+   "fe_design": "点 Add provider → 下拉列出该模型还没加的可补 provider → 选一个补进组(去重)→ 入队保存;点垃圾桶 → 从该模型组移除这个 provider → 入队保存。Add 的候选来自该模型尚未入选的 owned provider;移除不影响其它模型组。",
+   "fe_modules": [
+    {
+     "name": "默认 provider 选择算法",
+     "ref": "femod-defaultselect"
+    }
+   ],
+   "be_contract": [
+    {
+     "endpoint": "PUT /api/llm/roles",
+     "purpose": "增删 provider 后整表 upsert 持久化。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-1"
+    }
+   ],
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "gap_brief": "符合设计。",
+   "impl_ref": "fn-39"
+  },
+  {
+   "n": 40,
+   "cap": "role-model-remove",
+   "track": "共",
+   "module": "角色编辑",
+   "func": "设计:删掉角色里整个 model group(这个模型连同其所有 provider 兜底一起移除)。",
+   "action": "用户在角色卡内点某 model 卡的移除(或经 model 卡操作删整组)。",
+   "fe_design": "在角色卡内移除某 model group → 把这个模型连同它下面所有 provider route 从角色里删掉 → active_model 重算同步首位 → 入队保存。删整组只动这个角色,不影响别的角色或侧栏可用模型。",
+   "fe_modules": [],
+   "be_contract": [
+    {
+     "endpoint": "PUT /api/llm/roles",
+     "purpose": "删组后整表 upsert 持久化。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-1"
+    }
+   ],
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "gap_brief": "符合设计。",
+   "impl_ref": "fn-40"
+  },
+  {
+   "n": 41,
+   "cap": "role-model-fallback-toggle",
+   "track": "共",
+   "module": "角色编辑",
+   "func": "设计:切 `Model Fallback` 开关——关则只用第一个 model group(provider 兜底永远在),控制要不要多模型兜底。",
+   "action": "用户切角色设置里的 `Model Fallback` 开关。",
+   "fe_design": "切 Model Fallback 开关 → 写进角色的 model_fallback_enabled → 入队保存。语义:关闭时引擎物化只取第一个 model group(provider 层兜底永远在,关的只是「多模型」那层);开启时多个 model group 都进兜底链。开关由角色设置面板里的 Switch 呈现。",
+   "fe_modules": [],
+   "be_contract": [
+    {
+     "endpoint": "PUT /api/llm/roles",
+     "purpose": "开关变更整表 upsert,materialize 读 model_fallback_enabled 决定是否只取首组。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-1"
+    }
+   ],
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "gap_brief": "符合设计(materialize 尊重 fallback 开关,关则 groups[:1])。",
+   "impl_ref": "fn-41"
+  },
+  {
+   "n": 42,
+   "cap": "role-thinking-intent",
+   "track": "共",
+   "module": "角色意图",
+   "func": "设计:配 Thinking 偏好——off / preferred / required 三档互斥,用单一三态控件表达(不用两个开关)。",
+   "action": "用户在角色设置面板点 Thinking 的三档单选之一。",
+   "fe_design": "Thinking 用一个三档互斥的单选控件(off / preferred / required)→ 选哪档写进角色 intent.thinking → 入队保存。三档语义:off 不要思考;preferred 偏好但不支持只降级(downgraded + warning,仍入链);required 必须支持,能力未知→needs_test、明确不支持→not_fit(不入链)。控件应由后端 build_runtime_setting_descriptors(把 route capability 投影成控件描述符)驱动,前端不硬编码各 provider 规则。",
+   "fe_modules": [],
+   "be_contract": [
+    {
+     "endpoint": "PUT /api/llm/roles",
+     "purpose": "thinking 偏好随 intent 整表 upsert,materialize 的 _apply_intent 据此算 role_fit。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-1"
+    }
+   ],
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "gap_brief": "符合设计:thinking 已是 off/preferred/required 三档互斥单选(RadioGroup),required 档已落地;后端 _apply_intent 已支持三档 role_fit。",
+   "impl_ref": "fn-42"
+  },
+  {
+   "n": 43,
+   "cap": "role-output-token-intent",
+   "track": "共",
+   "module": "角色意图",
+   "func": "设计:配 Output Token 目标——用档位选择器表达 default / Use Max / target(配值)/ required_minimum(达不到判 Not Fit);downgrade 默认 allow、不暴露 UI。",
+   "action": "用户在角色设置面板选 Output Token 档位,target/required_minimum 档再填值。",
+   "fe_design": "Output Token 用「档位下拉 + 值输入」组合:档位 = default / maximum_available(Use Max)/ target / required_minimum → target 与 required_minimum 档才启用值输入 → 写进角色 intent.target_output_tokens(TokenIntent{mode, value?, downgrade})→ 入队保存。downgrade 策略 schema 保留、默认 allow、mvp1 不做 UI;required_minimum{value} 语义 = 要求该 route 最大可用输出 token ≥ value(只约束 output、不涉 context),route 输出上限 < value → role_fit 转 not_fit、不进 fallback_chain(是 role 下限要求高于 route 上限才判不合适,方向别写反);同步配 target_context_tokens(同一套档位控件)。cost_priority mvp1 砍掉、schema 不留。",
+   "fe_modules": [],
+   "be_contract": [
+    {
+     "endpoint": "PUT /api/llm/roles",
+     "purpose": "token 意图随 intent 整表 upsert,materialize 的 _apply_output_token_intent 据 mode/value/downgrade 算 role_fit。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-1"
+    }
+   ],
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "gap_brief": "符合设计:已是档位下拉(Default/Use Max/Target/Required Min)+ 值输入,且补了 context token 档;downgrade 默认 allow 不暴露、cost_priority 未做,均符合;后端 token 意图 role_fit 已落地。",
+   "impl_ref": "fn-43"
+  },
+  {
+   "n": 44,
+   "cap": "role-output-limit-summary",
+   "track": "共",
+   "module": "角色意图",
+   "func": "设计:看 `Route max token` 摘要——只读地投影角色里各 route 的 token 上限(min/max 范围),帮用户判断填多少合理。",
+   "action": "无显式动作(角色设置面板里随意图控件一起显示)。",
+   "fe_design": "角色设置面板里只读显示该角色当前各 route 的 token 上限摘要:从 providerModelsByRouteId(route→能力)取每条 route 的 max_input/max_output_tokens,聚合成 min/max 范围 + 已知/未知计数 → 渲染成一句摘要(如「Output route max token range: min … / max …」)。纯前端投影 route capability、只读,不发请求。",
+   "fe_modules": [],
+   "be_contract": [
+    {
+     "endpoint": "GET /api/llm/registry",
+     "purpose": "route 的 token 上限来自 model_groups DTO 里 provider_model 的 capabilities(投影,不发额外请求)。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-0"
+    }
+   ],
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "gap_brief": "符合设计(context + output 双摘要,只读投影 route capability)。",
+   "impl_ref": "fn-44"
+  },
+  {
+   "n": 45,
+   "cap": "role-route-status-light",
+   "track": "共",
+   "module": "状态投影",
+   "func": "设计:悬停 provider 行的状态灯看 role-match(Can Run / Limited / Blocked)+ 诊断,一眼知道这条 route 对本角色合不合适。",
+   "action": "用户鼠标悬停某 provider 行的 role-route 状态灯。",
+   "fe_design": "每个 provider 行显一个 role-route 状态灯(Can Run 绿 / Limited 黄 / Blocked 红 / Testing),由 deriveRoleRouteStatus 把后端 materialization_report 的 role_fit(using/downgraded/needs_test/not_fit)+ 该 route 的 6 态 ui_state + 实时测试态合成 → 悬停显单一顶层 tooltip:route 模型名 + role-match 诊断行(fail/downgrade 原因)+ 能力/token 上限。role_fit 权威来自后端 materialize report,前端只渲染、不自己判 fit。tooltip 是单层顶层(无嵌套、无独立 panel)。",
+   "fe_modules": [
+    {
+     "name": "role 测试态投影",
+     "ref": "femod-roletest"
+    }
+   ],
+   "be_contract": [
+    {
+     "endpoint": "GET /api/llm/registry",
+     "purpose": "角色已 materialize,materialization_report.entries 内嵌每 route 的 role_fit + warnings 供前端渲染灯/tooltip(投影不发额外请求)。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-0"
+    }
+   ],
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "gap_brief": "符合设计:role_fit 来自后端 materialize report,灯 + 单一顶层 tooltip 已实现(无独立 RoleTestResultPanel、无嵌套 tooltip)。",
+   "impl_ref": "fn-45"
+  },
+  {
+   "n": 46,
+   "cap": "role-test",
+   "track": "共",
+   "module": "角色测试",
+   "func": "设计:点 `Test` → 后端 job 对角色里所有模型批量真 probe(不停在第一条成功),实时回填状态灯 + 降级,结果(含失败)写回 Probe Knowledge Catalog;测试态以后端 job/持久化为准、切 tab 不丢。",
+   "action": "用户点角色卡上的 `Test` 按钮。",
+   "fe_design": "点 Test → 起一个后端异步 role 测试 job(POST /roles/{name}/test-jobs)→ 按 500ms 节奏轮询 job 进度(GET /role-test-jobs/{job_id})实时把逐 route 状态刷到角色卡的状态灯 → 完成后用 result 刷新各 provider 行的测试态 + role-fit + 降级(进 tooltip)。设计要点:① 对角色里所有模型批量真 probe,不停在第一条成功;② 结果(含失败)回写 draft 证据库 + 持久化;③ 测试态 SSOT 在后端,前端不持易失第二份——切 tab/刷新不丢。未保存先拒测(先 PUT 保存再 test)。\n\n测试态 SSOT 落地(可落地,不靠猜):\n- 后端两个 SSOT 层,前端只读两者、不再自存:(a)活跃 job SSOT = 内存字典 _role_test_jobs(routers/llm.py),正在跑的 live 进度的唯一真相,经 GET /role-test-jobs/{job_id} 投影;(b)持久层 SSOT = /roles/test-results(每角色最近一次完成结果),经 GET /api/llm/roles/test-results 投影。「live 进度」读 (a),「上次结果」读 (b);两者都在后端,前端任何时刻的测试态都是这两者的纯投影。\n- 前端易失层要删:LlmRolesTab 的组件 useState roleTestStates(切 tab 卸载即丢的并行真相)整层删掉,不再在前端缓存 live 进度/结果。改为:① 有活跃 job → 用 job_id 轮询 (a) 投影 live 灯;② 无活跃 job(刚挂载/切回/刷新)→ 从 (b) 投影上次结果。错误条文案也从后端 job 的 status=failed+message 投影,不再走易失层。\n- 切 tab/刷新怎么重投影:组件重挂载时,先拉 (b) GET /roles/test-results 把上次结果种子进灯(覆盖该角色全部 provider 行);若该角色此刻仍有未完成 job(后端 job 未到 completed/failed)→ 用其 job_id 续轮询 (a) 接上 live。即「切走再回」= 重新从 (a)+(b) 投影,不依赖任何前端残留。判据:切 tab 后回来,跑完的显结果、还在跑的显进度,都来自后端,不丢。\n- 测试态 DTO 形状(前端投影什么,不另立结构):① job 轮询返回 RoleTestJobResponse{status: queued|running|completed|failed, provider_statuses: 逐 route 实时态, result?: RoleTestResponse}——live 灯读 provider_statuses。② 完成结果 RoleTestResponse 按「model group → 各 provider」给每条 route 的 {status(testing|ok|failed|blocked|untested), role_fit(using|downgraded|needs_test|not_fit), ui_state(6 态), warnings[]}。③ 持久层 GET /roles/test-results 返回 RoleTestResultsResponse{results: map<role_name, {result: RoleTestResponse}>}。前端 deriveRoleRouteStatus 吃 (ui_state + role_fit + 测试 status) 合成 Can Run/Limited/Blocked/Testing 灯——三个输入全来自上面 DTO,无前端自造字段。",
+   "fe_modules": [
+    {
+     "name": "role 测试态投影",
+     "ref": "femod-roletest"
+    }
+   ],
+   "be_contract": [
+    {
+     "endpoint": "POST /api/llm/roles/{role_name}/test-jobs",
+     "purpose": "起异步 role 测试 job,对角色全部 route 批量真 probe,结果写回 Probe Knowledge Catalog + 持久化。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-5"
+    },
+    {
+     "endpoint": "GET /api/llm/roles/test-results",
+     "purpose": "挂载时拉上次持久化测试结果种子回 badge(测试态 SSOT 持久层)。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-4"
+    }
+   ],
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "gap_brief": "后端批量探测 + job + 持久化已就位、挂载已从持久化种子回填(切 tab 显历史);但 live 测试态仍存组件易失 useState(roleTestStates),未完全删易失层改纯后端 job 投影(测试 SSOT 落差的前端收尾),且 RoleTestResultPanel 仍孤儿未挂。",
+   "impl_ref": "fn-46"
+  },
+  {
+   "n": 47,
+   "cap": "role-test-error-banner",
+   "track": "共",
+   "module": "角色测试",
+   "func": "设计:Test 失败时显红色错误条;未保存先拒测(先存再测),把失败显式告诉用户不静默。",
+   "action": "无显式动作(点 Test 后若校验失败/未保存/测试出错自动显条)。",
+   "fe_design": "点 Test 时若角色有未保存校验错误 → 不发测试、直接显红条提示「先保存再测试」;测试 job 失败 → 显红条带失败原因。错误条在角色卡内常驻(不只 toast),显式告警不静默。失败不抹掉上次的结果(保留 last-known result)。",
+   "fe_modules": [
+    {
+     "name": "role 测试态投影",
+     "ref": "femod-roletest"
+    }
+   ],
+   "be_contract": [
+    {
+     "endpoint": "POST /api/llm/roles/{role_name}/test-jobs",
+     "purpose": "job 失败回 status=failed + message,前端据此显错误条。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-5"
+    }
+   ],
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "gap_brief": "符合设计(未保存先拒测 + 红错误条 + 保留上次结果)。",
+   "impl_ref": "fn-47"
+  },
+  {
+   "n": 48,
+   "cap": "role-rename-delete",
+   "track": "共",
+   "module": "角色编辑",
+   "func": "设计:角色卡 `⋮` → Rename(弹框改名)/ Delete(确认后删),管理已建角色。",
+   "action": "用户点角色卡 `⋮` → Rename(弹命名弹框)/ Delete(二次确认后删)。",
+   "fe_design": "角色卡 ⋮ 菜单 → Rename 弹命名弹框回填新名(校验空/重名)→ 改名随整表 upsert;Delete 先弹二次确认 toast → 确认后从 roles 移除该角色 → 入队保存(整表 upsert 缺席即删)/ 或走 DELETE /roles/{name}。改名只改显示名;删除从角色列表移除。",
+   "fe_modules": [
+    {
+     "name": "命名弹框",
+     "ref": "femod-rolenamedialog"
+    }
+   ],
+   "be_contract": [
+    {
+     "endpoint": "DELETE /api/llm/roles/{role_name}",
+     "purpose": "删一个角色后整表重新 materialize 回投影。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-3"
+    },
+    {
+     "endpoint": "PUT /api/llm/roles",
+     "purpose": "改名随整表 upsert 持久化。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-1"
+    }
+   ],
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "gap_brief": "符合设计(改名弹框 + 删除二次确认)。",
+   "impl_ref": "fn-48"
+  },
+  {
+   "n": 49,
+   "cap": "model-bundle-create",
+   "track": "共",
+   "module": "Model Bundle",
+   "func": "设计:`Add Model Bundle`(可复用、跨角色的模型束)——按钮放在 Model Bundles 内容/空态下方左侧,与上方 `Add Graph Agent Role` 的模块底部入口统一,新建一个空束。",
+   "action": "用户点 `Add Model Bundle` 按钮,命名后新建空束。",
+   "fe_design": "Add Model Bundle 按钮放到 Model Bundles 列表/空态之后的模块底部左侧,和 Graph Agent Roles 的 Add Role 入口同一节奏(标题只保留模块名,不把动作挤在标题行右侧)→ 弹命名弹框 → 新建一个空 bundle(canonical_id='bundle:{id}',可放不同模型、预配 provider)→ 入队保存。束 = 自建的「已排好 fallback 的 model group」,可像 model group 一样拖进角色;已配好/已测的束在 Available Models 顶部 Pinned 槽单独显示(强调可复用)。录入/测试/改名删除 UI 与 role 统一。",
+   "fe_modules": [
+    {
+     "name": "命名弹框",
+     "ref": "femod-rolenamedialog"
+    }
+   ],
+   "be_contract": [
+    {
+     "endpoint": "PUT /api/llm/roles",
+     "purpose": "bundle 随 roles 整表 upsert(model_bundles 同文件),后端 materialize_model_bundle 物化成束的 route 链。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-1"
+    }
+   ],
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "gap_brief": "符合设计(Add Model Bundle 在 Model Bundles 内容/空态下方左侧,与 Add Role 模块底部入口统一;新建空束);Pinned 顶部槽已有(bundle groups 置顶渲染)。",
+   "impl_ref": "fn-49"
+  },
+  {
+   "n": 50,
+   "cap": "model-bundle-edit",
+   "track": "共",
+   "module": "Model Bundle",
+   "func": "设计:拖模型进束 / 束内编辑(复用角色卡编辑器,束不可嵌套束);束卡也应显状态灯、有 Test 按钮(与 role 统一)。",
+   "action": "用户拖模型进束卡,或在束卡内调序/增删 provider/改意图。",
+   "fe_design": "束卡复用角色卡的编辑器(同一套 model 调序 / provider 链拖序 / 增删 / 意图面板)→ 拖模型进束自动挂组(束不可嵌套束,拖束进束报错)→ 入队保存。设计要求束的测试/状态展示也与 role 统一:束卡应显 role-route 状态灯 + 有 Test 按钮(复用 role 测试)。束内编辑改 bundle 内容。",
+   "fe_modules": [
+    {
+     "name": "默认 provider 选择算法",
+     "ref": "femod-defaultselect"
+    },
+    {
+     "name": "role 测试态投影",
+     "ref": "femod-roletest"
+    }
+   ],
+   "be_contract": [
+    {
+     "endpoint": "PUT /api/llm/roles",
+     "purpose": "束编辑随整表 upsert,materialize_model_bundle 物化束的 route 链。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-1"
+    },
+    {
+     "endpoint": "POST /api/llm/model-bundles/{bundle_id}/test",
+     "purpose": "束 Test(复用 role 测试编排)验束内 route 真连通。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-7"
+    }
+   ],
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "gap_brief": "符合设计(2026-06-20 代码已落地,design-audit vs code 核实,状态回填):原偏差『束卡不显状态灯、无 Test』已闭——ModelBundleCard.tsx(束卡组件)渲真 Test 按钮(data-model-bundle-test-trigger,行 217-230),并把真 testStatuses + roleFitByRouteId(取自 bundle.materialization_report,行 114-116)传进 ModelItem(行 313-326),不再是设计 gap 描述的空 {}。父层接线已 live:AdvancedModelBundlesSection.tsx 传 testStatusesByBundle/onTestBundle(行 84-87);LlmRolesTab.tsx 从真测试 store 经 runBundleTest 算 bundleTestState(行 428-450,503-505)。后端束测试 job 存在:routers/llm.py:1089 POST /model-bundles/{bundle_id}/test-jobs。测试断言:LlmRolesTab.test.tsx:2653(onRunTest 接通时渲束 Test 按钮,#50b)、:2662(live 测试态)、:2591-2601(束 role-route 状态灯)。",
+   "impl_ref": "fn-50"
+  },
+  {
+   "n": 51,
+   "cap": "bundle-as-role-source",
+   "track": "共",
+   "module": "Model Bundle",
+   "func": "设计:把已建束整体拖进角色作一组兜底——是引用(改束 → 所有引用它的角色同步跟着变),不是快照复制;含删束级联 + role 可在引用上局部覆盖。",
+   "action": "用户把一个 Pinned 束拖进某角色卡。",
+   "fe_design": "把束拖进角色 → 角色里挂这个束作一组兜底。设计目标(2026-06-18 PM,统一模型下束=一串 routes,拖进 role 后与 model-group 同级):(1)引用 live 同步——前端拖入时不复制束当时的 route 快照,而存 bundle 引用(bundle_id);materialize 物化时按引用拉取当前束内容展开成 fallback_chain → 改束 → 所有引用它的角色物化出的链跟着变(像共享组件实例)。(2)删束级联——束被删,引用它的角色里那一项引用随之消失(不留失效快照),该角色重物化时少这串 route(可能转 not-fit)。(3)role 可覆盖——束在 role 里就是一串 routes,role 对它照常可调序/Add/删 route/配 provider(role 自己的编排,不回写束本体);意图仍只在 role 级。此条覆盖早期「快照复制」方案。\n局部覆盖存储语义已定(PM 2026-06-18,方案①引用+delta,见机制页 submodule「Model Bundle 物化」):role 存 bundle_id 引用 + 一份「该 role 的覆盖 delta」,role 对引用束的调序/删/加 route/配 provider 都记成 delta、不固化快照;物化时先按引用拉束的当前内容、再叠加该 role 的 delta。冲突铁律——束是源头:束删某条 route 就从该 role 链移除,哪怕 role 覆盖过它;delta 只对仍存在于束里的 route 生效,束里已没的 route 上的 delta 自动失效丢弃。不需要「一改即脱离引用固化快照」的第二套机制。",
+   "fe_modules": [
+    {
+     "name": "默认 provider 选择算法",
+     "ref": "femod-defaultselect"
+    }
+   ],
+   "be_contract": [
+    {
+     "endpoint": "PUT /api/llm/roles",
+     "purpose": "角色存束引用(bundle_id)随整表 upsert,materialize 按引用拉当前束内容展开成 fallback_chain(已实现)。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-1"
+    }
+   ],
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "gap_brief": "符合设计(2026-06-20 代码已落地,design-audit vs code 核实,状态回填):原『快照复制、契约要改』已过时——按引用(非快照)端到端实现完毕。前端:attachBundleReferenceToRole(role-utils.ts:434-446)设 role.bundle_id 且不快照复制 routes;handlePointerUp 命中 BUNDLE_DRAG_PREFIX 时调它并在快照路径前 return(LlmRolesTab.tsx:319-325)。契约往返:RoleEntry.bundle_id 类型(api/llm.ts:369/478),PUT 时序列化(llm.ts:720)、从 registry 读回(llm.ts:678)。后端按引用物化:_materialize_one_role_for_response(routers/llm.py:4798-4809)用 role.bundle_id 解析 materialized_bundles;_materialize_roles_for_response 含纯引用 role(llm.py:4733-4735)。合并归 FROZEN gateway resolver materialize_role_entry(registry/resolver.py:244-270)实时拉 bundle.fallback_chain;_materialize_bundle_chain(resolver.py:273-287)只遍历束当前链、delta 仅对仍存在的 route 生效(束是源头,落到已删 route 的 delta 丢弃)。删束级联:缺束 → 空链(llm.py:4800-4808),delete_model_bundle 清引用它的 role 上 bundle_id(llm.py:1557-1576)。bundle_id 是 frozen GatewayRoleEntry schema 上的真字段(registry/schema.py:275)。测试:LlmRolesTab.test.tsx:2762『#51 bundle drop creates a reference, not a snapshot』断言设 role.bundle_id 而不快照复制(:2792-2800);frozen gateway 有 resolver/schema/临时 role 解析对 bundle_id 引用的测试。",
+   "impl_ref": "fn-51"
+  },
+  {
+   "n": 52,
+   "cap": "model-bundle-rename-delete",
+   "track": "共",
+   "module": "Model Bundle",
+   "func": "设计:束 `⋮` → Edit 改名 / Delete 删束,与 role 的改名删除统一。",
+   "action": "用户点束卡 `⋮` → Edit(弹框改名)/ Delete(确认后删)。",
+   "fe_design": "束卡 ⋮ 菜单 → Edit 弹命名弹框改束名(字段标签 Bundle name,校验空/重名)→ 改名随整表 upsert;Delete 先弹二次确认 → 确认后从 model_bundles 移除 → 入队保存。改名删除 UI 与 role 统一(同一套命名弹框 + 确认 toast)。",
+   "fe_modules": [
+    {
+     "name": "命名弹框",
+     "ref": "femod-rolenamedialog"
+    }
+   ],
+   "be_contract": [
+    {
+     "endpoint": "PUT /api/llm/roles",
+     "purpose": "束改名/删除随 roles 整表 upsert(model_bundles 同文件)持久化。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-1"
+    }
+   ],
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "gap_brief": "符合设计(束改名弹框 + 删除二次确认,与 role 统一)。",
+   "impl_ref": "fn-52"
+  },
+  {
+   "n": 53,
+   "cap": "role-projection-refresh",
+   "track": "共",
+   "module": "角色与可用模型加载",
+   "func": "设计:(被动)其它窗口改了 roles / 窗口聚焦回来 → 自动重投影刷新角色与可用模型,不丢、不显旧数据。",
+   "action": "无显式动作(其它窗口改 roles / 窗口聚焦 / WebSocket roles_changed 事件自动触发)。",
+   "fe_design": "其它窗口改 roles 或本窗口聚焦回来 / 收到 WebSocket roles_changed 事件 → 重拉 registry 快照 → 重投影角色卡 + 可用模型 + 测试态(测试态从后端持久化种子回填)。前端只投影 registry、不持第二份真相,所以重投影即与后端一致;切 tab / 刷新 / 多窗口改动都收敛到后端 SSOT。",
+   "fe_modules": [
+    {
+     "name": "role 测试态投影",
+     "ref": "femod-roletest"
+    }
+   ],
+   "be_contract": [
+    {
+     "endpoint": "GET /api/llm/registry",
+     "purpose": "重拉全量快照(roles + model_groups + bundle)重投影。",
+     "mechanism_ref": "roles_mech_materialize",
+     "iface_ref": "iface-0"
+    }
+   ],
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "gap_brief": "符合设计(被动重投影,只读 registry)。",
+   "impl_ref": "fn-53"
+  }
+ ],
+ "fe_defs": [
+  {
+   "id": "femod-statebadge",
+   "name": "6 态徽章 provider-state-badge",
+   "explain": "前端共享 UI 组件（跨页）：把后端 route 的 6 态 ui_state 渲染成统一彩色徽章 + 诊断 tooltip（ready🟢/historical_ready🔵/untested⚪/cooling_down 灰+倒计时/failed🔴 带 reason/off 灰），三页同态同色；侧栏可用模型卡的各 provider 行也用这套色（failed 标红不过滤、仍可拖）"
+  },
+  {
+   "id": "femod-rolenamedialog",
+   "name": "命名弹框",
+   "explain": "前端共享 UI 组件（跨页，已在 API Keys 登记）：通用命名/改名弹框，单输入框 + 空名/重名校验，复用作角色命名（#33）、角色改名（#48）、束命名（#49）、束改名（#52）；本页只引用不重造"
+  },
+  {
+   "id": "femod-defaultselect",
+   "name": "默认 provider 选择算法",
+   "explain": "前端共享逻辑（产品策略）：拖模型进角色时自动从该组多 provider 里挑「默认入选哪些 + 按什么序」（ready+untested+🔵 优先、official 优先、排除 failed/off）、active_model 同步首位、重复拖入去重合并；纯前端纯函数，不发请求、不做 materialize"
+  },
+  {
+   "id": "femod-roletest",
+   "name": "role 测试态投影",
+   "explain": "前端共享逻辑：把后端 role 测试 job 实时进度 / 持久化结果 / materialize 报告投影成角色卡每行的测试灯 + role-fit 灯（Can Run/Limited/Blocked）+ 单一顶层降级 tooltip；挂载从持久化种子回填、live 态由 job 轮询驱动；目标删前端易失 roleTestStates、纯投影后端 SSOT；跨页复用进节点 Properties 面板的快捷 Test"
+  }
+ ]
 }

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
 import { Plus, TriangleAlert } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
@@ -11,7 +12,7 @@ import {
 } from "@/components/ui/catalog-accordion"
 import { SaveStatusBadge } from "@/components/ui/save-status-badge"
 import { AddProviderForm, ProviderCard, ProviderListSkeleton } from "../../api-keys"
-import { officialProviderDrafts, thirdPartyProviderDrafts, notableProviderKeyForDraft, shouldShowManualModelPanel } from "../provider-utils"
+import { officialProviderDrafts, thirdPartyProviderDrafts, notableProviderKeyForDraft, providerEndpointDraftsForAction, shouldShowManualModelPanel } from "../provider-utils"
 import { SectionTitle } from "../shared"
 import type { SettingsPageContentProps } from "../types"
 
@@ -23,7 +24,6 @@ export function ApiKeysTab({
   saveStatus,
   onProviderFieldChange,
   onGetProviderModels,
-  onTestProviderEndpoint,
   onDeleteProvider,
   onAddProvider,
   onProviderModelsUpdated,
@@ -36,7 +36,6 @@ export function ApiKeysTab({
   | "saveStatus"
   | "onProviderFieldChange"
   | "onGetProviderModels"
-  | "onTestProviderEndpoint"
   | "onDeleteProvider"
   | "onAddProvider"
   | "onProviderModelsUpdated"
@@ -57,6 +56,7 @@ export function ApiKeysTab({
         description={t("apiKeys.description")}
         trailing={<SaveStatusBadge status={saveStatus} />}
       />
+      <ProbeCatalogStatus probeCatalog={credentials.probe_catalog} />
       <div className="space-y-4" data-testid="api-keys-list">
         {credentialsLoading ? (
           <ProviderListSkeleton count={5} />
@@ -77,7 +77,7 @@ export function ApiKeysTab({
               <CatalogAccordionTrigger>
                 {t("apiKeys.officialProviders")}
               </CatalogAccordionTrigger>
-              <CatalogAccordionContent className="-mx-2 space-y-3 pb-5">
+              <CatalogAccordionContent className="space-y-3 pb-5">
                 {officialDrafts.map((draft) => {
                   const persisted = persistedById[draft.id] ?? null
                   return (
@@ -87,7 +87,6 @@ export function ApiKeysTab({
                       persisted={persisted}
                       onFieldChange={(patch) => onProviderFieldChange(draft.id, { ...draft, ...patch })}
                       onGetModels={() => onGetProviderModels(draft.id)}
-                      onEndpointTest={(modelId) => onTestProviderEndpoint(draft.id, modelId)}
                       onDelete={() => onDeleteProvider(draft.id)}
                       providerKind="official"
                       showManualModelPanel={shouldShowManualModelPanel(draft, persisted)}
@@ -103,17 +102,28 @@ export function ApiKeysTab({
               <CatalogAccordionTrigger>
                 {t("apiKeys.thirdPartyProviders")}
               </CatalogAccordionTrigger>
-              <CatalogAccordionContent className="-mx-2 space-y-3 pb-5">
+              <CatalogAccordionContent className="space-y-3 pb-5">
                 {thirdPartyDrafts.map((draft) => {
                   const persisted = persistedById[draft.id] ?? null
+                  const persistedEndpoints = Object.fromEntries(
+                    providerEndpointDraftsForAction(draft).map((endpointDraft) => [
+                      endpointDraft.id,
+                      persistedById[endpointDraft.id]
+                        ?? credentials.providers.find((provider) => (
+                          provider.provider_type === endpointDraft.provider_type &&
+                          normalizeBaseUrl(provider.base_url) === normalizeBaseUrl(endpointDraft.base_url)
+                        ))
+                        ?? null,
+                    ]),
+                  )
                   return (
                     <ProviderCard
                       key={draft.id}
                       draft={draft}
                       persisted={persisted}
+                      persistedEndpoints={persistedEndpoints}
                       onFieldChange={(patch) => onProviderFieldChange(draft.id, patch)}
                       onGetModels={() => onGetProviderModels(draft.id)}
-                      onEndpointTest={(modelId) => onTestProviderEndpoint(draft.id, modelId)}
                       onDelete={() => onDeleteProvider(draft.id)}
                       providerKind="third-party"
                       showManualModelPanel={shouldShowManualModelPanel(draft, persisted)}
@@ -147,6 +157,38 @@ export function ApiKeysTab({
           </CatalogAccordion>
         )}
       </div>
+    </div>
+  )
+}
+
+function normalizeBaseUrl(value?: string | null): string {
+  return (value ?? "").trim().replace(/\/+$/, "").toLowerCase()
+}
+
+function ProbeCatalogStatus({
+  probeCatalog,
+}: {
+  probeCatalog: SettingsPageContentProps["credentials"]["probe_catalog"]
+}) {
+  if (!probeCatalog) return null
+  const remoteSynced = Boolean(probeCatalog.remote_catalog_source?.fetched_at)
+  return (
+    <div
+      className="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-border/60 bg-muted/10 px-3 py-2 text-xs text-muted-foreground"
+      data-testid="probe-catalog-status"
+    >
+      <span className="font-medium text-foreground">Local probe evidence</span>
+      <Badge variant="success">{probeCatalog.local_verified_records_count} verified</Badge>
+      <Badge variant={probeCatalog.local_failed_records_count > 0 ? "warning" : "secondary"}>
+        {probeCatalog.local_failed_records_count} failed
+      </Badge>
+      <Badge variant="outline">
+        {remoteSynced ? "Remote catalog synced" : "Remote catalog not synced"}
+      </Badge>
+      <Badge variant="secondary">Local only</Badge>
+      <span className="min-w-0">
+        {probeCatalog.sharing.message}
+      </span>
     </div>
   )
 }

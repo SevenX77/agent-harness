@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from graph_agent_gateway.registry.schema import CapabilityValue, RoleRouteEntry
-from graph_agent_gateway.state_projection import project_route_state_from_evidence
+from graph_agent_gateway.state_projection import project_route_state
 
 _FailedReasonCode = Literal["missing_config", "endpoint_unreachable", "model_failed"]
 
@@ -14,7 +14,6 @@ _FailedReasonCode = Literal["missing_config", "endpoint_unreachable", "model_fai
 class MaterializeRoleRequest:
     role: Any
     credentials: Any
-    evidence_records: list[Any] | None = None
     health_store: Any | None = None
     now: datetime | None = None
 
@@ -66,7 +65,6 @@ def materialize_role(request: MaterializeRoleRequest) -> MaterializedRoleResult:
                 route,
                 health_store,
                 current_time,
-                evidence_records=list(request.evidence_records or []),
             )
             if projection.ui_state in {"failed", "off"}:
                 report["skipped_provider_details"].append(
@@ -122,8 +120,6 @@ def _materialization_projection(
     route: Any,
     health_store: Any | None,
     current_time: datetime,
-    *,
-    evidence_records: list[Any],
 ) -> _ProjectionFacts:
     active_circuit = _select_active_circuit(
         endpoint,
@@ -131,13 +127,13 @@ def _materialization_projection(
         _active_circuits(endpoint, route, health_store, current_time),
         current_time,
     )
-    gateway_projection = project_route_state_from_evidence(
+    gateway_projection = project_route_state(
         route_id=_value(route, "route_id"),
         endpoint_status=_value(endpoint, "status"),
         route_status=_value(route, "status"),
         credential_available=_credential_available(endpoint),
         circuit_retry_at=_value(active_circuit, "retry_at") if active_circuit is not None else None,
-        evidence_records=evidence_records,
+        credential_evidence_refs=_route_credential_evidence_refs(route),
     )
 
     ui_state = gateway_projection.ui_state
@@ -265,10 +261,12 @@ def _credential_available(endpoint: Any) -> bool:
     return bool(api_key)
 
 
-def _route_draft_history(endpoint: Any, route: Any) -> bool:
+def _route_credential_evidence_refs(route: Any) -> list[str]:
     route_metadata = _value(route, "metadata", {}) or {}
-    endpoint_metadata = _value(endpoint, "metadata", {}) or {}
-    return bool(route_metadata.get("draft_history") or endpoint_metadata.get("draft_history"))
+    refs = route_metadata.get("evidence_refs")
+    if not isinstance(refs, list):
+        return []
+    return [ref for ref in refs if isinstance(ref, str)]
 
 
 def _apply_intent(

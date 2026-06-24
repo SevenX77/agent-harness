@@ -84,6 +84,7 @@ export interface CredentialRegistryResponse {
   provider_endpoints: Record<string, ProviderEndpoint>
   provider_routes: Record<string, ProviderRoute>
   runtime_policy: RuntimePolicy
+  probe_catalog?: ProbeCatalogSummary | null
 }
 
 export interface CanonicalGroup {
@@ -203,6 +204,21 @@ export interface CatalogSourceMetadata {
   last_error: string | null
 }
 
+export interface ProbeCatalogSharingStatus {
+  mode: 'local_export_only'
+  auto_upload_enabled: boolean
+  message: string
+}
+
+export interface ProbeCatalogSummary {
+  local_evidence_records_count: number
+  local_verified_records_count: number
+  local_failed_records_count: number
+  local_route_candidates_count: number
+  remote_catalog_source: CatalogSourceMetadata | null
+  sharing: ProbeCatalogSharingStatus
+}
+
 export interface CatalogSyncResponse {
   status: 'success'
   message: string
@@ -232,6 +248,7 @@ export type TestStatus =
 export interface ModelInfo {
   id: string
   route_id?: string
+  endpoint_id?: string
   status?: ModelProbeStatus
   /** Backend-projected 6-state UI status carried from the route (apikeys#30). */
   ui_state?: ProviderUiState
@@ -244,6 +261,7 @@ export interface ModelInfo {
 export interface ProviderTestResult {
   params_fingerprint: string
   base_url: string
+  runtime_base_url?: string
   provider_type?: ProviderType | null
   last_test_status: TestStatus
   last_test_at?: string
@@ -258,6 +276,7 @@ export interface CredentialProviderState {
   name: string
   api_key: string
   base_url?: string
+  runtime_base_url?: string
   provider_type?: ProviderType | null
 
   last_test_status?: TestStatus
@@ -271,6 +290,7 @@ export interface CredentialProviderState {
 
 export interface CredentialsState {
   providers: CredentialProviderState[]
+  probe_catalog?: ProbeCatalogSummary | null
 }
 
 export interface ProviderCredentialUpdate {
@@ -283,6 +303,7 @@ export interface ProviderCredentialUpdate {
 
 export interface ProviderTestRequest {
   id: string
+  name?: string
   provider_type: ProviderType
   api_key: string
   base_url?: string
@@ -577,6 +598,32 @@ function routesForEndpoint(registry: CredentialRegistryResponse, endpointId: str
   return Object.values(registry.provider_routes).filter((route) => route.endpoint_id === endpointId)
 }
 
+function comparableBaseUrl(value?: string | null): string {
+  return (value ?? '').trim().replace(/\/+$/, '').toLowerCase()
+}
+
+function endpointIdForRequest(
+  registry: CredentialRegistryResponse,
+  request: ProviderTestRequest,
+): string {
+  if (registry.provider_endpoints[request.id]) return request.id
+  return endpointForRequest(registry, request)?.endpoint_id ?? request.id
+}
+
+function endpointForRequest(
+  registry: CredentialRegistryResponse | null | undefined,
+  request: ProviderTestRequest,
+): ProviderEndpoint | null {
+  if (!registry) return null
+  if (registry.provider_endpoints[request.id]) return registry.provider_endpoints[request.id]
+  const targetBaseUrl = comparableBaseUrl(request.base_url)
+  const match = Object.values(registry.provider_endpoints).find((endpoint) => (
+    endpoint.protocol === request.provider_type &&
+    (comparableBaseUrl(endpoint.base_url) === targetBaseUrl || comparableBaseUrl(endpointStudioBaseUrl(endpoint)) === targetBaseUrl)
+  ))
+  return match ?? null
+}
+
 export function modelGroupsFromRegistry(registry: RegistryResponse): ModelGroup[] {
   return registry.model_groups ?? []
 }
@@ -850,6 +897,7 @@ function modelInfoFromRoute(route: ProviderRoute): ModelInfo {
   return {
     id: route.provider_model_id,
     route_id: route.route_id,
+    endpoint_id: route.endpoint_id,
     status: route.status,
     ui_state: route.ui_state,
     verified_profile_count: (route.verified_profiles ?? []).filter((profile) => profile.status === 'ready').length,
@@ -944,6 +992,7 @@ function testResultFromEndpoint(
   endpoint: ProviderEndpoint,
   routes: ProviderRoute[],
 ): ProviderTestResult | null {
+  const baseUrl = endpointStudioBaseUrl(endpoint)
   const lastTestStatus = statusToTestStatus(endpoint.status)
   const hasListedModels = (
     lastTestStatus === 'untested' &&
@@ -958,10 +1007,11 @@ function testResultFromEndpoint(
   return {
     params_fingerprint: paramsFingerprint({
       api_key: endpoint.api_key ?? '',
-      base_url: endpoint.base_url,
+      base_url: baseUrl,
       provider_type: endpoint.protocol,
     }),
-    base_url: endpoint.base_url,
+    base_url: baseUrl,
+    runtime_base_url: endpoint.base_url,
     provider_type: endpoint.protocol,
     last_test_status: lastTestStatus,
     last_test_at: endpoint.last_test_at ?? '',
@@ -975,6 +1025,11 @@ function testResultFromEndpoint(
       ? [endpoint.protocol]
       : [],
   }
+}
+
+function endpointStudioBaseUrl(endpoint: ProviderEndpoint): string {
+  const value = endpoint.metadata.studio_base_url
+  return typeof value === 'string' && value.trim() ? value : endpoint.base_url
 }
 
 function endpointToCredential(
@@ -994,7 +1049,8 @@ function endpointToCredential(
     id: endpoint.endpoint_id,
     name: endpoint.display_name,
     api_key: endpoint.api_key ?? '',
-    base_url: endpoint.base_url,
+    base_url: endpointStudioBaseUrl(endpoint),
+    runtime_base_url: endpoint.base_url,
     provider_type: endpoint.protocol,
     last_test_status: statusToTestStatus(endpoint.status),
     last_test_at: endpoint.last_test_at ?? '',
@@ -1010,6 +1066,7 @@ function registryToCredentials(registry: CredentialRegistryResponse): Credential
   return {
     providers: Object.values(registry.provider_endpoints)
       .map((endpoint) => endpointToCredential(registry, endpoint)),
+    probe_catalog: registry.probe_catalog ?? null,
   }
 }
 
@@ -1032,7 +1089,10 @@ function endpointFromCredentialUpdate(
     timeout_seconds: existing?.timeout_seconds ?? 120,
     trust_env: existing?.trust_env ?? false,
     proxy_env: existing?.proxy_env ?? null,
-    metadata: existing?.metadata ?? {},
+    metadata: {
+      ...(existing?.metadata ?? {}),
+      ...(nextBaseUrl ? { studio_base_url: nextBaseUrl } : {}),
+    },
   }
 }
 
@@ -1335,20 +1395,20 @@ export async function testProvider(
     }
   }
   rememberEndpointSecret(request.id, request.api_key)
-  const existing = cachedRegistry?.provider_endpoints[request.id]
-  await putRegistryEndpoints({
+  const existing = endpointForRequest(cachedRegistry, request)
+  const upsertedRegistry = await putRegistryEndpoints({
     [request.id]: endpointFromCredentialUpdate(
       {
         id: request.id,
-        name: existing?.display_name ?? request.id,
+        name: request.name ?? existing?.display_name ?? request.id,
         api_key: request.api_key,
         base_url: request.base_url ?? existing?.base_url ?? '',
         provider_type: request.provider_type,
       },
-      existing,
+      existing ?? undefined,
     ),
   })
-  const endpoint = await testEndpoint(request.id)
+  const endpoint = await testEndpoint(endpointIdForRequest(upsertedRegistry, request))
   return providerTestResponseFromEndpoint(endpoint, cachedRegistry)
 }
 
@@ -1366,41 +1426,43 @@ export async function getProviderModels(
     }
   }
   rememberEndpointSecret(request.id, request.api_key)
-  const existing = cachedRegistry?.provider_endpoints[request.id]
+  const existing = endpointForRequest(cachedRegistry, request)
   // Pre-test upsert persists the edited draft (base_url normalized server-side)
   // before the endpoint is exercised — see design atom #25 ("测试前置 upsert 落 endpoint").
-  await putRegistryEndpoints({
+  const upsertedRegistry = await putRegistryEndpoints({
     [request.id]: endpointFromCredentialUpdate(
       {
         id: request.id,
-        name: existing?.display_name ?? request.id,
+        name: request.name ?? existing?.display_name ?? request.id,
         api_key: request.api_key,
         base_url: request.base_url ?? existing?.base_url ?? '',
         provider_type: request.provider_type,
       },
-      existing,
+      existing ?? undefined,
     ),
   })
+  const endpointId = endpointIdForRequest(upsertedRegistry, request)
   // apikeys#24/#25: official AND third-party now share the single POST
   // /endpoints/{id}/test entry. The backend internally forks (official verifies on
   // get-models reachability; third-party runs protocol auto-detect + a real
   // batch-inference probe) and is the sole authority on whether the endpoint is
   // verified. The FE no longer forks by provider_kind nor judges connectivity off
   // a "not failed" heuristic — an endpoint is connected iff status === 'verified'.
-  const response = await api.post<EndpointTestResponse>(`/llm/endpoints/${segment(request.id)}/test`)
+  const response = await api.post<EndpointTestResponse>(`/llm/endpoints/${segment(endpointId)}/test`)
   const registry = cacheRegistry(response.data.registry)
-  const endpoint = registry.provider_endpoints[request.id]
-  if (!endpoint) throw new Error(`Endpoint model list response omitted endpoint: ${request.id}`)
-  const routes = routesForEndpoint(registry, request.id)
+  const endpoint = registry.provider_endpoints[endpointId]
+  if (!endpoint) throw new Error(`Endpoint model list response omitted endpoint: ${endpointId}`)
+  const routes = routesForEndpoint(registry, endpointId)
   const isVerified = endpoint.status === 'verified'
   const models = routes.map(modelInfoFromRoute)
-  upsertCachedResult(request.id, {
+  const cachedResult: ProviderTestResult = {
     params_fingerprint: paramsFingerprint({
       api_key: request.api_key,
       base_url: request.base_url ?? '',
       provider_type: request.provider_type,
     }),
     base_url: request.base_url ?? '',
+    runtime_base_url: endpoint.base_url,
     provider_type: request.provider_type,
     last_test_status: statusToTestStatus(endpoint.status),
     last_test_at: endpoint.last_test_at ?? '',
@@ -1408,7 +1470,9 @@ export async function getProviderModels(
     last_error_code: isVerified ? '' : endpointErrorCode(endpoint) ?? '',
     available_models: models,
     available_sdks: models.length > 0 ? [endpoint.protocol] : [],
-  })
+  }
+  upsertCachedResult(endpointId, cachedResult)
+  if (endpointId !== request.id) upsertCachedResult(request.id, cachedResult)
   return {
     status: isVerified ? 'ok' : endpointTestStatus(endpoint),
     latency_ms: null,
@@ -1434,17 +1498,17 @@ export async function testProviderEndpoint(
     }
   }
   rememberEndpointSecret(request.id, request.api_key)
-  const existing = cachedRegistry?.provider_endpoints[request.id]
+  const existing = endpointForRequest(cachedRegistry, request)
   await putRegistryEndpoints({
     [request.id]: endpointFromCredentialUpdate(
       {
         id: request.id,
-        name: existing?.display_name ?? request.id,
+        name: request.name ?? existing?.display_name ?? request.id,
         api_key: request.api_key,
         base_url: request.base_url ?? existing?.base_url ?? '',
         provider_type: request.provider_type,
       },
-      existing,
+      existing ?? undefined,
     ),
   })
   const response = await api.post<EndpointModelTestResponse>(

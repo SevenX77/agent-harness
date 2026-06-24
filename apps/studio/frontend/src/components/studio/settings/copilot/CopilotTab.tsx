@@ -569,7 +569,7 @@ export function CopilotTab({
           <CatalogAccordionTrigger>
             {t("copilot.claudeAgentSdk")}
           </CatalogAccordionTrigger>
-          <CatalogAccordionContent className="-mx-2 space-y-4 pb-5">
+          <CatalogAccordionContent className="space-y-4 pb-5">
             {displayRoles.map((role) => {
               const modelGroup = role.modelGroupId
                 ? claudeModelGroups.find((candidate) => candidate.id === role.modelGroupId)
@@ -635,6 +635,7 @@ function AddCopilotModelButton({
   disabled: boolean
   onClick: () => void
 }) {
+  const { t } = useTranslation("settings")
   const button = (
     <Button
       type="button"
@@ -658,7 +659,9 @@ function AddCopilotModelButton({
           <span tabIndex={0}>{button}</span>
         </TooltipTrigger>
         <TooltipContent side="top">
-          先把现有空卡选择模型组，再新建
+          {t("copilot.addModelDisabledTooltip", {
+            defaultValue: "Choose a model group for the empty card before adding another.",
+          })}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -675,6 +678,7 @@ function EmptyCopilotState({
 }: {
   onNavigateToApiKeys?: () => void
 }) {
+  const { t } = useTranslation("settings")
   return (
     <Card
       size="sm"
@@ -682,9 +686,14 @@ function EmptyCopilotState({
       data-copilot-empty-state="true"
     >
       <CardHeader className="!grid-cols-1">
-        <CardTitle>还没有支持 Anthropic Messages 的 route</CardTitle>
+        <CardTitle>
+          {t("copilot.emptyState.title", { defaultValue: "No Anthropic Messages route yet" })}
+        </CardTitle>
         <CardDescription>
-          去 API Keys 添加支持 anthropic-messages 协议的凭证（Anthropic Official / Ark / DeepSeek / OpenRouter 等），完成单模测试后会在这里显示。
+          {t("copilot.emptyState.description", {
+            defaultValue:
+              "Add credentials that support the anthropic-messages protocol in API Keys (Anthropic Official, Ark, DeepSeek, OpenRouter, and similar providers). Routes appear here after the provider or role test verifies them.",
+          })}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -695,7 +704,7 @@ function EmptyCopilotState({
           onClick={onNavigateToApiKeys}
           disabled={!onNavigateToApiKeys}
         >
-          去 API Keys 配置
+          {t("copilot.emptyState.cta", { defaultValue: "Go to API Keys" })}
         </Button>
       </CardContent>
     </Card>
@@ -779,7 +788,13 @@ function CopilotRoleCard({
               onClick={onNavigateToApiKeys}
               disabled={!onNavigateToApiKeys}
             >
-              有 {compatibleRoutes.length} 条 route 未测试，去 API Keys 测试
+              {t("copilot.untestedRoutesCta", {
+                count: compatibleRoutes.length,
+                defaultValue:
+                  compatibleRoutes.length === 1
+                    ? "{{count}} route has not been tested. Test it in API Keys."
+                    : "{{count}} routes have not been tested. Test them in API Keys.",
+              })}
             </button>
           ) : null}
         </div>

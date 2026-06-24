@@ -49,7 +49,6 @@ function baseProps(overrides: Partial<SettingsPageContentProps> = {}): SettingsP
     onTabChange: vi.fn(),
     onProviderFieldChange: vi.fn(),
     onGetProviderModels: vi.fn(),
-    onTestProviderEndpoint: vi.fn(),
     onDeleteProvider: vi.fn(),
     onAddProvider: vi.fn(),
     onProviderModelsUpdated: vi.fn(),

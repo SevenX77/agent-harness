@@ -183,7 +183,7 @@ describe('API Keys v4 registry adapter', () => {
         new_records_count: 2,
         catalog_source: {
           enabled: true,
-          source_url: 'https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_import_drafts.json',
+          source_url: 'https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_probe_catalog.json',
           fetched_at: '2026-06-20T23:00:00+00:00',
           etag: 'W/test',
           cache: false,
@@ -203,7 +203,7 @@ describe('API Keys v4 registry adapter', () => {
       new_records_count: 2,
       catalog_source: {
         enabled: true,
-        source_url: 'https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_import_drafts.json',
+        source_url: 'https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_probe_catalog.json',
         fetched_at: '2026-06-20T23:00:00+00:00',
         etag: 'W/test',
         cache: false,
@@ -215,6 +215,58 @@ describe('API Keys v4 registry adapter', () => {
     })
 
     expect(seen).toEqual(['post /llm/catalog/sync'])
+  })
+
+  it('projects local probe catalog evidence status from the registry snapshot', async () => {
+    api.defaults.adapter = adapter(() => registry({
+      probe_catalog: {
+        local_evidence_records_count: 3,
+        local_verified_records_count: 2,
+        local_failed_records_count: 1,
+        local_route_candidates_count: 0,
+        remote_catalog_source: {
+          enabled: true,
+          source_url: 'https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_probe_catalog.json',
+          fetched_at: '2026-06-20T23:00:00+00:00',
+          etag: 'W/test',
+          cache: false,
+          route_candidates_count: 7,
+          evidence_records_count: 11,
+          new_records_count: 4,
+          last_error: null,
+        },
+        sharing: {
+          mode: 'local_export_only',
+          auto_upload_enabled: false,
+          message: 'Local probe evidence is recorded on this machine. MVP1 does not auto-upload community catalog evidence.',
+        },
+      },
+    }))
+
+    const credentials = await getCredentials({ hydrateSecrets: false })
+
+    expect(credentials.probe_catalog).toEqual({
+      local_evidence_records_count: 3,
+      local_verified_records_count: 2,
+      local_failed_records_count: 1,
+      local_route_candidates_count: 0,
+      remote_catalog_source: {
+        enabled: true,
+        source_url: 'https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_probe_catalog.json',
+        fetched_at: '2026-06-20T23:00:00+00:00',
+        etag: 'W/test',
+        cache: false,
+        route_candidates_count: 7,
+        evidence_records_count: 11,
+        new_records_count: 4,
+        last_error: null,
+      },
+      sharing: {
+        mode: 'local_export_only',
+        auto_upload_enabled: false,
+        message: 'Local probe evidence is recorded on this machine. MVP1 does not auto-upload community catalog evidence.',
+      },
+    })
   })
 
   it('can load endpoint summaries without hydrating API key secrets', async () => {
@@ -317,12 +369,13 @@ describe('API Keys v4 registry adapter', () => {
           protocol: endpoint.protocol,
           base_url: endpoint.base_url,
           api_key: 'sk-openrouter-real',
-          provider_kind: endpoint.provider_kind,
-          rate_limit_bucket: endpoint.rate_limit_bucket,
           timeout_seconds: endpoint.timeout_seconds,
           trust_env: endpoint.trust_env,
           proxy_env: endpoint.proxy_env,
-          metadata: endpoint.metadata,
+          metadata: {
+            ...endpoint.metadata,
+            studio_base_url: 'https://openrouter.ai/api/v1',
+          },
         },
       },
     })

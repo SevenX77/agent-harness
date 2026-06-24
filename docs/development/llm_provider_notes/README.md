@@ -1,6 +1,6 @@
 ---
 status: Archived Reference
-target_goal: "Provider facts for Agent import drafts and human endpoint setup"
+target_goal: "Provider facts for Probe Knowledge Catalog seeding and human endpoint setup"
 linked_specs:
   - .kiro/specs/llm-provider-intelligence-v2/design.md
   - docs/development/LLM_MODEL_CONFIGURATION_FLOW.md
@@ -8,7 +8,7 @@ linked_specs:
 
 # LLM Provider Notes Archive
 
-This directory contains provider facts that can help a user or an Agent import workflow propose endpoint and route drafts.
+This directory contains provider facts that can help a user or automation seed endpoint/model hints for the Probe Knowledge Catalog and human endpoint setup.
 
 It is not a runtime source of truth. Studio runtime code must not read these files to construct endpoints, routes, roles, credentials, canonical aliases, runtime settings, or provider-selection behavior. Studio Backend may parse `## 4. Notable Model IDs` only for the suggestion-only `GET /api/llm/providers/notable-models` endpoint that feeds manual model-id placeholders.
 

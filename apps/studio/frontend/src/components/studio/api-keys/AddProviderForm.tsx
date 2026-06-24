@@ -2,6 +2,8 @@ import { useState, type FormEvent } from "react"
 import { Button } from "@/components/ui/button"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { cn } from "@/lib/utils"
+import { apiKeyInputClassName, apiKeyInputType } from "./ProviderCard"
 
 export type AddProviderType = "third-party"
 export const newProviderName = "New Provider"
@@ -69,7 +71,8 @@ export function addProviderNameError(name: string, existingNames: string[]): str
  * One-step third-party provider form (atom-19): name + base_url + api_key filled
  * in a single inline form, replacing the old two-step name-only dialog. Protocol
  * is NOT asked here — it is auto-detected at test time (#24/#25). The api_key
- * field is always type=text + CSS masked (atom-22 contract).
+ * field is always type=text, and CSS masking is applied only after a value exists
+ * so an empty placeholder remains readable (atom-22 contract).
  */
 export function AddProviderForm({
   existingNames,
@@ -134,11 +137,11 @@ export function AddProviderForm({
         <FieldLabel htmlFor="add-provider-api-key">API Key</FieldLabel>
         <Input
           id="add-provider-api-key"
-          type="text"
+          type={apiKeyInputType()}
           value={apiKey}
           onChange={(event) => setApiKey(event.target.value)}
           placeholder="Enter the provider API Key"
-          className="mask-input h-8 text-xs"
+          className={cn(apiKeyInputClassName(false, Boolean(apiKey)), "h-8 text-xs")}
           autoComplete="off"
           autoCorrect="off"
           autoCapitalize="none"

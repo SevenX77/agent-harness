@@ -23,7 +23,11 @@ vi.mock("react-i18next", () => ({
     type: "3rdParty",
     init: () => undefined,
   },
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string, options?: { count?: number; defaultValue?: string }) => (
+      options?.defaultValue?.replace("{{count}}", String(options.count ?? "")) ?? key
+    ),
+  }),
 }))
 
 vi.mock("@/api/client", () => ({
@@ -505,8 +509,8 @@ describe("R-F12 empty-state CTA + per-card untested warning", () => {
       />,
     )
     expect(html).toContain('data-copilot-empty-state="true"')
-    expect(html).toContain("还没有支持 Anthropic Messages 的 route")
-    expect(html).toContain("去 API Keys 配置")
+    expect(html).toContain("No Anthropic Messages route yet")
+    expect(html).toContain("Go to API Keys")
   })
 
   it("CTA button is disabled when no onNavigateToApiKeys is wired (degrade visibly)", () => {
@@ -537,7 +541,7 @@ describe("R-F12 empty-state CTA + per-card untested warning", () => {
       />,
     )
     expect(html).toContain('data-copilot-untested-warning="true"')
-    expect(html).toContain("有 1 条 route 未测试")
+    expect(html).toContain("1 route has not been tested")
   })
 })
 

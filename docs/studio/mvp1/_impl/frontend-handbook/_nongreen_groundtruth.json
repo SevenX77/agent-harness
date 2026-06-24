@@ -74,8 +74,8 @@
      "be_dep_ready": false,
      "fixable": "BE-first-then-FE",
      "effort": "L",
-     "fix_plan": "后端:_registry_response(llm.py:1644)目前直接回 provider_routes=credentials.provider_routes(llm.py:1671),不投影 ui_state——需调 gateway 的 project_provider_route_ui_state(state_projection.py:143)把每条 route 的 6 态 ui_state 算出来内嵌进 registry DTO;前端:在 TS ProviderRoute 接口(llm.ts:67-78)加 ui_state 字段,把 ProviderCard 的状态位从 RouteStatus 旧枚举(routeStatusTagVariant,ProviderCard.tsx:356-374)迁到 6 态,渲染补蓝态 historical_ready/cooling_down,复用 provider-state-badge.tsx 的 ProviderStateBadge;结果常驻 inline 写在 key/Base URL 旁。蓝态点亮还需 probe_import_draft(llm.py:905-909,现为桩)桩转真探产出 draft 历史证据。",
-     "evidence": "gateway ProviderRoute schema 已加 ui_state 字段(registry/schema.py:219 ui_state:ProviderUiState='untested'),但 Studio _registry_response 不投影它,直接回原始 provider_routes(llm.py:1671),route.ui_state 停在默认 'untested'。前端 TS ProviderRoute 接口无 ui_state 字段(llm.ts:67-78),ProviderEndpoint 也无(llm.ts:33-49)——前端读不到 6 态。ProviderCard 仍用 RouteStatus 枚举映射(routeStatusTagVariant,ProviderCard.tsx:356-364,只有 verified/failed/disabled/probe-verified,无完整 6 态),未 import ProviderStateBadge(ProviderCard.tsx:1-52 导入清单无)。蓝态根因:probe_import_draft 仍是桩,只改 status='probed' 不真探(llm.py:905-909 docstring 'real agent probing is handled by a later worker')。6 态组件本身已存在但只在 LLM Roles 用(provider-state-badge.tsx:61,消费 ProviderModelOption.ui_state,llm.ts:103)。",
+     "fix_plan": "后端:_registry_response(llm.py:1644)目前直接回 provider_routes=credentials.provider_routes(llm.py:1671),不投影 ui_state——需调 gateway 的 project_route_state(state_projection.py)把每条 route 的 6 态 ui_state 算出来内嵌进 registry DTO;前端:在 TS ProviderRoute 接口(llm.ts:67-78)加 ui_state 字段,把 ProviderCard 的状态位从 RouteStatus 旧枚举(routeStatusTagVariant,ProviderCard.tsx:356-374)迁到 6 态,渲染补蓝态 historical_ready/cooling_down,复用 provider-state-badge.tsx 的 ProviderStateBadge;结果常驻 inline 写在 key/Base URL 旁。蓝态点亮需要 Probe Knowledge Catalog 中有 probe-verified 历史证据。",
+     "evidence": "gateway ProviderRoute schema 已加 ui_state 字段(registry/schema.py:219 ui_state:ProviderUiState='untested'),但 Studio _registry_response 不投影它,直接回原始 provider_routes(llm.py:1671),route.ui_state 停在默认 'untested'。前端 TS ProviderRoute 接口无 ui_state 字段(llm.ts:67-78),ProviderEndpoint 也无(llm.ts:33-49)——前端读不到 6 态。ProviderCard 仍用 RouteStatus 枚举映射(routeStatusTagVariant,ProviderCard.tsx:356-364,只有 verified/failed/disabled/probe-verified,无完整 6 态),未 import ProviderStateBadge(ProviderCard.tsx:1-52 导入清单无)。蓝态根因是缺 Probe Knowledge Catalog probe-verified 历史证据。6 态组件本身已存在但只在 LLM Roles 用(provider-state-badge.tsx:61,消费 ProviderModelOption.ui_state,llm.ts:103)。",
      "verify": "组件测:喂含各 ui_state 的 registry route DTO,断言 ProviderCard 渲染对应 6 态彩标(含蓝态 historical_ready 显 'Previously Connected')且常驻 inline 在 key/Base URL 旁;一致性测:同一 ui_state,API Keys 卡与 LLM Roles 的 provider-state-badge.tsx 同色。"
     },
     {
@@ -134,9 +134,9 @@
      "be_dep_ready": false,
      "fixable": "BE-first-then-FE",
      "effort": "M",
-     "fix_plan": "测试断言『喂含各 ui_state 的 registry DTO → ProviderCard 渲染对应 6 态彩标且常驻 inline』当前会 RED,因为 registry DTO 不投影 route ui_state(llm.py:1671)、前端 TS ProviderRoute 无 ui_state 字段(llm.ts:67-78)、ProviderCard 用旧 RouteStatus 枚举。需后端投影 ui_state + 前端接 6 态 DTO,蓝态端到端还需 probe_import_draft 桩转真探。",
-     "evidence": "_registry_response 不投影 ui_state(llm.py:1671 直接回 credentials.provider_routes);TS ProviderRoute 无 ui_state(llm.ts:67-78);ProviderCard 用 routeStatusTagVariant 旧枚举(ProviderCard.tsx:356-364)、未 import ProviderStateBadge;probe_import_draft 桩(llm.py:905-909)。tpl-apikeys-impl.json tests[covers=#30].shots 要求六态卡 + 蓝态 Previously Connected + 与 LLM Roles 同色。",
-     "verify": "组件测:喂含 ready/historical_ready/untested/cooling_down/failed/off 的 registry route DTO,断言渲染对应色标 + inline 常驻;一致性测:与 LLM Roles provider-state-badge.tsx 同色;蓝态端到端:probe_import_draft 真探出证据后投影 historical_ready,桩态下不亮。"
+     "fix_plan": "测试断言『喂含各 ui_state 的 registry DTO → ProviderCard 渲染对应 6 态彩标且常驻 inline』当前会 RED,因为 registry DTO 不投影 route ui_state(llm.py:1671)、前端 TS ProviderRoute 无 ui_state 字段(llm.ts:67-78)、ProviderCard 用旧 RouteStatus 枚举。需后端投影 ui_state + 前端接 6 态 DTO,蓝态端到端需要 Probe Knowledge Catalog probe-verified 历史证据。",
+     "evidence": "_registry_response 不投影 ui_state(llm.py:1671 直接回 credentials.provider_routes);TS ProviderRoute 无 ui_state(llm.ts:67-78);ProviderCard 用 routeStatusTagVariant 旧枚举(ProviderCard.tsx:356-364)、未 import ProviderStateBadge。tpl-apikeys-impl.json tests[covers=#30].shots 要求六态卡 + 蓝态 Previously Connected + 与 LLM Roles 同色。",
+     "verify": "组件测:喂含 ready/historical_ready/untested/cooling_down/failed/off 的 registry route DTO,断言渲染对应色标 + inline 常驻;一致性测:与 LLM Roles provider-state-badge.tsx 同色;蓝态端到端:Probe Knowledge Catalog 有 probe-verified 历史证据后投影 historical_ready,无证据时不亮。"
     }
    ]
   },

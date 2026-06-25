@@ -635,6 +635,7 @@ function AddCopilotModelButton({
   disabled: boolean
   onClick: () => void
 }) {
+  const { t } = useTranslation("settings")
   const button = (
     <Button
       type="button"
@@ -658,7 +659,7 @@ function AddCopilotModelButton({
           <span tabIndex={0}>{button}</span>
         </TooltipTrigger>
         <TooltipContent side="top">
-          先把现有空卡选择模型组，再新建
+          {t("copilot.addModelTooltip")}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -675,6 +676,7 @@ function EmptyCopilotState({
 }: {
   onNavigateToApiKeys?: () => void
 }) {
+  const { t } = useTranslation("settings")
   return (
     <Card
       size="sm"
@@ -682,9 +684,9 @@ function EmptyCopilotState({
       data-copilot-empty-state="true"
     >
       <CardHeader className="!grid-cols-1">
-        <CardTitle>还没有支持 Anthropic Messages 的 route</CardTitle>
+        <CardTitle>{t("copilot.emptyState.title")}</CardTitle>
         <CardDescription>
-          去 API Keys 添加支持 anthropic-messages 协议的凭证（Anthropic Official / Ark / DeepSeek / OpenRouter 等），完成单模测试后会在这里显示。
+          {t("copilot.emptyState.description")}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -695,7 +697,7 @@ function EmptyCopilotState({
           onClick={onNavigateToApiKeys}
           disabled={!onNavigateToApiKeys}
         >
-          去 API Keys 配置
+          {t("copilot.emptyState.cta")}
         </Button>
       </CardContent>
     </Card>
@@ -770,7 +772,7 @@ function CopilotRoleCard({
             {role.title}
             <Badge variant="secondary">{role.source === "built_in" ? "Built-in" : "Third-party"}</Badge>
           </CardTitle>
-          <CardDescription>Coding copilot role synced with backend fallback chain.</CardDescription>
+          <CardDescription>{t("copilot.roleCard.description")}</CardDescription>
           {showUntestedWarning ? (
             <button
               type="button"
@@ -779,7 +781,7 @@ function CopilotRoleCard({
               onClick={onNavigateToApiKeys}
               disabled={!onNavigateToApiKeys}
             >
-              有 {compatibleRoutes.length} 条 route 未测试，去 API Keys 测试
+              {t("copilot.roleCard.untestedWarning", { n: compatibleRoutes.length })}
             </button>
           ) : null}
         </div>

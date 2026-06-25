@@ -7,7 +7,7 @@ import hashlib
 import logging
 import re
 import uuid
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -38,7 +38,6 @@ from app.core.adapters.gateway import (
     known_model_ids_for_endpoint,
     lint_role_routes,
     normalize_route_capabilities,
-    probe_priority,
     promotable_route_update,
     select_verified_profile,
 )
@@ -607,10 +606,18 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
         else:
             # Third-party endpoints must prove the protocol matches AND that the
             # endpoint can actually generate before reaching verified (apikeys#25).
+            # The probe leads with this endpoint's already-verified models so the
+            # Test confirms the *endpoint* in as few attempts as possible.
+            verified_model_ids = frozenset(
+                route.provider_model_id
+                for route in latest_credentials.provider_routes.values()
+                if route.endpoint_id == endpoint_id and route.status == "verified"
+            )
             verification = await _verify_third_party_endpoint_by_probe(
                 latest_endpoint,
                 discovered_model_ids,
                 raw_capabilities_by_model,
+                verified_model_ids=verified_model_ids,
             )
             status = verification.status
             message = verification.message
@@ -634,6 +641,25 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
                         status="ok",
                     ),
                     route_id=verified_route_ids.get(verification.verified_model_id),
+                )
+            elif (
+                verification.status != "verified"
+                and verified_model_ids
+                and not verification.failure_is_structural
+            ):
+                # An endpoint Test only proves the *endpoint* connects. get-models
+                # just proved the key+URL are live and this endpoint already has a
+                # verified route, so a round where every catalog model probe fails
+                # for model-level reasons (flaky / phantom upstream models the
+                # provider lists but cannot serve) must NOT regress the endpoint to
+                # failed — keep it verified by reusing the previously verified
+                # model. Structural failures (invalid_key / quota) are NOT reused:
+                # those mean the endpoint itself is broken and must fail.
+                retained_model_id = sorted(verified_model_ids)[0]
+                status = "verified"
+                message = (
+                    "Endpoint reachable; reusing previously verified model "
+                    f"{retained_model_id}. No new model verified this run."
                 )
     elif endpoint.provider_kind != "official" and result.status not in _STRUCTURAL_PROBE_STATUSES:
         probe_results = await _probe_third_party_models_for_endpoint(endpoint, ())
@@ -4315,6 +4341,9 @@ class ThirdPartyEndpointVerification:
     verified_model_id: str | None
     message: str
     probe_capabilities: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # True when the failure is protocol-agnostic (invalid_key / quota_exceeded):
+    # the endpoint itself is broken, so a prior verified route must NOT be reused.
+    failure_is_structural: bool = False
 
 
 def _third_party_protocol_candidates(endpoint: ProviderEndpoint) -> tuple[ProviderType, ...]:
@@ -4326,15 +4355,79 @@ def _third_party_protocol_candidates(endpoint: ProviderEndpoint) -> tuple[Provid
     return tuple(ordered)
 
 
+def _endpoint_probe_model_ids_by_trust(
+    library: ProviderImportDraft,
+    endpoint_id: str,
+    trust_state: str,
+) -> set[str]:
+    """Model ids with a probe evidence record of ``trust_state`` for one endpoint."""
+    result: set[str] = set()
+    for record in library.evidence_records:
+        if (
+            record.evidence_type != "probe"
+            or record.trust_state != trust_state
+            or record.endpoint_id != endpoint_id
+        ):
+            continue
+        model_id = record.model_id or record.provider_model_id
+        if model_id is not None:
+            result.add(model_id)
+    return result
+
+
+def _endpoint_probe_order(
+    library: ProviderImportDraft,
+    endpoint_id: str,
+    candidate_model_ids: Sequence[str],
+    *,
+    verified_model_ids: frozenset[str] = frozenset(),
+) -> list[str]:
+    """Order probe candidates so an endpoint Test confirms reachability fastest.
+
+    An endpoint Test only needs to prove the *endpoint* connects, so it leads
+    with the model most likely to succeed and stops on the first ``ok``:
+
+    1. models with a currently-verified route (green) — the surest bet,
+    2. models that connected before (probe-verified evidence / historical "blue"),
+    3. untried models,
+    4. known-failed models last.
+
+    This deliberately differs from gateway ``probe_priority`` (which *skips*
+    already-verified models to discover *new* capabilities); leading with a
+    known-good model is what an endpoint Test wants — fewest attempts to a green.
+    """
+    historical = _endpoint_probe_model_ids_by_trust(library, endpoint_id, "probe-verified")
+    failed = _endpoint_probe_model_ids_by_trust(library, endpoint_id, "probe-failed")
+    tier_current: list[str] = []
+    tier_historical: list[str] = []
+    tier_unknown: list[str] = []
+    tier_failed: list[str] = []
+    for model_id in candidate_model_ids:
+        if model_id in verified_model_ids:
+            tier_current.append(model_id)
+        elif model_id in historical:
+            tier_historical.append(model_id)
+        elif model_id in failed:
+            tier_failed.append(model_id)
+        else:
+            tier_unknown.append(model_id)
+    return [*tier_current, *tier_historical, *tier_unknown, *tier_failed]
+
+
 def _third_party_probe_model_ids(
     endpoint: ProviderEndpoint,
     discovered_model_ids: tuple[str, ...],
+    *,
+    verified_model_ids: frozenset[str] = frozenset(),
 ) -> list[str]:
     """Pick the model ids to drive the batch inference probe.
 
-    Discovered ids (from the get-models call) come first; when the endpoint
-    exposes no list API we fall back to the doc-maintained notable ids for its
-    probe backend so an unlistable-but-generating endpoint can still verify.
+    Discovered ids (from the get-models call) drive the candidate set; when the
+    endpoint exposes no list API we fall back to the doc-maintained notable ids
+    for its probe backend so an unlistable-but-generating endpoint can still
+    verify. The candidates are then ordered by :func:`_endpoint_probe_order` so
+    the probe leads with a known-good model and confirms the endpoint in as few
+    attempts as possible.
     """
     library = load_evidence_library()
     candidates = list(discovered_model_ids)
@@ -4342,29 +4435,30 @@ def _third_party_probe_model_ids(
         candidates = known_model_ids_for_endpoint(library, endpoint.endpoint_id)
     if not candidates:
         candidates = notable_model_ids(_endpoint_probe_backend(endpoint))
-    prioritized = probe_priority(
+    ordered = _endpoint_probe_order(
         library,
         endpoint.endpoint_id,
         _requested_model_ids(candidates),
+        verified_model_ids=verified_model_ids,
     )
-    if not prioritized and candidates:
-        prioritized = _requested_model_ids(candidates)
-    return prioritized[:_THIRD_PARTY_PROBE_MODEL_LIMIT]
+    return ordered[:_THIRD_PARTY_PROBE_MODEL_LIMIT]
 
 
 async def _detect_third_party_protocol(
     endpoint: ProviderEndpoint,
     probe_model_id: str,
-) -> tuple[ProviderType, RouteProbeResult] | None:
+) -> tuple[ProviderType | None, RouteProbeResult | None]:
     """Auto-detect the working protocol by probing one model per candidate.
 
     For each candidate protocol we clone the endpoint with that protocol and run
     a real generation probe for ``probe_model_id``. The FIRST candidate whose
     probe is not a transport/protocol-level structural mismatch wins: an ``ok``
     obviously wins, and an ``invalid_model`` also wins because it proves the
-    protocol/auth reached the provider (the model id is just wrong). Returns the
-    detected protocol plus that probe result, or ``None`` if every candidate
-    failed structurally (so the endpoint stays unverified).
+    protocol/auth reached the provider (the model id is just wrong). Returns
+    ``(protocol, probe)`` on success; on failure returns ``(None, probe)`` where
+    ``probe`` is the last (structural or exhausted) result so the caller can tell
+    a broken endpoint (invalid_key / quota) from a merely wrong model id, or
+    ``(None, None)`` when there were no candidates to probe.
     """
     last_result: RouteProbeResult | None = None
     for candidate in _third_party_protocol_candidates(endpoint):
@@ -4405,20 +4499,22 @@ async def _detect_third_party_protocol(
                 endpoint.endpoint_id,
                 route_probe.status,
             )
-            return None
+            return None, route_probe
     if last_result is not None:
         logger.warning(
             "third-party protocol auto-detect exhausted endpoint=%s last_status=%s",
             endpoint.endpoint_id,
             last_result.status,
         )
-    return None
+    return None, last_result
 
 
 async def _verify_third_party_endpoint_by_probe(
     endpoint: ProviderEndpoint,
     discovered_model_ids: tuple[str, ...],
     raw_capabilities_by_model: dict[str, dict[str, Any]],
+    *,
+    verified_model_ids: frozenset[str] = frozenset(),
 ) -> ThirdPartyEndpointVerification:
     """Run protocol auto-detect + batch inference probing for a third-party endpoint.
 
@@ -4429,7 +4525,11 @@ async def _verify_third_party_endpoint_by_probe(
     on the first ``ok`` and short-circuiting structural errors. The endpoint is
     promoted to ``verified`` ONLY when a real generation probe returns ``ok``.
     """
-    probe_model_ids = _third_party_probe_model_ids(endpoint, discovered_model_ids)
+    probe_model_ids = _third_party_probe_model_ids(
+        endpoint,
+        discovered_model_ids,
+        verified_model_ids=verified_model_ids,
+    )
     if not probe_model_ids:
         return ThirdPartyEndpointVerification(
             status="failed",
@@ -4438,16 +4538,29 @@ async def _verify_third_party_endpoint_by_probe(
             message="Endpoint reachable but no model ids were available to probe.",
         )
 
-    detection = await _detect_third_party_protocol(endpoint, probe_model_ids[0])
-    if detection is None:
+    detected_protocol, detection_probe = await _detect_third_party_protocol(
+        endpoint, probe_model_ids[0]
+    )
+    if detected_protocol is None:
+        structural = (
+            detection_probe is not None
+            and detection_probe.status in _STRUCTURAL_PROBE_STATUSES
+        )
+        message = (
+            _model_probe_failure_message(_model_probe_result_from_route_probe(detection_probe))
+            if structural and detection_probe is not None
+            else "Could not auto-detect a working protocol for this endpoint."
+        )
         return ThirdPartyEndpointVerification(
             status="failed",
             detected_protocol=endpoint.protocol,
             verified_model_id=None,
-            message="Could not auto-detect a working protocol for this endpoint.",
+            message=message,
+            failure_is_structural=structural,
         )
 
-    detected_protocol, first_probe = detection
+    assert detection_probe is not None  # detected_protocol set => probe present
+    first_probe = detection_probe
     detected_endpoint = endpoint.model_copy(update={"protocol": detected_protocol})
 
     last_failure: RouteProbeResult = first_probe
@@ -4495,6 +4608,7 @@ async def _verify_third_party_endpoint_by_probe(
         message=_model_probe_failure_message(
             _model_probe_result_from_route_probe(last_failure)
         ),
+        failure_is_structural=last_failure.status in _STRUCTURAL_PROBE_STATUSES,
     )
 
 

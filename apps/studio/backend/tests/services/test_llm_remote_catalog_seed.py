@@ -9,10 +9,10 @@ from app.models.llm_config import ProviderImportDraft
 
 def test_repository_root_remote_catalog_seed_is_public_safe() -> None:
     root = Path(__file__).resolve().parents[5]
-    catalog_path = root / "llm_import_drafts.json"
+    catalog_path = root / "llm_probe_catalog.json"
     if not catalog_path.exists():
         pytest.skip(
-            "repo-root llm_import_drafts.json is a local runtime artifact "
+            "repo-root llm_probe_catalog.json is a local runtime artifact "
             "(gitignored); absent in CI / fresh checkouts"
         )
 

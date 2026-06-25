@@ -5,6 +5,7 @@ import {
   type RoleTestProviderProgressStatus,
   type RoleTestResponse,
 } from "@/api/llm"
+import i18n from "@/i18n"
 // R-F11: align with the 6-state ProviderUiState (`apps/studio/backend/app/core/
 // adapters/gateway.py` ProviderUiState) plus a transient "testing" projection so
 // the route lights match LlmRolesTab's RoleRouteStatusLight (green/blue/gray/
@@ -182,13 +183,30 @@ function defaultSleep(ms: number): Promise<void> {
  */
 export const ERROR_CODE_MAP: Record<string, (roleName: string) => string> = {
   "resource.no_available_route": (roleName) =>
-    `${roleName} 暂无可用模型路由：请先在 API Keys 配置 Anthropic-compatible 凭证并测试通过`,
+    i18n.t("copilot.testErrors.noAvailableRoute", {
+      ns: "settings",
+      title: roleName,
+      defaultValue:
+        "{{title}} has no available model route. Configure Anthropic-compatible credentials in API Keys and run a test first.",
+    }),
   "resource.role_unknown": (roleName) =>
-    `${roleName} 不存在或已被删除：请刷新页面后重试`,
+    i18n.t("copilot.testErrors.roleUnknown", {
+      ns: "settings",
+      title: roleName,
+      defaultValue: "{{title}} does not exist or was deleted. Refresh the page and try again.",
+    }),
   "resource.role_invalid_kind": (roleName) =>
-    `${roleName} 不是 copilot 角色，无法用 Claude SDK 测试`,
+    i18n.t("copilot.testErrors.invalidKind", {
+      ns: "settings",
+      title: roleName,
+      defaultValue: "{{title}} is not a copilot role and cannot be tested with the Claude SDK.",
+    }),
   "resource.credential_missing": (roleName) =>
-    `${roleName} 缺少必需的 API key：请到 API Keys 填写后重试`,
+    i18n.t("copilot.testErrors.credentialMissing", {
+      ns: "settings",
+      title: roleName,
+      defaultValue: "{{title}} is missing a required API key. Add it in API Keys and try again.",
+    }),
 }
 
 function jobErrorCode(error: unknown): string | undefined {
@@ -205,7 +223,7 @@ function jobErrorCode(error: unknown): string | undefined {
 
 export function copilotRoleTestErrorMessage(error: unknown, roleDisplayName: string): string {
   // R-F9: prefer the backend job's error_code → human map over the raw
-  // `error.message` so the user sees "暂无可用模型路由" instead of
+  // `error.message` so the user sees an actionable localized explanation instead of
   // "ResourceTerminalError: ...".
   const code = jobErrorCode(error)
   if (code && ERROR_CODE_MAP[code]) {

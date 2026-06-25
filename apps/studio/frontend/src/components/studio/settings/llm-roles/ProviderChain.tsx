@@ -73,29 +73,42 @@ export const ProviderChain = memo(function ProviderChain({
 }) {
   const providerModels = providerModelsByRouteId ?? EMPTY_PROVIDER_MODELS_BY_ROUTE_ID
   const roleFits = roleFitByRouteId ?? EMPTY_ROLE_FIT_BY_ROUTE_ID
+  const visibleProviderEntries = useMemo(
+    () => collapseProviderEntries(providers, data, providerModels),
+    [data, providerModels, providers],
+  )
   const providerItems = useMemo(
-    () => providers.map((providerCode, index) => providerItemId(providerCode, index)),
-    [providers],
+    () => visibleProviderEntries.map((entry) => providerItemId(entry.providerCode, entry.rawIndex)),
+    [visibleProviderEntries],
   )
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
+  const visibleProviderKeys = useMemo(() => new Set(
+    visibleProviderEntries.map((entry) => providerDisplayKey(data, entry.providerCode, providerModels)),
+  ), [data, providerModels, visibleProviderEntries])
+  const visibleAppendableProviderCodes = useMemo(
+    () => collapseAppendableProviderCodes(appendableProviderCodes, data, providerModels, visibleProviderKeys),
+    [appendableProviderCodes, data, providerModels, visibleProviderKeys],
+  )
   const providerLabels = useMemo(
     () => Object.fromEntries(
-      appendableProviderCodes.map((providerCode) => [
+      visibleAppendableProviderCodes.map((providerCode) => [
         providerCode,
         data.providers[providerCode]?.name ?? providerCode,
       ]),
     ),
-    [appendableProviderCodes, data.providers],
+    [data.providers, visibleAppendableProviderCodes],
   )
 
   function handleDragEnd(event: DragEndEvent) {
-    const activeIndex = providerItems.indexOf(String(event.active.id))
-    const overIndex = event.over?.id ? providerItems.indexOf(String(event.over.id)) : -1
-    if (activeIndex >= 0 && overIndex >= 0 && activeIndex !== overIndex) {
-      onChange(reorderProviderInRole(data, roleName, modelCode, activeIndex, overIndex))
+    const activeEntry = visibleProviderEntries.find((entry) => providerItemId(entry.providerCode, entry.rawIndex) === String(event.active.id))
+    const overEntry = event.over?.id
+      ? visibleProviderEntries.find((entry) => providerItemId(entry.providerCode, entry.rawIndex) === String(event.over?.id))
+      : undefined
+    if (activeEntry && overEntry && activeEntry.rawIndex !== overEntry.rawIndex) {
+      onChange(reorderProviderInRole(data, roleName, modelCode, activeEntry.rawIndex, overEntry.rawIndex))
     }
   }
 
@@ -108,23 +121,24 @@ export const ProviderChain = memo(function ProviderChain({
           role="list"
           aria-label={`${modelName} provider fallback order`}
         >
-          {providers.map((providerCode, index) => (
+          {visibleProviderEntries.map((entry, index) => (
             <ProviderTag
-              key={`${providerCode}-${index}`}
-              id={providerItemId(providerCode, index)}
+              key={`${entry.providerCode}-${entry.rawIndex}`}
+              id={providerItemId(entry.providerCode, entry.rawIndex)}
               data={data}
               roleName={roleName}
               modelCode={modelCode}
-              providerCode={providerCode}
+              providerCode={entry.providerCode}
               index={index}
-              providerModel={providerModels.get(providerCode)}
-              roleFitEntry={roleFits.get(providerCode)}
-              testStatus={testStatuses[roleChainStatusKey(modelCode, providerCode)]}
+              rawIndex={entry.rawIndex}
+              providerModel={providerModels.get(entry.providerCode)}
+              roleFitEntry={roleFits.get(entry.providerCode)}
+              testStatus={testStatuses[roleChainStatusKey(modelCode, entry.providerCode)]}
               onChange={onChange}
             />
           ))}
           <AddProviderMenu
-            providerCodes={appendableProviderCodes}
+            providerCodes={visibleAppendableProviderCodes}
             providerLabels={providerLabels}
             onAppend={(providerCode) => onChange(appendProviderToModel(data, roleName, modelCode, providerCode))}
           />
@@ -141,6 +155,7 @@ const ProviderTag = memo(function ProviderTag({
   modelCode,
   providerCode,
   index,
+  rawIndex,
   providerModel,
   roleFitEntry,
   testStatus,
@@ -152,6 +167,7 @@ const ProviderTag = memo(function ProviderTag({
   modelCode: string
   providerCode: string
   index: number
+  rawIndex: number
   providerModel?: ProviderModelOption
   roleFitEntry?: MaterializationReportEntry
   testStatus?: RoleChainStatusMap[string]
@@ -230,7 +246,7 @@ const ProviderTag = memo(function ProviderTag({
               size="icon-xs"
               aria-label={`Remove ${providerName || providerCode}`}
               className="text-muted-foreground hover:text-foreground"
-              onClick={() => onChange(removeProviderFromRole(data, roleName, modelCode, index))}
+              onClick={() => onChange(removeProviderFromRole(data, roleName, modelCode, rawIndex))}
             >
               <Trash2 data-role-icon="true" className="size-3 text-muted-foreground" />
             </Button>
@@ -303,4 +319,77 @@ function AddProviderMenu({
 
 function providerItemId(providerCode: string, index: number): string {
   return `${providerCode}:${index}`
+}
+
+type ProviderEntry = {
+  providerCode: string
+  rawIndex: number
+}
+
+function collapseProviderEntries(
+  providers: string[],
+  data: RolesData,
+  providerModels: ReadonlyMap<string, ProviderModelOption>,
+): ProviderEntry[] {
+  const byLabel = new Map<string, ProviderEntry>()
+  providers.forEach((providerCode, rawIndex) => {
+    const entry = { providerCode, rawIndex }
+    const key = providerDisplayKey(data, providerCode, providerModels)
+    const previous = byLabel.get(key)
+    if (!previous || compareProviderEntries(entry, previous, providerModels) < 0) {
+      byLabel.set(key, entry)
+    }
+  })
+  return [...byLabel.values()].sort((left, right) => left.rawIndex - right.rawIndex)
+}
+
+function collapseAppendableProviderCodes(
+  providerCodes: string[],
+  data: RolesData,
+  providerModels: ReadonlyMap<string, ProviderModelOption>,
+  takenKeys: ReadonlySet<string>,
+): string[] {
+  const byLabel = new Map<string, ProviderEntry>()
+  providerCodes.forEach((providerCode, rawIndex) => {
+    const key = providerDisplayKey(data, providerCode, providerModels)
+    if (takenKeys.has(key)) return
+    const entry = { providerCode, rawIndex }
+    const previous = byLabel.get(key)
+    if (!previous || compareProviderEntries(entry, previous, providerModels) < 0) {
+      byLabel.set(key, entry)
+    }
+  })
+  return [...byLabel.values()]
+    .sort((left, right) => left.rawIndex - right.rawIndex)
+    .map((entry) => entry.providerCode)
+}
+
+function compareProviderEntries(
+  left: ProviderEntry,
+  right: ProviderEntry,
+  providerModels: ReadonlyMap<string, ProviderModelOption>,
+): number {
+  return providerUiStateRank(providerModels.get(left.providerCode)?.ui_state) -
+    providerUiStateRank(providerModels.get(right.providerCode)?.ui_state) ||
+    left.rawIndex - right.rawIndex ||
+    left.providerCode.localeCompare(right.providerCode)
+}
+
+function providerDisplayKey(
+  data: RolesData,
+  providerCode: string,
+  providerModels: ReadonlyMap<string, ProviderModelOption>,
+): string {
+  const label = data.providers[providerCode]?.name ?? providerModels.get(providerCode)?.provider_label ?? providerCode
+  return label.trim().toLowerCase() || providerCode
+}
+
+function providerUiStateRank(state: ProviderModelOption["ui_state"] | undefined): number {
+  if (state === "ready") return 0
+  if (state === "historical_ready") return 1
+  if (state === "untested") return 2
+  if (state === "cooling_down") return 3
+  if (state === "failed") return 4
+  if (state === "off") return 5
+  return 2
 }

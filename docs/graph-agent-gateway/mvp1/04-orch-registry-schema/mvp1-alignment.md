@@ -36,7 +36,7 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 
 | 边界 | 契约 |
 |---|---|
-| **③b 公共契约(schema 字段)** | `registry/schema.py:16-478` 全部 gateway runtime DTO：`ProviderEndpoint`(`:163`)/`ProviderRoute`(`:207`)/`RoleRouteEntry`(`:247`)/`RoleEntry`(`:264`)/`ModelProfile`(`:276`)/`RuntimeSettings`(`:121`)/`CapabilityValue`(`:67`)/`VerifiedProfile`(`:189`)/import-draft 系列(`:288-385`)/`RegistrySnapshot`(`:403`)/`ResolvedRoute`(`:415`)/`SkippedRoute`(`:448`)/`ResolvedRole`(`:466`)。`ConfigDict(extra="forbid")` 禁未知字段(如 `ProviderRoute:207-219`)。**这是本模块对全包的对外契约，其它模块只链接。** |
+| **③b 公共契约(schema 字段)** | `registry/schema.py:16-478` 全部 gateway runtime DTO：`ProviderEndpoint`(`:163`)/`ProviderRoute`(`:207`)/`RoleRouteEntry`(`:247`)/`RoleEntry`(`:264`)/`ModelProfile`(`:276`)/`RuntimeSettings`(`:121`)/`CapabilityValue`(`:67`)/`VerifiedProfile`(`:189`)/Probe Knowledge Catalog 目标 schema（现码 legacy import-draft 系列 `:288-385`）/`RegistrySnapshot`(`:403`)/`ResolvedRoute`(`:415`)/`SkippedRoute`(`:448`)/`ResolvedRole`(`:466`)。`ConfigDict(extra="forbid")` 禁未知字段(如 `ProviderRoute:207-219`)。**这是本模块对全包的对外契约，其它模块只链接。** |
 | **③a 应用加工(Studio DTO display/authoring 字段)** | `models/llm_config.py` 的 Studio wrapper 在 gateway 字段之上挂的 `display_name`(`:71-75`)等 display/authoring 字段 = **① UI / ③a 加工**，gateway 感知不到。剥离 seam = `to_registry_snapshot`(`:279-296`)+ `_gateway_*` helpers(`:89-118`)。 |
 | **剥离边界(③a → ③b)** | `RolesData.to_registry_snapshot(credentials) → RegistrySnapshot`：把 display/authoring 剥掉，只把 gateway schema 字段放进 snapshot。测试断言 `test_studio_display_fields_are_stripped_from_gateway_runtime_snapshot`(`test_llm_config_boundary.py:53-59`)。 |
 | **snapshot 加载校验(③b)** | `load_registry_snapshot`(`resolver.py:186-202`)+ `_assert_v4_credentials`(`:227-237`)+ `_assert_supported_roles`(`:240-261`)：hard cutover，拒绝旧 schema。 |
@@ -219,7 +219,7 @@ MVP1 目标：把 registry schema 固定为 **Studio↔Gateway 的共同契约**
 
 - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:67-145`: capability 与 runtime settings schema。**③b 公共契约。**
 - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:163-285`: endpoint、route、role route entry、role、profile schema。**③b 公共契约。**
-- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:288-385`: import draft、candidate、probe、evidence schema。**③b 公共契约。**
+- `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:288-385`: legacy import draft / candidate / probe / evidence schema；目标迁移为 `ProbeKnowledgeCatalog` + `EvidenceRecord` schema。**③b 公共契约。**
 - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:404-441`: `RegistrySnapshot.snapshot_version` 与 `ResolvedRoute.snapshot_version`。**③b 公共契约(权威源,其它模块只链接)。**
 - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:448-480`: skipped diagnostics 与 resolved role schema。**③b 公共契约。**
 - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:126-175`: resolver 使用 live snapshot evidence 并传播 `snapshot.snapshot_version` 到 `ResolvedRoute`。**③b 公共。**

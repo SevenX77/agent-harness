@@ -86,6 +86,12 @@
       "needsAttention": "{{title}} 测试需要注意",
       "failed": "{{title}} 测试失败"
     },
+    "testErrors": {
+      "noAvailableRoute": "{{title}} 暂无可用模型路由：请先在 API Keys 配置 Anthropic-compatible 凭证并测试通过",
+      "roleUnknown": "{{title}} 不存在或已被删除：请刷新页面后重试",
+      "invalidKind": "{{title}} 不是 copilot 角色，无法用 Claude SDK 测试",
+      "credentialMissing": "{{title}} 缺少必需的 API key：请到 API Keys 填写后重试"
+    },
     "aria": {
       "testing": "正在测试 {{title}}...",
       "ready": "{{title}} 就绪：{{ready}}/{{total}} 条 route"

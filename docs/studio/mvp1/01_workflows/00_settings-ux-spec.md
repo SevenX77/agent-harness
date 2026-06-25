@@ -1,7 +1,7 @@
 # Settings Page — 用户 UX Workflow 详细规格（API Keys / LLM Roles / Copilot）
 
 > **来源**：PM 口述需求（2026-06-02）。PM 强调此前"写过好几次"但未落进 mvp1，本次正式记载。
-> **地位**：设置页三个子页面的**权威 UX 规格**。[`00_settings.md`](./00_settings.md) 写四条旅程的结构与范式（高层）；本文写**每步操作 / 反馈 / 动机的细粒度行为**，尤其三条横切机制：draft 赋能/写回、model/endpoint 标签表现、测试落点。
+> **地位**：设置页三个子页面的**权威 UX 规格**。[`00_settings.md`](./00_settings.md) 写四条旅程的结构与范式（高层）；本文写**每步操作 / 反馈 / 动机的细粒度行为**，尤其三条横切机制：Probe Knowledge Catalog（探测知识库）赋能/写回、model/endpoint 标签表现、测试落点。§0 保留 PM 原话里的 `draft` 字样；结构化设计中 `draft` 已改名为 Probe Knowledge Catalog,Import Draft 不属于 MVP1 主线。
 > **写作铁律**：§0 存 PM 原话 verbatim（不 paraphrase、不修typo）；§1–§4 结构化（忠实，不"顺便优化"）；§5 与现状代码对接（cross-ref，不改需求）。
 
 ---
@@ -22,7 +22,7 @@
 
 ## 1. API Keys 页面 — 验证 endpoint（不是测模型的主战场）
 
-**页面职责一句话**：确认每个 endpoint 可连通，并用 draft（历史探测知识库）回填模型清单的已知信息。真正"保证某模型能用"的测试在 role 页面做（见 §4.3）。
+**页面职责一句话**：确认每个 endpoint 可连通，并用 Probe Knowledge Catalog（探测知识库）回填模型清单的已知信息。真正"保证某模型能用"的测试在 role 页面做（见 §4.3）。
 
 ### 1.1 Official provider（官方，比较可控）
 **动机**：官方 endpoint 可控，只要 API key 能连通就够，不必逐模型 probe。
@@ -30,11 +30,11 @@
 1. 用户填入 **API key**。
 2. 直接点 **Test**。
 3. 系统调 `GET /models`（获取模型列表）—— **只要这一步能连通，endpoint 即验证通过，不做逐模型 probe**。
-4. **拉取 draft**（该 provider 的历史探测草稿 / 证据库），把拉回的 model list 与 draft **做 diff**。
-   - **边界（PM 补充 2026-06-02）**：若 `GET /models` 返回 **200 但 `models=[]`（空清单）**，仍与拉取的 draft 做 diff，**用 draft 里的已知模型填充 model list** —— 空响应不代表没有模型（有的 provider 不返回清单），以 draft 历史为准。
-5. **把 draft 中已证实的资料回填给 model list**（历史已验证的能力/元数据填进当前清单）。
+4. **读取 Probe Knowledge Catalog**（该 provider 的历史探测知识库），把当前 `GET /models` 结果与 catalog 的 provider/endpoint/model 画像 **做 diff**。
+   - **边界（PM 补充 2026-06-02，术语更新）**：若 `GET /models` 返回 **200 但 `models=[]`（空清单）**，仍与 catalog 做 diff，**用 catalog 里的已知模型填充 model list** —— 空响应不代表没有模型（有的 provider 不返回清单），以历史探测知识为候选来源。
+5. **把 catalog 中已证实的资料回填给 model list**（历史已验证的能力/元数据填进当前清单，带 provenance/evidence_ref）。
 6. model list 的标签变 **蓝色 =「以前联通过」**（历史连通标记）。
-7. diff 出的**新模型 / 新 capability**（anthropic 在 get-model 时就会返回 capability）**写回 draft**（更新草稿）。
+7. diff 出的**新模型 / 新 capability**（anthropic 在 get-model 时就会返回 capability）**写回 Probe Knowledge Catalog**（沉淀历史知识）。
 - **official 只需要 get models**，到此 endpoint 验证完成。
 
 ### 1.2 Third-party provider（第三方）
@@ -48,7 +48,7 @@
    - **为什么批量、不靠单个**：单模型探测**不可靠** —— 实测同一个 `deepseek-r1` 一次 401、再测 200（瞬时抖动）；`minimax/glm` 间歇超时。原来让用户手选一个模型，就是怕系统自动只挑一个、它恰好抖动/超时 → **误判整个 endpoint 不通**。现在改全自动，必须用批量消除这个误判。
    - **机制**：系统**自动分批**探测（每批 ~3 个，优先挑常见可靠模型抬命中率；不一个一个、避免一长串失败浪费时间）；**一批一批打**，直到**某批中任一模型成功 → 判 endpoint 可用（停）**；或**模型探尽全失败 → endpoint 不可用**。
    - **错误码短路（省去试完所有模型）**：遇**结构性错配**码可直接判"协议/配置错"不必试完 —— openai 打 anthropic URL→`500 "Use /v1/messages instead"`；anthropic 打 openai URL→`404 not found`；未知模型→`400 invalid_request`。**但瞬时类（401 / 429 / timeout）不可短路**（与真失败靠码区分不了、且会抖动）→ 继续下一个/下一批。
-3. draft 行为、标签行为等等**与 official 一致**。
+3. Probe Knowledge Catalog 行为、标签行为等等**与 official 一致**。
 4. **（PM 2026-06-02/03 拍板：直接设计实现，非可选）一个 provider = 一把 key + 多个 URL**：
    - **模型（PM 校正）**：**一个 provider = 一把 key**，其下挂**多个 URL**；每个 `(URL × 探通的协议)` = 一个 **endpoint**。一个 URL 同时通两协议（openrouter）→ **两个 endpoint 都建**（确认①）。
    - **gateway/registry 无「卡」概念（确认②）**：只存**平铺的标准 endpoints**，**不感知它们来自一张卡还是两张卡**（card 是前端录入便利；多 URL → 标准 endpoint list 的拆分由 ③b 做，见 #3.1）；「同一 provider」靠 endpoint 共享的 `credential_ref` + `rate_limit_bucket` 表达，不是一个 card 实体。
@@ -67,14 +67,14 @@
 ### 1.4 测试结果的展示与落地（UX，PM 2026-06-03 实测反馈）
 - **#2.1 结果常驻原地、不只 toast**：endpoint 测试耗时久时，结果一出 toast（sonner）就闪没、看不到（要再测一次、把鼠标悬在 toast 上才看得到）。→ 测试结果（成功 / 失败原因）除 toast 外，**必须固定写在 API Key / Base URL 旁的状态勾（✓）位置**（常驻 inline），鼠标无需追 toast。
 - **#2.3 单模型测试结果换样式**：Manual probing 的单模型结果（`xx: Available` 绿 / `xx: Test failed` 红 badge）**还在用旧 model-badge 样式** → 改成与新状态体系一致的呈现（对齐 §4.2 的 route 级状态色 + inline）。
-- **#2.4 测试结果全进 draft**：这几次的 endpoint / 模型探测结果（**含失败**）都要写进 draft / 证据库，**不浪费**（失败也是历史：哪些模型抖动 / 超时 / 不可用；下次免重探、喂蓝态）。见 §4.1。
+- **#2.4 测试结果全进 Probe Knowledge Catalog**：这几次的 endpoint / 模型探测结果（**含失败**）都要写进探测知识库，**不浪费**（失败也是历史：哪些模型抖动 / 超时 / 不可用；下次免重探、喂蓝态）。见 §4.1。
 - **#2.5 错误码→用户文案 = 英文（回填 A7，PM 2026-06-03 定 UI 语言 = 英文）**：测试失败的可读诊断用**英文**，权威源 = 现网 `apps/studio/frontend/src/lib/llm-error-messages.ts`（已在 ProviderCard / Settings 用，含 HTTP 状态映射 + `composeTestErrorMessage`）；旧 `studio-api-keys-redesign/design-frontend.md §4.3` 的**中文整表作废**。**产品 UI 语言 = 英文**（非 A7 独有：Connected / Not configured 等全英文）。§1.4 的 inline 常驻诊断 + toast 都用这套英文文案。
 
 ---
 
 ## 2. LLM Roles 页面 — 把抽象角色映射到模型，并真实测通
 
-> 本节 = §0 原话 + **2026-06-03 第二轮原子动作走查**（PM 逐条裁定，原话见 §2.0）的细化定稿。本节整合三股改动：① ux-spec 状态体系（6 态 / failed-disabled 两分类 / draft，见 §4）；② 上一 part 底层改动（P8 run 模型对比测试复用 model-group/bundle；D10/D12 settings 数据走 gateway sidecar 永不 Rust）；③ gateway mvp1 契约（role→route 一等 API、base_url 保存时归一化、`build_runtime_setting_descriptors` 驱动 intent 控件，见 §6.2）。
+> 本节 = §0 原话 + **2026-06-03 第二轮原子动作走查**（PM 逐条裁定，原话见 §2.0）的细化定稿。本节整合三股改动：① ux-spec 状态体系（6 态 / failed-disabled 两分类 / Probe Knowledge Catalog，见 §4）；② 上一 part 底层改动（P8 run 模型对比测试复用 model-group/bundle；D10/D12 settings 数据走 gateway sidecar 永不 Rust）；③ gateway mvp1 契约（role→route 一等 API、base_url 保存时归一化、`build_runtime_setting_descriptors` 驱动 intent 控件，见 §6.2）。
 
 ### 2.0 PM 原话（2026-06-03 第二轮 Roles 走查，verbatim，不改一字）
 > 1. #R3 在model family上做一个折叠功能: anthropic 可以折叠起来, 隐藏里面的所有模型
@@ -140,10 +140,10 @@
 - **清嵌套 tooltip**〔#5〕：provider row 现有**嵌套 tooltip 冲突**→清理为**一个顶层 tooltip**。
 
 ### 2.5 Role 测试
-- 点 **Test** → 对 **role 里所有模型批量真 probe**（不停在第一条成功）→ 实时回填状态灯 + downgrades（进 tooltip，§2.4）→ **结果（含失败）回写 draft / 证据库**（§4.1）。
+- 点 **Test** → 对 **role 里所有模型批量真 probe**（不停在第一条成功）→ 实时回填状态灯 + downgrades（进 tooltip，§2.4）→ **结果（含失败）回写 Probe Knowledge Catalog**（§4.1）。
 - BE：`POST /api/llm/roles/{name}/test` + `/test-jobs`（异步轮询，`llm.py:996/1009`）；evidence 回写部分已在（`_append_model_probe_evidence`，`:771`）。
 - **后端 SSOT**：删前端易失 `roleTestStates`，测试态全以后端 job / 投影为准（切 tab / 刷新不丢）。
-- 未保存先拒测：draft 测试 = 先 `PUT` 保存再 test。
+- 未保存先拒测：role 测试 = 先 `PUT` 保存再 test。
 
 ### 2.6 Model Bundle（与 Role 高度统一）
 - **统一模型（地基，2026-06-18 PM）**：**model-group、model-bundle、role 本质都是「一串 routes 的数组」**，最终都被 materializer **展开铺平成一条 fallback_chain**。所以三者特性应**一致**：bundle 在 role 里和 model-group **同级、可拖、可调序、可逐模型/逐 provider 配（因为它就是 routes）**；copilot role 也是这套（§3）。区别只在"谁拥有这串数组"：model-group=registry 归一出来的、bundle=用户自建可复用的、role=用户为某个用途编排的。**任何 group/bundle/role 的语义，先回到"它是一串 routes"去推。**
@@ -173,9 +173,9 @@
 ### 2.9 测试关键点（§5 硬栏，写测试时必须验证）
 - **failed 仍在可用**：构造一条 route probe 失败（非弃用类）→ 断言它**仍出现在可用模型、标红、可拖**（防回归成"失败即消失"）。
 - **disabled 才灰且不可拖**：provider 明确返回"无此模型 / 已下线" → 归 disabled → 进弃用区、不可拖、可复制名 + 可 re-probe → 再通**捞回**可用模型。
-- **蓝态**：endpoint 验通 + draft 有历史连通 → 该模型显 🔵 蓝；role 页真 probe 通 → 升 🟢 绿。
+- **蓝态**：endpoint 验通 + Probe Knowledge Catalog 有历史连通 → 该模型显 🔵 蓝；role 页真 probe 通 → 升 🟢 绿。
 - **配置缺口红显引导**：缺 key / 无效 key / base_url / protocol / model → `failed`（reason=配置缺口，红）→ 组内**标红 + 「去配置」+ 引导去 API Keys 修**（不隐藏、不默认选）。
-- **role 测试批量**：role Test 探**所有**模型（非停首条成功），失败也回写 draft，切 tab / 刷新**不丢**。
+- **role 测试批量**：role Test 探**所有**模型（非停首条成功），失败也回写 Probe Knowledge Catalog，切 tab / 刷新**不丢**。
 - **bundle 引用同步**：改 bundle 内容 → 所有引用该 bundle 的 role materialize 出的 fallback_chain **跟着变**（验引用非快照）。
 - **thinking 三档**：off/preferred/required 用单控件互斥，required 且模型不支持 → role-fit 转 Needs Test / Not Fit，不静默。
 - **model family 折叠**：折叠态是视图态，刷新后保持（localStorage），不污染后端。
@@ -214,7 +214,7 @@
 
 ### 3.4 测试 = 真 SDK 调用（修假测试，核心）
 - **现状假测试**：`_probe_copilot_sdk_tool_call`（copilot SDK 测试探针，`llm.py:2150`）用 `AsyncAnthropic`（裸 Anthropic HTTP 客户端，`:2156`），而真实 copilot 跑 `ClaudeSDKClient`（`copilot.py:242`）→ **测的 SDK ≠ 跑的 SDK**，测过不证明 spawn/env 注入/tool loop 能跑。
-- **目标**：测试改走**真 `ClaudeSDKClient` 路径**（见本页 §3.8 Copilot SDK 调用机制），发真工具调用、验 spawn/env/tool loop；成功**写高阶证据**（SDK 工具调用验证通过）回 credentials + draft。
+- **目标**：测试改走**真 `ClaudeSDKClient` 路径**（见本页 §3.8 Copilot SDK 调用机制），发真工具调用、验 spawn/env/tool loop；成功**写高阶证据**（SDK 工具调用验证通过）回 credentials + Probe Knowledge Catalog。
 - copilot 应走 **role→routes 一等 API**（`resolve_routes`，gateway 02 目标），不再自己手装 registry snapshot（现 `_resolve_copilot_runtime` 手装，`copilot.py:419`）。
 
 ### 3.5 现状 gap → 接线工程清单（亲验 file:line）
@@ -261,11 +261,16 @@
 
 ## 4. 三条横切机制（贯穿三页）
 
-### 4.1 Draft 赋能 / 写回
-draft = 该 provider 的**历史探测草稿 / 证据库**，双向：
-- **赋能（读）**：拉取 draft，把**已证实的资料**回填给当前 model list（历史已验证的能力/元数据，不用重探）。
-- **写回（写）**：本次发现的**新模型 / 新 capability（diff 部分）写回 draft**，沉淀为下次的历史知识。
-- **（PM 2026-06-03）每次探测结果——成功 + 失败——都写回 draft / 证据库，不浪费**：失败也是历史信息（哪些模型抖动 / 超时 / 不可用），下次批量探测可优先跳过历史失败的、优先试历史成功的，抬命中率、省时间。
+### 4.1 Probe Knowledge Catalog 赋能 / 写回
+Probe Knowledge Catalog（探测知识库）= 按 provider 组织的 endpoint/model/route/capability 历史探测知识，双向：
+- **赋能（读）**：读取 catalog，把**已证实的资料**回填给当前 model list（历史已验证的能力/元数据，不用重探）。
+- **列表兜底**：`GET /models` 失败或返回空时，从 catalog 按 `provider_id + endpoint_fingerprint` 精确查候选；没有精确命中时降级到 `provider_id + protocol`。兜底生成的 route 只能是 `unverified_manual / untested`，不能直接 verified。
+- **能力回填**：当前 probe/list-models 拿不到 capability 时，可从 catalog 回填 capability；每个值必须带 provenance/evidence_ref，用于 UI/role-fit/probe 参数选择，但不能单独让 route 变绿。
+- **probe 优先级**：测试 endpoint 但不知道哪个 model 更可能连通时，从 catalog 的历史成功/失败/弃用数据排序，优先试近期成功、成功率高、能力匹配的模型，历史失败/弃用降权。
+- **写回（写）**：本次发现的**新模型 / 新 capability / endpoint 连通 / route probe 成功失败**写回 catalog，沉淀为下次的历史知识。
+- **（PM 2026-06-03，术语更新）每次探测结果——成功 + 失败——都写回探测知识库，不浪费**：失败也是历史信息（哪些模型抖动 / 超时 / 不可用），下次批量探测可优先跳过历史失败的、优先试历史成功的，抬命中率、省时间。
+- **MVP1 分享边界**：本地 evidence 只写本机 Probe Knowledge Catalog；远端 catalog 在 MVP1 是只读同步来源。`/catalog/share` 只做本地脱敏导出/摘要，不自动上传到全网，也不代表已有社区写入通道。未来若要多用户贡献，必须单独设计 ingestion service、审核/限流/反滥用、聚合与发布链路。脱敏红线包括 API key、credential_ref、私有 base_url、本地路径、原始 prompt/input/output、账号/组织信息。公共 catalog evidence 只能作为建议来源，不能直接把 active route 写绿。
+- **Import Draft 不属于 MVP1 主线**：MVP1 不做"待导入草稿 → apply 到 credentials"。`draft` 只作为旧文/旧代码 legacy 名称保留，不再代表本功能。
 
 ### 4.2 Model / Endpoint 标签的表现 —— route 级状态体系（PM 2026-06-02 拍板，#A 答案）
 标签颜色 = 该 **route** 的状态，**三页一致**（同一 endpoint/route 从 API key 页拖到 role 页，颜色不变）。**canonical 状态枚举（6 态）= `ready` / `historical_ready`(🔵 蓝) / `untested` / `failed`(带 reason) / `cooling_down` / `off`**；下表的 `verified` = `ready` 旧称、`disable` = `off`，是现码字段 / 展示映射，不另立态：
@@ -273,7 +278,7 @@ draft = 该 provider 的**历史探测草稿 / 证据库**，双向：
 | 颜色 / 样式 | 状态 | 含义 |
 |---|---|---|
 | 🟢 绿色 | **verified** | 真测试连通了（真实 probe 过） |
-| 🔵 蓝色 | **以前联通过** | 历史连通过（来自 draft 回填），但当前未真测 verified —— 介于"没测"与"verified"之间的历史态 |
+| 🔵 蓝色 | **以前联通过** | 历史连通过（来自 Probe Knowledge Catalog 回填），但当前未真测 verified —— 介于"没测"与"verified"之间的历史态 |
 | ⚪ 灰色 | **untested** | 没测试 |
 | 🔴 红色 | **failed** | 出错了要你修：① 配置缺口（缺 key/base_url/protocol/model id，原 needs_setup）② 测试失败（route 真探挂）—— `reason` 区分。**红、不挡进可用** |
 | ⚪ 灰色 + 倒计时 | **熔断 / cooling_down** | 临时失败（网络/限流/超时），倒计时后重试，不当永久失败 |
@@ -286,12 +291,12 @@ draft = 该 provider 的**历史探测草稿 / 证据库**，双向：
 > **与 gateway 现状投影的关系**：`project_provider_model_state`（投影函数，`services/llm_state_projection.py`）现产 **5 态**（ready / untested / cooling_down / needs_setup / off），其中 `needs_setup` 把"配置缺口"和"真测试失败"揉成一个灰态。**本体系两处改**：① **取消 `needs_setup`**——"配置缺口"与"测试失败"统一成 `failed`（红）+ reason；② **新增「🔵 蓝=以前联通过」**。目标 6 态映射：verified=ready🟢、以前联通过=蓝🔵、untested=untested⚪、**（配置缺口 ∪ 测试失败）=failed🔴（reason 区分）**、熔断=cooling_down、disable=off。→ **gateway 投影需：取消 needs_setup、补蓝态、failed 带 reason**。
 
 #### 状态分层（蓝态归属 + 投影逻辑，Claude 2026-06-02 核实，PM 已确认 Q2）
-- **三源域（事实从哪来）**：`Identity`（存在/启用/配置硬有效）· `Capability`（支持什么 + 测过没 + **draft 历史证据**）· `Health`（此刻能否跑/熔断）。铁律：单 status 不当统一真相。
-- **🔵 蓝态归 `Capability` 域的 draft/证据子源**（历史连通），是 `ui_state` 投影层的**第 6 态**，**不是新源域**。
-- **投影优先级（route 级，6 态）**：`off > failed🔴 > cooling_down > ready🟢 > 蓝🔵 > untested⚪`。`ready / 蓝 / untested` 同属"证据 tier"，按证据新鲜度排：刚测通 > 历史通（draft）> 无证据。
-- **蓝↔绿 = 测试落点（§4.3）的直接产物**：API key 页验 endpoint + draft 回填 → 模型显 🔵 蓝；role 页对模型真 probe → 升 🟢 绿。即"endpoint 验证（蓝）→ model 保证（绿）"。
+- **三源域（事实从哪来）**：`Identity`（存在/启用/配置硬有效）· `Capability`（支持什么 + 测过没 + **catalog 历史证据**）· `Health`（此刻能否跑/熔断）。铁律：单 status 不当统一真相。
+- **🔵 蓝态归 `Capability` 域的 catalog/probe-history 子源**（历史连通），是 `ui_state` 投影层的**第 6 态**，**不是新源域**。
+- **投影优先级（route 级，6 态）**：`off > failed🔴 > cooling_down > ready🟢 > 蓝🔵 > untested⚪`。`ready / 蓝 / untested` 同属"证据 tier"，按证据新鲜度排：刚测通 > 历史通（catalog）> 无证据。
+- **蓝↔绿 = 测试落点（§4.3）的直接产物**：API key 页验 endpoint + catalog 回填 → 模型显 🔵 蓝；role 页对模型真 probe → 升 🟢 绿。即"endpoint 验证（蓝）→ model 保证（绿）"。
 - **与其他状态轴正交**：`ui_state`（能不能用，6 态）≠ `capability_state`（了解多少能力：unknown/callable_only/partial/known）≠ `role_fit`（适不适合本角色，4 态）≠ `admission`（运行期 3 态）。
-- **实现 gap**：`ProviderUiState` Literal **去掉 `needs_setup`、加 `failed`（带 reason）+ 蓝态**（`services/llm_state_projection.py:12`）；`_setup_reason`（`:49-56`）改产 `failed` + reason（`missing_config` / `endpoint_unreachable` / `model_failed`）而非 `needs_setup`；`project_provider_model_state` 现只读 endpoint+route+circuits、**不读 draft**，要加"draft 是否有该 route 历史连通"输入；依赖 draft probe-worker（现为桩 `routers/llm.py:872` 只改状态不真探）。
+- **实现 gap**：`ProviderUiState` Literal **去掉 `needs_setup`、加 `failed`（带 reason）+ 蓝态**；`_setup_reason` 改产 `failed` + reason（`missing_config` / `endpoint_unreachable` / `model_failed`）而非 `needs_setup`；`project_route_state` 输入为 `catalog_history`（`draft_history` 仅为旧 metadata fallback），读 Probe Knowledge Catalog 中该 route 是否有历史连通证据。
 
 ### 4.3 测试落点：role card 里的 model 才做真实测试
 - **API key 页**：只验证 **endpoint**（轻量：连通 / get-models / 第三方加一次模型探测）。
@@ -304,8 +309,8 @@ draft = 该 provider 的**历史探测草稿 / 证据库**，双向：
 
 > 本节是工程对接线索，帮实现时定位；**不修改上面的需求**。
 
-- **draft 机制现状**：已有 `ProviderImportDraft`（草稿数据结构，`registry/schema.py:369`）、`llm_import_drafts.py`（草稿 + 证据库读写）、evidence library。**但 `probe_import_draft`（`routers/llm.py:872`，本该真去探测草稿的端点）现在是占位桩**（只把状态改成 probed、不真探）—— 本规格的"draft 赋能/写回"要真正工作，依赖把它做成真实 probe worker（= PM 已拍板"必须做"的 D2）。
-- **统一 UI state 投影**：§4.2 的标签 = `project_provider_model_state`（投影函数，`services/llm_state_projection.py`）现产 5 个 state；本规格目标 6 态：**① 去掉 `needs_setup`（并入 `failed` + reason）② 新增「🔵 蓝=以前联通过」**（#A 已答，见 §4.2）→ gateway 投影需取消 needs_setup、补蓝态、failed 带 reason。
+- **Probe Knowledge Catalog 现状 / legacy 命名**：canonical 入口已收敛到 `graph_agent_gateway.probe_catalog` / `app.services.llm_probe_catalog` / `llm_probe_catalog.json`；底层仍复用 `ProviderImportDraft` / `llm_import_drafts.py` 作为历史存储兼容层。这是历史命名，不是 MVP1 功能名。目标正式 schema 为 `ProbeKnowledgeCatalog`：保留 append-only evidence、remote read-only sync、probe history、candidate/capability fallback；MVP1 分享端点只做 local export，不自动上传；**不保留 Import Draft（待导入草稿 → apply）主线**。
+- **统一 UI state 投影**：§4.2 的标签 = gateway `project_route_state` / Studio adapter 投影，当前已产 6 态：**① 去掉 `needs_setup`（并入 `failed` + reason）② 新增「🔵 蓝=以前联通过」**（#A 已答，见 §4.2）；`catalog_history` 驱动历史蓝态，`draft_history` 仅为旧 metadata fallback。
 - **capability on get-model**：anthropic 在 get-model 时返回 capability —— 对接 gateway `03-credentials-endpoints` / `05-capabilities`；**#B 由 Claude 核实**各 protocol 的 list-models 是否带 capability（见下"Claude 待核实"）。
 - **protocol 自动探测**（第三方）：**#C 已答** —— 各 protocol 排列组合各测一遍、哪个连通判哪个（见 §1.2）。
 - **model bundle**：对接 `materialize_model_bundle`（把 bundle 物化成兜底链的函数，`services/llm_role_materializer.py:99`）+ `ModelBundle`（数据结构）—— bundle→route list 的解析已有雏形，实现时确认与本规格一致。
@@ -338,7 +343,7 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 | **openrouter**（聚合） | **是（最全）**（`context_length`/`architecture`/`supported_parameters`/`pricing`） | 否 |
 | **ark**（openai 兼容 `/api/v3`） | **否**（同 openai） | 是（doc 表或 probe） |
 
-> **(Claude live 测 2026-06-02，用 app key 真测 list-models 首条字段)**：① 上表 anthropic / gemini / openai / openrouter 已坐实；② **第三方聚合网关可能阉割 capability**：qiniu 的 /models（openai 口 + anthropic 口）只回 `id`/`display_name`，**不透传** capability（即便底层是 anthropic）→ 「带不带 capability」**看具体网关，不只看协议**；③ 设计结论：**list-models 富字段优先 + 缺则 probe 兜底**，对应 `capability_source`（api_list vs probed_verified）+ draft 赋能。故 official 不一定「只 get-models」就够（openai-official / ark 仍需 probe 补 per-model 能力）。
+> **(Claude live 测 2026-06-02，用 app key 真测 list-models 首条字段)**：① 上表 anthropic / gemini / openai / openrouter 已坐实；② **第三方聚合网关可能阉割 capability**：qiniu 的 /models（openai 口 + anthropic 口）只回 `id`/`display_name`，**不透传** capability（即便底层是 anthropic）→ 「带不带 capability」**看具体网关，不只看协议**；③ 设计结论：**list-models 富字段优先 + 缺则 probe 兜底**，对应 `capability_source`（api_list vs probed_verified）+ Probe Knowledge Catalog 赋能。故 official 不一定「只 get-models」就够（openai-official / ark 仍需 probe 补 per-model 能力）。
 
 > **⚠️ 代码缺口（接 #B，2026-06-03）**：anthropic 的 list-models 虽带 `capabilities` 富字段，但**现状代码还没消费** —— `registry/capabilities.py:137-198` 未读该块，anthropic 的 tool/thinking 仍按 `provider_doc` 硬编码注入（`services/official_capability_sources.py:208-223`）。所以"official 靠 list-models 免 probe"**目前未真正成立**，需把 anthropic capability 摄取接到新 `capabilities` 对象才行。
 
@@ -348,17 +353,17 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 
 > PM 2026-06-03 第三轮：这两页**重度依赖 gateway**，必须把每个原子操作**精确分层 + 守好各自边界**；尤其 **③b gateway 库是领域无关的「编排 + 模型调用」库，绝不接收特定业务领域需求**。修正前版 §6 的错：把「Studio 后端 Python」与「gateway 库」混成一层「③ 后端 gateway」——本版拆为 ③a（Studio 适配）/ ③b（gateway 库）。§1–§4 写 UX，本节做四层归属 + 握手契约。
 >
-> ⚠️ **2026-06-03 第四轮判据校准（本节最新依据，反转部分 ③a/③b 划分）**：把"领域 vs 领域无关"精确成"**公共能力内核 vs 应用加工**"。gateway = **富能力可复用网关**（权威定义见 gateway 包 `packages/graph-agent-gateway/README.md` §2）：它对模型数据与机制的**标准化 / 组织 / 编排 / 状态总结 / 知识沉淀**，凡**不依赖「应用加工四件事」（UI / 产品策略 / 调用方式 / 存储介质）**，都是 ③b 公共能力——**含 model group 分组 / 6 态标准总结 / draft 知识库 / materialize 编排内核**（这几项**反转**了旧版"归 ③a"的判断）。③a 只拥有 gateway 感知不到的**应用加工四件事**：① UI 交互/展示 ② 产品策略 ③ 实际调用方式 ④ 存储介质。判定一句话：**换个 app 还原样能用吗？能=③b，不能=③a**。**下方 §6.0–§6.5 全部按此校准；个别仍按旧表述（把 model group/6态/draft 归 ③a）的 ✓ 注与格子，一律以本校准为准**，逐模块处置见 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`。
+> ⚠️ **2026-06-03 第四轮判据校准 + 2026-06-23 术语收敛**：把"领域 vs 领域无关"精确成"**公共能力内核 vs 应用加工**"。gateway = **富能力可复用网关**（权威定义见 gateway 包 `packages/graph-agent-gateway/README.md` §2）：它对模型数据与机制的**标准化 / 组织 / 编排 / 状态总结 / 知识沉淀**，凡**不依赖「应用加工四件事」（UI / 产品策略 / 调用方式 / 存储介质）**，都是 ③b 公共能力——**含 model group 分组 / 6 态标准总结 / Probe Knowledge Catalog / materialize 编排内核**。③a 只拥有 gateway 感知不到的**应用加工四件事**：① UI 交互/展示 ② 产品策略 ③ 实际调用方式 ④ 存储介质/远端源/上传审批。判定一句话：**换个 app 还原样能用吗？能=③b，不能=③a**。`draft` 只保留为旧代码/旧原话里的 legacy 术语,不再作为 MVP1 功能名。
 
 ### 6.0 四层模型 + 领域无关铁律 + 三处握手
 | 层 | 是谁（代码位置） | 管什么 |
 |---|---|---|
-| **① 前端 (ts)** | `apps/studio/frontend` | UI + 前端业务逻辑（拖拽 / 投影渲染 / 默认选择算法 / family 折叠 / 弃用区 / 可搜索选组 / draft 态展示）。**只投影、不持第二份真相** |
+| **① 前端 (ts)** | `apps/studio/frontend` | UI + 前端业务逻辑（拖拽 / 投影渲染 / 默认选择算法 / family 折叠 / 弃用区 / 可搜索选组 / catalog 历史态展示）。**只投影、不持第二份真相** |
 | **② 后端 (rust)** | native-fs | 对 Roles/Copilot **几乎不碰数据**（凭证/角色数据永不 Rust）。只：General 选目录 / sidecar 生命周期 + IPC 桥 / copilot **聊天 session** 落盘（D8，属 skill 工作台 region，**非设置页**） |
 | **③a Studio 适配层（应用加工）** | `apps/studio/backend` | **应用加工四件事**：① UI 交互/展示（拖拽编辑、family 折叠、状态颜色渲染、可搜索选组）② 产品策略（默认推荐、动态浮出 opus4.8、弃用区）③ 实际调用方式（copilot 用 Claude SDK 拿 route 自己调）④ 存储介质（凭证/知识库存哪个文件）+ HTTP `/api/llm`·`/api/copilot` 适配壳。**只做 gateway 感知不到的加工** |
-| **③b gateway 库（公共能力内核）** | `packages/graph-agent-gateway` | **富能力公共内核**：凭证&端点 schema+读写+base_url 归一化+原始→标准 endpoint list / available models（分组 model_group·识别 identity·知识库 draft+notable）/ capability 归一化+对比+lint / 客观状态+熔断+**6 态标准总结** / 角色→fallback 链（**materialize 编排内核**）/ 两级调用（role+route）+错误分类+原生 ChatX。**凡不依赖应用加工四件事（UI / 产品策略 / 调用方式 / 存储介质）的模型数据/机制处理皆公共**（详 README §3） |
+| **③b gateway 库（公共能力内核）** | `packages/graph-agent-gateway` | **富能力公共内核**：凭证&端点 schema+读写+base_url 归一化+原始→标准 endpoint list / available models（分组 model_group·识别 identity·Probe Knowledge Catalog + notable）/ capability 归一化+对比+lint / 客观状态+熔断+**6 态标准总结** / 角色→fallback 链（**materialize 编排内核**）/ 两级调用（role+route）+错误分类+原生 ChatX。**凡不依赖应用加工四件事（UI / 产品策略 / 调用方式 / 存储介质）的模型数据/机制处理皆公共**（详 README §3） |
 
-**判据铁律（本节核心，2026-06-03 第四轮反转旧表述）**：③b **不是**"不能碰 model group / 6 态 / draft"——恰恰相反，**model group 分组 / 6 态标准总结 / draft 知识库 / materialize 编排的能力内核都属 ③b 公共**（gateway 机制衍生的最佳方案，任何 app 可复用）。**真正绝不上浮 ③b 的是应用加工四件事**：UI 交互/展示、产品策略（推荐/浮出/弃用/family 折叠）、实际调用方式（copilot SDK + session）、存储介质绑定。判定一句话：**换个 app 还原样能用吗？能=③b 公共，不能（绑死那四件事之一）=③a**。⚠️ 现码这些能力内核多数还**散在 ③a** `apps/studio/backend`（materialize / model_groups / 6 态 / draft / identity / notable / 熔断持久化）——按判据**应下沉 ③b**（下沉清单见修订版归属表）。
+**判据铁律（本节核心，2026-06-03 第四轮反转旧表述）**：③b **不是**"不能碰 model group / 6 态 / catalog"——恰恰相反，**model group 分组 / 6 态标准总结 / Probe Knowledge Catalog / materialize 编排的能力内核都属 ③b 公共**（gateway 机制衍生的最佳方案，任何 app 可复用）。**真正绝不上浮 ③b 的是应用加工四件事**：UI 交互/展示、产品策略（推荐/浮出/弃用/family 折叠）、实际调用方式（copilot SDK + session）、存储介质绑定/远端源/上传审批。判定一句话：**换个 app 还原样能用吗？能=③b 公共，不能（绑死那四件事之一）=③a**。⚠️ 现码这些能力内核多数还**散在 ③a** `apps/studio/backend`（materialize / model_groups / 6 态 / catalog legacy draft / identity / notable / 熔断持久化）——按判据**应下沉 ③b**。
 
 **三处握手**：
 - **① ↔ ③a** = HTTP `/api/llm/*`（registry / roles / model-groups / model-bundles / endpoints / routes / test-jobs）+ `/api/copilot/*`（REST 配置 + WS 聊天流）。契约 = DTO（`ModelGroup` / `ProviderModelOption.ui_state`(6 态) / `RoleTestResponse`）。FE 只投影 DTO、不持第二份。
@@ -368,38 +373,38 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 **保留原则**：前端只投影后端 SSOT（不持第二份）；数据层走 gateway sidecar **永不 Rust**（唯一 native = General 选目录）；接口前缀 `/api/llm` + `/api/copilot`，v4 契约源 = `llm-provider-intelligence-v2` + `studio-api-keys-regression-hardening`，**不恢复 v3**。
 
 ### 6.1 API Keys 页（四层重做，与 §6.2/§6.3 一致）
-> 前版"③后端gateway"三列已并入四层。**② Rust = N/A**（凭证/endpoint 数据永不 Rust）。核心分线（第四轮判据校准）：**协议探测 / list-models 解析 / capability 归一化 / route probe / base_url 归一化 / 错误分类 / endpoint 标准化拆分 + 生成 canonical id / 批量探测策略(短路·汇总) / draft 知识库内核 / 6 态标准总结** = **③b 公共能力**；**endpoint upsert + 存储 / 批量探测的 job-进度-HTTP 包装 / draft 的 import-apply 工作流 + 远端源 / 6 态颜色转 DTO** = **③a 应用加工**；**多 URL 录入** = 前端。
+> 前版"③后端gateway"三列已并入四层。**② Rust = N/A**（凭证/endpoint 数据永不 Rust）。核心分线：**协议探测 / list-models 解析 / capability 归一化 / route probe / base_url 归一化 / 错误分类 / endpoint 标准化拆分 + 生成 canonical id / 批量探测策略(短路·汇总) / Probe Knowledge Catalog 内核 / 6 态标准总结** = **③b 公共能力**；**endpoint upsert + 存储 / 批量探测的 job-进度-HTTP 包装 / 远端源选择 / 上传审批脱敏 / 6 态颜色转 DTO** = **③a 应用加工**；**多 URL 录入** = 前端。
 
 **四层职责：**
 | 层 | 内容 |
 |---|---|
 | **① 前端 (ts)** | UI：official 固定 5 卡（隐藏 name/base_url，只填 key）；third-party 自增卡（**多 URL 行 `+ URL`**）；Test 按钮；6 态状态标签（常驻 inline，§1.4）；Manual model probing 面板（加删 model id）；API key 输入（**type=text + CSS mask** + 显隐 + 复制 + **密码管理器抑制属性**，本地 InputGroup）；删除二次确认；骨架屏；**窄视口不溢出**。前端逻辑：输入草稿态（debounce 300ms）；**多 URL 录入**（card / 多 URL 行）→ 把原始信息交给 gateway，由 **③b 拆分 + 协议匹配 + 生成 canonical `endpoint_id`**（前端不再自己拆 / 不生成 id）；**Test 触发 + 展示进度**（批量探测策略归 ③b，前端只触发 + 显示）；**只投影 registry**（provider 卡 + 6 态 + Available Models 按 `route.endpoint_id`），**不持第二份** |
 | **② 后端 (rust)** | **N/A**（凭证/endpoint 数据永不 Rust） |
-| **③a Studio 适配（应用加工）** | HTTP `/api/llm/*`（见握手）；把前端录入的原始信息转交 ③b、`upsert` ③b 拆好的 endpoint 列表 + 存储；**批量探测的 job/进度/HTTP 包装**（策略归 ③b）；**draft 的 import-apply 工作流 + 远端源选择**（`probe_import_draft` 去桩做真 worker，知识库内核归 ③b）；**6 态颜色/文案转 DTO**（投影内核归 ③b）；endpoint test / route probe 任务编排 |
-| **③b gateway 库（公共能力内核）** | **协议探测**（对 URL 打各协议推理端点 + 对应 auth header：native anthropic=`x-api-key`、anthropic 兼容第三方=`Authorization: Bearer`）；**list-models 解析 per protocol**（OpenAI `data[].id` / Gemini `models[].name` 去 `models/` / 去重保序）；**capability 从 list-models 富字段归一化**（anthropic/gemini/openrouter 带；openai/阉割网关缺则 probe 兜底）；**base_url 按 protocol 保存时归一化**；route probe（1-token 真请求）；错误分类（结构错 404/500/400-invalid ↔ 瞬时 401/429/timeout）；**endpoint 标准化拆分 + 生成 canonical id；批量探测策略（短路·汇总）；draft 知识库内核（记录/复用/共享证据）；6 态标准总结**。不碰应用加工四件事，不知 card 录入交互 |
+| **③a Studio 适配（应用加工）** | HTTP `/api/llm/*`（见握手）；把前端录入的原始信息转交 ③b、`upsert` ③b 拆好的 endpoint 列表 + 存储；**批量探测的 job/进度/HTTP 包装**（策略归 ③b）；**Probe Knowledge Catalog 的远端源选择、存储介质、上传审批/脱敏**（知识库内核归 ③b）；**6 态颜色/文案转 DTO**（投影内核归 ③b）；endpoint test / route probe 任务编排 |
+| **③b gateway 库（公共能力内核）** | **协议探测**（对 URL 打各协议推理端点 + 对应 auth header：native anthropic=`x-api-key`、anthropic 兼容第三方=`Authorization: Bearer`）；**list-models 解析 per protocol**（OpenAI `data[].id` / Gemini `models[].name` 去 `models/` / 去重保序）；**capability 从 list-models 富字段归一化**（anthropic/gemini/openrouter 带；openai/阉割网关缺则 probe 兜底）；**base_url 按 protocol 保存时归一化**；route probe（1-token 真请求）；错误分类（结构错 404/500/400-invalid ↔ 瞬时 401/429/timeout）；**endpoint 标准化拆分 + 生成 canonical id；批量探测策略（短路·汇总）；Probe Knowledge Catalog 内核（记录/复用/共享证据、provider 分区、probe priority）；6 态标准总结**。不碰应用加工四件事，不知 card 录入交互 |
 
 **三处握手（API 契约）：**
 - **① ↔ ③a**：`GET /api/llm/registry`（RegistrySnapshot，api_key **redacted**）· `GET …/endpoints/{id}/secret`（单条明文，scoped reveal）· `PUT …/registry/endpoints`（upsert ③b 拆好的 endpoint 列表）· `POST …/endpoints/{id}/test`（批量模型探测）· `POST …/routes/{id}/probe[?force=true]`（单 route 真探 / Manual / Test Now）。DTO：endpoint/route + 6 态 `ui_state`，api_key 一律 redact。
-- **③a ↔ ③b**（进程内）：③a 调库做 endpoint 拆分 / 协议探测 / list-models 解析 / capability 归一化 / route probe / base_url 归一化 / 批量探测策略 / draft 知识库读写 / 6 态总结；**③b 返回标准结果（标准 endpoint list、批量探测结果、draft/state 投影结果）**，③a 只包装 job/HTTP + 落存储。
+- **③a ↔ ③b**（进程内）：③a 调库做 endpoint 拆分 / 协议探测 / list-models 解析 / capability 归一化 / route probe / base_url 归一化 / 批量探测策略 / Probe Knowledge Catalog 读写 / 6 态总结；**③b 返回标准结果（标准 endpoint list、批量探测结果、catalog/state 投影结果）**，③a 只包装 job/HTTP + 落存储。
 - **③b ↔ provider**：协议探测 + route probe 的真实 HTTP（打推理端点）。
 
 **逐操作归属（A1–A12，② Rust 全 N/A）：**
 | # 动作 | ① FE-ts | ③a Studio 适配 | ③b gateway 库 |
 |---|---|---|---|
 | A1 进 tab 加载 | 渲染 official 5 卡 + 第三方卡 + 6 态 | `GET registry`（redacted） | — |
-| A2 official 填 key + Test | 填 key、点 Test | get-models job 包装 + import/apply 工作流 + 转 DTO | list-models 解析 + capability 归一化 + **draft 写语义** + 6 态总结 |
+| A2 official 填 key + Test | 填 key、点 Test | get-models job 包装 + 转 DTO + catalog 存储/远端源 | list-models 解析 + capability 归一化 + **catalog 写语义** + 6 态总结 |
 | A3 第三方填 URL + 协议自动探测 | 填 URL、点 Test | 编排探测 + 判定可达 | **协议探测**（打推理端点 + auth header） |
 | A4 多 URL × 协议 → 拆 endpoint | 多 URL 录入、触发 | `PUT endpoints` upsert + 存储 | **拆分 + 协议匹配 + 测试 + 生成 canonical endpoint_id** |
-| A5 endpoint Test = 批量模型探测 | 触发 + 显示 inline | job/进度/HTTP 包装 + 写 draft（工作流） | **批量探测策略（批批打/命中停/结构错短路/瞬时不短路）+ route probe + 错误分类 + 汇总** |
-| A6 单模型 Manual probe | 加删 model id、触发 | job 包装 + import/apply 工作流 | route probe + **draft 写语义** |
+| A5 endpoint Test = 批量模型探测 | 触发 + 显示 inline | job/进度/HTTP 包装 + 写 catalog | **批量探测策略（批批打/命中停/结构错短路/瞬时不短路）+ route probe + 错误分类 + 汇总** |
+| A6 单模型 Manual probe | 加删 model id、触发 | job 包装 + 写 catalog | route probe + **catalog 写语义** |
 | A7 capability 回填 | 显示能力 | 投影 | **list-models 富字段归一化** + 缺则 probe |
-| A8 draft 赋能/写回 | 蓝标签渲染 | 调 ③b 读写 + import/apply 工作流 + 远端源 | **draft 知识库读写语义 + probe 结果合并** |
-| A9 6 态标签 | 渲染色 | 6 态结果转 DTO | **6 态标准总结（含读 draft 出蓝）+ RouteStatus + 熔断** |
+| A8 Probe Knowledge Catalog 赋能/写回 | 蓝标签渲染 | 调 ③b 读写 + 远端源 + 上传审批/脱敏 | **catalog 读写语义 + probe 结果合并 + provider 分区 + probe priority** |
+| A9 6 态标签 | 渲染色 | 6 态结果转 DTO | **6 态标准总结（含读 catalog 出蓝）+ RouteStatus + 熔断** |
 | A10 secret reveal | 进 tab 逐个换真值 | `GET endpoints/{id}/secret`（scoped、单条明文） | — |
 | A11 删 endpoint | 二次确认 | `PUT endpoints`（整表 upsert） | — |
 | A12 save-status badge | 统一 badge ← saveStatus | save 端点返回状态 | — |
 
-> **守边界检查（第四轮校准）**：③b 列是公共能力内核（协议探测/list 解析/capability 归一化/route probe/错误分类/base_url 归一化/**endpoint 拆分 + canonical id / 批量探测策略 / draft 知识库 / 6 态总结**）；③a 列是应用加工（upsert + 存储 / job-进度-HTTP / import-apply 工作流 / 颜色转 DTO）；① 只录入 + 渲染。⚠️ 原"前端拆分 / 前端生成 id / `_stable_endpoint_id` 退役"已反转——endpoint 标准化拆分 + canonical id 归 ③b。
+> **守边界检查**：③b 列是公共能力内核（协议探测/list 解析/capability 归一化/route probe/错误分类/base_url 归一化/**endpoint 拆分 + canonical id / 批量探测策略 / Probe Knowledge Catalog / 6 态总结**）；③a 列是应用加工（upsert + 存储 / job-进度-HTTP / 远端源 + 上传审批 / 颜色转 DTO）；① 只录入 + 渲染。⚠️ 原"前端拆分 / 前端生成 id / `_stable_endpoint_id` 退役"已反转——endpoint 标准化拆分 + canonical id 归 ③b。
 
 ### 6.2 LLM Roles 页
 > **② 后端 (rust) = N/A**（角色/凭证数据永不 Rust，本页 Rust 不参与）。
@@ -408,14 +413,14 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 | 层 | 内容 |
 |---|---|
 | **① 前端 (ts)** | UI + 前端业务逻辑：角色卡 + Available Models 侧栏（model group 卡、**family 可折叠**〔#1〕、**弃用区**可折叠、6 态色含 🔵 蓝、endpoint 平铺在「endpoints」标签）；拖 model group + **默认 provider 选择算法**（Ready+Untested+🔵 优先、排除 failed/off、cooling 有替代不默认选）；provider 链拖序/加删；intent 控件（thinking **三态互斥单控件**〔#2〕、输出 token，downgrade 无 UI〔#3〕，**布局轻优化**〔#4〕，控件由 ③b 描述符驱动）；Test 触发 + role-fit 状态灯 + **单一顶层 tooltip**（fail/downgrade 进 tooltip、**不要 RoleTestResultPanel**、清嵌套 tooltip〔#5〕）；Model Bundle 区（**Add 与 Add Role 同位**〔#6〕、复用 role 编辑/测试/改名删除、**拖进角色=引用**〔#7/#8/#9/#12〕）；family/弃用区折叠（localStorage 视图态）；**只投影、不持第二份**（删 `roleTestStates`） |
-| **③a Studio 适配（应用加工）** | `GET /api/llm/registry`（model_groups DTO + 6 态 `ui_state`）· `GET /api/llm/model-groups` · `GET/PUT/DELETE /api/llm/roles[/{name}]` · `POST /api/llm/roles/{name}/test(-jobs)` · `GET/PUT/DELETE /api/llm/model-bundles[/{id}]`+`/test`。**应用加工**：拖拽编辑角色/绑定的 UI；**default 选择/推荐策略**（产品策略）；6 态颜色转 DTO；materialize 报告 + role 测试结果的渲染；draft 的 import-apply 工作流。（model_group 分组 / materialize 编排 / 6 态总结 / draft 知识库的**内核归 ③b**，见右列）|
+| **③a Studio 适配（应用加工）** | `GET /api/llm/registry`（model_groups DTO + 6 态 `ui_state`）· `GET /api/llm/model-groups` · `GET/PUT/DELETE /api/llm/roles[/{name}]` · `POST /api/llm/roles/{name}/test(-jobs)` · `GET/PUT/DELETE /api/llm/model-bundles[/{id}]`+`/test`。**应用加工**：拖拽编辑角色/绑定的 UI；**default 选择/推荐策略**（产品策略）；6 态颜色转 DTO；materialize 报告 + role 测试结果的渲染；Probe Knowledge Catalog 的远端源配置 / 存储介质 / 上传审批与脱敏。（model_group 分组 / materialize 编排 / 6 态总结 / Probe Knowledge Catalog 的**内核归 ③b**，见右列）|
 | **③b gateway 库（公共能力内核）** | **model group 分组 / identity 识别**；**materialize 编排内核**（按意图过滤路线 + 降级 + 排 fallback 链 + role-fit/downgrade 诊断）；`resolve_routes(role)`→`ResolvedRole`；capability 归一化 + 对比 + `build_runtime_setting_descriptors`（驱动 ① intent 控件）；`lint_role_routes`（只 warn/block 不选型）；route probe；ChatX 调用；熔断 + 错误分类 + **6 态标准总结**（供 ③a 转 DTO）。③b 看到"角色编排结构 + 意图"（通用），看不到"用户怎么拖拽编辑出它" |
 
 **逐操作归属（R1–R25，② Rust 全 N/A）：**
 | # 动作 | ① FE-ts | ③a Studio 适配 | ③b gateway 库 |
 |---|---|---|---|
 | R1 进 tab 加载 | 渲染角色卡+侧栏 | `GET registry`(model_groups) | — |
-| R2 可用模型过滤 | 过滤渲染(family/弃用/6态) | 调 ③b + 转 DTO | **model group 分组 + 6 态总结(读 draft) + route modality capability** |
+| R2 可用模型过滤 | 过滤渲染(family/弃用/6态) | 调 ③b + 转 DTO | **model group 分组 + 6 态总结(读 catalog) + route modality capability** |
 | R3 搜模型 | 纯前端 | — | — |
 | R4 看 6 态 | 渲染色 | 6 态结果转 DTO | **6 态标准总结 + RouteStatus + 熔断** |
 | R5 弃用区 | 渲染/复制名/re-probe 触发 | disabled 分类 + 投影 | route probe(re-probe) |
@@ -427,7 +432,7 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 | R13 output token | 控件←描述符 | 同上 | max_output capability + descriptor |
 | R14 route max 摘要 | 显示 | role_effective_runtime_settings 投影 | `_effective_runtime_settings` |
 | R15 role-fit 灯 | 显示 | 渲染 fit 灯(读 ③b report) | **materialize 算 role_fit + capability + lint** |
-| R16 role Test 批量 | 触发 + 轮询喂灯 | `POST roles/{}/test-jobs` job 包装 + 落存储 | `resolve_routes` + 批量 route probe + **draft 写语义** |
+| R16 role Test 批量 | 触发 + 轮询喂灯 | `POST roles/{}/test-jobs` job 包装 + 落存储 | `resolve_routes` + 批量 route probe + **catalog 写语义** |
 | R17 Test 失败条 | 显示(未保存先拒) | 同 R16 | — |
 | R18 fail/downgrade | 单顶层 tooltip(无 panel) | 渲染 downgrade tooltip(读 ③b report) | **materialize 产 downgrade 诊断** |
 | R19 role 改名删 | 菜单 | `PUT/DELETE roles` | — |
@@ -437,7 +442,7 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 | R24 束改名删 | 同 role | `PUT/DELETE bundles` | — |
 | R25 被动刷新 | 重投影 | WS `roles_changed` | — |
 
-> **守边界检查（按 §6.0 第四轮判据校准）**：③b 列是公共能力内核（resolve/capability/lint/probe/ChatX）；**model group 分组 / materialize 编排 / 6 态标准总结 / draft 知识库的内核也属 ③b 公共**（现散 ③a 待下沉）。③a 真正独占的是**应用加工**：拖拽编辑交互、默认选择/推荐策略、状态颜色渲染。
+> **守边界检查（按 §6.0 第四轮判据校准）**：③b 列是公共能力内核（resolve/capability/lint/probe/ChatX）；**model group 分组 / materialize 编排 / 6 态标准总结 / Probe Knowledge Catalog 内核也属 ③b 公共**（现散 ③a 待下沉）。③a 真正独占的是**应用加工**：拖拽编辑交互、默认选择/推荐策略、状态颜色渲染、远端源配置/上传审批/脱敏。
 
 ### 6.3 Copilot 页
 > **② 后端 (rust)**：copilot **配置**(本页)= N/A；但 copilot **聊天 session 落盘**(D8)= Rust native-fs（skill 工作台 region，非本页）。
@@ -447,7 +452,7 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 | 层 | 内容 |
 |---|---|
 | **① 前端 (ts)** | copilot 角色卡(**单 model group**)；**可搜索选组器**〔#1〕；Test 触发；route 排序/加删；新建第三方角色(`copilot_` 前缀)；**「Backend Integration」slot 换统一 save-status badge**〔#4〕(四页共用、idle 静默)；**去 mock**；**内置动态浮出**〔#2〕(Claude opus4.8→4.7、DeepSeek V4Pro→V3.2Pro)；**eligible 不预过滤未测 route**〔#3〕；**copilot_ 前缀必修**(选组后保前缀)；UI 尽量复用 role |
-| **③a Studio 适配（应用加工）** | 复用 roles 端点(`role_kind=copilot`，`_is_copilot_role` 认 `copilot_` 前缀) + `POST /api/copilot/roles/{name}/test-sdk` + WS 聊天流。**领域逻辑**：**copilot SDK 调用**(`copilot.py` `ClaudeSDKClient`、base_url→env)；**真 SDK 测试**(修假测试 `AsyncAnthropic`→`ClaudeSDKClient`，`llm.py:2150`)；走**全 fallback 链**(非 `_resolve_copilot_route` 只取首条)；eligible 判据(调 ③b capability)；内置动态浮出策略；session 持久化(D8)+失败显式告警；测试证据回写 draft |
+| **③a Studio 适配（应用加工）** | 复用 roles 端点(`role_kind=copilot`，`_is_copilot_role` 认 `copilot_` 前缀) + `POST /api/copilot/roles/{name}/test-sdk` + WS 聊天流。**领域逻辑**：**copilot SDK 调用**(`copilot.py` `ClaudeSDKClient`、base_url→env)；**真 SDK 测试**(修假测试 `AsyncAnthropic`→`ClaudeSDKClient`，`llm.py:2150`)；走**全 fallback 链**(非 `_resolve_copilot_route` 只取首条)；eligible 判据(调 ③b capability)；内置动态浮出策略；session 持久化(D8)+失败显式告警；测试证据回写 Probe Knowledge Catalog |
 | **③b gateway 库（公共能力内核）** | **仅** `resolve_routes("copilot_chat")`→`ResolvedRoute[]`(③a 拿去自己用 SDK 调；**库不调 SDK、不知 copilot 是什么**)；route 是否 **anthropic-messages 兼容**的 capability(供 ③a 判 eligible) |
 
 **逐操作归属（C1–C12，② Rust 全 N/A；session 除外属 chat region）：**
@@ -457,7 +462,7 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 | C2 角色卡动态渲染 | 渲染 | 从真 model_groups 投影 copilot 角色 | — |
 | C3 种子卡(去 mock) | 无 mock | 同 C2 | — |
 | C4 route SDK 状态灯 | 显示 | 来自真 SDK 测试结果(③a 存) | — |
-| C5 Test 真 SDK | 触发 | **`ClaudeSDKClient` 真跑** + 写证据/draft | **仅** `resolve_routes` 给 route |
+| C5 Test 真 SDK | 触发 | **`ClaudeSDKClient` 真跑** + 写证据/catalog | **仅** `resolve_routes` 给 route |
 | C6 route 兜底序 | 拖序 | `PUT roles` + 走全链 | `resolve_routes` 返回有序 |
 | C7 Add/删 route(eligible) | 增删 | eligible 判据(调 ③b capability) | anthropic-messages 兼容 capability |
 | C8 model-group remove | 接 handler | `PUT roles` | — |
@@ -473,7 +478,7 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 
 | 机制 | ① 前端 (ts) | ③a Studio 适配（应用加工） | ③b gateway 库（公共能力内核） |
 |---|---|---|---|
-| **draft 赋能/写回** | 蓝标签 + "以前联通过"提示(渲染) | import/apply 工作流 + 存储介质/远端源选择(应用加工) | **draft 知识库内核(记录/复用/共享探测证据)属 ③b 公共**(现 `llm_import_drafts.py` 在 ③a 待下沉)；产出 probe 结果写入知识库 |
+| **Probe Knowledge Catalog 赋能/写回** | 蓝标签 + "以前联通过"提示(渲染) | 存储介质/远端源选择/上传审批与脱敏(应用加工) | **Probe Knowledge Catalog 内核(记录/复用/共享探测证据、provider 分区、probe priority)属 ③b 公共**(现码 legacy `llm_import_drafts.py` 在 ③a 待下沉并改名)；产出 probe 结果写入知识库 |
 | **6 态投影** | 渲染状态色(绿/蓝/灰/红/熔断/关) | 状态颜色/文案的呈现选择(应用加工) | **6 态标准总结(ready🟢/蓝🔵/untested⚪/failed🔴/cooling/off,failed 带 reason)属 ③b 公共**(现 `project_provider_model_state` 在 ③a 待下沉,需取消 needs_setup)；产出 RouteStatus + 熔断 |
 | **测试落点** | Test / Test Now 按钮(触发) | endpoint test / role test 编排 + 回写 SSOT | route probe(1-token 真请求) + 熔断写 health store |
 | **多 URL / 协议探测** | 多 URL 行(录入) | endpoint upsert + 存储、批量探测的 job/进度/HTTP 包装 | **endpoint 拆分 + 生成 canonical id + 协议探测 + base_url 归一化 + 批量探测策略 + 错误分类** |
@@ -483,10 +488,10 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 四层之间有**两条内部边界**必须守住——它们是这套握手的不变量，散落在 §6.1–§6.4 的 ✓ 注在此收拢成两条正式检查，逐条验：
 
 **检查 1 @ ③a ↔ ③b 边界：③b = 公共能力内核，不含应用加工（2026-06-03 第四轮反转旧不变量）**
-- **不变量**：③b **不是**"不能含 model group / 6 态 / draft"——它们的**能力内核（分组 / 状态标准总结 / 知识库 / materialize 编排）恰属 ③b 公共**。③b **绝不出现的是应用加工四件事**：UI 交互/展示（颜色、布局、折叠、渲染）、产品策略（默认推荐、浮出 opus4.8、弃用区、family 折叠）、实际调用方式（`ClaudeSDKClient` / copilot session）、存储介质绑定（硬编码文件路径 / 远端源）。
+- **不变量**：③b **不是**"不能含 model group / 6 态 / catalog"——它们的**能力内核（分组 / 状态标准总结 / Probe Knowledge Catalog / materialize 编排）恰属 ③b 公共**。③b **绝不出现的是应用加工四件事**：UI 交互/展示（颜色、布局、折叠、渲染）、产品策略（默认推荐、浮出 opus4.8、弃用区、family 折叠）、实际调用方式（`ClaudeSDKClient` / copilot session）、存储介质绑定（硬编码文件路径 / 远端源 / 上传审批）。
 - **怎么查**：① grep ③b 公共 API 有无**应用加工**痕迹——渲染/颜色/布局、"默认推荐"策略、`ClaudeSDKClient`、硬编码存储路径；② 对每个 ③b 能力问"**换个 app 还原样能用吗**"——不能（绑死 UI/产品策略/调用方式/存储）= 错放 ③b。
 - **违反信号**：③b 里冒出渲染/颜色/默认推荐策略/copilot SDK 调用/硬编码存储位置。
-- **现状**：⚠️ **能力内核待归位**——materialize / model_groups / 6 态 / draft / identity / notable / 熔断持久化的内核现仍散在 ③a `apps/studio/backend`，按判据**应下沉 ③b**；copilot SDK 调用、HTTP 壳、UI 渲染、产品策略**正确留 ③a**。下沉清单见 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`。
+- **现状**：⚠️ **能力内核待归位**——materialize / model_groups / 6 态 / Probe Knowledge Catalog(现码 legacy draft) / identity / notable / 熔断持久化的内核现仍散在 ③a `apps/studio/backend`，按判据**应下沉 ③b**；copilot SDK 调用、HTTP 壳、UI 渲染、产品策略**正确留 ③a**。下沉清单见 `docs/graph-agent-gateway/mvp1/module-disposition-revised.md`。
 
 **检查 2 @ ① ↔ ③a 边界：前端只投影、不持第二份真相**
 - **不变量**：前端（①）的"测试态 / 状态 / 模型清单"**只能从后端 registry 投影**，**不得**在前端组件态 / store 里另存一份真值（切 tab / 刷新就丢的并行态）。
@@ -553,7 +558,7 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 | 24 | `Test` → 异步批量 job(750ms 轮询)拉全厂商模型目录,endpoint 提 verified | 官 | official-test-job | ✅ ⚠️**DRIFT**:后端硬门禁 `provider_kind!='official'` 拒;目标=统一 `POST /endpoints/{id}/test`+批量探测(§1.2) |
 | 25 | `Get Models` → 同步单次 models-list 发现;路由停 unverified_manual | 三 | tp-getmodels | ✅ ⚠️ DRIFT(同上) |
 | 26 | 'Endpoint test' 填单 model id → Test 探测该 model | 三 | tp-model-probe | ✅ |
-| 27 | 'Manual model probing' 加多 model id 批量探测(后端按 kind 分叉) | 共 | manual-model-probe | ✅ ⚠️ 官→多候选 VerifiedProfile / 三→单次 `_probe_model` 写死 text-only(目标:统一批量探测+能力探测) |
+| 27 | 'Manual model probing' 加多 model id 批量探测(后端按 kind 分叉) | 共 | manual-model-probe | ✅ ⚠️ 官→多候选 VerifiedProfile / 三→单次 `_probe_model` 写死 text-only(目标:统一批量探测+能力探测)；探测证据写本地 Probe Knowledge Catalog，MVP1 不自动上传 |
 | 28 | (自动)Manual panel 拉 `notable-models` 候选作输入建议 | 共 | notable-models | ✅ 有 note 文件即返,不分官/三 |
 | 29 | `⋮` → Rename / Delete(official 不可改名/删) | 三 | tp-rename-delete | ✅ 删除二次确认 toast |
 | 30 | 状态投影:tp 顶层徽章(参数指纹) / official 每 route 彩色 Tag(后端权威) | 共 | test-status-projection | ✅ → 目标 6 态(§4.2) |
@@ -627,7 +632,7 @@ get-model / list-models 是否带 capability（决定哪些 provider 可免 prob
 
 | 早期 open question | 结论落点 |
 |---|---|
-| 测试态 SSOT 落盘/回填、删前端易失层 | ✅ §6.5 检查 2 + §4.1 draft 写回 |
+| 测试态 SSOT 落盘/回填、删前端易失层 | ✅ §6.5 检查 2 + §4.1 Probe Knowledge Catalog 写回 |
 | Copilot 整 tab 做到哪档 | ✅ 配置 + 真测试(修假测试)全做,§3.4 |
 | Copilot 分流 bug(#62/63 丢前缀) | ✅ 确认是 bug、接线必修,§7.4 |
 | role intent 前端缺口(#42/43 required/block) | ✅ 补 UI,§2.3 Role Intent |

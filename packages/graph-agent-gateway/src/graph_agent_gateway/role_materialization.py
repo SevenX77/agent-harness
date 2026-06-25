@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from graph_agent_gateway.registry.schema import CapabilityValue, RoleRouteEntry
-from graph_agent_gateway.state_projection import project_route_state_from_evidence
+from graph_agent_gateway.state_projection import project_route_state
 
 _FailedReasonCode = Literal["missing_config", "endpoint_unreachable", "model_failed"]
 
@@ -14,7 +14,6 @@ _FailedReasonCode = Literal["missing_config", "endpoint_unreachable", "model_fai
 class MaterializeRoleRequest:
     role: Any
     credentials: Any
-    evidence_records: list[Any] | None = None
     health_store: Any | None = None
     now: datetime | None = None
 
@@ -66,7 +65,6 @@ def materialize_role(request: MaterializeRoleRequest) -> MaterializedRoleResult:
                 route,
                 health_store,
                 current_time,
-                evidence_records=list(request.evidence_records or []),
             )
             if projection.ui_state in {"failed", "off"}:
                 report["skipped_provider_details"].append(
@@ -122,8 +120,6 @@ def _materialization_projection(
     route: Any,
     health_store: Any | None,
     current_time: datetime,
-    *,
-    evidence_records: list[Any],
 ) -> _ProjectionFacts:
     active_circuit = _select_active_circuit(
         endpoint,
@@ -131,13 +127,13 @@ def _materialization_projection(
         _active_circuits(endpoint, route, health_store, current_time),
         current_time,
     )
-    gateway_projection = project_route_state_from_evidence(
+    gateway_projection = project_route_state(
         route_id=_value(route, "route_id"),
         endpoint_status=_value(endpoint, "status"),
         route_status=_value(route, "status"),
         credential_available=_credential_available(endpoint),
         circuit_retry_at=_value(active_circuit, "retry_at") if active_circuit is not None else None,
-        evidence_records=evidence_records,
+        credential_evidence_refs=_route_credential_evidence_refs(route),
     )
 
     ui_state = gateway_projection.ui_state
@@ -265,10 +261,12 @@ def _credential_available(endpoint: Any) -> bool:
     return bool(api_key)
 
 
-def _route_draft_history(endpoint: Any, route: Any) -> bool:
+def _route_credential_evidence_refs(route: Any) -> list[str]:
     route_metadata = _value(route, "metadata", {}) or {}
-    endpoint_metadata = _value(endpoint, "metadata", {}) or {}
-    return bool(route_metadata.get("draft_history") or endpoint_metadata.get("draft_history"))
+    refs = route_metadata.get("evidence_refs")
+    if not isinstance(refs, list):
+        return []
+    return [ref for ref in refs if isinstance(ref, str)]
 
 
 def _apply_intent(
@@ -325,12 +323,19 @@ def _apply_intent(
     else:
         token_intent = _value(role_intent, "target_output_tokens")
 
-    if token_intent is not None:
+    if token_intent is None:
+        _apply_max_output_tokens(entry_report, route)
+    else:
         token_fit = _apply_output_token_intent(entry_report, token_intent, route)
         if token_fit == "not_fit":
             return "not_fit"
         if token_fit == "downgraded":
             role_fit = "downgraded"
+    output_floor_fit = _apply_thinking_output_floor(entry_report, route)
+    if output_floor_fit == "not_fit":
+        return "not_fit"
+    if output_floor_fit == "downgraded":
+        role_fit = "downgraded"
     return role_fit
 
 
@@ -345,10 +350,8 @@ def _apply_output_token_intent(
     route: Any,
 ) -> str:
     mode = _value(token_intent, "mode")
-    if mode == "maximum_available":
-        max_tokens = _max_output_tokens(route)
-        if max_tokens is not None:
-            entry_report["resolved_settings"]["max_output_tokens"] = max_tokens
+    if mode in {"default", "maximum_available"}:
+        _apply_max_output_tokens(entry_report, route)
         return "using"
     if mode != "target" or _value(token_intent, "value") is None:
         return "using"
@@ -376,12 +379,98 @@ def _apply_output_token_intent(
     return "downgraded"
 
 
+def _apply_max_output_tokens(entry_report: dict[str, Any], route: Any) -> None:
+    max_tokens = _max_output_tokens(route)
+    if max_tokens is not None:
+        entry_report["resolved_settings"]["max_output_tokens"] = max_tokens
+
+
+def _apply_thinking_output_floor(entry_report: dict[str, Any], route: Any) -> str:
+    reasoning = entry_report["resolved_settings"].get("reasoning")
+    if not isinstance(reasoning, dict) or reasoning.get("enabled") is not True:
+        return "using"
+
+    required_output = _thinking_required_output_tokens(route)
+    if required_output is None:
+        return "using"
+
+    route_max = _max_output_tokens(route)
+    if route_max is not None and required_output > route_max:
+        warning = {
+            "code": "thinking_output_floor_not_fit",
+            "route_id": _value(route, "route_id"),
+            "message": (
+                f"Thinking requires at least {required_output} output tokens, "
+                f"but this route limit is {route_max}."
+            ),
+        }
+        entry_report["warnings"].append(warning)
+        return "not_fit"
+
+    current_output = entry_report["resolved_settings"].get("max_output_tokens")
+    if isinstance(current_output, int | float) and int(current_output) >= required_output:
+        return "using"
+
+    entry_report["resolved_settings"]["max_output_tokens"] = required_output
+    warning = {
+        "code": "thinking_output_floor_applied",
+        "route_id": _value(route, "route_id"),
+        "message": (
+            f"Thinking requires at least {required_output} output tokens; "
+            "Studio raised the runtime max_output_tokens to keep the request valid."
+        ),
+    }
+    entry_report["warnings"].append(warning)
+    return "downgraded"
+
+
+def _thinking_required_output_tokens(route: Any) -> int | None:
+    capabilities = _route_effective_capabilities(route)
+    if _capability_value(capabilities.get("manual_thinking_budget_supported")) is False:
+        return None
+
+    budget = _capability_default_int(capabilities.get("reasoning_budget_tokens"))
+    if budget is None:
+        budget = _capability_int(capabilities.get("default_thinking_budget_tokens"))
+    if budget is None:
+        budget = _capability_min_int(capabilities.get("reasoning_budget_tokens"))
+    if budget is None:
+        budget = _capability_int(capabilities.get("min_thinking_budget_tokens"))
+    if budget is None:
+        return None
+    return budget + 1
+
+
 def _max_output_tokens(route: Any) -> int | None:
     capability = (_value(route, "capabilities", {}) or {}).get("max_output_tokens")
-    if capability is None or not isinstance(_capability_value(capability), dict):
+    value = _capability_value(capability) if capability is not None else None
+    if isinstance(value, int | float):
+        return int(value)
+    if not isinstance(value, dict):
         return None
-    max_value = _capability_value(capability).get("max")
+    max_value = value.get("max")
     return int(max_value) if isinstance(max_value, int | float) else None
+
+
+def _capability_default_int(capability: Any) -> int | None:
+    value = _capability_value(capability)
+    if not isinstance(value, dict):
+        return None
+    default_value = value.get("default")
+    return int(default_value) if isinstance(default_value, int | float) else None
+
+
+def _capability_min_int(capability: Any) -> int | None:
+    value = _capability_value(capability)
+    if not isinstance(value, dict):
+        return None
+    min_value = value.get("min")
+    return int(min_value) if isinstance(min_value, int | float) else None
+
+
+def _capability_int(capability: Any) -> int | None:
+    value = _capability_value(capability)
+    return int(value) if isinstance(value, int | float) else None
 
 
 def _route_thinking_capability(route: Any) -> Any | None:

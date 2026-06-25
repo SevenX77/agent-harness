@@ -8,7 +8,7 @@
    "n": 32,
    "cap": "role-list-load",
    "design_ref": "atom-32",
-   "current": "现状:已实现且符合。进 tab 拉 registry 后,LlmRolesTab(LlmRolesTab.tsx)用 pruneInvalidRoleProviders(role-utils.ts,把引用了已删 endpoint 的 route 从角色剔掉)归一化角色数据 → 角色区由 RoleCardList(RoleCardList.tsx)渲染 graph-agent 角色卡(copilot_ 前缀角色归 Copilot tab,不在此渲染)→ 右侧 AvailableModelsSidebar(AvailableModelsSidebar.tsx)渲染可拖的 model group 卡。角色与侧栏都是 registry 的纯投影。",
+   "current": "现状:已实现且符合。进 tab 拉 registry 后,LlmRolesTab(LlmRolesTab.tsx)用 pruneInvalidRoleProviders(role-utils.ts)归一化角色数据 → RoleCardList(RoleCardList.tsx)只渲染 Graph Agent Roles 分区;role_kind === \"copilot\" 的角色被过滤到独立 Copilot tab,不再出现 Copilot Roles / Add Copilot Role 模块;没有 role_kind 的历史角色按 graph-agent 兼容显示,避免仅凭名称误删旧图角色 → 右侧 AvailableModelsSidebar(AvailableModelsSidebar.tsx)渲染可拖的 model group 卡。角色与侧栏都是 registry 的纯投影。",
    "gap": "符合设计,无需改。",
    "fe_status": "符合",
    "be_dep": "已就绪可接。GET /registry 返回 roles(已 materialize)+ model_groups DTO;后端 materialize(D6.2)+ 6 态(D6.1)收口=ok。"
@@ -161,8 +161,8 @@
    "n": 49,
    "cap": "model-bundle-create",
    "design_ref": "atom-49",
-   "current": "现状:已实现且符合。AdvancedModelBundlesSection(AdvancedModelBundlesSection.tsx)的 Add Model Bundle 按钮 → RoleNameDialog 命名 → 新建空 bundle(canonical_id='bundle:{id}')→ 入队保存。已配的束经 modelBundleGroupsFromData(AdvancedModelBundlesSection.tsx)在 AvailableModelsSidebar 的 pinnedModelGroups 顶部槽渲染(置于 model-group 列表之上)。",
-   "gap": "符合设计(Add Model Bundle 与 Add Role 同位、空束、Pinned 顶部槽),无需改。",
+   "current": "现状:已实现且符合。AdvancedModelBundlesSection(AdvancedModelBundlesSection.tsx)的 Add Model Bundle 按钮位于 Model Bundles 列表/空态之后的模块底部左侧,与 Graph Agent Roles 的 Add Role 入口节奏统一;点击后走 RoleNameDialog 命名 → 新建空 bundle(canonical_id='bundle:{id}')→ 入队保存。已配的束经 modelBundleGroupsFromData(AdvancedModelBundlesSection.tsx)在 AvailableModelsSidebar 的 pinnedModelGroups 顶部槽渲染(置于 model-group 列表之上)。",
+   "gap": "符合设计(Add Model Bundle 在 Model Bundles 内容/空态下方左侧、空束、Pinned 顶部槽),无需改。",
    "fe_status": "符合",
    "be_dep": "已就绪可接。PUT /roles 整表 upsert(model_bundles 同文件),materialize_model_bundle(gateway)物化束 route 链。"
   },
@@ -251,16 +251,22 @@
     32
    ],
    "shots": [
-    "进 tab 显已有 graph-agent 角色卡 + 右侧可用模型侧栏(copilot_ 角色不在此)"
+    "进 tab 显已有 graph-agent 角色卡 + 右侧可用模型侧栏;Copilot Roles 分区不出现"
    ],
    "fe_status": "符合",
    "layer1": [
-    "mock GET /registry 回含 graph-agent + copilot_ 混合角色。",
-    "断言只渲染 graph-agent 角色卡(copilot_ 被过滤)。",
+    "mock GET /registry 回含 graph-agent + role_kind=copilot 混合角色。",
+    "断言只渲染 Graph Agent Roles 分区和 graph-agent 角色卡;Copilot Roles / Add Copilot Role 计数为 0。",
     "断言引用已删 endpoint 的 route 被 pruneInvalidRoleProviders 剔掉。"
    ],
    "layer2": [
     "进 Settings→LLM Roles 看角色卡 + 侧栏。"
+   ],
+   "screenshots": [
+    {
+     "file": "n0-roles-no-copilot-section.png",
+     "caption": "2026-06-24 Playwright 视觉验证:LLM Roles 只显示 Graph Agent Roles 分区;role_kind=copilot 的 copilot_chat 未在此页重复出现,侧边栏 Copilot tab 仍保留。"
+    }
    ]
   },
   {
@@ -576,7 +582,7 @@
     49
    ],
    "shots": [
-    "Add Model Bundle 与 Add Role 同位、命名后出现空束",
+    "Add Model Bundle 位于 Model Bundles 空态下方左侧,与 Add Role 模块底部入口统一;命名后出现空束",
     "已配束在侧栏顶部 Pinned 槽"
    ],
    "fe_status": "符合",
@@ -586,6 +592,16 @@
    ],
    "layer2": [
     "点 Add Model Bundle 建一个空束看位置 + Pinned 槽。"
+   ],
+   "screenshots": [
+    {
+     "file": "n0-roles-49-model-bundle-add-bottom.png",
+     "caption": "LLM Roles 空状态: Add Model Bundle 位于 Model Bundles 空态下方左侧,与上方 Add Role 入口统一。"
+    },
+    {
+     "file": "n0-roles-card-inset-bundle-bottom.png",
+     "caption": "2026-06-24 真机验证:Role card 位于 CatalogAccordionContent 内侧 8px,左右边框/圆角不再被 overflow-hidden 裁切;Add Model Bundle 继续位于 Model Bundles 空态下方左侧。"
+    }
    ]
   },
   {

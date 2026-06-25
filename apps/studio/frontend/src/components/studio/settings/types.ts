@@ -11,9 +11,15 @@ export interface ProviderDraft {
   name: string
   provider_type: ProviderType
   base_url: string
+  base_urls?: Array<{
+    id: string
+    value: string
+    provider_type?: ProviderType
+    endpoint_ids?: Partial<Record<ProviderType, string>>
+  }>
   api_key: string
   isTesting: boolean
-  testingAction?: "models" | "endpoint" | null
+  testingAction?: "models" | null
 }
 
 export interface SettingsPageProps {
@@ -55,7 +61,6 @@ export interface SettingsPageContentProps {
   onTabChange: (tab: SettingsTab) => void
   onProviderFieldChange: (providerId: string, patch: Partial<ProviderDraft>) => void
   onGetProviderModels: (providerId: string) => void
-  onTestProviderEndpoint: (providerId: string, modelId: string) => void
   onDeleteProvider: (providerId: string) => void
   onAddProvider: (data: AddProviderFormSubmission) => Promise<void> | void
   onProviderModelsUpdated: (providerId: string, models: ModelInfo[]) => void

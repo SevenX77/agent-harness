@@ -1,6 +1,6 @@
 {
   "native_fs_boundary": {
-    "summary": "Studio Settings(N0)的 LLM/凭证/角色/model group/bundle/copilot/general/role_test_results 配置写盘【完全不经过 Rust native-fs】。native_fs.rs 只管 skill workspace 文件(GRAPH.md/LOGIC.md、.workspace/test_inputs、.workspace/golden、.gemini/copilot/checkpoints、recent_workspaces.json),即 D12 'Rust 唯一写者' 约束的对象是 workspace 文件,不是 Settings 配置。Settings 配置走的是【python 后端独立的写路径】:每个 service(llm_credentials/llm_roles/llm_role_test_results/llm_import_drafts)各自用 tempfile.mkstemp + os.fsync + os.replace 原子写到 <APP_SETTINGS_DIR>/llm/ 下的 json/yaml/sqlite。前端 api/llm.ts 全程只调 HTTP api.get/put/post/delete('/llm/...'),从不调任何 Tauri invoke;native-fs 的 invoke 只在 Workspace.tsx / copilotStore.ts(skill 文件编辑)里出现。所以 D12 的'唯一写者'对 workspace 成立,对 Settings 不成立——Settings 是第二条独立写路径,二者写的目录不同(workspace_root vs APP_SETTINGS_DIR/llm),不构成 D12 禁止的'对同一文件双写'。",
+    "summary": "Studio Settings(N0)的 LLM/凭证/角色/model group/bundle/copilot/general/role_test_results 配置写盘【完全不经过 Rust native-fs】。native_fs.rs 只管 skill workspace 文件(GRAPH.md/LOGIC.md、.workspace/test_inputs、.workspace/golden、.gemini/copilot/checkpoints、recent_workspaces.json),即 D12 'Rust 唯一写者' 约束的对象是 workspace 文件,不是 Settings 配置。Settings 配置走的是【python 后端独立的写路径】:每个 service(llm_credentials/llm_roles/llm_role_test_results/llm_probe_catalog)各自用 tempfile.mkstemp + os.fsync + os.replace 原子写到 <APP_SETTINGS_DIR>/llm/ 下的 json/yaml/sqlite。前端 api/llm.ts 全程只调 HTTP api.get/put/post/delete('/llm/...'),从不调任何 Tauri invoke;native-fs 的 invoke 只在 Workspace.tsx / copilotStore.ts(skill 文件编辑)里出现。所以 D12 的'唯一写者'对 workspace 成立,对 Settings 不成立——Settings 是第二条独立写路径,二者写的目录不同(workspace_root vs APP_SETTINGS_DIR/llm),不构成 D12 禁止的'对同一文件双写'。",
     "evidence": [
       ["native_fs.rs 文件头自述只服务 skill/graph/copilot workspace 写", "apps/studio/tauri/src/native_fs.rs:1-8"],
       ["写命令解析 workspace_root,目标是 opened-folder 或 default-workspace/skills/<id>,与 APP_SETTINGS_DIR/llm 无关", "apps/studio/tauri/src/native_fs.rs:42-83"],
@@ -18,7 +18,7 @@
       ["凭证(endpoint+route 注册表)", "<APP_SETTINGS_DIR>/llm/llm_credentials.json", "默认 ~/Library/Application Support/AgentStudio/llm/llm_credentials.json(macOS);覆盖:STUDIO_LLM_CREDENTIALS_PATH(单文件)、STUDIO_CONFIG_DIR(整个 settings 目录)", "python 后端直接写(llm_credentials._save_credentials_unlocked,tempfile+os.replace+chmod600)"],
       ["角色 + model group + model bundle + model profile + copilot 角色", "<APP_SETTINGS_DIR>/llm/llm_roles.yaml", "默认 .../AgentStudio/llm/llm_roles.yaml;覆盖:STUDIO_LLM_ROLES_PATH、STUDIO_CONFIG_DIR", "python 后端直接写(llm_roles.save_roles_file → _atomic_write,tempfile+os.replace)"],
       ["role_test_results(角色/copilot 路由的最近测试结果)", "<APP_SETTINGS_DIR>/llm/llm_role_test_results.json", "默认 .../AgentStudio/llm/llm_role_test_results.json;覆盖:STUDIO_LLM_ROLE_TEST_RESULTS_PATH、STUDIO_CONFIG_DIR", "python 后端直接写(llm_role_test_results._save_all,tempfile+os.replace+chmod600)"],
-      ["import drafts + 追加式 evidence(provider 导入草稿/探测证据,copilot SDK 测试证据落这里)", "<APP_SETTINGS_DIR>/llm/llm_import_drafts.json", "默认 .../AgentStudio/llm/llm_import_drafts.json;覆盖:STUDIO_LLM_IMPORT_DRAFTS_PATH、STUDIO_CONFIG_DIR", "python 后端直接写(llm_import_drafts 存储)"],
+      ["Probe Knowledge Catalog + 追加式 evidence(endpoint/model/capability 探测证据,copilot SDK 测试证据落这里)", "<APP_SETTINGS_DIR>/llm/llm_probe_catalog.json", "默认 .../AgentStudio/llm/llm_probe_catalog.json;覆盖:STUDIO_LLM_PROBE_CATALOG_PATH、STUDIO_CONFIG_DIR；STUDIO_LLM_IMPORT_DRAFTS_PATH 仅 legacy fallback", "python 后端直接写(llm_probe_catalog facade；底层 legacy store 兼容)"],
       ["general 设置(runtime_policy:provider_down_ttl、probe_timeout、token_escalation、terminal_retry、secret_lifetime)", "嵌在 llm_credentials.json 的 runtime_policy 字段内,无独立文件", "随 llm_credentials.json;当前无专用 PUT 端点,仅在 putCredentials 时以默认值落盘,registry GET 时读出", "python 后端直接写(随凭证文件一起 os.replace)"],
       ["运行期健康缓存(circuit/last_probe,非用户配置)", "<APP_SETTINGS_DIR>/llm/llm_health.sqlite", "与 credentials_path 同目录(credentials_path().with_name);随 STUDIO_CONFIG_DIR/STUDIO_LLM_CREDENTIALS_PATH 移动", "python 后端直接写(SqliteLlmHealthStore,sqlite)"],
       ["canonical rules(规范化规则,若用)", "<APP_SETTINGS_DIR>/llm/llm_canonical_rules.yaml", "覆盖:STUDIO_LLM_CANONICAL_RULES_PATH、STUDIO_CONFIG_DIR", "python 后端直接写"],
@@ -54,7 +54,7 @@
       ["llm_roles.yaml", "model_bundles[id]", "可复用 bundle:model_profile_id/display_name/canonical_id/tags/intent/model_groups/fallback_chain/lint_requirements", "否"],
       ["llm_roles.yaml", "model_profiles[id]", "authoring 期可复用路由集合:model_profile_id/canonical_id/tags/fallback_chain/lint_requirements/display_name", "否"],
       ["llm_role_test_results.json", "results[role_name].role_name/status/message/result/updated_at", "每角色最近一次完成的测试结果:status(测试结论)、message(文案)、result(完整结果对象)、updated_at(ISO 时间)", "否(可能含模型回包文本)"],
-      ["llm_import_drafts.json", "evidence_records[] / draft 各字段", "provider 导入草稿与追加式 evidence(EvidenceRecord:探测尝试、capability 观察、provider_docs_url 等);copilot SDK 测试的 evidence 也追加到这里", "否"],
+      ["llm_probe_catalog.json", "evidence_records[] / route_candidates / metadata", "Probe Knowledge Catalog 追加式 evidence(EvidenceRecord:探测尝试、capability 观察、provider_docs_url 等);copilot SDK 测试的 evidence 也追加到这里。legacy 容器字段仍可能叫 draft。", "否"],
       ["llm_health.sqlite", "circuit / last_probe 等行", "运行期健康/熔断缓存,非用户编辑配置", "否"]
     ]
   },
@@ -70,7 +70,7 @@
       ["批量保存角色+profile+bundle", "llm_roles.yaml", "merge roles/model_profiles/model_bundles", "后端 routers/llm.py:910-924(put_llm_roles PUT /llm/roles)"],
       ["建 model bundle", "llm_roles.yaml", "model_bundles[id]:model_profile_id/display_name/canonical_id/tags/intent/model_groups/fallback_chain", "随 PUT /llm/roles 落盘 routers/llm.py:918;删除 routers/llm.py:1457-1467"],
       ["建/改 model group", "llm_roles.yaml", "roles[name].model_groups[] 或 bundle.model_groups[]:canonical_id/provider_models[].route_id+intent", "随角色/bundle PUT 落盘(同上 routers/llm.py:910-924,956-978)"],
-      ["配 copilot(copilot 角色)", "llm_roles.yaml(角色本体)+ llm_role_test_results.json(测试结果)+ llm_import_drafts.json(SDK evidence)", "roles[name].role_kind=copilot 及其 intent/model_groups;copilot SDK 测试结果 results[role].* 与 evidence_records[]", "角色:routers/llm.py:956-978;copilot SDK 测试持久化 routers/llm.py:1396-1432(save_credentials 1418 + save_role_test_result 1432 + append_evidence_record)"],
+      ["配 copilot(copilot 角色)", "llm_roles.yaml(角色本体)+ llm_role_test_results.json(测试结果)+ llm_probe_catalog.json(SDK evidence)", "roles[name].role_kind=copilot 及其 intent/model_groups;copilot SDK 测试结果 results[role].* 与 evidence_records[]", "角色:routers/llm.py:956-978;copilot SDK 测试持久化 routers/llm.py:1396-1432(save_credentials 1418 + save_role_test_result 1432 + append_evidence_record)"],
       ["改 general(runtime_policy)", "llm_credentials.json(runtime_policy 字段)", "provider_down_ttl_seconds/probe_timeout_seconds/token_escalation_rounds/terminal_retry/secret_lifetime", "无专用 PUT 端点;仅 putCredentials 时以默认值写入 api/llm.ts:1295-1299,registry GET 读出 routers/llm.py:1582"]
     ]
   }

@@ -184,9 +184,14 @@ class RoleTokenIntent(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["default", "maximum_available", "target", "required_minimum"]
+    mode: Literal["default", "maximum_available", "target"]
     value: int | None = Field(default=None, ge=1)
     downgrade: Literal["allow", "allow_with_warning", "block"] = "allow"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_required_minimum(cls, value: object) -> object:
+        return _migrate_required_minimum_token_intent(value)
 
 
 class TokenIntent(BaseModel):
@@ -194,9 +199,14 @@ class TokenIntent(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["inherit", "default", "maximum_available", "target", "required_minimum"]
+    mode: Literal["inherit", "default", "maximum_available", "target"]
     value: int | None = Field(default=None, ge=1)
     downgrade: Literal["allow", "allow_with_warning", "block"] = "allow"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_required_minimum(cls, value: object) -> object:
+        return _migrate_required_minimum_token_intent(value)
 
 
 class RoleIntent(BaseModel):
@@ -259,6 +269,17 @@ def _migrate_provider_preference(value: object) -> object:
     if value.get("provider_preference") in {"official_first", "ready_first"}:
         return {**value, "provider_preference": "manual_order"}
     return value
+
+
+def _migrate_required_minimum_token_intent(value: object) -> object:
+    if not isinstance(value, dict):
+        return value
+    if value.get("mode") != "required_minimum":
+        return value
+    migrated = dict(value)
+    migrated["mode"] = "maximum_available"
+    migrated["value"] = None
+    return migrated
 
 
 class RoleEntry(GatewayRoleEntry):
@@ -346,6 +367,32 @@ class RolesData(BaseModel):
         )
 
 
+class ProbeCatalogSharingSummary(BaseModel):
+    """MVP1 probe catalog sharing mode exposed to Studio UI."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["local_export_only"] = "local_export_only"
+    auto_upload_enabled: bool = False
+    message: str = (
+        "Local probe evidence is recorded on this machine. "
+        "MVP1 does not auto-upload community catalog evidence."
+    )
+
+
+class ProbeCatalogSummary(BaseModel):
+    """Local + remote Probe Knowledge Catalog status for Settings UI."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    local_evidence_records_count: int = 0
+    local_verified_records_count: int = 0
+    local_failed_records_count: int = 0
+    local_route_candidates_count: int = 0
+    remote_catalog_source: dict[str, Any] | None = None
+    sharing: ProbeCatalogSharingSummary = Field(default_factory=ProbeCatalogSharingSummary)
+
+
 class RegistryResponse(BaseModel):
     """Redacted registry response plus grouped display metadata."""
 
@@ -363,6 +410,7 @@ class RegistryResponse(BaseModel):
         default_factory=dict
     )
     catalog_source: dict[str, Any] | None = None
+    probe_catalog: ProbeCatalogSummary = Field(default_factory=ProbeCatalogSummary)
     role_effective_runtime_settings: dict[
         str,
         dict[str, dict[str, EffectiveRuntimeSetting]],
@@ -381,6 +429,8 @@ __all__ = [
     "ModelInfo",
     "ModelBundle",
     "ModelProfile",
+    "ProbeCatalogSharingSummary",
+    "ProbeCatalogSummary",
     "ProbeResult",
     "ProviderEndpoint",
     "ProviderImportDraft",

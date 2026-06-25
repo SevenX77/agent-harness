@@ -27,11 +27,18 @@ def roles_path() -> Path:
 
 
 def import_drafts_path() -> Path:
-    """Return the active Studio LLM import drafts path."""
-    return _env_or_default(
-        "STUDIO_LLM_IMPORT_DRAFTS_PATH",
-        "llm_import_drafts.json",
+    """Return the legacy import-drafts path alias for the probe catalog."""
+    return probe_catalog_path()
+
+
+def probe_catalog_path() -> Path:
+    """Return the active Studio LLM probe knowledge catalog path."""
+    override = os.environ.get("STUDIO_LLM_PROBE_CATALOG_PATH") or os.environ.get(
+        "STUDIO_LLM_IMPORT_DRAFTS_PATH"
     )
+    if override:
+        return Path(override).expanduser()
+    return config.APP_SETTINGS_DIR / _LLM_SETTINGS_DIR / "llm_probe_catalog.json"
 
 
 def role_test_results_path() -> Path:
@@ -61,6 +68,7 @@ __all__ = [
     "canonical_rules_path",
     "credentials_path",
     "import_drafts_path",
+    "probe_catalog_path",
     "role_test_results_path",
     "roles_path",
 ]

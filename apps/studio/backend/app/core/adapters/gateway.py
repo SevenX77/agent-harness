@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, dataclass, is_dataclass
+from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
@@ -23,32 +23,32 @@ from graph_agent_gateway.fallback_decision import (
 from graph_agent_gateway.fallback_decision import (
     decide_fallback as gateway_decide_fallback,
 )
-from graph_agent_gateway.import_draft_store import (
+from graph_agent_gateway.probe_catalog import (
     EVIDENCE_LIBRARY_DRAFT_ID as EVIDENCE_LIBRARY_DRAFT_ID,
 )
-from graph_agent_gateway.import_draft_store import ImportDraftStore as ImportDraftStore
-from graph_agent_gateway.import_draft_store import (
+from graph_agent_gateway.probe_catalog import ProbeCatalogStore as ProbeCatalogStore
+from graph_agent_gateway.probe_catalog import (
     PromotableRouteUpdate as PromotableRouteUpdate,
 )
-from graph_agent_gateway.import_draft_store import (
+from graph_agent_gateway.probe_catalog import (
     known_model_ids_for_endpoint as known_model_ids_for_endpoint,
 )
-from graph_agent_gateway.import_draft_store import (
+from graph_agent_gateway.probe_catalog import (
     known_verified_capabilities as known_verified_capabilities,
 )
-from graph_agent_gateway.import_draft_store import (
-    materialize_import_draft_candidates as materialize_import_draft_candidates,
+from graph_agent_gateway.probe_catalog import (
+    materialize_probe_catalog_candidates as materialize_probe_catalog_candidates,
 )
-from graph_agent_gateway.import_draft_store import (
+from graph_agent_gateway.probe_catalog import (
     merge_evidence_library as merge_evidence_library,
 )
-from graph_agent_gateway.import_draft_store import (
+from graph_agent_gateway.probe_catalog import (
     new_evidence_library as new_evidence_library,
 )
-from graph_agent_gateway.import_draft_store import (
+from graph_agent_gateway.probe_catalog import (
     probe_priority as probe_priority,
 )
-from graph_agent_gateway.import_draft_store import (
+from graph_agent_gateway.probe_catalog import (
     promotable_route_update as promotable_route_update,
 )
 from graph_agent_gateway.registry.base_url import (
@@ -143,14 +143,14 @@ from graph_agent_gateway.route_handoff import ResolvedRouteChain
 from graph_agent_gateway.state_projection import (
     project_route_state as gateway_project_route_state,
 )
-from graph_agent_gateway.state_projection import (
-    project_route_state_from_evidence as gateway_project_route_state_from_evidence,
-)
 from graph_agent_gateway.storage_contracts import (
     InMemoryConfigTruthStore as InMemoryConfigTruthStore,
 )
 
 from app.core.adapters.http_transport import HttpTransport, StudioAdapterError
+
+ImportDraftStore = ProbeCatalogStore
+materialize_import_draft_candidates = materialize_probe_catalog_candidates
 
 ProviderUiState = Literal["ready", "historical_ready", "untested", "cooling_down", "off", "failed"]
 _OPAQUE_SECRET_HANDLE_RE = re.compile(r"^secret-handle://studio-local/[a-f0-9]{32}$")
@@ -162,6 +162,7 @@ class ProviderModelStateProjection:
     reason_code: str | None = None
     retry_at: str | None = None
     ui_detail: str | None = None
+    evidence_refs: list[str] = field(default_factory=list)
 
 
 class GatewayAdapter:
@@ -271,7 +272,6 @@ class GatewayAdapter:
             GatewayMaterializeRoleRequest(
                 role=role,
                 credentials=credentials,
-                evidence_records=list(payload.get("evidence_records") or []),
                 health_store=health_store,
             )
         )
@@ -323,7 +323,6 @@ class GatewayAdapter:
                 "role": role_like_bundle,
                 "credentials": credentials,
                 "health_store": payload.get("health_store"),
-                "evidence_records": payload.get("evidence_records"),
             }
         )
         return bundle.model_copy(
@@ -359,17 +358,10 @@ class GatewayAdapter:
             "credential_available": credential_available,
             "circuit_retry_at": active_circuit.retry_at if active_circuit is not None else None,
         }
-        evidence_records = list(payload.get("evidence_records") or [])
-        if evidence_records:
-            gateway_projection = gateway_project_route_state_from_evidence(
-                **projector_payload,
-                evidence_records=evidence_records,
-            )
-        else:
-            gateway_projection = gateway_project_route_state(
-                **projector_payload,
-                draft_history=False,
-            )
+        gateway_projection = gateway_project_route_state(
+            **projector_payload,
+            credential_evidence_refs=self._route_credential_evidence_refs(route),
+        )
 
         return self._map_gateway_projection(
             gateway_projection,
@@ -408,13 +400,15 @@ class GatewayAdapter:
             ),
         )
 
-    def _route_draft_history(self, endpoint: Any, route: Any) -> bool:
-        # The gateway's historical_ready leg needs a draft_history signal. The
-        # probe worker currently stubs this, so no Studio route sets it yet; we
-        # read whatever metadata IS available rather than fabricating the signal.
+    def _route_credential_evidence_refs(self, route: Any) -> list[str]:
+        # User-facing state projection reads accepted credential facts only. The
+        # probe catalog can promote refs into route metadata, but the adapter must
+        # not project from a standalone catalog evidence list.
         route_metadata = getattr(route, "metadata", None) or {}
-        endpoint_metadata = getattr(endpoint, "metadata", None) or {}
-        return bool(route_metadata.get("draft_history") or endpoint_metadata.get("draft_history"))
+        refs = route_metadata.get("evidence_refs")
+        if not isinstance(refs, list):
+            return []
+        return [ref for ref in refs if isinstance(ref, str)]
 
     def _map_gateway_projection(
         self,
@@ -454,7 +448,10 @@ class GatewayAdapter:
                 ui_detail=ui_detail,
             )
 
-        return ProviderModelStateProjection(ui_state=ui_state)
+        return ProviderModelStateProjection(
+            ui_state=ui_state,
+            evidence_refs=list(getattr(gateway_projection, "evidence_refs", []) or []),
+        )
 
     def _circuit_matches(self, endpoint: Any, route: Any, circuit: Any) -> bool:
         if circuit.scope == "route":
@@ -611,6 +608,7 @@ def _provider_projection_from_response(response: Any) -> ProviderModelStateProje
         reason_code=response.get("reason_code"),
         retry_at=response.get("retry_at"),
         ui_detail=response.get("ui_detail"),
+        evidence_refs=list(response.get("evidence_refs") or []),
     )
 
 
@@ -828,12 +826,14 @@ __all__ = [
     "EvidenceRecord",
     "EVIDENCE_LIBRARY_DRAFT_ID",
     "ImportDraftStore",
+    "ProbeCatalogStore",
     "ProviderImportDraft",
     "PromotableRouteUpdate",
     "RouteCandidate",
     "known_model_ids_for_endpoint",
     "known_verified_capabilities",
     "materialize_import_draft_candidates",
+    "materialize_probe_catalog_candidates",
     "merge_evidence_library",
     "new_evidence_library",
     "probe_priority",

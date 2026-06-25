@@ -1,10 +1,10 @@
 {
   "backend_source": {
-    "summary": "6 态 (ready/historical_ready/untested/failed/cooling_down/off) 由 gateway 的 project_route_state 纯函数算出: off(endpoint/route disabled) -> failed(无凭证missing_config / endpoint失败endpoint_unreachable / route失败model_failed, 仅 failed 携带 reason_code) -> cooling_down(熔断 circuit_retry_at) -> ready(endpoint+route 双 verified) -> historical_ready(endpoint verified 且有历史 probe 证据 draft_history) -> 兜底 untested。Studio 封装 project_provider_model_state 调 gateway adapter。两个端点把 6 态吐给前端: (1) 模型分组列表里每条 provider_model 带字段 ui_state(还有 ui_detail/retry_at/reason_code), 并聚合成 status_summary{6态: 计数}; (2) 角色测试结果里每个 provider 带字段 provider_ui_state。admission_decision 由 ui_state 推: cooling_down->temporary_skip, failed/off->block, 其余->admit。",
+    "summary": "6 态 (ready/historical_ready/untested/failed/cooling_down/off) 由 gateway 的 project_route_state 纯函数算出: off(endpoint/route disabled) -> failed(无凭证missing_config / endpoint失败endpoint_unreachable / route失败model_failed, 仅 failed 携带 reason_code) -> cooling_down(熔断 circuit_retry_at) -> ready(endpoint+route 双 verified) -> historical_ready(endpoint verified 且有历史 probe 证据 catalog_history) -> 兜底 untested。Studio 封装 project_provider_model_state 调 gateway adapter。两个端点把 6 态吐给前端: (1) 模型分组列表里每条 provider_model 带字段 ui_state(还有 ui_detail/retry_at/reason_code), 并聚合成 status_summary{6态: 计数}; (2) 角色测试结果里每个 provider 带字段 provider_ui_state。admission_decision 由 ui_state 推: cooling_down->temporary_skip, failed/off->block, 其余->admit。",
     "evidence": [
       ["project_route_state 6 态分支与 reason_code 校验", "packages/graph-agent-gateway/src/graph_agent_gateway/state_projection.py:73-119"],
       ["ProviderModelStateProjection.ui_state Literal 6 态定义", "packages/graph-agent-gateway/src/graph_agent_gateway/state_projection.py:11-18"],
-      ["historical_ready 需 probe 证据 draft_history", "packages/graph-agent-gateway/src/graph_agent_gateway/state_projection.py:121-150"],
+      ["historical_ready 需 Probe Knowledge Catalog 的 catalog_history 信号", "packages/graph-agent-gateway/src/graph_agent_gateway/state_projection.py:73-119"],
       ["Studio 封装 project_provider_model_state 调 gateway adapter", "apps/studio/backend/app/services/llm_state_projection.py:11-37"],
       ["端点A: _provider_model_option 输出 ui_state 字段", "apps/studio/backend/app/routers/llm.py:1948"],
       ["端点A: status_summary 聚合 6 态计数", "apps/studio/backend/app/routers/llm.py:1827-1836"],

@@ -160,11 +160,17 @@
         "data 到后 → 断言渲染真实角色卡、无骨架。",
         "断言全文件不含『Backend Integration』写死徽章字符串。"
       ],
-      "layer2": [
-        "进 Settings→Copilot,看标题 + save 徽章 + 角色卡。",
-        "慢网络下看骨架屏。"
-      ]
-    },
+    "layer2": [
+      "进 Settings→Copilot,看标题 + save 徽章 + 角色卡。",
+      "慢网络下看骨架屏。"
+    ],
+    "screenshots": [
+      {
+        "file": "n0-copilot-english-empty-state.png",
+        "caption": "2026-06-24 真机验证:Language=en 且无 Anthropic Messages 兼容 route 时,Copilot 空态使用英文文案与 API Keys CTA,无中文硬编码泄漏。"
+      }
+    ]
+  },
     {
       "covers": "#55 copilot-role-list(元数据后端驱动)",
       "atoms": [

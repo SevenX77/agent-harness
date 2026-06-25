@@ -181,7 +181,7 @@ describe("R-F9 copilotRoleTestErrorMessage prefers error_code → human text", (
       "Claude Opus 4.7",
     )
     expect(message).toContain("Claude Opus 4.7")
-    expect(message).toContain("暂无可用模型路由")
+    expect(message).toContain("has no available model route")
     // No raw exception class names leak.
     expect(message).not.toContain("ResourceTerminalError")
     expect(message).not.toContain("raw backend tail")
@@ -199,10 +199,10 @@ describe("R-F9 copilotRoleTestErrorMessage prefers error_code → human text", (
   })
 
   it("ERROR_CODE_MAP covers each backend code the helper emits", () => {
-    expect(ERROR_CODE_MAP["resource.no_available_route"]("X")).toContain("暂无可用模型路由")
-    expect(ERROR_CODE_MAP["resource.role_unknown"]("X")).toContain("不存在或已被删除")
-    expect(ERROR_CODE_MAP["resource.role_invalid_kind"]("X")).toContain("不是 copilot 角色")
-    expect(ERROR_CODE_MAP["resource.credential_missing"]("X")).toContain("缺少必需的 API key")
+    expect(ERROR_CODE_MAP["resource.no_available_route"]("X")).toContain("has no available model route")
+    expect(ERROR_CODE_MAP["resource.role_unknown"]("X")).toContain("does not exist or was deleted")
+    expect(ERROR_CODE_MAP["resource.role_invalid_kind"]("X")).toContain("is not a copilot role")
+    expect(ERROR_CODE_MAP["resource.credential_missing"]("X")).toContain("is missing a required API key")
   })
 
   it("R-F11 cooling_down provider status surfaces as the cooling_down route light", () => {
@@ -269,6 +269,6 @@ describe("R-F9 copilotRoleTestErrorMessage prefers error_code → human text", (
     }
     expect(caught).not.toBeNull()
     expect((caught as { error_code?: string }).error_code).toBe("resource.no_available_route")
-    expect(copilotRoleTestErrorMessage(caught, "Claude Opus 4.7")).toContain("暂无可用模型路由")
+    expect(copilotRoleTestErrorMessage(caught, "Claude Opus 4.7")).toContain("has no available model route")
   })
 })

@@ -4,15 +4,15 @@
   "overview": {
     "manages": "一把 provider 的 key 怎么从用户填进来 → 安全落到磁盘 → 运行/测试时取回明文 → 连通状态变成界面上那 6 种颜色，整条链。",
     "why_single": "它横跨 4 个真实部件（前端录入 / gateway 后端落盘 / gateway 公共内核 / provider 真实 HTTP），牵涉 1 个文件（llm_credentials.json）、近 10 个后端函数、6 个 HTTP 接口，还有「明文绝不外泄但要能 redact 展示 + 单条 scoped 取回」这种安全契约——一两句说不清，所以单列一页。",
-    "design_owner": "gateway 库（packages/graph-agent-gateway）。凭证 & 端点 schema、base_url 归一化、协议探测、6 态投影、draft 知识库内核都是「换个 app 还能用」的公共能力，按 MVP1 第四轮判据归 gateway。",
-    "code_location": "部分现码仍落在 gateway 后端（apps/studio/backend 这侧）：HTTP 壳 / 落盘 / import-apply 工作流正确留在这；但凭证录入→落盘→取明文→6 态这条链上的存储 / redact / 单条 reveal 仍由 gateway 后端实现；状态投影内核已下沉 gateway，由 Studio 薄委托。",
+    "design_owner": "gateway 库（packages/graph-agent-gateway）。凭证 & 端点 schema、base_url 归一化、协议探测、6 态投影、Probe Knowledge Catalog 内核都是「换个 app 还能用」的公共能力，按 MVP1 第四轮判据归 gateway。",
+    "code_location": "部分现码仍落在 gateway 后端（apps/studio/backend 这侧）：HTTP 壳 / 落盘 / 远端只读同步源配置 / 本地导出属于 Studio 应用加工；legacy apply_draft 代码不属于 MVP1 主线。MVP1 不含自动上传社区 catalog 的链路。凭证录入→落盘→取明文→6 态这条链上的存储 / redact / 单条 reveal 仍由 gateway 后端实现；状态投影内核已下沉 gateway，由 Studio 薄委托。",
     "dataflow": [
       "前端把原始录入（card / 多 URL 行 + key）交给后端",
       "gateway 把原始信息标准化成「平铺的 endpoint 列表 + canonical id」",
       "gateway 后端 upsert_endpoints 原子落盘到 llm_credentials.json（0600 权限）",
       "GET /registry 出去时 api_key 字段被 SecretStr 自动 redact 成 **********",
       "真要用时（测试 / 运行）走 GET …/endpoints/{id}/secret 拿单条明文，或进程内由 ResolvedRoute 携带",
-      "状态层把 endpoint 状态 + route 状态 + 凭证在不在 + 熔断 + draft 历史证据合成 6 态，投影给前端上色"
+      "状态层只读取 credentials 中的 endpoint 状态 + route 状态 + 凭证在不在 + 熔断 + route.metadata.evidence_refs，把这些已采纳事实合成 6 态，投影给前端上色"
     ]
   },
   "submodules": [
@@ -46,13 +46,13 @@
       "name": "endpoint 标准化 + canonical id 生成",
       "code": "gateway: endpoints.py + canonical.py + base_url.py",
       "summary": "把前端「一把 key 挂多个 URL」的混合录入，理成一份平铺的标准 endpoint 列表，并给每条 endpoint 算出确定性的 canonical id。",
-      "formula": "endpoint =（一个 base_url × 一个探通的协议）；canonical_id = {provider_slug}-{protocol}[-{n}]，序号 -n 恒在 protocol 之后（n 从 2 起、首条不带号），同一 -n 永远指向同一条 URL。",
+      "formula": "endpoint candidate =（一个 base_url × 一个 protocol 候选）；第三方候选集固定为 openai_compatible / anthropic_compatible / google_genai（不含 ark_runtime）。一个 URL 可以同时保留多个可用 protocol endpoint；canonical_id = {provider_slug}-{protocol}[-{n}]，序号 -n 恒在 protocol 之后（n 从 2 起、首条不带号），同一 -n 永远指向同一条 URL。",
       "diagram": "endpoint_transform",
       "rules": [
-        "拆分：每个 (URL × 探通的协议) 当成独立一条 endpoint，由 standardize_endpoint_candidates 统一产出。",
+        "拆分：每个 URL 先展开为多个 protocol 候选 endpoint；测试后各 endpoint 独立保留自己的 verified/failed 结果，不把一个 URL 收敛成唯一协议。",
         "base_url 按 protocol 归一化（canonicalize_base_url），存进去的就是 canonical 形态，不留原始杂字符串。",
         "id 生成走两步：canonical_endpoint_id_base 出 {slug}-{protocol} 基名，再 _next_endpoint_id 在撞号时补 -2 / -3。",
-        "protocol 后缀固定映射：openai_compatible→openai、anthropic_compatible→anthropic、google_genai→google、ark_runtime→ark。",
+        "protocol 后缀固定映射：openai_compatible→openai、anthropic_compatible→anthropic、google_genai→google、ark_runtime→ark；第三方新增/测试候选不包含 ark_runtime，Ark 只属于官方 Ark endpoint。",
         "去重保序：reserved_endpoint_ids 已占用的 id 不复用，保证 id 稳定可回填。"
       ],
       "do": [
@@ -72,43 +72,43 @@
       "formula": "",
       "diagram": "",
       "rules": [
-        "协议判定靠打「推理端点」而非 /models：openai 试 POST /v1/chat/completions、anthropic 试 POST /v1/messages——因为两种网关 /models 都回 200，分不出来。",
+        "第三方不在多个 protocol 里『猜一个』；同一 URL 的 OpenAI / Anthropic / Gemini 候选 endpoint 各自打自己的推理端点，各自留下结果。",
         "带对应的 auth header：native anthropic 用 x-api-key；anthropic 兼容的第三方用 Authorization: Bearer。",
-        "哪个 protocol 被接受就判哪个。",
-        "route probe = 对一条 (model × endpoint) 发 1-token 真请求，验「能不能真生成」。"
+        "一个 URL 可能同时兼容多个 protocol,所以多个候选 endpoint 可同时是 verified；失败候选也以 failed 留在 registry/前端。",
+        "route probe = 对一条 (model × endpoint) 发 1-token 真请求，验「能不能真生成」；endpoint test 与单 model test 复用这条模型 probe 写回路径。"
       ],
       "do": [
         "协议判定、对应 auth header、route 真探。"
       ],
       "dont": [
         "不做批量探测的调度/短路策略的 HTTP 包装（Studio job 包装）。",
-        "不存结果（落盘归 Studio，draft 写语义归 gateway draft 内核）。"
+        "不存结果（落盘归 Studio，Probe Knowledge Catalog 写语义归 gateway 内核）。"
       ],
       "deviation": ""
     },
     {
-      "name": "draft 知识库内核",
-      "code": "gateway: import_draft_store.py",
-      "summary": "provider 的历史探测知识库，append-only、可跨机共享。它唯一的目的是「免重探」:把以前真探连通过的模型 / 能力记下来，下次别再一个一个盲测——拉云端知识库正是为了跳过全量重测，不是拉下来再测一遍。三条赋能(回填能力 / 清单兜底 / 免盲测) + 一条写回 + 一条共享。",
+      "name": "Probe Knowledge Catalog 内核",
+      "code": "gateway: probe_catalog.py；Studio facade: llm_probe_catalog.py（底层仍兼容 legacy import_draft_store.py / llm_import_drafts.py）",
+      "summary": "provider 的历史探测知识库，append-only、local-first，可读取远端只读目录。它唯一的目的是「免重探」:把以前真探连通过的 endpoint / model / capability 证据记下来，下次别再一个一个盲测——同步远端只读知识库是为了跳过全量重测，不是拉下来再测一遍。三条赋能(回填能力 / 清单兜底 / 免盲测) + 一条本地写回 + 一条本地导出。",
       "formula": "",
       "diagram": "",
       "rules": [
         "证据 append-only:append_evidence_record 只追加、不覆盖旧证据，连失败结果也记(失败也是「别再白试」的知识)。",
-        "赋能① 回填能力:读 draft，把以前真探连通过的模型能力回填进当前 model list——不是拿本次 get-models 的实时能力顶替。",
-        "赋能② 清单兜底:get-models 拿不到模型清单(空 / 失败)时，用 draft 里这个 provider 的已知模型补出清单——别让「列不出模型」变成死路。",
-        "赋能③ 免盲测:批量探测前先读 draft，已知通过的优先信 / 可跳、已知失败的往后排——不再从头一个一个盲试(这正是拉云端知识库的意义:跳过全量重测)。",
-        "出蓝态红线:只有真探连通(probe-verified)的历史才让 route 出蓝(historical_ready);只被 get-models 清单看到过(provider-list-observed)= 仅观测，停留灰(untested)，绝不出蓝。「看到 ≠ 连通过」。",
-        "写回方向:本次新发现的模型 / 新 capability(含失败)都 append 进 draft，沉淀成下次的历史。",
-        "共享方向:merge_evidence_library 合并远端知识库时按 evidence_id 去重;远端同步应在后端启动时跑一次(现状错放在进设置页才跑，见「后端实现状态」)。",
-        "candidate 物化:materialize_import_draft_candidates 把候选物化成 route，默认 status=unverified_manual。",
-        "D6.5 已把这套内核从 Studio 下沉到 gateway。"
+        "赋能① 回填能力:读 Probe Knowledge Catalog，把以前真探连通过的模型能力回填进当前 model list——不是拿本次 get-models 的实时能力顶替。",
+        "赋能② 清单兜底:get-models 拿不到模型清单(空 / 失败)时，用 Probe Knowledge Catalog 里这个 provider / endpoint 的已知模型补出清单——别让「列不出模型」变成死路。",
+        "赋能③ 免盲测:批量探测前先读 Probe Knowledge Catalog，已知通过的优先信 / 可跳、已知失败的往后排——不再从头一个一个盲试(这正是拉云端知识库的意义:跳过全量重测)。",
+        "出蓝态红线:只有已晋升进 credentials 的 route.metadata.evidence_refs 才让 route 出蓝(historical_ready);catalog 中孤立的 probe-verified 记录只是候选知识,不能被 UI/status 直接读取。只被 get-models 清单看到过(provider-list-observed)=仅观测，停留灰(untested)，绝不出蓝。「看到 ≠ 连通过」。",
+        "写回方向:本次用户触发的测试先写 credentials 的 endpoint/route 状态、capabilities、verified_profiles、metadata.evidence_refs;当 credentials 出现 evidence 相关写入时,同步 append 进 Probe Knowledge Catalog，沉淀成下次的历史。",
+        "同步/导出方向:merge_evidence_library 合并远端只读知识库时按 evidence_id 去重;远端同步应在后端启动时跑一次(现状错放在进设置页才跑，见「后端实现状态」)。/catalog/share 在 MVP1 只做本地脱敏导出(local_export_only),不自动上传社区证据。",
+        "candidate 物化:catalog candidate 只能经由 credentials 补出 route 候选，默认 status=unverified_manual / untested；只有当前本机真 probe 通才能让 credentials route 变 verified。",
+        "D6.5 已把这套内核从 Studio 下沉到 gateway；代码层已提供 canonical ProbeCatalogStore / llm_probe_catalog.py，底层 legacy 容器仍待后续迁移。"
       ],
       "do": [
         "证据记录 / 复用(回填能力·清单兜底·免盲测)/ 共享 / 去重。",
-        "candidate 物化、真探(probe-verified)证据 → historical_ready 蓝态投影的输入。"
+        "candidate 物化、probe-verified 证据晋升为 credentials route 的 capabilities / verified_profiles / metadata.evidence_refs。"
       ],
       "dont": [
-        "不做 import/apply 用户工作流、远端源选择、credentials writer 注入——这些留 Studio(llm_import_drafts.py 作 workflow glue)。",
+        "不做 Import Draft 用户工作流；MVP1 没有「待导入草稿 → apply 到 credentials」功能。远端只读源选择、存储介质、本地导出/脱敏留 Studio；社区上传/审批服务不在 MVP1。",
         "不把「只被 get-models 清单看到」的观测(provider-list-observed)当成连通证据出蓝。"
       ],
       "deviation": ""
@@ -116,14 +116,14 @@
     {
       "name": "6 态投影",
       "code": "gateway: state_projection.py（Studio 薄委托: llm_state_projection.py）",
-      "summary": "把多个事实源合成界面上的一个状态码——endpoint 状态、route 状态、凭证在不在、熔断、draft 历史，合出 6 态之一给前端上色。",
+      "summary": "把 credentials 里的多个已采纳事实合成界面上的一个状态码——endpoint 状态、route 状态、凭证在不在、熔断、route.metadata.evidence_refs，合出 6 态之一给前端上色。",
       "formula": "状态优先级：off > failed > cooling_down > ready > historical_ready > untested；6 态 = ready / historical_ready / untested / failed / cooling_down / off。",
       "diagram": "",
       "rules": [
-        "project_route_state 读 endpoint 状态 + route 状态 + 凭证在不在 + 熔断 retry_at + draft 是否有历史连通，按优先级投出一态。",
+        "project_route_state 读 endpoint 状态 + route 状态 + 凭证在不在 + 熔断 retry_at + credential_evidence_refs，按优先级投出一态。",
         "failed 必带 reason_code：missing_config（缺/错配置）/ endpoint_unreachable / model_failed。",
         "cooling_down 带 retry_at（熔断倒计时，到点自动重试）。",
-        "project_route_state_from_evidence 额外读 EvidenceRecord 里 probe-verified 的证据，出 historical_ready 蓝态并挂 evidence_refs。",
+        "不再提供 project_route_state_from_evidence 直读口；catalog evidence 必须先经 promotion 写入 credentials 的 route.metadata.evidence_refs，状态投影才会出 historical_ready。",
         "gateway 后端 project_provider_model_state 只是调 gateway adapter 的薄委托，本身不算状态。"
       ],
       "do": [
@@ -352,8 +352,8 @@
     },
     {
       "key": "action",
-      "title": "探测/测试动作类（触发真实模型调用，结果写回文件/草稿）",
-      "note": "这一类不是 CRUD：它不是「填字段存进去」，而是「发一次真实模型 HTTP 请求验连通，把结果作为副作用写回 endpoint/route 状态或 draft 证据库」。所以它没有「该填哪些字段」的数据语义，只有「探什么、怎么判通断、结果落哪」。"
+      "title": "探测/测试动作类（触发真实模型调用，结果写回文件/知识库）",
+      "note": "这一类不是 CRUD：它不是「填字段存进去」，而是「发一次真实模型 HTTP 请求验连通，把结果作为副作用写回 endpoint/route 状态或 Probe Knowledge Catalog」。所以它没有「该填哪些字段」的数据语义，只有「探什么、怎么判通断、结果落哪」。"
     }
   ],
   "interfaces": [
@@ -416,8 +416,8 @@
       "endpoint": "POST /api/llm/endpoints/{endpoint_id}/test（+ /test-jobs 异步）",
       "req": "路径参数 endpoint_id（异步版返回 job，前端轮询 GET /role-test-jobs 风格的 test-job）",
       "resp": "EndpointTestResponse / EndpointTestJobResponse：endpoint 是否验通 + 批量模型探测结果 + 更新后的 redacted registry",
-      "purpose": "endpoint 连通验证 = 批量模型探测（一批一批打、某批任一成功即判 endpoint 可用并停、结构性错配码短路、瞬时 401/429/timeout 不短路），结果（含失败）写回 draft",
-      "provider": "gateway 后端做 job/进度/HTTP 包装（llm.py）；批量探测策略 + route probe + 错误分类 + draft 写语义在 gateway 内核",
+      "purpose": "endpoint 连通验证 = 批量模型探测（一批一批打、某批任一成功即判 endpoint 可用并停、结构性错配码短路、瞬时 401/429/timeout 不短路），结果（含失败）写回 Probe Knowledge Catalog",
+      "provider": "gateway 后端做 job/进度/HTTP 包装（llm.py）；批量探测策略 + route probe + 错误分类 + catalog 写语义在 gateway 内核",
       "id": "iface-4"
     },
     {
@@ -434,18 +434,9 @@
       "endpoint": "POST /api/llm/routes/{route_id}/probe[?force=true]",
       "req": "路径参数 route_id，可选 query force",
       "resp": "单 route 真探结果 + 更新后 registry（route status / capabilities 刷新）",
-      "purpose": "单模型 Manual probe / Test Now——对一条 (model × endpoint) route 发 1-token 真请求验能不能真生成，结果写回 draft（成功 + 失败都记）",
+      "purpose": "单模型 Manual probe / Test Now——对一条 (model × endpoint) route 发 1-token 真请求验能不能真生成，结果写回 Probe Knowledge Catalog（成功 + 失败都记）",
       "provider": "gateway 后端（llm.py probe_route）；route probe 真请求在 gateway",
       "id": "iface-5"
-    },
-    {
-      "group": "action",
-      "endpoint": "POST /api/llm/import-drafts/{draft_id}/probe（⚠️ 现为桩）",
-      "req": "路径参数 draft_id",
-      "resp": "ProviderImportDraft（status 被改成 probed）",
-      "purpose": "（设计）真去探测 draft 里的候选 endpoint/route 把结果落证据库；（现状）只把 draft 状态翻成 probed，不真探——probe_import_draft 仍是占位桩（llm.py，docstring 自述「real agent probing is handled by a later worker」）",
-      "provider": "gateway 后端（llm.py probe_import_draft）；draft/evidence 内核已在 gateway import_draft_store.py，但这条 probe 工作流还没接真 worker",
-      "id": "iface-6"
     }
   ],
   "boundaries": {
@@ -454,8 +445,8 @@
       "把原始多 URL 录入标准化成平铺 endpoint 列表 + canonical id",
       "自动协议探测（打推理端点 + 对的 auth header）",
       "route 1-token 真探",
-      "draft 知识库 append-only 证据记录 / 复用 / 远端去重",
-      "把 endpoint / route / 凭证 / 熔断 / draft 合成 6 态投影 + reason_code",
+      "Probe Knowledge Catalog append-only 证据记录 / 复用 / 远端去重",
+      "把 endpoint / route / 凭证 / 熔断 / Probe Knowledge Catalog 合成 6 态投影 + reason_code",
       "对外 redact api_key + 单条 scoped reveal"
     ],
     "dont": [
@@ -480,7 +471,7 @@
         "code": "historical_ready",
         "dot": "🔵",
         "name": "历史就绪",
-        "mean": "draft 有真探连通(probe-verified)历史，但当前没真测;只被 get-models 清单看到过不算，那是灰。"
+        "mean": "credentials route 已有 probe-verified 历史证据引用(metadata.evidence_refs)，但当前没真测;只被 get-models 清单看到过不算，那是灰。"
       },
       {
         "code": "untested",
@@ -536,7 +527,7 @@
           "ready"
         ],
         [
-          "endpoint verified 且 draft 有真探连通历史(probe-verified，不含仅清单观测)",
+          "endpoint verified 且 credentials route.metadata.evidence_refs 引用了真探连通历史(probe-verified，不含仅清单观测)",
           "historical_ready(蓝，挂 evidence_refs)"
         ],
         [
@@ -604,17 +595,17 @@
       "ref": "d6"
     },
     {
-      "item": "draft 历史证据库",
+      "item": "Probe Knowledge Catalog 历史证据库",
       "d12": "D6.5",
       "status": "ok",
-      "note": "append-only 历史证据库(远端去重)已就绪,是蓝态 historical_ready 的数据来源。",
+      "note": "append-only 历史证据库(本地写入 + 远端只读同步去重)已就绪,是 credentials evidence_refs 晋升的来源/沉淀目标,但不是 UI/status 直接读取的真相源。MVP1 不自动上传社区 catalog;share 只做 local_export_only。",
       "ref": "d6"
     },
     {
-      "item": "draft probe 真 worker",
+      "item": "legacy Import Draft API 清理",
       "d12": "D6.5",
       "status": "partial",
-      "note": "缺口:probe_import_draft 仍是桩,不真探、不产历史证据 → #30 的蓝态端到端点不亮,要等后端去桩。",
+      "note": "MVP1 不再需要 Import Draft 主线；公开 /import-drafts API 已移除，canonical API 已改为 Probe Knowledge Catalog。底层仍有 legacy ProviderImportDraft 容器名，后续迁移为正式 ProbeKnowledgeCatalog schema。",
       "ref": "d6"
     },
     {
@@ -632,41 +623,41 @@
       "ref": "d6"
     },
     {
-      "item": "测试时读 draft 回填 / 清单兜底 / 免盲测",
+      "item": "测试时读 Probe Knowledge Catalog 回填 / 清单兜底 / 免盲测",
       "d12": "D6.5",
       "status": "ok",
-      "note": "已落地(三条子能力全做 + TDD 测试)。gateway 侧新增三个纯函数 known_verified_capabilities / known_model_ids_for_endpoint / probe_priority(import_draft_store.py,无 IO);backend 侧在 _upsert_discovered_routes 回填 draft 已证实能力(子①)、_third_party_probe_model_ids 用 draft 已知模型补清单(子②)并按 probe_priority 跳过已 verified / 把已 failed 排后(子③免盲测)。注:子③有候选就绝不返回空(避免历史全验过的 endpoint 复测误判失败)。测试见 gateway test_import_draft_derivation.py + backend test_llm_registry_api.py。",
+      "note": "已落地(三条子能力全做 + TDD 测试)。gateway 侧通过 Probe Knowledge Catalog 提供 known_verified_capabilities / known_model_ids_for_endpoint / probe_priority(无 IO);backend 侧在 _upsert_discovered_routes 回填 Catalog 已证实能力(子①)、_third_party_probe_model_ids 用 Catalog 已知模型补清单(子②)并按 probe_priority 跳过已 verified / 把已 failed 排后(子③免盲测)。注:子③有候选就绝不返回空(避免历史全验过的 endpoint 复测误判失败)。测试见 gateway test_probe_catalog.py / legacy test_import_draft_derivation.py + backend test_llm_registry_api.py。",
       "ref": "d6"
     },
     {
       "item": "云端知识库同步时机(启动 vs 进设置页)",
       "d12": "D6.5",
       "status": "ok",
-      "note": "已落地(纯 backend 接线)。后端启动 lifespan(main.py)新增 _sync_remote_evidence_library_on_startup:仅当配置了远端源(load_remote_catalog_source_metadata 非空且 enabled)才跑一次,best-effort——同步失败只记 warning、绝不挡启动。复用已有 sync_remote_evidence_library + gateway merge_evidence_library 去重,不新写同步逻辑。测试见 backend test_main_remote_catalog_sync.py(断言启动触发一次同步 + 同步抛错时仍正常启动)。",
+      "note": "已落地(纯 backend 接线)。后端启动 lifespan(main.py)新增 _sync_remote_probe_catalog_on_startup:仅当配置了远端只读源(load_remote_catalog_source_metadata 非空且 enabled)才跑一次,best-effort——同步失败只记 warning、绝不挡启动。复用 sync_remote_probe_catalog + gateway merge_evidence_library 去重,不新写同步逻辑。测试见 backend test_main_remote_catalog_sync.py(断言启动触发一次同步 + 同步抛错时仍正常启动)。",
       "ref": "d6"
     },
     {
       "item": "蓝态数据来源口径(看到 ≠ 连通过)",
       "d12": "D6.1",
       "status": "ok",
-      "note": "口径已钉死 + 不变量回归测试守。state_projection 出蓝(historical_ready)只认 draft 里 evidence_type==probe 且 trust_state==probe-verified 的历史;get-models 观测写的是 provider-list-observed,永不出蓝、只停留灰(untested)。新增不变量回归测试(gateway test_productization_route_state_contracts.py + backend test_model_list_observation_keeps_registry_route_untested)锁住「观测不出蓝」。2026-06-23 订正:蓝(historical_ready)渲染在**路由标签**(§143),不在 provider 标题——前次误把蓝渲染在 provider 标题、配 mock 假数据的截图已撤(见 apikeys #30 测试页订正说明)。蓝态路由标签渲染由 ProviderCard.test.tsx 单测守;本轮真机(真后端真探测)路由均 untested/ready,未强造蓝图。",
+      "note": "口径已钉死 + 不变量回归测试守。state_projection 出蓝(historical_ready)只认 credentials route.metadata.evidence_refs;Probe Knowledge Catalog 里的孤立 evidence 不再被 registry / role materialization 直接读取。get-models 观测写的是 provider-list-observed,永不出蓝、只停留灰(untested)。新增不变量回归测试(gateway test_productization_route_state_contracts.py + backend test_model_list_observation_keeps_registry_route_untested + catalog-only 不出蓝测试)锁住「观测不出蓝 / catalog-only 不出蓝」。2026-06-23 订正:蓝(historical_ready)渲染在**路由标签**(§143),不在 provider 标题——前次误把蓝渲染在 provider 标题、配 mock 假数据的截图已撤(见 apikeys #30 测试页订正说明)。蓝态路由标签渲染由 ProviderCard.test.tsx 单测守;本轮真机(真后端真探测)路由均 untested/ready,未强造蓝图。",
       "ref": "d6"
     },
     {
       "item": "知识库证据 → 配置档案晋升规则",
       "d12": "D6.5",
       "status": "ok",
-      "note": "已落地。gateway 新增纯函数 promotable_route_update(import_draft_store.py):从 draft 里 probe-verified 的记录算出该 route 应晋升的 capabilities + verified_profiles + evidence_refs;backend 在 _upsert_discovered_routes 对新建/已存 route 都调 _apply_promotable_route_update 写回。红线:只晋升能力 / 档案 / 证据引用,绝不改 route.status 假绿——状态仍由真探结果决定。测试见 backend test_endpoint_test_promotes_probe_verified_draft_capabilities_and_profiles(断言 capabilities 晋升 + verified_profiles 落盘 + ui_state==historical_ready 蓝态 + 持久化)。",
+      "note": "已落地。gateway 新增纯函数 promotable_route_update:从 Probe Knowledge Catalog 里 probe-verified 的记录算出该 route 应晋升到 credentials 的 capabilities + verified_profiles + evidence_refs;backend 在 _upsert_discovered_routes 对新建/已存 route 都调 _apply_promotable_route_update 写回。红线:只晋升能力 / 档案 / 证据引用,绝不改 route.status 假绿——状态仍由真探结果决定。测试见 backend test_endpoint_test_promotes_probe_verified_draft_capabilities_and_profiles、test_registry_does_not_project_historical_ready_from_catalog_without_credential_promotion、test_registry_and_role_materialization_use_credentials_evidence_refs_for_historical_ready。",
       "ref": "d6"
     }
   ],
   "rule_sections": [
     {
       "title": "知识库 ↔ 配置档案:四条对应关系 + 清单兜底",
-      "note": "draft(历史探测知识库)和 credential(当前配置档案)是两本账:知识库记「以前探到过什么」，配置档案记「现在这把 key 配成什么、是什么颜色」。测试 / 投影时按下面把知识库的料用到配置档案上，绿蓝灰各有红线。",
+      "note": "credentials 是运行时唯一真相源:用户操作读写 endpoint/route/key/status 都只读写 credentials。Probe Knowledge Catalog 是外部知识账:它只能给 credentials 提供候选/晋升来源，也只能在 credentials 写入 evidence 事实后沉淀新证据。测试 / 投影时按下面把知识库的料先用到 credentials 上，绿蓝灰各有红线。",
       "rules": [
         [
-          "draft 有某模型真探连通过的能力",
+          "Probe Knowledge Catalog 有某模型真探连通过的能力",
           "回填进配置档案该 route 的能力清单(不是拿本次 get-models 实时能力顶替)"
         ],
         [
@@ -674,7 +665,7 @@
           "route 显绿 ready —— 与蓝互斥:刚真探通了就是绿，不是蓝"
         ],
         [
-          "draft 有真探连通历史 且 当前没真测(非绿)",
+          "credentials route.metadata.evidence_refs 有真探连通历史引用 且 当前没真测(非绿)",
           "route 显蓝 historical_ready，挂 evidence_refs"
         ],
         [
@@ -683,7 +674,7 @@
         ],
         [
           "get-models 拿不到清单(空 / 失败)",
-          "用 draft 里该 provider 的已知模型补出清单(清单兜底，第 4 维)"
+          "用 Probe Knowledge Catalog 里该 provider / endpoint 的已知模型补出清单(清单兜底，第 4 维)"
         ]
       ]
     }

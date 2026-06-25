@@ -6,7 +6,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from graph_agent_gateway.registry.schema import (
-    EvidenceRecord,
     ProviderRoute,
     ProviderUiState,
     ResolvedRoute,
@@ -77,8 +76,12 @@ def project_route_state(
     route_status: str,
     credential_available: bool,
     circuit_retry_at: datetime | None = None,
-    draft_history: bool = False,
+    credential_evidence_refs: list[str] | None = None,
 ) -> ProviderModelStateProjection:
+    evidence_refs = [
+        ref for ref in credential_evidence_refs or [] if isinstance(ref, str)
+    ]
+
     if endpoint_status == "disabled" or route_status == "disabled":
         return ProviderModelStateProjection(route_id=route_id, ui_state="off")
 
@@ -105,39 +108,14 @@ def project_route_state(
     if endpoint_status == "verified" and route_status == "verified":
         return ProviderModelStateProjection(route_id=route_id, ui_state="ready")
 
-    if endpoint_status == "verified" and draft_history:
-        return ProviderModelStateProjection(route_id=route_id, ui_state="historical_ready")
+    if endpoint_status == "verified" and evidence_refs:
+        return ProviderModelStateProjection(
+            route_id=route_id,
+            ui_state="historical_ready",
+            evidence_refs=evidence_refs,
+        )
 
     return ProviderModelStateProjection(route_id=route_id, ui_state="untested")
-
-
-def project_route_state_from_evidence(
-    *,
-    route_id: str,
-    endpoint_status: str,
-    route_status: str,
-    credential_available: bool,
-    evidence_records: list[EvidenceRecord] | None = None,
-    circuit_retry_at: datetime | None = None,
-) -> ProviderModelStateProjection:
-    evidence_refs = [
-        record.evidence_id
-        for record in evidence_records or []
-        if record.evidence_type == "probe"
-        and record.trust_state == "probe-verified"
-        and (record.route_id == route_id or record.scope.get("route_id") == route_id)
-    ]
-    projection = project_route_state(
-        route_id=route_id,
-        endpoint_status=endpoint_status,
-        route_status=route_status,
-        credential_available=credential_available,
-        circuit_retry_at=circuit_retry_at,
-        draft_history=bool(evidence_refs),
-    )
-    if projection.ui_state != "historical_ready":
-        return projection
-    return projection.model_copy(update={"evidence_refs": evidence_refs})
 
 
 def project_provider_route_ui_state(

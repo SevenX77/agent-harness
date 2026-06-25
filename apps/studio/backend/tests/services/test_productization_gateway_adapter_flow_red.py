@@ -201,7 +201,7 @@ def test_gateway_adapter_delegates_role_materialization_to_gateway_owner(monkeyp
         captured["role"] = request.role  # type: ignore[attr-defined]
         captured["credentials"] = request.credentials  # type: ignore[attr-defined]
         captured["health_store"] = request.health_store  # type: ignore[attr-defined]
-        captured["evidence_records"] = request.evidence_records  # type: ignore[attr-defined]
+        captured["has_evidence_records"] = hasattr(request, "evidence_records")
         return SimpleNamespace(
             fallback_chain=[RoleRouteEntry(route_id="owner:sentinel")],
             materialization_report={
@@ -270,7 +270,7 @@ def test_gateway_adapter_delegates_role_materialization_to_gateway_owner(monkeyp
     assert captured["role"] is role
     assert captured["credentials"] is credentials
     assert captured["health_store"] is health_store
-    assert captured["evidence_records"] == evidence_records
+    assert captured["has_evidence_records"] is False
     assert [entry.route_id for entry in materialized.fallback_chain] == ["owner:sentinel"]
     assert materialized.materialization_report["entries"] == [
         {"route_id": "owner:sentinel", "role_fit": "using"}
@@ -1045,7 +1045,7 @@ def test_gateway_adapter_keeps_cooling_down_state_before_ready() -> None:
     assert projection.reason_code == "rate_limited"
 
 
-def test_gateway_adapter_projects_probe_evidence_as_historical_ready_without_metadata() -> None:
+def test_gateway_adapter_ignores_isolated_probe_evidence_for_historical_ready() -> None:
     from app.core.adapters.gateway import GatewayAdapter
     from app.models.llm_config import ProviderEndpoint, ProviderRoute
     from graph_agent_gateway.registry.schema import EvidenceRecord
@@ -1089,4 +1089,4 @@ def test_gateway_adapter_projects_probe_evidence_as_historical_ready_without_met
         }
     )
 
-    assert projection.ui_state == "historical_ready"
+    assert projection.ui_state == "untested"

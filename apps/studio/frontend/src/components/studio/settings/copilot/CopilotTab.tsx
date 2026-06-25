@@ -569,7 +569,7 @@ export function CopilotTab({
           <CatalogAccordionTrigger>
             {t("copilot.claudeAgentSdk")}
           </CatalogAccordionTrigger>
-          <CatalogAccordionContent className="-mx-2 space-y-4 pb-5">
+          <CatalogAccordionContent className="space-y-4 pb-5">
             {displayRoles.map((role) => {
               const modelGroup = role.modelGroupId
                 ? claudeModelGroups.find((candidate) => candidate.id === role.modelGroupId)

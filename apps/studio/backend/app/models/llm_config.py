@@ -184,9 +184,14 @@ class RoleTokenIntent(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["default", "maximum_available", "target", "required_minimum"]
+    mode: Literal["default", "maximum_available", "target"]
     value: int | None = Field(default=None, ge=1)
     downgrade: Literal["allow", "allow_with_warning", "block"] = "allow"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_required_minimum(cls, value: object) -> object:
+        return _migrate_required_minimum_token_intent(value)
 
 
 class TokenIntent(BaseModel):
@@ -194,9 +199,14 @@ class TokenIntent(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["inherit", "default", "maximum_available", "target", "required_minimum"]
+    mode: Literal["inherit", "default", "maximum_available", "target"]
     value: int | None = Field(default=None, ge=1)
     downgrade: Literal["allow", "allow_with_warning", "block"] = "allow"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_required_minimum(cls, value: object) -> object:
+        return _migrate_required_minimum_token_intent(value)
 
 
 class RoleIntent(BaseModel):
@@ -259,6 +269,17 @@ def _migrate_provider_preference(value: object) -> object:
     if value.get("provider_preference") in {"official_first", "ready_first"}:
         return {**value, "provider_preference": "manual_order"}
     return value
+
+
+def _migrate_required_minimum_token_intent(value: object) -> object:
+    if not isinstance(value, dict):
+        return value
+    if value.get("mode") != "required_minimum":
+        return value
+    migrated = dict(value)
+    migrated["mode"] = "maximum_available"
+    migrated["value"] = None
+    return migrated
 
 
 class RoleEntry(GatewayRoleEntry):

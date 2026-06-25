@@ -120,7 +120,7 @@ To ensure accuracy when multiple sources exist, the system follows these precede
 | Component | Path | Responsibility |
 |---|---|---|
 | **Catalog** | `packages/graph-agent-gateway/.../catalog.yaml` | The remote source of truth for model specs. |
-| **Discovery Service** | `apps/studio/backend/app/services/llm_import_drafts.py` | Pulls catalog, matches models, runs L1. |
+| **Probe Catalog Service** | `apps/studio/backend/app/services/llm_probe_catalog.py` | Pulls Probe Knowledge Catalog evidence, matches models, runs L1. |
 | **L2 Prober** | `apps/studio/backend/app/services/copilot_test.py` | Executes contract-based deep probes. |
 | **Lint Engine** | `packages/graph-agent-gateway/.../registry/lint.py` | Cross-checks Role requirements vs Route capabilities. |
 | **Storage** | `~/.studio/llm_credentials.json` | Persists `probed_verified` or `catalog_verified` markers. |

@@ -6,7 +6,7 @@ from datetime import datetime
 
 from app.core.adapters.gateway import ProviderModelStateProjection
 from app.core.adapters.transport_factory import build_gateway_adapter
-from app.models.llm_config import EvidenceRecord, ProviderEndpoint, ProviderRoute
+from app.models.llm_config import ProviderEndpoint, ProviderRoute
 from app.services.llm_health_store import RuntimeCircuit
 
 
@@ -15,7 +15,6 @@ def project_provider_model_state(
     endpoint: ProviderEndpoint,
     route: ProviderRoute,
     circuits: list[RuntimeCircuit],
-    evidence_records: list[EvidenceRecord] | None = None,
     now: datetime | None = None,
 ) -> ProviderModelStateProjection:
     adapter = build_gateway_adapter()
@@ -24,7 +23,6 @@ def project_provider_model_state(
             "endpoint": endpoint,
             "route": route,
             "circuits": circuits,
-            "evidence_records": evidence_records or [],
             "now": now,
         }
     )

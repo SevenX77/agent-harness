@@ -254,6 +254,15 @@ def test_registry_read_and_endpoint_upsert_redacts_secret(
     assert raw["provider_endpoints"]["anthropic-official"]["api_key"] == "anthropic-secret"
 
 
+def test_legacy_import_draft_routes_are_not_public_api(client: TestClient) -> None:
+    response = client.post(
+        "/api/llm/import-drafts",
+        json={"draft_id": "legacy", "source": {"kind": "test"}, "status": "pending"},
+    )
+
+    assert response.status_code == 404
+
+
 def test_registry_includes_runtime_setting_metadata_for_frontend_controls(
     client: TestClient,
     tmp_path: Path,
@@ -769,13 +778,11 @@ def test_registry_returns_model_groups_with_provider_ui_state_projection(
     assert provider_models["ready-provider:gpt-5"]["capability_state"] == "unknown"
 
 
-def test_registry_and_role_materialization_use_evidence_library_for_historical_ready(
+def test_registry_does_not_project_historical_ready_from_catalog_without_credential_promotion(
     client: TestClient,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import app.core.adapters.gateway as gateway_module
-
     settings_dir = tmp_path / "settings"
     monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
     active_credentials_path = settings_dir / "llm" / "llm_credentials.json"
@@ -837,6 +844,69 @@ def test_registry_and_role_materialization_use_evidence_library_for_historical_r
     assert registry_response.status_code == 200
     model_group = registry_response.json()["model_groups"][0]
     provider_model = model_group["provider_models"][0]
+    assert provider_model["ui_state"] == "untested"
+    assert model_group["status_summary"]["historical_ready"] == 0
+    assert model_group["status_summary"]["untested"] == 1
+
+
+def test_registry_and_role_materialization_use_credentials_evidence_refs_for_historical_ready(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.core.adapters.gateway as gateway_module
+
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    active_credentials_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "openai-direct": ProviderEndpoint(
+                    endpoint_id="openai-direct",
+                    display_name="OpenAI",
+                    protocol="openai_compatible",
+                    base_url="https://api.openai.example/v1",
+                    api_key="secret",
+                    status="verified",
+                )
+            },
+            provider_routes={
+                "openai-direct:gpt-5": ProviderRoute(
+                    route_id="openai-direct:gpt-5",
+                    endpoint_id="openai-direct",
+                    route_slug="gpt-5",
+                    provider_model_id="gpt-5",
+                    canonical_id="gpt-5",
+                    display_name="GPT-5",
+                    status="unverified_manual",
+                    metadata={"evidence_refs": ["probe-openai-gpt5"]},
+                )
+            },
+        ),
+        active_credentials_path,
+    )
+    role = RoleEntry(
+        model_groups=[
+            RoleModelGroup(
+                canonical_id="gpt-5",
+                display_name="GPT-5",
+                provider_models=[{"route_id": "openai-direct:gpt-5"}],
+            )
+        ]
+    )
+    save_roles_file(
+        roles_path,
+        RolesData(roles={"assistant": role}),
+        known_route_ids={"openai-direct:gpt-5"},
+    )
+
+    registry_response = client.get("/api/llm/registry")
+
+    assert registry_response.status_code == 200
+    model_group = registry_response.json()["model_groups"][0]
+    provider_model = model_group["provider_models"][0]
     assert provider_model["ui_state"] == "historical_ready"
     assert model_group["status_summary"]["historical_ready"] == 1
     assert model_group["status_summary"]["untested"] == 0
@@ -844,7 +914,7 @@ def test_registry_and_role_materialization_use_evidence_library_for_historical_r
     captured: dict[str, object] = {}
 
     def _spy(request: object) -> SimpleNamespace:
-        captured["evidence_records"] = request.evidence_records  # type: ignore[attr-defined]
+        captured["has_evidence_records"] = hasattr(request, "evidence_records")
         return SimpleNamespace(
             fallback_chain=[RoleRouteEntry(route_id="openai-direct:gpt-5")],
             materialization_report={
@@ -859,8 +929,7 @@ def test_registry_and_role_materialization_use_evidence_library_for_historical_r
     role_response = client.get("/api/llm/roles/assistant")
 
     assert role_response.status_code == 200
-    captured_evidence = captured["evidence_records"]  # type: ignore[assignment]
-    assert [record.evidence_id for record in captured_evidence] == ["probe-openai-gpt5"]
+    assert captured["has_evidence_records"] is False
 
 
 def test_model_list_observation_keeps_registry_route_untested(
@@ -2210,6 +2279,14 @@ def test_endpoint_test_third_party_probes_discovered_models_after_models_list(
     assert routes["qiniu:claude-qiniu"]["status"] == "verified"
 
 
+def test_third_party_protocol_auto_detect_excludes_ark_runtime() -> None:
+    assert llm_router._THIRD_PARTY_PROTOCOL_CANDIDATES == (
+        "openai_compatible",
+        "anthropic_compatible",
+        "google_genai",
+    )
+
+
 def test_endpoint_test_uses_endpoint_protocol_and_base_url_for_probe(
     client: TestClient,
     tmp_path: Path,
@@ -3119,7 +3196,7 @@ def test_endpoint_scoped_manual_model_test_verifies_only_successful_models(
         {
             "model_id": "missing-model",
             "status": "invalid_model",
-            "route_id": None,
+            "route_id": "openai-direct:missing-model",
             "message": "Provider rejected model.",
         },
     ]
@@ -3129,7 +3206,8 @@ def test_endpoint_scoped_manual_model_test_verifies_only_successful_models(
     assert "gpt-5-mini" in endpoint["last_test_message"]
     assert routes["openai-direct:gpt-5-mini"]["status"] == "verified"
     assert routes["openai-direct:gpt-5-mini"]["provider_model_id"] == "gpt-5-mini"
-    assert "openai-direct:missing-model" not in routes
+    assert routes["openai-direct:missing-model"]["status"] == "failed"
+    assert routes["openai-direct:missing-model"]["provider_model_id"] == "missing-model"
     assert calls == [
         ("openai", "secret", "https://api.openai.example/v1", "gpt-5-mini"),
         ("openai", "secret", "https://api.openai.example/v1", "missing-model"),
@@ -3142,7 +3220,7 @@ def test_endpoint_scoped_manual_model_test_verifies_only_successful_models(
     assert evidence_records[0].route_id == "openai-direct:gpt-5-mini"
     assert evidence_records[0].model_id == "gpt-5-mini"
     assert evidence_records[0].probe_status == "ok"
-    assert evidence_records[1].route_id is None
+    assert evidence_records[1].route_id == "openai-direct:missing-model"
     assert evidence_records[1].model_id == "missing-model"
     assert evidence_records[1].probe_status == "invalid_model"
     assert "Provider rejected model." in (evidence_records[1].reason or "")
@@ -3238,7 +3316,7 @@ def test_official_manual_model_test_uses_profile_probe_and_persists_attempts(
         {
             "model_id": "bad-pro",
             "status": "error",
-            "route_id": None,
+            "route_id": "openai-official:bad-pro",
             "message": "Responses API rejected reasoning.effort low.",
         },
     ]
@@ -3246,6 +3324,12 @@ def test_official_manual_model_test_uses_profile_probe_and_persists_attempts(
     assert route["status"] == "verified"
     assert route["verified_profiles"][0]["method_id"] == "openai_responses"
     assert route["metadata"]["probe_attempts"][0]["status"] == "ok"
+    failed_route = body["registry"]["provider_routes"]["openai-official:bad-pro"]
+    assert failed_route["status"] == "failed"
+    assert failed_route["ui_state"] == "failed"
+    assert failed_route["metadata"]["reason_code"] == "profile_probe_failed"
+    assert failed_route["metadata"]["last_probe_message"] == "Responses API rejected reasoning.effort low."
+    assert failed_route["metadata"]["probe_attempts"][0]["status"] == "error"
     evidence_records = load_evidence_library().evidence_records
     assert [record.trust_state for record in evidence_records] == [
         "probe-verified",
@@ -3255,7 +3339,7 @@ def test_official_manual_model_test_uses_profile_probe_and_persists_attempts(
     assert evidence_records[0].model_id == "gpt-5-pro"
     assert evidence_records[0].probe_attempts[0]["status"] == "ok"
     assert evidence_records[0].successful_probe == {"profile_count": 1}
-    assert evidence_records[1].route_id is None
+    assert evidence_records[1].route_id == "openai-official:bad-pro"
     assert evidence_records[1].model_id == "bad-pro"
     assert evidence_records[1].reason == "Responses API rejected reasoning.effort low."
 
@@ -5056,7 +5140,7 @@ def test_sync_catalog_endpoint(client: TestClient, tmp_path: Path, monkeypatch) 
             assert mode == "json"
             return {
                 "enabled": True,
-                "source_url": "https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_import_drafts.json",
+                "source_url": "https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_probe_catalog.json",
                 "fetched_at": "2026-06-20T23:00:00+00:00",
                 "etag": "W/test",
                 "cache": False,
@@ -5089,14 +5173,13 @@ def test_sync_catalog_endpoint(client: TestClient, tmp_path: Path, monkeypatch) 
             github_owner="sevenx",
             llm_catalog_repo="studio-llm-model-catalog",
             llm_catalog_branch="main",
-            llm_catalog_path="llm_import_drafts.json",
+            llm_catalog_path="llm_probe_catalog.json",
         ),
     )
     monkeypatch.setattr(llm_router, "GitHubCatalogClient", FakeGitHubCatalogClient)
-    monkeypatch.setattr(llm_router, "sync_remote_evidence_library", mock_sync)
     monkeypatch.setattr(
         llm_router,
-        "sync_remote_evidence_library_with_metadata",
+        "sync_remote_probe_catalog_with_metadata",
         mock_sync_with_metadata,
         raising=False,
     )
@@ -5108,12 +5191,12 @@ def test_sync_catalog_endpoint(client: TestClient, tmp_path: Path, monkeypatch) 
     assert "Catalog synced successfully" in body["message"]
     assert seen["data"] is None
     assert seen["url"] == (
-        "https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_import_drafts.json"
+        "https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_probe_catalog.json"
     )
     assert body["new_records_count"] == 0
     assert body["catalog_source"] == {
         "enabled": True,
-        "source_url": "https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_import_drafts.json",
+        "source_url": "https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_probe_catalog.json",
         "fetched_at": "2026-06-20T23:00:00+00:00",
         "etag": "W/test",
         "cache": False,
@@ -5130,17 +5213,38 @@ def test_registry_includes_last_remote_catalog_source(
     monkeypatch,
 ) -> None:
     _seed(tmp_path, monkeypatch)
+    append_evidence_record(
+        EvidenceRecord(
+            evidence_id="probe-local-ok",
+            evidence_type="probe",
+            trust_state="probe-verified",
+            endpoint_id="openai-direct",
+            route_id="openai-direct:gpt-5",
+            model_id="gpt-5",
+            provider_model_id="gpt-5",
+        )
+    )
+    append_evidence_record(
+        EvidenceRecord(
+            evidence_id="probe-local-failed",
+            evidence_type="probe",
+            trust_state="probe-failed",
+            endpoint_id="openai-direct",
+            model_id="missing-model",
+            provider_model_id="missing-model",
+        )
+    )
 
     import app.routers.llm as llm_router
-    import app.services.llm_import_drafts as import_drafts
+    import app.services.llm_probe_catalog as probe_catalog
 
-    source_model = getattr(import_drafts, "RemoteCatalogSourceMetadata", None)
-    remember = getattr(import_drafts, "remember_remote_catalog_source", None)
+    source_model = getattr(probe_catalog, "RemoteCatalogSourceMetadata", None)
+    remember = getattr(probe_catalog, "remember_remote_catalog_source", None)
     assert source_model is not None
     assert remember is not None
     source = source_model(
         enabled=True,
-        source_url="https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_import_drafts.json",
+        source_url="https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_probe_catalog.json",
         fetched_at="2026-06-20T23:00:00+00:00",
         etag="W/test",
         cache=False,
@@ -5155,7 +5259,20 @@ def test_registry_includes_last_remote_catalog_source(
         monkeypatch.setattr(llm_router, "_role_effective_runtime_settings", lambda *_args, **_kwargs: {})
         response = client.get("/api/llm/registry")
         assert response.status_code == 200
-        assert response.json()["catalog_source"] == source.model_dump(mode="json")
+        body = response.json()
+        assert body["catalog_source"] == source.model_dump(mode="json")
+        assert body["probe_catalog"] == {
+            "local_evidence_records_count": 2,
+            "local_verified_records_count": 1,
+            "local_failed_records_count": 1,
+            "local_route_candidates_count": 0,
+            "remote_catalog_source": source.model_dump(mode="json"),
+            "sharing": {
+                "mode": "local_export_only",
+                "auto_upload_enabled": False,
+                "message": "Local probe evidence is recorded on this machine. MVP1 does not auto-upload community catalog evidence.",
+            },
+        }
     finally:
         remember(None)
 
@@ -5165,8 +5282,13 @@ def test_share_catalog_endpoint(client: TestClient, tmp_path: Path, monkeypatch)
     
     response = client.post("/api/llm/catalog/share")
     assert response.status_code == 200
-    assert response.json()["status"] == "success"
-    assert "Local verified catalog evidence exported successfully" in response.json()["message"]
+    body = response.json()
+    assert body["status"] == "success"
+    assert body["sharing_mode"] == "local_export_only"
+    assert body["auto_upload_enabled"] is False
+    assert "Local verified catalog evidence exported successfully" in body["message"]
+    assert "does not upload" in body["export_instructions"]
+    assert "Pull Request" not in body["export_instructions"]
 
 
 def test_ensure_catalog_repository_endpoint(client: TestClient, tmp_path: Path, monkeypatch) -> None:
@@ -5180,8 +5302,8 @@ def test_ensure_catalog_repository_endpoint(client: TestClient, tmp_path: Path, 
             "owner": "sevenx",
             "repo": "studio-llm-model-catalog",
             "html_url": "https://github.com/sevenx/studio-llm-model-catalog",
-            "raw_url": "https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_import_drafts.json",
-            "catalog_path": "llm_import_drafts.json",
+            "raw_url": "https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_probe_catalog.json",
+            "catalog_path": "llm_probe_catalog.json",
             "branch": "main",
             "repository_created": True,
             "catalog_created": True,

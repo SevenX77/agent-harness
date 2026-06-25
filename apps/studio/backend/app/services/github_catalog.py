@@ -15,7 +15,7 @@ from app.core.adapters.gateway import EVIDENCE_LIBRARY_DRAFT_ID, new_evidence_li
 GITHUB_API_VERSION = "2022-11-28"
 DEFAULT_CATALOG_REPO = "studio-llm-model-catalog"
 DEFAULT_CATALOG_BRANCH = "main"
-DEFAULT_CATALOG_PATH = "llm_import_drafts.json"
+DEFAULT_CATALOG_PATH = "llm_probe_catalog.json"
 
 
 class GitHubCatalogApiError(RuntimeError):

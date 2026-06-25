@@ -5,7 +5,7 @@
     "unified_model": "统一模型（地基，2026-06-18 PM 拍板，所有物化的最高前提）：model-group、model-bundle、role 本质都是「一串 routes 的数组」，最终都被 materializer 展开铺平成同一种 fallback_chain。三者只差「谁拥有这串数组」——model-group=registry 按 canonical_id 归一出来的同模型跨 endpoint 合集、model-bundle=用户自建可复用、可放不同模型/预配 provider 的束、role=用户为某个用途编排的候选。所以物化内核对三者是同一套：同一套 6 态投影、同一套意图过滤/降级、同一套排序、同一套 role-fit 诊断；不为 group/bundle/role 各写一套。下面 submodules 里凡出现 group/bundle/role，先回到「它是一串 routes」去理解：bundle 物化复用角色物化内核（submodule「Model Bundle 物化」）、bundle 拖进 role 后在 role 里就是与 model-group 同级的一串 routes（可调序/增删/配 provider）。",
     "manages": "一个抽象角色（如 graph 节点的 llm_role）从用户在前端拖出来的「结构化模型组列表」→ 后端按意图过滤/降级/排序 → 物化成 gateway 运行时真正消费的「平铺兜底链 fallback_chain」+ 一份 role-fit/降级诊断报告，整条链。前端看 Group（每个模型一张卡，下面挂多 provider），引擎跑 Chain（一条拉平的 route 兜底序）。",
     "why_single": "它不是一个 CRUD：同一条角色数据要被「结构化编辑视图（前端）」和「平铺执行视图（引擎）」两种形态消费，中间靠 materialize_role（把结构化 model_groups 物化成平铺 fallback_chain 的函数）翻译。这块翻译牵涉 6 态投影、熔断读取、draft 历史证据、意图（thinking / token）过滤与降级、role-fit 诊断——一两句说不清，且 UI 测试态与引擎编排必须用同一套判断（不能前端绿了引擎却拒），所以单列一页。",
-    "design_owner": "gateway 库（packages/graph-agent-gateway）。materialize 编排内核（按意图过滤路线 + 降级 + 排 fallback 链 + role-fit/downgrade 诊断）、6 态标准总结、draft 知识库都是「换个 app 还能用」的公共能力，按 MVP1 第四轮判据归 gateway。Studio 侧只做薄委托 + HTTP 壳 + 拖拽编辑 UI + 默认选择产品策略。",
+    "design_owner": "gateway 库（packages/graph-agent-gateway）。materialize 编排内核（按意图过滤路线 + 降级 + 排 fallback 链 + role-fit/downgrade 诊断）、6 态标准总结、Probe Knowledge Catalog 都是「换个 app 还能用」的公共能力，按 MVP1 第四轮判据归 gateway。Studio 侧只做薄委托 + HTTP 壳 + 拖拽编辑 UI + 默认选择产品策略。",
     "code_location": "核心物化在 gateway role_materialization.py（materialize_role / materialize_model_bundle / _apply_intent / _materialization_projection）；Studio 侧 llm_role_materializer.py（materialize_role / materialize_model_bundle，仅 build_gateway_adapter 后 cast 调 gateway，不含编排逻辑）是薄委托；HTTP 壳与 role 测试 job 在 routers/llm.py（put_llm_role / start_role_test_job / _run_role_test_job_impl）。注：架构口径只有三后端，apps/studio/backend 这侧 = gateway 后端的 sidecar 承载层，不是第四层「Studio 后端」。",
     "dataflow": [
       "前端把角色的结构化 model_groups[]（每组 canonical_id + 各 provider 的 route_id）交给后端 sidecar（即 gateway 后端的承载层）",
@@ -296,7 +296,7 @@
       "endpoint": "POST /api/llm/roles/{role_name}/test-jobs（+ GET /role-test-jobs/{job_id} 轮询）",
       "req": "路径参数 role_name（异步起 job，前端按 500ms 节奏轮询 job_id）",
       "resp": "RoleTestJobResponse：status（queued/running/completed/failed）+ provider_statuses（逐 route 实时进度）+ result（RoleTestResponse：各 model group 各 provider 的 status / role_fit / ui_state / warnings）",
-      "purpose": "role 测试 = 对角色里所有模型批量真 probe（不停在第一条成功），实时回填状态灯 + 降级 tooltip，结果（含失败）写回 draft 证据库 + 持久化测试结果；未保存先拒测（先 PUT 再 test）",
+      "purpose": "role 测试 = 对角色里所有模型批量真 probe（不停在第一条成功），实时回填状态灯 + 降级 tooltip，结果（含失败）写回 Probe Knowledge Catalog + 持久化测试结果；未保存先拒测（先 PUT 再 test）",
       "provider": "gateway 后端做 job/进度/HTTP 包装（routers/llm.py start_role_test_job / _run_role_test_job_impl，job 存内存字典 _role_test_jobs）；批量 route probe + draft 写语义在 gateway 内核",
       "id": "iface-5"
     },
@@ -326,7 +326,7 @@
       "按意图（thinking 三档 / token 四档，intent 只在 role 级）算 role_fit 四态 + 降级诊断 warning",
       "跳过 failed/off、cooling_down 记警告、只把 fit 的 route 入链",
       "产出 materialization_report 供前端 role-fit 灯 + 降级 tooltip 渲染",
-      "role 测试批量 route probe（不停首条成功）+ 结果写回 draft + 持久化",
+      "role 测试批量 route probe（不停首条成功）+ 结果写回 Probe Knowledge Catalog + 持久化",
       "UI 测试态与引擎编排用同一套 6 态/role_fit 判断（前端绿 ⟺ 引擎入链）"
     ],
     "dont": [
@@ -350,7 +350,7 @@
         "code": "historical_ready",
         "dot": "🔵",
         "name": "历史就绪",
-        "mean": "draft 有历史连通证据但当前未真测；入链"
+        "mean": "Probe Knowledge Catalog 有历史连通证据但当前未真测；入链"
       },
       {
         "code": "untested",
@@ -454,17 +454,17 @@
       "ref": "d6"
     },
     {
-      "item": "draft 历史证据库",
+      "item": "Probe Knowledge Catalog 历史证据库",
       "d12": "D6.5",
       "status": "ok",
       "note": "append-only 历史证据库已就绪,是蓝态 historical_ready 的数据来源,role 测试结果(含失败)回写它。",
       "ref": "d6"
     },
     {
-      "item": "draft probe 真 worker",
+      "item": "Probe Catalog evidence writer",
       "d12": "D6.5",
-      "status": "partial",
-      "note": "缺口:probe_import_draft 仍是桩,不真探、不产历史证据 → 仅靠 role 测试产证据;不影响 role 物化主链,但 draft 端到端赋能尚缺一环。",
+      "status": "ok",
+      "note": "MVP1 不保留 Import Draft 主线；role/route/copilot 测试写 Probe Knowledge Catalog evidence,作为 historical_ready 蓝态和能力回填的证据来源。",
       "ref": "d6"
     },
     {

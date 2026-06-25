@@ -38,13 +38,13 @@ def test_github_catalog_ensure_creates_repo_and_seed_file() -> None:
             )
         if (
             request.method == "GET"
-            and request.url.path == "/repos/sevenx/studio-llm-model-catalog/contents/llm_import_drafts.json"
+            and request.url.path == "/repos/sevenx/studio-llm-model-catalog/contents/llm_probe_catalog.json"
         ):
             assert request.url.params["ref"] == "main"
             return httpx.Response(404, json={"message": "Not Found"})
         if (
             request.method == "PUT"
-            and request.url.path == "/repos/sevenx/studio-llm-model-catalog/contents/llm_import_drafts.json"
+            and request.url.path == "/repos/sevenx/studio-llm-model-catalog/contents/llm_probe_catalog.json"
         ):
             body = json.loads(request.content)
             assert body["branch"] == "main"
@@ -67,7 +67,7 @@ def test_github_catalog_ensure_creates_repo_and_seed_file() -> None:
     assert result.repository_created is True
     assert result.catalog_created is True
     assert result.raw_url == (
-        "https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_import_drafts.json"
+        "https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_probe_catalog.json"
     )
     assert [request.method for request in requests] == ["GET", "GET", "POST", "GET", "PUT"]
 

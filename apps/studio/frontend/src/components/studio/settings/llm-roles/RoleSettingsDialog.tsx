@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field"
 import { InputGroup, InputGroupInput } from "@/components/ui/input-group"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import type {
   RoleIntent,
@@ -32,13 +32,6 @@ export interface RoleSettingsDraft {
   outputTokenMode: RoleTokenIntentMode
   outputTokens: string
 }
-
-const TOKEN_MODE_OPTIONS: Array<{ value: RoleTokenIntentMode; label: string }> = [
-  { value: "default", label: "Default" },
-  { value: "maximum_available", label: "Use Max" },
-  { value: "target", label: "Target" },
-  { value: "required_minimum", label: "Required Min" },
-]
 
 export function RoleSettingsPanel({
   roleName,
@@ -94,85 +87,80 @@ export function RoleSettingsFields({
   onDraftChange: (draft: RoleSettingsDraft) => void
 }) {
   return (
-    <FieldSet data-role-settings-fields="true" className="gap-3">
+    <FieldSet data-role-settings-fields="true" className="gap-0">
       <FieldGroup className="gap-3">
         <div
           data-role-settings-toggles="true"
-          className="grid gap-x-4 gap-y-3 md:grid-cols-[minmax(8rem,0.9fr)_minmax(8rem,0.9fr)_minmax(18rem,1.8fr)] xl:grid-cols-[minmax(16rem,1fr)_minmax(16rem,1fr)]"
+          className="rounded-md border border-border bg-muted/10 p-3"
         >
-          <Field
-            orientation="horizontal"
-            data-role-model-fallback-setting="true"
-            data-role-setting-key="model_fallback_enabled"
-            className="items-center justify-between gap-3 py-1"
-          >
-            <FieldLabel htmlFor={`model-fallback-${roleName}`} className="min-w-0 truncate">
-              Model Fallback
-            </FieldLabel>
-            <Switch
-              id={`model-fallback-${roleName}`}
-              size="sm"
-              checked={modelFallbackEnabled}
-              onCheckedChange={onModelFallbackChange}
-              aria-label={`Model fallback for ${roleName}`}
-            />
-          </Field>
-
-          <Field data-role-thinking-setting="true" className="min-w-0 gap-1.5">
-            <FieldLabel id={`thinking-${roleName}`} className="min-w-0 truncate">
-              Thinking
-            </FieldLabel>
-            <RadioGroup
-              aria-labelledby={`thinking-${roleName}`}
-              value={draft.thinking}
-              onValueChange={(value) => onDraftChange({
-                ...draft,
-                thinking: value as RoleThinkingPreference,
-              })}
-              className="grid grid-cols-3 gap-1"
+          <div className="grid gap-3 lg:grid-cols-[minmax(12rem,0.8fr)_minmax(18rem,1.2fr)]">
+            <Field
+              orientation="horizontal"
+              data-role-model-fallback-setting="true"
+              data-role-setting-key="model_fallback_enabled"
+              className="min-h-10 items-center justify-between gap-3 rounded-md border border-border/70 bg-background/70 px-3"
             >
-              {(["off", "preferred", "required"] as const).map((value) => (
-                <FieldLabel
-                  key={value}
-                  htmlFor={`thinking-${value}-${roleName}`}
-                  className="flex min-w-0 items-center gap-1.5 rounded-md border border-border/70 px-2 py-1 text-xs font-medium"
-                >
-                  <RadioGroupItem id={`thinking-${value}-${roleName}`} value={value} />
-                  <span className="truncate">{thinkingLabel(value)}</span>
-                </FieldLabel>
-              ))}
-            </RadioGroup>
-          </Field>
+              <FieldLabel htmlFor={`model-fallback-${roleName}`} className="min-w-0 text-xs font-medium">
+                Model Fallback
+              </FieldLabel>
+              <Switch
+                id={`model-fallback-${roleName}`}
+                size="sm"
+                checked={modelFallbackEnabled}
+                onCheckedChange={onModelFallbackChange}
+                aria-label={`Model fallback for ${roleName}`}
+              />
+            </Field>
 
-          <TokenIntentField
-            roleName={roleName}
-            label="Context Tokens"
-            fieldKind="context"
-            mode={draft.contextTokenMode}
-            tokens={draft.contextTokens}
-            summary={tokenLimitSummary.context}
-            onModeChange={(contextTokenMode) => onDraftChange({
-              ...draft,
-              contextTokenMode,
-              contextTokens: tokenModeAcceptsValue(contextTokenMode) ? draft.contextTokens : "",
-            })}
-            onTokensChange={(contextTokens) => onDraftChange({ ...draft, contextTokens })}
-          />
+            <Field data-role-thinking-setting="true" className="min-w-0 gap-1.5 rounded-md border border-border/70 bg-background/70 p-3">
+              <FieldLabel id={`thinking-${roleName}`} className="min-w-0 text-xs font-medium">
+                Thinking
+              </FieldLabel>
+              <RadioGroup
+                aria-labelledby={`thinking-${roleName}`}
+                value={draft.thinking}
+                onValueChange={(value) => onDraftChange({
+                  ...draft,
+                  thinking: value as RoleThinkingPreference,
+                })}
+                className="grid grid-cols-3 gap-1"
+              >
+                {(["off", "preferred", "required"] as const).map((value) => (
+                  <FieldLabel
+                    key={value}
+                    htmlFor={`thinking-${value}-${roleName}`}
+                    className="flex min-w-0 items-center justify-center gap-1.5 rounded-md border border-border/70 bg-muted/20 px-2 py-1.5 text-xs font-medium transition-colors has-[[data-state=checked]]:border-primary/60 has-[[data-state=checked]]:bg-primary/10"
+                  >
+                    <RadioGroupItem id={`thinking-${value}-${roleName}`} value={value} />
+                    <span className="truncate">{thinkingLabel(value)}</span>
+                  </FieldLabel>
+                ))}
+              </RadioGroup>
+            </Field>
+          </div>
 
-          <TokenIntentField
-            roleName={roleName}
-            label="Output Tokens"
-            fieldKind="output"
-            mode={draft.outputTokenMode}
-            tokens={draft.outputTokens}
-            summary={tokenLimitSummary.output}
-            onModeChange={(outputTokenMode) => onDraftChange({
-              ...draft,
-              outputTokenMode,
-              outputTokens: tokenModeAcceptsValue(outputTokenMode) ? draft.outputTokens : "",
-            })}
-            onTokensChange={(outputTokens) => onDraftChange({ ...draft, outputTokens })}
-          />
+          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+            <TokenIntentField
+              roleName={roleName}
+              kind="context"
+              mode={draft.contextTokenMode}
+              label="Context Tokens"
+              tokens={draft.contextTokens}
+              summary={tokenLimitSummary.context}
+              onModeChange={(contextTokenMode) => onDraftChange({ ...draft, contextTokenMode })}
+              onTokensChange={(contextTokens) => onDraftChange({ ...draft, contextTokens })}
+            />
+            <TokenIntentField
+              roleName={roleName}
+              kind="output"
+              mode={draft.outputTokenMode}
+              label="Output Tokens"
+              tokens={draft.outputTokens}
+              summary={tokenLimitSummary.output}
+              onModeChange={(outputTokenMode) => onDraftChange({ ...draft, outputTokenMode })}
+              onTokensChange={(outputTokens) => onDraftChange({ ...draft, outputTokens })}
+            />
+          </div>
         </div>
       </FieldGroup>
     </FieldSet>
@@ -181,62 +169,63 @@ export function RoleSettingsFields({
 
 function TokenIntentField({
   roleName,
-  label,
-  fieldKind,
+  kind,
   mode,
+  label,
   tokens,
   summary,
   onModeChange,
   onTokensChange,
 }: {
   roleName: string
-  label: string
-  fieldKind: "context" | "output"
+  kind: "context" | "output"
   mode: RoleTokenIntentMode
+  label: string
   tokens: string
   summary: TokenLimitSummary
   onModeChange: (mode: RoleTokenIntentMode) => void
   onTokensChange: (tokens: string) => void
 }) {
-  const inputDisabled = !tokenModeAcceptsValue(mode)
-  const inputId = `${fieldKind}-token-target-${roleName}`
+  const inputId = `${kind}-token-target-${roleName}`
+  const fieldDataAttribute = kind === "context"
+    ? { "data-role-context-settings": true }
+    : { "data-role-output-settings": true }
+  const inputGroupDataAttribute = kind === "context"
+    ? { "data-role-context-token-input-group": true }
+    : { "data-role-output-token-input-group": true }
   return (
     <Field
-      data-role-context-settings={fieldKind === "context" ? "true" : undefined}
-      data-role-output-settings={fieldKind === "output" ? "true" : undefined}
-      className="min-w-0 gap-1.5"
+      {...fieldDataAttribute}
+      className="min-w-0 gap-1.5 rounded-md border border-border/70 bg-background/70 p-3"
     >
-      <FieldLabel htmlFor={inputId}>{label}</FieldLabel>
-      <div className="grid min-w-0 grid-cols-[minmax(7.25rem,auto)_minmax(0,1fr)] gap-2">
+      <FieldLabel htmlFor={inputId} className="text-xs font-medium">{label}</FieldLabel>
+      <div className="grid min-w-0 gap-2">
         <Select value={mode} onValueChange={(value) => onModeChange(value as RoleTokenIntentMode)}>
-          <SelectTrigger size="sm" aria-label={`${label} mode for ${roleName}`} className="w-full">
-            <span>{tokenModeLabel(mode)}</span>
+          <SelectTrigger size="sm" className="w-full">
+            <SelectValue>{tokenModeLabel(mode)}</SelectValue>
           </SelectTrigger>
           <SelectContent>
-            {TOKEN_MODE_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
+            <SelectItem value="default">Default</SelectItem>
+            <SelectItem value="maximum_available">Use Max</SelectItem>
+            <SelectItem value="required_minimum">Required Min</SelectItem>
+            <SelectItem value="target">Target</SelectItem>
           </SelectContent>
         </Select>
         <InputGroup
-          data-role-context-token-input-group={fieldKind === "context" ? "true" : undefined}
-          data-role-output-token-input-group={fieldKind === "output" ? "true" : undefined}
+          {...inputGroupDataAttribute}
         >
           <InputGroupInput
             id={inputId}
             aria-label={`${label} target for ${roleName}`}
             value={tokens}
-            disabled={inputDisabled}
             onChange={(event) => onTokensChange(event.target.value.replace(/[^\d]/g, ""))}
             inputMode="numeric"
-            placeholder={summary.max ? `Max ${formatNumber(summary.max)}` : "Optional value"}
+            placeholder={summary.max ? `Blank uses max ${formatNumber(summary.max)}` : "Blank uses route max"}
           />
         </InputGroup>
       </div>
       <FieldDescription>
-        {tokenLimitSummaryText(summary, fieldKind === "context" ? "Context" : "Output")}
+        {tokenSummaryText(label.replace(/ Tokens$/, ""), summary)}
       </FieldDescription>
     </Field>
   )
@@ -259,20 +248,20 @@ function tokenDraftFromIntent(intent?: RoleTokenIntent | null): {
   mode: RoleTokenIntentMode
   tokens: string
 } {
-  if (!intent) return { mode: "default", tokens: "" }
+  if (!intent) return { mode: "maximum_available", tokens: "" }
   return {
     mode: intent.mode,
-    tokens: tokenModeAcceptsValue(intent.mode) && intent.value ? String(intent.value) : "",
+    tokens: (intent.mode === "target" || intent.mode === "required_minimum") && intent.value ? String(intent.value) : "",
   }
 }
 
-function tokenLimitSummaryText(summary: TokenLimitSummary, label: "Context" | "Output"): string {
-  if (summary.totalCount === 0) return "No provider routes selected yet."
+function tokenSummaryText(label: string, summary: TokenLimitSummary): string {
+  if (summary.totalCount === 0) return `${label} route max token caps are unavailable.`
   if (summary.knownCount === 0 || summary.min === null || summary.max === null) {
     return `${label} route max token caps are unavailable.`
   }
   const prefix = summary.min === summary.max
-    ? `${label} route max token: ${formatNumber(summary.max)}.`
+    ? `${label} route max token cap: ${formatNumber(summary.max)}.`
     : `${label} route max token range: min ${formatNumber(summary.min)} / max ${formatNumber(summary.max)}.`
   const unknownCount = summary.totalCount - summary.knownCount
   if (unknownCount <= 0) return prefix
@@ -291,18 +280,20 @@ export function roleIntentFromSettingsDraft(draft: RoleSettingsDraft): RoleInten
 
 function tokenIntentFromDraft(mode: RoleTokenIntentMode, tokens: string): RoleTokenIntent | null {
   if (mode === "default") return null
-  if (mode === "maximum_available") return { mode }
+  if (mode === "maximum_available") return { mode: "maximum_available" }
   const value = parseOptionalInteger(tokens)
-  if (value === null) return null
-  return { mode, value, downgrade: "allow" }
-}
-
-function tokenModeAcceptsValue(mode: RoleTokenIntentMode): boolean {
-  return mode === "target" || mode === "required_minimum"
+  if (mode === "required_minimum") {
+    return value === null ? { mode: "required_minimum" } : { mode, value, downgrade: "allow" }
+  }
+  if (value === null) return { mode: "target" }
+  return { mode, value, downgrade: "allow_with_warning" }
 }
 
 function tokenModeLabel(mode: RoleTokenIntentMode): string {
-  return TOKEN_MODE_OPTIONS.find((option) => option.value === mode)?.label ?? "Default"
+  if (mode === "maximum_available") return "Use Max"
+  if (mode === "required_minimum") return "Required Min"
+  if (mode === "target") return "Target"
+  return "Default"
 }
 
 function thinkingLabel(value: RoleThinkingPreference): string {

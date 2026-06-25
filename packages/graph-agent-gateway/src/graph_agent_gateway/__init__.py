@@ -19,13 +19,13 @@ from graph_agent_gateway.fallback_decision import (
     decide_fallback,
 )
 from graph_agent_gateway.gateway_chat_model import GatewayChatModel
-from graph_agent_gateway.import_draft_store import (
-    ImportDraftStore,
-    MaterializedImportDraftCandidates,
+from graph_agent_gateway.probe_catalog import (
+    MaterializedProbeCatalogCandidates,
+    ProbeCatalogStore,
     PromotableRouteUpdate,
     known_model_ids_for_endpoint,
     known_verified_capabilities,
-    materialize_import_draft_candidates,
+    materialize_probe_catalog_candidates,
     merge_evidence_library,
     probe_priority,
     promotable_route_update,
@@ -42,7 +42,6 @@ from graph_agent_gateway.route_handoff import ResolvedRouteChain, RouteSkipDiagn
 from graph_agent_gateway.state_projection import (
     ProviderModelStateProjection,
     project_route_state,
-    project_route_state_from_evidence,
 )
 
 __all__ = [
@@ -55,13 +54,13 @@ __all__ = [
     "GatewayChatModel",
     "GatewayResolverMissingError",
     "GatewayRoleNotConfiguredError",
-    "ImportDraftStore",
     "LLMFallbackEvent",
     "MaterializeRoleRequest",
-    "MaterializedImportDraftCandidates",
+    "MaterializedProbeCatalogCandidates",
     "MaterializedRoleResult",
     "ModelResolver",
     "ModelResolverProtocol",
+    "ProbeCatalogStore",
     "ProviderModelStateProjection",
     "PromotableRouteUpdate",
     "ResolvedRole",
@@ -71,11 +70,10 @@ __all__ = [
     "decide_fallback",
     "known_model_ids_for_endpoint",
     "known_verified_capabilities",
-    "materialize_import_draft_candidates",
+    "materialize_probe_catalog_candidates",
     "materialize_role",
     "merge_evidence_library",
     "probe_priority",
     "project_route_state",
-    "project_route_state_from_evidence",
     "promotable_route_update",
 ]

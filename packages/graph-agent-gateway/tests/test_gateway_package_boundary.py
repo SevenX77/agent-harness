@@ -64,13 +64,13 @@ def test_gateway_public_facade_exports_mvp1_owner_api() -> None:
         FallbackDecisionRequest,
         decide_fallback,
     )
-    from graph_agent_gateway.import_draft_store import (
-        ImportDraftStore,
-        MaterializedImportDraftCandidates,
+    from graph_agent_gateway.probe_catalog import (
+        MaterializedProbeCatalogCandidates,
+        ProbeCatalogStore,
         PromotableRouteUpdate,
         known_model_ids_for_endpoint,
         known_verified_capabilities,
-        materialize_import_draft_candidates,
+        materialize_probe_catalog_candidates,
         merge_evidence_library,
         probe_priority,
         promotable_route_update,
@@ -84,7 +84,6 @@ def test_gateway_public_facade_exports_mvp1_owner_api() -> None:
     from graph_agent_gateway.state_projection import (
         ProviderModelStateProjection,
         project_route_state,
-        project_route_state_from_evidence,
     )
 
     expected_exports = {
@@ -98,14 +97,13 @@ def test_gateway_public_facade_exports_mvp1_owner_api() -> None:
         "CredentialResolveError": CredentialResolveError,
         "ProviderModelStateProjection": ProviderModelStateProjection,
         "project_route_state": project_route_state,
-        "project_route_state_from_evidence": project_route_state_from_evidence,
         "MaterializeRoleRequest": MaterializeRoleRequest,
         "MaterializedRoleResult": MaterializedRoleResult,
         "materialize_role": materialize_role,
-        "ImportDraftStore": ImportDraftStore,
-        "MaterializedImportDraftCandidates": MaterializedImportDraftCandidates,
+        "ProbeCatalogStore": ProbeCatalogStore,
+        "MaterializedProbeCatalogCandidates": MaterializedProbeCatalogCandidates,
         "PromotableRouteUpdate": PromotableRouteUpdate,
-        "materialize_import_draft_candidates": materialize_import_draft_candidates,
+        "materialize_probe_catalog_candidates": materialize_probe_catalog_candidates,
         "merge_evidence_library": merge_evidence_library,
         "known_model_ids_for_endpoint": known_model_ids_for_endpoint,
         "known_verified_capabilities": known_verified_capabilities,
@@ -116,6 +114,8 @@ def test_gateway_public_facade_exports_mvp1_owner_api() -> None:
     for public_name, expected_symbol in expected_exports.items():
         assert getattr(gw, public_name) is expected_symbol
         assert public_name in gw.__all__
+
+    assert not hasattr(gw, "project_route_state_from_evidence")
 
 
 def test_registry_surface_exports_skipped_route_diagnostics() -> None:

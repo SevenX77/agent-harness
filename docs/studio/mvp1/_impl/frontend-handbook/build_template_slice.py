@@ -814,7 +814,7 @@ def render_node_overview(stages, nctx):
             ("逐页走 routine", "每页按 S0 的 5 步：读设计 → 写两层测试（先红）→ 按契约实现 → 跑 focused gate → 真机验收。"),
         ])
         track = ('<div class="callout amber"><b>3 件后端依赖（边建边等后端，不挡开工）</b>：'
-                 '① <b>API Keys 蓝态</b>——后端 <code>probe_import_draft</code>（探测导入草稿的函数）是桩，UI 先建、后端 worker 落地才点亮历史可用态；'
+                 '① <b>API Keys 蓝态</b>——蓝态来自 Probe Knowledge Catalog 的 probe-verified 历史证据；Import Draft 非 MVP1 主线；'
                  '② <b>Roles required_minimum</b>——gateway <code>_apply_output_token_intent</code>（落 token 意图判 fit 的函数）缺该分支，控件先建、后端补分支才生效 not_fit；'
                  '③ <b>Roles schema 清理</b>——后端 <code>llm_config.py</code>（角色配置模型）还留 <code>inherit</code> / 组级 intent / <code>cost_priority</code>（都是可选字段），前端按 role-only 建、不发它们即可，后端并行清。</div>')
         todo = _todo_list("实施顺序 · Todo（满分先行、最复杂压后）", [

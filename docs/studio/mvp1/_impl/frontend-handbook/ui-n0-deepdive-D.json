@@ -73,7 +73,7 @@
           ["route_status", "str", "route 状态（verified/failed/disabled…）"],
           ["credential_available", "bool", "该端点是否有可用 key（③a 算：api_key 非空且非空串）"],
           ["circuit_retry_at", "datetime|None", "若熔断中，重试时间（来自 health store 的 active circuit）"],
-          ["draft_history / evidence_records", "bool / list[EvidenceRecord]", "该 route 是否有历史 probe-verified 证据（决定蓝态 historical_ready）"]
+          ["catalog_history / evidence_records", "bool / list[EvidenceRecord]", "该 route 是否有历史 probe-verified 证据（决定蓝态 historical_ready）；draft_history 仅为旧 metadata fallback"]
         ]
       },
       "response": {
@@ -317,7 +317,7 @@
       ],
       [
         "统一 endpoint test 去分叉",
-        "endpoint 验证按 provider_kind 分策略但同一内核：official 只 get-models 连通即验通（不逐模型 probe）；third-party 先协议自动探测（上条）再批量模型探推理端点（自动分批~3个/批、优先可靠模型、任一批任一模型成功→endpoint 可用且停、探尽全失败→不可用）。两路返回同形 DTO，所有探测结果(含失败)写回 draft 证据库",
+        "endpoint 验证按 provider_kind 分策略但同一内核：official 只 get-models 连通即验通（不逐模型 probe）；third-party 先协议自动探测（上条）再批量模型探推理端点（自动分批~3个/批、优先可靠模型、任一批任一模型成功→endpoint 可用且停、探尽全失败→不可用）。两路返回同形 DTO，所有探测结果(含失败)写回 Probe Knowledge Catalog",
         "统一 POST /api/llm/endpoints/{endpoint_id}/test（③a 薄壳）→ ③b 协议探测 + 批量 probe 内核；EndpointTestResponse 增协议/批量证据；批量进度走 EndpointTestJobResponse(已在 schema)",
         "00_settings-ux-spec.md:11-13,28-50,46-49,287-290；07-orch-fallback-circuit-probe/mvp1-alignment.md:30（批量探测策略=③b 公共）；llm.py:480-590（现状用既存 protocol 打 models-list、未去分叉）"
       ]
@@ -361,12 +361,12 @@
         ],
         [
           "角色测试 SSOT (role test / 测试状态唯一事实源)",
-          "D6（6 态/materialize 投影即 test-status SSOT 的消费）+ gateway 模块 08 test-status-ssot；role test 探测回写 draft 属 D6.5 import drafts",
-          "D6.5: Gateway ③b 拥有 draft/evidence 知识库内核、capability 归一化、probe 策略；ImportDraftStore/append-only EvidenceRecord/probe evidence→historical_ready projection 由 Gateway-owned contract 提供，Studio llm_import_drafts.py 作 workflow glue。role test 批量 probe 的状态投影走 D6.1 六态。gateway 设计单元 08 即『Test Status SSOT：6 态投影 + draft/证据库』。",
+          "D6（6 态/materialize 投影即 test-status SSOT 的消费）+ gateway 模块 08 test-status-ssot；role test 探测回写 Probe Knowledge Catalog evidence",
+          "D6.5: Gateway ③b 拥有 Probe Knowledge Catalog/evidence 知识库内核、capability 归一化、probe 策略；ProbeCatalogStore/append-only EvidenceRecord/probe evidence→historical_ready projection 由 Gateway-owned contract 提供，Studio llm_probe_catalog.py 作 service facade。role test 批量 probe 的状态投影走 D6.1 六态。gateway 设计单元 08 即『Test Status SSOT：6 态投影 + Probe Knowledge Catalog』。",
           "否（在 D6.1/D6.5 + gateway 模块 08，不在 d7）"
         ]
       ]
     },
-    "answer_to_user": "明确回答：这些 Settings-gateway 未实现/实现项【都不在 d7 的计划里】。d7(D7 『Golden headless』)讲的是 Golden 评估事实层——比较已有 run result 与 baseline 的可审计评估，owner 是 Engine RunResultSnapshot + headless golden component + Studio UX，唯一红点 D7.4 是 Copilot judge 数据流边界，跟 Settings/gateway 八竿子打不着。Settings-gateway 这几条实质落在：6 态投影=D6.1、materialize/model bundle=D6.2、role 测试 SSOT/draft 证据=D6.1+D6.5（对应 gateway 设计单元 08 test-status-ssot）；凭证解析=D5.2、route 解析=D5.1、fallback 决策=D5.3、空 route 终态=D5.4；协议自动探测/统一 endpoint test 去分叉=D5 的 endpoint/credential owner 收口线，其探测内核归 gateway 设计单元 03(endpoint 标准化)/07(批量探测策略)——12D 没有为『协议探测』单列子节点，它藏在 gateway 模块设计里、由 D5 兜 owner 边界。一句话：Settings 相关全在 D5（凭证/route/fallback/endpoint）和 D6（6 态/materialize/draft），d7 是 Golden 评估，不沾边。"
+    "answer_to_user": "明确回答：这些 Settings-gateway 未实现/实现项【都不在 d7 的计划里】。d7(D7 『Golden headless』)讲的是 Golden 评估事实层——比较已有 run result 与 baseline 的可审计评估，owner 是 Engine RunResultSnapshot + headless golden component + Studio UX，唯一红点 D7.4 是 Copilot judge 数据流边界，跟 Settings/gateway 八竿子打不着。Settings-gateway 这几条实质落在：6 态投影=D6.1、materialize/model bundle=D6.2、role 测试 SSOT/Probe Knowledge Catalog evidence=D6.1+D6.5（对应 gateway 设计单元 08 test-status-ssot）；凭证解析=D5.2、route 解析=D5.1、fallback 决策=D5.3、空 route 终态=D5.4；协议自动探测/统一 endpoint test 去分叉=D5 的 endpoint/credential owner 收口线，其探测内核归 gateway 设计单元 03(endpoint 标准化)/07(批量探测策略)——12D 没有为『协议探测』单列子节点，它藏在 gateway 模块设计里、由 D5 兜 owner 边界。一句话：Settings 相关全在 D5（凭证/route/fallback/endpoint）和 D6（6 态/materialize/Probe Knowledge Catalog），d7 是 Golden 评估，不沾边。"
   }
 }

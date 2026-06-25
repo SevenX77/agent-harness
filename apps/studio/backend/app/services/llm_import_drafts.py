@@ -241,7 +241,7 @@ def _store(path: Path | None = None) -> ImportDraftStore:
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CATALOG_URL = "https://raw.githubusercontent.com/SevenX77/studio-llm-model-catalog/main/llm_import_drafts.json"
+DEFAULT_CATALOG_URL = "https://raw.githubusercontent.com/SevenX77/studio-llm-model-catalog/main/llm_probe_catalog.json"
 
 
 async def sync_remote_evidence_library(

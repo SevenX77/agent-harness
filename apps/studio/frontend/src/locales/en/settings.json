@@ -86,6 +86,12 @@
       "needsAttention": "{{title}} test needs attention",
       "failed": "{{title}} test failed"
     },
+    "testErrors": {
+      "noAvailableRoute": "{{title}} has no available model route. Configure Anthropic-compatible credentials in API Keys and run a test first.",
+      "roleUnknown": "{{title}} does not exist or was deleted. Refresh the page and try again.",
+      "invalidKind": "{{title}} is not a copilot role and cannot be tested with the Claude SDK.",
+      "credentialMissing": "{{title}} is missing a required API key. Add it in API Keys and try again."
+    },
     "aria": {
       "testing": "Testing {{title}}...",
       "ready": "{{title}} ready: {{ready}}/{{total}} routes"

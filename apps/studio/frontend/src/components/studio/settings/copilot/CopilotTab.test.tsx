@@ -23,7 +23,11 @@ vi.mock("react-i18next", () => ({
     type: "3rdParty",
     init: () => undefined,
   },
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string, options?: { count?: number; defaultValue?: string }) => (
+      options?.defaultValue?.replace("{{count}}", String(options.count ?? "")) ?? key
+    ),
+  }),
 }))
 
 vi.mock("@/api/client", () => ({

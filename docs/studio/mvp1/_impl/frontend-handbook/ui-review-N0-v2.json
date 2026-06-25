@@ -178,7 +178,7 @@
         {
           "kind": "prose",
           "label": "实现",
-          "text": "CopilotTab.tsx 的 EmptyCopilotRoleCard（:494-509）用裸 Select 选组；copilot-role-derivation.ts 的 isBuiltIn（:65-69）靠硬编码 canonical_id 命中判内置，pickDefaultCopilotGroupIds（:90-109）有择优阶梯但与 isBuiltIn 判定脱节；activeRouteIds 只收 ui_state===ready 的路由。copilot SDK 测试结果持久化走 routers/llm.py:1396-1432（save_credentials + save_role_test_result + append_evidence_record，落 llm_role_test_results.json 与 llm_import_drafts.json）。saveStatus 已接 SaveStatusBadge（:144/:289），deriveCopilotCandidateGroups 从真 modelGroups + credentials 派生（无 mock）。"
+          "text": "CopilotTab.tsx 的 EmptyCopilotRoleCard（:494-509）用裸 Select 选组；copilot-role-derivation.ts 的 isBuiltIn（:65-69）靠硬编码 canonical_id 命中判内置，pickDefaultCopilotGroupIds（:90-109）有择优阶梯但与 isBuiltIn 判定脱节；activeRouteIds 只收 ui_state===ready 的路由。copilot SDK 测试结果持久化走 routers/llm.py:1396-1432（save_credentials + save_role_test_result + append_evidence_record，落 llm_role_test_results.json 与 llm_probe_catalog.json）。saveStatus 已接 SaveStatusBadge（:144/:289），deriveCopilotCandidateGroups 从真 modelGroups + credentials 派生（无 mock）。"
         },
         {
           "kind": "prose",
@@ -228,7 +228,7 @@
             ["凭证（endpoint + route 注册表）", "llm_credentials.json", "~/Library/Application Support/AgentStudio/llm/；STUDIO_LLM_CREDENTIALS_PATH / STUDIO_CONFIG_DIR", "python 后端原子写（tempfile+os.replace+chmod600）"],
             ["角色 + model group + bundle + profile + copilot 角色", "llm_roles.yaml", ".../AgentStudio/llm/；STUDIO_LLM_ROLES_PATH / STUDIO_CONFIG_DIR", "python 后端 _atomic_write"],
             ["角色 / copilot 路由最近测试结果", "llm_role_test_results.json", ".../AgentStudio/llm/；STUDIO_LLM_ROLE_TEST_RESULTS_PATH / STUDIO_CONFIG_DIR", "python 后端原子写 + chmod600"],
-            ["import drafts + 追加式 evidence（含 copilot SDK 测试证据）", "llm_import_drafts.json", ".../AgentStudio/llm/；STUDIO_LLM_IMPORT_DRAFTS_PATH / STUDIO_CONFIG_DIR", "python 后端"],
+            ["Probe Knowledge Catalog + 追加式 evidence（含 copilot SDK 测试证据）", "llm_probe_catalog.json", ".../AgentStudio/llm/；STUDIO_LLM_PROBE_CATALOG_PATH / STUDIO_CONFIG_DIR（STUDIO_LLM_IMPORT_DRAFTS_PATH 仅 legacy alias）", "python 后端"],
             ["运行期健康 / 熔断缓存（非用户配置）", "llm_health.sqlite", "与 credentials 同目录", "python 后端（sqlite）"],
             ["最近打开的 workspace 列表（非 LLM Settings）", "recent_workspaces.json", "AgentStudio/；STUDIO_CONFIG_DIR", "Rust native-fs（唯一 native 写 config 的命令）"]
           ]
@@ -424,7 +424,7 @@
             ["何时调用", "目标：endpoint 验证按 provider_kind 分策略但同一 ③b 内核"],
             ["必须字段", "endpoint_id（同入口）；内部据 provider_kind 选策略"],
             ["约束字段", "official 只 get-models 即验通（不逐模型 probe）；third-party 先协议自动探测、再批量模型探推理端点（~3/批、任一成功即停）"],
-            ["返回（目标）", "official / third-party 返回同形 EndpointTestResponse + 协议 / 批量证据，所有探测结果（含失败）写回 draft"],
+            ["返回（目标）", "official / third-party 返回同形 EndpointTestResponse + 协议 / 批量证据，所有探测结果（含失败）写回 Probe Knowledge Catalog"],
             ["主要错误（现状）", "GAP：现状 test_endpoint 用既存 protocol 打 models-list，官 / 三仅差是否 verified，未接 ③b 协议探测、未做批量"],
             ["证据", "apps/studio/backend/app/routers/llm.py:480-590；设计 00_settings-ux-spec.md:11-13,28-50,287-290"]
           ]

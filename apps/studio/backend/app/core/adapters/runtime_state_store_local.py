@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import fcntl
 import json
 import logging
+import os
 import re
+import sys
 import threading
 import time
 import uuid
@@ -14,6 +15,29 @@ from pathlib import Path
 from typing import Any
 
 from app.core.adapters.http_transport import StudioAdapterError
+
+if sys.platform == "win32":
+    import msvcrt
+
+    def _platform_lock_file(file: Any) -> None:
+        file.seek(0, os.SEEK_END)
+        if file.tell() == 0:
+            file.write(b"\0")
+            file.flush()
+        file.seek(0)
+        msvcrt.locking(file.fileno(), msvcrt.LK_LOCK, 1)
+
+    def _platform_unlock_file(file: Any) -> None:
+        file.seek(0)
+        msvcrt.locking(file.fileno(), msvcrt.LK_UNLCK, 1)
+else:
+    import fcntl
+
+    def _platform_lock_file(file: Any) -> None:
+        fcntl.flock(file.fileno(), fcntl.LOCK_EX)
+
+    def _platform_unlock_file(file: Any) -> None:
+        fcntl.flock(file.fileno(), fcntl.LOCK_UN)
 
 logger = logging.getLogger(__name__)
 _SAFE_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -369,12 +393,18 @@ class LocalRuntimeStateStore:
     @contextmanager
     def _run_file_lock(self, run_dir: Path) -> Iterator[None]:
         lock_file = run_dir / ".runtime_state.lock"
-        with open(lock_file, "a+") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        with open(lock_file, "a+b") as f:
+            self._lock_file(f)
             try:
                 yield
             finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                self._unlock_file(f)
+
+    def _lock_file(self, file: Any) -> None:
+        _platform_lock_file(file)
+
+    def _unlock_file(self, file: Any) -> None:
+        _platform_unlock_file(file)
 
     def _now_ms(self) -> int:
         return int(time.time() * 1000)

@@ -71,14 +71,16 @@
     "title": "Copilot",
     "description": "Configure copilot roles with the same model group fallback pattern used by LLM Roles.",
     "claudeAgentSdk": "Claude Agent SDK",
-    "addModelDisabledTooltip": "Choose a model group for the empty card before adding another.",
+    "addModelTooltip": "Pick a model group for the existing empty card first",
     "emptyState": {
       "title": "No Anthropic Messages route yet",
-      "description": "Add credentials that support the anthropic-messages protocol in API Keys (Anthropic Official, Ark, DeepSeek, OpenRouter, and similar providers). Routes appear here after the provider or role test verifies them.",
-      "cta": "Go to API Keys"
+      "description": "Add a credential that supports the anthropic-messages protocol in API Keys (Anthropic Official / Ark / DeepSeek / OpenRouter, etc.). It appears here once single-model testing passes.",
+      "cta": "Configure in API Keys"
     },
-    "untestedRoutesCta_one": "{{count}} route has not been tested. Test it in API Keys.",
-    "untestedRoutesCta_other": "{{count}} routes have not been tested. Test them in API Keys.",
+    "roleCard": {
+      "description": "Coding copilot role synced with backend fallback chain.",
+      "untestedWarning": "{{n}} route(s) untested — test in API Keys"
+    },
     "testToast": {
       "passed": "{{title}} test passed",
       "needsAttention": "{{title}} test needs attention",

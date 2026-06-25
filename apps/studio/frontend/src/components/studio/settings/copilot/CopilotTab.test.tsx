@@ -509,8 +509,8 @@ describe("R-F12 empty-state CTA + per-card untested warning", () => {
       />,
     )
     expect(html).toContain('data-copilot-empty-state="true"')
-    expect(html).toContain("No Anthropic Messages route yet")
-    expect(html).toContain("Go to API Keys")
+    expect(html).toContain("copilot.emptyState.title")
+    expect(html).toContain("copilot.emptyState.cta")
   })
 
   it("CTA button is disabled when no onNavigateToApiKeys is wired (degrade visibly)", () => {
@@ -541,7 +541,7 @@ describe("R-F12 empty-state CTA + per-card untested warning", () => {
       />,
     )
     expect(html).toContain('data-copilot-untested-warning="true"')
-    expect(html).toContain("1 route has not been tested")
+    expect(html).toContain("copilot.roleCard.untestedWarning")
   })
 })
 
@@ -680,6 +680,27 @@ describe("R-F17 copilot a11y aria keys are routed through i18n", () => {
     expect(zh.copilot.aria.ready).toContain("{{ready}}")
     expect(zh.copilot.aria.ready).toContain("{{total}}")
     expect(zh.copilot.aria.testing).toContain("正在测试")
+  })
+})
+
+describe("copilot empty-state + untested-warning text routed through i18n", () => {
+  it("en bundle defines emptyState / addModelTooltip / roleCard keys", async () => {
+    const en = (await import("@/locales/en/settings.json")).default
+    expect(en.copilot.emptyState.title.length).toBeGreaterThan(0)
+    expect(en.copilot.emptyState.description.length).toBeGreaterThan(0)
+    expect(en.copilot.emptyState.cta.length).toBeGreaterThan(0)
+    expect(en.copilot.addModelTooltip.length).toBeGreaterThan(0)
+    expect(en.copilot.roleCard.description.length).toBeGreaterThan(0)
+    expect(en.copilot.roleCard.untestedWarning).toContain("{{n}}")
+  })
+
+  it("zh-CN bundle defines the same keys with translated copy", async () => {
+    const zh = (await import("@/locales/zh-CN/settings.json")).default
+    expect(zh.copilot.emptyState.title).toContain("Anthropic Messages")
+    expect(zh.copilot.emptyState.cta).toContain("API Keys")
+    expect(zh.copilot.addModelTooltip).toContain("模型组")
+    expect(zh.copilot.roleCard.untestedWarning).toContain("{{n}}")
+    expect(zh.copilot.roleCard.untestedWarning).toContain("未测试")
   })
 })
 

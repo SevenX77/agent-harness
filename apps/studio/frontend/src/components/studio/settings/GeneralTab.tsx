@@ -110,16 +110,13 @@ export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appS
             <FieldLabel htmlFor="remote-model-catalog-enabled">
               {t("general.remoteModelCatalog.label")}
             </FieldLabel>
-            <div className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-muted/30 p-3">
-              <FieldDescription>{t("general.remoteModelCatalog.description")}</FieldDescription>
-              <Switch
-                id="remote-model-catalog-enabled"
-                checked={appSettings.remoteModelCatalogEnabled}
-                onCheckedChange={appSettings.setRemoteModelCatalogEnabled}
-                aria-label={t("general.remoteModelCatalog.label")}
-                className="shrink-0"
-              />
-            </div>
+            <Switch
+              id="remote-model-catalog-enabled"
+              checked={appSettings.remoteModelCatalogEnabled}
+              onCheckedChange={appSettings.setRemoteModelCatalogEnabled}
+              aria-label={t("general.remoteModelCatalog.label")}
+            />
+            <FieldDescription>{t("general.remoteModelCatalog.description")}</FieldDescription>
           </Field>
 
           <Field>

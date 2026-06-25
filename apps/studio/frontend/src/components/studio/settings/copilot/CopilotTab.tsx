@@ -659,9 +659,7 @@ function AddCopilotModelButton({
           <span tabIndex={0}>{button}</span>
         </TooltipTrigger>
         <TooltipContent side="top">
-          {t("copilot.addModelDisabledTooltip", {
-            defaultValue: "Choose a model group for the empty card before adding another.",
-          })}
+          {t("copilot.addModelTooltip")}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -686,14 +684,9 @@ function EmptyCopilotState({
       data-copilot-empty-state="true"
     >
       <CardHeader className="!grid-cols-1">
-        <CardTitle>
-          {t("copilot.emptyState.title", { defaultValue: "No Anthropic Messages route yet" })}
-        </CardTitle>
+        <CardTitle>{t("copilot.emptyState.title")}</CardTitle>
         <CardDescription>
-          {t("copilot.emptyState.description", {
-            defaultValue:
-              "Add credentials that support the anthropic-messages protocol in API Keys (Anthropic Official, Ark, DeepSeek, OpenRouter, and similar providers). Routes appear here after the provider or role test verifies them.",
-          })}
+          {t("copilot.emptyState.description")}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -704,7 +697,7 @@ function EmptyCopilotState({
           onClick={onNavigateToApiKeys}
           disabled={!onNavigateToApiKeys}
         >
-          {t("copilot.emptyState.cta", { defaultValue: "Go to API Keys" })}
+          {t("copilot.emptyState.cta")}
         </Button>
       </CardContent>
     </Card>
@@ -779,7 +772,7 @@ function CopilotRoleCard({
             {role.title}
             <Badge variant="secondary">{role.source === "built_in" ? "Built-in" : "Third-party"}</Badge>
           </CardTitle>
-          <CardDescription>Coding copilot role synced with backend fallback chain.</CardDescription>
+          <CardDescription>{t("copilot.roleCard.description")}</CardDescription>
           {showUntestedWarning ? (
             <button
               type="button"
@@ -788,13 +781,7 @@ function CopilotRoleCard({
               onClick={onNavigateToApiKeys}
               disabled={!onNavigateToApiKeys}
             >
-              {t("copilot.untestedRoutesCta", {
-                count: compatibleRoutes.length,
-                defaultValue:
-                  compatibleRoutes.length === 1
-                    ? "{{count}} route has not been tested. Test it in API Keys."
-                    : "{{count}} routes have not been tested. Test them in API Keys.",
-              })}
+              {t("copilot.roleCard.untestedWarning", { n: compatibleRoutes.length })}
             </button>
           ) : null}
         </div>

@@ -438,7 +438,7 @@ export function AssetsPanel({ skillId = null, workspaceRoot = null, skillDetail 
   }, [rootTarget, workspaceRoot])
 
   return (
-    <TooltipProvider delayDuration={0}>
+    <TooltipProvider>
       <div className="flex h-full flex-col bg-background">
         <PanelHeader title="Assets" />
 

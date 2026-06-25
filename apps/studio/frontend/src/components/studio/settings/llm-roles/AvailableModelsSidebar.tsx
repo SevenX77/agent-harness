@@ -329,7 +329,7 @@ const AvailableModelCard = memo(function AvailableModelCard({
   onReprobeRoute: (routeId: string) => void
 }) {
   return (
-    <div className="w-full max-w-full overflow-hidden rounded-md ring-inset ring-1 ring-foreground/10">
+    <div className="w-full max-w-full overflow-hidden rounded-md border border-border bg-muted/20 shadow-xs dark:bg-card dark:shadow-none">
       <button
         type="button"
         draggable={false}
@@ -342,7 +342,7 @@ const AvailableModelCard = memo(function AvailableModelCard({
         onPointerDown={(event) => onPointerSelect(model.id, event)}
         onClick={(event) => onClickSelect(model.id, event)}
         className={cn(
-          "block w-full max-w-full cursor-grab select-none transform-gpu overflow-hidden rounded-md bg-card p-2 text-left transition-[background-color,box-shadow,transform] duration-75 ease-out hover:bg-muted/25 active:scale-[0.99] active:cursor-grabbing active:bg-muted/40 data-[selected=true]:bg-muted/30 data-[selected=true]:ring-2 data-[selected=true]:ring-primary/70 data-[selected=true]:ring-inset focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none",
+          "block w-full max-w-full cursor-grab select-none transform-gpu overflow-hidden rounded-md bg-transparent p-2 text-left transition-[background-color,box-shadow,transform] duration-75 ease-out hover:bg-muted/35 active:scale-[0.99] active:cursor-grabbing active:bg-muted/45 data-[selected=true]:bg-muted/40 data-[selected=true]:ring-2 data-[selected=true]:ring-primary/70 data-[selected=true]:ring-inset focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none",
         )}
       >
         <div className="grid min-w-0 gap-1">
@@ -555,8 +555,8 @@ export function buildAvailableModelGroups(modelGroups: ModelGroup[]): AvailableM
         section: group.section_label || fallbackModelGroupSection(group),
         // #35(b): off/disabled routes move into the collapsible "Deprecated"
         // section; all other 6-state routes stay in the draggable provider row.
-        providers: allProviders.filter((provider) => provider.state !== "off"),
-        deprecatedProviders: allProviders.filter((provider) => provider.state === "off"),
+        providers: collapseDuplicateProviderLabels(allProviders.filter((provider) => provider.state !== "off")),
+        deprecatedProviders: collapseDuplicateProviderLabels(allProviders.filter((provider) => provider.state === "off")),
         thinking: group.capability_summary.thinking === "supported" ||
           group.capability_summary.thinking === "mixed" ||
           group.provider_models.some((providerModel) => Boolean(
@@ -578,6 +578,18 @@ export function buildAvailableModelGroups(modelGroups: ModelGroup[]): AvailableM
   return [...bySection.entries()]
     .sort(([left], [right]) => left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }))
     .map(([section, sectionModels]) => ({ section, models: sectionModels }))
+}
+
+function collapseDuplicateProviderLabels(providers: AvailableModelProvider[]): AvailableModelProvider[] {
+  const byLabel = new Map<string, AvailableModelProvider[]>()
+  for (const provider of providers) {
+    const key = providerDisplayKey(provider.label, provider.id)
+    byLabel.set(key, [...(byLabel.get(key) ?? []), provider])
+  }
+  return [...byLabel.values()]
+    .map((duplicates) => [...duplicates].sort(compareAvailableModelProviders)[0])
+    .filter((provider): provider is AvailableModelProvider => Boolean(provider))
+    .sort(compareAvailableModelProviders)
 }
 
 function fallbackModelGroupSection(group: ModelGroup): string {
@@ -671,6 +683,10 @@ function compareAvailableModelProviders(
   const labelCompare = left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: "base" })
   if (labelCompare !== 0) return labelCompare
   return left.id.localeCompare(right.id, undefined, { numeric: true, sensitivity: "base" })
+}
+
+function providerDisplayKey(label: string, fallbackId: string): string {
+  return label.trim().toLowerCase() || fallbackId
 }
 
 function providerDisplayStatePriority(state: ProviderUiState): number {

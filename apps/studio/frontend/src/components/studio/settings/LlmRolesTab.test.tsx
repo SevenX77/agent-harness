@@ -254,6 +254,49 @@ describe("LlmRolesTab controls", () => {
     expect(validateRolesDraft(next)).toBeNull()
   })
 
+  it("adds only the best route for each provider label when a model spans duplicate endpoints", () => {
+    const duplicatedProviderGroup: ModelGroup = {
+      ...modelGroups[0],
+      canonical_id: "deepseek-v4-flash",
+      display_name: "DeepSeek V4 Flash",
+      provider_models: [
+        {
+          ...modelGroups[0].provider_models[1],
+          route_id: "qiniu-openai:deepseek-v4-flash",
+          endpoint_id: "qiniu-openai",
+          provider_label: "Qiniu OpenAI",
+          provider_model_id: "deepseek-v4-flash",
+          ui_state: "ready",
+        },
+        {
+          ...modelGroups[0].provider_models[1],
+          route_id: "qiniu-anthropic:deepseek-v4-flash",
+          endpoint_id: "qiniu-anthropic",
+          provider_label: "Qiniu OpenAI",
+          provider_model_id: "deepseek-v4-flash",
+          ui_state: "untested",
+        },
+        {
+          ...modelGroups[0].provider_models[0],
+          route_id: "ark-official:deepseek-v4-flash",
+          endpoint_id: "ark-official",
+          provider_label: "Ark Official",
+          provider_kind: "official",
+          provider_model_id: "deepseek-v4-flash",
+          ui_state: "untested",
+        },
+      ],
+    }
+
+    const next = appendModelGroupToRole(rolesData, "copilot_chat", duplicatedProviderGroup)
+
+    expect(next.roles.copilot_chat.models["deepseek-v4-flash"].providers).toEqual([
+      "qiniu-openai:deepseek-v4-flash",
+      "ark-official:deepseek-v4-flash",
+    ])
+    expect(next.models["deepseek-v4-flash"].providers).not.toHaveProperty("qiniu-anthropic:deepseek-v4-flash")
+  })
+
   it("returns a drop error when a model group has no provider routes", () => {
     const result = appendModelGroupToRoleWithResult(rolesData, "copilot_chat", {
       ...modelGroups[0],
@@ -690,13 +733,15 @@ describe("LlmRolesTab controls", () => {
     const html = renderToStaticMarkup(<AvailableModelsSidebar modelGroups={modelGroups} />)
 
     expect(html).toContain("bg-card")
+    expect(html).toContain("border border-border")
+    expect(html).toContain("bg-muted/20")
+    expect(html).toContain("shadow-xs")
     expect(html).toContain("ring-inset")
-    expect(html).toContain("ring-1 ring-foreground/10")
-    expect(html).toContain("hover:bg-muted/25")
+    expect(html).toContain("hover:bg-muted/35")
     expect(html).toContain("active:scale-[0.99]")
-    expect(html).toContain("active:bg-muted/40")
+    expect(html).toContain("active:bg-muted/45")
     expect(html).toContain("transition-[background-color,box-shadow,transform]")
-    expect(html).toContain("data-[selected=true]:bg-muted/30")
+    expect(html).toContain("data-[selected=true]:bg-muted/40")
     expect(html).toContain("data-[selected=true]:ring-2")
     expect(html).toContain("data-[selected=true]:ring-primary/70")
     expect(html).toContain("focus-visible:ring-2")
@@ -1142,6 +1187,49 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain("provider_routes")
     expect(html).not.toContain("GPT5")
     expect(html).not.toContain("Claude Sonnet 4.6 Thinking")
+  })
+
+  it("collapses duplicate endpoint routes to one provider label in the model library", () => {
+    const duplicateEndpointGroups: ModelGroup[] = [{
+      ...modelGroups[0],
+      canonical_id: "deepseek-v4-flash",
+      display_name: "DeepSeek V4 Flash",
+      section_label: "deepseek",
+      provider_models: [
+        {
+          ...modelGroups[0].provider_models[1],
+          route_id: "qiniu-openai:deepseek-v4-flash",
+          endpoint_id: "qiniu-openai",
+          provider_label: "Qiniu OpenAI",
+          provider_model_id: "deepseek-v4-flash",
+          ui_state: "ready",
+        },
+        {
+          ...modelGroups[0].provider_models[1],
+          route_id: "qiniu-anthropic:deepseek-v4-flash",
+          endpoint_id: "qiniu-anthropic",
+          provider_label: "Qiniu OpenAI",
+          provider_model_id: "deepseek-v4-flash",
+          ui_state: "untested",
+        },
+        {
+          ...modelGroups[0].provider_models[1],
+          route_id: "ark-official:deepseek-v4-flash",
+          endpoint_id: "ark-official",
+          provider_label: "Ark Official",
+          provider_kind: "official",
+          provider_model_id: "deepseek-v4-flash",
+          ui_state: "untested",
+        },
+      ],
+    }]
+
+    const [entry] = buildAvailableModelGroups(duplicateEndpointGroups)[0].models
+
+    expect(entry.providers.map((provider) => `${provider.label}:${provider.state}:${provider.id}`)).toEqual([
+      "Qiniu OpenAI:ready:qiniu-openai:deepseek-v4-flash",
+      "Ark Official:untested:ark-official:deepseek-v4-flash",
+    ])
   })
 
   it("pins advanced model bundles above normal Available Models and keeps exact route ids", () => {
@@ -2267,9 +2355,12 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain('data-slot="dialog-content"')
     expect(fieldsHtml).toContain('data-role-settings-fields="true"')
     expect(fieldsHtml).toContain('data-role-settings-toggles="true"')
+    expect(fieldsHtml).toContain("rounded-md border border-border bg-muted/10")
+    expect(fieldsHtml).toContain('data-role-context-settings="true"')
+    expect(fieldsHtml).toContain('data-role-context-token-input-group="true"')
     expect(fieldsHtml).toContain('data-role-output-settings="true"')
     expect(fieldsHtml).toContain('data-role-output-token-input-group="true"')
-    expect(fieldsHtml).toContain("md:grid-cols-[minmax(8rem,0.9fr)_minmax(8rem,0.9fr)_minmax(18rem,1.8fr)]")
+    expect(fieldsHtml).toContain("lg:grid-cols-[minmax(12rem,0.8fr)_minmax(18rem,1.2fr)]")
     expect(fieldsHtml).toContain('data-slot="field-set"')
     expect(fieldsHtml).not.toContain("Provider Order")
     expect(fieldsHtml).not.toContain("Manual order")

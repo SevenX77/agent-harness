@@ -12,6 +12,7 @@ import {
   officialProviderTestSummary,
   officialProviderDrafts,
   providerDraftForAction,
+  providerEndpointDraftsForAction,
   shouldSyncRemoteModelCatalog,
   isStaleRouteReferenceError,
   refreshLoadedLlmRolesProjection,
@@ -474,6 +475,51 @@ describe('Add Provider flow helpers', () => {
     ])
   })
 
+  it('keeps third-party endpoint ids in their intended protocol slots when runtime detection mutates protocol', () => {
+    const [draft] = draftsFromCredentials({
+      providers: [
+        {
+          id: 'anthropic-qnaigc-com-openai-6a75652f0b',
+          name: 'Qiniu',
+          api_key: 'sk-qiniu',
+          base_url: 'https://anthropic.qnaigc.com',
+          provider_type: 'anthropic_compatible',
+          last_test_status: 'ok',
+        },
+        {
+          id: 'anthropic-qnaigc-com-anthropic-38963c9239',
+          name: 'Qiniu',
+          api_key: 'sk-qiniu',
+          base_url: 'https://anthropic.qnaigc.com',
+          provider_type: 'anthropic_compatible',
+          last_test_status: 'ok',
+        },
+        {
+          id: 'anthropic-qnaigc-com-google-ab16819307',
+          name: 'Qiniu',
+          api_key: 'sk-qiniu',
+          base_url: 'https://anthropic.qnaigc.com',
+          provider_type: 'google_genai',
+          last_test_status: 'error',
+        },
+      ],
+    })
+
+    expect(draft.base_urls?.[0].endpoint_ids).toMatchObject({
+      openai_compatible: 'anthropic-qnaigc-com-openai-6a75652f0b',
+      anthropic_compatible: 'anthropic-qnaigc-com-anthropic-38963c9239',
+      google_genai: 'anthropic-qnaigc-com-google-ab16819307',
+    })
+    expect(providerEndpointDraftsForAction(draft).map((endpointDraft) => ({
+      id: endpointDraft.id,
+      provider_type: endpointDraft.provider_type,
+    }))).toEqual([
+      { id: 'anthropic-qnaigc-com-openai-6a75652f0b', provider_type: 'openai_compatible' },
+      { id: 'anthropic-qnaigc-com-anthropic-38963c9239', provider_type: 'anthropic_compatible' },
+      { id: 'anthropic-qnaigc-com-google-ab16819307', provider_type: 'google_genai' },
+    ])
+  })
+
   it('uses canonical official provider endpoints for hidden Base URL fields and Test actions', () => {
     const staleOfficialDrafts = draftsFromCredentials({
       providers: [
@@ -576,6 +622,58 @@ describe('Add Provider flow helpers', () => {
         available_sdks: ['openai_compatible'],
       },
     ])
+  })
+
+  it('replaces stale provider models with the current endpoint test response even when the endpoint fails', () => {
+    const draft = providerDraftForAction([], 'openai-official')
+    expect(draft).not.toBeNull()
+    const current: CredentialsState = {
+      providers: [
+        {
+          id: 'openai-official',
+          name: 'OpenAI Official',
+          api_key: 'sk-live',
+          base_url: 'https://api.openai.com',
+          provider_type: 'openai_compatible',
+          last_test_status: 'ok',
+          available_models: [{ id: 'stale-green-model', status: 'verified' }],
+          available_sdks: ['openai_compatible'],
+          test_results: [{
+            params_fingerprint: providerTestParamsFingerprint(draft!),
+            base_url: 'https://api.openai.com',
+            provider_type: 'openai_compatible',
+            last_test_status: 'ok',
+            available_models: [{ id: 'stale-green-model', status: 'verified' }],
+            available_sdks: ['openai_compatible'],
+          }],
+        },
+      ],
+    }
+
+    const next = upsertProviderTestResponse(current, draft!, {
+      status: 'error',
+      message: 'Endpoint failed; model state is not proven.',
+      error_code: 'endpoint_test_failed',
+      available_models: [{
+        id: 'current-model',
+        status: 'failed',
+        ui_state: 'failed',
+        capabilities: { reason_code: 'error' },
+      }],
+      available_sdks: [],
+    })
+
+    expect(next.providers[0]).toMatchObject({
+      last_test_status: 'error',
+      available_models: [{ id: 'current-model', status: 'failed', ui_state: 'failed' }],
+      available_sdks: [],
+    })
+    expect(next.providers[0].test_results?.at(-1)).toMatchObject({
+      params_fingerprint: providerTestParamsFingerprint(draft!),
+      last_test_status: 'error',
+      available_models: [{ id: 'current-model', status: 'failed', ui_state: 'failed' }],
+      available_sdks: [],
+    })
   })
 
   it('adds manual model results for a newly materialized provider instead of dropping them', () => {

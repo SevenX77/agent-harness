@@ -129,7 +129,7 @@
    "module": "凭证录入与管理",
    "func": "设计:让用户填/改第三方 provider 的 name、base_url、api_key,改完即填即存。",
    "action": "用户在第三方卡内编辑 Base URL / API Key;改名走 ⋮ → Rename。",
-   "fe_design": "在第三方卡里改 Base URL / API Key 任一项 → 每次改动合并成一个 patch 落到 SettingsPage → debounce 自动保存;改名走 ⋮ → Rename 弹命名弹框回填 name。保存时后端把 base_url 按协议归一化、api_key 省略时保留旧值。协议字段不由用户手选:一条 Base URL 会展开成 OpenAI-compatible / Anthropic-compatible / Google GenAI 三个 endpoint 候选(第三方不包含 Ark),分别测试并保留各自结果;同一 URL 可同时有多个可用协议。第三方卡支持 + URL 在同一卡内增加多条 URL,由前端保存链拆成多 endpoint 并由 gateway/Studio 标准化回填。",
+   "fe_design": "在第三方卡里改 Base URL / API Key 任一项 → 每次改动合并成一个 patch 落到 SettingsPage → debounce 自动保存;改名走 ⋮ → Rename 弹命名弹框回填 name。保存时后端把 base_url 按协议归一化、api_key 省略时保留旧值。协议字段不由用户手选:一条 Base URL 会展开成 OpenAI-compatible / Anthropic-compatible / Google GenAI 三个 endpoint 候选(第三方不包含 Ark),分别测试并保留各自结果;同一 URL 可同时有多个可用协议。第三方卡支持 + URL 在同一卡内增加多条 URL,由前端保存链拆成多 endpoint 并由 gateway/Studio 标准化回填。Base URL 连通状态显示在具体 URL 输入行后面:该 URL 任一候选 endpoint 可达/测试通过则绿勾,已测候选全失败则红叉,未测不显示;不要把 URL 状态放在 Base URL 字段 label 旁边。",
    "fe_modules": [
     {
      "name": "provider-utils",
@@ -412,7 +412,7 @@
    "module": "状态投影",
    "func": "设计:把后端测试结果投影成 6 态状态标签,常驻 inline 显示在 key/URL 旁,三页颜色一致。",
    "action": "无显式动作(测试/加载后自动投影;含改 key 失效回退见 #21)。",
-   "fe_design": "前端把后端每条 route 的状态投影成 UI 标签，用 §4.2 的 6 态:🟢 ready=刚真测通过、🔵 historical_ready=credentials route 已采纳真探连通历史引用(metadata.evidence_refs)、当前非绿(只被 get-models 清单看到过不算，那是灰)、⚪ untested=没真探过(含只被清单看到过)、🔴 failed=出错要修(配置缺口 ∪ 测试失败，reason 区分，红但不挡)、⚪+倒计时 cooling_down=熔断中、⚪+不可选 off=禁用。红线:绿 = 刚真探通过;蓝 = credentials 有真探历史引用但当前非绿;灰 = 只被清单看到、没真探历史。「看到 ≠ 连通过」，观测绝不出蓝。第三方顶层一个连通徽章(按参数指纹取缓存结果);official 的 Available Routes 仍按 route 展示,third-party/custom 的 Available Models 必须按真实 model id 聚合成一个标签:任一 endpoint route 绿则 model 绿,没有绿但任一 route historical_ready/probe-verified 则 model 蓝,否则再落 failed/untested/off。第三方模型 tooltip 要能看到聚合下的 endpoint id、route id、失败消息和 probe attempts。结果除 toast 外必须常驻写在 key/Base URL 旁的状态位(inline，§1.4)。状态权威来自后端 6 态总结转的 credentials DTO，前端只读渲染、不持第二份。",
+   "fe_design": "前端把后端每条 route 的状态投影成 UI 标签，用 §4.2 的 6 态:🟢 ready=刚真测通过、🔵 historical_ready=credentials route 已采纳真探连通历史引用(metadata.evidence_refs)、当前非绿(只被 get-models 清单看到过不算，那是灰)、⚪ untested=没真探过(含只被清单看到过)、🔴 failed=出错要修(配置缺口 ∪ 测试失败，reason 区分，红但不挡)、⚪+倒计时 cooling_down=熔断中、⚪+不可选 off=禁用。红线:绿 = 刚真探通过;蓝 = credentials 有真探历史引用但当前非绿;灰 = 只被清单看到、没真探历史。「看到 ≠ 连通过」，观测绝不出蓝。第三方顶层一个连通徽章(按参数指纹取缓存结果);official 的 Available Routes 仍按 route 展示,third-party/custom 的 Available Models 必须按真实 model id 聚合成一个标签:任一 endpoint route 绿则 model 绿,没有绿但任一 route historical_ready/probe-verified 则 model 蓝;只有 invalid_model / model_not_found 这类模型级失败才把 model 标签标红;endpoint/protocol/API key/upstream 失败只进入 tooltip 诊断,不能把 model 本身判红。所有 route 都是 untested 时,聚合 model 必须保持 untested,不得因为某条 stale ui_state=failed 显示成 Route test failed。第三方模型 tooltip 要能看到聚合下的 endpoint id、route id、失败消息、失败作用域和 probe attempts。结果除 toast 外必须常驻写在 key/Base URL 旁的状态位(inline，§1.4)。状态权威来自后端 6 态总结转的 credentials DTO，前端只读渲染、不持第二份。",
    "fe_modules": [
     {
      "name": "状态投影",

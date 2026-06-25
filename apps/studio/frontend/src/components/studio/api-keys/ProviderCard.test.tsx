@@ -56,16 +56,19 @@ function makePersisted(
 function renderCardHtml({
   nextDraft = draft,
   persisted = null,
+  persistedEndpoints,
   showManualModelPanel = false,
 }: {
   nextDraft?: ProviderDraft
   persisted?: CredentialsState["providers"][number] | null
+  persistedEndpoints?: Record<string, CredentialsState["providers"][number] | null | undefined>
   showManualModelPanel?: boolean
 } = {}): string {
   return renderToStaticMarkup(
     <ProviderCard
       draft={nextDraft}
       persisted={persisted}
+      persistedEndpoints={persistedEndpoints}
       onFieldChange={vi.fn()}
       onGetModels={vi.fn()}
       onEndpointTest={vi.fn()}
@@ -434,6 +437,8 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
     const testButton = html.slice(html.lastIndexOf("<button", testIndex), html.indexOf("</button>", testIndex))
     expect(testIndex).toBeGreaterThan(-1)
     expect(testButton).toContain('data-variant="default"')
+    expect(testButton).toContain("min-w-[7.5rem]")
+    expect(testButton).toContain("justify-start")
     expect(testButton).not.toContain('data-variant="secondary"')
     expect(html).not.toContain("Get Models")
     expect(html).not.toContain("Endpoint test")
@@ -469,13 +474,84 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
     expect(html).not.toContain("Get Models")
     expect(html).not.toContain(">Endpoint test</label>")
     expect(html).not.toContain('title="Provider:')
-    expect(html).toContain(">Test</button>")
+    const testIndex = html.indexOf(">Test</button>")
+    const testButton = html.slice(html.lastIndexOf("<button", testIndex), html.indexOf("</button>", testIndex))
+    expect(testIndex).toBeGreaterThan(-1)
+    expect(testButton).toContain('data-variant="default"')
+    expect(testButton).toContain("min-w-[7.5rem]")
+    expect(testButton).toContain("justify-start")
+    expect(testButton).not.toContain('data-variant="secondary"')
     expect(html).toContain("https://api.qnaigc.com/v1")
     expect(html).toContain("Protocol: OpenAI-compatible")
     expect(html).toContain("OpenAI / api.qnaigc")
     expect(html).not.toContain("OpenAI / api.qnaigc.com")
     expect(html).not.toContain("OpenAI / api.qnaigc Connected")
     expect(html).not.toContain("OpenAI / api.qnaigc Failed")
+  })
+
+  it("shows base URL reachability on each URL row instead of the shared label", () => {
+    const nextDraft = makeDraft({
+      base_url: "https://good.example/v1",
+      base_urls: [
+        {
+          id: "url-good",
+          value: "https://good.example/v1",
+          provider_type: "openai_compatible",
+          endpoint_ids: {
+            openai_compatible: "good-openai",
+            anthropic_compatible: "good-anthropic",
+            google_genai: "good-google",
+          },
+        },
+        {
+          id: "url-bad",
+          value: "https://bad.example/v1",
+          provider_type: "openai_compatible",
+          endpoint_ids: {
+            openai_compatible: "bad-openai",
+            anthropic_compatible: "bad-anthropic",
+            google_genai: "bad-google",
+          },
+        },
+      ],
+    })
+
+    const html = renderCardHtml({
+      nextDraft,
+      persistedEndpoints: {
+        "good-openai": makePersisted({
+          id: "good-openai",
+          base_url: "https://good.example/v1",
+          last_test_status: "ok",
+          provider_type: "openai_compatible",
+          available_models: [{ id: "good-model", status: "verified", ui_state: "ready" }],
+        }),
+        "good-anthropic": makePersisted({
+          id: "good-anthropic",
+          base_url: "https://good.example/v1",
+          last_test_status: "error",
+          provider_type: "anthropic_compatible",
+        }),
+        "bad-openai": makePersisted({
+          id: "bad-openai",
+          base_url: "https://bad.example/v1",
+          last_test_status: "error",
+          provider_type: "openai_compatible",
+        }),
+        "bad-anthropic": makePersisted({
+          id: "bad-anthropic",
+          base_url: "https://bad.example/v1",
+          last_test_status: "timeout",
+          provider_type: "anthropic_compatible",
+        }),
+      },
+    })
+
+    expect(html).toContain('data-base-url-status="connected"')
+    expect(html).toContain('aria-label="https://good.example/v1 connected"')
+    expect(html).toContain('data-base-url-status="failed"')
+    expect(html).toContain('aria-label="https://bad.example/v1 failed"')
+    expect(html).not.toContain("Base URL accepted by the model-list endpoint")
   })
 
   it("shows protocol-normalized runtime URL separately from the input URL", () => {
@@ -1174,7 +1250,7 @@ describe("ProviderCard provider capabilities", () => {
     expect(html).toContain("cursor-pointer")
   })
 
-  it("surfaces third-party model probe status and error details", () => {
+  it("keeps endpoint-scoped third-party failures from marking the model failed", () => {
     const html = renderCardHtml({
       persisted: makePersisted({
         available_models: [{
@@ -1183,15 +1259,75 @@ describe("ProviderCard provider capabilities", () => {
           route_id: "api-qnaigc-com-v1-openai-cd4c26a12b:deepseek.deepseek-v3.1-terminus-thinking",
           status: "failed",
           ui_state: "failed",
-          last_probe_message: "Provider returned HTTP 502.",
+          last_probe_message: "Provider returned HTTP 502 (upstream_error). service temporarily unavailable.",
+          capabilities: {
+            reason_code: "error",
+            probe_attempts: [{ status: "error", message: "Provider returned HTTP 502." }],
+          },
+        }],
+      }),
+    })
+
+    expect(html).toContain('data-route-status="unverified_manual"')
+    expect(html).toContain('data-route-ui-state="untested"')
+    expect(html).toContain('aria-label="Copy model deepseek/deepseek-v3.1-terminus-thinking. Model not verified; endpoint failed"')
+    expect(html).not.toContain("border-tag-destructive-border")
+  })
+
+  it("marks a third-party model failed only when the probe reports an invalid model", () => {
+    const html = renderCardHtml({
+      persisted: makePersisted({
+        available_models: [{
+          id: "gemini-2.0-flash-thinking-exp",
+          endpoint_id: "api-qnaigc-com-v1-google-1d9e40f3e4",
+          route_id: "api-qnaigc-com-v1-google-1d9e40f3e4:gemini-2.0-flash-thinking-exp",
+          status: "failed",
+          ui_state: "failed",
+          last_probe_message: "Endpoint model probe failed (invalid_model). Provider returned HTTP 404.",
+          capabilities: {
+            reason_code: "invalid_model",
+            probe_attempts: [{ status: "invalid_model", message: "Provider returned HTTP 404." }],
+          },
         }],
       }),
     })
 
     expect(html).toContain('data-route-status="failed"')
     expect(html).toContain('data-route-ui-state="failed"')
-    expect(html).toContain('aria-label="Copy model deepseek/deepseek-v3.1-terminus-thinking. Route test failed"')
+    expect(html).toContain('aria-label="Copy model gemini-2.0-flash-thinking-exp. Route test failed"')
     expect(html).toContain("border-tag-destructive-border")
+  })
+
+  it("does not mark the endpoint or base URL failed when the only failure is invalid_model", () => {
+    const html = renderCardHtml({
+      nextDraft: makeDraft({
+        base_url: "https://api.qnaigc.com/v1",
+      }),
+      persisted: makePersisted({
+        base_url: "https://api.qnaigc.com/v1",
+        provider_type: "openai_compatible",
+        last_test_status: "error",
+        last_error_code: "invalid_model",
+        last_test_message: "Endpoint model probe failed (invalid_model). Provider returned HTTP 404.",
+        available_models: [{
+          id: "gemini-2.0-flash-thinking-exp",
+          endpoint_id: "api-qnaigc-com-v1-google-1d9e40f3e4",
+          route_id: "api-qnaigc-com-v1-google-1d9e40f3e4:gemini-2.0-flash-thinking-exp",
+          status: "failed",
+          ui_state: "failed",
+          last_probe_message: "Endpoint model probe failed (invalid_model). Provider returned HTTP 404.",
+          capabilities: {
+            reason_code: "invalid_model",
+            probe_attempts: [{ status: "invalid_model", message: "Provider returned HTTP 404." }],
+          },
+        }],
+      }),
+    })
+
+    expect(html).toContain('data-endpoint-status="untested"')
+    expect(html).not.toContain('data-endpoint-status="error"')
+    expect(html).not.toContain('data-base-url-status="failed"')
+    expect(html).toContain('data-route-status="failed"')
   })
 
   it("collapses duplicate third-party routes into one model tag and prefers a verified endpoint", () => {
@@ -1264,6 +1400,37 @@ describe("ProviderCard provider capabilities", () => {
     expect(html).toContain('data-route-ui-state="historical_ready"')
     expect(html).toContain('aria-label="Copy model anthropic/claude-fable-5. Previously Connected"')
     expect(html).toContain("border-multimodal-border")
+  })
+
+  it("does not show an aggregate failed status when every route summary is still untested", () => {
+    const aggregated = aggregateThirdPartyModelInfos([
+      {
+        id: "qwen3-30b-a3b-thinking-2507",
+        endpoint_id: "qiniu-anthropic",
+        route_id: "qiniu-anthropic:qwen3-30b-a3b-thinking-2507",
+        status: "unverified_manual",
+        ui_state: "failed",
+      },
+      {
+        id: "qwen3-30b-a3b-thinking-2507",
+        endpoint_id: "qiniu-openai",
+        route_id: "qiniu-openai:qwen3-30b-a3b-thinking-2507",
+        status: "unverified_manual",
+        ui_state: "untested",
+      },
+    ])
+
+    expect(aggregated).toHaveLength(1)
+    expect(aggregated[0].status).toBe("unverified_manual")
+    expect(aggregated[0].ui_state).toBe("untested")
+
+    const html = renderCardHtml({
+      persisted: makePersisted({ available_models: aggregated }),
+    })
+    expect(html).toContain('data-route-status="unverified_manual"')
+    expect(html).toContain('data-route-ui-state="untested"')
+    expect(html).toContain('aria-label="Copy model qwen3-30b-a3b-thinking-2507. Untested route"')
+    expect(html).not.toContain("Route test failed")
   })
 
   it("copies the available model real id", async () => {
@@ -1384,7 +1551,8 @@ describe("ProviderCard provider capabilities", () => {
     )
 
     expect(html).toContain("API key accepted by the model-list endpoint")
-    expect(html).toContain("Base URL accepted by the model-list endpoint")
+    expect(html).toContain('data-base-url-status="connected"')
+    expect(html).toContain('aria-label="https://llm.wavespeed.ai/v1 connected"')
     expect(html).toContain("Available Models:")
     expect(html).toContain("No models returned")
     expect(html).toContain('data-variant="warning"')

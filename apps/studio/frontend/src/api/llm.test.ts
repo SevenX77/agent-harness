@@ -722,6 +722,126 @@ describe('API Keys v4 registry adapter', () => {
     expect(result.available_models?.map((model) => model.id)).toEqual(['openai/gpt-5'])
   })
 
+  it('keeps an endpoint usable when route evidence has a verified model even if endpoint status is stale failed', async () => {
+    const verifiedRoute: ProviderRoute = {
+      ...route,
+      status: 'verified',
+      ui_state: 'ready',
+    }
+    const invalidModelRoute: ProviderRoute = {
+      ...route,
+      route_id: 'openrouter-custom:missing-model',
+      route_slug: 'missing-model',
+      provider_model_id: 'missing-model',
+      canonical_id: 'missing-model',
+      status: 'failed',
+      ui_state: 'failed',
+      metadata: {
+        reason_code: 'invalid_model',
+        last_probe_message: 'Endpoint model probe failed (invalid_model). Provider returned HTTP 404.',
+      },
+    }
+    let currentRegistry = registry()
+    api.defaults.adapter = adapter((config) => {
+      if (config.method === 'get') return currentRegistry
+      if (config.method === 'put') return currentRegistry
+      if (config.method === 'post' && config.url === '/llm/endpoints/openrouter-custom/test') {
+        currentRegistry = registry({
+          provider_endpoints: {
+            'openrouter-custom': {
+              ...endpoint,
+              status: 'failed',
+              last_test_at: '2026-06-20T12:15:00Z',
+              last_test_message: 'Endpoint model probe failed (invalid_model). Provider returned HTTP 404.',
+            },
+          },
+          provider_routes: {
+            [verifiedRoute.route_id]: verifiedRoute,
+            [invalidModelRoute.route_id]: invalidModelRoute,
+          },
+        })
+        return {
+          registry: currentRegistry,
+          tested_endpoint_id: 'openrouter-custom',
+          discovered_model_count: 2,
+        }
+      }
+      throw new Error(`Unexpected request: ${config.method} ${config.url}`)
+    })
+
+    const result = await getProviderModels({
+      id: 'openrouter-custom',
+      provider_type: 'openai_compatible',
+      api_key: 'sk-live',
+      base_url: 'https://openrouter.ai/api/v1',
+    })
+
+    expect(result.status).toBe('ok')
+    expect(result.error_code).toBeNull()
+    expect(result.model_seen).toBe('openai/gpt-5')
+    expect(result.available_models?.map((model) => [model.id, model.status])).toEqual([
+      ['openai/gpt-5', 'verified'],
+      ['missing-model', 'failed'],
+    ])
+
+    const credentials = await getCredentials()
+    expect(credentials.providers[0].last_test_status).toBe('ok')
+    expect(credentials.providers[0].last_error_code).toBe('')
+  })
+
+  it('does not mark an endpoint failed when every failure is model-scoped invalid_model', async () => {
+    const invalidModelRoute: ProviderRoute = {
+      ...route,
+      status: 'failed',
+      ui_state: 'failed',
+      metadata: {
+        reason_code: 'invalid_model',
+        last_probe_message: 'Endpoint model probe failed (invalid_model). Provider returned HTTP 404.',
+      },
+    }
+    let currentRegistry = registry()
+    api.defaults.adapter = adapter((config) => {
+      if (config.method === 'get') return currentRegistry
+      if (config.method === 'put') return currentRegistry
+      if (config.method === 'post' && config.url === '/llm/endpoints/openrouter-custom/test') {
+        currentRegistry = registry({
+          provider_endpoints: {
+            'openrouter-custom': {
+              ...endpoint,
+              status: 'failed',
+              last_test_at: '2026-06-20T12:16:00Z',
+              last_test_message: 'Endpoint model probe failed (invalid_model). Provider returned HTTP 404.',
+            },
+          },
+          provider_routes: { [invalidModelRoute.route_id]: invalidModelRoute },
+        })
+        return {
+          registry: currentRegistry,
+          tested_endpoint_id: 'openrouter-custom',
+          discovered_model_count: 1,
+        }
+      }
+      throw new Error(`Unexpected request: ${config.method} ${config.url}`)
+    })
+
+    const result = await getProviderModels({
+      id: 'openrouter-custom',
+      provider_type: 'openai_compatible',
+      api_key: 'sk-live',
+      base_url: 'https://openrouter.ai/api/v1',
+    })
+
+    expect(result.status).toBe('error')
+    expect(result.error_code).toBe('invalid_model')
+    expect(result.available_models?.map((model) => [model.id, model.status])).toEqual([
+      ['openai/gpt-5', 'failed'],
+    ])
+
+    const credentials = await getCredentials()
+    expect(credentials.providers[0].last_test_status).toBe('untested')
+    expect(credentials.providers[0].last_error_code).toBe('invalid_model')
+  })
+
   it('reports a third-party endpoint as failed when the probe does not reach verified (apikeys#25)', async () => {
     // The old heuristic (status !== 'failed' => ok) is gone; a reachable endpoint
     // whose batch inference probe never succeeds stays out of the connected state.

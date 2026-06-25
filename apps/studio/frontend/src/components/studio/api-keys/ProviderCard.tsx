@@ -46,16 +46,21 @@ import { RoleNameDialog } from "../settings/llm-roles/RoleNameDialog"
 
 type TestMessageStatus = "not_configured" | "testing" | NonNullable<CredentialsState["providers"][number]["last_test_status"]>
 type RouteDisplayStatus = RouteStatus | "unknown" | "testing"
+type RouteFailureScope = "model" | "endpoint" | "unknown"
 type AggregatedRouteSummary = {
   endpoint_id?: string
   route_id?: string
   status: RouteDisplayStatus
   ui_state?: ProviderUiState
   message?: string | null
+  reason_code?: string | null
+  failure_scope?: RouteFailureScope
 }
+type BaseUrlReachabilityState = "connected" | "failed" | "testing" | "unknown"
 const availableModelsPreviewLimit = 12
 const fieldRowClassName = "grid grid-cols-[minmax(0,1fr)_11.5rem] items-center gap-2"
 const fieldActionClassName = "flex min-w-0 items-center justify-start gap-2"
+const providerTestButtonClassName = "min-w-[7.5rem] shrink-0 justify-start px-4"
 const scrollableInputClassName = "overflow-x-auto whitespace-nowrap text-clip"
 const officialProviderNamesByKey: Record<string, string> = {
   anthropic: "Anthropic Official",
@@ -291,6 +296,44 @@ function FieldReachabilityCheck({ label }: { label: string }) {
   )
 }
 
+function BaseUrlReachabilityIcon({ state, url }: { state: BaseUrlReachabilityState; url: string }) {
+  if (state === "unknown") return null
+  if (state === "testing") {
+    return (
+      <span
+        className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground"
+        title={`${url || "Base URL"} is being tested`}
+        aria-label={`${url || "Base URL"} is being tested`}
+        data-base-url-status="testing"
+      >
+        <Loader2 className="size-3.5 animate-spin" />
+      </span>
+    )
+  }
+  if (state === "connected") {
+    return (
+      <span
+        className="inline-flex size-4 shrink-0 items-center justify-center text-success"
+        title={`${url} connected`}
+        aria-label={`${url} connected`}
+        data-base-url-status="connected"
+      >
+        <CheckCircle2 className="size-3.5" />
+      </span>
+    )
+  }
+  return (
+    <span
+      className="inline-flex size-4 shrink-0 items-center justify-center text-destructive"
+      title={`${url} failed`}
+      aria-label={`${url} failed`}
+      data-base-url-status="failed"
+    >
+      <XCircle className="size-3.5" />
+    </span>
+  )
+}
+
 type EndpointSummary = {
   id: string
   label: string
@@ -481,6 +524,71 @@ function endpointStatusSurfaceClass(status: TestMessageStatus): string {
   return "border-tag-destructive-border bg-tag-destructive-border/10 text-foreground"
 }
 
+function endpointStateDisplayStatus({
+  hasApiKey,
+  hasBaseUrl,
+  isTesting,
+  result,
+  models,
+}: {
+  hasApiKey: boolean
+  hasBaseUrl: boolean
+  isTesting: boolean
+  result: ProviderTestResult | null | undefined
+  models: ModelInfo[]
+}): TestMessageStatus {
+  if (!hasApiKey || !hasBaseUrl) return "not_configured"
+  if (isTesting) return "testing"
+  if (endpointHasUsableRoute(models)) return "ok"
+  const status = result?.last_test_status
+  if (!status || status === "untested") return "untested"
+  if (endpointFailureIsOnlyModelScoped(result, models)) return "untested"
+  return status
+}
+
+function endpointHasUsableRoute(models: ModelInfo[]): boolean {
+  return models.some((model) => (
+    model.status === "verified" ||
+    model.status === "probe-verified" ||
+    model.ui_state === "ready" ||
+    model.ui_state === "historical_ready" ||
+    modelVerifiedProfiles(model).some((profile) => profile.status === "ready")
+  ))
+}
+
+function endpointFailureIsOnlyModelScoped(
+  result: ProviderTestResult | null | undefined,
+  models: ModelInfo[],
+): boolean {
+  const summaries = models.flatMap(routeSummariesForModel)
+  const failureSummaries = summaries.filter((summary) => (
+    summary.status === "failed" || summary.ui_state === "failed" || summary.failure_scope
+  ))
+  if (failureSummaries.some((summary) => summary.failure_scope === "endpoint")) return false
+  if (failureSummaries.length > 0 && failureSummaries.every((summary) => summary.failure_scope === "model")) return true
+  const errorCode = result?.last_error_code?.trim().toLowerCase()
+  const message = result?.last_test_message?.toLowerCase() ?? ""
+  return (
+    errorCode === "invalid_model" ||
+    errorCode === "model_not_found" ||
+    message.includes("invalid_model") ||
+    message.includes("model_not_found") ||
+    message.includes("no available channels for model")
+  )
+}
+
+function resultLooksReachable(result: ProviderTestResult | null | undefined): boolean {
+  if (!result) return false
+  if (result.last_error_code) return false
+  if (result.last_test_status !== "untested" && result.last_test_status !== "ok") return false
+  return Boolean(
+    result.last_test_at ||
+    result.last_test_message ||
+    (result.available_models?.length ?? 0) > 0 ||
+    (result.available_sdks?.length ?? 0) > 0
+  )
+}
+
 function providerDisplayName(
   draft: ProviderDraft,
   isOfficial: boolean,
@@ -611,22 +719,92 @@ function routeStatusLabel(status: RouteDisplayStatus): string {
   return "Route status unknown"
 }
 
-function modelAggregateRank(model: ModelInfo): number {
-  const status = modelRouteStatus(model)
-  if (model.ui_state === "ready" || status === "verified") return 0
-  if (model.ui_state === "historical_ready" || status === "probe-verified") return 1
-  if (model.ui_state === "cooling_down" || status === "testing") return 2
-  if (model.ui_state === "failed" || status === "failed") return 3
-  if (model.ui_state === "untested" || status === "unverified_manual" || status === "unknown") return 4
-  if (model.ui_state === "off" || status === "disabled") return 5
+function routeFailureScopeFromSignals({
+  status,
+  uiState,
+  reasonCode,
+  attemptStatuses,
+  message,
+}: {
+  status: RouteDisplayStatus
+  uiState?: ProviderUiState
+  reasonCode?: string | null
+  attemptStatuses?: string[]
+  message?: string | null
+}): RouteFailureScope | undefined {
+  if (status !== "failed" && uiState !== "failed") return undefined
+  const reason = reasonCode?.trim().toLowerCase()
+  const attempts = attemptStatuses?.map((item) => item.trim().toLowerCase()).filter(Boolean) ?? []
+  if (reason === "invalid_model" || attempts.includes("invalid_model")) return "model"
+  if (reason === "model_not_found" || attempts.includes("model_not_found")) return "model"
+  if (reason === "ok" || attempts.includes("ok")) return undefined
+  if (reason === "error") return "endpoint"
+  const text = message?.toLowerCase() ?? ""
+  if (
+    text.includes("invalid api key") ||
+    text.includes("authentication_error") ||
+    text.includes("direct access to") ||
+    text.includes("use /v1/messages") ||
+    text.includes("chat/completions is not allowed") ||
+    text.includes("upstream_error") ||
+    text.includes("processing_error") ||
+    text.includes("service temporarily unavailable") ||
+    text.includes("timeout") ||
+    text.includes("network")
+  ) {
+    return "endpoint"
+  }
+  if (text.includes("invalid_model") || text.includes("no available channels for model")) return "model"
+  return "unknown"
+}
+
+function summaryAggregateStatus(summary: AggregatedRouteSummary): ModelProbeStatus | "unknown" {
+  if (summary.ui_state === "ready" || summary.status === "verified") return "verified"
+  if (summary.ui_state === "historical_ready" || summary.status === "probe-verified") return "probe-verified"
+  if (summary.ui_state === "cooling_down" || summary.status === "testing") return "testing"
+  if (summary.status === "failed") {
+    return summary.failure_scope === "endpoint" ? "unverified_manual" : "failed"
+  }
+  if (summary.ui_state === "failed") return "unverified_manual"
+  if (summary.ui_state === "off" || summary.status === "disabled") return "disabled"
+  if (summary.ui_state === "untested" || summary.status === "unverified_manual") return "unverified_manual"
+  return summary.status
+}
+
+function summaryAggregateUiState(summary: AggregatedRouteSummary): ProviderUiState | undefined {
+  if (summary.ui_state === "ready" || summary.status === "verified") return "ready"
+  if (summary.ui_state === "historical_ready" || summary.status === "probe-verified") return "historical_ready"
+  if (summary.ui_state === "cooling_down" || summary.status === "testing") return "cooling_down"
+  if (summary.status === "failed") {
+    return summary.failure_scope === "endpoint" ? "untested" : "failed"
+  }
+  if (summary.ui_state === "failed") return "untested"
+  if (summary.ui_state === "off" || summary.status === "disabled") return "off"
+  if (summary.ui_state === "untested" || summary.status === "unverified_manual") return "untested"
+  return summary.ui_state
+}
+
+function summaryAggregateRank(summary: AggregatedRouteSummary): number {
+  const status = summaryAggregateStatus(summary)
+  const uiState = summaryAggregateUiState(summary)
+  if (uiState === "ready" || status === "verified") return 0
+  if (uiState === "historical_ready" || status === "probe-verified") return 1
+  if (uiState === "cooling_down" || status === "testing") return 2
+  if (uiState === "failed" || status === "failed") return 3
+  if (uiState === "untested" || status === "unverified_manual" || status === "unknown") return 4
+  if (uiState === "off" || status === "disabled") return 5
   return 4
 }
 
-function aggregateModelUiState(models: ModelInfo[]): ProviderUiState | undefined {
+function modelAggregateRank(model: ModelInfo): number {
+  return summaryAggregateRank(aggregateRouteSummary(model))
+}
+
+function aggregateSummaryUiState(summaries: AggregatedRouteSummary[]): ProviderUiState | undefined {
   let best: ProviderUiState | undefined
   let bestRank = modelAggregateUiStatePriority.length
-  for (const model of models) {
-    const state = model.ui_state
+  for (const summary of summaries) {
+    const state = summaryAggregateUiState(summary)
     if (!state) continue
     const rank = modelAggregateUiStatePriority.indexOf(state)
     if (rank !== -1 && rank < bestRank) {
@@ -637,35 +815,68 @@ function aggregateModelUiState(models: ModelInfo[]): ProviderUiState | undefined
   return best
 }
 
-function aggregateModelStatus(models: ModelInfo[]): ModelProbeStatus | undefined {
-  if (models.some((model) => model.ui_state === "ready" || model.status === "verified")) return "verified"
-  if (models.some((model) => model.ui_state === "historical_ready" || model.status === "probe-verified")) return "probe-verified"
-  if (models.some((model) => model.ui_state === "cooling_down" || model.status === "testing")) return "testing"
-  if (models.some((model) => model.ui_state === "failed" || model.status === "failed")) return "failed"
-  if (models.every((model) => model.ui_state === "off" || model.status === "disabled")) return "disabled"
-  if (models.some((model) => model.ui_state === "untested" || model.status === "unverified_manual")) return "unverified_manual"
+function aggregateSummaryStatus(summaries: AggregatedRouteSummary[]): ModelProbeStatus | undefined {
+  if (summaries.some((summary) => summaryAggregateStatus(summary) === "verified")) return "verified"
+  if (summaries.some((summary) => summaryAggregateStatus(summary) === "probe-verified")) return "probe-verified"
+  if (summaries.some((summary) => summaryAggregateStatus(summary) === "testing")) return "testing"
+  if (summaries.some((summary) => summaryAggregateStatus(summary) === "failed")) return "failed"
+  if (summaries.length > 0 && summaries.every((summary) => summaryAggregateStatus(summary) === "disabled")) return "disabled"
+  if (summaries.some((summary) => summaryAggregateStatus(summary) === "unverified_manual")) return "unverified_manual"
   return undefined
 }
 
 function aggregateRouteSummary(model: ModelInfo): AggregatedRouteSummary {
+  const status = modelRouteStatus(model)
+  const reasonCode = modelProbeReasonCode(model)
+  const attemptStatuses = modelProbeAttemptStatuses(model)
+  const message = modelProbeMessage(model)
   return {
     endpoint_id: model.endpoint_id,
     route_id: model.route_id,
-    status: modelRouteStatus(model),
+    status,
     ui_state: model.ui_state,
-    message: modelProbeMessage(model),
+    message,
+    reason_code: reasonCode,
+    failure_scope: routeFailureScopeFromSignals({
+      status,
+      uiState: model.ui_state,
+      reasonCode,
+      attemptStatuses,
+      message,
+    }),
+  }
+}
+
+function normalizeAggregateRouteSummary(summary: AggregatedRouteSummary): AggregatedRouteSummary {
+  const status = summary.status ?? "unknown"
+  return {
+    ...summary,
+    status,
+    failure_scope: summary.failure_scope ?? routeFailureScopeFromSignals({
+      status,
+      uiState: summary.ui_state,
+      reasonCode: summary.reason_code,
+      message: summary.message,
+    }),
   }
 }
 
 function aggregateRouteSummaries(model: ModelInfo): AggregatedRouteSummary[] {
   const value = model.capabilities?.__aggregate_routes
   if (!Array.isArray(value)) return []
-  return value.filter((item): item is AggregatedRouteSummary => (
-    Boolean(item) &&
-    typeof item === "object" &&
-    !Array.isArray(item) &&
-    "status" in item
-  ))
+  return value
+    .filter((item): item is AggregatedRouteSummary => (
+      Boolean(item) &&
+      typeof item === "object" &&
+      !Array.isArray(item) &&
+      "status" in item
+    ))
+    .map(normalizeAggregateRouteSummary)
+}
+
+function routeSummariesForModel(model: ModelInfo): AggregatedRouteSummary[] {
+  const summaries = aggregateRouteSummaries(model)
+  return summaries.length > 0 ? summaries : [aggregateRouteSummary(model)]
 }
 
 function aggregateRoutesTooltipText(model: ModelInfo): string | null {
@@ -673,13 +884,22 @@ function aggregateRoutesTooltipText(model: ModelInfo): string | null {
   if (summaries.length <= 1) return null
   const lines = summaries.slice(0, 6).map((summary) => {
     const target = summary.endpoint_id ?? summary.route_id ?? "route"
-    const state = summary.ui_state === "historical_ready"
-      ? "Previously Connected"
-      : routeStatusLabel(summary.status)
+    const state = aggregateRouteSummaryLabel(summary)
     return `${state}: ${target}${summary.message ? ` - ${summary.message}` : ""}`
   })
   const remaining = summaries.length - lines.length
   return `Routes:\n${lines.join("\n")}${remaining > 0 ? `\n+${remaining} more` : ""}`
+}
+
+function aggregateRouteSummaryLabel(summary: AggregatedRouteSummary): string {
+  if (summary.ui_state === "historical_ready") return "Previously Connected"
+  if (summary.status === "failed") {
+    if (summary.failure_scope === "endpoint") return "Endpoint failed"
+    if (summary.failure_scope === "model") return "Model failed"
+    return "Route test failed"
+  }
+  if (summary.ui_state === "failed") return "Endpoint failed"
+  return routeStatusLabel(summary.status)
 }
 
 function modelCapabilityValue(model: ModelInfo, key: string): unknown {
@@ -859,8 +1079,23 @@ function RouteTooltipContent({ text }: { text: string }) {
 
 export function routeTooltipLineStatus(line: string): "warning" | "failed" | null {
   if (line.includes("Warning:")) return "warning"
-  if (line.includes("Failed:") || line.includes("Route test failed")) return "failed"
+  if (line.includes("Endpoint failed")) return "warning"
+  if (line.includes("Failed:") || line.includes("Route test failed") || line.includes("Model failed")) return "failed"
   return null
+}
+
+function modelProbeReasonCode(model: ModelInfo): string | null {
+  const value = modelCapabilityValue(model, "reason_code")
+  return typeof value === "string" && value.trim() ? value.trim() : null
+}
+
+function modelProbeAttemptStatuses(model: ModelInfo): string[] {
+  const attempts = modelCapabilityValue(model, "probe_attempts")
+  if (!Array.isArray(attempts)) return []
+  return attempts
+    .filter((attempt): attempt is Record<string, unknown> => Boolean(attempt) && typeof attempt === "object" && !Array.isArray(attempt))
+    .map((attempt) => (typeof attempt.status === "string" ? attempt.status.trim() : ""))
+    .filter(Boolean)
 }
 
 function modelProbeMessage(model: ModelInfo): string | null {
@@ -894,7 +1129,7 @@ function modelProbeAttemptTooltipText(model: ModelInfo): string | null {
 function thirdPartyModelTooltipText(model: ModelInfo, status: RouteDisplayStatus): string {
   const lines = [
     model.id,
-    `Status: ${routeStatusLabel(status)}`,
+    `Status: ${thirdPartyModelStatusLabel(model, status)}`,
   ]
   if (model.endpoint_id) lines.push(`Endpoint: ${model.endpoint_id}`)
   if (model.route_id) lines.push(`Route: ${model.route_id}`)
@@ -905,6 +1140,17 @@ function thirdPartyModelTooltipText(model: ModelInfo, status: RouteDisplayStatus
   const attempts = modelProbeAttemptTooltipText(model)
   if (attempts) lines.push(attempts)
   return lines.join("\n")
+}
+
+function thirdPartyModelStatusLabel(model: ModelInfo, status: RouteDisplayStatus): string {
+  if (model.ui_state === "historical_ready" || status === "probe-verified") return "Previously Connected"
+  const summaries = routeSummariesForModel(model)
+  const hasEndpointFailure = summaries.some((summary) => summary.failure_scope === "endpoint")
+  const hasModelFailure = summaries.some((summary) => summary.failure_scope === "model")
+  if (status === "unverified_manual" && hasEndpointFailure && !hasModelFailure) {
+    return "Model not verified; endpoint failed"
+  }
+  return routeStatusLabel(status)
 }
 
 function modelVerifiedProfiles(model: ModelInfo): Array<{
@@ -1083,20 +1329,21 @@ export function aggregateThirdPartyModelInfos(models: ModelInfo[]): ModelInfo[] 
     grouped.set(model.id, [...(grouped.get(model.id) ?? []), model])
   }
   return [...grouped.values()].map((group) => {
-    if (group.length === 1) return group[0]
     const sorted = [...group].sort((left, right) => (
       modelAggregateRank(left) - modelAggregateRank(right) ||
       (left.endpoint_id ?? "").localeCompare(right.endpoint_id ?? "") ||
       (left.route_id ?? "").localeCompare(right.route_id ?? "")
     ))
     const representative = sorted[0]
-    const summaries = sorted.map(aggregateRouteSummary)
+    const summaries = sorted.flatMap(routeSummariesForModel)
     const verifiedProfileCount = Math.max(...group.map((model) => model.verified_profile_count ?? 0))
+    const aggregateStatus = aggregateSummaryStatus(summaries)
+    const aggregateUiState = aggregateSummaryUiState(summaries)
     return {
       ...representative,
       id: representative.id,
-      status: aggregateModelStatus(group),
-      ui_state: aggregateModelUiState(group) ?? representative.ui_state,
+      status: aggregateStatus,
+      ui_state: aggregateUiState,
       verified_profile_count: verifiedProfileCount || representative.verified_profile_count,
       capabilities: {
         ...(representative.capabilities ?? {}),
@@ -1163,6 +1410,11 @@ export function ProviderCard({
       sdks: matchedResult?.available_sdks ?? [],
     }
   })
+  const endpointStatesByBaseUrlRow = new Map<string, typeof endpointStates>()
+  for (const state of endpointStates) {
+    const rowId = state.draft.base_urls?.[0]?.id ?? state.row.id
+    endpointStatesByBaseUrlRow.set(rowId, [...(endpointStatesByBaseUrlRow.get(rowId) ?? []), state])
+  }
   const primaryEndpointState = endpointStates[0] ?? null
   const matchedResult = (
     isOfficial
@@ -1208,13 +1460,13 @@ export function ProviderCard({
     .filter((state) => state.row.value.trim() || isOfficial || state.persisted)
     .map((state) => {
       const stateProfiles = endpointProfileSummary(state.models)
-      const stateStatus: TestMessageStatus = !hasApiKey || (!isOfficial && !state.row.value.trim())
-        ? "not_configured"
-        : isGettingModels
-          ? "testing"
-          : state.matchedResult?.last_test_status && state.matchedResult.last_test_status !== "untested"
-            ? state.matchedResult.last_test_status
-            : "untested"
+      const stateStatus = endpointStateDisplayStatus({
+        hasApiKey,
+        hasBaseUrl: isOfficial || Boolean(state.row.value.trim()),
+        isTesting: isGettingModels,
+        result: state.matchedResult,
+        models: state.models,
+      })
       return {
         id: state.persisted?.id ?? state.row.id,
         label: displayName,
@@ -1231,6 +1483,29 @@ export function ProviderCard({
       }
     })
   const showAvailableEndpoint = endpointSummaries.length > 0
+
+  const baseUrlReachabilityState = (rowId: string): BaseUrlReachabilityState => {
+    const states = endpointStatesByBaseUrlRow.get(rowId) ?? []
+    if (states.length === 0) return "unknown"
+    if (isGettingModels && states.some((state) => state.row.value.trim())) return "testing"
+    const reachability = states.map((state): BaseUrlReachabilityState => {
+      const result = state.matchedResult
+      const status = endpointStateDisplayStatus({
+        hasApiKey,
+        hasBaseUrl: isOfficial || Boolean(state.row.value.trim()),
+        isTesting: false,
+        result,
+        models: state.models,
+      })
+      if (status === "ok") return "connected"
+      if (status === "untested" && resultLooksReachable(result)) return "connected"
+      if (status && status !== "untested" && status !== "not_configured") return "failed"
+      return "unknown"
+    })
+    if (reachability.includes("connected")) return "connected"
+    if (reachability.includes("failed")) return "failed"
+    return "unknown"
+  }
 
   const updateBaseUrlRows = (nextRows: NonNullable<ProviderDraft["base_urls"]>) => {
     const rows = nextRows.length > 0 ? nextRows : [{ id: draft.id, value: "", provider_type: draft.provider_type }]
@@ -1282,7 +1557,9 @@ export function ProviderCard({
     // to the session RouteStatus only when ui_state is absent.
     const uiState = model.ui_state
     const tagVariant = uiState ? routeTagVariantFromUiState(uiState) : routeStatusTagVariant(status)
-    const statusLabel = uiState === "historical_ready" ? "Previously Connected" : routeStatusLabel(status)
+    const statusLabel = isOfficial
+      ? uiState === "historical_ready" ? "Previously Connected" : routeStatusLabel(status)
+      : thirdPartyModelStatusLabel(model, status)
     const modelType = isOfficial ? officialModelType(model) : null
     const modelTypeLabel = isOfficial ? officialModelTypeLabel(model) : null
     const isCapabilityModel = isOfficial && isCapabilityLibraryModel(model)
@@ -1462,10 +1739,10 @@ export function ProviderCard({
             <div className={fieldActionClassName}>
               <Button
                 type="button"
-                variant={isOfficial ? "default" : "secondary"}
+                variant="default"
                 onClick={handleGetModels}
                 disabled={isGettingModels}
-                className="px-4 shrink-0"
+                className={providerTestButtonClassName}
               >
                 {isGettingModels ? (
                   <Loader2 data-icon="inline-start" className="size-3.5 animate-spin shrink-0" />
@@ -1486,49 +1763,52 @@ export function ProviderCard({
           <div className="space-y-2">
             <div className="flex items-center gap-1.5">
               <Label htmlFor={`base-url-${draft.id}`}>Base URL</Label>
-              {hasReachableModelList ? <FieldReachabilityCheck label="Base URL" /> : null}
             </div>
             <div className="space-y-2">
-              {baseUrlRows.map((row, index) => (
-                <div key={row.id} className={fieldRowClassName}>
-                  <div className="flex flex-1 min-w-0 items-center gap-1.5">
-                    <Input
-                      ref={index === 0 ? baseUrlInputRef : undefined}
-                      id={index === 0 ? `base-url-${draft.id}` : `base-url-${draft.id}-${index}`}
-                      value={row.value}
-                      onChange={(event) => {
-                        if (baseUrlError) setBaseUrlError("")
-                        updateBaseUrlRow(row.id, event.target.value)
-                      }}
-                      placeholder={index === 0 ? "https://api.openai.com/v1" : "https://api.backup.example.com/v1"}
-                      autoComplete="off"
-                      autoCorrect="off"
-                      autoCapitalize="none"
-                      spellCheck={false}
-                      aria-invalid={baseUrlError ? true : undefined}
-                      aria-describedby={baseUrlError ? `base-url-error-${draft.id}` : undefined}
-                      onWheel={scrollInputContentOnWheel}
-                      className={scrollableInputClassName}
-                    />
-                    <div className="flex shrink-0 items-center">
-                      <FieldCopyButton value={row.value} label="Base URL" className="size-7 [&_svg]:size-3.5" />
-                      {baseUrlRows.length > 1 ? (
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          className="size-7 text-muted-foreground/70 transition-none hover:text-destructive [&_svg]:size-3.5"
-                          onClick={() => deleteBaseUrlRow(row.id)}
-                          aria-label="Remove Base URL"
-                        >
-                          <Trash2 />
-                        </Button>
-                      ) : null}
+              {baseUrlRows.map((row, index) => {
+                const rowStatus = baseUrlReachabilityState(row.id)
+                return (
+                  <div key={row.id} className={fieldRowClassName}>
+                    <div className="flex flex-1 min-w-0 items-center gap-1.5">
+                      <Input
+                        ref={index === 0 ? baseUrlInputRef : undefined}
+                        id={index === 0 ? `base-url-${draft.id}` : `base-url-${draft.id}-${index}`}
+                        value={row.value}
+                        onChange={(event) => {
+                          if (baseUrlError) setBaseUrlError("")
+                          updateBaseUrlRow(row.id, event.target.value)
+                        }}
+                        placeholder={index === 0 ? "https://api.openai.com/v1" : "https://api.backup.example.com/v1"}
+                        autoComplete="off"
+                        autoCorrect="off"
+                        autoCapitalize="none"
+                        spellCheck={false}
+                        aria-invalid={baseUrlError ? true : undefined}
+                        aria-describedby={baseUrlError ? `base-url-error-${draft.id}` : undefined}
+                        onWheel={scrollInputContentOnWheel}
+                        className={scrollableInputClassName}
+                      />
+                      <BaseUrlReachabilityIcon state={rowStatus} url={row.value} />
+                      <div className="flex shrink-0 items-center">
+                        <FieldCopyButton value={row.value} label="Base URL" className="size-7 [&_svg]:size-3.5" />
+                        {baseUrlRows.length > 1 ? (
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="size-7 text-muted-foreground/70 transition-none hover:text-destructive [&_svg]:size-3.5"
+                            onClick={() => deleteBaseUrlRow(row.id)}
+                            aria-label="Remove Base URL"
+                          >
+                            <Trash2 />
+                          </Button>
+                        ) : null}
+                      </div>
                     </div>
+                    <div aria-hidden="true" />
                   </div>
-                  <div aria-hidden="true" />
-                </div>
-              ))}
+                )
+              })}
               <Button
                 type="button"
                 variant="outline"

@@ -482,12 +482,22 @@ export function modelSupportsThinking(model: ModelInfo): boolean {
 }
 
 function defaultProviderModelsForGroup(modelGroup: ModelGroup): ModelGroup["provider_models"] {
-  return [...modelGroup.provider_models].sort((left, right) => (
+  const sortedProviderModels = [...modelGroup.provider_models].sort((left, right) => (
     providerStateRank(left.ui_state) - providerStateRank(right.ui_state) ||
     providerKindRank(left.provider_kind) - providerKindRank(right.provider_kind) ||
     left.provider_label.localeCompare(right.provider_label, undefined, { numeric: true, sensitivity: "base" }) ||
     left.route_id.localeCompare(right.route_id)
   ))
+  const byProviderLabel = new Map<string, ModelGroup["provider_models"][number]>()
+  for (const providerModel of sortedProviderModels) {
+    const key = providerModelDisplayKey(providerModel)
+    if (!byProviderLabel.has(key)) byProviderLabel.set(key, providerModel)
+  }
+  return [...byProviderLabel.values()]
+}
+
+function providerModelDisplayKey(providerModel: ModelGroup["provider_models"][number]): string {
+  return providerModel.provider_label.trim().toLowerCase() || providerModel.route_id
 }
 
 function providerKindRank(kind: ModelGroup["provider_models"][number]["provider_kind"]): number {

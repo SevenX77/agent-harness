@@ -290,11 +290,14 @@ function baseUrlRowsFromCredentialProviders(providers: CredentialProviderState[]
     const [primary] = ordered
     const displayBaseUrl = preferredDisplayBaseUrl(ordered)
     const endpointIds: Partial<Record<ProviderType, string>> = {}
-    for (const provider of ordered) {
-      const providerType = (provider.provider_type ?? "openai_compatible") as ProviderType
-      endpointIds[providerType] = provider.id
+    for (const providerType of thirdPartyProtocolCandidates) {
+      const protocolProviders = ordered
+        .filter((provider) => credentialProviderProtocolSlot(provider) === providerType)
+        .sort((left, right) => compareEndpointCandidateForProtocol(left, right, providerType))
+      const bestProvider = protocolProviders[0]
+      if (bestProvider) endpointIds[providerType] = bestProvider.id
     }
-    const primaryType = (primary?.provider_type ?? "openai_compatible") as ProviderType
+    const primaryType = primary ? credentialProviderProtocolSlot(primary) : "openai_compatible"
     return {
       id: endpointIds.openai_compatible ?? primary?.id ?? "",
       value: displayBaseUrl,
@@ -302,6 +305,35 @@ function baseUrlRowsFromCredentialProviders(providers: CredentialProviderState[]
       endpoint_ids: endpointIds,
     }
   })
+}
+
+function compareEndpointCandidateForProtocol(
+  left: CredentialProviderState,
+  right: CredentialProviderState,
+  providerType: ProviderType,
+): number {
+  return endpointIdProtocolAffinity(left.id, providerType) - endpointIdProtocolAffinity(right.id, providerType) ||
+    providerLastTestStatusRank(left.last_test_status) - providerLastTestStatusRank(right.last_test_status) ||
+    rightLastTestAtRank(right.last_test_at) - rightLastTestAtRank(left.last_test_at) ||
+    left.id.localeCompare(right.id)
+}
+
+function endpointIdProtocolAffinity(endpointId: string, providerType: ProviderType): number {
+  const suffix = providerTypeEndpointSuffix(providerType)
+  const normalized = endpointId.toLowerCase()
+  return normalized.includes(`-${suffix}-`) || normalized.endsWith(`-${suffix}`) ? 0 : 1
+}
+
+function providerLastTestStatusRank(status: CredentialProviderState["last_test_status"]): number {
+  if (status === "ok") return 0
+  if (status && status !== "untested") return 1
+  return 2
+}
+
+function rightLastTestAtRank(value: string | undefined): number {
+  if (!value) return 0
+  const time = Date.parse(value)
+  return Number.isFinite(time) ? time : 0
 }
 
 function preferredDisplayBaseUrl(providers: CredentialProviderState[]): string {
@@ -315,7 +347,7 @@ function compareCredentialProviderProtocol(
   left: CredentialProviderState,
   right: CredentialProviderState,
 ): number {
-  return providerTypeRank(left.provider_type) - providerTypeRank(right.provider_type)
+  return providerTypeRank(credentialProviderProtocolSlot(left)) - providerTypeRank(credentialProviderProtocolSlot(right))
     || left.id.localeCompare(right.id)
 }
 
@@ -331,11 +363,24 @@ function providerTypeEndpointSuffix(providerType: ProviderType): string {
   return "ark"
 }
 
+function credentialProviderProtocolSlot(provider: CredentialProviderState): ProviderType {
+  return providerTypeFromEndpointId(provider.id) ?? ((provider.provider_type ?? "openai_compatible") as ProviderType)
+}
+
+function providerTypeFromEndpointId(endpointId: string): ProviderType | null {
+  const normalized = endpointId.toLowerCase()
+  if (normalized.includes("-openai-") || normalized.endsWith("-openai")) return "openai_compatible"
+  if (normalized.includes("-anthropic-") || normalized.endsWith("-anthropic")) return "anthropic_compatible"
+  if (normalized.includes("-google-") || normalized.endsWith("-google")) return "google_genai"
+  if (normalized.includes("-ark-") || normalized.endsWith("-ark")) return "ark_runtime"
+  return null
+}
+
 function providerDraftFromCredential(provider: CredentialProviderState): ProviderDraft {
   return {
     id: provider.id,
     name: provider.name,
-    provider_type: (provider.provider_type ?? "openai_compatible") as ProviderType,
+    provider_type: credentialProviderProtocolSlot(provider),
     base_url: provider.base_url ?? "",
     api_key: provider.api_key,
     isTesting: false,

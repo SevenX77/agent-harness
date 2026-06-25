@@ -12,7 +12,7 @@ export function App() {
   useEditablePasteShortcut()
 
   return (
-    <TooltipProvider delayDuration={0}>
+    <TooltipProvider>
       <RuntimeGate>
         <Workspace
           skillId={currentSkillId}

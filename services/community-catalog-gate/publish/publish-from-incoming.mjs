@@ -77,9 +77,16 @@ function main() {
     rmSync(file.path);
   }
 
+  // Report the DEDUPED total actually written (manifest record_counts), not the
+  // pre-dedupe merged length — re-pushing already-published evidence is a no-op,
+  // and the log must say so honestly rather than imply spurious growth.
+  const publishedCount = JSON.parse(manifestBytes.toString()).shards.reduce(
+    (total, shard) => total + shard.record_count,
+    0,
+  );
   process.stdout.write(
-    `Ingested ${accepted} new record(s); rejected ${rejected.length}; ` +
-      `published ${records.length} total across ${shardFiles.length} shard(s); ` +
+    `Screened-in ${accepted} incoming record(s); rejected ${rejected.length}; ` +
+      `published ${publishedCount} unique record(s) total across ${shardFiles.length} shard(s); ` +
       `consumed ${incomingFiles.length} incoming file(s).\n`,
   );
   if (rejected.length) {

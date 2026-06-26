@@ -206,6 +206,51 @@ async def test_resolve_child_graph_topology_returns_child_phases(
 
 
 @pytest.mark.anyio
+async def test_resolve_child_graph_topology_includes_path_resolved_detail(
+    tmp_path: Path,
+    metadata_store: LocalJsonMetadataStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core import config
+
+    skills_dir = tmp_path / "skills"
+    workspaces_dir = tmp_path / "workspaces"
+    skills_dir.mkdir()
+    monkeypatch.setattr(config, "SKILLS_DIR", skills_dir)
+    monkeypatch.setattr(config, "WORKSPACES_DIR", workspaces_dir)
+
+    parent_dir = skills_dir / "parent"
+    parent_dir.mkdir()
+    (parent_dir / "GRAPH.md").write_text("placeholder\n", encoding="utf-8")
+
+    child_dir = skills_dir / "child"
+    child_dir.mkdir()
+    _write_child_graph(child_dir, "child-graph")
+    phase_file = child_dir / "phases" / "ingest" / "LOGIC.md"
+    phase_file.write_text(
+        phase_file.read_text(encoding="utf-8").replace(
+            "io:\n",
+            "name: ingest\nallow_sequential_overwrite:\n  - loaded\nio:\n",
+        ),
+        encoding="utf-8",
+    )
+
+    storage = LocalFilesystemBackend(tmp_path)
+    result = await skill_service.get_child_graph_topology(
+        "default",
+        "parent",
+        str(child_dir),
+        storage,
+        metadata_store,
+    )
+
+    assert result.detail is not None
+    assert result.detail.file_paths["skill_dir"] == str(child_dir.resolve())
+    assert result.detail.files["phases/ingest/LOGIC.md"] == phase_file.read_text(encoding="utf-8")
+    assert result.detail.files["phases/ingest/LOGIC.md"].count("allow_sequential_overwrite") == 1
+
+
+@pytest.mark.anyio
 async def test_resolve_child_graph_topology_rejects_relative_path(
     tmp_path: Path,
     metadata_store: LocalJsonMetadataStore,

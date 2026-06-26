@@ -272,7 +272,7 @@ SUBGRAPH phase 的 `io` 与普通节点一致,是 blackboard 的切片/回写边
 - 父图 `SUBGRAPH.md io` 与子图 `GRAPH.md io` **不要求字段集合 1:1 相等**,也不要求 required 集合或同名 schema 结构完全一致。
 - 若子图运行需要的 required 字段在父图切片中不存在,由 StateMapper/运行期 state mapping 报错；不在语法层强制父子镜像。
 
-这条是 mvp1 对旧 `target_skill + 父子 io 1:1` 模型的反转:子图节点像普通节点,只通过 blackboard slice/merge 接入。
+这条是 mvp1 对旧 registry-id + 父子 io 1:1 模型的反转:子图节点像普通节点,只通过 blackboard slice/merge 接入。
 
 ## 2.5 AGENT `SKILL.md` 语法契约
 Agent `SKILL.md` 是进入 LLM ReAct 循环的 phase 节点。节点类型由物理文件名 `SKILL.md` 推导,Loader 注入内部 `mode="agent"`；作者不得在 frontmatter 写 `mode:`。frontmatter 只放框架装配配置,业务 prompt 内容放在 body XML。未知字段编译期 FATAL；错误码全集不在本文重复,见 [`03-compile-rules` §4 agent domain](../03-compile-rules/mvp1-alignment.md#agent-domain)。
@@ -333,7 +333,7 @@ validator: false
 ### 2.5.2 `subagents[]` / `subgraphs[]` 子项字段
 `subagents[]` 与 `subgraphs[]` 不是同一类生命周期:
 - `subagents[]` 是 Agent phase 内层可委派的子 Agent,保持 `target_skill` 逻辑 skill id；它与 agent phase 捆绑,不按子图 path 反转。
-- `subgraphs[]` 是 Agent 可引用的子图资产,按 §2.1 使用相对(skill 根内)或绝对 `path`,不再使用 mvp0 的 `target_skill`。
+- `subgraphs[]` 是 Agent 可引用的子图资产,按 §2.1 使用相对(skill 根内)或绝对 `path`,不再使用 mvp0 的 registry-id 寻址。
 
 `subagents[]` 子项:
 
@@ -641,7 +641,7 @@ loop 的累积变量由作者**显式声明**、引擎不猜:
 - `io.outputs`:声明本节点允许**回写**黑板的字段边界——output key 必须 ⊂ `io.outputs.properties`,越界报同码。
 
 ### 2.10.2 子图 io 放宽(E1,目标)
-SUBGRAPH 节点 io **不要求父子字段 1:1**(详见 §2.4.3):`io.inputs` 从父图黑板切片喂子图、`io.outputs` 合并回父图,像普通节点;退役旧 `target_skill + 父子 io 1:1` 模型(执行侧删 `loader.py:528` inputs 1:1 强校,归 graph-exec E1)。
+SUBGRAPH 节点 io **不要求父子字段 1:1**(详见 §2.4.3):`io.inputs` 从父图黑板切片喂子图、`io.outputs` 合并回父图,像普通节点;退役旧 registry-id + 父子 io 1:1 模型(执行侧删 `loader.py:528` inputs 1:1 强校,归 graph-exec E1)。
 
 ### 2.10.3 文件导入→黑板(E2,目标·新能力)
 节点 `io.inputs` 可声明**"从文件导入 → 注入黑板字段"**:跑到该节点才 **lazy 注入**(非图启动时一次性),引擎读路径写黑板再切片(执行落 `_wrap_phase_runtime_node` 前置步,归 graph-exec E2;发 `InputFileInjectedEvent` 归 `observability`)。

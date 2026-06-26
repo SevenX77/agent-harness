@@ -22,10 +22,17 @@ class LintRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     markdown: str | None = None
+    file_path: str | None = None
+    workspace_root: str | None = None
 
 
 @router.post("/lint", response_model=LintResult)
 async def lint_skill(skill_id: str, body: LintRequest | None = None) -> LintResult:
     if body is not None and body.markdown is not None:
-        return lint_skill_changed_markdown(skill_id, body.markdown)
+        return lint_skill_changed_markdown(
+            skill_id,
+            body.markdown,
+            file_path=body.file_path,
+            workspace_root=body.workspace_root,
+        )
     return lint_skill_service(skill_id)

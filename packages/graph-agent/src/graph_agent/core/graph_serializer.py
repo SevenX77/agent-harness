@@ -51,7 +51,6 @@ def serialize_graph_topology_from_markdown(
     """Serialize a canvas topology update using the current GRAPH.md frontmatter."""
 
     frontmatter = _graph_frontmatter_from_markdown(original_md)
-    _validate_graph_phase_refs(phases)
     description_raw = frontmatter.get("description")
     return serialize_graph_topology(
         name=str(frontmatter.get("name") or skill_id),
@@ -76,13 +75,11 @@ def serialize_graph_topology(
     ``list[str]`` and therefore cannot carry edges), this takes the full phase
     refs so the body ``<phase depends_on=...>`` elements reflect the REAL graph.
 
-    - ``depends_on``: comma-joined; a phase with no deps renders ``depends_on="input"``
-      (the reserved entry sentinel — the loader requires a non-empty ``depends_on``).
-    - ``output``: derived as the leaf phases (ids that appear in no other phase's
-      ``depends_on``), satisfying the FROZEN rules "at least one output" and
-      "an output phase has no downstream edges".
+    - ``depends_on``: comma-joined when present; a phase with no deps renders as a
+      bare ``<phase>id</phase>`` canvas node.
+    - ``output``: not synthesized by the canvas serializer. The runtime derives
+      terminal phases from leaves when no explicit output markers are present.
     """
-    downstream = {dep for phase in phases for dep in phase.depends_on}
     lines = [
         "---",
         'schema_version: "v0.3.0"',
@@ -97,9 +94,11 @@ def serialize_graph_topology(
         lines.append(f"  - {phase.id}")
     lines.append("---")
     for phase in phases:
-        depends_on = ", ".join(phase.depends_on) if phase.depends_on else "input"
-        output = " output" if phase.id not in downstream else ""
-        lines.append(f'<phase depends_on="{depends_on}"{output}>{phase.id}</phase>')
+        if phase.depends_on:
+            depends_on = ", ".join(phase.depends_on)
+            lines.append(f'<phase depends_on="{depends_on}">{phase.id}</phase>')
+        else:
+            lines.append(f"<phase>{phase.id}</phase>")
     rendered = "\n".join(lines) + "\n"
     if original_md is None:
         return rendered
@@ -193,10 +192,8 @@ def _render_fresh_graph(manifest: GraphManifest) -> str:
     for phase in manifest.phases:
         lines.append(f"  - {phase}")
     lines.append("---")
-    for index, phase in enumerate(manifest.phases):
-        depends_on = "input" if index == 0 else manifest.phases[index - 1]
-        output = " output" if index == len(manifest.phases) - 1 else ""
-        lines.append(f'<phase depends_on="{depends_on}"{output}>{phase}</phase>')
+    for phase in manifest.phases:
+        lines.append(f"<phase>{phase}</phase>")
     return "\n".join(lines) + "\n"
 
 

@@ -15,11 +15,14 @@ function contextEdge(source: string, target: string, traceEvents: TraceEventInpu
   // a run (empty events) every edge is inert, replacing the old `!isGlobal`
   // design-time heuristic.
   const hasTraceData = edgeContextFromEvents(traceEvents, source, target) !== null
+  const isBoundaryEdge = source === INPUT_ID || source === OUTPUT_ID || target === INPUT_ID || target === OUTPUT_ID
   return {
     id: `${source}->${target}`,
     source,
     target,
     type: 'contextEdge',
+    reconnectable: isBoundaryEdge ? false : undefined,
+    deletable: isBoundaryEdge ? false : undefined,
     data: {
       hasTraceData,
       sourcePhaseId: source,
@@ -49,10 +52,6 @@ export function buildEdges(
   const edges: Edge<ContextEdgeData>[] = []
   for (const node of phaseNodes) {
     for (const source of node.data.dependsOn) {
-      // `input` is the reserved graph-entry sentinel in GRAPH.md
-      // (`<phase depends_on="input">`); it maps to the global Input node, not a
-      // phase named "input". Without this an input-rooted phase's edge dangles
-      // from a non-existent source and the Input node looks detached.
       edges.push(contextEdge(source === 'input' ? INPUT_ID : source, node.id, traceEvents))
     }
     if (node.data.dependsOn.length === 0) {

@@ -59,6 +59,7 @@ class ChildGraphTopology(BaseModel):
     description: str = ""
     phases: list[str] = Field(default_factory=list)
     graph_topology: list[dict[str, object]] = Field(default_factory=list)
+    detail: SkillDetail | None = None
 
 
 class SerializeGraphReq(BaseModel):
@@ -97,6 +98,7 @@ class CompileError(BaseModel):
     field: str | None = None
     severity: Literal["fatal", "warning"] = "fatal"
     message: str
+    error_code: str | None = None
 
 
 class CompileSuccess(BaseModel):

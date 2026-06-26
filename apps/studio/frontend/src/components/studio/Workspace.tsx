@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Connection } from "@xyflow/react"
 import { toast } from "sonner"
 import useSWR from "swr"
@@ -18,14 +18,14 @@ import { DiffView } from "@/components/diff/DiffView"
 import type { CopilotJudgeResponse, ResumeRunOptions } from "@/api/client"
 import type { TraceHitlResumeRequest } from "@/components/TracePanel"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
-import { compileSkill, fetcher, getCompareGroup, getResumeValidity, getSkillDetail, resolveRunInput, serializeSkillGraph, startCompareRun, writeSkillFile, wsUrl, postPredictRun, startRun, resumeRun } from "@/api/client"
+import { compileSkill, fetcher, getCompareGroup, getResumeValidity, getSkillDetail, resolveRunInput, serializeSkillGraph, writeSkillFile, wsUrl, postPredictRun, startRun, resumeRun } from "@/api/client"
 import type { CompareCandidateRun, GoldenBaseline, LintResult, ResumeValidityResponse, SerializableGraphPhaseRef, SkillDetail } from "@/api/types"
-import { candidatesFromRoleNames, compareTabsFromGroup } from "./run-compare"
+import { compareTabsFromGroup } from "./run-compare"
 import { isTauriRuntime } from "@/config/runtime"
-import { writeWorkspaceFile } from "@/lib/tauri"
+import { deleteWorkspacePath, listWorkspaceDir, moveWorkspacePath, readWorkspaceFile, writeWorkspaceFile } from "@/lib/tauri"
 import { errorMessage } from "@/utils/errors"
 import type { CompileError } from "@/api/types"
-import { connectPhaseRefs, createPhaseDraft, disconnectPhaseRefs, reconnectPhaseRefs, type NewPhaseKind } from "@/components/GraphCanvas/canvas-authoring"
+import { connectPhaseRefs, createPhaseDraft, disconnectPhaseRefs, orphanPhaseDirectoryIds, phaseDirectoryPath, phaseFilePath, phaseRefsFromSkillDetail, reconnectPhaseRefs, removePhaseRefs, renamePhaseRefs, type NewPhaseKind } from "@/components/GraphCanvas/canvas-authoring"
 import { isReadOnlySkillError, type ChildSaveTarget } from "@/components/GraphCanvas/drill-edit"
 import { sha256Hex } from "@/lib/hash"
 import { CenterActionBar, type SkillBuildStage } from "./center-action-bar"
@@ -35,7 +35,6 @@ import { hitlResumeOptionsFromRequest } from "./resume-options"
 import { activeLintErrors, compileErrorsByNode, dataGapErrorsByNode, lintErrorToCompileError, lintErrorsByNode, mergeNodeErrors } from "./node-compile-errors"
 import { goldenTriStateByNode, ranAgentNodesFromPredict } from "./node-golden"
 import { compileErrorsToFieldLintErrors } from "./field-compile-errors"
-import { CompareRunDialog } from "./CompareRunDialog"
 import { CompileErrorDrawer } from "./CompileErrorDrawer"
 import { ConflictDialog } from "./ConflictDialog"
 import { Header } from "./Header"
@@ -43,7 +42,8 @@ import { Panels } from "./Panels"
 import { SettingsPage } from "./SettingsPage"
 import { SplitEditor } from "./SplitEditor"
 import { Toolbar, type PanelKind } from "./Toolbar"
-import type { FileMeta } from "./file-types"
+import { applyPhaseName } from "./panels/phase-frontmatter"
+import type { FileOpenInput } from "./file-types"
 import { conflictFromSaveError, isSameSaveConflict, overwriteRetryPayload } from "./save-conflicts"
 import {
   WorkspaceProvider,
@@ -61,15 +61,9 @@ interface WorkspaceProps {
   onCloseSkill: () => void
 }
 
-type CenterActionBarCreateProps = ComponentProps<typeof CenterActionBar> & {
-  onCreatePhase?: (kind: NewPhaseKind) => Promise<void> | void
-}
-
 const LEFT_SIDEBAR_DEFAULT_SIZE = "24rem"
 const LEFT_SIDEBAR_MIN_SIZE = "24rem"
 const LEFT_SIDEBAR_MAX_SIZE = "35rem"
-
-const CenterActionBarWithCreate = CenterActionBar as (props: CenterActionBarCreateProps) => ReturnType<typeof CenterActionBar>
 
 interface CopilotJudgeReplayContext {
   skillId: string | null
@@ -462,37 +456,64 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     setSelectedEdge(null)
   }
 
-  const toOpenFile = useCallback(async (fileOrPath: FileMeta | string): Promise<OpenFile | null> => {
+  const handleNodeDeselect = () => {
+    setSelectedNodeId(null)
+    setSelectedNode(null)
+    setSelectedEdge(null)
+  }
+
+  const toOpenFile = useCallback(async (fileOrPath: FileOpenInput): Promise<OpenFile | null> => {
     if (!currentSkillId) return null
     const currentFiles = skillDetail?.files ?? {}
-    const rawPath = typeof fileOrPath === "string" ? fileOrPath : fileOrPath.path
-    const prefix = `${currentSkillId}/`
-    const path = rawPath.startsWith(prefix) ? rawPath.slice(prefix.length) : rawPath
-    const content = typeof fileOrPath === "string" ? currentFiles[path] ?? "" : fileOrPath.content
-    const language = typeof fileOrPath === "string" ? languageForPath(path) : fileOrPath.language
-    const fileSkillId = typeof fileOrPath === "string" ? currentSkillId : fileOrPath.skillId ?? currentSkillId
-    const fileWorkspaceRoot = typeof fileOrPath === "string" ? currentWorkspaceRoot : fileOrPath.workspaceRoot ?? currentWorkspaceRoot
+    const isStringPath = typeof fileOrPath === "string"
+    const requestedSkillId = isStringPath ? currentSkillId : fileOrPath.skillId ?? currentSkillId
+    const rawPath = isStringPath ? fileOrPath : fileOrPath.path
+    const requestedPrefix = `${requestedSkillId}/`
+    const currentPrefix = `${currentSkillId}/`
+    const path = rawPath.startsWith(requestedPrefix)
+      ? rawPath.slice(requestedPrefix.length)
+      : rawPath.startsWith(currentPrefix)
+        ? rawPath.slice(currentPrefix.length)
+        : rawPath
+    const fileSkillId = requestedSkillId
+    const fileWorkspaceRoot = isStringPath ? currentWorkspaceRoot : fileOrPath.workspaceRoot ?? currentWorkspaceRoot
+    let content = isStringPath ? currentFiles[path] ?? "" : fileOrPath.content
+    let hash = isStringPath ? null : fileOrPath.hash ?? null
+    if (content === undefined) {
+      if (isTauriRuntime()) {
+        const nativeFile = await readWorkspaceFile(fileWorkspaceRoot ?? fileSkillId, path)
+        content = nativeFile.content
+        hash = nativeFile.hash
+      } else {
+        content = currentFiles[path] ?? ""
+      }
+    }
+    const language = isStringPath ? languageForPath(path) : fileOrPath.language ?? languageForPath(path)
     return {
       path,
       language,
       content,
-      hash: typeof fileOrPath === "string" ? await sha256Hex(content) : fileOrPath.hash ?? await sha256Hex(content),
+      hash: hash ?? await sha256Hex(content),
       skillId: fileSkillId,
       workspaceRoot: fileWorkspaceRoot,
-      title: typeof fileOrPath === "string" ? undefined : fileOrPath.title,
-      saveEnabled: typeof fileOrPath === "string" ? undefined : fileOrPath.saveEnabled,
+      title: isStringPath ? undefined : fileOrPath.title,
+      saveEnabled: isStringPath ? undefined : fileOrPath.saveEnabled,
     }
   }, [currentSkillId, currentWorkspaceRoot, skillDetail?.files])
 
-  const handleFileOpen = useCallback((fileOrPath: FileMeta | string, side?: EditorSide) => {
+  const handleFileOpen = useCallback((fileOrPath: FileOpenInput, side?: EditorSide) => {
     setSettingsOpen(false)
-    void toOpenFile(fileOrPath).then((file) => {
-      if (!file) return
-      setActiveFileDetails((current) => {
-        const targetSide = side ?? (splitMode && current.left ? "right" : "left")
-        return { ...current, [targetSide]: file }
+    void toOpenFile(fileOrPath)
+      .then((file) => {
+        if (!file) return
+        setActiveFileDetails((current) => {
+          const targetSide = side ?? (splitMode && current.left ? "right" : "left")
+          return { ...current, [targetSide]: file }
+        })
       })
-    })
+      .catch((error) => {
+        toast.error(errorMessage(error))
+      })
   }, [splitMode, toOpenFile])
 
   const closeFile = useCallback((side: EditorSide) => {
@@ -534,6 +555,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     content: string,
     expectedHash?: string | null,
     override?: { skillId: string; workspaceRoot: string | null },
+    options: { createIfAbsent?: boolean } = {},
   ) => {
     const targetSkillId = override?.skillId ?? currentSkillId
     const targetWorkspaceRoot = override ? override.workspaceRoot : currentWorkspaceRoot
@@ -541,9 +563,77 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       throw new Error("No active workspace")
     }
     if (isTauriRuntime()) {
-      return await writeWorkspaceFile(targetWorkspaceRoot ?? targetSkillId, path, content, expectedHash ?? null)
+      return await writeWorkspaceFile(targetWorkspaceRoot ?? targetSkillId, path, content, expectedHash ?? null, options)
     }
     return await writeSkillFile(targetSkillId, path, content, expectedHash)
+  }, [currentSkillId, currentWorkspaceRoot])
+
+  const doDeleteWorkspacePath = useCallback(async (
+    path: string,
+    override?: { skillId: string; workspaceRoot: string | null },
+  ) => {
+    const targetSkillId = override?.skillId ?? currentSkillId
+    const targetWorkspaceRoot = override ? override.workspaceRoot : currentWorkspaceRoot
+    if (!targetSkillId) {
+      throw new Error("No active workspace")
+    }
+    if (!isTauriRuntime()) {
+      throw new Error("Deleting phase folders requires the desktop runtime")
+    }
+    await deleteWorkspacePath(targetWorkspaceRoot ?? targetSkillId, path)
+  }, [currentSkillId, currentWorkspaceRoot])
+
+  const doReadWorkspaceFile = useCallback(async (
+    path: string,
+    override?: { skillId: string; workspaceRoot: string | null },
+  ) => {
+    const targetSkillId = override?.skillId ?? currentSkillId
+    const targetWorkspaceRoot = override ? override.workspaceRoot : currentWorkspaceRoot
+    if (!targetSkillId) {
+      throw new Error("No active workspace")
+    }
+    if (!isTauriRuntime()) {
+      throw new Error("Reading workspace files requires the desktop runtime")
+    }
+    return await readWorkspaceFile(targetWorkspaceRoot ?? targetSkillId, path)
+  }, [currentSkillId, currentWorkspaceRoot])
+
+  const handlePhaseFileRead = useCallback(async (
+    { path }: { path: string },
+    target?: { skillId: string; workspaceRoot: string | null },
+  ) => {
+    return await doReadWorkspaceFile(path, target)
+  }, [doReadWorkspaceFile])
+
+  const doListWorkspaceDir = useCallback(async (
+    path: string,
+    override?: { skillId: string; workspaceRoot: string | null },
+  ) => {
+    const targetSkillId = override?.skillId ?? currentSkillId
+    const targetWorkspaceRoot = override ? override.workspaceRoot : currentWorkspaceRoot
+    if (!targetSkillId) {
+      throw new Error("No active workspace")
+    }
+    if (!isTauriRuntime()) {
+      throw new Error("Listing workspace dirs requires the desktop runtime")
+    }
+    return await listWorkspaceDir(targetWorkspaceRoot ?? targetSkillId, path)
+  }, [currentSkillId, currentWorkspaceRoot])
+
+  const doMoveWorkspacePath = useCallback(async (
+    from: string,
+    to: string,
+    override?: { skillId: string; workspaceRoot: string | null },
+  ) => {
+    const targetSkillId = override?.skillId ?? currentSkillId
+    const targetWorkspaceRoot = override ? override.workspaceRoot : currentWorkspaceRoot
+    if (!targetSkillId) {
+      throw new Error("No active workspace")
+    }
+    if (!isTauriRuntime()) {
+      throw new Error("Renaming phase folders requires the desktop runtime")
+    }
+    await moveWorkspacePath(targetWorkspaceRoot ?? targetSkillId, from, to)
   }, [currentSkillId, currentWorkspaceRoot])
 
   const compileSkillById = useCallback(async (targetSkillId: string) => {
@@ -555,8 +645,6 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         updateStage(targetSkillId, "compile-fail")
         setCompileErrors((current) => ({ ...current, [targetSkillId]: result.errors }))
         setCompileDrawerOpen(true)
-        const firstMessage = result.errors[0]?.message ?? result.detail
-        toast.error(`${result.errors.length} compile error${result.errors.length === 1 ? "" : "s"}: ${firstMessage}`)
         return
       }
       if (result.status === "ok") {
@@ -580,6 +668,17 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     }
   }, [mutateSkillDetail, updateStage])
 
+  const clearStaleCompileProjection = useCallback((targetSkillId: string) => {
+    setCompileErrors((current) => ({ ...current, [targetSkillId]: [] }))
+    setCompileStages((current) => {
+      if (!(targetSkillId in current)) return current
+      const next = { ...current }
+      delete next[targetSkillId]
+      return next
+    })
+    setCompileDrawerOpen(false)
+  }, [])
+
   const handlePhaseFileSave = useCallback(async ({
     path,
     content,
@@ -594,8 +693,26 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     // settle. Without a target the parent/root behaviour below is unchanged.
     if (target) {
       try {
-        await doWriteSkillFile(path, content, expectedHash, { skillId: target.skillId, workspaceRoot: target.workspaceRoot })
+        const result = await doWriteSkillFile(path, content, expectedHash, { skillId: target.skillId, workspaceRoot: target.workspaceRoot })
+        setActiveFileDetails((current) => {
+          const next = { ...current }
+          for (const side of ["left", "right"] as const) {
+            const file = current[side]
+            if (
+              file?.skillId === target.skillId
+              && file.workspaceRoot === target.workspaceRoot
+              && file.path === path
+            ) {
+              next[side] = { ...file, content, hash: result.hash, saveEnabled: true }
+            }
+          }
+          return next
+        })
         toast.success("Saved phase properties")
+        clearStaleCompileProjection(target.skillId)
+        if (currentSkillId && currentSkillId !== target.skillId) {
+          clearStaleCompileProjection(currentSkillId)
+        }
       } catch (error) {
         if (isReadOnlySkillError(error)) {
           toast.error("This subgraph is read-only — fork it into your workspace to edit.")
@@ -621,29 +738,205 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       return next
     })
     toast.success("Saved phase properties")
+    clearStaleCompileProjection(currentSkillId)
     void mutateSkillDetail()
-  }, [currentSkillId, doWriteSkillFile, mutateSkillDetail])
+  }, [clearStaleCompileProjection, currentSkillId, doWriteSkillFile, mutateSkillDetail])
 
-  const handleCreatePhase = useCallback(async (kind: NewPhaseKind) => {
+  const handleCreatePhase = useCallback(async (kind: NewPhaseKind, requestedPhaseId?: string) => {
     if (!currentSkillId || !skillDetail) {
       toast.error("Open a skill before creating a phase")
       return
     }
-    const draft = createPhaseDraft(skillDetail, kind)
     const graphContent = skillDetail.files?.["GRAPH.md"]
     const graphHash = graphContent === undefined ? null : await sha256Hex(graphContent)
+    const draft = createPhaseDraft(skillDetail, kind, [], requestedPhaseId)
+    let createdPhaseDir: string | null = null
     try {
+      await doWriteSkillFile(draft.filePath, draft.fileContent, null, undefined, { createIfAbsent: true })
+      createdPhaseDir = phaseDirectoryPath(draft.phaseId)
       const serialized = await serializeSkillGraph(currentSkillId, draft.phases, graphHash)
-      await doWriteSkillFile(draft.filePath, draft.fileContent)
       await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash)
       await compileSkillById(currentSkillId)
       toast.success(`Created ${draft.phaseId}`)
       await mutateSkillDetail()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not create phase")
+      if (createdPhaseDir) {
+        try {
+          await doDeleteWorkspacePath(createdPhaseDir)
+        } catch (rollbackError) {
+          toast.warning(`Could not clean up ${createdPhaseDir}: ${errorMessage(rollbackError)}`)
+        }
+      }
+      toast.error(errorMessage(error))
       void mutateSkillDetail()
     }
-  }, [compileSkillById, currentSkillId, doWriteSkillFile, mutateSkillDetail, skillDetail])
+  }, [compileSkillById, currentSkillId, doDeleteWorkspacePath, doWriteSkillFile, mutateSkillDetail, skillDetail])
+
+  const handleDeletePhase = useCallback(async (phaseId: string, target?: ChildSaveTarget) => {
+    const editDetail = target?.detail ?? skillDetail
+    if (!currentSkillId || !editDetail) {
+      toast.error("Open a skill before deleting a phase")
+      return
+    }
+    const result = removePhaseRefs(editDetail, phaseId)
+    if (!result.ok) {
+      toast.error(result.message)
+      return
+    }
+
+    const targetSkillId = target?.skillId ?? currentSkillId
+    const override = target ? { skillId: target.skillId, workspaceRoot: target.workspaceRoot } : undefined
+    const graphContent = editDetail.files?.["GRAPH.md"]
+    const graphHash = graphContent === undefined ? null : await sha256Hex(graphContent)
+    const phaseDirsToDelete = [
+      phaseId,
+      ...orphanPhaseDirectoryIds(editDetail, result.phases).filter((orphanId) => orphanId !== phaseId),
+    ]
+    try {
+      const serialized = await serializeSkillGraph(targetSkillId, result.phases, graphHash)
+      await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash, override)
+      for (const deletedPhaseId of phaseDirsToDelete) {
+        await doDeleteWorkspacePath(phaseDirectoryPath(deletedPhaseId), override)
+      }
+      const verifiedGraph = await doReadWorkspaceFile("GRAPH.md", override)
+      if (normalizeWorkspaceText(verifiedGraph.content) !== normalizeWorkspaceText(serialized.markdown_content)) {
+        throw new Error("Could not verify GRAPH.md after deleting phase")
+      }
+      const remainingPhaseDirs = await doListWorkspaceDir("phases", override)
+      const remainingDeletedIds = phaseDirsToDelete.filter((phaseDir) => (
+        remainingPhaseDirs.some((entry) => entry.kind === "dir" && entry.name === phaseDir)
+      ))
+      if (remainingDeletedIds.length > 0) {
+        throw new Error(`Could not delete phase folder: ${remainingDeletedIds.map(phaseDirectoryPath).join(", ")}`)
+      }
+      setSelectedNodeId((current) => current === phaseId ? null : current)
+      setSelectedNode((current) => current?.id === phaseId ? null : current)
+      setActiveFileDetails((current) => {
+        const next = { ...current }
+        const deletedPrefixes = phaseDirsToDelete.map((deletedPhaseId) => `${phaseDirectoryPath(deletedPhaseId)}/`)
+        for (const side of ["left", "right"] as const) {
+          const file = current[side]
+          if (file?.skillId === targetSkillId && deletedPrefixes.some((prefix) => file.path.startsWith(prefix))) {
+            delete next[side]
+          }
+        }
+        return next
+      })
+      await compileSkillById(targetSkillId)
+      toast.success(`Deleted ${phaseId}`)
+      if (target) {
+        await target.onSettled()
+      } else {
+        await mutateSkillDetail()
+      }
+    } catch (error) {
+      if (target) {
+        if (isReadOnlySkillError(error)) {
+          toast.error("This subgraph is read-only - fork it into your workspace to edit.")
+        }
+        void target.onSettled()
+      } else {
+        void mutateSkillDetail()
+      }
+      toast.error(errorMessage(error))
+    }
+  }, [compileSkillById, currentSkillId, doDeleteWorkspacePath, doListWorkspaceDir, doReadWorkspaceFile, doWriteSkillFile, mutateSkillDetail, skillDetail])
+
+  const handleRenamePhase = useCallback(async (phaseId: string, nextPhaseId: string) => {
+    if (!currentSkillId || !skillDetail) {
+      toast.error("Open a skill before renaming a phase")
+      return
+    }
+    const result = renamePhaseRefs(skillDetail, phaseId, nextPhaseId)
+    if (!result.ok) {
+      toast.error(result.message)
+      return
+    }
+
+    const nextId = nextPhaseId.trim()
+    const phase = phaseRefsFromSkillDetail(skillDetail).find((entry) => entry.id === phaseId)
+    if (!phase) {
+      toast.error("Phase not found")
+      return
+    }
+    const oldFilePath = phaseFilePath(phaseId, phase.mode)
+    const newFilePath = phaseFilePath(nextId, phase.mode)
+    const oldContent = skillDetail.files?.[oldFilePath]
+    if (oldContent === undefined) {
+      toast.error(`Phase file is missing: ${oldFilePath}`)
+      return
+    }
+    const renamedContent = applyPhaseName(oldContent, nextId)
+    if (!renamedContent.ok) {
+      toast.error(renamedContent.message)
+      return
+    }
+
+    const graphContent = skillDetail.files?.["GRAPH.md"]
+    const graphHash = graphContent === undefined ? null : await sha256Hex(graphContent)
+    const oldDir = phaseDirectoryPath(phaseId)
+    const newDir = phaseDirectoryPath(nextId)
+    let moved = false
+    let phaseWriteHash: string | null = null
+
+    try {
+      const serialized = await serializeSkillGraph(currentSkillId, result.phases, graphHash)
+      await doMoveWorkspacePath(oldDir, newDir)
+      moved = true
+      const phaseWrite = await doWriteSkillFile(newFilePath, renamedContent.markdown, await sha256Hex(oldContent))
+      phaseWriteHash = phaseWrite.hash
+      const graphWrite = await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash)
+      setSelectedNodeId((current) => current === phaseId ? nextId : current)
+      setSelectedNode((current) => (
+        current?.id === phaseId
+          ? {
+            id: nextId,
+            data: {
+              ...current.data,
+              phaseId: nextId,
+              label: nextId,
+              filePath: newFilePath,
+            },
+          }
+          : current
+      ))
+      setActiveFileDetails((current) => {
+        const next = { ...current }
+        const oldPrefix = `${oldDir}/`
+        const newPrefix = `${newDir}/`
+        for (const side of ["left", "right"] as const) {
+          const file = current[side]
+          if (!file || file.skillId !== currentSkillId) {
+            continue
+          }
+          if (file.path === "GRAPH.md") {
+            next[side] = { ...file, content: serialized.markdown_content, hash: graphWrite.hash, saveEnabled: true, title: undefined }
+          } else if (file.path === oldFilePath) {
+            next[side] = { ...file, path: newFilePath, content: renamedContent.markdown, hash: phaseWrite.hash, saveEnabled: true, title: undefined }
+          } else if (file.path.startsWith(oldPrefix)) {
+            next[side] = { ...file, path: `${newPrefix}${file.path.slice(oldPrefix.length)}` }
+          }
+        }
+        return next
+      })
+      toast.success(`Renamed ${phaseId} to ${nextId}`)
+      await compileSkillById(currentSkillId)
+      await mutateSkillDetail()
+    } catch (error) {
+      if (moved) {
+        try {
+          if (phaseWriteHash) {
+            await doWriteSkillFile(newFilePath, oldContent, phaseWriteHash)
+          }
+          await doMoveWorkspacePath(newDir, oldDir)
+        } catch (rollbackError) {
+          toast.warning(`Could not roll back phase folder rename: ${errorMessage(rollbackError)}`)
+        }
+      }
+      toast.error(errorMessage(error))
+      void mutateSkillDetail()
+    }
+  }, [compileSkillById, currentSkillId, doMoveWorkspacePath, doWriteSkillFile, mutateSkillDetail, skillDetail])
 
   // n2-canvas #14: the shared serialize → write GRAPH.md → compile → settle tail of
   // every graph-structure edit (connect / disconnect / reconnect). `editDetail` is
@@ -1023,7 +1316,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         toast.error(`Predict failed: ${fallbackMsg}`)
       }
     }
-  }, [currentSkillId, selectedTestInputId, updateStage])
+  }, [clearCopilotJudgeResult, currentSkillId, selectedTestInputId, updateStage])
 
   const handleRun = useCallback(async () => {
     if (!currentSkillId) return
@@ -1045,42 +1338,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       updateStage(targetSkillId, "predict-pass")
       toast.error(error instanceof Error ? error.message : "Failed to start run")
     }
-  }, [currentSkillId, deriveBuildStage, selectedTestInputId, updateStage, setRunId])
-
-  // n4-trace#23 (P8 model-compare): fan a run out across the picked Settings roles.
-  // Builds candidates from existing role names (candidatesFromRoleNames), calls the
-  // real compare endpoint, then points the trace at the first candidate's spawned
-  // run so the user immediately sees a candidate's stream while the others fill in.
-  const [compareStarting, setCompareStarting] = useState(false)
-  const handleStartCompare = useCallback(
-    async (roleNames: string[]) => {
-      if (!currentSkillId) return
-      const candidates = candidatesFromRoleNames(roleNames)
-      if (candidates.length === 0) {
-        toast.error("Pick at least one role to compare")
-        return
-      }
-      const targetSkillId = currentSkillId
-      setCompareStarting(true)
-      try {
-        const inputData = await resolveRunInput(targetSkillId, selectedTestInputId)
-        const group = await startCompareRun(targetSkillId, inputData, candidates)
-        clearCopilotJudgeResult()
-        setCompareGroupId(group.compare_group_id)
-        setCompareRuns(group.runs)
-        const first = group.runs[0] ?? null
-        setCompareCandidateId(first?.candidate_id ?? null)
-        setRunId(first?.metadata.run_id ?? null)
-        setActivePanel("timeline")
-        toast.success(`Comparing ${candidates.length} candidate${candidates.length === 1 ? "" : "s"}`)
-      } catch (error) {
-        toast.error(`Compare failed: ${errorMessage(error)}`)
-      } finally {
-        setCompareStarting(false)
-      }
-    },
-    [currentSkillId, selectedTestInputId, setRunId],
-  )
+  }, [clearCopilotJudgeResult, currentSkillId, deriveBuildStage, selectedTestInputId, updateStage, setRunId])
 
   // Switch the visible candidate: re-point the trace stream at that candidate's
   // spawned run (the per-candidate run id from the real compare group).
@@ -1202,7 +1460,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     } finally {
       setResumeLoading(false)
     }
-  }, [currentSkillId, runId, setRunId])
+  }, [clearCopilotJudgeResult, currentSkillId, runId, setRunId])
 
   const handleSubmitHitlResponse = useCallback(async (request: TraceHitlResumeRequest) => {
     if (!currentSkillId || !runId) return
@@ -1291,6 +1549,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     const dataGapByNode = dataGapErrorsByNode(skillDetail?.graph_topology)
     return mergeNodeErrors(compileWithLint, dataGapByNode)
   }, [activeLint, compileErrors, currentSkillId, skillDetail?.graph_topology])
+  const manualCompileErrorsByNodeId = useMemo(
+    () => compileErrorsByNode(currentSkillId ? compileErrors[currentSkillId] : []),
+    [compileErrors, currentSkillId],
+  )
   const goldenStateByNodeId = useMemo(
     () => goldenTriStateByNode(
       goldenBaselines,
@@ -1369,6 +1631,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   selectedTestInputId={selectedTestInputId}
                   onSelectTestInput={setSelectedTestInputId}
                   onPhaseFileSave={handlePhaseFileSave}
+                  onPhaseRename={handleRenamePhase}
                   runId={runId}
                   lintErrors={propertiesFieldErrors}
                   resumeValidity={resumeValidity}
@@ -1404,17 +1667,38 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
               ) : currentSkillId && hasOpenFile ? (
                 <SplitEditor
                   skillId={currentSkillId}
+                  workspaceRoot={currentWorkspaceRoot}
                   skillDetail={skillDetail}
                   isLoading={isLoading}
                   error={skillDetailError}
                   selectedNodeId={selectedNodeId}
                   onNodeSelect={handleNodeSelect}
+                  onNodeDeselect={handleNodeDeselect}
+                  onNodeFileOpen={handleFileOpen}
                   onPanelChange={setActivePanel}
+                  onCreatePhase={handleCreatePhase}
+                  onDeletePhase={handleDeletePhase}
+                  onPersistConnection={handlePersistConnection}
+                  onDisconnectConnection={handleDisconnectConnection}
+                  onReconnectConnection={handleReconnectConnection}
+                  onPhaseFileSave={handlePhaseFileSave}
+                  onPhaseFileRead={handlePhaseFileRead}
                   statusByNodeId={statusByNodeId}
+                  sequentialOverwriteErrorsByNodeId={manualCompileErrorsByNodeId}
                   compileErrorsByNodeId={compileErrorsByNodeId}
                   goldenStateByNodeId={goldenStateByNodeId}
                   errorMessageByNodeId={errorMessageByNodeId}
+                  dirtyDownstreamNodeIds={dirtyDownstreamNodeIds}
                   activeTracePhase={activeTracePhase}
+                  runId={runId}
+                  resumeNodeStatus={selectedNodeStatus}
+                  resumeValidity={resumeValidity}
+                  resumeValidityLoading={resumeValidityLoading}
+                  resumeValidityError={resumeValidityError}
+                  resumeLoading={resumeLoading}
+                  onResumeNode={runId ? handleResumeNode : undefined}
+                  onSubmitHitlResponse={handleSubmitHitlResponse}
+                  hitlSubmitting={resumeLoading}
                 />
               ) : currentSkillId === null ? (
                 <WelcomePage onSelectSkill={onSelectSkill} />
@@ -1427,13 +1711,18 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   error={skillDetailError}
                   selectedNodeId={selectedNodeId}
                   onNodeSelect={handleNodeSelect}
+                  onNodeDeselect={handleNodeDeselect}
+                  onNodeFileOpen={handleFileOpen}
                   onPanelChange={setActivePanel}
                   onCreatePhase={handleCreatePhase}
+                  onDeletePhase={handleDeletePhase}
                   onPersistConnection={handlePersistConnection}
                   onDisconnectConnection={handleDisconnectConnection}
                   onReconnectConnection={handleReconnectConnection}
                   onPhaseFileSave={handlePhaseFileSave}
+                  onPhaseFileRead={handlePhaseFileRead}
                   statusByNodeId={statusByNodeId}
+                  sequentialOverwriteErrorsByNodeId={manualCompileErrorsByNodeId}
                   compileErrorsByNodeId={compileErrorsByNodeId}
                   goldenStateByNodeId={goldenStateByNodeId}
                   errorMessageByNodeId={errorMessageByNodeId}
@@ -1457,22 +1746,12 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                     open={compileDrawerOpen && currentCompileErrors.length > 0}
                     onOpenChange={setCompileDrawerOpen}
                   />
-                  <CenterActionBarWithCreate
+                  <CenterActionBar
                     stage={deriveBuildStage(currentSkillId)}
                     onCompile={handleCompile}
                     onPredict={handlePredict}
                     onRun={handleRun}
-                    onCreatePhase={handleCreatePhase}
                   />
-                  {/* n4-trace#23: launch a P8 model-compare run against Settings roles.
-                      Same readiness gate as Run (needs a predict-passed skill). */}
-                  <div className="absolute bottom-4 left-4 z-30">
-                    <CompareRunDialog
-                      disabled={deriveBuildStage(currentSkillId) !== "predict-pass" || compareStarting}
-                      starting={compareStarting}
-                      onStartCompare={handleStartCompare}
-                    />
-                  </div>
                 </>
               ) : null}
               {goldenDiff.result && !settingsOpen ? (
@@ -1552,6 +1831,10 @@ function languageForPath(path: string): string {
   if (path.endsWith(".json")) return "json"
   if (path.endsWith(".py")) return "python"
   return "markdown"
+}
+
+function normalizeWorkspaceText(value: string): string {
+  return value.replace(/\r\n?/g, "\n")
 }
 
 function shortHash(value: string): string {

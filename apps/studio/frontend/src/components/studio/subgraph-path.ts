@@ -118,6 +118,44 @@ export function joinWorkspacePath(root: string, relativePath: string): string {
   return `${trimmedRoot}/${trimmedRelative.replace(/\\/g, "/")}`
 }
 
+export function subgraphPathValueFromSelection(selectedPath: string, workspaceRoot?: string | null): string {
+  const selected = selectedPath.trim()
+  if (!selected || !workspaceRoot) {
+    return selected
+  }
+  const relative = relativePathInsideRoot(selected, workspaceRoot)
+  return relative ?? selected
+}
+
+export function isPathInsideWorkspaceRoot(selectedPath: string, workspaceRoot?: string | null): boolean {
+  if (!workspaceRoot) {
+    return true
+  }
+  return relativePathInsideRoot(selectedPath, workspaceRoot) !== null
+}
+
+function relativePathInsideRoot(selectedPath: string, workspaceRoot: string): string | null {
+  const selected = normalizeComparableFsPath(selectedPath)
+  const root = normalizeComparableFsPath(workspaceRoot)
+  if (!selected || !root) {
+    return null
+  }
+  const selectedKey = selected.toLowerCase()
+  const rootKey = root.toLowerCase()
+  if (selectedKey === rootKey) {
+    return "."
+  }
+  const rootPrefix = rootKey.endsWith("/") ? rootKey : `${rootKey}/`
+  if (!selectedKey.startsWith(rootPrefix)) {
+    return null
+  }
+  return selected.slice(rootPrefix.length).replace(/^\/+/, "")
+}
+
+function normalizeComparableFsPath(value: string): string {
+  return value.trim().replace(/\\/g, "/").replace(/\/+$/, "")
+}
+
 function subgraphFilePath(row: Pick<GraphTopologyItem, "id" | "src">): string {
   const trimmedSrc = row.src.trim()
   if (!trimmedSrc) {

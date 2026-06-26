@@ -2,24 +2,47 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { GraphCanvas, type SkillGraphNodeData, type SkillNodeStatus } from "@/components/GraphCanvas"
 import type { CompileError, SkillDetail } from "@/api/types"
 import type { GoldenNodeState } from "@/components/studio/node-golden"
+import type { ComponentProps } from "react"
 import { LazyMonacoPanel } from "./LazyMonacoPanel"
 import { useWorkspaceContext, type EditorSide, type OpenFile } from "./WorkspaceContext"
 
-interface SplitEditorProps {
+type GraphCanvasProps = ComponentProps<typeof GraphCanvas>
+
+type SplitEditorCanvasProps = Pick<
+  GraphCanvasProps,
+  | "workspaceRoot"
+  | "onCreatePhase"
+  | "onDeletePhase"
+  | "onPersistConnection"
+  | "onDisconnectConnection"
+  | "onReconnectConnection"
+  | "onPhaseFileSave"
+  | "onPhaseFileRead"
+  | "onNodeFileOpen"
+  | "onNodeDeselect"
+  | "dirtyDownstreamNodeIds"
+  | "runId"
+  | "resumeNodeStatus"
+  | "resumeValidity"
+  | "resumeValidityLoading"
+  | "resumeValidityError"
+  | "resumeLoading"
+  | "onResumeNode"
+  | "onSubmitHitlResponse"
+  | "hitlSubmitting"
+>
+
+interface SplitEditorProps extends SplitEditorCanvasProps {
   skillId: string
   skillDetail?: SkillDetail
   isLoading?: boolean
   error?: unknown
   selectedNodeId?: string | null
-  // The bottom mini-canvas is a READ-ONLY projection of GRAPH.md (canvas =
-  // projection, per the canvas-projection design). It renders + navigates only;
-  // it deliberately receives NO graph-editing handlers (connect / reconnect /
-  // disconnect / create-phase / phase-file save). All graph editing happens on
-  // the main canvas, so two canvases can never race writes to GRAPH.md off
-  // independent snapshots. Only node selection / panel navigation is wired.
   onNodeSelect?: (node: { id: string; data: SkillGraphNodeData }) => void
+  onNodeDeselect?: () => void
   onPanelChange?: (panel: "assets" | "input" | "timeline" | "trace-doc" | "properties" | "local-history" | null) => void
   statusByNodeId?: Record<string, SkillNodeStatus>
+  sequentialOverwriteErrorsByNodeId?: Record<string, CompileError[]>
   compileErrorsByNodeId?: Record<string, CompileError[]>
   goldenStateByNodeId?: Record<string, GoldenNodeState>
   errorMessageByNodeId?: Record<string, string>
@@ -30,17 +53,38 @@ interface SplitEditorProps {
 
 export function SplitEditor({
   skillId,
+  workspaceRoot,
   skillDetail,
   isLoading,
   error,
   selectedNodeId,
   onNodeSelect,
+  onNodeDeselect,
   onPanelChange,
   statusByNodeId,
+  sequentialOverwriteErrorsByNodeId,
   compileErrorsByNodeId,
   goldenStateByNodeId,
   errorMessageByNodeId,
   activeTracePhase,
+  onCreatePhase,
+  onDeletePhase,
+  onPersistConnection,
+  onDisconnectConnection,
+  onReconnectConnection,
+  onPhaseFileSave,
+  onPhaseFileRead,
+  onNodeFileOpen,
+  dirtyDownstreamNodeIds,
+  runId,
+  resumeNodeStatus,
+  resumeValidity,
+  resumeValidityLoading,
+  resumeValidityError,
+  resumeLoading,
+  onResumeNode,
+  onSubmitHitlResponse,
+  hitlSubmitting,
 }: SplitEditorProps) {
   const {
     activeFileDetails,
@@ -110,18 +154,38 @@ export function SplitEditor({
         <div className="size-full border-t border-border">
           <GraphCanvas
             skillId={skillId}
+            workspaceRoot={workspaceRoot}
             skillDetail={skillDetail}
             isLoading={isLoading}
             error={error}
             selectedNodeId={selectedNodeId}
             onNodeSelect={onNodeSelect}
+            onNodeDeselect={onNodeDeselect}
+            onNodeFileOpen={onNodeFileOpen}
             onPanelChange={onPanelChange}
+            onCreatePhase={onCreatePhase}
+            onDeletePhase={onDeletePhase}
+            onPersistConnection={onPersistConnection}
+            onDisconnectConnection={onDisconnectConnection}
+            onReconnectConnection={onReconnectConnection}
+            onPhaseFileSave={onPhaseFileSave}
+            onPhaseFileRead={onPhaseFileRead}
             statusByNodeId={statusByNodeId}
             errorMessageByNodeId={errorMessageByNodeId}
+            sequentialOverwriteErrorsByNodeId={sequentialOverwriteErrorsByNodeId}
             compileErrorsByNodeId={compileErrorsByNodeId}
             goldenStateByNodeId={goldenStateByNodeId}
+            dirtyDownstreamNodeIds={dirtyDownstreamNodeIds}
             activeTracePhase={activeTracePhase}
-            compact
+            runId={runId}
+            resumeNodeStatus={resumeNodeStatus}
+            resumeValidity={resumeValidity}
+            resumeValidityLoading={resumeValidityLoading}
+            resumeValidityError={resumeValidityError}
+            resumeLoading={resumeLoading}
+            onResumeNode={onResumeNode}
+            onSubmitHitlResponse={onSubmitHitlResponse}
+            hitlSubmitting={hitlSubmitting}
           />
         </div>
       </ResizablePanel>

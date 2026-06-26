@@ -2,11 +2,12 @@
 //!
 //! All skill/graph/copilot writes route through these commands so a single
 //! writer owns the local filesystem (the design forbids a Python+Rust dual
-//! writer). Hashing is byte-compatible with the Python writer's
-//! `_graph_content_hash` (SHA-256 hex of UTF-8) so the optimistic
-//! expected-hash guard matches across writers, and the HashConflict error
-//! shape matches what the frontend (`api/client.ts`) parses.
+//! writer). Workspace text hashing matches Python text I/O semantics before
+//! `_graph_content_hash` (CRLF/CR normalized to LF, then SHA-256 of UTF-8) so the
+//! optimistic expected-hash guard matches across writers, and the HashConflict
+//! error shape matches what the frontend (`api/client.ts`) parses.
 
+use std::borrow::Cow;
 use std::io::Write as _;
 use std::path::{Component, Path, PathBuf};
 
@@ -94,6 +95,17 @@ pub fn sha256_hex(content: &str) -> String {
         let _ = write!(out, "{byte:02x}");
     }
     out
+}
+
+fn workspace_text_hash(content: &str) -> String {
+    sha256_hex(normalize_text_newlines(content).as_ref())
+}
+
+fn normalize_text_newlines(content: &str) -> Cow<'_, str> {
+    if !content.contains('\r') {
+        return Cow::Borrowed(content);
+    }
+    Cow::Owned(content.replace("\r\n", "\n").replace('\r', "\n"))
 }
 
 /// Join a workspace-relative path onto `root`, rejecting absolute paths and any
@@ -299,7 +311,7 @@ fn write_workspace_file_impl_inner(
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
             Err(error) => return Err(write_failed(format!("cannot read current file: {error}"))),
         };
-        let current_hash = sha256_hex(&current);
+        let current_hash = workspace_text_hash(&current);
         if let Some(expected) = expected_hash {
             if current_hash != expected {
                 return Err(WriteWorkspaceError::HashConflict {
@@ -355,7 +367,7 @@ fn write_workspace_file_impl_inner(
 
     Ok(WriteOutcome {
         path: path.to_string(),
-        hash: sha256_hex(content),
+        hash: workspace_text_hash(content),
     })
 }
 
@@ -737,7 +749,7 @@ pub fn read_workspace_file_impl(workspace_root: &str, path: &str) -> Result<Read
     })?;
     Ok(ReadOutcome {
         path: path.to_string(),
-        hash: sha256_hex(&content),
+        hash: workspace_text_hash(&content),
         content,
     })
 }
@@ -745,6 +757,7 @@ pub fn read_workspace_file_impl(workspace_root: &str, path: &str) -> Result<Read
 enum AllowedDeleteTarget {
     TestInputJson,
     GoldenBaselineDir,
+    PhaseDir,
 }
 
 fn allowed_delete_target(path: &str) -> Result<AllowedDeleteTarget, String> {
@@ -780,6 +793,10 @@ fn allowed_delete_target(path: &str) -> Result<AllowedDeleteTarget, String> {
         && is_safe_golden_baseline_id(&parts[2])
     {
         return Ok(AllowedDeleteTarget::GoldenBaselineDir);
+    }
+
+    if parts.len() == 2 && parts[0] == "phases" && is_safe_phase_dir_name(&parts[1]) {
+        return Ok(AllowedDeleteTarget::PhaseDir);
     }
 
     Err(format!("delete path not allowed: {trimmed}"))
@@ -821,9 +838,25 @@ fn is_safe_golden_baseline_id(id: &str) -> bool {
     })
 }
 
+fn is_safe_phase_dir_name(name: &str) -> bool {
+    if name.is_empty() || name == "." || name == ".." || name.len() > 100 {
+        return false;
+    }
+    let mut chars = name.chars();
+    let first = match chars.next() {
+        Some(value) => value,
+        None => return false,
+    };
+    if !(first.is_ascii_alphanumeric() || first == '_') {
+        return false;
+    }
+    chars.all(|value| value.is_ascii_alphanumeric() || value == '_' || value == '-')
+}
+
 /// Delete only the native-fs surfaces currently exposed by Studio:
 /// `.workspace/test_inputs/<safe>.json` files and `.workspace/golden/<safe-id>`
-/// baseline directories. This avoids exposing a general recursive delete.
+/// baseline directories, plus root `phases/<safe-id>` directories. This avoids
+/// exposing a general recursive delete.
 pub fn delete_workspace_path_impl(workspace_root: &str, path: &str) -> Result<(), String> {
     let allowed = allowed_delete_target(path)?;
     let root = PathBuf::from(workspace_root.trim());
@@ -844,7 +877,7 @@ pub fn delete_workspace_path_impl(workspace_root: &str, path: &str) -> Result<()
             }
             std::fs::remove_file(&target).map_err(|error| format!("cannot remove file: {error}"))
         }
-        AllowedDeleteTarget::GoldenBaselineDir => {
+        AllowedDeleteTarget::GoldenBaselineDir | AllowedDeleteTarget::PhaseDir => {
             if !file_type.is_dir() {
                 return Err(format!("delete path must be a directory: {path}"));
             }
@@ -855,6 +888,44 @@ pub fn delete_workspace_path_impl(workspace_root: &str, path: &str) -> Result<()
 
 /// One directory entry — `kind` is `"file"` or `"dir"` (symlinks fold into the
 /// kind of their target so callers don't have to special-case them).
+fn require_phase_dir_move_path(path: &str) -> Result<(), String> {
+    match allowed_delete_target(path)? {
+        AllowedDeleteTarget::PhaseDir => Ok(()),
+        _ => Err(format!("move path not allowed: {}", path.trim())),
+    }
+}
+
+/// Move a root phase directory during a phase rename. This intentionally exposes
+/// a narrower surface than a general filesystem move: both endpoints must be
+/// `phases/<safe-id>` directories under the same workspace.
+pub fn move_workspace_path_impl(workspace_root: &str, from: &str, to: &str) -> Result<(), String> {
+    require_phase_dir_move_path(from)?;
+    require_phase_dir_move_path(to)?;
+    let root = PathBuf::from(workspace_root.trim());
+    let source = safe_join(&root, from)?;
+    let target = safe_join(&root, to)?;
+    if source == target {
+        return Ok(());
+    }
+    ensure_existing_path_components_inside_workspace(&root, from)?;
+    ensure_existing_path_components_inside_workspace(&root, to)?;
+    let metadata = std::fs::symlink_metadata(&source).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            format!("path not found: {from}")
+        } else {
+            format!("cannot inspect workspace path: {error}")
+        }
+    })?;
+    if !metadata.file_type().is_dir() {
+        return Err(format!("move source must be a directory: {from}"));
+    }
+    if target.exists() {
+        return Err(format!("move target already exists: {to}"));
+    }
+    std::fs::rename(&source, &target)
+        .map_err(|error| format!("cannot move workspace path: {error}"))
+}
+
 #[derive(Serialize, Debug, PartialEq)]
 pub struct WorkspaceDirEntry {
     pub name: String,
@@ -1060,6 +1131,13 @@ pub fn delete_workspace_path(workspace_root: String, path: String) -> Result<(),
 }
 
 #[tauri::command]
+pub fn move_workspace_path(workspace_root: String, from: String, to: String) -> Result<(), String> {
+    let config_dir = crate::resolve_config_dir();
+    let resolved = resolve_workspace_root(&workspace_root, &config_dir)?;
+    move_workspace_path_impl(&resolved.to_string_lossy(), &from, &to)
+}
+
+#[tauri::command]
 pub fn list_workspace_dir(
     workspace_root: String,
     relative_dir: String,
@@ -1186,7 +1264,6 @@ fn skill_id_from_workspace_root(path: &str) -> String {
 fn last_path_segment(path: &str) -> Option<&str> {
     let mut last: Option<&str> = None;
     let mut start = 0usize;
-    let bytes = path.as_bytes();
     let mut segment_end = 0usize;
     let mut have_segment = false;
     for (idx, ch) in path.char_indices() {
@@ -1226,7 +1303,10 @@ fn normalize_skill_id_segment(name: &str) -> String {
 }
 
 fn starts_with_ascii_letter(value: &str) -> bool {
-    value.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+    value
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic())
 }
 
 /// Resolve the new-skill parent dir. Byte-for-byte to Python `_default_skills_root`
@@ -1350,7 +1430,11 @@ fn git_has_staged_changes(skill_dir: &Path) -> Result<bool, String> {
 /// indent + a single trailing newline. serde_json's default `Map` is a `BTreeMap`,
 /// so both the top-level ids and the per-entry keys serialize in sorted order,
 /// matching Python `sort_keys=True`.
-fn upsert_skill_index_entry(config_dir: &Path, skill_id: &str, absolute_path: &str) -> Result<(), String> {
+fn upsert_skill_index_entry(
+    config_dir: &Path,
+    skill_id: &str,
+    absolute_path: &str,
+) -> Result<(), String> {
     let index_path = config_dir.join("skill_index.json");
     let mut index = read_skill_index(&index_path);
     let mut entry = serde_json::Map::new();
@@ -1413,7 +1497,10 @@ fn read_skill_index(index_path: &Path) -> serde_json::Map<String, serde_json::Va
             "l2_remote_url".to_string(),
             serde_json::Value::String(l2_remote_url),
         );
-        normalized.insert(skill_id.clone(), serde_json::Value::Object(normalized_entry));
+        normalized.insert(
+            skill_id.clone(),
+            serde_json::Value::Object(normalized_entry),
+        );
     }
     normalized
 }
@@ -1600,6 +1687,27 @@ mod tests {
         )
         .expect("write with matching expected hash");
         assert_eq!(outcome.hash, sha256_hex("two"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn write_expected_hash_matches_python_text_newline_normalization() {
+        let root = temp_root("write-crlf-match");
+        std::fs::write(root.join("GRAPH.md"), "---\r\nname: demo\r\n---\r\n").unwrap();
+        let expected = sha256_hex("---\nname: demo\n---\n");
+
+        let outcome = write_workspace_file_impl(
+            root.to_str().unwrap(),
+            "GRAPH.md",
+            "---\nname: demo\nphases: []\n---\n",
+            Some(&expected),
+        )
+        .expect("CRLF-on-disk content should match the backend/editor LF hash");
+
+        assert_eq!(
+            outcome.hash,
+            sha256_hex("---\nname: demo\nphases: []\n---\n")
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -2110,20 +2218,68 @@ mod tests {
     }
 
     #[test]
-    fn delete_workspace_path_allows_test_input_file_and_golden_baseline_dir_only() {
+    fn delete_workspace_path_allows_test_input_file_golden_baseline_and_phase_dirs_only() {
         let root = temp_root("delete-allowlist");
         std::fs::create_dir_all(root.join(".workspace/test_inputs")).unwrap();
         std::fs::create_dir_all(root.join(".workspace/golden/run-1")).unwrap();
+        std::fs::create_dir_all(root.join("phases/review")).unwrap();
         std::fs::write(root.join(".workspace/test_inputs/case.json"), "{}").unwrap();
         std::fs::write(root.join(".workspace/golden/run-1/result.json"), "{}").unwrap();
+        std::fs::write(
+            root.join("phases/review/LOGIC.md"),
+            "---\nname: review\n---\n",
+        )
+        .unwrap();
 
         delete_workspace_path_impl(root.to_str().unwrap(), ".workspace/test_inputs/case.json")
             .expect("delete test input file");
         delete_workspace_path_impl(root.to_str().unwrap(), ".workspace/golden/run-1")
             .expect("delete golden baseline dir");
+        delete_workspace_path_impl(root.to_str().unwrap(), "phases/review")
+            .expect("delete phase dir");
 
         assert!(!root.join(".workspace/test_inputs/case.json").exists());
         assert!(!root.join(".workspace/golden/run-1").exists());
+        assert!(!root.join("phases/review").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn move_workspace_path_allows_root_phase_dir_rename_only() {
+        let root = temp_root("move-phase-dir");
+        std::fs::create_dir_all(root.join("phases/extract")).unwrap();
+        std::fs::write(
+            root.join("phases/extract/SUBGRAPH.md"),
+            "---\nname: extract\n---\n",
+        )
+        .unwrap();
+
+        move_workspace_path_impl(
+            root.to_str().unwrap(),
+            "phases/extract",
+            "phases/event_extraction",
+        )
+        .expect("move phase directory");
+
+        assert!(!root.join("phases/extract").exists());
+        assert!(root.join("phases/event_extraction/SUBGRAPH.md").exists());
+        let nested_error = move_workspace_path_impl(
+            root.to_str().unwrap(),
+            "phases/event_extraction/nested",
+            "phases/other",
+        )
+        .expect_err("nested phase path rejected");
+        let arbitrary_error =
+            move_workspace_path_impl(root.to_str().unwrap(), "GRAPH.md", "phases/other")
+                .expect_err("arbitrary source rejected");
+        assert!(
+            nested_error.contains("not allowed"),
+            "unexpected: {nested_error}"
+        );
+        assert!(
+            arbitrary_error.contains("not allowed"),
+            "unexpected: {arbitrary_error}"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -2143,7 +2299,9 @@ mod tests {
     fn delete_workspace_path_refuses_arbitrary_dirs_and_files() {
         let root = temp_root("delete-arbitrary");
         std::fs::create_dir_all(root.join(".workspace/test_inputs/nested")).unwrap();
+        std::fs::create_dir_all(root.join("phases/draft/nested")).unwrap();
         std::fs::write(root.join(".workspace/test_inputs/nested/child.json"), "{}").unwrap();
+        std::fs::write(root.join("phases/draft/nested/child.md"), "child").unwrap();
         std::fs::write(root.join("GRAPH.md"), "graph").unwrap();
 
         let dir_error =
@@ -2151,6 +2309,9 @@ mod tests {
                 .expect_err("arbitrary directory delete rejected");
         let file_error = delete_workspace_path_impl(root.to_str().unwrap(), "GRAPH.md")
             .expect_err("arbitrary file delete rejected");
+        let nested_phase_error =
+            delete_workspace_path_impl(root.to_str().unwrap(), "phases/draft/nested")
+                .expect_err("nested phase directory delete rejected");
 
         assert!(
             dir_error.contains("not allowed"),
@@ -2160,7 +2321,12 @@ mod tests {
             file_error.contains("not allowed"),
             "unexpected file error: {file_error}"
         );
+        assert!(
+            nested_phase_error.contains("not allowed"),
+            "unexpected nested phase error: {nested_phase_error}"
+        );
         assert!(root.join(".workspace/test_inputs/nested").exists());
+        assert!(root.join("phases/draft/nested").exists());
         assert!(root.join("GRAPH.md").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -2669,8 +2835,8 @@ mod tests {
         let parent = config.join("Skills");
         std::fs::create_dir_all(&parent).unwrap();
 
-        let outcome = create_skill_workspace_impl("", "demo-skill", &config)
-            .expect("create skill workspace");
+        let outcome =
+            create_skill_workspace_impl("", "demo-skill", &config).expect("create skill workspace");
         let root = PathBuf::from(&outcome.root);
 
         assert_eq!(outcome.skill_id, "demo-skill");
@@ -2679,17 +2845,34 @@ mod tests {
         // Scaffold files, byte-for-byte to Python _SCAFFOLD_FILES with name substituted.
         // D-1-4: empty agent-phase template — GRAPH.md topology + phases/init/SKILL.md.
         let graph = std::fs::read_to_string(root.join("GRAPH.md")).unwrap();
-        assert!(graph.contains("name: demo-skill"), "GRAPH.md name substituted");
+        assert!(
+            graph.contains("name: demo-skill"),
+            "GRAPH.md name substituted"
+        );
         assert!(graph.contains("schema_version: \"v0.3.0\""));
-        assert!(graph.trim_end().ends_with("<phase depends_on=\"input\" output>init</phase>"));
+        assert!(graph
+            .trim_end()
+            .ends_with("<phase depends_on=\"input\" output>init</phase>"));
         // Agent phase is a single SKILL.md (engine routes SKILL.md -> agent mode);
         // the old logic-phase LOGIC.md + actions/initialize.py must NOT be written.
         let skill = std::fs::read_to_string(root.join("phases/init/SKILL.md")).unwrap();
-        assert!(skill.contains("<role>"), "agent SKILL.md has a <role> block");
-        assert!(skill.contains("<goal>"), "agent SKILL.md has a <goal> block");
+        assert!(
+            skill.contains("<role>"),
+            "agent SKILL.md has a <role> block"
+        );
+        assert!(
+            skill.contains("<goal>"),
+            "agent SKILL.md has a <goal> block"
+        );
         assert!(skill.contains("max_iterations: 10"));
-        assert!(!root.join("phases/init/LOGIC.md").exists(), "no logic-phase LOGIC.md");
-        assert!(!root.join("phases/init/actions").exists(), "no logic-phase actions dir");
+        assert!(
+            !root.join("phases/init/LOGIC.md").exists(),
+            "no logic-phase LOGIC.md"
+        );
+        assert!(
+            !root.join("phases/init/actions").exists(),
+            "no logic-phase actions dir"
+        );
 
         // .workspace dir and .gitignore.
         assert!(root.join(".workspace").is_dir());
@@ -2706,7 +2889,10 @@ mod tests {
             .output()
             .expect("git log");
         let log_text = String::from_utf8_lossy(&log.stdout);
-        assert!(log_text.contains("initial-skill"), "initial-skill commit present: {log_text}");
+        assert!(
+            log_text.contains("initial-skill"),
+            "initial-skill commit present: {log_text}"
+        );
 
         let _ = std::fs::remove_dir_all(&config);
     }
@@ -2727,7 +2913,10 @@ mod tests {
             "{{\n  \"alpha\": {{\n    \"absolute_path\": \"{}\",\n    \"l2_remote_url\": \"\"\n  }}\n}}\n",
             outcome.root
         );
-        assert_eq!(index_raw, expected, "skill_index.json byte shape must match Python");
+        assert_eq!(
+            index_raw, expected,
+            "skill_index.json byte shape must match Python"
+        );
         let _ = std::fs::remove_dir_all(&config);
     }
 
@@ -2753,7 +2942,10 @@ mod tests {
             "{{\n  \"beta\": {{\n    \"absolute_path\": \"{}\",\n    \"l2_remote_url\": \"\"\n  }},\n  \"zeta\": {{\n    \"absolute_path\": \"/existing/zeta\",\n    \"l2_remote_url\": \"\"\n  }}\n}}\n",
             outcome.root
         );
-        assert_eq!(index_raw, expected, "upsert keeps sorted keys + existing entry");
+        assert_eq!(
+            index_raw, expected,
+            "upsert keeps sorted keys + existing entry"
+        );
         let _ = std::fs::remove_dir_all(&config);
     }
 
@@ -2769,7 +2961,10 @@ mod tests {
             .expect_err("non-empty target rejected");
         assert!(error.contains("non-empty"), "unexpected error: {error}");
         // The pre-existing file must be untouched.
-        assert_eq!(std::fs::read_to_string(target.join("existing.txt")).unwrap(), "occupied");
+        assert_eq!(
+            std::fs::read_to_string(target.join("existing.txt")).unwrap(),
+            "occupied"
+        );
         let _ = std::fs::remove_dir_all(&config);
     }
 
@@ -2792,7 +2987,10 @@ mod tests {
         let missing = config.join("nope").join("here");
         let error = create_skill_workspace_impl(missing.to_str().unwrap(), "x", &config)
             .expect_err("missing parent rejected");
-        assert!(error.contains("parent directory does not exist"), "unexpected: {error}");
+        assert!(
+            error.contains("parent directory does not exist"),
+            "unexpected: {error}"
+        );
         let _ = std::fs::remove_dir_all(&config);
     }
 
@@ -2805,7 +3003,10 @@ mod tests {
         let config = temp_root("create-default-parent");
         std::fs::create_dir_all(config.join("Skills")).unwrap();
         let outcome = create_skill_workspace_impl("   ", "gamma", &config).expect("create default");
-        assert_eq!(PathBuf::from(&outcome.root), config.join("Skills").join("gamma"));
+        assert_eq!(
+            PathBuf::from(&outcome.root),
+            config.join("Skills").join("gamma")
+        );
         let _ = std::fs::remove_dir_all(&config);
     }
 
@@ -2820,7 +3021,10 @@ mod tests {
         std::fs::create_dir_all(&config).unwrap();
         std::fs::write(
             config.join("app_settings.json"),
-            format!("{{\n  \"default_skills_directory\": \"{}\"\n}}\n", custom.display()),
+            format!(
+                "{{\n  \"default_skills_directory\": \"{}\"\n}}\n",
+                custom.display()
+            ),
         )
         .unwrap();
 
@@ -2857,7 +3061,10 @@ mod tests {
             .output()
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&name.stdout).trim(), "alice");
-        assert_eq!(String::from_utf8_lossy(&email.stdout).trim(), "alice@studio.local");
+        assert_eq!(
+            String::from_utf8_lossy(&email.stdout).trim(),
+            "alice@studio.local"
+        );
         let _ = std::fs::remove_dir_all(&config);
     }
 
@@ -2869,11 +3076,14 @@ mod tests {
         std::fs::create_dir_all(&folder).unwrap();
         std::fs::create_dir_all(&config).unwrap();
 
-        let outcome = open_skill_workspace_impl(folder.to_str().unwrap(), &config)
-            .expect("open bare folder");
+        let outcome =
+            open_skill_workspace_impl(folder.to_str().unwrap(), &config).expect("open bare folder");
         assert_eq!(PathBuf::from(&outcome.root), folder);
         // skill_id derived from the folder name via the TS-parity port.
-        assert_eq!(outcome.skill_id, skill_id_from_workspace_root(folder.to_str().unwrap()));
+        assert_eq!(
+            outcome.skill_id,
+            skill_id_from_workspace_root(folder.to_str().unwrap())
+        );
         // The index entry is written so the detail GET can resolve id→dir.
         let index_raw = std::fs::read_to_string(config.join("skill_index.json")).unwrap();
         assert!(index_raw.contains(&outcome.skill_id));
@@ -2893,7 +3103,10 @@ mod tests {
         assert!(open_skill_workspace_impl(missing.to_str().unwrap(), &config).is_err());
         let file_error = open_skill_workspace_impl(file.to_str().unwrap(), &config)
             .expect_err("file path rejected");
-        assert!(file_error.contains("not a directory"), "unexpected: {file_error}");
+        assert!(
+            file_error.contains("not a directory"),
+            "unexpected: {file_error}"
+        );
         assert!(open_skill_workspace_impl("  ", &config).is_err());
         let _ = std::fs::remove_dir_all(&config);
     }
@@ -2902,7 +3115,9 @@ mod tests {
     fn workspace_path_exists_reports_true_and_false() {
         let root = temp_root("exists-check");
         assert!(workspace_path_exists_impl(root.to_str().unwrap()));
-        assert!(!workspace_path_exists_impl(&root.join("missing").to_string_lossy()));
+        assert!(!workspace_path_exists_impl(
+            &root.join("missing").to_string_lossy()
+        ));
         assert!(!workspace_path_exists_impl("   "));
         let _ = std::fs::remove_dir_all(&root);
     }

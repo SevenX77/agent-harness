@@ -37,7 +37,7 @@ def test_serialize_adds_a_disconnected_phase_without_500(client: TestClient) -> 
     assert response.status_code == 200, response.text
     markdown = response.json()["markdown_content"]
     assert "  - logic" in markdown
-    assert '<phase depends_on="input" output>logic</phase>' in markdown
+    assert "<phase>logic</phase>" in markdown
     # The existing phase survives.
     assert "  - setup" in markdown
 
@@ -60,7 +60,7 @@ def test_serialize_preserves_fan_in_depends_on(client: TestClient) -> None:
 
     assert response.status_code == 200, response.text
     markdown = response.json()["markdown_content"]
-    assert '<phase depends_on="left, right" output>join</phase>' in markdown
+    assert '<phase depends_on="left, right">join</phase>' in markdown
     # left/right both depend only on setup (not linearised).
     assert '<phase depends_on="setup">left</phase>' in markdown
     assert '<phase depends_on="setup">right</phase>' in markdown
@@ -160,7 +160,7 @@ phases:
     assert "<note>Preserve this unknown body block.</note>" in markdown
     assert "<!-- keep: trailing comment -->" in markdown
     assert "  - review" in markdown
-    assert '<phase depends_on="setup" output>review</phase>' in markdown
+    assert '<phase depends_on="setup">review</phase>' in markdown
 
 
 def test_serialize_conflict_reports_current_disk_phase_count(

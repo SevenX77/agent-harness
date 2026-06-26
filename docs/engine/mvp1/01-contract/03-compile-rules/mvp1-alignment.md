@@ -36,7 +36,10 @@ sequenceDiagram
     Loader->>FS: read LOGIC.md / SUBGRAPH.md / SKILL.md
     Loader->>Loader: derive node type from filename and inject internal mode
     Loader->>AST: build node AST
-    alt SUBGRAPH or registered subagent mention
+    alt SUBGRAPH
+      Loader->>Resolver: resolve_subgraph(path)
+      Resolver-->>Loader: child skill root
+    else registered subagent mention
       Loader->>Resolver: resolve_skill(target_skill)
       Resolver-->>Loader: child skill root
     end
@@ -286,7 +289,7 @@ codex 复审确认 G1-G6 方向对,补强为"通用 app 可长期消费的协议
 |---|---|---|---|---|
 | `[F-v3-subgraph-schema-unknown-field]` | 编译期 | SUBGRAPH 未知字段 | 删除字段 | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
 | `[F-v3-subgraph-name-invalid]` | 编译期 | `name` 非法 | 修正命名 | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
-| `[F-v3-subgraph-target-skill-invalid]` | 编译期 | `target_skill` 非法或像路径 | 使用 registry skill id | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威) |
+| `[F-v3-subgraph-path-invalid]` | 编译期 | `path` 为空、越界、非目录或缺 `GRAPH.md` | 选择含 `GRAPH.md` 的 child graph folder，并写相对 skill root 的路径 | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威) |
 | `[F-v3-subgraph-io-schema-invalid]` | 编译期 | Subgraph IO schema 非法 | 修正 object schema | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威) |
 | `[F-v3-subgraph-io-mismatch]` | 编译期 | 父子 IO 字段集合不一致 | 对齐父 phase 和子 GRAPH IO | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威) |
 | `[F-v3-subgraph-io-schema-incompatible]` | 编译期 | 同名字段 schema 不兼容 | 对齐字段 schema | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威) |
@@ -304,7 +307,7 @@ codex 复审确认 G1-G6 方向对,补强为"通用 app 可长期消费的协议
 | `[F-v3-agent-exit-control-failed]` | 运行期 | AGENT phase 达到迭代预算仍无合格 finish_task marker | 让模型调用 finish_task 并提交通过 schema 的业务输出 | [ExitControl](../../02-mechanism/05-run-inner/05-exit-control/mvp1-alignment.md) |
 | `[F-v3-agent-tool-unknown]` | 编译期 | tool 未注册 | 注册 tool 或删引用 | [Agent](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
 | `[F-v3-agent-subagent-invalid]` | 编译期 | subagents 项缺字段 | 补 name/target_skill/description | [Agent](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
-| `[F-v3-agent-subgraph-invalid]` | 编译期 | subgraphs 项缺字段 | 补 name/target_skill/description | [Agent](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
+| `[F-v3-agent-subgraph-invalid]` | 编译期 | subgraphs 项缺字段 | 补 name/path/description | [Agent](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
 | `[F-v3-agent-max-iterations-invalid]` | 编译期 | max_iterations 超范围 | 设为 1..50 | [Agent](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
 | `[F-v3-agent-body-tag-unknown]` | 编译期 | 使用了不允许的顶级标签 | 仅保留 5 类白名单标签 | [Agent](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
 | `[F-v3-agent-role-missing]` | 编译期 | 缺 `<role>` | 添加 role | [Agent](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
@@ -343,10 +346,7 @@ codex 复审确认 G1-G6 方向对,补强为"通用 app 可长期消费的协议
 
 | 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
 |---|---|---|---|---|
-| `[F-v3-resolver-skill-id-invalid]` | 编译期 | skill id 非法 | 修正 target_skill | [Resolver](../../02-mechanism/02-resolver/mvp1-alignment.md#3-接口契约) |
-| `[F-v3-skill-id-ambiguous]` | 编译期/装配期 | resolver 找到多个匹配 skill root | 收窄 search paths 或移除重复注册 | [Resolver](../../02-mechanism/02-resolver/mvp1-alignment.md#3-接口契约) |
-| `[F-v3-skill-not-registered]` | 编译期/装配期 | resolver 查不到 skill | 在 Studio 导入或注册 skill | [Resolver](../../02-mechanism/02-resolver/mvp1-alignment.md#3-接口契约) |
-| `[F-v3-resolver-path-invalid]` | 编译期 | resolver 返回路径无 GRAPH.md | 修正 registry 记录 | [Resolver](../../02-mechanism/02-resolver/mvp1-alignment.md#3-接口契约) |
+| `[F-v3-resolver-path-invalid]` | 编译期 | subgraph path 非法或越界 | 修正 `path`，使其指向 skill root 内含 `GRAPH.md` 的目录 | [Resolver](../../02-mechanism/02-resolver/mvp1-alignment.md#3-接口契约) |
 | `[F-v3-resolver-interface-invalid]` | 编译期 | resolver 暴露非决议接口 | 实现单方法 `resolve_skill` | [Resolver](../../02-mechanism/02-resolver/mvp1-alignment.md#3-接口契约) |
 | `[F-v3-resolver-missing]` | 运行期 | 需要 resolver 但未注入 | 调用入口传入 resolver | [Resolver](../../02-mechanism/02-resolver/mvp1-alignment.md#3-接口契约) |
 

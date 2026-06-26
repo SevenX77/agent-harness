@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { LintError, LintResult } from '../api/types'
+import type { DebouncedLintTarget } from './useDebouncedLint'
 
 // ── Business-logic layer ────────────────────────────────────────────────────
 // Pure projections of the backend lint payload. These cover edit → debounce →
@@ -116,10 +117,10 @@ const { useDebouncedLint, lintStatusStorageKey, lintStatusEvent, lintResultEvent
   './useDebouncedLint'
 )
 
-function run(skillId: string, markdown: string) {
+function run(skillId: string, markdown: string, target?: DebouncedLintTarget) {
   reactHarness.cursor = 0
   // eslint-disable-next-line react-hooks/rules-of-hooks -- test harness drives the hook through a mocked React runtime
-  useDebouncedLint(skillId, markdown)
+  useDebouncedLint(skillId, markdown, target)
 }
 
 function hookState() {
@@ -213,6 +214,23 @@ describe('useDebouncedLint real hook path', () => {
     expect(resultEvent).toBeDefined()
     expect((resultEvent!.detail as { skillId: string }).skillId).toBe('skill-1')
     expect((resultEvent!.detail as { result: LintResult }).result.errors).toHaveLength(1)
+  })
+
+  it('sends the edited file path and workspace root with phase-file lint requests', async () => {
+    const payload: LintResult = { status: 'passed', errors: [], phases_summary: null }
+    apiHarness.post.mockResolvedValue({ data: payload })
+
+    run('skill-1', '---\nname: review\n---\n', {
+      filePath: 'phases/review/SKILL.md',
+      workspaceRoot: 'D:/repo/skills/story-deconstruction-v3',
+    })
+    vi.advanceTimersByTime(LINT_DEBOUNCE_MS)
+
+    expect(apiHarness.post).toHaveBeenCalledWith('/skills/skill-1/lint', {
+      markdown: '---\nname: review\n---\n',
+      file_path: 'phases/review/SKILL.md',
+      workspace_root: 'D:/repo/skills/story-deconstruction-v3',
+    })
   })
 
   it('a passed lint publishes passed with no diagnostics', async () => {

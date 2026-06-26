@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { GraphTopologyItem, SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData } from "@/components/nodes"
-import { INPUT_ID, OUTPUT_ID } from "@/components/nodes"
 import { fieldSupplyByField, type SelectedNode } from "./io-target"
 
 // n2-canvas#10 (data-gap-viz): fieldSupplyByField is the consumer of the REAL new
@@ -90,14 +89,8 @@ describe("fieldSupplyByField (n2-canvas#10 per-node data-gap projection)", () =>
     expect(map.get("doc")?.producer_phase).toBe("fetch")
   })
 
-  it("returns an empty map for the global input/output nodes and no selection", () => {
-    for (const selection of [
-      null,
-      makeNode(INPUT_ID),
-      makeNode(OUTPUT_ID),
-    ] satisfies SelectedNode[]) {
-      expect(fieldSupplyByField(selection, DETAIL).size).toBe(0)
-    }
+  it("returns an empty map when no phase is selected", () => {
+    expect(fieldSupplyByField(null, DETAIL).size).toBe(0)
   })
 
   it("returns an empty map when the backend row carries no field_supply (older payload)", () => {

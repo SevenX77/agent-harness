@@ -28,42 +28,48 @@ function edgeIds(edges: ReturnType<typeof buildEdges>): string[] {
 }
 
 describe("buildEdges", () => {
-  it("maps the reserved 'input' dependency to the global Input node (not a dangling 'input' source)", () => {
-    // <phase depends_on="input">step1</phase> — step1 is input-rooted.
-    const ids = edgeIds(buildEdges([node("step1", ["input"]), node("step2", ["step1"])]))
-    expect(ids).toContain(`${INPUT_ID}->step1`) // the fix: real global node, not "input"
-    expect(ids).not.toContain("input->step1") // the bug: dangling source
+  it("renders declared phase dependencies plus graph boundary edges", () => {
+    const ids = edgeIds(buildEdges([node("step1", []), node("step2", ["step1"])]))
+
     expect(ids).toContain("step1->step2")
+    expect(ids).toContain(`${INPUT_ID}->step1`)
+    expect(ids).toContain(`step2->${OUTPUT_ID}`)
+    expect(ids).toHaveLength(3)
   })
 
-  it("links a disconnected phase (no deps) to the Input node", () => {
-    const ids = edgeIds(buildEdges([node("solo", [])]))
-    expect(ids).toContain(`${INPUT_ID}->solo`)
-    expect(ids).toContain(`solo->${OUTPUT_ID}`) // also a leaf -> Output
+  it("synthesizes input and output edges for a single phase", () => {
+    expect(edgeIds(buildEdges([node("solo", [])]))).toEqual([
+      `${INPUT_ID}->solo`,
+      `solo->${OUTPUT_ID}`,
+    ])
   })
 
-  it("links leaf phases (no dependents) to the Output node", () => {
-    const ids = edgeIds(buildEdges([node("a", ["input"]), node("b", ["a"])]))
-    // b is the only leaf.
-    expect(ids).toContain(`b->${OUTPUT_ID}`)
-    expect(ids).not.toContain(`a->${OUTPUT_ID}`)
+  it("synthesizes output edges for leaf phases", () => {
+    const ids = edgeIds(buildEdges([node("a", []), node("b", ["a"])]))
+
+    expect(ids).toEqual([`${INPUT_ID}->a`, "a->b", `b->${OUTPUT_ID}`])
   })
 
   it("preserves real phase->phase fan-in", () => {
     const ids = edgeIds(
       buildEdges([
-        node("a", ["input"]),
+        node("a", []),
         node("b", ["a"]),
         node("c", ["a"]),
         node("d", ["b", "c"]),
       ]),
     )
+
+    expect(ids).toContain("a->b")
+    expect(ids).toContain("a->c")
     expect(ids).toContain("b->d")
     expect(ids).toContain("c->d")
     expect(ids).toContain(`${INPUT_ID}->a`)
+    expect(ids).toContain(`d->${OUTPUT_ID}`)
+    expect(ids).toHaveLength(6)
   })
 
-  it("connects Input straight to Output for an empty graph", () => {
+  it("connects input directly to output for an empty graph", () => {
     expect(edgeIds(buildEdges([]))).toEqual([`${INPUT_ID}->${OUTPUT_ID}`])
   })
 })

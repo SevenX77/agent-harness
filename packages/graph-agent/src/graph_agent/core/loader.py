@@ -1103,13 +1103,11 @@ def _extract_body_phase_refs(graph_path: Path, graph_body: str) -> list[BodyPhas
                 "[F-v3-graph-phase-id-invalid] body <phase> name is empty",
             )
         depends_raw = attrs.get("depends_on")
-        if depends_raw is None or not depends_raw.strip():
-            _graph_fatal(
-                graph_path,
-                _xml_line(graph_body, match.start()),
-                "[F-v3-graph-depends-unknown] body <phase> depends_on is required",
-            )
-        depends_on = tuple(dep for dep in re.split(r"[\s,]+", depends_raw.strip()) if dep)
+        depends_on = (
+            tuple(dep for dep in re.split(r"[\s,]+", depends_raw.strip()) if dep)
+            if depends_raw is not None
+            else ()
+        )
         attr_raw_start = match.start(1)
         token = PhaseTokenInfo(
             phase_id=name,
@@ -1148,13 +1146,8 @@ def _validate_graph_topology(
     )
 
     _validate_acyclic_graph(graph_path, adjacency)
-    if not input_roots:
-        _graph_fatal(
-            graph_path,
-            1,
-            "[F-v3-graph-depends-unknown] at least one phase must depend_on input",
-        )
-    _validate_no_islands(graph_path, adjacency, input_roots)
+    if input_roots:
+        _validate_no_islands(graph_path, adjacency, input_roots)
     _validate_unknown_dependencies(graph_path, unknown_deps)
     _validate_output_phases(graph_path, body_phase_refs, adjacency)
     for phase in phases:
@@ -1234,6 +1227,9 @@ def _collect_graph_dependencies(
     input_roots: list[str] = []
     unknown_deps: list[tuple[BodyPhaseRef, str]] = []
     for ref in body_phase_refs:
+        if not ref.depends_on:
+            input_roots.append(ref.name)
+            continue
         for dep in ref.depends_on:
             if dep == "input":
                 input_roots.append(ref.name)
@@ -1320,12 +1316,6 @@ def _validate_output_phases(
     adjacency: dict[str, list[str]],
 ) -> None:
     outputs = {ref.name for ref in body_phase_refs if ref.output}
-    if not outputs:
-        _graph_fatal(
-            graph_path,
-            1,
-            "[F-v3-graph-output-phase-invalid] at least one body <phase> must be output",
-        )
     non_terminal = {phase for phase, downstream in adjacency.items() if downstream}
     invalid = sorted(outputs & non_terminal)
     if invalid:

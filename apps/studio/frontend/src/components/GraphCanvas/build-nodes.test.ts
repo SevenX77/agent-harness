@@ -120,14 +120,14 @@ describe('buildNodes', () => {
     expect(phaseNode(nodes, 'review').errorMessage).toBeUndefined()
   })
 
-  it('always brackets phase nodes with global input/output nodes', () => {
+  it('brackets phase nodes with global input/output nodes', () => {
     const nodes = buildNodes('demo', skillDetail({
       phases: ['only'],
       graph_topology: [{ id: 'only', src: 'phases/only/LOGIC.md', depends_on: [], mode: 'logic' }],
     }), new Set(), () => {}, {})
 
-    expect(nodes[0].id).toBe(INPUT_ID)
-    expect(nodes[nodes.length - 1].id).toBe(OUTPUT_ID)
+    expect(nodes.map((node) => node.id)).toEqual([INPUT_ID, 'only', OUTPUT_ID])
+    expect(nodes.map((node) => node.type)).toEqual(['globalInput', 'skill', 'globalOutput'])
   })
 
   it('derives node kind from the phase FILE when topology.mode is absent (file is truth source)', () => {
@@ -343,10 +343,9 @@ describe('buildNodesFromTopology (drilled child graph)', () => {
     { id: 'nested', src: 'phases/nested/SUBGRAPH.md', depends_on: ['plan'], mode: 'subgraph', path: '/skills/grandchild' },
   ]
 
-  it('brackets drilled phases with global input/output and preserves order + deps', () => {
+  it('brackets drilled phase nodes with global input/output and preserves order + deps', () => {
     const nodes = buildNodesFromTopology('demo', ['plan', 'nested'], topology, {})
-    expect(nodes[0].id).toBe(INPUT_ID)
-    expect(nodes[nodes.length - 1].id).toBe(OUTPUT_ID)
+    expect(nodes.map((node) => node.id)).toEqual([INPUT_ID, 'plan', 'nested', OUTPUT_ID])
 
     const plan = phaseNode(nodes, 'plan')
     expect(plan.mode).toBe('agent')

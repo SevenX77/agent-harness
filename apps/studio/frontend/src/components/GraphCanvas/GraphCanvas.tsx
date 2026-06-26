@@ -14,25 +14,15 @@ import {
   type FinalConnectionState,
   type ReactFlowInstance,
 } from '@xyflow/react'
-import { FileCog, Plus } from 'lucide-react'
+import { Trash2 } from 'lucide-react'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type MouseEvent } from 'react'
 import { toast } from 'sonner'
 import { AxiosError } from 'axios'
 import type { ChildGraphTopology, CompileError, ErrorResponse, ResumeValidityResponse, SkillDetail } from '@/api/types'
-import { getChildGraphTopology, getSkillDetail, writeSkillFile, type ResumeRunOptions } from '@/api/client'
+import { getChildGraphTopology, getSkillDetail, type ResumeRunOptions } from '@/api/client'
 import { isTauriRuntime } from '@/config/runtime'
 import { resolveWorkspaceIdentity } from '@/components/studio/workspace-identity'
-import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { MacroContractDrawer } from '@/components/macroform/MacroContractDrawer'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -42,33 +32,28 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import { CycleDetectedError, getAutoLayoutedElements } from '@/lib/layout'
 import { sha256Hex } from '@/lib/hash'
 import { ContextEdge, type ContextEdgeData } from '@/components/edges/ContextEdge'
-import { GlobalInputNode, GlobalOutputNode } from '@/components/nodes/GlobalInputOutputNode'
 import { SubgraphGroupNode } from '@/components/nodes/SubgraphGroupNode'
-import { buildEdges, INPUT_ID, OUTPUT_ID, SkillNode, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
+import { buildEdges, GlobalInputNode, GlobalOutputNode, INPUT_ID, OUTPUT_ID, SkillNode, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
 import { buildSubgraphExpansion, isSubgraphPreviewId, type ExpandedSubgraphView, type SubgraphExpansionRequest } from '@/components/GraphCanvas/subgraph-expansion'
 import type { GoldenNodeState } from '@/components/studio/node-golden'
 import { useOptionalWorkspaceContext, type EdgeContextJson } from '@/components/studio/WorkspaceContext'
+import type { FileOpenInput, FileOpenRequest } from '@/components/studio/file-types'
 import { HitlNodeToolbar } from '@/components/studio/HitlNodeToolbar'
 import { ResumeNodeToolbar } from '@/components/studio/ResumeNodeToolbar'
 import type { TraceHitlResumeRequest } from '@/components/studio/hitl-prompt'
 import { resolveSubgraphPath } from '@/components/studio/subgraph-path'
 import { edgeContextFromEvents } from '@/lib/edge-context'
+import { errorMessage } from '@/utils/errors'
 import type { PanelKind } from '@/components/studio/Toolbar'
 import { buildNodes, buildNodesFromTopology, phaseKindFile } from './build-nodes'
 import { nodeToFocus } from './canvas-focus'
 import {
   type NewPhaseKind,
-  checkSequentialOverwrites,
   addSequentialOverwriteField,
+  defaultPhaseId,
   phaseRefsFromSkillDetail,
   phaseFilePath,
   planEdgeReconnect,
@@ -77,6 +62,13 @@ import {
 import { DrillBreadcrumb } from './DrillBreadcrumb'
 import { drillStackReducer, type DrillStack } from './drill-stack'
 import { isDrilledChildEditable, type ChildSaveTarget } from './drill-edit'
+import { PhaseNameDialog } from './PhaseNameDialog'
+import {
+  currentFileAllowsSequentialOverwrite,
+  findNextSubgraphExpansionNode,
+  sequentialOverwriteConflictForVisibleNode,
+  sequentialOverwriteRoutesFromNodeErrors,
+} from './sequential-overwrite-routing'
 
 interface GraphCanvasProps {
   skillId: string
@@ -89,8 +81,11 @@ interface GraphCanvasProps {
   error?: unknown
   selectedNodeId?: string | null
   onNodeSelect?: (node: { id: string, data: SkillGraphNodeData }) => void
+  onNodeDeselect?: () => void
+  onNodeFileOpen?: (file: FileOpenInput) => void
   onPanelChange?: (panel: PanelKind | null) => void
-  onCreatePhase?: (kind: NewPhaseKind) => Promise<void> | void
+  onCreatePhase?: (kind: NewPhaseKind, phaseId?: string) => Promise<void> | void
+  onDeletePhase?: (phaseId: string, target?: ChildSaveTarget) => Promise<void> | void
   // n2-canvas #14: every save handler takes an optional drilled-child `target`. When
   // editing INSIDE a drilled subgraph the canvas passes the child's own identity +
   // SkillDetail + child-refetch so the write/serialize/compile route to the CHILD
@@ -108,6 +103,9 @@ interface GraphCanvasProps {
     target?: ChildSaveTarget,
   ) => Promise<void> | void
   statusByNodeId?: Record<string, SkillNodeStatus>
+  /** Manual compile errors only. Used for node-anchored authoring confirmations. */
+  sequentialOverwriteErrorsByNodeId?: Record<string, CompileError[]>
+  /** Full node-error projection (manual compile + lint + data gap). Used only for node badges. */
   compileErrorsByNodeId?: Record<string, CompileError[]>
   goldenStateByNodeId?: Record<string, GoldenNodeState>
   errorMessageByNodeId?: Record<string, string>
@@ -124,6 +122,10 @@ interface GraphCanvasProps {
   activeTracePhase?: string | null
   compact?: boolean
   onPhaseFileSave?: (args: { path: string; content: string; expectedHash: string }, target?: ChildSaveTarget) => Promise<void> | void
+  onPhaseFileRead?: (
+    args: { path: string },
+    target?: Pick<ChildSaveTarget, 'skillId' | 'workspaceRoot'>,
+  ) => Promise<{ content: string; hash?: string | null }> | { content: string; hash?: string | null }
   // F4: when the run pauses for human input, the node-anchored HitL box submits
   // the answer through this callback (the same resume path the side panel uses).
   onSubmitHitlResponse?: (request: TraceHitlResumeRequest) => void
@@ -158,6 +160,10 @@ const useCanvasLayoutEffect = typeof window === 'undefined' ? useEffect : useLay
 const MINI_MAP_WIDTH = 200
 const MINI_MAP_HEIGHT = 120
 const MINI_MAP_PADDING = 48
+
+function overwriteConflictKey(conflict: Pick<OverwriteConflict, 'nodeId' | 'fieldName' | 'ancestorNodeId'>): string {
+  return `${conflict.nodeId}\0${conflict.fieldName}\0${conflict.ancestorNodeId}`
+}
 
 function miniMapNodeSize(type: string | undefined): { width: number; height: number } {
   if (type === 'globalInput' || type === 'globalOutput') {
@@ -291,6 +297,28 @@ function skillNodePhaseId(node: SkillGraphNode): string {
   return typeof node.data.phaseId === 'string' && node.data.phaseId ? node.data.phaseId : node.id
 }
 
+function phaseFileRequestForNode(
+  node: SkillGraphNode,
+  fallbackSkillId: string,
+  fallbackWorkspaceRoot: string | null | undefined,
+): FileOpenRequest {
+  const phaseId = skillNodePhaseId(node)
+  return {
+    path: node.data.filePath ?? `phases/${phaseId}/${phaseKindFile(node.data)}`,
+    skillId: node.data.skillId || fallbackSkillId,
+    workspaceRoot: node.data.workspaceRoot ?? fallbackWorkspaceRoot ?? null,
+    language: 'markdown',
+    saveEnabled: true,
+  }
+}
+
+function phaseIdFromCanvasNodeId(nodeId: string): string {
+  const parentId = previewNodeParentId(nodeId)
+  if (!parentId) return nodeId
+  const prefix = `${SUBGRAPH_PREVIEW_NODE_PREFIX}${parentId}::`
+  return nodeId.startsWith(prefix) ? nodeId.slice(prefix.length) : nodeId
+}
+
 export function topologyOwnerSkillIdForNode(node: SkillGraphNode, rootSkillId: string): string {
   return node.data.topologyOwnerSkillId || rootSkillId
 }
@@ -358,12 +386,16 @@ export function GraphCanvas({
   error,
   selectedNodeId,
   onNodeSelect,
+  onNodeDeselect,
+  onNodeFileOpen,
   onPanelChange,
   onCreatePhase,
+  onDeletePhase,
   onPersistConnection,
   onDisconnectConnection,
   onReconnectConnection,
   statusByNodeId,
+  sequentialOverwriteErrorsByNodeId,
   compileErrorsByNodeId,
   goldenStateByNodeId,
   errorMessageByNodeId,
@@ -371,6 +403,7 @@ export function GraphCanvas({
   activeTracePhase,
   compact = false,
   onPhaseFileSave,
+  onPhaseFileRead,
   onSubmitHitlResponse,
   hitlSubmitting = false,
   runId,
@@ -414,12 +447,14 @@ export function GraphCanvas({
   const [childDetail, setChildDetail] = useState<SkillDetail | null>(null)
   const [childGraphError, setChildGraphError] = useState<string | null>(null)
   const [isChildGraphLoading, setIsChildGraphLoading] = useState(false)
-  const [selectedCanvasNodeId, setSelectedCanvasNodeId] = useState<string | null>(null)
-  // n2 #22: the structured GRAPH.md macro-contract form (header scalars + phases
-  // list). Opened from the top-left toolbar; raw GRAPH.md double-click (#23)
-  // stays available untouched.
-  const [macroFormOpen, setMacroFormOpen] = useState(false)
+  const [selectionOverride, setSelectionOverride] = useState<{ active: boolean; nodeId: string | null }>({
+    active: false,
+    nodeId: null,
+  })
+  const selectionOverrideRef = useRef(selectionOverride)
   const [edgeMenuConnection, setEdgeMenuConnection] = useState<{ source: string; target: string } | null>(null)
+  const [nodeMenuPhaseId, setNodeMenuPhaseId] = useState<string | null>(null)
+  const [createPhaseKind, setCreatePhaseKind] = useState<NewPhaseKind | null>(null)
   const [canvasHeight, setCanvasHeight] = useState(0)
   const canvasRef = useRef<HTMLElement | null>(null)
   // R4 reconnect: set true the moment a dragged edge endpoint lands on a valid
@@ -431,33 +466,45 @@ export function GraphCanvas({
   const [warningQueue, setWarningQueue] = useState<OverwriteConflict[]>([])
   const [activeWarningIndex, setActiveWarningIndex] = useState<number>(-1)
   const [cancelledNodeIds, setCancelledNodeIds] = useState<Set<string>>(() => new Set())
+  const [suppressedWarningKeys, setSuppressedWarningKeys] = useState<Set<string>>(() => new Set())
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance<GraphCanvasNode, Edge<ContextEdgeData>> | null>(null)
+  const nodesRef = useRef<GraphCanvasNode[]>([])
   const [isViewportReady, setIsViewportReady] = useState(false)
   const viewportReadyRef = useRef(false)
   const viewportFitTokenRef = useRef(0)
   const lastFittedLayoutSignatureRef = useRef<string | null>(null)
+  const pendingNodeFileOpenRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const cancelPendingNodeFileOpen = useCallback(() => {
+    if (pendingNodeFileOpenRef.current) {
+      clearTimeout(pendingNodeFileOpenRef.current)
+      pendingNodeFileOpenRef.current = null
+    }
+  }, [])
+
+  useEffect(() => cancelPendingNodeFileOpen, [cancelPendingNodeFileOpen])
+
+  const applySelectionOverride = useCallback((nodeId: string | null) => {
+    const next = { active: true, nodeId }
+    selectionOverrideRef.current = next
+    setSelectionOverride(next)
+  }, [])
+
+  useEffect(() => {
+    const next = { active: false, nodeId: null }
+    selectionOverrideRef.current = next
+    setSelectionOverride(next)
+  }, [selectedNodeId])
+
+  const currentActiveSelectedNodeId = useCallback(() => {
+    const override = selectionOverrideRef.current
+    return override.active ? override.nodeId : selectedNodeId
+  }, [selectedNodeId])
 
   const updateViewportReady = useCallback((ready: boolean) => {
     viewportReadyRef.current = ready
     setIsViewportReady(ready)
   }, [])
-
-  // 1. Conflict detection effect
-  useEffect(() => {
-    if (!skillDetail) {
-      setWarningQueue([])
-      setActiveWarningIndex(-1)
-      return
-    }
-    const phases = phaseRefsFromSkillDetail(skillDetail)
-    const conflicts = checkSequentialOverwrites(skillDetail, phases)
-    setWarningQueue(conflicts)
-    if (conflicts.length > 0) {
-      setActiveWarningIndex(0)
-    } else {
-      setActiveWarningIndex(-1)
-    }
-  }, [skillDetail])
 
   // 2. Viewport pan transition effect
   useEffect(() => {
@@ -472,49 +519,155 @@ export function GraphCanvas({
   }, [activeWarningIndex, warningQueue, reactFlowInstance])
 
   // 3. Sequential overwrite allow/cancel callbacks
-  const handleAllowSequentialOverwrite = useCallback(async (nodeId: string, fieldName: string) => {
+  const expandedChildSaveTarget = useCallback((parentNodeId: string): ChildSaveTarget | null => {
+    const entry = expandedTopologiesRef.current[parentNodeId]
+    if (!entry || entry.view.status !== 'loaded' || !entry.view.detail) return null
+    const childSkillId = entry.childSkillId ?? resolveWorkspaceIdentity(`local:${entry.path}`).skillId
+    if (!childSkillId) return null
+    return {
+      skillId: childSkillId,
+      workspaceRoot: entry.path,
+      detail: entry.view.detail,
+      onSettled: async () => undefined,
+    }
+  }, [])
+
+  const updateExpandedPhaseFile = useCallback((parentNodeId: string, relativePath: string, content: string) => {
+    setExpandedTopologies((current) => {
+      const entry = current[parentNodeId]
+      if (!entry || entry.view.status !== 'loaded' || !entry.view.detail) return current
+      return {
+        ...current,
+        [parentNodeId]: {
+          ...entry,
+          view: {
+            ...entry.view,
+            detail: {
+              ...entry.view.detail,
+              files: {
+                ...(entry.view.detail.files ?? {}),
+                [relativePath]: content,
+              },
+            },
+          },
+        },
+      }
+    })
+  }, [])
+
+  const handleAllowSequentialOverwrite = useCallback(async (nodeId: string, fieldName: string, ancestorNodeId: string) => {
     if (!skillDetail || !onPhaseFileSave) return
-    const phase = phaseRefsFromSkillDetail(skillDetail).find((p) => p.id === nodeId)
-    if (!phase) return
-    const relativePath = phaseFilePath(nodeId, phase.mode)
-    const currentContent = skillDetail.files?.[relativePath]
-    if (!currentContent) return
+    const conflictToClear = warningQueue.find((conflict) => (
+      conflict.nodeId === nodeId
+      && conflict.fieldName === fieldName
+      && conflict.ancestorNodeId === ancestorNodeId
+    )) ?? { nodeId, fieldName, ancestorNodeId }
+    const conflictKey = overwriteConflictKey(conflictToClear)
+    const parentNodeId = previewNodeParentId(nodeId)
+    const visibleNode = nodesRef.current.find((node): node is SkillGraphNode => node.type === 'skill' && node.id === nodeId)
+    const nodeWorkspaceRoot = visibleNode?.data.workspaceRoot ?? workspaceRoot ?? null
+    const isChildFileTarget = Boolean(
+      visibleNode
+      && (
+        visibleNode.data.skillId !== skillId
+        || nodeWorkspaceRoot !== (workspaceRoot ?? null)
+      ),
+    )
+    const fallbackDetail = visibleNode?.data.resolvedSkillDetail ?? skillDetail
+    const fallbackTarget = visibleNode && isChildFileTarget
+      ? {
+          skillId: visibleNode.data.skillId || skillId,
+          workspaceRoot: nodeWorkspaceRoot,
+          detail: fallbackDetail,
+          onSettled: async () => undefined,
+        } satisfies ChildSaveTarget
+      : null
+    const target = parentNodeId ? expandedChildSaveTarget(parentNodeId) ?? fallbackTarget : fallbackTarget
+    const detail = target?.detail ?? skillDetail
+    const phaseId = visibleNode ? skillNodePhaseId(visibleNode) : phaseIdFromCanvasNodeId(nodeId)
+    const phase = phaseRefsFromSkillDetail(detail).find((p) => p.id === phaseId)
+    const relativePath = visibleNode?.data.filePath ?? (phase ? phaseFilePath(phaseId, phase.mode) : null)
+    if (!relativePath) return
+    let currentContent: string | undefined
+    let currentHash: string | null = null
+    if (onPhaseFileRead) {
+      try {
+        const file = await onPhaseFileRead({ path: relativePath }, target ?? undefined)
+        currentContent = file.content
+        currentHash = file.hash ?? null
+      } catch (readError) {
+        toast.error(`Could not read phase file: ${errorMessage(readError)}`)
+        return
+      }
+    }
+    if (currentContent === undefined) {
+      currentContent = detail.files?.[relativePath]
+    }
+    if (currentContent === undefined) {
+      toast.error(`Phase file is missing: ${relativePath}`)
+      return
+    }
 
     const updatedContent = addSequentialOverwriteField(currentContent, fieldName)
+    const updatedDetail: SkillDetail = {
+      ...detail,
+      files: {
+        ...(detail.files ?? {}),
+        [relativePath]: updatedContent,
+      },
+    }
     try {
-      const sha256Hex = async (text: string) => {
-        const msgUint8 = new TextEncoder().encode(text)
-        const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8)
-        const hashArray = Array.from(new Uint8Array(hashBuffer))
-        return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')
-      }
-      const hash = await sha256Hex(currentContent)
+      const hash = currentHash ?? await sha256Hex(currentContent)
       await onPhaseFileSave({
         path: relativePath,
         content: updatedContent,
         expectedHash: hash,
-      })
-      // Advance warning queue index or clear queue
-      if (activeWarningIndex < warningQueue.length - 1) {
-        setActiveWarningIndex((prev) => prev + 1)
-      } else {
-        setWarningQueue([])
-        setActiveWarningIndex(-1)
+      }, target ?? undefined)
+      if (parentNodeId) {
+        updateExpandedPhaseFile(parentNodeId, relativePath, updatedContent)
+      } else if (isChildFileTarget) {
+        setChildDetail((current) => current ? updatedDetail : current)
       }
+      if (visibleNode && isChildFileTarget && selectedNodeId === phaseId) {
+        onNodeSelect?.({
+          id: phaseId,
+          data: {
+            ...visibleNode.data,
+            resolvedSkillDetail: updatedDetail,
+          },
+        })
+      }
+      setSuppressedWarningKeys((current) => {
+        const next = new Set(current)
+        next.add(conflictKey)
+        return next
+      })
+      setCancelledNodeIds((prev) => {
+        const next = new Set(prev)
+        next.delete(nodeId)
+        return next
+      })
+      setWarningQueue([])
+      setActiveWarningIndex(-1)
     } catch (saveError) {
-      toast.error('Could not whitelist sequential overwrite: ' + (saveError instanceof Error ? saveError.message : String(saveError)))
+      toast.error(`Could not whitelist sequential overwrite: ${errorMessage(saveError)}`)
     }
-  }, [skillDetail, onPhaseFileSave, activeWarningIndex, warningQueue])
+  }, [expandedChildSaveTarget, onNodeSelect, onPhaseFileRead, onPhaseFileSave, selectedNodeId, skillDetail, skillId, updateExpandedPhaseFile, warningQueue, workspaceRoot])
 
-  const handleCancelWarning = useCallback((nodeId: string) => {
+  const handleCancelSequentialOverwrite = useCallback((nodeId: string, fieldName: string, ancestorNodeId: string) => {
     setCancelledNodeIds((prev) => {
       const next = new Set(prev)
       next.add(nodeId)
       return next
     })
+    setSuppressedWarningKeys((current) => {
+      const next = new Set(current)
+      next.add(overwriteConflictKey({ nodeId, fieldName, ancestorNodeId }))
+      return next
+    })
     setWarningQueue([])
     setActiveWarningIndex(-1)
-    toast.error('Warning cancelled. Conflict node marked red.')
+    toast.error('Sequential overwrite still unresolved. Adjust the node or allow overwrite before compiling.')
   }, [])
   const fitViewRef = useRef<(() => Promise<boolean> | boolean | void) | null>(null)
   const fitLayout = useCallback((options: { reveal?: boolean } = {}) => {
@@ -536,6 +689,11 @@ export function GraphCanvas({
   const toggleSubgraph = useCallback((nodeId: string) => {
     setExpandedSubgraphs((current) => nextExpandedSubgraphs(current, nodeId))
   }, [])
+
+  const openNodeFile = useCallback((node: SkillGraphNode) => {
+    const openFile = onNodeFileOpen ?? workspaceRef.current?.onFileOpen
+    openFile?.(phaseFileRequestForNode(node, skillId, workspaceRoot))
+  }, [onNodeFileOpen, skillId, workspaceRoot])
 
   // N2 atom #15: open/close an AGENT node's inline L3 step editor.
   const toggleSteps = useCallback((nodeId: string) => {
@@ -567,7 +725,7 @@ export function GraphCanvas({
         const expectedHash = await sha256Hex(currentBody)
         await onPhaseFileSave({ path: filePath, content: nextBody, expectedHash }, ...childArgs)
       } catch (saveError) {
-        toast.error('Could not save steps: ' + (saveError instanceof Error ? saveError.message : String(saveError)))
+        toast.error(`Could not save steps: ${errorMessage(saveError)}`)
       }
     },
     [onPhaseFileSave],
@@ -607,7 +765,9 @@ export function GraphCanvas({
       if (signal.cancelled) return
       setChildGraph(topology)
       const childSkillId = resolveWorkspaceIdentity(`local:${topology.path}`).skillId
-      if (childSkillId) {
+      if (topology.detail) {
+        setChildDetail(topology.detail)
+      } else if (childSkillId) {
         try {
           const detail = await getSkillDetail(childSkillId)
           if (signal.cancelled) return
@@ -666,6 +826,14 @@ export function GraphCanvas({
   }, [drilledPath, loadChildGraph])
   const safeStatusByNodeId = useMemo(() => statusByNodeId ?? {}, [statusByNodeId])
   const safeCompileErrorsByNodeId = useMemo(() => compileErrorsByNodeId ?? {}, [compileErrorsByNodeId])
+  const safeSequentialOverwriteErrorsByNodeId = useMemo(
+    () => sequentialOverwriteErrorsByNodeId ?? {},
+    [sequentialOverwriteErrorsByNodeId],
+  )
+  const sequentialOverwriteRoutes = useMemo(
+    () => sequentialOverwriteRoutesFromNodeErrors(safeSequentialOverwriteErrorsByNodeId, workspaceRoot ?? null),
+    [safeSequentialOverwriteErrorsByNodeId, workspaceRoot],
+  )
   const safeGoldenStateByNodeId = useMemo(() => goldenStateByNodeId ?? {}, [goldenStateByNodeId])
   const safeErrorMessageByNodeId = useMemo(() => errorMessageByNodeId ?? {}, [errorMessageByNodeId])
   const safeDirtyDownstreamNodeIds = useMemo(
@@ -739,7 +907,7 @@ export function GraphCanvas({
     }),
     [compact, expandedSteps, toggleSteps, handleStepsSave, safeDirtyDownstreamNodeIds],
   )
-  const rawNodes = useMemo(() => {
+  const rawNodes = useMemo<GraphCanvasNode[]>(() => {
     // R9 / n2-canvas #14: when focused into a child graph, render its real phases.
     // Status overlays (which key on ROOT phase ids) are dropped at depth.
     if (isDrilled) {
@@ -749,11 +917,14 @@ export function GraphCanvas({
       // read-only child (empty agentSteps), realising the PM read-only block.
       const childNodeSkillId = drilledChildIdentity?.skillId ?? skillId
       const childAgentSteps = isDrilledChildReadOnly ? {} : agentStepsInputs
-      // Option A: once the child's full SkillDetail loads, render it as a
-      // first-class editable graph with buildNodes (reusing the root edit wiring).
-      // Until then, render the topology-only projection (loading/fallback path).
+      // Option A: once the child's full path-resolved SkillDetail loads, render it
+      // as a first-class editable graph with buildNodes (reusing the root edit
+      // wiring). Until then, render the topology-only projection.
       if (childDetail && !isDrilledChildReadOnly) {
         return buildNodes(childNodeSkillId, childDetail, expandedSubgraphs, toggleSubgraph, {}, {}, {}, {}, childAgentSteps, childGraph.path)
+          .map((node) => node.type === 'skill'
+            ? { ...node, data: { ...node.data, resolvedSkillDetail: childDetail } }
+            : node)
       }
       return buildNodesFromTopology(childNodeSkillId, childGraph.phases, childGraph.graph_topology, {}, childAgentSteps, childGraph.path)
     }
@@ -872,7 +1043,13 @@ export function GraphCanvas({
         })
       }
       if (requests.length === 0) break
-      const parentNodes = availableNodes.map((node) => ({ id: node.id, type: node.type, position: node.position }))
+      const parentNodes = availableNodes.map((node) => ({
+        id: node.id,
+        type: node.type,
+        position: node.position,
+        width: typeof node.width === 'number' ? node.width : undefined,
+        height: typeof node.height === 'number' ? node.height : undefined,
+      }))
       const partial = buildSubgraphExpansion(parentNodes, requests, {
         expandedSubgraphs,
         onToggleSubgraph: toggleSubgraph,
@@ -894,6 +1071,39 @@ export function GraphCanvas({
     }),
     [layoutResult.edges, layoutResult.nodes, subgraphExpansion.edges, subgraphExpansion.nodes],
   )
+  const routedSequentialOverwriteConflicts = useMemo(() => {
+    const conflicts: OverwriteConflict[] = []
+    for (const route of sequentialOverwriteRoutes) {
+      const conflict = sequentialOverwriteConflictForVisibleNode(composedLayout.nodes, route)
+      if (conflict) conflicts.push(conflict)
+    }
+    return conflicts
+  }, [composedLayout.nodes, sequentialOverwriteRoutes])
+  const allSequentialOverwriteConflicts = useMemo(() => {
+    const conflicts: OverwriteConflict[] = []
+    const seen = new Set<string>()
+    for (const conflict of routedSequentialOverwriteConflicts) {
+      if (currentFileAllowsSequentialOverwrite(composedLayout.nodes, skillDetail, conflict)) continue
+      const key = overwriteConflictKey(conflict)
+      if (suppressedWarningKeys.has(key)) continue
+      if (seen.has(key)) continue
+      seen.add(key)
+      conflicts.push(conflict)
+    }
+    return conflicts
+  }, [composedLayout.nodes, routedSequentialOverwriteConflicts, skillDetail, suppressedWarningKeys])
+  useEffect(() => {
+    setWarningQueue(allSequentialOverwriteConflicts)
+    setActiveWarningIndex(allSequentialOverwriteConflicts.length > 0 ? 0 : -1)
+  }, [allSequentialOverwriteConflicts])
+  useEffect(() => {
+    if (isDrilled || sequentialOverwriteRoutes.length === 0) return
+    const nodeId = findNextSubgraphExpansionNode(composedLayout.nodes, expandedSubgraphs, sequentialOverwriteRoutes)
+    if (!nodeId) return
+    setExpandedSubgraphs((current) => (
+      current.has(nodeId) ? current : nextExpandedSubgraphs(current, nodeId)
+    ))
+  }, [composedLayout.nodes, expandedSubgraphs, isDrilled, sequentialOverwriteRoutes])
   // N2 atom #13 (subgraph-inline-preview): resolve child topology for every
   // expanded subgraph node currently present in the composed React Flow graph.
   // The backend boundary resolver must stay pinned to the root/opened skill for
@@ -955,8 +1165,8 @@ export function GraphCanvas({
           if (cancelled) return
           const childIdentity = resolveWorkspaceIdentity(`local:${topology.path}`)
           const childSkillId = childIdentity.skillId ?? undefined
-          let detail: SkillDetail | undefined
-          if (childSkillId) {
+          let detail: SkillDetail | undefined = topology.detail ?? undefined
+          if (!detail && childSkillId) {
             try {
               detail = await getSkillDetail(childSkillId)
             } catch (detailError) {
@@ -1009,6 +1219,7 @@ export function GraphCanvas({
   )
   const [nodes, setNodes, onNodesChange] = useNodesState<GraphCanvasNode>(composedLayout.nodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(decoratedComposedEdges)
+  nodesRef.current = nodes
 
   const hasLayoutNodes = layoutResult.nodes.length > 0 && !layoutResult.error
   const layoutSignature = useMemo(
@@ -1018,8 +1229,7 @@ export function GraphCanvas({
   useCanvasLayoutEffect(() => {
     setNodes(composedLayout.nodes)
     setEdges(decoratedComposedEdges)
-    const shouldFitViewport = hasLayoutNodes
-      && (!viewportReadyRef.current || lastFittedLayoutSignatureRef.current !== layoutSignature)
+    const shouldFitViewport = hasLayoutNodes && !viewportReadyRef.current
     if (shouldFitViewport) {
       lastFittedLayoutSignatureRef.current = layoutSignature
       fitLayout({ reveal: !viewportReadyRef.current })
@@ -1068,7 +1278,7 @@ export function GraphCanvas({
     setNodes((currentNodes) => {
       let changed = false
       const nextNodes = currentNodes.map((node) => {
-        if (node.type !== 'skill' || isSubgraphPreviewId(node.id)) return node
+        if (node.type !== 'skill') return node
 
         const activeConflict = warningQueue[activeWarningIndex]
         const hasConflict = activeConflict && activeConflict.nodeId === node.id ? activeConflict : undefined
@@ -1079,7 +1289,7 @@ export function GraphCanvas({
           node.data.activeConflict === hasConflict &&
           node.data.isConflictCancelled === isConflictCancelled &&
           node.data.onAllowSequentialOverwrite === handleAllowSequentialOverwrite &&
-          node.data.onCancelWarning === handleCancelWarning
+          node.data.onCancelSequentialOverwrite === handleCancelSequentialOverwrite
         ) {
           return node
         }
@@ -1092,15 +1302,15 @@ export function GraphCanvas({
             activeConflict: hasConflict,
             isConflictCancelled,
             onAllowSequentialOverwrite: handleAllowSequentialOverwrite,
-            onCancelWarning: handleCancelWarning,
+            onCancelSequentialOverwrite: handleCancelSequentialOverwrite,
           },
         }
       })
       return changed ? nextNodes : currentNodes
     })
-  }, [warningQueue, activeWarningIndex, cancelledNodeIds, handleAllowSequentialOverwrite, handleCancelWarning, setNodes])
+  }, [composedLayout.nodes, warningQueue, activeWarningIndex, cancelledNodeIds, handleAllowSequentialOverwrite, handleCancelSequentialOverwrite, setNodes])
 
-  const activeSelectedNodeId = selectedCanvasNodeId ?? selectedNodeId
+  const activeSelectedNodeId = selectionOverride.active ? selectionOverride.nodeId : selectedNodeId
   useEffect(() => {
     setNodes((currentNodes) => {
       let changed = false
@@ -1209,6 +1419,19 @@ export function GraphCanvas({
   // defensive path for any future surface that mounts GraphCanvas without it.
   const onReconnect = useCallback((oldEdge: Edge<ContextEdgeData>, newConnection: Connection) => {
     reconnectLandedRef.current = true
+    if (
+      oldEdge.source === INPUT_ID
+      || oldEdge.source === OUTPUT_ID
+      || oldEdge.target === INPUT_ID
+      || oldEdge.target === OUTPUT_ID
+      || newConnection.source === INPUT_ID
+      || newConnection.source === OUTPUT_ID
+      || newConnection.target === INPUT_ID
+      || newConnection.target === OUTPUT_ID
+    ) {
+      toast.error('Only phase nodes can be reconnected as dependencies')
+      return
+    }
     const plan = planEdgeReconnect(
       { source: oldEdge.source, target: oldEdge.target },
       { source: newConnection.source, target: newConnection.target },
@@ -1269,6 +1492,26 @@ export function GraphCanvas({
       })
   }, [blockDrilledEditIfUnwritable, drilledChildTarget, onDisconnectConnection])
 
+  const handleMenuDeletePhase = useCallback((phaseId: string) => {
+    if (!onDeletePhase) return
+    if (blockDrilledEditIfUnwritable()) return
+    const childArgs = drilledChildTarget ? ([drilledChildTarget] as const) : ([] as const)
+    void Promise.resolve(onDeletePhase(phaseId, ...childArgs))
+      .catch((deleteError: unknown) => {
+        toast.error(deleteError instanceof Error ? deleteError.message : 'Could not delete node')
+      })
+  }, [blockDrilledEditIfUnwritable, drilledChildTarget, onDeletePhase])
+
+  const handleOpenCreatePhaseDialog = useCallback((kind: NewPhaseKind) => {
+    if (blockDrilledEditIfUnwritable()) return
+    setCreatePhaseKind(kind)
+  }, [blockDrilledEditIfUnwritable])
+
+  const createPhaseInitialName = useMemo(
+    () => createPhaseKind ? defaultPhaseId(skillDetail, createPhaseKind) : '',
+    [createPhaseKind, skillDetail],
+  )
+
   // R4: an edge endpoint dragged off every handle and released (isValid not
   // true, and no onReconnect fired) = the user pulled the wire loose, so drop
   // the dependency via the same disconnect and serialize path.
@@ -1300,6 +1543,15 @@ export function GraphCanvas({
       })
   }, [blockDrilledEditIfUnwritable, composedLayout.nodes, decoratedComposedEdges, drilledChildTarget, onDisconnectConnection, setEdges, setNodes])
 
+  const handlePaneClick = useCallback(() => {
+    cancelPendingNodeFileOpen()
+    applySelectionOverride(null)
+    onNodeDeselect?.()
+    setEdgeMenuConnection(null)
+    setNodeMenuPhaseId(null)
+    onPanelChange?.('properties')
+  }, [applySelectionOverride, cancelPendingNodeFileOpen, onNodeDeselect, onPanelChange])
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -1326,10 +1578,9 @@ export function GraphCanvas({
         </div>
       ) : null}
 
-      {/* compact = the SplitEditor mini-canvas: a READ-ONLY projection of
-          GRAPH.md, never a second editor. Editing (connect / reconnect / delete)
-          stays on the main canvas, so two canvases can't race writes to GRAPH.md
-          off independent snapshots (the stale-hash 409 class). */}
+      {/* compact remains available for explicit read-only projections. The file
+          editor split uses normal canvas mode so authoring behaviour stays the
+          same when the canvas is squeezed into the lower pane. */}
       <ReactFlow
         className={isViewportReady ? undefined : HIDDEN_INITIAL_VIEWPORT_CLASS}
         nodes={nodes}
@@ -1351,24 +1602,46 @@ export function GraphCanvas({
             return
           }
           setEdgeMenuConnection(null)
+          setNodeMenuPhaseId(null)
         }}
-        onNodeContextMenu={() => {
+        onPaneClick={handlePaneClick}
+        onNodeContextMenu={(_, node) => {
           setEdgeMenuConnection(null)
+          setNodeMenuPhaseId(
+            node.type === 'skill' && !isSubgraphPreviewId(node.id)
+              ? skillNodePhaseId(node)
+              : null,
+          )
         }}
         onEdgeContextMenu={compact ? undefined : (event, edge) => {
+          setNodeMenuPhaseId(null)
           openEdgeContextMenu(event, { source: edge.source, target: edge.target })
         }}
         onNodeClick={(_, node) => {
           if (node.type === 'subgraphGroup') return
-          setSelectedCanvasNodeId(node.id)
+          cancelPendingNodeFileOpen()
+          const wasSelected = currentActiveSelectedNodeId() === node.id
+          applySelectionOverride(node.id)
+          if (node.type === 'globalInput' || node.type === 'globalOutput') {
+            onNodeDeselect?.()
+            onPanelChange?.('input')
+            return
+          }
           if (node.type === 'skill') {
             onNodeSelect?.({ id: skillNodePhaseId(node), data: node.data })
-            onPanelChange?.('properties')
+            if (wasSelected) {
+              pendingNodeFileOpenRef.current = setTimeout(() => {
+                pendingNodeFileOpenRef.current = null
+                openNodeFile(node)
+              }, 220)
+            } else {
+              onPanelChange?.('properties')
+            }
           }
         }}
         onNodeDragStart={(_, node) => {
           if (node.type === 'subgraphGroup') return
-          setSelectedCanvasNodeId(node.id)
+          applySelectionOverride(node.id)
           if (node.type === 'skill') {
             onNodeSelect?.({ id: skillNodePhaseId(node), data: node.data })
           }
@@ -1376,10 +1649,10 @@ export function GraphCanvas({
         selectNodesOnDrag
         onNodeDoubleClick={(_, node) => {
           if (node.type === 'subgraphGroup') return
-          setSelectedCanvasNodeId(node.id)
+          cancelPendingNodeFileOpen()
+          applySelectionOverride(node.id)
           if (node.type === 'globalInput' || node.type === 'globalOutput') {
-            const openSkillId = node.data.skillId || skillId
-            workspace?.onFileOpen(`${openSkillId}/GRAPH.md`)
+            onNodeDeselect?.()
             onPanelChange?.('input')
             return
           }
@@ -1402,8 +1675,7 @@ export function GraphCanvas({
             // (which swapped the whole Workspace to the child as a standalone
             // project) is gone; drilled editing stays on the same canvas.
             onNodeSelect?.({ id: phaseId, data: node.data })
-            const openSkillId = node.data.skillId || skillId
-            workspace?.onFileOpen(`${openSkillId}/${node.data.filePath ?? `phases/${phaseId}/${phaseKindFile(node.data)}`}`)
+            openNodeFile(node)
             onPanelChange?.('properties')
           }
         }}
@@ -1443,7 +1715,7 @@ export function GraphCanvas({
         />
         <Controls position="bottom-left" />
         {!compact ? <SkillMiniMap nodes={nodes} /> : null}
-        {(onCreatePhase && !isDrilled) || drillStack.length > 0 ? (
+        {drillStack.length > 0 || isChildGraphLoading || childGraphError ? (
           <Panel position="top-left">
             <div className="flex flex-col items-start gap-2">
               {drillStack.length > 0 ? (
@@ -1464,20 +1736,6 @@ export function GraphCanvas({
                   {childGraphError}
                 </div>
               ) : null}
-              {onCreatePhase && !isDrilled && !compact ? <AddPhaseControl onCreatePhase={onCreatePhase} /> : null}
-              {!isDrilled && !compact ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="shadow-sm"
-                  aria-label="Edit macro contract"
-                  onClick={() => setMacroFormOpen(true)}
-                >
-                  <FileCog className="size-3.5" />
-                  Macro contract
-                </Button>
-              ) : null}
             </div>
           </Panel>
         ) : null}
@@ -1486,30 +1744,36 @@ export function GraphCanvas({
       </ContextMenuTrigger>
       <CanvasContextMenuContent
         edgeMenuConnection={edgeMenuConnection}
-        onCreatePhase={isDrilled ? undefined : onCreatePhase}
+        nodeMenuPhaseId={nodeMenuPhaseId}
+        onCreatePhase={isDrilled ? undefined : handleOpenCreatePhaseDialog}
+        onDeletePhase={handleMenuDeletePhase}
         onDisconnectConnection={handleMenuDisconnect}
-        onCloseEdgeMenu={() => setEdgeMenuConnection(null)}
+        onCloseEdgeMenu={() => {
+          setEdgeMenuConnection(null)
+          setNodeMenuPhaseId(null)
+        }}
         readOnly={compact}
       />
-      <Sheet open={macroFormOpen} onOpenChange={setMacroFormOpen}>
-        <SheetContent side="right" className="w-[26rem] gap-0 p-0 sm:max-w-md">
-          <SheetHeader className="border-b border-border">
-            <SheetTitle>Macro contract</SheetTitle>
-            <SheetDescription>
-              Edit the GRAPH.md header (name, schema version, LLM role, description) and the phases list.
-            </SheetDescription>
-          </SheetHeader>
-          <ScrollArea className="min-h-0 flex-1">
-            <div className="p-4">
-              <MacroContractDrawer
-                skillId={skillId}
-                skillDetail={skillDetail}
-                writeFile={(path, content, expectedHash) => writeSkillFile(skillId, path, content, expectedHash)}
-              />
-            </div>
-          </ScrollArea>
-        </SheetContent>
-      </Sheet>
+      <PhaseNameDialog
+        open={createPhaseKind !== null}
+        kind={createPhaseKind}
+        initialName={createPhaseInitialName}
+        skillDetail={skillDetail}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCreatePhaseKind(null)
+          }
+        }}
+        onSubmit={(phaseId) => {
+          const kind = createPhaseKind
+          if (!kind || !onCreatePhase) return
+          setCreatePhaseKind(null)
+          void Promise.resolve(onCreatePhase(kind, phaseId))
+            .catch((createError: unknown) => {
+              toast.error(createError instanceof Error ? createError.message : 'Could not create phase')
+            })
+        }}
+      />
     </ContextMenu>
   )
 }
@@ -1520,45 +1784,25 @@ const ADD_PHASE_OPTIONS: ReadonlyArray<{ kind: NewPhaseKind; label: string }> = 
   { kind: 'subgraph', label: 'Subgraph Phase' },
 ]
 
-export function AddPhaseControl({
-  onCreatePhase,
-}: {
-  onCreatePhase: (kind: NewPhaseKind) => Promise<void> | void
-}) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button type="button" size="sm" variant="outline" className="shadow-sm" aria-label="Add phase">
-          <Plus className="size-3.5" />
-          Add phase
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start">
-        {ADD_PHASE_OPTIONS.map((option) => (
-          <DropdownMenuItem key={option.kind} onSelect={() => { void onCreatePhase(option.kind) }}>
-            {option.label}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-}
-
 export function CanvasContextMenuContent({
   edgeMenuConnection,
+  nodeMenuPhaseId,
   onCreatePhase,
+  onDeletePhase,
   onDisconnectConnection,
   onCloseEdgeMenu,
   readOnly,
 }: {
   edgeMenuConnection: { source: string; target: string } | null
+  nodeMenuPhaseId?: string | null
   onCreatePhase?: (kind: NewPhaseKind) => Promise<void> | void
+  onDeletePhase?: (phaseId: string) => Promise<void> | void
   onDisconnectConnection?: (connection: { source: string; target: string }) => Promise<void> | void
   onCloseEdgeMenu?: () => void
   readOnly?: boolean
 }) {
-  // Read-only projection (compact mini-canvas): no edit affordances at all, so
-  // right-click offers neither Disconnect nor Add Phase Node.
+  // Explicit read-only projection: no edit affordances at all, so right-click
+  // offers neither Disconnect nor Add Phase Node.
   if (readOnly) {
     return null
   }
@@ -1573,19 +1817,20 @@ export function CanvasContextMenuContent({
         >
           Disconnect
         </ContextMenuItem>
+      ) : nodeMenuPhaseId && onDeletePhase ? (
+        <ContextMenuItem variant="destructive" onSelect={() => { void onDeletePhase(nodeMenuPhaseId) }}>
+          <Trash2 className="size-3.5" />
+          Delete node
+        </ContextMenuItem>
       ) : (
         <ContextMenuSub>
           <ContextMenuSubTrigger>Add Phase Node</ContextMenuSubTrigger>
           <ContextMenuSubContent>
-            <ContextMenuItem onSelect={() => { void onCreatePhase?.('skill') }}>
-              Agent Phase
-            </ContextMenuItem>
-            <ContextMenuItem onSelect={() => { void onCreatePhase?.('logic') }}>
-              Logic Phase
-            </ContextMenuItem>
-            <ContextMenuItem onSelect={() => { void onCreatePhase?.('subgraph') }}>
-              Subgraph Phase
-            </ContextMenuItem>
+            {ADD_PHASE_OPTIONS.map((option) => (
+              <ContextMenuItem key={option.kind} onSelect={() => { void onCreatePhase?.(option.kind) }}>
+                {option.label}
+              </ContextMenuItem>
+            ))}
           </ContextMenuSubContent>
         </ContextMenuSub>
       )}

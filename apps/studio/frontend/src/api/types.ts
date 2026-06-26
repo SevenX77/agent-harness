@@ -40,6 +40,7 @@ export interface CompileError {
   field: string | null
   severity: 'fatal' | 'warning'
   message: string
+  error_code?: string | null
 }
 
 export interface ArtifactRef {
@@ -675,6 +676,7 @@ export interface ChildGraphTopology {
   description: string
   phases: string[]
   graph_topology: GraphTopologyItem[]
+  detail?: SkillDetail | null
 }
 
 export interface SkillDetail {

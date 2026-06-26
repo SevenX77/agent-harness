@@ -1,5 +1,5 @@
 import yaml from 'js-yaml'
-import type { CompileError, IoDeclaration, PhaseDef, SkillDetail, SkillManifest, IoInput, IoOutput, GraphManifestV030, GraphTopologyItem } from '@/api/types'
+import type { CompileError, GraphManifestV030, GraphTopologyItem, IoDeclaration, IoInput, IoOutput, PhaseDef, SkillDetail, SkillManifest } from '@/api/types'
 import { INPUT_ID, OUTPUT_ID, type GlobalNodeData, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus, type SubagentRef } from '@/components/nodes'
 import { normalizeSubgraphPath } from '@/components/studio/subgraph-path'
 import type { GoldenNodeState } from '@/components/studio/node-golden'

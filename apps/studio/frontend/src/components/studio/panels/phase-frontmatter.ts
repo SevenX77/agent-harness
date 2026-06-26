@@ -11,6 +11,22 @@ export interface PhaseSubagentRef {
   description: string
 }
 
+export type IterateMode = '' | 'batch' | 'loop'
+export type IterateMergeMode = 'append' | 'extend' | 'merge' | 'replace'
+
+export interface PhaseIterateFormData {
+  mode: IterateMode
+  over: string
+  itemVar: string
+  rangeStart: string
+  rangeEnd: string
+  concurrency: string
+  accumulateVar: string
+  accumulateInit: string
+  accumulateFrom: string
+  accumulateMerge: IterateMergeMode
+}
+
 export interface PhaseFrontmatterFormData {
   // agent (SKILL.md)
   llmRole: string
@@ -22,6 +38,9 @@ export interface PhaseFrontmatterFormData {
   path: string
   // shared (logic + subgraph)
   validator: boolean
+  // shared (agent + logic + subgraph)
+  allowSequentialOverwrite: string
+  iterate: PhaseIterateFormData
 }
 
 export type PhaseFrontmatter = Record<string, JsonValue>
@@ -49,6 +68,8 @@ export const EMPTY_FORM: PhaseFrontmatterFormData = {
   actions: '',
   path: '',
   validator: false,
+  allowSequentialOverwrite: '',
+  iterate: emptyIterateForm(),
 }
 
 export function parsePhaseFrontmatter(markdown: string): ParsePhaseFrontmatterResult {
@@ -87,6 +108,8 @@ export function phaseFrontmatterToForm(frontmatter: Partial<PhaseFrontmatter>): 
     actions: linesValue(frontmatter.actions),
     path: stringValue(frontmatter.path),
     validator: booleanValue(frontmatter.validator),
+    allowSequentialOverwrite: linesValue(frontmatter.allow_sequential_overwrite),
+    iterate: iterateValue(frontmatter.iterate, frontmatter.batch),
   }
 }
 
@@ -113,15 +136,26 @@ export function applyPhaseFrontmatterForm(
   }
 
   const nextFrontmatter = frontmatterFromForm(parsed.frontmatter, form, kind)
-  const dumped = yaml.dump(nextFrontmatter, {
-    lineWidth: 120,
-    noRefs: true,
-    sortKeys: false,
-    styles: { '!!null': 'empty' },
-  }).trimEnd()
-  const trimmedBody = parsed.body.replace(/^\n+/, '')
-  const body = trimmedBody.length > 0 ? `\n${trimmedBody}` : '\n'
-  return { ok: true, markdown: `---\n${dumped}\n---${body}` }
+  return { ok: true, markdown: serializePhaseMarkdown(nextFrontmatter, parsed.body) }
+}
+
+export function applyPhaseName(markdown: string, nextName: string): ApplyPhaseFrontmatterResult {
+  const parsed = parsePhaseFrontmatter(markdown)
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      reason: parsed.reason,
+      message: parsed.message,
+    }
+  }
+  const trimmed = nextName.trim()
+  if (!trimmed) {
+    return { ok: false, reason: 'non-object-frontmatter', message: 'Phase name is required.' }
+  }
+  return {
+    ok: true,
+    markdown: serializePhaseMarkdown({ ...parsed.frontmatter, name: trimmed }, parsed.body),
+  }
 }
 
 function splitMarkdownFrontmatter(markdown: string):
@@ -163,12 +197,16 @@ function frontmatterFromForm(
     setOptionalString(next, 'llm_role', form.llmRole)
     setOptionalList(next, 'tools', form.tools)
     setSubagents(next, form.subagents)
+    setOptionalList(next, 'allow_sequential_overwrite', form.allowSequentialOverwrite)
+    setIterate(next, form.iterate)
     return next
   }
 
   if (kind === 'logic') {
     setOptionalList(next, 'actions', form.actions)
     setBoolean(next, 'validator', form.validator)
+    setOptionalList(next, 'allow_sequential_overwrite', form.allowSequentialOverwrite)
+    setIterate(next, form.iterate)
     return next
   }
 
@@ -176,7 +214,21 @@ function frontmatterFromForm(
   delete next.targetSkill
   setOptionalString(next, 'path', form.path)
   setBoolean(next, 'validator', form.validator)
+  setOptionalList(next, 'allow_sequential_overwrite', form.allowSequentialOverwrite)
+  setIterate(next, form.iterate)
   return next
+}
+
+function serializePhaseMarkdown(frontmatter: PhaseFrontmatter, bodyContent: string): string {
+  const dumped = yaml.dump(frontmatter, {
+    lineWidth: 120,
+    noRefs: true,
+    sortKeys: false,
+    styles: { '!!null': 'empty' },
+  }).trimEnd()
+  const trimmedBody = bodyContent.replace(/^\n+/, '')
+  const body = trimmedBody.length > 0 ? `\n${trimmedBody}` : '\n'
+  return `---\n${dumped}\n---${body}`
 }
 
 function stringValue(value: unknown): string {
@@ -185,6 +237,10 @@ function stringValue(value: unknown): string {
 
 function booleanValue(value: unknown): boolean {
   return value === true
+}
+
+function numberStringValue(value: unknown): string {
+  return typeof value === 'number' && Number.isFinite(value) ? String(value) : ''
 }
 
 function linesValue(value: unknown): string {
@@ -208,6 +264,98 @@ function subagentsValue(value: unknown): PhaseSubagentRef[] {
       description: stringValue(item.description),
     }]
   })
+}
+
+function emptyIterateForm(): PhaseIterateFormData {
+  return {
+    mode: '',
+    over: '',
+    itemVar: '',
+    rangeStart: '',
+    rangeEnd: '',
+    concurrency: '',
+    accumulateVar: '',
+    accumulateInit: '[]',
+    accumulateFrom: '',
+    accumulateMerge: 'append',
+  }
+}
+
+function yamlInlineValue(value: unknown): string {
+  if (value === undefined) {
+    return ''
+  }
+  return yaml.dump(value, {
+    flowLevel: 0,
+    lineWidth: 120,
+    noRefs: true,
+    sortKeys: false,
+    styles: { '!!null': 'empty' },
+  }).trim()
+}
+
+function iterateValue(iterate: unknown, legacyBatch: unknown): PhaseIterateFormData {
+  if (isRecord(iterate)) {
+    const mode = iterate.mode === 'batch' || iterate.mode === 'loop' ? iterate.mode : ''
+    const range = Array.isArray(iterate.range) ? iterate.range : []
+    const accumulate = isRecord(iterate.accumulate) ? iterate.accumulate : {}
+    return {
+      ...emptyIterateForm(),
+      mode,
+      over: stringValue(iterate.over),
+      itemVar: stringValue(iterate.item_var),
+      rangeStart: numberStringValue(range[0]),
+      rangeEnd: numberStringValue(range[1]),
+      concurrency: numberStringValue(iterate.concurrency),
+      accumulateVar: stringValue(accumulate.var),
+      accumulateInit: Object.prototype.hasOwnProperty.call(accumulate, 'init')
+        ? yamlInlineValue(accumulate.init)
+        : '[]',
+      accumulateFrom: stringValue(accumulate.from),
+      accumulateMerge: mergeValue(accumulate.merge),
+    }
+  }
+
+  if (isRecord(legacyBatch)) {
+    return {
+      ...emptyIterateForm(),
+      mode: 'batch',
+      over: stringValue(legacyBatch.iterator),
+      itemVar: stringValue(legacyBatch.item_var),
+      concurrency: numberStringValue(legacyBatch.concurrency),
+    }
+  }
+
+  return emptyIterateForm()
+}
+
+function mergeValue(value: unknown): IterateMergeMode {
+  return value === 'extend' || value === 'merge' || value === 'replace' ? value : 'append'
+}
+
+function intValue(value: string): number | null {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return null
+  }
+  const parsed = Number.parseInt(trimmed, 10)
+  return Number.isFinite(parsed) && String(parsed) === trimmed ? parsed : null
+}
+
+function parseYamlValue(value: string): JsonValue {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return []
+  }
+  try {
+    const parsed = yaml.load(trimmed)
+    if (parsed == null || typeof parsed === 'string' || typeof parsed === 'number' || typeof parsed === 'boolean' || Array.isArray(parsed) || isRecord(parsed)) {
+      return parsed as JsonValue
+    }
+  } catch {
+    return trimmed
+  }
+  return trimmed
 }
 
 function setOptionalString(target: PhaseFrontmatter, key: string, value: string): void {
@@ -252,4 +400,40 @@ function setSubagents(target: PhaseFrontmatter, subagents: PhaseSubagentRef[]): 
   } else {
     delete target.subagents
   }
+}
+
+function setIterate(target: PhaseFrontmatter, iterate: PhaseIterateFormData): void {
+  delete target.batch
+  if (iterate.mode !== 'batch' && iterate.mode !== 'loop') {
+    delete target.iterate
+    return
+  }
+
+  const next: PhaseFrontmatter = {
+    mode: iterate.mode,
+    over: iterate.over.trim(),
+    item_var: iterate.itemVar.trim(),
+  }
+
+  const rangeStart = intValue(iterate.rangeStart)
+  const rangeEnd = intValue(iterate.rangeEnd)
+  if (rangeStart != null && rangeEnd != null) {
+    next.range = [rangeStart, rangeEnd]
+  }
+
+  const concurrency = intValue(iterate.concurrency)
+  if (iterate.mode === 'batch' && concurrency != null) {
+    next.concurrency = concurrency
+  }
+
+  if (iterate.mode === 'loop') {
+    next.accumulate = {
+      var: iterate.accumulateVar.trim(),
+      init: parseYamlValue(iterate.accumulateInit),
+      from: iterate.accumulateFrom.trim(),
+      merge: iterate.accumulateMerge,
+    }
+  }
+
+  target.iterate = next
 }

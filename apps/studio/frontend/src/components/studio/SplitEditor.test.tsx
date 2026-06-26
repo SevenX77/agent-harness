@@ -2,11 +2,9 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SplitEditor } from './SplitEditor'
 
-// The bottom mini-canvas must be a READ-ONLY projection of GRAPH.md (canvas =
-// projection design), never a second editor. This guards that SplitEditor
-// renders it in compact mode and wires NO graph-editing handlers, so two
-// canvases can never race writes to GRAPH.md off independent snapshots (the
-// stale-hash 409 class that a duplicate editor would reintroduce).
+// Opening a file editor must only squeeze the same canvas into the bottom area.
+// It must not swap in a compact/read-only projection with different authoring
+// behaviour.
 const mocks = vi.hoisted(() => ({
   graphCanvasProps: null as null | Record<string, unknown>,
 }))
@@ -37,35 +35,45 @@ vi.mock('./WorkspaceContext', () => ({
   }),
 }))
 
-describe('SplitEditor mini-canvas is a read-only projection', () => {
+describe('SplitEditor bottom canvas keeps normal canvas behaviour', () => {
   beforeEach(() => {
     mocks.graphCanvasProps = null
   })
 
-  it('renders the bottom canvas in compact mode with NO graph-editing handlers', () => {
+  it('renders the bottom canvas with the same graph-editing handlers', () => {
     const onNodeSelect = vi.fn()
+    const onCreatePhase = vi.fn()
+    const onDeletePhase = vi.fn()
+    const onPersistConnection = vi.fn()
+    const onDisconnectConnection = vi.fn()
+    const onReconnectConnection = vi.fn()
+    const onPhaseFileSave = vi.fn()
+    const onNodeFileOpen = vi.fn()
 
-    renderToStaticMarkup(<SplitEditor skillId="s1" onNodeSelect={onNodeSelect} />)
+    renderToStaticMarkup(
+      <SplitEditor
+        skillId="s1"
+        onNodeSelect={onNodeSelect}
+        onNodeFileOpen={onNodeFileOpen}
+        onCreatePhase={onCreatePhase}
+        onDeletePhase={onDeletePhase}
+        onPersistConnection={onPersistConnection}
+        onDisconnectConnection={onDisconnectConnection}
+        onReconnectConnection={onReconnectConnection}
+        onPhaseFileSave={onPhaseFileSave}
+      />,
+    )
 
     const props = mocks.graphCanvasProps
     expect(props).not.toBeNull()
-    // Read-only projection: compact on, navigation kept...
-    expect(props?.compact).toBe(true)
+    expect(props?.compact).toBeUndefined()
     expect(props?.onNodeSelect).toBe(onNodeSelect)
-    // ...and every graph-editing handler absent, so the mini-canvas cannot write
-    // GRAPH.md. Removing any of these from SplitEditor would reintroduce the
-    // dual-editor race this projection design exists to prevent.
-    for (const editingHandler of [
-      'onReconnectConnection',
-      'onPersistConnection',
-      'onDisconnectConnection',
-      'onCreatePhase',
-      'onPhaseFileSave',
-    ]) {
-      expect(
-        props?.[editingHandler],
-        `${editingHandler} must NOT reach the read-only mini-canvas`,
-      ).toBeUndefined()
-    }
+    expect(props?.onNodeFileOpen).toBe(onNodeFileOpen)
+    expect(props?.onCreatePhase).toBe(onCreatePhase)
+    expect(props?.onDeletePhase).toBe(onDeletePhase)
+    expect(props?.onPersistConnection).toBe(onPersistConnection)
+    expect(props?.onDisconnectConnection).toBe(onDisconnectConnection)
+    expect(props?.onReconnectConnection).toBe(onReconnectConnection)
+    expect(props?.onPhaseFileSave).toBe(onPhaseFileSave)
   })
 })

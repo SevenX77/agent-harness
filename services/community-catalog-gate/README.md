@@ -18,7 +18,25 @@ served catalog that any client can verify.
 | Redaction re-validation | `src/redaction.mjs` | Allowlist-only screen; rejects secrets / private hosts / bare hashes | none (pure) |
 | KV drain | `publish/drain-kv.mjs` | Read buffer + withdrawals into a records file | none (read-only) |
 | Aggregator / signer | `publish/aggregate.mjs` | Shard, digest, build + Ed25519-sign the manifest | writes files |
-| Publishing Action | `publish/publish-catalog.yml` | Scheduled commit to the catalog repo | `contents: write` |
+| Publishing Action (gate) | `publish/publish-catalog.yml` | Scheduled commit, drains the gate KV | `contents: write` |
+| **No-gate** publisher | `publish/publish-from-incoming.mjs` | Read `incoming/` batches, re-screen, merge with shards, sign | writes files |
+| **No-gate** Action | `publish/ingest-incoming.yml` | On `incoming/**` push: re-screen + sign + publish | `contents: write` |
+
+## Two write-path deployments
+
+Both deployments share the same redaction screen, aggregator, signer, and the
+"only the Action holds repo-write power, the signing key is only an Action
+secret" model. They differ only in **how evidence reaches the Action**:
+
+- **Gate** (`src/gate.mjs` + KV + `drain-kv.mjs` + `publish-catalog.yml`) — for
+  *multi-user* contribution: anyone's desktop POSTs an opt-in batch to a
+  Cloudflare Worker that buffers it; a scheduled Action drains + publishes.
+  Strangers never get repo-write power.
+- **No-gate** (`publish-from-incoming.mjs` + `ingest-incoming.yml`) — the
+  *simple* deployment: the desktop pushes sanitized batches straight into the
+  repo's `incoming/` staging area with the user's own git credentials, and the
+  Action re-screens + publishes on push. No Cloudflare, no KV. Fits a single
+  trusted publisher (or a few collaborators) who already have repo write access.
 
 ## Security model (three-way converged design v3)
 
@@ -79,6 +97,25 @@ wrangler deploy
 #   STUDIO_COMMUNITY_UPLOAD_ENABLED=true
 #   STUDIO_COMMUNITY_GATE_URL=https://<worker-host>
 #   STUDIO_COMMUNITY_INGESTION_TOKEN=<INGESTION_TOKEN>
+```
+
+### No-gate setup (desktop pushes to `incoming/`)
+
+```bash
+# 1. Generate the signing keypair (same as above) — store the PEM as the catalog
+#    repo's Action secret CATALOG_SIGNING_PRIVATE_KEY_PEM.
+
+# 2. Vendor the publisher into the PUBLIC catalog repo, preserving layout, and
+#    install the no-gate Action:
+#      .catalog-publisher/publish/publish-from-incoming.mjs
+#      .catalog-publisher/publish/aggregate.mjs
+#      .catalog-publisher/src/redaction.mjs
+#      publish/ingest-incoming.yml -> <catalog-repo>/.github/workflows/
+
+# 3. Point the desktop client at the catalog + its own repo (no gate URL/token):
+#      STUDIO_COMMUNITY_CATALOG_MANIFEST_URL=https://<pages-cdn>/manifest.json
+#      STUDIO_COMMUNITY_UPLOAD_ENABLED=true
+#      STUDIO_COMMUNITY_CATALOG_REPO=<owner>/<catalog-repo>   # incoming/ push target
 ```
 
 ## Test

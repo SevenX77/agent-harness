@@ -1,0 +1,70 @@
+# No-gate write-path publishing Action TEMPLATE.
+#
+# This is the SIMPLE deployment: no Cloudflare Worker, no KV. The desktop pushes
+# sanitized evidence batches straight into this repo's `incoming/` staging area
+# (using the user's own git credentials), and THIS Action re-validates + signs +
+# publishes them. Copy it into the PUBLIC CATALOG repo at
+# .github/workflows/ingest-incoming.yml.
+#
+# (The Cloudflare-gate variant — gate.mjs + drain-kv.mjs + publish-catalog.yml —
+# is kept alongside for the multi-user write-path; this no-gate variant does not
+# replace it, it is an additional, lighter deployment option.)
+#
+# This Action is the ONLY component with catalog-repo write capability, scoped to
+# the minimum `contents: write`. The Ed25519 private key lives ONLY as the secret
+# CATALOG_SIGNING_PRIVATE_KEY_PEM. Every incoming record is re-screened server-side
+# (defense in depth) and dropped if it could carry a secret / private endpoint /
+# bare hash / non probe-verified evidence.
+#
+# Vendor the publisher scripts into the catalog repo at `.catalog-publisher/`,
+# preserving the publish/ + src/ layout so the relative imports resolve:
+#   .catalog-publisher/publish/publish-from-incoming.mjs
+#   .catalog-publisher/publish/aggregate.mjs
+#   .catalog-publisher/src/redaction.mjs
+
+name: ingest-incoming
+
+on:
+  push:
+    paths:
+      - 'incoming/**' # desktop pushed a new evidence batch
+  workflow_dispatch: {} # manual re-publish
+
+permissions:
+  contents: write # minimal — nothing else
+
+concurrency:
+  group: publish-catalog
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Ingest incoming, re-screen, aggregate and sign
+        env:
+          CATALOG_OUTPUT_DIR: ${{ github.workspace }}
+          CATALOG_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.CATALOG_SIGNING_PRIVATE_KEY_PEM }}
+          PROTOCOL_MAJOR: '1'
+          GENERATED_AT: ${{ github.event.repository.updated_at }}
+        run: node .catalog-publisher/publish/publish-from-incoming.mjs
+
+      - name: Commit catalog
+        run: |
+          git config user.name 'catalog-publisher'
+          git config user.email 'catalog-publisher@users.noreply.github.com'
+          # incoming/ is staged too so the consumed batch files (deleted by the
+          # publisher) are committed as removals.
+          git add manifest.json manifest.json.sig shards/ incoming/
+          if git diff --cached --quiet; then
+            echo 'No catalog changes to publish.'
+          else
+            git commit -m "chore(catalog): ingest incoming + publish"
+            git push
+          fi

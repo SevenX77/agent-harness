@@ -25,14 +25,17 @@ export const ALLOWED_FIELDS = new Set([
   'observed_at',
 ]);
 
-// Must mirror the desktop client's PUBLIC_PROVIDER_HOST_ALLOWLIST.
+// Must mirror the desktop client's PUBLIC_PROVIDER_HOST_ALLOWLIST. Two same-risk
+// classes: official first-party endpoints AND public AI transit/aggregators that
+// anyone can register and connect to (their base URLs are public domains carrying
+// no user identity).
 export const PUBLIC_PROVIDER_HOST_ALLOWLIST = new Set([
+  // Official first-party provider endpoints.
   'api.openai.com',
   'api.anthropic.com',
   'generativelanguage.googleapis.com',
   'ark.cn-beijing.volces.com',
   'api.deepseek.com',
-  'openrouter.ai',
   'api.mistral.ai',
   'api.groq.com',
   'api.together.xyz',
@@ -40,6 +43,10 @@ export const PUBLIC_PROVIDER_HOST_ALLOWLIST = new Set([
   'dashscope.aliyuncs.com',
   'open.bigmodel.cn',
   'api.moonshot.cn',
+  // Public AI transit / aggregators.
+  'openrouter.ai',
+  'api.qnaigc.com', // 七牛 Qiniu AI 中转 (OpenAI-compatible)
+  'anthropic.qnaigc.com', // 七牛 Qiniu AI 中转 (Anthropic-compatible)
 ]);
 
 export const WIRE_EVIDENCE_TYPE = 'probe_result';

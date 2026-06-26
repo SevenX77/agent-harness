@@ -32,6 +32,16 @@ MVP1 目标:测试状态以**active credentials / runtime health store 的后端
 
 **阶段二托管社区目录设计入口**：MVP1 到此为止仍是 local-first：`/catalog/sync` 只拉取 read-only suggestion source，`/catalog/share` 只做 `local_export_only` 脱敏导出。大量用户贡献、托管 ingestion、反滥用、聚合索引、签名只读 artifact/CDN/GitHub mirror 的第二阶段设计登记在 [Community Probe Knowledge Catalog Service Design](../../../development/COMMUNITY_PROBE_CATALOG_SERVICE_DESIGN.md)。该设计是本模块 F3「Probe Knowledge Catalog」的后续扩展，不恢复 Import Draft，不允许远端 evidence 自动 apply 到 credentials，也不允许公共 catalog 直接写 `ready` 绿态。
 
+> **阶段二 Phase 2a 收敛决策（post-MVP1，三方审核定稿 2026-06；非 MVP1 范围，登记于此供后续实施对齐）**
+> 起步形态把托管服务塌缩到免费档，但守住所有 Non-Goal 与本模块合同。锁定决策（权威细节见上方设计文档「Phase 2a」两节）：
+> 1. **唯一 ingestion 形态 = serverless 门卫**（如 Cloudflare Workers 免费档暴露 `POST /v1/evidence/batches`）。门卫只做鉴权/限流/服务端脱敏复校/入队，**不持有任何 catalog-repo 写 token**；写仓能力**只**存在于定时发布 GitHub Action（最小 `permissions: contents: write`），故门卫被打穿也写不了公共目录。客户端直接触发 Action（issue/`repository_dispatch`）的方案**已否决**（等价客户端持写入通道 + 破坏统一上传契约），仅可在真实 GitHub 身份的小范围可信 cohort 内作试验、绝不内嵌 trigger token。
+> 2. **指纹隐私**：白名单知名公开服务商发 `normalized_public_base_url` 明文 + 指纹；非白名单/私有/未知 host **客户端上传前直接丢弃**，**永不发布原始不加盐 SHA-256**（可被字典枚举反推企业/个人/租户域名）；确需跨用户匹配非白名单公网站点时，唯一允许机制是**服务端加盐 HMAC**（pepper 门卫侧、可轮换、不公开原始哈希）+ 公网 host 审核，且为延后升级、不进 2a 基线。
+> 3. **读取路径是迁移项，不是「不变」**：现状整包拉单文件 `llm_probe_catalog.json`；manifest + 分片 + ETag + 校验（fail-closed）+ 独立 disposable cache 是新客户端能力，按迁移设计。
+> 4. **运维**：门卫不每请求直接 commit，写 KV/队列由 cron Action 批量提交（避免 git non-fast-forward 并发冲突）；分发走 GitHub **Pages（自带 CDN）**而非 raw（避免 429）。
+> 5. **边界守恒**：`/catalog/share` 维持 `local_export_only` / `auto_upload_enabled=false`；自动上传是二期能力且必须**每次主动 opt-in**，不是全局开关翻 true。`/catalog/repository/ensure`（用用户自己 token 建仓）**不复用**作客户端→公共目录上传路径。
+> 6. **schema 映射**：ingestion 的 `evidence_type:"probe_result"` 须映射到现有 `"probe"`（`registry/schema.py`；`/catalog/share` 按 `"probe"` 过滤）。
+> 7. **进实现前补齐 gap**：匿名 token 生命周期/限流/吊销；撤回机制（上传返回一次性 `receipt_token`）；artifact `manifest.json` 协议主版本号（老客户端拒绝而非崩）；签名密钥保管/轮换/泄漏应急；GitHub 特有测试（Action 最小权限、签名 fail-closed、manifest 降级拒绝、限流响应、token 提取滥用模拟）。
+
 不调真实模型;本模块定义"探测→持久化→投影→复用"的唯一写回路径与状态语义。本文只写文档目标,不改代码。
 
 **判据(6 态投影 + 探测知识库归属，跨 F1/F2/F3 共用)**：

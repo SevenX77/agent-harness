@@ -112,6 +112,160 @@ because it separates mutable untrusted ingestion from stable read-only sync.
    ETag, and incremental cursor.
 9. Gateway matching logic uses the artifact as a suggestion source only.
 
+### Phase 2a: GitHub-Native Free-Tier Starting Shape
+
+The hosted-service shape above is the high-volume end state. It is more than the
+first usable version needs. Phase 2a collapses it onto free tiers while preserving
+every Non-Goal and MVP1 contract, and upgrades to the full shape later **without
+changing the client upload contract** (`POST /v1/evidence/batches`).
+
+**The single hard constraint that shapes everything:** the desktop client must
+never hold a token that can write the public catalog repository (Non-Goal,
+line 34). The read/serve/aggregate side can therefore be pure GitHub, but the
+ingestion side needs a thin gate that holds the write token server-side.
+
+#### Ingestion gate: a serverless gate, and only that
+
+Phase 2a uses **a single free serverless function** (e.g. Cloudflare Workers free
+tier, ~100k req/day) exposing the designed `POST /v1/evidence/batches`. The gate's
+only jobs are authentication, rate-limiting, server-side redaction re-validation,
+and writing accepted batches into the ingestion buffer (Worker KV / D1 queue).
+**The gate holds no catalog-repo write token** — the actual repo commit is done
+later by the scheduled publishing Action (see below). So even a fully compromised
+gate cannot write the public catalog: its attack surface excludes public-catalog
+writes entirely.
+
+An earlier draft offered a second sub-option — triggering a GitHub Action directly
+from the client via an issue form / `repository_dispatch`. **That option is
+rejected**, on two independent grounds:
+
+- **Red-line violation.** Direct triggering needs either a shared trigger token
+  embedded in the client (extractable → anyone can drive writes to the public
+  repo) or a real contributor GitHub identity. Either way the client effectively
+  holds a write channel to the public catalog — exactly Non-Goal line 34. Issue-
+  form ingestion additionally opens issue-body injection and Action permission
+  escalation.
+- **Contract violation.** Issue / `repository_dispatch` is not
+  `POST /v1/evidence/batches`; it forks the single client upload path the whole
+  design is built around.
+
+A pure-GitHub Action ingestion lane may only ever be reintroduced for a tiny,
+explicitly trusted internal cohort that authenticates as real GitHub users —
+never as a public default, and never with a client-embedded trigger token.
+
+#### Everything except the gate is pure GitHub
+
+- **Aggregation + publishing** → a scheduled GitHub Action (cron) reads accepted
+  evidence, computes summaries, and commits read-only artifact shards +
+  `manifest.json`. (= the design's Aggregation + Publishing jobs on free compute.)
+  **This Action is the only component with catalog-repo write capability**, via its
+  own `GITHUB_TOKEN` / repo secret scoped to minimal `permissions: contents: write`.
+- **Ingestion is queued, not committed per request.** The gate writes each
+  accepted batch into a free serverless store (Worker KV / D1 queue); the cron
+  Action drains the queue and commits in batches. This avoids git
+  non-fast-forward write contention when many clients upload concurrently.
+- **Artifact serving** → GitHub **Pages** (built-in CDN) serves shards by ETag.
+  Prefer Pages over `raw.githubusercontent.com` to avoid `raw` IP rate-limiting
+  (429) under sync load.
+- **Read-only sync** → manifest → ETag diff → shard download → signature/digest
+  verify (fail-closed) → merge into a disposable suggestion cache.
+
+#### This changes the client read path — it is a migration, not "unchanged"
+
+Today the client pulls a **single `llm_probe_catalog.json`** and merges it into the
+local evidence library (`apps/studio/backend/app/services/llm_import_drafts.py`;
+`/catalog/sync` in `routers/llm.py`). Phase 2a's manifest + shard + ETag + verify
+flow is a **new client capability** and writes into a **disposable cache separate
+from the local evidence store**. It must be designed as a migration step, not
+described as "the read path is unchanged."
+
+#### Component mapping (design box → phase 2a)
+
+| Design component | Phase 2a realization |
+|---|---|
+| Community Catalog Service (ingestion) | One free serverless function: auth / rate-limit / redact / enqueue. Holds no repo-write token. |
+| Ingestion buffer | Serverless KV / queue, drained by cron. |
+| Aggregation + publishing jobs | Scheduled GitHub Action (cron, free). |
+| Artifact CDN / mirror | GitHub Pages (free, CDN-backed). |
+| Desktop / backend / gateway boundaries | Unchanged from the main design. |
+
+#### Red-line compliance (must stay true in 2a)
+
+- Client holds at most an ingestion-scoped upload token to the gate; never a
+  catalog-repo write token. **Repo write capability exists only in the scheduled
+  publishing Action** (minimal `permissions: contents: write`); the serverless gate
+  itself holds no catalog-repo write token, so a gate compromise cannot write the
+  public catalog.
+- Client-side redaction runs before preview/upload; the gate re-validates
+  server-side (`extra=forbid`, secret/private-host scans) and can reject.
+- Artifacts are read-only and can only feed `historical_ready` / `untested` /
+  capability provenance / model-list fallback / probe priority — never `ready`.
+- `provider-list-observed` never contributes to `historical_ready`.
+- `/catalog/share` keeps its MVP1 contract: `local_export_only`,
+  `auto_upload_enabled=false`. Auto-upload is a phase-2 capability and, when
+  introduced, is **per-upload opt-in** — not a global flag flipped to true.
+- `/catalog/repository/ensure` (which today creates/initializes a repo using the
+  *user's own* configured token) is **not** reused as the client→public-catalog
+  upload path; Phase 2a ingestion goes only through the serverless gate. Keeping
+  these distinct prevents drifting back into "desktop holds a catalog-write token."
+
+Phase 2a explicitly defers (acceptable gaps until volume/abuse demands them):
+signed-account tiers and official publisher lane (open questions 1, 7); strong
+anomaly detection and quarantine automation; a dedicated CDN separate from GitHub
+(open question 8). These are upgrades, not blockers, because the client contract
+(`POST /v1/evidence/batches`, read-only manifest sync) is identical across 2a and
+the full shape.
+
+### Phase 2a Draft Decisions for the Open Questions
+
+These resolve the open questions phase 2a actually depends on; the rest stay open
+for the full hosted shape.
+
+- **Q1 (auth):** anonymous install tokens only, issued by the gate and scoped to
+  ingestion. The gate must also enforce token-issuance rate-limit, per-token +
+  per-IP request rate-limit, max batch size / record count, and server-side
+  revocation. Defer signed accounts to a later phase.
+- **Q2 + Q3 (base URL / fingerprint):** privacy is protected by **not publishing
+  private hosts at all**, not by hashing them. In priority order:
+  1. **Allowlisted well-known public providers** (OpenAI / Anthropic / Google /
+     Ark / DeepSeek / OpenRouter …): publish `normalized_public_base_url`
+     plaintext + fingerprint.
+  2. **Non-allowlisted / private / unknown hosts:** the client **drops the
+     endpoint identity before upload** (default safe baseline). A raw, un-salted
+     global SHA-256 of the base URL is **never published** — it is reversible by
+     dictionary / enumeration for predictable corporate / personal / tenant
+     hostnames.
+  3. *If* cross-user matching of a non-allowlisted **public** site is ever
+     genuinely needed, the only permitted mechanism is a **server-side
+     salted/peppered HMAC fingerprint** (pepper held by the gate, rotatable,
+     never published as a raw hash), and only after that host passes a public-host
+     review. This is a deferred upgrade, not part of the 2a baseline.
+- **Q8 (artifact hosting):** phase 2a = GitHub **Pages** (CDN-backed) for serving
+  + the GitHub repo for storage. Revisit a project CDN only when shard size or
+  sync volume justifies it. Signature/digest verification is fail-closed before
+  any artifact is used.
+
+#### Gaps to close before implementation (phase 2a)
+
+1. Anonymous upload token lifecycle: issuance rate-limit, rotation, server-side
+   revocation, max payload / record count per batch.
+2. **Withdrawal for anonymous uploads:** on accepted upload the gate returns a
+   one-time `receipt_token`; the uploader can call a withdraw endpoint with it to
+   retract that batch within a window. (Open question 10, now in-scope for 2a.)
+3. **Artifact schema versioning:** `manifest.json` carries a protocol major
+   version so an older client refuses (rather than crashes on) a newer shard
+   format.
+4. **Signature & key management:** how the publishing Action stores the artifact
+   signing key, rotation cadence, and leak response.
+5. **Schema mapping:** the ingestion schema's `evidence_type: "probe_result"`
+   must map to the gateway's existing `"probe"` evidence type
+   (`registry/schema.py`; `/catalog/share` filters on `"probe"`). Define the
+   legacy ↔ phase-2 mapping explicitly.
+6. **GitHub-specific tests:** Action least-privilege/permission test, artifact
+   signature fail-closed, manifest downgrade/rollback refusal, rate-limit
+   responses, token-extraction abuse simulation; (only if the trusted-cohort
+   Action lane is ever built) issue-payload fuzzing + injection.
+
 ## Data Model and Indexes
 
 ### Core Entities
@@ -637,6 +791,10 @@ Operational tests:
 - Rollback manifest restores previous build.
 
 ## Open Questions
+
+> Questions 1, 2, 3, and 8 have draft resolutions for the free-tier start in
+> "Phase 2a Draft Decisions for the Open Questions" above; they remain open for
+> the full hosted shape.
 
 1. Should default uploads use anonymous install tokens only, or require a signed
    account before any community contribution is accepted?

@@ -107,6 +107,15 @@ from app.services.llm_model_groups import (
 )
 from app.services.llm_model_identity import project_model_identity
 from app.services.llm_notable_models import notable_model_ids
+from app.services.community_catalog_upload import (
+    CommunityUploadClient,
+    OfflineUploadQueue,
+    UploadDeferred,
+    batch_idempotency_key,
+    collect_uploadable_uploads,
+    community_upload_configured,
+)
+from app.services.llm_paths import community_upload_queue_path
 from app.services.llm_probe_catalog import (
     append_evidence_record,
     load_evidence_library,
@@ -526,6 +535,73 @@ async def share_catalog() -> dict[str, Any]:
         raise HTTPException(
             status_code=500,
             detail=f"Failed to share catalog evidence: {exc}",
+        ) from exc
+
+
+@router.post("/catalog/contribute")
+async def contribute_catalog() -> dict[str, Any]:
+    """Opt-in: upload sanitized probe evidence to the community catalog gate.
+
+    Dormant unless an operator has explicitly enabled upload AND configured a
+    gate URL + ingestion-scoped token (Phase 2a). When dormant this is a no-op
+    that never reaches the network; the local export path stays unchanged.
+    """
+    cfg = get_backend_config()
+    if not community_upload_configured(
+        gate_url=cfg.community_gate_url,
+        ingestion_token=cfg.community_ingestion_token,
+        enabled=cfg.community_upload_enabled,
+    ):
+        return {
+            "status": "disabled",
+            "sharing_mode": "local_export_only",
+            "auto_upload_enabled": False,
+            "message": (
+                "Community upload is not configured. Enable it and set a gate URL plus an "
+                "ingestion-scoped token to opt in; until then evidence stays local."
+            ),
+        }
+
+    try:
+        uploads = collect_uploadable_uploads(load_evidence_library(), load_credentials())
+        if not uploads:
+            return {
+                "status": "success",
+                "auto_upload_enabled": True,
+                "accepted": 0,
+                "message": "No probe-verified evidence is available to contribute.",
+            }
+        client = CommunityUploadClient(
+            gate_url=cfg.community_gate_url,
+            ingestion_token=cfg.community_ingestion_token,
+            protocol_major=cfg.community_protocol_major,
+        )
+        queue = OfflineUploadQueue(community_upload_queue_path())
+        key = batch_idempotency_key(uploads)
+        try:
+            ack = await client.upload_batch(uploads, idempotency_key=key, queue=queue)
+        except UploadDeferred:
+            return {
+                "status": "deferred",
+                "auto_upload_enabled": True,
+                "queued": True,
+                "records_queued": len(uploads),
+                "message": "Gate unreachable; the batch was queued locally for retry.",
+            }
+        return {
+            "status": "success",
+            "auto_upload_enabled": True,
+            "accepted": ack.accepted,
+            "rejected": ack.rejected,
+            "receipt_token": ack.receipt_token,
+            "records_submitted": len(uploads),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to contribute catalog evidence: {exc}",
         ) from exc
 
 

@@ -24,6 +24,19 @@ describe("subgraphPathFieldState", () => {
     expect(subgraphPathFieldState("relative/child_graph", null).status).toBe("missing")
   })
 
+  it("resolves a relative path against the current skill root", () => {
+    expect(subgraphPathFieldState("subgraph/child_graph", null, "/skills/parent")).toEqual({
+      path: "/skills/parent/subgraph/child_graph",
+      legacyTargetSkill: null,
+      status: "resolved",
+    })
+    expect(subgraphPathFieldState("subgraph\\child_graph", null, "C:\\skills\\parent")).toEqual({
+      path: "C:\\skills\\parent\\subgraph\\child_graph",
+      legacyTargetSkill: null,
+      status: "resolved",
+    })
+  })
+
   it("marks an empty path with a legacy target_skill as migration-required", () => {
     expect(subgraphPathFieldState("", "legacy.registry.child")).toEqual({
       path: null,

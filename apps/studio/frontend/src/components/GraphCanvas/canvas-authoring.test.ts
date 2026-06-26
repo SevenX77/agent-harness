@@ -84,9 +84,9 @@ describe('canvas authoring helpers', () => {
     expect(skill.fileContent).toContain('<step id="S1"')
     expect(skill.fileContent).toContain('<protocol id="P1">')
 
-    // SUBGRAPH.md: absolute path placeholder + io + validator. Uses path, not target_skill.
+    // SUBGRAPH.md: relative path placeholder + io + validator. Uses path, not target_skill.
     expect(subgraph.fileContent).toContain('name: subgraph')
-    expect(subgraph.fileContent).toContain('path: /absolute/path/to/child_skill')
+    expect(subgraph.fileContent).toContain('path: subgraph/child_skill')
     expect(subgraph.fileContent).toContain('io:')
     expect(subgraph.fileContent).toContain('validator: false')
   })

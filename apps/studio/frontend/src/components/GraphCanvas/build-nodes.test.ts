@@ -197,7 +197,7 @@ describe('buildNodes', () => {
     }), new Set(), () => {}, {})
 
     const legacy = phaseNode(nodes, 'legacy')
-    // Drill-down still requires an ABSOLUTE child path, so a legacy target_skill
+    // Drill-down still requires a real path field, so a legacy target_skill
     // exposes no drillable path…
     expect(legacy.subgraphPath).toBeNull()
     // …but the inline expand toggle IS wired (it surfaces the recovery state for
@@ -205,19 +205,20 @@ describe('buildNodes', () => {
     expect(legacy.onToggleSubgraph).toBeTypeOf('function')
   })
 
-  it('only exposes absolute subgraph paths for drill-down and trims surrounding whitespace', () => {
+  it('keeps absolute and relative subgraph paths for drill-down and trims surrounding whitespace', () => {
     const nodes = buildNodes('demo', skillDetail({
       phases: ['trimmed', 'relative'],
       graph_topology: [
         { id: 'trimmed', src: 'phases/trimmed/SUBGRAPH.md', depends_on: [], mode: 'subgraph', path: '  /abs/child  ' },
-        { id: 'relative', src: 'phases/relative/SUBGRAPH.md', depends_on: [], mode: 'subgraph', path: 'legacy.registry.child' },
+        { id: 'relative', src: 'phases/relative/SUBGRAPH.md', depends_on: [], mode: 'subgraph', path: 'subgraph/child' },
       ],
-    }), new Set(), () => {}, {})
+    }), new Set(), () => {}, {}, {}, {}, {}, {}, '/skills/parent')
 
     expect(phaseNode(nodes, 'trimmed').subgraphPath).toBe('/abs/child')
     expect(phaseNode(nodes, 'trimmed').onToggleSubgraph).toBeTypeOf('function')
     // A relative path is still NOT drillable (subgraphPath null)…
-    expect(phaseNode(nodes, 'relative').subgraphPath).toBeNull()
+    expect(phaseNode(nodes, 'relative').workspaceRoot).toBe('/skills/parent')
+    expect(phaseNode(nodes, 'relative').subgraphPath).toBe('subgraph/child')
     // …yet every SUBGRAPH-kind node now gets the expand toggle, so the unresolved
     // one opens its inline recovery state instead of silently offering nothing.
     expect(phaseNode(nodes, 'relative').onToggleSubgraph).toBeTypeOf('function')

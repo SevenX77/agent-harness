@@ -3,9 +3,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { SubgraphGroupNode, subgraphGroupTitle } from './SubgraphGroupNode'
 
 vi.mock('@xyflow/react', () => ({
-  Handle: ({ type, position }: { type: string; position: string }) => (
-    <span data-handle-position={position} data-handle-type={type} />
-  ),
   Position: { Left: 'left' },
 }))
 
@@ -31,7 +28,7 @@ describe('SubgraphGroupNode', () => {
 
     expect(html).toContain('event_timeline')
     expect(html).not.toContain('/abs/story-deconstruction-v3/subgraph/event_timeline')
-    expect(html).toContain('data-handle-position="left"')
+    expect(html).not.toContain('data-handle-position')
   })
 
   it('falls back to the path basename while loading before the child name arrives', () => {

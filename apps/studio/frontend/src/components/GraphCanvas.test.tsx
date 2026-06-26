@@ -2,7 +2,7 @@ import { isValidElement, type ReactElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AddPhaseControl, buildEdges, CanvasContextMenuContent, GraphCanvas, SkillNode, type SkillGraphNode } from './GraphCanvas'
-import { layoutViewportSignature, nextExpandedSubgraphs } from './GraphCanvas/GraphCanvas'
+import { layoutViewportSignature, nextExpandedSubgraphs, topologyOwnerSkillIdForNode } from './GraphCanvas/GraphCanvas'
 import { CycleDetectedError, getAutoLayoutedElements } from '../lib/layout'
 import type { Edge, Node } from '@xyflow/react'
 import type { SkillDetail } from '@/api/types'
@@ -29,6 +29,10 @@ vi.mock('@xyflow/react', () => ({
   reconnectEdge: vi.fn((_oldEdge, newConnection, edges) => [...edges, newConnection]),
   useEdgesState: vi.fn((initialEdges) => [initialEdges, vi.fn(), vi.fn()]),
   useNodesState: vi.fn((initialNodes) => [initialNodes, vi.fn(), vi.fn()]),
+  useReactFlow: vi.fn(() => ({
+    flowToScreenPosition: (position: { x: number; y: number }) => position,
+  })),
+  useViewport: vi.fn(() => ({ x: 0, y: 0, zoom: 1 })),
 }))
 
 vi.mock('../lib/layout', () => {
@@ -201,6 +205,27 @@ describe('GraphCanvas', () => {
 
     expect(onNodeSelect).toHaveBeenCalledWith({ id: 'setup', data: selected.data })
     expect(onPanelChange).toHaveBeenCalledWith('properties')
+  })
+
+  it('selects inline subgraph child nodes by their canonical phase id, not canvas namespace id', () => {
+    const onNodeSelect = vi.fn()
+    renderToStaticMarkup(<GraphCanvas skillId="demo-skill" onNodeSelect={onNodeSelect} />)
+
+    const props = reactFlowPropsRef.current as {
+      onNodeClick?: (event: unknown, node: SkillGraphNode) => void
+    } | null
+    const selected: SkillGraphNode = {
+      ...phaseNode('__subpreview__::node::parent::plan'),
+      data: {
+        ...phaseNode('plan').data,
+        skillId: 'child-skill',
+        phaseId: 'plan',
+        label: 'plan',
+      },
+    }
+    props?.onNodeClick?.({}, selected)
+
+    expect(onNodeSelect).toHaveBeenCalledWith({ id: 'plan', data: selected.data })
   })
 
   it('renders new phase node actions under an Add Phase Node submenu', () => {
@@ -470,9 +495,28 @@ describe('GraphCanvas', () => {
   })
 
   it('keeps inline subgraph topology expansion single-select per canvas level', () => {
+    const childA = '__subpreview__::node::segmentation::extract'
+    const childB = '__subpreview__::node::segmentation::review'
+
     expect([...nextExpandedSubgraphs(new Set(), 'segmentation')]).toEqual(['segmentation'])
     expect([...nextExpandedSubgraphs(new Set(['segmentation']), 'event_timeline')]).toEqual(['event_timeline'])
     expect([...nextExpandedSubgraphs(new Set(['event_timeline']), 'event_timeline')]).toEqual([])
+    expect([...nextExpandedSubgraphs(new Set(['segmentation']), childA)]).toEqual(['segmentation', childA])
+    expect([...nextExpandedSubgraphs(new Set(['segmentation', childA]), childB)]).toEqual(['segmentation', childB])
+    expect([...nextExpandedSubgraphs(new Set(['segmentation', childA]), childA)]).toEqual(['segmentation'])
+    expect([...nextExpandedSubgraphs(new Set(['segmentation', childA]), 'event_timeline')]).toEqual(['event_timeline'])
+  })
+
+  it('keeps nested topology fetches pinned to the root skill boundary', () => {
+    const nested = phaseNode('__subpreview__::node::event_timeline::extract')
+    nested.data.skillId = 'event-timeline'
+    nested.data.workspaceRoot = '/repo/skills/story-deconstruction-v3/subgraph/event-timeline'
+    nested.data.subgraphPath = '/repo/skills/story-deconstruction-v3/subgraph/event-timeline/subgraph/event-extraction'
+
+    expect(topologyOwnerSkillIdForNode(nested, 'story-deconstruction-v3')).toBe('story-deconstruction-v3')
+
+    nested.data.topologyOwnerSkillId = 'story-deconstruction-v3'
+    expect(topologyOwnerSkillIdForNode(nested, 'other-root')).toBe('story-deconstruction-v3')
   })
 
   it('keeps the error overlay', () => {
@@ -560,10 +604,8 @@ describe('GraphCanvas', () => {
     expect(html).toContain('aria-label="Expand subgraph"')
   })
 
-  it('does not render the expand toggle on a read-only preview child (no toggle callback)', () => {
-    // Preview children inside an expanded container have their callback stripped,
-    // so they never offer a re-expand control.
-    const html = skillNodeHtml({ mode: 'subgraph', subgraphPath: '/abs/child', isSubgraphPreview: true })
+  it('does not render the expand toggle when no toggle callback is wired', () => {
+    const html = skillNodeHtml({ mode: 'subgraph', subgraphPath: '/abs/child' })
 
     expect(html).not.toContain('aria-label="Expand subgraph"')
     expect(html).not.toContain('aria-label="Collapse subgraph"')

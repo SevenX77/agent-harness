@@ -244,12 +244,8 @@ impl SidecarManager {
             let port = allocate_loopback_port()?;
             let api_token = generate_api_token();
             let stderr_lines = Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_RING_LINES)));
-            let mut child = spawn_sidecar_process(
-                &launch_config,
-                port,
-                &api_token,
-                Arc::clone(&stderr_lines),
-            )?;
+            let mut child =
+                spawn_sidecar_process(&launch_config, port, &api_token, Arc::clone(&stderr_lines))?;
 
             if wait_for_health(port, launch_config.health_timeout) {
                 let runtime_config = SidecarRuntimeConfig::new(
@@ -437,6 +433,7 @@ fn spawn_sidecar_process(
             "PYTHONPATH",
             python_path_env(&config.site_packages, &config.backend_dir),
         )
+        .env("PATH", sidecar_path_env(&config.site_packages))
         .env("STUDIO_RESOURCE_DIR", &config.resource_dir)
         .env("STUDIO_CONFIG_DIR", &config.config_dir)
         .env("STUDIO_API_TOKEN", api_token)
@@ -461,11 +458,39 @@ fn spawn_sidecar_process(
 }
 
 fn python_path_env(site_packages: &Path, backend_dir: &Path) -> OsString {
-    let mut entries = vec![site_packages.to_path_buf(), backend_dir.to_path_buf()];
+    let mut entries = vec![site_packages.to_path_buf()];
+    if cfg!(windows) {
+        entries.extend(pywin32_python_path_entries(site_packages));
+    }
+    entries.push(backend_dir.to_path_buf());
     if let Some(existing) = std::env::var_os("PYTHONPATH") {
         entries.extend(std::env::split_paths(&existing));
     }
     std::env::join_paths(entries).expect("PYTHONPATH entries must be valid")
+}
+
+fn pywin32_python_path_entries(site_packages: &Path) -> Vec<PathBuf> {
+    [
+        site_packages.join("win32"),
+        site_packages.join("win32").join("lib"),
+    ]
+    .into_iter()
+    .filter(|path| path.exists())
+    .collect()
+}
+
+fn sidecar_path_env(site_packages: &Path) -> OsString {
+    let mut entries = Vec::new();
+    if cfg!(windows) {
+        let pywin32_system32 = site_packages.join("pywin32_system32");
+        if pywin32_system32.exists() {
+            entries.push(pywin32_system32);
+        }
+    }
+    if let Some(existing) = std::env::var_os("PATH") {
+        entries.extend(std::env::split_paths(&existing));
+    }
+    std::env::join_paths(entries).expect("PATH entries must be valid")
 }
 
 fn sidecar_cors_extra_origins() -> String {
@@ -717,6 +742,45 @@ mod tests {
         assert!(origins.contains("http://localhost:5174"));
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn python_path_env_includes_pywin32_target_paths_before_backend() {
+        let root = temp_test_dir("pywin32-pythonpath");
+        let site_packages = root.join("site-packages");
+        let backend_dir = root.join("backend");
+        std::fs::create_dir_all(site_packages.join("win32").join("lib")).expect("win32 dirs");
+        std::fs::create_dir_all(&backend_dir).expect("backend dir");
+
+        let joined = python_path_env(&site_packages, &backend_dir);
+        let entries = std::env::split_paths(&joined).collect::<Vec<_>>();
+
+        assert_eq!(entries[0], site_packages);
+        assert_eq!(entries[1], root.join("site-packages").join("win32"));
+        assert_eq!(
+            entries[2],
+            root.join("site-packages").join("win32").join("lib")
+        );
+        assert_eq!(entries[3], backend_dir);
+
+        std::fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn sidecar_path_env_prepends_pywin32_dll_path() {
+        let root = temp_test_dir("pywin32-path");
+        let site_packages = root.join("site-packages");
+        let pywin32_system32 = site_packages.join("pywin32_system32");
+        std::fs::create_dir_all(&pywin32_system32).expect("pywin32 dll dir");
+
+        let joined = sidecar_path_env(&site_packages);
+        let entries = std::env::split_paths(&joined).collect::<Vec<_>>();
+
+        assert_eq!(entries[0], pywin32_system32);
+
+        std::fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
     #[test]
     fn runtime_config_serializes_frontend_contract_field_names() {
         let config = SidecarRuntimeConfig::new(
@@ -746,5 +810,17 @@ mod tests {
 
         kill_process_group(&mut child).expect("kill process group");
         assert!(child.try_wait().expect("wait after kill").is_some());
+    }
+
+    #[cfg(windows)]
+    fn temp_test_dir(label: &str) -> PathBuf {
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "skill-studio-sidecar-{label}-{}-{suffix}",
+            std::process::id()
+        ))
     }
 }

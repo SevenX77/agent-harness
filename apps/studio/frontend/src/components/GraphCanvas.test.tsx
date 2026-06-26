@@ -2,6 +2,7 @@ import { isValidElement, type ReactElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AddPhaseControl, buildEdges, CanvasContextMenuContent, GraphCanvas, SkillNode, type SkillGraphNode } from './GraphCanvas'
+import { layoutViewportSignature, nextExpandedSubgraphs } from './GraphCanvas/GraphCanvas'
 import { CycleDetectedError, getAutoLayoutedElements } from '../lib/layout'
 import type { Edge, Node } from '@xyflow/react'
 import type { SkillDetail } from '@/api/types'
@@ -434,6 +435,44 @@ describe('GraphCanvas', () => {
     const html = renderToStaticMarkup(<GraphCanvas skillId="demo-skill" isLoading />)
 
     expect(html).toContain('Loading graph...')
+  })
+
+  it('keeps the initial loading canvas blank and hidden until the first viewport fit is controlled', () => {
+    renderToStaticMarkup(<GraphCanvas skillId="demo-skill" isLoading />)
+
+    const props = reactFlowPropsRef.current as {
+      nodes?: unknown[]
+      fitView?: boolean
+      className?: string
+    } | null
+    expect(props?.nodes).toEqual([])
+    expect(props?.fitView).toBeUndefined()
+    expect(props?.className).toContain('opacity-0')
+    expect(props?.className).toContain('pointer-events-none')
+  })
+
+  it('does not treat subgraph expand state as a viewport-refit layout change', () => {
+    const collapsed = phaseNode('subgraph')
+    collapsed.data.mode = 'subgraph'
+    collapsed.data.subgraphPath = '/abs/subgraph'
+    collapsed.data.isExpanded = false
+    collapsed.data.onToggleSubgraph = () => undefined
+    const expanded: SkillGraphNode = {
+      ...collapsed,
+      data: {
+        ...collapsed.data,
+        isExpanded: true,
+      },
+    }
+
+    expect(layoutViewportSignature([collapsed], [])).toBe(layoutViewportSignature([expanded], []))
+    expect(layoutViewportSignature([collapsed], [])).not.toBe(layoutViewportSignature([collapsed, phaseNode('next')], []))
+  })
+
+  it('keeps inline subgraph topology expansion single-select per canvas level', () => {
+    expect([...nextExpandedSubgraphs(new Set(), 'segmentation')]).toEqual(['segmentation'])
+    expect([...nextExpandedSubgraphs(new Set(['segmentation']), 'event_timeline')]).toEqual(['event_timeline'])
+    expect([...nextExpandedSubgraphs(new Set(['event_timeline']), 'event_timeline')]).toEqual([])
   })
 
   it('keeps the error overlay', () => {

@@ -57,7 +57,7 @@ from app.core.adapters.gateway import (
     test_provider_route as _gateway_test_provider_route_request,
 )
 from app.core.adapters.transport_factory import build_gateway_adapter
-from app.core.backends import get_backend_config
+from app.core.backends import get_backend_config, get_metadata
 from app.models.llm_config import (
     CapabilityValue,
     EvidenceRecord,
@@ -167,8 +167,10 @@ async def _autoshare_after_probe_best_effort() -> None:
 
     Silently uploads newly probe-verified evidence to the community catalog gate
     using an ingestion-scoped token (never a repo token). NEVER raises: a probe
-    must not fail because background sharing did. Dormant unless community upload
-    is explicitly enabled AND a gate URL + ingestion token are configured.
+    must not fail because background sharing did. Dormant unless the gate is
+    configured (URL + ingestion token) AND the single community model-catalog
+    toggle (``remote_model_catalog_enabled``, which gates both read and
+    contribute) is on.
     """
     try:
         cfg = get_backend_config()
@@ -177,6 +179,11 @@ async def _autoshare_after_probe_best_effort() -> None:
             ingestion_token=cfg.community_ingestion_token,
             enabled=cfg.community_upload_enabled,
         ):
+            return
+        # The single community model-catalog toggle gates both reading the
+        # catalog and contributing to it; honour the user's opt-out before upload.
+        settings = await get_metadata().read_app_settings()
+        if not settings.remote_model_catalog_enabled:
             return
         uploads = collect_uploadable_uploads(load_evidence_library(), load_credentials())
         if not uploads:

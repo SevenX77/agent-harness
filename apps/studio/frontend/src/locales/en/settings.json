@@ -59,7 +59,45 @@
     "addProvider": "Add Provider",
     "addProviderDialogTitle": "Add provider",
     "providerName": "Provider name",
-    "add": "Add"
+    "add": "Add",
+    "form": {
+      "providerNameLabel": "Provider name",
+      "providerNamePlaceholder": "e.g. My OpenRouter",
+      "providerNameRequired": "Provider name is required.",
+      "providerNameDuplicate": "A provider with this name already exists.",
+      "baseUrlLabel": "Base URL",
+      "baseUrlPlaceholder": "https://api.example.com",
+      "apiKeyLabel": "API Key",
+      "apiKeyPlaceholder": "Enter the provider API Key",
+      "cancelButton": "Cancel"
+    },
+    "manualTest": {
+      "title": "Manual model probing",
+      "description": "Add model ids when automatic model listing is unavailable.",
+      "placeholderExample": "e.g. {{example}}",
+      "modelInputLabel": "Manual model {{index}}",
+      "removeModelLabel": "Remove model {{index}}",
+      "addModel": "Add Model",
+      "testModels": "Test Models",
+      "testingLoading": "Testing models...",
+      "candidateLoadError": "Failed to load notable models",
+      "testFailedFallback": "Model test failed",
+      "noResults": "No model results were returned.",
+      "oneAvailable": "Model is available.",
+      "manyAvailable": "{{n}} models are available.",
+      "someFailed": "{{failed}} of {{total}} model tests failed.",
+      "failedItem": "{{modelId}}: {{status}}",
+      "status": {
+        "ok": "Available",
+        "invalidModel": "Model not found",
+        "invalidKey": "Invalid API key",
+        "rateLimited": "Rate limited",
+        "quotaExceeded": "Quota exceeded",
+        "networkError": "Network error",
+        "timeout": "Request timed out",
+        "failed": "Test failed"
+      }
+    }
   },
   "llmRoles": {
     "title": "LLM Roles",

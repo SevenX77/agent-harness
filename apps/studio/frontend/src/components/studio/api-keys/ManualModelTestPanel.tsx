@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { Loader2, Plus, Trash2 } from "lucide-react"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import i18n from "@/i18n"
 import { composeRequestErrorMessage } from "@/lib/llm-error-messages"
 import { getNotableModels, testProviderModels, type ModelInfo, type ProviderModelTestResult, type ProviderUiState } from "../../../api/llm"
 import { ProviderStateBadge } from "../settings/llm-roles/provider-state-badge"
@@ -32,23 +34,23 @@ type ManualModelToastKind = "success" | "error" | "info"
 export function manualModelStatusLabel(status: ProviderModelTestResult["status"]): string {
   switch (status) {
     case "ok":
-      return "Available"
+      return i18n.t("apiKeys.manualTest.status.ok")
     case "invalid_model":
-      return "Model not found"
+      return i18n.t("apiKeys.manualTest.status.invalidModel")
     case "invalid_key":
-      return "Invalid API key"
+      return i18n.t("apiKeys.manualTest.status.invalidKey")
     case "rate_limited":
-      return "Rate limited"
+      return i18n.t("apiKeys.manualTest.status.rateLimited")
     case "quota_exceeded":
-      return "Quota exceeded"
+      return i18n.t("apiKeys.manualTest.status.quotaExceeded")
     case "network_error":
-      return "Network error"
+      return i18n.t("apiKeys.manualTest.status.networkError")
     case "timeout":
-      return "Request timed out"
+      return i18n.t("apiKeys.manualTest.status.timeout")
     case "error":
-      return "Test failed"
+      return i18n.t("apiKeys.manualTest.status.failed")
     default:
-      return "Test failed"
+      return i18n.t("apiKeys.manualTest.status.failed")
   }
 }
 
@@ -90,10 +92,10 @@ export function modelIdPlaceholder(
     notableModels[0] ??
     exampleModelIdsByProvider[normalizedProviderKey] ??
     "gpt-5"
-  if (vendorPrefixedModelProviders.has(normalizedProviderKey)) {
-    return `e.g. ${example}`
-  }
-  return `e.g. ${example.replace(/^[^/]+\//, "")}`
+  const display = vendorPrefixedModelProviders.has(normalizedProviderKey)
+    ? example
+    : example.replace(/^[^/]+\//, "")
+  return i18n.t("apiKeys.manualTest.placeholderExample", { example: display })
 }
 
 export function mergeModelLists(existing: ModelInfo[], incoming: ModelInfo[]): ModelInfo[] {
@@ -105,7 +107,7 @@ export function mergeModelLists(existing: ModelInfo[], incoming: ModelInfo[]): M
 }
 
 export function manualModelCandidateErrorMessage(error: unknown): string {
-  return composeRequestErrorMessage(error, "Failed to load notable models")
+  return composeRequestErrorMessage(error, i18n.t("apiKeys.manualTest.candidateLoadError"))
 }
 
 export function manualModelToastSummary(results: ProviderModelTestResult[]): {
@@ -114,28 +116,32 @@ export function manualModelToastSummary(results: ProviderModelTestResult[]): {
   description?: string
 } {
   if (results.length === 0) {
-    return { kind: "info", title: "No model results were returned.", description: undefined }
+    return { kind: "info", title: i18n.t("apiKeys.manualTest.noResults"), description: undefined }
   }
   const failed = results.filter((result) => result.status !== "ok")
   if (failed.length === 0) {
     return {
       kind: "success",
-      title: results.length === 1 ? "Model is available." : `${results.length} models are available.`,
+      title:
+        results.length === 1
+          ? i18n.t("apiKeys.manualTest.oneAvailable")
+          : i18n.t("apiKeys.manualTest.manyAvailable", { n: results.length }),
       description: undefined,
     }
   }
   return {
     kind: "error",
-    title: `${failed.length} of ${results.length} model tests failed.`,
+    title: i18n.t("apiKeys.manualTest.someFailed", { failed: failed.length, total: results.length }),
     description: failed.slice(0, 3).map((result) => (
-      `${result.model_id}: ${manualModelStatusLabel(result.status)}`
+      i18n.t("apiKeys.manualTest.failedItem", { modelId: result.model_id, status: manualModelStatusLabel(result.status) })
     )).join(", "),
   }
 }
 
 export function ManualModelResultList({ results }: { results: ProviderModelTestResult[] }) {
+  const { t } = useTranslation("settings")
   if (results.length === 0) {
-    return <div className="text-xs text-muted-foreground">No model results were returned.</div>
+    return <div className="text-xs text-muted-foreground">{t("apiKeys.manualTest.noResults")}</div>
   }
 
   return (
@@ -156,6 +162,7 @@ export function ManualModelResultList({ results }: { results: ProviderModelTestR
 }
 
 export function ManualModelTestPanel({ providerKey, notableProviderKey, onModelsUpdated, defaultExpanded = false }: Props) {
+  const { t } = useTranslation("settings")
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [modelIds, setModelIds] = useState([""])
   const [notableModels, setNotableModels] = useState<string[]>([])
@@ -200,7 +207,7 @@ export function ManualModelTestPanel({ providerKey, notableProviderKey, onModels
     setResults([])
     setHasTested(true)
     const toastId = `manual-model-test-${providerKey}`
-    toast.loading("Testing models...", { id: toastId })
+    toast.loading(t("apiKeys.manualTest.testingLoading"), { id: toastId })
     try {
       const response = await testProviderModels({
         provider_id: providerKey,
@@ -212,7 +219,7 @@ export function ManualModelTestPanel({ providerKey, notableProviderKey, onModels
       toast[summary.kind](summary.title, { id: toastId, description: summary.description })
     } catch (testError) {
       setResults([])
-      const message = composeRequestErrorMessage(testError, "Model test failed")
+      const message = composeRequestErrorMessage(testError, t("apiKeys.manualTest.testFailedFallback"))
       setError(message)
       toast.error(message, { id: toastId })
     } finally {
@@ -232,8 +239,8 @@ export function ManualModelTestPanel({ providerKey, notableProviderKey, onModels
       <AccordionItem value={manualModelPanelValue} className="border-0 data-open:bg-transparent">
         <AccordionTrigger className="px-0 py-3 hover:no-underline">
           <div className="min-w-0">
-            <div className="font-medium text-foreground">Manual model probing</div>
-            <div className="text-muted-foreground">Add model ids when automatic model listing is unavailable.</div>
+            <div className="font-medium text-foreground">{t("apiKeys.manualTest.title")}</div>
+            <div className="text-muted-foreground">{t("apiKeys.manualTest.description")}</div>
           </div>
           {loadingCandidates && expanded ? <Loader2 className="size-3.5 animate-spin text-muted-foreground" /> : null}
         </AccordionTrigger>
@@ -252,7 +259,7 @@ export function ManualModelTestPanel({ providerKey, notableProviderKey, onModels
                     setError(null)
                   }}
                   placeholder={modelIdPlaceholder(notableProviderKey, notableModels, index)}
-                  aria-label={`Manual model ${index + 1}`}
+                  aria-label={t("apiKeys.manualTest.modelInputLabel", { index: index + 1 })}
                   autoComplete="off"
                   autoCorrect="off"
                   autoCapitalize="none"
@@ -263,7 +270,7 @@ export function ManualModelTestPanel({ providerKey, notableProviderKey, onModels
                   type="button"
                   size="icon"
                   variant="ghost"
-                  aria-label={`Remove model ${index + 1}`}
+                  aria-label={t("apiKeys.manualTest.removeModelLabel", { index: index + 1 })}
                   disabled={modelIds.length === 1}
                   onClick={() => {
                     setModelIds((current) => current.filter((_, itemIndex) => itemIndex !== index))
@@ -291,11 +298,11 @@ export function ManualModelTestPanel({ providerKey, notableProviderKey, onModels
               }}
             >
               <Plus className="size-3.5" />
-              Add Model
+              {t("apiKeys.manualTest.addModel")}
             </Button>
             <Button type="button" size="sm" onClick={() => void runModelTests()} disabled={testing || trimmedModelIds.length === 0}>
               {testing ? <Loader2 className="size-3.5 animate-spin" /> : null}
-              Test Models
+              {t("apiKeys.manualTest.testModels")}
             </Button>
           </div>
           {error ? <div className="text-destructive">{error}</div> : null}

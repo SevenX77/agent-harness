@@ -78,7 +78,6 @@ from app.models.llm_config import (
     overlay_bundle_reference_chain,
 )
 from app.services import copilot
-from app.services.community_catalog_nogate import autoshare_probe_evidence
 from app.services.community_catalog_sync import (
     DisposableCatalogCacheStore,
     VerifiedSyncError,
@@ -164,22 +163,32 @@ logger = logging.getLogger(__name__)
 
 
 async def _autoshare_after_probe_best_effort() -> None:
-    """Best-effort no-gate community auto-share after a successful probe.
+    """Best-effort community auto-share to the gate after a successful probe.
 
-    Silently pushes newly probe-verified evidence into the catalog repo's
-    ``incoming/`` staging area. NEVER raises: a probe must not fail because
-    background sharing did. Dormant unless ``community_nogate_upload_enabled``.
+    Silently uploads newly probe-verified evidence to the community catalog gate
+    using an ingestion-scoped token (never a repo token). NEVER raises: a probe
+    must not fail because background sharing did. Dormant unless community upload
+    is explicitly enabled AND a gate URL + ingestion token are configured.
     """
     try:
         cfg = get_backend_config()
-        await autoshare_probe_evidence(
-            load_evidence_library(),
-            load_credentials(),
-            github_token=cfg.github_token,
-            catalog_repo=cfg.llm_catalog_repo,
-            catalog_owner=cfg.github_owner,
-            enabled=cfg.community_nogate_upload_enabled,
-            branch=cfg.llm_catalog_branch,
+        if not community_upload_configured(
+            gate_url=cfg.community_gate_url,
+            ingestion_token=cfg.community_ingestion_token,
+            enabled=cfg.community_upload_enabled,
+        ):
+            return
+        uploads = collect_uploadable_uploads(load_evidence_library(), load_credentials())
+        if not uploads:
+            return
+        client = CommunityUploadClient(
+            gate_url=cfg.community_gate_url,
+            ingestion_token=cfg.community_ingestion_token,
+            protocol_major=cfg.community_protocol_major,
+        )
+        queue = OfflineUploadQueue(community_upload_queue_path())
+        await client.upload_batch(
+            uploads, idempotency_key=batch_idempotency_key(uploads), queue=queue
         )
     except Exception:  # noqa: BLE001 — best-effort: sharing must never fail a probe
         logger.warning("post-probe community auto-share failed", exc_info=True)

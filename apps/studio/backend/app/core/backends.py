@@ -47,6 +47,14 @@ class BackendConfig(BaseSettings):
     llm_catalog_repo: str = "studio-llm-model-catalog"
     llm_catalog_branch: str = "main"
     llm_catalog_path: str = "llm_probe_catalog.json"
+    # Community Probe Catalog (Phase 2a) — dormant by default. Upload activates
+    # only when explicitly enabled AND a gate URL + ingestion-scoped token exist.
+    community_upload_enabled: bool = False
+    community_gate_url: str = ""
+    community_ingestion_token: str = ""
+    community_protocol_major: int = 1
+    community_catalog_signing_pubkey: str = ""
+    community_catalog_manifest_url: str = ""
     engine_transport: str = "in_process"
     engine_loopback_base_url: str = "http://127.0.0.1:8787"
     gateway_transport: str = "in_process"

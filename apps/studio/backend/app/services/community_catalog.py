@@ -32,16 +32,20 @@ UPLOADABLE_TRUST_STATE = "probe-verified"
 # locally verified evidence (and is never auto-applied to credentials).
 COMMUNITY_PROVENANCE = "community-catalog"
 
-# Well-known public providers whose base URLs are safe to publish in plaintext.
-# Any host not on this list drops its endpoint identity before upload.
+# Public provider endpoints whose base URLs are safe to publish in plaintext.
+# This covers two same-risk classes: official first-party endpoints AND public AI
+# transit/aggregators that anyone can register and connect to. In both cases the
+# base URL is a public domain that carries no user identity, so connectivity
+# evidence routed through it is publishable and actionable by other clients.
+# Any host NOT on this list drops its endpoint identity before upload.
 PUBLIC_PROVIDER_HOST_ALLOWLIST: frozenset[str] = frozenset(
     {
+        # Official first-party provider endpoints.
         "api.openai.com",
         "api.anthropic.com",
         "generativelanguage.googleapis.com",
         "ark.cn-beijing.volces.com",
         "api.deepseek.com",
-        "openrouter.ai",
         "api.mistral.ai",
         "api.groq.com",
         "api.together.xyz",
@@ -49,6 +53,11 @@ PUBLIC_PROVIDER_HOST_ALLOWLIST: frozenset[str] = frozenset(
         "dashscope.aliyuncs.com",
         "open.bigmodel.cn",
         "api.moonshot.cn",
+        # Public AI transit / aggregators — anyone can register and connect; the
+        # base URL is a public domain carrying no user identity.
+        "openrouter.ai",
+        "api.qnaigc.com",  # 七牛 Qiniu AI 中转 (OpenAI-compatible)
+        "anthropic.qnaigc.com",  # 七牛 Qiniu AI 中转 (Anthropic-compatible)
     }
 )
 

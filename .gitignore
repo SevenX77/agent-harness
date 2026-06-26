@@ -132,6 +132,10 @@ apps/studio/frontend/test-results/
 
 # Test data
 test/
+# ...but the community-catalog-gate service ships real source tests (node --test)
+# that MUST be tracked; the broad `test/` rule above would otherwise swallow them.
+!services/community-catalog-gate/test/
+!services/community-catalog-gate/test/**
 
 # Code diagnostics outputs; reports/scratch are legacy local artifacts
 code-diagnostics/output/

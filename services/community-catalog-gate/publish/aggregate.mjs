@@ -39,10 +39,21 @@ export function dedupeRecords(records) {
   return [...seen.values()];
 }
 
+// Public, content-addressed evidence id. Clients never upload an id (privacy);
+// the publisher derives a stable one from the record identity so that dedupe and
+// the client cache agree, and so the client's parse_catalog_evidence — which
+// REQUIRES evidence_id — can consume the record. NOT a local/user id.
+export function deriveEvidenceId(record) {
+  return `cat-${sha256Hex(Buffer.from(recordKey(record), 'utf-8'))}`;
+}
+
 // Build the catalog: returns the manifest bytes (to be signed) + shard files.
 // generatedAt is injected (no implicit clock) so callers control determinism.
 export function buildCatalog(records, { protocolMajor, generatedAt }) {
-  const deduped = dedupeRecords(records);
+  const deduped = dedupeRecords(records).map((record) => ({
+    ...record,
+    evidence_id: deriveEvidenceId(record),
+  }));
   const shards = [];
   const shardFiles = [];
   for (let i = 0; i < deduped.length; i += SHARD_SIZE) {

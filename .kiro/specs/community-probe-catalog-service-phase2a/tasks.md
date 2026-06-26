@@ -91,6 +91,13 @@ linked_docs:
   `packages/graph-agent*`.
 - **`cryptography` promoted to a direct backend dependency** (was transitive) for
   Ed25519 manifest verification; `uv.lock` refreshed (version unchanged, 49.0.0).
+- **E2E-found integration fix:** a full real-code run (client redact → gate
+  screen → publish + sign → client verified sync over HTTP) caught that published
+  records carried no `evidence_id` (clients never upload one, by privacy design),
+  so the client's `parse_catalog_evidence` rejected every record. Root cause was
+  in the publisher: it now derives a stable content-addressed id
+  (`aggregate.deriveEvidenceId`, covered by a Node test). The signature +
+  shard-digest chain was confirmed to verify end to end.
 - **Open follow-ups (frontend / refinement, not blocking the red-lines):**
   receipt-token persistence + withdraw UI (3.4); per-shard ETag differential (4.1);
   gate rate-limit + abuse-sim tests (6.4).

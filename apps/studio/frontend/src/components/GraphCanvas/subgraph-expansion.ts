@@ -4,29 +4,16 @@ import type { ContextEdgeData } from '@/components/edges/ContextEdge'
 import {
   buildEdges,
   INPUT_ID,
-  OUTPUT_ID,
+  SUBGRAPH_PREVIEW_INPUT_TARGET_HANDLE_ID,
+  type GlobalNodeData,
   type GraphCanvasNode,
   type SkillGraphNode,
   type SkillGraphNodeData,
   type SubgraphGroupNodeData,
 } from '@/components/nodes'
-import { buildNodesFromTopology } from './build-nodes'
 import { CycleDetectedError, getAutoLayoutedElements } from '@/lib/layout'
+import { buildNodesFromTopology } from './build-nodes'
 
-// N2 atom #13 (subgraph-inline-preview): canvas-level inline expansion of a
-// subgraph node. Clicking the node's expand toggle reveals the child graph
-// INSIDE a dashed container anchored to the parent graph's far right (CANVAS-3 /
-// F4 "inline content is real, not mock").
-//
-// Point 2 (PM 2026-06-23): the child is rendered with the SAME recursive pipeline
-// the main canvas uses — `buildNodesFromTopology` (its own global input/output
-// nodes + real phase nodes) + `buildEdges` (contextEdge connectors with the
-// clickable midpoint dot) + `getAutoLayoutedElements` (dagre TB) — NOT a bespoke
-// partial builder. We then offset every laid-out element into the container and
-// namespace its id so the canvas interaction handlers skip the read-only preview.
-
-// Node sizes mirror lib/layout.ts so the parent bounding box / child sub-layout
-// agree with what dagre produced for the main canvas.
 const SKILL_NODE_WIDTH = 260
 const SKILL_NODE_HEIGHT = 120
 const IO_NODE_WIDTH = 180
@@ -34,29 +21,31 @@ const IO_NODE_HEIGHT = 80
 
 const CONTAINER_PADDING = 28
 const CONTAINER_HEADER = 44
-// Gap between the parent graph's right edge and the container's left edge.
-const CONTAINER_GAP = 160
-// Vertical gap kept between two stacked containers (multiple subgraphs expanded).
-const CONTAINER_STACK_GAP = 56
+const CONTAINER_GAP = 120
+const GROUP_Z_INDEX = 0
+const CHILD_NODE_Z_INDEX = 3
+const PREVIEW_EDGE_Z_INDEX = 2
 
-// Shared prefix that marks every node/edge this module emits as a read-only
-// preview element, so the canvas interaction handlers (select / drill / edge
-// context menu) can cheaply skip them without threading extra flags around.
 const PREVIEW_PREFIX = '__subpreview__'
 
 export function isSubgraphPreviewId(id: string): boolean {
   return id.startsWith(PREVIEW_PREFIX)
 }
 
-// Namespace a child element id under its parent subgraph node so two expanded
-// subgraphs (and the parent graph itself) never collide on ids like
-// `__global_input__` or a shared phase name.
-function previewId(parentNodeId: string, innerId: string): string {
-  return `${PREVIEW_PREFIX}::${parentNodeId}::${innerId}`
-}
-
 function groupNodeId(parentNodeId: string): string {
   return `${PREVIEW_PREFIX}::group::${parentNodeId}`
+}
+
+function childNodeId(parentNodeId: string, childId: string): string {
+  return `${PREVIEW_PREFIX}::node::${parentNodeId}::${childId}`
+}
+
+function childEdgeId(parentNodeId: string, edgeId: string): string {
+  return `${PREVIEW_PREFIX}::edge::${parentNodeId}::${edgeId}`
+}
+
+function bridgeEdgeId(parentNodeId: string, targetId: string): string {
+  return `${PREVIEW_PREFIX}::bridge::${parentNodeId}::${targetId}`
 }
 
 export type ExpandedSubgraphView =
@@ -67,7 +56,6 @@ export type ExpandedSubgraphView =
 export interface SubgraphExpansionRequest {
   parentNodeId: string
   parentLabel: string
-  /** Absolute child path when resolved; '' / raw value for the recovery state. */
   path: string
   view: ExpandedSubgraphView
 }
@@ -85,37 +73,14 @@ function nodeSize(type: string | undefined): { width: number; height: number } {
   return { width: SKILL_NODE_WIDTH, height: SKILL_NODE_HEIGHT }
 }
 
-function parentBoundingBox(nodes: PositionedParentNode[]): { right: number; top: number; bottom: number } {
-  let right = 0
-  let top = Number.POSITIVE_INFINITY
-  let bottom = Number.NEGATIVE_INFINITY
-  for (const node of nodes) {
-    const { width, height } = nodeSize(node.type)
-    right = Math.max(right, node.position.x + width / 2)
-    top = Math.min(top, node.position.y - height / 2)
-    bottom = Math.max(bottom, node.position.y + height / 2)
-  }
-  if (!Number.isFinite(top)) top = 0
-  if (!Number.isFinite(bottom)) bottom = 0
-  return { right, top, bottom }
-}
-
 interface ChildLayout {
-  /** Laid-out child nodes (global input/output + phases), CENTER positions normalised so the content top-left is (0,0). */
   nodes: GraphCanvasNode[]
-  /** Child connector edges (contextEdge), ids/source/target still in child space. */
   edges: Edge<ContextEdgeData>[]
   contentWidth: number
   contentHeight: number
+  inputCenter: { x: number; y: number }
 }
 
-/**
- * Lay out the child graph with the EXACT pipeline the main canvas uses, so the
- * inline preview reads identically (own in/out nodes + dotted contextEdge). The
- * returned node positions are normalised so the content's top-left extent is
- * (0,0); the caller translates them into the container. Throws
- * CycleDetectedError (from the shared auto-layout) if the child is cyclic.
- */
 function layoutChild(skillId: string, phases: string[], graphTopology: GraphTopologyItem[]): ChildLayout {
   const childNodes = buildNodesFromTopology(skillId, phases, graphTopology, {})
   const childPhaseNodes = childNodes.filter((node): node is SkillGraphNode => node.type === 'skill')
@@ -133,45 +98,152 @@ function layoutChild(skillId: string, phases: string[], graphTopology: GraphTopo
     minTop = Math.min(minTop, node.position.y - height / 2)
     maxBottom = Math.max(maxBottom, node.position.y + height / 2)
   }
-  if (!Number.isFinite(minLeft)) { minLeft = 0; maxRight = 0; minTop = 0; maxBottom = 0 }
+  if (!Number.isFinite(minLeft)) {
+    minLeft = 0
+    maxRight = 0
+    minTop = 0
+    maxBottom = 0
+  }
 
-  const normalizedNodes = laid.nodes.map((node) => ({
+  const nodes = laid.nodes.map((node) => ({
     ...node,
     position: { x: node.position.x - minLeft, y: node.position.y - minTop },
-  }))
+  })) as GraphCanvasNode[]
+  const input = nodes.find((node) => node.id === INPUT_ID)
 
   return {
-    nodes: normalizedNodes,
+    nodes,
     edges: laid.edges,
     contentWidth: maxRight - minLeft,
     contentHeight: maxBottom - minTop,
+    inputCenter: input?.position ?? { x: IO_NODE_WIDTH / 2, y: IO_NODE_HEIGHT / 2 },
   }
 }
 
-const BRIDGE_EDGE_STYLE = { stroke: 'var(--primary, #6366f1)', strokeOpacity: 0.8, strokeWidth: 1.5, strokeDasharray: '6 5' }
-
-function bridgeEdge(id: string, source: string, target: string): Edge<ContextEdgeData> {
+function bridgeEdge(
+  id: string,
+  source: string,
+  target: string,
+  targetHandle?: string,
+): Edge<ContextEdgeData> {
   return {
     id,
     source,
     target,
-    // Built-in smoothstep dashed line: distinct from the child's interactive
-    // contextEdge connectors — it marks the parent→child expansion relationship.
-    type: 'smoothstep',
+    targetHandle,
+    type: 'contextEdge',
     selectable: false,
     focusable: false,
     deletable: false,
-    style: BRIDGE_EDGE_STYLE,
+    reconnectable: false,
+    style: { strokeWidth: 1.5 },
+    zIndex: PREVIEW_EDGE_Z_INDEX,
+    data: {
+      hasTraceData: false,
+      sourcePhaseId: source,
+      targetPhaseId: target,
+    },
   }
 }
 
-/**
- * Build the inline-expansion overlay (group containers + recursively-rendered
- * child graphs + bridge edges) for every expanded subgraph. Pure: positions
- * derive from the supplied parent-node layout, so the caller can layer the result
- * on top of the live (possibly user-dragged) canvas without re-running the main
- * layout.
- */
+function readonlyChildNode(parentNodeId: string, node: GraphCanvasNode, left: number, top: number): GraphCanvasNode {
+  const id = childNodeId(parentNodeId, node.id)
+  const { width, height } = nodeSize(node.type)
+  const base = {
+    ...node,
+    id,
+    position: {
+      x: left + node.position.x,
+      y: top + node.position.y,
+    },
+    width,
+    height,
+    style: { ...node.style, width, height },
+    draggable: false,
+    selectable: false,
+    connectable: false,
+    deletable: false,
+    zIndex: CHILD_NODE_Z_INDEX,
+  }
+
+  if (node.type === 'skill') {
+    return {
+      ...base,
+      data: {
+        ...(node.data as SkillGraphNodeData),
+        isSubgraphPreview: true,
+        isExpanded: false,
+        onToggleSubgraph: undefined,
+        onToggleSteps: undefined,
+        onStepsSave: undefined,
+      },
+    } as GraphCanvasNode
+  }
+
+  return {
+    ...base,
+    data: {
+      ...(node.data as GlobalNodeData),
+      isSubgraphPreview: true,
+    },
+  } as GraphCanvasNode
+}
+
+function readonlyChildEdge(parentNodeId: string, edge: Edge<ContextEdgeData>): Edge<ContextEdgeData> {
+  const source = childNodeId(parentNodeId, edge.source)
+  const target = childNodeId(parentNodeId, edge.target)
+  return {
+    ...edge,
+    id: childEdgeId(parentNodeId, edge.id),
+    source,
+    target,
+    type: 'contextEdge',
+    selectable: false,
+    focusable: false,
+    deletable: false,
+    reconnectable: false,
+    zIndex: PREVIEW_EDGE_Z_INDEX,
+    data: {
+      ...edge.data,
+      hasTraceData: false,
+      sourcePhaseId: source,
+      targetPhaseId: target,
+    },
+  }
+}
+
+function groupNode(
+  request: SubgraphExpansionRequest,
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+  status: SubgraphGroupNodeData['status'],
+  childName?: string,
+  message?: string,
+): GraphCanvasNode {
+  return {
+    id: groupNodeId(request.parentNodeId),
+    type: 'subgraphGroup',
+    position: { x: left + width / 2, y: top + height / 2 },
+    data: {
+      parentLabel: request.parentLabel,
+      path: request.path,
+      status,
+      childName,
+      message,
+    },
+    width,
+    height,
+    style: { width, height },
+    draggable: false,
+    selectable: false,
+    connectable: false,
+    deletable: false,
+    zIndex: GROUP_Z_INDEX,
+  } as GraphCanvasNode
+}
+
 export function buildSubgraphExpansion(
   parentNodes: PositionedParentNode[],
   expansions: SubgraphExpansionRequest[],
@@ -181,128 +253,68 @@ export function buildSubgraphExpansion(
   }
 
   const parentById = new Map(parentNodes.map((node) => [node.id, node]))
-  const bbox = parentBoundingBox(parentNodes)
-  const containerLeftEdge = bbox.right + CONTAINER_GAP
-
   const nodes: GraphCanvasNode[] = []
   const edges: Edge<ContextEdgeData>[] = []
-
-  // Track the bottom edge of the last placed container so multiple simultaneously
-  // expanded subgraphs stack downward without overlapping.
-  let nextFreeTop = bbox.top
 
   for (const request of expansions) {
     const parent = parentById.get(request.parentNodeId)
     if (!parent) continue
 
-    // Lay the child out first so the container sizes to it. A cyclic child (or any
-    // layout failure) degrades to the recovery container instead of throwing.
-    let child: ChildLayout | null = null
+    const parentSize = nodeSize(parent.type)
+    const expandOrigin = {
+      x: parent.position.x + parentSize.width / 2,
+      y: parent.position.y,
+    }
+    const contentLeft = expandOrigin.x + CONTAINER_GAP
     let status: SubgraphGroupNodeData['status'] = request.view.status
     let message = request.view.status === 'error' ? request.view.message : undefined
     const childName = request.view.status === 'loaded' ? request.view.name : undefined
-    if (request.view.status === 'loaded') {
-      try {
-        child = layoutChild(request.parentNodeId, request.view.phases, request.view.graphTopology)
-      } catch (error) {
-        if (error instanceof CycleDetectedError) {
-          status = 'error'
-          message = '子图存在依赖环，无法在画布内预览'
-          child = null
-        } else {
-          throw error
-        }
+
+    if (request.view.status !== 'loaded') {
+      const width = 300
+      const height = 132
+      const left = contentLeft - CONTAINER_PADDING
+      const top = parent.position.y - height / 2
+      const group = groupNode(request, left, top, width, height, status, childName, message)
+      nodes.push(group)
+      edges.push(bridgeEdge(bridgeEdgeId(request.parentNodeId, group.id), request.parentNodeId, group.id))
+      continue
+    }
+
+    let child: ChildLayout
+    try {
+      child = layoutChild(request.parentNodeId, request.view.phases, request.view.graphTopology)
+    } catch (error) {
+      if (!(error instanceof CycleDetectedError)) {
+        throw error
       }
+      status = 'error'
+      message = 'Subgraph contains a dependency cycle and cannot be previewed inline.'
+      const width = 360
+      const height = 132
+      const left = contentLeft - CONTAINER_PADDING
+      const top = parent.position.y - height / 2
+      const group = groupNode(request, left, top, width, height, status, childName, message)
+      nodes.push(group)
+      edges.push(bridgeEdge(bridgeEdgeId(request.parentNodeId, group.id), request.parentNodeId, group.id))
+      continue
     }
 
-    const contentWidth = child?.contentWidth ?? 240
-    const contentHeight = child?.contentHeight ?? 56
-    const width = contentWidth + CONTAINER_PADDING * 2
-    const height = contentHeight + CONTAINER_HEADER + CONTAINER_PADDING * 2
+    const contentTop = parent.position.y - child.inputCenter.y
+    const groupLeft = contentLeft - CONTAINER_PADDING
+    const groupTop = contentTop - CONTAINER_HEADER - CONTAINER_PADDING
+    const width = child.contentWidth + CONTAINER_PADDING * 2
+    const height = child.contentHeight + CONTAINER_HEADER + CONTAINER_PADDING * 2
+    const group = groupNode(request, groupLeft, groupTop, width, height, status, childName, message)
+    nodes.push(group)
+    nodes.push(...child.nodes.map((node) => readonlyChildNode(request.parentNodeId, node, contentLeft, contentTop)))
+    edges.push(...child.edges.map((edge) => readonlyChildEdge(request.parentNodeId, edge)))
 
-    // Vertically align the container with its expand node, but never above the
-    // already-placed containers (keeps multiple expansions non-overlapping).
-    const preferredTop = parent.position.y - height / 2
-    const topEdge = Math.max(preferredTop, nextFreeTop)
-    nextFreeTop = topEdge + height + CONTAINER_STACK_GAP
-
-    const groupData: SubgraphGroupNodeData = {
-      parentLabel: request.parentLabel,
-      path: request.path,
-      status,
-      childName,
-      message,
-    }
-    nodes.push({
-      id: groupNodeId(request.parentNodeId),
-      type: 'subgraphGroup',
-      position: { x: containerLeftEdge + width / 2, y: topEdge + height / 2 },
-      data: groupData,
-      width,
-      height,
-      style: { width, height },
-      draggable: false,
-      selectable: false,
-      connectable: false,
-      deletable: false,
-      zIndex: 0,
-    } as GraphCanvasNode)
-
-    if (!child) continue
-
-    const contentLeft = containerLeftEdge + CONTAINER_PADDING
-    const contentTop = topEdge + CONTAINER_HEADER + CONTAINER_PADDING
-
-    for (const node of child.nodes) {
-      const { width: w, height: h } = nodeSize(node.type)
-      const isSkill = node.type === 'skill'
-      // Read-only preview: strip the live edit callbacks so a preview phase can
-      // never mutate the real graph, and flag skill nodes so the canvas handlers
-      // skip them. Explicit width/height is REQUIRED — preview nodes live outside
-      // useNodesState, so React Flow drops their measurement changes and would
-      // otherwise keep them `visibility: hidden` forever.
-      const data = isSkill
-        ? ({ ...(node.data as SkillGraphNodeData), isSubgraphPreview: true, onToggleSubgraph: undefined, onToggleSteps: undefined, onStepsSave: undefined } as SkillGraphNodeData)
-        : node.data
-      nodes.push({
-        ...node,
-        id: previewId(request.parentNodeId, node.id),
-        position: { x: contentLeft + node.position.x, y: contentTop + node.position.y },
-        data,
-        width: w,
-        height: h,
-        draggable: false,
-        selectable: false,
-        connectable: false,
-        deletable: false,
-        zIndex: 1,
-      } as GraphCanvasNode)
-    }
-
-    for (const edge of child.edges) {
-      edges.push({
-        ...edge,
-        id: previewId(request.parentNodeId, edge.id),
-        source: previewId(request.parentNodeId, edge.source),
-        target: previewId(request.parentNodeId, edge.target),
-        selectable: false,
-        focusable: false,
-        deletable: false,
-        zIndex: 1,
-      })
-    }
-
-    // Bridge edges thread the parent subgraph node THROUGH the child graph: the
-    // node's single inbound/outbound slot maps to the child's own IN/OUT nodes.
     edges.push(bridgeEdge(
-      `${PREVIEW_PREFIX}::bridge-in::${request.parentNodeId}`,
+      bridgeEdgeId(request.parentNodeId, childNodeId(request.parentNodeId, INPUT_ID)),
       request.parentNodeId,
-      previewId(request.parentNodeId, INPUT_ID),
-    ))
-    edges.push(bridgeEdge(
-      `${PREVIEW_PREFIX}::bridge-out::${request.parentNodeId}`,
-      previewId(request.parentNodeId, OUTPUT_ID),
-      request.parentNodeId,
+      childNodeId(request.parentNodeId, INPUT_ID),
+      SUBGRAPH_PREVIEW_INPUT_TARGET_HANDLE_ID,
     ))
   }
 

@@ -295,6 +295,137 @@ describe('AssetsPanel', () => {
     expect(html).not.toContain('phases/setup')
   })
 
+  it('renders subgraph files as a flat panel with recursive level and right-aligned status', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceProvider value={workspaceContextStub}>
+        <AssetsPanel
+          skillDetail={{
+            ...skillDetailWithFiles({}),
+            graph_topology: [
+              {
+                id: 'segmentation',
+                src: 'phases/segmentation',
+                depends_on: [],
+                mode: 'subgraph',
+                path: '/abs/skills/segmentation',
+              },
+              {
+                id: 'summary',
+                src: 'phases/summary',
+                depends_on: ['segmentation'],
+                mode: 'subgraph',
+                path: '/abs/skills/summary',
+                level: 2,
+              } as NonNullable<SkillDetail['graph_topology']>[number],
+            ],
+          }}
+          selectedNode={null}
+        />
+      </WorkspaceProvider>,
+    )
+
+    expect(html).toContain('data-assets-section="subgraphs-files"')
+    expect(html).toContain('data-subgraph-level="1"')
+    expect(html).toContain('data-subgraph-level="2"')
+    expect(html).toContain('L1')
+    expect(html).toContain('L2')
+    expect(html).toContain('data-subgraph-level-tag="true"')
+    expect(html.indexOf('data-subgraph-level-tag="true"')).toBeLessThan(html.indexOf('data-subgraph-name="true"'))
+    expect(html).toContain('data-subgraph-folder="true"')
+    expect(html).toContain('data-subgraph-default-expanded="false"')
+    expect(html).toContain('data-subgraph-status-slot="true"')
+    expect(html).toContain('data-subgraph-row-grid="true"')
+    expect(html).toContain('w-full min-w-0 space-y-1 overflow-hidden py-1')
+    expect(html).toContain('grid w-full min-w-0 grid-cols-[minmax(0,1fr)_max-content]')
+    expect(html).toContain('grid-cols-[auto_auto_minmax(0,1fr)]')
+    expect(html).toContain('min-w-max justify-self-end')
+    expect(html).not.toContain('w-[4.75rem]')
+    expect(html).not.toContain('w-10 px-0')
+    expect(html).not.toContain('--subgraph-indent')
+    expect(html).not.toContain('var(--subgraph-indent)')
+    expect(html).not.toContain('calc(1rem +')
+    expect(html).not.toContain('padding-left:12px')
+    expect(html).not.toContain('title="Subgraphs"')
+  })
+
+  it('suppresses recursive level pills when every subgraph is top-level', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceProvider value={workspaceContextStub}>
+        <AssetsPanel
+          skillDetail={{
+            ...skillDetailWithFiles({}),
+            graph_topology: [
+              {
+                id: 'segmentation',
+                src: 'phases/segmentation',
+                depends_on: [],
+                mode: 'subgraph',
+                path: '/abs/skills/segmentation',
+              },
+              {
+                id: 'event_timeline',
+                src: 'phases/event_timeline',
+                depends_on: ['segmentation'],
+                mode: 'subgraph',
+                path: '/abs/skills/event_timeline',
+              },
+            ],
+          }}
+          selectedNode={null}
+        />
+      </WorkspaceProvider>,
+    )
+
+    expect(html).toContain('segmentation')
+    expect(html).toContain('event_timeline')
+    expect(html).toContain('Linked')
+    expect(html).not.toContain('L1')
+    expect(html).not.toContain('Recursive level 1')
+  })
+
+  it('keeps each subgraph folder collapsed by default', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceProvider value={workspaceContextStub}>
+        <AssetsPanel
+          skillDetail={{
+            ...skillDetailWithFiles({}),
+            graph_topology: [
+              {
+                id: 'story_analysis',
+                src: 'phases/story_analysis',
+                depends_on: [],
+                mode: 'subgraph',
+                path: '/abs/skills/story_analysis',
+              },
+            ],
+          }}
+          selectedNode={null}
+        />
+      </WorkspaceProvider>,
+    )
+
+    expect(html).toContain('data-subgraph-folder="true"')
+    expect(html).toContain('data-subgraph-default-expanded="false"')
+    expect(html).not.toContain('data-subgraph-folder-contents="true"')
+  })
+
+  it('keeps the assets split panes constrained to the sidebar height', () => {
+    const html = renderAssetsPanel({ 'phases/step1/LOGIC.md': '---\nname: step1\n---\n' })
+
+    expect(html).toContain('data-assets-split-container="true"')
+    expect(html).toContain('grid h-full min-h-0')
+    expect(html).toContain('overflow-hidden px-0 pb-2')
+    expect(html).not.toContain('px-1.5 pb-2')
+    expect(html).not.toContain('calc(100vh - 5.25rem)')
+  })
+
+  it('does not draw an extra hard border between asset sections', () => {
+    const html = renderAssetsPanel({ 'phases/step1/LOGIC.md': '---\nname: step1\n---\n' })
+
+    expect(html).not.toContain('border-y border-border/40')
+    expect(html).not.toContain('bg-border/60')
+  })
+
   it('surfaces a referenced subgraph with no path honestly as missing', () => {
     const html = renderToStaticMarkup(
       <WorkspaceProvider value={workspaceContextStub}>

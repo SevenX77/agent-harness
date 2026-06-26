@@ -13,6 +13,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from app.core.adapters.gateway import EvidenceRecord, ProviderImportDraft
 from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint
 from app.services.community_catalog import build_upload_record
 from app.services.community_catalog_upload import (
@@ -174,9 +175,7 @@ def _credentials_with_openai() -> LLMCredentialsFile:
     return LLMCredentialsFile(provider_endpoints={"openai-main": endpoint})
 
 
-def _library_with(records: list[EvidenceRecord]) -> object:
-    from app.core.adapters.gateway import ProviderImportDraft
-
+def _library_with(records: list[EvidenceRecord]) -> ProviderImportDraft:
     return ProviderImportDraft.model_validate(
         {
             "draft_id": "evidence-library",

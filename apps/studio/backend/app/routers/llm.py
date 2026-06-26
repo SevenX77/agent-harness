@@ -78,6 +78,20 @@ from app.models.llm_config import (
     overlay_bundle_reference_chain,
 )
 from app.services import copilot
+from app.services.community_catalog_sync import (
+    DisposableCatalogCacheStore,
+    VerifiedSyncError,
+    make_httpx_fetcher,
+    sync_verified_catalog,
+)
+from app.services.community_catalog_upload import (
+    CommunityUploadClient,
+    OfflineUploadQueue,
+    UploadDeferred,
+    batch_idempotency_key,
+    collect_uploadable_uploads,
+    community_upload_configured,
+)
 from app.services.copilot_test import (
     ModelProbeResult,
     PingResult,
@@ -107,15 +121,10 @@ from app.services.llm_model_groups import (
 )
 from app.services.llm_model_identity import project_model_identity
 from app.services.llm_notable_models import notable_model_ids
-from app.services.community_catalog_upload import (
-    CommunityUploadClient,
-    OfflineUploadQueue,
-    UploadDeferred,
-    batch_idempotency_key,
-    collect_uploadable_uploads,
-    community_upload_configured,
+from app.services.llm_paths import (
+    community_catalog_cache_path,
+    community_upload_queue_path,
 )
-from app.services.llm_paths import community_upload_queue_path
 from app.services.llm_probe_catalog import (
     append_evidence_record,
     load_evidence_library,
@@ -603,6 +612,58 @@ async def contribute_catalog() -> dict[str, Any]:
             status_code=500,
             detail=f"Failed to contribute catalog evidence: {exc}",
         ) from exc
+
+
+@router.post("/catalog/sync-verified")
+async def sync_verified_community_catalog() -> dict[str, Any]:
+    """Pull the signed community catalog into a disposable, verified cache (R4).
+
+    Dormant unless a manifest URL and a signing public key are configured. The
+    sync is fail-closed: a bad signature, shard digest, or incompatible protocol
+    surfaces as an error and the disposable cache is left untouched. Verified
+    evidence is advisory and never auto-applied to credentials.
+    """
+    cfg = get_backend_config()
+    manifest_url = cfg.community_catalog_manifest_url.strip()
+    public_key_hex = cfg.community_catalog_signing_pubkey.strip()
+    if not manifest_url or not public_key_hex:
+        return {
+            "status": "disabled",
+            "verified_sync_enabled": False,
+            "message": (
+                "Verified community sync is not configured. Set a manifest URL and a signing "
+                "public key to enable the verified read path."
+            ),
+        }
+
+    cache_store = DisposableCatalogCacheStore(community_catalog_cache_path())
+    prev_etag = cache_store.load().manifest_etag
+    signature_url = f"{manifest_url}.sig"
+    shard_base_url = manifest_url.rsplit("/", 1)[0] + "/"
+    try:
+        outcome = await sync_verified_catalog(
+            manifest_url=manifest_url,
+            signature_url=signature_url,
+            shard_base_url=shard_base_url,
+            public_key_hex=public_key_hex,
+            client_protocol_major=cfg.community_protocol_major,
+            cache_store=cache_store,
+            fetch=make_httpx_fetcher(),
+            prev_etag=prev_etag,
+        )
+    except VerifiedSyncError as exc:
+        raise HTTPException(status_code=502, detail=f"Verified catalog sync failed: {exc}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Verified catalog sync error: {exc}") from exc
+
+    return {
+        "status": "success",
+        "verified_sync_enabled": True,
+        "sync_status": outcome.status,
+        "record_count": outcome.record_count,
+        "manifest_etag": outcome.manifest_etag,
+        "protocol_major": outcome.protocol_major,
+    }
 
 
 @router.post("/endpoints/{endpoint_id}/test", response_model=EndpointTestResponse)

@@ -1,0 +1,28 @@
+# Cloudflare Worker config TEMPLATE for the Community Probe Catalog gate.
+# Copy to wrangler.toml and fill in the KV namespace IDs before `wrangler deploy`.
+#
+# The gate intentionally has NO catalog-repo write token bound here. Its only
+# storage is the KV buffer drained by the publishing Action.
+
+name = "community-catalog-gate"
+main = "src/gate.mjs"
+compatibility_date = "2026-06-01"
+
+[vars]
+PROTOCOL_MAJOR = "1"
+
+# Secrets (set with `wrangler secret put`, never commit):
+#   INGESTION_TOKEN   — shared anonymous opt-in token clients send as Bearer
+
+# KV namespaces (create with `wrangler kv namespace create <name>`):
+[[kv_namespaces]]
+binding = "BUFFER"
+id = "REPLACE_WITH_BUFFER_KV_ID"
+
+[[kv_namespaces]]
+binding = "IDEMPOTENCY"
+id = "REPLACE_WITH_IDEMPOTENCY_KV_ID"
+
+[[kv_namespaces]]
+binding = "WITHDRAWN"
+id = "REPLACE_WITH_WITHDRAWN_KV_ID"

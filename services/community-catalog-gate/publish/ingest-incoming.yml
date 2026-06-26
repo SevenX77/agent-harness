@@ -59,9 +59,12 @@ jobs:
         run: |
           git config user.name 'catalog-publisher'
           git config user.email 'catalog-publisher@users.noreply.github.com'
-          # incoming/ is staged too so the consumed batch files (deleted by the
-          # publisher) are committed as removals.
-          git add manifest.json manifest.json.sig shards/ incoming/
+          git add manifest.json manifest.json.sig shards/
+          # incoming/ only exists once a desktop has pushed a batch (it is absent on
+          # a manual workflow_dispatch re-publish). Stage it only when present, so the
+          # consumed (deleted) batch files commit as removals without failing the
+          # no-incoming case.
+          [ -d incoming ] && git add incoming/ || true
           if git diff --cached --quiet; then
             echo 'No catalog changes to publish.'
           else

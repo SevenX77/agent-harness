@@ -1,10 +1,9 @@
 import type { Edge } from '@xyflow/react'
-import type { GraphTopologyItem } from '@/api/types'
+import type { GraphTopologyItem, SkillDetail } from '@/api/types'
 import type { ContextEdgeData } from '@/components/edges/ContextEdge'
 import {
   buildEdges,
   INPUT_ID,
-  SUBGRAPH_PREVIEW_INPUT_TARGET_HANDLE_ID,
   type GlobalNodeData,
   type GraphCanvasNode,
   type SkillGraphNode,
@@ -12,16 +11,18 @@ import {
   type SubgraphGroupNodeData,
 } from '@/components/nodes'
 import { CycleDetectedError, getAutoLayoutedElements } from '@/lib/layout'
-import { buildNodesFromTopology } from './build-nodes'
+import { buildNodes, buildNodesFromTopology } from './build-nodes'
 
 const SKILL_NODE_WIDTH = 260
 const SKILL_NODE_HEIGHT = 120
-const IO_NODE_WIDTH = 180
+const IO_NODE_WIDTH = 220
 const IO_NODE_HEIGHT = 80
 
 const CONTAINER_PADDING = 28
 const CONTAINER_HEADER = 44
-const CONTAINER_GAP = 120
+const EXPAND_TOGGLE_RADIUS = 10
+const SUBGRAPH_BRIDGE_LENGTH = 92
+const CONTAINER_GAP = SUBGRAPH_BRIDGE_LENGTH + CONTAINER_PADDING
 const GROUP_Z_INDEX = 0
 const CHILD_NODE_Z_INDEX = 3
 const PREVIEW_EDGE_Z_INDEX = 2
@@ -44,20 +45,23 @@ function childEdgeId(parentNodeId: string, edgeId: string): string {
   return `${PREVIEW_PREFIX}::edge::${parentNodeId}::${edgeId}`
 }
 
-function bridgeEdgeId(parentNodeId: string, targetId: string): string {
-  return `${PREVIEW_PREFIX}::bridge::${parentNodeId}::${targetId}`
-}
-
 export type ExpandedSubgraphView =
   | { status: 'loading' }
   | { status: 'error'; message: string }
-  | { status: 'loaded'; name?: string; phases: string[]; graphTopology: GraphTopologyItem[] }
+  | { status: 'loaded'; name?: string; phases: string[]; graphTopology: GraphTopologyItem[]; detail?: SkillDetail }
 
 export interface SubgraphExpansionRequest {
   parentNodeId: string
   parentLabel: string
   path: string
+  childSkillId?: string
+  topologyOwnerSkillId?: string
   view: ExpandedSubgraphView
+}
+
+export interface SubgraphExpansionOptions {
+  expandedSubgraphs?: ReadonlySet<string>
+  onToggleSubgraph?: (nodeId: string) => void
 }
 
 export interface PositionedParentNode {
@@ -81,8 +85,53 @@ interface ChildLayout {
   inputCenter: { x: number; y: number }
 }
 
-function layoutChild(skillId: string, phases: string[], graphTopology: GraphTopologyItem[]): ChildLayout {
-  const childNodes = buildNodesFromTopology(skillId, phases, graphTopology, {})
+const childLayoutCache = new Map<string, ChildLayout>()
+
+function childLayoutCacheKey(
+  skillId: string,
+  workspaceRoot: string | null,
+  phases: string[],
+  graphTopology: GraphTopologyItem[],
+  detail?: SkillDetail,
+): string {
+  const topologySignature = graphTopology
+    .map((row) => [
+      row.id,
+      row.mode ?? '',
+      row.path ?? '',
+      Array.isArray(row.depends_on) ? row.depends_on.join(',') : '',
+    ].join(':'))
+    .join('|')
+  const detailSignature = detail
+    ? [
+        JSON.stringify(detail.manifest),
+        JSON.stringify(detail.graph_topology ?? []),
+        Object.entries(detail.files ?? {})
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([path, content]) => `${path}:${content}`)
+          .join('\0'),
+      ].join('\0')
+    : 'topology-only'
+  return `${skillId}\0${workspaceRoot ?? ''}\0${phases.join(',')}\0${topologySignature}\0${detailSignature}`
+}
+
+function layoutChild(
+  skillId: string,
+  workspaceRoot: string | null,
+  phases: string[],
+  graphTopology: GraphTopologyItem[],
+  detail?: SkillDetail,
+): ChildLayout {
+  const cacheKey = childLayoutCacheKey(skillId, workspaceRoot, phases, graphTopology, detail)
+  const cached = childLayoutCache.get(cacheKey)
+  if (cached) {
+    return cached
+  }
+
+  const childDetail = detail ? { ...detail, graph_topology: graphTopology } : undefined
+  const childNodes = childDetail
+    ? buildNodes(skillId, childDetail, new Set(), () => undefined, {}, {}, {}, {}, {}, workspaceRoot)
+    : buildNodesFromTopology(skillId, phases, graphTopology, {}, {}, workspaceRoot)
   const childPhaseNodes = childNodes.filter((node): node is SkillGraphNode => node.type === 'skill')
   const childEdges = buildEdges(childPhaseNodes)
   const laid = getAutoLayoutedElements(childNodes, childEdges)
@@ -111,42 +160,27 @@ function layoutChild(skillId: string, phases: string[], graphTopology: GraphTopo
   })) as GraphCanvasNode[]
   const input = nodes.find((node) => node.id === INPUT_ID)
 
-  return {
+  const layout = {
     nodes,
     edges: laid.edges,
     contentWidth: maxRight - minLeft,
     contentHeight: maxBottom - minTop,
     inputCenter: input?.position ?? { x: IO_NODE_WIDTH / 2, y: IO_NODE_HEIGHT / 2 },
   }
+  childLayoutCache.set(cacheKey, layout)
+  return layout
 }
 
-function bridgeEdge(
-  id: string,
-  source: string,
-  target: string,
-  targetHandle?: string,
-): Edge<ContextEdgeData> {
-  return {
-    id,
-    source,
-    target,
-    targetHandle,
-    type: 'contextEdge',
-    selectable: false,
-    focusable: false,
-    deletable: false,
-    reconnectable: false,
-    style: { strokeWidth: 1.5 },
-    zIndex: PREVIEW_EDGE_Z_INDEX,
-    data: {
-      hasTraceData: false,
-      sourcePhaseId: source,
-      targetPhaseId: target,
-    },
-  }
-}
-
-function readonlyChildNode(parentNodeId: string, node: GraphCanvasNode, left: number, top: number): GraphCanvasNode {
+function inlineChildNode(
+  parentNodeId: string,
+  childSkillId: string,
+  childWorkspaceRoot: string | null,
+  topologyOwnerSkillId: string | undefined,
+  node: GraphCanvasNode,
+  left: number,
+  top: number,
+  options: SubgraphExpansionOptions,
+): GraphCanvasNode {
   const id = childNodeId(parentNodeId, node.id)
   const { width, height } = nodeSize(node.type)
   const base = {
@@ -159,21 +193,24 @@ function readonlyChildNode(parentNodeId: string, node: GraphCanvasNode, left: nu
     width,
     height,
     style: { ...node.style, width, height },
-    draggable: false,
-    selectable: false,
-    connectable: false,
-    deletable: false,
     zIndex: CHILD_NODE_Z_INDEX,
   }
 
   if (node.type === 'skill') {
+    const data = node.data as SkillGraphNodeData
+    const isSubgraphNode = data.mode === 'subgraph' || Boolean(data.subgraphPath)
     return {
       ...base,
       data: {
-        ...(node.data as SkillGraphNodeData),
-        isSubgraphPreview: true,
-        isExpanded: false,
-        onToggleSubgraph: undefined,
+        ...data,
+        skillId: childSkillId,
+        workspaceRoot: childWorkspaceRoot,
+        topologyOwnerSkillId,
+        phaseId: data.phaseId ?? node.id,
+        isExpanded: isSubgraphNode ? options.expandedSubgraphs?.has(id) === true : false,
+        onToggleSubgraph: isSubgraphNode && options.onToggleSubgraph
+          ? () => options.onToggleSubgraph?.(id)
+          : undefined,
         onToggleSteps: undefined,
         onStepsSave: undefined,
       },
@@ -182,11 +219,12 @@ function readonlyChildNode(parentNodeId: string, node: GraphCanvasNode, left: nu
 
   return {
     ...base,
-    data: {
-      ...(node.data as GlobalNodeData),
-      isSubgraphPreview: true,
-    },
-  } as GraphCanvasNode
+      data: {
+        ...(node.data as GlobalNodeData),
+        skillId: childSkillId,
+        workspaceRoot: childWorkspaceRoot,
+      },
+    } as GraphCanvasNode
 }
 
 function readonlyChildEdge(parentNodeId: string, edge: Edge<ContextEdgeData>): Edge<ContextEdgeData> {
@@ -208,6 +246,7 @@ function readonlyChildEdge(parentNodeId: string, edge: Edge<ContextEdgeData>): E
       hasTraceData: false,
       sourcePhaseId: source,
       targetPhaseId: target,
+      showContextControl: true,
     },
   }
 }
@@ -247,6 +286,7 @@ function groupNode(
 export function buildSubgraphExpansion(
   parentNodes: PositionedParentNode[],
   expansions: SubgraphExpansionRequest[],
+  options: SubgraphExpansionOptions = {},
 ): { nodes: GraphCanvasNode[]; edges: Edge<ContextEdgeData>[] } {
   if (expansions.length === 0) {
     return { nodes: [], edges: [] }
@@ -262,7 +302,7 @@ export function buildSubgraphExpansion(
 
     const parentSize = nodeSize(parent.type)
     const expandOrigin = {
-      x: parent.position.x + parentSize.width / 2,
+      x: parent.position.x + parentSize.width / 2 + EXPAND_TOGGLE_RADIUS,
       y: parent.position.y,
     }
     const contentLeft = expandOrigin.x + CONTAINER_GAP
@@ -277,13 +317,18 @@ export function buildSubgraphExpansion(
       const top = parent.position.y - height / 2
       const group = groupNode(request, left, top, width, height, status, childName, message)
       nodes.push(group)
-      edges.push(bridgeEdge(bridgeEdgeId(request.parentNodeId, group.id), request.parentNodeId, group.id))
       continue
     }
 
     let child: ChildLayout
     try {
-      child = layoutChild(request.parentNodeId, request.view.phases, request.view.graphTopology)
+      child = layoutChild(
+        request.childSkillId ?? request.parentNodeId,
+        request.path,
+        request.view.phases,
+        request.view.graphTopology,
+        request.view.detail,
+      )
     } catch (error) {
       if (!(error instanceof CycleDetectedError)) {
         throw error
@@ -296,7 +341,6 @@ export function buildSubgraphExpansion(
       const top = parent.position.y - height / 2
       const group = groupNode(request, left, top, width, height, status, childName, message)
       nodes.push(group)
-      edges.push(bridgeEdge(bridgeEdgeId(request.parentNodeId, group.id), request.parentNodeId, group.id))
       continue
     }
 
@@ -307,15 +351,17 @@ export function buildSubgraphExpansion(
     const height = child.contentHeight + CONTAINER_HEADER + CONTAINER_PADDING * 2
     const group = groupNode(request, groupLeft, groupTop, width, height, status, childName, message)
     nodes.push(group)
-    nodes.push(...child.nodes.map((node) => readonlyChildNode(request.parentNodeId, node, contentLeft, contentTop)))
-    edges.push(...child.edges.map((edge) => readonlyChildEdge(request.parentNodeId, edge)))
-
-    edges.push(bridgeEdge(
-      bridgeEdgeId(request.parentNodeId, childNodeId(request.parentNodeId, INPUT_ID)),
+    nodes.push(...child.nodes.map((node) => inlineChildNode(
       request.parentNodeId,
-      childNodeId(request.parentNodeId, INPUT_ID),
-      SUBGRAPH_PREVIEW_INPUT_TARGET_HANDLE_ID,
-    ))
+      request.childSkillId ?? request.parentNodeId,
+      request.path,
+      request.topologyOwnerSkillId,
+      node,
+      contentLeft,
+      contentTop,
+      options,
+    )))
+    edges.push(...child.edges.map((edge) => readonlyChildEdge(request.parentNodeId, edge)))
   }
 
   return { nodes, edges }

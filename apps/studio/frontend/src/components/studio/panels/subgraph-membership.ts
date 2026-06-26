@@ -1,8 +1,8 @@
 import type { SkillDetail } from "@/api/types"
 import {
   legacySubgraphTargetSkill,
-  normalizeAbsoluteSubgraphPath,
   resolveSubgraphReference,
+  resolveSubgraphPath,
   type SubgraphReferenceStatus,
 } from "@/components/studio/subgraph-path"
 import { parsePhaseFrontmatter } from "./phase-frontmatter"
@@ -48,12 +48,12 @@ export interface SubgraphMembership {
  * their `path` (from R4) determines resolved-vs-missing. Pure and side-effect
  * free so it is unit-testable and renderable synchronously.
  */
-export function subgraphMembership(skillDetail?: SkillDetail): SubgraphMembership[] {
+export function subgraphMembership(skillDetail?: SkillDetail, workspaceRoot?: string | null): SubgraphMembership[] {
   const topology = skillDetail?.graph_topology ?? []
   const memberships: SubgraphMembership[] = []
   for (const row of topology) {
     if (row.mode !== "subgraph") continue
-    const reference = resolveSubgraphReference(row, skillDetail?.files)
+    const reference = resolveSubgraphReference(row, skillDetail?.files, workspaceRoot)
     memberships.push({
       id: row.id,
       label: row.id,
@@ -156,9 +156,7 @@ function subgraphMembershipFromPhaseFile({
   const frontmatter = parsed.ok ? parsed.frontmatter : {}
   const label = stringField(frontmatter.name) ?? phaseId
   const rawPath = stringField(frontmatter.path)
-  const absolutePath = rawPath
-    ? normalizeAbsoluteSubgraphPath(rawPath) ?? joinWorkspacePath(parent.path ?? "", rawPath)
-    : null
+  const absolutePath = resolveSubgraphPath(rawPath, parent.path)
   const legacyTargetSkill = legacySubgraphTargetSkill(markdown)
 
   return {
@@ -193,15 +191,6 @@ function stringField(value: unknown): string | null {
   }
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
-}
-
-function joinWorkspacePath(root: string, relativePath: string): string {
-  const trimmedRoot = root.replace(/[\\/]+$/, "")
-  const trimmedRelative = relativePath.replace(/^[\\/]+/, "")
-  if (trimmedRoot.includes("\\")) {
-    return `${trimmedRoot}\\${trimmedRelative.replace(/\//g, "\\")}`
-  }
-  return `${trimmedRoot}/${trimmedRelative.replace(/\\/g, "/")}`
 }
 
 function normalizeWorkspaceKey(path: string): string {

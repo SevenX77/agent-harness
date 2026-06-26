@@ -257,17 +257,22 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
         // recovery state — never on read-only preview children (their callback is
         // stripped). `top-1/2 -translate-y-1/2 translate-x-1/2` centers it on, and
         // half-overhangs, the node's right border.
-        <button
-          type="button"
-          aria-label={data.isExpanded ? 'Collapse subgraph' : 'Expand subgraph'}
-          onClick={(event) => {
-            event.stopPropagation()
-            data.onToggleSubgraph?.()
-          }}
-          className="absolute right-0 top-1/2 inline-flex size-5 -translate-y-1/2 translate-x-1/2 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-sm transition-colors hover:border-primary"
-        >
-          {data.isExpanded ? <Minus className="size-3" /> : <Plus className="size-3" />}
-        </button>
+        <div className="absolute right-0 top-1/2 z-10 -translate-y-1/2 translate-x-1/2">
+          {data.isExpanded ? (
+            <span aria-hidden="true" className="subgraph-toggle-bridge-line" />
+          ) : null}
+          <button
+            type="button"
+            aria-label={data.isExpanded ? 'Collapse subgraph' : 'Expand subgraph'}
+            onClick={(event) => {
+              event.stopPropagation()
+              data.onToggleSubgraph?.()
+            }}
+            className="nodrag nopan relative z-10 inline-flex size-5 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-sm transition-colors hover:border-primary"
+          >
+            {data.isExpanded ? <Minus className="size-3" /> : <Plus className="size-3" />}
+          </button>
+        </div>
       ) : null}
       {/* N2 atom #13: expanding a subgraph node now renders a canvas-level dashed
           container with the child's REAL nodes/edges (see GraphCanvas

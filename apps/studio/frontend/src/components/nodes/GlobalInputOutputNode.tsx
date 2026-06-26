@@ -1,12 +1,11 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
 import type { IoDeclaration, IoInput, IoOutput } from '../../api/types'
 import { Badge } from '../ui/badge'
-import { SUBGRAPH_PREVIEW_INPUT_TARGET_HANDLE_ID } from './types'
 
 export interface GlobalNodeData extends Record<string, unknown> {
   type: 'global-input' | 'global-output'
   schema: IoDeclaration
-  isSubgraphPreview?: boolean
+  skillId?: string
 }
 
 type GlobalNode = Node<GlobalNodeData>
@@ -29,14 +28,6 @@ export function GlobalInputOutputNode({ data, selected }: NodeProps<GlobalNode>)
     >
       {isInput ? (
         <>
-          {data.isSubgraphPreview ? (
-            <Handle
-              id={SUBGRAPH_PREVIEW_INPUT_TARGET_HANDLE_ID}
-              type="target"
-              position={Position.Left}
-              className="!size-2.5 !border-background !bg-primary opacity-60 group-hover:opacity-100 transition-opacity duration-200"
-            />
-          ) : null}
           <Handle type="source" position={Position.Bottom} className="!size-2.5 !border-background !bg-primary opacity-60 group-hover:opacity-100 transition-opacity duration-200" />
         </>
       ) : (

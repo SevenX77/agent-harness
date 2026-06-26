@@ -10,15 +10,31 @@ export interface SubgraphReferenceState {
   status: SubgraphReferenceStatus
 }
 
-export function normalizeAbsoluteSubgraphPath(value: unknown): string | null {
+export function normalizeSubgraphPath(value: unknown): string | null {
   if (typeof value !== "string") {
     return null
   }
   const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+export function normalizeAbsoluteSubgraphPath(value: unknown): string | null {
+  const trimmed = normalizeSubgraphPath(value)
   if (!trimmed || !isAbsolutePath(trimmed)) {
     return null
   }
   return trimmed
+}
+
+export function resolveSubgraphPath(value: unknown, workspaceRoot?: string | null): string | null {
+  const path = normalizeSubgraphPath(value)
+  if (!path) {
+    return null
+  }
+  if (isAbsolutePath(path)) {
+    return path
+  }
+  return workspaceRoot ? joinWorkspacePath(workspaceRoot, path) : null
 }
 
 export function legacySubgraphTargetSkill(markdown: string | undefined): string | null {
@@ -35,8 +51,9 @@ export function legacySubgraphTargetSkill(markdown: string | undefined): string 
 export function resolveSubgraphReference(
   row: Pick<GraphTopologyItem, "id" | "src" | "path">,
   files: Record<string, string> | undefined,
+  workspaceRoot?: string | null,
 ): SubgraphReferenceState {
-  const path = normalizeAbsoluteSubgraphPath(row.path)
+  const path = resolveSubgraphPath(row.path, workspaceRoot)
   if (path) {
     return { path, legacyTargetSkill: null, status: "resolved" }
   }
@@ -50,20 +67,21 @@ export function resolveSubgraphReference(
 }
 
 export function invalidSubgraphPathMessage(path: string): string {
-  return `Subgraph preview requires an absolute path. Legacy child reference ${path} must be migrated from target_skill to path.`
+  return `Subgraph preview requires a path to a child graph. Legacy child reference ${path} must be migrated from target_skill to path.`
 }
 
 /**
  * Classify the LIVE, user-edited `path` value in the Properties subgraph form
- * (D7: subgraphs are resolved by absolute path, no registry). Mirrors
+ * (D7: subgraphs are resolved by path, no registry). Mirrors
  * `resolveSubgraphReference` but operates on the editable draft string rather
  * than a topology row, so the Properties Path input can show its own red/missing
  * state synchronously as the author types or loads SUBGRAPH.md `path:`.
  *
  * - `migration-required` when the path field is empty but a legacy
  *   `target_skill` is still present (the phase must migrate to `path`).
- * - `missing` when there is no usable absolute path (empty or not absolute).
- * - `resolved` when the value is a usable absolute path. Note: this is a
+ * - `missing` when there is no usable path (empty, or relative without a root).
+ * - `resolved` when the value is a usable absolute path, or a relative path that
+ *   can be resolved against the current skill root. Note: this is a
  *   SYNTACTIC resolve; whether that path actually exists on disk is confirmed
  *   separately by the backend `getChildGraphTopology` probe (404 =
  *   SUBGRAPH_PATH_NOT_FOUND), which the panel folds into the same red state.
@@ -71,8 +89,9 @@ export function invalidSubgraphPathMessage(path: string): string {
 export function subgraphPathFieldState(
   value: string,
   legacyTargetSkill: string | null,
+  workspaceRoot?: string | null,
 ): SubgraphReferenceState {
-  const path = normalizeAbsoluteSubgraphPath(value)
+  const path = resolveSubgraphPath(value, workspaceRoot)
   if (path) {
     return { path, legacyTargetSkill: null, status: "resolved" }
   }
@@ -88,6 +107,15 @@ function normalizedLegacyTargetSkill(value: unknown): string | null {
   }
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+export function joinWorkspacePath(root: string, relativePath: string): string {
+  const trimmedRoot = root.replace(/[\\/]+$/, "")
+  const trimmedRelative = relativePath.replace(/^[\\/]+/, "")
+  if (trimmedRoot.includes("\\")) {
+    return `${trimmedRoot}\\${trimmedRelative.replace(/\//g, "\\")}`
+  }
+  return `${trimmedRoot}/${trimmedRelative.replace(/\\/g, "/")}`
 }
 
 function subgraphFilePath(row: Pick<GraphTopologyItem, "id" | "src">): string {

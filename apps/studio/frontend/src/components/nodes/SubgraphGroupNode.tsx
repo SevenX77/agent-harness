@@ -1,4 +1,4 @@
-import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
+import { type Node, type NodeProps } from '@xyflow/react'
 import { FileCode2 } from 'lucide-react'
 import type { SubgraphGroupNodeData } from './types'
 import { Spinner } from '../ui/spinner'
@@ -17,8 +17,7 @@ export function SubgraphGroupNode({ data }: NodeProps<SubgraphGroupNode>) {
   const title = subgraphGroupTitle(data)
 
   return (
-    <div className="pointer-events-none relative flex size-full overflow-visible rounded-lg border-2 border-dashed border-primary/30 bg-transparent">
-      <Handle type="target" position={Position.Left} className="!size-2 !border-primary !bg-primary !opacity-0" />
+    <div className="subgraph-dash-frame pointer-events-none relative flex size-full overflow-visible rounded-lg bg-transparent">
       <div className="flex size-full min-h-0 flex-col overflow-hidden rounded-[inherit]">
         <div className="flex items-center gap-2 border-b border-primary/20 px-3 py-2 text-xs font-medium text-primary">
           <FileCode2 className="size-3.5 shrink-0" />

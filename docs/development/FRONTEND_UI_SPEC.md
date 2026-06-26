@@ -61,6 +61,7 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 **本项目样式真实来源**: shadcn `radix-mira` preset (preset id `b38miVIYq`, style `mira`, theme `indigo`), 可直接预览 demo: <https://ui.shadcn.com/create?preset=b38miVIYq&template=vite&pointer=true&rtl=true>。
 - **核心风格**: deep indigo-violet primary on neutral grays, light + dark mode, 0.625rem radius, Inter Variable + JetBrains Mono Variable fonts, lucide icons。
 - 设计 tokens 已 100% 推导自 demo computed CSS, 详细 token 矩阵见 [`.kiro/specs/_archive/studio-uikit-redesign/tokens.md`](../../.kiro/specs/_archive/studio-uikit-redesign/tokens.md), 当前已沉淀至本地主题 CSS (`apps/studio/frontend/src/index.css`)。
+- **中文字形必须打包字体兜底**: `--font-sans` 在 `Inter Variable`(拉丁)之后、系统 CJK(`PingFang SC`/`Microsoft YaHei`)之后,必须以**打包的 webfont** `Noto Sans SC Variable`(`@fontsource-variable/noto-sans-sc`,随 `index.css` `@import`)收尾。原因:Tauri 壳用 WebKitGTK,目标机常无系统中文字体,只靠系统字体会渲染成豆腐块;打包字体保证任何环境中文都出字。新增字体不要只改字体栈而漏装 `@fontsource` 依赖。
 - **颜色原则**: 开发人员写新组件时, **严禁 Hardcode 任何十六进制颜色码或 Tailwind 具体色值** (如 `bg-gray-800`)。必须使用语义化的 CSS 变量类 (如 `bg-background`, `text-muted-foreground`, `border-border`)。
 
 ### 2.3 暗黑极客主题 (Dark Theme Only)

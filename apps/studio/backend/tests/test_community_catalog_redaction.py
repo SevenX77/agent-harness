@@ -97,6 +97,13 @@ def test_normalize_base_url(raw: str, expected: str) -> None:
 
 
 def test_allowlist_contains_known_public_providers() -> None:
-    assert "api.openai.com" in PUBLIC_PROVIDER_HOST_ALLOWLIST
-    assert "api.anthropic.com" in PUBLIC_PROVIDER_HOST_ALLOWLIST
-    assert "api.deepseek.com" in PUBLIC_PROVIDER_HOST_ALLOWLIST
+    # Subset check via set operators rather than `str in ...`: membership in this
+    # frozenset is exact and safe, but CodeQL misreads `"host" in <name>` as
+    # URL-substring sanitization (a false positive). The production host check
+    # (`is_public_allowlisted`) extracts the hostname via urlsplit and matches the
+    # set exactly, so `api.openai.com.evil.com` cannot pass.
+    assert {
+        "api.openai.com",
+        "api.anthropic.com",
+        "api.deepseek.com",
+    } <= PUBLIC_PROVIDER_HOST_ALLOWLIST

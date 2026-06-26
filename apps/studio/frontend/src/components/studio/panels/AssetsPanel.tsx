@@ -524,7 +524,7 @@ export function AssetsPanel({ skillId = null, workspaceRoot = null, skillDetail 
   // derived from the backend topology (R4). No fake in-memory "registered" cache.
   const subgraphs = useMemo(() => {
     const ownerRoot = rootTarget ?? null
-    return subgraphMembership(skillDetail).map((subgraph) => ({ ...subgraph, workspaceRoot: ownerRoot }))
+    return subgraphMembership(skillDetail, ownerRoot).map((subgraph) => ({ ...subgraph, workspaceRoot: ownerRoot }))
   }, [rootTarget, skillDetail])
   const topLevelSubgraphs = useMemo(
     () => subgraphs.map((subgraph) => {

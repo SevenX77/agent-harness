@@ -12,6 +12,12 @@ export interface SubagentRef {
 
 export interface SkillGraphNodeData extends Record<string, unknown> {
   skillId: string
+  /** Absolute skill root that relative subgraph paths resolve against, when known. */
+  workspaceRoot?: string | null
+  /** Skill id used only for backend child-topology boundary resolution. */
+  topologyOwnerSkillId?: string
+  /** Canonical phase id inside its own skill. React Flow node ids may be namespaced. */
+  phaseId?: string
   label: string
   mode: string
   role?: string | null
@@ -51,13 +57,6 @@ export interface SkillGraphNodeData extends Record<string, unknown> {
   isExpanded?: boolean
   onToggleSubgraph?: () => void
   /**
-   * N2 atom #13 (subgraph-inline-preview): true for the read-only child phase
-   * nodes rendered inside an expanded subgraph's inline container. The canvas
-   * interaction handlers (select / drill / double-click open-file) skip these so
-   * a synthetic preview node never routes to a real phase file or selection.
-   */
-  isSubgraphPreview?: boolean
-  /**
    * N2 atom #15 (l3-step-edit): the agent phase body (SKILL.md text, sans
    * frontmatter handling — the full file content is fine since the step
    * transforms only touch `<step>` blocks). Present only for AGENT nodes so the
@@ -87,10 +86,9 @@ export type SkillGraphNode = Node<SkillGraphNodeData, 'skill'>
 export interface GlobalNodeData extends Record<string, unknown> {
   type: 'global-input' | 'global-output'
   schema: IoDeclaration
-  isSubgraphPreview?: boolean
+  skillId?: string
+  workspaceRoot?: string | null
 }
-
-export const SUBGRAPH_PREVIEW_INPUT_TARGET_HANDLE_ID = 'subgraph-preview-input-target'
 
 /**
  * N2 atom #13 (subgraph-inline-preview): data for the dashed container node that

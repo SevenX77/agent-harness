@@ -68,6 +68,46 @@ describe("subgraphMembership", () => {
     ])
   })
 
+  it("resolves a relative subgraph phase path from the owning skill root", () => {
+    const memberships = subgraphMembership(
+      skillDetailWithTopology([
+        {
+          id: "translate",
+          src: "phases/translate",
+          depends_on: ["setup"],
+          mode: "subgraph",
+          path: "subgraph/translator",
+        },
+      ]),
+      "/skills/parent",
+    )
+
+    expect(memberships).toEqual([
+      {
+        id: "translate",
+        label: "translate",
+        level: 1,
+        filePath: "phases/translate/SUBGRAPH.md",
+        path: "/skills/parent/subgraph/translator",
+        status: "resolved",
+      },
+    ])
+  })
+
+  it("marks a relative path without an owning skill root as missing", () => {
+    const memberships = subgraphMembership(
+      skillDetailWithTopology([
+        { id: "translate", src: "phases/translate", depends_on: [], mode: "subgraph", path: "subgraph/translator" },
+      ]),
+    )
+
+    expect(memberships[0]).toMatchObject({
+      id: "translate",
+      path: null,
+      status: "missing",
+    })
+  })
+
   it("marks a subgraph phase whose path is null as missing", () => {
     const memberships = subgraphMembership(
       skillDetailWithTopology([

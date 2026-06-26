@@ -74,4 +74,22 @@ describe("SkillNode inline L3 step editor (N2 atom #15, l3-step-edit)", () => {
     const html = renderNode(baseData({ agentBody: AGENT_BODY }))
     expect(html).not.toContain('aria-label="Edit steps"')
   })
+
+  it("renders the expanded subgraph bridge as part of the toggle control", () => {
+    const expandedHtml = renderNode(baseData({
+      mode: "subgraph",
+      isExpanded: true,
+      onToggleSubgraph: () => undefined,
+    }))
+    const collapsedHtml = renderNode(baseData({
+      mode: "subgraph",
+      isExpanded: false,
+      onToggleSubgraph: () => undefined,
+    }))
+
+    expect(expandedHtml).toContain('aria-label="Collapse subgraph"')
+    expect(expandedHtml).toContain("subgraph-toggle-bridge-line")
+    expect(collapsedHtml).toContain('aria-label="Expand subgraph"')
+    expect(collapsedHtml).not.toContain("subgraph-toggle-bridge-line")
+  })
 })

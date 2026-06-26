@@ -30,11 +30,12 @@ function baseData(overrides: Partial<SkillGraphNodeData>): SkillGraphNodeData {
   }
 }
 
-function renderPanel(args: { id: string; data: SkillGraphNodeData; filePath: string; content: string }): string {
+function renderPanel(args: { id: string; data: SkillGraphNodeData; filePath: string; content: string; workspaceRoot?: string | null }): string {
   const skillDetail = { files: { [args.filePath]: args.content } } as unknown as SkillDetail
   return renderToStaticMarkup(
     <PropertiesPanel
       skillId="demo"
+      workspaceRoot={args.workspaceRoot ?? '/skills/demo'}
       skillDetail={skillDetail}
       selectedNode={{ id: args.id, data: args.data }}
     />,
@@ -128,12 +129,12 @@ describe('PropertiesPanel — per-kind whitelist form (R3)', () => {
 
     expect(html).toContain('Legacy child reference')
     expect(html).toContain('legacy.registry.child')
-    expect(html).toContain('absolute path')
+    expect(html).toContain('Save a path')
     expect(html).not.toContain('Target skill')
   })
 
   // n2-properties #20: a subgraph phase whose SUBGRAPH.md declares no usable
-  // absolute `path` must render the Path input as invalid (red, via shadcn's
+  // `path` must render the Path input as invalid (red, via shadcn's
   // aria-invalid styling) AND surface the OS folder-picker import affordance.
   it('subgraph node with a missing path marks the Path input invalid and offers the folder import', () => {
     const html = renderPanel({
@@ -150,7 +151,7 @@ describe('PropertiesPanel — per-kind whitelist form (R3)', () => {
     expect(html).toContain('import its folder below')
   })
 
-  // A subgraph phase with a usable absolute path resolves syntactically, so the
+  // A subgraph phase with a usable path resolves syntactically, so the
   // Path input is NOT marked invalid and the import affordance stays hidden (the
   // on-disk probe runs only client-side, never during this SSR render).
   it('subgraph node with a usable absolute path is not marked invalid and hides the import affordance', () => {
@@ -163,6 +164,20 @@ describe('PropertiesPanel — per-kind whitelist form (R3)', () => {
 
     expect(html).not.toContain('aria-invalid="true"')
     expect(html).not.toContain('Select folder to import subgraph')
+  })
+
+  it('subgraph node with a relative path resolves against the skill root', () => {
+    const html = renderPanel({
+      id: 'child',
+      data: baseData({ mode: 'subgraph', subgraphPath: 'subgraph/child', filePath: 'phases/child/SUBGRAPH.md' }),
+      filePath: 'phases/child/SUBGRAPH.md',
+      content: ['---', 'name: child', 'path: subgraph/child', '---', 'Body'].join('\n'),
+      workspaceRoot: '/skills/demo',
+    })
+
+    expect(html).not.toContain('aria-invalid="true"')
+    expect(html).not.toContain('Select folder to import subgraph')
+    expect(html).toContain('Relative paths resolve from this skill root')
   })
 })
 

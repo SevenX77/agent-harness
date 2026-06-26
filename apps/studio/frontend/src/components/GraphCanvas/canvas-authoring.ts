@@ -288,7 +288,7 @@ function phaseDirectoryPath(phaseId: string): string {
 // unknown-field FATAL. Deprecated fields (`mode`, `system_prompt`,
 // `exit_contract`, `python_callable`, legacy registry child-reference fields)
 // must never be emitted.
-const SUBGRAPH_PATH_PLACEHOLDER = '/absolute/path/to/child_skill'
+const SUBGRAPH_PATH_PLACEHOLDER = 'subgraph/child_skill'
 
 export function defaultPhaseMarkdown(
   phaseId: string,

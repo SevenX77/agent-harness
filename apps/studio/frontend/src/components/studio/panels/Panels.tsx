@@ -4,6 +4,7 @@ import type { SkillGraphNodeData, SkillNodeStatus } from "@/components/GraphCanv
 import { TraceDocumentPanel } from "@/components/MonacoPanel"
 import { TracePanel, type TraceHitlResumeRequest } from "@/components/TracePanel"
 import type { CompareTab } from "../run-compare"
+import { useSkills } from "@/hooks/useSkills"
 import { useThemeValue } from "@/store/themeStore"
 import type { PanelKind } from "../Toolbar"
 import { useWorkspaceContext } from "../WorkspaceContext"
@@ -91,6 +92,14 @@ export function Panels({
 }: PanelsProps) {
   const { onFileOpen, selectedEdge, setSelectedEdge } = useWorkspaceContext()
   const isDarkMode = useThemeValue() === "dark"
+  const selectedNodeSkillId = selectedNode?.data.skillId ?? null
+  const selectedNodeUsesDifferentSkill = Boolean(selectedNodeSkillId && selectedNodeSkillId !== skillId)
+  const selectedNodeSkill = useSkills(selectedNodeUsesDifferentSkill ? selectedNodeSkillId : null)
+  const propertiesSkillId = selectedNodeUsesDifferentSkill ? selectedNodeSkillId : skillId
+  const propertiesWorkspaceRoot = selectedNodeUsesDifferentSkill
+    ? selectedNode?.data.workspaceRoot ?? null
+    : workspaceRoot
+  const propertiesSkillDetail = selectedNodeUsesDifferentSkill ? selectedNodeSkill.skillDetail : skillDetail
   if (!skillId) {
     return (
       <div className="flex h-full w-full flex-col bg-sidebar">
@@ -180,8 +189,9 @@ export function Panels({
   if (activePanel === "properties") {
     return (
       <PropertiesPanel
-        skillId={skillId}
-        skillDetail={skillDetail}
+        skillId={propertiesSkillId}
+        workspaceRoot={propertiesWorkspaceRoot}
+        skillDetail={propertiesSkillDetail}
         selectedNode={selectedNode}
         runId={runId}
         selectedNodeStatus={selectedNodeStatus}
@@ -191,7 +201,7 @@ export function Panels({
         resumeLoading={traceResumeLoading}
         lintErrors={lintErrors}
         onFileOpen={onFileOpen}
-        onPhaseFileSave={onPhaseFileSave}
+        onPhaseFileSave={selectedNodeUsesDifferentSkill ? undefined : onPhaseFileSave}
         onResumeNode={onResumeNode}
         onPromoteNode={onPromoteNode}
       />

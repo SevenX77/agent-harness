@@ -10,7 +10,7 @@ export class CycleDetectedError extends Error {
 
 const DEFAULT_NODE_WIDTH = 260
 const DEFAULT_NODE_HEIGHT = 120
-const IO_NODE_WIDTH = 180
+const IO_NODE_WIDTH = 220
 const IO_NODE_HEIGHT = 80
 
 function nodeSize(node: Node): { width: number; height: number } {

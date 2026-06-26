@@ -1,7 +1,9 @@
 import { useState, type FormEvent } from "react"
+import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import i18n from "@/i18n"
 import { cn } from "@/lib/utils"
 import { apiKeyInputClassName, apiKeyInputType } from "./ProviderCard"
 
@@ -60,9 +62,9 @@ function newProviderCodeSuffix(): string {
 
 export function addProviderNameError(name: string, existingNames: string[]): string | null {
   const trimmed = name.trim()
-  if (!trimmed) return "Provider name is required."
+  if (!trimmed) return i18n.t("apiKeys.form.providerNameRequired")
   if (existingNames.some((existing) => existing.trim().toLowerCase() === trimmed.toLowerCase())) {
-    return "A provider with this name already exists."
+    return i18n.t("apiKeys.form.providerNameDuplicate")
   }
   return null
 }
@@ -83,6 +85,7 @@ export function AddProviderForm({
   onSubmit: (submission: AddProviderFormSubmission) => void
   onCancel: () => void
 }) {
+  const { t } = useTranslation("settings")
   const [name, setName] = useState("")
   const [baseUrl, setBaseUrl] = useState("")
   const [apiKey, setApiKey] = useState("")
@@ -109,12 +112,12 @@ export function AddProviderForm({
       className="space-y-3 rounded-md border border-dashed border-border/60 bg-muted/10 p-3"
     >
       <Field>
-        <FieldLabel htmlFor="add-provider-name">Provider name</FieldLabel>
+        <FieldLabel htmlFor="add-provider-name">{t("apiKeys.form.providerNameLabel")}</FieldLabel>
         <Input
           id="add-provider-name"
           value={name}
           onChange={(event) => setName(event.target.value)}
-          placeholder="e.g. My OpenRouter"
+          placeholder={t("apiKeys.form.providerNamePlaceholder")}
           className="h-8 text-xs"
           aria-invalid={submitAttempted && nameError ? true : undefined}
           autoFocus
@@ -124,23 +127,23 @@ export function AddProviderForm({
         ) : null}
       </Field>
       <Field>
-        <FieldLabel htmlFor="add-provider-base-url">Base URL</FieldLabel>
+        <FieldLabel htmlFor="add-provider-base-url">{t("apiKeys.form.baseUrlLabel")}</FieldLabel>
         <Input
           id="add-provider-base-url"
           value={baseUrl}
           onChange={(event) => setBaseUrl(event.target.value)}
-          placeholder="https://api.example.com"
+          placeholder={t("apiKeys.form.baseUrlPlaceholder")}
           className="h-8 text-xs"
         />
       </Field>
       <Field>
-        <FieldLabel htmlFor="add-provider-api-key">API Key</FieldLabel>
+        <FieldLabel htmlFor="add-provider-api-key">{t("apiKeys.form.apiKeyLabel")}</FieldLabel>
         <Input
           id="add-provider-api-key"
           type={apiKeyInputType()}
           value={apiKey}
           onChange={(event) => setApiKey(event.target.value)}
-          placeholder="Enter the provider API Key"
+          placeholder={t("apiKeys.form.apiKeyPlaceholder")}
           className={cn(apiKeyInputClassName(false, Boolean(apiKey)), "h-8 text-xs")}
           autoComplete="off"
           autoCorrect="off"
@@ -152,10 +155,10 @@ export function AddProviderForm({
       </Field>
       <div className="flex gap-2">
         <Button type="submit" size="sm" data-add-provider-submit="true" className="gap-1">
-          Add
+          {t("apiKeys.add")}
         </Button>
         <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-          Cancel
+          {t("apiKeys.form.cancelButton")}
         </Button>
       </div>
     </form>

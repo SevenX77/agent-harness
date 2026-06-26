@@ -59,7 +59,45 @@
     "addProvider": "添加服务商",
     "addProviderDialogTitle": "添加服务商",
     "providerName": "服务商名称",
-    "add": "添加"
+    "add": "添加",
+    "form": {
+      "providerNameLabel": "供应商名称",
+      "providerNamePlaceholder": "例如 My OpenRouter",
+      "providerNameRequired": "请填写供应商名称。",
+      "providerNameDuplicate": "已存在同名供应商。",
+      "baseUrlLabel": "Base URL",
+      "baseUrlPlaceholder": "https://api.example.com",
+      "apiKeyLabel": "API Key",
+      "apiKeyPlaceholder": "输入该供应商的 API Key",
+      "cancelButton": "取消"
+    },
+    "manualTest": {
+      "title": "手动探测模型",
+      "description": "当无法自动获取模型列表时,手动填写模型 ID。",
+      "placeholderExample": "例如 {{example}}",
+      "modelInputLabel": "手动模型 {{index}}",
+      "removeModelLabel": "移除模型 {{index}}",
+      "addModel": "添加模型",
+      "testModels": "测试模型",
+      "testingLoading": "正在测试模型……",
+      "candidateLoadError": "加载常用模型失败",
+      "testFailedFallback": "模型测试失败",
+      "noResults": "未返回任何模型结果。",
+      "oneAvailable": "模型可用。",
+      "manyAvailable": "{{n}} 个模型可用。",
+      "someFailed": "{{total}} 个模型测试中有 {{failed}} 个失败。",
+      "failedItem": "{{modelId}}:{{status}}",
+      "status": {
+        "ok": "可用",
+        "invalidModel": "未找到模型",
+        "invalidKey": "API Key 无效",
+        "rateLimited": "已限流",
+        "quotaExceeded": "配额超限",
+        "networkError": "网络错误",
+        "timeout": "请求超时",
+        "failed": "测试失败"
+      }
+    }
   },
   "llmRoles": {
     "title": "LLM 角色",

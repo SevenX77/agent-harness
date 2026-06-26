@@ -38,6 +38,20 @@ def test_allowlisted_host_publishes_normalized_url_and_fingerprint() -> None:
     assert upload.endpoint_fingerprint == expected
 
 
+def test_public_transit_aggregator_hosts_are_allowlisted() -> None:
+    # A public AI transit/aggregator (anyone can register and connect) is the same
+    # class as openrouter.ai, which is already allowlisted: its base URL is a public
+    # domain carrying no user identity, so connectivity evidence routed through it is
+    # publishable — another client on the same transit can act on it. 七牛 (Qiniu) AI
+    # 中转 (api.qnaigc.com / anthropic.qnaigc.com) is such a transit and must keep its
+    # endpoint identity rather than being dropped as if it were a private host.
+    for base in ("https://api.qnaigc.com/v1", "https://anthropic.qnaigc.com"):
+        upload = build_upload_record(_probe_record(), base_url=base)
+        assert upload is not None, base
+        assert upload.normalized_public_base_url is not None, base
+        assert upload.endpoint_fingerprint is not None, base
+
+
 def test_fingerprint_never_published_without_plaintext() -> None:
     # A bare un-salted hash of a private host must never leak. When the host is
     # not allowlisted, neither the plaintext nor any fingerprint is present.

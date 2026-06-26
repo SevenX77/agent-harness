@@ -47,14 +47,22 @@ class BackendConfig(BaseSettings):
     llm_catalog_repo: str = "studio-llm-model-catalog"
     llm_catalog_branch: str = "main"
     llm_catalog_path: str = "llm_probe_catalog.json"
-    # Community Probe Catalog (Phase 2a) — dormant by default. Upload activates
-    # only when explicitly enabled AND a gate URL + ingestion-scoped token exist.
-    community_upload_enabled: bool = False
-    community_gate_url: str = ""
-    community_ingestion_token: str = ""
+    # Community Probe Catalog (Phase 2a) — ships ON by default with zero config.
+    # The gate is a CLEAN OPEN API: the client sends only sanitized records and
+    # NO token (all auth/abuse control is server-side). The gate URL, read-path
+    # signing key, and manifest URL are baked in (all public, no secrets), so a
+    # stock Studio reads + contributes out of the box. The single user-facing
+    # catalog toggle (remote_model_catalog_enabled) is the only control; an
+    # operator can still hard-disable the write path via STUDIO_COMMUNITY_UPLOAD_ENABLED.
+    community_upload_enabled: bool = True
+    community_gate_url: str = "https://community-catalog-gate.xingqiqi771.workers.dev"
     community_protocol_major: int = 1
-    community_catalog_signing_pubkey: str = ""
-    community_catalog_manifest_url: str = ""
+    community_catalog_signing_pubkey: str = (
+        "a0d0df37fe900c45cbe9f050dbe346ae46ae29f7d4779d836c1c8bc01c5949ae"
+    )
+    community_catalog_manifest_url: str = (
+        "https://sevenx77.github.io/studio-llm-model-catalog/manifest.json"
+    )
     engine_transport: str = "in_process"
     engine_loopback_base_url: str = "http://127.0.0.1:8787"
     gateway_transport: str = "in_process"

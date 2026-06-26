@@ -1,14 +1,14 @@
 """Post-probe community auto-share (gate) wiring.
 
 After a successful probe the desktop best-effort uploads newly probe-verified
-evidence to the community catalog gate using an ingestion-scoped token (never a
-repo token). Best-effort means a probe must NEVER fail because background sharing
-failed.
+evidence to the community catalog gate through a clean open API (no token, no
+credentials — the gate rate-limits server-side). Best-effort means a probe must
+NEVER fail because background sharing failed.
 
 A SINGLE community model-catalog toggle (``remote_model_catalog_enabled``, on by
 default) gates BOTH reading the catalog and contributing to it — so the upload
-also stays dormant whenever the user turns that one switch off, even when a gate
-URL + ingestion token are configured.
+stays dormant whenever the user turns that one switch off, even though the gate
+URL ships built in and contribution is on by default.
 """
 
 from __future__ import annotations
@@ -28,7 +28,6 @@ def _enabled_config() -> BackendConfig:
     return BackendConfig(
         community_upload_enabled=True,
         community_gate_url="https://gate.example.workers.dev",
-        community_ingestion_token="tkn-test",
     )
 
 
@@ -96,7 +95,8 @@ async def test_autoshare_uploads_batch_when_configured(monkeypatch: pytest.Monke
     init = captured["init"]
     assert isinstance(init, dict)
     assert init["gate_url"] == "https://gate.example.workers.dev"
-    assert init["ingestion_token"] == "tkn-test"
+    # Clean open API: the client is constructed without any token.
+    assert "ingestion_token" not in init
 
 
 @pytest.mark.anyio

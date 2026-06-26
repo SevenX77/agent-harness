@@ -1,8 +1,10 @@
 # Cloudflare Worker config TEMPLATE for the Community Probe Catalog gate.
 # Copy to wrangler.toml and fill in the KV namespace IDs before `wrangler deploy`.
 #
-# The gate intentionally has NO catalog-repo write token bound here. Its only
-# storage is the KV buffer drained by the publishing Action.
+# The gate is a CLEAN OPEN API: clients send only sanitized records, no token.
+# NO secrets, NO catalog-repo write token. Abuse is contained server-side by the
+# RATE_LIMITER binding (below) + redaction. Its only storage is the KV buffer
+# drained by the publishing Action.
 
 name = "community-catalog-gate"
 main = "src/gate.mjs"
@@ -11,8 +13,13 @@ compatibility_date = "2026-06-01"
 [vars]
 PROTOCOL_MAJOR = "1"
 
-# Secrets (set with `wrangler secret put`, never commit):
-#   INGESTION_TOKEN   — shared anonymous opt-in token clients send as Bearer
+# Per-client rate limiting — the gate takes no token, so this is the line
+# between "Studio contributing" and "anyone flooding it". Keyed on client IP.
+[[unsafe.bindings]]
+name = "RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 60, period = 60 }
 
 # KV namespaces (create with `wrangler kv namespace create <name>`):
 [[kv_namespaces]]

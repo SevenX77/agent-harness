@@ -1,4 +1,9 @@
-"""Phase 2a R1: opt-in contribute endpoint is dormant unless configured."""
+"""Phase 2a R1: contribute endpoint — clean open API (no token), on by default.
+
+The shipped default contributes with zero config (baked gate URL, on-by-default
+flag, no token). Tests neutralize that default to stay off the network; the
+"active by default" test clears the neutralization to exercise the real default.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +18,9 @@ from fastapi.testclient import TestClient
 from tests.helpers_community_catalog import probe_record  # type: ignore[import-not-found]
 
 
-def test_contribute_endpoint_dormant_by_default(client: TestClient) -> None:
+def test_contribute_endpoint_dormant_when_write_disabled(client: TestClient) -> None:
+    # The test default neutralizes the write path (prod ships it ON); contribute
+    # then reports disabled and never reaches the network.
     response = client.post("/api/llm/catalog/contribute")
     assert response.status_code == 200
     body = response.json()
@@ -30,9 +37,9 @@ def test_contribute_endpoint_does_not_upload_when_dormant(client: TestClient) ->
 
 
 def _enable_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Opt back in over the neutralized test default (clean open API — no token).
     monkeypatch.setenv("STUDIO_COMMUNITY_UPLOAD_ENABLED", "true")
     monkeypatch.setenv("STUDIO_COMMUNITY_GATE_URL", "https://gate.example.org")
-    monkeypatch.setenv("STUDIO_COMMUNITY_INGESTION_TOKEN", "ing-tok")
     clear_backend_caches()
 
 
@@ -90,3 +97,21 @@ def test_contribute_endpoint_reports_deferred_when_gate_unreachable(
     body = client.post("/api/llm/catalog/contribute").json()
     assert body["status"] == "deferred"
     assert body["queued"] is True
+
+
+def test_contribute_active_by_default_with_baked_gate(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Zero-config proof: with NO STUDIO_COMMUNITY_* env at all, the baked gate URL
+    # + on-by-default flag make contribute active — no token, nothing to set up.
+    # Clear the test neutralization to exercise the real shipped default; the
+    # client is stubbed so the proof needs no real network.
+    monkeypatch.delenv("STUDIO_COMMUNITY_UPLOAD_ENABLED", raising=False)
+    monkeypatch.delenv("STUDIO_COMMUNITY_GATE_URL", raising=False)
+    clear_backend_caches()
+    _seed_one_verified_probe()
+    monkeypatch.setattr("app.routers.llm.CommunityUploadClient", _FakeClient)
+    body = client.post("/api/llm/catalog/contribute").json()
+    assert body["status"] == "success"
+    assert body["accepted"] == 1
+    assert body["receipt_token"] == "rcpt-1"

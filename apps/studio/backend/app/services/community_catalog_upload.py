@@ -1,10 +1,12 @@
-"""Community Probe Catalog — Phase 2a opt-in upload client (R1/R3/R6).
+"""Community Probe Catalog — Phase 2a upload client (R1/R3/R6).
 
 The client posts sanitized :class:`EvidenceUpload` batches to the community gate
-using an **ingestion-scoped token only** (never a repo write token). Each batch
-carries an ``Idempotency-Key`` so the gate can dedupe, and failed batches are
-parked in a local offline queue for later retry — the key is preserved so a
-retry stays idempotent.
+through a **clean open API**: the request carries only sanitized records — no
+token, no credentials, no repo write key. All auth/abuse control lives
+server-side (the gate rate-limits per client). Each batch carries an
+``Idempotency-Key`` so the gate can dedupe, and failed batches are parked in a
+local offline queue for later retry — the key is preserved so a retry stays
+idempotent.
 """
 
 from __future__ import annotations
@@ -32,13 +34,15 @@ PROTOCOL_MAJOR = 1
 _TIMEOUT_SECONDS = 10.0
 
 
-def community_upload_configured(*, gate_url: str, ingestion_token: str, enabled: bool) -> bool:
-    """Return whether opt-in community upload is fully configured and enabled.
+def community_upload_configured(*, gate_url: str, enabled: bool) -> bool:
+    """Return whether community upload is enabled and has a gate to post to.
 
-    Dormant by default: all three of the explicit enable flag, the gate URL, and
-    the ingestion token must be present before any upload path activates.
+    The client needs no token — the gate is a clean open API. Upload activates
+    when the deployment flag is on and a gate URL is set; both ship with
+    on-by-default values, so contribution works out of the box and is governed
+    by the single user-facing catalog toggle.
     """
-    return bool(enabled and gate_url.strip() and ingestion_token.strip())
+    return bool(enabled and gate_url.strip())
 
 
 def collect_uploadable_uploads(
@@ -164,23 +168,23 @@ def _now_iso() -> str:
 
 
 class CommunityUploadClient:
-    """Opt-in client that uploads sanitized evidence batches to the gate."""
+    """Client that uploads sanitized evidence batches to the gate.
+
+    Clean open API: no token is sent. The gate takes only sanitized records and
+    rate-limits per client server-side.
+    """
 
     def __init__(
         self,
         *,
         gate_url: str,
-        ingestion_token: str,
         protocol_major: int = PROTOCOL_MAJOR,
         transport: httpx.AsyncBaseTransport | None = None,
         timeout: float = _TIMEOUT_SECONDS,
     ) -> None:
-        if not ingestion_token.strip():
-            raise ValueError("community upload requires an ingestion-scoped token (opt-in)")
         if not gate_url.strip():
             raise ValueError("community upload requires a gate URL")
         self._gate_url = gate_url.rstrip("/")
-        self._token = ingestion_token.strip()
         self._protocol_major = protocol_major
         self._transport = transport
         self._timeout = timeout
@@ -199,7 +203,6 @@ class CommunityUploadClient:
             "records": [record.model_dump(mode="json") for record in records],
         }
         headers = {
-            "Authorization": f"Bearer {self._token}",
             "Idempotency-Key": idempotency_key,
             "Content-Type": "application/json",
         }

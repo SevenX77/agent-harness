@@ -166,17 +166,16 @@ async def _autoshare_after_probe_best_effort() -> None:
     """Best-effort community auto-share to the gate after a successful probe.
 
     Silently uploads newly probe-verified evidence to the community catalog gate
-    using an ingestion-scoped token (never a repo token). NEVER raises: a probe
-    must not fail because background sharing did. Dormant unless the gate is
-    configured (URL + ingestion token) AND the single community model-catalog
-    toggle (``remote_model_catalog_enabled``, which gates both read and
-    contribute) is on.
+    through a clean open API (no token, no credentials — the gate rate-limits
+    server-side). NEVER raises: a probe must not fail because background sharing
+    did. On by default; stays dormant only if an operator hard-disables the write
+    path OR the single community model-catalog toggle
+    (``remote_model_catalog_enabled``, which gates both read and contribute) is off.
     """
     try:
         cfg = get_backend_config()
         if not community_upload_configured(
             gate_url=cfg.community_gate_url,
-            ingestion_token=cfg.community_ingestion_token,
             enabled=cfg.community_upload_enabled,
         ):
             return
@@ -190,7 +189,6 @@ async def _autoshare_after_probe_best_effort() -> None:
             return
         client = CommunityUploadClient(
             gate_url=cfg.community_gate_url,
-            ingestion_token=cfg.community_ingestion_token,
             protocol_major=cfg.community_protocol_major,
         )
         queue = OfflineUploadQueue(community_upload_queue_path())
@@ -590,16 +588,16 @@ async def share_catalog() -> dict[str, Any]:
 
 @router.post("/catalog/contribute")
 async def contribute_catalog() -> dict[str, Any]:
-    """Opt-in: upload sanitized probe evidence to the community catalog gate.
+    """Upload sanitized probe evidence to the community catalog gate.
 
-    Dormant unless an operator has explicitly enabled upload AND configured a
-    gate URL + ingestion-scoped token (Phase 2a). When dormant this is a no-op
-    that never reaches the network; the local export path stays unchanged.
+    Active by default through a clean open API (no token). Dormant only if an
+    operator hard-disables the write path or no gate URL is set (Phase 2a). When
+    dormant this is a no-op that never reaches the network; the local export path
+    stays unchanged.
     """
     cfg = get_backend_config()
     if not community_upload_configured(
         gate_url=cfg.community_gate_url,
-        ingestion_token=cfg.community_ingestion_token,
         enabled=cfg.community_upload_enabled,
     ):
         return {
@@ -607,8 +605,8 @@ async def contribute_catalog() -> dict[str, Any]:
             "sharing_mode": "local_export_only",
             "auto_upload_enabled": False,
             "message": (
-                "Community upload is not configured. Enable it and set a gate URL plus an "
-                "ingestion-scoped token to opt in; until then evidence stays local."
+                "Community upload is disabled. It is on by default; it is off only when an "
+                "operator hard-disables the write path or no gate URL is set."
             ),
         }
 
@@ -623,7 +621,6 @@ async def contribute_catalog() -> dict[str, Any]:
             }
         client = CommunityUploadClient(
             gate_url=cfg.community_gate_url,
-            ingestion_token=cfg.community_ingestion_token,
             protocol_major=cfg.community_protocol_major,
         )
         queue = OfflineUploadQueue(community_upload_queue_path())

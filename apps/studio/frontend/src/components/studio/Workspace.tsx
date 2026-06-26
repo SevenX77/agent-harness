@@ -65,6 +65,10 @@ type CenterActionBarCreateProps = ComponentProps<typeof CenterActionBar> & {
   onCreatePhase?: (kind: NewPhaseKind) => Promise<void> | void
 }
 
+const LEFT_SIDEBAR_DEFAULT_SIZE = "24rem"
+const LEFT_SIDEBAR_MIN_SIZE = "24rem"
+const LEFT_SIDEBAR_MAX_SIZE = "35rem"
+
 const CenterActionBarWithCreate = CenterActionBar as (props: CenterActionBarCreateProps) => ReturnType<typeof CenterActionBar>
 
 interface CopilotJudgeReplayContext {
@@ -1350,10 +1354,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
             <>
               <ResizablePanel
                 id="left-panel"
-                defaultSize="20%"
-                minSize="14%"
-                maxSize="35%"
-                className="min-w-[300px]"
+                defaultSize={LEFT_SIDEBAR_DEFAULT_SIZE}
+                minSize={LEFT_SIDEBAR_MIN_SIZE}
+                maxSize={LEFT_SIDEBAR_MAX_SIZE}
+                className="h-full min-h-0 overflow-hidden"
               >
                 <Panels
                   activePanel={activePanel}

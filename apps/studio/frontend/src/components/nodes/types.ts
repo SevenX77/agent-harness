@@ -87,13 +87,17 @@ export type SkillGraphNode = Node<SkillGraphNodeData, 'skill'>
 export interface GlobalNodeData extends Record<string, unknown> {
   type: 'global-input' | 'global-output'
   schema: IoDeclaration
+  isSubgraphPreview?: boolean
 }
+
+export const SUBGRAPH_PREVIEW_INPUT_TARGET_HANDLE_ID = 'subgraph-preview-input-target'
 
 /**
  * N2 atom #13 (subgraph-inline-preview): data for the dashed container node that
  * frames an expanded subgraph's inline child topology. Carries the resolve state
- * so the container can render loading / error / loaded affordances; the child
- * phase nodes/edges are emitted as siblings (see subgraph-expansion.ts).
+ * so the container can render loading / error affordances; loaded child
+ * nodes/edges are emitted as siblings in the parent ReactFlow instance (see
+ * subgraph-expansion.ts).
  */
 export interface SubgraphGroupNodeData extends Record<string, unknown> {
   parentLabel: string

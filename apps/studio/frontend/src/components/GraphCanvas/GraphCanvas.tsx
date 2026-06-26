@@ -16,7 +16,7 @@ import {
   type ReactFlowInstance,
 } from '@xyflow/react'
 import { FileCog, Plus } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type MouseEvent } from 'react'
 import { toast } from 'sonner'
 import { AxiosError } from 'axios'
 import type { ChildGraphTopology, CompileError, ErrorResponse, ResumeValidityResponse, SkillDetail } from '@/api/types'
@@ -82,7 +82,7 @@ interface GraphCanvasProps {
   skillId: string
   // n2-canvas #14: the parent skill's absolute workspace root (its own skill dir).
   // Used to decide whether a drilled child subgraph is EDITABLE (lives under the
-  // editable workspace) or READ-ONLY (a bundled/public skill) — see isDrilledChildEditable.
+  // editable workspace) or READ-ONLY (a bundled/public skill); see isDrilledChildEditable.
   workspaceRoot?: string | null
   skillDetail?: SkillDetail
   isLoading?: boolean
@@ -94,7 +94,7 @@ interface GraphCanvasProps {
   // n2-canvas #14: every save handler takes an optional drilled-child `target`. When
   // editing INSIDE a drilled subgraph the canvas passes the child's own identity +
   // SkillDetail + child-refetch so the write/serialize/compile route to the CHILD
-  // skill (not the parent). Absent target ⇒ parent/root edit, behaviour unchanged.
+  // skill (not the parent). Absent target means parent/root edit, behaviour unchanged.
   onPersistConnection?: (connection: Connection, target?: ChildSaveTarget) => Promise<void> | void
   onDisconnectConnection?: (connection: { source: string; target: string }, target?: ChildSaveTarget) => Promise<void> | void
   // n2-canvas #8 (atomic reconnect): a single handler that applies BOTH the old
@@ -120,7 +120,7 @@ interface GraphCanvasProps {
   // derived by Workspace from the same live run stream that colors the nodes
   // (statusByNodeId -> the node whose status is 'running'). When it changes the
   // canvas auto-centers on that node so the user's view follows the run. Not a
-  // new derivation — pure wiring of the existing activeTracePhase.
+  // new derivation; pure wiring of the existing activeTracePhase.
   activeTracePhase?: string | null
   compact?: boolean
   onPhaseFileSave?: (args: { path: string; content: string; expectedHash: string }, target?: ChildSaveTarget) => Promise<void> | void
@@ -153,6 +153,22 @@ const edgeTypes = {
 }
 
 const CENTER_NODE_ORIGIN: [number, number] = [0.5, 0.5]
+const HIDDEN_INITIAL_VIEWPORT_CLASS = 'opacity-0 pointer-events-none'
+const useCanvasLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
+
+export function layoutViewportSignature(nodes: GraphCanvasNode[], edges: Edge<ContextEdgeData>[]): string {
+  const nodeSignature = nodes
+    .map((node) => `${node.id}:${node.type ?? ''}:${node.position.x},${node.position.y}`)
+    .join('|')
+  const edgeSignature = edges
+    .map((edge) => `${edge.id}:${edge.source}->${edge.target}:${edge.type ?? ''}`)
+    .join('|')
+  return `${nodeSignature}::${edgeSignature}`
+}
+
+export function nextExpandedSubgraphs(current: ReadonlySet<string>, nodeId: string): Set<string> {
+  return current.has(nodeId) ? new Set() : new Set([nodeId])
+}
 
 function isEdgeContextTarget(target: EventTarget | null): boolean {
   return target instanceof Element && Boolean(target.closest(
@@ -225,7 +241,7 @@ export function GraphCanvas({
   const [childGraph, setChildGraph] = useState<ChildGraphTopology | null>(null)
   // n2-canvas #14: the drilled child's FULL SkillDetail (manifest/topology/files),
   // fetched in parallel with childGraph. Option A renders the drilled nodes with
-  // buildNodes(childSkillId, childDetail, …) — reusing the root edit wiring — so the
+  // buildNodes(childSkillId, childDetail, ...) reusing the root edit wiring, so the
   // child is a first-class EDITABLE graph keyed to its own identity, not a read-only
   // topology projection. Null until it resolves (the topology-only view renders meanwhile).
   const [childDetail, setChildDetail] = useState<SkillDetail | null>(null)
@@ -249,6 +265,15 @@ export function GraphCanvas({
   const [activeWarningIndex, setActiveWarningIndex] = useState<number>(-1)
   const [cancelledNodeIds, setCancelledNodeIds] = useState<Set<string>>(() => new Set())
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance<GraphCanvasNode & { selected: boolean }, Edge<ContextEdgeData>> | null>(null)
+  const [isViewportReady, setIsViewportReady] = useState(false)
+  const viewportReadyRef = useRef(false)
+  const viewportFitTokenRef = useRef(0)
+  const lastFittedLayoutSignatureRef = useRef<string | null>(null)
+
+  const updateViewportReady = useCallback((ready: boolean) => {
+    viewportReadyRef.current = ready
+    setIsViewportReady(ready)
+  }, [])
 
   // 1. Conflict detection effect
   useEffect(() => {
@@ -324,22 +349,25 @@ export function GraphCanvas({
     setActiveWarningIndex(-1)
     toast.error('Warning cancelled. Conflict node marked red.')
   }, [])
-  const fitViewRef = useRef<(() => void) | null>(null)
-  const fitLayout = useCallback(() => {
+  const fitViewRef = useRef<(() => Promise<boolean> | boolean | void) | null>(null)
+  const fitLayout = useCallback((options: { reveal?: boolean } = {}) => {
+    const token = viewportFitTokenRef.current
     window.requestAnimationFrame(() => {
-      fitViewRef.current?.()
-    })
-  }, [])
-  const toggleSubgraph = useCallback((nodeId: string) => {
-    setExpandedSubgraphs((current) => {
-      const next = new Set(current)
-      if (next.has(nodeId)) {
-        next.delete(nodeId)
-      } else {
-        next.add(nodeId)
+      const fitResult = fitViewRef.current?.()
+      if (!options.reveal) {
+        return
       }
-      return next
+      void Promise.resolve(fitResult)
+        .catch(() => undefined)
+        .then(() => {
+          if (viewportFitTokenRef.current === token) {
+            updateViewportReady(true)
+          }
+        })
     })
+  }, [updateViewportReady])
+  const toggleSubgraph = useCallback((nodeId: string) => {
+    setExpandedSubgraphs((current) => nextExpandedSubgraphs(current, nodeId))
   }, [])
 
   // N2 atom #15: open/close an AGENT node's inline L3 step editor.
@@ -356,15 +384,15 @@ export function GraphCanvas({
   }, [])
 
   // N2 atom #15: persist an edited agent body through the normal phase-file save
-  // path. The optimistic-lock hash is taken over the CURRENT (pre-edit) body —
-  // the same snapshot the step transforms ran on — so a stale concurrent edit is
+  // path. The optimistic-lock hash is taken over the CURRENT (pre-edit) body,
+  // the same snapshot the step transforms ran on, so a stale concurrent edit is
   // rejected by the backend hash guard rather than silently overwritten.
   const handleStepsSave = useCallback(
     async (_nodeId: string, filePath: string, currentBody: string, nextBody: string) => {
       if (!onPhaseFileSave) return
       // n2-canvas #14: inside an editable drilled child, route the body save to the
       // child target (read via ref so this stable callback need not depend on the
-      // drill state). At root depth the target is null → parent save, unchanged.
+      // drill state). At root depth the target is null, so parent save is unchanged.
       const childArgs = drilledChildTargetRef.current
         ? ([drilledChildTargetRef.current] as const)
         : ([] as const)
@@ -390,6 +418,13 @@ export function GraphCanvas({
 
   const drilledLevel = drillStack.length > 0 ? drillStack[drillStack.length - 1] : null
   const drilledPath = drilledLevel?.path ?? null
+  const viewportScopeKey = `${skillId}\0${compact ? 'compact' : 'full'}\0${drilledPath ?? 'root'}`
+
+  useCanvasLayoutEffect(() => {
+    viewportFitTokenRef.current += 1
+    lastFittedLayoutSignatureRef.current = null
+    updateViewportReady(false)
+  }, [updateViewportReady, viewportScopeKey])
 
   // n2-canvas #14: load the drilled child's topology AND its full SkillDetail
   // (Option A). The detail is fetched against the CHILD's own resolved skillId
@@ -412,7 +447,7 @@ export function GraphCanvas({
           setChildDetail(detail)
         } catch (detailError) {
           // The child topology rendered; its full detail (needed for in-place
-          // editing) failed to load. Keep the read-only topology view and warn —
+          // editing) failed to load. Keep the read-only topology view and warn;
           // never silently degrade to a non-editable canvas with no signal.
           if (signal.cancelled) return
           console.warn('subgraph child detail failed to load; drilled view stays read-only', detailError)
@@ -455,7 +490,7 @@ export function GraphCanvas({
   // or failure). The optimistic edge state is restored from layoutResult (built
   // from childGraph) by the connect/reconnect catch handlers; this re-pulls the
   // child's last-known-good topology + detail so the canvas reflects the real
-  // rolled-back / committed child state — the child analogue of mutateSkillDetail.
+  // rolled-back / committed child state; the child analogue of mutateSkillDetail.
   const refetchChildGraph = useCallback(async () => {
     if (!drilledPath) return
     const signal = { cancelled: false }
@@ -472,11 +507,12 @@ export function GraphCanvas({
   )
   const compactRatio = compact && canvasHeight > 0 && canvasHeight < 500 ? 0.2 : 0
 
-  useEffect(() => {
+  useCanvasLayoutEffect(() => {
     const element = canvasRef.current
     if (!element) return
     const updateHeight = () => setCanvasHeight(element.getBoundingClientRect().height)
     updateHeight()
+    if (typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(updateHeight)
     observer.observe(element)
     return () => observer.disconnect()
@@ -485,7 +521,7 @@ export function GraphCanvas({
   const isDrilled = drilledPath !== null
 
   // n2-canvas #14: the drilled child's own save identity, derived purely on the FE
-  // from the backend-resolved absolute child path (childGraph.path) — the SAME
+  // from the backend-resolved absolute child path (childGraph.path), the SAME
   // resolution the removed project-switch escape hatch used. Null at root depth.
   const drilledChildIdentity = useMemo(
     () => (isDrilled && childGraph ? resolveWorkspaceIdentity(`local:${childGraph.path}`) : null),
@@ -493,7 +529,7 @@ export function GraphCanvas({
   )
   // n2-canvas #14 (PM decision): a drilled child that resolves to a READ-ONLY
   // bundled/public skill (outside the editable workspace) is NOT editable in place
-  // — block, don't auto-fork, don't silently mutate. Determined up front, path-based.
+  // block, don't auto-fork, don't silently mutate. Determined up front, path-based.
   const isDrilledChildReadOnly = useMemo(
     () => (childGraph ? !isDrilledChildEditable(childGraph.path, workspaceRoot ?? null, isTauriRuntime()) : false),
     [childGraph, workspaceRoot],
@@ -526,7 +562,7 @@ export function GraphCanvas({
   // compact = read-only projection: withhold the in-node edit callbacks so the
   // "Edit steps" affordance never renders on the mini-canvas (canEditSteps keys
   // on onToggleSteps being a function). Only the read-only dirty-downstream
-  // graying is kept — editing the body stays on the main canvas.
+  // graying is kept; editing the body stays on the main canvas.
   const agentStepsInputs = useMemo(
     () => ({
       expandedSteps: compact ? undefined : expandedSteps,
@@ -554,15 +590,16 @@ export function GraphCanvas({
       }
       return buildNodesFromTopology(childNodeSkillId, childGraph.phases, childGraph.graph_topology, {}, childAgentSteps)
     }
+    if (isLoading && !skillDetail) return []
     return buildNodes(skillId, skillDetail, expandedSubgraphs, toggleSubgraph, safeStatusByNodeId, safeCompileErrorsByNodeId, safeGoldenStateByNodeId, safeErrorMessageByNodeId, agentStepsInputs)
-  }, [agentStepsInputs, childDetail, childGraph, drilledChildIdentity, expandedSubgraphs, isDrilled, isDrilledChildReadOnly, safeStatusByNodeId, safeCompileErrorsByNodeId, safeGoldenStateByNodeId, safeErrorMessageByNodeId, skillDetail, skillId, toggleSubgraph])
+  }, [agentStepsInputs, childDetail, childGraph, drilledChildIdentity, expandedSubgraphs, isDrilled, isDrilledChildReadOnly, isLoading, safeStatusByNodeId, safeCompileErrorsByNodeId, safeGoldenStateByNodeId, safeErrorMessageByNodeId, skillDetail, skillId, toggleSubgraph])
   const phaseNodes = useMemo(
     () => rawNodes.filter((node): node is SkillGraphNode => node.type === 'skill'),
     [rawNodes],
   )
-  // N2 atom #13 (subgraph-inline-preview): the (parent node id → absolute path)
+  // N2 atom #13 (subgraph-inline-preview): the (parent node id to absolute path)
   // pairs to resolve for inline expansion. Inline expansion runs at ROOT depth
-  // only — a drilled child already shows real topology. A stable string key drives
+  // only; a drilled child already shows real topology. A stable string key drives
   // the fetch effect so it fires only when the expanded-path SET changes, never on
   // layout churn (which would cancel in-flight fetches and strand a loading state).
   const expandedPathPairs = useMemo(() => {
@@ -574,7 +611,7 @@ export function GraphCanvas({
       .sort((a, b) => a.id.localeCompare(b.id))
   }, [phaseNodes, expandedSubgraphs, isDrilled])
   const expandedPathKey = useMemo(
-    () => expandedPathPairs.map((pair) => `${pair.id} ${pair.path}`).join('|'),
+    () => expandedPathPairs.map((pair) => `${pair.id}\0${pair.path}`).join('|'),
     [expandedPathPairs],
   )
   const expandedPathPairsRef = useRef(expandedPathPairs)
@@ -601,7 +638,7 @@ export function GraphCanvas({
     let cancelled = false
     for (const target of targets) {
       const existing = expandedTopologiesRef.current[target.id]
-      // Already resolved for this exact path → keep it. A 'loading' entry is
+      // Already resolved for this exact path; keep it. A 'loading' entry is
       // re-fetched because its prior in-flight request belonged to a now-cancelled
       // effect closure (the key changed), so it would otherwise hang.
       if (existing && existing.path === target.path && existing.view.status !== 'loading') {
@@ -643,8 +680,8 @@ export function GraphCanvas({
   // Trace events drive hasTraceData: an edge lights up only when the active run
   // actually dispatched data across it (matching input_dispatch event).
   const traceEvents = workspace?.traceEvents
-  // No nodes at all (e.g. drilled child still loading) → no edges, so we never
-  // emit a phantom INPUT→OUTPUT edge against a node-less canvas.
+  // No nodes at all (e.g. drilled child still loading) means no edges, so we never
+  // emit a phantom INPUT鈫扥UTPUT edge against a node-less canvas.
   const rawEdges = useMemo(
     () => (rawNodes.length === 0 ? [] : buildEdges(phaseNodes, traceEvents)),
     [phaseNodes, rawNodes.length, traceEvents],
@@ -659,16 +696,69 @@ export function GraphCanvas({
       throw layoutError
     }
   }, [canvasHeight, compactRatio, rawEdges, rawNodes])
-  const [nodes, setNodes, onNodesChange] = useNodesState<GraphCanvasNode>(layoutResult.nodes)
-  const [edges, setEdges, onEdgesChange] = useEdgesState(layoutResult.edges)
-
-  useEffect(() => {
-    setNodes(layoutResult.nodes)
-    setEdges(layoutResult.edges)
-    if (!layoutResult.error) {
-      fitLayout()
+  // N2 atom #13 (subgraph-inline-preview): expanding a subgraph should only
+  // decide whether its child topology is present in the same React Flow graph.
+  // The expanded child nodes/edges are fed into useNodesState/useEdgesState with
+  // the root graph, so handles, measurement, and edge routing all use the normal
+  // canvas pipeline. The base layout signature below still ignores these children
+  // so toggling expand/collapse never auto-refits the viewport.
+  const subgraphExpansion = useMemo(() => {
+    if (isDrilled) return { nodes: [] as GraphCanvasNode[], edges: [] as Edge<ContextEdgeData>[] }
+    const requests: SubgraphExpansionRequest[] = []
+    for (const node of layoutResult.nodes) {
+      if (node.type !== 'skill' || !expandedSubgraphs.has(node.id)) continue
+      const path = normalizeAbsoluteSubgraphPath(node.data.subgraphPath)
+      if (!path) {
+        // No usable child path: there is nothing to fetch, so expand straight to the
+        // inline recovery state (F4 "unresolved path shows recovery state"). Since
+        // #199 the backend resolves a declared relative/absolute path to absolute, so
+        // this branch is reached only when SUBGRAPH.md declares no path at all. This
+        // is why the "+" now appears on these nodes too.
+        requests.push({
+          parentNodeId: node.id,
+          parentLabel: node.data.label,
+          path: node.data.subgraphPath ?? '',
+          view: { status: 'error', message: 'This subgraph phase does not declare a usable path in SUBGRAPH.md.' },
+        })
+        continue
+      }
+      const entry = expandedTopologies[node.id]
+      const view: ExpandedSubgraphView = entry && entry.path === path ? entry.view : { status: 'loading' }
+      requests.push({ parentNodeId: node.id, parentLabel: node.data.label, path, view })
     }
-  }, [fitLayout, layoutResult, setEdges, setNodes])
+    if (requests.length === 0) return { nodes: [], edges: [] }
+    const parentNodes = layoutResult.nodes.map((node) => ({ id: node.id, type: node.type, position: node.position }))
+    return buildSubgraphExpansion(parentNodes, requests)
+  }, [expandedSubgraphs, expandedTopologies, isDrilled, layoutResult.nodes])
+  const composedLayout = useMemo(
+    () => ({
+      nodes: subgraphExpansion.nodes.length > 0
+        ? [...layoutResult.nodes, ...subgraphExpansion.nodes]
+        : layoutResult.nodes,
+      edges: subgraphExpansion.edges.length > 0
+        ? [...layoutResult.edges, ...subgraphExpansion.edges]
+        : layoutResult.edges,
+    }),
+    [layoutResult.edges, layoutResult.nodes, subgraphExpansion.edges, subgraphExpansion.nodes],
+  )
+  const [nodes, setNodes, onNodesChange] = useNodesState<GraphCanvasNode>(composedLayout.nodes)
+  const [edges, setEdges, onEdgesChange] = useEdgesState(composedLayout.edges)
+
+  const hasLayoutNodes = layoutResult.nodes.length > 0 && !layoutResult.error
+  const layoutSignature = useMemo(
+    () => layoutViewportSignature(layoutResult.nodes, layoutResult.edges),
+    [layoutResult.nodes, layoutResult.edges],
+  )
+  useCanvasLayoutEffect(() => {
+    setNodes(composedLayout.nodes)
+    setEdges(composedLayout.edges)
+    const shouldFitViewport = hasLayoutNodes
+      && (!viewportReadyRef.current || lastFittedLayoutSignatureRef.current !== layoutSignature)
+    if (shouldFitViewport) {
+      lastFittedLayoutSignatureRef.current = layoutSignature
+      fitLayout({ reveal: !viewportReadyRef.current })
+    }
+  }, [composedLayout, fitLayout, hasLayoutNodes, layoutSignature, setEdges, setNodes])
 
   useEffect(() => {
     if (layoutResult.error) {
@@ -688,7 +778,7 @@ export function GraphCanvas({
     if (!reactFlowInstance) {
       return
     }
-    // Only re-center when the RUNNING phase actually changes — not on every status
+    // Only re-center when the RUNNING phase actually changes, not on every status
     // overlay tick or user node-drag (which both churn the `nodes` reference). Read
     // node existence at fire time via getNodes() so `nodes` stays out of the deps,
     // otherwise a live run would keep snapping the viewport back and fight a manual pan.
@@ -712,7 +802,7 @@ export function GraphCanvas({
     setNodes((currentNodes) => {
       let changed = false
       const nextNodes = currentNodes.map((node) => {
-        if (node.type !== 'skill') return node
+        if (node.type !== 'skill' || isSubgraphPreviewId(node.id)) return node
 
         const activeConflict = warningQueue[activeWarningIndex]
         const hasConflict = activeConflict && activeConflict.nodeId === node.id ? activeConflict : undefined
@@ -748,46 +838,7 @@ export function GraphCanvas({
     () => nodes.map((node) => ({ ...node, selected: node.id === (selectedCanvasNodeId ?? selectedNodeId) })),
     [nodes, selectedCanvasNodeId, selectedNodeId],
   )
-  // N2 atom #13 (subgraph-inline-preview): the canvas-level inline expansion
-  // overlay (dashed container + real child nodes/edges + bridge edges) for every
-  // currently-expanded subgraph node. Layered ON TOP of the live (post-layout,
-  // possibly dragged) nodes — never fed back into the main dagre layout — so
-  // toggling expand never reflows the parent graph.
-  const subgraphExpansion = useMemo(() => {
-    if (isDrilled) return { nodes: [] as GraphCanvasNode[], edges: [] as Edge<ContextEdgeData>[] }
-    const requests: SubgraphExpansionRequest[] = []
-    for (const node of nodes) {
-      if (node.type !== 'skill' || !expandedSubgraphs.has(node.id)) continue
-      const path = normalizeAbsoluteSubgraphPath(node.data.subgraphPath)
-      if (!path) {
-        // No usable child path: there is nothing to fetch, so expand straight to the
-        // inline recovery state (F4 "unresolved path shows recovery state"). Since
-        // #199 the backend resolves a declared relative/absolute path to absolute, so
-        // this branch is reached only when SUBGRAPH.md declares no path at all. This
-        // is why the "+" now appears on these nodes too (PM 2026-06-23) — it used to
-        // be hidden, leaving no way to surface the recovery affordance.
-        requests.push({
-          parentNodeId: node.id,
-          parentLabel: node.data.label,
-          path: node.data.subgraphPath ?? '',
-          view: { status: 'error', message: '子图未声明 path —— 在该节点的 SUBGRAPH.md 里声明子图根目录的 path（推荐相对 skill 根，绝对亦可，均须落在 skill 根内）后即可展开真实子拓扑。' },
-        })
-        continue
-      }
-      const entry = expandedTopologies[node.id]
-      const view: ExpandedSubgraphView = entry && entry.path === path ? entry.view : { status: 'loading' }
-      requests.push({ parentNodeId: node.id, parentLabel: node.data.label, path, view })
-    }
-    if (requests.length === 0) return { nodes: [], edges: [] }
-    const parentNodes = nodes.map((node) => ({ id: node.id, type: node.type, position: node.position }))
-    return buildSubgraphExpansion(parentNodes, requests)
-  }, [nodes, expandedSubgraphs, expandedTopologies, isDrilled])
-  const displayNodes = useMemo(
-    () => (subgraphExpansion.nodes.length === 0
-      ? selectedNodes
-      : [...selectedNodes, ...subgraphExpansion.nodes.map((node) => ({ ...node, selected: false }))]),
-    [selectedNodes, subgraphExpansion.nodes],
-  )
+  const displayNodes = selectedNodes
   const openEdgeContextMenu = useCallback((
     _event: MouseEvent,
     connection: { source: string; target: string },
@@ -797,7 +848,7 @@ export function GraphCanvas({
       || connection.source === OUTPUT_ID
       || connection.target === INPUT_ID
       || connection.target === OUTPUT_ID
-      // N2 atom #13: inline-preview / bridge edges are read-only — no disconnect menu.
+      // N2 atom #13: inline-preview / bridge edges are read-only, so no disconnect menu.
       || isSubgraphPreviewId(connection.source)
       || isSubgraphPreviewId(connection.target)
     ) {
@@ -807,30 +858,25 @@ export function GraphCanvas({
     setEdgeMenuConnection(connection)
   }, [])
   const displayEdges = useMemo<Edge<ContextEdgeData>[]>(
-    () => [
-      ...edges.map((edge) => {
-        const edgeData = edge.data
-        return {
-          ...edge,
-          data: {
-            ...edgeData,
-            hasTraceData: edgeData?.hasTraceData === true,
-            contextJson: edgeData?.contextJson,
-            sourcePhaseId: edgeData?.sourcePhaseId ?? edge.source,
-            targetPhaseId: edgeData?.targetPhaseId ?? edge.target,
-            onEdgeContextMenu: openEdgeContextMenu,
-          },
-        }
-      }),
-      // N2 atom #13: inline-expansion edges render as-is (read-only smoothstep
-      // lines) without the interactive contextEdge data/menu wiring.
-      ...subgraphExpansion.edges,
-    ],
-    [edges, openEdgeContextMenu, subgraphExpansion.edges],
+    () => edges.map((edge) => {
+      const edgeData = edge.data
+      return {
+        ...edge,
+        data: {
+          ...edgeData,
+          hasTraceData: edgeData?.hasTraceData === true,
+          contextJson: edgeData?.contextJson,
+          sourcePhaseId: edgeData?.sourcePhaseId ?? edge.source,
+          targetPhaseId: edgeData?.targetPhaseId ?? edge.target,
+          onEdgeContextMenu: openEdgeContextMenu,
+        },
+      }
+    }),
+    [edges, openEdgeContextMenu],
   )
 
-  // n2-canvas #14: a drilled subgraph that is read-only (bundled/public) — or whose
-  // editable child detail has not resolved yet — must NOT accept a structure edit.
+  // n2-canvas #14: a drilled subgraph that is read-only (bundled/public), or whose
+  // editable child detail has not resolved yet, must NOT accept a structure edit.
   // Block BEFORE any optimistic mutation so the canvas never writes against the
   // wrong identity nor silently mutates a bundle. Returns true when the edit is
   // blocked. At root depth (not drilled) this is a no-op.
@@ -838,9 +884,9 @@ export function GraphCanvas({
     if (!isDrilled) return false
     if (drilledChildTarget) return false
     if (isDrilledChildReadOnly) {
-      toast.error('This subgraph is read-only — fork it into your workspace to edit.')
+      toast.error('This subgraph is read-only. Fork it into your workspace to edit.')
     } else {
-      toast.error('Loading subgraph — try again in a moment.')
+      toast.error('Loading subgraph. Try again in a moment.')
     }
     return true
   }, [isDrilled, drilledChildTarget, isDrilledChildReadOnly])
@@ -890,11 +936,11 @@ export function GraphCanvas({
       const childArgs = drilledChildTarget ? ([drilledChildTarget] as const) : ([] as const)
       Promise.resolve(onPersistConnection(connection, ...childArgs)).catch((persistError: unknown) => {
         toast.error(persistError instanceof Error ? persistError.message : 'Could not persist dependency')
-        setEdges(layoutResult.edges)
-        setNodes(layoutResult.nodes)
+        setEdges(composedLayout.edges)
+        setNodes(composedLayout.nodes)
       })
     }
-  }, [blockDrilledEditIfUnwritable, drilledChildTarget, layoutResult.edges, layoutResult.nodes, onPersistConnection, phaseNodes, setEdges, setNodes])
+  }, [blockDrilledEditIfUnwritable, composedLayout.edges, composedLayout.nodes, drilledChildTarget, onPersistConnection, phaseNodes, setEdges, setNodes])
 
   // R4 + n2-canvas #8: drag an existing edge endpoint to a new node = remove the
   // old dependency + add the new one. planEdgeReconnect owns the DECISION (global
@@ -902,7 +948,7 @@ export function GraphCanvas({
   // serialize/write through onReconnectConnection: the previous code chained
   // onDisconnectConnection().then(onPersistConnection), two serialize round-trips
   // against the same captured skillDetail closure, and the queued persist
-  // serialized the pre-disconnect phases with a stale expected_hash → backend 409
+  // serialized the pre-disconnect phases with a stale expected_hash, causing backend 409
   // lost-update that left the graph half-mutated. A reconnect that lands back on
   // the same endpoints (no-op) just snaps the edge back without a write. Both
   // real consumers (main canvas + compact SplitEditor canvas) now wire
@@ -933,8 +979,8 @@ export function GraphCanvas({
     setEdges((current) => reconnectEdge(oldEdge, newConnection, current))
     const rollback = (reconnectError: unknown) => {
       toast.error(reconnectError instanceof Error ? reconnectError.message : 'Could not reconnect dependency')
-      setEdges(layoutResult.edges)
-      setNodes(layoutResult.nodes)
+      setEdges(composedLayout.edges)
+      setNodes(composedLayout.nodes)
     }
     // n2-canvas #14: spread the child target ONLY when drilled; at root depth
     // these stay the original arg forms (no trailing undefined), so the existing
@@ -950,7 +996,7 @@ export function GraphCanvas({
     Promise.resolve(onDisconnectConnection(plan.disconnect, ...childArgs))
       .then(() => onPersistConnection({ ...newConnection, source: plan.connect.source, target: plan.connect.target }, ...childArgs))
       .catch(rollback)
-  }, [blockDrilledEditIfUnwritable, drilledChildTarget, layoutResult.edges, layoutResult.nodes, onDisconnectConnection, onPersistConnection, onReconnectConnection, phaseNodes, setEdges, setNodes])
+  }, [blockDrilledEditIfUnwritable, composedLayout.edges, composedLayout.nodes, drilledChildTarget, onDisconnectConnection, onPersistConnection, onReconnectConnection, phaseNodes, setEdges, setNodes])
 
   const onReconnectStart = useCallback(() => {
     reconnectLandedRef.current = false
@@ -972,7 +1018,7 @@ export function GraphCanvas({
 
   // R4: an edge endpoint dragged off every handle and released (isValid not
   // true, and no onReconnect fired) = the user pulled the wire loose, so drop
-  // the dependency via the same disconnect → serialize path.
+  // the dependency via the same disconnect and serialize path.
   const onReconnectEnd = useCallback((
     _event: globalThis.MouseEvent | globalThis.TouchEvent,
     edge: Edge<ContextEdgeData>,
@@ -996,10 +1042,10 @@ export function GraphCanvas({
     Promise.resolve(onDisconnectConnection({ source: edge.source, target: edge.target }, ...childArgs))
       .catch((disconnectError: unknown) => {
         toast.error(disconnectError instanceof Error ? disconnectError.message : 'Could not disconnect dependency')
-        setEdges(layoutResult.edges)
-        setNodes(layoutResult.nodes)
+        setEdges(composedLayout.edges)
+        setNodes(composedLayout.nodes)
       })
-  }, [blockDrilledEditIfUnwritable, drilledChildTarget, layoutResult.edges, layoutResult.nodes, onDisconnectConnection, setEdges, setNodes])
+  }, [blockDrilledEditIfUnwritable, composedLayout.edges, composedLayout.nodes, drilledChildTarget, onDisconnectConnection, setEdges, setNodes])
 
   return (
     <ContextMenu>
@@ -1032,6 +1078,7 @@ export function GraphCanvas({
           stays on the main canvas, so two canvases can't race writes to GRAPH.md
           off independent snapshots (the stale-hash 409 class). */}
       <ReactFlow
+        className={isViewportReady ? undefined : HIDDEN_INITIAL_VIEWPORT_CLASS}
         nodes={displayNodes}
         edges={displayEdges}
         nodeTypes={nodeTypes}
@@ -1094,13 +1141,13 @@ export function GraphCanvas({
               return
             }
             // n2-canvas #14 (edit write-back): while drilled, a leaf (non-subgraph)
-            // child node belongs to the CHILD subgraph and is edited IN PLACE — no
+            // child node belongs to the CHILD subgraph and is edited IN PLACE; no
             // project switch. The node's data.skillId is already the CHILD's own id
             // (the drilled build keys nodes to the child identity) and its filePath
             // is child-relative, so opening `${node.data.skillId}/<filePath>`
             // resolves the child's real file. The removed pushNavSkill escape hatch
             // (which swapped the whole Workspace to the child as a standalone
-            // project) is gone — drilled editing stays on the same canvas.
+            // project) is gone; drilled editing stays on the same canvas.
             onNodeSelect?.({ id: node.id, data: node.data })
             const openSkillId = node.data.skillId || skillId
             workspace?.onFileOpen(`${openSkillId}/${node.data.filePath ?? `phases/${node.id}/${phaseKindFile(node.data)}`}`)
@@ -1110,10 +1157,12 @@ export function GraphCanvas({
         onInit={(instance) => {
           setReactFlowInstance(instance)
           fitViewRef.current = () => instance.fitView({ padding: 0.2 })
-          fitLayout()
+          if (hasLayoutNodes) {
+            lastFittedLayoutSignatureRef.current = layoutSignature
+            fitLayout({ reveal: !viewportReadyRef.current })
+          }
         }}
         nodeOrigin={CENTER_NODE_ORIGIN}
-        fitView
         minZoom={0.35}
         maxZoom={1.4}
       >
@@ -1154,7 +1203,7 @@ export function GraphCanvas({
               {isChildGraphLoading ? (
                 <div className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs text-muted-foreground shadow-sm">
                   <Spinner className="size-3" />
-                  <span>Loading subgraph…</span>
+                  <span>Loading subgraph...</span>
                 </div>
               ) : null}
               {childGraphError ? (

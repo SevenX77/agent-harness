@@ -212,7 +212,32 @@ vi.mock('@/components/diff/DiffView', () => ({
 
 vi.mock('@/components/ui/resizable', () => ({
   ResizableHandle: () => <div data-testid="resize-handle" />,
-  ResizablePanel: ({ children }: { children: ReactNode }) => <div data-testid="resize-panel">{children}</div>,
+  ResizablePanel: ({
+    children,
+    className,
+    defaultSize,
+    id,
+    maxSize,
+    minSize,
+  }: {
+    children: ReactNode
+    className?: string
+    defaultSize?: string
+    id?: string
+    maxSize?: string
+    minSize?: string
+  }) => (
+    <div
+      data-testid="resize-panel"
+      data-panel-id={id}
+      data-default-size={defaultSize}
+      data-max-size={maxSize}
+      data-min-size={minSize}
+      className={className}
+    >
+      {children}
+    </div>
+  ),
   ResizablePanelGroup: ({ children }: { children: ReactNode }) => <div data-testid="resize-group">{children}</div>,
 }))
 
@@ -480,6 +505,23 @@ describe('Workspace WS-1 local writer contracts', () => {
     renderWorkspace(selection)
 
     expect(mocks.panelsProps?.workspaceRoot).toBe('/Users/sevenx/Projects/writer-smoke')
+  })
+
+  it('constrains the left resizable panel so Assets split panes stay inside the viewport', () => {
+    const html = renderToStaticMarkup(
+      <Workspace
+        skillId="writer-smoke"
+        onSelectSkill={vi.fn()}
+        onCloseSkill={vi.fn()}
+      />,
+    )
+
+    expect(html).toContain('data-panel-id="left-panel"')
+    expect(html).toContain('h-full min-h-0 overflow-hidden')
+    expect(html).toContain('data-default-size="24rem"')
+    expect(html).toContain('data-min-size="24rem"')
+    expect(html).toContain('data-max-size="35rem"')
+    expect(html).not.toContain('min-w-[24rem]')
   })
 
   it('passes imported workspace roots into golden diff promotion without changing the API skill id', () => {

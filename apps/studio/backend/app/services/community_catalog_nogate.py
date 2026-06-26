@@ -16,11 +16,18 @@ from __future__ import annotations
 
 import base64
 import json
+from collections.abc import Callable
 
 import httpx
 from pydantic import BaseModel, ConfigDict
 
+from app.core.adapters.gateway import ProviderImportDraft
+from app.models.llm_config import LLMCredentialsFile
 from app.services.community_catalog import EvidenceUpload
+from app.services.community_catalog_upload import (
+    batch_idempotency_key,
+    collect_uploadable_uploads,
+)
 
 GITHUB_API_VERSION = "2022-11-28"
 INCOMING_DIR = "incoming"
@@ -121,11 +128,76 @@ class NoGateUploadClient:
         return PushResult(path=path, created=True)
 
 
+class AutosharePlan(BaseModel):
+    """A decided auto-share batch: what to upload and under which idempotency key."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    uploads: list[EvidenceUpload]
+    idempotency_key: str
+
+
+def plan_autoshare(
+    library: ProviderImportDraft,
+    credentials: LLMCredentialsFile,
+    *,
+    github_token: str,
+    catalog_repo: str,
+    enabled: bool,
+) -> AutosharePlan | None:
+    """Decide whether to auto-share after a probe, and what batch to push.
+
+    Returns ``None`` when no-gate upload is dormant or there is no uploadable
+    evidence. Pure (no IO) so the decision stays unit-testable; the caller
+    performs the actual push with :class:`NoGateUploadClient`.
+    """
+    if not nogate_upload_configured(github_token=github_token, catalog_repo=catalog_repo, enabled=enabled):
+        return None
+    uploads = collect_uploadable_uploads(library, credentials)
+    if not uploads:
+        return None
+    return AutosharePlan(uploads=uploads, idempotency_key=batch_idempotency_key(uploads))
+
+
+async def autoshare_probe_evidence(
+    library: ProviderImportDraft,
+    credentials: LLMCredentialsFile,
+    *,
+    github_token: str,
+    catalog_repo: str,
+    catalog_owner: str,
+    enabled: bool,
+    branch: str = "main",
+    client_factory: Callable[..., NoGateUploadClient] = NoGateUploadClient,
+) -> PushResult | None:
+    """Decide + push in one call — the desktop's post-probe auto-share entrypoint.
+
+    Returns ``None`` when dormant, when there is no uploadable evidence, or when
+    the repo owner is not configured (the target repo cannot be located). Raises
+    on a real push failure; the caller wraps this best-effort so a probe never
+    fails just because background sharing did.
+    """
+    plan = plan_autoshare(
+        library, credentials, github_token=github_token, catalog_repo=catalog_repo, enabled=enabled
+    )
+    if plan is None:
+        return None
+    if not catalog_owner.strip():
+        return None
+    client = client_factory(
+        github_token=github_token, owner=catalog_owner, repo=catalog_repo, branch=branch
+    )
+    return await client.push_batch(plan.uploads, idempotency_key=plan.idempotency_key)
+
+
 __all__ = [
     "GITHUB_API_VERSION",
+    "AutosharePlan",
     "NoGateUploadClient",
     "PushResult",
+    "autoshare_probe_evidence",
     "build_incoming_object",
     "incoming_object_path",
     "nogate_upload_configured",
+    "plan_autoshare",
 ]

@@ -112,10 +112,17 @@ wrangler deploy
 #      .catalog-publisher/src/redaction.mjs
 #      publish/ingest-incoming.yml -> <catalog-repo>/.github/workflows/
 
-# 3. Point the desktop client at the catalog + its own repo (no gate URL/token):
+# 3. Point the desktop client at the catalog + its own repo (no gate URL/token).
+#    No-gate REUSES the existing github_* + llm_catalog_* settings, plus one switch
+#    (STUDIO_COMMUNITY_NOGATE_UPLOAD_ENABLED) — distinct from the gate's
+#    STUDIO_COMMUNITY_UPLOAD_ENABLED. After a successful probe the desktop silently
+#    pushes sanitized batches to incoming/; the user perceives nothing.
 #      STUDIO_COMMUNITY_CATALOG_MANIFEST_URL=https://<pages-cdn>/manifest.json
-#      STUDIO_COMMUNITY_UPLOAD_ENABLED=true
-#      STUDIO_COMMUNITY_CATALOG_REPO=<owner>/<catalog-repo>   # incoming/ push target
+#      STUDIO_COMMUNITY_NOGATE_UPLOAD_ENABLED=true
+#      STUDIO_GITHUB_TOKEN=<token with contents:write on the catalog repo>
+#      STUDIO_GITHUB_OWNER=<your github login>             # repo owner
+#      STUDIO_LLM_CATALOG_REPO=studio-llm-model-catalog    # incoming/ push target (name)
+#      STUDIO_LLM_CATALOG_BRANCH=main
 ```
 
 ## Test

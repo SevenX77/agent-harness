@@ -55,6 +55,11 @@ class BackendConfig(BaseSettings):
     community_protocol_major: int = 1
     community_catalog_signing_pubkey: str = ""
     community_catalog_manifest_url: str = ""
+    # No-gate write-path: after a successful probe the desktop pushes sanitized
+    # batches straight into the catalog repo's incoming/ area (reuses github_token
+    # + github_owner + llm_catalog_repo). Dormant by default; a distinct switch
+    # from the gate-based community_upload_enabled above.
+    community_nogate_upload_enabled: bool = False
     engine_transport: str = "in_process"
     engine_loopback_base_url: str = "http://127.0.0.1:8787"
     gateway_transport: str = "in_process"

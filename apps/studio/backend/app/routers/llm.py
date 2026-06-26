@@ -78,6 +78,7 @@ from app.models.llm_config import (
     overlay_bundle_reference_chain,
 )
 from app.services import copilot
+from app.services.community_catalog_nogate import autoshare_probe_evidence
 from app.services.community_catalog_sync import (
     DisposableCatalogCacheStore,
     VerifiedSyncError,
@@ -160,6 +161,30 @@ from app.services.official_capability_sources import (
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
 logger = logging.getLogger(__name__)
+
+
+async def _autoshare_after_probe_best_effort() -> None:
+    """Best-effort no-gate community auto-share after a successful probe.
+
+    Silently pushes newly probe-verified evidence into the catalog repo's
+    ``incoming/`` staging area. NEVER raises: a probe must not fail because
+    background sharing did. Dormant unless ``community_nogate_upload_enabled``.
+    """
+    try:
+        cfg = get_backend_config()
+        await autoshare_probe_evidence(
+            load_evidence_library(),
+            load_credentials(),
+            github_token=cfg.github_token,
+            catalog_repo=cfg.llm_catalog_repo,
+            catalog_owner=cfg.github_owner,
+            enabled=cfg.community_nogate_upload_enabled,
+            branch=cfg.llm_catalog_branch,
+        )
+    except Exception:  # noqa: BLE001 — best-effort: sharing must never fail a probe
+        logger.warning("post-probe community auto-share failed", exc_info=True)
+
+
 OFFICIAL_PROVIDER_TEST_CONCURRENCY = 4
 OFFICIAL_PROVIDER_TEST_BATCH_SIZE = 8
 NO_VERIFIED_ROUTE_PROFILE_MESSAGE = "No verified language route profile."
@@ -939,6 +964,7 @@ async def test_endpoint_models(
                 result,
                 route_id=route_ids_by_model.get(result.model_id),
             )
+        await _autoshare_after_probe_best_effort()
         return EndpointModelTestResponse(
             registry=_registry_response(latest_credentials, _load_roles_or_empty()),
             results=results,
@@ -1038,6 +1064,7 @@ async def test_endpoint_models(
             probe_result,
             route_id=route_ids_by_model.get(probe_result.model_id),
         )
+    await _autoshare_after_probe_best_effort()
     return EndpointModelTestResponse(
         registry=_registry_response(latest_credentials, _load_roles_or_empty()),
         results=results,

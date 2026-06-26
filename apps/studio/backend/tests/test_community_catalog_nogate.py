@@ -18,15 +18,44 @@ import json
 
 import httpx
 import pytest
+from app.core.adapters.gateway import EvidenceRecord, ProviderImportDraft
+from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint
 from app.services.community_catalog import build_upload_record
 from app.services.community_catalog_nogate import (
+    AutosharePlan,
     NoGateUploadClient,
+    PushResult,
+    autoshare_probe_evidence,
     build_incoming_object,
     incoming_object_path,
     nogate_upload_configured,
+    plan_autoshare,
 )
 
 from tests.helpers_community_catalog import probe_record  # type: ignore[import-not-found]
+
+
+def _credentials_with_openai() -> LLMCredentialsFile:
+    endpoint = ProviderEndpoint.model_validate(
+        {
+            "endpoint_id": "openai-main",
+            "protocol": "openai_compatible",
+            "base_url": "https://api.openai.com/v1",
+            "display_name": "OpenAI",
+        }
+    )
+    return LLMCredentialsFile(provider_endpoints={"openai-main": endpoint})
+
+
+def _library_with(records: list[EvidenceRecord]) -> ProviderImportDraft:
+    return ProviderImportDraft.model_validate(
+        {
+            "draft_id": "evidence-library",
+            "source": {"kind": "studio_evidence_library"},
+            "status": "pending",
+            "evidence_records": [r.model_dump(mode="json") for r in records],
+        }
+    )
 
 
 @pytest.fixture
@@ -126,3 +155,131 @@ def test_client_refuses_empty_token_owner_or_repo() -> None:
         NoGateUploadClient(github_token="ghp", owner="", repo="r")
     with pytest.raises(ValueError):
         NoGateUploadClient(github_token="ghp", owner="o", repo="")
+
+
+def test_plan_autoshare_returns_none_when_dormant() -> None:
+    library = _library_with([probe_record(endpoint_id="openai-main")])
+    plan = plan_autoshare(
+        library,
+        _credentials_with_openai(),
+        github_token="ghp",
+        catalog_repo="studio-llm-model-catalog",
+        enabled=False,
+    )
+    assert plan is None
+
+
+def test_plan_autoshare_returns_none_when_no_uploadable_evidence() -> None:
+    plan = plan_autoshare(
+        _library_with([]),
+        _credentials_with_openai(),
+        github_token="ghp",
+        catalog_repo="studio-llm-model-catalog",
+        enabled=True,
+    )
+    assert plan is None
+
+
+def test_plan_autoshare_builds_plan_from_uploadable_evidence() -> None:
+    library = _library_with(
+        [probe_record(endpoint_id="openai-main", provider_id="openai", provider_model_id="gpt-4o")]
+    )
+    plan = plan_autoshare(
+        library,
+        _credentials_with_openai(),
+        github_token="ghp",
+        catalog_repo="studio-llm-model-catalog",
+        enabled=True,
+    )
+    assert isinstance(plan, AutosharePlan)
+    assert len(plan.uploads) == 1
+    assert plan.uploads[0].provider_model_id == "gpt-4o"
+    assert plan.idempotency_key  # stable, content-derived
+
+
+@pytest.mark.anyio
+async def test_autoshare_pushes_when_configured_with_owner() -> None:
+    captured: dict[str, object] = {}
+
+    class FakeClient:
+        def __init__(self, **kwargs: object) -> None:
+            captured["init"] = kwargs
+
+        async def push_batch(self, uploads: list, *, idempotency_key: str) -> PushResult:
+            captured["uploads"] = uploads
+            return PushResult(path=incoming_object_path(idempotency_key), created=True)
+
+    library = _library_with(
+        [probe_record(endpoint_id="openai-main", provider_id="openai", provider_model_id="gpt-4o")]
+    )
+    result = await autoshare_probe_evidence(
+        library,
+        _credentials_with_openai(),
+        github_token="ghp",
+        catalog_repo="studio-llm-model-catalog",
+        catalog_owner="SevenX77",
+        branch="main",
+        enabled=True,
+        client_factory=FakeClient,
+    )
+    assert isinstance(result, PushResult)
+    assert result.created is True
+    init = captured["init"]
+    assert isinstance(init, dict)
+    assert init["owner"] == "SevenX77"
+    assert init["repo"] == "studio-llm-model-catalog"
+    assert len(captured["uploads"]) == 1  # type: ignore[arg-type]
+
+
+@pytest.mark.anyio
+async def test_autoshare_skips_when_dormant() -> None:
+    called = False
+
+    class FakeClient:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        async def push_batch(self, *args: object, **kwargs: object) -> PushResult:
+            nonlocal called
+            called = True
+            return PushResult(path="x", created=True)
+
+    result = await autoshare_probe_evidence(
+        _library_with([probe_record(endpoint_id="openai-main")]),
+        _credentials_with_openai(),
+        github_token="ghp",
+        catalog_repo="studio-llm-model-catalog",
+        catalog_owner="SevenX77",
+        branch="main",
+        enabled=False,
+        client_factory=FakeClient,
+    )
+    assert result is None
+    assert called is False
+
+
+@pytest.mark.anyio
+async def test_autoshare_skips_when_owner_missing() -> None:
+    called = False
+
+    class FakeClient:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        async def push_batch(self, *args: object, **kwargs: object) -> PushResult:
+            nonlocal called
+            called = True
+            return PushResult(path="x", created=True)
+
+    result = await autoshare_probe_evidence(
+        _library_with([probe_record(endpoint_id="openai-main")]),
+        _credentials_with_openai(),
+        github_token="ghp",
+        catalog_repo="studio-llm-model-catalog",
+        catalog_owner="",
+        branch="main",
+        enabled=True,
+        client_factory=FakeClient,
+    )
+    assert result is None
+    assert called is False

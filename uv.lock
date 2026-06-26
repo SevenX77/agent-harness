@@ -3072,6 +3072,7 @@ source = { editable = "apps/studio/backend" }
 dependencies = [
     { name = "aiofiles" },
     { name = "claude-agent-sdk" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "graph-agent" },
     { name = "ptyprocess" },
@@ -3089,6 +3090,7 @@ dependencies = [
 requires-dist = [
     { name = "aiofiles", specifier = ">=23.0.0" },
     { name = "claude-agent-sdk", specifier = ">=0.1.80" },
+    { name = "cryptography", specifier = ">=44" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "graph-agent", editable = "packages/graph-agent" },
     { name = "ptyprocess", specifier = ">=0.7.0" },

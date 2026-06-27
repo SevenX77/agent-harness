@@ -3,7 +3,11 @@ llm_role: analyst
 io:
   inputs:
     type: object
-    required: [formatted_paragraphs, events_raw, chapter_number, event_timeline]
+    required:
+      - formatted_paragraphs
+      - events_raw
+      - chapter_number
+      - event_timeline
     properties:
       formatted_paragraphs:
         type: string
@@ -15,7 +19,10 @@ io:
         type: object
   outputs:
     type: object
-    required: [parsed_events, event_timeline, events_raw]
+    required:
+      - parsed_events
+      - event_timeline
+      - events_raw
     properties:
       parsed_events:
         type: array
@@ -29,6 +36,10 @@ tools:
   - finish_task
 max_iterations: 20
 validator: true
+allow_sequential_overwrite:
+  - parsed_events
+  - events_raw
+  - event_timeline
 ---
 
 <role>

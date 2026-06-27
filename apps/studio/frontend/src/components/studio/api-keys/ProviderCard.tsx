@@ -62,7 +62,7 @@ type BaseUrlReachabilityState = "connected" | "failed" | "testing" | "unknown"
 const availableModelsPreviewLimit = 12
 const fieldRowClassName = "grid grid-cols-[minmax(0,1fr)_11.5rem] items-center gap-2"
 const fieldActionClassName = "flex min-w-0 items-center justify-start gap-2"
-const providerTestButtonClassName = "min-w-[7.5rem] shrink-0 justify-start px-4"
+const providerTestButtonClassName = "min-w-[7rem] shrink-0 justify-center px-3 has-data-[icon=inline-start]:ps-3"
 const scrollableInputClassName = "overflow-x-auto whitespace-nowrap text-clip"
 const officialProviderNamesByKey: Record<string, string> = {
   anthropic: "Anthropic Official",

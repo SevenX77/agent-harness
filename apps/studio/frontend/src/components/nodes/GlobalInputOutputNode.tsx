@@ -1,6 +1,7 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
 import type { IoInput, IoOutput } from '../../api/types'
 import { Badge } from '../ui/badge'
+import { GLOBAL_INPUT_SOURCE_HANDLE_ID, GLOBAL_OUTPUT_TARGET_HANDLE_ID } from './subgraph-bridge-handles'
 import type { GlobalNodeData } from './types'
 
 export type { GlobalNodeData } from './types'
@@ -24,9 +25,19 @@ export function GlobalInputOutputNode({ data, selected }: NodeProps<GlobalNode>)
       ].join(' ')}
     >
       {isInput ? (
-        <Handle type="source" position={Position.Bottom} className="!size-2.5 !border-background !bg-primary opacity-60 transition-opacity duration-200 group-hover:opacity-100" />
+        <Handle
+          id={GLOBAL_INPUT_SOURCE_HANDLE_ID}
+          type="source"
+          position={Position.Bottom}
+          className="global-input-source-handle !size-2.5 !border-background !bg-primary opacity-60 transition-opacity duration-200 group-hover:opacity-100"
+        />
       ) : (
-        <Handle type="target" position={Position.Top} className="!size-2.5 !border-background !bg-primary opacity-60 transition-opacity duration-200 group-hover:opacity-100" />
+        <Handle
+          id={GLOBAL_OUTPUT_TARGET_HANDLE_ID}
+          type="target"
+          position={Position.Top}
+          className="global-output-target-handle !size-2.5 !border-background !bg-primary opacity-60 transition-opacity duration-200 group-hover:opacity-100"
+        />
       )}
 
       <div className="flex items-start justify-between gap-3">

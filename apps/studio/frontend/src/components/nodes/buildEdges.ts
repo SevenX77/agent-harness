@@ -2,6 +2,12 @@ import type { Edge } from '@xyflow/react'
 import type { CallbackEvent, EventEnvelope } from '@/api/types'
 import type { ContextEdgeData } from '@/components/edges/ContextEdge'
 import { edgeContextFromEvents } from '@/lib/edge-context'
+import {
+  GLOBAL_INPUT_SOURCE_HANDLE_ID,
+  GLOBAL_OUTPUT_TARGET_HANDLE_ID,
+  SKILL_FLOW_SOURCE_HANDLE_ID,
+  SKILL_FLOW_TARGET_HANDLE_ID,
+} from './subgraph-bridge-handles'
 import type { SkillGraphNode } from './types'
 
 export const INPUT_ID = '__global_input__'
@@ -20,6 +26,8 @@ function contextEdge(source: string, target: string, traceEvents: TraceEventInpu
     id: `${source}->${target}`,
     source,
     target,
+    sourceHandle: source === INPUT_ID ? GLOBAL_INPUT_SOURCE_HANDLE_ID : SKILL_FLOW_SOURCE_HANDLE_ID,
+    targetHandle: target === OUTPUT_ID ? GLOBAL_OUTPUT_TARGET_HANDLE_ID : SKILL_FLOW_TARGET_HANDLE_ID,
     type: 'contextEdge',
     reconnectable: isBoundaryEdge ? false : undefined,
     deletable: isBoundaryEdge ? false : undefined,

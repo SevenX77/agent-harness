@@ -33,12 +33,11 @@ def test_verified_sync_endpoint_runs_when_configured(
     assert body["record_count"] == 3
 
 
-def test_verified_sync_carries_evidence_into_credentials(
+def test_verified_sync_caches_without_promoting_credentials(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The verified-sync endpoint is the moment the catalog data is carried INTO
-    credentials: a freshly synced probe-verified record matching a verified
-    endpoint's route writes evidence onto that route so it projects blue."""
+    """Page-load catalog sync only refreshes the disposable verified cache.
+    Route evidence is written into credentials later, during endpoint Test."""
     from app.models.llm_config import (
         LLMCredentialsFile,
         ProviderEndpoint,
@@ -113,9 +112,94 @@ def test_verified_sync_carries_evidence_into_credentials(
 
     body = client.post("/api/llm/catalog/sync-verified").json()
     assert body["status"] == "success"
-    assert body["promoted_route_count"] == 1
+    assert body["promoted_route_count"] == 0
 
     route = load_credentials(credentials_path()).provider_routes[
         "deepseek-official:deepseek-v4-pro"
     ]
-    assert "cat-deepseek-pro" in route.metadata.get("evidence_refs", [])
+    assert route.metadata.get("evidence_refs", []) == []
+
+
+def test_endpoint_test_carries_cached_community_evidence_for_new_routes(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When an endpoint Test creates route rows after the verified catalog was
+    already synced, the new routes must still receive matching community
+    evidence before the registry response is returned."""
+    from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint
+    from app.routers import llm as llm_router
+    from app.services.community_catalog import parse_catalog_evidence
+    from app.services.community_catalog_sync import (
+        CommunityCatalogCache,
+        DisposableCatalogCacheStore,
+    )
+    from app.services.llm_credentials import credentials_path, load_credentials, save_credentials
+    from app.services.llm_paths import community_catalog_cache_path
+    from graph_agent_gateway.registry.provider_probe import EndpointProbeResult
+
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "anthropic-official": ProviderEndpoint(
+                    endpoint_id="anthropic-official",
+                    display_name="Anthropic Official",
+                    protocol="anthropic_compatible",
+                    base_url="https://api.anthropic.com",
+                    api_key="secret",
+                    provider_kind="official",
+                    status="unverified_manual",
+                )
+            },
+        ),
+        credentials_path(),
+    )
+    record = parse_catalog_evidence(
+        {
+            "evidence_type": "probe_result",
+            "trust_state": "probe-verified",
+            "evidence_id": "cat-anthropic-opus",
+            "normalized_public_base_url": "https://api.anthropic.com",
+            "provider_model_id": "claude-opus-4-8",
+            "model_id": "claude-opus-4-8",
+            "method_id": "anthropic_messages",
+            "probe_status": "ok",
+        }
+    )
+    DisposableCatalogCacheStore(community_catalog_cache_path()).save(
+        CommunityCatalogCache(
+            generated_at="2026-06-26T00:00:00Z",
+            protocol_major=1,
+            records=[record],
+        )
+    )
+
+    async def fake_endpoint_probe(endpoint: ProviderEndpoint) -> EndpointProbeResult:
+        return EndpointProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            provider_kind=endpoint.provider_kind,
+            backend="claude",
+            base_url=endpoint.base_url,
+            status="ok",
+            latency_ms=11,
+            model_ids=("claude-opus-4-8",),
+        )
+
+    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_endpoint_probe)
+
+    response = client.post("/api/llm/endpoints/anthropic-official/test")
+
+    assert response.status_code == 200
+    registry = response.json()["registry"]
+    routes = registry["provider_routes"]
+    route = next(
+        item for item in routes.values() if item["provider_model_id"] == "claude-opus-4-8"
+    )
+    assert route["metadata"]["evidence_refs"] == ["cat-anthropic-opus"]
+    assert route["ui_state"] == "historical_ready"
+
+    saved_route = next(
+        item
+        for item in load_credentials(credentials_path()).provider_routes.values()
+        if item.provider_model_id == "claude-opus-4-8"
+    )
+    assert saved_route.metadata["evidence_refs"] == ["cat-anthropic-opus"]

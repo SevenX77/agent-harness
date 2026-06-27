@@ -267,6 +267,8 @@ export interface VerifiedCatalogSyncResponse {
   record_count?: number
   manifest_etag?: string | null
   protocol_major?: number
+  /** Routes whose credential gained community evidence (now projectable as blue). */
+  promoted_route_count?: number
   message?: string
 }
 

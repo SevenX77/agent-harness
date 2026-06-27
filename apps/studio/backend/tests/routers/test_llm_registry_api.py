@@ -26,7 +26,10 @@ from app.models.llm_config import (
 )
 from app.routers import llm as llm_router
 from app.services import copilot_test
-from app.services.community_catalog import parse_catalog_evidence
+from app.services.community_catalog import (
+    parse_catalog_evidence,
+    promote_community_evidence_into_credentials,
+)
 from app.services.community_catalog_sync import (
     CommunityCatalogCache,
     DisposableCatalogCacheStore,
@@ -324,6 +327,142 @@ def test_registry_probe_catalog_community_absent_when_no_cache(
     assert community["synced"] is False
     assert community["record_count"] == 0
     assert community["entries"] == []
+
+
+def _seed_deepseek_verified_endpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    route_status: str = "unverified_manual",
+) -> Path:
+    """A VERIFIED DeepSeek endpoint (api.deepseek.com/v1) with one not-yet-tested
+    route — the exact shape of the screenshot the user reported."""
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    creds_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "deepseek-official": ProviderEndpoint(
+                    endpoint_id="deepseek-official",
+                    display_name="DeepSeek Official",
+                    protocol="openai_compatible",
+                    base_url="https://api.deepseek.com/v1",
+                    api_key="secret",
+                    status="verified",
+                )
+            },
+            provider_routes={
+                "deepseek-official:deepseek-v4-pro": ProviderRoute(
+                    route_id="deepseek-official:deepseek-v4-pro",
+                    endpoint_id="deepseek-official",
+                    route_slug="deepseek-v4-pro",
+                    provider_model_id="deepseek-v4-pro",
+                    canonical_id="deepseek-v4-pro",
+                    display_name="DeepSeek V4 Pro",
+                    status=route_status,
+                )
+            },
+        ),
+        creds_path,
+    )
+    save_roles_file(
+        roles_path,
+        RolesData(),
+        known_route_ids={"deepseek-official:deepseek-v4-pro"},
+    )
+    return creds_path
+
+
+def _community_probe_record(
+    *,
+    evidence_id: str = "cat-deepseek-pro",
+    normalized_public_base_url: str = "https://api.deepseek.com",
+    model_id: str = "deepseek-v4-pro",
+    trust_state: str = "probe-verified",
+    evidence_type: str = "probe_result",
+) -> EvidenceRecord:
+    return parse_catalog_evidence(
+        {
+            "evidence_type": evidence_type,
+            "trust_state": trust_state,
+            "evidence_id": evidence_id,
+            "normalized_public_base_url": normalized_public_base_url,
+            "provider_model_id": model_id,
+            "model_id": model_id,
+            "method_id": "deepseek_chat_completions",
+            "capability_family": "language_reasoning",
+            "observed_at": "2026-06-26T09:33:40+00:00",
+            "probe_status": "ok",
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+        }
+    )
+
+
+def test_community_evidence_promotes_matching_route_to_historical_ready(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Community catalog is a data carrier INTO credentials (the single source of
+    truth). A probe-verified community record whose host + model match a VERIFIED
+    endpoint's route writes evidence into that route's credential, so the registry
+    projects it as historical_ready (blue) — host-tolerant across a /v1 suffix."""
+    creds_path = _seed_deepseek_verified_endpoint(tmp_path, monkeypatch)
+
+    updated = promote_community_evidence_into_credentials(
+        community_records=[_community_probe_record()]
+    )
+    assert updated == 1
+
+    # The credential now carries the community evidence ...
+    route = load_credentials(creds_path).provider_routes["deepseek-official:deepseek-v4-pro"]
+    assert "cat-deepseek-pro" in route.metadata.get("evidence_refs", [])
+    # ... but community evidence must NEVER promote a route to verified/green.
+    assert route.status == "unverified_manual"
+
+    # ... and the registry projects the route as historical_ready (blue).
+    body = client.get("/api/llm/registry").json()
+    provider_models = {
+        opt["route_id"]: opt
+        for group in body["model_groups"]
+        for opt in group["provider_models"]
+    }
+    assert provider_models["deepseek-official:deepseek-v4-pro"]["ui_state"] == "historical_ready"
+
+
+def test_community_evidence_skips_unmatched_host_and_observed_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No write when host does not match, and observed-only (not probe-verified)
+    community records never contribute to historical_ready."""
+    creds_path = _seed_deepseek_verified_endpoint(tmp_path, monkeypatch)
+
+    updated = promote_community_evidence_into_credentials(
+        community_records=[
+            # Wrong host — different provider, must not touch DeepSeek route.
+            _community_probe_record(
+                evidence_id="cat-other-host",
+                normalized_public_base_url="https://api.openai.com",
+            ),
+            # Right host + model but only list-observed, not probe-verified.
+            EvidenceRecord(
+                evidence_id="cat-observed-only",
+                evidence_type="model_list_observation",
+                trust_state="provider-list-observed",
+                model_id="deepseek-v4-pro",
+                provider_model_id="deepseek-v4-pro",
+                metadata={"normalized_public_base_url": "https://api.deepseek.com"},
+            ),
+        ]
+    )
+
+    assert updated == 0
+    route = load_credentials(creds_path).provider_routes["deepseek-official:deepseek-v4-pro"]
+    assert route.metadata.get("evidence_refs", []) == []
 
 
 def test_legacy_import_draft_routes_are_not_public_api(client: TestClient) -> None:

@@ -80,6 +80,9 @@ from app.models.llm_config import (
     overlay_bundle_reference_chain,
 )
 from app.services import copilot
+from app.services.community_catalog import (
+    promote_community_evidence_into_credentials,
+)
 from app.services.community_catalog_sync import (
     DisposableCatalogCacheStore,
     VerifiedSyncError,
@@ -656,12 +659,18 @@ async def contribute_catalog() -> dict[str, Any]:
 
 @router.post("/catalog/sync-verified")
 async def sync_verified_community_catalog() -> dict[str, Any]:
-    """Pull the signed community catalog into a disposable, verified cache (R4).
+    """Pull the signed community catalog into a disposable, verified cache (R4),
+    then carry its evidence INTO credentials (the single source of truth).
 
     Dormant unless a manifest URL and a signing public key are configured. The
     sync is fail-closed: a bad signature, shard digest, or incompatible protocol
-    surfaces as an error and the disposable cache is left untouched. Verified
-    evidence is advisory and never auto-applied to credentials.
+    surfaces as an error and the disposable cache is left untouched.
+
+    Credentials remain the only truth source: after a successful sync the
+    freshly verified records are written onto matching EXISTING routes' evidence
+    refs (host + model match) so the standard projection lights them as
+    ``historical_ready`` (blue). Community evidence is advisory — it never
+    promotes a route to ``ready``/green and never creates endpoints or routes.
     """
     cfg = get_backend_config()
     manifest_url = cfg.community_catalog_manifest_url.strip()
@@ -696,6 +705,17 @@ async def sync_verified_community_catalog() -> dict[str, Any]:
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Verified catalog sync error: {exc}") from exc
 
+    # Carry the freshly verified evidence into credentials (the single source of
+    # truth). Best-effort: a promotion hiccup must never fail the sync itself.
+    promoted_route_count = 0
+    try:
+        cached_records = cache_store.load().records
+        promoted_route_count = promote_community_evidence_into_credentials(
+            community_records=cached_records
+        )
+    except Exception:
+        logger.warning("community catalog evidence promotion failed", exc_info=True)
+
     return {
         "status": "success",
         "verified_sync_enabled": True,
@@ -703,6 +723,7 @@ async def sync_verified_community_catalog() -> dict[str, Any]:
         "record_count": outcome.record_count,
         "manifest_etag": outcome.manifest_etag,
         "protocol_major": outcome.protocol_major,
+        "promoted_route_count": promoted_route_count,
     }
 
 

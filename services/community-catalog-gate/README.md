@@ -14,11 +14,22 @@ served catalog that any client can verify.
 
 | Component | File | Role | Write power |
 | --- | --- | --- | --- |
-| Ingestion gate | `src/gate.mjs` | Serverless Worker: accept opt-in batches, re-validate redaction, dedupe, buffer | KV buffer only |
+| Ingestion gate | `src/gate.mjs` | Serverless Worker: accept anonymous batches (no token), rate-limit, re-validate redaction, dedupe, buffer | KV buffer only |
 | Redaction re-validation | `src/redaction.mjs` | Allowlist-only screen; rejects secrets / private hosts / bare hashes | none (pure) |
 | KV drain | `publish/drain-kv.mjs` | Read buffer + withdrawals into a records file | none (read-only) |
 | Aggregator / signer | `publish/aggregate.mjs` | Shard, digest, build + Ed25519-sign the manifest | writes files |
-| Publishing Action | `publish/publish-catalog.yml` | Scheduled commit to the catalog repo | `contents: write` |
+| Publishing Action | `publish/publish-catalog.yml` | Scheduled: drain gate KV, aggregate, sign, commit | `contents: write` |
+
+## Write path
+
+The gate enables **multi-user** contribution without giving anyone repo-write
+power. Any desktop POSTs an opt-in, pre-sanitized batch to the Cloudflare Worker
+(`src/gate.mjs`), which independently re-screens it (`src/redaction.mjs`) and
+buffers the survivors to KV. A scheduled Action (`publish-catalog.yml`) drains
+the buffer (`drain-kv.mjs`), aggregates + Ed25519-signs the manifest
+(`aggregate.mjs`), and commits the signed catalog. Strangers never get
+repo-write power; the gate holds no repo token; the signing private key exists
+only as an Action secret.
 
 ## Security model (three-way converged design v3)
 
@@ -31,9 +42,12 @@ served catalog that any client can verify.
   rejects anything outside a strict field allowlist, any non-allowlisted base
   URL, and any bare endpoint fingerprint without its plaintext (no
   de-anonymizable hashes).
-- **Opt-in only.** A batch must carry a valid anonymous ingestion token
-  (`INGESTION_TOKEN`). `Idempotency-Key` dedupes retries; the returned
-  `receipt_token` lets a user later withdraw a contribution.
+- **Clean open API + server-side rate limiting.** The client sends only
+  sanitized records — no token, no credentials, nothing to configure or leak. A
+  shared token would end up in every client anyway, so instead the gate is keyed
+  on client IP via the Cloudflare `RATE_LIMITER` binding to shed floods, and
+  redaction caps what any single request can land. `Idempotency-Key` dedupes
+  retries; the returned `receipt_token` lets a user later withdraw a contribution.
 - **Signed read path.** The manifest is signed with an Ed25519 key whose private
   half exists only as the Action secret `CATALOG_SIGNING_PRIVATE_KEY_PEM`. The
   desktop client verifies with the matching raw public key
@@ -44,10 +58,9 @@ served catalog that any client can verify.
 `POST /v1/evidence/batches`
 
 ```
-Authorization: Bearer <INGESTION_TOKEN>
 Idempotency-Key: <stable per-batch key>
 { "protocol_major": 1, "records": [ { "evidence_type": "probe_result", ... } ] }
--> { "accepted": N, "rejected": M, "receipt_token": "uuid" }
+-> { "accepted": N, "rejected": M, "receipt_token": "uuid" }   # 429 if rate-limited
 ```
 
 `POST /v1/evidence/withdraw` — `{ "receipt_token": "uuid" }` → marks the
@@ -61,12 +74,12 @@ npm run keygen
 #   -> store the PEM as the Action secret CATALOG_SIGNING_PRIVATE_KEY_PEM
 #   -> set the desktop client STUDIO_COMMUNITY_CATALOG_SIGNING_PUBKEY=<hex>
 
-# 2. Deploy the gate (Cloudflare Worker).
+# 2. Deploy the gate (Cloudflare Worker). No token/secret — it's an open API
+#    guarded by the RATE_LIMITER binding (configured in wrangler.toml).
 cp wrangler.toml.template wrangler.toml   # fill in KV namespace IDs
 wrangler kv namespace create BUFFER
 wrangler kv namespace create IDEMPOTENCY
 wrangler kv namespace create WITHDRAWN
-wrangler secret put INGESTION_TOKEN
 wrangler deploy
 
 # 3. Install the publishing Action in the PUBLIC catalog repo.
@@ -74,12 +87,17 @@ wrangler deploy
 #   vendor this dir as <catalog-repo>/gate (submodule or copy)
 #   add secrets: CATALOG_SIGNING_PRIVATE_KEY_PEM, CF_* (read-only KV token)
 
-# 4. Point the desktop client at the catalog + gate.
-#   STUDIO_COMMUNITY_CATALOG_MANIFEST_URL=https://<pages-cdn>/manifest.json
-#   STUDIO_COMMUNITY_UPLOAD_ENABLED=true
-#   STUDIO_COMMUNITY_GATE_URL=https://<worker-host>
-#   STUDIO_COMMUNITY_INGESTION_TOKEN=<INGESTION_TOKEN>
+# 4. Bake the public endpoints into the desktop build (defaults in
+#    apps/studio/backend/app/core/backends.py — all public, no secrets):
+#      community_gate_url, community_catalog_manifest_url,
+#      community_catalog_signing_pubkey. Stock Studio then reads + contributes
+#      with ZERO config; the single in-app catalog toggle is the only control.
 ```
+
+After a successful probe the desktop silently uploads any newly probe-verified,
+sanitized evidence to the gate — on by default, no token, the user perceives
+nothing. Unreachable-gate batches are parked in a local offline queue and
+retried, preserving their idempotency key.
 
 ## Test
 

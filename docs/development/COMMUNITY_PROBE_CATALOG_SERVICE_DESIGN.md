@@ -191,8 +191,9 @@ described as "the read path is unchanged."
 
 #### Red-line compliance (must stay true in 2a)
 
-- Client holds at most an ingestion-scoped upload token to the gate; never a
-  catalog-repo write token. **Repo write capability exists only in the scheduled
+- Client holds NO token of any kind — the gate is a clean open API (abuse is
+  contained server-side by per-client rate limiting + redaction). Certainly never
+  a catalog-repo write token. **Repo write capability exists only in the scheduled
   publishing Action** (minimal `permissions: contents: write`); the serverless gate
   itself holds no catalog-repo write token, so a gate compromise cannot write the
   public catalog.

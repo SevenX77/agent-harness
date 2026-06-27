@@ -31,6 +31,34 @@ from fastapi.testclient import TestClient  # noqa: E402
 _TEST_TOKEN = "studio-test-token"
 
 
+@pytest.fixture(autouse=True)
+def _community_catalog_neutralized_in_tests(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Keep the community catalog feature off the network during tests.
+
+    Production ships the catalog ON by default (clean open API, baked gate URL +
+    signing key, no token), so probe/contribute/sync paths would otherwise reach
+    the real gate. Neutralize both read and write here — and scrub any leaked
+    ``STUDIO_COMMUNITY_*`` shell env — so the default test state makes no network
+    call. Tests that exercise the active paths opt back in explicitly (set the
+    flag + a test gate/manifest URL and stub the client).
+    """
+    for var in (
+        "STUDIO_COMMUNITY_UPLOAD_ENABLED",
+        "STUDIO_COMMUNITY_GATE_URL",
+        "STUDIO_COMMUNITY_PROTOCOL_MAJOR",
+        "STUDIO_COMMUNITY_CATALOG_SIGNING_PUBKEY",
+        "STUDIO_COMMUNITY_CATALOG_MANIFEST_URL",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("STUDIO_COMMUNITY_UPLOAD_ENABLED", "false")
+    monkeypatch.setenv("STUDIO_COMMUNITY_GATE_URL", "")
+    monkeypatch.setenv("STUDIO_COMMUNITY_CATALOG_SIGNING_PUBKEY", "")
+    monkeypatch.setenv("STUDIO_COMMUNITY_CATALOG_MANIFEST_URL", "")
+    clear_backend_caches()
+    yield
+    clear_backend_caches()
+
+
 @pytest.fixture
 def studio_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
     skills_dir = tmp_path / "skills"

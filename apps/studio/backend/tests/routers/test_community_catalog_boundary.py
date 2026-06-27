@@ -26,7 +26,6 @@ def test_share_endpoint_unaffected_when_community_upload_configured(
     # start uploading. Share remains a pure local export.
     monkeypatch.setenv("STUDIO_COMMUNITY_UPLOAD_ENABLED", "true")
     monkeypatch.setenv("STUDIO_COMMUNITY_GATE_URL", "https://gate.example.org")
-    monkeypatch.setenv("STUDIO_COMMUNITY_INGESTION_TOKEN", "ing-tok")
     clear_backend_caches()
     body = client.post("/api/llm/catalog/share").json()
     assert body["sharing_mode"] == "local_export_only"

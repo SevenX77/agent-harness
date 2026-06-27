@@ -1,7 +1,8 @@
 """Phase 2a R1/R3/R6: opt-in upload client.
 
-- R1: upload only happens with an explicit ingestion-scoped token (opt-in); the
-  body carries only sanitized records, never credentials or a repo write token.
+- R1: the request is a clean open API — the body carries only sanitized records,
+  never a token, credentials, or a repo write key. All auth/abuse control is
+  server-side (the gate rate-limits; it takes no client token).
 - R3: every batch carries an Idempotency-Key so the gate can dedupe; the key is
   preserved across offline retries.
 - R6: failures (network / 5xx) park the batch in an offline queue for retry.
@@ -14,6 +15,7 @@ from pathlib import Path
 import httpx
 import pytest
 from app.core.adapters.gateway import EvidenceRecord, ProviderImportDraft
+from app.core.backends import BackendConfig, clear_backend_caches
 from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint
 from app.services.community_catalog import build_upload_record
 from app.services.community_catalog_upload import (
@@ -45,16 +47,15 @@ def _transport(captured: list[httpx.Request], *, status: int = 200, body: dict |
     return httpx.MockTransport(handle)
 
 
-def _client(transport: httpx.MockTransport, *, token: str = "ingestion-token-abc") -> CommunityUploadClient:
+def _client(transport: httpx.MockTransport) -> CommunityUploadClient:
     return CommunityUploadClient(
         gate_url="https://gate.example.org",
-        ingestion_token=token,
         transport=transport,
     )
 
 
 @pytest.mark.anyio
-async def test_upload_batch_posts_to_gate_with_token_and_idempotency_key() -> None:
+async def test_upload_batch_posts_to_gate_with_idempotency_key_and_no_token() -> None:
     captured: list[httpx.Request] = []
     client = _client(_transport(captured))
     await client.upload_batch([_upload()], idempotency_key="batch-1")
@@ -62,8 +63,9 @@ async def test_upload_batch_posts_to_gate_with_token_and_idempotency_key() -> No
     request = captured[0]
     assert request.method == "POST"
     assert request.url.path == EVIDENCE_BATCH_PATH
-    assert request.headers["Authorization"] == "Bearer ingestion-token-abc"
     assert request.headers["Idempotency-Key"] == "batch-1"
+    # Clean open API: the client sends NO Authorization/token header at all.
+    assert "Authorization" not in request.headers
 
 
 @pytest.mark.anyio
@@ -90,9 +92,9 @@ async def test_upload_batch_body_carries_only_sanitized_record_fields() -> None:
         assert forbidden not in record
 
 
-def test_client_refuses_empty_ingestion_token() -> None:
+def test_client_refuses_empty_gate_url() -> None:
     with pytest.raises(ValueError):
-        CommunityUploadClient(gate_url="https://gate.example.org", ingestion_token="   ")
+        CommunityUploadClient(gate_url="   ")
 
 
 @pytest.mark.anyio
@@ -152,15 +154,44 @@ async def test_drain_queue_keeps_batch_on_repeated_failure(tmp_path: Path) -> No
 # --- Phase 0 dormancy + Phase 3 service assembly --------------------------------
 
 
-def test_community_upload_dormant_by_default() -> None:
-    assert community_upload_configured(gate_url="", ingestion_token="", enabled=False) is False
+def test_community_upload_off_when_disabled_or_no_gate() -> None:
+    assert community_upload_configured(gate_url="", enabled=False) is False
+    assert community_upload_configured(gate_url="https://g", enabled=False) is False
+    assert community_upload_configured(gate_url="", enabled=True) is False
 
 
-def test_community_upload_requires_enabled_and_gate_and_token() -> None:
-    assert community_upload_configured(gate_url="https://g", ingestion_token="t", enabled=False) is False
-    assert community_upload_configured(gate_url="", ingestion_token="t", enabled=True) is False
-    assert community_upload_configured(gate_url="https://g", ingestion_token="", enabled=True) is False
-    assert community_upload_configured(gate_url="https://g", ingestion_token="t", enabled=True) is True
+def test_community_upload_active_with_enabled_and_gate() -> None:
+    assert community_upload_configured(gate_url="https://g", enabled=True) is True
+
+
+def test_backend_config_ships_community_catalog_on_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Zero-config: the stock build ships the whole community catalog ON. Write
+    # path (baked gate URL + flag, NO token) and read path (baked manifest +
+    # signing key) are all active out of the box. Clear the neutralized test env
+    # so we read the real shipped defaults.
+    for var in (
+        "STUDIO_COMMUNITY_UPLOAD_ENABLED",
+        "STUDIO_COMMUNITY_GATE_URL",
+        "STUDIO_COMMUNITY_CATALOG_SIGNING_PUBKEY",
+        "STUDIO_COMMUNITY_CATALOG_MANIFEST_URL",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    clear_backend_caches()
+    cfg = BackendConfig()
+    assert cfg.community_upload_enabled is True
+    assert cfg.community_gate_url.startswith("https://")
+    assert cfg.community_catalog_manifest_url.startswith("https://")
+    assert len(cfg.community_catalog_signing_pubkey) == 64
+    # The API is clean/open — there is no ingestion-token field at all.
+    assert not hasattr(cfg, "community_ingestion_token")
+    assert (
+        community_upload_configured(
+            gate_url=cfg.community_gate_url, enabled=cfg.community_upload_enabled
+        )
+        is True
+    )
 
 
 def _credentials_with_openai() -> LLMCredentialsFile:

@@ -289,7 +289,7 @@ codex 复审确认 G1-G6 方向对,补强为"通用 app 可长期消费的协议
 |---|---|---|---|---|
 | `[F-v3-subgraph-schema-unknown-field]` | 编译期 | SUBGRAPH 未知字段 | 删除字段 | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
 | `[F-v3-subgraph-name-invalid]` | 编译期 | `name` 非法 | 修正命名 | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态) |
-| `[F-v3-subgraph-path-invalid]` | 编译期 | `path` 为空、越界、非目录或缺 `GRAPH.md` | 选择含 `GRAPH.md` 的 child graph folder，并写相对 skill root 的路径 | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威) |
+| `[F-v3-subgraph-target-skill-invalid]` | 编译期 | subgraph target path 不可解析、越界、非目录或缺 `GRAPH.md` | 重连到 skill root 内含 `GRAPH.md` 的 child graph folder | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威) |
 | `[F-v3-subgraph-io-schema-invalid]` | 编译期 | Subgraph IO schema 非法 | 修正 object schema | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威) |
 | `[F-v3-subgraph-io-mismatch]` | 编译期 | 父子 IO 字段集合不一致 | 对齐父 phase 和子 GRAPH IO | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威) |
 | `[F-v3-subgraph-io-schema-incompatible]` | 编译期 | 同名字段 schema 不兼容 | 对齐字段 schema | [SUBGRAPH](../02-skill-syntax/mvp1-alignment.md#21-子图-path-引用契约mvp1-权威) |
@@ -347,6 +347,9 @@ codex 复审确认 G1-G6 方向对,补强为"通用 app 可长期消费的协议
 | 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
 |---|---|---|---|---|
 | `[F-v3-resolver-path-invalid]` | 编译期 | subgraph path 非法或越界 | 修正 `path`，使其指向 skill root 内含 `GRAPH.md` 的目录 | [Resolver](../../02-mechanism/02-resolver/mvp1-alignment.md#3-接口契约) |
+| `[F-v3-resolver-skill-id-invalid]` | 编译期 | resolver skill id 非法 | 使用合法 skill id | [Resolver](../../02-mechanism/02-resolver/mvp1-alignment.md#3-接口契约) |
+| `[F-v3-skill-id-ambiguous]` | 编译期 / 装配期 | resolver 命中多个 skill root | 收窄 search paths 或移除重复 skill root | [Resolver](../../02-mechanism/02-resolver/mvp1-alignment.md#3-接口契约) |
+| `[F-v3-skill-not-registered]` | 编译期 / 装配期 | resolver 找不到目标 skill | 注册或重连目标 skill root | [Resolver](../../02-mechanism/02-resolver/mvp1-alignment.md#3-接口契约) |
 | `[F-v3-resolver-interface-invalid]` | 编译期 | resolver 暴露非决议接口 | 实现单方法 `resolve_skill` | [Resolver](../../02-mechanism/02-resolver/mvp1-alignment.md#3-接口契约) |
 | `[F-v3-resolver-missing]` | 运行期 | 需要 resolver 但未注入 | 调用入口传入 resolver | [Resolver](../../02-mechanism/02-resolver/mvp1-alignment.md#3-接口契约) |
 

@@ -963,6 +963,13 @@ describe('SettingsPageContent (api_keys)', () => {
                 new_records_count: 4,
                 last_error: null,
               },
+              community_catalog: {
+                synced: true,
+                generated_at: '2026-06-20T23:00:00+00:00',
+                protocol_major: 1,
+                record_count: 0,
+                entries: [],
+              },
               sharing: {
                 mode: 'local_export_only',
                 auto_upload_enabled: false,
@@ -981,6 +988,64 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).toContain('Local only')
     expect(html).toContain('MVP1 does not auto-upload')
     expect(html).not.toContain('Pull Request')
+  })
+
+  it('surfaces verified community catalog routes as a separate advisory layer', () => {
+    const html = renderToStaticMarkup(
+      <SettingsPageContent
+        {...baseViewProps({
+          credentials: {
+            ...credentials,
+            probe_catalog: {
+              local_evidence_records_count: 1,
+              local_verified_records_count: 1,
+              local_failed_records_count: 0,
+              local_route_candidates_count: 0,
+              remote_catalog_source: null,
+              community_catalog: {
+                synced: true,
+                generated_at: '2026-06-26T14:40:44Z',
+                protocol_major: 1,
+                record_count: 2,
+                entries: [
+                  {
+                    public_base_url: 'https://api.deepseek.com',
+                    model_id: 'deepseek-v4-pro',
+                    capability_family: 'language_reasoning',
+                    method_id: 'deepseek_chat_completions',
+                    observed_at: '2026-06-26T09:33:40+00:00',
+                  },
+                  {
+                    public_base_url: 'https://api.moonshot.cn/v1',
+                    model_id: 'kimi-k2',
+                    capability_family: 'language_reasoning',
+                    method_id: 'openai_chat_completions',
+                    observed_at: '2026-06-25T08:00:00+00:00',
+                  },
+                ],
+              },
+              sharing: {
+                mode: 'local_export_only',
+                auto_upload_enabled: false,
+                message:
+                  'Local probe evidence is recorded on this machine. MVP1 does not auto-upload community catalog evidence.',
+              },
+            },
+          },
+        })}
+      />,
+    )
+
+    // Verified read path drives the synced badge (not the legacy remote source).
+    expect(html).toContain('Remote catalog synced')
+    expect(html).toContain('2 community-verified')
+    // Advisory layer: community-observed, explicitly not the user's own routes.
+    expect(html).toContain('Community-verified routes')
+    expect(html).toContain('advisory')
+    expect(html).toContain('https://api.deepseek.com')
+    expect(html).toContain('deepseek-v4-pro')
+    expect(html).toContain('https://api.moonshot.cn/v1')
+    expect(html).toContain('kimi-k2')
   })
 
   it('renders API key inputs as explicit masked text values (never native password) with password-manager ignore attributes', () => {

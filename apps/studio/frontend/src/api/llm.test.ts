@@ -15,6 +15,7 @@ import {
   getRoleTestJob,
   startRoleTestJob,
   syncRemoteModelCatalog,
+  syncVerifiedCommunityCatalog,
   testRole,
   testProviderModels,
   testProvider,
@@ -217,6 +218,32 @@ describe('API Keys v4 registry adapter', () => {
     expect(seen).toEqual(['post /llm/catalog/sync'])
   })
 
+  it('syncs the verified community catalog through the verified read-path endpoint', async () => {
+    const seen: string[] = []
+    api.defaults.adapter = adapter((config) => {
+      seen.push(`${config.method} ${config.url}`)
+      return {
+        status: 'success',
+        verified_sync_enabled: true,
+        sync_status: 'updated',
+        record_count: 5,
+        manifest_etag: 'W/"catalog-1"',
+        protocol_major: 1,
+      }
+    })
+
+    await expect(syncVerifiedCommunityCatalog()).resolves.toEqual({
+      status: 'success',
+      verified_sync_enabled: true,
+      sync_status: 'updated',
+      record_count: 5,
+      manifest_etag: 'W/"catalog-1"',
+      protocol_major: 1,
+    })
+
+    expect(seen).toEqual(['post /llm/catalog/sync-verified'])
+  })
+
   it('projects local probe catalog evidence status from the registry snapshot', async () => {
     api.defaults.adapter = adapter(() => registry({
       probe_catalog: {
@@ -234,6 +261,21 @@ describe('API Keys v4 registry adapter', () => {
           evidence_records_count: 11,
           new_records_count: 4,
           last_error: null,
+        },
+        community_catalog: {
+          synced: true,
+          generated_at: '2026-06-26T14:40:44Z',
+          protocol_major: 1,
+          record_count: 1,
+          entries: [
+            {
+              public_base_url: 'https://api.deepseek.com',
+              model_id: 'deepseek-v4-pro',
+              capability_family: 'language_reasoning',
+              method_id: 'deepseek_chat_completions',
+              observed_at: '2026-06-26T09:33:40+00:00',
+            },
+          ],
         },
         sharing: {
           mode: 'local_export_only',
@@ -260,6 +302,21 @@ describe('API Keys v4 registry adapter', () => {
         evidence_records_count: 11,
         new_records_count: 4,
         last_error: null,
+      },
+      community_catalog: {
+        synced: true,
+        generated_at: '2026-06-26T14:40:44Z',
+        protocol_major: 1,
+        record_count: 1,
+        entries: [
+          {
+            public_base_url: 'https://api.deepseek.com',
+            model_id: 'deepseek-v4-pro',
+            capability_family: 'language_reasoning',
+            method_id: 'deepseek_chat_completions',
+            observed_at: '2026-06-26T09:33:40+00:00',
+          },
+        ],
       },
       sharing: {
         mode: 'local_export_only',

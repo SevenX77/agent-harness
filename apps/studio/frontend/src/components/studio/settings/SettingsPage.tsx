@@ -5,7 +5,7 @@ import { buildPutPayload, useDebouncedCredentialsSave } from "@/hooks/useDebounc
 import { useDebouncedRolesSave } from "@/hooks/useDebouncedRolesSave"
 import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-error-messages"
 import { useStudioEventStream } from "@/hooks/useStudioEventStream"
-import { deleteModelBundle, deleteRole, getCredentials, getModelGroups, getProviderModels, getRoles, syncRemoteModelCatalog, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
+import { deleteModelBundle, deleteRole, getCredentials, getModelGroups, getProviderModels, getRoles, syncVerifiedCommunityCatalog, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
 import { draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, providerCachedTestResult, providerDraftForAction, providerEndpointDraftsForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
@@ -573,12 +573,12 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       return
     }
     remoteModelCatalogSyncedRef.current = true
-    syncRemoteModelCatalog()
+    syncVerifiedCommunityCatalog()
       .then(() => {
         refetchCredentialsFromEvent()
       })
       .catch((error) => {
-        console.warn("phase=settings-catalog action=remote-model-catalog-sync-failed error=%o", error)
+        console.warn("phase=settings-catalog action=verified-community-catalog-sync-failed error=%o", error)
       })
   }, [
     appSettings.isLoading,

@@ -196,8 +196,14 @@ export async function serializeSkillGraph(
   phases: SerializableGraphPhaseRef[],
   expectedHash?: string | null,
 ): Promise<SerializeGraphRes> {
+  const topologyPhases = phases.map(({ id, src, depends_on, output }) => ({
+    id,
+    src,
+    depends_on,
+    ...(output === true ? { output: true } : {}),
+  }))
   const response = await api.post<SerializeGraphRes>(`/skills/${skillId}/graph/serialize`, {
-    phases,
+    phases: topologyPhases,
     expected_hash: expectedHash ?? null,
   })
   return response.data

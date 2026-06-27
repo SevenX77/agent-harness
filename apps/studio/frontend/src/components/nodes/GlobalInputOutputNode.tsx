@@ -1,12 +1,9 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
-import type { IoDeclaration, IoInput, IoOutput } from '../../api/types'
+import type { IoInput, IoOutput } from '../../api/types'
 import { Badge } from '../ui/badge'
+import type { GlobalNodeData } from './types'
 
-export interface GlobalNodeData extends Record<string, unknown> {
-  type: 'global-input' | 'global-output'
-  schema: IoDeclaration
-  skillId?: string
-}
+export type { GlobalNodeData } from './types'
 
 type GlobalNode = Node<GlobalNodeData>
 type SchemaField = Pick<IoInput | IoOutput, 'name' | 'type'>
@@ -27,11 +24,9 @@ export function GlobalInputOutputNode({ data, selected }: NodeProps<GlobalNode>)
       ].join(' ')}
     >
       {isInput ? (
-        <>
-          <Handle type="source" position={Position.Bottom} className="!size-2.5 !border-background !bg-primary opacity-60 group-hover:opacity-100 transition-opacity duration-200" />
-        </>
+        <Handle type="source" position={Position.Bottom} className="!size-2.5 !border-background !bg-primary opacity-60 transition-opacity duration-200 group-hover:opacity-100" />
       ) : (
-        <Handle type="target" position={Position.Top} className="!size-2.5 !border-background !bg-primary opacity-60 group-hover:opacity-100 transition-opacity duration-200" />
+        <Handle type="target" position={Position.Top} className="!size-2.5 !border-background !bg-primary opacity-60 transition-opacity duration-200 group-hover:opacity-100" />
       )}
 
       <div className="flex items-start justify-between gap-3">

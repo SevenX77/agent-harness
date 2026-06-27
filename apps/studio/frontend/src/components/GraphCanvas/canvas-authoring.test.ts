@@ -1,12 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import type { SkillDetail } from '@/api/types'
+import { INPUT_ID, OUTPUT_ID } from '@/components/nodes'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 import {
   connectPhaseRefs,
   createPhaseDraft,
+  defaultPhaseId,
   disconnectPhaseRefs,
+  isSafePhaseId,
+  phaseDirectoryPath,
+  phaseDirectoryIdsFromSkillDetail,
   reconnectPhaseRefs,
   phaseRefsFromSkillDetail,
+  phaseNameError,
+  renamePhaseRefs,
+  removePhaseRefs,
+  orphanPhaseDirectoryIds,
   checkSequentialOverwrites,
   addSequentialOverwriteField,
   planEdgeReconnect,
@@ -28,6 +37,42 @@ describe('canvas authoring helpers', () => {
     expect(refs).toEqual([
       { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'skill' },
       { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'], mode: 'logic' },
+    ])
+  })
+
+  it('keeps topology dependencies literal instead of rewriting graph-entry sentinels', () => {
+    const refs = phaseRefsFromSkillDetail(skillDetail({
+      phases: [
+        { id: 'segmentation', src: 'phases/segmentation/SKILL.md', depends_on: ['input'] },
+        { id: 'analysis', src: 'phases/analysis/LOGIC.md', depends_on: ['segmentation'] },
+      ],
+      graph_topology: [
+        { id: 'segmentation', src: 'phases/segmentation/SKILL.md', depends_on: ['input'], mode: 'skill' },
+        { id: 'analysis', src: 'phases/analysis/LOGIC.md', depends_on: ['segmentation'], mode: 'logic' },
+      ],
+    }))
+
+    expect(refs).toEqual([
+      { id: 'segmentation', src: 'phases/segmentation/SKILL.md', depends_on: ['input'], mode: 'skill' },
+      { id: 'analysis', src: 'phases/analysis/LOGIC.md', depends_on: ['segmentation'], mode: 'logic' },
+    ])
+  })
+
+  it('preserves explicit output markers from topology rows', () => {
+    const refs = phaseRefsFromSkillDetail(skillDetail({
+      phases: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+      ],
+      graph_topology: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'skill' },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'], mode: 'logic', output: true },
+      ],
+    }))
+
+    expect(refs).toEqual([
+      { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'skill' },
+      { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'], mode: 'logic', output: true },
     ])
   })
 
@@ -64,31 +109,51 @@ describe('canvas authoring helpers', () => {
       expect(content).not.toContain('exit_contract')
       expect(content).not.toContain('python_callable')
       expect(content).not.toContain('target_skill')
+      expect(content).not.toContain('depends_on')
+      expect(content).not.toContain('sub_skill_ref')
     }
 
-    // LOGIC.md: io slices + actions registry + validator; body <action>. No mode.
+    // New canvas nodes are topologically clean: no dependencies and no output
+    // marker are invented during creation.
+    for (const draft of [logic, skill, subgraph]) {
+      expect(draft.phaseRef.depends_on).toEqual([])
+      expect(draft.phaseRef.output).toBeUndefined()
+    }
+
+    // But the source files should still use the MVP1 phase skeleton so users
+    // edit real fields instead of starting from an under-shaped stub.
     expect(logic.fileContent).toContain('name: logic')
     expect(logic.fileContent).toContain('io:')
-    expect(logic.fileContent).toContain('actions: [logic_action]')
-    expect(logic.fileContent).toContain('validator: false')
-    expect(logic.fileContent).toContain('<action>logic_action</action>')
+    expect(logic.fileContent).toContain('inputs:')
+    expect(logic.fileContent).toContain('outputs:')
+    expect(logic.fileContent).toContain('actions:')
 
-    // Agent SKILL.md: llm_role + tools + io + validator; body role/goal/step/protocol.
     expect(skill.fileContent).toContain('name: agent')
-    expect(skill.fileContent).toContain('llm_role: analyst')
-    expect(skill.fileContent).toContain('tools: []')
     expect(skill.fileContent).toContain('io:')
-    expect(skill.fileContent).toContain('validator: false')
+    expect(skill.fileContent).toContain('inputs:')
+    expect(skill.fileContent).toContain('outputs:')
     expect(skill.fileContent).toContain('<role>')
     expect(skill.fileContent).toContain('<goal>')
-    expect(skill.fileContent).toContain('<step id="S1"')
-    expect(skill.fileContent).toContain('<protocol id="P1">')
 
-    // SUBGRAPH.md: relative path placeholder + io + validator. Uses path, not target_skill.
     expect(subgraph.fileContent).toContain('name: subgraph')
-    expect(subgraph.fileContent).toContain('path: subgraph/child_skill')
+    expect(subgraph.fileContent).toContain('path:')
     expect(subgraph.fileContent).toContain('io:')
-    expect(subgraph.fileContent).toContain('validator: false')
+    expect(subgraph.fileContent).toContain('inputs:')
+    expect(subgraph.fileContent).toContain('outputs:')
+  })
+
+  it('creates a phase draft with a submitted safe node name', () => {
+    const detail = skillDetail({
+      phases: [
+        { id: 'logic', src: 'phases/logic/LOGIC.md', depends_on: [] },
+      ],
+    })
+
+    expect(createPhaseDraft(detail, 'logic', [], 'summarize_events')).toMatchObject({
+      phaseId: 'summarize_events',
+      filePath: 'phases/summarize_events/LOGIC.md',
+      phaseRef: { id: 'summarize_events', src: 'phases/summarize_events', depends_on: [], mode: 'logic' },
+    })
   })
 
   it('appends a numeric suffix when the readable phase id already exists', () => {
@@ -103,6 +168,62 @@ describe('canvas authoring helpers', () => {
       phaseId: 'logic-3',
       filePath: 'phases/logic-3/LOGIC.md',
     })
+  })
+
+  it('reserves root phase directories that exist on disk even when GRAPH.md no longer lists them', () => {
+    const detail = skillDetail({
+      phases: [],
+      files: {
+        'GRAPH.md': 'graph before\n',
+        'phases/logic/LOGIC.md': 'stale logic before\n',
+        'phases/logic-2/LOGIC.md': 'stale logic 2 before\n',
+        'subgraph/child/phases/logic/LOGIC.md': 'child skill phase is not a root phase\n',
+      },
+    })
+
+    expect(phaseDirectoryIdsFromSkillDetail(detail)).toEqual(['logic', 'logic-2'])
+    expect(defaultPhaseId(detail, 'logic')).toBe('logic-3')
+    expect(createPhaseDraft(detail, 'logic')).toMatchObject({
+      phaseId: 'logic-3',
+      filePath: 'phases/logic-3/LOGIC.md',
+      phaseRef: { id: 'logic-3', src: 'phases/logic-3', depends_on: [], mode: 'logic' },
+    })
+  })
+
+  it('validates submitted phase names against both GRAPH.md and root phase directories', () => {
+    const detail = skillDetail({
+      phases: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+      ],
+      files: {
+        'GRAPH.md': 'graph before\n',
+        'phases/stale/LOGIC.md': 'stale before\n',
+      },
+    })
+
+    expect(phaseNameError('', detail)).toBe('Phase name is required.')
+    expect(phaseNameError('bad name', detail)).toContain('Phase names must start')
+    expect(phaseNameError('draft', detail)).toBe('A phase named draft already exists.')
+    expect(phaseNameError('stale', detail)).toBe('A phase named stale already exists.')
+    expect(phaseNameError('next_phase', detail)).toBeNull()
+  })
+
+  it('finds root phase directories that are absent from the next GRAPH.md phase list', () => {
+    const detail = skillDetail({
+      phases: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+      ],
+      files: {
+        'GRAPH.md': 'graph before\n',
+        'phases/draft/SKILL.md': 'draft before\n',
+        'phases/stale/LOGIC.md': 'stale before\n',
+        'subgraph/child/phases/child_stale/LOGIC.md': 'child phase before\n',
+      },
+    })
+
+    expect(orphanPhaseDirectoryIds(detail, [
+      { id: 'draft', src: 'phases/draft', depends_on: [], mode: 'skill' },
+    ])).toEqual(['stale'])
   })
 
   it('adds source as a dependency of the target phase', () => {
@@ -122,7 +243,37 @@ describe('canvas authoring helpers', () => {
     expect(result.phases.find((phase) => phase.id === 'review')?.depends_on).toEqual(['draft'])
   })
 
-  it('rejects self dependencies, duplicate dependencies, and global nodes', () => {
+  it('connects graph input to a phase by writing depends_on input', () => {
+    const result = connectPhaseRefs(skillDetail({
+      phases: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+      ],
+      graph_topology: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'skill' },
+      ],
+    }), INPUT_ID, 'draft')
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.phases.find((phase) => phase.id === 'draft')?.depends_on).toEqual(['input'])
+  })
+
+  it('connects a phase to graph output by writing the explicit output marker', () => {
+    const result = connectPhaseRefs(skillDetail({
+      phases: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+      ],
+      graph_topology: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'skill' },
+      ],
+    }), 'draft', OUTPUT_ID)
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.phases.find((phase) => phase.id === 'draft')?.output).toBe(true)
+  })
+
+  it('rejects self dependencies, duplicate dependencies, and unknown phase ids', () => {
     const detail = skillDetail({
       phases: [
         { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
@@ -132,8 +283,8 @@ describe('canvas authoring helpers', () => {
 
     expect(connectPhaseRefs(detail, 'draft', 'draft')).toMatchObject({ ok: false, reason: 'self-dependency' })
     expect(connectPhaseRefs(detail, 'draft', 'review')).toMatchObject({ ok: false, reason: 'duplicate-dependency' })
-    expect(connectPhaseRefs(detail, '__global_input__', 'review')).toMatchObject({ ok: false, reason: 'global-node' })
-    expect(connectPhaseRefs(detail, 'draft', '__global_output__')).toMatchObject({ ok: false, reason: 'global-node' })
+    expect(connectPhaseRefs(detail, 'missing_phase', 'review')).toMatchObject({ ok: false, reason: 'unknown-phase' })
+    expect(connectPhaseRefs(detail, 'draft', 'missing_phase')).toMatchObject({ ok: false, reason: 'unknown-phase' })
   })
 
   it('removes source from the target dependency list when disconnecting phase refs', () => {
@@ -150,7 +301,80 @@ describe('canvas authoring helpers', () => {
     expect(result.phases.find((phase) => phase.id === 'review')?.depends_on).toEqual(['research'])
   })
 
-  it('rejects disconnecting global nodes and missing dependencies', () => {
+  it('disconnects graph input and graph output boundary markers', () => {
+    const detail = skillDetail({
+      phases: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: ['input'] },
+      ],
+      graph_topology: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: ['input'], mode: 'skill', output: true },
+      ],
+    })
+
+    const withoutInput = disconnectPhaseRefs(detail, INPUT_ID, 'draft')
+    expect(withoutInput.ok).toBe(true)
+    if (withoutInput.ok) {
+      expect(withoutInput.phases.find((phase) => phase.id === 'draft')?.depends_on).toEqual([])
+      expect(withoutInput.phases.find((phase) => phase.id === 'draft')?.output).toBe(true)
+    }
+
+    const withoutOutput = disconnectPhaseRefs(detail, 'draft', OUTPUT_ID)
+    expect(withoutOutput.ok).toBe(true)
+    if (withoutOutput.ok) {
+      expect(withoutOutput.phases.find((phase) => phase.id === 'draft')?.depends_on).toEqual(['input'])
+      expect(withoutOutput.phases.find((phase) => phase.id === 'draft')?.output).toBeUndefined()
+    }
+  })
+
+  it('removes a phase and clears incoming dependencies when deleting phase refs', () => {
+    const result = removePhaseRefs(skillDetail({
+      phases: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+        { id: 'publish', src: 'phases/publish/LOGIC.md', depends_on: ['review', 'draft'] },
+      ],
+    }), 'draft')
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.phases.map((phase) => phase.id)).toEqual(['review', 'publish'])
+    expect(result.phases.find((phase) => phase.id === 'review')?.depends_on).toEqual([])
+    expect(result.phases.find((phase) => phase.id === 'publish')?.depends_on).toEqual(['review'])
+    expect(phaseDirectoryPath('draft')).toBe('phases/draft')
+  })
+
+  it('renames a phase id, folder src, and every dependent reference together', () => {
+    const result = renamePhaseRefs(skillDetail({
+      phases: [
+        { id: 'extract', src: 'phases/extract/SUBGRAPH.md', depends_on: [] },
+        { id: 'stitch', src: 'phases/stitch/SKILL.md', depends_on: ['extract'] },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['stitch', 'extract'] },
+      ],
+    }), 'extract', 'event_extraction')
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.phases.map((phase) => phase.id)).toEqual(['event_extraction', 'stitch', 'review'])
+    expect(result.phases[0]).toMatchObject({ src: 'phases/event_extraction' })
+    expect(result.phases.find((phase) => phase.id === 'stitch')?.depends_on).toEqual(['event_extraction'])
+    expect(result.phases.find((phase) => phase.id === 'review')?.depends_on).toEqual(['stitch', 'event_extraction'])
+  })
+
+  it('rejects duplicate or unsafe phase rename targets', () => {
+    const detail = skillDetail({
+      phases: [
+        { id: 'extract', src: 'phases/extract/SUBGRAPH.md', depends_on: [] },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['extract'] },
+      ],
+    })
+
+    expect(isSafePhaseId('event_extraction')).toBe(true)
+    expect(isSafePhaseId('event extraction')).toBe(false)
+    expect(renamePhaseRefs(detail, 'extract', 'review')).toMatchObject({ ok: false, reason: 'duplicate-phase' })
+    expect(renamePhaseRefs(detail, 'extract', '../escape')).toMatchObject({ ok: false, reason: 'invalid-phase' })
+  })
+
+  it('rejects disconnecting unknown phase ids and missing dependencies', () => {
     const detail = skillDetail({
       phases: [
         { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
@@ -158,7 +382,7 @@ describe('canvas authoring helpers', () => {
       ],
     })
 
-    expect(disconnectPhaseRefs(detail, '__global_input__', 'review')).toMatchObject({ ok: false, reason: 'global-node' })
+    expect(disconnectPhaseRefs(detail, 'missing_phase', 'review')).toMatchObject({ ok: false, reason: 'unknown-phase' })
     expect(disconnectPhaseRefs(detail, 'review', 'draft')).toMatchObject({ ok: false, reason: 'missing-dependency' })
   })
 
@@ -252,16 +476,11 @@ allow_sequential_overwrite:
     })
   })
 
-  it('rejects reconnecting onto global nodes, onto itself, or back to the same endpoints', () => {
+  it('rejects reconnecting onto itself, back to the same endpoints, or with missing endpoints', () => {
     expect(planEdgeReconnect(
+      { source: null, target: 'review' },
       { source: 'draft', target: 'review' },
-      { source: 'draft', target: '__global_output__' },
-    )).toMatchObject({ ok: false, reason: 'global-node' })
-
-    expect(planEdgeReconnect(
-      { source: '__global_input__', target: 'review' },
-      { source: 'draft', target: 'review' },
-    )).toMatchObject({ ok: false, reason: 'global-node' })
+    )).toMatchObject({ ok: false, reason: 'invalid-endpoint' })
 
     expect(planEdgeReconnect(
       { source: 'draft', target: 'review' },
@@ -321,7 +540,7 @@ allow_sequential_overwrite:
     expect(result.phases.find((phase) => phase.id === 'publish')?.depends_on).toEqual(['review'])
   })
 
-  it('rejects reconnecting global nodes, self-dependencies, no-ops, missing old deps, and duplicates', () => {
+  it('rejects reconnecting unknown phase ids, self-dependencies, no-ops, missing old deps, and duplicates', () => {
     const detail = skillDetail({
       phases: [
         { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
@@ -330,8 +549,8 @@ allow_sequential_overwrite:
       ],
     })
 
-    expect(reconnectPhaseRefs(detail, { source: 'draft', target: 'review' }, { source: 'draft', target: '__global_output__' }))
-      .toMatchObject({ ok: false, reason: 'global-node' })
+    expect(reconnectPhaseRefs(detail, { source: 'draft', target: 'review' }, { source: 'draft', target: 'missing_phase' }))
+      .toMatchObject({ ok: false, reason: 'unknown-phase' })
     expect(reconnectPhaseRefs(detail, { source: 'draft', target: 'review' }, { source: 'review', target: 'review' }))
       .toMatchObject({ ok: false, reason: 'self-dependency' })
     expect(reconnectPhaseRefs(detail, { source: 'draft', target: 'review' }, { source: 'draft', target: 'review' }))
@@ -361,6 +580,7 @@ mode: logic
 function skillDetail(overrides: {
   phases?: Array<{ id: string; src: string; depends_on: string[] }>
   graph_topology?: SkillDetail['graph_topology']
+  files?: Record<string, string>
 } = {}): SkillDetail {
   const phases = overrides.phases ?? []
   const graph_topology = overrides.graph_topology ?? phases.map((p) => ({
@@ -385,7 +605,7 @@ function skillDetail(overrides: {
     node_schema_v21: {},
     io_schema: {},
     file_paths: {},
-    files: {},
+    files: overrides.files ?? {},
     manifest_errors: null,
     has_golden: false,
     latest_run_metadata: null,

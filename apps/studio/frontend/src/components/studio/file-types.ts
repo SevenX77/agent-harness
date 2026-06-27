@@ -8,3 +8,16 @@ export interface FileMeta {
   title?: string
   saveEnabled?: boolean
 }
+
+export interface FileOpenRequest {
+  path: string
+  language?: string
+  content?: string
+  hash?: string | null
+  skillId?: string | null
+  workspaceRoot?: string | null
+  title?: string
+  saveEnabled?: boolean
+}
+
+export type FileOpenInput = FileMeta | FileOpenRequest | string

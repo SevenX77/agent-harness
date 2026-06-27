@@ -51,7 +51,6 @@ def serialize_graph_topology_from_markdown(
     """Serialize a canvas topology update using the current GRAPH.md frontmatter."""
 
     frontmatter = _graph_frontmatter_from_markdown(original_md)
-    _validate_graph_phase_refs(phases)
     description_raw = frontmatter.get("description")
     return serialize_graph_topology(
         name=str(frontmatter.get("name") or skill_id),
@@ -76,13 +75,11 @@ def serialize_graph_topology(
     ``list[str]`` and therefore cannot carry edges), this takes the full phase
     refs so the body ``<phase depends_on=...>`` elements reflect the REAL graph.
 
-    - ``depends_on``: comma-joined; a phase with no deps renders ``depends_on="input"``
-      (the reserved entry sentinel — the loader requires a non-empty ``depends_on``).
-    - ``output``: derived as the leaf phases (ids that appear in no other phase's
-      ``depends_on``), satisfying the FROZEN rules "at least one output" and
-      "an output phase has no downstream edges".
+    - ``depends_on``: comma-joined when present; a phase with no deps renders as a
+      bare ``<phase>id</phase>`` canvas node.
+    - ``output``: not synthesized by the canvas serializer. The runtime derives
+      terminal phases from leaves when no explicit output markers are present.
     """
-    downstream = {dep for phase in phases for dep in phase.depends_on}
     lines = [
         "---",
         'schema_version: "v0.3.0"',
@@ -97,9 +94,16 @@ def serialize_graph_topology(
         lines.append(f"  - {phase.id}")
     lines.append("---")
     for phase in phases:
-        depends_on = ", ".join(phase.depends_on) if phase.depends_on else "input"
-        output = " output" if phase.id not in downstream else ""
-        lines.append(f'<phase depends_on="{depends_on}"{output}>{phase.id}</phase>')
+        attrs: list[str] = []
+        if phase.depends_on:
+            depends_on = ", ".join(phase.depends_on)
+            attrs.append(f'depends_on="{depends_on}"')
+        if phase.output:
+            attrs.append("output")
+        if attrs:
+            lines.append(f"<phase {' '.join(attrs)}>{phase.id}</phase>")
+        else:
+            lines.append(f"<phase>{phase.id}</phase>")
     rendered = "\n".join(lines) + "\n"
     if original_md is None:
         return rendered
@@ -130,55 +134,6 @@ def _io_schema_from_frontmatter(io_raw: object) -> PhaseIOSchema:
     )
 
 
-def _validate_graph_phase_refs(phases: Sequence[GraphPhaseRef]) -> None:
-    phase_ids = {phase.id for phase in phases}
-    for phase in phases:
-        for dep in phase.depends_on:
-            if dep not in phase_ids:
-                raise GraphTopologySerializationError(
-                    code="serializer_orphan",
-                    message=f"phase {phase.id!r} depends_on unknown phase {dep!r}",
-                    detail={"phase_id": phase.id, "dependency": dep},
-                )
-            if dep == phase.id:
-                raise GraphTopologySerializationError(
-                    code="serializer_cycle",
-                    message=f"phase {phase.id!r} cannot depend on itself",
-                    detail={"phase_id": phase.id},
-                )
-    _validate_graph_phase_refs_acyclic(phases)
-
-
-def _validate_graph_phase_refs_acyclic(phases: Sequence[GraphPhaseRef]) -> None:
-    adjacency: dict[str, list[str]] = {phase.id: [] for phase in phases}
-    for phase in phases:
-        for dep in phase.depends_on:
-            adjacency[dep].append(phase.id)
-    state: dict[str, str] = {}
-    stack: list[str] = []
-
-    def visit(node: str) -> None:
-        state[node] = "gray"
-        stack.append(node)
-        for nxt in adjacency[node]:
-            if state.get(nxt) == "gray":
-                start = stack.index(nxt)
-                cycle = stack[start:] + [nxt]
-                raise GraphTopologySerializationError(
-                    code="serializer_cycle",
-                    message="cycle detected: " + " -> ".join(cycle),
-                    detail={"cycle": cycle},
-                )
-            if state.get(nxt) is None:
-                visit(nxt)
-        stack.pop()
-        state[node] = "black"
-
-    for node in adjacency:
-        if state.get(node) is None:
-            visit(node)
-
-
 def _render_fresh_graph(manifest: GraphManifest) -> str:
     lines = [
         "---",
@@ -193,10 +148,8 @@ def _render_fresh_graph(manifest: GraphManifest) -> str:
     for phase in manifest.phases:
         lines.append(f"  - {phase}")
     lines.append("---")
-    for index, phase in enumerate(manifest.phases):
-        depends_on = "input" if index == 0 else manifest.phases[index - 1]
-        output = " output" if index == len(manifest.phases) - 1 else ""
-        lines.append(f'<phase depends_on="{depends_on}"{output}>{phase}</phase>')
+    for phase in manifest.phases:
+        lines.append(f"<phase>{phase}</phase>")
     return "\n".join(lines) + "\n"
 
 

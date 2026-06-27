@@ -1,5 +1,5 @@
 import type { Node } from '@xyflow/react'
-import type { CompileError, IoDeclaration } from '@/api/types'
+import type { CompileError, IoDeclaration, SkillDetail } from '@/api/types'
 import type { GoldenNodeState } from '@/components/studio/node-golden'
 
 export type SkillNodeStatus = 'idle' | 'running' | 'success' | 'error' | 'paused' | 'breakpoint'
@@ -52,6 +52,8 @@ export interface SkillGraphNodeData extends Record<string, unknown> {
    */
   isDirtyDownstream?: boolean
   dependsOn: string[]
+  /** True only when GRAPH.md marks this phase ref with the explicit `output` flag. */
+  isOutput?: boolean
   subgraphPath?: string | null
   subagents?: SubagentRef[]
   isExpanded?: boolean
@@ -77,8 +79,10 @@ export interface SkillGraphNodeData extends Record<string, unknown> {
   onStepsSave?: (nextBody: string) => void
   activeConflict?: { nodeId: string; fieldName: string; ancestorNodeId: string }
   isConflictCancelled?: boolean
-  onAllowSequentialOverwrite?: (nodeId: string, fieldName: string) => void
-  onCancelWarning?: (nodeId: string) => void
+  /** Full detail for a path-resolved child graph node, when this node is shown from an inline/drilled subgraph. */
+  resolvedSkillDetail?: SkillDetail
+  onAllowSequentialOverwrite?: (nodeId: string, fieldName: string, ancestorNodeId: string) => void
+  onCancelSequentialOverwrite?: (nodeId: string, fieldName: string, ancestorNodeId: string) => void
 }
 
 export type SkillGraphNode = Node<SkillGraphNodeData, 'skill'>

@@ -1,5 +1,5 @@
 import yaml from 'js-yaml'
-import type { CompileError, IoDeclaration, PhaseDef, SkillDetail, SkillManifest, IoInput, IoOutput, GraphManifestV030, GraphTopologyItem } from '@/api/types'
+import type { CompileError, GraphManifestV030, GraphTopologyItem, IoDeclaration, IoInput, IoOutput, PhaseDef, SkillDetail, SkillManifest } from '@/api/types'
 import { INPUT_ID, OUTPUT_ID, type GlobalNodeData, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus, type SubagentRef } from '@/components/nodes'
 import { normalizeSubgraphPath } from '@/components/studio/subgraph-path'
 import type { GoldenNodeState } from '@/components/studio/node-golden'
@@ -267,6 +267,7 @@ export function buildNodes(
         // N5 atom #3: gray this node when it is in the resume's affected-downstream set.
         isDirtyDownstream: agentSteps.dirtyDownstreamNodeIds?.has(phase.name) ?? false,
         dependsOn: topology?.depends_on ?? normalizeDependsOn(phase.depends_on),
+        isOutput: topology?.output === true,
         subgraphPath,
         isExpanded: expandedSubgraphs.has(phase.name),
         // Every SUBGRAPH-kind node gets the expand toggle — including ones whose
@@ -366,6 +367,7 @@ export function buildNodesFromTopology(
         filePath,
         status: statusByNodeId[phaseName] ?? 'idle',
         dependsOn: topology?.depends_on ?? [],
+        isOutput: topology?.output === true,
         subgraphPath,
         isExpanded: false,
         onToggleSubgraph: undefined,

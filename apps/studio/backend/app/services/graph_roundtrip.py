@@ -25,7 +25,7 @@ def serialize_graph_topology(
 
     Shared roundtrip boundary so Studio never imports the engine serializer
     module directly. Delegates to the engine's topology-aware serializer, which
-    emits the real per-phase ``depends_on`` and leaf-derived ``output`` markers.
+    emits only the per-phase ``depends_on`` and explicit ``output`` markers.
     """
     from app.core.adapters.engine import serialize_graph_topology as sdk_serialize_graph_topology
 

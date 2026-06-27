@@ -6,25 +6,56 @@ import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 import { AssetsPanel, PropertiesPanel, subagentSkillFilePath } from './Panels'
 
 describe('PropertiesPanel', () => {
-  it('renders an empty state without a selected node', () => {
-    const html = renderToStaticMarkup(<PropertiesPanel selectedNode={null} />)
+  it('renders graph frontmatter fields without a selected node', () => {
+    const html = renderToStaticMarkup(
+      <PropertiesPanel
+        skillDetail={skillDetailWithFiles({
+          'GRAPH.md': [
+            '---',
+            'schema_version: v0.3.0',
+            'name: story-deconstruction',
+            'description: Builds story analysis.',
+            'llm_role: analyst',
+            'io:',
+            '  inputs:',
+            '    type: object',
+            '    properties: {}',
+            '  outputs:',
+            '    type: object',
+            '    properties: {}',
+            'phases:',
+            '  - setup',
+            '---',
+            '<phase>setup</phase>',
+          ].join('\n'),
+        })}
+        selectedNode={null}
+      />,
+    )
 
-    expect(html).toContain('Select a node to inspect')
+    expect(html).toContain('Graph')
+    expect(html).toContain('name')
+    expect(html).toContain('story-deconstruction')
+    expect(html).toContain('description')
+    expect(html).toContain('Builds story analysis.')
+    expect(html).toContain('llm_role')
+    expect(html).toContain('analyst')
+    expect(html).not.toContain('Select a node to inspect')
+    expect(html).not.toContain('schema_version')
+    expect(html).not.toContain('phases')
+    expect(html).not.toContain('id="graph-io"')
   })
 
-  it('renders selected phase metadata in the sidebar panel', () => {
+  it('renders selected phase editable fields in the sidebar panel', () => {
     const html = renderToStaticMarkup(
       <PropertiesPanel
         skillDetail={skillDetailWithFiles({
           'phases/setup/LOGIC.md': [
             '---',
             'name: setup',
-            'mode: logic',
+            'actions:',
+            '  - prepare',
             '---',
-            '<python_callable>',
-            'prepare',
-            '</python_callable>',
-            '',
             'Body',
           ].join('\n'),
         })}
@@ -46,14 +77,16 @@ describe('PropertiesPanel', () => {
 
     expect(html).toContain('setup')
     expect(html).toContain('LOGIC')
-    // FROZEN whitelist: a logic node edits Actions + Validator, never the
+    // FROZEN whitelist: a logic node edits actions + validator, never the
     // deprecated mode/python_callable/system_prompt fields.
-    expect(html).toContain('Actions')
+    expect(html).toContain('actions')
+    expect(html).toContain('prepare')
     expect(html).not.toContain('Python callable')
     expect(html).not.toContain('System prompt')
-    expect(html).toContain('input')
-    expect(html).toContain('prepare')
-    expect(html).toContain('phases/setup/LOGIC.md')
+    expect(html).not.toContain('>Depends On<')
+    expect(html).not.toContain('>input<')
+    expect(html).not.toContain('>File<')
+    expect(html).not.toContain('phases/setup/LOGIC.md')
   })
 
   it('renders agent frontmatter fields for skill phase files', () => {
@@ -94,11 +127,11 @@ describe('PropertiesPanel', () => {
       />,
     )
 
-    // FROZEN whitelist: an agent node edits LLM role + Tools + Subagents, never
+    // FROZEN whitelist: an agent node edits llm_role + tools + subagents, never
     // the deprecated system_prompt/exit_contract/python_callable fields.
-    expect(html).toContain('LLM role')
-    expect(html).toContain('Tools')
-    expect(html).toContain('Subagents')
+    expect(html).toContain('llm_role')
+    expect(html).toContain('tools')
+    expect(html).toContain('subagents')
     expect(html).not.toContain('System prompt')
     expect(html).not.toContain('Exit contract')
     expect(html).not.toContain('Python callable')
@@ -133,9 +166,14 @@ describe('PropertiesPanel', () => {
       />,
     )
 
-    // FROZEN whitelist: a subgraph node edits Path (absolute) + Validator, never
+    // FROZEN whitelist: a subgraph node exposes name/path/validator/iterate, never
     // the deprecated target_skill/system_prompt fields.
-    expect(html).toContain('>Path<')
+    expect(html).toContain('>name<')
+    expect(html).toContain('>path<')
+    expect(html).toContain('>validator<')
+    expect(html).toContain('>iterate<')
+    expect(html).not.toContain('id="phase-io"')
+    expect(html).toContain('aria-label="Reconnect path"')
     expect(html).not.toContain('Target skill')
     expect(html).not.toContain('System prompt')
     expect(html).not.toContain('phase-tools')
@@ -172,7 +210,7 @@ describe('PropertiesPanel', () => {
     expect(html).toContain('disabled=""')
   })
 
-  it('renders subagents in the selected phase metadata', () => {
+  it('does not render selected-node subagents as read-only metadata', () => {
     const html = renderToStaticMarkup(
       <PropertiesPanel
         skillId="demo-skill"
@@ -199,9 +237,8 @@ describe('PropertiesPanel', () => {
       />,
     )
 
-    expect(html).toContain('Subagents')
-    expect(html).toContain('echo_expert')
-    expect(html).toContain('Echoes text from a child expert skill.')
+    expect(html).not.toContain('echo_expert')
+    expect(html).not.toContain('Echoes text from a child expert skill.')
   })
 
   it('builds the onFileOpen path for subagent click navigation', () => {
@@ -258,7 +295,7 @@ describe('AssetsPanel', () => {
   it('shows no subgraphs (no hardcoded mock) when the skill has none', () => {
     const html = renderAssetsPanel({ 'phases/step1/LOGIC.md': '---\nname: step1\n---\n' })
 
-    // The panel must render gateway/skill facts only — never the old hardcoded
+    // The panel must render gateway/skill facts only - never the old hardcoded
     // intent_classifier / translator_subgraph fallback.
     expect(html).not.toContain('intent_classifier')
     expect(html).not.toContain('translator_subgraph')

@@ -46,6 +46,27 @@ def test_clean_changed_markdown_passes_without_touching_disk(
     assert _disk_graph_text(skills_dir, skill_id) == original_on_disk
 
 
+def test_changed_phase_markdown_overlays_that_phase_not_graph_md(
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, _workspaces = studio_roots
+    skill_id = "text-segmentation"
+    phase_path = skills_dir / skill_id / "phases" / "setup" / "LOGIC.md"
+    original_phase = phase_path.read_text(encoding="utf-8")
+    changed_phase = original_phase.replace("<action>prepare</action>", "<action>prepare</action>\n")
+    assert changed_phase != original_phase
+
+    result = skill_service.lint_skill_changed_markdown(
+        skill_id,
+        changed_phase,
+        file_path="phases/setup/LOGIC.md",
+    )
+
+    assert result.status == "passed"
+    assert result.errors == []
+    assert phase_path.read_text(encoding="utf-8") == original_phase
+
+
 def test_invalid_changed_markdown_fails_while_disk_stays_valid(
     studio_roots: tuple[Path, Path],
 ) -> None:
@@ -143,6 +164,40 @@ class TestLintErrorFieldAxis:
         assert lint_error.error_code == "F-v3-runtime-state-mapping-failed"
         assert lint_error.phase_name == "setup"
         assert lint_error.severity == "error"
+
+    def test_lint_error_preserves_nested_subgraph_file_from_location_message(self, tmp_path: Path) -> None:
+        skill_dir = tmp_path / "story-deconstruction-v3"
+        phase_file = (
+            skill_dir
+            / "subgraph"
+            / "event-timeline"
+            / "subgraph"
+            / "event-extraction"
+            / "phases"
+            / "review"
+            / "SKILL.md"
+        )
+        phase_file.parent.mkdir(parents=True)
+        phase_file.write_text("---\nname: review\n---\n", encoding="utf-8")
+        detail = (
+            f"{phase_file}:1 Phase 'review' sequentially overwrites field 'events_raw' "
+            "outputted by upstream phase 'aggregate'."
+        )
+        exc = GraphCompileError(
+            detail,
+            payload=make_error_payload(
+                "[F-v3-sequential-overwrite-unauthorized]",
+                detail,
+                phase_id="review",
+                source_path="phases/review/SKILL.md",
+            ),
+        )
+
+        lint_error = skill_service._lint_error_from_exception(exc, skill_dir)
+
+        assert lint_error.file == (
+            "subgraph/event-timeline/subgraph/event-extraction/phases/review/SKILL.md"
+        )
 
     def test_lint_error_degrades_to_none_when_engine_has_no_field(self) -> None:
         # An engine error WITHOUT a field axis (GRAPH.md-level) must not invent one.

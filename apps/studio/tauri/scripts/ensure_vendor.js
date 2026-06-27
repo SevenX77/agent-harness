@@ -40,6 +40,31 @@ function sitePackages(vendorDir = VENDOR_DIR) {
   return path.join(vendorDir, 'site-packages')
 }
 
+function pathEnvKey(env = process.env) {
+  return Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'PATH'
+}
+
+function localVenvBin(workspaceRoot = REPO_ROOT) {
+  return path.join(workspaceRoot, '.venv', process.platform === 'win32' ? 'Scripts' : 'bin')
+}
+
+function withLocalVenvOnPath(env = process.env, workspaceRoot = REPO_ROOT) {
+  const next = { ...env }
+  const key = pathEnvKey(next)
+  const current = next[key] ?? ''
+  const venvBin = localVenvBin(workspaceRoot)
+  if (!fs.existsSync(venvBin)) return next
+  const pathEntries = current.split(path.delimiter).filter(Boolean)
+  const alreadyPresent = pathEntries.some((entry) => {
+    if (process.platform === 'win32') return entry.toLowerCase() === venvBin.toLowerCase()
+    return entry === venvBin
+  })
+  if (!alreadyPresent) {
+    next[key] = current ? `${venvBin}${path.delimiter}${current}` : venvBin
+  }
+  return next
+}
+
 function collectPythonFiles(root) {
   if (!fs.existsSync(root)) return null
   const files = []
@@ -107,10 +132,14 @@ function canImportVendoredPackages({
 function rebuildVendor({
   python = pythonExecutable(),
   buildScript = path.join(STUDIO_DIR, 'backend', 'scripts', 'build_vendor.py'),
+  env = process.env,
+  spawn = spawnSync,
+  workspaceRoot = REPO_ROOT,
 } = {}) {
   console.log('[vendor] Python vendor closure stale or incomplete; rebuilding')
-  const result = spawnSync('python3', [buildScript, '--python', python], {
-    cwd: REPO_ROOT,
+  const result = spawn(python, [buildScript, '--python', python], {
+    cwd: workspaceRoot,
+    env: withLocalVenvOnPath(env, workspaceRoot),
     stdio: 'inherit',
   })
   if (result.status !== 0) {
@@ -148,8 +177,10 @@ if (require.main === module) {
 module.exports = {
   canImportVendoredPackages,
   ensureVendor,
+  localVenvBin,
   localPackageSourcesAreVendored,
   pythonExecutable,
   rebuildVendor,
   sitePackages,
+  withLocalVenvOnPath,
 }

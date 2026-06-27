@@ -210,12 +210,37 @@ export interface ProbeCatalogSharingStatus {
   message: string
 }
 
+/**
+ * One advisory community-verified route projected from the disposable verified
+ * cache. Community-observed evidence — never the user's own verified route.
+ */
+export interface CommunityCatalogEntry {
+  public_base_url: string | null
+  model_id: string | null
+  capability_family: string | null
+  method_id: string | null
+  observed_at: string | null
+}
+
+/**
+ * Verified community catalog (disposable cache) status for the Settings UI.
+ * Advisory only — these records are never auto-applied to local credentials.
+ */
+export interface CommunityCatalogSummary {
+  synced: boolean
+  generated_at: string | null
+  protocol_major: number
+  record_count: number
+  entries: CommunityCatalogEntry[]
+}
+
 export interface ProbeCatalogSummary {
   local_evidence_records_count: number
   local_verified_records_count: number
   local_failed_records_count: number
   local_route_candidates_count: number
   remote_catalog_source: CatalogSourceMetadata | null
+  community_catalog: CommunityCatalogSummary
   sharing: ProbeCatalogSharingStatus
 }
 
@@ -226,6 +251,23 @@ export interface CatalogSyncResponse {
   evidence_records_count: number
   new_records_count: number
   catalog_source: CatalogSourceMetadata
+}
+
+/**
+ * Response from the verified community catalog read path
+ * (`POST /llm/catalog/sync-verified`). Dormant config returns
+ * `status: 'disabled'`; a successful pull returns `status: 'success'` with the
+ * verified record count. The displayed evidence is read back from the registry
+ * snapshot's `probe_catalog.community_catalog`, not from this response.
+ */
+export interface VerifiedCatalogSyncResponse {
+  status: 'success' | 'disabled'
+  verified_sync_enabled: boolean
+  sync_status?: string
+  record_count?: number
+  manifest_etag?: string | null
+  protocol_major?: number
+  message?: string
 }
 
 /**
@@ -1371,6 +1413,18 @@ export async function getRegistry(): Promise<RegistryResponse> {
 
 export async function syncRemoteModelCatalog(): Promise<CatalogSyncResponse> {
   const response = await api.post<CatalogSyncResponse>('/llm/catalog/sync')
+  cachedRegistry = null
+  return response.data
+}
+
+/**
+ * Pull the signed community catalog into the disposable, verified cache via the
+ * verified read path. The verified evidence it caches is surfaced back through
+ * the registry snapshot's `probe_catalog.community_catalog`, so callers refetch
+ * the registry afterwards to display it.
+ */
+export async function syncVerifiedCommunityCatalog(): Promise<VerifiedCatalogSyncResponse> {
+  const response = await api.post<VerifiedCatalogSyncResponse>('/llm/catalog/sync-verified')
   cachedRegistry = null
   return response.data
 }

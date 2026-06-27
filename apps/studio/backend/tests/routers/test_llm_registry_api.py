@@ -26,9 +26,15 @@ from app.models.llm_config import (
 )
 from app.routers import llm as llm_router
 from app.services import copilot_test
+from app.services.community_catalog import parse_catalog_evidence
+from app.services.community_catalog_sync import (
+    CommunityCatalogCache,
+    DisposableCatalogCacheStore,
+)
 from app.services.copilot_test import ModelProbeResult, PingResult, _Unauthorized
 from app.services.llm_credentials import credentials_path, load_credentials, save_credentials
 from app.services.llm_import_drafts import append_evidence_record, load_evidence_library
+from app.services.llm_paths import community_catalog_cache_path
 from app.services.llm_roles import load_roles_file, save_roles_file
 from app.services.llm_roles import roles_path as active_roles_path
 from fastapi.testclient import TestClient
@@ -252,6 +258,72 @@ def test_registry_read_and_endpoint_upsert_redacts_secret(
     }
     raw = json.loads(credentials_path().read_text())
     assert raw["provider_endpoints"]["anthropic-official"]["api_key"] == "anthropic-secret"
+
+
+def _write_community_cache(*records: object) -> None:
+    DisposableCatalogCacheStore(community_catalog_cache_path()).save(
+        CommunityCatalogCache(
+            manifest_etag='"abc-1"',
+            generated_at="2026-06-26T14:40:44Z",
+            protocol_major=1,
+            records=list(records),  # type: ignore[arg-type]
+        )
+    )
+
+
+def test_registry_probe_catalog_exposes_verified_community_cache(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """The registry surfaces the disposable verified community cache so the UI
+    can show 'past connected' community evidence as an advisory layer."""
+    _seed(tmp_path, monkeypatch)
+    record = parse_catalog_evidence(
+        {
+            "evidence_type": "probe_result",
+            "trust_state": "probe-verified",
+            "evidence_id": "cat-deepseek-pro",
+            "normalized_public_base_url": "https://api.deepseek.com",
+            "provider_model_id": "deepseek-v4-pro",
+            "model_id": "deepseek-v4-pro",
+            "method_id": "deepseek_chat_completions",
+            "capability_family": "language_reasoning",
+            "observed_at": "2026-06-26T09:33:40+00:00",
+            "probe_status": "ok",
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+        }
+    )
+    _write_community_cache(record)
+
+    body = client.get("/api/llm/registry").json()
+
+    community = body["probe_catalog"]["community_catalog"]
+    assert community["synced"] is True
+    assert community["record_count"] == 1
+    assert community["generated_at"] == "2026-06-26T14:40:44Z"
+    entry = community["entries"][0]
+    assert entry["public_base_url"] == "https://api.deepseek.com"
+    assert entry["model_id"] == "deepseek-v4-pro"
+    assert entry["capability_family"] == "language_reasoning"
+    # Community evidence is advisory: it must NOT inflate the local counts.
+    assert body["probe_catalog"]["local_verified_records_count"] == 0
+
+
+def test_registry_probe_catalog_community_absent_when_no_cache(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+
+    body = client.get("/api/llm/registry").json()
+
+    community = body["probe_catalog"]["community_catalog"]
+    assert community["synced"] is False
+    assert community["record_count"] == 0
+    assert community["entries"] == []
 
 
 def test_legacy_import_draft_routes_are_not_public_api(client: TestClient) -> None:
@@ -5384,6 +5456,13 @@ def test_registry_includes_last_remote_catalog_source(
             "local_failed_records_count": 1,
             "local_route_candidates_count": 0,
             "remote_catalog_source": source.model_dump(mode="json"),
+            "community_catalog": {
+                "synced": False,
+                "generated_at": None,
+                "protocol_major": 0,
+                "record_count": 0,
+                "entries": [],
+            },
             "sharing": {
                 "mode": "local_export_only",
                 "auto_upload_enabled": False,

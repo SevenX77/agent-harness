@@ -1430,6 +1430,7 @@ async def serialize_skill_graph_markdown(
                 id=phase.id,
                 src=phase.src,
                 depends_on=list(phase.depends_on),
+                output=phase.output,
             )
             for phase in request.phases
         ]
@@ -1507,6 +1508,7 @@ def _graph_topology(compiled: CompiledSkill, skill_dir: Path) -> list[dict[str, 
                 skill_dir,
                 phase_io_index=phase_io_index,
                 graph_input_fields=graph_input_fields,
+                output=row.get("output") is True,
             )
             for row in rows
             if isinstance(row, dict)
@@ -1541,6 +1543,7 @@ def _topology_row(
     *,
     phase_io_index: dict[str, dict[str, dict[str, object]]] | None = None,
     graph_input_fields: set[str] | None = None,
+    output: bool = False,
 ) -> dict[str, object]:
     """Build one topology row.
 
@@ -1557,6 +1560,8 @@ def _topology_row(
     }
     if mode == "subgraph":
         row["path"] = read_subgraph_path(skill_dir, phase_name)
+    if output:
+        row["output"] = True
     if phase_io_index is not None:
         io_fields = phase_io_index.get(phase_name, {"inputs": {}, "outputs": {}})
         row["io_fields"] = io_fields

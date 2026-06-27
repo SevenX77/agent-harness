@@ -512,6 +512,7 @@ export interface SerializableGraphPhaseRef {
   id: string
   src: string
   depends_on: string[]
+  output?: boolean
   mode: GraphPhaseMode
 }
 
@@ -657,6 +658,8 @@ export interface GraphTopologyItem {
   id: string
   src: string
   depends_on: string[]
+  /** True only when the GRAPH.md phase ref carries the explicit output marker. */
+  output?: boolean
   mode: 'logic' | 'subgraph' | 'skill' | string
   /** Child-graph path, surfaced only for subgraph phases. May be absolute or relative to the owning skill root. */
   path?: string | null

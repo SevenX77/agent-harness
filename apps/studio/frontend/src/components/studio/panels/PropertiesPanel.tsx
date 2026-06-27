@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 import { AxiosError } from "axios"
 import { AlertTriangle, CircleHelp, FolderOpen, Loader2, Pencil, ShieldCheck } from "lucide-react"
+import yaml from "js-yaml"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -54,6 +55,7 @@ import {
   phaseFrontmatterToForm,
   type IterateMergeMode,
   type IterateMode,
+  type PhaseFrontmatter,
   type PhaseFrontmatterFormData,
   type PhaseFrontmatterKind,
   type PhaseIterateFormData,
@@ -142,6 +144,74 @@ export function PropertiesPanel({
   onResumeNode,
   onPromoteNode,
 }: PropertiesPanelProps) {
+
+  const graphContent = skillDetail?.files?.["GRAPH.md"]
+  const graphFormState = useMemo(() => {
+    if (graphContent === undefined) {
+      return { key: "graph:none", ok: false as const, message: "GRAPH.md is not available in the loaded skill detail." }
+    }
+    const parsed = parsePhaseFrontmatter(graphContent)
+    if (!parsed.ok) {
+      return { key: `graph:${graphContent}`, ok: false as const, message: parsed.message }
+    }
+    return {
+      key: `graph:${graphContent}`,
+      ok: true as const,
+      form: graphFrontmatterToForm(parsed.frontmatter),
+    }
+  }, [graphContent])
+  const [loadedGraphFormKey, setLoadedGraphFormKey] = useState(graphFormState.key)
+  const [graphDraft, setGraphDraft] = useState<GraphFrontmatterFormData | null>(() => (
+    graphFormState.ok ? graphFormState.form : null
+  ))
+  const [graphSaving, setGraphSaving] = useState(false)
+
+  useEffect(() => {
+    setLoadedGraphFormKey(graphFormState.key)
+    setGraphDraft(graphFormState.ok ? graphFormState.form : null)
+    setGraphSaving(false)
+  }, [graphFormState])
+
+  const activeGraphDraft = graphFormState.ok
+    ? loadedGraphFormKey === graphFormState.key
+      ? graphDraft ?? graphFormState.form
+      : graphFormState.form
+    : null
+  const graphDirty = Boolean(activeGraphDraft && graphFormState.ok && !graphFormsEqual(activeGraphDraft, graphFormState.form))
+  const graphCanSave = Boolean(onPhaseFileSave && graphContent !== undefined && activeGraphDraft && graphFormState.ok && graphDirty && !graphSaving)
+
+  const setGraphField = <Key extends keyof GraphFrontmatterFormData>(field: Key, value: GraphFrontmatterFormData[Key]) => {
+    setGraphDraft((current) => current ? { ...current, [field]: value } : current)
+  }
+
+  const handleGraphReset = () => {
+    if (graphFormState.ok) {
+      setGraphDraft(graphFormState.form)
+    }
+  }
+
+  const handleGraphSave = async () => {
+    if (!onPhaseFileSave || graphContent === undefined || !activeGraphDraft) {
+      return
+    }
+    const next = applyGraphFrontmatterForm(graphContent, activeGraphDraft)
+    if (!next.ok) {
+      toast.error(`Frontmatter error: ${next.message}`)
+      return
+    }
+    setGraphSaving(true)
+    try {
+      await onPhaseFileSave({
+        path: "GRAPH.md",
+        content: next.markdown,
+        expectedHash: await sha256Hex(graphContent),
+      })
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save graph properties")
+    } finally {
+      setGraphSaving(false)
+    }
+  }
 
   const modeLabel = selectedNode ? phaseKindLabel(selectedNode.data) : null
   const effectiveNodeStatus = selectedNodeStatus ?? selectedNode?.data.status ?? null
@@ -359,11 +429,180 @@ export function PropertiesPanel({
             )}
           </div>
         ) : (
-          <div className="p-4 text-xs text-muted-foreground">Select a node to inspect</div>
+          <div className="space-y-3 px-2 py-2">
+            <GraphIdentityHeader />
+            {graphFormState.ok && activeGraphDraft ? (
+              <GraphFrontmatterForm
+                value={activeGraphDraft}
+                saving={graphSaving}
+                canSave={graphCanSave}
+                canReset={graphDirty && !graphSaving}
+                onFieldChange={setGraphField}
+                onReset={handleGraphReset}
+                onSave={() => {
+                  void handleGraphSave()
+                }}
+              />
+            ) : (
+              <div className="rounded-md border border-border bg-card px-3 py-2">
+                <div className="text-xs font-medium text-destructive">Frontmatter error</div>
+                <div className="mt-1 text-xs text-muted-foreground">{graphFormState.message}</div>
+                <div className="mt-3 flex gap-2">
+                  <Button type="button" size="sm" variant="secondary" onClick={() => onFileOpen?.("GRAPH.md")}>
+                    Open file
+                  </Button>
+                  <Button type="button" size="sm" disabled>
+                    Save
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </ScrollArea>
     </div>
   )
+}
+
+interface GraphFrontmatterFormData {
+  name: string
+  description: string
+  llmRole: string
+}
+
+function GraphIdentityHeader() {
+  return (
+    <div className="flex items-center justify-between gap-2 px-1">
+      <span className="min-w-0 truncate text-xs font-medium text-foreground">Graph</span>
+      <Badge variant="secondary">GRAPH.md</Badge>
+    </div>
+  )
+}
+
+function GraphFrontmatterForm({
+  value,
+  saving,
+  canSave,
+  canReset,
+  onFieldChange,
+  onReset,
+  onSave,
+}: {
+  value: GraphFrontmatterFormData
+  saving: boolean
+  canSave: boolean
+  canReset: boolean
+  onFieldChange: <Key extends keyof GraphFrontmatterFormData>(field: Key, value: GraphFrontmatterFormData[Key]) => void
+  onReset: () => void
+  onSave: () => void
+}) {
+  return (
+    <form
+      className="space-y-2"
+      onSubmit={(event) => {
+        event.preventDefault()
+        onSave()
+      }}
+    >
+      <FieldSet>
+        <FieldGroup>
+          <PropertyCard>
+            <Field>
+              <FieldLabel htmlFor="graph-name">name</FieldLabel>
+              <Input
+                id="graph-name"
+                value={value.name}
+                onChange={(event) => onFieldChange("name", event.currentTarget.value)}
+              />
+            </Field>
+          </PropertyCard>
+          <PropertyCard>
+            <Field>
+              <FieldLabel htmlFor="graph-description">description</FieldLabel>
+              <Textarea
+                id="graph-description"
+                value={value.description}
+                rows={3}
+                onChange={(event) => onFieldChange("description", event.currentTarget.value)}
+              />
+            </Field>
+          </PropertyCard>
+          <PropertyCard>
+            <Field>
+              <FieldLabel htmlFor="graph-llm-role">llm_role</FieldLabel>
+              <Input
+                id="graph-llm-role"
+                value={value.llmRole}
+                placeholder="analyst"
+                onChange={(event) => onFieldChange("llmRole", event.currentTarget.value)}
+              />
+            </Field>
+          </PropertyCard>
+        </FieldGroup>
+        <div className="flex justify-end gap-2 px-1">
+          <Button type="button" size="sm" variant="secondary" disabled={!canReset} onClick={onReset}>
+            Reset
+          </Button>
+          <Button type="submit" size="sm" disabled={!canSave}>
+            {saving ? "Saving" : "Save"}
+          </Button>
+        </div>
+      </FieldSet>
+    </form>
+  )
+}
+
+function graphFrontmatterToForm(frontmatter: PhaseFrontmatter): GraphFrontmatterFormData {
+  return {
+    name: graphStringValue(frontmatter.name),
+    description: graphStringValue(frontmatter.description),
+    llmRole: graphStringValue(frontmatter.llm_role),
+  }
+}
+
+function graphFormsEqual(left: GraphFrontmatterFormData, right: GraphFrontmatterFormData): boolean {
+  return left.name === right.name
+    && left.description === right.description
+    && left.llmRole === right.llmRole
+}
+
+function applyGraphFrontmatterForm(
+  markdown: string,
+  form: GraphFrontmatterFormData,
+): { ok: true; markdown: string } | { ok: false; message: string } {
+  const parsed = parsePhaseFrontmatter(markdown)
+  if (!parsed.ok) {
+    return { ok: false, message: parsed.message }
+  }
+  const next: PhaseFrontmatter = { ...parsed.frontmatter }
+  next.name = form.name
+  setGraphOptionalString(next, "description", form.description)
+  setGraphOptionalString(next, "llm_role", form.llmRole)
+  return { ok: true, markdown: serializeGraphMarkdown(next, parsed.body) }
+}
+
+function serializeGraphMarkdown(frontmatter: PhaseFrontmatter, bodyContent: string): string {
+  const dumped = yaml.dump(frontmatter, {
+    lineWidth: 120,
+    noRefs: true,
+    sortKeys: false,
+    styles: { "!!null": "empty" },
+  }).trimEnd()
+  const trimmedBody = bodyContent.replace(/^\n+/, "")
+  const body = trimmedBody.length > 0 ? `\n${trimmedBody}` : "\n"
+  return `---\n${dumped}\n---${body}`
+}
+
+function setGraphOptionalString(target: PhaseFrontmatter, key: string, value: string) {
+  if (value.trim().length === 0) {
+    delete target[key]
+  } else {
+    target[key] = value
+  }
+}
+
+function graphStringValue(value: unknown): string {
+  return typeof value === "string" ? value : ""
 }
 
 function PhaseIdentityHeader({

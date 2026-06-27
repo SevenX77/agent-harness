@@ -94,7 +94,7 @@ vi.mock('sonner', () => ({
 
 const layoutMock = vi.mocked(getAutoLayoutedElements)
 
-function phaseNode(id: string, dependsOn: string[] = []): SkillGraphNode {
+function phaseNode(id: string, dependsOn: string[] = [], isOutput = false): SkillGraphNode {
   return {
     id,
     type: 'skill',
@@ -105,6 +105,7 @@ function phaseNode(id: string, dependsOn: string[] = []): SkillGraphNode {
       mode: 'llm',
       status: 'idle',
       dependsOn,
+      isOutput,
     },
   }
 }
@@ -551,6 +552,28 @@ describe('GraphCanvas', () => {
     expect(onPersistConnection).toHaveBeenCalledWith({ source: 'draft', target: 'review' })
   })
 
+  it('persists explicit graph input and output boundary connections', () => {
+    const onPersistConnection = vi.fn()
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        skillDetail={graphSkillDetail([
+          { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+        ])}
+        onPersistConnection={onPersistConnection}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as {
+      onConnect?: (connection: { source: string; target: string }) => void
+    } | null
+    props?.onConnect?.({ source: INPUT_ID, target: 'draft' })
+    props?.onConnect?.({ source: 'draft', target: OUTPUT_ID })
+
+    expect(onPersistConnection).toHaveBeenCalledWith({ source: INPUT_ID, target: 'draft' })
+    expect(onPersistConnection).toHaveBeenCalledWith({ source: 'draft', target: OUTPUT_ID })
+  })
+
   it('does not persist invalid phase node connections', () => {
     const onPersistConnection = vi.fn()
     renderToStaticMarkup(
@@ -657,6 +680,60 @@ describe('GraphCanvas', () => {
     // The two-round-trip chain must NOT be used when the atomic handler exists.
     expect(onDisconnectConnection).not.toHaveBeenCalled()
     expect(onPersistConnection).not.toHaveBeenCalled()
+  })
+
+  it('reconnects phase edges onto graph Output through the same atomic reconnect path', async () => {
+    const onReconnectConnection = vi.fn().mockResolvedValue(undefined)
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        skillDetail={graphSkillDetail([
+          { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+          { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+        ])}
+        onReconnectConnection={onReconnectConnection}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as {
+      onReconnect?: (oldEdge: { source: string; target: string }, newConnection: { source: string; target: string }) => void
+    } | null
+
+    props?.onReconnect?.({ source: 'draft', target: 'review' }, { source: 'draft', target: OUTPUT_ID })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(onReconnectConnection).toHaveBeenCalledWith(
+      { source: 'draft', target: 'review' },
+      { source: 'draft', target: OUTPUT_ID },
+    )
+  })
+
+  it('reconnects phase edges onto graph Input through the same atomic reconnect path', async () => {
+    const onReconnectConnection = vi.fn().mockResolvedValue(undefined)
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        skillDetail={graphSkillDetail([
+          { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+          { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+        ])}
+        onReconnectConnection={onReconnectConnection}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as {
+      onReconnect?: (oldEdge: { source: string; target: string }, newConnection: { source: string; target: string }) => void
+    } | null
+
+    props?.onReconnect?.({ source: 'draft', target: 'review' }, { source: INPUT_ID, target: 'review' })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(onReconnectConnection).toHaveBeenCalledWith(
+      { source: 'draft', target: 'review' },
+      { source: INPUT_ID, target: 'review' },
+    )
   })
 
   it('falls back to disconnect-then-persist when no atomic onReconnectConnection is wired', async () => {
@@ -824,24 +901,28 @@ describe('GraphCanvas', () => {
     expect(html).toContain('Failed to load skill graph.')
   })
 
-  it('keeps the cycle warning overlay', () => {
+  it('keeps rendering the graph when auto-layout detects a cycle', () => {
     layoutMock.mockImplementation(() => {
       throw new CycleDetectedError()
     })
 
     const html = renderToStaticMarkup(<GraphCanvas skillId="demo-skill" />)
 
-    expect(html).toContain('SKILL contains cyclic dependency - cannot render graph.')
+    const props = reactFlowPropsRef.current as {
+      nodes?: unknown[]
+      edges?: unknown[]
+    } | null
+    expect(html).not.toContain('SKILL contains cyclic dependency - cannot render graph.')
+    expect(props?.nodes?.length).toBeGreaterThan(0)
+    expect(props?.edges).toBeDefined()
   })
 
-  it('builds declared serial dependency edges with graph boundaries', () => {
+  it('builds declared serial dependency edges without inferred graph boundaries', () => {
     const nodes = [phaseNode('A'), phaseNode('B', ['A']), phaseNode('C', ['B'])]
 
     expect(edgeIds(nodes)).toEqual([
-      `${INPUT_ID}->A`,
       'A->B',
       'B->C',
-      `C->${OUTPUT_ID}`,
     ])
     expectContextEdges(nodes)
   })
@@ -888,25 +969,30 @@ describe('GraphCanvas', () => {
     ]
 
     expect(edgeIds(nodes)).toEqual([
-      `${INPUT_ID}->A`,
       'A->B',
       'A->C',
       'B->D',
       'C->D',
-      `D->${OUTPUT_ID}`,
     ])
     expectContextEdges(nodes)
   })
 
-  it('synthesizes boundary edges for a single node with no dependencies', () => {
+  it('does not infer boundary edges for a single node with no dependencies', () => {
     const nodes = [phaseNode('X')]
 
-    expect(edgeIds(nodes)).toEqual([`${INPUT_ID}->X`, `X->${OUTPUT_ID}`])
+    expect(edgeIds(nodes)).toEqual([])
     expectContextEdges(nodes)
   })
 
-  it('connects input directly to output for empty phases', () => {
-    expect(edgeIds([])).toEqual([`${INPUT_ID}->${OUTPUT_ID}`])
+  it('renders explicit input and output declarations only', () => {
+    const nodes = [phaseNode('A', ['input']), phaseNode('B', ['A'], true)]
+
+    expect(edgeIds(nodes)).toEqual([`${INPUT_ID}->A`, 'A->B', `B->${OUTPUT_ID}`])
+    expectContextEdges(nodes)
+  })
+
+  it('renders no edges for empty phases', () => {
+    expect(edgeIds([])).toEqual([])
     expectContextEdges([])
   })
 

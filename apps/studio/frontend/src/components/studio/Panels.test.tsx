@@ -6,10 +6,44 @@ import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 import { AssetsPanel, PropertiesPanel, subagentSkillFilePath } from './Panels'
 
 describe('PropertiesPanel', () => {
-  it('renders an empty state without a selected node', () => {
-    const html = renderToStaticMarkup(<PropertiesPanel selectedNode={null} />)
+  it('renders graph frontmatter fields without a selected node', () => {
+    const html = renderToStaticMarkup(
+      <PropertiesPanel
+        skillDetail={skillDetailWithFiles({
+          'GRAPH.md': [
+            '---',
+            'schema_version: v0.3.0',
+            'name: story-deconstruction',
+            'description: Builds story analysis.',
+            'llm_role: analyst',
+            'io:',
+            '  inputs:',
+            '    type: object',
+            '    properties: {}',
+            '  outputs:',
+            '    type: object',
+            '    properties: {}',
+            'phases:',
+            '  - setup',
+            '---',
+            '<phase>setup</phase>',
+          ].join('\n'),
+        })}
+        selectedNode={null}
+      />,
+    )
 
-    expect(html).toContain('Select a node to inspect')
+    expect(html).toContain('Graph')
+    expect(html).toContain('name')
+    expect(html).toContain('story-deconstruction')
+    expect(html).toContain('description')
+    expect(html).toContain('Builds story analysis.')
+    expect(html).toContain('llm_role')
+    expect(html).toContain('analyst')
+    expect(html).not.toContain('Select a node to inspect')
+    expect(html).not.toContain('schema_version')
+    expect(html).not.toContain('phases')
+    expect(html).not.toContain('id="graph-io"')
   })
 
   it('renders selected phase editable fields in the sidebar panel', () => {

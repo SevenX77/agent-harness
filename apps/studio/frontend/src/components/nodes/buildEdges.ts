@@ -36,28 +36,12 @@ export function buildEdges(
   phaseNodes: SkillGraphNode[],
   traceEvents: TraceEventInput[] = [],
 ): Edge<ContextEdgeData>[] {
-  if (phaseNodes.length === 0) {
-    return [contextEdge(INPUT_ID, OUTPUT_ID, traceEvents)]
-  }
-
-  const dependents = new Map<string, Set<string>>()
-  for (const node of phaseNodes) {
-    for (const dependency of node.data.dependsOn) {
-      const targets = dependents.get(dependency) ?? new Set<string>()
-      targets.add(node.id)
-      dependents.set(dependency, targets)
-    }
-  }
-
   const edges: Edge<ContextEdgeData>[] = []
   for (const node of phaseNodes) {
     for (const source of node.data.dependsOn) {
       edges.push(contextEdge(source === 'input' ? INPUT_ID : source, node.id, traceEvents))
     }
-    if (node.data.dependsOn.length === 0) {
-      edges.push(contextEdge(INPUT_ID, node.id, traceEvents))
-    }
-    if (!dependents.has(node.id) || dependents.get(node.id)?.size === 0) {
+    if (node.data.isOutput === true) {
       edges.push(contextEdge(node.id, OUTPUT_ID, traceEvents))
     }
   }

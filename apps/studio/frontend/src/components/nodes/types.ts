@@ -52,6 +52,8 @@ export interface SkillGraphNodeData extends Record<string, unknown> {
    */
   isDirtyDownstream?: boolean
   dependsOn: string[]
+  /** True only when GRAPH.md marks this phase ref with the explicit `output` flag. */
+  isOutput?: boolean
   subgraphPath?: string | null
   subagents?: SubagentRef[]
   isExpanded?: boolean

@@ -66,6 +66,46 @@ def test_serialize_preserves_fan_in_depends_on(client: TestClient) -> None:
     assert '<phase depends_on="setup">right</phase>' in markdown
 
 
+def test_serialize_accepts_canonical_topology_without_node_mode(client: TestClient) -> None:
+    # GRAPH.md owns only topology facts. The phase type is derived from the
+    # phase file (LOGIC.md/SUBGRAPH.md/SKILL.md), so the serialize endpoint must
+    # not require a UI/editor `mode` field to write depends_on/output.
+    response = client.post(
+        "/api/skills/text-segmentation/graph/serialize",
+        json={
+            "phases": [
+                {"id": "setup", "src": "phases/setup", "depends_on": ["input"], "output": True},
+            ],
+            "expected_hash": None,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    markdown = response.json()["markdown_content"]
+    assert '<phase depends_on="input" output>setup</phase>' in markdown
+
+
+def test_serialize_ignores_legacy_node_mode(client: TestClient) -> None:
+    response = client.post(
+        "/api/skills/text-segmentation/graph/serialize",
+        json={
+            "phases": [
+                {
+                    "id": "setup",
+                    "src": "phases/setup",
+                    "depends_on": ["input"],
+                    "output": True,
+                    "mode": "agent",
+                },
+            ],
+            "expected_hash": None,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert '<phase depends_on="input" output>setup</phase>' in response.json()["markdown_content"]
+
+
 def test_serialize_tolerates_a_phase_dir_not_yet_in_graph(
     client: TestClient,
     studio_roots: tuple[Path, Path],

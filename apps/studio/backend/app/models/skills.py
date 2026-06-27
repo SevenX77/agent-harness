@@ -43,10 +43,19 @@ class SkillDetail(BaseModel):
 class PhaseRef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_mode(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "mode" in value:
+            normalized = dict(value)
+            normalized.pop("mode", None)
+            return normalized
+        return value
+
     id: str = Field(..., min_length=1)
     src: str = Field(..., min_length=1)
     depends_on: list[str] = Field(default_factory=list)
-    mode: Literal["logic", "subgraph", "skill"]
+    output: bool = False
 
 
 class ChildGraphTopology(BaseModel):

@@ -94,9 +94,14 @@ def serialize_graph_topology(
         lines.append(f"  - {phase.id}")
     lines.append("---")
     for phase in phases:
+        attrs: list[str] = []
         if phase.depends_on:
             depends_on = ", ".join(phase.depends_on)
-            lines.append(f'<phase depends_on="{depends_on}">{phase.id}</phase>')
+            attrs.append(f'depends_on="{depends_on}"')
+        if phase.output:
+            attrs.append("output")
+        if attrs:
+            lines.append(f"<phase {' '.join(attrs)}>{phase.id}</phase>")
         else:
             lines.append(f"<phase>{phase.id}</phase>")
     rendered = "\n".join(lines) + "\n"
@@ -127,55 +132,6 @@ def _io_schema_from_frontmatter(io_raw: object) -> PhaseIOSchema:
         message="GRAPH.md frontmatter is missing a valid io.inputs/io.outputs block",
         detail={},
     )
-
-
-def _validate_graph_phase_refs(phases: Sequence[GraphPhaseRef]) -> None:
-    phase_ids = {phase.id for phase in phases}
-    for phase in phases:
-        for dep in phase.depends_on:
-            if dep not in phase_ids:
-                raise GraphTopologySerializationError(
-                    code="serializer_orphan",
-                    message=f"phase {phase.id!r} depends_on unknown phase {dep!r}",
-                    detail={"phase_id": phase.id, "dependency": dep},
-                )
-            if dep == phase.id:
-                raise GraphTopologySerializationError(
-                    code="serializer_cycle",
-                    message=f"phase {phase.id!r} cannot depend on itself",
-                    detail={"phase_id": phase.id},
-                )
-    _validate_graph_phase_refs_acyclic(phases)
-
-
-def _validate_graph_phase_refs_acyclic(phases: Sequence[GraphPhaseRef]) -> None:
-    adjacency: dict[str, list[str]] = {phase.id: [] for phase in phases}
-    for phase in phases:
-        for dep in phase.depends_on:
-            adjacency[dep].append(phase.id)
-    state: dict[str, str] = {}
-    stack: list[str] = []
-
-    def visit(node: str) -> None:
-        state[node] = "gray"
-        stack.append(node)
-        for nxt in adjacency[node]:
-            if state.get(nxt) == "gray":
-                start = stack.index(nxt)
-                cycle = stack[start:] + [nxt]
-                raise GraphTopologySerializationError(
-                    code="serializer_cycle",
-                    message="cycle detected: " + " -> ".join(cycle),
-                    detail={"cycle": cycle},
-                )
-            if state.get(nxt) is None:
-                visit(nxt)
-        stack.pop()
-        state[node] = "black"
-
-    for node in adjacency:
-        if state.get(node) is None:
-            visit(node)
 
 
 def _render_fresh_graph(manifest: GraphManifest) -> str:

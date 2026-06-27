@@ -34,6 +34,8 @@ export interface OpenFile extends FileMeta {
   skillId: string
   workspaceRoot?: string | null
   hash: string | null
+  savedContent: string
+  dirty?: boolean
   title?: string
   saveEnabled?: boolean
 }

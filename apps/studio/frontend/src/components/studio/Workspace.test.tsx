@@ -34,7 +34,23 @@ const mocks = vi.hoisted(() => ({
     onPredict?: () => Promise<void> | void
     onRun?: () => Promise<void> | void
   },
-  conflictDialogProps: null as null | { onOverwriteRetry?: () => void },
+  conflictDialogProps: null as null | {
+    conflict?: {
+      path: string
+      localContent: string
+      remoteContent: string
+    } | null
+    onOverwriteRetry?: () => void
+  },
+  lazyMonacoProps: [] as Array<{
+    value: string
+    onChange: (value: string) => void
+    onInFlightChange: (inFlight: boolean) => void
+  }>,
+  webSockets: [] as Array<{
+    onmessage: ((event: { data: string }) => void) | null
+    close: () => void
+  }>,
   copilotProps: [] as Array<{
     skillId: string | null
     workspaceRoot?: string | null
@@ -57,6 +73,7 @@ const mocks = vi.hoisted(() => ({
   },
   goldenDiffCompare: vi.fn(),
   compileSkill: vi.fn(),
+  getSkillDetail: vi.fn(),
   getCompareGroup: vi.fn(),
   getResumeValidity: vi.fn(),
   postPredictRun: vi.fn(),
@@ -90,7 +107,7 @@ vi.mock('@/api/client', () => ({
   fetcher: vi.fn(async () => []),
   getCompareGroup: mocks.getCompareGroup,
   getResumeValidity: mocks.getResumeValidity,
-  getSkillDetail: vi.fn(),
+  getSkillDetail: mocks.getSkillDetail,
   postPredictRun: mocks.postPredictRun,
   resolveRunInput: mocks.resolveRunInput,
   resumeRun: mocks.resumeRun,
@@ -268,8 +285,19 @@ vi.mock('./SettingsPage', () => ({
   SettingsPage: () => <div data-testid="settings" />,
 }))
 
-vi.mock('./SplitEditor', () => ({
-  SplitEditor: () => <div data-testid="split-editor" />,
+vi.mock('./LazyMonacoPanel', () => ({
+  LazyMonacoPanel: (props: {
+    value: string
+    onChange: (value: string) => void
+    onInFlightChange: (inFlight: boolean) => void
+  }) => {
+    mocks.lazyMonacoProps.push(props)
+    return (
+      <div data-testid="lazy-monaco-panel">
+        {props.value}
+      </div>
+    )
+  }
 }))
 
 vi.mock('./Toolbar', () => ({
@@ -289,7 +317,14 @@ vi.mock('./Toolbar', () => ({
 }))
 
 vi.mock('./ConflictDialog', () => ({
-  ConflictDialog: (props: { onOverwriteRetry?: () => void }) => {
+  ConflictDialog: (props: {
+    conflict?: {
+      path: string
+      localContent: string
+      remoteContent: string
+    } | null
+    onOverwriteRetry?: () => void
+  }) => {
     mocks.conflictDialogProps = props
     return <div data-testid="conflict-dialog" />
   },
@@ -322,9 +357,13 @@ describe('Workspace WS-1 local writer contracts', () => {
       'WebSocket',
       class {
         onmessage: ((event: { data: string }) => void) | null = null
+        constructor() {
+          mocks.webSockets.push(this)
+        }
         close() {}
       },
     )
+    mocks.webSockets = []
     mocks.runStreamEvents = []
     mocks.fetchRunDetail.mockReset()
     mocks.refreshLocalHistory.mockReset()
@@ -333,6 +372,7 @@ describe('Workspace WS-1 local writer contracts', () => {
     mocks.graphCanvasProps = null
     mocks.centerActionBarProps = null
     mocks.conflictDialogProps = null
+    mocks.lazyMonacoProps.length = 0
     mocks.copilotProps.length = 0
     mocks.useSkillsIds.length = 0
     mocks.goldenDiffCalls.length = 0
@@ -341,6 +381,8 @@ describe('Workspace WS-1 local writer contracts', () => {
     mocks.goldenDiffCompare.mockResolvedValue(null)
     mocks.writeSkillFile.mockReset()
     mocks.writeSkillFile.mockResolvedValue({ path: 'GRAPH.md', hash: 'python-hash' })
+    mocks.getSkillDetail.mockReset()
+    mocks.getSkillDetail.mockImplementation(async (id: string) => skillDetail(id))
     mocks.compileSkill.mockReset()
     mocks.compileSkill.mockResolvedValue({
       status: 'ok',
@@ -455,7 +497,7 @@ describe('Workspace WS-1 local writer contracts', () => {
     expect((mocks.invoke.mock.calls[0][1] as Record<string, unknown>)).not.toHaveProperty('path')
   })
 
-  it('compiles after a canvas connection writes GRAPH.md successfully', async () => {
+  it('does not auto-compile after a canvas connection writes GRAPH.md successfully', async () => {
     renderWorkspace()
 
     await mocks.graphCanvasProps?.onPersistConnection?.({ source: 'draft', target: 'review' })
@@ -464,7 +506,7 @@ describe('Workspace WS-1 local writer contracts', () => {
       relativePath: 'GRAPH.md',
       content: 'serialized graph\n',
     }))
-    expect(mocks.compileSkill).toHaveBeenCalledWith('writer-smoke')
+    expect(mocks.compileSkill).not.toHaveBeenCalled()
   })
 
   it('shows compile success with artifact hash and execution fingerprint', async () => {
@@ -686,7 +728,7 @@ describe('Workspace WS-1 local writer contracts', () => {
       content: 'serialized graph\n',
       expectedHash: 'graph-hash',
     }))
-    expect(mocks.compileSkill).toHaveBeenCalledWith('writer-smoke')
+    expect(mocks.compileSkill).not.toHaveBeenCalled()
   })
 
   it('opens child subgraph phase files by reading the child workspace root from native fs', async () => {
@@ -708,6 +750,74 @@ describe('Workspace WS-1 local writer contracts', () => {
       workspaceRoot: '/Users/sevenx/Projects/story-deconstruction-v3/subgraph/event-timeline/subgraph/event-extraction',
       path: 'phases/review/SKILL.md',
     }))
+  })
+
+  it('keeps a dirty open editor buffer when a same-file skill_changed event arrives', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => {
+        root.render(
+          createElement(Workspace, {
+            skillId: 'writer-smoke',
+            onSelectSkill: vi.fn(),
+            onCloseSkill: vi.fn(),
+          }),
+        )
+        await Promise.resolve()
+      })
+
+      act(() => {
+        mocks.graphCanvasProps?.onNodeFileOpen?.('GRAPH.md')
+      })
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      expect(mocks.lazyMonacoProps.at(-1)?.value).toBe('graph before\n')
+
+      act(() => {
+        mocks.lazyMonacoProps.at(-1)?.onChange('local dirty graph\n')
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      mocks.getSkillDetail.mockResolvedValueOnce({
+        ...skillDetail('writer-smoke'),
+        files: {
+          ...skillDetail('writer-smoke').files,
+          'GRAPH.md': 'remote graph\n',
+        },
+      })
+
+      await act(async () => {
+        mocks.webSockets.at(-1)?.onmessage?.({
+          data: JSON.stringify({
+            type: 'skill_changed',
+            skill_id: 'writer-smoke',
+            path: 'GRAPH.md',
+          }),
+        })
+        await Promise.resolve()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      expect(mocks.lazyMonacoProps.at(-1)?.value).toBe('local dirty graph\n')
+      expect(mocks.conflictDialogProps?.conflict).toMatchObject({
+        path: 'GRAPH.md',
+        localContent: 'local dirty graph\n',
+        remoteContent: 'remote graph\n',
+      })
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+    }
   })
 
   it('creates a phase with the submitted node name', async () => {
@@ -812,7 +922,7 @@ describe('Workspace WS-1 local writer contracts', () => {
       workspaceRoot: RECONNECT_FIXTURE_SKILL_ID,
       path: 'phases/draft',
     })
-    expect(mocks.compileSkill).toHaveBeenCalledWith(RECONNECT_FIXTURE_SKILL_ID)
+    expect(mocks.compileSkill).not.toHaveBeenCalled()
   })
 
   it('deletes orphaned root phase directories that are absent from the next GRAPH.md', async () => {
@@ -831,7 +941,7 @@ describe('Workspace WS-1 local writer contracts', () => {
       .filter(([command]) => command === 'delete_workspace_path')
       .map(([, payload]) => (payload as { path?: string }).path)
     expect(deletedPaths).toEqual(['phases/draft', 'phases/logic'])
-    expect(mocks.compileSkill).toHaveBeenCalledWith(STALE_PHASE_DIR_FIXTURE_SKILL_ID)
+    expect(mocks.compileSkill).not.toHaveBeenCalled()
   })
 
   it('does not report delete success when the phase folder is still present after native delete', async () => {
@@ -895,6 +1005,7 @@ describe('Workspace WS-1 local writer contracts', () => {
       expectedHash: 'graph-hash',
     })
     expect(toastMocks.error).not.toHaveBeenCalled()
+    expect(mocks.compileSkill).not.toHaveBeenCalled()
   })
 
   it('wires conflict overwrite retry into the shared conflict dialog', () => {
@@ -939,17 +1050,12 @@ describe('Workspace WS-1 local writer contracts', () => {
     }
   })
 
-  // N3 #12: a passing realtime lint must drive the build stage to 'compile-pass' (which
-  // is what unlocks Predict in the CenterActionBar) without the user clicking Compile.
-  // deriveBuildStage is the design atom — it reads readLintStatus and maps passed →
-  // compile-pass; Workspace subscribes to lintStatusEvent so the bar re-renders when it
-  // changes.
-  it('drives the build stage to compile-pass from a passing realtime lint', () => {
+  it('does not treat a passing realtime lint as a manual compile pass', () => {
     mocks.lintStatus = 'passed'
 
     renderWorkspace()
 
-    expect(mocks.centerActionBarProps?.stage).toBe('compile-pass')
+    expect(mocks.centerActionBarProps?.stage).toBe('idle')
   })
 
   it('keeps the build stage idle while no lint has passed', () => {

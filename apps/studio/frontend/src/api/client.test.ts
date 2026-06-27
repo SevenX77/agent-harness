@@ -424,7 +424,7 @@ describe('api client auth token', () => {
           id: 'agent',
           src: 'phases/agent',
           depends_on: ['logic'],
-          mode: 'skill',
+          output: true,
         }],
         expected_hash: 'abc123',
       })
@@ -446,6 +446,7 @@ describe('api client auth token', () => {
       id: 'agent',
       src: 'phases/agent',
       depends_on: ['logic'],
+      output: true,
       mode: 'skill',
     }], 'abc123')).resolves.toEqual({
       markdown_content: '---\nname: text-segmentation\n---\n',

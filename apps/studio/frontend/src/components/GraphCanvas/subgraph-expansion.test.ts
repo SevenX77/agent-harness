@@ -29,8 +29,8 @@ const LOADED_REQUEST: SubgraphExpansionRequest = {
     name: 'child-skill',
     phases: ['plan', 'write'],
     graphTopology: [
-      topologyRow('plan', [], 'agent'),
-      topologyRow('write', ['plan'], 'logic'),
+      topologyRow('plan', ['input'], 'agent'),
+      { ...topologyRow('write', ['plan'], 'logic'), output: true },
     ],
   },
 }
@@ -53,8 +53,8 @@ const CHILD_DETAIL: SkillDetail = {
     phases: ['plan', 'write'],
   },
   graph_topology: [
-    topologyRow('plan', [], 'agent'),
-    topologyRow('write', ['plan'], 'logic'),
+    topologyRow('plan', ['input'], 'agent'),
+    { ...topologyRow('write', ['plan'], 'logic'), output: true },
   ],
   file_paths: {},
   files: {

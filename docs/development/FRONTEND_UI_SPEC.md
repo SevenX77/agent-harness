@@ -199,6 +199,8 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - **子图 inline 展开是同级单选，且预览标题只显示 skill 名**: 同一画布层级内只能展开一个 subgraph topology；展开另一个兄弟节点必须自动收起前一个，点击当前展开节点则收起。子图预览必须显示完整的正常 skill 拓扑（含自己的 Input/Output、内部 `contextEdge` 连线和 parent↔child preview group bridge 连线）。预览 group 的 title 使用 child skill `name` 或路径 basename，不得把完整绝对 path 当标题渲染。
 - **节点上的可视交互件（如子图展开 `+`）gate 在"回调是否接线"，不要 gate 在"某派生值解析成功"**: 展开 `+` 的出现条件是 `data.onToggleSubgraph` 这个回调存在（`build-nodes` 对每个 `mode==='subgraph'` 节点都接线、预览子节点剥离回调），**不是**"path 解析成绝对成功"。把可视件挂在派生值上，会让 path 没解析/未声明的节点直接不出 `+`——用户看到的就是"别的子图节点 + 号消失了"（2026-06-23 PM 第 3 问）。正确语义：能力恒在（所有子图节点都出 `+`），解析失败时点开走 recovery 提示态（F4「unresolved path shows recovery state」），而不是悄悄把入口藏掉。drill（双击下钻）这种"会真去读子图"的动作才另判 path 是否可解析。
 
+- **Graph Properties on empty canvas selection**: when no phase node is selected and the Properties panel is active, render editable `GRAPH.md` frontmatter fields only for `name`, `description`, and `llm_role`. Do not show `schema_version`, `phases`, `io`, file path, node type, or dependencies in this form; `phases` belongs to the canvas and `io` belongs to the Input/Output panels. Saving must preserve the `GRAPH.md` body phase tags.
+
 ## 4. 面板拖拽系统与自适应重绘
 Studio 必须表现得像一个原生桌面应用，核心支撑是灵活的分屏拖拽框架。
 - **基建组件**: 采用 `react-resizable-panels`。

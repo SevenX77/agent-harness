@@ -130,6 +130,19 @@ describe('buildNodes', () => {
     expect(nodes.map((node) => node.type)).toEqual(['globalInput', 'skill', 'globalOutput'])
   })
 
+  it('projects explicit graph output markers onto phase node data', () => {
+    const nodes = buildNodes('demo', skillDetail({
+      phases: ['draft', 'review'],
+      graph_topology: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'agent' },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'], mode: 'logic', output: true },
+      ],
+    }), new Set(), () => {}, {})
+
+    expect(phaseNode(nodes, 'draft').isOutput).toBe(false)
+    expect(phaseNode(nodes, 'review').isOutput).toBe(true)
+  })
+
   it('derives node kind from the phase FILE when topology.mode is absent (file is truth source)', () => {
     const nodes = buildNodes('demo', skillDetail({
       phases: ['draft'],
@@ -353,6 +366,16 @@ describe('buildNodesFromTopology (drilled child graph)', () => {
 
     const nested = phaseNode(nodes, 'nested')
     expect(nested.dependsOn).toEqual(['plan'])
+  })
+
+  it('projects explicit drilled graph output markers onto phase node data', () => {
+    const nodes = buildNodesFromTopology('demo', ['plan', 'nested'], [
+      { id: 'plan', src: 'phases/plan/SKILL.md', depends_on: [], mode: 'agent' },
+      { id: 'nested', src: 'phases/nested/LOGIC.md', depends_on: ['plan'], mode: 'logic', output: true },
+    ], {})
+
+    expect(phaseNode(nodes, 'plan').isOutput).toBe(false)
+    expect(phaseNode(nodes, 'nested').isOutput).toBe(true)
   })
 
   it('exposes a nested subgraph child path so deeper drilling is possible', () => {

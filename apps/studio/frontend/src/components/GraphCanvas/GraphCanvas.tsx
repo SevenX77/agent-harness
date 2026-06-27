@@ -12,7 +12,6 @@ import {
   type Connection,
   type Edge,
   type FinalConnectionState,
-  type ReactFlowInstance,
 } from '@xyflow/react'
 import { Trash2 } from 'lucide-react'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type MouseEvent } from 'react'
@@ -49,7 +48,6 @@ import { edgeContextFromEvents } from '@/lib/edge-context'
 import { errorMessage } from '@/utils/errors'
 import type { PanelKind } from '@/components/studio/Toolbar'
 import { buildNodes, buildNodesFromTopology, phaseKindFile } from './build-nodes'
-import { nodeToFocus } from './canvas-focus'
 import {
   type NewPhaseKind,
   addSequentialOverwriteField,
@@ -114,12 +112,6 @@ interface GraphCanvasProps {
   // being resumed from; the canvas grays exactly these nodes (unrelated branches
   // stay normal). Empty/undefined when resume is clean or no node is being resumed.
   dirtyDownstreamNodeIds?: ReadonlySet<string>
-  // N4 atom #9 (run-focus-follow): the phase id of the node currently running,
-  // derived by Workspace from the same live run stream that colors the nodes
-  // (statusByNodeId -> the node whose status is 'running'). When it changes the
-  // canvas auto-centers on that node so the user's view follows the run. Not a
-  // new derivation; pure wiring of the existing activeTracePhase.
-  activeTracePhase?: string | null
   compact?: boolean
   onPhaseFileSave?: (args: { path: string; content: string; expectedHash: string }, target?: ChildSaveTarget) => Promise<void> | void
   onPhaseFileRead?: (
@@ -400,7 +392,6 @@ export function GraphCanvas({
   goldenStateByNodeId,
   errorMessageByNodeId,
   dirtyDownstreamNodeIds,
-  activeTracePhase,
   compact = false,
   onPhaseFileSave,
   onPhaseFileRead,
@@ -467,12 +458,10 @@ export function GraphCanvas({
   const [activeWarningIndex, setActiveWarningIndex] = useState<number>(-1)
   const [cancelledNodeIds, setCancelledNodeIds] = useState<Set<string>>(() => new Set())
   const [suppressedWarningKeys, setSuppressedWarningKeys] = useState<Set<string>>(() => new Set())
-  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance<GraphCanvasNode, Edge<ContextEdgeData>> | null>(null)
   const nodesRef = useRef<GraphCanvasNode[]>([])
   const [isViewportReady, setIsViewportReady] = useState(false)
   const viewportReadyRef = useRef(false)
   const viewportFitTokenRef = useRef(0)
-  const lastFittedLayoutSignatureRef = useRef<string | null>(null)
   const pendingNodeFileOpenRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const cancelPendingNodeFileOpen = useCallback(() => {
@@ -506,19 +495,7 @@ export function GraphCanvas({
     setIsViewportReady(ready)
   }, [])
 
-  // 2. Viewport pan transition effect
-  useEffect(() => {
-    const activeWarning = warningQueue[activeWarningIndex]
-    if (activeWarning && reactFlowInstance) {
-      reactFlowInstance.fitView({
-        nodes: [{ id: activeWarning.nodeId }],
-        duration: 600,
-        padding: 0.8,
-      })
-    }
-  }, [activeWarningIndex, warningQueue, reactFlowInstance])
-
-  // 3. Sequential overwrite allow/cancel callbacks
+  // 2. Sequential overwrite allow/cancel callbacks
   const expandedChildSaveTarget = useCallback((parentNodeId: string): ChildSaveTarget | null => {
     const entry = expandedTopologiesRef.current[parentNodeId]
     if (!entry || entry.view.status !== 'loaded' || !entry.view.detail) return null
@@ -743,13 +720,6 @@ export function GraphCanvas({
 
   const drilledLevel = drillStack.length > 0 ? drillStack[drillStack.length - 1] : null
   const drilledPath = drilledLevel?.path ?? null
-  const viewportScopeKey = `${skillId}\0${compact ? 'compact' : 'full'}\0${drilledPath ?? 'root'}`
-
-  useCanvasLayoutEffect(() => {
-    viewportFitTokenRef.current += 1
-    lastFittedLayoutSignatureRef.current = null
-    updateViewportReady(false)
-  }, [updateViewportReady, viewportScopeKey])
 
   // n2-canvas #14: load the drilled child's topology AND its full SkillDetail
   // (Option A). The detail is fetched against the CHILD's own resolved skillId
@@ -992,7 +962,7 @@ export function GraphCanvas({
       return { ...getAutoLayoutedElements(rawNodes, rawEdges, { canvasHeight, compactRatio }), error: null }
     } catch (layoutError) {
       if (layoutError instanceof CycleDetectedError) {
-        return { nodes: [], edges: [], error: layoutError }
+        return { nodes: rawNodes, edges: rawEdges, error: layoutError }
       }
       throw layoutError
     }
@@ -1221,57 +1191,15 @@ export function GraphCanvas({
   const [edges, setEdges, onEdgesChange] = useEdgesState(decoratedComposedEdges)
   nodesRef.current = nodes
 
-  const hasLayoutNodes = layoutResult.nodes.length > 0 && !layoutResult.error
-  const layoutSignature = useMemo(
-    () => layoutViewportSignature(layoutResult.nodes, layoutResult.edges),
-    [layoutResult.nodes, layoutResult.edges],
-  )
+  const hasLayoutNodes = layoutResult.nodes.length > 0
   useCanvasLayoutEffect(() => {
     setNodes(composedLayout.nodes)
     setEdges(decoratedComposedEdges)
     const shouldFitViewport = hasLayoutNodes && !viewportReadyRef.current
     if (shouldFitViewport) {
-      lastFittedLayoutSignatureRef.current = layoutSignature
       fitLayout({ reveal: !viewportReadyRef.current })
     }
-  }, [composedLayout.nodes, decoratedComposedEdges, fitLayout, hasLayoutNodes, layoutSignature, setEdges, setNodes])
-
-  useEffect(() => {
-    if (layoutResult.error) {
-      toast.error('SKILL contains cyclic dependency - cannot render graph')
-      console.error(layoutResult.error)
-    }
-  }, [layoutResult.error])
-
-  // N4 atom #9 (run-focus-follow): when the run advances to a new node,
-  // auto-center the viewport on it. `activeTracePhase` is the live "running"
-  // node Workspace derives from the run stream; nodeToFocus only confirms a
-  // matching node exists on the canvas before centering, so we never fitView
-  // onto a phase id with no node (e.g. drilled child, INPUT/OUTPUT). Mirrors the
-  // conflict-warning pan effect above; no timer/listener so no cleanup needed.
-  const lastFocusedPhaseRef = useRef<string | null>(null)
-  useEffect(() => {
-    if (!reactFlowInstance) {
-      return
-    }
-    // Only re-center when the RUNNING phase actually changes, not on every status
-    // overlay tick or user node-drag (which both churn the `nodes` reference). Read
-    // node existence at fire time via getNodes() so `nodes` stays out of the deps,
-    // otherwise a live run would keep snapping the viewport back and fight a manual pan.
-    if ((activeTracePhase ?? null) === lastFocusedPhaseRef.current) {
-      return
-    }
-    const focusId = nodeToFocus(activeTracePhase, reactFlowInstance.getNodes().map((node) => node.id))
-    if (!focusId) {
-      return
-    }
-    lastFocusedPhaseRef.current = activeTracePhase ?? null
-    reactFlowInstance.fitView({
-      nodes: [{ id: focusId }],
-      duration: 600,
-      padding: 0.8,
-    })
-  }, [activeTracePhase, reactFlowInstance])
+  }, [composedLayout.nodes, decoratedComposedEdges, fitLayout, hasLayoutNodes, setEdges, setNodes])
 
   // Controlled effect to sync activeConflict, isConflictCancelled, and callbacks into the nodes state
   useEffect(() => {
@@ -1345,8 +1273,8 @@ export function GraphCanvas({
   const onConnect = useCallback((connection: Connection) => {
     const source = connection.source
     const target = connection.target
-    if (!source || !target || source === INPUT_ID || source === OUTPUT_ID || target === INPUT_ID || target === OUTPUT_ID) {
-      toast.error('Only phase nodes can be connected as dependencies')
+    if (!source || !target) {
+      toast.error('Connection endpoints are required')
       return
     }
     if (source === target) {
@@ -1355,12 +1283,20 @@ export function GraphCanvas({
     }
     const sourceNode = phaseNodes.find((node) => node.id === source)
     const targetNode = phaseNodes.find((node) => node.id === target)
-    if (!sourceNode || !targetNode) {
-      toast.error('Both connection endpoints must be phase nodes')
+    const isGraphInputConnection = source === INPUT_ID && Boolean(targetNode)
+    const isGraphOutputConnection = Boolean(sourceNode) && target === OUTPUT_ID
+    const isPhaseDependencyConnection = Boolean(sourceNode) && Boolean(targetNode)
+    if (!isGraphInputConnection && !isGraphOutputConnection && !isPhaseDependencyConnection) {
+      toast.error('Connect Input to a phase, phase to phase, or phase to Output')
       return
     }
-    if (targetNode.data.dependsOn.includes(source)) {
+    const dependencySource = source === INPUT_ID ? 'input' : source
+    if (targetNode && targetNode.data.dependsOn.includes(dependencySource)) {
       toast.error('This dependency already exists')
+      return
+    }
+    if (sourceNode && target === OUTPUT_ID && sourceNode.data.isOutput === true) {
+      toast.error('This output marker already exists')
       return
     }
     if (blockDrilledEditIfUnwritable()) {
@@ -1381,16 +1317,28 @@ export function GraphCanvas({
       style: { strokeWidth: 1.5 },
     }, edgeHandlers), current))
     setNodes((current) => current.map((node) => {
-      if (node.type !== 'skill' || node.id !== target || node.data.dependsOn.includes(source)) {
+      if (node.type !== 'skill') {
         return node
       }
-      return {
-        ...node,
-        data: {
-          ...node.data,
-          dependsOn: [...node.data.dependsOn, source],
+      if (node.id === targetNode?.id && !node.data.dependsOn.includes(dependencySource)) {
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            dependsOn: [...node.data.dependsOn, dependencySource],
+          }
         }
       }
+      if (node.id === sourceNode?.id && target === OUTPUT_ID) {
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            isOutput: true,
+          }
+        }
+      }
+      return node
     }))
     if (onPersistConnection) {
       // n2-canvas #14: pass the drilled-child target ONLY when drilled; at root
@@ -1419,19 +1367,6 @@ export function GraphCanvas({
   // defensive path for any future surface that mounts GraphCanvas without it.
   const onReconnect = useCallback((oldEdge: Edge<ContextEdgeData>, newConnection: Connection) => {
     reconnectLandedRef.current = true
-    if (
-      oldEdge.source === INPUT_ID
-      || oldEdge.source === OUTPUT_ID
-      || oldEdge.target === INPUT_ID
-      || oldEdge.target === OUTPUT_ID
-      || newConnection.source === INPUT_ID
-      || newConnection.source === OUTPUT_ID
-      || newConnection.target === INPUT_ID
-      || newConnection.target === OUTPUT_ID
-    ) {
-      toast.error('Only phase nodes can be reconnected as dependencies')
-      return
-    }
     const plan = planEdgeReconnect(
       { source: oldEdge.source, target: oldEdge.target },
       { source: newConnection.source, target: newConnection.target },
@@ -1570,14 +1505,6 @@ export function GraphCanvas({
         </div>
       ) : null}
 
-      {layoutResult.error ? (
-        <div className="absolute inset-0 z-10 grid place-items-center bg-background/80 p-8">
-          <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-            SKILL contains cyclic dependency - cannot render graph.
-          </div>
-        </div>
-      ) : null}
-
       {/* compact remains available for explicit read-only projections. The file
           editor split uses normal canvas mode so authoring behaviour stays the
           same when the canvas is squeezed into the lower pane. */}
@@ -1680,10 +1607,8 @@ export function GraphCanvas({
           }
         }}
         onInit={(instance) => {
-          setReactFlowInstance(instance)
           fitViewRef.current = () => instance.fitView({ padding: 0.2 })
           if (hasLayoutNodes) {
-            lastFittedLayoutSignatureRef.current = layoutSignature
             fitLayout({ reveal: !viewportReadyRef.current })
           }
         }}

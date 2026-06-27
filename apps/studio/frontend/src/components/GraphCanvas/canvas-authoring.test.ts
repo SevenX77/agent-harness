@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SkillDetail } from '@/api/types'
+import { INPUT_ID, OUTPUT_ID } from '@/components/nodes'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 import {
   connectPhaseRefs,
@@ -57,6 +58,24 @@ describe('canvas authoring helpers', () => {
     ])
   })
 
+  it('preserves explicit output markers from topology rows', () => {
+    const refs = phaseRefsFromSkillDetail(skillDetail({
+      phases: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+      ],
+      graph_topology: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'skill' },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'], mode: 'logic', output: true },
+      ],
+    }))
+
+    expect(refs).toEqual([
+      { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'skill' },
+      { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'], mode: 'logic', output: true },
+    ])
+  })
+
   it('creates logic, skill, and subgraph phase drafts with matching file paths', () => {
     const detail = skillDetail()
 
@@ -91,19 +110,36 @@ describe('canvas authoring helpers', () => {
       expect(content).not.toContain('python_callable')
       expect(content).not.toContain('target_skill')
       expect(content).not.toContain('depends_on')
-      expect(content).not.toContain('input')
-      expect(content).not.toContain('output')
-      expect(content).not.toContain('io:')
+      expect(content).not.toContain('sub_skill_ref')
     }
 
-    // New canvas nodes are intentionally clean stubs. The compiler, user, and
-    // Copilot decide how to make them executable; creation must not invent data
-    // boundaries or dependencies.
+    // New canvas nodes are topologically clean: no dependencies and no output
+    // marker are invented during creation.
+    for (const draft of [logic, skill, subgraph]) {
+      expect(draft.phaseRef.depends_on).toEqual([])
+      expect(draft.phaseRef.output).toBeUndefined()
+    }
+
+    // But the source files should still use the MVP1 phase skeleton so users
+    // edit real fields instead of starting from an under-shaped stub.
     expect(logic.fileContent).toContain('name: logic')
+    expect(logic.fileContent).toContain('io:')
+    expect(logic.fileContent).toContain('inputs:')
+    expect(logic.fileContent).toContain('outputs:')
+    expect(logic.fileContent).toContain('actions:')
 
     expect(skill.fileContent).toContain('name: agent')
+    expect(skill.fileContent).toContain('io:')
+    expect(skill.fileContent).toContain('inputs:')
+    expect(skill.fileContent).toContain('outputs:')
+    expect(skill.fileContent).toContain('<role>')
+    expect(skill.fileContent).toContain('<goal>')
 
     expect(subgraph.fileContent).toContain('name: subgraph')
+    expect(subgraph.fileContent).toContain('path:')
+    expect(subgraph.fileContent).toContain('io:')
+    expect(subgraph.fileContent).toContain('inputs:')
+    expect(subgraph.fileContent).toContain('outputs:')
   })
 
   it('creates a phase draft with a submitted safe node name', () => {
@@ -207,6 +243,36 @@ describe('canvas authoring helpers', () => {
     expect(result.phases.find((phase) => phase.id === 'review')?.depends_on).toEqual(['draft'])
   })
 
+  it('connects graph input to a phase by writing depends_on input', () => {
+    const result = connectPhaseRefs(skillDetail({
+      phases: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+      ],
+      graph_topology: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'skill' },
+      ],
+    }), INPUT_ID, 'draft')
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.phases.find((phase) => phase.id === 'draft')?.depends_on).toEqual(['input'])
+  })
+
+  it('connects a phase to graph output by writing the explicit output marker', () => {
+    const result = connectPhaseRefs(skillDetail({
+      phases: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+      ],
+      graph_topology: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'skill' },
+      ],
+    }), 'draft', OUTPUT_ID)
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.phases.find((phase) => phase.id === 'draft')?.output).toBe(true)
+  })
+
   it('rejects self dependencies, duplicate dependencies, and unknown phase ids', () => {
     const detail = skillDetail({
       phases: [
@@ -233,6 +299,31 @@ describe('canvas authoring helpers', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.phases.find((phase) => phase.id === 'review')?.depends_on).toEqual(['research'])
+  })
+
+  it('disconnects graph input and graph output boundary markers', () => {
+    const detail = skillDetail({
+      phases: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: ['input'] },
+      ],
+      graph_topology: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: ['input'], mode: 'skill', output: true },
+      ],
+    })
+
+    const withoutInput = disconnectPhaseRefs(detail, INPUT_ID, 'draft')
+    expect(withoutInput.ok).toBe(true)
+    if (withoutInput.ok) {
+      expect(withoutInput.phases.find((phase) => phase.id === 'draft')?.depends_on).toEqual([])
+      expect(withoutInput.phases.find((phase) => phase.id === 'draft')?.output).toBe(true)
+    }
+
+    const withoutOutput = disconnectPhaseRefs(detail, 'draft', OUTPUT_ID)
+    expect(withoutOutput.ok).toBe(true)
+    if (withoutOutput.ok) {
+      expect(withoutOutput.phases.find((phase) => phase.id === 'draft')?.depends_on).toEqual(['input'])
+      expect(withoutOutput.phases.find((phase) => phase.id === 'draft')?.output).toBeUndefined()
+    }
   })
 
   it('removes a phase and clears incoming dependencies when deleting phase refs', () => {

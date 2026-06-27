@@ -127,6 +127,8 @@ def test_subgraph_phase_topology_surfaces_absolute_path(
     topology = response.json()["graph_topology"]
     rows = {row["id"]: row for row in topology}
     assert rows["review"]["mode"] == "subgraph"
+    assert rows["review"]["output"] is True
+    assert rows["setup"].get("output") is not True
     # §2.1: the absolute child path is surfaced from the SUBGRAPH.md `path` field,
     # never the legacy `target_skill` field.
     assert rows["review"]["path"] == str(child_dir)
@@ -203,6 +205,7 @@ async def test_resolve_child_graph_topology_returns_child_phases(
     rows = {row["id"]: row for row in result.graph_topology}
     assert rows["ingest"]["mode"] == "logic"
     assert rows["ingest"]["depends_on"] == ["input"]
+    assert rows["ingest"]["output"] is True
 
 
 @pytest.mark.anyio

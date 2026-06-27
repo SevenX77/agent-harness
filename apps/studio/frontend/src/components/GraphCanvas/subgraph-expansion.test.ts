@@ -273,6 +273,19 @@ describe('buildSubgraphExpansion', () => {
     expect(bridge?.data?.showContextControl).toBe(false)
   })
 
+  it('lets the subgraph frame move from its header while keeping child topology bound to it', () => {
+    const { nodes } = buildSubgraphExpansion(PARENT_NODES, [LOADED_REQUEST])
+    const group = nodes.find((node) => node.type === 'subgraphGroup')
+    const childPhases = nodes.filter((node) => node.type === 'skill')
+
+    expect(group).toMatchObject({
+      draggable: true,
+      dragHandle: '.subgraph-group-drag-handle',
+      selectable: false,
+    })
+    expect(childPhases.every((node) => node.parentId === group?.id)).toBe(true)
+  })
+
   it('places the group past the parent graph without encoding that span into the parent node', () => {
     const parents: PositionedParentNode[] = [
       { id: 'expand', type: 'skill', position: { x: 160, y: 490 } },

@@ -92,13 +92,13 @@ export function EdgeContextDot({
       <circle
         r={EDGE_DOT_RADIUS}
         className={hasTraceData ? 'edge-context-dot__halo' : undefined}
-        fill="var(--color-background)"
-        stroke={hasTraceData ? 'var(--primary, #6366f1)' : 'var(--color-border)'}
+        fill="var(--studio-canvas-edge-dot-fill, var(--color-background))"
+        stroke={hasTraceData ? 'var(--studio-canvas-accent, var(--primary))' : 'var(--studio-canvas-border, var(--color-border))'}
         strokeWidth={2}
       />
       <circle
         r={EDGE_DOT_RADIUS - 3}
-        fill={hasTraceData ? 'var(--primary, #6366f1)' : 'var(--color-muted-foreground)'}
+        fill={hasTraceData ? 'var(--studio-canvas-accent, var(--primary))' : 'var(--studio-canvas-edge-dot-muted, var(--color-muted-foreground))'}
         opacity={hasTraceData ? 1 : 0.75}
       />
     </g>
@@ -152,7 +152,7 @@ export function ContextEdge({
         id={id}
         path={edgePath}
         style={{
-          stroke: '#27272a', // zinc-800
+          stroke: 'var(--studio-canvas-edge, var(--color-border))',
           strokeWidth: 2,
           ...style,
         }}
@@ -165,7 +165,7 @@ export function ContextEdge({
           path={edgePath}
           className="animated-flow-line"
           style={{
-            stroke: 'var(--primary, #6366f1)',
+            stroke: 'var(--studio-canvas-accent, var(--primary))',
             strokeWidth: 2,
             strokeOpacity: 0.8,
             pointerEvents: 'none',

@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import type { Connection } from "@xyflow/react"
 import { toast } from "sonner"
 import useSWR from "swr"
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
+import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { GraphCanvas, type SkillGraphNodeData } from "@/components/GraphCanvas"
 import { CopilotPanel } from "@/components/copilot/copilot-panel"
 import { copilotFileActionEffects, type CopilotFileAction } from "@/components/copilot/patch-proposed-bubble"
@@ -40,8 +40,10 @@ import { ConflictDialog } from "./ConflictDialog"
 import { Header } from "./Header"
 import { Panels } from "./Panels"
 import { SettingsPage } from "./SettingsPage"
-import { SplitEditor } from "./SplitEditor"
 import { Toolbar, type PanelKind } from "./Toolbar"
+import { WorkspaceEditorOverlay } from "./WorkspaceEditorOverlay"
+import { WorkspaceLeftPanelOverlay } from "./WorkspaceLeftPanelOverlay"
+import { WorkspaceRightPanelOverlay } from "./WorkspaceRightPanelOverlay"
 import { applyPhaseName } from "./panels/phase-frontmatter"
 import type { FileOpenInput } from "./file-types"
 import { conflictFromSaveError, isSameSaveConflict, overwriteRetryPayload } from "./save-conflicts"
@@ -60,10 +62,6 @@ interface WorkspaceProps {
   onSelectSkill: (skillId: string) => void
   onCloseSkill: () => void
 }
-
-const LEFT_SIDEBAR_DEFAULT_SIZE = "24rem"
-const LEFT_SIDEBAR_MIN_SIZE = "24rem"
-const LEFT_SIDEBAR_MAX_SIZE = "35rem"
 
 interface CopilotJudgeReplayContext {
   skillId: string | null
@@ -1639,6 +1637,65 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     return compileErrorsToFieldLintErrors(currentSkillId ? compileErrors[currentSkillId] : [])
   }, [compileErrors, currentSkillId, realtimeLint])
 
+  const leftPanelOverlay = activePanel ? (
+    <WorkspaceLeftPanelOverlay onClose={() => setActivePanel(null)}>
+      <Panels
+        activePanel={activePanel}
+        skillId={currentSkillId}
+        workspaceRoot={currentWorkspaceRoot}
+        skillDetail={skillDetail}
+        selectedNode={selectedNode}
+        selectedNodeStatus={selectedNodeStatus}
+        selectedTestInputId={selectedTestInputId}
+        onSelectTestInput={setSelectedTestInputId}
+        onPhaseFileSave={handlePhaseFileSave}
+        onPhaseRename={handleRenamePhase}
+        runId={runId}
+        lintErrors={propertiesFieldErrors}
+        resumeValidity={resumeValidity}
+        resumeValidityLoading={resumeValidityLoading}
+        resumeValidityError={resumeValidityError}
+        traceEvents={runStream.events}
+        activeTracePhase={activeTracePhase}
+        onSelectTracePrompt={setPromptIndex}
+        traceCanCompare={Boolean(runId)}
+        traceCompareLoading={goldenDiff.loading}
+        onCompareToGolden={handleCompareToGolden}
+        onPromoteToGolden={handlePromoteToGolden}
+        onPromoteNode={handlePromoteNode}
+        traceCanResume={Boolean(runId)}
+        traceResumeLoading={resumeLoading}
+        onResumeRun={handleResume}
+        onResumeNode={runId ? handleResumeNode : undefined}
+        onSubmitHitlResponse={handleSubmitHitlResponse}
+        onResumeEdgeDownstream={runId ? handleResumeEdgeDownstream : undefined}
+        compareTabs={compareTabs}
+        activeCandidateId={compareCandidateId}
+        onSelectCandidate={handleSelectCandidate}
+      />
+    </WorkspaceLeftPanelOverlay>
+  ) : null
+  const editorOpen = Boolean(activeFileDetails.left || activeFileDetails.right)
+  const workspaceOverlayStyle = {
+    "--studio-canvas-left-safe-area": activePanel ? "25.5rem" : "0px",
+    "--studio-canvas-right-safe-area": copilotOpen ? "23.5rem" : "0px",
+    "--studio-canvas-editor-safe-area": editorOpen ? "calc(var(--studio-editor-overlay-height) + 1.5rem)" : "0px",
+    "--studio-editor-overlay-height": "min(52%, 34rem)",
+  } as CSSProperties
+  const rightPanelOverlay = copilotOpen ? (
+    <WorkspaceRightPanelOverlay>
+      <CopilotPanel
+        skillId={currentSkillId}
+        workspaceRoot={currentWorkspaceRoot}
+        view={copilotJudgeRefs ? "eval" : "edit"}
+        judgeRefs={copilotJudgeRefs}
+        completedRunId={completedRunId}
+        onJudgePrepared={setCopilotJudgeResult}
+        onFileChanged={handleCopilotFileChanged}
+      />
+    </WorkspaceRightPanelOverlay>
+  ) : null
+
   return (
     <WorkspaceProvider value={contextValue}>
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
@@ -1669,56 +1726,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
           orientation="horizontal"
           className="min-w-0 flex-1"
         >
-          {activePanel ? (
-            <>
-              <ResizablePanel
-                id="left-panel"
-                defaultSize={LEFT_SIDEBAR_DEFAULT_SIZE}
-                minSize={LEFT_SIDEBAR_MIN_SIZE}
-                maxSize={LEFT_SIDEBAR_MAX_SIZE}
-                className="h-full min-h-0 overflow-hidden"
-              >
-                <Panels
-                  activePanel={activePanel}
-                  skillId={currentSkillId}
-                  workspaceRoot={currentWorkspaceRoot}
-                  skillDetail={skillDetail}
-                  selectedNode={selectedNode}
-                  selectedNodeStatus={selectedNodeStatus}
-                  selectedTestInputId={selectedTestInputId}
-                  onSelectTestInput={setSelectedTestInputId}
-                  onPhaseFileSave={handlePhaseFileSave}
-                  onPhaseRename={handleRenamePhase}
-                  runId={runId}
-                  lintErrors={propertiesFieldErrors}
-                  resumeValidity={resumeValidity}
-                  resumeValidityLoading={resumeValidityLoading}
-                  resumeValidityError={resumeValidityError}
-                  traceEvents={runStream.events}
-                  activeTracePhase={activeTracePhase}
-                  onSelectTracePrompt={setPromptIndex}
-                  traceCanCompare={Boolean(runId)}
-                  traceCompareLoading={goldenDiff.loading}
-                  onCompareToGolden={handleCompareToGolden}
-                  onPromoteToGolden={handlePromoteToGolden}
-                  onPromoteNode={handlePromoteNode}
-                  traceCanResume={Boolean(runId)}
-                  traceResumeLoading={resumeLoading}
-                  onResumeRun={handleResume}
-                  onResumeNode={runId ? handleResumeNode : undefined}
-                  onSubmitHitlResponse={handleSubmitHitlResponse}
-                  onResumeEdgeDownstream={runId ? handleResumeEdgeDownstream : undefined}
-                  compareTabs={compareTabs}
-                  activeCandidateId={compareCandidateId}
-                  onSelectCandidate={handleSelectCandidate}
-                />
-              </ResizablePanel>
-              <ResizableHandle />
-            </>
-          ) : null}
-
-          <ResizablePanel id="canvas" defaultSize={copilotOpen ? "60%" : "80%"} minSize="30%">
-            <div className="relative size-full">
+          <ResizablePanel id="canvas" defaultSize="100%" minSize="30%">
+            <div className="relative size-full" style={currentSkillId ? workspaceOverlayStyle : undefined}>
               {currentSkillId === null ? (
                 settingsOpen ? (
                   <SettingsPage onClose={() => setSettingsOpen(false)} />
@@ -1727,45 +1736,50 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                 )
               ) : (
                 <>
-                  <SplitEditor
-                    canvas={(
-                      <GraphCanvas
-                        key={currentSkillId}
-                        skillId={currentSkillId}
-                        workspaceRoot={currentWorkspaceRoot}
-                        skillDetail={skillDetail}
-                        isLoading={isLoading}
-                        error={skillDetailError}
-                        selectedNodeId={selectedNodeId}
-                        onNodeSelect={handleNodeSelect}
-                        onNodeDeselect={handleNodeDeselect}
-                        onNodeFileOpen={handleFileOpen}
-                        onPanelChange={setActivePanel}
-                        onCreatePhase={handleCreatePhase}
-                        onDeletePhase={handleDeletePhase}
-                        onPersistConnection={handlePersistConnection}
-                        onDisconnectConnection={handleDisconnectConnection}
-                        onReconnectConnection={handleReconnectConnection}
-                        onPhaseFileSave={handlePhaseFileSave}
-                        onPhaseFileRead={handlePhaseFileRead}
-                        statusByNodeId={statusByNodeId}
-                        sequentialOverwriteErrorsByNodeId={manualCompileErrorsByNodeId}
-                        compileErrorsByNodeId={compileErrorsByNodeId}
-                        goldenStateByNodeId={goldenStateByNodeId}
-                        errorMessageByNodeId={errorMessageByNodeId}
-                        dirtyDownstreamNodeIds={dirtyDownstreamNodeIds}
-                        runId={runId}
-                        resumeNodeStatus={selectedNodeStatus}
-                        resumeValidity={resumeValidity}
-                        resumeValidityLoading={resumeValidityLoading}
-                        resumeValidityError={resumeValidityError}
-                        resumeLoading={resumeLoading}
-                        onResumeNode={runId ? handleResumeNode : undefined}
-                        onSubmitHitlResponse={handleSubmitHitlResponse}
-                        hitlSubmitting={resumeLoading}
-                      />
-                    )}
-                  />
+                  <div
+                    data-studio-canvas-overlay-host="true"
+                    className="relative size-full"
+                  >
+                    <GraphCanvas
+                      key={currentSkillId}
+                      skillId={currentSkillId}
+                      workspaceRoot={currentWorkspaceRoot}
+                      skillDetail={skillDetail}
+                      isLoading={isLoading}
+                      error={skillDetailError}
+                      selectedNodeId={selectedNodeId}
+                      onNodeSelect={handleNodeSelect}
+                      onNodeDeselect={handleNodeDeselect}
+                      onNodeFileOpen={handleFileOpen}
+                      onPanelChange={setActivePanel}
+                      onCreatePhase={handleCreatePhase}
+                      onDeletePhase={handleDeletePhase}
+                      onPersistConnection={handlePersistConnection}
+                      onDisconnectConnection={handleDisconnectConnection}
+                      onReconnectConnection={handleReconnectConnection}
+                      onPhaseFileSave={handlePhaseFileSave}
+                      onPhaseFileRead={handlePhaseFileRead}
+                      statusByNodeId={statusByNodeId}
+                      sequentialOverwriteErrorsByNodeId={manualCompileErrorsByNodeId}
+                      compileErrorsByNodeId={compileErrorsByNodeId}
+                      goldenStateByNodeId={goldenStateByNodeId}
+                      errorMessageByNodeId={errorMessageByNodeId}
+                      dirtyDownstreamNodeIds={dirtyDownstreamNodeIds}
+                      hideMiniMap={editorOpen}
+                      runId={runId}
+                      resumeNodeStatus={selectedNodeStatus}
+                      resumeValidity={resumeValidity}
+                      resumeValidityLoading={resumeValidityLoading}
+                      resumeValidityError={resumeValidityError}
+                      resumeLoading={resumeLoading}
+                      onResumeNode={runId ? handleResumeNode : undefined}
+                      onSubmitHitlResponse={handleSubmitHitlResponse}
+                      hitlSubmitting={resumeLoading}
+                    />
+                    {leftPanelOverlay}
+                    <WorkspaceEditorOverlay />
+                    {rightPanelOverlay}
+                  </div>
                   {settingsOpen ? (
                     <div className="absolute inset-0 z-50 bg-background">
                       <SettingsPage onClose={() => setSettingsOpen(false)} />
@@ -1825,28 +1839,6 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
             </div>
           </ResizablePanel>
 
-          {copilotOpen ? (
-            <>
-              <ResizableHandle />
-              <ResizablePanel
-                id="copilot"
-                defaultSize="20%"
-                minSize="18%"
-                maxSize="35%"
-                className="min-w-[340px]"
-              >
-                <CopilotPanel
-                  skillId={currentSkillId}
-                  workspaceRoot={currentWorkspaceRoot}
-                  view={copilotJudgeRefs ? "eval" : "edit"}
-                  judgeRefs={copilotJudgeRefs}
-                  completedRunId={completedRunId}
-                  onJudgePrepared={setCopilotJudgeResult}
-                  onFileChanged={handleCopilotFileChanged}
-                />
-              </ResizablePanel>
-            </>
-          ) : null}
         </ResizablePanelGroup>
       </div>
       <ConflictDialog

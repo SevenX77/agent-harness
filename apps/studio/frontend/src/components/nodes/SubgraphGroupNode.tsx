@@ -1,5 +1,5 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
-import { FileCode2 } from 'lucide-react'
+import { FileCode2, GripHorizontal } from 'lucide-react'
 import type { CSSProperties } from 'react'
 import { SUBGRAPH_BRIDGE_TARGET_HANDLE_ID } from './subgraph-bridge-handles'
 import type { SubgraphGroupNodeData } from './types'
@@ -22,7 +22,7 @@ export function SubgraphGroupNode({ data }: NodeProps<SubgraphGroupNode>) {
     : undefined
 
   return (
-    <div className="subgraph-dash-frame pointer-events-none relative flex size-full overflow-visible rounded-lg bg-transparent" style={bridgeTargetStyle}>
+    <div className="subgraph-dash-frame studio-subgraph-frame pointer-events-none relative flex size-full overflow-visible rounded-md" style={bridgeTargetStyle}>
       <Handle
         id={SUBGRAPH_BRIDGE_TARGET_HANDLE_ID}
         type="target"
@@ -31,10 +31,14 @@ export function SubgraphGroupNode({ data }: NodeProps<SubgraphGroupNode>) {
         className="subgraph-bridge-target-handle"
       />
       <div className="flex size-full min-h-0 flex-col overflow-hidden rounded-[inherit]">
-        <div className="flex items-center gap-2 border-b border-primary/20 px-3 py-2 text-xs font-medium text-primary">
+        <div
+          data-subgraph-group-drag-handle="true"
+          className="subgraph-group-drag-handle studio-subgraph-header pointer-events-auto flex cursor-grab select-none items-center gap-2 border-b px-3 py-2 text-xs font-medium active:cursor-grabbing"
+        >
+          <GripHorizontal className="size-3.5 shrink-0 text-muted-foreground" />
           <FileCode2 className="size-3.5 shrink-0" />
           <span className="truncate">{title}</span>
-          <span className="ml-auto shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+          <span className="studio-subgraph-badge ml-auto shrink-0 rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
             subgraph
           </span>
         </div>

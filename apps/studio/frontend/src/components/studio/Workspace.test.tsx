@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
     onCreatePhase?: (kind: 'skill' | 'logic' | 'subgraph', phaseId?: string) => Promise<void> | void
     onDeletePhase?: (phaseId: string) => Promise<void> | void
     onNodeFileOpen?: (fileOrPath: unknown) => void
+    hideMiniMap?: boolean
     onPersistConnection?: (connection: { source: string; target: string }) => Promise<void> | void
     onReconnectConnection?: (
       disconnect: { source: string; target: string },
@@ -205,6 +206,7 @@ vi.mock('@/components/GraphCanvas', () => ({
     onCreatePhase?: (kind: 'skill' | 'logic' | 'subgraph', phaseId?: string) => Promise<void> | void
     onDeletePhase?: (phaseId: string) => Promise<void> | void
     onNodeFileOpen?: (fileOrPath: unknown) => void
+    hideMiniMap?: boolean
     onPersistConnection?: (connection: { source: string; target: string }) => Promise<void> | void
     onReconnectConnection?: (
       disconnect: { source: string; target: string },
@@ -574,7 +576,7 @@ describe('Workspace WS-1 local writer contracts', () => {
     expect(mocks.graphCanvasProps?.sequentialOverwriteErrorsByNodeId).toEqual({})
   })
 
-  it('constrains the left resizable panel so Assets split panes stay inside the viewport', () => {
+  it('renders the left workspace panel as an overlay drawer so the canvas is not resized', () => {
     const html = renderToStaticMarkup(
       <Workspace
         skillId="writer-smoke"
@@ -583,12 +585,62 @@ describe('Workspace WS-1 local writer contracts', () => {
       />,
     )
 
-    expect(html).toContain('data-panel-id="left-panel"')
-    expect(html).toContain('h-full min-h-0 overflow-hidden')
-    expect(html).toContain('data-default-size="24rem"')
-    expect(html).toContain('data-min-size="24rem"')
-    expect(html).toContain('data-max-size="35rem"')
-    expect(html).not.toContain('min-w-[24rem]')
+    expect(html).toContain('data-studio-left-overlay="true"')
+    expect(html).toContain('data-studio-canvas-overlay-host="true"')
+    expect(html).toContain('studio-left-panel-overlay')
+    expect(html).toContain('data-studio-left-panel-content="true"')
+    expect(html).toContain('h-fit')
+    expect(html).toContain('max-h-[calc(100%-1.5rem)]')
+    expect(html).toContain('flex min-h-0 max-h-[inherit]')
+    expect(html).toContain('--studio-canvas-left-safe-area:25.5rem')
+    expect(html).toContain('--studio-canvas-right-safe-area:23.5rem')
+    expect(html).toContain('rounded-lg')
+    expect(html).toContain('top-3')
+    expect(html).not.toContain('bottom-3 left-3 top-3')
+    expect(html).toContain('Close panel')
+    expect(html).toContain('data-testid="panels"')
+    expect(html).toContain('data-panel-id="canvas"')
+    expect(html).not.toContain('data-panel-id="left-panel"')
+  })
+
+  it('opens files in a canvas overlay editor, keeps GraphCanvas full-size, and hides the minimap', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => {
+        root.render(
+          <Workspace
+            skillId="writer-smoke"
+            onSelectSkill={vi.fn()}
+            onCloseSkill={vi.fn()}
+          />,
+        )
+      })
+
+      await act(async () => {
+        mocks.graphCanvasProps?.onNodeFileOpen?.({
+          path: 'phases/review/SKILL.md',
+          content: 'review body\n',
+          skillId: 'writer-smoke',
+          workspaceRoot: '/Users/sevenx/Projects/writer-smoke',
+          language: 'markdown',
+          hash: 'hash-1',
+        })
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      expect(container.innerHTML).toContain('data-studio-editor-overlay="true"')
+      expect(container.innerHTML).toContain('data-testid="lazy-monaco-panel"')
+      expect(container.innerHTML).not.toContain('editor-canvas-divider')
+      expect(container.innerHTML).toContain('--studio-canvas-editor-safe-area: calc(var(--studio-editor-overlay-height) + 1.5rem)')
+      expect(mocks.graphCanvasProps?.hideMiniMap).toBe(true)
+      expect(mocks.graphCanvasProps).not.toHaveProperty('viewportInsets')
+    } finally {
+      root.unmount()
+      container.remove()
+    }
   })
 
   it('passes imported workspace roots into golden diff promotion without changing the API skill id', () => {

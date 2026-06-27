@@ -5,6 +5,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import type { CompileError } from '@/api/types'
+import { SUBGRAPH_BRIDGE_SOURCE_HANDLE_ID } from './subgraph-bridge-handles'
 import type { SkillGraphNode, SkillGraphNodeData, SkillNodeStatus } from './types'
 
 type PhaseKind = 'LOGIC' | 'AGENT' | 'SUBGRAPH'
@@ -259,7 +260,13 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
         // half-overhangs, the node's right border.
         <div className="absolute right-0 top-1/2 z-10 -translate-y-1/2 translate-x-1/2">
           {data.isExpanded ? (
-            <span aria-hidden="true" className="subgraph-toggle-bridge-line" />
+            <Handle
+              id={SUBGRAPH_BRIDGE_SOURCE_HANDLE_ID}
+              type="source"
+              position={Position.Right}
+              isConnectable={false}
+              className="subgraph-bridge-source-handle"
+            />
           ) : null}
           <button
             type="button"

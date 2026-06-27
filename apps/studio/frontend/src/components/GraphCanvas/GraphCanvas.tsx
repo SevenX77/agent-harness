@@ -12,6 +12,7 @@ import {
   type Connection,
   type Edge,
   type FinalConnectionState,
+  type NodeChange,
 } from '@xyflow/react'
 import { Trash2 } from 'lucide-react'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type MouseEvent } from 'react'
@@ -34,9 +35,11 @@ import {
 import { CycleDetectedError, getAutoLayoutedElements } from '@/lib/layout'
 import { sha256Hex } from '@/lib/hash'
 import { ContextEdge, type ContextEdgeData } from '@/components/edges/ContextEdge'
+import { SubgraphBridgeEdge } from '@/components/edges/SubgraphBridgeEdge'
 import { SubgraphGroupNode } from '@/components/nodes/SubgraphGroupNode'
 import { buildEdges, GlobalInputNode, GlobalOutputNode, INPUT_ID, OUTPUT_ID, SkillNode, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
-import { buildSubgraphExpansion, isSubgraphPreviewId, type ExpandedSubgraphView, type SubgraphExpansionRequest } from '@/components/GraphCanvas/subgraph-expansion'
+import { SUBGRAPH_BRIDGE_EDGE_TYPE } from '@/components/nodes/subgraph-bridge-handles'
+import { buildSubgraphExpansion, isSubgraphPreviewId, positionedParentNodes, type ExpandedSubgraphView, type SubgraphExpansionRequest, type SubgraphExpansionResult } from '@/components/GraphCanvas/subgraph-expansion'
 import type { GoldenNodeState } from '@/components/studio/node-golden'
 import { useOptionalWorkspaceContext, type EdgeContextJson } from '@/components/studio/WorkspaceContext'
 import type { FileOpenInput, FileOpenRequest } from '@/components/studio/file-types'
@@ -67,6 +70,13 @@ import {
   sequentialOverwriteConflictForVisibleNode,
   sequentialOverwriteRoutesFromNodeErrors,
 } from './sequential-overwrite-routing'
+import {
+  canvasLayoutSignature,
+  layoutCanvasHeightForMode,
+  mergeStableLayoutPositions,
+  shouldRunInitialViewportFit,
+  updateStableLayoutPositionsFromNodeChanges,
+} from './canvas-projection'
 
 interface GraphCanvasProps {
   skillId: string
@@ -144,6 +154,7 @@ const nodeTypes = {
 
 const edgeTypes = {
   contextEdge: memo(ContextEdge),
+  [SUBGRAPH_BRIDGE_EDGE_TYPE]: memo(SubgraphBridgeEdge),
 }
 
 const CENTER_NODE_ORIGIN: [number, number] = [0.5, 0.5]
@@ -231,13 +242,7 @@ function SkillMiniMap({ nodes }: { nodes: GraphCanvasNode[] }) {
 }
 
 export function layoutViewportSignature(nodes: GraphCanvasNode[], edges: Edge<ContextEdgeData>[]): string {
-  const nodeSignature = nodes
-    .map((node) => `${node.id}:${node.type ?? ''}:${node.position.x},${node.position.y}`)
-    .join('|')
-  const edgeSignature = edges
-    .map((edge) => `${edge.id}:${edge.source}->${edge.target}:${edge.type ?? ''}`)
-    .join('|')
-  return `${nodeSignature}::${edgeSignature}`
+  return canvasLayoutSignature(nodes, edges)
 }
 
 const SUBGRAPH_PREVIEW_NODE_PREFIX = '__subpreview__::node::'
@@ -352,7 +357,9 @@ function decorateContextEdge(edge: Edge<ContextEdgeData>, handlers: ContextEdgeH
 }
 
 function decorateContextEdges(edges: Edge<ContextEdgeData>[], handlers: ContextEdgeHandlers): Edge<ContextEdgeData>[] {
-  return edges.map((edge) => decorateContextEdge(edge, handlers))
+  return edges.map((edge) => (
+    edge.type === 'contextEdge' ? decorateContextEdge(edge, handlers) : edge
+  ))
 }
 
 /** Map a child-topology resolver failure to a human-readable drill error. */
@@ -461,7 +468,13 @@ export function GraphCanvas({
   const nodesRef = useRef<GraphCanvasNode[]>([])
   const [isViewportReady, setIsViewportReady] = useState(false)
   const viewportReadyRef = useRef(false)
-  const viewportFitTokenRef = useRef(0)
+  const initialViewportFitStartedRef = useRef(false)
+  const viewportScopeKeyRef = useRef<string | null>(null)
+  const layoutCacheRef = useRef<{
+    signature: string
+    result: { nodes: GraphCanvasNode[]; edges: Edge<ContextEdgeData>[]; error: CycleDetectedError | null }
+  } | null>(null)
+  const stableLayoutPositionsRef = useRef<Map<string, GraphCanvasNode['position']>>(new Map())
   const pendingNodeFileOpenRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const cancelPendingNodeFileOpen = useCallback(() => {
@@ -647,19 +660,30 @@ export function GraphCanvas({
     toast.error('Sequential overwrite still unresolved. Adjust the node or allow overwrite before compiling.')
   }, [])
   const fitViewRef = useRef<(() => Promise<boolean> | boolean | void) | null>(null)
-  const fitLayout = useCallback((options: { reveal?: boolean } = {}) => {
-    const token = viewportFitTokenRef.current
+  const fitInitialViewportOnce = useCallback((hasLayoutNodes: boolean) => {
+    const fitView = fitViewRef.current
+    if (!shouldRunInitialViewportFit({
+      hasLayoutNodes,
+      hasFitView: Boolean(fitView),
+      initialFitStarted: initialViewportFitStartedRef.current,
+      viewportReady: viewportReadyRef.current,
+    })) {
+      return
+    }
+
+    initialViewportFitStartedRef.current = true
     window.requestAnimationFrame(() => {
-      const fitResult = fitViewRef.current?.()
-      if (!options.reveal) {
+      let fitResult: Promise<boolean> | boolean | void
+      try {
+        fitResult = fitView?.()
+      } catch {
+        updateViewportReady(true)
         return
       }
       void Promise.resolve(fitResult)
         .catch(() => undefined)
         .then(() => {
-          if (viewportFitTokenRef.current === token) {
-            updateViewportReady(true)
-          }
+          updateViewportReady(true)
         })
     })
   }, [updateViewportReady])
@@ -720,6 +744,21 @@ export function GraphCanvas({
 
   const drilledLevel = drillStack.length > 0 ? drillStack[drillStack.length - 1] : null
   const drilledPath = drilledLevel?.path ?? null
+  const viewportScopeKey = `${skillId}\0${drilledPath ?? ''}`
+  useCanvasLayoutEffect(() => {
+    if (viewportScopeKeyRef.current === null) {
+      viewportScopeKeyRef.current = viewportScopeKey
+      return
+    }
+    if (viewportScopeKeyRef.current === viewportScopeKey) {
+      return
+    }
+    viewportScopeKeyRef.current = viewportScopeKey
+    layoutCacheRef.current = null
+    stableLayoutPositionsRef.current = new Map()
+    initialViewportFitStartedRef.current = false
+    updateViewportReady(false)
+  }, [updateViewportReady, viewportScopeKey])
 
   // n2-canvas #14: load the drilled child's topology AND its full SkillDetail
   // (Option A). The detail is fetched against the CHILD's own resolved skillId
@@ -953,34 +992,62 @@ export function GraphCanvas({
   )
   // No nodes at all (e.g. drilled child still loading) means no edges, so we never
   // emit a phantom INPUT鈫扥UTPUT edge against a node-less canvas.
+  const topologyEdges = useMemo(
+    () => (rawNodes.length === 0 ? [] : buildEdges(phaseNodes)),
+    [phaseNodes, rawNodes.length],
+  )
   const rawEdges = useMemo(
     () => (rawNodes.length === 0 ? [] : buildEdges(phaseNodes, traceEvents)),
     [phaseNodes, rawNodes.length, traceEvents],
   )
+  const layoutCanvasHeight = layoutCanvasHeightForMode(canvasHeight, compactRatio)
+  const layoutSignature = useMemo(
+    () => canvasLayoutSignature(rawNodes, [], { canvasHeight: layoutCanvasHeight, compactRatio }),
+    [compactRatio, layoutCanvasHeight, rawNodes],
+  )
   const layoutResult = useMemo((): { nodes: GraphCanvasNode[]; edges: Edge<ContextEdgeData>[]; error: CycleDetectedError | null } => {
+    const cached = layoutCacheRef.current
+    if (cached?.signature === layoutSignature) {
+      return cached.result
+    }
+    let result: { nodes: GraphCanvasNode[]; edges: Edge<ContextEdgeData>[]; error: CycleDetectedError | null }
     try {
-      return { ...getAutoLayoutedElements(rawNodes, rawEdges, { canvasHeight, compactRatio }), error: null }
+      result = {
+        ...getAutoLayoutedElements(rawNodes, topologyEdges, { canvasHeight: layoutCanvasHeight, compactRatio }),
+        error: null,
+      }
     } catch (layoutError) {
       if (layoutError instanceof CycleDetectedError) {
-        return { nodes: rawNodes, edges: rawEdges, error: layoutError }
+        result = { nodes: rawNodes, edges: topologyEdges, error: layoutError }
+      } else {
+        throw layoutError
       }
-      throw layoutError
     }
-  }, [canvasHeight, compactRatio, rawEdges, rawNodes])
+    layoutCacheRef.current = { signature: layoutSignature, result }
+    return result
+  }, [compactRatio, layoutCanvasHeight, layoutSignature, rawNodes, topologyEdges])
+  const baseLayout = useMemo(() => {
+    const stableLayout = mergeStableLayoutPositions(rawNodes, layoutResult.nodes, stableLayoutPositionsRef.current)
+    stableLayoutPositionsRef.current = stableLayout.positions
+    return {
+      nodes: stableLayout.nodes,
+      edges: rawEdges,
+    }
+  }, [layoutResult.nodes, rawEdges, rawNodes])
   // N2 atom #13 (subgraph-inline-preview): expanding a subgraph should only
   // decide whether its child topology is present in the same React Flow graph.
   // The expanded child nodes/edges are fed into useNodesState/useEdgesState with
   // the root graph, so handles, measurement, and edge routing all use the normal
-  // canvas pipeline. The base layout signature below still ignores these children
-  // so toggling expand/collapse never auto-refits the viewport.
+  // canvas pipeline. The base layout signature is visible-node based: editing
+  // dependency edges redraws lines, but it must not rerun dagre or move nodes.
   const subgraphExpansion = useMemo(() => {
-    if (isDrilled) return { nodes: [] as GraphCanvasNode[], edges: [] as Edge<ContextEdgeData>[] }
+    if (isDrilled) return { nodes: [], edges: [] } satisfies SubgraphExpansionResult
     const nodes: GraphCanvasNode[] = []
     const edges: Edge<ContextEdgeData>[] = []
     const processed = new Set<string>()
 
     for (let depth = 0; depth <= expandedSubgraphs.size; depth += 1) {
-      const availableNodes = [...layoutResult.nodes, ...nodes]
+      const availableNodes = [...baseLayout.nodes, ...nodes]
       const requests: SubgraphExpansionRequest[] = []
       for (const node of availableNodes) {
         if (node.type !== 'skill' || !expandedSubgraphs.has(node.id) || processed.has(node.id)) continue
@@ -1013,13 +1080,7 @@ export function GraphCanvas({
         })
       }
       if (requests.length === 0) break
-      const parentNodes = availableNodes.map((node) => ({
-        id: node.id,
-        type: node.type,
-        position: node.position,
-        width: typeof node.width === 'number' ? node.width : undefined,
-        height: typeof node.height === 'number' ? node.height : undefined,
-      }))
+      const parentNodes = positionedParentNodes(availableNodes)
       const partial = buildSubgraphExpansion(parentNodes, requests, {
         expandedSubgraphs,
         onToggleSubgraph: toggleSubgraph,
@@ -1029,17 +1090,25 @@ export function GraphCanvas({
     }
 
     return { nodes, edges }
-  }, [expandedSubgraphs, expandedTopologies, isDrilled, layoutResult.nodes, skillId, toggleSubgraph])
+  }, [baseLayout.nodes, expandedSubgraphs, expandedTopologies, isDrilled, skillId, toggleSubgraph])
   const composedLayout = useMemo(
-    () => ({
-      nodes: subgraphExpansion.nodes.length > 0
-        ? [...layoutResult.nodes, ...subgraphExpansion.nodes]
-        : layoutResult.nodes,
-      edges: subgraphExpansion.edges.length > 0
-        ? [...layoutResult.edges, ...subgraphExpansion.edges]
-        : layoutResult.edges,
-    }),
-    [layoutResult.edges, layoutResult.nodes, subgraphExpansion.edges, subgraphExpansion.nodes],
+    () => {
+      const composedNodes = subgraphExpansion.nodes.length > 0
+        ? [...baseLayout.nodes, ...subgraphExpansion.nodes]
+        : baseLayout.nodes
+      return {
+        nodes: composedNodes,
+        edges: subgraphExpansion.edges.length > 0
+          ? [...baseLayout.edges, ...subgraphExpansion.edges]
+          : baseLayout.edges,
+      }
+    },
+    [
+      baseLayout.edges,
+      baseLayout.nodes,
+      subgraphExpansion.edges,
+      subgraphExpansion.nodes,
+    ],
   )
   const routedSequentialOverwriteConflicts = useMemo(() => {
     const conflicts: OverwriteConflict[] = []
@@ -1190,16 +1259,20 @@ export function GraphCanvas({
   const [nodes, setNodes, onNodesChange] = useNodesState<GraphCanvasNode>(composedLayout.nodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(decoratedComposedEdges)
   nodesRef.current = nodes
+  const handleNodesChange = useCallback((changes: NodeChange<GraphCanvasNode>[]) => {
+    onNodesChange(changes)
+    stableLayoutPositionsRef.current = updateStableLayoutPositionsFromNodeChanges(
+      stableLayoutPositionsRef.current,
+      changes,
+    )
+  }, [onNodesChange])
 
-  const hasLayoutNodes = layoutResult.nodes.length > 0
+  const hasLayoutNodes = baseLayout.nodes.length > 0
   useCanvasLayoutEffect(() => {
     setNodes(composedLayout.nodes)
     setEdges(decoratedComposedEdges)
-    const shouldFitViewport = hasLayoutNodes && !viewportReadyRef.current
-    if (shouldFitViewport) {
-      fitLayout({ reveal: !viewportReadyRef.current })
-    }
-  }, [composedLayout.nodes, decoratedComposedEdges, fitLayout, hasLayoutNodes, setEdges, setNodes])
+    fitInitialViewportOnce(hasLayoutNodes)
+  }, [composedLayout.nodes, decoratedComposedEdges, fitInitialViewportOnce, hasLayoutNodes, setEdges, setNodes])
 
   // Controlled effect to sync activeConflict, isConflictCancelled, and callbacks into the nodes state
   useEffect(() => {
@@ -1514,7 +1587,7 @@ export function GraphCanvas({
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        onNodesChange={onNodesChange}
+        onNodesChange={handleNodesChange}
         onEdgesChange={onEdgesChange}
         nodesConnectable={canEditCanvas}
         nodesDraggable={!compact}
@@ -1542,6 +1615,10 @@ export function GraphCanvas({
         }}
         onEdgeContextMenu={compact ? undefined : (event, edge) => {
           setNodeMenuPhaseId(null)
+          if (edge.type !== 'contextEdge') {
+            setEdgeMenuConnection(null)
+            return
+          }
           openEdgeContextMenu(event, { source: edge.source, target: edge.target })
         }}
         onNodeClick={(_, node) => {
@@ -1608,9 +1685,7 @@ export function GraphCanvas({
         }}
         onInit={(instance) => {
           fitViewRef.current = () => instance.fitView({ padding: 0.2 })
-          if (hasLayoutNodes) {
-            fitLayout({ reveal: !viewportReadyRef.current })
-          }
+          fitInitialViewportOnce(hasLayoutNodes)
         }}
         nodeOrigin={CENTER_NODE_ORIGIN}
         minZoom={0.35}

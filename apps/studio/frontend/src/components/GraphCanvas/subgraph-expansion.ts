@@ -2,6 +2,11 @@ import type { Edge } from '@xyflow/react'
 import type { GraphTopologyItem, SkillDetail } from '@/api/types'
 import type { ContextEdgeData } from '@/components/edges/ContextEdge'
 import {
+  SUBGRAPH_BRIDGE_EDGE_TYPE,
+  SUBGRAPH_BRIDGE_SOURCE_HANDLE_ID,
+  SUBGRAPH_BRIDGE_TARGET_HANDLE_ID,
+} from '@/components/nodes/subgraph-bridge-handles'
+import {
   buildEdges,
   type GraphCanvasNode,
   type SkillGraphNode,
@@ -41,6 +46,10 @@ function childEdgeId(parentNodeId: string, edgeId: string): string {
   return `${PREVIEW_PREFIX}::edge::${parentNodeId}::${edgeId}`
 }
 
+function bridgeEdgeId(parentNodeId: string): string {
+  return `${PREVIEW_PREFIX}::bridge::${parentNodeId}`
+}
+
 export type ExpandedSubgraphView =
   | { status: 'loading' }
   | { status: 'error'; message: string }
@@ -58,6 +67,11 @@ export interface SubgraphExpansionRequest {
 export interface SubgraphExpansionOptions {
   expandedSubgraphs?: ReadonlySet<string>
   onToggleSubgraph?: (nodeId: string) => void
+}
+
+export interface SubgraphExpansionResult {
+  nodes: GraphCanvasNode[]
+  edges: Edge<ContextEdgeData>[]
 }
 
 export interface PositionedParentNode {
@@ -86,6 +100,44 @@ function positionedNodeSize(node: PositionedParentNode): { width: number; height
     return { width: 220, height: 80 }
   }
   return { width: SKILL_NODE_WIDTH, height: SKILL_NODE_HEIGHT }
+}
+
+export function positionedParentNodes(nodes: GraphCanvasNode[]): PositionedParentNode[] {
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const centerCache = new Map<string, { x: number; y: number }>()
+
+  function absoluteCenter(node: GraphCanvasNode): { x: number; y: number } {
+    const cached = centerCache.get(node.id)
+    if (cached) return cached
+    if (!node.parentId) {
+      centerCache.set(node.id, node.position)
+      return node.position
+    }
+    const parent = byId.get(node.parentId)
+    if (!parent) {
+      centerCache.set(node.id, node.position)
+      return node.position
+    }
+    const parentCenter = absoluteCenter(parent)
+    const parentSize = nodeSize(parent)
+    const center = {
+      x: parentCenter.x - parentSize.width / 2 + node.position.x,
+      y: parentCenter.y - parentSize.height / 2 + node.position.y,
+    }
+    centerCache.set(node.id, center)
+    return center
+  }
+
+  return nodes.map((node) => {
+    const size = nodeSize(node)
+    return {
+      id: node.id,
+      type: node.type,
+      position: absoluteCenter(node),
+      width: size.width,
+      height: size.height,
+    }
+  })
 }
 
 interface ChildLayout {
@@ -184,13 +236,12 @@ function layoutChild(
 
 function inlineChildNode(
   parentNodeId: string,
+  groupId: string,
   childSkillId: string,
   childWorkspaceRoot: string | null,
   topologyOwnerSkillId: string | undefined,
   childDetail: SkillDetail | undefined,
   node: GraphCanvasNode,
-  left: number,
-  top: number,
   options: SubgraphExpansionOptions,
 ): GraphCanvasNode {
   const id = subgraphPreviewChildNodeId(parentNodeId, node.id)
@@ -198,9 +249,10 @@ function inlineChildNode(
   const base = {
     ...node,
     id,
+    parentId: groupId,
     position: {
-      x: left + node.position.x,
-      y: top + node.position.y,
+      x: CONTAINER_PADDING + node.position.x,
+      y: CONTAINER_HEADER + CONTAINER_PADDING + node.position.y,
     },
     width,
     height,
@@ -254,8 +306,31 @@ function readonlyChildEdge(parentNodeId: string, edge: Edge<ContextEdgeData>): E
   }
 }
 
+function visualBridgeEdge(parentNodeId: string, groupId: string): Edge<ContextEdgeData> {
+  return {
+    id: bridgeEdgeId(parentNodeId),
+    source: parentNodeId,
+    target: groupId,
+    sourceHandle: SUBGRAPH_BRIDGE_SOURCE_HANDLE_ID,
+    targetHandle: SUBGRAPH_BRIDGE_TARGET_HANDLE_ID,
+    type: SUBGRAPH_BRIDGE_EDGE_TYPE,
+    selectable: false,
+    focusable: false,
+    deletable: false,
+    reconnectable: false,
+    zIndex: PREVIEW_EDGE_Z_INDEX,
+    data: {
+      hasTraceData: false,
+      sourcePhaseId: parentNodeId,
+      targetPhaseId: groupId,
+      showContextControl: false,
+    },
+  }
+}
+
 function groupNode(
   request: SubgraphExpansionRequest,
+  parent: PositionedParentNode,
   left: number,
   top: number,
   width: number,
@@ -264,16 +339,24 @@ function groupNode(
   childName?: string,
   message?: string,
 ): GraphCanvasNode {
+  const parentSize = positionedNodeSize(parent)
+  const parentLeft = parent.position.x - parentSize.width / 2
+  const parentTop = parent.position.y - parentSize.height / 2
   return {
     id: groupNodeId(request.parentNodeId),
     type: 'subgraphGroup',
-    position: { x: left + width / 2, y: top + height / 2 },
+    parentId: request.parentNodeId,
+    position: {
+      x: left + width / 2 - parentLeft,
+      y: top + height / 2 - parentTop,
+    },
     data: {
       parentLabel: request.parentLabel,
       path: request.path,
       status,
       childName,
       message,
+      bridgeTargetOffsetY: parent.position.y - top,
     },
     width,
     height,
@@ -290,7 +373,7 @@ export function buildSubgraphExpansion(
   parentNodes: PositionedParentNode[],
   expansions: SubgraphExpansionRequest[],
   options: SubgraphExpansionOptions = {},
-): { nodes: GraphCanvasNode[]; edges: Edge<ContextEdgeData>[] } {
+): SubgraphExpansionResult {
   if (expansions.length === 0) {
     return { nodes: [], edges: [] }
   }
@@ -307,7 +390,7 @@ export function buildSubgraphExpansion(
     const parent = parentById.get(request.parentNodeId)
     if (!parent) continue
 
-    const parentSize = nodeSize()
+    const parentSize = positionedNodeSize(parent)
     const expandOrigin = {
       x: parent.position.x + parentSize.width / 2 + EXPAND_TOGGLE_RADIUS,
       y: parent.position.y,
@@ -325,8 +408,9 @@ export function buildSubgraphExpansion(
       const height = 132
       const left = contentLeft - CONTAINER_PADDING
       const top = parent.position.y - height / 2
-      const group = groupNode(request, left, top, width, height, status, childName, message)
+      const group = groupNode(request, parent, left, top, width, height, status, childName, message)
       nodes.push(group)
+      edges.push(visualBridgeEdge(request.parentNodeId, group.id))
       continue
     }
 
@@ -349,8 +433,9 @@ export function buildSubgraphExpansion(
       const height = 132
       const left = contentLeft - CONTAINER_PADDING
       const top = parent.position.y - height / 2
-      const group = groupNode(request, left, top, width, height, status, childName, message)
+      const group = groupNode(request, parent, left, top, width, height, status, childName, message)
       nodes.push(group)
+      edges.push(visualBridgeEdge(request.parentNodeId, group.id))
       continue
     }
 
@@ -359,17 +444,17 @@ export function buildSubgraphExpansion(
     const groupTop = contentTop - CONTAINER_HEADER - CONTAINER_PADDING
     const width = child.contentWidth + CONTAINER_PADDING * 2
     const height = child.contentHeight + CONTAINER_HEADER + CONTAINER_PADDING * 2
-    const group = groupNode(request, groupLeft, groupTop, width, height, status, childName, message)
-      nodes.push(group)
-      nodes.push(...child.nodes.map((node) => inlineChildNode(
-        request.parentNodeId,
-        request.childSkillId ?? request.parentNodeId,
-        request.path,
-        request.topologyOwnerSkillId,
-        request.view.status === 'loaded' ? request.view.detail : undefined,
-        node,
-        contentLeft,
-        contentTop,
+    const group = groupNode(request, parent, groupLeft, groupTop, width, height, status, childName, message)
+    nodes.push(group)
+    edges.push(visualBridgeEdge(request.parentNodeId, group.id))
+    nodes.push(...child.nodes.map((node) => inlineChildNode(
+      request.parentNodeId,
+      group.id,
+      request.childSkillId ?? request.parentNodeId,
+      request.path,
+      request.topologyOwnerSkillId,
+      request.view.status === 'loaded' ? request.view.detail : undefined,
+      node,
       options,
     )))
     edges.push(...child.edges.map((edge) => readonlyChildEdge(request.parentNodeId, edge)))

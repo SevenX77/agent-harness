@@ -281,13 +281,13 @@ export function CopilotPanel({
   }
 
   return (
-    <aside className="z-copilot flex h-full min-h-0 flex-col bg-sidebar text-sidebar-foreground">
-      <header className="border-b border-sidebar-border px-4 py-3">
+    <aside className="studio-copilot-panel studio-canvas-panel z-copilot flex h-full min-h-0 flex-col border-l text-foreground">
+      <header className="studio-canvas-panel-header border-b px-4 py-3">
         <div className="flex items-center gap-2">
-          <Bot className="size-4 text-primary" />
+          <Bot className="size-4 text-[color:var(--studio-canvas-accent)]" />
           <h2 className="text-sm font-semibold">Copilot</h2>
         </div>
-        <p className="mt-1 text-xs text-muted-foreground">
+        <p className="mt-1 inline-flex rounded border border-border/60 bg-background/30 px-1.5 py-0.5 text-xs text-muted-foreground">
           {copilot.connectionStatus}
           {copilot.reconnectInMs ? `, retry ${Math.round(copilot.reconnectInMs / 1000)}s` : ''}
         </p>
@@ -301,7 +301,7 @@ export function CopilotPanel({
       />
 
       {inEvalView && judgeRefs ? (
-        <div className="shrink-0 border-b border-sidebar-border px-3 py-2">
+        <div className="shrink-0 border-b px-3 py-2 [border-color:var(--studio-canvas-border-soft)]">
           <Button
             type="button"
             variant="outline"
@@ -310,7 +310,7 @@ export function CopilotPanel({
             onClick={() => {
               void askCopilotJudge()
             }}
-            className="w-full justify-start"
+            className="studio-canvas-input-surface w-full justify-start"
           >
             Ask Copilot Judge
           </Button>
@@ -329,7 +329,7 @@ export function CopilotPanel({
             />
           ))
         ) : (
-          <div className="rounded-md border border-dashed border-sidebar-border p-3 text-sm text-muted-foreground">
+          <div className="studio-canvas-input-surface rounded-md border border-dashed p-3 text-sm text-muted-foreground">
             <div className="prose prose-sm max-w-none text-muted-foreground dark:prose-invert">
               <ReactMarkdown>
                 {skillId
@@ -344,7 +344,7 @@ export function CopilotPanel({
                 <button
                   type="button"
                   onClick={() => setDraft('Help me create a new Skill. Ask clarifying questions, then propose a minimal skill.md.')}
-                  className="w-full rounded-md border border-sidebar-border bg-background px-2 py-1.5 text-start text-xs font-medium text-foreground hover:bg-accent"
+                  className="studio-canvas-input-surface w-full rounded-md border px-2 py-1.5 text-start text-xs font-medium text-foreground hover:bg-muted"
                 >
                   Describe my Skill
                 </button>
@@ -356,7 +356,7 @@ export function CopilotPanel({
                         key={template.id}
                         type="button"
                         onClick={() => setDraft(`Use the "${template.name}" template as a scaffold and help me create a Skill.`)}
-                        className="rounded-md border border-sidebar-border bg-background px-2 py-1 text-xs text-foreground hover:bg-accent"
+                        className="studio-canvas-input-surface rounded-md border px-2 py-1 text-xs text-foreground hover:bg-muted"
                       >
                         {template.name}
                       </button>
@@ -387,7 +387,7 @@ export function CopilotPanel({
       ) : null}
 
       <form onSubmit={submit} className="p-3 shrink-0">
-        <div className="flex flex-col gap-2 rounded-md border border-transparent bg-sidebar-accent/60 px-2.5 py-2 transition-colors focus-within:border-border">
+        <div className="studio-copilot-input studio-canvas-input-surface flex flex-col gap-2 rounded-md border px-2.5 py-2 transition-colors focus-within:[border-color:var(--studio-canvas-accent-muted)]">
           <textarea
             value={draft}
             onChange={(event) => {
@@ -404,14 +404,14 @@ export function CopilotPanel({
               <button
                 type="button"
                 aria-label="Attach file"
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground"
               >
                 <Paperclip className="size-3.5" />
               </button>
               <button
                 type="button"
                 aria-label="Add context"
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground"
               >
                 <Plus className="size-3.5" />
               </button>
@@ -433,7 +433,7 @@ export function CopilotPanel({
               aria-label="Send message"
               className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
                 draft.trim() && copilot.connectionStatus === 'open'
-                  ? 'bg-primary text-primary-foreground hover:bg-primary/80'
+                  ? 'bg-[color:var(--studio-canvas-accent)] text-primary-foreground hover:bg-primary/80'
                   : 'bg-secondary text-secondary-foreground'
               }`}
             >

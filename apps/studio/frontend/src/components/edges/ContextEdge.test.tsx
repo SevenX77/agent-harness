@@ -1,4 +1,4 @@
-import { isValidElement, type ReactElement, type ReactNode } from 'react'
+import { isValidElement, type CSSProperties, type ReactElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { Position } from '@xyflow/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -9,7 +9,17 @@ const { getBezierPathMock } = vi.hoisted(() => ({
 }))
 
 vi.mock('@xyflow/react', () => ({
-  BaseEdge: ({ id, path }: { id: string; path: string }) => <path data-edge-id={id} d={path} />,
+  BaseEdge: ({
+    id,
+    path,
+    className,
+    style,
+  }: {
+    id: string
+    path: string
+    className?: string
+    style?: CSSProperties
+  }) => <path data-edge-id={id} d={path} className={className} style={style} />,
   EdgeLabelRenderer: ({ children }: { children: ReactNode }) => <>{children}</>,
   Position: { Left: 'left', Right: 'right', Top: 'top', Bottom: 'bottom' },
   getBezierPath: getBezierPathMock,
@@ -99,6 +109,22 @@ describe('ContextEdge', () => {
     expect(html).toContain('aria-label="View edge trace data"')
     expect(html).toContain('edge-context-dot')
     expect(html).toContain('<circle')
+  })
+
+  it('uses shared canvas edge tokens for the line and context dot', () => {
+    const html = renderToStaticMarkup(<ContextEdge
+      {...baseProps}
+      data={{
+        hasTraceData: true,
+        sourcePhaseId: 'a',
+        targetPhaseId: 'b',
+      }}
+    />)
+
+    expect(html).toContain('var(--studio-canvas-edge')
+    expect(html).toContain('var(--studio-canvas-accent')
+    expect(html).not.toContain('#27272a')
+    expect(html).not.toContain('#6366f1')
   })
 
   it('renders the design-time tooltip copy', () => {

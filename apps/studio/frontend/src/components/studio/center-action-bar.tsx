@@ -100,24 +100,24 @@ function LockableButton({ disabled, lockReason, children }: LockableButtonProps)
 export function CenterActionBar({ stage, onCompile, onPredict, onRun }: CenterActionBarProps) {
   const d = deriveButtons(stage)
   return (
-    <div className="absolute bottom-6 left-1/2 z-30 inline-flex -translate-x-1/2 items-center gap-1 rounded-md border border-border bg-card px-1.5 py-1 shadow-lg">
+    <div className="studio-center-action-bar absolute bottom-6 left-1/2 z-30 inline-flex -translate-x-1/2 items-center gap-1 rounded-md border px-1.5 py-1">
       <Button
-        variant={d.compileHighlight ? "default" : "ghost"}
+        variant="ghost"
         size="default"
         disabled={d.compileDisabled}
         onClick={onCompile}
-        className="h-9 gap-1.5 rounded-md px-3.5 text-xs"
+        className={`studio-center-action-button h-9 gap-1.5 rounded-md px-3.5 text-xs ${d.compileHighlight ? "studio-center-action-button--active" : ""}`}
       >
         <Hammer className="size-3.5" />
         Compile
       </Button>
       <LockableButton disabled={d.predictDisabled} lockReason={PREDICT_LOCK_REASON}>
         <Button
-          variant={d.predictHighlight ? "default" : "ghost"}
+          variant="ghost"
           size="default"
           disabled={d.predictDisabled}
           onClick={onPredict}
-          className="h-9 gap-1.5 rounded-md px-3.5 text-xs"
+          className={`studio-center-action-button h-9 gap-1.5 rounded-md px-3.5 text-xs ${d.predictHighlight ? "studio-center-action-button--active" : ""}`}
         >
           <Zap className="size-3.5" />
           Predict
@@ -125,11 +125,11 @@ export function CenterActionBar({ stage, onCompile, onPredict, onRun }: CenterAc
       </LockableButton>
       <LockableButton disabled={d.runDisabled} lockReason={RUN_LOCK_REASON}>
         <Button
-          variant={d.runHighlight ? "default" : "ghost"}
+          variant="ghost"
           size="default"
           disabled={d.runDisabled}
           onClick={onRun}
-          className="h-9 gap-1.5 rounded-md px-3.5 text-xs"
+          className={`studio-center-action-button h-9 gap-1.5 rounded-md px-3.5 text-xs ${d.runHighlight ? "studio-center-action-button--active" : ""}`}
         >
           <Play fill="currentColor" className="size-3.5" />
           Run

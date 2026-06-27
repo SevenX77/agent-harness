@@ -57,6 +57,16 @@ describe('CenterActionBar lock-reason hint (#13)', () => {
   })
 })
 
+describe('CenterActionBar canvas surface styling', () => {
+  it('uses the shared canvas action surface instead of a plain card bar', () => {
+    const html = renderBar('idle')
+
+    expect(html).toContain('studio-center-action-bar')
+    expect(html).toContain('studio-center-action-button')
+    expect(html).toContain('studio-center-action-button--active')
+  })
+})
+
 describe('CenterActionBar corner-radius convergence (FRONTEND_UI_SPEC §2.4)', () => {
   it('uses rounded-md and never rounded-full on the shell and all three buttons', () => {
     const html = renderBar('idle')

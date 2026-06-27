@@ -121,6 +121,18 @@ describe('buildCopilotJudgeDraft', () => {
     expect(html).toContain('Ask Copilot Judge')
   })
 
+  it('uses the shared canvas overlay surface so Copilot matches Studio panels', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(CopilotPanel, {
+        skillId: 'text-segmentation',
+      }),
+    )
+
+    expect(html).toContain('studio-copilot-panel')
+    expect(html).toContain('studio-canvas-panel')
+    expect(html).toContain('studio-copilot-input')
+  })
+
   it('lifts judged refs to the parent after Ask Copilot Judge prepares context', async () => {
     const judged = {
       compare_result_ref: 'skill-1/golden/golden-1/compare/run-1/compare_result.json',

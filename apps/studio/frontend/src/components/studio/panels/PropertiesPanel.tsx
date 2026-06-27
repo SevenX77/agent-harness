@@ -48,6 +48,7 @@ import { errorMessage } from "@/utils/errors"
 import { runRoleTestJobToResult } from "../settings/llm-roles/role-test-store"
 import type { FileMeta } from "../file-types"
 import { PanelHeader } from "./_shared/PanelHeader"
+import { PanelActions, PanelBody, PanelFieldRow, PanelSection } from "./_shared/PanelSection"
 import { roleTestStatusBadge, type RoleTestStatusInput } from "./role-test-status"
 import {
   applyPhaseFrontmatterForm,
@@ -85,14 +86,6 @@ function phaseFrontmatterKind(label: "LOGIC" | "AGENT" | "SUBGRAPH"): PhaseFront
   if (label === "SUBGRAPH") return "subgraph"
   if (label === "AGENT") return "agent"
   return "logic"
-}
-
-function PropertyCard({ children }: { children: ReactNode }) {
-  return (
-    <div className="rounded-md border border-border bg-card px-3 py-3">
-      {children}
-    </div>
-  )
 }
 
 interface AllowOverwriteCandidate {
@@ -364,11 +357,13 @@ export function PropertiesPanel({
 
       <ScrollArea className="flex-1">
         {selectedNode ? (
-          <div className="space-y-3 px-2 py-2">
-            <PhaseIdentityHeader
-              selectedNode={selectedNode}
-              modeLabel={modeLabel}
-            />
+          <PanelBody>
+            <PanelSection>
+              <PhaseIdentityHeader
+                selectedNode={selectedNode}
+                modeLabel={modeLabel}
+              />
+            </PanelSection>
             <NodeResumeDebugBar
               runId={runId}
               nodeId={selectedNode.id}
@@ -415,7 +410,7 @@ export function PropertiesPanel({
               <div className="rounded-md border border-border bg-card px-3 py-2">
                 <div className="text-xs font-medium text-destructive">Frontmatter error</div>
                 <div className="mt-1 text-xs text-muted-foreground">{phaseFormState.message}</div>
-                <div className="mt-3 flex gap-2">
+                <PanelActions>
                   {filePath ? (
                     <Button type="button" size="sm" variant="secondary" onClick={() => onFileOpen?.(filePath)}>
                       Open file
@@ -424,13 +419,15 @@ export function PropertiesPanel({
                   <Button type="button" size="sm" disabled>
                     Save
                   </Button>
-                </div>
+                </PanelActions>
               </div>
             )}
-          </div>
+          </PanelBody>
         ) : (
-          <div className="space-y-3 px-2 py-2">
-            <GraphIdentityHeader />
+          <PanelBody>
+            <PanelSection>
+              <GraphIdentityHeader />
+            </PanelSection>
             {graphFormState.ok && activeGraphDraft ? (
               <GraphFrontmatterForm
                 value={activeGraphDraft}
@@ -447,17 +444,17 @@ export function PropertiesPanel({
               <div className="rounded-md border border-border bg-card px-3 py-2">
                 <div className="text-xs font-medium text-destructive">Frontmatter error</div>
                 <div className="mt-1 text-xs text-muted-foreground">{graphFormState.message}</div>
-                <div className="mt-3 flex gap-2">
+                <PanelActions>
                   <Button type="button" size="sm" variant="secondary" onClick={() => onFileOpen?.("GRAPH.md")}>
                     Open file
                   </Button>
                   <Button type="button" size="sm" disabled>
                     Save
                   </Button>
-                </div>
+                </PanelActions>
               </div>
             )}
-          </div>
+          </PanelBody>
         )}
       </ScrollArea>
     </div>
@@ -506,7 +503,7 @@ function GraphFrontmatterForm({
     >
       <FieldSet>
         <FieldGroup>
-          <PropertyCard>
+          <PanelFieldRow>
             <Field>
               <FieldLabel htmlFor="graph-name">name</FieldLabel>
               <Input
@@ -515,8 +512,8 @@ function GraphFrontmatterForm({
                 onChange={(event) => onFieldChange("name", event.currentTarget.value)}
               />
             </Field>
-          </PropertyCard>
-          <PropertyCard>
+          </PanelFieldRow>
+          <PanelFieldRow>
             <Field>
               <FieldLabel htmlFor="graph-description">description</FieldLabel>
               <Textarea
@@ -526,8 +523,8 @@ function GraphFrontmatterForm({
                 onChange={(event) => onFieldChange("description", event.currentTarget.value)}
               />
             </Field>
-          </PropertyCard>
-          <PropertyCard>
+          </PanelFieldRow>
+          <PanelFieldRow>
             <Field>
               <FieldLabel htmlFor="graph-llm-role">llm_role</FieldLabel>
               <Input
@@ -537,16 +534,16 @@ function GraphFrontmatterForm({
                 onChange={(event) => onFieldChange("llmRole", event.currentTarget.value)}
               />
             </Field>
-          </PropertyCard>
+          </PanelFieldRow>
         </FieldGroup>
-        <div className="flex justify-end gap-2 px-1">
+        <PanelActions>
           <Button type="button" size="sm" variant="secondary" disabled={!canReset} onClick={onReset}>
             Reset
           </Button>
           <Button type="submit" size="sm" disabled={!canSave}>
             {saving ? "Saving" : "Save"}
           </Button>
-        </div>
+        </PanelActions>
       </FieldSet>
     </form>
   )
@@ -890,7 +887,7 @@ function PhaseFrontmatterForm({
         <FieldGroup>
           {kind === "agent" ? (
             <>
-              <PropertyCard>
+              <PanelFieldRow>
                 <Field>
                   <FieldLabel htmlFor="phase-llm-role">
                     llm_role
@@ -911,8 +908,8 @@ function PhaseFrontmatterForm({
                     />
                   </div>
                 </Field>
-              </PropertyCard>
-              <PropertyCard>
+              </PanelFieldRow>
+              <PanelFieldRow>
                 <Field>
                   <FieldLabel htmlFor="phase-tools">
                     tools
@@ -925,18 +922,18 @@ function PhaseFrontmatterForm({
                     rows={4}
                   />
                 </Field>
-              </PropertyCard>
-              <PropertyCard>
+              </PanelFieldRow>
+              <PanelFieldRow>
                 <SubagentsField
                   value={value.subagents}
                   onChange={(next) => onFieldChange("subagents", next)}
                 />
-              </PropertyCard>
+              </PanelFieldRow>
             </>
           ) : null}
           {kind === "logic" ? (
             <>
-              <PropertyCard>
+              <PanelFieldRow>
                 <Field>
                   <FieldLabel htmlFor="phase-actions">
                     actions
@@ -949,14 +946,14 @@ function PhaseFrontmatterForm({
                     rows={4}
                   />
                 </Field>
-              </PropertyCard>
-              <PropertyCard>
+              </PanelFieldRow>
+              <PanelFieldRow>
                 <ValidatorField
                   value={value.validator}
                   errors={fieldErrors.validator}
                   onChange={(next) => onFieldChange("validator", next)}
                 />
-              </PropertyCard>
+              </PanelFieldRow>
               {/* n2-properties #19 (atom #19): the fields an action may write back
                   are bounded by io.outputs.properties, but that boundary is edited
                   in the I/O panel - not here. Surface a NON-blocking hint so the
@@ -969,13 +966,13 @@ function PhaseFrontmatterForm({
           ) : null}
           {kind === "subgraph" ? (
             <>
-              <PropertyCard>
+              <PanelFieldRow>
                 <SubgraphNameField
                   phaseId={phaseId}
                   onPhaseRename={onPhaseRename}
                 />
-              </PropertyCard>
-              <PropertyCard>
+              </PanelFieldRow>
+              <PanelFieldRow>
                 <SubgraphPathField
                   value={value.path}
                   errors={fieldErrors.path}
@@ -983,40 +980,40 @@ function PhaseFrontmatterForm({
                   workspaceRoot={workspaceRoot}
                   onReconnectFolder={onReconnectSubgraphFolder}
                 />
-              </PropertyCard>
-              <PropertyCard>
+              </PanelFieldRow>
+              <PanelFieldRow>
                 <ValidatorField
                   value={value.validator}
                   errors={fieldErrors.validator}
                   onChange={(next) => onFieldChange("validator", next)}
                 />
-              </PropertyCard>
+              </PanelFieldRow>
             </>
           ) : null}
-          <PropertyCard>
+          <PanelFieldRow>
             <AllowSequentialOverwriteField
               value={value.allowSequentialOverwrite}
               candidates={allowOverwriteCandidates}
               errors={fieldErrors.allow_sequential_overwrite}
               onChange={(next) => onFieldChange("allowSequentialOverwrite", next)}
             />
-          </PropertyCard>
-          <PropertyCard>
+          </PanelFieldRow>
+          <PanelFieldRow>
             <IterateField
               value={value.iterate}
               errors={fieldErrors.iterate}
               onChange={(next) => onFieldChange("iterate", next)}
             />
-          </PropertyCard>
+          </PanelFieldRow>
         </FieldGroup>
-        <div className="flex justify-end gap-2 px-1">
+        <PanelActions>
           <Button type="button" size="sm" variant="secondary" disabled={!canReset} onClick={onReset}>
             Reset
           </Button>
           <Button type="submit" size="sm" disabled={!canSave}>
             {saving ? "Saving" : "Save"}
           </Button>
-        </div>
+        </PanelActions>
       </FieldSet>
     </form>
   )

@@ -123,6 +123,7 @@ interface GraphCanvasProps {
   // stay normal). Empty/undefined when resume is clean or no node is being resumed.
   dirtyDownstreamNodeIds?: ReadonlySet<string>
   compact?: boolean
+  hideMiniMap?: boolean
   onPhaseFileSave?: (args: { path: string; content: string; expectedHash: string }, target?: ChildSaveTarget) => Promise<void> | void
   onPhaseFileRead?: (
     args: { path: string },
@@ -400,6 +401,7 @@ export function GraphCanvas({
   errorMessageByNodeId,
   dirtyDownstreamNodeIds,
   compact = false,
+  hideMiniMap = false,
   onPhaseFileSave,
   onPhaseFileRead,
   onSubmitHitlResponse,
@@ -687,6 +689,7 @@ export function GraphCanvas({
         })
     })
   }, [updateViewportReady])
+
   const toggleSubgraph = useCallback((nodeId: string) => {
     setExpandedSubgraphs((current) => nextExpandedSubgraphs(current, nodeId))
   }, [])
@@ -1268,6 +1271,7 @@ export function GraphCanvas({
   }, [onNodesChange])
 
   const hasLayoutNodes = baseLayout.nodes.length > 0
+
   useCanvasLayoutEffect(() => {
     setNodes(composedLayout.nodes)
     setEdges(decoratedComposedEdges)
@@ -1713,10 +1717,10 @@ export function GraphCanvas({
           resumeLoading={resumeLoading}
           onResumeNode={onResumeNode}
         />
-        <Controls position="bottom-left" />
-        {!compact ? <SkillMiniMap nodes={nodes} /> : null}
+        <Controls position="bottom-left" className="studio-canvas-controls" />
+        {!compact && !hideMiniMap ? <SkillMiniMap nodes={nodes} /> : null}
         {drillStack.length > 0 || isChildGraphLoading || childGraphError ? (
-          <Panel position="top-left">
+          <Panel position="top-left" className="studio-canvas-top-left-panel">
             <div className="flex flex-col items-start gap-2">
               {drillStack.length > 0 ? (
                 <DrillBreadcrumb

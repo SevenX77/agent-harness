@@ -531,6 +531,38 @@ describe('GraphCanvas', () => {
     expect(onCreatePhase).not.toHaveBeenCalled()
   })
 
+  it('keeps viewport controls out of the canvas chrome and exposes them in the context menu', () => {
+    const onZoomIn = vi.fn()
+    const onZoomOut = vi.fn()
+    const onFitView = vi.fn()
+    const onToggleCanvasLock = vi.fn()
+    const html = renderToStaticMarkup(<GraphCanvas skillId="demo-skill" />)
+
+    expect(html).not.toContain('data-testid="controls"')
+
+    contextMenuItems.length = 0
+    renderToStaticMarkup(
+      <CanvasContextMenuContent
+        edgeMenuConnection={null}
+        canvasLocked={false}
+        onZoomIn={onZoomIn}
+        onZoomOut={onZoomOut}
+        onFitView={onFitView}
+        onToggleCanvasLock={onToggleCanvasLock}
+      />,
+    )
+
+    contextMenuItems.find((item) => item.label === 'Zoom in')?.onSelect?.()
+    contextMenuItems.find((item) => item.label === 'Zoom out')?.onSelect?.()
+    contextMenuItems.find((item) => item.label === 'Fit view')?.onSelect?.()
+    contextMenuItems.find((item) => item.label === 'Lock canvas')?.onSelect?.()
+
+    expect(onZoomIn).toHaveBeenCalled()
+    expect(onZoomOut).toHaveBeenCalled()
+    expect(onFitView).toHaveBeenCalled()
+    expect(onToggleCanvasLock).toHaveBeenCalled()
+  })
+
   it('persists valid phase node connections', () => {
     const onPersistConnection = vi.fn()
     renderToStaticMarkup(

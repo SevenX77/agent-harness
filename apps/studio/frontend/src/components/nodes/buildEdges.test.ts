@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
 import { buildEdges, INPUT_ID, OUTPUT_ID } from "./buildEdges"
+import {
+  GLOBAL_INPUT_SOURCE_HANDLE_ID,
+  GLOBAL_OUTPUT_TARGET_HANDLE_ID,
+  SKILL_FLOW_SOURCE_HANDLE_ID,
+  SKILL_FLOW_TARGET_HANDLE_ID,
+} from "./subgraph-bridge-handles"
 import type { SkillGraphNode } from "./types"
 
 function node(id: string, dependsOn: string[], isOutput = false): SkillGraphNode {
@@ -46,9 +52,24 @@ describe("buildEdges", () => {
   })
 
   it("renders explicit input and output declarations", () => {
-    const ids = edgeIds(buildEdges([node("entry", ["input"]), node("final", ["entry"], true)]))
+    const edges = buildEdges([node("entry", ["input"]), node("final", ["entry"], true)])
+    const ids = edgeIds(edges)
 
     expect(ids).toEqual([`${INPUT_ID}->entry`, "entry->final", `final->${OUTPUT_ID}`])
+    expect(edges).toEqual([
+      expect.objectContaining({
+        sourceHandle: GLOBAL_INPUT_SOURCE_HANDLE_ID,
+        targetHandle: SKILL_FLOW_TARGET_HANDLE_ID,
+      }),
+      expect.objectContaining({
+        sourceHandle: SKILL_FLOW_SOURCE_HANDLE_ID,
+        targetHandle: SKILL_FLOW_TARGET_HANDLE_ID,
+      }),
+      expect.objectContaining({
+        sourceHandle: SKILL_FLOW_SOURCE_HANDLE_ID,
+        targetHandle: GLOBAL_OUTPUT_TARGET_HANDLE_ID,
+      }),
+    ])
   })
 
   it("preserves real phase->phase fan-in", () => {

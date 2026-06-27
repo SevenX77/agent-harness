@@ -5,7 +5,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import type { CompileError } from '@/api/types'
-import { SUBGRAPH_BRIDGE_SOURCE_HANDLE_ID } from './subgraph-bridge-handles'
+import {
+  SKILL_FLOW_SOURCE_HANDLE_ID,
+  SKILL_FLOW_TARGET_HANDLE_ID,
+  SUBGRAPH_BRIDGE_SOURCE_HANDLE_ID,
+} from './subgraph-bridge-handles'
 import type { SkillGraphNode, SkillGraphNodeData, SkillNodeStatus } from './types'
 
 type PhaseKind = 'LOGIC' | 'AGENT' | 'SUBGRAPH'
@@ -120,7 +124,12 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
           : 'border-border',
       ].join(' ')}
     >
-      <Handle type="target" position={Position.Top} className="!size-2.5 !border-background !bg-primary opacity-60 group-hover:opacity-100 transition-opacity duration-200" />
+      <Handle
+        id={SKILL_FLOW_TARGET_HANDLE_ID}
+        type="target"
+        position={Position.Top}
+        className="skill-flow-target-handle !size-2.5 !border-background !bg-primary opacity-60 group-hover:opacity-100 transition-opacity duration-200"
+      />
       <div className="flex items-start gap-3">
         <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
           <KindIcon className="size-4" />
@@ -285,7 +294,12 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
           container with the child's REAL nodes/edges (see GraphCanvas
           subgraphExpansion), not an in-node row list. The toggle above only flips
           the expand state; the container is drawn beside this node on the canvas. */}
-      <Handle type="source" position={Position.Bottom} className="!size-2.5 !border-background !bg-primary opacity-60 group-hover:opacity-100 transition-opacity duration-200" />
+      <Handle
+        id={SKILL_FLOW_SOURCE_HANDLE_ID}
+        type="source"
+        position={Position.Bottom}
+        className="skill-flow-source-handle !size-2.5 !border-background !bg-primary opacity-60 group-hover:opacity-100 transition-opacity duration-200"
+      />
     </div>
   )
 

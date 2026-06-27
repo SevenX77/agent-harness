@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { act, createElement, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { compareReplayArgsForJudgeResult, Workspace } from './Workspace'
+import { compareReplayArgsForJudgeResult, hasMiniMapToolSpace, Workspace } from './Workspace'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 import type { EventEnvelope, RunDetail, SerializableGraphPhaseRef, SkillDetail } from '@/api/types'
 
@@ -641,6 +641,14 @@ describe('Workspace WS-1 local writer contracts', () => {
       root.unmount()
       container.remove()
     }
+  })
+
+  it('shows the minimap only when the fixed action bar leaves enough room before Copilot', () => {
+    const actionBar = { right: 900 } as DOMRect
+
+    expect(hasMiniMapToolSpace(actionBar, { left: 1220 } as DOMRect)).toBe(true)
+    expect(hasMiniMapToolSpace(actionBar, { left: 1199 } as DOMRect)).toBe(false)
+    expect(hasMiniMapToolSpace(actionBar, null)).toBe(true)
   })
 
   it('passes imported workspace roots into golden diff promotion without changing the API skill id', () => {

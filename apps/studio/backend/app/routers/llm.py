@@ -60,6 +60,8 @@ from app.core.adapters.transport_factory import build_gateway_adapter
 from app.core.backends import get_backend_config, get_metadata
 from app.models.llm_config import (
     CapabilityValue,
+    CommunityCatalogEntry,
+    CommunityCatalogSummary,
     EvidenceRecord,
     FieldSource,
     LLMCredentialsFile,
@@ -1976,6 +1978,34 @@ def _registry_response(
     )
 
 
+def _community_catalog_summary() -> CommunityCatalogSummary:
+    """Project the disposable verified community cache for the Settings UI.
+
+    Advisory, read-only view of community-observed evidence (the verified read
+    path's `community_catalog_cache.json`). These records are never merged into
+    local evidence nor auto-applied to credentials; the public endpoint identity
+    lives in each record's metadata (see ``parse_catalog_evidence``).
+    """
+    cache = DisposableCatalogCacheStore(community_catalog_cache_path()).load()
+    entries = [
+        CommunityCatalogEntry(
+            public_base_url=record.metadata.get("normalized_public_base_url"),
+            model_id=record.model_id,
+            capability_family=record.capability_family,
+            method_id=record.method_id,
+            observed_at=record.observed_at,
+        )
+        for record in cache.records
+    ]
+    return CommunityCatalogSummary(
+        synced=cache.generated_at is not None or bool(cache.records),
+        generated_at=cache.generated_at,
+        protocol_major=cache.protocol_major,
+        record_count=len(cache.records),
+        entries=entries,
+    )
+
+
 def _probe_catalog_summary(remote_catalog_source: dict[str, Any] | None) -> ProbeCatalogSummary:
     library = load_evidence_library()
     probe_records = [
@@ -1991,6 +2021,7 @@ def _probe_catalog_summary(remote_catalog_source: dict[str, Any] | None) -> Prob
         ),
         local_route_candidates_count=len(library.route_candidates),
         remote_catalog_source=remote_catalog_source,
+        community_catalog=_community_catalog_summary(),
     )
 
 

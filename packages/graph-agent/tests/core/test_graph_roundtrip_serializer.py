@@ -113,7 +113,7 @@ Notes between old phase tags should survive.
     assert "  - review" in markdown
     assert '<phase depends_on="input">draft</phase>' in markdown
     assert '<phase depends_on="draft">enrich</phase>' in markdown
-    assert '<phase depends_on="enrich" output>review</phase>' in markdown
+    assert '<phase depends_on="enrich">review</phase>' in markdown
     assert '<phase depends_on="draft" output>review</phase>' not in markdown
 
 
@@ -218,7 +218,7 @@ def test_roundtrip_replaces_crlf_body_phase_tags_without_duplicates() -> None:
 
     assert markdown.count("<phase") == 2
     assert '<phase depends_on="input">draft</phase>' in markdown
-    assert '<phase depends_on="draft" output>review</phase>' in markdown
+    assert '<phase depends_on="draft">review</phase>' in markdown
     assert '<phase depends_on="input" output>draft</phase>' not in markdown
     assert "Intro text." in markdown
     assert "Tail text." in markdown
@@ -241,7 +241,7 @@ Tail text.
     assert len(re.findall(r"<phase\b", markdown, flags=re.IGNORECASE)) == 2
     assert "<Phase" not in markdown
     assert '<phase depends_on="input">draft</phase>' in markdown
-    assert '<phase depends_on="draft" output>review</phase>' in markdown
+    assert '<phase depends_on="draft">review</phase>' in markdown
 
 
 def test_roundtrip_replaces_inline_and_commented_body_phase_tags_without_duplicates() -> None:
@@ -259,7 +259,7 @@ Before <phase depends_on="input" output>draft</phase> after.
 
     assert markdown.count("<phase") == 2
     assert '<phase depends_on="input">draft</phase>' in markdown
-    assert '<phase depends_on="draft" output>review</phase>' in markdown
+    assert '<phase depends_on="draft">review</phase>' in markdown
     assert '<phase depends_on="input" output>draft</phase>' not in markdown
     assert "Before " in markdown
     assert " after." in markdown

@@ -288,7 +288,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
         <PopoverAnchor asChild>
           {nodeContent}
         </PopoverAnchor>
-        <PopoverContent side="top" align="center" className="w-[280px] p-3 bg-zinc-950 border border-zinc-800 rounded-md text-foreground shadow-xl z-50">
+        <PopoverContent portalled={false} side="top" align="center" avoidCollisions={false} className="w-[280px] p-3 bg-popover border border-border rounded-md text-foreground shadow-xl z-50">
           <div className="flex items-start gap-2.5">
             <AlertTriangle className="size-4 shrink-0 text-amber-500 mt-0.5" />
             <div className="flex-1 min-w-0">
@@ -301,18 +301,26 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
                   size="sm"
                   variant="ghost"
                   className="h-7 text-[11px] px-2 text-muted-foreground hover:text-foreground"
-                  onClick={() => data.onCancelWarning?.(data.activeConflict!.nodeId)}
+                  onClick={() => data.onCancelSequentialOverwrite?.(
+                    data.activeConflict!.nodeId,
+                    data.activeConflict!.fieldName,
+                    data.activeConflict!.ancestorNodeId,
+                  )}
                 >
                   Cancel
                 </Button>
-                <Button
-                  size="sm"
-                  variant="default"
-                  className="h-7 text-[11px] px-2.5 bg-amber-500 hover:bg-amber-600 text-zinc-950 font-medium rounded-md"
-                  onClick={() => data.onAllowSequentialOverwrite?.(data.activeConflict!.nodeId, data.activeConflict!.fieldName)}
-                >
-                  Allow Overwrite
-                </Button>
+                  <Button
+                    size="sm"
+                    variant="default"
+                    className="h-7 text-[11px] px-2.5 bg-amber-500 hover:bg-amber-600 text-zinc-950 font-medium rounded-md"
+                    onClick={() => data.onAllowSequentialOverwrite?.(
+                      data.activeConflict!.nodeId,
+                      data.activeConflict!.fieldName,
+                      data.activeConflict!.ancestorNodeId,
+                    )}
+                  >
+                    Allow Overwrite
+                  </Button>
               </div>
             </div>
           </div>

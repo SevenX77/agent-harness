@@ -222,7 +222,7 @@ def lint_skill_path(skill_path: Path) -> LintResult:
     try:
         compiled = compile_skill(skill_path, skill_resolver=build_studio_skill_resolver())
     except (GraphCompileError, ResourceNotFoundError) as exc:
-        return LintResult(status="failed", errors=[_lint_error_from_exception(exc)])
+        return LintResult(status="failed", errors=[_lint_error_from_exception(exc, skill_path)])
     return LintResult(
         status="passed",
         errors=[],
@@ -230,34 +230,57 @@ def lint_skill_path(skill_path: Path) -> LintResult:
     )
 
 
-def lint_skill_changed_markdown(skill_id: str, markdown: str) -> LintResult:
-    """Lint the editor's *unsaved* GRAPH.md body for a skill (no disk write).
+def lint_skill_changed_markdown(
+    skill_id: str,
+    markdown: str,
+    *,
+    file_path: str | None = None,
+    workspace_root: str | None = None,
+) -> LintResult:
+    """Lint the editor's *unsaved* markdown body for a skill file (no disk write).
 
     The lint kernel stays engine-owned (compile-lint F1/F5): we hand the changed
     markdown to the engine compiler and surface its diagnostics. Persistence is
     Autosave / native-fs's job, so the skill store on disk is never mutated. The
     engine compiler is path-based and also reads sibling files (phase docs,
     inline IO), so we materialize an *ephemeral* copy of the skill tree in the OS
-    temp dir, overwrite only GRAPH.md with the changed body, compile that copy
+    temp dir, overwrite only the actively edited file, compile that copy
     with caching off, and tear the copy down — nothing touches the skill store.
     """
-    logger.info("lint changed-markdown skill_id=%s bytes=%d", skill_id, len(markdown))
-    disk_dir = _resolve_skill_dir_for_lint(skill_id)
+    logger.info(
+        "lint changed-markdown skill_id=%s file_path=%s bytes=%d",
+        skill_id,
+        file_path or "GRAPH.md",
+        len(markdown),
+    )
+    overlay_path = _safe_lint_overlay_path(file_path)
+    disk_dir = _resolve_skill_dir_for_lint(skill_id, workspace_root=workspace_root)
     with tempfile.TemporaryDirectory(prefix="studio-lint-") as tmp_root:
         sandbox = Path(tmp_root) / "skill"
-        _materialize_lint_sandbox(disk_dir, markdown, sandbox)
+        _materialize_lint_sandbox(disk_dir, markdown, sandbox, overlay_path)
         result = lint_skill_path(sandbox)
     logger.info("lint changed-markdown skill_id=%s status=%s", skill_id, result.status)
     return _relocate_lint_files_to_skill_root(result, sandbox)
 
 
-def _resolve_skill_dir_for_lint(skill_id: str) -> Path | None:
+def _resolve_skill_dir_for_lint(skill_id: str, *, workspace_root: str | None = None) -> Path | None:
     """Resolve the on-disk skill dir, tolerating a not-yet-saved skill.
 
     A brand-new skill the user is drafting may have no disk tree yet; linting its
     unsaved body must still work, so a missing skill resolves to ``None`` and the
     sandbox is built from the body alone.
     """
+    if workspace_root:
+        root = Path(workspace_root).expanduser().resolve()
+        if root.exists() and root.is_dir():
+            return root
+        logger.info(
+            "lint changed-markdown skill_id=%s workspace_root=%s missing; body-only sandbox",
+            skill_id,
+            workspace_root,
+        )
+        return None
+
     try:
         return resolve_skill_dir(skill_id)
     except HTTPException:
@@ -265,13 +288,33 @@ def _resolve_skill_dir_for_lint(skill_id: str) -> Path | None:
         return None
 
 
-def _materialize_lint_sandbox(disk_dir: Path | None, markdown: str, sandbox: Path) -> None:
-    """Build an ephemeral compile sandbox: disk siblings + the changed GRAPH.md."""
+def _safe_lint_overlay_path(file_path: str | None) -> Path:
+    raw_path = (file_path or "GRAPH.md").strip()
+    if not raw_path:
+        raw_path = "GRAPH.md"
+    overlay_path = Path(raw_path.replace("\\", "/"))
+    if overlay_path.is_absolute() or any(part in {"", ".", ".."} for part in overlay_path.parts):
+        raise HTTPException(
+            status_code=400,
+            detail={"message": f"Invalid lint file path: {file_path}"},
+        )
+    return overlay_path
+
+
+def _materialize_lint_sandbox(
+    disk_dir: Path | None,
+    markdown: str,
+    sandbox: Path,
+    overlay_path: Path,
+) -> None:
+    """Build an ephemeral compile sandbox: disk siblings + the changed file."""
     if disk_dir is not None and disk_dir.exists():
         shutil.copytree(disk_dir, sandbox)
     else:
         sandbox.mkdir(parents=True, exist_ok=True)
-    (sandbox / "GRAPH.md").write_text(markdown, encoding="utf-8")
+    target = sandbox / overlay_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(markdown, encoding="utf-8")
 
 
 def _relocate_lint_files_to_skill_root(result: LintResult, sandbox: Path) -> LintResult:
@@ -293,7 +336,7 @@ def _relocate_lint_files_to_skill_root(result: LintResult, sandbox: Path) -> Lin
 
 
 def _strip_sandbox_prefix(file_path: str, sandbox_str: str) -> str:
-    return file_path[len(sandbox_str) :].lstrip("/")
+    return file_path[len(sandbox_str) :].lstrip("/\\")
 
 
 async def compile_skill_for_studio(
@@ -1165,6 +1208,72 @@ async def _broken_detail_from_files_async(
     )
 
 
+async def _path_resolved_detail_from_files_async(
+    skill_id: str,
+    skill_dir: Path,
+    lint_result: LintResult,
+    storage: StorageBackend,
+) -> SkillDetail:
+    """Build a SkillDetail for a directory already resolved by path.
+
+    Subgraph inline editing is path-owned: the parent skill's SUBGRAPH.md points
+    at a concrete child directory that may not be registered in the global skill
+    index. Resolving `/skills/{child_id}` would guess a different identity; this
+    helper keeps the detail pinned to the already validated child path.
+    """
+    if lint_result.status == "failed":
+        phases, topology = _graph_topology_projection_or_empty(skill_dir)
+        return SkillDetail(
+            manifest=GraphManifest(
+                schema_version="v0.3.0",
+                name=skill_id,
+                description="(broken: manifest invalid)",
+                io={
+                    "inputs": {"type": "object", "properties": {}},
+                    "outputs": {"type": "object", "properties": {}},
+                },
+                phases=phases,
+            ),
+            graph_topology=topology,
+            node_schema_v21=_node_schema_v21(),
+            io_schema={},
+            file_paths={
+                "skill_dir": str(skill_dir),
+                "graph_md": str(skill_dir / "GRAPH.md"),
+                "runs_dir": str(runs_dir_for(skill_dir)),
+                "test_inputs_dir": str(test_inputs_dir_for_skill(skill_dir)),
+                "golden_dir": str(golden_dir_for(skill_dir)),
+                "local_settings": str(local_settings_path_for(skill_dir)),
+            },
+            files=_read_skill_files(skill_dir),
+            has_golden=await storage.exists(str(golden_dir_for(skill_dir))),
+            latest_run_metadata=None,
+            lint_result=lint_result,
+            manifest_errors=lint_result.errors,
+        )
+
+    compiled = _load_compiled(skill_dir)
+    return SkillDetail(
+        manifest=compiled.manifest,
+        graph_topology=_graph_topology(compiled, skill_dir),
+        node_schema_v21=_node_schema_v21(),
+        io_schema=_io_schema(compiled),
+        file_paths={
+            "skill_dir": str(skill_dir),
+            "graph_md": str(skill_dir / "GRAPH.md"),
+            "runs_dir": str(runs_dir_for(skill_dir)),
+            "test_inputs_dir": str(test_inputs_dir_for_skill(skill_dir)),
+            "golden_dir": str(golden_dir_for(skill_dir)),
+            "local_settings": str(local_settings_path_for(skill_dir)),
+        },
+        files=_read_skill_files(skill_dir),
+        has_golden=await storage.exists(str(golden_dir_for(skill_dir))),
+        latest_run_metadata=None,
+        lint_result=lint_result,
+        manifest_errors=[],
+    )
+
+
 def _read_skill_files(skill_dir: Path) -> dict[str, str]:
     files: dict[str, str] = {}
     for path in sorted(skill_dir.rglob("*")):
@@ -1253,12 +1362,20 @@ async def get_child_graph_topology(
         if exc.code == "SUBGRAPH_PATH_NOT_FOUND":
             _raise_subgraph_path_not_found(child_path)
         _raise_subgraph_path_invalid(child_path, exc.reason)
+    child_dir = Path(projection.path)
+    detail = await _path_resolved_detail_from_files_async(
+        projection.name or child_dir.name,
+        child_dir,
+        lint_skill_path(child_dir),
+        storage,
+    )
     return ChildGraphTopology(
         path=projection.path,
         name=projection.name,
         description=projection.description,
         phases=projection.phases,
         graph_topology=projection.graph_topology,
+        detail=detail,
     )
 
 
@@ -1313,6 +1430,7 @@ async def serialize_skill_graph_markdown(
                 id=phase.id,
                 src=phase.src,
                 depends_on=list(phase.depends_on),
+                output=phase.output,
             )
             for phase in request.phases
         ]
@@ -1390,6 +1508,7 @@ def _graph_topology(compiled: CompiledSkill, skill_dir: Path) -> list[dict[str, 
                 skill_dir,
                 phase_io_index=phase_io_index,
                 graph_input_fields=graph_input_fields,
+                output=row.get("output") is True,
             )
             for row in rows
             if isinstance(row, dict)
@@ -1424,6 +1543,7 @@ def _topology_row(
     *,
     phase_io_index: dict[str, dict[str, dict[str, object]]] | None = None,
     graph_input_fields: set[str] | None = None,
+    output: bool = False,
 ) -> dict[str, object]:
     """Build one topology row.
 
@@ -1440,6 +1560,8 @@ def _topology_row(
     }
     if mode == "subgraph":
         row["path"] = read_subgraph_path(skill_dir, phase_name)
+    if output:
+        row["output"] = True
     if phase_io_index is not None:
         io_fields = phase_io_index.get(phase_name, {"inputs": {}, "outputs": {}})
         row["io_fields"] = io_fields
@@ -1491,7 +1613,7 @@ def _sync_skill_index_entry(skill_id: str) -> dict[str, str] | None:
     }
 
 
-def _lint_error_from_exception(exc: Exception) -> LintError:
+def _lint_error_from_exception(exc: Exception, skill_dir: Path | None = None) -> LintError:
     message = str(exc)
     match = _LOCATION_RE.search(message)
     line = int(match.group("line")) if match else None
@@ -1504,7 +1626,10 @@ def _lint_error_from_exception(exc: Exception) -> LintError:
     field_path = _lint_str_attr(exc, "field_path")
     source_path = _lint_str_attr(exc, "source_path")
     return LintError(
-        file=_lint_file_from_payload(payload) or _file_from_error_message(message),
+        file=(
+            _file_from_error_message(message, skill_dir)
+            or _lint_file_from_payload(payload, skill_dir)
+        ),
         line=line,
         column=None,
         error_code=_lint_code_from_payload(payload) or _error_code_from_message(message),
@@ -1535,11 +1660,14 @@ def _lint_code_from_payload(payload: object) -> str | None:
     return code.strip("[]") or None
 
 
-def _lint_file_from_payload(payload: object) -> str | None:
+def _lint_file_from_payload(payload: object, skill_dir: Path | None = None) -> str | None:
     """Surface the engine's typed ``source_path`` as a skill-relative file."""
     source_path = getattr(payload, "source_path", None)
     if not isinstance(source_path, str) or not source_path:
         return None
+    relative = _relative_compile_path(source_path, skill_dir) if skill_dir is not None else None
+    if relative and "/" in relative:
+        return relative
     for candidate in ("GRAPH.md", "io/inputs.json", "io/outputs.json"):
         if source_path.endswith(candidate):
             return candidate
@@ -1556,12 +1684,37 @@ def _lint_phase_from_payload(payload: object) -> str | None:
     return None
 
 
-def _file_from_error_message(message: str) -> str | None:
+def _file_from_error_message(message: str, skill_dir: Path | None = None) -> str | None:
+    location_file = _location_file_from_error_message(message, skill_dir)
+    if location_file:
+        return location_file
     for candidate in ("GRAPH.md", "io/inputs.json", "io/outputs.json"):
         if candidate in message:
             return candidate
     phase_match = re.search(r"(phases/[A-Za-z0-9_-]+/(?:LOGIC|SUBGRAPH|SKILL)\.md)", message)
     return phase_match.group(1) if phase_match else None
+
+
+def _location_file_from_error_message(message: str, skill_dir: Path | None) -> str | None:
+    pattern = re.compile(
+        r"(?P<path>(?:[A-Za-z]:[\\/]|/)[^\n]*?(?:GRAPH|LOGIC|SUBGRAPH|SKILL)\.md):(?P<line>\d+)"
+    )
+    match = pattern.search(message)
+    if match is None:
+        return None
+    path = match.group("path")
+    if skill_dir is not None:
+        relative = _relative_compile_path(path, skill_dir)
+        if relative:
+            return relative
+    normalized = path.replace("\\", "/")
+    subgraph_index = normalized.find("subgraph/")
+    if subgraph_index >= 0:
+        return normalized[subgraph_index:]
+    phases_index = normalized.find("phases/")
+    if phases_index >= 0:
+        return normalized[phases_index:]
+    return Path(path).name
 
 
 def _compile_failure_from_exception(exc: Exception, skill_dir: Path) -> CompileFailure:
@@ -1596,6 +1749,7 @@ def _compile_error_from_issue(issue: object, skill_dir: Path) -> CompileError:
         field=field,
         severity="warning" if severity == "warning" else "fatal",
         message=str(getattr(issue, "message", "Skill compilation failed")),
+        error_code=_normalize_error_code(getattr(issue, "rule_id", None)),
     )
 
 
@@ -1605,16 +1759,37 @@ def _compile_error_from_exception(exc: Exception, skill_dir: Path) -> CompileErr
     line = getattr(exc, "line", None)
     if line is None and match:
         line = int(match.group("line"))
-    file_path = _relative_compile_path(getattr(exc, "skill_path", None), skill_dir)
-    if file_path is None:
-        file_path = _file_from_error_message(message)
+    file_path = (
+        _file_from_error_message(message, skill_dir)
+        or _relative_compile_path(getattr(exc, "skill_path", None), skill_dir)
+    )
     return CompileError(
         file=file_path,
         line=line,
         field=getattr(exc, "field_path", None),
         severity="fatal",
         message=message,
+        error_code=_compile_error_code_from_exception(exc),
     )
+
+
+def _normalize_error_code(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return value.strip().strip("[]") or None
+
+
+def _compile_error_code_from_exception(exc: Exception) -> str | None:
+    payload = getattr(exc, "payload", None)
+    code = _normalize_error_code(getattr(payload, "code", None))
+    if code:
+        return code
+    error_payload = getattr(exc, "error_payload", None)
+    if isinstance(error_payload, dict):
+        code = _normalize_error_code(error_payload.get("code"))
+        if code:
+            return code
+    return _normalize_error_code(_error_code_from_message(str(exc)))
 
 
 def _parse_compile_location(

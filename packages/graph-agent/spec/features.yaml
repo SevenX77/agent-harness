@@ -806,7 +806,7 @@ features:
   events_secondary: []
   non_functional_contracts: []
   targeted_tests:
-  - tests/core/test_round14_skill_compilation_cutover.py::test_graph_serializer_fresh_render_uses_v030_dual_track_graph
+  - tests/core/test_round14_skill_compilation_cutover.py::test_graph_serializer_fresh_render_does_not_synthesize_graph_boundaries
   public_api_symbols:
   - CompiledStateGraph
   - assemble_graph

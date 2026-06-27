@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react'
 import type { EventEnvelope } from '@/api/types'
-import type { FileMeta } from './file-types'
+import type { FileOpenInput, FileMeta } from './file-types'
 
 export type EditorSide = 'left' | 'right'
 export type WorkspacePanelKind = 'assets' | 'input' | 'timeline' | 'properties' | 'local-history' | null
@@ -34,6 +34,8 @@ export interface OpenFile extends FileMeta {
   skillId: string
   workspaceRoot?: string | null
   hash: string | null
+  savedContent: string
+  dirty?: boolean
   title?: string
   saveEnabled?: boolean
 }
@@ -53,7 +55,7 @@ export interface WorkspaceContextValue {
   activeFiles: { left?: string, right?: string }
   activeFileDetails: Partial<Record<EditorSide, OpenFile>>
   splitMode: boolean
-  onFileOpen: (fileOrPath: FileMeta | string, side?: EditorSide) => void
+  onFileOpen: (fileOrPath: FileOpenInput, side?: EditorSide) => void
   openSplitEditor: () => void
   closeFile: (side: EditorSide) => void
   updateFileContent: (side: EditorSide, content: string) => void

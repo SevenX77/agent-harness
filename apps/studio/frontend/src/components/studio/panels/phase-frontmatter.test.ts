@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  applyPhaseName,
   applyPhaseFrontmatterForm,
   EMPTY_FORM,
   parsePhaseFrontmatter,
@@ -143,6 +144,140 @@ describe('phase frontmatter helpers', () => {
     expect(next.markdown).toContain('<action>strip_noise</action>')
   })
 
+  it('round-trips allow_sequential_overwrite as an editable phase frontmatter field', () => {
+    const source = [
+      '---',
+      'name: review',
+      'llm_role: analyst',
+      'allow_sequential_overwrite:',
+      '  - events_raw',
+      '---',
+      'Body',
+    ].join('\n')
+
+    const parsed = parsePhaseFrontmatter(source)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+
+    const form = phaseFrontmatterToForm(parsed.frontmatter)
+    expect(form.allowSequentialOverwrite).toBe('events_raw')
+
+    const next = applyPhaseFrontmatterForm(source, {
+      ...form,
+      allowSequentialOverwrite: 'events_raw\nparsed_events',
+    }, 'agent')
+
+    expect(next.ok).toBe(true)
+    if (!next.ok) return
+    expect(next.markdown).toContain('allow_sequential_overwrite:')
+    expect(next.markdown).toContain('  - events_raw')
+    expect(next.markdown).toContain('  - parsed_events')
+  })
+
+  it('migrates legacy batch into unified iterate when saving phase properties', () => {
+    const source = [
+      '---',
+      'name: worker',
+      'actions:',
+      '  - worker',
+      'batch:',
+      '  iterator: data.items',
+      '  item_var: item',
+      '  concurrency: 2',
+      '---',
+      'Body',
+    ].join('\n')
+
+    const parsed = parsePhaseFrontmatter(source)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+
+    const form = phaseFrontmatterToForm(parsed.frontmatter)
+    expect(form.iterate).toMatchObject({
+      mode: 'batch',
+      over: 'data.items',
+      itemVar: 'item',
+      concurrency: '2',
+    })
+
+    const next = applyPhaseFrontmatterForm(source, {
+      ...form,
+      iterate: {
+        ...form.iterate,
+        over: 'data.inputs.items',
+        rangeStart: '2',
+        rangeEnd: '3',
+      },
+    }, 'logic')
+
+    expect(next.ok).toBe(true)
+    if (!next.ok) return
+    expect(next.markdown).not.toContain('batch:')
+    expect(next.markdown).toContain('iterate:')
+    expect(next.markdown).toContain('mode: batch')
+    expect(next.markdown).toContain('over: data.inputs.items')
+    expect(next.markdown).toContain('item_var: item')
+    expect(next.markdown).toContain('range:')
+    expect(next.markdown).toContain('  - 2')
+    expect(next.markdown).toContain('  - 3')
+    expect(next.markdown).toContain('concurrency: 2')
+  })
+
+  it('round-trips loop iterate accumulator settings', () => {
+    const source = [
+      '---',
+      'name: collect',
+      'actions:',
+      '  - collect',
+      'iterate:',
+      '  mode: loop',
+      '  over: data.inputs.items',
+      '  item_var: item',
+      '  accumulate:',
+      '    var: collected',
+      '    init: []',
+      '    from: piece',
+      '    merge: append',
+      '---',
+      'Body',
+    ].join('\n')
+
+    const parsed = parsePhaseFrontmatter(source)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+
+    const form = phaseFrontmatterToForm(parsed.frontmatter)
+    expect(form.iterate).toMatchObject({
+      mode: 'loop',
+      over: 'data.inputs.items',
+      itemVar: 'item',
+      accumulateVar: 'collected',
+      accumulateInit: '[]',
+      accumulateFrom: 'piece',
+      accumulateMerge: 'append',
+    })
+
+    const next = applyPhaseFrontmatterForm(source, {
+      ...form,
+      iterate: {
+        ...form.iterate,
+        accumulateInit: '0',
+        accumulateMerge: 'replace',
+      },
+    }, 'logic')
+
+    expect(next.ok).toBe(true)
+    if (!next.ok) return
+    expect(next.markdown).toContain('mode: loop')
+    expect(next.markdown).toContain('over: data.inputs.items')
+    expect(next.markdown).toContain('item_var: item')
+    expect(next.markdown).toContain('accumulate:')
+    expect(next.markdown).toContain('var: collected')
+    expect(next.markdown).toContain('init: 0')
+    expect(next.markdown).toContain('from: piece')
+    expect(next.markdown).toContain('merge: replace')
+  })
+
   it('updates whitelisted subgraph path/validator and preserves unknown keys and body', () => {
     const source = [
       '---',
@@ -206,6 +341,26 @@ describe('phase frontmatter helpers', () => {
 
     expect(next.markdown).toContain('path: /abs/skills/child')
     expect(next.markdown).not.toContain('target_skill:')
+  })
+
+  it('renames the phase name field without touching path, io, or body', () => {
+    const source = [
+      '---',
+      'name: extract',
+      'path: subgraph/event_extraction',
+      'io:',
+      '  inputs: {type: object}',
+      '---',
+      '<subgraph />',
+    ].join('\n')
+
+    const next = applyPhaseName(source, 'event_extraction')
+    expect(next.ok).toBe(true)
+    if (!next.ok) return
+    expect(next.markdown).toContain('name: event_extraction')
+    expect(next.markdown).toContain('path: subgraph/event_extraction')
+    expect(next.markdown).toContain('io:')
+    expect(next.markdown).toContain('<subgraph />')
   })
 
   it('drops validator when toggled off without touching other keys', () => {

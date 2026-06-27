@@ -1,11 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { GraphTopologyItem, SkillDetail } from '@/api/types'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
-import {
-  INPUT_ID,
-  OUTPUT_ID,
-  type SkillGraphNode,
-} from '@/components/nodes'
+import type { SkillGraphNode } from '@/components/nodes'
 import {
   buildSubgraphExpansion,
   isSubgraphPreviewId,
@@ -14,11 +10,9 @@ import {
 } from './subgraph-expansion'
 
 const PARENT_NODES: PositionedParentNode[] = [
-  { id: '__global_input__', type: 'globalInput', position: { x: 0, y: 0 } },
   { id: 'draft', type: 'skill', position: { x: 160, y: 150 } },
   { id: 'review', type: 'skill', position: { x: 160, y: 320 } },
   { id: 'expand', type: 'skill', position: { x: 160, y: 490 } },
-  { id: '__global_output__', type: 'globalOutput', position: { x: 0, y: 660 } },
 ]
 
 function topologyRow(id: string, depends_on: string[], mode: string): GraphTopologyItem {
@@ -35,8 +29,8 @@ const LOADED_REQUEST: SubgraphExpansionRequest = {
     name: 'child-skill',
     phases: ['plan', 'write'],
     graphTopology: [
-      topologyRow('plan', [], 'agent'),
-      topologyRow('write', ['plan'], 'logic'),
+      topologyRow('plan', ['input'], 'agent'),
+      { ...topologyRow('write', ['plan'], 'logic'), output: true },
     ],
   },
 }
@@ -59,8 +53,8 @@ const CHILD_DETAIL: SkillDetail = {
     phases: ['plan', 'write'],
   },
   graph_topology: [
-    topologyRow('plan', [], 'agent'),
-    topologyRow('write', ['plan'], 'logic'),
+    topologyRow('plan', ['input'], 'agent'),
+    { ...topologyRow('write', ['plan'], 'logic'), output: true },
   ],
   file_paths: {},
   files: {
@@ -80,13 +74,6 @@ describe('buildSubgraphExpansion', () => {
     expect(group).toBeDefined()
     expect(group?.data).toMatchObject({ parentLabel: 'expand', path: '/abs/child-skill', status: 'loaded' })
 
-    const childInput = nodes.find((node) => node.type === 'globalInput')
-    const childOutput = nodes.find((node) => node.type === 'globalOutput')
-    expect(childInput?.id).toContain(INPUT_ID)
-    expect(childOutput?.id).toContain(OUTPUT_ID)
-    expect(childInput?.data.skillId).toBe('child-skill-id')
-    expect(childOutput?.data.skillId).toBe('child-skill-id')
-
     const childPhases = nodes.filter((node) => node.type === 'skill')
     expect(childPhases).toHaveLength(2)
     expect(childPhases.map((node) => node.data.label).sort()).toEqual(['plan', 'write'])
@@ -97,6 +84,12 @@ describe('buildSubgraphExpansion', () => {
     expect(nodes.filter((node) => node.type !== 'subgraphGroup').every((node) => node.deletable === undefined)).toBe(true)
     expect(nodes.every((node) => isSubgraphPreviewId(node.id))).toBe(true)
     expect(nodes.filter((node) => node.type !== 'subgraphGroup').every((node) => typeof node.width === 'number' && typeof node.height === 'number')).toBe(true)
+    expect(nodes.filter((node) => node.type !== 'subgraphGroup').map((node) => node.type).sort()).toEqual([
+      'globalInput',
+      'globalOutput',
+      'skill',
+      'skill',
+    ])
   })
 
   it('uses the child SkillDetail path so expanded nodes are complete normal nodes', () => {
@@ -114,16 +107,13 @@ describe('buildSubgraphExpansion', () => {
       },
     }])
 
-    const childInput = nodes.find((node) => node.type === 'globalInput')
-    const childOutput = nodes.find((node) => node.type === 'globalOutput')
     const plan = nodes.find((node) => node.type === 'skill' && node.data.label === 'plan')
 
-    expect(childInput?.data.schema.inputs).toEqual([{ name: 'story', type: 'string', source: 'runtime', default: null }])
-    expect(childOutput?.data.schema.outputs).toEqual([{ name: 'summary', type: 'string', target: 'file', path: null }])
     expect(plan?.data.tools).toEqual(['web_search'])
     expect(plan?.data.agentBody).toContain('<step>Plan the work</step>')
     expect(plan?.data.phaseId).toBe('plan')
     expect(plan?.id).not.toBe('plan')
+    expect(plan?.data.resolvedSkillDetail).toBe(CHILD_DETAIL)
   })
 
   it('keeps nested subgraph nodes on the same SkillNode toggle contract', () => {
@@ -246,14 +236,14 @@ describe('buildSubgraphExpansion', () => {
     const { edges } = buildSubgraphExpansion(PARENT_NODES, [LOADED_REQUEST])
     const internal = edges.filter((edge) => isSubgraphPreviewId(edge.source) && isSubgraphPreviewId(edge.target))
 
-    expect(internal.length).toBeGreaterThanOrEqual(3)
+    expect(internal).toHaveLength(3)
     expect(internal.every((edge) => edge.type === 'contextEdge')).toBe(true)
     expect(internal.every((edge) => edge.data?.showContextControl !== false)).toBe(true)
     expect(internal.every((edge) => edge.data?.sourcePhaseId === edge.source)).toBe(true)
     expect(internal.every((edge) => edge.data?.targetPhaseId === edge.target)).toBe(true)
-    expect(internal.some((edge) => edge.source.includes(INPUT_ID) && edge.target.includes('plan'))).toBe(true)
+    expect(internal.some((edge) => edge.source.includes('__global_input__') && edge.target.includes('plan'))).toBe(true)
     expect(internal.some((edge) => edge.source.includes('plan') && edge.target.includes('write'))).toBe(true)
-    expect(internal.some((edge) => edge.source.includes('write') && edge.target.includes(OUTPUT_ID))).toBe(true)
+    expect(internal.some((edge) => edge.source.includes('write') && edge.target.includes('__global_output__'))).toBe(true)
   })
 
   it('keeps the parent bridge visual out of React Flow edges and leaves a fixed toggle-to-frame span', () => {
@@ -265,28 +255,37 @@ describe('buildSubgraphExpansion', () => {
     expect(groupLeft).toBe(392)
   })
 
-  it('anchors the child input beside the clicked expand node, not the whole graph center', () => {
+  it('anchors the first child phase beside the clicked expand node, not the whole graph center', () => {
     const { nodes } = buildSubgraphExpansion(PARENT_NODES, [LOADED_REQUEST])
-    const childInput = nodes.find((node) => node.type === 'globalInput')
+    const childPlan = nodes.find((node) => node.type === 'skill' && node.data.label === 'plan')
     const parent = PARENT_NODES.find((node) => node.id === 'expand')
 
-    expect(childInput).toBeDefined()
-    expect(childInput?.position.y).toBe(parent?.position.y)
-    expect(childInput?.position.x ?? 0).toBeGreaterThan((parent?.position.x ?? 0) + 260 / 2)
+    expect(childPlan).toBeDefined()
+    expect(childPlan?.position.y).toBe(parent?.position.y)
+    expect(childPlan?.position.x ?? 0).toBeGreaterThan((parent?.position.x ?? 0) + 260 / 2)
   })
 
-  it('keeps expanded child input, phases, and output centered on the same graph axis', () => {
+  it('places an expanded subgraph to the right of the whole visible parent topology', () => {
+    const parents: PositionedParentNode[] = [
+      { id: 'expand', type: 'skill', position: { x: 160, y: 490 } },
+      { id: 'rightmost-parent', type: 'skill', position: { x: 720, y: 320 } },
+    ]
+    const { nodes } = buildSubgraphExpansion(parents, [LOADED_REQUEST])
+    const group = nodes.find((node) => node.type === 'subgraphGroup')
+    const groupLeft = (group?.position.x ?? 0) - ((group?.width as number | undefined) ?? 0) / 2
+    const parentGraphRight = 720 + 260 / 2
+
+    expect(groupLeft).toBeGreaterThan(parentGraphRight)
+  })
+
+  it('keeps expanded child phases centered on the same graph axis', () => {
     const { nodes } = buildSubgraphExpansion(PARENT_NODES, [LOADED_REQUEST])
-    const childInput = nodes.find((node) => node.type === 'globalInput')
-    const childOutput = nodes.find((node) => node.type === 'globalOutput')
     const childPhases = nodes.filter((node) => node.type === 'skill')
 
-    expect(childInput).toBeDefined()
-    expect(childOutput).toBeDefined()
     expect(childPhases).toHaveLength(2)
+    const axis = childPhases[0]?.position.x ?? 0
     for (const phase of childPhases) {
-      expect(phase.position.x).toBeCloseTo(childInput?.position.x ?? 0, 5)
-      expect(phase.position.x).toBeCloseTo(childOutput?.position.x ?? 0, 5)
+      expect(phase.position.x).toBeCloseTo(axis, 5)
     }
   })
 
@@ -296,7 +295,7 @@ describe('buildSubgraphExpansion', () => {
     ])
 
     expect(nodes.filter((node) => node.type === 'skill')).toHaveLength(0)
-    expect(nodes.filter((node) => node.type === 'globalInput' || node.type === 'globalOutput')).toHaveLength(0)
+    expect(nodes.filter((node) => node.type !== 'subgraphGroup')).toHaveLength(0)
     expect(nodes.find((node) => node.type === 'subgraphGroup')?.data).toMatchObject({ status: 'loading' })
     expect(edges).toHaveLength(0)
   })

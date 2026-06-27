@@ -210,6 +210,20 @@ export async function deleteWorkspacePath(
   })
 }
 
+export async function moveWorkspacePath(
+  workspaceRoot: string,
+  from: string,
+  to: string,
+): Promise<void> {
+  assertNativeHelpersAvailable()
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('move_workspace_path', {
+    workspaceRoot,
+    from,
+    to,
+  })
+}
+
 export async function addRecentWorkspace(
   absolutePath: string,
   displayName: string,

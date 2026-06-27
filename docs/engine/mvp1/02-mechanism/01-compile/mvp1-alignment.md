@@ -23,7 +23,7 @@ compile = 把磁盘 skill 源码**读进来 → 校验 → 编译成可信 AST**
 - **编译期纯函数**:只读源码、不执行 action、不调 Agent;读不到 `.workspace` → golden 失效**不在编译期**(移 eval 期,见 `compile-rules` CR3 / `golden-eval`)。
 
 ## 3. 接口契约
-`compile_skill(root,*,chat_model?,cache,skill_resolver) -> CompiledSkill`(签名归 `03-api-contract`;CompiledSkill/CompileResult 形状归 `data-contracts`);用 `02-resolver` 解析 SUBGRAPH/subagent 的 target_skill。
+`compile_skill(root,*,chat_model?,cache,skill_resolver) -> CompiledSkill`(签名归 `03-api-contract`;CompiledSkill/CompileResult 形状归 `data-contracts`);用 `02-resolver` 解析 SUBGRAPH 的 `path`；subagent 的 `target_skill` 属运行期委派机制。
 
 ## 4. 设计决策基础(用户原话)
 > loader 与 compile 关系(2026-06-03 PM):"loader 加载 skill 和 compile 有什么关系?" → loader 就是编译期机制本身(读→解析→校验→AST);它执行的规则归 compile-rules,它本身(loader/purity 扫描器/sandbox)是机制。

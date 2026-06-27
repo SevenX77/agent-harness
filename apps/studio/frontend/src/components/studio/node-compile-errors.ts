@@ -111,6 +111,7 @@ export function lintErrorToCompileError(error: LintError): CompileError {
     field: error.field_path ?? null,
     severity: error.severity === "warning" ? "warning" : "fatal",
     message: error.message,
+    error_code: error.error_code,
   }
 }
 

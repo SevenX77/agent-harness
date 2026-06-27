@@ -26,6 +26,7 @@ interface PanelsProps {
   selectedTestInputId?: string | null
   onSelectTestInput?: (id: string | null) => void
   onPhaseFileSave?: (payload: { path: string; content: string; expectedHash: string }) => Promise<void> | void
+  onPhaseRename?: (phaseId: string, nextPhaseId: string) => Promise<void> | void
   // trace-observability F1: while a run is active the timeline region streams
   // live trace events (TracePanel); with no active run it shows run history (F2).
   runId?: string | null
@@ -66,6 +67,7 @@ export function Panels({
   selectedTestInputId,
   onSelectTestInput,
   onPhaseFileSave,
+  onPhaseRename,
   runId,
   selectedNodeStatus,
   resumeValidity,
@@ -94,12 +96,15 @@ export function Panels({
   const isDarkMode = useThemeValue() === "dark"
   const selectedNodeSkillId = selectedNode?.data.skillId ?? null
   const selectedNodeUsesDifferentSkill = Boolean(selectedNodeSkillId && selectedNodeSkillId !== skillId)
-  const selectedNodeSkill = useSkills(selectedNodeUsesDifferentSkill ? selectedNodeSkillId : null)
+  const selectedNodeResolvedDetail = selectedNode?.data.resolvedSkillDetail
+  const selectedNodeSkill = useSkills(selectedNodeUsesDifferentSkill && !selectedNodeResolvedDetail ? selectedNodeSkillId : null)
   const propertiesSkillId = selectedNodeUsesDifferentSkill ? selectedNodeSkillId : skillId
   const propertiesWorkspaceRoot = selectedNodeUsesDifferentSkill
     ? selectedNode?.data.workspaceRoot ?? null
     : workspaceRoot
-  const propertiesSkillDetail = selectedNodeUsesDifferentSkill ? selectedNodeSkill.skillDetail : skillDetail
+  const propertiesSkillDetail = selectedNodeUsesDifferentSkill
+    ? selectedNodeResolvedDetail ?? selectedNodeSkill.skillDetail
+    : skillDetail
   if (!skillId) {
     return (
       <div className="flex h-full w-full flex-col bg-sidebar">
@@ -202,6 +207,7 @@ export function Panels({
         lintErrors={lintErrors}
         onFileOpen={onFileOpen}
         onPhaseFileSave={selectedNodeUsesDifferentSkill ? undefined : onPhaseFileSave}
+        onPhaseRename={selectedNodeUsesDifferentSkill ? undefined : onPhaseRename}
         onResumeNode={onResumeNode}
         onPromoteNode={onPromoteNode}
       />

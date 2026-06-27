@@ -5,7 +5,7 @@ import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { compareReplayArgsForJudgeResult, Workspace } from './Workspace'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
-import type { EventEnvelope, RunDetail, SkillDetail } from '@/api/types'
+import type { EventEnvelope, RunDetail, SerializableGraphPhaseRef, SkillDetail } from '@/api/types'
 
 // React 19's act() warns unless the environment opts in.
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -17,20 +17,40 @@ const mocks = vi.hoisted(() => ({
   },
   graphCanvasProps: null as null | {
     skillId?: string | null
+    onCreatePhase?: (kind: 'skill' | 'logic' | 'subgraph', phaseId?: string) => Promise<void> | void
+    onDeletePhase?: (phaseId: string) => Promise<void> | void
+    onNodeFileOpen?: (fileOrPath: unknown) => void
     onPersistConnection?: (connection: { source: string; target: string }) => Promise<void> | void
     onReconnectConnection?: (
       disconnect: { source: string; target: string },
       connect: { source: string; target: string },
     ) => Promise<void> | void
+    compileErrorsByNodeId?: Record<string, unknown[]>
+    sequentialOverwriteErrorsByNodeId?: Record<string, unknown[]>
   },
   centerActionBarProps: null as null | {
     stage?: string
     onCompile?: () => Promise<void> | void
     onPredict?: () => Promise<void> | void
     onRun?: () => Promise<void> | void
-    onCreatePhase?: (kind: 'skill' | 'logic' | 'subgraph') => Promise<void> | void
   },
-  conflictDialogProps: null as null | { onOverwriteRetry?: () => void },
+  conflictDialogProps: null as null | {
+    conflict?: {
+      path: string
+      localContent: string
+      remoteContent: string
+    } | null
+    onOverwriteRetry?: () => void
+  },
+  lazyMonacoProps: [] as Array<{
+    value: string
+    onChange: (value: string) => void
+    onInFlightChange: (inFlight: boolean) => void
+  }>,
+  webSockets: [] as Array<{
+    onmessage: ((event: { data: string }) => void) | null
+    close: () => void
+  }>,
   copilotProps: [] as Array<{
     skillId: string | null
     workspaceRoot?: string | null
@@ -53,6 +73,8 @@ const mocks = vi.hoisted(() => ({
   },
   goldenDiffCompare: vi.fn(),
   compileSkill: vi.fn(),
+  getSkillDetail: vi.fn(),
+  getCompareGroup: vi.fn(),
   getResumeValidity: vi.fn(),
   postPredictRun: vi.fn(),
   resolveRunInput: vi.fn(),
@@ -83,8 +105,9 @@ vi.mock('@tauri-apps/api/core', () => ({
 vi.mock('@/api/client', () => ({
   compileSkill: mocks.compileSkill,
   fetcher: vi.fn(async () => []),
+  getCompareGroup: mocks.getCompareGroup,
   getResumeValidity: mocks.getResumeValidity,
-  getSkillDetail: vi.fn(),
+  getSkillDetail: mocks.getSkillDetail,
   postPredictRun: mocks.postPredictRun,
   resolveRunInput: mocks.resolveRunInput,
   resumeRun: mocks.resumeRun,
@@ -179,6 +202,9 @@ vi.mock('@/lib/hash', () => ({
 vi.mock('@/components/GraphCanvas', () => ({
   GraphCanvas: (props: {
     skillId?: string | null
+    onCreatePhase?: (kind: 'skill' | 'logic' | 'subgraph', phaseId?: string) => Promise<void> | void
+    onDeletePhase?: (phaseId: string) => Promise<void> | void
+    onNodeFileOpen?: (fileOrPath: unknown) => void
     onPersistConnection?: (connection: { source: string; target: string }) => Promise<void> | void
     onReconnectConnection?: (
       disconnect: { source: string; target: string },
@@ -259,8 +285,19 @@ vi.mock('./SettingsPage', () => ({
   SettingsPage: () => <div data-testid="settings" />,
 }))
 
-vi.mock('./SplitEditor', () => ({
-  SplitEditor: () => <div data-testid="split-editor" />,
+vi.mock('./LazyMonacoPanel', () => ({
+  LazyMonacoPanel: (props: {
+    value: string
+    onChange: (value: string) => void
+    onInFlightChange: (inFlight: boolean) => void
+  }) => {
+    mocks.lazyMonacoProps.push(props)
+    return (
+      <div data-testid="lazy-monaco-panel">
+        {props.value}
+      </div>
+    )
+  }
 }))
 
 vi.mock('./Toolbar', () => ({
@@ -280,7 +317,14 @@ vi.mock('./Toolbar', () => ({
 }))
 
 vi.mock('./ConflictDialog', () => ({
-  ConflictDialog: (props: { onOverwriteRetry?: () => void }) => {
+  ConflictDialog: (props: {
+    conflict?: {
+      path: string
+      localContent: string
+      remoteContent: string
+    } | null
+    onOverwriteRetry?: () => void
+  }) => {
     mocks.conflictDialogProps = props
     return <div data-testid="conflict-dialog" />
   },
@@ -292,7 +336,6 @@ vi.mock('./center-action-bar', () => ({
     onCompile?: () => Promise<void> | void
     onPredict?: () => Promise<void> | void
     onRun?: () => Promise<void> | void
-    onCreatePhase?: (kind: 'skill' | 'logic' | 'subgraph') => Promise<void> | void
   }) => {
     mocks.centerActionBarProps = props
     return <div data-testid="center-action-bar" />
@@ -314,9 +357,13 @@ describe('Workspace WS-1 local writer contracts', () => {
       'WebSocket',
       class {
         onmessage: ((event: { data: string }) => void) | null = null
+        constructor() {
+          mocks.webSockets.push(this)
+        }
         close() {}
       },
     )
+    mocks.webSockets = []
     mocks.runStreamEvents = []
     mocks.fetchRunDetail.mockReset()
     mocks.refreshLocalHistory.mockReset()
@@ -325,6 +372,7 @@ describe('Workspace WS-1 local writer contracts', () => {
     mocks.graphCanvasProps = null
     mocks.centerActionBarProps = null
     mocks.conflictDialogProps = null
+    mocks.lazyMonacoProps.length = 0
     mocks.copilotProps.length = 0
     mocks.useSkillsIds.length = 0
     mocks.goldenDiffCalls.length = 0
@@ -333,6 +381,8 @@ describe('Workspace WS-1 local writer contracts', () => {
     mocks.goldenDiffCompare.mockResolvedValue(null)
     mocks.writeSkillFile.mockReset()
     mocks.writeSkillFile.mockResolvedValue({ path: 'GRAPH.md', hash: 'python-hash' })
+    mocks.getSkillDetail.mockReset()
+    mocks.getSkillDetail.mockImplementation(async (id: string) => skillDetail(id))
     mocks.compileSkill.mockReset()
     mocks.compileSkill.mockResolvedValue({
       status: 'ok',
@@ -350,6 +400,8 @@ describe('Workspace WS-1 local writer contracts', () => {
       source_map_ref: 'file:///tmp/source_map.json',
       execution_fingerprint: `sha256:${'2'.repeat(64)}`,
     })
+    mocks.getCompareGroup.mockReset()
+    mocks.getCompareGroup.mockResolvedValue({ compare_group_id: 'group-1', runs: [] })
     mocks.getResumeValidity.mockReset()
     mocks.getResumeValidity.mockResolvedValue({
       run_id: 'run-1',
@@ -392,7 +444,15 @@ describe('Workspace WS-1 local writer contracts', () => {
     })
     mocks.mutateSkillDetail.mockReset()
     mocks.invoke.mockReset()
-    mocks.invoke.mockResolvedValue({ path: 'GRAPH.md', hash: 'native-hash' })
+    mocks.invoke.mockImplementation(async (command: string, payload: { relativePath?: string; path?: string }) => {
+      if (command === 'read_workspace_file') {
+        return { path: payload.relativePath ?? payload.path ?? 'GRAPH.md', content: 'serialized graph\n', hash: 'native-hash' }
+      }
+      if (command === 'list_workspace_dir') {
+        return []
+      }
+      return { path: payload.relativePath ?? payload.path ?? 'GRAPH.md', hash: 'native-hash' }
+    })
     mocks.lintStatus = 'idle'
     toastMocks.error.mockReset()
     toastMocks.success.mockReset()
@@ -437,7 +497,7 @@ describe('Workspace WS-1 local writer contracts', () => {
     expect((mocks.invoke.mock.calls[0][1] as Record<string, unknown>)).not.toHaveProperty('path')
   })
 
-  it('compiles after a canvas connection writes GRAPH.md successfully', async () => {
+  it('does not auto-compile after a canvas connection writes GRAPH.md successfully', async () => {
     renderWorkspace()
 
     await mocks.graphCanvasProps?.onPersistConnection?.({ source: 'draft', target: 'review' })
@@ -446,7 +506,7 @@ describe('Workspace WS-1 local writer contracts', () => {
       relativePath: 'GRAPH.md',
       content: 'serialized graph\n',
     }))
-    expect(mocks.compileSkill).toHaveBeenCalledWith('writer-smoke')
+    expect(mocks.compileSkill).not.toHaveBeenCalled()
   })
 
   it('shows compile success with artifact hash and execution fingerprint', async () => {
@@ -505,6 +565,13 @@ describe('Workspace WS-1 local writer contracts', () => {
     renderWorkspace(selection)
 
     expect(mocks.panelsProps?.workspaceRoot).toBe('/Users/sevenx/Projects/writer-smoke')
+  })
+
+  it('keeps first-screen sequential overwrite lint out of the popover-only compile channel', () => {
+    renderWorkspace(LINT_SEQUENTIAL_OVERWRITE_FIXTURE_SKILL_ID)
+
+    expect(mocks.graphCanvasProps?.compileErrorsByNodeId?.review).toHaveLength(1)
+    expect(mocks.graphCanvasProps?.sequentialOverwriteErrorsByNodeId).toEqual({})
   })
 
   it('constrains the left resizable panel so Assets split panes stay inside the viewport', () => {
@@ -629,10 +696,19 @@ describe('Workspace WS-1 local writer contracts', () => {
     const selection = `local-workspace:${encodeURIComponent('writer-smoke')}:${encodeURIComponent('/Users/sevenx/Projects/writer-smoke')}`
     renderWorkspace(selection)
 
-    expect(mocks.centerActionBarProps?.onCreatePhase).toBeTypeOf('function')
-    await mocks.centerActionBarProps?.onCreatePhase?.('logic')
+    expect(mocks.graphCanvasProps?.onCreatePhase).toBeTypeOf('function')
+    await mocks.graphCanvasProps?.onCreatePhase?.('logic')
 
     expect(mocks.writeSkillFile).not.toHaveBeenCalled()
+    expect(mocks.invoke).toHaveBeenNthCalledWith(1, 'write_workspace_file', expect.objectContaining({
+      workspaceRoot: '/Users/sevenx/Projects/writer-smoke',
+      relativePath: 'phases/logic/LOGIC.md',
+      expectedHash: null,
+      createIfAbsent: true,
+    }))
+    expect(mocks.invoke.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.serializeSkillGraph.mock.invocationCallOrder[0],
+    )
     expect(mocks.serializeSkillGraph).toHaveBeenCalledWith(
       'writer-smoke',
       expect.arrayContaining([
@@ -646,18 +722,245 @@ describe('Workspace WS-1 local writer contracts', () => {
       'graph-hash',
     )
     expect(mocks.invoke).toHaveBeenCalledTimes(2)
-    expect(mocks.invoke).toHaveBeenNthCalledWith(1, 'write_workspace_file', expect.objectContaining({
-      workspaceRoot: '/Users/sevenx/Projects/writer-smoke',
-      relativePath: 'phases/logic/LOGIC.md',
-      expectedHash: null,
-    }))
     expect(mocks.invoke).toHaveBeenNthCalledWith(2, 'write_workspace_file', expect.objectContaining({
       workspaceRoot: '/Users/sevenx/Projects/writer-smoke',
       relativePath: 'GRAPH.md',
       content: 'serialized graph\n',
       expectedHash: 'graph-hash',
     }))
-    expect(mocks.compileSkill).toHaveBeenCalledWith('writer-smoke')
+    expect(mocks.compileSkill).not.toHaveBeenCalled()
+  })
+
+  it('opens child subgraph phase files by reading the child workspace root from native fs', async () => {
+    renderWorkspace()
+
+    mocks.graphCanvasProps?.onNodeFileOpen?.({
+      path: 'phases/review/SKILL.md',
+      skillId: 'event-extraction',
+      workspaceRoot: '/Users/sevenx/Projects/story-deconstruction-v3/subgraph/event-timeline/subgraph/event-extraction',
+      language: 'markdown',
+      saveEnabled: true,
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(mocks.invoke).toHaveBeenCalledWith('read_workspace_file', expect.objectContaining({
+      workspaceRoot: '/Users/sevenx/Projects/story-deconstruction-v3/subgraph/event-timeline/subgraph/event-extraction',
+      path: 'phases/review/SKILL.md',
+    }))
+  })
+
+  it('keeps a dirty open editor buffer when a same-file skill_changed event arrives', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => {
+        root.render(
+          createElement(Workspace, {
+            skillId: 'writer-smoke',
+            onSelectSkill: vi.fn(),
+            onCloseSkill: vi.fn(),
+          }),
+        )
+        await Promise.resolve()
+      })
+
+      act(() => {
+        mocks.graphCanvasProps?.onNodeFileOpen?.('GRAPH.md')
+      })
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      expect(mocks.lazyMonacoProps.at(-1)?.value).toBe('graph before\n')
+
+      act(() => {
+        mocks.lazyMonacoProps.at(-1)?.onChange('local dirty graph\n')
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      mocks.getSkillDetail.mockResolvedValueOnce({
+        ...skillDetail('writer-smoke'),
+        files: {
+          ...skillDetail('writer-smoke').files,
+          'GRAPH.md': 'remote graph\n',
+        },
+      })
+
+      await act(async () => {
+        mocks.webSockets.at(-1)?.onmessage?.({
+          data: JSON.stringify({
+            type: 'skill_changed',
+            skill_id: 'writer-smoke',
+            path: 'GRAPH.md',
+          }),
+        })
+        await Promise.resolve()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      expect(mocks.lazyMonacoProps.at(-1)?.value).toBe('local dirty graph\n')
+      expect(mocks.conflictDialogProps?.conflict).toMatchObject({
+        path: 'GRAPH.md',
+        localContent: 'local dirty graph\n',
+        remoteContent: 'remote graph\n',
+      })
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+    }
+  })
+
+  it('creates a phase with the submitted node name', async () => {
+    renderWorkspace('writer-smoke')
+
+    await mocks.graphCanvasProps?.onCreatePhase?.('logic', 'summarize_events')
+
+    expect(mocks.invoke).toHaveBeenNthCalledWith(1, 'write_workspace_file', expect.objectContaining({
+      relativePath: 'phases/summarize_events/LOGIC.md',
+      content: expect.stringContaining('name: summarize_events'),
+      createIfAbsent: true,
+    }))
+    const serializedPhases = mocks.serializeSkillGraph.mock.calls[0][1] as SerializableGraphPhaseRef[]
+    expect(serializedPhases).toContainEqual(expect.objectContaining({
+      id: 'summarize_events',
+      src: 'phases/summarize_events',
+      depends_on: [],
+      mode: 'logic',
+    }))
+  })
+
+  it('creates a phase without rewriting existing topology dependencies', async () => {
+    renderWorkspace(INPUT_SENTINEL_FIXTURE_SKILL_ID)
+
+    await mocks.graphCanvasProps?.onCreatePhase?.('logic')
+
+    const serializedPhases = mocks.serializeSkillGraph.mock.calls[0][1] as SerializableGraphPhaseRef[]
+    expect(serializedPhases.find((phase) => phase.id === 'entry')?.depends_on).toEqual(['input'])
+    expect(serializedPhases.find((phase) => phase.id === 'logic')?.depends_on).toEqual([])
+  })
+
+  it('does not adopt a stale phase directory when creating a new phase', async () => {
+    renderWorkspace(STALE_PHASE_DIR_FIXTURE_SKILL_ID)
+
+    await mocks.graphCanvasProps?.onCreatePhase?.('logic')
+
+    const phaseWrites = mocks.invoke.mock.calls.filter(
+      ([command, payload]) =>
+        command === 'write_workspace_file'
+        && String((payload as { relativePath?: string }).relativePath).startsWith('phases/'),
+    )
+    expect(phaseWrites.map(([, payload]) => (payload as { relativePath?: string }).relativePath)).toEqual([
+      'phases/logic-2/LOGIC.md',
+    ])
+    const serializedPhases = mocks.serializeSkillGraph.mock.calls[0][1] as SerializableGraphPhaseRef[]
+    expect(serializedPhases.some((phase) => phase.id === 'logic')).toBe(false)
+    expect(serializedPhases.some((phase) => phase.id === 'logic-2')).toBe(true)
+    expect(mocks.invoke).toHaveBeenCalledWith('write_workspace_file', expect.objectContaining({
+      relativePath: 'GRAPH.md',
+      content: 'serialized graph\n',
+    }))
+    expect(toastMocks.error).not.toHaveBeenCalled()
+  })
+
+  it('rolls back a newly-created phase directory when GRAPH serialization fails', async () => {
+    mocks.serializeSkillGraph.mockRejectedValueOnce(new Error('serialize failed'))
+    renderWorkspace('writer-smoke')
+
+    await mocks.graphCanvasProps?.onCreatePhase?.('logic')
+
+    expect(mocks.invoke).toHaveBeenCalledWith('write_workspace_file', expect.objectContaining({
+      relativePath: 'phases/logic/LOGIC.md',
+      createIfAbsent: true,
+    }))
+    expect(mocks.invoke).toHaveBeenCalledWith('delete_workspace_path', {
+      workspaceRoot: 'writer-smoke',
+      path: 'phases/logic',
+    })
+    expect(toastMocks.error).toHaveBeenCalledWith('serialize failed')
+  })
+
+  it('surfaces native create-phase write failures instead of a generic toast', async () => {
+    mocks.invoke.mockImplementation(async (command: string, payload: { relativePath?: string }) => {
+      if (command === 'write_workspace_file' && payload.relativePath === 'GRAPH.md') {
+        throw { type: 'WriteFailed', data: { message: 'cannot finalize write: locked' } }
+      }
+      return { path: payload.relativePath ?? 'GRAPH.md', hash: 'native-hash' }
+    })
+    renderWorkspace('writer-smoke')
+
+    await mocks.graphCanvasProps?.onCreatePhase?.('logic')
+
+    expect(toastMocks.error).toHaveBeenCalledWith('cannot finalize write: locked')
+  })
+
+  it('deletes a phase by persisting GRAPH.md without it before removing its phase directory', async () => {
+    renderWorkspace(RECONNECT_FIXTURE_SKILL_ID)
+
+    expect(mocks.graphCanvasProps?.onDeletePhase).toBeTypeOf('function')
+    await mocks.graphCanvasProps?.onDeletePhase?.('draft')
+
+    expect(mocks.serializeSkillGraph).toHaveBeenCalledTimes(1)
+    const serializedPhases = mocks.serializeSkillGraph.mock.calls[0][1] as SerializableGraphPhaseRef[]
+    expect(serializedPhases.some((phase) => phase.id === 'draft')).toBe(false)
+    expect(serializedPhases.find((phase) => phase.id === 'review')?.depends_on).toEqual([])
+    expect(mocks.invoke).toHaveBeenNthCalledWith(1, 'write_workspace_file', expect.objectContaining({
+      relativePath: 'GRAPH.md',
+      content: 'serialized graph\n',
+      expectedHash: 'graph-hash',
+    }))
+    expect(mocks.invoke).toHaveBeenNthCalledWith(2, 'delete_workspace_path', {
+      workspaceRoot: RECONNECT_FIXTURE_SKILL_ID,
+      path: 'phases/draft',
+    })
+    expect(mocks.compileSkill).not.toHaveBeenCalled()
+  })
+
+  it('deletes orphaned root phase directories that are absent from the next GRAPH.md', async () => {
+    renderWorkspace(STALE_PHASE_DIR_FIXTURE_SKILL_ID)
+
+    await mocks.graphCanvasProps?.onDeletePhase?.('draft')
+
+    expect(mocks.serializeSkillGraph).toHaveBeenCalledTimes(1)
+    const serializedPhases = mocks.serializeSkillGraph.mock.calls[0][1] as SerializableGraphPhaseRef[]
+    expect(serializedPhases.map((phase) => phase.id)).toEqual(['review'])
+    expect(mocks.invoke).toHaveBeenNthCalledWith(1, 'write_workspace_file', expect.objectContaining({
+      relativePath: 'GRAPH.md',
+      content: 'serialized graph\n',
+    }))
+    const deletedPaths = mocks.invoke.mock.calls
+      .filter(([command]) => command === 'delete_workspace_path')
+      .map(([, payload]) => (payload as { path?: string }).path)
+    expect(deletedPaths).toEqual(['phases/draft', 'phases/logic'])
+    expect(mocks.compileSkill).not.toHaveBeenCalled()
+  })
+
+  it('does not report delete success when the phase folder is still present after native delete', async () => {
+    mocks.invoke.mockImplementation(async (command: string, payload: { relativePath?: string; path?: string }) => {
+      if (command === 'read_workspace_file') {
+        return { path: payload.path ?? 'GRAPH.md', content: 'serialized graph\n', hash: 'native-hash' }
+      }
+      if (command === 'list_workspace_dir') {
+        return [{ name: 'draft', kind: 'dir' }]
+      }
+      return { path: payload.relativePath ?? payload.path ?? 'GRAPH.md', hash: 'native-hash' }
+    })
+    renderWorkspace(RECONNECT_FIXTURE_SKILL_ID)
+
+    await mocks.graphCanvasProps?.onDeletePhase?.('draft')
+
+    expect(toastMocks.error).toHaveBeenCalledWith('Could not delete phase folder: phases/draft')
+    expect(toastMocks.success).not.toHaveBeenCalledWith('Deleted draft')
+    expect(mocks.compileSkill).not.toHaveBeenCalled()
   })
 
   // n2-canvas #8 lost-update regression: an edge reconnect (drag the draft→review
@@ -702,6 +1005,7 @@ describe('Workspace WS-1 local writer contracts', () => {
       expectedHash: 'graph-hash',
     })
     expect(toastMocks.error).not.toHaveBeenCalled()
+    expect(mocks.compileSkill).not.toHaveBeenCalled()
   })
 
   it('wires conflict overwrite retry into the shared conflict dialog', () => {
@@ -746,17 +1050,12 @@ describe('Workspace WS-1 local writer contracts', () => {
     }
   })
 
-  // N3 #12: a passing realtime lint must drive the build stage to 'compile-pass' (which
-  // is what unlocks Predict in the CenterActionBar) without the user clicking Compile.
-  // deriveBuildStage is the design atom — it reads readLintStatus and maps passed →
-  // compile-pass; Workspace subscribes to lintStatusEvent so the bar re-renders when it
-  // changes.
-  it('drives the build stage to compile-pass from a passing realtime lint', () => {
+  it('does not treat a passing realtime lint as a manual compile pass', () => {
     mocks.lintStatus = 'passed'
 
     renderWorkspace()
 
-    expect(mocks.centerActionBarProps?.stage).toBe('compile-pass')
+    expect(mocks.centerActionBarProps?.stage).toBe('idle')
   })
 
   it('keeps the build stage idle while no lint has passed', () => {
@@ -989,8 +1288,86 @@ function renderWorkspace(skillId = 'writer-smoke') {
 // real new one to add. Keyed by skill id so the shared writer-smoke fixture (and
 // every test that asserts review.depends_on starts empty) is untouched.
 const RECONNECT_FIXTURE_SKILL_ID = 'reconnect-fixture'
+const INPUT_SENTINEL_FIXTURE_SKILL_ID = 'input-sentinel-fixture'
+const STALE_PHASE_DIR_FIXTURE_SKILL_ID = 'stale-phase-dir-fixture'
+const LINT_SEQUENTIAL_OVERWRITE_FIXTURE_SKILL_ID = 'lint-sequential-overwrite-fixture'
 
 function skillDetail(skillId = 'writer-smoke'): SkillDetail {
+  if (skillId === LINT_SEQUENTIAL_OVERWRITE_FIXTURE_SKILL_ID) {
+    return {
+      manifest: {
+        schema_version: CURRENT_SCHEMA_VERSION,
+        name: skillId,
+        description: 'Lint sequential overwrite fixture',
+        io: {
+          inputs: { type: 'object', properties: {} },
+          outputs: { type: 'object', properties: {} },
+        },
+        phases: ['draft', 'review'],
+      },
+      graph_topology: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'skill' },
+        { id: 'review', src: 'phases/review/SKILL.md', depends_on: ['draft'], mode: 'skill' },
+      ],
+      node_schema_v21: {},
+      io_schema: {},
+      file_paths: {},
+      files: {
+        'GRAPH.md': 'graph before\n',
+        'phases/draft/SKILL.md': 'draft before\n',
+        'phases/review/SKILL.md': 'review before\n',
+      },
+      manifest_errors: null,
+      has_golden: false,
+      latest_run_metadata: null,
+      lint_result: {
+        status: 'failed',
+        errors: [{
+          file: 'phases/review/SKILL.md',
+          line: 1,
+          column: 1,
+          phase_name: 'review',
+          field_path: 'allow_sequential_overwrite',
+          severity: 'error',
+          error_code: 'F-v3-sequential-overwrite-unauthorized',
+          message: "Phase 'review' sequentially overwrites field 'events_raw' outputted by upstream phase 'draft'. Declare 'events_raw' in allow_sequential_overwrite in SKILL.md to allow this.",
+        }],
+        phases_summary: null,
+      },
+    }
+  }
+  if (skillId === STALE_PHASE_DIR_FIXTURE_SKILL_ID) {
+    return {
+      manifest: {
+        schema_version: CURRENT_SCHEMA_VERSION,
+        name: skillId,
+        description: 'Stale phase directory fixture',
+        io: {
+          inputs: { type: 'object', properties: {} },
+          outputs: { type: 'object', properties: {} },
+        },
+        phases: ['draft', 'review'],
+      },
+      graph_topology: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'skill' },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'], mode: 'logic' },
+      ],
+      node_schema_v21: {},
+      io_schema: {},
+      file_paths: {},
+      files: {
+        'GRAPH.md': 'graph before\n',
+        'phases/draft/SKILL.md': 'draft before\n',
+        'phases/review/LOGIC.md': 'review before\n',
+        'phases/logic/LOGIC.md': 'stale logic before\n',
+        'subgraph/child/phases/child_logic/LOGIC.md': 'child phase before\n',
+      },
+      manifest_errors: null,
+      has_golden: false,
+      latest_run_metadata: null,
+      lint_result: null,
+    }
+  }
   if (skillId === RECONNECT_FIXTURE_SKILL_ID) {
     return {
       manifest: {
@@ -1016,6 +1393,34 @@ function skillDetail(skillId = 'writer-smoke'): SkillDetail {
         'phases/draft/SKILL.md': 'draft before\n',
         'phases/review/LOGIC.md': 'review before\n',
         'phases/publish/SKILL.md': 'publish before\n',
+      },
+      manifest_errors: null,
+      has_golden: false,
+      latest_run_metadata: null,
+      lint_result: null,
+    }
+  }
+  if (skillId === INPUT_SENTINEL_FIXTURE_SKILL_ID) {
+    return {
+      manifest: {
+        schema_version: CURRENT_SCHEMA_VERSION,
+        name: skillId,
+        description: 'Input sentinel fixture',
+        io: {
+          inputs: { type: 'object', properties: {} },
+          outputs: { type: 'object', properties: {} },
+        },
+        phases: ['entry'],
+      },
+      graph_topology: [
+        { id: 'entry', src: 'phases/entry/SKILL.md', depends_on: ['input'], mode: 'skill' },
+      ],
+      node_schema_v21: {},
+      io_schema: {},
+      file_paths: {},
+      files: {
+        'GRAPH.md': 'graph before\n',
+        'phases/entry/SKILL.md': 'entry before\n',
       },
       manifest_errors: null,
       has_golden: false,

@@ -375,14 +375,29 @@ def test_unreachable_phase_uses_island_code(tmp_path: Path, mock_skill_resolver:
     _expect_code(exc, "[F-v3-graph-phase-island]")
 
 
-def test_missing_output_phase_uses_dedicated_code(tmp_path: Path, mock_skill_resolver: object) -> None:
+def test_missing_output_phase_uses_leaf_terminal_fallback(tmp_path: Path, mock_skill_resolver: object) -> None:
     _graph(tmp_path, body='<phase depends_on="input">main</phase>')
     _agent_phase(tmp_path)
 
-    with pytest.raises(SkillLoadError) as exc:
-        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
+    compiled = SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
-    _expect_code(exc, "[F-v3-graph-output-phase-invalid]")
+    assert compiled.raw["graph_topology"]["phases"] == [
+        {"name": "main", "depends_on": ["input"], "output": False},
+    ]
+
+
+def test_bare_body_phase_compiles_as_dependency_free_node(
+    tmp_path: Path,
+    mock_skill_resolver: object,
+) -> None:
+    _graph(tmp_path, body="<phase>main</phase>")
+    _agent_phase(tmp_path)
+
+    compiled = SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
+
+    assert compiled.raw["graph_topology"]["phases"] == [
+        {"name": "main", "depends_on": [], "output": False},
+    ]
 
 
 @pytest.mark.parametrize(
@@ -488,7 +503,7 @@ def test_subgraph_io_output_mismatch_is_allowed_at_compile_time(tmp_path: Path, 
     assert compiled.nodes[0].phase_name == "main"
 
 
-def test_graph_serializer_fresh_render_uses_v030_dual_track_graph() -> None:
+def test_graph_serializer_fresh_render_does_not_synthesize_graph_boundaries() -> None:
     manifest = GraphManifest(
         schema_version="v0.3.0",
         name="serializer",
@@ -500,6 +515,8 @@ def test_graph_serializer_fresh_render_uses_v030_dual_track_graph() -> None:
 
     assert 'schema_version: "v0.3.0"' in rendered
     assert "phases:" in rendered
-    assert '<phase depends_on="input" output>main</phase>' in rendered
+    assert "<phase>main</phase>" in rendered
+    assert 'depends_on="input"' not in rendered
+    assert "<phase output" not in rendered
     assert "<input" not in rendered
     assert "<output" not in rendered

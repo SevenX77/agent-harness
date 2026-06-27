@@ -141,20 +141,20 @@ describe('edgeContextFromEvents', () => {
     expect(result?.inputs).toEqual({ attempt: 2 })
   })
 
-  it('matches the graph-entry edge when from_phase is null or "input"', () => {
+  it('matches a literal input dependency only when the event reports input', () => {
     const snapshot = { query: 'kick off' }
     const fromNull = edgeContextFromEvents(
       [dispatchEvent(null, 'planner', snapshot)],
-      '__global_input__',
+      'input',
       'planner',
     )
     const fromInput = edgeContextFromEvents(
       [dispatchEvent('input', 'planner', snapshot)],
-      '__global_input__',
+      'input',
       'planner',
     )
 
-    expect(fromNull?.inputs).toEqual(snapshot)
+    expect(fromNull).toBeNull()
     expect(fromInput?.inputs).toEqual(snapshot)
   })
 

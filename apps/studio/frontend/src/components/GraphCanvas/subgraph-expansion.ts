@@ -3,8 +3,6 @@ import type { GraphTopologyItem, SkillDetail } from '@/api/types'
 import type { ContextEdgeData } from '@/components/edges/ContextEdge'
 import {
   buildEdges,
-  INPUT_ID,
-  type GlobalNodeData,
   type GraphCanvasNode,
   type SkillGraphNode,
   type SkillGraphNodeData,
@@ -15,8 +13,6 @@ import { buildNodes, buildNodesFromTopology } from './build-nodes'
 
 const SKILL_NODE_WIDTH = 260
 const SKILL_NODE_HEIGHT = 120
-const IO_NODE_WIDTH = 220
-const IO_NODE_HEIGHT = 80
 
 const CONTAINER_PADDING = 28
 const CONTAINER_HEADER = 44
@@ -37,7 +33,7 @@ function groupNodeId(parentNodeId: string): string {
   return `${PREVIEW_PREFIX}::group::${parentNodeId}`
 }
 
-function childNodeId(parentNodeId: string, childId: string): string {
+export function subgraphPreviewChildNodeId(parentNodeId: string, childId: string): string {
   return `${PREVIEW_PREFIX}::node::${parentNodeId}::${childId}`
 }
 
@@ -68,11 +64,26 @@ export interface PositionedParentNode {
   id: string
   type?: string
   position: { x: number; y: number }
+  width?: number
+  height?: number
 }
 
-function nodeSize(type: string | undefined): { width: number; height: number } {
-  if (type === 'globalInput' || type === 'globalOutput') {
-    return { width: IO_NODE_WIDTH, height: IO_NODE_HEIGHT }
+function nodeSize(node?: GraphCanvasNode): { width: number; height: number } {
+  if (typeof node?.width === 'number' && typeof node?.height === 'number') {
+    return { width: node.width, height: node.height }
+  }
+  if (node?.type === 'globalInput' || node?.type === 'globalOutput') {
+    return { width: 220, height: 80 }
+  }
+  return { width: SKILL_NODE_WIDTH, height: SKILL_NODE_HEIGHT }
+}
+
+function positionedNodeSize(node: PositionedParentNode): { width: number; height: number } {
+  if (typeof node.width === 'number' && typeof node.height === 'number') {
+    return { width: node.width, height: node.height }
+  }
+  if (node.type === 'globalInput' || node.type === 'globalOutput') {
+    return { width: 220, height: 80 }
   }
   return { width: SKILL_NODE_WIDTH, height: SKILL_NODE_HEIGHT }
 }
@@ -82,7 +93,7 @@ interface ChildLayout {
   edges: Edge<ContextEdgeData>[]
   contentWidth: number
   contentHeight: number
-  inputCenter: { x: number; y: number }
+  anchorCenter: { x: number; y: number }
 }
 
 const childLayoutCache = new Map<string, ChildLayout>()
@@ -141,7 +152,7 @@ function layoutChild(
   let minTop = Number.POSITIVE_INFINITY
   let maxBottom = Number.NEGATIVE_INFINITY
   for (const node of laid.nodes) {
-    const { width, height } = nodeSize(node.type)
+    const { width, height } = nodeSize(node)
     minLeft = Math.min(minLeft, node.position.x - width / 2)
     maxRight = Math.max(maxRight, node.position.x + width / 2)
     minTop = Math.min(minTop, node.position.y - height / 2)
@@ -158,14 +169,14 @@ function layoutChild(
     ...node,
     position: { x: node.position.x - minLeft, y: node.position.y - minTop },
   })) as GraphCanvasNode[]
-  const input = nodes.find((node) => node.id === INPUT_ID)
+  const anchor = nodes.find((node) => node.type === 'skill')
 
   const layout = {
     nodes,
     edges: laid.edges,
     contentWidth: maxRight - minLeft,
     contentHeight: maxBottom - minTop,
-    inputCenter: input?.position ?? { x: IO_NODE_WIDTH / 2, y: IO_NODE_HEIGHT / 2 },
+    anchorCenter: anchor?.position ?? { x: 0, y: 0 },
   }
   childLayoutCache.set(cacheKey, layout)
   return layout
@@ -176,13 +187,14 @@ function inlineChildNode(
   childSkillId: string,
   childWorkspaceRoot: string | null,
   topologyOwnerSkillId: string | undefined,
+  childDetail: SkillDetail | undefined,
   node: GraphCanvasNode,
   left: number,
   top: number,
   options: SubgraphExpansionOptions,
 ): GraphCanvasNode {
-  const id = childNodeId(parentNodeId, node.id)
-  const { width, height } = nodeSize(node.type)
+  const id = subgraphPreviewChildNodeId(parentNodeId, node.id)
+  const { width, height } = nodeSize(node)
   const base = {
     ...node,
     id,
@@ -196,40 +208,31 @@ function inlineChildNode(
     zIndex: CHILD_NODE_Z_INDEX,
   }
 
-  if (node.type === 'skill') {
-    const data = node.data as SkillGraphNodeData
-    const isSubgraphNode = data.mode === 'subgraph' || Boolean(data.subgraphPath)
-    return {
-      ...base,
-      data: {
-        ...data,
-        skillId: childSkillId,
-        workspaceRoot: childWorkspaceRoot,
-        topologyOwnerSkillId,
-        phaseId: data.phaseId ?? node.id,
-        isExpanded: isSubgraphNode ? options.expandedSubgraphs?.has(id) === true : false,
-        onToggleSubgraph: isSubgraphNode && options.onToggleSubgraph
-          ? () => options.onToggleSubgraph?.(id)
-          : undefined,
-        onToggleSteps: undefined,
-        onStepsSave: undefined,
-      },
-    } as GraphCanvasNode
-  }
-
+  if (node.type !== 'skill') return base as GraphCanvasNode
+  const data = node.data as SkillGraphNodeData
+  const isSubgraphNode = data.mode === 'subgraph' || Boolean(data.subgraphPath)
   return {
     ...base,
-      data: {
-        ...(node.data as GlobalNodeData),
-        skillId: childSkillId,
-        workspaceRoot: childWorkspaceRoot,
-      },
-    } as GraphCanvasNode
+    data: {
+      ...data,
+      skillId: childSkillId,
+      workspaceRoot: childWorkspaceRoot,
+      topologyOwnerSkillId,
+      resolvedSkillDetail: childDetail,
+      phaseId: data.phaseId ?? node.id,
+      isExpanded: isSubgraphNode ? options.expandedSubgraphs?.has(id) === true : false,
+      onToggleSubgraph: isSubgraphNode && options.onToggleSubgraph
+        ? () => options.onToggleSubgraph?.(id)
+        : undefined,
+      onToggleSteps: undefined,
+      onStepsSave: undefined,
+    },
+  } as GraphCanvasNode
 }
 
 function readonlyChildEdge(parentNodeId: string, edge: Edge<ContextEdgeData>): Edge<ContextEdgeData> {
-  const source = childNodeId(parentNodeId, edge.source)
-  const target = childNodeId(parentNodeId, edge.target)
+  const source = subgraphPreviewChildNodeId(parentNodeId, edge.source)
+  const target = subgraphPreviewChildNodeId(parentNodeId, edge.target)
   return {
     ...edge,
     id: childEdgeId(parentNodeId, edge.id),
@@ -293,6 +296,10 @@ export function buildSubgraphExpansion(
   }
 
   const parentById = new Map(parentNodes.map((node) => [node.id, node]))
+  const parentGraphRight = parentNodes.reduce((right, node) => {
+    const { width } = positionedNodeSize(node)
+    return Math.max(right, node.position.x + width / 2)
+  }, Number.NEGATIVE_INFINITY)
   const nodes: GraphCanvasNode[] = []
   const edges: Edge<ContextEdgeData>[] = []
 
@@ -300,12 +307,15 @@ export function buildSubgraphExpansion(
     const parent = parentById.get(request.parentNodeId)
     if (!parent) continue
 
-    const parentSize = nodeSize(parent.type)
+    const parentSize = nodeSize()
     const expandOrigin = {
       x: parent.position.x + parentSize.width / 2 + EXPAND_TOGGLE_RADIUS,
       y: parent.position.y,
     }
-    const contentLeft = expandOrigin.x + CONTAINER_GAP
+    const contentLeft = Math.max(
+      expandOrigin.x + CONTAINER_GAP,
+      (Number.isFinite(parentGraphRight) ? parentGraphRight : expandOrigin.x) + CONTAINER_GAP,
+    )
     let status: SubgraphGroupNodeData['status'] = request.view.status
     let message = request.view.status === 'error' ? request.view.message : undefined
     const childName = request.view.status === 'loaded' ? request.view.name : undefined
@@ -344,21 +354,22 @@ export function buildSubgraphExpansion(
       continue
     }
 
-    const contentTop = parent.position.y - child.inputCenter.y
+    const contentTop = parent.position.y - child.anchorCenter.y
     const groupLeft = contentLeft - CONTAINER_PADDING
     const groupTop = contentTop - CONTAINER_HEADER - CONTAINER_PADDING
     const width = child.contentWidth + CONTAINER_PADDING * 2
     const height = child.contentHeight + CONTAINER_HEADER + CONTAINER_PADDING * 2
     const group = groupNode(request, groupLeft, groupTop, width, height, status, childName, message)
-    nodes.push(group)
-    nodes.push(...child.nodes.map((node) => inlineChildNode(
-      request.parentNodeId,
-      request.childSkillId ?? request.parentNodeId,
-      request.path,
-      request.topologyOwnerSkillId,
-      node,
-      contentLeft,
-      contentTop,
+      nodes.push(group)
+      nodes.push(...child.nodes.map((node) => inlineChildNode(
+        request.parentNodeId,
+        request.childSkillId ?? request.parentNodeId,
+        request.path,
+        request.topologyOwnerSkillId,
+        request.view.status === 'loaded' ? request.view.detail : undefined,
+        node,
+        contentLeft,
+        contentTop,
       options,
     )))
     edges.push(...child.edges.map((edge) => readonlyChildEdge(request.parentNodeId, edge)))

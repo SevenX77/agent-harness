@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData } from "@/components/nodes"
-import { INPUT_ID, OUTPUT_ID } from "@/components/nodes"
 import { resolveIoEditTarget, type SelectedNode } from "./io-target"
 
 // Atom #28 (any-io-import-file): the per-node import affordance — drop a file in
@@ -83,16 +82,11 @@ describe("resolveIoEditTarget (atom #28 per-node import target)", () => {
     expect(target.isGraphLevel).toBe(false)
   })
 
-  it("keeps the global input/output nodes and the empty selection on graph-level io", () => {
-    for (const selection of [
-      null,
-      makeNode(INPUT_ID, {}),
-      makeNode(OUTPUT_ID, {}),
-    ] satisfies SelectedNode[]) {
-      const target = resolveIoEditTarget(selection, DETAIL)
-      expect(target.relPath).toBe("GRAPH.md")
-      expect(target.content).toBe(GRAPH_FILE)
-      expect(target.isGraphLevel).toBe(true)
-    }
+  it("uses the empty selection for graph-level io", () => {
+    const target = resolveIoEditTarget(null, DETAIL)
+
+    expect(target.relPath).toBe("GRAPH.md")
+    expect(target.content).toBe(GRAPH_FILE)
+    expect(target.isGraphLevel).toBe(true)
   })
 })

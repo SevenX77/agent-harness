@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import type { Connection } from "@xyflow/react"
 import { toast } from "sonner"
 import useSWR from "swr"
@@ -61,6 +61,63 @@ interface WorkspaceProps {
   skillId: string | null
   onSelectSkill: (skillId: string) => void
   onCloseSkill: () => void
+}
+
+const MINI_MAP_TOOL_SPACE_THRESHOLD_PX = 300
+
+export function hasMiniMapToolSpace(
+  centerActionBarRect: Pick<DOMRect, "right"> | null,
+  rightOverlayRect: Pick<DOMRect, "left"> | null,
+): boolean {
+  if (!centerActionBarRect || !rightOverlayRect) {
+    return true
+  }
+  return rightOverlayRect.left - centerActionBarRect.right >= MINI_MAP_TOOL_SPACE_THRESHOLD_PX
+}
+
+function useMiniMapToolSpace(copilotOpen: boolean, currentSkillId: string | null, settingsOpen: boolean): boolean {
+  const [hasSpace, setHasSpace] = useState(true)
+
+  useLayoutEffect(() => {
+    if (!copilotOpen || !currentSkillId || settingsOpen) {
+      setHasSpace(true)
+      return
+    }
+
+    let frameId = 0
+    const measure = () => {
+      frameId = 0
+      const actionBar = document.querySelector<HTMLElement>('[data-studio-center-action-bar="true"]')
+      const rightOverlay = document.querySelector<HTMLElement>('[data-studio-right-overlay="true"]')
+      setHasSpace(hasMiniMapToolSpace(
+        actionBar?.getBoundingClientRect() ?? null,
+        rightOverlay?.getBoundingClientRect() ?? null,
+      ))
+    }
+    const scheduleMeasure = () => {
+      if (frameId === 0) {
+        frameId = window.requestAnimationFrame(measure)
+      }
+    }
+
+    scheduleMeasure()
+    window.addEventListener("resize", scheduleMeasure)
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(scheduleMeasure)
+    const actionBar = document.querySelector<HTMLElement>('[data-studio-center-action-bar="true"]')
+    const rightOverlay = document.querySelector<HTMLElement>('[data-studio-right-overlay="true"]')
+    if (actionBar) observer?.observe(actionBar)
+    if (rightOverlay) observer?.observe(rightOverlay)
+
+    return () => {
+      window.removeEventListener("resize", scheduleMeasure)
+      observer?.disconnect()
+      if (frameId !== 0) {
+        window.cancelAnimationFrame(frameId)
+      }
+    }
+  }, [copilotOpen, currentSkillId, settingsOpen])
+
+  return hasSpace
 }
 
 interface CopilotJudgeReplayContext {
@@ -1676,6 +1733,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     </WorkspaceLeftPanelOverlay>
   ) : null
   const editorOpen = Boolean(activeFileDetails.left || activeFileDetails.right)
+  const hasMiniMapSpace = useMiniMapToolSpace(copilotOpen, currentSkillId, settingsOpen)
   const workspaceOverlayStyle = {
     "--studio-canvas-left-safe-area": activePanel ? "25.5rem" : "0px",
     "--studio-canvas-right-safe-area": copilotOpen ? "23.5rem" : "0px",
@@ -1765,7 +1823,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                       goldenStateByNodeId={goldenStateByNodeId}
                       errorMessageByNodeId={errorMessageByNodeId}
                       dirtyDownstreamNodeIds={dirtyDownstreamNodeIds}
-                      hideMiniMap={editorOpen}
+                      hideMiniMap={editorOpen || !hasMiniMapSpace}
                       runId={runId}
                       resumeNodeStatus={selectedNodeStatus}
                       resumeValidity={resumeValidity}

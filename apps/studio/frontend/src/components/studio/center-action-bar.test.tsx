@@ -65,6 +65,15 @@ describe('CenterActionBar canvas surface styling', () => {
     expect(html).toContain('studio-center-action-button')
     expect(html).toContain('studio-center-action-button--active')
   })
+
+  it('is fixed to the viewport center and exposes a stable measurement hook', () => {
+    const html = renderBar('idle')
+
+    expect(html).toContain('data-studio-center-action-bar="true"')
+    expect(html).toContain('fixed')
+    expect(html).toContain('left-1/2')
+    expect(html).toContain('-translate-x-1/2')
+  })
 })
 
 describe('CenterActionBar corner-radius convergence (FRONTEND_UI_SPEC §2.4)', () => {

@@ -357,11 +357,6 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   overflow: hidden !important;
 }
 
-.react-flow .studio-canvas-controls.react-flow__panel.bottom.left {
-  bottom: 1rem !important;
-  left: calc(var(--studio-canvas-left-safe-area, 0px) + 1rem) !important;
-}
-
 .react-flow .skill-mini-map.react-flow__panel.bottom.right {
   bottom: 1rem !important;
   right: calc(var(--studio-canvas-right-safe-area, 0px) + 1rem) !important;
@@ -566,11 +561,7 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
 .studio-center-action-bar {
   background: var(--studio-canvas-surface);
   border-color: var(--studio-canvas-border);
-  left: var(--studio-canvas-left-safe-area, 0px);
-  right: var(--studio-canvas-right-safe-area, 0px);
   width: max-content;
-  margin-inline: auto;
-  transform: none;
   box-shadow:
     0 16px 38px rgb(0 0 0 / 0.36),
     inset 0 1px 0 rgb(255 255 255 / 0.04);

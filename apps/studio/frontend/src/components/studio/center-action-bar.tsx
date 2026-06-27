@@ -100,7 +100,10 @@ function LockableButton({ disabled, lockReason, children }: LockableButtonProps)
 export function CenterActionBar({ stage, onCompile, onPredict, onRun }: CenterActionBarProps) {
   const d = deriveButtons(stage)
   return (
-    <div className="studio-center-action-bar absolute bottom-6 left-1/2 z-30 inline-flex -translate-x-1/2 items-center gap-1 rounded-md border px-1.5 py-1">
+    <div
+      data-studio-center-action-bar="true"
+      className="studio-center-action-bar fixed bottom-6 left-1/2 z-40 inline-flex -translate-x-1/2 items-center gap-1 rounded-md border px-1.5 py-1"
+    >
       <Button
         variant="ghost"
         size="default"

@@ -2,7 +2,6 @@ import '@xyflow/react/dist/style.css'
 
 import {
   Background,
-  Controls,
   Panel,
   ReactFlow,
   addEdge,
@@ -13,6 +12,7 @@ import {
   type Edge,
   type FinalConnectionState,
   type NodeChange,
+  type ReactFlowInstance,
 } from '@xyflow/react'
 import { Trash2 } from 'lucide-react'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type MouseEvent } from 'react'
@@ -27,6 +27,7 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuSub,
   ContextMenuSubContent,
   ContextMenuSubTrigger,
@@ -662,6 +663,20 @@ export function GraphCanvas({
     toast.error('Sequential overwrite still unresolved. Adjust the node or allow overwrite before compiling.')
   }, [])
   const fitViewRef = useRef<(() => Promise<boolean> | boolean | void) | null>(null)
+  const reactFlowInstanceRef = useRef<ReactFlowInstance<GraphCanvasNode, Edge<ContextEdgeData>> | null>(null)
+  const [canvasLocked, setCanvasLocked] = useState(false)
+  const handleZoomIn = useCallback(() => {
+    void reactFlowInstanceRef.current?.zoomIn()
+  }, [])
+  const handleZoomOut = useCallback(() => {
+    void reactFlowInstanceRef.current?.zoomOut()
+  }, [])
+  const handleFitView = useCallback(() => {
+    void (fitViewRef.current?.() ?? reactFlowInstanceRef.current?.fitView({ padding: 0.2 }))
+  }, [])
+  const handleToggleCanvasLock = useCallback(() => {
+    setCanvasLocked((locked) => !locked)
+  }, [])
   const fitInitialViewportOnce = useCallback((hasLayoutNodes: boolean) => {
     const fitView = fitViewRef.current
     if (!shouldRunInitialViewportFit({
@@ -1593,11 +1608,15 @@ export function GraphCanvas({
         edgeTypes={edgeTypes}
         onNodesChange={handleNodesChange}
         onEdgesChange={onEdgesChange}
-        nodesConnectable={canEditCanvas}
-        nodesDraggable={!compact}
+        nodesConnectable={canEditCanvas && !canvasLocked}
+        nodesDraggable={!compact && !canvasLocked}
         deleteKeyCode={compact ? null : undefined}
         onConnect={compact ? undefined : onConnect}
-        edgesReconnectable={canEditCanvas}
+        edgesReconnectable={canEditCanvas && !canvasLocked}
+        panOnDrag={!canvasLocked}
+        zoomOnDoubleClick={!canvasLocked}
+        zoomOnPinch={!canvasLocked}
+        zoomOnScroll={!canvasLocked}
         onReconnectStart={compact ? undefined : onReconnectStart}
         onReconnect={compact ? undefined : onReconnect}
         onReconnectEnd={compact ? undefined : onReconnectEnd}
@@ -1688,6 +1707,7 @@ export function GraphCanvas({
           }
         }}
         onInit={(instance) => {
+          reactFlowInstanceRef.current = instance
           fitViewRef.current = () => instance.fitView({ padding: 0.2 })
           fitInitialViewportOnce(hasLayoutNodes)
         }}
@@ -1717,7 +1737,6 @@ export function GraphCanvas({
           resumeLoading={resumeLoading}
           onResumeNode={onResumeNode}
         />
-        <Controls position="bottom-left" className="studio-canvas-controls" />
         {!compact && !hideMiniMap ? <SkillMiniMap nodes={nodes} /> : null}
         {drillStack.length > 0 || isChildGraphLoading || childGraphError ? (
           <Panel position="top-left" className="studio-canvas-top-left-panel">
@@ -1749,6 +1768,11 @@ export function GraphCanvas({
       <CanvasContextMenuContent
         edgeMenuConnection={edgeMenuConnection}
         nodeMenuPhaseId={nodeMenuPhaseId}
+        canvasLocked={canvasLocked}
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
+        onFitView={handleFitView}
+        onToggleCanvasLock={handleToggleCanvasLock}
         onCreatePhase={isDrilled ? undefined : handleOpenCreatePhaseDialog}
         onDeletePhase={handleMenuDeletePhase}
         onDisconnectConnection={handleMenuDisconnect}
@@ -1791,6 +1815,11 @@ const ADD_PHASE_OPTIONS: ReadonlyArray<{ kind: NewPhaseKind; label: string }> = 
 export function CanvasContextMenuContent({
   edgeMenuConnection,
   nodeMenuPhaseId,
+  canvasLocked,
+  onZoomIn,
+  onZoomOut,
+  onFitView,
+  onToggleCanvasLock,
   onCreatePhase,
   onDeletePhase,
   onDisconnectConnection,
@@ -1799,6 +1828,11 @@ export function CanvasContextMenuContent({
 }: {
   edgeMenuConnection: { source: string; target: string } | null
   nodeMenuPhaseId?: string | null
+  canvasLocked?: boolean
+  onZoomIn?: () => void
+  onZoomOut?: () => void
+  onFitView?: () => void
+  onToggleCanvasLock?: () => void
   onCreatePhase?: (kind: NewPhaseKind) => Promise<void> | void
   onDeletePhase?: (phaseId: string) => Promise<void> | void
   onDisconnectConnection?: (connection: { source: string; target: string }) => Promise<void> | void
@@ -1812,6 +1846,19 @@ export function CanvasContextMenuContent({
   }
   return (
     <ContextMenuContent>
+      <ContextMenuItem onSelect={onZoomIn}>
+        Zoom in
+      </ContextMenuItem>
+      <ContextMenuItem onSelect={onZoomOut}>
+        Zoom out
+      </ContextMenuItem>
+      <ContextMenuItem onSelect={onFitView}>
+        Fit view
+      </ContextMenuItem>
+      <ContextMenuItem onSelect={onToggleCanvasLock}>
+        {canvasLocked ? 'Unlock canvas' : 'Lock canvas'}
+      </ContextMenuItem>
+      <ContextMenuSeparator />
       {edgeMenuConnection ? (
         <ContextMenuItem
           onSelect={() => {

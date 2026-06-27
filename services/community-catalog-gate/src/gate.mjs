@@ -1,16 +1,20 @@
 // Community Probe Catalog gate — serverless ingestion endpoint.
 //
-// SECURITY MODEL (three-way converged design v3):
+// SECURITY MODEL (clean open API — all abuse control is server-side):
+//   - The CLIENT sends only a sanitized batch: no token, no credentials, no
+//     repo write key. There is nothing secret to configure or leak client-side.
 //   - The gate holds NO catalog-repo write token. It only writes to its own KV
 //     buffer. Publishing to the public catalog repo is done by a SEPARATE
 //     scheduled GitHub Action with minimal `contents: write` (see publish/).
 //   - Every record is re-validated server-side (src/redaction.mjs) and rejected
 //     if it could carry a secret, a private endpoint, or a bare hash.
-//   - Uploads are opt-in: a request must carry a valid anonymous ingestion token.
+//   - Abuse is contained server-side by per-client RATE LIMITING (not a shared
+//     token — any client could extract one anyway): the Cloudflare RATE_LIMITER
+//     binding sheds excess requests; redaction caps what any request can land.
 //   - Idempotency-Key dedupes retries; receipt_token enables later withdrawal.
 //
 // Deploy as a Cloudflare Worker (wrangler). Bindings (see README):
-//   env.INGESTION_TOKEN  — shared anonymous opt-in token (secret)
+//   env.RATE_LIMITER     — Cloudflare rate-limit binding (per-client shedding)
 //   env.PROTOCOL_MAJOR   — accepted wire protocol major (string int)
 //   env.BUFFER           — KV namespace: pending accepted records
 //   env.IDEMPOTENCY      — KV namespace: idempotency-key -> ack
@@ -29,15 +33,20 @@ function json(body, status = 200) {
   });
 }
 
-function authorized(request, env) {
-  const header = request.headers.get('authorization') || '';
-  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
-  return Boolean(env.INGESTION_TOKEN) && token === env.INGESTION_TOKEN;
+// Server-side abuse control. With no client token, the only line between "Studio
+// contributing" and "anyone flooding the gate" is per-client shedding. The
+// RATE_LIMITER binding is keyed on the real client IP; absent (local/test) it
+// allows through so unit tests need no Cloudflare runtime.
+async function rateLimited(request, env) {
+  if (!env.RATE_LIMITER) return false;
+  const key = request.headers.get('cf-connecting-ip') || 'anonymous';
+  const { success } = await env.RATE_LIMITER.limit({ key });
+  return !success;
 }
 
 async function handleBatch(request, env) {
-  if (!authorized(request, env)) {
-    return json({ error: 'unauthorized' }, 401);
+  if (await rateLimited(request, env)) {
+    return json({ error: 'rate_limited' }, 429);
   }
   const idempotencyKey = request.headers.get('idempotency-key') || '';
   if (idempotencyKey && env.IDEMPOTENCY) {
@@ -87,8 +96,8 @@ async function handleBatch(request, env) {
 }
 
 async function handleWithdraw(request, env) {
-  if (!authorized(request, env)) {
-    return json({ error: 'unauthorized' }, 401);
+  if (await rateLimited(request, env)) {
+    return json({ error: 'rate_limited' }, 429);
   }
   let payload;
   try {

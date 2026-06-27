@@ -135,9 +135,11 @@ describe("GeneralTab render contract", () => {
 
   it("renders the remote model catalog switch using the local shadcn switch primitive", () => {
     const html = renderTab({ remoteModelCatalogEnabled: true })
-    expect(html).toContain("Remote model info")
-    expect(html).toContain("Read remote model catalog before showing route candidates.")
+    expect(html).toContain("Community model catalog")
+    expect(html).toContain(
+      "Read the community catalog to improve route suggestions, and anonymously contribute your sanitized probe results back to it. Turn off to stop both.",
+    )
     expect(html).toContain('data-slot="switch"')
-    expect(html).toContain('aria-label="Remote model info"')
+    expect(html).toContain('aria-label="Community model catalog"')
   })
 })

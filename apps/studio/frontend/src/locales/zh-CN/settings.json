@@ -37,8 +37,8 @@
       "description": "用于团队协作的私有 Gitea 主机。"
     },
     "remoteModelCatalog": {
-      "label": "远端模型信息",
-      "description": "显示 route 候选前读取远端模型 catalog。"
+      "label": "社区模型目录",
+      "description": "读取社区目录改善路由候选，并在探测后把你的脱敏探测结果匿名回传社区；关闭则读取与贡献都停。"
     },
     "language": {
       "label": "语言",

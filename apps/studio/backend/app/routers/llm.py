@@ -57,7 +57,7 @@ from app.core.adapters.gateway import (
     test_provider_route as _gateway_test_provider_route_request,
 )
 from app.core.adapters.transport_factory import build_gateway_adapter
-from app.core.backends import get_backend_config
+from app.core.backends import get_backend_config, get_metadata
 from app.models.llm_config import (
     CapabilityValue,
     EvidenceRecord,
@@ -160,6 +160,45 @@ from app.services.official_capability_sources import (
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
 logger = logging.getLogger(__name__)
+
+
+async def _autoshare_after_probe_best_effort() -> None:
+    """Best-effort community auto-share to the gate after a successful probe.
+
+    Silently uploads newly probe-verified evidence to the community catalog gate
+    through a clean open API (no token, no credentials — the gate rate-limits
+    server-side). NEVER raises: a probe must not fail because background sharing
+    did. On by default; stays dormant only if an operator hard-disables the write
+    path OR the single community model-catalog toggle
+    (``remote_model_catalog_enabled``, which gates both read and contribute) is off.
+    """
+    try:
+        cfg = get_backend_config()
+        if not community_upload_configured(
+            gate_url=cfg.community_gate_url,
+            enabled=cfg.community_upload_enabled,
+        ):
+            return
+        # The single community model-catalog toggle gates both reading the
+        # catalog and contributing to it; honour the user's opt-out before upload.
+        settings = await get_metadata().read_app_settings()
+        if not settings.remote_model_catalog_enabled:
+            return
+        uploads = collect_uploadable_uploads(load_evidence_library(), load_credentials())
+        if not uploads:
+            return
+        client = CommunityUploadClient(
+            gate_url=cfg.community_gate_url,
+            protocol_major=cfg.community_protocol_major,
+        )
+        queue = OfflineUploadQueue(community_upload_queue_path())
+        await client.upload_batch(
+            uploads, idempotency_key=batch_idempotency_key(uploads), queue=queue
+        )
+    except Exception:  # noqa: BLE001 — best-effort: sharing must never fail a probe
+        logger.warning("post-probe community auto-share failed", exc_info=True)
+
+
 OFFICIAL_PROVIDER_TEST_CONCURRENCY = 4
 OFFICIAL_PROVIDER_TEST_BATCH_SIZE = 8
 NO_VERIFIED_ROUTE_PROFILE_MESSAGE = "No verified language route profile."
@@ -549,16 +588,16 @@ async def share_catalog() -> dict[str, Any]:
 
 @router.post("/catalog/contribute")
 async def contribute_catalog() -> dict[str, Any]:
-    """Opt-in: upload sanitized probe evidence to the community catalog gate.
+    """Upload sanitized probe evidence to the community catalog gate.
 
-    Dormant unless an operator has explicitly enabled upload AND configured a
-    gate URL + ingestion-scoped token (Phase 2a). When dormant this is a no-op
-    that never reaches the network; the local export path stays unchanged.
+    Active by default through a clean open API (no token). Dormant only if an
+    operator hard-disables the write path or no gate URL is set (Phase 2a). When
+    dormant this is a no-op that never reaches the network; the local export path
+    stays unchanged.
     """
     cfg = get_backend_config()
     if not community_upload_configured(
         gate_url=cfg.community_gate_url,
-        ingestion_token=cfg.community_ingestion_token,
         enabled=cfg.community_upload_enabled,
     ):
         return {
@@ -566,8 +605,8 @@ async def contribute_catalog() -> dict[str, Any]:
             "sharing_mode": "local_export_only",
             "auto_upload_enabled": False,
             "message": (
-                "Community upload is not configured. Enable it and set a gate URL plus an "
-                "ingestion-scoped token to opt in; until then evidence stays local."
+                "Community upload is disabled. It is on by default; it is off only when an "
+                "operator hard-disables the write path or no gate URL is set."
             ),
         }
 
@@ -582,7 +621,6 @@ async def contribute_catalog() -> dict[str, Any]:
             }
         client = CommunityUploadClient(
             gate_url=cfg.community_gate_url,
-            ingestion_token=cfg.community_ingestion_token,
             protocol_major=cfg.community_protocol_major,
         )
         queue = OfflineUploadQueue(community_upload_queue_path())
@@ -939,6 +977,7 @@ async def test_endpoint_models(
                 result,
                 route_id=route_ids_by_model.get(result.model_id),
             )
+        await _autoshare_after_probe_best_effort()
         return EndpointModelTestResponse(
             registry=_registry_response(latest_credentials, _load_roles_or_empty()),
             results=results,
@@ -1038,6 +1077,7 @@ async def test_endpoint_models(
             probe_result,
             route_id=route_ids_by_model.get(probe_result.model_id),
         )
+    await _autoshare_after_probe_best_effort()
     return EndpointModelTestResponse(
         registry=_registry_response(latest_credentials, _load_roles_or_empty()),
         results=results,

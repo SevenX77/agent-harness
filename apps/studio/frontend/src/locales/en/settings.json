@@ -37,8 +37,8 @@
       "description": "Private Gitea host used for team collaboration."
     },
     "remoteModelCatalog": {
-      "label": "Remote model info",
-      "description": "Read remote model catalog before showing route candidates."
+      "label": "Community model catalog",
+      "description": "Read the community catalog to improve route suggestions, and anonymously contribute your sanitized probe results back to it. Turn off to stop both."
     },
     "language": {
       "label": "Language",

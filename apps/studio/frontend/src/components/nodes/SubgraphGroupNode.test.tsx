@@ -42,6 +42,24 @@ describe('SubgraphGroupNode', () => {
     expect(html).toContain('data-handle-position="left"')
   })
 
+  it('marks only the title header as the draggable group handle', () => {
+    const html = renderToStaticMarkup(<SubgraphGroupNode
+      {...({
+        data: {
+          parentLabel: 'event_timeline',
+          path: '/abs/story-deconstruction-v3/subgraph/event_timeline',
+          status: 'loaded',
+          childName: 'event_timeline',
+        },
+      } as Parameters<typeof SubgraphGroupNode>[0])}
+    />)
+
+    expect(html).toContain('subgraph-group-drag-handle')
+    expect(html).toContain('studio-subgraph-frame')
+    expect(html).toContain('studio-subgraph-header')
+    expect(html).toContain('data-subgraph-group-drag-handle="true"')
+  })
+
   it('falls back to the path basename while loading before the child name arrives', () => {
     expect(subgraphGroupTitle({
       parentLabel: 'event_timeline',

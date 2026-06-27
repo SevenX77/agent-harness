@@ -355,14 +355,34 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   border: var(--subgraph-dash-width, 1.35px) dashed var(--subgraph-dash-color, color-mix(in oklab, var(--primary) 54%, transparent));
 }
 
-.subgraph-toggle-bridge-line {
-  border-top: var(--subgraph-dash-width, 1.35px) dashed var(--subgraph-dash-color, color-mix(in oklab, var(--primary) 54%, transparent));
-  left: 100%;
-  pointer-events: none;
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 92px;
+.subgraph-bridge-source-handle,
+.subgraph-bridge-target-handle {
+  background: transparent !important;
+  border: 0 !important;
+  height: 0.5rem !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  width: 0.5rem !important;
+}
+
+.subgraph-bridge-source-handle {
+  left: 50% !important;
+  right: auto !important;
+  top: 50% !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+.subgraph-bridge-target-handle {
+  left: 0 !important;
+  top: var(--subgraph-bridge-target-y, 50%) !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+.react-flow .subgraph-bridge-edge {
+  stroke: var(--subgraph-dash-color, color-mix(in oklab, var(--primary) 54%, transparent));
+  stroke-dasharray: 6 6;
+  stroke-linecap: butt;
+  stroke-width: var(--subgraph-dash-width, 1.35px);
 }
 
 .react-flow .react-flow__attribution {

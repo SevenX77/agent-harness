@@ -3,8 +3,14 @@ import type { GraphTopologyItem, SkillDetail } from '@/api/types'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 import type { SkillGraphNode } from '@/components/nodes'
 import {
+  SUBGRAPH_BRIDGE_EDGE_TYPE,
+  SUBGRAPH_BRIDGE_SOURCE_HANDLE_ID,
+  SUBGRAPH_BRIDGE_TARGET_HANDLE_ID,
+} from '@/components/nodes/subgraph-bridge-handles'
+import {
   buildSubgraphExpansion,
   isSubgraphPreviewId,
+  positionedParentNodes,
   type PositionedParentNode,
   type SubgraphExpansionRequest,
 } from './subgraph-expansion'
@@ -73,10 +79,12 @@ describe('buildSubgraphExpansion', () => {
     const group = nodes.find((node) => node.type === 'subgraphGroup')
     expect(group).toBeDefined()
     expect(group?.data).toMatchObject({ parentLabel: 'expand', path: '/abs/child-skill', status: 'loaded' })
+    expect(group?.parentId).toBe('expand')
 
     const childPhases = nodes.filter((node) => node.type === 'skill')
     expect(childPhases).toHaveLength(2)
     expect(childPhases.map((node) => node.data.label).sort()).toEqual(['plan', 'write'])
+    expect(childPhases.every((node) => node.parentId === group?.id)).toBe(true)
     expect(childPhases.every((node) => node.data.skillId === 'child-skill-id')).toBe(true)
     expect(childPhases.every((node) => node.selectable !== false)).toBe(true)
     expect(nodes.filter((node) => node.type !== 'subgraphGroup').every((node) => node.draggable === undefined)).toBe(true)
@@ -246,23 +254,73 @@ describe('buildSubgraphExpansion', () => {
     expect(internal.some((edge) => edge.source.includes('write') && edge.target.includes('__global_output__'))).toBe(true)
   })
 
-  it('keeps the parent bridge visual out of React Flow edges and leaves a fixed toggle-to-frame span', () => {
+  it('emits the parent bridge as a visual-only handle-to-handle edge', () => {
     const { nodes, edges } = buildSubgraphExpansion(PARENT_NODES, [LOADED_REQUEST])
     const group = nodes.find((node) => node.type === 'subgraphGroup')
-    const groupLeft = (group?.position.x ?? 0) - ((group?.width as number | undefined) ?? 0) / 2
+    const bridge = edges.find((edge) => edge.type === SUBGRAPH_BRIDGE_EDGE_TYPE)
 
-    expect(edges.some((edge) => edge.source === 'expand')).toBe(false)
-    expect(groupLeft).toBe(392)
+    expect(bridge).toBeDefined()
+    expect(bridge).toMatchObject({
+      source: 'expand',
+      target: group?.id,
+      sourceHandle: SUBGRAPH_BRIDGE_SOURCE_HANDLE_ID,
+      targetHandle: SUBGRAPH_BRIDGE_TARGET_HANDLE_ID,
+      selectable: false,
+      focusable: false,
+      deletable: false,
+      reconnectable: false,
+    })
+    expect(bridge?.data?.showContextControl).toBe(false)
+  })
+
+  it('places the group past the parent graph without encoding that span into the parent node', () => {
+    const parents: PositionedParentNode[] = [
+      { id: 'expand', type: 'skill', position: { x: 160, y: 490 } },
+      { id: 'rightmost-parent', type: 'skill', position: { x: 720, y: 320 } },
+    ]
+    const { nodes, edges } = buildSubgraphExpansion(parents, [LOADED_REQUEST])
+    const group = nodes.find((node) => node.type === 'subgraphGroup')
+    const parentRight = 160 + 260 / 2
+    const groupLeft = 160 - 260 / 2 + (group?.position.x ?? 0) - ((group?.width as number | undefined) ?? 0) / 2
+    const bridge = edges.find((edge) => edge.type === SUBGRAPH_BRIDGE_EDGE_TYPE)
+
+    expect(group?.parentId).toBe('expand')
+    expect(groupLeft).toBeGreaterThan(parentRight)
+    expect(bridge?.source).toBe('expand')
+    expect(bridge?.target).toBe(group?.id)
+  })
+
+  it('restores absolute centers for parent-bound subgraph expansion nodes', () => {
+    const { nodes } = buildSubgraphExpansion(PARENT_NODES, [LOADED_REQUEST])
+    const absoluteNodes = positionedParentNodes([...PARENT_NODES.map((node) => ({
+      id: node.id,
+      type: 'skill' as const,
+      position: node.position,
+      width: node.width,
+      height: node.height,
+      data: {
+        skillId: 'demo',
+        label: node.id,
+        mode: 'logic',
+        status: 'idle' as const,
+        dependsOn: [],
+      },
+    })), ...nodes])
+    const group = nodes.find((node) => node.type === 'subgraphGroup')
+    const absoluteGroup = absoluteNodes.find((node) => node.id === group?.id)
+
+    expect(group?.parentId).toBe('expand')
+    expect(absoluteGroup?.position.x).toBe((group?.position.x ?? 0) + 160 - 260 / 2)
   })
 
   it('anchors the first child phase beside the clicked expand node, not the whole graph center', () => {
     const { nodes } = buildSubgraphExpansion(PARENT_NODES, [LOADED_REQUEST])
     const childPlan = nodes.find((node) => node.type === 'skill' && node.data.label === 'plan')
-    const parent = PARENT_NODES.find((node) => node.id === 'expand')
 
     expect(childPlan).toBeDefined()
-    expect(childPlan?.position.y).toBe(parent?.position.y)
-    expect(childPlan?.position.x ?? 0).toBeGreaterThan((parent?.position.x ?? 0) + 260 / 2)
+    expect(childPlan?.parentId).toBe('__subpreview__::group::expand')
+    expect(childPlan?.position.y ?? 0).toBeGreaterThan(44 + 28)
+    expect(childPlan?.position.x ?? 0).toBeGreaterThan(28)
   })
 
   it('places an expanded subgraph to the right of the whole visible parent topology', () => {
@@ -272,8 +330,8 @@ describe('buildSubgraphExpansion', () => {
     ]
     const { nodes } = buildSubgraphExpansion(parents, [LOADED_REQUEST])
     const group = nodes.find((node) => node.type === 'subgraphGroup')
-    const groupLeft = (group?.position.x ?? 0) - ((group?.width as number | undefined) ?? 0) / 2
     const parentGraphRight = 720 + 260 / 2
+    const groupLeft = 160 - 260 / 2 + (group?.position.x ?? 0) - ((group?.width as number | undefined) ?? 0) / 2
 
     expect(groupLeft).toBeGreaterThan(parentGraphRight)
   })
@@ -297,7 +355,8 @@ describe('buildSubgraphExpansion', () => {
     expect(nodes.filter((node) => node.type === 'skill')).toHaveLength(0)
     expect(nodes.filter((node) => node.type !== 'subgraphGroup')).toHaveLength(0)
     expect(nodes.find((node) => node.type === 'subgraphGroup')?.data).toMatchObject({ status: 'loading' })
-    expect(edges).toHaveLength(0)
+    expect(edges).toHaveLength(1)
+    expect(edges[0]?.type).toBe(SUBGRAPH_BRIDGE_EDGE_TYPE)
   })
 
   it('renders an error/recovery container beside the parent node', () => {
@@ -315,7 +374,8 @@ describe('buildSubgraphExpansion', () => {
       status: 'error',
       message: 'subgraph path unresolved',
     })
-    expect(edges).toHaveLength(0)
+    expect(edges).toHaveLength(1)
+    expect(edges[0]?.type).toBe(SUBGRAPH_BRIDGE_EDGE_TYPE)
   })
 
   it('returns nothing when there are no expansions', () => {

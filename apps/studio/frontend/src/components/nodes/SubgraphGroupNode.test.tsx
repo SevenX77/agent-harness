@@ -1,8 +1,17 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { SubgraphGroupNode, subgraphGroupTitle } from './SubgraphGroupNode'
+import { SUBGRAPH_BRIDGE_TARGET_HANDLE_ID } from './subgraph-bridge-handles'
 
 vi.mock('@xyflow/react', () => ({
+  Handle: (props: { id?: string; type?: string; position?: string }) => (
+    <span
+      data-testid="handle"
+      data-handle-id={props.id}
+      data-handle-type={props.type}
+      data-handle-position={props.position}
+    />
+  ),
   Position: { Left: 'left' },
 }))
 
@@ -28,7 +37,9 @@ describe('SubgraphGroupNode', () => {
 
     expect(html).toContain('event_timeline')
     expect(html).not.toContain('/abs/story-deconstruction-v3/subgraph/event_timeline')
-    expect(html).not.toContain('data-handle-position')
+    expect(html).toContain(`data-handle-id="${SUBGRAPH_BRIDGE_TARGET_HANDLE_ID}"`)
+    expect(html).toContain('data-handle-type="target"')
+    expect(html).toContain('data-handle-position="left"')
   })
 
   it('falls back to the path basename while loading before the child name arrives', () => {

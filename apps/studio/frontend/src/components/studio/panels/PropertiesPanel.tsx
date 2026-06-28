@@ -5,6 +5,7 @@ import yaml from "js-yaml"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
@@ -982,6 +983,10 @@ function PhaseFrontmatterForm({
                   label={(
                     <>
                       llm_role
+                      <HelpTooltip label="About llm_role">
+                        The LLM role this agent node runs as, overriding the graph default. Role-to-model/credential
+                        mapping is configured in Settings &rsaquo; LLM Roles; use Test to verify it resolves.
+                      </HelpTooltip>
                       <FieldErrorMarker errors={fieldErrors.llm_role} />
                     </>
                   )}
@@ -1001,6 +1006,10 @@ function PhaseFrontmatterForm({
                 <Field>
                   <YamlFieldLabel htmlFor="phase-tools">
                     tools
+                    <HelpTooltip label="About tools">
+                      One tool name per line that this agent may call at runtime. Reference a tool in the body with
+                      <span className="font-mono"> @tool:&lt;name&gt;</span>; it must be declared here first.
+                    </HelpTooltip>
                     <FieldErrorMarker errors={fieldErrors.tools} />
                   </YamlFieldLabel>
                   <Textarea
@@ -1025,6 +1034,10 @@ function PhaseFrontmatterForm({
                 <Field>
                   <YamlFieldLabel htmlFor="phase-actions">
                     actions
+                    <HelpTooltip label="About actions">
+                      One action name per line. This logic node runs them as deterministic code in this exact order; the
+                      list must match the <span className="font-mono">&lt;action&gt;</span> tags in the file body.
+                    </HelpTooltip>
                     <FieldErrorMarker errors={fieldErrors.actions} />
                   </YamlFieldLabel>
                   <Textarea
@@ -1133,6 +1146,10 @@ function AllowSequentialOverwriteField({
     <Field>
       <YamlFieldLabel htmlFor="phase-allow-sequential-overwrite">
         allow_sequential_overwrite
+        <HelpTooltip label="About allow_sequential_overwrite">
+          One output field per line that this phase is allowed to intentionally overwrite when an upstream phase already
+          wrote the same field to the blackboard. Fields not listed here are flagged by the engine as illegal overwrites.
+        </HelpTooltip>
         <FieldErrorMarker errors={errors} />
       </YamlFieldLabel>
       {candidates.length > 0 ? (
@@ -1274,7 +1291,12 @@ function HelpTooltip({ label, children }: { label: string; children: ReactNode }
           </button>
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-64">
-          {children}
+          {/* The base TooltipContent is an inline-flex row; wrap in a single block
+              child so prose flows/wraps normally instead of each text run and
+              <span> becoming its own flex column. */}
+          <div className="space-y-1 text-left text-xs font-normal leading-snug [overflow-wrap:normal]">
+            {children}
+          </div>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -1412,12 +1434,20 @@ function IterateField({
       <YamlFieldLabel htmlFor="phase-iterate-mode">
         iterate
         <HelpTooltip label="About iterate">
-          Configure phase-level batch or loop execution. I/O fields are edited in the I/O panel.
+          Make this phase run once per item of an array on the blackboard, instead of just once. Leave mode
+          <span className="font-mono"> off</span> for a normal single run. I/O fields are edited in the I/O panel.
         </HelpTooltip>
         <FieldErrorMarker errors={errors} />
       </YamlFieldLabel>
       <Field>
-        <YamlNestedFieldLabel htmlFor="phase-iterate-mode">mode</YamlNestedFieldLabel>
+        <YamlNestedFieldLabel htmlFor="phase-iterate-mode">
+          mode
+          <HelpTooltip label="About iterate mode">
+            <p><span className="font-mono">off</span> — run once.</p>
+            <p><span className="font-mono">batch</span> — map over the array concurrently, each item independent.</p>
+            <p><span className="font-mono">loop</span> — iterate serially and accumulate results across rounds.</p>
+          </HelpTooltip>
+        </YamlNestedFieldLabel>
         <Select
           value={modeValue}
           onValueChange={(next) => {
@@ -1440,7 +1470,13 @@ function IterateField({
         <div className="space-y-2 pt-1">
           <div className="grid grid-cols-2 gap-2">
             <Field>
-              <YamlNestedFieldLabel htmlFor="phase-iterate-over">over</YamlNestedFieldLabel>
+              <YamlNestedFieldLabel htmlFor="phase-iterate-over">
+                over
+                <HelpTooltip label="About over">
+                  Path to the array field on the blackboard to iterate, e.g. <span className="font-mono">data.inputs.items</span>.
+                  The engine runs this node once per element.
+                </HelpTooltip>
+              </YamlNestedFieldLabel>
               <Input
                 id="phase-iterate-over"
                 value={value.over}
@@ -1449,7 +1485,13 @@ function IterateField({
               />
             </Field>
             <Field>
-              <YamlNestedFieldLabel htmlFor="phase-iterate-item-var">item_var</YamlNestedFieldLabel>
+              <YamlNestedFieldLabel htmlFor="phase-iterate-item-var">
+                item_var
+                <HelpTooltip label="About item_var">
+                  Name under which the current element is injected onto the blackboard each round, so the node can read
+                  &ldquo;this item&rdquo;.
+                </HelpTooltip>
+              </YamlNestedFieldLabel>
               <Input
                 id="phase-iterate-item-var"
                 value={value.itemVar}
@@ -1459,7 +1501,13 @@ function IterateField({
             </Field>
           </div>
           <Field>
-            <YamlNestedFieldLabel>range</YamlNestedFieldLabel>
+            <YamlNestedFieldLabel>
+              range
+              <HelpTooltip label="About range">
+                Optional inclusive slice <span className="font-mono">[start, end]</span> (1-based) to iterate only that
+                segment of the array. Leave both empty to run the whole array.
+              </HelpTooltip>
+            </YamlNestedFieldLabel>
             <div className="grid grid-cols-2 gap-2">
               <Input
                 aria-label="iterate range start"
@@ -1479,7 +1527,12 @@ function IterateField({
           </Field>
           {value.mode === "batch" ? (
             <Field>
-              <YamlNestedFieldLabel htmlFor="phase-iterate-concurrency">concurrency</YamlNestedFieldLabel>
+              <YamlNestedFieldLabel htmlFor="phase-iterate-concurrency">
+                concurrency
+                <HelpTooltip label="About concurrency">
+                  Batch mode only. Max number of items processed at the same time (integer &ge; 1).
+                </HelpTooltip>
+              </YamlNestedFieldLabel>
               <Input
                 id="phase-iterate-concurrency"
                 inputMode="numeric"
@@ -1491,56 +1544,96 @@ function IterateField({
           ) : null}
           {value.mode === "loop" ? (
             <div className="space-y-2">
-              <YamlNestedFieldLabel>accumulate</YamlNestedFieldLabel>
-              <div className="grid grid-cols-2 gap-2">
-                <Field>
-                  <YamlNestedFieldLabel htmlFor="phase-iterate-accumulate-var">accumulate.var</YamlNestedFieldLabel>
-                  <Input
-                    id="phase-iterate-accumulate-var"
-                    value={value.accumulateVar}
-                    placeholder="collected"
-                    onChange={(event) => update({ accumulateVar: event.currentTarget.value })}
-                  />
-                </Field>
-                <Field>
-                  <YamlNestedFieldLabel htmlFor="phase-iterate-accumulate-from">accumulate.from</YamlNestedFieldLabel>
-                  <Input
-                    id="phase-iterate-accumulate-from"
-                    value={value.accumulateFrom}
-                    placeholder="piece"
-                    onChange={(event) => update({ accumulateFrom: event.currentTarget.value })}
-                  />
-                </Field>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <Field>
-                  <YamlNestedFieldLabel htmlFor="phase-iterate-accumulate-init">accumulate.init</YamlNestedFieldLabel>
-                  <Input
-                    id="phase-iterate-accumulate-init"
-                    value={value.accumulateInit}
-                    placeholder="[]"
-                    onChange={(event) => update({ accumulateInit: event.currentTarget.value })}
-                  />
-                </Field>
-                <Field>
-                  <YamlNestedFieldLabel htmlFor="phase-iterate-accumulate-merge">accumulate.merge</YamlNestedFieldLabel>
-                  <Select
-                    value={value.accumulateMerge}
-                    onValueChange={(next) => update({ accumulateMerge: next as IterateMergeMode })}
-                  >
-                    <SelectTrigger id="phase-iterate-accumulate-merge" aria-label="accumulate merge" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {ITERATE_MERGE_MODES.map((mode) => (
-                        <SelectItem key={mode} value={mode}>
-                          {mode}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-              </div>
+              <YamlNestedFieldLabel>
+                accumulate
+                <HelpTooltip label="About accumulate">
+                  Loop mode only. Declares how each round&rsquo;s output is gathered into a running value that the next
+                  round can read.
+                </HelpTooltip>
+              </YamlNestedFieldLabel>
+              {/* Frame accumulate.* sub-properties in the shared Card box (the same
+                  bordered card used in Settings > General) so they read as belonging
+                  to accumulate. Reuses @/components/ui/card, no new style. */}
+              <Card size="sm">
+                <CardContent className="space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <Field>
+                      <YamlNestedFieldLabel htmlFor="phase-iterate-accumulate-var">
+                        accumulate.var
+                        <HelpTooltip label="About accumulate.var">
+                          Name of the running accumulator. Each round it is injected onto the blackboard holding everything
+                          gathered so far, so the next round can build on it.
+                        </HelpTooltip>
+                      </YamlNestedFieldLabel>
+                      <Input
+                        id="phase-iterate-accumulate-var"
+                        value={value.accumulateVar}
+                        placeholder="collected"
+                        onChange={(event) => update({ accumulateVar: event.currentTarget.value })}
+                      />
+                    </Field>
+                    <Field>
+                      <YamlNestedFieldLabel htmlFor="phase-iterate-accumulate-from">
+                        accumulate.from
+                        <HelpTooltip label="About accumulate.from">
+                          Which field of this round&rsquo;s output to take as the increment that gets merged into the
+                          accumulator.
+                        </HelpTooltip>
+                      </YamlNestedFieldLabel>
+                      <Input
+                        id="phase-iterate-accumulate-from"
+                        value={value.accumulateFrom}
+                        placeholder="piece"
+                        onChange={(event) => update({ accumulateFrom: event.currentTarget.value })}
+                      />
+                    </Field>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Field>
+                      <YamlNestedFieldLabel htmlFor="phase-iterate-accumulate-init">
+                        accumulate.init
+                        <HelpTooltip label="About accumulate.init">
+                          Initial value of the accumulator as JSON, e.g. <span className="font-mono">[]</span> or
+                          <span className="font-mono"> {"{}"}</span>, before the first round runs.
+                        </HelpTooltip>
+                      </YamlNestedFieldLabel>
+                      <Input
+                        id="phase-iterate-accumulate-init"
+                        value={value.accumulateInit}
+                        placeholder="[]"
+                        onChange={(event) => update({ accumulateInit: event.currentTarget.value })}
+                      />
+                    </Field>
+                    <Field>
+                      <YamlNestedFieldLabel htmlFor="phase-iterate-accumulate-merge">
+                        accumulate.merge
+                        <HelpTooltip label="About accumulate.merge">
+                          <p>How each increment joins the accumulator:</p>
+                          <p><span className="font-mono">append</span> — add the increment as one item.</p>
+                          <p><span className="font-mono">extend</span> — concatenate a list of items.</p>
+                          <p><span className="font-mono">merge</span> — merge objects key by key.</p>
+                          <p><span className="font-mono">replace</span> — overwrite with the latest value.</p>
+                        </HelpTooltip>
+                      </YamlNestedFieldLabel>
+                      <Select
+                        value={value.accumulateMerge}
+                        onValueChange={(next) => update({ accumulateMerge: next as IterateMergeMode })}
+                      >
+                        <SelectTrigger id="phase-iterate-accumulate-merge" aria-label="accumulate merge" className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ITERATE_MERGE_MODES.map((mode) => (
+                            <SelectItem key={mode} value={mode}>
+                              {mode}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           ) : null}
         </div>
@@ -1594,6 +1687,10 @@ function ValidatorField({
     <Field orientation="horizontal" className="items-center justify-between gap-3">
       <YamlFieldLabel htmlFor="phase-validator" className="min-w-0">
         validator
+        <HelpTooltip label="About validator">
+          When on, the engine runs this node&rsquo;s sibling <span className="font-mono">validator.py</span> after the
+          node finishes to check its output. Off by default.
+        </HelpTooltip>
         <FieldErrorMarker errors={errors} />
       </YamlFieldLabel>
       <Switch
@@ -1666,7 +1763,14 @@ function SubagentsField({
 
   return (
     <Field>
-      <YamlFieldLabel>subagents</YamlFieldLabel>
+      <YamlFieldLabel>
+        subagents
+        <HelpTooltip label="About subagents">
+          Sub-agents this agent can delegate to at runtime. <span className="font-mono">name</span> is referenced in the
+          body with <span className="font-mono">@subagent:&lt;name&gt;</span>; <span className="font-mono">target_skill</span>
+          {" "}points at the agent skill being delegated to.
+        </HelpTooltip>
+      </YamlFieldLabel>
       <div className="space-y-2">
         {value.map((entry, index) => (
           <div key={index} className="space-y-1.5 rounded-md border border-border bg-background px-2 py-2">

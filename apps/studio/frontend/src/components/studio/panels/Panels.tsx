@@ -1,6 +1,7 @@
 import type { ResumeRunOptions } from "@/api/client"
 import type { CallbackEvent, EventEnvelope, LintError, ResumeValidityResponse, SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData, SkillNodeStatus } from "@/components/GraphCanvas"
+import type { ChildSaveTarget } from "@/components/GraphCanvas/drill-edit"
 import { TraceDocumentPanel } from "@/components/MonacoPanel"
 import { TracePanel, type TraceHitlResumeRequest } from "@/components/TracePanel"
 import type { CompareTab } from "../run-compare"
@@ -29,8 +30,11 @@ interface PanelsProps {
   // F4: i/o-panel test-input selection that feeds Predict/Run.
   selectedTestInputId?: string | null
   onSelectTestInput?: (id: string | null) => void
-  onPhaseFileSave?: (payload: { path: string; content: string; expectedHash: string }) => Promise<void> | void
-  onPhaseRename?: (phaseId: string, nextPhaseId: string) => Promise<void> | void
+  onPhaseFileSave?: (
+    payload: { path: string; content: string; expectedHash: string },
+    target?: ChildSaveTarget,
+  ) => Promise<void> | void
+  onPhaseRename?: (phaseId: string, nextPhaseId: string, target?: ChildSaveTarget) => Promise<void> | void
   // trace-observability F1: while a run is active the timeline region streams
   // live trace events (TracePanel); with no active run it shows run history (F2).
   runId?: string | null
@@ -101,7 +105,14 @@ export function Panels({
   const { onFileOpen, selectedEdge, setSelectedEdge } = useWorkspaceContext()
   const isDarkMode = useThemeValue() === "dark"
   const selectedNodeSkillId = selectedNode?.data.skillId ?? null
-  const selectedNodeUsesDifferentSkill = Boolean(selectedNodeSkillId && selectedNodeSkillId !== skillId)
+  const selectedNodeWorkspaceRoot = selectedNode?.data.workspaceRoot ?? null
+  const selectedNodeUsesDifferentSkill = Boolean(
+    selectedNode
+    && (
+      (selectedNodeSkillId && selectedNodeSkillId !== skillId)
+      || (selectedNodeWorkspaceRoot && selectedNodeWorkspaceRoot !== (workspaceRoot ?? null))
+    ),
+  )
   const selectedNodeResolvedDetail = selectedNode?.data.resolvedSkillDetail
   const selectedNodeSkill = useSkills(selectedNodeUsesDifferentSkill && !selectedNodeResolvedDetail ? selectedNodeSkillId : null)
   const propertiesSkillId = selectedNodeUsesDifferentSkill ? selectedNodeSkillId : skillId
@@ -111,6 +122,24 @@ export function Panels({
   const propertiesSkillDetail = selectedNodeUsesDifferentSkill
     ? selectedNodeResolvedDetail ?? selectedNodeSkill.skillDetail
     : skillDetail
+  const selectedNodeEditTarget = selectedNodeUsesDifferentSkill && propertiesSkillId && propertiesSkillDetail
+    ? {
+        skillId: propertiesSkillId,
+        workspaceRoot: propertiesWorkspaceRoot,
+        detail: propertiesSkillDetail,
+        onSettled: async () => undefined,
+      } satisfies ChildSaveTarget
+    : null
+  const propertiesPhaseFileSave = selectedNodeUsesDifferentSkill
+    ? selectedNodeEditTarget && onPhaseFileSave
+      ? (payload: { path: string; content: string; expectedHash: string }) => onPhaseFileSave(payload, selectedNodeEditTarget)
+      : undefined
+    : onPhaseFileSave
+  const propertiesPhaseRename = selectedNodeUsesDifferentSkill
+    ? selectedNodeEditTarget && onPhaseRename
+      ? (phaseId: string, nextPhaseId: string) => onPhaseRename(phaseId, nextPhaseId, selectedNodeEditTarget)
+      : undefined
+    : onPhaseRename
   if (!skillId) {
     return (
       <div className="flex h-full w-full flex-col bg-sidebar">
@@ -214,8 +243,8 @@ export function Panels({
         resumeLoading={traceResumeLoading}
         lintErrors={lintErrors}
         onFileOpen={onFileOpen}
-        onPhaseFileSave={selectedNodeUsesDifferentSkill ? undefined : onPhaseFileSave}
-        onPhaseRename={selectedNodeUsesDifferentSkill ? undefined : onPhaseRename}
+        onPhaseFileSave={propertiesPhaseFileSave}
+        onPhaseRename={propertiesPhaseRename}
         onResumeNode={onResumeNode}
         onPromoteNode={onPromoteNode}
       />

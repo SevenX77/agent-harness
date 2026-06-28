@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useState, type ComponentProps, type ReactNode } from "react"
 import { AxiosError } from "axios"
 import { AlertTriangle, CircleHelp, FolderOpen, Loader2, Pencil, ShieldCheck } from "lucide-react"
 import yaml from "js-yaml"
@@ -48,7 +48,7 @@ import { errorMessage } from "@/utils/errors"
 import { runRoleTestJobToResult } from "../settings/llm-roles/role-test-store"
 import type { FileMeta } from "../file-types"
 import { PanelHeader } from "./_shared/PanelHeader"
-import { PanelActions, PanelBody, PanelFieldRow, PanelSection } from "./_shared/PanelSection"
+import { PanelActions, PanelBody, PanelFieldRow } from "./_shared/PanelSection"
 import { roleTestStatusBadge, type RoleTestStatusInput } from "./role-test-status"
 import {
   applyPhaseFrontmatterForm,
@@ -87,6 +87,11 @@ function phaseFrontmatterKind(label: "LOGIC" | "AGENT" | "SUBGRAPH"): PhaseFront
   if (label === "AGENT") return "agent"
   return "logic"
 }
+
+const YAML_FIELD_LABEL_CLASS = "!text-sm !font-semibold !leading-5 !text-foreground/70"
+const YAML_READONLY_VALUE_CLASS =
+  "min-w-0 flex-1 cursor-default select-text truncate border-border/70 bg-secondary/25 font-mono text-xs text-foreground/80 focus-visible:border-input focus-visible:ring-0"
+const YAML_ICON_BUTTON_CLASS = "size-7 rounded-md bg-secondary/70 text-muted-foreground hover:bg-secondary hover:text-foreground"
 
 interface AllowOverwriteCandidate {
   field: string
@@ -207,9 +212,12 @@ export function PropertiesPanel({
   }
 
   const modeLabel = selectedNode ? phaseKindLabel(selectedNode.data) : null
+  const headerFileLabel = selectedNode ? phaseKindFile(selectedNode.data) : "GRAPH.md"
   const effectiveNodeStatus = selectedNodeStatus ?? selectedNode?.data.status ?? null
   const kind: PhaseFrontmatterKind = phaseFrontmatterKind(modeLabel ?? "LOGIC")
-  const filePath = selectedNode?.data.filePath ?? (selectedNode ? `phases/${selectedNode.id}/${phaseKindFile(selectedNode.data)}` : null)
+  const selectedPhaseId = selectedNode?.data.phaseId ?? selectedNode?.id ?? null
+  const filePath = selectedNode?.data.filePath ?? (selectedNode && selectedPhaseId ? `phases/${selectedPhaseId}/${phaseKindFile(selectedNode.data)}` : null)
+  const headerFilePath = filePath ?? "GRAPH.md"
   const fileContent = filePath ? skillDetail?.files?.[filePath] : undefined
   // Field-level near-projection (atom #5): group THIS node's lint errors by the engine's
   // `field_path` so each frontmatter field can show its own marker; no-field errors are
@@ -258,9 +266,9 @@ export function PropertiesPanel({
   const effectiveWorkspaceRoot = workspaceRoot ?? selectedNode?.data.workspaceRoot ?? null
   const allowOverwriteCandidates = useMemo(
     () => (selectedNode && filePath
-      ? inferAllowOverwriteCandidates(skillDetail, selectedNode.data.phaseId ?? selectedNode.id, filePath)
+      ? inferAllowOverwriteCandidates(skillDetail, selectedPhaseId ?? selectedNode.id, filePath)
       : []),
-    [filePath, selectedNode, skillDetail],
+    [filePath, selectedNode, selectedPhaseId, skillDetail],
   )
   const dirty = Boolean(activeDraft && phaseFormState.ok && !formsEqual(activeDraft, phaseFormState.form))
   const canSave = Boolean(onPhaseFileSave && filePath && fileContent !== undefined && activeDraft && phaseFormState.ok && dirty && !saving)
@@ -353,17 +361,15 @@ export function PropertiesPanel({
 
   return (
     <div className="flex h-full flex-col bg-background">
-      <PanelHeader title="Properties" />
+      <PanelHeader
+        title="Properties"
+        extra={<PropertiesHeaderHint />}
+        right={<PropertiesFileBadge fileLabel={headerFileLabel} filePath={headerFilePath} onFileOpen={onFileOpen} />}
+      />
 
       <ScrollArea className="flex-1">
         {selectedNode ? (
           <PanelBody>
-            <PanelSection>
-              <PhaseIdentityHeader
-                selectedNode={selectedNode}
-                modeLabel={modeLabel}
-              />
-            </PanelSection>
             <NodeResumeDebugBar
               runId={runId}
               nodeId={selectedNode.id}
@@ -394,7 +400,7 @@ export function PropertiesPanel({
                 allowOverwriteCandidates={allowOverwriteCandidates}
                 skillId={skillId}
                 workspaceRoot={effectiveWorkspaceRoot}
-                phaseId={selectedNode.id}
+                phaseId={selectedPhaseId ?? selectedNode.id}
                 onPhaseRename={kind === "subgraph" ? onPhaseRename : undefined}
                 onReconnectSubgraphFolder={handleReconnectSubgraphFolder}
                 onFieldChange={setField}
@@ -425,9 +431,6 @@ export function PropertiesPanel({
           </PanelBody>
         ) : (
           <PanelBody>
-            <PanelSection>
-              <GraphIdentityHeader />
-            </PanelSection>
             {graphFormState.ok && activeGraphDraft ? (
               <GraphFrontmatterForm
                 value={activeGraphDraft}
@@ -467,12 +470,109 @@ interface GraphFrontmatterFormData {
   llmRole: string
 }
 
-function GraphIdentityHeader() {
+function YamlFieldLabel({ className, ...props }: ComponentProps<typeof FieldLabel>) {
   return (
-    <div className="flex items-center justify-between gap-2 px-1">
-      <span className="min-w-0 truncate text-xs font-medium text-foreground">Graph</span>
-      <Badge variant="secondary">GRAPH.md</Badge>
-    </div>
+    <FieldLabel
+      className={`${YAML_FIELD_LABEL_CLASS}${className ? ` ${className}` : ""}`}
+      {...props}
+    />
+  )
+}
+
+function YamlNestedFieldLabel({ className, ...props }: ComponentProps<typeof FieldLabel>) {
+  return (
+    <FieldLabel
+      className={`!text-xs !font-normal !leading-4 !text-foreground/80${className ? ` ${className}` : ""}`}
+      {...props}
+    />
+  )
+}
+
+function YamlInputField({
+  id,
+  label,
+  value,
+  placeholder,
+  readOnly = false,
+  invalid = false,
+  inputClassName,
+  action,
+  children,
+  onChange,
+}: {
+  id: string
+  label: ReactNode
+  value: string
+  placeholder?: string
+  readOnly?: boolean
+  invalid?: boolean
+  inputClassName?: string
+  action?: ReactNode
+  children?: ReactNode
+  onChange?: (value: string) => void
+}) {
+  return (
+    <Field>
+      <YamlFieldLabel htmlFor={id}>{label}</YamlFieldLabel>
+      <div className="flex items-center gap-2">
+        <Input
+          id={id}
+          value={value}
+          placeholder={placeholder}
+          readOnly={readOnly}
+          aria-readonly={readOnly || undefined}
+          aria-invalid={invalid || undefined}
+          className={`${action ? "min-w-0 flex-1" : ""}${readOnly ? ` ${YAML_READONLY_VALUE_CLASS}` : ""}${inputClassName ? ` ${inputClassName}` : ""}`}
+          onChange={onChange ? (event) => onChange(event.currentTarget.value) : undefined}
+        />
+        {action}
+      </div>
+      {children}
+    </Field>
+  )
+}
+
+function PropertiesHeaderHint() {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="inline-flex size-5 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="Properties panel source"
+          >
+            <CircleHelp className="size-3.5" aria-hidden />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" align="start" className="max-w-64">
+          This panel edits the front matter YAML fields in the selected Markdown file.
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
+function PropertiesFileBadge({
+  fileLabel,
+  filePath,
+  onFileOpen,
+}: {
+  fileLabel: "GRAPH.md" | "LOGIC.md" | "SKILL.md" | "SUBGRAPH.md"
+  filePath: string
+  onFileOpen?: (fileOrPath: FileMeta | string) => void
+}) {
+  return (
+    <button
+      type="button"
+      className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      aria-label={`Open ${fileLabel}`}
+      onClick={() => onFileOpen?.(filePath)}
+    >
+      <Badge variant="secondary" className="cursor-pointer transition-colors hover:bg-secondary/80">
+        {fileLabel}
+      </Badge>
+    </button>
   )
 }
 
@@ -504,18 +604,16 @@ function GraphFrontmatterForm({
       <FieldSet>
         <FieldGroup>
           <PanelFieldRow>
-            <Field>
-              <FieldLabel htmlFor="graph-name">name</FieldLabel>
-              <Input
-                id="graph-name"
-                value={value.name}
-                onChange={(event) => onFieldChange("name", event.currentTarget.value)}
-              />
-            </Field>
+            <YamlInputField
+              id="graph-name"
+              label="name"
+              value={value.name}
+              onChange={(next) => onFieldChange("name", next)}
+            />
           </PanelFieldRow>
           <PanelFieldRow>
             <Field>
-              <FieldLabel htmlFor="graph-description">description</FieldLabel>
+              <YamlFieldLabel htmlFor="graph-description">description</YamlFieldLabel>
               <Textarea
                 id="graph-description"
                 value={value.description}
@@ -525,15 +623,13 @@ function GraphFrontmatterForm({
             </Field>
           </PanelFieldRow>
           <PanelFieldRow>
-            <Field>
-              <FieldLabel htmlFor="graph-llm-role">llm_role</FieldLabel>
-              <Input
-                id="graph-llm-role"
-                value={value.llmRole}
-                placeholder="analyst"
-                onChange={(event) => onFieldChange("llmRole", event.currentTarget.value)}
-              />
-            </Field>
+            <YamlInputField
+              id="graph-llm-role"
+              label="llm_role"
+              value={value.llmRole}
+              placeholder="analyst"
+              onChange={(next) => onFieldChange("llmRole", next)}
+            />
           </PanelFieldRow>
         </FieldGroup>
         <PanelActions>
@@ -602,23 +698,6 @@ function graphStringValue(value: unknown): string {
   return typeof value === "string" ? value : ""
 }
 
-function PhaseIdentityHeader({
-  selectedNode,
-  modeLabel,
-}: {
-  selectedNode: { id: string; data: SkillGraphNodeData }
-  modeLabel: "LOGIC" | "AGENT" | "SUBGRAPH" | null
-}) {
-  return (
-    <div className="flex items-center justify-between gap-2 px-1">
-      <span className="min-w-0 truncate text-xs font-medium text-foreground">{selectedNode.data.label}</span>
-      <div className="flex shrink-0 items-center gap-1.5">
-        {modeLabel ? <Badge variant="secondary">{modeLabel}</Badge> : null}
-      </div>
-    </div>
-  )
-}
-
 function RenamePhaseDialog({
   phaseId,
   onPhaseRename,
@@ -661,8 +740,9 @@ function RenamePhaseDialog({
       <DialogTrigger asChild>
         <Button
           type="button"
-          size="icon-sm"
-          variant="ghost"
+          size="icon"
+          variant="secondary"
+          className={YAML_ICON_BUTTON_CLASS}
           aria-label="Rename phase"
         >
           <Pencil className="size-3.5" aria-hidden />
@@ -676,11 +756,19 @@ function RenamePhaseDialog({
           </DialogDescription>
         </DialogHeader>
         <Field>
+          <form className="contents" autoComplete="off" onSubmit={(event) => {
+            event.preventDefault()
+            void handleSubmit()
+          }}>
           <FieldLabel htmlFor="phase-rename-input">New name</FieldLabel>
           <Input
             id="phase-rename-input"
+            name="phase-id-draft"
             value={draft}
             autoFocus
+            autoComplete="new-password"
+            autoCorrect="off"
+            spellCheck={false}
             aria-invalid={invalid || undefined}
             onChange={(event) => setDraft(event.currentTarget.value)}
             onKeyDown={(event) => {
@@ -692,6 +780,7 @@ function RenamePhaseDialog({
           />
           <FieldDescription>Use letters, numbers, underscores, or hyphens. The first character must be a letter or underscore.</FieldDescription>
           {invalid ? <p className="text-xs text-destructive">Invalid phase name.</p> : null}
+          </form>
         </Field>
         <DialogFooter>
           <Button type="button" variant="secondary" disabled={renaming} onClick={() => setOpen(false)}>
@@ -888,33 +977,32 @@ function PhaseFrontmatterForm({
           {kind === "agent" ? (
             <>
               <PanelFieldRow>
-                <Field>
-                  <FieldLabel htmlFor="phase-llm-role">
-                    llm_role
-                    <FieldErrorMarker errors={fieldErrors.llm_role} />
-                  </FieldLabel>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      id="phase-llm-role"
-                      className="flex-1"
-                      value={value.llmRole}
-                      placeholder="analyst"
-                      onChange={(event) => onFieldChange("llmRole", event.currentTarget.value)}
-                    />
+                <YamlInputField
+                  id="phase-llm-role"
+                  label={(
+                    <>
+                      llm_role
+                      <FieldErrorMarker errors={fieldErrors.llm_role} />
+                    </>
+                  )}
+                  value={value.llmRole}
+                  placeholder="analyst"
+                  action={(
                     <RoleTestControl
                       roleName={value.llmRole}
                       roleTest={roleTest}
                       onRoleTest={onRoleTest}
                     />
-                  </div>
-                </Field>
+                  )}
+                  onChange={(next) => onFieldChange("llmRole", next)}
+                />
               </PanelFieldRow>
               <PanelFieldRow>
                 <Field>
-                  <FieldLabel htmlFor="phase-tools">
+                  <YamlFieldLabel htmlFor="phase-tools">
                     tools
                     <FieldErrorMarker errors={fieldErrors.tools} />
-                  </FieldLabel>
+                  </YamlFieldLabel>
                   <Textarea
                     id="phase-tools"
                     value={value.tools}
@@ -935,10 +1023,10 @@ function PhaseFrontmatterForm({
             <>
               <PanelFieldRow>
                 <Field>
-                  <FieldLabel htmlFor="phase-actions">
+                  <YamlFieldLabel htmlFor="phase-actions">
                     actions
                     <FieldErrorMarker errors={fieldErrors.actions} />
-                  </FieldLabel>
+                  </YamlFieldLabel>
                   <Textarea
                     id="phase-actions"
                     value={value.actions}
@@ -1043,10 +1131,10 @@ function AllowSequentialOverwriteField({
 
   return (
     <Field>
-      <FieldLabel htmlFor="phase-allow-sequential-overwrite">
+      <YamlFieldLabel htmlFor="phase-allow-sequential-overwrite">
         allow_sequential_overwrite
         <FieldErrorMarker errors={errors} />
-      </FieldLabel>
+      </YamlFieldLabel>
       {candidates.length > 0 ? (
         <div className="space-y-1.5 rounded-md border border-border bg-background px-2 py-2">
           {candidates.map((candidate) => (
@@ -1201,17 +1289,15 @@ function SubgraphNameField({
   onPhaseRename?: (phaseId: string, nextPhaseId: string) => Promise<void> | void
 }) {
   return (
-    <Field>
-      <FieldLabel>name</FieldLabel>
-      <div className="flex min-h-8 items-center gap-2">
-        <span id="phase-name" className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
-          {phaseId}
-        </span>
-        {onPhaseRename ? (
-          <RenamePhaseDialog phaseId={phaseId} onPhaseRename={onPhaseRename} />
-        ) : null}
-      </div>
-    </Field>
+    <YamlInputField
+      id="phase-name"
+      label="name"
+      value={phaseId}
+      readOnly
+      action={onPhaseRename ? (
+        <RenamePhaseDialog phaseId={phaseId} onPhaseRename={onPhaseRename} />
+      ) : null}
+    />
   )
 }
 
@@ -1260,27 +1346,34 @@ function SubgraphPathField({
   const unresolved = fieldState.status !== "resolved" || diskMissing
 
   return (
-    <Field>
-      <FieldLabel htmlFor="phase-path">
-        path
-        <HelpTooltip label="About path">
-          Select the child graph folder that contains GRAPH.md. Studio saves a relative path when it can.
-        </HelpTooltip>
-        <FieldErrorMarker errors={errors} />
-      </FieldLabel>
-      <div className="flex min-h-8 items-center gap-2">
-        <span
-          id="phase-path"
-          role="status"
-          aria-invalid={unresolved || undefined}
-          className="min-w-0 flex-1 truncate font-mono text-xs text-foreground aria-invalid:text-destructive"
+    <YamlInputField
+      id="phase-path"
+      label={(
+        <>
+          path
+          <HelpTooltip label="About path">
+            Select the child graph folder that contains GRAPH.md. Studio saves a relative path when it can.
+          </HelpTooltip>
+          <FieldErrorMarker errors={errors} />
+        </>
+      )}
+      value={value.trim() || "No child graph selected"}
+      readOnly
+      invalid={unresolved}
+      inputClassName="aria-invalid:text-destructive"
+      action={(
+        <Button
+          type="button"
+          size="icon"
+          variant="secondary"
+          className={YAML_ICON_BUTTON_CLASS}
+          aria-label="Reconnect path"
+          onClick={onReconnectFolder}
         >
-          {value.trim() || "No child graph selected"}
-        </span>
-        <Button type="button" size="icon-sm" variant="secondary" aria-label="Reconnect path" onClick={onReconnectFolder}>
           <FolderOpen className="size-3.5" aria-hidden />
         </Button>
-      </div>
+      )}
+    >
       {unresolved ? (
         <div className="space-y-1.5">
           <p className="text-xs text-destructive">
@@ -1290,7 +1383,7 @@ function SubgraphPathField({
           </p>
         </div>
       ) : null}
-    </Field>
+    </YamlInputField>
   )
 }
 
@@ -1316,35 +1409,38 @@ function IterateField({
 
   return (
     <Field>
-      <FieldLabel htmlFor="phase-iterate-mode">
+      <YamlFieldLabel htmlFor="phase-iterate-mode">
         iterate
         <HelpTooltip label="About iterate">
           Configure phase-level batch or loop execution. I/O fields are edited in the I/O panel.
         </HelpTooltip>
         <FieldErrorMarker errors={errors} />
-      </FieldLabel>
-      <Select
-        value={modeValue}
-        onValueChange={(next) => {
-          update({ mode: (next === ITERATE_OFF_VALUE ? "" : next) as IterateMode })
-        }}
-      >
-        <SelectTrigger id="phase-iterate-mode" aria-label="iterate mode" className="w-full">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {ITERATE_MODES.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      </YamlFieldLabel>
+      <Field>
+        <YamlNestedFieldLabel htmlFor="phase-iterate-mode">mode</YamlNestedFieldLabel>
+        <Select
+          value={modeValue}
+          onValueChange={(next) => {
+            update({ mode: (next === ITERATE_OFF_VALUE ? "" : next) as IterateMode })
+          }}
+        >
+          <SelectTrigger id="phase-iterate-mode" aria-label="iterate mode" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {ITERATE_MODES.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
       {value.mode ? (
         <div className="space-y-2 pt-1">
           <div className="grid grid-cols-2 gap-2">
             <Field>
-              <FieldLabel htmlFor="phase-iterate-over">over</FieldLabel>
+              <YamlNestedFieldLabel htmlFor="phase-iterate-over">over</YamlNestedFieldLabel>
               <Input
                 id="phase-iterate-over"
                 value={value.over}
@@ -1353,7 +1449,7 @@ function IterateField({
               />
             </Field>
             <Field>
-              <FieldLabel htmlFor="phase-iterate-item-var">item_var</FieldLabel>
+              <YamlNestedFieldLabel htmlFor="phase-iterate-item-var">item_var</YamlNestedFieldLabel>
               <Input
                 id="phase-iterate-item-var"
                 value={value.itemVar}
@@ -1363,7 +1459,7 @@ function IterateField({
             </Field>
           </div>
           <Field>
-            <FieldLabel>range</FieldLabel>
+            <YamlNestedFieldLabel>range</YamlNestedFieldLabel>
             <div className="grid grid-cols-2 gap-2">
               <Input
                 aria-label="iterate range start"
@@ -1383,7 +1479,7 @@ function IterateField({
           </Field>
           {value.mode === "batch" ? (
             <Field>
-              <FieldLabel htmlFor="phase-iterate-concurrency">concurrency</FieldLabel>
+              <YamlNestedFieldLabel htmlFor="phase-iterate-concurrency">concurrency</YamlNestedFieldLabel>
               <Input
                 id="phase-iterate-concurrency"
                 inputMode="numeric"
@@ -1395,10 +1491,10 @@ function IterateField({
           ) : null}
           {value.mode === "loop" ? (
             <div className="space-y-2">
-              <FieldLabel>accumulate</FieldLabel>
+              <YamlNestedFieldLabel>accumulate</YamlNestedFieldLabel>
               <div className="grid grid-cols-2 gap-2">
                 <Field>
-                  <FieldLabel htmlFor="phase-iterate-accumulate-var">accumulate.var</FieldLabel>
+                  <YamlNestedFieldLabel htmlFor="phase-iterate-accumulate-var">accumulate.var</YamlNestedFieldLabel>
                   <Input
                     id="phase-iterate-accumulate-var"
                     value={value.accumulateVar}
@@ -1407,7 +1503,7 @@ function IterateField({
                   />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="phase-iterate-accumulate-from">accumulate.from</FieldLabel>
+                  <YamlNestedFieldLabel htmlFor="phase-iterate-accumulate-from">accumulate.from</YamlNestedFieldLabel>
                   <Input
                     id="phase-iterate-accumulate-from"
                     value={value.accumulateFrom}
@@ -1418,7 +1514,7 @@ function IterateField({
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <Field>
-                  <FieldLabel htmlFor="phase-iterate-accumulate-init">accumulate.init</FieldLabel>
+                  <YamlNestedFieldLabel htmlFor="phase-iterate-accumulate-init">accumulate.init</YamlNestedFieldLabel>
                   <Input
                     id="phase-iterate-accumulate-init"
                     value={value.accumulateInit}
@@ -1427,7 +1523,7 @@ function IterateField({
                   />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="phase-iterate-accumulate-merge">accumulate.merge</FieldLabel>
+                  <YamlNestedFieldLabel htmlFor="phase-iterate-accumulate-merge">accumulate.merge</YamlNestedFieldLabel>
                   <Select
                     value={value.accumulateMerge}
                     onValueChange={(next) => update({ accumulateMerge: next as IterateMergeMode })}
@@ -1496,10 +1592,10 @@ function ValidatorField({
 }) {
   return (
     <Field orientation="horizontal" className="items-center justify-between gap-3">
-      <FieldLabel htmlFor="phase-validator" className="min-w-0">
+      <YamlFieldLabel htmlFor="phase-validator" className="min-w-0">
         validator
         <FieldErrorMarker errors={errors} />
-      </FieldLabel>
+      </YamlFieldLabel>
       <Switch
         id="phase-validator"
         size="sm"
@@ -1570,7 +1666,7 @@ function SubagentsField({
 
   return (
     <Field>
-      <FieldLabel>subagents</FieldLabel>
+      <YamlFieldLabel>subagents</YamlFieldLabel>
       <div className="space-y-2">
         {value.map((entry, index) => (
           <div key={index} className="space-y-1.5 rounded-md border border-border bg-background px-2 py-2">

@@ -47,7 +47,7 @@ def test_codecov_yml_declares_report_only_status_and_flags() -> None:
 def test_ci_uploads_backend_and_graph_agent_coverage_to_codecov() -> None:
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
 
-    assert "codecov/codecov-action@v6" in workflow
+    assert "codecov/codecov-action@v7" in workflow
     assert "token: ${{ secrets.CODECOV_TOKEN }}" in workflow
     assert "files: coverage-backend.xml" in workflow
     assert "files: coverage-graph-agent.xml" in workflow

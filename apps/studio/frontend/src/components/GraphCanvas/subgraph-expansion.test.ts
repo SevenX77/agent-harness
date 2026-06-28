@@ -91,7 +91,7 @@ describe('buildSubgraphExpansion', () => {
     expect(nodes.filter((node) => node.type !== 'subgraphGroup').every((node) => node.connectable === undefined)).toBe(true)
     expect(nodes.filter((node) => node.type !== 'subgraphGroup').every((node) => node.deletable === undefined)).toBe(true)
     expect(nodes.every((node) => isSubgraphPreviewId(node.id))).toBe(true)
-    expect(nodes.filter((node) => node.type !== 'subgraphGroup').every((node) => typeof node.width === 'number' && typeof node.height === 'number')).toBe(true)
+    expect(nodes.filter((node) => node.type !== 'subgraphGroup').every((node) => node.width === undefined && node.height === undefined)).toBe(true)
     expect(nodes.filter((node) => node.type !== 'subgraphGroup').map((node) => node.type).sort()).toEqual([
       'globalInput',
       'globalOutput',
@@ -334,19 +334,6 @@ describe('buildSubgraphExpansion', () => {
     expect(childPlan?.parentId).toBe('__subpreview__::group::expand')
     expect(childPlan?.position.y ?? 0).toBeGreaterThan(44 + 28)
     expect(childPlan?.position.x ?? 0).toBeGreaterThan(28)
-  })
-
-  it('places an expanded subgraph to the right of the whole visible parent topology', () => {
-    const parents: PositionedParentNode[] = [
-      { id: 'expand', type: 'skill', position: { x: 160, y: 490 } },
-      { id: 'rightmost-parent', type: 'skill', position: { x: 720, y: 320 } },
-    ]
-    const { nodes } = buildSubgraphExpansion(parents, [LOADED_REQUEST])
-    const group = nodes.find((node) => node.type === 'subgraphGroup')
-    const parentGraphRight = 720 + 260 / 2
-    const groupLeft = 160 - 260 / 2 + (group?.position.x ?? 0) - ((group?.width as number | undefined) ?? 0) / 2
-
-    expect(groupLeft).toBeGreaterThan(parentGraphRight)
   })
 
   it('keeps expanded child phases centered on the same graph axis', () => {

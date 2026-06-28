@@ -33,6 +33,7 @@ vi.mock('@xyflow/react', () => ({
   useReactFlow: vi.fn(() => ({
     flowToScreenPosition: (position: { x: number; y: number }) => position,
   })),
+  useUpdateNodeInternals: vi.fn(() => vi.fn()),
   useViewport: vi.fn(() => ({ x: 0, y: 0, zoom: 1 })),
 }))
 
@@ -935,6 +936,12 @@ describe('GraphCanvas', () => {
 
     nested.data.topologyOwnerSkillId = 'story-deconstruction-v3'
     expect(topologyOwnerSkillIdForNode(nested, 'other-root')).toBe('story-deconstruction-v3')
+
+    nested.data.topologyOwnerSkillId = 'event-timeline'
+    expect(topologyOwnerSkillIdForNode(nested, 'event-timeline')).toBe('story-deconstruction-v3')
+
+    nested.data.workspaceRoot = 'D:\\repo\\skills\\story-deconstruction-v3\\subgraph\\event-timeline'
+    expect(topologyOwnerSkillIdForNode(nested, 'event-timeline')).toBe('story-deconstruction-v3')
   })
 
   it('keeps the error overlay', () => {

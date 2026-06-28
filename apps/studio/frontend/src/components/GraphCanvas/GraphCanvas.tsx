@@ -9,6 +9,7 @@ import {
   reconnectEdge,
   useEdgesState,
   useNodesState,
+  useUpdateNodeInternals,
   type Connection,
   type Edge,
   type FinalConnectionState,
@@ -264,6 +265,27 @@ function SkillMiniMap({ visible }: { visible: boolean }) {
       aria-hidden={!visible}
     />
   )
+}
+
+function SubgraphBridgeInternalsUpdater({ nodes }: { nodes: GraphCanvasNode[] }) {
+  const updateNodeInternals = useUpdateNodeInternals()
+  const bridgeAnchorNodeIds = useMemo(() => nodes
+    .filter((node) => (
+      node.type === 'subgraphGroup'
+      || (node.type === 'skill' && (node.data as SkillGraphNodeData).isExpanded === true)
+    ))
+    .map((node) => node.id), [nodes])
+
+  useCanvasLayoutEffect(() => {
+    if (bridgeAnchorNodeIds.length === 0) return
+
+    const frame = window.requestAnimationFrame(() => {
+      bridgeAnchorNodeIds.forEach((nodeId) => updateNodeInternals(nodeId))
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [bridgeAnchorNodeIds, updateNodeInternals])
+
+  return null
 }
 
 export function layoutViewportSignature(nodes: GraphCanvasNode[], edges: Edge<ContextEdgeData>[]): string {
@@ -1967,6 +1989,7 @@ export function GraphCanvas({
         maxZoom={1.4}
         proOptions={{ hideAttribution: true }}
       >
+        <SubgraphBridgeInternalsUpdater nodes={nodes} />
         <Background gap={18} size={1} />
         {/* F4: node-anchored HitL input. Reads the live run stream from the
             workspace context (same array the edges already consume) and anchors

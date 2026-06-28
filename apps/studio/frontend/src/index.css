@@ -388,11 +388,6 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   visibility: hidden;
 }
 
-.react-flow .studio-canvas-top-left-panel.react-flow__panel.top.left {
-  left: calc(var(--studio-canvas-left-safe-area, 0px) + 1rem) !important;
-  top: calc(var(--studio-canvas-editor-safe-area, 0px) + 1rem) !important;
-}
-
 .react-flow .skill-mini-map .react-flow__minimap-svg {
   background: var(--studio-canvas-surface);
 }
@@ -404,6 +399,11 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
 
 .react-flow .skill-mini-map .react-flow__minimap-node {
   opacity: 0.86;
+}
+
+.react-flow .studio-canvas-top-left-panel.react-flow__panel.top.left {
+  left: calc(var(--studio-canvas-left-safe-area, 0px) + 1rem) !important;
+  top: calc(var(--studio-canvas-editor-safe-area, 0px) + 1rem) !important;
 }
 
 .studio-canvas-panel {
@@ -469,21 +469,21 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
 }
 
 .studio-left-panel-overlay [data-studio-left-panel-content="true"] {
+  height: 100%;
   min-height: 0;
-  max-height: inherit;
   scrollbar-gutter: stable;
 }
 
 .studio-left-panel-overlay [data-studio-left-panel-content="true"] > * {
-  height: auto;
-  max-height: inherit;
+  height: 100%;
   min-height: 0;
   width: 100%;
 }
 
 .studio-left-panel-overlay [data-studio-left-panel-content="true"] > * > [data-slot="scroll-area"] {
-  flex: 0 1 auto;
-  max-height: calc(100vh - 1.5rem - 3rem);
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
 }
 
 .studio-left-panel-overlay [data-studio-left-panel-content="true"] > .bg-background,
@@ -622,18 +622,36 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
 }
 
 .studio-subgraph-frame {
+  backdrop-filter: blur(1px);
   background: color-mix(in oklab, var(--studio-canvas-surface) 30%, transparent);
-  border: 1px solid var(--studio-canvas-accent-muted);
+  border: 0;
   box-shadow:
-    0 18px 42px rgb(0 0 0 / 0.22),
-    inset 0 1px 0 rgb(255 255 255 / 0.04);
-  backdrop-filter: blur(8px);
+    inset 0 0 0 1.5px var(--primary),
+    0 18px 42px rgb(0 0 0 / 0.22);
 }
 
 .studio-subgraph-header {
-  background: var(--studio-canvas-accent);
-  border-color: var(--studio-canvas-accent);
+  background: var(--primary);
+  border-color: var(--primary);
   color: var(--primary-foreground);
+}
+
+.react-flow .react-flow__node-subgraphGroup,
+.react-flow .react-flow__node-subgraphGroup:focus,
+.react-flow .react-flow__node-subgraphGroup:focus-visible,
+.react-flow .react-flow__node-subgraphGroup.selected,
+.react-flow .react-flow__node-subgraphGroup.selectable:focus,
+.react-flow .react-flow__node-subgraphGroup.selectable:focus-visible {
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.react-flow .react-flow__node-subgraphGroup {
+  pointer-events: none !important;
+}
+
+.react-flow .react-flow__node-subgraphGroup .subgraph-group-drag-handle {
+  pointer-events: auto !important;
 }
 
 .studio-subgraph-header .text-muted-foreground {
@@ -649,39 +667,48 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
 }
 
 .subgraph-dash-frame {
-  border-color: var(--studio-canvas-accent-muted);
+  border: 0;
+  border-color: var(--primary);
 }
 
 .subgraph-bridge-source-handle,
 .subgraph-bridge-target-handle {
   background: transparent !important;
   border: 0 !important;
-  height: 0.5rem !important;
   opacity: 0 !important;
   pointer-events: none !important;
-  width: 0.5rem !important;
 }
 
+/* Source handle is nested in the +/- toggle wrapper (= the button's box), so
+   left:100% + center transform lands its measured center exactly on the
+   circular button's right-edge vertical center. */
 .subgraph-bridge-source-handle {
-  left: 50% !important;
+  height: 2px !important;
+  left: 100% !important;
   right: auto !important;
   top: 50% !important;
   transform: translate(-50%, -50%) !important;
+  width: 2px !important;
 }
 
+/* Target handle is nested in the subgraph header, so left:0 + center transform
+   lands its measured center exactly on the header's left-edge vertical center,
+   independent of the header's rendered height. */
 .subgraph-bridge-target-handle {
+  height: 2px !important;
   left: 0 !important;
-  top: var(--subgraph-bridge-target-y, 50%) !important;
+  top: 50% !important;
   transform: translate(-50%, -50%) !important;
+  width: 2px !important;
 }
 
 .react-flow .subgraph-bridge-edge {
-  filter: drop-shadow(0 0 4px var(--studio-canvas-accent-soft));
-  stroke: var(--studio-canvas-accent);
+  filter: none;
+  stroke: var(--primary);
   stroke-dasharray: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.6px;
+  stroke-linecap: butt;
+  stroke-linejoin: miter;
+  stroke-width: 1.5px;
 }
 
 @keyframes context-edge-flow {

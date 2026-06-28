@@ -355,11 +355,34 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
 
 .react-flow .skill-mini-map {
   overflow: hidden !important;
+  transform-origin: bottom right;
+  transition:
+    opacity 100ms ease-out,
+    transform 100ms ease-out;
 }
 
 .react-flow .skill-mini-map.react-flow__panel.bottom.right {
   bottom: 1rem !important;
+  right: 1rem !important;
+}
+
+.react-flow .skill-mini-map--visible.react-flow__panel.bottom.right {
   right: calc(var(--studio-canvas-right-safe-area, 0px) + 1rem) !important;
+}
+
+.react-flow .skill-mini-map--visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1);
+  transition-delay: 0s;
+  visibility: visible;
+}
+
+.react-flow .skill-mini-map--hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.98);
+  visibility: hidden;
 }
 
 .react-flow .studio-canvas-top-left-panel.react-flow__panel.top.left {
@@ -649,22 +672,6 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.6px;
-}
-
-.react-flow .react-flow__attribution {
-  background: var(--color-card) !important;
-  color: var(--color-muted-foreground) !important;
-  border-radius: var(--radius-sm) 0 0 0 !important;
-  padding: 2px 6px !important;
-}
-
-.react-flow .react-flow__attribution a {
-  color: var(--color-muted-foreground) !important;
-  text-decoration: none !important;
-}
-
-.react-flow .react-flow__attribution a:hover {
-  color: var(--color-foreground) !important;
 }
 
 @keyframes context-edge-flow {

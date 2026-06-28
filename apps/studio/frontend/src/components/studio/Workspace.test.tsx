@@ -651,6 +651,12 @@ describe('Workspace WS-1 local writer contracts', () => {
     expect(hasMiniMapToolSpace(actionBar, null)).toBe(true)
   })
 
+  it('hides the minimap until Copilot spacing has been measured', () => {
+    renderWorkspace()
+
+    expect(mocks.graphCanvasProps?.hideMiniMap).toBe(true)
+  })
+
   it('passes imported workspace roots into golden diff promotion without changing the API skill id', () => {
     const selection = `local-workspace:${encodeURIComponent('writer-smoke')}:${encodeURIComponent('/abs/path')}`
 

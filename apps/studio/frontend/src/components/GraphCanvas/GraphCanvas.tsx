@@ -177,7 +177,7 @@ function miniMapNodeSize(type: string | undefined): { width: number; height: num
   return { width: 260, height: 120 }
 }
 
-function SkillMiniMap({ nodes }: { nodes: GraphCanvasNode[] }) {
+function SkillMiniMap({ nodes, visible }: { nodes: GraphCanvasNode[]; visible: boolean }) {
   const miniNodes = useMemo(() => nodes
     .filter((node) => node.type !== 'subgraphGroup')
     .map((node) => {
@@ -217,8 +217,9 @@ function SkillMiniMap({ nodes }: { nodes: GraphCanvasNode[] }) {
   return (
     <Panel
       position="bottom-right"
-      className="react-flow__minimap skill-mini-map"
+      className={`react-flow__minimap skill-mini-map ${visible ? 'skill-mini-map--visible' : 'skill-mini-map--hidden'}`}
       style={{ height: MINI_MAP_HEIGHT, width: MINI_MAP_WIDTH }}
+      aria-hidden={!visible}
     >
       <svg
         className="skill-mini-map__svg"
@@ -1714,6 +1715,7 @@ export function GraphCanvas({
         nodeOrigin={CENTER_NODE_ORIGIN}
         minZoom={0.35}
         maxZoom={1.4}
+        proOptions={{ hideAttribution: true }}
       >
         <Background gap={18} size={1} />
         {/* F4: node-anchored HitL input. Reads the live run stream from the
@@ -1737,7 +1739,7 @@ export function GraphCanvas({
           resumeLoading={resumeLoading}
           onResumeNode={onResumeNode}
         />
-        {!compact && !hideMiniMap ? <SkillMiniMap nodes={nodes} /> : null}
+        {!compact ? <SkillMiniMap nodes={nodes} visible={!hideMiniMap} /> : null}
         {drillStack.length > 0 || isChildGraphLoading || childGraphError ? (
           <Panel position="top-left" className="studio-canvas-top-left-panel">
             <div className="flex flex-col items-start gap-2">

@@ -249,6 +249,16 @@ describe('GraphCanvas', () => {
     expect(html).toContain('data-node-origin="[0.5,0.5]"')
   })
 
+  it('hides the React Flow attribution via the library option', () => {
+    renderToStaticMarkup(<GraphCanvas skillId="demo-skill" />)
+
+    const props = reactFlowPropsRef.current as {
+      proOptions?: { hideAttribution?: boolean }
+    } | null
+
+    expect(props?.proOptions?.hideAttribution).toBe(true)
+  })
+
   it('opens the properties panel when a skill node is clicked', () => {
     const onNodeSelect = vi.fn()
     const onPanelChange = vi.fn()

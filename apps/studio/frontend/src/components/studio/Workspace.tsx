@@ -76,11 +76,19 @@ export function hasMiniMapToolSpace(
 }
 
 function useMiniMapToolSpace(copilotOpen: boolean, currentSkillId: string | null, settingsOpen: boolean): boolean {
-  const [hasSpace, setHasSpace] = useState(true)
+  const measurementKey = copilotOpen && currentSkillId && !settingsOpen ? currentSkillId : null
+  const [measurement, setMeasurement] = useState<{ key: string | null; hasSpace: boolean }>({
+    key: null,
+    hasSpace: true,
+  })
 
   useLayoutEffect(() => {
-    if (!copilotOpen || !currentSkillId || settingsOpen) {
-      setHasSpace(true)
+    if (!measurementKey) {
+      setMeasurement((current) => (
+        current.key === null && current.hasSpace
+          ? current
+          : { key: null, hasSpace: true }
+      ))
       return
     }
 
@@ -89,10 +97,13 @@ function useMiniMapToolSpace(copilotOpen: boolean, currentSkillId: string | null
       frameId = 0
       const actionBar = document.querySelector<HTMLElement>('[data-studio-center-action-bar="true"]')
       const rightOverlay = document.querySelector<HTMLElement>('[data-studio-right-overlay="true"]')
-      setHasSpace(hasMiniMapToolSpace(
-        actionBar?.getBoundingClientRect() ?? null,
-        rightOverlay?.getBoundingClientRect() ?? null,
-      ))
+      setMeasurement({
+        key: measurementKey,
+        hasSpace: hasMiniMapToolSpace(
+          actionBar?.getBoundingClientRect() ?? null,
+          rightOverlay?.getBoundingClientRect() ?? null,
+        ),
+      })
     }
     const scheduleMeasure = () => {
       if (frameId === 0) {
@@ -115,9 +126,13 @@ function useMiniMapToolSpace(copilotOpen: boolean, currentSkillId: string | null
         window.cancelAnimationFrame(frameId)
       }
     }
-  }, [copilotOpen, currentSkillId, settingsOpen])
+  }, [measurementKey])
 
-  return hasSpace
+  if (!measurementKey) {
+    return true
+  }
+
+  return measurement.key === measurementKey ? measurement.hasSpace : false
 }
 
 interface CopilotJudgeReplayContext {

@@ -2,6 +2,7 @@ import '@xyflow/react/dist/style.css'
 
 import {
   Background,
+  MiniMap,
   Panel,
   ReactFlow,
   addEdge,
@@ -164,83 +165,96 @@ const HIDDEN_INITIAL_VIEWPORT_CLASS = 'opacity-0 pointer-events-none'
 const useCanvasLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 const MINI_MAP_WIDTH = 200
 const MINI_MAP_HEIGHT = 120
-const MINI_MAP_PADDING = 48
+const MINI_MAP_NODE_WIDTH = 240
+const MINI_MAP_NODE_HEIGHT = 64
+
+type SkillMiniMapNodeProps = {
+  id: string
+  x: number
+  y: number
+  width: number
+  height: number
+  className: string
+  color?: string
+  selected: boolean
+  onClick?: (event: MouseEvent, id: string) => void
+}
 
 function overwriteConflictKey(conflict: Pick<OverwriteConflict, 'nodeId' | 'fieldName' | 'ancestorNodeId'>): string {
   return `${conflict.nodeId}\0${conflict.fieldName}\0${conflict.ancestorNodeId}`
 }
 
-function miniMapNodeSize(type: string | undefined): { width: number; height: number } {
-  if (type === 'globalInput' || type === 'globalOutput') {
-    return { width: 220, height: 80 }
+function miniMapNodeColor(node: { type?: string; selected?: boolean }): string {
+  if (node.type === 'subgraphGroup') {
+    return 'transparent'
   }
-  return { width: 260, height: 120 }
+  if (node.selected) {
+    return 'color-mix(in oklab, var(--studio-canvas-accent) 72%, var(--color-foreground))'
+  }
+  if (node.type === 'globalInput' || node.type === 'globalOutput') {
+    return 'var(--color-muted-foreground)'
+  }
+  return 'color-mix(in oklab, var(--color-foreground) 78%, var(--studio-canvas-accent) 22%)'
 }
 
-function SkillMiniMap({ nodes, visible }: { nodes: GraphCanvasNode[]; visible: boolean }) {
-  const miniNodes = useMemo(() => nodes
-    .filter((node) => node.type !== 'subgraphGroup')
-    .map((node) => {
-      const size = miniMapNodeSize(node.type)
-      return {
-        id: node.id,
-        type: node.type,
-        selected: node.selected === true,
-        x: node.position.x - size.width / 2,
-        y: node.position.y - size.height / 2,
-        width: size.width,
-        height: size.height,
-      }
-    }), [nodes])
+function miniMapNodeClassName(node: { type?: string }): string {
+  return node.type === 'subgraphGroup' ? 'skill-mini-map-node--group' : 'skill-mini-map-node--phase'
+}
 
-  if (miniNodes.length === 0) {
-    return null
+function SkillMiniMapNode({ id, x, y, width, height, className, color, selected, onClick }: SkillMiniMapNodeProps) {
+  if (className.includes('skill-mini-map-node--group')) {
+    return (
+      <rect
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        rx={10}
+        fill="transparent"
+        stroke="color-mix(in oklab, var(--studio-canvas-accent-muted) 64%, transparent)"
+        strokeWidth={4}
+        vectorEffect="non-scaling-stroke"
+        className={className}
+        onClick={onClick ? (event) => onClick(event, id) : undefined}
+      />
+    )
   }
 
-  let minX = Number.POSITIVE_INFINITY
-  let minY = Number.POSITIVE_INFINITY
-  let maxX = Number.NEGATIVE_INFINITY
-  let maxY = Number.NEGATIVE_INFINITY
-  for (const node of miniNodes) {
-    minX = Math.min(minX, node.x)
-    minY = Math.min(minY, node.y)
-    maxX = Math.max(maxX, node.x + node.width)
-    maxY = Math.max(maxY, node.y + node.height)
-  }
-  const viewBox = [
-    minX - MINI_MAP_PADDING,
-    minY - MINI_MAP_PADDING,
-    Math.max(1, maxX - minX + MINI_MAP_PADDING * 2),
-    Math.max(1, maxY - minY + MINI_MAP_PADDING * 2),
-  ].join(' ')
-
+  const nodeWidth = Math.min(width, MINI_MAP_NODE_WIDTH)
+  const nodeHeight = Math.min(height, MINI_MAP_NODE_HEIGHT)
   return (
-    <Panel
+    <rect
+      x={x + (width - nodeWidth) / 2}
+      y={y + (height - nodeHeight) / 2}
+      width={nodeWidth}
+      height={nodeHeight}
+      rx={8}
+      fill={color}
+      opacity={selected ? 0.95 : 0.78}
+      className={className}
+      onClick={onClick ? (event) => onClick(event, id) : undefined}
+    />
+  )
+}
+
+function SkillMiniMap({ visible }: { visible: boolean }) {
+  return (
+    <MiniMap
       position="bottom-right"
       className={`react-flow__minimap skill-mini-map ${visible ? 'skill-mini-map--visible' : 'skill-mini-map--hidden'}`}
       style={{ height: MINI_MAP_HEIGHT, width: MINI_MAP_WIDTH }}
+      nodeColor={miniMapNodeColor}
+      nodeClassName={miniMapNodeClassName}
+      nodeComponent={SkillMiniMapNode}
+      maskColor="color-mix(in oklab, var(--color-background) 76%, transparent)"
+      maskStrokeColor="color-mix(in oklab, var(--studio-canvas-accent-muted) 46%, transparent)"
+      maskStrokeWidth={2}
+      offsetScale={12}
+      pannable
+      zoomable
+      ariaLabel="Main graph overview"
       aria-hidden={!visible}
-    >
-      <svg
-        className="skill-mini-map__svg"
-        viewBox={viewBox}
-        role="img"
-        aria-label="Main graph overview"
-      >
-        {miniNodes.map((node) => (
-          <rect
-            key={node.id}
-            x={node.x}
-            y={node.y}
-            width={node.width}
-            height={node.height}
-            rx={8}
-            fill={node.selected ? 'var(--primary, #6366f1)' : node.type === 'skill' ? 'var(--color-foreground)' : 'var(--color-muted-foreground)'}
-            opacity={node.type === 'skill' ? 0.88 : 0.45}
-          />
-        ))}
-      </svg>
-    </Panel>
+    />
   )
 }
 
@@ -1739,7 +1753,7 @@ export function GraphCanvas({
           resumeLoading={resumeLoading}
           onResumeNode={onResumeNode}
         />
-        {!compact ? <SkillMiniMap nodes={nodes} visible={!hideMiniMap} /> : null}
+        {!compact ? <SkillMiniMap visible={!hideMiniMap} /> : null}
         {drillStack.length > 0 || isChildGraphLoading || childGraphError ? (
           <Panel position="top-left" className="studio-canvas-top-left-panel">
             <div className="flex flex-col items-start gap-2">

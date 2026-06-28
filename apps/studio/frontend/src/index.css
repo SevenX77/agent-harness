@@ -351,6 +351,9 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   background-color: var(--color-card) !important;
   border: 1px solid var(--color-border) !important;
   border-radius: var(--radius-md) !important;
+  box-shadow:
+    0 16px 38px rgb(0 0 0 / 0.32),
+    inset 0 1px 0 rgb(255 255 255 / 0.04);
 }
 
 .react-flow .skill-mini-map {
@@ -390,10 +393,17 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   top: calc(var(--studio-canvas-editor-safe-area, 0px) + 1rem) !important;
 }
 
-.react-flow .skill-mini-map__svg {
-  display: block;
-  height: 100%;
-  width: 100%;
+.react-flow .skill-mini-map .react-flow__minimap-svg {
+  background: var(--studio-canvas-surface);
+}
+
+.react-flow .skill-mini-map .react-flow__minimap-mask {
+  fill: color-mix(in oklab, var(--color-background) 76%, transparent);
+  stroke: color-mix(in oklab, var(--studio-canvas-accent-muted) 46%, transparent);
+}
+
+.react-flow .skill-mini-map .react-flow__minimap-node {
+  opacity: 0.86;
 }
 
 .studio-canvas-panel {
@@ -603,7 +613,7 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
 .studio-center-action-button--active {
   background: var(--studio-canvas-accent);
   color: var(--primary-foreground);
-  box-shadow: 0 0 0 1px var(--studio-canvas-accent-muted);
+  box-shadow: inset 0 0 0 1px var(--studio-canvas-accent-muted);
 }
 
 .studio-center-action-button--active:not(:disabled):hover {

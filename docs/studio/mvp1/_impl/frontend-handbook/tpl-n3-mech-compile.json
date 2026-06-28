@@ -1,0 +1,228 @@
+{
+ "id": "n3_compile_contract",
+ "title": "编译 / lint 错误契约 + 引擎编译规则",
+ "overview": {
+  "manages": "N3 节点对接后端的编译/lint 能力。错误来自三个来源(并列):① 首屏——打开 skill 时 GET /api/skills/{id} 返回的 SkillDetail.lint_result / manifest_errors(后端 get_skill_detail 已 lint 一次);② 编辑期——实时 lint(POST /lint);③ 主动——完整编译(POST /compile)。前端只触发/消费这三条 + 把返回的错误就近投影/汇总进 drawer + 用返回状态驱动门控;编译规则与错误码全归 engine。设计权威:能力模块 compile-lint(docs/studio/mvp1/02_capabilities/compile-lint/mvp1-alignment.md,FROZEN)+ 工作流 spec 03_compile.md。",
+  "why_single": "N3 三个 surface(实时 lint 三处投影 / Compile drawer / 动作条门控)对接的是同一组后端编译能力,且有一个易写糊的关键点:实时 lint 与手动 compile 是两条不同端点、返回两种不同形状的错误(一个有 error_code 无 field、一个有 field 无 error_code),三处就近投影对定位轴(file/field/line)的依赖也不同。把这组契约 + 两种错误形状 + 定位轴缺口单列一页讲清,避免各设计页各自描述导致口径不一。",
+  "design_owner": "engine 全权编译规则 + 全部 [F-v3-*] 错误码(engine compile-rules §9:Studio 只消费编译/运行错误 payload,不拥有规则)。前端侧:触发 + 呈现 + 门控状态机是前端自身。承载层是 gateway 后端 sidecar 侧(apps/studio/backend 这个 Python sidecar,是 gateway 后端的 HTTP 承载层),它把 /lint /compile 转发给 engine adapter,不自创规则。",
+  "code_location": "后端:gateway 后端 sidecar 侧的 routers/lint.py(lint_skill → lint_skill_service)、routers/skills.py(compile_skill_endpoint → compile_skill_for_studio,转发到 engine adapter)。前端:hooks/useDebouncedLint.ts(实时 lint hook)、api/client.ts(compileSkill 调 /compile)、components/studio/Workspace.tsx(收集 compileErrors、deriveBuildStage)、components/studio/center-action-bar.tsx(SkillBuildStage / deriveButtons 门控)。",
+  "dataflow": [
+   "首屏:打开 skill → GET /api/skills/:id → SkillDetail.lint_result / manifest_errors(后端 get_skill_detail 已 lint 一次)→ 建立初始就近投影",
+   "编辑期:编辑器内容变 → 实时 lint hook(useDebouncedLint,已接线 LazyMonacoPanel.tsx:250)防抖 800ms → POST /api/skills/:id/lint 体 {markdown}(后端 lint_skill_changed_markdown 物化副本编译 changed body)→ LintResult{status, errors: LintError[]} 覆盖首屏",
+   "lint 结果 → 三处就近投影(canvas 节点 / properties 字段旁 / 编辑器行内)+ 驱动 build stage(passed→compile-pass;warning 不阻塞 Predict、只 error 阻塞)",
+   "主动期:点 Compile → POST /api/skills/:id/compile → 200 CompileSuccess(解锁 Predict) 或 422 CompileFailure{errors: CompileError[]}",
+   "CompileFailure.errors → Compile drawer(出错自动弹、只盖画布、可复制)列 file:line-field-message + build stage 置 compile-fail",
+   "门控:build stage(9 态)经 deriveButtons 决定 Compile/Predict/Run 三按钮 highlight/disabled,逐级解锁;Run 还有后端兜底(未过 predict 抛 RUN_REQUIRES_PREDICT)"
+  ]
+ },
+ "submodules": [
+  {
+   "name": "实时 lint 触发（POST /lint）",
+   "code": "backend: routers/lint.py lint_skill; frontend: hooks/useDebouncedLint.ts",
+   "summary": "编辑期防抖触发的引擎查错;前端发当前 markdown,引擎返回 LintResult(status + 逐条 LintError)。只改状态 + 就近标红,不弹全局面板。",
+   "formula": "",
+   "diagram": "",
+   "rules": [
+    "请求:POST /api/skills/{skill_id}/lint,体 {markdown}(编辑期 changed markdown)——能力模块 compile-lint §3 已定。后端 lint_skill 收 LintRequest{markdown}:有 markdown 走 changed-markdown 沙箱编译(lint_skill_changed_markdown),无 body 回退 lint 磁盘 skill(向后兼容)。",
+    "响应 LintResult = {status:'passed'|'failed', errors: LintError[], phases_summary}。",
+    "LintError = {file?, line, column, error_code, severity:'error'|'warning', message, phase_name, field_path?, source_path?}——带 error_code / column / phase_name + engine 转发的 field_path/source_path 定位轴;无 CompileError 那个 field 键(两种错误形状的差异见下条)。",
+    "前端职责:防抖 800ms 发一次、期间置 checking、结果落 passed/failed 并广播给门控;空内容→idle、请求失败→failed+message。"
+   ],
+   "do": [
+    "前端发当前 markdown 给引擎查错。",
+    "引擎返回逐条 LintError(带 file/line/error_code/severity)。"
+   ],
+   "dont": [
+    "前端不判合法性(规则归引擎)。",
+    "lint 期不弹全局面板/toast(只改状态 + 就近标红)。"
+   ],
+   "deviation": ""
+  },
+  {
+   "name": "主动完整编译（POST /compile）",
+   "code": "backend: routers/skills.py compile_skill_endpoint → compile_skill_for_studio; frontend: api/client.ts compileSkill",
+   "summary": "点 Compile 主动跑完整编译;成功返回可运行产物身份(CompileSuccess),失败返回结构化错误(422 CompileFailure)。",
+   "formula": "",
+   "diagram": "",
+   "rules": [
+    "请求:POST /api/skills/{skill_id}/compile(无体)。",
+    "成功 200:CompileSuccess = {skill_id, status:'ok', phase_count, manifest_name, artifact_ref, source_map_ref, execution_fingerprint}——artifact_ref 是冻结编译产物身份(后端 D3)。",
+    "失败 422:CompileFailure = {code:'compile_failed', detail, errors: CompileError[]}。",
+    "CompileError = {file, line, field, severity:'fatal'|'warning', message}——带 **field**,无 error_code / column / phase_name。",
+    "前端职责:成功置 compile-pass(解锁 Predict)、清空错误;失败把 errors 写进 compileErrors[skillId]、置 compile-fail、供 drawer 展示。"
+   ],
+   "do": [
+    "前端主动触发完整编译。",
+    "引擎返回 CompileSuccess(产物身份) 或 422 CompileFailure(CompileError[])。"
+   ],
+   "dont": [
+    "前端不缓存编译产物为第二份真相(只投影 artifact_ref)。",
+    "前端不自定编译失败判定(归引擎)。"
+   ],
+   "deviation": ""
+  },
+  {
+   "name": "两种错误形状的差异 + 就近投影的定位轴",
+   "code": "backend models: app/models/errors.py LintError; app/models/skills.py CompileError",
+   "summary": "实时 lint 与手动 compile 返回两种不同形状的错误;三处就近投影对定位轴(file/field/line)的需求不同。engine 方向已定 ErrorPayload 的 field_path/source_path/source_span,但 Studio LintError 未采纳——字段级投影受此 drift 限制。",
+   "formula": "",
+   "diagram": "",
+   "rules": [
+    "LintError(来自 /lint):有 file / line / column / error_code / phase_name,severity = error | warning;**没有 field**。",
+    "CompileError(来自 /compile):有 file / line / field,severity = fatal | warning;**没有 error_code / column / phase_name**。",
+    "canvas 节点投影:按 phase 归组(用 file 路径里的 phases/<id>/ 或 phase_name)——两种错误都够。",
+    "编辑器行内投影:按 line 打 marker——但 LintError.line / column 可为 null(后端 _lint_error_from_exception 从异常 message 正则尽力解析),无 line 时降级到文件级 banner / Compile drawer、有 column 才精确列。",
+    "properties 字段旁投影:按 field 定位——只有 CompileError 有 field;实时 lint 的 LintError 缺 field。engine 方向已定 ErrorPayload 带 field_path/source_path/source_span,但 Studio LintError 未采纳(drift)——字段投影只能消费有 field 的 CompileError,或等 Studio LintError 采纳 engine field_path;无法定位时降级文件/节点级提示。"
+   ],
+   "do": [
+    "前端按定位轴(file/phase→节点、有 line→行、field→字段)把错误就近投影,缺轴时降级。"
+   ],
+   "dont": [
+    "前端不臆造缺失的定位轴(lint 无 field 就不硬塞到某字段旁;无 line 不硬标某行)。"
+   ],
+   "deviation": ""
+  },
+  {
+   "name": "build stage 门控状态机（纯前端）",
+   "code": "frontend: center-action-bar.tsx SkillBuildStage / deriveButtons; Workspace.tsx deriveBuildStage",
+   "summary": "动作条门控用一个前端状态机(9 态)决定三按钮的点亮/置灰与逐级解锁;不是后端契约,但其状态推进由 /lint /compile /predict 的结果驱动。",
+   "formula": "",
+   "diagram": "",
+   "rules": [
+    "9 态:idle / compiling / compile-fail / compile-pass / predicting / predict-fail / predict-pass / running / run-fail。",
+    "派生:deriveBuildStage 优先取显式 compileStages[id],否则据 lint 状态兜底(checking→compiling / failed→compile-fail / passed→compile-pass / 无→idle)。",
+    "按钮:deriveButtons 据 stage 设 Compile/Predict/Run 的 highlight/disabled,逐级解锁(详见动作条门控设计页 n3_gating_design)。",
+    "门控语义(能力模块 compile-lint COMPILE_LINT-3):编译 **warning 级不阻塞 Predict、只 error 级阻塞**;warning 仅标记/提示,不挡试飞。Run 必须 structure(compile)+ predict 双过才解锁。",
+    "驱动源:compile-pass 由 /compile 成功(或 lint passed)驱动;predict-pass 由 predict 成功(POST /api/skills/:id/runs/predict)驱动(predict 属 N4)。",
+    "Run 后端兜底:前端门控只是预防性置灰;后端 create_run → RunManager.start_run → require_passing_predict,当前 graph content hash 未过 predict 则抛 RUN_REQUIRES_PREDICT(409)——双保险防跑废。"
+   ],
+   "do": [
+    "前端据三端点结果推进 build stage、点亮/置灰按钮。"
+   ],
+   "dont": [
+    "状态机不持后端真相,只据后端返回的成功/失败信号转移。"
+   ],
+   "deviation": ""
+  }
+ ],
+ "files": [],
+ "interface_groups": [
+  {
+   "key": "read",
+   "title": "首屏读取类接口(打开 skill 拿初始错误)",
+   "note": "打开 skill 时一次性拿详情 + 首屏 lint 结果,供初始就近投影;之后由实时 lint / 手动 compile 覆盖。这是与下面动作类并列的第三个错误来源(首屏)。"
+  },
+  {
+   "key": "action",
+   "title": "触发引擎真跑的动作类接口",
+   "note": "这一组不是 CRUD:前端不通过它读写持久数据,而是触发引擎跑一次真实的编译 / lint / 试飞,拿回结构化结果(错误或产物身份)。规则与错误码归 engine,Studio 只触发 + 呈现。"
+  }
+ ],
+ "interfaces": [
+  {
+   "group": "read",
+   "endpoint": "GET /api/skills/{id}",
+   "req": "路径参数 skill_id",
+   "resp": "SkillDetail{..., lint_result: LintResult | null, manifest_errors: LintError[] | null}——打开 skill 时后端已 lint 一次(get_skill_detail → lint_skill_path),首屏即带错误;broken skill 另带 manifest_errors",
+   "purpose": "首屏错误初始化:打开 skill 时先消费 SkillDetail.lint_result / manifest_errors 建立初始就近投影,编辑后再由实时 lint 覆盖。这是与 POST /lint(编辑期)、POST /compile(主动)并列的第三个错误来源(首屏)",
+   "provider": "gateway 后端 sidecar 侧(routers/skills.py 的 get_skill → services/skills.py 的 get_skill_detail,内部 lint_skill_path)",
+   "id": "iface-skill-detail"
+  },
+  {
+   "group": "action",
+   "endpoint": "POST /api/skills/{id}/lint",
+   "req": "设计已定(能力模块 compile-lint/mvp1-alignment §3 接口契约):前端 lint 发送『changed markdown(编辑期变更内容)』、收 pass/fail/error;前端 hook 已按此 POST {markdown}。⚠ 后端 drift:真后端 routers/lint.py 的 lint_skill 只收 skill_id、lint 磁盘上已持久化的 skill(resolve_skill_dir),忽略请求体——后端实现偏离已定的 changed-markdown 契约,需补齐接受 body。这不是待定方案,是后端 drift",
+   "resp": "LintResult = {status:'passed'|'failed', errors: LintError[], phases_summary}。LintError = {file?, line, column, error_code, severity:'error'|'warning', message, phase_name}(有 error_code/column/phase_name,无 field;line/column 可为 null)",
+   "purpose": "编辑期防抖触发的实时编译查错;结果就近投影三处 + 驱动 build stage。前端只触发,规则归引擎",
+   "provider": "gateway 后端 sidecar 侧(routers/lint.py 的 lint_skill → services/skills.py 的 lint_skill → lint_skill_path)转发引擎编译查错",
+   "id": "iface-lint"
+  },
+  {
+   "group": "action",
+   "endpoint": "POST /api/skills/{id}/compile",
+   "req": "无体",
+   "resp": "200 CompileSuccess = {skill_id, status:'ok', phase_count, manifest_name, artifact_ref, source_map_ref, execution_fingerprint};或 422 CompileFailure = {code:'compile_failed', detail, errors: CompileError[]}。CompileError = {file, line, field, severity:'fatal'|'warning', message}(有 field,无 error_code)",
+   "purpose": "点 Compile 主动跑完整编译;成功解锁 Predict 并拿到冻结产物身份(artifact_ref),失败把 CompileError[] 列进 Compile drawer",
+   "provider": "gateway 后端 sidecar 侧(routers/skills.py 的 compile_skill_endpoint → compile_skill_for_studio)转发到 engine adapter",
+   "id": "iface-compile"
+  },
+  {
+   "group": "action",
+   "endpoint": "POST /api/skills/{id}/runs/predict",
+   "req": "PredictRunRequest(输入数据);属 N4 · Run & Verify,N3 只消费其成功信号",
+   "resp": "predict 结果(PredictRunResponse / RunDetail,形状归 N4);成功即驱动 build stage predict-pass",
+   "purpose": "predict 成功置 build stage predict-pass,解锁 Run。端点与 engine predict 路径已存在(非桩):routers/runs.py 的 predict_run → services/predictor.py 的 PredictorService.dispatch_predict_job 编译 artifact 并调 core/adapters/engine.py 的 EngineAdapter.predict_artifact;N3 只消费成功信号,完整 predict UX 归 N4",
+   "provider": "gateway 后端 sidecar 侧(routers/runs.py 的 predict_run,prefix /api/skills/{skill_id}/runs)→ engine predict",
+   "id": "iface-predict"
+  },
+  {
+   "group": "action",
+   "endpoint": "POST /api/skills/{id}/runs",
+   "req": "RunRequest;属 N4 · Run & Verify",
+   "resp": "RunMetadata(202);若当前 graph 的 content hash 未通过 predict,后端兜底抛 RUN_REQUIRES_PREDICT(409)",
+   "purpose": "Run 的后端强制门控兜底:create_run → RunManager.start_run → require_passing_predict,未过 predict 即 409 RUN_REQUIRES_PREDICT。N3 前端负责预防性置灰(predict-pass 才点亮 Run),后端这条是双保险;run 失败态呈现归 N4",
+   "provider": "gateway 后端 sidecar 侧(routers/runs.py 的 create_run → services/run_manager.py 的 RunManager.start_run → services/predict_gate.py 的 require_passing_predict)",
+   "id": "iface-run"
+  }
+ ],
+ "boundaries": {
+  "do": [
+   "前端首屏消费 GET /skills/{id} 的 SkillDetail.lint_result / manifest_errors 建立初始就近投影,再被实时 lint / 手动 compile 覆盖",
+   "前端触发实时 lint(/lint)与主动编译(/compile)",
+   "前端把返回的错误按定位轴就近投影(canvas/properties/editor)+ 汇总进 Compile drawer(出错自动弹、只盖画布)",
+   "前端用错误源驱动 build stage(9 态)门控三按钮逐级解锁(warning 不阻塞 Predict、只 error 阻塞);Run 另有后端 RUN_REQUIRES_PREDICT 兜底",
+   "gateway 后端 sidecar 侧把 /lint /compile 转发到 engine adapter,返回结构化结果"
+  ],
+  "dont": [
+   "前端不自创编译规则、不自定错误码(规则与 [F-v3-*] 全表归 engine)",
+   "前端不在本地判 skill 是否合法(只投影引擎判定结果)",
+   "前端不缓存编译产物为第二份真相(只投影 artifact_ref / errors)",
+   "不存在独立的「Studio 后端」层——/lint /compile 的承载层是 gateway 后端 sidecar 侧,规则归 engine"
+  ]
+ },
+ "states_errors": "N3 对外两组词表:① build stage 9 态(idle/compiling/compile-fail/compile-pass/predicting/predict-fail/predict-pass/running/run-fail)是前端门控状态机,转移规则见动作条门控设计页(n3_gating_design),不在契约层重述。门控判定按 severity:能力模块 compile-lint COMPILE_LINT-3 决定 **warning 不阻塞 Predict、只 error 阻塞**(warning 仅标记不挡试飞);Run 需 compile + predict 双过,且后端 require_passing_predict 兜底(未过抛 RUN_REQUIRES_PREDICT)。② 错误 severity 两套——实时 lint 的 LintError 用 error | warning,手动 compile 的 CompileError 用 fatal | warning(前端投影时按 severity 映射红/琥珀;fatal→error 当 error 级阻塞)。全部 [F-v3-*] 错误码不在前端枚举,整表 + domain 分类是引擎规则实现,指针指向 engine compile-rules §4(96 码全表)。",
+ "backend_status": [
+  {
+   "item": "POST /compile + CompileResult / ArtifactRef(冻结编译产物身份)",
+   "d12": "D3「冻结编译产物与 run-by-version」",
+   "status": "ok",
+   "note": "/compile(compile_skill_endpoint → compile_skill_for_studio)与 CompileSuccess.artifact_ref / execution_fingerprint 已就绪;后端实施手册 D3 是「一次运行到底绑定哪份可执行对象」维度(D3.2「Run/Predict 不吃源码路径」已 ok),提供编译产物身份。前端 #compile-trigger 直接可接。",
+   "ref": "d3"
+  },
+  {
+   "item": "编译 / lint 错误族 payload 传输",
+   "d12": "D1「跨模块调用边界 + 错误族契约」",
+   "status": "ok",
+   "note": "后端实施手册 D1 是「transport 可替换、错误仍可解释」维度(D1.3「HTTP loopback 错误族」已绿),保证引擎编译/lint 错误能结构化传到 studio 前端。LintError / CompileError 模型(gateway 后端 sidecar 侧的 models/errors.py、models/skills.py)已就绪。",
+   "ref": "d1"
+  },
+  {
+   "item": "引擎编译规则 + 全部 [F-v3-*] 错误码",
+   "d12": "—(engine 全权,非 D 维度)",
+   "status": "ok",
+   "note": "编译规则(结构/字段/拓扑/IO 数据流/mention/purity)与 96 个 [F-v3-*] 错误码全归 engine,权威在 engine compile-rules(docs/engine/mvp1/01-contract/03-compile-rules)。Studio 只消费、不拥有(engine §9)。前端不枚举码表,按 severity 投影即可。",
+   "ref": "d1"
+  },
+  {
+   "item": "实时 lint 接受 changed markdown(后端 drift)",
+   "d12": "—(已实现,changed-markdown lint 前后端接通)",
+   "status": "ok",
+   "note": "changed-markdown lint 前后端均已接通(原『后端 drift 忽略 body』已消解)。后端 routers/lint.py 的 lint_skill 收 LintRequest{markdown}:有 body.markdown 走 lint_skill_changed_markdown(services/skills.py:233——在 OS 临时目录物化一份 skill 副本、只把 GRAPH.md 覆盖为 changed body、cache=False 编译该副本、用完即焚,不碰磁盘 skill store),无 body 回退 lint 磁盘 skill(向后兼容)。前端 useDebouncedLint 防抖 800ms 后 POST {markdown}(hooks/useDebouncedLint.ts:110)。符合能力模块 compile-lint §3「Frontend lint sends changed markdown」。",
+   "ref": "d1"
+  },
+  {
+   "item": "GET /skills/{id} 首屏 lint(SkillDetail.lint_result)",
+   "d12": "—(已实现)",
+   "status": "ok",
+   "note": "打开 skill 时 get_skill(routers/skills.py)→ get_skill_detail(services/skills.py)已 lint_skill_path 一次,把结果写进 SkillDetail.lint_result / manifest_errors;前端类型 api/types.ts 的 SkillDetail 也带这两字段。前端首屏直接消费即可建立初始就近投影。已就绪。",
+   "ref": "d1"
+  },
+  {
+   "item": "错误定位轴(就近投影精度的后端前提)",
+   "d12": "—(engine 错误契约 V2·G1,Studio 已采纳 field_path/source_path)",
+   "status": "ok",
+   "note": "错误定位轴已采纳(原 drift 消解)。Studio LintError(后端 models/errors.py + 前端 api/types.ts)已带 field_path / source_path,且后端 _lint_error_from_exception(services/skills.py:1536)把 engine GraphAgentError payload 的 field_path/source_path 逐字转发(engine 未归因字段时为 null,降级到节点/文件轴)。配合既有 line/column/phase_name,三处就近投影(canvas 节点 / properties 字段旁 / 编辑器行内)所需定位轴齐备,#180 已三处真机验证。engine mvp1-alignment G1 的 source_span 字符级跨度命名未逐字采纳,但 line/column 足够驱动行级 squiggle、非阻塞。",
+   "ref": "d1"
+  }
+ ]
+}

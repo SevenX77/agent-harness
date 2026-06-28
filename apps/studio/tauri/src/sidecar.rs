@@ -73,7 +73,11 @@ impl SidecarLaunchConfig {
                 .join("resources")
                 .join("config"),
             startup_attempts: MAX_STARTUP_ATTEMPTS,
-            health_timeout: Duration::from_secs(5),
+            // Cold start (first launch after a vendor rebuild compiles .pyc for
+            // the engine + gateway import tree) routinely exceeds 5s under load;
+            // a warm start returns in ~1-2s so this only matters on a cold boot.
+            // 5s caused intermittent "sidecar health check timed out" failures.
+            health_timeout: Duration::from_secs(30),
             shutdown_timeout: Duration::from_secs(2),
         }
     }
@@ -125,6 +129,13 @@ impl SidecarRuntimeConfig {
     }
 }
 
+/// Name of the Tauri event emitted to the webview after a successful sidecar
+/// (re)start. The payload is a `SidecarRuntimeConfig` (same shape returned by
+/// `get_sidecar_config`) — the frontend listens for this event and calls
+/// `configureApiToken` / `configureApiBaseURL` so an in-flight `useStudioEventStream`
+/// reconnect picks up the fresh bearer token instead of looping on 4401 (R-F13).
+pub const SIDECAR_RESTARTED_EVENT: &str = "sidecar-restarted";
+
 pub struct SidecarManager {
     state: Mutex<SidecarState>,
 }
@@ -135,6 +146,10 @@ struct SidecarState {
     runtime_config: SidecarRuntimeConfig,
     stderr_lines: Arc<Mutex<VecDeque<String>>>,
     shutdown_timeout: Duration,
+    /// Kept on the state so `restart` can rebuild a fresh process tree using
+    /// the same resource/config layout the manager was originally bootstrapped
+    /// with — without re-deriving paths from scratch.
+    launch_config: SidecarLaunchConfig,
 }
 
 impl SidecarManager {
@@ -162,6 +177,7 @@ impl SidecarManager {
                         ),
                         stderr_lines,
                         shutdown_timeout: config.shutdown_timeout,
+                        launch_config: config.clone(),
                     }),
                 });
             }
@@ -201,6 +217,64 @@ impl SidecarManager {
             }
             let _ = kill_process_group(&mut child);
         }
+    }
+
+    /// R-F13: tear down the current sidecar process and spawn a fresh one with
+    /// a new bearer token and (if the env now pins a different value) port. The
+    /// caller is expected to emit `SIDECAR_RESTARTED_EVENT` with the returned
+    /// runtime config so the frontend can rotate `currentApiToken` and the
+    /// `useStudioEventStream` reconnect picks up the new token automatically
+    /// instead of looping on 4401 closes.
+    pub fn restart(&self) -> Result<SidecarRuntimeConfig, SidecarError> {
+        let launch_config = {
+            let mut state = self.state.lock().expect("sidecar state poisoned");
+            if let Some(mut child) = state.child.take() {
+                let _ = post_shutdown(state.runtime_config.port, &state.token);
+                if !wait_for_child_exit(&mut child, state.shutdown_timeout) {
+                    let _ = kill_process_group(&mut child);
+                }
+            }
+            state.launch_config.clone()
+        };
+
+        let attempts = launch_config.startup_attempts.max(1);
+        let mut last_error = None;
+
+        for _ in 0..attempts {
+            let port = allocate_loopback_port()?;
+            let api_token = generate_api_token();
+            let stderr_lines = Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_RING_LINES)));
+            let mut child =
+                spawn_sidecar_process(&launch_config, port, &api_token, Arc::clone(&stderr_lines))?;
+
+            if wait_for_health(port, launch_config.health_timeout) {
+                let runtime_config = SidecarRuntimeConfig::new(
+                    port,
+                    &launch_config.resource_dir,
+                    &launch_config.config_dir,
+                    &api_token,
+                );
+                let mut state = self.state.lock().expect("sidecar state poisoned");
+                state.child = Some(child);
+                state.token = api_token;
+                state.runtime_config = runtime_config.clone();
+                state.stderr_lines = stderr_lines;
+                state.shutdown_timeout = launch_config.shutdown_timeout;
+                // launch_config unchanged — keep the original layout.
+                log::info!(
+                    "sidecar: restart succeeded on port {port}; emitting {} to webview",
+                    SIDECAR_RESTARTED_EVENT
+                );
+                return Ok(runtime_config);
+            }
+
+            let stderr = recent_stderr(&stderr_lines);
+            let _ = kill_process_group(&mut child);
+            last_error = Some(SidecarError::HealthTimeout { port, stderr });
+        }
+
+        Err(last_error
+            .unwrap_or_else(|| SidecarError::SpawnFailed("sidecar did not restart".into())))
     }
 }
 
@@ -253,6 +327,37 @@ fn resource_root_for_runtime_mode(
 }
 
 pub fn allocate_loopback_port() -> std::io::Result<u16> {
+    // Honor STUDIO_SIDECAR_PORT if the launcher (or apps/studio/frontend/.env.local
+    // sourced via the dev shell) pinned a port. This lets the vite proxy target
+    // (which is bound at vite startup, before the sidecar has even spawned) line
+    // up with the sidecar's actual listening port — fixing the 502s when the
+    // browser opens 127.0.0.1:5173 in dev tunnel mode (R-F2).
+    if let Ok(value) = std::env::var("STUDIO_SIDECAR_PORT") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            match trimmed.parse::<u16>() {
+                Ok(pinned) if pinned > 0 => {
+                    log::info!(
+                        "sidecar: using pinned STUDIO_SIDECAR_PORT={} from env",
+                        pinned
+                    );
+                    return Ok(pinned);
+                }
+                Ok(_) => {
+                    log::warn!(
+                        "sidecar: ignoring STUDIO_SIDECAR_PORT=0; falling back to dynamic port"
+                    );
+                }
+                Err(err) => {
+                    log::warn!(
+                        "sidecar: invalid STUDIO_SIDECAR_PORT={:?} ({}); falling back to dynamic port",
+                        value,
+                        err
+                    );
+                }
+            }
+        }
+    }
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     Ok(listener.local_addr()?.port())
 }
@@ -328,6 +433,7 @@ fn spawn_sidecar_process(
             "PYTHONPATH",
             python_path_env(&config.site_packages, &config.backend_dir),
         )
+        .env("PATH", sidecar_path_env(&config.site_packages))
         .env("STUDIO_RESOURCE_DIR", &config.resource_dir)
         .env("STUDIO_CONFIG_DIR", &config.config_dir)
         .env("STUDIO_API_TOKEN", api_token)
@@ -352,11 +458,39 @@ fn spawn_sidecar_process(
 }
 
 fn python_path_env(site_packages: &Path, backend_dir: &Path) -> OsString {
-    let mut entries = vec![site_packages.to_path_buf(), backend_dir.to_path_buf()];
+    let mut entries = vec![site_packages.to_path_buf()];
+    if cfg!(windows) {
+        entries.extend(pywin32_python_path_entries(site_packages));
+    }
+    entries.push(backend_dir.to_path_buf());
     if let Some(existing) = std::env::var_os("PYTHONPATH") {
         entries.extend(std::env::split_paths(&existing));
     }
     std::env::join_paths(entries).expect("PYTHONPATH entries must be valid")
+}
+
+fn pywin32_python_path_entries(site_packages: &Path) -> Vec<PathBuf> {
+    [
+        site_packages.join("win32"),
+        site_packages.join("win32").join("lib"),
+    ]
+    .into_iter()
+    .filter(|path| path.exists())
+    .collect()
+}
+
+fn sidecar_path_env(site_packages: &Path) -> OsString {
+    let mut entries = Vec::new();
+    if cfg!(windows) {
+        let pywin32_system32 = site_packages.join("pywin32_system32");
+        if pywin32_system32.exists() {
+            entries.push(pywin32_system32);
+        }
+    }
+    if let Some(existing) = std::env::var_os("PATH") {
+        entries.extend(std::env::split_paths(&existing));
+    }
+    std::env::join_paths(entries).expect("PATH entries must be valid")
 }
 
 fn sidecar_cors_extra_origins() -> String {
@@ -473,10 +607,43 @@ mod tests {
 
     #[test]
     fn allocate_loopback_port_returns_bindable_dynamic_port() {
+        // SAFETY: tests in this module run in the same process; clearing the env
+        // here is fine because the only consumer is allocate_loopback_port and
+        // tests touching the pinned-port branch set the env explicitly.
+        unsafe {
+            std::env::remove_var("STUDIO_SIDECAR_PORT");
+        }
         let port = allocate_loopback_port().expect("port");
         assert_ne!(port, 0);
         let listener = TcpListener::bind(("127.0.0.1", port)).expect("released port should rebind");
         drop(listener);
+    }
+
+    #[test]
+    fn allocate_loopback_port_honors_pinned_env() {
+        // Use a high static port that is exceedingly unlikely to clash so we can
+        // assert we returned the pinned value rather than a random OS-allocated one.
+        let pinned: u16 = 49317;
+        unsafe {
+            std::env::set_var("STUDIO_SIDECAR_PORT", pinned.to_string());
+        }
+        let port = allocate_loopback_port().expect("port");
+        unsafe {
+            std::env::remove_var("STUDIO_SIDECAR_PORT");
+        }
+        assert_eq!(port, pinned);
+    }
+
+    #[test]
+    fn allocate_loopback_port_falls_back_on_invalid_env() {
+        unsafe {
+            std::env::set_var("STUDIO_SIDECAR_PORT", "not-a-number");
+        }
+        let port = allocate_loopback_port().expect("port");
+        unsafe {
+            std::env::remove_var("STUDIO_SIDECAR_PORT");
+        }
+        assert_ne!(port, 0);
     }
 
     #[test]
@@ -575,6 +742,45 @@ mod tests {
         assert!(origins.contains("http://localhost:5174"));
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn python_path_env_includes_pywin32_target_paths_before_backend() {
+        let root = temp_test_dir("pywin32-pythonpath");
+        let site_packages = root.join("site-packages");
+        let backend_dir = root.join("backend");
+        std::fs::create_dir_all(site_packages.join("win32").join("lib")).expect("win32 dirs");
+        std::fs::create_dir_all(&backend_dir).expect("backend dir");
+
+        let joined = python_path_env(&site_packages, &backend_dir);
+        let entries = std::env::split_paths(&joined).collect::<Vec<_>>();
+
+        assert_eq!(entries[0], site_packages);
+        assert_eq!(entries[1], root.join("site-packages").join("win32"));
+        assert_eq!(
+            entries[2],
+            root.join("site-packages").join("win32").join("lib")
+        );
+        assert_eq!(entries[3], backend_dir);
+
+        std::fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn sidecar_path_env_prepends_pywin32_dll_path() {
+        let root = temp_test_dir("pywin32-path");
+        let site_packages = root.join("site-packages");
+        let pywin32_system32 = site_packages.join("pywin32_system32");
+        std::fs::create_dir_all(&pywin32_system32).expect("pywin32 dll dir");
+
+        let joined = sidecar_path_env(&site_packages);
+        let entries = std::env::split_paths(&joined).collect::<Vec<_>>();
+
+        assert_eq!(entries[0], pywin32_system32);
+
+        std::fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
     #[test]
     fn runtime_config_serializes_frontend_contract_field_names() {
         let config = SidecarRuntimeConfig::new(
@@ -604,5 +810,17 @@ mod tests {
 
         kill_process_group(&mut child).expect("kill process group");
         assert!(child.try_wait().expect("wait after kill").is_some());
+    }
+
+    #[cfg(windows)]
+    fn temp_test_dir(label: &str) -> PathBuf {
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "skill-studio-sidecar-{label}-{}-{suffix}",
+            std::process::id()
+        ))
     }
 }

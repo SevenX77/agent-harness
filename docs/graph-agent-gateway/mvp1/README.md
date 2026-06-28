@@ -58,7 +58,7 @@ aligns_with: ../../development/design-doc-standards/00-three-axes.md · ../../de
 | `05-orch-capabilities-and-models` | `registry/capabilities.py`、`registry/profile_selector.py:select_verified_profile`、`registry/lint.py:lint_role_routes`、`services/llm_model_identity.py`、`services/llm_notable_models.py`、`services/llm_route_capabilities.py`、`services/llm_model_groups.py` | capability 规范化/探测;**lint 只 warn/block、不驱动选型**(决策);profile 选择;模型身份/分组/notable 投影 |
 | `06-orch-error-classification` | `registry/error_classification.py:classify_exception/classify_error_context` | 真实语义表(401/402/403/404 与 400-capability → **fallback**,非 fail-fast);decision 映射。mvp1 **不变**;纠正多处文档错误简写 |
 | `07-orch-fallback-circuit-probe` | `gateway_chat_model.py:_generate`(编排步骤,共享)、`client_manager.py:probe_provider/is_provider_marked_down/mark_provider_down`(共享)、`registry/probe_contracts.py`、`services/copilot_test.py`、`services/llm_health_store.py` | fallback 循环逐步;熔断 TTL;probe 1-token 真请求;**retry 保留 ChatX 瞬时重试(不设 0)**;截断升级重试搬到本层 |
-| `08-orch-test-status-ssot` | `services/llm_state_projection.py:project_provider_model_state`、`services/llm_import_drafts.py` | 探测→持久化→投影→复用(**用户核心目标**);UI state(6 态:ready/historical_ready/untested/failed/cooling_down/off，已取消 needs_setup);draft + evidence library。baseline 前端易失态;mvp1 后端 SSOT 回写 |
+| `08-orch-test-status-ssot` | `services/llm_state_projection.py:project_provider_model_state`、`services/llm_import_drafts.py`(legacy 名) | 探测→持久化→投影→复用(**用户核心目标**);UI state(6 态:ready/historical_ready/untested/failed/cooling_down/off，已取消 needs_setup);Probe Knowledge Catalog（探测知识库）+ evidence library。baseline 前端易失态;mvp1 后端 SSOT 回写 |
 
 ### 调用层
 | 文件夹 | 覆盖代码 | 职责 / 必须解释 |
@@ -75,7 +75,7 @@ aligns_with: ../../development/design-doc-standards/00-three-axes.md · ../../de
 | `01-handoff-interface` | `protocol.py:ModelResolverProtocol.resolve/resolve_routes`、`resolver.py:ModelResolver.resolve_routes`、`__init__.py`、`apps/studio/backend/app/models/copilot.py`(ws 事件)+ 引用 `registry/schema.py:ResolvedRoute/ResolvedRole` | `route` 契约每字段;resolve API 契约;两个消费方各取什么。baseline:route 级 public API 已落地;剩余下游接线与公共门面导出 |
 | `13-x-tracing-events-exceptions` | `events.py:LLMFallbackEvent`、`exceptions.py`、`tracing.py:emit_llm_fallback_event` | fallback 事件 payload(含 from/to route 诊断);各异常类型语义与触发点 |
 
-> **HTTP 适配壳（原模块 14）已移交 studio**：`routers/llm.py`、`routers/copilot.py` = ③a Studio HTTP 适配壳（HTTP 端点形状 / job·进度包装 / DTO 投影绑死 studio 调用方式 + 存储介质），不是 ③b gateway 公共内核。它 delegate 的能力内核（base_url 归一化 / capability / probe 策略 / materialize / 6 态 / draft / endpoint 拆分）才是 ③b 公共。文档见 `docs/studio/mvp1/04_platform/llm-copilot-http-api/`。
+> **HTTP 适配壳（原模块 14）已移交 studio**：`routers/llm.py`、`routers/copilot.py` = ③a Studio HTTP 适配壳（HTTP 端点形状 / job·进度包装 / DTO 投影绑死 studio 调用方式 + 存储介质），不是 ③b gateway 公共内核。它 delegate 的能力内核（base_url 归一化 / capability / probe 策略 / materialize / 6 态 / Probe Knowledge Catalog / endpoint 拆分）才是 ③b 公共。文档见 `docs/studio/mvp1/04_platform/llm-copilot-http-api/`。
 
 ### Predict(单独文档,非 baseline+alignment 模块)
 [`predict-migration-to-engine.md`](./predict-migration-to-engine.md):`predict_interception.py`、`services/predictor.py`、`services/diagnostic_export.py`、`models/runs.py`、`protocol.py:PredictContext`。决策:mock/模拟移交 engine,gateway 只留「role→route」。

@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import { useAppSettings } from "@/hooks/useAppSettings"
 import { buildPutPayload, useDebouncedCredentialsSave } from "@/hooks/useDebouncedCredentialsSave"
 import { useDebouncedRolesSave } from "@/hooks/useDebouncedRolesSave"
 import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-error-messages"
-import { deleteModelBundle, deleteRole, getCredentials, getModelGroups, getProviderModels, getRoles, testProviderEndpoint, type CredentialsState, type EndpointTestJobResponse, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
-import { wsUrl } from "../../../api/client"
+import { useStudioEventStream } from "@/hooks/useStudioEventStream"
+import { deleteModelBundle, deleteRole, getCredentials, getModelGroups, getProviderModels, getRoles, syncVerifiedCommunityCatalog, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
-import { draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, providerCachedTestResult, providerDraftForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
+import { draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, providerCachedTestResult, providerDraftForAction, providerEndpointDraftsForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
 import { normalizeRolesDraft, validateRolesDraft } from "./role-utils"
 import type { ProviderDraft, SettingsPageProps, SettingsTab } from "./types"
 
@@ -57,6 +57,18 @@ export function modelGroupsReferenceMissingCredentialProviders(
   }))
 }
 
+export function shouldSyncRemoteModelCatalog({
+  settingsLoading,
+  enabled,
+  alreadySynced,
+}: {
+  settingsLoading: boolean
+  enabled: boolean
+  alreadySynced: boolean
+}): boolean {
+  return !settingsLoading && enabled && !alreadySynced
+}
+
 function errorText(error: unknown): string {
   if (typeof error === "string") return error
   if (typeof error !== "object" || error === null) return ""
@@ -80,6 +92,7 @@ function errorText(error: unknown): string {
 function modelInfoEvidenceRank(model: ModelInfo): number {
   if (
     model.status === "verified" ||
+    model.status === "probe-verified" ||
     (model.verified_profile_count ?? 0) > 0 ||
     (model.verified_profiles ?? []).some((profile) => profile.status === "ready")
   ) return 4
@@ -121,17 +134,6 @@ function mergeStrings(left: string[] = [], right: string[] = []): string[] {
   return Array.from(new Set([...left, ...right]))
 }
 
-export function officialProviderProgressToastMessage(
-  providerName: string,
-  job: EndpointTestJobResponse,
-): string {
-  const total = job.total_model_count
-  if (total > 0) {
-    return `Loading ${providerName} route candidates (${total} listed)...`
-  }
-  return `Checking ${providerName} endpoint and provider catalog...`
-}
-
 function resetProviderTestOutcome(
   provider: CredentialsState["providers"][number],
 ): CredentialsState["providers"][number] {
@@ -147,15 +149,17 @@ function resetProviderTestOutcome(
 }
 
 export function officialProviderTestSummary(models: ModelInfo[]): {
-  kind: "success" | "warning"
+  kind: "success"
   message: string
 } {
-  const verifiedCount = models.filter((model) => model.status === "verified").length
+  const verifiedCount = models.filter((model) => (
+    model.status === "verified" || model.status === "probe-verified"
+  )).length
   const notVerifiedCount = Math.max(0, models.length - verifiedCount)
   if (verifiedCount === 0) {
     return {
-      kind: "warning",
-      message: "Provider catalog is reachable. Routes need single-model tests for live verification.",
+      kind: "success",
+      message: "Catalog loaded. Route candidates are listed.",
     }
   }
   const verifiedLabel = verifiedCount === 1 ? "1 already verified" : `${verifiedCount} already verified`
@@ -176,6 +180,8 @@ export function upsertProviderTestResponse(
   response: ProviderTestResponse,
 ): CredentialsState {
   const fingerprint = providerTestParamsFingerprint(latestDraft)
+  const responseModels = response.available_models ?? []
+  const responseSdks = response.available_sdks ?? []
   const nextProvider: CredentialsState["providers"][number] = {
     id: latestDraft.id,
     name: latestDraft.name,
@@ -186,21 +192,14 @@ export function upsertProviderTestResponse(
     last_test_at: new Date().toISOString(),
     last_test_message: response.message ?? "",
     last_error_code: response.error_code ?? "",
-    available_models: response.available_models ?? [],
-    available_sdks: response.available_sdks ?? [],
+    available_models: responseModels,
+    available_sdks: responseSdks,
   }
   const lastTestStatus = nextProvider.last_test_status ?? "untested"
   let found = false
   const providers: CredentialsState["providers"] = current.providers.map((provider): CredentialsState["providers"][number] => {
     if (provider.id !== latestDraft.id) return provider
     found = true
-    const previousResult = (provider.test_results ?? []).find((item) => item.params_fingerprint === fingerprint)
-    const visibleModels = lastTestStatus === "ok"
-      ? mergeModelInfos(provider.available_models, response.available_models)
-      : previousResult?.available_models ?? provider.available_models ?? []
-    const visibleSdks = lastTestStatus === "ok"
-      ? mergeStrings(provider.available_sdks, response.available_sdks)
-      : previousResult?.available_sdks ?? provider.available_sdks ?? []
     const testResult: ProviderTestResult = {
       params_fingerprint: fingerprint,
       base_url: latestDraft.base_url,
@@ -209,8 +208,8 @@ export function upsertProviderTestResponse(
       last_test_at: nextProvider.last_test_at,
       last_test_message: nextProvider.last_test_message,
       last_error_code: nextProvider.last_error_code,
-      available_models: visibleModels,
-      available_sdks: visibleSdks,
+      available_models: responseModels,
+      available_sdks: responseSdks,
     }
     const testResults = [
       ...(provider.test_results ?? []).filter((item) => item.params_fingerprint !== testResult.params_fingerprint),
@@ -219,8 +218,8 @@ export function upsertProviderTestResponse(
     return {
       ...provider,
       ...nextProvider,
-      available_models: visibleModels,
-      available_sdks: visibleSdks,
+      available_models: responseModels,
+      available_sdks: responseSdks,
       test_results: testResults,
     }
   })
@@ -347,6 +346,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   const [credentialsLoading, setCredentialsLoading] = useState(true)
   const [credentialsError, setCredentialsError] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<ProviderDraft[]>([])
+  const [providerTestingActions, setProviderTestingActions] = useState<Record<string, ProviderDraft["testingAction"]>>({})
   const [rolesData, setRolesData] = useState<RolesData | null>(null)
   const [modelGroups, setModelGroups] = useState<ModelGroup[]>(emptyModelGroups)
   const [rolesError, setRolesError] = useState<string | null>(null)
@@ -362,6 +362,19 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   const invalidatedTestOutcomeIdsRef = useRef<Set<string>>(new Set())
   const credentialsHydratedRef = useRef(false)
   const pendingRoleProjectionRefreshRef = useRef(false)
+  // #6: a roles_changed event arrived while the Roles/Copilot tab had never been
+  // opened (rolesData still null). Instead of dropping it, set this flag so the
+  // lazy load refetches fresh the first time the tab opens.
+  const rolesDirtyRef = useRef(false)
+  const remoteModelCatalogSyncedRef = useRef(false)
+  const visibleDrafts = useMemo(() => (
+    drafts.map((draft) => {
+      const testingAction = providerTestingActions[draft.id] ?? null
+      return testingAction
+        ? { ...draft, isTesting: true, testingAction }
+        : { ...draft, isTesting: false, testingAction: null }
+    })
+  ), [drafts, providerTestingActions])
 
   const handleSaved = useCallback((next: CredentialsState) => {
     setCredentials({
@@ -426,7 +439,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         })
         .catch(() => {})
 
-      if (activeTab === "llm_roles" && rolesDataRef.current) {
+      if ((activeTab === "llm_roles" || activeTab === "copilot") && rolesDataRef.current) {
         Promise.all([getRoles(), getModelGroups()])
           .then(([next, nextModelGroups]) => {
             setRolesData(next)
@@ -441,44 +454,137 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     }
   }, [activeTab])
 
+  // R-F19.2 — when the Tauri shell intercepts `WindowEvent::CloseRequested`
+  // (Cmd+Q / window close / Quit menu) it emits `before-quit` and blocks the
+  // shutdown for `QUIT_FLUSH_BUDGET` (1500ms) waiting for the FE to ack via
+  // `confirm_quit_ready`. We flush any debounced/in-flight roles save first,
+  // then ack — so a yaml edit that was still sitting in the 300ms debounce
+  // window doesn't get lost on Quit. Browser-mode (no Tauri) gracefully
+  // no-ops: the dynamic import resolves but `listen` never fires.
   useEffect(() => {
     let cancelled = false
-    let socket: WebSocket | null = null
-    try {
-      socket = new WebSocket(wsUrl("/ws/events"))
-      socket.onmessage = (message) => {
-        try {
-          const event = JSON.parse(String(message.data)) as { type?: string }
-          if (cancelled) return
-          if (event.type === "registry_changed") {
-            getCredentials({ hydrateSecrets: credentialsHydratedRef.current })
-              .then((next) => {
-                if (cancelled) return
-                setCredentials(next)
-                setDrafts(draftsFromCredentials(next))
-              })
-              .catch(() => {})
-          } else if (event.type === "roles_changed" && rolesDataRef.current) {
-            Promise.all([getRoles(), getModelGroups()])
-              .then(([next, nextModelGroups]) => {
-                if (cancelled) return
-                setRolesData(next)
-                setModelGroups(nextModelGroups)
-              })
-              .catch(() => {})
+    let unlisten: (() => void) | null = null
+    void (async () => {
+      try {
+        const [{ listen }, { invoke }] = await Promise.all([
+          import("@tauri-apps/api/event"),
+          import("@tauri-apps/api/core"),
+        ])
+        if (cancelled) return
+        unlisten = await listen("before-quit", async () => {
+          try {
+            await flushRolesSave()
+          } catch (error) {
+            // Surfacing via warn so silent loss is observable
+            // (rules/logging.md). We still ack so the shell isn't blocked
+            // for the full budget; the unmount cleanup helper also takes a
+            // best-effort pass if anything is still buffered.
+            console.warn(
+              "phase=quit action=flush-before-quit-failed reason=%o",
+              error,
+            )
           }
-        } catch {
-          // ignore
+          try {
+            await invoke("confirm_quit_ready")
+          } catch (error) {
+            console.warn(
+              "phase=quit action=confirm-quit-ready-invoke-failed reason=%o",
+              error,
+            )
+          }
+        })
+      } catch (error) {
+        // Not running under Tauri (e.g. dev browser tab). Quietly skip —
+        // this is expected and not a degradation.
+        if (import.meta.env.DEV) {
+          console.info(
+            "phase=quit action=before-quit-listener-unavailable reason=%o",
+            error,
+          )
         }
       }
-    } catch {
-      // ignore
-    }
+    })()
     return () => {
       cancelled = true
-      if (socket) socket.close()
+      if (unlisten) unlisten()
     }
+  }, [flushRolesSave])
+
+  // #5/#6 WebSocket auto-refresh, extracted into useStudioEventStream (resilient
+  // reconnect + observable logging). registry_changed re-pulls credentials;
+  // roles_changed re-pulls roles+model-groups when loaded, else marks them dirty
+  // so the next Roles/Copilot tab open refetches (the event is no longer
+  // silently dropped). onResync runs on every (re)connect to backfill any gap.
+  const refetchCredentialsFromEvent = useCallback(() => {
+    getCredentials({ hydrateSecrets: credentialsHydratedRef.current })
+      .then((next) => {
+        setCredentials(next)
+        setDrafts(draftsFromCredentials(next))
+      })
+      .catch((error) => {
+        console.warn("phase=settings-event-refresh action=credentials-refetch-failed error=%o", error)
+      })
   }, [])
+
+  const refetchRolesFromEvent = useCallback(() => {
+    Promise.all([getRoles(), getModelGroups()])
+      .then(([next, nextModelGroups]) => {
+        setRolesData(next)
+        setModelGroups(nextModelGroups)
+      })
+      .catch((error) => {
+        console.warn("phase=settings-event-refresh action=roles-refetch-failed error=%o", error)
+      })
+  }, [])
+
+  const handleRolesChangedEvent = useCallback(() => {
+    if (rolesDataRef.current) {
+      refetchRolesFromEvent()
+      return
+    }
+    // Roles tab not opened yet: don't drop the event — mark dirty so the lazy
+    // load refetches fresh when the user first opens Roles/Copilot.
+    console.info("phase=settings-event-refresh action=roles-marked-dirty reason=roles-not-loaded")
+    rolesDirtyRef.current = true
+  }, [refetchRolesFromEvent])
+
+  const handleEventResync = useCallback(() => {
+    refetchCredentialsFromEvent()
+    if (rolesDataRef.current) refetchRolesFromEvent()
+  }, [refetchCredentialsFromEvent, refetchRolesFromEvent])
+
+  const { connectionLost } = useStudioEventStream({
+    onRegistryChanged: refetchCredentialsFromEvent,
+    onRolesChanged: handleRolesChangedEvent,
+    onResync: handleEventResync,
+  })
+
+  useEffect(() => {
+    const enabled = appSettings.settings.remote_model_catalog_enabled
+    if (!enabled) {
+      remoteModelCatalogSyncedRef.current = false
+      return
+    }
+    if (!shouldSyncRemoteModelCatalog({
+      settingsLoading: appSettings.isLoading,
+      enabled,
+      alreadySynced: remoteModelCatalogSyncedRef.current,
+    })) {
+      return
+    }
+    remoteModelCatalogSyncedRef.current = true
+    syncVerifiedCommunityCatalog()
+      .then(() => {
+        refetchCredentialsFromEvent()
+      })
+      .catch((error) => {
+        console.warn("phase=settings-catalog action=verified-community-catalog-sync-failed error=%o", error)
+      })
+  }, [
+    appSettings.isLoading,
+    appSettings.settings.remote_model_catalog_enabled,
+    refetchCredentialsFromEvent,
+  ])
 
   useEffect(() => {
     let cancelled = false
@@ -530,8 +636,14 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   }, [activeTab])
 
   useEffect(() => {
-    if (activeTab !== "llm_roles" || rolesData) return
+    if ((activeTab !== "llm_roles" && activeTab !== "copilot") || rolesData) return
     let cancelled = false
+    // #6: clear any pending roles-dirty flag — this lazy load IS the refetch the
+    // dropped roles_changed event was waiting for.
+    if (rolesDirtyRef.current) {
+      console.info("phase=settings-event-refresh action=roles-dirty-consumed reason=tab-open")
+      rolesDirtyRef.current = false
+    }
     Promise.all([getRoles(), getModelGroups()])
       .then(([next, nextModelGroups]) => {
         if (cancelled) return
@@ -547,7 +659,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   }, [activeTab, rolesData])
 
   useEffect(() => {
-    if (activeTab !== "llm_roles" || !rolesData) return
+    if ((activeTab !== "llm_roles" && activeTab !== "copilot") || !rolesData) return
     if (!modelGroupsReferenceMissingCredentialProviders(modelGroups, credentials)) return
     void refreshLoadedLlmRolesProjection({
       rolesLoaded: true,
@@ -596,9 +708,14 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   }
 
   function setProviderTesting(providerId: string, testingAction: ProviderDraft["testingAction"]) {
-    setDrafts((current) => current.map((draft) => (
-      draft.id === providerId ? { ...draft, isTesting: Boolean(testingAction), testingAction } : draft
-    )))
+    setProviderTestingActions((current) => {
+      if (!testingAction) {
+        const next = { ...current }
+        delete next[providerId]
+        return next
+      }
+      return { ...current, [providerId]: testingAction }
+    })
   }
 
   function addProviderWithData(data: AddProviderFormSubmission) {
@@ -631,12 +748,8 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     await flushCredentialsSave()
     const draft = providerDraftForAction(draftsRef.current, providerId)
     if (!draft) return
-    const testedParams = {
-      api_key: draft.api_key,
-      base_url: draft.base_url,
-      provider_type: draft.provider_type,
-    }
     const isOfficial = inferProviderKind(draft) === "official"
+    const endpointDrafts = isOfficial ? [draft] : providerEndpointDraftsForAction(draft)
 
     setProviderTesting(providerId, "models")
     const toastId = `get-models-${providerId}`
@@ -648,95 +761,92 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     )
 
     try {
-      const handleOfficialProgress = (progress: ProviderTestResponse, job: EndpointTestJobResponse) => {
-        const latestDraft = providerDraftForAction(draftsRef.current, providerId)
-        if (!latestDraft || !providerTestParamsMatch(latestDraft, testedParams)) return
-        setCredentials((current) => upsertProviderModelsListResponse(current, latestDraft, progress))
-        toast.loading(
-          officialProviderProgressToastMessage(latestDraft.name || "provider", job),
-          { id: toastId },
-        )
+      // apikeys#24/#25: official and third-party share the same endpoint test
+      // authority. A third-party provider test is a single UI transaction over
+      // every base-url/protocol endpoint, so local rows and toast settle together.
+      const endpointResults: Array<{
+        endpointDraft: ProviderDraft
+        response: ProviderTestResponse
+      }> = []
+      for (const endpointDraft of endpointDrafts) {
+        try {
+          endpointResults.push({
+            endpointDraft,
+            response: await getProviderModels({
+              id: endpointDraft.id,
+              name: endpointDraft.name,
+              provider_type: endpointDraft.provider_type,
+              api_key: endpointDraft.api_key.trim(),
+              base_url: endpointDraft.base_url || undefined,
+            }),
+          })
+        } catch (error) {
+          endpointResults.push({
+            endpointDraft,
+            response: providerTestResponseFromRequestFailure(error),
+          })
+        }
       }
-      const response = await getProviderModels({
-        id: draft.id,
-        provider_type: draft.provider_type,
-        api_key: draft.api_key.trim(),
-        base_url: draft.base_url || undefined,
-      }, isOfficial ? { onProgress: handleOfficialProgress } : undefined)
-
       const latestDraft = providerDraftForAction(draftsRef.current, providerId)
-      if (!latestDraft || !providerTestParamsMatch(latestDraft, testedParams)) {
+      if (!latestDraft) {
         toast.info("Test result ignored because provider configuration changed.", { id: toastId })
         return
       }
-      invalidatedTestOutcomeIdsRef.current.delete(providerId)
+      const latestEndpointDrafts = isOfficial ? [latestDraft] : providerEndpointDraftsForAction(latestDraft)
+      const staleResult = endpointResults.some(({ endpointDraft }) => {
+        const latestEndpointDraft = latestEndpointDrafts.find((item) => item.id === endpointDraft.id)
+        return !latestEndpointDraft || !providerEndpointIdentityMatches(latestEndpointDraft, endpointDraft)
+      })
+      if (staleResult) {
+        toast.info("Test result ignored because provider configuration changed.", { id: toastId })
+        return
+      }
 
-      setCredentials((current) => (
-        isOfficial
-          ? upsertProviderTestResponse(current, latestDraft, response)
-          : upsertProviderModelsListResponse(current, latestDraft, response)
-      ))
+      if (endpointResults.length > 0) {
+        for (const { endpointDraft } of endpointResults) {
+          invalidatedTestOutcomeIdsRef.current.delete(providerId)
+          invalidatedTestOutcomeIdsRef.current.delete(endpointDraft.id)
+        }
+        setCredentials((current) => (
+          endpointResults.reduce((nextCredentials, { endpointDraft, response }) => {
+            const latestEndpointDraft = latestEndpointDrafts.find((item) => item.id === endpointDraft.id) ?? endpointDraft
+            return upsertProviderTestResponse(nextCredentials, latestEndpointDraft, response)
+          }, current)
+        ))
+      }
 
-      if (response.status === "ok") {
-        const models = response.available_models ?? []
+      const responses = endpointResults.map((result) => result.response)
+      const okResponses = responses.filter((response) => response.status === "ok")
+      if (okResponses.length > 0) {
+        const models = okResponses.flatMap((response) => response.available_models ?? [])
         const modelCount = models.length
         if (isOfficial) {
-          const summary = officialProviderTestSummary(models)
+          const summary = officialProviderTestSummary(okResponses[0]?.available_models ?? [])
           toast[summary.kind](summary.message, { id: toastId })
+        } else if (okResponses.length < endpointDrafts.length) {
+          const notReadyCount = endpointDrafts.length - okResponses.length
+          toast.warning(`Models listed on ${okResponses.length}/${endpointDrafts.length} endpoints (${modelCount} models); ${notReadyCount} not ready.`, { id: toastId })
         } else if (modelCount > 0) {
-          toast.success(`Models listed (${modelCount} models)`, { id: toastId })
+          toast.success(
+            responses.length > 1
+              ? `Models listed on ${responses.length} endpoints (${modelCount} models).`
+              : `Models listed (${modelCount} models)`,
+            { id: toastId },
+          )
         } else {
           toast.warning("Model-list endpoint is reachable, but no models were returned.", { id: toastId })
         }
       } else {
-        toast.error(composeTestErrorMessage(response.status, response.error_code, response.message), { id: toastId })
+        const response = responses[0]
+        toast.error(
+          response
+            ? composeTestErrorMessage(response.status, response.error_code, response.message)
+            : "Provider test failed",
+          { id: toastId },
+        )
       }
     } catch (error) {
-      toast.error(composeRequestErrorMessage(error, isOfficial ? "Provider test failed" : "Get models failed"), { id: toastId })
-    } finally {
-      setProviderTesting(providerId, null)
-    }
-  }
-
-  async function runProviderEndpointTest(providerId: string, modelId: string) {
-    await flushCredentialsSave()
-    const draft = providerDraftForAction(draftsRef.current, providerId)
-    const trimmedModelId = modelId.trim()
-    if (!draft || !trimmedModelId) return
-    const testedParams = {
-      api_key: draft.api_key,
-      base_url: draft.base_url,
-      provider_type: draft.provider_type,
-    }
-
-    setProviderTesting(providerId, "endpoint")
-    const toastId = `endpoint-test-${providerId}`
-    toast.loading(`Testing ${draft.name || "provider"} endpoint...`, { id: toastId })
-
-    try {
-      const response = await testProviderEndpoint({
-        id: draft.id,
-        provider_type: draft.provider_type,
-        api_key: draft.api_key.trim(),
-        base_url: draft.base_url || undefined,
-        model_id: trimmedModelId,
-      })
-
-      const latestDraft = providerDraftForAction(draftsRef.current, providerId)
-      if (!latestDraft || !providerTestParamsMatch(latestDraft, testedParams)) {
-        toast.info("Endpoint test result ignored because provider configuration changed.", { id: toastId })
-        return
-      }
-      invalidatedTestOutcomeIdsRef.current.delete(providerId)
-      setCredentials((current) => upsertProviderTestResponse(current, latestDraft, response))
-
-      if (response.status === "ok") {
-        toast.success(`Connected (${trimmedModelId})`, { id: toastId })
-      } else {
-        toast.error(composeTestErrorMessage(response.status, response.error_code, response.message), { id: toastId })
-      }
-    } catch (error) {
-      toast.error(composeRequestErrorMessage(error, "Endpoint test failed"), { id: toastId })
+      toast.error(composeRequestErrorMessage(error, "Provider test failed"), { id: toastId })
     } finally {
       setProviderTesting(providerId, null)
     }
@@ -786,13 +896,22 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     }
   }, [cancelRolesSave, flushRolesSave])
 
+  const refreshRolesProjection = useCallback(async () => {
+    await refreshLoadedLlmRolesProjection({
+      rolesLoaded: Boolean(rolesDataRef.current),
+      setModelGroups,
+      setRolesData,
+      setRolesError,
+    })
+  }, [])
+
   return (
     <SettingsPageContent
       activeTab={activeTab}
       credentials={credentials}
       credentialsLoading={credentialsLoading}
       credentialsError={credentialsError}
-      drafts={drafts}
+      drafts={visibleDrafts}
       saveStatus={saveStatus}
       rolesData={rolesData}
       modelGroups={modelGroups}
@@ -802,17 +921,21 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         userId: appSettings.settings.user_id,
         giteaHost: appSettings.settings.gitea_host,
         defaultSkillsDirectory: appSettings.settings.default_skills_directory,
+        language: appSettings.settings.language,
+        remoteModelCatalogEnabled: appSettings.settings.remote_model_catalog_enabled,
         isLoading: appSettings.isLoading,
         saveStatus: appSettings.saveStatus,
         setUserId: appSettings.setUserId,
         setGiteaHost: appSettings.setGiteaHost,
         setDefaultSkillsDirectory: appSettings.setDefaultSkillsDirectory,
+        setLanguage: appSettings.setLanguage,
+        setRemoteModelCatalogEnabled: appSettings.setRemoteModelCatalogEnabled,
       }}
+      connectionLost={connectionLost}
       onClose={onClose}
       onTabChange={setActiveTab}
       onProviderFieldChange={updateProviderField}
       onGetProviderModels={(providerId) => void runProviderGetModels(providerId)}
-      onTestProviderEndpoint={(providerId, modelId) => void runProviderEndpointTest(providerId, modelId)}
       onDeleteProvider={deleteProvider}
       onAddProvider={addProviderWithData}
       onProviderModelsUpdated={updateProviderModels}
@@ -820,6 +943,32 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       onDeleteRole={deleteRoleByName}
       onDeleteModelBundle={deleteModelBundleById}
       onBeforeRoleTest={flushRolesSave}
+      onAfterRoleTest={refreshRolesProjection}
+      onNavigateToApiKeys={() => setActiveTab("api_keys")}
     />
   )
+}
+
+function providerEndpointIdentityMatches(left: ProviderDraft, right: ProviderDraft): boolean {
+  return (
+    left.id === right.id &&
+    (left.provider_type ?? null) === (right.provider_type ?? null) &&
+    comparableProviderBaseUrl(left.base_url) === comparableProviderBaseUrl(right.base_url)
+  )
+}
+
+function providerTestResponseFromRequestFailure(error: unknown): ProviderTestResponse {
+  return {
+    status: "network_error",
+    latency_ms: null,
+    model_seen: null,
+    message: composeRequestErrorMessage(error, "Provider test request failed"),
+    error_code: "request_failed",
+    available_models: [],
+    available_sdks: [],
+  }
+}
+
+function comparableProviderBaseUrl(value?: string | null): string {
+  return (value ?? "").trim().replace(/\/+$/, "").toLowerCase()
 }

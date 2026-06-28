@@ -4,6 +4,8 @@ import {
   ManualModelResultList,
   manualModelAccordionValue,
   manualModelCandidateErrorMessage,
+  manualModelResultReasonCode,
+  manualModelResultUiState,
   manualModelStatusLabel,
   manualModelToastSummary,
   ManualModelTestPanel,
@@ -114,22 +116,36 @@ describe("ManualModelTestPanel", () => {
     expect(manualModelStatusLabel("error")).toBe("Test failed")
   })
 
-  it("renders failed manual model test results instead of going quiet", () => {
+  it("renders manual model results through the shared 6-state ProviderStateBadge (apikeys#27)", () => {
     const html = renderToStaticMarkup(
       <ManualModelResultList
         results={[
-          {
-            model_id: "claude-opus-4.7",
-            status: "invalid_model",
-            latency_ms: 354,
-          },
+          { model_id: "gpt-5", status: "ok", latency_ms: 120 },
+          { model_id: "claude-opus-4.7", status: "invalid_model", latency_ms: 354 },
         ]}
       />,
     )
 
+    // Both rows keep their model id + human label, but the colored chip is now the
+    // canonical 6-state badge (ready / failed), not the old 2-state success/destructive Badge.
+    expect(html).toContain("gpt-5")
+    expect(html).toContain("Available")
+    expect(html).toContain('data-provider-state-label="ready"')
     expect(html).toContain("claude-opus-4.7")
     expect(html).toContain("Model not found")
+    expect(html).toContain('data-provider-state-label="failed"')
     expect(html).not.toContain("invalid_model")
+  })
+
+  it("maps manual probe statuses to the 6-state ui_state and a badge reason code", () => {
+    expect(manualModelResultUiState("ok")).toBe("ready")
+    expect(manualModelResultUiState("invalid_model")).toBe("failed")
+    expect(manualModelResultUiState("timeout")).toBe("failed")
+    expect(manualModelResultReasonCode("invalid_model")).toBe("invalid_model")
+    expect(manualModelResultReasonCode("invalid_key")).toBe("invalid_key")
+    expect(manualModelResultReasonCode("rate_limited")).toBe("rate_limited")
+    expect(manualModelResultReasonCode("quota_exceeded")).toBe("rate_limited")
+    expect(manualModelResultReasonCode("timeout")).toBeNull()
   })
 
   it("renders an empty manual model test response as visible feedback", () => {

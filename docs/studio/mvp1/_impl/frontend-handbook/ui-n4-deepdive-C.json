@@ -1,0 +1,52 @@
+{
+  "storage": {
+    "summary": "Golden 基线按 skill 存在该 skill 工作区目录 .workspace/golden/<baseline_id>/ 下:每个基线一个目录,目录名=baseline_id=source_run_id。目录内有 baseline.json(基线清单:baseline_id/source_run_id/source_run_results_ref/locked/cases 列表)、report.json(摘要)、cases/<node_id>.json(逐 agent 节点的期望输出,即 expected_output)。这是 g-a 决策的落地:golden = 逐节点作者期望值,取代旧的整次快照。前端 GoldenSection 只读列出基线(id/source_run_id/locked/created_at),不能编辑内容。API 返回模型 GoldenBaseline 字段:id、source_run_id、source_run_results_ref、baseline_ref、linked_input_id、created_at、locked、content_path。",
+    "evidence": [
+      ["GoldenSection 前端只读列基线,显示 id/source_run_id/locked/created_at,标注需要 golden-content read 端点才能打开编辑(follow-on)", "apps/studio/frontend/src/components/studio/panels/GoldenSection.tsx:21-57"],
+      ["GoldenBaseline pydantic 模型:id/source_run_id/source_run_results_ref/baseline_ref/linked_input_id/created_at/locked/content_path,extra=forbid", "apps/studio/backend/app/models/golden.py:10-21"],
+      ["基线落盘目录 .workspace/golden/<run_id>/,文件名常量 BASELINE_FILENAME=baseline.json、REPORT_FILENAME=report.json、CASES_DIRNAME=cases", "apps/studio/backend/app/services/golden_diff.py:23-25"],
+      ["set_golden_baseline_for_run 把一个 sealed run 快照逐节点写成 golden case 文件到 baseline_dir", "apps/studio/backend/app/services/golden_diff.py:46-56"],
+      ["plan_golden_baseline_for_run 构造 baseline_payload(baseline_id/source_run_id/source_run_results_ref/locked/cases)+ report_payload + 每节点 cases/<case_id>.json(含 expected_output=该节点输出)", "apps/studio/backend/app/services/golden_diff.py:59-137"],
+      ["list 端点 glob '*/baseline.json' 枚举该 skill 下所有基线,按 created_at 倒序", "apps/studio/backend/app/services/golden_diff.py:29-43"],
+      ["GET/POST/DELETE /api/skills/{skill_id}/golden 路由;POST 走 set_golden_baseline_for_run", "apps/studio/backend/app/routers/golden.py:17-64"]
+    ]
+  },
+  "headless_compare": {
+    "summary": "headless 对比完全不重跑:evaluate_golden_headless 只读取已 sealed 的 run result 快照(RunResultSnapshot,来自 RunArtifactStore)与 baseline.json 的逐节点 expected_output,做字段级 diff,不启动任何新 run。compare_run_to_golden 是入口:取最新或指定基线 → 读已有 run result ref → golden_headless_request_from_ref 适配成引擎契约 GoldenInputRef → evaluate_golden_headless 比对。run result 必须从 sealed RunArtifactStore ref 读,若指向可变 run 文件则报 golden.run_results_mutable_ref(422),保证比的是封存结果而非现跑。409 守卫有两处:(1)业务守卫 assert_trace_can_be_promoted_to_golden —— 晋升前检查 trace_payload 是否 is_predict,是 predict trace 就抛 409 PREDICT_TRACE_CANNOT_BE_GOLDEN,阻止从 predict 来源 trace 晋升成 golden(E8/g-d 的作者定要求);(2)写守卫 _require_browser_write_fallback —— 所有改写工作区的请求(set/delete golden)必须带 X-Studio-Write-Fallback:browser,否则 409 NATIVE_FS_REQUIRED。",
+    "evidence": [
+      ["evaluate_golden_headless:读 run_results_ref 快照 + baseline 契约,_compare_node_outputs,无 run 启动", "apps/studio/backend/app/services/golden_headless.py:32-48"],
+      ["compare_run_to_golden:取 against 或最新基线 → 读已有 run result payload → 适配 GoldenInputRef → evaluate_golden_headless,返回 CompareResult", "apps/studio/backend/app/services/golden_diff.py:157-191"],
+      ["run result 必须从 sealed RunArtifactStore ref 读;命中可变 run 文件路径报 golden.run_results_mutable_ref(422)", "apps/studio/backend/app/services/golden_headless.py:453-471"],
+      ["_validate_snapshot_run_results_ref:校验快照内嵌 ref 与 sealed ref 完全一致(skill_id/run_id),防错配", "apps/studio/backend/app/services/golden_headless.py:223-253"],
+      ["409 业务守卫 assert_trace_can_be_promoted_to_golden:is_predict trace 抛 409 PREDICT_TRACE_CANNOT_BE_GOLDEN", "apps/studio/backend/app/services/diagnostic_export.py:23-53"],
+      ["该守卫在 plan_golden_baseline_for_run 晋升前被调用(promote/手动写都经此 plan)", "apps/studio/backend/app/services/golden_diff.py:61-66"],
+      ["409 写守卫 _require_browser_write_fallback:无 browser fallback 头则抛 409 NATIVE_FS_REQUIRED;POST/DELETE golden 都过它", "apps/studio/backend/app/routers/golden.py:34-39,57-81"]
+    ]
+  },
+  "field_diff": {
+    "summary": "字段级 diff 后端逐 agent 节点产出 NodeGoldenGroup(node_id/phase_id/status pass|fail/score/field_differences/stale_fields/schema_status valid|stale|missing/baseline_ref/run_results_ref),每个 FieldDifference 含 field_path/type/current_value/golden_value/score/changed。前端 DiffView 渲染:左栏按 node_group 分组列字段按钮,右栏 DiffField 按类型(text/number/bool/list/dict)展开当前值 vs golden 值。符合 E7:DiffView 挂在 editor 中央区的全屏覆盖层(goldenDiff.result 时 absolute inset-0 z-40 覆盖在 canvas 上,带 Close),不在 properties 面板。DiffView 自身用 grid 两栏分屏(14rem 字段列 + 详情)。useGoldenDiff hook 调 GET /skills/{skill}/runs/{run}/compare 拿 CompareResult,promote 调 saveGoldenBaseline。",
+    "evidence": [
+      ["DiffView 在 Workspace 中央 editor 区作为 absolute inset-0 z-40 覆盖层渲染(goldenDiff.result 时),不在 properties", "apps/studio/frontend/src/components/studio/Workspace.tsx:836-863"],
+      ["DiffView 内部 grid-cols-[14rem_1fr] 分屏:左字段列表(按 nodeGroups 分组)+ 右 DiffField 详情;UI 不从 field path 推断节点,只渲染后端 node_groups 契约", "apps/studio/frontend/src/components/diff/DiffView.tsx:35-47,192-235"],
+      ["NodeGoldenGroup 契约:node_id/phase_id/status/score/field_differences/stale_fields/schema_status/baseline_ref/run_results_ref", "apps/studio/backend/app/models/compare.py:27-39"],
+      ["FieldDifference 契约:field_path/type/current_value/golden_value/score/changed", "apps/studio/backend/app/models/compare.py:12-20"],
+      ["后端 _field_differences 用 engine adapter diff_outputs + calculate_score 逐字段算 diff", "apps/studio/backend/app/services/golden_headless.py:412-434"],
+      ["useGoldenDiff:compare 调 GET /skills/{skill}/runs/{run}/compare(可带 against),promote 调 saveGoldenBaseline", "apps/studio/frontend/src/hooks/useGoldenDiff.ts:23-56"]
+    ]
+  },
+  "create_paths": {
+    "headers": ["创建路", "机制", "现状(已接/缺)"],
+    "rows": [
+      [
+        "路 A(copilot 协作晋升)",
+        "设计 E3 两入口:① trace 内占位节点旁按钮 ② predict/run 跑完 copilot 输入框上方分析 bar 弹窗。后端 set_golden_baseline_for_run 把整次 run 逐节点晋升成 golden(过 409 predict 守卫)。前端 completedRunId 通路:Workspace 检测 run_ended → 传 completedRunId 给 CopilotPanel → 渲染 AnalysisBar → 确认走 autoWriteGoldenIfAbsent(仅在该 skill 尚无 golden 时 promote,有则不动 = F7),并 prepareCopilotJudgeContext 准备 judge。",
+        "部分已接。入口②(分析 bar 自动写)完整接通:AnalysisBar + autoWriteGoldenIfAbsent + completedRunId 通路 + judge 准备都在(analysis-bar.tsx:36-133、copilot-panel.tsx:326-333、Workspace.tsx:128-885)。compare/promote 工具栏入口在 TracePanel(run 级 Compare/Promote 按钮,TracePanel.tsx:78-97)和 DiffView 覆盖层都有。缺:入口①设计要求的『trace 内逐占位节点旁按钮』未实现 —— 现有的是整次 run 级的工具栏按钮,不是 per-node 占位节点旁按钮,粒度不符 E3①。"
+      ],
+      [
+        "路 B(手动 schema 模版)",
+        "设计 E4:无 golden 时按 io.outputs schema 自动生成符合 schema 的空 golden 模版 json,放 i/o 面板手填;一旦有数据状态自动切到 🟢有golden。",
+        "未实现(缺)。GoldenSection 只读列基线、明确标注打开编辑需要 follow-on read 端点(GoldenSection.tsx:21-25);InputPanel 里的 io.outputs 引用只是输出 artifact 路径配置(InputPanel.tsx:180-285),不是 golden 模版生成。后端无『按 output schema 生成空 golden 模版』的端点/服务,前端无生成+手填空模版的 UI。E1 状态机(🔘/🟡/🟢)与 E4 模版生成均未落地。"
+      ]
+    ]
+  }
+}

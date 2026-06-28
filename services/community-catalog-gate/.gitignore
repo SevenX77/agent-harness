@@ -1,0 +1,6 @@
+# wrangler local simulator state — never commit
+.wrangler/
+# deployment-specific config: copy wrangler.toml.template -> wrangler.toml and
+# fill in your own KV namespace IDs. The template is the committed source.
+wrangler.toml
+node_modules/

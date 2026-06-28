@@ -218,7 +218,7 @@ This checklist is generated from the Round 28 feature manifest. Each item names 
 - **Sources**: public-api, source-file-map
 - **Core paths**: packages/graph-agent/src/graph_agent/core/graph_assembler.py, packages/graph-agent/src/graph_agent/core/phase_nodes/_helpers.py
 - **Primary contracts**: 0 error codes, 0 events
-- `[Covered By: packages/graph-agent/tests/core/test_round14_skill_compilation_cutover.py::test_graph_serializer_fresh_render_uses_v030_dual_track_graph]`
+- `[Covered By: packages/graph-agent/tests/core/test_round14_skill_compilation_cutover.py::test_graph_serializer_fresh_render_does_not_synthesize_graph_boundaries]`
 
 ### F-runtime-compatibility-patches: Apply runtime compatibility patches and compatibility hooks exactly through the central bootstrap path.
 - **Boundary**: lifecycle-behavior - bootstrap patches and reasoning compatibility

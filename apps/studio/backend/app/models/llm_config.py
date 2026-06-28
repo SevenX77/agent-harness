@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
+from graph_agent_gateway.registry.resolver import materialize_role_entry
 from graph_agent_gateway.registry.schema import (
     CapabilityValue,
     EffectiveRuntimeSetting,
@@ -26,6 +27,9 @@ from graph_agent_gateway.registry.schema import (
     RouteCandidate,
     RuntimePolicy,
     RuntimeSettingDescriptor,
+)
+from graph_agent_gateway.registry.schema import (
+    ModelBundle as GatewayModelBundle,
 )
 from graph_agent_gateway.registry.schema import (
     ModelProfile as GatewayModelProfile,
@@ -111,10 +115,52 @@ def _gateway_role(role: RoleEntry) -> GatewayRoleEntry:
             include={
                 "system_prompt_prefix",
                 "source_profile_id",
+                "bundle_id",
                 "fallback_chain",
                 "lint_requirements",
             },
         )
+    )
+
+
+def overlay_bundle_reference_chain(
+    role: RoleEntry,
+    bundle: ModelBundle,
+) -> list[RoleRouteEntry]:
+    """Resolve a role's bundle reference into a flat route chain via the gateway.
+
+    #51 (束=引用): delegates the by-reference + delta overlay to the gateway
+    resolver's ``materialize_role_entry`` — the canonical owner of that merge. We
+    project the role + the already-materialized bundle onto a minimal
+    RegistrySnapshot (bundle keyed by its slug) and let the gateway pull the
+    bundle's flattened chain and overlay the role's ``fallback_chain`` delta. The
+    shell never hand-rolls the merge; this only plumbs the inputs.
+    """
+    gateway_role = _gateway_role(role)
+    snapshot = RegistrySnapshot(
+        model_bundles={bundle.model_profile_id: _gateway_model_bundle(bundle)},
+        roles={"__reference__": gateway_role},
+    )
+    merged = materialize_role_entry(snapshot, "__reference__", gateway_role)
+    return list(merged.fallback_chain)
+
+
+def _gateway_model_bundle(bundle: ModelBundle) -> GatewayModelBundle:
+    """Project a Studio ModelBundle onto the gateway runtime ModelBundle.
+
+    The Studio bundle is keyed by ``model_profile_id`` which is already a slug
+    (#49 generates it via lowercase/underscore normalization); the gateway uses
+    that same slug as ``bundle_id`` so a role's ``bundle_id`` reference resolves
+    against ``snapshot.model_bundles``. Studio-only authoring fields (display
+    name, model_groups, intent, materialization_report) are dropped — the gateway
+    only consumes the flattened ``fallback_chain`` + ``lint_requirements``.
+    """
+    return GatewayModelBundle.model_validate(
+        {
+            "bundle_id": bundle.model_profile_id,
+            "fallback_chain": [entry.model_dump(mode="python") for entry in bundle.fallback_chain],
+            "lint_requirements": dict(bundle.lint_requirements),
+        }
     )
 
 
@@ -138,9 +184,14 @@ class RoleTokenIntent(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["default", "maximum_available", "target", "required_minimum"]
+    mode: Literal["default", "maximum_available", "target"]
     value: int | None = Field(default=None, ge=1)
     downgrade: Literal["allow", "allow_with_warning", "block"] = "allow"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_required_minimum(cls, value: object) -> object:
+        return _migrate_required_minimum_token_intent(value)
 
 
 class TokenIntent(BaseModel):
@@ -148,9 +199,14 @@ class TokenIntent(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["inherit", "default", "maximum_available", "target", "required_minimum"]
+    mode: Literal["inherit", "default", "maximum_available", "target"]
     value: int | None = Field(default=None, ge=1)
     downgrade: Literal["allow", "allow_with_warning", "block"] = "allow"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_required_minimum(cls, value: object) -> object:
+        return _migrate_required_minimum_token_intent(value)
 
 
 class RoleIntent(BaseModel):
@@ -213,6 +269,17 @@ def _migrate_provider_preference(value: object) -> object:
     if value.get("provider_preference") in {"official_first", "ready_first"}:
         return {**value, "provider_preference": "manual_order"}
     return value
+
+
+def _migrate_required_minimum_token_intent(value: object) -> object:
+    if not isinstance(value, dict):
+        return value
+    if value.get("mode") != "required_minimum":
+        return value
+    migrated = dict(value)
+    migrated["mode"] = "maximum_available"
+    migrated["value"] = None
+    return migrated
 
 
 class RoleEntry(GatewayRoleEntry):
@@ -292,8 +359,71 @@ class RolesData(BaseModel):
                 profile_id: _gateway_model_profile(profile)
                 for profile_id, profile in self.model_profiles.items()
             },
+            model_bundles={
+                bundle.model_profile_id: _gateway_model_bundle(bundle)
+                for bundle in self.model_bundles.values()
+            },
             roles={role_name: _gateway_role(role) for role_name, role in self.roles.items()},
         )
+
+
+class ProbeCatalogSharingSummary(BaseModel):
+    """MVP1 probe catalog sharing mode exposed to Studio UI."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["local_export_only"] = "local_export_only"
+    auto_upload_enabled: bool = False
+    message: str = (
+        "Local probe evidence is recorded on this machine. "
+        "MVP1 does not auto-upload community catalog evidence."
+    )
+
+
+class CommunityCatalogEntry(BaseModel):
+    """One advisory community-verified route surfaced to the Settings UI.
+
+    Sourced from the disposable verified cache; community-observed, never merged
+    into local evidence.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    public_base_url: str | None = None
+    model_id: str | None = None
+    capability_family: str | None = None
+    method_id: str | None = None
+    observed_at: str | None = None
+
+
+class CommunityCatalogSummary(BaseModel):
+    """Verified community catalog (disposable cache) status for Settings UI.
+
+    Advisory only — these records are community-observed and never auto-applied
+    to local credentials.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    synced: bool = False
+    generated_at: str | None = None
+    protocol_major: int = 0
+    record_count: int = 0
+    entries: list[CommunityCatalogEntry] = []
+
+
+class ProbeCatalogSummary(BaseModel):
+    """Local + remote Probe Knowledge Catalog status for Settings UI."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    local_evidence_records_count: int = 0
+    local_verified_records_count: int = 0
+    local_failed_records_count: int = 0
+    local_route_candidates_count: int = 0
+    remote_catalog_source: dict[str, Any] | None = None
+    community_catalog: CommunityCatalogSummary = Field(default_factory=CommunityCatalogSummary)
+    sharing: ProbeCatalogSharingSummary = Field(default_factory=ProbeCatalogSharingSummary)
 
 
 class RegistryResponse(BaseModel):
@@ -312,6 +442,8 @@ class RegistryResponse(BaseModel):
     route_runtime_settings: dict[str, dict[str, RuntimeSettingDescriptor]] = Field(
         default_factory=dict
     )
+    catalog_source: dict[str, Any] | None = None
+    probe_catalog: ProbeCatalogSummary = Field(default_factory=ProbeCatalogSummary)
     role_effective_runtime_settings: dict[
         str,
         dict[str, dict[str, EffectiveRuntimeSetting]],
@@ -330,6 +462,8 @@ __all__ = [
     "ModelInfo",
     "ModelBundle",
     "ModelProfile",
+    "ProbeCatalogSharingSummary",
+    "ProbeCatalogSummary",
     "ProbeResult",
     "ProviderEndpoint",
     "ProviderImportDraft",
@@ -346,4 +480,5 @@ __all__ = [
     "RuntimeSettingDescriptor",
     "RuntimePolicy",
     "TestStatus",
+    "overlay_bundle_reference_chain",
 ]

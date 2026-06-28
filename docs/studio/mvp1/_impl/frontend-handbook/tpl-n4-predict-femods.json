@@ -1,0 +1,34 @@
+[
+  {
+    "name": "构建档位门控（deriveBuildStage + deriveButtons）",
+    "kind": "纯逻辑模块（节点内共享）",
+    "what": "compile→predict→run 的『构建档位』状态机：把 lint/compile/predict 三类状态算成一个档位（idle/compiling/compile-fail/compile-pass/predicting/predict-fail/predict-pass/running/run-fail），再据档位决定底部动作条三个按钮哪个亮、哪个灰。它是『逐级解锁』这条核心交互的唯一前端底座，Predict 与 Run 两个 surface 都靠它判能不能点。",
+    "where": "deriveBuildStage（Workspace.tsx，优先读手动 Compile/Predict/Run 写入的 compileStages、否则退后台 lint 状态）；deriveButtons（center-action-bar.tsx，据档位算 compile/predict/run 三按钮的 highlight/disabled）；CenterActionBar（center-action-bar.tsx，动作条组件本体）。",
+    "duties": [
+      "把 lint/compile/predict 三类状态归约成单一构建档位（9 档）。",
+      "据档位点亮『下一步可做』的按钮、灰禁其余（compile-pass 点亮 Predict、predict-pass 点亮 Run）。",
+      "失败档（compile-fail/predict-fail）保持该按钮高亮可点以便重试。"
+    ],
+    "used_by": "Predict：#1（compile-pass 点亮 Predict）、#4（predict 成功推档 predict-pass 点亮 Run）、#5（灰禁原因提示）；Run：#6（predict-pass 才点亮 Run + handleRun 守卫）。",
+    "boundary": "做：算档位、决定三按钮亮灰。不做：不发 predict/run 请求（那是 handlePredict/handleRun）、不做服务端门校验（content_hash 门在后端 predict_gate）、不持后端真相。",
+    "reuse_note": "predict 首登记处；Run #6/#9 复用同一档位机；trace/golden 不直接用。",
+    "design_note": "现状 #5 缺『灰禁原因文字』——deriveButtons 只产 highlight/disabled，无门控可解释提示；目标在 CenterActionBar 据档位补『先通过上一步』旁注。",
+    "api": "无 —— 纯前端状态机；它驱动的请求（postPredictRun/startRun）由各自 handler 发。"
+  },
+  {
+    "name": "测试输入解析（resolveRunInput）",
+    "kind": "纯逻辑模块（节点内共享）",
+    "what": "把 I/O 面板里用户选中的那份测试输入解析成发给 predict/run 的 input_data：选了就 fetch 它的 content、没选回退空对象 {}。predict、run、batch 三处发起执行前都靠它把『选了哪份输入』变成请求体。",
+    "where": "resolveRunInput（client.ts，把选中测试输入 id 解析成 payload）；选中态来自 I/O 面板的 InputPanel / TestInputsSection（panels/，列测试输入 + 勾选/选中）。",
+    "duties": [
+      "选了输入 → fetch 该输入文件 content 当 input_data。",
+      "没选 → 回退空对象 {}（predict/run 仍可按空输入跑）。",
+      "把解析结果交给 handlePredict / handleRun / runBatch 装进请求体。"
+    ],
+    "used_by": "Predict：#2（选中即取 content）、#3（试飞输入）；Run：#6（单次 run 输入）、#11（批量逐份输入由 TestInputsSection 勾选驱动）。",
+    "boundary": "做：把选中输入解析成 input_data。不做：不决定 mock（mock 归后端 golden 状态）、不发请求、不管输入文件的导入/编辑（那是 N2 i/o 面板的职责）。",
+    "reuse_note": "predict 首登记处；Run 单次/批量复用。",
+    "design_note": "符合 spec『输入是节点/run 配置，不是 predict/run 的独立议题』；路径式选已导入文件直接跑，已无旧 PredictInputDialog 弹窗。",
+    "api": "GET 选中测试输入文件 content（经 client.ts），再随 POST /runs/predict 或 POST /runs 发出。"
+  }
+]

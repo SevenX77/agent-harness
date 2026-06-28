@@ -22,6 +22,10 @@ export interface LintError {
   severity: 'error' | 'warning'
   message: string
   phase_name: string | null
+  // Engine's typed nearest-field locator, forwarded by the Studio shell. Drives
+  // field-level Properties projection; null/absent → degrade to node/file axis.
+  field_path?: string | null
+  source_path?: string | null
 }
 
 export interface LintResult {
@@ -36,6 +40,17 @@ export interface CompileError {
   field: string | null
   severity: 'fatal' | 'warning'
   message: string
+  error_code?: string | null
+}
+
+export interface ArtifactRef {
+  artifact_id: string
+  content_hash: string
+  store: 'ephemeral' | 'product'
+  version: string | null
+  manifest_ref: string
+  source_map_ref: string
+  execution_fingerprint?: string | null
 }
 
 export interface CompileSuccess {
@@ -43,6 +58,9 @@ export interface CompileSuccess {
   status: 'ok'
   phase_count: number
   manifest_name: string
+  artifact_ref: ArtifactRef
+  source_map_ref: string
+  execution_fingerprint: string
 }
 
 export interface CompileFailure {
@@ -53,12 +71,6 @@ export interface CompileFailure {
 
 export type CompileResult = CompileSuccess | CompileFailure
 
-export interface ConfigMismatchWarning {
-  actual_remote_url: string
-  expected_remote_url: string
-  recommendation: string
-}
-
 export interface SkillSummary {
   id: string
   name: string
@@ -67,7 +79,6 @@ export interface SkillSummary {
   has_golden: boolean
   last_run_at: string | null
   directory_path: string | null
-  config_mismatch?: ConfigMismatchWarning | null
 }
 
 export interface SkillTemplate {
@@ -78,10 +89,19 @@ export interface SkillTemplate {
   content: string
 }
 
+/**
+ * Studio UI language persisted in app settings. Mirrors the frontend
+ * `supportedLngs` (src/i18n.ts) and the backend `SupportedLanguage`
+ * (models/settings.py); keep the three in sync.
+ */
+export type AppLanguage = 'en' | 'zh-CN'
+
 export interface AppSettings {
   user_id: string
   gitea_host: string
   default_skills_directory: string
+  language: AppLanguage
+  remote_model_catalog_enabled: boolean
 }
 
 export interface CollaborateResult {
@@ -104,11 +124,39 @@ export interface PublishSkillReq {
   version?: string
 }
 
+export interface ReleaseArtifactRef {
+  artifact_id: string
+  content_hash: string
+  store: 'product'
+  manifest_ref: string
+  source_map_ref?: string | null
+  execution_fingerprint?: string | null
+}
+
+export interface ReleaseRemoteSync {
+  status: 'pending' | 'failed' | 'succeeded' | 'skipped'
+  reason?: string
+  error_type?: string
+  error?: string
+  details?: JsonObject
+}
+
+export interface ReleaseManifest {
+  release_version: string
+  artifact_id: string
+  content_hash: string
+  manifest_ref: string
+  artifact_ref: ReleaseArtifactRef
+  remote_sync?: ReleaseRemoteSync | null
+  idempotency_key?: string
+  created_at?: string
+}
+
 export interface PublishResult {
   status: 'ok' | 'error'
   message: string
   artifact_id?: string | null
-  extra?: Record<string, unknown>
+  extra?: Partial<ReleaseManifest> & Record<string, unknown>
 }
 
 export interface TokensMetrics {
@@ -116,6 +164,10 @@ export interface TokensMetrics {
   output_tokens: number
   total_tokens: number
   cost_estimate: number | null
+  // ⑧a: engine run wall-clock duration, projected through the Studio run history
+  // (backend models/runs.py declares it explicitly). Optional because older sealed
+  // runs may predate the field; the run list renders "n/a" when absent.
+  wall_time_sec?: number | null
 }
 
 export interface RunRequest {
@@ -130,6 +182,12 @@ export interface TestInputMetadata {
   created_at: string
   size_bytes: number
   content_preview: string
+}
+
+export interface TestInputDetail {
+  id: string
+  name: string
+  content: JsonObject
 }
 
 export interface BatchRunRequest {
@@ -164,6 +222,15 @@ export interface RunMetadata {
   started_at: string
   metrics: TokensMetrics | null
   input_summary: string | null
+  git_status?: 'committed' | 'locked' | 'failed' | 'no_git' | null
+  artifact_ref?: ArtifactRef | null
+  source_map_ref?: string | null
+  execution_fingerprint?: string | null
+  // n4-trace#23 (model-compare): set only on compare-fanned runs so the Trace
+  // can group/tab the per-candidate results; omitted on ordinary runs.
+  compare_group_id?: string | null
+  candidate_id?: string | null
+  candidate_role_name?: string | null
 }
 
 export interface RunListResponse {
@@ -171,7 +238,40 @@ export interface RunListResponse {
   total: number
 }
 
-export type GitHistoryKind = 'auto_run' | 'manual' | 'other'
+/**
+ * n4-trace#23 (model-compare, P8): one candidate in a compare run. Each candidate
+ * references a role that already exists in the active llm_roles.yaml (built in
+ * Settings); the backend runs the same compiled artifact through that role.
+ * `target_role` optionally narrows the override to a single graph_agent role the
+ * skill's phases bind to (omitted = override every role).
+ */
+export interface RunCandidate {
+  candidate_id: string
+  role_name: string
+  target_role?: string | null
+}
+
+/** n4-trace#23: one candidate's spawned run inside a compare group. */
+export interface CompareCandidateRun {
+  candidate_id: string
+  role_name: string
+  metadata: RunMetadata
+}
+
+/** n4-trace#23 POST response: the compare group + the per-candidate runs it spawned. */
+export interface CompareRunResponse {
+  compare_group_id: string
+  runs: CompareCandidateRun[]
+}
+
+/** n4-trace#23 GET response: per-candidate runs for one compare group, for Trace tabs. */
+export interface CompareRunGroupResponse {
+  compare_group_id: string
+  runs: CompareCandidateRun[]
+}
+
+export type GitHistoryKind = 'auto_run' | 'manual' | 'other' | 'release'
+export type GitHistorySource = 'git' | 'manifest'
 
 export interface GitHistoryItem {
   sha: string
@@ -179,6 +279,12 @@ export interface GitHistoryItem {
   author: string
   timestamp: string
   kind: GitHistoryKind
+  source?: GitHistorySource
+  revertable?: boolean
+  release_version?: string | null
+  artifact_id?: string | null
+  content_hash?: string | null
+  manifest_ref?: string | null
 }
 
 export interface RevertSkillReq {
@@ -188,9 +294,38 @@ export interface RevertSkillReq {
 export interface RunDetail {
   metadata: RunMetadata
   input_data: JsonObject | null
-  events: CallbackEvent[]
+  events: EventEnvelope[]
   final_context: JsonObject | null
   artifacts: string[] | null
+}
+
+export interface ResumeValidityResponse {
+  run_id: string
+  resume_allowed: boolean
+  reason:
+    | 'ok'
+    | 'dirty_upstream'
+    | 'checkpoint.not_found'
+    | 'checkpoint.invalid'
+    | 'state.not_found'
+    | 'artifact.invalid_ref'
+    | 'artifact.identity_mismatch'
+    | 'compile_failed'
+  checkpoint_id: string | null
+  checkpoint_ns: string | null
+  resume_from_node_id: string | null
+  resume_to_node_id: string | null
+  dirty_fields: Array<'content_hash' | 'execution_fingerprint'>
+  // n5-node#3 (dirty-downstream-graying): the downstream node ids the resume node
+  // can dirty. The Studio shell slices these from the dependency graph when the
+  // whole-skill compare is dirty and `resume_from_node_id` is set; empty on the
+  // clean / no-resume-node paths. The frontend grays exactly these nodes.
+  dirty_node_ids: string[]
+  affected_downstream: string[]
+  snapshot_content_hash: string | null
+  current_content_hash: string | null
+  snapshot_execution_fingerprint: string | null
+  current_execution_fingerprint: string | null
 }
 
 export type MockedSource = 'golden_case' | 'copilot' | 'heuristic_stub' | 'manual'
@@ -218,17 +353,89 @@ export interface PredictDiagnosticExport {
   path_diff: PathDiff | null
 }
 
+/**
+ * One agent node's golden case, projected from baseline.json for the UI badge.
+ * Mirrors backend models/golden.py GoldenBaselineCase. Presence of a node_id in
+ * a baseline's `cases` is what drives the canvas golden 🟢 has-golden state.
+ */
+export interface GoldenBaselineCase {
+  case_id: string
+  node_id: string
+  phase_id: string
+  expected_output_ref: string
+}
+
 export interface GoldenBaseline {
   id: string
+  source_run_id: string | null
+  source_run_results_ref: string | null
+  baseline_ref: string | null
   linked_input_id: string
   created_at: string
   locked: boolean
   content_path: string
+  // Per-node cases projected from baseline.json. Optional/defaulted: older payloads
+  // may omit it — consumers treat an absent value as an empty list.
+  cases?: GoldenBaselineCase[]
+}
+
+/**
+ * N4 atom #29 read path: one agent node's stored golden case content — the editable
+ * `expected_output` the case file holds. Mirrors backend models/golden.py
+ * GoldenCaseContent. The list endpoint only projects per-node case METADATA
+ * (GoldenBaselineCase, with an `expected_output_ref`); this carries the resolved content
+ * the ref points at so the I/O panel can open a golden file for editing.
+ */
+export interface GoldenCaseContent {
+  case_id: string
+  node_id: string
+  phase_id: string
+  expected_output: JsonObject
+}
+
+/**
+ * N4 atom #29: a golden baseline with each case's resolved `expected_output`, returned by
+ * `GET /skills/{id}/golden/{golden_id}/content` (optionally `?node_id=` to scope to one
+ * node). Mirrors backend models/golden.py GoldenBaselineContent. Editing is read-only
+ * here — saving an edit still goes through the existing manual-golden write
+ * (`POST /golden/manual/plan` → Rust native-fs, D12), NOT a new write path.
+ */
+export interface GoldenBaselineContent {
+  id: string
+  source_run_id: string | null
+  locked: boolean
+  cases: GoldenCaseContent[]
+}
+
+/**
+ * N4 atom #33: a schema-valid empty golden template for an agent node. Mirrors backend
+ * models/golden.py GoldenTemplate — `schema` is the node's io.outputs JSON schema and
+ * `template` is the structure-valid empty stub the author hand-fills.
+ */
+export interface GoldenTemplate {
+  skill_id: string
+  node_id: string
+  schema: JsonObject
+  template: JsonObject
+}
+
+export interface GoldenBaselineFile {
+  path: string
+  content: string
+}
+
+export interface GoldenBaselinePlan {
+  baseline: GoldenBaseline
+  files: GoldenBaselineFile[]
 }
 
 export interface SetGoldenReq {
   run_id: string
   lock: boolean
+  // Per-node promote (atom #32): when set, the baseline is written for this agent
+  // node only (mirrors backend models/golden.py SetGoldenReq.node_id). Absent =
+  // run-level baseline over all agent nodes (existing behavior).
+  node_id?: string | null
 }
 
 export type FieldDiffType = 'text' | 'number' | 'bool' | 'list' | 'dict' | 'null' | 'unknown'
@@ -242,18 +449,26 @@ export interface FieldDifference {
   changed: boolean
 }
 
-export interface NodeGoldenResult {
+export interface NodeGoldenGroup {
   node_id: string
-  verdict: 'pass' | 'fail'
+  phase_id: string | null
+  status: 'pass' | 'fail'
   score: number
-  differences: FieldDifference[]
+  field_differences: FieldDifference[]
+  stale_fields: string[]
+  schema_status: 'valid' | 'stale' | 'missing'
+  baseline_ref: string
+  run_results_ref: string
 }
 
 export interface CompareResult {
-  differences: FieldDifference[]
+  baseline_id: string
+  source_run_id: string | null
+  source_run_results_ref: string | null
+  baseline_ref: string
+  run_results_ref: string
   total_score: number
-  golden_run_id: string
-  node_results: NodeGoldenResult[]
+  node_groups: NodeGoldenGroup[]
 }
 
 export interface TerminalSession {
@@ -297,6 +512,7 @@ export interface SerializableGraphPhaseRef {
   id: string
   src: string
   depends_on: string[]
+  output?: boolean
   mode: GraphPhaseMode
 }
 
@@ -417,11 +633,53 @@ export interface PersonaSkillDef extends BaseSkillManifest {
 
 export type SkillManifest = AgentSkillDef | GraphSkillDef | PersonaSkillDef | GraphManifestV030
 
+/**
+ * n2-canvas#10 (data-gap-viz): one entry per downstream INPUT field of a phase,
+ * resolving where that field is supplied from. Produced by the backend
+ * `compute_field_supply` (services/canvas_data_gap.py) and attached to each
+ * `graph_topology` row as `field_supply`. `supplied=false` (`source='none'`) is a
+ * data gap the i/o panel renders as a missing-input marker; a supplied field
+ * names its `producer_phase` (when `source='phase'`) so the user sees who feeds it.
+ */
+export interface FieldSupplyEntry {
+  field: string
+  supplied: boolean
+  source: 'phase' | 'graph_input' | 'none'
+  producer_phase: string | null
+}
+
+/** Per-phase io field schema projection (`graph_topology[].io_fields`). */
+export interface IoFieldsProjection {
+  inputs: Record<string, JsonObject>
+  outputs: Record<string, JsonObject>
+}
+
 export interface GraphTopologyItem {
   id: string
   src: string
   depends_on: string[]
+  /** True only when the GRAPH.md phase ref carries the explicit output marker. */
+  output?: boolean
   mode: 'logic' | 'subgraph' | 'skill' | string
+  /** Child-graph path, surfaced only for subgraph phases. May be absolute or relative to the owning skill root. */
+  path?: string | null
+  /** n2-canvas#10: this phase's per-node io.inputs/io.outputs field schema. */
+  io_fields?: IoFieldsProjection
+  /** n2-canvas#10: per-input-field supply/demand projection for data-gap markers. */
+  field_supply?: FieldSupplyEntry[]
+}
+
+/**
+ * Child graph resolved by path for inline subgraph rendering. The backend response path is absolute.
+ * Mirrors the backend `ChildGraphTopology` model.
+ */
+export interface ChildGraphTopology {
+  path: string
+  name: string
+  description: string
+  phases: string[]
+  graph_topology: GraphTopologyItem[]
+  detail?: SkillDetail | null
 }
 
 export interface SkillDetail {
@@ -463,6 +721,26 @@ export interface CallbackEventBase {
 }
 
 export type CallbackEvent = CallbackEventBase & Record<string, JsonValue | undefined>
+
+export interface TransportErrorPayload {
+  error_code: string
+  message: string
+  details: JsonObject
+  retryable: boolean
+}
+
+export interface EventEnvelope {
+  schema_version: 'studio.event.v1'
+  stream_id: string
+  seq: number
+  cursor: string
+  run_id: string
+  event_type: string
+  timestamp: string
+  payload: CallbackEvent
+  error_code?: string | null
+  error_payload?: TransportErrorPayload | null
+}
 
 export interface StudioGlobalEvent {
   type: 'skill_changed'

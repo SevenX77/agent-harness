@@ -104,6 +104,190 @@ export function mockedSourceClass(source: MockedSource): string {
   return 'border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-900/20 dark:text-violet-300'
 }
 
+export interface RetryBadge {
+  /** Human-facing label, e.g. "2/3" when a limit is known or "#2" when it is not. */
+  label: string
+  /** Current attempt number, 1-based. */
+  attempt: number
+  /** Max attempts when the engine reported a limit; null otherwise. */
+  limit: number | null
+  /** True once this is the final allowed attempt (attempt === limit). */
+  exhausted: boolean
+}
+
+/** Auto-expand a trace payload only when it is small enough to read inline (~2KB). */
+export const TRACE_PAYLOAD_AUTO_EXPAND_BYTES = 2048
+
+export interface PayloadPreview {
+  /** Serialized payload, truncated to a readable head when it exceeds the limit. */
+  text: string
+  /** True when the full payload is larger than the auto-expand limit. */
+  truncated: boolean
+  /** Byte size of the full serialized payload. */
+  sizeBytes: number
+  /** Human-readable size, e.g. "3.9 KB". */
+  sizeLabel: string
+}
+
+function numericField(value: JsonValue | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function readAttemptFields(source: Record<string, JsonValue | undefined>): { attempt: number | null; limit: number | null } {
+  // attempt/max_attempts are 1-based; retry_count is 0-based attempts already spent.
+  const attemptDirect = numericField(source.attempt)
+  const retryCount = numericField(source.retry_count)
+  const attempt = attemptDirect ?? (retryCount !== null ? retryCount + 1 : null)
+  const limit = numericField(source.max_attempts) ?? numericField(source.max_retries) ?? numericField(source.retry_limit)
+  return { attempt, limit }
+}
+
+export function retryBadge(event: CallbackEvent): RetryBadge | null {
+  let { attempt, limit } = readAttemptFields(event)
+  if (attempt === null && isJsonObject(event.metadata)) {
+    ({ attempt, limit } = readAttemptFields(event.metadata))
+  }
+  if (attempt === null && isJsonObject(event.metrics)) {
+    ({ attempt, limit } = readAttemptFields(event.metrics))
+  }
+  if (attempt === null) {
+    return null
+  }
+  const label = limit !== null ? `${attempt}/${limit}` : `#${attempt}`
+  return {
+    label,
+    attempt,
+    limit,
+    exhausted: limit !== null && attempt >= limit,
+  }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`
+  }
+  return `${(bytes / 1024).toFixed(1)} KB`
+}
+
+export function payloadPreview(event: CallbackEvent): PayloadPreview {
+  const full = JSON.stringify(event, null, 2)
+  const sizeBytes = full.length
+  const sizeLabel = formatBytes(sizeBytes)
+  if (sizeBytes <= TRACE_PAYLOAD_AUTO_EXPAND_BYTES) {
+    return { text: full, truncated: false, sizeBytes, sizeLabel }
+  }
+  return {
+    text: `${full.slice(0, TRACE_PAYLOAD_AUTO_EXPAND_BYTES)}…`,
+    truncated: true,
+    sizeBytes,
+    sizeLabel,
+  }
+}
+
+// ── Agent tool-call folding (D1/P2, n4-trace #16) ───────────────────────────
+// The engine emits a `tool_call` event (packages/graph-agent .../events.py
+// ToolCallEvent: tool_name / args / result / duration_ms) for every tool an
+// agent phase invokes. Instead of dumping it as raw JSON, the trace row folds
+// it under a semantic verb the same way copilot/tool-call-bubble.tsx does
+// (Read → Explored, Write/Edit → Worked, Bash → Ran), so the agent's actions
+// read like an agent IDE rather than a JSON blob.
+
+const TOOL_CALL_VERBS: Record<string, string> = {
+  Read: 'Explored',
+  Glob: 'Explored',
+  Grep: 'Explored',
+  LS: 'Explored',
+  Write: 'Worked',
+  Edit: 'Worked',
+  MultiEdit: 'Worked',
+  Bash: 'Ran',
+}
+
+export interface ToolCallSummary {
+  /** Semantic verb for the tool (Explored / Worked / Ran) or a fallback. */
+  verb: string
+  /** The raw tool name, e.g. "Read". */
+  toolName: string
+  /** One-line headline, e.g. "Explored · Read". */
+  headline: string
+  /** Serialized args (tool input), empty string when there are none. */
+  args: string
+  /** Result / output text, trimmed to the leading lines for the summary. */
+  resultSummary: string
+  /** Optional duration label, e.g. "120 ms". */
+  durationLabel: string | null
+}
+
+function isToolCallEvent(event: CallbackEvent): boolean {
+  return event.event_type === 'tool_call' && typeof event.tool_name === 'string'
+}
+
+function summariseResult(value: JsonValue | undefined): string {
+  if (typeof value !== 'string') {
+    return ''
+  }
+  const lines = value.split('\n')
+  if (lines.length <= 4) {
+    return value.trim()
+  }
+  return `${lines.slice(0, 4).join('\n').trim()}\n…`
+}
+
+/**
+ * Build a classified, foldable summary for an agent `tool_call` event.
+ *
+ * Returns null for any event that is not a tool_call, so callers can fall back
+ * to the generic payload renderer.
+ */
+export function toolCallSummary(event: CallbackEvent): ToolCallSummary | null {
+  if (!isToolCallEvent(event)) {
+    return null
+  }
+  const toolName = String(event.tool_name)
+  const verb = TOOL_CALL_VERBS[toolName] ?? 'Called'
+  const args = isJsonObject(event.args) && Object.keys(event.args).length > 0 ? JSON.stringify(event.args, null, 2) : ''
+  const durationLabel = typeof event.duration_ms === 'number' && Number.isFinite(event.duration_ms)
+    ? `${Math.round(event.duration_ms)} ms`
+    : null
+  return {
+    verb,
+    toolName,
+    headline: `${verb} · ${toolName}`,
+    args,
+    resultSummary: summariseResult(event.result),
+    durationLabel,
+  }
+}
+
+// ── Retry-exhausted Error Stack (D10, n4-trace #25) ─────────────────────────
+// When retries run out, the engine's retry_exhausted event carries
+// `final_errors: list[str]` (each prior attempt's failure reason); a
+// validation_fail carries `errors: list[str]` for that single attempt. The row
+// surfaces these as an explicit, expandable Error Stack so the user sees *why*
+// each attempt failed rather than just a red light.
+
+function stringList(value: JsonValue | undefined): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+}
+
+/**
+ * Collect the per-attempt failure reasons carried by a retry_exhausted /
+ * validation_fail event. Returns an empty array when the event is neither, or
+ * carries no error list.
+ */
+export function errorStack(event: CallbackEvent): string[] {
+  if (event.event_type === 'retry_exhausted') {
+    return stringList(event.final_errors)
+  }
+  if (event.event_type === 'validation_fail') {
+    return stringList(event.errors)
+  }
+  return []
+}
+
 export function findPromptEvent(events: CallbackEvent[], selectedIndex: number): CallbackEvent | null {
   const selected = events[selectedIndex]
   if (!selected) {

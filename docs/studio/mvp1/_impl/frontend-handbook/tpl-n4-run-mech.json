@@ -1,0 +1,204 @@
+{
+  "id": "n4_run_mech",
+  "title": "run 真跑编排 + 服务端 predict 门 + 批量 + autocommit（设计）",
+  "overview": {
+    "manages": "用户点 Run 后一次真跑怎么走完整条：前端 predict-pass 守卫 → 发起 run → 后端 compile 拿 content_hash → require_passing_predict 服务端门 → spawn 子进程真跑引擎 → 事件流 drain fan-out 给所有订阅者 → 落盘 final_state/metrics/trace + seal 封存 → 成功则 autocommit。外加『勾多份各跑一次』的批量编排。",
+    "why_single": "run 不是单个请求：它牵涉前后端双重 predict 门（前端 stage 守卫 + 后端 content_hash 门）、子进程真跑 + 事件 fan-out、产物不可变 seal、批量逐子 run 各受门约束、以及成功收尾 autocommit——这一整块被 run(#6–#13) 多操作共享，单列一页。",
+    "design_owner": "engine 后端（真跑执行在引擎 runner）+ gateway 后端 sidecar 侧（run 管理 / 子进程 / 事件 drain / 服务端门 / autocommit）。前端只发起、订阅、读结果。",
+    "code_location": "前端 handleRun（Workspace.tsx，前端 predict-pass 守卫）→ startRun（client.ts）；批量 useBatchRun（hooks/，toggleInput/runBatch/轮询）。gateway 后端 sidecar 侧 create_run/create_batch_run（routers/runs.py）→ run_manager.start_run/start_batch_run（services/run_manager.py，spawn 子进程 + 事件队列 + 落盘 + 封存 + autocommit）→ require_passing_predict（services/predict_gate.py，服务端门）→ EngineAdapter.run_artifact（core/adapters/engine.py）→ 引擎 runner.run_artifact。",
+    "dataflow": [
+      "前端 handleRun 先 deriveBuildStage(skill)≠predict-pass 直接 return（前端硬门，连请求都不发）",
+      "通过 → 推档 running → resolveRunInput 取输入 → startRun POST /api/skills/{id}/runs（body 带 input_data）",
+      "后端 start_run 先 EngineAdapter.compile 拿 content_hash → require_passing_predict 比对 last_predict.json：不匹配抛 RUN_REQUIRES_PREDICT(409)（服务端二道门，绕过 UI 也挡）",
+      "通过 → multiprocessing 起子进程 _run_worker_main → adapter.run_artifact 真跑引擎；in_process transport 挂 event_subscriber 把引擎回调事件实时塞进进程队列",
+      "主进程 _drain_process_queue 从队列取事件 → 包成 EventEnvelope（见 trace 机制）append + fan-out 给 WS 订阅者；type=status 转终态 metadata",
+      "跑完按 RunResult.success 落盘 final_state/metrics/trace + _persist_run_artifacts 经 LocalRunArtifactStore put_batch + seal_run 封存；成功收尾 _auto_commit_successful_run 自动提交（git_status）",
+      "批量：runBatch POST /runs/batch-run → start_batch_run 对每个 input 各调一次 start_run（各受服务端门约束）→ 前端每 1s 轮询 GET /batch/{id} 汇总进度"
+    ]
+  },
+  "submodules": [
+    {
+      "name": "require_passing_predict（run 的服务端 predict 门）",
+      "code": "gateway 后端 sidecar 侧: predict_gate.require_passing_predict / has_passing_predict（services/predict_gate.py）",
+      "summary": "run 真跑前的服务端二道门：把这次新编译的 content_hash 跟 last_predict.json 记录的 hash 比对，没有匹配的 passing predict 就抛 RUN_REQUIRES_PREDICT(409)——前端门只挡 UI，这道门挡任何 caller。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "start_run 先 compile 拿当前 content_hash，再 require_passing_predict(skill, content_hash) 校验。",
+        "has_passing_predict 要求：last_predict.json 存在成功记录 AND 记录的 content_hash == 当前 hash，才放行。",
+        "无匹配（没 predict 过 / 改图后 hash 变了判 stale）→ 抛 RUN_REQUIRES_PREDICT(409, not_retryable)。",
+        "这保证任何 caller（不止 UI，含直接打 API、批量子 run）都受 predict 前提约束。"
+      ],
+      "do": [
+        "run 发起前比对 content_hash，挡掉无 predict 前提的真跑。",
+        "改图后强制重 predict（旧 pass stale）。"
+      ],
+      "dont": [
+        "不替代前端门（前端 handleRun 守卫减少无谓请求，服务端门兜底）。"
+      ],
+      "deviation": ""
+    },
+    {
+      "name": "子进程真跑 + 事件 fan-out + 不可变落盘",
+      "code": "gateway 后端 sidecar 侧: run_manager.start_run / _run_worker_main / _drain_process_queue / _persist_run_artifacts（services/run_manager.py）",
+      "summary": "起子进程真跑引擎、把引擎回调事件实时 drain 并 fan-out 给所有 WS 订阅者、跑完把产物落盘并经内容寻址存储 seal 封存成不可变事实源。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "multiprocessing 起子进程 _run_worker_main 跑 adapter.run_artifact（真跑引擎，真烧 token）。",
+        "in_process transport 挂 event_subscriber，引擎回调事件实时塞进程队列；主进程 _drain_process_queue 取出包 EventEnvelope（seq/cursor 编号）append + fan-out。",
+        "跑完按 RunResult.success 落 final_state.json/metrics.json/trace.jsonl，经 LocalRunArtifactStore put_batch + seal_run 封存（sealed 后禁写、按 sha256 内容寻址、读要先 seal）。",
+        "裸文件是派生缓存、封存 store 是事实源（D2.2 收口）。"
+      ],
+      "do": [
+        "子进程真跑 + 实时事件 fan-out + 不可变 seal 落盘。"
+      ],
+      "dont": [
+        "前端不直接读裸 run 文件（按封存 ref/hash 读，裸文件非真相）。",
+        "run 产物不走 Rust native-fs（runtime_artifact，D12.5 显式豁免，走 RunArtifactStore Python 路径）。"
+      ],
+      "deviation": "D12.5（partial）：生产 run_manager 仍裸 Path 写 .workspace/runs，LocalRunArtifactStore 未完全接生产 run（缺口交回 D2 收敛）——不影响前端真跑/读结果。"
+    },
+    {
+      "name": "批量编排（勾多份各跑一次）",
+      "code": "frontend: useBatchRun（hooks/useBatchRun.ts）· gateway 后端 sidecar 侧: run_manager.start_batch_run / get_batch_status",
+      "summary": "勾选多份输入各起一次真跑、轮询汇总进度的编排；每个子 run 同样过 require_passing_predict 服务端门，某项失败显式上报不静默。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "前端 toggleInput 勾选 → runBatch POST /runs/batch-run（body input_ids）→ 拿 batch_id。",
+        "后端 start_batch_run 对每个 input 加载后挨个调 start_run 各起一次真跑（各受服务端门约束）。",
+        "前端每 1s 轮询 GET /batch/{id}；get_batch_status 汇总各子 run 算 total/completed/running|success|failed。",
+        "UI 显示『completed/total · status』+ batchError；某子 run 失败显式计入、不静默吞。"
+      ],
+      "do": [
+        "多选输入各跑一次 + 进度轮询 + 失败显式上报。"
+      ],
+      "dont": [
+        "不做图级/节点级/嵌套 loop 的高级批量（那是引擎 02-iterate 设计，前端 UI 等引擎方案）。"
+      ],
+      "deviation": ""
+    }
+  ],
+  "interface_groups": [
+    {
+      "key": "action",
+      "title": "真跑动作类（真烧 token、有副作用）",
+      "note": "这一类真起引擎执行：POST /runs 单次、POST /runs/batch-run 批量。受服务端 predict 门约束，成功落盘 + seal + autocommit。"
+    },
+    {
+      "key": "crud",
+      "title": "运行查询/管理类（读历史、轮询进度、删）",
+      "note": "这一类是读/管理：列 run 历史、读某次详情、轮询批量进度、删 run。幂等、不触发新执行。"
+    }
+  ],
+  "interfaces": [
+    {
+      "group": "action",
+      "endpoint": "POST /api/skills/{id}/runs",
+      "req": "RunRequest{input_data}（前端只发 input_data；golden_id/paste_json 模型支持但前端不发）",
+      "resp": "RunMetadata（202 异步）：run_id（<ISO 时间戳>_<8hex>）/ status（创建恒 running）/ started_at / metrics（TokensMetrics，创建 null、drain 回填；**无 wall_time_sec → 历史耗时落空，见 #10**）/ input_summary / git_status（成功后透传 committed|locked|failed，前端 types.ts RunMetadata 已含此字段）",
+      "purpose": "发起单次真跑——先过服务端 predict 门，再 spawn 子进程真跑引擎、落盘 seal、成功 autocommit",
+      "provider": "gateway 后端 sidecar 侧（routers/runs.py create_run → run_manager.start_run → 引擎 runner.run_artifact）",
+      "id": "iface-run-0"
+    },
+    {
+      "group": "action",
+      "endpoint": "POST /api/skills/{id}/runs/batch-run",
+      "req": "BatchRunRequest{input_ids}（勾选的多份输入 id）",
+      "resp": "BatchRunResponse{batch_id}（202 异步）",
+      "purpose": "对多份输入各起一次真跑（各受服务端 predict 门约束）",
+      "provider": "gateway 后端 sidecar 侧（routers/runs.py create_batch_run → run_manager.start_batch_run 逐个 start_run）",
+      "id": "iface-run-1"
+    },
+    {
+      "group": "crud",
+      "endpoint": "GET /api/batch/{batch_id}",
+      "req": "无入参（batch_id 在路径）",
+      "resp": "BatchRunStatus{total, completed, 逐子 run status（running|success|failed）}",
+      "purpose": "轮询批量进度——前端每 1s 拉一次汇总『completed/total · status』",
+      "provider": "gateway 后端 sidecar 侧（run_manager.get_batch_status）",
+      "id": "iface-run-2"
+    },
+    {
+      "group": "crud",
+      "endpoint": "GET /api/skills/{id}/runs",
+      "req": "无入参",
+      "resp": "RunListResponse（run 历史列表：run_id/status/耗时/token 等）",
+      "purpose": "列该 skill 的 run 历史，喂 timeline 面板",
+      "provider": "gateway 后端 sidecar 侧（routers/runs.py list_runs）",
+      "id": "iface-run-3"
+    },
+    {
+      "group": "crud",
+      "endpoint": "DELETE /api/skills/{id}/runs/{run_id}",
+      "req": "无 body（run_id 在路径）",
+      "resp": "204 无内容",
+      "purpose": "删除某次 run 记录",
+      "provider": "gateway 后端 sidecar 侧（routers/runs.py delete_run）",
+      "id": "iface-run-4"
+    },
+    {
+      "group": "crud",
+      "endpoint": "GET /api/skills/{id}/runs/{run_id}",
+      "req": "无入参（run_id 在路径）",
+      "resp": "RunDetail（含 events 回放、final_context、phases 等）",
+      "purpose": "回看某次历史 run 的完整详情（trace 回看也走它，见 trace 机制）",
+      "provider": "gateway 后端 sidecar 侧（routers/runs.py get_run）",
+      "id": "iface-run-5"
+    }
+  ],
+  "boundaries": {
+    "do": [
+      "前端 predict-pass 守卫 + 后端 require_passing_predict content_hash 门（双保险）",
+      "spawn 子进程真跑引擎、真烧 token、落盘 final_state/metrics/trace + seal 封存",
+      "事件实时 drain + fan-out 给所有 WS 订阅者（节点灯/trace 共用，见 trace 机制）",
+      "批量逐子 run 各跑一次 + 进度轮询 + 失败显式上报",
+      "成功 run 收尾 autocommit + git_status（归属 N6）"
+    ],
+    "dont": [
+      "无 predict-pass 不真跑（前后端双门）",
+      "失败 run 不 autocommit",
+      "不做图级/节点级/嵌套 loop 高级批量（引擎 02-iterate）",
+      "run 产物不走 Rust native-fs（runtime_artifact，走 RunArtifactStore）",
+      "前端不持第二份 run 真相（按封存 ref/hash 读）"
+    ]
+  },
+  "backend_status": [
+    {
+      "item": "run 真跑 + 服务端 predict 门 + 事件 fan-out",
+      "d12": "D11『EventEnvelope schema + 事件 sink』(ok) + D7『predict 门』",
+      "status": "ok",
+      "note": "start_run + require_passing_predict + 子进程真跑 + 事件 drain fan-out 均 live；前端 handleRun 守卫 + 后端 content_hash 门双保险已接。← #6–#8/#10/#11 直接用。",
+      "ref": "d11"
+    },
+    {
+      "item": "run 产物不可变 seal 落盘",
+      "d12": "D2.2『run 产物不可变并 seal、消费者按 ref/hash 读』(ok)",
+      "status": "ok",
+      "note": "LocalRunArtifactStore put_batch + seal_run 封存、按 sha256 内容寻址、sealed 后禁写已 live（D2.2 收口）。← #7 直接用。",
+      "ref": "d2"
+    },
+    {
+      "item": "run-by-version 入口 + artifact identity 可见性",
+      "d12": "D3『run-by-version 入口 + ArtifactRef/execution_fingerprint 可见性』",
+      "status": "bad",
+      "note": "Studio compile/UI 不返回完整 artifact identity、execution_fingerprint 不可见、prod/dev missing artifact 分层未接真实路径。不阻塞本 surface 的真跑/落盘（#7 符合），但『按发布版本运行』入口缺。",
+      "ref": "d3"
+    },
+    {
+      "item": "run metrics DTO 投影 wall_time_sec（历史耗时）",
+      "d12": "不在 12D 范围；归 Studio sidecar DTO 投影层",
+      "status": "review",
+      "note": "根因（#10 偏差）：TimelinePanel 读 run.metrics.wall_time_sec 显耗时，但 TokensMetrics（models/runs.py）只有 token + cost、无 wall_time_sec，RunManager._tokens_metrics 也不投影，所以耗时落 n/a。引擎 RunResult 有 wall_time_sec，是 Studio sidecar DTO 把它丢了。修复：metrics DTO 加 wall_time_sec（或独立 duration_sec）+ 前端类型同步。",
+      "ref": "d2"
+    },
+    {
+      "item": ".workspace/runs 经 RunArtifactStore 写",
+      "d12": "D12.5『.workspace/runs 必须经 Engine RunArtifactStore 或受控 domain API 写入』",
+      "status": "partial",
+      "note": "生产 run_manager 仍裸 Path 写 .workspace/runs，LocalRunArtifactStore 未完全接生产 run（缺口交回 D2 收敛）。前端无感（只读封存结果）。",
+      "ref": "d12"
+    }
+  ]
+}

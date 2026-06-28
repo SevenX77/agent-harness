@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,10 +21,13 @@ from graph_agent_gateway.registry.credentials import (
 from graph_agent_gateway.registry.resolver import RegistryResolutionError, resolve_role
 from graph_agent_gateway.registry.schema import (
     RegistrySnapshot,
-    ResolvedRole,
     RoleEntry,
     RoleRouteEntry,
     RuntimePolicy,
+)
+from graph_agent_gateway.route_handoff import (
+    ResolvedRouteChain,
+    resolved_role_to_route_chain,
 )
 from graph_agent_gateway.storage_contracts import ConfigTruthStore
 
@@ -66,6 +70,7 @@ class ModelResolver:
             provider_routes=credentials.get("provider_routes") or {},
             runtime_policy=RuntimePolicy.model_validate(credentials.get("runtime_policy") or {}),
             model_profiles=roles.get("model_profiles") or {},
+            model_bundles=roles.get("model_bundles") or {},
             roles=roles.get("roles") or {},
         )
 
@@ -113,13 +118,13 @@ class ModelResolver:
         except RegistryResolutionError as exc:
             raise ResourceTerminalError(
                 error_code="resource.no_available_route",
-                error_payload={"role": role_name},
+                error_payload=_route_resolution_error_payload(role_name, exc),
             ) from exc
 
         if not resolved.routes:
             raise ResourceTerminalError(
                 error_code="resource.no_available_route",
-                error_payload={"role": role_name},
+                error_payload=resolved_role_to_route_chain(resolved).error_payload or {"role": role_name},
             )
 
         first_route = resolved.routes[0]
@@ -164,7 +169,7 @@ class ModelResolver:
         role_name: str,
         *,
         route_override: str | None = None,
-    ) -> ResolvedRole:
+    ) -> ResolvedRouteChain:
         with self._stats_lock:
             self.stats.total_resolves += 1
         try:
@@ -177,15 +182,56 @@ class ModelResolver:
         except RegistryResolutionError as exc:
             raise ResourceTerminalError(
                 error_code="resource.no_available_route",
-                error_payload={"role": role_name},
+                error_payload=_route_resolution_error_payload(role_name, exc),
             ) from exc
 
         if not resolved.routes:
             raise ResourceTerminalError(
                 error_code="resource.no_available_route",
-                error_payload={"role": role_name},
+                error_payload=resolved_role_to_route_chain(resolved).error_payload or {"role": role_name},
             )
-        return resolved
+        return resolved_role_to_route_chain(resolved)
+
+    def resolve_temporary_role(
+        self,
+        role_name: str,
+        role: RoleEntry | Mapping[str, Any],
+        *,
+        route_override: str | None = None,
+    ) -> ResolvedRouteChain:
+        temporary_role = RoleEntry.model_validate(role)
+        temporary_snapshot = self.registry_snapshot.model_copy(
+            update={"roles": {**self.registry_snapshot.roles, role_name: temporary_role}}
+        )
+
+        try:
+            resolved = resolve_role(
+                temporary_snapshot,
+                role_name,
+                route_override=route_override,
+                credential_provider=self.credential_provider,
+            )
+        except RegistryResolutionError as exc:
+            raise ResourceTerminalError(
+                error_code="resource.no_available_route",
+                error_payload=_route_resolution_error_payload(role_name, exc),
+            ) from exc
+
+        if not resolved.routes:
+            raise ResourceTerminalError(
+                error_code="resource.no_available_route",
+                error_payload=resolved_role_to_route_chain(resolved).error_payload or {"role": role_name},
+            )
+        return resolved_role_to_route_chain(resolved)
+
+    def resolve_temporary_roles(
+        self,
+        roles: Mapping[str, RoleEntry | Mapping[str, Any]],
+    ) -> dict[str, ResolvedRouteChain]:
+        return {
+            role_name: self.resolve_temporary_role(role_name, role)
+            for role_name, role in roles.items()
+        }
 
     def mark_provider_down(self, route_id: str) -> None:
         """Manually mark a route down in the shared gateway cache."""
@@ -223,6 +269,25 @@ class ModelResolver:
             RuntimeError("manual mark down"),
             role.runtime_policy,
         )
+
+
+def _route_resolution_error_payload(
+    role_name: str,
+    exc: RegistryResolutionError,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"role": role_name}
+    skipped = getattr(exc, "skipped_diagnostics", None)
+    if skipped:
+        payload["skipped"] = [
+            {
+                "route_id": item.route_id,
+                "reason_code": item.reason_code,
+                "message": item.message,
+                "from_override": item.from_override,
+            }
+            for item in skipped
+        ]
+    return payload
 
 
 def _assert_v4_credentials(payload: dict[str, Any], path: Path) -> None:
@@ -269,6 +334,7 @@ def _gateway_roles_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "system_prompt_prefix",
         "source_profile_id",
         "source_profile_snapshot",
+        "bundle_id",
         "fallback_chain",
         "lint_requirements",
     }
@@ -286,8 +352,32 @@ def _gateway_roles_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         **payload,
         "model_profiles": payload.get("model_profiles") or {},
+        "model_bundles": _gateway_model_bundles_payload(payload),
         "roles": gateway_roles,
     }
+
+
+def _gateway_model_bundles_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    bundles = payload.get("model_bundles") or {}
+    if not isinstance(bundles, dict):
+        return {}
+
+    gateway_bundles: dict[str, Any] = {}
+    gateway_bundle_keys = {"bundle_id", "fallback_chain", "lint_requirements"}
+    for bundle_id, bundle in bundles.items():
+        if not isinstance(bundle, dict):
+            gateway_bundles[bundle_id] = bundle
+            continue
+        gateway_bundle = {key: value for key, value in bundle.items() if key in gateway_bundle_keys}
+        gateway_bundle["bundle_id"] = (
+            gateway_bundle.get("bundle_id")
+            or bundle.get("model_profile_id")
+            or bundle_id
+        )
+        gateway_bundle["fallback_chain"] = bundle.get("fallback_chain") or []
+        gateway_bundle["lint_requirements"] = bundle.get("lint_requirements") or {}
+        gateway_bundles[bundle_id] = gateway_bundle
+    return gateway_bundles
 
 
 def _default_client_manager() -> Any:

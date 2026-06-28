@@ -1,0 +1,604 @@
+{
+  "page": "apikeys",
+  "intro": "API Keys 页（Settings 第三个标签）干一件事：让用户把各家大模型的访问凭证录进来，并确认每个连接点真能连通。页面分两半——上半是 5 家官方厂商（固定预渲染，只需填一个 key），下半是用户自己加的第三方 provider（要填地址、协议、key）。录入后点测试，系统会去真打模型接口、判定通不通，并把结果以彩色状态标签呈现。所有改动即填即存，刷新后能从后端（③a Studio）恢复。",
+  "glossary": [
+    {
+      "id": "endpoint",
+      "term": "endpoint（连接点）",
+      "category": "领域概念",
+      "owner": "跨层（概念归 ③b；录入归 ① 前端；存储归 ③a）",
+      "explain": "一个「URL × 协议」的组合 = 一个 endpoint，是系统真正去连模型的最小单位。同一个 provider（同一把 key）可挂多个 URL，每个 URL 探出哪个协议通就和那个协议配成一个 endpoint；一个 URL 同时通两种协议就建两个 endpoint。这是 gateway 的核心抽象：③b gateway 库只认平铺的标准 endpoint 列表，不认识「卡片」（卡片只是前端录入外壳）。「多 URL × 多协议 → 多 endpoint」的拆分 + 协议匹配 + 生成 canonical endpoint_id 按设计归 ③b；前端只录入；③a 只 upsert + 存储。",
+      "detail": [
+        [
+          "澄清",
+          "最小连接单位 = URL × 协议；gateway 只认平铺 endpoint list、不认卡片"
+        ],
+        [
+          "拆分/canonical id 归属",
+          "③b gateway（设计；现码部分在 ③a 待下沉）"
+        ]
+      ]
+    },
+    {
+      "id": "provider",
+      "term": "provider（厂商 / 供应商）",
+      "category": "领域概念",
+      "owner": "跨层（概念归 ③b；分区渲染归 ① 前端）",
+      "explain": "一家模型供应商，对应页面上一张卡。分两类：official（官方，5 家钉死：anthropic / openai / gemini / deepseek / ark）和 third-party（第三方，用户自增）。一个 provider = 一把 key，其下可挂多个 URL/endpoint，这些 endpoint 共享同一把 key 和同一个限流额度（gateway 里用 endpoint 共享的 credential_ref + rate_limit_bucket 表达「同一 provider」，而不是一个 card 实体）。",
+      "detail": [
+        [
+          "澄清",
+          "official 5 家固定 vs third-party 自增；一 provider = 一 key + 共享额度"
+        ],
+        [
+          "卡片 vs gateway",
+          "card 是前端录入便利；gateway 不感知卡，靠 credential_ref/bucket 表达同源"
+        ]
+      ]
+    },
+    {
+      "id": "provider-kind",
+      "term": "provider_kind（厂商类别 official / third-party）",
+      "category": "领域概念",
+      "owner": "③a Studio（保存时钉标记）",
+      "explain": "给每个 endpoint 钉的「官方还是第三方」标记。保存（upsert）时若 endpoint_id 命中官方白名单，③a 强制把它标成 official，前端改不了——这保证官方卡端点参数不被乱动。当前很多功能（如批量测试 job）按这个标记分叉走不同代码路径，正是 #24/#27 官/三不对称的根源（属现状缺口，非目标）。这个标记是 ③a 在保存时落的持久化字段（产品策略性的分区控制），不是 gateway 的能力归一化。",
+      "detail": [
+        [
+          "澄清",
+          "持久化在 endpoint 上的 official/third-party 标记；官方白名单命中强制 official"
+        ],
+        [
+          "副作用",
+          "现状测试路径按它分叉 → #24/#27 不对称（待统一）"
+        ]
+      ]
+    },
+    {
+      "id": "protocol-probe",
+      "term": "协议探测（protocol probe）",
+      "category": "后端能力",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "第三方 provider 填了 URL 后，系统不让用户自己选协议，而是「把各种协议挨个试打一遍」：用每种协议的方式去打这个 URL 的推理端点（不是打 /models 列表接口，因为列表接口各家都返 200、判不出协议），看哪个被接受、哪个被拒，被接受的那个判为该 URL 的协议。探测时要带对的认证头（原生 anthropic 用 x-api-key、anthropic 兼容的第三方网关用 Authorization: Bearer），带错会把「能用」误判成「不通」。这是 gateway 内置协议 SDK 的公共能力，换个 app 也复用。",
+      "detail": [
+        [
+          "定义层",
+          "③b gateway（内置协议 SDK；现散 ③a 待下沉）"
+        ],
+        [
+          "复用范围",
+          "任何 app 录入第三方 endpoint 时都用；本页 #24/#25 测试路径的底层"
+        ]
+      ]
+    },
+    {
+      "id": "batch-model-probe",
+      "term": "批量模型探测（batch model probe）",
+      "category": "后端能力",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "判第三方 endpoint 真能不能用的目标方式：不只点一个模型试，而是自动分批（每批约 3 个、优先挑常见可靠模型）去真打推理端点。一批一批打，某批里任一模型成功就判 endpoint 可用并停下；全部探尽都失败才判不可用。这么做是因为单模型探测不可靠——同一模型可能这次 401、下次 200（瞬时抖动）。遇到结构性错配错误码（如「请改用 /v1/messages」）可短路判错，但瞬时类错误（401/429/超时）不许短路。这套「批量探测策略（短路·汇总）」按设计是 ③b 公共能力内核；③a 只做 job/进度/HTTP 包装。",
+      "detail": [
+        [
+          "定义层",
+          "③b gateway（批量探测策略·短路·汇总；现散 ③a 待下沉）"
+        ],
+        [
+          "复用范围",
+          "官/三统一测试路径的目标内核（unified-endpoint-test）；③a 只包 job/HTTP"
+        ]
+      ]
+    },
+    {
+      "id": "six-state",
+      "term": "6 态（route 级状态体系，six-state）",
+      "category": "后端能力",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "每条 route（某模型在某 endpoint 上的一条连接路线）的状态用 6 种表达，三个页面颜色一致：🟢 ready=真测通了；🔵 historical_ready=以前联通过（来自 Probe Knowledge Catalog 历史回填，当前没真测）；⚪ untested=没测；🔴 failed=出错要修（含配置缺口 缺 key/URL/协议、和 真测失败，用 reason 区分，红但不挡进可用列表）；⚪+倒计时 cooling_down=临时失败熔断中、倒计时后重试；⚪+不可选 off=被禁用。这套「6 态标准总结」按设计是 ③b 公共能力内核（gateway 客观状态 + 熔断的最佳总结）；现码 project_provider_model_state 只产 5 态（把配置缺口和测试失败揉成一个 needs_setup 灰态、没蓝态），在 ③a 待下沉并补齐。③a 只把 6 态转成颜色/文案 DTO（应用加工）。",
+      "detail": [
+        [
+          "定义层",
+          "③b gateway（6 态标准总结 + 熔断；现码在 ③a project_provider_model_state 待下沉，需取消 needs_setup、补蓝态）"
+        ],
+        [
+          "复用范围",
+          "三页（API Keys / Roles / Copilot）统一状态色；③a 仅转 DTO"
+        ]
+      ]
+    },
+    {
+      "id": "probe-catalog",
+      "term": "Probe Knowledge Catalog（探测知识库）",
+      "category": "后端能力",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "每个 provider 的历史探测知识库，双向用：读（赋能）——把过去已证实的模型清单和能力回填到当前列表，不用重探，对应 🔵 蓝态；写（写回）——本次探测发现的新模型/新能力（含失败记录，如哪些模型抖动/超时）沉淀回本机，下次批量探测可优先跳过历史失败的、优先试历史成功的。这套「Probe Knowledge Catalog 内核（记录/复用探测证据）」按设计是 ③b 公共能力；③a 只做远端只读源选择、存储介质、本地导出/脱敏（应用加工）。MVP1 不自动上传社区 catalog。现码 llm_import_drafts.py / ProviderImportDraft 是 legacy 命名，Import Draft（待导入草稿→apply）不属于 MVP1 主线。",
+      "detail": [
+        [
+          "定义层",
+          "③b gateway（知识库内核；现码 llm_import_drafts.py 在 ③a 待下沉并需改名）"
+        ],
+        [
+          "复用范围",
+          "回填蓝态 + 喂批量探测的历史优先级；③a 做远端只读源配置、本地导出和脱敏"
+        ]
+      ]
+    },
+    {
+      "id": "unified-endpoint-test",
+      "term": "统一 endpoint test（目标测试路径，unified endpoint test）",
+      "category": "后端能力",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉、且尚未统一）",
+      "explain": "目标设计：官方和第三方用同一套测试入口 POST /endpoints/{id}/test + 批量模型探测，不分官/三走两套。现状是分裂的——官方走异步批量 job 但只认官方、第三方被拒（#24）；第三方走同步单次 get-models 只升「未验证」（#25）；手动多模型探测官方产多能力候选、第三方写死 text-only（#27）。这三处不对称是现状缺口、不是目标。统一后的测试内核（批量探测 + 能力归一化）归 ③b 公共；③a 只包装 job/HTTP。",
+      "detail": [
+        [
+          "定义层",
+          "③b gateway（统一测试 + 能力归一化内核；现码分裂在 ③a 待统一下沉）"
+        ],
+        [
+          "复用范围",
+          "官/三合一的目标入口；现 #24/#25/#27 三处不对称待收敛"
+        ]
+      ]
+    },
+    {
+      "id": "credentials-file",
+      "term": "llm_credentials.json（凭证文件）",
+      "category": "数据文件",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "存所有 provider 的明文 key + endpoint/route/状态/已发现模型的 JSON 文件，权限 0600（仅本人可读写），位于 AgentStudio 配置目录的 llm/ 子目录下。每次写都是原子写（先写临时文件再 os.replace 替换）。读写经统一存储缝（load_credentials / save_credentials），预留多用户 user_id。schema 由 ③b gateway 库定义、数据归 ③b；路径由 ③a 的 llm_paths（credentials_path）定；读写由 ③a Studio 后端经存储缝执行。",
+      "detail": [
+        [
+          "Schema 定义",
+          "③b gateway 库"
+        ],
+        [
+          "文件路径定义",
+          "③a（llm_paths.credentials_path）"
+        ],
+        [
+          "读写",
+          "③a Studio backend 经 storage seam（预留 user_id）"
+        ],
+        [
+          "文件归属",
+          "③b gateway-owned 数据"
+        ]
+      ]
+    },
+    {
+      "id": "secret-hydration",
+      "term": "凭证 hydration（明文回填，hydrateEndpointSecrets）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "前端把后端打码成 '**********' 的 key 逐个换回真值的逻辑。后端默认返回的 registry 快照里 key 是打码的，进 API Keys tab 时对每个被打码的 endpoint 单独发一次「取明文」请求（GET …/endpoints/{id}/secret），换回真值写进前端缓存，这样用户能看到/改自己已存的 key。这是纯前端的展示加工，后端只按 endpoint_id 原样返回明文、不探测不写盘。",
+      "detail": [
+        [
+          "定义层",
+          "① 前端（hydrateEndpointSecrets 逐 endpoint 换真值）"
+        ],
+        [
+          "复用范围",
+          "本页 #16 进 tab 回填、#31 刷新恢复后换真值"
+        ]
+      ]
+    },
+    {
+      "id": "test-status-projection",
+      "term": "状态投影（test status projection，后端测试结果 → 状态标签）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "前端不自己持有第二份「真相」，而是把后端 registry 里每条 endpoint/route 的状态投影成 UI 标签：第三方卡顶层一个连通徽章（按当前参数指纹查缓存的测试结果，参数变了就取不到旧结果、自动回落未测）、官方卡每条 route 一个彩色 Tag（直接信后端权威状态）。状态权威来自 ③a 投影出的 DTO（底层是 ③b 的 6 态总结），前端只读着渲染、不另持真相。",
+      "detail": [
+        [
+          "定义层",
+          "① 前端（只投影 registry/route 状态，不持第二份真相）"
+        ],
+        [
+          "复用范围",
+          "本页 #21 改 key 失效回退、#30 状态投影、#31 刷新恢复"
+        ]
+      ]
+    },
+    {
+      "id": "provider-utils",
+      "term": "provider-utils（第三方共享工具集）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "API Keys 页一组复用的纯函数：把 5 家官方厂商各映射成一张卡（缺的补空卡）、过滤出第三方卡、按「参数指纹」缓存/查测试结果（key+URL+协议变了指纹就变、旧结果失效）、判断 Manual 探测面板该不该显示、从 id/name/url 猜 provider 短名等。多处卡片共用，是这页的状态/分区中枢。纯前端工具，分区靠前端白名单完成、后端不参与。",
+      "detail": [
+        [
+          "定义层",
+          "① 前端（纯函数工具集）"
+        ],
+        [
+          "复用范围",
+          "本页 #17 分区、#21/#27/#28/#30 等多卡共用的指纹缓存与短名推断"
+        ]
+      ]
+    },
+    {
+      "id": "role-name-dialog",
+      "term": "RoleNameDialog（命名弹框，复用组件）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "一个通用的「输入名字 → 确认」弹框组件，原本给角色命名用，这里被 API Keys 页复用：新增第三方 provider 时弹它填名，第三方卡改名（⋮ → Rename）也弹它。纯前端 UI 组件，与后端无关。",
+      "detail": [
+        [
+          "定义层",
+          "① 前端（通用命名弹框组件）"
+        ],
+        [
+          "复用范围",
+          "本页 #19 新增第三方、#20/#29 第三方改名；Roles 页角色命名同源复用"
+        ]
+      ]
+    }
+  ],
+  "atoms": [
+    {
+      "n": 16,
+      "cap": "secret-hydration",
+      "track": "共",
+      "marker": "live",
+      "module": "凭证录入与管理",
+      "func": "进 API Keys tab 时把后端（③a Studio）打码的 key 换回真值，让用户看到/改自己已存的密钥。",
+      "action": "切到 API Keys tab（首次进入触发一次加载）。",
+      "fe_logic": "切进 API Keys tab → 先拉一份 registry 快照（里面 key 都是 '**********' 打码的）→ [[secret-hydration]]（凭证 hydration）逐个检查哪些 endpoint 的 key 是打码值 → 对这些 endpoint 各发一次「取明文」请求换回真 key → 写进前端缓存，用户即可看到/编辑。首次进 tab 时连带真值一起换，之后窗口聚焦重拉只取打码快照不重换。",
+      "fe_modules": [
+        "secret-hydration"
+      ],
+      "be_logic": "「取明文」请求按 endpoint_id 读 [[credentials-file]]，取出该 endpoint 的真 key 原样返回——不探测、不改状态、不写盘。",
+      "be_api": [
+        {
+          "endpoint": "GET /llm/registry/endpoints/{endpoint_id}/secret",
+          "owner": "③a Studio",
+          "purpose": "返回单个 endpoint 的明文 key（仅本地 settings UI 用），逐个换真值前先用 GET /llm/registry 拿打码快照。",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计（§6.1 握手 A10 secret reveal、A1 registry redacted）。"
+    },
+    {
+      "n": 17,
+      "cap": "provider-partition",
+      "track": "共",
+      "marker": "live",
+      "module": "凭证录入与管理",
+      "func": "把页面拆成官方区（固定 5 厂商）和第三方区（用户自增），让用户一眼分清官方/第三方。",
+      "action": "无（进 tab 自动渲染）。",
+      "fe_logic": "进 tab 自动渲染 → 上半「official」区把 5 家固定厂商（anthropic/openai/gemini/deepseek/ark）各映射成一张卡（缺的补空卡，base_url 用各家 canonical 默认值注入）→ 下半「third-party」区把用户自增的 provider form draft（前端局部草稿态，不是 Probe Knowledge Catalog）过滤出来逐张渲染 → 每张卡都是一个 [[provider]] 录入+测试卡。分区靠前端的 [[provider-utils]] 白名单完成，后端（③a Studio）不参与。",
+      "fe_modules": [
+        "provider-utils"
+      ],
+      "be_logic": "无——后端（③a Studio）只回平铺的 registry，分区是纯前端行为。",
+      "be_api": [],
+      "gap": "符合设计（§1.1/§1.2 官方固定可控 vs 第三方自增；§7.2 #17 ✅）。"
+    },
+    {
+      "n": 18,
+      "cap": "official-key-only",
+      "track": "官",
+      "marker": "live",
+      "module": "凭证录入与管理",
+      "func": "官方卡只让填 API Key，并在同一卡内用一个 Test 动作验证连接、展示 Available Endpoints / Available Routes。",
+      "func_note": "",
+      "action": "在官方卡填 API Key → 点右侧 `Test`；展开卡片查看 Available Endpoints 与 route 标签。",
+      "fe_logic": "官方卡识别为 isOfficial → 协议下拉、Base URL 输入、Endpoint test 三段全不渲染，只留 API Key 输入行 + 右侧单一 `Test` 按钮 → canonical base_url 由白名单默认值注入、不暴露成可编辑框 → 卡内渲染 `Available Endpoints`，每个 endpoint 用 Tag + Radix Tooltip 展示 provider、endpoint id、base URL、protocol、status、routes、profiles、verified method ids、request mapper ids、tool protocol、last test/message 等详情 → 官方卡没有 ⋮ 菜单和 Third-party 徽章，所以不可改名/删。",
+      "fe_modules": [
+        "provider-utils"
+      ],
+      "be_logic": "填写本身不发请求。注：官方端点的 [[provider-kind]] 由后端（③a Studio）钉死——保存时若 endpoint_id 命中官方白名单，强制标成 official，前端改不了。",
+      "be_api": [
+        {
+          "endpoint": "PUT /llm/registry/endpoints",
+          "owner": "③a Studio",
+          "purpose": "保存草稿时整批 upsert endpoint（填写本身不发，测试见 #24）。",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计：官方参数固定可控，页面只暴露 API Key + 单一 Test + Available Endpoints / Available Routes；不再渲染手动 Endpoint test 输入。"
+    },
+    {
+      "n": 19,
+      "cap": "tp-add-provider",
+      "track": "三",
+      "marker": "live",
+      "module": "凭证录入与管理",
+      "func": "让用户用一个 inline 表单一次性新增第三方 provider 的 name、Base URL 和 API Key。",
+      "action": "点 `+ Add Provider` → 在下方 inline 表单填 Provider name / Base URL / API Key → 点 `Add`。",
+      "fe_logic": "点 + Add Provider → 展开 [[add-provider-form]] inline 表单 → 提交时校验 name/base_url/api_key 都非空且 name 不重复 → 生成 custom-{随机 UUID} 作 code，带着 base_url/api_key 直接进入第三方草稿列表 → 草稿入队等 debounce 自动保存。API Key 输入始终 type=text；空字段不加 mask class，placeholder 必须可读，只有已有值时才 CSS mask。",
+      "fe_modules": [
+        "add-provider-form"
+      ],
+      "be_logic": "新增即建前端草稿，没有独立 add 端点；草稿随 debounce 整批 upsert 到 [[credentials-file]]。",
+      "be_api": [
+        {
+          "endpoint": "PUT /llm/registry/endpoints",
+          "owner": "③a Studio",
+          "purpose": "草稿保存时整批 upsert（提交弹框本身不发请求）。",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "已对齐：旧的两步 name-only 弹框已替换为 AddProviderForm inline 一次填全；Protocol 不再手填，后续由测试/后端路径判断。当前仍是单 base_url DTO，多 Base URL 见 #20。"
+    },
+    {
+      "n": 20,
+      "cap": "tp-credential-edit",
+      "track": "三",
+      "marker": "live",
+      "module": "凭证录入与管理",
+      "func": "让用户填/改第三方 provider 的 name、Base URL 和 API Key；Base URL 当前单条，目标是同 provider 支持多条 URL。",
+      "action": "在第三方卡内编辑 Base URL / API Key；改名走 ⋮ → Rename。",
+      "fe_logic": "在第三方卡里改 Base URL / API Key 任一项 → 每次改动合并成一个 patch 落到 SettingsPage → debounce 自动保存；改名走 ⋮ → Rename 弹 [[role-name-dialog]] 回填 name。Protocol 下拉不再渲染，卡片使用当前 provider_type/后端归一化结果表达协议。",
+      "fe_modules": [
+        "provider-utils",
+        "role-name-dialog"
+      ],
+      "be_logic": "仅前端草稿 + debounce 落库 → 整批 upsert 时后端（③a Studio）会把 base_url 按协议归一化、api_key 省略时保留旧值；真探测在 #24/#25/#26/#27 才发生。当前 DTO 仍是单 `base_url: string`，多 URL 需要 endpoint DTO / 保存链路扩展后才能落地。",
+      "be_api": [
+        {
+          "endpoint": "PUT /llm/registry/endpoints",
+          "owner": "③a Studio",
+          "purpose": "编辑触发的 debounce 保存走它（整批 upsert）。",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "部分对齐：当前 UI 已清掉 Protocol 下拉并保持单 Base URL；设计/机制卡要求同一 provider 可挂多个 Base URL（每条 URL × protocol 形成 endpoint，UI 需要 `+ URL` 添加按钮），这仍是契约层缺口，不能只在前端假造。"
+    },
+    {
+      "n": 21,
+      "cap": "credential-key-edit",
+      "track": "共",
+      "marker": "live",
+      "module": "凭证录入与管理",
+      "func": "改 API Key 后让旧测试结果立即失效、状态徽章退回未测，避免拿旧 key 的「已连通」误导用户。",
+      "action": "在 API Key 输入框里修改 key 文本。",
+      "fe_logic": "改 API Key 文本 → SettingsPage 比对新旧参数（key/URL/协议）是否一致 → 参数变了就把该 provider 加进「已失效」集合 → 顶层徽章按「参数指纹」查缓存结果，指纹对不上就取不到旧结果、自动回落未配置/未测。纯前端按参数指纹判失效，后端（③a Studio）不参与。",
+      "fe_modules": [
+        "test-status-projection",
+        "provider-utils"
+      ],
+      "be_logic": "无——失效判定纯前端，后端（③a Studio）只在重测时写新状态。",
+      "be_api": [],
+      "gap": "符合设计（§7.2 #21 ✅ 改后旧测试失效→badge 回 untested；与 §4.2 [[six-state]] 一致）。"
+    },
+    {
+      "n": 22,
+      "cap": "secret-mask-toggle",
+      "track": "共",
+      "marker": "live",
+      "module": "凭证录入与管理",
+      "func": "用眼睛图标在明文与掩码之间切换 API Key 显示，方便核对又默认不外泄。",
+      "action": "点 API Key 输入框旁的 Eye / EyeOff 图标。",
+      "fe_logic": "点眼睛图标 → 翻转 visible 状态 → 输入框始终保持 type=text；隐藏态通过 CSS mask 隐藏真实值，可见态移除 mask。空 API Key 字段不加 mask class，placeholder 保持可读。",
+      "fe_modules": [],
+      "be_logic": "无（纯前端显隐）。",
+      "be_api": [],
+      "gap": "已对齐：ProviderCard 与 AddProviderForm 都保持 type=text + CSS mask；只有字段已有值时才加 mask class，避免空 placeholder 显示成圆点，也避免触发浏览器密码管理器。"
+    },
+    {
+      "n": 23,
+      "cap": "secret-copy",
+      "track": "共",
+      "marker": "live",
+      "module": "凭证录入与管理",
+      "func": "一键把 API Key 复制到剪贴板，省去手动选中长串密钥。",
+      "action": "点 API Key 旁的 Copy 图标。",
+      "fe_logic": "点 Copy 图标 → 调浏览器剪贴板写入 key → 成功/失败各弹一条提示；key 为空时按钮禁用。",
+      "fe_modules": [],
+      "be_logic": "无（浏览器剪贴板 API，无网络）。",
+      "be_api": [],
+      "gap": "符合设计（§6.1 ① 前端 复制；§7.2 #23 ✅）。"
+    },
+    {
+      "n": 24,
+      "cap": "official-test-job",
+      "track": "官",
+      "marker": "live",
+      "module": "测试与模型探测",
+      "func": "官方卡点 Test：通过后端 job 化测试读取 provider catalog / route candidates，并把结果投影到 Available Endpoints、Available Routes 和 toast。",
+      "action": "在官方卡点 `Test` 按钮。",
+      "fe_logic": "官方卡点 Test → 前端起一个后端（③a Studio）任务（job）→ 轮询 compact job status → 把 catalog/list 返回的候选合并到当前 provider test result → 卡内只显示这一个 Test 动作；不渲染 Endpoint test 输入，也不在前端发每模型 generation probe。",
+      "fe_modules": [
+        "test-status-projection"
+      ],
+      "be_logic": "后端 job 读取 provider model catalog / route candidates，写回 endpoint/route 状态与可用候选；单模型 generation/profile probe 留给 Role Test 或后续显式 probe 路径。状态和已发现模型经原子写落进 [[credentials-file]]（job 进度本身是内存态、不落盘）。",
+      "be_api": [
+        {
+          "endpoint": "POST /llm/endpoints/{endpoint_id}/test-jobs",
+          "owner": "③a Studio",
+          "purpose": "起一个官方 provider 异步批量测试 job（拉全模型目录），返回 job_id。",
+          "connected": "部分"
+        },
+        {
+          "endpoint": "GET /llm/endpoint-test-jobs/{job_id}",
+          "owner": "③a Studio",
+          "purpose": "750ms 轮询该 job 的进度/结果。",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "基本对齐：官方卡单 Test + compact job 已是主路径；需继续确保 toast 只汇总 live verified / unverified / failed，不把 catalog 总数误称为 verified。"
+    },
+    {
+      "n": 25,
+      "cap": "tp-unified-test",
+      "track": "三",
+      "marker": "live",
+      "module": "测试与模型探测",
+      "func": "第三方卡点 Test：用当前 API Key + Base URL 做一次统一连接/模型发现测试，回填 Available Endpoints 与 Available Models。",
+      "action": "在第三方卡点 `Test` 按钮。",
+      "fe_logic": "第三方卡只有一个 `Test` 按钮 → 点击前校验 API Key 和 Base URL → 走当前 endpoint 连通 / 模型发现路径 → 结果按参数指纹缓存并投影到卡内状态、`Available Endpoints` 与 `Available Models`；不再同时显示 `Get Models` 与第二个 `Endpoint test`。",
+      "fe_modules": [
+        "test-status-projection"
+      ],
+      "be_logic": "第三方走单 endpoint 测试：先把该 endpoint upsert 落库，再读取模型列表/连通状态并写回 registry。当前后端仍主要证明 key+URL 可达，是否做完整 generation/profile probe 仍需与统一 batch probe 契约继续收敛。",
+      "be_api": [
+        {
+          "endpoint": "POST /llm/endpoints/{endpoint_id}/test",
+          "owner": "③a Studio",
+          "purpose": "对单个 endpoint 同步跑一次连通+models-list 发现，返回模型列表与新状态。",
+          "connected": "已接通"
+        },
+        {
+          "endpoint": "PUT /llm/registry/endpoints",
+          "owner": "③a Studio",
+          "purpose": "前置 upsert 落 endpoint。",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "前端已对齐：第三方卡已清掉 Get Models/Endpoint test 双测试 UI，只保留一个 Test。后端语义仍待统一成不分官/三的 endpoint 测试 + batch/profile probe。"
+    },
+    {
+      "n": 26,
+      "cap": "available-endpoints-summary",
+      "track": "三",
+      "marker": "live",
+      "module": "测试与模型探测",
+      "func": "在官方和第三方 provider 卡内显示 Available Endpoints，并用 tooltip 展示 endpoint 详细信息。",
+      "action": "展开任意 provider 卡 → 查看 `Available Endpoints`；hover/focus endpoint 标签查看详情。",
+      "fe_logic": "ProviderCard 根据当前 draft/persisted/test result 组装 endpoint summary → 在官方与第三方卡内渲染 `Available Endpoints` 区域 → 每个 endpoint 用本地 Tag 展示 base URL / method 数 / 状态，用 Radix Tooltip 展示 provider、endpoint id、base URL、protocol、status、routes、profiles、verified method ids、request mapper ids、tool protocol、SDKs、last test/message、error code；不使用原生 title，避免双 tooltip。当前前端 DTO 只有单 base_url，所以每卡最多展示一条；Ark 等官方 provider 的多调用路径归入该 endpoint 下的 call methods / verified profiles。",
+      "fe_modules": [
+        "test-status-projection"
+      ],
+      "be_logic": "数据来自后端（③a Studio）registry / test result 投影；当前仍是一条 endpoint 一个 base_url。多 Base URL 落地后，后端需返回同 provider 下多 endpoint / 多 base_url 明细，前端才能渲染多条。",
+      "be_api": [
+        {
+          "endpoint": "GET /llm/registry",
+          "owner": "③a Studio",
+          "purpose": "返回 endpoint/base_url/provider_type/route/test 状态供 Available Endpoints 投影。",
+          "connected": "已接通"
+        },
+        {
+          "endpoint": "POST /llm/endpoints/{endpoint_id}/test",
+          "owner": "③a Studio",
+          "purpose": "刷新当前 endpoint 测试结果，回写 endpoint 状态和候选模型。",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "前端当前 UI 已对齐：官方/第三方都有 Available Endpoints + tooltip，并删除旧 Endpoint test 单元。剩余缺口是多 Base URL 契约尚未落地，现只能展示单 endpoint。"
+    },
+    {
+      "n": 27,
+      "cap": "manual-model-probe",
+      "track": "共",
+      "marker": "live",
+      "module": "测试与模型探测",
+      "func": "在「Manual model probing」面板加多个 model id 一次性批量探测，自动列模型不可用时手动喂候选。",
+      "action": "在 Manual model probing 面板点 `Add Model` 填多个 model id → 点 `Test Models`。",
+      "fe_logic": "在 Manual model probing 面板里 Add Model / 删行管理一组 model id → 点 Test Models 批量发探测 → 结果以绿/红徽章列表呈现、并回写 Available Models。面板显示条件：官方卡恒显，第三方卡需已连通或已有模型才显（[[provider-utils]] 判定）。",
+      "fe_modules": [
+        "provider-utils",
+        "test-status-projection"
+      ],
+      "be_logic": "后端（③a Studio）按 [[provider-kind]] 分叉走两条不同路：官方 → 跑「能力档案探测」产出多个候选 profile、带真实能力探测；第三方 → 对每个 model 打 1 次探测，成功时把能力写死成 text-only（硬编码 input/output 都只有 'text'）。结果原子写落 [[credentials-file]]。",
+      "be_api": [
+        {
+          "endpoint": "POST /llm/endpoints/{endpoint_id}/models/test",
+          "owner": "③a Studio",
+          "purpose": "model_ids 多个逐个探测；官方走 profile 探测产多能力候选，第三方走单探+写死 text-only。",
+          "connected": "部分"
+        }
+      ],
+      "gap": "DRIFT（铁律）：同一个端点后端（③a Studio）按官/三分叉成两条不对称路——官方探到「多个候选档案 + 真实能力」，第三方只单探一次、能力硬写成 text-only（纯文本）。目标是统一成同一套：不分官/三都做批量探测 + 统一能力探测（能力归一化，缺了就 probe 兜底），见 §1.2 + §6.1 A5/A7。§7.2 #27 标 ⚠️。"
+    },
+    {
+      "n": 28,
+      "cap": "notable-models",
+      "track": "共",
+      "marker": "live",
+      "module": "测试与模型探测",
+      "func": "Manual 面板自动拉该 provider 的「值得一试」候选 model id，作为输入框占位建议，降低手填门槛。",
+      "action": "无（Manual 面板挂载时自动拉取）。",
+      "fe_logic": "Manual 面板出现时自动按 provider 短名拉一份「值得一试」的 model id 列表 → 写进输入框的占位提示，帮用户少手敲。provider 短名由工具函数从 id/name/url 猜出。",
+      "fe_modules": [
+        "provider-utils"
+      ],
+      "be_logic": "按 provider 短名从「随后端（③a Studio）打包的静态推荐文件」读候选列表返回——不分官/三、纯读不写盘。数据源是打包静态文件、不是用户凭证，不走凭证存储缝。",
+      "be_api": [
+        {
+          "endpoint": "GET /llm/providers/notable-models?provider_key={key}",
+          "owner": "③a Studio",
+          "purpose": "按 provider 短名返回文档维护的「值得一试」model id 列表（输入建议用）。",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计（§7.2 #28 ✅ 有 note 文件即返、不分官/三；属 §1.2/§6.1 ① 前端的输入建议辅助）。"
+    },
+    {
+      "n": 29,
+      "cap": "tp-rename-delete",
+      "track": "三",
+      "marker": "live",
+      "module": "凭证录入与管理",
+      "func": "第三方卡的 ⋮ 菜单改名/删除（删除带二次确认），让用户管理自增的第三方 provider；官方卡无此菜单不可改名/删。",
+      "action": "点第三方卡 `⋮` → Rename（弹框改名）/ Delete（确认后删）。",
+      "fe_logic": "第三方卡 ⋮ 菜单（官方卡无此菜单）→ Rename 弹 [[role-name-dialog]] 改 name；Delete 先弹二次确认提示 → 确认后从草稿移除、并标记角色投影需刷新、debounce 落库。",
+      "fe_modules": [
+        "role-name-dialog",
+        "provider-utils"
+      ],
+      "be_logic": "删除有两条路：(a) 草稿删后整批 upsert——但 upsert 是「缺席即保留」语义，单靠它删不掉；(b) 真正删用专门的删除端点，删 endpoint 并级联清掉角色里引用该 endpoint 的 route（先原子写角色文件移引用，再原子写 [[credentials-file]] 删 endpoint）。改名只改显示名随草稿保存。涉及凭证文件和角色文件两个存储缝（均 ③b gateway-owned）。",
+      "be_api": [
+        {
+          "endpoint": "PUT /llm/registry/endpoints",
+          "owner": "③a Studio",
+          "purpose": "整表 upsert（缺席=保留，非删除）。",
+          "connected": "已接通"
+        },
+        {
+          "endpoint": "DELETE /llm/registry/endpoints/{endpoint_id}",
+          "owner": "③a Studio",
+          "purpose": "删该 endpoint 并级联清掉角色里引用它的 route。",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计（§6.1 A11 删 endpoint 二次确认+级联清 route；§7.2 #29 ✅ 删除二次确认、官方不可改名/删）。注：独立删除按钮 ProviderDeleteButton 定义未在卡内渲染，属孤儿。"
+    },
+    {
+      "n": 30,
+      "cap": "test-status-projection",
+      "track": "共",
+      "marker": "live",
+      "module": "状态投影",
+      "func": "把后端（③a Studio）测试结果投影成状态标签：第三方卡顶层一个连通徽章（按参数指纹取缓存结果）、官方每条 route 一个彩色 Tag（信后端（③a Studio）权威状态）。",
+      "action": "无（测试/加载后自动投影；含改 key 失效回退见 #21）。",
+      "fe_logic": "[[test-status-projection]]（状态投影）把后端（③a Studio）endpoint/route 状态转成 UI 标签：provider 卡内的 Available Endpoints 展示 endpoint 级状态；Available Routes/Models 展示 route/model 级状态；参数变化后按指纹让旧结果失效。",
+      "fe_modules": [
+        "test-status-projection",
+        "provider-utils"
+      ],
+      "be_logic": "状态权威来自后端（③a Studio）把 endpoint/route 的 status 投影成 DTO；route status 由 #24/#26/#27 各测试 handler 写进 [[credentials-file]]。投影本身只读不写盘。底层凭证数据 ③b gateway-owned。",
+      "be_api": [
+        {
+          "endpoint": "GET /llm/registry",
+          "owner": "③a Studio",
+          "purpose": "数据来自各测试响应内嵌的 registry + 这个全量快照（投影本身不发额外请求）。",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "仍需继续统一到底层 [[six-state]]：当前前端已把 endpoint 详情集中到 Available Endpoints，但后端 route/status 枚举和历史态投影仍需收敛到 6 态标准。"
+    },
+    {
+      "n": 31,
+      "cap": "registry-restore",
+      "track": "共",
+      "marker": "live",
+      "module": "凭证录入与管理",
+      "func": "刷新/重开页面后，从后端（③a Studio）registry 恢复每个 provider 的 key、测试状态、Available Models，不丢用户已配的凭证与探测结果。",
+      "action": "无（刷新或重新进入页面自动恢复；其它窗口改动聚焦回来也重拉）。",
+      "fe_logic": "刷新或重进页面 → 拉一份全量 registry 快照（含 endpoint+route+状态+已发现模型）→ 转成 UI 凭证态恢复每张卡 → key 再经 #16 的 [[secret-hydration]] 换回真值。初始与窗口聚焦时各拉一次。前端只投影 registry、不持第二份真相。",
+      "fe_modules": [
+        "secret-hydration",
+        "test-status-projection"
+      ],
+      "be_logic": "返回 endpoint/route/role 联合快照的端点读 [[credentials-file]] 并投影，api_key 一律打码。只读不写盘。端点 ③a Studio，凭证数据 ③b gateway-owned。",
+      "be_api": [
+        {
+          "endpoint": "GET /llm/registry",
+          "owner": "③a Studio",
+          "purpose": "返回全量 endpoint/route/role 的打码快照（恢复 key 占位/状态/Available Models 用），key 真值另走 #16 的 secret 端点。",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计（§6.1 ① 前端 只投影 registry、不持第二份；§7.2 #31 ✅ 刷新后从 registry 恢复）。"
+    }
+  ]
+}

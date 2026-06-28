@@ -1,0 +1,130 @@
+{
+  "id": "n5_trace_impl",
+  "title": "N5.4 Trace 时间线 · 实施详情",
+  "design_ref": "n5_trace_design",
+  "intro": "本页是 N5.4(Trace 面板面)前端的现状/差距/实施计划/测试,1:1 对应设计页 n5_trace_design(原子 #10–#13)。代码按「文件名 + 函数/对象名」引用。核心结论:Trace 面板这块是 N5 最成熟的面——实时 trace、全局续跑、断线重连补流、搜索过滤均已实现且符合;它是 N5 其余面(红灯/边黑板)的事件底座。事件/续跑机制见 mech_n5_events / mech_n5_resume。 UI 技术债(触碰时改):TracePanel.tsx 现用 emerald/amber/sky/zinc 等具体 palette class,违 FRONTEND_UI_SPEC 语义 token 原则——改 trace UI 时一并换语义 token。",
+  "functions": [
+    {
+      "n": 10,
+      "cap": "live-trace-stream",
+      "design_ref": "atom-10",
+      "current": "现状:符合。useRunStream(hooks/useRunStream.ts)连 WS /ws/runs/{run_id} 持续把 EventEnvelope 批量(每 ~100ms flush)刷进状态;TracePanel.tsx 内 VirtualTraceList 虚拟滚动实时渲染(只渲可视区行,应对上千条事件)。只读投影,不在前端拼第二份运行真相。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "be_dep": "已就绪:WS /ws/runs/{run_id} 经 run_manager.stream_run 推 EventEnvelope(见 mech_n5_events)。"
+    },
+    {
+      "n": 11,
+      "cap": "global-resume-from-checkpoint",
+      "design_ref": "atom-11",
+      "current": "现状:符合。TracePanel.tsx 顶栏[Resume]按钮(aria-label『Resume run from last checkpoint』),canResume=Boolean(runId) + resumeLoading 控制可点;点 onResume → Workspace.tsx 的 handleResume 调 resumeRun(skillId, runId) **不带 options** → 后端用 restore 出的最近 checkpoint 整体续。run 级续跑入口对得上(节点级精准续是另一条语义,见 N5.1#2)。",
+      "gap": "符合设计,无需改(全局 run 级续跑入口已具备;与节点级并存)。",
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "be_dep": "已就绪:resume 端点不带 node 参数即全局续(lease/fencing 续跑链已通,见 mech_n5_resume)。"
+    },
+    {
+      "n": 12,
+      "cap": "trace-reconnect-replay",
+      "design_ref": "atom-12",
+      "current": "现状:符合。useRunStream 记 cursorRef、断线按 nextBackoffMs(lib/websocket.ts,1s 起×2 封顶 30s)退避重连、重连 URL 由 runEventsWsUrl 带 ?cursor= 续接、按 seq 去重并检测 gap,暴露 status/error/cursor/reconnectInMs;sidecar 侧续接由 run_manager.stream_run(run_id, cursor) + _events_after_cursor(内存 record.events replay、解析 expired/gap)实现,websockets.py 的 run_events 调用。",
+      "gap": "符合设计,无需改(断线重连 + cursor 续接 + seq 去重三件套已具备)。",
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "be_dep": "已就绪:WS /ws/runs/{run_id}?cursor= + sidecar run_manager.stream_run/_events_after_cursor 续接补流(注:engine 的 EventStreamBuffer/StreamCursor 已定义但未被该 WS 路由使用,维护改 WS replay 改 run_manager,见 mech_n5_events)。"
+    },
+    {
+      "n": 13,
+      "cap": "trace-search-filter",
+      "design_ref": "atom-13",
+      "current": "现状:符合。过滤逻辑已抽成纯函数 filterTraceEvents(useTraceFilter.ts:在已收事件上按搜索词 + phase 过滤的纯函数),TracePanel.tsx 内 VirtualTraceList 经 useTraceFilter hook 消费它,在已收事件上客户端即筛即显(仍虚拟滚动),不重请求。",
+      "gap": "符合设计,无需改。过滤纯函数 filterTraceEvents 已抽出并单测覆盖。",
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "be_dep": "n/a(纯前端在已收事件上过滤,无后端契约)。",
+      "fe_resync": "过滤逻辑抽成纯函数 filterTraceEvents(useTraceFilter.ts)并由 useTraceFilter.test.ts 单测(搜索词→只剩匹配、phase 切换→只剩该 phase、在已收事件上筛)+ hook 表面;另加 e2e run-trace.spec.ts;verified by green gates + post-audit(2026-06-20)"
+    }
+  ],
+  "plan": [
+    {
+      "step": 1,
+      "what": "N5.4 四个功能(#10 实时 trace / #11 全局续跑 / #12 重连补流 / #13 搜索过滤)现状均符合设计,无前端改动项;作为 N5 其余面(N5.1 红灯、N5.3 边黑板)的事件底座保持稳定即可。若 N5.1/N5.3 改动触及共用的 useRunStream/事件派生,回归测本页四项不退化。",
+      "depends_on": "无独立改动;仅作为底座被 N5.1/N5.3 复用时做回归保护。",
+      "why": "本面已符合 spec,列为『无需改 + 回归保护』;把改动预算留给真正偏差的 N5.1/N5.2/N5.3。",
+      "block": "前端独立"
+    }
+  ],
+  "tests": [
+    {
+      "covers": "#10 live-trace-stream",
+      "atoms": [
+        10
+      ],
+      "shots": [
+        "run 进行中 Trace 面板实时滚动展示事件(虚拟滚动,上千条不卡)"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "mock WS 推一串 EventEnvelope → 断言 useRunStream 批量刷入、VirtualTraceList 实时渲染。",
+        "断言只读投影(不在前端改写事件)。"
+      ],
+      "layer2": [
+        "真跑:真跑一条多 phase skill,确认 Trace 实时滚动、事件量大时不卡顿,截图。"
+      ]
+    },
+    {
+      "covers": "#11 global-resume-from-checkpoint",
+      "atoms": [
+        11
+      ],
+      "shots": [
+        "Trace 顶栏全局[Resume]可点(有 run 时),点后从最近 checkpoint 整体续"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "断言 canResume=Boolean(runId) 控制[Resume]可点性;点击 → resumeRun(skillId, runId) 被调且**不带** node options(全局续)。",
+        "断言 resumeLoading 时按钮禁用。"
+      ],
+      "layer2": [
+        "真跑:真跑一条 run 到中断,点 Trace 顶栏全局[Resume],确认从最近 checkpoint 整体续,截图。"
+      ]
+    },
+    {
+      "covers": "#12 trace-reconnect-replay",
+      "atoms": [
+        12
+      ],
+      "shots": [
+        "WS 断开后自动按退避重连、用 cursor 续接补齐断线期间事件、不重复"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "mock socket 断开 → 断言按 nextBackoffMs 退避重连、重连 URL 带 ?cursor=。",
+        "推重复 seq → 断言去重;制造 seq 缺口 → 断言检测 gap。",
+        "(后端)断言 run_manager.stream_run + _events_after_cursor 据 cursor replay、解析 expired/gap(非 EventStreamBuffer)。"
+      ],
+      "layer2": [
+        "真跑:手动断开后端再恢复,确认 Trace WS 自动重连并用 cursor 补齐断线期间事件、无重复无丢失,截图。"
+      ]
+    },
+    {
+      "covers": "#13 trace-search-filter",
+      "atoms": [
+        13
+      ],
+      "shots": [
+        "搜索关键词 / 按 phase 过滤后 Trace 即筛即显"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "对纯函数 filterTraceEvents(useTraceFilter.ts)单测:输入搜索词 → 断言只剩匹配事件;切 phase → 断言只剩该 phase 事件;断言在已收事件上筛(不重新请求)。",
+        "渲染 VirtualTraceList(经 useTraceFilter hook)→ 断言搜索/phase 过滤即筛即显。"
+      ],
+      "layer2": [
+        "e2e run-trace.spec.ts:真跑后在 Trace 搜索某关键词、按某节点过滤,确认即筛即显。"
+      ],
+      "fe_resync": "已真覆盖:纯函数 filterTraceEvents 抽到 useTraceFilter.ts 并由 useTraceFilter.test.ts 单测(搜索词、phase 切换、在已收事件上筛)+ hook 表面;e2e run-trace.spec.ts;verified by green gates + post-audit(2026-06-20)"
+    }
+  ]
+}

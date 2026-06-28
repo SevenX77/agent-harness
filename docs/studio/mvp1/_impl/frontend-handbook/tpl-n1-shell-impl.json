@@ -1,0 +1,323 @@
+{
+  "id": "n1_shell_impl",
+  "title": "N1.3 Workspace 外壳 · 实施详情",
+  "design_ref": "n1_shell_design",
+  "intro": "本页是 Workspace 外壳前端的现状/差距/实施计划/测试,1:1 对应设计页 n1_shell_design(原子 #15–#23)。代码按「文件名 + 函数/对象名」引用。结论:壳绝大多数已符合设计——D11(强隔离切换)、D10(非全屏启动)、D8(copilot 退出恢复)都已实现,本页主要记录现状证据 + 个别边角清理。其中 #22(copilot 退出恢复)以真代码为准纠正了旧审计稿/spec 的滞后标注。后端只涉及 Studio Rust 后端 native-fs(copilot 落盘 / sidecar 配置),见 n1_contract 机制 B。",
+  "functions": [
+    {
+      "n": 15,
+      "cap": "home-workspace-render-switch",
+      "design_ref": "atom-15",
+      "current": "现状:已实现且符合。Workspace 用 currentSkillId(navStack 末项经 resolveWorkspaceIdentity 解析)在画布面板按 settingsOpen / currentSkillId / 打开文件 渲 SettingsPage / WelcomePage(Home)/ SplitEditor / GraphCanvas;Home 与工作区同壳、只换画布面板。边角:WelcomeScreen.tsx 是 no-op 孤儿包装(onSelectSkill 传空函数),真实挂载是 Workspace 直接渲 WelcomePage。",
+      "gap": "符合设计。唯一边角:删 WelcomeScreen.tsx no-op 孤儿包装(前端独立清理)。",
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "be_dep": "n/a(纯前端渲染切换)。"
+    },
+    {
+      "n": 16,
+      "cap": "strong-isolation-skill-switch",
+      "design_ref": "atom-16",
+      "current": "现状:已实现且符合(D11)。Workspace 里以 skillId 为依赖的 useEffect:skillId 为 null 时 navStack 置空、activePanel 置 null、copilotOpen 置 false;进入 skill 时 navStack=[skillId]、activePanel=assets、copilotOpen=true。另一个以 currentSkillId 为依赖的 effect 清 runId 与选中测试输入。打开文件/分屏/选中在 pushNavSkill / popNavTo 时清。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "be_dep": "n/a(纯前端强隔离)。"
+    },
+    {
+      "n": 17,
+      "cap": "workspace-shell-layout",
+      "design_ref": "atom-17",
+      "current": "现状:已实现且符合(D11)。Workspace 渲全宽 Header + 12 单位宽 Toolbar(始终在)+ 水平 ResizablePanelGroup:left-panel(仅 activePanel 非空才挂载)、canvas(常在)、copilot(仅 copilotOpen 才挂载)。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "be_dep": "n/a(纯前端布局)。"
+    },
+    {
+      "n": 18,
+      "cap": "panel-switch",
+      "design_ref": "atom-18",
+      "current": "现状:已实现且符合(D11)。Toolbar 渲五个 PanelKind(assets/properties/input/timeline/local-history)按钮,onClick 是 onPanelChange(点当前激活则传 null=toggle),接 setActivePanel;activePanel 既选左面板内容也决定左栏挂载;运行类动作程序化设 activePanel=timeline。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "be_dep": "n/a(纯前端面板切换)。"
+    },
+    {
+      "n": 19,
+      "cap": "back-to-home-unload",
+      "design_ref": "atom-19",
+      "current": "现状:已实现且符合(D11)。Header 的 Layers logo onClick 调 onHome=handleHome:先 setSettingsOpen(false) 收 Settings,再 onCloseSkill()(App 把 currentSkillId 置 null)→ 触发 #16 的 skillId effect Home 分支卸载工作态。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "be_dep": "n/a(纯前端卸载)。"
+    },
+    {
+      "n": 20,
+      "cap": "settings-overlay-non-unload",
+      "design_ref": "atom-20",
+      "current": "现状:已实现且符合。Header onOpenSettings 仍 setSettingsOpen(true) 单向打开;Toolbar 接 settingsOpen/onSettingsToggle,用 setSettingsOpen(open => !open) 让 Settings 齿轮成为 toggle,并用 aria-pressed 暴露当前打开态。settingsOpen 只在画布面板把内容换 SettingsPage,left-panel 与 copilot 是同级兄弟 ResizablePanel、不受影响,currentSkillId 不变 → 工作区不卸载。再次点 Toolbar 齿轮或打开文件都会 setSettingsOpen(false) 收起 Settings。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "be_dep": "n/a(纯前端 overlay)。"
+    },
+    {
+      "n": 21,
+      "cap": "enter-mounts-copilot",
+      "design_ref": "atom-21",
+      "current": "现状:已实现且符合。copilotOpen 初始为 Boolean(skillId),#16 的 effect 进入置 true、Home 置 false;copilotOpen 为真时右侧挂 ResizablePanel 装 CopilotPanel(props skillId/workspaceRoot/view);Home 无 Copilot;新建空 skill 进入也 copilotOpen=true;Header Sparkles 按钮可手动 toggle。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "be_dep": "n/a(纯前端挂载;Copilot 对话/连接归 copilot-assist)。"
+    },
+    {
+      "n": 22,
+      "cap": "copilot-exit-restore",
+      "design_ref": "atom-22",
+      "current": "现状:桌面态已实现且符合(D8),纠正旧审计稿/spec 滞后标注。copilotStore(Copilot 会话内存 store)的 persistSessionToDisk(写盘唯一函数)经 writeWorkspaceFile(Rust native-fs 封装)落 .gemini/copilot/sessions/<skillId>/<会话id>.json,由 appendMessage 与 updateMessage(status 离开 running/pending 即结算时)触发;persistActiveSession 写 _active.json 记上次活跃 tab。再进/冷启动 hydrate 从盘读回按 id 合并(内存优先)、并按 _active.json 恢复上次活跃 tab;useCopilot 的 context effect 在 skillId 为 null(回 Home)时早返回、不清 store(reset 仅 web/无 workspace 身份的兜底分支调)。故对话跨退出/再进/冷启动恢复一致。Web/非桌面态 writeWorkspaceFile 抛 Desktop only(被吞进 persistenceError)、读/列返回空 → 内存优先、刷新即丢。",
+      "gap": "符合设计(桌面态)。以真代码为准:旧审计稿 surfaces_table「纯内存全丢=缺口」已过时,01_init.md 仍标 target-design 属 spec 滞后于代码。Web 态内存优先=MVP1 桌面优先设计边界(可接受),无需改。",
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "be_dep": "已就绪:Studio Rust 后端 write_workspace_file/read_workspace_file/list_workspace_dir/ensure_workspace_support_dirs 已实现(D8 落点)。"
+    },
+    {
+      "n": 23,
+      "cap": "app-startup-banner",
+      "design_ref": "atom-23",
+      "current": "现状:已实现且符合(D10)。RuntimeGate 已改写为非门:RuntimeShell 永远先渲染壳 children,只在底部中央渲非阻塞横幅(loading「Connecting to backend…」/ error「Backend unavailable — some features are disabled.」+ Retry,ready 无横幅);initializeRuntimeConfig(解析 sidecar 配置,Tauri 下取 Rust get_sidecar_config)在副作用里跑、失败标 degraded 但不挡渲染。代码注释明确引 D10。",
+      "gap": "符合设计。边角:组件名 RuntimeGate 已名不副实(实为连接状态横幅),可记为待重命名;sidecar eager-spawn 归平台(Studio Rust 后端)。",
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "be_dep": "n/a(横幅纯前端;sidecar 配置走 Rust get_sidecar_config 已实现,eager-spawn 归平台)。"
+    }
+  ],
+  "plan": [
+    {
+      "step": 1,
+      "what": "#15 删 WelcomeScreen.tsx no-op 孤儿包装(真实挂载是 Workspace 直接渲 WelcomePage);顺带记录 RuntimeGate 待重命名(#23)与 D3 死代码 open_in_cursor/terminal/codex 待删(见 n1_contract 机制 B)。",
+      "depends_on": "前端:删孤儿文件;其余为记录项。后端不动。",
+      "why": "壳 #15–#23 已符合设计,唯一可做的是清理孤儿/死代码,纯前端、零依赖。",
+      "block": "前端独立"
+    }
+  ],
+  "tests": [
+    {
+      "covers": "#15 home-workspace-render-switch",
+      "atoms": [
+        15
+      ],
+      "shots": [
+        "currentSkillId 为 null 渲 Home;进入 skill 渲工作区内容(同壳换画布)"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "渲染 Workspace,currentSkillId=null → 断言画布面板渲 WelcomePage。",
+        "设 currentSkillId=某 skill → 断言画布渲工作区内容(GraphCanvas/SplitEditor),Header 始终在。"
+      ],
+      "layer2": [
+        "启动到 Home → 画布是 WelcomePage;进入一个 skill → 画布变工作区,顶栏不变。"
+      ],
+      "screenshots": [
+        {
+          "file": "n1-03-workspace-open.png",
+          "caption": "currentSkillId=null 渲 Home;进入 skill 同一外壳换成画布内容"
+        }
+      ]
+    },
+    {
+      "covers": "#16 strong-isolation-skill-switch",
+      "atoms": [
+        16
+      ],
+      "shots": [
+        "进 skill 开面板后回 Home → navStack/面板/copilot 全卸载"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "进入 skillA(开面板/Copilot)→ 切 skillId=null → 断言 navStack 空、activePanel=null、copilotOpen=false。",
+        "切 skillA→skillB → 断言 navStack=[skillB]、activePanel=assets、copilotOpen=true,且 skillA 的选中/分屏不残留。"
+      ],
+      "layer2": [
+        "真跑:进 skill → 开面板 → 点左上 logo 回 Home → 工作区全卸载;再进另一 skill → 干净工作台、无上个 skill 残留。"
+      ],
+      "screenshots": [
+        {
+          "file": "n1-08-back-home.png",
+          "caption": "进 skill 开面板后点 Header logo 回 Home → 面板 / Copilot 全卸载(干净 Home)"
+        }
+      ]
+    },
+    {
+      "covers": "#17 workspace-shell-layout",
+      "atoms": [
+        17
+      ],
+      "shots": [
+        "进入 skill 后 Header + 左 Toolbar + 三栏(左面板/画布/Copilot)"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "进入 skill → 断言渲 Header + Toolbar + ResizablePanelGroup;activePanel 为 null 时左栏不挂载、为某面板时挂载。"
+      ],
+      "layer2": [
+        "进入 skill → 看到顶栏 + 左竖条 + 中间画布 + 右 Copilot。"
+      ],
+      "screenshots": [
+        {
+          "file": "n1-03-workspace-open.png",
+          "caption": "工作区外壳 = Header + 左 Toolbar + 三栏(左面板 / 画布 / Copilot)"
+        }
+      ]
+    },
+    {
+      "covers": "#18 panel-switch",
+      "atoms": [
+        18
+      ],
+      "shots": [
+        "点 Toolbar 面板按钮切左 dock 内容;再点同一个收起左栏"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "点 Toolbar 的 properties → 断言 activePanel=properties、左栏渲 Properties;再点 properties → 断言 activePanel=null、左栏收起。"
+      ],
+      "layer2": [
+        "依次点 Toolbar 五个面板图标看左 dock 内容切换;点当前激活的收起左栏。"
+      ],
+      "screenshots": [
+        {
+          "file": "n1-04-panel-switch.png",
+          "caption": "点 Toolbar 面板按钮切换左 dock 内容(切到 I/O 面板)"
+        }
+      ]
+    },
+    {
+      "covers": "#19 back-to-home-unload",
+      "atoms": [
+        19
+      ],
+      "shots": [
+        "点 Header logo 回 Home 并连带关 Settings,无孤儿 overlay"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "Settings 打开态,点 Header logo → 断言 handleHome 先 setSettingsOpen(false) 再 onCloseSkill()。",
+        "断言退首页后工作态卸载、Settings overlay 不再渲染。"
+      ],
+      "layer2": [
+        "进 skill 开 Settings → 点顶栏 logo → 回到 Home 且 Settings 已关、无残留浮层。"
+      ],
+      "screenshots": [
+        {
+          "file": "n1-08-back-home.png",
+          "caption": "点 Header 的 Layers logo 回 Home,连带关闭 Settings,无孤儿 overlay"
+        }
+      ]
+    },
+    {
+      "covers": "#20 settings-overlay-non-unload",
+      "atoms": [
+        20
+      ],
+      "shots": [
+        "打开 Settings 只换画布面板,左文件树/右 Copilot 仍在",
+        "Settings 已打开时再次点 Toolbar 齿轮会关闭,仍不卸载工作区"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "进入 skill 点 Toolbar Settings 齿轮 → 断言 settingsOpen=true、画布渲 SettingsPage,left-panel/copilot 仍挂载、currentSkillId 不变。",
+        "再次点同一个 Toolbar 齿轮 → 断言 settingsOpen=false、SettingsPage 卸载但 currentSkillId/工作区外壳不变。"
+      ],
+      "layer2": [
+        "进 skill → 开 Settings → 左文件树/右 Copilot 仍可见可点,工作区未退出。",
+        "再次点左下 Settings 齿轮 → Settings 关闭并回到工作区,未退 Home。"
+      ],
+      "screenshots": [
+        {
+          "file": "n1-05-settings-overlay.png",
+          "caption": "打开 Settings 只替换画布面板,工作区外壳(左树 / 右 Copilot)仍挂载"
+        },
+        {
+          "file": "settings-shell-toggle-closed.png",
+          "caption": "Settings 已打开时再次点 Toolbar 齿轮,只关闭 overlay 并保留工作区外壳"
+        }
+      ]
+    },
+    {
+      "covers": "#21 enter-mounts-copilot",
+      "atoms": [
+        21
+      ],
+      "shots": [
+        "进入 skill 右侧出现 Copilot;Home 无 Copilot"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "进入 skill → 断言 copilotOpen=true、右侧挂 CopilotPanel;切 Home → 断言 copilotOpen=false、无 Copilot 栏。",
+        "新建空 skill 进入 → 断言 copilotOpen=true。"
+      ],
+      "layer2": [
+        "进入 skill 看右侧 Copilot;回 Home 无 Copilot;新建空 skill 进入也立即有 Copilot。"
+      ],
+      "screenshots": [
+        {
+          "file": "n1-03-workspace-open.png",
+          "caption": "进入 skill 右侧出现 Copilot 面板(Home 屏无 Copilot)"
+        }
+      ]
+    },
+    {
+      "covers": "#22 copilot-exit-restore",
+      "atoms": [
+        22
+      ],
+      "shots": [
+        "与 copilot 对话后回 Home 再进同一 skill → 对话与上次活跃 tab 一模一样恢复"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "mock native-fs 读写,与 copilot 对话(含 AI 回答)→ 断言 persistSessionToDisk 把会话写到 .gemini/copilot/sessions/<skillId>/<id>.json、_active.json 记活跃 tab。",
+        "回 Home(skillId=null)→ 断言 useCopilot effect 早返回、copilotStore 未 reset。",
+        "再进同一 skill → 断言 hydrate 读回会话(含 AI 回答)并恢复上次活跃 tab。",
+        "断言 web/非桌面态 writeWorkspaceFile 抛 Desktop only 被吞进 persistenceError、不崩。"
+      ],
+      "layer2": [
+        "真跑(关键,桌面):进 skill → 与 copilot 对几句(等 AI 回答完)→ 回 Home → 再进同一 skill → 应看到原对话(含 AI 回答)与上次活跃 tab,不应是空白会话。",
+        "真跑:对话后冷启动应用 → 再进同一 skill → 对话仍恢复(冷启动 hydrate 读盘)。"
+      ],
+      "screenshots": [
+        {
+          "file": "n1-07-copilot-collapsed.png",
+          "caption": "Copilot 收起态(画布回流占满);展开 / 折叠切换正常"
+        }
+      ]
+    },
+    {
+      "covers": "#23 app-startup-banner",
+      "atoms": [
+        23
+      ],
+      "shots": [
+        "启动即渲染壳(无全屏 splash);后端不可用时底部非阻塞横幅 + Retry"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "渲染 RuntimeGate/RuntimeShell → 断言始终渲染壳 children(无全屏门);initializeRuntimeConfig 失败 → 断言只渲底部横幅 + Retry、不挡壳。",
+        "断言 ready 态无横幅、loading 态显「Connecting…」、error 态显「Backend unavailable」+ Retry。"
+      ],
+      "layer2": [
+        "真跑:启动应用 → 壳立即可见(无全屏 splash);断开后端启动 → 底部出现「Backend unavailable」+ Retry,界面其余仍可用。"
+      ],
+      "screenshots": [
+        {
+          "file": "n1-17-startup-banner.png",
+          "caption": "RuntimeShell error 态:应用壳保持可见,底部只显示非阻塞 Backend unavailable + Retry 横幅。"
+        }
+      ]
+    }
+  ]
+}

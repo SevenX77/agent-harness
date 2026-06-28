@@ -22,10 +22,12 @@ class HttpTransport:
         base_url: str,
         http_client: httpx.Client | None = None,
         schema_version: str = SCHEMA_VERSION,
+        headers: dict[str, str] | None = None,
     ):
         self.base_url = base_url
         self.http_client = http_client or httpx.Client()
         self.schema_version = schema_version
+        self.headers = dict(headers or {})
 
     def post(
         self,
@@ -34,7 +36,7 @@ class HttpTransport:
         *,
         idempotency_key: str | None = None,
     ) -> Any:
-        headers = {}
+        headers = dict(self.headers)
         if idempotency_key is not None:
             headers["Idempotency-Key"] = idempotency_key
 
@@ -60,19 +62,11 @@ class HttpTransport:
                 raise StudioAdapterError("transport.timeout", {"detail": str(last_exc)}) from last_exc
 
         if response.status_code >= 500:
-            try:
-                data = response.json()
-                if isinstance(data, dict) and "schema_version" in data and "ok" in data and not data["ok"]:
-                    err_code = data.get("error_code", "unknown")
-                    err_payload = data.get("error_payload")
-                    if not isinstance(err_payload, dict):
-                        err_payload = {"detail": err_payload} if err_payload is not None else {}
-                    raise StudioAdapterError(err_code, err_payload)
-            except StudioAdapterError:
-                raise
-            except Exception:
-                pass
+            self._raise_response_envelope_error(response)
             raise StudioAdapterError("transport.http_5xx", {"status_code": response.status_code})
+        if response.status_code >= 400:
+            self._raise_response_envelope_error(response)
+            raise StudioAdapterError("transport.http_4xx", {"status_code": response.status_code})
 
         try:
             data = response.json()
@@ -116,7 +110,7 @@ class HttpTransport:
         cursor: int | None = None,
         idempotency_key: str | None = None,
     ) -> Iterator[Any]:
-        headers = {}
+        headers = dict(self.headers)
         if idempotency_key is not None:
             headers["Idempotency-Key"] = idempotency_key
 
@@ -135,7 +129,11 @@ class HttpTransport:
             raise StudioAdapterError("transport.connection_refused", {"detail": str(exc)}) from exc
 
         if response.status_code >= 500:
+            self._raise_response_envelope_error(response)
             raise StudioAdapterError("transport.http_5xx", {"status_code": response.status_code})
+        if response.status_code >= 400:
+            self._raise_response_envelope_error(response)
+            raise StudioAdapterError("transport.http_4xx", {"status_code": response.status_code})
 
         seen_seqs = set()
         lines = response.text.splitlines() if response.text else []
@@ -181,3 +179,18 @@ class HttpTransport:
                 continue
 
             yield event_data
+
+    def _raise_response_envelope_error(self, response: httpx.Response) -> None:
+        try:
+            data = response.json()
+        except Exception:
+            return
+
+        if not (isinstance(data, dict) and "schema_version" in data and "ok" in data and not data["ok"]):
+            return
+
+        err_code = data.get("error_code", "unknown")
+        err_payload = data.get("error_payload")
+        if not isinstance(err_payload, dict):
+            err_payload = {"detail": err_payload} if err_payload is not None else {}
+        raise StudioAdapterError(err_code, err_payload)

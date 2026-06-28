@@ -157,6 +157,124 @@ def test_resolver_preserves_declared_route_order_and_role_metadata() -> None:
     assert resolved.runtime_policy.provider_down_ttl_seconds == 60
 
 
+def test_resolver_materializes_bundle_reference_with_role_delta_settings() -> None:
+    from graph_agent_gateway.registry.resolver import materialize_role_entry, resolve_role
+    from graph_agent_gateway.registry.schema import (
+        CapabilityValue,
+        ModelBundle,
+        ProviderEndpoint,
+        ProviderRoute,
+        RegistrySnapshot,
+        RoleEntry,
+        RoleRouteEntry,
+    )
+
+    snapshot = RegistrySnapshot(
+        provider_endpoints={
+            "openai": ProviderEndpoint(
+                endpoint_id="openai",
+                protocol="openai_compatible",
+                base_url="https://api.openai.example/v1",
+                api_key=SecretStr("secret"),
+            ),
+            "anthropic": ProviderEndpoint(
+                endpoint_id="anthropic",
+                protocol="anthropic_compatible",
+                base_url="https://api.anthropic.example",
+                api_key=SecretStr("secret"),
+            ),
+        },
+        provider_routes={
+            "openai:gpt-5": ProviderRoute(
+                route_id="openai:gpt-5",
+                endpoint_id="openai",
+                route_slug="gpt-5",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
+                status="verified",
+                capabilities={
+                    "thinking_protocol": CapabilityValue(value=True, source="manual"),
+                },
+            ),
+            "anthropic:claude": ProviderRoute(
+                route_id="anthropic:claude",
+                endpoint_id="anthropic",
+                route_slug="claude",
+                provider_model_id="claude",
+                canonical_id="claude",
+                status="verified",
+            ),
+        },
+        model_bundles={
+            "analysis": ModelBundle(
+                bundle_id="analysis",
+                fallback_chain=[
+                    RoleRouteEntry(
+                        route_id="openai:gpt-5",
+                        runtime_settings={
+                            "temperature": 0.2,
+                            "reasoning": {"enabled": True, "budget_tokens": 4096},
+                        },
+                    ),
+                    RoleRouteEntry(
+                        route_id="anthropic:claude",
+                        runtime_settings={"temperature": 0.4},
+                    ),
+                ],
+                lint_requirements={"thinking": "warn"},
+            )
+        },
+        roles={
+            "graph_agent": RoleEntry(
+                bundle_id="analysis",
+                fallback_chain=[
+                    RoleRouteEntry(
+                        route_id="openai:gpt-5",
+                        runtime_settings={
+                            "max_output_tokens": 8192,
+                            "reasoning": {"budget_tokens": 2048},
+                        },
+                    ),
+                    RoleRouteEntry(
+                        route_id="ghost:model",
+                        runtime_settings={"temperature": 1.0},
+                    ),
+                ],
+                lint_requirements={"tool_calling": "off"},
+            )
+        },
+    )
+
+    materialized = materialize_role_entry(
+        snapshot,
+        "graph_agent",
+        snapshot.roles["graph_agent"],
+    )
+    resolved = resolve_role(snapshot, "graph_agent")
+
+    assert [entry.route_id for entry in materialized.fallback_chain] == [
+        "openai:gpt-5",
+        "anthropic:claude",
+    ]
+    assert materialized.lint_requirements == {
+        "thinking": "warn",
+        "tool_calling": "off",
+    }
+    assert materialized.fallback_chain[0].runtime_settings.temperature == 0.2
+    assert materialized.fallback_chain[0].runtime_settings.max_output_tokens == 8192
+    assert materialized.fallback_chain[0].runtime_settings.reasoning.enabled is True
+    assert materialized.fallback_chain[0].runtime_settings.reasoning.budget_tokens == 2048
+    assert [route.route_id for route in resolved.routes] == [
+        "openai:gpt-5",
+        "anthropic:claude",
+    ]
+    assert resolved.routes[0].runtime_settings.temperature == 0.2
+    assert resolved.routes[0].runtime_settings.max_output_tokens == 8192
+    assert resolved.routes[0].runtime_settings.reasoning.enabled is True
+    assert resolved.routes[0].runtime_settings.reasoning.budget_tokens == 2048
+    assert "ghost:model" not in [item.route_id for item in materialized.fallback_chain]
+
+
 def test_resolver_propagates_snapshot_version_to_resolved_routes() -> None:
     from graph_agent_gateway.registry.contracts import SnapshotVersion
     from graph_agent_gateway.registry.resolver import resolve_role

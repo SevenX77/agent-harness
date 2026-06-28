@@ -1,0 +1,109 @@
+{
+  "page_id": "n4_predict_design",
+  "title": "Predict 试飞 · 操作设计",
+  "region": "run-verify:predict",
+  "intro": "本页是 N4 工作流第 1 个 surface「Predict 试飞」的 MVP1 设计（应该怎样）：用户在底部动作条点 Predict，把搭好编译过的 skill 先「试飞」一遍——logic 节点（确定性代码节点）真跑自己代码、不烧 token；agent 节点（要调 LLM 的节点）走 mock 顶替真实模型调用。predict 的职责是把逻辑链路跑通、确认输入输出 schema 真没问题，跑通了才解锁 Run 真跑。这是 spec 04『predict 是 run 的硬前提；golden 不是前提，只决定 agent 节点用哪份 mock』的落地。每张卡讲一个操作的目标长啥样、用户怎么触发、前端该怎么走、依赖后端哪条契约；现状/差距见实施页（n4_predict_impl），predict 编排链 + mock-by-golden + predict-pass 记录这块机制单列在契约页 predict 机制节（n4_predict_mech）。注：spec 04 把 onPredict/predict-pass 标『桩/永不置位』已过时——真代码里 handlePredict 真调 postPredictRun、deriveBuildStage 真会落到 predict-pass 解锁 Run，本页以真代码为准。",
+  "atoms": [
+    {
+      "n": 1,
+      "cap": "predict-trigger",
+      "module": "动作条 · Predict 触发与门控",
+      "func": "设计：编译绿灯（compile-pass）后底部动作条的 Predict 按钮才点亮，用户点它起手一次试飞——把当前这张图按选中的测试输入跑一遍，验证逻辑链路与 schema。",
+      "action": "用户点底部动作条（画布底部居中的 Compile/Predict/Run 总控条）中间的 Predict 按钮（compile-pass 档位才高亮可点）。",
+      "fe_design": "动作条三按钮的亮/灰由当前『构建档位』决定：deriveBuildStage（把 lint/compile/predict 三类状态算成一个档位的函数）算出 compile-pass 时，deriveButtons（据档位决定三按钮亮灰的函数）点亮 Predict、灰禁 Run。点 Predict → handlePredict（Workspace 里发起试飞的回调）先推档 predicting → 取输入 → 发 predict 请求 → 成功推档 predict-pass。Predict 在 compile-pass / predicting / predict-fail 三档都保持高亮可点（失败可重试）。设计意图：动作条是 compile→predict→run 逐级解锁的唯一总控，每一步只有上一步过了才点亮下一步。",
+      "fe_modules": [
+        { "name": "构建档位门控（deriveBuildStage + deriveButtons）" }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计（compile-pass 才点亮 Predict；点 Predict 走 handlePredict 起手试飞、失败可重试）。",
+      "impl_ref": "fn-1"
+    },
+    {
+      "n": 2,
+      "cap": "predict-input-select",
+      "module": "试飞数据流",
+      "func": "设计：predict 用哪份输入，由用户在 I/O 面板选一份已导入的测试输入决定（路径式选已有文件直接 predict），不再弹一个独立的输入对话框。没选则用空对象兜底。",
+      "action": "用户在 I/O 面板（左侧 Inputs/Outputs 配置面板）的测试输入列表里选中一份输入，再点 Predict（无选中则按空输入跑）。",
+      "fe_design": "handlePredict 调 resolveRunInput（把 I/O 面板选中的测试输入解析成 predict payload 的函数）：选了输入就 fetch 它的 content 当 input_data，没选回退空对象 {}。这是 spec『predict 触发改成 i/o 面板选已导入文件 → 直接 predict（路径式），废弃 PredictInputDialog（旧的弹窗式输入对话框）』的落地。设计意图：输入是节点/run 的配置项、不是 predict 的独立议题，predict 就按配置跑。",
+      "fe_modules": [
+        { "name": "测试输入解析（resolveRunInput）" }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{id}/runs/predict",
+          "purpose": "带选中输入的 input_data 发起试飞（请求只带 input_data，mock 由后端按 golden 状态自动决定，前端不带 mock_llm）。",
+          "mechanism_ref": "n4_predict_mech",
+          "iface_ref": "iface-predict-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（resolveRunInput 选中即取 content、无选回退空对象；路径式选文件直接 predict，已无 PredictInputDialog）。",
+      "impl_ref": "fn-2"
+    },
+    {
+      "n": 3,
+      "cap": "predict-logic-vs-agent-mock",
+      "module": "试飞数据流",
+      "func": "设计：试飞时 logic 节点真跑自己的确定性代码、不经模型、不烧 token；agent 节点不真调 LLM，而是走 mock 顶替——mock 用哪份由 golden 状态自动决定（有 golden 吐 golden_case，无 golden 一路降级到启发式占位 heuristic_stub），全程无手动选择器。",
+      "action": "无显式动作（点 Predict 后，引擎对每个节点自动分流 logic 真跑 / agent 走 mock）。",
+      "fe_design": "前端只发 predict 请求、不参与 mock 选择——请求 body 只带 input_data、不带 mock_llm，把 mock 决策完全交给后端。后端引擎装配带 SDKPredictContext（Predict 模式拦截模型生成的上下文）的图：logic 节点真跑确定性代码；agent 节点经 resolve_generation（决定 agent 节点输出哪份 mock 的函数）按 has_golden_case 自动选 golden_case 或 heuristic_stub。设计意图（spec『有没有 golden 的区别只在于 predict 在 agent 节点拿哪个 mock 数据输出』）：mock 完全自动、零手动选择器，前端不碰这层逻辑。",
+      "fe_modules": [
+        { "name": "测试输入解析（resolveRunInput）" }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{id}/runs/predict",
+          "purpose": "试飞编排：logic 真跑 / agent mock-by-golden 全在后端引擎完成（前端不带 mock_llm）。",
+          "mechanism_ref": "n4_predict_mech",
+          "iface_ref": "iface-predict-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（前端不带 mock_llm，logic 真跑 / agent mock-by-golden 全自动在后端引擎 resolve_generation 完成）。已对引擎核实：runner.resolve_generation 有 golden 吐 golden_case、否则 heuristic_stub。",
+      "impl_ref": "fn-3"
+    },
+    {
+      "n": 4,
+      "cap": "predict-pass-unlock-run",
+      "module": "动作条 · Predict 触发与门控",
+      "func": "设计：试飞成功后，前端把档位推进到 predict-pass、点亮 Run；同时后端把这次通过的 predict 绑定到当前编译产物的 content_hash 落盘，作为 Run 真跑的服务端前提——改了图 hash 变了，旧的 pass 判失效、必须重 predict。",
+      "action": "无显式动作（predict 请求成功 resolve 后自动推档 predict-pass，Run 按钮随之点亮）。",
+      "fe_design": "正确设计：前端只在 predict『业务成功』时才推 predict-pass 解锁 Run——即 postPredictRun 返回体的 RunResult.success===true（path_diff 无缺失/多余/乱序、各 phase 通过），而非仅 HTTP 200。注意取 success 这个布尔字段、不是 status：引擎 RunResult（core/result.py）的 success 是真字段、会被 model_dump 序列化进响应，而 status 是 @property（由 success 派生）、不被 model_dump 序列化、响应里根本没有。判定要和后端一致：后端 record_predict_pass（把通过的 predict 绑编译 content_hash 落 last_predict.json）只在 result.success 为真时记录，供 Run 真跑的服务端门校验。前端 updateStage 推 predict-pass 后 deriveButtons 在该档点亮 Run；业务失败（success===false）则进 predict-fail 并显诊断（读 path_diff/phases）。设计意图：predict 认证的是『当前这张图』，且前端乐观态必须与后端门一致，不能 HTTP 成功就放行。",
+      "fe_modules": [
+        { "name": "构建档位门控（deriveBuildStage + deriveButtons）" }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{id}/runs/predict",
+          "purpose": "返回 RunResult.model_dump（含 success/phases/path_diff 真字段；status 是 @property、不序列化、响应里没有）；业务成功（success===true）后端才 record_predict_pass 绑 content_hash，作为 Run 服务端门的事实源。前端须读 success 判成功，不能只看 HTTP 200。",
+          "mechanism_ref": "n4_predict_mech",
+          "iface_ref": "iface-predict-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：handlePredict（Workspace.tsx:929，Workspace 里发起试飞的回调）现按业务成功门控——`if (predict.status !== \"success\")` 进 predict-fail（清 🟡、弹带 path_diff 的错误 toast）并 return，只有 status==='success' 才走 updateStage('predict-pass') 点亮 Run（Workspace.tsx:949）。原『契约问题：success 不透出』已消解：predict 端点返回真序列化 DTO PredictDiagnosticExport（Studio sidecar 的诊断导出对象，runs.py:63 response_model + diagnostic_export.py:15-20 构建），其 status 是 models/runs.py:67 声明的具体字段 Literal['success','failed']（不是不序列化的 @property），且 status⟺success 等价（core/result.py:73 success 布尔 + :146-148 status @property 由 success 派生），所以前端读 predict.status 既正确又拿得到。后端门一致：predictor.py:145-151 record_predict_pass 仅 result.success 才记录。测试：Workspace.test.tsx:686-707（HTTP200 status='failed' 缺 'review' → predict-fail 无成功 toast）、:709-724（status='success' → predict-pass）。",
+      "impl_ref": "fn-4"
+    },
+    {
+      "n": 5,
+      "cap": "gating-reason-text",
+      "module": "动作条 · Predict 触发与门控",
+      "func": "设计：当 Predict 或 Run 因为门控而灰禁时，按钮旁要给一句可解释的提示（如 Run 灰着要说『先通过 Predict』），让用户懂『为什么现在点不动』，而不是哑着一个灰按钮。",
+      "action": "无显式动作（按钮处于灰禁态时，旁边/悬浮显示门控原因文字）。",
+      "fe_design": "在 CenterActionBar（底部动作条组件）里，按当前档位给灰禁的按钮配一句原因：Predict 灰（idle/compiling/compile-fail）→『先 Compile 通过』；Run 灰（compile-pass/predicting/predict-fail）→『先通过 Predict』。提示可做成按钮 title/悬浮或旁注小字，与 settings 里 role-test 的禁用解释风格统一。设计意图：顺序门控对用户必须可解释（spec『灰禁的 Predict/Run 旁给「先通过上一步」提示，门控可解释』）。",
+      "fe_modules": [
+        { "name": "构建档位门控（deriveBuildStage + deriveButtons）" }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：center-action-bar.tsx（底部动作条组件）现给灰禁按钮配可解释门控原因——PREDICT_LOCK_REASON='Compile must pass first'、RUN_LOCK_REASON='Predict must pass first'（center-action-bar.tsx:39-40）；LockableButton（把禁用按钮包进 shadcn Tooltip 的封装，center-action-bar.tsx:82-98）用 TooltipContent 显原因、span 带 aria-label 供悬浮/读屏；Predict（:114）与 Run（:126）各按其 lock reason 包裹，复用 shadcn Tooltip 而非自造组件，与 settings role-test 禁用解释风格统一。测试：center-action-bar.test.tsx:18（锁定 Predict 断言 'Compile must pass first'）、:26（锁定 Run 断言 'Predict must pass first'）。",
+      "impl_ref": "fn-5"
+    }
+  ]
+}

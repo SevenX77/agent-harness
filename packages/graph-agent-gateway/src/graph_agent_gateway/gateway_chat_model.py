@@ -186,81 +186,87 @@ class GatewayChatModel(BaseChatModel):
                         ),
                     )
                     continue
-            try:
-                before_usage = _usage_total_calls(self.client_manager, candidate)
-                response = _dispatch(
-                    self.client_manager,
-                    candidate,
-                    request_messages,
-                    credential_provider=self.credential_provider,
-                    max_tokens=_int_kwarg(
-                        kwargs.get("max_tokens"),
-                        _effective_int(candidate, "max_output_tokens", self.max_tokens),
-                    ),
-                    temperature=_float_kwarg(
-                        kwargs.get("temperature"),
-                        _effective_float(candidate, "temperature", self.temperature),
-                    ),
-                    reasoning=_bool_kwarg(
-                        kwargs.get("reasoning"),
-                        self.thinking_enabled
-                        if self.thinking_enabled is not None
-                        else _effective_bool(candidate, "reasoning.enabled", False),
-                    ),
-                    thinking_budget_tokens=_optional_int_kwarg(
-                        kwargs.get("thinking_budget_tokens"),
-                        _effective_optional_int(candidate, "reasoning.budget_tokens"),
-                    ),
-                    tools=list(self.bound_tools) or None,
-                    tool_choice=self.tool_choice or _effective_text(candidate, "tool_choice"),
-                    runtime_policy=runtime_policy,
-                    top_p=_effective_optional_float(candidate, "top_p"),
-                    stop_sequences=_effective_string_list(candidate, "stop_sequences"),
-                    seed=_effective_optional_int(candidate, "seed"),
-                    parallel_tool_calls=_effective_optional_bool(candidate, "parallel_tool_calls"),
-                    structured_output=_effective_structured_output(candidate),
-                    reasoning_effort=_effective_text(candidate, "reasoning.effort"),
-                    call_method_id=candidate.call_method_id,
-                    request_mapper_id=candidate.request_mapper_id,
-                )
-                after_usage = _usage_total_calls(self.client_manager, candidate)
-                if after_usage == before_usage:
-                    usage = _usage_from_response(response)
-                    _record_usage(
+            retry_same_used = False
+            while True:
+                try:
+                    before_usage = _usage_total_calls(self.client_manager, candidate)
+                    response = _dispatch(
                         self.client_manager,
-                        candidate.endpoint_id,
-                        usage["prompt_tokens"],
-                        usage["completion_tokens"],
-                    )
-                return self._build_chat_result(response, candidate)
-            except Exception as exc:  # noqa: BLE001 - gateway fallback boundary
-                classification = classify_exception(exc, route_id=candidate.route_id)
-                failure = _failure_record(candidate, exc, classification.decision)
-                failure["unclassified_default"] = classification.unclassified_default
-                failure["provider_status_code"] = classification.provider_status_code
-                failures.append(failure)
-                if classification.decision != "fallback_allowed":
-                    raise AllProvidersFailedError(
-                        self.role_name,
-                        failures,
-                        phase_name=self.phase_name or "<gateway>",
-                    ) from exc
-                _mark_down(self.client_manager, candidate, exc, runtime_policy)
-                emit_llm_fallback_event(
-                    callbacks=self.event_callbacks,
-                    phase_name=self.phase_name or "<gateway>",
-                    from_provider=candidate_id,
-                    to_provider=self._next_candidate_id(index + 1),
-                    reason=f"{type(exc).__name__}: {exc}",
-                    context=self._fallback_event_context(
                         candidate,
-                        index + 1,
-                        fallback_decision=classification.decision,
-                        error_type=type(exc).__name__,
-                        provider_status_code=classification.provider_status_code,
-                        unclassified_default=classification.unclassified_default,
-                    ),
-                )
+                        request_messages,
+                        credential_provider=self.credential_provider,
+                        max_tokens=_int_kwarg(
+                            kwargs.get("max_tokens"),
+                            _effective_int(candidate, "max_output_tokens", self.max_tokens),
+                        ),
+                        temperature=_float_kwarg(
+                            kwargs.get("temperature"),
+                            _effective_float(candidate, "temperature", self.temperature),
+                        ),
+                        reasoning=_bool_kwarg(
+                            kwargs.get("reasoning"),
+                            self.thinking_enabled
+                            if self.thinking_enabled is not None
+                            else _effective_bool(candidate, "reasoning.enabled", False),
+                        ),
+                        thinking_budget_tokens=_optional_int_kwarg(
+                            kwargs.get("thinking_budget_tokens"),
+                            _effective_optional_int(candidate, "reasoning.budget_tokens"),
+                        ),
+                        tools=list(self.bound_tools) or None,
+                        tool_choice=self.tool_choice or _effective_text(candidate, "tool_choice"),
+                        runtime_policy=runtime_policy,
+                        top_p=_effective_optional_float(candidate, "top_p"),
+                        stop_sequences=_effective_string_list(candidate, "stop_sequences"),
+                        seed=_effective_optional_int(candidate, "seed"),
+                        parallel_tool_calls=_effective_optional_bool(candidate, "parallel_tool_calls"),
+                        structured_output=_effective_structured_output(candidate),
+                        reasoning_effort=_effective_text(candidate, "reasoning.effort"),
+                        call_method_id=candidate.call_method_id,
+                        request_mapper_id=candidate.request_mapper_id,
+                    )
+                    after_usage = _usage_total_calls(self.client_manager, candidate)
+                    if after_usage == before_usage:
+                        usage = _usage_from_response(response)
+                        _record_usage(
+                            self.client_manager,
+                            candidate.endpoint_id,
+                            usage["prompt_tokens"],
+                            usage["completion_tokens"],
+                        )
+                    return self._build_chat_result(response, candidate)
+                except Exception as exc:  # noqa: BLE001 - gateway fallback boundary
+                    classification = classify_exception(exc, route_id=candidate.route_id)
+                    failure = _failure_record(candidate, exc, classification.decision)
+                    failure["unclassified_default"] = classification.unclassified_default
+                    failure["provider_status_code"] = classification.provider_status_code
+                    failures.append(failure)
+                    if classification.action == "retry_same_route" and not retry_same_used:
+                        retry_same_used = True
+                        continue
+                    if classification.decision != "fallback_allowed":
+                        raise AllProvidersFailedError(
+                            self.role_name,
+                            failures,
+                            phase_name=self.phase_name or "<gateway>",
+                        ) from exc
+                    _mark_down(self.client_manager, candidate, exc, runtime_policy)
+                    emit_llm_fallback_event(
+                        callbacks=self.event_callbacks,
+                        phase_name=self.phase_name or "<gateway>",
+                        from_provider=candidate_id,
+                        to_provider=self._next_candidate_id(index + 1),
+                        reason=f"{type(exc).__name__}: {exc}",
+                        context=self._fallback_event_context(
+                            candidate,
+                            index + 1,
+                            fallback_decision=classification.decision,
+                            error_type=type(exc).__name__,
+                            provider_status_code=classification.provider_status_code,
+                            unclassified_default=classification.unclassified_default,
+                        ),
+                    )
+                    break
 
         raise AllProvidersFailedError(
             self.role_name,

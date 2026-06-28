@@ -1,0 +1,66 @@
+{
+  "page_id": "n5_hitl_design",
+  "title": "HitL 悬浮输入 · 人工注入续跑 · 操作设计",
+  "region": "debug:hitl",
+  "intro": "本页是「调试续跑」里**场景 A(HitL,human-in-the-loop 人工介入)**这块交互面的 MVP1 设计(应该怎样):agent 跑到一半请求人类输入时,run 暂停,在**那个暂停节点上方**浮出一个富文本输入框(锚定节点、不是固定在顶栏),用户作答后点续跑,答案作为消息注入回 agent 继续跑。每张卡只描述操作目标、用户怎么触发、前端怎么做、依赖后端哪条契约;现状与差距见实施页(n5_impl)。注:HitL 的暂停信号与答案注入都走运行事件流(EventEnvelope)+ resume 端点,对接 engine 后端经 gateway sidecar(即 gateway 后端的 HTTP 承载层)暴露的接口;暂停态(paused)由事件→节点态派生(deriveNodeStatuses)从 interrupted/hitl 类事件算出。",
+  "atoms": [
+    {
+      "n": 5,
+      "cap": "hitl-node-anchored-input",
+      "track": "A",
+      "module": "HitL 输入",
+      "func": "设计(spec F4):agent 调用「请求人类输入」时 → run 暂停 → 在**暂停的那个节点**的 debug bar 上方浮出一个富文本输入框(锚定节点、非固定顶栏),把 agent 的问题/可选项渲染出来给用户作答。",
+      "action": "无显式动作触发浮现(agent 发出 interrupted/请求输入事件 → 该节点进入 paused 态 → 悬浮输入框在该节点上方自动浮出);用户在框内输入答案。",
+      "fe_design": "运行事件流里出现 interrupted(暂停/请求澄清)类事件 → 事件→节点态派生(deriveNodeStatuses)把该节点态置为 paused → 从最近一条 HitL 提示事件(latestHitlPrompt,扫事件取最新暂停 prompt 的函数)取出问题文本(question/prompt/message)、可选项(options)、挂起的工具调用列表(pending_tool_calls)+ 该暂停的 phase 名与 checkpoint 元数据 → 在**该 paused 节点上方**渲染一个锚定节点的悬浮富文本输入框(含问题、可选项按钮、多 pending 工具调用时的选择器、文本输入)——具体锚定方式:用 @xyflow/react(画布所用的 React Flow 图库)内置的 NodeToolbar(把浮动 UI 锚定到某图节点、随画布平移缩放跟随、position 可设 top 的组件)以 position=top 挂到暂停节点上方,复用 TracePanel 现有 HitL 表单内容、不新造表单逻辑。设计意图(spec 决策):输入框要**锚定暂停节点**(让「哪个节点在等输入」与「在哪答」空间对应),**不做成固定顶栏**——固定顶栏会让用户分不清是哪个节点在等。",
+      "fe_modules": [
+        {
+          "name": "运行事件流订阅（useRunStream）"
+        },
+        {
+          "name": "事件→节点态派生（deriveNodeStatuses）"
+        },
+        {
+          "name": "HitL prompt 提取与提交（latestHitlPrompt + resume-options）"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "WS /ws/runs/{run_id}",
+          "purpose": "订阅事件流;⚠ 当前 interrupted 暂停事件引擎未发射(只有类定义),HitL 暂停态在真跑无源——需补发 interrupted 或改用 resume_applied。",
+          "mechanism_ref": "mech_n5_events",
+          "iface_ref": "iface-stream"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "契约问题",
+      "gap_brief": "符合设计(HitL 输入框已锚定暂停节点 F4 达成)。2026-06-20: 代码已落地(design-audit vs code 核实),状态回填。表单已从 TracePanel 迁成锚定暂停节点的悬浮框:HitlNodeToolbar(HitlNodeToolbar.tsx:32)用 <NodeToolbar nodeId={pausedNodeId} isVisible position={Position.Top}> 包 HitlPromptForm——正是原子要求的 position=top 锚到暂停节点的浮动输入(非固定顶栏);pausedNodeId=prompt.phaseName(:28)。它挂在活的 ReactFlow 子树内(GraphCanvas.tsx:824-828),接真实 WS run 流(Workspace.tsx:855 traceEvents:runStream.events)+ onSubmitHitlResponse/hitlSubmitting(Workspace.tsx:1398-1399)。prompt 提取:latestHitlPrompt(hitl-prompt.ts:82)投出 question/options/pending_tool_calls/phaseName/checkpointId/checkpointNs;paused 派生:deriveNodeStatuses(node-status.ts:84)+ isPausedEvent(node-status.ts:34)从 interrupted/hitl/human_input_required/pause/paused 置 paused。表单内容复用 HitlPromptForm.tsx(单一来源,TracePanel.tsx:295 也用)。测试:HitlNodeToolbar.test.tsx 断言 nodeId=='review'(phase)、position=='top'、isVisible==true、共享表单渲染;HitlNodeToolbar/HitlPromptForm/hitl-prompt/node-status 共 29 tests 通过。后端轴(be_status 仍记契约问题,非本 FE 原子目标):引擎 InterruptedEvent/ResumedEvent 的显式发射仍是后端关切,前端 paused 派生已覆盖更广的暂停事件集兜底,故不阻塞本 FE 原子 符合。",
+      "impl_ref": "fn-5"
+    },
+    {
+      "n": 6,
+      "cap": "hitl-answer-inject-resume",
+      "track": "A",
+      "module": "HitL 注入",
+      "func": "设计(spec F5):用户在 HitL 框里答完点续跑 → 答案作为对挂起工具调用(pending tool call)/中断的回应,经 human_response 注入回 agent,Graph 从暂停点续跑;多个挂起工具调用时要能指定答的是哪个(tool_call_id)。",
+      "action": "用户在 HitL 悬浮框输入答案(必要时选定要回应的 pending 工具调用)→ 点[Resume/提交]。",
+      "fe_design": "提交 HitL 表单 → submitHitlResponse(把表单内容打包成 HitL 回应请求的回调)产出 {content 答案文本, phaseName 暂停的 phase, toolCallId 回应哪个工具调用, checkpointId/checkpointNs} → 经 hitlResumeOptionsFromRequest(resume-options.ts 里把 HitL 请求转成 resumeRun 选项的函数)转成 resumeRun 的 options.humanResponse={content, toolCallId} → 调 resumeRun(skillId, runId, options)→ 后端 resume 端点把 human_response 透传给引擎,引擎 _apply_resume_human_response(在 checkpoint 里找到挂起工具调用、把答案构造成 ToolMessage 经 graph.update_state 写回 messages 的函数)注入后从暂停点续跑。设计意图:答案不是普通输入,而是「对那次 interrupt/工具调用的回应」,所以注入成 ToolMessage、并支持 tool_call_id 定位多挂起调用中的哪一个。续跑后续期事件经同一条 WS 流回,trace/节点灯闭环。",
+      "fe_modules": [
+        {
+          "name": "HitL prompt 提取与提交（latestHitlPrompt + resume-options）"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{skill_id}/runs/{run_id}/resume",
+          "purpose": "携带 human_response={content, tool_call_id?} 注入人工答案续跑;引擎把它写成 ToolMessage 回应挂起工具调用。",
+          "mechanism_ref": "mech_n5_resume",
+          "iface_ref": "iface-resume"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计:Workspace 的 handleSubmitHitlResponse 经 hitlResumeOptionsFromRequest 把答案打成 humanResponse={content, toolCallId} 调 resumeRun;后端 resume 端点收 human_input/human_response、引擎 _apply_resume_human_response 构造 ToolMessage 注入(需 checkpoint 有挂起工具调用,否则报错)。注入语义符合 F5;真正的体验偏差在上游 #5 的输入框位置,本注入链路本身对得上。",
+      "impl_ref": "fn-6"
+    }
+  ]
+}

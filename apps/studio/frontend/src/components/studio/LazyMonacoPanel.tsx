@@ -5,6 +5,11 @@ import { toast } from 'sonner'
 import { writeSkillFile } from '@/api/client'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { isTauriRuntime } from '@/config/runtime'
+import { useDebouncedLint } from '@/hooks/useDebouncedLint'
+import { sha256Hex } from '@/lib/hash'
+import { LintDiagnosticsPanel, type EditorOnMount, type MonacoApi, type MonacoEditor as MonacoEditorInstance } from '@/components/MonacoPanel'
+import { applyLintMarkers } from '@/components/studio/lint-monaco-markers'
 
 const MonacoEditor = lazy(async () => {
   const module = await import('@monaco-editor/react')
@@ -22,6 +27,7 @@ interface SaveConflictPayload {
 interface LazyMonacoPanelProps {
   title: string
   skillId: string
+  workspaceRoot?: string | null
   filePath: string
   value: string
   onChange: (value: string) => void
@@ -49,9 +55,61 @@ function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
 
+interface SaveMonacoDraftArgs {
+  skillId: string
+  workspaceRoot?: string | null
+  filePath: string
+  content: string
+  savedContent: string
+  currentHash: string | null
+  onSaved: (hash: string) => void
+  onConflict: (conflict: SaveConflictPayload) => void
+}
+
+type SaveMonacoDraftResult =
+  | { status: 'saved'; hash: string; savedContent: string }
+  | { status: 'conflict' }
+
+export async function saveMonacoDraft({
+  skillId,
+  workspaceRoot,
+  filePath,
+  content,
+  savedContent,
+  currentHash,
+  onSaved,
+  onConflict,
+}: SaveMonacoDraftArgs): Promise<SaveMonacoDraftResult> {
+  const expectedHash = currentHash ?? await sha256Hex(savedContent)
+  try {
+    const saveTarget = isTauriRuntime() ? workspaceRoot ?? skillId : skillId
+    const result = await writeSkillFile(saveTarget, filePath, content, expectedHash)
+    onSaved(result.hash)
+    return { status: 'saved', hash: result.hash, savedContent: content }
+  } catch (error) {
+    const status = axios.isAxiosError(error) ? error.response?.status : undefined
+    if (status === 409 && axios.isAxiosError(error)) {
+      const data = error.response?.data as {
+        current_hash?: string
+        current_markdown_content?: string
+      }
+      onConflict({
+        skillId,
+        path: filePath,
+        localContent: content,
+        remoteContent: data.current_markdown_content ?? '',
+        remoteHash: data.current_hash ?? null,
+      })
+      return { status: 'conflict' }
+    }
+    throw error
+  }
+}
+
 export function LazyMonacoPanel({
   title,
   skillId,
+  workspaceRoot = null,
   filePath,
   value,
   onChange,
@@ -84,16 +142,26 @@ export function LazyMonacoPanel({
     onConflictRef.current = onConflict
   })
 
+  const lastPathRef = useRef(filePath)
+  const lastHashRef = useRef(initialHash)
+
   useEffect(() => {
-    setDraft(value)
-    draftRef.current = value
-    savedRef.current = value
-    hashRef.current = initialHash
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current)
-      timerRef.current = null
+    const pathChanged = lastPathRef.current !== filePath
+    const hashChanged = lastHashRef.current !== initialHash
+    lastPathRef.current = filePath
+    lastHashRef.current = initialHash
+
+    if (pathChanged || hashChanged || value !== draftRef.current) {
+      setDraft(value)
+      draftRef.current = value
+      savedRef.current = value
+      hashRef.current = initialHash
+      if (timerRef.current !== null) {
+        window.clearTimeout(timerRef.current)
+        timerRef.current = null
+      }
+      onInFlightChangeRef.current(false)
     }
-    onInFlightChangeRef.current(false)
   }, [filePath, initialHash, value])
 
   const saveNow = useCallback(async (content: string) => {
@@ -105,10 +173,21 @@ export function LazyMonacoPanel({
     let attempts = 0
     while (attempts < 4) {
       try {
-        const result = await writeSkillFile(skillId, filePath, content, hashRef.current)
+        const result = await saveMonacoDraft({
+          skillId,
+          workspaceRoot,
+          filePath,
+          content,
+          savedContent: savedRef.current,
+          currentHash: hashRef.current,
+          onSaved: onSavedRef.current,
+          onConflict: onConflictRef.current,
+        })
+        if (result.status === 'conflict') {
+          return
+        }
         hashRef.current = result.hash
-        savedRef.current = content
-        onSavedRef.current(result.hash)
+        savedRef.current = result.savedContent
         if (failedToastRef.current !== null) {
           toast.dismiss(failedToastRef.current)
           failedToastRef.current = null
@@ -116,20 +195,6 @@ export function LazyMonacoPanel({
         return
       } catch (error) {
         const status = axios.isAxiosError(error) ? error.response?.status : undefined
-        if (status === 409 && axios.isAxiosError(error)) {
-          const data = error.response?.data as {
-            current_hash?: string
-            current_markdown_content?: string
-          }
-          onConflictRef.current({
-            skillId,
-            path: filePath,
-            localContent: content,
-            remoteContent: data.current_markdown_content ?? '',
-            remoteHash: data.current_hash ?? null,
-          })
-          return
-        }
         if (status && status < 500) {
           throw error
         }
@@ -143,7 +208,7 @@ export function LazyMonacoPanel({
         attempts += 1
       }
     }
-  }, [filePath, saveEnabled, skillId])
+  }, [filePath, saveEnabled, skillId, workspaceRoot])
 
   const flush = useCallback(() => {
     if (timerRef.current !== null) {
@@ -180,9 +245,46 @@ export function LazyMonacoPanel({
     }, 1500)
   }
 
+  // Realtime lint (workflow 03_compile F1): the live editor draft drives the debounced
+  // /lint call; its diagnostics are the single source of truth the panel below projects.
+  const { result: lintResult } = useDebouncedLint(saveEnabled ? skillId : "", draft, {
+    filePath,
+    workspaceRoot,
+  })
+  const editorRef = useRef<MonacoEditorInstance | null>(null)
+  const monacoRef = useRef<MonacoApi | null>(null)
+
+  const handleEditorMount = useCallback<EditorOnMount>((editor, monaco) => {
+    editorRef.current = editor
+    monacoRef.current = monaco
+    // Paint any diagnostics the lint hook already resolved before mount (atom #6).
+    applyLintMarkers(monaco, editor.getModel(), lintResult)
+  }, [lintResult])
+
+  // IDE-style inline markers (authoring N3 atom #6): project the engine's line-bearing
+  // diagnostics onto the Monaco model. Pure mapping in `lint-monaco-markers`; no second
+  // source of truth. Line-less diagnostics degrade to the strip above, never guess a line.
+  useEffect(() => {
+    applyLintMarkers(monacoRef.current, editorRef.current?.getModel() ?? null, lintResult)
+  }, [lintResult])
+
+  const handleJumpToLine = useCallback((line: number | null) => {
+    const editor = editorRef.current
+    if (!editor || !line) {
+      return
+    }
+    editor.revealLineInCenter(line)
+    editor.setPosition({ lineNumber: line, column: 1 })
+    editor.focus()
+  }, [])
+
+  const handleCopyDiagnostics = useCallback((message: string) => {
+    void navigator.clipboard?.writeText(message)
+  }, [])
+
   return (
-    <section className="flex h-full min-h-0 flex-col bg-card">
-      <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-3">
+    <section className="flex h-full min-h-0 flex-col bg-transparent">
+      <div className="studio-canvas-panel-header flex h-10 shrink-0 items-center justify-between border-b px-3">
         <h2 className="text-sm font-semibold text-foreground">{title}</h2>
         <div className="flex items-center gap-2">
           <Badge variant="secondary" className="font-mono text-muted-foreground">{language}</Badge>
@@ -212,6 +314,11 @@ export function LazyMonacoPanel({
           ) : null}
         </div>
       </div>
+      <LintDiagnosticsPanel
+        lintResult={lintResult}
+        onJumpToLine={handleJumpToLine}
+        onCopyErrors={handleCopyDiagnostics}
+      />
       <div className="min-h-0 flex-1">
         <Suspense fallback={<MonacoSkeleton />}>
           <MonacoEditor
@@ -227,6 +334,7 @@ export function LazyMonacoPanel({
               automaticLayout: true,
               readOnly: !saveEnabled,
             }}
+            onMount={handleEditorMount}
             onChange={(nextValue) => handleChange(nextValue ?? '')}
           />
         </Suspense>

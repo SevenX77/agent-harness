@@ -28,11 +28,27 @@ def test_project_route_state_maps_missing_config_to_failed_reason() -> None:
         route_status="unverified_manual",
         credential_available=False,
         circuit_retry_at=None,
-        draft_history=False,
+        credential_evidence_refs=[],
     )
 
     assert projection.ui_state == "failed"
     assert projection.reason_code == "missing_config"
+
+
+def test_project_route_state_uses_credential_evidence_refs_for_history() -> None:
+    from graph_agent_gateway.state_projection import project_route_state
+
+    projection = project_route_state(
+        route_id="openai:gpt-5",
+        endpoint_status="verified",
+        route_status="unverified_manual",
+        credential_available=True,
+        circuit_retry_at=None,
+        credential_evidence_refs=["probe-openai-gpt5"],
+    )
+
+    assert projection.ui_state == "historical_ready"
+    assert projection.evidence_refs == ["probe-openai-gpt5"]
 
 
 def test_materialize_role_skips_failed_routes_and_returns_terminal_error() -> None:

@@ -1,0 +1,51 @@
+{
+  "stage_machine": {
+    "headers": ["stage 档位", "进入条件", "解锁的按钮"],
+    "rows": [
+      ["idle", "无 compile 记录且 lint 既非 checking/failed/passed(deriveBuildStage 默认分支, Workspace.tsx:624)", "仅 Compile 高亮可点;Predict 灰禁、Run 灰禁(deriveButtons compile-disabled 分支, center-action-bar.tsx:32-41)"],
+      ["compiling", "compileStages[id]=='compiling'(点 Compile 起手 updateStage, Workspace.tsx:282)或 lint=='checking'(Workspace.tsx:621)", "Compile 高亮但 disabled(正在编译);Predict 灰禁、Run 灰禁(center-action-bar.tsx:32-41)"],
+      ["compile-fail", "编译返回错误或抛异常(compileSkillById, Workspace.tsx:287/302)或 lint=='failed'(Workspace.tsx:622)", "Compile 高亮可点(重试);Predict 灰禁、Run 灰禁(center-action-bar.tsx:32-41)"],
+      ["compile-pass", "编译成功 status=='ok'(Workspace.tsx:294)或 lint=='passed'(Workspace.tsx:623)", "Compile 变 ghost 仍可点;Predict 高亮可点(解锁);Run 仍灰禁(center-action-bar.tsx:42-50)"],
+      ["predicting", "点 Predict 起手 updateStage(Workspace.tsx:630)", "Compile 可点;Predict 高亮可点;Run 仍灰禁(center-action-bar.tsx:42-50)"],
+      ["predict-fail", "postPredictRun 抛错(Workspace.tsx:637)", "Compile 可点;Predict 高亮可点(重试);Run 仍灰禁(center-action-bar.tsx:42-50)"],
+      ["predict-pass", "postPredictRun 成功 resolve(Workspace.tsx:634)", "Compile 可点;Predict 变 ghost 可点;Run 高亮可点(唯一解锁 Run 的档位)(center-action-bar.tsx:52-59)"],
+      ["running", "点 Run 且当前档=='predict-pass' 后 updateStage(Workspace.tsx:666-671)", "Run 高亮(deriveButtons 末尾兜底分支, center-action-bar.tsx:52-59);失败回退 predict-pass(Workspace.tsx:680)"],
+      ["run-fail", "类型已定义但当前代码未显式置位(枚举见 center-action-bar.tsx:13);落在 deriveButtons 末尾兜底分支 → 表现同 running", "Run 高亮可点(center-action-bar.tsx:52-59)"]
+    ]
+  },
+  "predict": {
+    "summary": "前端 handlePredict(Workspace.tsx:627,点 Predict 的处理函数)先 updateStage 把档位推到 predicting,再调 resolveRunInput(client.ts:432,把 i/o 面板选中的测试输入解析成 payload,没选则空对象 {})拿到 inputData,然后 postPredictRun(client.ts:188,POST /api/skills/{id}/runs/predict,body 只带 input_data,不带 mock_llm)。后端 predict_run 路由(runs.py:35)调 predictor_service.dispatch_predict_job(predictor.py:59,Predict 编排入口):先 adapter.compile 把当前 skill 编成 ephemeral artifact(predictor.py:72),再 adapter.predict_artifact 把 mock_llm(此处为 None)、inputs 一并发给引擎(predictor.py:84-97)。引擎侧 predict_skill(runner.py:195)用 MockStrategy.from_param(mock_llm)(runner.py:238,把 mock 参数解析成策略对象)装配带 SDKPredictContext(runner.py:109,Predict 模式下拦截模型生成的上下文)的图。关键区别由节点类型天然产生:logic 节点(确定性代码节点)在 predict 里真跑自己的代码、不经过模型生成、不烧 token;只有 agent 节点(要调 LLM 的节点)才走 SDKPredictContext.resolve_generation(runner.py:116)用 mock 顶替真实模型。mock 由 golden 状态自动决定、无手动选择器:resolve_generation 先看 strategy.has_golden_case(phase_name)(runner.py:126)——有 golden 就吐 golden_case 输出(runner.py:127-129),没有就一路降级到 P2 启发式占位 generate_heuristic_stub(runner.py:154,按节点输出 schema 造一份占位数据),记为 heuristic_stub(runner.py:155)。predict 成功后,predictor 在 _persist_predict_result(predictor.py:120)落盘 result.json,并且只有 result.success 为真时调 record_predict_pass(predict_gate.py:31)把这次 pass 绑定到编译出的 content_hash 存进 .workspace/last_predict.json——这就是服务端的 predict-pass 置位。前端这边 postPredictRun 成功 resolve 后 handlePredict 把档位推到 predict-pass(Workspace.tsx:634),deriveButtons 据此点亮 Run。",
+    "evidence": [
+      ["handlePredict 推 predicting → resolveRunInput → postPredictRun → 成功置 predict-pass", "apps/studio/frontend/src/components/studio/Workspace.tsx:627-635"],
+      ["postPredictRun 只发 input_data,不带 mock_llm", "apps/studio/frontend/src/api/client.ts:188-193"],
+      ["predict 路由调 dispatch_predict_job 透传 mock_llm/input_data", "apps/studio/backend/app/routers/runs.py:35-43"],
+      ["dispatch_predict_job:compile ephemeral → predict_artifact(mock_llm 此处为 None)", "apps/studio/backend/app/services/predictor.py:59-97"],
+      ["mock-by-golden 决策:有 golden→golden_case,无→heuristic_stub 占位", "packages/graph-agent/src/graph_agent/core/runner.py:116-156"],
+      ["logic 节点真跑(确定性、不烧 token)/ agent 走 mock — 设计原话", "docs/studio/mvp1/01_workflows/04_run-and-verify.md:21-22"],
+      ["predict 成功才 record_predict_pass,绑定 content_hash 落 last_predict.json", "apps/studio/backend/app/services/predictor.py:137-149"]
+    ]
+  },
+  "run": {
+    "summary": "前端 handleRun(Workspace.tsx:664,点 Run 的处理函数)第一件事就是硬门控:deriveBuildStage(currentSkillId) 若不等于 predict-pass 直接 return、什么都不做(Workspace.tsx:666-669),所以没 predict-pass 连请求都不发。通过门控后推档到 running、resolveRunInput 拿 inputData,调 startRun(client.ts:232,POST /api/skills/{id}/runs,body 带 input_data)。后端 create_run 路由(runs.py:30)调 run_manager.start_run(run_manager.py:422):先 adapter.compile 编 ephemeral artifact 拿 content_hash,再 require_passing_predict(run_manager.py:439,predict_gate.py:100)做服务端二道门——把这次编译的 content_hash 跟 last_predict.json 里记录的 hash 比对,没有匹配的 passing predict 就抛 RUN_REQUIRES_PREDICT(409),编辑过图导致 hash 变了也会因 hash mismatch 判 stale 重新要求 predict(predict_gate.py:88-96)。门过后 start_run 用 multiprocessing 起子进程跑 _run_worker_main(run_manager.py:89),子进程里 adapter.run_artifact 真跑引擎,in_process transport 时挂 event_subscriber 把引擎回调事件实时塞进进程队列(run_manager.py:124-126);跑完按 RunResult.success 决定 success/failed,落盘 final_state.json / metrics.json / trace.jsonl 并 _persist_run_artifacts 封存(run_manager.py:130-165)。主进程 _drain_process_queue(run_manager.py:642)从队列取事件:type=='event' 的包成 EventEnvelope 推给所有 WS 订阅者(run_manager.py:655-665),type=='status' 的转成终态 metadata。前端 startRun 成功后 setRunId(Workspace.tsx:675)并把面板切到 timeline(Workspace.tsx:677),useRunStream(runId) 订阅事件流,deriveNodeStatuses(node-status.ts:45,把事件流按到达顺序 last-event-wins 折成每节点状态)把 phase_start→running、phase_end→success、validation_fail/retry_exhausted/含 error/fail→error 映射成画布节点灯(Workspace.tsx:132-135)。",
+    "evidence": [
+      ["handleRun 硬门控:stage!=='predict-pass' 直接 return", "apps/studio/frontend/src/components/studio/Workspace.tsx:664-683"],
+      ["startRun POST /runs body 带 input_data", "apps/studio/frontend/src/api/client.ts:232-237"],
+      ["start_run:compile → require_passing_predict 服务端门 → spawn 子进程", "apps/studio/backend/app/services/run_manager.py:422-491"],
+      ["服务端门 require_passing_predict 按 content_hash 比对,不匹配 409", "apps/studio/backend/app/services/predict_gate.py:88-114"],
+      ["子进程 _run_worker_main:run_artifact 真跑 + 挂 event_subscriber + 落盘", "apps/studio/backend/app/services/run_manager.py:89-165"],
+      ["_drain_process_queue:event→EventEnvelope 推订阅者 / status→终态", "apps/studio/backend/app/services/run_manager.py:642-693"],
+      ["deriveNodeStatuses:phase_start→running / phase_end→success / 失败→error", "apps/studio/frontend/src/components/studio/node-status.ts:45-62"]
+    ]
+  },
+  "batch_autocommit": {
+    "summary": "批量:i/o 面板每个测试输入前有 checkbox,勾选走 useBatchRun(useBatchRun.ts:12,管理批量选择与轮询的 hook)的 toggleInput;点 'Run N as batch' 调 runBatch(useBatchRun.ts:73)POST /api/skills/{id}/runs/batch-run(body input_ids)。后端 create_batch_run 路由(runs.py:51)调 run_manager.start_batch_run(run_manager.py:493):对每个 input_id 加载测试输入后挨个调 start_run 各起一次真跑(run_manager.py:500-503),返回 batch_id + 子 run_id 列表。前端拿到 batch_id 后每 1s 轮询 GET /api/batch/{batch_id}(useBatchRun.ts:33-63),后端 get_batch_status(run_manager.py:512)汇总各子 run 状态算 total/completed/running|success|failed,UI 显示 'completed/total · status'(TestInputsSection.tsx:163-166)。注意批量每个子 run 同样走 start_run,因此同样受 require_passing_predict 服务端门约束。autocommit:run 成功收尾时 _finalize_terminal_run(run_manager.py:697)在 status=='success' 分支调 _auto_commit_successful_run(run_manager.py:719),用 GitLocalService.auto_commit_run 把这次成功运行的产物 git 提交,结果写进 metadata.git_status(committed/locked/failed);git 锁冲突或命令失败只降级记 warning、不阻断(run_manager.py:731-737)。即:成功 run 后确实自动 git 存档,失败 run 不 commit。设计文档把 autocommit 归类到「保存与发布」而非 run-verify 本身(04-run-and-verify.md C14),但实现就落在 run_manager 的 run 收尾路径里。",
+    "evidence": [
+      ["useBatchRun:toggleInput 选输入 / runBatch POST batch-run / 1s 轮询 batch 状态", "apps/studio/frontend/src/hooks/useBatchRun.ts:33-90"],
+      ["批量 UI:checkbox 勾选 + 'Run N as batch' + completed/total 进度", "apps/studio/frontend/src/components/studio/panels/TestInputsSection.tsx:118-167"],
+      ["start_batch_run:逐 input 各调 start_run 起一次真跑", "apps/studio/backend/app/services/run_manager.py:493-510"],
+      ["get_batch_status:汇总子 run 算 running/success/failed", "apps/studio/backend/app/services/run_manager.py:512-548"],
+      ["成功 run 收尾 _finalize_terminal_run → _auto_commit_successful_run", "apps/studio/backend/app/services/run_manager.py:697-737"],
+      ["autocommit 设计归属:C14 归保存与发布", "docs/studio/mvp1/01_workflows/04_run-and-verify.md:60"]
+    ]
+  }
+}

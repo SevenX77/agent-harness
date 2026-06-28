@@ -8,7 +8,7 @@ linked_code_paths:
   - apps/studio/backend/app/routers/llm.py
   - apps/studio/backend/app/services/llm_credentials.py
   - apps/studio/backend/app/services/llm_roles.py
-  - apps/studio/backend/app/services/llm_import_drafts.py
+  - apps/studio/backend/app/services/llm_probe_catalog.py
   - packages/graph-agent-gateway/src/graph_agent_gateway/registry/
 ---
 
@@ -23,7 +23,7 @@ LLM Provider Intelligence V2 is a hard cut from provider cards, `available_model
 - **ProviderRoute**: one physical model route under one endpoint. It owns `route_id`, `endpoint_id`, provider model ID, canonical display grouping, capabilities, and probe status.
 - **ModelProfile**: authoring-time bundle such as `CLO47T = Claude Opus 4.7 Thinking`. A profile stores a fallback chain of exact route IDs.
 - **RoleEntry**: runtime role config. It stores the actual fallback chain executed by the engine, plus optional source-profile trace metadata.
-- **ProviderImportDraft**: non-trusted Agent import output. Drafts never write active endpoints or routes until the backend probe/diff/apply workflow accepts them.
+- **Probe Knowledge Catalog**: local-first probe evidence for endpoint connectivity, route/model connectivity, and capability observations. It can consume a remote read-only catalog as a suggestion source when live list/probe data is incomplete. It is not runtime truth: user-facing reads and writes go through credentials, and catalog evidence can only affect UI/runtime state after it has been promoted into credentials as route capabilities, profiles, or `metadata.evidence_refs`.
 
 ## 2. Endpoints
 
@@ -68,11 +68,19 @@ Canonical IDs are UI grouping keys supplied by backend DTOs. Frontend code must 
 
 `config/llm_canonical_rules.yaml` is the explicit source for curated aliases. Moving aliases such as OpenRouter `~...latest` are intentionally not canonical aliases unless they are pinned by a deliberate rule and test.
 
-## 5. Import Drafts
+## 5. Probe Knowledge Catalog
 
-Agent onboarding output enters a draft store, not active credentials.
+User-facing probing updates active credentials first: endpoint tests write endpoint status and observed routes, route/model probes write route status, capability/profile data, diagnostics, and `metadata.evidence_refs` when evidence is accepted. The same evidence is then appended to the local Probe Knowledge Catalog so future credentials can reuse it. A standalone catalog record is advisory and does not by itself make a route blue or runnable.
 
-Drafts can include multiple endpoint candidates and multiple route candidates. If a draft endpoint ID matches an active endpoint, apply must require an explicit merge/discard/delete-active-first decision. There is no auto-promote path from Agent output into runtime configuration.
+The catalog can include endpoint evidence (`provider_id`/protocol/base URL connectivity), route evidence (`endpoint_id`/model/capability connectivity), failure observations, and remote source metadata for read-only sync. A new user can use it to:
+
+- recover known model IDs when live `list models` is unavailable;
+- recover known capabilities when a route probe cannot fully infer them;
+- pick a historically connected model for endpoint testing instead of blind probing.
+
+Catalog evidence is advisory until a local probe or backend promotion writes the corresponding route data into credentials. MVP1 does not include an Import Draft apply workflow.
+
+MVP1 sharing is deliberately local-only: `/api/llm/catalog/share` can prepare/export sanitized local evidence for a maintainer or future ingestion service, but the desktop app does not auto-upload probe evidence to a community catalog. A scalable multi-user community catalog requires a separate service design for ingestion, abuse control, aggregation, sharding, and artifact publishing.
 
 ## 6. Model Profiles and Roles
 

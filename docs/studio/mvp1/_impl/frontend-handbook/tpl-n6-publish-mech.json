@@ -1,0 +1,254 @@
+{
+  "id": "n6_publish_mech",
+  "title": "发布机制(Artifact Registry zip 上传,非 git push)",
+  "overview": {
+    "manages": "发布 surface 背后有两条互补路径:① Release —— 把当前 skill 编译、打包成 product artifact、提交本地 product store(内容寻址 blob + release manifest),并在配置了 registry 时另发远端 Artifact Registry 同步(走 gateway 后端 sidecar HTTP)。② Package release —— 把已发布的 release 包以 native-fs 落地到工作区文件(走 Studio Rust 后端 Tauri 命令)。发布前置校验、错误码、回执都归这块。",
+    "why_single": "发布牵涉两条链:Release(前置校验 user_id → 编译 → 打包 → 提交本地 product store → 可选远端 sync → 回执)与 Package release(用回执经 native-fs 把发布包落盘)。其中『发布 = Artifact Registry 打包上传,不是 git push』『无 registry 时优雅降级为本地、不报错』『前置校验失败给 typed 错误码供前端指引 Settings』『native-fs 打包落盘走 Studio Rust 后端、不是 sidecar HTTP』最容易被写糊,单列一页讲清。",
+    "design_owner": "两个后端:① Release 链(发布端点 + 本地 product store + registry 客户端)归 gateway 后端 sidecar(`apps/studio/backend` 这个 Python sidecar,是 gateway 后端的 HTTP 承载层),现由 Python 完成。② Package release 的 native-fs 打包落盘归 Studio Rust 后端(`apps/studio/tauri` 的 native-fs),经 Tauri 命令 `publish_package_writer` 实现(D9.4 已落地,非未来项)。",
+    "code_location": "后端(gateway sidecar Python):路由 `skills.publish_skill`(发布端点处理函数);`artifact_registry.build_publish_metadata`(发布前置 + manifest 组装)、`ArtifactRegistryClient.upload_artifact`/`sync_release_manifest`(远端同步,仅配置 registry 时走)、`product_store_local.LocalProductArtifactStore`(本地 product store)。后端(Studio Rust native-fs):`native_fs.publish_package_writer`/`publish_package_writer_impl`(把发布包原子写到工作区相对路径,拒绝路径穿越/符号链接逃逸)。前端:`usePublishSkill`(发布 hook)+ `Header.getReleaseIdentity`(回执徽章)+ `Header.executePackageRelease`→`tauri.writePublishPackage`(native-fs 打包导出)。",
+    "dataflow": [
+      "用户点 Header→Team→Release → 前端 `usePublishSkill` 调 `POST /skills/{id}/publish`(可带 Idempotency-Key 头)",
+      "后端前置校验:user_id 空 → 抛 APP_SETTINGS_INCOMPLETE(供前端指引 Settings)",
+      "编译 skill → 打包成 product artifact(内容寻址,content_hash=sha256)→ 提交本地 product store(stage → commit)",
+      "若配置了 registry host + token → 另发远端 sync(upload_artifact + sync_release_manifest);未配置 → 优雅降级为仅本地发布,不报错",
+      "返回 PublishResult{status,message,artifact_id,extra{release_version,artifact_ref,content_hash,manifest_ref,remote_sync,...}}",
+      "前端用 PublishResult 拼成功 toast + Header 回执徽章(原子 #6);失败按 error_code 决定是否挂 Open Settings(原子 #7)",
+      "发布成功后端在 git 历史打 release 快照标记(见机制 A 的 release 快照子模块)",
+      "(可选)用户点 Package release → 前端用上一次发布回执经 Tauri 命令 `publish_package_writer` 把发布包以 native-fs 原子写到工作区 `.workspace/releases/{skill}-{version}.package.json`,回 {path,nativePath,hash,bytesWritten};冲突/权限/路径逃逸 → 可换路径重试(原子 #10)"
+    ]
+  },
+  "submodules": [
+    {
+      "name": "发布端点(编译 → 打包 → 本地提交 → 可选远端 sync)",
+      "code": "backend: skills.publish_skill",
+      "summary": "发布的主流程:校验 → 编译 → 打包成 product artifact → 提交本地 product store → 配置了 registry 才另发远端同步,最后回 PublishResult。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "请求 `POST /skills/{id}/publish`,body 可带 `version`(默认 1.0.0,需匹配版本号格式),可带 `Idempotency-Key` 头做幂等。",
+        "底层 = 打包 zip 成 product artifact 提交本地 product store,**不是 git push**;git 只用于本地存档(机制 A)与 Save/Sync-to-Team,不用于 publish。",
+        "registry 同步是条件性的:仅当 app 设置里 registry host 与 token 都非空才发远端;否则降级为『仅本地 product store 发布』,message 体现降级,不报错。",
+        "成功回 PublishResult,失败回 typed 错误体{error_code,message},发布成功后另在 git 历史打 release 快照(机制 A)。"
+      ],
+      "do": [
+        "校验 → 编译 → 打包 product artifact → 提交本地 product store。",
+        "配置了 registry 才另发远端 sync。",
+        "回 PublishResult / typed 错误体。"
+      ],
+      "dont": [
+        "不做 git push / 团队推送(发布≠git)。",
+        "无 registry 配置时不报错(降级本地发布)。"
+      ],
+      "deviation": "后端已实现;前端缺口在入口语义(Release 与团队 git 操作同列易误读,原子 #5 偏差),非后端问题。"
+    },
+    {
+      "name": "发布前置校验 + 错误码",
+      "code": "backend: skills.publish_skill(端点级校验)+ artifact_registry.build_publish_metadata",
+      "summary": "发布前校验必备配置(user_id),失败时抛 typed 错误码;前端据『可在 Settings 修复』的码挂 Open Settings 指引。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "**设计目标(spec P4 + capability F2)**:user_id 缺 **或 registry host+token 缺** 都应给 clear error + 指引 Settings;远端同步失败也应让用户感知。",
+        "端点级校验:app 设置 user_id 为空 → 抛 `APP_SETTINGS_INCOMPLETE`(400);`build_publish_metadata`(组 manifest 前的兜底)也对空 user_id 抛错。",
+        "publish 路径实际会抛的 error_code:`APP_SETTINGS_INCOMPLETE`(缺 user_id)/ `PUBLISH_CONFLICT`(版本已存在且 artifact 不同,409)/ `PUBLISH_FAILED`(本地提交失败,500)/ `SKILL_DIR_MISSING`(skill 目录丢失且无缓存 release,404)/ `REGISTRY_API_ERROR`(远端 HTTP ≥400,502)/ `REGISTRY_NETWORK_ERROR`(远端网络错,503)。",
+        "前端白名单 SETTINGS_FIXABLE_ERROR_CODES = {APP_SETTINGS_INCOMPLETE, REGISTRY_NOT_CONFIGURED}:命中就挂 Open Settings。缺 user_id 映射到 APP_SETTINGS_INCOMPLETE(在白名单)→ 指引覆盖。",
+        "⚠️ **drift 1 — registry 缺不报错**:`publish_skill` 在 `registry.host`/`token` 为空时**不抛错**,而是降级本地发布,写 remote_sync.status=skipped(reason=registry_not_configured)、返回 `PublishResult(status=ok)`。所以白名单里的 `REGISTRY_NOT_CONFIGURED` **后端从不抛**,前端那条分支是死路 → spec『registry 缺→指引』未达成。",
+        "⚠️ **drift 2 — 远端失败 soft-fail**:`publish_pipeline._manifest_with_remote_sync` 经 `_is_remote_sync_soft_failure`(判 `ArtifactRegistryApiError`/`httpx.RequestError`)把远端异常当软失败,记 remote_sync.status=failed、**不抛给前端**(只在 manifest 里留痕)。"
+      ],
+      "do": [
+        "发布前校验 user_id,空则抛 APP_SETTINGS_INCOMPLETE。",
+        "各失败给 typed error_code(供前端区分处理)。"
+      ],
+      "dont": [
+        "(现状,非设计)registry 缺不当作前置校验失败——降级而非报错;远端异常 soft-fail 不抛前端。"
+      ],
+      "deviation": "⚠️ code↔design drift:spec 要 registry 缺→clear error + 指引、远端失败让用户感知;真代码 registry 缺降级本地不报错、远端失败 soft-fail。user_id 前置校验已实现且符合;registry 前置校验未按设计实现。修复需后端补 registry host/token 前置校验抛 typed error(如真启用 REGISTRY_NOT_CONFIGURED),让前端白名单的 registry 分支成真实路径。"
+    },
+    {
+      "name": "Artifact Registry 客户端 + 本地 product store",
+      "code": "backend: artifact_registry.ArtifactRegistryClient(远端)+ product_store_local.LocalProductArtifactStore(本地)",
+      "summary": "本地 product store 用内容寻址 blob + release manifest 保存 artifact;registry 客户端在配置了远端时同步——这两条都是 sidecar 内部 / sidecar→registry,前端不直接调用。⚠️ 现状只同步 release manifest,未上传 zip package(见下)。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "本地:`LocalProductArtifactStore`(本地 product 制品库)把 artifact 以内容寻址(sha256)存成 blob,release manifest 以 stage → commit(硬链接原子提升)落地,冲突抛 release.conflict,可 rollback。",
+        "远端实际走的路径(仅配置了 registry):`publish_skill` → `sync_product_artifact_release` → `ArtifactRegistryClient.sync_release_manifest`,把 release manifest 传到 `POST {registry_host}/api/v1/releases`。",
+        "⚠️ **code↔design drift — zip package 未上传**:capability F2 设计目标是『backend zips the skill and uploads package + metadata』,对应 `ArtifactRegistryClient.upload_artifact`(multipart 传 metadata + 包 zip 到 `POST {registry_host}/api/v1/artifacts`)。但 `upload_artifact` **在 `apps/studio/backend/app` 里无 publish 生产调用**(仅有定义 + 测试 fake 引用),publish 远端路径只同步 manifest。F2 自身也标注『zip 构建仍在 Python,D12 Rust 写者未收口 ⚠️』。",
+        "这些远端端点是 **sidecar → 外部 Artifact Registry**,**前端不直接调用**(前端只调 sidecar 的 `/skills/{id}/publish`);远端失败/未配置不阻塞本地发布,体现在 PublishResult.extra.remote_sync.status=failed/skipped。"
+      ],
+      "do": [
+        "本地内容寻址保存 artifact + release manifest(stage/commit/rollback)。",
+        "配置了 registry 才同步 release manifest 到远端(`POST /releases`)。"
+      ],
+      "dont": [
+        "前端不直接调远端 registry 端点(只调 sidecar publish)。",
+        "(现状,非设计)未上传 zip package 到 `POST /artifacts`;远端失败不阻塞本地发布(降级记进 remote_sync)。"
+      ],
+      "deviation": "⚠️ code↔design drift:F2 设计目标=上传 zip package + metadata,真代码只同步 manifest(`sync_release_manifest`),`upload_artifact` 无 publish 生产调用;zip 构建仍 Python、D12 Rust 写者未收口。Release 链 product store 写盘走 Python,native-fs 打包导出另由下一子模块 Studio Rust 路径承担(已落地)。"
+    },
+    {
+      "name": "native-fs 打包导出(Studio Rust 后端)",
+      "code": "backend(Studio Rust native-fs): native_fs.publish_package_writer / publish_package_writer_impl; frontend: Header.executePackageRelease → tauri.writePublishPackage",
+      "summary": "把已发布的 release 包以 native-fs 原子写到工作区文件——这是 D12『发布打包落盘走 native-fs』在前端 + Studio Rust 后端的落地,经 Tauri 命令 publish_package_writer 完成,不走 sidecar HTTP。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "前端 `executePackageRelease`(打包导出编排)用上一次发布回执(release_version/content_hash/manifest_ref/artifact_ref)调 `writePublishPackage` → Tauri 命令 `publish_package_writer`,写到工作区相对路径(默认 `.workspace/releases/{skill}-{version}.package.json`)。",
+        "Rust `publish_package_writer_impl`(native-fs 写实现)原子写文件并回 {path, nativePath, hash, bytesWritten};对路径穿越(parent traversal)/符号链接逃逸(symlink escape)拒绝写,有单元测试覆盖。",
+        "typed 错误 Conflict / PermissionDenied / PathEscape → 前端给可重试 toast + 『Choose path』动作打开『Package target』弹框换路径重试;成功 toast 带 native 路径 + 『Reveal』。",
+        "这条路径走 **Studio Rust 后端 native-fs**(Tauri IPC 命令),不是 gateway 后端 sidecar 的 HTTP 端点;前端只触发 + 投影结果。"
+      ],
+      "do": [
+        "用发布回执经 native-fs 把发布包原子写到工作区文件。",
+        "拒绝路径穿越 / 符号链接逃逸。",
+        "typed 错误可换路径重试。"
+      ],
+      "dont": [
+        "不走 sidecar HTTP(走 Studio Rust 后端 Tauri 命令)。",
+        "前端不自己写盘(只发 Tauri 命令、投影结果)。"
+      ],
+      "deviation": "前端 + Studio Rust 后端均已实现(D9.4);非未来项。"
+    }
+  ],
+  "files": [
+    {
+      "name": "PublishResult(发布回执响应 DTO)",
+      "version": "POST /api/skills/{skill_id}/publish 的响应体",
+      "what": "前端发布成功后读到的回执结构;前端用它拼成功 toast 与 Header 回执徽章(原子 #6),如实表达发布底层=Artifact Registry artifact 而非 git。",
+      "structs": [
+        {
+          "name": "PublishResult",
+          "fields": [
+            {"name": "status", "type": "str", "meaning": "ok / 错误;前端据它分成功/失败分支"},
+            {"name": "message", "type": "str", "meaning": "人读消息(含降级提示,如『Published to local product store; registry sync failed』)"},
+            {"name": "artifact_id", "type": "str|null", "meaning": "发布出的 artifact id"}
+          ]
+        },
+        {
+          "name": "PublishResult.extra",
+          "fields": [
+            {"name": "release_version", "type": "str", "meaning": "发布版本号(回执徽章主字段)"},
+            {"name": "artifact_ref", "type": "obj", "meaning": "{artifact_id, content_hash, manifest_ref, store, source_map_ref?}"},
+            {"name": "content_hash", "type": "str", "meaning": "内容哈希 sha256:<hex>(内容寻址,表明非 git)"},
+            {"name": "manifest_ref", "type": "str", "meaning": "release manifest 引用路径"},
+            {"name": "package_kind", "type": "str", "meaning": "product_artifact(包种类)"},
+            {"name": "remote_sync", "type": "obj", "meaning": "{status: succeeded|failed|skipped, reason?/error_type?/error?},远端同步结果"}
+          ]
+        }
+      ],
+      "owns": "后端拥有(发布结果是后端 product store + registry 的权威输出);前端只读投影。",
+      "crud_pointer": "前端写(触发发布并取回执):`POST /api/skills/{id}/publish`(见下方接口表 iface-publish)。",
+      "storage_note": "本地 product store(内容寻址 blob + release manifest)由 sidecar Python 完成;D12 目标态打包写盘走 Studio Rust native-fs。前端不落盘、不持第二份发布真相。",
+      "security_fe": "回执只含版本/哈希/manifest/同步状态等元数据,不含凭证;前端只读渲染。"
+    }
+  ],
+  "interface_groups": [
+    {
+      "key": "action",
+      "title": "发布动作类(触发真实打包 + 提交,前端调用)",
+      "note": "点 Release 会真打包 + 提交本地 product store(配置了 registry 还真上传远端),不是幂等读。前端只调这一条 sidecar 端点;它是『测试通过 ⟺ 真能用』要真跑的入口。"
+    },
+    {
+      "key": "downstream",
+      "title": "下游:sidecar → 外部 Artifact Registry(前端不调用)",
+      "note": "这两条是 sidecar 在配置了 registry 时向外部 Artifact Registry 发的远端同步,**前端从不直接调用**(前端只调上面的 /skills/{id}/publish)。列在这里是为讲清『发布底层做什么』,不是前端契约面。"
+    },
+    {
+      "key": "native",
+      "title": "native-fs 打包导出(Studio Rust 后端 Tauri 命令,前端调用)",
+      "note": "Package release 经这条把发布包以 native-fs 落地。它是 Studio Rust 后端的 Tauri IPC 命令(不是 sidecar HTTP 端点),前端经 `writePublishPackage` 调用;『端点』写成命令名,无 HTTP 方法。"
+    }
+  ],
+  "interfaces": [
+    {
+      "group": "action",
+      "endpoint": "POST /api/skills/{skill_id}/publish",
+      "req": "body {version?: str = '1.0.0'};可选头 Idempotency-Key",
+      "resp": "PublishResult{status,message,artifact_id,extra{...}}(见上方 DTO);失败 typed 错误体{error_code,message},码:APP_SETTINGS_INCOMPLETE / PUBLISH_CONFLICT / PUBLISH_FAILED / SKILL_DIR_MISSING / REGISTRY_API_ERROR / REGISTRY_NETWORK_ERROR",
+      "purpose": "发布当前 skill(编译→打包 product artifact→提交本地 product store→可选远端 sync)——原子 #5/#6/#7 用它",
+      "provider": "gateway 后端 sidecar(`skills.publish_skill`)",
+      "id": "iface-publish"
+    },
+    {
+      "group": "downstream",
+      "endpoint": "POST {registry_host}/api/v1/releases（publish 实际走这条）",
+      "req": "JSON {skill_id, metadata{author=user_id,version,artifact_ref,...}, release_manifest}",
+      "resp": "JSON;失败被当 soft-failure 降级进 remote_sync.status=failed,不阻塞、不抛前端",
+      "purpose": "sidecar 把 release manifest 同步到外部 Artifact Registry——这是 publish 远端路径**实际调用**的端点(`sync_release_manifest`)。前端不调用,仅作机制说明",
+      "provider": "外部 Artifact Registry(由 sidecar `ArtifactRegistryClient.sync_release_manifest` 调,经 `sync_product_artifact_release`)",
+      "id": "iface-registry-release"
+    },
+    {
+      "group": "downstream",
+      "endpoint": "POST {registry_host}/api/v1/artifacts（⚠️ 设计目标,publish 当前未调用）",
+      "req": "multipart:metadata(JSON)+ package(zip 二进制)",
+      "resp": "JSON(含远端 artifact_id 等)",
+      "purpose": "⚠️ **code↔design drift**:capability F2 设计目标是上传 zip package + metadata(`ArtifactRegistryClient.upload_artifact`),但该方法在 `apps/studio/backend/app` 里**无 publish 生产调用**(仅定义 + 测试 fake);publish 远端只同步 manifest(上一条)。列此条记录设计目标与现状缺口,前端亦不调用",
+      "provider": "外部 Artifact Registry(`ArtifactRegistryClient.upload_artifact`,定义已存在但 publish 路径未接)",
+      "id": "iface-registry-upload"
+    },
+    {
+      "group": "native",
+      "endpoint": "Tauri 命令 publish_package_writer",
+      "req": "{workspaceRoot, relativePath(默认 `.workspace/releases/{skill}-{version}.package.json`), releaseVersion, contentHash, manifestRef, artifactRef}",
+      "resp": "{path, nativePath, hash, bytesWritten};typed 错误 Conflict / PermissionDenied / PathEscape(各带 path,前端可换路径重试)",
+      "purpose": "把发布包以 native-fs 原子写到工作区文件——原子 #10 Package release 用它(Studio Rust 后端 Tauri IPC 命令,非 sidecar HTTP)",
+      "provider": "Studio Rust 后端 native-fs(`native_fs.publish_package_writer` / `publish_package_writer_impl`,前端经 `tauri.writePublishPackage` 调)",
+      "id": "iface-package-writer"
+    }
+  ],
+  "boundaries": {
+    "do": [
+      "后端编译 → 打包 product artifact(内容寻址)→ 提交本地 product store",
+      "后端配置了 registry 才另发远端 Artifact Registry 同步",
+      "后端发布前校验 user_id,失败给 typed error_code",
+      "Package release 经 Studio Rust 后端 native-fs(Tauri publish_package_writer)把发布包原子写到工作区文件,拒绝路径穿越/符号链接逃逸",
+      "前端调 sidecar /publish(Release)与 Tauri publish_package_writer(Package release)、用 PublishResult 拼回执、按可修复码挂 Open Settings"
+    ],
+    "dont": [
+      "不做 git push / 团队推送(发布=Artifact Registry / native-fs 落盘,非 git)",
+      "无 registry 配置时不报错(优雅降级为本地发布)",
+      "前端不直接调外部 registry 端点(只调 sidecar publish)",
+      "前端不自造发布结果(以 PublishResult / native-fs 写结果为准)",
+      "Release 链对接 gateway 后端 sidecar、Package release 对接 Studio Rust 后端 native-fs——两条都不是新增的第四层后端"
+    ]
+  },
+  "states_errors": "",
+  "backend_status": [
+    {
+      "item": "发布端点 POST /publish",
+      "d12": "—",
+      "status": "ok",
+      "note": "`publish_skill` 已实现:编译→打包→提交本地 product store→可选远端 sync→回 PublishResult。该路径的 product store 写盘由 gateway sidecar Python `product_store_local` 完成。前端 Release 直接用。",
+      "ref": "d12"
+    },
+    {
+      "item": "native-fs 打包导出(Tauri publish_package_writer)",
+      "d12": "D12「发布打包落盘走 native-fs」",
+      "status": "ok",
+      "note": "Studio Rust 后端 `native_fs.publish_package_writer` / `publish_package_writer_impl` 已实现(D9.4):把发布包以 native-fs 原子写到工作区文件,拒绝路径穿越/符号链接逃逸,有单元测试。前端经 `tauri.writePublishPackage` 调用(原子 #10)。这是 D12『发布打包落盘走 native-fs』前端 + Rust 侧的已落地实现,非未来项。",
+      "ref": "d12"
+    },
+    {
+      "item": "前置校验 + 错误码",
+      "d12": "—",
+      "status": "partial",
+      "note": "⚠️ code↔design drift。user_id 前置校验已实现(空→APP_SETTINGS_INCOMPLETE,前端按白名单挂 Open Settings)=符合。但 spec P4/F2 还要求 registry host/token 缺→clear error+指引——真代码 registry 缺时降级本地、不报错(remote_sync=skipped、PublishResult ok),远端失败 soft-fail 不抛前端,故 `REGISTRY_NOT_CONFIGURED` publish 路径从不抛、前端那条分支是死路。修复需后端补 registry 前置校验抛 typed error。",
+      "ref": "d12"
+    },
+    {
+      "item": "Artifact Registry 远端同步 + 本地 product store",
+      "d12": "—",
+      "status": "partial",
+      "note": "本地 `LocalProductArtifactStore`(内容寻址 + manifest stage/commit/rollback)已实现=符合。⚠️ 远端 drift:F2 设计目标=上传 zip package + metadata(`upload_artifact`),真代码 publish 远端只同步 manifest(`sync_release_manifest`→`POST /releases`),`upload_artifact` 无 publish 生产调用;zip 构建仍 Python、D12 Rust 写者未收口。前端不直接碰这两块,只读 PublishResult。",
+      "ref": "d12"
+    },
+    {
+      "item": "发布消费端点(list/get/run release)",
+      "d12": "—",
+      "status": "review",
+      "note": "边界注记(非 N6 阻塞):后端 `skills.list_skill_releases`/`get_skill_release`/`run_skill_release` 与前端 `api/client.ts` `listReleases`/`getRelease` 已存在(读取/按 release 启动 run),但 **N6 前端原子不消费它们**。若归 N4(运行与验收)或未来「发布消费面」,应在对应节点登记;此处仅作可见性注记,不升级为 N6 契约缺口。",
+      "ref": "d12"
+    }
+  ]
+}

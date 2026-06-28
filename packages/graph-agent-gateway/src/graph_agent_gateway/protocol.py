@@ -6,7 +6,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from graph_agent_gateway.registry.schema import ResolvedRole
+from graph_agent_gateway.route_handoff import ResolvedRouteChain
 
 
 @runtime_checkable
@@ -45,5 +45,5 @@ class ModelResolverProtocol(Protocol):
         role_name: str,
         *,
         route_override: str | None = None,
-    ) -> ResolvedRole:
+    ) -> ResolvedRouteChain:
         """Resolve registry configuration to an ordered route chain."""

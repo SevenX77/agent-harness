@@ -6,6 +6,7 @@ import threading
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -25,13 +26,24 @@ from app.models.llm_config import (
 )
 from app.routers import llm as llm_router
 from app.services import copilot_test
+from app.services.community_catalog import (
+    parse_catalog_evidence,
+    promote_community_evidence_into_credentials,
+)
+from app.services.community_catalog_sync import (
+    CommunityCatalogCache,
+    DisposableCatalogCacheStore,
+)
 from app.services.copilot_test import ModelProbeResult, PingResult, _Unauthorized
-from app.services.llm_credentials import credentials_path, save_credentials
-from app.services.llm_import_drafts import load_evidence_library
+from app.services.llm_credentials import credentials_path, load_credentials, save_credentials
+from app.services.llm_import_drafts import append_evidence_record, load_evidence_library
+from app.services.llm_paths import community_catalog_cache_path
 from app.services.llm_roles import load_roles_file, save_roles_file
 from app.services.llm_roles import roles_path as active_roles_path
 from fastapi.testclient import TestClient
-from graph_agent_gateway.registry.schema import VerifiedProfile
+from graph_agent_gateway.registry import provider_probe as gateway_provider_probe
+from graph_agent_gateway.registry.provider_probe import EndpointProbeResult, RouteProbeResult
+from graph_agent_gateway.registry.schema import EvidenceRecord, RouteCandidate, VerifiedProfile
 
 
 def _seed(
@@ -92,6 +104,7 @@ def _seed(
 def test_role_effective_runtime_settings_uses_gateway_model_resolver(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from app.core.adapters.gateway import GatewayAdapter
     from graph_agent_gateway.resolver import ModelResolver
 
     route_id = "openai-direct:gpt-5"
@@ -136,6 +149,11 @@ def test_role_effective_runtime_settings_uses_gateway_model_resolver(
         return original_resolve_routes(self, role_name, route_override=route_override)
 
     monkeypatch.setattr(ModelResolver, "resolve_routes", recording_resolve_routes)
+    monkeypatch.setattr(
+        llm_router,
+        "build_gateway_adapter",
+        lambda: GatewayAdapter(transport="in_process"),
+    )
 
     result = llm_router._role_effective_runtime_settings(credentials, roles)
 
@@ -153,7 +171,14 @@ def test_role_effective_runtime_settings_projects_no_available_route(
     def raise_no_available_route(_self: object, _payload: dict[str, object]) -> object:
         raise NoAvailableRouteError()
 
-    monkeypatch.setattr(llm_router.GatewayAdapter, "resolve_routes", raise_no_available_route)
+    class FailingGatewayAdapter:
+        resolve_routes = raise_no_available_route
+
+    monkeypatch.setattr(
+        llm_router,
+        "build_gateway_adapter",
+        lambda: FailingGatewayAdapter(),
+    )
 
     result = llm_router._role_effective_runtime_settings(
         LLMCredentialsFile(),
@@ -236,6 +261,217 @@ def test_registry_read_and_endpoint_upsert_redacts_secret(
     }
     raw = json.loads(credentials_path().read_text())
     assert raw["provider_endpoints"]["anthropic-official"]["api_key"] == "anthropic-secret"
+
+
+def _write_community_cache(*records: object) -> None:
+    DisposableCatalogCacheStore(community_catalog_cache_path()).save(
+        CommunityCatalogCache(
+            manifest_etag='"abc-1"',
+            generated_at="2026-06-26T14:40:44Z",
+            protocol_major=1,
+            records=list(records),  # type: ignore[arg-type]
+        )
+    )
+
+
+def test_registry_probe_catalog_exposes_verified_community_cache(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """The registry surfaces the disposable verified community cache so the UI
+    can show 'past connected' community evidence as an advisory layer."""
+    _seed(tmp_path, monkeypatch)
+    record = parse_catalog_evidence(
+        {
+            "evidence_type": "probe_result",
+            "trust_state": "probe-verified",
+            "evidence_id": "cat-deepseek-pro",
+            "normalized_public_base_url": "https://api.deepseek.com",
+            "provider_model_id": "deepseek-v4-pro",
+            "model_id": "deepseek-v4-pro",
+            "method_id": "deepseek_chat_completions",
+            "capability_family": "language_reasoning",
+            "observed_at": "2026-06-26T09:33:40+00:00",
+            "probe_status": "ok",
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+        }
+    )
+    _write_community_cache(record)
+
+    body = client.get("/api/llm/registry").json()
+
+    community = body["probe_catalog"]["community_catalog"]
+    assert community["synced"] is True
+    assert community["record_count"] == 1
+    assert community["generated_at"] == "2026-06-26T14:40:44Z"
+    entry = community["entries"][0]
+    assert entry["public_base_url"] == "https://api.deepseek.com"
+    assert entry["model_id"] == "deepseek-v4-pro"
+    assert entry["capability_family"] == "language_reasoning"
+    # Community evidence is advisory: it must NOT inflate the local counts.
+    assert body["probe_catalog"]["local_verified_records_count"] == 0
+
+
+def test_registry_probe_catalog_community_absent_when_no_cache(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+
+    body = client.get("/api/llm/registry").json()
+
+    community = body["probe_catalog"]["community_catalog"]
+    assert community["synced"] is False
+    assert community["record_count"] == 0
+    assert community["entries"] == []
+
+
+def _seed_deepseek_verified_endpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    route_status: str = "unverified_manual",
+) -> Path:
+    """A VERIFIED DeepSeek endpoint (api.deepseek.com/v1) with one not-yet-tested
+    route — the exact shape of the screenshot the user reported."""
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    creds_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "deepseek-official": ProviderEndpoint(
+                    endpoint_id="deepseek-official",
+                    display_name="DeepSeek Official",
+                    protocol="openai_compatible",
+                    base_url="https://api.deepseek.com/v1",
+                    api_key="secret",
+                    status="verified",
+                )
+            },
+            provider_routes={
+                "deepseek-official:deepseek-v4-pro": ProviderRoute(
+                    route_id="deepseek-official:deepseek-v4-pro",
+                    endpoint_id="deepseek-official",
+                    route_slug="deepseek-v4-pro",
+                    provider_model_id="deepseek-v4-pro",
+                    canonical_id="deepseek-v4-pro",
+                    display_name="DeepSeek V4 Pro",
+                    status=route_status,
+                )
+            },
+        ),
+        creds_path,
+    )
+    save_roles_file(
+        roles_path,
+        RolesData(),
+        known_route_ids={"deepseek-official:deepseek-v4-pro"},
+    )
+    return creds_path
+
+
+def _community_probe_record(
+    *,
+    evidence_id: str = "cat-deepseek-pro",
+    normalized_public_base_url: str = "https://api.deepseek.com",
+    model_id: str = "deepseek-v4-pro",
+    trust_state: str = "probe-verified",
+    evidence_type: str = "probe_result",
+) -> EvidenceRecord:
+    return parse_catalog_evidence(
+        {
+            "evidence_type": evidence_type,
+            "trust_state": trust_state,
+            "evidence_id": evidence_id,
+            "normalized_public_base_url": normalized_public_base_url,
+            "provider_model_id": model_id,
+            "model_id": model_id,
+            "method_id": "deepseek_chat_completions",
+            "capability_family": "language_reasoning",
+            "observed_at": "2026-06-26T09:33:40+00:00",
+            "probe_status": "ok",
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+        }
+    )
+
+
+def test_community_evidence_promotes_matching_route_to_historical_ready(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Community catalog is a data carrier INTO credentials (the single source of
+    truth). A probe-verified community record whose host + model match a VERIFIED
+    endpoint's route writes evidence into that route's credential, so the registry
+    projects it as historical_ready (blue) — host-tolerant across a /v1 suffix."""
+    creds_path = _seed_deepseek_verified_endpoint(tmp_path, monkeypatch)
+
+    updated = promote_community_evidence_into_credentials(
+        community_records=[_community_probe_record()]
+    )
+    assert updated == 1
+
+    # The credential now carries the community evidence ...
+    route = load_credentials(creds_path).provider_routes["deepseek-official:deepseek-v4-pro"]
+    assert "cat-deepseek-pro" in route.metadata.get("evidence_refs", [])
+    # ... but community evidence must NEVER promote a route to verified/green.
+    assert route.status == "unverified_manual"
+
+    # ... and the registry projects the route as historical_ready (blue).
+    body = client.get("/api/llm/registry").json()
+    provider_models = {
+        opt["route_id"]: opt
+        for group in body["model_groups"]
+        for opt in group["provider_models"]
+    }
+    assert provider_models["deepseek-official:deepseek-v4-pro"]["ui_state"] == "historical_ready"
+
+
+def test_community_evidence_skips_unmatched_host_and_observed_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No write when host does not match, and observed-only (not probe-verified)
+    community records never contribute to historical_ready."""
+    creds_path = _seed_deepseek_verified_endpoint(tmp_path, monkeypatch)
+
+    updated = promote_community_evidence_into_credentials(
+        community_records=[
+            # Wrong host — different provider, must not touch DeepSeek route.
+            _community_probe_record(
+                evidence_id="cat-other-host",
+                normalized_public_base_url="https://api.openai.com",
+            ),
+            # Right host + model but only list-observed, not probe-verified.
+            EvidenceRecord(
+                evidence_id="cat-observed-only",
+                evidence_type="model_list_observation",
+                trust_state="provider-list-observed",
+                model_id="deepseek-v4-pro",
+                provider_model_id="deepseek-v4-pro",
+                metadata={"normalized_public_base_url": "https://api.deepseek.com"},
+            ),
+        ]
+    )
+
+    assert updated == 0
+    route = load_credentials(creds_path).provider_routes["deepseek-official:deepseek-v4-pro"]
+    assert route.metadata.get("evidence_refs", []) == []
+
+
+def test_legacy_import_draft_routes_are_not_public_api(client: TestClient) -> None:
+    response = client.post(
+        "/api/llm/import-drafts",
+        json={"draft_id": "legacy", "source": {"kind": "test"}, "status": "pending"},
+    )
+
+    assert response.status_code == 404
 
 
 def test_registry_includes_runtime_setting_metadata_for_frontend_controls(
@@ -735,21 +971,229 @@ def test_registry_returns_model_groups_with_provider_ui_state_projection(
     assert model_group["display_name"] == "GPT 5"
     assert model_group["status_summary"] == {
         "ready": 1,
+        "historical_ready": 0,
         "untested": 1,
         "cooling_down": 0,
-        "needs_setup": 1,
         "off": 1,
-        "failed": 1,
+        "failed": 2,
     }
     provider_models = {option["route_id"]: option for option in model_group["provider_models"]}
     assert provider_models["ready-provider:gpt-5"]["ui_state"] == "ready"
     assert provider_models["untested-provider:gpt-5"]["ui_state"] == "untested"
-    assert provider_models["missing-key-provider:gpt-5"]["ui_state"] == "needs_setup"
+    # Missing credential now converges to the canonical failed/missing_config (was needs_setup).
+    assert provider_models["missing-key-provider:gpt-5"]["ui_state"] == "failed"
     assert provider_models["failed-provider:gpt-5"]["ui_state"] == "failed"
     assert provider_models["disabled-provider:gpt-5"]["ui_state"] == "off"
     assert provider_models["ready-provider:gpt-5"]["endpoint_id"] == "ready-provider"
     assert provider_models["ready-provider:gpt-5"]["provider_kind"] == "third_party"
     assert provider_models["ready-provider:gpt-5"]["capability_state"] == "unknown"
+
+
+def test_registry_does_not_project_historical_ready_from_catalog_without_credential_promotion(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    active_credentials_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "openai-direct": ProviderEndpoint(
+                    endpoint_id="openai-direct",
+                    display_name="OpenAI",
+                    protocol="openai_compatible",
+                    base_url="https://api.openai.example/v1",
+                    api_key="secret",
+                    status="verified",
+                )
+            },
+            provider_routes={
+                "openai-direct:gpt-5": ProviderRoute(
+                    route_id="openai-direct:gpt-5",
+                    endpoint_id="openai-direct",
+                    route_slug="gpt-5",
+                    provider_model_id="gpt-5",
+                    canonical_id="gpt-5",
+                    display_name="GPT-5",
+                    status="unverified_manual",
+                )
+            },
+        ),
+        active_credentials_path,
+    )
+    role = RoleEntry(
+        model_groups=[
+            RoleModelGroup(
+                canonical_id="gpt-5",
+                display_name="GPT-5",
+                provider_models=[{"route_id": "openai-direct:gpt-5"}],
+            )
+        ]
+    )
+    save_roles_file(
+        roles_path,
+        RolesData(roles={"assistant": role}),
+        known_route_ids={"openai-direct:gpt-5"},
+    )
+    evidence = EvidenceRecord(
+        evidence_id="probe-openai-gpt5",
+        evidence_type="probe",
+        trust_state="probe-verified",
+        endpoint_id="openai-direct",
+        route_id="openai-direct:gpt-5",
+        model_id="gpt-5",
+        provider_model_id="gpt-5",
+        probe_status="ok",
+    )
+    append_evidence_record(evidence)
+
+    registry_response = client.get("/api/llm/registry")
+
+    assert registry_response.status_code == 200
+    model_group = registry_response.json()["model_groups"][0]
+    provider_model = model_group["provider_models"][0]
+    assert provider_model["ui_state"] == "untested"
+    assert model_group["status_summary"]["historical_ready"] == 0
+    assert model_group["status_summary"]["untested"] == 1
+
+
+def test_registry_and_role_materialization_use_credentials_evidence_refs_for_historical_ready(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.core.adapters.gateway as gateway_module
+
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    active_credentials_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "openai-direct": ProviderEndpoint(
+                    endpoint_id="openai-direct",
+                    display_name="OpenAI",
+                    protocol="openai_compatible",
+                    base_url="https://api.openai.example/v1",
+                    api_key="secret",
+                    status="verified",
+                )
+            },
+            provider_routes={
+                "openai-direct:gpt-5": ProviderRoute(
+                    route_id="openai-direct:gpt-5",
+                    endpoint_id="openai-direct",
+                    route_slug="gpt-5",
+                    provider_model_id="gpt-5",
+                    canonical_id="gpt-5",
+                    display_name="GPT-5",
+                    status="unverified_manual",
+                    metadata={"evidence_refs": ["probe-openai-gpt5"]},
+                )
+            },
+        ),
+        active_credentials_path,
+    )
+    role = RoleEntry(
+        model_groups=[
+            RoleModelGroup(
+                canonical_id="gpt-5",
+                display_name="GPT-5",
+                provider_models=[{"route_id": "openai-direct:gpt-5"}],
+            )
+        ]
+    )
+    save_roles_file(
+        roles_path,
+        RolesData(roles={"assistant": role}),
+        known_route_ids={"openai-direct:gpt-5"},
+    )
+
+    registry_response = client.get("/api/llm/registry")
+
+    assert registry_response.status_code == 200
+    model_group = registry_response.json()["model_groups"][0]
+    provider_model = model_group["provider_models"][0]
+    assert provider_model["ui_state"] == "historical_ready"
+    assert model_group["status_summary"]["historical_ready"] == 1
+    assert model_group["status_summary"]["untested"] == 0
+
+    captured: dict[str, object] = {}
+
+    def _spy(request: object) -> SimpleNamespace:
+        captured["has_evidence_records"] = hasattr(request, "evidence_records")
+        return SimpleNamespace(
+            fallback_chain=[RoleRouteEntry(route_id="openai-direct:gpt-5")],
+            materialization_report={
+                "entries": [{"route_id": "openai-direct:gpt-5", "role_fit": "using"}],
+                "warnings": [],
+                "skipped_provider_details": [],
+            },
+        )
+
+    monkeypatch.setattr(gateway_module, "gateway_materialize_role", _spy, raising=False)
+
+    role_response = client.get("/api/llm/roles/assistant")
+
+    assert role_response.status_code == 200
+    assert captured["has_evidence_records"] is False
+
+
+def test_model_list_observation_keeps_registry_route_untested(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "openai-direct": ProviderEndpoint(
+                    endpoint_id="openai-direct",
+                    display_name="OpenAI",
+                    protocol="openai_compatible",
+                    base_url="https://api.openai.example/v1",
+                    api_key="secret",
+                    status="verified",
+                )
+            },
+            provider_routes={
+                "openai-direct:gpt-5": ProviderRoute(
+                    route_id="openai-direct:gpt-5",
+                    endpoint_id="openai-direct",
+                    route_slug="gpt-5",
+                    provider_model_id="gpt-5",
+                    canonical_id="gpt-5",
+                    display_name="GPT-5",
+                    status="unverified_manual",
+                )
+            },
+        ),
+        credentials_path(),
+    )
+    append_evidence_record(
+        EvidenceRecord(
+            evidence_id="model-list-openai-gpt5",
+            evidence_type="model_list_observation",
+            trust_state="provider-list-observed",
+            endpoint_id="openai-direct",
+            route_id="openai-direct:gpt-5",
+            model_id="gpt-5",
+            provider_model_id="gpt-5",
+            model_list_observation={"observed_model_ids": ["gpt-5"]},
+        )
+    )
+
+    response = client.get("/api/llm/registry")
+
+    assert response.status_code == 200
+    route = response.json()["provider_routes"]["openai-direct:gpt-5"]
+    assert route["ui_state"] == "untested"
 
 
 def test_registry_model_group_exposes_thinking_capability_from_verified_profile(
@@ -1421,13 +1865,17 @@ def test_registry_invalidates_legacy_fake_endpoint_test_status(
     assert endpoint["last_test_message"] == "Needs retest after v4 provider probe upgrade."
 
 
-def test_endpoint_test_uses_real_provider_probe(
+def test_endpoint_test_third_party_runs_inference_probe_to_verify(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    # apikeys#25: a third-party endpoint Test discovers models via get-models,
+    # then runs a real generation probe (protocol auto-detect + batch inference)
+    # and only reaches `verified` when a generation probe actually succeeds.
     _seed(tmp_path, monkeypatch)
     calls: list[tuple[str, str, str]] = []
+    probe_calls: list[tuple[str, str, str, str]] = []
 
     async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
         calls.append((backend, api_key, base_url))
@@ -1439,9 +1887,8 @@ def test_endpoint_test_uses_real_provider_probe(
         base_url: str,
         model_id: str,
     ) -> ModelProbeResult:
-        raise AssertionError(
-            f"endpoint test should only call /models, not probe {backend} {base_url} {model_id}"
-        )
+        probe_calls.append((backend, api_key, base_url, model_id))
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=21)
 
     monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
     monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
@@ -1453,23 +1900,646 @@ def test_endpoint_test_uses_real_provider_probe(
     assert body["tested_endpoint_id"] == "openai-direct"
     assert body["discovered_model_count"] == 2
     endpoint = body["registry"]["provider_endpoints"]["openai-direct"]
-    assert endpoint["status"] == "unverified_manual"
-    assert "Connected" in endpoint["last_test_message"]
+    assert endpoint["status"] == "verified"
+    assert "Generation verified" in endpoint["last_test_message"]
     assert "gpt-5" in endpoint["last_test_message"]
     routes = body["registry"]["provider_routes"]
     assert routes["openai-direct:gpt-5"]["status"] == "verified"
     assert routes["openai-direct:gpt-5"]["display_name"] == "GPT-5"
     assert routes["openai-direct:gpt-5-mini"]["provider_model_id"] == "gpt-5-mini"
     assert routes["openai-direct:gpt-5-mini"]["route_slug"] == "gpt-5-mini"
-    assert routes["openai-direct:gpt-5-mini"]["status"] == "unverified_manual"
+    # get-models reached once; the first probed model (gpt-5) verified, so the
+    # batch loop stops there.
     assert calls == [("openai", "secret", "https://api.openai.example/v1")]
+    assert probe_calls == [("openai", "secret", "https://api.openai.example/v1", "gpt-5")]
 
 
-def test_endpoint_test_does_not_require_one_token_model_probe_after_models_list(
+def test_endpoint_test_third_party_failed_inference_probe_stays_failed(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    # apikeys#25: get-models reachability alone never reaches verified for a
+    # third-party endpoint that was NEVER verified before — if no model generates
+    # and there is no prior verified route to fall back on, it stays failed.
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "oai-fresh": ProviderEndpoint(
+                    endpoint_id="oai-fresh",
+                    display_name="Fresh OpenAI",
+                    protocol="openai_compatible",
+                    base_url="https://api.openai.example/v1",
+                    api_key="secret",
+                )
+            },
+        ),
+        credentials_path(),
+    )
+
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        return PingResult(latency_ms=42, model_ids=("gpt-5", "gpt-5-mini"))
+
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        return ModelProbeResult(
+            model_id=model_id,
+            status="invalid_model",
+            message="generation failed for endpoint protocol/base_url combination",
+        )
+
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
+
+    response = client.post("/api/llm/endpoints/oai-fresh/test")
+
+    assert response.status_code == 200
+    body = response.json()
+    endpoint = body["registry"]["provider_endpoints"]["oai-fresh"]
+    assert endpoint["status"] == "failed"
+
+
+def test_endpoint_test_third_party_retains_verified_when_reachable_and_previously_verified(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # apikeys: an endpoint Test only needs to prove the *endpoint* connects. When
+    # get-models proves the key+URL are live AND the endpoint already has a
+    # verified route, a round where every catalog model probe fails (flaky /
+    # phantom upstream models) must NOT regress the endpoint to failed — it keeps
+    # its verified status by reusing the previously verified model.
+    _seed(tmp_path, monkeypatch)  # seeds a verified openai-direct:gpt-5 route
+
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        return PingResult(latency_ms=42, model_ids=("gpt-5", "gpt-5-mini"))
+
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        return ModelProbeResult(
+            model_id=model_id,
+            status="invalid_model",
+            message="generation failed for endpoint protocol/base_url combination",
+        )
+
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
+
+    response = client.post("/api/llm/endpoints/openai-direct/test")
+
+    assert response.status_code == 200
+    body = response.json()
+    endpoint = body["registry"]["provider_endpoints"]["openai-direct"]
+    assert endpoint["status"] == "verified"
+    assert "previously verified" in endpoint["last_test_message"].lower()
+    # the previously verified route must remain verified
+    routes = body["registry"]["provider_routes"]
+    assert routes["openai-direct:gpt-5"]["status"] == "verified"
+
+
+def test_endpoint_test_third_party_auto_detects_protocol_and_persists_it(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # apikeys#25: the third-party Test rotates candidate protocols (cloning the
+    # endpoint per candidate) until a generation probe is accepted, then persists
+    # the detected protocol on the endpoint — the user never hand-picks it.
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "mystery": ProviderEndpoint(
+                    endpoint_id="mystery",
+                    display_name="Mystery",
+                    # Stored protocol is wrong; auto-detect must rotate to anthropic.
+                    protocol="openai_compatible",
+                    base_url="https://anthropic.mystery.example/v1",
+                    api_key="secret",
+                )
+            },
+        ),
+        credentials_path(),
+    )
+    probed_backends: list[str] = []
+
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        return PingResult(latency_ms=42, model_ids=("claude-x",))
+
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        probed_backends.append(backend)
+        # Only the anthropic (claude) transport is accepted by this endpoint.
+        if backend == "claude":
+            return ModelProbeResult(model_id=model_id, status="ok", latency_ms=21)
+        return ModelProbeResult(model_id=model_id, status="error", message="protocol mismatch")
+
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
+
+    response = client.post("/api/llm/endpoints/mystery/test")
+
+    assert response.status_code == 200
+    body = response.json()
+    endpoint = body["registry"]["provider_endpoints"]["mystery"]
+    assert endpoint["status"] == "verified"
+    # Detected protocol persisted (openai was tried first and rejected, claude won).
+    assert endpoint["protocol"] == "anthropic_compatible"
+    assert "openai" in probed_backends and "claude" in probed_backends
+
+
+def test_endpoint_test_third_party_invalid_key_short_circuits_protocol_detect(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # apikeys#25: a structural error (invalid_key) cannot be fixed by rotating the
+    # protocol, so the auto-detect loop stops after the first candidate instead of
+    # burning a probe per protocol.
+    _seed(tmp_path, monkeypatch)
+    probe_count = {"n": 0}
+
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        return PingResult(latency_ms=42, model_ids=("gpt-5",))
+
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        probe_count["n"] += 1
+        return ModelProbeResult(model_id=model_id, status="invalid_key", message="bad key")
+
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
+
+    response = client.post("/api/llm/endpoints/openai-direct/test")
+
+    assert response.status_code == 200
+    endpoint = response.json()["registry"]["provider_endpoints"]["openai-direct"]
+    assert endpoint["status"] == "failed"
+    # Only the first candidate protocol was probed; invalid_key short-circuited.
+    assert probe_count["n"] == 1
+
+
+def test_third_party_models_test_capabilities_come_from_list_models_not_hardcoded(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # apikeys#27: the third-party manual-model probe derives route capabilities
+    # from the endpoint's list-models rich fields (symmetric with the official
+    # side), not the old hard-coded text-only default.
+    _seed(tmp_path, monkeypatch)
+
+    async def fake_gateway_test_provider_endpoint(
+        endpoint: ProviderEndpoint,
+    ) -> EndpointProbeResult:
+        return EndpointProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            provider_kind=endpoint.provider_kind,
+            backend="openai",
+            base_url="https://api.openai.example/v1",
+            status="ok",
+            latency_ms=42,
+            model_ids=("vision-pro",),
+            model_capabilities={
+                "vision-pro": {
+                    "input_modalities": ["text", "image"],
+                    "output_modalities": ["text"],
+                }
+            },
+        )
+
+    async def fake_probe_model(
+        backend: str,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=33)
+
+    monkeypatch.setattr(
+        llm_router,
+        "_gateway_test_provider_endpoint",
+        fake_gateway_test_provider_endpoint,
+        raising=False,
+    )
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
+
+    response = client.post(
+        "/api/llm/endpoints/openai-direct/models/test",
+        json={"model_ids": ["vision-pro"]},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    route = body["registry"]["provider_routes"]["openai-direct:vision-pro"]
+    assert route["status"] == "verified"
+    # image input came from list-models rich fields — NOT the text-only hardcode.
+    assert route["capabilities"]["input_modalities"]["value"] == ["text", "image"]
+
+
+def test_endpoint_test_promotes_probe_verified_draft_capabilities_and_profiles(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "openai-official": ProviderEndpoint(
+                    endpoint_id="openai-official",
+                    display_name="OpenAI",
+                    protocol="openai_compatible",
+                    base_url="https://api.openai.example/v1",
+                    api_key="secret",
+                    provider_kind="official",
+                )
+            }
+        ),
+        credentials_path(),
+    )
+    append_evidence_record(
+        EvidenceRecord(
+            evidence_id="probe-openai-gpt5",
+            evidence_type="probe",
+            trust_state="probe-verified",
+            endpoint_id="openai-official",
+            route_id="openai-official:gpt-5",
+            model_id="gpt-5",
+            provider_model_id="gpt-5",
+            method_id="openai_responses",
+            request_mapper_id="openai_responses_text",
+            input_modalities=["text"],
+            output_modalities=["text"],
+            candidate_capabilities={
+                "draft_only_capability": CapabilityValue(
+                    value=True,
+                    source="probed_verified",
+                )
+            },
+        )
+    )
+
+    async def fake_gateway_test_provider_endpoint(
+        endpoint: ProviderEndpoint,
+    ) -> EndpointProbeResult:
+        return EndpointProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            provider_kind=endpoint.provider_kind,
+            backend="openai",
+            base_url=endpoint.base_url,
+            status="ok",
+            latency_ms=42,
+            model_ids=("gpt-5",),
+            model_capabilities={"gpt-5": {}},
+        )
+
+    monkeypatch.setattr(
+        llm_router,
+        "_gateway_test_provider_endpoint",
+        fake_gateway_test_provider_endpoint,
+        raising=False,
+    )
+
+    response = client.post("/api/llm/endpoints/openai-official/test")
+
+    assert response.status_code == 200
+    route = response.json()["registry"]["provider_routes"]["openai-official:gpt-5"]
+    assert route["status"] == "unverified_manual"
+    assert route["ui_state"] == "historical_ready"
+    assert route["capabilities"]["draft_only_capability"]["value"] is True
+    assert route["verified_profiles"][0]["method_id"] == "openai_responses"
+    persisted = load_credentials(credentials_path())
+    persisted_route = persisted.provider_routes["openai-official:gpt-5"]
+    assert persisted_route.capabilities["draft_only_capability"].value is True
+    assert persisted_route.verified_profiles[0].method_id == "openai_responses"
+
+
+def test_third_party_probe_model_ids_fall_back_to_draft_known_models(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    endpoint = ProviderEndpoint(
+        endpoint_id="openai-direct",
+        display_name="OpenAI",
+        protocol="openai_compatible",
+        base_url="https://api.openai.example/v1",
+        api_key="secret",
+    )
+    append_evidence_record(
+        EvidenceRecord(
+            evidence_id="probe-draft-known",
+            evidence_type="probe",
+            trust_state="probe-verified",
+            endpoint_id="openai-direct",
+            route_id="openai-direct:draft-known-model",
+            model_id="draft-known-model",
+            provider_model_id="draft-known-model",
+        ),
+        route_candidates={
+            "openai-direct:draft-known-model": RouteCandidate(
+                endpoint_id="openai-direct",
+                route_slug="draft-known-model",
+                provider_model_id="draft-known-model",
+                canonical_id="draft-known-model",
+                display_name="draft-known-model",
+            )
+        },
+    )
+
+    assert llm_router._third_party_probe_model_ids(endpoint, ()) == ["draft-known-model"]
+
+
+def test_third_party_probe_model_ids_leads_with_verified_then_unknown_then_failed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # apikeys: an endpoint Test proves the *endpoint* connects with the fewest
+    # attempts, so it must LEAD with a model that connected before (known-ok),
+    # then untried models, then known-failed last. It must NOT skip the known-good
+    # model — skipping it forces the probe onto flaky/phantom catalog models.
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    endpoint = ProviderEndpoint(
+        endpoint_id="openai-direct",
+        display_name="OpenAI",
+        protocol="openai_compatible",
+        base_url="https://api.openai.example/v1",
+        api_key="secret",
+    )
+    append_evidence_record(
+        EvidenceRecord(
+            evidence_id="probe-known-ok",
+            evidence_type="probe",
+            trust_state="probe-verified",
+            endpoint_id="openai-direct",
+            route_id="openai-direct:known-ok",
+            model_id="known-ok",
+            provider_model_id="known-ok",
+        )
+    )
+    append_evidence_record(
+        EvidenceRecord(
+            evidence_id="probe-known-fail",
+            evidence_type="probe",
+            trust_state="probe-failed",
+            endpoint_id="openai-direct",
+            route_id="openai-direct:known-fail",
+            model_id="known-fail",
+            provider_model_id="known-fail",
+        )
+    )
+
+    model_ids = llm_router._third_party_probe_model_ids(
+        endpoint,
+        ("known-fail", "fresh", "known-ok"),
+    )
+
+    assert model_ids == ["known-ok", "fresh", "known-fail"]
+
+
+def test_third_party_probe_model_ids_puts_currently_verified_routes_first(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # apikeys: a model with a currently-verified route (green) is the surest bet,
+    # so it leads ahead of a model that merely connected in the past (blue).
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    endpoint = ProviderEndpoint(
+        endpoint_id="openai-direct",
+        display_name="OpenAI",
+        protocol="openai_compatible",
+        base_url="https://api.openai.example/v1",
+        api_key="secret",
+    )
+    # Both models connected before (historical / blue) in the evidence library...
+    for model_id in ("hist-ok", "green-ok"):
+        append_evidence_record(
+            EvidenceRecord(
+                evidence_id=f"probe-{model_id}",
+                evidence_type="probe",
+                trust_state="probe-verified",
+                endpoint_id="openai-direct",
+                route_id=f"openai-direct:{model_id}",
+                model_id=model_id,
+                provider_model_id=model_id,
+            )
+        )
+
+    # ...but only green-ok has a currently-verified route, so it must lead.
+    model_ids = llm_router._third_party_probe_model_ids(
+        endpoint,
+        ("hist-ok", "green-ok"),
+        verified_model_ids=frozenset({"green-ok"}),
+    )
+
+    assert model_ids == ["green-ok", "hist-ok"]
+
+
+def test_endpoint_test_reprobes_when_all_listed_models_are_probe_verified_in_draft(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+    append_evidence_record(
+        EvidenceRecord(
+            evidence_id="probe-known-ok",
+            evidence_type="probe",
+            trust_state="probe-verified",
+            endpoint_id="openai-direct",
+            route_id="openai-direct:known-ok",
+            model_id="known-ok",
+            provider_model_id="known-ok",
+        )
+    )
+
+    async def fake_gateway_test_provider_endpoint(
+        endpoint: ProviderEndpoint,
+    ) -> EndpointProbeResult:
+        return EndpointProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            provider_kind=endpoint.provider_kind,
+            backend="openai",
+            base_url=endpoint.base_url,
+            status="ok",
+            latency_ms=42,
+            model_ids=("known-ok",),
+        )
+
+    async def fake_gateway_test_provider_route(
+        endpoint: ProviderEndpoint,
+        route: ProviderRoute,
+        *,
+        runtime_settings: dict[str, object] | None = None,
+    ) -> RouteProbeResult:
+        del runtime_settings
+        return RouteProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            route_id=route.route_id,
+            provider_kind=endpoint.provider_kind,
+            backend="openai",
+            base_url=endpoint.base_url,
+            model_id=route.provider_model_id,
+            status="ok",
+            latency_ms=33,
+        )
+
+    monkeypatch.setattr(
+        llm_router,
+        "_gateway_test_provider_endpoint",
+        fake_gateway_test_provider_endpoint,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        llm_router,
+        "_gateway_test_provider_route",
+        fake_gateway_test_provider_route,
+        raising=False,
+    )
+
+    response = client.post("/api/llm/endpoints/openai-direct/test")
+
+    assert response.status_code == 200
+    endpoint = response.json()["registry"]["provider_endpoints"]["openai-direct"]
+    assert endpoint["status"] == "verified"
+    assert endpoint["last_test_message"] != "Endpoint reachable but no model ids were available to probe."
+    assert "known-ok" in endpoint["last_test_message"]
+
+
+def test_registry_response_projects_six_state_ui_state_onto_routes(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # apikeys#30: the registry snapshot stamps each route's 6-state ui_state so the
+    # API Keys cards render the authoritative state inline.
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "ready-ep": ProviderEndpoint(
+                    endpoint_id="ready-ep",
+                    display_name="Ready",
+                    protocol="openai_compatible",
+                    base_url="https://api.ready.example/v1",
+                    api_key="secret",
+                    status="verified",
+                ),
+                "nokey-ep": ProviderEndpoint(
+                    endpoint_id="nokey-ep",
+                    display_name="No Key",
+                    protocol="openai_compatible",
+                    base_url="https://api.nokey.example/v1",
+                    status="unverified_manual",
+                ),
+            },
+            provider_routes={
+                "ready-ep:gpt-5": ProviderRoute(
+                    route_id="ready-ep:gpt-5",
+                    endpoint_id="ready-ep",
+                    route_slug="gpt-5",
+                    provider_model_id="gpt-5",
+                    canonical_id="gpt-5",
+                    status="verified",
+                ),
+                "nokey-ep:gpt-5": ProviderRoute(
+                    route_id="nokey-ep:gpt-5",
+                    endpoint_id="nokey-ep",
+                    route_slug="gpt-5",
+                    provider_model_id="gpt-5",
+                    canonical_id="gpt-5",
+                    status="unverified_manual",
+                ),
+            },
+        ),
+        credentials_path(),
+    )
+
+    response = client.get("/api/llm/registry")
+
+    assert response.status_code == 200
+    routes = response.json()["provider_routes"]
+    # verified endpoint + verified route -> ready (green).
+    assert routes["ready-ep:gpt-5"]["ui_state"] == "ready"
+    # endpoint with no credential -> failed (missing config).
+    assert routes["nokey-ep:gpt-5"]["ui_state"] == "failed"
+
+
+def test_endpoint_test_delegates_unified_provider_probe_to_gateway(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+    gateway_calls: list[str] = []
+
+    async def fake_gateway_test_provider_endpoint(
+        endpoint: ProviderEndpoint,
+    ) -> EndpointProbeResult:
+        gateway_calls.append(endpoint.endpoint_id)
+        return EndpointProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            provider_kind=endpoint.provider_kind,
+            backend="openai",
+            base_url="https://api.openai.example/v1",
+            status="ok",
+            latency_ms=42,
+            model_ids=("gpt-5",),
+        )
+
+    async def fail_studio_probe(*_args: object, **_kwargs: object) -> PingResult:
+        raise AssertionError("Studio llm.py must forward endpoint test to Gateway.")
+
+    monkeypatch.setattr(
+        llm_router,
+        "_gateway_test_provider_endpoint",
+        fake_gateway_test_provider_endpoint,
+        raising=False,
+    )
+    monkeypatch.setattr(llm_router, "_ping_provider", fail_studio_probe)
+
+    response = client.post("/api/llm/endpoints/openai-direct/test")
+
+    assert response.status_code == 200
+    assert gateway_calls == ["openai-direct"]
+    body = response.json()
+    assert body["tested_endpoint_id"] == "openai-direct"
+    assert body["discovered_model_count"] == 1
+
+
+def test_endpoint_test_third_party_probes_discovered_models_after_models_list(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # apikeys#25: after get-models discovers ids, the third-party Test runs a real
+    # inference probe over the discovered models (get-models proves only key+URL
+    # reachability, not that the endpoint can actually generate).
     settings_dir = tmp_path / "settings"
     monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
     save_credentials(
@@ -1500,11 +2570,7 @@ def test_endpoint_test_does_not_require_one_token_model_probe_after_models_list(
         model_id: str,
     ) -> ModelProbeResult:
         model_probe_calls.append((backend, api_key, base_url, model_id))
-        return ModelProbeResult(
-            model_id=model_id,
-            status="invalid_model",
-            message="generation failed for endpoint protocol/base_url combination",
-        )
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=21)
 
     monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
     monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
@@ -1515,12 +2581,22 @@ def test_endpoint_test_does_not_require_one_token_model_probe_after_models_list(
     body = response.json()
     endpoint = body["registry"]["provider_endpoints"]["qiniu"]
     assert model_list_calls == [("openai", "secret", "https://anthropic.qnaigc.com/v1")]
-    assert model_probe_calls == []
-    assert endpoint["status"] == "unverified_manual"
-    assert "Connected" in endpoint["last_test_message"]
+    assert model_probe_calls == [
+        ("openai", "secret", "https://anthropic.qnaigc.com/v1", "claude-qiniu")
+    ]
+    assert endpoint["status"] == "verified"
+    assert "Generation verified" in endpoint["last_test_message"]
     assert body["discovered_model_count"] == 1
     routes = body["registry"]["provider_routes"]
-    assert routes["qiniu:claude-qiniu"]["status"] == "unverified_manual"
+    assert routes["qiniu:claude-qiniu"]["status"] == "verified"
+
+
+def test_third_party_protocol_auto_detect_excludes_ark_runtime() -> None:
+    assert llm_router._THIRD_PARTY_PROTOCOL_CANDIDATES == (
+        "openai_compatible",
+        "anthropic_compatible",
+        "google_genai",
+    )
 
 
 def test_endpoint_test_uses_endpoint_protocol_and_base_url_for_probe(
@@ -1610,7 +2686,7 @@ def test_endpoint_test_preserves_protocol_version_path_for_provider_probe(
     ) -> ModelProbeResult:
         return ModelProbeResult(model_id=model_id, status="ok", latency_ms=21)
 
-    monkeypatch.setattr(copilot_test, "_request_models", fake_request_models)
+    monkeypatch.setattr(gateway_provider_probe, "_request_models", fake_request_models)
     monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
     response = client.post("/api/llm/endpoints/qiniu/test")
@@ -1812,27 +2888,58 @@ def test_endpoint_test_rejects_invalid_api_key(
     assert "invalid_api_key" in endpoint["last_test_message"]
 
 
-def test_endpoint_test_treats_empty_model_list_as_reachable(
+def test_endpoint_test_third_party_empty_model_list_falls_back_to_notable_probe(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    _seed(tmp_path, monkeypatch)
+    # apikeys#25: when get-models returns no ids the third-party Test falls back to
+    # doc-maintained notable model ids for the inference probe. If none generate
+    # AND the endpoint was never verified before, it is NOT verified (get-models
+    # reachability alone is insufficient). Uses a fresh endpoint with no prior
+    # verified route so the reachability-alone invariant is tested in isolation.
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "oai-fresh": ProviderEndpoint(
+                    endpoint_id="oai-fresh",
+                    display_name="Fresh OpenAI",
+                    protocol="openai_compatible",
+                    base_url="https://api.openai.example/v1",
+                    api_key="secret",
+                )
+            },
+        ),
+        credentials_path(),
+    )
+    probe_calls: list[str] = []
 
     async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
         return PingResult(latency_ms=42, model_ids=())
 
-    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        probe_calls.append(model_id)
+        return ModelProbeResult(model_id=model_id, status="invalid_model", message="no such model")
 
-    response = client.post("/api/llm/endpoints/openai-direct/test")
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
+
+    response = client.post("/api/llm/endpoints/oai-fresh/test")
 
     assert response.status_code == 200
     body = response.json()
-    endpoint = body["registry"]["provider_endpoints"]["openai-direct"]
+    endpoint = body["registry"]["provider_endpoints"]["oai-fresh"]
     assert body["discovered_model_count"] == 0
-    assert endpoint["status"] == "unverified_manual"
-    assert endpoint["last_test_message"] == "Endpoint reachable but returned no models."
-    assert "openai-direct:gpt-5" in body["registry"]["provider_routes"]
+    assert endpoint["status"] == "failed"
+    # notable openai model ids were probed (fallback fired) and none generated.
+    assert probe_calls
 
 
 def test_official_endpoint_test_records_model_list_without_generation_probes(
@@ -2374,457 +3481,6 @@ def test_registry_normalizes_stale_gemini_interactions_failed_metadata(
     }
 
 
-def test_official_endpoint_test_job_returns_compact_progress_without_registry(
-    client: TestClient,
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    settings_dir = tmp_path / "settings"
-    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
-    save_credentials(
-        LLMCredentialsFile(
-            provider_endpoints={
-                "openai-official": ProviderEndpoint(
-                    endpoint_id="openai-official",
-                    display_name="OpenAI Official",
-                    protocol="openai_compatible",
-                    base_url="https://api.openai.com/v1",
-                    api_key="secret",
-                    provider_kind="official",
-                )
-            },
-            provider_routes={
-                "openai-official:gpt-5-old": ProviderRoute(
-                    route_id="openai-official:gpt-5-old",
-                    endpoint_id="openai-official",
-                    route_slug="gpt-5-old",
-                    provider_model_id="gpt-5-old",
-                    canonical_id="gpt-5-old",
-                    status="verified",
-                    verified_profiles=[
-                        VerifiedProfile(
-                            profile_id="text_responses",
-                            capability="text_chat",
-                            method_id="openai_responses",
-                            request_mapper_id="openai_responses_text",
-                            status="ready",
-                            default=True,
-                            fallback_rank=1,
-                        )
-                    ],
-                )
-            },
-        ),
-        credentials_path(),
-    )
-
-    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
-        assert (backend, api_key, base_url) == ("openai", "secret", "https://api.openai.com/v1")
-        return PingResult(
-            latency_ms=42,
-            model_ids=("gpt-5", "gpt-image-1"),
-            model_capabilities={
-                "gpt-5": {
-                    "id": "gpt-5",
-                    "max_context_tokens": 400_000,
-                    "max_output_tokens": 128_000,
-                },
-                "gpt-image-1": {
-                    "id": "gpt-image-1",
-                    "max_output_tokens": 4_096,
-                },
-            },
-        )
-
-    async def fail_profile_probe(endpoint, model_id: str):
-        del endpoint, model_id
-        raise AssertionError("Provider-level Test jobs must not generation-probe every model.")
-
-    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
-    monkeypatch.setattr(
-        llm_router,
-        "_probe_official_model_profile_result",
-        fail_profile_probe,
-    )
-
-    start = client.post("/api/llm/endpoints/openai-official/test-jobs")
-
-    assert start.status_code == 200
-    started = start.json()
-    assert "registry" not in started
-    assert started["endpoint_id"] == "openai-official"
-    job_id = started["job_id"]
-
-    status = started
-    for _ in range(50):
-        if status["status"] == "completed":
-            break
-        time.sleep(0.01)
-        poll = client.get(f"/api/llm/endpoint-test-jobs/{job_id}")
-        assert poll.status_code == 200
-        status = poll.json()
-
-    assert status["status"] == "completed"
-    assert "registry" not in status
-    assert status["total_model_count"] == 2
-    assert status["tested_model_count"] == 0
-    assert status["verified_route_count"] == 0
-    assert status["catalog_only_count"] == 0
-    assert status["available_models"] == [
-        {
-            "id": "gpt-5",
-            "route_id": "openai-official:gpt-5",
-            "status": "unverified_manual",
-            "verified_profile_count": 0,
-            "last_probe_message": None,
-            "capabilities": {
-                "model_type": "language_reasoning",
-                "model_type_label": "Language/reasoning model",
-                "capability_library": False,
-                "candidate_methods": ["openai_chat_completions", "openai_responses"],
-                "input_modalities": ["text", "image", "file"],
-                "output_modalities": ["text"],
-                "input_modalities_source": "provider_doc",
-                "output_modalities_source": "provider_doc",
-                "input_modalities_source_urls": [
-                    "https://developers.openai.com/api/docs/models",
-                    "https://developers.openai.com/api/reference/responses/overview",
-                    "https://developers.openai.com/api/docs/guides/images-vision",
-                    "https://developers.openai.com/api/docs/api-reference/files",
-                ],
-                "output_modalities_source_urls": [
-                    "https://developers.openai.com/api/docs/models",
-                    "https://developers.openai.com/api/reference/responses/overview",
-                ],
-                "max_input_tokens": 400000,
-                "max_input_tokens_source": "api_list",
-                "max_input_tokens_source_urls": [
-                    "https://developers.openai.com/api/docs/models",
-                    "https://api.openai.com/v1/models",
-                ],
-                "max_output_tokens": 128000,
-                "max_output_tokens_source": "api_list",
-                "max_output_tokens_source_urls": [
-                    "https://developers.openai.com/api/docs/models",
-                    "https://api.openai.com/v1/models",
-                ],
-            },
-        },
-        {
-            "id": "gpt-image-1",
-            "route_id": "openai-official:gpt-image-1",
-            "status": "unverified_manual",
-            "verified_profile_count": 0,
-            "last_probe_message": None,
-            "capabilities": {
-                "model_type": "image_generation",
-                "model_type_label": "Image generation model",
-                "capability_library": True,
-                "candidate_methods": ["openai_images"],
-                "input_modalities": ["text", "image"],
-                "output_modalities": ["image"],
-                "input_modalities_source": "provider_doc",
-                "output_modalities_source": "provider_doc",
-                "input_modalities_source_urls": [
-                    "https://developers.openai.com/api/docs/models",
-                    "https://developers.openai.com/api/docs/guides/image-generation",
-                ],
-                "output_modalities_source_urls": [
-                    "https://developers.openai.com/api/docs/models",
-                    "https://developers.openai.com/api/docs/guides/image-generation",
-                ],
-                "max_output_tokens": 4096,
-                "max_output_tokens_source": "api_list",
-                "max_output_tokens_source_urls": [
-                    "https://developers.openai.com/api/docs/models",
-                    "https://api.openai.com/v1/models",
-                ],
-            },
-        }
-    ]
-    stored = json.loads(credentials_path().read_text(encoding="utf-8"))
-    assert (
-        stored["provider_routes"]["openai-official:gpt-5-old"]["provider_model_id"]
-        == "gpt-5-old"
-    )
-    route_caps = stored["provider_routes"]["openai-official:gpt-5"]["capabilities"]
-    assert route_caps["max_input_tokens"]["value"] == 400000
-    assert route_caps["max_output_tokens"]["value"] == 128000
-    assert stored["provider_routes"]["openai-official:gpt-5"]["status"] == "unverified_manual"
-    library = load_evidence_library()
-    assert library.evidence_records[-1].trust_state == "provider-list-observed"
-
-
-def test_official_endpoint_test_job_does_not_mark_listed_models_testing(
-    client: TestClient,
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    settings_dir = tmp_path / "settings"
-    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
-    save_credentials(
-        LLMCredentialsFile(
-            provider_endpoints={
-                "openai-official": ProviderEndpoint(
-                    endpoint_id="openai-official",
-                    display_name="OpenAI Official",
-                    protocol="openai_compatible",
-                    base_url="https://api.openai.com/v1",
-                    api_key="secret",
-                    provider_kind="official",
-                )
-            },
-        ),
-        credentials_path(),
-    )
-
-    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
-        assert (backend, api_key, base_url) == ("openai", "secret", "https://api.openai.com/v1")
-        return PingResult(
-            latency_ms=42,
-            model_ids=("gpt-1", "gpt-2", "gpt-3", "gpt-4"),
-        )
-
-    async def fail_profile_probe(endpoint, model_id: str):
-        del endpoint, model_id
-        raise AssertionError("Provider-level Test jobs must not generation-probe listed models.")
-
-    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
-    monkeypatch.setattr(
-        llm_router,
-        "_probe_official_model_profile_result",
-        fail_profile_probe,
-    )
-
-    start = client.post("/api/llm/endpoints/openai-official/test-jobs")
-    assert start.status_code == 200
-    job_id = start.json()["job_id"]
-
-    status = start.json()
-    for _ in range(50):
-        if status["status"] == "completed":
-            break
-        time.sleep(0.01)
-        poll = client.get(f"/api/llm/endpoint-test-jobs/{job_id}")
-        assert poll.status_code == 200
-        status = poll.json()
-
-    assert status["status"] == "completed"
-    assert status["tested_model_count"] == 0
-    assert status["verified_route_count"] == 0
-    models = {model["id"]: model for model in status["available_models"]}
-    assert {
-        model_id
-        for model_id, model in models.items()
-        if model["status"] == "testing"
-    } == set()
-    assert {model["status"] for model in models.values()} == {"unverified_manual"}
-
-
-def test_official_endpoint_test_job_lists_language_candidates_without_generation_probe(
-    client: TestClient,
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    settings_dir = tmp_path / "settings"
-    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
-    save_credentials(
-        LLMCredentialsFile(
-            provider_endpoints={
-                "openai-official": ProviderEndpoint(
-                    endpoint_id="openai-official",
-                    display_name="OpenAI Official",
-                    protocol="openai_compatible",
-                    base_url="https://api.openai.com/v1",
-                    api_key="secret",
-                    provider_kind="official",
-                )
-            },
-        ),
-        credentials_path(),
-    )
-
-    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
-        assert (backend, api_key, base_url) == ("openai", "secret", "https://api.openai.com/v1")
-        return PingResult(latency_ms=42, model_ids=("gpt-5.2", "gpt-image-1"))
-
-    async def fail_profile_probe(endpoint, model_id: str):
-        del endpoint, model_id
-        raise AssertionError("Provider-level Test jobs must not generation-probe language models.")
-
-    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
-    monkeypatch.setattr(
-        llm_router,
-        "_probe_official_model_profile_result",
-        fail_profile_probe,
-    )
-
-    start = client.post("/api/llm/endpoints/openai-official/test-jobs")
-
-    assert start.status_code == 200
-    job_id = start.json()["job_id"]
-    status = start.json()
-    for _ in range(50):
-        if status["status"] == "completed":
-            break
-        time.sleep(0.01)
-        poll = client.get(f"/api/llm/endpoint-test-jobs/{job_id}")
-        assert poll.status_code == 200
-        status = poll.json()
-
-    assert status["status"] == "completed"
-    assert status["verified_route_count"] == 0
-    assert status["failed_model_count"] == 0
-    assert status["catalog_only_count"] == 0
-    assert status["tested_model_count"] == 0
-    models = {model["id"]: model for model in status["available_models"]}
-    assert models["gpt-5.2"]["status"] == "unverified_manual"
-    assert models["gpt-5.2"]["last_probe_message"] is None
-    assert models["gpt-5.2"]["capabilities"]["model_type"] == "language_reasoning"
-    assert models["gpt-5.2"]["capabilities"]["candidate_methods"] == [
-        "openai_chat_completions",
-        "openai_responses",
-    ]
-    assert models["gpt-image-1"]["status"] == "unverified_manual"
-    assert models["gpt-image-1"]["last_probe_message"] is None
-    assert models["gpt-image-1"]["capabilities"]["model_type"] == "image_generation"
-
-    raw = json.loads(credentials_path().read_text(encoding="utf-8"))
-    assert "capability_library" not in raw["provider_endpoints"]["openai-official"]["metadata"]
-    assert raw["provider_routes"]["openai-official:gpt-5.2"]["status"] == "unverified_manual"
-    assert raw["provider_routes"]["openai-official:gpt-image-1"]["status"] == "unverified_manual"
-    library = load_evidence_library()
-    assert library.evidence_records[-1].trust_state == "provider-list-observed"
-
-
-def test_official_endpoint_test_job_leaves_generation_failures_to_single_model_tests(
-    client: TestClient,
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    settings_dir = tmp_path / "settings"
-    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
-    save_credentials(
-        LLMCredentialsFile(
-            provider_endpoints={
-                "gemini-official": ProviderEndpoint(
-                    endpoint_id="gemini-official",
-                    display_name="Gemini Official",
-                    protocol="google_genai",
-                    base_url="https://generativelanguage.googleapis.com",
-                    api_key="secret",
-                    provider_kind="official",
-                )
-            },
-        ),
-        credentials_path(),
-    )
-
-    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
-        assert (backend, api_key, base_url) == (
-            "gemini",
-            "secret",
-            "https://generativelanguage.googleapis.com",
-        )
-        return PingResult(latency_ms=42, model_ids=("gemini-3-pro-preview",))
-
-    async def fail_profile_probe(endpoint, model_id: str):
-        del endpoint, model_id
-        raise AssertionError("Provider-level Test jobs must not generation-probe a route.")
-
-    async def fail_probe_call_method(endpoint, model_id: str, candidate):
-        del endpoint, model_id, candidate
-        raise AssertionError("Provider-level Test jobs must not call generation methods.")
-
-    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
-    monkeypatch.setattr(
-        llm_router,
-        "_probe_official_model_profile_result",
-        fail_profile_probe,
-    )
-    monkeypatch.setattr(
-        llm_router,
-        "_probe_official_call_method",
-        fail_probe_call_method,
-    )
-
-    start = client.post("/api/llm/endpoints/gemini-official/test-jobs")
-
-    assert start.status_code == 200
-    job_id = start.json()["job_id"]
-    status = start.json()
-    for _ in range(50):
-        if status["status"] == "completed":
-            break
-        time.sleep(0.01)
-        poll = client.get(f"/api/llm/endpoint-test-jobs/{job_id}")
-        assert poll.status_code == 200
-        status = poll.json()
-
-    assert status["status"] == "completed"
-    assert status["tested_model_count"] == 0
-    models = {model["id"]: model for model in status["available_models"]}
-    assert models["gemini-3-pro-preview"]["status"] == "unverified_manual"
-    assert models["gemini-3-pro-preview"]["last_probe_message"] is None
-    assert models["gemini-3-pro-preview"]["capabilities"]["model_type"] == "language_reasoning"
-
-    raw = json.loads(credentials_path().read_text(encoding="utf-8"))
-    assert "capability_library" not in raw["provider_endpoints"]["gemini-official"]["metadata"]
-    assert raw["provider_routes"]["gemini-official:gemini-3-pro-preview"]["status"] == (
-        "unverified_manual"
-    )
-
-
-def test_official_endpoint_test_job_records_unexpected_model_list_failure(
-    client: TestClient,
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    settings_dir = tmp_path / "settings"
-    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
-    save_credentials(
-        LLMCredentialsFile(
-            provider_endpoints={
-                "openai-official": ProviderEndpoint(
-                    endpoint_id="openai-official",
-                    display_name="OpenAI Official",
-                    protocol="openai_compatible",
-                    base_url="https://api.openai.com/v1",
-                    api_key="secret",
-                    provider_kind="official",
-                )
-            },
-        ),
-        credentials_path(),
-    )
-
-    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
-        del backend, api_key, base_url
-        raise RuntimeError("model list mapper crashed")
-
-    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
-
-    start = client.post("/api/llm/endpoints/openai-official/test-jobs")
-
-    assert start.status_code == 200
-    job_id = start.json()["job_id"]
-    status = start.json()
-    for _ in range(50):
-        if status["status"] == "failed":
-            break
-        time.sleep(0.01)
-        poll = client.get(f"/api/llm/endpoint-test-jobs/{job_id}")
-        assert poll.status_code == 200
-        status = poll.json()
-
-    assert status["status"] == "failed"
-    assert "model list mapper crashed" in status["message"]
-
-    retry = client.post("/api/llm/endpoints/openai-official/test-jobs")
-    assert retry.status_code == 200
-    assert retry.json()["job_id"] != job_id
-
-
 def test_endpoint_scoped_manual_model_test_verifies_only_successful_models(
     client: TestClient,
     tmp_path: Path,
@@ -2868,7 +3524,7 @@ def test_endpoint_scoped_manual_model_test_verifies_only_successful_models(
         {
             "model_id": "missing-model",
             "status": "invalid_model",
-            "route_id": None,
+            "route_id": "openai-direct:missing-model",
             "message": "Provider rejected model.",
         },
     ]
@@ -2878,7 +3534,8 @@ def test_endpoint_scoped_manual_model_test_verifies_only_successful_models(
     assert "gpt-5-mini" in endpoint["last_test_message"]
     assert routes["openai-direct:gpt-5-mini"]["status"] == "verified"
     assert routes["openai-direct:gpt-5-mini"]["provider_model_id"] == "gpt-5-mini"
-    assert "openai-direct:missing-model" not in routes
+    assert routes["openai-direct:missing-model"]["status"] == "failed"
+    assert routes["openai-direct:missing-model"]["provider_model_id"] == "missing-model"
     assert calls == [
         ("openai", "secret", "https://api.openai.example/v1", "gpt-5-mini"),
         ("openai", "secret", "https://api.openai.example/v1", "missing-model"),
@@ -2891,7 +3548,7 @@ def test_endpoint_scoped_manual_model_test_verifies_only_successful_models(
     assert evidence_records[0].route_id == "openai-direct:gpt-5-mini"
     assert evidence_records[0].model_id == "gpt-5-mini"
     assert evidence_records[0].probe_status == "ok"
-    assert evidence_records[1].route_id is None
+    assert evidence_records[1].route_id == "openai-direct:missing-model"
     assert evidence_records[1].model_id == "missing-model"
     assert evidence_records[1].probe_status == "invalid_model"
     assert "Provider rejected model." in (evidence_records[1].reason or "")
@@ -2987,7 +3644,7 @@ def test_official_manual_model_test_uses_profile_probe_and_persists_attempts(
         {
             "model_id": "bad-pro",
             "status": "error",
-            "route_id": None,
+            "route_id": "openai-official:bad-pro",
             "message": "Responses API rejected reasoning.effort low.",
         },
     ]
@@ -2995,6 +3652,12 @@ def test_official_manual_model_test_uses_profile_probe_and_persists_attempts(
     assert route["status"] == "verified"
     assert route["verified_profiles"][0]["method_id"] == "openai_responses"
     assert route["metadata"]["probe_attempts"][0]["status"] == "ok"
+    failed_route = body["registry"]["provider_routes"]["openai-official:bad-pro"]
+    assert failed_route["status"] == "failed"
+    assert failed_route["ui_state"] == "failed"
+    assert failed_route["metadata"]["reason_code"] == "profile_probe_failed"
+    assert failed_route["metadata"]["last_probe_message"] == "Responses API rejected reasoning.effort low."
+    assert failed_route["metadata"]["probe_attempts"][0]["status"] == "error"
     evidence_records = load_evidence_library().evidence_records
     assert [record.trust_state for record in evidence_records] == [
         "probe-verified",
@@ -3004,7 +3667,7 @@ def test_official_manual_model_test_uses_profile_probe_and_persists_attempts(
     assert evidence_records[0].model_id == "gpt-5-pro"
     assert evidence_records[0].probe_attempts[0]["status"] == "ok"
     assert evidence_records[0].successful_probe == {"profile_count": 1}
-    assert evidence_records[1].route_id is None
+    assert evidence_records[1].route_id == "openai-official:bad-pro"
     assert evidence_records[1].model_id == "bad-pro"
     assert evidence_records[1].reason == "Responses API rejected reasoning.effort low."
 
@@ -3072,6 +3735,54 @@ def test_manual_model_test_does_not_resurrect_secret_cleared_during_probe(
         }
     ]
     assert "openai-direct:gpt-5-mini" not in response.json()["registry"]["provider_routes"]
+
+
+def test_manual_model_failed_probe_does_not_mark_changed_endpoint_failed(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+
+    async def fake_probe_model(
+        backend: str,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        raw = json.loads(credentials_path().read_text(encoding="utf-8"))
+        endpoint = raw["provider_endpoints"]["openai-direct"]
+        endpoint["api_key"] = None
+        endpoint["base_url"] = "https://changed.example/v1"
+        credentials_path().write_text(json.dumps(raw), encoding="utf-8")
+        return ModelProbeResult(
+            model_id=model_id,
+            status="invalid_model",
+            latency_ms=33,
+            message="old endpoint rejected this model",
+        )
+
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
+
+    response = client.post(
+        "/api/llm/endpoints/openai-direct/models/test",
+        json={"model_ids": ["gpt-5-mini"]},
+    )
+
+    assert response.status_code == 200
+    raw = json.loads(credentials_path().read_text(encoding="utf-8"))
+    endpoint = raw["provider_endpoints"]["openai-direct"]
+    assert endpoint["api_key"] is None
+    assert endpoint["base_url"] == "https://changed.example/v1"
+    assert endpoint["status"] == "unverified_manual"
+    assert response.json()["results"] == [
+        {
+            "model_id": "gpt-5-mini",
+            "status": "error",
+            "route_id": None,
+            "message": "Endpoint changed while model test was running.",
+        }
+    ]
 
 
 def test_discovered_route_slug_collision_uses_deterministic_suffix(
@@ -3462,6 +4173,49 @@ def test_route_probe_force_true_calls_real_provider_probe(
     assert response.json()["status"] == "verified"
 
 
+def test_route_probe_force_true_delegates_scoped_route_probe_to_gateway(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+    gateway_calls: list[tuple[str, str]] = []
+
+    async def fake_gateway_test_provider_route(
+        endpoint: ProviderEndpoint,
+        route: ProviderRoute,
+        **_kwargs: object,
+    ) -> RouteProbeResult:
+        gateway_calls.append((endpoint.endpoint_id, route.route_id))
+        return RouteProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            route_id=route.route_id,
+            provider_kind=endpoint.provider_kind,
+            backend="openai",
+            base_url="https://api.openai.example/v1",
+            model_id=route.provider_model_id,
+            status="ok",
+            latency_ms=12,
+        )
+
+    async def fail_studio_route_probe(*_args: object, **_kwargs: object) -> ModelProbeResult:
+        raise AssertionError("Studio llm.py must forward route probe to Gateway.")
+
+    monkeypatch.setattr(
+        llm_router,
+        "_gateway_test_provider_route",
+        fake_gateway_test_provider_route,
+        raising=False,
+    )
+    monkeypatch.setattr(llm_router, "_probe_model", fail_studio_route_probe)
+
+    response = client.post("/api/llm/routes/openai-direct:gpt-5/probe?force=true", json={})
+
+    assert response.status_code == 200
+    assert gateway_calls == [("openai-direct", "openai-direct:gpt-5")]
+    assert response.json()["status"] == "verified"
+
+
 def test_route_probe_force_true_success_closes_active_route_circuit(
     client: TestClient,
     tmp_path: Path,
@@ -3845,12 +4599,16 @@ def test_role_test_job_reports_active_route_progress(
         assert running.status_code == 200
         running_body = running.json()
         assert running_body["status"] == "running"
+        # R-F21: provider_statuses now carries retry_after_seconds alongside
+        # status so a cooling_down route can drive the FE Test Button countdown.
+        # The field is None for non-cooldown progress entries.
         assert running_body["provider_statuses"] == [
             {
                 "canonical_id": "gpt-5",
                 "route_id": "openai-direct:gpt-5",
                 "status": "testing",
                 "message": None,
+                "retry_after_seconds": None,
             }
         ]
     finally:
@@ -4694,22 +5452,164 @@ def test_sync_catalog_endpoint(client: TestClient, tmp_path: Path, monkeypatch) 
     _seed(tmp_path, monkeypatch)
     
     from app.services.llm_import_drafts import ProviderImportDraft
-    async def mock_sync():
-        return ProviderImportDraft(
-            draft_id="studio-evidence-library",
-            source={"kind": "studio_evidence_library"},
-            status="pending",
-            route_candidates={},
-            evidence_records=[],
+    seen: dict[str, object] = {}
+
+    class FakeGitHubCatalogClient:
+        def __init__(self, *args, **kwargs) -> None:
+            raise AssertionError("catalog sync must read the public raw URL without GitHub token")
+
+    async def mock_sync(*, data=None, url=None):
+        raise AssertionError("catalog sync endpoint must call the metadata-aware sync service")
+
+    class FakeCatalogSource:
+        new_records_count = 0
+
+        def model_dump(self, *, mode: str = "json") -> dict[str, object]:
+            assert mode == "json"
+            return {
+                "enabled": True,
+                "source_url": "https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_probe_catalog.json",
+                "fetched_at": "2026-06-20T23:00:00+00:00",
+                "etag": "W/test",
+                "cache": False,
+                "route_candidates_count": 0,
+                "evidence_records_count": 0,
+                "new_records_count": 0,
+                "last_error": None,
+            }
+
+    async def mock_sync_with_metadata(*, data=None, url=None):
+        seen["data"] = data
+        seen["url"] = url
+        return SimpleNamespace(
+            draft=ProviderImportDraft(
+                draft_id="studio-evidence-library",
+                source={"kind": "studio_evidence_library"},
+                status="pending",
+                route_candidates={},
+                evidence_records=[],
+            ),
+            catalog_source=FakeCatalogSource(),
         )
     
     import app.routers.llm as llm_router
-    monkeypatch.setattr(llm_router, "sync_remote_evidence_library", mock_sync)
+    monkeypatch.setattr(
+        llm_router,
+        "get_backend_config",
+        lambda: SimpleNamespace(
+            github_token="ghp-test",
+            github_owner="sevenx",
+            llm_catalog_repo="studio-llm-model-catalog",
+            llm_catalog_branch="main",
+            llm_catalog_path="llm_probe_catalog.json",
+        ),
+    )
+    monkeypatch.setattr(llm_router, "GitHubCatalogClient", FakeGitHubCatalogClient)
+    monkeypatch.setattr(
+        llm_router,
+        "sync_remote_probe_catalog_with_metadata",
+        mock_sync_with_metadata,
+        raising=False,
+    )
     
     response = client.post("/api/llm/catalog/sync")
     assert response.status_code == 200
-    assert response.json()["status"] == "success"
-    assert "Catalog synced successfully" in response.json()["message"]
+    body = response.json()
+    assert body["status"] == "success"
+    assert "Catalog synced successfully" in body["message"]
+    assert seen["data"] is None
+    assert seen["url"] == (
+        "https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_probe_catalog.json"
+    )
+    assert body["new_records_count"] == 0
+    assert body["catalog_source"] == {
+        "enabled": True,
+        "source_url": "https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_probe_catalog.json",
+        "fetched_at": "2026-06-20T23:00:00+00:00",
+        "etag": "W/test",
+        "cache": False,
+        "route_candidates_count": 0,
+        "evidence_records_count": 0,
+        "new_records_count": 0,
+        "last_error": None,
+    }
+
+
+def test_registry_includes_last_remote_catalog_source(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+    append_evidence_record(
+        EvidenceRecord(
+            evidence_id="probe-local-ok",
+            evidence_type="probe",
+            trust_state="probe-verified",
+            endpoint_id="openai-direct",
+            route_id="openai-direct:gpt-5",
+            model_id="gpt-5",
+            provider_model_id="gpt-5",
+        )
+    )
+    append_evidence_record(
+        EvidenceRecord(
+            evidence_id="probe-local-failed",
+            evidence_type="probe",
+            trust_state="probe-failed",
+            endpoint_id="openai-direct",
+            model_id="missing-model",
+            provider_model_id="missing-model",
+        )
+    )
+
+    import app.routers.llm as llm_router
+    import app.services.llm_probe_catalog as probe_catalog
+
+    source_model = getattr(probe_catalog, "RemoteCatalogSourceMetadata", None)
+    remember = getattr(probe_catalog, "remember_remote_catalog_source", None)
+    assert source_model is not None
+    assert remember is not None
+    source = source_model(
+        enabled=True,
+        source_url="https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_probe_catalog.json",
+        fetched_at="2026-06-20T23:00:00+00:00",
+        etag="W/test",
+        cache=False,
+        route_candidates_count=3,
+        evidence_records_count=5,
+        new_records_count=2,
+        last_error=None,
+    )
+
+    try:
+        remember(source)
+        monkeypatch.setattr(llm_router, "_role_effective_runtime_settings", lambda *_args, **_kwargs: {})
+        response = client.get("/api/llm/registry")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["catalog_source"] == source.model_dump(mode="json")
+        assert body["probe_catalog"] == {
+            "local_evidence_records_count": 2,
+            "local_verified_records_count": 1,
+            "local_failed_records_count": 1,
+            "local_route_candidates_count": 0,
+            "remote_catalog_source": source.model_dump(mode="json"),
+            "community_catalog": {
+                "synced": False,
+                "generated_at": None,
+                "protocol_major": 0,
+                "record_count": 0,
+                "entries": [],
+            },
+            "sharing": {
+                "mode": "local_export_only",
+                "auto_upload_enabled": False,
+                "message": "Local probe evidence is recorded on this machine. MVP1 does not auto-upload community catalog evidence.",
+            },
+        }
+    finally:
+        remember(None)
 
 
 def test_share_catalog_endpoint(client: TestClient, tmp_path: Path, monkeypatch) -> None:
@@ -4717,5 +5617,37 @@ def test_share_catalog_endpoint(client: TestClient, tmp_path: Path, monkeypatch)
     
     response = client.post("/api/llm/catalog/share")
     assert response.status_code == 200
-    assert response.json()["status"] == "success"
-    assert "Local verified catalog evidence exported successfully" in response.json()["message"]
+    body = response.json()
+    assert body["status"] == "success"
+    assert body["sharing_mode"] == "local_export_only"
+    assert body["auto_upload_enabled"] is False
+    assert "Local verified catalog evidence exported successfully" in body["message"]
+    assert "does not upload" in body["export_instructions"]
+    assert "Pull Request" not in body["export_instructions"]
+
+
+def test_ensure_catalog_repository_endpoint(client: TestClient, tmp_path: Path, monkeypatch) -> None:
+    _seed(tmp_path, monkeypatch)
+
+    import app.routers.llm as llm_router
+
+    def fake_ensure_catalog_repository():
+        return {
+            "status": "success",
+            "owner": "sevenx",
+            "repo": "studio-llm-model-catalog",
+            "html_url": "https://github.com/sevenx/studio-llm-model-catalog",
+            "raw_url": "https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_probe_catalog.json",
+            "catalog_path": "llm_probe_catalog.json",
+            "branch": "main",
+            "repository_created": True,
+            "catalog_created": True,
+        }
+
+    monkeypatch.setattr(llm_router, "ensure_catalog_repository", fake_ensure_catalog_repository, raising=False)
+
+    response = client.post("/api/llm/catalog/repository/ensure")
+
+    assert response.status_code == 200
+    assert response.json() == fake_ensure_catalog_repository()
+    assert "ghp-" not in response.text

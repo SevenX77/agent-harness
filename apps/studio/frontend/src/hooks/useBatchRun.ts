@@ -70,15 +70,21 @@ export function useBatchRun(skillId: string | null) {
     ))
   }, [])
 
-  const runBatch = useCallback(async () => {
-    if (!skillId || selectedInputIds.length === 0) {
+  // `inputIds` lets a caller run an explicit set in the same tick (e.g. the C10
+  // naming-sequence suggestion), bypassing the async setState of the selection.
+  const runBatch = useCallback(async (inputIds?: readonly string[]) => {
+    const targetIds = inputIds && inputIds.length > 0 ? Array.from(inputIds) : selectedInputIds
+    if (!skillId || targetIds.length === 0) {
       return null
+    }
+    if (inputIds && inputIds.length > 0) {
+      setSelectedInputIds(targetIds)
     }
 
     setBatchError(null)
     setBatchRunning(true)
     try {
-      const payload: BatchRunRequest = { input_ids: selectedInputIds }
+      const payload: BatchRunRequest = { input_ids: targetIds }
       const response = await api.post<BatchRunResponse>(`/skills/${skillId}/runs/batch-run`, payload)
       setBatchId(response.data.batch_id)
       return response.data

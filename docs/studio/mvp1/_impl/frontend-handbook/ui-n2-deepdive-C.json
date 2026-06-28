@@ -1,0 +1,53 @@
+{
+  "cycle_check": {
+    "summary": "环检测不是手写的图遍历,而是在自动布局阶段交给 dagre 的 graphlib.alg.isAcyclic 判定;一旦不是 DAG 就抛 CycleDetectedError,GraphCanvas 把它降级成空画布 + 红色错误条 + toast。GraphCanvas.tsx :217-243 那一段是 sequential-overwrite 冲突告警的回调(handleAllowSequentialOverwrite / handleCancelWarning),不是环检测本体;真正的环检测在 lib/layout.ts。",
+    "evidence": [
+      ["环检测实现:getAutoLayoutedElements 把节点/边塞进 dagre graphlib.Graph,然后 if (!graphlib.alg.isAcyclic(graph)) throw new CycleDetectedError()——靠 dagre 的无环判定,不是自写 DFS/拓扑排序", "apps/studio/frontend/src/lib/layout.ts:47-49"],
+      ["CycleDetectedError 类定义,message='SKILL contains a cyclic dependency - cannot auto-layout'", "apps/studio/frontend/src/lib/layout.ts:4-9"],
+      ["layoutResult useMemo 捕获 CycleDetectedError → 返回 {nodes:[],edges:[],error},其它异常继续抛", "apps/studio/frontend/src/components/GraphCanvas/GraphCanvas.tsx:314-323"],
+      ["可视报错:layoutResult.error 时铺一层全屏遮罩 'SKILL contains cyclic dependency - cannot render graph.'(红色 destructive 边框),同时 toast.error + console.error", "apps/studio/frontend/src/components/GraphCanvas/GraphCanvas.tsx:478-484, 335-340"],
+      ["GraphCanvas.tsx :217-243 实为 fitLayout / toggleSubgraph 工具函数,与环检测无关(:173-216 是 sequential-overwrite 告警回调)", "apps/studio/frontend/src/components/GraphCanvas/GraphCanvas.tsx:217-243"]
+    ]
+  },
+  "data_gap": {
+    "summary": "前端没有 REQ-2 意义上的'上游没产出下游要的字段'数据断层校验。前端唯一的字段级图分析是 checkSequentialOverwrites(检测同一字段被祖先和后代重复写、且未加白名单的顺序覆盖冲突),它检的是'重复写'不是'缺供给'。真正的字段供需/断层校验在引擎编译期(compile),前端只是把引擎吐回的 CompileError[] 按节点 id 叠到节点上显示,不在前端自己算供需图。",
+    "evidence": [
+      ["checkSequentialOverwrites:对每个 phase 取其 io.outputs.properties 字段,沿 depends_on 求传递祖先集,若祖先也产出同名字段且不在 allow_sequential_overwrite 白名单 → 记一条 OverwriteConflict。这是'重复覆盖'检测,不是'供给缺失'检测", "apps/studio/frontend/src/components/GraphCanvas/canvas-authoring.ts:281-381"],
+      ["冲突可视化:把 activeConflict 注入对应 SkillNode.data,画布平移 fitView 聚焦到冲突节点;用户点 Allow 写 allow_sequential_overwrite 白名单,点 Cancel 把节点标红", "apps/studio/frontend/src/components/GraphCanvas/GraphCanvas.tsx:143-216, 342-377"],
+      ["前端不自算数据断层:连线写回后调 compileSkillById,引擎编译结果 CompileError[] 经 compileErrorsByNodeId 传入 GraphCanvas 按节点叠加显示", "apps/studio/frontend/src/components/studio/Workspace.tsx:373, 394; apps/studio/frontend/src/components/GraphCanvas/GraphCanvas.tsx:69, 278"],
+      ["引擎侧才有字段供需/类型校验:io_manager 在 compile 期对 io.output source_field 做 type mismatch 报错", "packages/graph-agent/src/graph_agent/core/io_manager.py:76"]
+    ]
+  },
+  "add_node": {
+    "summary": "建节点=建文件:Add phase 下拉/右键子菜单给三个 kind(skill/logic/subgraph),onCreatePhase(kind) 调 Workspace 的 createPhaseDraft → 按 kind 映射到 SKILL.md / LOGIC.md / SUBGRAPH.md 三种文件路径,内容由 defaultPhaseMarkdown 脚手架生成,然后 writeSkillFile 落盘 + 把 phaseRef 追加进 GRAPH.md。脚手架是 FROZEN-clean 的:三种模板都不写 mode/system_prompt/exit_contract/python_callable/target_skill,节点类型靠文件名(LOGIC.md/SKILL.md/SUBGRAPH.md)区分而非 mode 字段。",
+    "evidence": [
+      ["三个建节点入口 kind=skill/logic/subgraph(Add phase 下拉 + 右键 ContextMenu 子菜单),都走 onCreatePhase(kind)", "apps/studio/frontend/src/components/GraphCanvas/GraphCanvas.tsx:590-594, 643-655"],
+      ["phaseFilePath 把 kind 映射成文件:skill→phases/<id>/SKILL.md,subgraph→phases/<id>/SUBGRAPH.md,其余→phases/<id>/LOGIC.md", "apps/studio/frontend/src/components/GraphCanvas/canvas-authoring.ts:129-137"],
+      ["createPhaseDraft 生成 phaseId(去重)、filePath、fileContent=defaultPhaseMarkdown、phaseRef(mode=kind, depends_on=[]),并把 phaseRef 追加到 phases 列表(待写回 GRAPH.md)", "apps/studio/frontend/src/components/GraphCanvas/canvas-authoring.ts:49-66"],
+      ["脚手架 FROZEN-clean 注释明确:节点类型由文件 KIND 决定,绝不写 mode/system_prompt/exit_contract/python_callable/target_skill", "apps/studio/frontend/src/components/GraphCanvas/canvas-authoring.ts:143-149"],
+      ["logicPhaseMarkdown 模板:只有 name/io/actions/validator + <action> 体,无废弃字段", "apps/studio/frontend/src/components/GraphCanvas/canvas-authoring.ts:165-184"],
+      ["agentPhaseMarkdown 模板:name/llm_role/io/tools/validator + <role>/<goal>/<step>/<protocol>,无 system_prompt/exit_contract", "apps/studio/frontend/src/components/GraphCanvas/canvas-authoring.ts:186-215"],
+      ["subgraphPhaseMarkdown 模板:name/path/io/validator,用 path:(占位 /absolute/path/to/child_skill)而非 target_skill", "apps/studio/frontend/src/components/GraphCanvas/canvas-authoring.ts:217-233"]
+    ]
+  },
+  "connect_ops": {
+    "headers": ["连线操作", "是否支持", "写回字段/file:line"],
+    "rows": [
+      ["新建连线(connect)", "支持", "写 target 的 depends_on;onConnect 乐观更新 + onPersistConnection → connectPhaseRefs(往 target.depends_on push source)→ serializeSkillGraph 写回 GRAPH.md。GraphCanvas.tsx:416-458;canvas-authoring.ts:68-98;Workspace.tsx:360-379"],
+      ["断连(disconnect)", "支持", "改 target 的 depends_on(移除 source);右键边出 Disconnect 菜单 → onDisconnectConnection → disconnectPhaseRefs(filter 掉该依赖)→ 写回 GRAPH.md。GraphCanvas.tsx:633-641, 503-505;canvas-authoring.ts:100-127;Workspace.tsx:381-400"],
+      ["重连(reconnect/改接到别的端点)", "不支持(缺)", "ReactFlow 没挂 onReconnect/onReconnectEnd,也没设 edgesReconnectable;无重连写回路径。GraphCanvas.tsx:486-548(仅 onConnect/onEdgesChange/右键菜单)"],
+      ["拖拽断线(拖出端点松手即断)", "不支持(缺)", "无 onReconnectEnd 把'拖离 handle 松手'判为删除;断连只能走右键 Disconnect 菜单。GraphCanvas.tsx 无 onReconnect* 监听"]
+    ]
+  },
+  "io_panel": {
+    "summary": "io 面板已不再投影假文件(stale 已清):旧版把 input/schema.json + input/sample.json 两个磁盘上不存在的假文件投进编辑器、edit autosave 到死路径=静默丢数据,现已删除,panel-files.ts 注释明确说明并改为直接读 GRAPH.md frontmatter 的 io.inputs/io.outputs。input 侧:导入靠 SchemaInferPanel 拖 JSON 推断 schema 存进 GRAPH.md io.inputs(F2),加上字段级增删改名/改类型直接写 io.inputs.properties。output artifact 落盘(G3):OutputPathRow 给每个 output 字段设 path,applyOutputArtifactPathToGraph 往 io.outputs.<field> 写 {target:'artifact', path},空 path 清除;引擎侧 io/manager 认 target='artifact' 并解析到 .workspace/runs/<id>/artifacts/<path>,G3 后端契约已落地。G2(子图 io 1:1 校验删了没):前端无该校验;引擎 loader 仍保留 [F-v3-subgraph-io-mismatch] 校验,但只比 outputs(parent_outputs != child_outputs)不是 inputs+outputs 全 1:1,所以是'已弱化为仅 outputs',没有彻底删除。",
+    "evidence": [
+      ["投影假文件已删:IoContractView 注释——曾投 input/schema.json + input/sample.json 两个假文件,edit autosave 到死路径=静默丢数据,现已移除,改为返回解析后的 io map + 一个 seed 字符串", "apps/studio/frontend/src/components/studio/panels/panel-files.ts:70-85"],
+      ["input 字段级编辑直接写真契约 GRAPH.md io.inputs.properties(rename/setType/remove/add),无假文件死路径", "apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:342-358, 542-579"],
+      ["input schema 推断(F2):拖 JSON → inferJsonSchemaFromText → applyInputSchemaToGraph 写 GRAPH.md io.inputs,提示 'Saved to GRAPH.md io.inputs.'", "apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:87-107, 164-167"],
+      ["output artifact 落盘(G3):applyOutputArtifactPathToGraph 往 io.outputs.<field> 写 target='artifact'+path(空清除),OutputPathRow 提交", "apps/studio/frontend/src/lib/schema-infer.ts:80-111; apps/studio/frontend/src/components/studio/panels/InputPanel.tsx:222-290"],
+      ["G3 引擎契约已落地:io/manager 认 target in ('artifact','artifact_manager') 并走 artifact_saver 解析名/路径", "packages/graph-agent/src/graph_agent/io/manager.py:159-163, 237"],
+      ["G2 子图 io 校验未删,仅弱化为比 outputs:loader 取 parent_outputs/child_outputs,若 parent_outputs != child_outputs 报 [F-v3-subgraph-io-mismatch] FATAL(注意它读 target_skill 而非新 path:)", "packages/graph-agent/src/graph_agent/core/loader.py:549-558"]
+    ]
+  }
+}

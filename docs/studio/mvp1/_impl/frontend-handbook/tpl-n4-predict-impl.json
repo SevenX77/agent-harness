@@ -1,0 +1,166 @@
+{
+ "id": "n4_predict_impl",
+ "title": "Predict 试飞 · 实施详情",
+ "design_ref": "n4_predict_design",
+ "intro": "本页是 Predict 试飞 surface 的现状/差距/实施计划/测试，1:1 对应设计页 n4_predict_design（原子 #1–#5）。代码按『文件名 + 函数/对象名』引用（可全局搜索定位，不写行号）。底层 predict 编排 + mock-by-golden + predict-pass 门见 n4_predict_mech。现状：predict 触发（#1）、输入解析（#2）、logic/agent 分流（#3）已接实且符合设计（spec 把 onPredict 标『桩』已过时）。两处偏差需修前端：#4 predict-pass 解锁 Run——handlePredict 只按 HTTP 成功放行、未读 RunResult.success，会把业务失败的 predict 误放行（真 Run 又被服务端门 409）；#5 门控对用户哑（灰禁按钮无原因文字）。",
+ "functions": [
+  {
+   "n": 1,
+   "cap": "predict-trigger",
+   "design_ref": "n4-atom-1",
+   "current": "现状：已实现且符合。center-action-bar.tsx 的 deriveButtons 在 compile-pass / predicting / predict-fail 档点亮 Predict、灰禁 Run；点 Predict 触发 Workspace.tsx 的 handlePredict，先 updateStage(predicting) 再发请求。compile-pass 由 deriveBuildStage 据 compileStages 或后台 lint(passed) 算出。",
+   "gap": "符合设计，无需改。",
+   "fe_status": "符合",
+   "be_dep": "不依赖后端新契约（动作条门控纯前端）。试飞请求依赖 POST /runs/predict（已实现）。"
+  },
+  {
+   "n": 2,
+   "cap": "predict-input-select",
+   "design_ref": "n4-atom-2",
+   "current": "现状：已实现且符合。handlePredict 调 resolveRunInput(targetSkillId, selectedTestInputId)：选了输入 fetch content、没选回退 {}。已是路径式（i/o 面板选已导入文件直接 predict），无 PredictInputDialog 弹窗。",
+   "gap": "符合设计，无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。POST /api/skills/{id}/runs/predict（routers/runs.py predict_run）已实现，接受 input_data。"
+  },
+  {
+   "n": 3,
+   "cap": "predict-logic-vs-agent-mock",
+   "design_ref": "n4-atom-3",
+   "current": "现状：已实现且符合（后端 live）。前端 postPredictRun 请求只带 input_data、不带 mock_llm。后端引擎装配带 SDKPredictContext 的图：logic 节点真跑；agent 节点 runner.resolve_generation 按 has_golden_case → golden_case（有 golden）/ heuristic_stub（无 golden）。已对引擎核实（packages/graph-agent core/runner.py resolve_generation）。",
+   "gap": "符合设计，无需改。前端职责仅『不带 mock_llm、把决策交后端』，已做到。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。引擎 predict_artifact + resolve_generation（mock-by-golden）live。"
+  },
+  {
+   "n": 4,
+   "cap": "predict-pass-unlock-run",
+   "design_ref": "n4-atom-4",
+   "current": "现状：偏差（前端乐观放行）。Workspace.tsx 的 handlePredict 只 await postPredictRun 的 HTTP 成功就 updateStage('predict-pass') 点亮 Run，未检查返回体 RunResult.success；catch 才进 predict-fail。后端 routers/runs.py 的 predict_run 返回 result.model_dump(mode='json')（HTTP 200）——引擎 RunResult（core/result.py）的 success 是真布尔字段、会序列化进响应；status 是 @property、不被 model_dump 序列化、响应里没有。predictor.py 的 _persist_predict_result 仅当 result.success 才 record_predict_pass。",
+   "gap": "差距：前端把『业务成功』与『HTTP 成功』混了。① client.ts 的 PredictRunResponse 类型当前声明的是可选 `status?`（运行时永远不出现、因为 RunResult.status 不序列化）、且没声明 success——要改成声明 `success?: boolean`（真字段）+ phases/path_diff，别保留没用的 status；② handlePredict 只在 RunResult.success===true 时进 predict-pass，success===false 进 predict-fail 并显诊断（path_diff/phases）。否则 HTTP200-业务失败的 predict 会被前端误放行，真 Run 又被服务端门 409 RUN_REQUIRES_PREDICT。",
+   "fe_status": "符合",
+   "be_dep": "契约问题（DTO 投影）。后端 record_predict_pass/has_passing_predict（predict_gate.py）+ 服务端门已实现；缺口在 Studio sidecar 把 RunResult.success/phases/path_diff 投影给前端类型（PredictRunResponse 现未透出；success 已在 model_dump 响应里、status 是 @property 不序列化）。",
+   "fe_status_prev": "偏差",
+   "fe_resync": "已修复并测试通过(batch1, 2026-06-20)"
+  },
+  {
+   "n": 5,
+   "cap": "gating-reason-text",
+   "design_ref": "n4-atom-5",
+   "current": "现状：偏差。center-action-bar.tsx 的三个 Button 只有 variant(highlight) + disabled，灰禁时无任何 title / 旁注 / 原因文字——用户看到 Run 灰着但不知道『要先过 Predict』。门控逻辑对用户是哑的。",
+   "gap": "差距：在 CenterActionBar 据当前 stage 给灰禁按钮配原因文字。① Predict 灰（idle/compiling/compile-fail）→『先 Compile 通过』；② Run 灰（compile-pass/predicting/predict-fail）→『先通过 Predict』。做成按钮 title 悬浮或旁注小字，与 settings role-test 禁用解释风格统一。纯前端，无后端依赖。",
+   "fe_status": "符合",
+   "be_dep": "无后端依赖（纯前端可解释提示）。",
+   "fe_status_prev": "偏差",
+   "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
+  }
+ ],
+ "plan": [
+  {
+   "step": 1,
+   "what": "#5 门控可解释：在 CenterActionBar 据 stage 给灰禁的 Predict/Run 补原因文字（『先 Compile 通过』/『先通过 Predict』）。沿用 settings role-test 禁用解释风格，不自造组件。",
+   "depends_on": "无（纯前端；deriveButtons 已给出每个按钮的 disabled 态，只需据 stage 映射一句原因）。",
+   "why": "前端独立、零后端依赖，是 Predict surface 唯一需返工项，先做。",
+   "block": "前端独立"
+  },
+  {
+   "step": 2,
+   "what": "#4 predict-pass 按业务成功放行（偏差，需修前端）：① client.ts 的 PredictRunResponse 类型补 success/phases/path_diff（success 是 RunResult 真字段、已在 model_dump 响应里；status 是 @property 不序列化、不读它）；② handlePredict 只在 RunResult.success===true 时 updateStage('predict-pass')，success===false 进 predict-fail 显诊断。否则 HTTP200-业务失败的 predict 被误放行。",
+   "depends_on": "前端依赖 sidecar DTO 投影：PredictRunResponse 透出 success 等字段（缺口在 Studio sidecar 暴露层，引擎 RunResult 已产出 success）。",
+   "why": "前后端 predict 门必须一致：后端只在 result.success 才 record_predict_pass，前端却按 HTTP 成功放行 → 不一致。这是真功能缺陷、不是提示，与 #5 同批修。",
+   "block": "前端独立"
+  },
+  {
+   "step": 3,
+   "what": "#1–#3 无功能性改动：触发、输入解析、logic/agent 分流现状均已接实且符合设计。本步仅作现状留底 + 测试方案。",
+   "depends_on": "无。",
+   "why": "这三项已 live，相较 spec『桩』标注已领先；不开实施任务。",
+   "block": "前端独立"
+  }
+ ],
+ "tests": [
+  {
+   "covers": "#1 predict-trigger",
+   "atoms": [
+    1
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "mock deriveBuildStage 返回 compile-pass → 断言 deriveButtons 给 predictHighlight=true、runDisabled=true。",
+    "点 Predict → 断言 handlePredict 先 updateStage(predicting)。",
+    "stage=idle → 断言 Predict disabled。"
+   ],
+   "layer2": [
+    "编译一个 skill 到绿灯，看 Predict 是否点亮、Run 是否仍灰。",
+    "点 Predict，看档位是否进 predicting。"
+   ],
+   "shots": [
+    "compile-pass 时 Predict 高亮、Run 灰",
+    "点 Predict 后档位进 predicting"
+   ]
+  },
+  {
+   "covers": "#2 predict-input-select + #3 logic/agent mock",
+   "atoms": [
+    2,
+    3
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "选中一份测试输入 → 点 Predict → 断言 resolveRunInput 取该输入 content、postPredictRun body.input_data=该 content 且不含 mock_llm。",
+    "未选输入 → 断言 input_data 回退 {}。",
+    "mock 后端契约测：predict response.phases 里 agent 节点 mocked_source ∈ {golden_case, heuristic_stub}（有/无 golden 两例）。"
+   ],
+   "layer2": [
+    "真跑：选一份输入点 Predict，看 trace 里 logic 节点真跑、agent 节点标 mock 来源（heuristic_stub 或 golden_case）。",
+    "给某 agent 节点建 golden 后再 predict，看该节点 mock 来源切到 golden_case（真跑确认 mock-by-golden）。"
+   ],
+   "shots": [
+    "predict 后 trace 行标 agent 节点 mocked_source",
+    "无 golden 时 agent 走 heuristic_stub、有 golden 时走 golden_case"
+   ]
+  },
+  {
+   "covers": "#4 predict-pass-unlock-run（偏差 · RED 待转 GREEN）",
+   "atoms": [
+    4
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "RED：mock postPredictRun 返回 HTTP 200 但 RunResult.success===false（path_diff 有缺失）→ 断言『前端不进 predict-pass、Run 仍灰』失败（现状误放行，待实现转 GREEN）。",
+    "实现后：success===true → 断言 updateStage(predict-pass) 点亮 Run；success===false → 断言进 predict-fail 并显诊断、Run 仍灰。",
+    "后端契约测：业务失败 predict 不写 last_predict.json（_persist_predict_result 不调 record_predict_pass）；成功才写、content_hash=当前编译 hash。"
+   ],
+   "layer2": [
+    "目标落地前对现状真跑取证：造一个 path_diff 不匹配的 predict（HTTP200、success=false），看前端是否误点亮 Run、真去 Run 是否被 409 拦。",
+    "落地后：业务失败 predict（success=false）后 Run 仍灰 + 显诊断；业务成功（success=true）后才点亮。改图重编后真去 Run 看服务端门是否要求重 Predict。"
+   ],
+   "shots": [
+    "业务失败 predict（success=false）后 Run 仍灰 + 显诊断",
+    "业务成功后 Run 点亮；改图后需重 Predict"
+   ],
+   "fe_status_prev": "偏差",
+   "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
+  },
+  {
+   "covers": "#5 gating-reason-text（偏差 · RED 待转 GREEN）",
+   "atoms": [
+    5
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "RED：当前 center-action-bar 灰禁按钮无原因文字 → 测试断言『Run 灰禁时存在 title/旁注=先通过 Predict』失败（待实现转 GREEN）。",
+    "实现后：stage=compile-pass → 断言 Run 按钮含『先通过 Predict』提示；stage=idle → 断言 Predict 按钮含『先 Compile 通过』提示。"
+   ],
+   "layer2": [
+    "目标形态落地前先对现状真跑取证：Run 灰禁时悬浮无解释。",
+    "落地后：把鼠标移到灰禁的 Run，看是否提示『先通过 Predict』、截图。"
+   ],
+   "shots": [
+    "灰禁 Run 悬浮显示『先通过 Predict』",
+    "灰禁 Predict 悬浮显示『先 Compile 通过』"
+   ],
+   "fe_status_prev": "偏差",
+   "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
+  }
+ ]
+}

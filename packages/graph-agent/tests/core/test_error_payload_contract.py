@@ -42,8 +42,8 @@ def _error_registry() -> dict[str, Any]:
 
 def _spec_codes() -> set[str]:
     text = ERROR_SPEC.read_text(encoding="utf-8")
-    match = re.search(r"## 4\. 错误码全表\(96\)(.*?)(?:\n## 5\.|\Z)", text, re.S)
-    assert match is not None, "mvp1 compile-rules must keep a bounded 96-code table section"
+    match = re.search(r"## 4\. 错误码全表\(97\)(.*?)(?:\n## 5\.|\Z)", text, re.S)
+    assert match is not None, "mvp1 compile-rules must keep a bounded 97-code table section"
     return set(re.findall(r"\[F-v3-[a-z0-9-]+\]", match.group(1)))
 
 
@@ -112,7 +112,7 @@ def test_error_registry_matches_error_code_spec_key_set() -> None:
     registry = _error_registry()
 
     assert set(registry) == _spec_codes()
-    assert len(registry) == len(_spec_codes()) == 96
+    assert len(registry) == len(_spec_codes()) == 97
 
 
 def test_error_registry_preserves_multi_stage_codes() -> None:
@@ -245,7 +245,7 @@ def test_builtin_tool_failure_asserts_payload_code(tmp_path: Path, mock_skill_re
 def test_error_registry_entries_have_complete_nonempty_metadata() -> None:
     registry = _error_registry()
 
-    assert len(registry) == len(_spec_codes()) == 96
+    assert len(registry) == len(_spec_codes()) == 97
     for code, metadata in registry.items():
         assert metadata.code == code
         assert metadata.code
@@ -267,6 +267,17 @@ def test_pr4_compile_recursion_error_codes_are_registered() -> None:
         assert metadata.level == "FATAL"
         assert "编译期" in metadata.stage
         assert metadata.doc_link
+
+
+def test_golden_stale_fields_error_code_is_registered_for_eval_phase() -> None:
+    registry = _error_registry()
+
+    metadata = registry["[F-v3-golden-stale-fields]"]
+
+    assert metadata.code == "[F-v3-golden-stale-fields]"
+    assert metadata.level == "FATAL"
+    assert metadata.stage == ("eval 期",)
+    assert "golden-eval" in metadata.doc_link
 
 
 def test_error_registry_preserves_warn_level_for_reference_reader_fallback() -> None:

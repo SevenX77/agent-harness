@@ -1,0 +1,138 @@
+{
+  "page_id": "n6_history_design",
+  "title": "本地存档与历史 · 操作设计",
+  "region": "workspace:local-history",
+  "intro": "本页是「成功 run 自动本地存档 + Local History 回滚」这一 surface 的 MVP1 设计(应该怎样):每张卡只描述该操作目标长啥样、用户怎么触发、前端该怎么做、依赖后端哪条契约;现状实现与差距见实施页(n6_history_impl),底层 git autocommit / 历史 / 回滚机制见本节点后端接口契约页(n6_history_mech)。定性(引 06_eval.md):成功 run 本地 git autocommit 存档=MVP1 保留的核心价值,本地够用;存档要让用户感知、可回滚。",
+  "atoms": [
+    {
+      "n": 1,
+      "cap": "autocommit-feedback",
+      "module": "成功 run 后存档感知",
+      "func": "设计:成功 run 之后让用户知道『这次成功 run 已自动存档到本地,可回滚』,而不是对存档发生完全无感。",
+      "action": "无显式动作(run 完成自动触发——前端收到运行流的 `run_ended` 事件即视为本次 run 结束)。",
+      "fe_design": "成功 run 后端会自动做一次本地 git 提交(见后端契约页机制 A),并把提交结果回填成本次 run 元数据上的 `git_status`(取值 committed / locked / failed)。**取数路径(关键)**:运行流的 `run_ended` 事件**只标志 run 结束、不携带 run 元数据**;前端收到 `run_ended` 后须**再拉一次 run 详情**(`GET /skills/{id}/runs/{run_id}`,返回 `RunDetail.metadata.git_status`;前端可用既有的 run-history hook 的 `fetchRunDetail`)才能读到 `git_status`。读到后:committed → 轻量『已自动存档,可在 Local History 回滚』反馈(toast 或 inline)+ 触发 Local History 刷新(见 #2);locked / failed → 『本次未存档(原因)』可观测提示,不假装存档成功。前端只读 `git_status` 投影,不自己判断存没存。",
+      "fe_modules": [
+        {
+          "name": "本地历史 hook",
+          "ref": "femod-uselocalhistory"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "GET /api/skills/{skill_id}/runs/{run_id}",
+          "purpose": "run 结束后读这条 run 的详情,从 `RunDetail.metadata.git_status`(committed/locked/failed)投影存档反馈——这是 #1 的读模型(`run_ended` 不带 metadata,必须再拉)。",
+          "mechanism_ref": "n6_history_mech",
+          "iface_ref": "iface-run-detail"
+        },
+        {
+          "endpoint": "成功 run 后服务端自动 autocommit(副作用,无前端端点)",
+          "purpose": "run 成功完成时后端自动本地 git 提交并把结果回填成 run 元数据上的 git_status(committed/locked/failed)。",
+          "mechanism_ref": "n6_history_mech",
+          "iface_ref": null
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(成功 run 存档反馈已落地)。2026-06-20: 代码已落地(design-audit vs code 核实),状态回填。取数路径按设计接好:Workspace.tsx:283-320 在 `run_ended` 边上 fetchRunDetail(completedRunId)→ archiveFeedbackForGitStatus(detail.metadata.git_status) → committed/no_git 走 toast.success、locked/failed 走 toast.warning,try/catch 出错 toast.error 不静默;映射函数 useRunHistory.ts:142-160 覆盖 committed/no_git/locked/failed 四态;fetchRunDetail(useRunHistory.ts:35-41)打 GET /skills/{id}/runs/{run_id};后端读模型 runs.py:87-98 get_run 返回 RunDetail,git_status 由 run_manager._auto_commit_successful_run 回填(run_manager.py:1006-1034)。旧 gap_brief 担心的『无 .git 仓被误判 committed』边界已解决:后端现把无仓情形区分为 `no_git`(api/types.ts:224 git_status 含 'no_git'),前端按 no_git 单独反馈,不假装 committed。集成测试 Workspace.test.tsx:820-844 断言 committed/no_git/locked 三态走 fetchRunDetail→toast,32/32 通过。",
+      "impl_ref": "fn-1"
+    },
+    {
+      "n": 2,
+      "cap": "history-auto-refresh",
+      "module": "成功 run 后存档感知",
+      "func": "设计:成功 run 之后,Local History 面板里新的『Auto run』存档快照自动出现,用户不必手点 Refresh。",
+      "action": "无显式动作(run 完成自动触发,跟随 #1 的 `run_ended`)。",
+      "fe_design": "run 完成后,前端让本地历史 hook 重新拉一次 `/skills/{id}/history`(revalidate),使后端刚生成的 Auto run 快照立即进入列表。这只是对单一真相(后端 git 历史)的重新投影:前端不在本地拼快照、不持第二份历史,只是把『该刷新了』的时机接到 run 完成事件上。",
+      "fe_modules": [
+        {
+          "name": "本地历史 hook",
+          "ref": "femod-uselocalhistory"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "GET /api/skills/{skill_id}/history",
+          "purpose": "返回本地 git 历史(含 autocommit 的 Auto run 快照)∪ product store releases,合并成 GitHistoryItem 列表供面板渲染。",
+          "mechanism_ref": "n6_history_mech",
+          "iface_ref": "iface-history"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(run 完成自动刷 Local History)。2026-06-20: 代码已落地(design-audit vs code 核实),状态回填。同一条 `run_ended` 边经 nextLocalHistoryRefreshKey 去重后 void refreshLocalHistory()(Workspace.tsx:262-274);refresh = useLocalHistory(skillId).refresh,即对 /skills/{id}/history 的 SWR mutate revalidate(useRunHistory.ts:55-87,key 与面板同源,不本地拼快照);去重规则 nextLocalHistoryRefreshKey(useRunHistory.ts:106-120,同 skill::run key 只触发一次)。集成测试 Workspace.test.tsx:846-850 断言 run_ended 边 refreshLocalHistory 恰调一次,32/32 通过。",
+      "impl_ref": "fn-2"
+    },
+    {
+      "n": 3,
+      "cap": "history-list",
+      "module": "Local History 面板",
+      "func": "设计:在 Local History 面板里列出本地存档快照(autocommit 的 Auto run、手动存档、发布 Release 标记),每条带可读信息让用户认出它是什么时候、哪种存档。",
+      "action": "用户打开 Local History 面板(面板挂载时自动拉一次历史)。",
+      "fe_design": "面板拉 `/skills/{id}/history` 得到一组 GitHistoryItem,逐条渲染:提交信息 / 短 sha / 作者 / 时间,并按 `kind` 给一个种类标签——auto_run 显示『Auto run』、manual 显示『Manual』、release 显示『Release』、其它显示『Other』。列表只投影后端历史,前端不自造快照、不改写历史。",
+      "fe_modules": [
+        {
+          "name": "快照列表呈现",
+          "ref": "femod-historypanelview"
+        },
+        {
+          "name": "本地历史 hook",
+          "ref": "femod-uselocalhistory"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "GET /api/skills/{skill_id}/history",
+          "purpose": "返回 GitHistoryItem 列表(sha/message/author/timestamp/kind/revertable 等),kind 区分 auto_run/manual/release/other。",
+          "mechanism_ref": "n6_history_mech",
+          "iface_ref": "iface-history"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(面板已按 kind 标签列出快照)。",
+      "impl_ref": "fn-3"
+    },
+    {
+      "n": 4,
+      "cap": "snapshot-revert",
+      "module": "Local History 面板",
+      "func": "设计:让用户从某个本地存档快照回滚,把工作区恢复到那次快照的状态。",
+      "action": "用户在 Local History 某条快照上点 `Revert`。",
+      "fe_design": "点 Revert → 调 `/skills/{id}/revert` 带该快照 sha → 后端把工作区硬回滚到该 sha(git reset --hard)并回一份恢复后的 skill detail → 前端用返回的 detail 刷新当前 skill、并 revalidate 历史 → 成功弹『Reverted to local history snapshot』、失败弹错误 toast。回滚是只读式触发:前端只发 sha、用后端回的权威 detail 覆盖,不在本地猜回滚结果。",
+      "fe_modules": [
+        {
+          "name": "本地历史 hook",
+          "ref": "femod-uselocalhistory"
+        },
+        {
+          "name": "快照列表呈现",
+          "ref": "femod-historypanelview"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{skill_id}/revert",
+          "purpose": "按 sha 把工作区硬回滚(git reset --hard)到该快照,返回恢复后的 skill detail。",
+          "mechanism_ref": "n6_history_mech",
+          "iface_ref": "iface-revert"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(Revert→POST /revert→刷 detail + toast)。",
+      "impl_ref": "fn-4"
+    }
+  ],
+  "fe_defs": [
+    {
+      "id": "femod-uselocalhistory",
+      "name": "本地历史 hook",
+      "explain": "前端共享逻辑:useLocalHistory,拉 /skills/{id}/history 的 SWR hook,带 refresh(revalidate)与 revert(回滚)。"
+    },
+    {
+      "id": "femod-historypanelview",
+      "name": "快照列表呈现",
+      "explain": "前端共享逻辑:LocalHistoryPanelView + kindLabel,把 GitHistoryItem 列表渲成带种类标签的快照行。"
+    }
+  ]
+}

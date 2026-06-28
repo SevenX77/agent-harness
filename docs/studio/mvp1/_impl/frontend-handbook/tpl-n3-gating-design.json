@@ -1,0 +1,140 @@
+{
+  "page_id": "n3_gating_design",
+  "title": "动作条编译门控 · 操作设计",
+  "region": "authoring:action-bar-gating",
+  "intro": "本页是 N3 · Compile 节点里「动作条的绿灯门控」这一 surface 的 MVP1 设计(应该怎样)。动作条(画布下方居中的 Compile / Predict / Run 三按钮条)用一个 build stage(编译构建阶段)状态机决定每个按钮是点亮还是置灰,逐级解锁:先 compile-pass 才能 Predict、再 predict-pass 才能 Run——让用户清楚现在能做哪一步、为什么下一步还点不了。本页四类操作:状态机驱动按钮态、逐级门控解锁、lint 状态驱动 stage、锁态原因提示、predict-pass 解锁 Run。门控本身是纯前端状态机;它依赖的 compile/predict/run 真跑契约见 n3_compile_contract(predict/run 细节属 N4)。",
+  "atoms": [
+    {
+      "n": 10,
+      "cap": "build-stage-buttons",
+      "track": "A2a",
+      "module": "门控状态机",
+      "func": "设计:用一个 build stage 状态机统一决定三个按钮(Compile / Predict / Run)各自是高亮(可点、当前该点的那个)还是置灰(还不能点)。这是 spec A2「lint 状态→build stage」拆出的 A2a:状态机→按钮视觉。",
+      "action": "无显式动作(build stage 变化时,三按钮的高亮/置灰自动随之更新)。",
+      "fe_design": "动作条组件按当前 stage 经一个纯派生函数(deriveButtons)算出三按钮的 highlight/disabled:idle/compiling/compile-fail → 只 Compile 高亮(compiling 时 Compile 置灰防重复点),Predict/Run 置灰;compile-pass/predicting/predict-fail → Predict 高亮,Compile 可点(重编译)、Run 置灰;predict-pass/running/run-fail → Run 高亮。highlight 用主色实心按钮、非高亮用幽灵按钮,disabled 设原生禁用。设计意图:把「现在能点哪个」用一个状态机收口,避免三按钮各判各的导致状态打架。",
+      "fe_modules": [
+        {
+          "name": "build stage 派生（deriveBuildStage / deriveButtons）",
+          "ref": "femod-n3-build-stage"
+        }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计:center-action-bar 的 SkillBuildStage(9 态枚举)+ deriveButtons(据 stage 设三按钮 highlight/disabled)已实现。纯前端状态机,无后端契约。",
+      "impl_ref": "fn-10"
+    },
+    {
+      "n": 11,
+      "cap": "stage-gating",
+      "track": "A8",
+      "module": "门控状态机",
+      "func": "设计:三步逐级解锁——Compile 通过(compile-pass)才解锁 Predict,Predict 通过(predict-pass)才解锁 Run。用户必须按顺序往下走,不能跳级。",
+      "action": "用户依次点 Compile → Predict → Run;每一步成功后下一步按钮才点亮。",
+      "fe_design": "build stage 在 compile / predict / run 各自的处理函数里推进:handleCompile 成功 → compile-pass(解锁 Predict);handlePredict 成功 → predict-pass(解锁 Run);handleRun 在 stage===predict-pass 时才真跑。deriveButtons(见 #10)据 stage 把未到的步骤置灰。门控判定按 severity(能力模块 compile-lint COMPILE_LINT-3):**warning 级不阻塞 Predict、只 error 级阻塞**(warning 仅标记不挡试飞)。设计意图:门控保证「编译没过不让试飞、试飞没过不让正式跑」。前端门控只是预防性置灰——Run 另有后端兜底:后端 create_run → RunManager.start_run → require_passing_predict,当前 graph content hash 未过 predict 则抛 RUN_REQUIRES_PREDICT(409),双保险防跑废(run 失败态呈现归 N4)。",
+      "fe_modules": [
+        {
+          "name": "build stage 派生（deriveBuildStage / deriveButtons）",
+          "ref": "femod-n3-build-stage"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{id}/compile",
+          "purpose": "compile-pass 这一级解锁靠 /compile 成功驱动。",
+          "mechanism_ref": "n3_compile_contract",
+          "iface_ref": "iface-compile"
+        },
+        {
+          "endpoint": "POST /api/skills/{id}/runs",
+          "purpose": "Run 后端强制门控兜底:未过 predict 抛 RUN_REQUIRES_PREDICT(409);前端门控之外的双保险。",
+          "mechanism_ref": "n3_compile_contract",
+          "iface_ref": "iface-run"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(范围注):Compile→Predict→Run 的逐级解锁链本身可用——由手动 Compile 与 Predict 的成功驱动 stage 推进。范围:① 其中「lint→compile-pass」这一驱动源因 lint hook 未接线恒走 idle 兜底(见 #12 lint-drives-stage),现状 compile-pass 全靠手动 Compile;② warning 不阻塞 Predict、只 error 阻塞的 severity 判定(COMPILE_LINT-3)需在前端门控里落实;③ Run 后端兜底(RUN_REQUIRES_PREDICT)已就绪,前端只需预防性置灰。门控机制本身正确,/compile、/runs 后端已就绪。",
+      "impl_ref": "fn-11"
+    },
+    {
+      "n": 12,
+      "cap": "lint-drives-stage",
+      "track": "A2b",
+      "module": "门控状态机",
+      "func": "设计:编辑期实时 lint 的状态自动驱动 build stage——lint checking→编译中、failed→编译失败、passed→compile-pass(免得用户每改一下都要手动点 Compile 才解锁 Predict)。这是 spec A2 拆出的 A2b:lint 状态→落到哪个 stage。",
+      "action": "无显式动作(编辑触发 lint,lint 状态变化自动反映到 build stage)。",
+      "fe_design": "build stage 的派生函数(deriveBuildStage)优先取显式 compileStages[id](手动 compile/predict/run 设的),否则据 lint 状态兜底:lint checking→compiling、failed→compile-fail、passed→compile-pass,无则 idle。设计意图:编辑期 lint 通过即自动驱动 compile-pass 解锁 Predict,让「改图→实时查错→绿灯」连成一条不打断的流,无需每次手动 Compile。",
+      "fe_modules": [
+        {
+          "name": "build stage 派生（deriveBuildStage / deriveButtons）",
+          "ref": "femod-n3-build-stage"
+        },
+        {
+          "name": "实时 lint hook（useDebouncedLint）",
+          "ref": "femod-n3-lint-hook"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{id}/lint",
+          "purpose": "lint 状态(checking/failed/passed)是这条驱动的来源,经 sessionStorage 广播给 deriveBuildStage 读取。",
+          "mechanism_ref": "n3_compile_contract",
+          "iface_ref": "iface-lint"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(2026-06-20:代码已落地,design-audit vs code 核实,状态回填)。lint→stage 驱动已接通:LazyMonacoPanel.tsx:250 调 useDebouncedLint(skillId, draft),hook 在 useDebouncedLint.ts:110-117 POST /lint 后 publishLintStatus(写 sessionStorage + 派 lintStatusEvent);Workspace.tsx:206-216 订阅 lintStatusEvent 并 bump lintTick,deriveBuildStage(Workspace.tsx:904-916)依赖 lintTick、读 readLintStatus(id) 并映射 passed→compile-pass / failed→compile-fail / checking→compiling。后端 changed-markdown body drift 也已闭合:routers/lint.py:28-31 把 body.markdown 转给 lint_skill_changed_markdown,services/skills.py:233-251 用临时 sandbox 真 lint 编辑器未保存的 GRAPH.md(不再忽略 body)。设计原标「lint hook 未接线、readLintStatus 恒 idle」不再成立。测试 Workspace.test.tsx:664「drives the build stage to compile-pass from a passing realtime lint」通过(vitest 31/31)。",
+      "impl_ref": "fn-12"
+    },
+    {
+      "n": 13,
+      "cap": "lock-reason-hint",
+      "track": "A8",
+      "module": "门控解锁语义",
+      "func": "设计:被置灰的 Predict / Run 按钮上,给一句「为什么还点不了」的原因提示。可见 UI 文案用英文(与现有 Compile/Predict/Run 按钮及产品英文体系一致):如『Compile must pass first』『Predict must pass first』,让用户看懂门控、不用猜。",
+      "action": "无显式动作(用户悬停被置灰的 Predict/Run 按钮时显示原因提示)。",
+      "fe_design": "在被置灰的按钮上挂一个 tooltip(或副标),按当前 stage 给出锁着的原因。可见 UI 文案用英文(与现有 Compile/Predict/Run 一致):Predict 在未 compile-pass 时提示『Compile must pass first』;Run 在未 predict-pass 时提示『Predict must pass first』(中文解释只留手册说明,不进可见 UI)。设计意图:绿灯门控不能只靠按钮亮/灰让用户猜,要把「为何还锁着」说清——门控语义可读。门控链逻辑不动,只补文案。",
+      "fe_modules": [
+        {
+          "name": "build stage 派生（deriveBuildStage / deriveButtons）",
+          "ref": "femod-n3-build-stage"
+        }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计(2026-06-20:代码已落地,design-audit vs code 核实,状态回填)。锁态原因提示已落地:center-action-bar.tsx:39-40 定义 PREDICT_LOCK_REASON='Compile must pass first'、RUN_LOCK_REASON='Predict must pass first'(英文 UI 文案,符合设计);LockableButton(82-98)把 disabled 按钮包进 shadcn Tooltip(import 4-8),TooltipContent 显示锁定原因,disabled 按钮的指针穿透用带 aria-label 的可聚焦 span 处理;Predict/Run 按钮分别在 114-125、126-137 包裹。center-action-bar 外壳与按钮用 rounded-md(103,109,120,132),顺带还清了 rounded-full 的 UI-spec 债。设计原标「无 tooltip、门控语义靠用户猜」不再成立。测试 center-action-bar.test.tsx:17-53 断言锁定 Predict/Run 出现英文文案、解锁后消失(vitest 31/31)。纯前端,无后端。",
+      "impl_ref": "fn-13"
+    },
+    {
+      "n": 14,
+      "cap": "predict-pass-unlock",
+      "track": "A9",
+      "module": "门控状态机",
+      "func": "设计:Predict 通过后把 stage 置 predict-pass,从而解锁 Run。spec A9 曾担心「predict-pass 永不置位导致 Run 永远点不了」,此处确认置位链路通。",
+      "action": "用户点 Predict;成功后 Run 按钮点亮。",
+      "fe_design": "handlePredict 在 predict 成功后把 build stage 置 predict-pass → deriveButtons 据此点亮 Run。设计意图:试飞(Predict)通过即解锁正式 Run,门控链最后一级闭合。",
+      "fe_modules": [
+        {
+          "name": "build stage 派生（deriveBuildStage / deriveButtons）",
+          "ref": "femod-n3-build-stage"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{id}/runs/predict",
+          "purpose": "predict-pass 由 predict 成功驱动;predict 端点(routers/runs.py 的 predict_run)与 engine predict 路径已存在(非桩),属 N4;N3 只用其成功信号解锁 Run。",
+          "mechanism_ref": "n3_compile_contract",
+          "iface_ref": "iface-predict"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合(范围注):本分支 handlePredict 成功已置 predict-pass、解锁 Run,A9 担心的「永不置位」在此分支不成立。订正:predict 端点是 POST /api/skills/{id}/runs/predict(routers/runs.py 的 predict_run → PredictorService.dispatch_predict_job → EngineAdapter.predict_artifact),**非桩**——它真编译 artifact 并调 engine predict;完整 predict UX 归 N4。此处只确认「predict 成功→predict-pass→解锁 Run」的门控转移已接通。后端轴标 n/a:Run 的门控解锁是前端转移,predict/run 端点契约归 N4 复核。",
+      "impl_ref": "fn-14"
+    }
+  ],
+  "fe_defs": []
+}

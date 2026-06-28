@@ -1,0 +1,309 @@
+{
+  "page": "shell",
+  "glossary": [
+    {
+      "id": "settings-overlay",
+      "term": "Settings 浮层（settings overlay）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "Settings 不是独立路由页面，而是盖在工作区画布上的一层面板：左侧导航栏、右侧 Copilot 都还在原地，只有中间画布被它替换。它也不是带遮罩、带焦点锁定的真正弹窗，所以左右两栏在 Settings 打开时仍能点。本质是壳层维护的一个「Settings 是否打开」开关 + 中间区按这个开关二选一渲染。",
+      "detail": [
+        [
+          "定义层",
+          "① 前端（壳层组件 + open 开关）"
+        ],
+        [
+          "复用范围",
+          "壳层级容器，承载 General / API Keys / Roles / Copilot 四个配置区"
+        ]
+      ]
+    },
+    {
+      "id": "ws-events",
+      "term": "实时刷新长连接（/ws/events WebSocket）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "Settings 打开时前端建立的一条 WebSocket 长连接，专门接收 ③a Studio 后端推来的「数据变了」通知（凭证变了 / 角色变了）。凭证刷新和角色刷新两件事共用这同一条连接，是壳层唯一真正被多处复用的前端抽象。连接本身是前端基础设施；它消费的事件由 ③a 的 WS 端点（见 ws-events-api）产生。",
+      "detail": [
+        [
+          "定义层",
+          "① 前端（前端建连 + 监听）"
+        ],
+        [
+          "复用范围",
+          "凭证刷新（#5）与角色刷新（#6）共用同一条连接"
+        ]
+      ]
+    },
+    {
+      "id": "save-badge",
+      "term": "保存状态徽章（SaveStatusBadge）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "一个随保存进度变色的小标签（待保存 Pending / 保存中 Saving / 已保存 Saved / 失败 Failed），让用户确认「即填即存」真的生效——Settings 全程没有独立 Save 按钮，改完字段过一会儿自动存。设计目标是四个配置区共用同一个组件；现状是各区各画各的、有几份近乎重复实现待合并。",
+      "detail": [
+        [
+          "定义层",
+          "① 前端（纯展示组件，吃统一 SaveStatus 类型）"
+        ],
+        [
+          "复用范围",
+          "目标：General/API Keys/Roles/Copilot 四区共用；现状各区各实现待合并"
+        ]
+      ]
+    },
+    {
+      "id": "error-boundary",
+      "term": "错误兜底卡（error boundary）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "React 错误边界：某个配置区渲染时崩溃，不让整页变白屏，而是当场换成一张「出错了 + 重试」的卡片，点重试就重新渲染那一块。现状只罩住了 Roles 和 Copilot 两个区，General 和 API Keys 还没罩。",
+      "detail": [
+        [
+          "定义层",
+          "① 前端（React error boundary 组件）"
+        ],
+        [
+          "复用范围",
+          "现状仅罩 Roles / Copilot；设计要求任一区崩溃都有兜底"
+        ]
+      ]
+    },
+    {
+      "id": "credentials-file",
+      "term": "llm_credentials.json（凭证文件）",
+      "category": "数据文件",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "保存所有 provider API key + endpoint/route/状态/已发现模型的本地 JSON 文件，权限 0600（仅本人可读写），位于 ~/Library/Application Support/AgentStudio/llm/ 子目录下。每次写都是原子写（先写临时文件再 os.replace 替换，避免写一半被读到）。外部进程改动它会触发「凭证变了」通知。它的 schema 由 ③b gateway 库定义、数据归 ③b；文件落在哪个目录由 ③a 的 llm_paths（credentials_path）决定；实际读写由 ③a Studio 后端经预留 user_id 的存储缝（load/save_credentials）执行。",
+      "detail": [
+        [
+          "Schema 定义",
+          "③b gateway 库"
+        ],
+        [
+          "文件路径定义",
+          "③a（llm_paths.credentials_path）"
+        ],
+        [
+          "读写",
+          "③a Studio backend 经 storage seam（预留 user_id）"
+        ],
+        [
+          "文件归属",
+          "③b gateway-owned 数据"
+        ]
+      ]
+    },
+    {
+      "id": "roles-file",
+      "term": "llm_roles.yaml（角色文件）",
+      "category": "数据文件",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "保存所有 LLM 角色（含 graph-agent 角色、copilot 角色、模型束）配置的本地 YAML 文件，同样在 AgentStudio 的 llm/ 子目录下。每次保存都原子写。外部进程改动它会触发「角色变了」通知。schema 由 ③b gateway 库定义、数据归 ③b；路径由 ③a 的 llm_paths（roles_path）决定；读写由 ③a Studio 后端经存储缝执行。",
+      "detail": [
+        [
+          "Schema 定义",
+          "③b gateway 库"
+        ],
+        [
+          "文件路径定义",
+          "③a（llm_paths.roles_path）"
+        ],
+        [
+          "读写",
+          "③a Studio backend 经 storage seam（预留 user_id）"
+        ],
+        [
+          "文件归属",
+          "③b gateway-owned 数据"
+        ]
+      ]
+    },
+    {
+      "id": "ws-events-api",
+      "term": "WS 事件端点 /ws/events（registry_changed / roles_changed）",
+      "category": "接口",
+      "owner": "③a Studio",
+      "explain": "③a Studio 后端的 WebSocket 端点：文件监听器监到凭证 / 角色文件被外部进程改动后，向前端推 registry_changed（凭证变了）或 roles_changed（角色变了）事件。事件只通知「变了」、不带数据本身，前端收到后自己重拉。Studio 自己写盘时会先在监听器登记「这次是本进程写的」去抖，避免把自己的写当外部变更自激。",
+      "detail": [
+        [
+          "契约 / DTO",
+          "WS 事件名 registry_changed / roles_changed（无 payload，仅信号）"
+        ],
+        [
+          "谁提供",
+          "③a Studio（WS 端点 + 文件监听器广播）"
+        ]
+      ]
+    },
+    {
+      "id": "registry-get",
+      "term": "拉凭证清单 GET /llm/registry",
+      "category": "接口",
+      "owner": "③a Studio",
+      "explain": "前端收到「凭证变了」通知后，用来重新把整份凭证清单拉回来刷新视图的读端点。返回的是打码快照（api_key 一律 redacted），key 真值另走单条 secret 端点逐个换回。端点本身由 ③a 提供，返回的数据投影自 ③b-owned 的 llm_credentials.json。",
+      "detail": [
+        [
+          "契约 / DTO",
+          "RegistrySnapshot（endpoint/route/状态/已发现模型，api_key redacted）"
+        ],
+        [
+          "谁提供",
+          "③a Studio"
+        ]
+      ]
+    }
+  ],
+  "atoms": [
+    {
+      "n": 1,
+      "cap": "open-settings-overlay",
+      "track": null,
+      "marker": "live",
+      "module": "进入与切换",
+      "func": "让用户从工作区进入 Settings 配置面板，且不打断当前工作（画布被盖住但工作区不卸载）。",
+      "action": "点左侧 Toolbar 最下方的 Settings 齿轮图标（此按钮只负责「打开」，不是开关——已经打开时再点没有任何反应，要关得靠 X 或 Home）。",
+      "fe_logic": "点齿轮图标 → 把「Settings 是否打开」这个开关置为「开」→ 中间画布位置改为渲染 [[settings-overlay]]，左侧导航和右侧 Copilot 原样保留、仍可点。Header 左上角也有第二个入口，效果一样、同样只负责打开。注意这个齿轮按钮内部写死的是「置为打开」而不是「取反」，所以它本质上是个 open-only 按钮、不是 toggle。",
+      "fe_modules": [],
+      "be_logic": "无。",
+      "be_api": [],
+      "gap": "⚠️ 偏差：设计（§7.0 PM 拍板）要求「再点一次 toolbar 齿轮 = 关闭 Settings」，即这个图标应该是开/关切换；但现状它写死成「只打开」，再点关不掉，关闭只剩 X 和 Home 两条路——应补成可切换关闭。至于「浮层盖画布但不卸载工作区、且不是带遮罩的真弹窗」，这是设计已认可的现状，不算偏差。"
+    },
+    {
+      "n": 2,
+      "cap": "settings-skeleton",
+      "track": null,
+      "marker": "live",
+      "module": "保存与刷新指示",
+      "func": "数据未到位时给用户占位骨架屏，避免空白等待（available models 巨长列表是 NFR 首要场景）。",
+      "action": "无显式触发，进入 Settings 各 tab、数据加载期间自动出现。",
+      "fe_logic": "壳层本身不画任何统一的加载占位，而是把「加载中显示什么」整个甩给各个配置区自己管：API Keys 区数据没回来时摆 5 张占位卡，LLM Roles 区摆侧栏和角色卡两块骨架，而 General 区干脆连骨架都没有、只是把输入框临时禁用一下。",
+      "fe_modules": [],
+      "be_logic": "无。",
+      "be_api": [],
+      "gap": "⚠️ 偏差（§7.0）：壳层缺一个统一的加载占位，各区各画各的，尤其 General 区只禁用字段、没有骨架，整体加载表现不一致。"
+    },
+    {
+      "n": 3,
+      "cap": "settings-tab-switch",
+      "track": null,
+      "marker": "live",
+      "module": "进入与切换",
+      "func": "让用户在四个配置区（General / API Keys / Roles / Copilot）之间切换，切到哪个才加载哪个的数据（懒加载）。",
+      "action": "点左侧导航栏里某个 tab 名（General / API Keys / LLM Roles / Copilot）。",
+      "fe_logic": "点某个导航名 → 记下「当前在哪个区」→ 内容区只渲染那个区。数据是用到才拉的（懒加载）：切到 API Keys 才去把已存的密钥换成真值，切到 Roles 或 Copilot 才去拉角色和模型组——没点开过的区一概不拉。",
+      "fe_modules": [],
+      "be_logic": "无（切换本身不调后端（③a Studio）；切到某区才触发的数据加载属于那个区自己的读请求，不算壳层动作）。",
+      "be_api": [],
+      "gap": "符合设计。"
+    },
+    {
+      "n": 4,
+      "cap": "settings-save-badge",
+      "track": null,
+      "marker": "live",
+      "module": "保存与刷新指示",
+      "func": "改动字段后，让用户在右上角看到保存状态反馈（Pending / Saving / Saved / Failed），确认即填即存生效。",
+      "fe_logic": "用户改了字段 → 触发自动保存 → 对应区标题右上的 [[save-badge]] 跟着保存进度变化（待保存→保存中→已保存，失败则报错）。但这徽章是三个区各画各的，壳层顶栏只有标题和 X 关闭按钮，没有一个统管全局的保存状态。",
+      "fe_modules": [],
+      "be_logic": "无。",
+      "be_api": [],
+      "gap": "⚠️ 偏差（§7.0）：三个区各画各的徽章、顶栏无全局保存态；而且这个徽章在代码里有好几份近乎重复的实现没合并。设计要求四个区共用同一个保存状态徽章组件。",
+      "action": "无显式触发，改任意字段后即填即存，徽章随保存状态自动变化。"
+    },
+    {
+      "n": 5,
+      "cap": "ws-registry-refresh",
+      "track": null,
+      "marker": "live",
+      "module": "保存与刷新指示",
+      "func": "外部进程改了 credentials（凭证）时，通过 WebSocket 事件自动刷新 Settings 里的凭证视图，无需用户手动重载。",
+      "action": "无用户动作（被动）：外部改 credentials → 后端（③a Studio）推 WS 事件 → 前端自动重拉。",
+      "fe_logic": "整条链是：外部某个进程改了 [[credentials-file]] → 后端（③a Studio）文件监听器发现变了 → 经 [[ws-events]] 推一条「凭证变了」的通知 → 前端收到后自动重新拉凭证清单、把视图刷成最新。用户什么都不用做。",
+      "fe_modules": [
+        "ws-events"
+      ],
+      "be_logic": "后端（③a Studio，WS 端点与广播归它、被监控的凭证数据归 ③b gateway）这边分两种写法：① Studio 自己存凭证时，先在文件监听器里登记一下「这次是本进程写的」（让监听器去抖、别把自己的写当成外部改动而自激），再原子写盘；② 外部进程改 [[credentials-file]]，监听器监到真正的外部变更，就经 WS 端点推「凭证变了」。",
+      "be_api": [
+        {
+          "endpoint": "WS /ws/events（事件 registry_changed）",
+          "owner": "③a Studio",
+          "purpose": "通知前端凭证已变、该重新拉取刷新",
+          "connected": "已接通"
+        },
+        {
+          "endpoint": "GET /llm/registry（+ 逐 endpoint 换真值）",
+          "owner": "③a Studio",
+          "purpose": "收到通知后重新拉回整份凭证清单刷新视图",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "⚠️ 偏差（§7.0）：前端这条长连接有两处「出错了直接吞掉、不记日志」（违反日志铁律，降级悄无声息看不见），而且连接断了之后没有重连——长连接一掉，自动刷新能力就静默失效。"
+    },
+    {
+      "n": 6,
+      "cap": "ws-roles-refresh",
+      "track": null,
+      "marker": "live",
+      "module": "保存与刷新指示",
+      "func": "外部进程改了 roles（角色配置）时，通过 WebSocket 事件自动刷新 Settings 里的角色与模型组视图。",
+      "action": "无用户动作（被动）：外部改 roles → 后端（③a Studio）推 WS 事件 → 前端自动重拉。",
+      "fe_logic": "和凭证刷新走的是同一条 [[ws-events]]：外部改了 [[roles-file]] → 后端（③a Studio）推一条「角色变了」的通知 → 前端重新拉角色和模型组刷新。但这里多了一道门槛——只有当用户此前开过 Roles 或 Copilot 区、本地已经有过一份角色数据时才会刷新；如果从没开过这两个区，本地没数据，这条通知会被直接丢掉（既不刷新也不记录）。",
+      "fe_modules": [
+        "ws-events"
+      ],
+      "be_logic": "和凭证那套对称（WS 端点归后端 ③a Studio、角色数据归 ③b gateway）：Studio 自己存角色时先在监听器登记本进程写、再原子落盘；外部改 [[roles-file]] 则由监听器监到、经 WS 端点推「角色变了」。",
+      "be_api": [
+        {
+          "endpoint": "WS /ws/events（事件 roles_changed）",
+          "owner": "③a Studio",
+          "purpose": "通知前端角色表已变、该重新拉取刷新",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "⚠️ 偏差（§7.0）：没开过 Roles 区时，「角色变了」的通知会被吞掉——刷新被卡在「必须已经加载过」这个前提上；另外它和凭证刷新共用那条长连接，同样有静默吞错和不重连的毛病。"
+    },
+    {
+      "n": 7,
+      "cap": "close-settings-overlay",
+      "track": null,
+      "marker": "live",
+      "module": "关闭",
+      "func": "让用户关闭 Settings 面板、回到工作区画布。",
+      "action": "关闭 Settings 有多个触发：① 点顶栏右上角的 X（只收起浮层、回到工作区画布）；② 点 Header 左上角 Home（连带关 Settings 并退回首页，见 #8）。注意：再点左侧 Toolbar 的齿轮关不掉它（那个按钮只负责打开，见 #1）。",
+      "fe_logic": "点顶栏的 X → 把「Settings 是否打开」开关置为「关」→ 浮层卸载、中间画布恢复原来的内容（编辑器或画布）。另一条关闭路径 Home 见 #8（先关 Settings 再退首页）。一个重要细节：关闭时那些「改完等一会儿自动存」的保存计时器既不会被强制立刻保存、也不会被取消——它们照旧到点就把请求打给后端（③a Studio）。",
+      "fe_modules": [],
+      "be_logic": "无（关闭纯粹是前端把开关置关、卸载面板）。需要点明的是：关闭时那些已经在路上的自动保存请求仍会照常打到后端（③a Studio）落地，这是正确行为——面板的开关只控制前端视图，不该中断或回滚已经发起的持久化。",
+      "be_api": [],
+      "gap": "符合设计。Settings 全程即填即存（改字段就自动存），根本不存在「有未保存草稿」这种状态，所以关闭无需弹「要不要保存」的确认框——关闭只是收起界面，在途的保存继续落地正是预期。原清单把「关闭不拦截在途保存」记成缺口并不准确：在即填即存模型下，关掉视图不等于撤销已提交的保存，这是设计正确性。"
+    },
+    {
+      "n": 8,
+      "cap": "home-closes-settings",
+      "track": null,
+      "marker": "live",
+      "module": "关闭",
+      "func": "Settings 打开时点 Header 的 Home，既关掉 Settings 又退回首页（比 X 多一层：连工作区一起退）。",
+      "action": "（Settings 打开状态下）点 Header 左上角 Home 图标（Layers 标志按钮）。",
+      "fe_logic": "点 Header 的 Home → 先把「Settings 是否打开」置为「关」，再退出当前 skill 回到首页。所以 Home 比 X 多走一步：X 只收起 Settings 回到工作区，Home 则在关 Settings 之外还把整个工作区一起退掉、回首页。",
+      "fe_modules": [],
+      "be_logic": "无。",
+      "be_api": [],
+      "gap": "符合设计。X 和 Home 是两条不同语义、都是预期的：X 仅关 Settings 回工作区，Home 还连带卸载工作区退首页（§7.0 已说明，非偏差）。"
+    },
+    {
+      "n": 9,
+      "cap": "settings-error-boundary",
+      "track": null,
+      "marker": "live",
+      "module": "错误兜底",
+      "func": "某个 tab 渲染崩溃时给出错误兜底卡 + Retry 按钮，避免整页白屏。",
+      "action": "无用户动作（被动）：某个区渲染抛错时自动兜底；用户可点兜底卡上的 Retry 重试。",
+      "fe_logic": "某个配置区渲染时崩了 → 被 [[error-boundary]] 接住 → 当场换成一张报错卡片配「重试」按钮 → 点重试就清掉错误、重新渲染那一块，整页不会白屏。但现状只罩住了 Roles 和 Copilot 两个区，General 和 API Keys 没被罩；崩溃时这层只往控制台打了条 error。",
+      "fe_modules": [],
+      "be_logic": "无。",
+      "be_api": [],
+      "gap": "⚠️ 偏差（§7.0）：错误兜底只罩 Roles / Copilot 两个区，General 和 API Keys 没罩——这两个区一旦渲染崩溃仍会白屏，没达到「任一区崩溃都有兜底」的设计意图。"
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+{
+  "code": "N3",
+  "title": "Compile · 编译门控",
+  "status": "bad",
+  "intent_oneliner": "编辑时实时 lint 只把错误就近标在节点/属性/编辑器三处;想看完整清单点 Compile 弹可复制 drawer;compile-pass 才解锁 Predict——让用户精准定位改哪、并清楚为什么还点不了下一步。",
+  "role_table": {
+    "headers": ["界面单元", "在用户工作流里的作用", "MVP1 要它表达什么"],
+    "rows": [
+      ["Compile 按钮(center-action-bar.tsx:66 Hammer 按钮)", "用户点它主动触发完整编译,看详细错误", "点 = 弹出 drawer 列全部错误(file:line-field-message),可复制、不盖侧栏(设计 A6)"],
+      ["build stage 状态机(center-action-bar.tsx:31 deriveButtons)", "告诉用户现在在编译/失败/通过哪一档,据此点亮下一步按钮", "compile→predict→run 逐级解锁;lint 通过自动驱动 compile-pass(设计 A8)"],
+      ["实时 lint(useDebouncedLint.ts:30 防抖 800ms POST /lint)", "编辑时后台静默查错,不打断输入", "只把错误就近标红三处,不弹全局面板/toast(设计决策 28 行)"],
+      ["canvas 节点错误小标(SkillNode.tsx:105 AlertTriangle+计数)", "在出错的那个节点上提示此处有编译错", "标志+tooltip 显示此处具体错误/警告(设计 A3)"],
+      ["properties/io 面板属性旁标记", "在出错的具体字段旁提示", "特定属性旁 tooltip 显示此处错误/警告(设计 A4)"],
+      ["编辑器行内标记(LazyMonacoPanel)", "像 IDE 一样在出错行内标红", "编辑器 IDE 式行内标记定位到行(设计 A5)"]
+    ]
+  },
+  "surfaces_table": {
+    "headers": ["界面 / 状态", "用户在此做什么", "期望得到什么", "当前不合理点"],
+    "rows": [
+      ["编辑中(实时 lint 失败)", "继续打字改图", "出错的节点/字段/行就近标红,不被打断", "节点只显示一个红色计数徽标(SkillNode.tsx:105),tooltip 只说『N compile error(s) on this node』(:116)——不告诉用户错的是哪个字段/哪行/什么原因,无法精准定位"],
+      ["编辑中(实时 lint 失败)", "想知道某个具体属性错在哪", "属性旁 tooltip 标错", "PropertiesPanel.tsx 完全没接 compileErrors——属性旁零投影(A4 缺失)"],
+      ["编辑中(实时 lint 失败)", "在编辑器里改 markdown", "出错行 IDE 式行内标红+悬停看原因", "SplitEditor 渲染的 LazyMonacoPanel 不接任何 error/marker props(LazyMonacoPanel.tsx:24 prop 列表无 error 字段)——编辑器零行内标记(A5 缺失)"],
+      ["点 Compile 后失败", "看完整错误清单、复制去排查", "弹出 drawer(不盖侧栏)列 file:line-field-message,可复制", "现状是底部浮层卡片 CompileErrorPanel(Workspace.tsx:868,absolute bottom-20 居中浮层),没有复制按钮,且正是设计明令删除的旧浮层(A7『删除』)——drawer 根本没实现"],
+      ["compile-pass", "看到 Predict 被点亮,理解为何可以试飞", "绿灯门控语义清楚:为什么解锁", "deriveButtons 只按 stage 点亮/置灰按钮(center-action-bar.tsx),无任何『为何解锁/为何还锁着』的文字说明,门控语义靠用户猜"]
+    ]
+  },
+  "actions_table": {
+    "headers": ["用户动作", "经由哪个界面", "MVP1 约束 / 禁止"],
+    "rows": [
+      ["编辑触发实时 lint", "后台 POST /skills/:id/lint(useDebouncedLint.ts:49)", "只能就近标红三处;禁止弹全局面板/toast(避免编辑中途一直全局报错)"],
+      ["点 Compile 看详细错误", "Compile 按钮 → drawer", "必须弹 drawer、列 file:line-field-message、可复制、不覆盖侧栏;禁止用旧底部浮层卡片"],
+      ["点 Predict", "stage 门控", "仅 compile-pass(或 lint passed 自动驱动)后可点;否则置灰"],
+      ["点 Run", "stage 门控", "仅 predict-pass 后可点"]
+    ]
+  },
+  "plan": "三处投影各自补齐就近上下文:节点徽标 tooltip 展开成具体 field/line/message 列表;PropertiesPanel 按 field 把 compileErrors 标到对应属性旁;编辑器接 Monaco setModelMarkers 做 IDE 式行内标记。把底部浮层 CompileErrorPanel 换成点 Compile 弹出的 drawer(沿用 shadcn Drawer,不盖侧栏,带复制)。门控按钮补一句解锁/未解锁原因提示。",
+  "current_risk": "三处『就近投影』只做到了 canvas 节点的一个计数徽标,且徽标不带具体错因;properties 与编辑器两处投影完全缺失;设计明令删除的底部浮层卡片仍在用,且 Compile drawer 未实现。结果:用户拿到的只有『这个节点有 N 个错』,无法精准定位到字段/行去修改——直接违反 MVP1 核心目标(让用户精准定位)。",
+  "issues_table": {
+    "headers": ["不合理点", "应如何改(处理原则)"],
+    "rows": [
+      ["底部浮层卡片 CompileErrorPanel 仍在(设计已判 A7 删除),且无复制、不是 drawer", "删浮层,改为点 Compile 弹 drawer(不盖侧栏、可复制、列 file:line-field-message)"],
+      ["编辑器无 IDE 式行内标记(A5 缺)", "把 compileErrors 传进 Monaco,用 setModelMarkers 按 line+severity 做行内标记,悬停显示 message"],
+      ["properties/io 属性旁无任何错误投影(A4 缺)", "PropertiesPanel 按 error.field 把错误就近标到对应属性旁,tooltip 显示原因"],
+      ["节点徽标只给计数,tooltip 不含具体错因(A3 弱)", "tooltip 展开为该节点的错误列表(field-line-message),让用户在画布上即可定位"],
+      ["绿灯门控只点亮/置灰,无解锁语义", "在被锁按钮上加一句原因提示(如『先修复编译错误』)"]
+    ]
+  },
+  "gates_table": {
+    "headers": ["验证项", "现状 = 不合理", "目标 = 合理"],
+    "rows": [
+      ["编辑中途不完整", "实时 lint 只标红、不弹全局面板/toast(useDebouncedLint 仅改状态)= 合理", "保持:只就近标红,不全局打断"],
+      ["错误就近三处投影", "只有 canvas 一处(且只计数);properties/编辑器两处缺失 = 不合理", "三处都标:节点/属性/编辑行各自就近显示具体错因"],
+      ["点 Compile 看详细", "底部浮层卡片、无复制、非 drawer = 不合理", "弹 drawer:列 file:line-field-message、可复制、不盖侧栏"],
+      ["门控解锁", "compile-pass 解锁 predict 已通(deriveBuildStage 把 lint passed→compile-pass);但无解锁语义提示 = 部分", "保持解锁链;补『为何还点不了』的文字"]
+    ]
+  },
+  "children": [
+    {
+      "code": "N3.1",
+      "title": "实时 lint 三处投影(节点/属性/编辑器)",
+      "status": "bad",
+      "problem": "设计要求错误就近标在三处(canvas 节点、properties 属性旁、编辑器行内),让用户精准定位。现状只做了 canvas 一处,且只是个计数徽标;properties 与编辑器两处完全没接 compileErrors。",
+      "design": "03_compile.md A3/A4/A5 + 原话『错误3处显示:1 canvas节点小标志 tooltip;2 properties/io 特定属性旁 tooltip;3 编辑器 ide 式行内标记』。",
+      "current": "canvas:SkillNode.tsx:105-118 只渲染 AlertTriangle+compileErrorCount,tooltip 固定文案『N compile error(s) on this node』(SkillNode.tsx:116),不含 field/line/message。properties:PropertiesPanel.tsx 无 compileErrors 入参或投影(grep 仅 frontmatter/roleTest 错误)。编辑器:SplitEditor.tsx:60 渲染的 LazyMonacoPanel 无任何 error/marker prop(LazyMonacoPanel.tsx:24-39 prop 列表)。compileErrors 只经 build-nodes.ts:201 灌进 canvas 节点。",
+      "fix": "1) 节点徽标 tooltip 展开为该节点错误列表(field-line-message);2) PropertiesPanel 接收 compileErrors 并按 field 标到对应属性旁;3) LazyMonacoPanel 增加 errors prop,onMount 用 monaco.editor.setModelMarkers 按 line+severity 做行内标记,message 作悬停。",
+      "current_evidence": "SkillNode.tsx:105-118; PropertiesPanel.tsx(无投影); LazyMonacoPanel.tsx:24-39; build-nodes.ts:201",
+      "auto": ["编辑触发 lint 失败 → 出错节点显示徽标且 tooltip 列出具体 field-line-message", "出错字段在 PropertiesPanel 旁出现 tooltip", "出错行在 Monaco 编辑器内出现行内红标"],
+      "manual": ["人工:造一个 IO 字段错,确认三处都标到正确位置且文案含原因"],
+      "pass": ["三处投影都能定位到具体 field/line,而非只给一个节点级计数"]
+    },
+    {
+      "code": "N3.2",
+      "title": "Compile drawer(结构化错误列表,可复制)",
+      "status": "bad",
+      "problem": "设计明令:删旧底部浮层卡片,改为点 Compile 弹 drawer(不覆盖侧栏)列详细错误、可复制。现状仍是底部浮层卡片,无复制、非 drawer,且就是设计要删的那个浮层。",
+      "design": "03_compile.md A6 + A7『底部浮层卡片列错误 → 删除(现 CompileErrorPanel)』+ 原话『把浮层卡片面板去掉,改成点击 compile 弹出 drawer 不覆盖侧边栏,列出详细编译错误可以复制』。",
+      "current": "Workspace.tsx:789-790 当 currentCompileErrors>0 渲染 CompileErrorPanel;CompileErrorPanel(Workspace.tsx:868)是 absolute bottom-20 left-1/2 -translate-x-1/2 的居中底部浮层卡片,列 file:line-field-message 但无复制按钮、无 drawer、不随点击 Compile 切换显隐(只按有无错误自动浮现)。",
+      "current_evidence": "Workspace.tsx:789-790; Workspace.tsx:868-889",
+      "fix": "删 CompileErrorPanel 浮层;新建 Compile drawer(沿用 shadcn Drawer 或 Sheet,侧/底位但不盖左侧栏),点 Compile 打开,列 file:line-field-message,加 Copy 按钮复制全部。",
+      "auto": ["点 Compile 且有错 → 弹出 drawer 列全部错误", "drawer 有复制按钮,复制内容含 file:line-field-message", "drawer 不遮挡左侧栏"],
+      "manual": ["人工:造多条编译错误,点 Compile,确认 drawer 列全、可复制、不盖侧栏"],
+      "pass": ["旧底部浮层卡片已删;Compile drawer 实现且满足可复制/不盖侧栏"]
+    },
+    {
+      "code": "N3.3",
+      "title": "绿灯门控解锁语义(compile-pass→predict→run)",
+      "status": "partial",
+      "problem": "门控解锁链本身通了(lint passed 自动驱动 compile-pass,解锁 Predict;predict 成功置 predict-pass,解锁 Run),但 UI 只表现为按钮点亮/置灰,没有任何『为什么还点不了下一步』的语义提示,用户看不懂门控。",
+      "design": "03_compile.md A8 门控逐级解锁;测试关键点『compile-pass 解锁 predict;predict-pass 解锁 run』。",
+      "current": "deriveBuildStage(Workspace.tsx:583)把 lint passed→compile-pass;deriveButtons(center-action-bar.tsx:31)仅据 stage 设 highlight/disabled,无原因文案。predict 成功在 handlePredict(Workspace.tsx:600)置 predict-pass(注:设计 A9 担心的 predict-pass 永不置位,在本分支已置位,需真跑复核)。",
+      "current_evidence": "Workspace.tsx:583-591; center-action-bar.tsx:31-60; Workspace.tsx:596-601",
+      "fix": "在置灰的 Predict/Run 按钮上加一句原因(如『先修复编译错误后解锁』『先 Predict 通过后解锁』),用 tooltip 或副标。门控链逻辑不动。",
+      "auto": ["编译未过时 Predict 置灰且悬停显示原因", "compile-pass 后 Predict 点亮", "predict-pass 后 Run 点亮"],
+      "manual": ["真跑:lint 通过 → 点 Predict 成功 → 确认 Run 真正解锁(复核 A9 是否仍 bug)"],
+      "pass": ["解锁链与设计一致,且每个锁态都有可读的原因提示"]
+    }
+  ]
+}

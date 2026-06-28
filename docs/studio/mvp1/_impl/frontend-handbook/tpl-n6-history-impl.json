@@ -1,0 +1,151 @@
+{
+ "id": "n6_history_impl",
+ "title": "本地存档与历史 · 实施详情",
+ "design_ref": "n6_history_design",
+ "intro": "本页是本地存档与历史前端的现状/差距/实施计划/测试,1:1 对应设计页 n6_history_design(原子 #1–#4)。代码按『文件名 + 函数/对象名』引用(可全局搜索,不写行号);底层 git autocommit/历史/回滚机制见 n6_history_mech,后端契约已就绪(history/revert/autocommit 均实现)。",
+ "functions": [
+  {
+   "n": 1,
+   "cap": "autocommit-feedback",
+   "design_ref": "atom-1",
+   "current": "现状:偏差——成功 run 后前端对存档零反馈。`Workspace.tsx` 只在 run 启动时 `toast.success(\"Run started successfully\")`,普通 run 完成无任何完成/存档提示;`completedRunId`(`Workspace.tsx`,由运行流里的 `run_ended` 事件推出)只作为 prop 传给 CopilotPanel 驱动 copilot 分析栏,不触发存档反馈。关键:`useRunStream`(`hooks/useRunStream.ts`)的 `run_ended` **只停重连、不携带 run 元数据**,所以 `completedRunId` 拿不到 `git_status`。后端其实已把存档结果回填:`run_manager._auto_commit_successful_run`(run 成功后调 autocommit 并回填状态)产出 `git_status`(committed/locked/failed),该字段已存在于前端 `api/types.ts` 的 RunMetadata 类型上,且可经 `GET /skills/{id}/runs/{run_id}`(`RunDetail.metadata`)读到——但全前端无任何消费者读它。",
+   "gap": "差距 + **取数路径(补 BLOCKER)**:触发顺序 = ① `run_ended` 到达(只标志结束)→ ② 再拉本 run 详情 `GET /skills/{id}/runs/{run_id}`(用既有 `useRunHistory.fetchRunDetail`,`hooks/useRunHistory.ts`,返回 `RunDetail`)→ ③ 读 `RunDetail.metadata.git_status` → ④ committed 给『已自动存档,可在 Local History 回滚』反馈(toast/inline)、locked/failed 给『本次未存档(原因)』提示 → ⑤ 触发 Local History 刷新(见 #2)。需要:在 Workspace(或承载 run 流的组件)接住 `run_ended`、调 fetchRunDetail、据 git_status 投影文案。纯前端改动,后端不动(git_status + GET /runs/{id} 已就绪)。⚠️ 文案口径:committed 在 skill 无 `.git` 时也会被后端标(见契约页 MAJOR),前端不无条件承诺『可回滚快照已存在』。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接(后端不需改)。成功 run autocommit + git_status 回填已实现(`auto_commit_run` / `_auto_commit_successful_run`);读模型 `GET /skills/{id}/runs/{run_id}`(`runs.get_run`→`RunDetail.metadata.git_status`)已实现。⚠️ 后端 MAJOR(非本前端项要改,记录待修):无 `.git` 时 git_status 仍标 committed,应区分 skipped/no_repo。",
+   "fe_resync": "batch6a 已修复+测试通过(2026-06-20)"
+  },
+  {
+   "n": 2,
+   "cap": "history-auto-refresh",
+   "design_ref": "atom-2",
+   "current": "现状:偏差——run 完成后 Local History 不自动刷新。`useLocalHistory`(`useRunHistory.ts`)用 SWR 拉 `/skills/{id}/history`,暴露了 `refresh`(SWR mutate revalidate),但没有任何地方在 run 完成(`run_ended`)时调用它;新生成的 Auto run 快照要用户手点 Refresh 才出现。",
+   "gap": "差距:把 `useLocalHistory` 的 `refresh` 接到 run 完成时机——run 完成后调一次 refresh,使后端刚生成的 Auto run 快照自动进入列表。与 #1 共用同一个 run 完成监听点。纯前端改动,后端不动(GET /history 已就绪)。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接(后端不需改)。GET /api/skills/{id}/history 已实现(`get_skill_history` 合并 git 历史与 product store releases)。",
+   "fe_status_prev": "偏差",
+   "fe_resync": "batch4 已修复+测试通过(2026-06-20)"
+  },
+  {
+   "n": 3,
+   "cap": "history-list",
+   "design_ref": "atom-3",
+   "current": "现状:已实现且符合。`HistoryPanel.tsx` 的 `LocalHistoryPanelView`(本地历史面板视图)逐条渲染 GitHistoryItem:message/短 sha/author/timestamp;`kindLabel`(`HistoryPanel.tsx`)把 kind 映成标签——auto_run→『Auto run』、manual→『Manual』、release→『Release』、其它→『Other』。数据来自 `useLocalHistory`,只投影后端历史。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。GET /api/skills/{id}/history 返回带 kind 的 GitHistoryItem 列表。"
+  },
+  {
+   "n": 4,
+   "cap": "snapshot-revert",
+   "design_ref": "atom-4",
+   "current": "现状:已实现且符合。`HistoryPanel.tsx` 的 `handleRevert`(回滚点击处理)调 `useLocalHistory` 的 `revert(sha)`→`revertSkill(skillId, sha)`(POST /revert),成功 `toast`『Reverted to local history snapshot』、失败错误 toast;`useLocalHistory.revert`(`useRunHistory.ts`)在回滚后 revalidate 历史并用返回的 detail 刷新当前 skill。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。POST /api/skills/{id}/revert(`revert_skill`→`git_local.revert_to`,git reset --hard)已实现,错误码 GIT_OBJECT_NOT_FOUND/GIT_REVERT_CONFLICT 齐备。"
+  }
+ ],
+ "plan": [
+  {
+   "step": 1,
+   "what": "#1 autocommit 存档感知:在 `Workspace.tsx`(或承载 run 流处)监听 run 完成(`run_ended`)→ 因 `run_ended` 不带 metadata,调 `useRunHistory.fetchRunDetail(run_id)`(`hooks/useRunHistory.ts`)拉 `GET /skills/{id}/runs/{run_id}` → 读 `RunDetail.metadata.git_status` → committed→『已自动存档,可在 Local History 回滚』轻量反馈、locked/failed→『本次未存档(原因)』可观测提示。文案用『已存档(如有 git 仓)』口径,避免无 `.git` 时 committed 误导(见契约页 MAJOR)。",
+   "depends_on": "无(纯前端;后端 git_status + GET /runs/{id} 读模型均已就绪)。",
+   "why": "存档感知是 MVP1 保留的核心价值在 UI 的落点,且零后端依赖(读模型已在),最先做。",
+   "block": "前端独立"
+  },
+  {
+   "step": 2,
+   "what": "#2 Local History 自动刷新:在同一个 run 完成监听点调 `useLocalHistory` 的 `refresh`,使新 Auto run 快照自动出现,不必手点 Refresh。",
+   "depends_on": "前端依赖 step 1 的 run 完成监听点(同一处);后端 GET /history 已就绪。",
+   "why": "与 #1 共用 run 完成时机,紧随其后落地,让『存档发生』与『新快照可见』一致。",
+   "block": "前端独立"
+  },
+  {
+   "step": 3,
+   "what": "#3 快照列表呈现 + #4 回滚:已实现且符合,只补回归测试(列表按 kind 标签、Revert→POST /revert→刷 detail+toast),不改实现。",
+   "depends_on": "无。",
+   "why": "已符合设计,纳入测试保证后续改动不回归。",
+   "block": "前端独立"
+  }
+ ],
+ "tests": [
+  {
+   "covers": "#1 autocommit 存档感知",
+   "atoms": [
+    1
+   ],
+   "shots": [
+    "成功 run 完成后出现『已自动存档,可在 Local History 回滚』反馈",
+    "git 锁/失败时出『本次未存档(原因)』提示而非假装成功"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "RED:当前 run 完成(run_ended)后无任何存档反馈、无人调 fetchRunDetail/读 git_status → 断言『git_status=committed 时给已存档反馈』失败。",
+    "GREEN:mock run_ended + mock `GET /runs/{run_id}` 回 `metadata.git_status='committed'` → 断言前端先调 fetchRunDetail、再出现『已自动存档』反馈。",
+    "git_status='failed'/'locked' → 断言出『未存档(原因)』提示、不出『已存档』。",
+    "断言取数路径正确:不假设 run_ended 携带 git_status(它不带),必须经 GET /runs/{run_id} 读。"
+   ],
+   "layer2": [
+    "目标形态落地前:先对现状路径取证——真跑一次成功 run,记录『run 完成后无存档反馈』。",
+    "落地后重跑:真跑一次成功 run(有 .git 的 skill),看『已自动存档』反馈出现;再造 git 锁场景看『未存档』提示。"
+   ],
+   "fe_resync": "已成真集成测试:Workspace.test.tsx(jsdom + createRoot + act)翻 run_ended → 断言走 fetchRunDetail → 据 git_status 出存档 toast(committed / no_git / locked)+ 调一次 refreshLocalHistory;verified by green gates + post-audit(2026-06-20)"
+  },
+  {
+   "covers": "#2 Local History 自动刷新",
+   "atoms": [
+    2
+   ],
+   "shots": [
+    "成功 run 后不手点 Refresh,Local History 自动出现新『Auto run』快照"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "RED:当前 run 完成后未调 useLocalHistory.refresh → 断言『run_ended 触发历史 revalidate』失败。",
+    "GREEN:mock run_ended → 断言调用了 useLocalHistory 的 refresh(revalidate 历史)。",
+    "断言刷新后列表含新的 auto_run 快照。"
+   ],
+   "layer2": [
+    "目标形态落地前:真跑成功 run,记录『新 Auto run 快照需手点 Refresh 才出现』。",
+    "落地后重跑:真跑成功 run,不手动刷新,看新 Auto run 快照自动出现在 Local History。"
+   ],
+   "fe_status_prev": "偏差",
+   "fe_resync": "已成真集成测试:Workspace.test.tsx(jsdom + createRoot + act)翻 run_ended → 断言 refreshLocalHistory 被调一次(SWR revalidate 历史),与 #1 同一 run 完成监听点;verified by green gates + post-audit(2026-06-20)"
+  },
+  {
+   "covers": "#3 快照列表呈现",
+   "atoms": [
+    3
+   ],
+   "shots": [
+    "Local History 列出快照,kind 标签为 Auto run / Manual / Release"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "喂含 auto_run/manual/release/other 的 GitHistoryItem 列表 → 断言每条渲染 message/短 sha/author/timestamp。",
+    "断言 kindLabel 把 auto_run→『Auto run』、manual→『Manual』、release→『Release』、其它→『Other』。"
+   ],
+   "layer2": [
+    "真跑一次成功 run 后打开 Local History,看快照行与 kind 标签。"
+   ]
+  },
+  {
+   "covers": "#4 快照回滚 Revert",
+   "atoms": [
+    4
+   ],
+   "shots": [
+    "点某快照 Revert → 工作区回滚到该快照、弹『Reverted to local history snapshot』"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "契约测:点 Revert → 断言调 POST /api/skills/{id}/revert 带该 sha。",
+    "mock 成功返回 detail → 断言用返回 detail 刷当前 skill、revalidate 历史、弹成功 toast。",
+    "mock 失败(GIT_REVERT_CONFLICT)→ 断言弹错误 toast、不静默。"
+   ],
+   "layer2": [
+    "真跑:对一条本地快照点 Revert(真 git reset --hard),看工作区恢复 + 成功 toast。"
+   ],
+   "fe_resync": "已成真集成测试:HistoryPanel.test.tsx 断言点 Revert → 调 revert(sha) → 成功/冲突 toast;verified by green gates + post-audit(2026-06-20)"
+  }
+ ]
+}

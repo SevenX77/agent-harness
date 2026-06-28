@@ -1,17 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react"
+import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { SaveStatusBadge } from "@/components/ui/save-status-badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
-import { roleChainStatusKey, type RoleChainStatus, type RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
-import { getRoleTestJob, startRoleTestJob, type CredentialsState, type ModelGroup, type ProviderModelOption, type RoleTestJobResponse, type RoleTestProviderProgress, type RoleTestProviderResult, type RoleTestResponse, type RolesData } from "../../../api/llm"
+import type { CredentialsState, ModelGroup, ProviderModelOption, RolesData } from "../../../api/llm"
 import { AdvancedModelBundlesSection, modelBundleGroupsFromData } from "./llm-roles/AdvancedModelBundlesSection"
 import { AvailableModelsSidebar } from "./llm-roles/AvailableModelsSidebar"
-import { RoleSaveStatusBadge } from "./llm-roles/RoleBadges"
 import { RoleCardList } from "./llm-roles/RoleCardList"
-import { appendModelGroupToBundle, removeModelBundle } from "./model-bundle-utils"
-import { appendModelGroupToRoleWithResult, modelDropFailureMessage, ownedProviderCodesForModel, pruneInvalidRoleProviders, removeRole } from "./role-utils"
+import {
+  bundleTestStoreKey,
+  roleTestStatusesByRole,
+  runBundleTest,
+  runRoleTest,
+  seedPersistedRoleTestResults,
+  useRoleTestStore,
+} from "./llm-roles/role-test-store"
+import { appendModelGroupToBundle, removeModelBundle, visibleModelBundleEntries } from "./model-bundle-utils"
+import { appendModelGroupToRoleWithResult, attachBundleReferenceToRole, BUNDLE_DRAG_PREFIX, modelDropFailureMessage, ownedProviderCodesForModel, pruneInvalidRoleProviders, removeRole } from "./role-utils"
 import { credentialsByProviderCode } from "./route-credentials"
 import { SectionTitle } from "./shared"
 
@@ -33,13 +41,6 @@ export interface AvailableModelDragPreviewState {
   y: number
 }
 
-export interface RoleTestState {
-  running: boolean
-  result?: RoleTestResponse
-  error?: string
-  activeStatuses?: RoleChainStatusMap
-}
-
 export function LlmRolesTab({
   data,
   credentials,
@@ -50,6 +51,8 @@ export function LlmRolesTab({
   onDeleteRole,
   onDeleteModelBundle,
   onBeforeRoleTest,
+  onAfterRoleTest,
+  onNavigateToApiKeys,
 }: {
   data: RolesData | null
   credentials: CredentialsState
@@ -60,7 +63,10 @@ export function LlmRolesTab({
   onDeleteRole?: (roleName: string) => void
   onDeleteModelBundle?: (bundleId: string) => void
   onBeforeRoleTest?: () => Promise<RolesData | null>
+  onAfterRoleTest?: () => Promise<void> | void
+  onNavigateToApiKeys?: () => void
 }) {
+  const { t } = useTranslation("settings")
   const credentialsByCode = useMemo(() => (
     data
       ? credentialsByProviderCode(data, { providers: credentials.providers })
@@ -122,10 +128,23 @@ export function LlmRolesTab({
     }
     return result
   }, [availableModelGroups, normalizedData])
-  const [roleTestStates, setRoleTestStates] = useState<Record<string, RoleTestState>>({})
+
+  // #46/#47: read the live test state ENTIRELY from the module-scoped backend
+  // mirror (role-test-store). The component holds NO copy of its own — running
+  // progress, last results and error banners all project from the store, so an
+  // in-flight test survives a tab switch / remount (the store is module-scoped
+  // and keeps polling the backend job).
+  const roleTestStore = useRoleTestStore()
   const testStatusesByRole = useMemo(() => (
-    roleTestStatusesByRole(roleTestStates)
-  ), [roleTestStates])
+    roleTestStatusesByRole(roleTestStore)
+  ), [roleTestStore])
+
+  // On mount, seed badges from the persisted last-known results so a
+  // remount/restart shows prior status instead of resetting to untested. Seeding
+  // is idempotent and never clobbers a running test (see mergePersistedRoleTestResults).
+  useEffect(() => {
+    void seedPersistedRoleTestResults()
+  }, [])
   const activeAvailableModelDragRef = useRef<string | null>(null)
   const availableModelPointerDragRef = useRef<AvailableModelPointerDrag | null>(null)
   const availableModelDragPreviewNodeRef = useRef<HTMLDivElement | null>(null)
@@ -297,6 +316,13 @@ export function LlmRolesTab({
       clearPointerDrag({ suppressClick: true })
       if (!latestData) return
       if (roleName) {
+        // #51: a dragged bundle attaches as a LIVE REFERENCE (bundle_id), not a
+        // snapshot copy — so editing the bundle later reflects on every role that
+        // links to it after re-projection.
+        if (drag.modelId.startsWith(BUNDLE_DRAG_PREFIX)) {
+          onChangeRef.current(attachBundleReferenceToRole(latestData, roleName, drag.modelId))
+          return
+        }
         const modelGroup = modelGroupsByIdRef.current.get(drag.modelId)
         if (!modelGroup) {
           toast.error(modelDropFailureMessage({
@@ -386,82 +412,46 @@ export function LlmRolesTab({
     [modelGroupsById],
   )
   const handleRunTestChain = useCallback(
-    async (roleName: string) => {
-      if (error) {
-        setRoleTestStates((current) => ({
-          ...current,
-          [roleName]: {
-            running: false,
-            result: current[roleName]?.result,
-            error: `Save the role before testing: ${error}`,
-          },
-        }))
-        return
-      }
-
-      setRoleTestStates((current) => ({
-        ...current,
-        [roleName]: {
-          ...current[roleName],
-          running: true,
-          error: undefined,
-          activeStatuses: {},
-        },
-      }))
-
-      try {
-        await onBeforeRoleTest?.()
-        let job = await startRoleTestJob(roleName)
-        setRoleTestStates((current) => ({
-          ...current,
-          [roleName]: {
-            ...current[roleName],
-            running: true,
-            activeStatuses: roleTestStatusesFromJob(job),
-          },
-        }))
-        while (job.status === "queued" || job.status === "running") {
-          await sleep(500)
-          job = await getRoleTestJob(job.job_id)
-          setRoleTestStates((current) => ({
-            ...current,
-            [roleName]: {
-              ...current[roleName],
-              running: true,
-              activeStatuses: roleTestStatusesFromJob(job),
-            },
-          }))
-        }
-        if (job.status === "failed" || !job.result) {
-          throw new Error(job.message ?? "Role test failed")
-        }
-        setRoleTestStates((current) => ({
-          ...current,
-          [roleName]: {
-            running: false,
-            result: job.result ?? undefined,
-            error: undefined,
-            activeStatuses: undefined,
-          },
-        }))
-      } catch (roleTestError) {
-        setRoleTestStates((current) => ({
-          ...current,
-          [roleName]: {
-            running: false,
-            result: current[roleName]?.result,
-            error: roleTestError instanceof Error ? roleTestError.message : "Role test failed",
-            activeStatuses: undefined,
-          },
-        }))
-      }
+    (roleName: string) => {
+      // The store projects running/result/error into the mirror; #47 未保存先拒测
+      // is handled inside runRoleTest via the validationError argument.
+      void runRoleTest(roleName, {
+        beforeRoleTest: onBeforeRoleTest,
+        afterRoleTest: onAfterRoleTest,
+        validationError: error,
+      })
     },
-    [error, onBeforeRoleTest],
+    [error, onAfterRoleTest, onBeforeRoleTest],
   )
+  // #50b: bundle test reuses the same backend mirror, keyed under __bundle__{id}.
+  const handleTestBundle = useCallback(
+    (bundleId: string) => {
+      void runBundleTest(bundleId, {
+        beforeBundleTest: onBeforeRoleTest,
+        afterBundleTest: onAfterRoleTest,
+      })
+    },
+    [onAfterRoleTest, onBeforeRoleTest],
+  )
+  // Project the bundle slice of the shared mirror into per-bundle props. The
+  // store keys bundle entries under __bundle__{id}; testStatusesByRole already
+  // projects every key (roles + bundles) into chain-status maps.
+  const bundleTestState = useMemo(() => {
+    const statusesByBundle: Record<string, (typeof testStatusesByRole)[string]> = {}
+    const runningByBundle: Record<string, boolean> = {}
+    const errorsByBundle: Record<string, string | undefined> = {}
+    for (const [bundleId] of visibleModelBundleEntries(normalizedData ?? { roles: {}, models: {}, providers: {} } as RolesData)) {
+      const key = bundleTestStoreKey(bundleId)
+      statusesByBundle[bundleId] = testStatusesByRole[key] ?? {}
+      runningByBundle[bundleId] = roleTestStore[key]?.running ?? false
+      errorsByBundle[bundleId] = roleTestStore[key]?.error
+    }
+    return { statusesByBundle, runningByBundle, errorsByBundle }
+  }, [normalizedData, roleTestStore, testStatusesByRole])
   if (!normalizedData) {
     return (
       <LlmRolesLayout sidebar={<LlmRolesModelsSkeleton />}>
-        <SectionTitle title="LLM Roles" description="Edit model and provider fallback order." />
+        <SectionTitle title={t("llmRoles.title")} description={t("llmRoles.loadingDescription")} />
         <LlmRolesRolesSkeleton />
       </LlmRolesLayout>
     )
@@ -475,16 +465,18 @@ export function LlmRolesTab({
             modelGroups={modelGroups}
             pinnedModelGroups={bundleModelGroups}
             onModelPointerDown={handleAvailableModelPointerDown}
+            onNavigateToApiKeys={onNavigateToApiKeys}
+            onReprobed={onAfterRoleTest}
           />
         )}
       >
         <SectionTitle
-          title="LLM Roles"
-          description="Edit model and provider fallback order. Changes auto-save."
-          trailing={<RoleSaveStatusBadge status={saveStatus} />}
+          title={t("llmRoles.title")}
+          description={t("llmRoles.description")}
+          trailing={<SaveStatusBadge status={saveStatus} />}
         />
 
-        {error ? <div className="mb-3 text-xs text-destructive">Validation failed: {error}</div> : null}
+        {error ? <div className="mb-3 text-xs text-destructive">{t("llmRoles.validationFailed", { error })}</div> : null}
 
         <RoleCardList
           data={normalizedData}
@@ -493,9 +485,9 @@ export function LlmRolesTab({
           ownedProviderCodesByModel={ownedProviderCodesByModel}
           providerModelsByRouteId={providerModelsByRouteId}
           testStatusesByRole={testStatusesByRole}
-          roleTestResults={Object.fromEntries(Object.entries(roleTestStates).map(([roleName, state]) => [roleName, state.result]))}
-          roleTestErrors={Object.fromEntries(Object.entries(roleTestStates).map(([roleName, state]) => [roleName, state.error]))}
-          roleTestRunningByName={Object.fromEntries(Object.entries(roleTestStates).map(([roleName, state]) => [roleName, state.running]))}
+          roleTestResults={Object.fromEntries(Object.entries(roleTestStore).map(([roleName, state]) => [roleName, state.result]))}
+          roleTestErrors={Object.fromEntries(Object.entries(roleTestStore).map(([roleName, state]) => [roleName, state.error]))}
+          roleTestRunningByName={Object.fromEntries(Object.entries(roleTestStore).map(([roleName, state]) => [roleName, state.running]))}
           onRunTestChain={handleRunTestChain}
           getActiveAvailableModelDragId={getActiveAvailableModelDragId}
           getAvailableModelGroup={getAvailableModelGroup}
@@ -508,6 +500,10 @@ export function LlmRolesTab({
           modelDisplayNamesByCode={modelDisplayNamesByCode}
           modelGroups={modelGroups}
           providerModelsByRouteId={providerModelsByRouteId}
+          testStatusesByBundle={bundleTestState.statusesByBundle}
+          testRunningByBundle={bundleTestState.runningByBundle}
+          bundleTestErrors={bundleTestState.errorsByBundle}
+          onTestBundle={handleTestBundle}
           getActiveAvailableModelDragId={getActiveAvailableModelDragId}
           onChange={onChange}
           onDeleteBundle={onDeleteModelBundle ?? ((bundleId) => onChange(removeModelBundle(normalizedData, bundleId)))}
@@ -518,73 +514,7 @@ export function LlmRolesTab({
   )
 }
 
-export function roleTestStatusesByRole(
-  states: Record<string, RoleTestState>,
-  activeRoleName: string | null = null,
-  activeStatuses: RoleChainStatusMap = {},
-): Record<string, RoleChainStatusMap> {
-  return Object.fromEntries(
-    Object.entries(states).map(([roleName, state]) => [
-      roleName,
-      state.running
-        ? state.activeStatuses ?? (roleName === activeRoleName ? activeStatuses : {})
-        : roleTestStatusesFromResult(state.result),
-    ]),
-  )
-}
-
-function roleTestStatusesFromJob(job: RoleTestJobResponse): RoleChainStatusMap {
-  const statusMap: RoleChainStatusMap = {}
-  for (const providerStatus of job.provider_statuses) {
-    statusMap[roleChainStatusKey(providerStatus.canonical_id, providerStatus.route_id)] = {
-      status: roleChainStatusForProviderProgress(providerStatus),
-      message: providerStatus.message ?? undefined,
-    }
-  }
-  return statusMap
-}
-
-function roleChainStatusForProviderProgress(providerStatus: RoleTestProviderProgress): RoleChainStatus {
-  if (providerStatus.status === "testing") return "testing"
-  if (providerStatus.status === "ok") return "ok"
-  if (providerStatus.status === "queued" || providerStatus.status === "untested") return "idle"
-  return "error"
-}
-
-function roleTestStatusesFromResult(result?: RoleTestResponse): RoleChainStatusMap {
-  const statusMap: RoleChainStatusMap = {}
-  for (const group of result?.model_groups ?? []) {
-    for (const providerResult of group.provider_results) {
-      statusMap[roleChainStatusKey(group.canonical_id, providerResult.route_id)] = {
-        status: roleChainStatusForProviderResult(providerResult),
-        message: roleTestProviderMessage(providerResult),
-      }
-    }
-  }
-  return statusMap
-}
-
-function roleChainStatusForProviderResult(providerResult: RoleTestProviderResult): RoleChainStatusMap[string]["status"] {
-  if (providerResult.status === "ok") {
-    return providerResult.role_fit === "using" && providerResult.warnings.length === 0 ? "ok" : "warning"
-  }
-  if (providerResult.status === "untested") return "idle"
-  return "error"
-}
-
-function roleTestProviderMessage(providerResult: RoleTestProviderResult): string | undefined {
-  const messages = [
-    providerResult.message,
-    providerResult.retry_at ? `Retry after ${providerResult.retry_at}.` : null,
-  ].filter((message): message is string => Boolean(message))
-  return Array.from(new Set(messages)).join(" ") || undefined
-}
-
 export { modelDropFailureMessage } from "./role-utils"
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms))
-}
 
 export function AvailableModelDragPreview({
   drag,

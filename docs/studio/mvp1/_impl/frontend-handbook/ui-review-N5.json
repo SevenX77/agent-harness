@@ -1,0 +1,259 @@
+{
+  "code": "N5",
+  "title": "Debug & Resume · 调试续跑",
+  "status": "bad",
+  "intent_oneliner": "运行失败或暂停后,用户在出问题的那个节点/那条边上就地干预,从该点精准续跑、上游不重跑。UI 必须提供四件事:① 节点级 Resume(锚在节点、走 checkpoint,1..X-1 不重跑)② Agent 请求输入时锚定节点的 HitL 悬浮框 ③ 边黑板可写、篡改后驱动下游续跑 ④ 改上游后受影响下游 Resume 自动置灰。",
+  "role_table": {
+    "headers": [
+      "界面单元",
+      "用户用它做什么",
+      "MVP1 要它表达什么(F#)"
+    ],
+    "rows": [
+      [
+        "失败节点红灯 + 错误摘要",
+        "一眼看出 run 停在哪个节点、为什么",
+        "F1:失败节点亮红并就地显示 Error Message,把视线锚到出错点"
+      ],
+      [
+        "节点级 [Resume] 按钮",
+        "改完该节点后从该节点续跑、上游不重跑",
+        "F2:Resume 锚在节点上(非全局顶栏),1..X-1 走 checkpoint 不重跑"
+      ],
+      [
+        "脏状态置灰",
+        "改了上游后,失效的下游 Resume 自动不可点",
+        "F3:只有上游 checkpoint 仍有效的节点可 Resume"
+      ],
+      [
+        "节点上悬浮输入框 (HitL)",
+        "Agent 请求人类输入时就地作答",
+        "F4:锚定暂停节点的悬浮富文本框(非固定顶栏)"
+      ],
+      [
+        "边 dot 黑板可写编辑器",
+        "点边 dot 展开上轮 Context、手改 JSON 后存",
+        "F6:复用 Monaco 切可写 → 存 → 下游用篡改数据 Resume"
+      ]
+    ]
+  },
+  "surfaces_table": {
+    "headers": [
+      "界面 / 状态",
+      "用户在此做什么",
+      "期望得到什么",
+      "当前不合理点"
+    ],
+    "rows": [
+      [
+        "Trace Timeline 顶栏 Resume 按钮",
+        "点一下续跑整个 run",
+        "从最近 checkpoint 续跑",
+        "Resume 是 run 级全局按钮(TracePanel.tsx:67-77),不是节点级"
+      ],
+      [
+        "失败节点",
+        "看哪个节点红了",
+        "红灯 + Error Message",
+        "node-status.ts 只派生 running/success/error;红灯有、Error Message 未摊到节点"
+      ],
+      [
+        "边 dot → 黑板视图",
+        "点 dot 看这条边传了什么黑板",
+        "查看+手改 JSON 后存",
+        "EdgeContextView 只读;后端 context_overrides 已接、前端无可写入口"
+      ],
+      [
+        "Agent 请求人类输入 (HitL)",
+        "Agent 暂停时回答它",
+        "节点上方悬浮框 → 答 → 注入续跑",
+        "前端零 HitL UI;后端 human_input 已接、前端不传"
+      ],
+      [
+        "改上游后下游 Resume",
+        "改了上游 schema 后想续下游",
+        "受影响下游 Resume 自动置灰",
+        "无任何脏状态/checkpoint 失效追踪"
+      ]
+    ]
+  },
+  "actions_table": {
+    "headers": [
+      "用户动作",
+      "经由哪个界面(目标)",
+      "MVP1 约束 / 禁止"
+    ],
+    "rows": [
+      [
+        "从某节点精准续跑",
+        "失败/可续节点上的 [Resume]",
+        "F2:必须节点级,1..X-1 不重跑"
+      ],
+      [
+        "回答 Agent 的输入请求",
+        "暂停节点上方的 HitL 悬浮框",
+        "F4:锚定节点的悬浮框,非固定顶栏"
+      ],
+      [
+        "篡改边上黑板再续跑",
+        "边 dot → 可写 Monaco → 存",
+        "F6:复用 trace 编辑器切可写,存后下游用篡改数据"
+      ],
+      [
+        "脏状态下被阻止续跑",
+        "受影响下游 Resume 自动置灰",
+        "F3:上游变更使下游 Resume 置灰,无关节点仍可续"
+      ]
+    ]
+  },
+  "plan": "按依赖顺序、后端契约已就绪(主要是前端接线):① 把 Resume 从 Trace 顶栏下沉到节点——失败/可续节点上挂按钮,续跑携带起始节点,引擎用该节点 checkpoint 续、上游不重跑;② 新建锚定暂停节点的悬浮输入框,答案经 `human_input` 注入续跑;③ 边黑板视图接入已有可写 Monaco(`LazyMonacoPanel` 的 readOnly 开关),保存经 `context_overrides` 注入下游续跑;④ 引入 checkpoint 失效追踪,改上游 schema/拓扑 → 受影响下游 Resume 自动置灰。",
+  "current_risk": "运行失败/暂停后,用户应能在出问题的节点/边上就地精准续跑,但四个核心能力——节点级 Resume、HitL 人工注入、边黑板篡改续跑、脏状态置灰——全部缺失,只落地了 Trace 顶栏的 run 级整体续跑。后端契约(`resumeRun` 的 `human_input` / `context_overrides`)已留口子,但前端零调用点:引擎在等前端,前端还没接。用户无法精准修一个节点续跑,只能整条 run 重来。",
+  "issues_table": {
+    "headers": [
+      "不合理点",
+      "应如何改(处理原则)"
+    ],
+    "rows": [
+      [
+        "Resume 是 run 级全局按钮,且后端无 from_node",
+        "前后端都加节点级续跑:ResumeReq 加 from_node、引擎按节点定位 checkpoint;前端 Resume 下沉到节点"
+      ],
+      [
+        "HitL 前端缺口(后端已通)",
+        "新建锚定暂停节点的悬浮输入框,提交经 resumeRun(human_input) 注入"
+      ],
+      [
+        "篡改续跑前端缺口(后端已通)",
+        "边视图接可写 Monaco + 保存,存盘经 resumeRun(context_overrides) 注入下游"
+      ],
+      [
+        "无脏状态置灰",
+        "引入 checkpoint 失效追踪(编辑期事件/派生),改上游 → 受影响下游 Resume 置灰"
+      ],
+      [
+        "失败节点 Error Message 未摊到节点",
+        "在红灯节点上呈现错误摘要(F1 后半)"
+      ]
+    ]
+  },
+  "gates_table": {
+    "headers": [
+      "验证项",
+      "现状 = 不合理",
+      "目标 = 合理"
+    ],
+    "rows": [
+      [
+        "Resume 入口位置",
+        "顶栏全局 1 个(TracePanel.tsx:67)",
+        "锚在每个可续节点上"
+      ],
+      [
+        "节点级续跑语义",
+        "续整个 run,后端无 from_node",
+        "从选中节点续,1..X-1 走 checkpoint 不重跑"
+      ],
+      [
+        "篡改续跑",
+        "边视图只读、前端不传 overrides",
+        "边上 Monaco 可写,存后下游用篡改数据续跑"
+      ],
+      [
+        "HitL",
+        "无任何 UI、前端不传 human_input",
+        "暂停 → 节点上悬浮输入 → 答案注入续跑"
+      ],
+      [
+        "脏状态置灰",
+        "仅 !runId 禁用",
+        "改上游 → 受影响下游 Resume 置灰,无关节点可续"
+      ]
+    ]
+  },
+  "children": [
+    {
+      "code": "N5.1",
+      "title": "节点级 Resume(就地精准续跑)",
+      "status": "bad",
+      "problem": "用户改完某节点想从该节点续跑、上游不重跑,但界面上 Resume 只有一个挂在 Trace Timeline 顶栏的全局按钮,无法选节点续;而且后端续跑契约也没有起始节点参数,所以这是前后端两端都缺的能力。",
+      "design": "05_debugging.md F2:节点级 [Resume] 按钮锚在节点上,用 checkpoint 已有数据从该节点精准续跑,1..X-1 不重跑;测试关键点明确'[Resume] 锚在节点上(非全局)'。",
+      "current": "前端:Resume 渲染在 TracePanel 顶栏(components/TracePanel.tsx:67-77),由 Workspace 全局 handleResume 驱动(components/studio/Workspace.tsx:655-672),调 resumeRun(skillId, runId) 续整条 run,可用性只看 traceCanResume={Boolean(runId)}(Workspace.tsx:739),与节点无关。后端:resume_skill(packages/graph-agent .../runner.py:455)只接 checkpoint_id/checkpoint_ns 且只用最新一条 checkpoint,resume 请求模型 ResumeReq(routers/runs.py:109)无 from_node——全链路没有任何起始节点参数。",
+      "fix": "后端 ResumeReq 加 from_node、引擎按节点定位历史 checkpoint 并从该点续;前端把 Resume 从顶栏下沉到失败/可续节点上,续跑时携带起始节点。",
+      "auto": [
+        "失败节点上出现 [Resume] 按钮",
+        "点节点 Resume → 续跑请求带 from_node",
+        "顶栏全局 Resume 不再是唯一入口"
+      ],
+      "manual": [
+        "真跑一条多节点 skill,故意让中段失败,改该节点后点其上 Resume,核对 1..X-1 未重跑(走 checkpoint)"
+      ],
+      "pass": [
+        "Resume 锚在节点上",
+        "后端接受 from_node 且 1..X-1 用 checkpoint 不重跑"
+      ]
+    },
+    {
+      "code": "N5.2",
+      "title": "HitL 人工注入(后端已实现,缺前端 UI)",
+      "status": "partial",
+      "problem": "Agent 运行中请求人类输入时,前端没有任何暂停态、没有悬浮输入框,用户无处作答——但这是纯前端缺口:后端注入链路已经实现并有测试。",
+      "design": "05_debugging.md F4/F5:agent 请求人类输入 → run 暂停 → 节点 debug bar 上方悬浮富文本框(锚定节点,非固定顶栏)→ PM 输入 → 点 Resume,答案作为消息注入续跑。",
+      "current": "后端整条链路已通且有测试:resume_run 端点透传 human_input(routers/runs.py:133)→ EngineAdapter.resume(engine.py:852)→ 引擎 _apply_resume_human_response(runner.py:1247,在 checkpoint 里找到挂起的工具调用,把人工答案构造成 ToolMessage 经 graph.update_state 写回 messages,真正作为对 interrupt 的回应注入回 agent;无挂起调用则抛错)。缺口全在前端:无'等待人类输入'暂停态、无悬浮输入框,且唯一续跑调用点 Workspace.tsx:675 调 resumeRun 时根本不传 human_input(恒为 null)。",
+      "fix": "新建锚定暂停节点的悬浮富文本输入组件;run 暂停事件出现时浮现,提交后经 resumeRun(human_input) 注入续跑(后端已就绪,只需前端接线)。",
+      "auto": [
+        "Agent 请求输入时节点进入暂停态",
+        "暂停节点上方浮现富文本输入框(非固定顶栏)",
+        "提交后续跑请求带 human_input"
+      ],
+      "manual": [
+        "真跑一个会请求人类输入的 agent skill,确认暂停 + 悬浮框出现,答完续跑且答案被注入(后端已能处理)"
+      ],
+      "pass": [
+        "agent 请求输入 → 暂停 + 节点上悬浮框",
+        "答案经 human_input 注入 → 续跑"
+      ]
+    },
+    {
+      "code": "N5.3",
+      "title": "边黑板篡改续跑(后端已实现,缺前端可写编辑器)",
+      "status": "partial",
+      "problem": "点边 dot 只能只读查看上轮黑板,无法手改 JSON、无保存入口——同样是纯前端缺口:后端篡改合并已实现。",
+      "design": "05_debugging.md F6/F7:点边 dot → 复用 Monaco 编辑器(切可写)展开上轮真实 Context → 手改 JSON → 存;篡改保存后点下游 Resume → 拿伪造 JSON 续跑下游。决策 Q3 明确'可写 Monaco = trace 只读编辑器切 readonly'。",
+      "current": "后端已通:引擎 _apply_resume_context_overrides(runner.py:1184,取 checkpoint 当前黑板 BusinessData、用 overrides 合并校验后 update_state 写回,且 _validate_resume_context_overrides 拒掉系统保留键)。缺口在前端:点 dot 打开的 EdgeContextView(components/studio/panels/EdgeContextView.tsx)全程只读,数据来自 edgeContextFromEvents(lib/edge-context.ts:56,从历史 input_dispatch 事件取黑板快照),用 <dl>/Badge 列键值;可写 Monaco 开关已存在(LazyMonacoPanel.tsx:290 readOnly: !saveEnabled)却未接进边视图;前端不传 context_overrides。",
+      "fix": "在边黑板视图接入可写 Monaco(复用已有 readOnly 开关)+ 保存;存盘经 resumeRun(context_overrides) 把篡改 JSON 注入下游续跑(后端已就绪)。",
+      "auto": [
+        "边视图里黑板 JSON 可编辑(Monaco 可写)",
+        "有保存按钮",
+        "保存后下游 Resume 请求带 context_overrides"
+      ],
+      "manual": [
+        "真跑后点一条边 dot,改黑板某字段存盘,点下游节点 Resume,核对下游确实拿到篡改后的值(后端已能合并)"
+      ],
+      "pass": [
+        "点 dot → 可写编辑器改黑板 → 存",
+        "下游 Resume 经 context_overrides 用篡改数据续跑"
+      ]
+    },
+    {
+      "code": "N5.4",
+      "title": "脏状态置灰(改上游 → 受影响下游 Resume 置灰)",
+      "status": "bad",
+      "problem": "改了上游节点 schema/拓扑后,下游 checkpoint 其实已失效,但界面不会把受影响下游的 Resume 置灰,用户可能拿失效 checkpoint 续跑得到错误结果。这是前后端两端都缺。",
+      "design": "05_debugging.md F3:改上游节点/拓扑/输出 schema → 受影响下游节点 [Resume] 自动置灰,只有上游 checkpoint 仍有效的节点可 Resume;无关节点仍可续。",
+      "current": "根因在事实源:运行事件契约(packages/graph-agent .../core/event_contracts.py)全是运行期生命周期事件,没有'改 schema/改拓扑/checkpoint 失效'这类编辑期事件,前端无从感知失效。节点态派生 deriveNodeStatuses(components/studio/node-status.ts:45)只产出 running/success/error 三态(类型声明 6 态只写 3 态),无 dirty/stale。Resume 唯一禁用条件是 !runId(Workspace.tsx:739),与上游是否改动无关。",
+      "fix": "引入 checkpoint 失效追踪:监测上游 schema/拓扑变更(编辑期事件或前端派生),算出受影响下游集合,据此置灰这些节点的 Resume;无关节点保持可续。",
+      "auto": [
+        "改上游 schema → 受影响下游 Resume 变 disabled",
+        "无关节点 Resume 仍可点",
+        "置灰状态有可见提示(为何不可续)"
+      ],
+      "manual": [
+        "跑通一条链后改上游某节点输出 schema,确认下游 Resume 置灰、旁支节点仍可续"
+      ],
+      "pass": [
+        "改上游 → 受影响下游 Resume 置灰",
+        "无关节点仍可 Resume"
+      ]
+    }
+  ]
+}

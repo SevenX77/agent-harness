@@ -1,0 +1,310 @@
+{
+  "shell": {
+    "title": "Settings",
+    "close": "Close settings",
+    "connectionLost": "Connection lost"
+  },
+  "tabs": {
+    "general": "General",
+    "apiKeys": "API Keys",
+    "llmRoles": "LLM Roles",
+    "copilot": "Copilot"
+  },
+  "saveStatus": {
+    "pending": "Pending",
+    "saving": "Saving",
+    "saved": "Saved",
+    "error": "Save failed"
+  },
+  "general": {
+    "title": "General",
+    "description": "Application defaults and collaboration identity. Changes auto-save.",
+    "userId": {
+      "label": "Studio User ID",
+      "placeholder": "your-username",
+      "description": "Used as the local Git author and team owner."
+    },
+    "defaultSkillFolder": {
+      "label": "Default skill folder",
+      "placeholder": "Select a folder path",
+      "choose": "Choose",
+      "reset": "Reset default skill folder",
+      "description": "New skills are created here when no folder is chosen."
+    },
+    "giteaHost": {
+      "label": "Gitea Host",
+      "placeholder": "https://gitea.example.com",
+      "description": "Private Gitea host used for team collaboration."
+    },
+    "remoteModelCatalog": {
+      "label": "Community model catalog",
+      "description": "Read the community catalog to improve route suggestions, and anonymously contribute your sanitized probe results back to it. Turn off to stop both."
+    },
+    "language": {
+      "label": "Language",
+      "description": "Switch Studio UI copy without restarting the app.",
+      "ariaLabel": "Studio language",
+      "english": "English",
+      "simplifiedChinese": "Simplified Chinese"
+    }
+  },
+  "apiKeys": {
+    "title": "API Keys",
+    "description": "Local LLM provider credentials used by Studio runtime. Changes auto-save.",
+    "loadFailedTitle": "API Keys load failed",
+    "loadFailedDescription": "{{error}}. Stored provider values are not shown until the credentials document loads.",
+    "officialProviders": "Official Providers",
+    "thirdPartyProviders": "Third-party Providers",
+    "noThirdPartyProviders": "No third-party providers configured.",
+    "addProvider": "Add Provider",
+    "addProviderDialogTitle": "Add provider",
+    "providerName": "Provider name",
+    "add": "Add",
+    "form": {
+      "providerNameLabel": "Provider name",
+      "providerNamePlaceholder": "e.g. My OpenRouter",
+      "providerNameRequired": "Provider name is required.",
+      "providerNameDuplicate": "A provider with this name already exists.",
+      "baseUrlLabel": "Base URL",
+      "baseUrlPlaceholder": "https://api.example.com",
+      "apiKeyLabel": "API Key",
+      "apiKeyPlaceholder": "Enter the provider API Key",
+      "cancelButton": "Cancel"
+    },
+    "manualTest": {
+      "title": "Manual model probing",
+      "description": "Add model ids when automatic model listing is unavailable.",
+      "placeholderExample": "e.g. {{example}}",
+      "modelInputLabel": "Manual model {{index}}",
+      "removeModelLabel": "Remove model {{index}}",
+      "addModel": "Add Model",
+      "testModels": "Test Models",
+      "testingLoading": "Testing models...",
+      "candidateLoadError": "Failed to load notable models",
+      "testFailedFallback": "Model test failed",
+      "noResults": "No model results were returned.",
+      "oneAvailable": "Model is available.",
+      "manyAvailable": "{{n}} models are available.",
+      "someFailed": "{{failed}} of {{total}} model tests failed.",
+      "failedItem": "{{modelId}}: {{status}}",
+      "status": {
+        "ok": "Available",
+        "invalidModel": "Model not found",
+        "invalidKey": "Invalid API key",
+        "rateLimited": "Rate limited",
+        "quotaExceeded": "Quota exceeded",
+        "networkError": "Network error",
+        "timeout": "Request timed out",
+        "failed": "Test failed"
+      }
+    },
+    "card": {
+      "testingBadge": "Testing...",
+      "connectedBadge": "Connected",
+      "connectedWithLatency": "Connected ({{latencyMs}}ms)",
+      "notConfigured": "Not configured",
+      "thirdPartyBadge": "Third-party",
+      "copiedToast": "{{label}} copied",
+      "copyFailedToast": "Failed to copy {{label}}",
+      "modelNameLabel": "Model name",
+      "routeWord": "route",
+      "modelWord": "model",
+      "apiKeyLabel": "API Key",
+      "apiKeyShort": "API key",
+      "apiKeyPlaceholder": "Enter your {{providerName}} API Key",
+      "apiKeyRequired": "API key is required.",
+      "baseUrlLabel": "Base URL",
+      "baseUrlPlaceholder1": "https://api.openai.com/v1",
+      "baseUrlPlaceholder2": "https://api.backup.example.com/v1",
+      "baseUrlRequired": "Base URL is required.",
+      "fieldReachable": "{{label}} accepted by the model-list endpoint",
+      "baseUrlConnected": "{{url}} connected",
+      "baseUrlFailed": "{{url}} failed",
+      "baseUrlTesting": "{{url}} is being tested",
+      "baseUrlFallback": "Base URL",
+      "testButton": "Test",
+      "showApiKeyButton": "Show API key",
+      "hideApiKeyButton": "Hide API key",
+      "copyApiKeyButton": "Copy API key",
+      "copyBaseUrlButton": "Copy Base URL",
+      "copyLabelButton": "Copy {{label}}",
+      "renameButton": "Rename",
+      "deleteButton": "Delete",
+      "addUrlButton": "Add URL",
+      "removeBaseUrlButton": "Remove Base URL",
+      "showMoreButton": "Show {{n}} more",
+      "showFewerButton": "Show fewer",
+      "moreActionsButton": "More actions for {{draftName}}",
+      "availableRoutesLabel": "Available Routes:",
+      "availableModelsLabel": "Available Models:",
+      "availableEndpointsLabel": "Available Endpoints:",
+      "noModelsWarning": "No models returned",
+      "unnamedProvider": "Unnamed Provider",
+      "officialProvider": "Official Provider",
+      "thisProvider": "this provider",
+      "copyTagAria": "Copy {{target}} {{modelId}}. {{detail}}",
+      "routeStatus": {
+        "verified": "Verified route",
+        "failed": "Route test failed",
+        "testing": "Testing route",
+        "disabled": "Disabled route",
+        "probeVerified": "Probe verified route (historical success)",
+        "unverified": "Untested route",
+        "unknown": "Route status unknown",
+        "previouslyConnected": "Previously Connected",
+        "endpointFailed": "Endpoint failed",
+        "modelFailed": "Model failed",
+        "modelNotVerified": "Model not verified; endpoint failed"
+      },
+      "endpointStatus": {
+        "testing": "Testing",
+        "connected": "Connected",
+        "notConfigured": "Not configured",
+        "untested": "Untested"
+      },
+      "protocol": {
+        "anthropic": "Anthropic-compatible",
+        "ark": "Ark runtime",
+        "google": "Google GenAI",
+        "openai": "OpenAI-compatible",
+        "unknown": "Unknown"
+      },
+      "protocolShort": {
+        "anthropic": "Anth",
+        "gemini": "Gemini",
+        "openai": "OpenAI",
+        "ark": "Ark",
+        "unknown": "Endpoint"
+      },
+      "capability": {
+        "textChat": "text chat",
+        "reasoning": "reasoning",
+        "imageInput": "image input",
+        "audioInput": "audio input",
+        "toolCalling": "tool calling",
+        "structuredOutput": "structured output",
+        "translation": "translation"
+      },
+      "modality": {
+        "text": "text",
+        "image": "image",
+        "video": "video",
+        "audio": "audio",
+        "file": "file",
+        "pdf": "PDF",
+        "embedding": "embedding",
+        "moderation": "moderation",
+        "threeD": "3D"
+      },
+      "tooltip": {
+        "provider": "Provider: {{label}}",
+        "endpoint": "Endpoint: {{id}}",
+        "inputUrl": "Input URL: {{url}}",
+        "runtimeUrl": "Runtime URL: {{url}}",
+        "protocol": "Protocol: {{protocol}}",
+        "status": "Status: {{status}}",
+        "routes": "Routes: {{n}}",
+        "profiles": "Profiles: {{n}}",
+        "methods": "Methods: {{methods}}",
+        "methodsNotVerified": "Methods: Not verified yet",
+        "requestMappers": "Request mappers: {{mappers}}",
+        "requestMappersNotVerified": "Request mappers: Not verified yet",
+        "profileCapabilities": "Profile capabilities: {{capabilities}}",
+        "profileCapabilitiesNotVerified": "Profile capabilities: Not verified yet",
+        "toolProtocol": "Tool protocol: {{status}}",
+        "toolProtocolSupported": "supported",
+        "toolProtocolNotListed": "not listed by backend",
+        "sdks": "SDKs: {{n}}",
+        "lastTest": "Last test: {{timestamp}}",
+        "message": "Message: {{message}}",
+        "errorCode": "Error code: {{code}}",
+        "notSet": "Not set",
+        "routesHeader": "Routes:",
+        "attemptsHeader": "Attempts:",
+        "plusMore": "+{{n}} more"
+      },
+      "modelTypeLabel": {
+        "languageReasoning": "Language/reasoning model",
+        "imageGeneration": "Image generation model",
+        "videoGeneration": "Video generation model",
+        "audio": "Audio/realtime model",
+        "embedding": "Embedding model",
+        "translation": "Translation model",
+        "threeD": "3D generation model"
+      },
+      "routeGroup": {
+        "language": "Language",
+        "multimodal": "Multimodal",
+        "embedding": "Embedding",
+        "audio": "Audio",
+        "video": "Video",
+        "translation": "Translation",
+        "threeD": "3D",
+        "moderation": "Moderation",
+        "interactionsAgent": "Interactions Agent",
+        "other": "Other"
+      },
+      "routeTooltip": {
+        "verifiedRoute": "Verified {{capability}} route",
+        "languageFallback": "language",
+        "methods": "Methods: {{methods}}",
+        "input": "Input: {{modalities}}",
+        "output": "Output: {{modalities}}",
+        "maxInput": "Max input: {{value}} tokens",
+        "maxInputNotListed": "Max input: not listed",
+        "maxOutput": "Max output: {{value}} tokens",
+        "maxOutputNotListed": "Max output: not listed",
+        "routeTestFailed": "Route test failed: {{message}}",
+        "routeTestFailedBare": "Route test failed",
+        "route": "Route: {{id}}"
+      },
+      "deleteConfirm": {
+        "title": "Delete {{displayName}}?",
+        "description": "This provider and its routes will be removed from API Keys, LLM Roles, and model bundles."
+      },
+      "renameDialog": {
+        "title": "Rename provider",
+        "fieldLabel": "Provider name"
+      },
+      "aria": {
+        "deleteProvider": "Delete provider"
+      }
+    }
+  },
+  "llmRoles": {
+    "title": "LLM Roles",
+    "loadingDescription": "Edit model and provider fallback order.",
+    "description": "Edit model and provider fallback order. Changes auto-save.",
+    "validationFailed": "Validation failed: {{error}}"
+  },
+  "copilot": {
+    "title": "Copilot",
+    "description": "Configure copilot roles with the same model group fallback pattern used by LLM Roles.",
+    "claudeAgentSdk": "Claude Agent SDK",
+    "addModelTooltip": "Pick a model group for the existing empty card first",
+    "emptyState": {
+      "title": "No Anthropic Messages route yet",
+      "description": "Add a credential that supports the anthropic-messages protocol in API Keys (Anthropic Official / Ark / DeepSeek / OpenRouter, etc.). It appears here once single-model testing passes.",
+      "cta": "Configure in API Keys"
+    },
+    "roleCard": {
+      "description": "Coding copilot role synced with backend fallback chain.",
+      "untestedWarning": "{{n}} route(s) untested — test in API Keys"
+    },
+    "testToast": {
+      "passed": "{{title}} test passed",
+      "needsAttention": "{{title}} test needs attention",
+      "failed": "{{title}} test failed"
+    },
+    "testErrors": {
+      "noAvailableRoute": "{{title}} has no available model route. Configure Anthropic-compatible credentials in API Keys and run a test first.",
+      "roleUnknown": "{{title}} does not exist or was deleted. Refresh the page and try again.",
+      "invalidKind": "{{title}} is not a copilot role and cannot be tested with the Claude SDK.",
+      "credentialMissing": "{{title}} is missing a required API key. Add it in API Keys and try again."
+    },
+    "aria": {
+      "testing": "Testing {{title}}...",
+      "ready": "{{title}} ready: {{ready}}/{{total}} routes"
+    }
+  }
+}

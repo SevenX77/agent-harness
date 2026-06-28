@@ -5,6 +5,7 @@ import {
   type CredentialsState,
   type ProviderCredentialUpdate,
 } from "@/api/llm"
+import { endpointIdForBaseUrlProtocol, thirdPartyProtocolCandidates } from "@/components/studio/settings/provider-utils"
 
 /** Status of the most recent (or in-flight) auto-save call. */
 export type SaveStatus = "idle" | "pending" | "saving" | "saved" | "error"
@@ -161,14 +162,36 @@ export function buildPutPayload(
     name: string
     api_key?: string
     base_url?: string
+    base_urls?: ReadonlyArray<{
+      id: string
+      value: string
+      provider_type?: ProviderCredentialUpdate["provider_type"]
+      endpoint_ids?: Partial<Record<NonNullable<ProviderCredentialUpdate["provider_type"]>, string>>
+    }>
     provider_type?: ProviderCredentialUpdate["provider_type"]
   }>,
 ): ProviderCredentialUpdate[] {
-  return providers.map((provider) => ({
-    id: provider.id,
-    name: provider.name,
-    api_key: provider.api_key ?? "",
-    base_url: provider.base_url ?? "",
-    provider_type: provider.provider_type ?? null,
-  }))
+  return providers.flatMap((provider) => {
+    const baseUrlRows = provider.base_urls?.length
+      ? provider.base_urls
+      : [{ id: provider.id, value: provider.base_url ?? "" }]
+    const nonEmptyBaseUrlRows = baseUrlRows.filter((row) => row.value.trim().length > 0)
+    const rows = nonEmptyBaseUrlRows.length > 0 ? nonEmptyBaseUrlRows : baseUrlRows.slice(0, 1)
+    if (provider.base_urls?.length) {
+      return rows.flatMap((row) => thirdPartyProtocolCandidates.map((protocol) => ({
+        id: endpointIdForBaseUrlProtocol(provider.id, row, protocol),
+        name: provider.name,
+        api_key: provider.api_key ?? "",
+        base_url: row.value.trim(),
+        provider_type: protocol,
+      })))
+    }
+    return rows.map((row) => ({
+      id: row.id || provider.id,
+      name: provider.name,
+      api_key: provider.api_key ?? "",
+      base_url: row.value.trim(),
+      provider_type: row.provider_type ?? provider.provider_type ?? null,
+    }))
+  })
 }

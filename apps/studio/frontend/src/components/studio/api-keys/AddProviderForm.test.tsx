@@ -1,5 +1,8 @@
+import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 import {
+  AddProviderForm,
+  addProviderNameError,
   createBlankAddProviderSubmission,
   deriveAddProviderFormSubmission,
   providerCodeFromCustomName,
@@ -38,5 +41,48 @@ describe("AddProviderForm", () => {
     })
 
     uuid.mockRestore()
+  })
+})
+
+describe("addProviderNameError", () => {
+  it("requires a non-empty name", () => {
+    expect(addProviderNameError("   ", [])).toBe("Provider name is required.")
+  })
+
+  it("rejects a duplicate name (case/space-insensitive)", () => {
+    expect(addProviderNameError(" My OpenRouter ", ["my openrouter"])).toBe(
+      "A provider with this name already exists.",
+    )
+  })
+
+  it("accepts a unique non-empty name", () => {
+    expect(addProviderNameError("Fresh Provider", ["My OpenRouter"])).toBeNull()
+  })
+})
+
+describe("AddProviderForm component (atom-19 one-step inline form)", () => {
+  function renderForm(): string {
+    return renderToStaticMarkup(
+      <AddProviderForm existingNames={[]} onSubmit={() => {}} onCancel={() => {}} />,
+    )
+  }
+
+  it("renders a single inline form with name, base_url and api_key inputs", () => {
+    const html = renderForm()
+    expect(html).toContain('data-add-provider-form="true"')
+    expect(html).toContain('id="add-provider-name"')
+    expect(html).toContain('id="add-provider-base-url"')
+    expect(html).toContain('id="add-provider-api-key"')
+    expect(html).toContain('data-add-provider-submit="true"')
+  })
+
+  it("keeps the empty api_key placeholder readable while still using type=text", () => {
+    const html = renderForm()
+    const apiKeyInput = html.match(/<input[^>]*id="add-provider-api-key"[^>]*>/)
+    expect(apiKeyInput).not.toBeNull()
+    expect(apiKeyInput?.[0]).toContain('type="text"')
+    expect(apiKeyInput?.[0]).toContain('placeholder="Enter the provider API Key"')
+    expect(apiKeyInput?.[0]).not.toContain("mask-input")
+    expect(apiKeyInput?.[0]).not.toContain('type="password"')
   })
 })

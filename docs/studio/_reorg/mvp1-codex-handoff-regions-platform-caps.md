@@ -6,7 +6,7 @@ scope: studio mvp1 补 23 个模块文档 = regions(12) + platform(4) + capabili
 ground_truth:
   - docs/DESIGN-PROCESS.md（写作框架，必读）
   - docs/studio/INDEX.md（三维治理总纲 + §7 模板 + §6 注册表 + §4 status 词表，必读）
-  - docs/engine/mvp1/_migration-src/api-engine-studio-contract.md（引擎↔studio 接口契约 SSOT;⚠️引擎 docs 重组中,写时 grep 确认当前路径）
+  - docs/engine/mvp1/03-api-contract/mvp1-alignment.md（引擎↔studio 接口契约 SSOT）
   - docs/studio/mvp1/01_workflows/00_settings-ux-spec.md §6.0（LLM/copilot 四层边界 SSOT）
   - apps/studio/{frontend,backend,tauri}（前端/后端/Rust 当前源码 = baseline 复核对象）
   - packages/graph-agent（引擎库）、packages/graph-agent-gateway（网关库）
@@ -29,7 +29,7 @@ related_monorepos:
 
 1. `docs/DESIGN-PROCESS.md` — 设计文档模板（§2）、接口契约七项（§3）、双向引用（§3.5）、SSOT（§5）、反模式（§6）。
 2. `docs/studio/INDEX.md` — 三维模型（§1）、所有权不变量（§2，**灭重叠的关键**）、status 词表（§4）、权威注册表（§6，**只能用这里的名字**）、四套文档模板（§7）、cross-link 规范（§8）。
-3. `api-engine-studio-contract.md`（引擎↔studio 执行/事件/HTTP-WS 三接口面 SSOT；**现在 `docs/engine/mvp1/_migration-src/`,引擎 docs 重组中——写时 grep 确认当前路径**）— region/platform 接口段的 SSOT。
+3. `docs/engine/mvp1/03-api-contract/mvp1-alignment.md`（引擎↔studio 执行/事件/HTTP-WS 三接口面 SSOT）— region/platform 接口段的 SSOT。
 4. `docs/studio/mvp1/01_workflows/00_settings-ux-spec.md` §6.0 — LLM/copilot **四层边界**（settings region + gateway/engine 平台块必读）。
 5. 已写好的 7 个 capability 文档（`docs/studio/mvp1/02_capabilities/*.md`）— **作为格式范本**，你补的 7 个对齐它们的模板（⚠️ 已写 7 个形态**不完全一致**，以 §1 模板为准、顺带补齐差异，别照抄某一篇的偏差；`trace-observability.md` 最完整可参考）。
 

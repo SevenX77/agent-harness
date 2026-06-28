@@ -1,0 +1,122 @@
+{
+  "code": "N4",
+  "title": "Run & Verify · 运行与验收",
+  "status": "partial",
+  "intent_oneliner": "predict 试飞跑通逻辑(硬前提)→ run 真跑消耗 token → trace 去黑盒 → golden 对比验收;用户靠这一面确认 skill 真能用。",
+  "role_table": {
+    "headers": ["界面单元", "在用户工作流里的作用", "MVP1 要它表达什么"],
+    "rows": [
+      ["底部动作条 Compile/Predict/Run (center-action-bar.tsx)", "用户沿 compile→predict→run 逐级解锁的唯一总控", "门控:绿灯才解锁 Predict,predict-pass 才解锁 Run;Run 是真跑要烧 token"],
+      ["I/O 面板 测试输入 + 批量勾选 (InputPanel/TestInputsSection)", "用户选哪份输入去 predict/run,勾多个=批量", "单次=选一份,批量=勾多份各跑一次;输入是节点配置不是 predict 独立议题"],
+      ["I/O 面板 Golden 区 (GoldenSection.tsx)", "用户看/管这个 skill 有哪些 golden 基线", "golden 状态决定 agent 节点 mock 走占位还是 golden replay;golden 非 run 前提"],
+      ["Trace Timeline 面板 (TracePanel.tsx)", "用户看 run 过程、去黑盒、对比/晋升 golden", "run 时流式进事件、agent 折叠摘要;run 后回看完整 trace"],
+      ["画布节点灯 (node-status.ts → statusByNodeId)", "用户在画布上直观看到哪个节点在跑/成/败", "节点呼吸灯随真实 run 事件逐个亮,失败亮红"],
+      ["线上 dot → 黑板视图 (EdgeContextView.tsx)", "用户点节点间的 dot 看那一刻黑板内容", "dot=状态机转移点:看黑板内容 + 上节点 end→下节点 start 的操作记录"],
+      ["Prompt Inspector (PromptInspector.tsx)", "用户点 llm_call 看 prompt 到底喂了什么", "模板/喂入变量/渲染后 三视图,去 prompt 黑盒"],
+      ["Golden Diff 覆盖层 (DiffView via useGoldenDiff)", "用户拿 run 实际输出和 golden 比", "run 后字段级 diff,详细 diff 在 editor 分屏不在 properties"]
+    ]
+  },
+  "surfaces_table": {
+    "headers": ["界面 / 状态", "用户在此做什么", "期望得到什么", "当前不合理点"],
+    "rows": [
+      ["动作条 predict-pass 解锁 Run (deriveButtons)", "compile 绿→点 Predict→pass 后点 Run", "清楚知道'为什么 Run 现在能点了/为什么还不能'", "门控只靠按钮 highlight/disable 表达;Run 灰着时没有任何文字说'先通过 Predict',用户不懂为何点不动 (center-action-bar.tsx:31-60)"],
+      ["Predict 触发 (handlePredict)", "选好 I/O 测试输入后点 Predict 试飞", "看到逻辑跑通、agent 节点拿了 mock、schema 没问题", "predict 只弹一个 toast '完成/失败';agent 节点'未测试→逻辑OK→有golden'三态标签 (E1) 在画布上看不到,用户不知 predict 到底验了什么 (Workspace.tsx:593-628)"],
+      ["Run 真跑 + 节点灯 (handleRun + statusByNodeId)", "点 Run 看画布节点逐个亮、timeline 流事件", "运行中/成/败一目了然,focus 跟随当前节点", "节点灯已接 (node-status.ts) 但无'呼吸/运行中'动画语义、focus 不自动跟随当前运行节点 (C5/C6 仅 running/success/error 三态色,无运行态指示动画)"],
+      ["Trace 面板 run 时流式 (Panels.tsx:85-99)", "run 时自动开面板看事件流入", "agent 输出流式 + 分类折叠摘要(Worked/Explored/Thought)", "trace 行只是通用'展开看原始 JSON' (TraceEventRow.tsx:119-123),没有 agent IDE 式分类折叠摘要,agent 长输出对用户=一坨 JSON"],
+      ["Trace 面板 focus 切换 (D5)", "点某节点想只看该节点 trace", "focus 空画布=run 概要;focus 节点=该节点 trace + 编辑器跳该范围", "TracePanel 不接收 selectedNode,无 focus→trace 过滤;run 概要(focus 空画布=全局)整块缺失 (TracePanel.tsx 无 focus 入参)"],
+      ["完整 trace 文档 (D4)", "run 后想读人能看懂的完整 trace", "只读编辑器看轻度格式化 trace 文档", "无 trace 文档编辑器视图,只有事件流列表;grep 全仓无 trace-document/jsonl 编辑器实现"],
+      ["dot → 黑板 (EdgeContextView.tsx)", "点 dot 看转移点黑板", "黑板内容 + reduce/截断/注入/落盘 操作记录", "黑板内容 + changed_keys 已展示,但'上节点 end→下节点 start 的操作记录'被标注为 target-design 未实现 (EdgeContextView.tsx:141-144)"],
+      ["Golden 创建 (E3/E4)", "predict/run 跑完想固化 golden", "trace 内占位节点旁按钮 + copilot 分析 bar 弹窗;或手填空模版", "前端只有 TracePanel 顶部 'Golden' promote 按钮 (TracePanel.tsx:88-97);schema 自动生成空模版手填 (E4) 在 I/O 面板未见;copilot 分析 bar 自动写 golden 走 completedRunId 但 UI 路径未在本面板呈现"]
+    ]
+  },
+  "actions_table": {
+    "headers": ["用户动作", "经由哪个界面", "MVP1 约束 / 禁止"],
+    "rows": [
+      ["点 Predict 试飞", "底部动作条", "硬前提:必须 compile-pass;logic 真跑确定性、agent 走 mock 不烧 token"],
+      ["点 Run 真跑", "底部动作条", "硬前提:必须 predict-pass(handleRun:632-635 已挡);真烧 token"],
+      ["勾多份输入跑批量", "I/O 面板 TestInputsSection", "batch/loop 配置归引擎;某项失败必须显式上报不静默"],
+      ["点 dot 看黑板", "画布线上 dot → EdgeContextView", "dot=节点间状态机转移点;禁止把它当 selectedEdge JSON 倾倒进 Properties(D14 已清理)"],
+      ["点 llm_call 看 prompt", "PromptInspector 三视图", "模板/变量/渲染三视图;predict 来源 trace 不可晋升 golden(409 守卫,后端)"],
+      ["run 后对比 golden", "Trace 顶部 Compare / Golden Diff 覆盖层", "字段级 diff;golden 由作者定/手填,非从 predict trace 捕获(409)"]
+    ]
+  },
+  "plan": "本节点只读审查,不改码。重点核对 04_run-and-verify.md 的 predict/run/trace/golden 四段 atom actions 与当前前端组件的接线现状,逐子节点判 ok/partial/bad 并给处理原则。",
+  "current_risk": "设计文档'整层定性'(150 行)严重过时:它说 onPredict/onRun=桩、TracePanel/PromptInspector/BatchRunner/useGoldenDiff'零挂载',但实际 Workspace.tsx 已把 predict→run 硬前提门控、节点灯、批量、golden diff、prompt inspector、dot 黑板、resume 全部接线。真实风险不在'没接线',而在三处 UX 缺口:(1) 门控不可解释——Run 灰着不告诉用户'先过 Predict';(2) agent 折叠摘要缺失,trace 对 agent 长输出只能展开成原始 JSON;(3) focus→节点 trace 过滤 / run 概要 / 完整 trace 文档编辑器整块未实现,'去黑盒'只做了一半。",
+  "issues_table": {
+    "headers": ["不合理点", "应如何改(处理原则)"],
+    "rows": [
+      ["Run 按钮灰禁时无理由文字,用户不懂为何点不动", "门控状态要可解释:灰禁的 Predict/Run 旁给一句'先通过上一步'的提示(tooltip 或副标),让用户看懂这是顺序门控不是 bug"],
+      ["agent 节点 trace 输出无分类折叠摘要,只能展开成原始 JSON", "agent 流式输出按 IDE 习惯做'一行摘要可折叠 + 末尾自然语言总结',复用已有 AgentStepsInline 的折叠思路,接进 TracePanel 而非只在编辑器用"],
+      ["focus 某节点不会把 trace 收窄到该节点;无 run 概要", "TracePanel 接 selectedNode:空画布=run_id 概要,选节点=只显该节点 trace;这是设计明写的'focus 决定粒度'核心交互"],
+      ["agent 节点画布上看不到'未测试→逻辑OK→有golden'三态", "predict 跑完把 agent 节点三态标签落到画布节点上,让用户一眼看出哪些 agent 已被 golden 兜底、哪些还是占位"],
+      ["完整 trace 文档(人能读、轻度格式化)无编辑器视图", "补只读编辑器渲染轻度格式化 trace 文档,focus 节点时跳到该节点范围;非原始 jsonl 倾倒"],
+      ["dot 视图只给黑板+changed_keys,缺'节点间操作记录'", "补'上节点 end→下节点 start'的 reduce/截断/注入/落盘 操作流(依赖引擎推流 micro 事件,前端先留位渲染)"],
+      ["设计文档整层定性已与代码脱节", "更新 04_run-and-verify.md 的 status 列与'整层定性':predict/run/golden/trace 接线多数已 live,真实缺口收敛到'agent 折叠 + focus 粒度 + trace 文档 + 节点三态'"]
+    ]
+  },
+  "gates_table": {
+    "headers": ["验证项", "现状 = 不合理", "目标 = 合理"],
+    "rows": [
+      ["predict 是 run 硬前提且用户看得懂", "handleRun 已挡 predict-pass,但灰禁按钮无理由文字,门控对用户=哑的", "灰禁 Run 给出'先通过 Predict'提示;predict 跑完画布显 agent 三态,门控可解释"],
+      ["run 时 trace 流式 + agent 折叠摘要", "事件流式已通,但 agent 输出只能展开原始 JSON,无分类折叠", "agent 输出分类折叠摘要 + 末尾自然语言总结,长输出可读"],
+      ["focus 决定 trace 粒度", "TracePanel 不接 selectedNode,无 focus 过滤、无 run 概要", "空画布=run 概要、选节点=该节点 trace + 编辑器跳范围"],
+      ["点 dot 看黑板 + 节点间操作记录", "黑板内容 + changed_keys 已显,操作记录 target-design 缺", "dot 同时给黑板内容和 end→start 全部操作流"],
+      ["run 后字段级 golden diff", "useGoldenDiff 已接、Compare/Golden Diff 覆盖层已挂", "保持:字段级 diff 在 editor 分屏,不回流 properties"],
+      ["批量某项失败显式上报", "批量已接 useBatchRun,显 completed/total/status", "保持并确认失败项不静默、错误可见"]
+    ]
+  },
+  "children": [
+    {
+      "code": "N4.1",
+      "title": "Predict 试飞(硬前提门控 + mock vs golden)",
+      "status": "partial",
+      "problem": "predict 作为 run 的硬前提逻辑已落地,但'为什么 Run 解锁了/还没解锁'对用户是哑的;agent 节点'未测试→逻辑OK→有golden'三态在画布上看不到,用户不知 predict 验了什么、哪些 agent 被 golden 兜底。",
+      "design": "04_run-and-verify.md B 段 + E1:predict 把逻辑跑通(logic 真跑、agent 走 mock),pass 才解锁 Run;agent 节点状态机三态;mock 由 golden 状态自动决定(无→占位 heuristic_stub / 有→golden_case)。",
+      "current": "Workspace.tsx:593-628 handlePredict(选 I/O 输入→postPredictRun→置 predict-pass/fail);center-action-bar.tsx:31-60 deriveButtons(predict-pass 才解锁 Run);trace.ts:90-104 mockedSourceLabel(已能在 trace 行标 golden_case/heuristic_stub)。",
+      "current_risk": "门控正确但不可解释;agent 三态标签未上画布。",
+      "fix": "1) 灰禁的 Predict/Run 给'先通过上一步'提示文字;2) predict 跑完把 agent 节点三态(未测试/逻辑OK/有golden)落到画布节点;3) 保持 mock-by-golden 自动、无手动选择器。",
+      "auto": ["deriveButtons 在各 stage 下 Predict/Run 的 highlight/disable 正确", "handleRun 在 stage!=='predict-pass' 时直接 return(已有:632-635)"],
+      "manual": ["compile 绿后点 Predict,观察 Run 从灰变亮;Run 灰时是否有理由提示", "predict 后画布 agent 节点是否显三态", "trace 行 mock 来源是否标 golden/heuristic"],
+      "pass": ["Run 仅在 predict-pass 可点", "灰禁按钮可解释", "agent 三态可见", "mock 来源自动且可辨"]
+    },
+    {
+      "code": "N4.2",
+      "title": "Run 控制(单次 / 批量 / 状态指示)",
+      "status": "partial",
+      "problem": "单次 run、批量 run、节点灯、run 历史都已接线;缺的是运行态的清晰指示——节点灯只有 running/success/error 三态色,没有'呼吸/运行中'动画语义,focus 不自动跟随当前运行节点。",
+      "design": "04 C 段:单次=选一份输入、批量=勾多份各跑一次(入口在 I/O 面板);节点呼吸灯随执行逐个亮(C5);focus 自动跟随当前运行节点(C6);批量进度轮询 + 某项失败显式上报(C11/C12)。",
+      "current": "Workspace.tsx:630-649 handleRun(predict-pass 门控→startRun→setRunId→开 timeline);node-status.ts deriveNodeStatuses(phase_start→running/phase_end→success/失败→error);TestInputsSection.tsx:63-168 useBatchRun(勾选+runBatch+completed/total/status+batchError);TimelinePanel.tsx run 历史列表(run_id/状态/耗时/token)。",
+      "current_risk": "运行态指示弱:无呼吸动画、focus 不跟随。",
+      "fix": "1) 节点 running 态加呼吸/边框动画(与 settings role-test 边框动画统一,P1);2) focus 自动跟随 activeTracePhase 当前运行节点(C6/G9);3) 批量失败项确保显式可见不静默(已有 batchError,核对每项级别)。",
+      "auto": ["deriveNodeStatuses last-event-wins:validation_fail→retry→pass 最终绿,retry_exhausted 最终红(node-status.test.ts)", "批量 completed/total 计数随轮询更新"],
+      "manual": ["真跑一次看画布节点是否逐个亮、当前节点是否有运行态动画", "勾两份输入跑批量看进度与失败上报", "run 历史是否显耗时/token"],
+      "pass": ["单/批量入口都在 I/O 面板", "节点灯随真实事件亮且运行态可辨", "批量失败显式上报", "run 历史信息完整"]
+    },
+    {
+      "code": "N4.3",
+      "title": "Trace 面板(流式 + agent 折叠 + dot 黑板 + prompt 三视图 + focus 粒度)",
+      "status": "partial",
+      "problem": "事件流式、dot→黑板、prompt 三视图、run 后回看都已接;但三项核心'去黑盒'交互缺失:agent 输出无分类折叠摘要(只能展开原始 JSON)、focus 节点不收窄 trace 也无 run 概要、完整 trace 文档无只读编辑器视图。",
+      "design": "04 D 段:run 时流式 + agent 分类折叠摘要(Worked/Explored/Thought + 末尾总结);run 后 focus 决定粒度(空画布=run 概要 / 节点=该节点 trace + 编辑器跳范围,D3/D5);完整 trace=人能读轻度格式化文档(D4);dot=黑板内容+节点间操作记录(D6);llm_call 模板/变量/渲染三视图(D8)。",
+      "current": "Panels.tsx:83-101 timeline 区(runId→TracePanel 流式 / 否则 TimelinePanel 历史);TraceEventRow.tsx:119-123 行展开=原始 JSON(无 agent 折叠);PromptInspector.tsx:44-71 三视图 Template/Variables/Rendered(已全);EdgeContextView.tsx dot→黑板+changed_keys(操作记录标 target-design:141-144);TracePanel.tsx 无 selectedNode 入参(无 focus 过滤);全仓无 trace 文档编辑器。",
+      "current_risk": "去黑盒只做了'看到事件',没做到'按节点收窄 + agent 可读折叠 + 完整文档'。",
+      "fix": "1) agent 流式输出做分类折叠摘要(复用 AgentStepsInline 折叠思路接进 TracePanel);2) TracePanel 接 selectedNode 做 focus 粒度(空=run 概要、节点=该节点 trace);3) 补只读编辑器渲染轻度格式化 trace 文档并按节点跳范围;4) dot 补节点间操作记录(依赖引擎 micro 事件)。",
+      "auto": ["TracePanel 空事件显'Waiting for run events'(TracePanel.tsx:48-59)", "PromptInspector 三 tab 各取 template_source/variables/resolved_prompt(PromptInspector.tsx:54-65)", "TraceFilter/SearchBar 按类型+关键字过滤(Showing N of M)"],
+      "manual": ["run 时 agent 节点长输出是否折叠成可读摘要还是一坨 JSON", "点某节点 trace 是否收窄;空画布是否给 run 概要", "点 dot 是否给黑板+操作记录", "点 llm_call 三视图是否齐"],
+      "pass": ["agent 输出分类折叠可读", "focus 决定 trace 粒度", "完整 trace 文档人能读", "dot 给黑板+操作记录", "prompt 三视图齐"]
+    },
+    {
+      "code": "N4.4",
+      "title": "Golden 评估(三态 / 创建两路 / 字段级 diff)",
+      "status": "partial",
+      "problem": "golden 基线列表、run 后字段级 diff、promote 晋升都已接;但 golden 创建两路不完整(手填空模版路 E4 在 I/O 面板未见、copilot 分析 bar 自动写 golden 的 UI 路径未在本面板呈现),agent 节点三态(E1)也未上画布。",
+      "design": "04 E 段:agent 三态 🔘未测试→🟡逻辑OK→🟢有golden(E1);mock 自动(E2);创建路 A=trace 占位节点旁按钮 + predict/run 跑完 copilot 分析 bar 弹窗(E3);路 B=按 io.outputs schema 自动生成空模版手填(E4);golden 设置归 I/O 面板(E5);run 后字段级 diff 在 editor 分屏不在 properties(E7);409 守卫 golden 非从 predict trace 捕获(E8)。",
+      "current": "GoldenSection.tsx:26-57 I/O 面板列 golden 基线(id/source_run_id/locked/time);Workspace.tsx:130-140 useGoldenDiff compare/promote;Workspace.tsx:801-828 Golden Diff 覆盖层(DiffView,不在 properties,符合 E7);TracePanel.tsx:78-97 Compare/Golden(promote)按钮;Workspace.tsx:113-116 completedRunId 喂 copilot 分析 bar(E3 路 A 自动写 golden 的数据通路)。",
+      "current_risk": "diff 与 promote 已通,但创建路 B(schema 空模版手填)缺、三态未上画布。",
+      "fix": "1) 补 E4:按 io.outputs schema 自动生成符合 schema 的空 golden 模版,在 I/O 面板手填;2) agent 三态上画布(与 N4.1 共用);3) 确认 copilot 分析 bar 弹窗→无 golden 节点自动写 golden 的 UI 闭环;4) 保持 409:golden 作者定,非 predict trace 捕获。",
+      "auto": ["GoldenSection 空态显 'No golden baselines yet'", "useGoldenDiff compare 出字段级 diff、promote 出 baseline(useGoldenDiff.test.ts)", "DiffView 渲染在覆盖层非 properties"],
+      "manual": ["跑完点 Compare 是否出字段级 diff", "点 Golden(promote)是否写基线并显在 I/O 面板", "I/O 面板能否按 schema 生成空模版手填 golden", "predict 来源 trace 是否被挡晋升(409)"],
+      "pass": ["三态可见", "创建两路都可用", "字段级 diff 在 editor 分屏", "mock 自动选", "409 守卫生效"]
+    }
+  ]
+}

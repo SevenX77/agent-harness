@@ -1,0 +1,135 @@
+{
+  "_meta": {
+    "node": "N1 — Home 欢迎屏 + workspace 外壳",
+    "workspace": "/Users/sevenx/Documents/coding/agent-harness/.worktrees/studio-mvp1-mainbased",
+    "entry_files": {
+      "home": "apps/studio/frontend/src/components/welcome/WelcomePage.tsx",
+      "welcome_screen_wrapper": "apps/studio/frontend/src/components/WelcomeScreen.tsx (薄包装, 直接渲染 WelcomePage)",
+      "shell": "apps/studio/frontend/src/components/studio/Workspace.tsx",
+      "header": "apps/studio/frontend/src/components/studio/Header.tsx",
+      "app_root": "apps/studio/frontend/src/App.tsx",
+      "tauri_bridge": "apps/studio/frontend/src/lib/tauri.ts",
+      "native_fs_rust": "apps/studio/tauri/src/native_fs.rs",
+      "recent_hook": "apps/studio/frontend/src/hooks/useRecentSkills.ts",
+      "copilot_store": "apps/studio/frontend/src/store/copilotStore.ts",
+      "copilot_ctx_switch": "apps/studio/frontend/src/hooks/useCopilot.ts",
+      "skills_router": "apps/studio/backend/app/routers/skills.py",
+      "skills_service": "apps/studio/backend/app/services/skills.py"
+    }
+  },
+
+  "storage_nativefs": {
+    "summary": "N1 的写盘存在两条互不重叠的路径。(1) 新建/打开 skill 的『脚手架与注册』走 Python 后端 POST /skills,Python 用 target.write_text 直接写盘(write_skill_files_atomic),不经 Rust native-fs。(2) 进入 workspace 后的『内容写』(GRAPH.md、phase 文件、copilot 会话、golden、publish package)在 Tauri 运行时统一走 Rust native_fs.rs 作为唯一写者。Recent/MRU 列表存在两处(localStorage + Rust 写的 recent_workspaces.json),是双写。结论:N1 本身的脚手架建盘不满足 D12『Rust 唯一写者』(由 Python 建初始文件树),但后续 workspace 内容写满足 D12。",
+    "findings": [
+      ["新建 skill 提交走前端 api.post('/skills', buildSkillCreatePayload(...)),即 HTTP 到 Python 后端,不是 Rust", "apps/studio/frontend/src/components/welcome/WelcomePage.tsx:390"],
+      ["Python 后端 create_new_skill 非 import 分支调用 write_skill_files_atomic 落地脚手架文件", "apps/studio/backend/app/services/skills.py:594"],
+      ["write_skill_files_atomic 用 Python target.write_text 写文件(临时目录+rename),这是 Python 直接写盘,不经 Rust native-fs", "apps/studio/backend/app/services/skills.py:152"],
+      ["进入 workspace 后内容写由 doWriteSkillFile 决定:isTauriRuntime() 时走 writeWorkspaceFile(Rust native-fs),否则降级到 HTTP writeSkillFile", "apps/studio/frontend/src/components/studio/Workspace.tsx:257"],
+      ["writeWorkspaceFile 通过 Tauri invoke('write_workspace_file') 调到 Rust", "apps/studio/frontend/src/lib/tauri.ts:155"],
+      ["Rust write_workspace_file 命令即 D12 唯一写者实现(乐观 expected-hash + 临时文件+rename 原子写)", "apps/studio/tauri/src/native_fs.rs:1233"],
+      ["native_fs.rs 文件头注释明确声明 D12:所有 skill/graph/copilot 写经这些命令,单一写者拥有本地文件系统,禁止 Python+Rust 双写", "apps/studio/tauri/src/native_fs.rs:1-8"],
+      ["打开文件夹时『有』写盘动作:openSkill 会 ensureWorkspaceSupportDirs(创建 .gemini/copilot/sessions),这条走 Rust", "apps/studio/frontend/src/components/welcome/WelcomePage.tsx:321"],
+      ["ensureWorkspaceSupportDirs → Rust 命令 ensure_workspace_support_dirs,在 workspace 下 create_dir_all .gemini/copilot/sessions", "apps/studio/tauri/src/native_fs.rs:1393"],
+      ["打开文件夹还会触发 POST /skills 注册(见 open_folder_chain),那一步的写盘(若 import 进 repair state)由 Python 处理,不经 Rust", "apps/studio/frontend/src/components/welcome/WelcomePage.tsx:303"],
+      ["Recent/MRU 存储字段:absolutePath、displayName、identity(=`local:<path>`)、lastOpenedAt,共 4 字段;无 phaseCount/lastRunAt(这些是渲染时从 skills 列表 join 出来的,不进 recent 存储)", "apps/studio/frontend/src/hooks/useRecentSkills.ts:3-8"],
+      ["Recent 主存:浏览器 localStorage 键 'recentWorkspaces',最多 10 条,按 identity 去重", "apps/studio/frontend/src/hooks/useRecentSkills.ts:40-41"],
+      ["Recent 副存(Tauri):openSkill 同时 fire-and-forget 调 addRecentWorkspace 写 Rust 端", "apps/studio/frontend/src/components/welcome/WelcomePage.tsx:320"],
+      ["Rust add_recent_workspace 把 recent 写进 <config_dir>/recent_workspaces.json(serde_json pretty)", "apps/studio/tauri/src/native_fs.rs:1298"],
+      ["recent_workspaces.json 路径来自 sidecar.default_user_config_dir()", "apps/studio/tauri/src/native_fs.rs:1229-1231"],
+      ["但 WelcomePage 渲染 Recent 实际读的是 useRecentSkills()(localStorage),并未读取 Rust 的 listRecentWorkspaces();即 Rust 端 recent 文件当前是写了但 Home 没用作渲染源(双写、单读 localStorage)", "apps/studio/frontend/src/components/welcome/WelcomePage.tsx:249"]
+    ]
+  },
+
+  "registry_backend": {
+    "summary": "后端仍是一个『注册表/metadata 模型』:list_skill_summaries 聚合 public 目录 + workspace 目录 + metadata 已保存条目三个来源,并用 unregistered_skill_ids 做软删除过滤;create/import 会 save_skill_index_entry + save_skill_summary 写注册;DELETE 走 unregister(软删,不删源目录)。聚合字段 phase_count/last_run_at/has_golden/config_mismatch 全部是后端算的。前端审查提到的『warning 放行』属实:import 缺 GRAPH.md/SKILL.md 现在是 logger.warning 放行进 repair 状态,不再硬拒。结论:注册表模型在后端『还在』(没拆),前端要做的去注册表化里,纯前端能改的有限(Recent 来源、卡片聚合 badge 的呈现);真正去掉 POST/DELETE 注册副作用要后端先动。",
+    "findings": [
+      ["GET /api/skills → list_skill_summaries(列表聚合)", "apps/studio/backend/app/routers/skills.py:283"],
+      ["POST /api/skills → create_new_skill(create 或 import_existing)", "apps/studio/backend/app/routers/skills.py:292"],
+      ["DELETE /api/skills/{skill_id} → delete_skill(204)", "apps/studio/backend/app/routers/skills.py:914"],
+      ["list_skill_summaries 三来源聚合:public(SKILLS_DIR)、workspace(workspace_skills_dir)、metadata.list_skills,并以 list_unregistered_skill_ids 过滤已软删项 —— 这就是注册表行为", "apps/studio/backend/app/services/skills.py:181-204"],
+      ["每条 summary 由 _attach_config_mismatch 注入 config_mismatch(后端用 detect_config_mismatch 算 repo URL 漂移)", "apps/studio/backend/app/services/skills.py:213, 254-264"],
+      ["phase_count 后端算(compile 后取 manifest.phases 数;失败回退 0)", "apps/studio/backend/app/services/skills.py:872-882"],
+      ["has_golden / last_run_at 也后端算(golden 目录是否存在 / 最近一次 run 的 started_at)", "apps/studio/backend/app/services/skills.py:883-884"],
+      ["create_new_skill 在 import 分支:缺 GRAPH.md/SKILL.md 时不再硬拒,改 logger.warning 放行进 repair 状态(WELCOME-2 / D2 FROZEN 注释)", "apps/studio/backend/app/services/skills.py:547-559"],
+      ["有 GRAPH.md 时只 lint_skill_path 探测、不 raise(让用户后续修正)", "apps/studio/backend/app/services/skills.py:560-562"],
+      ["import 成功后写注册:save_skill_index_entry + save_skill_summary", "apps/studio/backend/app/services/skills.py:574-578"],
+      ["delete_skill 是软删:resolve 后 unregister_skill + remove_skill_index_entry + remove_skill_summary,源目录不动(docstring: without deleting its source directory)", "apps/studio/backend/app/services/skills.py:442-453"],
+      ["create_new_skill 入口先查 metadata.get_skill_summary / get_skill_index_entry,存在即 SKILL_ALREADY_EXISTS —— 典型注册表去重", "apps/studio/backend/app/services/skills.py:516-523"]
+    ]
+  },
+
+  "open_folder_chain": {
+    "summary": "打开文件夹『确实会先 POST /skills 注册』。链路:点 Open folder → selectSkillDirectory(Rust 目录选择器)→ openSkill(dir) → resolveBackendSkillIdForWorkspace 对绝对路径调 POST /skills(import_existing=true)拿后端 skillId → rememberWorkspace(localStorage)+ addRecentWorkspace(Rust)+ ensureWorkspaceSupportDirs(Rust)→ onSelectSkill(createLocalWorkspaceSelection(skillId, root))进 workspace。manifest 拒绝文案多数已是『准死分支』:后端 import 已不对缺 manifest 抛 INVALID_DIRECTORY_PATH(改 warning 放行),所以 formatImportSkillError 里『missing GRAPH.md or SKILL.md』分支后端正常路径已不触发;只有 OS 级(路径不存在/不是目录)与 SKILL_ALREADY_EXISTS 仍会抛。",
+    "findings": [
+      ["Open folder 按钮 → importSkillDirectory", "apps/studio/frontend/src/components/welcome/WelcomePage.tsx:401-414"],
+      ["importSkillDirectory 先 selectSkillDirectory(Rust select_directory 目录选择器)拿绝对路径,再 openSkill(directory)", "apps/studio/frontend/src/components/welcome/WelcomePage.tsx:404-408"],
+      ["openSkill → resolveBackendSkillIdForWorkspace(workspaceRoot)", "apps/studio/frontend/src/components/welcome/WelcomePage.tsx:316-318"],
+      ["resolveBackendSkillIdForWorkspace 对绝对路径执行 api.post('/skills', buildSkillImportPayload(root))注册并 mutateSkills() —— 即『先注册』", "apps/studio/frontend/src/components/welcome/WelcomePage.tsx:295-314"],
+      ["buildSkillImportPayload 带 import_existing:true,skill_id 从路径末段推导", "apps/studio/frontend/src/components/welcome/WelcomePage.tsx:79-85"],
+      ["已注册(SKILL_ALREADY_EXISTS)时不报错,改取 existingSkillId 复用", "apps/studio/frontend/src/components/welcome/WelcomePage.tsx:306-312"],
+      ["进入 workspace 经过:rememberWorkspace(localStorage)→ addRecentWorkspace(Rust)→ ensureWorkspaceSupportDirs(Rust)→ onSelectSkill(createLocalWorkspaceSelection)", "apps/studio/frontend/src/components/welcome/WelcomePage.tsx:319-326"],
+      ["onSelectSkill 即 App 的 setCurrentSkillId,把 selection 字符串塞进 Workspace 的 skillId prop", "apps/studio/frontend/src/App.tsx:18-20"],
+      ["formatImportSkillError 仍含 INVALID_DIRECTORY_PATH『missing GRAPH.md or SKILL.md』文案分支;但后端 import 已不对此抛该 code(改 warning 放行),故此分支在正常 import 路径下是准死分支", "apps/studio/frontend/src/components/welcome/WelcomePage.tsx:215-228"],
+      ["后端对应处:_is_importable_skill_directory 为假时 logger.warning 放行,不 raise INVALID_DIRECTORY_PATH;只 OS 级(路径不存在/非目录)才 _raise_invalid_directory_path", "apps/studio/backend/app/services/skills.py:545-559"],
+      ["requestValidationMessage 的『import_existing 不被后端支持/请重启 sidecar』文案也是历史兼容分支,仅当后端是旧 sidecar(loc 含 import_existing)才触发", "apps/studio/frontend/src/components/welcome/WelcomePage.tsx:179-187"]
+    ]
+  },
+
+  "copilot_persistence": {
+    "summary": "copilotStore 不是纯内存:它有真正的落盘与冷启动恢复。会话以 <id>.json 写到 workspace 下 .gemini/copilot/sessions/<skillId>/,最后活跃 tab 写 _active.json,全部经 Rust native-fs(writeWorkspaceFile)。冷启动 hydrate() 用 listWorkspaceDir+readWorkspaceFile 从盘读回并合并(内存 session 在 id 冲突时赢)。切 skill:有 workspaceRoot 时 setContext+hydrate(不 reset,保留每 context 会话);无 workspaceRoot(web 降级)才 reset+newSession。回 Home(skillId=null)时 useCopilot 的 effect 直接 return,不动 store。D8『退出再进恢复』基本已实现(含恢复上次活跃 tab),后端无需持久化接口 —— 持久化在前端经 Rust 落到 workspace 内。仍有边角:web/非 Tauri 运行时落盘 inert(writeWorkspaceFile 抛 Desktop only,被吞进 persistenceError),即纯浏览器态不持久。",
+    "findings": [
+      ["会话落盘:persistSessionToDisk → writeWorkspaceFile 写 .gemini/copilot/sessions/<skillId>/<id>.json(经 Rust native-fs)", "apps/studio/frontend/src/store/copilotStore.ts:148-162"],
+      ["appendMessage(开新一轮)与 updateMessage(turn settle 后)都会触发 persistSessionToDisk,保证完整 transcript 落盘(R16/D8 注释:修过『重启只剩用户问、AI 答空白』)", "apps/studio/frontend/src/store/copilotStore.ts:283-286, 316-325"],
+      ["最后活跃 tab 落盘:persistActiveSession 写 _active.json", "apps/studio/frontend/src/store/copilotStore.ts:127-135"],
+      ["冷启动恢复:hydrate() 用 loadCopilotSessionsFromDisk 读盘并 merge,内存 session id 冲突时赢;每 context 只读盘一次(hydratedKeys)", "apps/studio/frontend/src/store/copilotStore.ts:201-246"],
+      ["loadCopilotSessionsFromDisk 经 listWorkspaceDir + readWorkspaceFile(均 Rust native-fs)读 sessions 目录", "apps/studio/frontend/src/store/copilotStore.ts:33-62"],
+      ["切 skill / 进入 workspace:useCopilot effect 在有 workspaceRoot 时 setContext+hydrate,无则 web 降级 reset+newSession", "apps/studio/frontend/src/hooks/useCopilot.ts:131-158"],
+      ["回 Home:skillId 为 null 时该 effect 直接 return,不清 store(会话留在 sessionsByContext,下次进同 skill 仍在)", "apps/studio/frontend/src/hooks/useCopilot.ts:131-134"],
+      ["store.reset 仅在 web 降级路径调用,会清空 sessionsByContext 与 hydratedKeys", "apps/studio/frontend/src/store/copilotStore.ts:340-350"],
+      ["落盘对 web/test 是 inert:writeWorkspaceFile 在非 Tauri 抛 'Desktop only',被 catch 进 persistenceError,不阻塞 UI", "apps/studio/frontend/src/store/copilotStore.ts:158-161"]
+    ]
+  },
+
+  "three_module_dataflow": {
+    "summary": "N1 五个操作跨三模块。①前端 = React(WelcomePage/Workspace/copilotStore);③a studio 后端 = Python FastAPI /api/skills(注册表/聚合/lint);native-fs = Rust Tauri 命令(本地文件唯一写者 + recent.json + 目录选择器)。交接点:前端→后端用 HTTP api client(契约 = CreateSkillReq/SkillSummary);前端→Rust 用 Tauri invoke(契约 = workspaceRoot+relativePath+content/expected_hash)。",
+    "steps": [
+      ["新建 skill", "WelcomePage.submitNewSkill 收集 name → buildSkillCreatePayload → api.post('/skills') → 拿 SkillSummary 后 openSkill", "create_new_skill 校验去重 + write_skill_files_atomic 落脚手架 + save_skill_index_entry/save_skill_summary 注册", "不参与脚手架写;仅 openSkill 时 ensureWorkspaceSupportDirs 建 .gemini 目录", "契约: POST /api/skills CreateSkillReq{skill_id,directory_path?} → 201 SkillSummary{id,directory_path,phase_count,...}"],
+      ["打开文件夹", "Open folder → selectSkillDirectory(Rust)→ openSkill → resolveBackendSkillIdForWorkspace 调 POST /skills(import)", "create_new_skill import 分支:缺 manifest warning 放行进 repair,save 注册条目,返回 SkillSummary", "select_directory 弹目录选择器;ensure_workspace_support_dirs 建支持目录;add_recent_workspace 写 recent.json", "前端→Rust invoke('select_directory',{defaultPath});前端→后端 POST /api/skills import_existing=true"],
+      ["Recent 列表", "useRecentSkills 读 localStorage 'recentWorkspaces' 渲染;与 useSkills(/api/skills)join 出 phaseCount/badge", "GET /api/skills 提供 phase_count/has_golden/config_mismatch 供卡片 badge", "addRecentWorkspace/list/remove 写 recent_workspaces.json(当前 Home 未用 list 作渲染源)", "前端读 localStorage(主) + GET /api/skills(聚合 join);Rust recent.json 为副写"],
+      ["进入 workspace 外壳", "App.setCurrentSkillId(selection) → Workspace 用 resolveWorkspaceIdentity 拆出 skillId/workspaceRoot,渲染顶栏/Toolbar/三栏", "useSkills(currentSkillId) 拉 GET /api/skills/{id} detail(GRAPH/phases/files)", "后续文件保存 doWriteSkillFile→writeWorkspaceFile(Rust 唯一写者)", "selection 字符串契约 createLocalWorkspaceSelection(skillId, root);保存契约 write_workspace_file{workspaceRoot,relativePath,content,expectedHash}"],
+      ["copilot 对话", "useCopilot.setContext/hydrate;CopilotPanel 渲染;消息流经 copilotStore append/update", "copilot 路由(/api 下,WS)负责对话推理(N1 仅外壳,内容属后续节点)", "会话/活跃tab 落盘与读回:writeWorkspaceFile/readWorkspaceFile/listWorkspaceDir 全经 Rust", "前端→Rust write/read/list workspace 命令,路径 .gemini/copilot/sessions/<skillId>/"]
+    ]
+  },
+
+  "shell_isolation": {
+    "summary": "skillId 切换由 Workspace 顶层 useEffect 做强重置:重置 navStack、activePanel、copilotOpen,并由 [currentSkillId] 的第二个 effect 重置 runId、selectedTestInputId。pushNavSkill/popNavTo(子图导航)另外清 activeFileDetails/splitMode/selectedNode。Back-to-Home(Header onHome→handleHome)先关 Settings 再 onCloseSkill(=setCurrentSkillId(null)),触发同一 useEffect 把外壳清空(navStack=[]、activePanel=null、copilotOpen=false),并在 canvas 区渲染 WelcomePage。Settings overlay 是条件渲染的 SettingsPage,不卸载 Workspace 本体(三栏结构仍在,SettingsPage 盖在 canvas 区),回 Home 与切 skill 都会先 setSettingsOpen(false)。copilot 的跨 skill 隔离不在 Workspace 重置,而在 useCopilot 按 (workspaceRoot,skillId) 切 context(见 copilot_persistence)。",
+    "findings": [
+      ["skillId 变化 useEffect:null→清空(navStack[],activePanel null,copilotOpen false);非 null→设 [skillId]、activePanel 'assets'、copilotOpen true", "apps/studio/frontend/src/components/studio/Workspace.tsx:73-83"],
+      ["currentSkillId 变化第二 effect:重置 runId 与 selectedTestInputId(避免跨 skill 残留运行/测试输入)", "apps/studio/frontend/src/components/studio/Workspace.tsx:102-105"],
+      ["pushNavSkill(进子图)清 activeFileDetails/splitMode/selectedNode/selectedNodeId", "apps/studio/frontend/src/components/studio/Workspace.tsx:472-478"],
+      ["popNavTo(面包屑回退)同样清 activeFileDetails/splitMode/selectedNode/selectedNodeId", "apps/studio/frontend/src/components/studio/Workspace.tsx:480-486"],
+      ["Back-to-Home:Header Back 按钮 onClick=onHome", "apps/studio/frontend/src/components/studio/Header.tsx:91-92"],
+      ["handleHome 先 setSettingsOpen(false) 再 onCloseSkill", "apps/studio/frontend/src/components/studio/Workspace.tsx:690-693"],
+      ["onCloseSkill = App 的 setCurrentSkillId(null),使 skillId→null 触发上面的清空 effect", "apps/studio/frontend/src/App.tsx:20"],
+      ["Settings overlay 不卸载外壳:settingsOpen 时在 canvas 区条件渲染 <SettingsPage>,Header/Toolbar/三栏仍挂载", "apps/studio/frontend/src/components/studio/Workspace.tsx:767-768"],
+      ["skillId===null 时 canvas 区渲染 <WelcomePage onSelectSkill={onSelectSkill}>(即 Home 嵌在 workspace 外壳里复用)", "apps/studio/frontend/src/components/studio/Workspace.tsx:785-786"],
+      ["copilot 隔离不靠 Workspace 重置:由 useCopilot effect 按 (workspaceRoot,skillId) setContext/hydrate 切上下文", "apps/studio/frontend/src/hooks/useCopilot.ts:131-158"]
+    ]
+  },
+
+  "ready_vs_blocked": {
+    "summary": "去注册表化的 N1 修复项里:纯前端可做的主要是『让 Open folder / Recent 不依赖 POST /skills 注册副作用、Recent 渲染统一到一个源、清掉准死的 manifest 拒绝文案』的呈现层;真正去掉后端注册表(POST 写 index/summary、DELETE 软删 unregister、list 三源聚合)需后端先动,属后端阻塞。D8 copilot 恢复、D12 workspace 内容写、D2 不卡校验已基本满足,不需作为缺失项。",
+    "rows": [
+      ["Recent 渲染源二选一(localStorage vs Rust recent.json)统一,避免双写单读不一致", "纯前端可做", "apps/studio/frontend/src/components/welcome/WelcomePage.tsx:249 + apps/studio/frontend/src/hooks/useRecentSkills.ts:62 + apps/studio/frontend/src/lib/tauri.ts:238"],
+      ["清理/收敛 Open folder 的准死分支文案(missing GRAPH.md/SKILL.md、import_existing 不支持),与后端 warning 放行对齐", "纯前端可做", "apps/studio/frontend/src/components/welcome/WelcomePage.tsx:215-228, 179-187 + apps/studio/backend/app/services/skills.py:547-559"],
+      ["Recent 卡片极简化(D-1-1):是否仍展示 Golden / Config drift / phases / lastRun badge 由前端决定", "纯前端可做", "apps/studio/frontend/src/components/welcome/WelcomePage.tsx:509-541, 578-584"],
+      ["去掉打开文件夹必先 POST /skills 注册的耦合(D11 无注册表:打开任意文件夹即进 workspace,不写后端 index/summary)", "需后端先动 / 需对齐", "apps/studio/frontend/src/components/welcome/WelcomePage.tsx:295-314 + apps/studio/backend/app/services/skills.py:574-578"],
+      ["去掉后端 list 三源聚合 + unregistered 过滤(注册表模型本体)", "后端阻塞", "apps/studio/backend/app/services/skills.py:181-204"],
+      ["DELETE 软删语义(unregister)是否保留 / 改为纯 Recent 移除(R1:IDE 内不删 skill,只移出列表)", "需对齐(前端已只移列表+可选 DELETE)", "apps/studio/frontend/src/components/welcome/WelcomePage.tsx:358-370 + apps/studio/backend/app/services/skills.py:442-453"],
+      ["卡片聚合字段(phaseCount/lastRunAt/has_golden/config_mismatch)若要保留则依赖后端 GET /api/skills 计算", "后端阻塞(若保留)", "apps/studio/backend/app/services/skills.py:872-884, 254-264"],
+      ["D8 copilot 退出恢复 — 已实现(落盘+hydrate+活跃tab),非缺失", "已实现", "apps/studio/frontend/src/store/copilotStore.ts:148-246"],
+      ["D12 workspace 内容写经 Rust 唯一写者 — 已实现(脚手架建盘除外,见 storage_nativefs)", "已实现(脚手架除外)", "apps/studio/frontend/src/components/studio/Workspace.tsx:257 + apps/studio/tauri/src/native_fs.rs:1233"],
+      ["D2 打开文件夹不卡校验 — 已实现(后端 warning 放行进 repair 状态)", "已实现", "apps/studio/backend/app/services/skills.py:547-559"]
+    ]
+  }
+}

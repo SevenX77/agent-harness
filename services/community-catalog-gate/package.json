@@ -1,0 +1,14 @@
+{
+  "name": "community-catalog-gate",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Community Probe Catalog ingestion gate (serverless) + publishing aggregator. Phase 2a.",
+  "scripts": {
+    "test": "node --test",
+    "keygen": "node publish/aggregate.mjs keygen"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

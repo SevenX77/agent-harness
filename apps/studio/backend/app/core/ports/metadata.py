@@ -6,7 +6,6 @@ from typing import Protocol, TypedDict
 
 from app.models.runs import RunMetadata
 from app.models.settings import AppSettings
-from app.models.skills import SkillSummary
 
 
 class SkillIndexEntry(TypedDict):
@@ -33,40 +32,12 @@ class MetadataStore(Protocol):
         """Remove one skill index entry if present."""
         ...
 
-    async def list_unregistered_skill_ids(self, user_id: str) -> set[str]:
-        """Return skill ids hidden from Studio for one user."""
-        ...
-
-    async def unregister_skill(self, user_id: str, skill_id: str) -> None:
-        """Hide one skill id from Studio without deleting its source files."""
-        ...
-
-    async def register_skill(self, user_id: str, skill_id: str) -> None:
-        """Make one previously hidden skill id visible in Studio again."""
-        ...
-
     async def read_app_settings(self) -> AppSettings:
         """Return global Studio application settings."""
         ...
 
     async def write_app_settings(self, settings: AppSettings) -> None:
         """Persist global Studio application settings."""
-        ...
-
-    async def list_skills(self, user_id: str) -> list[SkillSummary]:
-        """Return saved skill summaries for one user."""
-        ...
-
-    async def get_skill_summary(self, user_id: str, skill_id: str) -> SkillSummary | None:
-        """Return one saved skill summary when present."""
-        ...
-
-    async def save_skill_summary(self, user_id: str, summary: SkillSummary) -> None:
-        """Persist one skill summary for one user."""
-        ...
-
-    async def remove_skill_summary(self, user_id: str, skill_id: str) -> None:
-        """Remove one skill summary if present."""
         ...
 
     async def list_runs(self, user_id: str, skill_id: str) -> list[RunMetadata]:

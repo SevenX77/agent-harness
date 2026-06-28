@@ -1,0 +1,61 @@
+{
+  "name": "llm_credentials.json",
+  "what": "Studio 本地存放 LLM 凭证的文件：以平铺表的形式存所有 provider 的 endpoint(可调用地址 + API key)和 route(具体模型路由),给 gateway 运行时解析用。",
+  "version": "schema_version = 4 (Literal[4], 固定)",
+  "structs": [
+    {
+      "name": "顶层 (LLMCredentialsFile)",
+      "fields": [
+        {"name": "schema_version", "type": "int(=4)", "meaning": "固定 4；非 4 或含旧 providers 字段直接报错拒绝 (llm_credentials.py)", "sensitive": false},
+        {"name": "provider_endpoints", "type": "map<endpoint_id, ProviderEndpoint>", "meaning": "平铺的 endpoint 表,key 是 endpoint_id (llm_config.py)", "sensitive": false},
+        {"name": "provider_routes", "type": "map<route_id, ProviderRoute>", "meaning": "平铺的 route 表,key 是 route_id;每条 route 的 endpoint_id 必须在 provider_endpoints 中存在 (llm_config.py, llm_credentials.py)", "sensitive": false},
+        {"name": "runtime_policy", "type": "RuntimePolicy", "meaning": "gateway 运行时健康/探测策略:provider 宕机 TTL、探测超时、token 升级轮次、终端重试、密钥生命周期等 (llm_config.py, schema.py)", "sensitive": false}
+      ]
+    },
+    {
+      "name": "ProviderEndpoint (schema.py, Studio 子类 llm_config.py 加 display_name)",
+      "fields": [
+        {"name": "endpoint_id", "type": "string(slug)", "meaning": "endpoint 唯一标识,必须是 slug 形态;也是 map 的 key", "sensitive": false},
+        {"name": "display_name", "type": "string", "meaning": "Studio 端给用户看的 provider 标签 (llm_config.py,仅 Studio DTO 有,落 gateway 时被 exclude)", "sensitive": false},
+        {"name": "protocol", "type": "enum<openai_compatible|anthropic_compatible|google_genai|ark_runtime>", "meaning": "调用协议族,决定用哪套请求格式 (schema.py)", "sensitive": false},
+        {"name": "base_url", "type": "string", "meaning": "endpoint 的 canonical base URL,写入前按 protocol 规范化 (canonicalize_base_url)", "sensitive": false},
+        {"name": "credential_ref", "type": "string|null", "meaning": "可选的凭证引用 ref;credential provider 用它定位 key,不把 secret 放到 route 上 (credentials.py)", "sensitive": false},
+        {"name": "api_key", "type": "SecretStr|null", "meaning": "provider 明文 API key;落盘时取 get_secret_value() 写明文,GET 响应里被 redact (llm_credentials.py, schema.py)", "sensitive": true},
+        {"name": "status", "type": "enum<verified|unverified_manual|disabled|failed>", "meaning": "endpoint 验证状态,默认 unverified_manual (schema.py,173)", "sensitive": false},
+        {"name": "last_test_at", "type": "string|null", "meaning": "最近一次测试时间戳 (ISO 字符串)", "sensitive": false},
+        {"name": "last_test_message", "type": "string|null", "meaning": "最近一次测试的结果消息", "sensitive": false},
+        {"name": "provider_kind", "type": "enum<official|third_party|custom>", "meaning": "provider 归类,官方 endpoint(anthropic/openai 等)按 CURATED_PROVIDER_KIND 强制为 official (schema.py, llm_credentials.py)", "sensitive": false},
+        {"name": "rate_limit_bucket", "type": "string|null", "meaning": "限流分桶标识,可多个 endpoint 共享一个限流桶", "sensitive": false},
+        {"name": "timeout_seconds", "type": "int(默认120,>=1)", "meaning": "该 endpoint 调用超时秒数 (schema.py)", "sensitive": false},
+        {"name": "trust_env", "type": "bool(默认false)", "meaning": "是否信任环境里的代理设置 (schema.py)", "sensitive": false},
+        {"name": "proxy_env", "type": "string|null", "meaning": "指定读取代理地址的环境变量名", "sensitive": false},
+        {"name": "metadata", "type": "map<string, any>", "meaning": "自由扩展元数据,如 capability_library(能力候选库)(schema.py, llm_credentials.py)", "sensitive": false}
+      ]
+    },
+    {
+      "name": "ProviderRoute (schema.py, Studio 子类 llm_config.py 加 display_name)",
+      "fields": [
+        {"name": "route_id", "type": "string", "meaning": "route 唯一标识,强制等于 endpoint_id:route_slug (schema.py,240)", "sensitive": false},
+        {"name": "display_name", "type": "string|null", "meaning": "Studio 端可选的展示/管理标签 (llm_config.py,仅 Studio DTO)", "sensitive": false},
+        {"name": "endpoint_id", "type": "string(slug)", "meaning": "该 route 挂在哪个 endpoint 上,必须指向已存在的 endpoint (schema.py)", "sensitive": false},
+        {"name": "route_slug", "type": "string(slug)", "meaning": "route 在该 endpoint 下的 slug 形态模型名 (schema.py)", "sensitive": false},
+        {"name": "provider_model_id", "type": "string", "meaning": "provider 真实模型 ID,发请求时实际用的模型名 (schema.py)", "sensitive": false},
+        {"name": "canonical_id", "type": "string", "meaning": "跨 provider 归一化的模型标识,用于把不同 provider 的同模型聚合 (schema.py)", "sensitive": false},
+        {"name": "status", "type": "enum<verified|unverified_manual|disabled|failed>", "meaning": "route 验证状态,默认 unverified_manual (schema.py)", "sensitive": false},
+        {"name": "snapshot_version", "type": "SnapshotVersion|null", "meaning": "能力快照版本号,可空", "sensitive": false},
+        {"name": "capabilities", "type": "map<string, CapabilityValue>", "meaning": "归一化能力表,每项含 value+source(api_list/provider_doc/probed_verified 等)+observed_at (schema.py,219)", "sensitive": false},
+        {"name": "verified_profiles", "type": "list<VerifiedProfile>", "meaning": "已测通的调用方式列表,每个 profile 含 capability/method_id/request_mapper_id/status/fallback_rank/输入输出模态 (schema.py,220)", "sensitive": false},
+        {"name": "metadata", "type": "map<string, any>", "meaning": "自由扩展元数据,如 legacy_migrated_from 标记 v3 迁移来源 (schema.py, llm_credentials.py)", "sensitive": false}
+      ]
+    }
+  ],
+  "owner": [
+    ["Schema 定义", "可执行 schema 由 gateway 库拥有:graph_agent_gateway.registry.schema 的 ProviderEndpoint/ProviderRoute/RuntimePolicy(schema.py/207/88)。Studio 后端只在 llm_config.py 薄封装,子类化加 display_name(llm_config.py/77/121)"],
+    ["路径定义", "由 Studio 后端 llm_paths.py 的 credentials_path() 算(llm_paths.py);可被环境变量 STUDIO_LLM_CREDENTIALS_PATH 覆盖,否则落到 APP_SETTINGS_DIR/llm/llm_credentials.json"],
+    ["读写", "Studio 后端 llm_credentials.py 读写:load_credentials() 读(拒旧 schema)、save_credentials()/upsert_endpoints()/upsert_routes()/delete_* 写,全部经原子写 _save_credentials_unlocked()(llm_credentials.py/67/105/156/446)。HTTP 入口在 llm.py"],
+    ["文件归属", "gateway-owned 数据契约 + Studio-owned 本地存储:schema 归 gateway,文件本身是 Studio 本地凭证存储(llm_config.py docstring 明示 executable schema 由 gateway 拥有)"]
+  ],
+  "path": "默认 <APP_SETTINGS_DIR>/llm/llm_credentials.json,macOS 上即 ~/Library/Application Support/AgentStudio/llm/llm_credentials.json(APP_DIR_NAME='AgentStudio', paths.py/34;_LLM_SETTINGS_DIR='llm', llm_paths.py)。路径由 credentials_path() 计算(llm_paths.py),env STUDIO_LLM_CREDENTIALS_PATH 可覆盖",
+  "rw": "原子写:tempfile.mkstemp 写同目录临时文件 → fsync → chmod 0600 → os.replace 原子替换 → 再 chmod 0600(_save_credentials_unlocked, llm_credentials.py)。父目录 mkdir 后 chmod 0700。全程持 _credentials_lock(threading.Lock)串行化。写前调 record_api_write() 通知文件监视器避免自触发(llm_credentials.py)",
+  "security": "api_key 以明文落盘,仅靠文件 0600 + 父目录 0700 兜底(_save_credentials_unlocked + _credentials_payload_for_storage 取 get_secret_value() 写明文, llm_credentials.py/476)。GET /registry 走 serialize_for_response→model_dump(mode='json'),SecretStr 被 Pydantic redact 成 '**********'(SECRET_REDACTION_PLACEHOLDER, llm_credentials.py/100)。单条明文只走 scoped 端点 GET /registry/endpoints/{id}/secret 显式 get_secret_value() 返回(llm.py)。upsert 时若传入是占位符或空串则保留旧 key,不覆盖明文(_preserved_secret/_is_new_secret, llm_credentials.py)"
+}

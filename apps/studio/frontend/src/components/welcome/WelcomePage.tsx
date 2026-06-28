@@ -1,15 +1,14 @@
-import { AlertCircle, AlertTriangle, Clock3, FolderOpen, Layers, Layers3, MoreVertical, Plus, Sparkles, Trash2 } from 'lucide-react'
-import { useMemo, useState, type FormEvent } from 'react'
+import { AlertTriangle, Clock3, FolderOpen, Layers, Layers3, MoreVertical, Plus, Trash2 } from 'lucide-react'
+import { useState, type FormEvent } from 'react'
 import { toast } from 'sonner'
-import { api } from '../../api/client'
 import type { SkillSummary } from '../../api/types'
 import { useAppSettings } from '../../hooks/useAppSettings'
 import { useRecentSkills } from '../../hooks/useRecentSkills'
-import { useSkills } from '../../hooks/useSkills'
-import { revealInFileManager, selectSkillDirectory } from '../../lib/tauri'
+import { getRuntimeConfig } from '../../config/runtime'
+import { revealInFileManager, selectSkillDirectory, ensureWorkspaceSupportDirs, createSkillWorkspace, openSkillWorkspace } from '../../lib/tauri'
 import { errorMessage, isRecord } from '../../utils/errors'
-import { effectiveDefaultSkillsDirectory, joinDirectoryPath } from '../../utils/skill-paths'
-import { Badge } from '../ui/badge'
+import { joinDirectoryPath } from '../../utils/skill-paths'
+import { Alert, AlertDescription, AlertTitle } from '../ui/alert'
 import { Button } from '../ui/button'
 import {
   Card,
@@ -17,19 +16,16 @@ import {
   CardHeader,
   CardTitle,
 } from '../ui/card'
-import { requestDeleteConfirmationToast } from '../ui/delete-confirm-toast'
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
-  ContextMenuSeparator,
   ContextMenuTrigger,
 } from '../ui/context-menu'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu'
 import {
@@ -39,11 +35,13 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '../ui/empty'
-import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
+import { Skeleton } from '../ui/skeleton'
+import { createLocalWorkspaceSelection, isAbsolutePath } from '../studio/workspace-identity'
 import { NewSkillDialog } from './NewSkillDialog'
-import { formatLastRun, normalizeSkillId, shortPath, skillIdFromPath, sortRecent } from './utils'
+import { formatLastRun, normalizeSkillId, shortPath, skillIdFromPath } from './utils'
 
 export const REVEAL_ACTION_LABEL = 'Show in folder'
+export const REMOVE_ACTION_LABEL = 'Remove from recent'
 export const ACTION_MENU_CLASSNAME = 'w-48'
 
 interface WelcomePageProps {
@@ -57,7 +55,16 @@ interface CreateSkillPayload {
 }
 
 export function defaultSkillsDirectory(customDirectory?: string | null): string | null {
-  return effectiveDefaultSkillsDirectory(customDirectory)
+  if (customDirectory) return customDirectory
+  const config = getRuntimeConfig()
+  if (config?.configDir) {
+    return `${config.configDir}/Skills`
+  }
+  // No real default folder is known yet (no app setting, no runtime config dir).
+  // Return null so the UI shows an honest "Default: AgentStudio/Skills" hint and
+  // the Rust native-fs writer picks the OS config Skills dir at create time —
+  // never a fabricated, non-existent `/studio/config/Skills` placeholder path.
+  return null
 }
 
 export function buildSkillCreatePayload(name: string, parentDirectory?: string | null): CreateSkillPayload {
@@ -76,34 +83,20 @@ export function buildSkillImportPayload(directoryPath: string): CreateSkillPaylo
   }
 }
 
-function comparableDirectoryPath(path: string) {
-  return path.trim().replace(/\\/g, '/').replace(/\/+$/, '')
+function ignorePromise(promise: Promise<unknown>) {
+  promise.catch(() => undefined)
 }
 
-export function registeredSkillIdForImport(directoryPath: string, skills: SkillSummary[]): string | null {
-  const selectedPath = comparableDirectoryPath(directoryPath)
-  const pathMatch = skills.find((skill) => (
-    skill.directory_path ? comparableDirectoryPath(skill.directory_path) === selectedPath : false
-  ))
-  if (pathMatch) {
-    return pathMatch.id
-  }
-
-  const selectedSkillId = skillIdFromPath(directoryPath)
-  return skills.find((skill) => skill.id === selectedSkillId)?.id ?? null
+export function registeredSkillIdForImport(directoryPath: string, skills: SkillSummary[]): string | null
+export function registeredSkillIdForImport(): string | null {
+  return null
 }
 
-export function requestSkillDeleteConfirmation(
-  skill: Pick<SkillSummary, 'id' | 'name'>,
-  onConfirm: () => void | Promise<void>,
-) {
-  const displayName = skill.name.trim() || skill.id
-  requestDeleteConfirmationToast({
-    id: `delete-skill-${skill.id}`,
-    title: `Delete ${displayName}?`,
-    description: 'This skill will be removed from Studio. Its source folder stays on disk.',
-    onConfirm,
-  })
+interface WorkspaceCardModel {
+  absolutePath: string
+  displayName: string
+  identity: string
+  lastOpenedAt: string
 }
 
 interface StudioErrorPayload {
@@ -123,73 +116,6 @@ function sentenceFragment(message: string) {
   return message ? `${message[0].toLowerCase()}${message.slice(1)}` : message
 }
 
-function relativeLintFile(value: string): string | null {
-  const match = value.match(/[\\/]?((?:phases[\\/][A-Za-z0-9_-]+[\\/](?:LOGIC|SUBGRAPH|SKILL)\.md)|GRAPH\.md|io[\\/]inputs\.json|io[\\/]outputs\.json)/)
-  return match ? match[1].replace(/\\/g, '/') : null
-}
-
-function lineFromLintMessage(value: string): string | null {
-  const match = value.match(/(?:GRAPH\.md|io[\\/](?:inputs|outputs)\.json|phases[\\/][A-Za-z0-9_-]+[\\/](?:LOGIC|SUBGRAPH|SKILL)\.md):(?<line>\d+)/)
-  return match?.groups?.line ?? null
-}
-
-function isMissingPythonCallable(message: string) {
-  return /python_callable/.test(message) && /(Input should be a valid string|required)/.test(message)
-}
-
-function cleanLintMessage(message: string): string {
-  if (isMissingPythonCallable(message)) {
-    return 'LOGIC.md is missing <python_callable>. Add a <python_callable> block that names a Python function in phases/<phase>/actions/.'
-  }
-  return message
-    .replace(/\s*For further information visit https:\/\/errors\.pydantic\.dev\/\S+/g, '')
-    .replace(/\[F-[^\]]+\]\s*/g, '')
-    .replace(/^.*(?:GRAPH\.md|io[\\/](?:inputs|outputs)\.json|phases[\\/][A-Za-z0-9_-]+[\\/](?:LOGIC|SUBGRAPH|SKILL)\.md):\d+\s*/s, '')
-    .trim()
-}
-
-function firstLintErrorMessage(payload: StudioErrorPayload): string | null {
-  const errors = payload.details?.errors
-  if (!Array.isArray(errors) || errors.length === 0) {
-    return null
-  }
-  const first = errors[0]
-  if (!isRecord(first) || typeof first.message !== 'string') {
-    return null
-  }
-  const file = typeof first.file === 'string'
-    ? relativeLintFile(first.file)
-    : relativeLintFile(first.message)
-  const line = typeof first.line === 'number'
-    ? String(first.line)
-    : lineFromLintMessage(first.message)
-  const location = [
-    file,
-    line,
-  ].filter(Boolean).join(':')
-  const message = cleanLintMessage(first.message)
-  return location ? `${location} ${message}` : message
-}
-
-function requestValidationMessage(payload: StudioErrorPayload): string {
-  const errors = payload.details?.errors
-  const first = Array.isArray(errors) && isRecord(errors[0]) ? errors[0] : null
-  const location = first && Array.isArray(first.loc) ? first.loc.join('.') : ''
-  if (location.includes('import_existing')) {
-    return 'the running backend does not support folder import yet. Quit and restart Studio so the updated sidecar is loaded.'
-  }
-  return 'the request did not match the /skills API contract.'
-}
-
-function existingSkillIdFromError(error: unknown): string | null {
-  const payload = studioErrorPayload(error)
-  if (payload?.error_code !== 'SKILL_ALREADY_EXISTS') {
-    return null
-  }
-  const existingSkillId = payload.details?.skill_id
-  return typeof existingSkillId === 'string' ? existingSkillId : null
-}
-
 export function formatCreateSkillError(error: unknown, skillId: string): string {
   const payload = studioErrorPayload(error)
   if (payload?.error_code === 'SKILL_ALREADY_EXISTS') {
@@ -198,38 +124,34 @@ export function formatCreateSkillError(error: unknown, skillId: string): string 
   if (payload?.error_code === 'INVALID_DIRECTORY_PATH' && payload.message) {
     return `Cannot create "${skillId}": ${sentenceFragment(payload.message)}`
   }
-  if (payload?.error_code === 'MANIFEST_VALIDATION_FAILED') {
-    if (payload.message?.toLowerCase() === 'request validation failed') {
-      return `Cannot create "${skillId}": ${requestValidationMessage(payload)}`
-    }
-    return `Cannot create "${skillId}": ${firstLintErrorMessage(payload) ?? sentenceFragment(payload.message ?? 'manifest validation failed')}`
-  }
+  // D2 (不卡导入): new-skill creation now writes via the Studio Rust native-fs
+  // command, which rejects OS-level failures with a plain error string and emits
+  // no structured error_code. Manifest/lint validation copy belongs only to the
+  // Open-folder/import path, so the create path surfaces only OS-level reasons
+  // (SKILL_ALREADY_EXISTS, INVALID_DIRECTORY_PATH) and otherwise falls through to
+  // the raw error message.
   return errorMessage(error)
 }
 
+/**
+ * Format an Open-folder failure for the toast description.
+ *
+ * Under D2 (open any local folder, never reject for a missing GRAPH.md/SKILL.md)
+ * and D12 (local writes go through the Studio Rust native-fs writer), the open
+ * path runs openSkillWorkspace, whose Tauri `invoke` rejects with a PLAIN STRING
+ * (or plain object) on OS-level failure only — never the structured
+ * StudioErrorPayload that the retired Python POST /skills import returned. So the
+ * old manifest/registry rejection branches ("Cannot import this folder", missing
+ * GRAPH.md/SKILL.md, lint, request-validation) were unreachable dead copy and are
+ * removed. errorMessage surfaces the raw Rust reason directly (errors.ts handles
+ * both string and plain-object Tauri rejections).
+ */
 export function formatImportSkillError(error: unknown): string {
-  const payload = studioErrorPayload(error)
-  if (payload?.error_code === 'INVALID_DIRECTORY_PATH' && payload.message) {
-    return `Cannot import this folder: ${sentenceFragment(payload.message)}`
-  }
-  if (payload?.error_code === 'SKILL_ALREADY_EXISTS') {
-    const existingSkillId = payload.details?.skill_id
-    return typeof existingSkillId === 'string'
-      ? `Cannot import this folder: it is already registered as "${existingSkillId}".`
-      : 'Cannot import this folder: it is already registered.'
-  }
-  if (payload?.error_code === 'MANIFEST_VALIDATION_FAILED') {
-    if (payload.message?.toLowerCase() === 'request validation failed') {
-      return `Cannot import this folder: ${requestValidationMessage(payload)}`
-    }
-    return `Cannot import this folder: ${firstLintErrorMessage(payload) ?? sentenceFragment(payload.message ?? 'manifest validation failed')}`
-  }
   return errorMessage(error)
 }
-
 
 export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
-  const [importing, setImporting] = useState(false)
+  const [openingFolder, setOpeningFolder] = useState(false)
   const [creating, setCreating] = useState(false)
   const [newSkillOpen, setNewSkillOpen] = useState(false)
   const [newSkillName, setNewSkillName] = useState('new-skill')
@@ -238,14 +160,53 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
   const [newSkillError, setNewSkillError] = useState<string | null>(null)
   const appSettings = useAppSettings()
   const defaultSkillParentDirectory = defaultSkillsDirectory(appSettings.settings.default_skills_directory)
-  const { skills, skillListError, mutateSkills } = useSkills(null)
-  const skillIds = useMemo(() => skills.map((skill) => skill.id), [skills])
-  const { recentSkills, rememberSkill } = useRecentSkills(skillIds)
-  const visibleSkills = useMemo(() => sortRecent(skills, recentSkills), [recentSkills, skills])
+  const { recentWorkspaces, rememberWorkspace, removeWorkspace, isHydrating, recentError } = useRecentSkills()
 
-  const openSkill = (skillId: string) => {
-    rememberSkill(skillId)
-    onSelectSkill(skillId)
+  // Recent is a pure MRU projection (D11/D-1-1): each card is one entry from the
+  // Rust native-fs recent_workspaces store, no registry-derived fields and no
+  // registry merge.
+  const visibleWorkspaces: WorkspaceCardModel[] = recentWorkspaces.map((w) => ({
+    absolutePath: w.absolutePath,
+    displayName: w.displayName,
+    identity: w.identity,
+    lastOpenedAt: w.lastOpenedAt,
+  }))
+
+  const resolveBackendSkillIdForWorkspace = async (workspaceRoot: string, backendSkillId?: string) => {
+    if (backendSkillId) {
+      return backendSkillId
+    }
+    if (!isAbsolutePath(workspaceRoot)) {
+      return workspaceRoot
+    }
+    // D2/D12: opening a folder = register it via the Rust native-fs writer (OS
+    // checks only, no manifest validation, no backend registry). Rust derives the
+    // skill id from the path and writes the skill_index entry so the read-detail
+    // sidecar GET /api/skills/{id} resolves; we encode the SAME id into the
+    // local-workspace selection token below.
+    const result = await openSkillWorkspace(workspaceRoot)
+    return result.skillId
+  }
+
+  const openSkill = async (workspaceRoot: string, displayName?: string, backendSkillId?: string) => {
+    const name = displayName || skillIdFromPath(workspaceRoot)
+    const resolvedSkillId = await resolveBackendSkillIdForWorkspace(workspaceRoot, backendSkillId)
+    // Single source of truth: rememberWorkspace writes the MRU entry to the Rust
+    // native-fs store (recent_workspaces.json) AND updates the local projection.
+    // No second localStorage write — the prior dual-write could diverge.
+    rememberWorkspace({ absolutePath: workspaceRoot, displayName: name })
+    ignorePromise(ensureWorkspaceSupportDirs(workspaceRoot))
+    onSelectSkill(
+      isAbsolutePath(workspaceRoot)
+        ? createLocalWorkspaceSelection(resolvedSkillId, workspaceRoot)
+        : resolvedSkillId
+    )
+  }
+
+  const openWorkspace = (workspace: WorkspaceCardModel) => {
+    openSkill(workspace.absolutePath, workspace.displayName).catch((error) => {
+      toast.error('Open folder failed', { description: formatImportSkillError(error) })
+    })
   }
 
   const openNewSkillDialog = () => {
@@ -267,22 +228,13 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
     }
   }
 
-  const handleReveal = (skill: SkillSummary) => {
-    void revealInFileManager(skill.directory_path ?? '')
+  const handleReveal = (workspace: { absolutePath: string }) => {
+    ignorePromise(revealInFileManager(workspace.absolutePath))
   }
 
-  const deleteSkill = async (skill: SkillSummary) => {
-    try {
-      await api.delete(`/skills/${skill.id}`)
-      toast.success(`Removed ${skill.name} from Studio`)
-      await mutateSkills()
-    } catch (error) {
-      toast.error('Could not delete skill', { description: errorMessage(error) })
-    }
-  }
-
-  const handleDelete = (skill: SkillSummary) => {
-    requestSkillDeleteConfirmation(skill, () => deleteSkill(skill))
+  const handleRemove = (workspace: { identity: string; displayName: string }) => {
+    removeWorkspace(workspace.identity)
+    toast.success(`Removed "${workspace.displayName}" from recent`)
   }
 
   const submitNewSkill = async (event?: FormEvent) => {
@@ -296,10 +248,14 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
     setCreating(true)
     setNewSkillError(null)
     try {
-      const response = await api.post<SkillSummary>('/skills', buildSkillCreatePayload(skillId, newSkillParentDirectory))
-      await mutateSkills()
+      // D12: build dir + scaffold + git init via the Rust native-fs sole writer
+      // (no Python POST /skills, no copilot, no manifest lint). Rust writes the
+      // skill_index entry keyed by skillId and returns {root, skillId}; openSkill
+      // encodes that same id into the local-workspace token so the detail GET
+      // resolves. Parent blank -> Rust defaults to the config Skills dir.
+      const result = await createSkillWorkspace(newSkillParentDirectory ?? '', skillId)
       setNewSkillOpen(false)
-      openSkill(response.data.id)
+      await openSkill(result.root, trimmed, result.skillId)
     } catch (error) {
       setNewSkillError(formatCreateSkillError(error, skillId))
     } finally {
@@ -307,30 +263,21 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
     }
   }
 
-  const importSkillDirectory = async () => {
-    setImporting(true)
+  // D2/D12: "Open folder" = pick any local folder, then open it through the Rust
+  // native-fs writer (no manifest validation, no registry import). On OS-level
+  // failure the toast surfaces the raw Rust reason via formatImportSkillError.
+  const openFolder = async () => {
+    setOpeningFolder(true)
     try {
       const directory = await selectSkillDirectory(defaultSkillParentDirectory)
       if (!directory) {
         return
       }
-      const registeredSkillId = registeredSkillIdForImport(directory, skills)
-      if (registeredSkillId) {
-        openSkill(registeredSkillId)
-        return
-      }
-      const response = await api.post<SkillSummary>('/skills', buildSkillImportPayload(directory))
-      await mutateSkills()
-      openSkill(response.data.id)
+      await openSkill(directory)
     } catch (error) {
-      const existingSkillId = existingSkillIdFromError(error)
-      if (existingSkillId) {
-        openSkill(existingSkillId)
-        return
-      }
-      toast.error('Import failed', { description: formatImportSkillError(error) })
+      toast.error('Open folder failed', { description: formatImportSkillError(error) })
     } finally {
-      setImporting(false)
+      setOpeningFolder(false)
     }
   }
 
@@ -370,165 +317,137 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
             <Button
               variant="outline"
               size="lg"
-              disabled={importing}
-              onClick={() => void importSkillDirectory()}
+              disabled={openingFolder}
+              onClick={() => {
+                ignorePromise(openFolder())
+              }}
               className="w-full justify-start"
             >
               <FolderOpen />
-              {importing ? 'Importing' : 'Import skill'}
+              {openingFolder ? 'Opening' : 'Open folder'}
             </Button>
             <p className="mt-1 truncate text-xs text-muted-foreground">Choose any local folder</p>
           </div>
         </div>
 
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-medium text-muted-foreground">Recent skills</h2>
-          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-            <Sparkles className="size-3.5" />
-            Desktop workspace
-          </span>
+          <h2 className="text-sm font-medium text-muted-foreground">Recent</h2>
         </div>
 
-        {skillListError ? (
-          <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-            <div className="flex items-center gap-2 font-medium">
-              <AlertCircle className="size-4" />
-              Could not load skills
-            </div>
-          </div>
+        {/*
+          N1 atom #9: when the Recent MRU read / path-validation fails, surface a
+          LOCAL red box here. It sits below the always-available New skill / Open
+          folder entries, so a Recent failure never blocks creating or opening a
+          workspace (D11 不阻塞入口). The reason comes from useRecentSkills, which
+          logs the failure rather than swallowing it.
+        */}
+        {recentError ? (
+          <Alert variant="destructive" className="mb-3 border-destructive-border bg-destructive-background">
+            <AlertTriangle />
+            <AlertTitle>Could not load recent skills</AlertTitle>
+            <AlertDescription>{recentError}</AlertDescription>
+          </Alert>
         ) : null}
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          {visibleSkills.map((skill) => (
-            <ContextMenu key={skill.id}>
-              <ContextMenuTrigger asChild>
-                <Card
-                  size="sm"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => openSkill(skill.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      openSkill(skill.id)
-                    }
-                  }}
-                  className="relative cursor-pointer select-none transition-colors hover:ring-2 hover:ring-primary/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                >
-                  <CardHeader className="px-3 pb-0">
-                    <div className="flex items-start gap-3">
-                      <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
-                        <Layers3 className="size-4" />
-                      </div>
-                      <div className="min-w-0 flex-1 pr-12">
-                        <CardTitle className="truncate text-sm">{skill.name}</CardTitle>
-                        <p className="mt-1 line-clamp-2 min-h-10 break-all font-mono text-[11px] leading-5 text-muted-foreground">
-                          {shortPath(skill.directory_path)}
-                        </p>
-                        {skill.has_golden || skill.config_mismatch ? (
-                          <div className="mt-2 flex flex-wrap items-center gap-1">
-                            {skill.has_golden ? <Badge>Golden</Badge> : null}
-                            {skill.config_mismatch ? (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Badge
-                                    variant="outline"
-                                    aria-label="Repo URL mismatch"
-                                    onClick={(event) => event.stopPropagation()}
-                                    className="border-destructive/40 bg-destructive/10 text-destructive"
-                                  >
-                                    <AlertTriangle />
-                                    Config drift
-                                  </Badge>
-                                </TooltipTrigger>
-                                <TooltipContent className="max-w-xs text-xs">
-                                  <div className="space-y-1.5">
-                                    <div>
-                                      <span className="font-medium">Actual:</span>{' '}
-                                      <span className="break-all font-mono">{skill.config_mismatch.actual_remote_url}</span>
-                                    </div>
-                                    <div>
-                                      <span className="font-medium">Expected:</span>{' '}
-                                      <span className="break-all font-mono">{skill.config_mismatch.expected_remote_url}</span>
-                                    </div>
-                                    <div className="pt-1 text-muted-foreground">{skill.config_mismatch.recommendation}</div>
-                                  </div>
-                                </TooltipContent>
-                              </Tooltip>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </div>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={`More actions for ${skill.name}`}
-                            className="absolute right-2 top-2 z-10"
+        {isHydrating ? (
+          <RecentSkeleton />
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {visibleWorkspaces.map((workspace) => (
+              <ContextMenu key={workspace.identity}>
+                <ContextMenuTrigger asChild>
+                  <Card
+                    size="sm"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => openWorkspace(workspace)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        openWorkspace(workspace)
+                      }
+                    }}
+                    className="relative cursor-pointer select-none transition-colors hover:ring-2 hover:ring-primary/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  >
+                    <CardHeader className="px-3 pb-0">
+                      <div className="flex items-start gap-3">
+                        <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
+                          <Layers3 className="size-4" />
+                        </div>
+                        <div className="min-w-0 flex-1 pr-12">
+                          <CardTitle className="truncate text-sm">{workspace.displayName}</CardTitle>
+                          <p className="mt-1 line-clamp-2 min-h-10 break-all font-mono text-[11px] leading-5 text-muted-foreground">
+                            {shortPath(workspace.absolutePath)}
+                          </p>
+                        </div>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              aria-label={`More actions for ${workspace.displayName}`}
+                              className="absolute right-2 top-2 z-10"
+                              onClick={(event) => event.stopPropagation()}
+                              onPointerDown={(event) => event.stopPropagation()}
+                              onKeyDown={(event) => event.stopPropagation()}
+                            >
+                              <MoreVertical />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            align="end"
+                            className={ACTION_MENU_CLASSNAME}
                             onClick={(event) => event.stopPropagation()}
-                            onPointerDown={(event) => event.stopPropagation()}
-                            onKeyDown={(event) => event.stopPropagation()}
                           >
-                            <MoreVertical />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent
-                          align="end"
-                          className={ACTION_MENU_CLASSNAME}
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <DropdownMenuItem onSelect={() => handleReveal(skill)}>
-                            <FolderOpen />
-                            {REVEAL_ACTION_LABEL}
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            variant="destructive"
-                            onSelect={() => void handleDelete(skill)}
-                          >
-                            <Trash2 />
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </CardHeader>
-                  <CardFooter className="justify-between gap-3 px-3 pt-0 text-xs text-muted-foreground">
-                    <span>{skill.phase_count} phases</span>
-                    <span className="inline-flex items-center gap-1">
-                      <Clock3 className="size-3.5" />
-                      {formatLastRun(skill.last_run_at)}
-                    </span>
-                  </CardFooter>
-                </Card>
-              </ContextMenuTrigger>
-              <ContextMenuContent className={ACTION_MENU_CLASSNAME}>
-                <ContextMenuItem onSelect={() => handleReveal(skill)}>
-                  <FolderOpen />
-                  {REVEAL_ACTION_LABEL}
-                </ContextMenuItem>
-                <ContextMenuSeparator />
-                <ContextMenuItem
-                  variant="destructive"
-                  onSelect={() => void handleDelete(skill)}
-                >
-                  <Trash2 />
-                  Delete
-                </ContextMenuItem>
-              </ContextMenuContent>
-            </ContextMenu>
-          ))}
-        </div>
+                            <DropdownMenuItem onSelect={() => handleReveal(workspace)}>
+                              <FolderOpen />
+                              {REVEAL_ACTION_LABEL}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onSelect={() => handleRemove(workspace)}
+                            >
+                              <Trash2 />
+                              {REMOVE_ACTION_LABEL}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </CardHeader>
+                    <CardFooter className="justify-end gap-3 px-3 pt-0 text-xs text-muted-foreground">
+                      <span className="inline-flex items-center gap-1">
+                        <Clock3 className="size-3.5" />
+                        {formatLastRun(workspace.lastOpenedAt || null)}
+                      </span>
+                    </CardFooter>
+                  </Card>
+                </ContextMenuTrigger>
+                <ContextMenuContent className={ACTION_MENU_CLASSNAME}>
+                  <ContextMenuItem onSelect={() => handleReveal(workspace)}>
+                    <FolderOpen />
+                    {REVEAL_ACTION_LABEL}
+                  </ContextMenuItem>
+                  <ContextMenuItem
+                    variant="destructive"
+                    onSelect={() => handleRemove(workspace)}
+                  >
+                    <Trash2 />
+                    {REMOVE_ACTION_LABEL}
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
+            ))}
+          </div>
+        )}
 
-        {!skillListError && visibleSkills.length === 0 ? (
+        {!isHydrating && visibleWorkspaces.length === 0 ? (
           <Empty className="min-h-40 border border-dashed border-border">
             <EmptyHeader>
               <EmptyMedia variant="icon">
                 <FolderOpen />
               </EmptyMedia>
-              <EmptyTitle>No skills found</EmptyTitle>
-              <EmptyDescription>Create or import a skill to populate this workspace.</EmptyDescription>
+              <EmptyTitle>No recent skills</EmptyTitle>
+              <EmptyDescription>Create a new skill or open a folder to get started.</EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : null}
@@ -542,11 +461,40 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
         parentDirectory={newSkillParentDirectory}
         defaultParentDirectory={defaultSkillParentDirectory}
         selectingParentDirectory={selectingNewSkillParent}
-        onChooseParentDirectory={() => void chooseNewSkillParentDirectory()}
+        onChooseParentDirectory={() => {
+          ignorePromise(chooseNewSkillParentDirectory())
+        }}
         newSkillError={newSkillError}
         creating={creating}
         onSubmit={submitNewSkill}
       />
+    </div>
+  )
+}
+
+/**
+ * N1 Home · atom #8 (recent-skeleton).
+ *
+ * Loading placeholder for the Recent grid during the cold-start / pre-hydration
+ * window (D6), shown by WelcomePage while useRecentSkills reports isHydrating.
+ * Mirrors the recent-card shape — icon tile + name + path bars — using the
+ * shared shadcn Skeleton, the same primitive ProviderListSkeleton uses, so the
+ * first paint reads as the Recent grid rather than a blank flash.
+ */
+export function RecentSkeleton({ count = 2 }: { count?: number }) {
+  return (
+    <div data-recent-skeleton="true" className="grid gap-3 sm:grid-cols-2">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="rounded-md border p-3">
+          <div className="flex items-start gap-3">
+            <Skeleton className="size-8 shrink-0 rounded-md" />
+            <div className="min-w-0 flex-1 space-y-2">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-3 w-full" />
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

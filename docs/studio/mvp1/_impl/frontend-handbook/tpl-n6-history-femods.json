@@ -1,0 +1,28 @@
+[
+  {
+    "name": "本地历史 hook",
+    "what": "拉取本地存档历史、并提供刷新与回滚的前端数据 hook —— 它是『本地存档与历史』surface 唯一对接历史端点的入口,各操作经它读历史 / 刷新 / 回滚,不各自发请求。",
+    "where": "useRunHistory.ts 的 `useLocalHistory`(对 `/skills/{id}/history` 的 SWR hook);返回 `history`(快照列表)、`isLoading`、`error`、`refresh`(SWR mutate,revalidate 历史)、`revert`(调 `revertSkill` → POST /revert 并 revalidate)。",
+    "duties": [
+      "用 SWR 拉 `/skills/{id}/history` 得到 GitHistoryItem 列表,作为面板的单一数据源(只投影后端历史)。",
+      "暴露 `refresh`(SWR mutate revalidate):供 run 完成时自动刷新(原子 #2)与用户手动刷新共用一条路径。",
+      "暴露 `revert(sha)`:调 `revertSkill(skillId, sha)`(POST /revert),成功后 revalidate 历史 + 用返回的 detail 刷新当前 skill(原子 #4)。"
+    ],
+    "used_by": "#2(run 完成自动刷新——调 refresh)、#3(快照列表——读 history)、#4(回滚——调 revert)。#1 另用同文件的姊妹 hook `useRunHistory` 的 `fetchRunDetail`(拉 `GET /runs/{run_id}` 读 RunDetail.metadata.git_status)作存档反馈的读模型。",
+    "boundary": "做:拉历史、刷新历史、触发回滚并用后端 detail 覆盖;(姊妹 `fetchRunDetail`)按 run_id 拉 run 详情供 #1 读 git_status。不做:不自造/不本地拼历史快照、不预测回滚结果、不做 autocommit(那是后端 run 的副作用)。",
+    "api": "GET /api/skills/{id}/history(读历史)、POST /api/skills/{id}/revert(回滚);均经 api/client 的 getLocalHistory / revertSkill 封装。#1 读模型 GET /api/skills/{id}/runs/{run_id} 经 `useRunHistory.fetchRunDetail`。"
+  },
+  {
+    "name": "快照列表呈现",
+    "what": "把后端历史列表渲成带『种类标签』的快照行的前端呈现逻辑 —— 每条快照按 kind 显示它是 autocommit、手动还是发布。",
+    "where": "HistoryPanel.tsx 的 `LocalHistoryPanelView`(本地历史面板视图,渲染快照行:message/短 sha/author/timestamp + Revert);`kindLabel`(把 kind 映成显示文案的函数:auto_run→『Auto run』、manual→『Manual』、release→『Release』、其它→『Other』);`handleRevert`(点 Revert 调 hook 的 revert + 成功/失败 toast)。",
+    "duties": [
+      "逐条渲染 GitHistoryItem:提交信息 / 短 sha / 作者 / 时间,并按 `kind` 给一个种类标签。",
+      "`kindLabel` 把 kind 翻成用户可读文案(Auto run / Manual / Release / Other),让用户认出每条是哪种存档。",
+      "`handleRevert` 接住 Revert 点击:调本地历史 hook 的 revert(sha),成功弹『Reverted to local history snapshot』、失败弹错误 toast。"
+    ],
+    "used_by": "#3(快照列表呈现 + kind 标签)、#4(Revert 按钮 + 回滚反馈)。",
+    "boundary": "做:把历史列表渲成带 kind 标签的行、接住 Revert 交互并给反馈。不做:不发数据请求(数据来自本地历史 hook)、不自造快照、不决定哪些可回滚(revertable 由后端给)。",
+    "api": "无 —— 纯呈现层,数据与回滚动作都委托给『本地历史 hook』。"
+  }
+]

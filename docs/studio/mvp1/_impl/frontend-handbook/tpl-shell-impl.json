@@ -1,0 +1,315 @@
+{
+  "id": "shell_impl",
+  "title": "Settings 壳层 · 实施详情",
+  "design_ref": "shell_design",
+  "intro": "本页是 Settings 壳层前端的现状/差距/实施计划/测试,1:1 对应设计页 shell_design(原子 #1–#9)。设计已说清「应该怎样」,这里写「现在怎样、差多少、按什么顺序补、怎么测」。代码一律按「文件名 + 函数/对象名」引用(可全局搜索定位,不写行号——行号会漂、名字稳定)。overlay 生命周期 + WebSocket 自动刷新 + 全局保存徽章这块单列的机制见 shell_mech_overlay,凭证读写底层机制见 mech_cred。注:壳层涉及的后端只有 gateway 后端 sidecar 的 /ws/events(WebSocket 事件通道)与文件监听器,已就绪;overlay/tab/徽章/错误边界全是前端自身,无第四层「Studio 后端」。",
+  "functions": [
+    {
+      "n": 1,
+      "cap": "open-settings-overlay",
+      "design_ref": "atom-1",
+      "current": "现状:已实现且符合。Workspace(工作区根组件)持 settingsOpen 状态(useState),Toolbar(左侧竖排工具条)接收 settingsOpen/onSettingsToggle,onSettingsToggle 用 setSettingsOpen(open => !open) 把 Settings 齿轮做成 toggle;按钮带 aria-pressed=settingsOpen 并在打开态用 secondary 变体显示按下状态。Header(顶栏)的 onOpenSettings 仍是单向 setSettingsOpen(true),供 publish 缺配置等指引打开 Settings。settingsOpen=true 时,Workspace 只在画布区(canvas 这块 ResizablePanel)渲染 SettingsPage(壳层根组件)替换编辑器/图;再次点 Toolbar 齿轮置 false 后画布换回原工作区内容;左侧 Panels(文件树等工具面板)与右侧 Copilot 面板照常挂载——工作区不卸载。SettingsPage 不铺全屏 backdrop、不做 focus-trap,是有意的「非真 modal」。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "be_dep": "n/a(纯前端 overlay,无后端契约)。"
+    },
+    {
+      "n": 2,
+      "cap": "settings-skeleton",
+      "design_ref": "atom-2",
+      "current": "现状:偏差——无壳层级骨架,完全下放各 tab 自管。SettingsPageContent(按 activeTab 渲染 tab 的内容区)没有一层统一的「数据未到→骨架」收口。只有 API Keys tab 自己在 credentialsLoading(凭证加载中标志)为真时渲染 ProviderListSkeleton(占位 5 张 provider 卡形状的骨架,ApiKeysTab.tsx)。General / LLM Roles / Copilot 各 tab 各自处理 loading,壳层没有统一占位。",
+      "gap": "✅ 本次已实施并通过两层测试,符合设计。",
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "be_dep": "n/a(纯前端骨架展示,无后端)。"
+    },
+    {
+      "n": 3,
+      "cap": "settings-tab-switch",
+      "design_ref": "atom-3",
+      "current": "现状:已实现且符合。SettingsPage 持 activeTab(当前激活 tab)状态,SettingsPageContent 按它渲染对应 tab、导航栏 NavButton(左侧 tab 导航按钮)点击调 onTabChange(即 setActiveTab)。懒加载用多个绑 activeTab 的 useEffect(React 副作用钩子):切到 api_keys 且未 hydrate 过(credentialsHydratedRef 这个标志为假)才首次 getCredentials() 取明文 hydrate;切到 llm_roles/copilot 且 rolesData(角色数据)为空才首次 Promise.all([getRoles, getModelGroups]) 并发拉角色+模型组。已加载过的 tab 不重复拉。注:凭证的打码快照在壳层挂载时由一个无条件 useEffect getCredentials({hydrateSecrets:false}) 先拉一次(供各 tab 共用),按 tab 懒加载的是 API Keys 的明文 hydrate 与 Roles 的角色/模型组。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "be_dep": "已就绪可接。切 API Keys 拉的 GET /api/llm/registry(凭证/路由打码快照)、切 Roles 拉的 roles / model-groups 均已实现(见 mech_cred 后端状态)。"
+    },
+    {
+      "n": 4,
+      "cap": "settings-save-badge",
+      "design_ref": "atom-4",
+      "current": "现状:偏差——三套数据各画各的徽章,顶栏无全局保存态。SaveStatusBadge(把保存态渲成带图标徽章的组件,save-status-badge.tsx:pending/saving 转圈 Loader2、saved 打勾 Check、error 三角警告 TriangleAlert + warning 色 + aria-live)被三处各自复用:API Keys tab 在 ApiKeysTab.tsx 用 saveStatus(来自 useDebouncedCredentialsSave)、挂在该 tab 标题栏 trailing;General tab 在 GeneralTab.tsx 用 appSettings.saveStatus(来自 useAppSettings)、挂该 tab 标题栏;LLM Roles 用 rolesSaveStatus(来自 useDebouncedRolesSave)。SettingsPageContent 顶部的壳层标题栏(只有 title + X)没有任何全局保存徽章。",
+      "gap": "✅ 本次已实施并通过两层测试,符合设计。",
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "be_dep": "n/a(保存态是前端 debounce hook 产出,无后端契约;保存动作本身各走各的 PUT)。"
+    },
+    {
+      "n": 5,
+      "cap": "ws-registry-refresh",
+      "design_ref": "atom-5",
+      "current": "现状:刷新可用,但韧性偏差。SettingsPage 挂载时一个 useEffect(React 副作用钩子)开 WebSocket 连 wsUrl('/ws/events')(client.ts 里把相对路径拼成完整 WebSocket 地址的函数)。socket.onmessage(收到一条事件的回调)里 JSON.parse 事件、判 event.type==='registry_changed' 就 getCredentials({hydrateSecrets:...}) 重拉凭证 + draftsFromCredentials(把后端凭证快照转成前端草稿列表的纯函数)重建草稿。后端侧:gateway 后端 sidecar 的 services/file_watcher(文件监听器)的 _handle_path(每个文件落盘时被调的回调)比对路径是凭证文件就 broadcast_from_thread({type:'registry_changed'})(从工作线程把事件广播到事件总线);websockets.studio_events(/ws/events 路由处理函数)鉴权后订阅 STUDIO_EVENTS_TOPIC(Studio 事件主题)推送。偏差点:onmessage 内层有 try{...}catch{ // ignore }、外层建连也 try{...}catch{ // ignore }——两处空 catch 静默吞异常(违 logging 铁律);effect 清理只 socket.close(),断开后没有任何重连逻辑。",
+      "gap": "✅ 本次已实施并通过两层测试,符合设计。",
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "be_dep": "已就绪可接(后端不需改)。/ws/events 通道(websockets.studio_events)+ file_watcher 广播 registry_changed 已实现;重拉走 GET /api/llm/registry(已实现)。前端缺的是重连 + 可观测,与后端无关。"
+    },
+    {
+      "n": 6,
+      "cap": "ws-roles-refresh",
+      "design_ref": "atom-6",
+      "current": "现状:刷新可用但会吞事件,且与 #5 同源的韧性偏差。同一条 /ws/events WebSocket 里,event.type==='roles_changed' 且 rolesDataRef.current 非空(即角色数据已加载过)才 Promise.all([getRoles, getModelGroups]) 重拉角色 + 模型组。后端侧 file_watcher 的 _handle_path 比对路径是角色文件就 broadcast roles_changed。偏差点:① 只有 rolesDataRef 非空才响应——没开过 LLM Roles / Copilot tab 的话角色数据未加载,roles_changed 被直接吞掉(下次进 tab 拉的是当时的新值,但事件本身没留痕);② 与 #5 共用同一段空 catch 静默 + 无重连。",
+      "gap": "✅ 本次已实施并通过两层测试,符合设计。",
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "be_dep": "已就绪可接(后端不需改)。/ws/events + file_watcher 广播 roles_changed 已实现;重拉走 getRoles / getModelGroups(已实现)。"
+    },
+    {
+      "n": 7,
+      "cap": "close-settings-overlay",
+      "design_ref": "atom-7",
+      "current": "现状:已实现且符合。SettingsPageContent 标题栏的 X 按钮 onClick 调 onClose;SettingsPage 收到的 onClose 即 Workspace 传的 () => setSettingsOpen(false),把 settingsOpen 置 false → 画布区从 SettingsPage 换回编辑器/图,左右栏一直没动 → 无缝回工作区。即填即存语义下没有「未保存」确认;关闭不取消在途 PUT(debounce 保存的 in-flight 请求仍落地)。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "be_dep": "n/a(纯前端收起 overlay,无后端)。"
+    },
+    {
+      "n": 8,
+      "cap": "home-closes-settings",
+      "design_ref": "atom-8",
+      "current": "现状:已实现且符合。Header 的 Home(返回首页)图标 onClick 调 onHome,Workspace 传的是 handleHome:先 setSettingsOpen(false) 收起 Settings overlay,再 onCloseSkill() 卸载当前工作区退回首页。与 X 形成两条语义——X 只收起 Settings(工作区还在),Home 收起 Settings 且卸载工作区退首页,不留盖在首页上的孤儿 overlay。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "be_dep": "n/a(纯前端,无后端)。"
+    },
+    {
+      "n": 9,
+      "cap": "settings-error-boundary",
+      "design_ref": "atom-9",
+      "current": "现状:偏差——只包了两个 tab。SettingsErrorBoundary(React 错误边界类组件:getDerivedStateFromError 捕获子树渲染异常存进 state、componentDidCatch 用 console.error 记日志、有 error 时渲 destructive Alert 兜底卡 + Retry 按钮)在 SettingsPageContent 里只包了 LlmRolesTab(label='LLM Roles')和 CopilotTab(label='Copilot');GeneralTab 与 ApiKeysTab 没有包错误边界——这俩 tab 渲染崩溃会白屏(向上冒泡到更外层)。",
+      "gap": "✅ 本次已实施并通过两层测试,符合设计。",
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "be_dep": "n/a(纯前端错误边界,无后端)。"
+    }
+  ],
+  "plan": [
+    {
+      "step": 1,
+      "what": "#9 settings-error-boundary:把 GeneralTab 和 ApiKeysTab 各包一层现成的 SettingsErrorBoundary(label 标 tab 名),做到四 tab 全包。",
+      "depends_on": "无(复用现有 SettingsErrorBoundary 组件,只在 SettingsPageContent 多包两层)。后端不动。",
+      "why": "改动最小、纯包裹、零后端依赖、消除 General/API Keys 崩溃白屏风险,最先做掉。",
+      "block": "前端独立"
+    },
+    {
+      "step": 2,
+      "what": "#2 settings-skeleton:在壳层(SettingsPageContent/SettingsPage)加一层统一的「该 tab 数据未到→骨架」收口,但骨架形状按 tab 各自真实布局(沿用 ProviderListSkeleton 风格、用 shadcn Skeleton):API Keys 复用现成 ProviderListSkeleton(5 张 provider 卡形状);General 用 GeneralTabSkeleton(标题块 + 4 行表单字段形状,贴合真实布局),加载时显示骨架、不再 disable 整表单;LLM Roles / Copilot 用角色卡占位骨架(若干角色卡形状占位条 + 右侧 Available Models 侧栏占位块,不套 provider 卡形状)。",
+      "depends_on": "前端:复用现有骨架风格;UI 用 shadcn。后端不动。",
+      "why": "纯前端、后端契约不变,可与 step 1 并行;统一首屏占位体验(尤其 API Keys 巨长 models 列表)。",
+      "block": "前端独立"
+    },
+    {
+      "step": 3,
+      "what": "#4 settings-save-badge:在壳层顶栏(SettingsPageContent 那条标题栏)加一个全局保存徽章,把 credentials/roles/appSettings 三套 saveStatus 合并成一个壳层级状态(优先级 error>saving>pending>saved>idle),复用现有 SaveStatusBadge。",
+      "depends_on": "前端:把三套 saveStatus 提升到 SettingsPage 层、写一个合并三态的纯函数;复用 SaveStatusBadge。后端不动。",
+      "why": "纯前端、后端不变;把分散在各 tab 的保存态汇到顶栏一处,可与 step 1/2 并行(只动壳层标题栏与状态合并,不踩 WebSocket)。",
+      "block": "前端独立"
+    },
+    {
+      "step": 4,
+      "what": "#5 ws-registry-refresh + #6 ws-roles-refresh:把 SettingsPage 那条 /ws/events WebSocket 抽成带重连(指数退避:初始延迟 1s、倍率 ×2、封顶 30s、加 full jitter 全抖动;永久重试不设放弃上限,连不上就一直按封顶后的间隔重试;重连成功重拉一次补漏)+ 可观测日志(连接 INFO / 断开重连 WARNING / 解析失败 ERROR)的逻辑;去掉两处空 catch 静默;roles_changed 不被「角色未加载过」吞掉(标脏下次进 tab 重拉);配「连接不上」用户警告标志(放壳层顶栏 SettingsPageContent 标题栏、保存徽章 SaveStatusBadge 右侧;触发阈值:连续失败 ≥3 次 或 累计 >10s 仍未连上才显示,避免瞬断闪烁,重连成功立即消失)。",
+      "depends_on": "前端:重写这条 WebSocket 的连接/重连/事件分发。后端事件源(/ws/events + file_watcher)已就绪、不动。",
+      "why": "#5/#6 共用同一条 WebSocket,必须一起改(分开改会互相踩同一段 effect);它修的是韧性(重连)+ 合规(logging 铁律去空 catch),独立于前三步、放最后做收口。",
+      "block": "前端独立"
+    }
+  ],
+  "tests": [
+    {
+      "covers": "#1 open-settings-overlay",
+      "atoms": [
+        1
+      ],
+      "shots": [
+        "点 Toolbar Settings 图标后,画布换成 Settings 面板,左文件树/右 Copilot 仍在",
+        "Settings 已打开时再次点 Toolbar Settings 图标,面板关闭并回到工作区画布"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "渲染 Workspace,模拟点 Toolbar 的 Settings 图标。",
+        "断言 settingsOpen 置 true、画布区渲染 SettingsPage、Toolbar Settings 按钮 aria-pressed=true。",
+        "再次点同一个 Toolbar Settings 图标 → 断言 settingsOpen 置 false、SettingsPage 不再渲染、aria-pressed=false。",
+        "断言左侧 Panels 与右侧 Copilot 面板仍挂载(工作区不卸载)。",
+        "断言无全屏 backdrop / 无 focus-trap(非真 modal)。"
+      ],
+      "layer2": [
+        "进工作区,点左侧 Toolbar 底部 Settings 齿轮。",
+        "确认面板盖在画布上、左文件树仍可点、右 Copilot 仍在。",
+        "再次点同一个齿轮,确认 Settings 面板关闭、回到原画布。"
+      ],
+      "screenshots": [
+        {
+          "file": "settings-shell-toggle-open.png",
+          "caption": "点 Toolbar Settings 齿轮后,画布换成 Settings 面板且齿轮处于按下态"
+        },
+        {
+          "file": "settings-shell-toggle-closed.png",
+          "caption": "Settings 已打开时再次点同一齿轮,面板关闭并回到工作区画布"
+        }
+      ]
+    },
+    {
+      "covers": "#2 settings-skeleton",
+      "atoms": [
+        2
+      ],
+      "shots": [
+        "数据未到时显示统一骨架占位(非空白)",
+        "数据到位后骨架换成真内容"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "RED:当前壳层无统一骨架收口,只有 API Keys 自管 ProviderListSkeleton → 断言『壳层级统一骨架』失败。",
+        "GREEN:mock 某 tab 数据 loading 态 → 断言壳层渲染该 tab 的骨架占位。",
+        "断言数据到位后骨架被真内容替换。"
+      ],
+      "layer2": [
+        "在慢网络/mock 延迟下打开 Settings、切各 tab,看数据未到时是否有统一骨架。"
+      ]
+    },
+    {
+      "covers": "#3 settings-tab-switch",
+      "atoms": [
+        3
+      ],
+      "shots": [
+        "四 tab 切换正常,切到某 tab 才发起该 tab 的数据请求"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "渲染 SettingsPage,mock getCredentials/getRoles/getModelGroups。",
+        "断言初始不拉 API Keys 凭证 hydration;切到 api_keys 才首次 getCredentials() 并 hydrate。",
+        "断言切到 llm_roles/copilot 才首次拉 roles + model groups。",
+        "断言已加载过的 tab 再切回不重复拉。"
+      ],
+      "layer2": [
+        "打开 Settings,依次点四个 tab,看内容切换。",
+        "用网络面板确认切到 API Keys 才出现 registry/secret 请求。"
+      ]
+    },
+    {
+      "covers": "#4 settings-save-badge",
+      "atoms": [
+        4
+      ],
+      "shots": [
+        "顶栏全局保存徽章随改动流转 Pending→Saving→Saved",
+        "任一 tab 保存失败时顶栏显示 Failed(warning 色)"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "RED:当前壳层顶栏(SettingsPageContent 标题栏)无全局保存徽章,三套各画各的 → 断言『顶栏全局保存徽章』失败。",
+        "GREEN:mock credentials/roles/appSettings 三套 saveStatus → 断言顶栏徽章按优先级(error>saving>pending>saved>idle)合并显示。",
+        "断言任一套 error 时顶栏显示 error(warning 色)。",
+        "断言三套全 idle 时顶栏徽章隐藏。"
+      ],
+      "layer2": [
+        "在某 tab 改一个字段,看顶栏徽章 Pending→Saving→Saved。",
+        "断网后改字段,看顶栏徽章变 Failed。"
+      ],
+      "screenshots": [
+        {
+          "file": "general-15-save.png",
+          "caption": "壳层顶栏全局保存徽章(合并 credentials/roles/appSettings 三套保存态,优先级 error>saving>pending>saved>idle)"
+        }
+      ]
+    },
+    {
+      "covers": "#5 ws-registry-refresh + #6 ws-roles-refresh",
+      "atoms": [
+        5,
+        6
+      ],
+      "shots": [
+        "外部改凭证文件后界面自动刷新(无需手动)",
+        "WebSocket 断开后自动重连、重连成功后重拉一次",
+        "连接不上时显示「连接不上」警告标志"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "mock WebSocket,推 {type:'registry_changed'} → 断言触发 getCredentials 重拉 + 重建草稿。",
+        "推 {type:'roles_changed'} → 断言触发 getRoles+getModelGroups 重拉(且不因角色未加载被吞)。",
+        "RED:当前 onmessage/建连为空 catch 静默、断开无重连 → 断言『断开后重连』『解析失败有日志』失败。",
+        "GREEN:模拟 socket 断开 → 断言按退避重连;模拟解析异常 → 断言记 ERROR 日志(非空 catch)。"
+      ],
+      "layer2": [
+        "真跑(关键):开两个窗口/进程,在外部真改凭证文件,看 Settings 界面是否自动刷新。",
+        "真跑:手动断开后端再恢复,看 WebSocket 是否自动重连并补刷新、断开期间是否显示「连接不上」警告。"
+      ],
+      "screenshots": [
+        {
+          "file": "roles-card.png",
+          "caption": "壳层顶栏『连接不上』警告(WS 韧性 #5/#6)"
+        }
+      ]
+    },
+    {
+      "covers": "#7 close-settings-overlay",
+      "atoms": [
+        7
+      ],
+      "shots": [
+        "点 X 后无缝回到工作区,打开的文件/Copilot 会话仍在"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "渲染 SettingsPage,点标题栏 X → 断言调 onClose、settingsOpen 置 false。",
+        "断言画布从 SettingsPage 换回编辑器/图,左右栏未卸载。",
+        "断言无未保存确认弹窗(即填即存);在途 PUT 不被取消。"
+      ],
+      "layer2": [
+        "在 Settings 里改个字段(触发保存)立刻点 X,确认改动仍落地、回到工作区原样。"
+      ]
+    },
+    {
+      "covers": "#8 home-closes-settings",
+      "atoms": [
+        8
+      ],
+      "shots": [
+        "Settings 打开时点 Home,既退回首页又关掉 Settings,不留孤儿 overlay"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "Settings 打开态,点 Header Home → 断言调 handleHome:先 setSettingsOpen(false) 再 onCloseSkill()。",
+        "断言退首页后 Settings overlay 不再渲染(无孤儿)。",
+        "对比 X:断言 X 只收起 Settings、不调 onCloseSkill(工作区还在)。"
+      ],
+      "layer2": [
+        "打开 Settings,点顶栏 Home,确认回到首页且 Settings 已关。"
+      ]
+    },
+    {
+      "covers": "#9 settings-error-boundary",
+      "atoms": [
+        9
+      ],
+      "shots": [
+        "某 tab 渲染崩溃时显示兜底卡 + Retry(不白屏)",
+        "四 tab(General/API Keys/Roles/Copilot)都被错误边界包住"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "RED:当前只有 Roles/Copilot 包 SettingsErrorBoundary,General/API Keys 未包 → 让 GeneralTab/ApiKeysTab 抛错断言『有兜底卡』失败(会白屏/上抛)。",
+        "GREEN:四 tab 全包后,让任一 tab 子组件抛错 → 断言渲染 destructive 兜底卡(含 tab label + 错误 message + Retry)。",
+        "断言 Retry 清错重渲染;断言 componentDidCatch 记了日志(非静默)。",
+        "断言一个 tab 崩溃不牵连其它 tab 与工作区。"
+      ],
+      "layer2": [
+        "注入一个会崩的 tab 子组件,看是否塌成兜底卡而非白屏。",
+        "点 Retry 看是否恢复。"
+      ]
+    }
+  ]
+}

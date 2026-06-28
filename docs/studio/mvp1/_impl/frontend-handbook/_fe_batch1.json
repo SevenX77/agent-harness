@@ -1,0 +1,50 @@
+{
+ "n2-properties#16": {
+  "name": "node-type-derivation",
+  "fix_plan": "在 PropertiesPanel.tsx 的 phaseKindLabel(第38-42行,据 data.mode/data.subgraphPath 推 LOGIC/AGENT/SUBGRAPH 标签的函数)与 build-nodes.ts 的 phaseKindFile(第10-14行,据同样字段推 LOGIC.md/SKILL.md/SUBGRAPH.md 的函数)里,把类型派生的真相源改为『该 phase 目录下存在哪个节点文件』。具体:build-nodes.ts:177 已经读到 frontmatter,可据 detail.files 里存在 phases/<id>/SUBGRAPH.md|SKILL.md|LOGIC.md 哪个文件来定 kind,而不是只信 topology.mode;并去掉 build-nodes.ts:174 的 `topology?.mode ?? phase.mode` 里 phase.mode 这个可能 stale 的 fallback 歧义(topology.mode 缺时不要回退到作者可写的 phase.mode,改为回退到文件存在性)。引擎侧真相已就绪——topology_projection.py:11-14 的 _PHASE_FILE_TO_MODE(把物理文件名映射为 mode 的常量表)按 SKILL/LOGIC/SUBGRAPH.md 派生 mode,loader.py:207 的 _reject_phase_forbidden_metadata 把作者写的 mode: 当禁止字段拒掉,所以前端据文件派生是安全的、无需后端改动。",
+  "verify": "新增/扩展 build-nodes 单测:构造 topology.mode 缺失但 detail.files 含 phases/x/SKILL.md → 断言节点 kind 据文件判为 AGENT;构造 topology.mode='logic' 但目录只有 SKILL.md(stale 场景)→ 断言据文件判 AGENT 不被 stale mode 推翻。UI:选中一个 agent 节点看顶部 Badge 据文件正确。",
+  "evidence": "apps/studio/frontend/src/components/studio/panels/PropertiesPanel.tsx:38-49 (phaseKindLabel/phaseKindFile 读 data.mode/data.subgraphPath,非文件存在性); apps/studio/frontend/src/components/GraphCanvas/build-nodes.ts:174 (`const mode = topology?.mode ?? phase.mode` — phase.mode fallback 兜底仍在); build-nodes.ts:10-14 (phaseKindFile 同样据 mode/subgraphPath); 后端真相: packages/graph-agent/src/graph_agent/core/topology_projection.py:11-14 (_PHASE_FILE_TO_MODE 文件→mode 映射), loader.py:207 (_reject_phase_forbidden_metadata 拒作者写 mode:)。",
+  "category": "FE-feature",
+  "effort": "S"
+ },
+ "n2-properties#17": {
+  "name": "readonly-mode-row",
+  "fix_plan": "在 PropertiesPanel.tsx 底部只读信息区(第321-329行的 <dl> 块,用 DetailRow 渲染 Phase ID/Mode/Depends On/Role/Tools/File 的只读行)里,把第323行 `<DetailRow label=\"Mode\" value={modeLabel} />` 删掉,或改述为 `<DetailRow label=\"节点类型\" value={modeLabel} />`(并补一句『来自文件 SKILL/LOGIC/SUBGRAPH.md,不可编辑』的说明),消除『mode 是可设属性』的误导。同步改 PropertiesPanel.fields.test.tsx:9-19 那段注释和 DEPRECATED_LABELS 逻辑——现状注释明说『read-only dl 仍展示 Mode 行,故意不在禁用列表里』,改完后该注释/口径要随之更新。纯前端文案/结构改动,与 #16 一起做更自洽。",
+  "verify": "新增单测:渲染任一节点 → 断言只读 dl 不含 label='Mode' 的行(或断言改述为『节点类型』)。UI:选中节点看底部只读区无误导的 Mode 行。",
+  "evidence": "apps/studio/frontend/src/components/studio/panels/PropertiesPanel.tsx:323 (`<DetailRow label=\"Mode\" value={modeLabel} />` 仍渲染 Mode 只读行); 同文件 321-329 行 <dl> 只读区; apps/studio/frontend/src/components/studio/panels/PropertiesPanel.fields.test.tsx:9-19 (注释明确『the read-only inspection dl still shows a \"Mode\" row ... \"Mode\" is intentionally not in this deprecated-editor list』——证明 Mode 行至今仍在且被刻意保留)。",
+  "category": "FE-feature",
+  "effort": "S"
+ },
+ "n3-gating#12": {
+  "name": "lint-drives-stage",
+  "fix_plan": "Pure FE wiring in apps/studio/frontend/src/components/studio/Workspace.tsx. The pieces all exist (useDebouncedLint is wired at LazyMonacoPanel.tsx:250 and writes status via publishLintStatus; deriveBuildStage at Workspace.tsx:741-749 already reads readLintStatus(id) and maps passed→compile-pass). The only missing link: Workspace never re-renders when lint status changes. Add a useEffect in Workspace.tsx that window.addEventListener(lintStatusEvent /* 'studio-lint-status-changed', exported from useDebouncedLint.ts:6 */, handler) and on a matching skillId bumps a small state value (e.g. const [lintTick,setLintTick]=useState(0); setLintTick(t=>t+1)) so deriveBuildStage(currentSkillId) is re-evaluated and the CenterActionBar at line 1084 flips Predict on. Remove the stale 'hook unwired / backend ignores body' framing from the handbook — both are now false (lint.py:28-31 + skills.py:320 accept the changed-markdown body).",
+  "verify": "Add a Workspace.test.tsx case that un-mocks readLintStatus (currently hard-coded to 'idle' at line 99-100), dispatches a 'studio-lint-status-changed' event with status 'passed' for the active skill, and asserts the Predict button becomes enabled. Manual: open a skill, edit GRAPH.md to a passing state, wait 800ms debounce, confirm Predict lights up without clicking Compile.",
+  "evidence": "Wired hook: apps/studio/frontend/src/components/studio/LazyMonacoPanel.tsx:250 `const { result: lintResult } = useDebouncedLint(skillId, draft)`. Hook publishes status: apps/studio/frontend/src/hooks/useDebouncedLint.ts:79,87,93 publishLintStatus(...) + dispatch lintStatusEvent at :21. deriveBuildStage reads it: apps/studio/frontend/src/components/studio/Workspace.tsx:744 `const lint = readLintStatus(id)` → :747 passed→'compile-pass'. NO subscriber: grep for addEventListener/lintStatusEvent in Workspace.tsx returns nothing. Backend drift resolved: apps/studio/backend/app/routers/lint.py:28-31 routes body.markdown to lint_skill_changed_markdown; apps/studio/backend/app/services/skills.py:320-338 does a real engine compile on an ephemeral sandbox (no disk write). Commit 6ba445ad.",
+  "category": "FE-wiring",
+  "effort": "S"
+ },
+ "n4-predict#4": {
+  "name": "predict-pass-unlock-run",
+  "fix_plan": "纯前端接线。在 Workspace.tsx 的 handlePredict（Workspace 里发起试飞并据结果推档的回调，751-794 行)里,await postPredictRun 拿到 predict（类型 PredictDiagnosticExport）后,先判 predict.status === 'success' 再 updateStage(targetSkillId,'predict-pass')；predict.status === 'failed' 时改走 updateStage(targetSkillId,'predict-fail') 并据 predict.path_diff/predict.phases 显诊断（如 toast 或诊断面板）。无需改 DTO/后端:契约已透出 status。注意手册原写的『读 success 字段、不读 status』已过时——当前后端把业务成功投影成 PredictDiagnosticExport.status('success'|'failed'),前端正确做法就是读这个 status。",
+  "verify": "Vitest 在 Workspace.test.tsx 加一例:mocks.postPredictRun.mockResolvedValue({is_predict:true,status:'failed',phases:[],path_diff:{...}}) → 触发 onPredict → 断言 CenterActionBar 收到的 stage 进 'predict-fail'(Run 仍灰)、未进 'predict-pass'。UI:造一个 path_diff 不匹配的 skill,点 Predict,观察返回 status='failed' 时 Run 是否仍灰(当前会被误点亮,真去 Run 被后端 409 RUN_REQUIRES_PREDICT 拦,predict_gate.py:100-125)。",
+  "evidence": "Workspace.tsx:757 postPredictRun(...)；765 updateStage(targetSkillId,'predict-pass') 在 await 成功后无条件执行,全函数(751-794)无 predict.status/predict.success 判定;catch(767-793)只接 axios HTTP 错误(client.ts:45 api=axios.create 默认 validateStatus 拒非2xx)。后端契约已就绪:routers/runs.py:39 @router.post('/predict',response_model=PredictDiagnosticExport) → predictor.py:118-120 export_diagnostics → diagnostic_export.py:17 status=result.status；result.py:150-151 status 属性返回 success?'success':'failed';predictor.py:145 record_predict_pass 仅在 result.success 才写。types.ts:311-316 PredictDiagnosticExport 已含 status:'success'|'failed' + phases + path_diff。",
+  "category": "FE-wiring",
+  "effort": "S"
+ },
+ "n6-publish#5": {
+  "name": "release-entry (Release 入口消歧非 git push)",
+  "fix_plan": "在 apps/studio/frontend/src/components/studio/Header.tsx 的 Team 下拉(DropdownMenuContent, 行225-249)消除『发布=git push』误导。两条可选路径任一即可:(a) 信息架构分组——在 Submit for Review(行234-237)与 Release(行238-241)之间插入 <DropdownMenuSeparator/> + <DropdownMenuLabel>（shadcn 已有组件,见 @/components/ui/dropdown-menu 导入区行15-18，需补 import DropdownMenuSeparator/DropdownMenuLabel），把 Release/Package release 与 Save/Sync/Submit 团队 git 操作区隔；(b) 文案点明——在 Release 项文本或 releaseSuccessMessage(usePublishSkill.ts:56-76 拼成功 toast 的函数)加上『Artifact Registry（非 git push）』字样。纯前端,不动后端。",
+  "verify": "组件测(Header.test.tsx):断言 Team 下拉 Release 区有 DropdownMenuSeparator/Label 分组，或 Release 项/成功 toast 出现 'Artifact Registry'。UI 步骤:打开 Team 下拉，确认 Release 与 git 操作有视觉区隔或非-git 文案。",
+  "evidence": "Header.tsx:225-249 Team 下拉 5 项(Save to Team/Sync from Team/Submit for Review/Release/Package release)平铺无 DropdownMenuSeparator、无 DropdownMenuLabel 分组、无『Artifact Registry/non-git』文案；Header.tsx:238-241 Release 项仅裸文本 'Release'；usePublishSkill.ts:68,75 成功 toast 文案 'Released {ver}: {artifactId}...' / 'Released to production: artifact published' 均无 Artifact Registry 字样；usePublishSkill.ts:79 唯一 'Artifact Registry' 字符串在代码注释中，非用户可见。后端就绪:skills.py:577 POST /{skill_id}/publish 存在。",
+  "category": "FE-feature",
+  "effort": "S"
+ },
+ "n6-publish#9": {
+  "name": "no-virtual-requirements (撒花 orphan 死代码清理)",
+  "fix_plan": "删除两个 orphan 死代码文件:apps/studio/frontend/src/lib/confetti.ts(celebrateSuccess——触发撒花粒子动画的函数)与 apps/studio/frontend/src/types/canvas-confetti.d.ts(canvas-confetti 库的 TS 模块声明)。已确认全前端 0 外部 import。负向约束(无 commit-msg UI/无独立 Publish 按钮/不接撒花)现状已合规,保持不动。纯前端删除,零依赖、零风险。",
+  "verify": "断言两文件不存在 + 全仓 0 confetti import(grep)。落地后真发一次成功，确认不撒花、无 commit-msg 弹窗。",
+  "evidence": "lib/confetti.ts:1-9 仍在仓内(celebrateSuccess 调 confetti 粒子特效)；types/canvas-confetti.d.ts:1-9 仍在仓内；grep 'lib/confetti|celebrateSuccess|canvas-confetti'(排除两文件自身)外部 import 0 命中 = 确为 orphan；grep commitMessage/commit message 全前端 0 命中(负向约束合规);设计 design.json atom-9 明示『不接入』应一并删除。",
+  "category": "FE-feature",
+  "effort": "S"
+ }
+}

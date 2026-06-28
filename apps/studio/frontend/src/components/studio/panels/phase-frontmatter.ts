@@ -5,14 +5,42 @@ import { isRecord } from '@/utils/errors'
 export type PhaseFrontmatterKind = 'logic' | 'agent' | 'subgraph'
 export type PhaseFrontmatterErrorReason = 'missing-frontmatter' | 'unterminated-frontmatter' | 'invalid-yaml' | 'non-object-frontmatter'
 
-export interface PhaseFrontmatterFormData {
+export interface PhaseSubagentRef {
   name: string
-  mode: string
-  pythonCallable: string
-  systemPrompt: string
-  exitContract: string
+  target_skill: string
+  description: string
+}
+
+export type IterateMode = '' | 'batch' | 'loop'
+export type IterateMergeMode = 'append' | 'extend' | 'merge' | 'replace'
+
+export interface PhaseIterateFormData {
+  mode: IterateMode
+  over: string
+  itemVar: string
+  rangeStart: string
+  rangeEnd: string
+  concurrency: string
+  accumulateVar: string
+  accumulateInit: string
+  accumulateFrom: string
+  accumulateMerge: IterateMergeMode
+}
+
+export interface PhaseFrontmatterFormData {
+  // agent (SKILL.md)
+  llmRole: string
   tools: string
-  targetSkill: string
+  subagents: PhaseSubagentRef[]
+  // logic (LOGIC.md)
+  actions: string
+  // subgraph (SUBGRAPH.md)
+  path: string
+  // shared (logic + subgraph)
+  validator: boolean
+  // shared (agent + logic + subgraph)
+  allowSequentialOverwrite: string
+  iterate: PhaseIterateFormData
 }
 
 export type PhaseFrontmatter = Record<string, JsonValue>
@@ -33,14 +61,15 @@ export type ApplyPhaseFrontmatterResult =
   | { ok: true; markdown: string }
   | { ok: false; reason: PhaseFrontmatterErrorReason; message: string }
 
-const EMPTY_FORM: PhaseFrontmatterFormData = {
-  name: '',
-  mode: 'logic',
-  pythonCallable: '',
-  systemPrompt: '',
-  exitContract: '',
+export const EMPTY_FORM: PhaseFrontmatterFormData = {
+  llmRole: '',
   tools: '',
-  targetSkill: '',
+  subagents: [],
+  actions: '',
+  path: '',
+  validator: false,
+  allowSequentialOverwrite: '',
+  iterate: emptyIterateForm(),
 }
 
 export function parsePhaseFrontmatter(markdown: string): ParsePhaseFrontmatterResult {
@@ -71,21 +100,31 @@ export function parsePhaseFrontmatter(markdown: string): ParsePhaseFrontmatterRe
   }
 }
 
-export function phaseFrontmatterToForm(frontmatter: Partial<PhaseFrontmatter>, body = ''): PhaseFrontmatterFormData {
+export function phaseFrontmatterToForm(frontmatter: Partial<PhaseFrontmatter>): PhaseFrontmatterFormData {
   return {
-    name: stringValue(frontmatter.name),
-    mode: stringValue(frontmatter.mode) || inferKind(frontmatter),
-    pythonCallable: xmlBlockValue(body, 'python_callable'),
-    systemPrompt: xmlBlockValue(body, 'system_prompt'),
-    exitContract: xmlBlockValue(body, 'exit_contract'),
+    llmRole: stringValue(frontmatter.llm_role),
     tools: linesValue(frontmatter.tools),
-    targetSkill: stringValue(frontmatter.target_skill),
+    subagents: subagentsValue(frontmatter.subagents),
+    actions: linesValue(frontmatter.actions),
+    path: stringValue(frontmatter.path),
+    validator: booleanValue(frontmatter.validator),
+    allowSequentialOverwrite: linesValue(frontmatter.allow_sequential_overwrite),
+    iterate: iterateValue(frontmatter.iterate, frontmatter.batch),
   }
 }
 
+/**
+ * Serialize the whitelisted fields for `kind` back into the source markdown.
+ *
+ * Round-trip contract: parsed frontmatter + body are preserved; only the
+ * whitelisted fields for the given node kind are set. Keys outside the
+ * whitelist (`name`, `io`, `llm_role` when not an agent, and any unknown key)
+ * are never touched, so saving never destroys data the form cannot edit.
+ */
 export function applyPhaseFrontmatterForm(
   markdown: string,
-  form: PhaseFrontmatterFormData = EMPTY_FORM,
+  form: PhaseFrontmatterFormData,
+  kind: PhaseFrontmatterKind,
 ): ApplyPhaseFrontmatterResult {
   const parsed = parsePhaseFrontmatter(markdown)
   if (!parsed.ok) {
@@ -96,21 +135,27 @@ export function applyPhaseFrontmatterForm(
     }
   }
 
-  const nextFrontmatter = frontmatterFromForm(parsed.frontmatter, form)
-  const kind = inferKind({ ...nextFrontmatter, mode: form.mode, target_skill: form.targetSkill })
-  const dumped = yaml.dump(nextFrontmatter, {
-    lineWidth: 120,
-    noRefs: true,
-    sortKeys: false,
-    styles: { '!!null': 'empty' },
-  }).trimEnd()
-  const nextBody = bodyFromForm(parsed.body, form, kind)
-  const body = nextBody.length > 0 ? `\n${nextBody}` : '\n'
-  return { ok: true, markdown: `---\n${dumped}\n---${body}` }
+  const nextFrontmatter = frontmatterFromForm(parsed.frontmatter, form, kind)
+  return { ok: true, markdown: serializePhaseMarkdown(nextFrontmatter, parsed.body) }
 }
 
-export function phaseKindFromFrontmatter(frontmatter: Partial<PhaseFrontmatter>): PhaseFrontmatterKind {
-  return inferKind(frontmatter)
+export function applyPhaseName(markdown: string, nextName: string): ApplyPhaseFrontmatterResult {
+  const parsed = parsePhaseFrontmatter(markdown)
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      reason: parsed.reason,
+      message: parsed.message,
+    }
+  }
+  const trimmed = nextName.trim()
+  if (!trimmed) {
+    return { ok: false, reason: 'non-object-frontmatter', message: 'Phase name is required.' }
+  }
+  return {
+    ok: true,
+    markdown: serializePhaseMarkdown({ ...parsed.frontmatter, name: trimmed }, parsed.body),
+  }
 }
 
 function splitMarkdownFrontmatter(markdown: string):
@@ -141,110 +186,61 @@ function splitMarkdownFrontmatter(markdown: string):
   }
 }
 
-function frontmatterFromForm(frontmatter: PhaseFrontmatter, form: PhaseFrontmatterFormData): PhaseFrontmatter {
+function frontmatterFromForm(
+  frontmatter: PhaseFrontmatter,
+  form: PhaseFrontmatterFormData,
+  kind: PhaseFrontmatterKind,
+): PhaseFrontmatter {
   const next: PhaseFrontmatter = { ...frontmatter }
-  const kind = inferKind({ ...frontmatter, mode: form.mode, target_skill: form.targetSkill })
 
-  setOptionalString(next, 'name', form.name)
-  setOptionalString(next, 'mode', form.mode)
-
-  if (kind === 'logic') {
-    delete next.validator
-    delete next.execute_steps
-    delete next.llm_role
-    delete next.model_override
-    delete next.prompt
-    delete next.user_prompt_template
-    delete next.agent_tools
-    delete next.sub_skill_ref
-    delete next.tools
-    delete next.target_skill
-    return next
-  }
-
-  if (kind === 'subgraph') {
-    setOptionalString(next, 'target_skill', form.targetSkill)
-    delete next.validator
-    delete next.execute_steps
-    delete next.llm_role
-    delete next.model_override
-    delete next.prompt
-    delete next.user_prompt_template
-    delete next.agent_tools
-    delete next.sub_skill_ref
-    delete next.tools
-    return next
-  }
-
-  setOptionalList(next, 'tools', form.tools)
-  delete next.validator
-  delete next.execute_steps
-  delete next.llm_role
-  delete next.model_override
-  delete next.prompt
-  delete next.user_prompt_template
-  delete next.agent_tools
-  delete next.sub_skill_ref
-  delete next.target_skill
-  return next
-}
-
-function inferKind(frontmatter: Partial<PhaseFrontmatter>): PhaseFrontmatterKind {
-  const mode = stringValue(frontmatter.mode)
-  if (mode === 'subgraph' || stringValue(frontmatter.target_skill) || stringValue(frontmatter.sub_skill_ref)) {
-    return 'subgraph'
-  }
-  if (mode === 'skill' || mode === 'llm' || mode === 'agent') {
-    return 'agent'
-  }
-  return 'logic'
-}
-
-function bodyFromForm(body: string, form: PhaseFrontmatterFormData, kind: PhaseFrontmatterKind): string {
-  const next = removeXmlBlock(removeXmlBlock(removeXmlBlock(body, 'python_callable'), 'system_prompt'), 'exit_contract').trimStart()
-  if (kind === 'logic') {
-    return prependXmlBlocks(next, [['python_callable', form.pythonCallable]])
-  }
   if (kind === 'agent') {
-    return prependXmlBlocks(next, [
-      ['system_prompt', form.systemPrompt],
-      ['exit_contract', form.exitContract],
-    ])
+    setOptionalString(next, 'llm_role', form.llmRole)
+    setOptionalList(next, 'tools', form.tools)
+    setSubagents(next, form.subagents)
+    setOptionalList(next, 'allow_sequential_overwrite', form.allowSequentialOverwrite)
+    setIterate(next, form.iterate)
+    return next
   }
+
+  if (kind === 'logic') {
+    setOptionalList(next, 'actions', form.actions)
+    setBoolean(next, 'validator', form.validator)
+    setOptionalList(next, 'allow_sequential_overwrite', form.allowSequentialOverwrite)
+    setIterate(next, form.iterate)
+    return next
+  }
+
+  delete next.target_skill
+  delete next.targetSkill
+  setOptionalString(next, 'path', form.path)
+  setBoolean(next, 'validator', form.validator)
+  setOptionalList(next, 'allow_sequential_overwrite', form.allowSequentialOverwrite)
+  setIterate(next, form.iterate)
   return next
 }
 
-function prependXmlBlocks(body: string, blocks: Array<[tag: string, value: string]>): string {
-  const rendered = blocks
-    .map(([tag, value]) => xmlBlock(tag, value))
-    .filter(Boolean)
-    .join('\n\n')
-  if (!rendered) {
-    return body
-  }
-  return body ? `${rendered}\n\n${body}` : `${rendered}\n`
-}
-
-function xmlBlock(tag: string, value: string): string {
-  const trimmed = value.trim()
-  return trimmed ? `<${tag}>\n${trimmed}\n</${tag}>` : ''
-}
-
-function xmlBlockValue(body: string, tag: string): string {
-  const match = xmlBlockRegex(tag).exec(body)
-  return match?.[1]?.trim() ?? ''
-}
-
-function removeXmlBlock(body: string, tag: string): string {
-  return body.replace(xmlBlockRegex(tag), '').replace(/\n{3,}/g, '\n\n')
-}
-
-function xmlBlockRegex(tag: string): RegExp {
-  return new RegExp(`<${tag}>\\s*([\\s\\S]*?)\\s*<\\/${tag}>\\n*`, 'm')
+function serializePhaseMarkdown(frontmatter: PhaseFrontmatter, bodyContent: string): string {
+  const dumped = yaml.dump(frontmatter, {
+    lineWidth: 120,
+    noRefs: true,
+    sortKeys: false,
+    styles: { '!!null': 'empty' },
+  }).trimEnd()
+  const trimmedBody = bodyContent.replace(/^\n+/, '')
+  const body = trimmedBody.length > 0 ? `\n${trimmedBody}` : '\n'
+  return `---\n${dumped}\n---${body}`
 }
 
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value : ''
+}
+
+function booleanValue(value: unknown): boolean {
+  return value === true
+}
+
+function numberStringValue(value: unknown): string {
+  return typeof value === 'number' && Number.isFinite(value) ? String(value) : ''
 }
 
 function linesValue(value: unknown): string {
@@ -254,10 +250,126 @@ function linesValue(value: unknown): string {
   return value.filter((item): item is string => typeof item === 'string').join('\n')
 }
 
+function subagentsValue(value: unknown): PhaseSubagentRef[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.flatMap((item) => {
+    if (!isRecord(item)) {
+      return []
+    }
+    return [{
+      name: stringValue(item.name),
+      target_skill: stringValue(item.target_skill),
+      description: stringValue(item.description),
+    }]
+  })
+}
+
+function emptyIterateForm(): PhaseIterateFormData {
+  return {
+    mode: '',
+    over: '',
+    itemVar: '',
+    rangeStart: '',
+    rangeEnd: '',
+    concurrency: '',
+    accumulateVar: '',
+    accumulateInit: '[]',
+    accumulateFrom: '',
+    accumulateMerge: 'append',
+  }
+}
+
+function yamlInlineValue(value: unknown): string {
+  if (value === undefined) {
+    return ''
+  }
+  return yaml.dump(value, {
+    flowLevel: 0,
+    lineWidth: 120,
+    noRefs: true,
+    sortKeys: false,
+    styles: { '!!null': 'empty' },
+  }).trim()
+}
+
+function iterateValue(iterate: unknown, legacyBatch: unknown): PhaseIterateFormData {
+  if (isRecord(iterate)) {
+    const mode = iterate.mode === 'batch' || iterate.mode === 'loop' ? iterate.mode : ''
+    const range = Array.isArray(iterate.range) ? iterate.range : []
+    const accumulate = isRecord(iterate.accumulate) ? iterate.accumulate : {}
+    return {
+      ...emptyIterateForm(),
+      mode,
+      over: stringValue(iterate.over),
+      itemVar: stringValue(iterate.item_var),
+      rangeStart: numberStringValue(range[0]),
+      rangeEnd: numberStringValue(range[1]),
+      concurrency: numberStringValue(iterate.concurrency),
+      accumulateVar: stringValue(accumulate.var),
+      accumulateInit: Object.prototype.hasOwnProperty.call(accumulate, 'init')
+        ? yamlInlineValue(accumulate.init)
+        : '[]',
+      accumulateFrom: stringValue(accumulate.from),
+      accumulateMerge: mergeValue(accumulate.merge),
+    }
+  }
+
+  if (isRecord(legacyBatch)) {
+    return {
+      ...emptyIterateForm(),
+      mode: 'batch',
+      over: stringValue(legacyBatch.iterator),
+      itemVar: stringValue(legacyBatch.item_var),
+      concurrency: numberStringValue(legacyBatch.concurrency),
+    }
+  }
+
+  return emptyIterateForm()
+}
+
+function mergeValue(value: unknown): IterateMergeMode {
+  return value === 'extend' || value === 'merge' || value === 'replace' ? value : 'append'
+}
+
+function intValue(value: string): number | null {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return null
+  }
+  const parsed = Number.parseInt(trimmed, 10)
+  return Number.isFinite(parsed) && String(parsed) === trimmed ? parsed : null
+}
+
+function parseYamlValue(value: string): JsonValue {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return []
+  }
+  try {
+    const parsed = yaml.load(trimmed)
+    if (parsed == null || typeof parsed === 'string' || typeof parsed === 'number' || typeof parsed === 'boolean' || Array.isArray(parsed) || isRecord(parsed)) {
+      return parsed as JsonValue
+    }
+  } catch {
+    return trimmed
+  }
+  return trimmed
+}
+
 function setOptionalString(target: PhaseFrontmatter, key: string, value: string): void {
   const trimmed = value.trim()
   if (trimmed) {
     target[key] = trimmed
+  } else {
+    delete target[key]
+  }
+}
+
+function setBoolean(target: PhaseFrontmatter, key: string, value: boolean): void {
+  if (value) {
+    target[key] = true
   } else {
     delete target[key]
   }
@@ -273,4 +385,55 @@ function setOptionalList(target: PhaseFrontmatter, key: string, value: string): 
   } else {
     delete target[key]
   }
+}
+
+function setSubagents(target: PhaseFrontmatter, subagents: PhaseSubagentRef[]): void {
+  const cleaned = subagents
+    .map((entry) => ({
+      name: entry.name.trim(),
+      target_skill: entry.target_skill.trim(),
+      description: entry.description.trim(),
+    }))
+    .filter((entry) => entry.name || entry.target_skill || entry.description)
+  if (cleaned.length > 0) {
+    target.subagents = cleaned
+  } else {
+    delete target.subagents
+  }
+}
+
+function setIterate(target: PhaseFrontmatter, iterate: PhaseIterateFormData): void {
+  delete target.batch
+  if (iterate.mode !== 'batch' && iterate.mode !== 'loop') {
+    delete target.iterate
+    return
+  }
+
+  const next: PhaseFrontmatter = {
+    mode: iterate.mode,
+    over: iterate.over.trim(),
+    item_var: iterate.itemVar.trim(),
+  }
+
+  const rangeStart = intValue(iterate.rangeStart)
+  const rangeEnd = intValue(iterate.rangeEnd)
+  if (rangeStart != null && rangeEnd != null) {
+    next.range = [rangeStart, rangeEnd]
+  }
+
+  const concurrency = intValue(iterate.concurrency)
+  if (iterate.mode === 'batch' && concurrency != null) {
+    next.concurrency = concurrency
+  }
+
+  if (iterate.mode === 'loop') {
+    next.accumulate = {
+      var: iterate.accumulateVar.trim(),
+      init: parseYamlValue(iterate.accumulateInit),
+      from: iterate.accumulateFrom.trim(),
+      merge: iterate.accumulateMerge,
+    }
+  }
+
+  target.iterate = next
 }

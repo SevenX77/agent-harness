@@ -1,0 +1,233 @@
+{
+  "id": "n4_golden_mech",
+  "title": "golden 存储 + headless 字段级对比 + 409 两守卫（设计）",
+  "overview": {
+    "manages": "golden 基线怎么存（逐节点作者期望值）、怎么从一次 run 晋升（promote）成基线、怎么把 run 实际输出跟 golden 做字段级 diff（headless 不重跑），以及两道 409 守卫——业务守卫（predict trace 不可晋升 golden）+ 写守卫（改写工作区须带浏览器回退头）。",
+    "why_single": "golden 这块牵涉：逐节点 cases 的存储布局（取代旧整次快照 g-a）、headless 评估只比 sealed 结果不重跑、字段级 diff 的契约（NodeGoldenGroup/FieldDifference）、以及两道职责不同的 409 守卫——一整块被 golden(#29–#36) 多操作共享，单列一页。",
+    "design_owner": "engine 后端（diff/score 算法在引擎 adapter）+ gateway 后端 sidecar 侧（golden 存储/晋升/headless 评估/守卫）。前端只列基线、触发 compare/promote、读 diff。",
+    "code_location": "gateway 后端 sidecar 侧 golden_diff.py（list/set/plan/compare 基线）、golden_headless.py（headless 评估）、diagnostic_export.py（assert_trace_can_be_promoted_to_golden 业务守卫）、routers/golden.py（端点 + _require_browser_write_fallback 写守卫）、routers/compare.py（compare/diff 端点）；前端 useGoldenDiff（hooks/）、GoldenSection（panels/）、DiffView（diff/）、analysis-bar（copilot/，autoWriteGoldenIfAbsent）。",
+    "dataflow": [
+      "promote：前端 saveGoldenBaseline → Tauri 模式 POST /golden/plan 拿待写文件清单、用 native-fs 逐个写（不带回退头）；浏览器模式 POST /golden 带 X-Studio-Write-Fallback: browser 让后端代写",
+      "晋升落盘前过业务守卫 assert_trace_can_be_promoted_to_golden：trace 若 is_predict（predict 来源）抛 409 PREDICT_TRACE_CANNOT_BE_GOLDEN（任何晋升路径都过这道检查）",
+      "set/delete golden 过写守卫 _require_browser_write_fallback：缺浏览器回退头抛 409 NATIVE_FS_REQUIRED",
+      "存储：golden_diff.set_golden_baseline_for_run 把某 sealed run snapshot 拆成逐节点 case，落 .workspace/golden/<baseline_id>/{baseline.json, report.json, cases/<node_id>.json}（baseline_id = source_run_id）",
+      "compare：前端 useGoldenDiff.compare → GET/POST /runs/{run}/compare → compare_run_to_golden → 读已 sealed 的 run result 快照 + baseline 的逐节点 expected_output → evaluate_golden_headless 逐节点字段级比对（不启新 run）",
+      "结果 CompareResult.node_groups（逐节点 NodeGoldenGroup：status/score/field_differences/schema_status）→ 前端 DiffView 全屏覆盖层两栏渲染（editor 区、不在 properties）"
+    ]
+  },
+  "submodules": [
+    {
+      "name": "golden 存储（逐节点作者期望值，取代整次快照）",
+      "code": "gateway 后端 sidecar 侧: golden_diff.set/plan/list_golden_baselines（services/golden_diff.py）",
+      "summary": "golden = 逐 agent 节点的作者期望输出（g-a 取代旧『整次 run 快照』），按 skill 存在 .workspace/golden/<baseline_id>/，每个基线一个目录，目录内 baseline.json（清单）+ report.json（摘要）+ cases/<node_id>.json（逐节点 expected_output）。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "baseline_id = source_run_id（由哪次 run 晋升而来）；list 端点 glob */baseline.json 按 created_at 倒序枚举该 skill 全部基线。",
+        "plan_golden_baseline_for_run 把一次 sealed run 快照拆成逐节点 golden case（不落盘，返回待写文件清单）；set_golden_baseline_for_run 真写盘。",
+        "GoldenBaseline 模型（extra=forbid）：id/source_run_id/source_run_results_ref/baseline_ref/linked_input_id/created_at/locked/content_path。",
+        "晋升前过业务守卫（predict trace 不可晋升）。"
+      ],
+      "do": [
+        "逐节点期望值存储 + 列基线 + plan/set 晋升。"
+      ],
+      "dont": [
+        "不存整次 run 快照（g-a：改为逐节点）。",
+        "golden 文件读/编辑需 golden-content read 端点（follow-on，#29/#33 待补）。"
+      ],
+      "deviation": ""
+    },
+    {
+      "name": "headless 字段级对比（只比 sealed 结果、不重跑）",
+      "code": "gateway 后端 sidecar 侧: golden_headless.evaluate_golden_headless / golden_diff.compare_run_to_golden（services/）",
+      "summary": "把 run 实际输出跟 golden 逐节点逐字段比对，全程不启动任何新 run——只读已 sealed 的 run result 快照 + baseline 的逐节点 expected_output，逐字段算 diff + score。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "compare_run_to_golden 取 against 指定或最新基线 → 读已有 run result ref → 适配成引擎契约 → evaluate_golden_headless 逐节点比对。",
+        "run result 必须从 sealed RunArtifactStore ref 读；ref 指向可变 run 文件报 golden.run_results_mutable_ref(422)。",
+        "逐节点 NodeGoldenGroup：node_id/phase_id/status(pass|fail)/score/field_differences/stale_fields/schema_status(valid|stale|missing)；每个 FieldDifference：field_path/type/current_value/golden_value/score/changed。",
+        "diff/score 用引擎 adapter 的 diff_outputs + calculate_score 逐字段算；UI 不从 field path 推节点身份、只渲后端给的 node_groups。"
+      ],
+      "do": [
+        "只比封存结果的逐节点字段级 diff + score。"
+      ],
+      "dont": [
+        "不重跑（headless 评估不启新 run）。",
+        "不读可变 run 文件（必须 sealed ref，否则 422）。"
+      ],
+      "deviation": ""
+    },
+    {
+      "name": "两道 409 守卫（业务 + 写）",
+      "code": "gateway 后端 sidecar 侧: diagnostic_export.assert_trace_can_be_promoted_to_golden · routers/golden._require_browser_write_fallback",
+      "summary": "职责不同的两道 409：业务守卫挡 predict 来源 trace 晋升 golden（PREDICT_TRACE_CANNOT_BE_GOLDEN）；写守卫挡缺浏览器回退头的工作区改写（NATIVE_FS_REQUIRED）。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "业务守卫 assert_trace_can_be_promoted_to_golden：检 trace_payload 是否 is_predict（查顶层/metadata/root.metadata 三处），是则抛 409 PREDICT_TRACE_CANNOT_BE_GOLDEN；在 plan_golden_baseline_for_run 落盘前调，任何晋升路径都过。",
+        "写守卫 _require_browser_write_fallback：set/delete golden 须带 X-Studio-Write-Fallback: browser，否则抛 409 NATIVE_FS_REQUIRED。",
+        "前端正路：Tauri 模式走 /plan 拿 plan 用 native-fs 本地写（不带头、不走后端 set）；浏览器无 native-fs 才带回退头走后端 set。"
+      ],
+      "do": [
+        "挡 predict trace 晋升 + 挡缺回退头的代写。"
+      ],
+      "dont": [
+        "不让 golden 从 predict 来源 trace 捕获（golden 必须作者定/手填，spec E8）。"
+      ],
+      "deviation": ""
+    }
+  ],
+  "files": [
+    {
+      "name": ".workspace/golden/<baseline_id>/",
+      "what": "某 skill 的一个 golden 基线目录（baseline_id = 晋升它的 source_run_id）。存逐节点作者期望值，前端只通过 /golden 与 /compare 端点间接读，不直接碰文件。",
+      "version": "GoldenBaseline(Pydantic, extra=forbid) + 逐节点 cases",
+      "structs": [
+        {
+          "name": "baseline.json（基线清单，前端视角）",
+          "fields": [
+            { "name": "baseline_id", "type": "string", "meaning": "基线 id（= source_run_id，由哪次 run 晋升）", "sensitive": false },
+            { "name": "source_run_id", "type": "string", "meaning": "源 run id（这份 golden 从哪次 run 固化而来）", "sensitive": false },
+            { "name": "source_run_results_ref", "type": "ref", "meaning": "源 run 结果的 sealed ref（不可变内容寻址引用）", "sensitive": false },
+            { "name": "locked", "type": "bool", "meaning": "是否锁定（锁定的基线不被自动覆盖）", "sensitive": false },
+            { "name": "cases", "type": "list", "meaning": "case 记录列表，每条指向一个 cases/<node_id>.json", "sensitive": false }
+          ]
+        },
+        {
+          "name": "cases/<node_id>.json（逐 agent 节点期望）",
+          "fields": [
+            { "name": "node_id", "type": "string", "meaning": "哪个 agent 节点的期望（diff 逐节点比对的键）", "sensitive": false },
+            { "name": "expected_output", "type": "object", "meaning": "该节点的作者期望输出（compare 拿它跟实际输出逐字段比）", "sensitive": false }
+          ]
+        }
+      ],
+      "owns": "归属 skill 工作区（作者定的验收基线）；由 gateway 后端 sidecar 承载读写。前端不直接碰文件，只通过 /golden（列/晋升/删）与 /compare（对比）端点投影。",
+      "crud_pointer": "前端从不直接读写这些文件；列基线走 GET /golden、晋升走 POST /golden 或 /golden/plan、对比走 GET/POST /runs/{run}/compare——见下方「接口」一节，不在此重列。",
+      "storage_note": "目录布局、内容寻址、seal 等是后端实现细节，从前端视角不关心（只认端点契约）。",
+      "security_fe": "golden 是验收期望值、非机密；写盘走 native-fs（Tauri）或带显式浏览器回退头的后端代写（两道 409 守卫把关）。"
+    }
+  ],
+  "interface_groups": [
+    {
+      "key": "crud",
+      "title": "基线读写类（列/晋升/删 golden）",
+      "note": "列该 skill 基线、把某次 run 晋升成基线（Tauri 走 plan 本地写、浏览器走 set 带回退头）、删基线。写操作过两道 409 守卫。"
+    },
+    {
+      "key": "action",
+      "title": "对比评估类（headless，不重跑）",
+      "note": "把 run 实际输出跟 golden 逐节点字段级比对，只读 sealed 结果、不启新 run。"
+    }
+  ],
+  "interfaces": [
+    {
+      "group": "crud",
+      "endpoint": "GET /api/skills/{id}/golden",
+      "req": "无入参",
+      "resp": "list[GoldenBaseline]（id/source_run_id/locked/content_path/created_at…，按 created_at 倒序）",
+      "purpose": "列该 skill 全部 golden 基线——喂 I/O 面板 GoldenSection",
+      "provider": "gateway 后端 sidecar 侧（routers/golden.py list_golden_baselines → golden_diff.list_golden_baselines_for_skill）",
+      "id": "iface-golden-0"
+    },
+    {
+      "group": "crud",
+      "endpoint": "POST /api/skills/{id}/golden",
+      "req": "SetGoldenReq{run_id, lock} + Header X-Studio-Write-Fallback: browser（浏览器代写必带，否则 409 NATIVE_FS_REQUIRED）",
+      "resp": "GoldenBaseline；predict 来源 trace → 409 PREDICT_TRACE_CANNOT_BE_GOLDEN；缺回退头 → 409 NATIVE_FS_REQUIRED",
+      "purpose": "把某次 run 晋升成 golden 基线（浏览器路径，后端代写）——过业务 + 写两道 409 守卫",
+      "provider": "gateway 后端 sidecar 侧（routers/golden.py set_golden_baseline → golden_diff.set_golden_baseline_for_run）",
+      "id": "iface-golden-1"
+    },
+    {
+      "group": "crud",
+      "endpoint": "POST /api/skills/{id}/golden/plan",
+      "req": "SetGoldenReq{run_id, lock}",
+      "resp": "GoldenBaselinePlan（含 files[{path,content}] 待前端写入的文件清单）",
+      "purpose": "Tauri 路径晋升——返回待写文件清单（不落盘），前端用 native-fs 逐个写（不带回退头）",
+      "provider": "gateway 后端 sidecar 侧（routers/golden.py plan_golden_baseline → golden_diff.plan_golden_baseline_for_run）",
+      "id": "iface-golden-2"
+    },
+    {
+      "group": "crud",
+      "endpoint": "DELETE /api/skills/{id}/golden/{golden_id}",
+      "req": "Header X-Studio-Write-Fallback: browser（否则 409 NATIVE_FS_REQUIRED）",
+      "resp": "204 无内容；缺回退头 → 409 NATIVE_FS_REQUIRED；不存在 → 404",
+      "purpose": "删某个 golden 基线（过写守卫）",
+      "provider": "gateway 后端 sidecar 侧（routers/golden.py delete_golden_baseline）",
+      "id": "iface-golden-3"
+    },
+    {
+      "group": "action",
+      "endpoint": "POST /api/skills/{id}/runs/{run_id}/compare",
+      "req": "无 body（run_id 在路径）",
+      "resp": "CompareResult（baseline_id/baseline_ref/run_results_ref/total_score/node_groups[]）",
+      "purpose": "把该 run 实际输出跟当前基线做逐节点字段级 diff（headless，不重跑）",
+      "provider": "gateway 后端 sidecar 侧（routers/compare.py compare_run → golden_diff.compare_run_to_golden）",
+      "id": "iface-golden-4"
+    },
+    {
+      "group": "action",
+      "endpoint": "GET /api/skills/{id}/runs/{run_id}/compare",
+      "req": "可带 against（指定对比基线 id，缺省取当前基线）",
+      "resp": "CompareResult（同上）",
+      "purpose": "前端 useGoldenDiff.compare 主用的对比端点（可指定 against 基线）",
+      "provider": "gateway 后端 sidecar 侧（routers/compare.py compare_run_get）",
+      "id": "iface-golden-5"
+    },
+    {
+      "group": "action",
+      "endpoint": "GET /api/skills/{id}/runs/{run_id}/diff",
+      "req": "可带 against",
+      "resp": "CompareResult（与 compare 同，diff 别名端点）",
+      "purpose": "compare 的别名端点（同 compare_run_to_golden）",
+      "provider": "gateway 后端 sidecar 侧（routers/compare.py diff_run）",
+      "id": "iface-golden-6"
+    }
+  ],
+  "boundaries": {
+    "do": [
+      "逐节点作者期望值存储（取代整次快照 g-a）+ 列/晋升/删基线",
+      "headless 字段级 diff（只比 sealed 结果、不重跑）",
+      "两道 409 守卫：predict trace 不可晋升 + 缺回退头不代写",
+      "晋升正路：Tauri 走 /plan native-fs 本地写、浏览器走 /golden 带回退头"
+    ],
+    "dont": [
+      "golden 不从 predict 来源 trace 捕获（必须作者定/手填）",
+      "compare 不重跑、不读可变 run 文件（须 sealed ref，否则 422）",
+      "golden 不绑 prompt/agent 内部（只绑 output schema，失效见 #35）",
+      "前端不直接读写 golden 文件（经端点投影）"
+    ]
+  },
+  "states_errors": "compare 逐节点 schema_status：valid（schema 一致）/ stale（schema 漂移）/ missing（缺字段）；status：pass|fail（逐节点）。错误码：PREDICT_TRACE_CANNOT_BE_GOLDEN(409，predict trace 晋升被业务守卫拦)、NATIVE_FS_REQUIRED(409，缺 X-Studio-Write-Fallback 头被写守卫拦)、golden.run_results_mutable_ref(422，compare 读了可变 run 文件)、基线不存在 404。失效条件（#35）：改 prompt/agent 内部不失效，仅改 output schema 致缺字段 → 编译错误必须补才能 predict。",
+  "backend_status": [
+    {
+      "item": "golden 逐节点存储 + headless 字段级 diff + baseline_ref/seal",
+      "d12": "D7『golden 逐节点评估事实合同』(D7.1 RunResultSnapshot / D7.2 per-node diff / D7.3 baseline_ref 均 ok)",
+      "status": "ok",
+      "note": "golden = 逐节点期望值（g-a）、headless 只比 sealed 结果不重跑、逐节点 NodeGoldenGroup 字段级 diff、baseline_ref 与存储均已 live。← #29/#31/#34 直接用。",
+      "ref": "d7"
+    },
+    {
+      "item": "Copilot judge 边界（judge 只消费 compare_result_ref，不私读 run/golden 文件）",
+      "d12": "D7.4『CopilotJudgeAdapter 边界』",
+      "status": "ok",
+      "note": "D7.4 已实现已接线：CopilotJudgeAdapter（services/copilot_judge_adapter.py）只消费 run_results_ref/baseline_ref，经 validate_copilot_judge_refs（守 ref 形状、拒绝绝对路径/../反斜杠 = 禁 Copilot 私读任意 run/golden 文件）产出 compare_result_ref + judge_context_ref 交回，已在 routers/copilot.py 经 .prepare() 接线（git c11d56f0）。← #32 创建路 A 的 copilot judge 闭环边界可直接用。",
+      "ref": "d7"
+    },
+    {
+      "item": "Golden API DTO 投影缺口（cases 摘要 + per-node 写入）",
+      "d12": "不在 12D 范围；归 Studio sidecar DTO + 契约层",
+      "status": "review",
+      "note": "两处契约缺口（根因在 API 暴露层）：① GoldenBaseline 模型（models/golden.py + types.ts）**无 cases**——baseline.json 落盘有逐节点 cases，但 list_golden_baselines_for_skill 只映 top-level metadata，所以前端拿不到 per-node golden 覆盖（卡 #30 三态）；② SetGoldenReq 只有 run_id+lock、**无 node_id**，plan_golden_baseline_for_run 遍历所有 node 生成整份 baseline，所以无法 per-node 写入（卡 #32 入口①）。修复：GET /golden 返回 node-level cases 摘要（或新增 golden detail 端点）；若要 per-node promote 则扩展 SetGoldenReq + plan/set 服务支持 node_id/case 选择 + 合并策略。",
+      "ref": "d7"
+    },
+    {
+      "item": "按 output schema 生成空 golden 模版（创建路 B）+ golden 失效编译校验",
+      "d12": "不在 12D 范围；归 spec E4（模版生成）/ E6（失效校验）的后端契约，与编译门控（N3 Compile）协同",
+      "status": "review",
+      "note": "现后端无『按 io.outputs schema 生成空 golden 模版』端点（#33 缺）、无『改 output schema 致 golden 缺字段 → 编译错误』校验（#35 缺）。两项后端契约待理清（不挂 12D，归 E4/E6 + 编译门控）。",
+      "ref": "d7"
+    }
+  ]
+}

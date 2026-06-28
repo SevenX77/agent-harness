@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 from graph_agent.core.skill_resolver_protocol import SKILL_ID_PATTERN
 
@@ -17,6 +17,7 @@ class GraphPhaseRef(BaseModel):
     id: str = Field(min_length=1)
     src: str = Field(min_length=1)
     depends_on: list[str] = Field(...)
+    output: bool = False
 
 
 class ContextBridge(BaseModel):
@@ -38,13 +39,22 @@ class PhaseIOSchema(BaseModel):
 
 
 class AgentRegistryItem(BaseModel):
-    """Named registry binding available to an Agent body."""
+    """Named subgraph binding available to an Agent body."""
 
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
-    target_skill: str = Field(pattern=SKILL_ID_PATTERN)
+    path: str = Field(min_length=1)
     description: str = Field(min_length=1)
+
+    @field_validator("path")
+    @classmethod
+    def _path_must_be_absolute(cls, value: str) -> str:
+        from pathlib import Path
+
+        if not Path(value).is_absolute():
+            raise ValueError("subgraph path must be absolute")
+        return value
 
 
 class ReferenceSpec(BaseModel):
@@ -178,11 +188,26 @@ class LogicNodeAST(_BaseNodeAST):
 class SubgraphNodeAST(_BaseNodeAST):
     """Subgraph delegation phase node parsed from ``SUBGRAPH.md``."""
 
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, serialize_by_alias=True)
+
     mode: Literal["subgraph"]
-    target_skill: str = Field(pattern=SKILL_ID_PATTERN)
+    target_skill: str = Field(alias="path", min_length=1)
     io: PhaseIOSchema
     # V0.3 AST bool flag; not the legacy LLMPhase.validator module path.
     validator: StrictBool = False
+
+    @property
+    def path(self) -> str:
+        return self.target_skill
+
+    @field_validator("target_skill")
+    @classmethod
+    def _path_not_blank(cls, value: str) -> str:
+        # Subgraph path may be relative (resolved against the skill root by the
+        # loader) or absolute; the loader enforces that it stays within root.
+        if not value.strip():
+            raise ValueError("subgraph path must not be blank")
+        return value
 
 
 class AgentNodeAST(_BaseNodeAST):

@@ -1,0 +1,115 @@
+{
+  "page_id": "n5_node_design",
+  "title": "失败节点 · 红灯 / 错误 / 节点级 Resume / 脏态置灰 · 操作设计",
+  "region": "debug:node",
+  "intro": "本页是「调试续跑」节点里**画布节点本身**这块调试面的 MVP1 设计(应该怎样):一次真实 Run 失败/暂停后,用户视线该被锚到出问题的那个节点上——节点亮红灯并就地显示错误摘要、节点上挂一个[Resume]按钮从该节点精准续跑(上游走 checkpoint 不重跑)、改了上游后受影响下游节点的 Resume 自动置灰。每张卡只描述该操作目标长啥样、用户怎么触发、前端怎么做、依赖后端哪条契约;现状与差距见实施页(n5_impl)。续跑/checkpoint/事件流这三块大后端机制单列在契约页(n5_contract)的三张机制页。注:这里的节点态(红灯/暂停)与边黑板都由同一份运行事件流(EventEnvelope)派生,事件流来自 gateway 后端 sidecar 侧(apps/studio/backend 这个 Python sidecar,是 gateway 后端的 HTTP 承载层)推送的 WS /ws/runs/{run_id};节点级续跑/校验对接的是 engine 后端经 sidecar 暴露的 resume 端点。F8(进 debug 前置:需先有一次真实 Run)是一个 spec 原子的两个落点之一——这里讲它作为「调试的前置条件」,它作为「Trace 顶栏全局续跑入口」的另一落点见 N5.4。",
+  "atoms": [
+    {
+      "n": 1,
+      "cap": "failed-node-red-light",
+      "track": "B",
+      "module": "失败定位",
+      "func": "设计(spec F1):一次 Run 失败/校验不过时,Timeline 停在出错节点,该节点在画布上亮红灯并**就地**显示一句错误摘要(Error Message),让用户一眼看出 run 停在哪个节点、为什么——不用去别的面板翻。",
+      "action": "无显式动作(run 执行中某节点抛校验失败/重试耗尽事件时,节点自动转红并就地浮出错误摘要)。",
+      "fe_design": "运行事件流(WS /ws/runs/{run_id} 推来的 EventEnvelope 序列,事件信封)→ 经事件→节点态派生(deriveNodeStatuses,node-status.ts 里把有序事件 reduce 成每节点状态的纯函数)算出该节点态为 error → 画布节点(SkillNode,单个图节点的展示组件)按 error 态渲红(destructive 红框 + AlertTriangle 三角图标徽章)。设计意图:① 红灯与运行期节点灯共用**同一份派生**(spec 决策 Q4:事件→节点态派生器归 trace-observability,run 节点灯 + debug 红灯同源),不另写一套;② 错误摘要要摊到**节点本身**——从该节点最后一条失败事件(validation_fail 校验失败 / retry_exhausted 重试耗尽)的 payload 取 message,在节点上(或其紧贴的 debug bar)就地显示,而不是只靠红色、把文本藏进右侧 Properties 面板。失败事件类型由派生侧的 FAILURE_EVENT_TYPES(显式失败事件集合 = validation_fail / retry_exhausted)与「event_type 含 error|fail / status=failed|error」共同判定。",
+      "fe_modules": [
+        {
+          "name": "运行事件流订阅（useRunStream）"
+        },
+        {
+          "name": "事件→节点态派生（deriveNodeStatuses）"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "WS /ws/runs/{run_id}",
+          "purpose": "订阅该 run 的事件流(EventEnvelope),前端据 phase/validation_fail/retry_exhausted 等事件派生节点态与错误摘要。",
+          "mechanism_ref": "mech_n5_events",
+          "iface_ref": "iface-stream"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(红灯 + 就地错误摘要 F1 全达成)。2026-06-20: 代码已落地(design-audit vs code 核实),状态回填。错误摘要已摊到节点本身:deriveNodeErrorMessages(node-status.ts:141,把 trace 事件 reduce 成每节点最后一条失败 message 的纯函数)产出消息,Workspace.tsx:326 errorMessageByNodeId useMemo 喂给 GraphCanvas.tsx:178,build-nodes.ts:261 写进 data.errorMessage,SkillNode.tsx:95-98 派生 inlineErrorMessage、:216-225 在节点上(非 Properties 面板)就地渲一个 role=alert / aria-label=Node error summary 的 destructive 错误框。红灯本身仍同源(Q4)。测试 SkillNode.error.test.tsx 通过(断言错误时就地摘要存在、无错误时不存在),63/63 前端测试绿。",
+      "impl_ref": "fn-1"
+    },
+    {
+      "n": 2,
+      "cap": "node-anchored-resume",
+      "track": "B",
+      "module": "节点级续跑",
+      "func": "设计(spec F2):改完出错节点后,从**该节点**精准续跑——[Resume]按钮**锚在节点上**(不是只有 Trace 顶栏一个全局按钮),续跑时携带起始节点,引擎用该节点已有 checkpoint(检查点,LangGraph 每跑完一个 super-step 落的状态快照)从该点续,1..X-1 不重跑。",
+      "action": "用户点画布上失败/可续节点上的[Resume]按钮(锚在节点本身,非全局顶栏)。",
+      "fe_design": "选中/悬停失败节点 → 从事件流取该节点的 checkpoint 元数据(nodeResumeCheckpointFromEvents,node-resume.ts 里扫事件取该 phase 最后一条带 checkpoint_id 的快照标识的函数)→ 点节点[Resume] → 调 resumeRun(client.ts 里发起续跑的 API 函数)并带上 options:resumeFromNodeId(从哪个节点续)+ checkpointId/checkpointNs(定位该节点的 checkpoint)+ 可选 resumeToNodeId(续到哪个节点止)→ 后端 resume 端点按这些参数从该 checkpoint 续。设计意图:[Resume]入口下沉到节点本体——具体锚定方式:用 @xyflow/react(画布所用的 React Flow 图库)内置的 NodeToolbar(把浮动 UI 锚定到某个图节点、随画布平移缩放跟随的组件)把现有 NodeResumeDebugBar 的 Resume 按钮挂到失败/可续节点上,而不是新造组件;让「修哪个节点 → 从哪个节点续」在空间上一一对应;全局顶栏 Resume(N4/N5.4 的从最近 checkpoint 整体续)保留为另一条语义,二者并存不互斥。",
+      "fe_modules": [
+        {
+          "name": "节点级 Resume 校验与发起（node-resume + validity）"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{skill_id}/runs/{run_id}/resume",
+          "purpose": "携带 resume_from_node_id + checkpoint_id/checkpoint_ns 从指定节点续跑;后端持 lease/fencing 经 RuntimeStateStore 恢复快照后调引擎 resume_skill。",
+          "mechanism_ref": "mech_n5_resume",
+          "iface_ref": "iface-resume"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "契约问题",
+      "gap_brief": "符合设计(Resume 按钮已锚在节点 F2 达成)。2026-06-20: 代码已落地(design-audit vs code 核实),状态回填。按钮已下沉到节点本体:ResumeNodeToolbar(ResumeNodeToolbar.tsx:1,79,一个 @xyflow/react NodeToolbar,锚到失败节点 nodeId)渲在 ReactFlow 子树内(GraphCanvas.tsx:832-841),onResumeNode → Workspace.tsx:1397(有 runId 时调 handleResumeNode)→ handleResumeNode(Workspace.tsx:1193)→ resumeRun;点击构造 nodeResumeOptionsFromValidity 携带 resume_from_node_id(ResumeNodeToolbar.tsx:75)。全局顶栏 Resume(handleResume Workspace.tsx:1139)并存为另一条语义。ResumeNodeToolbar.test.tsx 断言 toolbar 渲 'Resume node' 且请求带 resume_from_node_id,通过。后端轴(be_status 契约问题,非本 FE 原子目标):引擎『严格只重跑 X..Y、1..X-1 走 checkpoint 不重』(D10.2)仍是 FROZEN-engine/后端关切,不属本原子的前端目标(按钮位置 + resumeFromNodeId 入参),故不阻塞本 FE 原子 符合。",
+      "impl_ref": "fn-2"
+    },
+    {
+      "n": 3,
+      "cap": "dirty-downstream-graying",
+      "track": "B",
+      "module": "脏态置灰",
+      "func": "设计(spec F3):改了上游节点/拓扑/输出 schema 后,受影响**下游**节点的 checkpoint 已失效,这些下游节点的[Resume]应**自动置灰**不可点(并给出为何不可续的提示);只有上游 checkpoint 仍有效的节点可 Resume,无关旁支节点不受影响仍可续。",
+      "action": "无显式动作(用户改了上游节点 → 受影响下游节点的[Resume]自动变 disabled;选中该下游节点时显示置灰原因)。",
+      "fe_design": "选中一个可续节点 → 调 resume 校验(getResumeValidity,查 POST …/resume/validity 这条只读判定端点的前端函数)带该节点 checkpoint 元数据 → 后端比对快照与当前 skill 的内容哈希(content_hash)/执行指纹(execution_fingerprint,编译产物的拓扑指纹)→ 返回 ResumeValidityResponse(resume_allowed 是否可续 + reason 原因(ok/dirty_upstream 上游变脏/checkpoint.not_found/checkpoint.invalid/...) + dirty_fields 脏了哪些字段)→ 前端据 resume_allowed=false 把该节点[Resume]置灰、并把 reason(如 dirty_upstream)作为「为何不可续」提示。设计意图:把「失效」从猜测变成后端可解释判定(脏在 content_hash 还是 execution_fingerprint),前端只按判定置灰;目标是受影响下游**自动**置灰且无关旁支仍可续。",
+      "fe_modules": [
+        {
+          "name": "节点级 Resume 校验与发起（node-resume + validity）"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{skill_id}/runs/{run_id}/resume/validity",
+          "purpose": "只读判定:对指定 checkpoint/节点返回 resume_allowed + reason(dirty_upstream 等) + dirty_fields,供前端决定是否置灰[Resume]。",
+          "mechanism_ref": "mech_n5_resume",
+          "iface_ref": "iface-validity"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(受影响下游自动置灰、旁支不受影响 F3 全达成)。2026-06-20: 代码已落地(design-audit vs code 核实),状态回填。前端自动批量、置灰下沉画布:Workspace.tsx:1098-1137 一个键于 skillContentSignature(skillDetail.files)的自动 edit-watcher effect,改了内容就重探 getResumeValidity(锚在该 run 的失败节点 resumeAnchorId@Workspace.tsx:1092),不再单点 on-select;dirtyDownstreamFromValidity(Workspace.tsx:1259)把后端 affected_downstream 切片投成 Set → dirtyDownstreamNodeIds(GraphCanvas.tsx:179)→ build-nodes.ts:265 置 isDirtyDownstream → SkillNode.tsx:99-102,226-235 把节点置灰(opacity-50 grayscale)+ 'Resume unavailable' 提示。后端 per-node validity 已落实(设计原标的契约问题已解决):resume_downstream.py:52 affected_downstream_nodes 做传递依赖 BFS(无关旁支被排除),:104 resume_allowed_for_node 分全局/逐节点、切片不可用时保守阻断;engine.py:1203-1237 调用之。测试绿:前端 SkillNode.dirty-downstream.test.tsx + node-resume.test.ts + build-nodes.test.ts;后端 test_resume_downstream.py + test_resume_validity_per_node.py 共 12 passed。",
+      "impl_ref": "fn-3"
+    },
+    {
+      "n": 4,
+      "cap": "debug-requires-real-run",
+      "track": "前置",
+      "module": "调试前置",
+      "func": "设计(spec F8,前置落点):进入 debug(节点级续跑/HitL/篡改)的前提是先有一次**真实 Run**——它产出 trace(事件流)+ checkpoint(每节点的状态快照),后续所有就地干预都依赖这两样。没有真实 run,节点级 Resume / 校验 / 边黑板都无源可依。",
+      "action": "用户在工作区点 Run(开始运行)→ 真实跑一遍 skill,产出 trace + per-run checkpoint。",
+      "fe_design": "点 Run → startRun(client.ts 发起运行的 API 函数)POST /api/skills/{skill_id}/runs 拿到 run_id → 以 run_id 起一条 useRunStream(订阅 WS /ws/runs/{run_id} 的事件流 hook)→ 事件持续流入,节点灯/边黑板/trace 全部据此派生;引擎按 per-run checkpointer(每个 run 一个独立 SQLite checkpoint 库)在每个 super-step 落 checkpoint。设计意图:debug 不是凭空的——它是「在一次真实 run 的 trace+checkpoint 之上做就地干预」,所以 F8 是 B/A/C 三场景的共同前置。这一落点强调「先有真实 run」;同一前置在 N4/N5.4 还有「Trace 顶栏全局 Resume 从最近 checkpoint 续」的入口落点。",
+      "fe_modules": [
+        {
+          "name": "运行事件流订阅（useRunStream）"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{skill_id}/runs",
+          "purpose": "发起一次真实 run,返回 run_id;引擎据 per-run checkpointer 在每个节点落 checkpoint,事件经 WS /ws/runs/{run_id} 推回。",
+          "mechanism_ref": "mech_n5_checkpoint",
+          "iface_ref": "iface-startrun"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计:startRun + useRunStream 已实现,per-run SQLite checkpointer(每个 run 独立 checkpoints.db)在每个 super-step 落 checkpoint,trace 事件经 WS /ws/runs/{run_id} 推回;debug 的 trace+checkpoint 源已就绪。",
+      "impl_ref": "fn-4"
+    }
+  ]
+}

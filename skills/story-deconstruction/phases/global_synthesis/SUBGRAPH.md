@@ -1,6 +1,6 @@
 ---
 name: global_synthesis
-target_skill: global-synthesis
+path: subskills/global-synthesis
 io:
   inputs:
     type: object

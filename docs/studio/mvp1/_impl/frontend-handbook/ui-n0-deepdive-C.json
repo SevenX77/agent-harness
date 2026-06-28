@@ -1,0 +1,48 @@
+{
+  "storage": {
+    "summary": "API key 明文存盘到 llm_credentials.json (schema_version=4) 的 provider_endpoints[<endpoint_id>].api_key 字段;内存里是 SecretStr,落盘时 _credentials_payload_for_storage 把它 get_secret_value() 还原成明文字符串写入 JSON,无任何加密/哈希。文件权限被强制 0600、目录 0700。schema 同时有 credential_ref 这层可选间接(ProviderEndpoint.credential_ref: str|None,默认 None),但当前实现里它几乎总是 None——真正用的是合成引用 'endpoint:<endpoint_id>'。fingerprint 不入库存盘,而是按需用 compute_credential_fingerprint(endpoint) 实时算(sha256(endpoint_id+protocol+base_url+明文secret+timeout+trust_env+proxy_env)[全长]),只当缓存键/防并发覆盖标记,不是 key 本体的替身。",
+    "evidence": [
+      ["ProviderEndpoint.api_key: SecretStr|None,credential_ref: str|None=None(凭证间接层,默认 None)", "packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:163-181"],
+      ["LLMCredentialsFile schema_version 固定为 4,只含 provider_endpoints/provider_routes/runtime_policy", "apps/studio/backend/app/models/llm_config.py:121-133"],
+      ["落盘时把 SecretStr 还原成明文写进 JSON 的 api_key 字段(_credentials_payload_for_storage)", "apps/studio/backend/app/services/llm_credentials.py:472-479"],
+      ["原子写 + 强制 chmod 0600(文件)/0700(目录),无加密(_save_credentials_unlocked)", "apps/studio/backend/app/services/llm_credentials.py:446-469"],
+      ["存盘路径常量 credentials_path() 解析 llm_credentials.json", "apps/studio/backend/app/services/llm_credentials.py:25,49"],
+      ["fingerprint 非入库,实时 sha256 计算,payload 含明文 secret 但结果不可逆,仅作缓存键/防覆盖", "packages/graph-agent-gateway/src/graph_agent_gateway/registry/storage.py:14-40"]
+    ]
+  },
+  "lifecycle": {
+    "headers": ["步骤", "触发", "函数/端点 file:line", "数据形态(明文key/credential_ref/handle)"],
+    "rows": [
+      ["1. 录入(用户在 Settings 填 key)", "前端 putRegistryEndpoints 发 PUT /api/llm/registry/endpoints,body 含明文 api_key;若 key 没变前端传占位符 '**********' 让后端保留旧值", "前端 apps/studio/frontend/src/api/llm.ts:1175-1186(putRegistryEndpoints);后端 apps/studio/backend/app/routers/llm.py:361-365(put_registry_endpoints)", "明文 key(HTTP body 里)"],
+      ["2. 存盘(upsert)", "put_registry_endpoints → upsert_endpoints,_preserved_secret 判断:传了真新 key 用新的,传占位符/空则保留原 SecretStr", "apps/studio/backend/app/services/llm_credentials.py:105-138(upsert_endpoints),428-443(_preserved_secret/_is_new_secret)", "明文 key → 落盘成 JSON 明文 api_key"],
+      ["3. 测 endpoint(连通性)", "前端 testEndpoint → POST /api/llm/endpoints/{id}/test;后端直接 endpoint.api_key.get_secret_value() 取明文喂给 _ping_provider 调 models-list", "apps/studio/backend/app/routers/llm.py:480-590(test_endpoint),493/502-506(取明文调 _ping_provider)", "明文 key(直接读,不经 resolve_credential/handle)"],
+      ["4. 测模型(_probe_model)", "前端 testProviderModels → POST /api/llm/endpoints/{id}/models/test;后端同样直接 endpoint.api_key.get_secret_value() 喂 _probe_model / _probe_official_model_profile_result", "apps/studio/backend/app/routers/llm.py:599-784(test_endpoint_models),697-705(明文调 _probe_model)", "明文 key(直接读,不经 handle)"],
+      ["5. 角色→route 解析(运行/run/N4 与 copilot 测试共用)", "build_gateway_route_runtime → ModelResolver.resolve_routes → resolve_role;为每条 route 算出 credential_ref(endpoint.credential_ref or 'endpoint:<id>')和 fingerprint,装进 ResolvedRoute", "apps/studio/backend/app/services/gateway_resolver.py:43-86;packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:107-184(credential_ref 与 fingerprint 写入 ResolvedRoute)", "credential_ref(字符串引用,如 'endpoint:openai-official')+ fingerprint,此时不含明文"],
+      ["6. 兑换真 key(模型调用前)", "client_manager 建 provider 客户端时 _resolve_api_key(route, credential_provider),用 route.credential_ref 向 EndpointCredentialProvider.get() 要回 SecretStr,再 get_secret_value() 成明文", "packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:386-406(_resolve_api_key);registry/credentials.py:38-45(EndpointCredentialProvider.get)", "credential_ref → SecretStr → 明文 key"],
+      ["7. 注入请求", "明文 key 作为 api_key 传进 provider SDK/HTTP 客户端;OpenAI 兼容裸 HTTP 路径写成 Authorization: Bearer <key>", "packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:106-113,147,186,226;ordinary_chat.py:566-602(Bearer 注入)", "明文 key(进 SDK/Authorization 头)"]
+    ]
+  },
+  "handle_redemption": {
+    "summary": "关键发现:secret-handle:// 这层在运行时模型调用路径上【根本没被消费】。resolve_credential(credential_resolver.py:43)只产出一个不含明文的 sha256 占位 handle('secret-handle://studio-local/<32位digest>'),GatewayAdapter.resolve_credential(gateway.py:454)是它唯一的生产入口,但全仓除测试外【零调用方】——它是契约/隔离测试用的产物,不在 run 路径上。真正的 handle→真 key 兑换其实绕过了 handle:运行时 _resolve_api_key(client_manager.py:386)拿的是 ResolvedRoute.credential_ref(字符串引用,不是 secret-handle),调 credential_provider.get(credential_ref);持有真 key 的是 EndpointCredentialProvider(registry/credentials.py:14),它内部按 'endpoint:<id>' 或 endpoint.credential_ref 索引到 ProviderEndpoint,直接返回那枚 SecretStr,_resolve_api_key 再 get_secret_value() 成明文。所以真 key 始终在 credentials 快照里的 ProviderEndpoint.api_key,'兑换'就是按引用回表查 SecretStr,没有 handle 解码、没有短期票据回兑这一步。",
+    "evidence": [
+      ["resolve_credential 只产 sha256 占位 handle,seed=credential_ref|fingerprint|scope|expires,明文 key 不进 handle", "packages/graph-agent-gateway/src/graph_agent_gateway/credential_resolver.py:43-107"],
+      ["GatewayAdapter.resolve_credential 是 handle 生产入口,内部用 EndpointCredentialProvider 但只为算 descriptor,不返真 key", "apps/studio/backend/app/core/adapters/gateway.py:454-488"],
+      ["GatewayAdapter.resolve_credential 全仓非测试零调用方(grep '.resolve_credential(' 排除 tests/vendor 无命中)——handle 不在 run 路径", "apps/studio/backend/app/core/adapters/gateway.py:454(无生产调用方)"],
+      ["运行时真兑换:_resolve_api_key 用 route.credential_ref(非 handle)调 credential_provider.get → SecretStr → get_secret_value 明文", "packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py:386-406"],
+      ["持有真 key 者:EndpointCredentialProvider.get(ref) 按 'endpoint:<id>'/credential_ref 索引 ProviderEndpoint,返回 endpoint.api_key(SecretStr)", "packages/graph-agent-gateway/src/graph_agent_gateway/registry/credentials.py:14-45"],
+      ["ResolvedRoute.credential_ref = endpoint.credential_ref or 'endpoint:<endpoint_id>',这就是运行时回表用的引用", "packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:107,153"],
+      ["route_chat_model_factory 只对 'secret-handle://expired/' 前缀做拒绝兜底,说明 handle 仅在测试桩里以字符串形式出现", "packages/graph-agent-gateway/src/graph_agent_gateway/route_chat_model_factory.py:33"]
+    ]
+  },
+  "fallback_authoring": {
+    "summary": "边界成立:Settings 页只【写】fallback 链,运行时由 Gateway 的 resolver【读】链做决策。fallback 链存在 roles 文件(roles_path() 指向 llm_roles.json,schema_version 2/3)里 roles[<role>].fallback_chain 字段,每个元素是 RoleRouteEntry{route_id + 可选 runtime_settings}。Settings 通过 PUT /api/llm/roles、PUT /api/llm/roles/{name}、POST .../apply-profile 把链写进这个字段(apply-profile 是把一个 ModelProfile.fallback_chain 整段拷进角色)。运行时 ModelResolver/resolve_role 按 fallback_chain 顺序逐条尝试:跳过 missing/不可执行/无凭证/lint 阻断的 route,取第一条可用的——这就是'决策'(代码里没有名为 decide_fallback 的函数,顺序回退决策实现在 resolve_role 的主循环 + lint 过滤里)。schema_version 3 的角色还可用 model_groups 表达分组,materialize 时会落成 fallback_chain。",
+    "evidence": [
+      ["fallback_chain 定义在 RoleEntry,元素是 RoleRouteEntry(route_id + runtime_settings)", "packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py:248-285"],
+      ["Studio 侧 RoleEntry 额外带 model_groups(schema3 分组,materialize 落成 fallback_chain);ModelBundle 也有 fallback_chain/model_groups", "apps/studio/backend/app/models/llm_config.py:218-246"],
+      ["Settings 写链:PUT /roles、PUT /roles/{name}、POST /roles/{name}/apply-profile(把 profile.fallback_chain 拷进角色)", "apps/studio/backend/app/routers/llm.py:910-924,956-977,1497-1551"],
+      ["fallback 链存盘在 roles 文件(roles_path → llm_roles.json,schema 2/3),与 credentials 文件分离", "apps/studio/backend/app/services/gateway_resolver.py:53,126-135;app/services/llm_roles.py(roles_path)"],
+      ["Gateway 运行时读链决策:resolve_role 遍历 fallback_chain,逐条跳过 route_missing/not_executable/credential_missing/profile_unavailable/lint_blocked,取首条可用", "packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py:35-236"],
+      ["运行时入口 ModelResolver.resolve_routes/resolve 调 resolve_role 消费该链(无独立 decide_fallback 函数,顺序回退即决策)", "packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:91-192"]
+    ]
+  }
+}

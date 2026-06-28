@@ -1,43 +1,50 @@
 import { useEffect, useState } from "react"
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group"
+import { InputGroup, InputGroupInput } from "@/components/ui/input-group"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import type {
   RoleIntent,
   RoleProviderPreference,
   RoleThinkingPreference,
+  RoleTokenIntent,
+  RoleTokenIntentMode,
 } from "@/api/llm"
 
-export interface OutputLimitSummary {
+export interface TokenLimitSummary {
   knownCount: number
   totalCount: number
   min: number | null
   max: number | null
 }
 
+export interface RoleTokenLimitSummary {
+  context: TokenLimitSummary
+  output: TokenLimitSummary
+}
+
 export interface RoleSettingsDraft {
   providerPreference: RoleProviderPreference
   thinking: RoleThinkingPreference
+  contextTokenMode: RoleTokenIntentMode
+  contextTokens: string
+  outputTokenMode: RoleTokenIntentMode
   outputTokens: string
-  useMaximumTokens: boolean
 }
 
 export function RoleSettingsPanel({
   roleName,
   modelFallbackEnabled,
   intent,
-  outputLimitSummary,
+  tokenLimitSummary,
   onModelFallbackChange,
   onSubmit,
 }: {
   roleName: string
   modelFallbackEnabled: boolean
   intent?: RoleIntent
-  outputLimitSummary: OutputLimitSummary
+  tokenLimitSummary: RoleTokenLimitSummary
   onModelFallbackChange: (enabled: boolean) => void
   onSubmit: (intent: RoleIntent) => void
 }) {
@@ -57,7 +64,7 @@ export function RoleSettingsPanel({
       roleName={roleName}
       modelFallbackEnabled={modelFallbackEnabled}
       draft={draft}
-      outputLimitSummary={outputLimitSummary}
+      tokenLimitSummary={tokenLimitSummary}
       onModelFallbackChange={onModelFallbackChange}
       onDraftChange={updateDraft}
     />
@@ -68,121 +75,194 @@ export function RoleSettingsFields({
   roleName,
   modelFallbackEnabled,
   draft,
-  outputLimitSummary,
+  tokenLimitSummary,
   onModelFallbackChange,
   onDraftChange,
 }: {
   roleName: string
   modelFallbackEnabled: boolean
   draft: RoleSettingsDraft
-  outputLimitSummary: OutputLimitSummary
+  tokenLimitSummary: RoleTokenLimitSummary
   onModelFallbackChange: (enabled: boolean) => void
   onDraftChange: (draft: RoleSettingsDraft) => void
 }) {
-  const thinkingPreferred = draft.thinking !== "off"
-
   return (
-    <FieldSet data-role-settings-fields="true" className="gap-3">
+    <FieldSet data-role-settings-fields="true" className="gap-0">
       <FieldGroup className="gap-3">
         <div
           data-role-settings-toggles="true"
-          className="grid gap-x-4 gap-y-3 md:grid-cols-[minmax(8rem,0.9fr)_minmax(8rem,0.9fr)_minmax(18rem,1.8fr)]"
+          className="rounded-md border border-border bg-muted/10 p-3"
         >
-          <Field
-            orientation="horizontal"
-            data-role-model-fallback-setting="true"
-            data-role-setting-key="model_fallback_enabled"
-            className="items-center justify-between gap-3 py-1"
-          >
-            <FieldLabel htmlFor={`model-fallback-${roleName}`} className="min-w-0 truncate">
-              Model Fallback
-            </FieldLabel>
-            <Switch
-              id={`model-fallback-${roleName}`}
-              size="sm"
-              checked={modelFallbackEnabled}
-              onCheckedChange={onModelFallbackChange}
-              aria-label={`Model fallback for ${roleName}`}
-            />
-          </Field>
-
-          <Field
-            orientation="horizontal"
-            className="items-center justify-between gap-3 py-1"
-          >
-            <FieldLabel htmlFor={`thinking-preferred-${roleName}`} className="min-w-0 truncate">
-              Thinking Preferred
-            </FieldLabel>
-            <Switch
-              id={`thinking-preferred-${roleName}`}
-              size="sm"
-              checked={thinkingPreferred}
-              onCheckedChange={(checked) => onDraftChange({
-                ...draft,
-                thinking: checked ? "preferred" : "off",
-              })}
-              aria-label={`Thinking Preferred for ${roleName}`}
-            />
-          </Field>
-
-          <Field data-role-output-settings="true" className="min-w-0 gap-1.5">
-            <FieldLabel htmlFor={`output-token-target-${roleName}`}>Output Token Target</FieldLabel>
-            <InputGroup data-role-output-token-input-group="true">
-              <InputGroupInput
-                id={`output-token-target-${roleName}`}
-                aria-label={`Output token target for ${roleName}`}
-                value={draft.outputTokens}
-                disabled={draft.useMaximumTokens}
-                onChange={(event) => onDraftChange({
-                  ...draft,
-                  outputTokens: event.target.value.replace(/[^\d]/g, ""),
-                })}
-                inputMode="numeric"
-                placeholder={outputLimitSummary.max ? `Max ${formatNumber(outputLimitSummary.max)}` : "Optional target"}
+          <div className="grid gap-3 lg:grid-cols-[minmax(12rem,0.8fr)_minmax(18rem,1.2fr)]">
+            <Field
+              orientation="horizontal"
+              data-role-model-fallback-setting="true"
+              data-role-setting-key="model_fallback_enabled"
+              className="min-h-10 items-center justify-between gap-3 rounded-md border border-border/70 bg-background/70 px-3"
+            >
+              <FieldLabel htmlFor={`model-fallback-${roleName}`} className="min-w-0 text-xs font-medium">
+                Model Fallback
+              </FieldLabel>
+              <Switch
+                id={`model-fallback-${roleName}`}
+                size="sm"
+                checked={modelFallbackEnabled}
+                onCheckedChange={onModelFallbackChange}
+                aria-label={`Model fallback for ${roleName}`}
               />
-              <InputGroupAddon align="inline-end" className="cursor-default gap-2 pr-1.5">
-                <span className="whitespace-nowrap text-[11px]">Use max</span>
-                <Switch
-                  size="sm"
-                  checked={draft.useMaximumTokens}
-                  onCheckedChange={(checked) => onDraftChange({
-                    ...draft,
-                    useMaximumTokens: checked,
-                  })}
-                  aria-label={`Use maximum output tokens for ${roleName}`}
-                />
-              </InputGroupAddon>
-            </InputGroup>
-            <FieldDescription>
-              {outputLimitSummaryText(outputLimitSummary)}
-            </FieldDescription>
-          </Field>
+            </Field>
+
+            <Field data-role-thinking-setting="true" className="min-w-0 gap-1.5 rounded-md border border-border/70 bg-background/70 p-3">
+              <FieldLabel id={`thinking-${roleName}`} className="min-w-0 text-xs font-medium">
+                Thinking
+              </FieldLabel>
+              <RadioGroup
+                aria-labelledby={`thinking-${roleName}`}
+                value={draft.thinking}
+                onValueChange={(value) => onDraftChange({
+                  ...draft,
+                  thinking: value as RoleThinkingPreference,
+                })}
+                className="grid grid-cols-3 gap-1"
+              >
+                {(["off", "preferred", "required"] as const).map((value) => (
+                  <FieldLabel
+                    key={value}
+                    htmlFor={`thinking-${value}-${roleName}`}
+                    className="flex min-w-0 items-center justify-center gap-1.5 rounded-md border border-border/70 bg-muted/20 px-2 py-1.5 text-xs font-medium transition-colors has-[[data-state=checked]]:border-primary/60 has-[[data-state=checked]]:bg-primary/10"
+                  >
+                    <RadioGroupItem id={`thinking-${value}-${roleName}`} value={value} />
+                    <span className="truncate">{thinkingLabel(value)}</span>
+                  </FieldLabel>
+                ))}
+              </RadioGroup>
+            </Field>
+          </div>
+
+          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+            <TokenIntentField
+              roleName={roleName}
+              kind="context"
+              mode={draft.contextTokenMode}
+              label="Context Tokens"
+              tokens={draft.contextTokens}
+              summary={tokenLimitSummary.context}
+              onModeChange={(contextTokenMode) => onDraftChange({ ...draft, contextTokenMode })}
+              onTokensChange={(contextTokens) => onDraftChange({ ...draft, contextTokens })}
+            />
+            <TokenIntentField
+              roleName={roleName}
+              kind="output"
+              mode={draft.outputTokenMode}
+              label="Output Tokens"
+              tokens={draft.outputTokens}
+              summary={tokenLimitSummary.output}
+              onModeChange={(outputTokenMode) => onDraftChange({ ...draft, outputTokenMode })}
+              onTokensChange={(outputTokens) => onDraftChange({ ...draft, outputTokens })}
+            />
+          </div>
         </div>
       </FieldGroup>
     </FieldSet>
   )
 }
 
+function TokenIntentField({
+  roleName,
+  kind,
+  mode,
+  label,
+  tokens,
+  summary,
+  onModeChange,
+  onTokensChange,
+}: {
+  roleName: string
+  kind: "context" | "output"
+  mode: RoleTokenIntentMode
+  label: string
+  tokens: string
+  summary: TokenLimitSummary
+  onModeChange: (mode: RoleTokenIntentMode) => void
+  onTokensChange: (tokens: string) => void
+}) {
+  const inputId = `${kind}-token-target-${roleName}`
+  const fieldDataAttribute = kind === "context"
+    ? { "data-role-context-settings": true }
+    : { "data-role-output-settings": true }
+  const inputGroupDataAttribute = kind === "context"
+    ? { "data-role-context-token-input-group": true }
+    : { "data-role-output-token-input-group": true }
+  return (
+    <Field
+      {...fieldDataAttribute}
+      className="min-w-0 gap-1.5 rounded-md border border-border/70 bg-background/70 p-3"
+    >
+      <FieldLabel htmlFor={inputId} className="text-xs font-medium">{label}</FieldLabel>
+      <div className="grid min-w-0 gap-2">
+        <Select value={mode} onValueChange={(value) => onModeChange(value as RoleTokenIntentMode)}>
+          <SelectTrigger size="sm" className="w-full">
+            <SelectValue>{tokenModeLabel(mode)}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="default">Default</SelectItem>
+            <SelectItem value="maximum_available">Use Max</SelectItem>
+            <SelectItem value="required_minimum">Required Min</SelectItem>
+            <SelectItem value="target">Target</SelectItem>
+          </SelectContent>
+        </Select>
+        <InputGroup
+          {...inputGroupDataAttribute}
+        >
+          <InputGroupInput
+            id={inputId}
+            aria-label={`${label} target for ${roleName}`}
+            value={tokens}
+            onChange={(event) => onTokensChange(event.target.value.replace(/[^\d]/g, ""))}
+            inputMode="numeric"
+            placeholder={summary.max ? `Blank uses max ${formatNumber(summary.max)}` : "Blank uses route max"}
+          />
+        </InputGroup>
+      </div>
+      <FieldDescription>
+        {tokenSummaryText(label.replace(/ Tokens$/, ""), summary)}
+      </FieldDescription>
+    </Field>
+  )
+}
+
 function draftFromIntent(intent?: RoleIntent): RoleSettingsDraft {
-  const outputIntent = intent?.target_output_tokens
+  const contextDraft = tokenDraftFromIntent(intent?.target_context_tokens)
+  const outputDraft = tokenDraftFromIntent(intent?.target_output_tokens)
   return {
     providerPreference: intent?.provider_preference ?? "manual_order",
     thinking: intent?.thinking ?? "off",
-    outputTokens: outputIntent?.mode === "target" && outputIntent.value ? String(outputIntent.value) : "",
-    useMaximumTokens: outputIntent?.mode === "maximum_available",
+    contextTokenMode: contextDraft.mode,
+    contextTokens: contextDraft.tokens,
+    outputTokenMode: outputDraft.mode,
+    outputTokens: outputDraft.tokens,
   }
 }
 
-function outputLimitSummaryText(summary: OutputLimitSummary): string {
-  if (summary.totalCount === 0) {
-    return "No provider routes selected yet."
+function tokenDraftFromIntent(intent?: RoleTokenIntent | null): {
+  mode: RoleTokenIntentMode
+  tokens: string
+} {
+  if (!intent) return { mode: "maximum_available", tokens: "" }
+  return {
+    mode: intent.mode,
+    tokens: (intent.mode === "target" || intent.mode === "required_minimum") && intent.value ? String(intent.value) : "",
   }
+}
+
+function tokenSummaryText(label: string, summary: TokenLimitSummary): string {
+  if (summary.totalCount === 0) return `${label} route max token caps are unavailable.`
   if (summary.knownCount === 0 || summary.min === null || summary.max === null) {
-    return "Selected route max token caps are unavailable."
+    return `${label} route max token caps are unavailable.`
   }
   const prefix = summary.min === summary.max
-    ? `Route max token: ${formatNumber(summary.max)}.`
-    : `Route max token range: min ${formatNumber(summary.min)} / max ${formatNumber(summary.max)}.`
+    ? `${label} route max token cap: ${formatNumber(summary.max)}.`
+    : `${label} route max token range: min ${formatNumber(summary.min)} / max ${formatNumber(summary.max)}.`
   const unknownCount = summary.totalCount - summary.knownCount
   if (unknownCount <= 0) return prefix
   const routeLabel = unknownCount === 1 ? "1 route cap" : `${unknownCount} route caps`
@@ -190,27 +270,36 @@ function outputLimitSummaryText(summary: OutputLimitSummary): string {
 }
 
 export function roleIntentFromSettingsDraft(draft: RoleSettingsDraft): RoleIntent {
-  if (draft.useMaximumTokens) {
-    return {
-      provider_preference: draft.providerPreference,
-      thinking: draft.thinking,
-      target_output_tokens: {
-        mode: "maximum_available",
-      },
-    }
-  }
-  const outputValue = parseOptionalInteger(draft.outputTokens)
   return {
     provider_preference: draft.providerPreference,
     thinking: draft.thinking,
-    target_output_tokens: outputValue !== null
-      ? {
-          mode: "target",
-          value: outputValue,
-          downgrade: "allow",
-        }
-      : null,
+    target_context_tokens: tokenIntentFromDraft(draft.contextTokenMode, draft.contextTokens),
+    target_output_tokens: tokenIntentFromDraft(draft.outputTokenMode, draft.outputTokens),
   }
+}
+
+function tokenIntentFromDraft(mode: RoleTokenIntentMode, tokens: string): RoleTokenIntent | null {
+  if (mode === "default") return null
+  if (mode === "maximum_available") return { mode: "maximum_available" }
+  const value = parseOptionalInteger(tokens)
+  if (mode === "required_minimum") {
+    return value === null ? { mode: "required_minimum" } : { mode, value, downgrade: "allow" }
+  }
+  if (value === null) return { mode: "target" }
+  return { mode, value, downgrade: "allow_with_warning" }
+}
+
+function tokenModeLabel(mode: RoleTokenIntentMode): string {
+  if (mode === "maximum_available") return "Use Max"
+  if (mode === "required_minimum") return "Required Min"
+  if (mode === "target") return "Target"
+  return "Default"
+}
+
+function thinkingLabel(value: RoleThinkingPreference): string {
+  if (value === "preferred") return "Preferred"
+  if (value === "required") return "Required"
+  return "Off"
 }
 
 function parseOptionalInteger(value: string): number | null {

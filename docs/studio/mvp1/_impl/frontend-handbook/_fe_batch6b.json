@@ -1,0 +1,14 @@
+{
+ "n3-lint#4": {
+  "name": "canvas-node-projection(出错节点小标志+tooltip)",
+  "fix_plan": "两处仍未做,均为纯前端:① tooltip 展开——SkillNode.tsx:120 的 TooltipContent 仍是固定文案 `{compileErrorCount} compile error(s) on this node`,只给计数;需把 data.compileErrors 逐条渲成 field-line-message 列表(复用 PropertiesPanel 里 FieldErrorMarker 的 message 列表渲法 + shadcn Tooltip)。② 数据源切实时 lint——画布节点徽标的 compileErrors 来自 build-nodes.ts:191 `compileErrors: compileErrorsByNodeId[phase.name]`,而 Workspace.tsx:943-946 的 compileErrorsByNodeId 由手动 Compile 的 compileErrors state 经 compileErrorsByNode 分组得到,实时 lintResult 仍停在 LazyMonacoPanel 内部(line 250)未上提;需把 useDebouncedLint 的 result 上提到 Workspace(或 lint store)再用 compileErrorsByNode 分组喂给 build-nodes,使编辑期实时 lint 也能即时标到节点。后端 LintError 已带 file/phase_name/line/field_path,数据足够,无需改后端。",
+  "verify": "RED:渲染带 compileErrors 的 SkillNode,断言 tooltip 含具体 field/line/message → 现状只 'N compile error(s)' 失败;GREEN:tooltip 展开后断言逐条 field-line-message;UI:编辑出错内容(不手动 Compile),~800ms 后出错节点即时出现小标志(证明数据源已切实时 lint)、悬停看逐条详情",
+  "evidence": "frontend/src/components/nodes/SkillNode.tsx:120(tooltip 仍纯计数 'N compile error(s) on this node');frontend/src/components/GraphCanvas/build-nodes.ts:191(节点 compileErrors 来自 compileErrorsByNodeId[phase.name]);frontend/src/components/studio/Workspace.tsx:942-946(compileErrorsByNodeId 由手动 compileErrors state 分组,非 lintResult);LazyMonacoPanel.tsx:250(实时 lintResult 仅在编辑器内部,未上提)"
+ },
+ "n3-lint#5": {
+  "name": "properties-projection(字段旁错误标记+tooltip)",
+  "fix_plan": "字段级投影骨架已全部落地,只差把数据源从手动 Compile 切到实时 lint:① 已做——PropertiesPanel.tsx:159-161 用 fieldErrorsByKey(lintErrors, selectedNode.id) 按 engine field_path 分组,514/535/556/568/578/595 行对各 frontmatter 字段渲 FieldErrorMarker(AlertTriangle + shadcn Tooltip 列 message),Studio LintError 已采纳 field_path/source_path(errors.py:33-34、types.ts:27-28),手册'PropertiesPanel 零投影 / LintError 未采纳 field_path'已过时。② 仍缺——Workspace.tsx:957-960 传给 PropertiesPanel 的 propertiesFieldErrors 由 compileErrorsToFieldLintErrors(手动 Compile 的 compileErrors)产出(代码注释自承 'realtime lint result is not lifted here, so compile is today's field source'),实时 lint 的字段投影未通;需把 useDebouncedLint 的 result(已含 field_path,见 skills.py:1493-1506 _lint_error_from_exception 读 field_path)上提到 Workspace、替换/合并到 propertiesFieldErrors。纯前端 wiring,无后端依赖。",
+  "verify": "`npx vitest run src/components/studio/panels/PropertiesPanel.lint-fields.test.tsx`(断言有 field_path 的错误标到对应字段、无 field_path 不误标);UI:编辑出错字段(不手动 Compile),~800ms 后 properties 面板对应字段旁出现标记(证明数据源已切实时 lint)",
+  "evidence": "frontend/src/components/studio/panels/PropertiesPanel.tsx:159-161(fieldErrorsByKey),514-595(FieldErrorMarker 各字段),677-708(FieldErrorMarker 实现);frontend/src/api/types.ts:27-28(field_path/source_path 已采纳);backend/app/models/errors.py:33-34(field_path/source_path);frontend/src/components/studio/Workspace.tsx:954-960(propertiesFieldErrors 仍来自手动 Compile,注释自承实时 lint 未上提);backend/app/services/skills.py:1493-1506(实时 lint 已产出 field_path);PropertiesPanel.lint-fields.test.tsx 全绿"
+ }
+}

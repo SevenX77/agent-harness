@@ -18,6 +18,7 @@ _DEFAULT_DETAILS_SCHEMA: dict[str, Any] = {
 _DOMAIN_AGENT = "agent"
 _DOMAIN_COGNITIVE_RUNTIME = "cognitive / tool / runtime"
 _DOMAIN_COMPILE = "compile"
+_DOMAIN_GOLDEN = "golden"
 _DOMAIN_GRAPH = "graph"
 _DOMAIN_LOGIC = "logic"
 _DOMAIN_MENTION = "mention"
@@ -88,8 +89,12 @@ ERROR_REGISTRY: dict[str, ErrorCodeMetadata] = {
     '[F-v3-subgraph-name-invalid]': ErrorCodeMetadata('[F-v3-subgraph-name-invalid]', 'FATAL', ('编译期',), 'docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态'),
     '[F-v3-subgraph-target-skill-invalid]': ErrorCodeMetadata('[F-v3-subgraph-target-skill-invalid]', 'FATAL', ('编译期',), _DOC_SUBGRAPH_PATH_CONTRACT),
     '[F-v3-subgraph-io-schema-invalid]': ErrorCodeMetadata('[F-v3-subgraph-io-schema-invalid]', 'FATAL', ('编译期',), _DOC_SUBGRAPH_PATH_CONTRACT),
+    # Retained for the round28 registry↔owner bijection. No longer emitted: the
+    # parent/child io.outputs 1:1 gate was relaxed (skill-syntax §2.4 / cutover
+    # item ⑦); subgraph io is sliced/merged by StateMapper like a normal node.
     '[F-v3-subgraph-io-mismatch]': ErrorCodeMetadata('[F-v3-subgraph-io-mismatch]', 'FATAL', ('编译期',), _DOC_SUBGRAPH_PATH_CONTRACT),
     '[F-v3-subgraph-io-schema-incompatible]': ErrorCodeMetadata('[F-v3-subgraph-io-schema-incompatible]', 'FATAL', ('编译期',), _DOC_SUBGRAPH_PATH_CONTRACT),
+    '[F-v3-golden-stale-fields]': ErrorCodeMetadata('[F-v3-golden-stale-fields]', 'FATAL', ('eval 期',), 'docs/engine/mvp1/02-mechanism/05-run-inner/06-golden-eval/mvp1-alignment.md#3-接口契约'),
     '[F-v3-agent-schema-unknown-field]': ErrorCodeMetadata('[F-v3-agent-schema-unknown-field]', 'FATAL', ('编译期',), 'docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态'),
     '[F-v3-agent-name-invalid]': ErrorCodeMetadata('[F-v3-agent-name-invalid]', 'FATAL', ('编译期',), 'docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态'),
     '[F-v3-agent-llm-role-unknown]': ErrorCodeMetadata('[F-v3-agent-llm-role-unknown]', 'FATAL', ('编译期',), 'docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md#2-语法部件清单--mvp1-写入状态'),
@@ -186,10 +191,11 @@ _CATALOG_METADATA_ROWS: tuple[tuple[str, str], ...] = (
     (_DOMAIN_LOGIC, '检查子图业务规则'),
     (_DOMAIN_SUBGRAPH, _REMEDIATE_DELETE_FIELD),
     (_DOMAIN_SUBGRAPH, _REMEDIATE_FIX_NAME),
-    (_DOMAIN_SUBGRAPH, '使用 registry skill id'),
+    (_DOMAIN_SUBGRAPH, '使用绝对 path 指向工作目录内子图'),
     (_DOMAIN_SUBGRAPH, '修正 object schema'),
     (_DOMAIN_SUBGRAPH, '对齐父 phase 和子 GRAPH IO'),
     (_DOMAIN_SUBGRAPH, '对齐字段 schema'),
+    (_DOMAIN_GOLDEN, '重新生成或补齐该节点 golden'),
     (_DOMAIN_AGENT, _REMEDIATE_DELETE_FIELD),
     (_DOMAIN_AGENT, _REMEDIATE_FIX_NAME),
     (_DOMAIN_AGENT, '使用已注册角色'),

@@ -1,0 +1,81 @@
+{
+ "id": "n5_hitl_impl",
+ "title": "N5.2 HitL 悬浮输入 · 实施详情",
+ "design_ref": "n5_hitl_design",
+ "intro": "本页是 N5.2(HitL 人工注入面)前端的现状/差距/实施计划/测试,1:1 对应设计页 n5_hitl_design(原子 #5–#6)。代码按「文件名 + 函数/对象名」引用。核心结论:HitL 注入链路(取暂停 prompt → 打包答案 → human_response 注入续跑)已端到端打通,唯一偏差是**输入框位置**——现状在 TracePanel 固定面板,spec F4 要它锚定暂停节点、浮在其 debug bar 上方。续跑/事件机制见 mech_n5_resume / mech_n5_events。",
+ "functions": [
+  {
+   "n": 5,
+   "cap": "hitl-node-anchored-input",
+   "design_ref": "atom-5",
+   "current": "现状:表单已实现,位置偏差。deriveNodeStatuses(node-status.ts)据 hitl/interrupted 类事件(isPausedEvent)把节点态置 paused;TracePanel.tsx 的 latestHitlPrompt 扫事件取最新暂停 prompt(question/prompt/message/options/pending_tool_calls + phase + checkpoint 元数据),并在 TracePanel 顶部渲 HitL 表单(问题 + 可选项按钮 + 多 pending 工具调用单选选择器 + 文本输入)。但表单渲在 **TracePanel(固定面板)**,不是锚定暂停节点、浮在其 debug bar 上方。",
+   "gap": "差距:把 HitL 输入从 TracePanel 迁成『锚定暂停节点、浮在其上方的悬浮富文本框』(达成 spec F4『非固定顶栏』)。prompt 提取/表单内容(latestHitlPrompt)可复用,主要是渲染位置与锚定。纯前端改动;后端暂停事件已就绪。",
+   "fe_status": "符合",
+   "be_status": "契约问题",
+   "be_dep": "⚠ 部分缺口:interrupted/暂停事件引擎未发射(InterruptedEvent 仅类定义,真实事件是 run_manager 入队的 resume_applied)——HitL 暂停态在真跑无事件源,前端表单目前只在 mock 下工作。需后端补发 interrupted/resumed,或前端改读 resume_applied(见 mech_n5_events / mech_n5_resume)。",
+   "fe_status_prev": "偏差",
+   "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
+  },
+  {
+   "n": 6,
+   "cap": "hitl-answer-inject-resume",
+   "design_ref": "atom-6",
+   "current": "现状:符合。提交 HitL 表单 → submitHitlResponse 产 {content, phaseName, toolCallId, checkpointId, checkpointNs} → hitlResumeOptionsFromRequest(resume-options.ts)转成 resumeRun 的 options.humanResponse={content, toolCallId} → Workspace.tsx 的 handleSubmitHitlResponse 调 resumeRun → 后端 resume 端点透传 human_response → 引擎 _apply_resume_human_response 构造 ToolMessage 注入(需挂起工具调用)续跑;支持 tool_call_id 定位多挂起调用。",
+   "gap": "符合设计,注入链路无需改;真正待改的是上游 #5 的输入框位置(本注入对得上 F5)。",
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "be_dep": "注入原语已实现(resume 端点收 human_response、引擎 _apply_resume_human_response 构造 ToolMessage 注入,需挂起工具调用)。⚠ 但续跑后事件是 resume_applied,非 resumed;node-status 未把 resume_applied/resumed 映射回 running,trace/WS 闭环(D10.3)仍 partial。"
+  }
+ ],
+ "plan": [
+  {
+   "step": 1,
+   "what": "#5 hitl-node-anchored-input:把 HitL 输入表单从 TracePanel 迁成『锚定暂停节点、浮在其 debug bar 上方的悬浮富文本框』,复用 latestHitlPrompt 取到的问题/可选项/pending 工具调用渲染。",
+   "depends_on": "前端:用 @xyflow/react 的 NodeToolbar(position=top)把 HitL 表单锚到暂停节点上方,复用 latestHitlPrompt + TracePanel 现有表单内容(只迁位置,不重写表单)。后端暂停事件已就绪。",
+   "why": "纯前端位置迁移、后端不变;注入链(#6)已通,所以本节点核心活就是把框挪对位置。",
+   "block": "前端独立"
+  }
+ ],
+ "tests": [
+  {
+   "covers": "#5 hitl-node-anchored-input",
+   "atoms": [
+    5
+   ],
+   "shots": [
+    "agent 请求输入时该节点进 paused 态,悬浮输入框浮在该节点 debug bar 上方(非 TracePanel 固定面板)",
+    "悬浮框渲出问题文本 + 可选项 + 多 pending 工具调用选择器"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "RED(事件源):喂 resume_applied(真实续跑事件)→ 断言『进 paused / 浮现 HitL 框』失败,因为前端只认 interrupted/hitl,而引擎不发 interrupted。",
+    "mock 注入 interrupted 事件 → 断言 deriveNodeStatuses 置 paused、latestHitlPrompt 取到 prompt/可选项/pending 工具调用(当前仅在此 mock 下成立)。",
+    "RED(位置):断言『悬浮框锚定暂停节点』失败(现状在 TracePanel 固定面板)。",
+    "GREEN:后端补发 interrupted(或前端改读 resume_applied)+ 用 NodeToolbar 把框锚到 paused 节点后,断言真跑暂停事件触发悬浮框。"
+   ],
+   "layer2": [
+    "真跑(关键):真跑一个会请求人类输入的 agent skill,确认该节点暂停 + 悬浮框在其上方浮现(非固定顶栏),截图。"
+   ],
+   "fe_status_prev": "偏差",
+   "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
+  },
+  {
+   "covers": "#6 hitl-answer-inject-resume",
+   "atoms": [
+    6
+   ],
+   "shots": [
+    "答完点提交后续跑请求带 human_response={content, tool_call_id}",
+    "续跑后 agent 收到答案继续、trace 出 resumed 事件"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "mock 提交 → 断言 hitlResumeOptionsFromRequest 把答案转成 options.humanResponse={content, toolCallId}、resumeRun 被调。",
+    "断言多 pending 工具调用时按选中的 toolCallId 提交。"
+   ],
+   "layer2": [
+    "真跑(关键):真跑会请求输入的 skill,答完续跑,确认答案被注入(agent 据答案继续)、trace 出 resumed,截图。"
+   ]
+  }
+ ]
+}

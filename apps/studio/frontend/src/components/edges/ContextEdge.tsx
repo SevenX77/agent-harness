@@ -1,14 +1,14 @@
 import * as ReactFlow from '@xyflow/react'
 import type { Edge, EdgeProps } from '@xyflow/react'
-import type { MouseEvent } from 'react'
-import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
-import { useOptionalWorkspaceContext } from '../studio/WorkspaceContext'
+import type { KeyboardEvent, MouseEvent } from 'react'
 
 export interface ContextEdgeData extends Record<string, unknown> {
   hasTraceData: boolean
   contextJson?: unknown
   sourcePhaseId: string
   targetPhaseId: string
+  showContextControl?: boolean
+  onInspectEdge?: (edge: { id: string; source: string; target: string; contextJson?: unknown }) => void
   onEdgeContextMenu?: (event: MouseEvent, connection: { source: string; target: string }) => void
 }
 
@@ -21,86 +21,88 @@ type GlobalWithProcess = typeof globalThis & {
   }
 }
 
-const HORIZONTAL_EDGE_EPSILON = 0.5
+const STRAIGHT_EDGE_EPSILON = 0.5
+const EDGE_DOT_RADIUS = 7
 
 function isHorizontalHandlePosition(position: ReactFlow.Position): boolean {
   return position === ReactFlow.Position.Left || position === ReactFlow.Position.Right
 }
 
-function getMockEdgeContext(source: string, target: string) {
-  const defaultContext = {
-    "timestamp": new Date().toISOString(),
-    "agent_state": {
-      "status": "success",
-      "current_phase": target,
-      "previous_phase": source
-    },
-    "inputs": {
-      "query": "Develop a high-performance backend routing module for the user workspace.",
-      "max_iterations": 5
-    },
-    "phase_outputs": {
-      [source]: {
-        "status": "completed",
-        "confidence": 0.94,
-        "summary": `Execution completed in phase ${source}. Refined payload forwarded to ${target}.`
-      }
-    },
-    "scratch": {
-      "tokens_consumed": 1280,
-      "elapsed_seconds": 1.45,
-      "tool_calls": [
-        {
-          "tool": "directory_search",
-          "args": { "pattern": "route" },
-          "status": "success"
-        }
-      ]
+function isVerticalHandlePosition(position: ReactFlow.Position): boolean {
+  return position === ReactFlow.Position.Top || position === ReactFlow.Position.Bottom
+}
+
+export function EdgeContextDot({
+  id,
+  x,
+  y,
+  hasTraceData,
+  tooltipCopy,
+  data,
+}: {
+  id: string
+  x: number
+  y: number
+  hasTraceData: boolean
+  tooltipCopy: string
+  data: ContextEdgeData | undefined
+}) {
+  const source = data?.sourcePhaseId || ''
+  const target = data?.targetPhaseId || ''
+  const inspect = () => {
+    data?.onInspectEdge?.({
+      id,
+      source,
+      target,
+      contextJson: data.contextJson,
+    })
+  }
+  const handleKeyDown = (event: KeyboardEvent<SVGGElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return
     }
-  };
-
-  if (source.includes('input') || source.toLowerCase() === 'input') {
-    return {
-      ...defaultContext,
-      "inputs": {
-        "query": "Develop a high-performance backend routing module for the user workspace.",
-        "user_role": "admin",
-        "environment": "production"
-      },
-      "phase_outputs": {},
-      "scratch": {
-        "initiated_at": new Date().toISOString(),
-        "auth_validated": true
-      }
-    };
+    event.preventDefault()
+    event.stopPropagation()
+    inspect()
   }
 
-  if (target.includes('output') || target.toLowerCase() === 'output') {
-    return {
-      ...defaultContext,
-      "inputs": {
-        "query": "Develop a high-performance backend routing module for the user workspace."
-      },
-      "phase_outputs": {
-        "planner": {
-          "plan": ["Retrieve files", "Refactor workspace routes", "Verify compilation"],
-          "confidence": 0.98
-        },
-        "executor": {
-          "modified_files": ["apps/studio/frontend/src/lib/tauri.ts"],
-          "compilation": "pass",
-          "test_results": "1620 passed"
+  return (
+    <g
+      role="button"
+      tabIndex={0}
+      className="nodrag nopan edge-context-dot"
+      data-edge-context-target="true"
+      data-edge-source={source}
+      data-edge-target={target}
+      aria-label="View edge trace data"
+      transform={`translate(${x} ${y})`}
+      style={{ cursor: 'pointer', pointerEvents: 'all' }}
+      onClick={(event) => {
+        event.stopPropagation()
+        inspect()
+      }}
+      onKeyDown={handleKeyDown}
+      onContextMenu={(event) => {
+        if (source && target) {
+          data?.onEdgeContextMenu?.(event, { source, target })
         }
-      },
-      "scratch": {
-        "tokens_consumed": 4820,
-        "elapsed_seconds": 5.82,
-        "final_summary": "Successfully integrated native directory selection into Assets panel and verified state persistence."
-      }
-    };
-  }
-
-  return defaultContext;
+      }}
+    >
+      <title>{tooltipCopy}</title>
+      <circle
+        r={EDGE_DOT_RADIUS}
+        className={hasTraceData ? 'edge-context-dot__halo' : undefined}
+        fill="var(--studio-canvas-edge-dot-fill, var(--color-background))"
+        stroke={hasTraceData ? 'var(--studio-canvas-accent, var(--primary))' : 'var(--studio-canvas-border, var(--color-border))'}
+        strokeWidth={2}
+      />
+      <circle
+        r={EDGE_DOT_RADIUS - 3}
+        fill={hasTraceData ? 'var(--studio-canvas-accent, var(--primary))' : 'var(--studio-canvas-edge-dot-muted, var(--color-muted-foreground))'}
+        opacity={hasTraceData ? 1 : 0.75}
+      />
+    </g>
+  )
 }
 
 export function ContextEdge({
@@ -114,12 +116,18 @@ export function ContextEdge({
   style,
   data,
 }: EdgeProps<ContextEdgeModel>) {
-  const workspace = useOptionalWorkspaceContext()
-
-  const [edgePath, labelX, labelY] = Math.abs(sourceY - targetY) <= HORIZONTAL_EDGE_EPSILON
+  const isHorizontalStraight =
+    Math.abs(sourceY - targetY) <= STRAIGHT_EDGE_EPSILON
     && isHorizontalHandlePosition(sourcePosition)
     && isHorizontalHandlePosition(targetPosition)
-    ? [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, (sourceX + targetX) / 2, sourceY]
+  // TB layout: a node and its single child share an X, so draw a clean vertical
+  // line instead of a bezier (mirrors the horizontal-straight case for LR).
+  const isVerticalStraight =
+    Math.abs(sourceX - targetX) <= STRAIGHT_EDGE_EPSILON
+    && isVerticalHandlePosition(sourcePosition)
+    && isVerticalHandlePosition(targetPosition)
+  const [edgePath, labelX, labelY] = isHorizontalStraight || isVerticalStraight
+    ? [`M ${sourceX} ${sourceY} L ${targetX} ${targetY}`, (sourceX + targetX) / 2, (sourceY + targetY) / 2]
     : ReactFlow.getBezierPath({
         sourceX,
         sourceY,
@@ -129,6 +137,7 @@ export function ContextEdge({
         targetPosition,
       })
   const hasTraceData = data?.hasTraceData === true
+  const showContextControl = data?.showContextControl !== false
   const globalProcess = (globalThis as GlobalWithProcess).process
   const isTestEnv = globalProcess?.env?.NODE_ENV === 'test'
 
@@ -136,43 +145,14 @@ export function ContextEdge({
     ? 'Run the skill to inspect transferred data'
     : (hasTraceData ? 'Click to inspect flowing context' : 'No data captured on this path')
 
-  const buttonClasses = isTestEnv
-    ? [
-        'block size-4 rounded-full border bg-primary transition-colors',
-        hasTraceData
-          ? 'border-primary ring-2 ring-primary/40'
-          : 'border-primary hover:ring-2 hover:ring-primary/30',
-      ].join(' ')
-    : [
-        'block size-4 rounded-full border bg-zinc-900 transition-all cursor-pointer',
-        hasTraceData
-          ? 'border-primary ring-2 ring-primary/40 hover:scale-110 shadow-lg shadow-primary/20'
-          : 'border-zinc-700 hover:border-zinc-500 hover:ring-2 hover:ring-zinc-700',
-      ].join(' ')
-
   return (
     <>
-      <style>{`
-        @keyframes context-edge-flow {
-          from {
-            stroke-dashoffset: 24;
-          }
-          to {
-            stroke-dashoffset: 0;
-          }
-        }
-        .animated-flow-line {
-          stroke-dasharray: 8, 8;
-          animation: context-edge-flow 1.2s linear infinite;
-        }
-      `}</style>
-
       {/* Base inactive connection line */}
       <ReactFlow.BaseEdge
         id={id}
         path={edgePath}
         style={{
-          stroke: '#27272a', // zinc-800
+          stroke: 'var(--studio-canvas-edge, var(--color-border))',
           strokeWidth: 2,
           ...style,
         }}
@@ -185,7 +165,7 @@ export function ContextEdge({
           path={edgePath}
           className="animated-flow-line"
           style={{
-            stroke: 'var(--primary, #6366f1)',
+            stroke: 'var(--studio-canvas-accent, var(--primary))',
             strokeWidth: 2,
             strokeOpacity: 0.8,
             pointerEvents: 'none',
@@ -193,52 +173,16 @@ export function ContextEdge({
         />
       )}
 
-      <ReactFlow.EdgeLabelRenderer>
-        <div
-          className="nodrag nopan absolute animate-in fade-in duration-200"
-          style={{
-            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-            pointerEvents: 'all',
-          }}
-        >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                data-edge-context-target="true"
-                data-edge-source={data?.sourcePhaseId}
-                data-edge-target={data?.targetPhaseId}
-                aria-label="View edge trace data"
-                className={buttonClasses}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  if (workspace?.setSelectedEdge && workspace?.onPanelChange) {
-                    const mockJson = getMockEdgeContext(data?.sourcePhaseId || '', data?.targetPhaseId || '')
-                    workspace.setSelectedEdge({
-                      id,
-                      source: data?.sourcePhaseId || '',
-                      target: data?.targetPhaseId || '',
-                      contextJson: mockJson
-                    })
-                    workspace.onPanelChange('properties')
-                  }
-                }}
-                onContextMenu={(event) => {
-                  if (data?.sourcePhaseId && data?.targetPhaseId) {
-                    data.onEdgeContextMenu?.(event, {
-                      source: data.sourcePhaseId,
-                      target: data.targetPhaseId,
-                    })
-                  }
-                }}
-              />
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              {tooltipCopy}
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      </ReactFlow.EdgeLabelRenderer>
+      {showContextControl ? (
+        <EdgeContextDot
+          id={id}
+          x={labelX}
+          y={labelY}
+          hasTraceData={hasTraceData}
+          tooltipCopy={tooltipCopy}
+          data={data}
+        />
+      ) : null}
     </>
   )
 }

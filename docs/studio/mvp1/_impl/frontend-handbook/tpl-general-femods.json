@@ -1,0 +1,47 @@
+[
+  {
+    "name": "保存状态徽章（SaveStatusBadge）",
+    "kind": "共享 UI 组件（跨节点）",
+    "what": "一个通用的「保存状态」徽章 SaveStatusBadge:吃同一个 SaveStatus 类型(idle/pending/saving/saved/error),把即填即存的当前态渲染成顶部右上的小徽章。它和「General」本身无关——四个 settings tab 的标题栏都用它反馈保存态。它是跨节点共享组件、已在 Shell(settings 壳层)登记;General #15 是它的复用方,本卡精简、不重复 Shell 那张完整卡。",
+    "where": "组件本体 ui/save-status-badge.tsx(SaveStatusBadge);General 挂载点 GeneralTab.tsx(SectionTitle 的 trailing 槽,绑 appSettings.saveStatus);现状 API Keys / LLM Roles / Copilot 三个 tab 的标题栏也都复用同一个 SaveStatusBadge。",
+    "duties": [
+      "把 SaveStatus 五态渲染成徽章:idle 静默不显 / pending 待存(转圈)/ saving 保存中(转圈)/ saved 已存(打勾)/ error 失败(warning 色三角 + aria-live assertive)。",
+      "放在各 tab 标题行的 trailing 槽,不另起独立 Save 按钮(settings 即填即存、无显式保存)。",
+      "失败态显式可见(不静默),配合 hook 层的 toast 一起把保存失败告诉用户。"
+    ],
+    "used_by": "General:#15(三字段即填即存的保存反馈);现状也复用于 API Keys / LLM Roles / Copilot 三个 tab 标题栏(同一 SaveStatus 类型)。",
+    "boundary": "做:把保存态渲染成徽章。不做:不发保存请求、不决定何时保存(那是各页 hook 的 debounce/PUT 逻辑)、不持保存态真相(只读传入的 status)。",
+    "reuse_note": "已在 Shell 登记，General #15 复用（卡精简,不重复写完整卡）。",
+    "design_note": "残留近重复:四个 tab 的标题栏保存徽章现已统一用这一个共享 SaveStatusBadge(General 侧无近重复);仅 LLM Roles 角色卡内另有一个 RoleSaveStatusBadge(RoleBadges.tsx,吃同一 SaveStatus、英文写死、error 用 outline 而非 warning),按「统一组件」要求宜并入本共享徽章——属 Roles 页范畴、不阻塞 General。",
+    "api": "无 —— 它只渲染传入的 status;真正的保存(debounce + PUT /api/settings)由各页 hook(General 是 useAppSettings)做。"
+  },
+  {
+    "name": "app 设置即填即存",
+    "what": "General tab 三字段(user_id / gitea_host / default_skills_directory)的「改→缓冲→整体 PUT→反馈」即填即存逻辑集合,是 General 落地的唯一前端底座;它管 debounce、并发缓冲、保存态机,不弹文件夹选择器、不落盘。",
+    "where": "hooks/useAppSettings.ts(整文件,useAppSettings hook);含 updateSettings(局部 patch 合进完整三字段对象)、queueSave(300ms debounce 排程,APP_SETTINGS_SAVE_DELAY_MS=300)、performSave(发 PUT /api/settings + 维护 SaveStatus + 并发缓冲 pendingSettingsRef)、三个字段 setter(setUserId/setGiteaHost/setDefaultSkillsDirectory)、初始 loadAppSettings(GET /api/settings + withRuntimeDefaults 回落)。",
+    "duties": [
+      "字段录入合并:任一 setter → updateSettings 合出完整三字段对象(无字段级 PATCH,永远整体提交)。",
+      "debounce:queueSave 起 300ms 排程,合并连续快改为一次 PUT。",
+      "并发安全:有 in-flight 请求时把新值缓冲进 pendingSettingsRef,当前请求 finally 里再发缓冲值,避免乱序覆盖。",
+      "保存态机:维护 SaveStatus(idle/pending/saving/saved/error)驱动顶部徽章;失败 setSaveStatus('error') + toast,不静默。",
+      "初始恢复:进 tab/刷新走 loadAppSettings→GET /api/settings,空 default_skills_directory 经 withRuntimeDefaults 在前端回落 runtime 默认。"
+    ],
+    "used_by": "General:#10–#15(三字段录入、debounce 整体 PUT、保存徽章、初始恢复全靠它)。",
+    "boundary": "做:三字段的合并、debounce、整体 PUT、并发缓冲、保存态机、初始恢复。不做:不弹文件夹选择器(归 native picker 封装)、不落盘(归 gateway 后端)、不持第二份 app_settings 真相(以后端为准)。",
+    "api": "PUT /api/settings(整体三字段写)+ GET /api/settings(初始读),不做字段级 PATCH。"
+  },
+  {
+    "name": "native 目录选择器封装",
+    "what": "进 General 选默认 skills 目录时,通过 Tauri invoke 触发 OS 原生文件夹选择器的前端封装——settings 里唯一走 Studio Rust 后端 native-fs 的调用侧;它只弹窗取路径,不落盘。",
+    "where": "lib/tauri.ts selectSkillDirectory(invoke('select_directory') 弹原生选择器);配套运行时判定 isTauriRuntime / nativeHelpersAreAvailable(config/runtime.ts);General 调用点在 GeneralTab.tsx 的 chooseDefaultSkillsDirectory。",
+    "duties": [
+      "桌面环境走 Tauri invoke('select_directory'),把当前目录作起始路径传给 Studio Rust 后端,弹 OS 文件夹对话框。",
+      "返回用户选定的绝对路径;取消返回 null。",
+      "非桌面(web 模式,isTauriRuntime 为假)toast『Desktop only』、返回 null,不弹选择器。",
+      "native helpers 不可用时 toast 桌面运行时不可用(显式,不静默)。"
+    ],
+    "used_by": "General:#13(选默认 skills 目录的唯一 native 入口)。",
+    "boundary": "做:弹 OS 原生文件夹选择器、回传选定绝对路径、桌面/非桌面分流。不做:不落盘 app_settings(选定路径回前端后由 useAppSettings 走 PUT /api/settings 存)、不碰凭证/角色等其它 settings 数据。",
+    "api": "Tauri command select_directory(Studio Rust 后端 native 文件夹对话框),不走 HTTP。"
+  }
+]

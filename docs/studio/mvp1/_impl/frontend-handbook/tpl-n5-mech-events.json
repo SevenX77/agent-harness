@@ -1,0 +1,236 @@
+{
+  "id": "mech_n5_events",
+  "title": "运行事件流 EventEnvelope + 节点态/边黑板派生底座(机制)",
+  "overview": {
+    "manages": "一次 run 的**唯一事件事实源**:引擎产 EventEnvelope(事件信封)经 WS /ws/runs/{run_id} 推给前端,同一份事件流同时派生三样东西——节点灯/debug 红灯(deriveNodeStatuses)、边 dot 黑板(edgeContextFromEvents)、Trace 时间线(VirtualTraceList)。本页讲信封 schema、断点续接(cursor/seq/gap)、脱敏,以及前端派生侧。",
+    "why_single": "这条事件流是 N5 几乎所有 debug 展示的共同底座:N5.1 红灯/暂停、N5.3 边黑板、N5.4 trace 都从它派生(spec 决策 Q4:run 节点灯 + debug 红灯共用同一派生)。它被多面共用、又容易在『去重/续接/派生』上写糊,单列一页。",
+    "design_owner": "engine 后端为主(EventEnvelope 契约、cursor/seq/gap 缓冲、事件产生都在 engine);经 gateway 后端 sidecar(gateway 后端 HTTP 承载层)的 WS /ws/runs/{run_id} + run_manager.stream_run 推送;前端 useRunStream 订阅 + deriveNodeStatuses/edgeContextFromEvents 派生。",
+    "code_location": "engine:core/event_contracts.py(EventEnvelope/EventStreamBuffer/StreamCursor/TransportErrorPayload)、callbacks/events.py(各领域事件类,Literal event_type)。sidecar:routers/websockets.py 的 run_events(WS /ws/runs/{run_id})+ run_manager.stream_run。前端:hooks/useRunStream.ts(订阅+去重+续接)、components/studio/node-status.ts deriveNodeStatuses、lib/edge-context.ts edgeContextFromEvents、components/TracePanel.tsx + VirtualTraceList。",
+    "dataflow": [
+      "引擎执行产领域事件(CallbackEvent)→ make_event_envelope 包成 EventEnvelope(补 cursor='stream_id:seq' + 时间戳)",
+      "sidecar run_manager.stream_run(run_id, cursor) 经 WS /ws/runs/{run_id} 逐条 send_json 推给前端",
+      "前端 useRunStream 订阅:按 seq 去重、检测 gap、记 cursor、断线带 cursor 重连续接",
+      "同一份 events 三路派生:deriveNodeStatuses → 节点灯/红灯/paused;edgeContextFromEvents → 边黑板;VirtualTraceList → trace 时间线"
+    ]
+  },
+  "submodules": [
+    {
+      "name": "EventEnvelope 事件信封 + payload 领域事件",
+      "code": "engine: core/event_contracts.py EventEnvelope + callbacks/events.py CallbackEvent",
+      "summary": "信封是传输壳(版本/流 id/序号/游标/错误),真正语义在 payload 的领域事件(用 Literal event_type 辨别)。前端据 payload event_type 派生一切。",
+      "formula": "EventEnvelope.cursor = 'stream_id:seq'",
+      "diagram": "",
+      "rules": [
+        "信封顶层字段:schema_version='studio.event.v1' / stream_id / seq(流内单调序号)/ run_id / event_type / payload(领域事件 dict)/ cursor / timestamp / error_code? / error_payload?。",
+        "payload 领域事件(与 debug 相关):phase_start(节点开始→running)、phase_end(节点正常结束→success)、validation_fail(校验失败→error)、retry_exhausted(重试耗尽→error)、input_dispatch(边转移派发,带 blackboard_snapshot/changed_keys→边黑板)、run_ended(运行终止)、interrupted(暂停/请求人类输入→paused)、resumed(续跑恢复)。",
+        "make_event_envelope:构造信封,自动补 cursor='stream_id:seq' 与时间戳。",
+        "frozen pydantic 模型:信封不可变。"
+      ],
+      "do": [
+        "用信封统一承载所有运行事件。",
+        "payload 用 Literal event_type 标签辨别领域事件。"
+      ],
+      "dont": [
+        "前端不据传输层 event_type 猜语义,解包 payload 取领域 event_type。"
+      ],
+      "deviation": "⚠ interrupted / resumed 这两个 payload 事件类型在 callbacks/events.py 只有**类定义、引擎从未构造发射**;真实续跑事件是 sidecar run_manager 入队的 resume_applied。故下表把 interrupted→paused / resumed→running 标为**目标映射(事件源未发射)**。"
+    },
+    {
+      "name": "断点续接:cursor / seq 去重 / gap",
+      "code": "sidecar(WS replay): run_manager.stream_run + _events_after_cursor; engine 契约层: event_contracts.py EventStreamBuffer/StreamCursor(定义,未被本 WS 路由使用); 前端 hooks/useRunStream.ts",
+      "summary": "用单调 seq 去重、cursor(stream_id:seq)续接、gap 检测,保证断线重连后不丢不重。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "前端 useRunStream:记 cursorRef、按 nextBackoffMs(1s 起×2 封顶 30s)退避重连、重连 URL 带 ?cursor= 续接、按 seq 去重并检测 gap。",
+        "sidecar 侧 WS 续接的**真实落点是 run_manager.stream_run(run_id, cursor)** → _events_after_cursor(从内存 record.events 按 cursor 解析 expired/gap 后 replay),由 websockets.py 的 run_events 调用。",
+        "⚠ engine 的 EventStreamBuffer/StreamCursor(event_contracts.py)虽定义了 cursor resume/seq 去重/gap 语义,但**当前 sidecar WS 路由并未使用它**——维护者要改 WS replay 行为应改 run_manager.stream_run/_events_after_cursor,不是 EventStreamBuffer。"
+      ],
+      "do": [
+        "seq 去重 + cursor 续接 + gap 检测。",
+        "前端断线带 cursor 退避重连补流。"
+      ],
+      "dont": [
+        "不让重连丢事件或重复事件(去重 + 续接兜底)。"
+      ],
+      "deviation": "⚠ 实现落点澄清:cursor 续接功能可用,但 sidecar WS 用的是 RunManager.stream_run + _events_after_cursor(内存 replay),不是 engine 的 EventStreamBuffer(后者已定义但未接入本路由)。功能结论成立、责任边界需按真实落点写。"
+    },
+    {
+      "name": "前端派生侧:节点态 + 边黑板",
+      "code": "前端: node-status.ts deriveNodeStatuses + lib/edge-context.ts edgeContextFromEvents",
+      "summary": "同一份事件流 reduce 成节点态(运行灯/debug 红灯/暂停)与边黑板(只读底座),是 spec Q4『run 节点灯+debug 红灯共用同一派生』的落地。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "deriveNodeStatuses:按到达顺序对每个 phase 做 last-event-wins,产 running(phase_start)/success(phase_end)/error(validation_fail/retry_exhausted 等)/paused(interrupted/hitl 类)。",
+        "SkillNodeStatus 类型定义 6 态(idle/running/success/error/paused/breakpoint);事件派生覆盖 running/success/error/paused,idle/breakpoint 非事件派生,dirty/stale 不在该枚举(脏态走 resume/validity,见 mech_n5_checkpoint)。",
+        "edgeContextFromEvents:扫该边最后一条 input_dispatch/edge_transition,取 blackboard_snapshot/changed_keys/checkpoint 元数据;无匹配返回 null(空态非 mock)。"
+      ],
+      "do": [
+        "run 节点灯与 debug 红灯/暂停共用同一份 deriveNodeStatuses(Q4)。",
+        "边黑板从同一事件流的 input_dispatch 派生。"
+      ],
+      "dont": [
+        "节点态不掺编辑期信号(dirty/stale 不来自事件流,走 validity 判定)。",
+        "边黑板无匹配事件不回退 mock(显示空态)。"
+      ],
+      "deviation": "⚠ 派生器(D11.4)与边黑板(D11.5)本身已绿;但两处**契约缺口**:① 事件 payload **不携带 checkpoint_id/checkpoint_ns**(callbacks/events.py 各事件类无此字段、sidecar _event_envelope_from_callback 只 payload=dict(raw_event) 不 enrich),故 nodeResumeCheckpointFromEvents/edgeContextFromEvents 取 checkpoint 在真跑中取不到(仅 mock 带字段时成立);② interrupted/resumed 未发射(见上),paused 态在真跑无源。红灯『错误摘要就地』、篡改编辑器组件是另一层前端展示偏差。"
+    }
+  ],
+  "files": [
+    {
+      "name": "EventEnvelope(事件信封 schema,前端经 WS 收、不写)",
+      "version": "schema_version = 'studio.event.v1'",
+      "what": "运行事件流每条消息的统一信封;前端 useRunStream 收到后据 payload.event_type 派生节点态/边黑板/trace。",
+      "structs": [
+        {
+          "name": "EventEnvelope 顶层",
+          "fields": [
+            {
+              "name": "schema_version",
+              "type": "str",
+              "meaning": "信封版本常量 'studio.event.v1'"
+            },
+            {
+              "name": "stream_id",
+              "type": "str",
+              "meaning": "事件流标识(run 维度)"
+            },
+            {
+              "name": "seq",
+              "type": "int",
+              "meaning": "流内单调递增序号(去重 + gap 检测)"
+            },
+            {
+              "name": "run_id",
+              "type": "str",
+              "meaning": "所属运行"
+            },
+            {
+              "name": "event_type",
+              "type": "str",
+              "meaning": "传输层事件类型"
+            },
+            {
+              "name": "payload",
+              "type": "dict",
+              "meaning": "领域事件体(真正语义,含 phase/edge/error 定位字段)"
+            },
+            {
+              "name": "cursor",
+              "type": "str",
+              "meaning": "断点游标 'stream_id:seq',重连回传"
+            },
+            {
+              "name": "timestamp",
+              "type": "datetime",
+              "meaning": "事件时间"
+            },
+            {
+              "name": "error_code",
+              "type": "str?",
+              "meaning": "错误事件错误码"
+            },
+            {
+              "name": "error_payload",
+              "type": "TransportErrorPayload?",
+              "meaning": "结构化错误体(message/details/retryable,details 自动脱敏 api_key/token/traceback)"
+            }
+          ]
+        }
+      ],
+      "owns": "EventEnvelope 契约归 engine 后端(core/event_contracts.py);sidecar 经 WS 转发;前端只读消费。",
+      "crud_pointer": "前端只**读**:经 WS /ws/runs/{run_id} 订阅收信封,不回写(事件流是单向只读)。",
+      "storage_note": "事件落盘(runs/{run_id}/trace)与缓冲(EventStreamBuffer)是后端实现,不归前端;前端只关心收到的信封 schema。",
+      "security_fe": "error_payload.details 已在后端脱敏(api_key/authorization/token/secret/traceback → [redacted]);前端展示不二次泄密。"
+    }
+  ],
+  "interface_groups": [
+    {
+      "key": "ws",
+      "title": "事件流订阅(WS 单向只读,后端推、前端派生)",
+      "note": "这一类不是 CRUD,也不触发动作:前端开一条 WS 长连订阅该 run 的事件流,后端逐条推 EventEnvelope,前端据此派生节点灯/边黑板/trace。带 cursor 可断线续接。"
+    }
+  ],
+  "interfaces": [
+    {
+      "group": "ws",
+      "endpoint": "WS /ws/runs/{run_id}",
+      "req": "path run_id;query token(鉴权)+ cursor(可选,断线重连续接点 'stream_id:seq');无业务入参",
+      "resp": "EventEnvelope 流,逐条 send_json;字段见上方信封 schema;断线带 cursor 重连后端从该游标之后补发",
+      "purpose": "订阅一次 run 的事件流,驱动节点灯/debug 红灯(deriveNodeStatuses)、边黑板(edgeContextFromEvents)、Trace 时间线;debug 三场景的展示底座。",
+      "provider": "gateway 后端 sidecar 的 run_events 路由(websockets.py,token 鉴权 + run_manager.stream_run(run_id, cursor) 推送)",
+      "id": "iface-stream"
+    }
+  ],
+  "boundaries": {
+    "do": [
+      "引擎产 EventEnvelope(统一信封)逐条经 WS 推送",
+      "前端订阅、按 seq 去重、cursor 续接、gap 检测",
+      "同一份事件流三路派生:节点灯/红灯、边黑板、trace 时间线"
+    ],
+    "dont": [
+      "事件流单向只读,前端不回写(篡改/续跑走 resume 端点,不经此通道)",
+      "节点态派生不掺编辑期信号(脏态走 validity)",
+      "边黑板无匹配事件不回退 mock(空态)"
+    ]
+  },
+  "rule_sections": [
+    {
+      "title": "payload event_type → 节点态(派生映射)",
+      "note": "deriveNodeStatuses 把领域事件按 phase 做 last-event-wins 映射成节点态(条件 → 结果),run 节点灯与 debug 红灯共用这同一份(spec Q4)。⚠ 标※者事件源当前**未发射**(interrupted/resumed 仅类定义、resume_applied 才是真实续跑事件),属目标映射:",
+      "rules": [
+        [
+          "phase_start(节点开始执行)",
+          "running(运行中)"
+        ],
+        [
+          "phase_end(节点正常结束)",
+          "success(成功)"
+        ],
+        [
+          "validation_fail / retry_exhausted / 含 error|fail",
+          "error(失败红灯)"
+        ],
+        [
+          "※ interrupted / hitl 类(请求人类输入)",
+          "paused(暂停,等 HitL)—— 事件源未发射,真跑不触发"
+        ],
+        [
+          "※ resumed(续跑恢复)",
+          "running —— 未发射;真实事件是 resume_applied(node-status 当前未映射回 running)"
+        ]
+      ]
+    }
+  ],
+  "backend_status": [
+    {
+      "item": "EventEnvelope 契约 + cursor/seq/gap 续接(D11.1 / D11.2)",
+      "d12": "D11「Event stream」",
+      "status": "ok",
+      "note": "EventEnvelope 固定 schema(schema_version/stream_id/seq/cursor/run_id/event_type/payload/error_code/error_payload)、EventStreamBuffer/StreamCursor 的 cursor 续接 + seq 去重 + gap/expired 错误、TransportErrorPayload 脱敏均已实现并测试。",
+      "ref": "d11"
+    },
+    {
+      "item": "事件驱动节点灯 + debug 红灯派生器(D11.4)",
+      "d12": "D11「Event stream」",
+      "status": "partial",
+      "note": "deriveNodeStatuses 派生逻辑已实现(phase_start→running / phase_end→success / 失败→error),run 节点灯与 debug 红灯共用(Q4)。⚠ 但 paused 依赖的 interrupted 事件、续跑回 running 依赖的 resumed 事件**引擎未发射**(真实事件是 resume_applied,前端未映射);F1 红灯可复用此派生,『错误摘要就地到节点』是前端展示侧。",
+      "ref": "d11"
+    },
+    {
+      "item": "边 dot 黑板派生(D11.5)",
+      "d12": "D11「Event stream」",
+      "status": "ok",
+      "note": "edgeContextFromEvents 从 EventEnvelope 的 input_dispatch 派生真实黑板(覆盖真实/空态/分支定位、不回退 mock),为 N5.3 边篡改提供只读底座。",
+      "ref": "d11"
+    },
+    {
+      "item": "事件 payload 携带 checkpoint 指针(节点/边续跑取 checkpoint 用)",
+      "d12": "D11「Event stream」/ D10「Resume/checkpoint」",
+      "status": "partial",
+      "note": "前端 nodeResumeCheckpointFromEvents/edgeContextFromEvents 读 payload.checkpoint_id/checkpoint_ns,但 callbacks/events.py 的 phase/dispatch 事件类**无此字段**、sidecar _event_envelope_from_callback 不 enrich(payload=dict(raw_event))。需 engine 事件携带、或 sidecar 包 EventEnvelope 时补充、或新增只读 checkpoint lookup 契约;补齐前节点/边续跑的 checkpoint 定位仅在 mock 事件成立。",
+      "ref": "d10"
+    }
+  ]
+}

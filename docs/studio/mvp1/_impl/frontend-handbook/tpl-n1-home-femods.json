@@ -1,0 +1,47 @@
+[
+  {
+    "name": "Recent MRU 存储",
+    "kind": "前端逻辑(N1 自有)",
+    "what": "Home 的 Recent 最近列表底层存储:useRecentSkills(读写浏览器 localStorage 里 recentWorkspaces 这条最近列表的 hook)。它是纯 MRU(most-recently-used 最近使用),与后端无关——后端不可用 Home 也能渲 Recent。条目含 absolutePath(绝对路径)/ displayName(显示名)/ identity(去重键,形如 local:<path>)/ lastOpenedAt(最近打开时间),上限 10。",
+    "where": "hooks/useRecentSkills.ts:readRecentWorkspaces(读 localStorage 并过滤合法条目)、rememberRecentWorkspace(去重、置顶、截到 10、写回)、removeRecentWorkspace(按 identity 删)、pruneMissingRecentWorkspaces(按调用方给的 exists 谓词剪掉路径失效条目——已写好但当前无调用方=死代码);hook 本体 useRecentSkills 暴露 {recentWorkspaces, rememberWorkspace, removeWorkspace}。消费者 components/welcome/WelcomePage.tsx。",
+    "duties": [
+      "读/写/删 localStorage 里的 MRU 最近列表(key recentWorkspaces,上限 10,按 identity 去重)。",
+      "打开一个文件夹时 rememberWorkspace 置顶刷新该条最近时间。",
+      "(目标接上)pruneMissingRecentWorkspaces 把路径已失效的条目自动剪掉——支撑 #6 的「失效点击报错 + 自动移除」(其路径存在性检查需 Studio Rust 后端支撑)。"
+    ],
+    "used_by": "#3(recent-mru-grid)、#4(open-recent-card)、#6(remove-skill-entry)、#8(recent-skeleton)。",
+    "boundary": "做:维护「最近打开过哪些文件夹」的本地 MRU(路径+名+最近时间)。不做:不存注册表派生字段(phaseCount/Golden/Config-drift 归注册表,N1 目标去掉)、不依赖后端(后端不可用也能读)、不做 skill 生命周期管理(不删 skill,R1)。",
+    "reuse_note": "N1 自有(不跨节点共享)。本页(Home)是它的登记处;#3/#4/#6/#8 都 chip 链进来复用,同一存储只登记一次。",
+    "design_note": "现状 Home 的 visibleWorkspaces 把这条 MRU 与 GET /api/skills 注册表合并(还追加注册表里 MRU 没有的 skill);N1 目标是 Recent 只来自这条 MRU,拆掉注册表合并。"
+  },
+  {
+    "name": "Skill 打开例程",
+    "kind": "前端逻辑(N1 自有)",
+    "what": "把「一个工作区路径」打开进工作区的统一例程:openSkill(打开进工作区的函数)+ resolveBackendSkillIdForWorkspace(把工作区路径解析成后端 skillId 的函数)。打开文件夹、点 Recent 卡、新建后进入三处都复用它。",
+    "where": "components/welcome/WelcomePage.tsx:openSkill(记 MRU rememberWorkspace + 原生 addRecentWorkspace + ensureWorkspaceSupportDirs + onSelectSkill 进工作区)、resolveBackendSkillIdForWorkspace(现状先 POST /api/skills import 取后端 skillId,撞 SKILL_ALREADY_EXISTS 则取回既有 id)、openWorkspace(点卡入口,失败弹「Open folder failed」)。",
+    "duties": [
+      "解析后端 skillId(现状走 POST /api/skills import,目标改走 Studio Rust 后端 native-fs、不注册)。",
+      "记 MRU(rememberWorkspace 写 localStorage + addRecentWorkspace 原生镜像)。",
+      "建工作区支持目录(ensureWorkspaceSupportDirs,Rust)后 onSelectSkill 进工作区。"
+    ],
+    "used_by": "#2(open-folder)、#4(open-recent-card)、#13(newskill-create-scaffold,新建后进入)。",
+    "boundary": "做:把路径打开进工作区(解析 id + 记 MRU + 建支持目录 + 进入)。不做:不做 manifest 校验(D2 不卡导入)、目标不做后端注册(解耦后只记 MRU + 走 Rust)。",
+    "reuse_note": "N1 自有。本页(Home)登记;#2/#4 在 Home、#13 在新建对话框页都 chip 链进来复用,同一例程只登记一次。",
+    "design_note": "现状耦合 POST /api/skills 注册(违 D12);目标解耦成「记 MRU + 走 Studio Rust 后端 native-fs 打开」,等机制 B 的 Rust 打开命令(后端先于前端)。",
+    "api": "现状 POST /api/skills(import_existing=true);目标 Studio Rust 后端 native-fs 打开命令(待实现)。"
+  },
+  {
+    "name": "新建/打开错误格式化",
+    "kind": "前端逻辑(N1 自有)",
+    "what": "把后端建/导入返回的结构化错误转成给用户看的精炼文案:formatImportSkillError(格式化打开/导入错误)、formatCreateSkillError(格式化新建错误)、firstLintErrorMessage(从后端 lint 详情抽第一条错误的位置与信息)。",
+    "where": "components/welcome/WelcomePage.tsx:formatImportSkillError、formatCreateSkillError、firstLintErrorMessage(及其辅助 cleanLintMessage / relativeLintFile / lineFromLintMessage / requestValidationMessage)。",
+    "duties": [
+      "按 error_code 分支出文案:INVALID_DIRECTORY_PATH(路径无效/非空)、SKILL_ALREADY_EXISTS(已存在)、MANIFEST_VALIDATION_FAILED(脚手架/lint 失败)。",
+      "MANIFEST_VALIDATION_FAILED 分支走 firstLintErrorMessage 抽 lint 位置——这套在导入路径上 D2 后已不可达(死分支)。"
+    ],
+    "used_by": "#2(open-folder,formatImportSkillError)、#14(newskill-create-error,formatCreateSkillError)。",
+    "boundary": "做:把后端结构化错误转成精炼用户文案。不做:目标不再格式化 manifest/lint 拒绝类错误(D2 后只留 OS 级失败)。",
+    "reuse_note": "N1 自有。本页登记;#2(打开)与 #14(新建)复用,同一组格式化只登记一次。",
+    "design_note": "目标收缩到只留 OS 级失败文案(INVALID_DIRECTORY_PATH / SKILL_ALREADY_EXISTS),删 MANIFEST_VALIDATION_FAILED 的 lint 文案死分支(纯前端可做)。"
+  }
+]

@@ -1,46 +1,355 @@
 import type { CopilotMessage } from '../types/copilot'
+import {
+  writeWorkspaceFile,
+  ensureWorkspaceSupportDirs,
+  readWorkspaceFile,
+  listWorkspaceDir,
+} from '../lib/tauri'
 
 type Listener = () => void
 
-interface CopilotState {
-  skillId: string | null
+export interface CopilotSession {
+  id: string
   messages: CopilotMessage[]
 }
 
-let state: CopilotState = {
-  skillId: null,
-  messages: [],
+function sessionsDir(skillId: string): string {
+  return `.gemini/copilot/sessions/${skillId}`
 }
+
+function isCopilotSession(value: unknown): value is CopilotSession {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as { id?: unknown; messages?: unknown }
+  return typeof candidate.id === 'string' && Array.isArray(candidate.messages)
+}
+
+/**
+ * Load every persisted session for a workspace/skill from disk via the native
+ * read commands. Non-Tauri runtimes return an empty list (listWorkspaceDir is a
+ * no-op there), so this is inert in web/test builds. A single corrupt session
+ * file is skipped with a warning rather than aborting the whole hydrate —
+ * losing one history shouldn't hide the rest.
+ */
+export async function loadCopilotSessionsFromDisk(
+  workspaceId: string,
+  skillId: string,
+): Promise<CopilotSession[]> {
+  const dir = sessionsDir(skillId)
+  const entries = await listWorkspaceDir(workspaceId, dir)
+  const sessions: CopilotSession[] = []
+  for (const entry of entries) {
+    // `_`-prefixed files are reserved markers (e.g. _active.json), not sessions.
+    if (entry.kind !== 'file' || !entry.name.endsWith('.json') || entry.name.startsWith('_')) {
+      continue
+    }
+    try {
+      const result = await readWorkspaceFile(workspaceId, `${dir}/${entry.name}`)
+      const parsed: unknown = JSON.parse(result.content)
+      if (isCopilotSession(parsed)) {
+        sessions.push(parsed)
+      } else {
+        console.warn(`copilot: skipping malformed session file ${entry.name}`)
+      }
+    } catch (err: unknown) {
+      console.warn(
+        `copilot: skipping unreadable session file ${entry.name}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      )
+    }
+  }
+  return sessions
+}
+
+function activeMarkerPath(skillId: string): string {
+  return `${sessionsDir(skillId)}/_active.json`
+}
+
+/**
+ * Read the last-active session id persisted for a workspace/skill, so cold-start
+ * restores the tab the user was actually viewing (F2/D8: "退出恢复 ... 上次活跃
+ * tab"), not just the newest-created one. Returns null if no marker / unreadable.
+ */
+export async function loadActiveCopilotSessionId(
+  workspaceId: string,
+  skillId: string,
+): Promise<string | null> {
+  try {
+    const result = await readWorkspaceFile(workspaceId, activeMarkerPath(skillId))
+    const parsed: unknown = JSON.parse(result.content)
+    if (parsed && typeof parsed === 'object' && typeof (parsed as { activeSessionId?: unknown }).activeSessionId === 'string') {
+      return (parsed as { activeSessionId: string }).activeSessionId
+    }
+  } catch {
+    // No marker yet (first run) or unreadable — fall back to newest session.
+  }
+  return null
+}
+
+export interface CopilotState {
+  workspaceId: string | null
+  skillId: string | null
+  sessions: CopilotSession[]
+  activeSessionId: string | null
+  persistenceError: string | null
+  messages: CopilotMessage[]
+}
+
+const state: Omit<CopilotState, 'messages'> = {
+  workspaceId: null,
+  skillId: null,
+  sessions: [],
+  activeSessionId: null,
+  persistenceError: null,
+}
+
+const sessionsByContext: Record<string, CopilotSession[]> = {}
+
+// Contexts already hydrated from disk this process — so we hit the filesystem
+// at most once per workspace/skill, not on every context switch.
+const hydratedKeys = new Set<string>()
 
 const listeners = new Set<Listener>()
 
+let cachedSnapshot: CopilotState | null = null
+
 function emit() {
+  cachedSnapshot = null
   listeners.forEach((listener) => listener())
 }
 
+/**
+ * Persist the active session id (last-viewed tab) so cold start restores it.
+ * Fire-and-forget — failure surfaces via persistenceError but never blocks the
+ * UI tab switch. Inert in web/test (writeWorkspaceFile throws "Desktop only",
+ * caught here). Captures ids at call time so a later context change can't retarget.
+ */
+function persistActiveSession(workspaceId: string, skillId: string, activeSessionId: string): void {
+  void writeWorkspaceFile(
+    workspaceId,
+    activeMarkerPath(skillId),
+    JSON.stringify({ activeSessionId }, null, 2),
+  ).catch((err: unknown) => {
+    state.persistenceError = err instanceof Error ? err.message : String(err)
+  })
+}
+
+/**
+ * Flush a full session (id + messages) to its `<id>.json` file via the native fs
+ * wrapper. This is the SINGLE on-disk write path for transcripts — shared by
+ * appendMessage (a turn starts) and updateMessage (the streamed assistant text /
+ * thinking / tool events land here). R16/D8: streamed assistant content was only
+ * ever applied via updateMessage, which previously never persisted, so a restart
+ * restored the user question with a BLANK assistant answer. Persisting on every
+ * message mutation (incl. the terminal done event) makes hydrate() round-trip the
+ * complete transcript. Snapshots the session by value so a later context switch
+ * can't retarget the write. Inert in web/test (writeWorkspaceFile rejects there).
+ */
+async function persistSessionToDisk(
+  workspaceId: string,
+  skillId: string,
+  session: CopilotSession,
+): Promise<void> {
+  try {
+    await ensureWorkspaceSupportDirs(workspaceId)
+    const relativePath = `.gemini/copilot/sessions/${skillId}/${session.id}.json`
+    await writeWorkspaceFile(workspaceId, relativePath, JSON.stringify(session, null, 2))
+    state.persistenceError = null
+  } catch (err: unknown) {
+    state.persistenceError = err instanceof Error ? err.message : String(err)
+  }
+  emit()
+}
+
 export const copilotStore = {
-  getSnapshot: () => state,
+  getSnapshot(): CopilotState {
+    if (!cachedSnapshot) {
+      const activeSession = state.sessions.find((s) => s.id === state.activeSessionId)
+      cachedSnapshot = {
+        ...state,
+        messages: activeSession ? activeSession.messages : [],
+      }
+    }
+    return cachedSnapshot
+  },
   subscribe(listener: Listener) {
     listeners.add(listener)
     return () => listeners.delete(listener)
   },
-  reset(skillId: string | null) {
-    state = { skillId, messages: [] }
+  setContext(workspaceId: string | null, skillId: string | null) {
+    state.workspaceId = workspaceId
+    state.skillId = skillId
+    if (workspaceId && skillId) {
+      const key = `${workspaceId}::${skillId}`
+      state.sessions = sessionsByContext[key] || []
+    } else {
+      state.sessions = []
+    }
+    state.activeSessionId = state.sessions.length > 0
+      ? state.sessions[state.sessions.length - 1].id
+      : null
+    state.persistenceError = null
     emit()
   },
-  appendMessage(message: CopilotMessage) {
-    state = { ...state, messages: [...state.messages, message] }
-    emit()
+  /**
+   * Cold-start recovery (copilot F2): load any sessions persisted to disk for
+   * this workspace/skill and merge them into the in-memory store. In-memory
+   * sessions win on id collision (they carry the live, still-streaming
+   * messages); disk-only sessions are restored so a restart no longer wipes
+   * history. Idempotent per context — disk is read at most once per process.
+   */
+  async hydrate(workspaceId: string, skillId: string): Promise<void> {
+    const key = `${workspaceId}::${skillId}`
+    if (hydratedKeys.has(key)) return
+    hydratedKeys.add(key)
+
+    let diskSessions: CopilotSession[]
+    try {
+      diskSessions = await loadCopilotSessionsFromDisk(workspaceId, skillId)
+    } catch (err: unknown) {
+      // Transient read failure — allow a later retry and surface it.
+      hydratedKeys.delete(key)
+      state.persistenceError = err instanceof Error ? err.message : String(err)
+      emit()
+      return
+    }
+    if (diskSessions.length === 0) return
+
+    const memSessions = sessionsByContext[key] ?? []
+    const byId = new Map<string, CopilotSession>()
+    for (const session of diskSessions) byId.set(session.id, session)
+    for (const session of memSessions) byId.set(session.id, session)
+    // Session ids embed Date.now(), so lexical sort ≈ chronological.
+    const merged = [...byId.values()].sort((a, b) =>
+      a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+    )
+    sessionsByContext[key] = merged
+
+    // Restore the LAST-VIEWED tab (F2/D8), not just the newest-created one.
+    const persistedActiveId = await loadActiveCopilotSessionId(workspaceId, skillId)
+
+    // Only touch live state if this is still the active context.
+    if (state.workspaceId === workspaceId && state.skillId === skillId) {
+      state.sessions = merged
+      const activeStillValid =
+        state.activeSessionId !== null &&
+        merged.some((session) => session.id === state.activeSessionId)
+      if (!activeStillValid) {
+        const restoredActive =
+          persistedActiveId && merged.some((session) => session.id === persistedActiveId)
+            ? persistedActiveId
+            : merged[merged.length - 1].id
+        state.activeSessionId = restoredActive
+      }
+      emit()
+    }
   },
-  updateMessage(messageId: string, updater: (message: CopilotMessage) => CopilotMessage) {
-    state = {
-      ...state,
-      messages: state.messages.map((message) => message.id === messageId ? updater(message) : message),
+  newSession(): string {
+    const newId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+    const newSession: CopilotSession = {
+      id: newId,
+      messages: [],
+    }
+    state.sessions = [...state.sessions, newSession]
+    state.activeSessionId = newId
+    if (state.workspaceId && state.skillId) {
+      const key = `${state.workspaceId}::${state.skillId}`
+      sessionsByContext[key] = state.sessions
+      persistActiveSession(state.workspaceId, state.skillId, newId)
+    }
+    emit()
+    return newId
+  },
+  switchSession(id: string) {
+    state.activeSessionId = id
+    if (state.workspaceId && state.skillId) {
+      persistActiveSession(state.workspaceId, state.skillId, id)
     }
     emit()
   },
+  async appendMessage(message: CopilotMessage) {
+    state.sessions = state.sessions.map((s) => {
+      if (s.id === state.activeSessionId) {
+        return { ...s, messages: [...s.messages, message] }
+      }
+      return s
+    })
+    if (state.workspaceId && state.skillId) {
+      const key = `${state.workspaceId}::${state.skillId}`
+      sessionsByContext[key] = state.sessions
+    }
+    emit()
+
+    const activeSession = state.sessions.find((s) => s.id === state.activeSessionId)
+    if (state.workspaceId && state.skillId && activeSession) {
+      await persistSessionToDisk(state.workspaceId, state.skillId, activeSession)
+    }
+  },
+  /**
+   * Apply an updater to one message in the active session. Streamed assistant
+   * deltas (text/thinking/tool) and the terminal done/error events all flow
+   * through here. R16/D8: when a turn completes (status no longer 'running' —
+   * i.e. the done/error event landed), flush the full assembled message to disk
+   * so hydrate() restores a complete transcript instead of a blank answer.
+   */
+  updateMessage(messageId: string, updater: (message: CopilotMessage) => CopilotMessage) {
+    state.sessions = state.sessions.map((s) => {
+      if (s.id === state.activeSessionId) {
+        return {
+          ...s,
+          messages: s.messages.map((m) => (m.id === messageId ? updater(m) : m)),
+        }
+      }
+      return s
+    })
+    if (state.workspaceId && state.skillId) {
+      const key = `${state.workspaceId}::${state.skillId}`
+      sessionsByContext[key] = state.sessions
+    }
+    emit()
+
+    const activeSession = state.sessions.find((s) => s.id === state.activeSessionId)
+    const updatedMessage = activeSession?.messages.find((m) => m.id === messageId)
+    // Persist once the turn settles (status leaves 'running'); skip mid-stream
+    // deltas to avoid a disk write per token. The empty-shell write from
+    // appendMessage already covers the early in-flight state on disk.
+    if (
+      state.workspaceId &&
+      state.skillId &&
+      activeSession &&
+      updatedMessage &&
+      updatedMessage.status !== 'running' &&
+      updatedMessage.status !== 'pending'
+    ) {
+      void persistSessionToDisk(state.workspaceId, state.skillId, activeSession)
+    }
+  },
   clearMessages() {
-    state = { ...state, messages: [] }
+    state.sessions = state.sessions.map((s) => {
+      if (s.id === state.activeSessionId) {
+        return { ...s, messages: [] }
+      }
+      return s
+    })
+    if (state.workspaceId && state.skillId) {
+      const key = `${state.workspaceId}::${state.skillId}`
+      sessionsByContext[key] = state.sessions
+    }
     emit()
   },
+  reset(skillId: string | null) {
+    state.skillId = skillId
+    state.sessions = []
+    state.activeSessionId = null
+    state.persistenceError = null
+    for (const key in sessionsByContext) {
+      delete sessionsByContext[key]
+    }
+    hydratedKeys.clear()
+    emit()
+  },
+}
+
+if (typeof window !== 'undefined') {
+  (window as unknown as Record<string, unknown>).copilotStore = copilotStore
 }

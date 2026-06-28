@@ -1,0 +1,119 @@
+{
+  "submodules": [
+    {
+      "name": "凭证存储",
+      "code": "studio-backend: llm_credentials.py",
+      "summary": "拥有磁盘文件 llm_credentials.json 的全部读写，是这套机制唯一碰盘的「存储介质」。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "读：load_credentials；写：save_credentials / upsert_endpoints / delete_endpoint / upsert_routes / delete_route 一整套。",
+        "所有写都是原子写——先写临时文件、fsync、再 os.replace 整体替换，杜绝半截文件。",
+        "落地后强制 0600 文件权限、0700 目录权限，靠权限保护明文 key（文件本身不加密）。",
+        "保留语义：upsert_endpoints 对没传 api_key 的 endpoint 保留旧 key（_preserved_secret），不会把已存的 key 抹掉。",
+        "official 端点（anthropic / openai / gemini / deepseek / ark-official 白名单）强制钉死 provider_kind=official。",
+        "同一把 key 挂的多个 endpoint 共享 credential_ref 和 rate_limit_bucket（限流配额按 key 算）。",
+        "删 endpoint 时级联删它名下的 route，不留孤儿路由。"
+      ],
+      "do": [
+        "磁盘读写、原子性、文件/目录权限。",
+        "密钥保留与 v3→v4 迁移。",
+        "official 白名单钉 provider_kind、curated kind 修复。"
+      ],
+      "dont": [
+        "不决定 endpoint 怎么从原始 URL 拆出来（那是 gateway 标准化的事）。",
+        "不调真模型、不算 6 态颜色、不渲染 UI。"
+      ],
+      "deviation": ""
+    },
+    {
+      "name": "endpoint 标准化 + canonical id 生成",
+      "code": "gateway: endpoints.py + canonical.py + base_url.py",
+      "summary": "把前端「一把 key 挂多个 URL」的混合录入，理成一份平铺的标准 endpoint 列表，并给每条 endpoint 算出确定性的 canonical id。",
+      "formula": "endpoint candidate =（一个 base_url × 一个 protocol 候选）；第三方候选集固定为 openai_compatible / anthropic_compatible / google_genai（不含 ark_runtime）。一个 URL 可以同时保留多个可用 protocol endpoint；canonical_id = {provider_slug}-{protocol}[-{n}]，序号 -n 恒在 protocol 之后（n 从 2 起、首条不带号），同一 -n 永远指向同一条 URL。",
+      "diagram": "endpoint_transform",
+      "rules": [
+        "拆分：每个 URL 先展开为多个 protocol 候选 endpoint；测试后各 endpoint 独立保留自己的 verified/failed 结果，不把一个 URL 收敛成唯一协议。",
+        "base_url 按 protocol 归一化（canonicalize_base_url），存进去的就是 canonical 形态，不留原始杂字符串。",
+        "id 生成走两步：canonical_endpoint_id_base 出 {slug}-{protocol} 基名，再 _next_endpoint_id 在撞号时补 -2 / -3。",
+        "protocol 后缀固定映射：openai_compatible→openai、anthropic_compatible→anthropic、google_genai→google、ark_runtime→ark；第三方新增/测试候选不包含 ark_runtime，Ark 只属于官方 Ark endpoint。",
+        "去重保序：reserved_endpoint_ids 已占用的 id 不复用，保证 id 稳定可回填。"
+      ],
+      "do": [
+        "原始录入 → 标准 endpoint list。",
+        "协议匹配、canonical base_url、canonical id 生成、去重保序。"
+      ],
+      "dont": [
+        "不做录入 UI（前端做）、不落盘（Studio upsert 做）。",
+        "不知道这把 key 来自一张卡还是两张卡——gateway 无「卡」概念，只认平铺 endpoint。"
+      ],
+      "deviation": "⚠️ 设计上拆分/生成 id 应整条归 gateway，但现码 Studio 侧仍残留 _stable_endpoint_id（llm_credentials.py，一张 host→legacy-id 的硬编码白名单），只在 v3→v4 迁移函数 _v3_payload_to_v4 里用；新建链路已走 gateway，这块是迁移期遗留。"
+    },
+    {
+      "name": "协议探测 + route probe",
+      "code": "gateway: protocol.py + probe_contracts.py",
+      "summary": "对一个 URL 自动判定它到底是哪种协议，并对单条 (model × endpoint) 发真请求验它能不能真生成。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "第三方不在多个 protocol 里『猜一个』；同一 URL 的 OpenAI / Anthropic / Gemini 候选 endpoint 各自打自己的推理端点，各自留下结果。",
+        "带对应的 auth header：native anthropic 用 x-api-key；anthropic 兼容的第三方用 Authorization: Bearer。",
+        "一个 URL 可能同时兼容多个 protocol,所以多个候选 endpoint 可同时是 verified；失败候选也以 failed 留在 registry/前端。",
+        "route probe = 对一条 (model × endpoint) 发 1-token 真请求，验「能不能真生成」；endpoint test 与单 model test 复用这条模型 probe 写回路径。"
+      ],
+      "do": [
+        "协议判定、对应 auth header、route 真探。"
+      ],
+      "dont": [
+        "不做批量探测的调度/短路策略的 HTTP 包装（Studio job 包装）。",
+        "不存结果（落盘归 Studio，draft 写语义归 gateway draft 内核）。"
+      ],
+      "deviation": ""
+    },
+    {
+      "name": "Probe Knowledge Catalog 内核",
+      "code": "gateway: import_draft_store.py",
+      "summary": "provider 的历史探测证据库，append-only，既给当前 model list 回填已证实能力（出蓝态），也把本次新发现写回沉淀成下次历史。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "证据 append-only：append_evidence_record 只追加、不覆盖旧证据，连失败结果也记。",
+        "赋能方向：读 Probe Knowledge Catalog 把已证实的模型/能力回填进当前 model list，让对应 route 出 historical_ready 蓝态。",
+        "写回方向：本次发现的新模型 / 新 capability（含失败）都 append 进 Probe Knowledge Catalog。",
+        "materialize_probe_catalog_candidates 把候选物化成 route，默认 status=unverified_manual。",
+        "merge_evidence_library 合并远端证据时按 evidence_id 去重。",
+        "D6.5 已把这套内核从 Studio 下沉到 gateway。"
+      ],
+      "do": [
+        "证据记录 / 复用 / 共享 / 去重。",
+        "candidate 物化、probe 证据 → historical_ready 投影的输入。"
+      ],
+      "dont": [
+        "不做 Import Draft 用户工作流；MVP1 没有「待导入草稿 → apply 到 credentials」功能。远端源选择、存储介质、上传审批/脱敏留 Studio。"
+      ],
+      "deviation": ""
+    },
+    {
+      "name": "6 态投影",
+      "code": "gateway: state_projection.py（Studio 薄委托: llm_state_projection.py）",
+      "summary": "把多个事实源合成界面上的一个状态码——endpoint 状态、route 状态、凭证在不在、熔断、Probe Knowledge Catalog 历史，合出 6 态之一给前端上色。",
+      "formula": "状态优先级：off > failed > cooling_down > ready > historical_ready > untested；6 态 = ready / historical_ready / untested / failed / cooling_down / off。",
+      "diagram": "",
+      "rules": [
+        "project_route_state 读 endpoint 状态 + route 状态 + 凭证在不在 + 熔断 retry_at + catalog_history 是否有历史连通，按优先级投出一态。",
+        "failed 必带 reason_code：missing_config（缺/错配置）/ endpoint_unreachable / model_failed。",
+        "cooling_down 带 retry_at（熔断倒计时，到点自动重试）。",
+        "project_route_state_from_evidence 额外读 EvidenceRecord 里 probe-verified 的证据，出 historical_ready 蓝态并挂 evidence_refs。",
+        "Studio 后端 project_provider_model_state 只是调 gateway adapter 的薄委托，本身不算状态。"
+      ],
+      "do": [
+        "6 态标准总结、reason_code、retry_at、蓝态证据挂载。"
+      ],
+      "dont": [
+        "不决定颜色/文案/图标怎么渲染（前端 display mapping）。",
+        "不决定状态色的产品呈现选择（Studio 转 DTO）。"
+      ],
+      "deviation": ""
+    }
+  ]
+}

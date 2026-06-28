@@ -1,0 +1,64 @@
+{
+  "resume_contract": {
+    "request": {
+      "headers": ["字段", "类型", "含义"],
+      "rows": [
+        ["context_overrides", "dict[str, Any] | None = None", "篡改黑板:要覆盖回写到 BusinessData 的业务字段;只允许业务字段,_前缀及 messages/tool_calls/checkpoint_ns/configurable/runtime/callbacks/compiled_graph 被拒"],
+        ["human_input", "str | None = None", "HitL 人工输入文本;后端包成 {content: human_input} 作为对 pending 工具调用/interrupt 的回应"]
+      ]
+    },
+    "response": {
+      "headers": ["字段", "类型", "含义"],
+      "rows": [
+        ["run_id", "str", "续跑后的 run id(后端原样回传传入的 run_id)"],
+        ["status", "Literal['running','success','failed']", "续跑结果状态;引擎 res.success 映射为 success/failed"],
+        ["started_at", "datetime", "续跑开始时间(ISO,引擎 res.started_at 或当前 UTC)"],
+        ["metrics", "TokensMetrics | None", "token 用量与成本估算"],
+        ["input_summary", "str | None", "固定为字符串 'resumed'"],
+        ["git_status", "Literal['committed','locked','failed'] | None", "续跑结果未填(result 字典里没放),实际为 None"]
+      ]
+    },
+    "evidence": [
+      ["ResumeReq 请求模型(extra=forbid,只含 context_overrides+human_input)", "apps/studio/backend/app/models/runs.py:109-113"],
+      ["resume_run 端点:把两参数塞进 adapter.resume payload", "apps/studio/backend/app/routers/runs.py:133-163"],
+      ["RunMetadata 响应模型字段定义", "apps/studio/backend/app/models/runs.py:53-61"],
+      ["resume 端点起始节点参数:无显式 start/from_node,起点由 checkpoint_id/checkpoint_ns 从 restore 的 runtime_state 推出", "apps/studio/backend/app/core/adapters/engine.py:825-836"],
+      ["resume_skill 引擎签名(checkpoint_id/checkpoint_ns 决定续跑起点)", "packages/graph-agent/src/graph_agent/core/runner.py:455-469"]
+    ]
+  },
+  "human_input_flow": {
+    "summary": "真处理、真注入。端点把 human_input 透传给 adapter.resume;adapter 在 in_process 模式把它包成 human_response={'content': human_input}(engine.py:852-854),经 runtime_state_resume_bridge 透传给 graph_agent.resume_skill;runner 的 _apply_resume_human_response 找到 checkpoint 里 pending 的工具调用,构造 ToolMessage(content=human_input) 用 graph.update_state 写回 messages,从而把人工输入作为对 interrupt/工具调用的回应注入回 agent 续跑。注意:它要求 checkpoint 里确有 pending tool call,否则抛 _ResumeInputError。",
+    "evidence": [
+      ["端点透传 human_input 进 adapter.resume payload", "apps/studio/backend/app/routers/runs.py:140-147"],
+      ["adapter 把 human_input 包成 human_response={'content': ...}", "apps/studio/backend/app/core/adapters/engine.py:852-854"],
+      ["adapter 调 resume_restored_runtime_state 传 human_response", "apps/studio/backend/app/core/adapters/engine.py:866-877"],
+      ["bridge 把 human_response 透传给 graph_agent.resume_skill", "apps/studio/backend/app/core/adapters/runtime_state_resume_bridge.py:22-33"],
+      ["runner 校验 human_response 必须含 str 类型 content", "packages/graph-agent/src/graph_agent/core/runner.py:1112-1123"],
+      ["_apply_resume_human_response 构造 ToolMessage 注入回 messages", "packages/graph-agent/src/graph_agent/core/runner.py:1247-1263"],
+      ["resume_skill 在 invoke 前调用 _apply_resume_human_response", "packages/graph-agent/src/graph_agent/core/runner.py:519-520"],
+      ["无 pending 工具调用时抛 _ResumeInputError(硬约束)", "packages/graph-agent/src/graph_agent/core/runner.py:1231-1232"]
+    ]
+  },
+  "context_overrides_flow": {
+    "summary": "真处理、真覆盖下游输入。端点透传 context_overrides 进 adapter.resume -> bridge -> graph_agent.resume_skill。runner 先用 _validate_resume_context_overrides 拒掉 _前缀及系统保留键(只许业务字段),再用 _apply_resume_context_overrides 取 checkpoint 当前 state 的 data(BusinessData),用 context_overrides update 后重新 BusinessData.model_validate,用 graph.update_state 写回 {'data': updated_data};若 checkpoint 已无 next(已结束),还会用 _override_source_node 推断 as_node(哪个节点产出了被覆盖字段)。续跑 graph.invoke(None) 时下游读到的就是被篡改后的黑板。",
+    "evidence": [
+      ["端点透传 context_overrides", "apps/studio/backend/app/routers/runs.py:144"],
+      ["adapter 取 context_overrides 并传给 bridge", "apps/studio/backend/app/core/adapters/engine.py:812, 866-873"],
+      ["bridge 透传给 resume_skill", "apps/studio/backend/app/core/adapters/runtime_state_resume_bridge.py:29"],
+      ["_validate_resume_context_overrides:只许业务字段,拒系统保留键", "packages/graph-agent/src/graph_agent/core/runner.py:1126-1138"],
+      ["保留键黑名单常量", "packages/graph-agent/src/graph_agent/core/runner.py:98-106"],
+      ["_apply_resume_context_overrides:update data 后 update_state 写回黑板", "packages/graph-agent/src/graph_agent/core/runner.py:1184-1203"],
+      ["_override_source_node:已结束时按 io.outputs 推断写回节点", "packages/graph-agent/src/graph_agent/core/runner.py:1173-1181"],
+      ["resume_skill 在 invoke 前调用 _apply_resume_context_overrides", "packages/graph-agent/src/graph_agent/core/runner.py:518, 520"]
+    ]
+  },
+  "frontend_gap": {
+    "summary": "后端契约全通,前端零接入。resumeRun 函数本身支持第三参 options.{contextOverrides, humanInput}(client.ts:306-319),但唯一真实调用点 Workspace.tsx:675 调的是 resumeRun(currentSkillId, runId) —— 不传 options,导致两参数恒为 undefined -> 发出 null,等价于纯 continue。前端对 human_input/context_overrides 的传值调用点为零(其余命中均在 client.ts 定义或 .test 文件 mock)。无 HitL 悬浮输入框(grep HumanInput/HitlPanel/InterruptPanel/awaiting human 全空)。边黑板面板 EdgeContextView 为纯只读:只用 ScrollArea/Badge 展示 blackboard_snapshot,无 textarea/onChange/input、无写回 resume 的入口,不是可写篡改编辑器。",
+    "evidence": [
+      ["resumeRun 定义支持 contextOverrides/humanInput options", "apps/studio/frontend/src/api/client.ts:306-319"],
+      ["唯一真实调用点不传 options(纯 continue)", "apps/studio/frontend/src/components/studio/Workspace.tsx:671-688"],
+      ["其余 resumeRun 命中均为测试 mock", "apps/studio/frontend/src/components/studio/Workspace.test.tsx:49,71,241"],
+      ["EdgeContextView 仅只读展示黑板快照(无编辑控件)", "apps/studio/frontend/src/components/studio/panels/EdgeContextView.tsx:1-31"]
+    ]
+  }
+}

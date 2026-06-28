@@ -5,8 +5,7 @@ from pathlib import Path
 import pytest
 from app.core.adapters.metadata_local import LocalJsonMetadataStore
 from app.core.adapters.storage_local import LocalFilesystemBackend
-from app.models.skills import SkillSummary
-from app.services.skills import delete_skill, list_skill_summaries
+from app.services.skills import delete_skill
 from fastapi import HTTPException
 
 
@@ -37,17 +36,6 @@ async def test_delete_skill_unregisters_workspace_skill_without_removing_files(
         skill_id,
         {"absolute_path": str(skill_dir), "l2_remote_url": ""},
     )
-    await metadata.save_skill_summary(
-        user_id,
-        SkillSummary(
-            id=skill_id,
-            name="Workspace skill",
-            description="",
-            phase_count=0,
-            has_golden=False,
-            directory_path=str(skill_dir),
-        ),
-    )
 
     await delete_skill(user_id, skill_id, storage, metadata)
 
@@ -55,13 +43,10 @@ async def test_delete_skill_unregisters_workspace_skill_without_removing_files(
     assert (skill_dir / "GRAPH.md").exists()
     assert (skill_dir / ".workspace" / "runs").exists()
     assert await metadata.get_skill_index_entry(skill_id) is None
-    assert await metadata.get_skill_summary(user_id, skill_id) is None
-    summaries = await list_skill_summaries(user_id, storage, metadata)
-    assert skill_id not in {summary.id for summary in summaries}
 
 
 @pytest.mark.anyio
-async def test_delete_skill_unregisters_builtin_public_skill_without_removing_files(
+async def test_delete_skill_unindexes_builtin_public_skill_without_removing_files(
     studio_roots: tuple[Path, Path],
     tmp_path: Path,
 ) -> None:
@@ -78,8 +63,9 @@ async def test_delete_skill_unregisters_builtin_public_skill_without_removing_fi
 
     assert (skill_dir / "GRAPH.md").exists()
     assert skill_dir.exists()
-    summaries = await list_skill_summaries("default", storage, metadata)
-    assert skill_id not in {summary.id for summary in summaries}
+    # Delete only un-indexes; a public skill carries no skill_index entry, so the
+    # source files survive and the index has no entry for it.
+    assert await metadata.get_skill_index_entry(skill_id) is None
 
 
 @pytest.mark.anyio

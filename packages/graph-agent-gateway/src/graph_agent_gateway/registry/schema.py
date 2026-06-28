@@ -19,6 +19,7 @@ ROUTE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9._-]*$")
 Protocol = Literal["openai_compatible", "anthropic_compatible", "google_genai", "ark_runtime"]
 ProviderKind = Literal["official", "third_party", "custom"]
 RouteStatus = Literal["verified", "unverified_manual", "disabled", "failed"]
+ProviderUiState = Literal["ready", "historical_ready", "untested", "failed", "cooling_down", "off"]
 CapabilitySource = Literal["api_list", "provider_doc", "agent_draft", "manual", "probed_verified"]
 EvidenceTrustState = Literal[
     "doc-discovered",
@@ -37,7 +38,7 @@ EvidenceRecordType = Literal[
     "probe",
     "agent_note",
 ]
-LintSeverity = Literal["off", "warn", "error"]
+LintSeverity = Literal["off", "warn", "warning", "error"]
 RuntimeSettingSource = Literal[
     "route_setting",
     "profile_default",
@@ -215,6 +216,7 @@ class ProviderRoute(BaseModel):
     provider_model_id: str
     canonical_id: str
     status: RouteStatus = "unverified_manual"
+    ui_state: ProviderUiState = "untested"
     snapshot_version: SnapshotVersion | None = None
     capabilities: dict[str, CapabilityValue] = Field(default_factory=dict)
     verified_profiles: list[VerifiedProfile] = Field(default_factory=list)
@@ -270,8 +272,16 @@ class RoleEntry(BaseModel):
     system_prompt_prefix: str = ""
     source_profile_id: str | None = None
     source_profile_snapshot: dict[str, Any] | None = None
+    bundle_id: str | None = None
     fallback_chain: list[RoleRouteEntry] = Field(default_factory=list)
     lint_requirements: dict[str, LintSeverity] = Field(default_factory=dict)
+
+    @field_validator("bundle_id")
+    @classmethod
+    def _bundle_id_is_slug(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        return _validate_slug(value, "bundle_id")
 
 
 class ModelProfile(BaseModel):
@@ -284,6 +294,21 @@ class ModelProfile(BaseModel):
     tags: list[str] = Field(default_factory=list)
     fallback_chain: list[RoleRouteEntry] = Field(default_factory=list)
     lint_requirements: dict[str, LintSeverity] = Field(default_factory=dict)
+
+
+class ModelBundle(BaseModel):
+    """Reusable model bundle referenced by roles during materialization."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    bundle_id: str
+    fallback_chain: list[RoleRouteEntry] = Field(default_factory=list)
+    lint_requirements: dict[str, LintSeverity] = Field(default_factory=dict)
+
+    @field_validator("bundle_id")
+    @classmethod
+    def _bundle_id_is_slug(cls, value: str) -> str:
+        return _validate_slug(value, "bundle_id")
 
 
 class EndpointCandidate(ProviderEndpoint):
@@ -393,7 +418,7 @@ class LintResult(BaseModel):
 
     role_name: str
     route_id: str
-    severity: Literal["warn", "error"]
+    severity: Literal["warn", "warning", "error"]
     capability: str
     message: str
     source: str
@@ -411,6 +436,7 @@ class RegistrySnapshot(BaseModel):
     provider_routes: dict[str, ProviderRoute] = Field(default_factory=dict)
     runtime_policy: RuntimePolicy = Field(default_factory=RuntimePolicy)
     model_profiles: dict[str, ModelProfile] = Field(default_factory=dict)
+    model_bundles: dict[str, ModelBundle] = Field(default_factory=dict)
     roles: dict[str, RoleEntry] = Field(default_factory=dict)
 
 

@@ -1,0 +1,62 @@
+[
+  {
+    "name": "Settings overlay 容器",
+    "what": "Settings 壳层的 overlay(盖在画布上的浮层)生命周期编排:由工作区决定是否在画布面板渲染 Settings、按 tab 渲染并懒加载、X 收起 / Home 连带关并退首页——overlay 只占画布面板、不卸载左右栏、非真 modal(不铺全屏遮罩、不锁焦点)。",
+    "where": "Workspace.tsx(工作区根组件,持 settingsOpen 状态、在 canvas 面板条件渲染 SettingsPage、handleHome 函数先收 Settings 再调 onCloseSkill 退首页);SettingsPage.tsx(壳层根组件,持 activeTab 当前激活 tab 状态 + 各 tab 数据加载/懒加载编排 + onClose 回调);SettingsPageContent.tsx(壳层内容区,按 activeTab 渲染对应 tab、顶部标题栏含 X)。",
+    "duties": [
+      "持 settingsOpen(Settings 开没开)开关:Toolbar(左侧竖排工具条)的 onSettingsOpen 与 Header(顶栏)的 onOpenSettings 都置 true,X(onClose)/ Home(handleHome)置 false。",
+      "只在画布面板(canvas,工作区中央那块可缩放面板)渲染 SettingsPage 替换编辑器/图,左侧 Panels(文件树等工具面板)与右侧 Copilot 面板全程挂载——工作区不卸载。",
+      "非真 modal:不铺全屏 backdrop(遮罩层)、不做 focus-trap(把键盘焦点锁在弹窗内的机制)。",
+      "tab 切换 + 按 tab 懒加载:切到 api_keys 才首拉凭证并 hydrate(把掩码 key 换回明文)、切到 llm_roles/copilot 才首拉角色+模型组,已加载不重复拉。",
+      "两条关闭语义:X 只收起 overlay(工作区还在);Home 先收起再调 onCloseSkill(卸载当前工作区退回首页的回调)卸载工作区退首页。"
+    ],
+    "used_by": "#1(open-settings-overlay)、#2(settings-skeleton,骨架挂在容器里)、#3(settings-tab-switch)、#7(close-settings-overlay)、#8(home-closes-settings)。",
+    "boundary": "做:overlay 开关、把 SettingsPage 渲进画布面板、tab 切换+懒加载、X/Home 收起语义。不做:不卸载工作区、不做真 modal 的 backdrop/focus-trap、不取消在途保存、不持数据真相(数据归各 tab 拉)。"
+  },
+  {
+    "name": "保存状态徽章（SaveStatusBadge）",
+    "kind": "共享 UI 组件(跨节点)",
+    "what": "一个通用的「保存状态徽章」组件(SaveStatusBadge,把一个保存态值渲成右上角带图标小徽章的纯展示组件):把即填即存的保存态(idle 空闲 / pending 待保存 / saving 保存中 / saved 已保存 / error 失败)渲成小徽章,和具体存什么数据无关——任何走 debounce(防抖,改完停顿一下才发请求)即填即存的地方都能用它显示「存了没」。",
+    "where": "组件本体在 save-status-badge.tsx 的 SaveStatusBadge;当前三处挂载点——ApiKeysTab.tsx(API Keys tab 根组件)显示凭证保存态、GeneralTab.tsx(General tab 根组件)显示 app 设置保存态、LlmRolesTab.tsx(LLM Roles tab 根组件)显示角色保存态。目标新增挂载点:SettingsPageContent.tsx(壳层内容区,含顶栏)的顶栏显示三套合并后的全局保存态。",
+    "duties": [
+      "把保存态映射成徽章:pending/saving 用 Loader2(转圈图标)转圈、saved 用 Check(打勾图标)、error 用 TriangleAlert(三角警告图标)配 warning 琥珀色。",
+      "idle(无改动)时返回 null 不渲染——无改动就无徽章。",
+      "带无障碍:aria-label(给读屏软件的文字标签)+ aria-live(状态变化时读屏软件自动播报的区域,error 用 assertive 立即打断播报、其余用 polite 等空隙再播报)。"
+    ],
+    "used_by": "#4(settings-save-badge,目标在壳层顶栏复用它显示全局保存态);现有 API Keys / General / LLM Roles 三个 tab 也各自在用它。",
+    "boundary": "做:把单个保存态值渲成徽章。不做:不发起保存(保存动作走各自的 debounce 保存 hook)、不决定保存内容、不合并多源态(把三套态合并成一个壳层态的逻辑由调用方提供,本组件只收一个最终态)。",
+    "reuse_note": "跨节点共享:同时服务 API Keys / General / LLM Roles 各自的保存态,目标再服务壳层顶栏的全局保存态。本页（Settings 壳层）是它的首登记处,后续 General(#15)、Copilot(#65)复用它即指向此卡。单处定义、多处复用,不在每处各写一遍。",
+    "api": "无 —— 纯展示组件,只收一个 saveStatus 值渲染;保存请求由调用方各自的 debounce 保存 hook 发。"
+  },
+  {
+    "name": "Settings WebSocket 刷新",
+    "what": "Settings 壳层那条连 /ws/events 的 WebSocket(长连事件通道):收到 gateway 后端 sidecar 文件监听器广播的 registry_changed(凭证文件变了)/ roles_changed(角色文件变了)后,重拉对应数据刷新界面,实现外部文件变更自动跟上单一真相。",
+    "where": "SettingsPage.tsx 里挂载时开 WebSocket 的那个 useEffect(React 副作用钩子);连接地址由 wsUrl('/ws/events')(client.ts 里把相对路径拼成完整 WebSocket 地址的函数)给出;socket.onmessage(收到一条事件的回调)分发 registry_changed → getCredentials(拉凭证快照的 API 函数)重拉、roles_changed → getRoles + getModelGroups(分别拉角色、拉模型组的 API 函数)重拉。",
+    "duties": [
+      "挂载时开一条 WebSocket 连 /ws/events,组件卸载时 close 关闭。",
+      "收 registry_changed → 重拉凭证 + draftsFromCredentials(把后端凭证快照转成前端草稿列表的纯函数)重建草稿;收 roles_changed → 重拉角色 + 模型组。",
+      "用 cancelled(组件已卸载标志)防卸载后还 setState(更新已销毁组件的状态会报警告)。",
+      "(目标)断开/出错后按指数退避(每次重连间隔翻倍)重连,重连成功后重拉一次补漏。",
+      "(目标)连接 / 断开 / 重连 / 解析失败都记可观测日志(去掉现状那两处空 catch 静默),拉不到时给用户「连接不上」警告标志。"
+    ],
+    "used_by": "#5(ws-registry-refresh)、#6(ws-roles-refresh)。",
+    "boundary": "做:订阅事件流、按事件类型重拉对应数据、(目标)重连+可观测。不做:不在事件里取数据体(只收『变了』信号、自己重拉)、不持第二份真相、不广播(广播归 gateway 后端 sidecar 的 file_watcher 文件监听器)。",
+    "api": "WS /ws/events(订阅 registry_changed / roles_changed 事件);重拉走 GET /api/llm/registry(拉凭证/路由打码快照)与 getRoles / getModelGroups。"
+  },
+  {
+    "name": "Settings 错误边界",
+    "kind": "共享 UI 组件(跨节点)",
+    "what": "一个通用的 React 错误边界(error boundary,专门捕获子组件树渲染期异常的类组件):把子树渲染时抛的错捕获住,改渲一张带错误信息 + Retry 的兜底卡,不让整块界面白屏。和具体 tab 无关——任何要兜住渲染崩溃的地方都能用。",
+    "where": "组件本体在 SettingsErrorBoundary.tsx;当前挂载点 SettingsPageContent.tsx 里包了 LlmRolesTab / CopilotTab 两个 tab。目标新增挂载点:同文件里再包 GeneralTab / ApiKeysTab。",
+    "duties": [
+      "getDerivedStateFromError(React 静态方法,子树抛错时把异常存进 state 触发兜底渲染)把渲染异常存进 state;componentDidCatch(React 生命周期方法,抛错时附带错误详情被调用)用 console.error 记日志(label tab 名 + 错误对象)。",
+      "有 error 时渲 destructive(危险红色)Alert 兜底卡:标题『{label} failed to render』+ 错误 message + Retry 按钮。",
+      "Retry 把 error 清空、重试渲染子树。",
+      "每个 tab 各包一层(label 标 tab 名),崩了只塌该 tab、不牵连别的。"
+    ],
+    "used_by": "#9(settings-error-boundary,目标四 tab 全包);现有 LLM Roles / Copilot 已在用。",
+    "boundary": "做:捕获子树渲染期异常、渲兜底卡 + Retry、记日志。不做:不捕获事件回调/异步里的错(React 错误边界只管渲染期异常,事件/异步里的错它捕获不到)、不静默吞(必 console.error)。",
+    "reuse_note": "跨 tab 共享:同一个错误边界组件被四个 tab 各包一层(label 区分)。单处定义、多处复用。",
+    "api": "无 —— 纯前端错误边界,不碰后端。"
+  }
+]

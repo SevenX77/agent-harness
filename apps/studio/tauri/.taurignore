@@ -1,0 +1,7 @@
+# Paths the `tauri dev` file watcher must NOT treat as source changes.
+# The vendored Python runtime + site-packages live inside this crate dir; the
+# sidecar interpreter writes .pyc bytecode into vendor/**/__pycache__ at import
+# time, which otherwise triggers an endless "Rebuilding application" loop (one
+# rebuild per .pyc → thousands of sidecar cold-restarts on startup).
+vendor/
+target/

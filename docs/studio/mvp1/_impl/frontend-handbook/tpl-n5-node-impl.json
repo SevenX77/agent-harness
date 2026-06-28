@@ -1,0 +1,154 @@
+{
+ "id": "n5_node_impl",
+ "title": "N5.1 失败节点调试 · 实施详情",
+ "design_ref": "n5_node_design",
+ "intro": "本页是 N5.1(画布节点调试面)前端的现状/差距/实施计划/测试,1:1 对应设计页 n5_node_design(原子 #1–#4)。代码按「文件名 + 函数/对象名」引用(可全局搜索,不写行号)。核心结论:后端契约大体就绪(事件流派生红灯、resume 端点收节点级参数、resume/validity 判脏态都已落地),前端缺的主要是**把交互下沉到画布节点本身**——错误摘要、节点级[Resume]、脏态置灰现状都在右侧 Properties 面板,需迁到节点上。续跑/checkpoint/事件三块机制见契约页 mech_n5_resume / mech_n5_checkpoint / mech_n5_events。 UI 技术债(触碰时改):SkillNode.tsx 现用 emerald/amber/sky/zinc 等具体 palette class,违 FRONTEND_UI_SPEC 的语义 token 原则——下沉/改动节点时一并换语义 token 或本地 variant,不新增硬编码色。",
+ "functions": [
+  {
+   "n": 1,
+   "cap": "failed-node-red-light",
+   "design_ref": "atom-1",
+   "current": "现状:红灯符合,错误摘要未就地。SkillNode(单个图节点组件,STATUS_STYLE 把 error 态映成 destructive 红框 + AlertTriangle 三角图标徽章)已据 deriveNodeStatuses(node-status.ts 把事件 reduce 成节点态)算出的 error 态渲红;失败判定走 FAILURE_EVENT_TYPES(validation_fail/retry_exhausted)+「event_type 含 error|fail / status=failed|error」。但错误**文本**只在右侧 Properties 面板呈现(选中节点才看得到),没摊到画布节点上。",
+   "gap": "差距:把该节点最后一条失败事件的 message 摊到节点本身(或其紧贴的 debug bar)就地显示,达成 spec F1『失败节点亮红并就地显示 Error Message』;红灯与派生本身不动(已符合、且与运行期节点灯同源 Q4)。纯前端改动,沿用现有 SkillNode 与 shadcn 风格、不自造;后端事件流不动。",
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "be_dep": "已就绪可接:错误事件(validation_fail/retry_exhausted)经 WS /ws/runs/{run_id} 推来,payload 带 message;前端取来就地渲即可,后端不需改(见 mech_n5_events)。",
+   "fe_status_prev": "偏差",
+   "fe_resync": "修补+审计后真修通,重新翻绿(2026-06-20)"
+  },
+  {
+   "n": 2,
+   "cap": "node-anchored-resume",
+   "design_ref": "atom-2",
+   "current": "现状:数据通路通,按钮位置偏差。resumeRun(client.ts)已支持 options(resumeFromNodeId/resumeToNodeId/checkpointId/checkpointNs/contextOverrides/humanInput/humanResponse);Workspace.tsx 的 handleResumeNode 已带 resumeFromNodeId + checkpointId/checkpointNs(从 nodeResumeCheckpointFromEvents 取)续跑;但发起入口挂在右侧 Properties 面板的 NodeResumeDebugBar(PropertiesPanel.tsx 里渲 resume_allowed/dirty_fields + Resume node 按钮的「节点续跑调试条」组件)——选中 error 节点时才在该面板渲 Resume node 按钮,不在画布节点上。",
+   "gap": "差距:把节点级[Resume]从 Properties 面板下沉到画布失败/可续节点本身(锚节点),达成 spec F2『Resume 锚在节点上(非全局)』;续跑参数链(resumeFromNodeId+checkpoint)已通,主要是 UI 位置迁移。纯前端改动;后端 resume 端点已收节点级参数(但严格『1..X-1 不重跑』编排引擎侧 partial,见 be_dep)。",
+   "fe_status": "符合",
+   "be_status": "契约问题",
+   "be_dep": "部分就绪:resume 端点已收并校验 resume_from_node_id/resume_to_node_id(引擎 _validate_resume_node_ids),lease/fencing 续跑链已通;但『精准只重跑目标节点及下游、上游严格走 checkpoint 不重跑』的跳跑编排引擎侧仍 partial(交 LangGraph 路由),F2『1..X-1 不重跑』尚不能严格保证——后端 D10.2 待收口(见 mech_n5_resume 节点级定位子模块)。 另:节点 checkpoint 元数据不在事件 payload(events.py 无 checkpoint_id/ns、sidecar 不 enrich),nodeResumeCheckpointFromEvents 真跑取不到 → 需 engine 事件携带或 sidecar enrich 或新增 checkpoint lookup(见 mech_n5_events 后端状态)。",
+   "fe_resync": "batch6c 已修复+测试通过(2026-06-20)"
+  },
+  {
+   "n": 3,
+   "cap": "dirty-downstream-graying",
+   "design_ref": "atom-3",
+   "current": "现状:已实现且符合(spec F3)。上游编辑现会**自动**派生受影响下游集合并批量置灰:Workspace.tsx 里以 skill 内容签名(skill content signature)+ resume 锚点(resume anchor)为 key 的 edit-watcher effect(监听编辑、算出受影响下游并批量查 validity 的副作用)取代了原来 selectedNodeStatus==='error' 的单点按需查;改上游后受影响下游节点的[Resume]批量置灰、无关旁支保持可续。后端 resume_allowed 也已做成**逐节点**(per-node):resume_downstream.py 的 resume_allowed_for_node(按目标节点算该节点能否续的函数)+ engine.py 落地——无关旁支即便整图有脏态也仍可续、受影响下游被挡、全局续跑仍按整 skill 门控,依赖切片不可用时降级为保守拒绝(conservative block)。",
+   "gap": "符合设计,无需改。『改上游→自动算受影响下游集合→批量置灰、无关旁支可续』与后端 per-node resume_allowed 均已落地(spec F3 满足)。",
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "be_dep": "已就绪。resume_downstream.py 的 resume_allowed_for_node(逐节点判定该节点能否续)+ engine.py 已实现 per-node validity:无关旁支脏态下仍可续、受影响下游被挡、全局续跑整 skill 门控、切片不可用降级保守拒绝。后端无需再改(见 mech_n5_checkpoint)。",
+   "fe_resync": "已落地:Workspace.tsx edit-watcher effect(以 skill content signature + resume anchor 为 key 自动批量置灰受影响下游)取代旧单点 error 门;后端 resume_downstream.py resume_allowed_for_node + engine.py 做成 per-node。测试 node-resume.test.ts、build-nodes.test.ts、后端 test_resume_downstream.py + test_resume_validity_per_node.py 覆盖;verified by green gates + post-audit(2026-06-20)"
+  },
+  {
+   "n": 4,
+   "cap": "debug-requires-real-run",
+   "design_ref": "atom-4",
+   "current": "现状:符合。点 Run → startRun(client.ts)POST /api/skills/{skill_id}/runs 拿 run_id → useRunStream(hooks/useRunStream.ts)以 run_id 起 WS /ws/runs/{run_id} 订阅事件;引擎按 per-run SQLite checkpointer 在每个 super-step 落 checkpoint。trace+checkpoint 源就绪,debug 前置满足。",
+   "gap": "符合设计,无需改(debug 的 trace+checkpoint 前置已由真实 run 产出)。",
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "be_dep": "已就绪:startRun 端点 + per-run checkpointer + WS 事件流均已实现(见 mech_n5_checkpoint / mech_n5_events)。"
+  }
+ ],
+ "plan": [
+  {
+   "step": 1,
+   "what": "#1 failed-node-red-light:把失败节点最后一条失败事件的 message 摊到画布节点本身(或紧贴的 debug bar)就地显示,达成 F1『就地 Error Message』。红灯/派生不动。",
+   "depends_on": "前端:从已收事件取该节点失败 message 渲到 SkillNode;复用现有 SkillNode + shadcn。后端不动(事件已带 message)。",
+   "why": "纯展示、零后端依赖、消除『红了但看不到为什么』,先做。",
+   "block": "前端独立"
+  },
+  {
+   "step": 2,
+   "what": "#2 node-anchored-resume:把节点级[Resume]从 Properties 面板下沉到画布失败/可续节点上(锚节点),续跑参数链(resumeFromNodeId+checkpoint)沿用 handleResumeNode。",
+   "depends_on": "前端:用 @xyflow/react 的 NodeToolbar 把现有 NodeResumeDebugBar 的 Resume 按钮锚到画布失败/可续节点上(不新造组件),复用现有 resumeRun 节点 options。后端 resume 端点已收节点级参数。",
+   "why": "UI 位置迁移为主、数据链已通,可与 step 1 并行(都在节点组件上)。注:引擎『1..X-1 不重跑』编排 partial,续跑语义达成度受后端 D10.2 制约,需在真跑时核对。",
+   "block": "前端独立"
+  },
+  {
+   "step": 3,
+   "what": "#3 dirty-downstream-graying:把脏态置灰呈现到画布节点[Resume],并补『上游变更→受影响下游集合→批量查 validity 置灰、无关旁支可续』的前端派生(达成 F3 自动置灰)。",
+   "depends_on": "前端:复用 getResumeValidity + 加受影响下游集合派生;依赖 step 2 的节点[Resume]入口已下沉。后端 validity 端点已就绪。",
+   "why": "依赖 step 2 的节点级[Resume]先落位才能在其上做置灰;后端判定已通,纯前端派生,排在节点按钮之后。",
+   "block": "前端独立"
+  }
+ ],
+ "tests": [
+  {
+   "covers": "#1 failed-node-red-light",
+   "atoms": [
+    1
+   ],
+   "shots": [
+    "失败节点在画布上亮红灯并就地显示错误摘要(非只红色、非藏 Properties 面板)"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "RED:喂含 validation_fail/retry_exhausted 的事件流,断言『节点上就地显示 error message 文本』失败(现状文本只在 Properties 面板)。",
+    "GREEN:实现后断言 SkillNode(或其 debug bar)渲出该节点最后一条失败事件的 message。",
+    "断言红灯本身(error 态 destructive 样式)仍由 deriveNodeStatuses 派生、与运行期节点灯同源。"
+   ],
+   "layer2": [
+    "真跑(关键):真跑一条会失败的多节点 skill,确认失败节点在画布上既红灯又就地显示错误摘要,截图。"
+   ],
+   "fe_status_prev": "偏差",
+   "fe_resync": "覆盖项已全绿(2026-06-20)"
+  },
+  {
+   "covers": "#2 node-anchored-resume",
+   "atoms": [
+    2
+   ],
+   "shots": [
+    "失败/可续节点上出现[Resume]按钮(锚节点、非只顶栏全局)",
+    "点节点 Resume 后续跑请求带 resume_from_node_id"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "RED:断言『画布失败节点上有[Resume]按钮』失败(现状按钮在 Properties 面板)。",
+    "GREEN:实现后断言节点上[Resume]存在;点它 → 断言 resumeRun 被调且 options 带 resumeFromNodeId + checkpointId/checkpointNs(来自 nodeResumeCheckpointFromEvents)。",
+    "断言全局顶栏 Resume 仍在(两条语义并存、节点级不取代全局)。"
+   ],
+   "layer2": [
+    "真跑(关键):真跑一条多节点 skill 让中段失败,改该节点后点其上[Resume],核对续跑从该节点起;并核对 1..X-1 是否走 checkpoint 未重跑(注:引擎跳跑编排 partial,若上游仍重跑则记为后端 D10.2 缺口、据实记录不掩盖)。"
+   ],
+   "fe_resync": "覆盖项已全绿(2026-06-20)"
+  },
+  {
+   "covers": "#3 dirty-downstream-graying",
+   "atoms": [
+    3
+   ],
+   "shots": [
+    "改上游后受影响下游节点[Resume]自动置灰 + 显示为何不可续(dirty_upstream)",
+    "无关旁支节点[Resume]仍可点"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "mock resume/validity 返回 resume_allowed=false + reason=dirty_upstream + dirty_fields=[execution_fingerprint] → 断言该节点[Resume]置灰且显示原因。",
+    "RED:断言『改上游后自动对受影响下游集合批量置灰』失败(现状仅选中单点按需查、且在 Properties 面板)。",
+    "GREEN:实现后断言上游变更触发受影响下游集合派生 → 这些节点[Resume]批量置灰、无关旁支仍 allowed。"
+   ],
+   "layer2": [
+    "真跑(关键):真跑通一条链后改上游某节点输出 schema,确认受影响下游节点[Resume]批量置灰、无关旁支仍可续(后端 per-node resume_allowed_for_node 已落地,F3 满足)。"
+   ],
+   "fe_resync": "改上游自动批量置灰受影响下游(Workspace.tsx edit-watcher effect)+ 后端 per-node resume_allowed(resume_downstream.py resume_allowed_for_node + engine.py)已落地,无关旁支可续;测试 node-resume.test.ts、build-nodes.test.ts、test_resume_downstream.py、test_resume_validity_per_node.py 覆盖;verified by green gates + post-audit(2026-06-20)"
+  },
+  {
+   "covers": "#4 debug-requires-real-run",
+   "atoms": [
+    4
+   ],
+   "shots": [
+    "点 Run 后产出 trace(事件流)+ checkpoint,节点灯随事件点亮"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "mock startRun 返回 run_id → 断言以该 run_id 起 useRunStream 订阅 WS /ws/runs/{run_id}。",
+    "断言事件流到达后 deriveNodeStatuses 据事件点亮节点灯。"
+   ],
+   "layer2": [
+    "真跑:真点 Run 跑一条 skill,确认 trace 实时滚动、节点灯随事件流转、产出 per-run checkpoint(后续 debug 可用),截图。"
+   ]
+  }
+ ]
+}

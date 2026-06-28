@@ -10,7 +10,6 @@ from typing import Any
 import pytest
 
 from graph_agent.core.compiler import compile_skill
-from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.graph_assembler import assemble_graph
 
 
@@ -74,7 +73,7 @@ phases:
 def _write_subgraph_phase(
     root: Path,
     *,
-    target_skill: str,
+    child_path: Path,
     input_properties: dict[str, Any],
     output_properties: dict[str, Any],
     input_required: list[str] | None = None,
@@ -85,7 +84,7 @@ def _write_subgraph_phase(
     _write(
         root / "phases" / "delegate" / "SUBGRAPH.md",
         f"""---
-target_skill: {target_skill}
+path: {child_path}
 io:
   inputs:
     {input_yaml}
@@ -135,7 +134,7 @@ def _subgraph_skill(
     action_body: str | None = None,
 ) -> tuple[Path, Path, DictSkillResolver]:
     parent = root / "parent"
-    child = root / "child"
+    child = parent / "subgraphs" / "child"
     child_outputs = child_outputs or parent_outputs
 
     _write_graph(
@@ -149,7 +148,7 @@ def _subgraph_skill(
     )
     _write_subgraph_phase(
         parent,
-        target_skill="child",
+        child_path=child,
         input_properties=parent_inputs,
         output_properties=parent_outputs,
         input_required=list(parent_inputs),
@@ -256,7 +255,12 @@ def test_subgraph_runtime_slices_parent_blackboard_with_relaxed_inputs(tmp_path:
     assert result["data"]["phase_outputs"]["delegate"]["seen_keys"] == ["shared_text"]
 
 
-def test_subgraph_output_mismatch_still_fatals_with_existing_code(tmp_path: Path) -> None:
+def test_subgraph_output_mismatch_now_compiles_without_1to1_gate(tmp_path: Path) -> None:
+    # WS-E1 Step5 / skill-syntax §2.4: the parent/child io.outputs 1:1 equality
+    # gate is relaxed. A subgraph whose declared outputs differ from the child's
+    # now COMPILES instead of raising [F-v3-subgraph-io-mismatch] — StateMapper
+    # merges by the parent's declared outputs at runtime, so field sets need not
+    # match 1:1.
     parent, _, resolver = _subgraph_skill(
         tmp_path,
         parent_inputs={"shared_text": {"type": "string"}},
@@ -269,9 +273,6 @@ def test_subgraph_output_mismatch_still_fatals_with_existing_code(tmp_path: Path
         """,
     )
 
-    with pytest.raises(SkillLoadError) as exc_info:
-        compile_skill(parent, cache=False, skill_resolver=resolver)
+    compiled = compile_skill(parent, cache=False, skill_resolver=resolver)
 
-    assert exc_info.value.payload is not None
-    assert exc_info.value.payload.code == "[F-v3-subgraph-io-mismatch]"
-    assert "outputs" in str(exc_info.value)
+    assert compiled.nodes[0].phase_name == "delegate"

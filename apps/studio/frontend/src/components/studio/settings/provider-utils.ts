@@ -10,6 +10,11 @@ const officialProviders = [
   { code: "ark", label: "Ark", baseUrl: "https://ark.cn-beijing.volces.com/api/v3" },
 ]
 const officialProviderCodes = officialProviders.map((vendor) => vendor.code)
+export const thirdPartyProtocolCandidates: ProviderType[] = [
+  "openai_compatible",
+  "anthropic_compatible",
+  "google_genai",
+]
 const notableProviderKeys = [
   "openrouter",
   "wavespeed",
@@ -25,17 +30,36 @@ type ProviderTestParams = {
   provider_type?: ProviderType | null
 }
 
+type BaseUrlDraftRow = NonNullable<ProviderDraft["base_urls"]>[number]
+
 /** Build a draft list from the server `CredentialsState` snapshot. */
 export function draftsFromCredentials(credentials: CredentialsState): ProviderDraft[] {
-  return credentials.providers.map((provider) => ({
-    id: provider.id,
-    name: provider.name,
-    provider_type: (provider.provider_type ?? "openai_compatible") as ProviderType,
-    base_url: provider.base_url ?? "",
-    api_key: provider.api_key,
-    isTesting: false,
-    testingAction: null,
-  }))
+  const drafts: ProviderDraft[] = []
+  const thirdPartyGroups = new Map<string, CredentialProviderState[]>()
+
+  for (const provider of credentials.providers) {
+    const draft = providerDraftFromCredential(provider)
+    if (inferProviderKind(draft) === "official") {
+      drafts.push(draft)
+      continue
+    }
+    const groupKey = thirdPartyGroupKey(provider)
+    thirdPartyGroups.set(groupKey, [...(thirdPartyGroups.get(groupKey) ?? []), provider])
+  }
+
+  for (const providers of thirdPartyGroups.values()) {
+    const orderedProviders = [...providers].sort(compareCredentialProviderProtocol)
+    const [primary] = orderedProviders
+    if (!primary) continue
+    const baseUrls = baseUrlRowsFromCredentialProviders(orderedProviders)
+    drafts.push({
+      ...providerDraftFromCredential(primary),
+      base_url: baseUrls[0]?.value ?? "",
+      base_urls: baseUrls,
+    })
+  }
+
+  return drafts
 }
 
 let providerIdFallbackCounter = 0
@@ -48,8 +72,17 @@ function newProviderId(): string {
 }
 
 export function inferProviderType(providerCode: string, baseUrl = "", name = ""): ProviderType {
-  const haystack = `${providerCode} ${name} ${baseUrl}`.toLowerCase()
-  if (haystack.includes("ark") || haystack.includes("volces")) return "ark_runtime"
+  const normalizedProviderCode = providerCode.toLowerCase()
+  const normalizedName = name.toLowerCase()
+  const normalizedBaseUrl = baseUrl.toLowerCase()
+  const isOfficialArk = (
+    normalizedProviderCode === "ark" ||
+    normalizedProviderCode === "ark-official" ||
+    normalizedProviderCode === "ark_official" ||
+    (normalizedName.includes("ark official") && normalizedBaseUrl.includes("volces"))
+  )
+  if (isOfficialArk) return "ark_runtime"
+  const haystack = `${normalizedProviderCode} ${normalizedName} ${normalizedBaseUrl}`
   if (haystack.includes("anthropic") || haystack.includes("claude")) return "anthropic_compatible"
   if (haystack.includes("gemini") || haystack.includes("google")) return "google_genai"
   return "openai_compatible"
@@ -64,11 +97,14 @@ export function draftFromAddProviderSubmission(
   data: AddProviderFormSubmission,
   id: string = data.providerCode || newProviderId(),
 ): ProviderDraft {
+  const baseUrl = data.baseUrl.trim()
+  const providerType = inferProviderType(data.providerCode, baseUrl, data.name)
   return {
     id,
     name: data.name,
-    provider_type: inferProviderType(data.providerCode, data.baseUrl, data.name),
-    base_url: data.baseUrl,
+    provider_type: providerType,
+    base_url: baseUrl,
+    base_urls: [{ id, value: baseUrl, provider_type: providerType, endpoint_ids: { [providerType]: id } }],
     api_key: data.apiKey,
     isTesting: false,
     testingAction: null,
@@ -97,6 +133,37 @@ export function providerDraftForAction(drafts: ProviderDraft[], providerId: stri
   if (!draft) return null
   const vendor = officialProviderForDraft(draft)
   return vendor ? withOfficialProviderDefaults(draft, vendor) : draft
+}
+
+export function providerEndpointDraftsForAction(draft: ProviderDraft): ProviderDraft[] {
+  const rows = draft.base_urls?.length
+    ? draft.base_urls.filter((row) => row.value.trim().length > 0)
+    : [{ id: draft.id, value: draft.base_url, provider_type: draft.provider_type, endpoint_ids: { [draft.provider_type]: draft.id } }]
+  const effectiveRows = rows.length > 0 ? rows : [{ id: draft.id, value: draft.base_url }]
+  return effectiveRows.flatMap((row) => {
+    const protocols = inferProviderKind(draft) === "official"
+      ? [row.provider_type ?? draft.provider_type]
+      : thirdPartyProtocolCandidates
+    return protocols.map((protocol) => ({
+      ...draft,
+      id: endpointIdForBaseUrlProtocol(draft.id, row, protocol),
+      provider_type: protocol,
+      base_url: row.value,
+      base_urls: [{ ...row, provider_type: protocol }],
+    }))
+  })
+}
+
+export function endpointIdForBaseUrlProtocol(
+  providerId: string,
+  row: { id: string; endpoint_ids?: Partial<Record<ProviderType, string>> },
+  protocol: ProviderType,
+): string {
+  const existing = row.endpoint_ids?.[protocol]
+  if (existing) return existing
+  const suffix = providerTypeEndpointSuffix(protocol)
+  const baseId = row.id || providerId
+  return `${baseId}-${suffix}`
 }
 
 export function thirdPartyProviderDrafts(drafts: ProviderDraft[]): ProviderDraft[] {
@@ -170,11 +237,17 @@ function isOfficialProviderDraft(draft: ProviderDraft, providerCode: string): bo
   const normalizedName = draft.name.toLowerCase()
   const vendor = officialProviders.find((item) => item.code === providerCode)
   const label = vendor ? officialProviderDisplayName(vendor.label).toLowerCase() : providerCode
+  const baseUrl = normalizeBaseUrlForProviderMatch(draft.base_url)
+  const vendorBaseUrl = normalizeBaseUrlForProviderMatch(vendor?.baseUrl ?? "")
   return (
     normalizedId === providerCode ||
-    normalizedId.startsWith(`${providerCode}-`) ||
-    normalizedId.startsWith(`${providerCode}_`) ||
-    (normalizedName.includes(label) && normalizedName.includes("official"))
+    normalizedId === `${providerCode}-official` ||
+    normalizedId === `${providerCode}_official` ||
+    (
+      normalizedName.includes(label) &&
+      normalizedName.includes("official") &&
+      (!vendorBaseUrl || baseUrl === vendorBaseUrl)
+    )
   )
 }
 
@@ -190,9 +263,134 @@ function withOfficialProviderDefaults(
     ...draft,
     provider_type: inferProviderType(vendor.code),
     base_url: vendor.baseUrl,
+    base_urls: undefined,
   }
 }
 
 function officialProviderDisplayName(label: string): string {
   return label.replace(/\s*\(.+\)\s*$/, "")
+}
+
+function normalizeBaseUrlForProviderMatch(value: string): string {
+  return value.trim().replace(/\/+$/, "").toLowerCase()
+}
+
+function normalizeBaseUrlGroupKey(value: string): string {
+  return normalizeBaseUrlForProviderMatch(value).replace(/\/v1$/, "")
+}
+
+function baseUrlRowsFromCredentialProviders(providers: CredentialProviderState[]): BaseUrlDraftRow[] {
+  const groups = new Map<string, CredentialProviderState[]>()
+  for (const provider of providers) {
+    const key = normalizeBaseUrlGroupKey(provider.base_url ?? "")
+    groups.set(key, [...(groups.get(key) ?? []), provider])
+  }
+  return [...groups.values()].map((group) => {
+    const ordered = [...group].sort(compareCredentialProviderProtocol)
+    const [primary] = ordered
+    const displayBaseUrl = preferredDisplayBaseUrl(ordered)
+    const endpointIds: Partial<Record<ProviderType, string>> = {}
+    for (const providerType of thirdPartyProtocolCandidates) {
+      const protocolProviders = ordered
+        .filter((provider) => credentialProviderProtocolSlot(provider) === providerType)
+        .sort((left, right) => compareEndpointCandidateForProtocol(left, right, providerType))
+      const bestProvider = protocolProviders[0]
+      if (bestProvider) endpointIds[providerType] = bestProvider.id
+    }
+    const primaryType = primary ? credentialProviderProtocolSlot(primary) : "openai_compatible"
+    return {
+      id: endpointIds.openai_compatible ?? primary?.id ?? "",
+      value: displayBaseUrl,
+      provider_type: primaryType,
+      endpoint_ids: endpointIds,
+    }
+  })
+}
+
+function compareEndpointCandidateForProtocol(
+  left: CredentialProviderState,
+  right: CredentialProviderState,
+  providerType: ProviderType,
+): number {
+  return endpointIdProtocolAffinity(left.id, providerType) - endpointIdProtocolAffinity(right.id, providerType) ||
+    providerLastTestStatusRank(left.last_test_status) - providerLastTestStatusRank(right.last_test_status) ||
+    rightLastTestAtRank(right.last_test_at) - rightLastTestAtRank(left.last_test_at) ||
+    left.id.localeCompare(right.id)
+}
+
+function endpointIdProtocolAffinity(endpointId: string, providerType: ProviderType): number {
+  const suffix = providerTypeEndpointSuffix(providerType)
+  const normalized = endpointId.toLowerCase()
+  return normalized.includes(`-${suffix}-`) || normalized.endsWith(`-${suffix}`) ? 0 : 1
+}
+
+function providerLastTestStatusRank(status: CredentialProviderState["last_test_status"]): number {
+  if (status === "ok") return 0
+  if (status && status !== "untested") return 1
+  return 2
+}
+
+function rightLastTestAtRank(value: string | undefined): number {
+  if (!value) return 0
+  const time = Date.parse(value)
+  return Number.isFinite(time) ? time : 0
+}
+
+function preferredDisplayBaseUrl(providers: CredentialProviderState[]): string {
+  const withVersionPath = providers.find((provider) => (
+    normalizeBaseUrlForProviderMatch(provider.base_url ?? "").endsWith("/v1")
+  ))
+  return withVersionPath?.base_url ?? providers[0]?.base_url ?? ""
+}
+
+function compareCredentialProviderProtocol(
+  left: CredentialProviderState,
+  right: CredentialProviderState,
+): number {
+  return providerTypeRank(credentialProviderProtocolSlot(left)) - providerTypeRank(credentialProviderProtocolSlot(right))
+    || left.id.localeCompare(right.id)
+}
+
+function providerTypeRank(providerType?: ProviderType | null): number {
+  const index = thirdPartyProtocolCandidates.indexOf((providerType ?? "openai_compatible") as ProviderType)
+  return index === -1 ? thirdPartyProtocolCandidates.length : index
+}
+
+function providerTypeEndpointSuffix(providerType: ProviderType): string {
+  if (providerType === "openai_compatible") return "openai"
+  if (providerType === "anthropic_compatible") return "anthropic"
+  if (providerType === "google_genai") return "google"
+  return "ark"
+}
+
+function credentialProviderProtocolSlot(provider: CredentialProviderState): ProviderType {
+  return providerTypeFromEndpointId(provider.id) ?? ((provider.provider_type ?? "openai_compatible") as ProviderType)
+}
+
+function providerTypeFromEndpointId(endpointId: string): ProviderType | null {
+  const normalized = endpointId.toLowerCase()
+  if (normalized.includes("-openai-") || normalized.endsWith("-openai")) return "openai_compatible"
+  if (normalized.includes("-anthropic-") || normalized.endsWith("-anthropic")) return "anthropic_compatible"
+  if (normalized.includes("-google-") || normalized.endsWith("-google")) return "google_genai"
+  if (normalized.includes("-ark-") || normalized.endsWith("-ark")) return "ark_runtime"
+  return null
+}
+
+function providerDraftFromCredential(provider: CredentialProviderState): ProviderDraft {
+  return {
+    id: provider.id,
+    name: provider.name,
+    provider_type: credentialProviderProtocolSlot(provider),
+    base_url: provider.base_url ?? "",
+    api_key: provider.api_key,
+    isTesting: false,
+    testingAction: null,
+  }
+}
+
+function thirdPartyGroupKey(provider: CredentialProviderState): string {
+  return [
+    provider.name.trim().toLowerCase(),
+    provider.api_key,
+  ].join("\u0000")
 }

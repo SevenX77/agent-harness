@@ -42,6 +42,82 @@ def test_http_5xx_preserves_response_envelope_error_payload() -> None:
     assert exc_info.value.error_payload == {"retry_after_ms": 250, "worker": "engine-a"}
 
 
+def test_non_envelope_http_4xx_is_transport_error_not_serialization_failure() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, text="not found")
+
+    transport = HttpTransport(
+        base_url="http://studio-loopback.test",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        schema_version=SCHEMA_VERSION,
+    )
+
+    with pytest.raises(StudioAdapterError) as exc_info:
+        transport.post("/engine/missing", {}, idempotency_key="idem-missing")
+
+    assert exc_info.value.error_code == "transport.http_4xx"
+    assert exc_info.value.error_payload == {"status_code": 404}
+
+
+def test_http_4xx_response_envelope_preserves_owner_error_payload() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            403,
+            json={
+                "schema_version": SCHEMA_VERSION,
+                "ok": False,
+                "error_code": "LOOPBACK_FORBIDDEN",
+                "error_payload": {"message": "internal token required"},
+            },
+        )
+
+    transport = HttpTransport(
+        base_url="http://studio-loopback.test",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        schema_version=SCHEMA_VERSION,
+    )
+
+    with pytest.raises(StudioAdapterError) as exc_info:
+        transport.post("/gateway/decide_fallback", {}, idempotency_key="idem-forbidden")
+
+    assert exc_info.value.error_code == "LOOPBACK_FORBIDDEN"
+    assert exc_info.value.error_payload == {"message": "internal token required"}
+
+
+def test_event_stream_5xx_preserves_response_envelope_error_payload() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert str(request.url) == "http://studio-loopback.test/engine/runs/run-123/events?cursor=4"
+        assert request.headers.get("Idempotency-Key") == "idem-run-123-events"
+        return httpx.Response(
+            503,
+            json={
+                "schema_version": SCHEMA_VERSION,
+                "ok": False,
+                "error_code": "engine.overloaded",
+                "error_payload": {"retry_after_ms": 250, "worker": "engine-a"},
+            },
+        )
+
+    transport = HttpTransport(
+        base_url="http://studio-loopback.test",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        schema_version=SCHEMA_VERSION,
+    )
+
+    with pytest.raises(StudioAdapterError) as exc_info:
+        list(
+            transport.stream_events(
+                "/engine/runs/run-123/events",
+                cursor=4,
+                idempotency_key="idem-run-123-events",
+            )
+        )
+
+    assert exc_info.value.error_code == "engine.overloaded"
+    assert exc_info.value.error_payload == {"retry_after_ms": 250, "worker": "engine-a"}
+
+
 def test_timeout_retry_reuses_idempotency_key_without_duplicate_execution() -> None:
     attempts: list[str | None] = []
     executions = 0

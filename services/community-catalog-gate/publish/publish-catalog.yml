@@ -1,0 +1,64 @@
+# Scheduled publishing Action TEMPLATE.
+#
+# This file is NOT active in the agent-harness repo (GitHub only runs workflows
+# under the repo-root .github/workflows/). Copy it into the PUBLIC CATALOG repo
+# at .github/workflows/publish-catalog.yml.
+#
+# This Action is the ONLY component with catalog-repo write capability, and it is
+# scoped to the minimum: `contents: write`. The serverless gate holds no repo
+# token. The Ed25519 private key lives ONLY as the secret CATALOG_SIGNING_PRIVATE_KEY_PEM.
+
+name: publish-catalog
+
+on:
+  schedule:
+    - cron: '17 */6 * * *' # every 6 hours
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # minimal — nothing else
+
+concurrency:
+  group: publish-catalog
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Bring in the gate scripts (vendored copy or git submodule of services/community-catalog-gate).
+      - name: Drain gate KV buffer
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }} # read-only KV token
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_BUFFER_NAMESPACE_ID: ${{ secrets.CF_BUFFER_NAMESPACE_ID }}
+          CF_WITHDRAWN_NAMESPACE_ID: ${{ secrets.CF_WITHDRAWN_NAMESPACE_ID }}
+          INPUT_RECORDS_FILE: ${{ runner.temp }}/records.json
+        run: node gate/publish/drain-kv.mjs
+
+      - name: Aggregate, shard and sign
+        env:
+          INPUT_RECORDS_FILE: ${{ runner.temp }}/records.json
+          CATALOG_OUTPUT_DIR: ${{ github.workspace }}
+          CATALOG_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.CATALOG_SIGNING_PRIVATE_KEY_PEM }}
+          PROTOCOL_MAJOR: '1'
+          GENERATED_AT: ${{ github.event.repository.updated_at }}
+        run: node gate/publish/aggregate.mjs
+
+      - name: Commit catalog
+        run: |
+          git config user.name 'catalog-publisher'
+          git config user.email 'catalog-publisher@users.noreply.github.com'
+          git add manifest.json manifest.json.sig shards/
+          if git diff --cached --quiet; then
+            echo 'No catalog changes to publish.'
+          else
+            git commit -m "chore(catalog): scheduled publish"
+            git push
+          fi

@@ -8,5 +8,7 @@
 /vendor/site-packages/
 /vendor/backend/
 /vendor/resources/
+/vendor/requirements.lock.txt
+/vendor/requirements.thirdparty.txt
 /python_runtime/*
 !/python_runtime/.keep

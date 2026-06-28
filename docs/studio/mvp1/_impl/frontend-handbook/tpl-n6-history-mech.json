@@ -1,0 +1,189 @@
+{
+  "id": "n6_history_mech",
+  "title": "本地存档与历史机制(git autocommit + 历史 + 回滚)",
+  "overview": {
+    "manages": "成功 run 后的本地 git autocommit 存档、发布时的 release 快照标记、本地历史列表(git 历史 ∪ product store releases)、以及按 sha 硬回滚。这是 N6『本地存档与历史』surface 背后的整条后端机制。",
+    "why_single": "存档/历史/回滚不是某一个操作,而是一组互相牵动的后端能力:run 成功的副作用(autocommit + 回填 git_status)、历史合并(两个来源拼成一份列表)、回滚(git reset --hard)。其中『autocommit 是 run 的服务端副作用、前端只能经 run 元数据 git_status 与历史列表感知』这点最容易被写糊,单列一页讲清。",
+    "design_owner": "gateway 后端 sidecar(`apps/studio/backend` 这个 Python sidecar,是 gateway 后端的 HTTP 承载层)。git 操作现由 sidecar 的 Python 服务 `git_local`(本地 git 命令封装)以子进程调 git CLI 完成;D12 目标态是写盘/git 走 Studio Rust 后端 native-fs(现 Python)。",
+    "code_location": "后端:`git_local`(GitLocalService,本地 git 命令封装)的 `auto_commit_run`(成功 run 后自动提交)/`commit_empty_snapshot`(发布时打 release 空提交)/`revert_to`(git reset --hard 回滚);run 编排里 `run_manager._auto_commit_successful_run`(run 成功后调 auto_commit_run 并回填 git_status);路由 `skills.get_skill_history`(合并历史)/`skills.revert_skill`(回滚端点)/`skills._record_release_history_snapshot`(发布快照)。前端:`useLocalHistory`(历史 hook)+ `HistoryPanel`(面板)。",
+    "dataflow": [
+      "用户跑一次 run 成功 → run 编排 `_auto_commit_successful_run` 调 `auto_commit_run`(git add + commit --allow-empty,提交信息 `auto-run-{run_id}`)",
+      "提交结果回填成本次 run 元数据上的 `git_status`(committed / locked / failed)",
+      "前端收到 `run_ended`(只标志结束、不带 metadata)→ 再拉 `GET /skills/{id}/runs/{run_id}` 读 `RunDetail.metadata.git_status` → 投影存档反馈(原子 #1)+ revalidate `/skills/{id}/history`(原子 #2)",
+      "面板拉 `GET /skills/{id}/history` → 后端把 git 历史 ∪ product store releases 合并成 GitHistoryItem 列表(按 kind 标 auto_run/manual/release)",
+      "用户点某快照 Revert → `POST /skills/{id}/revert {sha}` → 后端 `revert_to`(git reset --hard {sha})→ 回恢复后的 skill detail",
+      "发布成功(见机制 B)→ `_record_release_history_snapshot` 调 `commit_empty_snapshot`(提交信息 `release-{version}` + release trailers)在历史里留一个 release 标记"
+    ]
+  },
+  "submodules": [
+    {
+      "name": "成功 run autocommit + git_status 回填",
+      "code": "backend: run_manager._auto_commit_successful_run → git_local.auto_commit_run",
+      "summary": "run 成功完成时后端自动做一次本地 git 提交,并把提交结果作为状态回填到 run 元数据,供前端感知『已存档』。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "`auto_commit_run`(成功 run 后自动提交)对 skill 目录跑 git add + commit --allow-empty,提交信息固定为 `auto-run-{run_id}`;skill 目录无 `.git` 时返回 None(不存档,不报错)。",
+        "`_auto_commit_successful_run`(run 编排里的调用方)把提交结果落成 run 元数据上的 `git_status`:成功=committed、遇 git 锁=locked、命令失败=failed,locked/failed 会写 WARNING 日志(可观测降级)。",
+        "这是 run 成功的**服务端副作用**:没有独立的前端『存档』端点;前端经 **run 详情读模型**(`GET /skills/{id}/runs/{run_id}` 的 `RunDetail.metadata.git_status`,见下方接口表 `iface-run-detail`)读 `git_status`——运行流 `run_ended` 只标志结束、**不带 metadata**。",
+        "⚠️ **后端边界(MAJOR)**:`auto_commit_run` 在 skill 目录无 `.git` 时返回 None,而 `_auto_commit_successful_run` **不区分 None**,只要不抛异常就把 git_status 置 committed。即 `committed` **不绝对等于**真有一次可回滚的 git 提交(无仓时也会标 committed)。前端据此投影『可回滚』需谨慎;建议后端把无仓情形扩成 `skipped`/`no_repo`,在此之前前端文案不无条件承诺『可回滚快照已存在』。"
+      ],
+      "do": [
+        "run 成功后自动本地 git 提交(allow-empty)。",
+        "把提交结果回填成 run 元数据 git_status(committed/locked/failed)。",
+        "git 锁 / 命令失败时写 WARNING、不阻塞 run。"
+      ],
+      "dont": [
+        "不暴露独立的『存档』前端端点(autocommit 是 run 的副作用)。",
+        "无 `.git` 时不存档也不报错(但当前仍标 committed,见上 ⚠️)。"
+      ],
+      "deviation": "后端已实现且回填 git_status;前端缺口在不消费 git_status、run 完成不给存档反馈(原子 #1 偏差)。另有后端 MAJOR:无 `.git` 时 git_status 仍标 committed(应区分 skipped/no_repo)——属后端 code drift,前端投影需带保留口径。"
+    },
+    {
+      "name": "release 快照标记",
+      "code": "backend: skills._record_release_history_snapshot → git_local.commit_empty_snapshot",
+      "summary": "发布成功后在本地 git 历史里打一个空提交作为 release 标记,把版本/哈希/manifest 写进 git trailers,使历史里能认出『这是一次发布』。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "发布成功后 `_record_release_history_snapshot` 调 `commit_empty_snapshot`(打空提交)写一条提交信息 `release-{version}` + release trailers(版本/content_hash/manifest_ref/artifact_id)。",
+        "skill 目录无 `.git`、或 trailers 缺关键字段时跳过(不打标记,不报错)。",
+        "历史合并时这条提交被识别为 kind=release(见下一子模块),面板显示『Release』标签。"
+      ],
+      "do": [
+        "发布成功在历史里留 release 空提交 + trailers。"
+      ],
+      "dont": [
+        "不在 release 提交里塞文件改动(只作标记)。",
+        "缺 `.git`/缺字段时静默跳过。"
+      ],
+      "deviation": "后端已实现;前端只需在面板把 kind=release 渲成『Release』标签(原子 #3,已符合)。"
+    },
+    {
+      "name": "历史合并 + 回滚",
+      "code": "backend: skills.get_skill_history(合并) / skills.revert_skill → git_local.revert_to",
+      "summary": "把本地 git 历史与 product store 的 releases 合并成一份统一历史列表;回滚把工作区硬重置到某个 sha。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "`get_skill_history`(历史端点处理函数)读 git 历史(auto_run/manual/release/other)并 ∪ product store releases,合并去重成 GitHistoryItem 列表(每条带 kind / revertable 等)。",
+        "`revert_skill`(回滚端点处理函数)调 `revert_to`(git reset --hard {sha})把工作区硬回滚到该 sha,返回恢复后的 skill detail;sha 不存在 → GIT_OBJECT_NOT_FOUND,回滚冲突 → GIT_REVERT_CONFLICT。",
+        "回滚是破坏性硬重置:前端只发 sha、用后端回的权威 detail 覆盖本地,不在前端猜回滚后的状态。"
+      ],
+      "do": [
+        "合并 git 历史 ∪ product store releases 成统一列表。",
+        "按 sha 硬回滚并回恢复后的 detail。"
+      ],
+      "dont": [
+        "前端不自造历史 / 不本地拼快照(只投影后端列表)。",
+        "前端不在本地预测回滚结果(以后端 detail 为准)。"
+      ],
+      "deviation": "后端已实现;前端历史列表/回滚均符合(原子 #3/#4)。"
+    }
+  ],
+  "files": [
+    {
+      "name": "GitHistoryItem(本地历史响应 DTO)",
+      "version": "GET /api/skills/{skill_id}/history 的列表元素",
+      "what": "前端通过历史端点读到的每条本地存档快照的结构;这不是前端落盘的文件,而是后端把 git 历史 ∪ product store releases 合并后的响应元素。",
+      "structs": [
+        {
+          "name": "GitHistoryItem",
+          "fields": [
+            {"name": "sha", "type": "str", "meaning": "提交 sha(回滚用);非 git 来源的 release 用合成 sha"},
+            {"name": "message", "type": "str", "meaning": "提交信息(autocommit 为 `auto-run-{run_id}`、release 为 `release-{version}`)"},
+            {"name": "author", "type": "str", "meaning": "提交作者"},
+            {"name": "timestamp", "type": "datetime", "meaning": "提交时间"},
+            {"name": "kind", "type": "auto_run|manual|release|other", "meaning": "快照种类,面板据此标『Auto run / Manual / Release / Other』"},
+            {"name": "source", "type": "git|manifest", "meaning": "来源:git 历史 还是 product store manifest"},
+            {"name": "revertable", "type": "bool", "meaning": "是否可回滚(回滚按钮的开关)"},
+            {"name": "release_version", "type": "str|null", "meaning": "release 快照的版本号(非 release 为空)"},
+            {"name": "artifact_id", "type": "str|null", "meaning": "release 快照对应 artifact id"},
+            {"name": "content_hash", "type": "str|null", "meaning": "release 快照内容哈希"},
+            {"name": "manifest_ref", "type": "str|null", "meaning": "release 快照 manifest 引用"}
+          ]
+        }
+      ],
+      "owns": "后端拥有(git 历史 + product store releases 是单一真相);前端只读投影。",
+      "crud_pointer": "前端读:`GET /api/skills/{id}/history`(见下方接口表 iface-history);回滚写:`POST /api/skills/{id}/revert`(iface-revert)。",
+      "storage_note": "历史与回滚由 sidecar Python `git_local`(git CLI 子进程)完成;D12 目标态写盘/git 走 Studio Rust native-fs。前端不落盘、不持第二份历史。",
+      "security_fe": "前端只读历史元数据,不接触凭证/明文;回滚是破坏性操作,UI 应让用户确认 sha 后再发。"
+    }
+  ],
+  "interface_groups": [
+    {
+      "key": "crud",
+      "title": "数据读写类(历史读取 / 回滚 / run 详情)",
+      "note": "GET /history 纯读历史列表,POST /revert 写工作区(硬回滚),GET /runs/{run_id} 纯读 run 详情(为 #1 取 git_status)。autocommit 本身不在此列——它是 run 成功的服务端副作用,无前端端点,需经 run 详情读模型 + 历史列表感知。"
+    }
+  ],
+  "interfaces": [
+    {
+      "group": "crud",
+      "endpoint": "GET /api/skills/{skill_id}/history",
+      "req": "path 参数 skill_id;无 body",
+      "resp": "list[GitHistoryItem](见上方 DTO):git 历史 ∪ product store releases 合并、按时间排序,每条带 kind/revertable",
+      "purpose": "面板拉本地存档快照列表(含 autocommit 的 Auto run 与发布 Release 标记)——原子 #2(run 完成自动刷新)/#3(列表呈现)用它",
+      "provider": "gateway 后端 sidecar(`skills.get_skill_history` 合并 git 历史与 product store releases)",
+      "id": "iface-history"
+    },
+    {
+      "group": "crud",
+      "endpoint": "GET /api/skills/{skill_id}/runs/{run_id}",
+      "req": "path 参数 skill_id + run_id;无 body",
+      "resp": "RunDetail(`apps/studio/backend/app/models/runs.py`),含 `metadata`(RunMetadata),其 `git_status`∈committed/locked/failed/null 即 #1 要读的存档状态",
+      "purpose": "#1 的读模型:`run_ended` 只标志结束、不带 metadata,前端须再拉本 run 详情才能读 `git_status` 投影存档反馈;前端可用既有 run-history hook 的 `fetchRunDetail`",
+      "provider": "gateway 后端 sidecar(`runs.get_run` → `RunDetail.metadata.git_status`)",
+      "id": "iface-run-detail"
+    },
+    {
+      "group": "crud",
+      "endpoint": "POST /api/skills/{skill_id}/revert",
+      "req": "body {sha: str}(要回滚到的快照 sha)",
+      "resp": "SkillDetail(回滚后的 skill 详情);错误 GIT_OBJECT_NOT_FOUND(sha 不存在)/ GIT_REVERT_CONFLICT(回滚冲突)",
+      "purpose": "把工作区硬回滚到某快照(git reset --hard)——原子 #4 Revert 用它",
+      "provider": "gateway 后端 sidecar(`skills.revert_skill` → `git_local.revert_to`)",
+      "id": "iface-revert"
+    }
+  ],
+  "boundaries": {
+    "do": [
+      "后端 run 成功自动本地 git 提交(allow-empty)+ 回填 run 元数据 git_status",
+      "后端发布成功打 release 空提交标记(trailers 带版本/哈希/manifest)",
+      "后端合并 git 历史 ∪ product store releases 成统一历史列表",
+      "后端按 sha 硬回滚(git reset --hard)并回恢复后的 skill detail",
+      "前端投影历史列表、经 run 详情读模型读 git_status、把 kind 渲成标签、按 sha 触发回滚"
+    ],
+    "dont": [
+      "不暴露独立『存档』前端端点(autocommit 是 run 的服务端副作用,经 run 详情读模型读 git_status)",
+      "前端不自造历史 / 不持第二份历史真相",
+      "前端不在本地预测回滚结果(以后端 detail 为准)",
+      "存档/历史层不做 git push 或团队推送(那是 Save/Sync-to-Team 的事,非本机制)",
+      "本机制不是独立后端层——它只对接 gateway 后端 sidecar 的 history/revert/runs 端点"
+    ]
+  },
+  "states_errors": "",
+  "backend_status": [
+    {
+      "item": "成功 run autocommit + git_status 回填",
+      "d12": "D12「写盘/ git 走 native-fs」",
+      "status": "ok",
+      "note": "`auto_commit_run` + `_auto_commit_successful_run` 已实现:run 成功自动本地提交并回填 git_status(committed/locked/failed)。现由 Python `git_local` 以 git CLI 子进程完成;D12 目标态是写盘/git 迁到 Studio Rust native-fs(属后端占坑,不阻塞前端消费 git_status)。",
+      "ref": "d12"
+    },
+    {
+      "item": "本地历史列表 GET /history",
+      "d12": "—",
+      "status": "ok",
+      "note": "`get_skill_history` 已实现:合并 git 历史与 product store releases 成 GitHistoryItem 列表,kind 区分 auto_run/manual/release。前端原子 #2/#3 直接用。",
+      "ref": "d12"
+    },
+    {
+      "item": "回滚 POST /revert",
+      "d12": "—",
+      "status": "ok",
+      "note": "`revert_skill` → `git_local.revert_to`(git reset --hard)已实现,返回恢复后的 skill detail,错误码 GIT_OBJECT_NOT_FOUND / GIT_REVERT_CONFLICT 齐备。前端原子 #4 直接用。",
+      "ref": "d12"
+    }
+  ]
+}

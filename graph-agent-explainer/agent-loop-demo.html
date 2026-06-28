@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Loop 演示 · visual-extract</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Outfit:wght@300;400;500;600;700;800&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --font-sans:'Outfit','Noto Sans SC',sans-serif;
+    --font-mono:'JetBrains Mono',monospace;
+    --st-bg:#09090b; --st-panel:#131316; --st-border:#27272a; --st-text:#e4e4e7; --st-muted:#8a8a93;
+    --st-primary:#7c6cf0; --st-primary-soft:rgba(124,108,240,.16); --st-logic:#2dd4bf; --st-io:#64748b;
+    --gold:#e9b949; --ok:#2dd4bf; --bad:#f87171; --warn:#f59e0b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:#f3f4f8;color:#3b414a;font-family:var(--font-sans);line-height:1.6;padding:36px 20px;}
+  .wrap{max-width:1080px;margin:0 auto;}
+  h1{font-size:30px;font-weight:800;color:#0e1116;letter-spacing:-.6px;margin-bottom:10px;}
+  .lead{font-size:15px;color:#555b65;margin-bottom:8px;}
+  .lead b{color:#0e1116;}
+  .note{font-size:12px;color:#8b919b;margin:6px 0 14px;}
+  code{font-family:var(--font-mono);font-size:12px;background:#eef1f6;border:1px solid #e4e6ea;border-radius:4px;padding:1px 5px;color:#0d7a92;}
+
+  .studio{border:1px solid var(--st-border);border-radius:12px;overflow:hidden;background:var(--st-bg);box-shadow:0 16px 44px rgba(20,30,60,.16);}
+  .studio-title{height:38px;display:flex;align-items:center;gap:8px;padding:0 14px;background:#0d0d10;border-bottom:1px solid var(--st-border);}
+  .studio-title .dots{display:flex;gap:6px;}
+  .studio-title .dots i{width:10px;height:10px;border-radius:50%;background:#2c2c31;display:block;}
+  .studio-title .tt{font-family:var(--font-mono);font-size:11px;color:var(--st-muted);letter-spacing:.4px;}
+  .studio-title .tt b{color:var(--st-text);font-weight:600;}
+
+  /* control bar */
+  .ctrl{display:flex;gap:8px;padding:11px 14px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--st-border);background:#0d0d10;}
+  .sbtn{font-size:12px;font-weight:600;padding:6px 13px;border-radius:7px;background:#16161b;border:1px solid var(--st-border);color:var(--st-text);cursor:pointer;transition:all .18s;}
+  .sbtn:hover{border-color:#3a3a42;}
+  .sbtn.go{background:rgba(45,212,191,.14);border-color:var(--st-logic);color:#5eead4;}
+  .sbtn.go:disabled{opacity:.4;cursor:default;}
+  .sbtn.single.active{background:rgba(248,113,113,.14);border-color:var(--bad);color:#fca5a5;}
+  .ctrl-hint{font-size:11px;color:var(--st-muted);margin-left:auto;}
+
+  /* stage = canvas + kb sidebar */
+  .stage{display:flex;}
+  .canvas{flex:1;min-width:0;background-color:var(--st-bg);background-image:radial-gradient(var(--st-border) 1px,transparent 1px);background-size:18px 18px;}
+  .canvas svg{width:100%;height:540px;display:block;}
+
+  .kb-side{width:280px;border-left:1px solid var(--st-border);background:var(--st-panel);padding:14px;flex-shrink:0;overflow-y:auto;max-height:540px;}
+  .kb-side h4{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--st-muted);font-family:var(--font-mono);margin:0 0 9px;display:flex;align-items:center;gap:6px;}
+  .kb-side h4 .imp{color:var(--gold);font-size:9px;opacity:0;transition:opacity .3s;}
+  .kb-side h4 .imp.on{opacity:1;}
+  .ax-item{border:1px solid var(--st-border);border-radius:7px;padding:7px 9px;margin-bottom:7px;background:#16161b;opacity:.4;transition:all .35s;}
+  .ax-item.lit{opacity:1;border-color:var(--gold);box-shadow:0 0 0 1px rgba(233,185,73,.25);}
+  .ax-item .axt{font-size:12px;font-weight:700;color:#d4d4d8;}
+  .ax-item .axt b{color:var(--gold);font-family:var(--font-mono);font-size:11px;margin-right:5px;}
+  .ax-item .axd{font-size:11px;color:var(--st-muted);margin-top:1px;}
+  .derive{text-align:center;color:var(--st-muted);font-size:16px;margin:4px 0 8px;}
+  .pr-item{border:1px solid var(--st-border);border-radius:7px;padding:7px 9px;margin-bottom:7px;background:#141019;opacity:.4;transition:all .35s;}
+  .pr-item.lit{opacity:1;border-color:var(--st-primary);box-shadow:0 0 0 1px var(--st-primary-soft);}
+  .pr-item .prt{font-size:12px;font-weight:700;color:#c3bbff;}
+  .pr-item .prt b{font-family:var(--font-mono);font-size:11px;color:#b6acff;margin-right:5px;}
+  .pr-item .proj{font-size:10px;color:var(--gold);font-family:var(--font-mono);margin:2px 0;}
+  .pr-item .prr{font-size:11px;color:var(--st-muted);}
+
+  /* svg nodes */
+  .nlabel{fill:var(--st-text);font-size:11px;font-weight:600;font-family:var(--font-sans);}
+  .nkind{font-size:8px;font-family:var(--font-mono);font-weight:700;letter-spacing:.4px;}
+  .nsub{fill:var(--st-muted);font-size:8.5px;font-family:var(--font-mono);}
+  .gedge{stroke:#3a3a42;stroke-width:1.6;fill:none;}
+  .gnode rect{transition:all .3s;}
+  .gnode.dim{opacity:.22;}
+  .plusdot{cursor:pointer;}
+  .plusdot circle{fill:#16161b;stroke:var(--st-primary);stroke-width:1.6;transition:all .2s;}
+  .plusdot:hover circle{fill:var(--st-primary-soft);}
+  .plusdot text{fill:var(--st-primary);font-size:15px;font-weight:700;font-family:var(--font-mono);}
+
+  .snode rect{transition:all .3s;}
+  .snode.run rect{stroke:var(--st-primary);stroke-width:2.4;filter:drop-shadow(0 0 7px var(--st-primary));}
+  .snode.ok rect{stroke:var(--ok);stroke-width:2.2;}
+  .snode.bad rect{stroke:var(--bad);stroke-width:2.2;}
+  .snode.kbhit rect{stroke:var(--gold);stroke-width:2.2;filter:drop-shadow(0 0 8px var(--gold));}
+  .kbtag{fill:var(--gold);font-size:9px;font-weight:700;font-family:var(--font-mono);opacity:0;transition:opacity .25s;}
+  .kbtag.on{opacity:1;}
+  .sconn{stroke:var(--st-primary);stroke-width:1.6;fill:none;stroke-dasharray:4 3;opacity:.55;}
+  .backedge{stroke:var(--warn);stroke-width:1.8;fill:none;stroke-dasharray:5 4;opacity:.3;}
+  .backedge.flow{opacity:1;animation:dash .8s linear;}
+  .backlabel{fill:var(--warn);font-size:8.5px;font-weight:700;font-family:var(--font-mono);opacity:.5;}
+  .backlabel.flow{opacity:1;}
+  @keyframes dash{from{stroke-dashoffset:54}to{stroke-dashoffset:0}}
+
+  /* trace */
+  .trace-h{font-size:10px;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.6px;color:var(--st-muted);padding:9px 14px 0;background:#0d0d10;}
+  .trace{background:#0d0d10;height:230px;overflow-y:auto;padding:6px 14px 12px;font-family:var(--font-mono);font-size:11px;border-top:1px solid var(--st-border);}
+  .trow{display:flex;gap:8px;padding:2px 0;opacity:0;transform:translateX(-3px);transition:opacity .25s,transform .25s;align-items:baseline;}
+  .trow.on{opacity:1;transform:none;}
+  .trow .ti{color:#52525b;flex-shrink:0;width:30px;text-align:right;}
+  .trow .tg{flex-shrink:0;width:78px;font-weight:700;}
+  .trow .tx{color:#c9c9d1;}
+  .tg.kb{color:var(--gold);} .tg.plan{color:#b6acff;} .tg.act{color:#c3bbff;}
+  .tg.review{color:var(--st-logic);} .tg.gate{color:var(--warn);} .tg.out{color:var(--bad);}
+  .tx .bad{color:#fca5a5;} .tx .ok{color:#5eead4;} .tx .warn{color:#fbbf24;} .tx .em{color:#fff;font-weight:600;}
+  @media(max-width:860px){ .stage{flex-direction:column;} .kb-side{width:100%;border-left:none;border-top:1px solid var(--st-border);max-height:none;} }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>为什么 Agent Loop 比单次 LLM 强</h1>
+    <p class="lead">用真实流水线 <b>visual-extract</b>(剧本 → 视觉资产)演示:同一步活,<b>单次 LLM</b> 交一次就完事、错了没人管;<b>Agent Loop</b> 先从<b>公理</b>推导出领域标准,带着标准做、做完用标准自我批注、不达标就打回重做,直到达标。</p>
+    <p class="note">机制对齐 graph-agent mvp1:<code>create_agent</code> ReAct · <code>update_working_memory</code>(plan) · phase <code>validator</code> + <code>after_agent</code> 退出闸 · <code>NudgeInjector</code> 回灌(<code>jump_to:"model"</code>)。点 agent 节点右侧 <b style="color:#b6acff">+</b> 原地展开它的内部 step 子图,再点 ▶ 看闭环跑起来。</p>
+
+    <div class="studio">
+      <div class="studio-title"><span class="dots"><i></i><i></i><i></i></span><span class="tt">Studio · <b>visual-extract</b> · agent loop trace</span></div>
+      <div class="ctrl">
+        <button class="sbtn go" id="run-btn" onclick="RUN()">▶ 运行 Agent Loop</button>
+        <button class="sbtn single" id="single-btn" onclick="toggleSingle()">单次 LLM 模式</button>
+        <span class="ctrl-hint" id="hint">先点节点右侧 + 展开,再运行</span>
+      </div>
+      <div class="stage">
+        <div class="canvas"><svg id="svg" viewBox="0 0 560 480" preserveAspectRatio="xMidYMid meet"></svg></div>
+        <div class="kb-side" id="kb-side"></div>
+      </div>
+      <div class="trace-h">trace · 实时日志 (timeline)</div>
+      <div class="trace" id="trace"></div>
+    </div>
+  </div>
+
+  <script>
+  const SVGNS='http://www.w3.org/2000/svg';
+  function NS(t){return document.createElementNS(SVGNS,t);}
+  function $(id){return document.getElementById(id);}
+  function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+
+  // ---------- main vertical pipeline ----------
+  const KIND_COLOR={io:'#64748b',logic:'#2dd4bf',agent:'#7c6cf0'};
+  const MAIN=[
+    {id:'input',label:'input',kind:'io'},
+    {id:'setup',label:'setup',kind:'logic'},
+    {id:'continuity',label:'continuity',kind:'agent'},
+    {id:'annotation',label:'annotation',kind:'agent'},
+    {id:'entity_spatial',label:'entity_spatial',kind:'agent',exp:true},
+    {id:'evolution',label:'evolution',kind:'agent',exp:true},
+    {id:'validation',label:'validation',kind:'agent'},
+    {id:'output',label:'output',kind:'io'},
+  ];
+  const MX=34,MW=118,MH=34,MGAP=56,MY0=14;
+  function mY(i){return MY0+i*MGAP;}
+
+  // ---------- agent loop sub-steps (mapped to mvp1) ----------
+  const STEPS=[
+    {id:'plan',   t:'Plan',      sub:'update_working_memory'},
+    {id:'planrev',t:'审核 Plan',  sub:'对照推导协议自检', kb:true},
+    {id:'act',    t:'Step / Act', sub:'ReAct · tool calls'},
+    {id:'review', t:'Review',    sub:'after_agent · validator', kb:true},
+    {id:'end',    t:'达标 END',   sub:'finish_task 放行'},
+  ];
+  const LX=322,LW=204,SH=46,SGAP=74,SY0=18;
+  function sY(i){return SY0+i*SGAP;}
+
+  // ---------- knowledge base: axioms -> protocols ----------
+  const AXIOMS=[
+    {id:'AX1',rn:'I',  t:'观测闭包', d:'表征边界 = 媒介观测边界'},
+    {id:'AX2',rn:'II', t:'本体节俭', d:'不创造非必要实体'},
+    {id:'AX3',rn:'III',t:'正交分解', d:'维度互相独立,不交叉改写'},
+    {id:'AX4',rn:'IV', t:'状态即时', d:'状态=被观测时刻,不外推'},
+    {id:'AX5',rn:'V',  t:'推理封闭', d:'结论信息量 ≤ 前提'},
+  ];
+  const PHASE_KB={
+    entity_spatial:[
+      {p:'P3',name:'非资产过滤', from:'AX2', proj:'本体节俭 ⊕ 实体=制作单元', rule:'门窗墙等置景 → 归 Location,不建 Prop'},
+      {p:'P4',name:'Zero-State', from:'AX4', proj:'状态即时 ⊕ 实体=角色',     rule:'首个 Look=Look_0,出场即即时状态'},
+      {p:'SC',name:'value+clue', from:'AX5', proj:'推理封闭 ⊕ 描述需溯源',     rule:'每个描述字段必须 {value, clue}'},
+    ],
+    evolution:[
+      {p:'P2',name:'视觉推导过滤', from:'AX1', proj:'观测闭包 ⊕ 媒介=镜头', rule:'推不出视觉变化 → 不记 look_change'},
+      {p:'P1',name:'因果链精准',   from:'AX5', proj:'推理封闭 ⊕ 前提=clue', rule:'diff 不得超出 clue 支持范围'},
+    ],
+  };
+
+  // ---------- timelines (loop / single) per phase ----------
+  function C(s){return '<code style="font-size:10px">'+s+'</code>';}
+  const SEQ={
+    entity_spatial:{
+      loop:[
+        {tag:'kb', tx:'KnowledgeBase 导入中… <span class="warn">载入公理集 (AX1–AX5)</span>'},
+        {tag:'kb', axiom:'AX2', proto:'P3', tx:'公理 <span class="em">II 本体节俭</span> ⊕ 实体=制作单元 ⇒ 推导 <span class="em">P3 非资产过滤</span>'},
+        {tag:'kb', axiom:'AX4', proto:'P4', tx:'公理 <span class="em">IV 状态即时</span> ⊕ 实体=角色 ⇒ 推导 <span class="em">P4 Zero-State</span>'},
+        {tag:'kb', axiom:'AX5', proto:'SC', tx:'公理 <span class="em">V 推理封闭</span> ⊕ 描述需溯源 ⇒ 推导 <span class="em">value+clue</span> 约束'},
+        {tag:'kb', tx:'推导完成 · 3 条协议注入 '+C('system_prompt')},
+        {tag:'plan', node:'plan', state:'run', tx:'WorkingMemoryUpdated · 计划:逐个 save_entity(林深 / 防爆门 / 弩箭)'},
+        {tag:'plan', node:'planrev', state:'kbhit', kbtag:'planrev', tx:'用 <span class="em">P3/P4</span> 审核计划 → 批注:<span class="warn">「先建 Look_0 起点;置景类先过 P3 再决定是否建 Prop」</span>'},
+        {tag:'act', node:'act', state:'run', think:2200, tx:'💭 thinking… 组织 save_entity 调用'},
+        {tag:'act', node:'act', state:'run', tx:'ToolCalled save_entity(<span class="bad">CHR_001 look=Look_1, makeup="脸色苍白"</span>) ×2 → FinishTaskSubmitted <span class="warn">(round 1)</span>'},
+        {tag:'review', node:'review', state:'kbhit', kbtag:'review', tx:'对照 P3/P4/schema 批注中…'},
+        {tag:'review', node:'review', state:'bad', tx:'<span class="bad">SchemaValidation FAIL</span> · CHR_001.makeup 缺 clue 字段'},
+        {tag:'review', node:'review', state:'bad', tx:'<span class="bad">[P4] FAIL</span> · 首 Look=Look_1,应为 Look_0'},
+        {tag:'review', node:'review', state:'bad', tx:'<span class="bad">[P3] FAIL</span> · 防爆门是置景,应归 LOC_001.description'},
+        {tag:'gate', node:'review', state:'bad', back:true, tx:'<span class="warn">AfterAgentGate BLOCK</span> → NudgeInjected '+C('jump_to:"model"')+' <span class="warn">(round 1→2)</span>'},
+        {tag:'act', node:'act', state:'run', think:2200, tx:'💭 thinking… 按批注修 Look_0 + 补 clue'},
+        {tag:'act', node:'act', state:'run', tx:'ToolCalled update_look(Look_1→<span class="ok">Look_0</span>) · makeup=<span class="ok">{value,clue}</span> → FinishTaskSubmitted <span class="warn">(round 2)</span>'},
+        {tag:'review', node:'review', state:'kbhit', kbtag:'review', tx:'再次对照协议批注中…'},
+        {tag:'review', node:'review', state:'bad', tx:'<span class="ok">P4 ✓ · value+clue ✓</span> ;但 <span class="bad">[P3] 仍 FAIL</span> · 防爆门仍建为独立 Prop'},
+        {tag:'gate', node:'review', state:'bad', back:true, tx:'<span class="warn">AfterAgentGate BLOCK</span> → NudgeInjected '+C('jump_to:"model"')+' <span class="warn">(round 2→3)</span>'},
+        {tag:'act', node:'act', state:'run', think:2000, tx:'💭 thinking… 删 PRP_007 并入 Location'},
+        {tag:'act', node:'act', state:'run', tx:'ToolCalled delete_entity(PRP_007) + 追加 LOC_001.description → FinishTaskSubmitted <span class="warn">(round 3)</span>'},
+        {tag:'review', node:'review', state:'ok', kbtag:'review', tx:'<span class="ok">SchemaValidation PASS</span> · P3 ✓ P4 ✓ value+clue ✓'},
+        {tag:'gate', node:'end', state:'ok', tx:'<span class="ok">AfterAgentGate PASS</span> · finish_task 放行 → <span class="em">END</span>(3 项缺陷全部修复)'},
+      ],
+      single:[
+        {tag:'kb', tx:'KnowledgeBase 已注入标准 — <span class="warn">但单次模式不会自检</span>'},
+        {tag:'act', node:'plan', state:'run', think:1500, tx:'💭 thinking…'},
+        {tag:'act', node:'act', state:'run', tx:'LLMResponse · 一次性产出 save_entity ×2'},
+        {tag:'out', node:'end', state:'bad', tx:'<span class="bad">OutputReturned</span> · 无 review/refine — <span class="bad em">Look_1、缺 clue、防爆门当 Prop 共 3 项缺陷原样输出</span>,无人发现'},
+      ],
+    },
+    evolution:{
+      loop:[
+        {tag:'kb', tx:'KnowledgeBase 导入中… <span class="warn">载入公理集 (AX1–AX5)</span>'},
+        {tag:'kb', axiom:'AX1', proto:'P2', tx:'公理 <span class="em">I 观测闭包</span> ⊕ 媒介=镜头 ⇒ 推导 <span class="em">P2 视觉推导过滤</span>'},
+        {tag:'kb', axiom:'AX5', proto:'P1', tx:'公理 <span class="em">V 推理封闭</span> ⊕ 前提=clue ⇒ 推导 <span class="em">P1 因果链精准</span>'},
+        {tag:'kb', tx:'推导完成 · 2 条协议注入 '+C('system_prompt')},
+        {tag:'plan', node:'plan', state:'run', tx:'WorkingMemoryUpdated · 计划:list_entities 拿 ID,再写 2 条 look_change(中箭 / 发誓)'},
+        {tag:'plan', node:'planrev', state:'kbhit', kbtag:'planrev', tx:'用 <span class="em">P1/P2</span> 审核计划 → 批注:<span class="warn">「先判事件是否产生视觉变化(P2);diff 不得超出 clue(P1);entity_id 用系统 ID」</span>'},
+        {tag:'act', node:'act', state:'run', think:2200, tx:'💭 thinking… 组织 record_look_change'},
+        {tag:'act', node:'act', state:'run', tx:'ToolCalled record_look_change(<span class="bad">"林深", diff={makeup:流血, clothing:破损}</span>) + (<span class="bad">"暗暗发誓"→记一条</span>) → FinishTaskSubmitted <span class="warn">(round 1)</span>'},
+        {tag:'review', node:'review', state:'kbhit', kbtag:'review', tx:'对照 P1/P2 批注中…'},
+        {tag:'review', node:'review', state:'bad', tx:'<span class="bad">[P1] FAIL</span> · 中箭<b>头部</b> → diff 不应含 clothing(扩大推断)'},
+        {tag:'review', node:'review', state:'bad', tx:'<span class="bad">[P2] FAIL</span> · "暗暗发誓"无视觉变化,不应记 look_change'},
+        {tag:'review', node:'review', state:'bad', tx:'<span class="bad">entity_id FAIL</span> · 用了名称"林深",应解析为 CHR_001'},
+        {tag:'gate', node:'review', state:'bad', back:true, tx:'<span class="warn">AfterAgentGate BLOCK</span> → NudgeInjected '+C('jump_to:"model"')+' <span class="warn">(round 1→2)</span>'},
+        {tag:'act', node:'act', state:'run', think:2200, tx:'💭 thinking… 收窄 diff + 删非视觉事件'},
+        {tag:'act', node:'act', state:'run', tx:'diff 只留 <span class="ok">{makeup:头部血伤}</span> · 删除"发誓"那条 → FinishTaskSubmitted <span class="warn">(round 2)</span>'},
+        {tag:'review', node:'review', state:'kbhit', kbtag:'review', tx:'再次对照协议批注中…'},
+        {tag:'review', node:'review', state:'bad', tx:'<span class="ok">P1 ✓ · P2 ✓</span> ;但 <span class="bad">entity_id 仍 FAIL</span> · 还在用名称"林深"'},
+        {tag:'gate', node:'review', state:'bad', back:true, tx:'<span class="warn">AfterAgentGate BLOCK</span> → NudgeInjected '+C('jump_to:"model"')+' <span class="warn">(round 2→3)</span>'},
+        {tag:'act', node:'act', state:'run', think:2000, tx:'💭 thinking… resolve 名称为系统 ID'},
+        {tag:'act', node:'act', state:'run', tx:'record_look_change(<span class="ok">CHR_001</span>, ...) → FinishTaskSubmitted <span class="warn">(round 3)</span>'},
+        {tag:'review', node:'review', state:'ok', kbtag:'review', tx:'<span class="ok">SchemaValidation PASS</span> · P1 ✓ P2 ✓ entity_id ✓'},
+        {tag:'gate', node:'end', state:'ok', tx:'<span class="ok">AfterAgentGate PASS</span> · finish_task 放行 → <span class="em">END</span>(3 项缺陷全部修复)'},
+      ],
+      single:[
+        {tag:'kb', tx:'KnowledgeBase 已注入标准 — <span class="warn">但单次模式不会自检</span>'},
+        {tag:'act', node:'plan', state:'run', think:1500, tx:'💭 thinking…'},
+        {tag:'act', node:'act', state:'run', tx:'LLMResponse · 一次性写 2 条 look_change'},
+        {tag:'out', node:'end', state:'bad', tx:'<span class="bad">OutputReturned</span> · 无 review/refine — <span class="bad em">clothing 扩大推断、"发誓"误记、名称未解析 共 3 项缺陷原样输出</span>,无人发现'},
+      ],
+    },
+  };
+
+  let expanded=null, single=false, running=false, runToken=0, traceIdx=0;
+
+  // ---------- render main pipeline ----------
+  function renderMain(){
+    const svg=$('svg'); svg.innerHTML='';
+    const cx=MX+MW/2;
+    for(let i=0;i<MAIN.length-1;i++){
+      const y1=mY(i)+MH, y2=mY(i+1);
+      const p=NS('path'); p.setAttribute('class','gedge');
+      p.setAttribute('d','M '+cx+' '+y1+' C '+cx+' '+(y1+14)+' '+cx+' '+(y2-14)+' '+cx+' '+y2);
+      svg.appendChild(p);
+    }
+    MAIN.forEach((n,i)=>{
+      const g=NS('g'); g.setAttribute('class','gnode'); g.setAttribute('data-id',n.id);
+      if(expanded && expanded!==n.id) g.classList.add('dim');
+      const r=NS('rect'); r.setAttribute('x',MX);r.setAttribute('y',mY(i));r.setAttribute('width',MW);r.setAttribute('height',MH);r.setAttribute('rx',8);
+      r.setAttribute('fill','#16161b');r.setAttribute('stroke',KIND_COLOR[n.kind]);r.setAttribute('stroke-width',1.6);
+      if(n.kind==='io')r.setAttribute('opacity','.6');
+      g.appendChild(r);
+      const k=NS('text'); k.setAttribute('class','nkind');k.setAttribute('x',MX+9);k.setAttribute('y',mY(i)+14);k.setAttribute('fill',KIND_COLOR[n.kind]);
+      k.textContent=n.kind==='agent'?'AGENT ⟳':(n.kind==='logic'?'LOGIC  fn':'I/O');
+      g.appendChild(k);
+      const l=NS('text'); l.setAttribute('class','nlabel');l.setAttribute('x',MX+9);l.setAttribute('y',mY(i)+29);l.textContent=n.label; g.appendChild(l);
+      svg.appendChild(g);
+      if(n.exp){
+        const cxp=MX+MW+13, cyp=mY(i)+MH/2;
+        const pd=NS('g'); pd.setAttribute('class','plusdot'); pd.setAttribute('data-exp',n.id);
+        const c=NS('circle'); c.setAttribute('cx',cxp);c.setAttribute('cy',cyp);c.setAttribute('r',9); pd.appendChild(c);
+        const tx=NS('text'); tx.setAttribute('x',cxp);tx.setAttribute('y',cyp+5);tx.setAttribute('text-anchor','middle');
+        tx.textContent=(expanded===n.id)?'\u2212':'+'; pd.appendChild(tx);
+        pd.addEventListener('click',()=>toggleExpand(n.id));
+        svg.appendChild(pd);
+      }
+    });
+    if(expanded) renderLoop(expanded);
+  }
+
+  // ---------- render agent-loop sub-graph (inline) ----------
+  function renderLoop(id){
+    const svg=$('svg');
+    const idx=MAIN.findIndex(n=>n.id===id);
+    const g=NS('g'); g.setAttribute('id','loopg');
+    const cxL=LX+LW/2;
+    // connector from + dot to Plan
+    const px=MX+MW+13, py=mY(idx)+MH/2;
+    const conn=NS('path'); conn.setAttribute('class','sconn');
+    conn.setAttribute('d','M '+(px+9)+' '+py+' C '+(px+60)+' '+py+' '+(LX-50)+' '+(sY(0)+SH/2)+' '+LX+' '+(sY(0)+SH/2));
+    g.appendChild(conn);
+    // forward edges
+    for(let i=0;i<STEPS.length-1;i++){
+      const p=NS('path'); p.setAttribute('class','gedge');
+      const y1=sY(i)+SH, y2=sY(i+1);
+      p.setAttribute('d','M '+cxL+' '+y1+' C '+cxL+' '+(y1+12)+' '+cxL+' '+(y2-12)+' '+cxL+' '+y2);
+      g.appendChild(p);
+    }
+    // backedge review(3) -> act(2)
+    const rY=sY(3)+SH/2, aY=sY(2)+SH/2;
+    const be=NS('path'); be.setAttribute('id','backedge'); be.setAttribute('class','backedge');
+    be.setAttribute('d','M '+LX+' '+rY+' C '+(LX-36)+' '+(rY-4)+' '+(LX-36)+' '+(aY+4)+' '+LX+' '+aY);
+    g.appendChild(be);
+    const bl=NS('text'); bl.setAttribute('class','backlabel');bl.setAttribute('x',LX-34);bl.setAttribute('y',(rY+aY)/2);bl.setAttribute('text-anchor','middle');
+    bl.textContent='BLOCK ↺'; g.appendChild(bl);
+    // step nodes
+    STEPS.forEach((s,i)=>{
+      const sn=NS('g'); sn.setAttribute('class','snode'); sn.setAttribute('data-id',s.id);
+      const r=NS('rect'); r.setAttribute('x',LX);r.setAttribute('y',sY(i));r.setAttribute('width',LW);r.setAttribute('height',SH);r.setAttribute('rx',8);
+      r.setAttribute('fill','#15151b');r.setAttribute('stroke','#45454f');r.setAttribute('stroke-width',1.6); sn.appendChild(r);
+      const t=NS('text'); t.setAttribute('class','nlabel');t.setAttribute('x',LX+11);t.setAttribute('y',sY(i)+20);t.textContent=(i+1)+'. '+s.t; sn.appendChild(t);
+      const sub=NS('text'); sub.setAttribute('class','nsub');sub.setAttribute('x',LX+11);sub.setAttribute('y',sY(i)+35);sub.textContent=s.sub; sn.appendChild(sub);
+      g.appendChild(sn);
+      if(s.kb){
+        const kt=NS('text'); kt.setAttribute('class','kbtag'); kt.setAttribute('id','kbtag-'+s.id);
+        kt.setAttribute('x',LX+LW-8);kt.setAttribute('y',sY(i)-5);kt.setAttribute('text-anchor','end');
+        kt.textContent='\u25C6 KB 推导注入'; g.appendChild(kt);
+      }
+    });
+    svg.appendChild(g);
+  }
+
+  function setSnode(id,state){ const n=document.querySelector('#loopg .snode[data-id="'+id+'"]'); if(!n)return; n.classList.remove('run','ok','bad','kbhit'); if(state)n.classList.add(state); }
+  function showKBTag(id,on){ const t=$('kbtag-'+id); if(t)t.classList.toggle('on',!!on); }
+  async function flowBack(){ const e=$('backedge'),l=document.querySelector('.backlabel'); if(e)e.classList.add('flow'); if(l)l.classList.add('flow'); setSnode('act','run'); await sleep(820); if(e)e.classList.remove('flow'); if(l)l.classList.remove('flow'); }
+
+  // ---------- sidebar (axioms -> protocols) ----------
+  function renderSidebar(phase){
+    let h='<h4>知识库 · 公理层 <span class="imp" id="imp-ax">载入中</span></h4>';
+    AXIOMS.forEach(a=>{ h+='<div class="ax-item" id="ax-'+a.id+'"><div class="axt"><b>'+a.rn+'</b>'+a.t+'</div><div class="axd">'+a.d+'</div></div>'; });
+    h+='<div class="derive">\u21D3 运行时推导 \u21D3</div>';
+    h+='<h4>协议层 · 本 phase 适用 <span class="imp" id="imp-pr">推导中</span></h4>';
+    (PHASE_KB[phase]||[]).forEach(p=>{ h+='<div class="pr-item" id="pr-'+p.p+'"><div class="prt"><b>'+(p.p==='SC'?'schema':p.p)+'</b>'+p.name+'</div><div class="proj">\u2190 '+p.proj+'</div><div class="prr">'+p.rule+'</div></div>'; });
+    $('kb-side').innerHTML=h;
+  }
+  function litAxiom(id){ const e=$('ax-'+id); if(e)e.classList.add('lit'); const i=$('imp-ax'); if(i)i.classList.add('on'); }
+  function litProto(p){ const e=$('pr-'+p); if(e)e.classList.add('lit'); const i=$('imp-pr'); if(i)i.classList.add('on'); }
+  function resetKB(){ document.querySelectorAll('.ax-item,.pr-item').forEach(e=>e.classList.remove('lit')); document.querySelectorAll('.imp').forEach(e=>e.classList.remove('on')); }
+
+  // ---------- trace ----------
+  const TAGNAME={kb:'KB',plan:'PLAN',act:'ACT',review:'REVIEW',gate:'GATE',out:'OUT'};
+  function addTrace(tag,html){
+    traceIdx++;
+    const tr=$('trace'); const d=document.createElement('div'); d.className='trow';
+    d.innerHTML='<span class="ti">'+traceIdx+'</span><span class="tg '+tag+'">'+(TAGNAME[tag]||tag)+'</span><span class="tx">'+html+'</span>';
+    tr.appendChild(d); tr.scrollTop=tr.scrollHeight; requestAnimationFrame(()=>d.classList.add('on'));
+  }
+
+  // ---------- interaction ----------
+  function toggleExpand(id){
+    if(running) return;
+    expanded=(expanded===id)?null:id;
+    renderMain();
+    if(expanded){ renderSidebar(expanded); $('hint').textContent='已展开 '+expanded+' · 点 ▶ 运行'; }
+    else { $('kb-side').innerHTML=''; $('hint').textContent='先点节点右侧 + 展开,再运行'; }
+    $('trace').innerHTML=''; traceIdx=0;
+  }
+
+  function toggleSingle(){
+    if(running) return; single=!single;
+    $('single-btn').classList.toggle('active',single);
+    $('hint').textContent = single ? '单次 LLM 模式:运行看缺陷如何漏过' : 'Agent Loop 模式:运行看完整闭环';
+    $('trace').innerHTML=''; traceIdx=0;
+  }
+
+  async function RUN(){
+    if(running) return;
+    if(!expanded){ toggleExpand('entity_spatial'); await sleep(120); }
+    running=true; const tok=++runToken;
+    $('run-btn').disabled=true; $('run-btn').textContent='● 运行中…';
+    $('trace').innerHTML=''; traceIdx=0; resetKB();
+    STEPS.forEach(s=>{ setSnode(s.id,null); showKBTag(s.id,false); });
+    const seq=SEQ[expanded][single?'single':'loop'];
+    for(const it of seq){
+      if(tok!==runToken) return;
+      if(it.think){ if(it.node) setSnode(it.node,'run'); await sleep(it.think); }
+      if(tok!==runToken) return;
+      if(it.node && it.state) setSnode(it.node,it.state);
+      if(it.axiom) litAxiom(it.axiom);
+      if(it.proto) litProto(it.proto);
+      if(it.kbtag) showKBTag(it.kbtag,true);
+      if(it.back){ await flowBack(); if(tok!==runToken) return; }
+      addTrace(it.tag,it.tx);
+      await sleep(it.gap||780);
+    }
+    running=false;
+    $('run-btn').disabled=false; $('run-btn').textContent='▶ 运行 Agent Loop';
+    $('hint').textContent = single
+      ? '单次 LLM:带缺陷直接输出 ✗（共 3 项未被发现）'
+      : 'Agent Loop:跑了 3 轮(2 次打回)后全部达标 ✓';
+  }
+
+  window.addEventListener('load',()=>{ renderMain(); toggleExpand('entity_spatial'); });
+  </script>
+</body>
+</html>

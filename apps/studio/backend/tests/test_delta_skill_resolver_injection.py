@@ -119,16 +119,134 @@ def test_delta4_run_worker_passes_skill_resolver(tmp_path: Path, monkeypatch: An
 
     run_manager_module._run_worker_main(
         "demo.skill",
-        str(ephemeral_dir),
         str(tmp_path / "run"),
         {},
         queue,
-        art_ref=art_ref,
+        art_ref,
     )
 
     assert calls
     assert calls[0]["artifact_ref"] == art_ref
     assert calls[0]["inputs"] == {}
+
+
+def test_run_worker_reports_failed_when_result_unsuccessful(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """P0#3 (handshake audit §5.3): the run worker must NOT report fake success.
+
+    When EngineAdapter.run_artifact returns a RunResult with success=False
+    (engine-level failure that does not raise, e.g. [F-v3-graph-root-missing]),
+    the worker must surface status=failed, not the hardcoded 'success'.
+    """
+    import json
+
+    from app.core import config
+
+    monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
+
+    sha_val = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+    storage_root = tmp_path / "workspaces" / "default"
+    ephemeral_dir = storage_root / "ephemeral_run_skills" / sha_val
+    ephemeral_dir.mkdir(parents=True, exist_ok=True)
+    (ephemeral_dir / "GRAPH.md").write_text("# Skill\n", encoding="utf-8")
+
+    import app.core.adapters.engine as engine_adapter_module
+
+    def fake_run_artifact(_adapter: object, _payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "context": {},
+            "metrics": {},
+            "success": False,
+            "error": "[F-v3-graph-root-missing] boom",
+        }
+
+    monkeypatch.setattr(engine_adapter_module.EngineAdapter, "run_artifact", fake_run_artifact)
+
+    art_ref = {
+        "artifact_id": "demo.skill",
+        "content_hash": f"sha256:{sha_val}",
+        "store": "ephemeral",
+        "manifest_ref": "some_manifest_ref",
+    }
+    run_dir = storage_root / "runs" / "run"
+    queue = _Queue()
+
+    run_manager_module._run_worker_main(
+        "demo.skill",
+        str(run_dir),
+        {},
+        queue,
+        art_ref,
+    )
+
+    status_events = [e for e in queue.items if e.get("type") == "status"]
+    assert status_events, "worker should emit a status event"
+    assert status_events[-1]["status"] == "failed"
+    assert "graph-root-missing" in str(status_events[-1].get("error"))
+
+    from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
+
+    metrics = json.loads(
+        LocalRunArtifactStore(root=storage_root)
+        .get_run_object("run", "metrics.json")
+        .decode("utf-8")
+    )
+    assert metrics["status"] == "failed"
+
+
+def test_run_worker_passes_workspace_root_not_runs_dir(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """P0#2 (handshake audit §5.2): worker passes workspace_dir = the .workspace ROOT.
+
+    Engine writes <workspace_dir>/runs/<thread_id>. Passing run_dir.parent (=.workspace/runs)
+    made it land in .workspace/runs/runs/<id> while Studio reads .workspace/runs/<id> (empty).
+    Mirrors the predict-path contract (test_workspace_dir_contract_red §predict).
+    """
+    from app.core import config
+
+    monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
+
+    sha_val = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+    storage_root = tmp_path / "workspaces" / "default"
+    ephemeral_dir = storage_root / "ephemeral_run_skills" / sha_val
+    ephemeral_dir.mkdir(parents=True, exist_ok=True)
+    (ephemeral_dir / "GRAPH.md").write_text("# Skill\n", encoding="utf-8")
+
+    import app.core.adapters.engine as engine_adapter_module
+
+    calls: list[dict[str, Any]] = []
+
+    def fake_run_artifact(_adapter: object, payload: dict[str, Any]) -> dict[str, Any]:
+        calls.append(payload)
+        return {"context": {}, "metrics": {}, "success": True}
+
+    monkeypatch.setattr(engine_adapter_module.EngineAdapter, "run_artifact", fake_run_artifact)
+
+    art_ref = {
+        "artifact_id": "demo.skill",
+        "content_hash": f"sha256:{sha_val}",
+        "store": "ephemeral",
+        "manifest_ref": "some_manifest_ref",
+    }
+    workspace_root = tmp_path / "skill" / ".workspace"
+    run_dir = workspace_root / "runs" / "run-123"
+    queue = _Queue()
+
+    run_manager_module._run_worker_main(
+        "demo.skill",
+        str(run_dir),
+        {},
+        queue,
+        art_ref,
+    )
+
+    assert calls
+    assert calls[0]["workspace_dir"] == str(workspace_root)
+    assert calls[0]["thread_id"] == "run-123"
 
 
 def test_delta4_lint_skill_path_passes_skill_resolver(

@@ -1,7 +1,7 @@
 ---
 module: 01-contract/02-skill-syntax
 doc: mvp1-alignment
-status: drafted（mvp1 自写=唯一真理；子图 path=绝对路径已写清；GRAPH/LOGIC/SUBGRAPH/AGENT/cognitive/mention/resource(§2.8)/iterate(§2.9)/io 切片(§2.10) 语法已迁入；语法部件全部补齐）
+status: drafted（mvp1 自写=唯一真理；子图 path=相对 skill 根(子图在 skill 内)或绝对、均须落在 skill 根内已写清；GRAPH/LOGIC/SUBGRAPH/AGENT/cognitive/mention/resource(§2.8)/iterate(§2.9)/io 切片(§2.10) 语法已迁入；语法部件全部补齐）
 binds_baseline: ./baseline.md
 aligns_with: ../../00-architecture-overview.md（§2 契约层 A）
 ---
@@ -22,7 +22,7 @@ aligns_with: ../../00-architecture-overview.md（§2 契约层 A）
 | GRAPH.md frontmatter + DAG + 根 io | ✅ 已迁入,见 §2.2 |
 | LOGIC.md(action 寻址 + validator 生命周期) | ✅ 已迁入,见 §2.3；action 契约按 V4 干净契约反转 |
 | SUBGRAPH.md(name/validator/io/path 字段表) | ✅ path 见 §2.1；其余语法见 §2.4 |
-| SKILL.md(Agent frontmatter + body XML + 引用注入) | ✅ 已迁入,见 §2.5；其 `subgraphs[]` 引用按 §2.1 用绝对 path |
+| SKILL.md(Agent frontmatter + body XML + 引用注入) | ✅ 已迁入,见 §2.5；其 `subgraphs[]` 引用按 §2.1 用相对/绝对 path |
 | cognitive 模板(8 槽布局) | ✅ 已迁入,见 §2.6；仅管模板语法,渲染机制见 `02-mechanism/03-assemble` |
 | mention `@type:NAME`(7 类) | ✅ 已迁入,见 §2.7 |
 | reference/example 机制 | ✅ 已写清,见 §2.8 |
@@ -32,27 +32,28 @@ aligns_with: ../../00-architecture-overview.md（§2 契约层 A）
 > ❌ **无 golden 声明**:golden 是 `.workspace` 临时产物,不进 skill 源码语法。
 
 ## 2.1 子图 path 引用契约(mvp1 权威)
-子图 = 一个 phase 委托**另一个完整 graph skill** 执行。引用它用 **path**(直接写子图文件夹的**绝对路径**),无注册表、直接解析。
+子图 = 一个 phase 委托**另一个完整 graph skill** 执行。引用它用 **path**(写子图文件夹路径——子图在引用方 skill 目录内时写**相对 skill 根**的相对路径,绝对路径也接受;无论哪种,解析后都必须落在引用方 skill 根内),无注册表、直接解析。
 
 > **只管子图,不含子代理**:本节是**子图**(SUBGRAPH 节点 + agent `subgraphs[]`,编译期解析的独立 graph skill)。agent 的 **`subagents[]`(子代理)是另一回事**——它与 agent phase 捆绑、运行期由 LLM 委派(生命周期不同),**不在此列、不改 path**(见 §8.3)。
 
 ### 字段
-- **`SUBGRAPH.md` frontmatter `path`**:`path: <子图文件夹的绝对路径>`,指向含 `GRAPH.md` 的子图根目录。
-- **agent `SKILL.md` 的 `subgraphs[].path`**:agent phase 里登记的子图,每项同样写**绝对** `path`。
+- **`SUBGRAPH.md` frontmatter `path`**:`path: <子图文件夹路径>`,指向含 `GRAPH.md` 的子图根目录;子图在 skill 内时写**相对 skill 根**(如 `subgraph/<name>`,推荐),绝对路径也接受。
+- **agent `SKILL.md` 的 `subgraphs[].path`**:agent phase 里登记的子图,每项同样写**相对(skill 根内)或绝对** `path`。
 
-### path = 绝对路径(物理地址)
-path 写**绝对路径**,不是相对路径。原因:
-- **要能"随便放哪里"**:绝对路径是确定的物理地址,子图放磁盘任何位置都能被定位;相对路径会把子图**绑死在某个基准目录、一移动就失效**,做不到"随便放"。
-- **直接解析**:绝对路径本身就是地址,引擎直接打开,**无需任何 id→路径 的注册表查找**。
-- **copilot 可达**:copilot 的工作目录范围**必须包含**这个子图 path,否则 copilot 看不到、也编辑不了该子图。
+### path = 相对(skill 根内)或绝对路径
+path 写**相对 skill 根的相对路径**或**绝对路径**,两种都直接解析、无注册表查找;**空 `path` 非法**。怎么选:
+- **子图在引用方 skill 目录内**(默认落点 `<skill_root>/subgraph/<name>/`,随 skill 一起提交/迁移)——**推荐写相对 skill 根**的路径(如 `subgraph/<name>`)。引擎把它按 skill 根解析成 `<skill_root>/<相对path>`。相对路径才能跨机器跑:绝对路径绑死作者机器的物理地址,换一个 checkout 就失效(这正是 2026-06-21 从"必须绝对"放宽到相对的起因,见 §4)。
+- **绝对路径**:语法上同样接受,引擎按字面解析。但见下条边界——它**仍须落在引用方 skill 根内**,所以绝对路径只是同一 skill 内位置的另一种写法,不能让子图逃出 skill 目录。
+- **边界强制**:无论相对还是绝对,引擎解析出的子图根**必须落在引用方 skill 根目录之内**、且是含 `GRAPH.md` 的目录,否则编译失败(`escapes skill root` / `not a directory` / 缺 `GRAPH.md`)。即子图物理上必须自包含在引用方 skill 内。
+- **copilot 可达**:copilot 的工作目录范围**必须包含**子图最终解析到的物理位置,否则 copilot 看不到、也编辑不了该子图。
 
 ### io(子图节点像普通节点)
 子图节点的 `io.inputs` 从黑板(`WorkflowState.data`,节点间共享状态)按自己声明**切片过滤**取字段,`io.outputs` 合并回黑板——和任何普通节点一样。**不要求**父图与子图的字段集合一一对应。
 
 ### 默认落点
-新建子图默认放在引用方 skill 根目录的 `subgraph/` 文件夹下(`<skill_root>/subgraph/<name>/`),递归自包含——详见 `01-physical-layout` §2.1。但 `path` 字段始终写**绝对路径**,所以子图也可放工作区内任意位置。
+新建子图默认放在引用方 skill 根目录的 `subgraph/` 文件夹下(`<skill_root>/subgraph/<name>/`),递归自包含——详见 `01-physical-layout` §2.1。`path` 推荐写相对 skill 根的相对路径(随 skill 整体迁移仍可解析);引擎强制子图最终落在 skill 根内,因此子图始终自包含、不漂到 skill 目录之外。
 
-> registry / 逻辑 id 寻址是早期已废弃方案,mvp1 不再使用。解析机制(绝对 path → 校验落在 copilot 工作目录边界内 → 子图 root)写在 `02-mechanism/02-resolver`;默认物理落点写在 `01-physical-layout` §2.1。
+> registry / 逻辑 id 寻址是早期已废弃方案,mvp1 不再使用。解析机制(相对 path → 按 skill 根解析;绝对 path → 按字面;两者都校验落在 skill 根边界内 → 子图 root)写在 `02-mechanism/02-resolver`;默认物理落点写在 `01-physical-layout` §2.1。
 
 ## 2.2 GRAPH.md 根语法契约
 `GRAPH.md` 是 graph skill 根节点,声明整图元数据、phase 注册表、body DAG 拓扑和根 io。它只允许出现在 skill 根目录；phase 目录内出现 `GRAPH.md` 归 `physical-layout`/`compile-rules` 判错。
@@ -234,7 +235,7 @@ Action 与 Tool 的边界固定:
 ```yaml
 ---
 name: producer_review
-path: /absolute/path/to/producer_reviewer
+path: subgraph/producer_reviewer    # 相对 skill 根(推荐);绝对路径也接受,但都须落在 skill 根内
 io:
   inputs:
     type: object
@@ -253,7 +254,7 @@ validator: false
 | 字段 | 类型 | 必填 | 默认值 | 语法/校验规则 | 业务作用 |
 |---|---|---|---|---|---|
 | `name` | string | 是 | 无 | 正则 `^[a-z][a-z0-9_-]*$` | Trace 与 Studio 展示名 |
-| `path` | absolute path string | 是 | 无 | 必须是子图 skill 根目录绝对路径；详细寻址见 §2.1 | 指向被调用的 graph skill |
+| `path` | path string(相对 skill 根 或 绝对) | 是 | 无 | 非空;相对按 skill 根解析,绝对按字面;解析后须落在 skill 根内且含 `GRAPH.md`;详细寻址见 §2.1 | 指向被调用的 graph skill |
 | `validator` | boolean | 否 | `false` | 必须是 YAML boolean,不能用 `"true"` 字符串 | 声明是否对本 subgraph phase 的候选输出启用后置校验 |
 | `io.inputs` | JSON Schema object | 是 | 无 | 顶层 `type: object`；含 `properties`；`required` 只能引用已有 properties | 声明父图从 blackboard 切给子图调用的字段边界 |
 | `io.outputs` | JSON Schema object | 是 | 无 | 同 `io.inputs`；子图返回父图的字段必须是 `properties` 子集 | 声明子图完成后允许合并回父图 blackboard 的字段边界 |
@@ -271,7 +272,7 @@ SUBGRAPH phase 的 `io` 与普通节点一致,是 blackboard 的切片/回写边
 - 父图 `SUBGRAPH.md io` 与子图 `GRAPH.md io` **不要求字段集合 1:1 相等**,也不要求 required 集合或同名 schema 结构完全一致。
 - 若子图运行需要的 required 字段在父图切片中不存在,由 StateMapper/运行期 state mapping 报错；不在语法层强制父子镜像。
 
-这条是 mvp1 对旧 `target_skill + 父子 io 1:1` 模型的反转:子图节点像普通节点,只通过 blackboard slice/merge 接入。
+这条是 mvp1 对旧 registry-id + 父子 io 1:1 模型的反转:子图节点像普通节点,只通过 blackboard slice/merge 接入。
 
 ## 2.5 AGENT `SKILL.md` 语法契约
 Agent `SKILL.md` 是进入 LLM ReAct 循环的 phase 节点。节点类型由物理文件名 `SKILL.md` 推导,Loader 注入内部 `mode="agent"`；作者不得在 frontmatter 写 `mode:`。frontmatter 只放框架装配配置,业务 prompt 内容放在 body XML。未知字段编译期 FATAL；错误码全集不在本文重复,见 [`03-compile-rules` §4 agent domain](../03-compile-rules/mvp1-alignment.md#agent-domain)。
@@ -300,7 +301,7 @@ subagents:
     description: Review story production quality
 subgraphs:
   - name: review_graph
-    path: /absolute/path/to/review_graph
+    path: subgraph/review_graph    # 相对 skill 根(推荐);绝对也可,均须落在 skill 根内
     description: Run the structured review graph
 references:
   - id: R1
@@ -324,7 +325,7 @@ validator: false
 | `io.outputs` | JSON Schema object | 是 | 无 | 顶层 `type: object`;含 `properties`;finish_task 输出必须满足该 schema | finish_task 输出强校验 schema |
 | `tools` | list[string] | 否 | `[]` | 每项正则 `^[a-z][a-z0-9_]*$`;必须是 builtin 或 tool registry 已注册名 | 暴露给 Agent ReAct 循环主动调用 |
 | `subagents` | list[object] | 否 | `[]` | 每项含 `name`、`target_skill`、`description`;`name` 供 `@subagent:NAME` 引用 | 注册可委托的 Agent 子技能 |
-| `subgraphs` | list[object] | 否 | `[]` | 每项含 `name`、`path`、`description`;`path` 必须是子图 skill 根目录绝对路径,见 §2.1 | 注册 Agent 可引用或说明的子图资产 |
+| `subgraphs` | list[object] | 否 | `[]` | 每项含 `name`、`path`、`description`;`path` 相对 skill 根或绝对、均须落在 skill 根内,见 §2.1 | 注册 Agent 可引用或说明的子图资产 |
 | `references` | list[object] | 否 | `[]` | 每项含 `id`、`path`、`summary`;`id` 正则 `^[A-Z][A-Za-z0-9_-]*$` | 装配期预读 + runtime `read_reference` 索引 |
 | `examples` | list[object] | 否 | `[]` | 每项含 `id`、`path`、`summary`;只注册 document 扩展案例库 | runtime `read_example` 索引 |
 | `max_iterations` | integer | 否 | `10` | `1 <= max_iterations <= 50` | 限制 ReAct 循环最大轮数,防止失控调用 |
@@ -332,7 +333,7 @@ validator: false
 ### 2.5.2 `subagents[]` / `subgraphs[]` 子项字段
 `subagents[]` 与 `subgraphs[]` 不是同一类生命周期:
 - `subagents[]` 是 Agent phase 内层可委派的子 Agent,保持 `target_skill` 逻辑 skill id；它与 agent phase 捆绑,不按子图 path 反转。
-- `subgraphs[]` 是 Agent 可引用的子图资产,按 §2.1 使用绝对 `path`,不再使用 mvp0 的 `target_skill`。
+- `subgraphs[]` 是 Agent 可引用的子图资产,按 §2.1 使用相对(skill 根内)或绝对 `path`,不再使用 mvp0 的 registry-id 寻址。
 
 `subagents[]` 子项:
 
@@ -347,7 +348,7 @@ validator: false
 | 字段 | 类型 | 必填 | 默认值 | 语法/校验规则 | 业务作用 |
 |---|---|---|---|---|---|
 | `name` | string | 是 | 无 | 正则 `^[a-z][a-z0-9_-]*$`;同列表内唯一 | Body 中 `@subgraph:NAME` 的本地引用名 |
-| `path` | absolute path string | 是 | 无 | 必须是子图 skill 根目录绝对路径;解析边界见 §2.1 / `02-resolver` | 指向可引用或说明的子图资产 |
+| `path` | path string(相对 skill 根 或 绝对) | 是 | 无 | 非空;相对按 skill 根解析,绝对按字面;解析后须落在 skill 根内;边界见 §2.1 / `02-resolver` | 指向可引用或说明的子图资产 |
 | `description` | string | 是 | 无 | 非空 | 给 LLM 和 Studio 自动补全展示用途 |
 
 ### 2.5.3 Body XML 扁平化容器
@@ -396,7 +397,7 @@ Body 中出现的 `@type:NAME` 必须能在对应静态域内解析。Loader 不
 | `@reference:R1` | frontmatter `references[].id` | id 存在;path 在 skill 根内或合法相对路径 |
 | `@example:E1` | body `<example id>` + frontmatter document `examples[].id` | id 存在;document example path/summary 合法 |
 | `@subagent:producer_reviewer` | frontmatter `subagents[].name` | name 存在;`target_skill` 字段合法 |
-| `@subgraph:review_graph` | frontmatter `subgraphs[].name` | name 存在;`path` 是合法绝对路径且子图 root 可解析 |
+| `@subgraph:review_graph` | frontmatter `subgraphs[].name` | name 存在;`path` 合法(相对 skill 根或绝对)且子图 root 落在 skill 根内可解析 |
 | `@protocol:P1` | 本 body `<protocol id="P1">` | id 存在 |
 | `@step:S1` | 本 body `<step id="S1">` | id 存在 |
 | `@tool:store_segments` | frontmatter `tools[]` + framework builtin | tool 名存在 |
@@ -534,7 +535,7 @@ Loader 必须按 mention 类型查对应可达域,不允许跨域 fallback。
 |---|---|---|---|
 | `subagent` | `frontmatter.subagents[].name` | Agent SKILL.md frontmatter | `target_skill` 字段合法 |
 | `tool` | `frontmatter.tools[]` + framework builtin tools | Agent SKILL.md frontmatter + Engine builtin registry | tool 已注册且可暴露给当前 `llm_role` |
-| `subgraph` | `frontmatter.subgraphs[].name` | Agent SKILL.md frontmatter | `path` 是绝对路径,并按 §2.1 / `02-resolver` 可解析 |
+| `subgraph` | `frontmatter.subgraphs[].name` | Agent SKILL.md frontmatter | `path` 相对 skill 根或绝对、落在 skill 根内,并按 §2.1 / `02-resolver` 可解析 |
 | `protocol` | body `<protocol id="...">` | 当前 SKILL.md body AST | id 唯一 |
 | `step` | body `<step id="...">` | 当前 SKILL.md body AST | id 唯一 |
 | `reference` | `frontmatter.references[].id` | Agent SKILL.md frontmatter | path 合法;summary 非空 |
@@ -640,7 +641,7 @@ loop 的累积变量由作者**显式声明**、引擎不猜:
 - `io.outputs`:声明本节点允许**回写**黑板的字段边界——output key 必须 ⊂ `io.outputs.properties`,越界报同码。
 
 ### 2.10.2 子图 io 放宽(E1,目标)
-SUBGRAPH 节点 io **不要求父子字段 1:1**(详见 §2.4.3):`io.inputs` 从父图黑板切片喂子图、`io.outputs` 合并回父图,像普通节点;退役旧 `target_skill + 父子 io 1:1` 模型(执行侧删 `loader.py:528` inputs 1:1 强校,归 graph-exec E1)。
+SUBGRAPH 节点 io **不要求父子字段 1:1**(详见 §2.4.3):`io.inputs` 从父图黑板切片喂子图、`io.outputs` 合并回父图,像普通节点;退役旧 registry-id + 父子 io 1:1 模型(执行侧删 `loader.py:528` inputs 1:1 强校,归 graph-exec E1)。
 
 ### 2.10.3 文件导入→黑板(E2,目标·新能力)
 节点 `io.inputs` 可声明**"从文件导入 → 注入黑板字段"**:跑到该节点才 **lazy 注入**(非图启动时一次性),引擎读路径写黑板再切片(执行落 `_wrap_phase_runtime_node` 前置步,归 graph-exec E2;发 `InputFileInjectedEvent` 归 `observability`)。
@@ -654,26 +655,27 @@ SUBGRAPH 节点 io **不要求父子字段 1:1**(详见 §2.4.3):`io.inputs` 从
 skill 源码(语法)→ AST(`GraphManifest` / `PhaseAST` / `Phase` 等,归 `data-contracts`)。
 - **GRAPH**:AST 持根 metadata、inline `io.inputs/outputs`、phase registry；body DAG 产出拓扑顺序与 output phase 集合。
 - **LOGIC**:AST 持 `io`、`actions`、`validator`；运行层按 `def <action_name>(inputs)->dict` 调度 action 链。
-- **SUBGRAPH**:AST 持 `path`(绝对路径)、`io`、`validator`；下游 `02-resolver` 按绝对 path 直接解析(无 registry)。
+- **SUBGRAPH**:AST 持 `path`(相对 skill 根 或 绝对)、`io`、`validator`；下游 `02-resolver` 相对按 skill 根、绝对按字面解析(无 registry),并校验落在 skill 根内。
 - **SKILL/AGENT**:AST 持 `role`、`goal`、`steps`、`protocols`、`examples_inline`、`io`、`tools`、`subagents`、`subgraphs`、`references`、`examples`、`max_iterations`、`validator`、`llm_role`；body XML 只提供 5 类业务块。
-- **SKILL agent `subgraphs[]`**:引用项持绝对 `path`;`subagents[]` 仍持 `target_skill`,二者生命周期不同。
+- **SKILL agent `subgraphs[]`**:引用项持 `path`(相对 skill 根 或 绝对,落在 skill 根内);`subagents[]` 仍持 `target_skill`,二者生命周期不同。
 - **cognitive 模板语法**:Agent AST + resources + `io.outputs` 填充固定 8 槽模板；渲染机制归 `02-mechanism/03-assemble`。
 - **mention**:`@type:NAME` 只允许 7 类,按静态 registry 做可达性校验。
 - **iterate**:节点 frontmatter `batch:`(现状)/ 目标统一 `iterate:` → `PhaseAST.batch`(`BatchSpec`,归 `data-contracts`);声明语法本节 §2.9,执行机制归 `04-run-outer/02-iterate`。
 
 ## 4. 设计决策基础(用户原话)
 > 子图 path(PM 2026-06-02):"subgraph.md里面写path, 直接解析就好了, 随便放哪里。唯一要注意的是copilot 的工作目录范围要把subgraph的子图path 加进去。还有一个是注册在agent phase里的子图,也一样写path"
-> path 必须绝对路径(PM 2026-06-05):"path写绝对路径"——理由即上条"随便放哪里":相对路径绑死基准目录、移动即失效,做不到随便放。
+> path 必须绝对路径(PM 2026-06-05,**已于 2026-06-21 放宽,见下条**):"path写绝对路径"——理由即上条"随便放哪里":相对路径绑死基准目录、移动即失效,做不到随便放。
+> path 放宽为"相对(skill 根内)/绝对"(2026-06-21,commit `00daacc6`):实践中子图就放在引用方 skill 的 `subgraph/` 下、随 skill 一起提交,写绝对路径反而绑死作者机器、换 checkout 即失效(且 broke CI)。故 loader 改为:相对路径相对 **skill 根**解析、绝对路径按字面,**两者都强制解析结果落在 skill 根边界内**(子图必须自包含在引用方 skill 内,`escapes skill root` 即编译失败)。"随便放哪里"由"磁盘任意绝对位置"收窄为"skill 根内任意位置 + 相对/绝对两种写法",换来跨机器可移植。
 
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
 | SS1 | **唯一真理在 mvp1**,旧 mvp0 spec 弃用、不作 SSOT 引用;真空部件报警、必须在 mvp1 补 | mvp0 要废弃;靠引用旧文档=假装写了,会随 mvp0 删除而真空 |
-| SS2 | 子图引用用 **`path`(绝对路径)**,无注册表、直接解析 | path 即物理地址、能随便放、直接解析(PM 2026-06-02 / 06-05) |
+| SS2 | 子图引用用 **`path`(相对 skill 根 或 绝对,均须落在 skill 根内)**,无注册表、直接解析 | 直接解析、无 registry;相对路径让子图随 skill 整体迁移仍可解析、跨机器可移植(PM 2026-06-02 / 06-05;06-21 放宽相对,commit `00daacc6`) |
 | SS3 | 子图 io 像普通节点(黑板切片过滤),不强制父子 1:1 | 严格 1:1 太死;统一走黑板状态机过滤 |
 | SS4 | GRAPH 根 IO 只允许 inline frontmatter,物理 IO 文件退役 | skill 语法自包含,减少物理文件漂移 |
 | SS5 | LOGIC action 采用 V4 干净契约:`def <action_name>(inputs)->dict`、只读 inputs、纯返回 | 去掉 Context mutation 和编排副作用,让 action 可测、可序列化、可 checkpoint |
-| SS6 | AGENT `subagents[]` 保持 `target_skill`;AGENT `subgraphs[]` 改为绝对 `path` | 子代理是运行期 Agent 委派,子图是编译期 graph skill 寻址,生命周期不同 |
+| SS6 | AGENT `subagents[]` 保持 `target_skill`;AGENT `subgraphs[]` 用 `path`(相对 skill 根 或 绝对) | 子代理是运行期 Agent 委派,子图是编译期 graph skill 寻址,生命周期不同 |
 | SS7 | cognitive 只在本文定义模板语法与 8 槽结构,渲染机制归 `02-mechanism/03-assemble` | 契约层只管 skill 写法,装配期机制不在 syntax 内重复 |
 | SS8 | mention 固定 7 类 `@type:NAME`,静态 registry 可达性失败即编译失败 | 引用必须在编译期可验证,不能留给 LLM 猜 |
 | SS9 | iterate 声明统一为 `iterate:{mode,over,item_var,range,concurrency,accumulate}`(现状 `batch:` 是其 `mode=batch` 子集) | 一套声明覆盖 batch/loop/图级;现状只 batch,loop/range/图级/统一块归 kiro,执行归 `02-iterate` |
@@ -682,10 +684,10 @@ skill 源码(语法)→ AST(`GraphManifest` / `PhaseAST` / `Phase` 等,归 `data
 1. **GRAPH**:frontmatter `phases`、body `<phase>`、物理 `phases/<name>/` 三者不一致会失败；inline `io.inputs/outputs` 合法；旧物理 IO/ref 字段失败。
 2. **LOGIC**:frontmatter `actions` 与 body `<action>` 顺序一致；action 文件只能按 action 名寻址；`def <action_name>(inputs)->dict` 纯返回；Context mutation、`run_skill`、FS/sys.path/import 越界失败。
 3. **LOGIC validator**:`validator: true` 缺 `validator.py` 或无 `validate(output, state_slice, **kwargs)` 失败；validator 抛错/返回非法字段时不回写。
-4. **子图引用**:`SUBGRAPH.md` / agent `subgraphs[]` 解析的是**绝对 `path`** 字段(不是逻辑 id);父子 io 不再做 1:1 相等校验。
-5. path 不在 copilot 工作目录边界内 → 解析失败报警(归 `02-resolver`)。
+4. **子图引用**:`SUBGRAPH.md` / agent `subgraphs[]` 解析的是 **`path`** 字段(相对 skill 根或绝对,不是逻辑 id);空 `path` 在 AST 层即拒;父子 io 不再做 1:1 相等校验。
+5. path 解析后超出引用方 **skill 根**(`escapes skill root`)/ 非目录 / 缺 `GRAPH.md` → 编译失败;copilot 工作目录还须覆盖子图物理位置(归 `02-resolver`)。
 6. **AGENT frontmatter/body**:未知字段失败；`io.inputs/outputs` 必填且合法；`max_iterations` 限 1..50；body 只允许 5 类顶层标签；缺/重复 `<role>` 或 `<goal>` 失败；`<step>` / `<protocol>` / `<example>` id 非法或重复失败。
-7. **AGENT registries**:`subagents[].target_skill` 仍按子代理机制校验；`subgraphs[].path` 按绝对 path 校验；references/examples path/summary 合法；frontmatter 与 body mention 可达域一致。
+7. **AGENT registries**:`subagents[].target_skill` 仍按子代理机制校验；`subgraphs[].path` 按相对(skill 根)/绝对、落在 skill 根内校验；references/examples path/summary 合法；frontmatter 与 body mention 可达域一致。
 8. **cognitive 模板语法**:8 个固定容器存在；`<exit_contract>` 只由模板 hardcode；`{output_schema}` 来自当前 Agent phase `io.outputs`。
 9. **mention**:7 类 regex 命中；未知 type、残缺 token、目标不存在、大小写不一致均失败；未使用注册项只 WARN。
 10. **iterate**:`iterate.mode` ∈ {batch,loop};`over` 所指非 list → `[F-v3-iterate-over-not-list]`；`mode=loop` 缺 `item_var`/`accumulate.var` 对应 `io.inputs` 字段 → `[F-v3-iterate-accumulate-fields-missing]`；`accumulate.merge` ∈ {append,extend,merge,replace}。
@@ -699,4 +701,4 @@ engine 全权(子图语法是 engine 主决策);skill 源码被 studio 编辑器
 3. **subagents[] 不改 path(PM 2026-06-05 拍)**:子代理(`subagents[]`)与 **agent phase 捆绑**、是**运行期由 LLM 委派**的机制,跟子图(编译期解析、靠物理 path 引用的独立 skill)**不是一回事**(生命周期不同,断层#7)——引用方式**维持 `target_skill`,不改 path**。
 
 ## 交叉引用(链接, 不复制)
-00-architecture-overview §2 · `01-physical-layout`(子图默认落点)· `compile-rules` · `02-mechanism/02-resolver`(绝对 path 解析)· `02-mechanism/03-assemble`(cognitive 模板渲染)· `02-mechanism/05-run-inner/04-tools`(Agent tools)· `04-run-outer/02-iterate`
+00-architecture-overview §2 · `01-physical-layout`(子图默认落点)· `compile-rules` · `02-mechanism/02-resolver`(相对/绝对 path 解析)· `02-mechanism/03-assemble`(cognitive 模板渲染)· `02-mechanism/05-run-inner/04-tools`(Agent tools)· `04-run-outer/02-iterate`

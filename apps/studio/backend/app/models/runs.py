@@ -6,8 +6,8 @@ from datetime import datetime
 from typing import Any, Literal
 
 from graph_agent import PathDiff, PhaseRecord
-from graph_agent.callbacks.events import CallbackEvent
-from pydantic import BaseModel, ConfigDict
+from graph_agent.core.event_contracts import EventEnvelope
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class TokensMetrics(BaseModel):
@@ -17,6 +17,27 @@ class TokensMetrics(BaseModel):
     output_tokens: int
     total_tokens: int
     cost_estimate: float | None = None
+    # ⑧a: engine run wall-clock duration. Declared explicitly (keeping extra="forbid"
+    # for a controllable surface) so the engine's wall_time_sec survives the Studio
+    # projection and reaches the frontend run history instead of being stripped.
+    wall_time_sec: float | None = None
+
+
+class RunCandidate(BaseModel):
+    """One model/role candidate in a P8 model-compare run (n4-trace#23).
+
+    ``role_name`` references a role that already exists in the active
+    ``llm_roles.yaml`` -- the candidate runs the same compiled artifact but
+    resolves its agent node(s) through this role. ``target_role`` optionally
+    narrows the override to a single role the skill's phases bind to; when
+    omitted, the candidate role overrides every graph_agent role.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: str = Field(..., min_length=1)
+    role_name: str = Field(..., min_length=1)
+    target_role: str | None = None
 
 
 class RunRequest(BaseModel):
@@ -25,6 +46,10 @@ class RunRequest(BaseModel):
     input_data: dict[str, Any] | None = None
     golden_id: str | None = None
     paste_json: str | None = None
+    # n4-trace#23: when present, fan the run out across candidate roles. Each
+    # candidate spawns its own worker (same artifact/inputs) tagged with a shared
+    # compare-group id, so the frontend Trace can tab between per-model results.
+    candidates: list[RunCandidate] | None = None
 
 
 class PredictRunRequest(BaseModel):
@@ -58,7 +83,15 @@ class RunMetadata(BaseModel):
     started_at: datetime
     metrics: TokensMetrics | None = None
     input_summary: str | None = None
-    git_status: Literal["committed", "locked", "failed"] | None = None
+    git_status: Literal["committed", "locked", "failed", "no_git"] | None = None
+    artifact_ref: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
+    source_map_ref: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    execution_fingerprint: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    # n4-trace#23: model-compare grouping. Set only on compare-fanned runs so the
+    # frontend can group/tab the per-candidate results; omitted on ordinary runs.
+    compare_group_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    candidate_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    candidate_role_name: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class RunListResponse(BaseModel):
@@ -66,6 +99,34 @@ class RunListResponse(BaseModel):
 
     runs: list[RunMetadata]
     total: int
+
+
+class CompareCandidateRun(BaseModel):
+    """One candidate's spawned run within a model-compare group (n4-trace#23)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: str
+    role_name: str
+    metadata: RunMetadata
+
+
+class CompareRunResponse(BaseModel):
+    """POST response: the compare group and the per-candidate runs it spawned."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    compare_group_id: str
+    runs: list[CompareCandidateRun]
+
+
+class CompareRunGroupResponse(BaseModel):
+    """GET response: per-candidate runs for one compare group, for Trace tabs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    compare_group_id: str
+    runs: list[CompareCandidateRun]
 
 
 class BatchRunResponse(BaseModel):
@@ -101,7 +162,7 @@ class RunDetail(BaseModel):
 
     metadata: RunMetadata
     input_data: dict[str, Any] | None = None
-    events: list[CallbackEvent]
+    events: list[EventEnvelope]
     final_context: dict[str, Any] | None = None
     artifacts: list[str] | None = None
 
@@ -109,5 +170,52 @@ class RunDetail(BaseModel):
 class ResumeReq(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    checkpoint_id: str | None = None
+    checkpoint_ns: str | None = None
+    resume_from_node_id: str | None = None
+    resume_to_node_id: str | None = None
     context_overrides: dict[str, Any] | None = None
     human_input: str | None = None
+    human_response: dict[str, Any] | None = None
+
+
+class ResumeValidityReq(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    checkpoint_id: str | None = None
+    checkpoint_ns: str | None = None
+    resume_from_node_id: str | None = None
+    resume_to_node_id: str | None = None
+
+
+class ResumeValidityResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str
+    resume_allowed: bool
+    reason: Literal[
+        "ok",
+        "dirty_upstream",
+        "checkpoint.not_found",
+        "checkpoint.invalid",
+        "state.not_found",
+        "artifact.invalid_ref",
+        "artifact.identity_mismatch",
+        "compile_failed",
+    ]
+    checkpoint_id: str | None = None
+    checkpoint_ns: str | None = None
+    resume_from_node_id: str | None = None
+    resume_to_node_id: str | None = None
+    dirty_fields: list[Literal["content_hash", "execution_fingerprint"]] = Field(default_factory=list)
+    # n5-node#3 (dirty-downstream-graying): per-node dirty slice. When the
+    # whole-skill compare is dirty and resume_from_node_id is set, the Studio
+    # shell projects which downstream phases the resume node can dirty so the
+    # frontend grays exactly those. Dependency-graph based (the engine has no
+    # per-node hash) -- empty on the clean / no-resume-node paths.
+    dirty_node_ids: list[str] = Field(default_factory=list)
+    affected_downstream: list[str] = Field(default_factory=list)
+    snapshot_content_hash: str | None = None
+    current_content_hash: str | None = None
+    snapshot_execution_fingerprint: str | None = None
+    current_execution_fingerprint: str | None = None

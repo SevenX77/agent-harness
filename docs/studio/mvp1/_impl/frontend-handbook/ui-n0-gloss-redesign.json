@@ -1,0 +1,420 @@
+{
+  "shell": [
+    {
+      "id": "settings-overlay",
+      "term": "Settings 浮层（settings overlay）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "Settings 不是独立路由页面，而是盖在工作区画布上的一层面板：左侧导航栏、右侧 Copilot 都还在原地，只有中间画布被它替换。它也不是带遮罩、带焦点锁定的真正弹窗，所以左右两栏在 Settings 打开时仍能点。本质是壳层维护的一个「Settings 是否打开」开关 + 中间区按这个开关二选一渲染。",
+      "detail": [["定义层", "① 前端（壳层组件 + open 开关）"], ["复用范围", "壳层级容器，承载 General / API Keys / Roles / Copilot 四个配置区"]]
+    },
+    {
+      "id": "ws-events",
+      "term": "实时刷新长连接（/ws/events WebSocket）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "Settings 打开时前端建立的一条 WebSocket 长连接，专门接收 ③a Studio 后端推来的「数据变了」通知（凭证变了 / 角色变了）。凭证刷新和角色刷新两件事共用这同一条连接，是壳层唯一真正被多处复用的前端抽象。连接本身是前端基础设施；它消费的事件由 ③a 的 WS 端点（见 ws-events-api）产生。",
+      "detail": [["定义层", "① 前端（前端建连 + 监听）"], ["复用范围", "凭证刷新（#5）与角色刷新（#6）共用同一条连接"]]
+    },
+    {
+      "id": "save-badge",
+      "term": "保存状态徽章（SaveStatusBadge）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "一个随保存进度变色的小标签（待保存 Pending / 保存中 Saving / 已保存 Saved / 失败 Failed），让用户确认「即填即存」真的生效——Settings 全程没有独立 Save 按钮，改完字段过一会儿自动存。设计目标是四个配置区共用同一个组件；现状是各区各画各的、有几份近乎重复实现待合并。",
+      "detail": [["定义层", "① 前端（纯展示组件，吃统一 SaveStatus 类型）"], ["复用范围", "目标：General/API Keys/Roles/Copilot 四区共用；现状各区各实现待合并"]]
+    },
+    {
+      "id": "error-boundary",
+      "term": "错误兜底卡（error boundary）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "React 错误边界：某个配置区渲染时崩溃，不让整页变白屏，而是当场换成一张「出错了 + 重试」的卡片，点重试就重新渲染那一块。现状只罩住了 Roles 和 Copilot 两个区，General 和 API Keys 还没罩。",
+      "detail": [["定义层", "① 前端（React error boundary 组件）"], ["复用范围", "现状仅罩 Roles / Copilot；设计要求任一区崩溃都有兜底"]]
+    },
+    {
+      "id": "credentials-file",
+      "term": "llm_credentials.json（凭证文件）",
+      "category": "数据文件",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "保存所有 provider API key + endpoint/route/状态/已发现模型的本地 JSON 文件，权限 0600（仅本人可读写），位于 ~/Library/Application Support/AgentStudio/llm/ 子目录下。每次写都是原子写（先写临时文件再 os.replace 替换，避免写一半被读到）。外部进程改动它会触发「凭证变了」通知。它的 schema 由 ③b gateway 库定义、数据归 ③b；文件落在哪个目录由 ③a 的 llm_paths（credentials_path）决定；实际读写由 ③a Studio 后端经预留 user_id 的存储缝（load/save_credentials）执行。",
+      "detail": [["Schema 定义", "③b gateway 库"], ["文件路径定义", "③a（llm_paths.credentials_path）"], ["读写", "③a Studio backend 经 storage seam（预留 user_id）"], ["文件归属", "③b gateway-owned 数据"]]
+    },
+    {
+      "id": "roles-file",
+      "term": "llm_roles.yaml（角色文件）",
+      "category": "数据文件",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "保存所有 LLM 角色（含 graph-agent 角色、copilot 角色、模型束）配置的本地 YAML 文件，同样在 AgentStudio 的 llm/ 子目录下。每次保存都原子写。外部进程改动它会触发「角色变了」通知。schema 由 ③b gateway 库定义、数据归 ③b；路径由 ③a 的 llm_paths（roles_path）决定；读写由 ③a Studio 后端经存储缝执行。",
+      "detail": [["Schema 定义", "③b gateway 库"], ["文件路径定义", "③a（llm_paths.roles_path）"], ["读写", "③a Studio backend 经 storage seam（预留 user_id）"], ["文件归属", "③b gateway-owned 数据"]]
+    },
+    {
+      "id": "ws-events-api",
+      "term": "WS 事件端点 /ws/events（registry_changed / roles_changed）",
+      "category": "接口",
+      "owner": "③a Studio",
+      "explain": "③a Studio 后端的 WebSocket 端点：文件监听器监到凭证 / 角色文件被外部进程改动后，向前端推 registry_changed（凭证变了）或 roles_changed（角色变了）事件。事件只通知「变了」、不带数据本身，前端收到后自己重拉。Studio 自己写盘时会先在监听器登记「这次是本进程写的」去抖，避免把自己的写当外部变更自激。",
+      "detail": [["契约 / DTO", "WS 事件名 registry_changed / roles_changed（无 payload，仅信号）"], ["谁提供", "③a Studio（WS 端点 + 文件监听器广播）"]]
+    },
+    {
+      "id": "registry-get",
+      "term": "拉凭证清单 GET /llm/registry",
+      "category": "接口",
+      "owner": "③a Studio",
+      "explain": "前端收到「凭证变了」通知后，用来重新把整份凭证清单拉回来刷新视图的读端点。返回的是打码快照（api_key 一律 redacted），key 真值另走单条 secret 端点逐个换回。端点本身由 ③a 提供，返回的数据投影自 ③b-owned 的 llm_credentials.json。",
+      "detail": [["契约 / DTO", "RegistrySnapshot（endpoint/route/状态/已发现模型，api_key redacted）"], ["谁提供", "③a Studio"]]
+    }
+  ],
+  "general": [
+    {
+      "id": "instant-save",
+      "term": "即填即存（instant-save / 自动保存）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "General 页没有「保存」按钮。改完任意输入框后，前端等 300 毫秒防抖（避免边打字边反复存）再自动把整页设置写盘；标题右侧徽章实时显示状态：等待中 / 保存中 / 已保存 / 失败。如果上一次还没存完又改了，会把新改动排队、等上一次完成再补发，保证不丢不乱。这是一套纯前端的编排机制（防抖 + 排队 + 触发 PUT），不是后端能力——被本页多个原子（#10/#11/#12/#13/#14/#15）共同复用。",
+      "detail": [["定义层", "① 前端（防抖 + 排队 + 触发保存的前端逻辑）"], ["复用范围", "本页 #10 User ID、#11 Gitea 地址、#12/#13/#14 技能目录、#15 保存机制本体"]]
+    },
+    {
+      "id": "app-settings-file",
+      "term": "app_settings.json（全局设置文件）",
+      "category": "数据文件",
+      "owner": "③a Studio",
+      "explain": "Studio 的一个本地配置文件，存这三样东西：提交署名用的 User ID、用户自建的 Gitea 地址、新建技能默认落地的文件夹。它放在 AgentStudio 配置目录的根部（macOS 在 ~/Library/Application Support/AgentStudio/，Linux 在 ~/.local/share/AgentStudio/，Windows 在 %APPDATA%/AgentStudio/）。它是这套数据文件里的特例：schema、路径、读写全部归 ③a，gateway 库完全不参与——因为存的是 Studio 自己的产品级配置（署名/发布地址/技能目录），不是 gateway 可复用的模型数据。",
+      "detail": [["Schema 定义", "③a Studio（GlobalSettings 模型）"], ["文件路径定义", "③a（core/paths + metadata_local）"], ["读写", "③a Studio backend"], ["文件归属", "纯 ③a（gateway 库不参与）"]]
+    },
+    {
+      "id": "studio-backend",
+      "term": "Studio 本地后端（③a Studio 适配层）",
+      "category": "后端能力",
+      "owner": "③a Studio",
+      "explain": "Studio 自己的本机 Python 服务（apps/studio/backend），负责读写本机配置和文件、并对前端提供 /api/* 端点。它做的是「应用加工」：UI/产品策略/调用方式/存储介质这四件 gateway 感知不到的事。澄清一个常见误解：它和 ③b gateway 不是「本地 vs 云端」两套东西——gateway 是一个进程内的 Python 库、本身也跑在本机、不是云服务；General 这一页存的是纯本地的 app_settings.json，确实完全不经过 gateway，但原因是「这页存的是 Studio 自己的产品配置」，不是「gateway 在云端」。",
+      "detail": [["定义层", "③a Studio（apps/studio/backend 本机服务 + /api/* 适配壳）"], ["复用范围", "本页所有保存动作都由它处理；其它页它也是前端唯一对接的 HTTP 入口"]]
+    },
+    {
+      "id": "settings-put-api",
+      "term": "保存设置接口 PUT /api/settings",
+      "category": "接口",
+      "owner": "③a Studio",
+      "explain": "保存 General 设置的唯一接口，「整页替换」式：每次都把 User ID、Gitea 地址、技能目录三个字段当成一整份一起写盘，没有「只改某一个字段」的细粒度更新。写盘用原子写（先写临时文件再瞬间替换正式文件），不会写一半损坏；写失败报 500。落盘目标是 app_settings.json（纯 ③a，不碰 gateway）。",
+      "detail": [["契约 / DTO", "GlobalSettings（user_id + gitea_host + skills_dir 三字段整份替换；无字段级 patch）"], ["谁提供", "③a Studio"]]
+    },
+    {
+      "id": "native-folder-picker",
+      "term": "原生文件夹选择器（native folder picker，桌面版）",
+      "category": "后端能力",
+      "owner": "跨层（② Rust 桌面命令 select_directory）",
+      "explain": "点「选择」按钮时弹出的、操作系统自带的那个文件夹挑选窗口。它由桌面端的 ② Rust 层（native-fs）通过 select_directory 命令直接调系统能力实现，不走 ③a 的 HTTP 网络后端。这是整个设置页里唯一一个调用系统原生能力的操作；浏览器（非桌面）模式下用不了，点了只提示「仅桌面端可用」。选好的路径回填输入框后，才由 PUT /api/settings 持久化。",
+      "detail": [["定义层", "② Rust 桌面层（select_directory 命令，非 HTTP）"], ["复用范围", "本页 #13 选默认技能目录；设置页唯一走系统原生能力的操作"]]
+    },
+    {
+      "id": "runtime-default-skills-dir",
+      "term": "技能目录的默认值（runtime default skills dir）",
+      "category": "领域概念",
+      "owner": "③a Studio",
+      "explain": "技能默认文件夹留空时系统兜底用的派生路径，即配置目录下的 Skills 子文件夹（如 AgentStudio/Skills）。「重置」按钮就是把目录还原成这个值；保存时后端若发现字段为空也会替换成它。它是一个由 ③a 在运行时算出来的派生值，不是用户配置项本身。",
+      "detail": [["澄清", "由 ③a 运行时派生（配置目录 + /Skills），非持久化字段"], ["用途", "#12 留空兜底、#14 重置目标值"]]
+    }
+  ],
+  "apikeys": [
+    {
+      "id": "endpoint",
+      "term": "endpoint（连接点）",
+      "category": "领域概念",
+      "owner": "跨层（概念归 ③b；录入归 ① 前端；存储归 ③a）",
+      "explain": "一个「URL × 协议」的组合 = 一个 endpoint，是系统真正去连模型的最小单位。同一个 provider（同一把 key）可挂多个 URL，每个 URL 探出哪个协议通就和那个协议配成一个 endpoint；一个 URL 同时通两种协议就建两个 endpoint。这是 gateway 的核心抽象：③b gateway 库只认平铺的标准 endpoint 列表，不认识「卡片」（卡片只是前端录入外壳）。「多 URL × 多协议 → 多 endpoint」的拆分 + 协议匹配 + 生成 canonical endpoint_id 按设计归 ③b；前端只录入；③a 只 upsert + 存储。",
+      "detail": [["澄清", "最小连接单位 = URL × 协议；gateway 只认平铺 endpoint list、不认卡片"], ["拆分/canonical id 归属", "③b gateway（设计；现码部分在 ③a 待下沉）"]]
+    },
+    {
+      "id": "provider",
+      "term": "provider（厂商 / 供应商）",
+      "category": "领域概念",
+      "owner": "跨层（概念归 ③b；分区渲染归 ① 前端）",
+      "explain": "一家模型供应商，对应页面上一张卡。分两类：official（官方，5 家钉死：anthropic / openai / gemini / deepseek / ark）和 third-party（第三方，用户自增）。一个 provider = 一把 key，其下可挂多个 URL/endpoint，这些 endpoint 共享同一把 key 和同一个限流额度（gateway 里用 endpoint 共享的 credential_ref + rate_limit_bucket 表达「同一 provider」，而不是一个 card 实体）。",
+      "detail": [["澄清", "official 5 家固定 vs third-party 自增；一 provider = 一 key + 共享额度"], ["卡片 vs gateway", "card 是前端录入便利；gateway 不感知卡，靠 credential_ref/bucket 表达同源"]]
+    },
+    {
+      "id": "provider-kind",
+      "term": "provider_kind（厂商类别 official / third-party）",
+      "category": "领域概念",
+      "owner": "③a Studio（保存时钉标记）",
+      "explain": "给每个 endpoint 钉的「官方还是第三方」标记。保存（upsert）时若 endpoint_id 命中官方白名单，③a 强制把它标成 official，前端改不了——这保证官方卡端点参数不被乱动。当前很多功能（如批量测试 job）按这个标记分叉走不同代码路径，正是 #24/#27 官/三不对称的根源（属现状缺口，非目标）。这个标记是 ③a 在保存时落的持久化字段（产品策略性的分区控制），不是 gateway 的能力归一化。",
+      "detail": [["澄清", "持久化在 endpoint 上的 official/third-party 标记；官方白名单命中强制 official"], ["副作用", "现状测试路径按它分叉 → #24/#27 不对称（待统一）"]]
+    },
+    {
+      "id": "protocol-probe",
+      "term": "协议探测（protocol probe）",
+      "category": "后端能力",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "第三方 provider 填了 URL 后，系统不让用户自己选协议，而是「把各种协议挨个试打一遍」：用每种协议的方式去打这个 URL 的推理端点（不是打 /models 列表接口，因为列表接口各家都返 200、判不出协议），看哪个被接受、哪个被拒，被接受的那个判为该 URL 的协议。探测时要带对的认证头（原生 anthropic 用 x-api-key、anthropic 兼容的第三方网关用 Authorization: Bearer），带错会把「能用」误判成「不通」。这是 gateway 内置协议 SDK 的公共能力，换个 app 也复用。",
+      "detail": [["定义层", "③b gateway（内置协议 SDK；现散 ③a 待下沉）"], ["复用范围", "任何 app 录入第三方 endpoint 时都用；本页 #24/#25 测试路径的底层"]]
+    },
+    {
+      "id": "batch-model-probe",
+      "term": "批量模型探测（batch model probe）",
+      "category": "后端能力",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "判第三方 endpoint 真能不能用的目标方式：不只点一个模型试，而是自动分批（每批约 3 个、优先挑常见可靠模型）去真打推理端点。一批一批打，某批里任一模型成功就判 endpoint 可用并停下；全部探尽都失败才判不可用。这么做是因为单模型探测不可靠——同一模型可能这次 401、下次 200（瞬时抖动）。遇到结构性错配错误码（如「请改用 /v1/messages」）可短路判错，但瞬时类错误（401/429/超时）不许短路。这套「批量探测策略（短路·汇总）」按设计是 ③b 公共能力内核；③a 只做 job/进度/HTTP 包装。",
+      "detail": [["定义层", "③b gateway（批量探测策略·短路·汇总；现散 ③a 待下沉）"], ["复用范围", "官/三统一测试路径的目标内核（unified-endpoint-test）；③a 只包 job/HTTP"]]
+    },
+    {
+      "id": "six-state",
+      "term": "6 态（route 级状态体系，six-state）",
+      "category": "后端能力",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "每条 route（某模型在某 endpoint 上的一条连接路线）的状态用 6 种表达，三个页面颜色一致：🟢 ready=真测通了；🔵 historical_ready=以前联通过（来自 draft 历史回填，当前没真测）；⚪ untested=没测；🔴 failed=出错要修（含配置缺口 缺 key/URL/协议、和 真测失败，用 reason 区分，红但不挡进可用列表）；⚪+倒计时 cooling_down=临时失败熔断中、倒计时后重试；⚪+不可选 off=被禁用。这套「6 态标准总结」按设计是 ③b 公共能力内核（gateway 客观状态 + 熔断的最佳总结）；现码 project_provider_model_state 只产 5 态（把配置缺口和测试失败揉成一个 needs_setup 灰态、没蓝态），在 ③a 待下沉并补齐。③a 只把 6 态转成颜色/文案 DTO（应用加工）。",
+      "detail": [["定义层", "③b gateway（6 态标准总结 + 熔断；现码在 ③a project_provider_model_state 待下沉，需取消 needs_setup、补蓝态）"], ["复用范围", "三页（API Keys / Roles / Copilot）统一状态色；③a 仅转 DTO"]]
+    },
+    {
+      "id": "draft",
+      "term": "draft（历史探测证据库）",
+      "category": "后端能力",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "每个 provider 的历史探测知识库，双向用：读（赋能）——把过去已证实的模型清单和能力回填到当前列表，不用重探，对应 🔵 蓝态；写（写回）——本次探测发现的新模型/新能力（含失败记录，如哪些模型抖动/超时）沉淀回去，下次批量探测可优先跳过历史失败的、优先试历史成功的。这套「Probe Knowledge Catalog 内核（记录/复用/共享探测证据）」按设计是 ③b 公共能力；③a 只做远端源选择、存储介质、上传审批/脱敏（应用加工）。现码 llm_import_drafts.py / ProviderImportDraft 是 legacy 命名，Import Draft（待导入草稿→apply）不属于 MVP1 主线。",
+      "detail": [["定义层", "③b gateway（知识库内核；现码 llm_import_drafts.py 在 ③a 待下沉并需改名）"], ["复用范围", "回填蓝态 + 喂批量探测的历史优先级；③a 做远端源配置、上传审批和脱敏"]]
+    },
+    {
+      "id": "unified-endpoint-test",
+      "term": "统一 endpoint test（目标测试路径，unified endpoint test）",
+      "category": "后端能力",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉、且尚未统一）",
+      "explain": "目标设计：官方和第三方用同一套测试入口 POST /endpoints/{id}/test + 批量模型探测，不分官/三走两套。现状是分裂的——官方走异步批量 job 但只认官方、第三方被拒（#24）；第三方走同步单次 get-models 只升「未验证」（#25）；手动多模型探测官方产多能力候选、第三方写死 text-only（#27）。这三处不对称是现状缺口、不是目标。统一后的测试内核（批量探测 + 能力归一化）归 ③b 公共；③a 只包装 job/HTTP。",
+      "detail": [["定义层", "③b gateway（统一测试 + 能力归一化内核；现码分裂在 ③a 待统一下沉）"], ["复用范围", "官/三合一的目标入口；现 #24/#25/#27 三处不对称待收敛"]]
+    },
+    {
+      "id": "credentials-file",
+      "term": "llm_credentials.json（凭证文件）",
+      "category": "数据文件",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "存所有 provider 的明文 key + endpoint/route/状态/已发现模型的 JSON 文件，权限 0600（仅本人可读写），位于 AgentStudio 配置目录的 llm/ 子目录下。每次写都是原子写（先写临时文件再 os.replace 替换）。读写经统一存储缝（load_credentials / save_credentials），预留多用户 user_id。schema 由 ③b gateway 库定义、数据归 ③b；路径由 ③a 的 llm_paths（credentials_path）定；读写由 ③a Studio 后端经存储缝执行。",
+      "detail": [["Schema 定义", "③b gateway 库"], ["文件路径定义", "③a（llm_paths.credentials_path）"], ["读写", "③a Studio backend 经 storage seam（预留 user_id）"], ["文件归属", "③b gateway-owned 数据"]]
+    },
+    {
+      "id": "secret-hydration",
+      "term": "凭证 hydration（明文回填，hydrateEndpointSecrets）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "前端把后端打码成 '**********' 的 key 逐个换回真值的逻辑。后端默认返回的 registry 快照里 key 是打码的，进 API Keys tab 时对每个被打码的 endpoint 单独发一次「取明文」请求（GET …/endpoints/{id}/secret），换回真值写进前端缓存，这样用户能看到/改自己已存的 key。这是纯前端的展示加工，后端只按 endpoint_id 原样返回明文、不探测不写盘。",
+      "detail": [["定义层", "① 前端（hydrateEndpointSecrets 逐 endpoint 换真值）"], ["复用范围", "本页 #16 进 tab 回填、#31 刷新恢复后换真值"]]
+    },
+    {
+      "id": "test-status-projection",
+      "term": "状态投影（test status projection，后端测试结果 → 状态标签）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "前端不自己持有第二份「真相」，而是把后端 registry 里每条 endpoint/route 的状态投影成 UI 标签：第三方卡顶层一个连通徽章（按当前参数指纹查缓存的测试结果，参数变了就取不到旧结果、自动回落未测）、官方卡每条 route 一个彩色 Tag（直接信后端权威状态）。状态权威来自 ③a 投影出的 DTO（底层是 ③b 的 6 态总结），前端只读着渲染、不另持真相。",
+      "detail": [["定义层", "① 前端（只投影 registry/route 状态，不持第二份真相）"], ["复用范围", "本页 #21 改 key 失效回退、#30 状态投影、#31 刷新恢复"]]
+    },
+    {
+      "id": "provider-utils",
+      "term": "provider-utils（第三方共享工具集）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "API Keys 页一组复用的纯函数：把 5 家官方厂商各映射成一张卡（缺的补空卡）、过滤出第三方卡、按「参数指纹」缓存/查测试结果（key+URL+协议变了指纹就变、旧结果失效）、判断 Manual 探测面板该不该显示、从 id/name/url 猜 provider 短名等。多处卡片共用，是这页的状态/分区中枢。纯前端工具，分区靠前端白名单完成、后端不参与。",
+      "detail": [["定义层", "① 前端（纯函数工具集）"], ["复用范围", "本页 #17 分区、#21/#27/#28/#30 等多卡共用的指纹缓存与短名推断"]]
+    },
+    {
+      "id": "role-name-dialog",
+      "term": "RoleNameDialog（命名弹框，复用组件）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "一个通用的「输入名字 → 确认」弹框组件，原本给角色命名用，这里被 API Keys 页复用：新增第三方 provider 时弹它填名，第三方卡改名（⋮ → Rename）也弹它。纯前端 UI 组件，与后端无关。",
+      "detail": [["定义层", "① 前端（通用命名弹框组件）"], ["复用范围", "本页 #19 新增第三方、#20/#29 第三方改名；Roles 页角色命名同源复用"]]
+    }
+  ],
+  "roles": [
+    {
+      "id": "role",
+      "term": "角色（Role）",
+      "category": "领域概念",
+      "owner": "跨层（概念归 ③b；编辑 UI 归 ① 前端；存储归 ③a）",
+      "explain": "一个有名字的「岗位」，比如 graph-agent（跑工作流的智能体）。用户给这个岗位配一串可用模型，岗位运行时就按这串顺序去找能用的模型。本页只管 graph-agent 这类角色，copilot（聊天助手）那类被父层按类型挡掉不在这显示。角色这个「编排结构 + 意图」是 gateway materialize 内核认得的通用概念（③b 看得到结构和意图，看不到用户怎么拖拽编辑出它）。",
+      "detail": [["澄清", "抽象岗位名 → 一串模型 + 兜底顺序；本页只显 graph-agent 类"], ["分层", "编排结构属 ③b 通用概念；拖拽编辑 UI 属 ① 前端；落盘 llm_roles.yaml 经 ③a"]]
+    },
+    {
+      "id": "model-group",
+      "term": "模型组（Model Group）",
+      "category": "领域概念",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "把右侧某个可用模型拖进角色后，在角色卡里生成的一组配置：包含这个模型 + 它在各个 provider（供应渠道，如官方 API、第三方代理）上的若干条线路。角色卡里一行就是一个模型组。「把可用 route 归并成 model group + identity 识别」这套分组按设计是 ③b 公共能力内核（任何 app 复用）；现码散在 ③a 待下沉。前端只渲染分组结果。",
+      "detail": [["定义层", "③b gateway（model group 分组 + identity 识别；现散 ③a 待下沉）"], ["复用范围", "本页角色卡每行 + 右侧侧栏分组；Copilot 页选组也复用同一分组"]]
+    },
+    {
+      "id": "fallback-chain",
+      "term": "兜底链（fallback chain）",
+      "category": "领域概念",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "把角色里的多个模型、每个模型的多条 provider 线路，按用户排好的先后顺序拉成一条长队列。引擎运行时从队头开始试，第一条不行就退到下一条，直到有一条成功——这就是「兜底」。第一个模型即默认主模型（active_model）。这条拍平的有序队列是 materialize 编排内核的产物（属 ③b 公共能力），前端编排的是层级结构、不直接编辑这条链。",
+      "detail": [["澄清", "拍平的有序尝试队列；队头=active_model 默认主模型"], ["产出层", "③b materialize 编排内核（现散 ③a 待下沉）"]]
+    },
+    {
+      "id": "route",
+      "term": "线路（route）",
+      "category": "领域概念",
+      "owner": "跨层（概念归 ③b；存储归 ③a）",
+      "explain": "一条「用哪个模型 + 走哪个 endpoint 凭证」的具体可执行路径，是兜底链里最小的一格。比如「claude-sonnet 走官方 API」是一条线路，「同一个 claude-sonnet 走某代理」是另一条线路。route 是 gateway 的一等概念（route 级 API、route probe、6 态都挂在 route 上）。",
+      "detail": [["澄清", "兜底链最小单位 = 模型 × endpoint；gateway 一等概念"], ["分层", "解析/probe/状态归 ③b；落盘随角色经 ③a"]]
+    },
+    {
+      "id": "materialize",
+      "term": "物化（materialize）",
+      "category": "后端能力",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "用户在界面上是分层编排的（角色 → 几个模型组 → 每个模型组下几个 provider，还带开关和偏好）。引擎不认这种嵌套结构，只认一条拍平的、按序尝试的线路队列。「物化」就是把用户编排的这套层级结构、连同各种开关偏好，拍平翻译成引擎能直接照着跑的兜底链，同时产出 role-fit/降级诊断报告。这是 gateway 的「materialize 编排内核」，按设计是 ③b 公共能力（换个 app 复用）；现码在 ③a 的 llm_role_materializer 待下沉。每次保存角色时跑一遍。",
+      "detail": [["定义层", "③b gateway（materialize 编排内核；现码 llm_role_materializer 在 ③a 待下沉）"], ["复用范围", "本页所有保存动作（#33/#36-#43）+ 模型束物化 + Copilot 角色物化都跑它"]]
+    },
+    {
+      "id": "six-states",
+      "term": "6 态（provider 线路连通状态，six-state）",
+      "category": "后端能力",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "每条 provider 线路当前能不能用，用 6 种状态描述：ready（绿，刚测通）、historical_ready（蓝，以前通过但这次没重测）、untested（灰，从没测过）、failed（红，出错要修，附原因如缺配置/连不上）、cooling_down（灰+倒计时，熔断冷却中）、off（灰，被关掉或下线）。这套 6 态标准总结按设计是 ③b 公共能力内核（gateway 客观状态 + 熔断衍生），三页统一；现码 project_provider_model_state 在 ③a 待下沉。前端只投影渲染颜色。与 API Keys 页的 six-state 是同一套体系、归属一致。",
+      "detail": [["定义层", "③b gateway（6 态标准总结；现码在 ③a 待下沉）"], ["复用范围", "三页统一状态色；本页右侧侧栏 + role-fit 灯底层都读它"]]
+    },
+    {
+      "id": "role-fit",
+      "term": "role-fit（角色适配诊断）",
+      "category": "后端能力",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "在某个角色的语境下，判断每条线路「能不能胜任这个角色的要求」的诊断结果，分 Using（在用）/Downgraded（能用但降级，比如达不到偏好）/Needs Test（要先测）/Not Fit（不适配，比如角色要求必须支持推理但模型不支持）。这和 6 态不同：6 态只看「线路本身通不通」（全局 health），role-fit 还叠加「这个角色对它的额外要求」（role-local 派生，从不改全局 health）。诊断由 materialize 物化时生成（属 ③b 编排内核），随角色对象返回，前端只读着点亮状态灯。",
+      "detail": [["定义层", "③b gateway（materialize 产 role_fit 诊断；现散 ③a 待下沉）"], ["复用范围", "本页 #45 状态灯 + tooltip；role-local，不污染全局 6 态"]]
+    },
+    {
+      "id": "model-bundle",
+      "term": "模型束（Model Bundle）",
+      "category": "领域概念",
+      "owner": "跨层（束物化内核归 ③b；编辑 UI 归 ① 前端；存储归 ③a）",
+      "explain": "一个可跨角色复用的「模型组合包」：预先排好一串模型 + provider + 兜底顺序，存成一个有名字的束。建好后可整包拖进多个角色，省得每个角色重配一遍。设计上束和角色用同一套编辑器，束里不能再嵌套束。设计要求束拖进角色是「引用」而非快照——改束 → 所有引用它的角色同步跟着变（现码是快照复制，属头号偏差，见 #51）。束的物化（materialize_model_bundle）属 ③b 编排内核。",
+      "detail": [["澄清", "可跨角色复用的预排模型组合；束内不嵌套束；拖入角色应为引用（现码快照待修）"], ["分层", "束物化内核归 ③b；编辑复用 role 编辑器（① 前端）；落盘随 llm_roles.yaml 经 ③a"]]
+    },
+    {
+      "id": "llm-roles-yaml",
+      "term": "llm_roles.yaml（角色落盘文件）",
+      "category": "数据文件",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "所有角色、模型束的持久化存储文件，放在 AgentStudio/llm/ 目录下。每次保存角色都原子写入（先写临时文件再替换，避免写一半损坏）。运行时算出来的投影字段（如状态、诊断）有一部分不写进 YAML、只在响应里带。schema 由 ③b gateway 库定义、数据归 ③b；路径由 ③a 的 llm_paths（roles_path）定；读写由 ③a Studio 后端经存储缝执行。跨页（Roles / Copilot）是同一份文件、归属一致。",
+      "detail": [["Schema 定义", "③b gateway 库"], ["文件路径定义", "③a（llm_paths.roles_path）"], ["读写", "③a Studio backend 经 storage seam（预留 user_id）"], ["文件归属", "③b gateway-owned 数据"]]
+    },
+    {
+      "id": "storage-seam",
+      "term": "存储缝（gateway storage seam）",
+      "category": "领域概念",
+      "owner": "跨层（数据归属边界：③b-owned 数据，③a 经适配器跨缝读写）",
+      "explain": "角色/凭证数据的归属边界：数据文件和物化逻辑算 ③b gateway 的地盘（gateway-owned 数据 + 编排内核），③a Studio 后端只是经一个适配器跨过这道缝去调用、并落到具体存储介质（存哪个文件是 ③a 的应用加工）。本页大量动作都是「③a 提供 HTTP 端点，但底下的角色数据和物化逻辑归 ③b」。存储缝还预留了多用户 user_id。",
+      "detail": [["澄清", "数据归属边界：③b-owned 数据/物化 vs ③a 跨缝读写 + 选存储介质"], ["预留", "存储缝预留 user_id（多用户）"]]
+    },
+    {
+      "id": "put-roles-merge",
+      "term": "整表 upsert（PUT /llm/roles 的合并语义）",
+      "category": "接口",
+      "owner": "③a Studio",
+      "explain": "本页几乎所有「改了什么」的保存动作都走同一个端点：把整份角色数据（所有角色+所有束）提交上去，③a 按「合并」方式落盘——提交体里有的键覆盖，没提到的角色保留。所以删一个角色/束，前端要主动把它从提交体里去掉，而不是发删除信号（真删单个走 DELETE /llm/roles/{name}）。端点由 ③a 提供；落盘后由 ③b materialize 物化、写入 ③b-owned 的 llm_roles.yaml。",
+      "detail": [["契约 / DTO", "整份 roles+bundles 提交，merge 语义（缺席=保留，非删除）；真删走 DELETE /llm/roles/{name}"], ["谁提供", "③a Studio（落盘后触发 ③b materialize）"]]
+    },
+    {
+      "id": "available-models-sidebar",
+      "term": "可用模型侧栏（AvailableModelsSidebar）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "页面右侧那一栏，列出当前所有可用的模型（按厂商/系列分组，带 6 态色标），是用户往角色里拖模型的来源。顶部有搜索框（纯前端过滤），束也置顶在这栏里供拖入角色。纯前端组件，渲染的分组与状态数据来自 ③a 投影的 DTO（底层 ③b 的 model group 分组 + 6 态）。",
+      "detail": [["定义层", "① 前端（侧栏组件 + 纯前端搜索过滤）"], ["复用范围", "本页 #32 加载、#34 搜索、#35 展开状态、#36 拖入来源；束也置顶其中"]]
+    },
+    {
+      "id": "role-editor-set",
+      "term": "角色卡编辑器（ModelItem / ProviderChain / RoleSettingsPanel 复用组）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "角色卡内部那套编辑控件：单行模型、模型的 provider 兜底链、角色设置面板（开关+意图）。模型束卡复用了同一套，所以束和角色的编辑体验一致。是本页真正被多处复用的前端抽象。其中 intent 控件由 ③b 的 build_runtime_setting_descriptors（能力描述符）驱动，但控件本身是前端 UI。",
+      "detail": [["定义层", "① 前端（角色卡内编辑控件组；intent 控件由 ③b 描述符驱动）"], ["复用范围", "本页 #36-#48 角色编辑 + #50 模型束编辑复用同一套"]]
+    },
+    {
+      "id": "registry",
+      "term": "模型清册（GET /llm/registry）",
+      "category": "接口",
+      "owner": "③a Studio",
+      "explain": "返回所有可用模型分组、每条 provider 线路的 6 态状态、以及每条线路探测到的能力（如最大输出/上下文 token 上限）。右侧可用模型侧栏的内容、以及角色里 token 上限摘要的数值，都来自这份清册。端点由 ③a 提供；返回的分组/6 态/能力数据投影自 ③b 的公共能力内核（model group 分组、6 态总结、capability 归一化）。",
+      "detail": [["契约 / DTO", "RegistrySnapshot（model_groups + 每 route 的 ui_state 6 态 + capability，api_key redacted）"], ["谁提供", "③a Studio（数据投影自 ③b 内核）"]]
+    }
+  ],
+  "copilot": [
+    {
+      "id": "copilot-role",
+      "term": "copilot 角色（copilot role）",
+      "category": "领域概念",
+      "owner": "跨层（角色概念归 ③b；SDK 调用/产品策略归 ③a；编辑 UI 归 ① 前端）",
+      "explain": "助手用的「角色」。和 graph（工作流图）里的角色长得一样、也是「一个抽象名字映射到一组真实模型 + 兜底顺序」，但运行时是两套独立的东西：copilot 不走工作流引擎，而是用 Claude 官方 SDK（claude_agent_sdk）直接 spawn 一个 claude 命令行子进程来对话。一个 copilot 角色只能绑一个 model group（不像 graph 角色能绑多组）。关键边界：gateway 库完全不知道 copilot 是什么——它只把 copilot_chat 当普通 role 解析成 route；SDK 调用 / 测试 / session 全属 ③a Studio 领域。",
+      "detail": [["澄清", "抽象助手角色；不走引擎、走 Claude SDK 子进程；只绑一个 model group"], ["分层", "route 解析归 ③b（不知 copilot）；SDK 调用/session/测试/动态浮出归 ③a；编辑 UI 归 ① 前端"]]
+    },
+    {
+      "id": "model-group",
+      "term": "Model Group（模型组）",
+      "category": "领域概念",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "一组「指向同一个逻辑模型的多条线路」的集合，例如「Claude Opus 4.8」这个组下面可能挂着官方 anthropic 一条线、第三方 anthropic-兼容中转一条线。给 copilot 角色选一个 model group，就等于说「这个助手用哪个模型、以及这个模型有哪几条可切换的线路」。与 Roles 页是同一个概念、同一套 ③b 分组内核，归属一致。",
+      "detail": [["定义层", "③b gateway（model group 分组 + identity；现散 ③a 待下沉）"], ["复用范围", "本页 #63 选组；与 Roles 页 model-group 同源"]]
+    },
+    {
+      "id": "route",
+      "term": "Route（线路）",
+      "category": "领域概念",
+      "owner": "跨层（解析归 ③b；SDK 调用归 ③a）",
+      "explain": "一条「模型 + 具体 endpoint 凭证」的可执行线路。一个 model group 里通常有多条 route，排成兜底链：运行时先试第一条，连不上就顺着链往下试。gateway 库只负责把 copilot_chat 解析成 ResolvedRoute[]（route 级 API + capability），③a 拿这些 route 自己用 ClaudeSDKClient 去调。与 Roles 页 route 同一概念、归属一致。",
+      "detail": [["澄清", "模型 × endpoint 凭证的可执行路径；多条排兜底链"], ["分层", "resolve_routes(copilot_chat) 归 ③b；拿 route 用 SDK 调归 ③a"]]
+    },
+    {
+      "id": "builtin-surface",
+      "term": "内置角色动态浮出（builtin surface）",
+      "category": "后端能力",
+      "owner": "③a Studio",
+      "explain": "设计要的「首次没有任何助手时不让用户面对空白」机制：系统从当前可用模型里，按家族偏好阶梯（Claude 优先最新的 Opus 4.8、退而求其次 4.7；DeepSeek 优先 V4-Pro、退 V3.2-Pro）自动挑出最新最好的型号，浮现成内置助手角色。关键是「动态择优」——按实际可用的型号挑，而不是写死一对一映射。这是产品策略（推荐/浮出/弃用四件事之一），按 §6.0 判据归 ③a 应用加工，不上浮 gateway。现码择优函数 pickDefault 写好了但主流程没接（#56 真 gap）。",
+      "detail": [["定义层", "③a Studio（产品策略：动态浮出，§6.0 应用加工）"], ["复用范围", "本页 #56 首次空态自动浮出；现 pickDefault 已写未接线"]]
+    },
+    {
+      "id": "real-sdk-test",
+      "term": "真 SDK 测试（real SDK test）",
+      "category": "后端能力",
+      "owner": "③a Studio",
+      "explain": "助手卡上点 Test 时该做的「测得和真跑一模一样」的验证。做法是：用助手真实对话用的同一套 Claude 官方客户端（ClaudeSDKClient），真的 spawn 一个 claude 命令行子进程、把这条线路的 base_url/api_key 通过环境变量注进去，然后在临时工作目录写一个随机口令文件、让模型去读并回显口令。模型只有真正走通「启动子进程 → 环境变量注入生效 → 工具调用回路能读文件」整条链，才可能把口令念对——念对就等于这条线路真能用。它取代了旧的「假测试」（旧版用裸 Anthropic HTTP 客户端发工具调用，测的客户端和真跑的根本不是一套）。因 copilot SDK 调用/测试全属 ③a 领域，这个测试归 ③a；gateway 不碰 SDK。",
+      "detail": [["定义层", "③a Studio（copilot SDK 测试，§6.0 调用方式归 ③a）"], ["复用范围", "本页 #58 点 Test；与真实对话同一套 ClaudeSDKClient + 子进程 + env 注入"]]
+    },
+    {
+      "id": "ui-state",
+      "term": "ui_state（线路就绪态投影，6 态粗粒度）",
+      "category": "后端能力",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "gateway 侧给每条线路投影出来的一个粗粒度状态（即三页统一的 6 态，如 ready/未验证等），反映的是「凭证齐不齐、配置对不对」这种静态判断，而不是「真用 SDK 测过能跑」。助手卡初始显示的 N/M SDK Ready 数就是拿这个充数，所以是粗映射、不等于真测过；点 Test 后才被 real-sdk-test 的真测结果覆盖。它就是 API Keys/Roles 页 six-state 的同一套体系，归属一致（③b 公共能力，现码 ③a 待下沉）。",
+      "detail": [["定义层", "③b gateway（6 态标准总结；现码在 ③a 待下沉）"], ["复用范围", "本页 #57 初始 N/M 充数 + 线路灯初值；与 six-state 同源，真测态由 #58 覆盖"]]
+    },
+    {
+      "id": "save-status-badge",
+      "term": "SaveStatusBadge（统一保存状态徽章）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "四个设置页（General / API Keys / LLM Roles / Copilot）共用的同一个保存状态小标签组件，吃同一个 SaveStatus 类型，按 idle（静默不显）/pending（待保存）/saving（保存中）/saved（已保存）/失败（显式红色告警）流转。Copilot 页头右上挂的就是它，取代了早前那个写死装饰、不反映真实状态的「Backend Integration」假徽章。与 shell 页 save-badge 是同一个统一组件方向。",
+      "detail": [["定义层", "① 前端（统一保存徽章组件，吃 SaveStatus 类型）"], ["复用范围", "四个设置页共用；本页 #54/#65 页头挂载"]]
+    },
+    {
+      "id": "derive-candidates",
+      "term": "deriveCopilotCandidateGroups（候选组派生）",
+      "category": "前端模块",
+      "owner": "① 前端（含待下沉 ③b 的启发式）",
+      "explain": "前端把真实 registry（凭证 + 模型清单）派生成 copilot 可选候选组的函数。它顺带做了两件还属「前端启发式」的事：用 provider_type==='anthropic_compatible' 这个字段筛出哪些线路可选，以及拿一张写死的型号白名单（claude-opus-4.7/4.8、deepseek-v4-pro/v3.2-pro）判定哪个算 Built-in。这两处理想上该由 ③b gateway 的真实能力判定（route 是否 anthropic-messages 兼容）来取代——属现状偏差（#55/#60 仍成立）。",
+      "detail": [["定义层", "① 前端（候选组派生；含两处启发式应由 ③b 能力判定取代）"], ["复用范围", "本页 #55 卡片判内置、#60 eligible 可选线路筛选"]]
+    },
+    {
+      "id": "pick-default",
+      "term": "pickDefaultCopilotGroupIds（默认内置组择优）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "已经写好的「按偏好阶梯挑默认内置助手」函数（Claude 优先 4.8 退 4.7、DeepSeek 优先 V4-Pro 退 V3.2-Pro）。逻辑是对的、已是动态择优（不是旧的写死映射），但 Copilot 页主流程目前没调它——所以首次空态不会自动浮出内置助手，函数白写在那（#56 真 gap）。它实现的是 builtin-surface 这条产品策略的前端择优部分。",
+      "detail": [["定义层", "① 前端（择优函数，实现 builtin-surface 的前端部分）"], ["复用范围", "本页 #56 首次空态择优；逻辑已就绪、主流程未接线"]]
+    },
+    {
+      "id": "llm-roles-yaml",
+      "term": "llm_roles.yaml（角色配置文件）",
+      "category": "数据文件",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "所有角色（含 copilot 角色）落盘的 YAML 文件，存在 AgentStudio 配置目录的 llm/ 子目录下。增删改助手、调兜底顺序，最终都原子写进这里。它和 Roles 页是同一份文件：schema 由 ③b gateway 库定义、数据归 ③b；路径由 ③a 的 llm_paths（roles_path）定；读写由 ③a Studio 后端经存储缝执行（预留多用户 user_id）。copilot 角色靠 key 的 copilot_ 前缀与 graph 角色区分（③a 按前缀分流）。",
+      "detail": [["Schema 定义", "③b gateway 库"], ["文件路径定义", "③a（llm_paths.roles_path）"], ["读写", "③a Studio backend 经 storage seam（预留 user_id）"], ["文件归属", "③b gateway-owned 数据"]]
+    }
+  ]
+}

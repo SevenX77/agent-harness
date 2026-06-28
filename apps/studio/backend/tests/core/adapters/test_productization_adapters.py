@@ -35,6 +35,31 @@ def test_gateway_adapter_exposes_gateway_primitives() -> None:
         assert callable(method), f"GatewayAdapter must expose {method_name}()"
 
 
+def test_gateway_adapter_empty_fallback_chain_uses_canonical_terminal_error() -> None:
+    GatewayAdapter = _load_symbol("app.core.adapters.gateway", "GatewayAdapter")
+
+    adapter = GatewayAdapter(transport="in_process")
+
+    with pytest.raises(Exception) as exc_info:
+        adapter.decide_fallback(
+            {
+                "role": "empty_role",
+                "fallback_chain": [],
+                "current_route_id": "",
+                "failed_route_ids": [],
+                "error": {"error_type": "EmptyRouteChain"},
+            }
+        )
+
+    assert _error_code(exc_info.value) == "resource.no_available_route"
+    assert getattr(exc_info.value, "error_payload", {}) == {
+        "decision": "give_up",
+        "role": "empty_role",
+        "route_ids": [],
+        "failed_route_ids": [],
+    }
+
+
 @pytest.mark.parametrize(
     ("module_name", "class_name"),
     (

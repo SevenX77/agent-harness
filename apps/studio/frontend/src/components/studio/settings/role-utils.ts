@@ -417,6 +417,34 @@ export function appendModelGroupToRoleWithResult(
   return { data: next, error: null }
 }
 
+export const BUNDLE_DRAG_PREFIX = "bundle:"
+
+/**
+ * #51: attach a bundle to a role as a LIVE REFERENCE, not a snapshot copy.
+ *
+ * Dragging a bundle (drag id "bundle:{id}") into a role sets role.bundle_id to the
+ * referenced bundle. The role's own model_groups (role.models here) stay as the
+ * local DELTA layer — they are NOT populated with a frozen copy of the bundle's
+ * routes. The backend materializes the chain by reference (live bundle edits +
+ * delete cascade reflect on re-projection); the role applies its delta on top.
+ *
+ * A drag id that is not a bundle id leaves the data untouched (caller handles
+ * the normal model-group snapshot path).
+ */
+export function attachBundleReferenceToRole(
+  data: RolesData,
+  roleName: string,
+  dragModelId: string,
+): RolesData {
+  if (!dragModelId.startsWith(BUNDLE_DRAG_PREFIX)) return data
+  if (!data.roles[roleName]) return data
+  const bundleId = dragModelId.slice(BUNDLE_DRAG_PREFIX.length)
+  if (!bundleId) return data
+  const next = cloneRolesData(data)
+  next.roles[roleName] = { ...next.roles[roleName], bundle_id: bundleId }
+  return next
+}
+
 export function modelDropFailureMessage({
   modelId,
   destination,
@@ -454,12 +482,22 @@ export function modelSupportsThinking(model: ModelInfo): boolean {
 }
 
 function defaultProviderModelsForGroup(modelGroup: ModelGroup): ModelGroup["provider_models"] {
-  return [...modelGroup.provider_models].sort((left, right) => (
+  const sortedProviderModels = [...modelGroup.provider_models].sort((left, right) => (
     providerStateRank(left.ui_state) - providerStateRank(right.ui_state) ||
     providerKindRank(left.provider_kind) - providerKindRank(right.provider_kind) ||
     left.provider_label.localeCompare(right.provider_label, undefined, { numeric: true, sensitivity: "base" }) ||
     left.route_id.localeCompare(right.route_id)
   ))
+  const byProviderLabel = new Map<string, ModelGroup["provider_models"][number]>()
+  for (const providerModel of sortedProviderModels) {
+    const key = providerModelDisplayKey(providerModel)
+    if (!byProviderLabel.has(key)) byProviderLabel.set(key, providerModel)
+  }
+  return [...byProviderLabel.values()]
+}
+
+function providerModelDisplayKey(providerModel: ModelGroup["provider_models"][number]): string {
+  return providerModel.provider_label.trim().toLowerCase() || providerModel.route_id
 }
 
 function providerKindRank(kind: ModelGroup["provider_models"][number]["provider_kind"]): number {
@@ -469,10 +507,14 @@ function providerKindRank(kind: ModelGroup["provider_models"][number]["provider_
 }
 
 function providerStateRank(state: ModelGroup["provider_models"][number]["ui_state"]): number {
+  // #36 (spec §2.2 "默认选 Ready+Untested+🔵"): historical_ready (🔵, previously
+  // connected) ranks as a default-eligible candidate between ready and untested,
+  // so a group whose strongest provider is 🔵 is still picked by default.
   if (state === "ready") return 0
-  if (state === "untested") return 1
-  if (state === "cooling_down") return 2
-  return 3
+  if (state === "historical_ready") return 1
+  if (state === "untested") return 2
+  if (state === "cooling_down") return 3
+  return 4
 }
 
 function modelGroupSupportsThinking(modelGroup: ModelGroup): boolean {

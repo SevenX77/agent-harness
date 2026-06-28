@@ -30,24 +30,27 @@ describe("tagVariants", () => {
     expect(classes).not.toContain("bg-success/10")
   })
 
-  it("keeps semantic entity tag variants on the shared success-tinted background", () => {
+  it("uses matching tinted backgrounds for every semantic entity tag", () => {
+    const infoClasses = tagVariants({ variant: "info" }).split(/\s+/)
+    const successClasses = tagVariants({ variant: "success" }).split(/\s+/)
     const warningClasses = tagVariants({ variant: "warning" }).split(/\s+/)
     const destructiveClasses = tagVariants({ variant: "destructive" }).split(/\s+/)
     const probeVerifiedClasses = tagVariants({ variant: "probe-verified" }).split(/\s+/)
 
+    expect(infoClasses).toEqual(expect.arrayContaining(["border-primary/70", "bg-primary/10"]))
+    expect(successClasses).toEqual(expect.arrayContaining(["border-success", "bg-success/10"]))
     expect(warningClasses).toContain("border-warning")
-    expect(warningClasses).toContain("bg-success/10")
+    expect(warningClasses).toContain("bg-warning/10")
     expect(warningClasses).toContain("text-foreground")
-    expect(warningClasses).not.toContain("bg-warning-background")
 
     expect(destructiveClasses).toContain("border-tag-destructive-border")
-    expect(destructiveClasses).toContain("bg-success/10")
+    expect(destructiveClasses).toContain("bg-tag-destructive-border/10")
     expect(destructiveClasses).toContain("text-foreground")
-    expect(destructiveClasses).not.toContain("bg-destructive-background")
 
     expect(probeVerifiedClasses).toContain("border-multimodal-border")
-    expect(probeVerifiedClasses).toContain("bg-success/10")
+    expect(probeVerifiedClasses).toContain("bg-multimodal-border/10")
     expect(probeVerifiedClasses).toContain("text-foreground")
+    expect(probeVerifiedClasses).not.toContain("bg-success/10")
     expect(probeVerifiedClasses).not.toContain("border-warning")
   })
 })

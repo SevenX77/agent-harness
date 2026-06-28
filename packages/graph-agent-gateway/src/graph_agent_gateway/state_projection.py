@@ -5,12 +5,16 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from graph_agent_gateway.registry.schema import ResolvedRoute
+from graph_agent_gateway.registry.schema import (
+    ProviderRoute,
+    ProviderUiState,
+    ResolvedRoute,
+)
 
 
 class ProviderModelStateProjection(BaseModel):
     route_id: str
-    ui_state: Literal["ready", "historical_ready", "untested", "failed", "cooling_down", "off"]
+    ui_state: ProviderUiState
     reason_code: Literal["missing_config", "endpoint_unreachable", "model_failed"] | None = None
     retry_at: datetime | None = None
     ui_detail: str | None = None
@@ -72,8 +76,12 @@ def project_route_state(
     route_status: str,
     credential_available: bool,
     circuit_retry_at: datetime | None = None,
-    draft_history: bool = False,
+    credential_evidence_refs: list[str] | None = None,
 ) -> ProviderModelStateProjection:
+    evidence_refs = [
+        ref for ref in credential_evidence_refs or [] if isinstance(ref, str)
+    ]
+
     if endpoint_status == "disabled" or route_status == "disabled":
         return ProviderModelStateProjection(route_id=route_id, ui_state="off")
 
@@ -100,10 +108,25 @@ def project_route_state(
     if endpoint_status == "verified" and route_status == "verified":
         return ProviderModelStateProjection(route_id=route_id, ui_state="ready")
 
-    if endpoint_status == "verified" and draft_history:
-        return ProviderModelStateProjection(route_id=route_id, ui_state="historical_ready")
+    if endpoint_status == "verified" and evidence_refs:
+        return ProviderModelStateProjection(
+            route_id=route_id,
+            ui_state="historical_ready",
+            evidence_refs=evidence_refs,
+        )
 
     return ProviderModelStateProjection(route_id=route_id, ui_state="untested")
+
+
+def project_provider_route_ui_state(
+    route: ProviderRoute,
+    projection: ProviderModelStateProjection,
+) -> ProviderRoute:
+    if route.route_id != projection.route_id:
+        raise ValueError(
+            f"projection route_id '{projection.route_id}' does not match route '{route.route_id}'"
+        )
+    return route.model_copy(update={"ui_state": projection.ui_state})
 
 
 def materialize_role(

@@ -1,0 +1,63 @@
+{
+  "codes": {
+    "missing_api_key": "API key is empty. Add a key before testing.",
+    "timeout": "The request timed out after 8 seconds.",
+    "invalid_api_key": "API key is invalid or was rejected by the provider.",
+    "invalid_x_api_key": "API key is invalid or was rejected by the provider.",
+    "insufficient_quota": "The account has no remaining quota.",
+    "model_not_found": "The model does not exist or this API key cannot access it.",
+    "rate_limit_exceeded": "Rate limit exceeded (429).",
+    "invalid_request_error": "The provider rejected the request format.",
+    "context_length_exceeded": "The request exceeds the model context window.",
+    "permission_error": "The API key does not have permission to access this resource.",
+    "authentication_error": "Authentication failed. Check the API key and required headers.",
+    "not_found_error": "The provider returned 404 for the endpoint or resource.",
+    "request_too_large": "The request body is too large.",
+    "rate_limit_error": "Rate limit exceeded (429).",
+    "api_error": "The provider returned an internal API error.",
+    "overloaded_error": "The provider is temporarily overloaded.",
+    "unauthorized": "The API key is not authorized (401).",
+    "PERMISSION_DENIED": "The API key does not have permission to access this resource.",
+    "UNAUTHENTICATED": "The API key could not be authenticated.",
+    "RESOURCE_EXHAUSTED": "Quota or rate limit is exhausted.",
+    "UNAVAILABLE": "The provider is temporarily unavailable.",
+    "no_available_sdk": "No compatible protocol was confirmed. Check the API key, Base URL, and selected provider protocol, then retry.",
+    "model_list_unavailable": "The provider model list could not be loaded. Check the Base URL and whether the provider supports a model-list endpoint.",
+    "rate_limited": "Rate limit exceeded (429).",
+    "quota_exceeded": "Quota is exhausted (402/403).",
+    "network_error": "Network error. The provider could not be reached.",
+    "http_error": "The provider returned an unexpected HTTP status."
+  },
+  "httpStatus": {
+    "400": "The request parameters are invalid.",
+    "401": "The request is not authenticated.",
+    "403": "The request is not authorized, or this API key cannot access the resource.",
+    "404": "The resource or endpoint could not be found.",
+    "408": "The request timed out.",
+    "409": "The request conflicts with the current state.",
+    "422": "The request does not match the backend schema.",
+    "429": "The provider rate limit was reached. Try again later.",
+    "500": "The backend service failed.",
+    "502": "The backend service or proxy is unavailable.",
+    "503": "The service is temporarily unavailable.",
+    "504": "The backend request timed out."
+  },
+  "status": {
+    "untested": "Not configured",
+    "unverified_manual": "Parameters Reachable",
+    "ok": "Connected",
+    "error": "Test failed",
+    "invalid_key": "Invalid API key",
+    "rate_limited": "Rate limited",
+    "quota_exceeded": "Quota exhausted",
+    "network_error": "Network error",
+    "timeout": "Request timed out",
+    "missing_api_key": "API key is empty"
+  },
+  "fallbacks": {
+    "errorCode": "Provider returned error code: {{code}}",
+    "httpStatus": "HTTP {{status}} request failed.",
+    "notConfigured": "Not configured",
+    "requestFailed": "Request failed"
+  }
+}

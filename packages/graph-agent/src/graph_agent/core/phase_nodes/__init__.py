@@ -20,7 +20,6 @@ from __future__ import annotations
 from graph_agent.core.phase_nodes.base import (
     DependencyContainer,
     HeartbeatProtocol,
-    ModelResolverProtocol,
     PhaseNode,
     SaveCompactionSidecar,
 )
@@ -38,7 +37,6 @@ __all__ = [
     "DependencyContainer",
     "HeartbeatProtocol",
     "LLMPhaseNode",
-    "ModelResolverProtocol",
     "PhaseNode",
     "SaveCompactionSidecar",
     "ValidationPhaseNode",

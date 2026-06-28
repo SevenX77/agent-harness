@@ -17,6 +17,7 @@ dependencies = [
     "python-multipart>=0.0.5",
     "starlette>=0.37.2",
     "claude-agent-sdk>=0.1.80",
+    "cryptography>=44",
 ]
 
 [tool.uv.sources]

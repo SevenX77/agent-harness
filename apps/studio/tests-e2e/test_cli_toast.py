@@ -15,9 +15,20 @@ import re
 import time
 from pathlib import Path
 
+import pytest
 from playwright.sync_api import Page, expect
 
 logger = logging.getLogger("e2e.cli_toast")
+
+# STALE vs current UI — quarantined (honest skip, not fake-green) pending
+# re-author. The test clicks an "Open CLI" button that no longer exists anywhere
+# in the frontend, and touches the now-empty public skills_dir. Re-author the
+# terminal + skill_changed-toast flow against the current UI after confirming the
+# CLI/terminal affordance is in MVP1 scope.
+pytestmark = pytest.mark.skip(
+    reason="stale vs current UI: 'Open CLI' affordance removed from the frontend; "
+    "re-author terminal/file-watch flow after confirming CLI is in MVP1 scope"
+)
 
 
 def _select_skill(page: Page, skill_id: str) -> None:

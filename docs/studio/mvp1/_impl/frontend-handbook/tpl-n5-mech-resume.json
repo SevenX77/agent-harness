@@ -1,0 +1,241 @@
+{
+  "id": "mech_n5_resume",
+  "title": "续跑契约链(resume 端点 → 并发控制 → 注入 → 引擎续跑)(机制)",
+  "overview": {
+    "manages": "「调试续跑」四个场景(节点级续跑 / HitL 人工注入 / 篡改 Context 续跑 / 全局续跑)的**共同后端入口**——从前端一次 resume 请求,到经 RuntimeStateStore(运行态存储,管租约/快照)持租约恢复快照、把人工答案/篡改黑板/起始节点透传给引擎 resume_skill(引擎最底层续跑原语)续跑、再回写新快照释放租约的整条链。",
+    "why_single": "resume 不是某一个操作,而是被四种 debug 入口共用的一整块后端机制,且牵涉三件容易写糊又必须一致的事:① 并发控制(lease 租约 + fencing 防旧 worker);② 注入语义(context_overrides 篡改黑板 / human_response 人工答案);③ 节点级定位(从哪个节点续)。单列一页讲清,各操作卡(N5.1#2、N5.2#6、N5.3#9、N5.4#11)只引用它。",
+    "design_owner": "engine 后端为主(resume_skill 续跑原语、checkpoint 定位、注入校验都在 engine);经 gateway 后端 sidecar(apps/studio/backend 这个 Python sidecar,是 gateway 后端的 HTTP 承载层)的 resume 端点暴露,并由 sidecar 侧的 RuntimeStateStore 提供 lease/fencing 并发控制。",
+    "code_location": "sidecar(gateway 后端承载层):routers/runs.py 的 resume_run(resume 端点)、resume_validity(只读判定端点);core/adapters/engine.py 的 EngineAdapter.resume(持租约恢复快照后桥接引擎);core/adapters/runtime_state_resume_bridge.py 的 resume_restored_runtime_state(透传桥)。engine:core/runner.py 的 resume_skill(续跑原语)+ _validate_resume_node_ids / _validate_resume_context_overrides / _apply_resume_context_overrides / _apply_resume_human_response。",
+    "dataflow": [
+      "前端 resumeRun(skillId, runId, options) → POST /api/skills/{skill_id}/runs/{run_id}/resume,body=ResumeReq",
+      "EngineAdapter.resume:acquire_lease(取独占租约,ttl 30s) → restore(恢复运行态快照,取出 checkpoint_id/checkpoint_ns/artifact_ref)",
+      "heartbeat(续租) → resume_restored_runtime_state(桥)透传 checkpoint/checkpointer/context_overrides/human_response/resume_from_node_id 给引擎",
+      "引擎 resume_skill:_validate_resume_node_ids(校验起止节点存在)+ _validate_resume_context_overrides(拒系统保留键)→ _apply_resume_context_overrides / _apply_resume_human_response(注入)→ graph.invoke(None, config) 从 checkpoint 续",
+      "续跑结束:snapshot(回写新运行态,校验 fencing token) → finally release(释放租约);端点封成 RunMetadata 返回"
+    ]
+  },
+  "submodules": [
+    {
+      "name": "resume 端点与请求模型(ResumeReq)",
+      "code": "sidecar: routers/runs.py resume_run + models/runs.py ResumeReq",
+      "summary": "一个 resume 端点收四种续跑入口的请求,请求模型 ResumeReq 七字段覆盖「续跑点定位 + 节点级范围 + 两种注入」,extra=forbid 拒未知字段。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "checkpoint_id / checkpoint_ns:定位从哪个 checkpoint(检查点)续;缺省用 restore 出的最近一条。",
+        "resume_from_node_id / resume_to_node_id:节点级续跑范围(从哪个节点续、续到哪个节点止);引擎校验节点存在。",
+        "context_overrides:篡改黑板的业务字段覆盖(场景 C 用),引擎校验只许业务字段。",
+        "human_input / human_response:HitL 人工答案(场景 A 用);human_input 是纯文本,缺 human_response 时后端包成 {content: human_input};human_response 是显式 dict(可含 content + tool_call_id),优先级更高。",
+        "ResumeReq model_config extra='forbid':拒绝未知字段,防误传。"
+      ],
+      "do": [
+        "一个端点统一收全局/节点级/HitL/篡改四种续跑请求。",
+        "透传定位 + 注入参数给 EngineAdapter.resume。"
+      ],
+      "dont": [
+        "不在端点层做续跑业务(端点只做请求校验 + 透传 + 错误码映射,续跑逻辑在引擎)。"
+      ],
+      "deviation": "无(端点契约本身已就绪);节点级范围参数虽已收下,真正「只重跑 X..Y」的跳跑编排在引擎侧仍 partial,见下『节点级定位参数』子模块。"
+    },
+    {
+      "name": "RuntimeStateStore 并发控制(lease / fencing)",
+      "code": "sidecar: core/adapters/engine.py EngineAdapter.resume + core/adapters/runtime_state_store_local.py LocalRuntimeStateStore",
+      "summary": "续跑全程持一把独占租约(lease)并 heartbeat 续租,用单调递增的 fencing token(防旧 worker 写入的栅栏令牌)挡掉过期/不匹配的写,保证同一 run 不被两个 worker 并发续跑写花。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "acquire_lease(run_id, owner_id, ttl_ms=30000):取独占租约;已有活跃租约被别的 owner 持有 → 抛 state.lease_conflict。",
+        "heartbeat(run_id, lease):续跑前/中续租;租约已非活跃(被栅栏) → 抛 state.lease_fenced。",
+        "snapshot(run_id, next_state, lease):成功后回写新运行态;fencing_token 比当前小 → 抛 state.lease_fenced。",
+        "release(run_id, lease):无论成功失败都在 finally 释放租约。",
+        "跨进程用 fcntl.flock(LOCK_EX) 文件锁 + 进程内 RLock 双层保护;_atomic_write_json 临时文件 + replace 原子落盘。"
+      ],
+      "do": [
+        "续跑全程持租约 + heartbeat + finally release。",
+        "用 fencing token 挡旧 worker 的过期写。"
+      ],
+      "dont": [
+        "不允许无租约 snapshot(抛 state.lease_required)。",
+        "不让两个 worker 并发续同一 run(lease_conflict)。"
+      ],
+      "deviation": "无 —— D10.1/D10.5 已落地:EngineAdapter.resume 已 acquire_lease/restore/heartbeat/snapshot/release 经 LocalRuntimeStateStore,跨进程 fcntl 锁已补。"
+    },
+    {
+      "name": "context_overrides 注入(篡改黑板)",
+      "code": "engine: core/runner.py _validate_resume_context_overrides + _apply_resume_context_overrides",
+      "summary": "把前端传的篡改黑板字段,经保留键黑名单校验后合并进 checkpoint 当前黑板(BusinessData),用 graph.update_state 写回,使续跑时下游读到篡改值。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "_validate_resume_context_overrides:只许业务字段,拒系统保留键(messages / tool_calls / checkpoint_ns / configurable / runtime / callbacks / compiled_graph)。",
+        "_apply_resume_context_overrides:取 checkpoint 当前 state 的 data(BusinessData,业务黑板)→ 用 overrides update → 重新 model_validate → graph.update_state 写回 {data: updated}。",
+        "若 checkpoint 已无 next(run 已结束),用 _override_source_node 按 io.outputs 推断写回到哪个节点(as_node)。"
+      ],
+      "do": [
+        "校验并合并篡改字段进黑板。",
+        "续跑下游读到篡改后的值。"
+      ],
+      "dont": [
+        "不允许覆盖系统保留键(只许业务字段)。"
+      ],
+      "deviation": "无 —— context_overrides 校验 + 合并写回已实现;前端篡改入口(N5.3#8)的编辑器组件偏差(Textarea 非 Monaco)是前端侧,不在本后端机制。"
+    },
+    {
+      "name": "human_response 注入(HitL 人工答案)",
+      "code": "engine: core/runner.py _apply_resume_human_response",
+      "summary": "把人工答案构造成对挂起工具调用(pending tool call)的回应消息(ToolMessage),经 graph.update_state 写回 messages,使续跑时 agent 收到「人类的回答」继续。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "human_response 须含 str 类型 content;sidecar 把纯文本 human_input 包成 {content: human_input}。",
+        "_apply_resume_human_response:在 checkpoint 里找到挂起的工具调用,把答案构造成 ToolMessage(content=答案)经 graph.update_state 写回 messages。",
+        "硬约束:checkpoint 里必须确有 pending tool call,否则抛 _ResumeInputError(无挂起调用不能注入)。",
+        "可携带 tool_call_id 定位多个挂起工具调用中的哪一个。"
+      ],
+      "do": [
+        "把人工答案注入成对挂起工具调用的 ToolMessage 回应。",
+        "支持 tool_call_id 定位多挂起调用。"
+      ],
+      "dont": [
+        "无挂起工具调用时不注入(抛 _ResumeInputError)。"
+      ],
+      "deviation": "⚠ 契约缺口:引擎注入原语(_apply_resume_human_response)已实现,但**暂停/续跑事件未闭环**——InterruptedEvent/ResumedEvent 在 callbacks/events.py 只有类定义、引擎从未构造发射;当前真实续跑事件是 sidecar run_manager 的 _resume_audit_event 入队的 event_type='resume_applied'(回显 checkpoint_id/ns),不是 'resumed'。故前端 HitL 暂停态缺真实事件源(latestHitlPrompt 匹配的 interrupted/hitl 在真跑中不会触发),需引擎补发 interrupted/resumed 或前端改用 resume_applied 语义。前端 UI 偏差(HitL 框位置 N5.2#5、篡改编辑器 N5.3#8)是另一层前端缺口。"
+    },
+    {
+      "name": "节点级定位参数(resume_from / to_node_id)",
+      "code": "engine: core/runner.py resume_skill + _validate_resume_node_ids / _validate_resume_checkpoint_targets",
+      "summary": "续跑请求可带起止节点;引擎校验节点在编译图中存在、校验 checkpoint 目标合法,但「只重跑 X..Y、1..X-1 走 checkpoint 不重跑」的实际跳跑编排仍交 LangGraph 路由,未见显式跳过逻辑。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "resume_skill 签名收 resume_from_node_id / resume_to_node_id,经 bridge 透传。",
+        "_validate_resume_node_ids:校验起止节点在编译图节点集合中存在。",
+        "_validate_resume_checkpoint_targets:校验图结构相对续跑目标合法。",
+        "续跑点最终由 checkpoint_id/checkpoint_ns + LangGraph 内置路由决定,graph.invoke(None, config) 从该配置续。"
+      ],
+      "do": [
+        "收下并校验起止节点参数。"
+      ],
+      "dont": [
+        "(目标但未完全保证)严格『1..X-1 走 checkpoint 不重跑』的跳跑编排。"
+      ],
+      "deviation": "⚠ partial:from/to_node_id 已被收下并校验,但「精准只重跑目标节点及下游、上游全部走 checkpoint 不重跑」的编排在引擎侧未见显式实现(交 LangGraph 路由),spec F2 要的『1..X-1 不重跑』尚不能由本契约严格保证,后端 D10.2 仍待收口。"
+    }
+  ],
+  "files": [],
+  "interface_groups": [
+    {
+      "key": "action",
+      "title": "动作类(触发真实续跑,改运行状态)",
+      "note": "这一类点了会**真的续跑**:持租约、注入篡改/答案、从 checkpoint 续、回写新快照。不是幂等查询,调用前后运行状态会变。"
+    },
+    {
+      "key": "query",
+      "title": "查询类(只读判定,不改状态)",
+      "note": "这一类只**读取判定**、不改任何运行状态:对一个 checkpoint/节点算出『能不能续、为什么不能』,供前端决定是否置灰[Resume]。幂等可重复调。"
+    }
+  ],
+  "interfaces": [
+    {
+      "group": "action",
+      "endpoint": "POST /api/skills/{skill_id}/runs/{run_id}/resume",
+      "req": "ResumeReq{checkpoint_id?, checkpoint_ns?, resume_from_node_id?, resume_to_node_id?, context_overrides?:dict, human_input?:str, human_response?:dict}(extra=forbid)",
+      "resp": "RunMetadata{run_id, status:running|success|failed, started_at, metrics?, input_summary='resumed', git_status?, artifact_ref?, source_map_ref?, execution_fingerprint?}",
+      "purpose": "四种续跑入口的统一动作端点:全局续(不带 node)、节点级续(带 resume_from_node_id)、HitL 注入(带 human_response)、篡改续跑(带 context_overrides)。",
+      "provider": "gateway 后端 sidecar 的 resume_run 路由 → EngineAdapter.resume(lease/fencing/restore/heartbeat/release)→ bridge → engine resume_skill",
+      "id": "iface-resume"
+    },
+    {
+      "group": "query",
+      "endpoint": "POST /api/skills/{skill_id}/runs/{run_id}/resume/validity",
+      "req": "ResumeValidityReq{checkpoint_id?, checkpoint_ns?, resume_from_node_id?, resume_to_node_id?}(与 resume 同的定位参数,无注入字段)",
+      "resp": "ResumeValidityResponse{run_id, resume_allowed:bool, reason:ok|dirty_upstream|checkpoint.not_found|checkpoint.invalid|state.not_found|artifact.invalid_ref|artifact.identity_mismatch|compile_failed, dirty_fields:[content_hash|execution_fingerprint], snapshot_content_hash, current_content_hash, snapshot_execution_fingerprint, current_execution_fingerprint}",
+      "purpose": "只读判定一个 checkpoint/节点能否续跑:重编译 skill 比对快照与当前的 content_hash(内容哈希)/execution_fingerprint(执行指纹),脏了返回 dirty_upstream + 脏字段,供前端置灰[Resume]。",
+      "provider": "gateway 后端 sidecar 的 resume_validity 路由 → EngineAdapter 重 restore + recompile 比对 content_hash/execution_fingerprint",
+      "id": "iface-validity"
+    }
+  ],
+  "boundaries": {
+    "do": [
+      "一个 resume 端点统一收四种续跑入口,透传定位 + 注入参数",
+      "续跑全程持 lease + heartbeat + finally release,fencing 挡旧 worker",
+      "引擎校验并注入 context_overrides(篡改)/ human_response(HitL),从 checkpoint 续",
+      "resume/validity 只读判定脏态(content_hash/execution_fingerprint 比对)供前端置灰"
+    ],
+    "dont": [
+      "端点不做续跑业务逻辑(只校验 + 透传 + 错误码映射)",
+      "不允许覆盖系统保留键(context_overrides 只许业务字段)",
+      "无挂起工具调用时不注入 human_response(抛 _ResumeInputError)",
+      "(目标未完全保证)节点级『1..X-1 严格不重跑』编排引擎侧仍 partial"
+    ]
+  },
+  "rule_sections": [
+    {
+      "title": "resume(动作端点)错误码 → HTTP 映射",
+      "note": "resume_run(routers/runs.py)把 state.* 错误按 STANDARD_ERROR_MAP(exceptions.py)透传,其余非 state 错误(含 artifact.*、engine.resume_failed)统一包成 RESUME_CHECKPOINT_NOT_FOUND(条件 → 结果):",
+      "rules": [
+        [
+          "state.lease_conflict / lease_fenced / lease_required / release_failed",
+          "409"
+        ],
+        [
+          "state.not_found(无运行态快照)",
+          "404"
+        ],
+        [
+          "state.invalid_checkpoint(快照缺 checkpoint_id)",
+          "422"
+        ],
+        [
+          "其余非 state(含 artifact.* 与 engine.resume_failed)",
+          "包成 RESUME_CHECKPOINT_NOT_FOUND → 404(注:此码在 exceptions.py 定义为 404,非 422)"
+        ]
+      ]
+    },
+    {
+      "title": "resume/validity(查询端点)判定 → reason / HTTP",
+      "note": "validity 的多数结果是 200 响应里的 reason(resume_allowed=false),**不抛 HTTP 错误**;artifact.invalid_ref / artifact.identity_mismatch 也是 200 的 reason,不是 HTTP artifact 错误。非 state 异常走 standard_http_exception('RESUME_VALIDITY_FAILED'),该码已在后端 STANDARD_ERROR_MAP 注册为 **422 · not_retryable**:",
+      "rules": [
+        [
+          "content_hash + execution_fingerprint 都一致",
+          "200 · reason=ok(resume_allowed=true)"
+        ],
+        [
+          "上游变脏 / checkpoint 缺失或损坏 / artifact.invalid_ref / identity_mismatch / compile_failed",
+          "200 · reason=对应枚举(resume_allowed=false)"
+        ],
+        [
+          "state.* 异常",
+          "透传对应 HTTP(同 resume 动作端点)"
+        ],
+        [
+          "其余非 state 异常",
+          "RESUME_VALIDITY_FAILED → 422 · not_retryable(已注册进 STANDARD_ERROR_MAP)"
+        ]
+      ]
+    }
+  ],
+  "backend_status": [
+    {
+      "item": "resume 端点 + lease/fencing 并发控制(D10.1 / D10.5)",
+      "d12": "D10「Resume/checkpoint」",
+      "status": "ok",
+      "note": "生产 resume 已经 RuntimeStateStore:EngineAdapter.resume 走 acquire_lease/restore/heartbeat/snapshot/release,跨进程 fcntl 锁已补,错误码 state.lease_conflict/lease_fenced 完整。注:后端实施手册 D10 早期文本曾标 bad(称生产 resume 绕过 RuntimeStateStore),源码已落地,属手册文本滞后于代码。",
+      "ref": "d10"
+    },
+    {
+      "item": "context_overrides(篡改)/ human_response(HitL)注入(D10.3 / D10.4)",
+      "d12": "D10「Resume/checkpoint」",
+      "status": "partial",
+      "note": "引擎注入原语均已实现:_validate/_apply_resume_context_overrides(篡改,只许业务字段、合并写回黑板)、_apply_resume_human_response(HitL,构造 ToolMessage 注入,需挂起工具调用)。⚠ 但 HitL 暂停/恢复事件未闭环:InterruptedEvent/ResumedEvent 仅有类定义、从未发射;真实续跑事件是 run_manager 入队的 resume_applied(非 resumed)。故 D10.3「续跑后 trace/WS 闭环 + 暂停事件源」仍为 partial,不是 ok。前端 UI 偏差另算。",
+      "ref": "d10"
+    },
+    {
+      "item": "节点级续跑『1..X-1 不重跑』编排(D10.2)",
+      "d12": "D10「Resume/checkpoint」",
+      "status": "partial",
+      "note": "resume 端点与 resume_skill 已收并校验 resume_from_node_id/resume_to_node_id(_validate_resume_node_ids),resume/validity 已能判脏态;但「精准只重跑目标节点及下游、上游严格走 checkpoint 不重跑」的跳跑编排引擎侧未见显式实现(交 LangGraph 路由),spec F2『1..X-1 不重跑』尚不能由本契约严格保证,待 D10.2 收口。",
+      "ref": "d10"
+    }
+  ]
+}

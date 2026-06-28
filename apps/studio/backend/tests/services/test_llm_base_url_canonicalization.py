@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from graph_agent_gateway.registry.route_identity import stable_endpoint_id
+
 
 def test_upsert_endpoints_persists_protocol_canonical_base_urls(tmp_path: Path) -> None:
     from app.services.llm_credentials import upsert_endpoints
@@ -45,10 +47,24 @@ def test_upsert_endpoints_persists_protocol_canonical_base_urls(tmp_path: Path) 
 
     payload = json.loads(path.read_text(encoding="utf-8"))
     saved = payload["provider_endpoints"]
-    assert saved["wavespeed-anthropic"]["base_url"] == "https://llm.wavespeed.ai"
-    assert saved["deepseek-anthropic"]["base_url"] == "https://api.deepseek.com/anthropic"
-    assert saved["ark-runtime"]["base_url"] == "https://ark.cn-beijing.volces.com/api/v3"
-    assert saved["openai-compatible"]["base_url"] == "https://api.openai.example/v1"
+
+    # WaveSpeed has no curated/official mapping → endpoint_id is derived from
+    # the canonical (protocol, base_url) pair by stable_endpoint_id.
+    wavespeed_persisted_id = stable_endpoint_id(
+        protocol="anthropic_compatible", base_url="https://llm.wavespeed.ai"
+    )
+    assert saved[wavespeed_persisted_id]["base_url"] == "https://llm.wavespeed.ai"
+
+    # DeepSeek and Ark hosts are recognized as official providers, so the
+    # incoming endpoint_id is rewritten to the curated `*-official` id.
+    assert saved["deepseek-official"]["base_url"] == "https://api.deepseek.com/anthropic"
+    assert saved["ark-official"]["base_url"] == "https://ark.cn-beijing.volces.com/api/v3"
+
+    # Generic openai-compatible endpoints also flow through stable_endpoint_id.
+    openai_persisted_id = stable_endpoint_id(
+        protocol="openai_compatible", base_url="https://api.openai.example/v1"
+    )
+    assert saved[openai_persisted_id]["base_url"] == "https://api.openai.example/v1"
 
 
 def test_upserted_canonical_base_url_is_what_resolver_reads(tmp_path: Path) -> None:
@@ -69,11 +85,17 @@ def test_upserted_canonical_base_url_is_what_resolver_reads(tmp_path: Path) -> N
         },
         path=path,
     )
+
+    # Routes must reference the persisted endpoint_id, not the caller-supplied one.
+    persisted_endpoint_id = stable_endpoint_id(
+        protocol="anthropic_compatible", base_url="https://llm.wavespeed.ai"
+    )
+    route_id = f"{persisted_endpoint_id}:claude"
     upsert_routes(
         {
-            "wavespeed-anthropic:claude": {
-                "route_id": "wavespeed-anthropic:claude",
-                "endpoint_id": "wavespeed-anthropic",
+            route_id: {
+                "route_id": route_id,
+                "endpoint_id": persisted_endpoint_id,
                 "route_slug": "claude",
                 "provider_model_id": "claude",
                 "canonical_id": "claude",
@@ -90,7 +112,7 @@ def test_upserted_canonical_base_url_is_what_resolver_reads(tmp_path: Path) -> N
         provider_routes=credentials.provider_routes,
         roles={
             "graph_agent": RoleEntry(
-                fallback_chain=[RoleRouteEntry(route_id="wavespeed-anthropic:claude")]
+                fallback_chain=[RoleRouteEntry(route_id=route_id)]
             )
         },
     )
@@ -98,7 +120,7 @@ def test_upserted_canonical_base_url_is_what_resolver_reads(tmp_path: Path) -> N
     resolved = resolve_role(snapshot, "graph_agent")
 
     assert (
-        credentials.provider_endpoints["wavespeed-anthropic"].base_url
+        credentials.provider_endpoints[persisted_endpoint_id].base_url
         == "https://llm.wavespeed.ai"
     )
     assert resolved.routes[0].base_url == "https://llm.wavespeed.ai"
@@ -137,7 +159,15 @@ def test_v3_migration_persists_protocol_canonical_base_url(tmp_path: Path) -> No
 
     migrated = migrate_v3_credentials_to_v4(path)
 
-    assert migrated.provider_endpoints["wavespeed-prod"].base_url == "https://llm.wavespeed.ai"
+    # WaveSpeed has no curated/official mapping → the v3 id is rewritten by
+    # stable_endpoint_id on migration.
+    wavespeed_persisted_id = stable_endpoint_id(
+        protocol="anthropic_compatible", base_url="https://llm.wavespeed.ai"
+    )
+    assert migrated.provider_endpoints[wavespeed_persisted_id].base_url == "https://llm.wavespeed.ai"
+
+    # Ark host is recognized as official → id is rewritten to `ark-official`
+    # (matches the incoming v3 id in this fixture, but the derivation runs).
     assert (
         migrated.provider_endpoints["ark-official"].base_url
         == "https://ark.cn-beijing.volces.com/api/v3"

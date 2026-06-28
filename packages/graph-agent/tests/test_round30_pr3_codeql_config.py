@@ -56,7 +56,7 @@ def test_codeql_analyze_job_uses_init_and_analyze_v4() -> None:
     assert analyze_job["runs-on"] == "ubuntu-latest"
 
     steps = analyze_job["steps"]
-    assert any(step.get("uses") == "actions/checkout@v4" for step in steps)
+    assert any(step.get("uses") == "actions/checkout@v7" for step in steps)
 
     init_steps = [step for step in steps if step.get("uses") == "github/codeql-action/init@v4"]
     assert len(init_steps) == 1

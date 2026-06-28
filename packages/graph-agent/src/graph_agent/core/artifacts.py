@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import io
 import json
 import logging
+import tempfile
+import zipfile
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -40,6 +43,7 @@ class CompiledArtifactManifest(BaseModel):
     execution_fingerprint: str
     source_map_ref: str
     diagnostics: list[dict[str, Any]] = Field(default_factory=list)
+    artifact_bytes: bytes | None = Field(default=None, exclude=True)
 
 
 class ArtifactBytes(BaseModel):
@@ -129,12 +133,29 @@ def _build_source_map(source_path: Path) -> dict[str, Any]:
     }
 
 
+def _build_artifact_archive(source_path: Path, relative_paths: list[str]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_STORED) as archive:
+        for rel_path in relative_paths:
+            zip_info = zipfile.ZipInfo(rel_path)
+            zip_info.date_time = (1980, 1, 1, 0, 0, 0)
+            zip_info.compress_type = zipfile.ZIP_STORED
+            zip_info.external_attr = 0o644 << 16
+            archive.writestr(zip_info, (source_path / rel_path).read_bytes())
+    return buffer.getvalue()
+
+
+def _default_artifact_output_root() -> Path:
+    return Path(tempfile.gettempdir()) / "graph_agent" / "artifacts"
+
+
 def compile_artifact(
     *,
     source_root: str | Path,
     skill_resolver: SkillResolverProtocol,
     store: Literal["ephemeral", "product"] = "ephemeral",
     version: str | None = None,
+    artifact_output_root: str | Path | None = None,
 ) -> CompiledArtifactManifest:
     source_path = Path(source_root)
 
@@ -155,15 +176,9 @@ def compile_artifact(
     relative_paths.sort()
 
 
-    # 3. Compute deterministic content_hash
-    content_hasher = hashlib.sha256()
-    for rel_path in relative_paths:
-        content_hasher.update(rel_path.encode("utf-8"))
-        p = source_path / rel_path
-        content = p.read_bytes()
-        content_hasher.update(len(content).to_bytes(8, "big"))
-        content_hasher.update(content)
-    content_hash_hex = content_hasher.hexdigest()
+    # 3. Build the deterministic executable artifact bytes and hash that product payload.
+    artifact_bytes = _build_artifact_archive(source_path, relative_paths)
+    content_hash_hex = hashlib.sha256(artifact_bytes).hexdigest()
     content_hash = f"sha256:{content_hash_hex}"
 
     # 4. Compute deterministic execution_fingerprint excluding metadata.ui
@@ -198,7 +213,8 @@ def compile_artifact(
         fingerprint_hasher.update(content)
     execution_fingerprint = f"sha256:{fingerprint_hasher.hexdigest()}"
 
-    objects_dir = source_path / ".graph_agent" / "artifacts" / content_hash_hex
+    objects_root = Path(artifact_output_root) if artifact_output_root is not None else _default_artifact_output_root()
+    objects_dir = objects_root / content_hash_hex
     objects_dir.mkdir(parents=True, exist_ok=True)
     source_map_path = objects_dir / "source_map.json"
     manifest_path = objects_dir / "manifest.json"
@@ -217,6 +233,7 @@ def compile_artifact(
         execution_fingerprint=execution_fingerprint,
         source_map_ref=artifact_ref.source_map_ref,
         diagnostics=[],
+        artifact_bytes=artifact_bytes,
     )
 
     source_map_path.write_text(

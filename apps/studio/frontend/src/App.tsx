@@ -12,14 +12,14 @@ export function App() {
   useEditablePasteShortcut()
 
   return (
-    <TooltipProvider delayDuration={0}>
+    <TooltipProvider>
       <RuntimeGate>
         <Workspace
           skillId={currentSkillId}
           onSelectSkill={setCurrentSkillId}
           onCloseSkill={() => setCurrentSkillId(null)}
         />
-        <Toaster position="bottom-right" />
+        <Toaster position="top-right" />
       </RuntimeGate>
     </TooltipProvider>
   )

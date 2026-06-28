@@ -18,7 +18,7 @@ The runtime source files are:
 
 - `<studio_config_dir>/llm/llm_credentials.json`: active endpoint credentials, physical routes, and `runtime_policy`.
 - `<studio_config_dir>/llm/llm_roles.yaml`: active model profiles and role fallback chains by exact `route_id`.
-- `<studio_config_dir>/llm/llm_import_drafts.json` or backend job storage: transient Agent import drafts.
+- `<studio_config_dir>/llm/llm_probe_catalog.json`: shared Probe Knowledge Catalog evidence for endpoint/model/capability probing. Legacy installs may still override the same store with `STUDIO_LLM_IMPORT_DRAFTS_PATH`; new code should use `STUDIO_LLM_PROBE_CATALOG_PATH`.
 
 `studio_config_dir` is resolved by `apps/studio/backend/app/core/paths.app_settings_dir`: `STUDIO_CONFIG_DIR` when set, otherwise the platform application-support directory used by Studio.
 
@@ -30,7 +30,8 @@ Optional active override paths:
 
 - `STUDIO_LLM_CREDENTIALS_PATH`
 - `STUDIO_LLM_ROLES_PATH`
-- `STUDIO_LLM_IMPORT_DRAFTS_PATH`
+- `STUDIO_LLM_PROBE_CATALOG_PATH`
+- `STUDIO_LLM_IMPORT_DRAFTS_PATH` (legacy alias for the probe catalog store)
 - `STUDIO_LLM_CANONICAL_RULES_PATH`
 
 ## Startup Behavior

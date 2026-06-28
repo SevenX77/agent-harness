@@ -1,0 +1,792 @@
+{
+  "page": "roles",
+  "glossary": [
+    {
+      "id": "role",
+      "term": "角色（Role）",
+      "category": "领域概念",
+      "owner": "跨层（概念归 ③b；编辑 UI 归 ① 前端；存储归 ③a）",
+      "explain": "一个有名字的「岗位」，比如 graph-agent（跑工作流的智能体）。用户给这个岗位配一串可用模型，岗位运行时就按这串顺序去找能用的模型。本页只管 graph-agent 这类角色，copilot（聊天助手）那类被父层按类型挡掉不在这显示。角色这个「编排结构 + 意图」是 gateway materialize 内核认得的通用概念（③b 看得到结构和意图，看不到用户怎么拖拽编辑出它）。",
+      "detail": [
+        [
+          "澄清",
+          "抽象岗位名 → 一串模型 + 兜底顺序；本页只显 graph-agent 类"
+        ],
+        [
+          "分层",
+          "编排结构属 ③b 通用概念；拖拽编辑 UI 属 ① 前端；落盘 llm_roles.yaml 经 ③a"
+        ]
+      ]
+    },
+    {
+      "id": "model-group",
+      "term": "模型组（Model Group）",
+      "category": "领域概念",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "把右侧某个可用模型拖进角色后，在角色卡里生成的一组配置：包含这个模型 + 它在各个 provider（供应渠道，如官方 API、第三方代理）上的若干条线路。角色卡里一行就是一个模型组。「把可用 route 归并成 model group + identity 识别」这套分组按设计是 ③b 公共能力内核（任何 app 复用）；现码散在 ③a 待下沉。前端只渲染分组结果。",
+      "detail": [
+        [
+          "定义层",
+          "③b gateway（model group 分组 + identity 识别；现散 ③a 待下沉）"
+        ],
+        [
+          "复用范围",
+          "本页角色卡每行 + 右侧侧栏分组；Copilot 页选组也复用同一分组"
+        ]
+      ]
+    },
+    {
+      "id": "fallback-chain",
+      "term": "兜底链（fallback chain）",
+      "category": "领域概念",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "把角色里的多个模型、每个模型的多条 provider 线路，按用户排好的先后顺序拉成一条长队列。引擎运行时从队头开始试，第一条不行就退到下一条，直到有一条成功——这就是「兜底」。第一个模型即默认主模型（active_model）。这条拍平的有序队列是 materialize 编排内核的产物（属 ③b 公共能力），前端编排的是层级结构、不直接编辑这条链。",
+      "detail": [
+        [
+          "澄清",
+          "拍平的有序尝试队列；队头=active_model 默认主模型"
+        ],
+        [
+          "产出层",
+          "③b materialize 编排内核（现散 ③a 待下沉）"
+        ]
+      ]
+    },
+    {
+      "id": "route",
+      "term": "线路（route）",
+      "category": "领域概念",
+      "owner": "跨层（概念归 ③b；存储归 ③a）",
+      "explain": "一条「用哪个模型 + 走哪个 endpoint 凭证」的具体可执行路径，是兜底链里最小的一格。比如「claude-sonnet 走官方 API」是一条线路，「同一个 claude-sonnet 走某代理」是另一条线路。route 是 gateway 的一等概念（route 级 API、route probe、6 态都挂在 route 上）。",
+      "detail": [
+        [
+          "澄清",
+          "兜底链最小单位 = 模型 × endpoint；gateway 一等概念"
+        ],
+        [
+          "分层",
+          "解析/probe/状态归 ③b；落盘随角色经 ③a"
+        ]
+      ]
+    },
+    {
+      "id": "materialize",
+      "term": "物化（materialize）",
+      "category": "后端能力",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "用户在界面上是分层编排的（角色 → 几个模型组 → 每个模型组下几个 provider，还带开关和偏好）。引擎不认这种嵌套结构，只认一条拍平的、按序尝试的线路队列。「物化」就是把用户编排的这套层级结构、连同各种开关偏好，拍平翻译成引擎能直接照着跑的兜底链，同时产出 role-fit/降级诊断报告。这是 gateway 的「materialize 编排内核」，按设计是 ③b 公共能力（换个 app 复用）；现码在 ③a 的 llm_role_materializer 待下沉。每次保存角色时跑一遍。",
+      "detail": [
+        [
+          "定义层",
+          "③b gateway（materialize 编排内核；现码 llm_role_materializer 在 ③a 待下沉）"
+        ],
+        [
+          "复用范围",
+          "本页所有保存动作（#33/#36-#43）+ 模型束物化 + Copilot 角色物化都跑它"
+        ]
+      ]
+    },
+    {
+      "id": "six-states",
+      "term": "6 态（provider 线路连通状态，six-state）",
+      "category": "后端能力",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "每条 provider 线路当前能不能用，用 6 种状态描述：ready（绿，刚测通）、historical_ready（蓝，以前通过但这次没重测）、untested（灰，从没测过）、failed（红，出错要修，附原因如缺配置/连不上）、cooling_down（灰+倒计时，熔断冷却中）、off（灰，被关掉或下线）。这套 6 态标准总结按设计是 ③b 公共能力内核（gateway 客观状态 + 熔断衍生），三页统一；现码 project_provider_model_state 在 ③a 待下沉。前端只投影渲染颜色。与 API Keys 页的 six-state 是同一套体系、归属一致。",
+      "detail": [
+        [
+          "定义层",
+          "③b gateway（6 态标准总结；现码在 ③a 待下沉）"
+        ],
+        [
+          "复用范围",
+          "三页统一状态色；本页右侧侧栏 + role-fit 灯底层都读它"
+        ]
+      ]
+    },
+    {
+      "id": "role-fit",
+      "term": "role-fit（角色适配诊断）",
+      "category": "后端能力",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "在某个角色的语境下，判断每条线路「能不能胜任这个角色的要求」的诊断结果，分 Using（在用）/Downgraded（能用但降级，比如达不到偏好）/Needs Test（要先测）/Not Fit（不适配，比如角色要求必须支持推理但模型不支持）。这和 6 态不同：6 态只看「线路本身通不通」（全局 health），role-fit 还叠加「这个角色对它的额外要求」（role-local 派生，从不改全局 health）。诊断由 materialize 物化时生成（属 ③b 编排内核），随角色对象返回，前端只读着点亮状态灯。",
+      "detail": [
+        [
+          "定义层",
+          "③b gateway（materialize 产 role_fit 诊断；现散 ③a 待下沉）"
+        ],
+        [
+          "复用范围",
+          "本页 #45 状态灯 + tooltip；role-local，不污染全局 6 态"
+        ]
+      ]
+    },
+    {
+      "id": "model-bundle",
+      "term": "模型束（Model Bundle）",
+      "category": "领域概念",
+      "owner": "跨层（束物化内核归 ③b；编辑 UI 归 ① 前端；存储归 ③a）",
+      "explain": "一个可跨角色复用的「模型组合包」：预先排好一串模型 + provider + 兜底顺序，存成一个有名字的束。建好后可整包拖进多个角色，省得每个角色重配一遍。设计上束和角色用同一套编辑器，束里不能再嵌套束。设计要求束拖进角色是「引用」而非快照——改束 → 所有引用它的角色同步跟着变（现码是快照复制，属头号偏差，见 #51）。束的物化（materialize_model_bundle）属 ③b 编排内核。",
+      "detail": [
+        [
+          "澄清",
+          "可跨角色复用的预排模型组合；束内不嵌套束；拖入角色应为引用（现码快照待修）"
+        ],
+        [
+          "分层",
+          "束物化内核归 ③b；编辑复用 role 编辑器（① 前端）；落盘随 llm_roles.yaml 经 ③a"
+        ]
+      ]
+    },
+    {
+      "id": "llm-roles-yaml",
+      "term": "llm_roles.yaml（角色落盘文件）",
+      "category": "数据文件",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "所有角色、模型束的持久化存储文件，放在 AgentStudio/llm/ 目录下。每次保存角色都原子写入（先写临时文件再替换，避免写一半损坏）。运行时算出来的投影字段（如状态、诊断）有一部分不写进 YAML、只在响应里带。schema 由 ③b gateway 库定义、数据归 ③b；路径由 ③a 的 llm_paths（roles_path）定；读写由 ③a Studio 后端经存储缝执行。跨页（Roles / Copilot）是同一份文件、归属一致。",
+      "detail": [
+        [
+          "Schema 定义",
+          "③b gateway 库"
+        ],
+        [
+          "文件路径定义",
+          "③a（llm_paths.roles_path）"
+        ],
+        [
+          "读写",
+          "③a Studio backend 经 storage seam（预留 user_id）"
+        ],
+        [
+          "文件归属",
+          "③b gateway-owned 数据"
+        ]
+      ]
+    },
+    {
+      "id": "storage-seam",
+      "term": "存储缝（gateway storage seam）",
+      "category": "领域概念",
+      "owner": "跨层（数据归属边界：③b-owned 数据，③a 经适配器跨缝读写）",
+      "explain": "角色/凭证数据的归属边界：数据文件和物化逻辑算 ③b gateway 的地盘（gateway-owned 数据 + 编排内核），③a Studio 后端只是经一个适配器跨过这道缝去调用、并落到具体存储介质（存哪个文件是 ③a 的应用加工）。本页大量动作都是「③a 提供 HTTP 端点，但底下的角色数据和物化逻辑归 ③b」。存储缝还预留了多用户 user_id。",
+      "detail": [
+        [
+          "澄清",
+          "数据归属边界：③b-owned 数据/物化 vs ③a 跨缝读写 + 选存储介质"
+        ],
+        [
+          "预留",
+          "存储缝预留 user_id（多用户）"
+        ]
+      ]
+    },
+    {
+      "id": "put-roles-merge",
+      "term": "整表 upsert（PUT /llm/roles 的合并语义）",
+      "category": "接口",
+      "owner": "③a Studio",
+      "explain": "本页几乎所有「改了什么」的保存动作都走同一个端点：把整份角色数据（所有角色+所有束）提交上去，③a 按「合并」方式落盘——提交体里有的键覆盖，没提到的角色保留。所以删一个角色/束，前端要主动把它从提交体里去掉，而不是发删除信号（真删单个走 DELETE /llm/roles/{name}）。端点由 ③a 提供；落盘后由 ③b materialize 物化、写入 ③b-owned 的 llm_roles.yaml。",
+      "detail": [
+        [
+          "契约 / DTO",
+          "整份 roles+bundles 提交，merge 语义（缺席=保留，非删除）；真删走 DELETE /llm/roles/{name}"
+        ],
+        [
+          "谁提供",
+          "③a Studio（落盘后触发 ③b materialize）"
+        ]
+      ]
+    },
+    {
+      "id": "available-models-sidebar",
+      "term": "可用模型侧栏（AvailableModelsSidebar）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "页面右侧那一栏，列出当前所有可用的模型（按厂商/系列分组，带 6 态色标），是用户往角色里拖模型的来源。顶部有搜索框（纯前端过滤），束也置顶在这栏里供拖入角色。纯前端组件，渲染的分组与状态数据来自 ③a 投影的 DTO（底层 ③b 的 model group 分组 + 6 态）。",
+      "detail": [
+        [
+          "定义层",
+          "① 前端（侧栏组件 + 纯前端搜索过滤）"
+        ],
+        [
+          "复用范围",
+          "本页 #32 加载、#34 搜索、#35 展开状态、#36 拖入来源；束也置顶其中"
+        ]
+      ]
+    },
+    {
+      "id": "role-editor-set",
+      "term": "角色卡编辑器（ModelItem / ProviderChain / RoleSettingsPanel 复用组）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "角色卡内部那套编辑控件：单行模型、模型的 provider 兜底链、角色设置面板（开关+意图）。模型束卡复用了同一套，所以束和角色的编辑体验一致。是本页真正被多处复用的前端抽象。其中 intent 控件由 ③b 的 build_runtime_setting_descriptors（能力描述符）驱动，但控件本身是前端 UI。",
+      "detail": [
+        [
+          "定义层",
+          "① 前端（角色卡内编辑控件组；intent 控件由 ③b 描述符驱动）"
+        ],
+        [
+          "复用范围",
+          "本页 #36-#48 角色编辑 + #50 模型束编辑复用同一套"
+        ]
+      ]
+    },
+    {
+      "id": "registry",
+      "term": "模型清册（GET /llm/registry）",
+      "category": "接口",
+      "owner": "③a Studio",
+      "explain": "返回所有可用模型分组、每条 provider 线路的 6 态状态、以及每条线路探测到的能力（如最大输出/上下文 token 上限）。右侧可用模型侧栏的内容、以及角色里 token 上限摘要的数值，都来自这份清册。端点由 ③a 提供；返回的分组/6 态/能力数据投影自 ③b 的公共能力内核（model group 分组、6 态总结、capability 归一化）。",
+      "detail": [
+        [
+          "契约 / DTO",
+          "RegistrySnapshot（model_groups + 每 route 的 ui_state 6 态 + capability，api_key redacted）"
+        ],
+        [
+          "谁提供",
+          "③a Studio（数据投影自 ③b 内核）"
+        ]
+      ]
+    }
+  ],
+  "atoms": [
+    {
+      "n": 32,
+      "cap": "role-list-load",
+      "track": null,
+      "marker": "live",
+      "module": "角色管理",
+      "func": "进 Roles 标签时，让用户一眼看到已建好的角色（每个角色一张卡）和右侧可拖入的全部可用模型，作为配置角色→模型兜底链的起点。",
+      "action": "点顶部 Roles 标签进入（懒加载，切到才拉数据）。",
+      "fe_logic": "切到 Roles 标签 → 左栏渲染角色卡列表 + 右栏渲染 [[available-models-sidebar]] → 数据没回来前先显骨架屏占位 → 父层把 copilot 那类角色按类型挡掉，本标签只显 graph-agent 角色。",
+      "fe_modules": [
+        "available-models-sidebar"
+      ],
+      "be_logic": "后端（③a Studio）读 [[llm-roles-yaml]] 和凭证文件 → 逐个角色跑一遍 [[materialize]]（只有挂了模型的角色才物化出兜底链和诊断报告，空角色原样返回）→ 右侧可用模型则是把所有可用 [[route]] 归并成模型组列表。整个加载只读不写盘。",
+      "be_api": [
+        {
+          "endpoint": "GET /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "返回全部角色，每个角色带类型、模型组、物化出的兜底链和诊断报告",
+          "connected": "已接通"
+        },
+        {
+          "endpoint": "GET /llm/registry",
+          "owner": "③a Studio",
+          "purpose": "返回可用模型分组 + 每条线路的 6 态，供右侧侧栏用",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计（§7.3 R1：进 tab 渲染角色卡+侧栏）。"
+    },
+    {
+      "n": 33,
+      "cap": "role-create",
+      "track": null,
+      "marker": "live",
+      "module": "角色管理",
+      "func": "让用户新建一个空角色（先起名、暂不挂模型），之后再往里拖模型，符合“允许建无模型空壳角色”的设计。",
+      "action": "点 Add Graph Agent Role → 弹框输入角色名 → 确认。",
+      "fe_logic": "点新建 → 弹框收角色名 → 把这个空角色塞进角色字典 → 整份数据上抛保存。",
+      "fe_modules": [],
+      "be_logic": "走 [[put-roles-merge]] 整表合并保存 → 这个角色没挂任何模型 → 跳过 [[materialize]]（没有模型组可拍平）→ 原样原子写进 [[llm-roles-yaml]]。",
+      "be_api": [
+        {
+          "endpoint": "PUT /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "整表合并保存全部角色，此动作新增一个空角色",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计（§2.2 step1：新建 role 允许空壳）。"
+    },
+    {
+      "n": 34,
+      "cap": "available-models-search",
+      "track": null,
+      "marker": "live",
+      "module": "可用模型侧栏",
+      "func": "可用模型列表很长时，让用户用关键词快速定位某个模型/厂商/模型 id，不必上下翻。",
+      "action": "在右侧 Available Models 顶部搜索框输入关键词（支持多词）。",
+      "fe_logic": "输入关键词 → 纯前端按模型名/规范 id/provider 标签/provider 的模型 id 等多个字段做多词匹配过滤 → 不可匹配的隐藏。全程不碰后端（③a Studio）。",
+      "fe_modules": [
+        "available-models-sidebar"
+      ],
+      "be_logic": "无，纯前端过滤。",
+      "be_api": [],
+      "gap": "符合设计（§6.2 R3：搜模型=纯前端）。"
+    },
+    {
+      "n": 35,
+      "cap": "available-model-provider-states",
+      "track": null,
+      "marker": "live",
+      "module": "可用模型侧栏",
+      "func": "让用户展开一张模型卡，看到该模型在各个 provider 渠道上的连通状态（6 态），从而知道哪条 provider 线路可用、为什么某条缺失。",
+      "action": "点一张模型卡展开（展开后显示该模型全部 provider 标签 + 各自状态文字）。",
+      "fe_logic": "点开模型卡 → 逐个 provider 渲染一枚带 [[six-states]] 颜色的标签 → 不丢任何状态：连出错的(failed)、被关的(off)也照常列出来，让用户看见“缺”的原因。",
+      "fe_modules": [
+        "available-models-sidebar"
+      ],
+      "be_logic": "后端（③a Studio）把每个模型组投成可显示的数据 → 每条 [[route]] 调 gateway 的状态投影算出 [[six-states]] → 缺配置/配错记为 failed 并带原因、下线/关记为 off，都照常返回不过滤。只读不写盘。状态枚举本体归 ③b gateway。",
+      "be_api": [
+        {
+          "endpoint": "GET /llm/registry",
+          "owner": "③a Studio",
+          "purpose": "返回每条 provider 线路的 6 态 + 原因码",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "catalog 旧标已过时——它说“needs_setup/off 被静默过滤、看不到为何缺”，但已核对当前代码：状态枚举已是 6 态（无 needs_setup，配置缺口归 failed🔴+原因、下线归 off），后端（③a Studio）也不再按状态过滤 provider，缺/错都照常显示。残留偏差很小：展开卡只显状态文字（Ready/Failed…），还没做 §2.1 要求的“failed 行点一下去 API Keys 页配置”的跳转入口。"
+    },
+    {
+      "n": 36,
+      "cap": "role-model-map-drag",
+      "track": null,
+      "marker": "live",
+      "module": "兜底链编辑",
+      "func": "让用户把右侧某个可用模型拖进角色卡，自动在该角色下建一组模型组，并按默认策略把可用的 provider 选在前，省去手挑。",
+      "action": "从右侧 Available Models 拖一张模型卡，松手到某张角色卡上。",
+      "fe_logic": "拖一张模型卡 → 松手命中某角色卡 → 在该角色下新建一组 [[model-group]]，把这个模型的 provider 线路写进去，并按默认策略排序（可用的 ready/untested/蓝排前、排除 failed/off）→ 整份数据上抛保存。",
+      "fe_modules": [
+        "role-editor-set"
+      ],
+      "be_logic": "保存走 [[put-roles-merge]] → 对该角色跑 [[materialize]] 重排兜底链 → 原子写 [[llm-roles-yaml]]。默认 provider 选择算法前端与后端（③b gateway）两侧都实现（前端给即时反馈、后端（③b gateway）物化时再算一遍）。",
+      "be_api": [
+        {
+          "endpoint": "PUT /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "整表合并保存，此动作把新模型组的线路写进目标角色",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计（§2.2 step2 + §7.3 #36）。"
+    },
+    {
+      "n": 37,
+      "cap": "role-model-reorder",
+      "track": null,
+      "marker": "live",
+      "module": "兜底链编辑",
+      "func": "当一个角色挂了多个模型时，让用户拖动调整模型之间的兜底先后（谁先试），第一个即默认主模型。",
+      "action": "在角色卡内按住一行模型上下拖，改模型顺序。",
+      "fe_logic": "在角色卡内上下拖一行模型 → 重排该角色内模型组的先后顺序 → 第一位自动同步成默认主模型 → 上抛保存。",
+      "fe_modules": [
+        "role-editor-set"
+      ],
+      "be_logic": "保存走 [[put-roles-merge]] → 对该角色跑 [[materialize]]，按新模型顺序重排兜底链 → 原子写 [[llm-roles-yaml]]。",
+      "be_api": [
+        {
+          "endpoint": "PUT /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "整表合并保存，此动作改该角色模型组的顺序",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计（§7.3 #37：active_model 永远同步第一个）。"
+    },
+    {
+      "n": 38,
+      "cap": "role-provider-reorder",
+      "track": null,
+      "marker": "live",
+      "module": "兜底链编辑",
+      "func": "在某一个模型行内，让用户拖动该模型的多个 provider 标签调它们之间的兜底先后（只影响这个模型的 provider 链）。",
+      "action": "在某模型行的 provider 标签区按住一个 provider 标签拖动排序。",
+      "fe_logic": "在某模型行内拖动一个 provider 标签 → 重排这个模型自己的 provider 兜底顺序（不影响别的模型）→ 上抛保存。",
+      "fe_modules": [
+        "role-editor-set"
+      ],
+      "be_logic": "保存走 [[put-roles-merge]] → 对该角色跑 [[materialize]]，按新 provider 顺序重排这个模型在兜底链里的若干条线路 → 原子写 [[llm-roles-yaml]]。",
+      "be_api": [
+        {
+          "endpoint": "PUT /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "整表合并保存，此动作改某模型内 provider 线路的顺序",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计（§7.3 #38）。"
+    },
+    {
+      "n": 39,
+      "cap": "role-provider-add-remove",
+      "track": null,
+      "marker": "live",
+      "module": "兜底链编辑",
+      "func": "让用户给某个模型补加一条还没用上的 provider 线路，或用垃圾桶删掉某条 provider，从而手工增删该模型的兜底来源。",
+      "action": "点模型行内 Add provider 下拉选一个 provider 补加；或点某 provider 标签上的垃圾桶图标移除。",
+      "fe_logic": "点 Add provider 下拉 → 列出这个模型“拥有但当前没用上”的 provider → 选一个补进该模型；或点 provider 标签上的垃圾桶 → 从该模型移除这条 → 上抛保存。",
+      "fe_modules": [
+        "role-editor-set"
+      ],
+      "be_logic": "保存走 [[put-roles-merge]] → 对该角色跑 [[materialize]] 重算兜底链 → 原子写 [[llm-roles-yaml]]。",
+      "be_api": [
+        {
+          "endpoint": "PUT /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "整表合并保存，此动作增/删某模型的 provider 线路",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计（§2.2 step3 + §7.3 #39）。"
+    },
+    {
+      "n": 40,
+      "cap": "role-model-remove",
+      "track": null,
+      "marker": "live",
+      "module": "兜底链编辑",
+      "func": "让用户从角色里整组删掉一个模型（连同它的全部 provider 线路），不再把该模型纳入此角色的兜底链。",
+      "action": "点模型行右侧垃圾桶图标，删整个模型组。",
+      "fe_logic": "点模型行右侧垃圾桶 → 从角色里删掉整组 [[model-group]]（连它的全部 provider 线路）→ 上抛保存。",
+      "fe_modules": [
+        "role-editor-set"
+      ],
+      "be_logic": "保存走 [[put-roles-merge]] → 对该角色跑 [[materialize]] 重算兜底链（少了这一组）→ 原子写 [[llm-roles-yaml]]。",
+      "be_api": [
+        {
+          "endpoint": "PUT /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "整表合并保存，此动作从角色删一个模型组",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计（§7.3 #40）。"
+    },
+    {
+      "n": 41,
+      "cap": "role-model-fallback-toggle",
+      "track": null,
+      "marker": "live",
+      "module": "兜底链编辑",
+      "func": "让用户开关“模型级兜底”：关掉后该角色只用第一个模型（provider 级兜底仍在），用于把角色锁死在单一首选模型。",
+      "action": "在角色设置面板里切 Model Fallback 开关。",
+      "fe_logic": "在角色设置面板切 Model Fallback 开关 → 写进该角色的模型级兜底开关字段 → 上抛保存。",
+      "fe_modules": [
+        "role-editor-set"
+      ],
+      "be_logic": "保存走 [[put-roles-merge]] → [[materialize]] 尊重这个开关：关掉时只把第一个模型组的线路入链（仍保留它内部的 provider 兜底）→ 原子写 [[llm-roles-yaml]]。",
+      "be_api": [
+        {
+          "endpoint": "PUT /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "整表合并保存，此动作写角色的模型级兜底开关",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计（§2.2 step4 + §7.3 #41）。"
+    },
+    {
+      "n": 42,
+      "cap": "role-thinking-intent",
+      "track": null,
+      "marker": "live",
+      "module": "角色意图",
+      "func": "让用户表达该角色对“推理(thinking)模型”的偏好：off(不要) / preferred(偏好) / required(必须)，三档互斥；required 且模型不支持时角色判 Not Fit。",
+      "action": "在角色设置面板的 Thinking 区点 off / preferred / required 三选一（单选互斥控件）。",
+      "fe_logic": "在 Thinking 区用三态单选控件选 off/preferred/required → 写进角色意图的推理偏好字段 → 上抛保存。",
+      "fe_modules": [
+        "role-editor-set"
+      ],
+      "be_logic": "保存走 [[put-roles-merge]] 原子写 [[llm-roles-yaml]]。物化时把这个偏好落到 [[role-fit]] 判定：required 但能力未知 → Needs Test、明确不支持 → Not Fit；preferred 不满足 → 降级(Downgraded)。判定逻辑归 gateway。",
+      "be_api": [
+        {
+          "endpoint": "PUT /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "整表合并保存，此动作写角色的推理偏好(off/preferred/required)",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "catalog 旧标已过时——它说“前端只 off/preferred 两态、无 UI”，但已核对当前代码：前端已是三档互斥单选控件（off/preferred/required），后端（③b gateway）物化也已支持 required→Not Fit。此条在当前树已符合 §2.3〔#2〕设计。"
+    },
+    {
+      "n": 43,
+      "cap": "role-output-token-intent",
+      "track": null,
+      "marker": "live",
+      "module": "角色意图",
+      "func": "让用户给该角色设置输出 token 目标：选模式（Default/Use Max/Target/Required Min）并在 Target/Required Min 时填具体值，用来驱动选型与降级判定。",
+      "action": "在角色设置面板 Output Tokens 区下拉选模式；模式为 Target/Required Min 时在右侧输入框填数值。",
+      "fe_logic": "在 Output Tokens 区下拉选模式（Default/Use Max/Target/Required Min）→ 选 Target 或 Required Min 时旁边输入框才可填数值 → 组装成角色的输出 token 意图（降级策略前端固定写 allow，不暴露 UI）→ 上抛保存。Context Tokens 也并列做了同样的字段。",
+      "fe_modules": [
+        "role-editor-set"
+      ],
+      "be_logic": "保存走 [[put-roles-merge]] 原子写 [[llm-roles-yaml]]。物化时按 token 意图算 [[role-fit]]：Required Min 达不到 → Not Fit；按降级策略 block → Not Fit、allow_with_warning → 仅告警(warn)。判定逻辑归 gateway。",
+      "be_api": [
+        {
+          "endpoint": "PUT /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "整表合并保存，此动作写角色的输出/上下文 token 意图(模式+数值)",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "部分修正后符合设计。catalog 说“前端固定 downgrade=allow、block/warn 无 UI”属实，但据 §2.3〔#3〕这正是设计要求（降级默认策略不需要 UI，schema 保留默认 allow），不是偏差。catalog 漏记的正向进展：四档模式 + 上下文 token 字段都已落 UI，这部分已符合设计。"
+    },
+    {
+      "n": 44,
+      "cap": "role-output-limit-summary",
+      "track": null,
+      "marker": "live",
+      "module": "角色意图",
+      "func": "在 token 设置字段下方，给用户只读展示该角色所有 provider 线路探测到的“最大输出/上下文 token 上限”摘要（单值或区间，几条线路上限未知也提示），帮用户判断填多少合理。",
+      "action": "（无需操作，自动随角色当前 provider 路线显示）。",
+      "fe_logic": "汇总该角色所有线路探测到的最大输入/输出 token 上限 → 算出最小值/最大值/已知条数 → 拼成一句可读摘要（单值或区间，有线路上限未知时也提示），只读显示在字段说明里。",
+      "fe_modules": [
+        "role-editor-set"
+      ],
+      "be_logic": "上限数值来自每条 [[route]] 的能力探测结果，随 [[registry]] 投影时一起带过来，没有独立端点、也不单独写盘。能力投影逻辑归 gateway，前端只读。",
+      "be_api": [
+        {
+          "endpoint": "GET /llm/registry",
+          "owner": "③a Studio",
+          "purpose": "线路能力(最大 token 上限)随这份清册一起带回",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计（§2.3 Route max token 摘要=投影 route capability，只读 + §7.3 #44）。"
+    },
+    {
+      "n": 45,
+      "cap": "role-route-status-light",
+      "track": null,
+      "marker": "live",
+      "module": "状态与测试",
+      "func": "在每条 provider 行上给一盏 role-fit 状态灯（Using/Downgraded/Needs Test/Not Fit），悬停看诊断（为何降级/为何不适配），让用户知道这条线路在本角色下到底能不能跑、跑得怎样。",
+      "action": "悬停某 provider 行的状态灯，看 tooltip 诊断。",
+      "fe_logic": "每条 provider 行一盏状态灯 → 综合这条线路的连通状态、后端（③b gateway）[[role-fit]] 诊断、测试态推出灯色（Using/Downgraded/Needs Test/Not Fit）→ 悬停时单一顶层 tooltip 显示诊断原因。前端只读后端（③b gateway）的诊断报告，不自己算适配。",
+      "fe_modules": [
+        "role-editor-set"
+      ],
+      "be_logic": "[[role-fit]] 来自后端（③b gateway）[[materialize]] 生成的诊断报告（逐条线路写适配结果），随角色对象一起返回。",
+      "be_api": [
+        {
+          "endpoint": "GET /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "角色对象内含逐条线路的 role-fit + 诊断，灯与 tooltip 读它",
+          "connected": "已接通"
+        },
+        {
+          "endpoint": "PUT /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "保存后回传的角色对象同样带最新诊断报告",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计（§2.4 role-fit 灯来自后端（③b gateway）materialize report + §7.3 #45）。"
+    },
+    {
+      "n": 46,
+      "cap": "role-test",
+      "track": null,
+      "marker": "live",
+      "module": "状态与测试",
+      "func": "让用户点 Test，对该角色兜底链里所有模型逐条线路真发探测请求，实时把每条 provider 的灯刷成测试中/通过/失败 + 降级信息，确认这角色真能跑。",
+      "action": "点角色卡头部 Test 按钮（运行中按钮转圈、文字变 Testing）。",
+      "fe_logic": "点 Test → 起一个测试 job 并每 500ms 轮询进度 → 把进度写进前端组件自己的状态，喂给各行灯实时刷新；挂载时再从后端（③a Studio）持久结果回种灯（补空槽）。这里的实时进度存在前端组件态里，不是后端（③a Studio）SSOT 的纯投影。",
+      "fe_modules": [
+        "role-editor-set"
+      ],
+      "be_logic": "后端（③a Studio，端点与测试编排归它、结果文件为本地持久态）起测试 job → 用并发方式同时探这条角色的所有目标线路（不在第一条成功就停，全测）→ 结果存进内存 job 字典 + 持久化到测试结果文件，供下次回种。",
+      "be_api": [
+        {
+          "endpoint": "POST /llm/roles/{name}/test-jobs",
+          "owner": "③a Studio",
+          "purpose": "起对该角色全模型全线路的并发探测 job，返回 job_id",
+          "connected": "已接通"
+        },
+        {
+          "endpoint": "GET /llm/role-test-jobs/{job_id}",
+          "owner": "③a Studio",
+          "purpose": "轮询测试进度",
+          "connected": "已接通"
+        },
+        {
+          "endpoint": "GET /llm/roles/test-results",
+          "owner": "③a Studio",
+          "purpose": "回种每个角色最后一次测试结果",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "部分修后仍有两处偏差：① 旧的独立测试结果面板(RoleTestResultPanel)确属孤儿——全仓只有测试文件引用、生产从没挂载，§2.4 已删此面板，应清理。② 测试态没完全归后端（③a Studio）：实时进度仍存在前端组件态里，切到别的 tab 实时态就丢，靠挂载时从后端（③a Studio）回种“最后一次结果”缓解，但没达到 §2.5/§6.5 要求的“删掉前端易失层、纯投影后端（③a Studio）单一真相源”。批量探所有模型(不停在首条)这点已符合 §2.5。"
+    },
+    {
+      "n": 47,
+      "cap": "role-test-error-banner",
+      "track": null,
+      "marker": "live",
+      "module": "状态与测试",
+      "func": "当 Test 因未保存(草稿态)或测试失败时，在角色卡里弹一条红色错误条，告诉用户为什么测不了/哪里挂了（未保存先拒测，提示先保存）。",
+      "action": "（被动）点 Test 后若未保存或测试失败，角色卡内出现红条。",
+      "fe_logic": "点 Test 时若角色还没保存（草稿态）→ 前端先拦下不发 job，把“先保存再测”回填成该角色的测试错误，角色卡显红条；正常情况下先触发保存再发测试。",
+      "fe_modules": [
+        "role-editor-set"
+      ],
+      "be_logic": "测试 job 失败时回写 job 状态为 failed + 失败消息回传显示；未保存这种情况前端在发 job 前就拦了，会先走保存(PUT /llm/roles 落盘)再测。",
+      "be_api": [
+        {
+          "endpoint": "POST /llm/roles/{name}/test-jobs",
+          "owner": "③a Studio",
+          "purpose": "失败时 job 回 status=failed + 消息；未保存场景前端先走 PUT 不发本请求",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计（§2.5 未保存先 PUT 再 test + §7.3 #47）。"
+    },
+    {
+      "n": 48,
+      "cap": "role-rename-delete",
+      "track": null,
+      "marker": "live",
+      "module": "角色管理",
+      "func": "让用户对一个角色改名或删除（删除走二次确认，避免误删整条角色及其兜底链）。",
+      "action": "点角色卡 ⋮ 菜单 → Rename（弹框改名）/ Delete（确认 toast 后删）。",
+      "fe_logic": "点 ⋮ 菜单 → Rename 开弹框改角色名；Delete 走二次确认 toast 后再删。",
+      "fe_modules": [
+        "role-editor-set"
+      ],
+      "be_logic": "改名走 [[put-roles-merge]]：因为是合并语义，改名实际是“新名当新键写进去、旧键由前端从提交体去掉”；删除走单角色删除端点。两者最终都原子写 [[llm-roles-yaml]]。",
+      "be_api": [
+        {
+          "endpoint": "PUT /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "改名=新键覆盖、旧键从提交体去掉(合并语义)",
+          "connected": "已接通"
+        },
+        {
+          "endpoint": "DELETE /llm/roles/{name}",
+          "owner": "③a Studio",
+          "purpose": "删单个角色(连其兜底链)",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计（§7.3 #48）。"
+    },
+    {
+      "n": 49,
+      "cap": "model-bundle-create",
+      "track": null,
+      "marker": "live",
+      "module": "Model Bundle",
+      "func": "让用户新建一个模型束——一个可跨角色复用、预排好 fallback 的模型组合（可放不同模型、预配 provider）。",
+      "action": "点 Model Bundles 区的 Add Model Bundle → 弹框命名 → 确认。",
+      "fe_logic": "点 Add Model Bundle → 弹框收束名 → 新建一个空 [[model-bundle]] 写进束字典 → 上抛保存。",
+      "fe_modules": [],
+      "be_logic": "随 [[put-roles-merge]]（整份数据里也含束字段，按合并落盘）原子写进 [[llm-roles-yaml]]；束的物化走 gateway 的束物化逻辑，空束(没挂模型)跳过物化。束数据和束物化归 gateway。",
+      "be_api": [
+        {
+          "endpoint": "PUT /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "整表合并保存(含模型束)，此动作新增一个空束",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计（§2.6 定义 + §7.3 #49）。"
+    },
+    {
+      "n": 50,
+      "cap": "model-bundle-edit",
+      "track": null,
+      "marker": "live",
+      "module": "Model Bundle",
+      "func": "让用户往束里拖模型、并在束内复用角色卡那套编辑器调 provider/兜底序/意图（束不能再嵌套束），把束配成一个排好 fallback 的可复用组合。",
+      "action": "从右侧 Available Models 拖模型到某张束卡；在束卡内拖模型/provider 排序、改设置。",
+      "fe_logic": "把右侧模型拖进束卡 → 复用 [[role-editor-set]] 同一套编辑器调 provider/兜底序/意图 → 落束时挡掉“束拖束”防嵌套 → 上抛保存。注意：束卡给模型行死传了空的测试状态，所以束里看不到状态灯、也没有 Test 按钮。",
+      "fe_modules": [
+        "role-editor-set"
+      ],
+      "be_logic": "保存走 [[put-roles-merge]] → 对束跑 gateway 的束物化，把束拍平成它自己的兜底链 → 原子写 [[llm-roles-yaml]]。束数据和束物化归 gateway。",
+      "be_api": [
+        {
+          "endpoint": "PUT /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "整表合并保存(含模型束)，此动作改某束的模型组/provider 顺序/意图",
+          "connected": "已接通"
+        },
+        {
+          "endpoint": "POST /llm/model-bundles/{id}/test",
+          "owner": "③a Studio",
+          "purpose": "给束独立测试(§6.2 R22 要求)",
+          "connected": "未接通"
+        }
+      ],
+      "gap": "已核对当前代码属实：束卡不显 role-fit 状态灯、也没有 Test 按钮（束卡给模型行死传空测试状态，头部对比角色卡少了 Test 按钮）。违 §2.6〔#7〕“束 Test 前端复用 role 的测试、束也能独立测” + §2.9。需补束的测试端点和按钮。"
+    },
+    {
+      "n": 51,
+      "cap": "bundle-as-role-source",
+      "track": null,
+      "marker": "live",
+      "module": "Model Bundle",
+      "func": "让用户把整个已建好的束拖进角色，作为该角色的一组兜底来源（一次拖入=带一整组排好的模型+provider）。",
+      "action": "从右侧 Available Models 顶部的束置顶槽，把一张束卡整体拖到某角色卡上。",
+      "fe_logic": "把束置顶槽里的一张束拖到角色卡 → 当前代码是把这个束此刻的全部线路“原样复制一份”塞进角色的模型组里 → 角色存的是这份复制出来的线路副本，并没有记下“这组来自哪个束”的引用标识 → 上抛保存。",
+      "fe_modules": [
+        "role-editor-set"
+      ],
+      "be_logic": "角色保存走 [[put-roles-merge]] → 对角色自己的模型组（已经是复制进来的线路）跑 [[materialize]] → 原子写 [[llm-roles-yaml]]。后端（③b gateway，角色数据与物化归它）完全不知道这组来自某个束，物化时也不会按引用回去拉束的当前内容。",
+      "be_api": [
+        {
+          "endpoint": "PUT /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "整表合并保存，此动作把束的线路快照复制进角色(非引用)",
+          "connected": "部分接通"
+        }
+      ],
+      "gap": "头号偏差，已核对代码属实：当前是“快照复制”而非“引用”。打个比方——现在像是把束的内容复印了一份贴进角色，复印件和原件从此各走各的；而设计 §2.6〔#8/#12〕要的是“引用”，像把束当成一个共享组件实例放进角色——以后改了束（换 provider、加模型），所有引用了它的角色都跟着自动变。当前实现里角色拖入后持的是线路副本，束后续改动不会同步到已拖入的角色。需把角色对束的承载从“复制线路”改成“存束的引用标识”，并让物化时按引用展开束的当前内容（§6.2 R23）。"
+    },
+    {
+      "n": 52,
+      "cap": "model-bundle-rename-delete",
+      "track": null,
+      "marker": "live",
+      "module": "Model Bundle",
+      "func": "让用户对一个束改名或删除（删除二次确认，移除该束及其 route 编排）。",
+      "action": "点束卡 ⋮ 菜单 → Edit（改名弹框）/ Delete（确认后删）。",
+      "fe_logic": "点束卡 ⋮ 菜单 → Edit 开弹框改束名；Delete 走二次确认后删。",
+      "fe_modules": [],
+      "be_logic": "随 [[put-roles-merge]]（含束字段、合并语义）整表落盘到 [[llm-roles-yaml]]。合并语义下删束要由前端从提交体的束字典里去掉这个键。束数据归 gateway。",
+      "be_api": [
+        {
+          "endpoint": "PUT /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "整表合并保存(含束)，改名=新键覆盖、删除=从提交体去键",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计（§2.6〔#9〕束改名删与 role 统一 + §7.3 #52）。"
+    },
+    {
+      "n": 53,
+      "cap": "role-projection-refresh",
+      "track": null,
+      "marker": "live",
+      "module": "跨窗刷新",
+      "func": "当别的窗口改了 roles，或本窗口重新聚焦时，自动重新拉取并重投影角色/状态，保证看到的是最新数据，不用手动刷新。",
+      "action": "（被动）其它窗口改 roles / 本窗口聚焦时自动触发。",
+      "fe_logic": "壳层监听后端（③a Studio）推来的 roles_changed（角色变更）事件 → 收到后重新拉清册和角色两份数据并重投影显示。",
+      "fe_modules": [],
+      "be_logic": "角色落盘后后端（③a Studio，WS 广播归它、角色文件归 ③b gateway）广播 roles_changed 事件：保存时去抖登记，外部直接改了 [[llm-roles-yaml]] 也由文件监听器监到 → 经事件通道推 roles_changed → 前端据此重拉两份数据。事件只通知，不带数据本身。",
+      "be_api": [
+        {
+          "endpoint": "WS roles_changed (经 /ws/events)",
+          "owner": "③a Studio",
+          "purpose": "通知前端角色已变，触发其重拉",
+          "connected": "已接通"
+        },
+        {
+          "endpoint": "GET /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "收到事件后重拉角色",
+          "connected": "已接通"
+        },
+        {
+          "endpoint": "GET /llm/registry",
+          "owner": "③a Studio",
+          "purpose": "收到事件后重拉清册",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计（§6.2 R25：被动刷新=重投影）。"
+    }
+  ]
+}

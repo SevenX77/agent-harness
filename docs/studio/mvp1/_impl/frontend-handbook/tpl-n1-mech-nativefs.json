@@ -1,0 +1,187 @@
+{
+  "id": "n1_mech_nativefs",
+  "title": "native-fs 本地文件契约(Studio Rust 后端)",
+  "owner_tag": "Studio Rust 后端",
+  "overview": {
+    "manages": "N1 依赖的 Studio Rust 后端(apps/studio/tauri 的原生部分)本地文件能力:目录选择、文件管理器定位、工作区文件读写 / 列目录 / 建支持目录、最近工作区原生 MRU、sidecar 配置、checkpoint 安全写——前端经 lib/tauri.ts(把 Rust 命令包成异步函数的桥)调用。这是 D12(写盘全量走 Rust 决策:本地文件读写经 native-fs,仅 engine/gateway 用 Python sidecar)的落点。",
+    "why_single": "N1 的本地文件操作横跨多处(打开文件夹选目录、Reveal 定位、copilot 会话落盘 D8、新建脚手架落盘 D12、失效路径校验),都归 Studio Rust 后端 native-fs 这一块;单列一页讲清「哪些命令已就绪、哪些是 D12 缺口、前端经哪个桥函数调」。",
+    "design_owner": "后端为主(Studio Rust 后端,即 apps/studio/tauri 原生部分)。**契约方向归属 04_platform/native-fs 平台 spec**(mvp1-alignment.md 的 native-rust-writer 单元:Studio 自有本地写入唯一写者,D10/D12 锁定;Copilot SDK Write/Edit 为 MVP1 明确例外、归 copilot-assist、不经 native-fs)——本页只把 N1 要对接的命令契约写清并标实现状态,新命令的最终命令名/DTO 由该平台 spec pin。前端经 lib/tauri.ts 桥调用;非桌面(纯浏览器)态这些命令降级——写类抛「Desktop only」(被吞进 persistenceError)、读/列类返回空,故 web 态本地持久缺失,是 MVP1 桌面优先的设计边界。",
+    "code_location": "后端:apps/studio/tauri 的 native_fs.rs(本地文件命令)+ sidecar.rs(sidecar 生命周期/配置)。前端桥:lib/tauri.ts(selectSkillDirectory / revealInFileManager / writeWorkspaceFile / readWorkspaceFile / listWorkspaceDir / ensureWorkspaceSupportDirs / add|remove_recent_workspace 等封装)。消费者:WelcomePage(目录选择/定位)、copilotStore(会话落盘/读回,D8)、RuntimeGate(sidecar 配置)。",
+    "dataflow": [
+      "打开文件夹 / 新建选目录 → 前端 selectSkillDirectory → Rust select_directory 弹 OS 目录选择器",
+      "Reveal → 前端 revealInFileManager → Rust reveal_in_file_manager 在 Finder/Explorer 定位(浏览器降级复制路径)",
+      "copilot 对话(D8)→ copilotStore.persistSessionToDisk → 前端 writeWorkspaceFile → Rust write_workspace_file 落 .gemini/copilot/sessions/<skillId>/<id>.json;再进 / 冷启动 → hydrate → readWorkspaceFile / listWorkspaceDir 读回",
+      "目标(D12 缺口,方向锁于平台 spec native-rust-writer)新建/打开落盘 → create_skill_workspace / open_skill_workspace 命令(现无,仍走 Python POST /api/skills;命令级契约见本页 gap 组)",
+      "失效 Recent 自动移除 → workspace_path_exists 路径存在性检查(现 pruneMissingRecentWorkspaces 的 exists 谓词无 Rust 接入)"
+    ]
+  },
+  "submodules": [
+    {
+      "name": "已就绪的本地文件命令",
+      "code": "rust: native_fs.rs(select_directory / reveal / write|read|list workspace file / ensure support dirs / recent workspace)",
+      "summary": "目录选择、文件管理器定位、工作区文件读写 / 列目录 / 建支持目录、最近工作区原生 MRU 写——这些命令已实现,N1 的打开文件夹选目录(#12)、Reveal(#5)、copilot 会话落盘 D8(#22)都直接用它们。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "select_directory:弹 OS 目录选择器、返回选中目录或 null(打开文件夹 / 选新建父目录用)。",
+        "reveal_in_file_manager:在系统文件管理器定位路径;浏览器态降级复制路径到剪贴板。",
+        "write_workspace_file / read_workspace_file / list_workspace_dir / ensure_workspace_support_dirs:工作区内文件写 / 读 / 列目录 / 建 .gemini 等支持目录——copilot 会话落盘 / 读回(D8)经它们。",
+        "add_recent_workspace / remove_recent_workspace:原生最近工作区 MRU 写(注:listRecentWorkspaces 原生读回无调用方,渲染用的是 localStorage MRU——原生 MRU 是只写不读的冗余,待并)。"
+      ],
+      "do": ["选目录 / 定位 / 工作区文件读写 / 建支持目录"],
+      "dont": ["非桌面态写类抛 Desktop only(被吞)、读/列类返回空——web 持久缺失是设计边界"],
+      "deviation": "已就绪,符合 D12 方向。冗余:原生 MRU 写了但 listRecentWorkspaces 无人读(渲染用 localStorage MRU),属可并的小冗余。"
+    },
+    {
+      "name": "D12 落盘缺口(方向已锁,命令级契约待平台 spec pin)",
+      "code": "rust: 缺 create_skill_workspace / open_skill_workspace / workspace_path_exists 命令",
+      "summary": "**方向已锁**:04_platform/native-fs/mvp1-alignment.md(native-fs MVP1 对齐文档)的 native-rust-writer 单元 + F1 Unique Local Writer(Studio 自有写入唯一写者)+ F2 Workspace Folder Operations,加 D10(后端三分)/ D12(本地操作全量 Rust)已把「新建/打开 skill 的建目录 / 写脚手架 / git init / 注册-free」归到 Studio Rust 后端 native-fs(F1 status=target-design、F2=partial live)。**缺口**:Rust 侧尚无对应命令,新建/打开仍走 Python POST /api/skills。本节末「接口(契约)」的 gap 组已给出三条 command 级目标契约(create_skill_workspace / open_skill_workspace / workspace_path_exists),命令形态对齐现有 write_workspace_file 等命令模式,**最终命令名 / DTO / 错误码由 04_platform/native-fs 平台 spec 最终 pin**。这是卡住前端 #2/#4/#6/#13 解耦的后端缺口(后端先于前端)。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "缺口①(→ iface-scaffold):新建 skill 的建目录 + 写脚手架(D-1-4:agent 模板)+ git init,不注册——现走 Python create_new_skill。",
+        "缺口②(→ iface-open):打开文件夹的「登记 + 返回 workspace 标识(不校验 manifest、不注册)」Rust 路径——现走 Python POST /api/skills import。",
+        "缺口③(→ iface-exists):失效 Recent 自动移除依赖的「路径存在性检查」能力——现 pruneMissingRecentWorkspaces 的 exists 谓词无 Rust 实现接入。",
+        "registry-free 交接:Rust 命令返回 {root, skill_id} → 前端 createLocalWorkspaceSelection 生成 workspace identity + rememberWorkspace 记 MRU;只读详情仍走 sidecar GET /api/skills/{id}(保留),不经注册表。"
+      ],
+      "do": ["(目标)用上述三条 Rust 命令承接建/写脚手架/git init/打开/路径校验"],
+      "dont": ["(现状)尚未提供这些命令,前端只能继续走 Python"],
+      "deviation": "⚠ D12 缺口(方向已锁、命令级待 pin):三条 Rust 命令未实现,故 N1 前端 #2/#4/#13(解耦 POST /api/skills、走 Rust)与 #6(失效自动移除的路径校验)只能等后端先行。落地分两层:先由平台 pin + 实现 native-fs 命令契约(含测试),再改 Welcome/NewSkill 前端接线。"
+    },
+    {
+      "name": "D3 外部 IDE 联动死代码",
+      "code": "rust+frontend: open_in_cursor / open_in_terminal / open_in_codex",
+      "summary": "Studio Rust 后端的 open_in_cursor / open_in_terminal / open_in_codex 命令与前端 openInCursor/openInTerminal/openInCodex 桥函数仍在,但前端零调用(仅自身定义与测试引用)——copilot 内置后无需外跳。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "前端 openInCursor / openInTerminal / openInCodex 与对应 Rust 命令均定义了但无生产调用方。",
+        "D3(删外部 IDE 联动决策:copilot 内置后无需 Open in Cursor/Terminal/Codex 外跳)要删这套 helper + Rust 命令。"
+      ],
+      "do": ["(目标)删除这套死代码"],
+      "dont": ["不保留 copilot 内置后已无用的外部 IDE 外跳"],
+      "deviation": "D3 待办:死代码未删(前端零调用)。属清理项,不阻塞 N1 主线,记录在案。"
+    }
+  ],
+  "files": [],
+  "interface_groups": [
+    {
+      "key": "crud",
+      "title": "已就绪的 native-fs 命令(N1 直接用)",
+      "note": "这一组是 Studio Rust 后端已实现、N1 现在就在用的本地文件命令:选目录、定位、工作区文件读写(copilot 落盘 D8)、sidecar 配置。前端经 lib/tauri.ts 桥调用,非桌面态降级。"
+    },
+    {
+      "key": "gap",
+      "title": "D12 落盘缺口(未实现,卡住前端解耦)",
+      "note": "这一组是 D12 目标需要、但 Studio Rust 后端尚未提供的命令——create_skill_workspace(新建建目录+脚手架+git init)/ open_skill_workspace(打开文件夹登记,不校验 manifest、不注册)/ workspace_path_exists(失效路径校验)。**方向已锁**于 04_platform/native-fs/mvp1-alignment.md(native-rust-writer/F1/F2 + D10/D12),命令形态对齐现有 write_workspace_file 等模式,**最终命令名/DTO/错误码由该平台 spec pin**;前端只先对照此目标契约,落地等后端先行(后端先于前端)。"
+    }
+  ],
+  "interfaces": [
+    {
+      "group": "crud",
+      "endpoint": "select_directory",
+      "req": "可选默认目录",
+      "resp": "选中目录绝对路径,或 null(用户取消 / 非桌面态)",
+      "purpose": "弹 OS 目录选择器。打开文件夹(#2)、新建选父目录(#12)用。",
+      "provider": "Studio Rust 后端(native_fs.rs);前端桥 selectSkillDirectory",
+      "id": "iface-dirpick"
+    },
+    {
+      "group": "crud",
+      "endpoint": "reveal_in_file_manager",
+      "req": "本地路径",
+      "resp": "无(在 Finder/Explorer 定位);浏览器态降级复制路径到剪贴板",
+      "purpose": "在系统文件管理器定位一个文件夹。Recent 卡片 Reveal(#5)用。",
+      "provider": "Studio Rust 后端(native_fs.rs);前端桥 revealInFileManager",
+      "id": "iface-reveal"
+    },
+    {
+      "group": "crud",
+      "endpoint": "write_workspace_file / read_workspace_file / list_workspace_dir / ensure_workspace_support_dirs",
+      "req": "workspaceId + 相对路径(写还带内容)",
+      "resp": "写:无;读:文件内容;列目录:条目列表;建支持目录:无。非桌面态写抛 Desktop only(被吞)、读/列返回空",
+      "purpose": "工作区内文件读写 / 列目录 / 建 .gemini 支持目录。copilot 会话落盘 / 读回(D8,#22)经它们:写 .gemini/copilot/sessions/<skillId>/<id>.json,hydrate 列目录 + 读回。",
+      "provider": "Studio Rust 后端(native_fs.rs);前端桥 writeWorkspaceFile / readWorkspaceFile / listWorkspaceDir / ensureWorkspaceSupportDirs",
+      "id": "iface-wsfile"
+    },
+    {
+      "group": "crud",
+      "endpoint": "get_sidecar_config",
+      "req": "无",
+      "resp": "sidecar 地址 / 鉴权令牌等配置",
+      "purpose": "前端启动时解析 sidecar 配置连后端;连接状态以非阻塞横幅呈现(#23)。sidecar 的 eager-spawn 本身归平台。",
+      "provider": "Studio Rust 后端(sidecar.rs);前端 initializeRuntimeConfig 调用",
+      "id": "iface-sidecarcfg"
+    },
+    {
+      "group": "gap",
+      "endpoint": "create_skill_workspace(提案名,待平台 spec pin)",
+      "req": "parent_directory: String(父目录绝对路径,空则用 default_skills_directory)、skill_id: String(已 normalizeSkillId 规范的合法 id)。命名/参数风格对齐现有 write_workspace_file(workspace_root: String, …) 命令模式。",
+      "resp": "Result<{ root: String(建好的 skill 目录绝对路径), skill_id: String }, String>(错误为 String,沿用现有 native-fs 命令的 Result<T, String> 约定)",
+      "purpose": "D12 目标:Studio Rust 后端建目录 + 写脚手架(D-1-4 agent 模板,非 logic 相位模板)+ git init,**不注册到后端注册表**(registry-free)。替代现状 Python POST /api/skills(create 分支 create_new_skill)。供新建对话框 #13。",
+      "provider": "Studio Rust 后端(native_fs.rs,待实现;方向锁定于 04_platform/native-fs/mvp1-alignment.md 的 native-rust-writer F1 + D12)。错误码/规则:目标非空文件夹拒绝(对齐现 Python _directory_is_nonempty 的 INVALID_DIRECTORY_PATH)、父目录不存在/路径非法拒绝、skill_id 已存在拒绝;幂等:同名重复创建应稳定报已存在而非脏写。脚手架文件集与 git init 细节由平台 spec 与 D-1-4 模板契约定。",
+      "id": "iface-scaffold"
+    },
+    {
+      "group": "gap",
+      "endpoint": "open_skill_workspace(提案名,待平台 spec pin)",
+      "req": "directory: String(用户选中的本地文件夹绝对路径)。",
+      "resp": "Result<{ root: String, skill_id: String(由路径派生的本地 workspace 标识) }, String>",
+      "purpose": "D12 目标:打开任意本地文件夹=登记 + 返回 workspace 标识,**不校验 manifest**(D2:缺 GRAPH.md/SKILL.md 也放行,交 compile+copilot 修)、**不注册到后端注册表**。替代现状 openSkill→resolveBackendSkillIdForWorkspace 的 POST /api/skills import。供打开文件夹 #2 与开 Recent 卡 #4。",
+      "provider": "Studio Rust 后端(native_fs.rs,待实现;方向锁定于 04_platform/native-fs/mvp1-alignment.md F2 Workspace Folder Operations + D2/D12)。错误码:仅 OS 级失败(路径不存在/非目录);registry-free 交接:返回的 {root, skill_id} 由前端 createLocalWorkspaceSelection(把 skillId+root 编码成 local-workspace 选择令牌的函数)生成 workspace identity,只读详情仍走 sidecar GET /api/skills/{id}(get_skill_detail,manifest 坏时降级 broken detail,保留)。",
+      "id": "iface-open"
+    },
+    {
+      "group": "gap",
+      "endpoint": "workspace_path_exists(提案名,待平台 spec pin)",
+      "req": "path: String(待校验的本地路径)。",
+      "resp": "Result<bool, String>(true=路径仍存在)",
+      "purpose": "D12/R1 目标:供失效 Recent 自动移除——点一张 Recent 卡前用它判 absolutePath 是否还在,不存在则报错 + 从 MRU 移除(接上现成 useRecentSkills 的 pruneMissingRecentWorkspaces 的 exists 谓词)。供 #6。",
+      "provider": "Studio Rust 后端(native_fs.rs,待实现;属 F2 Workspace Folder Operations 的轻量补充)。幂等只读、无副作用。",
+      "id": "iface-exists"
+    }
+  ],
+  "boundaries": {
+    "do": [
+      "选目录 / 文件管理器定位 / 工作区文件读写 / 列目录 / 建支持目录 / sidecar 配置(已实现)",
+      "copilot 会话落盘 + 读回(D8 落点,已实现)"
+    ],
+    "dont": [
+      "(现状缺口)尚未提供新建/打开 skill 的建目录 / 写脚手架 / git init Rust 命令(D12 待办)",
+      "(现状缺口)尚未提供失效路径自动移除用的路径存在性检查",
+      "非桌面态不持久(写抛 Desktop only 被吞、读/列返回空)——web 持久缺失是桌面优先设计边界",
+      "它是 Studio Rust 后端(apps/studio/tauri 原生部分),与 gateway/engine 的 Python sidecar 是不同后端,别混"
+    ]
+  },
+  "states_errors": "",
+  "backend_status": [
+    {
+      "item": "native-fs 文件读写 / 支持目录命令",
+      "d12": "D12「本地写经 native-fs」+ D8「copilot 退出恢复」落点",
+      "status": "ok",
+      "note": "write/read/list workspace file + ensure_workspace_support_dirs 已实现;copilot 会话落盘 .gemini/copilot/sessions/<skillId>/<id>.json + hydrate 读回(D8,#22)直接用、已验证桌面态可恢复。",
+      "ref": "d8"
+    },
+    {
+      "item": "目录选择 / 定位 / sidecar 配置命令",
+      "d12": "D12 native-fs / D10 启动",
+      "status": "ok",
+      "note": "select_directory(#2/#12)、reveal_in_file_manager(#5)、get_sidecar_config(#23)已实现可用。",
+      "ref": "d12"
+    },
+    {
+      "item": "新建/打开 skill 落盘命令(create/open_skill_workspace)",
+      "d12": "04_platform/native-fs native-rust-writer F1/F2 + D12「本地写经 native-fs」",
+      "status": "ok",
+      "note": "已落地(2026-06-23 据代码核对订正,原标 bad 系滞后)。Rust 已实现 create_skill_workspace / open_skill_workspace(native_fs.rs:写脚手架 + git init + skill_index 登记,带单测),已注册进 Tauri invoke_handler(lib.rs:415-416);前端 Home 新建走 createSkillWorkspace、打开走 openSkillWorkspace(lib/tauri.ts:149/164),已无 POST /api/skills 建/导入调用。与本页『POST 写盘迁 native-fs(D12)』ok 同一笔事实。F1/F2 命令级目标契约已满足。",
+      "ref": "d12"
+    },
+    {
+      "item": "失效路径存在性检查 + D3 死代码清理",
+      "d12": "对应 N1 设计 R1(失效自动移除)/ D3(删外部 IDE 联动)",
+      "status": "ok",
+      "note": "两半均已落地(2026-06-23 据代码核对)。R1 路径存在性:Rust workspace_path_exists 已注册(lib.rs)、前端 workspacePathExists 已调(lib/tauri.ts)供 stale-MRU pruning。D3 删外部 IDE 联动:open_in_cursor / open_in_codex / open_in_terminal 三个 Rust 命令 + spawn_tool 辅助 + 前端 invokeShell/openInCursor/openInTerminal/openInCodex 死代码全部删除,invoke_handler 注册同步移除(本 PR);残留引用 grep 为 0,前端 lint/typecheck/test/build 全绿、cargo check Finished。",
+      "ref": "d12"
+    }
+  ]
+}

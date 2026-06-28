@@ -86,10 +86,11 @@ Follow the instructions.
 
 def _write_subgraph_phase(root: Path, *, validator: bool | None = None) -> None:
     validator_line = "" if validator is None else f"validator: {str(validator).lower()}\n"
+    child = root / "child-skill"
     _write(
         root / "phases" / "main" / "SUBGRAPH.md",
         f"""---
-target_skill: child-skill
+path: {child}
 io:
   inputs:
     type: object
@@ -160,7 +161,7 @@ def test_γ0_2_subgraph_node_validator_defaults_false() -> None:
     ast = SubgraphNodeAST.model_validate(
         {
             "mode": "subgraph",
-            "target_skill": "child-skill",
+            "path": "/workspace/child-skill",
             "io": {"inputs": {"type": "object"}, "outputs": {"type": "object"}},
         }
     )

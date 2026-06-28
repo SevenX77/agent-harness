@@ -1,0 +1,257 @@
+{
+  "page": "general",
+  "glossary": [
+    {
+      "id": "instant-save",
+      "term": "即填即存（instant-save / 自动保存）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "General 页没有「保存」按钮。改完任意输入框后，前端等 300 毫秒防抖（避免边打字边反复存）再自动把整页设置写盘；标题右侧徽章实时显示状态：等待中 / 保存中 / 已保存 / 失败。如果上一次还没存完又改了，会把新改动排队、等上一次完成再补发，保证不丢不乱。这是一套纯前端的编排机制（防抖 + 排队 + 触发 PUT），不是后端能力——被本页多个原子（#10/#11/#12/#13/#14/#15）共同复用。",
+      "detail": [
+        [
+          "定义层",
+          "① 前端（防抖 + 排队 + 触发保存的前端逻辑）"
+        ],
+        [
+          "复用范围",
+          "本页 #10 User ID、#11 Gitea 地址、#12/#13/#14 技能目录、#15 保存机制本体"
+        ]
+      ]
+    },
+    {
+      "id": "app-settings-file",
+      "term": "app_settings.json（全局设置文件）",
+      "category": "数据文件",
+      "owner": "③a Studio",
+      "explain": "Studio 的一个本地配置文件，存这三样东西：提交署名用的 User ID、用户自建的 Gitea 地址、新建技能默认落地的文件夹。它放在 AgentStudio 配置目录的根部（macOS 在 ~/Library/Application Support/AgentStudio/，Linux 在 ~/.local/share/AgentStudio/，Windows 在 %APPDATA%/AgentStudio/）。它是这套数据文件里的特例：schema、路径、读写全部归 ③a，gateway 库完全不参与——因为存的是 Studio 自己的产品级配置（署名/发布地址/技能目录），不是 gateway 可复用的模型数据。",
+      "detail": [
+        [
+          "Schema 定义",
+          "③a Studio（GlobalSettings 模型）"
+        ],
+        [
+          "文件路径定义",
+          "③a（core/paths + metadata_local）"
+        ],
+        [
+          "读写",
+          "③a Studio backend"
+        ],
+        [
+          "文件归属",
+          "纯 ③a（gateway 库不参与）"
+        ]
+      ]
+    },
+    {
+      "id": "studio-backend",
+      "term": "Studio 本地后端（③a Studio 适配层）",
+      "category": "后端能力",
+      "owner": "③a Studio",
+      "explain": "Studio 自己的本机 Python 服务（apps/studio/backend），负责读写本机配置和文件、并对前端提供 /api/* 端点。它做的是「应用加工」：UI/产品策略/调用方式/存储介质这四件 gateway 感知不到的事。澄清一个常见误解：它和 ③b gateway 不是「本地 vs 云端」两套东西——gateway 是一个进程内的 Python 库、本身也跑在本机、不是云服务；General 这一页存的是纯本地的 app_settings.json，确实完全不经过 gateway，但原因是「这页存的是 Studio 自己的产品配置」，不是「gateway 在云端」。",
+      "detail": [
+        [
+          "定义层",
+          "③a Studio（apps/studio/backend 本机服务 + /api/* 适配壳）"
+        ],
+        [
+          "复用范围",
+          "本页所有保存动作都由它处理；其它页它也是前端唯一对接的 HTTP 入口"
+        ]
+      ]
+    },
+    {
+      "id": "settings-put-api",
+      "term": "保存设置接口 PUT /api/settings",
+      "category": "接口",
+      "owner": "③a Studio",
+      "explain": "保存 General 设置的唯一接口，「整页替换」式：每次都把 User ID、Gitea 地址、技能目录三个字段当成一整份一起写盘，没有「只改某一个字段」的细粒度更新。写盘用原子写（先写临时文件再瞬间替换正式文件），不会写一半损坏；写失败报 500。落盘目标是 app_settings.json（纯 ③a，不碰 gateway）。",
+      "detail": [
+        [
+          "契约 / DTO",
+          "GlobalSettings（user_id + gitea_host + skills_dir 三字段整份替换；无字段级 patch）"
+        ],
+        [
+          "谁提供",
+          "③a Studio"
+        ]
+      ]
+    },
+    {
+      "id": "native-folder-picker",
+      "term": "原生文件夹选择器（native folder picker，桌面版）",
+      "category": "后端能力",
+      "owner": "跨层（② Rust 桌面命令 select_directory）",
+      "explain": "点「选择」按钮时弹出的、操作系统自带的那个文件夹挑选窗口。它由桌面端的 ② Rust 层（native-fs）通过 select_directory 命令直接调系统能力实现，不走 ③a 的 HTTP 网络后端。这是整个设置页里唯一一个调用系统原生能力的操作；浏览器（非桌面）模式下用不了，点了只提示「仅桌面端可用」。选好的路径回填输入框后，才由 PUT /api/settings 持久化。",
+      "detail": [
+        [
+          "定义层",
+          "② Rust 桌面层（select_directory 命令，非 HTTP）"
+        ],
+        [
+          "复用范围",
+          "本页 #13 选默认技能目录；设置页唯一走系统原生能力的操作"
+        ]
+      ]
+    },
+    {
+      "id": "runtime-default-skills-dir",
+      "term": "技能目录的默认值（runtime default skills dir）",
+      "category": "领域概念",
+      "owner": "③a Studio",
+      "explain": "技能默认文件夹留空时系统兜底用的派生路径，即配置目录下的 Skills 子文件夹（如 AgentStudio/Skills）。「重置」按钮就是把目录还原成这个值；保存时后端若发现字段为空也会替换成它。它是一个由 ③a 在运行时算出来的派生值，不是用户配置项本身。",
+      "detail": [
+        [
+          "澄清",
+          "由 ③a 运行时派生（配置目录 + /Skills），非持久化字段"
+        ],
+        [
+          "用途",
+          "#12 留空兜底、#14 重置目标值"
+        ]
+      ]
+    }
+  ],
+  "atoms": [
+    {
+      "n": 10,
+      "cap": "studio-user-id",
+      "track": null,
+      "marker": "live",
+      "module": "身份",
+      "func": "设置 Studio User ID（本地 Git 提交署名用的身份标识）",
+      "action": "在 General 页的 Studio User ID 输入框里直接输入或编辑。",
+      "fe_logic": "你输入的内容是 author name（本地 Git 提交时显示「谁做的」的署名）。每敲一下，输入框就把新值更新到内存里的设置对象，并触发[[instant-save]]——300 毫秒后自动写盘。",
+      "fe_modules": [
+        "instant-save"
+      ],
+      "be_logic": "[[studio-backend]]收到后，把这个新 User ID 连同另外两个字段当成完整一份设置，原子写进[[app-settings-file]]。它纯本地存盘，不经过角色/凭证那套云端流程。",
+      "be_api": [
+        {
+          "endpoint": "PUT /api/settings",
+          "owner": "studio-backend",
+          "purpose": "把整页设置（含 User ID）一次性写进 app_settings.json",
+          "connected": "前端即填即存触发，整份替换，无字段级更新"
+        }
+      ],
+      "gap": "符合设计（ux-spec §7.1 #10）：走 Studio 本地后端写 app_settings.json，符合「本地配置由本地后端写」的归属规则。"
+    },
+    {
+      "n": 11,
+      "cap": "gitea-host",
+      "track": null,
+      "marker": "live",
+      "module": "身份",
+      "func": "填写 Gitea Host（你自建的 Gitea 实例地址）",
+      "action": "在 General 页的 Gitea Host 输入框里填实例地址。",
+      "fe_logic": "你填的是发布/同步技能时要连的那台 Gitea 服务器的网址。填完同样走[[instant-save]]自动保存；后端（③a Studio）在存之前会顺手去掉首尾空白。",
+      "fe_modules": [
+        "instant-save"
+      ],
+      "be_logic": "和 User ID 走完全相同的通道：[[studio-backend]]把 Gitea 地址作为整份设置的一部分，原子写进[[app-settings-file]]。注意这里只存「服务器地址」这一半——登录这台服务器要用的 token/密码是另一套（只走环境变量，不存在这个文件里）。",
+      "be_api": [
+        {
+          "endpoint": "PUT /api/settings",
+          "owner": "studio-backend",
+          "purpose": "把整页设置（含 Gitea 地址）一次性写盘",
+          "connected": "与 #10 共用同一接口，整份替换"
+        }
+      ],
+      "gap": "符合设计（ux-spec §7.1 #11）：本字段只管地址；发布鉴权所需的凭据走另一套环境变量配置，两者职责分开。"
+    },
+    {
+      "n": 12,
+      "cap": "skills-dir-manual",
+      "track": null,
+      "marker": "live",
+      "module": "产物路径",
+      "func": "手动输入默认技能文件夹的绝对路径（新建技能落地的地方）",
+      "action": "在 General 页的 Default Skill Folder 输入框里手动键入路径。",
+      "fe_logic": "你手敲一条绝对路径，告诉 Studio「以后新建的技能默认放这里」。改完走[[instant-save]]。如果你把它清空，系统会用[[runtime-default-skills-dir]]兜底，不会真的没有目录可用。",
+      "fe_modules": [
+        "instant-save"
+      ],
+      "be_logic": "[[studio-backend]]把这个目录当整份设置的一部分原子写进[[app-settings-file]]；存的时候如果发现是空的，后端（③a Studio）会替换成默认的 Skills 子目录再返回。",
+      "be_api": [
+        {
+          "endpoint": "PUT /api/settings",
+          "owner": "studio-backend",
+          "purpose": "把整页设置（含技能目录）一次性写盘",
+          "connected": "与 #10 共用同一接口，整份替换"
+        }
+      ],
+      "gap": "符合设计（ux-spec §7.1 #12）：手填路径与其它字段共用同一个整份写盘通道。"
+    },
+    {
+      "n": 13,
+      "cap": "skills-dir-native-picker",
+      "track": null,
+      "marker": "live",
+      "module": "产物路径",
+      "func": "点「选择」弹出系统原生文件夹窗口来挑默认技能目录，免去手敲路径",
+      "action": "点 Default Skill Folder 旁边带文件夹图标的「选择」按钮。",
+      "fe_logic": "点「选择」会弹出[[native-folder-picker]]（系统自带的文件夹窗口）。你选好一个文件夹后，路径自动填回输入框并触发[[instant-save]]保存。在浏览器模式下这个按钮点了只提示「仅桌面端可用」。",
+      "fe_modules": [
+        "instant-save",
+        "native-folder-picker"
+      ],
+      "be_logic": "弹窗本身不经过网络后端（③a Studio）——它由桌面端的 Rust 层直接调系统能力打开文件夹选择窗。只有等你选完、路径填回输入框后，才由 #15 那条保存逻辑把它写盘。",
+      "be_api": [
+        {
+          "endpoint": "native（Rust 桌面命令 select_directory，非 HTTP 接口）",
+          "owner": "native-folder-picker",
+          "purpose": "调系统原生对话框弹出文件夹选择窗，返回用户选中的路径",
+          "connected": "选中路径回填输入框后，再由 PUT /api/settings 持久化"
+        }
+      ],
+      "gap": "符合设计（ux-spec §7.1 #13）：浏览器模式仅提示「仅桌面端可用」，且确为设置页唯一一个走系统原生能力的操作。"
+    },
+    {
+      "n": 14,
+      "cap": "skills-dir-reset",
+      "track": null,
+      "marker": "live",
+      "module": "产物路径",
+      "func": "一键把默认技能目录还原成系统默认值",
+      "action": "点 Default Skill Folder 旁边带回退图标的「重置」按钮。",
+      "fe_logic": "点「重置」就把目录还原成[[runtime-default-skills-dir]]（配置目录下的 Skills 文件夹），还原本质就是写入一个新值，照样走[[instant-save]]保存。如果系统取不到这个默认值，按钮会变灰不可点。",
+      "fe_modules": [
+        "instant-save",
+        "runtime-default-skills-dir"
+      ],
+      "be_logic": "和手填路径走一样的通道：[[studio-backend]]把还原后的目录当整份设置原子写进[[app-settings-file]]。",
+      "be_api": [
+        {
+          "endpoint": "PUT /api/settings",
+          "owner": "studio-backend",
+          "purpose": "把还原后的技能目录连同整页设置一次性写盘",
+          "connected": "与 #10 共用同一接口，整份替换"
+        }
+      ],
+      "gap": "符合设计（ux-spec §7.1 #14）：默认值取不到时「重置」按钮置灰，与文档一致。"
+    },
+    {
+      "n": 15,
+      "cap": "appsettings-save",
+      "track": null,
+      "marker": "live",
+      "module": "保存机制",
+      "func": "全页即填即存：改完 300 毫秒后自动保存，顶部徽章实时显示保存状态，没有独立「保存」按钮",
+      "action": "改 General 页任意字段（User ID / Gitea 地址 / 技能目录）就触发，无需点保存；看标题右侧的状态徽章。",
+      "fe_logic": "这是支撑前面所有字段的[[instant-save]]机制本身。任何字段一改 → 重置 300 毫秒计时器、徽章显示「等待中」 → 时间到开始保存、徽章显示「保存中」 → 成功显示「已保存」、失败显示「失败」并弹提示。如果上一次还没存完你又改了，会把新改动排队、等上一次完成再补发，保证不丢不乱。",
+      "fe_modules": [
+        "instant-save"
+      ],
+      "be_logic": "[[studio-backend]]每次都把三个字段（User ID + Gitea 地址 + 技能目录）当成完整一份，用原子写（先写临时文件再瞬间替换）写进[[app-settings-file]]——没有「只改一个字段」的细粒度更新。写失败会抛 500 错误。整个过程纯本地，不碰云端网关。",
+      "be_api": [
+        {
+          "endpoint": "PUT /api/settings",
+          "owner": "settings-put-api",
+          "purpose": "整页三字段一次性替换写盘，无字段级更新；写失败抛 500",
+          "connected": "前端 300 毫秒防抖后触发，全程由 Studio 本地后端拥有"
+        }
+      ],
+      "gap": "符合设计（ux-spec §7.1 #15）：三字段整份 PUT、无字段级更新；实时显徽章、不放独立「保存」按钮，与前端 UI 规范一致。"
+    }
+  ]
+}

@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Module Review Repair Handbook Template</title>
+<style>
+  :root {
+    --bg-app: #f3f4f8;
+    --bg-card: #f4f5f7;
+    --border-color: #e3e6ec;
+    --border-hover: #cbd2dc;
+    --text-title: #0e1116;
+    --text-body: #3b414a;
+    --text-muted: #7f8793;
+    --accent-blue: #3266e8;
+    --accent-green: #2ecc71;
+    --accent-orange: #f39c12;
+    --accent-red: #e74c3c;
+    --accent-purple: #8e44ad;
+    --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg-app); color: var(--text-body); font-family: var(--font-sans); line-height: 1.65; }
+  .main-layout { display: flex; align-items: flex-start; gap: 24px; max-width: 1280px; margin: 0 auto; padding: 0 24px; }
+  .sidebar { width: 318px; display: flex; flex-direction: column; padding: 30px 8px 30px 0; position: sticky; top: 0; align-self: flex-start; height: 100vh; overflow: hidden; flex-shrink: 0; }
+  .sb-card { background: #fff; border: 1px solid var(--border-color); border-radius: 16px; box-shadow: 0 4px 18px rgba(20,30,60,.05); padding: 16px 14px; margin-bottom: 16px; }
+  .sb-title { font-size: 13px; font-weight: 800; color: var(--text-title); line-height: 1.35; margin-bottom: 8px; }
+  .sb-sub { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+  .sb-card.toc { padding: 14px 10px; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .sb-progress-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); margin-bottom: 10px; font-weight: 600; }
+  .sb-progress-row b { color: var(--text-title); }
+  .sb-progress-track { height: 6px; background: #e9ebee; border-radius: 99px; overflow: hidden; }
+  .sb-progress-fill { height: 100%; width: 0%; background: #1b1d21; border-radius: 99px; transition: width .35s ease; }
+  .toc-group { margin-bottom: 12px; }
+  .toc-parent { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 10px; text-decoration: none; color: var(--text-title); transition: background .18s; }
+  .toc-parent:hover, .toc-parent.active { background: #eef0f3; }
+  .parent-node { width: 26px; height: 26px; border-radius: 8px; background: #15171d; color: #fff; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 10px; font-weight: 800; flex-shrink: 0; }
+  .parent-title { min-width: 0; flex: 1; }
+  .parent-title b { display: block; font-size: 13px; line-height: 1.25; }
+  .parent-title span { display: block; font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px; }
+  .child-list { margin-left: 18px; padding-left: 13px; border-left: 1px solid #dfe3ea; }
+  .progress-item { display: flex; align-items: flex-start; gap: 9px; padding: 7px 9px; border-radius: 9px; text-decoration: none; transition: background .18s; }
+  .progress-item:hover, .progress-item.active { background: #eef0f3; }
+  .dot-indicator { width: 16px; height: 16px; border-radius: 50%; background: #fff; border: 2px solid #d1d7e0; flex-shrink: 0; margin-top: 1px; }
+  .progress-item.done .dot-indicator { background: var(--accent-green); border-color: var(--accent-green); }
+  .item-label { font-size: 12px; font-weight: 600; color: #68707d; line-height: 1.35; }
+  .progress-item.active .item-label { color: var(--text-title); font-weight: 800; }
+  .status-dot { margin-left: auto; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; }
+  .ok { background: var(--accent-green); }
+  .partial { background: var(--accent-orange); }
+  .bad { background: var(--accent-red); }
+  .review { background: var(--accent-purple); }
+  .viewport { flex: 1; min-width: 0; }
+  .reading-column { width: 100%; max-width: 920px; margin: 30px 0 56px; padding: 42px 50px 30px; background: #fff; border: 1px solid var(--border-color); border-radius: 18px; box-shadow: 0 12px 40px rgba(20,30,60,.06); overflow: hidden; min-width: 0; }
+  .doc-section { display: none; min-width: 0; overflow-wrap: break-word; word-break: break-word; }
+  .doc-section.active { display: block; }
+  .card-header-tag { font-size: 11px; font-family: var(--font-mono); text-transform: uppercase; font-weight: 700; color: var(--accent-blue); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .card-header-tag::before { content: ""; width: 6px; height: 6px; border-radius: 2px; background: var(--accent-blue); }
+  .lesson-title { font-size: 33px; font-weight: 800; color: var(--text-title); margin-bottom: 8px; line-height: 1.22; }
+  .lesson-subtitle { font-size: 14px; color: var(--text-muted); margin-bottom: 22px; }
+  .sec-label { font-size: 17px; font-weight: 800; color: var(--text-title); margin: 28px 0 12px; display: flex; align-items: center; gap: 9px; }
+  .sec-label::before { content: ""; width: 6px; height: 6px; border-radius: 2px; background: var(--accent-blue); }
+  .body-copy { font-size: 14px; line-height: 1.86; color: #49515d; margin-bottom: 14px; }
+  .intro-lead, .callout { border-radius: 12px; padding: 15px 17px; margin: 14px 0 20px; line-height: 1.72; }
+  .intro-lead { background: var(--bg-card); border: 1px solid var(--border-color); }
+  .callout { border-left: 3px solid var(--accent-blue); background: rgba(50,102,232,.07); color: #2a4aa0; }
+  .callout.red { border-left-color: var(--accent-red); background: rgba(231,76,60,.09); color: #9d352b; }
+  .callout.amber { border-left-color: var(--accent-orange); background: rgba(243,156,18,.11); color: #815409; }
+  .callout.green { border-left-color: var(--accent-green); background: rgba(46,204,113,.09); color: #1f7a45; }
+  .hero-grid, .checks { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 18px 0 22px; }
+  .hero-card, .check-card, .wave-card, .repair-child-card, .node-card { background: #fff; border: 1px solid var(--border-color); border-radius: 10px; padding: 13px 14px; }
+  .hero-k, .check-head { font-family: var(--font-mono); font-size: 11px; font-weight: 800; color: var(--text-muted); margin-bottom: 7px; }
+  .hero-v { font-size: 14px; color: var(--text-body); line-height: 1.75; }
+  .wave-grid, .routine-list, .repair-card-list { display: grid; grid-template-columns: 1fr; gap: 10px; margin: 12px 0 22px; }
+  .wave-card h4, .repair-child-head h4 { color: var(--text-title); font-size: 14px; margin-bottom: 5px; }
+  .wave-card p, .repair-child-body p { color: #505864; font-size: 13px; line-height: 1.68; }
+  .node-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin: 10px 0 20px; }
+  .node-card { text-decoration: none; color: inherit; display: block; }
+  .node-card .nid { font-family: var(--font-mono); font-size: 10px; font-weight: 800; color: var(--accent-blue); margin-bottom: 5px; }
+  .node-card .nh { font-size: 14px; color: var(--text-title); font-weight: 800; line-height: 1.35; }
+  .node-card .nt { font-size: 12.5px; color: var(--text-muted); margin-top: 5px; line-height: 1.5; }
+  .check-body ol, .check-body ul { padding-left: 18px; }
+  .check-body li { margin-bottom: 8px; font-size: 13.2px; color: #525965; line-height: 1.58; }
+  .info-table { width: 100%; border-collapse: collapse; margin: 12px 0 22px; table-layout: fixed; border: 1px solid var(--border-color); border-radius: 12px; overflow: hidden; display: table; }
+  .info-table th { background: #f4f5f7; color: var(--text-title); font-size: 12px; text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border-color); }
+  .info-table td { vertical-align: top; color: #505864; font-size: 12.8px; line-height: 1.65; padding: 12px; border-bottom: 1px solid var(--border-color); border-right: 1px solid var(--border-color); }
+  .info-table tr:last-child td { border-bottom: 0; }
+  .info-table td:last-child { border-right: 0; }
+  .repair-child-head { display: flex; align-items: flex-start; gap: 10px; justify-content: space-between; margin-bottom: 10px; }
+  .state-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 9px; font-family: var(--font-mono); font-size: 11px; font-weight: 700; border: 1px solid; }
+  .state-badge.ok { color: #14713c; background: rgba(46,204,113,.09); border-color: rgba(46,204,113,.34); }
+  .state-badge.partial { color: #8a5a08; background: rgba(243,156,18,.10); border-color: rgba(243,156,18,.36); }
+  .state-badge.bad { color: #a33225; background: rgba(231,76,60,.09); border-color: rgba(231,76,60,.34); }
+  .state-badge.review { color: #71408f; background: rgba(142,68,173,.08); border-color: rgba(142,68,173,.28); }
+  .paginator { display: flex; align-items: stretch; justify-content: space-between; gap: 14px; margin-top: 40px; }
+  .nav-btn { flex: 1; min-width: 0; background: #14161b; border: 1px solid #14161b; color: #d6dae1; padding: 16px 18px; border-radius: 12px; cursor: pointer; font-size: 13.5px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+  #prev-btn { justify-content: flex-start; }
+  #next-btn { justify-content: flex-end; }
+  .nb-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (max-width: 900px) {
+    .main-layout { display: block; padding: 0 14px; }
+    .sidebar { display: none; }
+    .reading-column { margin: 14px 0 28px; padding: 26px 20px 22px; }
+    .hero-grid, .checks, .node-grid { grid-template-columns: 1fr; }
+    .lesson-title { font-size: 26px; }
+  }
+</style>
+</head>
+<body>
+  <div class="main-layout">
+    <aside class="sidebar">
+      <div class="sb-card">
+        <div class="sb-title">模块审查修复手册</div>
+        <div class="sb-sub">先读总章，再按每个模块的设计总览、修复路径、子节点验收顺序推进。</div>
+      </div>
+      <div class="sb-card sb-progress">
+        <div class="sb-progress-row"><span>阅读进度</span><b id="progress-pct">0%</b></div>
+        <div class="sb-progress-track"><div class="sb-progress-fill" id="progress-fill"></div></div>
+      </div>
+      <nav class="sb-card toc" id="toc"></nav>
+    </aside>
+    <main class="viewport">
+      <article class="reading-column">
+        <div id="docInner"></div>
+        <nav class="paginator">
+          <button class="nav-btn" id="prev-btn" onclick="prevPage()"><span>&larr;</span><span class="nb-label" id="prev-label">上一页</span></button>
+          <button class="nav-btn" id="next-btn" onclick="nextPage()"><span class="nb-label" id="next-label">下一页</span><span>&rarr;</span></button>
+        </nav>
+      </article>
+    </main>
+  </div>
+
+<script>
+const S0_PAGE = {
+  id: "s0",
+  code: "S0",
+  title: "总章：环境、波次与方法论",
+  pageId: "s0_overview",
+  purpose: "这份手册用于把模块审查、设计澄清、修复推进和验证证据组织成可阅读、可复查、可复用的页面。",
+  environment: [["Worktree", "<absolute path>"], ["Branch", "<branch name>"], ["Status page", "<html path>"]],
+  waves: [["Wave 1 · 边界先行", "先修限制旧路复发的模块边界。"], ["Wave 2 · 能力收敛", "再修存储、文件、运行或 UI 能力。"]],
+  routine: [["读设计", "先看父节点设计页。"], ["写 RED", "先写失败检查。"], ["更新手册", "把证据写回修复页。"]],
+  methodology: [["先定义模块本体", "回答模块拥有的事实或能力。"], ["分清语义与能力", "adapter、hook、presenter 是接入方式，不自动成为架构层。"]]
+};
+
+const MODULE_TREE = [
+  {
+    id: "m1",
+    code: "M1",
+    title: "示例模块",
+    status: "partial",
+    ontology: [
+      ["语义层", "定义业务事实、状态、用户意图和一致性规则。", "不执行底层能力。"],
+      ["能力层", "提供可复用执行能力、状态机、渲染能力或存储能力。", "不定义业务语义。"]
+    ],
+    owner: "模块 owner 拥有事实和契约；调用方只消费公开接口；接入方式不发明业务语义。",
+    interfaces: [["接口/状态", "输入", "输出", "错误"], ["createThing", "CreateRequest", "ThingRef", "thing.conflict"]],
+    consumers: [["调用方", "使用接口", "必带约束"], ["UI", "createThing/readThing", "id、version、expectedHash"]],
+    plan: "先补 RED，再做最小实现，最后跑 focused gate 和截图验收。",
+    current: "当前风险写在修复页，不写在设计页。",
+    issues: [["问题", "处理原则"], ["设计和修复混写", "父页只写稳定设计，修复页写动态事实。"]],
+    gates: [["门禁", "RED 应如何失败", "GREEN 应如何通过"], ["DOM check", "缺 section/nav", "section/nav 一一对应"]],
+    children: [
+      child("m1_child", "M1.1", "示例子节点", "bad", "旧问题背景。", "正确设计。", "当前支线现状。", "修复目标。", ["自动化验证。"], ["手工验收。"], ["放行判据。"])
+    ]
+  }
+];
+
+function child(id, code, title, status, problem, design, current, fix, auto, manual, pass) {
+  return { id, code, title, status, problem, design, current, fix, auto, manual, pass };
+}
+function statusClass(status) { return status === "ok" ? "ok" : status === "partial" ? "partial" : status === "bad" ? "bad" : "review"; }
+function statusText(status) {
+  return status === "ok" ? "边界清晰" : status === "partial" ? "部分落实" : status === "bad" ? "当前有问题" : "需补证据";
+}
+function esc(text) {
+  return String(text).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function inlineCode(text) {
+  return esc(text).replace(/`([^`]+)`/g, "<code>$1</code>");
+}
+function list(items, ordered) {
+  const tag = ordered ? "ol" : "ul";
+  return "<" + tag + ">" + items.map(item => "<li>" + inlineCode(item) + "</li>").join("") + "</" + tag + ">";
+}
+function infoTable(headers, rows) {
+  return '<table class="info-table"><thead><tr>' + headers.map(h => "<th>" + inlineCode(h) + "</th>").join("") + "</tr></thead><tbody>" +
+    rows.map(row => "<tr>" + row.map(cell => "<td>" + inlineCode(cell) + "</td>").join("") + "</tr>").join("") +
+  "</tbody></table>";
+}
+function flatPages() {
+  const pages = [{ ...S0_PAGE, kind: "s0", pageId: S0_PAGE.pageId }];
+  MODULE_TREE.forEach(node => {
+    pages.push({ ...node, kind: "design", pageId: node.id + "_overview" });
+    pages.push({ ...node, kind: "repair", pageId: node.id + "_repair" });
+    node.children.forEach(c => pages.push({ ...c, parent: node, kind: "child", pageId: c.id }));
+  });
+  return pages;
+}
+const PAGES = flatPages();
+function renderS0(page) {
+  return '<section class="doc-section" id="' + page.pageId + '">' +
+    '<div class="card-header-tag">Opening chapter · ' + page.code + '</div>' +
+    '<h2 class="lesson-title">' + esc(page.title) + '</h2>' +
+    '<div class="lesson-subtitle">先确认环境、波次和方法论，再进入每个模块。</div>' +
+    '<div class="intro-lead">' + inlineCode(page.purpose) + '</div>' +
+    '<div class="sec-label">当前实施环境</div>' + infoTable(["项", "值"], page.environment) +
+    '<div class="sec-label">整体修复波次</div><div class="wave-grid">' + page.waves.map(w => '<div class="wave-card"><h4>' + inlineCode(w[0]) + '</h4><p>' + inlineCode(w[1]) + '</p></div>').join("") + '</div>' +
+    '<div class="sec-label">固定 routine</div><div class="wave-grid">' + page.routine.map(r => '<div class="wave-card"><h4>' + inlineCode(r[0]) + '</h4><p>' + inlineCode(r[1]) + '</p></div>').join("") + '</div>' +
+    '<div class="sec-label">模块审查方法论</div><div class="wave-grid">' + page.methodology.map(m => '<div class="wave-card"><h4>' + inlineCode(m[0]) + '</h4><p>' + inlineCode(m[1]) + '</p></div>').join("") + '</div>' +
+  '</section>';
+}
+function renderParentDesign(node) {
+  return '<section class="doc-section" id="' + node.id + '_overview">' +
+    '<div class="card-header-tag">Design overview · ' + node.code + '</div>' +
+    '<h2 class="lesson-title">' + node.code + ' · ' + esc(node.title) + '</h2>' +
+    '<div class="lesson-subtitle">设计页只写稳定逻辑：模块本体、边界、接口、调用关系。</div>' +
+    '<div class="sec-label">模块本体与层级</div>' + infoTable(["层/概念", "职责", "边界"], node.ontology) +
+    '<div class="sec-label">正确 owner 切分</div><p class="body-copy">' + inlineCode(node.owner) + '</p>' +
+    '<div class="sec-label">对外接口 / 状态 / 错误</div>' + infoTable(node.interfaces[0], node.interfaces.slice(1)) +
+    '<div class="sec-label">调用方使用矩阵</div>' + infoTable(node.consumers[0], node.consumers.slice(1)) +
+  '</section>';
+}
+function renderParentRepair(node) {
+  return '<section class="doc-section" id="' + node.id + '_repair">' +
+    '<div class="card-header-tag">Repair path · ' + node.code + '</div>' +
+    '<h2 class="lesson-title">' + node.code + ' · 修复路径</h2>' +
+    '<div class="lesson-subtitle">修复页只写动态事实：问题记录、当前风险、门禁和子节点落点。</div>' +
+    '<div class="sec-label">修复路径</div><p class="body-copy">' + inlineCode(node.plan) + '</p>' +
+    '<div class="sec-label">当前风险</div><div class="callout amber">' + inlineCode(node.current) + '</div>' +
+    '<div class="sec-label">本轮问题记录</div>' + infoTable(node.issues[0], node.issues.slice(1)) +
+    '<div class="sec-label">RED/GREEN 门禁</div>' + infoTable(node.gates[0], node.gates.slice(1)) +
+    '<div class="sec-label">子节点落点</div><div class="repair-card-list">' + node.children.map(c =>
+      '<div class="repair-child-card"><div class="repair-child-head"><h4>' + c.code + ' · ' + esc(c.title) + '</h4><span class="state-badge ' + statusClass(c.status) + '">' + statusText(c.status) + '</span></div><div class="repair-child-body"><p><strong>修复目标</strong>' + inlineCode(c.fix) + '</p></div><a class="node-card" href="#' + c.id + '"><div class="nid">' + c.code + '</div><div class="nh">进入子节点验收页</div><div class="nt">查看问题、设计、验证和放行判据。</div></a></div>'
+    ).join("") + '</div>' +
+  '</section>';
+}
+function renderChildAcceptance(childNode) {
+  return '<section class="doc-section" id="' + childNode.id + '">' +
+    '<div class="card-header-tag">Child acceptance · ' + childNode.parent.code + '</div>' +
+    '<h2 class="lesson-title">' + childNode.code + ' · ' + esc(childNode.title) + '</h2>' +
+    '<div class="hero-grid"><div class="hero-card"><div class="hero-k">状态</div><div class="hero-v"><span class="state-badge ' + statusClass(childNode.status) + '">' + statusText(childNode.status) + '</span></div></div><div class="hero-card"><div class="hero-k">父节点边界</div><div class="hero-v">' + inlineCode(childNode.parent.owner) + '</div></div></div>' +
+    '<div class="sec-label">问题背景</div><p class="body-copy">' + inlineCode(childNode.problem) + '</p>' +
+    '<div class="sec-label">正确设计</div><p class="body-copy">' + inlineCode(childNode.design) + '</p>' +
+    '<div class="sec-label">当前支线现状</div><div class="callout amber">' + inlineCode(childNode.current) + '</div>' +
+    '<div class="sec-label">修复目标</div><p class="body-copy">' + inlineCode(childNode.fix) + '</p>' +
+    '<div class="checks"><div class="check-card"><div class="check-head">自动化 / 静态验证</div><div class="check-body">' + list(childNode.auto, false) + '</div></div><div class="check-card"><div class="check-head">手工验收</div><div class="check-body">' + list(childNode.manual, true) + '</div></div></div>' +
+    '<div class="sec-label">放行判据</div><div class="check-card"><div class="check-body">' + list(childNode.pass, false) + '</div></div>' +
+  '</section>';
+}
+function buildTOC() {
+  const intro = '<div class="toc-group"><a class="toc-parent" href="#s0_overview" id="nav-s0_overview"><span class="parent-node">S0</span><span class="parent-title"><b>' + esc(S0_PAGE.title) + '</b><span>环境 / 波次 / 方法论</span></span><span class="status-dot ok"></span></a></div>';
+  document.getElementById("toc").innerHTML = intro + MODULE_TREE.map(node => {
+    const repair = '<a class="progress-item" href="#' + node.id + '_repair" id="nav-' + node.id + '_repair"><span class="dot-indicator"></span><span class="item-label">' + node.code + ' 修复路径</span><span class="status-dot ' + statusClass(node.status) + '"></span></a>';
+    const children = node.children.map(c => '<a class="progress-item" href="#' + c.id + '" id="nav-' + c.id + '"><span class="dot-indicator"></span><span class="item-label">' + c.code + ' ' + esc(c.title) + '</span><span class="status-dot ' + statusClass(c.status) + '"></span></a>').join("");
+    return '<div class="toc-group"><a class="toc-parent" href="#' + node.id + '_overview" id="nav-' + node.id + '_overview"><span class="parent-node">' + node.code + '</span><span class="parent-title"><b>' + esc(node.title) + '</b><span>设计总览 · 修复路径 · ' + node.children.length + ' 个子节点 · ' + statusText(node.status) + '</span></span><span class="status-dot ' + statusClass(node.status) + '"></span></a><div class="child-list">' + repair + children + '</div></div>';
+  }).join("");
+}
+function buildDoc() {
+  document.getElementById("docInner").innerHTML = renderS0(S0_PAGE) + MODULE_TREE.map(node =>
+    renderParentDesign(node) + renderParentRepair(node) + node.children.map(c => renderChildAcceptance({ ...c, parent: node })).join("")
+  ).join("");
+}
+let current = 0;
+function shortTitle(index) {
+  const page = PAGES[index];
+  if (!page) return "";
+  if (page.kind === "s0") return "S0 总章";
+  if (page.kind === "design") return page.code + " 设计总览";
+  if (page.kind === "repair") return page.code + " 修复路径";
+  return page.code + " " + page.title;
+}
+function showPage(index, smooth) {
+  current = Math.max(0, Math.min(PAGES.length - 1, index));
+  const page = PAGES[current];
+  document.querySelectorAll(".doc-section").forEach(section => section.classList.toggle("active", section.id === page.pageId));
+  PAGES.forEach((p, idx) => {
+    const nav = document.getElementById("nav-" + p.pageId);
+    if (!nav) return;
+    nav.classList.toggle("active", idx === current);
+    nav.classList.toggle("done", idx <= current);
+  });
+  const pct = Math.round(((current + 1) / PAGES.length) * 100);
+  document.getElementById("progress-fill").style.width = pct + "%";
+  document.getElementById("progress-pct").textContent = pct + "%";
+  document.getElementById("prev-btn").style.visibility = current === 0 ? "hidden" : "visible";
+  document.getElementById("next-btn").style.visibility = current === PAGES.length - 1 ? "hidden" : "visible";
+  document.getElementById("prev-label").textContent = current > 0 ? shortTitle(current - 1) : "";
+  document.getElementById("next-label").textContent = current < PAGES.length - 1 ? shortTitle(current + 1) : "";
+  window.scrollTo({ top: 0, behavior: smooth ? "smooth" : "auto" });
+  if (history.replaceState) history.replaceState(null, "", "#" + page.pageId);
+}
+function nextPage() { if (current < PAGES.length - 1) showPage(current + 1, true); }
+function prevPage() { if (current > 0) showPage(current - 1, true); }
+window.addEventListener("load", () => {
+  buildTOC();
+  buildDoc();
+  document.querySelectorAll('a[href^="#"]').forEach(link => {
+    link.addEventListener("click", event => {
+      event.preventDefault();
+      const id = link.getAttribute("href").slice(1);
+      const idx = PAGES.findIndex(page => page.pageId === id);
+      if (idx >= 0) showPage(idx, false);
+    });
+  });
+  const hash = location.hash ? location.hash.slice(1) : "s0_overview";
+  const start = PAGES.findIndex(page => page.pageId === hash);
+  showPage(start >= 0 ? start : 0, false);
+});
+</script>
+</body>
+</html>

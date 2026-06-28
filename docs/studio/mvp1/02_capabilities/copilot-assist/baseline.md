@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/copilot-assist
 doc: baseline
-status: FROZEN（现状对齐 pinned 代码 0d9fbaf；SDK 对话 live，但仍直写、session 内存态、ThinkingBlock 未翻译，Settings 里的 SDK 测试路径与真实 chat 不等价 ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；SDK 对话 live，Write/Edit 直写为 MVP1 允许口径；session 内存态、ThinkingBlock 未翻译，Settings 里的 SDK 测试路径与真实 chat 不等价 ⚠️。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/backend/app/services/copilot.py:stream_query · apps/studio/backend/app/services/copilot.py:_translate_sdk_message · apps/studio/backend/app/routers/copilot.py:copilot_ws · apps/studio/frontend/src/store/copilotStore.ts:reset · apps/studio/backend/app/routers/llm.py:_probe_copilot_sdk_tool_call
 units: [copilot-sdk-test-parity, copilot-session-persistence]
@@ -9,11 +9,11 @@ units: [copilot-sdk-test-parity, copilot-session-persistence]
 
 # copilot-assist — Baseline（当下代码实现逻辑）
 
-> **Scope**: 右侧 copilot chat 的端到端能力：对话、多 session、@mention、安全写、建技能向导、judge/打磨载体与分析 bar。
-> **现状一句话**: SDK 对话 live，但仍直写、session 内存态、ThinkingBlock 未翻译，Settings 里的 SDK 测试路径与真实 chat 不等价 ⚠️。
+> **Scope**: 右侧 copilot chat 的端到端能力：对话、多 session、@mention、Copilot 自写与审阅回显、建技能向导、judge/打磨载体与分析 bar。
+> **现状一句话**: SDK 对话 live，Write/Edit 直写为 MVP1 允许口径；session 内存态、ThinkingBlock 未翻译，Settings 里的 SDK 测试路径与真实 chat 不等价 ⚠️。
 
 ## UI/UX
-右侧 copilot chat 的端到端能力：对话、多 session、@mention、安全写、建技能向导、judge/打磨载体与分析 bar。 当前在 UI 上的可见入口、提示、面板或状态详见下方前端证据；带 ⚠️ 的项是已验真的 code↔design drift。
+右侧 copilot chat 的端到端能力：对话、多 session、@mention、Copilot 自写与审阅回显、建技能向导、judge/打磨载体与分析 bar。 当前在 UI 上的可见入口、提示、面板或状态详见下方前端证据；带 ⚠️ 的项是已验真的 code↔design drift。
 
 ## 前端逻辑
 | 面 | 现状 | 证据（文件:符号名） |
@@ -34,16 +34,16 @@ units: [copilot-sdk-test-parity, copilot-session-persistence]
 
 ## 当前边界（copilot-assist 现在不是什么）
 - 数据流归属保持切开：judge/打磨归 `golden-eval`，commit-msg 归 `publish`。
-- 写盘唯一权威不在 copilot；Apply 委托 `native-fs` / editor 保存契约。
+- Copilot SDK `Read/Write/Edit` 是 MVP1 明确例外，允许在 workspace/cwd/add_dirs 范围内自行读写；Studio 自有保存、脚手架、`.workspace`、publish 等写入仍归 `native-fs`。
 
 ## baseline / alignment 差异（测试锚点）
 | 维度 | 现状（baseline） | 目标（alignment） |
 |---|---|---|
 | ThinkingBlock | `_translate_sdk_message` 丢 ThinkingBlock ⚠️ | thinking/tool call 全量流式，折叠但不省略 |
-| 安全写 | SDK `acceptEdits` 直写 ⚠️ | Write/Edit 变 diff proposal，Apply 走 Rust/编辑器保存与冲突处理 |
+| Copilot Write/Edit | SDK `acceptEdits` 直写（MVP1 允许） | 允许直写 workspace；工具事件需回显文件名与 diff/summary，Bash 仍审批 |
 | session | 前端 store reset 后内存态丢失 ⚠️ | 一 skill 多 session 持久化，退出恢复全部与活跃 tab |
 | SDK 测试 | Settings probe 走 `AsyncAnthropic` ⚠️ | 短 smoke 走真实 `ClaudeSDKClient` chat 路径 |
-> **验"是否按目标改了"**：1. ThinkingBlock；2. 安全写；3. session；4. SDK 测试。
+> **验"是否按目标改了"**：1. ThinkingBlock；2. Copilot Write/Edit 审阅回显；3. session；4. SDK 测试。
 
 ## 读代码主路径提示
 `apps/studio/backend/app/services/copilot.py:stream_query` → `apps/studio/backend/app/services/copilot.py:_translate_sdk_message` → `apps/studio/backend/app/routers/copilot.py:copilot_ws` → `apps/studio/frontend/src/store/copilotStore.ts:reset` → `apps/studio/backend/app/routers/llm.py:_probe_copilot_sdk_tool_call`。

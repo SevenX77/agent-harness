@@ -27,7 +27,7 @@ MVP1 目标：把「凭证 / 端点」的**数据结构 · 读写契约 · 归�
 按判据「换个 app 还原样能用吗?能=③b」拆开本模块的能力：
 - **③b 公共**：`credential_ref` 取密钥契约、endpoint/route schema、`base_url` 按协议归一化、凭证指纹、**endpoint 标准化拆分 + 协议匹配 + 测试 + 生成 canonical endpoint_id**。这些是 gateway 机制衍生的最佳方案，不绑死 UI/产品策略/调用方式/存储。
 - **① 前端**：用户怎么录入(provider 卡、多 URL 行)。
-- **③a 应用加工**：endpoint upsert + 实际**存储介质**(存哪个文件)、批量探测的 job/进度/HTTP 包装、draft import-apply 工作流。
+- **③a 应用加工**：endpoint upsert + 实际**存储介质**(存哪个文件)、批量探测的 job/进度/HTTP 包装、Probe Knowledge Catalog 远端源配置/上传审批。Import Draft（待导入草稿→apply）不是 MVP1 功能。
 
 不调模型(调用归 [[09-inv-invocation-runtime]])。本文只写文档目标，不改代码。**② Rust：N/A(凭证/endpoint 数据永不 Rust)**——本模块全部能力落在 ③b(gateway 包)/ ③a(studio backend)/ ① 前端，数据永不进 Rust 层。
 
@@ -44,7 +44,7 @@ MVP1 目标：把「凭证 / 端点」的**数据结构 · 读写契约 · 归�
 | **③a → ③b(凭证读写契约)** | `CredentialProviderProtocol`{ `describe(ref) → CredentialDescriptor`(非 secret，readiness), `get(ref) → secret`(执行期) }。权威源 `registry/contracts.py:33-40`。secret **永不**进 `ResolvedRoute`。 |
 | **resolve_role 输出(凭证部分)** | `ResolvedRoute`{ `credential_ref`(非空，`_has_credential_reference` 校验，`schema.py:441`), `credential_fingerprint`(非明文), `base_url`(canonical), protocol, timeout/proxy }。**无 `api_key` 字段**。字段权威源 `schema.py:415-439`。 |
 | **base_url 归一化(③b 公共，两道)** | 主 = 保存时 per-protocol canonical(`upsert_endpoints` 入口)；副 = 调用时幂等 no-op 双保险([[10-inv-route-chat-model-factory]] / copilot `_resolve_route_runtime`)。canonical 规则随 protocol 固定(F1)。 |
-| **存储介质(③a 注入)** | gateway 定 schema + 读写契约，**存哪个文件由 ③a 注入**：`credentials_path`/`roles_path`/`import_drafts_path`/`canonical_rules_path`(`llm_paths.py:13-42`，支持 env override)。 |
+| **存储介质(③a 注入)** | gateway 定 schema + 读写契约，**存哪个文件由 ③a 注入**：`credentials_path`/`roles_path`/`probe_catalog_path`/`canonical_rules_path`(`llm_paths.py:13-42`，支持 env override；`import_drafts_path` 仅为旧环境兼容别名)。 |
 | **错误** | credential_ref 缺失 → resolved route 不成立(`schema.py:441`)；执行期 secret 缺失/空 → `KeyError`(`credentials.py:38-45`)。 |
 | **归属 / 稳定性** | endpoint/route/resolved schema 权威源 = [[04-orch-registry-schema]]；本模块只链接。canonical endpoint_id 规则稳定性由 ③b 维护(本轮已定 ③b)。 |
 
@@ -83,7 +83,7 @@ MVP1 目标：把「凭证 / 端点」的**数据结构 · 读写契约 · 归�
   1. credentials storage 只负责 active endpoint/route/runtime_policy 文件;`load_credentials`(用途:v4 credentials 读取入口,拒绝 legacy/非 v4 schema)拒绝旧 schema,保证 runtime 不回退旧 provider/env 行为(`apps/studio/backend/app/services/llm_credentials.py:39-67`)。
   2. roles storage 只负责 roles/profile/bundle authoring 文件;`validate_references`(用途:校验 roles/profile/bundle 只引用已知 route_id)确保 route_id 引用存在,但不做动态选型或 secret 读取(`apps/studio/backend/app/services/llm_roles.py:88-133`)。
   3. path storage 只负责文件位置;`_env_or_default`(用途:集中处理 env override 与默认 app settings dir)集中处理 env override 与默认 app settings dir(`apps/studio/backend/app/services/llm_paths.py:45-49`)。
-  - upsert 入口：① 前端交来的标准 endpoint list 由 ③a `upsert_endpoints` + 把它存进文件(存储介质)；存储介质由 ③a 注入(`credentials_path`/`roles_path`/`import_drafts_path`/`canonical_rules_path`)。删除 endpoint 时同步删除其 route(见下决策)。
+  - upsert 入口：① 前端交来的标准 endpoint list 由 ③a `upsert_endpoints` + 把它存进文件(存储介质)；存储介质由 ③a 注入(`credentials_path`/`roles_path`/`probe_catalog_path`/`canonical_rules_path`)。删除 endpoint 时同步删除其 route(见下决策)。
 - **决策 + 动机**：
   - **endpoint 与 route 分层是必要边界**：endpoint 代表连接/凭证/protocol,route 代表模型/capability/canonical_id;删除 endpoint 时同步删 route,说明这两个层级不能混成一个 provider 字符串(`apps/studio/backend/app/services/llm_credentials.py:139-155`)。
   - **存储介质归 ③a 注入**：gateway 定 schema + 读写规范，存哪个文件是应用的事(README §2 存储介质)；`llm_paths.py` 的 env override 正是这条边界。
@@ -113,7 +113,7 @@ MVP1 目标：把「凭证 / 端点」的**数据结构 · 读写契约 · 归�
   - **per-protocol base_url canonical**：保存 anthropic endpoint(base_url 带 `/v1`)→ 存成去尾 `/v1`；deepseek-anthropic 带 `/v1` → 存成去 `/v1` 补 `/anthropic`；ark → `.../api/v3`；openai → 保持 provider 接受形状(防回归成「只 strip 尾斜杠」)。
   - **实证（2026-06-04 spike，归一化必须）**：WaveSpeed anthropic SDK runtime 用 `https://llm.wavespeed.ai/v1` → **404**（Anthropic SDK 自加 `/v1/messages` 变 `/v1/v1/messages`），归一化到 root `https://llm.wavespeed.ai` → ok。**证明 per-protocol 归一化是 SDK runtime 跑通的前提，不是"应该做"而是"必须做"**（[chatx-provider-patterns.md](../references/chatx-provider-patterns.md)）。⚠️ 还牵出 Finding C：Studio 的 raw HTTP probe 会 dedup `/v1` 而 SDK runtime 不会 → probe 通过 ≠ runtime 通过，详见 [[08-orch-test-status-ssot]]。
   - **保存=调用同一路径**：保存后 resolver / probe / client factory / fingerprint / copilot env 读到的 base_url **完全一致**(防「测试通了运行又错」)。
-- **status**：已实现——`upsert_endpoints`、v3→v4 migration、import draft apply 与 fingerprint 均复用 gateway `canonicalize_base_url`;调用层仍保留幂等双保险。
+- **status**：已实现——`upsert_endpoints`、v3→v4 migration、Probe Catalog 路径和 fingerprint 均复用 gateway `canonicalize_base_url`/canonical path 规则;调用层仍保留幂等双保险。Import Draft apply 非 MVP1 主线，不再作为公开 HTTP 功能。
 - **归属**：region/platform **③b** `packages/graph-agent-gateway`：base_url 归一化(`registry/storage.py`)。调用时幂等落点 = [[10-inv-route-chat-model-factory]] / copilot `_resolve_route_runtime`(③a 调用方式)。
 
 ### F4 endpoint 标准化拆分 + canonical id 生成
@@ -138,7 +138,7 @@ MVP1 目标：把「凭证 / 端点」的**数据结构 · 读写契约 · 归�
   - **协议自动探测**：third-party URL 不让用户选 protocol → ③b 打各协议推理端点 + auth header 自动判定(`x-api-key` vs `Bearer`)。
   - **前端不拆/不生成 id**：前端只交原始输入，拆分 + canonical id 由 ③b 做(回归反转点：不再前端拆、不再前端生成 id)。
 - **status**：已实现 ③b 标准化内核——`registry/endpoints.py` 覆盖拆分、probe 编排接口、标准 endpoint candidates 输出、canonical endpoint_id 稳定性 / collision suffix / reserved id 防撞,并把 v3 migration 历史 id helper 下沉到 gateway；Studio `llm_credentials.py` 的 migration 已改为调用 gateway helper。③a HTTP/job 接线仍保持应用包装边界。
-- **归属**：region/platform **③b** `packages/graph-agent-gateway`：endpoint 拆分 + protocol probe 编排接口 + canonical id 生成 + legacy migration id helper。**③a** `apps/studio/backend`：批量探测 job/HTTP 包装、draft import-apply 工作流、调用 gateway 标准化结果后 `upsert_endpoints` + 存储。**① 前端**：provider 卡录入、多 URL 行(只收集原始输入，不拆 / 不生成 id)。
+- **归属**：region/platform **③b** `packages/graph-agent-gateway`：endpoint 拆分 + protocol probe 编排接口 + canonical id 生成 + legacy migration id helper。**③a** `apps/studio/backend`：批量探测 job/HTTP 包装、Probe Catalog 远端源/上传审批、调用 gateway 标准化结果后 `upsert_endpoints` + 存储。**① 前端**：provider 卡录入、多 URL 行(只收集原始输入，不拆 / 不生成 id)。
 
 ### F5 凭证指纹(`compute_credential_fingerprint`)
 

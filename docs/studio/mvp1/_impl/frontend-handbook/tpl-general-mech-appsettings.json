@@ -1,0 +1,202 @@
+{
+  "id": "general_mech_appsettings",
+  "title": "app_settings 读写 + 选目录机制（设计）",
+  "overview": {
+    "manages": "General tab 三个应用级配置(Studio User ID / Gitea Host / 默认 skills 目录)怎么从用户填进来 → 即填即存(debounce 整体 PUT)→ 进 tab/刷新时拉回恢复,加上「选默认 skills 目录」这一条唯一走 native 文件夹选择器的本地操作,整条链。",
+    "why_single": "它横跨两个不同后端:三字段的读写走 gateway 后端(Python sidecar 暴露的 GET/PUT /api/settings → app_settings.json),而「选目录」单独走 Studio Rust 后端(native 文件夹选择器)。同一个 General tab 里两条落点不同的链、外加「整体 PUT 无字段级 PATCH」「即填即存 + 保存徽章 + 并发缓冲」这些约束——一两句说不清,所以单列一页。",
+    "design_owner": "Studio 应用自身。app_settings 是 Studio 的应用配置(身份/产物路径),不属 gateway 的凭证/路由、也不属 engine 的编排;它由 gateway 后端的 sidecar 承载 HTTP 读写,但语义归属 Studio app。",
+    "code_location": "三字段读写:前端 useAppSettings(hook)→ api/client.ts getAppSettings/updateAppSettings → gateway 后端 routers/settings.py 的 GET/PUT /api/settings → metadata 存储读写 app_settings.json。选目录:前端 lib/tauri.ts selectSkillDirectory → Studio Rust 后端 tauri/src/lib.rs 的 select_directory 命令(native 文件夹对话框)。",
+    "dataflow": [
+      "用户在 General tab 改任一字段(User ID / Gitea Host / 默认 skills 目录),或点 Choose 选目录、点 Reset 还原",
+      "选目录这一步先走 Studio Rust 后端 select_directory 弹 OS 原生选择器、拿回绝对路径,写进默认 skills 目录字段(其它字段无此步)",
+      "前端 updateSettings 把改动合成完整三字段对象,queueSave 起 300ms debounce",
+      "到点 performSave 整体 PUT /api/settings(三字段一起发,无字段级 PATCH);有 in-flight 时缓冲进 pendingSettings,回来后再发",
+      "gateway 后端 routers/settings.py 校验 AppSettings(extra=forbid、字段 strip)→ metadata 存储落盘 app_settings.json,空 default_skills_directory 回落 runtime 默认 DEFAULT_SKILLS_ROOT",
+      "保存态实时反映到顶部 SaveStatusBadge(pending/saving/saved/error);进 tab/刷新走 GET /api/settings 拉回快照恢复三字段"
+    ]
+  },
+  "submodules": [
+    {
+      "name": "即填即存(debounce 整体 PUT + 保存徽章)",
+      "code": "frontend: useAppSettings.ts",
+      "summary": "拥有 General 三字段在前端的「改→缓冲→PUT→反馈」整条即填即存逻辑,是 General tab 落地的唯一前端底座。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "改任一字段走 setUserId/setGiteaHost/setDefaultSkillsDirectory → updateSettings 合出完整三字段对象(无字段级 PATCH,永远整体提交)。",
+        "queueSave 起 300ms debounce;到点 performSave 发 PUT /api/settings。",
+        "并发安全:有 in-flight 请求时把新值缓冲进 pendingSettings,当前请求回来后再发缓冲值,避免乱序覆盖。",
+        "保存态走 SaveStatus(idle/pending/saving/saved/error),驱动顶部 SaveStatusBadge;失败显式 toast + error 态,不静默。",
+        "进 tab/刷新初始 load 走 GET /api/settings;空 default_skills_directory 经 withRuntimeDefaults 在前端先回落 runtime 默认。"
+      ],
+      "do": [
+        "三字段录入的合并、debounce、整体 PUT、并发缓冲。",
+        "保存态机与徽章驱动、失败显式告警。",
+        "初始加载与运行时默认回落(前端侧)。"
+      ],
+      "dont": [
+        "不做字段级 PATCH(整体三字段提交是契约)。",
+        "不负责弹文件夹选择器(那是 native picker 子模块)、不负责落盘(归后端)。"
+      ],
+      "deviation": ""
+    },
+    {
+      "name": "选目录(native 文件夹选择器)",
+      "code": "frontend: lib/tauri.ts selectSkillDirectory · Studio Rust: tauri/src/lib.rs select_directory",
+      "summary": "settings 里唯一走 Studio Rust 后端 / native-fs 的操作:弹 OS 原生文件夹对话框、把用户选定的绝对路径交回前端,只选不存。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "前端 selectSkillDirectory 先判运行时:isTauriRuntime 为假(web 模式)→ toast『Desktop only』、返回 null,不弹选择器;native helpers 不可用 → 报桌面运行时不可用。",
+        "桌面环境走 Tauri invoke('select_directory'),把当前默认 skills 目录(currentDefaultSkillsDirectory)作起始路径传入。",
+        "Studio Rust 后端 select_directory 弹 OS 文件夹对话框(picker_starting_directory 把起始路径定位到已存在目录、目录不存在则尝试创建、再不行退到父目录)。",
+        "用户选定 → 返回绝对路径字符串;取消 → 返回 null。",
+        "选定路径回到前端后只是写进 default_skills_directory 字段,落盘仍走 PUT /api/settings——Rust 不碰 app_settings.json。"
+      ],
+      "do": [
+        "弹 OS 原生文件夹选择器、定位起始目录、回传选定绝对路径。",
+        "桌面/非桌面环境分流(web 模式 toast『Desktop only』)。"
+      ],
+      "dont": [
+        "不存 app_settings(落盘归 gateway 后端 PUT /api/settings)。",
+        "不碰凭证/角色等其它 settings 数据——选目录是 General 专属的唯一 native 操作。"
+      ],
+      "deviation": ""
+    },
+    {
+      "name": "app_settings 落盘(后端,前端只视为黑盒)",
+      "code": "gateway 后端: routers/settings.py + metadata 存储",
+      "summary": "gateway 后端把前端 PUT 来的三字段校验后落盘到 app_settings.json,从前端视角只是「PUT 进去、GET 出来」的黑盒。",
+      "formula": "",
+      "diagram": "",
+      "rules": [
+        "GET /api/settings 读 app_settings、PUT /api/settings 写;AppSettings 模型 extra=forbid(多字段拒绝)、三字段保存前 strip 去空白。",
+        "空 default_skills_directory 后端回落 DEFAULT_SKILLS_ROOT(runtime 默认 skills 根目录),保证返回的是具体路径。",
+        "写失败显式回 SETTINGS_WRITE_FAILED(500),不静默吞错。"
+      ],
+      "do": [
+        "三字段校验 + 落盘 + 空目录回落 runtime 默认。"
+      ],
+      "dont": [
+        "前端不关心它怎么落盘(在哪、原子性、权限)——那是后端实现细节,只认 GET/PUT 契约。"
+      ],
+      "deviation": ""
+    }
+  ],
+  "files": [
+    {
+      "name": "app_settings.json",
+      "what": "Studio 自己的应用配置文件:存 General tab 的三字段(Studio User ID / Gitea Host / 默认 skills 目录)。它是 Studio 的 app 设置,不属 gateway 凭证、也不属 engine 路由;前端只通过 /api/settings 读写,从不直接碰文件。",
+      "version": "AppSettings(Pydantic 模型,extra=forbid)",
+      "structs": [
+        {
+          "name": "AppSettings(三字段,前端视角)",
+          "fields": [
+            {
+              "name": "user_id",
+              "type": "string",
+              "meaning": "Studio User ID:本地 Git 作者名 + publish 时的仓库 owner;缺它点 publish 被后端挡『User ID 未配置』",
+              "sensitive": false
+            },
+            {
+              "name": "gitea_host",
+              "type": "string",
+              "meaning": "自建 Gitea 实例根地址,publish/sync 硬依赖;缺它点 publish 被后端挡『Gitea Host 未配置』。注:发布 token/凭据另走 env-only STUDIO_*,不在本文件",
+              "sensitive": false
+            },
+            {
+              "name": "default_skills_directory",
+              "type": "string",
+              "meaning": "新建 skill 的默认落地目录(绝对路径);为空时后端/前端各自回落 runtime 默认 configDir/Skills",
+              "sensitive": false
+            }
+          ]
+        }
+      ],
+      "owns": "这份数据归 Studio 应用自身(app 配置),由 gateway 后端的 sidecar 承载 HTTP 读写。前端不拥有、不直接碰文件,只通过 /api/settings 投影。",
+      "crud_pointer": "前端从不直接读写这个文件;它的全部读写都走 GET /api/settings(读三字段)与 PUT /api/settings(整体写三字段)两条接口——见下方「接口」一节,不在此重列。",
+      "storage_note": "文件存在哪、怎么落盘是后端实现细节,从前端视角不关心(只认 GET/PUT 契约)。",
+      "security_fe": "三字段都不是机密(user_id / host / 目录路径);发布用的 token/凭据走 env-only STUDIO_* 环境变量,绝不进本文件、也不在本 tab 录入。"
+    }
+  ],
+  "interface_groups": [
+    {
+      "key": "crud",
+      "title": "数据读写类(对 app_settings.json 的读/整体写)",
+      "note": "这一类是数据库式接口:资源固定(整份 app_settings 三字段),请求字段固定。前端「读写 app 设置」指的就是调这 2 条——整体三字段提交,无字段级 PATCH。"
+    },
+    {
+      "key": "action",
+      "title": "本地动作类(走 Studio Rust 后端 native-fs)",
+      "note": "这一类不是 HTTP CRUD:它通过 Studio Rust 后端弹 OS 原生文件夹对话框选一个本地目录,是 settings 里唯一走 native 的操作。它只「选路径」,选完仍由前端走 PUT /api/settings 落盘——不自己存 app_settings。"
+    }
+  ],
+  "interfaces": [
+    {
+      "group": "crud",
+      "endpoint": "GET /api/settings",
+      "req": "无入参",
+      "resp": "AppSettings{user_id, gitea_host, default_skills_directory}(空 default_skills_directory 后端回落 runtime 默认 DEFAULT_SKILLS_ROOT)",
+      "purpose": "查(读整份)——进 General tab / 刷新时拉一份 app_settings 快照恢复三字段,前端只投影、不持第二份真相",
+      "provider": "gateway 后端(routers/settings.py get_settings)",
+      "id": "iface-set-0"
+    },
+    {
+      "group": "crud",
+      "endpoint": "PUT /api/settings",
+      "req": "AppSettings{user_id, gitea_host, default_skills_directory}(整体三字段,无字段级 PATCH;extra 多字段会被拒)",
+      "resp": "落盘后的 AppSettings(空 default_skills_directory 回落 runtime 默认);写失败 → SETTINGS_WRITE_FAILED(500)",
+      "purpose": "增/改(整体 upsert)——即填即存的 debounce 落点;三字段一起提交,后端校验(strip、extra=forbid)后落盘 app_settings.json",
+      "provider": "gateway 后端(routers/settings.py put_settings)",
+      "id": "iface-set-1"
+    },
+    {
+      "group": "action",
+      "endpoint": "Tauri command select_directory",
+      "req": "defaultPath(可选,起始目录)",
+      "resp": "选定目录的绝对路径字符串;用户取消 → null;web 模式 → 不触发(前端先 toast『Desktop only』)",
+      "purpose": "选目录(唯一 native 操作)——Studio Rust 后端弹 OS 原生文件夹选择器,把用户选定的绝对路径交回前端;只选不存,落盘仍由前端走 PUT /api/settings",
+      "provider": "Studio Rust 后端(tauri/src/lib.rs select_directory)",
+      "id": "iface-set-native"
+    }
+  ],
+  "boundaries": {
+    "do": [
+      "三字段(user_id / gitea_host / default_skills_directory)的前端即填即存:合并、300ms debounce、整体 PUT、并发缓冲",
+      "保存态机 + 顶部保存徽章 + 失败显式告警",
+      "进 tab/刷新经 GET /api/settings 恢复三字段,空目录回落 runtime 默认",
+      "选默认 skills 目录:经 Studio Rust 后端弹 OS 原生文件夹选择器、回传绝对路径(settings 里唯一 native 操作)",
+      "后端(gateway sidecar)对三字段校验 + 落盘 app_settings.json + 空目录回落 DEFAULT_SKILLS_ROOT"
+    ],
+    "dont": [
+      "不做字段级 PATCH(整体三字段提交是契约)",
+      "不把发布 token/凭据放进 app_settings(那是 env-only STUDIO_*,另一套)",
+      "选目录的 Rust 后端不落盘 app_settings(只选路径,存归 PUT /api/settings)",
+      "settings 不适用『写全量 Rust』(D12 那条是 skill 源文件的归属;credentials/roles/settings 数据层走 gateway Python、永不 Rust 化)——唯一 native 就是这条选目录",
+      "前端不在本地持第二份 app_settings 真相(只投影,以后端为准)"
+    ]
+  },
+  "backend_status": [
+    {
+      "item": "app_settings 读写(GET/PUT /api/settings)",
+      "d12": "—",
+      "status": "ok",
+      "note": "三字段整体读写已就绪可接:GET/PUT /api/settings(routers/settings.py)+ AppSettings 校验 + 空目录回落 DEFAULT_SKILLS_ROOT 均已实现。← #10–#15 直接用。",
+      "ref": "settings"
+    },
+    {
+      "item": "选目录 native picker(Tauri select_directory)",
+      "d12": "—",
+      "status": "ok",
+      "note": "Studio Rust 后端 select_directory(tauri/src/lib.rs)弹 OS 文件夹对话框、定位起始目录、回传绝对路径已就绪;web 模式前端 toast『Desktop only』。← #13 直接用。",
+      "ref": "rust"
+    },
+    {
+      "item": "Gitea publish 校验(读 app_settings 拦缺配)",
+      "d12": "—",
+      "status": "ok",
+      "note": "publish/sync 时后端从 app_settings 读 user_id/gitea_host,缺则报 APP_SETTINGS_INCOMPLETE(routers/skills.py)。本 tab 只录入,拦截发生在 publish 那一刻;非 General 前端职责,登记说明 Gitea Host 的硬依赖去向。",
+      "ref": "settings"
+    }
+  ]
+}

@@ -46,4 +46,43 @@ describe("buildPutPayload", () => {
     ])
     expect(result[0].provider_type).toBeNull()
   })
+
+  it("expands each third-party base URL row into protocol-specific endpoints", () => {
+    const result = buildPutPayload([
+      {
+        id: "qiniu-openai",
+        name: "Qiniu",
+        api_key: "sk-qiniu",
+        base_urls: [{
+          id: "qiniu-openai",
+          value: "https://api.qnaigc.com/v1",
+          endpoint_ids: { openai_compatible: "qiniu-openai" },
+        }],
+      },
+    ])
+
+    expect(result).toEqual([
+      {
+        id: "qiniu-openai",
+        name: "Qiniu",
+        api_key: "sk-qiniu",
+        base_url: "https://api.qnaigc.com/v1",
+        provider_type: "openai_compatible",
+      },
+      {
+        id: "qiniu-openai-anthropic",
+        name: "Qiniu",
+        api_key: "sk-qiniu",
+        base_url: "https://api.qnaigc.com/v1",
+        provider_type: "anthropic_compatible",
+      },
+      {
+        id: "qiniu-openai-google",
+        name: "Qiniu",
+        api_key: "sk-qiniu",
+        base_url: "https://api.qnaigc.com/v1",
+        provider_type: "google_genai",
+      },
+    ])
+  })
 })

@@ -1,0 +1,56 @@
+{
+  "topic": "Studio N2 Authoring — 三类节点(Agent/Logic/Subgraph)Properties 白名单字段级 schema 深挖",
+  "worktree": "/Users/sevenx/Documents/coding/agent-harness/.worktrees/studio-mvp1-mainbased",
+  "whitelist": {
+    "summary": "PropertiesPanel.tsx 的 PhaseFrontmatterForm(三类节点 frontmatter 表单)按 kind 分支只渲染各类型白名单字段;表单数据形状定义在 phase-frontmatter.ts:14-25(PhaseFrontmatterFormData)。与 engine skill-syntax mvp1-alignment.md 的 §2.5(Agent SKILL.md)/§2.3(LOGIC.md)/§2.4(SUBGRAPH.md)字段表逐项对齐。",
+    "headers": ["节点类型", "Properties 渲染字段(file:line)", "字段含义", "对齐 engine §/文档证据"],
+    "rows": [
+      ["Agent (SKILL.md)", "llmRole — Input 文本框 (PropertiesPanel.tsx:315-332);frontmatter 键 llm_role (phase-frontmatter.ts:84,163)", "LLM 角色名:路由模型 tier/policy,空则继承 GRAPH 默认。UI 描述写 'Routes model tier/policy. Inherits the graph default when blank.'(:331)", "§2.5 字段表 mvp1-alignment.md:321 『llm_role | 必须存在于 llm_roles.yaml | 路由 LLM tier/model policy,不是 prompt 文案』"],
+      ["Agent (SKILL.md)", "tools — Textarea 每行一个工具名 (PropertiesPanel.tsx:333-342);frontmatter 键 tools 转 list (phase-frontmatter.ts:85,164)", "暴露给 Agent ReAct 循环主动调用的工具清单,一行一个工具名 (:341)", "§2.5 字段表 mvp1-alignment.md:325 『tools | list[string] | 正则 ^[a-z][a-z0-9_]*$ | 暴露给 Agent ReAct 循环主动调用』"],
+      ["Agent (SKILL.md)", "subagents — SubagentsField 子表单,每项三格 name/target_skill/description (PropertiesPanel.tsx:343-346,446-500);frontmatter 键 subagents (phase-frontmatter.ts:86,165)", "子代理登记表:每项 name(代理名)/target_skill(目标子 skill 逻辑 id)/description(描述)。子代理与 agent phase 捆绑、运行期由 LLM 委派", "§2.5 示例 mvp1-alignment.md:297-299『subagents: - name/target_skill/description』+ §2.1 注 mvp1-alignment.md:37『subagents(子代理)…不在子图 path 之列、不改 path(见 §8.3)』→ subagents 保留 target_skill 是设计要求,非 stale"],
+      ["Logic (LOGIC.md)", "actions — Textarea 每行一个 action,按执行顺序 (PropertiesPanel.tsx:349-360);frontmatter 键 actions 转 list (phase-frontmatter.ts:87,170)", "确定性 Python action 的注册+执行顺序,一行一个 action 名 (:359)", "§2.3 字段表 mvp1-alignment.md:167『actions | list[string] | 非空;每项 ^[a-z][a-z0-9_]*$;按列表顺序执行 | 注册确定性 Python action 的执行顺序』"],
+      ["Logic (LOGIC.md)", "validator — Switch 开关 (PropertiesPanel.tsx:361-365,431-444);frontmatter 键 validator bool (phase-frontmatter.ts:89,171)", "布尔开关:开启后置校验钩子,在 action 链结果写回 blackboard 前跑同级 validator.py 阻断脏输出", "§2.3 字段表 mvp1-alignment.md:168,220『validator | boolean | 默认 false | true 时必须存在同级 validator.py | 开启后置校验钩子』"],
+      ["Subgraph (SUBGRAPH.md)", "path — Input 文本框,占位 /absolute/path/to/child_graph (PropertiesPanel.tsx:369-378);frontmatter 键 path (phase-frontmatter.ts:88,175)", "子图根目录的绝对路径,指向含 GRAPH.md 的子 skill 根。UI 描述 'Absolute path to the child graph skill root.'(:377)", "§2.1+§2.4 字段表 mvp1-alignment.md:256『path | absolute path string | 必须是子图 skill 根目录绝对路径』,§2.1:40『path: <子图文件夹的绝对路径>』"],
+      ["Subgraph (SUBGRAPH.md)", "validator — Switch 开关 (PropertiesPanel.tsx:379-382,431-444);frontmatter 键 validator bool (phase-frontmatter.ts:89,176)", "布尔开关:对本 subgraph phase 候选输出启用后置校验", "§2.4 字段表 mvp1-alignment.md:257『validator | boolean | 默认 false | 声明是否对本 subgraph phase 的候选输出启用后置校验』"]
+    ],
+    "note_io_not_in_properties": "io.inputs/io.outputs(节点输入输出 JSON Schema + artifact 落盘)按设计**不在 Properties 渲染**,归 i/o panel(02_authoring.md:20 R3/G3;phase-editing F3 mvp1-alignment.md:38-45)。Properties 只管 frontmatter 的白名单标量/列表字段,正文 XML 步骤(L3 <step>/<action>)归画布内联(phase-editing F5 mvp1-alignment.md:56-63),也不在 Properties。"
+  },
+  "stale_excluded": {
+    "summary": "对照 02_authoring.md:11 FROZEN 警示列出的旧字段(type/system_prompt/exit_contract/max_retries/max_nudges/python_callable/mode/user_prompt_builder),逐个确认 PropertiesPanel.tsx + phase-frontmatter.ts 现状是否暴露。结论:这些字段在 Properties 表单里**全部不再作为可编辑字段渲染**;phase-frontmatter.ts 的 applyPhaseFrontmatterForm 用白名单写回(:93-125 注释明示『Keys outside the whitelist…are never touched』),所以保存也不会注入它们。",
+    "headers": ["旧字段", "为何被 FROZEN 禁", "现状是否已不暴露(证据 file:line)"],
+    "rows": [
+      ["mode (frontmatter)", "FROZEN F1:节点类型由文件名决定(SKILL/LOGIC/SUBGRAPH.md),不得在 frontmatter 写可变 mode。Loader 注入内部 mode(mvp1-alignment.md:138,230,277『作者不得在 frontmatter 写 mode:』)", "✅ 不作为可编辑字段暴露:PropertiesPanel.tsx 全文无 mode 输入框;mode 仅作为只读派生值显示成 Badge(:227)和 DetailRow(:264)。phase-frontmatter.ts 的 PhaseFrontmatterFormData(:14-25)无 mode 字段,frontmatterFromForm(:155-178)从不写 mode。⚠️ 但 mode 仍被读来**派生节点类型**(见 mode_derivation,违 F1 口径)"],
+      ["system_prompt", "FROZEN:cognitive 模板自动生成 system prompt,业务文案放 body XML <role>/<goal>,frontmatter 不放 prompt 文案(mvp1-alignment.md:277『frontmatter 只放框架装配配置,业务 prompt 内容放在 body XML』;02_authoring.md:11)", "✅ 不暴露:grep PropertiesPanel.tsx + phase-frontmatter.ts 无 system_prompt 字段;表单白名单不含此键,写回不触碰"],
+      ["exit_contract", "FROZEN:exit_contract 由 cognitive 模板末尾固定生成(V030_AGENT_EXIT_CONTRACT_TEXT,baseline.md:96),Loader 显式禁止 body 写 <exit_contract>(baseline.md:79);02_authoring.md:11 列为废", "✅ 不暴露:PropertiesPanel/phase-frontmatter 无 exit_contract 字段"],
+      ["max_retries / max_nudges / max_iterations", "FROZEN:02_authoring.md:11 把 max_retries/max_nudges 列为违 FROZEN 已废;mvp1 §2.5 Agent 字段表(mvp1-alignment.md:317-325)白名单不含这些循环控制字段", "✅ 不暴露:PropertiesPanel/phase-frontmatter 无任何 max_* 输入字段(build-nodes.ts 内部 PhaseDef 仍有 max_retries:null 等占位,但那是 manifest 投影常量,不进 Properties 表单)"],
+      ["python_callable", "FROZEN:LOGIC action 寻址改为 actions:[名字] + 物理 actions/<name>.py,不允许 frontmatter 写 callable 路径(mvp1-alignment.md:185『不允许 ./actions/foo.py、pkg.module:function』);02_authoring.md:11 列废", "✅ 不暴露:Logic 分支只渲染 actions(Textarea)+ validator(Switch)(PropertiesPanel.tsx:349-365),无 python_callable"],
+      ["type (simple/graph)", "FROZEN:GRAPH.md 头部无 type 字段,节点类型靠文件名(02_authoring.md:9,11『无 type 字段』『type(simple/graph)…违 FROZEN』)", "✅ 节点级 Properties 不暴露 type(type 是 GRAPH 头部概念,本就不属节点 Properties);PropertiesPanel 无 type 字段"],
+      ["user_prompt_builder / user_prompt_template", "FROZEN:02_authoring.md:11 把 <user_prompt_builder> 列为违 FROZEN 已废", "✅ 不暴露:PropertiesPanel/phase-frontmatter 无 user_prompt_* 字段(build-nodes.ts 内部 PhaseDef 投影仍带 user_prompt_template,属 manifest 兼容投影,不进表单)"],
+      ["target_skill (subagents 子项)", "注意:target_skill 在子图 path 迁移中**不算 stale**。§2.1(mvp1-alignment.md:37)明确 subagents(子代理)与子图 path 是两回事,子代理保留 target_skill;只有 SUBGRAPH 节点和 agent subgraphs[] 改 path", "现状=按设计保留:SubagentsField 仍用 target_skill(PropertiesPanel.tsx:460,477-479;phase-frontmatter.ts:10,205,244)。这**符合**§2.5 示例(mvp1-alignment.md:299 subagents…target_skill),非违规字段"]
+    ]
+  },
+  "mode_derivation": {
+    "summary": "节点类型派生违反 phase-editing F1『类型由文件决定』:前端用 data.mode 值(而非文件名)推节点类型,且 data.mode 的源头 build-nodes.ts:179 是 topology.mode ?? phase.mode——即一个可变的 mode 值,不是从落地文件名反推。当 mode 与文件冲突时以 mode 为准(因为 phaseKindFile 是从 mode 算出文件名,而非读真实存在的文件)。对比 engine Loader:Loader 是反过来的——先发现物理文件名,再由 _PHASE_FILE_TO_MODE 注入 mode,文件名才是真相源。所以前后端口径相反:engine=文件定 mode,前端=mode 定文件/类型。",
+    "evidence": [
+      ["phaseKindLabel(根据 data.mode/subgraphPath 推 LOGIC/AGENT/SUBGRAPH 标签的函数):if subgraphPath||mode==='subgraph'→SUBGRAPH;mode∈{skill,llm,agent}→AGENT;else→LOGIC。优先读 data.mode,不读真实文件名", "PropertiesPanel.tsx:33-37"],
+      ["phaseKindFile(由上面的 label 反算出文件名 LOGIC.md/SKILL.md/SUBGRAPH.md 的函数):文件名是从 mode 派生出来的,不是读磁盘真实文件", "PropertiesPanel.tsx:39-44(build-nodes.ts:8-12 有同名重复实现)"],
+      ["注释自述『Node kind is derived from the phase FILE KIND, never a mode: frontmatter field』——但实现实际读的是 data.mode,注释与代码不符(data.mode 来源见下)", "PropertiesPanel.tsx:46"],
+      ["data.mode 源头:buildNodes 里 const mode = topology?.mode ?? phase.mode——节点 data.mode 取 graph_topology 行的 mode,回退 manifest phase.mode;是一个值,不是文件名探测结果。filePath 再由 phaseKindFile({mode,subgraphPath}) 算出,故『冲突时 mode 赢』", "build-nodes.ts:179,186"],
+      ["engine Loader 反向口径:_PHASE_FILE_TO_MODE 固定 LOGIC.md→logic、SUBGRAPH.md→subgraph、SKILL.md→agent;_discover_phase_files 要求每个 phase 目录恰好有三者之一——文件名是真相,mode 由文件名注入", "baseline.md:25,34(packages/graph-agent/src/graph_agent/core/loader.py:_PHASE_FILE_TO_MODE / _discover_phase_files)"],
+      ["mvp1-alignment 三处明文:作者不得在 frontmatter 写 mode:,Loader 注入内部 mode=logic/subgraph/agent", "mvp1-alignment.md:138(logic)/230(subgraph)/277(agent)"],
+      ["phase-editing F1 测试口径:changing old mode frontmatter does not change rendered node type; file kind does——当前前端 mode 驱动派生不满足此测试", "phase-editing/mvp1-alignment.md:20-25"],
+      ["缓解情形:在 graph_topology 真实存在的正常路径下,topology.mode 由 engine 按文件注入,前端读到的 mode 与文件名一致,二者不冲突;问题集中在『若有人在 frontmatter 手写 mode 且与文件名不一致』时,前端会信 mode(经 topology/phase 投影)而非文件名,与 F1 测试要求相反", ""]
+    ]
+  },
+  "doc_drift": {
+    "summary": "实现已重建白名单(F2 三类节点字段集已在 PropertiesPanel.tsx + phase-frontmatter.ts 落地),但两份设计文档仍把 Properties 标成 stale/未做,属文档漂移,应回写。注意:漂移仅限『白名单是否已建』这一点;mode 派生违 F1(Q3)是**真实未修**,文档标 stale 在这一点上是对的,不应回写成 done。",
+    "headers": ["文档位置(path:行)", "现写的 stale 表述", "实际现状", "建议回写"],
+    "rows": [
+      ["docs/studio/mvp1/01_workflows/02_authoring.md:28", "『Properties 编辑保存 | stale-code:保存 live 但字段集全过时、与 FROZEN 全冲突』,依据指 PropertiesPanel.tsx:293-305 / phase-frontmatter.ts:8-16", "字段集已不再过时:三类节点白名单已落地(Agent llm_role/tools/subagents、Logic actions/validator、Subgraph path/validator),无 system_prompt/exit_contract/max_retries/python_callable", "把 status 从 stale-code 改为 live/已重建(字段白名单);保存走 Python writeSkillFile 的迁 Rust 债(D12)可保留为独立 stale 项,但『字段集过时』的结论应撤"],
+      ["docs/studio/mvp1/01_workflows/02_authoring.md:29", "『Properties 白名单重建…| target-design(REQ-10 确认 batch-2 stale 结论)』", "白名单重建已**实现**,非仅 target-design", "status 改为 done/live;保留与 FROZEN 字段表的链接"],
+      ["docs/studio/mvp1/01_workflows/02_authoring.md:60", "『读 v030 / 写 V2.x stale-code:…phase-frontmatter.ts…读过时 shape』", "phase-frontmatter.ts 已是白名单 shape(PhaseFrontmatterFormData 只含 llmRole/tools/subagents/actions/path/validator),不再读旧 mode/system_prompt 等", "从 stale-code 清单移除 phase-frontmatter.ts(subagentsForPhase 读 phase_config 兼容层可单列,见 build-nodes.ts:151-160)"],
+      ["docs/studio/mvp1/02_capabilities/phase-editing/mvp1-alignment.md:4 与 :12", "status 头『Properties/phase parser 仍读写旧 mode/system_prompt/exit_contract/python_callable/target_skill 字段 ⚠️』", "Properties 已不读写 system_prompt/exit_contract/python_callable;mode 不再作可编辑字段(仅派生读);target_skill 是 subagents 合法保留字段(§2.1/§8.3),不应列为『旧字段 stale』", "改 status 头:system_prompt/exit_contract/python_callable 已移除;mode 改述为『仍用于节点类型派生(违 F1),但非可编辑字段』;把 target_skill 从 stale 清单删除(它是子代理合法字段)"],
+      ["docs/studio/mvp1/02_capabilities/phase-editing/mvp1-alignment.md:35(F2)与:53(F4)", "F2 Status: target-design;F4 Status: target-design; current code stale", "F2 白名单已实现→可改 done;F4 subgraph path 字段已在 Properties 渲染(PropertiesPanel.tsx:369-378)→『current code stale』部分过时", "F2 Status 改 done/live;F4 改述『path 字段已渲染;缺失 path 标红+导入入口仍 target』,不再整体标 stale"]
+    ]
+  }
+}

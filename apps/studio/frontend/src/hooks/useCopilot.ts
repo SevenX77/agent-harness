@@ -4,6 +4,7 @@ import { nextBackoffMs } from '../lib/websocket'
 import { copilotStore } from '../store/copilotStore'
 import type { CopilotEvent, CopilotMessage } from '../types/copilot'
 import { normalizeCopilotEvent } from '../types/copilot'
+import { resolveWorkspaceIdentity } from '../components/studio/workspace-identity'
 
 type ConnectionStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'reconnecting' | 'error'
 
@@ -17,6 +18,52 @@ function nextId(prefix: string) {
   return `${prefix}-${Date.now()}-${messageIdFallbackCounter}`
 }
 
+export interface CopilotSendPayload {
+  user_message: string
+  model_override?: string
+  role?: string
+  workspace_root?: string
+  judge_context?: CopilotJudgeContext
+}
+
+export interface CopilotJudgeContext {
+  compare_result_ref: string
+  judge_context_ref: string
+  baseline_ref: string
+  diff_summary: {
+    baseline_id: string
+    run_results_ref: string
+    total_score: number
+    node_group_count: number
+    failed_node_count: number
+  }
+}
+
+/** Build the ws send payload, attaching model_override / role only when present. */
+export function buildCopilotSendPayload(
+  userMessage: string,
+  modelOverride?: string | null,
+  role?: string | null,
+  workspaceRoot?: string | null,
+  judgeContext?: CopilotJudgeContext | null,
+): CopilotSendPayload {
+  const payload: CopilotSendPayload = { user_message: userMessage }
+  if (modelOverride) {
+    payload.model_override = modelOverride
+  }
+  if (role) {
+    payload.role = role
+  }
+  const trimmedWorkspaceRoot = workspaceRoot?.trim()
+  if (trimmedWorkspaceRoot) {
+    payload.workspace_root = trimmedWorkspaceRoot
+  }
+  if (judgeContext) {
+    payload.judge_context = judgeContext
+  }
+  return payload
+}
+
 function createMessage(role: CopilotMessage['role'], content: string, status: CopilotMessage['status']): CopilotMessage {
   return {
     id: nextId(role),
@@ -28,7 +75,37 @@ function createMessage(role: CopilotMessage['role'], content: string, status: Co
   }
 }
 
-export function useCopilot(skillId: string | null) {
+/**
+ * Drain queued text deltas into the store, coalescing by message. Shared by the
+ * 75ms flush timer and the terminal-event path: draining before applying
+ * done/error guarantees the persisted snapshot (R16/D8) includes every trailing
+ * text token, not just whatever happened to flush before the turn settled.
+ */
+function flushTextQueue(
+  queue: Array<{ messageId: string; content: string; event: CopilotEvent }>,
+): void {
+  if (queue.length === 0) {
+    return
+  }
+  const batch = queue.splice(0)
+  const byMessage = new Map<string, { content: string; events: CopilotEvent[] }>()
+  batch.forEach((item) => {
+    const current = byMessage.get(item.messageId) ?? { content: '', events: [] }
+    current.content += item.content
+    current.events.push(item.event)
+    byMessage.set(item.messageId, current)
+  })
+  byMessage.forEach((value, messageId) => {
+    copilotStore.updateMessage(messageId, (message) => ({
+      ...message,
+      content: `${message.content}${value.content}`,
+      status: 'running',
+      events: [...message.events, ...value.events],
+    }))
+  })
+}
+
+export function useCopilot(skillId: string | null, workspaceRootOverride?: string | null) {
   const snapshot = useSyncExternalStore(copilotStore.subscribe, copilotStore.getSnapshot)
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('idle')
   const [reconnectInMs, setReconnectInMs] = useState<number | null>(null)
@@ -49,6 +126,12 @@ export function useCopilot(skillId: string | null) {
     if (event.type === 'text_delta') {
       textQueueRef.current.push({ messageId, content: event.content, event })
     } else {
+      // Terminal events (done/error) trigger an on-disk flush in the store. Drain
+      // any still-queued text deltas first so the persisted transcript carries the
+      // complete assistant answer, not a truncated one (R16/D8).
+      if (event.type === 'done' || event.type === 'error') {
+        flushTextQueue(textQueueRef.current)
+      }
       copilotStore.updateMessage(messageId, (message) => ({
         ...message,
         status: event.status,
@@ -61,11 +144,36 @@ export function useCopilot(skillId: string | null) {
     }
   }, [])
 
+  const workspaceRoot = workspaceRootOverride?.trim() || resolveWorkspaceIdentity(skillId).workspaceRoot || ''
+
   useEffect(() => {
+    if (!skillId) {
+      return
+    }
+    if (workspaceRoot) {
+      // Multi-session context: load (or create) sessions for this workspace/skill pair.
+      copilotStore.setContext(workspaceRoot, skillId)
+      // Cold-start recovery (F2): pull any disk-persisted sessions first, and
+      // only mint a fresh session if none survive on disk — otherwise a restart
+      // would silently discard prior conversations.
+      let cancelled = false
+      void copilotStore.hydrate(workspaceRoot, skillId).finally(() => {
+        if (cancelled) return
+        if (copilotStore.getSnapshot().sessions.length === 0) {
+          copilotStore.newSession()
+        }
+      })
+      return () => {
+        cancelled = true
+      }
+    }
+    // Fallback (web / no workspace identity): main's single-session reset on skill change.
     if (snapshot.skillId !== skillId) {
       copilotStore.reset(skillId)
+      copilotStore.newSession()
     }
-  }, [skillId, snapshot.skillId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skillId, workspaceRoot])
 
   useEffect(() => {
     if (!skillId) {
@@ -78,25 +186,7 @@ export function useCopilot(skillId: string | null) {
     let reconnectTimer: number | undefined
 
     const flushTimer = window.setInterval(() => {
-      if (textQueueRef.current.length === 0) {
-        return
-      }
-      const batch = textQueueRef.current.splice(0)
-      const byMessage = new Map<string, { content: string, events: CopilotEvent[] }>()
-      batch.forEach((item) => {
-        const current = byMessage.get(item.messageId) ?? { content: '', events: [] }
-        current.content += item.content
-        current.events.push(item.event)
-        byMessage.set(item.messageId, current)
-      })
-      byMessage.forEach((value, messageId) => {
-        copilotStore.updateMessage(messageId, (message) => ({
-          ...message,
-          content: `${message.content}${value.content}`,
-          status: 'running',
-          events: [...message.events, ...value.events],
-        }))
-      })
+      flushTextQueue(textQueueRef.current)
     }, 75)
 
     const connect = () => {
@@ -146,7 +236,12 @@ export function useCopilot(skillId: string | null) {
     }
   }, [skillId, appendAssistantEvent])
 
-  const sendMessage = useCallback((content: string, modelOverride?: string | null) => {
+  const sendMessage = useCallback((
+    content: string,
+    modelOverride?: string | null,
+    role?: string | null,
+    judgeContext?: CopilotJudgeContext | null,
+  ) => {
     const trimmed = content.trim()
     if (!trimmed || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
       return false
@@ -154,13 +249,9 @@ export function useCopilot(skillId: string | null) {
 
     assistantMessageIdRef.current = null
     copilotStore.appendMessage(createMessage('user', trimmed, 'success'))
-    const payload: { user_message: string, model_override?: string } = { user_message: trimmed }
-    if (modelOverride) {
-      payload.model_override = modelOverride
-    }
-    socketRef.current.send(JSON.stringify(payload))
+    socketRef.current.send(JSON.stringify(buildCopilotSendPayload(trimmed, modelOverride, role, workspaceRoot, judgeContext)))
     return true
-  }, [])
+  }, [workspaceRoot])
 
   return {
     messages: snapshot.messages,
@@ -169,5 +260,10 @@ export function useCopilot(skillId: string | null) {
     lastError,
     sendMessage,
     clearMessages: copilotStore.clearMessages,
+    persistenceError: snapshot.persistenceError,
+    activeSessionId: snapshot.activeSessionId,
+    sessions: snapshot.sessions,
+    newSession: () => copilotStore.newSession(),
+    switchSession: (id: string) => copilotStore.switchSession(id),
   }
 }

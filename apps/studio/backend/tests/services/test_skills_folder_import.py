@@ -76,16 +76,18 @@ async def test_create_new_skill_imports_existing_nonempty_directory_without_writ
         "absolute_path": str(skill_dir),
         "l2_remote_url": "",
     }
-    assert (
-        await metadata_store.get_skill_summary("default", "story-deconstruction-imported")
-        == summary
-    )
+    # The legacy per-user summary registry is retired: the skill_index is the only
+    # persisted truth and no skill_summary.json is written.
+    assert not list(skill_dir.rglob("skill_summary.json"))
 
 
-def test_create_skill_import_rejects_non_skill_directory(
+def test_create_skill_import_allows_non_skill_directory_into_repair_state(
     client: TestClient,
     tmp_path: Path,
 ) -> None:
+    # WELCOME-2 / F2 / D2 (FROZEN): "Open folder" must not block on file shape.
+    # A non-skill folder (no GRAPH.md/SKILL.md) imports into a repair state instead
+    # of being hard-rejected — compile/copilot normalize it later.
     skill_dir = tmp_path / "external" / "not-a-skill"
     skill_dir.mkdir(parents=True)
     (skill_dir / "notes.txt").write_text("plain folder\n", encoding="utf-8")
@@ -99,20 +101,23 @@ def test_create_skill_import_rejects_non_skill_directory(
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 201
     body = response.json()
-    assert body["error_code"] == "INVALID_DIRECTORY_PATH"
-    assert "GRAPH.md or SKILL.md" in body["message"]
-    assert body["details"] == {
-        "directory_path": str(skill_dir),
-        "required_entry": "GRAPH.md or SKILL.md",
-    }
+    assert body["id"] == "not-a-skill"
+    assert body["directory_path"] == str(skill_dir)
+    # Repair state: no manifest yet, so no phases and an empty description.
+    assert body["phase_count"] == 0
+    assert body["description"] == ""
+    # Import must not scaffold a manifest behind the user's back.
+    assert not (skill_dir / "GRAPH.md").exists()
 
 
-def test_import_skill_rejects_empty_directory_without_scaffolding(
+def test_import_skill_allows_empty_directory_into_repair_state(
     client: TestClient,
     tmp_path: Path,
 ) -> None:
+    # D2: opening ANY folder (including an empty one) must reach Workspace in a
+    # repair state rather than being rejected for missing root docs.
     skill_dir = tmp_path / "external" / "empty-folder"
     skill_dir.mkdir(parents=True)
 
@@ -125,10 +130,10 @@ def test_import_skill_rejects_empty_directory_without_scaffolding(
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 201
     body = response.json()
-    assert body["error_code"] == "INVALID_DIRECTORY_PATH"
-    assert "GRAPH.md or SKILL.md" in body["message"]
+    assert body["id"] == "empty-folder"
+    assert body["phase_count"] == 0
     assert not (skill_dir / "GRAPH.md").exists()
 
 
@@ -226,8 +231,11 @@ def test_create_skill_without_files_uses_valid_default_scaffold(
     assert response.status_code == 201, response.json()
     assert response.json()["directory_path"] == str(skill_dir)
     assert (skill_dir / "GRAPH.md").exists()
-    assert (skill_dir / "phases" / "init" / "LOGIC.md").exists()
-    assert (skill_dir / "phases" / "init" / "actions" / "initialize.py").exists()
+    # D-1-4: the default scaffold is an empty agent phase (single SKILL.md the
+    # engine routes to agent mode), not the old logic-phase LOGIC.md + actions.
+    assert (skill_dir / "phases" / "init" / "SKILL.md").exists()
+    assert not (skill_dir / "phases" / "init" / "LOGIC.md").exists()
+    assert not (skill_dir / "phases" / "init" / "actions").exists()
     assert (skill_dir / ".workspace").is_dir()
     assert (skill_dir / ".git").is_dir()
 
@@ -309,32 +317,6 @@ def test_create_skill_with_missing_directory_path_scaffolds(
     assert (skill_dir / "GRAPH.md").exists()
     assert (skill_dir / ".workspace").is_dir()
     assert (skill_dir / ".git").is_dir()
-
-
-@pytest.mark.anyio
-async def test_list_skill_summaries_returns_minimal_summary_for_v1_skill(
-    tmp_path: Path,
-    metadata_store: LocalJsonMetadataStore,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    skills_root = tmp_path / "skills"
-    skill_dir = skills_root / "story-deconstruction"
-    skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text("# Story Deconstruction\n", encoding="utf-8")
-    monkeypatch.setattr(config, "SKILLS_DIR", skills_root)
-    monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
-
-    summaries = await skill_service.list_skill_summaries(
-        "default",
-        LocalFilesystemBackend(tmp_path),
-        metadata_store,
-    )
-
-    assert [summary.id for summary in summaries] == ["story-deconstruction"]
-    assert summaries[0].name == "story-deconstruction"
-    assert summaries[0].description == ""
-    assert summaries[0].phase_count == 0
-    assert summaries[0].directory_path == str(skill_dir)
 
 
 @pytest.mark.anyio

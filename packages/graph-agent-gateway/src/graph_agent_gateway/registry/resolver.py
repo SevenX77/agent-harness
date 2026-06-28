@@ -13,11 +13,13 @@ from graph_agent_gateway.registry.profile_selector import (
 from graph_agent_gateway.registry.schema import (
     CapabilityValue,
     EffectiveRuntimeSetting,
+    ModelBundle,
     ProviderEndpoint,
     ProviderRoute,
     RegistrySnapshot,
     ResolvedRole,
     ResolvedRoute,
+    RoleEntry,
     RoleRouteEntry,
     RuntimeSettings,
     SkippedRoute,
@@ -31,6 +33,8 @@ EXECUTABLE_ROUTE_STATUSES = {"verified", "unverified_manual"}
 class RegistryResolutionError(ValueError):
     """Registry resolution failed before any provider call."""
 
+    skipped_diagnostics: list[SkippedRoute]
+
 
 def resolve_role(
     snapshot: RegistrySnapshot,
@@ -43,6 +47,7 @@ def resolve_role(
     role = snapshot.roles.get(role_name)
     if role is None:
         raise RegistryResolutionError(f"role is not configured: {role_name}")
+    role = materialize_role_entry(snapshot, role_name, role)
 
     try:
         entries = (
@@ -218,9 +223,11 @@ def resolve_role(
             raise RegistryResolutionError(f"role '{role_name}' has an empty fallback chain.")
         else:
             summary = "; ".join(f"{item.route_id} ({item.reason_code}): {item.message}" for item in skipped_diagnostics)
-            raise RegistryResolutionError(
+            error = RegistryResolutionError(
                 f"Registry resolution failed for role '{role_name}'. All routes were skipped: {summary}"
             )
+            error.skipped_diagnostics = skipped_diagnostics
+            raise error
 
     return ResolvedRole(
         role_name=role_name,
@@ -232,6 +239,80 @@ def resolve_role(
         source_profile_id=role.source_profile_id,
         source_profile_snapshot=role.source_profile_snapshot,
     )
+
+
+def materialize_role_entry(
+    snapshot: RegistrySnapshot,
+    role_name: str,
+    role: RoleEntry | None = None,
+) -> RoleEntry:
+    """Materialize a role's bundle reference into an executable route chain."""
+    role = role or snapshot.roles.get(role_name)
+    if role is None:
+        raise RegistryResolutionError(f"role is not configured: {role_name}")
+    if role.bundle_id is None:
+        return role
+
+    bundle = snapshot.model_bundles.get(role.bundle_id)
+    if bundle is None:
+        raise RegistryResolutionError(
+            f"model bundle is not configured for role '{role_name}': {role.bundle_id}"
+        )
+
+    return role.model_copy(
+        update={
+            "fallback_chain": _materialize_bundle_chain(bundle, role.fallback_chain),
+            "lint_requirements": {
+                **bundle.lint_requirements,
+                **role.lint_requirements,
+            },
+        }
+    )
+
+
+def _materialize_bundle_chain(
+    bundle: ModelBundle,
+    role_delta_chain: list[RoleRouteEntry],
+) -> list[RoleRouteEntry]:
+    overrides = {entry.route_id: entry for entry in role_delta_chain}
+    materialized: list[RoleRouteEntry] = []
+
+    for bundle_entry in bundle.fallback_chain:
+        override = overrides.get(bundle_entry.route_id)
+        if override is None:
+            materialized.append(bundle_entry)
+            continue
+        materialized.append(_merge_role_route_entry(bundle_entry, override))
+
+    return materialized
+
+
+def _merge_role_route_entry(
+    base: RoleRouteEntry,
+    delta: RoleRouteEntry,
+) -> RoleRouteEntry:
+    return RoleRouteEntry(
+        route_id=base.route_id,
+        runtime_settings_source=delta.runtime_settings_source,
+        runtime_settings=_merge_runtime_settings(base.runtime_settings, delta.runtime_settings),
+    )
+
+
+def _merge_runtime_settings(base: RuntimeSettings, delta: RuntimeSettings) -> RuntimeSettings:
+    base_payload = base.model_dump(mode="python", exclude_none=True)
+    delta_payload = delta.model_dump(mode="python", exclude_none=True)
+    return RuntimeSettings.model_validate(_deep_merge(base_payload, delta_payload))
+
+
+def _deep_merge(base: dict[str, object], delta: dict[str, object]) -> dict[str, object]:
+    merged = dict(base)
+    for key, value in delta.items():
+        current = merged.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            merged[key] = _deep_merge(current, value)
+        elif value != {}:
+            merged[key] = value
+    return merged
 
 
 def _describe_credential(

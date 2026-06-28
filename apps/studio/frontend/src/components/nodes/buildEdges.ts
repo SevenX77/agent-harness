@@ -1,29 +1,38 @@
 import type { Edge } from '@xyflow/react'
+import type { CallbackEvent, EventEnvelope } from '@/api/types'
 import type { ContextEdgeData } from '@/components/edges/ContextEdge'
+import { edgeContextFromEvents } from '@/lib/edge-context'
+import {
+  GLOBAL_INPUT_SOURCE_HANDLE_ID,
+  GLOBAL_OUTPUT_TARGET_HANDLE_ID,
+  SKILL_FLOW_SOURCE_HANDLE_ID,
+  SKILL_FLOW_TARGET_HANDLE_ID,
+} from './subgraph-bridge-handles'
 import type { SkillGraphNode } from './types'
 
 export const INPUT_ID = '__global_input__'
 export const OUTPUT_ID = '__global_output__'
 
-type GlobalWithProcess = typeof globalThis & {
-  process?: {
-    env?: {
-      NODE_ENV?: string
-    }
-  }
-}
+type TraceEventInput = CallbackEvent | EventEnvelope
 
-function contextEdge(source: string, target: string): Edge<ContextEdgeData> {
-  const isGlobal = source.startsWith('__global') || target.startsWith('__global')
-  const globalProcess = (globalThis as GlobalWithProcess).process
-  const isTestEnv = globalProcess?.env?.NODE_ENV === 'test'
+function contextEdge(source: string, target: string, traceEvents: TraceEventInput[]): Edge<ContextEdgeData> {
+  // hasTraceData reflects whether the run actually dispatched data across this
+  // edge — i.e. a matching `input_dispatch` event exists in the stream. Without
+  // a run (empty events) every edge is inert, replacing the old `!isGlobal`
+  // design-time heuristic.
+  const hasTraceData = edgeContextFromEvents(traceEvents, source, target) !== null
+  const isBoundaryEdge = source === INPUT_ID || source === OUTPUT_ID || target === INPUT_ID || target === OUTPUT_ID
   return {
     id: `${source}->${target}`,
     source,
     target,
+    sourceHandle: source === INPUT_ID ? GLOBAL_INPUT_SOURCE_HANDLE_ID : SKILL_FLOW_SOURCE_HANDLE_ID,
+    targetHandle: target === OUTPUT_ID ? GLOBAL_OUTPUT_TARGET_HANDLE_ID : SKILL_FLOW_TARGET_HANDLE_ID,
     type: 'contextEdge',
+    reconnectable: isBoundaryEdge ? false : undefined,
+    deletable: isBoundaryEdge ? false : undefined,
     data: {
-      hasTraceData: isTestEnv ? false : !isGlobal,
+      hasTraceData,
       sourcePhaseId: source,
       targetPhaseId: target,
     },
@@ -31,30 +40,17 @@ function contextEdge(source: string, target: string): Edge<ContextEdgeData> {
   }
 }
 
-export function buildEdges(phaseNodes: SkillGraphNode[]): Edge<ContextEdgeData>[] {
-  if (phaseNodes.length === 0) {
-    return [contextEdge(INPUT_ID, OUTPUT_ID)]
-  }
-
-  const dependents = new Map<string, Set<string>>()
-  for (const node of phaseNodes) {
-    for (const dependency of node.data.dependsOn) {
-      const targets = dependents.get(dependency) ?? new Set<string>()
-      targets.add(node.id)
-      dependents.set(dependency, targets)
-    }
-  }
-
+export function buildEdges(
+  phaseNodes: SkillGraphNode[],
+  traceEvents: TraceEventInput[] = [],
+): Edge<ContextEdgeData>[] {
   const edges: Edge<ContextEdgeData>[] = []
   for (const node of phaseNodes) {
     for (const source of node.data.dependsOn) {
-      edges.push(contextEdge(source, node.id))
+      edges.push(contextEdge(source === 'input' ? INPUT_ID : source, node.id, traceEvents))
     }
-    if (node.data.dependsOn.length === 0) {
-      edges.push(contextEdge(INPUT_ID, node.id))
-    }
-    if (!dependents.has(node.id) || dependents.get(node.id)?.size === 0) {
-      edges.push(contextEdge(node.id, OUTPUT_ID))
+    if (node.data.isOutput === true) {
+      edges.push(contextEdge(node.id, OUTPUT_ID, traceEvents))
     }
   }
   return edges

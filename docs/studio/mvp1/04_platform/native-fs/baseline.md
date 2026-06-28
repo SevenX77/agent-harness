@@ -1,7 +1,7 @@
 ---
 module: 04_platform/native-fs
 doc: baseline
-status: FROZEN（现状对齐 pinned 代码 0d9fbaf；Tauri sidecar/picker/reveal live；实际 skill/graph/package 写入仍经 FastAPI/Python，多处未收敛到 Rust 唯一写者 ⚠️。）
+status: FROZEN（现状对齐 pinned 代码 0d9fbaf；Tauri sidecar/picker/reveal live；Studio 自有 skill/graph/package 写入仍经 FastAPI/Python，多处未收敛到 Rust 唯一写者 ⚠️；Copilot SDK Write/Edit 为 MVP1 明确例外。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/tauri/src/lib.rs:select_directory · apps/studio/tauri/src/lib.rs:reveal_in_file_manager · apps/studio/tauri/src/lib.rs:open_in_cursor · apps/studio/tauri/src/sidecar.rs:SidecarManager · apps/studio/frontend/src/api/client.ts:writeSkillFile · apps/studio/backend/app/services/artifact_registry.py:build_publish_package
 units: [native-rust-writer, workspace-open-folder-mru, subgraph-path-inline-drilldown, publish-artifact-autocommit, local-history-snapshot, copilot-session-persistence]
@@ -9,8 +9,8 @@ units: [native-rust-writer, workspace-open-folder-mru, subgraph-path-inline-dril
 
 # native-fs — Baseline（当下代码实现逻辑）
 
-> **Scope**: Tauri/Rust 本地能力：唯一写者、本地目录选择/打开、sidecar 生命周期、workspace runtime storage 与局部失败状态。
-> **现状一句话**: Tauri sidecar/picker/reveal live；实际 skill/graph/package 写入仍经 FastAPI/Python，多处未收敛到 Rust 唯一写者 ⚠️。
+> **Scope**: Tauri/Rust 本地能力：Studio 自有写入唯一写者、本地目录选择/打开、sidecar 生命周期、workspace runtime storage 与局部失败状态；Copilot SDK Write/Edit 为 MVP1 例外。
+> **现状一句话**: Tauri sidecar/picker/reveal live；Studio 自有 skill/graph/package 写入仍经 FastAPI/Python，多处未收敛到 Rust 唯一写者 ⚠️；Copilot SDK Write/Edit 为 MVP1 明确例外。
 
 ## UI/UX
 | 面 | 现状 | 证据（文件:符号名） |
@@ -54,7 +54,7 @@ units: [native-rust-writer, workspace-open-folder-mru, subgraph-path-inline-dril
 ## baseline / alignment 差异（测试锚点）
 | 维度 | 现状（baseline） | 目标（alignment） |
 |---|---|---|
-| 唯一写者 | file/graph writes 仍走 FastAPI/Python ⚠️ | 所有本地写走 Rust/Tauri writer 或明确的 Rust-mediated path |
+| 唯一写者 | file/graph writes 仍走 FastAPI/Python ⚠️ | Studio 自有本地写走 Rust/Tauri writer 或明确的 Rust-mediated path；Copilot SDK Write/Edit 直写为 MVP1 允许例外 |
 | 打包写者 | `build_publish_package` Python zip ⚠️ | publish package 写入/打包边界收口到 native-fs |
 | sidecar gate | 旧 non-fullscreen gate 引用需对齐 D10 ⚠️ | shell 即时渲染，sidecar 错误局部显示 |
 > **验"是否按目标改了"**：1. 唯一写者；2. 打包写者；3. sidecar gate。

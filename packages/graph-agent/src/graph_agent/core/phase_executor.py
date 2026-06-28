@@ -40,10 +40,10 @@ from __future__ import annotations
 import logging
 
 from graph_agent.callbacks.base import Callback
+from graph_agent.core.llm_provider import LLMProvider
 from graph_agent.core.phase_nodes import (
     DependencyContainer,
     HeartbeatProtocol,
-    ModelResolverProtocol,
     SaveCompactionSidecar,
     build_code_phase_node,
     build_llm_phase_node,
@@ -70,13 +70,15 @@ class PhaseExecutor:
         *,
         run_context: RunContext | None = None,
         heartbeat: HeartbeatProtocol | None = None,
-        resolver: ModelResolverProtocol | None = None,
+        llm_provider: LLMProvider | None = None,
+        resolver: object | None = None,
         save_compaction_sidecar: SaveCompactionSidecar | None = None,
     ) -> None:
         self._callbacks = callbacks
         self._run_context = run_context
         self._heartbeat = heartbeat
-        self._resolver = resolver
+        self._llm_provider = llm_provider
+        self._legacy_model_resolver = resolver
         self._save_compaction_sidecar = save_compaction_sidecar
 
     def __getstate__(self) -> object:
@@ -116,7 +118,8 @@ class PhaseExecutor:
         """Snapshot the harness-lifetime services into the immutable container."""
         return DependencyContainer(
             callbacks=self._callbacks,
-            resolver=self._resolver,
+            llm_provider=self._llm_provider,
+            legacy_model_resolver=self._legacy_model_resolver,
             save_compaction_sidecar=self._save_compaction_sidecar,
         )
 

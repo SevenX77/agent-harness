@@ -61,7 +61,7 @@ graph-agent-gateway 是一个 **富能力的可复用模型网关**，不是一�
 - **list-models 解析（每协议）+ 批量探测编排**（🔻）：把端点支持的模型列出来 / 探出来。
 - **按同类分组（model group）**（🔻 现 `llm_model_groups.py`）：把同一模型的多个变体 / 快照 / 渠道折叠成一个用户可见的"模型组"，让应用查找 / 选择更方便。
 - **品牌 / 家族识别（identity）**（🔻 现 `llm_model_identity.py`）：把原始 model id 客观归类到厂商 / 家族（Anthropic·Claude、OpenAI·GPT…）。
-- **探测知识库（draft + 证据库 + notable）**（🔻 现 `llm_import_drafts.py` / `llm_notable_models.py`；数据结构 `EvidenceRecord` / `ProviderImportDraft` 已在 ✅ `registry/schema.py`）：记住"哪些模型存在 / 可用 / 值得试"、每条路线历次探测的证据，可**远端共享**。这是 gateway 背后可沉淀、可共享的知识资产。
+- **Probe Knowledge Catalog（探测知识库 + notable）**（🔻 canonical API 现为 `probe_catalog.py` / `llm_probe_catalog.py`，legacy 实现仍含 `llm_import_drafts.py` / `ProviderImportDraft`；数据结构 `EvidenceRecord` 已在 ✅ `registry/schema.py`）：记住"哪些 endpoint 连通过 / 哪些模型存在 / 哪些能力被探测证实 / 哪些模型值得优先试"、每条路线历次探测的证据，可**远端共享**。这是 gateway 背后可沉淀、可共享的知识资产；Import Draft（待导入草稿 → apply）不属于 MVP1 主线。
 
 ### C. 能力
 - **能力归一化**（✅ `registry/capabilities.py:normalize_route_capabilities`）：把各厂商参差的能力字段（模态、最大 token、thinking…）归一成统一表示。
@@ -133,7 +133,7 @@ Studio 是 gateway 的一个消费应用。它的「设置页」站在 gateway �
 
 - **已在包内**（`src/graph_agent_gateway/`）：`ModelResolver` / `GatewayChatModel` 调用外壳、`client_manager` 调用与熔断、`registry/`（schema / credentials / capabilities / lint / error_classification / probe / canonical / resolver）、events / exceptions / tracing。
 - **对外 API 现状**：顶层 `__init__` 目前只导出 `GatewayChatModel` / `ModelResolver` / 异常——上面 §3 的多数富能力**尚未提升为一等对外 API**（仍埋在 `registry` 子模块，或仍在 studio 侧）。
-- **待下沉**（按判据属公共，当前实现散在 `apps/studio/backend`）：endpoint 标准化拆分、list-models 解析、model group 分组、identity、notable / draft 知识库、6 态投影、熔断持久化、materialize 编排核心、能力合并。
+- **待下沉**（按判据属公共，当前实现散在 `apps/studio/backend`）：endpoint 标准化拆分、list-models 解析、model group 分组、identity、notable / Probe Knowledge Catalog、6 态投影、熔断持久化、materialize 编排核心、能力合并。
 - **模块级现状 vs 目标**详见 `docs/graph-agent-gateway/mvp1/`。
 
 ---

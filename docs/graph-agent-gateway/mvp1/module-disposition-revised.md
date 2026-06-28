@@ -18,7 +18,7 @@ aligns_with: ./README.md（scope / non-goals） · ./DESIGN_UNITS_INDEX.md（own
 
 ## 0. 为什么反转
 
-原 review（2026-06-03）按"③b 绝不含 model group / draft / 6 态 / copilot = 领域"判定，把一大批 gateway 公共能力误判成"③a 领域泄漏、该搬出 gateway"。
+原 review（2026-06-03）按"③b 绝不含 model group / 探测知识库 / 6 态 / copilot = 领域"判定，把一大批 gateway 公共能力误判成"③a 领域泄漏、该搬出 gateway"。
 
 PM 第四轮校准后：这些的**能力内核恰是 ③b 公共**（gateway 机制衍生的最佳方案，任何调模型的 app 可复用），只有 UI / 产品策略 / 调用方式 / 存储介质归 ③a。
 
@@ -48,7 +48,7 @@ PM 第四轮校准后：这些的**能力内核恰是 ③b 公共**（gateway �
 | 07 health_store（熔断持久化） | ③a（seam） | **③b 公共** | 下沉 gateway；存储介质留注入 |
 | 07 copilot_test（copilot 假测试） | ③a leak | ③a 应用（copilot 专属） | 留 studio |
 | 08 6 态投影（`state_projection`） | ③a 全搬 ❌ | **③b 公共**（标准总结） | 下沉 gateway；颜色渲染留前端 |
-| 08 draft + 证据库（`import_drafts`） | ③a 全搬 ❌ | **③b 公共**（知识库）+ ③a（import/apply 工作流） | 知识库下沉 gateway；import UI 留 studio；**远端源选择/配置留 ③a** |
+| 08 Probe Knowledge Catalog（legacy `import_drafts`） | ③a 全搬 ❌ | **③b 公共**（探测知识库）+ ③a（远端源/存储/上传审批） | 探测知识库下沉 gateway；远端源选择/配置、存储介质、上传审批/脱敏留 ③a；Import Draft（待导入草稿→apply）不属于 MVP1 主线 |
 | 09 invocation runtime | ③b ✓ | ③b 公共 | 留 gateway |
 | 10 route-chat-model 工厂 | ③b（新建） | ③b 公共 | 留 gateway（WS-1 后源码已存在） |
 | 11 provider profiles | ③b（新建） | ③b 公共 | 留 gateway（WS-1 后源码已存在） |
@@ -68,7 +68,7 @@ PM 第四轮校准后：这些的**能力内核恰是 ③b 公共**（gateway �
 | model_group 分组 | `services/llm_model_groups.py` | family 折叠/弃用区的展示 |
 | identity 品牌/家族识别 | `services/llm_model_identity.py` | 展示名样式覆盖（如有） |
 | notable 知识 | `services/llm_notable_models.py` | 哪个面板展示（Manual panel） |
-| draft + 证据库 | `services/llm_import_drafts.py` | import/apply 工作流 UI + **远端源选择/配置**（当前默认 GitHub URL,可由 `STUDIO_CATALOG_URL` 或调用参数覆盖） |
+| Probe Knowledge Catalog（legacy `import_drafts`） | `services/llm_import_drafts.py` | 远端源选择/配置、存储介质、上传审批/脱敏（当前默认 GitHub URL,可由 `STUDIO_CATALOG_URL` 或调用参数覆盖）；Import Draft 工作流非 MVP1 |
 | 6 态标准总结 | `services/llm_state_projection.py` | 状态颜色/文案呈现 |
 | 熔断持久化 | `services/llm_health_store.py` | 存储介质（SQLite 路径）注入 |
 | 能力合并 | `services/llm_route_capabilities.py` | — |
@@ -101,6 +101,6 @@ mock = 业务逻辑 → 移交 engine；gateway 只留 role→route。
 
 ## 6. 对原 14 个模块文档的影响
 
-- **不再"把模块搬出 gateway 文档"**——这些模块（含 model_group / 6 态 / draft / materialize）**本就该在 gateway 文档**，因为它们是公共能力。
+- **不再"把模块搬出 gateway 文档"**——这些模块（含 model_group / 6 态 / Probe Knowledge Catalog / materialize）**本就该在 gateway 文档**，因为它们是公共能力。
 - 真正要从 gateway 文档**移出**的只有：**12 copilot**（2026-06-03 **移除**——copilot=③a 应用、不构成 gateway 模块；gateway 只给 `copilot_chat` route，copilot 专属内容移 studio `copilot-assist` + ux-spec §3.8）、**14 routers**（2026-06-03 **移交 studio** `04_platform/llm-copilot-http-api/`，③a HTTP 适配壳），以及各模块里混入的 **UI / 产品策略**描述。
 - 各模块文档需**重写视角**：把"现状 ③a 实现"标为"待下沉 ③b 的公共能力"，把 UI / 产品策略部分明确划给 studio（与 `00_settings-ux-spec.md` §6 配套，不脱钩）。

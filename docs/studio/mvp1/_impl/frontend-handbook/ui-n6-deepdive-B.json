@@ -1,0 +1,156 @@
+{
+  "autocommit_chain": {
+    "summary": "成功 run 的子进程发回 status=success 消息 → run_manager 在终态收尾时调用 _auto_commit_successful_run → GitLocalService.auto_commit_run 用 subprocess 跑 git add + git commit（消息 auto-run-<run_id>，allow_empty）→ 把结果（committed/locked/failed）写回 RunMetadata.git_status 并落盘 run_metadata.json。纯本地 L1 git 存档，不 push、不连 Gitea。",
+    "steps": {
+      "headers": ["步骤", "触发", "函数/端点 file:line", "数据形态"],
+      "rows": [
+        ["1. run 终态判定", "子进程发回 message_type=status 且 status==success（或进程 exitcode==0 兜底）", "run_manager.py:666-687 (_run_event_loop 内 status 分支)", "构造 RunMetadata(status='success', run_id, started_at, metrics, input_summary)"],
+        ["2. 终态收尾", "terminal_metadata 非空 → 调 _finalize_terminal_run", "run_manager.py:697-706 (_finalize_terminal_run)", "metadata.status=='success' 分支:先 _copy_final_state_to_storage,再触发 autocommit"],
+        ["3. 触发 autocommit", "status=='success' 时调用", "run_manager.py:719-737 (_auto_commit_successful_run)", "入参 skill_dir=run_dir.parent.parent.parent、run_id;asyncio.to_thread 跑同步 git"],
+        ["4. 执行 git 提交", "auto_commit_run 内部", "git_local.py:524-528 (GitLocalService.auto_commit_run)", "若无 .git 返回 None;否则 self.add(skill_dir) 后 self.commit(skill_dir, f'auto-run-{run_id}', allow_empty=True)"],
+        ["5. subprocess 跑 git", "commit/add 内部", "git_local.py:571-589 (run_git)", "subprocess.run(['git', *args], cwd=skill_dir, capture_output=True);带 lock 重试,返回 GitCommandResult(args/stdout/stderr/returncode)"],
+        ["6. 写回 git_status", "捕获 GitFileLockedError/GitCommandError 决定状态", "run_manager.py:730-737", "metadata.model_copy(update={'git_status': 'committed'|'locked'|'failed'})"],
+        ["7. 落盘元数据", "回到 _finalize_terminal_run", "run_manager.py:701-705 (_write_run_metadata + _save_run_metadata)", "写 run_dir/run_metadata.json(含 git_status),再存进 MetadataStore;_sync_latest_run 更新 latest 指针"]
+      ]
+    }
+  },
+  "publish_chain": {
+    "summary": "前端 Header 触发 publish() → usePublishSkill.executePublishSkill 调 publishSkill(api/client) → POST /skills/{id}/publish → 后端 publish_skill 校验 user_id、resolve skill_dir、engine.compile 编出 artifact_ref(zip 落本地 blob + manifest)→ ProductArtifactPublisher.publish_release 走 stage→commit 两阶段原子写 release manifest(带 release lock + 幂等 key)→ 若配了 Registry host/token 则 remote_sync 后置同步到 Artifact Registry(软失败不回滚,记 remote_sync 状态)→ 写一条 release 快照 git 空提交 → 返回 PublishResult。发布是 ProductArtifactStore release,不是 git push。",
+    "steps": {
+      "headers": ["步骤", "触发", "函数/端点 file:line", "数据形态"],
+      "rows": [
+        ["1. 前端发起", "用户点 Release/Publish → usePublishSkill.publish()", "usePublishSkill.ts:117-155 (executePublishSkill)", "调 publishSkill(skillId);成功 toast releaseSuccessMessage(读 release_version/artifact_id/content_hash/manifest_ref/remote_sync),失败读 backendErrorCode 决定是否给 Open Settings 快捷"],
+        ["2. HTTP 调用", "executePublishSkill 内", "client.ts:120-123 (publishSkill)", "api.post(`/skills/${skillId}/publish`, request);request 默认 {} → version 缺省 1.0.0"],
+        ["3. 后端端点", "POST /skills/{skill_id}/publish", "skills.py:512-521 (publish_skill)", "依赖注入 user_id/storage/metadata/registry;Header Idempotency-Key 可选;body=PublishSkillReq"],
+        ["4. 前置校验 user_id", "读 app_settings", "skills.py:523-532", "user_id 为空 → 400 APP_SETTINGS_INCOMPLETE(not_retryable)"],
+        ["5. 算幂等 key + resolve skill_dir", "进 try", "skills.py:542-573 (_publish_idempotency_key, resolve_skill_dir_async)", "idem_key=skill+version+header 派生;skill_dir 找不到但有 release 所有权证据则走已存在 release 复用分支"],
+        ["6. 编译 artifact", "build_engine_adapter().compile", "engine.py:585-650 (StudioEngineAdapter.compile)", "in_process:compile_artifact 算 content_hash/execution_fingerprint,_zip_directory 打包,LocalProductArtifactStore.put 写 blob,写 manifest.json;返回 dict{artifact_id,content_hash,store,version,manifest_ref,source_map_ref,execution_fingerprint}"],
+        ["7. 组发布请求", "构造 PublishArtifactRequest", "skills.py:577-582 / publish_pipeline.py:21-27", "PublishArtifactRequest(artifact_ref, release_version, idempotency_key, atomic_stage='stage_invisible')"],
+        ["8. 原子发布(带 remote_sync)", "registry host+token 都配了 → 传 remote_sync 回调", "skills.py:584-607 → publish_pipeline.py:57-144 (publish_release)", "release lock 下:get_release 查幂等/冲突 → store.stage_release(写 .stage) → store.commit_release(os.link .stage→.json) → _manifest_with_remote_sync"],
+        ["9. 两阶段落盘", "stage/commit_release", "product_store_local.py:118-201 (stage_release/commit_release)", "stage:O_EXCL 独占写 normalized manifest;commit:os.link 原子 publish,FileExistsError→release.conflict;失败 commit 触发 rollback_release(GC .stage/.json/remote_sync)"],
+        ["10. 远程同步", "remote_sync 回调", "skills.py:589-598 → artifact_registry.py:163-189 (sync_product_artifact_release) → 89-141 (sync_release_manifest)", "POST {host}/api/v1/releases,Bearer token,body{skill_id,metadata,release_manifest};软失败(ArtifactRegistryApiError/httpx.RequestError)记 remote_sync.status=failed 不回滚,硬失败回滚"],
+        ["11. release 快照 git", "成功后", "skills.py:637/745 → 81-96 (_record_release_history_snapshot)", "git commit_empty_snapshot 写 Release v<x> 空提交,带 Release-Marker/Release-Version/Release-Content-Hash/Release-Manifest-Ref trailers"],
+        ["12. 返回结果", "组 PublishResult", "skills.py:638-647 / 755-769", "PublishResult(status='ok', message, artifact_id, extra{version,release_version,skill_id,artifact_id,artifact_ref,content_hash,manifest_ref,package_kind='product_artifact',remote_sync})"]
+      ]
+    }
+  },
+  "interfaces": [
+    {
+      "name": "POST /skills/{skill_id}/publish",
+      "dock": "前端 publishSkill(client.ts:120) → 后端 publish_skill(skills.py:512);body=PublishSkillReq(models/publish.py:13),resp=PublishResult(models/publish.py:28)",
+      "request": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["(path) skill_id", "str", "要发布的 skill id"],
+          ["(header) Idempotency-Key", "str | None", "可选幂等键;与 skill+version 一起派生最终 idem_key(_publish_idempotency_key skills.py:202)"],
+          ["version", "str (默认 '1.0.0')", "release 版本号;正则 ^[A-Za-z0-9][A-Za-z0-9._+-]* 校验(marker-safe),非法 → 422"]
+        ]
+      },
+      "response": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["status", "Literal['ok','error']", "发布结果"],
+          ["message", "str", "人类可读消息(如 'Published to registry' / 'registry sync failed')"],
+          ["artifact_id", "str | None", "已提交产物 id"],
+          ["extra", "dict[str,Any]", "附加字段:version/release_version/skill_id/artifact_id/artifact_ref/content_hash/manifest_ref/package_kind='product_artifact'/remote_sync/registry_artifact_id(成功且 sync 成功时)"]
+        ]
+      },
+      "evidence": [
+        ["models/publish.py:13-34", "PublishSkillReq + PublishResult 模型定义"],
+        ["routers/skills.py:512-521", "端点签名与依赖注入"],
+        ["routers/skills.py:638-647,755-769", "PublishResult.extra 字段组装两处(有/无 registry 两分支)"]
+      ]
+    },
+    {
+      "name": "ReleaseManifest (本地 release manifest)",
+      "dock": "ProductArtifactPublisher.publish_release 返回(publish_pipeline.py:57)→ 被 LocalProductArtifactStore 持久化为 releases/<skill>/<ver>.json(product_store_local.py:432 _normalize_release_manifest 强制 schema)",
+      "request": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["release_version", "str", "版本号,须与文件名一致否则 release.invalid_manifest"],
+          ["artifact_ref", "dict (object)", "冻结产物引用,缺失 → invalid_manifest"],
+          ["idempotency_key", "str", "幂等键(stage payload 带入)"],
+          ["created_at", "str(ISO)", "创建时间(datetime.now(UTC).isoformat,publish_pipeline.py:90)"]
+        ]
+      },
+      "response": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["release_version", "str", "归一化后版本"],
+          ["artifact_id", "str", "顶层冗余(=artifact_ref.artifact_id)"],
+          ["content_hash", "str 'sha256:<64hex>'", "顶层冗余;格式被 _parse_content_hash 强校验"],
+          ["manifest_ref", "str", "顶层冗余 manifest 路径引用"],
+          ["artifact_ref", "dict{artifact_id,content_hash,manifest_ref,store='product',source_map_ref?}", "归一化的冻结产物引用"],
+          ["idempotency_key", "str (可选)", "幂等键"],
+          ["created_at", "str (可选)", "创建时间;与 idempotency_key 至少有一,否则 invalid_manifest"],
+          ["remote_sync", "dict (读取时附加)", "读 manifest 时合并 remote_sync 状态(product_store_local.py:113-115)"]
+        ]
+      },
+      "evidence": [
+        ["product_store_local.py:432-523", "_normalize_release_manifest:release manifest 字段级强 schema(顶层+artifact_ref 双写)"],
+        ["publish_pipeline.py:86-91", "publish_release 构造 stage payload 的原始字段"]
+      ]
+    },
+    {
+      "name": "ArtifactRef (冻结产物引用)",
+      "dock": "引擎 compile 产出(engine.py:642-650 dict)/ 引擎模型 graph_agent ArtifactRef(artifacts.py:18)→ 本地存储 dataclass ArtifactRef(product_store_local.py:14)→ release manifest.artifact_ref",
+      "request": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["artifact_id", "str", "产物 id(=skill_id)"],
+          ["content_hash", "str 'sha256:<hex>'", "内容寻址哈希(对打包内容算 sha256)"],
+          ["store", "Literal['ephemeral','product']", "存储域;publish 走 'product'"],
+          ["version", "str | None", "版本(引擎模型有,本地 dataclass 无)"],
+          ["manifest_ref", "str", "编译 manifest 引用路径/URI"],
+          ["source_map_ref", "str | None", "源码映射引用(可选)"]
+        ]
+      },
+      "response": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["execution_fingerprint", "str 'sha256:<hex>'", "(compile 返回 dict 附带)排除 metadata.ui 的确定性执行指纹"]
+        ]
+      },
+      "evidence": [
+        ["packages/graph-agent/src/graph_agent/core/artifacts.py:18-33", "引擎权威 ArtifactRef Pydantic 模型(store 校验)"],
+        ["product_store_local.py:14-21", "本地 dataclass ArtifactRef(无 version 字段)"],
+        ["engine.py:642-650", "compile 返回的扁平 dict(artifact_id/content_hash/store/version/manifest_ref/source_map_ref/execution_fingerprint)"]
+      ]
+    },
+    {
+      "name": "run_ended 相关 / RunMetadata 存档字段",
+      "dock": "run_manager 终态收尾写 RunMetadata(models/runs.py:53)→ run_metadata.json + MetadataStore;前端读 git_status 显示存档徽章",
+      "request": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["(status 消息) status", "'success'|'failed'", "子进程发回的终态;success 才触发 autocommit(run_manager.py:667)"],
+          ["(status 消息) metrics", "dict→TokensMetrics|None", "token 用量(_tokens_metrics run_manager.py:777)"]
+        ]
+      },
+      "response": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["run_id", "str", "运行 id"],
+          ["status", "Literal['running','success','failed']", "运行终态"],
+          ["started_at", "datetime", "开始时间"],
+          ["metrics", "TokensMetrics | None", "token 指标"],
+          ["input_summary", "str | None", "输入摘要"],
+          ["git_status", "Literal['committed','locked','failed'] | None", "autocommit 存档结果:committed=已提交,locked=git 锁跳过,failed=提交失败;唯一与存档相关字段"]
+        ]
+      },
+      "evidence": [
+        ["models/runs.py:53-61", "RunMetadata 模型,git_status 字段定义"],
+        ["run_manager.py:719-737", "_auto_commit_successful_run 写 git_status 三态"]
+      ]
+    }
+  ],
+  "unimpl_design": {
+    "headers": ["占坑/未实现项", "目标设计", "文档证据"],
+    "rows": [
+      ["团队协作 Gitea / git push", "MVP1 不实现;publish=Artifact Registry zip 上传,非 git push;团队协作整套 Gitea 部署留坑,未来真要做团队发布再启。后端已有 git_collab 路由(skills.py:462-487 save_to_team/sync_from_team/submit_for_review)+ SyncSkillReq 模型(git_collab.py:10)占位,但定调低优先。", "06_eval.md:25,39-40(占坑低优先);06_eval.md:30 PM 原话『gitea 部署起来麻烦吗…没那么紧急,保存在本地够用,只是占了个坑』;baseline.md:35,54(不拥有 git push,team collaboration deferred);mvp1-alignment.md:23『team/Gitea is a future placeholder』"],
+      ["发布鉴权 UI", "发布鉴权 UI 同 settings 占坑;后端发布用 ArtifactRegistryClient Bearer token(artifact_registry.py:57)+ get_auth_user_id(backends.py:122)解析用户,但无专门发布鉴权 UI。", "06_eval.md:25『团队协作(Gitea)+ 发布鉴权 UI 同 settings 占坑』;06_eval.md:39-40(占坑低优先)"],
+      ["Copilot 自动生成 commit-message + commit-msg 输入 UI", "删:认定为 stale-doc 虚需求,不实现 commit-message prompt;autocommit 用固定消息 auto-run-<run_id>(git_local.py:528)。", "06_eval.md:6,21(~~P6 commit message 输入 + Copilot 自动生成~~ 删 stale-doc 虚需求);mvp1-alignment.md:40『do not implement commit-message prompt』;mvp1-alignment.md:42(06_eval.md:21-22 explicitly delete commit message UI)"],
+      ["发布成功自动回主页 / confetti 撒花", "保留『回主页闭环』能力但不自动跳转(用户手动回 Home);撒花特效删(stale-doc 虚需求)。", "06_eval.md:20(P5 发布成功→回主页;现不自动跳主页 live);06_eval.md:6,21(撒花特效删);mvp1-alignment.md:49-53『after save/release user can return to Home…Status: partial live; no automatic redirect』;mvp1-alignment.md:40(confetti not implemented)"]
+    ]
+  }
+}

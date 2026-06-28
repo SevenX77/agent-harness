@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from graph_agent.core.manifest import SkillManifest
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -11,16 +11,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.models.errors import LintError
 from app.models.lint import LintResult
 from app.models.runs import RunMetadata
-
-
-class ConfigMismatchWarning(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    actual_remote_url: str
-    expected_remote_url: str
-    recommendation: str = (
-        "建议以 .git/config 为基准 (per design.md 决策 22), 在 Settings 调整 User ID / Gitea Host"
-    )
 
 
 class SkillSummary(BaseModel):
@@ -33,7 +23,6 @@ class SkillSummary(BaseModel):
     has_golden: bool
     last_run_at: datetime | None = None
     directory_path: str | None = None
-    config_mismatch: ConfigMismatchWarning | None = None
 
 
 class SkillDetail(BaseModel):
@@ -54,10 +43,32 @@ class SkillDetail(BaseModel):
 class PhaseRef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_mode(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "mode" in value:
+            normalized = dict(value)
+            normalized.pop("mode", None)
+            return normalized
+        return value
+
     id: str = Field(..., min_length=1)
     src: str = Field(..., min_length=1)
     depends_on: list[str] = Field(default_factory=list)
-    mode: Literal["logic", "subgraph", "skill"]
+    output: bool = False
+
+
+class ChildGraphTopology(BaseModel):
+    """Child graph resolved by absolute path for inline subgraph rendering."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    name: str
+    description: str = ""
+    phases: list[str] = Field(default_factory=list)
+    graph_topology: list[dict[str, object]] = Field(default_factory=list)
+    detail: SkillDetail | None = None
 
 
 class SerializeGraphReq(BaseModel):
@@ -96,6 +107,7 @@ class CompileError(BaseModel):
     field: str | None = None
     severity: Literal["fatal", "warning"] = "fatal"
     message: str
+    error_code: str | None = None
 
 
 class CompileSuccess(BaseModel):
@@ -105,6 +117,9 @@ class CompileSuccess(BaseModel):
     status: Literal["ok"]
     phase_count: int
     manifest_name: str
+    artifact_ref: dict[str, Any]
+    source_map_ref: str
+    execution_fingerprint: str
 
 
 class CompileFailure(BaseModel):

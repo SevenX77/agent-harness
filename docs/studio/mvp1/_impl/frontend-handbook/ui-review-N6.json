@@ -1,0 +1,106 @@
+{
+  "code": "N6",
+  "title": "Save & Publish · 保存与发布",
+  "status": "partial",
+  "intent_oneliner": "成功 run 自动本地存档(autocommit)+ 低优先发布到 Artifact Registry(zip 上传,非 git push);存档要让用户感知,发布前置校验缺失要指引去 Settings;commit-msg/confetti/独立按钮等虚需求应已删。",
+  "role_table": {
+    "headers": ["界面单元", "在用户工作流里的作用", "MVP1 要它表达什么"],
+    "rows": [
+      ["Header『Team』下拉里的 Release 项 (Header.tsx:143-146)", "用户发布上线的唯一入口(与 Save/Sync/Submit 四合一)", "发布=占坑低优先;入口最小化藏在 Team 下拉合理,但『Team/Release』字面易让人以为是 git/团队推送"],
+      ["Release 成功后 Header 的 Release 徽章 (Header.tsx:97-117)", "发布成功后给出 release version + artifact id + content hash 的回执", "发布底层=Artifact Registry artifact,不是 git;徽章内容(artifact/hash/manifest/remote sync)如实表达了这点"],
+      ["Local History 面板 (HistoryPanel.tsx)", "展示本地 git 存档快照(含 autocommit 的 Auto run 项),可回滚", "成功 run 后 autocommit 存档=保留;用户应能看到『刚才成功 run 已自动存档』"],
+      ["发布失败 toast 的 Open Settings 动作 (usePublishSkill.ts:108-117)", "发布前置校验失败时把用户引到 Settings 补 registry host/token/user_id", "前置校验失败=明确报错+指引 Settings,非静默"]
+    ]
+  },
+  "surfaces_table": {
+    "headers": ["界面 / 状态", "用户在此做什么", "期望得到什么", "当前不合理点"],
+    "rows": [
+      ["成功 run 之后", "继续编辑或准备发布", "感知到『这次成功 run 已自动存档到本地,可回滚』", "无任何主动提示;autocommit 只落到后端 git,前端不弹 toast、不刷新 Local History,用户对存档发生无感 (Workspace.tsx:644 只 toast『Run started』,completedRunId 仅驱动 copilot bar,Workspace.tsx:113-114)"],
+      ["Local History 面板", "查看/回滚存档", "成功 run 后新 Auto run 快照立即出现", "useLocalHistory (useRunHistory.ts:55) 无 run 完成→自动 revalidate;run_ended 事件不刷新 history,必须手点 Refresh 才看到新存档"],
+      ["点 Team→Release 发布", "把当前 skill 发布上线", "清楚知道这是『打包上传 Artifact Registry』而非 git push/团队推送", "入口名『Team』+『Release』,与 Save to Team/Sync/Submit 同列,语义上把发布和团队 git 操作混在一起,易误导为 git push (Header.tsx:130-147)"],
+      ["发布前置校验失败(registry host/token/user_id 缺)", "看报错并去修", "明确报错+一键去 Settings", "已实现:仅 REGISTRY_NOT_CONFIGURED/APP_SETTINGS_INCOMPLETE 两个 code 才挂 Open Settings (usePublishSkill.ts:27);user_id 缺(后端 build_publish_metadata 校验)对应的 error_code 是否在白名单内未在前端可证,可能漏指引"],
+      ["发布成功后", "回主页开始新探索", "闭环回 Home", "MVP1 P5 承认『现不自动跳主页』,属已知占坑,非 bug"]
+    ]
+  },
+  "actions_table": {
+    "headers": ["用户动作", "经由哪个界面", "MVP1 约束 / 禁止"],
+    "rows": [
+      ["发布上线", "Header→Team 下拉→Release (Header.tsx:143)", "底层必须是 Artifact Registry zip 上传,禁止表达为 git push;入口可最小化"],
+      ["查看本地存档/回滚", "Local History 面板 Revert (HistoryPanel.tsx:138-150)", "autocommit 存档=保留;本地够用"],
+      ["发布前补凭证", "失败 toast→Open Settings→Settings (usePublishSkill.ts:116)", "前置校验失败必须明确报错+指引,禁止静默失败"],
+      ["(禁)输入/生成 commit message", "—", "P6 虚需求已删,UI 不得出现 commit-msg 弹窗/输入框"],
+      ["(禁)发布成功撒花", "—", "P7 虚需求已删,confetti 不得接入"]
+    ]
+  },
+  "plan": "本节点轴=存档与发布的信息架构是否符合 MVP1。审 4 个子面:① autocommit 存档用户感不感知(成功 run 后有无提示+Local History 是否自动出现新快照);② Release 入口/回执有没有把『Artifact Registry 上传』误导成『git push』;③ 发布前置校验失败有没有指引去 Settings;④ 删掉的虚需求(commit-msg UI/confetti/独立 Publish 按钮)有无残留。证据全部挂 file:line,设计意图引 06_eval.md + publish/baseline.md。",
+  "current_risk": "最大不合理在『存档无感』:MVP1 把 autocommit 存档列为保留的核心价值(成功 run 自动存档让用户安心),但前端对存档零反馈——成功 run 不提示存档、Local History 不自动刷新,用户既不知道存档发生、也看不到新快照,核心价值在 UI 层丢失。次要风险:Release 藏在『Team』下拉且与 Save-to-Team/Sync/Submit 这些真 git/团队操作同列,语义上把『发布=Artifact Registry 上传』和『git 推送』混淆,有误导。confetti 源文件(lib/confetti.ts 的 celebrateSuccess)虽是 orphan(全仓无 import)但残留未删,属 stale 死代码。",
+  "issues_table": {
+    "headers": ["不合理点", "应如何改(处理原则)"],
+    "rows": [
+      ["成功 run 后用户对 autocommit 存档完全无感:不提示、Local History 不自动刷新", "run 完成(run_ended)后给一条轻量『已自动存档,可在 Local History 回滚』反馈,并让 useLocalHistory 在 run 完成时 revalidate,使新 Auto run 快照自动出现——存档是 MVP1 保留的核心价值,必须在 UI 可见"],
+      ["Release 入口藏在『Team』下拉、与 Save-to-Team/Sync/Submit(git/团队操作)同列,语义把发布等同 git push", "发布与团队 git 操作在信息架构上分组区隔,或在 Release 项/回执用文案点明『打包上传 Artifact Registry』,消除『Publish=git push』误导(MVP1 alignment 明列此条)"],
+      ["发布前置校验指引白名单可能不全:user_id 缺时是否落在 SETTINGS_FIXABLE_ERROR_CODES 内未可证", "核对后端发布前置校验所有失败 error_code(registry host/token/user_id)是否都进 Open Settings 白名单,缺一个=该失败无指引=半静默"],
+      ["confetti 死代码残留:lib/confetti.ts(celebrateSuccess,撒花特效)+ types/canvas-confetti.d.ts 全仓无 import", "P7 虚需求已删,应一并清除 orphan 源文件与类型声明,避免 stale 误导后人以为发布要撒花"]
+    ]
+  },
+  "gates_table": {
+    "headers": ["验证项", "现状 = 不合理", "目标 = 合理"],
+    "rows": [
+      ["成功 run 后存档感知", "无提示;completedRunId 只驱动 copilot bar,不触发存档反馈或 history 刷新", "run 完成给『已自动存档/可回滚』反馈,Local History 自动出现新 Auto run 快照"],
+      ["发布≠git push 表达", "Release 与 Save-to-Team/Sync/Submit 同列『Team』下拉,易误读为 git 推送", "信息架构或文案明示发布=Artifact Registry 上传,无 git push 误导"],
+      ["前置校验指引完整", "仅 2 个 error_code 挂 Open Settings;user_id 缺是否覆盖未可证", "所有前置校验失败(host/token/user_id)都明确报错+指引 Settings"],
+      ["虚需求清理", "confetti.ts/canvas-confetti.d.ts orphan 残留;commit-msg UI 已无残留(已合规)", "confetti 源文件与类型声明清除;commit-msg/独立 Publish 按钮保持不出现"]
+    ]
+  },
+  "children": [
+    {
+      "code": "N6.1",
+      "title": "autocommit 存档指示",
+      "status": "bad",
+      "problem": "MVP1 把『成功 run 自动本地 autocommit 存档』列为保留的核心价值,但前端对存档零反馈,用户对存档发生与否完全无感。",
+      "design": "06_eval.md P1『成功 run 后本地 git autocommit 存档』live;baseline『publish 前能看到本地存档/快照状态』。",
+      "current": "Workspace.tsx:644 run 启动仅 toast『Run started successfully』,无成功完成 toast;completedRunId(Workspace.tsx:113-114,由 run_ended 流事件推出)仅驱动 copilot 分析 bar(Workspace.tsx:848),不触发存档提示;useLocalHistory(useRunHistory.ts:55)无 run 完成→自动 revalidate,新 Auto run 快照不会自动出现。",
+      "fix": "run_ended 后给『已自动存档,可在 Local History 回滚』轻量反馈,并让 useLocalHistory 在 run 完成时 revalidate,使新快照自动可见。",
+      "auto": ["grep run_ended → 确认是否有 history.refresh / 存档提示绑定", "useRunHistory.ts 检查 useLocalHistory 是否含 run 完成 revalidate"],
+      "manual": ["跑一次成功 run,看是否有任何『已存档』反馈、Local History 是否不点 Refresh 就出现新 Auto run 项"],
+      "pass": ["成功 run 后用户能在不手动刷新的情况下感知存档已发生"]
+    },
+    {
+      "code": "N6.2",
+      "title": "Release/发布流程(Artifact Registry 非 git push)",
+      "status": "partial",
+      "problem": "发布底层是 Artifact Registry zip 上传,但入口『Team→Release』与 Save-to-Team/Sync/Submit(真 git/团队操作)同列,语义上把发布混入 git 推送,有误导。",
+      "design": "06_eval.md P2/P3『Release 在 Header Team 下拉』『发布=zip 上传 Artifact Registry,非 git』;alignment『UI 不再把 Publish 等同 Gitea push』。",
+      "current": "Header.tsx:130-147 同一『Team』下拉里并列 Save to Team / Sync from Team / Submit for Review / Release;Release 回执徽章(Header.tsx:97-117)如实展示 artifact_id/content_hash/manifest_ref/remote_sync,这部分正确表达了 Artifact 性质;但入口分组让 Release 与 git 操作语义混淆。",
+      "current_evidence": "Header.tsx:143-146 Release 项;Header.tsx:97-117 release 徽章",
+      "fix": "把发布与团队 git 操作在信息架构上区隔,或在 Release 项/回执文案点明『打包上传 Artifact Registry』,消除 Publish=git push 误导。",
+      "auto": ["grep『Release』『Team』确认入口分组", "确认回执是否展示 artifact/hash(已展示=正确)"],
+      "manual": ["走查 Team 下拉,判断用户是否会把 Release 误解为 git 推送"],
+      "pass": ["UI 不把发布等同 git/Gitea push;发布=Artifact Registry 在入口或回执处可辨"]
+    },
+    {
+      "code": "N6.3",
+      "title": "发布前置校验与 Settings 指引",
+      "status": "partial",
+      "problem": "前置校验失败的 Settings 指引只覆盖 2 个 error_code,user_id 缺等是否覆盖未可证,可能存在失败无指引。",
+      "design": "06_eval.md P4『user_id/registry host+token 缺→报错+指引去 Settings,非静默』。",
+      "current": "usePublishSkill.ts:27 SETTINGS_FIXABLE_ERROR_CODES 仅含 REGISTRY_NOT_CONFIGURED、APP_SETTINGS_INCOMPLETE;settingsToastOptions(L108-117)只对这两个 code 挂 Open Settings 动作;后端 build_publish_metadata 要求非空 user_id(baseline 后端表),其失败 error_code 是否落在白名单内,前端代码无法证实——若不在,user_id 缺时报错但无指引。",
+      "fix": "核对后端所有发布前置校验失败 error_code(host/token/user_id)是否都进 Open Settings 白名单,补齐缺项。",
+      "auto": ["grep SETTINGS_FIXABLE_ERROR_CODES 列出白名单 code", "后端 grep build_publish_metadata / error_code 列出实际抛出的 code 对照"],
+      "manual": ["构造 user_id 缺失发布,确认报错是否带 Open Settings"],
+      "pass": ["所有前置校验失败都明确报错且带 Settings 指引,无半静默项"]
+    },
+    {
+      "code": "N6.4",
+      "title": "残留虚需求清理(commit-msg / confetti / 独立按钮)",
+      "status": "partial",
+      "problem": "P6 commit-msg UI、P7 confetti、独立 Publish 按钮均为已删虚需求;前两者残留情况需核。",
+      "design": "06_eval.md P6『commit message 输入+Copilot 生成』删、P7『confetti』删(注明 lib/confetti.ts orphan 不接入)、gaps『独立 Publish 按钮占坑』。",
+      "current": "commit-msg:前端全仓无 commit-message UI 残留(grep commitMessage/generate message 无命中=合规);独立 Publish 按钮:无,Release 合并在 Team 下拉=合规;confetti:lib/confetti.ts 的 celebrateSuccess(撒花函数)+ types/canvas-confetti.d.ts 仍在仓内,但全仓除自身外无任何 import(grep confetti 排除自身 0 命中)=确为 orphan 死代码,设计明示『不接入』但未删源文件。",
+      "fix": "清除 confetti.ts 与 canvas-confetti.d.ts 这两个 orphan 文件(已确认无引用),消除 stale 死代码;commit-msg/独立按钮保持现状(已合规)。",
+      "auto": ["grep -r confetti 排除自身→确认 0 import", "grep commitMessage/commit message→确认无 UI 残留"],
+      "manual": ["发布成功不出现撒花;无 commit-msg 弹窗"],
+      "pass": ["confetti orphan 文件清除;UI 不出现 commit-msg/撒花/独立 Publish 按钮"]
+    }
+  ]
+}

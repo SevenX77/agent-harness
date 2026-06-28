@@ -1,0 +1,130 @@
+{
+  "code": "N1",
+  "title": "Init · 发现与初始化",
+  "status": "partial",
+  "intent_oneliner": "用 IDE/workspace 模型(D11)进入 Studio:Home=打开文件夹+Recent(MRU),skill=一个文件夹,无注册表,一窗口专注一个 skill;打开任意文件夹不卡校验(D2)。",
+  "role_table": {
+    "headers": ["界面单元", "在用户工作流里的作用", "MVP1 要它表达什么"],
+    "rows": [
+      ["WelcomePage(Home 欢迎屏,currentSkillId===null 时渲染)", "应用入口:新建 skill / 打开文件夹 / 从 Recent 重新进入", "IDE 风格起点,抄 Cursor/VS Code(R2);Recent 靠 MRU 路径,不靠注册表"],
+      ["New skill 按钮 + NewSkillDialog(填名/选父目录的弹窗)", "建一个新 skill 文件夹并立即进工作区", "极简新建:只要名+父目录,脚手架后端生成(D-1-4 logic→agent 模板)"],
+      ["Open folder 按钮(选任意本地文件夹)", "把已有文件夹当 skill 打开", "D2:打开任意文件夹都不被拒,缺 manifest 交 compile+copilot 修"],
+      ["Recent skills 卡片网格(MRU 列表)", "一眼看到最近打过的 skill,点一下回到工作区", "MRU 主导(路径+名),极简卡片(D-1-1);Cursor Open Recent 同款"],
+      ["Workspace 外壳(Header 顶栏 + Toolbar 左侧条 + 三栏 ResizablePanelGroup)", "进入 skill 后的沉浸式编辑环境;Back-to-Home 退出", "强隔离 Home/Workspace(D11):进 skill 才有面板/copilot,回 Home 全卸载"],
+      ["Header 左上 Back-to-Home 按钮(Layers logo)", "从专注模式退回主页", "D11 退出专注模式的唯一出口"]
+    ]
+  },
+  "surfaces_table": {
+    "headers": ["界面 / 状态", "用户在此做什么", "期望得到什么", "当前不合理点"],
+    "rows": [
+      ["Home 欢迎屏(WelcomePage.tsx:416-463)", "选新建 / 打开文件夹 / 点 Recent", "三个清晰入口 + 最近列表", "标题区写死品牌 GSkill Studio 与 Header 一致(WelcomePage.tsx:424),Recent 区右侧挂一个无意义的 'Desktop workspace' 装饰标签(WelcomePage.tsx:467-470),对用户无操作价值"],
+      ["Recent 卡片(WelcomePage.tsx:483-602)", "点卡片进 skill;右键/⋯ 菜单 Reveal/Remove", "MRU 快速回到工作区", "卡片仍渲染 phaseCount/lastRunAt/Golden/Config drift 徽章(WelcomePage.tsx:509-541,578-584),这些字段来自注册表聚合(useSkills→GET /skills),与 D11 无注册表+D-1-1 删 Config drift 冲突;无后端时这些区域是 0/空,信息噪音"],
+      ["卡片 ⋯ 菜单 Remove(WelcomePage.tsx:567-573,358-377)", "把 skill 从 Studio 移除", "—", "R1 已决定删 Delete(抄 Cursor:IDE 内不删 skill),但 Remove 菜单项仍在,且 deleteSkill 会调 DELETE /skills/{id} 走注册表注销路径,违反 R1"],
+      ["New skill 弹窗(NewSkillDialog.tsx)", "填名、选父目录、Create", "建文件夹+脚手架+进工作区", "结构合理;但提交错误文案仍含大量 manifest/lint 校验分支(formatCreateSkillError + firstLintErrorMessage,WelcomePage.tsx:156-213),与去注册表/D2 后只留 OS 级失败的方向不符"],
+      ["Open folder(WelcomePage.tsx:401-414)", "OS 选目录→进工作区", "任意文件夹都能打开", "前端 openSkill 仍先 POST /skills 做 import 注册(WelcomePage.tsx:295-314,303),把'打开文件夹'耦合成'注册到后端';formatImportSkillError 仍保留 'missing GRAPH.md or SKILL.md' 拒绝文案(WelcomePage.tsx:218-219),虽然后端已不再硬拒(skills.py:544-560 改为 warning),前端文案是死分支"],
+      ["进入 workspace 后的外壳(Workspace.tsx:686-855)", "看画布、开面板、用 copilot", "顶栏+左导航条+三栏布局", "符合 D11 强隔离:skillId 切换时 useEffect 重置 navStack/面板/copilot(Workspace.tsx:72-82);Back-to-Home 经 onCloseSkill 卸载"],
+      ["Back-to-Home 后再进入(copilot 对话)", "退出再进同一 skill", "copilot 对话应一模一样恢复(D8)", "copilotStore 纯内存,退出即 reset(copilotStore),回 Home 对话全丢;D8 要求恢复 = 缺口(target-design,实现归 copilot-assist/native-fs)"],
+      ["空态(WelcomePage.tsx:605-615)", "首次无任何 skill", "引导新建/打开", "文案 'Create or import a skill' 用 'import' 词;D2 后术语应统一为'打开文件夹',import 是旧注册表语汇"],
+      ["Recent 加载骨架(D6)", "后端拉起 sidecar 期间", "skeleton 占位,不空白", "WelcomePage 无 skeleton 分支,Recent 区直接靠 visibleWorkspaces 渲染;D6 要求的 lazy/skeleton 缺口"]
+    ]
+  },
+  "actions_table": {
+    "headers": ["用户动作", "经由哪个界面", "MVP1 约束 / 禁止"],
+    "rows": [
+      ["新建 skill", "New skill → NewSkillDialog → Create", "脚手架=logic→agent 模板(D-1-4),非空文件夹不调 copilot;写盘应走 Rust(D12)"],
+      ["打开任意本地文件夹", "Open folder → OS 选择器", "D2:绝不卡导入/不校验文件结构;不应先注册到后端再进入(去注册表)"],
+      ["从 Recent 重新进入", "点 Recent 卡片", "只靠 MRU(路径+名)即可进入,后端不可用也能开"],
+      ["Reveal(系统文件管理器定位)", "卡片 ⋯ / 右键菜单", "保留(浏览器降级复制路径)"],
+      ["删除 / 移除 skill", "卡片 ⋯ Remove", "禁止:R1 删 Delete,IDE 内不删 skill;失效路径应改为点击报错+自动移除"],
+      ["返回 Home", "Header Back-to-Home", "卸载工作区(清 navStack/面板/分屏/选中/copilot);但 copilot 对话须可恢复(D8)"],
+      ["打开 Settings", "Toolbar 齿轮 / Header", "不算退出工作区(center overlay,不卸载)"]
+    ]
+  },
+  "plan": "保留三入口(新建/打开文件夹/Recent)的信息架构与强隔离 Home/Workspace 外壳 —— 这部分已符合 D11。需对齐设计的:(1) Recent 卡片去注册表化,只留路径+名+lastOpened,删 phaseCount/Golden/Config-drift 徽章;(2) 删 Remove(R1),失效路径改点击报错+自动移除;(3) 打开文件夹解耦后端注册(走 Rust 写,不先 POST /skills),清掉 manifest/lint 校验文案死分支;(4) 补 Recent skeleton(D6);(5) copilot 对话退出可恢复(D8)。术语统一'打开文件夹',去掉 import 旧词。",
+  "current_risk": "Home 仍是注册表模型的外壳套了一层 Recent:卡片信息、错误文案、打开文件夹的注册调用都依赖 GET/POST/DELETE /skills,与 D1/D11'无注册表'方向冲突。用户层面表现为:Recent 卡片显示对 IDE 用户无意义的 0 phases/空徽章;打开文件夹仍可能被旧文案误导为'被拒';Remove 菜单诱导用户做 R1 已禁止的删除动作。后端 D2 已修(skills.py 改 warning),但前端校验文案是死代码,造成前后端语义不一致。",
+  "issues_table": {
+    "headers": ["不合理点", "应如何改(处理原则)"],
+    "rows": [
+      ["Recent 卡片挂注册表派生信息(phaseCount/lastRunAt/Golden/Config drift)", "卡片降为极简:路径+显示名+lastOpened(D-1-1);徽章与注册表派生字段移除,Recent 只读 MRU"],
+      ["卡片 Remove 菜单 + DELETE /skills 注销", "删 Remove(R1);Recent 失效路径改为'点击时报错并自动从 MRU 移除',不在 IDE 内删 skill"],
+      ["打开文件夹先 POST /skills 注册(把打开耦合成注册)", "解耦:打开=记 MRU+进工作区,落盘/解析走 Rust(D12),不依赖后端注册表"],
+      ["formatImportSkillError/formatCreateSkillError 保留 manifest/lint 拒绝文案(后端已不拒,前端是死分支)", "删 manifest/lint 校验文案分支,只留 OS 级失败(路径不存在/非目录);术语统一'打开文件夹'"],
+      ["空态/按钮副本用 'import' 旧注册表词", "统一改为'打开文件夹'(Open folder)语汇,与 D2/IDE 模型一致"],
+      ["Recent 无 skeleton(D6)", "sidecar 拉起期间 Recent 区显示骨架占位,不空白闪烁"],
+      ["Back-to-Home 后 copilot 对话全丢", "D8:退出再进恢复对话(实现归 copilot-assist/native-fs 持久化),工作态面板/分屏可丢"]
+    ]
+  },
+  "gates_table": {
+    "headers": ["验证项", "现状 = 不合理", "目标 = 合理"],
+    "rows": [
+      ["Recent 卡片信息密度", "显示 0 phases/lastRun/Golden/Config-drift,来自 GET /skills 聚合", "只显示名+路径+最近打开时间,纯 MRU"],
+      ["打开任意文件夹", "前端先 POST /skills 注册,保留 missing-manifest 拒绝文案", "直接记 MRU+进工作区,落盘走 Rust,无 manifest 校验文案"],
+      ["删除入口", "卡片 ⋯ 有 Remove,调 DELETE /skills", "无删除入口;失效 Recent 点击报错+自动移除"],
+      ["后端不可用时进入", "Recent 卡片依赖 useSkills(GET /skills)补字段,徽章/计数失效", "MRU 独立渲染,后端不可用也能新建/打开/点 Recent"],
+      ["Recent 加载态", "无 skeleton,直接渲染或空白", "sidecar 期间 skeleton 占位(D6)"],
+      ["copilot 退出恢复", "回 Home 对话清空,再进为空", "再进恢复对话一模一样(D8)"]
+    ]
+  },
+  "children": [
+    {
+      "code": "N1.1",
+      "title": "Home/Welcome · 三入口与品牌头",
+      "status": "ok",
+      "problem": "欢迎屏信息架构(新建/打开文件夹/Recent 三入口 + 品牌头)是否符合 IDE 起点意图",
+      "design": "01_init.md §1 + D11/R2:Home=打开文件夹+Recent,抄 Cursor/VS Code;新建与打开并列、Recent 在下",
+      "current": "WelcomePage.tsx:416-471(品牌头+New skill+Open folder 并列 grid + Recent 标题)",
+      "fix": "保留布局;去掉 Recent 区右侧无意义的 'Desktop workspace' 装饰标签(WelcomePage.tsx:467-470)",
+      "auto": ["渲染 WelcomePage,断言存在 New skill / Open folder 两个按钮与 Recent skills 标题"],
+      "manual": ["启动应用(currentSkillId=null) → 看到 GSkill Studio 头 + New skill + Open folder + Recent skills → 不应看到任何注册表/聚合统计标语"],
+      "pass": ["三入口可见且并列,品牌头与 Header 一致"]
+    },
+    {
+      "code": "N1.2",
+      "title": "Recent 卡片 · MRU 极简化",
+      "status": "bad",
+      "problem": "Recent 卡片仍挂注册表派生信息和 Remove 删除项,违反 D11 无注册表 / D-1-1 删 Config drift / R1 删 Delete",
+      "design": "D11 无注册表、D-1-1 卡片极简(只路径+名)、R1 不在 IDE 内删 skill",
+      "current": "phaseCount/lastRunAt(WelcomePage.tsx:578-584)、Golden/Config drift 徽章(509-541)、Remove 菜单(567-573)+DELETE /skills(358-377);字段全来自 useSkills→GET /skills 聚合(248,262-291)",
+      "fix": "卡片只渲染 displayName+shortPath+lastOpenedAt;删 Golden/Config-drift 徽章与 phaseCount;删 Remove 项,失效路径改点击报错+自动 removeWorkspace",
+      "auto": ["mock 无后端(GET /skills 失败),断言 Recent 卡片仍渲染且不含 phases/Golden/Config-drift/Remove"],
+      "manual": ["打开几个 skill 后回 Home → Recent 卡片只显示名+路径+最近时间 → 不应看到 0 phases / Golden / Config drift / Remove 菜单项"],
+      "pass": ["卡片信息纯 MRU,无注册表派生字段,无删除入口"]
+    },
+    {
+      "code": "N1.3",
+      "title": "打开文件夹 · 不卡校验 + 解耦注册",
+      "status": "partial",
+      "problem": "D2 在 UI 上的体现:打开任意文件夹不应被拒、不应先注册到后端;前端仍保留 manifest 拒绝文案且先 POST /skills",
+      "design": "D2 不卡导入(后端 skills.py:544-560 已改 warning 放行) + D12 写盘走 Rust + 去注册表",
+      "current": "openSkill→resolveBackendSkillIdForWorkspace 先 POST /skills import(WelcomePage.tsx:295-314);formatImportSkillError 保留 'missing GRAPH.md or SKILL.md' 拒绝文案(218-219)= 死分支(后端已不抛此拒绝)",
+      "fix": "打开=记 MRU+进工作区,落盘/解析走 Rust(D12);删 formatImportSkillError 里 manifest/lint 拒绝分支,仅留 OS 级失败;术语改'打开文件夹'",
+      "auto": ["选一个缺 GRAPH.md/SKILL.md 的空文件夹打开,断言进入工作区(不弹 missing-manifest 拒绝 toast)"],
+      "manual": ["Open folder → 选一个普通空目录 → 应进入工作区(交 compile/copilot) → 不应看到 'Cannot import this folder: missing GRAPH.md or SKILL.md'"],
+      "pass": ["任意文件夹可打开,无 manifest 拒绝文案,打开不依赖后端注册"]
+    },
+    {
+      "code": "N1.4",
+      "title": "Workspace 外壳 · 强隔离切换",
+      "status": "ok",
+      "problem": "进入 skill 后的顶栏+左导航条+面板切换是否符合 D11 强隔离(进 skill 才有面板/copilot,回 Home 全卸载)",
+      "design": "D11:一窗口专注一个 skill;Back-to-Home 卸载 navStack/面板/分屏/选中/copilot;Settings 不卸载",
+      "current": "skillId 切换 useEffect 重置(Workspace.tsx:72-82);Toolbar 五面板切换(Toolbar.tsx:15-21);Header Back-to-Home→onCloseSkill(Header.tsx:59-66);Settings 为 overlay 不卸载(Workspace.tsx:750-751)",
+      "fix": "无需改;符合 D11",
+      "auto": ["切 skillId=null 断言 navStack/activePanel/copilotOpen 全重置"],
+      "manual": ["进 skill → 开面板 → 点左上 logo 回 Home → 工作区全卸载;打开 Settings → 仍在工作区不卸载"],
+      "pass": ["强隔离切换正确,Settings 不卸载"]
+    },
+    {
+      "code": "N1.5",
+      "title": "copilot 对话退出恢复(D8)",
+      "status": "ok",
+      "problem": "退出再进同一 skill,copilot 对话是否一模一样恢复(D8)——原审查标为『纯内存全丢』的缺口,本次深挖核实该结论已不成立,实际已实现",
+      "design": "D8 MUST:退出再进恢复对话;其余工作态(面板/分屏)可丢(Q3)",
+      "current": "已实现:会话经 Rust native-fs 落 .gemini/copilot/sessions/<skillId>/<id>.json,冷启动 hydrate() 读回合并并恢复上次活跃 tab(copilotStore.ts:148-246);回 Home(skillId=null)时 useCopilot effect 直接 return、不清 store(useCopilot.ts:131-134)",
+      "fix": "无需改。唯一边角:纯浏览器/非 Tauri 运行时落盘 inert(writeWorkspaceFile 抛 Desktop only 被吞进 persistenceError),web 态不持久——MVP1 桌面优先,可接受",
+      "auto": ["与 copilot 对话后回 Home 再进同一 skill,断言历史消息(含 AI 回答)与上次活跃 tab 恢复"],
+      "manual": ["进 skill → 与 copilot 对几句 → 回 Home → 再进同一 skill → 应看到原对话与上次活跃 tab → 不应是空白会话"],
+      "pass": ["同一 skill 退出再进,copilot 对话与活跃 tab 恢复一致(桌面态)"]
+    }
+  ]
+}

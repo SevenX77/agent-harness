@@ -116,30 +116,30 @@
 
 ---
 
-## §4 安全写 + diff 气泡 (PM 2026-06-03 走查)
+## §4 Copilot 自写 + diff 气泡 (PM 2026-06-03 走查; 2026-06-14 例外更新)
 
 ### 决策 + 动机
-- **范围 = 做全**: 安全写拦截 + diff 气泡 + apply 闭环全建(现码 `acceptEdits` 直写、无 `patch_proposed`,前后端 grep 空)。
-- **Apply 数据流 = P0-A + D12(PM 已定,采信)**: 文件在编辑器开着 → 写内存 buffer(变 dirty)→ 你保存;没开 → 直接落盘。**落盘走 Rust**(D12,不走 Python `POST /files`)。冲突 → 复用 `SaveConflict` UI;Apply 后自动 compile,错误回灌 diff 气泡。copilot 只产 `patch_proposed` 提案 + 提案 UI,写/冲突/编译委托编辑器已有能力,不另造写链路。
-- **diff 气泡**: 每改动一个气泡,带 **Apply**(写)/ **Reject**(忽略)/ **Open Compare**(并排 Monaco diff)。
+- **范围 = 做全**: Copilot SDK `Read/Write/Edit` 允许自行读写 workspace;Studio 负责工具事件、diff 气泡、Open Compare 等审阅回显。`acceptEdits` 直写在 MVP1 不再算 D12 违规。
+- **Write/Edit 数据流 = 2026-06-14 PM 放行**: 文件写由 SDK 工具 runner 在 workspace/cwd/add_dirs 范围内直接执行;Studio 在工具事件前后尽量采集 diff/summary,并刷新编辑器视图。D12 仍约束 Studio 自有写入(editor save / graph serialize / test_inputs / golden / runs / artifacts / publish package),不约束 Copilot SDK Write/Edit。
+- **diff 气泡**: 每次改动尽量出气泡,带 **Accept/Keep**(确认保留)/ **Reject**(还原或提示手动回退)/ **Open Compare**(并排 Monaco diff)。
 - **Bash 处置 = 抄 Cursor(PM 原话「抄cursor」)**: 保留 Bash/终端但 **human-in-the-loop**——
-  - **文件写**走 Write/Edit → diff 提案(引导 model 用编辑工具,不用 Bash 重定向)。
+  - **文件写**走 Write/Edit → SDK 直接读写 + diff/summary 审阅(引导 model 用编辑工具,不用 Bash 重定向)。
   - **Bash 命令**(build/test/git/grep/ls)→ **每条命令卡呈现,你 Approve/Reject 才执行**(同 Cursor 终端审批);只读/安全命令可配**自动允许**白名单,写/破坏性必审批。
   - **闭环不绕过**:Bash 里 `cat > file` 也拦成待审批命令,你看得到可拒。
-  - **机制(Claude 定)**: SDK `can_use_tool`/PreToolUse 回调拦截 —— Write/Edit→提案,Bash→审批卡。(pm-pending §P0-B 的拦截机制;design 阶段先 30 行 PoC 验 SDK 能拦+拿入参。)
+  - **机制(2026-06-14 更新)**: SDK `can_use_tool`/PreToolUse 对 Write/Edit 放行;对 Bash 做审批卡。(pm-pending §P0-B 的拦截机制;design 阶段 PoC 已核实 allow=SDK 直写、deny=工具失败,没有"自行 Rust 写后告诉模型成功"的中间态。)
   - ⚠️ 我对 Cursor 的理解 = 命令审批 + 编辑走 diff;若"抄 Cursor"指别的细节(auto-run 默认/allowlist 范围)点我。
 
 ### 原子动作
 | # | 动作 | status | 归属 |
 |---|---|---|---|
-| SW1 | Write/Edit 拦成 `patch_proposed`(不直写盘) | target(现 acceptEdits 直写) | platform(copilot service)+ SDK 回调 |
+| SW1 | Write/Edit 允许 SDK 直写 workspace + 回显 diff/summary | live/target polish | platform(copilot service)+ region `copilot` |
 | SW2 | diff 气泡:Apply / Reject / Open Compare(并排 Monaco) | target | region `copilot` + `editor` |
-| SW3 | Apply→编辑器 buffer(开着)或 Rust 落盘(没开);冲突→SaveConflict;后自动 compile | target | platform `native-fs`(Rust 写)+ `compile-lint` |
+| SW3 | 改动后刷新编辑器视图;Accept/Reject 后自动 compile | target | region `copilot` + `editor` + `compile-lint` |
 | SW4 | Bash 命令审批卡:Approve/Reject 才跑;只读类可配自动允许 | target(现 Bash 直跑) | region `copilot` + SDK 回调 |
 
 ### 测试关键点
-- copilot 改文件 → 出 diff 气泡,Apply 前磁盘不变。
-- 文件在编辑器开着且 dirty → Apply 进 buffer 不覆盖草稿(走 SaveConflict)。
+- copilot Write/Edit 改文件 → 允许磁盘立即变化,并出 diff/summary 气泡。
+- 文件在编辑器开着且 dirty → 工具写后编辑器视图刷新/冲突提示不静默覆盖。
 - Bash `cat > x.md` / `sed -i` → 拦成审批卡,拒了文件不变(闭环不绕过)。
 - 只读命令(ls/grep)→ 在 allowlist 则自动跑,否则也审批。
 

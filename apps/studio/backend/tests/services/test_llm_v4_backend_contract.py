@@ -22,6 +22,7 @@ from app.services.llm_credentials import (
     upsert_endpoints,
 )
 from app.services.llm_roles import InvalidRoleReference, load_roles_file, save_roles_file
+from graph_agent_gateway.registry.route_identity import stable_endpoint_id
 from graph_agent_gateway.registry.storage import compute_credential_fingerprint
 from pydantic import SecretStr, ValidationError
 
@@ -53,6 +54,13 @@ def _route(route_id: str = "openai-direct:gpt-5") -> ProviderRoute:
             "tool_protocol": CapabilityValue(value="openai_tools", source="manual"),
         },
     )
+
+
+def _url_endpoint_id(
+    base_url: str = "https://api.openai.example/v1",
+    protocol: str = "openai_compatible",
+) -> str:
+    return stable_endpoint_id(protocol=protocol, base_url=base_url)
 
 
 def test_credentials_v4_schema_redacts_secret_and_rejects_legacy_v3() -> None:
@@ -167,9 +175,10 @@ def test_migrate_v3_credentials_normalizes_known_endpoint_ids(tmp_path: Path) ->
 
     migrated = migrate_v3_credentials_to_v4(path)
 
-    assert "openrouter-prod" in migrated.provider_endpoints
+    openrouter_endpoint_id = _url_endpoint_id("https://openrouter.ai/api")
+    assert openrouter_endpoint_id in migrated.provider_endpoints
     assert "98593eb6-764b-497e-808d-6610935f0e0a" not in migrated.provider_endpoints
-    assert "openrouter-prod:anthropic.claude-sonnet-4-6" in migrated.provider_routes
+    assert f"{openrouter_endpoint_id}:anthropic.claude-sonnet-4-6" in migrated.provider_routes
 
 
 def test_upsert_endpoint_omitted_api_key_preserves_secret_and_empty_clears_secret(
@@ -194,7 +203,7 @@ def test_upsert_endpoint_omitted_api_key_preserves_secret_and_empty_clears_secre
     )
     assert (
         load_credentials(path)
-        .provider_endpoints["openai-direct"]
+        .provider_endpoints[_url_endpoint_id()]
         .api_key.get_secret_value()
         == "secret"
     )
@@ -212,9 +221,39 @@ def test_upsert_endpoint_omitted_api_key_preserves_secret_and_empty_clears_secre
         path=path,
     )
 
-    endpoint = load_credentials(path).provider_endpoints["openai-direct"]
+    endpoint = load_credentials(path).provider_endpoints[_url_endpoint_id()]
     assert endpoint.display_name == "OpenAI Renamed Again"
     assert endpoint.api_key is None
+
+
+def test_upsert_endpoint_omitted_credential_ref_preserves_existing_ref(tmp_path: Path) -> None:
+    path = tmp_path / "llm_credentials.json"
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "openai-direct": _endpoint().model_copy(
+                    update={"credential_ref": "credential:openai-prod"}
+                )
+            }
+        ),
+        path,
+    )
+
+    upsert_endpoints(
+        {
+            "openai-direct": {
+                "endpoint_id": "openai-direct",
+                "display_name": "OpenAI Renamed",
+                "protocol": "openai_compatible",
+                "base_url": "https://api.openai.example/v1",
+            }
+        },
+        path=path,
+    )
+
+    endpoint = load_credentials(path).provider_endpoints[_url_endpoint_id()]
+    assert endpoint.display_name == "OpenAI Renamed"
+    assert endpoint.credential_ref == "credential:openai-prod"
 
 
 def test_upsert_endpoint_redacted_api_key_placeholder_preserves_secret(tmp_path: Path) -> None:
@@ -237,9 +276,77 @@ def test_upsert_endpoint_redacted_api_key_placeholder_preserves_secret(tmp_path:
         path=path,
     )
 
-    endpoint = load_credentials(path).provider_endpoints["openai-direct"]
+    endpoint = load_credentials(path).provider_endpoints[_url_endpoint_id()]
     assert endpoint.display_name == "OpenAI From Redacted Response"
     assert endpoint.api_key.get_secret_value() == "secret"
+
+
+def test_upsert_endpoint_ordinary_save_does_not_accept_test_status_facts(tmp_path: Path) -> None:
+    path = tmp_path / "llm_credentials.json"
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "openai-direct": _endpoint().model_copy(
+                    update={
+                        "status": "verified",
+                        "last_test_at": "2026-06-18T00:00:00Z",
+                        "last_test_message": "Backend probe succeeded.",
+                    }
+                )
+            }
+        ),
+        path,
+    )
+
+    upsert_endpoints(
+        {
+            "openai-direct": {
+                "endpoint_id": "openai-direct",
+                "display_name": "OpenAI User Edit",
+                "protocol": "openai_compatible",
+                "base_url": "https://api.openai.example/v1",
+                "api_key": "**********",
+                "status": "failed",
+                "last_test_at": "2026-06-18T01:00:00Z",
+                "last_test_message": "Frontend cache should not become fact.",
+            }
+        },
+        path=path,
+    )
+
+    endpoint = load_credentials(path).provider_endpoints[_url_endpoint_id()]
+    assert endpoint.display_name == "OpenAI User Edit"
+    assert endpoint.status == "verified"
+    assert endpoint.last_test_at == "2026-06-18T00:00:00Z"
+    assert endpoint.last_test_message == "Backend probe succeeded."
+
+
+def test_upsert_third_party_endpoint_uses_url_stable_id(tmp_path: Path) -> None:
+    path = tmp_path / "llm_credentials.json"
+    expected_id = stable_endpoint_id(
+        protocol="openai_compatible",
+        base_url="https://llm.wavespeed.ai/v1",
+    )
+
+    upsert_endpoints(
+        {
+            "custom-00000000-0000-4000-8000-000000000001": {
+                "endpoint_id": "custom-00000000-0000-4000-8000-000000000001",
+                "display_name": "WaveSpeed Custom",
+                "protocol": "openai_compatible",
+                "base_url": "https://llm.wavespeed.ai/v1/",
+                "api_key": "wavespeed-secret",
+                "provider_kind": "custom",
+            }
+        },
+        path=path,
+    )
+
+    endpoints = load_credentials(path).provider_endpoints
+    assert "custom-00000000-0000-4000-8000-000000000001" not in endpoints
+    assert endpoints[expected_id].endpoint_id == expected_id
+    assert endpoints[expected_id].base_url == "https://llm.wavespeed.ai/v1"
+    assert endpoints[expected_id].provider_kind == "custom"
 
 
 def test_load_credentials_repairs_legacy_catalog_candidate_failed_status(tmp_path: Path) -> None:
@@ -381,7 +488,7 @@ def test_upsert_endpoint_preserves_user_provider_kind_and_rate_limit_bucket(tmp_
         path=path,
     )
 
-    endpoint = load_credentials(path).provider_endpoints["onechats-proxy"]
+    endpoint = load_credentials(path).provider_endpoints[_url_endpoint_id("https://onechats.example/v1")]
     assert endpoint.display_name == "OneChats Proxy Renamed"
     assert endpoint.provider_kind == "official"
     assert endpoint.rate_limit_bucket == "onechats-official-mirror"
@@ -413,8 +520,9 @@ def test_upsert_new_endpoint_seeds_curated_provider_kind(tmp_path: Path) -> None
     )
 
     endpoints = load_credentials(path).provider_endpoints
+    proxy_endpoint_id = _url_endpoint_id("https://proxy.example/v1")
     assert endpoints["anthropic-official"].provider_kind == "official"
-    assert endpoints["my-custom-proxy"].provider_kind == "third_party"
+    assert endpoints[proxy_endpoint_id].provider_kind == "third_party"
 
 
 def test_upsert_endpoint_omitted_provider_kind_and_bucket_preserve_existing_values(
@@ -450,7 +558,7 @@ def test_upsert_endpoint_omitted_provider_kind_and_bucket_preserve_existing_valu
         path=path,
     )
 
-    endpoint = load_credentials(path).provider_endpoints["onechats-proxy"]
+    endpoint = load_credentials(path).provider_endpoints[_url_endpoint_id("https://onechats.example/v1")]
     assert endpoint.display_name == "OneChats Proxy Renamed"
     assert endpoint.provider_kind == "custom"
     assert endpoint.rate_limit_bucket == "onechats-shared-key"

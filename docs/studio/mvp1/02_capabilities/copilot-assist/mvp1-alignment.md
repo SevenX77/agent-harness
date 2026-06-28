@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/copilot-assist
 doc: mvp1-alignment
-status: FROZEN（SDK 对话 live，但仍直写无 diff/checkpoint、session 内存态、ThinkingBlock 未翻译，Settings 里的 SDK 测试路径与真实 chat 不等价 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（SDK 对话 live；Write/Edit 直写为 MVP1 允许口径，仍缺 diff 审阅体验；session 内存态、ThinkingBlock 未翻译，Settings 里的 SDK 测试路径与真实 chat 不等价 ⚠️。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [copilot-sdk-test-parity, copilot-session-persistence]
 aligns_with: 01_workflows/00_settings-ux-spec.md（Copilot SDK test）· 01_workflows/04_run-and-verify.md（analysis bar）
@@ -9,10 +9,10 @@ aligns_with: 01_workflows/00_settings-ux-spec.md（Copilot SDK test）· 01_work
 
 # copilot-assist — MVP1 Alignment
 
-> **Tier**: capability | **Owns**: `copilot-sdk-test-parity`（真实 SDK smoke 路径）+ `copilot-session-persistence`（多 session / 消息渲染） | **现状**: SDK 对话 live，但仍直写无 diff/checkpoint、session 内存态、ThinkingBlock 未翻译，Settings 里的 SDK 测试路径与真实 chat 不等价 ⚠️。 | **Related**: [baseline](./baseline.md)（双向）· `copilot` region · `studio-settings` · `golden-eval` · `publish` · `native-fs` · `llm-copilot-http-api`
+> **Tier**: capability | **Owns**: `copilot-sdk-test-parity`（真实 SDK smoke 路径）+ `copilot-session-persistence`（多 session / 消息渲染） | **现状**: SDK 对话 live；Write/Edit 直写为 MVP1 允许口径，仍缺 diff 审阅体验；session 内存态、ThinkingBlock 未翻译，Settings 里的 SDK 测试路径与真实 chat 不等价 ⚠️。 | **Related**: [baseline](./baseline.md)（双向）· `copilot` region · `studio-settings` · `golden-eval` · `publish` · `native-fs` · `llm-copilot-http-api`
 
 ## 1. 定义
-copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个**懂搭 skill + 懂业务领域**的对话助手，能精确取上下文（@mention）、安全改文件（diff 提案）、对话式建技能、承载 judge/打磨、跑完主动提分析。
+copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个**懂搭 skill + 懂业务领域**的对话助手，能精确取上下文（@mention）、允许 SDK 在 workspace 内自行读写文件并配套审阅回显、对话式建技能、承载 judge/打磨、跑完主动提分析。
 
 ## 2. 数据流 / 机制（设计细节）
 ### 功能逐项（原 F 段迁移）
@@ -49,13 +49,13 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 - **测试点**：输入 `@plan`→菜单过滤高亮、选中成内联 pill 可删；点节点/dot/文件自动 @；dirty 文件 @ 拿草稿；发送后第一条=注入清单点开看内容；大工程菜单 <50ms / 超 150K 截断告警。
 - **归属**：region [[copilot]](菜单/pill/回显)；自动触发跨 [[canvas]]/[[editor]]/[[timeline]]。
 
-### F5 安全写 + diff 气泡 + Bash 审批
-- **机制**：Write/Edit 经 SDK 回调**立即应用到编辑器 buffer 并经 Rust autosave 落盘(live、可还原)**,同时记 **checkpoint**;编辑器内联显示绿/红 diff(Open Compare 并排 Monaco)。**Accept=保留(清 checkpoint);Reject=Rust 从 checkpoint 精确还原到改前**。其间 compile/predict/run 用的就是这份 pending 代码(Cursor 式 apply-then-review)。冲突复用 `SaveConflict`,改后自动 compile 回灌。Bash 命令仍逐条审批卡(human-in-the-loop)。
-- **决策+动机**：**模型 B(Cursor 式,PM 2026-06-06 定):改动即时生效、可整体还原,不是"不 Apply 不写"**。D12 仍成立——唯一写者还是 Rust,只是写入时机改成"即时落盘 + checkpoint 还原"而非 gated 在 Apply;**D12 只管写盘走谁、不管何时写,两者正交**。copilot 只产改动 + diff/审阅/还原 UI,写/冲突/编译/还原委托编辑器+Rust 已有能力。**Bash 抄 Cursor**(保留 Bash 但 human-in-the-loop:Bash 命令逐条审批,只读类可配自动允许,`cat>file` 也拦成审批,闭环不绕过)。
-- **原话**：「抄cursor」(Bash 处置)。
-- **status**：现 `acceptEdits` 直写但无 diff 审阅 / 无 checkpoint 还原 = target(目标:即时应用 + 内联 diff + checkpoint 还原)。
-- **测试点**：改文件**立即在编辑器生效并落盘 + 显示内联 diff**,此时 predict/run 用新代码;**Reject 从 checkpoint 精确还原(回改前字节)**,Accept 保留;`cat>file`/`sed -i` 仍拦成审批卡(拒了不执行)。
-- **归属**：region [[copilot]] + [[editor]] · platform [[native-fs]](Rust 写)。
+### F5 Copilot 自写 + diff 气泡 + Bash 审批
+- **机制**：MVP1 明确允许 Copilot SDK `Read/Write/Edit` 在当前 workspace/cwd/add_dirs 范围内自行读写文件；Studio 不要求把 Write/Edit 拦成 Rust 写入或 `patch_proposed` 才算合规。工具事件仍要回显，能拿到前后内容时展示 diff 气泡 / Open Compare；写后 compile/predict/run 使用磁盘上的最新结果。Bash 命令仍逐条审批卡(human-in-the-loop)，因为 Bash 可执行任意 shell 与重定向写入。
+- **决策+动机**：PM 2026-06-14 对 Copilot Write/Edit 作 MVP1 例外：这条“放过”，允许 copilot 自己读写。D12 仍约束 Studio 自有本地写入（编辑器保存、脚手架、graph serialize、test_inputs/golden/runs/artifacts、publish 打包等）走 [[native-fs]]；Copilot SDK 工具 runner 视为外部 agent runtime 的受控 workspace 操作，不再作为 D12 阻断项。**Bash 抄 Cursor**(保留 Bash 但 human-in-the-loop:Bash 命令逐条审批,只读类可配自动允许,`cat>file`/`sed -i` 这类 shell 写入也走审批,闭环不绕过)。
+- **原话**：「抄cursor」(Bash 处置) / 「Copilot Write/Edit 这条放过,在 MVP1 设计文档里也注明一下,允许 copilot 自己读写」。
+- **status**：SDK `acceptEdits` 直写 = MVP1 允许；diff 审阅 / Open Compare / 工具事件回显强化 = target，不再把 Write/Edit 直写标为 D12 违规。
+- **测试点**：Write/Edit 可在 workspace 内直接修改文件且不触发 D12 违规报警；改后 predict/run 读取最新文件；工具事件展示文件名与 diff/summary（可取到前后内容时）；Bash 审批拒绝后不执行。
+- **归属**：Write/Edit 自写归 region [[copilot]] / `copilot-assist`；Studio 自有写入仍归 platform [[native-fs]]。
 
 ### F6 建技能向导
 - **机制**：copilot-SDK 调一个**独立 brainstorming graph skill**(graph 背景知识 + skill-spec 渐进暴露 + template few-shot)对话设计新 skill(问需求→定 io schema→生成骨架)；产出落盘归 [[skill-workspace]] + [[native-fs]]。
@@ -84,27 +84,27 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 
 ## 3. 接口契约
 - **copilot WS（① 前端 → ③a studio backend）**：`WS /api/skills/{skill_id}/copilot/ws`（现 `routers/copilot.py:34`）。请求(MVP1 扩展)`{user_message, model_override?, mentions[], implicit_context, attachments[]（图片 base64,新）, request_id}`；响应事件 union `text_delta | thinking_delta(新) | tool_use_start | tool_use_result | patch_applied(新) | context_resolved(新) | tool_approval_request(新) | error | done`。字段 SSOT = `apps/studio/backend/app/models/copilot.py`(实现时扩展)。错误→`error` 事件不甩 raw traceback。
-- **调用 SDK（③a → claude_agent_sdk）**：copilot 自身 = `ClaudeSDKClient`；block 类型 SSOT = `claude_agent_sdk/types.py`(Text/Thinking/ToolUse/ToolResult/ServerTool)；`can_use_tool`/PreToolUse 回调:Write/Edit→即时应用+内联 diff+checkpoint、Bash→审批(需 PoC)。
-- **安全写落盘 → [[native-fs]](Rust, D12)**:copilot 改动**即时进编辑器 buffer + Rust autosave 落盘 + 记 checkpoint**,`SaveConflict`→compile;**Reject 经 Rust 从 checkpoint 还原**。写入唯一权威=Rust,落点 SSOT 在 native-fs(D12 只约束写者、不约束 Apply 前后)。
+- **调用 SDK（③a → claude_agent_sdk）**：copilot 自身 = `ClaudeSDKClient`；block 类型 SSOT = `claude_agent_sdk/types.py`(Text/Thinking/ToolUse/ToolResult/ServerTool)；MVP1 允许 SDK `Read/Write/Edit` 自行读写 workspace；`can_use_tool`/PreToolUse 主要用于 Bash 审批与必要的 workspace 边界控制。
+- **Copilot Write/Edit 例外（D12 carve-out）**：Copilot SDK 工具 runner 的 Write/Edit 不走 [[native-fs]] 也不算 D12 违规；Studio 负责事件回显、diff/summary、必要时刷新编辑器视图。D12 仍适用于 Studio 自有写入链路（editor save、graph serialize、test_inputs/golden/runs/artifacts、publish package 等）。
 - **跨能力边界(数据流归别处)**：judge/打磨→[[golden-eval]]；commit-msg→[[publish]]；模型选择→[[studio-settings]]；role→route→[[gateway]] `resolve_routes("copilot_chat")`。
 
 ---
 
 ## 4. 设计决策基础（PM 原话）
 > **组织方式**：**以每个功能为索引** —— 每个功能(F1–F8)一段，把它的机制/决策+动机/原话/测试点/status/归属**全收在自己段里**；仅「定义」「接口契约」是模块级总览。现状基线见 [baseline](./baseline.md)。
-> **框架决策(PM 原话)**：「1.现在是mvp1. 2.做全」—— chat-shell（@mention/pill/安全写/diff）+ brain 全纳入，不再 deferred；copilot 一等能力、全功能不延后。
+> **框架决策(PM 原话)**：「1.现在是mvp1. 2.做全」—— chat-shell（@mention/pill/diff/Bash 审批）+ brain 全纳入，不再 deferred；copilot 一等能力、全功能不延后。
 
 ## 5. 决策 + 动机
 | ID | 决策 | 动机 |
 |---|---|---|
 | COPILOT_ASSIST-1 | ThinkingBlock | 单元 `copilot-session-persistence`；**为什么**：全流式消息(含 ThinkingBlock)要完整翻译渲染、不省略 |
-| COPILOT_ASSIST-2 | 安全写(模型 B) | 单元 `copilot-session-persistence`；**为什么**：Cursor 式即时应用 + 内联 diff + checkpoint 还原(Reject 精确回退);写盘仍唯一走 Rust(D12),Bash 仍逐条审批 |
+| COPILOT_ASSIST-2 | Copilot Write/Edit 自写例外 | 单元 `copilot-session-persistence`；**为什么**：MVP1 允许 SDK Write/Edit 直接读写 workspace，保留 diff/summary 审阅体验；D12 继续约束 Studio 自有写入，Bash 仍逐条审批 |
 | COPILOT_ASSIST-3 | session | 单元 `copilot-session-persistence`；**为什么**：退出再进对话一模一样、session 必须落盘不丢(D8 MUST) |
 | COPILOT_ASSIST-4 | SDK 测试 | 单元 `copilot-sdk-test-parity`；**为什么**：copilot test 必须走真实 `ClaudeSDKClient`，不能用 AsyncAnthropic 假路径 |
 
 ## 6. 测试关键点
 1. ThinkingBlock: baseline 现状为 `_translate_sdk_message` 丢 ThinkingBlock ⚠️；目标为 thinking/tool call 全量流式，折叠但不省略。
-2. 安全写(模型 B): baseline 现状为 SDK `acceptEdits` 直写、无 diff/无 checkpoint ⚠️；目标为 即时应用 + 内联 diff + checkpoint,Reject 精确还原,落盘走 Rust。
+2. Copilot Write/Edit 自写例外: baseline 现状为 SDK `acceptEdits` 直写；目标为 允许直写 workspace，同时回显工具事件与 diff/summary，Bash 仍 human-in-the-loop。
 3. session: baseline 现状为 前端 store reset 后内存态丢失 ⚠️；目标为 一 skill 多 session 持久化，退出恢复全部与活跃 tab。
 4. SDK 测试: baseline 现状为 Settings probe 走 `AsyncAnthropic` ⚠️；目标为 短 smoke 走真实 `ClaudeSDKClient` chat 路径。
 
@@ -113,7 +113,7 @@ copilot-assist = skill 工作台右侧 copilot 助手的端到端行为：一个
 
 ## 8. gaps / 报警
 - 🚨 ThinkingBlock: `_translate_sdk_message` 丢 ThinkingBlock ⚠️；目标 thinking/tool call 全量流式，折叠但不省略。
-- 🚨 安全写(模型 B): SDK `acceptEdits` 直写、无 diff/无 checkpoint ⚠️；目标 即时应用 + 内联 diff + checkpoint,Reject 精确还原,落盘走 Rust。
+- ⚠️ diff 审阅体验: SDK `acceptEdits` 直写为 MVP1 允许；剩余目标是稳定回显工具事件、diff/summary 与 Open Compare，不再把 Write/Edit 直写列为 D12 阻断。
 - 🚨 session: 前端 store reset 后内存态丢失 ⚠️；目标 一 skill 多 session 持久化，退出恢复全部与活跃 tab。
 - 🚨 SDK 测试: Settings probe 走 `AsyncAnthropic` ⚠️；目标 短 smoke 走真实 `ClaudeSDKClient` chat 路径。
 

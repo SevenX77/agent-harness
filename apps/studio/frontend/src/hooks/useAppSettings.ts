@@ -1,14 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import i18n from '../i18n'
 import { getAppSettings, updateAppSettings } from '../api/client'
-import type { AppSettings } from '../api/types'
+import type { AppLanguage, AppSettings } from '../api/types'
 import type { SaveStatus } from './useDebouncedCredentialsSave'
 import { runtimeDefaultSkillsDirectory } from '../utils/skill-paths'
+
+/**
+ * N0 i18n (#15.1): the persisted `app_settings.language` is the durable source
+ * of truth for the UI language. When settings hydrate, reconcile the live
+ * react-i18next language to the stored value so the backend choice wins over the
+ * detector's localStorage cache (e.g. a value synced from another device).
+ */
+function syncI18nLanguage(language: AppLanguage): void {
+  if (i18n.language === language) return
+  i18n.changeLanguage(language).catch((error) => {
+    console.warn('phase=app-settings action=i18n-language-sync-failed language=%s error=%o', language, error)
+  })
+}
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   user_id: '',
   gitea_host: '',
   default_skills_directory: '',
+  language: 'en',
+  remote_model_catalog_enabled: true,
 }
 
 const APP_SETTINGS_SAVE_DELAY_MS = 300
@@ -23,10 +39,12 @@ function withRuntimeDefaults(settings: AppSettings): AppSettings {
     : settings
 }
 
-function appSettingsEqual(left: AppSettings, right: AppSettings) {
+export function appSettingsEqual(left: AppSettings, right: AppSettings) {
   return left.user_id === right.user_id
     && left.gitea_host === right.gitea_host
     && left.default_skills_directory === right.default_skills_directory
+    && left.language === right.language
+    && left.remote_model_catalog_enabled === right.remote_model_catalog_enabled
 }
 
 export async function loadAppSettings(): Promise<AppSettings> {
@@ -70,6 +88,7 @@ export function useAppSettings() {
         latestSettingsRef.current = nextSettings
         setSettings(nextSettings)
         setError(null)
+        syncI18nLanguage(nextSettings.language)
       })
       .catch((loadError) => {
         if (cancelled) return
@@ -147,6 +166,14 @@ export function useAppSettings() {
     updateSettings({ default_skills_directory: defaultSkillsDirectory })
   }, [updateSettings])
 
+  const setLanguage = useCallback((language: AppLanguage) => {
+    updateSettings({ language })
+  }, [updateSettings])
+
+  const setRemoteModelCatalogEnabled = useCallback((remoteModelCatalogEnabled: boolean) => {
+    updateSettings({ remote_model_catalog_enabled: remoteModelCatalogEnabled })
+  }, [updateSettings])
+
   const save = useCallback(async () => {
     if (timerRef.current) {
       clearTimeout(timerRef.current)
@@ -169,6 +196,8 @@ export function useAppSettings() {
     setUserId,
     setGiteaHost,
     setDefaultSkillsDirectory,
+    setLanguage,
+    setRemoteModelCatalogEnabled,
     save,
     isLoading,
     error,

@@ -1,0 +1,234 @@
+{
+ "id": "general_impl",
+ "title": "General · 实施详情",
+ "design_ref": "general_design",
+ "intro": "本页是 General(身份与产物路径)tab 前端的现状/差距/实施计划/测试,1:1 对应设计页 general_design(原子 #10–#15)。设计已说清「应该怎样」,这里写「现在怎样、差多少、怎么测」。代码按「文件名 + 函数/对象名」引用(可全局搜索定位,不写行号——行号会漂、名字稳定)。底层依赖的「即填即存 + 选目录走 native」机制见 general_mech_appsettings。General 六个动作(#10–#15)现状均已实现且符合设计:相较 API Keys / Roles / Copilot,这一块没有需返工的 drift、没有未挂载的孤儿组件、也没有桩/假测试。一处需登记(非缺陷):General tab 里还有一个语言下拉,只切前端 i18n、不进 app_settings、不在原子范围(见设计页 intro);它不需要本页处理,登记说明已判过、不是被漏看的孤儿。",
+ "functions": [
+  {
+   "n": 10,
+   "cap": "studio-user-id",
+   "design_ref": "atom-10",
+   "current": "现状:已实现且符合。General tab(GeneralTab.tsx)的 Studio User ID 输入框 onChange 调 appSettings.setUserId(useAppSettings.ts 里把 user_id 合进设置对象的 setter)→ updateSettings(useAppSettings.ts,合 patch + 排程保存)→ queueSave 300ms debounce → performSave 发 PUT /api/settings。纯文本身份字段,无官方/第三方之分。后端 publish 时从 app_settings 读 user_id 当 Git author / repo owner(routers/skills.py,缺则报 APP_SETTINGS_INCOMPLETE)。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。GET/PUT /api/settings(routers/settings.py)已实现;publish 读 user_id 的校验链已在(routers/skills.py)。"
+  },
+  {
+   "n": 11,
+   "cap": "gitea-host",
+   "design_ref": "atom-11",
+   "current": "现状:已实现且符合。GeneralTab.tsx 的 Gitea Host 输入框 onChange 调 appSettings.setGiteaHost → updateSettings → 同一条 debounce PUT。前端只录入这一个 host;发布 token/凭据走 env-only STUDIO_*、不在本 tab。缺 Gitea Host 的拦截发生在 publish/sync 那一刻:routers/skills.py 的 collaborate 端点读 app_settings.gitea_host,空则报 APP_SETTINGS_INCOMPLETE『Gitea Host 未配置』并把 host 装进 git_collab 用作仓库地址——本输入框不前置阻断。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。PUT /api/settings 落 gitea_host 已实现;publish/sync 读它做仓库地址 + 缺配拦截(routers/skills.py)已在。"
+  },
+  {
+   "n": 12,
+   "cap": "skills-dir-manual",
+   "design_ref": "atom-12",
+   "current": "现状:已实现且符合。GeneralTab.tsx 的「默认 skills 目录」输入框 value 绑 appSettings.defaultSkillsDirectory、onChange 调 appSettings.setDefaultSkillsDirectory → updateSettings → debounce PUT。手填是「选目录(#13)」之外的兜底,web 模式下也能纯文本填路径。展示兜底:GeneralTab.tsx 用 effectiveDefaultSkillsDirectory(utils/skill-paths.ts,把空值回落到 runtime 默认 configDir/Skills)算出 currentDefaultSkillsDirectory,空值时不显空白。手填/选目录/Reset 写同一个 default_skills_directory 字段。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。PUT /api/settings 落 default_skills_directory + 空目录后端回落 DEFAULT_SKILLS_ROOT(routers/settings.py _with_effective_defaults)已实现。"
+  },
+  {
+   "n": 13,
+   "cap": "skills-dir-native-picker",
+   "design_ref": "atom-13",
+   "current": "现状:已实现且符合。GeneralTab.tsx 的 Choose 按钮 onClick 走 chooseDefaultSkillsDirectory(GeneralTab.tsx 内的本地 async 函数)→ 调 selectSkillDirectory(lib/tauri.ts,通过 Tauri invoke('select_directory') 弹 native 选择器的封装)。selectSkillDirectory 先判运行时:isTauriRuntime 为假(web 模式)→ toast『Desktop only』返回 null;native helpers 不可用 → toast 桌面运行时不可用。桌面环境走 Studio Rust 后端 select_directory(tauri/src/lib.rs,弹 OS 文件夹对话框;picker_starting_directory 把 chooseDefaultSkillsDirectory 传入的当前默认 skills 目录作起始路径、目录不存在则尝试创建、再不行退到父目录)→ 返回绝对路径 → appSettings.setDefaultSkillsDirectory 写回字段 + debounce PUT。这是整个 settings 唯一走 Studio Rust 后端 native-fs 的操作;Rust 只选不存,落盘照走 PUT /api/settings。选择中按钮 disabled(selectingDefaultFolder 态)。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。Studio Rust 后端 select_directory(tauri/src/lib.rs,弹 OS 文件夹对话框 + 起始目录定位 + 回传路径)已实现;落盘仍走 PUT /api/settings(已实现)。"
+  },
+  {
+   "n": 14,
+   "cap": "skills-dir-reset",
+   "design_ref": "atom-14",
+   "current": "现状:已实现且符合。GeneralTab.tsx 的 Reset(RotateCcw 回旋箭头)按钮 onClick 取 fallbackDefaultSkillsDirectory(GeneralTab.tsx 里由 effectiveDefaultSkillsDirectory(null) 算出的 runtime 默认目录)→ appSettings.setDefaultSkillsDirectory 把字段复位成它 → debounce PUT。runtime 默认拿不到(fallbackDefaultSkillsDirectory 为空)时按钮 disabled——没有可还原目标就不让点。Reset 与手填(#12)、选目录(#13)写同一个 default_skills_directory 字段。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。复位值随 PUT /api/settings 落盘(已实现);runtime 默认目录由前端 runtimeDefaultSkillsDirectory(utils/skill-paths.ts)从 runtime config 算,不依赖后端额外契约。"
+  },
+  {
+   "n": 15,
+   "cap": "appsettings-save",
+   "design_ref": "atom-15",
+   "current": "现状:已实现且符合。useAppSettings.ts 是 General 即填即存的底座:setUserId/setGiteaHost/setDefaultSkillsDirectory 各自调 updateSettings 合出完整三字段对象 → queueSave 起 300ms debounce(APP_SETTINGS_SAVE_DELAY_MS=300)→ performSave 发 PUT /api/settings(整体三字段,无字段级 PATCH)。并发安全:有 in-flight(inflightRef)时把新值缓冲进 pendingSettingsRef、当前请求 finally 里再发缓冲值。保存态走 SaveStatus(idle/pending/saving/saved/error),GeneralTab.tsx 顶部用 SaveStatusBadge(ui/save-status-badge.tsx)渲染;失败 setSaveStatus('error') + toast 显式告警(useAppSettings.ts),不静默。进 tab/刷新初始 load 走 loadAppSettings→getAppSettings(GET /api/settings),空 default_skills_directory 经 withRuntimeDefaults 在前端先回落 runtime 默认。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_dep": "已就绪可接。GET/PUT /api/settings(routers/settings.py)整体读写已实现;前端保存徽章用的是共享组件 SaveStatusBadge(ui/save-status-badge.tsx),现状四个 settings tab 的标题栏保存徽章(General / API Keys / LLM Roles / Copilot)已统一复用这一个共享组件——General 侧无近重复 badge。仅 LLM Roles 的「每个角色卡内」另有一个 RoleSaveStatusBadge(RoleBadges.tsx,吃同一 SaveStatus、英文写死、error 用 outline 而非 warning 色)是残留近重复,属 Roles 页范畴、与 General 无关。"
+  },
+  {
+   "n": 15.1,
+   "cap": "settings-language",
+   "design_ref": "atom-15.1",
+   "current": "现状:GeneralTab(General 设置页组件)用 useTranslation 拿 i18n,语言下拉 onChange 调 i18n.changeLanguage 切界面语言;但不写进 app_settings、不走 PUT /api/settings,所以重开应用语言不恢复(回默认)。",
+   "gap": "差距:把 language 提升为 app_settings 持久字段。① 后端 AppSettings 模型(routers/settings.py)加 language 字段(默认英文/跟随系统);② 前端下拉 onChange 既 i18n.changeLanguage 又把 language 并进 updateSettings 走即填即存(同 #10–#14);③ 应用启动读 app_settings.language 初始化 i18n。",
+   "fe_status": "符合",
+   "be_dep": "契约要改:后端 app_settings 需加 language 字段;现 AppSettings schema extra=forbid 会拒未知字段,必须先在后端显式加 language。GET/PUT /api/settings 链路本身已就绪。",
+   "fe_resync": "审计核实已接语言持久化+测试,翻绿(2026-06-20)"
+  }
+ ],
+ "plan": [
+  {
+   "step": 1,
+   "what": "无功能性改动。General 六个动作(#10–#15)现状均已实现且符合设计:三字段即填即存(debounce 整体 PUT)、选目录走 native picker、Reset 还原默认、保存徽章——均与 §7.1 机制一致;无需返工的 drift、无未挂载的孤儿组件、无桩/假测试。语言下拉是 tab 内 i18n 偏好、不在原子范围(见 intro 登记)。",
+   "depends_on": "无。",
+   "why": "相较 API Keys / Roles / Copilot,General 的接线最完整。本页不开实施任务,仅作现状留底 + 测试方案,供 reviewer 确认「General 无需返工」。",
+   "block": "前端独立"
+  },
+  {
+   "step": 2,
+   "what": "横切登记(非 General 专项):保存徽章组件收口。现状四个 settings tab 的标题栏保存徽章已统一用共享组件 SaveStatusBadge(ui/save-status-badge.tsx)——General 侧已无近重复。残留的近重复只有 LLM Roles 角色卡内的 RoleSaveStatusBadge(RoleBadges.tsx,吃同一 SaveStatus、英文写死、error 用 outline 而非 warning),按「统一组件」要求宜并入共享 SaveStatusBadge。此项属 Roles 页范畴,在那边统一处理、不重开 General。",
+   "depends_on": "前端依赖:Roles 页把角色卡内 RoleSaveStatusBadge 并入共享 SaveStatusBadge(General 已用共享组件,无改动)。后端不动。",
+   "why": "登记而非 General 任务:General 自身已复用共享徽章、用法符合;唯一残留近重复在 Roles 角色卡内,收口归 Roles 页,避免在 General 页面做跨页改动。",
+   "block": "前端独立"
+  }
+ ],
+ "tests": [
+  {
+   "covers": "#10 studio-user-id",
+   "atoms": [
+    10
+   ],
+   "shots": [
+    "改 User ID 后顶部徽章走 Pending→Saving→Saved",
+    "刷新后 User ID 仍在"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "mock PUT /api/settings 成功。",
+    "改 User ID 输入框 → 断言 300ms 后发一次 PUT,body 含三字段且 user_id=新值。",
+    "断言保存徽章态 pending→saving→saved。"
+   ],
+   "layer2": [
+    "进 Settings→General,改 Studio User ID。",
+    "刷新页面,看 User ID 是否保留。"
+   ],
+   "screenshots": [
+    {
+     "file": "general-15-save.png",
+     "caption": "General 即填即存:改 Studio User ID → 顶栏全局保存徽章 + 区块徽章走 Saved（300ms debounce 整体 PUT）"
+    }
+   ]
+  },
+  {
+   "covers": "#11 gitea-host",
+   "atoms": [
+    11
+   ],
+   "shots": [
+    "改 Gitea Host 后徽章走 Saved",
+    "缺 Gitea Host 时去 publish 报『Gitea Host 未配置』"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "改 Gitea Host → 断言发 PUT,body gitea_host=新值(随三字段整体提交)。",
+    "断言徽章态流转正确。"
+   ],
+   "layer2": [
+    "填好 Gitea Host,看保存反馈。",
+    "清空 Gitea Host 后去点某 skill 的 publish/sync,看后端是否回『Gitea Host 未配置』引导(真跑后端校验链)。"
+   ]
+  },
+  {
+   "covers": "#12 skills-dir-manual",
+   "atoms": [
+    12
+   ],
+   "shots": [
+    "手填目录路径后徽章走 Saved",
+    "字段为空时输入框显示 runtime 默认目录(非空白)"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "手填目录路径 → 断言发 PUT,default_skills_directory=填入值。",
+    "字段为空 → 断言展示值回落 effectiveDefaultSkillsDirectory 的 runtime 默认(configDir/Skills)。"
+   ],
+   "layer2": [
+    "在目录输入框手打一个路径,看保存与展示。"
+   ]
+  },
+  {
+   "covers": "#13 skills-dir-native-picker",
+   "atoms": [
+    13
+   ],
+   "shots": [
+    "桌面点 Choose 弹 OS 原生文件夹选择器,选定后路径回填",
+    "web 模式点 Choose 只 toast『Desktop only』、不弹选择器"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "mock isTauriRuntime=true + invoke('select_directory') 回一个路径 → 点 Choose → 断言 setDefaultSkillsDirectory 收到该路径、随后发 PUT。",
+    "mock isTauriRuntime=false → 点 Choose → 断言走 toast『Desktop only』、不调 invoke、不发 PUT。",
+    "选择中 → 断言 Choose 按钮 disabled(selectingDefaultFolder)。"
+   ],
+   "layer2": [
+    "桌面真跑:点 Choose,在弹出的 OS 文件夹选择器里选一个目录,看路径回填 + 保存(关键:这是唯一 native 操作,要真弹真选)。",
+    "web 模式点 Choose,看是否只 toast『Desktop only』。"
+   ]
+  },
+  {
+   "covers": "#14 skills-dir-reset",
+   "atoms": [
+    14
+   ],
+   "shots": [
+    "点 Reset 把目录还原成 runtime 默认 configDir/Skills",
+    "runtime 默认不可用时 Reset 按钮 disabled"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "字段为自定义路径 → 点 Reset → 断言 setDefaultSkillsDirectory 收到 runtime 默认值、发 PUT。",
+    "mock runtimeDefaultSkillsDirectory 返回 null(runtime config 不可用)→ 断言 Reset 按钮 disabled。"
+   ],
+   "layer2": [
+    "把目录改成自定义路径后点 Reset,看是否回到默认。"
+   ]
+  },
+  {
+   "covers": "#15 appsettings-save",
+   "atoms": [
+    15
+   ],
+   "shots": [
+    "连续快改多次只在停手 300ms 后发一次 PUT(debounce)",
+    "保存失败时徽章显 error + toast 告警(不静默)"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "连续改三次字段 → 断言只在最后一次后 300ms 发一次 PUT(debounce 合并)。",
+    "PUT 整体三字段、无字段级 PATCH。",
+    "并发:in-flight 期间再改 → 断言新值缓冲进 pendingSettings、首个请求回来后再发缓冲值。",
+    "mock PUT 失败 → 断言 saveStatus='error' + toast.error(失败显式,不静默)。"
+   ],
+   "layer2": [
+    "快速连改 User ID 几下,看是否只保存一次。",
+    "断网/造 500 后改字段,看徽章是否报错(真跑失败路径)。"
+   ]
+  },
+  {
+   "covers": "#15.1 settings-language",
+   "atoms": [
+    15.1
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "后端契约测:AppSettings 模型加 language 字段后,PUT /api/settings 带 language 不再被 extra=forbid 拒;GET 回读带 language。",
+    "组件测:语言下拉 onChange → 断言既调 i18n.changeLanguage、又把 language 并进 updateSettings(走 PUT)。",
+    "启动测:app_settings.language=zh → 断言 i18n 初始化为 zh。"
+   ],
+   "layer2": [
+    "改语言下拉为简体中文。",
+    "完全重开应用。"
+   ],
+   "shots": [
+    "切到简体中文后界面即时变中文 + 顶部保存徽章 saved",
+    "重开应用后语言仍是上次选的简体中文(不回默认)"
+   ],
+   "fe_status_prev": "偏差",
+   "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
+  }
+ ]
+}

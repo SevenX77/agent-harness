@@ -29,7 +29,7 @@ aligns_with: ../../00-architecture-overview.md（§2 契约层 A）
 ```
 
 #### 2.1.1 子图默认落点(`subgraph/`)
-新建子图默认放在引用方 skill **自己根目录**的 `subgraph/<name>/` 下。每个子图本身是**完整 graph skill**(有自己的 `GRAPH.md` / `phases/`,以及它自己的 `subgraph/`),**递归自包含**——孙图落在 `<skill_root>/subgraph/<name>/subgraph/<name2>/`,层层下去,每个 skill 把自己的子图收在自己根的 `subgraph/`。子图用**绝对 path** 引用(语法见 `skill-syntax` §2.1、解析见 `02-resolver`),所以"默认放这"只是约定;要独立复用时可放工作区任意位置、path 指过去。子图相关目录在 engine **统一叫 `subgraph/`**(不再有 `subskills/` 这种旧概念——代码本就不消费它)。
+新建子图默认放在引用方 skill **自己根目录**的 `subgraph/<name>/` 下。每个子图本身是**完整 graph skill**(有自己的 `GRAPH.md` / `phases/`,以及它自己的 `subgraph/`),**递归自包含**——孙图落在 `<skill_root>/subgraph/<name>/subgraph/<name2>/`,层层下去,每个 skill 把自己的子图收在自己根的 `subgraph/`。子图用 **path** 引用——推荐写**相对 skill 根**(如 `subgraph/<name>`),绝对路径也接受(语法见 `skill-syntax` §2.1、解析见 `02-resolver`)。引擎强制子图最终落在引用方 skill 根**之内**(`escapes skill root` 即编译失败),所以子图必须自包含在 skill 内、不能放到 skill 目录之外;"默认放 `subgraph/`"是约定,skill 根内换个位置也行。子图相关目录在 engine **统一叫 `subgraph/`**(不再有 `subskills/` 这种旧概念——代码本就不消费它)。
 
 ### 2.2 `.workspace` 运行时树
 `.workspace` 运行时树 = Engine SDK 在调用方传入的 `workspace_dir` 里创建 / 读取的固定户型。Studio / host 只决定这块地在哪里;Engine 不从 Studio 配置、环境变量、默认用户目录或 `skill_root` 猜 workspace root,也不在 `workspace_dir` 之外写 run / predict / golden artifacts。
@@ -108,12 +108,12 @@ Studio 可以继续提供 Test Inputs CRUD,但不得把 HTTP 编排 / helper 路
 
 ## 3. 接口契约
 - **文件名→类型**:`GRAPH.md`→root、`LOGIC.md`→logic、`SUBGRAPH.md`→subgraph、`SKILL.md`→agent(大小写精确;一目录恰一个节点文件,否则 `[F-v3-graph-phase-mode-ambiguous]` / `[F-v3-graph-phase-node-missing]`)。
-- **子图落点**:`<skill_root>/subgraph/<name>/`(默认),子图节点 `SUBGRAPH.md` 用绝对 `path` 指向它(解析归 `02-resolver`)。
+- **子图落点**:`<skill_root>/subgraph/<name>/`(默认),子图节点 `SUBGRAPH.md` 用 `path`(相对 skill 根 或 绝对,均须落在 skill 根内)指向它(解析归 `02-resolver`)。
 - **workspace 入口**:`run_skill` / `predict_skill` / `evaluate_golden_baseline` 必须校验 `workspace_dir: Path`(绝对路径,拒相对 / 环境变量猜测)。
 - **校验规则**(DAG/IO/mention 等)归 `compile-rules`,本域只定布局。
 
 ## 4. 设计决策基础(用户原话)
-> 子图默认落点(PM 2026-06-05 拍):子图默认放父 skill 自己根的 `subgraph/`(用户选"父 skill 自己的根")、递归自包含(用户确认),避免多层嵌套难找;path 写绝对路径("随便放哪里")。
+> 子图默认落点(PM 2026-06-05 拍):子图默认放父 skill 自己根的 `subgraph/`(用户选"父 skill 自己的根")、递归自包含(用户确认),避免多层嵌套难找;path 写绝对路径("随便放哪里")。**path 已于 2026-06-21 放宽**(commit `00daacc6`):推荐写相对 skill 根(跨机器可移植),绝对也接受,但都强制落在 skill 根内——详见 `skill-syntax` §2.1 / §4。
 > golden→workspace(2026-06-03 PM):"golden不能写进skill , golden是会失效的临时产物, 他只是辅助优化skill的临时产物,不应该写进skill本体,应该留在.workspace"
 > Studio/Engine 分工:"Studio 是土地局(决定地皮在哪),Engine 是施工队(只在传入的 workspace_dir 里盖固定户型)"
 
@@ -123,7 +123,7 @@ Studio 可以继续提供 Test Inputs CRUD,但不得把 HTTP 编排 / helper 路
 | PL1 | skill 源码树由 mvp1 自写为唯一真理(不引用 mvp0) | mvp0 弃用,真理只在 mvp1 |
 | PL2 | golden 在 `.workspace/golden/`,**不进 skill 源码树** | golden 是会失效临时产物,非 skill 定义 |
 | PL3 | Studio 决定 workspace root,Engine 只认 `workspace_dir` | engine 不知道 studio 存在,可独立测试 |
-| PL4 | 子图默认落 `<skill_root>/subgraph/<name>/`、递归自包含;**绝对 path** 引用、无 registry | 子图集中在每个 skill 自己根下、好找;path 即物理地址(PM 2026-06-02 / 06-05) |
+| PL4 | 子图默认落 `<skill_root>/subgraph/<name>/`、递归自包含;**`path`(相对 skill 根 或 绝对,均须落在 skill 根内)** 引用、无 registry | 子图集中在每个 skill 自己根下、好找;相对 path 跨机器可移植(PM 2026-06-02 / 06-05;06-21 放宽相对,`00daacc6`) |
 
 ## 6. 测试关键点
 1. 文件名→类型:`SKILL.md` / `LOGIC.md` / `SUBGRAPH.md` 各进对应 runtime;多 / 缺节点文件 FATAL。

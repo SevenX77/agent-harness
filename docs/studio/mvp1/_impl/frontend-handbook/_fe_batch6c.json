@@ -1,0 +1,20 @@
+{
+ "n2-canvas#15": {
+  "name": "l3-step-edit",
+  "fix_plan": "把已存在但孤儿的 AgentStepsInline(AgentStepsInline.tsx:135,画布内联 step 编辑组件)挂到画布节点编辑入口(节点右缘展开 body)。增删改序复用 agent-steps.ts 已有纯函数(parseAgentSteps:36 / addAgentStep:108 / removeAgentStep:84 / reorderAgentSteps:63 / updateAgentStep:124)。保存复用 Workspace.tsx 现成 phase 文件保存路径(handlePhaseFileSave→doWriteSkillFile→native-fs write_workspace_file 桌面 / POST /skills/{id}/files/{path} 浏览器 fallback),无需新增后端 mutate 端点。",
+  "verify": "新增挂载测试:断言节点右缘展开 body 后渲染 AgentStepsInlineView、能增删/重排 <step>/<action>(调 agent-steps.ts 纯函数),保存走现成 phase 文件保存路径。UI:展开一个节点 body,增删改序步骤,看 phase 文件 body 落盘。",
+  "evidence": "grep AgentStepsInline/AgentStepsInlineView 在 apps/studio/frontend/src 除自身 .tsx + .test.tsx 外零命中(孤儿,无任何画布/节点引用);agent-steps.ts 的增删改序纯函数也只被 AgentStepsInline.tsx 用、无画布引用。组件 AgentStepsInline.tsx:36 AgentStepsInlineView + :135 AgentStepsInline 均已导出存在。"
+ },
+ "n4-run#9": {
+  "name": "run-focus-follow (画布 focus 自动跟随当前 running 节点)",
+  "fix_plan": "Add an `activeTracePhase?: string | null` prop to GraphCanvasProps (GraphCanvas.tsx:61-81), thread it from Workspace.tsx:1058-1075 (the GraphCanvas call currently passes only statusByNodeId, NOT activeTracePhase). Inside GraphCanvas add a new useEffect keyed on [activeTracePhase, reactFlowInstance] that calls reactFlowInstance.fitView({ nodes: [{ id: activeTracePhase }], duration: 600, padding: 0.8 }) — mirroring the existing conflict-warning pan effect at GraphCanvas.tsx:172-182. Also thread the prop through SplitEditor (Workspace.tsx:1039-1054) so the split-canvas path follows too. activeTracePhase is already computed in Workspace.tsx:208-211 (Object.entries(statusByNodeId).find status===running), so no new derivation is needed — pure wiring + one effect.",
+  "verify": "Unit: mock activeTracePhase A→B, assert reactFlowInstance.fitView called with nodes:[{id:'B'}] (RED currently — no such call). UI: run a multi-node skill, watch the canvas auto-pan/center onto each running node as the run advances; screenshot the viewport following the running node.",
+  "evidence": "GraphCanvas.tsx:61-81 GraphCanvasProps has NO activeTracePhase prop (only statusByNodeId at :72); grep for activeTracePhase across components/GraphCanvas/ returns zero hits. The only fitView-driven viewport pan is the conflict-warning effect at GraphCanvas.tsx:172-182 (centers on activeWarning.nodeId, not the running node). Workspace.tsx:208-211 computes activeTracePhase but Workspace.tsx:1015 passes it ONLY to the trace/properties panel; the GraphCanvas call (Workspace.tsx:1058-1075) and SplitEditor call (Workspace.tsx:1039-1054) pass statusByNodeId but NOT activeTracePhase. Canvas uses statusByNodeId for node coloring only, never for centering."
+ },
+ "n5-node#2": {
+  "name": "node-anchored-resume ([Resume]锚在节点)",
+  "fix_plan": "把 PropertiesPanel.tsx 的 NodeResumeDebugBar(line 401-469,渲 resume_allowed/dirty_fields + Resume node 按钮)的 Resume 入口下沉到画布:仿照已存在的 HitlNodeToolbar.tsx(用 @xyflow/react NodeToolbar 锚到 paused 节点)新建一个 ResumeNodeToolbar,在 GraphCanvas.tsx <ReactFlow> 子树内(line 567 HitlNodeToolbar 同位置)对 error 态节点渲 NodeToolbar,复用 nodeResumeOptionsFromValidity(node-resume.ts:18)+ Workspace.handleResumeNode(Workspace.tsx:919)。数据链已通,纯 UI 位置迁移。注:be_dep 未完全就绪——见 evidence,checkpoint 元数据对失败节点取不到 + 引擎严格不重跑上游 partial,真跑续跑语义达成度受限,但 FE 锚定本身可立即做。",
+  "verify": "新增测试:渲 ResumeNodeToolbar 喂 error 节点,断言节点上有 [Resume] 按钮且点击调 resumeRun 带 resumeFromNodeId;断言顶栏全局 Resume 仍在。真跑:多节点 skill 中段失败,点节点 Resume,核对续跑起点 + 据实记录上游是否重跑(后端 D10.2 缺口)。",
+  "evidence": "Resume 按钮现状在右侧面板:PropertiesPanel.tsx:268-277 渲 NodeResumeDebugBar,该组件(line 401-469)含 'Resume node' 按钮;GraphCanvas.tsx:567 只渲 HitlNodeToolbar,无 Resume 节点锚定;NodeToolbar 模式已被 HitlNodeToolbar.tsx:32 验证可用。be_dep 缺口:failure 事件(ValidationFailEvent events.py:95、RetryExhaustedEvent:323、PhaseEndEvent:66)均无 checkpoint_id 字段,只有 RunStartedEvent(:297)/InterruptedEvent(:421)/ResumedEvent(:445)带,故 nodeResumeCheckpointFromEvents(node-resume.ts:52-79,要求 phase_name===nodeId 且有 checkpoint_id)对失败节点取不到 checkpoint;引擎 _validate_resume_node_ids 仅校验节点存在(runner.py:1272),无显式跳过上游编排。"
+ }
+}

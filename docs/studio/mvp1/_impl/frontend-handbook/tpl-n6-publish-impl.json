@@ -1,0 +1,213 @@
+{
+  "id": "n6_publish_impl",
+  "title": "发布(Release) · 实施详情",
+  "design_ref": "n6_publish_design",
+  "intro": "本页是发布前端的现状/差距/实施计划/测试,1:1 对应设计页 n6_publish_design(原子 #5–#10)。代码按『文件名 + 函数/对象名』引用(不写行号);底层发布机制见 n6_publish_mech,后端契约已就绪(publish/precheck/registry 走 gateway sidecar、native-fs 打包导出走 Studio Rust Tauri 命令,均实现)。",
+  "functions": [
+    {
+      "n": 5,
+      "cap": "release-entry",
+      "design_ref": "atom-5",
+      "current": "现状:入口已实现且可工作,偏差在语义。`Header.tsx` 的 Team 下拉里有一个 Release `DropdownMenuItem`,点它调发布 hook 的 `publish.publish()`。但 Release 与 Save to Team / Sync from Team / Submit for Review(真 git/团队操作)同列同一『Team』下拉,语义上把『发布=Artifact Registry 打包上传』和 git/团队推送混在一起,易让用户误读为 git push。",
+      "gap": "差距:消除『发布=git push』误导——在 Release 项或回执文案点明『打包上传 Artifact Registry(非 git push)』,或在信息架构上把发布与团队 git 操作分组区隔(如分隔线/分组标题)。入口最小化、藏 Team 下拉本身符合占坑低优先,不必拆独立按钮。纯前端文案/分组改动,后端不动。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接(后端不需改)。POST /api/skills/{id}/publish(`publish_skill`)已实现,底层=Artifact Registry zip 上传、非 git。",
+      "fe_status_prev": "偏差",
+      "fe_resync": "已修复并测试通过(batch1, 2026-06-20)"
+    },
+    {
+      "n": 6,
+      "cap": "release-receipt",
+      "design_ref": "atom-6",
+      "current": "现状:已实现且符合。发布成功后 `usePublishSkill` 的 `releaseSuccessMessage`(`usePublishSkill.ts`)用 PublishResult.extra 拼成功 toast(Released {version}: {artifactId}, {contentHash}, {manifestRef}, {remoteSync});`Header.tsx` 的 `getReleaseIdentity` 从 PublishResult.extra 取 release_version/artifactId/contentHash/manifestRef/remoteSyncLabel 渲染回执徽章 + tooltip。回执如实展示 artifact/hash/manifest/remote sync,正确表达 Artifact 性质而非 git。",
+      "gap": "符合设计,无需改。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。POST /publish 成功返回 PublishResult{...extra{release_version,artifact_ref,content_hash,manifest_ref,remote_sync}}。"
+    },
+    {
+      "n": 7,
+      "cap": "publish-precheck-settings",
+      "design_ref": "atom-7",
+      "current": "现状(读法 B):本地发布永远先成功。后端 `skills.publish_skill`(发布路由)在缺 registry/身份配置时不抛错——本地 `publish_release` 照常提交,远端同步标 `remote_sync={status:skipped, reason}`,reason ∈ {`registry_not_configured`(有 user_id 但缺仓库 host/token)、`app_settings_incomplete`(缺 user_id)},返回 PublishResult status=ok。前端 `usePublishSkill.ts` 在 ok 结果上读 `remote_sync.reason`:`releaseSuccessMessage`(拼成功文案的函数)已把 skip reason 写进成功 toast(经 `remoteSyncSummary`);`successToastOptions`(决定成功 toast 是否挂动作的函数)在 reason=`app_settings_incomplete` 时挂可点『Open Settings』(去 General 配 user_id),reason=`registry_not_configured` 时仅信息提示、不挂按钮。",
+      "gap": "符合设计(读法 B)。前端处理的 skip-reason 集合 `FE_HANDLED_SKIP_REASONS`(hook 里声明的 FE 已知跳过原因常量)= {registry_not_configured, app_settings_incomplete},与后端 `skills.py:710-732` 实际发的 reason 完全相等。已删除原 catch 路径的 `SETTINGS_FIXABLE_ERROR_CODES` 错误码白名单(后端发布从不抛这些码 → 死分支),真正抛出的错误(网络/校验,如 PUBLISH_FAILED/PUBLISH_CONFLICT)仍走普通错误 toast(无 Settings 动作)。registry 目前只有环境变量、无 Settings UI;若将来要『无 registry 也跳 Settings 配仓库』,需另立 Settings 加 registry 配置任务(本轮不做)。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接(读法 B,后端基本不动)。缺配置时 publish 返回 ok + remote_sync.skipped.reason,前端按 reason 给非阻塞提示;不需要新错误码。",
+      "fe_status_prev": "符合",
+      "fe_resync": "2026-06-20 fe_resync(读法 B,PM 已决):把『Open Settings』引导从死的 catch 错误码白名单挪到 ok+skip 成功路径——app_settings_incomplete 出可点 Open Settings、registry_not_configured 仅信息;新增 `FE_HANDLED_SKIP_REASONS` 常量,并以一致性测断言它 == 后端发的 reason 集合。本地发布成功 + 非阻塞 Settings 提示,不硬失败、不抛错误码。"
+    },
+    {
+      "n": 8,
+      "cap": "publish-loopback",
+      "design_ref": "atom-8",
+      "current": "现状:符合 MVP1 决策(占坑)。发布成功后不自动跳主页,由用户自行返回。06_eval.md P5 明列『现不自动跳主页 = 已知占坑』,属低优先未来项。",
+      "gap": "符合 MVP1 决策,无需改。自动跳主页为占坑低优先,未来真要做发布后闭环再启;现阶段不应把『不自动跳』当缺陷去补。",
+      "fe_status": "符合",
+      "be_dep": "n/a(纯前端导航,无后端契约)。"
+    },
+    {
+      "n": 9,
+      "cap": "no-virtual-requirements",
+      "design_ref": "atom-9",
+      "current": "现状:负向约束部分合规,死代码部分偏差。① 负向约束:全前端无 commit-message UI(grep commitMessage/commit message 0 命中)、无独立 Publish 按钮(Release 合并在 Team 下拉)、不接撒花——均合规。② 死代码:`lib/confetti.ts`(`celebrateSuccess`,撒花特效函数)+ `types/canvas-confetti.d.ts`(canvas-confetti 类型声明)仍在仓内,但全前端 0 import(grep confetti 排除自身 0 命中)=确为 orphan 死代码,设计明示『不接入』却未删源文件。",
+      "gap": "差距(仅死代码):删除 `lib/confetti.ts` 与 `types/canvas-confetti.d.ts` 这两个 orphan 文件(已确认 0 引用),消除 stale 误导;负向约束部分保持现状(无 commit-msg/独立按钮/撒花接入)。纯前端清理,后端不动。",
+      "fe_status": "符合",
+      "be_dep": "n/a(纯前端约束 + 死代码清理,无后端)。",
+      "fe_status_prev": "偏差",
+      "fe_resync": "已修复并测试通过(batch1, 2026-06-20)"
+    },
+    {
+      "n": 10,
+      "cap": "package-release-native-fs",
+      "design_ref": "atom-10",
+      "current": "现状:已实现且符合。`Header.tsx` 有 Package 图标按钮(aria-label『Package release』,打包中转圈)+ Team 下拉『Package release』项,点击走 `handlePackageRelease`→`executePackageRelease`:用 `getReleaseIdentity(publish.lastResult)` 的回执(release_version/content_hash/manifest_ref/artifact_ref)+ 工作区相对路径(`packageRelativePath`,默认 `.workspace/releases/{skill}-{version}.package.json`)调 `writePublishPackage`(`lib/tauri.ts`)→ Tauri 命令 `publish_package_writer`(Studio Rust 后端 native-fs)。成功弹『Packaged release {version}: {hash}, {manifestRef}』+ native 路径 + 『Reveal』;失败按 native-fs typed 错误(Conflict/PermissionDenied/PathEscape)给可重试 toast + 『Choose path』打开 Package target 弹框换路径重试。Rust 侧 `native_fs.publish_package_writer_impl` 原子写 + 拒绝路径穿越/符号链接逃逸,有单元测试。仅在已有发布回执(lastResult 非空)时入口可用。",
+      "gap": "符合设计,无需改。注:这是 D12『发布打包落盘走 native-fs』前端 + Studio Rust 后端的已落地实现(D9.4),不是未来项。",
+      "fe_status": "符合",
+      "be_dep": "已就绪可接。Studio Rust 后端 Tauri 命令 `publish_package_writer`(原子写 + 路径穿越/符号链接逃逸拒绝)已实现(D9.4),前端经 `writePublishPackage` 调用。"
+    }
+  ],
+  "plan": [
+    {
+      "step": 1,
+      "what": "#9 死代码清理:删除 `lib/confetti.ts`(celebrateSuccess)与 `types/canvas-confetti.d.ts`(已确认 0 import 的 orphan);负向约束(无 commit-msg/独立按钮/撒花接入)保持现状。",
+      "depends_on": "无(纯前端删除,已确认无引用)。",
+      "why": "零风险、零依赖的清理,先做掉消除 stale 死代码;且与其它项无耦合。",
+      "block": "前端独立"
+    },
+    {
+      "step": 2,
+      "what": "#5 Release 入口消歧:在 Release 项/回执文案点明『打包上传 Artifact Registry(非 git push)』或把发布与团队 git 操作在 Team 下拉里分组区隔(分隔线/分组标题)。",
+      "depends_on": "无(纯前端文案/分组;后端 publish 已就绪)。",
+      "why": "消除『发布=git push』误导是 MVP1 alignment 明列项,纯前端、不阻塞,紧随清理后做。",
+      "block": "前端独立"
+    },
+    {
+      "step": 3,
+      "what": "#6 回执 + #7 前置校验指引 + #8 闭环 + #10 native-fs 打包导出:已符合,补回归测试——回执如实展示 artifact/hash/manifest;缺 user_id→APP_SETTINGS_INCOMPLETE→Open Settings;发布后不自动跳主页(占坑)保持;Package release 经 Tauri publish_package_writer 写盘 + typed 错误换路径重试。不改实现。",
+      "depends_on": "无(#10 依赖 Studio Rust 后端 native-fs publish_package_writer,已实现)。",
+      "why": "已符合设计,纳入测试保证后续不回归;尤其 #7 的白名单与后端实际抛码对齐、#10 的 native-fs 错误重试路径要钉死。",
+      "block": "前端独立"
+    }
+  ],
+  "tests": [
+    {
+      "covers": "#5 Release 入口(消歧非 git push)",
+      "atoms": [
+        5
+      ],
+      "shots": [
+        "Team 下拉里 Release 项/回执文案点明『Artifact Registry』,用户不误读为 git push"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "组件测:断言 Team 下拉含 Release 项,点击调 publish.publish()。",
+        "RED:当前 Release 与 Save/Sync/Submit 同列且无『Artifact Registry/非 git』文案或分组 → 断言『发布入口有非-git 消歧标识』失败。",
+        "GREEN:断言 Release 项/回执出现『Artifact Registry』(或发布与团队 git 操作有分组区隔)。"
+      ],
+      "layer2": [
+        "目标落地前:走查 Team 下拉,记录『Release 与 git/团队操作同列、易误读』。",
+        "落地后重跑:走查 Team 下拉,确认 Release 有非-git 消歧文案/分组。"
+      ],
+      "fe_status_prev": "偏差",
+      "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
+    },
+    {
+      "covers": "#6 发布回执(Artifact 性质)",
+      "atoms": [
+        6
+      ],
+      "shots": [
+        "发布成功 toast 含 version/artifact id/content hash/manifest",
+        "Header 回执徽章展示 artifact id + content hash + remote sync 状态"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "mock PublishResult(extra 含 release_version/artifact_ref/content_hash/manifest_ref/remote_sync)→ 断言 releaseSuccessMessage 拼出含这几项的成功 toast。",
+        "断言 getReleaseIdentity 从 extra 取出 version/artifactId/contentHash/manifestRef/remoteSyncLabel 渲染徽章。",
+        "字段缺失时 → 断言回退泛化文案,不编造。"
+      ],
+      "layer2": [
+        "真跑:用真配置(本地 product store 即可)真发一次,看成功 toast + Header 回执徽章展示 artifact/hash/manifest。"
+      ]
+    },
+    {
+      "covers": "#7 缺配置=本地发布成功 + 非阻塞 Settings 提示(读法 B)",
+      "atoms": [
+        7
+      ],
+      "shots": [
+        "缺 user_id 发布 → ok+skip(app_settings_incomplete) → 成功 toast 带『Open Settings』动作(非阻塞)",
+        "缺 registry → ok+skip(registry_not_configured) → 成功 toast 仅含 reason 信息、无按钮"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "mock 发布返回 ok + remote_sync.skipped → 断言成功消息含 skip reason(remoteSyncSummary 拼进)。",
+        "mock reason=app_settings_incomplete → 断言成功 toast 挂 Open Settings 动作(successToastOptions);reason=registry_not_configured → 断言无动作。",
+        "一致性测(取代旧错误码一致性,即原 test#3):断言 FE_HANDLED_SKIP_REASONS == 后端实际发的 reason 集合 {registry_not_configured, app_settings_incomplete};并断言真正抛出的错误走普通错误 toast(无 Settings 动作)。"
+      ],
+      "layer2": [
+        "真跑:清空 user_id 后真点 Release,看本地发布成功 + 成功 toast 带 Open Settings、点它跳 Settings;缺 registry 时看成功 toast 仅提示、不阻塞。"
+      ],
+      "fe_status_prev": "符合",
+      "fe_resync": "2026-06-20 fe_resync(读法 B):一致性测从『错误码白名单↔后端抛码』改为『FE skip-reason 集合↔后端 ok+skip 发的 reason』,且该一致性成立(== {registry_not_configured, app_settings_incomplete});删去『期望抛 REGISTRY_NOT_CONFIGURED 错误』这类读法 B 下不可能的断言。"
+    },
+    {
+      "covers": "#8 发布后闭环(占坑)",
+      "atoms": [
+        8
+      ],
+      "shots": [
+        "发布成功后停在当前视图(现不自动跳主页,占坑)"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "断言发布成功后不触发自动跳主页(符合占坑决策,非缺陷)。"
+      ],
+      "layer2": [
+        "真跑:真发一次成功,确认停在当前视图、可手动回主页开始新探索。"
+      ]
+    },
+    {
+      "covers": "#9 虚需求不出现 + orphan 清理",
+      "atoms": [
+        9
+      ],
+      "shots": [
+        "发布成功不出现撒花;无 commit-msg 弹窗;无独立 Publish 按钮",
+        "仓内无 lib/confetti.ts / types/canvas-confetti.d.ts"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "约束测(符合):断言全前端无 commit-message UI(grep 0 命中)、无独立 Publish 按钮、发布成功不调撒花。",
+        "RED:当前 lib/confetti.ts + types/canvas-confetti.d.ts 仍在仓内(orphan)→ 断言『撒花源文件已清除』失败。",
+        "GREEN:删除后断言两文件不存在、且全仓 0 confetti import。"
+      ],
+      "layer2": [
+        "目标落地前:grep 取证 confetti orphan 残留、commit-msg 0 命中。",
+        "落地后重跑:真发一次成功,确认不撒花、无 commit-msg 弹窗;确认仓内 confetti 文件已删。"
+      ],
+      "fe_status_prev": "偏差",
+      "fe_resync": "覆盖的功能点已全部符合(2026-06-20)"
+    },
+    {
+      "covers": "#10 Package release(native-fs 打包导出)",
+      "atoms": [
+        10
+      ],
+      "shots": [
+        "Package release 成功 toast 含 version/hash/manifest + native 路径 + Reveal",
+        "Conflict 错误 toast 带『Choose path』→ Package target 弹框换路径重试成功"
+      ],
+      "fe_status": "符合",
+      "layer1": [
+        "契约测:点 Package release → 断言用 lastResult 的回执调 writePublishPackage(Tauri publish_package_writer),请求含 workspaceRoot/relativePath/releaseVersion/contentHash/manifestRef/artifactRef。",
+        "mock 成功(返回 {path,nativePath,hash,bytesWritten})→ 断言成功 toast 带 nativePath + Reveal 动作。",
+        "mock typed 错误 Conflict/PermissionDenied/PathEscape → 断言可重试 toast 带『Choose path』,换路径后再次 writePublishPackage。",
+        "无发布回执(lastResult 空)时 → 断言入口不可用(handlePackageRelease guard)。"
+      ],
+      "layer2": [
+        "真跑:先真发一次拿到回执,再点 Package release(真走 Tauri native-fs),看 `.workspace/releases/*.package.json` 落盘 + 成功 toast + Reveal 定位。",
+        "造一次路径冲突,看『Choose path』换路径重试成功。"
+      ]
+    }
+  ]
+}

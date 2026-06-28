@@ -1,0 +1,35 @@
+[
+  {
+    "name": "运行事件流订阅（useRunStream）",
+    "kind": "纯逻辑模块（节点内共享）",
+    "what": "订阅某次 run 的 WebSocket 事件流、把乱序/重复/断流处理干净、攒成一份有序 events[] 供各消费者渲染的 hook。它是 Run/Trace 整块去黑盒的事件入口——节点灯、trace 时间线、dot 黑板、prompt 透视全从它给的同一份 events[] 取数据，不各自向后端要。",
+    "where": "useRunStream(runId)（hooks/useRunStream.ts）：连 runEventsWsUrl(runId, cursor)，onmessage 解析 EventEnvelope → 按 seq 去重（seenSeqs）+ 连续性校验（seq!==lastSeq+1 报 Run stream gap）+ 100ms 批量 flush 进 events[]；收 run_ended 置 runEnded 停止重连（防终态后端每次重连全量回放导致事件无界累积）；runId 变更时整体重置。",
+    "duties": [
+      "连 WS、按 cursor 续流；onmessage 解析 EventEnvelope 信封。",
+      "按 seq 去重 + 连续性校验（缺口报 Run stream gap，可观测不静默）。",
+      "100ms 批量 flush 进 events[]，降低高频事件重渲染。",
+      "收 run_ended 停重连；runId 切换以新 runId 重置（live→history 源切换不串）。"
+    ],
+    "used_by": "Run：#8（节点灯的事件源）；Trace：#14（run 时流式）、#15（历史回看）、#17（focus 粒度过滤）、#18（完整 trace 文档）、#19（dot 取 input_dispatch/edge_transition）、#20（prompt 透视取 prompt_captured）、#27（韧性/源切换重置）。",
+    "boundary": "做：订阅、去重、续流、攒 events[]、停重连。不做：不渲染（渲染归 TracePanel/SkillNode/EdgeContextView）、不派生节点态（归 deriveNodeStatuses）、不持后端外的第二份事实源。",
+    "reuse_note": "run 首登记处；trace 多处复用同一份 events[]。",
+    "design_note": "符合 D11 EventEnvelope SSOT 设计；终态停重连是已记录的防无界累积措施（3-phase run 曾涨到数千事件）。",
+    "api": "WS /ws/runs/{run_id}（订阅事件流，见 trace 机制 iface-trace-0）。"
+  },
+  {
+    "name": "事件→节点态派生（deriveNodeStatuses）",
+    "kind": "纯逻辑模块（节点内共享）",
+    "what": "把一条有序事件流折成『每个节点当前什么态』的纯函数：phase_start→running、phase_end→success、validation_fail/retry_exhausted/含 error|fail→error、hitl/interrupt→paused，按到达顺序 last-event-wins（同节点先失败后重试成功最终判绿、最终失败判红）。画布节点灯和 debug 红灯共用它（spec Q4：事件→节点态派生器归 trace，run/debug 共用）。",
+    "where": "deriveNodeStatuses(events, runId)（components/studio/node-status.ts）：兼容 CallbackEvent / EventEnvelope 两种入参（callbackPayload 取 payload）；isFailureEvent 显式把 validation_fail/retry_exhausted 列入失败集（它们不含 'error' 子串，否则会误标绿）；按 attempt 取最新一轮。",
+    "duties": [
+      "把事件流按 phase 折成 {phase: running|success|error|paused}。",
+      "显式判失败：validation_fail/retry_exhausted + 含 error|fail 子串 + status=failed/error。",
+      "按 attempt 取最新一轮，避免旧重试覆盖新结果；last-event-wins。"
+    ],
+    "used_by": "Run：#8（画布节点呼吸灯）、#9（activeTracePhase 取 running 节点驱动 focus 跟随）；Trace：#22（失败节点红灯）、#25（重试徽章按 attempt）。N5 debug 红灯亦复用（spec Q4）。",
+    "boundary": "做：从事件流派生每节点状态。不做：不渲染样式（SkillNode STATUS_STYLE 负责呼吸脉冲/边框色）、不订阅 WS（events[] 由 useRunStream 给）、不做 focus 平移（#9 的画布平移是消费方）。",
+    "reuse_note": "run 首登记处；trace 红灯复用；N5 debug 复用。",
+    "design_note": "isFailureEvent 显式列 validation_fail/retry_exhausted 是已修过的真 bug（旧 .includes('error') 会把这两类失败误标绿）。",
+    "api": "无 —— 纯函数；输入是 useRunStream 的 events[]，输出喂画布 SkillNode。"
+  }
+]

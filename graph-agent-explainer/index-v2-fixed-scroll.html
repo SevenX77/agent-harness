@@ -1,0 +1,982 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Graph-Agent · MVP1 生命周期手册</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Outfit:wght@300;400;500;600;700;800&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-app: #f3f4f8;
+    --bg-card: #f4f5f7;
+    --border-color: #e4e6ea;
+    --border-hover: #d0d4da;
+    --text-title: #0e1116;
+    --text-body: #3b414a;
+    --text-muted: #8b919b;
+    --accent-blue: #3266e8;
+    --accent-blue-rgb: 50, 102, 232;
+    --accent-blue-hover: #517def;
+    --accent-teal: #00d2ff;
+    --accent-green: #2ecc71;
+    --accent-orange: #f39c12;
+    --accent-red: #e74c3c;
+    --accent-purple: #8e44ad;
+    --font-sans: 'Outfit', 'Noto Sans SC', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+    /* Studio dark palette (mock) */
+    --st-bg: #09090b;        /* zinc-950 */
+    --st-panel: #131316;
+    --st-border: #27272a;    /* zinc-800 */
+    --st-border-soft:#1e1e22;
+    --st-text: #e4e4e7;
+    --st-muted: #8a8a93;
+    --st-primary: #7c6cf0;   /* indigo-violet */
+    --st-primary-soft: rgba(124,108,240,.16);
+    --st-agent: #7c6cf0;
+    --st-logic: #2dd4bf;
+    --st-subgraph: #f59e0b;
+    --st-io: #64748b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body { background-color: var(--bg-app); color: var(--text-body); font-family: var(--font-sans); line-height: 1.6; }
+
+  .main-layout { display: flex; align-items: flex-start; gap: 24px; max-width: 1160px; margin: 0 auto; padding: 0 24px; }
+
+  /* sidebar TOC */
+  .sidebar { width: 264px; background: transparent; display: flex; flex-direction: column; padding: 30px 8px 30px 0; position: sticky; top: 0; align-self: flex-start; height: 100vh; overflow: hidden; flex-shrink: 0; }
+  .sb-card { background: #fff; border: 1px solid var(--border-color); border-radius: 16px; box-shadow: 0 4px 18px rgba(20,30,60,.05); padding: 16px 14px; margin-bottom: 16px; }
+  .sb-card.toc { padding: 14px 10px; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .sb-card.toc::-webkit-scrollbar { width: 6px; }
+  .sb-card.toc::-webkit-scrollbar-track { background: transparent; }
+  .sb-card.toc::-webkit-scrollbar-thumb { background: #d8dce3; border-radius: 999px; }
+  .sb-card.toc::-webkit-scrollbar-thumb:hover { background: #c2c8d2; }
+  .toc-group { margin-bottom: 6px; }
+  .toc-group:last-child { margin-bottom: 0; }
+  .ccircle, .dot-indicator { width: 18px; height: 18px; border-radius: 50%; background: #fff; border: 2px solid #d3d7df; position: relative; flex-shrink: 0; transition: all .25s; }
+  .toc-chapter.done .ccircle, .progress-item.done .dot-indicator { background: var(--accent-green); border-color: var(--accent-green); }
+  .toc-chapter.done .ccircle::after, .progress-item.done .dot-indicator::after { content: ""; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+  .toc-chapter { display: flex; align-items: center; gap: 11px; padding: 9px 10px; border-radius: 9px; cursor: pointer; font-size: 13.5px; font-weight: 700; color: var(--text-title); }
+  .toc-chapter:hover { background: rgba(0,0,0,.03); }
+  .progress-item { display: flex; align-items: center; gap: 11px; padding: 8px 10px 8px 14px; margin-left: 4px; border-radius: 9px; cursor: pointer; text-decoration: none; transition: background .2s; }
+  .progress-item:hover { background: rgba(0,0,0,.03); }
+  .progress-item.active { background: #eef0f3; }
+  .item-label { font-size: 13px; font-weight: 500; color: #6b717b; transition: color .2s; line-height: 1.4; }
+  .progress-item.active .item-label { color: var(--text-title); font-weight: 600; }
+  .progress-item.done .item-label { color: var(--text-body); }
+  .sb-progress-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); margin-bottom: 10px; font-weight: 600; letter-spacing: .3px; }
+  .sb-progress-row b { color: var(--text-title); font-weight: 700; }
+  .sb-progress-track { height: 6px; background: #e9ebee; border-radius: 99px; overflow: hidden; }
+  .sb-progress-fill { height: 100%; width: 0%; background: #1b1d21; border-radius: 99px; transition: width .4s ease; }
+
+  /* reading column */
+  .viewport { flex: 1; min-width: 0; }
+  .reading-column { width: 100%; max-width: 820px; margin: 30px 0 56px; padding: 40px 48px 28px; background: #fff; border: 1px solid var(--border-color); border-radius: 18px; box-shadow: 0 12px 40px rgba(20,30,60,.06); overflow: hidden; min-width: 0; }
+  .doc-section { display: none; }
+  .doc-section.active { display: block; }
+  .doc-section, .lesson-text { min-width: 0; overflow-wrap: break-word; word-break: break-word; }
+  .doc-section img, .doc-section table, .doc-section .inline-canvas { max-width: 100%; }
+  .card-header-tag { font-size: 11px; font-family: var(--font-mono); text-transform: uppercase; font-weight: 700; color: var(--accent-blue-hover); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .card-header-tag::before { content: "■"; font-size: 8px; color: var(--accent-blue); }
+  .lesson-title { font-size: 32px; font-weight: 800; color: var(--text-title); margin-bottom: 22px; line-height: 1.25; letter-spacing: -.6px; }
+  .lesson-text { font-size: 15px; color: var(--text-body); line-height: 1.85; }
+  .lesson-text p { margin-bottom: 16px; }
+  .lesson-text b { color: var(--text-title); font-weight: 700; }
+  .lesson-text ul { list-style: none; padding-left: 8px; margin-bottom: 14px; }
+  .lesson-text li { position: relative; padding-left: 16px; margin-bottom: 8px; font-size: 14.5px; color: #555b65; }
+  .lesson-text li::before { content: "▫"; position: absolute; left: 0; color: var(--accent-blue-hover); font-weight: bold; }
+  .lesson-text code { font-family: var(--font-mono); font-size: 12px; background: #eef1f6; border: 1px solid var(--border-color); border-radius: 4px; padding: 1px 5px; color: #0d7a92; }
+  .lesson-alert { background: rgba(50,102,232,.07); border-left: 3px solid var(--accent-blue); padding: 12px 16px; border-radius: 0 8px 8px 0; margin-bottom: 16px; font-size: 13px; color: #2a4aa0; line-height: 1.65; }
+  .lesson-alert b { color: #1a347e; }
+  .lesson-alert.alert-green { background: rgba(46,204,113,.09); border-left-color: var(--accent-green); color: #1f7a45; }
+  .lesson-alert.alert-green b { color: #15602f; }
+  .lesson-alert.alert-amber { background: rgba(243,156,18,.10); border-left-color: var(--accent-orange); color: #8a5a08; }
+  .lesson-alert.alert-amber b { color: #6b4406; }
+  .big-quote { font-size: 20px; line-height: 1.62; font-weight: 600; color: var(--text-title); border-left: 3px solid var(--accent-blue); padding: 4px 0 4px 22px; margin: 10px 0 24px; letter-spacing: -.2px; }
+  .big-quote .src { display: block; font-size: 13px; font-weight: 500; color: var(--text-muted); margin-top: 12px; letter-spacing: 0; }
+  .sec-label { font-size: 17px; font-weight: 800; color: var(--text-title); margin: 26px 0 12px; letter-spacing: -.3px; display: flex; align-items: center; gap: 9px; }
+  .sec-label::before { content: ""; width: 6px; height: 6px; border-radius: 2px; background: var(--accent-blue); }
+
+  /* principle cards / comparison / flywheel reused */
+  .pcards { display: grid; gap: 12px; margin: 8px 0 22px; }
+  .pcards.cols-3 { grid-template-columns: repeat(3,1fr); }
+  @media(max-width:760px){ .pcards.cols-3 { grid-template-columns: 1fr; } }
+  .pcard { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 18px 16px; transition: border-color .25s; }
+  .pcard:hover { border-color: var(--border-hover); }
+  .pcard .pc-ico { font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: var(--accent-blue-hover); margin-bottom: 8px; letter-spacing: .5px; }
+  .pcard .pc-h { font-size: 15px; font-weight: 700; color: var(--text-title); margin-bottom: 6px; }
+  .pcard .pc-t { font-size: 13px; color: var(--text-muted); line-height: 1.65; }
+  .cmp { width: 100%; border-collapse: separate; border-spacing: 0; margin: 10px 0 22px; font-size: 13.5px; border: 1px solid var(--border-color); border-radius: 12px; overflow: hidden; }
+  .cmp th, .cmp td { padding: 12px 14px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border-color); }
+  .cmp thead th { background: #f4f5f7; font-size: 12px; color: var(--text-muted); font-weight: 700; letter-spacing: .4px; }
+  .cmp thead th.us { color: #1763c4; }
+  .cmp tbody td:first-child { color: #5a606a; font-weight: 700; width: 34%; }
+  .cmp td.them { color: #6c727c; }
+  .cmp td.us { color: #16357a; background: rgba(50,102,232,.07); font-weight: 600; }
+  .cmp tr:last-child td { border-bottom: none; }
+  .flywheel { display: flex; flex-direction: column; gap: 0; margin: 12px 0 22px; }
+  .fw-stage { position: relative; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 16px 18px; }
+  .fw-stage.top { border-color: rgba(50,102,232,.4); box-shadow: 0 0 24px rgba(50,102,232,.08) inset; }
+  .fw-stage.bottom { border-color: rgba(46,204,113,.35); }
+  .fw-stage .fw-k { font-family: var(--font-mono); font-size: 11px; color: var(--accent-blue-hover); font-weight: 700; margin-bottom: 5px; letter-spacing: .5px; }
+  .fw-stage.bottom .fw-k { color: var(--accent-green); }
+  .fw-stage .fw-h { font-size: 15.5px; font-weight: 700; color: var(--text-title); margin-bottom: 5px; }
+  .fw-stage .fw-t { font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+  .fw-arrow { text-align: center; color: var(--text-muted); font-size: 12px; padding: 8px 0; letter-spacing: .5px; }
+  .fw-arrow b { color: var(--accent-teal); font-weight: 600; }
+
+  /* paginator */
+  .paginator { display: flex; align-items: stretch; justify-content: space-between; gap: 14px; margin-top: 40px; flex-shrink: 0; }
+  .nav-btn { flex: 1; min-width: 0; background-color: #14161b; border: 1px solid #14161b; color: #d6dae1; padding: 16px 18px; border-radius: 12px; cursor: pointer; font-size: 13.5px; font-weight: 600; display: flex; align-items: center; gap: 10px; transition: all .2s; }
+  #prev-btn { justify-content: flex-start; }
+  #next-btn { justify-content: flex-end; }
+  .nav-btn:hover { background-color: #20232b; }
+  .nb-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #prev-label { text-align: left; flex: 1; }
+  #next-label { text-align: right; flex: 1; }
+
+  /* ===== STUDIO MOCK (dark canvas embedded in light page) ===== */
+  .studio { margin: 16px 0 26px; border: 1px solid var(--st-border); border-radius: 12px; overflow: hidden; background: var(--st-bg); box-shadow: 0 16px 44px rgba(20,30,60,.16); font-size: 13px; }
+  .studio-title { height: 38px; display: flex; align-items: center; gap: 8px; padding: 0 14px; background: #0d0d10; border-bottom: 1px solid var(--st-border); }
+  .studio-title .dots { display: flex; gap: 6px; }
+  .studio-title .dots i { width: 10px; height: 10px; border-radius: 50%; background: #2c2c31; display: block; }
+  .studio-title .tt { font-family: var(--font-mono); font-size: 11px; color: var(--st-muted); letter-spacing: .4px; }
+  .studio-title .tt b { color: var(--st-text); font-weight: 600; }
+  .studio-body { display: flex; min-height: 360px; }
+  .studio-rail { width: 46px; background: #0d0d10; border-right: 1px solid var(--st-border); display: flex; flex-direction: column; align-items: center; padding: 10px 0; gap: 4px; flex-shrink: 0; }
+  .rail-ico { width: 30px; height: 30px; border-radius: 7px; display: flex; align-items: center; justify-content: center; color: var(--st-muted); font-size: 14px; cursor: pointer; transition: all .2s; }
+  .rail-ico:hover { background: #1a1a1f; color: var(--st-text); }
+  .rail-ico.active { background: var(--st-primary-soft); color: #b6acff; }
+  .studio-main { flex: 1; min-width: 0; display: flex; }
+  .studio-canvas { flex: 1; min-width: 0; position: relative; background-color: var(--st-bg); background-image: radial-gradient(var(--st-border) 1px, transparent 1px); background-size: 18px 18px; }
+  .studio-canvas svg { width: 100%; height: 100%; display: block; }
+  .studio-panel { width: 230px; border-left: 1px solid var(--st-border); background: var(--st-panel); flex-shrink: 0; display: flex; flex-direction: column; }
+  .panel-head { height: 34px; display: flex; align-items: center; padding: 0 12px; border-bottom: 1px solid var(--st-border); font-size: 11px; font-weight: 700; letter-spacing: .5px; color: var(--st-muted); text-transform: uppercase; font-family: var(--font-mono); }
+  .panel-body { padding: 12px; overflow-y: auto; }
+  .pf-row { margin-bottom: 11px; }
+  .pf-k { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: var(--st-muted); margin-bottom: 3px; font-family: var(--font-mono); }
+  .pf-v { font-size: 12.5px; color: var(--st-text); }
+  .pf-v .chip { display: inline-block; background: #1c1c22; border: 1px solid var(--st-border); border-radius: 5px; padding: 1px 7px; margin: 2px 3px 0 0; font-size: 11px; font-family: var(--font-mono); color: #c9c4ff; }
+  .pf-empty { color: var(--st-muted); font-size: 12px; font-style: italic; }
+  /* mock monaco code */
+  .mono { background: #0d0d10; border-right: 1px solid var(--st-border); width: 44%; flex-shrink: 0; padding: 12px 14px; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.7; color: #cfd2da; overflow: auto; white-space: pre; }
+  .mono .k { color: #c586c0; } .mono .s { color: #9cdcfe; } .mono .c { color: #6a9955; } .mono .n { color: #b5cea8; } .mono .t { color: #4ec9b0; }
+  /* control bar */
+  .studio-ctrl { display: flex; gap: 8px; padding: 12px 14px 4px; flex-wrap: wrap; align-items: center; }
+  .sbtn { font-size: 12px; font-weight: 600; padding: 6px 13px; border-radius: 7px; background: #16161b; border: 1px solid var(--st-border); color: var(--st-text); cursor: pointer; transition: all .18s; }
+  .sbtn:hover { border-color: #3a3a42; }
+  .sbtn.active { background: var(--st-primary-soft); border-color: var(--st-primary); color: #c3bbff; }
+  .sbtn.green.active { background: rgba(45,212,191,.15); border-color: var(--st-logic); color: #5eead4; }
+  .ctrl-hint { font-size: 11px; color: var(--st-muted); }
+  /* trace timeline mock */
+  .trace { border-top: 1px solid var(--st-border); background: #0d0d10; max-height: 118px; overflow-y: auto; padding: 8px 12px; font-family: var(--font-mono); font-size: 11px; }
+  .trace-row { display: flex; gap: 8px; padding: 2px 0; color: var(--st-muted); opacity: .35; transition: opacity .25s; }
+  .trace-row.on { opacity: 1; color: var(--st-text); }
+  .trace-row .ev { color: #b6acff; }
+  .trace-row .ok { color: var(--st-logic); }
+  /* SVG node helpers */
+  .nlabel { fill: var(--st-text); font-size: 11px; font-weight: 600; font-family: var(--font-sans); }
+  .nsub { fill: var(--st-muted); font-size: 9px; font-family: var(--font-mono); }
+  .nkind { font-size: 8.5px; font-family: var(--font-mono); font-weight: 700; letter-spacing: .5px; }
+  .gedge { stroke: #3a3a42; stroke-width: 1.6; fill: none; transition: stroke .3s, stroke-width .3s; }
+  .gedge.flow { stroke: var(--st-primary); stroke-width: 2.2; stroke-dasharray: 4 4; animation: gdash 1s linear infinite; }
+  @keyframes gdash { to { stroke-dashoffset: -16; } }
+  .gnode { transition: all .25s; cursor: pointer; }
+  .gnode rect { transition: all .3s; }
+  .gnode.dim rect { opacity: .5; }
+  .gnode.running rect { filter: drop-shadow(0 0 7px var(--st-primary)); }
+  .gnode.done rect { stroke-width: 2; }
+  .gbadge { font-size: 8.5px; font-family: var(--font-mono); font-weight: 700; }
+  .gbadge.run { fill: #b6acff; }
+  .gbadge.ok { fill: var(--st-logic); }
+  .gbadge.idle { fill: var(--st-muted); }
+  .gbadge.stale { fill: var(--accent-orange); }
+  @keyframes stpulse { from { opacity: .55; } to { opacity: 1; } }
+  .gnode.running .gbadge { animation: stpulse .9s infinite alternate; }
+  .gnode.stale rect { stroke: var(--accent-orange) !important; fill: rgba(245,158,11,.08) !important; }
+
+  @media(max-width:760px){ .sidebar { display: none; } .mono { display:none; } }
+
+  /* ===== DEMO ⑦ agent-loop (scoped, axioms→protocols + gated loop) ===== */
+  #demo-loop { --gold:#e9b949; --ok:#2dd4bf; --bad:#f87171; --warn:#f59e0b; }
+  #demo-loop .lp-stage { display: flex; }
+  #demo-loop .studio-canvas svg { height: 520px; }
+  #demo-loop .lp-side { width: 280px; border-left: 1px solid var(--st-border); background: var(--st-panel); padding: 14px; flex-shrink: 0; overflow-y: auto; max-height: 520px; }
+  #demo-loop .lp-side h4 { font-size: 10px; text-transform: uppercase; letter-spacing: .6px; color: var(--st-muted); font-family: var(--font-mono); margin: 0 0 9px; display: flex; align-items: center; gap: 6px; }
+  #demo-loop .lp-side h4 .imp { color: var(--gold); font-size: 9px; opacity: 0; transition: opacity .3s; }
+  #demo-loop .lp-side h4 .imp.on { opacity: 1; }
+  #demo-loop .ax-item { border: 1px solid var(--st-border); border-radius: 7px; padding: 7px 9px; margin-bottom: 7px; background: #16161b; opacity: .4; transition: all .35s; }
+  #demo-loop .ax-item.lit { opacity: 1; border-color: var(--gold); box-shadow: 0 0 0 1px rgba(233,185,73,.25); }
+  #demo-loop .ax-item .axt { font-size: 12px; font-weight: 700; color: #d4d4d8; }
+  #demo-loop .ax-item .axt b { color: var(--gold); font-family: var(--font-mono); font-size: 11px; margin-right: 5px; }
+  #demo-loop .ax-item .axd { font-size: 11px; color: var(--st-muted); margin-top: 1px; }
+  #demo-loop .derive { text-align: center; color: var(--st-muted); font-size: 16px; margin: 4px 0 8px; }
+  #demo-loop .pr-item { border: 1px solid var(--st-border); border-radius: 7px; padding: 7px 9px; margin-bottom: 7px; background: #141019; opacity: .4; transition: all .35s; }
+  #demo-loop .pr-item.lit { opacity: 1; border-color: var(--st-primary); box-shadow: 0 0 0 1px var(--st-primary-soft); }
+  #demo-loop .pr-item .prt { font-size: 12px; font-weight: 700; color: #c3bbff; }
+  #demo-loop .pr-item .prt b { font-family: var(--font-mono); font-size: 11px; color: #b6acff; margin-right: 5px; }
+  #demo-loop .pr-item .proj { font-size: 10px; color: var(--gold); font-family: var(--font-mono); margin: 2px 0; }
+  #demo-loop .pr-item .prr { font-size: 11px; color: var(--st-muted); }
+  #demo-loop .gnode.dim { opacity: .22; }
+  #demo-loop .plusdot { cursor: pointer; }
+  #demo-loop .plusdot circle { fill: #16161b; stroke: var(--st-primary); stroke-width: 1.6; transition: all .2s; }
+  #demo-loop .plusdot:hover circle { fill: var(--st-primary-soft); }
+  #demo-loop .plusdot text { fill: var(--st-primary); font-size: 15px; font-weight: 700; font-family: var(--font-mono); }
+  #demo-loop .snode rect { transition: all .3s; }
+  #demo-loop .snode.run rect { stroke: var(--st-primary); stroke-width: 2.4; filter: drop-shadow(0 0 7px var(--st-primary)); }
+  #demo-loop .snode.ok rect { stroke: var(--ok); stroke-width: 2.2; }
+  #demo-loop .snode.bad rect { stroke: var(--bad); stroke-width: 2.2; }
+  #demo-loop .snode.kbhit rect { stroke: var(--gold); stroke-width: 2.2; filter: drop-shadow(0 0 8px var(--gold)); }
+  #demo-loop .kbtag { fill: var(--gold); font-size: 9px; font-weight: 700; font-family: var(--font-mono); opacity: 0; transition: opacity .25s; }
+  #demo-loop .kbtag.on { opacity: 1; }
+  #demo-loop .sconn { stroke: var(--st-primary); stroke-width: 1.6; fill: none; stroke-dasharray: 4 3; opacity: .55; }
+  #demo-loop .backedge { stroke: var(--warn); stroke-width: 1.8; fill: none; stroke-dasharray: 5 4; opacity: .3; }
+  #demo-loop .backedge.flow { opacity: 1; animation: lpdash .8s linear; }
+  #demo-loop .backlabel { fill: var(--warn); font-size: 8.5px; font-weight: 700; font-family: var(--font-mono); opacity: .5; }
+  #demo-loop .backlabel.flow { opacity: 1; }
+  @keyframes lpdash { from { stroke-dashoffset: 54; } to { stroke-dashoffset: 0; } }
+  #demo-loop .lp-trace { max-height: none; height: 220px; }
+  #demo-loop .lp-trace .trow { display: flex; gap: 8px; padding: 2px 0; opacity: 0; transform: translateX(-3px); transition: opacity .25s, transform .25s; align-items: baseline; }
+  #demo-loop .lp-trace .trow.on { opacity: 1; transform: none; }
+  #demo-loop .lp-trace .ti { color: #52525b; flex-shrink: 0; width: 26px; text-align: right; }
+  #demo-loop .lp-trace .tg { flex-shrink: 0; width: 70px; font-weight: 700; }
+  #demo-loop .lp-trace .tx { color: #c9c9d1; }
+  #demo-loop .lp-trace .tg.kb { color: var(--gold); }
+  #demo-loop .lp-trace .tg.plan { color: #b6acff; }
+  #demo-loop .lp-trace .tg.act { color: #c3bbff; }
+  #demo-loop .lp-trace .tg.review { color: var(--st-logic); }
+  #demo-loop .lp-trace .tg.gate { color: var(--warn); }
+  #demo-loop .lp-trace .tg.out { color: var(--bad); }
+  #demo-loop .lp-trace .tx .bad { color: #fca5a5; }
+  #demo-loop .lp-trace .tx .ok { color: #5eead4; }
+  #demo-loop .lp-trace .tx .warn { color: #fbbf24; }
+  #demo-loop .lp-trace .tx .em { color: #fff; font-weight: 600; }
+  @media(max-width:760px){ #demo-loop .lp-stage { flex-direction: column; } #demo-loop .lp-side { width: 100%; border-left: none; border-top: 1px solid var(--st-border); max-height: none; } }
+</style>
+</head>
+<body>
+  <div class="main-layout">
+    <aside class="sidebar">
+      <div class="sb-card sb-progress">
+        <div class="sb-progress-row"><span>阅读进度</span><b id="progress-pct">0%</b></div>
+        <div class="sb-progress-track"><div class="sb-progress-fill" id="progress-fill"></div></div>
+      </div>
+      <nav class="sb-card toc" id="toc"></nav>
+    </aside>
+    <main class="viewport">
+      <article class="reading-column">
+        <div id="docInner"></div>
+        <nav class="paginator">
+          <button class="nav-btn" id="prev-btn" onclick="prevPage()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            <span class="nb-label" id="prev-label">上一页</span>
+          </button>
+          <button class="nav-btn" id="next-btn" onclick="nextPage()">
+            <span class="nb-label" id="next-label">下一页</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </button>
+        </nav>
+      </article>
+    </main>
+  </div>
+
+  <!-- DEMO BANK (JS relocates each studio mock into its section) -->
+  <div id="demoBank" style="display:none"></div>
+
+  <script>
+    // ===== TOC structure =====
+    const TOC = [
+      { ch: '前言：三模块协同产品', items: [['intro_summary', '开篇：核心设计亮点与产品心智']] },
+      { ch: '第一卷：Skill Studio 设计与打磨手册', items: [
+        ['init_repair', '1.1 起步：打开工作区与引导修复'],
+        ['config_credentials', '1.2 配置：API 凭证与模型就绪检查'],
+        ['authoring_source', '1.3 设计：编辑 Skill、Steps 与属性白名单'],
+        ['compile_gate', '1.4 检验：一键编译与分级门控'],
+        ['predict_mock', '1.5 试飞：Predict 模拟运行与 409 守卫'],
+        ['run_execution', '1.6 真跑：Run 真实执行与事件状态灯'],
+        ['trace_observability', '1.7 去黑盒：Trace 瀑布流、线上 Dot 与人能读文档'],
+        ['debug_resume', '1.8 调试：节点 Resume 续跑与 HitL 人工注入'],
+        ['golden_eval', '1.9 打磨：基于 Golden 的比对评估'],
+        ['publish_release', '1.10 发布：Artifact Release 与版本提交']
+      ]},
+      { ch: '第二卷：GraphAgent Harness 架构与机制手册', items: [
+        ['arch_boundary', '2.1 系统架构与三模块物理边界'],
+        ['storage_partition', '2.2 存储三线分治机制与成品库'],
+        ['gateway_brain', '2.3 Gateway 健康状态投影与路由大脑'],
+        ['engine_runtime', '2.4 Engine 运行时：LangGraph 串联与事件流协议'],
+        ['hitl_resume_protocol', '2.5 HitL 与 Resume 恢复协议'],
+        ['stable_boundary', '2.6 三模块稳定边界与错误纪律']
+      ]},
+      { ch: '第三卷：二次开发与扩展指南', items: [
+        ['custom_logic', '3.1 自定义 Logic 节点开发'],
+        ['custom_tool', '3.2 自定义 Tool 与 Action 编写'],
+        ['custom_middleware', '3.3 自定义 Engine Middleware (中间件)']
+      ]}
+    ];
+    const slideKeys = TOC.flatMap(g => g.items.map(i => i[0]));
+
+    // ===== SLIDE CONTENT (filled below via SLIDES) =====
+    const SLIDES = {};
+    // placeholder; real content injected by CONTENT script block
+
+    // ===== engine =====
+    let current = 0;
+    function buildTOC() {
+      const toc = document.getElementById('toc');
+      toc.innerHTML = TOC.map(g => {
+        const items = g.items.map(([k,label]) =>
+          `<a class="progress-item" href="#${k}" id="nav-${k}"><span class="dot-indicator"></span><span class="item-label">${label}</span></a>`
+        ).join('');
+        return `<div class="toc-group"><div class="toc-chapter"><span class="ccircle"></span><span>${g.ch}</span></div>${items}</div>`;
+      }).join('');
+    }
+    function buildDoc() {
+      const docInner = document.getElementById('docInner');
+      slideKeys.forEach(key => {
+        const data = SLIDES[key];
+        if (!data) return;
+        const section = document.createElement('section');
+        section.className = 'doc-section';
+        section.id = key;
+        section.innerHTML =
+          '<div class="card-header-tag">' + data.tag + '</div>' +
+          '<h2 class="lesson-title">' + data.title + '</h2>' +
+          '<div class="lesson-text">' + data.text + '</div>';
+        docInner.appendChild(section);
+      });
+    }
+    function shortTitle(key) { return (SLIDES[key] && SLIDES[key].title) ? SLIDES[key].title : key; }
+    function updateChapterDots() {
+      document.querySelectorAll('.toc-group').forEach(group => {
+        const items = group.querySelectorAll('.progress-item');
+        let allDone = items.length > 0;
+        items.forEach(it => { if (!it.classList.contains('done')) allDone = false; });
+        group.querySelector('.toc-chapter')?.classList.toggle('done', allDone);
+      });
+    }
+    function mountDemo(key) {
+      const sec = document.getElementById(key);
+      if (!sec) return;
+      const slot = sec.querySelector('[data-demo]');
+      if (!slot || slot.dataset.mounted) return;
+      const demoId = slot.getAttribute('data-demo');
+      const demo = document.getElementById(demoId);
+      if (demo) { slot.appendChild(demo); slot.dataset.mounted = '1'; demo.style.display = ''; if (typeof DEMO_INIT[demoId] === 'function') DEMO_INIT[demoId](); }
+    }
+    function showPage(i, smooth) {
+      current = Math.max(0, Math.min(slideKeys.length - 1, i));
+      const key = slideKeys[current];
+      document.querySelectorAll('.doc-section').forEach(s => s.classList.toggle('active', s.id === key));
+      slideKeys.forEach((k, idx) => {
+        const nav = document.getElementById('nav-' + k);
+        if (!nav) return;
+        nav.classList.toggle('active', idx === current);
+        nav.classList.toggle('done', idx <= current);
+      });
+      updateChapterDots();
+      mountDemo(key);
+      const pct = Math.round(((current + 1) / slideKeys.length) * 100);
+      const f = document.getElementById('progress-fill'); if (f) f.style.width = pct + '%';
+      const p = document.getElementById('progress-pct'); if (p) p.textContent = pct + '%';
+      const prevBtn = document.getElementById('prev-btn'), nextBtn = document.getElementById('next-btn');
+      const prevLbl = document.getElementById('prev-label'), nextLbl = document.getElementById('next-label');
+      if (prevBtn) prevBtn.style.visibility = current === 0 ? 'hidden' : 'visible';
+      if (nextBtn) nextBtn.style.visibility = current === slideKeys.length - 1 ? 'hidden' : 'visible';
+      if (prevLbl) prevLbl.textContent = current > 0 ? shortTitle(slideKeys[current - 1]) : '';
+      if (nextLbl) nextLbl.textContent = current < slideKeys.length - 1 ? shortTitle(slideKeys[current + 1]) : '';
+      window.scrollTo({ top: 0, behavior: smooth ? 'smooth' : 'auto' });
+      if (history.replaceState) history.replaceState(null, '', '#' + key);
+    }
+    function nextPage() { if (current < slideKeys.length - 1) showPage(current + 1, true); }
+    function prevPage() { if (current > 0) showPage(current - 1, true); }
+    const DEMO_INIT = {};
+
+    window.addEventListener('load', () => {
+      buildTOC();
+      buildDoc();
+      document.querySelectorAll('.progress-item').forEach(a => {
+        a.addEventListener('click', e => { e.preventDefault(); const key = a.getAttribute('href').slice(1); const idx = slideKeys.indexOf(key); if (idx >= 0) showPage(idx, false); });
+      });
+      document.querySelectorAll('.toc-chapter').forEach(h => {
+        h.addEventListener('click', () => { const first = h.parentElement.querySelector('.progress-item'); if (first) { const idx = slideKeys.indexOf(first.getAttribute('href').slice(1)); if (idx >= 0) showPage(idx, false); } });
+      });
+      const start = location.hash ? slideKeys.indexOf(location.hash.slice(1)) : 0;
+      showPage(start >= 0 ? start : 0, false);
+    });
+    window.addEventListener('hashchange', () => {
+      const idx = location.hash ? slideKeys.indexOf(location.hash.slice(1)) : 0;
+      if (idx >= 0 && idx !== current) showPage(idx, false);
+    });
+  </script>
+
+  <script src="./index-v2-fixed-scroll-content.js"></script>
+  <script>
+  // inject the 7 studio-mock demo shells into the hidden demoBank
+  document.getElementById('demoBank').innerHTML = `
+    <!-- DEMO ① compile -->
+    <div class="studio" id="demo-compile">
+      <div class="studio-title"><span class="dots"><i></i><i></i><i></i></span><span class="tt">Studio · <b>v030_e2e_pipeline</b></span></div>
+      <div class="studio-ctrl">
+        <button class="sbtn active" id="cmp-btn" onclick="DEMO_compile_run()">▶ 编译 (compile_skill)</button>
+        <span class="ctrl-hint" id="cmp-hint">左边是真实 GRAPH.md,点编译看右边长出图</span>
+      </div>
+      <div class="studio-body">
+        <div class="studio-rail"><span class="rail-ico">▦</span><span class="rail-ico">⊞</span><span class="rail-ico">⊳</span><span class="rail-ico">≣</span><span class="rail-ico">↺</span></div>
+        <div class="studio-main">
+          <div class="mono"><span class="c">--- GRAPH.md ---</span>
+<span class="k">schema_version</span>: <span class="s">"v0.3.0"</span>
+<span class="k">name</span>: round14-e2e-pipeline
+<span class="k">phases</span>:
+  - segment
+  - score
+  - expand
+<span class="c">---</span>
+&lt;phase depends_on=<span class="s">"input"</span>&gt;<span class="t">segment</span>&lt;/phase&gt;
+&lt;phase depends_on=<span class="s">"segment"</span>&gt;<span class="t">score</span>&lt;/phase&gt;
+&lt;phase depends_on=<span class="s">"score"</span> output&gt;<span class="t">expand</span>&lt;/phase&gt;</div>
+          <div class="studio-canvas"><svg id="svg-compile" viewBox="0 0 620 300" preserveAspectRatio="xMidYMid meet"></svg></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DEMO ② nodes + properties -->
+    <div class="studio" id="demo-nodes">
+      <div class="studio-title"><span class="dots"><i></i><i></i><i></i></span><span class="tt">Studio · <b>v030_e2e_pipeline</b></span></div>
+      <div class="studio-ctrl"><span class="ctrl-hint">点画布上的节点 → 右侧 Properties 显示该 phase 的真实配置</span></div>
+      <div class="studio-body">
+        <div class="studio-rail"><span class="rail-ico">▦</span><span class="rail-ico active">⊞</span><span class="rail-ico">⊳</span><span class="rail-ico">≣</span><span class="rail-ico">↺</span></div>
+        <div class="studio-main">
+          <div class="studio-canvas"><svg id="svg-nodes" viewBox="0 0 540 300" preserveAspectRatio="xMidYMid meet"></svg></div>
+          <div class="studio-panel"><div class="panel-head">Properties</div><div class="panel-body" id="nodes-props"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DEMO ③ run -->
+    <div class="studio" id="demo-run">
+      <div class="studio-title"><span class="dots"><i></i><i></i><i></i></span><span class="tt">Studio · <b id="run-name">v030_e2e_pipeline</b></span></div>
+      <div class="studio-ctrl">
+        <button class="sbtn active" id="run-topo-linear" onclick="DEMO_run_setTopo('linear')">线性流程</button>
+        <button class="sbtn" id="run-topo-fan" onclick="DEMO_run_setTopo('fan')">并行 fan-out</button>
+        <button class="sbtn green active" id="run-go" onclick="DEMO_run_go()">▶ Run</button>
+        <span class="ctrl-hint" id="run-hint">按 super-step 推进;无依赖的节点会同时点亮</span>
+      </div>
+      <div class="studio-body">
+        <div class="studio-rail"><span class="rail-ico">▦</span><span class="rail-ico">⊞</span><span class="rail-ico">⊳</span><span class="rail-ico active">≣</span><span class="rail-ico">↺</span></div>
+        <div class="studio-main">
+          <div class="studio-canvas"><svg id="svg-run" viewBox="0 0 560 300" preserveAspectRatio="xMidYMid meet"></svg></div>
+        </div>
+      </div>
+      <div class="trace" id="run-trace"></div>
+    </div>
+
+    <!-- DEMO ④ seam run/predict -->
+    <div class="studio" id="demo-seam">
+      <div class="studio-title"><span class="dots"><i></i><i></i><i></i></span><span class="tt">Studio · <b>模型 seam</b></span></div>
+      <div class="studio-ctrl">
+        <button class="sbtn active" id="seam-run" onclick="DEMO_seam_mode('run')">run_skill (真跑)</button>
+        <button class="sbtn" id="seam-predict" onclick="DEMO_seam_mode('predict')">predict_skill (预演)</button>
+        <span class="ctrl-hint" id="seam-hint"></span>
+      </div>
+      <div class="studio-body">
+        <div class="studio-rail"><span class="rail-ico">▦</span><span class="rail-ico">⊞</span><span class="rail-ico">⊳</span><span class="rail-ico active">≣</span><span class="rail-ico">↺</span></div>
+        <div class="studio-main">
+          <div class="studio-canvas"><svg id="svg-seam" viewBox="0 0 540 300" preserveAspectRatio="xMidYMid meet"></svg></div>
+          <div class="studio-panel"><div class="panel-head">llm_roles.yaml</div><div class="panel-body" id="seam-roles"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DEMO ⑤ invalidation -->
+    <div class="studio" id="demo-invalid">
+      <div class="studio-title"><span class="dots"><i></i><i></i><i></i></span><span class="tt">Studio · <b>失效语义 (设计意图)</b></span></div>
+      <div class="studio-ctrl">
+        <button class="sbtn" id="inv-schema" onclick="DEMO_invalid('schema')">改 score 输出契约 (+必填字段)</button>
+        <button class="sbtn" id="inv-prompt" onclick="DEMO_invalid('prompt')">只改 score 的 prompt 文字</button>
+        <button class="sbtn" id="inv-reset" onclick="DEMO_invalid('reset')">复位</button>
+        <span class="ctrl-hint" id="inv-hint">改输出形状 → 下游 golden 标黄;只改 prompt → 不失效</span>
+      </div>
+      <div class="studio-body">
+        <div class="studio-rail"><span class="rail-ico">▦</span><span class="rail-ico">⊞</span><span class="rail-ico">⊳</span><span class="rail-ico">≣</span><span class="rail-ico">↺</span></div>
+        <div class="studio-main">
+          <div class="studio-canvas"><svg id="svg-invalid" viewBox="0 0 560 300" preserveAspectRatio="xMidYMid meet"></svg></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DEMO ⑥ subgraph -->
+    <div class="studio" id="demo-subgraph">
+      <div class="studio-title"><span class="dots"><i></i><i></i><i></i></span><span class="tt">Studio · <b>子图展开</b></span></div>
+      <div class="studio-ctrl"><span class="ctrl-hint">点橙色的 <b style="color:var(--st-subgraph)">expand</b> 子图节点 → 展开 / 收起它内部的子拓扑</span></div>
+      <div class="studio-body">
+        <div class="studio-rail"><span class="rail-ico">▦</span><span class="rail-ico">⊞</span><span class="rail-ico">⊳</span><span class="rail-ico">≣</span><span class="rail-ico">↺</span></div>
+        <div class="studio-main">
+          <div class="studio-canvas"><svg id="svg-subgraph" viewBox="0 0 560 320" preserveAspectRatio="xMidYMid meet"></svg></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DEMO ⑦ agent loop · axioms -->
+    <div class="studio" id="demo-loop">
+      <div class="studio-title"><span class="dots"><i></i><i></i><i></i></span><span class="tt">Studio · <b>visual-extract</b> · agent loop trace</span></div>
+      <div class="studio-ctrl">
+        <button class="sbtn green active" id="lp-run" onclick="LOOP_RUN()">▶ 运行 Agent Loop</button>
+        <button class="sbtn" id="lp-single" onclick="LOOP_toggleSingle()">单次 LLM 模式</button>
+        <span class="ctrl-hint" id="lp-hint">先点节点右侧 + 展开,再运行</span>
+      </div>
+      <div class="lp-stage">
+        <div class="studio-canvas"><svg id="lp-svg" viewBox="0 0 560 480" preserveAspectRatio="xMidYMid meet"></svg></div>
+        <div class="lp-side" id="lp-kb"></div>
+      </div>
+      <div class="trace lp-trace" id="lp-trace"></div>
+    </div>
+  `;
+  </script>
+  <script>
+  // ===== shared graph renderer for all studio mocks =====
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const KIND_COLOR = { agent:'#7c6cf0', logic:'#2dd4bf', subgraph:'#f59e0b', io:'#64748b' };
+  const KIND_LABEL = { agent:'AGENT', logic:'LOGIC', subgraph:'SUBGRAPH', io:'I/O' };
+  function NS(t){ return document.createElementNS(SVGNS, t); }
+  function gget(svg, id){ return svg.querySelector('.gnode[data-id="'+id+'"]'); }
+
+  function renderGraph(svg, nodes, edges, dir){
+    dir = dir || 'h';
+    svg.innerHTML = '';
+    const map = {}; nodes.forEach(n => map[n.id] = n);
+    edges.forEach(([a,b]) => {
+      const s = map[a], t = map[b]; if(!s||!t) return;
+      let x1,y1,x2,y2,c1x,c1y,c2x,c2y;
+      if(dir==='h'){ x1=s.x+s.w; y1=s.y+s.h/2; x2=t.x; y2=t.y+t.h/2; const dx=Math.max(24,(x2-x1)/2); c1x=x1+dx; c1y=y1; c2x=x2-dx; c2y=y2; }
+      else { x1=s.x+s.w/2; y1=s.y+s.h; x2=t.x+t.w/2; y2=t.y; const dy=Math.max(18,(y2-y1)/2); c1x=x1; c1y=y1+dy; c2x=x2; c2y=y2-dy; }
+      const p = NS('path');
+      p.setAttribute('class','gedge');
+      p.setAttribute('data-edge', a+'>'+b);
+      p.setAttribute('d', 'M '+x1+' '+y1+' C '+c1x+' '+c1y+' '+c2x+' '+c2y+' '+x2+' '+y2);
+      svg.appendChild(p);
+    });
+    nodes.forEach(n => {
+      const g = NS('g');
+      g.setAttribute('class','gnode'+(n.kind==='io'?' dim':''));
+      g.setAttribute('data-id', n.id);
+      const r = NS('rect');
+      r.setAttribute('x',n.x); r.setAttribute('y',n.y); r.setAttribute('width',n.w); r.setAttribute('height',n.h); r.setAttribute('rx',8);
+      r.setAttribute('fill','#16161b'); r.setAttribute('stroke',KIND_COLOR[n.kind]); r.setAttribute('stroke-width',1.6);
+      g.appendChild(r);
+      const k = NS('text'); k.setAttribute('class','nkind'); k.setAttribute('x',n.x+9); k.setAttribute('y',n.y+15); k.setAttribute('fill',KIND_COLOR[n.kind]); k.textContent = KIND_LABEL[n.kind]; g.appendChild(k);
+      const l = NS('text'); l.setAttribute('class','nlabel'); l.setAttribute('x',n.x+n.w/2); l.setAttribute('y',n.y+n.h-11); l.setAttribute('text-anchor','middle'); l.textContent = n.label; g.appendChild(l);
+      const b = NS('text'); b.setAttribute('class','gbadge idle'); b.setAttribute('data-badge',''); b.setAttribute('x',n.x+n.w-9); b.setAttribute('y',n.y+15); b.setAttribute('text-anchor','end'); b.textContent='○'; g.appendChild(b);
+      svg.appendChild(g);
+    });
+  }
+  function setState(svg, id, state){
+    const g = gget(svg, id); if(!g) return;
+    g.classList.remove('running','done','stale');
+    const b = g.querySelector('[data-badge]');
+    if(state==='running'){ g.classList.add('running'); b.setAttribute('class','gbadge run'); b.textContent='● run'; }
+    else if(state==='done'){ g.classList.add('done'); b.setAttribute('class','gbadge ok'); b.textContent='✓'; }
+    else if(state==='stale'){ g.classList.add('stale'); b.setAttribute('class','gbadge stale'); b.textContent='▲ stale'; }
+    else { b.setAttribute('class','gbadge idle'); b.textContent='○'; }
+  }
+  function setFlow(svg, a, b, on){ const e = svg.querySelector('[data-edge="'+a+'>'+b+'"]'); if(e) e.classList.toggle('flow', !!on); }
+  function $(id){ return document.getElementById(id); }
+
+  // ===== topologies (coordinates baked for clarity) =====
+  function linearH(){ return {
+    nodes:[
+      {id:'input',label:'input',kind:'io',x:8,y:77,w:100,h:46},
+      {id:'segment',label:'segment',kind:'agent',x:122,y:77,w:104,h:46},
+      {id:'score',label:'score',kind:'logic',x:240,y:77,w:104,h:46},
+      {id:'expand',label:'expand',kind:'subgraph',x:358,y:77,w:104,h:46},
+      {id:'output',label:'output',kind:'io',x:476,y:77,w:78,h:46},
+    ],
+    edges:[['input','segment'],['segment','score'],['score','expand'],['expand','output']] };
+  }
+  function fanH(){ return {
+    nodes:[
+      {id:'input',label:'input',kind:'io',x:8,y:77,w:92,h:46},
+      {id:'prepare',label:'prepare',kind:'agent',x:120,y:77,w:104,h:46},
+      {id:'branch_a',label:'branch_a',kind:'agent',x:244,y:30,w:104,h:46},
+      {id:'branch_b',label:'branch_b',kind:'agent',x:244,y:124,w:104,h:46},
+      {id:'assemble',label:'assemble',kind:'logic',x:368,y:77,w:104,h:46},
+      {id:'output',label:'output',kind:'io',x:486,y:77,w:66,h:46},
+    ],
+    edges:[['input','prepare'],['prepare','branch_a'],['prepare','branch_b'],['branch_a','assemble'],['branch_b','assemble'],['assemble','output']] };
+  }
+  function linearV(){ return {
+    nodes:[
+      {id:'input',label:'input',kind:'io',x:45,y:6,w:150,h:44},
+      {id:'segment',label:'segment',kind:'agent',x:45,y:70,w:150,h:44},
+      {id:'score',label:'score',kind:'logic',x:45,y:134,w:150,h:44},
+      {id:'expand',label:'expand',kind:'subgraph',x:45,y:198,w:150,h:44},
+      {id:'output',label:'output',kind:'io',x:45,y:262,w:150,h:44},
+    ],
+    edges:[['input','segment'],['segment','score'],['score','expand'],['expand','output']] };
+  }
+  </script>
+  <script>
+  function addTrace(el, html){ const d=document.createElement('div'); d.className='trace-row'; d.innerHTML=html; el.appendChild(d); el.scrollTop=el.scrollHeight; requestAnimationFrame(()=>d.classList.add('on')); }
+
+  // ---- DEMO ① compile ----
+  DEMO_INIT['demo-compile'] = function(){ const svg=$('svg-compile'); svg.setAttribute('viewBox','0 0 240 320'); svg.innerHTML='<text x="120" y="160" text-anchor="middle" fill="#6a9955" font-family="JetBrains Mono" font-size="12">GRAPH.md 未编译 — 点 ▶ 编译</text>'; };
+  function DEMO_compile_run(){
+    const svg=$('svg-compile'); const topo=linearV();
+    renderGraph(svg, topo.nodes, topo.edges, 'v');
+    topo.nodes.forEach(n=>{ const g=gget(svg,n.id); if(g){ g.style.opacity='0'; g.style.transition='opacity .35s'; } });
+    let t=0;
+    topo.nodes.forEach(n=>{ setTimeout(()=>{ const g=gget(svg,n.id); if(g) g.style.opacity='1'; topo.edges.filter(e=>e[1]===n.id).forEach(e=>setFlow(svg,e[0],e[1],true)); }, t); t+=260; });
+    setTimeout(()=>{ topo.edges.forEach(e=>setFlow(svg,e[0],e[1],false)); topo.nodes.forEach(n=>setState(svg,n.id,'done')); $('cmp-hint').textContent='编译成功 · 5 节点 / 4 边 · 已装配成 LangGraph 状态机'; }, t+200);
+  }
+
+  // ---- DEMO ② nodes + properties ----
+  const NODE_PROPS = {
+    input:{h:'I/O · input',f:[['inputs','chapter_content : string  (required)']]},
+    segment:{h:'Agent · SKILL.md',f:[['role','analyst'],['tools','finish_task'],['subagents','echo_helper → e2e.echo'],['subgraphs','deep_dive → e2e.expander'],['references','R1 · segmentation_guide.md'],['examples','E2 · long_case.md'],['max_iterations','8']]},
+    score:{h:'Logic · LOGIC.md',f:[['mode','logic'],['actions','score.py'],['io.outputs','scored_segments : array']]},
+    expand:{h:'Subgraph · SUBGRAPH.md',f:[['mode','subgraph'],['target_skill','e2e.expander'],['output','report : string']]},
+    output:{h:'I/O · output',f:[['outputs','report : string  (required)']]},
+  };
+  function renderProps(el,id){ const p=NODE_PROPS[id]; if(!p){el.innerHTML='';return;} el.innerHTML='<div class="pf-row"><div class="pf-k">node</div><div class="pf-v"><b style="color:#c3bbff">'+id+'</b> · '+p.h+'</div></div>'+p.f.map(function(kv){return '<div class="pf-row"><div class="pf-k">'+kv[0]+'</div><div class="pf-v">'+kv[1]+'</div></div>';}).join(''); }
+  function selectNode(svg,id){ svg.querySelectorAll('.gnode rect').forEach(r=>r.setAttribute('stroke-width',1.6)); const g=gget(svg,id); if(g) g.querySelector('rect').setAttribute('stroke-width',2.8); }
+  DEMO_INIT['demo-nodes'] = function(){ const svg=$('svg-nodes'); svg.setAttribute('viewBox','0 0 240 320'); const topo=linearV(); renderGraph(svg,topo.nodes,topo.edges,'v'); topo.nodes.forEach(n=>{ const g=gget(svg,n.id); g.style.cursor='pointer'; g.addEventListener('click',()=>{ selectNode(svg,n.id); renderProps($('nodes-props'),n.id); }); }); selectNode(svg,'segment'); renderProps($('nodes-props'),'segment'); };
+
+  // ---- DEMO ③ run ----
+  let runBusy=false, runTopo='linear';
+  function DEMO_run_setTopo(t){
+    if(runBusy) return; runTopo=t; const svg=$('svg-run');
+    $('run-topo-linear').classList.toggle('active',t==='linear');
+    $('run-topo-fan').classList.toggle('active',t==='fan');
+    $('run-name').textContent = t==='linear'?'v030_e2e_pipeline':'fake_canvas_fanout';
+    $('run-hint').textContent = t==='linear'?'线性:节点逐个推进':'fan-out:branch_a / branch_b 无依赖 → 同时点亮';
+    const topo = t==='linear'?linearH():fanH();
+    svg.setAttribute('viewBox','0 0 560 200');
+    renderGraph(svg, topo.nodes, topo.edges, 'h');
+    $('run-trace').innerHTML='';
+  }
+  function DEMO_run_go(){
+    if(runBusy) return; runBusy=true;
+    const svg=$('svg-run');
+    const topo = runTopo==='linear'?linearH():fanH();
+    topo.nodes.forEach(n=>setState(svg,n.id,'idle'));
+    const steps = runTopo==='linear'
+      ? [['input'],['segment'],['score'],['expand'],['output']]
+      : [['input'],['prepare'],['branch_a','branch_b'],['assemble'],['output']];
+    const inc = {}; topo.edges.forEach(e=>{ (inc[e[1]]=inc[e[1]]||[]).push(e[0]); });
+    const trace=$('run-trace'); trace.innerHTML='';
+    let t=0; const STEP=760;
+    steps.forEach(grp=>{
+      setTimeout(()=>{ grp.forEach(id=>{ setState(svg,id,'running'); (inc[id]||[]).forEach(a=>setFlow(svg,a,id,true)); addTrace(trace,'<span class="ev">PhaseStarted</span> '+id); }); }, t);
+      setTimeout(()=>{ grp.forEach(id=>{ setState(svg,id,'done'); (inc[id]||[]).forEach(a=>setFlow(svg,a,id,false)); addTrace(trace,'<span class="ok">PhaseCompleted</span> '+id+' ✓'); }); }, t+STEP-200);
+      t+=STEP;
+    });
+    setTimeout(()=>{ runBusy=false; addTrace(trace,'<span class="ok">GraphCompleted</span> ✓'); }, t+150);
+  }
+  DEMO_INIT['demo-run'] = function(){ DEMO_run_setTopo('linear'); };
+
+  // ---- DEMO ④ seam run/predict ----
+  let seamBusy=false;
+  function seamRoles(){ return '<div class="pf-row"><div class="pf-k">analyst</div><div class="pf-v"><span class="chip">openai · gpt-4o</span></div></div><div class="pf-row"><div class="pf-k">fast</div><div class="pf-v"><span class="chip">anthropic · haiku</span></div></div><div class="pf-row"><div class="pf-k">logic 节点</div><div class="pf-v pf-empty">不调模型(纯 Python)</div></div><div class="pf-row"><div class="pf-k">换模型</div><div class="pf-v" style="color:#8a8a93">只改这份 yaml,流程图不动</div></div>'; }
+  DEMO_INIT['demo-seam'] = function(){ const svg=$('svg-seam'); svg.setAttribute('viewBox','0 0 240 320'); const topo=linearV(); renderGraph(svg,topo.nodes,topo.edges,'v'); $('seam-roles').innerHTML=seamRoles(); DEMO_seam_mode('run'); };
+  function DEMO_seam_mode(mode){
+    if(seamBusy) return; const svg=$('svg-seam'); const topo=linearV();
+    $('seam-run').classList.toggle('active',mode==='run'); $('seam-predict').classList.toggle('active',mode==='predict');
+    topo.nodes.forEach(n=>{ const g=gget(svg,n.id); if(g&&n.kind!=='io') g.classList.remove('dim'); setState(svg,n.id,'idle'); });
+    seamBusy=true; let t=0; const order=topo.nodes.map(n=>n.id);
+    if(mode==='run'){ let tok=0; order.forEach(id=>{ setTimeout(()=>{ setState(svg,id,'running'); topo.edges.filter(e=>e[1]===id).forEach(e=>setFlow(svg,e[0],e[1],true)); }, t); setTimeout(()=>{ setState(svg,id,'done'); topo.edges.filter(e=>e[1]===id).forEach(e=>setFlow(svg,e[0],e[1],false)); if(id==='segment')tok+=820; if(id==='expand')tok+=1340; $('seam-hint').textContent='run_skill:真调模型 · 累计 ~'+tok+' tokens'; }, t+560); t+=640; }); setTimeout(()=>{seamBusy=false;},t); }
+    else { $('seam-hint').textContent='predict_skill:不调模型 · 仅沿图校验路径 · 0 token'; order.forEach(id=>{ setTimeout(()=>{ const g=gget(svg,id); if(g)g.classList.add('dim'); setState(svg,id,'done'); }, t); t+=150; }); setTimeout(()=>{seamBusy=false;},t); }
+  }
+
+  // ---- DEMO ⑤ invalidation ----
+  function DEMO_invalid(mode){
+    const svg=$('svg-invalid'); const topo=linearH();
+    if(mode==='reset' || !svg.querySelector('.gnode')){ svg.setAttribute('viewBox','0 0 560 200'); renderGraph(svg,topo.nodes,topo.edges,'h'); topo.nodes.forEach(n=>setState(svg,n.id,'done')); topo.edges.forEach(e=>setFlow(svg,e[0],e[1],false)); $('inv-hint').textContent='稳定态:所有节点 golden 同步'; if(mode==='reset'||mode===undefined) return; }
+    if(mode==='schema'){ topo.nodes.forEach(n=>setState(svg,n.id,'done')); setState(svg,'score','running'); setState(svg,'expand','stale'); setState(svg,'output','stale'); setFlow(svg,'score','expand',true); setFlow(svg,'expand','output',true); $('inv-hint').textContent='score 输出契约 +1 必填字段 → 下游 expand / output 的 golden 标黄 stale,需重算'; }
+    else if(mode==='prompt'){ topo.nodes.forEach(n=>setState(svg,n.id,'done')); topo.edges.forEach(e=>setFlow(svg,e[0],e[1],false)); setState(svg,'score','running'); setTimeout(()=>setState(svg,'score','done'),700); $('inv-hint').textContent='只改 score 的 prompt 文字 → 输出形状没变 → golden 不失效,下游一律不动'; }
+  }
+  DEMO_INIT['demo-invalid'] = function(){ DEMO_invalid('reset'); };
+
+  // ---- DEMO ⑥ subgraph ----
+  let subOpen=false;
+  function subRender(){
+    const svg=$('svg-subgraph'); const base=linearH();
+    let nodes=base.nodes.slice(), edges=base.edges.slice();
+    if(subOpen){ svg.setAttribute('viewBox','0 0 560 300'); nodes.push({id:'build',label:'build (expander)',kind:'agent',x:343,y:226,w:134,h:44}); }
+    else svg.setAttribute('viewBox','0 0 560 200');
+    renderGraph(svg,nodes,edges,'h');
+    if(subOpen){
+      const p=NS('path'); p.setAttribute('class','gedge flow'); p.setAttribute('d','M 410 123 C 410 175 410 180 410 226'); svg.appendChild(p);
+      const cap=NS('text'); cap.setAttribute('x',343); cap.setAttribute('y',285); cap.setAttribute('class','nsub'); cap.setAttribute('fill','#f59e0b'); cap.textContent='SUBGRAPH → e2e.expander'; svg.appendChild(cap);
+    }
+    const eg=gget(svg,'expand'); if(eg){ eg.style.cursor='pointer'; eg.addEventListener('click',()=>{ subOpen=!subOpen; subRender(); }); }
+  }
+  DEMO_INIT['demo-subgraph'] = function(){ subOpen=false; subRender(); };
+
+  // ---- DEMO ⑦ agent loop · axioms→protocols + gated loop (IIFE, exposes LOOP_RUN / LOOP_toggleSingle) ----
+  (function(){
+    const LP_KIND={io:'#64748b',logic:'#2dd4bf',agent:'#7c6cf0'};
+    function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+    // main vertical pipeline
+    const MAIN=[
+      {id:'input',label:'input',kind:'io'},
+      {id:'setup',label:'setup',kind:'logic'},
+      {id:'continuity',label:'continuity',kind:'agent'},
+      {id:'annotation',label:'annotation',kind:'agent'},
+      {id:'entity_spatial',label:'entity_spatial',kind:'agent',exp:true},
+      {id:'evolution',label:'evolution',kind:'agent',exp:true},
+      {id:'validation',label:'validation',kind:'agent'},
+      {id:'output',label:'output',kind:'io'},
+    ];
+    const MX=34,MW=118,MH=34,MGAP=56,MY0=14;
+    function mY(i){ return MY0+i*MGAP; }
+
+    // agent loop sub-steps (mapped to mvp1)
+    const STEPS=[
+      {id:'plan',   t:'Plan',       sub:'update_working_memory'},
+      {id:'planrev',t:'审核 Plan',   sub:'对照推导协议自检', kb:true},
+      {id:'act',    t:'Step / Act', sub:'ReAct · tool calls'},
+      {id:'review', t:'Review',     sub:'after_agent · validator', kb:true},
+      {id:'end',    t:'达标 END',    sub:'finish_task 放行'},
+    ];
+    const LX=322,LW=204,SH=46,SGAP=74,SY0=18;
+    function sY(i){ return SY0+i*SGAP; }
+
+    // knowledge base: axioms -> protocols
+    const AXIOMS=[
+      {id:'AX1',rn:'I',  t:'观测闭包', d:'表征边界 = 媒介观测边界'},
+      {id:'AX2',rn:'II', t:'本体节俭', d:'不创造非必要实体'},
+      {id:'AX3',rn:'III',t:'正交分解', d:'维度互相独立,不交叉改写'},
+      {id:'AX4',rn:'IV', t:'状态即时', d:'状态=被观测时刻,不外推'},
+      {id:'AX5',rn:'V',  t:'推理封闭', d:'结论信息量 ≤ 前提'},
+    ];
+    const PHASE_KB={
+      entity_spatial:[
+        {p:'P3',name:'非资产过滤', from:'AX2', proj:'本体节俭 ⊕ 实体=制作单元', rule:'门窗墙等置景 → 归 Location,不建 Prop'},
+        {p:'P4',name:'Zero-State', from:'AX4', proj:'状态即时 ⊕ 实体=角色',     rule:'首个 Look=Look_0,出场即即时状态'},
+        {p:'SC',name:'value+clue', from:'AX5', proj:'推理封闭 ⊕ 描述需溯源',     rule:'每个描述字段必须 {value, clue}'},
+      ],
+      evolution:[
+        {p:'P2',name:'视觉推导过滤', from:'AX1', proj:'观测闭包 ⊕ 媒介=镜头', rule:'推不出视觉变化 → 不记 look_change'},
+        {p:'P1',name:'因果链精准',   from:'AX5', proj:'推理封闭 ⊕ 前提=clue', rule:'diff 不得超出 clue 支持范围'},
+      ],
+    };
+
+    function C(s){ return '<code style="font-size:10px">'+s+'</code>'; }
+    const SEQ={
+      entity_spatial:{
+        loop:[
+          {tag:'kb', tx:'KnowledgeBase 导入中… <span class="warn">载入公理集 (AX1–AX5)</span>'},
+          {tag:'kb', axiom:'AX2', proto:'P3', tx:'公理 <span class="em">II 本体节俭</span> ⊕ 实体=制作单元 ⇒ 推导 <span class="em">P3 非资产过滤</span>'},
+          {tag:'kb', axiom:'AX4', proto:'P4', tx:'公理 <span class="em">IV 状态即时</span> ⊕ 实体=角色 ⇒ 推导 <span class="em">P4 Zero-State</span>'},
+          {tag:'kb', axiom:'AX5', proto:'SC', tx:'公理 <span class="em">V 推理封闭</span> ⊕ 描述需溯源 ⇒ 推导 <span class="em">value+clue</span> 约束'},
+          {tag:'kb', tx:'推导完成 · 3 条协议注入 '+C('system_prompt')},
+          {tag:'plan', node:'plan', state:'run', tx:'WorkingMemoryUpdated · 计划:逐个 save_entity(林深 / 防爆门 / 弩箭)'},
+          {tag:'plan', node:'planrev', state:'kbhit', kbtag:'planrev', tx:'用 <span class="em">P3/P4</span> 审核计划 → 批注:<span class="warn">「先建 Look_0 起点;置景类先过 P3 再决定是否建 Prop」</span>'},
+          {tag:'act', node:'act', state:'run', think:2200, tx:'💭 thinking… 组织 save_entity 调用'},
+          {tag:'act', node:'act', state:'run', tx:'ToolCalled save_entity(<span class="bad">CHR_001 look=Look_1, makeup="脸色苍白"</span>) ×2 → FinishTaskSubmitted <span class="warn">(round 1)</span>'},
+          {tag:'review', node:'review', state:'kbhit', kbtag:'review', tx:'对照 P3/P4/schema 批注中…'},
+          {tag:'review', node:'review', state:'bad', tx:'<span class="bad">SchemaValidation FAIL</span> · CHR_001.makeup 缺 clue 字段'},
+          {tag:'review', node:'review', state:'bad', tx:'<span class="bad">[P4] FAIL</span> · 首 Look=Look_1,应为 Look_0'},
+          {tag:'review', node:'review', state:'bad', tx:'<span class="bad">[P3] FAIL</span> · 防爆门是置景,应归 LOC_001.description'},
+          {tag:'gate', node:'review', state:'bad', back:true, tx:'<span class="warn">AfterAgentGate BLOCK</span> → NudgeInjected '+C('jump_to:"model"')+' <span class="warn">(round 1→2)</span>'},
+          {tag:'act', node:'act', state:'run', think:2200, tx:'💭 thinking… 按批注修 Look_0 + 补 clue'},
+          {tag:'act', node:'act', state:'run', tx:'ToolCalled update_look(Look_1→<span class="ok">Look_0</span>) · makeup=<span class="ok">{value,clue}</span> → FinishTaskSubmitted <span class="warn">(round 2)</span>'},
+          {tag:'review', node:'review', state:'kbhit', kbtag:'review', tx:'再次对照协议批注中…'},
+          {tag:'review', node:'review', state:'bad', tx:'<span class="ok">P4 ✓ · value+clue ✓</span> ;但 <span class="bad">[P3] 仍 FAIL</span> · 防爆门仍建为独立 Prop'},
+          {tag:'gate', node:'review', state:'bad', back:true, tx:'<span class="warn">AfterAgentGate BLOCK</span> → NudgeInjected '+C('jump_to:"model"')+' <span class="warn">(round 2→3)</span>'},
+          {tag:'act', node:'act', state:'run', think:2000, tx:'💭 thinking… 删 PRP_007 并入 Location'},
+          {tag:'act', node:'act', state:'run', tx:'ToolCalled delete_entity(PRP_007) + 追加 LOC_001.description → FinishTaskSubmitted <span class="warn">(round 3)</span>'},
+          {tag:'review', node:'review', state:'ok', kbtag:'review', tx:'<span class="ok">SchemaValidation PASS</span> · P3 ✓ P4 ✓ value+clue ✓'},
+          {tag:'gate', node:'end', state:'ok', tx:'<span class="ok">AfterAgentGate PASS</span> · finish_task 放行 → <span class="em">END</span>(3 项缺陷全部修复)'},
+        ],
+        single:[
+          {tag:'kb', tx:'KnowledgeBase 已注入标准 — <span class="warn">但单次模式不会自检</span>'},
+          {tag:'act', node:'plan', state:'run', think:1500, tx:'💭 thinking…'},
+          {tag:'act', node:'act', state:'run', tx:'LLMResponse · 一次性产出 save_entity ×2'},
+          {tag:'out', node:'end', state:'bad', tx:'<span class="bad">OutputReturned</span> · 无 review/refine — <span class="bad em">Look_1、缺 clue、防爆门当 Prop 共 3 项缺陷原样输出</span>,无人发现'},
+        ],
+      },
+      evolution:{
+        loop:[
+          {tag:'kb', tx:'KnowledgeBase 导入中… <span class="warn">载入公理集 (AX1–AX5)</span>'},
+          {tag:'kb', axiom:'AX1', proto:'P2', tx:'公理 <span class="em">I 观测闭包</span> ⊕ 媒介=镜头 ⇒ 推导 <span class="em">P2 视觉推导过滤</span>'},
+          {tag:'kb', axiom:'AX5', proto:'P1', tx:'公理 <span class="em">V 推理封闭</span> ⊕ 前提=clue ⇒ 推导 <span class="em">P1 因果链精准</span>'},
+          {tag:'kb', tx:'推导完成 · 2 条协议注入 '+C('system_prompt')},
+          {tag:'plan', node:'plan', state:'run', tx:'WorkingMemoryUpdated · 计划:list_entities 拿 ID,再写 2 条 look_change(中箭 / 发誓)'},
+          {tag:'plan', node:'planrev', state:'kbhit', kbtag:'planrev', tx:'用 <span class="em">P1/P2</span> 审核计划 → 批注:<span class="warn">「先判事件是否产生视觉变化(P2);diff 不得超出 clue(P1);entity_id 用系统 ID」</span>'},
+          {tag:'act', node:'act', state:'run', think:2200, tx:'💭 thinking… 组织 record_look_change'},
+          {tag:'act', node:'act', state:'run', tx:'ToolCalled record_look_change(<span class="bad">"林深", diff={makeup:流血, clothing:破损}</span>) + (<span class="bad">"暗暗发誓"→记一条</span>) → FinishTaskSubmitted <span class="warn">(round 1)</span>'},
+          {tag:'review', node:'review', state:'kbhit', kbtag:'review', tx:'对照 P1/P2 批注中…'},
+          {tag:'review', node:'review', state:'bad', tx:'<span class="bad">[P1] FAIL</span> · 中箭<b>头部</b> → diff 不应含 clothing(扩大推断)'},
+          {tag:'review', node:'review', state:'bad', tx:'<span class="bad">[P2] FAIL</span> · "暗暗发誓"无视觉变化,不应记 look_change'},
+          {tag:'review', node:'review', state:'bad', tx:'<span class="bad">entity_id FAIL</span> · 用了名称"林深",应解析为 CHR_001'},
+          {tag:'gate', node:'review', state:'bad', back:true, tx:'<span class="warn">AfterAgentGate BLOCK</span> → NudgeInjected '+C('jump_to:"model"')+' <span class="warn">(round 1→2)</span>'},
+          {tag:'act', node:'act', state:'run', think:2200, tx:'💭 thinking… 收窄 diff + 删非视觉事件'},
+          {tag:'act', node:'act', state:'run', tx:'diff 只留 <span class="ok">{makeup:头部血伤}</span> · 删除"发誓"那条 → FinishTaskSubmitted <span class="warn">(round 2)</span>'},
+          {tag:'review', node:'review', state:'kbhit', kbtag:'review', tx:'再次对照协议批注中…'},
+          {tag:'review', node:'review', state:'bad', tx:'<span class="ok">P1 ✓ · P2 ✓</span> ;但 <span class="bad">entity_id 仍 FAIL</span> · 还在用名称"林深"'},
+          {tag:'gate', node:'review', state:'bad', back:true, tx:'<span class="warn">AfterAgentGate BLOCK</span> → NudgeInjected '+C('jump_to:"model"')+' <span class="warn">(round 2→3)</span>'},
+          {tag:'act', node:'act', state:'run', think:2000, tx:'💭 thinking… resolve 名称为系统 ID'},
+          {tag:'act', node:'act', state:'run', tx:'record_look_change(<span class="ok">CHR_001</span>, ...) → FinishTaskSubmitted <span class="warn">(round 3)</span>'},
+          {tag:'review', node:'review', state:'ok', kbtag:'review', tx:'<span class="ok">SchemaValidation PASS</span> · P1 ✓ P2 ✓ entity_id ✓'},
+          {tag:'gate', node:'end', state:'ok', tx:'<span class="ok">AfterAgentGate PASS</span> · finish_task 放行 → <span class="em">END</span>(3 项缺陷全部修复)'},
+        ],
+        single:[
+          {tag:'kb', tx:'KnowledgeBase 已注入标准 — <span class="warn">但单次模式不会自检</span>'},
+          {tag:'act', node:'plan', state:'run', think:1500, tx:'💭 thinking…'},
+          {tag:'act', node:'act', state:'run', tx:'LLMResponse · 一次性写 2 条 look_change'},
+          {tag:'out', node:'end', state:'bad', tx:'<span class="bad">OutputReturned</span> · 无 review/refine — <span class="bad em">clothing 扩大推断、"发誓"误记、名称未解析 共 3 项缺陷原样输出</span>,无人发现'},
+        ],
+      },
+    };
+
+    let expanded=null, single=false, running=false, runToken=0, traceIdx=0;
+
+    function renderMain(){
+      const svg=$('lp-svg'); if(!svg) return; svg.innerHTML='';
+      const cx=MX+MW/2;
+      for(let i=0;i<MAIN.length-1;i++){
+        const y1=mY(i)+MH, y2=mY(i+1);
+        const p=NS('path'); p.setAttribute('class','gedge');
+        p.setAttribute('d','M '+cx+' '+y1+' C '+cx+' '+(y1+14)+' '+cx+' '+(y2-14)+' '+cx+' '+y2);
+        svg.appendChild(p);
+      }
+      MAIN.forEach((n,i)=>{
+        const g=NS('g'); g.setAttribute('class','gnode'); g.setAttribute('data-id',n.id);
+        if(expanded && expanded!==n.id) g.classList.add('dim');
+        const r=NS('rect'); r.setAttribute('x',MX);r.setAttribute('y',mY(i));r.setAttribute('width',MW);r.setAttribute('height',MH);r.setAttribute('rx',8);
+        r.setAttribute('fill','#16161b');r.setAttribute('stroke',LP_KIND[n.kind]);r.setAttribute('stroke-width',1.6);
+        if(n.kind==='io')r.setAttribute('opacity','.6');
+        g.appendChild(r);
+        const k=NS('text'); k.setAttribute('class','nkind');k.setAttribute('x',MX+9);k.setAttribute('y',mY(i)+14);k.setAttribute('fill',LP_KIND[n.kind]);
+        k.textContent=n.kind==='agent'?'AGENT ⟳':(n.kind==='logic'?'LOGIC  fn':'I/O');
+        g.appendChild(k);
+        const l=NS('text'); l.setAttribute('class','nlabel');l.setAttribute('x',MX+9);l.setAttribute('y',mY(i)+29);l.textContent=n.label; g.appendChild(l);
+        svg.appendChild(g);
+        if(n.exp){
+          const cxp=MX+MW+13, cyp=mY(i)+MH/2;
+          const pd=NS('g'); pd.setAttribute('class','plusdot'); pd.setAttribute('data-exp',n.id);
+          const c=NS('circle'); c.setAttribute('cx',cxp);c.setAttribute('cy',cyp);c.setAttribute('r',9); pd.appendChild(c);
+          const tx=NS('text'); tx.setAttribute('x',cxp);tx.setAttribute('y',cyp+5);tx.setAttribute('text-anchor','middle');
+          tx.textContent=(expanded===n.id)?'\u2212':'+'; pd.appendChild(tx);
+          pd.addEventListener('click',()=>toggleExpand(n.id));
+          svg.appendChild(pd);
+        }
+      });
+      if(expanded) renderLoop(expanded);
+    }
+
+    function renderLoop(id){
+      const svg=$('lp-svg');
+      const idx=MAIN.findIndex(n=>n.id===id);
+      const g=NS('g'); g.setAttribute('id','lp-loopg');
+      const cxL=LX+LW/2;
+      const px=MX+MW+13, py=mY(idx)+MH/2;
+      const conn=NS('path'); conn.setAttribute('class','sconn');
+      conn.setAttribute('d','M '+(px+9)+' '+py+' C '+(px+60)+' '+py+' '+(LX-50)+' '+(sY(0)+SH/2)+' '+LX+' '+(sY(0)+SH/2));
+      g.appendChild(conn);
+      for(let i=0;i<STEPS.length-1;i++){
+        const p=NS('path'); p.setAttribute('class','gedge');
+        const y1=sY(i)+SH, y2=sY(i+1);
+        p.setAttribute('d','M '+cxL+' '+y1+' C '+cxL+' '+(y1+12)+' '+cxL+' '+(y2-12)+' '+cxL+' '+y2);
+        g.appendChild(p);
+      }
+      const rY=sY(3)+SH/2, aY=sY(2)+SH/2;
+      const be=NS('path'); be.setAttribute('id','lp-backedge'); be.setAttribute('class','backedge');
+      be.setAttribute('d','M '+LX+' '+rY+' C '+(LX-36)+' '+(rY-4)+' '+(LX-36)+' '+(aY+4)+' '+LX+' '+aY);
+      g.appendChild(be);
+      const bl=NS('text'); bl.setAttribute('class','backlabel');bl.setAttribute('x',LX-34);bl.setAttribute('y',(rY+aY)/2);bl.setAttribute('text-anchor','middle');
+      bl.textContent='BLOCK ↺'; g.appendChild(bl);
+      STEPS.forEach((s,i)=>{
+        const sn=NS('g'); sn.setAttribute('class','snode'); sn.setAttribute('data-id',s.id);
+        const r=NS('rect'); r.setAttribute('x',LX);r.setAttribute('y',sY(i));r.setAttribute('width',LW);r.setAttribute('height',SH);r.setAttribute('rx',8);
+        r.setAttribute('fill','#15151b');r.setAttribute('stroke','#45454f');r.setAttribute('stroke-width',1.6); sn.appendChild(r);
+        const t=NS('text'); t.setAttribute('class','nlabel');t.setAttribute('x',LX+11);t.setAttribute('y',sY(i)+20);t.textContent=(i+1)+'. '+s.t; sn.appendChild(t);
+        const sub=NS('text'); sub.setAttribute('class','nsub');sub.setAttribute('x',LX+11);sub.setAttribute('y',sY(i)+35);sub.textContent=s.sub; sn.appendChild(sub);
+        g.appendChild(sn);
+        if(s.kb){
+          const kt=NS('text'); kt.setAttribute('class','kbtag'); kt.setAttribute('id','lp-kbtag-'+s.id);
+          kt.setAttribute('x',LX+LW-8);kt.setAttribute('y',sY(i)-5);kt.setAttribute('text-anchor','end');
+          kt.textContent='\u25C6 KB 推导注入'; g.appendChild(kt);
+        }
+      });
+      svg.appendChild(g);
+    }
+
+    function setSnode(id,state){ const n=document.querySelector('#lp-loopg .snode[data-id="'+id+'"]'); if(!n)return; n.classList.remove('run','ok','bad','kbhit'); if(state)n.classList.add(state); }
+    function showKBTag(id,on){ const t=$('lp-kbtag-'+id); if(t)t.classList.toggle('on',!!on); }
+    async function flowBack(){ const e=$('lp-backedge'),l=document.querySelector('#lp-loopg .backlabel'); if(e)e.classList.add('flow'); if(l)l.classList.add('flow'); setSnode('act','run'); await sleep(820); if(e)e.classList.remove('flow'); if(l)l.classList.remove('flow'); }
+
+    function renderSidebar(phase){
+      let h='<h4>知识库 · 公理层 <span class="imp" id="lp-imp-ax">载入中</span></h4>';
+      AXIOMS.forEach(a=>{ h+='<div class="ax-item" id="lp-ax-'+a.id+'"><div class="axt"><b>'+a.rn+'</b>'+a.t+'</div><div class="axd">'+a.d+'</div></div>'; });
+      h+='<div class="derive">\u21D3 运行时推导 \u21D3</div>';
+      h+='<h4>协议层 · 本 phase 适用 <span class="imp" id="lp-imp-pr">推导中</span></h4>';
+      (PHASE_KB[phase]||[]).forEach(p=>{ h+='<div class="pr-item" id="lp-pr-'+p.p+'"><div class="prt"><b>'+(p.p==='SC'?'schema':p.p)+'</b>'+p.name+'</div><div class="proj">\u2190 '+p.proj+'</div><div class="prr">'+p.rule+'</div></div>'; });
+      $('lp-kb').innerHTML=h;
+    }
+    function litAxiom(id){ const e=$('lp-ax-'+id); if(e)e.classList.add('lit'); const i=$('lp-imp-ax'); if(i)i.classList.add('on'); }
+    function litProto(p){ const e=$('lp-pr-'+p); if(e)e.classList.add('lit'); const i=$('lp-imp-pr'); if(i)i.classList.add('on'); }
+    function resetKB(){ document.querySelectorAll('#lp-kb .ax-item,#lp-kb .pr-item').forEach(e=>e.classList.remove('lit')); document.querySelectorAll('#lp-kb .imp').forEach(e=>e.classList.remove('on')); }
+
+    const TAGNAME={kb:'KB',plan:'PLAN',act:'ACT',review:'REVIEW',gate:'GATE',out:'OUT'};
+    function emit(tag,html){
+      traceIdx++;
+      const tr=$('lp-trace'); const d=document.createElement('div'); d.className='trow';
+      d.innerHTML='<span class="ti">'+traceIdx+'</span><span class="tg '+tag+'">'+(TAGNAME[tag]||tag)+'</span><span class="tx">'+html+'</span>';
+      tr.appendChild(d); tr.scrollTop=tr.scrollHeight; requestAnimationFrame(()=>d.classList.add('on'));
+    }
+
+    function toggleExpand(id){
+      if(running) return;
+      expanded=(expanded===id)?null:id;
+      renderMain();
+      if(expanded){ renderSidebar(expanded); $('lp-hint').textContent='已展开 '+expanded+' · 点 ▶ 运行'; }
+      else { $('lp-kb').innerHTML=''; $('lp-hint').textContent='先点节点右侧 + 展开,再运行'; }
+      $('lp-trace').innerHTML=''; traceIdx=0;
+    }
+
+    function toggleSingle(){
+      if(running) return; single=!single;
+      $('lp-single').classList.toggle('active',single);
+      $('lp-hint').textContent = single ? '单次 LLM 模式:运行看缺陷如何漏过' : 'Agent Loop 模式:运行看完整闭环';
+      $('lp-trace').innerHTML=''; traceIdx=0;
+    }
+
+    async function RUN(){
+      if(running) return;
+      if(!expanded){ toggleExpand('entity_spatial'); await sleep(120); }
+      running=true; const tok=++runToken;
+      $('lp-run').disabled=true; $('lp-run').textContent='● 运行中…';
+      $('lp-trace').innerHTML=''; traceIdx=0; resetKB();
+      STEPS.forEach(s=>{ setSnode(s.id,null); showKBTag(s.id,false); });
+      const seq=SEQ[expanded][single?'single':'loop'];
+      for(const it of seq){
+        if(tok!==runToken) return;
+        if(it.think){ if(it.node) setSnode(it.node,'run'); await sleep(it.think); }
+        if(tok!==runToken) return;
+        if(it.node && it.state) setSnode(it.node,it.state);
+        if(it.axiom) litAxiom(it.axiom);
+        if(it.proto) litProto(it.proto);
+        if(it.kbtag) showKBTag(it.kbtag,true);
+        if(it.back){ await flowBack(); if(tok!==runToken) return; }
+        emit(it.tag,it.tx);
+        await sleep(it.gap||780);
+      }
+      running=false;
+      $('lp-run').disabled=false; $('lp-run').textContent='▶ 运行 Agent Loop';
+      $('lp-hint').textContent = single
+        ? '单次 LLM:带缺陷直接输出 ✗(共 3 项未被发现)'
+        : 'Agent Loop:跑了 3 轮(2 次打回)后全部达标 ✓';
+    }
+
+    DEMO_INIT['demo-loop'] = function(){ single=false; running=false; expanded=null; $('lp-single').classList.remove('active'); renderMain(); toggleExpand('entity_spatial'); };
+    window.LOOP_RUN = RUN;
+    window.LOOP_toggleSingle = toggleSingle;
+  })();
+  </script>
+</body>
+</html>

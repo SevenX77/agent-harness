@@ -1,0 +1,184 @@
+{
+  "page_id": "n4_run_design",
+  "title": "Run 控制 · 操作设计",
+  "region": "run-verify:run",
+  "intro": "本页是 N4 第 2 个 surface「Run 控制」的 MVP1 设计（应该怎样）：predict 试飞过了，用户在底部动作条点 Run 真跑——这次真调 LLM、真烧 token、真落盘。Run 的硬前提是 predict-pass（前端守卫 + 后端 content_hash 门双保险，绕过 UI 直接打 API 也挡）。跑起来后画布节点呼吸灯随真实 run 事件逐个亮，I/O 面板可勾多份输入跑批量，timeline 存 run 历史。每张卡讲一个操作的设计；现状/差距见 n4_run_impl，run 编排 + 服务端门 + 批量 + autocommit 机制见 n4_run_mech。注：spec 04 把 onRun/节点灯/批量标『桩/孤儿』已过时——真代码里 handleRun 真发 startRun、节点灯有 running 脉冲（6 态）、批量 useBatchRun 已接，本页以真代码为准。autocommit（#13）归属 N6『保存与发布』，此处仅标注其由 run 收尾触发。",
+  "atoms": [
+    {
+      "n": 6,
+      "cap": "run-trigger-gated",
+      "module": "动作条 · Run 触发（predict-pass 硬门）",
+      "func": "设计：predict-pass 后 Run 点亮，用户点 Run 发起一次真跑。predict-pass 是 Run 的唯一前提，且这道门前后端双保险——前端没 predict-pass 连请求都不发，后端再用 content_hash 二次校验，任何 caller（不止 UI）都受约束。",
+      "action": "用户点底部动作条最右的 Run 按钮（仅 predict-pass 档高亮可点）。",
+      "fe_design": "点 Run → handleRun（Workspace 发起真跑的回调）第一件事就是 deriveBuildStage 若 ≠ predict-pass 直接 return（前端硬门，连请求都不发）→ 通过则推档 running → resolveRunInput 取输入 → startRun（client.ts 发 POST /runs）→ 成功 setRunId + 切面板到 timeline。后端 start_run 再调 require_passing_predict（用 last_predict.json 的 content_hash 跟新编译 hash 比对），不匹配抛 RUN_REQUIRES_PREDICT(409)。设计意图：predict 是 run 硬前提，前端门挡 UI、后端门挡一切 caller。",
+      "fe_modules": [
+        { "name": "构建档位门控（deriveBuildStage + deriveButtons）" },
+        { "name": "测试输入解析（resolveRunInput）" }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{id}/runs",
+          "purpose": "发起单次真跑（body 带 input_data）；后端 start_run 先 require_passing_predict 校验 content_hash 服务端门。",
+          "mechanism_ref": "n4_run_mech",
+          "iface_ref": "iface-run-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（handleRun 前端守卫 stage!==predict-pass 直接 return；后端 require_passing_predict 服务端门 409 双保险）。spec 标『onRun=桩/零 caller』已过时。",
+      "impl_ref": "fn-6"
+    },
+    {
+      "n": 7,
+      "cap": "run-realrun-persist",
+      "module": "真跑执行与落盘",
+      "func": "设计：后端把这次 run 真跑引擎、把结果落盘成不可变事实源——final_state（最终黑板状态）/ metrics（token 等指标）/ trace（事件日志），跑完封存（seal），之后禁止再写、消费者按 ref + hash 读。",
+      "action": "无显式动作（点 Run 通过门控后，后端 spawn 子进程真跑、落盘、封存）。",
+      "fe_design": "前端这步只是『发起 + 拿 run_id』，真跑全在后端：start_run 用 multiprocessing 起子进程跑 _run_worker_main → adapter.run_artifact 真跑引擎 → 按 RunResult.success 决定 success/failed，落盘 final_state.json/metrics.json/trace.jsonl 并经 LocalRunArtifactStore put_batch + seal_run 封存成内容寻址的不可变产物。前端只在拿到 run_id 后订阅事件流、读封存结果，不持第二份真相。设计意图：run 产物是不可变事实源（D2.2 已收口 seal），裸文件不再是真相。",
+      "fe_modules": [],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{id}/runs",
+          "purpose": "触发后端 spawn 子进程真跑引擎 + 落盘 final_state/metrics/trace + seal 封存。",
+          "mechanism_ref": "n4_run_mech",
+          "iface_ref": "iface-run-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（后端真跑落盘 + seal 不可变已 live，前端只投影不自存）。注：run-by-version 入口 / artifact identity 可见性是 D3 缺口（bad），不阻塞本操作的真跑落盘。",
+      "impl_ref": "fn-7"
+    },
+    {
+      "n": 8,
+      "cap": "run-node-lights",
+      "module": "画布运行态",
+      "func": "设计：run 跑起来时，画布上每个节点的灯随真实 run 事件逐个亮——运行中（running 呼吸脉冲）、成功（绿）、失败（红）、暂停（琥珀），一眼看出哪个节点在跑/成/败。",
+      "action": "无显式动作（订阅 run 事件流后，画布节点灯随 phase_start/phase_end/失败事件自动变色）。",
+      "fe_design": "useRunStream(runId) 订阅事件流 → deriveNodeStatuses（把事件流按到达顺序 last-event-wins 折成每节点状态的函数）映射：phase_start→running、phase_end→success、validation_fail/retry_exhausted/含 error|fail→error、hitl/interrupt→paused → 喂给画布 SkillNode（画布节点组件）的 STATUS_STYLE 渲染。running 态用 animate-pulse-primary 呼吸脉冲、6 态（idle/running/success/error/paused/breakpoint）各有边框色 + 图标。设计意图（spec『节点呼吸灯随执行逐个亮；运行态边框动画与 settings role-test 统一』）：失败显式判（validation_fail/retry_exhausted 不含 error 子串、要显式列入失败集，否则会误标绿）。",
+      "fe_modules": [
+        { "name": "运行事件流订阅（useRunStream）" },
+        { "name": "事件→节点态派生（deriveNodeStatuses）" }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "WS /ws/runs/{run_id}",
+          "purpose": "节点灯的事件源：phase_start/phase_end/validation_fail/retry_exhausted 等经此流推给前端。",
+          "mechanism_ref": "n4_trace_mech",
+          "iface_ref": "iface-trace-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（节点灯随真实 run 事件亮，running 已有 animate-pulse-primary 呼吸脉冲 + 6 态；validation_fail/retry_exhausted 显式判失败）。旧审计『节点灯仅三态色无呼吸动画』已过时——SkillNode STATUS_STYLE 真有 running 脉冲。",
+      "impl_ref": "fn-8"
+    },
+    {
+      "n": 9,
+      "cap": "run-focus-follow",
+      "module": "画布运行态",
+      "func": "设计：run 跑到哪个节点，画布 focus 自动跟随定位到当前运行的那个节点，用户不用手动找。",
+      "action": "无显式动作（run 推进到某节点时，画布自动平移/定位到该 running 节点）。",
+      "fe_design": "Workspace 已从节点状态算出 activeTracePhase（当前 running 的节点，取 statusByNodeId 里 status==running 的那个）。设计要：用它驱动画布自动 focus——把视口平移/居中到当前 running 节点，run 跨节点推进时 focus 跟着走。设计意图（spec C6『focus 自动跟随当前运行节点』）：让用户视线始终在正在执行的节点上。",
+      "fe_modules": [
+        { "name": "事件→节点态派生（deriveNodeStatuses）" }
+      ],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：画布现据 running 节点自动 focus——GraphCanvas.tsx:482-503 一个 useEffect 调 reactFlowInstance.fitView({nodes:[{id:focusId}],duration:600,padding:0.8})（reactflow 把视口居中到指定节点的 API）把视口自动平移居中到当前运行节点；focusId 来自 nodeToFocus(activeTracePhase,...)（canvas-focus.ts:15-23，由当前 trace phase 推出要 focus 哪个节点的函数）；activeTracePhase 在 Workspace.tsx:337-340 从 statusByNodeId 取 status==running 的节点派生、经 Workspace.tsx:1390 下传 GraphCanvas。lastFocusedPhaseRef（GraphCanvas.tsx:481,490,497，记住上次已 focus 的 phase 的 ref）只在 running phase 真变了才重新居中，避免与用户手动平移打架。测试：GraphCanvas/canvas-focus.test.ts 通过（2026-06-20 运行）。",
+      "impl_ref": "fn-9"
+    },
+    {
+      "n": 10,
+      "cap": "run-history",
+      "module": "批量与历史",
+      "func": "设计：timeline 面板列出该 skill 的 run 历史（run_id / 状态 / 耗时 / token），点某次可回看它的完整详情。",
+      "action": "用户在 timeline 面板（运行时间线面板）的 run 历史列表里点某一次 run。",
+      "fe_design": "timeline 面板拉 run 列表（GET /runs），列每条 run 的 run_id/status/耗时/token；点某条用 getRunDetail（按 run_id 拉该次详情含 events）回看完整 trace（详见 trace surface）。设计意图：run 后能从列表回看任意一次历史运行。耗时这一列要能真显示——TimelinePanel 读 run.metrics.wall_time_sec，所以列表/详情的 metrics DTO 必须带 wall_time_sec（或独立 duration_sec）。",
+      "fe_modules": [],
+      "be_contract": [
+        {
+          "endpoint": "GET /api/skills/{id}/runs",
+          "purpose": "列该 skill 的 run 历史（run_id/状态/token/耗时；metrics 已带 wall_time_sec，TokensMetrics.wall_time_sec 见 models/runs.py:23）。",
+          "mechanism_ref": "n4_run_mech",
+          "iface_ref": "iface-run-3"
+        },
+        {
+          "endpoint": "GET /api/skills/{id}/runs/{run_id}",
+          "purpose": "回看某次历史 run 的完整详情（含 events 回放）。",
+          "mechanism_ref": "n4_run_mech",
+          "iface_ref": "iface-run-5"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：列表 + 点击回看详情已接（GET /runs + getRunDetail live），run_id/状态/token 符合；原『耗时列落空』的契约问题已解——耗时端到端打通：后端 models/runs.py:23 声明 TokensMetrics.wall_time_sec（float|None，extra=forbid 下），run_manager.py:1156-1163 的 _tokens_metrics（把原始指标投影成 DTO 的函数）投影 wall_time_sec，run_manager.py:137 的 _run_worker_main（run 子进程主函数）以 metrics.setdefault('wall_time_sec', _result_wall_time(...)) 落值；前端 api/types.ts:169 在 TokensMetrics 上声明 wall_time_sec?:number|null，所以 TimelinePanel.tsx:220 类型干净地读 run.metrics?.wall_time_sec（无 unknown 强转）喂给 formatDuration（TimelinePanel.tsx:15-18，把秒数格式化成耗时文案的函数）。测试：后端 tests/services/test_run_manager_wall_time.py（3 测，验投影 + RunMetadata JSON 序列化）、前端 TimelinePanel.wall-time.test.tsx（2 测），均绿（2026-06-20）。",
+      "impl_ref": "fn-10"
+    },
+    {
+      "n": 11,
+      "cap": "run-batch",
+      "module": "批量与历史",
+      "func": "设计：I/O 面板每份测试输入前有 checkbox，勾多份点『Run N as batch』，后端对每份各起一次真跑；前端轮询进度（总数/完成/逐项状态），某项失败显式上报、不静默。",
+      "action": "用户在 I/O 面板 TestInputsSection 勾选多份测试输入，点『Run N as batch』。",
+      "fe_design": "useBatchRun（管批量选择 + 轮询的 hook）：toggleInput 勾选 → runBatch POST /runs/batch-run（body input_ids）→ 拿 batch_id 每 1s 轮询 GET /batch/{id} → 汇总各子 run 算 total/completed/running|success|failed，UI 显示『completed/total · status』+ batchError。后端 start_batch_run 对每个 input 各调一次 start_run（各受 require_passing_predict 服务端门约束）。设计意图：批量 = 勾多份各跑一次；某项失败显式上报不静默。",
+      "fe_modules": [
+        { "name": "测试输入解析（resolveRunInput）" }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{id}/runs/batch-run",
+          "purpose": "对勾选的多份 input 各起一次真跑，返回 batch_id。",
+          "mechanism_ref": "n4_run_mech",
+          "iface_ref": "iface-run-1"
+        },
+        {
+          "endpoint": "GET /api/batch/{batch_id}",
+          "purpose": "轮询批量进度（total/completed/逐子 run 状态）。",
+          "mechanism_ref": "n4_run_mech",
+          "iface_ref": "iface-run-2"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（多选 + runBatch + 1s 轮询 + completed/total/status + batchError 显式上报已接）。注：图级/节点级/嵌套 loop 的高级批量配置归引擎设计、前端 UI 等引擎方案，不在本基础多选批量范围。",
+      "impl_ref": "fn-11"
+    },
+    {
+      "n": 12,
+      "cap": "run-batch-naming-sequence",
+      "module": "批量与历史",
+      "func": "设计：当测试输入呈命名序列（chapter1 / chapter2 …）时，UI 建议自动把它们组成批量，省去用户逐个勾。",
+      "action": "无显式动作（I/O 面板检测到命名序列输入时，给出『自动批量』建议）。",
+      "fe_design": "I/O 面板的 TestInputsSection 检测输入文件名的序列模式（如 chapter1/2/3、ep1/2/3），识别到就给一个『把这组当批量跑』的建议入口，点一下自动勾选整组走 runBatch。设计意图（spec C10）：减少命名序列输入逐个勾选的操作；属批量的便捷增强。",
+      "fe_modules": [],
+      "be_contract": [],
+      "fe_status": "符合",
+      "be_status": "n/a",
+      "gap_brief": "符合设计（2026-06-20 代码已落地，design-audit vs code 核实，状态回填）：TestInputsSection.tsx:62-96 的 detectNamingSequence()（检测命名序列的函数）识别共享非空前缀 + 递增整数后缀（chapter1/2/3、ep1/2…），返回成员 >=2 的最大组；TestInputsSection.tsx:129-138 接线：算出序列、整组选满后 isSequenceFullySelected 隐藏建议、handleRunSequence 调 batch.runBatch(group.ids)；UI 渲染 TestInputsSection.tsx:227-242 一个 Sparkles 图标的『Run {label} ({n}) as batch』按钮一键选+跑整组。runBatch 接受显式 ids（useBatchRun.ts:75-76，targetIds = inputIds||selectedInputIds → POST /runs/batch-run），复用既有批量契约、零后端依赖。测试：TestInputsSection.test.ts（detectNamingSequence 套件，2026-06-20 通过）。",
+      "impl_ref": "fn-12"
+    },
+    {
+      "n": 13,
+      "cap": "run-autocommit",
+      "module": "真跑执行与落盘",
+      "func": "设计：一次 run 成功收尾后自动把成功运行产物 git 提交，结果写进 git_status（committed/locked/failed）。这条由 run 收尾触发，但归属 N6『保存与发布』（存档与发布都是 git 的功能）。",
+      "action": "无显式动作（run 状态变 success 时后端自动 commit）。",
+      "fe_design": "前端在本 surface 无操作——autocommit 全在后端：run 成功收尾 _finalize_terminal_run 在 status==success 分支调 _auto_commit_successful_run（用 GitLocalService.auto_commit_run 提交成功产物），结果写 metadata.git_status；git 锁冲突/命令失败只降级记 warning、不阻断；失败 run 不 commit。设计意图：autocommit 由 run 触发但语义归保存与发布——本页只标注其触发点与归属，UI/契约细节在 N6。",
+      "fe_modules": [],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/skills/{id}/runs",
+          "purpose": "run 成功收尾时后端 _auto_commit_successful_run 自动提交（git_status 透传到 RunMetadata）。",
+          "mechanism_ref": "n4_run_mech",
+          "iface_ref": "iface-run-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计（后端成功 run 自动 commit + git_status 已 live，失败 run 不 commit、git 冲突仅降级 warning）。归属 N6 保存与发布，本页仅标注触发点。注：前端 RunMetadata 类型已含 git_status（types.ts `git_status?: 'committed'|'locked'|'failed'|null`，后端 models/runs.py 亦有）——类型已对齐，真实剩余项是 N6 侧是否把 autocommit 结果在 UI 充分展示。",
+      "impl_ref": "fn-13"
+    }
+  ]
+}

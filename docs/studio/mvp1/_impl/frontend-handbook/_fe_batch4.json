@@ -1,0 +1,30 @@
+{
+ "n2-canvas#8": {
+  "name": "reconnect-drag-disconnect",
+  "fix_plan": "在 GraphCanvas.tsx 的 <ReactFlow>(画布主组件,行 499)上加 edgesReconnectable 并挂 onReconnect / onReconnectEnd 两个回调。onReconnect(把边端点改接到新目标):等价于对旧目标调 disconnectPhaseRefs(canvas-authoring.ts 从目标 phase 的 depends_on 移除某依赖的纯函数)+ 对新目标调 connectPhaseRefs(往 depends_on 追加来源 id 的纯函数),再走现成 onPersistConnection→serializeSkillGraph 写回。onReconnectEnd(端点拖离 handle 松手未命中):判为 disconnectPhaseRefs。复用 onConnect(行 429)里已有的端点合法性校验 + 乐观回滚模式。",
+  "verify": "GraphCanvas.test.tsx 加用例:模拟 onReconnect 触发后断言旧目标 depends_on 移除来源、新目标追加,且 serializeSkillGraph 被调一次;onReconnectEnd 未命中断言 disconnectPhaseRefs。UI:把一条边端点拖到别的节点,看 GRAPH.md depends_on 迁移;拖离松手看边删除。",
+  "evidence": "GraphCanvas.tsx:499-518 的 <ReactFlow> 只挂了 onConnect(506) 和 onEdgeContextMenu(516,右键 Disconnect 菜单);全仓 grep onReconnect/onReconnectEnd/edgesReconnectable 零命中(apps/studio/frontend/src 全空)。后端 serialize 端点已就绪 skills.py:453 POST /{skill_id}/graph/serialize、client.ts:162 serializeSkillGraph。",
+  "effort": "S"
+ },
+ "n4-run#12": {
+  "name": "run-batch-naming-sequence (命名序列自动批量建议)",
+  "fix_plan": "In TestInputsSection.tsx, add a pure helper that detects a numeric naming sequence over `items[].name` (shared prefix + incrementing integer suffix like chapter1/2/3, ep1/2/3) and returns the matched id group. When such a group is detected and not already fully selected, render a suggestion entry (a small inline button near the batch bar at TestInputsSection.tsx:152-170, e.g. 'Run chapter1–3 as batch') that on click selects the whole group (call batch.toggleInput for each id, or extend useBatchRun with a selectMany action) and then batch.runBatch(). No backend change — reuses the existing POST /runs/batch-run contract via useBatchRun.runBatch (hooks/useBatchRun.ts:73-90).",
+  "verify": "Unit: feed test inputs named chapter1/chapter2/chapter3, assert the sequence-detection helper returns those 3 ids and the suggestion entry renders (RED currently). UI: create inputs chapter1/2/3, confirm an 'auto-batch' suggestion appears; click it → whole group checked → runBatch fires POST /runs/batch-run with all 3 input_ids.",
+  "evidence": "TestInputsSection.tsx renders items with manual checkboxes only (lines 118-125, onChange→batch.toggleInput) and a static 'Run N as batch' button (lines 154-162); there is no inspection of item.name for sequence patterns. grep for chapter|sequence|naming|autoBatch|suggest across TestInputsSection.tsx + useBatchRun.ts returns NONE FOUND. useBatchRun (hooks/useBatchRun.ts:65,73,94-101) exposes only toggleInput/runBatch/selectedInputIds — no detectSequence/selectMany/suggest.",
+  "effort": "M"
+ },
+ "n4-trace#18": {
+  "name": "trace-doc-editor (只读完整 trace 文档编辑器)",
+  "fix_plan": "整条 trace 目前只有 VirtualTraceList 事件行 + ExpandedPayload 原始 JSON,无只读文档编辑器。补一个只读编辑器视图(复用 MonacoPanel.tsx / LazyMonacoPanel 的只读模式)把整条 trace 渲成轻度格式化、人能读的文档;focus 某节点时编辑器跳该节点范围(与 #17 联动);点状态只读看完整黑板详情、深层可折叠(D7 并入)。",
+  "verify": "单测:断言存在只读 trace 文档编辑器组件,渲染格式化文档而非 jsonl。UI:点『看完整 trace』,在只读编辑器读格式化文档,点节点跳范围。",
+  "evidence": "grep MonacoPanel/LazyMonacoPanel 在 trace/timeline 相关文件零命中(仅编辑器自身使用);TraceEventRow.tsx:141-166 唯一的 trace 详情渲染就是 pre JSON。",
+  "effort": "L"
+ },
+ "n6-history#2": {
+  "name": "history-auto-refresh (run 后 Local History 自动刷新)",
+  "fix_plan": "useLocalHistory(useRunHistory.ts:55)暴露了 refresh(SWR mutate revalidate,useRunHistory.ts:85),但当前只在 HistoryPanel.tsx:161 内部实例化、且 refresh 仅绑在手动刷新按钮(HistoryPanel.tsx:185 onRefresh)。run 完成时无人调用它。改法:复用 #1 的 run 完成监听点(Workspace.tsx 的 run_ended 边沿),在那里也调一次 useLocalHistory(currentSkillId).refresh()(需在 Workspace 实例化该 hook,目前 Workspace 未引用它),让后端新生成的 Auto run 快照(GET /history)自动进列表,不必手点 Refresh。注意 SWR key '/skills/{id}/history' 与 HistoryPanel 内的同一 key,mutate 会触达面板的 SWR 缓存。",
+  "verify": "Vitest:mock run_ended → 断言调用了 useLocalHistory 的 refresh(revalidate /history)。UI:真跑一次成功 run(有 .git 的 skill),不手动刷新,看新『Auto run』快照自动出现在 Local History。",
+  "evidence": "useRunHistory.ts:55-88 useLocalHistory 带 refresh: mutate;HistoryPanel.tsx:161 是唯一消费者,refresh 仅接到手动按钮(HistoryPanel.tsx:185)。grep 全 src/ 无任何 run_ended/run 完成处调用 useLocalHistory 或其 refresh。后端 GET /skills/{id}/history 已实现(skills.py:910-926,合并 git 历史与 release)。",
+  "effort": "S"
+ }
+}

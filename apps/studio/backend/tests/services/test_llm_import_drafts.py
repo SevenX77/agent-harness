@@ -1,20 +1,28 @@
 from __future__ import annotations
 
+import asyncio
+import threading
+from datetime import datetime
 from pathlib import Path
 
+import httpx
 import pytest
-from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint
+from app.core import config
+from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint, ProviderRoute
 from app.services.llm_credentials import load_credentials, save_credentials
 from app.services.llm_import_drafts import (
     DraftApplyConflict,
     DraftExpired,
+    RemoteCatalogSyncError,
     append_evidence_record,
     create_draft,
     load_draft,
     load_evidence_library,
     save_draft,
+    sync_remote_evidence_library,
 )
 from graph_agent_gateway.registry.schema import (
+    CapabilityValue,
     EndpointCandidate,
     EvidenceRecord,
     FieldSource,
@@ -56,6 +64,26 @@ def _draft() -> ProviderImportDraft:
             )
         },
     )
+
+
+def test_probe_catalog_path_uses_probe_catalog_filename_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import llm_paths
+
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", tmp_path)
+
+    probe_catalog_path = getattr(llm_paths, "probe_catalog_path", None)
+    assert probe_catalog_path is not None
+    assert probe_catalog_path() == tmp_path / "llm" / "llm_probe_catalog.json"
+
+
+def test_llm_probe_catalog_service_is_canonical_backend_import() -> None:
+    from app.services import llm_probe_catalog
+
+    assert llm_probe_catalog.load_evidence_library is load_evidence_library
+    assert llm_probe_catalog.sync_remote_probe_catalog is not None
 
 
 def test_import_draft_store_round_trips_multi_endpoint_draft(tmp_path: Path) -> None:
@@ -146,6 +174,182 @@ def test_evidence_library_appends_probe_failure_without_overwriting_success(
     assert library.evidence_records[1].reason == "provider rejected the request"
 
 
+def test_sync_remote_evidence_library_raises_on_remote_404(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store_path = tmp_path / "import_drafts.json"
+    cached = ProviderImportDraft(
+        draft_id="studio-evidence-library",
+        source={"kind": "studio_evidence_library"},
+        status="pending",
+        route_candidates={
+            "openai-official:gpt-5": RouteCandidate(
+                endpoint_id="openai-official",
+                route_slug="gpt-5",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
+                display_name="GPT-5",
+            )
+        },
+    )
+    save_draft(cached, path=store_path)
+
+    request = httpx.Request("GET", "https://example.invalid/llm_probe_catalog.json")
+    response = httpx.Response(404, request=request)
+
+    class FakeAsyncClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> FakeAsyncClient:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            pass
+
+        async def get(self, _url: str) -> httpx.Response:
+            return response
+
+    import app.services.llm_import_drafts as import_drafts
+
+    monkeypatch.setattr(import_drafts.httpx, "AsyncClient", FakeAsyncClient)
+
+    with pytest.raises(RemoteCatalogSyncError, match="404"):
+        asyncio.run(
+            sync_remote_evidence_library(
+                url=str(request.url),
+                path=store_path,
+            )
+        )
+
+    assert load_evidence_library(path=store_path).route_candidates == cached.route_candidates
+
+
+def test_sync_remote_evidence_library_with_metadata_reports_source_and_new_records(
+    tmp_path: Path,
+) -> None:
+    import app.services.llm_import_drafts as import_drafts
+
+    sync_with_metadata = getattr(import_drafts, "sync_remote_evidence_library_with_metadata", None)
+    assert sync_with_metadata is not None
+
+    store_path = tmp_path / "import_drafts.json"
+    source_url = "https://raw.githubusercontent.com/SevenX77/studio-llm-model-catalog/main/llm_probe_catalog.json"
+    remote_draft = ProviderImportDraft(
+        draft_id="studio-evidence-library",
+        source={"kind": "studio_evidence_library", "location": "github"},
+        status="pending",
+        route_candidates={
+            "openai-official:gpt-5": RouteCandidate(
+                endpoint_id="openai-official",
+                route_slug="gpt-5",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
+                display_name="GPT-5",
+            )
+        },
+        evidence_records=[
+            EvidenceRecord(
+                evidence_id="evidence-remote",
+                evidence_type="probe",
+                trust_state="probe-verified",
+                observed_at="2026-05-31T10:00:00+00:00",
+                endpoint_id="openai-official",
+                route_id="openai-official:gpt-5",
+                model_id="gpt-5",
+                provider_model_id="gpt-5",
+                method_id="openai_responses",
+                request_mapper_id="openai_responses_text",
+                probe_status="ok",
+                scope={"endpoint_id": "openai-official", "route_id": "openai-official:gpt-5"},
+                successful_probe={"profile_count": 1},
+            )
+        ],
+    )
+
+    result = asyncio.run(
+        sync_with_metadata(
+            data={"drafts": {"studio-evidence-library": remote_draft.model_dump(mode="json")}},
+            url=source_url,
+            path=store_path,
+        )
+    )
+
+    assert result.draft.draft_id == "studio-evidence-library"
+    source = result.catalog_source.model_dump(mode="json")
+    assert source == {
+        "enabled": True,
+        "source_url": source_url,
+        "fetched_at": source["fetched_at"],
+        "etag": None,
+        "cache": False,
+        "route_candidates_count": 1,
+        "evidence_records_count": 1,
+        "new_records_count": 1,
+        "last_error": None,
+    }
+    datetime.fromisoformat(source["fetched_at"])
+
+
+def test_apply_draft_marks_applied_without_losing_interleaved_evidence_append(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.services.llm_import_drafts as import_drafts
+    from app.services.llm_import_drafts import apply_draft
+
+    store_path = tmp_path / "import_drafts.json"
+    credentials_path = tmp_path / "llm_credentials.json"
+    save_draft(_draft(), path=store_path)
+    interleaved = EvidenceRecord(
+        evidence_id="evidence-interleaved",
+        evidence_type="probe",
+        trust_state="probe-verified",
+        endpoint_id="openai-direct",
+        route_id="openai-direct:gpt-5",
+        model_id="gpt-5",
+        provider_model_id="gpt-5",
+        probe_status="ok",
+    )
+    original_save_all = import_drafts.ImportDraftStore.save_all
+    injected = False
+    append_threads: list[threading.Thread] = []
+
+    def _save_all_with_interleaved_append(self, drafts: dict[str, ProviderImportDraft]) -> None:
+        nonlocal injected
+        lock_owned = getattr(self._write_lock, "_is_owned", lambda: False)()
+        draft = drafts.get("draft-1")
+        if not injected and draft is not None and draft.status == "applied":
+            injected = True
+            if lock_owned:
+                append_started = threading.Event()
+
+                def _append_after_apply_lock_releases() -> None:
+                    append_started.set()
+                    append_evidence_record(interleaved, path=store_path)
+
+                thread = threading.Thread(target=_append_after_apply_lock_releases)
+                append_threads.append(thread)
+                thread.start()
+                assert append_started.wait(timeout=2)
+            else:
+                append_evidence_record(interleaved, path=store_path)
+        original_save_all(self, drafts)
+
+    monkeypatch.setattr(import_drafts.ImportDraftStore, "save_all", _save_all_with_interleaved_append)
+
+    applied = apply_draft("draft-1", path=store_path, credentials_path=credentials_path)
+    for thread in append_threads:
+        thread.join(timeout=2)
+        assert not thread.is_alive()
+
+    evidence_ids = [record.evidence_id for record in load_evidence_library(path=store_path).evidence_records]
+    assert applied.status == "applied"
+    assert injected is True
+    assert evidence_ids == ["evidence-interleaved"]
+
+
 def test_expired_draft_apply_is_rejected(tmp_path: Path) -> None:
     from app.services.llm_import_drafts import apply_draft
 
@@ -192,3 +396,133 @@ def test_active_endpoint_collision_requires_explicit_choice(tmp_path: Path) -> N
     saved = load_credentials(credentials_path)
     assert saved.provider_endpoints["openai-direct"].api_key.get_secret_value() == "secret"
     assert "openai-direct:gpt-5" in saved.provider_routes
+
+
+def test_apply_draft_rejects_route_candidates_missing_materialized_endpoint(tmp_path: Path) -> None:
+    from app.services.llm_import_drafts import apply_draft
+
+    store_path = tmp_path / "import_drafts.json"
+    credentials_path = tmp_path / "llm_credentials.json"
+    draft = _draft().model_copy(
+        update={
+            "endpoint_candidates": {},
+            "route_candidates": {
+                "missing-endpoint:gpt-5": RouteCandidate(
+                    endpoint_id="missing-endpoint",
+                    route_slug="gpt-5",
+                    provider_model_id="gpt-5",
+                    canonical_id="gpt-5",
+                    display_name="GPT-5",
+                )
+            },
+        }
+    )
+    save_draft(draft, path=store_path)
+
+    with pytest.raises(DraftApplyConflict, match="missing endpoint"):
+        apply_draft("draft-1", path=store_path, credentials_path=credentials_path)
+
+    saved = load_credentials(credentials_path)
+    assert saved.provider_routes == {}
+
+
+def test_active_route_collision_requires_explicit_choice_before_apply(tmp_path: Path) -> None:
+    from app.services.llm_import_drafts import apply_draft
+
+    store_path = tmp_path / "import_drafts.json"
+    credentials_path = tmp_path / "llm_credentials.json"
+    save_credentials(
+        LLMCredentialsFile(
+            provider_routes={
+                "openai-direct:gpt-5": ProviderRoute(
+                    route_id="openai-direct:gpt-5",
+                    endpoint_id="openai-direct",
+                    route_slug="gpt-5",
+                    provider_model_id="legacy-gpt-5",
+                    canonical_id="legacy/gpt-5",
+                    display_name="Legacy GPT-5",
+                    status="verified",
+                )
+            }
+        ),
+        credentials_path,
+    )
+    save_draft(_draft(), path=store_path)
+
+    with pytest.raises(DraftApplyConflict, match="active routes already exist: openai-direct:gpt-5"):
+        apply_draft("draft-1", path=store_path, credentials_path=credentials_path)
+
+    saved = load_credentials(credentials_path)
+    assert saved.provider_routes["openai-direct:gpt-5"].provider_model_id == "legacy-gpt-5"
+
+
+def test_apply_draft_uses_gateway_candidate_materialization_for_canonical_base_url(
+    tmp_path: Path,
+) -> None:
+    from app.services.llm_import_drafts import apply_draft
+
+    store_path = tmp_path / "import_drafts.json"
+    credentials_path = tmp_path / "llm_credentials.json"
+    draft = _draft().model_copy(
+        update={
+            "endpoint_candidates": {
+                "openai-direct": _draft()
+                .endpoint_candidates["openai-direct"]
+                .model_copy(
+                    update={
+                        "protocol": "anthropic_compatible",
+                        "base_url": "https://llm.wavespeed.ai/v1/",
+                    }
+                )
+            }
+        }
+    )
+    save_draft(draft, path=store_path)
+
+    apply_draft("draft-1", path=store_path, credentials_path=credentials_path)
+
+    saved = load_credentials(credentials_path)
+    assert saved.provider_endpoints["openai-direct"].base_url == "https://llm.wavespeed.ai"
+    assert saved.provider_routes["openai-direct:gpt-5"].status == "unverified_manual"
+
+
+def test_apply_draft_preserves_secret_display_name_capabilities_and_metadata(tmp_path: Path) -> None:
+    from app.services.llm_import_drafts import apply_draft
+
+    store_path = tmp_path / "import_drafts.json"
+    credentials_path = tmp_path / "llm_credentials.json"
+    draft = _draft().model_copy(
+        update={
+            "endpoint_candidates": {
+                "openai-direct": _draft()
+                .endpoint_candidates["openai-direct"]
+                .model_copy(update={"metadata": {"region": "us-west"}})
+            },
+            "route_candidates": {
+                "openai-direct:gpt-5": _draft()
+                .route_candidates["openai-direct:gpt-5"]
+                .model_copy(
+                    update={
+                        "capabilities": {
+                            "max_output_tokens": CapabilityValue(value={"max": 128000}, source="agent_draft")
+                        },
+                        "metadata": {"family": "gpt"},
+                    }
+                )
+            },
+        }
+    )
+    save_draft(draft, path=store_path)
+
+    apply_draft("draft-1", path=store_path, credentials_path=credentials_path)
+
+    saved = load_credentials(credentials_path)
+    endpoint = saved.provider_endpoints["openai-direct"]
+    route = saved.provider_routes["openai-direct:gpt-5"]
+    assert endpoint.api_key is not None
+    assert endpoint.api_key.get_secret_value() == "secret"
+    assert endpoint.display_name == "OpenAI Direct"
+    assert endpoint.metadata == {"region": "us-west"}
+    assert route.display_name == "GPT-5"
+    assert route.capabilities["max_output_tokens"].value == {"max": 128000}
+    assert route.metadata == {"family": "gpt"}

@@ -1,7 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import {
-  CopilotTab,
   SettingsPageContent,
   draftFromAddProviderSubmission,
   draftsFromCredentials,
@@ -10,10 +9,11 @@ import {
   moveProviderInRole,
   modelGroupsReferenceMissingCredentialProviders,
   notableProviderKeyForDraft,
-  officialProviderProgressToastMessage,
   officialProviderTestSummary,
   officialProviderDrafts,
   providerDraftForAction,
+  providerEndpointDraftsForAction,
+  shouldSyncRemoteModelCatalog,
   isStaleRouteReferenceError,
   refreshLoadedLlmRolesProjection,
   providerTestParamsFingerprint,
@@ -130,17 +130,20 @@ function baseViewProps(
       userId: 'alice',
       giteaHost: 'https://gitea.example.com',
       defaultSkillsDirectory: '/Users/alice/Skills',
+      language: 'en',
+      remoteModelCatalogEnabled: true,
       isLoading: false,
       saveStatus: 'idle',
       setUserId: vi.fn(),
       setGiteaHost: vi.fn(),
       setDefaultSkillsDirectory: vi.fn(),
+      setLanguage: vi.fn(),
+      setRemoteModelCatalogEnabled: vi.fn(),
     },
     onClose: vi.fn(),
     onTabChange: vi.fn(),
     onProviderFieldChange: vi.fn(),
     onGetProviderModels: vi.fn(),
-    onTestProviderEndpoint: vi.fn(),
     onDeleteProvider: vi.fn(),
     onAddProvider: vi.fn(),
     onProviderModelsUpdated: vi.fn(),
@@ -148,6 +151,8 @@ function baseViewProps(
     onDeleteRole: vi.fn(),
     onDeleteModelBundle: vi.fn(),
     onBeforeRoleTest: vi.fn().mockResolvedValue(null),
+    onAfterRoleTest: vi.fn(),
+    onNavigateToApiKeys: vi.fn(),
     ...overrides,
   }
 }
@@ -174,6 +179,31 @@ describe('draftsFromCredentials', () => {
   })
 })
 
+describe('remote model catalog auto-sync policy', () => {
+  it('runs only after settings load, when enabled, and before the current on-cycle has synced', () => {
+    expect(shouldSyncRemoteModelCatalog({
+      settingsLoading: true,
+      enabled: true,
+      alreadySynced: false,
+    })).toBe(false)
+    expect(shouldSyncRemoteModelCatalog({
+      settingsLoading: false,
+      enabled: false,
+      alreadySynced: false,
+    })).toBe(false)
+    expect(shouldSyncRemoteModelCatalog({
+      settingsLoading: false,
+      enabled: true,
+      alreadySynced: true,
+    })).toBe(false)
+    expect(shouldSyncRemoteModelCatalog({
+      settingsLoading: false,
+      enabled: true,
+      alreadySynced: false,
+    })).toBe(true)
+  })
+})
+
 describe('refreshLoadedLlmRolesProjection', () => {
   it('refreshes loaded roles and model groups after credential route changes', async () => {
     const nextRoles: RolesData = {
@@ -186,7 +216,7 @@ describe('refreshLoadedLlmRolesProjection', () => {
         canonical_id: 'gpt-5',
         display_name: 'GPT-5',
         provider_models: [],
-        status_summary: { ready: 0, untested: 0, cooling_down: 0, needs_setup: 0, off: 0 },
+        status_summary: { ready: 0, untested: 0, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
         capability_summary: {
           capability_known_count: 0,
           thinking: 'unknown',
@@ -273,7 +303,7 @@ describe('modelGroupsReferenceMissingCredentialProviders', () => {
             capabilities: {},
           },
         ],
-        status_summary: { ready: 0, untested: 1, cooling_down: 0, needs_setup: 0, off: 0 },
+        status_summary: { ready: 0, untested: 1, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
         capability_summary: {
           capability_known_count: 0,
           thinking: 'unknown',
@@ -303,7 +333,7 @@ describe('modelGroupsReferenceMissingCredentialProviders', () => {
             capabilities: {},
           },
         ],
-        status_summary: { ready: 1, untested: 0, cooling_down: 0, needs_setup: 0, off: 0 },
+        status_summary: { ready: 1, untested: 0, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
         capability_summary: {
           capability_known_count: 1,
           thinking: 'supported',
@@ -337,10 +367,34 @@ describe('Add Provider flow helpers', () => {
       name: 'My OpenRouter',
       provider_type: 'openai_compatible',
       base_url: 'https://openrouter.ai/api/v1',
+      base_urls: [{
+        id: 'custom-test',
+        value: 'https://openrouter.ai/api/v1',
+        provider_type: 'openai_compatible',
+        endpoint_ids: { openai_compatible: 'custom-test' },
+      }],
       api_key: 'sk-openrouter',
       isTesting: false,
       testingAction: null,
     })
+  })
+
+  it('keeps ark_runtime scoped to the official Ark provider, not third-party URLs', () => {
+    expect(inferProviderType('ark', 'https://ark.cn-beijing.volces.com/api/v3', 'Ark Official')).toBe('ark_runtime')
+    expect(draftFromAddProviderSubmission({
+      providerCode: 'my-ark-proxy',
+      name: 'My Ark Proxy',
+      baseUrl: 'https://ark.example.test/v1',
+      apiKey: 'sk-proxy',
+      type: 'third-party',
+    }, 'custom-ark-proxy').provider_type).toBe('openai_compatible')
+    expect(draftFromAddProviderSubmission({
+      providerCode: 'my-volces-proxy',
+      name: 'My Volces Proxy',
+      baseUrl: 'https://volces.example.test/v1',
+      apiKey: 'sk-proxy',
+      type: 'third-party',
+    }, 'custom-volces-proxy').provider_type).toBe('openai_compatible')
   })
 
   it('infers anthropic-compatible protocol from third-party name or base URL', () => {
@@ -379,13 +433,21 @@ describe('Add Provider flow helpers', () => {
       isTesting: false,
     })).toBe('official')
     expect(inferProviderKind({
-      id: 'ark-123',
-      name: 'Ark',
+      id: 'ark-official',
+      name: 'Ark Official',
       provider_type: 'ark_runtime',
       base_url: 'https://ark.cn-beijing.volces.com/api/v3',
       api_key: 'sk',
       isTesting: false,
     })).toBe('official')
+    expect(inferProviderKind({
+      id: 'ark-123',
+      name: 'Ark proxy',
+      provider_type: 'openai_compatible',
+      base_url: 'https://ark.example.test/v1',
+      api_key: 'sk',
+      isTesting: false,
+    })).toBe('third-party')
     expect(inferProviderKind({
       id: 'custom-1',
       name: 'OpenRouter',
@@ -410,6 +472,51 @@ describe('Add Provider flow helpers', () => {
       'OC_DS',
       'WS_LLM',
       'CUSTOM_AB12CD34',
+    ])
+  })
+
+  it('keeps third-party endpoint ids in their intended protocol slots when runtime detection mutates protocol', () => {
+    const [draft] = draftsFromCredentials({
+      providers: [
+        {
+          id: 'anthropic-qnaigc-com-openai-6a75652f0b',
+          name: 'Qiniu',
+          api_key: 'sk-qiniu',
+          base_url: 'https://anthropic.qnaigc.com',
+          provider_type: 'anthropic_compatible',
+          last_test_status: 'ok',
+        },
+        {
+          id: 'anthropic-qnaigc-com-anthropic-38963c9239',
+          name: 'Qiniu',
+          api_key: 'sk-qiniu',
+          base_url: 'https://anthropic.qnaigc.com',
+          provider_type: 'anthropic_compatible',
+          last_test_status: 'ok',
+        },
+        {
+          id: 'anthropic-qnaigc-com-google-ab16819307',
+          name: 'Qiniu',
+          api_key: 'sk-qiniu',
+          base_url: 'https://anthropic.qnaigc.com',
+          provider_type: 'google_genai',
+          last_test_status: 'error',
+        },
+      ],
+    })
+
+    expect(draft.base_urls?.[0].endpoint_ids).toMatchObject({
+      openai_compatible: 'anthropic-qnaigc-com-openai-6a75652f0b',
+      anthropic_compatible: 'anthropic-qnaigc-com-anthropic-38963c9239',
+      google_genai: 'anthropic-qnaigc-com-google-ab16819307',
+    })
+    expect(providerEndpointDraftsForAction(draft).map((endpointDraft) => ({
+      id: endpointDraft.id,
+      provider_type: endpointDraft.provider_type,
+    }))).toEqual([
+      { id: 'anthropic-qnaigc-com-openai-6a75652f0b', provider_type: 'openai_compatible' },
+      { id: 'anthropic-qnaigc-com-anthropic-38963c9239', provider_type: 'anthropic_compatible' },
+      { id: 'anthropic-qnaigc-com-google-ab16819307', provider_type: 'google_genai' },
     ])
   })
 
@@ -515,6 +622,58 @@ describe('Add Provider flow helpers', () => {
         available_sdks: ['openai_compatible'],
       },
     ])
+  })
+
+  it('replaces stale provider models with the current endpoint test response even when the endpoint fails', () => {
+    const draft = providerDraftForAction([], 'openai-official')
+    expect(draft).not.toBeNull()
+    const current: CredentialsState = {
+      providers: [
+        {
+          id: 'openai-official',
+          name: 'OpenAI Official',
+          api_key: 'sk-live',
+          base_url: 'https://api.openai.com',
+          provider_type: 'openai_compatible',
+          last_test_status: 'ok',
+          available_models: [{ id: 'stale-green-model', status: 'verified' }],
+          available_sdks: ['openai_compatible'],
+          test_results: [{
+            params_fingerprint: providerTestParamsFingerprint(draft!),
+            base_url: 'https://api.openai.com',
+            provider_type: 'openai_compatible',
+            last_test_status: 'ok',
+            available_models: [{ id: 'stale-green-model', status: 'verified' }],
+            available_sdks: ['openai_compatible'],
+          }],
+        },
+      ],
+    }
+
+    const next = upsertProviderTestResponse(current, draft!, {
+      status: 'error',
+      message: 'Endpoint failed; model state is not proven.',
+      error_code: 'endpoint_test_failed',
+      available_models: [{
+        id: 'current-model',
+        status: 'failed',
+        ui_state: 'failed',
+        capabilities: { reason_code: 'error' },
+      }],
+      available_sdks: [],
+    })
+
+    expect(next.providers[0]).toMatchObject({
+      last_test_status: 'error',
+      available_models: [{ id: 'current-model', status: 'failed', ui_state: 'failed' }],
+      available_sdks: [],
+    })
+    expect(next.providers[0].test_results?.at(-1)).toMatchObject({
+      params_fingerprint: providerTestParamsFingerprint(draft!),
+      last_test_status: 'error',
+      available_models: [{ id: 'current-model', status: 'failed', ui_state: 'failed' }],
+      available_sdks: [],
+    })
   })
 
   it('adds manual model results for a newly materialized provider instead of dropping them', () => {
@@ -649,22 +808,6 @@ describe('Add Provider flow helpers', () => {
 })
 
 describe('SettingsPageContent (api_keys)', () => {
-  it('describes official provider catalog progress without generation-probe wording', () => {
-    expect(officialProviderProgressToastMessage('Anthropic Official', {
-      job_id: 'job-1',
-      endpoint_id: 'anthropic-official',
-      status: 'running',
-      total_model_count: 8,
-      tested_model_count: 0,
-      verified_route_count: 0,
-      failed_model_count: 0,
-      catalog_only_count: 0,
-      message: 'Reading provider catalog.',
-      available_models: [],
-      available_sdks: ['anthropic_compatible'],
-    })).toBe('Loading Anthropic Official route candidates (8 listed)...')
-  })
-
   it('summarizes official provider Test results as catalog hydration, not generation probing', () => {
     expect(officialProviderTestSummary([
       { id: 'claude-haiku', status: 'verified' },
@@ -675,6 +818,16 @@ describe('SettingsPageContent (api_keys)', () => {
     ])).toEqual({
       kind: 'success',
       message: 'Catalog loaded (2 already verified, 3 not generation-probe verified)',
+    })
+  })
+
+  it('treats reachable official provider catalogs as success even before route verification', () => {
+    expect(officialProviderTestSummary([
+      { id: 'claude-opus-4-1', status: 'unverified_manual' },
+      { id: 'claude-sonnet' },
+    ])).toEqual({
+      kind: 'success',
+      message: 'Catalog loaded. Route candidates are listed.',
     })
   })
 
@@ -711,42 +864,6 @@ describe('SettingsPageContent (api_keys)', () => {
     const copilotHtml = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ activeTab: 'copilot' })} />)
     expect(copilotHtml).toContain('max-w-5xl')
     expect(copilotHtml).toContain('max-w-3xl')
-  })
-
-  it('renders Copilot as a standalone Settings page with SDK compatibility states', () => {
-    const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ activeTab: 'copilot' })} />)
-
-    expect(html).toContain('data-copilot-settings-page="true"')
-    expect(html).toContain('Copilot</button>')
-    expect(html).toContain('data-slot="catalog-accordion"')
-    expect(html).toContain('Claude Agent SDK')
-    expect(html).not.toContain('Copilot Roles')
-    expect(html).toContain('Opus 4.7 Copilot')
-    expect(html).toContain('DeepSeek V4 Copilot')
-    expect(html).toContain('Claude Agent SDK Ready')
-    expect(html).toContain('Claude Agent SDK Not tested')
-    expect(html).toContain('data-copilot-model-group="true"')
-    expect(html).toContain('data-copilot-provider-grid="true"')
-    expect(html).toContain('data-copilot-provider-card="true"')
-    expect(html).toContain('data-copilot-model-add-trigger="true"')
-    expect(html).toContain('Add model')
-    expect(html).toContain('DeepSeek Official')
-    expect(html).toContain('Ark Official')
-    expect(html).not.toContain('aria-label="Copilot roles"')
-    expect(html).not.toContain('data-copilot-sdk-select="true"')
-    expect(html).not.toContain('openai_chat_completions')
-  })
-
-  it('renders the Copilot tab component without depending on LLM Roles data', () => {
-    const html = renderToStaticMarkup(<CopilotTab />)
-
-    expect(html).toContain('data-copilot-role-card="true"')
-    expect(html.match(/data-copilot-role-card="true"/g)).toHaveLength(2)
-    expect(html.match(/data-copilot-role-source="built_in"/g)).toHaveLength(2)
-    expect(html).toContain('data-copilot-model-name="true"')
-    expect(html).toContain('data-variant="default"')
-    expect(html).toContain('Test</button>')
-    expect(html).not.toContain('data-copilot-role-delete-trigger="true"')
   })
 
   it('renders provider skeletons while credentials are loading', () => {
@@ -795,7 +912,7 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).toContain('Gemini Official')
     expect(html).toContain('DeepSeek Official')
     expect(html).toContain('Ark Official')
-    expect(html).not.toContain('Not configured')
+    expect(html).toContain('Available Endpoints:')
     expect(html).toContain('Third-party Providers')
     expect(html).toContain('No third-party providers configured.')
     expect(html).toContain('Add Provider')
@@ -824,12 +941,126 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).toContain('Test')
   })
 
-  it('renders API key inputs as native password values with password-manager ignore attributes', () => {
+  it('renders local probe catalog status without implying automatic sharing', () => {
+    const html = renderToStaticMarkup(
+      <SettingsPageContent
+        {...baseViewProps({
+          credentials: {
+            ...credentials,
+            probe_catalog: {
+              local_evidence_records_count: 3,
+              local_verified_records_count: 2,
+              local_failed_records_count: 1,
+              local_route_candidates_count: 0,
+              remote_catalog_source: {
+                enabled: true,
+                source_url: 'https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_probe_catalog.json',
+                fetched_at: '2026-06-20T23:00:00+00:00',
+                etag: 'W/test',
+                cache: false,
+                route_candidates_count: 7,
+                evidence_records_count: 11,
+                new_records_count: 4,
+                last_error: null,
+              },
+              community_catalog: {
+                synced: true,
+                generated_at: '2026-06-20T23:00:00+00:00',
+                protocol_major: 1,
+                record_count: 0,
+                entries: [],
+              },
+              sharing: {
+                mode: 'local_export_only',
+                auto_upload_enabled: false,
+                message: 'Local probe evidence is recorded on this machine. MVP1 does not auto-upload community catalog evidence.',
+              },
+            },
+          },
+        })}
+      />,
+    )
+
+    expect(html).toContain('Local probe evidence')
+    expect(html).toContain('2 verified')
+    expect(html).toContain('1 failed')
+    expect(html).toContain('Remote catalog synced')
+    expect(html).toContain('Local only')
+    expect(html).toContain('MVP1 does not auto-upload')
+    expect(html).not.toContain('Pull Request')
+  })
+
+  it('surfaces verified community catalog routes as a separate advisory layer', () => {
+    const html = renderToStaticMarkup(
+      <SettingsPageContent
+        {...baseViewProps({
+          credentials: {
+            ...credentials,
+            probe_catalog: {
+              local_evidence_records_count: 1,
+              local_verified_records_count: 1,
+              local_failed_records_count: 0,
+              local_route_candidates_count: 0,
+              remote_catalog_source: null,
+              community_catalog: {
+                synced: true,
+                generated_at: '2026-06-26T14:40:44Z',
+                protocol_major: 1,
+                record_count: 2,
+                entries: [
+                  {
+                    public_base_url: 'https://api.deepseek.com',
+                    model_id: 'deepseek-v4-pro',
+                    capability_family: 'language_reasoning',
+                    method_id: 'deepseek_chat_completions',
+                    observed_at: '2026-06-26T09:33:40+00:00',
+                  },
+                  {
+                    public_base_url: 'https://api.moonshot.cn/v1',
+                    model_id: 'kimi-k2',
+                    capability_family: 'language_reasoning',
+                    method_id: 'openai_chat_completions',
+                    observed_at: '2026-06-25T08:00:00+00:00',
+                  },
+                ],
+              },
+              sharing: {
+                mode: 'local_export_only',
+                auto_upload_enabled: false,
+                message:
+                  'Local probe evidence is recorded on this machine. MVP1 does not auto-upload community catalog evidence.',
+              },
+            },
+          },
+        })}
+      />,
+    )
+
+    // Verified read path drives the synced badge (not the legacy remote source).
+    expect(html).toContain('Remote catalog synced')
+    expect(html).toContain('2 community-verified')
+    // Advisory layer: community-observed, explicitly not the user's own routes.
+    expect(html).toContain('Community-verified routes')
+    expect(html).toContain('advisory')
+    expect(html).toContain('https://api.deepseek.com')
+    expect(html).toContain('deepseek-v4-pro')
+    expect(html).toContain('https://api.moonshot.cn/v1')
+    expect(html).toContain('kimi-k2')
+  })
+
+  it('renders API key inputs as explicit masked text values (never native password) with password-manager ignore attributes', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
 
-    expect(html).toContain('type="password"')
-    expect(html).toContain('value="sk-deepseek"')
+    // atom-22 contract: secret field is always type=text, never password. Hidden
+    // fields render same-length bullets so the real secret is not present in DOM
+    // text while browser/extension password managers still ignore the field.
+    expect(html).toContain('type="text"')
+    expect(html).not.toContain('type="password"')
+    expect(html).not.toContain('mask-input')
+    expect(html).not.toContain('value="sk-deepseek"')
+    expect(html).toContain(`value="${'•'.repeat('sk-deepseek'.length)}"`)
     expect(html).toContain('name="provider-secret-DS"')
+    expect(html).toContain('readOnly=""')
     expect(html).toContain('autoComplete="off"')
     expect(html).toContain('data-1p-ignore=""')
     expect(html).toContain('data-lpignore="true"')
@@ -840,7 +1071,10 @@ describe('SettingsPageContent (api_keys)', () => {
 
   it('hides official Test outcome badges but keeps third-party outcomes visible', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
-    expect(html).not.toContain('Connected')
+    const officialHeaderStart = html.indexOf('DeepSeek Official')
+    const officialHeaderEnd = html.indexOf('data-slot="card-content"', officialHeaderStart)
+    const officialHeaderHtml = html.slice(officialHeaderStart, officialHeaderEnd)
+    expect(officialHeaderHtml).not.toContain('Connected')
 
     const withThirdPartyOutcome: CredentialsState = {
       providers: credentials.providers.map((provider) => (
@@ -858,7 +1092,10 @@ describe('SettingsPageContent (api_keys)', () => {
       />,
     )
 
-    expect(htmlWithThirdPartyOutcome).toContain('Connected')
+    const thirdPartyHeaderStart = htmlWithThirdPartyOutcome.indexOf('My Custom OpenAI')
+    const thirdPartyHeaderEnd = htmlWithThirdPartyOutcome.indexOf('data-slot="card-content"', thirdPartyHeaderStart)
+    const thirdPartyHeaderHtml = htmlWithThirdPartyOutcome.slice(thirdPartyHeaderStart, thirdPartyHeaderEnd)
+    expect(thirdPartyHeaderHtml).toContain('Connected')
   })
 
   it('renders a Delete button/action menu for each user-owned provider', () => {

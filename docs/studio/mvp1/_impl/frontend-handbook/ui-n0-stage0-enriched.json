@@ -1,0 +1,114 @@
+{
+  "stage": 0,
+  "region": "settings:shell",
+  "atoms": [
+    {
+      "n": 1,
+      "cap": "open-settings-overlay",
+      "track": null,
+      "marker": "live",
+      "func": "让用户从工作区进入 Settings 配置面板，且不打断当前工作（画布被盖住但工作区不卸载）。",
+      "action": "点左侧 Toolbar 最下方的 Settings 齿轮图标。",
+      "fe": "Toolbar 的 Settings 按钮（Toolbar.tsx:80-95，齿轮图标 Button，onClick 调 onSettingsOpen）触发 Workspace 把 settingsOpen 置 true（Workspace.tsx:815）；面板在画布槽位条件渲染 <SettingsPage>（Workspace.tsx:859-860），只替换中间 canvas，左侧 Toolbar/Panels 与右侧 Copilot 仍挂载。SettingsPageContent（SettingsPageContent.tsx:42-48）是普通 flex 容器、非真 modal，无 backdrop / focus-trap。",
+      "be": "无",
+      "api": "无",
+      "gap": "符合设计意图（overlay 盖画布、不卸载工作区），但 §7.0 标注的现状偏差成立：非真 modal，左右栏仍可交互，无 backdrop / focus-trap。"
+    },
+    {
+      "n": 2,
+      "cap": "settings-skeleton",
+      "track": null,
+      "marker": "live",
+      "func": "数据未到位时给用户占位骨架屏，避免空白等待（available models 巨长列表是 NFR 首要场景）。",
+      "action": "无显式触发，进入 Settings 各 tab、数据加载期间自动出现。",
+      "fe": "无壳层级（SettingsPageContent 顶层）骨架，完全下放给各 tab 自管：API Keys 用 ProviderListSkeleton count={5}（ApiKeysTab.tsx:62-63，凭证加载中渲染 5 张占位卡）；LLM Roles 用 LlmRolesModelsSkeleton + LlmRolesRolesSkeleton（LlmRolesTab.tsx:509-511 与定义 :699，侧栏与角色卡两块骨架）；General 无骨架，仅用 disabled 锁字段（GeneralTab.tsx:51 等，appSettings.isLoading 时禁用输入）。",
+      "be": "无",
+      "api": "无",
+      "gap": "偏差（§7.0 ⚠️）：无壳层级骨架，完全下放各 tab 自管；General tab 甚至没有骨架只 disable 字段，壳层缺统一 loading 表现。"
+    },
+    {
+      "n": 3,
+      "cap": "settings-tab-switch",
+      "track": null,
+      "marker": "live",
+      "func": "让用户在四个配置区（General / API Keys / Roles / Copilot）之间切换，切到哪个才加载哪个的数据（懒加载）。",
+      "action": "点左侧导航栏里某个 tab 名（General / API Keys / LLM Roles / Copilot）。",
+      "fe": "NavButton 导航（SettingsPageContent.tsx:51-64，四个 NavButton onClick 调 onTabChange）改 activeTab 状态（SettingsPage.tsx:348 useState + :824 onTabChange=setActiveTab）；内容区按 activeTab 条件渲染对应 tab（SettingsPageContent.tsx:66-122）。懒加载由 activeTab 驱动的 effect 实现：进 api_keys 才 hydrate 凭证明文（SettingsPage.tsx:509-533），进 llm_roles/copilot 才拉 roles + model groups（SettingsPage.tsx:535-550）。",
+      "be": "无（切 tab 本身无后端动作；切到才触发的数据加载属各 tab 的 GET，不在壳层）。",
+      "api": "无",
+      "gap": "符合设计。"
+    },
+    {
+      "n": 4,
+      "cap": "settings-save-badge",
+      "track": null,
+      "marker": "live",
+      "func": "改动字段后，让用户在右上角看到保存状态反馈（Pending / Saving / Saved / Failed），确认即填即存生效。",
+      "action": "无显式触发，改任意字段后即填即存，徽章随保存状态自动变化。",
+      "fe": "三 tab 各自在自己的 SectionTitle 右上 trailing 槽放一个 SaveStatusBadge，没有壳层全局保存态：General（GeneralTab.tsx:38，status=appSettings.saveStatus）、API Keys（ApiKeysTab.tsx:59，status=saveStatus）、LLM Roles（LlmRolesTab.tsx:530，status=saveStatus）。另有一份近重复的 RoleSaveStatusBadge（RoleBadges.tsx:5）。壳层顶栏（SettingsPageContent.tsx:43-48）只有标题 + X 关闭，无任何保存徽章。",
+      "be": "无",
+      "api": "无",
+      "gap": "偏差（§7.0 ⚠️）：三 tab 各画各的徽章，顶栏无全局保存态；且 SaveStatusBadge 与 RoleSaveStatusBadge / AppSettingsSaveStatusBadge 是多份近重复组件，未统一（设计要求四页共用一个 save-status badge，见 §3.5 横切登记）。"
+    },
+    {
+      "n": 5,
+      "cap": "ws-registry-refresh",
+      "track": null,
+      "marker": "live",
+      "func": "外部进程改了 credentials（凭证）时，通过 WebSocket 事件自动刷新 Settings 里的凭证视图，无需用户手动重载。",
+      "action": "无用户动作（被动）：外部改 credentials → 后端推 WS 事件 → 前端自动重拉。",
+      "fe": "SettingsPage 建一条 WebSocket 连 /ws/events（SettingsPage.tsx:447-484）；收到 type==='registry_changed'（:456）就重新 getCredentials 并刷新 drafts（:457-463）。连接 onmessage 解析与 socket 建立各包了一个空 catch（:473-475 与 :477-479，注释只写 // ignore），且无断线重连逻辑。",
+      "be": "后端在凭证变更时通过 WS /ws/events 推 registry_changed 事件（这是后端侧动作；本壳层前端只消费）。",
+      "api": "WS event: registry_changed（经 /ws/events，wsUrl 来自 api/client）。",
+      "gap": "偏差（§7.0 ⚠️）：两处空 catch 静默吞错（违 logging 铁律，降级不可观测），且 WS 断开后无重连——长连接掉了就静默失去自动刷新能力。"
+    },
+    {
+      "n": 6,
+      "cap": "ws-roles-refresh",
+      "track": null,
+      "marker": "live",
+      "func": "外部进程改了 roles（角色配置）时，通过 WebSocket 事件自动刷新 Settings 里的角色与模型组视图。",
+      "action": "无用户动作（被动）：外部改 roles → 后端推 WS 事件 → 前端自动重拉。",
+      "fe": "同一条 /ws/events 连接（SettingsPage.tsx:447-484）；收到 type==='roles_changed' 时，仅当 rolesDataRef.current 已有值（:464，即用户开过 Roles/Copilot tab 加载过）才重拉 getRoles + getModelGroups（:464-471）。若从没开过 Roles tab、rolesDataRef 为空，该分支条件不成立，事件被直接吞掉（不刷新也不记录）。",
+      "be": "后端在角色数据变更时通过 WS /ws/events 推 roles_changed 事件（后端侧动作）。",
+      "api": "WS event: roles_changed（经 /ws/events）。",
+      "gap": "偏差（§7.0 ⚠️）：没开过 Roles tab（rolesDataRef 为空）则 roles_changed 事件被吞——刷新被 gate 在已加载前提上；同样落在上面那对空 catch 静默 + 无重连里。"
+    },
+    {
+      "n": 7,
+      "cap": "close-settings-overlay",
+      "track": null,
+      "marker": "live",
+      "func": "让用户关闭 Settings 面板、回到工作区画布。",
+      "action": "点 Settings 顶栏右上角的 X 按钮。",
+      "fe": "顶栏 X 按钮（SettingsPageContent.tsx:45-47，Button onClick 调 onClose）；onClose 由 Workspace 传入，做 setSettingsOpen(false)（Workspace.tsx:860），面板卸载、画布回到原内容（SplitEditor / Canvas）。SettingsPage 内的 debounce 保存计时器（useDebouncedCredentialsSave / useDebouncedRolesSave，SettingsPage.tsx:401-421）不因关闭而 flush 或取消。",
+      "be": "无（关闭是纯前端 unmount；但已在途的 debounced PUT 仍会照常打到后端落地）。",
+      "api": "无（关闭本身不调 API；在途保存走各 tab 的 PUT，不属本动作）。",
+      "gap": "符合设计的基本关闭语义，但 §7.0 标注现状缺口成立：无未保存确认弹窗，关闭时 in-flight 的 PUT 仍会落地（不拦截）。"
+    },
+    {
+      "n": 8,
+      "cap": "home-closes-settings",
+      "track": null,
+      "marker": "live",
+      "func": "Settings 打开时点 Header 的 Home，既关掉 Settings 又退回首页（比 X 多一层：连工作区一起退）。",
+      "action": "（Settings 打开状态下）点 Header 左上角 Home 图标（Layers 标志按钮）。",
+      "fe": "Header 的 Home 按钮（Header.tsx:139，onClick 调 onHome）→ Workspace 的 handleHome（Workspace.tsx:782-785）先 setSettingsOpen(false) 关 Settings，再 onCloseSkill() 退出当前 skill 回首页；onHome 由 Workspace 把 handleHome 传给 Header（Workspace.tsx:804）。",
+      "be": "无",
+      "api": "无",
+      "gap": "符合设计。现状为预期的两条不同语义：X 仅关 Settings 回工作区，Home 在关 Settings 之外还卸载工作区 / 退首页（§7.0 已说明，非偏差）。"
+    },
+    {
+      "n": 9,
+      "cap": "settings-error-boundary",
+      "track": null,
+      "marker": "live",
+      "func": "某个 tab 渲染崩溃时给出错误兜底卡 + Retry 按钮，避免整页白屏。",
+      "action": "无用户动作（被动）：tab 渲染抛错时自动兜底；用户可点兜底卡上的 Retry 重试。",
+      "fe": "SettingsErrorBoundary（SettingsErrorBoundary.tsx，React class 组件，getDerivedStateFromError 捕获 → 渲染 destructive Alert + Retry 按钮，:23-38；Retry 即 setState 清 error 重渲染 :33）。但只包了两个 tab：LLM Roles（SettingsPageContent.tsx:69）与 Copilot（:88）；General 与 API Keys 未被 SettingsErrorBoundary 包裹（:101-121 直接渲染，无边界）。componentDidCatch 仅 console.error（:16-18）。",
+      "be": "无",
+      "api": "无",
+      "gap": "偏差（§7.0 ⚠️）：错误边界只包 Roles / Copilot，General / API Keys 没包——这两个 tab 渲染崩溃仍会白屏，未达「任一 tab 崩溃都有兜底」的设计意图。"
+    }
+  ]
+}

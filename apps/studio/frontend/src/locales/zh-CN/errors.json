@@ -1,0 +1,63 @@
+{
+  "codes": {
+    "missing_api_key": "API key 为空。请先填写 key 再测试。",
+    "timeout": "请求在 8 秒后超时。",
+    "invalid_api_key": "API key 无效或被服务商拒绝。",
+    "invalid_x_api_key": "API key 无效或被服务商拒绝。",
+    "insufficient_quota": "账号没有剩余额度。",
+    "model_not_found": "模型不存在，或当前 API key 无权访问。",
+    "rate_limit_exceeded": "已触发限流 (429)。",
+    "invalid_request_error": "服务商拒绝了请求格式。",
+    "context_length_exceeded": "请求超过了模型上下文窗口。",
+    "permission_error": "API key 没有访问该资源的权限。",
+    "authentication_error": "认证失败。请检查 API key 和必要请求头。",
+    "not_found_error": "服务商返回 404，端点或资源不存在。",
+    "request_too_large": "请求体过大。",
+    "rate_limit_error": "已触发限流 (429)。",
+    "api_error": "服务商返回内部 API 错误。",
+    "overloaded_error": "服务商暂时过载。",
+    "unauthorized": "API key 未授权 (401)。",
+    "PERMISSION_DENIED": "API key 没有访问该资源的权限。",
+    "UNAUTHENTICATED": "API key 无法通过认证。",
+    "RESOURCE_EXHAUSTED": "额度或限流配额已耗尽。",
+    "UNAVAILABLE": "服务商暂时不可用。",
+    "no_available_sdk": "没有确认兼容协议。请检查 API key、Base URL 和选择的服务商协议后重试。",
+    "model_list_unavailable": "无法加载服务商模型列表。请检查 Base URL，以及服务商是否支持模型列表端点。",
+    "rate_limited": "已触发限流 (429)。",
+    "quota_exceeded": "额度已耗尽 (402/403)。",
+    "network_error": "网络错误。无法连接服务商。",
+    "http_error": "服务商返回了非预期 HTTP 状态。"
+  },
+  "httpStatus": {
+    "400": "请求参数无效。",
+    "401": "请求未认证。",
+    "403": "请求未授权，或当前 API key 无权访问该资源。",
+    "404": "找不到资源或端点。",
+    "408": "请求超时。",
+    "409": "请求与当前状态冲突。",
+    "422": "请求不符合后端 schema。",
+    "429": "已触发服务商限流。请稍后重试。",
+    "500": "后端服务失败。",
+    "502": "后端服务或代理不可用。",
+    "503": "服务暂时不可用。",
+    "504": "后端请求超时。"
+  },
+  "status": {
+    "untested": "未配置",
+    "unverified_manual": "参数可达",
+    "ok": "已连接",
+    "error": "测试失败",
+    "invalid_key": "API key 无效",
+    "rate_limited": "已限流",
+    "quota_exceeded": "额度耗尽",
+    "network_error": "网络错误",
+    "timeout": "请求超时",
+    "missing_api_key": "API key 为空"
+  },
+  "fallbacks": {
+    "errorCode": "服务商返回错误码：{{code}}",
+    "httpStatus": "HTTP {{status}} 请求失败。",
+    "notConfigured": "未配置",
+    "requestFailed": "请求失败"
+  }
+}

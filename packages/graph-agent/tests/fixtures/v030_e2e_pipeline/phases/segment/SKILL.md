@@ -24,7 +24,7 @@ phase_config:
       description: Echoes a concise review note when a boundary is ambiguous.
   subgraphs:
     - name: deep_dive
-      target_skill: e2e.expander
+      path: /Users/sevenx/Documents/coding/agent-harness/.worktrees/studio-mvp1-mainbased/packages/graph-agent/tests/fixtures/v030_e2e_pipeline/registry/expander
       description: Delegates deep expansion to the expander subgraph skill.
   references:
     - id: R1

@@ -1,0 +1,200 @@
+{
+  "meta": {
+    "scope": "N5 调试续跑 三模块接口 + 12D 交叉核对",
+    "modules": "① Studio 前端 / ③a Studio 后端 / ③b 引擎 graph-agent + 运行态存储",
+    "note": "12D HTML 的 d10 current 文本(写于 2026-06-15)称生产 resume 不走 RuntimeStateStore;但源码 2026-06-17 已落地 D10.1/D10.5(EngineAdapter.resume 现已经 acquire_lease/restore/heartbeat/release + bridge)。本报告以源码为准并标注差异。"
+  },
+  "interfaces": [
+    {
+      "name": "resume 端点 (Studio HTTP)",
+      "dock": "① resumeRun(client.ts) → ③a POST /skills/{id}/runs/{run_id}/resume(runs.py) → ③b EngineAdapter.resume → graph-agent resume_skill",
+      "request": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["skill_id", "str (path)", "skill 标识，路由路径参数"],
+          ["run_id", "str (path)", "要续跑的运行标识，路由路径参数"],
+          ["context_overrides", "dict[str,Any] | None", "篡改续跑用：覆盖黑板业务字段(引擎侧只允许业务字段，拒 _checkpoint_ns/messages 等)"],
+          ["human_input", "str | None", "HitL 注入：人工答案文本，adapter 投影成 human_response={content}"]
+        ]
+      },
+      "response": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["run_id", "str", "续跑后的运行标识"],
+          ["status", "str", "success / failed"],
+          ["started_at", "str(ISO)", "续跑开始时间"],
+          ["input_summary", "str | None", "本例固定 'resumed'"],
+          ["metrics", "dict | None", "token 等指标"],
+          ["git_status", "obj | None", "工作区 git 状态"]
+        ]
+      },
+      "missing": "request 无 from_node / checkpoint_id / checkpoint_ns / tool_call_id —— 即只支持 run 级续跑，不支持节点级续跑、不支持指定 HitL 目标 tool call。错误码:state.* 透传(409/422),其余包成 RESUME_CHECKPOINT_NOT_FOUND。",
+      "evidence": [
+        ["ResumeReq 模型(只有 context_overrides + human_input)", "apps/studio/backend/app/models/runs.py:109-113"],
+        ["resume_run 路由(只透传 skill_id/run_id/context_overrides/human_input)", "apps/studio/backend/app/routers/runs.py:124-163"],
+        ["前端 resumeRun(options 只有 contextOverrides/humanInput)", "apps/studio/frontend/src/api/client.ts:306-319"],
+        ["state.* 错误透传 vs 包成 RESUME_CHECKPOINT_NOT_FOUND", "apps/studio/backend/app/routers/runs.py:148-155"]
+      ]
+    },
+    {
+      "name": "EngineAdapter.resume → RuntimeStateStore 生命周期 (③a→③b)",
+      "dock": "③a EngineAdapter.resume 在 in_process 模式下用 RuntimeStateStore 包住 graph-agent resume_skill(经 bridge)",
+      "request": {
+        "headers": ["步骤/参数", "类型", "含义"],
+        "rows": [
+          ["acquire_lease(run_id, owner_id, ttl_ms=30000)", "→ LeaseToken", "拿独占租约;别的 owner 已持有→state.lease_conflict"],
+          ["restore(run_id)", "→ snapshot", "恢复运行态快照,取出 checkpoint_id/checkpoint_ns/artifact_ref"],
+          ["restore_checkpointer(snapshot)", "→ checkpointer", "把 LangGraph checkpointer 藏在 bridge 内,不裸调 resolve_checkpointer"],
+          ["heartbeat(run_id, lease)", "→ LeaseToken", "续跑前续租;旧 token→state.lease_fenced"],
+          ["resume_restored_runtime_state(...)", "→ RunResult", "bridge 调 resume_skill,传 checkpoint_id/ns/checkpointer/context_overrides/human_response"],
+          ["snapshot(run_id, next_state, lease)", "→ StateVersionRef", "成功后写新运行态;校验 fencing token"],
+          ["release(run_id, lease)", "→ None", "无论成功失败都释放租约"]
+        ]
+      },
+      "response": {"headers": [], "rows": []},
+      "missing": "节点级定位(from_node)未进 bridge;checkpoint_id 取自 restore 出的快照,非来自请求的指定节点。http_loopback 模式走 POST /engine/resume 带 Idempotency-Key。",
+      "evidence": [
+        ["EngineAdapter.resume 全生命周期(acquire_lease/restore/heartbeat/bridge/release)", "apps/studio/backend/app/core/adapters/engine.py:792-880"],
+        ["缺 checkpoint_id 时拒绝 state.invalid_checkpoint", "apps/studio/backend/app/core/adapters/engine.py:817-826"],
+        ["scoped review:生产 resume 经 RuntimeStateStore + bridge,测试 143 passed", "temp/d10_1_5_scoped_review.md:31-63"]
+      ]
+    },
+    {
+      "name": "resume_skill 引擎契约 (③b graph-agent)",
+      "dock": "③b 引擎最底层续跑原语,被 bridge 调用",
+      "request": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["skill_path", "str | Path", "skill 入口路径"],
+          ["workspace_dir", "Path (kw)", "运行工作区目录"],
+          ["run_id", "str (kw)", "运行标识(= thread_id)"],
+          ["checkpoint_id", "str | None", "LangGraph checkpoint 标识,定位续跑点"],
+          ["checkpoint_ns", "str | None", "checkpoint 命名空间(节点级粒度用)"],
+          ["checkpointer", "Any | None", "由 bridge 注入的 checkpointer"],
+          ["context_overrides", "dict[str,Any] | None", "篡改续跑:覆盖黑板业务字段,经 _validate_resume_context_overrides 校验"],
+          ["human_response", "dict[str,Any] | None", "HitL:含 content(+可选 tool_call_id),写成 ToolMessage 注入"],
+          ["event_subscriber", "Callable[[CallbackEvent],None]", "事件回调,事件落 runs/{run_id}/trace"]
+        ]
+      },
+      "response": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["RunResult", "obj", "含 success/started_at/metrics/final_context 等;失败时也产 artifacts + RunEndedEvent(status=crashed)"]
+        ]
+      },
+      "missing": "签名已有 checkpoint_id/checkpoint_ns(支撑节点级粒度),但 Studio 主路径不传节点级目标;human_response 已支持 tool_call_id 概念但 Studio 请求体未透。",
+      "evidence": [
+        ["resume_skill 签名", "packages/graph-agent/src/graph_agent/core/runner.py:455-469"],
+        ["context_overrides/human_response 校验 + 注入", "packages/graph-agent/src/graph_agent/core/runner.py:472-519"]
+      ]
+    },
+    {
+      "name": "EventEnvelope 运行事件流 (③b引擎 → ③a后端 → ①前端)",
+      "dock": "③b 引擎产 EventEnvelope → ③a run queue/WS/run detail → ① useRunStream/TracePanel 派生节点灯+edge blackboard",
+      "request": {"headers": [], "rows": []},
+      "response": {
+        "headers": ["字段", "类型", "含义"],
+        "rows": [
+          ["schema_version", "str = 'studio.event.v1'", "事件契约版本"],
+          ["stream_id", "str", "事件流标识(= run 维度)"],
+          ["seq", "int", "单调递增序号,用于去重和续接"],
+          ["run_id", "str", "所属运行"],
+          ["event_type", "str", "事件类型(phase_start/phase_end/interrupted/resumed/...)"],
+          ["payload", "dict[str,Any]", "事件体(phase/edge/error 定位字段)"],
+          ["cursor", "str", "续接游标,默认 'stream_id:seq'"],
+          ["timestamp", "datetime", "事件时间"],
+          ["error_code", "str | None", "错误事件错误码"],
+          ["error_payload", "TransportErrorPayload | None", "结构化错误(message/details/retryable,details 自动脱敏 api_key/token/traceback)"]
+        ]
+      },
+      "missing": "D11 本体已绿:envelope/cursor/seq/gap/节点灯/edge blackboard 都从 EventEnvelope 派生。但 HitL 的 interrupted/resumed 事件接进 resume 路由的 run 队列(让续跑后 trace/WS 闭环)仍是 D10.3 缺口。",
+      "evidence": [
+        ["EventEnvelope 模型(顶层字段全集)", "packages/graph-agent/src/graph_agent/core/event_contracts.py:46-57"],
+        ["TransportErrorPayload + details 脱敏", "packages/graph-agent/src/graph_agent/core/event_contracts.py:60-71"],
+        ["interrupted / resumed 事件类型", "packages/graph-agent/src/graph_agent/callbacks/events.py:416,432"],
+        ["EventStreamBuffer cursor 续接/seq 去重/gap/expired", "packages/graph-agent/src/graph_agent/core/event_contracts.py:171-224"],
+        ["StreamCursor(stream_id/cursor/next_seq/window_start_seq)", "packages/graph-agent/src/graph_agent/core/event_contracts.py:38-43"]
+      ]
+    },
+    {
+      "name": "RuntimeStateStore / checkpoint 契约 (③b 引擎运行态存储)",
+      "dock": "③b 引擎定义 Protocol;③a 注入 LocalRuntimeStateStore(生产) / InMemoryRuntimeStateStore(测试)",
+      "request": {
+        "headers": ["方法/字段", "类型", "含义"],
+        "rows": [
+          ["acquire_lease(run_id, *, owner_id, ttl_ms)", "→ LeaseToken", "拿租约;活跃 lease 被别的 owner 抢→LeaseConflictError(state.lease_conflict)"],
+          ["heartbeat(run_id, *, lease_token)", "→ LeaseToken", "续租;lease 已非活跃→LeaseFencingError(state.lease_fenced)"],
+          ["snapshot(run_id, state, *, lease_token)", "→ StateVersionRef", "写状态快照;fencing_token < 当前→state.lease_fenced"],
+          ["restore(run_id, *, state_ref=None)", "→ dict[str,Any]", "恢复最新或指定版本的状态"],
+          ["release(run_id, *, lease_token)", "→ None", "释放租约"],
+          ["LeaseToken", "BaseModel(frozen)", "lease_id / owner_id / fencing_token:int / ttl_ms / safety_margin_ms"],
+          ["StateRef", "BaseModel(frozen)", "run_id / version"],
+          ["StateVersionRef", "BaseModel(frozen)", "run_id / version / fencing_token"]
+        ]
+      },
+      "response": {"headers": [], "rows": []},
+      "missing": "Protocol + InMemory(引擎) + Local(Studio) 已实现;CheckpointRef 作为独立 frozen 契约未单列(checkpoint_id/ns 走 resume_skill 参数 + restore 出的快照字段)。LocalRuntimeStateStore 已补 fcntl.flock 跨进程锁(原会无条件覆盖 lease.json 的问题已修)。",
+      "evidence": [
+        ["RuntimeStateStore Protocol", "packages/graph-agent/src/graph_agent/core/storage_contracts.py:92-106"],
+        ["LeaseToken / StateRef / StateVersionRef", "packages/graph-agent/src/graph_agent/core/storage_contracts.py:30-49"],
+        ["LeaseConflictError / LeaseFencingError 错误码", "packages/graph-agent/src/graph_agent/core/storage_contracts.py:64-73"],
+        ["InMemoryRuntimeStateStore lease/fencing 实现", "packages/graph-agent/src/graph_agent/core/storage_contracts.py:154-210"],
+        ["LocalRuntimeStateStore 加 fcntl.flock(scoped review)", "temp/d10_1_5_scoped_review.md:50"]
+      ]
+    }
+  ],
+  "unimpl_design": {
+    "headers": ["未实现项", "目标机制", "目标端点/schema", "文档证据"],
+    "rows": [
+      [
+        "节点级 Resume",
+        "Studio→Engine 续跑请求带 from_node 或 from=<node_id>|<node_id>:<iter_index>;Engine 经 RuntimeStateStore/state history 定位该节点前一个有效 checkpoint,复用上游不重跑、只重跑目标节点及下游",
+        "POST /skills/{id}/runs/{run_id}/resume 请求体加 from_node/from + idempotency_key;复用 resume_skill 已有的 checkpoint_id/checkpoint_ns 参数;前端失败节点 debug bar 上的 [Resume] 按钮(锚节点,非全局)",
+        "docs/studio/mvp1/01_workflows/05_debugging.md:15(F2),32-33(测试关键点);temp/...12d-repair-framework...html d10_node_resume(D10.2) plan"
+      ],
+      [
+        "HitL 人工输入注入",
+        "Engine 暂停时发 hitl/interrupted EventEnvelope;前端节点 debug bar 上方悬浮富文本框渲染问题/选项;提交 resume 发 human_response={content, tool_call_id?},续跑后经同一 EventEnvelope/WS/trace 写 answer injected/resumed",
+        "resume 请求体加 tool_call_id(定位多 pending tool call)+ from/checkpoint;EventEnvelope event_type=interrupted/resumed;resume 路由接 run_manager 事件队列",
+        "docs/studio/mvp1/01_workflows/05_debugging.md:17-18(F4/F5),34;d10_hitl(D10.3) status=partial"
+      ],
+      [
+        "篡改 Context 续跑",
+        "edge dot 绑定真实 trace context(run_id/source/target/downstream/checkpoint_id/ns),默认只读,显式 Tamper 后复用可写 Monaco 编辑 JSON;Resume downstream 把 context_overrides + 定位元数据发给 resume;下游用篡改数据、上游 checkpoint 不重跑;原 trace 不变 + tamper diff/audit",
+        "复用 resume 的 context_overrides(引擎已校验只允许业务字段,拒 _checkpoint_ns/messages);前端 edge dot → 可写 Monaco + Tamper 开关 + JSON 校验 + Resume downstream 按钮(用语义 token,不硬编码 Tailwind 色)",
+        "docs/studio/mvp1/01_workflows/05_debugging.md:19-20(F6/F7),35;d10_context_tamper(D10.4) status=partial"
+      ],
+      [
+        "脏状态置灰 (checkpoint validity)",
+        "按上游源码/输入/拓扑/输出 schema/execution fingerprint 变更标记下游 checkpoint invalid;Studio 在失败节点 debug bar:有效→[Resume] 可点发 node id,invalid/missing→置灰或显示 checkpoint.invalid/checkpoint.not_found",
+        "新增 checkpoint validity 查询/投影接口(resume_allowed:bool + reason:dirty_upstream);前端按 validity 控制 [Resume] 按钮置灰",
+        "docs/studio/mvp1/01_workflows/05_debugging.md:16(F3),33;d10_node_resume(D10.2) plan 中的 checkpoint validity 段"
+      ],
+      [
+        "失败节点亮红灯 + Error Message",
+        "Timeline 停在错误节点,失败节点亮红灯并显示 Error Message;由 EventEnvelope 事件流 deriveNodeStatusByPhase 派生(error/paused),非前端猜",
+        "复用 D11 已绿的事件→节点态派生器(trace-observability deriveNodeStatusByPhase),debug 红灯与 run 节点灯共用同一份派生",
+        "docs/studio/mvp1/01_workflows/05_debugging.md:14(F1),25(Q4);d11_node_state(D11.4) status=ok(派生器已实现)"
+      ]
+    ]
+  },
+  "d12_crosscheck": {
+    "d10_is": "D10 = 'Resume/checkpoint'(调试续跑闭环),status=bad。Engine 拥有 RuntimeStateStore 与 checkpoint/resume 语义,Studio debug UI 负责选 node/dot、传 human/context override。计划:先冻结 CheckpointRef/resume(request)/list_checkpoints/explainable failure 合同,再让生产 resume 强制经 RuntimeStateStore 的 lease/fencing/restore/heartbeat/snapshot/release,然后定义节点级 resume payload + checkpoint validity(脏上游/缺 checkpoint 可解释),最后才承载 HitL 和 edge tamper(它们只能作为 resume(request) 的输入场景,不能绕过控制面)。5 个子节点:D10.1 RuntimeStateStore 接进生产 resume(bad)、D10.2 节点级 Resume 与 checkpoint 复用(bad)、D10.3 HitL answer injection(partial)、D10.4 edge dot context tamper(partial)、D10.5 lease conflict/fencing 错误(bad)。",
+    "d11_is": "D11 = 'Event stream'(运行事件流),status=ok。Engine 拥有 envelope/cursor/seq/gap 语义,Studio 拥有 websocket/transport UI。本轮已收敛:EventEnvelope 固定 schema_version/stream_id/seq/cursor/run_id/event_type/payload/error_code/error_payload;Studio run WS 和 Run Detail 已适配;useRunStream 存 cursor、按 seq 去重、暴露 gap/expired;TracePanel/节点灯/edge context 全从 envelope 派生。5 个子节点全 ok:D11.1 EventEnvelope contract、D11.2 cursor 续接/seq 去重/gap、D11.3 TracePanel live+history、D11.4 事件驱动节点灯与 debug 状态、D11.5 edge dot blackboard。",
+    "mapping": {
+      "headers": ["N5 实现项", "落在哪个 D", "该 D 计划/status 怎么说"],
+      "rows": [
+        ["生产 resume 走 RuntimeStateStore(lease/fencing/restore/heartbeat/snapshot/release)", "D10.1 + D10.5", "HTML 标 status=bad,称生产 resume 仍绕过 RuntimeStateStore。但源码 2026-06-17 已落地:EngineAdapter.resume 已 acquire_lease/restore/heartbeat/release + bridge 隐藏 checkpointer(engine.py:792-880),scoped review 143 passed(d10_1_5_scoped_review.md)。即 D10.1/D10.5 计划已实际完成,HTML current 文本滞后。"],
+        ["节点级 Resume(from_node + 复用上游 checkpoint)", "D10.2", "status=bad。计划:补 checkpoint validity 查询/投影 + 节点级 resume payload。当前 ResumeReq 只有 context_overrides/human_input,无 from_node;前端只有 TracePanel 全局 [Resume],无失败节点级按钮。未实现。"],
+        ["脏状态置灰(checkpoint validity / dirty upstream)", "D10.2", "status=bad。计划:按上游源码/输入/拓扑/schema 变更标 invalid,前端有效发 node id、无效置灰。当前无 validity 接口、前端 DirtyIndicator 只用于草稿非 checkpoint。未实现。"],
+        ["HitL 答案注入续跑", "D10.3", "status=partial。引擎 resume_skill 已收 human_response 写 ToolMessage;Studio 已透 human_input。缺:请求体无 tool_call_id/from/checkpoint;前端无 HitL 悬浮输入框;resume 路由未接 run_manager 事件队列,续跑后 trace/WS 闭环无证据。部分实现。"],
+        ["篡改 Context 续跑(edge dot tamper)", "D10.4", "status=partial。引擎 context_overrides 已校验只允许业务字段;Studio backend/前端 resumeRun 已收 context_overrides;edge context 已改 edgeContextFromEvents。缺:可写 Monaco + Tamper 开关 + JSON 校验 + Resume downstream UI + tamper diff/audit。部分实现。"],
+        ["事件流事实源(EventEnvelope)", "D11.1 + D11.2", "status=ok。EventEnvelope/cursor/seq/gap 合同已绿,引擎/后端/前端围绕同一 envelope 测试。已实现。"],
+        ["事件驱动节点灯 + debug 红灯派生器", "D11.4", "status=ok。trace-observability deriveNodeStatusByPhase 已实现(phase_start→running/phase_end→success/error→error/HitL→paused),Workspace 把派生 statusByNodeId 传 GraphCanvas。已实现(05_debugging F1 红灯可复用此派生)。"],
+        ["edge dot blackboard(真实数据非 mock)", "D11.5", "status=ok。edge context 从 EventEnvelope payload 派生,覆盖真实/空态/分支定位、不回退 mock。已实现(为 D10.4 篡改提供只读底座)。"],
+        ["checkpoint 契约(lease/fencing/snapshot/restore)", "D10.1/D10.5(本体) + D2/D12(长期存储)", "RuntimeStateStore Protocol + lease/fencing 原语已实现(storage_contracts.py)。RunArtifactStore 作为长期事件/状态存储事实源归 D2/D12 收敛。"]
+      ]
+    },
+    "answer": "N5 这些缺失能力确实主要落在 D10(Resume/checkpoint),少量底座在 D11(Event stream,已绿)。具体:① '生产 resume 走 RuntimeStateStore + lease/fencing'(D10.1/D10.5)——12D HTML 标 bad、说没接,但源码 2026-06-17 已实际落地并通过 143 个测试,属 HTML current 文本滞后于代码;② '节点级 Resume' 和 '脏状态置灰'(都在 D10.2,status=bad)——真未实现,后端 ResumeReq 无 from_node、前端只有全局 Resume 无失败节点按钮、无 checkpoint validity 接口;③ 'HitL 注入'(D10.3,partial)和 '篡改 Context 续跑'(D10.4,partial)——引擎原语+后端透传已通,缺前端 UI(HitL 悬浮框 / 可写 Monaco+Tamper)和续跑后 trace/WS 闭环。整体进度:D10 的并发控制面(D10.1/D10.5)已基本闭环,但 N5 真正面向用户的调试交互(节点级续跑、脏态置灰、HitL 输入框、篡改编辑器)仍是 bad/partial,前端几乎全无,核心难点仍卡在节点级 checkpoint 定位与前端 debug UI;D11 事件流事实源全绿,为这些 debug 能力提供了节点灯/edge blackboard 底座。"
+  }
+}

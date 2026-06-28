@@ -16,7 +16,7 @@ def test_missing_token_returns_401(
     monkeypatch.delenv("STUDIO_DEV_TUNNEL_TOKEN", raising=False)
 
     with TestClient(create_app()) as client:
-        response = client.get("/api/skills")
+        response = client.get("/api/templates")
 
     assert response.status_code == 401
     assert response.json()["error_code"] == "UNAUTHORIZED"
@@ -31,7 +31,7 @@ def test_wrong_token_returns_401(
     monkeypatch.delenv("STUDIO_DEV_TUNNEL_TOKEN", raising=False)
 
     with TestClient(create_app()) as client:
-        response = client.get("/api/skills", headers={"Authorization": "Bearer wrong"})
+        response = client.get("/api/templates", headers={"Authorization": "Bearer wrong"})
 
     assert response.status_code == 401
     assert response.json()["error_code"] == "INVALID_TOKEN"
@@ -46,10 +46,12 @@ def test_correct_token_passes(
     monkeypatch.delenv("STUDIO_DEV_TUNNEL_TOKEN", raising=False)
 
     with TestClient(create_app()) as client:
-        response = client.get("/api/skills", headers={"Authorization": "Bearer secret"})
+        response = client.get("/api/templates", headers={"Authorization": "Bearer secret"})
 
     assert response.status_code == 200
-    assert response.json()
+    # GET /api/templates is a stable authenticated route (bundled template list);
+    # a parseable list response confirms the auth middleware let the request through.
+    assert isinstance(response.json(), list)
 
 
 def test_health_endpoint_bypass(
@@ -76,10 +78,10 @@ def test_dev_mode_bypass_when_token_unset(
     monkeypatch.setenv("STUDIO_DEV_TUNNEL_TOKEN", "dev-secret")
 
     with TestClient(create_app()) as client:
-        missing_response = client.get("/api/skills")
-        wrong_response = client.get("/api/skills", headers={"Authorization": "Bearer wrong"})
+        missing_response = client.get("/api/templates")
+        wrong_response = client.get("/api/templates", headers={"Authorization": "Bearer wrong"})
         correct_response = client.get(
-            "/api/skills",
+            "/api/templates",
             headers={"Authorization": "Bearer dev-secret"},
         )
 
@@ -88,7 +90,9 @@ def test_dev_mode_bypass_when_token_unset(
     assert wrong_response.status_code == 401
     assert wrong_response.json()["error_code"] == "INVALID_TOKEN"
     assert correct_response.status_code == 200
-    assert correct_response.json()
+    # GET /api/templates is a stable authenticated route; a parseable list response
+    # confirms the dev-tunnel token let the request through the auth middleware.
+    assert isinstance(correct_response.json(), list)
 
 
 def test_api_and_dev_tunnel_tokens_both_pass(
@@ -100,8 +104,8 @@ def test_api_and_dev_tunnel_tokens_both_pass(
     monkeypatch.setenv("STUDIO_DEV_TUNNEL_TOKEN", "dev-secret")
 
     with TestClient(create_app()) as client:
-        api_response = client.get("/api/skills", headers={"Authorization": "Bearer api-secret"})
-        dev_response = client.get("/api/skills", headers={"Authorization": "Bearer dev-secret"})
+        api_response = client.get("/api/templates", headers={"Authorization": "Bearer api-secret"})
+        dev_response = client.get("/api/templates", headers={"Authorization": "Bearer dev-secret"})
 
     assert api_response.status_code == 200
     assert dev_response.status_code == 200

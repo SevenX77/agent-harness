@@ -265,6 +265,7 @@ describe('AssetsPanel', () => {
       'script/bar.py': 'print("bar")',
     })
 
+    expect(html).toContain('story-deconstruction')
     expect(html).toContain('SKILL.md')
     expect(html).toContain('nodes')
     expect(html).toContain('script')
@@ -367,6 +368,8 @@ describe('AssetsPanel', () => {
     expect(html).toContain('L1')
     expect(html).toContain('L2')
     expect(html).toContain('data-subgraph-level-tag="true"')
+    expect(html).toContain('data-variant="info"')
+    expect(html).toContain('data-variant="warning"')
     expect(html.indexOf('data-subgraph-level-tag="true"')).toBeLessThan(html.indexOf('data-subgraph-name="true"'))
     expect(html).toContain('data-subgraph-folder="true"')
     expect(html).toContain('data-subgraph-default-expanded="false"')
@@ -449,11 +452,24 @@ describe('AssetsPanel', () => {
   it('keeps the assets split panes constrained to the sidebar height', () => {
     const html = renderAssetsPanel({ 'phases/step1/LOGIC.md': '---\nname: step1\n---\n' })
 
+    expect(html).toContain('data-assets-panel-stable-height="true"')
     expect(html).toContain('data-assets-split-container="true"')
-    expect(html).toContain('grid h-full min-h-0')
+    expect(html).toContain('flex h-full min-h-0 flex-col')
+    expect(html).toContain('data-assets-subgraphs-drawer="true"')
     expect(html).toContain('overflow-hidden px-0 pb-2')
     expect(html).not.toContain('px-1.5 pb-2')
     expect(html).not.toContain('calc(100vh - 5.25rem)')
+  })
+
+  it('renders section bars as visible rows and makes the subgraphs bar the collapse trigger', () => {
+    const html = renderAssetsPanel({ 'phases/step1/LOGIC.md': '---\nname: step1\n---\n' })
+
+    expect(html).toContain('data-assets-section-bar="true"')
+    expect(html).toContain('bg-muted/55')
+    expect(html).toContain('data-assets-section-toggle="true"')
+    expect(html).toContain('aria-label="Collapse Subgraphs Files"')
+    expect(html).toContain('aria-expanded="true"')
+    expect(html).toContain('w-full cursor-pointer justify-between')
   })
 
   it('does not draw an extra hard border between asset sections', () => {

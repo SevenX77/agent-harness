@@ -201,6 +201,7 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 
 - **Graph Properties on empty canvas selection**: when no phase node is selected and the Properties panel is active, render editable `GRAPH.md` frontmatter fields only for `name`, `description`, and `llm_role`. Do not show `schema_version`, `phases`, `io`, file path, node type, or dependencies in this form; `phases` belongs to the canvas and `io` belongs to the Input/Output panels. Saving must preserve the `GRAPH.md` body phase tags.
 - **Properties form visual hierarchy**: the Properties panel is an editable settings form, not a stack of inspector cards. Use one subtle form frame per selected graph/node, with internal field sections divided by thin separators. Do not wrap every YAML field in its own bordered card; reserve separate cards for genuinely independent tools such as golden/resume status.
+- **Assets panel section stability**: `SKILL FILES` and `SUBGRAPHS FILES` must render as visible full-width section bars. The subgraphs collapse/expand target is the whole bar, not only the chevron. `SKILL FILES` must show the skill root folder above its children instead of flattening root contents, and the bottom subgraphs drawer must collapse to its header without shrinking the overall Assets panel or removing the empty reading space under the skill tree.
 
 ## 4. 面板拖拽系统与自适应重绘
 Studio 必须表现得像一个原生桌面应用，核心支撑是灵活的分屏拖拽框架。

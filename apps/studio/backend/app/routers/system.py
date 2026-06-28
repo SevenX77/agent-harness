@@ -6,7 +6,12 @@ import asyncio
 import os
 import signal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
+
+from app.services.runtime_truth_sources import (
+    build_truth_source_sections,
+    read_truth_source_content,
+)
 
 router = APIRouter(tags=["system"])
 
@@ -14,6 +19,19 @@ router = APIRouter(tags=["system"])
 @router.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@router.get("/api/system/truth-sources")
+async def truth_sources() -> dict[str, object]:
+    return build_truth_source_sections()
+
+
+@router.get("/api/system/truth-sources/{source_id}/content")
+async def truth_source_content(source_id: str) -> dict[str, object]:
+    content = read_truth_source_content(source_id)
+    if content is None:
+        raise HTTPException(status_code=404, detail="truth source content unavailable")
+    return content
 
 
 @router.post("/shutdown")

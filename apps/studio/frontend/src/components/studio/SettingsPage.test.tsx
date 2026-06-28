@@ -990,7 +990,7 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).not.toContain('Pull Request')
   })
 
-  it('surfaces verified community catalog routes as a separate advisory layer', () => {
+  it('summarizes verified community catalog routes without listing them in API Keys', () => {
     const html = renderToStaticMarkup(
       <SettingsPageContent
         {...baseViewProps({
@@ -1009,15 +1009,15 @@ describe('SettingsPageContent (api_keys)', () => {
                 record_count: 2,
                 entries: [
                   {
-                    public_base_url: 'https://api.deepseek.com',
-                    model_id: 'deepseek-v4-pro',
+                    public_base_url: 'https://catalog-only-one.example',
+                    model_id: 'catalog-only-model-one',
                     capability_family: 'language_reasoning',
                     method_id: 'deepseek_chat_completions',
                     observed_at: '2026-06-26T09:33:40+00:00',
                   },
                   {
-                    public_base_url: 'https://api.moonshot.cn/v1',
-                    model_id: 'kimi-k2',
+                    public_base_url: 'https://catalog-only-two.example/v1',
+                    model_id: 'catalog-only-model-two',
                     capability_family: 'language_reasoning',
                     method_id: 'openai_chat_completions',
                     observed_at: '2026-06-25T08:00:00+00:00',
@@ -1039,13 +1039,14 @@ describe('SettingsPageContent (api_keys)', () => {
     // Verified read path drives the synced badge (not the legacy remote source).
     expect(html).toContain('Remote catalog synced')
     expect(html).toContain('2 community-verified')
-    // Advisory layer: community-observed, explicitly not the user's own routes.
-    expect(html).toContain('Community-verified routes')
-    expect(html).toContain('advisory')
-    expect(html).toContain('https://api.deepseek.com')
-    expect(html).toContain('deepseek-v4-pro')
-    expect(html).toContain('https://api.moonshot.cn/v1')
-    expect(html).toContain('kimi-k2')
+    // Route-level advisory details live in the General truth-source runtime log,
+    // not in the API Keys header where a large catalog would overwhelm the form.
+    expect(html).not.toContain('Community-verified routes')
+    expect(html).not.toContain('community-catalog-entries')
+    expect(html).not.toContain('catalog-only-one.example')
+    expect(html).not.toContain('catalog-only-model-one')
+    expect(html).not.toContain('catalog-only-two.example')
+    expect(html).not.toContain('catalog-only-model-two')
   })
 
   it('renders API key inputs as explicit masked text values (never native password) with password-manager ignore attributes', () => {

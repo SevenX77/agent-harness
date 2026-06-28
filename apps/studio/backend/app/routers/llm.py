@@ -83,11 +83,10 @@ from app.services import copilot
 from app.services.community_catalog import (
     apply_community_evidence_to_credentials,
 )
+from app.services.community_catalog_runtime import sync_verified_community_catalog_cache
 from app.services.community_catalog_sync import (
     DisposableCatalogCacheStore,
     VerifiedSyncError,
-    make_httpx_fetcher,
-    sync_verified_catalog,
 )
 from app.services.community_catalog_upload import (
     CommunityUploadClient,
@@ -162,6 +161,7 @@ from app.services.official_capability_sources import (
     official_doc_source_urls,
     provider_doc_limit_rules,
 )
+from app.services.runtime_activity import record_runtime_activity
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
 logger = logging.getLogger(__name__)
@@ -482,6 +482,16 @@ async def get_registry_endpoint_secret(endpoint_id: str) -> EndpointSecretRespon
 async def put_registry_endpoints(request: EndpointUpsertRequest) -> dict[str, Any]:
     """Upsert endpoints; absent endpoint IDs are retained."""
     data = upsert_endpoints({endpoint_id: endpoint for endpoint_id, endpoint in request.provider_endpoints.items()})
+    record_runtime_activity(
+        source_id="llm_credentials",
+        action="upsert_endpoints",
+        message="Saved provider endpoint settings.",
+        changes={
+            "endpoint_ids": sorted(request.provider_endpoints),
+            "endpoint_count": len(data.provider_endpoints),
+            "route_count": len(data.provider_routes),
+        },
+    )
     return serialize_for_response(data)
 
 
@@ -498,7 +508,24 @@ async def delete_registry_endpoint(endpoint_id: str) -> dict[str, Any]:
             _remove_route_references_from_roles(roles, route_ids),
             known_route_ids=set(credentials.provider_routes) - route_ids,
         )
+        record_runtime_activity(
+            source_id="llm_roles",
+            action="remove_endpoint_route_references",
+            message="Removed role references to routes owned by a deleted endpoint.",
+            changes={"endpoint_id": endpoint_id, "route_ids": sorted(route_ids)},
+        )
     data = delete_endpoint(endpoint_id)
+    record_runtime_activity(
+        source_id="llm_credentials",
+        action="delete_endpoint",
+        message="Deleted a provider endpoint and its owned routes.",
+        changes={
+            "endpoint_id": endpoint_id,
+            "removed_route_ids": sorted(route_ids),
+            "remaining_endpoint_count": len(data.provider_endpoints),
+            "remaining_route_count": len(data.provider_routes),
+        },
+    )
     return serialize_for_response(data)
 
 
@@ -510,6 +537,17 @@ async def sync_catalog() -> dict[str, Any]:
         result = await sync_remote_probe_catalog_with_metadata(data=data, url=url)
         remember_remote_catalog_source(result.catalog_source)
         updated = result.draft
+        record_runtime_activity(
+            source_id="llm_probe_catalog",
+            action="sync_remote_catalog",
+            message="Pulled the legacy remote probe catalog and merged it locally.",
+            changes={
+                "catalog_url": url,
+                "route_candidates_count": len(updated.route_candidates),
+                "evidence_records_count": len(updated.evidence_records),
+                "new_records_count": result.catalog_source.new_records_count,
+            },
+        )
         return {
             "status": "success",
             "message": "Catalog synced successfully with remote repository.",
@@ -605,6 +643,12 @@ async def contribute_catalog() -> dict[str, Any]:
         gate_url=cfg.community_gate_url,
         enabled=cfg.community_upload_enabled,
     ):
+        record_runtime_activity(
+            source_id="community_upload_queue",
+            action="contribute_catalog_skipped",
+            message="Skipped community catalog contribution because upload is disabled or unconfigured.",
+            changes={"auto_upload_enabled": False},
+        )
         return {
             "status": "disabled",
             "sharing_mode": "local_export_only",
@@ -618,6 +662,12 @@ async def contribute_catalog() -> dict[str, Any]:
     try:
         uploads = collect_uploadable_uploads(load_evidence_library(), load_credentials())
         if not uploads:
+            record_runtime_activity(
+                source_id="community_upload_queue",
+                action="contribute_catalog_noop",
+                message="Checked community catalog contribution; no probe-verified evidence was available.",
+                changes={"records_submitted": 0},
+            )
             return {
                 "status": "success",
                 "auto_upload_enabled": True,
@@ -633,6 +683,12 @@ async def contribute_catalog() -> dict[str, Any]:
         try:
             ack = await client.upload_batch(uploads, idempotency_key=key, queue=queue)
         except UploadDeferred:
+            record_runtime_activity(
+                source_id="community_upload_queue",
+                action="contribute_catalog_deferred",
+                message="Queued sanitized local evidence because the community catalog gate was unreachable.",
+                changes={"records_queued": len(uploads)},
+            )
             return {
                 "status": "deferred",
                 "auto_upload_enabled": True,
@@ -640,6 +696,16 @@ async def contribute_catalog() -> dict[str, Any]:
                 "records_queued": len(uploads),
                 "message": "Gate unreachable; the batch was queued locally for retry.",
             }
+        record_runtime_activity(
+            source_id="community_upload_queue",
+            action="contribute_catalog_uploaded",
+            message="Uploaded sanitized local evidence to the community catalog gate.",
+            changes={
+                "records_submitted": len(uploads),
+                "accepted": ack.accepted,
+                "rejected": ack.rejected,
+            },
+        )
         return {
             "status": "success",
             "auto_upload_enabled": True,
@@ -669,48 +735,12 @@ async def sync_verified_community_catalog() -> dict[str, Any]:
     cached community evidence is applied later during endpoint Test, once the
     matching routes exist locally.
     """
-    cfg = get_backend_config()
-    manifest_url = cfg.community_catalog_manifest_url.strip()
-    public_key_hex = cfg.community_catalog_signing_pubkey.strip()
-    if not manifest_url or not public_key_hex:
-        return {
-            "status": "disabled",
-            "verified_sync_enabled": False,
-            "message": (
-                "Verified community sync is not configured. Set a manifest URL and a signing "
-                "public key to enable the verified read path."
-            ),
-        }
-
-    cache_store = DisposableCatalogCacheStore(community_catalog_cache_path())
-    prev_etag = cache_store.load().manifest_etag
-    signature_url = f"{manifest_url}.sig"
-    shard_base_url = manifest_url.rsplit("/", 1)[0] + "/"
     try:
-        outcome = await sync_verified_catalog(
-            manifest_url=manifest_url,
-            signature_url=signature_url,
-            shard_base_url=shard_base_url,
-            public_key_hex=public_key_hex,
-            client_protocol_major=cfg.community_protocol_major,
-            cache_store=cache_store,
-            fetch=make_httpx_fetcher(),
-            prev_etag=prev_etag,
-        )
+        return await sync_verified_community_catalog_cache(trigger="api")
     except VerifiedSyncError as exc:
         raise HTTPException(status_code=502, detail=f"Verified catalog sync failed: {exc}") from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Verified catalog sync error: {exc}") from exc
-
-    return {
-        "status": "success",
-        "verified_sync_enabled": True,
-        "sync_status": outcome.status,
-        "record_count": outcome.record_count,
-        "manifest_etag": outcome.manifest_etag,
-        "protocol_major": outcome.protocol_major,
-        "promoted_route_count": 0,
-    }
 
 
 @router.post("/endpoints/{endpoint_id}/test", response_model=EndpointTestResponse)
@@ -761,6 +791,12 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
         )
         latest_credentials.provider_endpoints[endpoint_id] = updated
         save_credentials(latest_credentials)
+        record_runtime_activity(
+            source_id="llm_credentials",
+            action="endpoint_test_discarded",
+            message="Endpoint test result was discarded because credentials changed during the run.",
+            changes={"endpoint_id": endpoint_id, "status": "unverified_manual"},
+        )
         return EndpointTestResponse(
             registry=_registry_response(latest_credentials, _load_roles_or_empty()),
             tested_endpoint_id=endpoint_id,
@@ -781,6 +817,16 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
             discovered_model_ids,
             raw_capabilities_by_model,
             route_ids_by_model,
+        )
+        record_runtime_activity(
+            source_id="llm_probe_catalog",
+            action="model_list_observed",
+            message="Recorded model-list evidence from an endpoint test.",
+            changes={
+                "endpoint_id": endpoint_id,
+                "model_count": len(discovered_model_ids),
+                "model_ids": sorted(discovered_model_ids),
+            },
         )
         if latest_endpoint.provider_kind == "official":
             # Official endpoints are operator-controlled: a reachable get-models
@@ -871,8 +917,20 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
     )
     updated = latest_endpoint.model_copy(update=endpoint_update)
     latest_credentials.provider_endpoints[endpoint_id] = updated
-    _apply_cached_community_evidence(latest_credentials)
+    promoted_count = _apply_cached_community_evidence(latest_credentials)
     save_credentials(latest_credentials)
+    record_runtime_activity(
+        source_id="llm_credentials",
+        action="endpoint_test",
+        message="Saved endpoint test result and applied matching cached community evidence.",
+        changes={
+            "endpoint_id": endpoint_id,
+            "status": status,
+            "message": message,
+            "discovered_model_count": len(discovered_model_ids),
+            "promoted_catalog_records": promoted_count,
+        },
+    )
     return EndpointTestResponse(
         registry=_registry_response(latest_credentials, _load_roles_or_empty()),
         tested_endpoint_id=endpoint_id,
@@ -972,6 +1030,17 @@ async def test_endpoint_models(
                 )
                 route_ids_by_model.update(failed_route_ids)
             save_credentials(latest_credentials)
+            record_runtime_activity(
+                source_id="llm_credentials",
+                action="manual_model_probe",
+                message="Saved official manual model probe results.",
+                changes={
+                    "endpoint_id": endpoint_id,
+                    "requested_model_count": len(requested_model_ids),
+                    "verified_model_count": len(successful_model_ids),
+                    "failed_model_count": len(failed_profile_results),
+                },
+            )
         results = [
             EndpointModelTestResult(
                 model_id=result.model_id,
@@ -986,6 +1055,16 @@ async def test_endpoint_models(
                 endpoint,
                 result,
                 route_id=route_ids_by_model.get(result.model_id),
+            )
+        if official_results:
+            record_runtime_activity(
+                source_id="llm_probe_catalog",
+                action="manual_model_probe_evidence",
+                message="Recorded official manual model probe evidence.",
+                changes={
+                    "endpoint_id": endpoint_id,
+                    "model_ids": sorted(requested_model_ids),
+                },
             )
         await _autoshare_after_probe_best_effort()
         return EndpointModelTestResponse(
@@ -1046,6 +1125,18 @@ async def test_endpoint_models(
         )
         latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint
         save_credentials(latest_credentials)
+        record_runtime_activity(
+            source_id="llm_credentials",
+            action="manual_model_probe",
+            message="Saved manual model probe results.",
+            changes={
+                "endpoint_id": endpoint_id,
+                "status": status,
+                "requested_model_count": len(requested_model_ids),
+                "successful_model_count": len(successful_model_ids),
+                "failed_model_count": len(probe_results) - len(successful_model_ids),
+            },
+        )
     else:
         latest_credentials = load_credentials()
         latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
@@ -1086,6 +1177,16 @@ async def test_endpoint_models(
             endpoint,
             probe_result,
             route_id=route_ids_by_model.get(probe_result.model_id),
+        )
+    if probe_results:
+        record_runtime_activity(
+            source_id="llm_probe_catalog",
+            action="manual_model_probe_evidence",
+            message="Recorded manual model probe evidence.",
+            changes={
+                "endpoint_id": endpoint_id,
+                "model_ids": sorted(result.model_id for result in probe_results),
+            },
         )
     await _autoshare_after_probe_best_effort()
     return EndpointModelTestResponse(
@@ -1150,6 +1251,12 @@ async def put_route_metadata(route_id: str, request: RouteEditableUpdate) -> Pro
         }
     )
     upsert_routes({route_id: updated})
+    record_runtime_activity(
+        source_id="llm_credentials",
+        action="update_route_metadata",
+        message="Updated editable route metadata.",
+        changes={"route_id": route_id, "status": request.status},
+    )
     return updated
 
 
@@ -1165,6 +1272,15 @@ async def delete_registry_route(route_id: str) -> dict[str, Any]:
             {"route_id": route_id, **refs},
         )
     data = delete_route(route_id)
+    record_runtime_activity(
+        source_id="llm_credentials",
+        action="delete_route",
+        message="Deleted a provider route.",
+        changes={
+            "route_id": route_id,
+            "remaining_route_count": len(data.provider_routes),
+        },
+    )
     return serialize_for_response(data)
 
 
@@ -1189,6 +1305,16 @@ async def put_llm_roles(request: RolesData) -> RolesData:
     materialized = _materialize_roles_for_response(merged, credentials)
     saved = _save_roles_with_active_routes(materialized)
     await _publish_roles_changed()
+    record_runtime_activity(
+        source_id="llm_roles",
+        action="upsert_roles",
+        message="Saved LLM roles, model profiles, and model bundles.",
+        changes={
+            "role_count": len(saved.roles),
+            "model_profile_count": len(saved.model_profiles),
+            "model_bundle_count": len(saved.model_bundles),
+        },
+    )
     return _materialize_roles_for_response(saved, credentials)
 
 
@@ -1242,6 +1368,12 @@ async def put_llm_role(role_name: str, request: RoleEntry) -> RoleEntry:
     schema_version = 3 if role.model_groups else data.schema_version
     saved = _save_roles_with_active_routes(data.model_copy(update={"schema_version": schema_version, "roles": roles}))
     await _publish_roles_changed()
+    record_runtime_activity(
+        source_id="llm_roles",
+        action="upsert_role",
+        message="Saved one LLM role.",
+        changes={"role_name": role_name, "schema_version": schema_version},
+    )
     return _materialize_role_for_response(saved.roles[role_name], credentials)
 
 
@@ -1256,6 +1388,12 @@ async def delete_llm_role(role_name: str) -> RolesData:
     credentials = load_credentials()
     saved = _save_roles_with_active_routes(data.model_copy(update={"roles": roles}))
     await _publish_roles_changed()
+    record_runtime_activity(
+        source_id="llm_roles",
+        action="delete_role",
+        message="Deleted one LLM role.",
+        changes={"role_name": role_name, "remaining_role_count": len(saved.roles)},
+    )
     return _materialize_roles_for_response(saved, credentials)
 
 
@@ -1795,6 +1933,12 @@ def _persist_completed_role_test_result(role_name: str, result: dict[str, Any]) 
             result,
             status=status,
             message=message if isinstance(message, str) else None,
+        )
+        record_runtime_activity(
+            source_id="llm_role_test_results",
+            action="role_test_result_saved",
+            message="Saved the latest role or copilot test result.",
+            changes={"role_name": role_name, "status": status},
         )
     except Exception as exc:  # noqa: BLE001 — persistence is best-effort, never fail the job
         logger.warning(

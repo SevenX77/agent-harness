@@ -38,7 +38,7 @@
     },
     "remoteModelCatalog": {
       "label": "社区模型目录",
-      "description": "读取社区目录改善路由候选，并在探测后把你的脱敏探测结果匿名回传社区；关闭则读取与贡献都停。"
+      "description": "下载已验证的社区 catalog 作为本地路由证据，并允许把脱敏后的成功探测证据贡献回社区；关闭后读取和贡献路径都会停止。"
     },
     "language": {
       "label": "语言",
@@ -46,6 +46,118 @@
       "ariaLabel": "Studio 语言",
       "english": "English",
       "simplifiedChinese": "简体中文"
+    },
+    "truthSources": {
+      "title": "运行时唯一真相源文件",
+      "description": "保存 Studio 运行状态的唯一真相源文件和文件夹。",
+      "refresh": "刷新",
+      "loading": "正在加载运行时真相源...",
+      "empty": "后端没有返回运行时真相源。",
+      "loadFailed": "运行时真相源加载失败：{{error}}",
+      "open": "打开",
+      "exists": "存在",
+      "missing": "不存在",
+      "openMode": "模式：{{mode}}",
+      "size": "大小：{{size}}",
+      "updated": "更新：{{time}}",
+      "statusLine": "{{exists}} · {{kind}} · {{size}} · {{time}}",
+      "pathLabel": "{{label}} 路径",
+      "logsTitle": "运行日志（{{count}}）",
+      "toggleLogs": "{{state}}：{{source}}",
+      "showLogs": "展开日志",
+      "hideLogs": "隐藏日志",
+      "noLogs": "这个文件还没有记录过操作。",
+      "logsSummary": "最近 {{time}} · {{action}}",
+      "logDetailsTitle": "详情（{{count}}）",
+      "toggleLogDetails": "{{state}}日志详情",
+      "showLogDetails": "展开",
+      "hideLogDetails": "隐藏",
+      "previewTitle": "文件预览",
+      "previewFailed": "无法预览文件",
+      "previewTruncated": "文件较大，当前只显示前半部分。",
+      "categories": {
+        "settings": "设置",
+        "workspace": "工作区",
+        "credentials": "凭据",
+        "roles": "角色",
+        "health": "健康状态",
+        "catalog": "Catalog",
+        "modelRules": "模型规则",
+        "diagnostics": "诊断",
+        "runtime": "运行时"
+      },
+      "sections": {
+        "application": {
+          "label": "应用配置",
+          "description": "Studio 全局配置和工作区根目录。"
+        },
+        "llm_runtime": {
+          "label": "LLM 运行时真相",
+          "description": "后端持有的凭据、路由、角色和健康状态存储。"
+        },
+        "catalog": {
+          "label": "探测与社区 catalog",
+          "description": "本地探测证据、远端社区缓存和上传重试状态。"
+        },
+        "diagnostics": {
+          "label": "运行诊断",
+          "description": "后端操作生成的追加式诊断日志。"
+        }
+      },
+      "sources": {
+        "app_settings": {
+          "label": "应用设置",
+          "description": "保存 Studio 用户 ID、默认目录、语言和社区 catalog 开关等界面偏好。"
+        },
+        "skill_index": {
+          "label": "技能索引",
+          "description": "记录 Studio shell 使用的技能索引和工作区元数据。"
+        },
+        "workspaces_root": {
+          "label": "工作区根目录",
+          "description": "用户工作区和可写技能文件夹的根目录。"
+        },
+        "default_skills_root": {
+          "label": "默认技能根目录",
+          "description": "当前本地 Studio 配置使用的默认可写技能根目录。"
+        },
+        "llm_credentials": {
+          "label": "LLM 凭据",
+          "description": "服务商 endpoint、API key、route 状态和凭据证据引用的唯一真相源。"
+        },
+        "llm_roles": {
+          "label": "LLM 角色",
+          "description": "保存 Studio 运行时物化使用的角色定义、模型组和路由 bundle。"
+        },
+        "llm_role_test_results": {
+          "label": "角色测试结果",
+          "description": "持久化 Studio 诊断界面展示的角色和 copilot 测试结果。"
+        },
+        "llm_health": {
+          "label": "LLM 健康数据库",
+          "description": "本地服务商路由健康状态和冷却诊断。"
+        },
+        "llm_probe_catalog": {
+          "label": "本地 probe catalog",
+          "description": "手动探测和 endpoint test 收集到的本地证据。"
+        },
+        "community_catalog_cache": {
+          "label": "社区 catalog 缓存",
+          "description": "从远端社区 catalog 下载并验签后的临时快照。"
+        },
+        "community_upload_queue": {
+          "label": "社区上传队列",
+          "description": "无法上传时本地排队的脱敏探测证据。"
+        },
+        "llm_canonical_rules": {
+          "label": "模型规范化规则",
+          "description": "可选的服务商和模型身份规范化规则。"
+        },
+        "runtime_activity_log": {
+          "label": "运行活动日志",
+          "description": "结构化记录几点几分做了什么操作、改了哪些状态。"
+        }
+      }
     }
   },
   "apiKeys": {

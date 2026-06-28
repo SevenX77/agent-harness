@@ -137,6 +137,49 @@ export interface RoleTestResultsResponse {
   results: Record<string, PersistedRoleTestResult>
 }
 
+export interface RuntimeActivityLogEntry {
+  id: string
+  recorded_at: string
+  source_id: string
+  action: string
+  message: string
+  changes: Record<string, unknown>
+}
+
+export interface TruthSource {
+  id: string
+  label: string
+  path: string
+  kind: string
+  description: string
+  open_mode: 'file' | 'directory'
+  exists: boolean
+  size_bytes: number | null
+  updated_at: string | null
+  logs: RuntimeActivityLogEntry[]
+  can_preview: boolean
+}
+
+export interface TruthSourceSection {
+  id: string
+  label: string
+  description: string
+  sources: TruthSource[]
+}
+
+export interface TruthSourcesResponse {
+  sections: TruthSourceSection[]
+}
+
+export interface TruthSourceContentResponse {
+  source_id: string
+  path: string
+  kind: string
+  content: string
+  truncated: boolean
+  size_bytes: number
+}
+
 /**
  * R20: fetch the persisted last-known role/copilot test results so the settings
  * tabs can re-seed their badges on mount (survives server restart / remount).
@@ -144,6 +187,18 @@ export interface RoleTestResultsResponse {
  */
 export async function getRoleTestResults(): Promise<RoleTestResultsResponse> {
   const response = await api.get<RoleTestResultsResponse>('/llm/roles/test-results')
+  return response.data
+}
+
+export async function getTruthSources(): Promise<TruthSourcesResponse> {
+  const response = await api.get<TruthSourcesResponse>('/system/truth-sources')
+  return response.data
+}
+
+export async function getTruthSourceContent(sourceId: string): Promise<TruthSourceContentResponse> {
+  const response = await api.get<TruthSourceContentResponse>(
+    `/system/truth-sources/${encodeURIComponent(sourceId)}/content`,
+  )
   return response.data
 }
 

@@ -26,7 +26,9 @@ def test_verified_sync_endpoint_runs_when_configured(
     async def fake_sync(**_kwargs: object) -> SyncOutcome:
         return SyncOutcome(status="updated", record_count=3, manifest_etag='"v2"', protocol_major=1)
 
-    monkeypatch.setattr("app.routers.llm.sync_verified_catalog", fake_sync)
+    monkeypatch.setattr(
+        "app.services.community_catalog_runtime.sync_verified_catalog", fake_sync
+    )
     body = client.post("/api/llm/catalog/sync-verified").json()
     assert body["status"] == "success"
     assert body["sync_status"] == "updated"
@@ -50,6 +52,7 @@ def test_verified_sync_caches_without_promoting_credentials(
         load_credentials,
         save_credentials,
     )
+    from app.services.runtime_activity import load_runtime_activity
 
     save_credentials(
         LLMCredentialsFile(
@@ -108,11 +111,23 @@ def test_verified_sync_caches_without_promoting_credentials(
             status="updated", record_count=1, manifest_etag='"v2"', protocol_major=1
         )
 
-    monkeypatch.setattr("app.routers.llm.sync_verified_catalog", fake_sync)
+    monkeypatch.setattr(
+        "app.services.community_catalog_runtime.sync_verified_catalog", fake_sync
+    )
 
     body = client.post("/api/llm/catalog/sync-verified").json()
     assert body["status"] == "success"
     assert body["promoted_route_count"] == 0
+    assert body["cached_record_count"] == 1
+
+    catalog_logs = load_runtime_activity(source_id="community_catalog_cache")
+    assert catalog_logs
+    latest_log = catalog_logs[0]
+    assert latest_log["action"] == "sync_verified_catalog"
+    assert latest_log["changes"]["cached_record_count"] == 1
+    assert latest_log["changes"]["catalog_routes"] == [
+        "https://api.deepseek.com | deepseek-v4-pro | (unknown capability)"
+    ]
 
     route = load_credentials(credentials_path()).provider_routes[
         "deepseek-official:deepseek-v4-pro"

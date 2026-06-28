@@ -43,3 +43,26 @@ def test_lifespan_remote_probe_catalog_sync_failure_does_not_block_startup(monke
         response = client.get("/health")
 
     assert response.status_code == 200
+
+
+def test_lifespan_syncs_verified_community_catalog_on_startup(monkeypatch) -> None:
+    import app.main as main
+
+    calls: list[str] = []
+
+    async def fake_sync_verified_community_catalog_cache(*, trigger: str) -> dict[str, object]:
+        calls.append(trigger)
+        return {"status": "success"}
+
+    monkeypatch.setattr(
+        main,
+        "sync_verified_community_catalog_cache",
+        fake_sync_verified_community_catalog_cache,
+        raising=False,
+    )
+
+    with TestClient(create_app()) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    assert calls == ["startup"]

@@ -10,7 +10,6 @@ import {
 } from "react"
 import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tag } from "@/components/ui/tag"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -28,6 +27,7 @@ import { applyPhaseFrontmatterForm, parsePhaseFrontmatter, phaseFrontmatterToFor
 import { fileFromDetail, languageForPath } from "./panel-files"
 import { loadRecursiveSubgraphMembership, subgraphMembership, type SubgraphMembership } from "./subgraph-membership"
 import { toast } from "sonner"
+import { cn } from "@/lib/utils"
 
 interface AssetsPanelProps {
   skillId?: string | null
@@ -158,6 +158,54 @@ function AssetTreeRows({
         return child.file ? <FileRow key={child.path} file={child.file} onOpen={onOpen} /> : null
       })}
     </>
+  )
+}
+
+function basenameFromPath(value?: string | null): string {
+  const trimmed = value?.trim()
+  if (!trimmed) return ""
+  const normalized = trimmed.replace(/\\/g, "/").replace(/\/+$/, "")
+  return normalized.split("/").filter(Boolean).pop() ?? trimmed
+}
+
+function skillRootLabel({
+  skillDetail,
+  skillId,
+  workspaceRoot,
+}: {
+  skillDetail?: SkillDetail
+  skillId?: string | null
+  workspaceRoot?: string | null
+}): string {
+  return basenameFromPath(workspaceRoot)
+    || basenameFromPath(skillId)
+    || skillDetail?.manifest?.name
+    || "Skill"
+}
+
+function SkillRootTree({
+  rootLabel,
+  node,
+  onOpen,
+}: {
+  rootLabel: string
+  node: AssetTreeNode
+  onOpen: (file: FileMeta) => void
+}) {
+  if (sortedAssetChildren(node).length === 0) {
+    return <div className="px-2 py-1.5 text-[11px] text-muted-foreground">No files</div>
+  }
+
+  return (
+    <FolderRow
+      name={rootLabel}
+      defaultExpanded
+      rowClassName="rounded-none hover:bg-transparent"
+      buttonClassName="py-1.5"
+      labelClassName="font-medium text-foreground"
+    >
+      <AssetTreeRows node={node} onOpen={onOpen} emptyLabel="No files" />
+    </FolderRow>
   )
 }
 
@@ -298,19 +346,48 @@ function AssetExplorerSection({
   children,
   action,
   collapsed = false,
+  onHeaderToggle,
+  headerToggleLabel,
+  headerIcon,
 }: {
   sectionId: string
   label: string
   children: ReactNode
   action?: ReactNode
   collapsed?: boolean
+  onHeaderToggle?: () => void
+  headerToggleLabel?: string
+  headerIcon?: ReactNode
 }) {
+  const headerClassName = "flex h-8 shrink-0 items-center bg-muted/55 px-2"
+  const labelNode = (
+    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
+  )
+
   return (
     <section data-assets-section={sectionId} className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="flex h-7 shrink-0 items-center bg-muted/20 px-2">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{label}</span>
-        {action ? <div className="ml-auto flex items-center gap-1">{action}</div> : null}
-      </div>
+      {onHeaderToggle ? (
+        <button
+          type="button"
+          data-assets-section-bar="true"
+          data-assets-section-toggle="true"
+          aria-label={headerToggleLabel}
+          aria-expanded={!collapsed}
+          onClick={onHeaderToggle}
+          className={cn(
+            headerClassName,
+            "w-full cursor-pointer justify-between border-0 text-left outline-none transition-colors hover:bg-muted/70 focus-visible:ring-1 focus-visible:ring-ring",
+          )}
+        >
+          {labelNode}
+          {headerIcon ? <span className="ml-auto flex items-center text-muted-foreground">{headerIcon}</span> : null}
+        </button>
+      ) : (
+        <div data-assets-section-bar="true" className={headerClassName}>
+          {labelNode}
+          {action ? <div className="ml-auto flex items-center gap-1">{action}</div> : null}
+        </div>
+      )}
       {collapsed ? null : <div className="min-h-0 flex-1">{children}</div>}
     </section>
   )
@@ -362,6 +439,7 @@ function SubgraphFilesBlock({
     saveEnabled: false,
   })
   const [expanded, setExpanded] = useState(false)
+  const levelVariant = subgraphLevelTagVariant(subgraph.level)
   const endAdornment = (
     <div
       data-subgraph-status-slot="true"
@@ -395,7 +473,7 @@ function SubgraphFilesBlock({
           {showLevelTag ? (
             <Tag
               size="xs"
-              variant="muted"
+              variant={levelVariant}
               className="shrink-0"
               data-subgraph-level-tag="true"
               aria-label={`Recursive level ${subgraph.level}`}
@@ -410,7 +488,7 @@ function SubgraphFilesBlock({
       {expanded ? (
         <div
           data-subgraph-folder-contents="true"
-          className="space-y-0.5 pb-1 pl-4"
+          className="space-y-0.5 pb-1 pl-6"
         >
           <TreeStatusLine state={treeState} />
           {!subgraph.path && treeState.status === "idle" ? (
@@ -423,6 +501,13 @@ function SubgraphFilesBlock({
       ) : null}
     </div>
   )
+}
+
+function subgraphLevelTagVariant(level: number): "info" | "warning" | "success" | "muted" {
+  if (level === 1) return "info"
+  if (level === 2) return "warning"
+  if (level === 3) return "success"
+  return "muted"
 }
 
 function clampSubgraphsPanelPercent(value: number): number {
@@ -499,6 +584,7 @@ export function AssetsPanel({ skillId = null, workspaceRoot = null, skillDetail 
     skillId,
   })
   const fileTree = nativeFileTree.tree ?? fallbackFileTree
+  const rootLabel = skillRootLabel({ skillDetail, skillId, workspaceRoot: rootTarget })
   const openFile = useCallback(async (file: FileMeta) => {
     const targetRoot = file.workspaceRoot ?? rootTarget
     if (targetRoot) {
@@ -659,25 +745,23 @@ export function AssetsPanel({ skillId = null, workspaceRoot = null, skillDetail 
 
   return (
     <TooltipProvider>
-      <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-background">
+      <div
+        data-assets-panel-stable-height="true"
+        className="grid h-[calc(100vh-1.5rem)] max-h-[calc(100vh-1.5rem)] min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-background"
+      >
         <PanelHeader title="Assets" />
 
         <div
           ref={splitContainerRef}
           data-assets-split-container="true"
-          className="grid h-full min-h-0 overflow-hidden px-0 pb-2"
-          style={{
-            gridTemplateRows: subgraphsCollapsed
-              ? "minmax(0, 1fr) 1.75rem"
-              : `minmax(0, ${100 - subgraphsPanelPercent}fr) 0.5rem minmax(0, ${subgraphsPanelPercent}fr)`,
-          }}
+          className="flex h-full min-h-0 flex-col overflow-hidden px-0 pb-2"
         >
-          <div className="min-h-0 overflow-hidden">
+          <div className="min-h-0 flex-1 overflow-hidden">
             <AssetExplorerSection sectionId="skill-files" label="Skill Files">
               <ScrollArea className="h-full min-h-0">
                 <div className="space-y-0.5 px-0.5 py-1 text-xs">
                   <TreeStatusLine state={nativeFileTree} />
-                  <AssetTreeRows node={fileTree} onOpen={openFile} emptyLabel="No files" />
+                  <SkillRootTree rootLabel={rootLabel} node={fileTree} onOpen={openFile} />
                 </div>
               </ScrollArea>
             </AssetExplorerSection>
@@ -697,27 +781,18 @@ export function AssetsPanel({ skillId = null, workspaceRoot = null, skillDetail 
             </div>
           )}
 
-          <div className="min-h-0 overflow-hidden">
+          <div
+            data-assets-subgraphs-drawer="true"
+            className={cn("min-h-0 shrink-0 overflow-hidden", subgraphsCollapsed ? "h-8" : "min-h-36")}
+            style={subgraphsCollapsed ? undefined : { height: `${subgraphsPanelPercent}%` }}
+          >
             <AssetExplorerSection
               sectionId="subgraphs-files"
               label="Subgraphs Files"
               collapsed={subgraphsCollapsed}
-              action={(
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-xs"
-                      aria-label={subgraphsToggleLabel}
-                      onClick={toggleSubgraphsPanel}
-                    >
-                      {subgraphsCollapsed ? <ChevronUp /> : <ChevronDown />}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top">{subgraphsToggleLabel}</TooltipContent>
-                </Tooltip>
-              )}
+              onHeaderToggle={toggleSubgraphsPanel}
+              headerToggleLabel={subgraphsToggleLabel}
+              headerIcon={subgraphsCollapsed ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
             >
               <ScrollArea className="h-full min-h-0">
                 <SubgraphFilesList

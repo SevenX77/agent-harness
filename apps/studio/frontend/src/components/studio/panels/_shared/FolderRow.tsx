@@ -7,6 +7,7 @@ export function FolderRow({
   children,
   endAdornment,
   defaultExpanded = false,
+  onExpandedChange,
   rowClassName,
   buttonClassName,
   labelClassName,
@@ -15,18 +16,26 @@ export function FolderRow({
   children: ReactNode
   endAdornment?: ReactNode
   defaultExpanded?: boolean
+  onExpandedChange?: (expanded: boolean) => void
   rowClassName?: string
   buttonClassName?: string
   labelClassName?: string
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded)
+  const toggleExpanded = () => {
+    setExpanded((value) => {
+      const next = !value
+      onExpandedChange?.(next)
+      return next
+    })
+  }
 
   return (
     <div className="w-full min-w-0">
       <div className={cn("flex min-w-0 items-center gap-1 rounded-md transition-colors hover:bg-accent", rowClassName)}>
         <button
           type="button"
-          onClick={() => setExpanded((value) => !value)}
+          onClick={toggleExpanded}
           title={name}
           className={cn(
             "flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md border-0 px-2 py-1 text-left text-xs text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring",

@@ -45,6 +45,8 @@ import { WorkspaceEditorOverlay } from "./WorkspaceEditorOverlay"
 import { WorkspaceLeftPanelOverlay } from "./WorkspaceLeftPanelOverlay"
 import { WorkspaceRightPanelOverlay } from "./WorkspaceRightPanelOverlay"
 import { applyPhaseName } from "./panels/phase-frontmatter"
+import { useSkillSubgraphMembershipTree } from "./panels/use-subgraph-membership-tree"
+import { useWorkspaceDirectoryTree } from "./panels/use-workspace-directory-tree"
 import type { FileOpenInput } from "./file-types"
 import { conflictFromSaveError, isSameSaveConflict, overwriteRetryPayload } from "./save-conflicts"
 import {
@@ -233,6 +235,17 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const inFlightRef = useRef<Partial<Record<EditorSide, boolean>>>({})
   const [conflict, setConflict] = useState<SaveConflict | null>(null)
   const { skillDetail, skillDetailError, mutateSkillDetail } = useSkills(currentSkillId)
+  const assetDirectoryTree = useWorkspaceDirectoryTree({
+    workspaceRoot: currentWorkspaceRoot ?? currentSkillId,
+    skillId: currentSkillId,
+    skillDetail,
+    enabled: Boolean(currentSkillId),
+  })
+  const assetSubgraphTree = useSkillSubgraphMembershipTree({
+    skillDetail,
+    workspaceRoot: currentWorkspaceRoot ?? currentSkillId,
+    enabled: Boolean(currentSkillId),
+  })
   const isLoading = useMemo(() => Boolean(currentSkillId && !skillDetail && !skillDetailError), [skillDetail, skillDetailError, currentSkillId])
   const [compileStages, setCompileStages] = useState<Record<string, SkillBuildStage>>({})
   const [compileErrors, setCompileErrors] = useState<Record<string, CompileError[]>>({})
@@ -1716,6 +1729,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         skillId={currentSkillId}
         workspaceRoot={currentWorkspaceRoot}
         skillDetail={skillDetail}
+        assetDirectoryTree={assetDirectoryTree}
+        assetSubgraphTree={assetSubgraphTree}
         selectedNode={selectedNode}
         selectedNodeStatus={selectedNodeStatus}
         selectedTestInputId={selectedTestInputId}

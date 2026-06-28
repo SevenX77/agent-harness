@@ -15,12 +15,16 @@ import { PanelHeader } from "./_shared/PanelHeader"
 import { EdgeContextView } from "./EdgeContextView"
 import { PropertiesPanel } from "./PropertiesPanel"
 import { TimelinePanel } from "./TimelinePanel"
+import type { SubgraphMembershipTree } from "./use-subgraph-membership-tree"
+import type { WorkspaceDirectoryTree } from "./use-workspace-directory-tree"
 
 interface PanelsProps {
   activePanel: PanelKind
   skillId: string | null
   workspaceRoot?: string | null
   skillDetail?: SkillDetail
+  assetDirectoryTree?: WorkspaceDirectoryTree
+  assetSubgraphTree?: SubgraphMembershipTree
   selectedNode: { id: string; data: SkillGraphNodeData } | null
   // F4: i/o-panel test-input selection that feeds Predict/Run.
   selectedTestInputId?: string | null
@@ -63,6 +67,8 @@ export function Panels({
   skillId,
   workspaceRoot = null,
   skillDetail,
+  assetDirectoryTree,
+  assetSubgraphTree,
   selectedNode,
   selectedTestInputId,
   onSelectTestInput,
@@ -121,6 +127,8 @@ export function Panels({
         workspaceRoot={workspaceRoot}
         skillDetail={skillDetail}
         selectedNode={selectedNode}
+        directoryTree={assetDirectoryTree}
+        subgraphTree={assetSubgraphTree}
       />
     )
   }
@@ -213,5 +221,14 @@ export function Panels({
       />
     )
   }
-  return <AssetsPanel skillId={skillId} workspaceRoot={workspaceRoot} skillDetail={skillDetail} selectedNode={selectedNode} />
+  return (
+    <AssetsPanel
+      skillId={skillId}
+      workspaceRoot={workspaceRoot}
+      skillDetail={skillDetail}
+      selectedNode={selectedNode}
+      directoryTree={assetDirectoryTree}
+      subgraphTree={assetSubgraphTree}
+    />
+  )
 }

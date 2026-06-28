@@ -11,12 +11,10 @@ import {
 import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Tag } from "@/components/ui/tag"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import type { SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData } from "@/components/GraphCanvas"
-import { isTauriRuntime } from "@/config/runtime"
-import { listWorkspaceDir, readWorkspaceFile, selectSkillDirectory, writeWorkspaceFile } from "@/lib/tauri"
+import { readWorkspaceFile, selectSkillDirectory, writeWorkspaceFile } from "@/lib/tauri"
 import { errorMessage } from "@/utils/errors"
 import { useWorkspaceContext } from "../WorkspaceContext"
 import type { FileMeta } from "../file-types"
@@ -24,8 +22,16 @@ import { FileRow } from "./_shared/FileRow"
 import { FolderRow } from "./_shared/FolderRow"
 import { PanelHeader } from "./_shared/PanelHeader"
 import { applyPhaseFrontmatterForm, parsePhaseFrontmatter, phaseFrontmatterToForm } from "./phase-frontmatter"
-import { fileFromDetail, languageForPath } from "./panel-files"
-import { loadRecursiveSubgraphMembership, subgraphMembership, type SubgraphMembership } from "./subgraph-membership"
+import { subgraphMembership, type SubgraphMembership } from "./subgraph-membership"
+import {
+  type SubgraphMembershipTree,
+  useSubgraphMembershipTree,
+} from "./use-subgraph-membership-tree"
+import {
+  type DirectoryTreeState,
+  type WorkspaceDirectoryTree,
+  useWorkspaceDirectoryTree,
+} from "./use-workspace-directory-tree"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 
@@ -34,124 +40,60 @@ interface AssetsPanelProps {
   workspaceRoot?: string | null
   skillDetail?: SkillDetail
   selectedNode: { id: string; data: SkillGraphNodeData } | null
-}
-
-interface AssetTreeNode {
-  name: string
-  path: string
-  kind: "file" | "dir"
-  file?: FileMeta
-  children: Map<string, AssetTreeNode>
-}
-
-type DirectoryTreeStatus = "idle" | "loading" | "ready" | "error"
-
-interface DirectoryTreeState {
-  status: DirectoryTreeStatus
-  tree: AssetTreeNode | null
-  message?: string
+  directoryTree?: WorkspaceDirectoryTree
+  subgraphTree?: SubgraphMembershipTree
 }
 
 const DEFAULT_SUBGRAPHS_PANEL_PERCENT = 36
 const MIN_SUBGRAPHS_PANEL_PERCENT = 16
 const MAX_SUBGRAPHS_PANEL_PERCENT = 50
 
-function createAssetTreeNode(name: string, path: string, kind: "file" | "dir" = "dir"): AssetTreeNode {
-  return {
-    name,
-    path,
-    kind,
-    children: new Map(),
-  }
-}
-
-function createFileMeta({
-  path,
-  content = "",
-  skillId,
-  workspaceRoot,
-  titlePrefix,
-  saveEnabled = true,
-}: {
-  path: string
-  content?: string
-  skillId?: string | null
-  workspaceRoot?: string | null
-  titlePrefix?: string | null
-  saveEnabled?: boolean
-}): FileMeta {
-  return {
-    path,
-    language: languageForPath(path),
-    content,
-    skillId,
-    workspaceRoot,
-    title: titlePrefix ? `${titlePrefix} / ${path}` : undefined,
-    saveEnabled,
-  }
-}
-
-function buildAssetTree(skillDetail?: SkillDetail, options: {
-  skillId?: string | null
-  workspaceRoot?: string | null
-} = {}): AssetTreeNode {
-  const root = createAssetTreeNode("", "")
-  for (const path of Object.keys(skillDetail?.files ?? {}).sort((a, b) => a.localeCompare(b))) {
-    const parts = path.split("/").filter(Boolean)
-    if (parts.length === 0) continue
-
-    let current = root
-    parts.forEach((part, index) => {
-      const nodePath = parts.slice(0, index + 1).join("/")
-      let node = current.children.get(part)
-      if (!node) {
-        node = createAssetTreeNode(part, nodePath, index === parts.length - 1 ? "file" : "dir")
-        current.children.set(part, node)
-      }
-      if (index === parts.length - 1) {
-        node.kind = "file"
-        node.file = {
-          ...fileFromDetail(skillDetail, path),
-          skillId: options.skillId,
-          workspaceRoot: options.workspaceRoot,
-        }
-      }
-      current = node
-    })
-  }
-  return root
-}
-
-function sortedAssetChildren(node: AssetTreeNode): AssetTreeNode[] {
-  return [...node.children.values()].sort((left, right) => {
-    const leftIsFolder = left.kind === "dir"
-    const rightIsFolder = right.kind === "dir"
-    if (leftIsFolder !== rightIsFolder) return leftIsFolder ? -1 : 1
-    return left.name.localeCompare(right.name)
-  })
-}
-
 function AssetTreeRows({
-  node,
+  directoryTree,
+  directoryPath,
   onOpen,
   emptyLabel,
 }: {
-  node: AssetTreeNode
+  directoryTree: WorkspaceDirectoryTree
+  directoryPath: string
   onOpen: (file: FileMeta) => void
   emptyLabel?: string
 }) {
-  const children = sortedAssetChildren(node)
-  if (children.length === 0 && emptyLabel) {
+  const directory = directoryTree.getDirectory(directoryPath)
+
+  if (directory.status === "loading" && directory.entries.length === 0) {
+    return <TreeStatusLine state={directory} />
+  }
+
+  if (directory.status === "error" && directory.entries.length === 0) {
+    return <TreeStatusLine state={directory} />
+  }
+
+  if (directory.entries.length === 0 && emptyLabel) {
     return <div className="px-2 py-1.5 text-[11px] text-muted-foreground">{emptyLabel}</div>
   }
 
   return (
     <>
-      {children.map((child) => {
+      <TreeStatusLine state={directory} subtle />
+      {directory.entries.map((child) => {
         if (child.kind === "dir") {
           return (
-            <FolderRow key={child.path} name={child.name}>
-              <AssetTreeRows node={child} onOpen={onOpen} emptyLabel="Empty folder" />
+            <FolderRow
+              key={child.path}
+              name={child.name}
+              onExpandedChange={(expanded) => {
+                if (expanded) {
+                  directoryTree.ensureDirectory(child.path)
+                }
+              }}
+            >
+              <AssetTreeRows
+                directoryTree={directoryTree}
+                directoryPath={child.path}
+                onOpen={onOpen}
+                emptyLabel="Empty folder"
+              />
             </FolderRow>
           )
         }
@@ -185,14 +127,22 @@ function skillRootLabel({
 
 function SkillRootTree({
   rootLabel,
-  node,
+  directoryTree,
   onOpen,
 }: {
   rootLabel: string
-  node: AssetTreeNode
+  directoryTree: WorkspaceDirectoryTree
   onOpen: (file: FileMeta) => void
 }) {
-  if (sortedAssetChildren(node).length === 0) {
+  if (directoryTree.root.status === "loading" && directoryTree.root.entries.length === 0) {
+    return <TreeStatusLine state={directoryTree.root} />
+  }
+
+  if (directoryTree.root.status === "error" && directoryTree.root.entries.length === 0) {
+    return <TreeStatusLine state={directoryTree.root} />
+  }
+
+  if (directoryTree.root.entries.length === 0) {
     return <div className="px-2 py-1.5 text-[11px] text-muted-foreground">No files</div>
   }
 
@@ -204,134 +154,13 @@ function SkillRootTree({
       buttonClassName="py-1.5"
       labelClassName="font-medium text-foreground"
     >
-      <AssetTreeRows node={node} onOpen={onOpen} emptyLabel="No files" />
+      <AssetTreeRows directoryTree={directoryTree} directoryPath="" onOpen={onOpen} emptyLabel="No files" />
     </FolderRow>
   )
 }
 
-function sortedNativeEntries(entries: Awaited<ReturnType<typeof listWorkspaceDir>>) {
-  return [...entries].sort((left, right) => {
-    if (left.kind !== right.kind) return left.kind === "dir" ? -1 : 1
-    return left.name.localeCompare(right.name)
-  })
-}
-
-async function appendNativeDirectory({
-  node,
-  workspaceRoot,
-  relativeDir,
-  skillId,
-  titlePrefix,
-  saveEnabled,
-}: {
-  node: AssetTreeNode
-  workspaceRoot: string
-  relativeDir: string
-  skillId?: string | null
-  titlePrefix?: string | null
-  saveEnabled: boolean
-}) {
-  const entries = sortedNativeEntries(await listWorkspaceDir(workspaceRoot, relativeDir || "."))
-  for (const entry of entries) {
-    const path = relativeDir ? `${relativeDir}/${entry.name}` : entry.name
-    const child = createAssetTreeNode(entry.name, path, entry.kind)
-    if (entry.kind === "file") {
-      child.file = createFileMeta({
-        path,
-        skillId,
-        workspaceRoot,
-        titlePrefix,
-        saveEnabled,
-      })
-    } else {
-      try {
-        await appendNativeDirectory({
-          node: child,
-          workspaceRoot,
-          relativeDir: path,
-          skillId,
-          titlePrefix,
-          saveEnabled,
-        })
-      } catch {
-        // Keep the directory visible even when native-fs refuses one child path
-        // (for example, a protected symlink). The Rust layer remains the guard.
-      }
-    }
-    node.children.set(entry.name, child)
-  }
-}
-
-async function loadNativeDirectoryTree({
-  workspaceRoot,
-  skillId,
-  titlePrefix,
-  saveEnabled,
-}: {
-  workspaceRoot: string
-  skillId?: string | null
-  titlePrefix?: string | null
-  saveEnabled: boolean
-}): Promise<AssetTreeNode> {
-  const root = createAssetTreeNode("", "")
-  await appendNativeDirectory({
-    node: root,
-    workspaceRoot,
-    relativeDir: "",
-    skillId,
-    titlePrefix,
-    saveEnabled,
-  })
-  return root
-}
-
-function useNativeDirectoryTree({
-  workspaceRoot,
-  skillId,
-  titlePrefix,
-  saveEnabled = true,
-}: {
-  workspaceRoot?: string | null
-  skillId?: string | null
-  titlePrefix?: string | null
-  saveEnabled?: boolean
-}): DirectoryTreeState {
-  const [state, setState] = useState<DirectoryTreeState>({ status: "idle", tree: null })
-
-  useEffect(() => {
-    if (!workspaceRoot || !isTauriRuntime()) {
-      setState({ status: "idle", tree: null })
-      return undefined
-    }
-
-    let cancelled = false
-    setState((current) => ({ status: "loading", tree: current.tree }))
-    void loadNativeDirectoryTree({ workspaceRoot, skillId, titlePrefix, saveEnabled })
-      .then((tree) => {
-        if (!cancelled) {
-          setState({ status: "ready", tree })
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setState({
-            status: "error",
-            tree: null,
-            message: error instanceof Error ? error.message : String(error || "Could not read folder"),
-          })
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [saveEnabled, skillId, titlePrefix, workspaceRoot])
-
-  return state
-}
-
-function TreeStatusLine({ state }: { state: DirectoryTreeState }) {
-  if (state.status === "loading") {
+function TreeStatusLine({ state, subtle = false }: { state: DirectoryTreeState; subtle?: boolean }) {
+  if (state.status === "loading" && (!subtle || state.entries.length === 0)) {
     return <div className="px-2 py-1.5 text-[11px] text-muted-foreground">Loading folder...</div>
   }
   if (state.status === "error") {
@@ -402,44 +231,57 @@ function SubgraphFilesList({
   onOpen: (file: FileMeta) => void
   onChoosePath: (subgraph: SubgraphMembership) => void
 }) {
+  const [expandedSubgraphKey, setExpandedSubgraphKey] = useState<string | null>(null)
+  useEffect(() => {
+    if (expandedSubgraphKey && !subgraphs.some((subgraph) => subgraphFilesKey(subgraph) === expandedSubgraphKey)) {
+      setExpandedSubgraphKey(null)
+    }
+  }, [expandedSubgraphKey, subgraphs])
+
   if (subgraphs.length === 0) {
     return <div className="px-2 py-1.5 text-[11px] text-muted-foreground">No subgraphs</div>
   }
 
   return (
     <div className="w-full min-w-0 space-y-1 overflow-hidden py-1">
-      {subgraphs.map((subgraph) => (
-        <SubgraphFilesBlock
-          key={`${subgraph.level}:${subgraph.id}:${subgraph.filePath}`}
-          subgraph={subgraph}
-          showLevelTag={subgraphs.some((candidate) => candidate.level > 1)}
-          onOpen={onOpen}
-          onChoosePath={onChoosePath}
-        />
-      ))}
+      {subgraphs.map((subgraph) => {
+        const key = subgraphFilesKey(subgraph)
+        return (
+          <SubgraphFilesBlock
+            key={key}
+            subgraph={subgraph}
+            expanded={expandedSubgraphKey === key}
+            onToggle={() => setExpandedSubgraphKey((current) => (current === key ? null : key))}
+            onOpen={onOpen}
+            onChoosePath={onChoosePath}
+          />
+        )
+      })}
     </div>
   )
 }
 
 function SubgraphFilesBlock({
   subgraph,
-  showLevelTag,
+  expanded,
+  onToggle,
   onOpen,
   onChoosePath,
 }: {
   subgraph: SubgraphMembership
-  showLevelTag: boolean
+  expanded: boolean
+  onToggle: () => void
   onOpen: (file: FileMeta) => void
   onChoosePath: (subgraph: SubgraphMembership) => void
 }) {
-  const treeState = useNativeDirectoryTree({
+  const directoryTree = useWorkspaceDirectoryTree({
     workspaceRoot: subgraph.path,
     skillId: subgraph.label,
     titlePrefix: subgraph.label,
     saveEnabled: false,
+    enabled: expanded,
   })
-  const [expanded, setExpanded] = useState(false)
-  const levelVariant = subgraphLevelTagVariant(subgraph.level)
+  const levelClassName = subgraphLevelTagClassName(subgraph.level)
   const endAdornment = (
     <div
       data-subgraph-status-slot="true"
@@ -463,24 +305,33 @@ function SubgraphFilesBlock({
       >
         <button
           type="button"
-          onClick={() => setExpanded((value) => !value)}
+          aria-expanded={expanded}
+          onClick={onToggle}
           title={subgraph.label}
-          className={`grid min-w-0 cursor-pointer items-center gap-2 border-0 bg-transparent p-0 text-left text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring ${
-            showLevelTag ? "grid-cols-[auto_auto_minmax(0,1fr)]" : "grid-cols-[auto_minmax(0,1fr)]"
-          }`}
+          className="grid min-w-0 cursor-pointer grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-2 border-0 bg-transparent p-0 text-left text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
         >
           {expanded ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />}
-          {showLevelTag ? (
-            <Tag
-              size="xs"
-              variant={levelVariant}
-              className="shrink-0"
-              data-subgraph-level-tag="true"
-              aria-label={`Recursive level ${subgraph.level}`}
+          <span
+            className={cn(
+              "grid h-4 w-6 min-w-6 max-w-6 shrink-0 grid-cols-[auto_auto] items-center justify-center gap-px overflow-hidden rounded-sm px-0.5 text-[9px] leading-none",
+              levelClassName,
+            )}
+            data-subgraph-level-tag="true"
+            aria-label={`Recursive level ${subgraph.level}`}
+          >
+            <span
+              data-subgraph-level-prefix="true"
+              className="justify-self-center text-center font-medium"
             >
-              L{subgraph.level}
-            </Tag>
-          ) : null}
+              L
+            </span>
+            <span
+              data-subgraph-level-number="true"
+              className="justify-self-center text-center font-semibold tabular-nums"
+            >
+              {subgraph.level}
+            </span>
+          </span>
           <span data-subgraph-name="true" className="truncate font-medium text-foreground">{subgraph.label}</span>
         </button>
         <div className="min-w-max justify-self-end">{endAdornment}</div>
@@ -490,12 +341,16 @@ function SubgraphFilesBlock({
           data-subgraph-folder-contents="true"
           className="space-y-0.5 pb-1 pl-6"
         >
-          <TreeStatusLine state={treeState} />
-          {!subgraph.path && treeState.status === "idle" ? (
+          {!subgraph.path && directoryTree.root.status === "idle" ? (
             <div className="px-2 py-1 text-[11px] text-muted-foreground">{subgraphLinkTooltip(subgraph)}</div>
           ) : null}
-          {treeState.tree ? (
-            <AssetTreeRows node={treeState.tree} onOpen={onOpen} emptyLabel="Empty subgraph folder" />
+          {subgraph.path ? (
+            <AssetTreeRows
+              directoryTree={directoryTree}
+              directoryPath=""
+              onOpen={onOpen}
+              emptyLabel="Empty subgraph folder"
+            />
           ) : null}
         </div>
       ) : null}
@@ -503,11 +358,15 @@ function SubgraphFilesBlock({
   )
 }
 
-function subgraphLevelTagVariant(level: number): "info" | "warning" | "success" | "muted" {
-  if (level === 1) return "info"
-  if (level === 2) return "warning"
-  if (level === 3) return "success"
-  return "muted"
+function subgraphLevelTagClassName(level: number): string {
+  if (level === 1) return "bg-foreground/15 text-foreground"
+  if (level === 2) return "bg-muted/55 text-muted-foreground"
+  if (level === 3) return "bg-muted/35 text-muted-foreground/80"
+  return "bg-muted/20 text-muted-foreground/60"
+}
+
+function subgraphFilesKey(subgraph: SubgraphMembership): string {
+  return `${subgraph.level}:${subgraph.id}:${subgraph.filePath}`
 }
 
 function clampSubgraphsPanelPercent(value: number): number {
@@ -568,22 +427,26 @@ function SubgraphLinkBadge({
   )
 }
 
-export function AssetsPanel({ skillId = null, workspaceRoot = null, skillDetail }: AssetsPanelProps) {
+export function AssetsPanel({
+  skillId = null,
+  workspaceRoot = null,
+  skillDetail,
+  directoryTree: providedDirectoryTree,
+  subgraphTree: providedSubgraphTree,
+}: AssetsPanelProps) {
   const { onFileOpen } = useWorkspaceContext()
   const [subgraphPathOverrides, setSubgraphPathOverrides] = useState<Record<string, string>>({})
   const [subgraphsCollapsed, setSubgraphsCollapsed] = useState(false)
   const [subgraphsPanelPercent, setSubgraphsPanelPercent] = useState(DEFAULT_SUBGRAPHS_PANEL_PERCENT)
   const splitContainerRef = useRef<HTMLDivElement | null>(null)
   const rootTarget = workspaceRoot ?? skillId
-  const fallbackFileTree = useMemo(
-    () => buildAssetTree(skillDetail, { skillId, workspaceRoot: rootTarget }),
-    [rootTarget, skillDetail, skillId],
-  )
-  const nativeFileTree = useNativeDirectoryTree({
+  const localDirectoryTree = useWorkspaceDirectoryTree({
     workspaceRoot: rootTarget,
     skillId,
+    skillDetail,
+    enabled: !providedDirectoryTree,
   })
-  const fileTree = nativeFileTree.tree ?? fallbackFileTree
+  const directoryTree = providedDirectoryTree ?? localDirectoryTree
   const rootLabel = skillRootLabel({ skillDetail, skillId, workspaceRoot: rootTarget })
   const openFile = useCallback(async (file: FileMeta) => {
     const targetRoot = file.workspaceRoot ?? rootTarget
@@ -621,50 +484,15 @@ export function AssetsPanel({ skillId = null, workspaceRoot = null, skillDetail 
     }),
     [subgraphPathOverrides, subgraphs],
   )
-  const topLevelSubgraphKey = useMemo(
-    () => topLevelSubgraphs.map((subgraph) => [
-      subgraph.id,
-      subgraph.level,
-      subgraph.filePath,
-      subgraph.workspaceRoot ?? "",
-      subgraph.path ?? "",
-      subgraph.status,
-    ].join("\u0001")).join("\u0002"),
-    [topLevelSubgraphs],
-  )
-  const [recursiveSubgraphs, setRecursiveSubgraphs] = useState<{
-    key: string
-    items: SubgraphMembership[]
-  } | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    setRecursiveSubgraphs({ key: topLevelSubgraphKey, items: topLevelSubgraphs })
-
-    if (!isTauriRuntime() || topLevelSubgraphs.length === 0) {
-      return () => {
-        cancelled = true
-      }
-    }
-
-    void loadRecursiveSubgraphMembership(topLevelSubgraphs, readWorkspaceFile)
-      .then((memberships) => {
-        if (!cancelled) {
-          setRecursiveSubgraphs({ key: topLevelSubgraphKey, items: memberships })
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setRecursiveSubgraphs({ key: topLevelSubgraphKey, items: topLevelSubgraphs })
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [topLevelSubgraphKey, topLevelSubgraphs])
-  const displayedSubgraphs = recursiveSubgraphs?.key === topLevelSubgraphKey
-    ? recursiveSubgraphs.items
-    : topLevelSubgraphs
+  const hasSubgraphOverrides = Object.keys(subgraphPathOverrides).length > 0
+  const localSubgraphTree = useSubgraphMembershipTree({
+    topLevel: topLevelSubgraphs,
+    enabled: !providedSubgraphTree || hasSubgraphOverrides,
+  })
+  const activeSubgraphTree = providedSubgraphTree && !hasSubgraphOverrides
+    ? providedSubgraphTree
+    : localSubgraphTree
+  const displayedSubgraphs = activeSubgraphTree.items
   const chooseSubgraphPath = useCallback(async (subgraph: SubgraphMembership) => {
     const writeRoot = subgraph.workspaceRoot ?? rootTarget ?? workspaceRoot
     if (!writeRoot) {
@@ -747,7 +575,7 @@ export function AssetsPanel({ skillId = null, workspaceRoot = null, skillDetail 
     <TooltipProvider>
       <div
         data-assets-panel-stable-height="true"
-        className="grid h-[calc(100vh-1.5rem)] max-h-[calc(100vh-1.5rem)] min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-background"
+        className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-background"
       >
         <PanelHeader title="Assets" />
 
@@ -760,8 +588,7 @@ export function AssetsPanel({ skillId = null, workspaceRoot = null, skillDetail 
             <AssetExplorerSection sectionId="skill-files" label="Skill Files">
               <ScrollArea className="h-full min-h-0">
                 <div className="space-y-0.5 px-0.5 py-1 text-xs">
-                  <TreeStatusLine state={nativeFileTree} />
-                  <SkillRootTree rootLabel={rootLabel} node={fileTree} onOpen={openFile} />
+                  <SkillRootTree rootLabel={rootLabel} directoryTree={directoryTree} onOpen={openFile} />
                 </div>
               </ScrollArea>
             </AssetExplorerSection>

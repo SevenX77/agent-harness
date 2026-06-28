@@ -3,8 +3,6 @@ import type { Edge, EdgeProps } from '@xyflow/react'
 import type { ContextEdgeData } from './ContextEdge'
 
 type SubgraphBridgeEdgeModel = Edge<ContextEdgeData, 'subgraphBridge'>
-const SUBGRAPH_BRIDGE_DASH = 4
-const SUBGRAPH_BRIDGE_GAP = 4
 
 interface Point {
   x: number
@@ -14,10 +12,6 @@ interface Point {
 function edgeCoordinate(value: number): string {
   const rounded = Math.round(value * 1000) / 1000
   return Object.is(rounded, -0) ? '0' : String(rounded)
-}
-
-function pointsEqual(a: Point, b: Point): boolean {
-  return Math.abs(a.x - b.x) < 0.001 && Math.abs(a.y - b.y) < 0.001
 }
 
 export function subgraphBridgePoints({
@@ -59,103 +53,30 @@ export function subgraphBridgePath(params: Parameters<typeof subgraphBridgePoint
   return pathFromPoints(subgraphBridgePoints(params))
 }
 
-export function subgraphBridgePathLength({
-  sourceX,
-  sourceY,
-  targetX,
-  targetY,
-}: {
-  sourceX: number
-  sourceY: number
-  targetX: number
-  targetY: number
-}): number {
-  return polylineLength(subgraphBridgePoints({ sourceX, sourceY, targetX, targetY }))
-}
-
-function distance(a: Point, b: Point): number {
-  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y)
-}
+const SUBGRAPH_BRIDGE_DASH = 4
 
 function polylineLength(points: Point[]): number {
   let length = 0
   for (let index = 1; index < points.length; index += 1) {
-    length += distance(points[index - 1], points[index])
+    length += Math.hypot(points[index].x - points[index - 1].x, points[index].y - points[index - 1].y)
   }
   return length
 }
 
-function pointOnSegment(start: Point, end: Point, distanceFromStart: number): Point {
-  const length = distance(start, end)
-  if (length <= 0) return start
-  const ratio = distanceFromStart / length
-  return {
-    x: start.x + (end.x - start.x) * ratio,
-    y: start.y + (end.y - start.y) * ratio,
-  }
-}
-
-function segmentPathAlongPolyline(points: Point[], startDistance: number, endDistance: number): string {
-  const segmentPoints: Point[] = []
-  let travelled = 0
-  for (let index = 1; index < points.length; index += 1) {
-    const segmentStart = points[index - 1]
-    const segmentEnd = points[index]
-    const segmentLength = distance(segmentStart, segmentEnd)
-    const segmentFrom = travelled
-    const segmentTo = travelled + segmentLength
-    travelled = segmentTo
-    const overlapFrom = Math.max(startDistance, segmentFrom)
-    const overlapTo = Math.min(endDistance, segmentTo)
-    if (overlapTo <= overlapFrom) continue
-
-    const startPoint = pointOnSegment(segmentStart, segmentEnd, overlapFrom - segmentFrom)
-    const endPoint = pointOnSegment(segmentStart, segmentEnd, overlapTo - segmentFrom)
-    if (segmentPoints.length === 0 || !pointsEqual(segmentPoints[segmentPoints.length - 1], startPoint)) {
-      segmentPoints.push(startPoint)
-    }
-    segmentPoints.push(endPoint)
-  }
-  return pathFromPoints(segmentPoints)
-}
-
-export function subgraphBridgeDashPaths(params: Parameters<typeof subgraphBridgePoints>[0]): string[] {
-  const points = subgraphBridgePoints(params)
-  const length = polylineLength(points)
-  if (length <= 0) return []
-  if (length <= SUBGRAPH_BRIDGE_DASH) {
-    return [pathFromPoints(points)]
-  }
-
-  const intervals: Array<[number, number]> = []
-  const addInterval = (start: number, end: number) => {
-    const clampedStart = Math.max(0, Math.min(length, start))
-    const clampedEnd = Math.max(clampedStart, Math.min(length, end))
-    if (clampedEnd - clampedStart < 0.5) return
-    const previous = intervals[intervals.length - 1]
-    if (previous && clampedStart <= previous[1]) {
-      previous[1] = Math.max(previous[1], clampedEnd)
-      return
-    }
-    intervals.push([clampedStart, clampedEnd])
-  }
-
-  const sourceClip = 0
-  const visibleLength = length - sourceClip
-  addInterval(sourceClip, sourceClip + SUBGRAPH_BRIDGE_DASH)
-  const finalStart = Math.max(sourceClip, length - SUBGRAPH_BRIDGE_DASH)
-  for (
-    let cursor = sourceClip + SUBGRAPH_BRIDGE_DASH + SUBGRAPH_BRIDGE_GAP;
-    cursor + SUBGRAPH_BRIDGE_DASH <= finalStart - SUBGRAPH_BRIDGE_GAP;
-    cursor += SUBGRAPH_BRIDGE_DASH + SUBGRAPH_BRIDGE_GAP
-  ) {
-    addInterval(cursor, cursor + SUBGRAPH_BRIDGE_DASH)
-  }
-  if (visibleLength > SUBGRAPH_BRIDGE_DASH) {
-    addInterval(finalStart, length)
-  }
-
-  return intervals.map(([start, end]) => segmentPathAlongPolyline(points, start, end))
+/**
+ * Dash pattern (dash == gap == d) fitted to the polyline's EXACT length so the
+ * line begins with a full dash at the source (toggle button edge) and ends with
+ * a full dash at the target (header edge). With k dashes and k-1 equal gaps,
+ * (2k-1)·d = length, and we pick k so d stays ≈ SUBGRAPH_BRIDGE_DASH. A plain
+ * static `stroke-dasharray: 4 4` can't do this: it leaves a truncated ~2px
+ * fragment whenever the length isn't a clean multiple of the period.
+ */
+export function subgraphBridgeDashArray(params: Parameters<typeof subgraphBridgePoints>[0]): string {
+  const length = polylineLength(subgraphBridgePoints(params))
+  if (length <= 0) return '0'
+  const k = Math.max(1, Math.round((length / SUBGRAPH_BRIDGE_DASH + 1) / 2))
+  const d = length / (2 * k - 1)
+  return `${edgeCoordinate(d)} ${edgeCoordinate(d)}`
 }
 
 export function SubgraphBridgeEdge({
@@ -166,21 +87,23 @@ export function SubgraphBridgeEdge({
   targetY,
   style,
 }: EdgeProps<SubgraphBridgeEdgeModel>) {
-  const paths = subgraphBridgeDashPaths({ sourceX, sourceY, targetX, targetY })
+  // One continuous orthogonal path from the parent toggle to the subgraph header.
+  // The dash rhythm is fitted to the path length (subgraphBridgeDashArray) so both
+  // ends land on a FULL dash — a full dash leaves the button edge and a full dash
+  // arrives at the header, with no truncated 2px fragment and no leading gap.
+  const params = { sourceX, sourceY, targetX, targetY }
+  const path = subgraphBridgePath(params)
+  const strokeDasharray = subgraphBridgeDashArray(params)
   return (
-    <>
-      {paths.map((path, index) => (
-        <ReactFlow.BaseEdge
-          key={`${id}-${index}`}
-          id={`${id}-${index}`}
-          path={path}
-          className="subgraph-bridge-edge"
-          style={{
-            pointerEvents: 'none',
-            ...style,
-          }}
-        />
-      ))}
-    </>
+    <ReactFlow.BaseEdge
+      id={id}
+      path={path}
+      className="subgraph-bridge-edge"
+      style={{
+        pointerEvents: 'none',
+        ...style,
+        strokeDasharray,
+      }}
+    />
   )
 }

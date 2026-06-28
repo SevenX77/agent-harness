@@ -703,9 +703,10 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
 }
 
 .react-flow .subgraph-bridge-edge {
+  /* stroke-dasharray is set inline per-edge (subgraphBridgeDashArray) so the
+     rhythm fits the path length and both ends land on a full dash. */
   filter: none;
   stroke: var(--primary);
-  stroke-dasharray: none;
   stroke-linecap: butt;
   stroke-linejoin: miter;
   stroke-width: 1.5px;

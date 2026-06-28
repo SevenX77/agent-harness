@@ -1,0 +1,335 @@
+{
+  "page_id": "copilot_design",
+  "title": "Copilot 设置页 · 操作设计",
+  "region": "settings:copilot",
+  "intro": "本页是 Copilot（助手配置）tab 各操作的 MVP1 设计(应该怎样):每张卡只描述该操作目标长啥样、用户怎么触发、前端该怎么做、依赖后端哪条契约;现状实现与差距见实施页(copilot_impl),依赖的 route 解析/SDK 测试机制见 copilot 机制页(copilot_mech_route)。Copilot 与 LLM Roles 同构(角色配置 + 拖 route 兜底 + 测试回写),两点不同:① copilot 角色只能配一个 model group(不像 graph role 可多组);② 测试与真实对话都走 copilot 自己的 Claude Agent SDK 调用(spawn claude CLI 子进程、base_url 经 env 注入),不是普通 LLM 的 HTTP 调用——所以 copilot 的『测试』和『真实运行』本应是同一条路、不存在假测试。",
+  "atoms": [
+    {
+      "n": 54,
+      "cap": "copilot-tab-shell",
+      "track": "共",
+      "module": "壳层与保存反馈",
+      "func": "设计:进 Copilot tab 看到标题 + 统一保存状态徽章 + copilot 角色卡;数据没到先骨架屏,不让用户对着空白。",
+      "action": "用户切到 Copilot tab(首次进入自动加载,无需点按钮)。",
+      "fe_design": "进 tab → 渲染标题区(标题 + 描述 + trailing 槽位放统一保存状态徽章(SaveStatusBadge,把 SaveStatus 渲染成统一徽章的共享 UI 组件))→ 数据(roles)未到时显示 2 张骨架卡 → 数据到后渲染真实 copilot 角色卡。trailing 槽位用的是四页共用的同一个保存状态徽章组件(General / API Keys / LLM Roles / Copilot 同款,已在 Shell 登记、本页复用),不是写死的装饰徽章。校验失败时标题下显式显示错误条(不静默)。",
+      "fe_modules": [
+        {
+          "name": "保存状态徽章（SaveStatusBadge）",
+          "ref": "femod-savestatus"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "GET /api/llm/registry",
+          "purpose": "拉快照(roles + model_groups + 6 态原料),前端据此渲染 copilot 角色卡;无数据时前端自渲骨架屏。",
+          "mechanism_ref": "copilot_mech_route",
+          "iface_ref": "iface-c0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计。trailing 已用共用 SaveStatusBadge,旧『Backend Integration』写死装饰徽章已不存在。",
+      "impl_ref": "fn-54"
+    },
+    {
+      "n": 55,
+      "cap": "copilot-role-list",
+      "track": "共",
+      "module": "角色卡渲染",
+      "func": "设计:把后端真实 model_groups + 凭证投影成 copilot 角色卡,标 Built-in / Third-party,卡内显该角色配的 model group 与 route 兜底链。『Built-in vs Third-party』= 这个 copilot 角色选的是不是系统按 family 阶梯自动浮出的 canonical model-group(§3.2 PM 2026-06-18 澄清),不是一个独立的后端元数据字段。",
+      "action": "无显式动作(进 tab 自动按真实数据渲染)。",
+      "fe_design": "进 tab → 从 registry 的 model_groups + credentials 派生候选 copilot 模型组(只保留含 anthropic 兼容 endpoint 的组)→ 与 roles 表里 role_kind='copilot' 的角色对齐渲染成卡:有选中 model group 的渲染成完整角色卡(显兜底链 route + SDK 状态灯),没选的渲染成空卡(待选组)。\n\nBuilt-in / Third-party 徽章的判定走『canonical 组归一化』这条已有能力,不需要新后端契约:① copilot 的『内置角色』本质 = 系统自动选了一个 canonical model-group(如 canonical_id 为 claude-opus-4.8 的组),而 canonical_id 由 §2.1『相同模型合并 / singleton 按 canonical_id 键』那套归一化早就算好、registry 的每个 model_group 已带(RoleModelGroup.canonical_id);② 所以『某角色是内置』⟺『它选的组的 canonical_id 正是系统按 family 阶梯(#56)会自动浮出的那批 canonical 组之一』——内置判定与 #56 浮出判定是同一套 canonical-id 真相,不是两份白名单。\n\n落地含义:Built-in 标注 = 复用 #56 的择优函数(pickDefaultCopilotGroupIds)判定『这个角色的组在不在系统会浮出的 canonical 组里』,在 = built_in、否则 third_party(用户自建组)。卡片标题/描述直接取 model_group 的 display_name(已归一化的 canonical 显示名),不靠『display_name 是否含 Claude』套两句模板。",
+      "fe_modules": [
+        {
+          "name": "copilot 角色派生",
+          "ref": "femod-copilot-derivation"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "GET /api/llm/registry",
+          "purpose": "返回真实 model_groups(带 6 态 ui_state + capabilities)+ roles + 凭证快照,供前端派生候选组并投影角色卡。",
+          "mechanism_ref": "copilot_mech_route",
+          "iface_ref": "iface-c0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "已接真 registry(deriveCopilotCandidateGroups,无 mock)。偏差在前端用了两套独立的脆判定:Built-in 靠一段硬编码 canonical_id 白名单(claude-opus-4.7/4.8、deepseek-v4-pro/v3.2-pro),描述靠 display_name.includes('Claude') 套两句模板——这跟 #56 的浮出阶梯各写各的、容易漂。目标:Built-in 判定改为『复用 #56 的 pickDefaultCopilotGroupIds 看这个组在不在系统浮出的 canonical 组里』,描述/标题直接取 model_group 的归一化 display_name。这是纯前端收敛(去掉重复白名单 + includes 模板),不需要后端补 role 元数据契约——canonical_id 已在 registry 的 model_group DTO 里(RoleModelGroup.canonical_id),后端契约不动。",
+      "impl_ref": "fn-55"
+    },
+    {
+      "n": 56,
+      "cap": "role-seed-fallback",
+      "track": "共",
+      "module": "角色卡渲染",
+      "func": "设计:内置角色不写死,而是动态从 available models 里浮出 Claude 和 DeepSeek 最新最好的模型作默认——Claude 优先 opus 4.8(退 4.7),DeepSeek 优先 V4 Pro(退 V3.2 Pro),都没有就不浮出、让用户自建。",
+      "action": "无显式动作(无角色或首次进入时按 family 偏好阶梯自动浮出默认)。",
+      "fe_design": "动态择优浮出,落地三件事写死如下:\n\n① 触发时机:进 tab 渲染时,若 roles 表里没有任何 role_kind='copilot' 的角色(即用户从没建过 copilot 角色)→ 用派生候选组浮出默认内置角色;只要已存在至少一个 copilot 角色(哪怕是空草稿)就不再浮出默认(不覆盖用户已建的)。浮出的内置角色是『按候选默认值渲染』,不是写盘新角色——用户不动它就不落库,动了(选组/测试)才进保存链。\n\n② family 阶梯(每个 family 独立择优,逐档回退):Claude family 在候选 canonical_id 里有 claude-opus-4.8 → 浮出 4.8;否则有 claude-opus-4.7 → 浮出 4.7;两者都无 → Claude 不浮出。DeepSeek family 有 deepseek-v4-pro → 浮出 V4 Pro;否则有 deepseek-v3.2-pro → 浮出 V3.2 Pro;都无 → DeepSeek 不浮出。两 family 各自独立,可能浮出 0/1/2 张。判据用候选组的 canonical_id(归一化已算好),不靠模型显示名字符串猜。\n\n③ 无候选空态(不 mock):两 family 都没有匹配的 canonical 组(比如用户只配了别的 provider)→ 不浮出任何默认,显示『无内置角色,点 Add model 自建』的空态/引导,绝不回退到 mock 种子卡(去 mock 后空就是空、如实呈现)。\n\n这是动态择优,浮出的就是 #55 判 Built-in 的同一批 canonical 组——浮出函数(pickDefaultCopilotGroupIds)既驱动浮出、又是 Built-in 判定的唯一真相,二者同源。",
+      "fe_modules": [
+        {
+          "name": "copilot 角色派生",
+          "ref": "femod-copilot-derivation"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "GET /api/llm/registry",
+          "purpose": "提供 available 的 model_groups,前端据 canonical id 判断有没有 opus4.8/4.7、V4Pro/V3.2Pro 来择优浮出。",
+          "mechanism_ref": "copilot_mech_route",
+          "iface_ref": "iface-c0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "已无 mock 种子(去 mock 完成);偏差在动态浮出未挂载——按阶梯择优的纯函数 pickDefaultCopilotGroupIds(claude-opus-4.8→4.7、deepseek-v4-pro→v3.2-pro)已写好但全仓无任何调用方(连测试都未引用,孤儿),当前无角色时不自动浮出默认,需把它接进渲染链。",
+      "impl_ref": "fn-56"
+    },
+    {
+      "n": 57,
+      "cap": "route-sdk-status-badge",
+      "track": "共",
+      "module": "状态投影",
+      "func": "设计:角色卡顶部显 N/M SDK Ready 汇总徽章、每条 route 一个 SDK 状态灯,灯来自真 SDK 测试结果,重开/重启后还在。",
+      "action": "无显式动作(测试后/加载后自动投影;含挂载时从持久化结果回填)。",
+      "fe_design": "角色卡顶 N/M SDK Ready 徽章(M=兼容 route 数、N=测过且 ready 的)+ 每条 route 一个状态灯(🟢ready/🔵testing/⚪not_tested/🔴unsupported)。灯的权威来自真 SDK 测试:本次测试中走进度 override,本次没测的从挂载时拉的持久化 last 测试结果(读 sdk_evidence.routes 的 per-route 裁决)回填,所以重开 tab/重启后端后状态灯不丢。前端只读投影、不持第二份真相。",
+      "fe_modules": [
+        {
+          "name": "copilot 状态投影",
+          "ref": "femod-copilot-status"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "GET /api/llm/roles/test-results",
+          "purpose": "挂载时拉持久化的 last SDK 测试结果,per-route 裁决在 result.sdk_evidence.routes,前端据此回填状态灯。",
+          "mechanism_ref": "copilot_mech_route",
+          "iface_ref": "iface-c2"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计。SDK 状态灯已接真 SDK 测试证据(copilotRouteStatusesFromPersistedResult 读 sdk_evidence.routes)+ 挂载回填;未测过的 route 初始灯按 ui_state 显示(未测=⚪),测过即升真 SDK 裁决。",
+      "impl_ref": "fn-57"
+    },
+    {
+      "n": 58,
+      "cap": "copilot-role-test",
+      "track": "共",
+      "module": "SDK 测试",
+      "func": "设计:点 Test 对角色每条 route 验 Claude Agent SDK 工具调用能不能真跑通——发真工具调用、验 spawn/env 注入/tool loop,测过 ⟺ 运行能用,不存在假测试。",
+      "action": "用户在 copilot 角色卡点 `Test` 按钮。",
+      "fe_design": "点 Test → 起一个后端测试 job、按节奏轮询进度实时刷到每条 route 灯上(testing→ready/unsupported)→ 成功 toast、需关注 toast.warning。后端对每条 route 起一个真 ClaudeSDKClient 子进程:写一个随机 token 到临时文件、逼模型用工具读回来,token 真被回显才算 tool loop 跑通(spawn + env 注入 + 工具循环全验)。这与真实对话走的是同一条 SDK 路径,所以『测的 SDK == 跑的 SDK』。前端只触发 + 展示进度,SDK 驱动策略归后端机制(copilot_mech_route)。",
+      "fe_modules": [
+        {
+          "name": "copilot 状态投影",
+          "ref": "femod-copilot-status"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "POST /api/llm/roles/{role_name}/test-jobs",
+          "purpose": "起 copilot SDK 测试 job;后端按 role_kind=='copilot' 分流到真 ClaudeSDKClient 逐 route 测试,前端轮询 job 进度。",
+          "mechanism_ref": "copilot_mech_route",
+          "iface_ref": "iface-c3"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计——这是 spec §3.4 要修的核心 drift,现码已修:测试走真 ClaudeSDKClient(run_route_sdk_test,token 回显验 tool loop)、旧的 AsyncAnthropic 裸探针假测试已移除;前端经统一 role test-job 入口触发(不再需要单独 test-sdk 端点)。",
+      "impl_ref": "fn-58"
+    },
+    {
+      "n": 59,
+      "cap": "route-fallback-reorder",
+      "track": "共",
+      "module": "route 兜底管理",
+      "func": "设计:拖动 route 调兜底优先级,且重排真生效——真实运行按这个序逐条尝试,不是只取首条。",
+      "action": "用户在角色卡的 route 兜底链里拖动 route 调序。",
+      "fe_design": "拖动 route → 重排兜底序 → 写进角色 fallback_chain + models[group].providers → debounce 保存。运行/测试时后端沿这个有序兜底链逐条尝试:某条缺 credential/解析失败/调用失败就记录后退到下一条,不是只认首条。前端只录入序、运行端走全链是后端机制(copilot_mech_route)。",
+      "fe_modules": [],
+      "be_contract": [
+        {
+          "endpoint": "PUT /api/llm/roles",
+          "purpose": "保存重排后的兜底序(整表 upsert);后端解析时按此序物化有序 ResolvedRoute,运行走全链。",
+          "mechanism_ref": "copilot_mech_route",
+          "iface_ref": "iface-c1"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计。前端拖序写 fallback_chain;运行端 stream_query + _next_copilot_route 已走全兜底链(非只首条)——spec §3.5『_resolve_copilot_route 只取首条』的旧 drift 在现码已消除,该首条函数现为未调用的死代码。",
+      "impl_ref": "fn-59"
+    },
+    {
+      "n": 60,
+      "cap": "route-fallback-add-remove",
+      "track": "共",
+      "module": "route 兜底管理",
+      "func": "设计:往兜底链追加一条兼容 route / 用垃圾桶删一条,候选 route 用后端 capability 判 eligible(支持 anthropic-messages),不靠名字猜。",
+      "action": "用户点 `Add route` 选一条可追加 route,或点某 route 的垃圾桶删除。",
+      "fe_design": "Add route → 下拉列出该 model group 里兼容、且还没在链里的 route,选一条追加到兜底序尾 → debounce 保存。垃圾桶 → 从兜底序移除该 route → 保存。候选 route 的『兼容』判据 = 该 route 的 endpoint 是 anthropic 兼容协议(后端 capability),不是按 route 名字启发式猜。",
+      "fe_modules": [
+        {
+          "name": "copilot 角色派生",
+          "ref": "femod-copilot-derivation"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "PUT /api/llm/roles",
+          "purpose": "保存增删 route 后的兜底链(整表 upsert)。",
+          "mechanism_ref": "copilot_mech_route",
+          "iface_ref": "iface-c1"
+        },
+        {
+          "endpoint": "GET /api/llm/registry",
+          "purpose": "提供 route 的协议/capability,前端据 anthropic 兼容性过滤可追加候选。",
+          "mechanism_ref": "copilot_mech_route",
+          "iface_ref": "iface-c0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计。增删 route 写兜底链;eligible 判据已用 endpoint provider_type=='anthropic_compatible' 的真 capability 过滤(deriveCopilotCandidateGroups),非按名字猜——spec §3.2 要取代的 isClaudeAgentSdkCompatibleRoute 名字启发式在现码已不存在。",
+      "impl_ref": "fn-60"
+    },
+    {
+      "n": 61,
+      "cap": "model-group-remove",
+      "track": "共",
+      "module": "route 兜底管理",
+      "func": "设计:model-group 行的 Remove 按钮能真把该 model group 从角色移除(让用户换组);因 copilot 单组约束(§3.1,一个 copilot 角色只能配一个 model group),『删组』= 把这个角色清回未选组的空卡态,而非删掉多组里的一组。",
+      "action": "用户点 model-group 行的 Remove(垃圾桶)按钮。",
+      "fe_design": "点 model-group 行 Remove → 把该角色的 model group 选择整体清空(active_model 清空、models 清空、fallback_chain 清空)→ 角色退回 EmptyCopilotRoleCard(可重新选组的空卡)→ 保存。\n\n单组约束下的精确语义:copilot 角色至多一个 model group,所以 Remove 不存在『删 N 组里的一组』,它就是『退选』——角色本身不删(role key / role_kind='copilot' 保留),只是清掉选中的组,变回待选状态。这与 #61 是同一个角色的生命周期内的『换组前先退组』,跟 #64『删整个第三方角色』是两件事(后者把角色从 roles 表移除)。按钮应接真 handler,不是写死禁用的占位。",
+      "fe_modules": [],
+      "be_contract": [
+        {
+          "endpoint": "PUT /api/llm/roles",
+          "purpose": "保存清空 model group 后的角色(整表 upsert)。",
+          "mechanism_ref": "copilot_mech_route",
+          "iface_ref": "iface-c1"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "现状 model-group 行的 Remove 按钮写死 disabled 且无 onClick handler(CopilotModelGroupCard 里 Trash2 按钮恒 disabled),纯占位;目标是接 handler 让它真能清空 model group。纯前端改动,后端 PUT /roles 不动。",
+      "impl_ref": "fn-61"
+    },
+    {
+      "n": 62,
+      "cap": "copilot-role-add",
+      "track": "三",
+      "module": "角色增删",
+      "func": "设计:点 Add model 新建一张第三方 copilot 角色草稿卡,id 带 copilot_ 前缀语义(copilot_custom_N),让用户自建助手角色。",
+      "action": "用户点 `Add model` 按钮。",
+      "fe_design": "点 Add model → 生成 id=copilot_custom_{N}(N 按已有 copilot_custom_ 角色数递增)、role_kind='copilot' 的空草稿角色 → 渲染成待选组的空卡 → 入队保存。新建即带 copilot 语义(role_kind + copilot_custom_ id),后端据 role_kind 归为 copilot 角色。",
+      "fe_modules": [],
+      "be_contract": [
+        {
+          "endpoint": "PUT /api/llm/roles",
+          "purpose": "保存新建的 copilot 草稿角色(整表 upsert);后端按 role_kind 归类 copilot。",
+          "mechanism_ref": "copilot_mech_route",
+          "iface_ref": "iface-c1"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计。addDraftCopilotRole 建 copilot_custom_N + role_kind='copilot' 草稿;后端按 role_kind(非 key 前缀)分流,新建不会错存——spec §7.4 标的『key 命名触发后端分流误判风险』因后端改认 role_kind 字段已不成立。",
+      "impl_ref": "fn-62"
+    },
+    {
+      "n": 63,
+      "cap": "copilot-config-model-group",
+      "track": "三",
+      "module": "角色增删",
+      "func": "设计:空卡下拉选一个 Model group → 角色变可配置(自动挂兜底链),且选组器应可搜索;选组后角色仍归 copilot、不被错存成 graph-agent。",
+      "action": "用户在空 copilot 卡的 Model group 选择器里选一个组。",
+      "fe_design": "空卡选 Model group → 把该组的兼容 route 作默认兜底链挂上(默认选 ready 的)、角色变完整可配置卡 → 保存。\n\n可搜索选组器(C10 #1)的精确设计,对齐 §2.1『可用模型搜索』体验:① 触发——空卡的选组控件是带搜索输入框的选项卡(shadcn Command/Combobox 模式),不是裸下拉;② 搜什么——输入实时纯前端过滤候选 copilot 组,匹配字段同 §2.1:组的归一化显示名(display_name)、canonical_id、组内各 route 的 provider 标签、provider model id;支持多 token 全含 + 紧凑匹配(忽略分隔符);③ 候选范围——只列『anthropic 兼容(eligible)且当前角色还没选』的 copilot 候选组(与 #60 Add route 的 eligible 判据同源);④ 过滤纯前端不发请求,选中一个组即落选。\n\n关键(分流不变量):选组只改角色的 active_model + models + fallback_chain,角色 key 保持不变(仍是 copilot_custom_N、role_kind 仍 copilot),后端据 role_kind 归 copilot——绝不把 role key 改成裸 modelGroupId 而丢掉 copilot 语义。",
+      "fe_modules": [
+        {
+          "name": "copilot 角色派生",
+          "ref": "femod-copilot-derivation"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "PUT /api/llm/roles",
+          "purpose": "保存选组后的角色(整表 upsert);后端按 role_kind=='copilot' 归 copilot。",
+          "mechanism_ref": "copilot_mech_route",
+          "iface_ref": "iface-c1"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "分流 bug 已修(applyCopilotModelGroupSelection 保留 role key、只写 active_model/models/fallback_chain,后端认 role_kind 字段)——spec §3.5 标的『选组后 role key 丢 copilot_ 前缀致误判』在现码已不复现。仍偏差的是选组器:现状是裸 shadcn Select、非可搜索选项卡(C10 #1 要求可搜索),需替换为可搜索选组器。",
+      "impl_ref": "fn-63"
+    },
+    {
+      "n": 64,
+      "cap": "copilot-role-delete",
+      "track": "三",
+      "module": "角色增删",
+      "func": "设计:第三方 copilot 角色可删(带二次确认),Built-in 角色不可删;删后走整表 PUT 覆盖。",
+      "action": "用户点第三方 copilot 角色卡的删除(垃圾桶)→ 确认。",
+      "fe_design": "第三方卡垃圾桶 → 弹二次确认 toast → 确认后从 roles 移除该角色 → 整表 PUT 覆盖保存。Built-in 角色卡不渲染删除按钮(不可删)。删除是整表 upsert 语义:被删角色在新整表里缺席即被覆盖掉。",
+      "fe_modules": [],
+      "be_contract": [
+        {
+          "endpoint": "PUT /api/llm/roles",
+          "purpose": "整表 upsert 覆盖(被删角色缺席即移除)。",
+          "mechanism_ref": "copilot_mech_route",
+          "iface_ref": "iface-c1"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(二次确认 toast + 整表覆盖;Built-in 卡无删除按钮)。",
+      "impl_ref": "fn-64"
+    },
+    {
+      "n": 65,
+      "cap": "copilot-save-status",
+      "track": "共",
+      "module": "壳层与保存反馈",
+      "func": "设计:改完角色配置后,统一保存状态徽章实时反映保存中/已保存,失败显式告警不静默。",
+      "action": "无显式动作(改任意字段触发 debounce 保存,徽章随状态变)。",
+      "fe_design": "改任意角色配置 → debounce 保存 → trailing 槽位的统一保存状态徽章(SaveStatusBadge)按 idle(静默不显)/pending(Pending)/saving(Saving)/saved(Saved)/失败(显式错误)切换;保存失败显式告警(不静默吞掉,D8 铁律)。徽章与 General/API Keys/LLM Roles 同一个共用组件,四页表现一致。",
+      "fe_modules": [
+        {
+          "name": "保存状态徽章（SaveStatusBadge）",
+          "ref": "femod-savestatus"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "PUT /api/llm/roles",
+          "purpose": "保存返回状态供徽章反映(成功/失败);失败态由前端显式呈现。",
+          "mechanism_ref": "copilot_mech_route",
+          "iface_ref": "iface-c1"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计——spec §7.4 标的 stale-code『void saveStatus; void error 直接丢弃、改完无反馈』在现码已修:saveStatus 已传进 SaveStatusBadge、error 已渲染成错误条,四页共用同一保存状态徽章(SaveStatusBadge)。",
+      "impl_ref": "fn-65"
+    }
+  ],
+  "fe_defs": [
+    {
+      "id": "femod-savestatus",
+      "name": "保存状态徽章（SaveStatusBadge）",
+      "explain": "前端共享 UI 组件：SaveStatusBadge（components/ui/save-status-badge.tsx），把 SaveStatus（idle/pending/saving/saved/失败）渲染成统一保存状态徽章；General / API Keys / LLM Roles / Copilot 四页共用同一个——取代了旧的三份近重复 badge（SaveStatusBadge/RoleSaveStatusBadge/AppSettingsSaveStatusBadge），『统一组件（横切）』已闭环"
+    },
+    {
+      "id": "femod-copilot-derivation",
+      "name": "copilot 角色派生",
+      "explain": "前端共享逻辑：copilot-role-derivation.ts，从后端 model_groups + credentials 派生候选 copilot 模型组的纯函数集；deriveCopilotCandidateGroups（只保留含 anthropic 兼容 endpoint 的组、按 anthropic-messages capability 判 eligible，并标 built_in/third_party）；pickDefaultCopilotGroupIds（按 family 偏好阶梯择优浮出默认 canonical 组：opus4.8→4.7、V4Pro→V3.2Pro，现为孤儿待挂载——它既驱动 #56 浮出，又应作 #55 built_in 判定的唯一真相）；applyCopilotModelGroupSelection（选组时保留 role key、写 active_model/models/fallback_chain，保住 copilot 语义、修掉旧丢前缀 bug）。偏差点（#55）：现状 built_in 判定与描述靠一段独立的硬编码 canonical_id 白名单 + display_name.includes('Claude') 模板，与 pickDefaultCopilotGroupIds 各写各的，应收敛为复用浮出函数判 built_in、描述直接取归一化 display_name（纯前端收敛，不需后端补元数据契约——canonical_id 已在 registry model_group DTO 里）"
+    },
+    {
+      "id": "femod-copilot-status",
+      "name": "copilot 状态投影",
+      "explain": "前端共享逻辑：copilot-role-test.ts，把后端 SDK 测试结果投影成 route 状态灯的逻辑；runCopilotRoleTestJob（起 job + 轮询进度喂状态灯）；copilotRouteStatusesFromJob（本次测试进度 → 状态灯）；copilotRouteStatusesFromPersistedResult（读持久化 sdk_evidence.routes 的 per-route 裁决 → 挂载回填状态灯）；agentStatusForRoute（CopilotModelGroupCard.tsx，按初始 ui_state + 本次 override 合成 SDK 状态灯码）"
+    }
+  ]
+}

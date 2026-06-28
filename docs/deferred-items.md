@@ -8,6 +8,52 @@
 
 > **DEF-001 / DEF-002 已拉回 `studio-feature-trace-inspector` scope**(2026-06-01),不再是 deferred 项 —— 二者本就是该 spec 自己的 feature,不属跨 spec/孤儿,见下方 Promoted 区与 `requirement.md` REQ-3 / REQ-7。
 
+### DEF-028 — copilot F6 建技能向导(独立 brainstorming graph skill)— 需独立 authoring 轮
+- **日期**: 2026-06-14
+- **事项**: 设计 §F6:copilot-SDK 调一个**独立 brainstorming graph skill**(graph 背景知识 + skill-spec 渐进暴露 + template few-shot)对话式设计新 skill(问需求→定 io schema→生成骨架),两入口(新建 skill 时可选 + chat 说"帮我建个 X")。
+- **现状(核实)**: 该 brainstorming graph skill **不存在**(全仓 `find` 无 brainstorm/skill-builder skill);`SkillCreatorWizard.tsx` 是**模板路径**(`TemplatePicker` + `skillMdGenerator`),= 设计里"默认新建(模板文件夹,不调 copilot)"那条,不是 F6 的对话式向导。
+- **延期原因**: F6 = **authoring 一个新的 graph_skill 工件**(GRAPH.md + phases + 背景知识/few-shot 内容)+ copilot 调用集成 + chat-trigger 入口。这是内容创作 + 集成,非代码小改,需独立 fresh-context 轮(且产出物本身要按 FROZEN 骨架可编译)。
+- **前置条件**: 设计/撰写 brainstorming graph skill 内容;copilot 经自定义工具/`add_dirs` 调它;chat "帮我建 X" 触发路由。
+- **来源**: copilot-assist mvp1-alignment §F6(line 60-65)。
+
+### DEF-029 — input F3 输出产物路径(per-node output artifact)— owner=engine(缺 schema 字段)
+- **日期**: 2026-06-14
+- **事项**: 设计 §F3:从 i/o 面板配置**每节点**输出文件 / 产物路径;"setting an output artifact path updates node file; default path lands under workspace artifacts"。
+- **现状(核实)**: 引擎只有**run 级** `output_dir` / `default_output_dir`(`runner.py:1199,1296`,产物落 `trace_output/artifacts` 或 run 级 output_context),**没有 per-node「output artifact path」字段**在 manifest/phase schema 里。
+- **延期原因**: F3 要的是 per-node 输出路径设置,需引擎 manifest/phase schema **加一个 per-node output-path 字段**让引擎按节点落产物 = **owner=engine 的 schema 变更**,Studio 不能单方面加引擎不读的字段(与 per-node golden 扁平、edge 黑板同类的 engine 侧前置)。
+- **前置条件**: 引擎在 phase/manifest schema 暴露 per-node output-artifact-path + run 时按它落产物;之后 Studio i/o 面板加编辑 UI 写该字段。
+- **来源**: input/mvp1-alignment §F3(line 38-43)+ 引擎 schema 核实(2026-06-14)。
+
+### DEF-027 — copilot F5 Write/Edit 自写例外 — ✅ PM 放行(2026-06-14,接受为 MVP1 口径)
+- **PM 裁决(2026-06-14)**: **放行**。MVP1 允许 Copilot SDK `Read/Write/Edit` 在 workspace/cwd/add_dirs 范围内自行读写;不重构成自定义 MCP propose-tools 走 Rust。D12 继续约束 Studio 自有写入(editor save / graph serialize / test_inputs / golden / runs / artifacts / publish package 等),但不把 Copilot SDK Write/Edit 直写列为 D12 阻断。此条不再是待办,留作**已接受的设计例外**记录。
+- **日期**: 2026-06-14
+- **事项**: 原设计曾要求 copilot 的 Write/Edit **前向写经 Rust autosave 落盘**(Rust 唯一写者)。当前实现:`can_use_tool`(`copilot.py:_make_safe_write_can_use_tool`)对 Write/Edit 返回 `PermissionResultAllow` → **SDK CLI 子进程自己把文件写到磁盘**。该实现现在被 MVP1 设计接受,不再判为违规;Reject 还原仍经 Rust(`restore_workspace_file`)。
+- **为何不能用权限回调修**: 已 PoC 真跑核实——SDK 的 `can_use_tool` 和 `hooks`(PreToolUse)都只有 `allow|deny|ask` 三态,**只能放行/拦截,没有"我自己用 Rust 写、并告诉模型成功"的口子**;Allow=SDK 直写,Deny=模型看到工具失败。且 backend sidecar **调不了 Tauri Rust IPC**(只有前端能调)→ 前向写要走 Rust 必须经前端。
+- **忠实的修法(已核实 SDK 支持,但是再架构)**: 不给模型 SDK 原生 Write/Edit,改用**自定义 in-process MCP 工具**(SDK 的 `@tool` + `create_sdk_mcp_server` + `McpSdkServerConfig`,已确认 PRESENT):`propose_write(path,content)` / `propose_edit(...)` 的 handler = 我们的代码,**只 emit patch_proposed 事件 + 返回 success,不写文件**;前端收到事件后**经 Rust `write_workspace_file` 落盘**(= 前向写走 Rust,D12 忠实)。代价:模型从用原生 Write/Edit 改成用自定义工具,行为/质量有影响 = **架构/价值判断,需 PM 拍板**(接受当前 SDK 直写的偏离 / 还是切自定义工具走 Rust)。
+- **当前状态**: diff 审阅 + checkpoint 还原(经 Rust)已做;前向写由 SDK 直写是 MVP1 允许例外。后续只追踪 diff/summary/Open Compare 等审阅体验,不追踪"前向写必须经 Rust"。
+- **来源**: copilot-assist mvp1-alignment §F5 / native-fs mvp1-alignment D12 carve-out;本会话 PoC + SDK 能力核实(2026-06-14)。
+
+### DEF-024 — copilot F5 安全写:Bash 交互审批往返(双向 WS 控制通道)— 后续
+- **日期**: 2026-06-14
+- **事项**: copilot F5 模型 B 的 Bash「逐条审批卡」需用户点 Approve/Reject,回传后端解析 `can_use_tool` 的 Future 决定 Allow/Deny。现 `can_use_tool` 已对 Bash 触发并 emit `bash_approval_required` 事件,但**保守 hold=deny**(破坏性命令不批不跑,安全但不能 approve)。
+- **延期原因**: copilot WS 端点(`routers/copilot.py:34`)是**严格单向**(收一条 user_message → 流式发到 done,不在流式中读入站消息);Bash approve 需在流式途中接收前端 `{type:bash_decision,tool_use_id,approved}` 入站消息并解析 callback 的 pending Future = 需重构 WS 为双向控制通道 + 后端 pending-approval Future 注册表。
+- **前置条件**: 设计/实现双向 WS 控制协议(入站审批消息路由到 per-(skill,tool_use_id) Future)。Write/Edit 的 accept/reject 是**非阻塞**的(模型 B 即时应用事后审阅),已完整实现,不依赖此项。
+- **来源**: copilot-assist mvp1-alignment §F5;本会话 PoC 真跑确认 can_use_tool 对 Bash 触发(2026-06-14)。
+
+### DEF-025 — copilot F5 安全写:编辑器 buffer 实时同步 + accept/reject 后自动 recompile — 后续
+- **日期**: 2026-06-14
+- **事项**: 设计 §F5「改动即时进编辑器 buffer」+「改后自动 compile 回灌」。现 patch_proposed 的 Reject 把文件**还原到磁盘**(经 Rust 唯一写者),但 **Monaco 编辑器 buffer 不自动 reload、compile 不自动触发**。需:copilot 改动 → 编辑器 buffer live 更新;Accept/Reject 后 → 触发 recompile 回灌。
+- **延期原因**: copilot 面板与 Monaco 编辑器 / compile 流是分离组件,live buffer 双向同步是更深的集成(编辑器 store ↔ copilot 事件)。内联 diff bubble(主路径)+ 磁盘还原已做。
+- **前置条件**: 编辑器 store 暴露"外部文件变更 → reload buffer"钩子 + compile 触发 API。
+- **来源**: copilot-assist mvp1-alignment §F5;本会话 F5 frontend 实现(2026-06-14)。
+
+### DEF-026 — copilot F5:Monaco 并排 Open Compare(side-by-side)— 增强
+- **日期**: 2026-06-14
+- **事项**: 设计 §F5「Open Compare 并排 Monaco」。现做的是**内联 green/red 行 diff**(LCS,主路径,已满足"看改动 + accept/reject")。side-by-side Monaco DiffEditor 是增强视图。
+- **延期原因**: 内联 diff 已覆盖核心审阅需求;Monaco DiffEditor 挂载是增量增强,非阻塞。
+- **前置条件**: 复用 LazyMonacoPanel + DiffEditor;从 PatchProposedBubble 开 overlay。
+- **来源**: copilot-assist mvp1-alignment §F5。
+
 ### DEF-003 — 画布亮暗模式联动(Responsive Canvas Theme)— owner 待指派
 - **日期**: 2026-06-01
 - **事项**: React Flow 画布的网格、背景、自定义边 SVG(`stroke`/`strokeDasharray`)、节点辉光在 light/dark 切换时自动重绘(对应 trace-inspector level-3 `mvp0-alignment.md` target 2)。
@@ -22,12 +68,14 @@
 - **前置条件**: 指派 owner(候选:`workspace-fs` 平台域 / `studio-feature-asset-explorer`)。
 - **来源**: 同上评审。
 
-### DEF-005 — 节点级「编辑-续跑」干预(Intervene-mode)— 后端阻塞
-- **日期**: 2026-06-01
+### DEF-005 — 节点级「编辑-续跑」干预(Intervene-mode)— 仅剩节点级粒度(run-level resume 已做)
+- **日期**: 2026-06-01;**更新 2026-06-14**(审计纠正过时描述)
 - **事项**: `05_debugging.md` 场景C:点边原点 → 可编辑 Monaco 篡改 inter-node state → 点下游节点 `[Resume]` 用伪造数据续跑。
-- **延期原因**: 后端 resume 端点 `POST /api/skills/{skill_id}/runs/{run_id}/resume` 当前 `501 Not Implemented`(`apps/studio/backend/app/routers/runs.py:64-70`);`ResumeReq.context_overrides` 字段已定义但全代码零引用;无节点级 resume 粒度(仅 thread/run 级 checkpoint)。
-- **前置条件**: 后端实现 resume 端点 + 消费 `context_overrides` + 节点级 checkpoint 恢复粒度。
-- **来源**: 同上评审;能力散见于 `05_debugging.md` 场景C 与 `trace-and-predict-visibility` 验收末行。
+- **现状更正(2026-06-14 审计)**: 原"后端 resume 端点 501"已**过时**——`runs.py:63-96` 的 resume 端点**已接线**(调 `EngineAdapter.resume` → `resume_skill`,非 501),`ResumeReq.context_overrides` / `human_input` 已透传给 adapter;**run-level「从 checkpoint 续跑」前后端都已做**(本会话补了前端 Resume 按钮 `TracePanel`→`Workspace.handleResume`,commit `d914f9a3`)。**仅剩真缺口 = 节点级粒度**:(a) 点边编辑 inter-node state 的 Monaco 干预 UI;(b) 引擎暴露节点级(非仅 thread/run 级)checkpoint 恢复点,让 `context_overrides` 能定位到某节点。
+- **延期原因(收窄后)**: 节点级 resume 需引擎侧 checkpoint 粒度(仅 thread/run 级 LangGraph checkpoint 现有);干预 UI 依赖 edge-dot 真黑板(F4,引擎结构化 transition 事件)。
+- **另:D10 lease/heartbeat/fencing 未接入 resume 路径**(审计 P2 确认)= 引擎侧 D10 缺口,独立于本 UI(`resume_skill` 走 LangGraph checkpointer 绕过 RuntimeStateStore)。
+- **前置条件**: 引擎节点级 checkpoint 恢复 + edge-dot transition 事件 + D10 lease 接入 resume。
+- **来源**: 同上评审 + 2026-06-14 wave2 conformance 审计(resume-ui 项)。
 
 ### DEF-006 — （已撤回）侧边栏去过滤 `needs_setup` —— 经核实为误诊
 - **日期**: 2026-06-01（同日核实撤回）
@@ -127,6 +175,7 @@
 - **延期原因**: `cargo update -p glib` 锁在 0.18.5 没动 —— 上层 tauri 2.x / GTK 栈把 glib 约束在 0.18.x，升到 0.20 要连带 bump 整个 GTK/tauri Rust 依赖栈，是破坏性大改、需单独回归测桌面外壳，不在本轮「快速安全修」范围。
 - **前置条件**: tauri/wry/GTK 栈整体升级排期（确认 0.20 兼容性 + 桌面端回归测试）。
 - **来源**: 2026-06-04 dependabot 27 条漏洞修复批；其余 26 条已修，仅此 1 条受栈约束阻塞。
+- **2026-06-22 复核（仍阻塞，证据更新）**: `cargo update -p glib --precise 0.20.0` 实测报错——`gtk 0.18.2` 要求 `glib = "^0.18"`，由 `tauri 2.11.1` 锁定（链：glib←atk/gtk 0.18.2←muda/tao/webkit2gtk←tauri）。补充：glib **仅 Linux 构建用到**（macOS 走 WKWebView，`cargo tree -i glib` 默认 target 为空），实际影响面更低。本轮 2026-06-22 又一批 35 条 dependabot 漏洞（npm 30 + pip 4 + rust 1）已清掉 npm/pip 全部 34 条，仅此 1 条（GHSA-wrw7-89jp-8q8g）受上游栈约束阻塞；PM 决定继续 deferred 跟踪、不 dismiss 告警，待 tauri 升级 GTK 0.20 栈再随之修复。
 
 ### DEF-017 — mvp0 `04-subgraph-md-spec` 退役受「引用未清零」阻塞（PM 2026-06-05 三步）
 - **日期**: 2026-06-05

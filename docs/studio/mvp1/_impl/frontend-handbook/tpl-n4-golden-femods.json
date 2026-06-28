@@ -1,0 +1,18 @@
+[
+  {
+    "name": "golden 对比 hook（useGoldenDiff）",
+    "kind": "纯逻辑模块（节点内共享）",
+    "what": "把『run 输出 vs golden 字段级对比』和『把某次 run 晋升成 golden』两件事封成一个 hook：compare 调对比端点拿 CompareResult、promote 调 saveGoldenBaseline 晋升。golden 验收的几个入口（diff 覆盖层、TracePanel Compare 按钮、copilot 分析 bar）都靠它。",
+    "where": "useGoldenDiff(skillId, runId, workspaceRoot)（hooks/useGoldenDiff.ts）：compare(against?, runIdOverride?) → GET /skills/{id}/runs/{run}/compare（可带 against）拿 CompareResult；promote() → saveGoldenBaseline（client.ts，Tauri 走 /plan native-fs 本地写、浏览器走 /golden 带回退头）；clear() 收起结果。result 驱动 DiffView 全屏覆盖层。",
+    "duties": [
+      "compare：拉某 run 对当前/指定基线的逐节点字段级 diff（CompareResult.node_groups）。",
+      "promote：把某次 run 晋升成 golden（走 saveGoldenBaseline 的 Tauri/浏览器双路 + 两道 409 守卫）。",
+      "result/clear：维护 diff 结果，驱动/收起 DiffView 覆盖层。"
+    ],
+    "used_by": "Golden：#34（字段级 diff 覆盖层）、#32（copilot 分析 bar 确认后 promote/judge）、#36（promote 走 saveGoldenBaseline 受 409 守卫）；TracePanel 顶栏 Compare/Golden 按钮亦调它。",
+    "boundary": "做：compare/promote 的客户端封装 + 维护 diff 结果。不做：不算 diff（headless 评估在后端引擎）、不渲染（渲染归 DiffView）、不自存 golden 真相（以后端为准）。",
+    "reuse_note": "golden 首登记处；diff 覆盖层 / TracePanel Compare / copilot 分析 bar 多处复用。",
+    "design_note": "compare 只比 sealed 结果不重跑（后端 headless）；promote 受两道 409 守卫（predict trace 不可晋升 + 写须带回退头）。",
+    "api": "GET /runs/{run}/compare（对比，iface-golden-5）+ POST /golden 或 /golden/plan（晋升，iface-golden-1/2）。"
+  }
+]

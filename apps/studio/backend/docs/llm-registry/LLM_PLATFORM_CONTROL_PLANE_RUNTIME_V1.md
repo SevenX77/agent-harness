@@ -25,7 +25,7 @@ If implementation evidence contradicts a North Star item, record an explicit ADR
 
 The platform is a pair of SDK libraries:
 
-- Control Plane: catalog, knowledge, registry authoring, role/route materialization, probe orchestration, job state, import drafts, and view DTOs.
+- Control Plane: catalog, Probe Knowledge Catalog, registry authoring, role/route materialization, probe orchestration, job state, and view DTOs.
 - Gateway Runtime Plane: provider execution, terminal dispatch, request mapping, retry/fallback/circuit semantics, runtime health semantics, probe primitives, and sanitized runtime observations.
 
 Studio imports both libraries in-process. There is no service process in this design.

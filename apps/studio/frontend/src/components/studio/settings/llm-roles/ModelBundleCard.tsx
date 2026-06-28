@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, type DragEvent } from "react"
+import { memo, useCallback, useMemo, useState, type DragEvent } from "react"
 import { toast } from "sonner"
 import {
   closestCenter,
@@ -13,7 +13,7 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable"
-import { ChevronDown, Layers3, MoreVertical, Pencil, Trash2 } from "lucide-react"
+import { ChevronDown, Layers3, Loader2, MoreVertical, Pencil, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -37,6 +37,7 @@ import {
 import { requestDeleteConfirmationToast } from "@/components/ui/delete-confirm-toast"
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import type { CredentialsState, MaterializationReportEntry, ModelBundleEntry, ModelGroup, ProviderModelOption, RolesData } from "@/api/llm"
+import type { RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
 import {
   AVAILABLE_MODEL_DRAG_TYPE,
   modelDropFailureMessage,
@@ -52,7 +53,7 @@ import {
   updateBundleIntent,
 } from "../model-bundle-utils"
 import { ModelItem } from "./ModelItem"
-import { roleOutputLimitSummary } from "./RoleCard"
+import { roleTokenLimitSummary } from "./RoleCard"
 import { RoleNameDialog } from "./RoleNameDialog"
 import { RoleSettingsPanel } from "./RoleSettingsDialog"
 
@@ -76,6 +77,10 @@ export const ModelBundleCard = memo(function ModelBundleCard({
   credentialsByCode,
   modelDisplayNamesByCode,
   providerModelsByRouteId,
+  testStatuses = {},
+  testRunning = false,
+  bundleTestError,
+  onRunTest,
   getActiveAvailableModelDragId,
   getAvailableModelGroup,
   onChange,
@@ -87,6 +92,10 @@ export const ModelBundleCard = memo(function ModelBundleCard({
   credentialsByCode: Record<string, CredentialsState["providers"][number]>
   modelDisplayNamesByCode: ReadonlyMap<string, string>
   providerModelsByRouteId: ReadonlyMap<string, ProviderModelOption>
+  testStatuses?: RoleChainStatusMap
+  testRunning?: boolean
+  bundleTestError?: string
+  onRunTest?: (bundleId: string) => void
   getActiveAvailableModelDragId: () => string | null
   getAvailableModelGroup: (modelGroupId: string) => ModelGroup | null
   onChange: (next: RolesData) => void
@@ -105,12 +114,20 @@ export const ModelBundleCard = memo(function ModelBundleCard({
   const roleFitByRouteId = useMemo<ReadonlyMap<string, MaterializationReportEntry>>(() => (
     new Map((bundle.materialization_report?.entries ?? []).map((entry) => [entry.route_id, entry]))
   ), [bundle.materialization_report?.entries])
-  const outputLimitSummary = useMemo(
-    () => role ? roleOutputLimitSummary(role, providerModelsByRouteId) : {
-      knownCount: 0,
-      totalCount: 0,
-      min: null,
-      max: null,
+  const tokenLimitSummary = useMemo(
+    () => role ? roleTokenLimitSummary(role, providerModelsByRouteId) : {
+      context: {
+        knownCount: 0,
+        totalCount: 0,
+        min: null,
+        max: null,
+      },
+      output: {
+        knownCount: 0,
+        totalCount: 0,
+        min: null,
+        max: null,
+      },
     },
     [providerModelsByRouteId, role],
   )
@@ -128,6 +145,10 @@ export const ModelBundleCard = memo(function ModelBundleCard({
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
+
+  const handleRunTest = useCallback(() => {
+    onRunTest?.(bundleId)
+  }, [bundleId, onRunTest])
 
   function commitRoleLikeData(nextRoleData: RolesData) {
     onChange(commitBundleRoleData(data, bundleId, nextRoleData))
@@ -192,7 +213,21 @@ export const ModelBundleCard = memo(function ModelBundleCard({
               className="ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180"
             />
           </CollapsibleTrigger>
-          <CardAction className="col-start-1 row-start-2 flex h-8 items-center justify-start gap-2 self-center sm:col-start-2 sm:row-start-1 sm:justify-end">
+          <CardAction className="col-start-1 row-start-2 flex h-8 flex-nowrap items-center justify-start gap-2 self-center sm:col-start-2 sm:row-start-1 sm:justify-end">
+            {onRunTest ? (
+              <Button
+                type="button"
+                variant="default"
+                size="default"
+                data-model-bundle-test-trigger="true"
+                className="min-w-20 shrink-0"
+                disabled={testRunning}
+                onClick={handleRunTest}
+              >
+                {testRunning ? <Loader2 className="size-3 animate-spin" /> : null}
+                {testRunning ? "Testing" : "Test"}
+              </Button>
+            ) : null}
             <DropdownMenu open={actionsOpen} onOpenChange={setActionsOpen}>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -238,7 +273,7 @@ export const ModelBundleCard = memo(function ModelBundleCard({
             roleName={`bundle-${bundleId}`}
             modelFallbackEnabled={bundle.model_fallback_enabled ?? true}
             intent={bundle.intent}
-            outputLimitSummary={outputLimitSummary}
+            tokenLimitSummary={tokenLimitSummary}
             onModelFallbackChange={(checked) => onChange(toggleBundleModelFallback(data, bundleId, checked))}
             onSubmit={(intent) => onChange(updateBundleIntent(data, bundleId, intent))}
           />
@@ -251,6 +286,14 @@ export const ModelBundleCard = memo(function ModelBundleCard({
           onDrop={handleAvailableModelDrop}
           className="space-y-4"
         >
+          {bundleTestError ? (
+            <div
+              data-model-bundle-test-error="true"
+              className="rounded-md border border-destructive-border bg-destructive-background/10 px-3 py-2 text-xs text-destructive"
+            >
+              Bundle Test failed: {bundleTestError}
+            </div>
+          ) : null}
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
@@ -278,7 +321,7 @@ export const ModelBundleCard = memo(function ModelBundleCard({
                       ownedProviderCodes={ownedProviderCodesByModel.get(modelCode)}
                       providerModelsByRouteId={providerModelsByRouteId}
                       roleFitByRouteId={roleFitByRouteId}
-                      testStatuses={{}}
+                      testStatuses={testStatuses}
                       onChange={commitRoleLikeData}
                     />
                   )

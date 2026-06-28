@@ -33,6 +33,10 @@ PYTHON = (
 )
 
 SIDECAR_NEEDLES = ("uvicorn", "app.main:app")
+# The backend refuses to start without an auth token (app/main.py); every
+# non-/health request needs Authorization: Bearer <token>.
+SIDECAR_TOKEN = "t26-sidecar-token"
+AUTH_HEADERS = {"Authorization": f"Bearer {SIDECAR_TOKEN}"}
 
 
 @dataclass(frozen=True)
@@ -176,6 +180,7 @@ def sidecar_env(tmp_path: Path) -> dict[str, str]:
         "PYTHONPATH": os.pathsep.join(paths),
         "STUDIO_RESOURCE_DIR": str(resource_dir(tmp_path)),
         "STUDIO_SHUTDOWN_TOKEN": "t26-token",
+        "STUDIO_DEV_TUNNEL_TOKEN": SIDECAR_TOKEN,
     }
 
 
@@ -233,7 +238,9 @@ def test_dynamic_sidecar_port_works_when_8787_is_occupied(tmp_path: Path) -> Non
         process = start_python_sidecar(port, tmp_path)
         try:
             wait_for_health(port, process=process)
-            skills = httpx.get(f"http://127.0.0.1:{port}/api/skills", timeout=2.0)
+            skills = httpx.get(
+                f"http://127.0.0.1:{port}/api/skills", headers=AUTH_HEADERS, timeout=2.0
+            )
             assert skills.status_code == 200
             assert any(skill["id"] == "pm-smoke" for skill in skills.json())
         finally:

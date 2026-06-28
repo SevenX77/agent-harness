@@ -1,18 +1,20 @@
 import { renderToStaticMarkup } from "react-dom/server"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { CredentialsState, ModelGroup, RolesData } from "../../../api/llm"
-import { roleChainStatusKey } from "../../../hooks/useRoleTestChainRunner"
-import { AvailableModelDragPreview, LlmRolesTab, modelDropFailureMessage, roleIntentFromSettingsDraft, roleTestStatusesByRole, RoleSettingsFields } from "./LlmRolesTab"
+import { rolesDataToBackend } from "../../../api/llm"
+import { roleChainStatusKey, type RoleChainStatusMap } from "../../../hooks/useRoleTestChainRunner"
+import { AvailableModelDragPreview, LlmRolesTab, modelDropFailureMessage, roleIntentFromSettingsDraft, RoleSettingsFields } from "./LlmRolesTab"
 import {
   AvailableModelsSidebar,
   buildAvailableModelGroups,
   filterAvailableModelGroups,
 } from "./llm-roles/AvailableModelsSidebar"
 import { AdvancedModelBundlesSection, modelBundleGroupsFromData } from "./llm-roles/AdvancedModelBundlesSection"
+import { ModelBundleCard } from "./llm-roles/ModelBundleCard"
 import { requestRoleDeleteConfirmation, RoleCard } from "./llm-roles/RoleCard"
 import { roleNameDisplayError, RoleNameDialog, RoleNameFields } from "./llm-roles/RoleNameDialog"
-import { RoleTestResultPanel } from "./llm-roles/RoleTestResultPanel"
-import { appendAvailableModelToRole, appendModelGroupToRole, appendModelGroupToRoleWithResult, appendRole, normalizeRolesDraft, ownedProviderCodesForModel, pruneInvalidRoleProviders, removeModelFromRole, removeProviderFromRole, removeRole, renameRole, reorderModelInRole, reorderProviderInRole, toggleModelFallback, validateRolesDraft } from "./role-utils"
+import { roleTestStatusesByRole, __resetRoleTestStoreForTests, __setRoleTestStoreForTests } from "./llm-roles/role-test-store"
+import { appendAvailableModelToRole, appendModelGroupToRole, appendModelGroupToRoleWithResult, appendRole, attachBundleReferenceToRole, normalizeRolesDraft, ownedProviderCodesForModel, pruneInvalidRoleProviders, removeModelFromRole, removeProviderFromRole, removeRole, renameRole, reorderModelInRole, reorderProviderInRole, toggleModelFallback, validateRolesDraft } from "./role-utils"
 import { credentialsByProviderCode } from "./route-credentials"
 
 const toastMock = vi.hoisted(() => Object.assign(vi.fn(), {
@@ -102,7 +104,7 @@ const modelGroups: ModelGroup[] = [
         provider_label: "Broken Proxy",
         provider_kind: "third_party",
         provider_model_id: "claude-sonnet-4-7",
-        ui_state: "needs_setup",
+        ui_state: "failed",
         ui_detail: "API key is missing.",
         retry_at: null,
         reason_code: "missing_key",
@@ -114,7 +116,8 @@ const modelGroups: ModelGroup[] = [
       ready: 1,
       untested: 1,
       cooling_down: 0,
-      needs_setup: 1,
+      historical_ready: 0,
+      failed: 1,
       off: 0,
     },
     capability_summary: {
@@ -203,7 +206,7 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain("1 Needs Setup")
     expect(html).toContain('data-provider-state="ready"')
     expect(html).toContain('data-provider-state="untested"')
-    expect(html).toContain('data-provider-state="needs_setup"')
+    expect(html).toContain('data-provider-state="failed"')
     expect(html).toContain('data-variant="default"')
     expect(html).not.toContain("claude-sonnet-4-7</")
     expect(html).not.toContain("anthropic-official:claude-sonnet-4-7")
@@ -249,6 +252,49 @@ describe("LlmRolesTab controls", () => {
     ])
     expect(next.providers["anthropic-official:claude-sonnet-4-7"].name).toBe("Anthropic Official")
     expect(validateRolesDraft(next)).toBeNull()
+  })
+
+  it("adds only the best route for each provider label when a model spans duplicate endpoints", () => {
+    const duplicatedProviderGroup: ModelGroup = {
+      ...modelGroups[0],
+      canonical_id: "deepseek-v4-flash",
+      display_name: "DeepSeek V4 Flash",
+      provider_models: [
+        {
+          ...modelGroups[0].provider_models[1],
+          route_id: "qiniu-openai:deepseek-v4-flash",
+          endpoint_id: "qiniu-openai",
+          provider_label: "Qiniu OpenAI",
+          provider_model_id: "deepseek-v4-flash",
+          ui_state: "ready",
+        },
+        {
+          ...modelGroups[0].provider_models[1],
+          route_id: "qiniu-anthropic:deepseek-v4-flash",
+          endpoint_id: "qiniu-anthropic",
+          provider_label: "Qiniu OpenAI",
+          provider_model_id: "deepseek-v4-flash",
+          ui_state: "untested",
+        },
+        {
+          ...modelGroups[0].provider_models[0],
+          route_id: "ark-official:deepseek-v4-flash",
+          endpoint_id: "ark-official",
+          provider_label: "Ark Official",
+          provider_kind: "official",
+          provider_model_id: "deepseek-v4-flash",
+          ui_state: "untested",
+        },
+      ],
+    }
+
+    const next = appendModelGroupToRole(rolesData, "copilot_chat", duplicatedProviderGroup)
+
+    expect(next.roles.copilot_chat.models["deepseek-v4-flash"].providers).toEqual([
+      "qiniu-openai:deepseek-v4-flash",
+      "ark-official:deepseek-v4-flash",
+    ])
+    expect(next.models["deepseek-v4-flash"].providers).not.toHaveProperty("qiniu-anthropic:deepseek-v4-flash")
   })
 
   it("returns a drop error when a model group has no provider routes", () => {
@@ -622,7 +668,7 @@ describe("LlmRolesTab controls", () => {
           provider_label: "Needs Setup Provider",
           provider_kind: "official",
           provider_model_id: "deepseek-v3",
-          ui_state: "needs_setup",
+          ui_state: "failed",
         },
       ],
     }
@@ -658,7 +704,7 @@ describe("LlmRolesTab controls", () => {
 
     expect(html).toContain('data-slot="card"')
     expect(html).toContain("Add Graph Agent Role")
-    expect(html).toContain("Add Copilot Role")
+    expect(html).not.toContain("Add Copilot Role")
     expect(html).toContain('data-role-add-trigger="true"')
     expect(html).toContain('data-slot="empty"')
     expect(html).toContain("Drop model")
@@ -687,13 +733,15 @@ describe("LlmRolesTab controls", () => {
     const html = renderToStaticMarkup(<AvailableModelsSidebar modelGroups={modelGroups} />)
 
     expect(html).toContain("bg-card")
+    expect(html).toContain("border border-border")
+    expect(html).toContain("bg-muted/20")
+    expect(html).toContain("shadow-xs")
     expect(html).toContain("ring-inset")
-    expect(html).toContain("ring-1 ring-foreground/10")
-    expect(html).toContain("hover:bg-muted/25")
+    expect(html).toContain("hover:bg-muted/35")
     expect(html).toContain("active:scale-[0.99]")
-    expect(html).toContain("active:bg-muted/40")
+    expect(html).toContain("active:bg-muted/45")
     expect(html).toContain("transition-[background-color,box-shadow,transform]")
-    expect(html).toContain("data-[selected=true]:bg-muted/30")
+    expect(html).toContain("data-[selected=true]:bg-muted/40")
     expect(html).toContain("data-[selected=true]:ring-2")
     expect(html).toContain("data-[selected=true]:ring-primary/70")
     expect(html).toContain("focus-visible:ring-2")
@@ -811,7 +859,7 @@ describe("LlmRolesTab controls", () => {
           provider_label: "Setup Provider",
           provider_kind: "custom",
           provider_model_id: "gpt-5",
-          ui_state: "needs_setup",
+          ui_state: "failed",
           ui_detail: "Model does not exist.",
           retry_at: null,
           reason_code: "invalid_model",
@@ -836,7 +884,8 @@ describe("LlmRolesTab controls", () => {
         ready: 1,
         untested: 1,
         cooling_down: 1,
-        needs_setup: 1,
+        historical_ready: 0,
+        failed: 1,
         off: 1,
       },
       capability_summary: {
@@ -934,9 +983,14 @@ describe("LlmRolesTab controls", () => {
   })
 
   it("uses only active provider progress statuses while a persisted role test is running", () => {
+    // A running role projects its live activeStatuses (from the polled backend job),
+    // not the statuses derived from any prior result still on the state.
     expect(roleTestStatusesByRole({
       copilot_chat: {
         running: true,
+        activeStatuses: {
+          [roleChainStatusKey("CL46T", "anthropic")]: { status: "testing" },
+        },
         result: {
           role_name: "copilot_chat",
           status: "warning",
@@ -973,8 +1027,6 @@ describe("LlmRolesTab controls", () => {
           }],
         },
       },
-    }, "copilot_chat", {
-      [roleChainStatusKey("CL46T", "anthropic")]: { status: "testing" },
     })).toEqual({
       copilot_chat: {
         [roleChainStatusKey("CL46T", "anthropic")]: { status: "testing" },
@@ -1035,48 +1087,6 @@ describe("LlmRolesTab controls", () => {
     expect(providerCardTag).toContain('data-provider-test-status="testing"')
     expect(providerCardTag).toContain('data-role-route-status="testing"')
     expect(providerCardTag).toContain("relative")
-  })
-
-  it("renders role test results with actionable warnings but without execution ids", () => {
-    const html = renderToStaticMarkup(
-      <RoleTestResultPanel
-        result={{
-          role_name: "Analyst",
-          status: "warning",
-          warnings: [{ message: "Thinking is required but capability is unknown." }],
-          model_groups: [{
-            canonical_id: "gpt-5",
-            display_name: "GPT 5",
-            provider_results: [{
-              route_id: "openrouter:gpt-5",
-              provider_label: "OpenRouter",
-              provider_ui_state: "cooling_down",
-              role_fit: "needs_test",
-              admission_decision: "temporary_skip",
-              status: "blocked",
-              warnings: [{ message: "Thinking is required but capability is unknown." }],
-              retry_at: "2026-12-31T00:00:00Z",
-              message: "Retry after transient rate limit.",
-              resolved_settings: {},
-            }],
-          }],
-        }}
-      />,
-    )
-
-    expect(html).toContain("Role Test")
-    expect(html).toContain("Needs Attention")
-    expect(html).toContain("GPT 5")
-    expect(html).toContain("OpenRouter")
-    expect(html).toContain("Cooling Down")
-    expect(html).toContain("Needs Test")
-    expect(html).toContain("Skipped")
-    expect(html).toContain("Thinking is required but capability is unknown.")
-    expect(html).toContain("Retry after transient rate limit.")
-    expect(html).not.toContain("openrouter:gpt-5")
-    expect(html).not.toContain("route_id")
-    expect(html).not.toContain("endpoint")
-    expect(html).not.toContain("canonical")
   })
 
   it("does not render persisted role test reports inside the role card", () => {
@@ -1144,7 +1154,8 @@ describe("LlmRolesTab controls", () => {
         ready: 5,
         untested: 0,
         cooling_down: 0,
-        needs_setup: 0,
+        historical_ready: 0,
+        failed: 0,
         off: 0,
       },
     }]
@@ -1176,6 +1187,49 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain("provider_routes")
     expect(html).not.toContain("GPT5")
     expect(html).not.toContain("Claude Sonnet 4.6 Thinking")
+  })
+
+  it("collapses duplicate endpoint routes to one provider label in the model library", () => {
+    const duplicateEndpointGroups: ModelGroup[] = [{
+      ...modelGroups[0],
+      canonical_id: "deepseek-v4-flash",
+      display_name: "DeepSeek V4 Flash",
+      section_label: "deepseek",
+      provider_models: [
+        {
+          ...modelGroups[0].provider_models[1],
+          route_id: "qiniu-openai:deepseek-v4-flash",
+          endpoint_id: "qiniu-openai",
+          provider_label: "Qiniu OpenAI",
+          provider_model_id: "deepseek-v4-flash",
+          ui_state: "ready",
+        },
+        {
+          ...modelGroups[0].provider_models[1],
+          route_id: "qiniu-anthropic:deepseek-v4-flash",
+          endpoint_id: "qiniu-anthropic",
+          provider_label: "Qiniu OpenAI",
+          provider_model_id: "deepseek-v4-flash",
+          ui_state: "untested",
+        },
+        {
+          ...modelGroups[0].provider_models[1],
+          route_id: "ark-official:deepseek-v4-flash",
+          endpoint_id: "ark-official",
+          provider_label: "Ark Official",
+          provider_kind: "official",
+          provider_model_id: "deepseek-v4-flash",
+          ui_state: "untested",
+        },
+      ],
+    }]
+
+    const [entry] = buildAvailableModelGroups(duplicateEndpointGroups)[0].models
+
+    expect(entry.providers.map((provider) => `${provider.label}:${provider.state}:${provider.id}`)).toEqual([
+      "Qiniu OpenAI:ready:qiniu-openai:deepseek-v4-flash",
+      "Ark Official:untested:ark-official:deepseek-v4-flash",
+    ])
   })
 
   it("pins advanced model bundles above normal Available Models and keeps exact route ids", () => {
@@ -1296,7 +1350,7 @@ describe("LlmRolesTab controls", () => {
           ...modelGroups[0].provider_models[2],
           route_id: "broken:deepseek-v4-flash",
           provider_label: "Broken Proxy",
-          ui_state: "needs_setup",
+          ui_state: "failed",
         },
         {
           ...modelGroups[0].provider_models[0],
@@ -1313,7 +1367,7 @@ describe("LlmRolesTab controls", () => {
     expect(providers.map((provider) => `${provider.label}:${provider.state}`)).toEqual([
       "DeepSeek Official:ready",
       "Qiniu-OpenAi:untested",
-      "Broken Proxy:needs_setup",
+      "Broken Proxy:failed",
     ])
   })
 
@@ -1341,7 +1395,8 @@ describe("LlmRolesTab controls", () => {
           ready: 0,
           untested: 1,
           cooling_down: 0,
-          needs_setup: 0,
+          historical_ready: 0,
+          failed: 0,
           off: 0,
         },
         capability_summary: {
@@ -1758,7 +1813,7 @@ describe("LlmRolesTab controls", () => {
     expect(dialogHtml).not.toContain("disabled")
   })
 
-  it("groups roles into graph agent and copilot accordion sections", () => {
+  it("shows only the graph agent accordion section in LLM Roles", () => {
     const groupedData: RolesData = {
       ...rolesData,
       roles: {
@@ -1776,15 +1831,16 @@ describe("LlmRolesTab controls", () => {
     expect(html).toContain('data-slot="catalog-accordion-trigger"')
     expect(html).toContain('data-role-category="graph-agent"')
     expect(html).toContain("Graph Agent Roles")
-    expect(html).toContain('data-role-category="copilot"')
-    expect(html).toContain("Copilot Roles")
-    expect(html.indexOf("Graph Agent Roles")).toBeLessThan(html.indexOf("Copilot Roles"))
+    expect(html).not.toContain('data-role-category="copilot"')
+    expect(html).not.toContain("Copilot Roles")
+    expect(html).not.toContain("Add Copilot Role")
+    expect(html).toContain('data-role-name="copilot_chat"')
     expect(html.indexOf("catalog-accordion-state-icon")).toBeLessThan(html.indexOf("Graph Agent Roles"))
     expect(html.indexOf("Graph Agent Roles")).toBeLessThan(html.indexOf("lucide-cog"))
     expect(html).not.toContain("lucide-workflow")
   })
 
-  it("uses role_kind instead of role name when grouping roles", () => {
+  it("uses role_kind to keep graph-agent roles with copilot-like names visible", () => {
     const groupedData: RolesData = {
       ...rolesData,
       roles: {
@@ -1804,16 +1860,14 @@ describe("LlmRolesTab controls", () => {
     }
     const html = renderRolesHtml({ data: groupedData })
     const graphSectionStart = html.indexOf('data-role-category="graph-agent"')
-    const copilotSectionStart = html.indexOf('data-role-category="copilot"')
-    const graphSection = html.slice(graphSectionStart, copilotSectionStart)
-    const copilotSection = html.slice(copilotSectionStart)
+    const graphSection = html.slice(graphSectionStart)
 
     expect(graphSection).toContain('data-role-name="copilot_planner"')
     expect(graphSection).not.toContain('data-role-name="assistant"')
-    expect(copilotSection).toContain('data-role-name="assistant"')
+    expect(html).not.toContain('data-role-category="copilot"')
   })
 
-  it("keeps empty role categories visible and uses default title typography", () => {
+  it("keeps the graph-agent category visible and uses default title typography", () => {
     const graphOnlyData: RolesData = {
       ...rolesData,
       roles: {
@@ -1830,10 +1884,10 @@ describe("LlmRolesTab controls", () => {
     const titleHtml = html.slice(titleIndex, titleEnd)
 
     expect(html).toContain('data-role-category="graph-agent"')
-    expect(html).toContain('data-role-category="copilot"')
-    expect(html).toContain("No Copilot roles configured.")
     expect(html).toContain("Add Graph Agent Role")
-    expect(html).toContain("Add Copilot Role")
+    expect(html).not.toContain('data-role-category="copilot"')
+    expect(html).not.toContain("No Copilot roles configured.")
+    expect(html).not.toContain("Add Copilot Role")
     expect(titleHtml).not.toContain("font-mono")
   })
 
@@ -1979,7 +2033,7 @@ describe("LlmRolesTab controls", () => {
     expect(renderedRoles.length).toBeGreaterThan(0)
     expect(renderedRoles.length).toBeLessThan(12)
     expect(html).toContain("Add Graph Agent Role")
-    expect(html).toContain("Add Copilot Role")
+    expect(html).not.toContain("Add Copilot Role")
   })
 
   it("shows readable model names instead of active model controls or model abbreviations", () => {
@@ -2254,6 +2308,11 @@ describe("LlmRolesTab controls", () => {
               value: 8192,
               downgrade: "allow_with_warning",
             },
+            target_context_tokens: {
+              mode: "required_minimum",
+              value: 64000,
+              downgrade: "allow",
+            },
           },
         },
       },
@@ -2265,15 +2324,25 @@ describe("LlmRolesTab controls", () => {
         modelFallbackEnabled={true}
         draft={{
           providerPreference: "manual_order",
-          thinking: "preferred",
-          outputTokens: "8192",
-          useMaximumTokens: true,
+          thinking: "required",
+          contextTokenMode: "required_minimum",
+          contextTokens: "64000",
+          outputTokenMode: "maximum_available",
+          outputTokens: "",
         }}
-        outputLimitSummary={{
-          knownCount: 2,
-          totalCount: 3,
-          min: 4096,
-          max: 16384,
+        tokenLimitSummary={{
+          context: {
+            knownCount: 2,
+            totalCount: 3,
+            min: 65536,
+            max: 200000,
+          },
+          output: {
+            knownCount: 2,
+            totalCount: 3,
+            min: 4096,
+            max: 16384,
+          },
         }}
         onModelFallbackChange={vi.fn()}
         onDraftChange={vi.fn()}
@@ -2286,42 +2355,59 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain('data-slot="dialog-content"')
     expect(fieldsHtml).toContain('data-role-settings-fields="true"')
     expect(fieldsHtml).toContain('data-role-settings-toggles="true"')
+    expect(fieldsHtml).toContain("rounded-md border border-border bg-muted/10")
+    expect(fieldsHtml).toContain('data-role-context-settings="true"')
+    expect(fieldsHtml).toContain('data-role-context-token-input-group="true"')
     expect(fieldsHtml).toContain('data-role-output-settings="true"')
     expect(fieldsHtml).toContain('data-role-output-token-input-group="true"')
-    expect(fieldsHtml).toContain("md:grid-cols-[minmax(8rem,0.9fr)_minmax(8rem,0.9fr)_minmax(18rem,1.8fr)]")
+    expect(fieldsHtml).toContain("lg:grid-cols-[minmax(12rem,0.8fr)_minmax(18rem,1.2fr)]")
     expect(fieldsHtml).toContain('data-slot="field-set"')
     expect(fieldsHtml).not.toContain("Provider Order")
     expect(fieldsHtml).not.toContain("Manual order")
     expect(fieldsHtml).toContain("Model Fallback")
     expect(fieldsHtml).toContain("model_fallback_enabled")
-    expect(fieldsHtml).toContain("Thinking Preferred")
+    expect(fieldsHtml).toContain("Thinking")
+    expect(fieldsHtml).toContain("Preferred")
+    expect(fieldsHtml).toContain("Required")
     expect(fieldsHtml).toContain('data-slot="switch"')
+    expect(fieldsHtml).toContain('data-slot="radio-group"')
     expect(fieldsHtml).not.toContain("Try the next model group")
+    expect(fieldsHtml).toContain('data-role-context-settings="true"')
+    expect(fieldsHtml).toContain('data-role-output-settings="true"')
+    expect(fieldsHtml).toContain("Context Tokens")
+    expect(fieldsHtml).toContain("Output Tokens")
+    expect(fieldsHtml).toContain("Required Min")
+    expect(fieldsHtml).toContain("Use Max")
+    expect(fieldsHtml).toContain('value="64000"')
+    expect(fieldsHtml).toContain("Context route max token range: min 65,536 / max 200,000. 1 route cap unavailable.")
+    expect(fieldsHtml).toContain("Output route max token range: min 4,096 / max 16,384. 1 route cap unavailable.")
     expect(fieldsHtml).not.toContain("Require routes to prove")
-    expect(fieldsHtml).toContain("Output Token Target")
-    expect(fieldsHtml).toContain("Use max")
-    expect(fieldsHtml).toContain('aria-label="Use maximum output tokens for copilot_chat"')
-    expect(fieldsHtml).toContain('value="8192"')
-    expect(fieldsHtml).toContain("disabled")
-    expect(fieldsHtml).toContain("Route max token range: min 4,096 / max 16,384. 1 route cap unavailable.")
     expect(fieldsHtml).not.toContain("If Target Exceeds Route Cap")
     expect(fieldsHtml).not.toContain("Use route max and mark Limited")
-    expect(fieldsHtml).not.toContain('data-slot="select-trigger"')
+    expect(fieldsHtml).toContain('data-slot="select-trigger"')
     expect(fieldsHtml).not.toContain("Temperature")
     expect(fieldsHtml).not.toContain("Max Tokens")
-    expect(fieldsHtml).not.toContain("Runtime default")
   })
 
-  it("saves the Thinking switch as a preferred role intent", () => {
+  it("saves Thinking and context/output token modes as role intent", () => {
     expect(roleIntentFromSettingsDraft({
       providerPreference: "manual_order",
-      thinking: "preferred",
+      thinking: "required",
+      contextTokenMode: "required_minimum",
+      contextTokens: "64000",
+      outputTokenMode: "maximum_available",
       outputTokens: "",
-      useMaximumTokens: false,
     })).toMatchObject({
       provider_preference: "manual_order",
-      thinking: "preferred",
-      target_output_tokens: null,
+      thinking: "required",
+      target_context_tokens: {
+        mode: "required_minimum",
+        value: 64000,
+        downgrade: "allow",
+      },
+      target_output_tokens: {
+        mode: "maximum_available",
+      },
     })
   })
 
@@ -2333,21 +2419,506 @@ describe("LlmRolesTab controls", () => {
         draft={{
           providerPreference: "manual_order",
           thinking: "required",
+          contextTokenMode: "default",
+          contextTokens: "",
+          outputTokenMode: "target",
           outputTokens: "",
-          useMaximumTokens: false,
         }}
-        outputLimitSummary={{
-          knownCount: 0,
-          totalCount: 2,
-          min: null,
-          max: null,
+        tokenLimitSummary={{
+          context: {
+            knownCount: 0,
+            totalCount: 2,
+            min: null,
+            max: null,
+          },
+          output: {
+            knownCount: 0,
+            totalCount: 2,
+            min: null,
+            max: null,
+          },
         }}
         onModelFallbackChange={vi.fn()}
         onDraftChange={vi.fn()}
       />,
     )
 
-    expect(fieldsHtml).toContain("Selected route max token caps are unavailable.")
+    expect(fieldsHtml).toContain("Context route max token caps are unavailable.")
+    expect(fieldsHtml).toContain("Output route max token caps are unavailable.")
     expect(fieldsHtml).not.toContain("Test first")
+  })
+})
+
+describe("#35 available models configure + deprecated section", () => {
+  const stateModelGroups: ModelGroup[] = [{
+    canonical_id: "gpt-5",
+    display_name: "GPT 5",
+    section_label: "openai",
+    provider_models: [
+      {
+        route_id: "ready:gpt-5",
+        provider_label: "Ready Provider",
+        provider_kind: "official",
+        provider_model_id: "gpt-5",
+        ui_state: "ready",
+        ui_detail: null,
+        retry_at: null,
+        reason_code: null,
+        capability_state: "known",
+        capabilities: {},
+      },
+      {
+        route_id: "missing-config:gpt-5",
+        provider_label: "Misconfigured Provider",
+        provider_kind: "third_party",
+        provider_model_id: "gpt-5",
+        ui_state: "failed",
+        ui_detail: "API key is missing.",
+        retry_at: null,
+        reason_code: "missing_config",
+        capability_state: "unknown",
+        capabilities: {},
+      },
+      {
+        route_id: "off:gpt-5",
+        provider_label: "Disabled Provider",
+        provider_kind: "custom",
+        provider_model_id: "gpt-5",
+        ui_state: "off",
+        ui_detail: "Disabled by user.",
+        retry_at: null,
+        reason_code: "user_disabled",
+        capability_state: "unknown",
+        capabilities: {},
+      },
+    ],
+    status_summary: { ready: 1, untested: 0, cooling_down: 0, historical_ready: 0, failed: 1, off: 1 },
+    capability_summary: {
+      capability_known_count: 1,
+      thinking: "unknown",
+      tools: "unknown",
+      structured_output: "unknown",
+      max_context_tokens: null,
+      max_output_tokens: null,
+    },
+  }]
+
+  it("shows a Configure affordance on a missing_config failed provider row", () => {
+    const html = renderToStaticMarkup(
+      <AvailableModelsSidebar modelGroups={stateModelGroups} onNavigateToApiKeys={vi.fn()} />,
+    )
+
+    expect(html).toContain('data-available-model-provider-configure="true"')
+    expect(html).toContain('data-provider-reason-code="missing_config"')
+    expect(html).toContain("Configure")
+    expect(html).toContain('aria-label="Configure Misconfigured Provider in API Keys"')
+  })
+
+  it("renders off/disabled routes inside a non-draggable collapsible deprecated section", () => {
+    const html = renderToStaticMarkup(
+      <AvailableModelsSidebar modelGroups={stateModelGroups} />,
+    )
+
+    expect(html).toContain('data-available-model-deprecated-toggle="true"')
+    expect(html).toContain('data-available-model-deprecated-section="true"')
+    expect(html).toContain("Deprecated (1)")
+    // The off route's name renders inside the deprecated section, marked non-draggable.
+    const deprecatedSection = html.match(/data-available-model-deprecated-section="true"[\s\S]*$/)?.[0] ?? ""
+    expect(deprecatedSection).toContain("Disabled Provider")
+    expect(deprecatedSection).toContain('data-available-model-deprecated-row="true"')
+    expect(deprecatedSection).toContain('data-available-model-native-dnd="off"')
+    expect(deprecatedSection).not.toContain('data-available-model-drag-source="true"')
+    expect(html).toContain('data-available-model-deprecated-copy="true"')
+    expect(html).toContain('data-available-model-deprecated-reprobe="true"')
+    // The off route is NOT in the draggable provider row.
+    const draggableButton = html.match(/<button[^>]*data-available-model-drag-source="true"[\s\S]*?<\/button>/)?.[0] ?? ""
+    expect(draggableButton).not.toContain("Disabled Provider")
+  })
+})
+
+describe("#50a model bundle status lights", () => {
+  const bundleModelGroups: ModelGroup[] = [{
+    canonical_id: "claude-sonnet-4-7",
+    display_name: "Claude Sonnet 4.7",
+    section_label: "anthropic",
+    provider_models: [{
+      route_id: "anthropic-official:claude-sonnet-4-7",
+      endpoint_id: "anthropic-official",
+      provider_label: "Anthropic Official",
+      provider_kind: "official",
+      provider_model_id: "claude-sonnet-4-7",
+      ui_state: "ready",
+      ui_detail: null,
+      retry_at: null,
+      reason_code: null,
+      capability_state: "known",
+      capabilities: {},
+    }],
+    status_summary: { ready: 1, untested: 0, cooling_down: 0, historical_ready: 0, failed: 0, off: 0 },
+    capability_summary: {
+      capability_known_count: 1,
+      thinking: "unknown",
+      tools: "unknown",
+      structured_output: "unknown",
+      max_context_tokens: null,
+      max_output_tokens: null,
+    },
+  }]
+  const bundleData: RolesData = {
+    models: {
+      "claude-sonnet-4-7": {
+        name: "Claude Sonnet 4.7",
+        providers: { "anthropic-official:claude-sonnet-4-7": "claude-sonnet-4-7" },
+      },
+    },
+    providers: {
+      "anthropic-official:claude-sonnet-4-7": {
+        name: "Anthropic Official",
+        type: "anthropic_compatible",
+        endpoint_id: "anthropic-official",
+      },
+    },
+    roles: {},
+    model_bundles: {
+      premium_stack: {
+        model_profile_id: "premium_stack",
+        display_name: "Premium Stack",
+        canonical_id: "bundle:premium_stack",
+        model_fallback_enabled: true,
+        intent: { provider_preference: "manual_order" },
+        model_groups: [{
+          canonical_id: "claude-sonnet-4-7",
+          display_name: "Claude Sonnet 4.7",
+          provider_models: [{ route_id: "anthropic-official:claude-sonnet-4-7" }],
+        }],
+        fallback_chain: [{ route_id: "anthropic-official:claude-sonnet-4-7" }],
+        materialization_report: {
+          entries: [{
+            canonical_id: "claude-sonnet-4-7",
+            route_id: "anthropic-official:claude-sonnet-4-7",
+            role_fit: "using",
+          }],
+          warnings: [],
+          skipped_provider_details: [],
+        },
+      },
+    },
+  }
+
+  const bundleCredentialsByCode = credentialsByProviderCode(bundleData, {
+    providers: [{
+      id: "anthropic-official",
+      name: "Anthropic Official",
+      api_key: "sk-anthropic",
+      provider_type: "anthropic_compatible",
+      last_test_status: "ok",
+    }],
+  })
+  const bundleProviderModelsByRouteId = new Map(
+    bundleModelGroups[0].provider_models.map((providerModel) => [providerModel.route_id, providerModel]),
+  )
+
+  function renderBundleCardWithRoleFit(
+    materializationReport: NonNullable<RolesData["model_bundles"]>[string]["materialization_report"],
+    extra?: {
+      onRunTest?: (bundleId: string) => void
+      testStatuses?: RoleChainStatusMap
+      testRunning?: boolean
+      bundleTestError?: string
+    },
+  ): string {
+    const bundle = {
+      ...bundleData.model_bundles!.premium_stack,
+      materialization_report: materializationReport,
+    }
+    return renderToStaticMarkup(
+      <ModelBundleCard
+        bundle={bundle}
+        bundleId="premium_stack"
+        data={{ ...bundleData, model_bundles: { premium_stack: bundle } }}
+        credentialsByCode={bundleCredentialsByCode}
+        modelDisplayNamesByCode={new Map([["claude-sonnet-4-7", "Claude Sonnet 4.7"]])}
+        providerModelsByRouteId={bundleProviderModelsByRouteId}
+        onRunTest={extra?.onRunTest}
+        testStatuses={extra?.testStatuses}
+        testRunning={extra?.testRunning}
+        bundleTestError={extra?.bundleTestError}
+        getActiveAvailableModelDragId={() => null}
+        getAvailableModelGroup={() => null}
+        onChange={vi.fn()}
+        onDeleteBundle={vi.fn()}
+      />,
+    )
+  }
+
+  it("feeds bundle role-fit into ModelItem status lights (#50a)", () => {
+    const html = renderBundleCardWithRoleFit(bundleData.model_bundles!.premium_stack.materialization_report)
+
+    // Status light wiring present: role-fit drives a Can Run light fed via ModelItem.
+    expect(html).toContain('data-role-route-status-light="true"')
+    expect(html).toContain('aria-label="Role route status Can Run')
+    expect(html).toContain('data-role-route-status="runnable"')
+  })
+
+  it("projects every backend role_fit verdict from the bundle materialization_report into the light", () => {
+    // #50/#45: role_fit is authoritative from the backend materialize report — the
+    // card only renders it, never re-derives fit client-side. Each verdict must map
+    // to the correct user state: using→Can Run, downgraded/needs_test→Limited,
+    // not_fit→Blocked.
+    const downgraded = renderBundleCardWithRoleFit({
+      entries: [{
+        canonical_id: "claude-sonnet-4-7",
+        route_id: "anthropic-official:claude-sonnet-4-7",
+        role_fit: "downgraded",
+        warnings: [{ code: "thinking_preferred_unsupported" }],
+      }],
+      warnings: [],
+      skipped_provider_details: [],
+    })
+    expect(downgraded).toContain('data-role-route-status="limited"')
+    expect(downgraded).toContain('aria-label="Role route status Limited')
+
+    const needsTest = renderBundleCardWithRoleFit({
+      entries: [{
+        canonical_id: "claude-sonnet-4-7",
+        route_id: "anthropic-official:claude-sonnet-4-7",
+        role_fit: "needs_test",
+        warnings: [{ code: "thinking_capability_unknown" }],
+      }],
+      warnings: [],
+      skipped_provider_details: [],
+    })
+    expect(needsTest).toContain('data-role-route-status="limited"')
+
+    const notFit = renderBundleCardWithRoleFit({
+      entries: [{
+        canonical_id: "claude-sonnet-4-7",
+        route_id: "anthropic-official:claude-sonnet-4-7",
+        role_fit: "not_fit",
+        warnings: [{ code: "output_tokens_below_required_minimum" }],
+      }],
+      warnings: [],
+      skipped_provider_details: [],
+    })
+    expect(notFit).toContain('data-role-route-status="blocked"')
+    expect(notFit).toContain('aria-label="Role route status Blocked')
+  })
+
+  it("renders a single top-level role-route diagnostic tooltip for a downgraded bundle route", () => {
+    // #45: the diagnostic is a single top-level tooltip wrapping the row (no nested
+    // tooltip, no separate result panel). The warning reason from the report drives
+    // the diagnostic text.
+    const html = renderBundleCardWithRoleFit({
+      entries: [{
+        canonical_id: "claude-sonnet-4-7",
+        route_id: "anthropic-official:claude-sonnet-4-7",
+        role_fit: "downgraded",
+        warnings: [{ code: "thinking_preferred_unsupported" }],
+      }],
+      warnings: [],
+      skipped_provider_details: [],
+    })
+
+    expect(html).toContain('data-provider-row-status-tooltip="true"')
+    // Single light per row — no parallel RoleTestResultPanel surface (spec §2.4 "不要").
+    expect(html).not.toContain('data-role-test-result-panel="true"')
+  })
+
+  it("still renders the light from ui_state when the bundle has no materialization_report (empty / undefined report)", () => {
+    // Empty report and a totally missing report must not crash and must still light
+    // the row from the 6-state ui_state alone (ready→Can Run). This guards the
+    // empty/error projection path the design requires.
+    const emptyReport = renderBundleCardWithRoleFit({
+      entries: [],
+      warnings: [],
+      skipped_provider_details: [],
+    })
+    expect(emptyReport).toContain('data-role-route-status="runnable"')
+
+    const undefinedReport = renderBundleCardWithRoleFit(undefined)
+    expect(undefinedReport).toContain('data-role-route-status="runnable"')
+    expect(undefinedReport).toContain('data-role-route-status-light="true"')
+  })
+
+  it("renders a bundle Test button when onRunTest is wired (#50b)", () => {
+    const html = renderBundleCardWithRoleFit(
+      bundleData.model_bundles!.premium_stack.materialization_report,
+      { onRunTest: vi.fn() },
+    )
+    expect(html).toContain('data-model-bundle-test-trigger="true"')
+    expect(html).toMatch(/>Test<\/button>/)
+  })
+
+  it("shows Testing + projects live test statuses while a bundle test runs (#50b)", () => {
+    const html = renderBundleCardWithRoleFit(
+      bundleData.model_bundles!.premium_stack.materialization_report,
+      {
+        onRunTest: vi.fn(),
+        testRunning: true,
+        testStatuses: {
+          [roleChainStatusKey("claude-sonnet-4-7", "anthropic-official:claude-sonnet-4-7")]: {
+            status: "testing",
+          },
+        },
+      },
+    )
+    expect(html).toContain("Testing")
+    expect(html).toContain('data-role-route-status="testing"')
+  })
+
+  it("shows the bundle test error banner without a Test trigger when there is no handler", () => {
+    const html = renderBundleCardWithRoleFit(
+      bundleData.model_bundles!.premium_stack.materialization_report,
+      { bundleTestError: "probe exploded" },
+    )
+    expect(html).toContain('data-model-bundle-test-error="true"')
+    expect(html).toContain("probe exploded")
+  })
+})
+
+describe("#46 role test state projects from the module store on (re)mount", () => {
+  afterEach(() => {
+    __resetRoleTestStoreForTests()
+  })
+
+  it("restores a running test's live progress from the store when the tab remounts", () => {
+    // Simulate an in-flight test owned by the module-scoped backend mirror — the
+    // exact state that survives a tab switch / remount. The freshly rendered tab
+    // must project that running progress, not a blank untested card.
+    __setRoleTestStoreForTests({
+      copilot_chat: {
+        running: true,
+        activeStatuses: {
+          [roleChainStatusKey("CL46T", "anthropic")]: { status: "testing" },
+        },
+      },
+    })
+
+    const html = renderRolesHtml()
+
+    expect(html).toContain("Testing")
+    expect(html).toContain('data-provider-test-status="testing"')
+    expect(html).toContain('data-role-route-status="testing"')
+  })
+
+  it("restores a settled test's last result from the store when the tab remounts", () => {
+    __setRoleTestStoreForTests({
+      copilot_chat: {
+        running: false,
+        result: {
+          role_name: "copilot_chat",
+          status: "ok",
+          warnings: [],
+          model_groups: [{
+            canonical_id: "CL46T",
+            display_name: "Claude Sonnet 4.6 Thinking",
+            provider_results: [{
+              route_id: "anthropic",
+              provider_label: "Anthropic",
+              provider_ui_state: "ready",
+              role_fit: "using",
+              admission_decision: "admit",
+              status: "ok",
+              warnings: [],
+              retry_at: null,
+              message: null,
+              resolved_settings: {},
+            }],
+          }],
+        },
+      },
+    })
+
+    const html = renderRolesHtml()
+
+    expect(html).toContain('data-provider-test-status="ok"')
+  })
+
+  it("projects the store error banner without an in-component test state copy", () => {
+    __setRoleTestStoreForTests({
+      copilot_chat: {
+        running: false,
+        error: "Save the role before testing: copilot_chat: model must contain at least one provider",
+      },
+    })
+
+    const html = renderRolesHtml()
+
+    expect(html).toContain('data-role-test-error="true"')
+    expect(html).toContain("Role Test failed: Save the role before testing:")
+  })
+})
+
+describe("#51 bundle drop creates a reference, not a snapshot", () => {
+  const referenceData: RolesData = {
+    models: {},
+    providers: {
+      "anthropic-official:claude-sonnet-4-7": {
+        name: "Anthropic Official",
+        type: "anthropic_compatible",
+        endpoint_id: "anthropic-official",
+      },
+    },
+    roles: {
+      analyst: { model_fallback_enabled: true, active_model: "", models: {} },
+    },
+    model_bundles: {
+      premium_stack: {
+        model_profile_id: "premium_stack",
+        display_name: "Premium Stack",
+        canonical_id: "bundle:premium_stack",
+        model_fallback_enabled: true,
+        intent: { provider_preference: "manual_order" },
+        model_groups: [{
+          canonical_id: "claude-sonnet-4-7",
+          display_name: "Claude Sonnet 4.7",
+          provider_models: [{ route_id: "anthropic-official:claude-sonnet-4-7" }],
+        }],
+        fallback_chain: [{ route_id: "anthropic-official:claude-sonnet-4-7" }],
+      },
+    },
+  }
+
+  it("sets role.bundle_id (reference) without snapshot-copying the bundle routes", () => {
+    const next = attachBundleReferenceToRole(referenceData, "analyst", "bundle:premium_stack")
+
+    // Reference, not snapshot: bundle_id points at the bundle, and the role's own
+    // model groups (the local delta layer) are NOT populated with the bundle routes.
+    expect(next.roles.analyst.bundle_id).toBe("premium_stack")
+    expect(Object.keys(next.roles.analyst.models)).toEqual([])
+    // The original is untouched (pure function).
+    expect(referenceData.roles.analyst.bundle_id).toBeUndefined()
+  })
+
+  it("ignores a non-bundle drag id (only bundle: ids attach a reference)", () => {
+    const next = attachBundleReferenceToRole(referenceData, "analyst", "claude-sonnet-4-7")
+    expect(next).toBe(referenceData)
+  })
+
+  it("round-trips bundle_id through the role serializer (reflects live bundle on re-projection)", () => {
+    const withReference = attachBundleReferenceToRole(referenceData, "analyst", "bundle:premium_stack")
+    const backend = rolesDataToBackend(withReference)
+    expect(backend.roles.analyst.bundle_id).toBe("premium_stack")
+  })
+
+  it("renders a 'Linked to bundle X' badge on a reference role (not a snapshot label)", () => {
+    const withReference = attachBundleReferenceToRole(referenceData, "analyst", "bundle:premium_stack")
+    const html = renderToStaticMarkup(
+      <RoleCard
+        data={withReference}
+        category="graph-agent"
+        credentialsByCode={{}}
+        modelDisplayNamesByCode={new Map()}
+        ownedProviderCodesByModel={new Map()}
+        roleName="analyst"
+        onRunTestChain={vi.fn()}
+        getActiveAvailableModelDragId={() => null}
+        getAvailableModelGroup={() => null}
+        onChange={vi.fn()}
+        onDeleteRole={vi.fn()}
+      />,
+    )
+    expect(html).toContain('data-role-linked-bundle="true"')
+    expect(html).toContain("Linked to bundle: Premium Stack")
   })
 })

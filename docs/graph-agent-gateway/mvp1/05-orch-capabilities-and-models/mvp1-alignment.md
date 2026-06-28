@@ -53,10 +53,10 @@ MVP1 对齐目标：保留现有 capability/profile/lint/模型知识语义，�
 > → model group 分组 / identity 归类 / notable 知识 / route_capabilities 合并，换任何调模型 app 都原样要 → **③b 公共**（本轮反转旧"③a 产品解释"判断）。
 
 > **本轮反转的 PM 校准 · ux-spec §6.0 行 342（verbatim）**：
-> "凡**不依赖「应用加工四件事」（UI / 产品策略 / 调用方式 / 存储介质）**，都是 ③b 公共能力——**含 model group 分组 / 6 态标准总结 / draft 知识库 / materialize 编排内核**（这几项**反转**了旧版"归 ③a"的判断）。"
+> "凡**不依赖「应用加工四件事」（UI / 产品策略 / 调用方式 / 存储介质）**，都是 ③b 公共能力——**含 model group 分组 / 6 态标准总结 / Probe Knowledge Catalog / materialize 编排内核**（这几项**反转**了旧版"归 ③a"的判断）。"
 
 > **模型知识属 gateway（available models）· README §3.B（verbatim，标注 🔻 = 公共但现散 ③a）**：
-> "**按同类分组（model group）**（🔻 现 `llm_model_groups.py`）：把同一模型的多个变体 / 快照 / 渠道折叠成一个用户可见的"模型组"……**品牌 / 家族识别（identity）**（🔻 现 `llm_model_identity.py`）……**探测知识库（draft + 证据库 + notable）**（🔻 现 `llm_import_drafts.py` / `llm_notable_models.py`）：记住"哪些模型存在 / 可用 / 值得试"……这是 gateway 背后可沉淀、可共享的知识资产。"
+> "**按同类分组（model group）**（🔻 现 `llm_model_groups.py`）：把同一模型的多个变体 / 快照 / 渠道折叠成一个用户可见的"模型组"……**品牌 / 家族识别（identity）**（🔻 现 `llm_model_identity.py`）……**Probe Knowledge Catalog + notable**（🔻 现 `probe_catalog.py` / legacy `llm_import_drafts.py` / `llm_notable_models.py`）：记住"哪些 endpoint 连通过、哪些模型存在 / 可用、哪些能力被探测证实、哪些模型值得优先试"……这是 gateway 背后可沉淀、可共享的知识资产。"
 
 > **编排 / 调用分离 · D2（决策）+ PM 原话（verbatim，不改一字）· 另见 [[10-inv-route-chat-model-factory]] / [[09-inv-invocation-runtime]]（同一 D2，跨模块共享，重复留底防 drift）**：
 > **决策（D2）**：把「编排（orchestration）」与「调用（invocation）」做成两个内聚模块，各有明确 API。**编排层**：输入 role_name / model_override，输出解析好的 `ResolvedRoute`(s)（protocol / base_url / credential_ref / provider_model_id / runtime settings + fallback 顺序 + 熔断/probe 决策），**只决定「该用哪条 route」，不负责真正调用**。**调用层**：输入一条 `ResolvedRoute` + messages（+ runtime params），输出 `AIMessage` / 结果，负责 build 原生 ChatX + invoke + 取结果。对 05 的含义：05 产出的 capability/profile 编排字段（`call_method_id` / `request_mapper_id` / `capabilities` / `effective_runtime_settings`）是**编排层输出**，A' 迁移时它们成为「route → 原生 ChatX 调用适配（RouteChatModelFactory，M6）」的**输入**，**而不是 gateway 自研消息转换的理由**——gateway 不再自己做消息转换，改由原生 ChatX 消费这些字段。

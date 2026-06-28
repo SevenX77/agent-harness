@@ -72,7 +72,79 @@ def test_model_resolver_protocol_resolve_routes_signature_is_complete() -> None:
     assert params["route_override"].kind is inspect.Parameter.KEYWORD_ONLY
     assert params["route_override"].default is None
     assert params["route_override"].annotation == "str | None"
-    assert signature.return_annotation == "ResolvedRole"
+    assert signature.return_annotation == "ResolvedRouteChain"
+
+
+def test_model_resolver_protocol_resolve_routes_returns_route_chain_annotation() -> None:
+    from graph_agent_gateway.protocol import ModelResolverProtocol
+
+    signature = inspect.signature(ModelResolverProtocol.resolve_routes)
+
+    assert signature.return_annotation == "ResolvedRouteChain"
+
+
+def test_model_resolver_resolve_routes_returns_resolved_route_chain() -> None:
+    from graph_agent_gateway.resolver import ModelResolver
+    from graph_agent_gateway.route_handoff import ResolvedRouteChain, RouteSkipDiagnostic
+    from graph_agent_gateway.storage_contracts import InMemoryConfigTruthStore
+
+    store = InMemoryConfigTruthStore()
+    user_id = "route-handoff-test"
+    store.put_config(
+        user_id,
+        "credentials",
+        {
+            "schema_version": 4,
+            "provider_endpoints": {
+                "openai": {
+                    "endpoint_id": "openai",
+                    "protocol": "openai_compatible",
+                    "base_url": "https://api.openai.example/v1",
+                    "api_key": "secret",
+                    "status": "verified",
+                }
+            },
+            "provider_routes": {
+                "openai:gpt-5": {
+                    "route_id": "openai:gpt-5",
+                    "endpoint_id": "openai",
+                    "route_slug": "gpt-5",
+                    "provider_model_id": "gpt-5",
+                    "canonical_id": "gpt-5",
+                    "status": "verified",
+                }
+            },
+            "runtime_policy": {},
+        },
+    )
+    store.put_config(
+        user_id,
+        "roles",
+        {
+            "schema_version": 2,
+            "model_profiles": {},
+            "roles": {
+                "graph_agent": {
+                    "fallback_chain": [
+                        {"route_id": "missing:gpt-5"},
+                        {"route_id": "openai:gpt-5"},
+                    ]
+                }
+            },
+        },
+    )
+
+    chain = ModelResolver(config_store=store, user_id=user_id).resolve_routes("graph_agent")
+
+    assert isinstance(chain, ResolvedRouteChain)
+    assert chain.role == "graph_agent"
+    assert [route.route_id for route in chain.routes] == ["openai:gpt-5"]
+    assert chain.skipped
+    assert isinstance(chain.skipped[0], RouteSkipDiagnostic)
+    assert chain.skipped[0].route_id == "missing:gpt-5"
+    assert chain.skipped[0].reason_code == "route_missing"
+    assert not hasattr(chain, "role_name")
+    assert not hasattr(chain, "lint_results")
 
 
 def test_protocol_is_runtime_checkable_for_di_validation() -> None:

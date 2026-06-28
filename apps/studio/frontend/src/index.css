@@ -3,12 +3,13 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/inter";
 @import "@fontsource-variable/jetbrains-mono";
+@import "@fontsource-variable/noto-sans-sc";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
     --font-heading: var(--font-sans);
-    --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+    --font-sans: 'Inter Variable', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC Variable', ui-sans-serif, system-ui, sans-serif;
     --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
@@ -71,6 +72,18 @@
     --z-copilot: 40;
     --z-modal: 50;
     --z-toast: 60;
+    /* Studio canvas chrome aliases product tokens; do not derive a separate palette. */
+    --studio-canvas-accent: var(--primary);
+    --studio-canvas-accent-muted: var(--primary);
+    --studio-canvas-accent-soft: transparent;
+    --studio-canvas-border: var(--border);
+    --studio-canvas-border-soft: var(--border);
+    --studio-canvas-surface: var(--card);
+    --studio-canvas-surface-elevated: var(--card);
+    --studio-canvas-surface-muted: var(--muted);
+    --studio-canvas-edge: var(--border);
+    --studio-canvas-edge-dot-fill: var(--background);
+    --studio-canvas-edge-dot-muted: var(--muted-foreground);
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
     --card: oklch(1 0 0);
@@ -256,7 +269,8 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   }
 }
 
-[data-provider-card="true"][data-provider-test-status="testing"]::after {
+[data-provider-card="true"][data-provider-test-status="testing"]::after,
+[data-copilot-provider-card="true"][data-agent-sdk-status="testing"]::after {
   animation: provider-card-border-flow 1.1s linear infinite;
   background:
     linear-gradient(
@@ -339,6 +353,304 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   border-radius: var(--radius-md) !important;
 }
 
+.react-flow .skill-mini-map {
+  overflow: hidden !important;
+}
+
+.react-flow .skill-mini-map.react-flow__panel.bottom.right {
+  bottom: 1rem !important;
+  right: calc(var(--studio-canvas-right-safe-area, 0px) + 1rem) !important;
+}
+
+.react-flow .studio-canvas-top-left-panel.react-flow__panel.top.left {
+  left: calc(var(--studio-canvas-left-safe-area, 0px) + 1rem) !important;
+  top: calc(var(--studio-canvas-editor-safe-area, 0px) + 1rem) !important;
+}
+
+.react-flow .skill-mini-map__svg {
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+
+.studio-canvas-panel {
+  background: var(--studio-canvas-surface);
+  border-color: var(--studio-canvas-border);
+  box-shadow:
+    0 18px 48px rgb(0 0 0 / 0.32),
+    inset 0 1px 0 rgb(255 255 255 / 0.04);
+  backdrop-filter: blur(18px);
+}
+
+.studio-canvas-panel-header {
+  background: var(--studio-canvas-surface-elevated);
+  border-color: var(--studio-canvas-border-soft);
+}
+
+.studio-canvas-input-surface {
+  background: var(--studio-canvas-surface-muted);
+  border-color: var(--studio-canvas-border-soft);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
+}
+
+.studio-left-panel-overlay {
+  background: var(--studio-canvas-surface);
+  border-color: var(--studio-canvas-border);
+  box-shadow:
+    0 18px 52px rgb(0 0 0 / 0.42),
+    inset 0 1px 0 rgb(255 255 255 / 0.04);
+  backdrop-filter: blur(18px);
+}
+
+.studio-editor-overlay {
+  left: calc(var(--studio-canvas-left-safe-area, 0px) + 0.75rem);
+  right: calc(var(--studio-canvas-right-safe-area, 0px) + 0.75rem);
+  height: var(--studio-editor-overlay-height, min(52%, 34rem));
+  max-height: calc(100% - 1.5rem);
+  background: var(--studio-canvas-surface);
+  border-color: var(--studio-canvas-border);
+  box-shadow:
+    0 18px 52px rgb(0 0 0 / 0.42),
+    inset 0 1px 0 rgb(255 255 255 / 0.04);
+  backdrop-filter: blur(18px);
+}
+
+.studio-editor-overlay > section,
+.studio-editor-overlay [data-testid="resize-panel"] > section {
+  border-radius: inherit;
+}
+
+.studio-right-panel-overlay {
+  background: var(--studio-canvas-surface);
+  border-color: var(--studio-canvas-border);
+  box-shadow:
+    0 18px 52px rgb(0 0 0 / 0.42),
+    inset 0 1px 0 rgb(255 255 255 / 0.04);
+  backdrop-filter: blur(18px);
+}
+
+.studio-right-panel-overlay .studio-copilot-panel {
+  width: 100%;
+  border-left: 0;
+  border-radius: inherit;
+}
+
+.studio-left-panel-overlay [data-studio-left-panel-content="true"] {
+  min-height: 0;
+  max-height: inherit;
+  scrollbar-gutter: stable;
+}
+
+.studio-left-panel-overlay [data-studio-left-panel-content="true"] > * {
+  height: auto;
+  max-height: inherit;
+  min-height: 0;
+  width: 100%;
+}
+
+.studio-left-panel-overlay [data-studio-left-panel-content="true"] > * > [data-slot="scroll-area"] {
+  flex: 0 1 auto;
+  max-height: calc(100vh - 1.5rem - 3rem);
+}
+
+.studio-left-panel-overlay [data-studio-left-panel-content="true"] > .bg-background,
+.studio-left-panel-overlay [data-studio-left-panel-content="true"] > .bg-sidebar {
+  background: transparent;
+}
+
+.studio-left-panel-overlay [data-studio-panel-header="true"] {
+  background: var(--studio-canvas-surface-elevated);
+  border-bottom: 1px solid var(--studio-canvas-border-soft);
+  height: 3rem;
+  padding-inline: 1rem 2.75rem;
+}
+
+.studio-left-panel-overlay [data-studio-panel-header="true"] .text-xs {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.studio-left-panel-overlay [data-studio-panel-body="true"] {
+  display: flex;
+  flex-direction: column;
+  padding-block: 0;
+}
+
+.studio-left-panel-overlay [data-studio-panel-section="true"] {
+  border-bottom: 1px solid var(--studio-canvas-border-soft);
+  padding: 0.875rem 1rem;
+}
+
+.studio-left-panel-overlay [data-studio-panel-body="true"] > form,
+.studio-left-panel-overlay [data-studio-panel-body="true"] > section:not([data-studio-panel-section="true"]) {
+  border-bottom: 1px solid var(--studio-canvas-border-soft);
+}
+
+.studio-left-panel-overlay [data-slot="field-set"],
+.studio-left-panel-overlay [data-slot="field-group"] {
+  gap: 0;
+}
+
+.studio-left-panel-overlay [data-studio-panel-field-row="true"] {
+  border-bottom: 1px solid var(--studio-canvas-border-soft);
+  padding: 1rem;
+}
+
+.studio-left-panel-overlay [data-studio-panel-field-row="true"]:last-child {
+  border-bottom: 0;
+}
+
+.studio-left-panel-overlay [data-studio-panel-actions="true"] {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.875rem 1rem 1rem;
+}
+
+.studio-left-panel-overlay [data-studio-panel-body="true"] > section:not([data-studio-panel-section="true"]) {
+  padding: 0.875rem 1rem;
+}
+
+.studio-left-panel-overlay [data-studio-panel-body="true"] > section:not([data-studio-panel-section="true"]) + section {
+  border-top: 0;
+}
+
+.studio-left-panel-overlay [data-studio-panel-body="true"] [data-slot="field-label"],
+.studio-left-panel-overlay [data-studio-panel-body="true"] .text-\[10px\].uppercase {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--foreground);
+}
+
+.studio-left-panel-overlay [data-studio-panel-body="true"] :where([data-slot="input"], [data-slot="textarea"], button[role="combobox"]) {
+  background: var(--studio-canvas-surface-muted);
+  border-color: var(--studio-canvas-border-soft);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
+}
+
+.studio-left-panel-overlay [data-studio-panel-body="true"] :where([data-slot="textarea"]) {
+  min-height: 5.5rem;
+}
+
+.studio-left-panel-overlay [data-studio-panel-body="true"] :where(.rounded-md.border.bg-background, .rounded-md.border.bg-card) {
+  background: color-mix(in oklab, var(--background) 70%, black);
+  border-color: var(--studio-canvas-border-soft);
+}
+
+.studio-left-panel-overlay [data-studio-panel-body="true"] section > .rounded-md.border,
+.studio-left-panel-overlay [data-studio-panel-body="true"] section > .space-y-2 > .rounded-md.border,
+.studio-left-panel-overlay [data-studio-panel-body="true"] section > .space-y-1 > .rounded-md.border {
+  background: color-mix(in oklab, var(--background) 78%, black);
+}
+
+.studio-left-panel-overlay :where(.rounded-md.border.bg-card, .rounded-md.border.bg-background) {
+  background: var(--studio-canvas-surface-muted);
+  border-color: var(--studio-canvas-border-soft);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
+}
+
+.studio-left-panel-overlay :where(input, textarea, button[role="combobox"]) {
+  background-color: var(--studio-canvas-surface-muted);
+}
+
+.studio-left-panel-overlay [data-slot="scroll-area-viewport"] > div {
+  display: block !important;
+}
+
+.studio-center-action-bar {
+  background: var(--studio-canvas-surface);
+  border-color: var(--studio-canvas-border);
+  width: max-content;
+  box-shadow:
+    0 16px 38px rgb(0 0 0 / 0.36),
+    inset 0 1px 0 rgb(255 255 255 / 0.04);
+  backdrop-filter: blur(18px);
+}
+
+.studio-center-action-button {
+  color: var(--muted-foreground);
+}
+
+.studio-center-action-button:not(:disabled):hover {
+  background: var(--studio-canvas-surface-muted);
+  color: var(--foreground);
+}
+
+.studio-center-action-button--active {
+  background: var(--studio-canvas-accent);
+  color: var(--primary-foreground);
+  box-shadow: 0 0 0 1px var(--studio-canvas-accent-muted);
+}
+
+.studio-center-action-button--active:not(:disabled):hover {
+  background: var(--studio-canvas-accent);
+  color: var(--primary-foreground);
+}
+
+.studio-subgraph-frame {
+  background: color-mix(in oklab, var(--studio-canvas-surface) 30%, transparent);
+  border: 1px solid var(--studio-canvas-accent-muted);
+  box-shadow:
+    0 18px 42px rgb(0 0 0 / 0.22),
+    inset 0 1px 0 rgb(255 255 255 / 0.04);
+  backdrop-filter: blur(8px);
+}
+
+.studio-subgraph-header {
+  background: var(--studio-canvas-accent);
+  border-color: var(--studio-canvas-accent);
+  color: var(--primary-foreground);
+}
+
+.studio-subgraph-header .text-muted-foreground {
+  color: currentColor;
+  opacity: 0.72;
+}
+
+.studio-subgraph-badge {
+  background: transparent;
+  border-color: currentColor;
+  color: var(--primary-foreground);
+  opacity: 0.86;
+}
+
+.subgraph-dash-frame {
+  border-color: var(--studio-canvas-accent-muted);
+}
+
+.subgraph-bridge-source-handle,
+.subgraph-bridge-target-handle {
+  background: transparent !important;
+  border: 0 !important;
+  height: 0.5rem !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  width: 0.5rem !important;
+}
+
+.subgraph-bridge-source-handle {
+  left: 50% !important;
+  right: auto !important;
+  top: 50% !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+.subgraph-bridge-target-handle {
+  left: 0 !important;
+  top: var(--subgraph-bridge-target-y, 50%) !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+.react-flow .subgraph-bridge-edge {
+  filter: drop-shadow(0 0 4px var(--studio-canvas-accent-soft));
+  stroke: var(--studio-canvas-accent);
+  stroke-dasharray: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.6px;
+}
+
 .react-flow .react-flow__attribution {
   background: var(--color-card) !important;
   color: var(--color-muted-foreground) !important;
@@ -355,6 +667,29 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   color: var(--color-foreground) !important;
 }
 
+@keyframes context-edge-flow {
+  from {
+    stroke-dashoffset: 24;
+  }
+
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.animated-flow-line {
+  animation: context-edge-flow 1.2s linear infinite;
+  stroke-dasharray: 8, 8;
+}
+
+.edge-context-dot {
+  outline: none;
+}
+
+.edge-context-dot__halo {
+  filter: drop-shadow(0 0 5px color-mix(in oklab, var(--primary) 42%, transparent));
+}
+
 @font-face {
   font-family: 'text-security-disc';
   src: url('/fonts/text-security-disc.woff2') format('woff2');
@@ -365,4 +700,15 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   -webkit-text-security: disc;
   /* Firefox fallback (-webkit-text-security is unsupported). */
   font-family: 'text-security-disc', -apple-system, sans-serif;
+}
+
+/* Keep the placeholder readable. The disc font above (a Firefox fallback) would
+   otherwise render the empty-state hint as a row of bullets, making an EMPTY
+   field look like it already holds a masked secret. Force the placeholder back
+   to the normal UI font (and disable text-security) so an empty input shows its
+   hint text, not fake dots. Real typed/saved values still mask via the rules
+   above. */
+.mask-input::placeholder {
+  font-family: var(--font-sans);
+  -webkit-text-security: none;
 }

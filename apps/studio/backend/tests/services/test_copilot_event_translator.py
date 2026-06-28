@@ -7,9 +7,11 @@ from types import SimpleNamespace
 
 import pytest
 from app.models.copilot import (
+    CopilotEventContextResolved,
     CopilotEventDone,
     CopilotEventError,
     CopilotEventText,
+    CopilotEventThinking,
     CopilotEventToolUseResult,
     CopilotEventToolUseStart,
 )
@@ -27,8 +29,10 @@ from claude_agent_sdk.types import (
     AssistantMessage,
     ResultMessage,
     TextBlock,
+    ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
+    UserMessage,
 )
 from pydantic import SecretStr
 
@@ -74,6 +78,40 @@ def test_translate_text_event() -> None:
     assert events == [CopilotEventText(content="hello")]
 
 
+def test_translate_thinking_block_event() -> None:
+    # F1: extended-thinking must be streamed (collapsible, never dropped).
+    events = copilot._translate_sdk_message(
+        AssistantMessage(
+            content=[ThinkingBlock(thinking="let me reason...", signature="sig")],
+            model="claude",
+        ),
+        {},
+    )
+
+    assert events == [CopilotEventThinking(content="let me reason...")]
+
+
+def test_translate_thinking_then_text_preserves_order() -> None:
+    # Thinking precedes the visible answer in the same assistant turn; both
+    # events must be emitted in order so the UI can render the collapsible
+    # Thought above the answer text.
+    events = copilot._translate_sdk_message(
+        AssistantMessage(
+            content=[
+                ThinkingBlock(thinking="reasoning", signature="sig"),
+                TextBlock(text="answer"),
+            ],
+            model="claude",
+        ),
+        {},
+    )
+
+    assert events == [
+        CopilotEventThinking(content="reasoning"),
+        CopilotEventText(content="answer"),
+    ]
+
+
 def test_translate_tool_use_start_event() -> None:
     tool_names: dict[str, str] = {}
 
@@ -102,6 +140,35 @@ def test_translate_tool_result_event() -> None:
     assert events == [
         CopilotEventToolUseResult(tool_name="Read", success=True, result_summary="ok")
     ]
+
+
+def test_translate_tool_result_in_user_message() -> None:
+    # The real SDK returns tool results in UserMessage, not AssistantMessage —
+    # these must still surface (F1 "不省略"), keyed back to the tool name.
+    events = copilot._translate_sdk_message(
+        UserMessage(content=[ToolResultBlock(tool_use_id="tool-1", content="file contents")]),
+        {"tool-1": "Read"},
+    )
+
+    assert events == [
+        CopilotEventToolUseResult(tool_name="Read", success=True, result_summary="file contents")
+    ]
+
+
+def test_translate_failed_tool_result_in_user_message() -> None:
+    events = copilot._translate_sdk_message(
+        UserMessage(
+            content=[ToolResultBlock(tool_use_id="tool-1", content="denied", is_error=True)]
+        ),
+        {"tool-1": "Bash"},
+    )
+
+    assert events == [CopilotEventError(message="工具 Bash 失败: denied")]
+
+
+def test_translate_user_message_with_plain_text_is_ignored() -> None:
+    # A plain user-text message (not a tool result) is not echoed back.
+    assert copilot._translate_sdk_message(UserMessage(content="hello"), {}) == []
 
 
 def test_translate_result_message_is_done() -> None:
@@ -138,17 +205,18 @@ def test_stream_query_errors_when_api_key_missing(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(
         copilot,
         "_resolve_copilot_runtime",
-        lambda _model_override: _runtime(_resolved_route(), ""),
+        lambda _model_override, role="copilot_chat": _runtime(_resolved_route(), ""),
     )
     events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi")))
 
-    assert events == [CopilotEventError(message="Endpoint anthropic-official 未配置 API key")]
+    assert isinstance(events[0], CopilotEventContextResolved)  # F4: first event echoes context
+    assert events[1:] == [CopilotEventError(message="Endpoint anthropic-official 未配置 API key")]
 
 
 def test_stream_query_errors_when_model_override_is_unknown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def resolve_copilot_runtime(_model_override: str | None) -> object:
+    def resolve_copilot_runtime(_model_override: str | None, role: str = "copilot_chat") -> object:
         raise KeyError("BAD_MODEL")
 
     monkeypatch.setattr(copilot, "_resolve_copilot_runtime", resolve_copilot_runtime)
@@ -209,10 +277,14 @@ def test_resolve_copilot_runtime_uses_gateway_model_resolver(
         calls.append((role_name, route_override))
         return original_resolve_routes(self, role_name, route_override=route_override)
 
-    monkeypatch.setattr(copilot, "load_credentials", lambda: credentials)
-    monkeypatch.setattr(copilot, "default_roles_path", lambda: roles_path)
-    monkeypatch.setattr(copilot, "load_roles_file", lambda _path: roles)
+    from app.services import gateway_resolver
+    monkeypatch.setattr(gateway_resolver, "load_credentials", lambda: credentials)
+    monkeypatch.setattr(gateway_resolver, "default_roles_path", lambda: roles_path)
+    monkeypatch.setattr(gateway_resolver, "load_roles_file", lambda _path: roles)
     monkeypatch.setattr(ModelResolver, "resolve_routes", recording_resolve_routes)
+    from app.core import config
+
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", tmp_path / "settings")
 
     routes, credential_provider = copilot._resolve_copilot_runtime(route_id)
 
@@ -230,12 +302,13 @@ def test_stream_query_timeout_error(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     monkeypatch.setattr(
         copilot,
         "_resolve_copilot_runtime",
-        lambda _model_override: _runtime(_resolved_route()),
+        lambda _model_override, role="copilot_chat": _runtime(_resolved_route()),
     )
 
     events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi", workspace_dir=tmp_path)))
 
-    assert events == [CopilotEventError(message="请求超时, 检查网络 / 代理")]
+    assert isinstance(events[0], CopilotEventContextResolved)
+    assert events[1:] == [CopilotEventError(message="请求超时, 检查网络 / 代理")]
 
 
 def test_stream_query_sdk_network_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -247,12 +320,13 @@ def test_stream_query_sdk_network_error(monkeypatch: pytest.MonkeyPatch, tmp_pat
     monkeypatch.setattr(
         copilot,
         "_resolve_copilot_runtime",
-        lambda _model_override: _runtime(_resolved_route()),
+        lambda _model_override, role="copilot_chat": _runtime(_resolved_route()),
     )
 
     events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi", workspace_dir=tmp_path)))
 
-    assert events == [
+    assert isinstance(events[0], CopilotEventContextResolved)
+    assert events[1:] == [
         CopilotEventError(
             message="后端连接失败 (DeepSeek 端点不可达 / 大陆需代理): connection failed"
         )
@@ -270,14 +344,16 @@ def test_stream_query_uses_system_prompt_and_yields_done(
     monkeypatch.setattr(
         copilot,
         "_resolve_copilot_runtime",
-        lambda _model_override: _runtime(_resolved_route()),
+        lambda _model_override, role="copilot_chat": _runtime(_resolved_route()),
     )
 
     events = asyncio.run(
         _collect(copilot.stream_query("skill-a", "user text", workspace_dir=tmp_path))
     )
 
-    assert events == [CopilotEventText(content="hello"), CopilotEventDone()]
+    assert isinstance(events[0], CopilotEventContextResolved)  # F4: context echo first
+    assert events[0].summary.startswith("本轮注入")
+    assert events[1:] == [CopilotEventText(content="hello"), CopilotEventDone()]
     assert client.connected is True
     assert "聚焦 Studio 上下文" in client.queries[0]
     assert "user text" in client.queries[0]

@@ -1,0 +1,59 @@
+{
+  "mechanism": {
+    "summary": "Checkpoint 是 LangGraph 原生 checkpointer 机制:在 assemble_graph 编译图时把 checkpointer 注入 builder.compile(checkpointer=...),引擎每跑完一个 super-step(节点)就由 LangGraph 自动写一条 checkpoint 到 thread。引擎核心 run_skill 从 execution_context 取出 checkpointer_spec(默认 'auto')→ resolve_checkpointer 解析成具体 saver → 用它编译图执行。Studio 侧默认把 spec 设成每个 run 一个独立 SQLite 文件 sqlite:<workspace>/runs/<run_id>/checkpoints.db,所以 checkpoint 落在 per-run 的 sqlite 库里。",
+    "evidence": [
+      ["graph.compile(checkpointer=checkpointer) — 编译时注入 checkpointer,后续每个 super-step 自动落盘", "packages/graph-agent/src/graph_agent/core/graph_assembler.py:214"],
+      ["run_skill 入参 checkpointer_spec 默认 'auto',resolve_checkpointer 解析后用于编译图", "packages/graph-agent/src/graph_agent/core/runner.py:1453"],
+      ["resolve_checkpointer(checkpointer_spec) → active_checkpointer,传给 assemble_graph", "packages/graph-agent/src/graph_agent/core/runner.py:1485"],
+      ["run_artifact 从 execution_context 取 checkpointer_spec,缺省回退 'auto'", "packages/graph-agent/src/graph_agent/core/runner.py:780"],
+      ["checkpointer_context/resolve_checkpointer 支持 memory/sqlite/postgres 三种 backend", "packages/graph-agent/src/graph_agent/core/checkpointer.py:40"]
+    ]
+  },
+  "checkpoint_granularity": {
+    "summary": "粒度是 LangGraph 的 thread(=run)级 + super-step 级:每个 thread_id 对应一个 run,LangGraph 在每个 super-step(每个图节点执行完)写一条带 checkpoint_id 的 checkpoint。所以底层 checkpoint 数据本身是逐节点累积的(同一 thread 下有多条 checkpoint,每条对应执行到某节点的快照)。但 Studio 续跑契约只携带『最新一条』checkpoint:snapshot 时只存一个 checkpoint_id(取 checkpointer.list(...) 的 checkpoints[0],即最新),resume 也只用这一个 checkpoint_id 续。因此对外暴露的恢复点是 run 级的『上次中断处』,不是任意指定节点。",
+    "evidence": [
+      ["快照只取 checkpoints[0](最新一条)的 checkpoint_id 存进 runtime state", "apps/studio/backend/app/core/adapters/engine.py:421"],
+      ["_latest_runtime_checkpoint_state 用 thread_id 列出 checkpoint 取最新", "apps/studio/backend/app/core/adapters/engine.py:417"],
+      ["resume 时 thread_id=run_id,checkpoint_id 指向单条 checkpoint", "packages/graph-agent/src/graph_agent/core/runner.py:1164"],
+      ["编译图无 interrupt_before/interrupt_after,无静态节点暂停点(故节点级中断/续靠 tool-call/interrupt 动态产生)", "packages/graph-agent/src/graph_agent/core/graph_assembler.py:214"]
+    ]
+  },
+  "resume_flow": {
+    "headers": ["步骤", "函数/端点 file:line", "数据形态"],
+    "rows": [
+      ["前端发起 Resume", "apps/studio/frontend/src/api/client.ts:306 (resumeRun)", "POST /skills/{skillId}/runs/{runId}/resume,body={context_overrides|null, human_input|null}"],
+      ["后端 resume 端点", "apps/studio/backend/app/routers/runs.py:133 (resume_run)", "ResumeReq{context_overrides, human_input} → 调 build_engine_adapter().resume({skill_id, run_id, context_overrides, human_input}),错误按 state.* 映射 409/404"],
+      ["引擎适配器 resume(获锁+恢复快照)", "apps/studio/backend/app/core/adapters/engine.py:802 (EngineAdapter.resume)", "acquire_lease(ttl=30s) → restore(run_id) 取 StateSnapshot → 从 state 取 checkpoint_id/checkpoint_ns → restore_checkpointer(从 checkpointer_spec 还原 SqliteSaver) → 取 artifact_ref + workspace_dir → heartbeat 续租"],
+      ["桥接到引擎 resume_skill", "apps/studio/backend/app/core/adapters/runtime_state_resume_bridge.py:7 (resume_restored_runtime_state)", "透传 artifact_root, workspace_dir, run_id, checkpoint_id, checkpoint_ns, checkpointer, context_overrides, human_response 调 graph_agent.resume_skill"],
+      ["引擎从 checkpoint 恢复执行", "packages/graph-agent/src/graph_agent/core/runner.py:455 (resume_skill)", "_resolve_resume_config 组 {configurable:{thread_id, checkpoint_ns, checkpoint_id}} → assemble_graph(checkpointer=active) → 可选 update_state 注入 context_overrides/human_response → graph.invoke(None, config) 从该 checkpoint 续跑 → 返回 WorkflowResult"],
+      ["续跑结束回写新快照+释放租约", "apps/studio/backend/app/core/adapters/engine.py:897 (snapshot) / engine.py:911 (release)", "snapshot(run_id, next_state{status,metrics,...}, lease) 更新 runtime state → finally 里 release(run_id, lease);返回 {run_id,status,started_at,metrics} 给端点封成 RunMetadata"]
+    ]
+  },
+  "node_resume_gap": {
+    "summary": "节点级续跑后端【不支持】『从指定节点 X 续、1..X-1 不重跑』。resume 全链路没有任何 from_node/start_node/start_at/resume_node 参数:前端只传 context_overrides+human_input,端点只透传这两个,resume_skill 只接收 checkpoint_id/checkpoint_ns。续跑点完全由 LangGraph checkpoint 决定,且 Studio 只保存并使用『最新一条 checkpoint』(checkpoints[0]),即只能从『上次中断/停下的那个点』整体续,无法跳到任意历史节点重放。真正能跳过前序节点的前提是 run 在某节点处发生了 interrupt 或留下未应答的 tool_call —— 这种中断是运行时动态产生的(human-in-the-loop),不是用户可指定的 from-node;_pending_tool_calls/_select_pending_tool_call_id 处理的也是这种 pending 中断,而非节点定位。结论:只支持『整 run 从最新 checkpoint 续』+『对中断点喂 human_response/override』,不支持用户指定 from-node 的部分重跑。",
+    "evidence": [
+      ["前端 resumeRun 仅 contextOverrides/humanInput,无节点参数", "apps/studio/frontend/src/api/client.ts:306"],
+      ["resume 端点仅透传 context_overrides/human_input", "apps/studio/backend/app/routers/runs.py:140"],
+      ["resume_skill 签名只有 checkpoint_id/checkpoint_ns/context_overrides/human_response,无 from_node", "packages/graph-agent/src/graph_agent/core/runner.py:455"],
+      ["_resolve_resume_config 缺 checkpoint_id 时取 checkpoints[0](最新),不接受指定节点", "packages/graph-agent/src/graph_agent/core/runner.py:1156"],
+      ["graph.invoke(None, config) 从 checkpoint 续,起点由 checkpoint 状态决定", "packages/graph-agent/src/graph_agent/core/runner.py:520"],
+      ["context_overrides 经 update_state(as_node=...) 注入,as_node 仅在无 next 时按输出字段推断,非用户指定续跑节点", "packages/graph-agent/src/graph_agent/core/runner.py:1199"],
+      ["pending 中断/工具调用是动态运行时态,非节点定位入口", "packages/graph-agent/src/graph_agent/core/runner.py:1206"]
+    ]
+  },
+  "storage": {
+    "summary": "Checkpoint 本体存在每个 run 独立的 SQLite 文件 <workspace>/runs/<run_id>/checkpoints.db(由 LangGraph SqliteSaver 写),是 Python 后端写盘,不走 native-fs(Rust);run_manager 还会 touch 出该文件占位(_ensure_run_files)。续跑用的『runtime state 快照』则是另一层:LocalRuntimeStateStore 把 snapshot.json/lease.json/fencing_counter.json 写到 <storage_root>/runs/<run_id>/,同样是 Python 后端用普通 fcntl 文件锁 + 原子 rename 写,不经 Rust native-fs。并发保护【已实现】:LocalRuntimeStateStore 有完整 lease+fencing 机制 —— acquire_lease 发 lease_id+单调递增 fencing_token+ttl,snapshot/heartbeat/release 前都校验 lease 匹配(lease_id+owner_id+fencing_token 三者一致),不匹配抛 state.lease_fenced;活跃 lease 未过期再 acquire 抛 state.lease_conflict;进程内 RLock + 跨进程 fcntl.flock 双层锁。engine.resume 整个续跑过程持 lease(ttl 30s)并 heartbeat,旧 worker 的过期/不匹配 lease 写入会被 fencing 挡掉。",
+    "evidence": [
+      ["checkpointer_spec 默认 sqlite:<workspace>/runs/<run_id>/checkpoints.db,per-run sqlite", "apps/studio/backend/app/core/adapters/engine.py:339"],
+      ["SqliteSaver.from_conn_string 写 sqlite 文件(Python 侧,langgraph-checkpoint-sqlite)", "packages/graph-agent/src/graph_agent/core/checkpointer.py:64"],
+      ["run_manager touch checkpoints.db 占位(Python 写)", "apps/studio/backend/app/services/run_manager.py:284"],
+      ["runtime state 快照写 snapshot.json(Python 原子写 .tmp→replace,非 native-fs)", "apps/studio/backend/app/core/adapters/runtime_state_store_local.py:140"],
+      ["_atomic_write_json 用临时文件 + replace 原子落盘", "apps/studio/backend/app/core/adapters/runtime_state_store_local.py:305"],
+      ["跨进程文件锁 fcntl.flock(LOCK_EX) 保护写", "apps/studio/backend/app/core/adapters/runtime_state_store_local.py:318"],
+      ["acquire_lease 发单调 fencing_token,活跃未过期 lease 再 acquire 抛 state.lease_conflict", "apps/studio/backend/app/core/adapters/runtime_state_store_local.py:44"],
+      ["_next_fencing_token 单调递增 fencing token(防旧 worker)", "apps/studio/backend/app/core/adapters/runtime_state_store_local.py:293"],
+      ["_assert_lease_matches 校验 lease_id+owner_id+fencing_token,不符抛 state.lease_fenced", "apps/studio/backend/app/core/adapters/runtime_state_store_local.py:266"],
+      ["engine.resume 全程持 lease 并 heartbeat,finally release", "apps/studio/backend/app/core/adapters/engine.py:820"]
+    ]
+  }
+}

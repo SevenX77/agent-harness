@@ -99,6 +99,7 @@ Inline example.
 
 
 def _subgraph_parent(root: Path) -> None:
+    child = root / "child"
     _write(
         root / "GRAPH.md",
         """---
@@ -125,8 +126,8 @@ phases:
     )
     _write(
         root / "phases" / "sub" / "SUBGRAPH.md",
-        """---
-target_skill: child
+        f"""---
+path: {child}
 io:
   inputs:
     type: object
@@ -143,7 +144,6 @@ io:
 ---
 """,
     )
-    child = root / "child"
     _write(
         child / "GRAPH.md",
         """---
@@ -245,7 +245,7 @@ def test_agent_can_call_read_example_for_declared_document_example(
     assert any("document example body" in str(message.content) for message in chat.tool_messages)
 
 
-def test_subgraph_target_skill_runs_and_child_data_does_not_inherit_parent(
+def test_subgraph_path_runs_and_child_data_does_not_inherit_parent(
     tmp_path: Path,
     mock_skill_resolver: object,
 ) -> None:

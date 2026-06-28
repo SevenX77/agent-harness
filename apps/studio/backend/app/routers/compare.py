@@ -21,6 +21,15 @@ async def compare_run(skill_id: str, run_id: str) -> CompareResult:
 
 
 @router.get(
+    "/compare",
+    response_model=CompareResult,
+    responses={404: {"model": ErrorResponse}},
+)
+async def compare_run_get(skill_id: str, run_id: str, against: str | None = None) -> CompareResult:
+    return compare_run_to_golden(skill_id, run_id, against=against)
+
+
+@router.get(
     "/diff",
     response_model=CompareResult,
     responses={404: {"model": ErrorResponse}},

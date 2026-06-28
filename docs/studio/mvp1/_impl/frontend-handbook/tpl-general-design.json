@@ -1,0 +1,249 @@
+{
+  "page_id": "general_design",
+  "title": "General 设置页 · 操作设计",
+  "region": "settings:general",
+  "intro": "本页是 General(身份与产物路径)tab 各操作的 MVP1 设计(应该怎样):每个动作只描述该操作目标长啥样、用户怎么触发、前端该怎么做、依赖后端哪条契约;现状实现与差距见实施页(general_impl),底层依赖的「即填即存 + 选目录走 native」机制见 app_settings 机制页(general_mech_appsettings)。General tab 配的是「我是谁(Studio User ID)/ 产物发哪(Gitea Host)/ 新 skill 默认建在哪(默认 skills 目录)」这三件应用级配置——它不属凭证(API Keys)、不属角色路由(LLM Roles),是 Studio 自己的 app 设置。原子 #10–#15 覆盖的就是这三字段的录入与即填即存。注:General tab 里还有一个语言下拉(English / 简体中文),它只切前端 i18n 语言、不进 app_settings、不走 PUT /api/settings,所以不在本页原子范围内(纯界面语言偏好,非身份/产物配置)。",
+  "atoms": [
+    {
+      "n": 10,
+      "cap": "studio-user-id",
+      "track": "共",
+      "module": "身份与产物路径",
+      "func": "设计:让用户填一个 Studio User ID(本地 Git 作者名 + publish 时的仓库 owner),作为「我是谁」的身份标识。",
+      "action": "用户在 General tab 的 Studio User ID 输入框里改文本(无按钮,边改边存)。",
+      "fe_design": "User ID 输入框改文本 → 每次改动调 setUserId(useAppSettings 里把 user_id 合进设置对象的函数)→ 进 300ms debounce 整体 PUT(三字段一起发,见 #15)→ 顶部保存徽章随之走 Pending/Saving/Saved。这是应用级身份字段,纯文本录入,没有官方/第三方之分;它被 publish 链当作 Git author name 与 repo owner 使用(缺它点 publish 会被后端挡下,见机制页)。",
+      "fe_modules": [
+        {
+          "name": "app 设置即填即存",
+          "ref": "femod-appsettings-save"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "PUT /api/settings",
+          "purpose": "三字段整体 upsert app_settings(user_id 随其它两字段一起 PUT,无字段级 PATCH)。",
+          "mechanism_ref": "general_mech_appsettings",
+          "iface_ref": "iface-set-1"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计。",
+      "impl_ref": "fn-10"
+    },
+    {
+      "n": 11,
+      "cap": "gitea-host",
+      "track": "共",
+      "module": "身份与产物路径",
+      "func": "设计:让用户填 Gitea Host(自建 Gitea 实例的根地址),作为 publish/sync 的硬依赖——缺它就无法把 skill 发到团队仓库。",
+      "action": "用户在 General tab 的 Gitea Host 输入框里改文本(边改边存)。",
+      "fe_design": "Gitea Host 输入框改文本 → setGiteaHost(把 gitea_host 合进设置对象)→ 同一条 300ms debounce 整体 PUT(见 #15)→ 保存徽章反馈。前端只录入这一个 host 地址;它只是 publish 鉴权链的一半——发布用的 token/凭据走另一套 env-only 的 STUDIO_* 环境变量、不在本 tab 录入。缺 Gitea Host 时,真正的拦截发生在用户去点 publish/sync 的那一刻(后端校验后报「Gitea Host 未配置」),本输入框不做前置阻断。",
+      "fe_modules": [
+        {
+          "name": "app 设置即填即存",
+          "ref": "femod-appsettings-save"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "PUT /api/settings",
+          "purpose": "gitea_host 随三字段整体 PUT 落 app_settings;publish 时后端从 app_settings 读它做仓库地址。",
+          "mechanism_ref": "general_mech_appsettings",
+          "iface_ref": "iface-set-1"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计。",
+      "impl_ref": "fn-11"
+    },
+    {
+      "n": 12,
+      "cap": "skills-dir-manual",
+      "track": "共",
+      "module": "身份与产物路径",
+      "func": "设计:让用户直接在输入框里手填「默认 skills 目录」的绝对路径,作为新建 skill 时的落地目录。",
+      "action": "用户在「默认 skills 目录」输入框里手打/粘贴一个目录路径。",
+      "fe_design": "目录输入框改文本 → setDefaultSkillsDirectory(把 default_skills_directory 合进设置对象)→ 同一条 debounce 整体 PUT。这是「选目录(#13)」之外的手填兜底:即使没有 native 文件夹选择器(如 web 模式),用户也能纯文本填路径。输入框的展示值经 effectiveDefaultSkillsDirectory(把空值回落到 runtime 默认 configDir/Skills 的工具函数)兜底——为空时显示 runtime 默认目录,而不是空白。手填与「选目录」「Reset」写的是同一个字段。",
+      "fe_modules": [
+        {
+          "name": "app 设置即填即存",
+          "ref": "femod-appsettings-save"
+        },
+        {
+          "name": "skills 目录默认值解析",
+          "ref": "femod-skill-paths"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "PUT /api/settings",
+          "purpose": "default_skills_directory 随三字段整体 PUT 落 app_settings。",
+          "mechanism_ref": "general_mech_appsettings",
+          "iface_ref": "iface-set-1"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计。",
+      "impl_ref": "fn-12"
+    },
+    {
+      "n": 13,
+      "cap": "skills-dir-native-picker",
+      "track": "共",
+      "module": "身份与产物路径",
+      "func": "设计:点 Choose 弹出操作系统原生文件夹选择器选目录——这是 settings 里唯一走 Studio Rust 后端 / native 的本地操作。",
+      "action": "用户点「默认 skills 目录」旁的 Choose 按钮。",
+      "fe_design": "点 Choose → 调 selectSkillDirectory(lib/tauri.ts 里通过 Tauri invoke 触发 OS 文件夹选择器的前端封装,把当前默认 skills 目录 currentDefaultSkillsDirectory 作起始路径传入)→ 它走 Tauri 的 select_directory(Studio Rust 后端命令,弹原生文件夹对话框;picker_starting_directory 把起始路径定位到该目录、目录不存在则尝试创建、再不行退到父目录)→ 用户选定后返回绝对路径 → setDefaultSkillsDirectory 写回字段 + 走 debounce PUT。这条是 settings 里唯一不走 gateway 后端 HTTP、而走 Studio Rust 后端 native-fs 的操作(选本地目录天然是桌面壳的活)。非桌面环境(web 模式,isTauriRuntime 为假)按钮点了只 toast『Desktop only』、不弹选择器——选目录是桌面专属能力。选完仍只是把路径文本写进同一个字段,落盘照样走 PUT /api/settings(Rust 只负责「弹窗选路径」,不负责存)。",
+      "fe_modules": [
+        {
+          "name": "native 目录选择器封装",
+          "ref": "femod-tauri-picker"
+        },
+        {
+          "name": "app 设置即填即存",
+          "ref": "femod-appsettings-save"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "Tauri command select_directory",
+          "purpose": "Studio Rust 后端弹 OS 原生文件夹选择器、返回用户选定的绝对路径(唯一 native 操作,只选不存)。",
+          "mechanism_ref": "general_mech_appsettings",
+          "iface_ref": "iface-set-native"
+        },
+        {
+          "endpoint": "PUT /api/settings",
+          "purpose": "选定路径回写字段后,随三字段整体 PUT 落 app_settings。",
+          "mechanism_ref": "general_mech_appsettings",
+          "iface_ref": "iface-set-1"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(桌面弹 native picker、web 模式 toast『Desktop only』)。",
+      "impl_ref": "fn-13"
+    },
+    {
+      "n": 14,
+      "cap": "skills-dir-reset",
+      "track": "共",
+      "module": "身份与产物路径",
+      "func": "设计:点 Reset 把默认 skills 目录还原成 runtime 默认值(configDir/Skills),撤销用户的自定义路径。",
+      "action": "用户点「默认 skills 目录」旁的 Reset(回旋箭头)图标。",
+      "fe_design": "点 Reset → 取 runtime 默认目录(runtimeDefaultSkillsDirectory:从运行时 config 的 configDir 拼出 configDir/Skills、无 configDir 时退回 resourceDir/config/Skills 的工具函数)→ setDefaultSkillsDirectory 把字段写成这个默认值 → 走 debounce PUT。当 runtime config 拿不到默认目录(fallback 为空)时按钮 disabled——没有可还原的目标就不让点。Reset 与手填(#12)、选目录(#13)写的是同一个 default_skills_directory 字段,只是把它复位到 runtime 默认。",
+      "fe_modules": [
+        {
+          "name": "skills 目录默认值解析",
+          "ref": "femod-skill-paths"
+        },
+        {
+          "name": "app 设置即填即存",
+          "ref": "femod-appsettings-save"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "PUT /api/settings",
+          "purpose": "复位后的 default_skills_directory 随三字段整体 PUT 落 app_settings。",
+          "mechanism_ref": "general_mech_appsettings",
+          "iface_ref": "iface-set-1"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(runtime 默认不可用时 disabled)。",
+      "impl_ref": "fn-14"
+    },
+    {
+      "n": 15,
+      "cap": "appsettings-save",
+      "track": "共",
+      "module": "身份与产物路径",
+      "func": "设计:任意字段改动即填即存——300ms debounce 把三字段整体 PUT,并用顶部保存徽章实时反馈保存态。",
+      "action": "无显式动作(改 #10–#14 任一字段自动触发;无独立 Save 按钮)。",
+      "fe_design": "改任一字段 → updateSettings(把局部 patch 合进当前设置对象的函数)合出完整三字段对象 → queueSave 起 300ms debounce → 到点调 performSave 发 PUT /api/settings(整体三字段,无字段级 PATCH)。保存态走保存状态徽章(SaveStatusBadge,顶部右上把保存态渲成小徽章的共享 UI 组件):idle 静默 / pending 待存 / saving 保存中 / saved 已存 / error 失败显式告警(error 用 warning 色 + aria-live assertive)。并发安全:有 in-flight 请求时把新改动缓冲进 pendingSettings、当前请求回来后再发缓冲值,避免乱序覆盖。这是 General 三字段录入(#10–#14)共享的落地底座——它们改的都是同一份 app_settings、走的都是这一条 debounce PUT。",
+      "fe_modules": [
+        {
+          "name": "app 设置即填即存",
+          "ref": "femod-appsettings-save"
+        },
+        {
+          "name": "保存状态徽章（SaveStatusBadge）",
+          "ref": "femod-save-status-badge"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "PUT /api/settings",
+          "purpose": "整体三字段 upsert app_settings,返回落盘后的权威值供前端回填。",
+          "mechanism_ref": "general_mech_appsettings",
+          "iface_ref": "iface-set-1"
+        },
+        {
+          "endpoint": "GET /api/settings",
+          "purpose": "进 tab/刷新时拉一份 app_settings 快照恢复三字段(空 default_skills_directory 后端回落 runtime 默认)。",
+          "mechanism_ref": "general_mech_appsettings",
+          "iface_ref": "iface-set-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计(debounce 整体 PUT + 徽章 + 并发缓冲)。",
+      "impl_ref": "fn-15"
+    },
+    {
+      "n": 15.1,
+      "cap": "settings-language",
+      "track": "共",
+      "module": "身份与产物路径",
+      "func": "设计:切界面语言(English / 简体中文)并持久化——和 #10–#14 其它字段一样存进 app_settings,重开应用恢复上次语言。",
+      "action": "点 General 顶部语言下拉,选 English / 简体中文。",
+      "fe_design": "现状只调 i18n.changeLanguage(react-i18next 切界面语言的函数)切界面、不落盘,重开回默认。目标:把 language 当成 app_settings 的一个持久字段——下拉 onChange 既调 i18n.changeLanguage 切界面、又把 language 并进 updateSettings 走和三字段同一条即填即存链(→ queueSave → PUT /api/settings);应用启动读 app_settings.language 初始化 i18n。",
+      "fe_modules": [
+        {
+          "name": "app 设置即填即存",
+          "ref": "femod-appsettings"
+        }
+      ],
+      "be_contract": [
+        {
+          "endpoint": "PUT /api/settings",
+          "purpose": "把含 language 的整份 app_settings 落盘(与三字段同一条链)。",
+          "mechanism_ref": "general_mech_appsettings",
+          "iface_ref": "iface-set-0"
+        }
+      ],
+      "fe_status": "符合",
+      "be_status": "已实现",
+      "gap_brief": "符合设计。2026-06-20:代码已落地(design-audit vs code 核实),状态回填。language 已是 app_settings 的持久字段、端到端打通:后端 AppSettings 已加显式 language 字段(models/settings.py:31-34,默认 'en',解了 extra='forbid' 的拒收风险);前端 API 类型补 AppLanguage/language(types.ts:96/102);useAppSettings hook 的 setLanguage 走 updateSettings→queueSave→performSave PUT /api/settings 持久化(useAppSettings.ts:167-169),hydrate 时 syncI18nLanguage 按存值初始化 i18n(:89);GeneralTab 下拉 onChange 经 applyLanguageChange 同时切 i18n + 持久化(GeneralTab.tsx:127-148 + language-switch.ts:32-33)。测试绿:前端 12/12、后端 16/16(含 PUT→GET round-trip、缺省回落、拒非法语言)。",
+      "impl_ref": true
+    }
+  ],
+  "fe_defs": [
+    {
+      "id": "femod-save-status-badge",
+      "name": "保存状态徽章（SaveStatusBadge）",
+      "kind": "共享 UI 组件（跨节点）",
+      "explain": "共享 UI 组件:SaveStatusBadge(ui/save-status-badge.tsx,把 SaveStatus 五态 idle/pending/saving/saved/error 渲成顶部右上小徽章;idle 不渲染、error 用 warning 色 + aria-live assertive)。已在 Shell(settings 壳层)登记为共享组件,General #15 复用——只读传入 status、不发保存请求",
+      "reuse_note": "已在 Shell 登记，General #15 复用（卡精简,不重复写完整卡）"
+    },
+    {
+      "id": "femod-appsettings-save",
+      "name": "app 设置即填即存",
+      "explain": "前端共享逻辑:useAppSettings(管 app_settings 读取/即填即存的 hook),含 updateSettings(局部 patch 合进设置对象)、queueSave(300ms debounce 排程)、performSave(发 PUT /api/settings + 维护保存徽章态 + 并发缓冲 pendingSettings),以及 setUserId/setGiteaHost/setDefaultSkillsDirectory 三个字段 setter;贯穿 #10–#15"
+    },
+    {
+      "id": "femod-tauri-picker",
+      "name": "native 目录选择器封装",
+      "explain": "前端共享逻辑:selectSkillDirectory(lib/tauri.ts 里通过 Tauri invoke('select_directory') 触发 OS 原生文件夹选择器的前端封装);非桌面环境 toast『Desktop only』、native helpers 不可用时报桌面运行时不可用;只负责弹窗取路径,不负责落盘"
+    },
+    {
+      "id": "femod-skill-paths",
+      "name": "skills 目录默认值解析",
+      "explain": "前端共享逻辑:utils/skill-paths.ts,runtimeDefaultSkillsDirectory(从 runtime config 的 configDir 拼 configDir/Skills、无则退 resourceDir/config/Skills)+ effectiveDefaultSkillsDirectory(把空字段回落到 runtime 默认)+ joinDirectoryPath(按平台分隔符拼目录);供 #12 展示兜底与 #14 Reset 取默认值"
+    }
+  ]
+}

@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from graph_agent_gateway.registry.schema import VerifiedProfile
-
+from app.core.adapters.gateway import VerifiedProfile
 from app.models.llm_config import CapabilityValue, ProviderRoute
 
 
@@ -26,19 +25,9 @@ def verified_profile_route_capabilities(
     if not ready_profiles:
         return {}
 
-    input_modalities = sorted(
-        {
-            modality
-            for profile in ready_profiles
-            for modality in (profile.input_modalities or [])
-        }
-    )
+    input_modalities = sorted({modality for profile in ready_profiles for modality in (profile.input_modalities or [])})
     output_modalities = sorted(
-        {
-            modality
-            for profile in ready_profiles
-            for modality in (profile.output_modalities or [])
-        }
+        {modality for profile in ready_profiles for modality in (profile.output_modalities or [])}
     )
     capabilities: dict[str, CapabilityValue] = {
         "verified_methods": CapabilityValue(

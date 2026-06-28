@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 from graph_agent_gateway.registry.schema import (
     ProviderEndpoint,
     ProviderRoute,
@@ -43,6 +42,34 @@ def _mock_registry_snapshot() -> RegistrySnapshot:
     )
 
 
+def _resolver_from_snapshot(snapshot: RegistrySnapshot, **kwargs: Any) -> ModelResolver:
+    from graph_agent_gateway.storage_contracts import InMemoryConfigTruthStore
+
+    payload = snapshot.model_dump(mode="python")
+    store = InMemoryConfigTruthStore()
+    user_id = "test-user"
+    store.put_config(
+        user_id,
+        "credentials",
+        {
+            "schema_version": 4,
+            "provider_endpoints": payload["provider_endpoints"],
+            "provider_routes": payload["provider_routes"],
+            "runtime_policy": payload["runtime_policy"],
+        },
+    )
+    store.put_config(
+        user_id,
+        "roles",
+        {
+            "schema_version": 2,
+            "model_profiles": payload["model_profiles"],
+            "roles": payload["roles"],
+        },
+    )
+    return ModelResolver(config_store=store, user_id=user_id, **kwargs)
+
+
 class MockPredictContext:
     def __init__(self, expected_payload: dict[str, Any], expected_source: str) -> None:
         self.expected_payload = expected_payload
@@ -55,8 +82,7 @@ class MockPredictContext:
 
 
 def test_model_resolver_predict_callable_bridge() -> None:
-    # Build ModelResolver
-    resolver = ModelResolver(registry_snapshot=_mock_registry_snapshot())
+    resolver = _resolver_from_snapshot(_mock_registry_snapshot())
     
     # Define a PredictContext with custom mock response
     context = MockPredictContext(
@@ -64,14 +90,7 @@ def test_model_resolver_predict_callable_bridge() -> None:
         expected_source="copilot"
     )
     
-    # Try resolving with predict_context. This should fail or ignore predict_context in Red Phase!
-    # Because predict_context parameter is not defined or is ignored, and returns old "predict mock" or standard model.
-    try:
-        model = resolver.resolve("mock-role", predict_context=context, phase_name="draft")
-    except TypeError as exc:
-        # If predict_context is not a supported parameter, it will throw TypeError.
-        # This is expected in the Red Phase.
-        pytest.fail(f"ModelResolver.resolve does not support predict_context parameter: {exc}")
+    model = resolver.resolve("mock-role", predict_context=context, phase_name="draft")
 
     # Invoke the model
     response = model.invoke([HumanMessage(content="Hello")])
@@ -83,7 +102,7 @@ def test_model_resolver_predict_callable_bridge() -> None:
 
 
 def test_model_resolver_ignores_predict_context_when_none() -> None:
-    resolver = ModelResolver(registry_snapshot=_mock_registry_snapshot())
+    resolver = _resolver_from_snapshot(_mock_registry_snapshot())
     
     # Resolving with predict_context=None should return a regular GatewayChatModel
     model = resolver.resolve("mock-role", predict_context=None)

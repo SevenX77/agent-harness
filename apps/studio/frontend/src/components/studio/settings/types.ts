@@ -1,4 +1,5 @@
 import type { ReactNode } from "react"
+import type { AppLanguage } from "@/api/types"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 import type { CredentialsState, ModelGroup, ModelInfo, ProviderType, RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
@@ -10,9 +11,15 @@ export interface ProviderDraft {
   name: string
   provider_type: ProviderType
   base_url: string
+  base_urls?: Array<{
+    id: string
+    value: string
+    provider_type?: ProviderType
+    endpoint_ids?: Partial<Record<ProviderType, string>>
+  }>
   api_key: string
   isTesting: boolean
-  testingAction?: "models" | "endpoint" | null
+  testingAction?: "models" | null
 }
 
 export interface SettingsPageProps {
@@ -34,17 +41,26 @@ export interface SettingsPageContentProps {
     userId: string
     giteaHost: string
     defaultSkillsDirectory: string
+    language: AppLanguage
+    remoteModelCatalogEnabled: boolean
     isLoading: boolean
     saveStatus: SaveStatus
     setUserId: (value: string) => void
     setGiteaHost: (value: string) => void
     setDefaultSkillsDirectory: (value: string) => void
+    setLanguage: (value: AppLanguage) => void
+    setRemoteModelCatalogEnabled: (value: boolean) => void
   }
+  /**
+   * N0 Settings · Shell (atoms #5/#6): true only after the /ws/events stream's
+   * reconnect backoff has consistently failed past the flicker threshold. The
+   * top bar shows a "connection lost" warning to the right of the save badge.
+   */
+  connectionLost?: boolean
   onClose: () => void
   onTabChange: (tab: SettingsTab) => void
   onProviderFieldChange: (providerId: string, patch: Partial<ProviderDraft>) => void
   onGetProviderModels: (providerId: string) => void
-  onTestProviderEndpoint: (providerId: string, modelId: string) => void
   onDeleteProvider: (providerId: string) => void
   onAddProvider: (data: AddProviderFormSubmission) => Promise<void> | void
   onProviderModelsUpdated: (providerId: string, models: ModelInfo[]) => void
@@ -52,6 +68,13 @@ export interface SettingsPageContentProps {
   onDeleteRole: (roleName: string) => void
   onDeleteModelBundle: (bundleId: string) => void
   onBeforeRoleTest: () => Promise<RolesData | null>
+  onAfterRoleTest: () => Promise<void> | void
+  /**
+   * #35 (spec §2.1): a failed provider row with reason_code === "missing_config"
+   * offers a "Configure" affordance that jumps to the API Keys tab. SettingsPage
+   * owns the active tab, so the callback flows down through here to the sidebar.
+   */
+  onNavigateToApiKeys: () => void
 }
 
 export type { ReactNode }

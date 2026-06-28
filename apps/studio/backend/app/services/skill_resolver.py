@@ -5,10 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from graph_agent import ResourceNotFoundError
-from graph_agent.core.exceptions import make_error_payload
-
 from app.core import config
+from app.core.adapters.engine import ResourceNotFoundError, make_error_payload
 
 
 class StudioSkillResolver:
@@ -71,9 +69,7 @@ def _skill_index_entry(skill_id: str) -> dict[str, str] | None:
         return None
     return {
         "absolute_path": entry["absolute_path"],
-        "l2_remote_url": (
-            entry.get("l2_remote_url") if isinstance(entry.get("l2_remote_url"), str) else ""
-        ),
+        "l2_remote_url": (entry.get("l2_remote_url") if isinstance(entry.get("l2_remote_url"), str) else ""),
     }
 
 

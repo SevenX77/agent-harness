@@ -23,6 +23,12 @@ CORS_ORIGINS = [
     "http://127.0.0.1:5174",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    # Packaged desktop (Tauri) webview origins. The bundled .app serves its
+    # frontend from the Tauri custom protocol, so without these the production
+    # UI cannot reach its own sidecar over HTTP (only the non-CORS WebSocket
+    # connects), which shows up as a permanent "Could not load skills".
+    "tauri://localhost",  # macOS / Linux
+    "http://tauri.localhost",  # Windows
 ]
 _extra_cors_origins = os.environ.get("STUDIO_CORS_EXTRA_ORIGINS", "").strip()
 if _extra_cors_origins:

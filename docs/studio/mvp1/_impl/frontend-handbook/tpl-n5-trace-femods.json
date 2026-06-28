@@ -1,0 +1,32 @@
+[
+  {
+    "name": "运行事件流订阅（useRunStream）",
+    "kind": "纯逻辑工具集",
+    "what": "一个订阅 run 事件流的 hook(useRunStream,hooks/useRunStream.ts):连 WS /ws/runs/{run_id} 拉 EventEnvelope[],按 seq 去重、检测 gap、记 cursor、断线带 cursor 退避重连;是 N5 节点灯/边黑板/trace 的共同事件源。",
+    "where": "hooks/useRunStream.ts 的 useRunStream;lib/websocket.ts 的 runEventsWsUrl(把 runId+cursor 拼成 WS 地址)、nextBackoffMs(指数退避 1s 起×2 封顶 30s);Workspace.tsx 用 run_id 起 hook,把 runStream.events 同时喂节点态派生、边黑板派生、TracePanel。",
+    "duties": [
+      "连 WS /ws/runs/{run_id}(带 token + 可选 cursor),批量(每 ~100ms flush)把 EventEnvelope 刷进状态。",
+      "按 seq 去重(已见序号丢弃)、检测 gap(序号缺口),暴露 status/error/cursor/reconnectInMs。",
+      "断线按 nextBackoffMs 退避重连,重连 URL 带 ?cursor= 从断点续接补流。"
+    ],
+    "used_by": "#1/#4(节点红灯/调试前置真实 run)、#5(HitL 暂停态)、#7(边黑板)、#10/#12(trace 实时/重连补流)。",
+    "boundary": "做:订阅、去重、续接、重连、暴露事件流。不做:不解释事件语义(派生在 deriveNodeStatuses/edgeContextFromEvents)、不回写(单向只读)、不自存第二份真相。",
+    "reuse_note": "节点内跨多面共享:N5.1 红灯、N5.2 暂停、N5.3 边黑板、N5.4 trace 全用这一份事件流(单一事件事实源)。",
+    "api": "WS /ws/runs/{run_id}?cursor=(只读订阅,token 鉴权)。见 mech_n5_events。"
+  },
+  {
+    "name": "Trace 面板渲染（TracePanel + VirtualTraceList）",
+    "kind": "前端 UI 组件",
+    "what": "Trace 时间线面板与其虚拟滚动列表:把 EventEnvelope[] 实时渲染成可滚动、可搜索/过滤的事件时间线;事件量大(实测上千条)时只渲可视区行避免卡顿。",
+    "where": "components/TracePanel.tsx(面板:含顶栏全局[Resume]、搜索/过滤、HitL 表单区)+ 其内 VirtualTraceList(虚拟滚动事件列表);由 Workspace.tsx 把 runStream.events 作为 traceLogs 传入。",
+    "duties": [
+      "实时渲染事件时间线(虚拟滚动,按批刷新避免抖动)。",
+      "搜索框 + 按 phase 过滤,在已收事件上客户端即筛即显。",
+      "顶栏全局[Resume]按钮(canResume=Boolean(runId)),点击 onResume 触发全局续跑。"
+    ],
+    "used_by": "#10(live-trace-stream,实时展示)、#11(global-resume-from-checkpoint,全局续跑入口)、#13(trace-search-filter,搜索过滤)。",
+    "boundary": "做:渲染时间线、搜索过滤、承载全局 Resume 入口。不做:不做事件去重/续接(在 useRunStream)、不做事件语义派生(在派生 femod)。",
+    "reuse_note": "节点内共享:Trace 面板的三个操作(实时展示/全局续跑/搜索过滤)共用同一面板与虚拟列表组件。",
+    "api": "事件源 WS /ws/runs/{run_id}(经 useRunStream);全局续跑 POST …/resume(不带 node options)。见 mech_n5_events / mech_n5_resume。"
+  }
+]

@@ -18,9 +18,32 @@ export type ConnectPhaseRefsResult =
   | { ok: true; phases: SerializableGraphPhaseRef[] }
   | {
     ok: false
-    reason: 'global-node' | 'self-dependency' | 'unknown-phase' | 'duplicate-dependency' | 'missing-dependency'
+    reason: 'invalid-endpoint' | 'self-dependency' | 'unknown-phase' | 'duplicate-dependency' | 'missing-dependency'
     message: string
   }
+
+export type RemovePhaseRefsResult =
+  | { ok: true; phases: SerializableGraphPhaseRef[] }
+  | {
+    ok: false
+    reason: 'invalid-phase' | 'unknown-phase'
+    message: string
+  }
+
+export type RenamePhaseRefsResult =
+  | { ok: true; phases: SerializableGraphPhaseRef[] }
+  | {
+    ok: false
+    reason: 'invalid-phase' | 'unknown-phase' | 'duplicate-phase' | 'unchanged'
+    message: string
+  }
+
+const PHASE_ID_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]*$/
+
+export function isSafePhaseId(value: string): boolean {
+  const trimmed = value.trim()
+  return trimmed.length > 0 && trimmed.length <= 100 && PHASE_ID_PATTERN.test(trimmed)
+}
 
 export function phaseRefsFromSkillDetail(detail: SkillDetail | undefined): SerializableGraphPhaseRef[] {
   if (!detail?.manifest) {
@@ -40,15 +63,89 @@ export function phaseRefsFromSkillDetail(detail: SkillDetail | undefined): Seria
     return {
       id: phaseId,
       src,
-      depends_on: [...(topology?.depends_on ?? [])],
+      depends_on: serializableDependsOn(topology?.depends_on ?? []),
+      ...(topology?.output === true ? { output: true } : {}),
       mode,
     }
   })
 }
 
-export function createPhaseDraft(detail: SkillDetail | undefined, kind: NewPhaseKind, skillId?: string): PhaseDraft {
+export function phaseDirectoryIdsFromSkillDetail(detail: SkillDetail | undefined): string[] {
+  if (!detail?.files) {
+    return []
+  }
+
+  const ids = new Set<string>()
+  for (const path of Object.keys(detail.files)) {
+    const normalized = path.replaceAll("\\", "/")
+    const match = /^phases\/([^/]+)(?:\/|$)/.exec(normalized)
+    const phaseId = match?.[1]
+    if (phaseId && isSafePhaseId(phaseId)) {
+      ids.add(phaseId)
+    }
+  }
+  return [...ids].sort()
+}
+
+export function orphanPhaseDirectoryIds(
+  detail: SkillDetail | undefined,
+  nextPhases: SerializableGraphPhaseRef[],
+): string[] {
+  const activeIds = new Set(nextPhases.map((phase) => phase.id))
+  return phaseDirectoryIdsFromSkillDetail(detail).filter((phaseId) => !activeIds.has(phaseId))
+}
+
+export function defaultPhaseId(
+  detail: SkillDetail | undefined,
+  kind: NewPhaseKind,
+  reservedPhaseIds: Iterable<string> = [],
+): string {
   const phases = phaseRefsFromSkillDetail(detail)
-  const phaseId = nextPhaseId(phases.map((phase) => phase.id), basePhaseId(kind))
+  return nextPhaseId(
+    [
+      ...phases.map((phase) => phase.id),
+      ...phaseDirectoryIdsFromSkillDetail(detail),
+      ...reservedPhaseIds,
+    ],
+    basePhaseId(kind),
+  )
+}
+
+export function phaseNameError(
+  phaseId: string,
+  detail: SkillDetail | undefined,
+  reservedPhaseIds: Iterable<string> = [],
+): string | null {
+  const trimmed = phaseId.trim()
+  if (!trimmed) {
+    return 'Phase name is required.'
+  }
+  if (!isSafePhaseId(trimmed)) {
+    return 'Phase names must start with a letter or underscore and contain only letters, numbers, underscores, or hyphens.'
+  }
+  const existingIds = new Set([
+    ...phaseRefsFromSkillDetail(detail).map((phase) => phase.id),
+    ...phaseDirectoryIdsFromSkillDetail(detail),
+    ...reservedPhaseIds,
+  ])
+  if (existingIds.has(trimmed)) {
+    return `A phase named ${trimmed} already exists.`
+  }
+  return null
+}
+
+export function createPhaseDraft(
+  detail: SkillDetail | undefined,
+  kind: NewPhaseKind,
+  reservedPhaseIds: Iterable<string> = [],
+  requestedPhaseId?: string,
+): PhaseDraft {
+  const phases = phaseRefsFromSkillDetail(detail)
+  const phaseId = requestedPhaseId?.trim() || defaultPhaseId(detail, kind, reservedPhaseIds)
+  const error = requestedPhaseId ? phaseNameError(phaseId, detail, reservedPhaseIds) : null
+  if (error) {
+    throw new Error(error)
+  }
   const filePath = phaseFilePath(phaseId, kind)
   const phaseRef: SerializableGraphPhaseRef = {
     id: phaseId,
@@ -59,7 +156,7 @@ export function createPhaseDraft(detail: SkillDetail | undefined, kind: NewPhase
   return {
     phaseId,
     filePath,
-    fileContent: defaultPhaseMarkdown(phaseId, kind, skillId),
+    fileContent: defaultPhaseMarkdown(phaseId, kind),
     phaseRef,
     phases: [...phases, phaseRef],
   }
@@ -70,14 +167,50 @@ export function connectPhaseRefs(
   sourceId: string | null | undefined,
   targetId: string | null | undefined,
 ): ConnectPhaseRefsResult {
-  if (!sourceId || !targetId || isGlobalNode(sourceId) || isGlobalNode(targetId)) {
-    return { ok: false, reason: 'global-node', message: 'Global input/output nodes cannot be persisted as phase dependencies.' }
+  if (!sourceId || !targetId) {
+    return { ok: false, reason: 'invalid-endpoint', message: 'Both connection endpoints must be phase nodes.' }
   }
   if (sourceId === targetId) {
     return { ok: false, reason: 'self-dependency', message: 'A phase cannot depend on itself.' }
   }
 
   const phases = phaseRefsFromSkillDetail(detail)
+  if (sourceId === INPUT_ID) {
+    const target = phases.find((phase) => phase.id === targetId)
+    if (!target) {
+      return { ok: false, reason: 'unknown-phase', message: 'Graph input must connect to a phase node.' }
+    }
+    if (target.depends_on.includes('input')) {
+      return { ok: false, reason: 'duplicate-dependency', message: 'This dependency already exists.' }
+    }
+    return {
+      ok: true,
+      phases: phases.map((phase) => (
+        phase.id === target.id
+          ? { ...phase, depends_on: [...phase.depends_on, 'input'] }
+          : phase
+      )),
+    }
+  }
+  if (targetId === OUTPUT_ID) {
+    const source = phases.find((phase) => phase.id === sourceId)
+    if (!source) {
+      return { ok: false, reason: 'unknown-phase', message: 'Graph output must be connected from a phase node.' }
+    }
+    if (source.output === true) {
+      return { ok: false, reason: 'duplicate-dependency', message: 'This output marker already exists.' }
+    }
+    return {
+      ok: true,
+      phases: phases.map((phase) => (
+        phase.id === source.id ? { ...phase, output: true } : phase
+      )),
+    }
+  }
+  if (sourceId === OUTPUT_ID || targetId === INPUT_ID) {
+    return { ok: false, reason: 'invalid-endpoint', message: 'Graph boundaries must connect as Input -> phase or phase -> Output.' }
+  }
+
   const source = phases.find((phase) => phase.id === sourceId)
   const target = phases.find((phase) => phase.id === targetId)
   if (!source || !target) {
@@ -102,11 +235,50 @@ export function disconnectPhaseRefs(
   sourceId: string | null | undefined,
   targetId: string | null | undefined,
 ): ConnectPhaseRefsResult {
-  if (!sourceId || !targetId || isGlobalNode(sourceId) || isGlobalNode(targetId)) {
-    return { ok: false, reason: 'global-node', message: 'Global input/output edges are derived and cannot be disconnected.' }
+  if (!sourceId || !targetId) {
+    return { ok: false, reason: 'invalid-endpoint', message: 'Both edge endpoints must be phase nodes.' }
   }
 
   const phases = phaseRefsFromSkillDetail(detail)
+  if (sourceId === INPUT_ID) {
+    const target = phases.find((phase) => phase.id === targetId)
+    if (!target) {
+      return { ok: false, reason: 'unknown-phase', message: 'Graph input must disconnect from a phase node.' }
+    }
+    if (!target.depends_on.includes('input')) {
+      return { ok: false, reason: 'missing-dependency', message: 'This edge is not backed by a graph input dependency.' }
+    }
+    return {
+      ok: true,
+      phases: phases.map((phase) => (
+        phase.id === target.id
+          ? { ...phase, depends_on: phase.depends_on.filter((dependency) => dependency !== 'input') }
+          : phase
+      )),
+    }
+  }
+  if (targetId === OUTPUT_ID) {
+    const source = phases.find((phase) => phase.id === sourceId)
+    if (!source) {
+      return { ok: false, reason: 'unknown-phase', message: 'Graph output must disconnect from a phase node.' }
+    }
+    if (source.output !== true) {
+      return { ok: false, reason: 'missing-dependency', message: 'This edge is not backed by an output marker.' }
+    }
+    return {
+      ok: true,
+      phases: phases.map((phase) => {
+        if (phase.id !== source.id) return phase
+        const nextPhase = { ...phase }
+        delete nextPhase.output
+        return nextPhase
+      }),
+    }
+  }
+  if (sourceId === OUTPUT_ID || targetId === INPUT_ID) {
+    return { ok: false, reason: 'invalid-endpoint', message: 'Graph boundaries must disconnect as Input -> phase or phase -> Output.' }
+  }
+
   const source = phases.find((phase) => phase.id === sourceId)
   const target = phases.find((phase) => phase.id === targetId)
   if (!source || !target) {
@@ -126,6 +298,206 @@ export function disconnectPhaseRefs(
   }
 }
 
+function serializableDependsOn(dependsOn: readonly string[]): string[] {
+  return [...dependsOn]
+}
+
+export function removePhaseRefs(
+  detail: SkillDetail | undefined,
+  phaseId: string | null | undefined,
+): RemovePhaseRefsResult {
+  if (!phaseId) {
+    return { ok: false, reason: 'invalid-phase', message: 'Phase id is required.' }
+  }
+
+  const phases = phaseRefsFromSkillDetail(detail)
+  if (!phases.some((phase) => phase.id === phaseId)) {
+    return { ok: false, reason: 'unknown-phase', message: 'Phase not found.' }
+  }
+
+  return {
+    ok: true,
+    phases: phases
+      .filter((phase) => phase.id !== phaseId)
+      .map((phase) => ({
+        ...phase,
+        depends_on: phase.depends_on.filter((dependency) => dependency !== phaseId),
+      })),
+  }
+}
+
+export function renamePhaseRefs(
+  detail: SkillDetail | undefined,
+  phaseId: string | null | undefined,
+  nextPhaseId: string,
+): RenamePhaseRefsResult {
+  if (!phaseId) {
+    return { ok: false, reason: 'invalid-phase', message: 'Select a phase node to rename.' }
+  }
+  const nextId = nextPhaseId.trim()
+  if (!isSafePhaseId(nextId)) {
+    return {
+      ok: false,
+      reason: 'invalid-phase',
+      message: 'Phase names must start with a letter or underscore and contain only letters, numbers, underscores, or hyphens.',
+    }
+  }
+  if (nextId === phaseId) {
+    return { ok: false, reason: 'unchanged', message: 'Phase name is unchanged.' }
+  }
+
+  const phases = phaseRefsFromSkillDetail(detail)
+  if (!phases.some((phase) => phase.id === phaseId)) {
+    return { ok: false, reason: 'unknown-phase', message: 'The selected phase is not in GRAPH.md.' }
+  }
+  if (phases.some((phase) => phase.id === nextId)) {
+    return { ok: false, reason: 'duplicate-phase', message: `A phase named ${nextId} already exists.` }
+  }
+
+  return {
+    ok: true,
+    phases: phases.map((phase) => {
+      const renamed = phase.id === phaseId
+      return {
+        ...phase,
+        id: renamed ? nextId : phase.id,
+        src: renamed ? phaseDirectoryPath(nextId) : phase.src,
+        depends_on: phase.depends_on.map((dependency) => dependency === phaseId ? nextId : dependency),
+      }
+    }),
+  }
+}
+
+/** An edge identified purely by its two phase endpoints. */
+export interface EdgeEndpoints {
+  source: string | null | undefined
+  target: string | null | undefined
+}
+
+/**
+ * Result of planning an edge reconnect (drag an existing edge endpoint onto a
+ * different node). A reconnect is the composition of two atomic depends_on
+ * mutations the canvas already supports: remove the old dependency, then add the
+ * new one. Both halves flow through the existing disconnect/connect → serialize
+ * path, so the serialize contract is unchanged (n2-canvas #8, R4).
+ */
+export type ReconnectPlan =
+  | { ok: true; disconnect: { source: string; target: string }; connect: { source: string; target: string } }
+  | { ok: false; reason: 'invalid-endpoint' | 'self-dependency' | 'no-op'; message: string }
+
+/**
+ * Pure planner for a React Flow edge reconnect. Given the old edge and the new
+ * connection (either the source or the target endpoint may have moved), decide
+ * whether the move is a legal dependency edit and, if so, return the disconnect
+ * + connect operations to apply. Endpoint legality against the live graph
+ * (unknown phase, duplicate, missing dependency) is re-checked by
+ * disconnectPhaseRefs / connectPhaseRefs when the plan is applied, mirroring the
+ * onConnect validation reuse.
+ */
+export function planEdgeReconnect(oldEdge: EdgeEndpoints, newConnection: EdgeEndpoints): ReconnectPlan {
+  const oldSource = oldEdge.source
+  const oldTarget = oldEdge.target
+  const newSource = newConnection.source
+  const newTarget = newConnection.target
+  if (!oldSource || !oldTarget || !newSource || !newTarget) {
+    return { ok: false, reason: 'invalid-endpoint', message: 'Edge endpoints must be phase nodes to reconnect.' }
+  }
+  if (newSource === newTarget) {
+    return { ok: false, reason: 'self-dependency', message: 'A phase cannot depend on itself.' }
+  }
+  if (oldSource === newSource && oldTarget === newTarget) {
+    return { ok: false, reason: 'no-op', message: 'Edge was reconnected to the same endpoints.' }
+  }
+
+  return {
+    ok: true,
+    disconnect: { source: oldSource, target: oldTarget },
+    connect: { source: newSource, target: newTarget },
+  }
+}
+
+function skillDetailFromPhaseRefs(phases: SerializableGraphPhaseRef[]): SkillDetail {
+  return {
+    manifest: {
+      schema_version: CURRENT_SCHEMA_VERSION,
+      name: 'draft',
+      description: '',
+      io: {
+        inputs: { type: 'object', properties: {} },
+        outputs: { type: 'object', properties: {} },
+      },
+      phases: phases.map((phase) => phase.id),
+    },
+    graph_topology: phases.map((phase) => ({
+      id: phase.id,
+      src: phase.src,
+      depends_on: [...phase.depends_on],
+      ...(phase.output === true ? { output: true } : {}),
+      mode: phase.mode,
+    })),
+    node_schema_v21: {},
+    io_schema: {},
+    file_paths: {},
+    files: {},
+    manifest_errors: null,
+    has_golden: false,
+    latest_run_metadata: null,
+    lint_result: null,
+  }
+}
+
+export type ReconnectPhaseRefsResult =
+  | { ok: true; phases: SerializableGraphPhaseRef[] }
+  | {
+    ok: false
+    reason: 'invalid-endpoint' | 'self-dependency' | 'unknown-phase' | 'duplicate-dependency' | 'missing-dependency' | 'no-op'
+    message: string
+  }
+
+/**
+ * Compute the next phases for an edge reconnect as a SINGLE atomic depends_on
+ * mutation (n2-canvas #8 lost-update fix). The previous implementation ran the
+ * disconnect and the connect as TWO sequential serialize round-trips against the
+ * same captured skillDetail closure: the disconnect wrote a new GRAPH.md (hash
+ * changed) and revalidated, but the queued connect still serialized the
+ * PRE-disconnect phases with a now-stale expected_hash, so the backend hash
+ * guard rejected it with 409 and left the graph half-mutated.
+ *
+ * This helper instead derives ONE phases list off a single `phaseRefsFromSkillDetail`
+ * snapshot that BOTH drops the old dependency (disconnect.source from
+ * disconnect.target) AND adds the new dependency (connect.source to
+ * connect.target). The caller serializes + writes that single list once with a
+ * single expected_hash. It re-runs the same per-endpoint guards the standalone
+ * connect/disconnect helpers enforce (global node, self-dependency, unknown
+ * phase, duplicate, missing) so the validation contract is unchanged; only the
+ * round-trip count drops from two to one.
+ */
+export function reconnectPhaseRefs(
+  detail: SkillDetail | undefined,
+  disconnect: { source: string; target: string },
+  connect: { source: string; target: string },
+): ReconnectPhaseRefsResult {
+  if (!disconnect.source || !disconnect.target || !connect.source || !connect.target) {
+    return { ok: false, reason: 'invalid-endpoint', message: 'Edge endpoints must be phase nodes to reconnect.' }
+  }
+  if (connect.source === connect.target) {
+    return { ok: false, reason: 'self-dependency', message: 'A phase cannot depend on itself.' }
+  }
+  if (disconnect.source === connect.source && disconnect.target === connect.target) {
+    return { ok: false, reason: 'no-op', message: 'Edge was reconnected to the same endpoints.' }
+  }
+
+  const disconnected = disconnectPhaseRefs(detail, disconnect.source, disconnect.target)
+  if (!disconnected.ok) {
+    return disconnected
+  }
+  const connected = connectPhaseRefs(skillDetailFromPhaseRefs(disconnected.phases), connect.source, connect.target)
+  if (!connected.ok) {
+    return connected
+  }
+  return { ok: true, phases: connected.phases }
+}
+
 export function phaseFilePath(phaseId: string, kind: NewPhaseKind): string {
   if (kind === 'skill') {
     return `phases/${phaseId}/SKILL.md`
@@ -136,54 +508,79 @@ export function phaseFilePath(phaseId: string, kind: NewPhaseKind): string {
   return `phases/${phaseId}/LOGIC.md`
 }
 
-function phaseDirectoryPath(phaseId: string): string {
+export function phaseDirectoryPath(phaseId: string): string {
   return `phases/${phaseId}`
 }
 
-export function defaultPhaseMarkdown(phaseId: string, kind: NewPhaseKind, skillId = 'placeholder.child_skill'): string {
+// Node type is determined by the phase FILE KIND (LOGIC.md / SKILL.md /
+// SUBGRAPH.md), never a `mode:` frontmatter field. The scaffolds below stay
+// FROZEN-clean per engine skill-syntax §2.3 (LOGIC), §2.5 (agent SKILL),
+// §2.4/§2.1 (SUBGRAPH) so the engine compiler accepts them with no
+// unknown-field FATAL. Deprecated fields (`mode`, `system_prompt`,
+// `exit_contract`, `python_callable`, legacy registry child-reference fields)
+// must never be emitted.
+export function defaultPhaseMarkdown(
+  phaseId: string,
+  kind: NewPhaseKind,
+  subgraphPath?: string,
+): string {
   if (kind === 'skill') {
-    return [
-      '---',
-      `name: ${phaseId}`,
-      'mode: skill',
-      'tools: []',
-      '---',
-      '',
-      '<system_prompt>',
-      `Describe what ${phaseId} should do.`,
-      '</system_prompt>',
-      '',
-      '<exit_contract>',
-      'Call finish_task when this phase is complete.',
-      '</exit_contract>',
-      '',
-      `# ${phaseId}`,
-      '',
-    ].join('\n')
+    return agentPhaseMarkdown(phaseId)
   }
   if (kind === 'subgraph') {
-    return [
-      '---',
-      `name: ${phaseId}`,
-      'mode: subgraph',
-      `target_skill: ${skillId}`,
-      '---',
-      '',
-      `# ${phaseId}`,
-      '',
-    ].join('\n')
+    return subgraphPhaseMarkdown(phaseId, subgraphPath)
   }
+  return logicPhaseMarkdown(phaseId)
+}
+
+function logicPhaseMarkdown(phaseId: string): string {
   return [
     '---',
     `name: ${phaseId}`,
-    'mode: logic',
+    'io:',
+    '  inputs:',
+    '    type: object',
+    '    properties: {}',
+    '  outputs:',
+    '    type: object',
+    '    properties: {}',
+    'actions: []',
     '---',
     '',
-    '<python_callable>',
-    phaseId.replaceAll('-', '_'),
-    '</python_callable>',
+  ].join('\n')
+}
+
+function agentPhaseMarkdown(phaseId: string): string {
+  return [
+    '---',
+    `name: ${phaseId}`,
+    'io:',
+    '  inputs:',
+    '    type: object',
+    '    properties: {}',
+    '  outputs:',
+    '    type: object',
+    '    properties: {}',
+    '---',
+    '<role></role>',
+    '<goal></goal>',
     '',
-    `# ${phaseId}`,
+  ].join('\n')
+}
+
+function subgraphPhaseMarkdown(phaseId: string, subgraphPath?: string): string {
+  return [
+    '---',
+    `name: ${phaseId}`,
+    `path: ${subgraphPath ? subgraphPath : '""'}`,
+    'io:',
+    '  inputs:',
+    '    type: object',
+    '    properties: {}',
+    '  outputs:',
+    '    type: object',
+    '    properties: {}',
+    '---',
     '',
   ].join('\n')
 }
@@ -222,10 +619,6 @@ function normalizePhaseMode(mode: string | undefined): GraphPhaseMode | null {
     return mode
   }
   return null
-}
-
-function isGlobalNode(id: string): boolean {
-  return id === INPUT_ID || id === OUTPUT_ID
 }
 
 export interface OverwriteConflict {

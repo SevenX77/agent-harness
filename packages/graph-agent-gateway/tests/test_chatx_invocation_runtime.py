@@ -285,15 +285,16 @@ def _gateway_with_factory(
 
 
 @pytest.mark.parametrize(
-    "exception",
+    ("exception", "expected_invocation_pattern"),
     [
-        ProviderHTTPError(401, "bad key after chatx retries"),
-        httpx.ConnectError("connection failed after chatx retries"),
+        (ProviderHTTPError(401, "bad key after chatx retries"), ("primary", "fallback")),
+        (httpx.ConnectError("connection failed after chatx retries"), ("primary", "primary", "fallback")),
     ],
 )
 def test_chatx_retry_exhaustion_fallback_shapes_remain_fallback_allowed(
     monkeypatch: pytest.MonkeyPatch,
     exception: BaseException,
+    expected_invocation_pattern: tuple[str, ...],
 ) -> None:
     bad_route = _route(endpoint_id="primary", route_slug="bad")
     fallback_route = _route(endpoint_id="fallback", route_slug="ok")
@@ -312,7 +313,48 @@ def test_chatx_retry_exhaustion_fallback_shapes_remain_fallback_allowed(
     result = model.invoke([HumanMessage(content="hello")])
 
     assert result.content == "fallback-ok"
-    assert factory.invoked_routes == [bad_route.route_id, fallback_route.route_id]
+    expected_routes = [
+        bad_route.route_id if provider == "primary" else fallback_route.route_id
+        for provider in expected_invocation_pattern
+    ]
+    assert factory.invoked_routes == expected_routes
+
+
+def test_gateway_chat_model_retries_same_route_before_switching_on_retryable_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    primary_route = _route(endpoint_id="primary", route_slug="bad")
+    fallback_route = _route(endpoint_id="fallback", route_slug="ok")
+
+    class RetrySameFactory:
+        def __init__(self) -> None:
+            self.invoked_routes: list[str] = []
+            self.route_attempts: dict[str, int] = {}
+
+        def build(self, route: Any, **kwargs: object):
+            factory = self
+
+            class RouteAwareChatModel:
+                def invoke(self, messages: list[BaseMessage]) -> AIMessage:
+                    del messages
+                    factory.invoked_routes.append(route.route_id)
+                    attempt = factory.route_attempts.get(route.route_id, 0)
+                    factory.route_attempts[route.route_id] = attempt + 1
+                    if route.route_id == primary_route.route_id and attempt == 0:
+                        raise ProviderHTTPError(503, "transient upstream overload")
+                    if route.route_id == primary_route.route_id:
+                        return AIMessage(content="primary-recovered")
+                    return AIMessage(content="fallback-used")
+
+            return RouteAwareChatModel()
+
+    factory = RetrySameFactory()
+    model = _gateway_with_factory(monkeypatch, factory, [primary_route, fallback_route])
+
+    result = model.invoke([HumanMessage(content="hello")])
+
+    assert result.content == "primary-recovered"
+    assert factory.invoked_routes == [primary_route.route_id, primary_route.route_id]
 
 
 def test_chatx_retry_exhaustion_400_non_capability_shape_remains_fail_fast(

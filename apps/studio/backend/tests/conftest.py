@@ -14,8 +14,9 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 STUDIO_BACKEND = REPO_ROOT / "apps" / "studio" / "backend"
 SRC_CORE = REPO_ROOT / "src" / "core"
 GRAPH_AGENT_SRC = REPO_ROOT / "packages" / "graph-agent" / "src"
+GRAPH_AGENT_GATEWAY_SRC = REPO_ROOT / "packages" / "graph-agent-gateway" / "src"
 
-for path in (STUDIO_BACKEND, SRC_CORE, GRAPH_AGENT_SRC):
+for path in (STUDIO_BACKEND, SRC_CORE, GRAPH_AGENT_SRC, GRAPH_AGENT_GATEWAY_SRC):
     path_str = str(path)
     if path_str not in sys.path:
         sys.path.insert(0, path_str)
@@ -28,6 +29,34 @@ from app.services.terminal_manager import terminal_manager  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 _TEST_TOKEN = "studio-test-token"
+
+
+@pytest.fixture(autouse=True)
+def _community_catalog_neutralized_in_tests(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Keep the community catalog feature off the network during tests.
+
+    Production ships the catalog ON by default (clean open API, baked gate URL +
+    signing key, no token), so probe/contribute/sync paths would otherwise reach
+    the real gate. Neutralize both read and write here — and scrub any leaked
+    ``STUDIO_COMMUNITY_*`` shell env — so the default test state makes no network
+    call. Tests that exercise the active paths opt back in explicitly (set the
+    flag + a test gate/manifest URL and stub the client).
+    """
+    for var in (
+        "STUDIO_COMMUNITY_UPLOAD_ENABLED",
+        "STUDIO_COMMUNITY_GATE_URL",
+        "STUDIO_COMMUNITY_PROTOCOL_MAJOR",
+        "STUDIO_COMMUNITY_CATALOG_SIGNING_PUBKEY",
+        "STUDIO_COMMUNITY_CATALOG_MANIFEST_URL",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("STUDIO_COMMUNITY_UPLOAD_ENABLED", "false")
+    monkeypatch.setenv("STUDIO_COMMUNITY_GATE_URL", "")
+    monkeypatch.setenv("STUDIO_COMMUNITY_CATALOG_SIGNING_PUBKEY", "")
+    monkeypatch.setenv("STUDIO_COMMUNITY_CATALOG_MANIFEST_URL", "")
+    clear_backend_caches()
+    yield
+    clear_backend_caches()
 
 
 @pytest.fixture

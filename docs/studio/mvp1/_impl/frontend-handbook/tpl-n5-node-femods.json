@@ -1,0 +1,33 @@
+[
+  {
+    "name": "事件→节点态派生（deriveNodeStatuses）",
+    "kind": "纯逻辑工具集",
+    "what": "一个把有序运行事件流(EventEnvelope[])reduce 成每节点状态的纯函数(deriveNodeStatuses,node-status.ts):按事件到达顺序对每个 phase 做 last-event-wins,产出 running/success/error/paused,供画布节点灯(运行期)与 debug 红灯/暂停(调试期)共用同一份(spec 决策 Q4)。",
+    "where": "node-status.ts 的 deriveNodeStatuses(reduce 事件成节点态的纯函数)、isFailureEvent(判单事件是否标红)、isPausedEvent(判是否暂停)、FAILURE_EVENT_TYPES(显式失败事件集合 = validation_fail/retry_exhausted);节点态类型 SkillNodeStatus 在 components/nodes/types.ts。Workspace 用 useMemo 包它,输入仅 runStream.events。",
+    "duties": [
+      "按事件顺序对每个 phase last-event-wins:phase_start→running、phase_end→success、validation_fail/retry_exhausted/含 error|fail→error、interrupted/hitl 类→paused。",
+      "isFailureEvent 判定单事件是否标红;isPausedEvent 判定是否进暂停态(供 HitL 浮框)。",
+      "只消费运行事件,不掺编辑期信号(dirty/stale 不来自这里,走 resume/validity)。"
+    ],
+    "used_by": "#1(failed-node-red-light,红灯)、#5(hitl-node-anchored-input,paused 暂停态触发悬浮框)。",
+    "boundary": "做:把事件流 reduce 成 running/success/error/paused 四态。不做:不产 idle/breakpoint(非事件派生)、不产 dirty/stale(脏态走 mech_n5_checkpoint 的 validity)、不渲染(只算态,渲染在 SkillNode)。",
+    "reuse_note": "节点内共享:运行期节点灯与调试期红灯/暂停共用同一份派生(Q4),不写两套。",
+    "api": "无直接后端调用 —— 纯函数,输入是 useRunStream 收来的 EventEnvelope[];事件源经 WS /ws/runs/{run_id}(见 mech_n5_events)。"
+  },
+  {
+    "name": "节点级 Resume 校验与发起（node-resume + validity）",
+    "kind": "绑定节点级续跑的业务逻辑",
+    "what": "一组支撑「从某节点精准续跑」的前端逻辑:从事件流取该节点 checkpoint 元数据、查该节点能否续(脏态判定)、带起止节点 + checkpoint 调 resume 续跑。",
+    "where": "node-resume.ts 的 nodeResumeCheckpointFromEvents(扫事件取该 phase 最后一条带 checkpoint_id 的快照标识);getResumeValidity(api/client.ts,查 POST …/resume/validity 的函数)+ ResumeValidityResponse 类型(api/types.ts);resumeRun(client.ts)的 options(resumeFromNodeId/resumeToNodeId/checkpointId/checkpointNs);现状承载在 PropertiesPanel.tsx 的 NodeResumeDebugBar(PropertiesPanel.tsx 里渲 resume_allowed/dirty_fields + Resume node 按钮的「节点续跑调试条」组件)(选中 error 节点时渲校验 + Resume node 按钮;目标用 @xyflow/react 的 NodeToolbar 把它锚到画布节点)+ Workspace.tsx 的 handleResumeNode。",
+    "duties": [
+      "nodeResumeCheckpointFromEvents:从事件流取选中节点的 checkpoint_id/checkpoint_ns。",
+      "getResumeValidity:带 checkpoint 元数据查 validity,拿 resume_allowed/reason(dirty_upstream 等)/dirty_fields。",
+      "据 resume_allowed=false 置灰[Resume]并显示 reason 为何不可续。",
+      "点续跑:resumeRun 带 resumeFromNodeId(+checkpointId/ns,可选 resumeToNodeId)发起节点级续跑。"
+    ],
+    "used_by": "#2(node-anchored-resume,节点级续跑)、#3(dirty-downstream-graying,脏态置灰)。",
+    "boundary": "做:取节点 checkpoint、查 validity、带起止节点续跑、按判定置灰。不做:不做续跑业务(在引擎)、不自己判脏(判定在后端 validity 端点)。目标偏差:按钮/置灰现状在 Properties 面板,应下沉到画布节点(N5.1#2/#3)。",
+    "reuse_note": "节点内共享:节点级续跑(#2)与脏态置灰(#3)共用同一套 checkpoint 取值 + validity 查询 + resumeRun 节点 options。",
+    "api": "GET 类:POST /api/skills/{skill_id}/runs/{run_id}/resume/validity(只读判定);动作类:POST …/resume(带 resume_from_node_id)。见 mech_n5_resume。"
+  }
+]

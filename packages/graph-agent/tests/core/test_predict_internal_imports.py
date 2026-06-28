@@ -3,17 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from graph_agent_gateway.gateway_chat_model import GatewayChatModel
-from graph_agent_gateway.registry.schema import (
-    ProviderEndpoint,
-    ProviderRoute,
-    RegistrySnapshot,
-    RoleEntry,
-    RoleRouteEntry,
-    RuntimeSettings,
-)
 from graph_agent_gateway.resolver import ModelResolver
+from graph_agent_gateway.storage_contracts import InMemoryConfigTruthStore
 
 import graph_agent
+
+_TEST_USER_ID = "engine-contract-test-user"
 
 EXPECTED_TOP_LEVEL_EXPORTS = [
     "run_skill",
@@ -37,40 +32,58 @@ EXPECTED_TOP_LEVEL_EXPORTS = [
     "GraphExecutionError",
     "ModelProviderError",
     "ResourceNotFoundError",
+    "compile_artifact",
+    "run_artifact",
+    "predict_artifact",
 ]
 
 
-def _make_snapshot() -> RegistrySnapshot:
-    return RegistrySnapshot(
-        provider_endpoints={
-            "px": ProviderEndpoint(
-                endpoint_id="px",
-                protocol="openai_compatible",
-                base_url="https://provider.example/v1",
-                api_key="secret",
-            ),
-        },
-        provider_routes={
-            "px:x-model": ProviderRoute(
-                route_id="px:x-model",
-                endpoint_id="px",
-                route_slug="x-model",
-                provider_model_id="x-model",
-                canonical_id="x-model",
-                status="verified",
-            ),
-        },
-        roles={
-            "test_role": RoleEntry(
-                fallback_chain=[
-                    RoleRouteEntry(
-                        route_id="px:x-model",
-                        runtime_settings=RuntimeSettings(temperature=0.4),
-                    )
-                ],
-            )
+def _make_config_store() -> InMemoryConfigTruthStore:
+    store = InMemoryConfigTruthStore()
+    store.put_config(
+        _TEST_USER_ID,
+        "credentials",
+        {
+            "schema_version": 4,
+            "provider_endpoints": {
+                "px": {
+                    "endpoint_id": "px",
+                    "protocol": "openai_compatible",
+                    "base_url": "https://provider.example/v1",
+                    "api_key": "secret",
+                }
+            },
+            "provider_routes": {
+                "px:x-model": {
+                    "route_id": "px:x-model",
+                    "endpoint_id": "px",
+                    "route_slug": "x-model",
+                    "provider_model_id": "x-model",
+                    "canonical_id": "x-model",
+                    "status": "verified",
+                }
+            },
+            "runtime_policy": {},
         },
     )
+    store.put_config(
+        _TEST_USER_ID,
+        "roles",
+        {
+            "schema_version": 2,
+            "roles": {
+                "test_role": {
+                    "fallback_chain": [
+                        {
+                            "route_id": "px:x-model",
+                            "runtime_settings": {"temperature": 0.4},
+                        }
+                    ],
+                }
+            },
+        },
+    )
+    return store
 
 
 def test_top_level_export_abi_has_no_predict_additions() -> None:
@@ -81,7 +94,7 @@ def test_top_level_export_abi_has_no_predict_additions() -> None:
 
 
 def test_model_resolver_non_predict_path_still_returns_gateway() -> None:
-    resolver = ModelResolver(registry_snapshot=_make_snapshot())
+    resolver = ModelResolver(config_store=_make_config_store(), user_id=_TEST_USER_ID)
 
     model = resolver.resolve("test_role", phase_name="phaseA")
 
@@ -96,7 +109,7 @@ def test_resolver_with_predict_context_resolves_to_predict_gateway() -> None:
         def resolve_generation(self, phase_name: str, role_name: str, messages: list[Any]) -> str:
             return "mocked content"
 
-    resolver = ModelResolver(registry_snapshot=_make_snapshot())
+    resolver = ModelResolver(config_store=_make_config_store(), user_id=_TEST_USER_ID)
     model = resolver.resolve("test_role", phase_name="phaseA", predict_context=DummyPredictContext())
 
     assert isinstance(model, PredictGatewayChatModel)

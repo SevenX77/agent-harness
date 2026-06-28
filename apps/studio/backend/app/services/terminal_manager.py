@@ -11,11 +11,17 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import WebSocket
-from ptyprocess import PtyProcess
 
 from app.core import config
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
 from app.models.terminal import TerminalSession
+
+try:
+    from ptyprocess import PtyProcess as _PtyProcess
+except (ImportError, ModuleNotFoundError):
+    _PtyProcess = None
+
+PtyProcess: Any = _PtyProcess
 
 _SKILL_ID_RE = re.compile(r"^[a-z0-9-]+$")
 _ALLOWED_COMMANDS = {
@@ -57,6 +63,16 @@ class TerminalManager:
 
         skill_dir = _resolve_terminal_cwd(skill_id)
         command = _validated_command(self.command)
+        if PtyProcess is None:
+            response = error_response(
+                error_code="TERMINAL_SPAWN_FAILED",
+                http_status=500,
+                message="Terminal PTY support is not available on this platform",
+                details={"skill_id": skill_id, "command": command},
+                retry_strategy="idempotent",
+            )
+            raise_error_response(response)
+
         term_id = uuid.uuid4().hex[:12]
         try:
             process = PtyProcess.spawn(command, cwd=str(skill_dir))

@@ -1,10 +1,12 @@
 """graph_agent - Document-driven LLM agent harness SDK.
 
-Public API (21 stable exports):
+Public API (24 stable exports):
 
 * Execution & Interception: ``run_skill``, ``predict_skill``,
   ``resume_skill``, ``evaluate_golden_baseline``, ``RunResult``, ``PathDiff``,
   ``PhaseRecord``
+* Productization artifact runtime: ``compile_artifact``, ``run_artifact``,
+  ``predict_artifact``
 * Static analysis: ``compile_skill``, ``CompileResult``, ``SkillManifest``,
   ``serialize_skill``
 * Graph assembly: ``assemble_graph``, ``CompiledSkill``, ``CompiledStateGraph``
@@ -27,6 +29,7 @@ alias form satisfies ``mypy --strict``'s ``no_implicit_reexport`` rule.
 
 from __future__ import annotations
 
+from graph_agent.core.artifacts import compile_artifact as compile_artifact
 from graph_agent.core.compiler import CompileResult as CompileResult
 from graph_agent.core.compiler import compile_skill as compile_skill
 from graph_agent.core.exceptions import GraphAgentError as GraphAgentError
@@ -45,8 +48,10 @@ from graph_agent.core.result import PathDiff as PathDiff
 from graph_agent.core.result import PhaseRecord as PhaseRecord
 from graph_agent.core.result import RunResult as RunResult
 from graph_agent.core.runner import evaluate_golden_baseline as evaluate_golden_baseline
+from graph_agent.core.runner import predict_artifact as predict_artifact
 from graph_agent.core.runner import predict_skill as predict_skill
 from graph_agent.core.runner import resume_skill as resume_skill
+from graph_agent.core.runner import run_artifact as run_artifact
 from graph_agent.core.runner import run_skill as run_skill
 from graph_agent.core.serialize import serialize_skill as serialize_skill
 from graph_agent.runtime.state import BlackboardState as BlackboardState
@@ -73,4 +78,7 @@ __all__ = [
     "GraphExecutionError",
     "ModelProviderError",
     "ResourceNotFoundError",
+    "compile_artifact",
+    "run_artifact",
+    "predict_artifact",
 ]

@@ -36,6 +36,7 @@ STANDARD_ERROR_MAP: dict[str, ErrorDefinition] = {
     ),
     "COMPILE_FAILED": ErrorDefinition(http_status=200, retry_strategy="not_retryable"),
     "RUN_SPAWN_FAILED": ErrorDefinition(http_status=500, retry_strategy="idempotent"),
+    "RUN_REQUIRES_PREDICT": ErrorDefinition(http_status=409, retry_strategy="not_retryable"),
     "TERMINAL_SPAWN_FAILED": ErrorDefinition(http_status=500, retry_strategy="idempotent"),
     "TERMINAL_LIMIT_REACHED": ErrorDefinition(http_status=503, retry_strategy="backoff"),
     "WEBSOCKET_DISCONNECTED": ErrorDefinition(http_status=499, retry_strategy="backoff"),
@@ -45,6 +46,15 @@ STANDARD_ERROR_MAP: dict[str, ErrorDefinition] = {
         http_status=404,
         retry_strategy="not_retryable",
     ),
+    "RESUME_VALIDITY_FAILED": ErrorDefinition(
+        http_status=422,
+        retry_strategy="not_retryable",
+    ),
+    "TEST_INPUT_NOT_FOUND": ErrorDefinition(http_status=404, retry_strategy="not_retryable"),
+    "TEST_INPUT_ALREADY_EXISTS": ErrorDefinition(http_status=409, retry_strategy="not_retryable"),
+    "TEST_INPUT_VALIDATION_FAILED": ErrorDefinition(http_status=422, retry_strategy="not_retryable"),
+    "SUBGRAPH_PATH_INVALID": ErrorDefinition(http_status=422, retry_strategy="not_retryable"),
+    "SUBGRAPH_PATH_NOT_FOUND": ErrorDefinition(http_status=404, retry_strategy="not_retryable"),
 }
 
 
@@ -119,6 +129,11 @@ def _json_response(response: ErrorResponse) -> JSONResponse:
 
 async def http_exception_handler(_request: Request, exc: HTTPException) -> JSONResponse:
     """Normalize HTTPException detail payloads into ErrorResponse."""
+    if isinstance(exc.detail, dict) and {"schema_version", "ok", "error_code", "error_payload"}.issubset(
+        exc.detail,
+    ):
+        return JSONResponse(status_code=exc.status_code, content=exc.detail)
+
     if isinstance(exc.detail, dict) and {"error_code", "http_status", "message"}.issubset(
         exc.detail,
     ):

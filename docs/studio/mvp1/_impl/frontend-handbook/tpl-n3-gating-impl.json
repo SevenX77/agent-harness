@@ -1,0 +1,173 @@
+{
+ "id": "n3_gating_impl",
+ "title": "动作条编译门控 · 实施详情",
+ "design_ref": "n3_gating_design",
+ "intro": "本页是「动作条编译门控」surface 前端的现状/差距/实施计划/测试,1:1 对应设计页 n3_gating_design(原子 #10–#14)。代码按「文件名 + 函数/对象名」引用。门控状态机本身(deriveBuildStage / deriveButtons)可用,缺口在:lint 驱动这一路因 lint hook 未接线恒走 idle 兜底、置灰按钮无锁态原因提示。",
+ "functions": [
+  {
+   "n": 10,
+   "cap": "build-stage-buttons",
+   "design_ref": "atom-10",
+   "current": "现状:符合。center-action-bar.tsx 的 SkillBuildStage(9 态枚举)+ deriveButtons(纯函数,据 stage 算三按钮 highlight/disabled):idle/compiling/compile-fail → Compile 高亮(compiling 时禁用)、Predict/Run 禁用;compile-pass/predicting/predict-fail → Predict 高亮、Compile 可点、Run 禁用;其余(predict-pass/running/run-fail)→ Run 高亮。highlight 用 variant=default 实心、否则 ghost。外壳与三按钮圆角为 rounded-md,符合 FRONTEND_UI_SPEC §2.4(≤rounded-md)。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_status": "n/a",
+   "be_dep": "n/a(纯前端状态机)。fe_status 符合指门控逻辑符合 03_compile;rounded-full 视觉债是另一轴的 UI-spec 偏离,见 current/gap。"
+  },
+  {
+   "n": 11,
+   "cap": "stage-gating",
+   "design_ref": "atom-11",
+   "current": "现状:符合。逐级解锁链通:handleCompile→compileSkillById 成功置 compile-pass(解锁 Predict);handlePredict 成功置 predict-pass(解锁 Run);handleRun 仅在 stage===predict-pass 时 startRun。deriveButtons 据 stage 置灰未到的步骤。compile-pass 既可由手动 Compile 拿到,也可由编辑期 lint 通过经 deriveBuildStage 兜底拿到(见 #12,lint hook 已接线)。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "be_dep": "已就绪。compile-pass 解锁靠 /compile 成功(已实现)。Run 另有后端强制门控兜底:create_run(POST /api/skills/{id}/runs)→ RunManager.start_run → require_passing_predict,未过 predict 抛 RUN_REQUIRES_PREDICT(409),已实现。前端只需预防性置灰 + 落实 warning 不阻塞/error 阻塞(COMPILE_LINT-3)。predict/run 完整 UX 属 N4。"
+  },
+  {
+   "n": 12,
+   "cap": "lint-drives-stage",
+   "design_ref": "atom-12",
+   "current": "现状:符合。Workspace.tsx 的 deriveBuildStage:优先取 compileStages[id],否则据 readLintStatus(id) 兜底(checking→compiling / failed→compile-fail / passed→compile-pass / 无→idle)。readLintStatus 读的 sessionStorage 状态由 useDebouncedLint 的 publishLintStatus 写,而该 hook 已接线到编辑器(LazyMonacoPanel.tsx:250 调 useDebouncedLint(skillId, draft)):编辑 phase 文件 → 防抖 lint → 通过即 publishLintStatus('passed') → deriveBuildStage 自动落 compile-pass、点亮 Predict,无需手动 Compile。",
+   "gap": "符合设计,无需改(lint hook 接线已于 n3_lint 落地)。",
+   "fe_status": "符合",
+   "be_status": "已实现",
+   "be_dep": "deriveBuildStage 逻辑前端已就绪;/lint endpoint 已就绪但有 changed-markdown body drift(lint_skill 忽略请求体)。缺口=前端 lint hook 接线(n3_lint_design #1)+ 后端 /lint 接受 changed markdown body。",
+   "fe_status_prev": "偏差",
+   "fe_resync": "已修复并测试通过(batch1, 2026-06-20)"
+  },
+  {
+   "n": 13,
+   "cap": "lock-reason-hint",
+   "design_ref": "atom-13",
+   "current": "现状:符合。center-action-bar.tsx 的 LockableButton 给置灰的 Predict/Run 包一个 focusable span(承载英文锁定原因 aria-label,绕过 disabled 吞指针事件)+ shadcn Tooltip:Predict 未到 compile-pass 悬停显示『Compile must pass first』;Run 未到 predict-pass 悬停显示『Predict must pass first』。外壳与按钮圆角 rounded-md,符合 §2.4。",
+   "gap": "符合设计,无需改。",
+   "fe_status": "符合",
+   "be_status": "n/a",
+   "be_dep": "n/a(纯前端文案 + 圆角规范收敛)。",
+   "fe_status_prev": "未实施",
+   "fe_resync": "核验:代码现已符合,手册原标注滞后(2026-06-20)"
+  },
+  {
+   "n": 14,
+   "cap": "predict-pass-unlock",
+   "design_ref": "atom-14",
+   "current": "现状:符合(范围注)。Workspace.tsx 的 handlePredict(经 api/client.ts 的 postPredictRun)在 predict 成功后置 build stage predict-pass,deriveButtons 据此点亮 Run;A9 担心的『predict-pass 永不置位』在本分支不成立。订正:predict 端点是 POST /api/skills/{id}/runs/predict(routers/runs.py 的 predict_run),且 PredictorService.dispatch_predict_job 真编译 artifact 并调 EngineAdapter.predict_artifact——**非桩**,会产生真实成功信号。范围:此处只验证『predict 成功→predict-pass→解锁 Run』的门控转移接通,完整 predict UX 归 N4。",
+   "gap": "门控转移符合,无需改;predict 完整 UX 与真跑复核归 N4。",
+   "fe_status": "符合",
+   "be_status": "n/a",
+   "be_dep": "n/a。predict 端点 POST /api/skills/{id}/runs/predict 与 engine predict 路径已存在(非桩);predict/run 端点契约归 N4 复核,本节点只用其成功信号闭合 Run 门控。"
+  }
+ ],
+ "plan": [
+  {
+   "step": 1,
+   "what": "#13 lock-reason-hint:给 center-action-bar 被置灰的 Predict/Run 按钮按 stage 补一句锁态原因提示(shadcn Tooltip),门控链逻辑不动。",
+   "depends_on": "前端:只在按钮上加 tooltip 文案。后端不动。",
+   "why": "纯前端、零依赖、改动最小、直接补齐门控语义可读性,先做。",
+   "block": "前端独立"
+  },
+  {
+   "step": 2,
+   "what": "#12 lint-drives-stage:依赖 n3_lint_design #1 把 useDebouncedLint 接线;接线后 deriveBuildStage 的 lint 兜底自动生效,本原子无需另改代码,接线后验证编辑期 lint 通过→compile-pass。",
+   "depends_on": "前端:依赖 lint hook 接线(n3_lint_design #1)。deriveBuildStage 逻辑已就绪。后端 /lint endpoint 已就绪,但真实编辑缓冲 lint 仍依赖后端接受 changed markdown body(现 drift)。",
+   "why": "本原子的偏差根因是 lint hook 未接线;接线在 lint surface 做,这里只验证联动,排在接线之后。",
+   "block": "前端独立"
+  }
+ ],
+ "tests": [
+  {
+   "covers": "#10 build-stage-buttons + #11 stage-gating + #14 predict-pass-unlock",
+   "atoms": [
+    10,
+    11,
+    14
+   ],
+   "shots": [
+    "compile 未过时 Predict/Run 置灰、Compile 高亮",
+    "compile-pass 后 Predict 点亮;predict-pass 后 Run 点亮"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "对 deriveButtons 逐 stage 断言三按钮 highlight/disabled(idle→只 Compile 高亮;compile-pass→Predict 高亮;predict-pass→Run 高亮)。",
+    "断言 handleCompile 成功置 compile-pass、handlePredict 成功置 predict-pass、handleRun 仅 predict-pass 时 startRun。",
+    "断言逐级解锁:未 compile-pass 时 Predict disabled;未 predict-pass 时 Run disabled。"
+   ],
+   "layer2": [
+    "真跑:对一个能编译通过的真 skill,点 Compile→看 Predict 点亮→点 Predict→看 Run 点亮,确认逐级解锁链通(predict 端点 /runs/predict 与 engine path 已存在,N3 只复核成功信号→解锁 Run;完整 predict 真跑归 N4)。"
+   ],
+   "screenshots": [
+    {
+     "file": "n3-gating-01-gated.png",
+     "caption": "真机:idle 态——Compile 高亮(实心 variant=default),Predict / Run 置灰禁用(compile 未过,门控未解锁)。"
+    },
+    {
+     "file": "n3-gating-02-predict-lit.png",
+     "caption": "真机:点 Compile 成功 → compile-pass,Predict 点亮(实心)、Run 仍置灰(predict 未过);成功 toast 显示编译指纹。"
+    },
+    {
+     "file": "n3-gating-03-run-lit.png",
+     "caption": "真机:Predict 成功(POST /skills/:id/runs/predict 返回 status=success)→ predict-pass,Run 点亮解锁。逐级解锁链 compile-pass→predict-pass→run 接通。"
+    }
+   ]
+  },
+  {
+   "covers": "#12 lint-drives-stage",
+   "atoms": [
+    12
+   ],
+   "shots": [
+    "编辑期 lint 通过后,无需手动 Compile,Predict 自动点亮"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "断言 deriveBuildStage 在 readLintStatus 返回 passed 时给出 compile-pass(逻辑层已对)。",
+    "RED:当前 lint hook 未接线,readLintStatus 恒 idle → 断言『编辑触发后 stage 由 lint 驱动到 compile-pass』失败。",
+    "GREEN(lint 接线后):mock useDebouncedLint 写 passed → 断言 deriveBuildStage 给 compile-pass、Predict 点亮。"
+   ],
+   "layer2": [
+    "现状路径取证:编辑一个能通过的 skill,确认当前不点 Compile 则 Predict 不会自动点亮(lint 未驱动)。",
+    "目标路径(lint 接线后真跑):编辑通过后等防抖,看 Predict 自动点亮,无需手动 Compile。"
+   ],
+   "fe_status_prev": "偏差",
+   "fe_resync": "覆盖的功能点已全部符合(2026-06-20)",
+   "screenshots": [
+    {
+     "file": "n3-gating-04-lint-drives.png",
+     "caption": "真机:在编辑期 lint=通过 的状态下,deriveBuildStage 兜底自动把 build stage 落到 compile-pass、点亮 Predict(无需手动 Compile,Run 仍置灰)。该 lint 状态由已接线的 useDebouncedLint(LazyMonacoPanel.tsx:250 调 useDebouncedLint(skillId,draft))在 lint 通过时 publishLintStatus('passed') 写入 sessionStorage,deriveBuildStage 即读它。"
+    }
+   ]
+  },
+  {
+   "covers": "#13 lock-reason-hint",
+   "atoms": [
+    13
+   ],
+   "shots": [
+    "悬停置灰的 Predict 显示英文文案『Compile must pass first』;悬停置灰 Run 显示『Predict must pass first』"
+   ],
+   "fe_status": "符合",
+   "layer1": [
+    "RED:当前置灰按钮无 tooltip/副标 → 断言『置灰 Predict 有原因提示』失败。",
+    "GREEN:加提示后,断言 stage=idle/compile-fail 时 Predict tooltip 英文文案为『Compile must pass first』、未 predict-pass 时 Run 文案为『Predict must pass first』。",
+    "断言已解锁的按钮不显示锁态提示。"
+   ],
+   "layer2": [
+    "现状路径取证:悬停置灰的 Predict/Run,确认当前无任何原因提示。",
+    "目标路径(改后真跑):悬停置灰按钮,看到对应锁态原因文案;解锁后提示消失。"
+   ],
+   "fe_status_prev": "未实施",
+   "fe_resync": "覆盖的功能点已全部符合(2026-06-20)",
+   "screenshots": [
+    {
+     "file": "n3-gating-05-lock-predict.png",
+     "caption": "真机:悬停被置灰的 Predict → Tooltip 就近显示英文锁定原因『Compile must pass first』(LockableButton 包一个 focusable span 承载 aria-label,绕过 disabled 吞指针事件)。"
+    },
+    {
+     "file": "n3-gating-06-lock-run.png",
+     "caption": "真机:compile-pass 后 Run 仍置灰,悬停 → Tooltip 显示『Predict must pass first』。"
+    }
+   ]
+  }
+ ]
+}

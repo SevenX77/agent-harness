@@ -7,7 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-GitHistoryKind = Literal["auto_run", "manual", "other"]
+GitHistoryKind = Literal["auto_run", "manual", "other", "release"]
+GitHistorySource = Literal["git", "manifest"]
 
 
 class GitHistoryItem(BaseModel):
@@ -18,6 +19,12 @@ class GitHistoryItem(BaseModel):
     author: str
     timestamp: datetime
     kind: GitHistoryKind
+    source: GitHistorySource = "git"
+    revertable: bool = True
+    release_version: str | None = None
+    artifact_id: str | None = None
+    content_hash: str | None = None
+    manifest_ref: str | None = None
 
 
 class RevertSkillReq(BaseModel):

@@ -294,6 +294,8 @@ class RunStartedEvent(_EventBase):
     run_id: str
     thread_id: str
     is_resume: bool = False
+    checkpoint_id: str | None = None
+    checkpoint_ns: str | None = None
     # Gemini Q5: full initial_context; goes through to_jsonable_dict once
     # Commit B lands that helper. Until then callers pass already-JSONable dicts.
     initial_context: dict[str, Any] = Field(default_factory=dict)
@@ -416,6 +418,10 @@ class InterruptedEvent(_EventBase):
     event_type: Literal["interrupted"] = "interrupted"
     phase_name: str
     thread_id: str
+    checkpoint_id: str | None = None
+    checkpoint_ns: str | None = None
+    namespace: str | None = None
+    ns: str | None = None
     # Mirrors the clarification payload shape returned by get_thread_status
     # so the front-end can reuse the same rendering code path.
     question: str | None = None
@@ -436,6 +442,10 @@ class ResumedEvent(_EventBase):
     # LLM prompt itself would already enforce downstream.
     human_input: str
     resumed_from_phase: str | None = None
+    checkpoint_id: str | None = None
+    checkpoint_ns: str | None = None
+    namespace: str | None = None
+    ns: str | None = None
 
 
 class HeartbeatEvent(_EventBase):

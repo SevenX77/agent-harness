@@ -1,4 +1,4 @@
-"""Predict-mode GatewayChatModel subclass skeleton."""
+"""Predict-mode chat model interception owned by the engine package."""
 
 from __future__ import annotations
 
@@ -6,19 +6,20 @@ import json
 import time
 from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
-from typing import Any, cast
+from inspect import Parameter, Signature
+from typing import Any, Literal, cast
 
-from graph_agent_gateway.gateway_chat_model import GatewayChatModel, ToolSpec, _normalise_tool
-from graph_agent_gateway.registry.schema import ResolvedRole
 from langchain_core.callbacks.manager import (
     AsyncCallbackManagerForLLMRun,
     CallbackManagerForLLMRun,
 )
 from langchain_core.language_models.base import LanguageModelInput
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from langchain_core.messages.ai import UsageMetadata
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_core.runnables import Runnable
+from pydantic import ConfigDict, Field
 
 from graph_agent.callbacks.base import Callback
 from graph_agent.core._predict_internal.strategy import BaseMockStrategy, MockedSource
@@ -26,37 +27,29 @@ from graph_agent.core._predict_internal.stub import generate_heuristic_stub
 from graph_agent.core._predict_internal.tracing import record_mock_source
 
 
-class PredictGatewayChatModel(GatewayChatModel):
-    """Gateway subclass used only for Predict-bound model resolver instances."""
-
+class _PredictGatewayChatModelMixin:
     mock_strategy: BaseMockStrategy
-
-    def __init__(
-        self,
-        role_name: str,
-        resolved_role: ResolvedRole,
-        *,
-        mock_strategy: BaseMockStrategy,
-        max_tokens: int = 4096,
-        temperature: float = 0.7,
-        callbacks: Sequence[Callback] = (),
-        phase_name: str | None = None,
-        probe_before_call: bool = True,
-        thinking_enabled: bool | None = None,
-        **kwargs: Any,
-    ) -> None:
-        kwargs["mock_strategy"] = mock_strategy
-        super().__init__(
-            role_name,
-            resolved_role,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            callbacks=callbacks,
-            phase_name=phase_name,
-            probe_before_call=probe_before_call,
-            thinking_enabled=thinking_enabled,
-            **kwargs,
-        )
+    name: str | None
+    role_name: str
+    phase_name: str | None
+    resolved_role: Any
+    max_tokens: int
+    temperature: float
+    event_callbacks: Sequence[Callback]
+    bound_tools: tuple[Any, ...]
+    tool_choice: str | None
+    tool_kwargs: dict[str, object]
+    probe_before_call: bool
+    thinking_enabled: bool | None
+    cache: Any
+    verbose: bool
+    tags: list[str] | None
+    metadata: dict[str, Any] | None
+    custom_get_token_ids: Any
+    rate_limiter: Any
+    disable_streaming: bool | Literal["tool_calling"]
+    output_version: str | None
+    profile: Any
 
     def _generate(
         self,
@@ -104,41 +97,6 @@ class PredictGatewayChatModel(GatewayChatModel):
             generation_info=metadata,
         )
 
-    def bind_tools(
-        self,
-        tools: Sequence[ToolSpec],
-        *,
-        tool_choice: str | None = None,
-        **kwargs: Any,
-    ) -> Runnable[LanguageModelInput, AIMessage]:
-        """Keep Predict interception active after LangChain binds phase tools."""
-
-        bound = PredictGatewayChatModel(
-            self.role_name,
-            self.resolved_role,
-            mock_strategy=self.mock_strategy,
-            max_tokens=self.max_tokens,
-            temperature=self.temperature,
-            callbacks=self.event_callbacks,
-            phase_name=self.phase_name,
-            probe_before_call=self.probe_before_call,
-            thinking_enabled=self.thinking_enabled,
-            bound_tools=tuple(_normalise_tool(tool) for tool in tools),
-            tool_choice=tool_choice,
-            tool_kwargs={key: cast(object, value) for key, value in kwargs.items()},
-            name=self.name,
-            cache=self.cache,
-            verbose=self.verbose,
-            tags=self.tags,
-            metadata=self.metadata,
-            custom_get_token_ids=self.custom_get_token_ids,
-            rate_limiter=self.rate_limiter,
-            disable_streaming=self.disable_streaming,
-            output_version=self.output_version,
-            profile=self.profile,
-        )
-        return cast(Runnable[LanguageModelInput, AIMessage], bound)
-
     def _select_mock_payload(self) -> tuple[dict[str, Any], MockedSource]:
         phase_name = self._predict_phase_name
         if self.mock_strategy.has_golden_case(phase_name):
@@ -150,9 +108,7 @@ class PredictGatewayChatModel(GatewayChatModel):
                 source = "manual"
             return self.mock_strategy.get_manual_override(phase_name), source
 
-        return generate_heuristic_stub(self.mock_strategy.get_phase_schema(phase_name)), (
-            "heuristic_stub"
-        )
+        return generate_heuristic_stub(self.mock_strategy.get_phase_schema(phase_name)), ("heuristic_stub")
 
     def _build_predict_chat_result(
         self,
@@ -163,6 +119,7 @@ class PredictGatewayChatModel(GatewayChatModel):
         metadata = self._mock_metadata(source)
         message = AIMessage(
             content=content,
+            tool_calls=_predict_tool_calls(self.bound_tools, payload, metadata),
             id=str(metadata["id"]),
             additional_kwargs={"mock_payload": payload, "mocked_source": source},
             response_metadata=metadata,
@@ -197,6 +154,122 @@ class PredictGatewayChatModel(GatewayChatModel):
         }
 
 
+class PredictGatewayChatModel(_PredictGatewayChatModelMixin, BaseChatModel):
+    """LangChain-compatible Predict mock model without Gateway concrete dependencies."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    role_name: str
+    resolved_role: Any
+    mock_strategy: BaseMockStrategy
+    max_tokens: int = 4096
+    temperature: float = 0.7
+    event_callbacks: tuple[Any, ...] = Field(default_factory=tuple)
+    phase_name: str | None = None
+    probe_before_call: bool = True
+    thinking_enabled: bool | None = None
+    bound_tools: tuple[Any, ...] = Field(default_factory=tuple)
+    tool_choice: str | None = None
+    tool_kwargs: dict[str, object] = Field(default_factory=dict)
+    profile: Any = None
+
+    def __init__(
+        self,
+        role_name: str,
+        resolved_role: Any,
+        *,
+        mock_strategy: BaseMockStrategy,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        callbacks: Sequence[Callback] = (),
+        phase_name: str | None = None,
+        probe_before_call: bool = True,
+        thinking_enabled: bool | None = None,
+        bound_tools: Sequence[Any] = (),
+        tool_choice: str | None = None,
+        tool_kwargs: dict[str, object] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(  # type: ignore[call-arg]
+            role_name=role_name,
+            resolved_role=resolved_role,
+            mock_strategy=mock_strategy,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            event_callbacks=tuple(callbacks),
+            phase_name=phase_name,
+            probe_before_call=probe_before_call,
+            thinking_enabled=thinking_enabled,
+            bound_tools=tuple(bound_tools),
+            tool_choice=tool_choice,
+            tool_kwargs=dict(tool_kwargs or {}),
+            **kwargs,
+        )
+
+    @property
+    def _llm_type(self) -> str:
+        return "predict_mock"
+
+    @property
+    def _identifying_params(self) -> dict[str, object]:
+        return {"role_name": self.role_name, "phase_name": self.phase_name or ""}
+
+    def bind_tools(
+        self,
+        tools: Sequence[Any],
+        *,
+        tool_choice: str | None = None,
+        **kwargs: Any,
+    ) -> Runnable[LanguageModelInput, AIMessage]:
+        """Keep Predict interception active after LangChain binds phase tools."""
+        bound = type(self)(
+            self.role_name,
+            self.resolved_role,
+            mock_strategy=self.mock_strategy,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            callbacks=self.event_callbacks,
+            phase_name=self.phase_name,
+            probe_before_call=self.probe_before_call,
+            thinking_enabled=self.thinking_enabled,
+            bound_tools=tuple(_normalise_predict_tool(tool) for tool in tools),
+            tool_choice=tool_choice,
+            tool_kwargs={key: cast(object, value) for key, value in kwargs.items()},
+            name=self.name,
+            cache=self.cache,
+            verbose=self.verbose,
+            tags=self.tags,
+            metadata=self.metadata,
+            custom_get_token_ids=self.custom_get_token_ids,
+            rate_limiter=self.rate_limiter,
+            disable_streaming=self.disable_streaming,
+            output_version=self.output_version,
+            profile=self.profile,
+        )
+        return cast(Runnable[LanguageModelInput, AIMessage], bound)
+
+
+PredictGatewayChatModel.__signature__ = Signature(
+    parameters=[
+        Parameter("role_name", Parameter.POSITIONAL_OR_KEYWORD, annotation="str"),
+        Parameter("resolved_role", Parameter.POSITIONAL_OR_KEYWORD, annotation="Any"),
+        Parameter(
+            "mock_strategy",
+            Parameter.KEYWORD_ONLY,
+            annotation="BaseMockStrategy",
+        ),
+        Parameter("max_tokens", Parameter.KEYWORD_ONLY, default=4096, annotation="int"),
+        Parameter("temperature", Parameter.KEYWORD_ONLY, default=0.7, annotation="float"),
+        Parameter("callbacks", Parameter.KEYWORD_ONLY, default=(), annotation="Sequence[Callback]"),
+        Parameter("phase_name", Parameter.KEYWORD_ONLY, default=None, annotation="str | None"),
+        Parameter("probe_before_call", Parameter.KEYWORD_ONLY, default=True, annotation="bool"),
+        Parameter("thinking_enabled", Parameter.KEYWORD_ONLY, default=None, annotation="bool | None"),
+        Parameter("kwargs", Parameter.VAR_KEYWORD, annotation="Any"),
+    ],
+    return_annotation="None",
+)
+
+
 def _payload_to_content(payload: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -216,6 +289,57 @@ def _token_usage() -> dict[str, int]:
 
 def _message_usage_metadata() -> UsageMetadata:
     return {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+
+
+def _normalise_predict_tool(tool: Any) -> Any:
+    if isinstance(tool, dict):
+        return dict(tool)
+    name = getattr(tool, "name", None)
+    description = getattr(tool, "description", None)
+    if name is not None:
+        payload: dict[str, object] = {"name": str(name)}
+        if description is not None:
+            payload["description"] = str(description)
+        return payload
+    return tool
+
+
+def _predict_tool_calls(
+    bound_tools: Sequence[Any],
+    payload: dict[str, Any],
+    metadata: dict[str, object],
+) -> list[dict[str, Any]]:
+    if not any(_predict_tool_name(tool) == "finish_task" for tool in bound_tools):
+        return []
+    return [
+        {
+            "name": "finish_task",
+            "args": {
+                "reasoning": "Predict mock completed the phase.",
+                "business_data_md": _payload_to_business_data_md(payload),
+            },
+            "id": f"{metadata['id']}_finish_task",
+        }
+    ]
+
+
+def _predict_tool_name(tool: Any) -> str | None:
+    if isinstance(tool, dict):
+        name = tool.get("name")
+        return str(name) if name is not None else None
+    name = getattr(tool, "name", None)
+    return str(name) if name is not None else None
+
+
+def _payload_to_business_data_md(payload: dict[str, Any]) -> str:
+    lines = ["## item-1"]
+    for key, value in payload.items():
+        if isinstance(value, str):
+            rendered = value
+        else:
+            rendered = json.dumps(value, ensure_ascii=False, sort_keys=True)
+        lines.append(f"- {key}: {rendered}")
+    return "\n".join(lines) + "\n"
 
 
 def _safe_identifier(value: str) -> str:

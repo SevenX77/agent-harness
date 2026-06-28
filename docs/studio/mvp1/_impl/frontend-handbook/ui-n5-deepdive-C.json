@@ -1,0 +1,65 @@
+{
+  "event_envelope": {
+    "summary": "EventEnvelope（packages/graph-agent/src/graph_agent/core/event_contracts.py:46 定义的运行事件信封）是 trace 时间线、节点灯、边黑板三者的唯一共同事实源：前端 useRunStream 拉到的就是 EventEnvelope[]，Workspace 同一份 runStream.events 同时喂给节点灯派生(deriveNodeStatuses)、边黑板派生(edgeContextFromEvents/traceEvents)、trace timeline(TracePanel)。信封本身是传输壳，真正的领域语义在 payload 里（一个 CallbackEvent，event_type 用 Literal 标签辨别）。",
+    "schema": {
+      "headers": ["事件/字段", "含义"],
+      "rows": [
+        ["EventEnvelope.schema_version", "信封版本常量 'studio.event.v1'（event_contracts.py:48），前端用它判断是否是封装过的信封"],
+        ["EventEnvelope.stream_id / run_id", "事件所属流和运行的 id（event_contracts.py:49-51）"],
+        ["EventEnvelope.seq", "流内单调递增序号（event_contracts.py:50），前端用它去重 + 检测 gap"],
+        ["EventEnvelope.event_type", "传输层事件类型字符串（event_contracts.py:52），如 'run_ended'/'stream.error'"],
+        ["EventEnvelope.payload", "真正的领域事件 dict（event_contracts.py:53），即 callbacks/events.py 里的 CallbackEvent"],
+        ["EventEnvelope.cursor", "断点游标 'stream_id:seq'（event_contracts.py:54/104），前端重连时回传"],
+        ["EventEnvelope.error_code / error_payload", "传输错误码与脱敏后的错误体（event_contracts.py:56-57）"],
+        ["payload.event_type=phase_start", "PhaseStartEvent，节点开始执行（callbacks/events.py:55-56）→ 节点灯 running"],
+        ["payload.event_type=phase_end", "PhaseEndEvent，节点正常结束（callbacks/events.py:66-67）→ 节点灯 success"],
+        ["payload.event_type=validation_fail", "ValidationFailEvent，校验失败（callbacks/events.py:95-96）→ 节点灯 error"],
+        ["payload.event_type=retry_exhausted", "RetryExhaustedEvent，重试耗尽强制降级（callbacks/events.py:321-324）→ 节点灯 error"],
+        ["payload.event_type=input_dispatch", "InputDispatchEvent，一次边转移派发的扁平字典（callbacks/events.py:265-272），携带 from_phase/to_phase/blackboard_snapshot/changed_keys → 边黑板"],
+        ["payload.event_type=run_ended", "RunEndedEvent，运行终止（callbacks/events.py:302-305），前端据此停止重连"]
+      ]
+    },
+    "evidence": [
+      ["EventEnvelope 类（信封 schema，frozen pydantic 模型）", "packages/graph-agent/src/graph_agent/core/event_contracts.py:46-57"],
+      ["make_event_envelope（构造信封、自动补 cursor='stream_id:seq' 和时间戳的工厂函数）", "packages/graph-agent/src/graph_agent/core/event_contracts.py:90-118"],
+      ["callbacks/events.py 用 Literal[event_type] 标签区分领域事件（_EventBase 派生的 30+ 事件类）", "packages/graph-agent/src/graph_agent/callbacks/events.py:42-376"],
+      ["前端从同一份 runStream.events 派生节点灯", "apps/studio/frontend/src/components/studio/Workspace.tsx:120-121"],
+      ["前端把同一份 runStream.events 作为 traceEvents 传给边黑板", "apps/studio/frontend/src/components/studio/Workspace.tsx:550"],
+      ["前端把同一份 runStream.events 传给 trace 时间线 TracePanel", "apps/studio/frontend/src/components/studio/Workspace.tsx:749"],
+      ["node-status.ts 同时认 CallbackEvent 与 EventEnvelope（callbackPayload 解包 payload）", "apps/studio/frontend/src/components/studio/node-status.ts:29-35"]
+    ]
+  },
+  "node_status_derivation": {
+    "summary": "节点灯由 deriveNodeStatuses（node-status.ts:45 把有序事件流 reduce 成每节点状态的纯函数）派生：按到达顺序遍历事件、对每个 phase 做 last-event-wins。它只产出三态——running（phase_start）、success（phase_end）、error（validation_fail/retry_exhausted/含 error|fail 的类型/status=failed|error）。注意 SkillNodeStatus 类型本身定义了 6 态（idle/running/success/error/paused/breakpoint，nodes/types.ts:4），但派生函数永远只写 3 态，paused/breakpoint/idle 不来自事件派生，dirty/stale 根本不在该枚举里。",
+    "evidence": [
+      ["deriveNodeStatuses（按 phase 做 last-event-wins 的纯派生函数）只写 running/success/error 三态", "apps/studio/frontend/src/components/studio/node-status.ts:45-62"],
+      ["isFailureEvent（判定单事件是否标红的函数）认 validation_fail/retry_exhausted/含 error或fail/status=failed或error", "apps/studio/frontend/src/components/studio/node-status.ts:20-25"],
+      ["FAILURE_EVENT_TYPES（显式失败事件集合）= {validation_fail, retry_exhausted}", "apps/studio/frontend/src/components/studio/node-status.ts:10"],
+      ["SkillNodeStatus 类型定义 6 态，但派生只覆盖其中 3 态，无 dirty/stale", "apps/studio/frontend/src/components/nodes/types.ts:4"],
+      ["Workspace 用 useMemo 包 deriveNodeStatuses，输入仅 runStream.events", "apps/studio/frontend/src/components/studio/Workspace.tsx:119-121"]
+    ]
+  },
+  "dirty_state_gap": {
+    "summary": "没有节点级 dirty/stale 态，因为节点灯的唯一输入是【运行事件流】——deriveNodeStatuses 只消费已发生的运行事件，事件流里根本没有'上游 schema/拓扑被改'这类事件类型（events.py 全是运行期生命周期事件，无 schema_changed/topology_changed/checkpoint_invalidated）。改上游 schema 或拓扑是【编辑期】动作，前端没有任何机制把它和【已有运行的下游 checkpoint】关联做失效标记：节点状态完全由上一次运行的事件决定，编辑后旧灯色原样保留直到重跑覆盖。前端代码里出现的 dirty 全是【草稿表单未保存】语义（EditorDraft.dirty、DirtyIndicator、PropertiesPanel 的 formsEqual 比较），stale 全是【设置页里 LLM 路由/模型引用失效】语义（isStaleRouteReferenceError），都与'下游 checkpoint 失效'无关。checkpoint 在前端只用于 TracePanel 的'从最后 checkpoint 续跑'按钮，没有失效检测。",
+    "evidence": [
+      ["deriveNodeStatuses 输入只有事件流，无编辑期信号", "apps/studio/frontend/src/components/studio/node-status.ts:45-62"],
+      ["events.py 事件类型全为运行期生命周期，无 schema/topology/checkpoint 失效事件", "packages/graph-agent/src/graph_agent/callbacks/events.py:55-376"],
+      ["EditorDraft.dirty 是草稿未保存语义，非节点失效", "apps/studio/frontend/src/types/studio.ts:17-21"],
+      ["DirtyIndicator 只渲染草稿未保存点", "apps/studio/frontend/src/components/draft/DirtyIndicator.tsx:1-6"],
+      ["PropertiesPanel 的 dirty=表单与草稿不等（formsEqual 比较），属编辑态非节点态", "apps/studio/frontend/src/components/studio/panels/PropertiesPanel.tsx:162-163"],
+      ["stale 全部出现在 SettingsPage 路由/模型引用失效语义（isStaleRouteReferenceError）", "apps/studio/frontend/src/components/studio/settings/SettingsPage.tsx:44"],
+      ["checkpoint 在前端仅用于'从最后 checkpoint 续跑'按钮，无失效检测", "apps/studio/frontend/src/components/TracePanel.tsx:69-70"]
+    ]
+  },
+  "blackboard_derivation": {
+    "summary": "边 dot 点开显示的黑板数据来自 edgeContextFromEvents（edge-context.ts:56 的纯选择器函数）：它在同一份 traceEvents（即 runStream.events）里扫描【最后一条】from_phase→to_phase 匹配的 input_dispatch/edge_transition 事件，取其 blackboard_snapshot（引擎派发进下游 phase 的扁平字典，events.py:270）映射成 Properties/timeline 面板的 inputs。它只读，因为：(1) 数据源是历史运行事件——派发已发生、不可回改；(2) 后端 InputDispatchEvent 只携带'派发进 to_phase 的快照'，不含可写回的下游 outputs（edge-context.ts:91-93 注释明说 phase_outputs 留空）；(3) 点 dot 的回调只 setSelectedEdge + 切到 timeline 面板查看（ContextEdge.tsx:152-171），无任何提交/编辑黑板的入口。要可写需补：一个'编辑边上下文→回灌到下次运行输入'的写回契约（后端要新增接收编辑后黑板的入口 + 事件，前端要把 dot 从只读查看器变成可编辑表单），当前两者都不存在。",
+    "evidence": [
+      ["edgeContextFromEvents 扫事件取最后一条匹配 input_dispatch/edge_transition 的 blackboard_snapshot", "apps/studio/frontend/src/lib/edge-context.ts:56-111"],
+      ["snapshot 映射进 inputs，phase_outputs 显式留空（派发事件不带下游输出）", "apps/studio/frontend/src/lib/edge-context.ts:91-96"],
+      ["InputDispatchEvent 只含 blackboard_snapshot/dispatched_keys/changed_keys，无可写回字段", "packages/graph-agent/src/graph_agent/callbacks/events.py:265-272"],
+      ["点边 dot 回调只 setSelectedEdge + onPanelChange('timeline')，无写入口", "apps/studio/frontend/src/components/edges/ContextEdge.tsx:150-172"],
+      ["无匹配事件时返回 null，面板显示空态而非可编辑回填", "apps/studio/frontend/src/lib/edge-context.ts:78-80"],
+      ["前端事件订阅来自 useRunStream，纯只读 EventEnvelope 流（无回写通道）", "apps/studio/frontend/src/hooks/useRunStream.ts:13-125"]
+    ]
+  }
+}

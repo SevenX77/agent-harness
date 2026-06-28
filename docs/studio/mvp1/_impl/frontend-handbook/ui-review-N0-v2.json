@@ -1,0 +1,435 @@
+{
+  "code": "N0",
+  "title": "Settings · 设置与配置",
+  "status": "partial",
+  "intent_oneliner": "Settings 是「让其余节点能跑」的运行底座：在这里配好凭证、把抽象角色映射到真实模型并测通、配 copilot、填身份与产物路径；UI 的灵魂是让 endpoint 与每条 route 的真实可用状态（6 态）一目了然，且测试结果以后端为唯一真相、切 tab / 刷新都不丢。",
+  "user_goal": "用户来 Settings 是为了「准备好让 authoring / compile / run / eval 这些后续节点能真正跑起来」所需的一切运行前置。具体四件事：填好各 provider 的凭证并验证 endpoint 能连通；把 graph_agent / copilot 这类抽象角色映射到一条带兜底（fallback）的真实模型链并逐个测通；给 copilot 助手单独配一个 model group；以及填好 User ID / Gitea 主机 / 默认 skills 目录这些身份与产物落点。用户做完这些，离开 Settings 时心里要有底：我测过的就是绿的、它会一直是绿的。",
+  "impl_overview": [
+    {
+      "heading": "存储与 native-fs（总览）",
+      "prose": "Settings 的全部配置（凭证 / 角色 / model group / bundle / copilot / general / 角色测试结果）写盘【完全不经过 Rust native-fs】。Rust native-fs（apps/studio/tauri/src/native_fs.rs，Tauri 侧唯一的本地文件写命令）只服务 skill workspace 文件（GRAPH.md / LOGIC.md / .workspace 等），这才是设计原则 D12『Rust 是 workspace 文件唯一写者』约束的对象。Settings 配置走的是另一条独立写路径：python 后端每个 service（llm_credentials / llm_roles / llm_role_test_results / llm_import_drafts）各自用 tempfile + os.fsync + os.replace 做原子写，落在 <APP_SETTINGS_DIR>/llm/ 下的 json / yaml / sqlite。前端 Settings 客户端（apps/studio/frontend/src/api/llm.ts）全程只发 HTTP，零 Tauri invoke。因此 D12 的『唯一写者』对 workspace 成立、对 Settings 不成立——两者写的是不同目录（workspace_root vs APP_SETTINGS_DIR/llm），不构成 D12 禁止的『对同一文件双写』。字段级文件 / 路径细节见参考页『存储与数据模型』。"
+    },
+    {
+      "heading": "凭证模型（总览）",
+      "prose": "API key 是【明文存盘】到 llm_credentials.json 的 api_key 字段——内存里是 SecretStr（pydantic 的密文包装类型），落盘时被还原成明文写进 JSON，无加密 / 无 hash，仅靠文件 0600、目录 0700 权限兜底（apps/studio/backend/app/services/llm_credentials.py:446-479）。schema 里有 credential_ref（外部凭证引用字段）这层可选间接，但当前实现几乎总是 null，真正用的是合成引用 'endpoint:<id>'。运行时还有一层 secret-handle://（不可反解的 opaque 凭证句柄）契约存在于 gateway 里，但它在真实 run 路径上【根本没被消费】——GatewayAdapter.resolve_credential（apps/studio/backend/app/core/adapters/gateway.py:454，产 handle 的唯一入口）全仓除测试外零调用方；运行时真正的兑换走的是 _resolve_api_key（packages/.../client_manager.py:386）拿 credential_ref 回表查 SecretStr 再取明文，绕过了 handle。凭证 7 步生命周期与字段细节见 N0.2 子节点和参考页『接口 schema』。"
+    },
+    {
+      "heading": "6 态模型（总览）",
+      "prose": "6 态（ready 绿 / historical_ready 蓝 / untested 灰 / failed 红 / cooling_down 熔断 / off 关）由 gateway 内核的纯函数 project_route_state（packages/graph-agent-gateway/src/graph_agent_gateway/state_projection.py:68-119）算出，优先级 off > failed > cooling_down > ready > historical_ready > untested，只有 failed 携带 reason_code（missing_config / endpoint_unreachable / model_failed 三选一）。Studio 后端的 project_provider_model_state（apps/studio/backend/app/services/llm_state_projection.py:11-37）只是封装去调 gateway adapter，自己不算事实。这套状态绝大多数地方是用来【展示】（侧栏色块、徽章、tooltip、排序），真正当【功能闸门】用的只有少数几处：后端的 admission_decision（按 ui_state 推 admit / block / temporary_skip）、materialize_role 构建角色回退链时剔除 failed/off、以及 copilot 的『N/M SDK Ready』计数。这几处功能判断在 N0.3 子节点用一张简练表列出。"
+    },
+    {
+      "heading": "三模块切分（总览）",
+      "prose": "Settings 横跨三个模块，职责必须分清：① 前端（apps/studio/frontend）只渲染后端给的 DTO、不自己算事实；③a 后端薄壳（apps/studio/backend/app/core/adapters/gateway.py + routers/llm.py）只做 DTO 转换、HTTP / job 包装、存储介质注入；③b gateway 公共内核（packages/graph-agent-gateway）才拥有真正的机制——route 解析、6 态投影、凭证解析、fallback 决策、materialize、协议标准化。当前几处偏差本质都是『机制本该在 ③b、却在 ① 或 ③a 留了第二份真相 / 第二套策略』：前端 LlmRolesTab 持 roleTestStates、CopilotTab 持 routeStatusOverrides 就是典型的『① 留了第二份易失事实』，违反了『前端只投影』。"
+    },
+    {
+      "heading": "计划归属（总览）",
+      "prose": "这些实现项落在 12D 修复框架的 D5（Gateway 凭证 / route / fallback / endpoint owner 收口）和 D6（6 态投影 / materialize / draft 证据库），具体：6 态投影=D6.1、materialize 与 model bundle=D6.2、角色测试 SSOT 与 draft 证据=D6.1+D6.5、凭证解析=D5.2、route 解析=D5.1、fallback 决策=D5.3、空链终态=D5.4；协议自动探测 / 统一 endpoint test 去分叉是 D5 的 endpoint owner 收口线，其探测内核归 gateway 设计单元 03（endpoint 标准化）/ 07（批量探测策略）。【全都不在 d7】——d7（D7『Golden headless』）是 Golden 评估事实层（比对已有 run result 与 baseline），owner 是 Engine + headless golden + Studio UX，与 Settings / gateway 八竿子打不着。"
+    }
+  ],
+  "surfaces_overview": {
+    "headers": ["界面单元", "作用", "MVP1 要它表达什么"],
+    "rows": [
+      ["四 tab 左导航（General / API Keys / LLM Roles / Copilot）", "在覆盖层里切换四条配置旅程，不卸载工作区", "settings 是『运行底座』，可在装配 / 试飞途中随手进出（00_settings §2.1）"],
+      ["General Tab", "填 User ID / Gitea 主机 / 默认 skills 目录，即填即存", "身份与产物落点；唯一走 native 文件选择器的地方（00_settings §3.1）"],
+      ["API Keys Tab", "配 provider 凭证、验 endpoint 可连通", "endpoint 验证主战场（验的是端点可达，非 model 保证）；official 只 get-models、third-party 应加协议自动探 + 批量探（ux-spec §1）"],
+      ["LLM Roles Tab", "把抽象角色映射到 model group 兜底链并真实测通", "predict / run 命脉；左角色卡 + 右可用模型侧栏，存结构化、执行平铺（ux-spec §2）"],
+      ["Copilot Tab", "给 copilot 配单个 model group", "与 roles 同构但单组；测试走真 ClaudeSDKClient（ux-spec §3）"],
+      ["Available Models 侧栏（Roles / Copilot 复用）", "拖模型进角色，按 6 态色看每个 provider 行能不能用", "endpoint 状态投影；应支持 family 可折叠 + 弃用区（ux-spec §2.1）"]
+    ]
+  },
+  "plan": "后端先于前端。① 后端（③b 内核 + ③a 薄壳）：把 endpoint test 统一成 POST /endpoints/{id}/test + 批量探测，消除 official / third-party 机制分叉；落地协议自动探测（接通已存在但无生产探测器的 standardize_endpoint_candidates）；把假测试 AsyncAnthropic 换成真 ClaudeSDKClient。② 后端契约定下来后再改前端：A) 删 LlmRolesTab 的 roleTestStates 易失层、改纯投影后端 role-test 持久结果；B) 给 Available Models 侧栏加 family 折叠 + 弃用区（re-probe 捞回）；C) 第三方 API Keys 卡把『手填单 model id + 手选协议』换成『自动探协议 + 自动批量探』；D) Copilot 选组器换可搜索组件、内置浮出改按 available 动态择优；E) ModelBundleCard 接 Test 按钮 + 真 status；F) 删 CopilotTab 的 routeStatusOverrides 会话态、route 状态纯投影真 SDK 测试。",
+  "current_risk": "本节点最大的 UX 逻辑问题是『测试态真相源不统一』。LLM Roles 仍在前端组件态里持有 roleTestStates 这份易失的测试副本（apps/studio/frontend/src/components/studio/settings/LlmRolesTab.tsx:162，一个 useState），运行期角色 / route 的状态主要活在前端 state 里、只靠 useEffect 从后端 best-effort 种子回填。这直接违反 ux-spec §6.5 检查 2『前端只投影、不持第二份真相』。后果：用户测完一个角色、切到别的 tab 再回来、或刷新 app，看到的状态灯可能和后端真实持久化的探测结果不一致——用户无法信任『我刚才测过、它是绿的』，而这正是 Settings 全节点的灵魂（测了就别再丢）。Copilot 侧同样有 routeStatusOverrides（apps/studio/frontend/src/components/studio/settings/copilot/CopilotTab.tsx:112，会话级覆盖态）这份第二真相。修这个问题不是改 UI 样式，是把事实源从前端收回后端。",
+  "issues_table": {
+    "headers": ["不合理点", "应如何改"],
+    "rows": [
+      ["前端 roleTestStates / routeStatusOverrides 易失副本，测试态真相分裂", "删前端易失层，角色 / route 状态一律从后端 registry + role-test 持久结果投影；切 tab / 刷新读回后端 SSOT"],
+      ["API Keys official / third-party 测试机制不对称（official 走异步批量 job + Test 文案、third-party 同步单次 + 还要手填一个 model id 做 endpoint test）", "统一 POST /endpoints/{id}/test + 批量探测；官 / 三差异只剩身份与 canonical 默认，测试路径同一套"],
+      ["第三方 protocol 仍是手动 Select，未自动探测", "接通已存在的 standardize_endpoint_candidates，对 URL × 各协议打推理端点 + 对应 auth header，连通即判协议，UI 去掉手选"],
+      ["Available Models 侧栏无 family 折叠、无弃用区", "加 per-family 折叠（localStorage 视图态）；disabled 模型入可折叠弃用区、灰显不可拖、可复制名 + re-probe 捞回"],
+      ["Model Bundle 卡无 Test 按钮、状态写死空（testStatuses={{}}）", "复用 role 测试路径给束加 Test + 真 status 灯；拖进角色是引用非快照（改束同步）"],
+      ["Copilot 选组器不可搜索 + 内置浮出靠硬编码 canonical_id 判定", "选组器换可搜索组件；内置浮出按 available 动态择优（opus4.8→4.7 / V4Pro→V3.2Pro）"]
+    ]
+  },
+  "gates_table": {
+    "headers": ["验证项", "现状 = 不合理", "目标 = 合理"],
+    "rows": [
+      ["角色测试态持久性", "测完切 tab / 刷新可能回退（前端 roleTestStates 易失）", "切 tab / 刷新后状态灯仍准（纯投影后端 SSOT）"],
+      ["官 / 三测试一致性", "official=Test 异步 job、third-party=Get Models + 手填 model", "两者同走 endpoint test + 批量探测，仅身份不同"],
+      ["第三方协议探测", "用户手动 Select 协议", "填 URL 后系统自动探出协议"],
+      ["失败 route 仍可用", "buildAvailableModelGroups 保留全部 provider_models（已对）", "failed 标红、仍列出、仍可拖（维持）"],
+      ["family 折叠 / 弃用区", "都不存在", "family 可整体折叠；弃用模型入弃用区可 re-probe 捞回"],
+      ["copilot 选组前缀", "applyCopilotModelGroupSelection 已保 copilot_ 前缀", "选组后 role key 仍带 copilot_，后端不误判 graph-agent（复核维持）"]
+    ]
+  },
+  "children": [
+    {
+      "code": "N0.1",
+      "title": "General（身份与产物路径）",
+      "status": "ok",
+      "function": "这个界面让用户填三样身份 / 产物落点信息：User ID（标识自己）、Gitea 主机（产物推到哪个 git 服务）、默认 skills 目录（生成的 skill 文件落在本地哪个文件夹），外加语言选择。用户怎么用：直接改任意字段，无需点 Save——每次 onChange 即触发保存，右上角的保存徽章（SaveStatusBadge）会从 Saving 转 Saved 给反馈。选 skills 目录时点 Choose 会唤起操作系统原生文件夹选择器（这是整个 Settings 唯一走 native 文件选择器的地方）；点 Reset 把 skills 目录回落到计算出的默认值。",
+      "impl_blocks": [
+        {
+          "kind": "prose",
+          "label": "实现",
+          "text": "GeneralTab.tsx:33-135 渲染三字段 + 语言选择，均 onChange 即调 appSettings.setX（即填即存，debounce 由上层 PUT /api/settings 统一处理）；Choose 调 selectSkillDirectory（:21-31，web 模式会 toast『Desktop only』）；Reset 回落 fallbackDefaultSkillsDirectory（:82-92）；右上 SaveStatusBadge（:38）接 appSettings.saveStatus 显示保存进度。"
+        },
+        {
+          "kind": "callout",
+          "variant": "green",
+          "text": "无明显违反 MVP1：即填即存、无独立 Save 按钮、选目录走 native、Reset 回默认，全部符合 00_settings §3.1 / ux-spec §7.1。本子节点维持现状，无改动项。"
+        }
+      ],
+      "gap": "当前已符合设计意图，无需改动。唯一可留意的轻量点：general 里属于运行策略的字段（runtime_policy：provider_down_ttl / probe_timeout / token_escalation 等）目前没有专用 PUT 端点，只在写凭证时以默认值随 llm_credentials.json 一起落盘——但这些不在 General Tab 的可见三字段范围内，不影响本子节点判定。",
+      "auto": ["grep 确认 GeneralTab 无独立 Save 按钮", "确认 SaveStatusBadge 接 appSettings.saveStatus"],
+      "manual": ["打开 General → 改 User ID → 不应出现 Save 按钮、应看到右上保存徽章 Saving→Saved", "点 Choose → desktop 应唤起原生文件夹选择器；web 模式应 toast『Desktop only』", "点 Reset → skills 目录应回落到默认值"],
+      "pass": ["三字段即填即存且有保存徽章", "选目录走 native、Reset 回默认"]
+    },
+    {
+      "code": "N0.2",
+      "title": "API Keys（凭证 + endpoint 测试状态）",
+      "status": "partial",
+      "function": "这个界面让用户配各 provider 的凭证、并验证 endpoint（端点）能否连通。分 official（官方 curated 端点）和 third-party（用户自填 URL）两区。用户怎么用：在 official 卡填 key、点测试，系统打 models-list 验通；在 third-party 卡填 URL + key + 选协议，再验证端点。验证的是『这个端点可达』这件轻量事，真正逐个模型能不能用是 LLM Roles 页才做的事（API Keys 验 endpoint、role 页才 probe 模型）。",
+      "impl_blocks": [
+        {
+          "kind": "prose",
+          "label": "实现",
+          "text": "ApiKeysTab.tsx 渲染 official / third-party 两区 ProviderCard。填 key 保存走 putRegistryEndpoints（PUT /llm/registry/endpoints，api/llm.ts:1175-1186 → routers/llm.py:361-366 → upsert_endpoints），api_key 明文落盘、传占位符 ********** 时后端保留旧值。验 endpoint 走 testEndpoint（POST /llm/endpoints/{id}/test，api/llm.ts:1207-1208 → routers/llm.py:480-590），后端直接取 endpoint.api_key 明文打 models-list 写 status / last_test_*。6 态标签投影已在（ProviderCard.tsx:350 routeStatusTagVariant，含 probe-verified 蓝态）；Base URL 旁有 FieldReachabilityCheck（:1037）常驻显勾，部分满足『结果常驻原地』。"
+        },
+        {
+          "kind": "prose",
+          "label": "凭证生命周期",
+          "text": "一把 key 从录入到注入请求走 7 步：1) 前端 PUT 带明文 key（没改则传占位符）→ 2) upsert_endpoints 落盘成 JSON 明文 → 3) 测 endpoint 时后端直接 get_secret_value() 取明文打 models-list → 4) 测模型时同样直接取明文喂 _probe_model → 5) 角色解析时为每条 route 算出 credential_ref（'endpoint:<id>'）+ fingerprint 装进 ResolvedRoute，此时不含明文 → 6) 模型调用前 _resolve_api_key 用 credential_ref 回表向 EndpointCredentialProvider 要回 SecretStr 再取明文 → 7) 明文作为 api_key 注入 SDK / 写成 Authorization: Bearer 注入 HTTP。详见参考页『存储与数据模型』的凭证字段卡。"
+        },
+        {
+          "kind": "callout",
+          "variant": "amber",
+          "label": "当前差距",
+          "text": "官 / 三测试机制不对称、第三方协议仍手选——见 gap。"
+        },
+        {
+          "kind": "evidence",
+          "rows": [
+            ["官 / 三按钮文案随 isOfficial 在 Test / Get Models 间切", "ProviderCard.tsx:994-1004"],
+            ["third-party 仍渲染手动 Protocol Select", "ProviderCard.tsx:1010-1031"],
+            ["third-party endpoint test 要用户手填 single model id", "ProviderCard.tsx:1068-1079"],
+            ["api_key 明文落盘（SecretStr 还原成明文写 JSON）", "apps/studio/backend/app/services/llm_credentials.py:472-479"],
+            ["协议自动探测内核已在但无生产探测器、未接 ③a", "packages/graph-agent-gateway/src/graph_agent_gateway/registry/endpoints.py:92-165"]
+          ]
+        }
+      ],
+      "gap": "三处偏差：① official / third-party 测试机制不对称——official 按钮叫『Test』走异步批量 job，third-party 按钮叫『Get Models』同步单次、且还要用户手填一个 model id 做 endpoint test（违 ux-spec §1.2『统一 endpoint test + 批量探测』）。② 第三方 protocol 仍是手动 Select 下拉，未做协议自动探测（违 ux-spec §1.2）——值得注意的是 gateway 内核 standardize_endpoint_candidates（对每个 URL × 每种协议打推理端点判协议的函数）已经写好并导出，但缺活的协议探测器实现、也没接进后端 test_endpoint 的 HTTP 路径。③ 修复顺序应后端先行：先在 ③b 落地协议探测器 + ③a 统一 endpoint test，再把前端两区按钮统一、去掉手选协议、去掉手填单 model id。",
+      "auto": ["grep ProviderCard 确认按钮文案不再随 isOfficial 分叉", "确认无手动 Protocol Select", "确认 6 态 Tag variant 映射覆盖 ready / probe-verified / failed / cooling / off"],
+      "manual": ["打开 API Keys → 第三方卡填 URL + key → 应自动探出协议、点测试自动批量探模型，不应要求手填单个 model id", "official 卡填 key 点 Test → 模型标签应出现蓝色『Previously Connected』（draft 回填）"],
+      "pass": ["官 / 三测试路径统一（同走 endpoint test 批量探测）", "第三方协议自动探出、无需手选", "6 态标签 inline 常驻、含蓝态"]
+    },
+    {
+      "code": "N0.3",
+      "title": "LLM Roles（角色→模型映射 / model group / fallback / 测试态）",
+      "status": "partial",
+      "function": "这个界面是 predict / run 的命脉：把抽象角色（如 graph_agent）映射到一条带兜底的真实模型链并测通。布局是左角色卡 + 右 Available Models 侧栏。用户怎么用：从侧栏把 model（或 model group / bundle）拖进角色卡组成兜底链，点角色的 Test 批量探链内所有模型，按 6 态色看每条 provider 行能不能用；侧栏里 failed 标红但仍列出、仍可拖（保留全部 provider_models 是有意为之）。存的是结构化的 model_groups[]，后端 materialize 时物化平铺成可执行的 fallback_chain。",
+      "impl_blocks": [
+        {
+          "kind": "prose",
+          "label": "实现",
+          "text": "角色存 roles[name].model_groups[]（llm_roles.yaml），后端 materialize_role（packages/.../role_materialization.py:34-115，把分组物化成扁平回退链的函数）跳过 failed/off 组链 + 出报告。侧栏 AvailableModelsSidebar.tsx 6 态色齐全（:519 providerStateTagVariant，含 historical_ready=probe-verified 蓝），buildAvailableModelGroups（:377）按 section 分组、保留全部 provider_models。RoleSettingsDialog.tsx 的 thinking 是 off/preferred/required 三态 RadioGroup（:125-144，达标）、token mode 含 required_minimum（:40，达标）；ProviderChain.tsx:246-252 整行包单个顶层 Tooltip、状态灯 showTooltip=false（嵌套已清，达标）。"
+        },
+        {
+          "kind": "prose",
+          "label": "6 态在哪里当『功能闸门』用",
+          "text": "6 态绝大多数是展示用，真正驱动功能开关的只有下表几处。把它们单列出来，是为了说明『改 6 态判定会动到哪些真实行为』，不是清单。"
+        },
+        {
+          "kind": "table",
+          "label": "6 态的功能判断点",
+          "headers": ["功能判断", "据哪个状态", "判断结果", "file:line"],
+          "rows": [
+            ["后端路由准入 admission_decision", "ui_state == cooling_down / failed / off / 其余", "cooling_down→temporary_skip、failed/off→block、其余→admit（6 态唯一真正的后端闸门）", "apps/studio/backend/app/routers/llm.py:4165-4169"],
+            ["materialize_role 构建角色回退链", "failed/off / cooling_down / 其余", "failed/off 剔出 fallback_chain、cooling_down 进 warnings 但仍排除、其余入链", "packages/graph-agent-gateway/src/graph_agent_gateway/state_projection.py:153-191"],
+            ["前端 deriveRoleRouteStatus 角色路由可用性", "failed/off→blocked、cooling/historical/untested(未ok)→limited、其余→runnable", "把 6 态折成 blocked/limited/runnable/testing，驱动 ProviderChain 行边框 / 灯", "apps/studio/frontend/src/components/studio/settings/llm-roles/role-route-status.tsx:44-59"]
+          ]
+        },
+        {
+          "kind": "callout",
+          "variant": "amber",
+          "label": "当前差距",
+          "text": "前端持 roleTestStates 易失测试态 + 侧栏无 family 折叠 / 弃用区 + bundle 卡无 Test——见 gap。"
+        },
+        {
+          "kind": "evidence",
+          "rows": [
+            ["前端 roleTestStates 易失测试态（useState）", "apps/studio/frontend/src/components/studio/settings/LlmRolesTab.tsx:162"],
+            ["useEffect best-effort 种子回填、handleRunTestChain 写进前端 state", "apps/studio/frontend/src/components/studio/settings/LlmRolesTab.tsx:171-184,444-506"],
+            ["侧栏无 family 折叠、无弃用区分流（按 section 平铺）", "apps/studio/frontend/src/components/studio/settings/llm-roles/AvailableModelsSidebar.tsx:377"],
+            ["Model Bundle 卡 status 写死空、无 Test 按钮", "apps/studio/frontend/src/components/studio/settings/llm-roles/ModelBundleCard.tsx:289"]
+          ]
+        }
+      ],
+      "gap": "三处缺口：① 前端仍持 roleTestStates（LlmRolesTab.tsx:162 的 useState）这份易失测试副本，运行期角色 / route 状态主要活在前端、靠 best-effort 回填，违反『前端只投影、不持第二份真相』（ux-spec §6.5 检查 2）——这是本节点最大风险（见 current_risk）。② Available Models 侧栏无 per-family 折叠、无弃用区（disabled 模型应入可折叠弃用区、灰显不可拖、可 re-probe 捞回）（违 ux-spec §2.1）。③ Model Bundle 卡 testStatuses 写死空对象、无 Test 按钮（违 ux-spec §2.6）。已达标的：6 态体系、thinking 三档、Role Intent required_minimum、单顶层 tooltip（嵌套已清）、RoleTestResultPanel 已删未挂载。修复顺序：先删前端易失层改纯后端投影（依赖后端 role-test 持久结果可读回），再补侧栏折叠 / 弃用区，再给 bundle 接 role 测试路径。",
+      "auto": ["grep 确认 LlmRolesTab 不再有 roleTestStates useState", "grep 侧栏出现 family 折叠态 + 弃用区渲染", "grep ModelBundleCard 出现 Test 触发 + 非空 testStatuses", "确认 RoleTestResultPanel 仍未挂载"],
+      "manual": ["打开 Roles → 测一个角色 → 切到 Copilot tab 再切回 → 状态灯应仍为刚测结果（不回退 untested）", "侧栏点 anthropic family 头 → 应整体折叠隐藏其下模型", "provider 明确无此模型 → 该模型应入弃用区、灰显不可拖、可 re-probe", "hover provider 行 → 只弹一个顶层 tooltip（无嵌套）"],
+      "pass": ["切 tab / 刷新后角色测试态不丢（纯后端投影）", "family 可折叠 + 弃用区可 re-probe 捞回", "bundle 有 Test + 真状态灯", "failed 标红仍可拖、单顶层 tooltip"]
+    },
+    {
+      "code": "N0.4",
+      "title": "Copilot（助手配置）",
+      "status": "partial",
+      "function": "这个界面给 copilot 助手配单个 model group，与 LLM Roles 同构但只配一组。用户怎么用：新建 copilot 角色时用选组器选一个 model group；系统会浮出内置的 Claude / DeepSeek 最优模型作为默认；点 Test 用真 Claude Agent SDK（ClaudeSDKClient）验证 route 能不能用，按真 SDK 测试结果亮状态灯。copilot 配置本质就是 role_kind=copilot 的角色，与普通角色同存一个 llm_roles.yaml，只是 role key 必须保留 copilot_ 前缀，否则后端会误判成 graph-agent。",
+      "impl_blocks": [
+        {
+          "kind": "prose",
+          "label": "实现",
+          "text": "CopilotTab.tsx 的 EmptyCopilotRoleCard（:494-509）用裸 Select 选组；copilot-role-derivation.ts 的 isBuiltIn（:65-69）靠硬编码 canonical_id 命中判内置，pickDefaultCopilotGroupIds（:90-109）有择优阶梯但与 isBuiltIn 判定脱节；activeRouteIds 只收 ui_state===ready 的路由。copilot SDK 测试结果持久化走 routers/llm.py:1396-1432（save_credentials + save_role_test_result + append_evidence_record，落 llm_role_test_results.json 与 llm_probe_catalog.json）。saveStatus 已接 SaveStatusBadge（:144/:289），deriveCopilotCandidateGroups 从真 modelGroups + credentials 派生（无 mock）。"
+        },
+        {
+          "kind": "prose",
+          "label": "复用 gateway 解析",
+          "text": "copilot 不自维护第二套状态 / fallback 策略：route 状态来自同一套 6 态投影，fallback 语义只在 ③b 的 decide_fallback（gateway 决定 retry_same / switch_route / give_up 的函数），copilot 角色物化复用 materialize_role。设计上 copilot 的 SDK 测试该走真 ClaudeSDKClient，当前后端测试桩仍是假的 AsyncAnthropic、待换真 SDK。"
+        },
+        {
+          "kind": "callout",
+          "variant": "amber",
+          "label": "当前差距",
+          "text": "选组器不可搜索 + 内置浮出靠硬编码 + route 状态持会话态——见 gap。"
+        },
+        {
+          "kind": "evidence",
+          "rows": [
+            ["EmptyCopilotRoleCard 用裸 Select（不可搜索）", "apps/studio/frontend/src/components/studio/settings/copilot/CopilotTab.tsx:494-509"],
+            ["isBuiltIn 靠硬编码 canonical_id 判定", "apps/studio/frontend/src/components/studio/settings/copilot/copilot-role-derivation.ts:65-69"],
+            ["routeStatusOverrides 会话级覆盖态（第二真相）", "apps/studio/frontend/src/components/studio/settings/copilot/CopilotTab.tsx:112"],
+            ["copilot SDK 测试结果持久化入口", "apps/studio/backend/app/routers/llm.py:1396-1432"]
+          ]
+        }
+      ],
+      "gap": "三处偏差：① 选组器仍是裸 Select、不可搜索（违 ux-spec §3.3 #C10）。② 内置角色浮出靠硬编码 canonical_id 命中判 built_in，而非按 available 动态择优（应 opus4.8→4.7、V4Pro→V3.2Pro 动态选最优）（违 ux-spec §3.2/§3.3）。③ route 状态仍持 routeStatusOverrides 会话级覆盖态（CopilotTab.tsx:112），违『只投影』，且后端 SDK 测试桩仍是假的 AsyncAnthropic、未换真 ClaudeSDKClient。已改善的（比 ux-spec 旧描述好）：mock 已去、saveStatus 已接、假『Backend Integration』徽章已去、copilot_ 前缀已在 applyCopilotModelGroupSelection 保住。修复顺序：先后端把假测试换真 SDK，再前端删 routeStatusOverrides 改纯投影、换可搜索选组器、内置浮出对齐 pickDefaultCopilotGroupIds 的动态择优。",
+      "auto": ["grep CopilotTab 选组器是否可搜索（非裸 Select）", "grep copilot-role-derivation 是否仍硬编码 canonical_id 判 built_in", "确认无 mock-copilot-data 引用、无 Backend Integration 徽章", "确认选组后 role key 保 copilot_ 前缀"],
+      "manual": ["打开 Copilot → 新建角色 → 选组器应可输入搜索过滤", "available 里有 opus4.8 → 应浮出 4.8；只有 4.7 → 浮出 4.7", "点 Test → 应走真 SDK（spawn）验证、状态灯来自真测试", "选组后保存 → 后端应归 copilot 不错存 graph-agent"],
+      "pass": ["选组器可搜索", "内置按 available 动态择优、非硬编码", "route 状态纯投影真 SDK 测试", "选组保 copilot_ 前缀"]
+    }
+  ],
+  "refPages": [
+    {
+      "id": "n0_ref_store",
+      "code": "N0参考·存储",
+      "title": "存储与数据模型",
+      "intro": "Settings 各配置落在哪个文件、关键字段含义、哪些字段敏感——字段级细节集中在此，主页面只讲总览。",
+      "blocks": [
+        {
+          "kind": "callout",
+          "variant": "red",
+          "label": "敏感",
+          "text": "api_key 明文存盘，仅靠文件 0600 / 目录 0700 权限兜底，无加密 / 无 hash。"
+        },
+        {
+          "kind": "table",
+          "label": "存储路径总表",
+          "headers": ["数据", "文件", "默认位置 / 覆盖环境变量", "写入方"],
+          "rows": [
+            ["凭证（endpoint + route 注册表）", "llm_credentials.json", "~/Library/Application Support/AgentStudio/llm/；STUDIO_LLM_CREDENTIALS_PATH / STUDIO_CONFIG_DIR", "python 后端原子写（tempfile+os.replace+chmod600）"],
+            ["角色 + model group + bundle + profile + copilot 角色", "llm_roles.yaml", ".../AgentStudio/llm/；STUDIO_LLM_ROLES_PATH / STUDIO_CONFIG_DIR", "python 后端 _atomic_write"],
+            ["角色 / copilot 路由最近测试结果", "llm_role_test_results.json", ".../AgentStudio/llm/；STUDIO_LLM_ROLE_TEST_RESULTS_PATH / STUDIO_CONFIG_DIR", "python 后端原子写 + chmod600"],
+            ["Probe Knowledge Catalog + 追加式 evidence（含 copilot SDK 测试证据）", "llm_probe_catalog.json", ".../AgentStudio/llm/；STUDIO_LLM_PROBE_CATALOG_PATH / STUDIO_CONFIG_DIR（STUDIO_LLM_IMPORT_DRAFTS_PATH 仅 legacy alias）", "python 后端"],
+            ["运行期健康 / 熔断缓存（非用户配置）", "llm_health.sqlite", "与 credentials 同目录", "python 后端（sqlite）"],
+            ["最近打开的 workspace 列表（非 LLM Settings）", "recent_workspaces.json", "AgentStudio/；STUDIO_CONFIG_DIR", "Rust native-fs（唯一 native 写 config 的命令）"]
+          ]
+        },
+        {
+          "kind": "fieldcard",
+          "title": "llm_credentials.json · provider_endpoints[id]",
+          "subtitle": "endpoint（端点）凭证与状态",
+          "fields": [
+            ["schema_version", "固定 4；非 4 或含旧 providers 键 → 拒绝加载"],
+            ["endpoint_id", "端点唯一 slug（如 anthropic-official）"],
+            ["protocol", "调用协议（anthropic_compatible / openai_compatible / google_genai / ark_runtime）"],
+            ["base_url", "已 canonicalize 的端点基址 URL"],
+            ["api_key", "API 密钥【明文存储】——落盘时把 SecretStr 还原成明文写入 JSON，靠 0600/0700 权限兜底"],
+            ["credential_ref", "可选外部凭证引用；当前几乎总是 null，真正用合成引用 'endpoint:<id>'"],
+            ["provider_kind", "official / third_party；curated 官方端点强制 official"],
+            ["status", "端点验证状态（unverified_manual / verified / failed）；legacy 假测试降级为 unverified_manual"],
+            ["last_test_at / last_test_message", "最近一次连通性测试时间 / 文案"],
+            ["metadata.capability_library", "端点维度缓存的能力 / 目录候选（catalog_candidate+failed 会修复为 unverified_manual）"]
+          ]
+        },
+        {
+          "kind": "fieldcard",
+          "title": "llm_credentials.json · provider_routes[id]",
+          "subtitle": "route（路由）标识与能力",
+          "fields": [
+            ["route_id / endpoint_id / route_slug", "route_id = endpoint_id:route_slug"],
+            ["provider_model_id / canonical_id", "厂商真实模型名 / 跨厂商规范名"],
+            ["status", "该路由验证状态"],
+            ["capabilities", "路由能力（max token、modalities 等 CapabilityValue 字典）"],
+            ["verified_profiles[]", "已验证调用方式列表：profile_id / capability / method_id / status(ready/failed/catalog_candidate) / fallback_rank / 输入输出 modalities / runtime_overrides"]
+          ]
+        },
+        {
+          "kind": "fieldcard",
+          "title": "llm_roles.yaml · roles[name]",
+          "subtitle": "角色（含 copilot 角色，role_kind=copilot）",
+          "fields": [
+            ["schema_version", "2 或 3；有 model_groups 时升 3"],
+            ["role_kind", "graph_agent 或 copilot（copilot 配置就是 role_kind=copilot 的同文件角色）"],
+            ["system_prompt_prefix / source_profile_id", "系统提示前缀 / 引用的 profile"],
+            ["fallback_chain", "生成的扁平路由回退链（每项 route_id + runtime_settings）"],
+            ["intent", "角色意图：provider_preference / thinking(off/preferred/required) / target_context / output_tokens / cost_priority"],
+            ["model_groups[]", "用户编排的 model group：canonical_id + display_name + intent + provider_models[]（每项 route_id + 可选 override intent）"],
+            ["model_fallback_enabled / materialization_report", "是否启用回退；materialize 产出的报告（entries/warnings/skipped）"]
+          ]
+        },
+        {
+          "kind": "fieldcard",
+          "title": "llm_roles.yaml · model_bundles[id] / model_profiles[id]",
+          "subtitle": "可复用束 / authoring 期路由集",
+          "fields": [
+            ["model_bundles[id]", "可复用束：model_profile_id / display_name / canonical_id / tags / intent / model_groups / fallback_chain / lint_requirements"],
+            ["model_profiles[id]", "authoring 期可复用路由集合：model_profile_id / canonical_id / tags / fallback_chain / lint_requirements"]
+          ]
+        },
+        {
+          "kind": "fieldcard",
+          "title": "派生 / 不落盘",
+          "subtitle": "运行期算出，不写文件",
+          "fields": [
+            ["credential fingerprint", "compute_credential_fingerprint(endpoint) 实时 sha256（含明文 secret 但不可逆），仅作缓存键 / 防并发覆盖，不入库"],
+            ["secret-handle://", "resolve_credential 产的不可反解 opaque handle；真实 run 路径上零调用方，仅契约 / 隔离测试用"]
+          ]
+        },
+        {
+          "kind": "callout",
+          "variant": "blue",
+          "label": "general 落点",
+          "text": "general 的 runtime_policy（provider_down_ttl / probe_timeout / token_escalation / terminal_retry / secret_lifetime）无独立文件，嵌在 llm_credentials.json 的 runtime_policy 字段内，当前无专用 PUT 端点，仅 putCredentials 时以默认值落盘。"
+        }
+      ]
+    },
+    {
+      "id": "n0_ref_iface",
+      "code": "N0参考·接口",
+      "title": "三模块接口 schema",
+      "intro": "① 前端 / ③a 后端薄壳 / ③b gateway 内核 之间的关键接口请求 / 响应 schema 与未实现目标项——操作规格用操作卡、数据结构用字段卡。",
+      "blocks": [
+        {
+          "kind": "opcard",
+          "title": "POST /api/llm/endpoints/{id}/test（endpoint 验证）",
+          "rows": [
+            ["何时调用", "① 点 Test 验证某端点能否连通"],
+            ["必须字段", "endpoint_id（path param）；无 body，protocol / base_url / key 从已存 credentials 读"],
+            ["约束字段", "现状：③a 用端点既存 protocol 打 models-list，未委托 ③b 协议探测（这是要去的分叉点）"],
+            ["返回", "{registry（刷新后整份注册表）, tested_endpoint_id, discovered_model_count}；连通写 status=verified/unverified_manual，失败写 failed + last_test_message"],
+            ["主要错误", "失败时 status=failed + last_test_message；endpoint 不存在 404"],
+            ["实现", "apps/studio/backend/app/routers/llm.py:480-590"]
+          ]
+        },
+        {
+          "kind": "opcard",
+          "title": "POST /api/llm/endpoints/{id}/test-jobs（批量探测 job，异步轮询）",
+          "rows": [
+            ["何时调用", "① 触发对端点下模型批量探测，再轮询 GET /endpoint-test-jobs/{job_id}"],
+            ["必须字段", "endpoint_id（path，起 job）；job_id（path，轮询）"],
+            ["约束字段", "job 包装在 ③a，批量探测编排内核设计归 ③b（gateway 模块 07）"],
+            ["返回", "{job_id, endpoint_id, status(queued/running/completed/failed), total/tested_model_count（进度）, verified_route_count/failed_model_count/catalog_only_count, available_models[]（每模型 id/route_id/status/verified_profile_count/last_probe_message/capabilities）, available_sdks[]}"],
+            ["主要错误", "job 级 status=failed"],
+            ["实现", "apps/studio/backend/app/routers/llm.py:172-196,385-417,468-478"]
+          ]
+        },
+        {
+          "kind": "fieldcard",
+          "title": "ProviderModelStateProjection",
+          "subtitle": "6 态投影 response（③b 产，① 只染色）",
+          "fields": [
+            ["route_id", "对应 route"],
+            ["ui_state", "六态之一：ready / historical_ready / untested / failed / cooling_down / off"],
+            ["reason_code", "仅 failed 必带：missing_config / endpoint_unreachable / model_failed；其余必无"],
+            ["retry_at", "仅 cooling_down 时给重试时间"],
+            ["ui_detail", "可选展示文案"],
+            ["evidence_refs", "historical_ready 时携带支撑蓝态的 probe 证据 id"]
+          ]
+        },
+        {
+          "kind": "fieldcard",
+          "title": "ResolvedRouteChain / ResolvedRoute",
+          "subtitle": "route 解析 response（③b 产，无明文 key）",
+          "fields": [
+            ["role", "角色名"],
+            ["routes[]", "有序 fallback 执行链；每条带 route_id / protocol / base_url / credential_ref / credential_fingerprint / capabilities / runtime_settings（无明文 api_key）"],
+            ["skipped[]", "被跳过 route：{route_id, reason_code, message, from_override}（disabled / 缺凭证 / lint_blocked）"],
+            ["error_code", "空 routes 时必为 resource.no_available_route"],
+            ["error_payload", "空 routes 时必非空（含 role）"]
+          ]
+        },
+        {
+          "kind": "fieldcard",
+          "title": "CredentialResolveResponse",
+          "subtitle": "凭证解析 response（③b 产 opaque handle，raw secret 永不进 ① / 日志 / trace）",
+          "fields": [
+            ["secret_handle", "opaque handle（secret-handle://studio-local/<sha32>），不可反解、不等于 secret"],
+            ["credential_ref", "回带的凭证引用（非明文 key）"],
+            ["expires_at", "handle 过期时间（now + ttl）"],
+            ["fingerprint", "凭证指纹（变更检测，非明文）"],
+            ["[error]", "CredentialResolveError：credential.invalid_ttl / credential.missing 等结构化错误"]
+          ]
+        },
+        {
+          "kind": "opcard",
+          "title": "decide_fallback（③b fallback 决策；Studio/Copilot 不维护第二套状态码策略）",
+          "rows": [
+            ["何时调用", "某条 route 调用失败后，决定 retry_same / switch_route / give_up"],
+            ["必须字段", "current_route_id、attempt、failed_route_ids、error_context（含 status_code）"],
+            ["约束字段", "retryable_status_codes 默认 {429,500,502,503,504,529}；命中且当前 route 未失败 → retry_same"],
+            ["返回", "{action(retry_same/switch_route/give_up), reason_code, next_route_id(switch 必填), retry_after?}"],
+            ["主要错误", "give_up 时 error_code 必为 resource.no_available_route，error_payload 含 role/route_ids/failed_route_ids"],
+            ["实现", "packages/graph-agent-gateway/src/graph_agent_gateway/fallback_decision.py:49-135；③a 薄委托 gateway.py:425-452"]
+          ]
+        },
+        {
+          "kind": "opcard",
+          "title": "materialize_role（③b 角色物化为 fallback_chain，含 role-fit）",
+          "rows": [
+            ["何时调用", "① 渲染 materialization report；角色 / bundle 物化成可执行链时"],
+            ["必须字段", "role(RoleEntry，含 model_groups/intent)、credentials、evidence_records、health_store"],
+            ["约束字段", "遍历 model_groups × provider_models，跳过 failed/off；cooling_down 进 warnings 但排除"],
+            ["返回", "{fallback_chain[]（每条 route_id + runtime_settings，已落 reasoning.enabled/max_output_tokens）, materialization_report{entries/warnings/skipped}}；每 entry 带 role_fit(using/downgraded/needs_test/not_fit)"],
+            ["主要错误", "空链时 error_code=resource.no_available_route"],
+            ["实现", "packages/graph-agent-gateway/src/graph_agent_gateway/role_materialization.py:34-115,244-346"]
+          ]
+        },
+        {
+          "kind": "opcard",
+          "title": "[未实现-目标] 协议自动探测 standardize_endpoint_candidates",
+          "rows": [
+            ["何时调用", "目标：① 录入多 URL + key → ③b 对每 URL × 每协议排列组合各试一遍 → 通的建 endpoint"],
+            ["必须字段", "raw(RawProviderEndpointInput：display_name/urls[]/api_key…)、probe(ProtocolProbe 探测器)、protocols、reserved_endpoint_ids"],
+            ["约束字段", "打『推理端点』（openai→/chat/completions、anthropic→/messages）+ 对应 auth header；endpoint_id 规则 {slug}-{protocol}[-n]"],
+            ["返回", "EndpointStandardizationResult{endpoint_candidates: dict[id, EndpointCandidate], probe_results: dict[ProbeResult]（含失败也写、喂证据库）}"],
+            ["主要错误（现状）", "GAP：内核函数已在并导出，但活探测器（ProtocolProbe）无生产实现、且未接进 ③a test_endpoint HTTP 路径（Studio backend 零调用方）"],
+            ["证据", "packages/graph-agent-gateway/src/graph_agent_gateway/registry/endpoints.py:41-165；设计 00_settings-ux-spec.md:42-50"]
+          ]
+        },
+        {
+          "kind": "opcard",
+          "title": "[未实现-目标] model bundle test（统一进 role 测试）",
+          "rows": [
+            ["何时调用", "目标：bundle 拖进 role 后按引用展开成 route list，复用 role test 批量 probe，无独立 bundle-test 端点"],
+            ["必须字段", "复用 role_name 或临时包装 role；materialize 走 ③a materialize_model_bundle → ③b materialize_role"],
+            ["约束字段", "拖进 role = 引用（改 bundle → 所有引用同步），不是快照"],
+            ["返回（目标）", "复用 RoleTestJobResponse（POST /roles/{name}/test + /test-jobs 异步轮询），结果回写 draft"],
+            ["主要错误（现状）", "GAP：bundle 有 CRUD + materialize_model_bundle，但只物化不真测；无 /bundles/{id}/test，测试要靠拖进 role"],
+            ["证据", "apps/studio/backend/app/core/adapters/gateway.py:244-292；设计 00_settings-ux-spec.md:148-155,161-163,171"]
+          ]
+        },
+        {
+          "kind": "opcard",
+          "title": "[未实现-目标] 统一 endpoint test 去分叉（official vs third-party）",
+          "rows": [
+            ["何时调用", "目标：endpoint 验证按 provider_kind 分策略但同一 ③b 内核"],
+            ["必须字段", "endpoint_id（同入口）；内部据 provider_kind 选策略"],
+            ["约束字段", "official 只 get-models 即验通（不逐模型 probe）；third-party 先协议自动探测、再批量模型探推理端点（~3/批、任一成功即停）"],
+            ["返回（目标）", "official / third-party 返回同形 EndpointTestResponse + 协议 / 批量证据，所有探测结果（含失败）写回 Probe Knowledge Catalog"],
+            ["主要错误（现状）", "GAP：现状 test_endpoint 用既存 protocol 打 models-list，官 / 三仅差是否 verified，未接 ③b 协议探测、未做批量"],
+            ["证据", "apps/studio/backend/app/routers/llm.py:480-590；设计 00_settings-ux-spec.md:11-13,28-50,287-290"]
+          ]
+        }
+      ]
+    }
+  ]
+}

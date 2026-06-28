@@ -1,0 +1,18 @@
+[
+  {
+    "name": "边 Context 派生与篡改校验（edge-context + edge-tamper）",
+    "kind": "绑定边篡改场景的业务逻辑",
+    "what": "一组支撑「点边 dot 看真实黑板 → 篡改 JSON → 下游续跑」的前端逻辑:从事件流派生这条边的真实黑板(只读底座),把编辑后的 JSON 解析校验成 resume 的 context_overrides。",
+    "where": "lib/edge-context.ts 的 edgeContextFromEvents(扫该边最后一条 input_dispatch/edge_transition 取 blackboard_snapshot/changed_keys/checkpoint 元数据的纯选择器);components/studio/panels/edge-tamper.ts 的 edgeTamperResumeOptionsFromJson(把编辑后 JSON 解析+校验成 resumeRun options 的函数);EdgeContextView.tsx(只读 + tampering 可写态)、ContextEdge.tsx(边 dot 点击)、Workspace.tsx 的 handleResumeEdgeDownstream。",
+    "duties": [
+      "edgeContextFromEvents:从同一份事件流取该边真实黑板快照 + changed_keys + checkpoint 元数据;无匹配返回 null(空态非 mock)。",
+      "只读展示:键值 + changed_keys 高亮 + 篡改 diff/审计区。",
+      "edgeTamperResumeOptionsFromJson:解析编辑后 JSON,非法就地报错;合法产出 options{resumeFromNodeId=edge.target, contextOverrides, checkpoint 元数据}。",
+      "handleResumeEdgeDownstream:带 contextOverrides + resumeFromNodeId 调 resumeRun 下游续跑。"
+    ],
+    "used_by": "#7(edge-blackboard-readonly-view,只读查看)、#8(edge-blackboard-tamper-edit,篡改编辑)、#9(edge-tamper-resume-downstream,下游续跑)。",
+    "boundary": "做:派生真实黑板、校验篡改 JSON、带 overrides 续跑。不做:不做合并写回(引擎 _apply_resume_context_overrides 合并进 BusinessData)、不回退 mock(无事件显空态)。目标偏差:篡改编辑器现状用 Textarea,应复用可写 Monaco(决策 Q3,N5.3#8)。",
+    "reuse_note": "节点内共享:只读查看(#7)、篡改编辑(#8)、下游续跑(#9)三步同一条边篡改链,共用派生 + 校验。",
+    "api": "动作类:POST /api/skills/{skill_id}/runs/{run_id}/resume(带 context_overrides + resume_from_node_id=edge.target);事件源 WS /ws/runs/{run_id}。见 mech_n5_resume / mech_n5_events。"
+  }
+]

@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/graph-authoring
 doc: mvp1-alignment
-status: FROZEN（画布主拓扑 live；新建 phase 和 subgraph 仍混旧字段，inline subgraph 是 mock ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（画布主拓扑 live；新建 phase 写入文件驱动白名单；subgraph 使用 path 引用；inline subgraph 按同级 React Flow nodes/edges 渲染；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [subgraph-path-inline-drilldown]
 aligns_with: 01_workflows/02_authoring.md（graph authoring / subgraph）
@@ -9,7 +9,7 @@ aligns_with: 01_workflows/02_authoring.md（graph authoring / subgraph）
 
 # graph-authoring — MVP1 Alignment
 
-> **Tier**: capability | **Owns**: `subgraph-path-inline-drilldown`（新建子图/默认落点 UI；inline 展开由 canvas region 承载） | **现状**: 画布主拓扑 live；新建 phase 和 subgraph 仍混旧字段，inline subgraph 是 mock ⚠️。 | **Related**: [baseline](./baseline.md)（双向）· `canvas` · `assets` · `phase-editing` · `native-fs` · `engine` resolver/skill-syntax
+> **Tier**: capability | **Owns**: `subgraph-path-inline-drilldown`（新建子图/默认落点 UI；inline 展开由 canvas region 承载） | **现状**: 画布主拓扑 live；新建 phase 写入文件驱动白名单；subgraph 使用 path 引用；inline subgraph 按同级 React Flow nodes/edges 渲染。 | **Related**: [baseline](./baseline.md)（双向）· `canvas` · `assets` · `phase-editing` · `native-fs` · `engine` resolver/skill-syntax
 
 ## 1. 定义
 `graph-authoring` owns the macro and meso graph composition flow: render graph skill topology, create phase nodes, connect/disconnect dependencies, expand subgraphs, and surface graph-level topology errors.
@@ -46,8 +46,8 @@ Source workflow basis: `01_workflows/02_authoring.md:8`, `01_workflows/02_author
 
 ### F4. Expand Subgraph By Path
 
-- 机制: subgraph node expands inline or navigates into a child graph when its local path resolves;**子图节点 = `phases/<phase_id>/SUBGRAPH.md`,frontmatter 写绝对 `path:` 直接指子图根(无 registry,D7);子图默认落 `<skill_root>/subgraph/<name>/`、递归自包含**(可移走、`path` 跟改)。
-- 决策: 子图按绝对 `path` 引用(无 registry,D7)、父子 io 不做 1:1 校验(G2);**格式/落点/解析归 engine SSOT**([`01-physical-layout` §2.1.1](../../../../engine/mvp1/01-contract/01-physical-layout/mvp1-alignment.md) · `skill-syntax` §2.1 · `02-resolver`)——studio 只引用、不复制(避免"撞旧源");文件夹名统一 `subgraph/`(PM 2026-06-05)。
+- 机制: subgraph node expands inline or navigates into a child graph when its path resolves;**子图节点 = `phases/<phase_id>/SUBGRAPH.md`,frontmatter 写 `path:` 指向含 `GRAPH.md` 的子图根；默认写相对 skill root 的 `subgraph/<name>`，绝对路径也必须落在 skill root 边界内；无 registry(D7)**。
+- 决策: 子图按 `path` 引用(相对 skill root 优先；无 registry,D7)、父子 io 不做 1:1 校验(G2);**格式/落点/解析归 engine SSOT**([`01-physical-layout` §2.1.1](../../../../engine/mvp1/01-contract/01-physical-layout/mvp1-alignment.md) · `skill-syntax` §2.1 · `02-resolver`)——studio 只引用、不复制(避免"撞旧源");文件夹名统一 `subgraph/`(PM 2026-06-05)。
 - 原话/来源: `01_workflows/02_authoring.md:37` locks path-based subgraph references; `01_workflows/02_authoring.md:38` records the relaxed child IO decision.
 - 测试: resolved path expands/navigates; unresolved path shows an Assets recovery action; child IO filters from the shared blackboard.
 - Status: placeholder/stale.
@@ -80,7 +80,7 @@ Source workflow basis: `01_workflows/02_authoring.md:8`, `01_workflows/02_author
 | GRAPH_AUTHORING-3 | 节点态 | 单元 `run-execution-node-status`（消费；owner=run-execution/state-engine）；**为什么**：节点运行态来自 run/predict/state 投影，graph-authoring 只消费不拥有 |
 
 ## 6. 测试关键点
-1. 子图字段: baseline 现状为 `defaultPhaseMarkdown` 写旧 `mode/target_skill` ⚠️；目标为 子图 frontmatter 写 engine MVP1 绝对 `path`。
+1. 子图字段: 目标为 子图 frontmatter 写 engine MVP1 `path`（相对 skill root 优先，绝对也必须落在边界内），不得写旧寻址字段。
 2. inline 展开: baseline 现状为 `SubgraphInline` 使用假数据 ⚠️；目标为 展开真实解析子图、面包屑/下钻可回退。
 3. 节点态: baseline 现状为 `buildNodes` 默认首节点 success ⚠️；目标为 节点态来自真实 run/predict/state projection。
 
@@ -88,7 +88,7 @@ Source workflow basis: `01_workflows/02_authoring.md:8`, `01_workflows/02_author
 `canvas` · `assets` · `phase-editing` · `native-fs` · `engine` resolver/skill-syntax
 
 ## 8. gaps / 报警
-- 🚨 子图字段: `defaultPhaseMarkdown` 写旧 `mode/target_skill` ⚠️；目标 子图 frontmatter 写 engine MVP1 绝对 `path`。
+- 🚨 子图字段: 目标 子图 frontmatter 写 engine MVP1 `path`（相对 skill root 优先，绝对也必须落在边界内），不得写旧寻址字段。
 - 🚨 inline 展开: `SubgraphInline` 使用假数据 ⚠️；目标 展开真实解析子图、面包屑/下钻可回退。
 - 🚨 节点态: `buildNodes` 默认首节点 success ⚠️；目标 节点态来自真实 run/predict/state projection。
 

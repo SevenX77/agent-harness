@@ -30,7 +30,15 @@ main @ `89cf12eb`（engine Wave 4A 三个 WS 合入后）SonarCloud 质量门 ER
 phases_root 做前缀校验后才发生任何文件系统访问；越界走 `_graph_fatal`（必然 raise，CodeQL 推不出
 NoReturn 所以认为污点流继续）。判定：误报。
 
-### 3.2 安全热点 34 个 — 全部 REVIEWED/SAFE（2026-06-10，经由 API 批量标记）
+### 3.2 PR #139 CodeQL py/path-injection alerts — dismissed (false positive)
+
+Alerts `#11/#66/#67/#173/#174/#175/#176/#177/#179/#180/#181` 来自 MVP1 三模块集成 PR 的
+Studio 路径 helper 边界。PR 已新增 `test_codeql_path_safety.py` 覆盖 run/golden id segment、
+artifact ref 与 zip slip；生产代码已补 `validate_run_id_segment`、skill id safe segment、sha256
+content hash 校验、zip member 逐项落点检查。剩余告警落在 `run_dir_for`/golden/worker helper 的已校验
+下游 sink，判定为静态分析无法跨 helper 证明的误报，按 `false positive` dismiss。
+
+### 3.3 安全热点 34 个 — 全部 REVIEWED/SAFE（2026-06-10，经由 API 批量标记）
 
 | 规则 | 数量 | 位置 | SAFE 理由 |
 |---|---|---|---|
@@ -39,7 +47,7 @@ NoReturn 所以认为污点流继续）。判定：误报。
 | `typescript:S2245`（Math.random） | 2 | components/ui/sidebar.tsx、uikit sidebar.tsx（均 :597） | shadcn/ui vendored 组件的 skeleton 装饰性随机宽度，非密码学用途；改写会制造上游 drift |
 | `javascript:S4036`（PATH 可写目录） | 1 | tauri/scripts/download_runtime.js | 开发机构建期工具脚本，非交付运行时代码 |
 
-### 3.3 后续加固项（非阻塞，择机做）
+### 3.4 后续加固项（非阻塞，择机做）
 
 - workflow actions SHA pinning（S7637 的根治），可配 dependabot 的 SHA 更新模式
 - `_graph_fatal` 标注 `typing.NoReturn`，让 CodeQL/类型检查理解其控制流，避免同类误报复发

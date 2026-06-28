@@ -1,0 +1,145 @@
+import { renderToStaticMarkup } from "react-dom/server"
+import { describe, expect, it, vi } from "vitest"
+import { GeneralTab } from "./GeneralTab"
+import type { SettingsPageContentProps } from "./types"
+
+/**
+ * GeneralTab render-contract tests (N0 Settings · General, atoms #10–#15).
+ *
+ * The repo convention for component coverage is static rendering via
+ * `renderToStaticMarkup` (no `@testing-library/react` dependency); interactive
+ * behaviour (debounced PUT, picker, reset click, error toast) is exercised by
+ * the Playwright e2e `tests/e2e/general-settings.spec.ts`. These tests lock the
+ * rendering contract: every field is bound to its app-settings value, the save
+ * badge reflects status, and loading/disabled wiring is present — so a future
+ * edit that unbinds a field or drops the badge is caught.
+ *
+ * #15.1 (language persistence into app_settings) is now wired: the language
+ * dropdown is bound to `appSettings.language` (the persisted value) and, on
+ * change, both drives `i18n.changeLanguage` and persists via
+ * `appSettings.setLanguage` (the two-call behaviour is unit-tested in
+ * `language-switch.test.ts`). Here we lock the render contract: the dropdown is
+ * present and reflects the persisted language value.
+ */
+
+type AppSettingsProp = SettingsPageContentProps["appSettings"]
+
+function makeAppSettings(overrides: Partial<AppSettingsProp> = {}): AppSettingsProp {
+  return {
+    userId: "alice",
+    giteaHost: "https://gitea.example.com",
+    defaultSkillsDirectory: "/Users/alice/AgentStudio/Skills",
+    language: "en",
+    remoteModelCatalogEnabled: true,
+    isLoading: false,
+    saveStatus: "saved",
+    setUserId: vi.fn(),
+    setGiteaHost: vi.fn(),
+    setDefaultSkillsDirectory: vi.fn(),
+    setLanguage: vi.fn(),
+    setRemoteModelCatalogEnabled: vi.fn(),
+    ...overrides,
+  }
+}
+
+function renderTab(overrides?: Partial<AppSettingsProp>): string {
+  return renderToStaticMarkup(<GeneralTab appSettings={makeAppSettings(overrides)} />)
+}
+
+function inputTag(html: string, id: string): string {
+  const match = html.match(new RegExp(`<input[^>]*\\bid="${id}"[^>]*>`))
+  if (!match) throw new Error(`input #${id} not found in markup`)
+  return match[0]
+}
+
+describe("GeneralTab render contract", () => {
+  it("#10 binds the Studio User ID input to appSettings.userId", () => {
+    const html = renderTab({ userId: "carol" })
+    expect(inputTag(html, "studio-user-id")).toContain('value="carol"')
+  })
+
+  it("#11 binds the Gitea Host input to appSettings.giteaHost", () => {
+    const html = renderTab({ giteaHost: "https://git.internal.example" })
+    expect(inputTag(html, "gitea-host")).toContain('value="https://git.internal.example"')
+  })
+
+  it("#12 binds the default skill folder input to appSettings.defaultSkillsDirectory", () => {
+    const html = renderTab({ defaultSkillsDirectory: "/tmp/custom-skills" })
+    expect(inputTag(html, "default-skill-folder")).toContain('value="/tmp/custom-skills"')
+  })
+
+  it("#13 renders the native folder Choose button", () => {
+    expect(renderTab()).toContain("Choose")
+  })
+
+  it("#14 renders a Reset control that is disabled when no runtime default is available", () => {
+    // In the node test env getRuntimeConfig() is null, so the runtime-default
+    // fallback resolves to empty and Reset must be disabled (no target to reset to).
+    const html = renderTab()
+    const resetMatch = html.match(/<button[^>]*aria-label="Reset default skill folder"[^>]*>/)
+    expect(resetMatch).not.toBeNull()
+    expect(resetMatch?.[0]).toContain('disabled=""')
+  })
+
+  it("#15 renders the save-status badge reflecting the current save status", () => {
+    expect(renderTab({ saveStatus: "saved" })).toContain('data-save-status="saved"')
+    expect(renderTab({ saveStatus: "pending" })).toContain('data-save-status="pending"')
+    expect(renderTab({ saveStatus: "error" })).toContain('data-save-status="error"')
+  })
+
+  it("#15 hides the save-status badge when idle", () => {
+    expect(renderTab({ saveStatus: "idle" })).not.toContain("data-save-status-badge")
+  })
+
+  it("never disables the editable inputs on loading (the shell renders GeneralTabSkeleton instead)", () => {
+    // B fix: General no longer disables its whole form while appSettings load —
+    // SettingsPageContent shows GeneralTabSkeleton during isLoading, consistent
+    // with the other tabs. So whenever GeneralTab itself renders, its inputs are
+    // editable regardless of the (incidental) isLoading flag value.
+    const html = renderTab({ isLoading: true })
+    expect(inputTag(html, "studio-user-id")).not.toContain('disabled=""')
+    expect(inputTag(html, "gitea-host")).not.toContain('disabled=""')
+    expect(inputTag(html, "default-skill-folder")).not.toContain('disabled=""')
+  })
+
+  it("keeps the editable inputs enabled once loaded", () => {
+    const html = renderTab({ isLoading: false })
+    expect(inputTag(html, "studio-user-id")).not.toContain('disabled=""')
+    expect(inputTag(html, "gitea-host")).not.toContain('disabled=""')
+  })
+
+  it("renders all three identity/output fields and the language selector", () => {
+    const html = renderTab()
+    expect(html).toContain("Studio User ID")
+    expect(html).toContain("Gitea Host")
+    expect(html).toContain("Default skill folder")
+    // #15.1 language dropdown is wired to persisted appSettings.language.
+    expect(html).toContain('aria-label="Studio language"')
+  })
+
+  it("#15.1 binds the language selector for the persisted language value", () => {
+    // Radix Select renders the chosen label and its options client-side / in a
+    // portal (the static select-value span is empty and SelectContent is not in
+    // static markup), so neither the selected text nor the option labels can be
+    // asserted from renderToStaticMarkup. What we can lock here: the language
+    // trigger mounts (bound by id + aria-label) for either persisted value — i.e.
+    // the persisted `appSettings.language` drives the control without throwing.
+    // The change-time two-call behaviour is unit-tested in language-switch.test.ts.
+    for (const language of ["en", "zh-CN"] as const) {
+      const html = renderTab({ language })
+      expect(html).toContain('id="studio-language"')
+      expect(html).toContain('aria-label="Studio language"')
+      expect(html).toContain("Switch Studio UI copy without restarting the app.")
+    }
+  })
+
+  it("renders the remote model catalog switch using the local shadcn switch primitive", () => {
+    const html = renderTab({ remoteModelCatalogEnabled: true })
+    expect(html).toContain("Community model catalog")
+    expect(html).toContain(
+      "Read the community catalog to improve route suggestions, and anonymously contribute your sanitized probe results back to it. Turn off to stop both.",
+    )
+    expect(html).toContain('data-slot="switch"')
+    expect(html).toContain('aria-label="Community model catalog"')
+  })
+})

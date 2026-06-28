@@ -11,7 +11,9 @@ import pytest
 from app.core import config
 from app.models.runs import RunMetadata
 from app.services.event_bus import event_bus
+from app.services.predict_gate import record_predict_pass
 from app.services.run_manager import run_manager
+from app.services.skills import resolve_skill_dir
 from app.services.terminal_manager import terminal_manager
 from fastapi.testclient import TestClient
 from graph_agent.callbacks.events import (
@@ -22,8 +24,55 @@ from graph_agent.callbacks.events import (
     RunEndedEvent,
     RunStartedEvent,
 )
+from graph_agent.core.result_contracts import NodeRunResult, RunResultSnapshot, RunResultsRef
 
 from tests.conftest import copy_skill
+
+FALLBACK_HEADERS = {"X-Studio-Write-Fallback": "browser"}
+
+
+def _open_skills_into_index(workspaces_dir: Path, dirs_by_id: dict[str, Path]) -> None:
+    """Record folders in the native-fs skill index so Home (IDE model) lists them.
+
+    Home stopped auto-scanning the bundled SKILLS_DIR registry (01_init.md D11);
+    a folder surfaces only after it is opened/imported, which the native-fs layer
+    records as a skill-index entry. Tests simulate that open by writing the entry.
+    """
+    import asyncio
+
+    from app.core.adapters.metadata_local import LocalJsonMetadataStore
+
+    metadata = LocalJsonMetadataStore(
+        global_config_dir=config.APP_SETTINGS_DIR,
+        workspaces_root=workspaces_dir,
+    )
+
+    async def _register() -> None:
+        for skill_id, skill_dir in dirs_by_id.items():
+            await metadata.save_skill_index_entry(
+                skill_id,
+                {"absolute_path": str(skill_dir), "l2_remote_url": ""},
+            )
+
+    asyncio.run(_register())
+
+
+def _record_predict_pass(skill_id: str) -> None:
+    """Satisfy the server-side predict-pass run prerequisite for a skill.
+
+    Mirrors the real predict-then-run flow: a passing Predict records predict-pass
+    bound to the compiled content_hash, which the run-spawn gate consumes after
+    matching it against the freshly-compiled hash. Compiling here (as the real
+    predict does) guarantees the recorded hash matches what start_run compiles.
+    """
+    from app.core.adapters.engine import EngineAdapter
+
+    skill_dir = resolve_skill_dir(skill_id)
+    adapter = EngineAdapter(transport="in_process")
+    art_ref = adapter.compile(
+        {"skill_dir": str(skill_dir), "skill_id": skill_id, "artifact_scope": "ephemeral"}
+    )
+    record_predict_pass(skill_dir, skill_id, "predict-fixture", content_hash=art_ref["content_hash"])
 
 
 def test_openapi_registers_phase0_rest_surface(client: TestClient) -> None:
@@ -59,16 +108,24 @@ def test_openapi_registers_phase0_rest_surface(client: TestClient) -> None:
     assert "/api/_debug/value-error" not in schema["paths"]
 
 
-def test_skills_list_and_detail_use_real_skill_files(client: TestClient) -> None:
-    skills_response = client.get("/api/skills")
-    assert skills_response.status_code == 200
-    skill_ids = {item["id"] for item in skills_response.json()}
-    assert {
-        "text-segmentation",
-        "event-extraction",
-        "batch-analysis",
-        "global-synthesis",
-    } <= skill_ids
+def test_openapi_declares_typed_resume_error_responses(client: TestClient) -> None:
+    schema = client.get("/openapi.json").json()
+
+    responses = schema["paths"]["/api/skills/{skill_id}/runs/{run_id}/resume"]["post"]["responses"]
+
+    for status_code in ("404", "409", "422"):
+        assert status_code in responses
+        assert responses[status_code]["content"]["application/json"]["schema"]["$ref"].endswith("/ErrorResponse")
+
+
+def test_skill_detail_uses_real_skill_files(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    # GET /api/skills/{id} detail compiles the real on-disk files of an opened skill
+    # (IDE model, 01_init.md D11 无注册表 — no Python LIST aggregation).
+    skills_dir, workspaces_dir = studio_roots
+    _open_skills_into_index(workspaces_dir, {"text-segmentation": skills_dir / "text-segmentation"})
 
     detail_response = client.get("/api/skills/text-segmentation")
     assert detail_response.status_code == 200
@@ -108,6 +165,66 @@ def test_lint_reports_failed_manifest_with_line_number(
     assert body["errors"][0]["error_code"]
 
 
+def test_lint_accepts_changed_markdown_body_without_writing_disk(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, _workspaces = studio_roots
+    skill_id = "text-segmentation"
+    graph_path = skills_dir / skill_id / "GRAPH.md"
+    original = graph_path.read_text(encoding="utf-8")
+    broken_body = original.replace("name: text-segmentation\n", "")
+    assert broken_body != original
+
+    response = client.post(
+        f"/api/skills/{skill_id}/lint",
+        json={"markdown": broken_body},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "failed"
+    assert body["errors"], "broken changed-markdown must surface a diagnostic"
+    assert body["errors"][0]["error_code"].startswith("F-")
+    # The unsaved body must never be persisted to the skill store on disk.
+    assert graph_path.read_text(encoding="utf-8") == original
+
+
+def test_lint_changed_markdown_passes_when_disk_would_fail(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    """A clean unsaved body lints green even if the disk copy is broken."""
+    skills_dir, workspaces_dir = studio_roots
+    skill_id = "text-segmentation"
+    skill_dir = copy_skill(skills_dir, workspaces_dir, skill_id)
+    good_graph = (skill_dir / "GRAPH.md").read_text(encoding="utf-8")
+    # Break the disk copy so a path-based lint would fail.
+    (skill_dir / "GRAPH.md").write_text(
+        good_graph.replace("name: text-segmentation\n", ""),
+        encoding="utf-8",
+    )
+
+    response = client.post(
+        f"/api/skills/{skill_id}/lint",
+        json={"markdown": good_graph},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "passed"
+
+
+def test_lint_without_body_still_lints_disk_path(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    """Backward-compat: no body falls back to linting the on-disk skill."""
+    response = client.post("/api/skills/text-segmentation/lint")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "passed"
+
+
 def test_put_updates_indexed_skill_atomically_and_invalid_content_preserves_file(
     client: TestClient,
     studio_roots: tuple[Path, Path],
@@ -126,7 +243,7 @@ def test_put_updates_indexed_skill_atomically_and_invalid_content_preserves_file
     files = _agent_skill_files("idea-generator")
     files["GRAPH.md"] = updated
 
-    ok_response = client.put("/api/skills/idea-generator", json={"files": files})
+    ok_response = client.put("/api/skills/idea-generator", json={"files": files}, headers=FALLBACK_HEADERS)
 
     assert ok_response.status_code == 200
     assert ok_response.json()["manifest"]["description"] == "Updated ideas"
@@ -135,7 +252,7 @@ def test_put_updates_indexed_skill_atomically_and_invalid_content_preserves_file
 
     bad_files = dict(files)
     bad_files["GRAPH.md"] = "not yaml"
-    bad_response = client.put("/api/skills/idea-generator", json={"files": bad_files})
+    bad_response = client.put("/api/skills/idea-generator", json={"files": bad_files}, headers=FALLBACK_HEADERS)
 
     assert bad_response.status_code == 422
     assert "Updated ideas" in skill_path.read_text(encoding="utf-8")
@@ -203,9 +320,6 @@ def test_create_skill_with_directory_path_writes_to_user_dir(
     assert not (workspaces_dir / "default" / "skills" / "idea-generator" / "GRAPH.md").exists()
     index = json.loads(config.SKILL_INDEX_PATH.read_text(encoding="utf-8"))
     assert index["idea-generator"]["absolute_path"] == str(skill_dir)
-    assert "idea-generator" in {
-        item["id"] for item in client.get("/api/skills").json() if item["directory_path"]
-    }
 
 
 def test_create_skill_with_invalid_directory_path_returns_422(
@@ -353,6 +467,108 @@ def test_request_validation_errors_use_error_response(client: TestClient) -> Non
     assert body["details"]["errors"]
 
 
+@pytest.mark.parametrize(
+    ("error_code", "payload", "expected_status"),
+    [
+        ("artifact.hash_mismatch", {"expected": "a", "actual": "b"}, 422),
+        ("artifact.not_found", {"hash": "sha256:missing"}, 404),
+    ],
+)
+def test_get_run_detail_maps_artifact_adapter_errors_to_typed_error_response(
+    monkeypatch: pytest.MonkeyPatch,
+    error_code: str,
+    payload: dict[str, Any],
+    expected_status: int,
+) -> None:
+    from app.core.adapters.http_transport import StudioAdapterError
+    from app.main import create_app
+
+    def raise_artifact_error(*_args: Any, **_kwargs: Any) -> None:
+        raise StudioAdapterError(error_code, payload)
+
+    monkeypatch.setattr(run_manager, "get_run_detail", raise_artifact_error)
+
+    with TestClient(create_app(), raise_server_exceptions=False) as api_client:
+        api_client.headers["Authorization"] = "Bearer studio-test-token"
+        response = api_client.get("/api/skills/text-segmentation/runs/run-1")
+
+    assert response.status_code == expected_status
+    body = response.json()
+    assert body["error_code"] == error_code
+    assert body["http_status"] == expected_status
+    assert body["details"] == payload
+
+
+def test_resume_maps_runtime_state_adapter_errors_to_typed_error_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.core.adapters.transport_factory as transport_factory
+    from app.core.adapters.http_transport import StudioAdapterError
+    from app.main import create_app
+
+    payload = {"run_id": "run-1", "active_owner": "worker-a"}
+
+    class FakeAdapter:
+        def resume(self, _payload: dict[str, Any]) -> dict[str, Any]:
+            raise StudioAdapterError("state.lease_conflict", payload)
+
+    monkeypatch.setattr(transport_factory, "build_engine_adapter", lambda: FakeAdapter())
+
+    with TestClient(create_app(), raise_server_exceptions=False) as api_client:
+        api_client.headers["Authorization"] = "Bearer studio-test-token"
+        response = api_client.post(
+            "/api/skills/text-segmentation/runs/run-1/resume",
+            json={"human_input": "continue"},
+        )
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body["error_code"] == "state.lease_conflict"
+    assert body["http_status"] == 409
+    assert body["details"] == payload
+
+
+@pytest.mark.parametrize(
+    ("error_code", "payload", "expected_status"),
+    [
+        ("state.invalid_checkpoint", {"run_id": "run-1", "detail": "Checkpoint is invalid"}, 422),
+        ("state.lease_conflict", {"run_id": "run-1", "active_owner": "worker-a"}, 409),
+        ("state.lease_fenced", {"run_id": "run-1", "action": "snapshot"}, 409),
+        ("state.not_found", {"run_id": "run-1", "detail": "Snapshot not found"}, 404),
+        ("state.release_failed", {"run_id": "run-1", "detail": "unlink failed"}, 409),
+    ],
+)
+def test_d10_resume_api_preserves_runtime_state_error_codes_without_checkpoint_wrapping(
+    monkeypatch: pytest.MonkeyPatch,
+    error_code: str,
+    payload: dict[str, Any],
+    expected_status: int,
+) -> None:
+    import app.core.adapters.transport_factory as transport_factory
+    from app.core.adapters.http_transport import StudioAdapterError
+    from app.main import create_app
+
+    class FakeAdapter:
+        def resume(self, _payload: dict[str, Any]) -> dict[str, Any]:
+            raise StudioAdapterError(error_code, payload)
+
+    monkeypatch.setattr(transport_factory, "build_engine_adapter", lambda: FakeAdapter())
+
+    with TestClient(create_app(), raise_server_exceptions=False) as api_client:
+        api_client.headers["Authorization"] = "Bearer studio-test-token"
+        response = api_client.post(
+            "/api/skills/text-segmentation/runs/run-1/resume",
+            json={"human_input": "continue"},
+        )
+
+    assert response.status_code == expected_status
+    body = response.json()
+    assert body["error_code"] == error_code
+    assert body["http_status"] == expected_status
+    assert body["details"] == payload
+    assert body["error_code"] != "RESUME_CHECKPOINT_NOT_FOUND"
+
+
 def test_run_endpoint_spawns_worker_and_ws_streams_events(
     client: TestClient,
     studio_roots: tuple[Path, Path],
@@ -362,6 +578,7 @@ def test_run_endpoint_spawns_worker_and_ws_streams_events(
     monkeypatch.setattr(run_manager, "process_factory", InlineProcess)
     monkeypatch.setattr(run_manager, "queue_factory", queue.Queue)
     monkeypatch.setattr(run_manager, "worker", fake_run_worker)
+    _record_predict_pass("text-segmentation")
 
     response = client.post(
         "/api/skills/text-segmentation/runs",
@@ -374,7 +591,8 @@ def test_run_endpoint_spawns_worker_and_ws_streams_events(
     run_id = body["run_id"]
 
     with client.websocket_connect(f"/ws/runs/{run_id}") as websocket:
-        event_types = [websocket.receive_json()["event_type"] for _ in range(6)]
+        stream_events = [websocket.receive_json() for _ in range(6)]
+    event_types = [event["event_type"] for event in stream_events]
     assert event_types == [
         "run_started",
         "phase_start",
@@ -383,6 +601,14 @@ def test_run_endpoint_spawns_worker_and_ws_streams_events(
         "finish_task",
         "run_ended",
     ]
+    assert [event["schema_version"] for event in stream_events] == ["studio.event.v1"] * 6
+    assert [event["run_id"] for event in stream_events] == [run_id] * 6
+    assert [event["seq"] for event in stream_events] == [1, 2, 3, 4, 5, 6]
+    assert stream_events[0]["payload"]["event_type"] == "run_started"
+
+    with client.websocket_connect(f"/ws/runs/{run_id}?cursor={stream_events[1]['cursor']}") as websocket:
+        resumed_events = [websocket.receive_json() for _ in range(4)]
+    assert [event["seq"] for event in resumed_events] == [3, 4, 5, 6]
 
     detail: dict[str, Any] = {}
     for _ in range(20):
@@ -393,6 +619,8 @@ def test_run_endpoint_spawns_worker_and_ws_streams_events(
 
     assert detail["metadata"]["status"] == "success"
     assert [event["event_type"] for event in detail["events"]] == event_types
+    assert [event["seq"] for event in detail["events"]] == [1, 2, 3, 4, 5, 6]
+    assert detail["events"][1]["payload"]["phase_name"] == "setup"
     run_dir = _skills_dir / "text-segmentation" / ".workspace" / "runs" / run_id
     assert (run_dir / "final_state.json").exists()
     assert (run_dir / "trace.jsonl").exists()
@@ -419,6 +647,7 @@ def test_successful_run_triggers_auto_commit(
         "git_service",
         FakeGitService(commits),
     )
+    _record_predict_pass("commit-skill")
 
     response = client.post("/api/skills/commit-skill/runs", json={"input_data": {"topic": "ok"}})
 
@@ -448,6 +677,7 @@ def test_failed_run_does_not_auto_commit(
     monkeypatch.setattr(run_manager, "queue_factory", queue.Queue)
     monkeypatch.setattr(run_manager, "worker", fake_failed_run_worker)
     monkeypatch.setattr(run_manager, "git_service", FakeGitService(commits))
+    _record_predict_pass("failed-commit-skill")
 
     response = client.post(
         "/api/skills/failed-commit-skill/runs",
@@ -541,6 +771,7 @@ def test_batch_run_starts_runs_from_test_inputs(
     monkeypatch.setattr(run_manager, "process_factory", InlineProcess)
     monkeypatch.setattr(run_manager, "queue_factory", queue.Queue)
     monkeypatch.setattr(run_manager, "worker", fake_run_worker)
+    _record_predict_pass("text-segmentation")
 
     inputs_response = client.get("/api/skills/text-segmentation/test_inputs")
 
@@ -569,28 +800,40 @@ def test_set_golden_and_compare_run_diff(
     studio_roots: tuple[Path, Path],
 ) -> None:
     _skills_dir, workspaces_dir = studio_roots
-    _write_final_state(
+    _write_result_snapshot(
         workspaces_dir,
         "text-segmentation",
         "golden-run",
-        {"answer": "hello world", "score": 10, "ok": True},
+        [
+            {"phase_name": "setup", "outputs": {"answer": "hello world", "score": 10, "ok": True}},
+        ],
     )
-    _write_final_state(
+    _write_result_snapshot(
         workspaces_dir,
         "text-segmentation",
         "current-run",
-        {"answer": "hello studio", "score": 8, "ok": False},
+        [
+            {"phase_name": "setup", "outputs": {"answer": "hello studio", "score": 8, "ok": False}},
+        ],
     )
 
     promote_response = client.post(
         "/api/skills/text-segmentation/golden",
         json={"run_id": "golden-run", "lock": False},
+        headers=FALLBACK_HEADERS,
     )
 
     assert promote_response.status_code == 200
     assert promote_response.json()["id"] == "golden-run"
+    assert promote_response.json()["source_run_id"] == "golden-run"
+    assert promote_response.json()["source_run_results_ref"] == "text-segmentation/runs/golden-run/result.json"
+    assert promote_response.json()["baseline_ref"] == ".workspace/golden/golden-run/baseline.json"
     golden_dir = _skills_dir / "text-segmentation" / ".workspace" / "golden" / "golden-run"
-    assert (golden_dir / "golden_metadata.json").exists()
+    assert (golden_dir / "baseline.json").exists()
+    assert (golden_dir / "report.json").exists()
+    assert (golden_dir / "cases" / "setup.json").exists()
+    assert json.loads((golden_dir / "baseline.json").read_text(encoding="utf-8"))["locked"] is False
+    assert not (golden_dir / "golden_metadata.json").exists()
 
     diff_response = client.get(
         "/api/skills/text-segmentation/runs/current-run/diff?against=golden-run",
@@ -598,14 +841,122 @@ def test_set_golden_and_compare_run_diff(
 
     assert diff_response.status_code == 200
     body = diff_response.json()
-    assert body["golden_run_id"] == "golden-run"
+    assert body["baseline_id"] == "golden-run"
+    assert body["source_run_id"] == "golden-run"
+    assert body["run_results_ref"] == "text-segmentation/runs/current-run/result.json"
     assert body["total_score"] < 100
+    assert "differences" not in body
+    assert "node_results" not in body
     answer_diff = next(
-        item for item in body["differences"] if item["field_path"] == "output.answer"
+        item for item in body["node_groups"][0]["field_differences"] if item["field_path"] == "nodes.setup.answer"
     )
     assert answer_diff["type"] == "text"
     assert answer_diff["changed"] is True
     assert answer_diff["score"] < 1
+
+
+def test_set_golden_requires_explicit_browser_fallback_header(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, workspaces_dir = studio_roots
+    _write_final_state(
+        workspaces_dir,
+        "text-segmentation",
+        "golden-run",
+        {"answer": "must use native fs unless browser fallback is explicit"},
+    )
+    golden_dir = skills_dir / "text-segmentation" / ".workspace" / "golden" / "golden-run"
+
+    response = client.post(
+        "/api/skills/text-segmentation/golden",
+        json={"run_id": "golden-run", "lock": False},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error_code"] == "NATIVE_FS_REQUIRED"
+    assert not golden_dir.exists()
+
+
+def test_golden_plan_prepares_native_fs_payload_without_writing_baseline(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    _skills_dir, workspaces_dir = studio_roots
+    _write_result_snapshot(
+        workspaces_dir,
+        "text-segmentation",
+        "plan-run",
+        [{"phase_name": "setup", "outputs": {"answer": "native writer owns golden"}}],
+    )
+    golden_dir = _skills_dir / "text-segmentation" / ".workspace" / "golden" / "plan-run"
+
+    response = client.post(
+        "/api/skills/text-segmentation/golden/plan",
+        json={"run_id": "plan-run", "lock": True},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["baseline"]["id"] == "plan-run"
+    assert body["baseline"]["source_run_id"] == "plan-run"
+    assert body["baseline"]["source_run_results_ref"] == "text-segmentation/runs/plan-run/result.json"
+    assert body["baseline"]["baseline_ref"] == ".workspace/golden/plan-run/baseline.json"
+    assert body["baseline"]["locked"] is True
+    files = {item["path"]: json.loads(item["content"]) for item in body["files"]}
+    assert files[".workspace/golden/plan-run/baseline.json"]["locked"] is True
+    assert files[".workspace/golden/plan-run/baseline.json"]["cases"][0]["node_id"] == "setup"
+    assert files[".workspace/golden/plan-run/report.json"]["case_count"] == 1
+    assert files[".workspace/golden/plan-run/cases/setup.json"]["expected_output"] == {
+        "answer": "native writer owns golden"
+    }
+    assert "result_path" not in body
+    assert "result_content" not in body
+    assert "metadata_path" not in body
+    assert "metadata_content" not in body
+    assert not golden_dir.exists()
+
+
+def test_compare_endpoint_returns_per_node_golden_diff(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    _skills_dir, workspaces_dir = studio_roots
+    _write_result_snapshot(
+        workspaces_dir,
+        "text-segmentation",
+        "golden-node-run",
+        [
+            {"phase_name": "setup", "outputs": {"answer": "hello world", "ok": True}},
+            {"phase_name": "review", "outputs": {"score": 10}},
+        ],
+    )
+    _write_result_snapshot(
+        workspaces_dir,
+        "text-segmentation",
+        "current-node-run",
+        [
+            {"phase_name": "setup", "outputs": {"answer": "hello studio", "ok": True}},
+            {"phase_name": "review", "outputs": {"score": 10}},
+        ],
+    )
+
+    promote_response = client.post(
+        "/api/skills/text-segmentation/golden",
+        json={"run_id": "golden-node-run", "lock": False},
+        headers=FALLBACK_HEADERS,
+    )
+    assert promote_response.status_code == 200
+
+    compare_response = client.get("/api/skills/text-segmentation/runs/current-node-run/compare")
+
+    assert compare_response.status_code == 200
+    body = compare_response.json()
+    assert [node["node_id"] for node in body["node_groups"]] == ["setup", "review"]
+    assert body["node_groups"][0]["status"] == "fail"
+    assert body["node_groups"][0]["field_differences"][0]["field_path"] == "nodes.setup.answer"
+    assert body["node_groups"][1]["status"] == "pass"
+    assert body["node_groups"][1]["field_differences"] == []
 
 
 def test_compare_missing_golden_returns_404(
@@ -618,7 +969,150 @@ def test_compare_missing_golden_returns_404(
     response = client.get("/api/skills/text-segmentation/runs/current-run/diff")
 
     assert response.status_code == 404
-    assert response.json()["error_code"] == "RESUME_CHECKPOINT_NOT_FOUND"
+    assert response.json()["error_code"] == "golden.baseline_not_found"
+
+
+def test_set_golden_with_node_id_writes_only_that_node(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    """POST golden with node_id promotes one agent node, not the whole run (GOLDEN_EVAL-1)."""
+    skills_dir, workspaces_dir = studio_roots
+    _write_result_snapshot(
+        workspaces_dir,
+        "text-segmentation",
+        "node-set-run",
+        [
+            {"phase_name": "setup", "outputs": {"answer": "hello world"}},
+            {"phase_name": "review", "outputs": {"score": 10}},
+        ],
+    )
+
+    response = client.post(
+        "/api/skills/text-segmentation/golden",
+        json={"run_id": "node-set-run", "lock": False, "node_id": "review"},
+        headers=FALLBACK_HEADERS,
+    )
+
+    assert response.status_code == 200
+    golden_dir = skills_dir / "text-segmentation" / ".workspace" / "golden" / "node-set-run"
+    assert (golden_dir / "cases" / "review.json").exists()
+    assert not (golden_dir / "cases" / "setup.json").exists()
+    cases = response.json()["cases"]
+    assert [case["node_id"] for case in cases] == ["review"]
+
+
+def test_set_golden_second_node_merges_without_clobbering_first(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    """A node-scoped write must not auto-overwrite a sibling node's golden (F6)."""
+    skills_dir, workspaces_dir = studio_roots
+    _write_result_snapshot(
+        workspaces_dir,
+        "text-segmentation",
+        "node-merge-run",
+        [
+            {"phase_name": "setup", "outputs": {"answer": "hello world"}},
+            {"phase_name": "review", "outputs": {"score": 10}},
+        ],
+    )
+
+    first = client.post(
+        "/api/skills/text-segmentation/golden",
+        json={"run_id": "node-merge-run", "lock": False, "node_id": "setup"},
+        headers=FALLBACK_HEADERS,
+    )
+    assert first.status_code == 200
+    second = client.post(
+        "/api/skills/text-segmentation/golden",
+        json={"run_id": "node-merge-run", "lock": False, "node_id": "review"},
+        headers=FALLBACK_HEADERS,
+    )
+    assert second.status_code == 200
+
+    golden_dir = skills_dir / "text-segmentation" / ".workspace" / "golden" / "node-merge-run"
+    assert (golden_dir / "cases" / "setup.json").exists()
+    assert (golden_dir / "cases" / "review.json").exists()
+    cases = client.get("/api/skills/text-segmentation/golden").json()[0]["cases"]
+    assert sorted(case["node_id"] for case in cases) == ["review", "setup"]
+
+
+def test_list_golden_projects_cases(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    """GET golden projects per-node cases — the three-state badge's source of truth."""
+    _skills_dir, workspaces_dir = studio_roots
+    _write_result_snapshot(
+        workspaces_dir,
+        "text-segmentation",
+        "list-cases-run",
+        [
+            {"phase_name": "setup", "outputs": {"answer": "hello world"}},
+            {"phase_name": "review", "outputs": {"score": 10}},
+        ],
+    )
+    promote = client.post(
+        "/api/skills/text-segmentation/golden",
+        json={"run_id": "list-cases-run", "lock": False},
+        headers=FALLBACK_HEADERS,
+    )
+    assert promote.status_code == 200
+
+    listed = client.get("/api/skills/text-segmentation/golden")
+
+    assert listed.status_code == 200
+    body = listed.json()
+    assert len(body) == 1
+    assert sorted(case["node_id"] for case in body[0]["cases"]) == ["review", "setup"]
+
+
+def test_set_golden_node_scoped_still_runs_predict_guard(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F6 guard holds for node-scoped writes: the predict-trace 409 is not bypassed.
+
+    The guard verdict is exercised by its own unit tests; here we assert the
+    node-scoped promote path still routes the snapshot through the guard, so a
+    detected predict trace surfaces as 409 instead of being silently promoted.
+    """
+    _skills_dir, workspaces_dir = studio_roots
+    _write_result_snapshot(
+        workspaces_dir,
+        "text-segmentation",
+        "predict-node-run",
+        [{"phase_name": "setup", "outputs": {"answer": "fake"}}],
+    )
+
+    from app.services import golden_diff
+
+    def _reject_predict(trace_payload: dict[str, Any], *, skill_id: str, run_id: str) -> None:
+        del trace_payload, skill_id, run_id
+        from app.core.exceptions import error_response, raise_error_response
+
+        raise_error_response(
+            error_response(
+                error_code="PREDICT_TRACE_CANNOT_BE_GOLDEN",
+                http_status=409,
+                message="Predict traces cannot be saved as Golden baselines",
+                details={},
+                retry_strategy="not_retryable",
+            )
+        )
+
+    monkeypatch.setattr(golden_diff, "assert_trace_can_be_promoted_to_golden", _reject_predict)
+
+    response = client.post(
+        "/api/skills/text-segmentation/golden",
+        json={"run_id": "predict-node-run", "lock": False, "node_id": "setup"},
+        headers=FALLBACK_HEADERS,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error_code"] == "PREDICT_TRACE_CANNOT_BE_GOLDEN"
 
 
 def test_run_spawn_failure_maps_to_500(
@@ -627,6 +1121,7 @@ def test_run_spawn_failure_maps_to_500(
 ) -> None:
     monkeypatch.setattr(run_manager, "process_factory", FailingProcess)
     monkeypatch.setattr(run_manager, "queue_factory", queue.Queue)
+    _record_predict_pass("text-segmentation")
 
     response = client.post(
         "/api/skills/text-segmentation/runs",
@@ -635,6 +1130,50 @@ def test_run_spawn_failure_maps_to_500(
 
     assert response.status_code == 500
     assert response.json()["error_code"] == "RUN_SPAWN_FAILED"
+
+
+def test_run_without_prior_predict_returns_run_requires_predict(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # No predict-pass on record: the server-side gate must block the run-spawn
+    # path before any worker is started, for any caller (not just the UI).
+    del studio_roots
+    monkeypatch.setattr(run_manager, "process_factory", InlineProcess)
+    monkeypatch.setattr(run_manager, "queue_factory", queue.Queue)
+    monkeypatch.setattr(run_manager, "worker", fake_run_worker)
+
+    response = client.post(
+        "/api/skills/text-segmentation/runs",
+        json={"input_data": {"input_text": "hello"}},
+    )
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body["error_code"] == "RUN_REQUIRES_PREDICT"
+    assert body["details"]["skill_id"] == "text-segmentation"
+
+
+def test_run_after_passing_predict_is_allowed(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A passing predict on record satisfies the gate and lets the run spawn.
+    del studio_roots
+    monkeypatch.setattr(run_manager, "process_factory", InlineProcess)
+    monkeypatch.setattr(run_manager, "queue_factory", queue.Queue)
+    monkeypatch.setattr(run_manager, "worker", fake_run_worker)
+    _record_predict_pass("text-segmentation")
+
+    response = client.post(
+        "/api/skills/text-segmentation/runs",
+        json={"input_data": {"input_text": "hello"}},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "running"
 
 
 def test_terminal_endpoint_spawns_pty_and_reaps_expired_session(
@@ -668,14 +1207,58 @@ def test_events_ws_broadcasts_to_multiple_clients(client: TestClient) -> None:
         assert second.receive_json() == {"type": "skill_changed", "skill_id": "text-segmentation"}
 
 
-def test_deferred_endpoints_return_structured_501(client: TestClient) -> None:
-    response = client.delete("/api/skills/demo/golden/example")
+def test_delete_golden_baseline_removes_persisted_baseline(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    _skills_dir, workspaces_dir = studio_roots
+    _write_result_snapshot(
+        workspaces_dir,
+        "text-segmentation",
+        "delete-golden-run",
+        [{"phase_name": "setup", "outputs": {"answer": "remove me"}}],
+    )
 
-    assert response.status_code == 501
-    body = response.json()
-    assert body["error_code"] == "NOT_IMPLEMENTED"
-    assert body["http_status"] == 501
-    assert body["retry_strategy"] == "not_retryable"
+    promote_response = client.post(
+        "/api/skills/text-segmentation/golden",
+        json={"run_id": "delete-golden-run", "lock": False},
+        headers=FALLBACK_HEADERS,
+    )
+    assert promote_response.status_code == 200
+
+    delete_response = client.delete(
+        "/api/skills/text-segmentation/golden/delete-golden-run",
+        headers=FALLBACK_HEADERS,
+    )
+
+    assert delete_response.status_code == 204
+    assert client.get("/api/skills/text-segmentation/golden").json() == []
+
+
+def test_delete_golden_requires_explicit_browser_fallback_header(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, _workspaces_dir = studio_roots
+    golden_dir = skills_dir / "text-segmentation" / ".workspace" / "golden" / "delete-golden-run"
+    golden_dir.mkdir(parents=True, exist_ok=True)
+    (golden_dir / "baseline.json").write_text(
+        json.dumps(
+            {
+                "baseline_id": "delete-golden-run",
+                "source_run_id": "source-run",
+                "source_run_results_ref": "text-segmentation/runs/source-run/result.json",
+                "cases": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.delete("/api/skills/text-segmentation/golden/delete-golden-run")
+
+    assert response.status_code == 409
+    assert response.json()["error_code"] == "NATIVE_FS_REQUIRED"
+    assert golden_dir.exists()
 
 
 def test_value_error_handler_returns_studio_error_response(client: TestClient) -> None:
@@ -698,6 +1281,24 @@ def test_cors_allows_vite_and_backup_dev_origins(client: TestClient) -> None:
         "http://127.0.0.1:5174",
         "http://localhost:3000",
     ):
+        response = client.options(
+            "/api/skills",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == origin
+
+
+def test_cors_allows_packaged_tauri_webview_origins(client: TestClient) -> None:
+    # The packaged desktop .app serves its frontend from the Tauri custom
+    # protocol origin (tauri://localhost on macOS/Linux, http://tauri.localhost
+    # on Windows). Without these in the allow-list the bundled UI cannot make any
+    # HTTP API call (it can only open the WebSocket, which is not CORS-gated),
+    # which surfaces as a permanent "Could not load skills".
+    for origin in ("tauri://localhost", "http://tauri.localhost"):
         response = client.options(
             "/api/skills",
             headers={
@@ -739,12 +1340,12 @@ class FailingProcess(InlineProcess):
 
 def fake_run_worker(
     skill_id: str,
-    skill_path_raw: str,
     run_dir_raw: str,
     inputs: dict[str, Any],
     process_queue: queue.Queue[dict[str, Any]],
+    art_ref: dict[str, Any],
 ) -> None:
-    del skill_path_raw, inputs
+    del art_ref, inputs
     run_dir = Path(run_dir_raw)
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "artifacts").mkdir(exist_ok=True)
@@ -761,11 +1362,11 @@ def fake_run_worker(
             wall_time_seconds=0.1,
         ),
     ]
-    (run_dir / "trace.jsonl").write_text(
-        "\n".join(event.model_dump_json() for event in events) + "\n",
-        encoding="utf-8",
-    )
-    (run_dir / "final_state.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
+    trace_jsonl = "\n".join(event.model_dump_json() for event in events) + "\n"
+    final_state = {"ok": True}
+    (run_dir / "trace.jsonl").write_text(trace_jsonl, encoding="utf-8")
+    (run_dir / "final_state.json").write_text(json.dumps(final_state), encoding="utf-8")
+    _write_run_artifact_store(run_dir, final_state=final_state, trace_jsonl=trace_jsonl)
     (run_dir / "metrics.json").write_text(json.dumps({"status": "success"}), encoding="utf-8")
     (run_dir / "checkpoints.db").touch()
     for event in events:
@@ -775,12 +1376,12 @@ def fake_run_worker(
 
 def fake_failed_run_worker(
     skill_id: str,
-    skill_path_raw: str,
     run_dir_raw: str,
     inputs: dict[str, Any],
     process_queue: queue.Queue[dict[str, Any]],
+    art_ref: dict[str, Any],
 ) -> None:
-    del skill_id, skill_path_raw, inputs
+    del skill_id, art_ref, inputs
     run_dir = Path(run_dir_raw)
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "final_state.json").write_text(json.dumps({}), encoding="utf-8")
@@ -792,8 +1393,11 @@ class FakeGitService:
     def __init__(self, commits: list[tuple[Path, str]]) -> None:
         self._commits = commits
 
-    def auto_commit_run(self, skill_dir: Path, run_id: str) -> None:
+    def auto_commit_run(self, skill_dir: Path, run_id: str) -> object:
         self._commits.append((skill_dir, run_id))
+        # Non-None mirrors GitLocalService returning a commit result for a real
+        # git repo, so the run is reported committed (not the no_git boundary).
+        return object()
 
 
 class FakePty:
@@ -885,6 +1489,80 @@ def _write_final_state(
     return run_dir
 
 
+def _write_result_state(
+    workspaces_dir: Path,
+    skill_id: str,
+    run_id: str,
+    payload: dict[str, Any],
+) -> Path:
+    del workspaces_dir
+    run_dir = config.SKILLS_DIR / skill_id / ".workspace" / "runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "result.json").write_text(json.dumps(payload), encoding="utf-8")
+    return run_dir
+
+
+def _write_result_snapshot(
+    workspaces_dir: Path,
+    skill_id: str,
+    run_id: str,
+    phases: list[dict[str, Any]],
+) -> Path:
+    del workspaces_dir
+    run_dir = resolve_skill_dir(skill_id) / ".workspace" / "runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    node_outputs: dict[str, Any] = {}
+    for index, phase in enumerate(phases):
+        node_id = phase.get("phase_name") or phase.get("node_id") or f"node_{index}"
+        node_outputs[str(node_id)] = phase.get("outputs", {})
+    _write_run_result_snapshot_store(
+        run_dir,
+        skill_id=skill_id,
+        run_id=run_id,
+        node_outputs=node_outputs,
+    )
+    return run_dir
+
+
+def _write_run_result_snapshot_store(
+    run_dir: Path,
+    *,
+    skill_id: str,
+    run_id: str,
+    node_outputs: dict[str, Any],
+) -> None:
+    from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
+
+    store = LocalRunArtifactStore(root=run_dir.parent.parent)
+    object_payloads = {
+        f"nodes/{node_id}/outputs.json": json.dumps(outputs).encode("utf-8")
+        for node_id, outputs in node_outputs.items()
+    }
+    snapshot = RunResultSnapshot(
+        run_results_ref=RunResultsRef(
+            run_id=run_id,
+            uri=f"{skill_id}/runs/{run_id}/result.json",
+            content_hash="sha256:" + ("0" * 64),
+        ),
+        node_results=[
+            NodeRunResult(
+                agent_node_id=node_id,
+                status="success",
+                outputs_ref=f"{skill_id}/runs/{run_id}/nodes/{node_id}/outputs.json",
+                trace_refs=[f"{skill_id}/runs/{run_id}/trace/{node_id}.jsonl"],
+            )
+            for node_id in node_outputs
+        ],
+        status="success",
+        outputs_ref=f"{skill_id}/runs/{run_id}/outputs.json",
+        trace_refs=[f"{skill_id}/runs/{run_id}/trace.jsonl"],
+    )
+    object_payloads["result.json"] = snapshot.model_dump_json().encode("utf-8")
+    store.begin_run(run_id, metadata={"artifact_id": skill_id})
+    store.put_batch(run_id, object_payloads)
+    store.seal_run(run_id)
+
+
 def _write_run_record(
     workspaces_dir: Path,
     skill_id: str,
@@ -893,8 +1571,53 @@ def _write_run_record(
     started_at: datetime,
     input_data: dict[str, Any],
 ) -> Path:
-    run_dir = _write_final_state(workspaces_dir, skill_id, run_id, {"ok": True})
+    final_state = {"ok": True}
+    run_dir = _write_final_state(workspaces_dir, skill_id, run_id, final_state)
     metadata = RunMetadata(run_id=run_id, status="success", started_at=started_at)
     (run_dir / "run_metadata.json").write_text(metadata.model_dump_json(), encoding="utf-8")
     (run_dir / "input_data.json").write_text(json.dumps(input_data), encoding="utf-8")
+    _write_run_artifact_store(run_dir, final_state=final_state, trace_jsonl="", input_data=input_data)
     return run_dir
+
+
+def _write_run_artifact_store(
+    run_dir: Path,
+    *,
+    final_state: dict[str, Any],
+    trace_jsonl: str,
+    input_data: dict[str, Any] | None = None,
+) -> None:
+    from app.core.adapters.run_artifact_store_local import LocalRunArtifactStore
+
+    store = LocalRunArtifactStore(root=run_dir.parent.parent)
+    node_outputs = {"setup": final_state}
+    snapshot = RunResultSnapshot(
+        run_results_ref=RunResultsRef(
+            run_id=run_dir.name,
+            uri=f"{run_dir.parent.parent.parent.name}/runs/{run_dir.name}/result.json",
+            content_hash="sha256:" + ("0" * 64),
+        ),
+        node_results=[
+            NodeRunResult(
+                agent_node_id=node_id,
+                status="success",
+                outputs_ref=f"{run_dir.parent.parent.parent.name}/runs/{run_dir.name}/nodes/{node_id}/outputs.json",
+                trace_refs=[f"{run_dir.parent.parent.parent.name}/runs/{run_dir.name}/trace.jsonl"],
+            )
+            for node_id in node_outputs
+        ],
+        status="success",
+        outputs_ref=f"{run_dir.parent.parent.parent.name}/runs/{run_dir.name}/outputs.json",
+        trace_refs=[f"{run_dir.parent.parent.parent.name}/runs/{run_dir.name}/trace.jsonl"],
+    )
+    store.put_batch(
+        run_dir.name,
+        {
+            "result.json": snapshot.model_dump_json().encode("utf-8"),
+            "nodes/setup/outputs.json": json.dumps(final_state).encode("utf-8"),
+            "final_state.json": json.dumps(final_state).encode("utf-8"),
+            "input_data.json": json.dumps(input_data or {}).encode("utf-8"),
+            "trace.jsonl": trace_jsonl.encode("utf-8"),
+        },
+    )
+    store.seal_run(run_dir.name)

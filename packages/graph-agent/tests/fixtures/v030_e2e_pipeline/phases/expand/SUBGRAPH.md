@@ -1,5 +1,5 @@
 ---
-target_skill: e2e.expander
+path: registry/expander
 allow_sequential_overwrite: [report]
 io:
   inputs:

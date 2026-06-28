@@ -1,0 +1,435 @@
+{
+  "page": "copilot",
+  "glossary": [
+    {
+      "id": "copilot-role",
+      "term": "copilot 角色（copilot role）",
+      "category": "领域概念",
+      "owner": "跨层（角色概念归 ③b；SDK 调用/产品策略归 ③a；编辑 UI 归 ① 前端）",
+      "explain": "助手用的「角色」。和 graph（工作流图）里的角色长得一样、也是「一个抽象名字映射到一组真实模型 + 兜底顺序」，但运行时是两套独立的东西：copilot 不走工作流引擎，而是用 Claude 官方 SDK（claude_agent_sdk）直接 spawn 一个 claude 命令行子进程来对话。一个 copilot 角色只能绑一个 model group（不像 graph 角色能绑多组）。关键边界：gateway 库完全不知道 copilot 是什么——它只把 copilot_chat 当普通 role 解析成 route；SDK 调用 / 测试 / session 全属 ③a Studio 领域。",
+      "detail": [
+        [
+          "澄清",
+          "抽象助手角色；不走引擎、走 Claude SDK 子进程；只绑一个 model group"
+        ],
+        [
+          "分层",
+          "route 解析归 ③b（不知 copilot）；SDK 调用/session/测试/动态浮出归 ③a；编辑 UI 归 ① 前端"
+        ]
+      ]
+    },
+    {
+      "id": "model-group",
+      "term": "Model Group（模型组）",
+      "category": "领域概念",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "一组「指向同一个逻辑模型的多条线路」的集合，例如「Claude Opus 4.8」这个组下面可能挂着官方 anthropic 一条线、第三方 anthropic-兼容中转一条线。给 copilot 角色选一个 model group，就等于说「这个助手用哪个模型、以及这个模型有哪几条可切换的线路」。与 Roles 页是同一个概念、同一套 ③b 分组内核，归属一致。",
+      "detail": [
+        [
+          "定义层",
+          "③b gateway（model group 分组 + identity；现散 ③a 待下沉）"
+        ],
+        [
+          "复用范围",
+          "本页 #63 选组；与 Roles 页 model-group 同源"
+        ]
+      ]
+    },
+    {
+      "id": "route",
+      "term": "Route（线路）",
+      "category": "领域概念",
+      "owner": "跨层（解析归 ③b；SDK 调用归 ③a）",
+      "explain": "一条「模型 + 具体 endpoint 凭证」的可执行线路。一个 model group 里通常有多条 route，排成兜底链：运行时先试第一条，连不上就顺着链往下试。gateway 库只负责把 copilot_chat 解析成 ResolvedRoute[]（route 级 API + capability），③a 拿这些 route 自己用 ClaudeSDKClient 去调。与 Roles 页 route 同一概念、归属一致。",
+      "detail": [
+        [
+          "澄清",
+          "模型 × endpoint 凭证的可执行路径；多条排兜底链"
+        ],
+        [
+          "分层",
+          "resolve_routes(copilot_chat) 归 ③b；拿 route 用 SDK 调归 ③a"
+        ]
+      ]
+    },
+    {
+      "id": "builtin-surface",
+      "term": "内置角色动态浮出（builtin surface）",
+      "category": "后端能力",
+      "owner": "③a Studio",
+      "explain": "设计要的「首次没有任何助手时不让用户面对空白」机制：系统从当前可用模型里，按家族偏好阶梯（Claude 优先最新的 Opus 4.8、退而求其次 4.7；DeepSeek 优先 V4-Pro、退 V3.2-Pro）自动挑出最新最好的型号，浮现成内置助手角色。关键是「动态择优」——按实际可用的型号挑，而不是写死一对一映射。这是产品策略（推荐/浮出/弃用四件事之一），按 §6.0 判据归 ③a 应用加工，不上浮 gateway。现码择优函数 pickDefault 写好了但主流程没接（#56 真 gap）。",
+      "detail": [
+        [
+          "定义层",
+          "③a Studio（产品策略：动态浮出，§6.0 应用加工）"
+        ],
+        [
+          "复用范围",
+          "本页 #56 首次空态自动浮出；现 pickDefault 已写未接线"
+        ]
+      ]
+    },
+    {
+      "id": "real-sdk-test",
+      "term": "真 SDK 测试（real SDK test）",
+      "category": "后端能力",
+      "owner": "③a Studio",
+      "explain": "助手卡上点 Test 时该做的「测得和真跑一模一样」的验证。做法是：用助手真实对话用的同一套 Claude 官方客户端（ClaudeSDKClient），真的 spawn 一个 claude 命令行子进程、把这条线路的 base_url/api_key 通过环境变量注进去，然后在临时工作目录写一个随机口令文件、让模型去读并回显口令。模型只有真正走通「启动子进程 → 环境变量注入生效 → 工具调用回路能读文件」整条链，才可能把口令念对——念对就等于这条线路真能用。它取代了旧的「假测试」（旧版用裸 Anthropic HTTP 客户端发工具调用，测的客户端和真跑的根本不是一套）。因 copilot SDK 调用/测试全属 ③a 领域，这个测试归 ③a；gateway 不碰 SDK。",
+      "detail": [
+        [
+          "定义层",
+          "③a Studio（copilot SDK 测试，§6.0 调用方式归 ③a）"
+        ],
+        [
+          "复用范围",
+          "本页 #58 点 Test；与真实对话同一套 ClaudeSDKClient + 子进程 + env 注入"
+        ]
+      ]
+    },
+    {
+      "id": "ui-state",
+      "term": "ui_state（线路就绪态投影，6 态粗粒度）",
+      "category": "后端能力",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "gateway 侧给每条线路投影出来的一个粗粒度状态（即三页统一的 6 态，如 ready/未验证等），反映的是「凭证齐不齐、配置对不对」这种静态判断，而不是「真用 SDK 测过能跑」。助手卡初始显示的 N/M SDK Ready 数就是拿这个充数，所以是粗映射、不等于真测过；点 Test 后才被 real-sdk-test 的真测结果覆盖。它就是 API Keys/Roles 页 six-state 的同一套体系，归属一致（③b 公共能力，现码 ③a 待下沉）。",
+      "detail": [
+        [
+          "定义层",
+          "③b gateway（6 态标准总结；现码在 ③a 待下沉）"
+        ],
+        [
+          "复用范围",
+          "本页 #57 初始 N/M 充数 + 线路灯初值；与 six-state 同源，真测态由 #58 覆盖"
+        ]
+      ]
+    },
+    {
+      "id": "save-status-badge",
+      "term": "SaveStatusBadge（统一保存状态徽章）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "四个设置页（General / API Keys / LLM Roles / Copilot）共用的同一个保存状态小标签组件，吃同一个 SaveStatus 类型，按 idle（静默不显）/pending（待保存）/saving（保存中）/saved（已保存）/失败（显式红色告警）流转。Copilot 页头右上挂的就是它，取代了早前那个写死装饰、不反映真实状态的「Backend Integration」假徽章。与 shell 页 save-badge 是同一个统一组件方向。",
+      "detail": [
+        [
+          "定义层",
+          "① 前端（统一保存徽章组件，吃 SaveStatus 类型）"
+        ],
+        [
+          "复用范围",
+          "四个设置页共用；本页 #54/#65 页头挂载"
+        ]
+      ]
+    },
+    {
+      "id": "derive-candidates",
+      "term": "deriveCopilotCandidateGroups（候选组派生）",
+      "category": "前端模块",
+      "owner": "① 前端（含待下沉 ③b 的启发式）",
+      "explain": "前端把真实 registry（凭证 + 模型清单）派生成 copilot 可选候选组的函数。它顺带做了两件还属「前端启发式」的事：用 provider_type==='anthropic_compatible' 这个字段筛出哪些线路可选，以及拿一张写死的型号白名单（claude-opus-4.7/4.8、deepseek-v4-pro/v3.2-pro）判定哪个算 Built-in。这两处理想上该由 ③b gateway 的真实能力判定（route 是否 anthropic-messages 兼容）来取代——属现状偏差（#55/#60 仍成立）。",
+      "detail": [
+        [
+          "定义层",
+          "① 前端（候选组派生；含两处启发式应由 ③b 能力判定取代）"
+        ],
+        [
+          "复用范围",
+          "本页 #55 卡片判内置、#60 eligible 可选线路筛选"
+        ]
+      ]
+    },
+    {
+      "id": "pick-default",
+      "term": "pickDefaultCopilotGroupIds（默认内置组择优）",
+      "category": "前端模块",
+      "owner": "① 前端",
+      "explain": "已经写好的「按偏好阶梯挑默认内置助手」函数（Claude 优先 4.8 退 4.7、DeepSeek 优先 V4-Pro 退 V3.2-Pro）。逻辑是对的、已是动态择优（不是旧的写死映射），但 Copilot 页主流程目前没调它——所以首次空态不会自动浮出内置助手，函数白写在那（#56 真 gap）。它实现的是 builtin-surface 这条产品策略的前端择优部分。",
+      "detail": [
+        [
+          "定义层",
+          "① 前端（择优函数，实现 builtin-surface 的前端部分）"
+        ],
+        [
+          "复用范围",
+          "本页 #56 首次空态择优；逻辑已就绪、主流程未接线"
+        ]
+      ]
+    },
+    {
+      "id": "llm-roles-yaml",
+      "term": "llm_roles.yaml（角色配置文件）",
+      "category": "数据文件",
+      "owner": "③b gateway（设计；现码在 ③a 待下沉）",
+      "explain": "所有角色（含 copilot 角色）落盘的 YAML 文件，存在 AgentStudio 配置目录的 llm/ 子目录下。增删改助手、调兜底顺序，最终都原子写进这里。它和 Roles 页是同一份文件：schema 由 ③b gateway 库定义、数据归 ③b；路径由 ③a 的 llm_paths（roles_path）定；读写由 ③a Studio 后端经存储缝执行（预留多用户 user_id）。copilot 角色靠 key 的 copilot_ 前缀与 graph 角色区分（③a 按前缀分流）。",
+      "detail": [
+        [
+          "Schema 定义",
+          "③b gateway 库"
+        ],
+        [
+          "文件路径定义",
+          "③a（llm_paths.roles_path）"
+        ],
+        [
+          "读写",
+          "③a Studio backend 经 storage seam（预留 user_id）"
+        ],
+        [
+          "文件归属",
+          "③b gateway-owned 数据"
+        ]
+      ]
+    }
+  ],
+  "atoms": [
+    {
+      "n": 54,
+      "cap": "copilot-tab-shell",
+      "track": null,
+      "marker": "live",
+      "module": "角色卡与种子",
+      "func": "进 Copilot tab 时给出页面骨架:标题、说明、右上保存状态徽章;角色卡还没就绪时先占位骨架屏,让用户知道页面在加载。",
+      "action": "切到 Copilot tab(懒加载挂载 Copilot 设置页根组件)。",
+      "fe_logic": "进 tab → 渲染页头(标题 + 说明)，右上角挂一个统一保存状态徽章 [[save-status-badge]] → 角色数据还没到时先显两张骨架占位卡，到了再换成真角色卡。标题和说明文字取自国际化词条。",
+      "fe_modules": [
+        "save-status-badge"
+      ],
+      "be_logic": "无后端（③a Studio）动作。这层纯前端壳；要显示的角色数据来自上游已经拉好的角色表投影(见 #55)。",
+      "be_api": [],
+      "gap": "符合设计(原 catalog 标的 bug 已修)。审计原来记 #54『右上徽章是写死装饰、不反映真实连接』——当前工作树里全前端已搜不到『Backend Integration』字样，页头右上已换成真正接 saveStatus 的统一保存徽章。"
+    },
+    {
+      "n": 55,
+      "cap": "copilot-role-list",
+      "track": null,
+      "marker": "live",
+      "module": "角色卡与种子",
+      "func": "把后端（③a Studio）角色表里属于 copilot 的角色渲染成助手卡，显示模型名、Built-in/Third-party 来源徽章、兜底链，让用户看到当前配了哪些助手。",
+      "action": "进 tab 后随角色数据到达自动渲染。",
+      "fe_logic": "从角色表里过滤出 copilot 角色 → 每个组装成一张助手卡 → 卡上标题和模型元数据优先取真实 registry 派生出的候选组信息，缺了才回退到把角色名格式化显示 → 来源徽章按角色是 built_in 还是 third_party 显 Built-in / Third-party。",
+      "fe_modules": [
+        "derive-candidates"
+      ],
+      "be_logic": "上游统一拉全部角色 → 后端（③b gateway）逐个把角色『物化』(把抽象角色展开成含模型/兜底链的具体配置，空角色跳过) → 前端按 copilot 归属过滤渲染。角色数据读自落盘的角色配置文件 [[llm-roles-yaml]]。",
+      "be_api": [
+        {
+          "endpoint": "GET /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "返回全部角色(含各角色的归属、模型、兜底链)，前端自己挑出 copilot 的来画卡。",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "部分符合，仍有前端启发式残留。卡片『是不是内置』是前端 [[derive-candidates]] 拿一张写死的型号白名单(claude-opus-4.7/4.8、deepseek-v4-pro/v3.2-pro)判的，说明文字也按显示名里有没有『Claude』二选一——这套判定是前端写死的、没跟后端（③b gateway）的角色语义对齐(原审计 #55 这点仍成立)。好的一面：旧的 mock 模板已经清干净，无任何 mock 数据引用。"
+    },
+    {
+      "n": 56,
+      "cap": "role-seed-fallback",
+      "track": null,
+      "marker": "placeholder",
+      "module": "角色卡与种子",
+      "func": "(设计目标)首次一个助手都没有时，自动从可用模型里按家族偏好阶梯浮出 Claude / DeepSeek 最新最好的内置助手，免去空白起步。",
+      "action": "进 tab 且后端（③a Studio）一个 copilot 角色都没有时。",
+      "fe_logic": "择优函数 [[pick-default]] 其实已经写好、也已是动态择优(不是旧的写死映射)，但 Copilot 页主流程根本没调它来自动建种子角色 → 页面只渲染已经存在的 copilot 角色，一个都没有时就不自动建卡，只剩一个 Add model 按钮干等用户自己建。",
+      "fe_modules": [
+        "pick-default",
+        "builtin-surface"
+      ],
+      "be_logic": "无后端（③a Studio）动作。自动浮出种子是前端的产品策略，后端（③a Studio）不会替你自动建 copilot 助手。",
+      "be_api": [],
+      "gap": "真 gap，未接线。设计(内置角色动态浮出 [[builtin-surface]])要求一个助手都没有时按阶梯自动浮出内置助手；现在择优逻辑写好了却没接进主流程，首次空态不会自动浮出。注意这里的 mock 已清(不是『默认 props 还是 mock』了)，纯粹是『自动浮出』这一步还没接上。"
+    },
+    {
+      "n": 57,
+      "cap": "route-sdk-status-badge",
+      "track": null,
+      "marker": "placeholder",
+      "module": "Route 与测试",
+      "func": "在助手卡右上显示『N/M SDK Ready』汇总徽章，以及每条线路上的状态灯，让用户一眼看出这个助手有几条线已验证可用。",
+      "action": "(被动)随线路列表 + 测试结果覆盖态渲染。",
+      "fe_logic": "汇总徽章的『几条就绪』直接数有几条线路状态是 ready；但线路的初始状态是直接照搬 gateway 投影的粗粒度态 [[ui-state]]，不是真 SDK 测过的结果 → 所以初始的 N/M 是拿『配置看着对』充的数。点了 Test 之后，真测结果(见 #58)才会覆盖进来，把灯刷成真值。",
+      "fe_modules": [
+        "ui-state"
+      ],
+      "be_logic": "初始的就绪数来自 GET /llm/registry 投影出的线路就绪态 [[ui-state]](gateway 的 6 态投影，不是真 SDK 测过)；真 SDK 测试的结果走 #58 那条路回填覆盖。",
+      "be_api": [
+        {
+          "endpoint": "GET /llm/registry",
+          "owner": "③b gateway",
+          "purpose": "提供每条线路的粗粒度就绪态投影(凭证齐不齐、配置对不对)，用来给初始的 N/M 充数。",
+          "connected": "部分接通"
+        }
+      ],
+      "gap": "部分符合，初始徽章仍是粗映射。设计要求 SDK 状态灯反映真测过的能力；现在初始 N/M 数的是 [[ui-state]]『看着 ready』而非真测过(原审计 #57 仍成立)。另外发现一处投影不完整：单条线路的灯，只在状态是 testing(测试中)时才把真测覆盖态合并回去显示；测完变成 ready/不支持这种终态时反而没覆盖回灯——终态没刷回来。"
+    },
+    {
+      "n": 58,
+      "cap": "copilot-role-test",
+      "track": null,
+      "marker": "live",
+      "module": "Route 与测试",
+      "func": "点 Test 对这个助手的每条线路发一次真实 SDK 工具调用，验证子进程启动、环境变量注入、工具回路真能跑通，实时把每条线路的灯刷成 测试中→就绪/不支持。",
+      "action": "点助手卡上的 Test 按钮。",
+      "fe_logic": "点 Test → 发起一个角色测试任务并轮询进度 → 把任务回来的每条线路状态实时写进覆盖态，灯随之刷新 → 测完弹 toast 提示成功 / 需关注。",
+      "fe_modules": [],
+      "be_logic": "测试任务端点识别出这是 copilot 角色 → 分流到专门的 SDK 测试任务 → 对每条线路做一次真 SDK 测试 [[real-sdk-test]]：在临时工作区写一个随机口令文件、把这条线路的 base_url/api_key 通过环境变量注进 SDK、真 spawn 一个 claude 客户端去读文件并回显口令，只有口令念对(证明子进程+环境注入+工具回路全跑通)才判 ok → 测试结果作为『SDK 证据』原子落盘进凭证文件。",
+      "be_api": [
+        {
+          "endpoint": "POST /llm/roles/{name}/test-jobs",
+          "owner": "③a Studio",
+          "purpose": "起一个角色测试任务，对 copilot 角色内部分流去做真 SDK 探针；返回任务号。",
+          "connected": "已接通"
+        },
+        {
+          "endpoint": "GET /llm/role-test-jobs/{job_id}",
+          "owner": "③a Studio",
+          "purpose": "轮询这个测试任务的逐线路进度/结果。",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计(原 catalog 标的 bug 已修)。原审计 #58 的核心 gap 是『假测试：探针走裸 Anthropic HTTP 客户端，真跑用 ClaudeSDKClient，测的 SDK ≠ 跑的 SDK』——当前工作树里全后端（③a Studio）已搜不到 AsyncAnthropic、也无旧探针函数；测试已改走真 ClaudeSDKClient，和助手真实对话用同一套客户端、同一条子进程+环境注入路径，并用随机口令回显证明工具回路真跑通。这是 Stage 4 假测试 gap 的关键填法。"
+    },
+    {
+      "n": 59,
+      "cap": "route-fallback-reorder",
+      "track": null,
+      "marker": "live",
+      "module": "Route 与测试",
+      "func": "拖动线路卡片调整这个助手的兜底优先级，决定运行时先试哪条线。",
+      "action": "在线路网格里拖动某条线路卡。",
+      "fe_logic": "拖完 → 把新顺序写回这个助手的兜底链和模型组里的线路顺序 → 触发上游 debounce 保存。",
+      "fe_modules": [],
+      "be_logic": "保存把新兜底顺序原子写进角色配置文件 [[llm-roles-yaml]]。运行时助手对话的主循环是从兜底链第一条起步、连不上就顺着链往下逐条试，所以重排会真正改变尝试顺序、确实生效。",
+      "be_api": [
+        {
+          "endpoint": "PUT /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "整表 upsert，把这个助手调过序的兜底链落盘。",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "基本符合。原审计 #59『运行侧只取首条、重排未必生效』在当前活路径上已不成立——真实运行的对话主循环走的是完整兜底链、不是只首条。残留一处死代码:还留着一个只取首条的旧助手函数，但全后端（③a Studio）搜不到任何调用方，不影响运行，属清理项而非 bug。"
+    },
+    {
+      "n": 60,
+      "cap": "route-fallback-add-remove",
+      "track": null,
+      "marker": "live",
+      "module": "Route 与测试",
+      "func": "用 Add route 往兜底链追加一条兼容线路，或用垃圾桶把某条线路从链里移除，管理这个助手能用哪些线。",
+      "action": "点线路网格里的 Add route 选一条，或点线路卡上的垃圾桶。",
+      "fe_logic": "可追加的是这个组里还没进链的线路 → 选中就追加进兜底顺序；垃圾桶就从兜底顺序里过滤掉这条 → 都走同一个『写回顺序 + 触发保存』流程。",
+      "fe_modules": [
+        "derive-candidates"
+      ],
+      "be_logic": "保存原子写进角色配置文件 [[llm-roles-yaml]]。",
+      "be_api": [
+        {
+          "endpoint": "PUT /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "整表 upsert，把增/删线路后的兜底链落盘。",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "部分符合，『哪些线路可选』仍靠前端启发式筛。设计要求『可选』由后端（③b gateway）的真实能力判定(这条线路是不是 anthropic-messages 兼容)；现在可选线路集是前端 [[derive-candidates]] 按 provider_type==='anthropic_compatible' 这个字段筛出来的——按字段名猜，不是后端（③b gateway）按真实能力判(原审计 #60 仍成立)。"
+    },
+    {
+      "n": 61,
+      "cap": "model-group-remove",
+      "track": null,
+      "marker": "placeholder",
+      "module": "角色增删与配置",
+      "func": "(设计目标)model-group 行的 Remove 按钮，让用户把这个助手的整个模型组移除。",
+      "action": "点 model-group 行右侧的垃圾桶按钮。",
+      "fe_logic": "组级 Remove 按钮被写死成 disabled、且根本没绑点击处理 → 纯占位、点不动。(对照:线路级的删除按钮是真接了点击的，能用;只有组级这个是空壳。)",
+      "fe_modules": [],
+      "be_logic": "无后端（③a Studio）动作。没接点击就不会发任何请求。",
+      "be_api": [],
+      "gap": "真 gap，未接线。设计要求把这个 Remove 接上移除逻辑；现状仍是 disabled 写死 + 没有点击处理。需要注意:copilot 助手只能绑一个模型组，所以『移除组』语义上约等于清空这个助手的组配置，具体怎么接还需定义。"
+    },
+    {
+      "n": 62,
+      "cap": "copilot-role-add",
+      "track": null,
+      "marker": "live",
+      "module": "角色增删与配置",
+      "func": "点 Add model 新建一张空的第三方助手草稿卡，让用户从零配一个自定义助手。",
+      "action": "点 Add model 按钮。",
+      "fe_logic": "新建草稿 → id 取 copilot_custom_N(N 按现有同类草稿数量+1，带 copilot_ 前缀✓)，归属标 copilot、兜底链和模型组都先空着 → 因为还没选模型组，这张卡渲染成『空助手选组卡』，等用户去下拉里选组(见 #63)。",
+      "fe_modules": [],
+      "be_logic": "保存把新角色原子写进角色配置文件 [[llm-roles-yaml]];因为 key 带 copilot_ 前缀，后端（③a Studio）按 copilot 归属处理(后端（③a Studio）靠前缀 startswith copilot_ 来分流)。",
+      "be_api": [
+        {
+          "endpoint": "PUT /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "整表 upsert，把新建的空 copilot 草稿角色落盘。",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计。新建这一步本来就带 copilot_ 前缀，所以原审计 #62 担心的『命名触发后端（③a Studio）分流误判』的真正风险点在『选组之后会不会丢前缀』——那个点见 #63，已修。"
+    },
+    {
+      "n": 63,
+      "cap": "copilot-config-model-group",
+      "track": null,
+      "marker": "live",
+      "module": "角色增删与配置",
+      "func": "在空草稿卡的下拉里选一个模型组，把空助手变成可配置的助手(自动用该组里就绪的线路填好兜底链)。",
+      "action": "在空助手卡的下拉里选一个 model group。",
+      "fe_logic": "下拉选中 → 选组函数『用角色自己的 id 作 key 原地更新』，只把选中的模型组 id 写进这个角色的 active_model 和模型清单里，绝不动 role 的 key → 所以 key 始终是 copilot_custom_N、copilot_ 前缀保住了。同时默认把该组里就绪状态的线路选进兜底链。",
+      "fe_modules": [],
+      "be_logic": "保存原子写进角色配置文件 [[llm-roles-yaml]];因 key 仍带 copilot_ 前缀，后端（③a Studio）按前缀归 copilot、不会错存成 graph 工作流角色。",
+      "be_api": [
+        {
+          "endpoint": "PUT /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "整表 upsert，把空草稿配上模型组后的角色落盘。",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计(原 catalog 标的 bug 已修)。原审计 #63 记的旧 bug 是『选组后把 role 的 key 改成了裸模型组 id(如 claude-opus-4.7)，丢了 copilot_ 前缀 → 后端（③a Studio）靠前缀分流时把它误判成 graph 工作流角色错存』——当前选组函数用角色自己的 id 作 key、模型组 id 只写进 active_model/模型清单，函数注释就是『选组保留 copilot_ 前缀』，前缀不再丢、后端（③a Studio）不再误分流。这是 Stage 4 分流 bug 的关键填法。"
+    },
+    {
+      "n": 64,
+      "cap": "copilot-role-delete",
+      "track": null,
+      "marker": "live",
+      "module": "角色增删与配置",
+      "func": "删除一个第三方助手(弹确认 toast 防误删);内置助手卡不给删除入口。",
+      "action": "点第三方助手卡上的垃圾桶 → 确认 toast。",
+      "fe_logic": "点垃圾桶 → 弹二次确认 toast → 确认后从角色数据里删掉这个角色 → 触发上游保存。删除按钮只在角色来源是 third_party 时才渲染(内置卡没有删除按钮)。",
+      "fe_modules": [],
+      "be_logic": "这里有个工程注意点:整表 PUT 是 merge 语义(提交体里没出现的角色会被保留)，所以单靠『从提交体里去掉这个 key』并不会让后端（③a Studio）真删除——真正的删除应当走删单角色的端点。两条路最终都原子写角色配置文件 [[llm-roles-yaml]]。",
+      "be_api": [
+        {
+          "endpoint": "DELETE /llm/roles/{name}",
+          "owner": "③a Studio",
+          "purpose": "真正删掉单个 copilot 助手角色(整表 PUT 是 merge、去键不删，删除应走这条)。",
+          "connected": "部分接通"
+        }
+      ],
+      "gap": "基本符合(内置无删除、第三方带确认)。一处需确认的潜在落差:整表 PUT 是 merge 语义、缺席角色保留，前端删角色若只是『从提交体去键』再走 bulk PUT，后端（③a Studio）不会真删——删除是否走了真正的删单角色端点(DELETE /llm/roles/{name})需要确认，否则删除可能不生效。"
+    },
+    {
+      "n": 65,
+      "cap": "copilot-save-status",
+      "track": null,
+      "marker": "live",
+      "module": "保存反馈",
+      "func": "改完助手配置后，在页头看到保存中/已保存/失败反馈，知道改动有没有落盘。",
+      "action": "(被动)任意改动触发上游 debounce 保存后，保存状态流转。",
+      "fe_logic": "页头(骨架分支和主分支两处)都挂统一保存状态徽章 [[save-status-badge]]，把上游传进来的保存状态真渲染出来 → 失败时额外显一条红色校验错误条。保存状态已被真正消费，不再像旧版那样直接丢弃。",
+      "fe_modules": [
+        "save-status-badge"
+      ],
+      "be_logic": "保存状态由上游的角色保存逻辑驱动整表 PUT 的结果产出(idle→pending→saving→saved/失败)，本组件只投影状态、不直接发请求。落盘走角色配置文件 [[llm-roles-yaml]]。",
+      "be_api": [
+        {
+          "endpoint": "PUT /llm/roles",
+          "owner": "③a Studio",
+          "purpose": "上游 debounce 保存;保存结果驱动徽章状态流转，本组件只投影。",
+          "connected": "已接通"
+        }
+      ],
+      "gap": "符合设计(原 catalog 标的 bug 已修)。原审计 #65 记的旧 stale-code 是『保存状态和错误被直接丢弃、改完没有任何反馈』——当前 Copilot 页已搜不到那种丢弃写法;保存状态经统一徽章 [[save-status-badge]] 真渲染、错误真显红色错误条，反馈已接通。这是 Stage 4 saveStatus 丢弃 gap 的关键填法。残留小项:汇总就绪数那个函数还刻意忽略了一个线路覆盖态参数，与保存反馈无关。"
+    }
+  ]
+}

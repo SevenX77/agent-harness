@@ -1,0 +1,64 @@
+[
+  {
+    "name": "凭证 hydration",
+    "what": "进 API Keys tab 时,把后端回的「打码 key 快照」逐个 endpoint 换回真值的纯展示层回填逻辑——明文只在前端本地换回、绝不写回后端。",
+    "where": "llm.ts hydrateEndpointSecrets(逐 endpoint 把掩码 key 换回真值的主函数);配套 llm.ts getEndpointSecret(对单 endpoint 发 GET /registry/endpoints/{id}/secret 取明文)、llm.ts knownEndpointSecrets(endpointId→真 key 的模块级本地缓存)、llm.ts hydrateRegistryWithKnownSecrets(下次拉快照时用本地缓存就地换回,避免重复请求)、入口在 llm.ts getCredentials(默认 hydrateSecrets=true)。",
+    "duties": [
+      "拿到一份全量 registry 快照后,挑出 api_key 仍是掩码值('**********')的 endpoint,只对这些发『取明文』请求(已是真值的跳过)。",
+      "把换回的明文写进模块级本地缓存 knownEndpointSecrets,供本次会话后续就地复用。",
+      "下次再拉快照时先用本地缓存就地换回已知 key,确保同一 key 不会发第二次 secret 请求。",
+      "保证明文只活在前端本地缓存里:从不写回后端,窗口聚焦重拉时也只取掩码快照、不重复换明文。",
+      "对取明文失败的单个 endpoint 静默保留掩码(不整体失败),让其余 endpoint 正常 hydrate。"
+    ],
+    "used_by": "#16(secret-hydration,进 tab 首次回填真 key)、#31(registry-restore,刷新/重进页恢复每张卡后再经它换回真值)。",
+    "boundary": "做:把掩码 key 换成真值供 UI 查看/修改,纯读取式回填。不做:不把明文写回后端、不持第二份真相、不参与 key 的保存/校验/测试,也不决定 key 是否有效。"
+  },
+  {
+    "name": "provider-utils",
+    "what": "API Keys 页一批前端共享的纯函数 + 本地 UI 逻辑集合,管官方/第三方分卡、草稿增删、参数指纹缓存、显隐掩码、复制等杂活,本身不发网络请求。",
+    "where": "provider-utils.ts(整文件,官方 5 家清单在 :5 officialProviders);显隐+CSS 掩码与复制散在 ProviderCard.tsx apiKeyInputType / :95 apiKeyInputClassName / :103 copyCredentialValue(语义上同属这组前端共享逻辑,物理上在 ProviderCard 内)。",
+    "duties": [
+      "官方 5 卡映射:officialProviderDrafts(provider-utils.ts)把固定 5 家(anthropic/openai/gemini/deepseek/ark)各映射成一张卡,缺的补空卡,并经 withOfficialProviderDefaults(:185)注入 canonical base_url。",
+      "官方/第三方判定与过滤:isOfficialProviderDraft(:168)按白名单认官方,inferProviderKind(:58)分类,thirdPartyProviderDrafts(:102)过滤出第三方草稿。",
+      "草稿增删:draftFromAddProviderSubmission(:63)把新增表单(含 custom-{uuid} code)落成草稿,draftsFromCredentials(:29)把后端快照转成草稿列表。",
+      "参数指纹缓存:providerTestParamsFingerprint(:138,对 api_key/base_url/provider_type 三参算 fnv1a32 哈希)+ providerCachedTestResult(:146,按指纹查 test_results 缓存)+ providerTestParamsMatch(:127,比对三参是否变)——改 key 即按指纹失效旧结果。",
+      "显隐 + CSS 掩码:apiKeyInputType(ProviderCard.tsx)/apiKeyInputClassName(:95)按 visible 控制 key 输入框的明文/掩码呈现。",
+      "复制:copyCredentialValue(ProviderCard.tsx)写剪贴板并 toast 成功/失败,空值不复制。",
+      "推 provider 短名:notableProviderKeyForDraft(:106)从 id/name/url 猜出 provider 短名(给推荐模型/占位提示用)。",
+      "面板显示判定:shouldShowManualModelPanel(:116)按官方/测试态决定是否展示手动探测面板。"
+    ],
+    "used_by": "#17、#18、#19、#20、#21、#22、#23、#27、#28、#29、#30(几乎贯穿整页:分卡、增删、指纹失效、显隐掩码、复制、短名、面板判定)。",
+    "boundary": "做:官方/第三方分卡、草稿建模、按指纹缓存/失效测试结果、本地显隐掩码与复制等纯前端逻辑。不做:不发任何网络请求、不持久化、不决定后端 provider_kind(官方钉死在后端)、不做真实测试/探测。",
+    "api": "无 —— 纯前端函数,不发任何网络请求(分卡/建模/指纹/掩码全在内存算)。"
+  },
+  {
+    "name": "状态投影",
+    "what": "把后端每条 route/endpoint 的测试与状态结果(按参数指纹取缓存)投影成卡上 UI 标签的前端逻辑,目标对齐 LLM Roles 那套完整 6 态色。",
+    "where": "ProviderCard.tsx routeDisplayStatus / :350 routeStatusTagVariant / :360 routeStatusLabel(把 route 状态算成标签变体与文案)、:205 directPersistedTestResult(参数不匹配时回 null 使状态回落)、:787 testStatus(顶层连通态)、:151 TestMessage(连通徽章);目标复用 LLM Roles 已有 6 态组件 provider-state-badge.tsx(ready/historical_ready/untested/cooling_down/failed/off 色映射)。",
+    "duties": [
+      "按参数指纹取后端缓存的测试结果(经 provider-utils 的 providerCachedTestResult),指纹对不上就视为无结果、状态回落 untested/not_configured。",
+      "第三方卡渲染顶层一个连通徽章(TestMessage),官方卡每条 route 渲染一个彩色 Tag,信后端权威态。",
+      "把状态映射成标签颜色/文案变体(routeStatusTagVariant/routeStatusLabel),让用户一眼看出 verified/failed/testing 等。",
+      "目标态:迁到后端 6 态 ui_state DTO,补齐蓝态 historical_ready(以前联通过)与 cooling_down(熔断倒计时),并复用 LLM Roles 的 6 态色映射保证三页同色。",
+      "结果除 toast 外常驻 inline 写在 key/Base URL 旁(§1.4),只读渲染、不持第二份真相。"
+    ],
+    "used_by": "#21、#24、#25、#26、#27、#30、#31(凡是要把测试/状态结果显示成标签的原子都用它,#30 是它的主战场:6 态对齐)。",
+    "boundary": "做:只读地把后端状态/测试结果投影成 UI 标签与颜色。不做:不发起测试、不改后端状态、不自造状态真相(权威全来自后端 6 态 DTO),也不负责取明文 key。"
+  },
+  {
+    "name": "命名弹框",
+    "kind": "共享 UI 组件（跨节点）",
+    "what": "一个通用的「给东西起名 / 改名」弹框:单输入框 + 重名/空名校验,提交只吐 trim 后的名字。它和「角色」本身无关——任何需要命名/改名的地方都能用。",
+    "where": "组件本体 RoleNameDialog.tsx、输入字段 :99 RoleNameFields、重名/空名校验 :144 roleNameError;API Keys 挂载点 ApiKeysTab.tsx(新增命名)、ProviderCard.tsx(⋮→Rename 改名回填)。",
+    "duties": [
+      "渲染一个带单输入框的命名弹框,支持受控/非受控开合,提交回调只吐出 trim 后的名字。",
+      "校验名字:空名报『required』、与 existingNames 撞名(忽略大小写、排除自身)报『already exists』,拦住非法提交。",
+      "提交成功后按受控/非受控规则关闭弹框并回传名字给上层 onSubmit。"
+    ],
+    "used_by": "API Keys:#19(新增 provider 命名)、#20(改名)、#29(⋮→Rename);LLM Roles:角色命名/改名(另一节点,同一个组件)。",
+    "boundary": "做:命名/改名的弹框交互 + 重名/空名校验。不做:不录入 base_url/api_key/协议、不做保存、不碰凭证值。",
+    "reuse_note": "跨节点共享:它同时服务 API Keys(给第三方 provider 命名)和 LLM Roles(给角色命名)。所以它是一个共享前端模块——单处定义、多处复用,不在每个节点各写一遍。",
+    "design_note": "命名问题:当前代码名 `RoleNameDialog`、且物理放在 `llm-roles/` 目录下,名字带「role」语义不准(它根本不只服务角色)。设计上应提升为共享组件、改成中性名(如 NameDialog)、挪到共享目录。",
+    "api": "无 —— 它只收集名字、回调给调用方;真正的保存由调用方做(新建走整批 upsert、改名走 PUT /registry/endpoints)。所以它和 provider-utils 一样不碰后端,区别只在:provider-utils 是纯函数库、它是 UI 组件。"
+  }
+]

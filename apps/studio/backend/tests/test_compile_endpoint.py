@@ -12,12 +12,14 @@ def test_compile_success_returns_manifest_summary(client: TestClient) -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body == {
-        "skill_id": "text-segmentation",
-        "status": "ok",
-        "phase_count": 1,
-        "manifest_name": "text-segmentation",
-    }
+    assert body["skill_id"] == "text-segmentation"
+    assert body["status"] == "ok"
+    assert body["phase_count"] == 1
+    assert body["manifest_name"] == "text-segmentation"
+    assert body["artifact_ref"]["artifact_id"] == "text-segmentation"
+    assert body["artifact_ref"]["content_hash"].startswith("sha256:")
+    assert body["artifact_ref"]["source_map_ref"] == body["source_map_ref"]
+    assert body["artifact_ref"]["execution_fingerprint"] == body["execution_fingerprint"]
 
 
 def test_compile_failure_returns_structured_errors(
@@ -40,11 +42,12 @@ def test_compile_failure_returns_structured_errors(
     assert body["detail"].startswith("Skill compilation failed with 1 error")
     assert body["errors"]
     error = body["errors"][0]
-    assert set(error) == {"file", "line", "field", "severity", "message"}
+    assert set(error) == {"file", "line", "field", "severity", "message", "error_code"}
     assert error["file"] in {"phases/setup/LOGIC.md", None}
     assert error["line"] is None or isinstance(error["line"], int)
     assert error["field"] is None or isinstance(error["field"], str)
     assert error["severity"] == "fatal"
+    assert error["error_code"] is None or isinstance(error["error_code"], str)
     assert "mode" in error["message"]
 
 

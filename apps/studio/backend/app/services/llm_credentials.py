@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import tempfile
 import threading
@@ -13,12 +12,20 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from graph_agent_gateway.registry.base_url import canonicalize_base_url
-from graph_agent_gateway.registry.canonical import canonicalize_model
-from graph_agent_gateway.registry.capabilities import normalize_route_capabilities
-from graph_agent_gateway.registry.schema import CapabilitySource
+from graph_agent_gateway.registry.route_identity import (
+    route_slug as identity_route_slug,
+)
+from graph_agent_gateway.registry.route_identity import (
+    stable_endpoint_id as url_stable_endpoint_id,
+)
 from pydantic import SecretStr, ValidationError
 
+from app.core.adapters.gateway import (
+    CapabilitySource,
+    canonicalize_base_url,
+    canonicalize_model,
+    normalize_route_capabilities,
+)
 from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint, ProviderRoute
 from app.services.llm_paths import credentials_path
 
@@ -50,12 +57,8 @@ def load_credentials(path: Path | None = None) -> LLMCredentialsFile:
     try:
         payload = json.loads(credential_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise ValueError(
-            f"LLM_CREDENTIALS_SCHEMA: invalid llm_credentials.json: {credential_path}"
-        ) from exc
-    if isinstance(payload, dict) and (
-        payload.get("schema_version") != 4 or "providers" in payload
-    ):
+        raise ValueError(f"LLM_CREDENTIALS_SCHEMA: invalid llm_credentials.json: {credential_path}") from exc
+    if isinstance(payload, dict) and (payload.get("schema_version") != 4 or "providers" in payload):
         raise ValueError(
             f"LLM_CREDENTIALS_SCHEMA: llm_credentials.json must use schema_version 4; "
             f"legacy provider credentials are rejected: {credential_path}"
@@ -63,15 +66,14 @@ def load_credentials(path: Path | None = None) -> LLMCredentialsFile:
     try:
         return _normalize_loaded_credentials(LLMCredentialsFile.model_validate(payload))
     except ValidationError as exc:
-        raise ValueError(
-            f"LLM_CREDENTIALS_SCHEMA: invalid v4 llm credentials schema: {credential_path}"
-        ) from exc
+        raise ValueError(f"LLM_CREDENTIALS_SCHEMA: invalid v4 llm credentials schema: {credential_path}") from exc
 
 
 def save_credentials(data: LLMCredentialsFile, path: Path | None = None) -> None:
     """Atomically write credentials and force file permissions to ``0600``."""
     credential_path = path or credentials_path()
     from app.services.file_watcher import record_api_write
+
     try:
         record_api_write(credential_path)
     except Exception:
@@ -116,26 +118,37 @@ def upsert_endpoints(
         data = load_credentials(credential_path)
         endpoints = dict(data.provider_endpoints)
         for endpoint_id, payload in endpoint_payloads.items():
-            incoming = _endpoint_from_payload(payload)
-            if incoming.endpoint_id != endpoint_id:
-                raise ValueError(f"endpoint payload key does not match endpoint_id: {endpoint_id}")
-            current = endpoints.get(endpoint_id)
-            api_key = _preserved_secret(incoming, current)
+            incoming = _endpoint_from_payload(_endpoint_authoring_payload(payload))
             canonical_base_url = canonicalize_base_url(incoming.base_url, incoming.protocol)
+            persisted_endpoint_id = _persisted_endpoint_id(
+                endpoint_id=endpoint_id,
+                endpoint=incoming,
+                canonical_base_url=canonical_base_url,
+            )
+            current = endpoints.get(persisted_endpoint_id) or endpoints.get(endpoint_id)
+            api_key = _preserved_secret(incoming, current)
             updates: dict[str, Any] = {
+                "endpoint_id": persisted_endpoint_id,
                 "api_key": api_key,
                 "base_url": canonical_base_url,
+                "status": current.status if current is not None else "unverified_manual",
+                "last_test_at": current.last_test_at if current is not None else None,
+                "last_test_message": current.last_test_message if current is not None else None,
             }
-            curated_provider_kind = CURATED_PROVIDER_KIND_BY_ENDPOINT_ID.get(endpoint_id)
+            curated_provider_kind = CURATED_PROVIDER_KIND_BY_ENDPOINT_ID.get(persisted_endpoint_id)
             if curated_provider_kind is not None and _field_omitted(payload, "provider_kind"):
                 updates["provider_kind"] = curated_provider_kind
             elif current is None:
-                updates["provider_kind"] = _seeded_provider_kind(endpoint_id, incoming, payload)
+                updates["provider_kind"] = _seeded_provider_kind(persisted_endpoint_id, incoming, payload)
             elif _field_omitted(payload, "provider_kind"):
                 updates["provider_kind"] = current.provider_kind
             if current is not None and _field_omitted(payload, "rate_limit_bucket"):
                 updates["rate_limit_bucket"] = current.rate_limit_bucket
-            endpoints[endpoint_id] = incoming.model_copy(update=updates)
+            if current is not None and _field_omitted(payload, "credential_ref"):
+                updates["credential_ref"] = current.credential_ref
+            if persisted_endpoint_id != endpoint_id:
+                endpoints.pop(endpoint_id, None)
+            endpoints[persisted_endpoint_id] = incoming.model_copy(update=updates)
         data = data.model_copy(update={"provider_endpoints": endpoints})
         _save_credentials_unlocked(data, credential_path)
         return data
@@ -149,13 +162,9 @@ def delete_endpoint(endpoint_id: str, *, path: Path | None = None) -> LLMCredent
         endpoints = dict(data.provider_endpoints)
         endpoints.pop(endpoint_id, None)
         routes = {
-            route_id: route
-            for route_id, route in data.provider_routes.items()
-            if route.endpoint_id != endpoint_id
+            route_id: route for route_id, route in data.provider_routes.items() if route.endpoint_id != endpoint_id
         }
-        data = data.model_copy(
-            update={"provider_endpoints": endpoints, "provider_routes": routes}
-        )
+        data = data.model_copy(update={"provider_endpoints": endpoints, "provider_routes": routes})
         _save_credentials_unlocked(data, credential_path)
         return data
 
@@ -205,6 +214,19 @@ def _endpoint_from_payload(payload: dict[str, Any] | ProviderEndpoint) -> Provid
     return ProviderEndpoint.model_validate(payload)
 
 
+def _endpoint_authoring_payload(payload: dict[str, Any] | ProviderEndpoint) -> dict[str, Any] | ProviderEndpoint:
+    fact_fields = {"status", "last_test_at", "last_test_message"}
+    if isinstance(payload, dict):
+        return {key: value for key, value in payload.items() if key not in fact_fields}
+    return payload.model_copy(
+        update={
+            "status": "unverified_manual",
+            "last_test_at": None,
+            "last_test_message": None,
+        }
+    )
+
+
 def _field_omitted(payload: dict[str, Any] | ProviderEndpoint, field_name: str) -> bool:
     if isinstance(payload, dict):
         return field_name not in payload
@@ -221,6 +243,35 @@ def _seeded_provider_kind(
     return CURATED_PROVIDER_KIND_BY_ENDPOINT_ID.get(endpoint_id, "third_party")
 
 
+def _persisted_endpoint_id(
+    *,
+    endpoint_id: str,
+    endpoint: ProviderEndpoint,
+    canonical_base_url: str,
+) -> str:
+    official_endpoint_id = _official_endpoint_id_for_base_url(canonical_base_url)
+    if official_endpoint_id is not None:
+        return official_endpoint_id
+    if endpoint_id in CURATED_PROVIDER_KIND_BY_ENDPOINT_ID:
+        return endpoint_id
+    return url_stable_endpoint_id(protocol=endpoint.protocol, base_url=canonical_base_url)
+
+
+def _official_endpoint_id_for_base_url(base_url: str) -> str | None:
+    base_host = _url_hostname(base_url)
+    if base_host == "api.anthropic.com":
+        return "anthropic-official"
+    if base_host == "api.openai.com":
+        return "openai-official"
+    if base_host == "api.deepseek.com":
+        return "deepseek-official"
+    if base_host == "generativelanguage.googleapis.com":
+        return "gemini-official"
+    if _host_matches(base_host, "volces.com"):
+        return "ark-official"
+    return None
+
+
 def _normalize_loaded_credentials(data: LLMCredentialsFile) -> LLMCredentialsFile:
     return _repair_catalog_candidate_route_statuses(
         _repair_curated_provider_kinds(_invalidate_legacy_fake_test_statuses(data))
@@ -233,9 +284,7 @@ def _repair_curated_provider_kinds(data: LLMCredentialsFile) -> LLMCredentialsFi
     for endpoint_id, endpoint in data.provider_endpoints.items():
         curated_provider_kind = CURATED_PROVIDER_KIND_BY_ENDPOINT_ID.get(endpoint_id)
         if curated_provider_kind is not None and endpoint.provider_kind != curated_provider_kind:
-            endpoints[endpoint_id] = endpoint.model_copy(
-                update={"provider_kind": curated_provider_kind}
-            )
+            endpoints[endpoint_id] = endpoint.model_copy(update={"provider_kind": curated_provider_kind})
             changed = True
         else:
             endpoints[endpoint_id] = endpoint
@@ -374,28 +423,18 @@ def _legacy_models(provider: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _stable_endpoint_id(provider: dict[str, Any]) -> str:
     raw = str(provider.get("id") or provider.get("code") or "").strip()
-    name = str(provider.get("name") or "").lower()
     base_url = str(provider.get("base_url") or "").strip()
-    base_host = _url_hostname(base_url)
-    base_path = _url_path(base_url)
-    if base_host == "api.anthropic.com":
-        return "anthropic-official"
-    if base_host == "api.openai.com":
-        return "openai-official"
-    if base_host == "api.deepseek.com":
-        return "deepseek-official"
-    if base_host == "generativelanguage.googleapis.com":
-        return "gemini-official"
-    if _host_matches(base_host, "volces.com"):
-        return "ark-official"
-    if _host_matches(base_host, "openrouter.ai") or "openrouter" in name:
-        return "openrouter-prod"
-    if "wavespeed" in base_host or "wavespeed" in name:
-        return "wavespeed-prod"
-    if _host_matches(base_host, "qnaigc.com") and ("anthropic" in base_path or "anthropic" in name):
-        return "qiniu-anthropic"
-    if _host_matches(base_host, "qnaigc.com"):
-        return "qiniu-openai"
+    protocol = provider.get("provider_type") or provider.get("type")
+    if protocol not in {"anthropic_compatible", "openai_compatible", "google_genai", "ark_runtime"}:
+        return raw
+    canonical_base_url = canonicalize_base_url(base_url, protocol)
+    official_endpoint_id = _official_endpoint_id_for_base_url(canonical_base_url)
+    if official_endpoint_id is not None:
+        return official_endpoint_id
+    if raw in CURATED_PROVIDER_KIND_BY_ENDPOINT_ID:
+        return raw
+    if base_url:
+        return url_stable_endpoint_id(protocol=protocol, base_url=canonical_base_url)
     return raw
 
 
@@ -406,24 +445,13 @@ def _url_hostname(raw_url: str) -> str:
     return (parsed.hostname or "").lower().rstrip(".")
 
 
-def _url_path(raw_url: str) -> str:
-    if not raw_url:
-        return ""
-    parsed = urlparse(raw_url if "://" in raw_url else f"https://{raw_url}")
-    return parsed.path.lower()
-
-
 def _host_matches(hostname: str, domain: str) -> bool:
     normalized_domain = domain.lower().rstrip(".")
     return hostname == normalized_domain or hostname.endswith(f".{normalized_domain}")
 
 
 def _route_slug(provider_model_id: str) -> str:
-    slug = provider_model_id.strip().lower().replace("/", ".").replace("_", "-")
-    slug = re.sub(r"[^a-z0-9._-]+", "-", slug)
-    slug = re.sub(r"-+", "-", slug).strip("-")
-    slug = re.sub(r"^(claude-(?:sonnet|opus|haiku)-\d+)-(\d+)$", r"\1.\2", slug)
-    return slug or "unknown"
+    return identity_route_slug(provider_model_id)
 
 
 def _next_backup_path(path: Path) -> Path:

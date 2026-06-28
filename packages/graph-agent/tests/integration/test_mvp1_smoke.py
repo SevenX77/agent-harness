@@ -49,8 +49,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from graph_agent_gateway.registry.resolver import resolve_role
-from graph_agent_gateway.resolver import ModelResolver, load_registry_snapshot
+import yaml
+from graph_agent_gateway.resolver import ModelResolver
+from graph_agent_gateway.storage_contracts import InMemoryConfigTruthStore
 from langchain_core.messages import HumanMessage
 
 from graph_agent.core.compiler import compile_skill
@@ -78,11 +79,21 @@ E2E_TRACE_BASE = REPO_ROOT / "docs" / "v1-reset" / "e2e_traces"
 def _route_registry_smoke_ready() -> bool:
     """Return true when v4/v2 route registry has a credentialed smoke role."""
     try:
-        snapshot = load_registry_snapshot(LLM_CREDENTIALS_PATH, LLM_ROLES_PATH)
-        resolved = resolve_role(snapshot, _real_llm_smoke_role())
+        resolver = _build_smoke_model_resolver()
+        resolver.resolve(_real_llm_smoke_role())
     except Exception:
         return False
-    return bool(resolved.routes and resolved.routes[0].api_key.get_secret_value())
+    return True
+
+
+def _build_smoke_model_resolver() -> ModelResolver:
+    credentials = json.loads(LLM_CREDENTIALS_PATH.read_text(encoding="utf-8"))
+    roles = yaml.safe_load(LLM_ROLES_PATH.read_text(encoding="utf-8")) or {}
+    user_id = "mvp1-smoke"
+    store = InMemoryConfigTruthStore()
+    store.put_config(user_id, "credentials", credentials, if_none_match="*")
+    store.put_config(user_id, "roles", roles, if_none_match="*")
+    return ModelResolver(config_store=store, user_id=user_id)
 
 
 def _real_llm_smoke_role() -> str:
@@ -433,10 +444,7 @@ class TestRealLLMSmoke:
         run_start = time.monotonic()
 
         resolver = _FixedRoleResolver(
-            ModelResolver(
-                credentials_path=LLM_CREDENTIALS_PATH,
-                roles_path=LLM_ROLES_PATH,
-            ),
+            _build_smoke_model_resolver(),
             role,
         )
         skill_resolver = LocalWorkspaceResolver(workspace_root=Path(V3_SKILL_PATH).parent)

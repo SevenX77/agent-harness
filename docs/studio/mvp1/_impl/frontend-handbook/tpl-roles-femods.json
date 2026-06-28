@@ -1,0 +1,68 @@
+[
+  {
+    "name": "6 态徽章 provider-state-badge",
+    "kind": "共享 UI 组件（跨页）",
+    "what": "一个把后端 route 的 6 态 ui_state 渲染成统一彩色徽章 + tooltip 的组件:ready🟢 / historical_ready🔵(Previously Connected) / untested⚪ / cooling_down(灰+倒计时) / failed🔴(带 reason) / off(灰)。三页(API Keys / LLM Roles / Copilot)同态同色的唯一渲染源。",
+    "where": "组件本体 components/studio/settings/llm-roles/provider-state-badge.tsx ProviderStateBadge(按 state 查 providerStateMeta 出 label/variant/Icon/description),熔断倒计时辅件 cooling-down-countdown.tsx CoolingDownCountdown;6 态色映射也被侧栏 AvailableModelsSidebar.tsx providerStateTagVariant 平行实现一份(Tag 变体)。",
+    "duties": [
+      "把 6 态 ui_state 映射成徽章 variant + label + 图标 + tooltip 描述(ready→success/Check、historical_ready→outline+蓝底/History、untested→outline/Circle、cooling_down→warning/Timer、failed→destructive/CircleX、off→secondary/PauseCircle)。",
+      "failed 态按 reason_code 给人话诊断(missing_config→缺 key/配置、endpoint_unreachable→端点连不通、model_failed→模型探测失败、invalid_key/invalid_model/invalid_base_url/invalid_protocol 等),进 tooltip。",
+      "cooling_down 态附 retry_at(Retry at …)倒计时。",
+      "侧栏可用模型卡里同一套 6 态色渲染各 provider 行(providerStateTagVariant + providerStateLabel),failed 标红但仍列出、仍可拖(不过滤)。"
+    ],
+    "used_by": "LLM Roles:#35(侧栏各 provider 行 6 态色)、#45(role-fit 灯旁的底层 route 态);跨页:API Keys(#30 卡状态位目标复用它)、Copilot(SDK 状态灯)。",
+    "boundary": "做:只读地把后端 6 态 ui_state 渲染成统一颜色徽章 + 诊断 tooltip。不做:不发起测试、不改后端状态、不自造状态真相(权威全来自后端 ui_state DTO)、不决定哪些 route 出现(那是侧栏过滤)。",
+    "reuse_note": "跨页共享:三页都用同一套 6 态色,保证「同一 endpoint/route 从 API Keys 拖到 Roles 颜色不变」。这是横切的状态展示底座,单处定义颜色语义、多处复用(现状侧栏 Tag 与 badge 两处各实现一份色映射,应收敛成一套)。",
+    "api": "无 —— 纯展示组件,只吃后端投影来的 ui_state/reason_code/retry_at,不发任何网络请求。"
+  },
+  {
+    "name": "命名弹框",
+    "kind": "共享 UI 组件（跨页，已在 API Keys 登记）",
+    "what": "一个通用的「给东西起名 / 改名」弹框:单输入框 + 重名/空名校验,提交只吐 trim 后的名字。它和「角色」本身无关——任何需要命名/改名的地方都能用(角色、provider、bundle)。",
+    "where": "组件本体 components/studio/settings/llm-roles/RoleNameDialog.tsx;LLM Roles 挂载点:RoleCard.tsx(角色 ⋮→Rename)、LlmRolesTab 新建角色命名、ModelBundleCard.tsx(束 ⋮→Edit 改名)。",
+    "duties": [
+      "渲染带单输入框的命名弹框,支持受控/非受控开合,提交回调只吐 trim 后的名字。",
+      "校验名字:空名报 required、与 existingNames 撞名(忽略大小写、排除自身)报 already exists,拦住非法提交。",
+      "可定制字段标签(fieldLabel,如 bundle 用「Bundle name」)与弹框标题(title,如「Rename role」/「Edit model bundle」)。"
+    ],
+    "used_by": "LLM Roles:#33(新建角色命名)、#48(角色改名)、#49(新建束命名)、#52(束改名);API Keys:#19/#20/#29(provider 命名/改名,已登记)。",
+    "boundary": "做:命名/改名的弹框交互 + 重名/空名校验。不做:不录入模型/provider/意图、不做保存、不碰角色内容。",
+    "reuse_note": "跨页共享(已在 API Keys 模块页登记):同时服务 API Keys(provider 命名)和 LLM Roles(角色/束命名)。单处定义、多处复用。本页 fe_modules 引用名「命名弹框」即指它,不重造。",
+    "design_note": "命名问题:当前代码名 RoleNameDialog、物理放在 llm-roles/ 目录下,名字带「role」语义不准(它不只服务角色,也服务 provider/bundle)。设计上应提升为中性名(如 NameDialog)、挪到共享目录。",
+    "api": "无 —— 只收集名字、回调给调用方;真正的保存由调用方做(角色/束走整表 PUT /llm/roles)。"
+  },
+  {
+    "name": "默认 provider 选择算法",
+    "kind": "共享逻辑（产品策略）",
+    "what": "把一个 model group 拖进角色时,自动从该组的多个 provider route 里挑「默认入选哪些 + 按什么序」的纯函数逻辑——产品策略(应用加工),不是 gateway 公共能力。",
+    "where": "components/studio/settings/role-utils.ts appendModelGroupToRoleWithResult(拖入主入口,内部调 defaultProviderModelsForGroup 选 + 排)、defaultProviderModelsForGroup(按状态/kind/名排序)、providerStateRank(6 态排序权重)、providerKindRank(official 优先)、syncActiveModelToFirst(active_model 同步首位);去重在 appendModelGroupToRoleWithResult(已在该 role 的 route 合并不建副本)。",
+    "duties": [
+      "拖入时把该 model group 的 provider_models 按「状态(ready 先) → kind(official 先) → 名」排序,组成默认 provider 兜底序写进角色。",
+      "默认选可用候选、official 优先(除非角色偏好覆盖);failed/off 排后,cooling_down 居中。",
+      "active_model 永远同步到第一个 model(syncActiveModelToFirst):调序后首位即 active。",
+      "重复拖入去重:把已在该角色的 model group 再拖进来,不建副本——合并新可用的 provider route(Set 去重)。",
+      "拖入空组/无可用 route 时返回 error(不静默)。"
+    ],
+    "used_by": "#36(拖模型进角色自动挂组 + 默认选)、#37(active_model 同步首位)、#39(Add provider 去重合并)、#51(束拖进角色——现状走同一拖入路径=快照;目标改引用后,束拖入存 bundle_id 引用、不再经此默认选展开快照,普通 model group 拖入仍用本算法)。",
+    "boundary": "做:拖入时的默认 provider 选择/排序/去重纯前端逻辑(产品策略)。不做:不发网络、不持久化、不算 6 态(只读 ui_state 排序)、不做 materialize(那是后端按意图过滤入链)。",
+    "api": "无 —— 纯前端函数,在内存里算默认选择,保存另走整表 PUT /llm/roles。",
+    "design_note": "现状默认排序 providerStateRank 只显式区分 ready/untested/cooling_down,蓝态 historical_ready 落进默认兜底桶(>2);设计的默认入选应含 ready+untested+🔵 蓝(可用候选)、排除 failed/off,可在此函数补蓝态权重。"
+  },
+  {
+    "name": "role 测试态投影",
+    "kind": "共享逻辑（跨页）",
+    "what": "把后端 role 测试 job 的实时进度 / 持久化结果投影成角色卡上每条 provider 行的「测试状态灯 + role-fit 灯 + 降级 tooltip」的前端逻辑,目标是删前端易失副本、纯投影后端 SSOT。",
+    "where": "状态灯 + 单顶层 tooltip 在 role-route-status.tsx(deriveRoleRouteStatus 把 ui_state+role_fit+测试态合成 runnable/limited/blocked/testing 灯、roleProviderRouteTooltip 拼诊断 tooltip、RoleRouteStatusLight 渲染灯);job 进度→灯映射在 LlmRolesTab.tsx(roleTestStatusesFromJob / roleTestStatusesFromResult);持久化种子在 LlmRolesTab.tsx seedRoleTestStatesFromPersisted(挂载拉 GET /roles/test-results 回填);跨页复用在 panels/PropertiesPanel.tsx + panels/role-test-status.ts(节点属性面板的快捷 Test)。",
+    "duties": [
+      "把 role 测试 job 的逐 route 进度(testing/ok/failed/blocked/untested)实时映射成 provider 行的状态灯。",
+      "把后端 materialization_report 的 role_fit(using/downgraded/needs_test/not_fit)+ ui_state 合成单个 role-route 灯:Can Run(绿)/ Limited(黄)/ Blocked(红)/ Testing。",
+      "fail / downgrade 诊断只进一个顶层 tooltip(不另起面板、不嵌套 tooltip):拼 route 模型名 + role-match 行 + 能力/token 上限 + 各 warning。",
+      "挂载时从持久化的上次测试结果(GET /roles/test-results)种子回 badge,重开/重启显历史状态而非全退未测(只填空槽、不覆盖在跑的 live 态)。",
+      "跨页:节点 Properties 面板每个 role 旁的快捷 Test 复用同一套 runPersistedRoleTestJob + 状态投影(测同一后端 job)。"
+    ],
+    "used_by": "#45(role-fit 灯)、#46(role 测试实时回填灯)、#47(测试失败条)、#53(被动重投影);跨页(§2.7):节点 Properties 面板快捷 Test + role 状态展示。",
+    "boundary": "做:只读地把后端测试 job / 持久化结果 / materialize 报告投影成状态灯与 tooltip。不做:不自造测试态真相。",
+    "api": "GET /api/llm/roles/test-results(种子持久化结果)、POST /api/llm/roles/{name}/test-jobs + GET /role-test-jobs/{job_id}(起 + 轮询活跃 job);本模块只投影这些后端数据,不在前端持第二份。",
+    "design_note": "测试 SSOT 落差(头号):现状 role 测试的 live 态存在组件易失 useState(LlmRolesTab.tsx 的 roleTestStates),切 tab 即丢——后端两层才是 SSOT:① 活跃 job = _role_test_jobs(routers/llm.py 内存字典,正在跑的 live 进度真相,经 GET /role-test-jobs/{job_id} 投影);② 持久层 = /roles/test-results(每角色最近一次完成结果,经 GET /api/llm/roles/test-results 投影)。本页接线工程要整层删 roleTestStates 易失层、改纯投影后端(对应守边界检查 2)。落地:删 roleTestStates 及所有 setRoleTestStates 写点,roleTestStatusesFromJob/roleTestStatusesFromResult 产物直接喂灯投影(或经服务端态缓存层,缓存层是后端态镜像非自持真相);切 tab/刷新重投影 = 重挂载先拉持久层种子进灯,该角色仍有未完成 job 则用 job_id 续轮询活跃 job 接上 live——两者都后端,无前端残留。现有 seedRoleTestStatesFromPersisted 是过渡形态,目标是 live 态也由后端 job 轮询驱动、不另存。"
+  }
+]

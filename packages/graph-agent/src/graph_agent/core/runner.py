@@ -30,6 +30,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -45,9 +46,18 @@ from graph_agent.callbacks.emit import (
 )
 from graph_agent.callbacks.events import (
     CallbackEvent,
+    InterruptedEvent,
+    ResumedEvent,
     RunEndedEvent,
     RunStartedEvent,
 )
+from graph_agent.core.adapter_contracts import (
+    PredictArtifactRequest,
+    RunArtifactErrorResult,
+    RunArtifactRequest,
+    RunSession,
+)
+from graph_agent.core.checkpoint_validity import checkpoint_id_before_phase
 from graph_agent.core.checkpointer import resolve_checkpointer
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.exceptions import (
@@ -58,10 +68,12 @@ from graph_agent.core.exceptions import (
     make_error_payload,
 )
 from graph_agent.core.graph_assembler import assemble_graph
+from graph_agent.core.llm_provider import LLMProvider, LLMProviderError
 from graph_agent.core.local_workspace_resolver import LocalWorkspaceResolver
 from graph_agent.core.result import RunResult, WorkflowMetrics, WorkflowResult
 from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol, require_skill_resolver
 from graph_agent.core.state import BusinessData
+from graph_agent.core.storage_contracts import ObjectRef, RunArtifactStore
 from graph_agent.runtime.state import normalize_blackboard_data
 
 logger = logging.getLogger(__name__)
@@ -69,6 +81,17 @@ logger = logging.getLogger(__name__)
 _NO_MOCK_LLM = object()
 _RUNTIME_PHASE_FAILED_CODE = "[F-v3-runtime-phase-failed]"
 _SKILL_ENTRYPOINT_FILENAME = "SKILL.md"
+_HITL_TOOL_NAMES = {"ask_clarification", "request_human_input"}
+
+
+@dataclass(frozen=True)
+class _HitLInterruptCheckpoint:
+    checkpoint_id: str
+    checkpoint_ns: str
+    phase_name: str
+    question: str | None = None
+    clarification_type: str | None = None
+    options: list[str] | None = None
 
 
 class PredictDeadlockError(RuntimeError):
@@ -193,6 +216,7 @@ def predict_skill(  # noqa: C901
     event_subscriber: Callable[[CallbackEvent], None] | None = None,
     skill_resolver: SkillResolverProtocol,
     model_resolver: Any | None = None,
+    llm_provider: LLMProvider | None = None,
     copilot_predict: Callable[..., Any] | None = None,
     **inputs: Any,
 ) -> RunResult:
@@ -224,48 +248,6 @@ def predict_skill(  # noqa: C901
 
     compiled = compile_skill(skill_path_obj, skill_resolver=resolver)
 
-    if model_resolver is None:
-        from graph_agent_gateway.registry.schema import (
-            ProviderEndpoint,
-            ProviderRoute,
-            RegistrySnapshot,
-            RoleEntry,
-            RoleRouteEntry,
-        )
-        from graph_agent_gateway.resolver import ModelResolver
-        from pydantic import SecretStr
-
-        roles = {}
-        for phase_name in compiled.manifest.phases:
-            roles[phase_name] = RoleEntry(
-                fallback_chain=[RoleRouteEntry(route_id="mock-endpoint:mock-route")]
-            )
-        roles["graph_agent"] = RoleEntry(
-            fallback_chain=[RoleRouteEntry(route_id="mock-endpoint:mock-route")]
-        )
-
-        snapshot = RegistrySnapshot(
-            provider_endpoints={
-                "mock-endpoint": ProviderEndpoint(
-                    endpoint_id="mock-endpoint",
-                    protocol="openai_compatible",
-                    base_url="http://localhost",
-                    api_key=SecretStr("mock-key"),
-                )
-            },
-            provider_routes={
-                "mock-endpoint:mock-route": ProviderRoute(
-                    route_id="mock-endpoint:mock-route",
-                    endpoint_id="mock-endpoint",
-                    route_slug="mock-route",
-                    provider_model_id="mock-model",
-                    canonical_id="mock-model",
-                    status="verified",
-                )
-            },
-            roles=roles,
-        )
-        model_resolver = ModelResolver(registry_snapshot=snapshot)
 
     # 1. Strategy setup
     strategy = MockStrategy.from_param(mock_llm)
@@ -303,6 +285,7 @@ def predict_skill(  # noqa: C901
         compiled,
         chat_model=None,
         model_resolver=model_resolver,
+        llm_provider=llm_provider,
         callbacks=cast(Any, event_sink),
         skill_resolver=resolver,
         predict_context=predict_context,
@@ -412,6 +395,7 @@ def run_skill(
     cleanup_checkpoints_on_finish: bool = True,
     skill_resolver: SkillResolverProtocol,
     model_resolver: Any | None = None,
+    llm_provider: LLMProvider | None = None,
     **inputs: Any,
 ) -> RunResult:
     """Execute a SKILL.md and return a typed workflow result."""
@@ -440,6 +424,7 @@ def run_skill(
             cleanup_checkpoints_on_finish=cleanup_checkpoints_on_finish,
             skill_resolver=resolver,
             model_resolver=model_resolver,
+            llm_provider=llm_provider,
             **inputs,
         )
     except GraphAgentError as exc:
@@ -487,18 +472,26 @@ def resume_skill(
     *,
     workspace_dir: Path,
     run_id: str,
+    from_phase: str | None = None,
     checkpoint_id: str | None = None,
     checkpoint_ns: str | None = None,
+    resume_from_node_id: str | None = None,
+    resume_to_node_id: str | None = None,
+    checkpointer: Any | None = None,
     context_overrides: dict[str, Any] | None = None,
     human_response: dict[str, Any] | None = None,
     skill_resolver: SkillResolverProtocol,
     model_resolver: Any | None = None,
+    llm_provider: LLMProvider | None = None,
     event_subscriber: Callable[[CallbackEvent], None] | None = None,
 ) -> RunResult:
     """Resume a previously interrupted skill run from a checkpoint."""
     workspace_root = _validate_workspace_dir(workspace_dir)
     _validate_resume_human_response(human_response)
     _validate_resume_context_overrides(context_overrides)
+    _validate_resume_node_selector(from_phase, "from_phase")
+    _validate_resume_node_selector(resume_from_node_id, "resume_from_node_id")
+    _validate_resume_node_selector(resume_to_node_id, "resume_to_node_id")
 
     resolver = require_skill_resolver(skill_resolver, caller="resume_skill")
     started_at = datetime.now(UTC)
@@ -517,33 +510,84 @@ def resume_skill(
     )
 
     logger.info(
-        "[Resume] Resuming run_id=%s checkpoint_ns=%s checkpoint_id=%s",
+        "[Resume] Resuming run_id=%s from_phase=%s checkpoint_ns=%s checkpoint_id=%s",
         run_id,
+        from_phase,
         checkpoint_ns,
         checkpoint_id,
     )
 
-    active_checkpointer = _resolve_resume_checkpointer()
-    invoke_config = _resolve_resume_config(
-        active_checkpointer,
-        run_id=run_id,
-        checkpoint_ns=checkpoint_ns,
-        checkpoint_id=checkpoint_id,
-    )
+    active_checkpointer = checkpointer if checkpointer is not None else _resolve_resume_checkpointer()
 
     try:
         compiled = compile_skill(skill_path, skill_resolver=resolver)
+        invoke_config = _resolve_resume_config(
+            active_checkpointer,
+            compiled=compiled,
+            run_id=run_id,
+            from_phase=from_phase,
+            checkpoint_ns=checkpoint_ns,
+            checkpoint_id=checkpoint_id,
+        )
+        selected_checkpoint_id = _checkpoint_id_from_config(invoke_config)
+        selected_checkpoint_ns = _checkpoint_ns_from_config(invoke_config)
+        _emit_v030_event(
+            event_sink,
+            RunStartedEvent(
+                run_id=run_id,
+                thread_id=run_id,
+                is_resume=True,
+                checkpoint_id=selected_checkpoint_id,
+                checkpoint_ns=selected_checkpoint_ns,
+                initial_context={
+                    "checkpoint_id": selected_checkpoint_id,
+                    "checkpoint_ns": selected_checkpoint_ns,
+                    "from_phase": from_phase,
+                },
+            ),
+        )
         assembled = assemble_graph(
             compiled,
             model_resolver=model_resolver,
+            llm_provider=llm_provider,
             callbacks=cast(Any, event_sink),
             skill_resolver=resolver,
             checkpointer=active_checkpointer,
         )
         graph = assembled.graph
+        _validate_resume_node_ids(compiled, from_phase, resume_from_node_id, resume_to_node_id)
+        _validate_resume_context_override_scope(
+            compiled,
+            resume_from_node_id or from_phase,
+            context_overrides,
+        )
+        _validate_resume_checkpoint_targets(graph, invoke_config, resume_to_node_id)
 
-        invoke_config = _apply_resume_context_overrides(graph, compiled, invoke_config, context_overrides)
+        invoke_config = _apply_resume_context_overrides(
+            graph,
+            compiled,
+            invoke_config,
+            context_overrides,
+            resume_from_node_id=resume_from_node_id or from_phase,
+        )
         invoke_config = _apply_resume_human_response(graph, invoke_config, human_response)
+        resumed_from_phase = (
+            from_phase
+            or resume_from_node_id
+            or _phase_name_from_checkpoint_ns(selected_checkpoint_ns)
+        )
+        _emit_v030_event(
+            event_sink,
+            ResumedEvent(
+                thread_id=run_id,
+                human_input=str((human_response or {}).get("content") or ""),
+                resumed_from_phase=resumed_from_phase,
+                checkpoint_id=selected_checkpoint_id,
+                checkpoint_ns=selected_checkpoint_ns,
+                namespace=selected_checkpoint_ns,
+                ns=selected_checkpoint_ns,
+            ),
+        )
         result = graph.invoke(None, config=invoke_config)
 
     except Exception as exc:
@@ -635,6 +679,7 @@ def _run_skill_dict(
     cleanup_checkpoints_on_finish: bool = True,
     skill_resolver: SkillResolverProtocol,
     model_resolver: Any | None = None,
+    llm_provider: LLMProvider | None = None,
     **inputs: Any,
 ) -> dict[str, Any]:
     """Execute a SKILL.md with the given inputs. Pure document-driven.
@@ -675,6 +720,7 @@ def _run_skill_dict(
             callbacks=callbacks,
             skill_resolver=resolver,
             model_resolver=model_resolver,
+            llm_provider=llm_provider,
             **inputs,
         )
 
@@ -692,7 +738,486 @@ def _run_skill_dict(
     )
 
 
+_LLM_PROVIDER_UNSET = object()
+
+
+def _optional_llm_provider(value: LLMProvider | None | object) -> LLMProvider | None:
+    if value is _LLM_PROVIDER_UNSET:
+        return None
+    return cast(LLMProvider | None, value)
+
+
+class RawSkillPathError(Exception):
+    def __init__(self, message: str = "raw skill_path is not allowed") -> None:
+        super().__init__(message)
+        self.error_code = "runtime.raw_skill_path"
+
+
+class MissingRunArtifactObjectRefError(Exception):
+    def __init__(self, run_id: str, path: str) -> None:
+        super().__init__(f"Run artifact store did not return an object ref for {path}")
+        self.error_code = "artifact.missing_object_ref"
+        self.details = {"run_id": run_id, "path": path}
+
+
+_RUN_CACHE: dict[str, RunSession] = {}
+
+
+def _cached_session_for_materialization(
+    idempotency_key: str,
+    run_artifact_store: RunArtifactStore | None,
+) -> RunSession | None:
+    cached = _RUN_CACHE.get(idempotency_key)
+    if cached is None:
+        return None
+    if run_artifact_store is None:
+        return cached
+    if isinstance(cached.result_ref, str) and cached.result_ref.startswith("bytes://"):
+        return cached
+    return None
+
+
+def _artifact_run_id(request: RunArtifactRequest | PredictArtifactRequest) -> str:
+    requested = request.execution_context.get("thread_id") or request.execution_context.get("run_id")
+    if isinstance(requested, str) and requested:
+        return requested
+    return f"run-{request.artifact_ref.artifact_id}-{request.idempotency_key}"
+
+
+def _artifact_hash_hex(request: RunArtifactRequest | PredictArtifactRequest) -> str | None:
+    content_hash = request.artifact_ref.content_hash
+    if content_hash.startswith("sha256:"):
+        return content_hash.split(":", 1)[1]
+    return None
+
+
+def _resolve_artifact_root(request: RunArtifactRequest | PredictArtifactRequest) -> Path | None:
+    explicit = request.execution_context.get("artifact_root")
+    if isinstance(explicit, str) and explicit:
+        path = Path(explicit)
+        if (path / "GRAPH.md").is_file():
+            return path
+
+    sha256_val = _artifact_hash_hex(request)
+    workspace_raw = request.execution_context.get("workspace_dir")
+    if not isinstance(workspace_raw, str) or not workspace_raw or sha256_val is None:
+        return None
+
+    workspace_dir = Path(workspace_raw)
+    candidates = (
+        workspace_dir / "ephemeral_run_skills" / sha256_val,
+        workspace_dir.parent / "ephemeral_run_skills" / sha256_val,
+    )
+    for candidate in candidates:
+        if (candidate / "GRAPH.md").is_file():
+            return candidate
+    return None
+
+
+def _resolve_artifact_workspace_dir(request: RunArtifactRequest | PredictArtifactRequest) -> Path | None:
+    workspace_raw = request.execution_context.get("workspace_dir")
+    if isinstance(workspace_raw, str) and workspace_raw:
+        return Path(workspace_raw)
+    return None
+
+
+def _artifact_skill_resolver(
+    artifact_root: Path,
+    skill_resolver: SkillResolverProtocol | None,
+) -> SkillResolverProtocol:
+    if skill_resolver is not None:
+        return skill_resolver
+    return LocalWorkspaceResolver(search_paths=[artifact_root, artifact_root.parent])
+
+
+def _run_compiled_artifact_graph(
+    request: RunArtifactRequest,
+    *,
+    run_id: str,
+    skill_resolver: SkillResolverProtocol | None,
+    llm_provider: LLMProvider | None,
+    model_resolver: Any | None,
+) -> RunResult | RunArtifactErrorResult:
+    artifact_root = _resolve_artifact_root(request)
+    workspace_dir = _resolve_artifact_workspace_dir(request)
+    if artifact_root is None or workspace_dir is None:
+        return RunArtifactErrorResult(
+            error_code="llm.provider_not_configured",
+            error_payload={
+                "error_code": "llm.provider_not_configured",
+                "message": "LLM Provider is not configured",
+                "details": {"artifact_root": str(artifact_root) if artifact_root else None},
+                "retryable": False,
+            },
+            run_id=run_id,
+            retryable=False,
+        )
+
+    event_subscriber = request.execution_context.get("event_subscriber")
+    checkpointer_spec = request.execution_context.get("checkpointer_spec")
+    if checkpointer_spec is None:
+        checkpointer_spec = request.execution_context.get("checkpointer")
+    started_at = datetime.now(UTC)
+    raw = _run_v030_skill_dict(
+        artifact_root,
+        workspace_dir=workspace_dir,
+        mock_llm=_NO_MOCK_LLM,
+        thread_id=run_id,
+        event_subscriber=event_subscriber if callable(event_subscriber) else None,
+        skill_resolver=_artifact_skill_resolver(artifact_root, skill_resolver),
+        llm_provider=llm_provider,
+        model_resolver=model_resolver,
+        checkpointer_spec=checkpointer_spec or "auto",
+        **request.inputs,
+    )
+    wall_time = float(raw.get("wall_time_sec", 0.0))
+    workflow_result = WorkflowResult(
+        success=True,
+        run_id=str(raw.get("run_id") or run_id),
+        skill_id=artifact_root.name,
+        context=dict(raw.get("context", {})),
+        metrics=WorkflowMetrics.from_mapping(dict(raw.get("metrics", {})), wall_time_sec=wall_time),
+        trace_path=raw.get("trace_path"),
+        error=None,
+        started_at=started_at,
+        finished_at=datetime.now(UTC),
+        wall_time_sec=wall_time,
+    )
+    run_dir = Path(raw.get("run_dir") or workspace_dir / "runs" / workflow_result.run_id)
+    _write_workflow_result_artifacts(run_dir, workflow_result)
+    return workflow_result
+
+
+def _run_compiled_artifact_predict_graph(
+    request: PredictArtifactRequest,
+    *,
+    run_id: str,
+    skill_resolver: SkillResolverProtocol | None,
+    llm_provider: LLMProvider | None,
+    model_resolver: Any | None,
+) -> RunResult | RunArtifactErrorResult:
+    artifact_root = _resolve_artifact_root(request)
+    workspace_dir = _resolve_artifact_workspace_dir(request)
+    if artifact_root is None or workspace_dir is None:
+        return RunArtifactErrorResult(
+            error_code="llm.provider_not_configured",
+            error_payload={
+                "error_code": "llm.provider_not_configured",
+                "message": "LLM Provider is not configured",
+                "details": {"artifact_root": str(artifact_root) if artifact_root else None},
+                "retryable": False,
+            },
+            run_id=run_id,
+            retryable=False,
+        )
+
+    return predict_skill(
+        artifact_root,
+        workspace_dir=workspace_dir,
+        thread_id=run_id,
+        unattended=True,
+        skill_resolver=_artifact_skill_resolver(artifact_root, skill_resolver),
+        llm_provider=llm_provider,
+        model_resolver=model_resolver,
+        mock_llm=request.execution_context.get("mock_llm"),
+        current_hashes=request.execution_context.get("current_hashes") or {},
+        **request.inputs,
+    )
+
+
+def _workflow_result_ref(result: WorkflowResult | RunResult, workspace_dir: Path | None) -> str | None:
+    if workspace_dir is None:
+        return None
+    result_path = workspace_dir / "runs" / result.run_id / "result.json"
+    if result_path.is_file():
+        return f"file://{result_path}"
+    return None
+
+
+def _artifact_not_materialized_error(
+    request: RunArtifactRequest | PredictArtifactRequest,
+    run_id: str,
+) -> RunArtifactErrorResult:
+    return RunArtifactErrorResult(
+        error_code="runtime.artifact_not_materialized",
+        error_payload={
+            "error_code": "runtime.artifact_not_materialized",
+            "message": "Artifact bytes are not materialized for graph execution",
+            "details": {
+                "artifact_id": request.artifact_ref.artifact_id,
+                "content_hash": request.artifact_ref.content_hash,
+            },
+            "retryable": False,
+        },
+        run_id=run_id,
+        retryable=False,
+    )
+
+
+def _safe_provider_error_details(raw_details: Any) -> dict[str, Any]:
+    if not isinstance(raw_details, dict):
+        return {}
+    safe: dict[str, Any] = {}
+    for key, value in raw_details.items():
+        key_text = str(key)
+        if _contains_sensitive_error_text(key_text):
+            continue
+        safe[key_text] = _sanitize_provider_error_value(value)
+    return safe
+
+
+def _sanitize_provider_error_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return _safe_provider_error_details(value)
+    if isinstance(value, list):
+        return [_sanitize_provider_error_value(item) for item in value]
+    if isinstance(value, str) and _contains_sensitive_error_text(value):
+        return "[redacted]"
+    return value
+
+
+def _safe_provider_error_message(exc: Exception) -> str:
+    error_code = str(getattr(exc, "error_code", ""))
+    if isinstance(exc, LLMProviderError) or error_code.startswith("llm."):
+        return "Provider invocation failed"
+    message = str(exc)
+    return "[redacted]" if _contains_sensitive_error_text(message) else message
+
+
+def _contains_sensitive_error_text(value: str) -> bool:
+    lowered = value.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "secret",
+            "api_key",
+            "apikey",
+            "authorization",
+            "traceback",
+            "token",
+            "sk-",
+        )
+    )
+
+
+def _execute_run_artifact_outputs(
+    request: RunArtifactRequest,
+    *,
+    run_id: str,
+    artifact_executor: Callable[[RunArtifactRequest], dict[str, Any]] | None,
+    skill_resolver: SkillResolverProtocol | None,
+    llm_provider: LLMProvider | None,
+    model_resolver: Any | None,
+) -> dict[str, Any] | RunResult | RunArtifactErrorResult:
+    if artifact_executor is not None:
+        return artifact_executor(request)
+
+    artifact_root = _resolve_artifact_root(request)
+    if artifact_root is not None:
+        return _run_compiled_artifact_graph(
+            request,
+            run_id=run_id,
+            skill_resolver=skill_resolver,
+            llm_provider=llm_provider,
+            model_resolver=model_resolver,
+        )
+
+    return _artifact_not_materialized_error(request, run_id)
+
+
+def _run_artifact_store_result(
+    *,
+    run_artifact_store: RunArtifactStore,
+    run_id: str,
+    request: RunArtifactRequest | PredictArtifactRequest,
+    outputs: Any,
+) -> str:
+    metadata: dict[str, Any] = {"artifact_id": request.artifact_ref.artifact_id}
+    dev_rebuild = request.execution_context.get("artifact_dev_rebuild")
+    if isinstance(dev_rebuild, dict):
+        metadata["artifact_dev_rebuild"] = dev_rebuild
+    run_artifact_store.begin_run(run_id, metadata)
+
+    if hasattr(outputs, "model_dump"):
+        serializable_outputs = outputs.model_dump(mode="json")
+    else:
+        serializable_outputs = outputs
+    data_bytes = json.dumps(serializable_outputs, default=str).encode("utf-8")
+    refs = run_artifact_store.put_batch(run_id, {"outputs.json": data_bytes})
+
+    ref_val = _outputs_object_ref(refs, run_id=run_id)
+    run_artifact_store.seal_run(run_id)
+
+    return ref_val.bytes_ref
+
+
+def _outputs_object_ref(refs: dict[str, ObjectRef] | list[ObjectRef], *, run_id: str) -> ObjectRef:
+    ref_val: ObjectRef | None = None
+    if isinstance(refs, dict):
+        ref_val = refs.get("outputs.json")
+    elif isinstance(refs, list) and refs:
+        ref_val = refs[0]
+
+    if ref_val is None:
+        raise MissingRunArtifactObjectRefError(run_id, "outputs.json")
+    bytes_ref = getattr(ref_val, "bytes_ref", None)
+    if not isinstance(bytes_ref, str) or not bytes_ref.startswith("bytes://"):
+        raise MissingRunArtifactObjectRefError(run_id, "outputs.json")
+    return ref_val
+
+
+def run_artifact(
+    request: RunArtifactRequest | None = None,
+    *,
+    artifact_executor: Callable[[RunArtifactRequest], dict[str, Any]] | None = None,
+    run_artifact_store: RunArtifactStore | None = None,
+    llm_provider: LLMProvider | None | object = _LLM_PROVIDER_UNSET,
+    skill_resolver: SkillResolverProtocol | None = None,
+    model_resolver: Any | None = None,
+    **legacy_kwargs: Any,
+) -> RunSession | RunArtifactErrorResult:
+    if "skill_path" in legacy_kwargs:
+        raise RawSkillPathError()
+
+    if request is None or not isinstance(request, RunArtifactRequest):
+        raise TypeError("request must be an instance of RunArtifactRequest")
+
+    run_id = _artifact_run_id(request)
+
+    cached = _cached_session_for_materialization(request.idempotency_key, run_artifact_store)
+    if cached is not None:
+        return cached
+
+    workspace_dir = _resolve_artifact_workspace_dir(request)
+    try:
+        outputs = _execute_run_artifact_outputs(
+            request,
+            run_id=run_id,
+            artifact_executor=artifact_executor,
+            skill_resolver=skill_resolver,
+            llm_provider=_optional_llm_provider(llm_provider),
+            model_resolver=model_resolver,
+        )
+        if isinstance(outputs, RunArtifactErrorResult):
+            return outputs
+    except Exception as exc:
+        error_code = getattr(exc, "error_code", "llm.provider_invoke_failed")
+        message = _safe_provider_error_message(exc)
+        details = _safe_provider_error_details(getattr(exc, "details", {}))
+        retryable = getattr(exc, "retryable", False)
+
+        return RunArtifactErrorResult(
+            error_code=error_code,
+            error_payload={
+                "error_code": error_code,
+                "message": message,
+                "details": details,
+                "retryable": retryable,
+            },
+            run_id=run_id,
+            retryable=retryable,
+        )
+
+    result_ref = _workflow_result_ref(outputs, workspace_dir) if isinstance(outputs, RunResult) else None
+    if run_artifact_store is not None:
+        result_ref = _run_artifact_store_result(
+            run_artifact_store=run_artifact_store,
+            run_id=run_id,
+            request=request,
+            outputs=outputs,
+        )
+
+    session = RunSession(
+        run_id=run_id,
+        event_stream_ref=f"stream://{run_id}",
+        result_ref=result_ref,
+        status_ref=f"state://{run_id}/status",
+    )
+    _RUN_CACHE[request.idempotency_key] = session
+    return session
+
+
+def predict_artifact(
+    request: PredictArtifactRequest | RunArtifactRequest,
+    *,
+    artifact_executor: Callable[[RunArtifactRequest], dict[str, Any]] | None = None,
+    run_artifact_store: RunArtifactStore | None = None,
+    llm_provider: LLMProvider | None | object = _LLM_PROVIDER_UNSET,
+    skill_resolver: SkillResolverProtocol | None = None,
+    model_resolver: Any | None = None,
+) -> RunSession | RunArtifactErrorResult:
+    from graph_agent.core.adapter_contracts import PredictArtifactRequest, RunArtifactRequest
+
+    if not isinstance(request, (PredictArtifactRequest, RunArtifactRequest)):
+        raise TypeError("request must be an instance of PredictArtifactRequest or RunArtifactRequest")
+
+    if isinstance(request, PredictArtifactRequest) and _resolve_artifact_root(request) is not None:
+        run_id = _artifact_run_id(request)
+        cached = _cached_session_for_materialization(request.idempotency_key, run_artifact_store)
+        if cached is not None:
+            return cached
+        try:
+            result = _run_compiled_artifact_predict_graph(
+                request,
+                run_id=run_id,
+                skill_resolver=skill_resolver,
+                llm_provider=_optional_llm_provider(llm_provider),
+                model_resolver=model_resolver,
+            )
+            if isinstance(result, RunArtifactErrorResult):
+                return result
+        except Exception as exc:
+            error_code = getattr(exc, "error_code", "llm.provider_invoke_failed")
+            message = _safe_provider_error_message(exc)
+            details = _safe_provider_error_details(getattr(exc, "details", {}))
+            retryable = getattr(exc, "retryable", False)
+            return RunArtifactErrorResult(
+                error_code=error_code,
+                error_payload={
+                    "error_code": error_code,
+                    "message": message,
+                    "details": details,
+                    "retryable": retryable,
+                },
+                run_id=run_id,
+                retryable=retryable,
+            )
+        workspace_dir = _resolve_artifact_workspace_dir(request)
+        result_ref = _workflow_result_ref(result, workspace_dir)
+        if run_artifact_store is not None:
+            result_ref = _run_artifact_store_result(
+                run_artifact_store=run_artifact_store,
+                run_id=run_id,
+                request=request,
+                outputs=result,
+            )
+        session = RunSession(
+            run_id=run_id,
+            event_stream_ref=f"stream://{run_id}",
+            result_ref=result_ref,
+            status_ref=f"state://{run_id}/status",
+        )
+        _RUN_CACHE[request.idempotency_key] = session
+        return session
+
+    run_request = RunArtifactRequest(
+        artifact_ref=request.artifact_ref,
+        inputs=request.inputs,
+        execution_context=request.execution_context,
+        idempotency_key=request.idempotency_key,
+    )
+    return run_artifact(
+        run_request,
+        artifact_executor=artifact_executor,
+        run_artifact_store=run_artifact_store,
+        llm_provider=llm_provider,
+        skill_resolver=skill_resolver,
+        model_resolver=model_resolver,
+    )
+
+
 def _validate_workspace_dir(workspace_dir: Path) -> Path:
+
     workspace_path = Path(workspace_dir)
     if not workspace_path.is_absolute():
         raise ValueError("workspace_dir must be an absolute path")
@@ -728,6 +1253,111 @@ def _validate_resume_context_overrides(context_overrides: dict[str, Any] | None)
         raise ValueError(f"context_overrides may only contain business fields; forbidden: {joined}")
 
 
+def _validate_resume_node_selector(value: str | None, field_name: str) -> None:
+    if value is None:
+        return
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} must be a non-empty string")
+
+
+def _compiled_phase_names(compiled: Any) -> set[str]:
+    names: set[str] = set()
+    for node in getattr(compiled, "nodes", []) or []:
+        phase_name = getattr(node, "phase_name", None)
+        if isinstance(phase_name, str):
+            names.add(phase_name)
+    return names
+
+
+def _validate_resume_node_ids(
+    compiled: Any,
+    from_phase: str | None,
+    resume_from_node_id: str | None,
+    resume_to_node_id: str | None,
+) -> None:
+    requested = {
+        field_name: value
+        for field_name, value in (
+            ("from_phase", from_phase),
+            ("resume_from_node_id", resume_from_node_id),
+            ("resume_to_node_id", resume_to_node_id),
+        )
+        if value is not None
+    }
+    if not requested:
+        return
+    phase_names = _compiled_phase_names(compiled)
+    missing = {field_name: value for field_name, value in requested.items() if value not in phase_names}
+    if missing:
+        rendered = ", ".join(f"{field}={value!r}" for field, value in sorted(missing.items()))
+        raise _ResumeInputError(f"Resume node selector does not match compiled graph: {rendered}")
+
+
+def _validate_resume_checkpoint_targets(
+    graph: Any,
+    invoke_config: dict[str, Any],
+    resume_to_node_id: str | None,
+) -> None:
+    if resume_to_node_id is None:
+        return
+    current_state = graph.get_state(invoke_config)
+    next_nodes = tuple(str(node) for node in (current_state.next or ()))
+    if next_nodes and resume_to_node_id not in next_nodes:
+        raise _ResumeInputError(
+            f"resume_to_node_id {resume_to_node_id!r} does not match checkpoint next node(s): {next_nodes}"
+        )
+
+
+def _node_output_fields(node: Any) -> set[str]:
+    io = getattr(node, "frontmatter", {}).get("io") or {}
+    outputs = io.get("outputs") or {}
+    properties = outputs.get("properties") or {}
+    return {str(field) for field in properties}
+
+
+def _validate_resume_context_override_scope(
+    compiled: Any,
+    resume_from_node_id: str | None,
+    context_overrides: dict[str, Any] | None,
+) -> None:
+    if resume_from_node_id is None or not context_overrides:
+        return
+    phase_order = [name for name in _compiled_phase_names_in_order(compiled)]
+    try:
+        resume_index = phase_order.index(resume_from_node_id)
+    except ValueError:
+        return
+    producer_by_field: dict[str, str] = {}
+    for node in getattr(compiled, "nodes", []) or []:
+        phase_name = getattr(node, "phase_name", None)
+        if not isinstance(phase_name, str):
+            continue
+        for field in _node_output_fields(node):
+            producer_by_field[field] = phase_name
+
+    dirty_fields: list[str] = []
+    for field in context_overrides:
+        producer = producer_by_field.get(field)
+        if producer is None or producer == resume_from_node_id:
+            continue
+        if producer in phase_order and phase_order.index(producer) < resume_index:
+            dirty_fields.append(field)
+    if dirty_fields:
+        joined = ", ".join(sorted(dirty_fields))
+        raise _ResumeInputError(
+            f"context_overrides would dirty upstream checkpoint data before {resume_from_node_id!r}: {joined}"
+        )
+
+
+def _compiled_phase_names_in_order(compiled: Any) -> list[str]:
+    names: list[str] = []
+    for node in getattr(compiled, "nodes", []) or []:
+        phase_name = getattr(node, "phase_name", None)
+        if isinstance(phase_name, str):
+            names.append(phase_name)
+    return names
+
+
 def _resolve_resume_checkpointer() -> Any:
     active_checkpointer = resolve_checkpointer("auto")
     if active_checkpointer is None or active_checkpointer is True:
@@ -738,12 +1368,24 @@ def _resolve_resume_checkpointer() -> Any:
 def _resolve_resume_config(
     active_checkpointer: Any,
     *,
+    compiled: Any,
     run_id: str,
+    from_phase: str | None,
     checkpoint_ns: str | None,
     checkpoint_id: str | None,
 ) -> dict[str, Any]:
     ns = checkpoint_ns or ""
+    if from_phase and checkpoint_id:
+        raise ValueError("from_phase and checkpoint_id are mutually exclusive resume selectors")
     resolved_checkpoint_id = checkpoint_id
+    if from_phase:
+        resolved_checkpoint_id = checkpoint_id_before_phase(
+            active_checkpointer,
+            compiled,
+            run_id=run_id,
+            checkpoint_ns=ns,
+            phase_id=from_phase,
+        )
     if not resolved_checkpoint_id:
         search_config = {"configurable": {"thread_id": run_id, "checkpoint_ns": ns}}
         checkpoints = list(active_checkpointer.list(search_config))
@@ -758,6 +1400,42 @@ def _resolve_resume_config(
             "checkpoint_id": resolved_checkpoint_id,
         }
     }
+
+
+def _checkpoint_id_from_config(config: dict[str, Any]) -> str:
+    return str(config.get("configurable", {}).get("checkpoint_id") or "")
+
+
+def _checkpoint_ns_from_config(config: dict[str, Any]) -> str:
+    return str(config.get("configurable", {}).get("checkpoint_ns") or "")
+
+
+def _phase_name_from_checkpoint_ns(checkpoint_ns: str) -> str | None:
+    for part in reversed([part for part in checkpoint_ns.split(".") if part]):
+        if part.startswith("agent:"):
+            return part.split(":", 1)[1] or None
+    return checkpoint_ns or None
+
+
+def _checkpoint_config(checkpoint_tuple: Any) -> dict[str, Any]:
+    config = getattr(checkpoint_tuple, "config", {}) or {}
+    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
+    return configurable if isinstance(configurable, dict) else {}
+
+
+def _checkpoint_tuple_id(checkpoint_tuple: Any) -> str:
+    configurable = _checkpoint_config(checkpoint_tuple)
+    checkpoint_id = configurable.get("checkpoint_id")
+    if checkpoint_id:
+        return str(checkpoint_id)
+    checkpoint = getattr(checkpoint_tuple, "checkpoint", {}) or {}
+    if isinstance(checkpoint, dict):
+        return str(checkpoint.get("id") or "")
+    return ""
+
+
+def _checkpoint_tuple_ns(checkpoint_tuple: Any) -> str:
+    return str(_checkpoint_config(checkpoint_tuple).get("checkpoint_ns") or "")
 
 
 def _override_source_node(compiled: Any, overridden_fields: set[str]) -> str | None:
@@ -776,6 +1454,8 @@ def _apply_resume_context_overrides(
     compiled: Any,
     invoke_config: dict[str, Any],
     context_overrides: dict[str, Any] | None,
+    *,
+    resume_from_node_id: str | None = None,
 ) -> dict[str, Any]:
     if not context_overrides:
         return invoke_config
@@ -788,7 +1468,7 @@ def _apply_resume_context_overrides(
 
     as_node = None
     if not current_state.next:
-        as_node = _override_source_node(compiled, set(context_overrides.keys()))
+        as_node = resume_from_node_id or _override_source_node(compiled, set(context_overrides.keys()))
 
     return cast(dict[str, Any], graph.update_state(invoke_config, {"data": updated_data}, as_node=as_node))
 
@@ -812,6 +1492,156 @@ def _pending_tool_calls(state_messages: list[Any]) -> list[dict[str, Any]]:
         for tool_call_id, tool_call in ai_tool_calls.items()
         if tool_call_id not in answered_tool_call_ids
     ]
+
+
+def _hitl_tool_call_from_messages(messages: list[Any]) -> dict[str, Any] | None:
+    for tool_call in _pending_tool_calls(messages):
+        if str(tool_call.get("name") or "") in _HITL_TOOL_NAMES:
+            return tool_call
+    return None
+
+
+def _hitl_tool_call_from_pregel_tasks(tasks: Any) -> dict[str, Any] | None:
+    if not isinstance(tasks, (list, tuple)):
+        return None
+    for task in tasks:
+        arg = getattr(task, "arg", None)
+        # langgraph <=1.2.2 wrapped a single tool call in a dict under
+        # "tool_call"; >=1.2.6 carries a list of tool-call dicts directly
+        # (Send(node="tools", arg=[{...tool_call...}])).
+        if isinstance(arg, dict):
+            candidates: list[Any] = [arg.get("tool_call")]
+        elif isinstance(arg, (list, tuple)):
+            candidates = list(arg)
+        else:
+            continue
+        for tool_call in candidates:
+            if isinstance(tool_call, dict) and str(tool_call.get("name") or "") in _HITL_TOOL_NAMES:
+                return tool_call
+    return None
+
+
+def _normalise_options(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    if isinstance(value, tuple):
+        return [str(item) for item in value]
+    return []
+
+
+def _hitl_checkpoint_from_tool_call(
+    checkpoint_tuple: Any,
+    tool_call: dict[str, Any],
+) -> _HitLInterruptCheckpoint | None:
+    checkpoint_id = _checkpoint_tuple_id(checkpoint_tuple)
+    if not checkpoint_id:
+        return None
+    checkpoint_ns = _checkpoint_tuple_ns(checkpoint_tuple)
+    args = tool_call.get("args")
+    args = args if isinstance(args, dict) else {}
+    question = args.get("question")
+    clarification_type = args.get("clarification_type")
+    return _HitLInterruptCheckpoint(
+        checkpoint_id=checkpoint_id,
+        checkpoint_ns=checkpoint_ns,
+        phase_name=_phase_name_from_checkpoint_ns(checkpoint_ns) or "",
+        question=str(question) if question is not None else None,
+        clarification_type=str(clarification_type) if clarification_type is not None else None,
+        options=_normalise_options(args.get("options")),
+    )
+
+
+def _interrupt_payload(value: Any) -> dict[str, Any] | None:
+    if not value:
+        return None
+    candidates = value if isinstance(value, (list, tuple)) else [value]
+    if not candidates:
+        return None
+    raw = getattr(candidates[0], "value", candidates[0])
+    if isinstance(raw, dict):
+        return raw
+    if raw is None:
+        return None
+    return {"question": str(raw), "clarification_type": "missing_info", "options": []}
+
+
+def _hitl_checkpoint_from_interrupt_payload(
+    checkpoint_tuple: Any,
+    payload: dict[str, Any],
+) -> _HitLInterruptCheckpoint | None:
+    checkpoint_id = _checkpoint_tuple_id(checkpoint_tuple)
+    if not checkpoint_id:
+        return None
+    checkpoint_ns = _checkpoint_tuple_ns(checkpoint_tuple)
+    question = payload.get("question")
+    clarification_type = payload.get("clarification_type")
+    return _HitLInterruptCheckpoint(
+        checkpoint_id=checkpoint_id,
+        checkpoint_ns=checkpoint_ns,
+        phase_name=str(payload.get("phase_name") or _phase_name_from_checkpoint_ns(checkpoint_ns) or ""),
+        question=str(question) if question is not None else None,
+        clarification_type=str(clarification_type) if clarification_type is not None else None,
+        options=_normalise_options(payload.get("options")),
+    )
+
+
+def _checkpoint_values(checkpoint_tuple: Any) -> dict[str, Any]:
+    checkpoint = getattr(checkpoint_tuple, "checkpoint", {}) or {}
+    if not isinstance(checkpoint, dict):
+        return {}
+    values = checkpoint.get("channel_values") or {}
+    return values if isinstance(values, dict) else {}
+
+
+def _iter_checkpoints_for_run(active_checkpointer: Any, run_id: str) -> list[Any]:
+    list_checkpoints = getattr(active_checkpointer, "list", None)
+    if not callable(list_checkpoints):
+        return []
+    try:
+        checkpoints = list(list_checkpoints({"configurable": {"thread_id": run_id}}))
+    except Exception:  # noqa: BLE001 - event detection must not crash a run
+        logger.warning("[HitL] failed to inspect checkpoints for run_id=%s", run_id, exc_info=True)
+        return []
+    latest_by_namespace: list[Any] = []
+    seen_namespaces: set[str] = set()
+    for checkpoint_tuple in checkpoints:
+        checkpoint_ns = _checkpoint_tuple_ns(checkpoint_tuple)
+        if checkpoint_ns in seen_namespaces:
+            continue
+        seen_namespaces.add(checkpoint_ns)
+        latest_by_namespace.append(checkpoint_tuple)
+    return latest_by_namespace
+
+
+def _find_hitl_interrupt_checkpoint(
+    active_checkpointer: Any,
+    run_id: str,
+    result: Any,
+) -> _HitLInterruptCheckpoint | None:
+    checkpoints = _iter_checkpoints_for_run(active_checkpointer, run_id)
+    result_payload = _interrupt_payload(result.get("__interrupt__") if isinstance(result, dict) else None)
+    for checkpoint_tuple in checkpoints:
+        values = _checkpoint_values(checkpoint_tuple)
+        payload = _interrupt_payload(values.get("__interrupt__")) or result_payload
+        if payload is not None:
+            hitl = _hitl_checkpoint_from_interrupt_payload(checkpoint_tuple, payload)
+            if hitl is not None:
+                return hitl
+
+        tool_call = _hitl_tool_call_from_pregel_tasks(values.get("__pregel_tasks"))
+        if tool_call is not None:
+            hitl = _hitl_checkpoint_from_tool_call(checkpoint_tuple, tool_call)
+            if hitl is not None:
+                return hitl
+
+        messages = values.get("messages") or []
+        if isinstance(messages, list):
+            tool_call = _hitl_tool_call_from_messages(messages)
+            if tool_call is not None:
+                hitl = _hitl_checkpoint_from_tool_call(checkpoint_tuple, tool_call)
+                if hitl is not None:
+                    return hitl
+    return None
 
 
 def _select_pending_tool_call_id(
@@ -857,6 +1687,51 @@ def _resume_error_payload(exc: Exception) -> Any:
     if isinstance(exc, GraphAgentError) and exc.payload is not None:
         return exc.payload
     return make_error_payload(_RUNTIME_PHASE_FAILED_CODE, str(exc))
+
+
+def _business_context_from_graph_result(result: Any) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        return {}
+    data = result.get("data")
+    if data is not None and hasattr(data, "model_dump"):
+        return cast(dict[str, Any], data.model_dump())
+    if isinstance(data, dict):
+        return dict(data)
+    return {}
+
+
+def _emit_v030_interrupted_run(
+    event_sink: Any,
+    *,
+    run_id: str,
+    hitl: _HitLInterruptCheckpoint,
+    final_context: dict[str, Any],
+    wall_time: float,
+) -> None:
+    _emit_v030_event(
+        event_sink,
+        InterruptedEvent(
+            phase_name=hitl.phase_name,
+            thread_id=run_id,
+            checkpoint_id=hitl.checkpoint_id,
+            checkpoint_ns=hitl.checkpoint_ns,
+            namespace=hitl.checkpoint_ns,
+            ns=hitl.checkpoint_ns,
+            question=hitl.question,
+            clarification_type=hitl.clarification_type,
+            options=list(hitl.options or []),
+        ),
+    )
+    _emit_v030_event(
+        event_sink,
+        RunEndedEvent(
+            run_id=run_id,
+            thread_id=run_id,
+            status="interrupted",
+            final_context=_v030_phase_context(final_context),
+            wall_time_seconds=wall_time,
+        ),
+    )
 
 
 def _finalize_successful_v030_run(
@@ -1039,6 +1914,8 @@ def _run_v030_skill_dict(
     callbacks: list[Any] | None = None,
     skill_resolver: SkillResolverProtocol,
     model_resolver: Any | None = None,
+    llm_provider: LLMProvider | None = None,
+    checkpointer_spec: Any = "auto",
     **inputs: Any,
 ) -> dict[str, Any]:
     """Execute a V0.3.0 skill root through compile_skill + assemble_graph."""
@@ -1067,9 +1944,10 @@ def _run_v030_skill_dict(
     )
     chat_model = mock_llm if mock_llm is not _NO_MOCK_LLM else None
     active_model_resolver = model_resolver if mock_llm is _NO_MOCK_LLM else None
+    active_llm_provider = llm_provider if mock_llm is _NO_MOCK_LLM else None
 
     # Step 4.1: Dynamically resolve the checkpointer
-    active_checkpointer = resolve_checkpointer("auto")
+    active_checkpointer = resolve_checkpointer(checkpointer_spec)
 
     try:
         compiled = compile_skill(skill_root, skill_resolver=resolver)
@@ -1077,6 +1955,7 @@ def _run_v030_skill_dict(
             compiled,
             chat_model=chat_model,
             model_resolver=active_model_resolver,
+            llm_provider=active_llm_provider,
             callbacks=cast(Any, event_sink),
             skill_resolver=resolver,
             checkpointer=active_checkpointer,
@@ -1100,6 +1979,26 @@ def _run_v030_skill_dict(
             initial_state,
             config={"configurable": {"thread_id": run_id}},
         )
+        hitl_interrupt = _find_hitl_interrupt_checkpoint(active_checkpointer, run_id, result)
+        if hitl_interrupt is not None:
+            wall_time = round(time.time() - t0, 3)
+            final_context = _business_context_from_graph_result(result)
+            _emit_v030_interrupted_run(
+                event_sink,
+                run_id=run_id,
+                hitl=hitl_interrupt,
+                final_context=final_context,
+                wall_time=wall_time,
+            )
+            saved_trace_path = str(event_sink.trace_path) if event_sink.trace_path is not None else None
+            return {
+                "run_id": run_id,
+                "context": final_context,
+                "metrics": {"wall_time_sec": wall_time},
+                "trace_path": saved_trace_path,
+                "run_dir": str(trace_output),
+                "wall_time_sec": wall_time,
+            }
     except Exception:
         wall_time = round(time.time() - t0, 3)
         _emit_v030_event(

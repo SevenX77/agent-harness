@@ -1,0 +1,130 @@
+[
+  {
+    "name": "graph round-trip 客户端",
+    "what": "画布动作（连线 / 建节点 / 改头部）写回源码的前端编排逻辑：把当前画布拓扑交给后端序列化成新 GRAPH.md 文本、再落盘、再重编译，全程带 hash 乐观锁防覆盖。",
+    "where": "Workspace.tsx 的 handlePersistConnection（把一条新连线落到源码的编排函数）/ doWriteSkillFile（Workspace 里统一的写盘入口，桌面态转 Rust native-fs、浏览器态退化 HTTP）；serializeSkillGraph（api/client.ts 里 POST /skills/{id}/graph/serialize 的客户端函数）；graphHash 用 sha256Hex（对当前 GRAPH.md 文本算 sha256 当 expected_hash 的工具）。",
+    "duties": [
+      "把画布当前 phase 列表 + 真实 depends_on 拓扑组成请求，POST 给后端 serialize 端点换回完整新 GRAPH.md 文本（后端保留非拓扑内容）。",
+      "对当前内存里的 GRAPH.md 文本算 sha256 当 expected_hash，同时传给 serialize 与落盘两道，防画布拿旧版覆盖磁盘新版。",
+      "拿到新 markdown 后调 doWriteSkillFile 落盘，桌面态走 Rust native-fs、浏览器态退化为 HTTP POST 给 Python 后端。",
+      "落盘后触发 compileSkillById 重编译（编译门控的呈现归 N3 Compile，这里只触发）。",
+      "拿后端回的新 current_hash 更新为下次的 expected_hash，串起连续编辑的乐观锁链。"
+    ],
+    "used_by": "#1（canvas-projection 投影出画布）、#6（connect-edge 连线写回）、#7（disconnect-edge 断连写回）、#23（graphmd-raw-roundtrip 头部裸编辑保存）。",
+    "boundary": "做：把画布拓扑/源码编辑组织成「serialize → 落盘 → 重编译」一条链，带 hash 乐观锁。不做：不自己序列化 GRAPH.md 文本（归后端 serializer）、不算编译结果（归引擎）、不直接碰磁盘（写盘归 Rust native-fs）。",
+    "api": "serialize 走 POST /skills/{id}/graph/serialize；落盘桌面态走 Rust native-fs write_workspace_file、浏览器态走 HTTP；详见后端接口契约页 mech_graph。"
+  },
+  {
+    "name": "canvas-authoring",
+    "what": "画布拓扑编辑的一组纯函数：连线/断连改 depends_on、新建节点组装草稿、按节点类型出 FROZEN-clean 脚手架，本身不发网络、不落盘。",
+    "where": "canvas-authoring.ts（整文件）：connectPhaseRefs（往目标 phase 的 depends_on 追加来源 id 的纯函数）、disconnectPhaseRefs（从 depends_on 移除某依赖的纯函数）、createPhaseDraft（组装新节点草稿：去重 id + 文件路径 + 脚手架文本）、phaseFilePath（把 kind 映射成 phases/<id>/SKILL|LOGIC|SUBGRAPH.md 的函数）、defaultPhaseMarkdown（按 kind 出三种模板的脚手架函数，分派到 logicPhaseMarkdown / agentPhaseMarkdown / subgraphPhaseMarkdown）。",
+    "duties": [
+      "连线：connectPhaseRefs 只往目标 phase 的 depends_on 数组追加来源 phase id（不动别的字段）。",
+      "断连：disconnectPhaseRefs 只从目标 phase 的 depends_on 过滤掉该依赖。",
+      "建节点=建文件：phaseFilePath 把 skill/logic/subgraph 三 kind 映射成 SKILL.md / LOGIC.md / SUBGRAPH.md 路径；createPhaseDraft 生成去重 phaseId + 脚手架文本 + 空 depends_on 的 phaseRef。",
+      "脚手架 FROZEN-clean：defaultPhaseMarkdown 三模板只写各类型白名单字段（logic=name/io/actions/validator、agent=name/llm_role/io/tools/validator、subgraph=name/path/io/validator），绝不写 mode / system_prompt / exit_contract / python_callable / target_skill。"
+    ],
+    "used_by": "#4（create-node-is-file 建节点）、#6（connect-edge）、#7（disconnect-edge）。",
+    "boundary": "做：连断线改 depends_on、建节点草稿、三类节点脚手架（纯内存）。不做：不发网络、不落盘（写盘归 graph round-trip 客户端 + native-fs）、不决定节点类型真相（类型由落地的文件名决定）。",
+    "api": "无 —— 纯前端函数，结果交给 graph round-trip 客户端去 serialize / 落盘。"
+  },
+  {
+    "name": "节点类型派生",
+    "what": "把一个 phase 算成 LOGIC / AGENT / SUBGRAPH 三类之一、并反算它对应哪个文件名的前端逻辑。类型派生以**该 phase 目录下落地的节点文件名为先**（SUBGRAPH/SKILL/LOGIC.md），符合「类型=文件名」的 FROZEN 口径（F1 已闭合，2026-06-23 核实）。",
+    "where": "PropertiesPanel.tsx 的 phaseKindLabel（据 data.mode / data.subgraphPath 推三类标签的函数）/ phaseKindFile（由标签反算文件名的函数）；节点 data.mode 的源头是 build-nodes.ts:239 `phaseModeFromFiles(phase.name, detail?.files) ?? phaseKindFromTopologyMode(topology?.mode)`——**先按落地的 SUBGRAPH/SKILL/LOGIC.md 文件名派生**（phaseModeFromFiles），文件缺失才回退引擎注入的 topology.mode（与文件名一致），旧的 `?? phase.mode`（读可变 manifest mode）已删。phaseKindLabel 因此吃的是文件派生出来的 data.mode。",
+    "duties": [
+      "phaseKindLabel：subgraphPath 或 mode==='subgraph' → SUBGRAPH；mode ∈ {skill,llm,agent} → AGENT；否则 → LOGIC（其输入 data.mode 已是文件派生）。",
+      "phaseKindFile：由上面标签反算 SUBGRAPH.md / SKILL.md / LOGIC.md 文件名。",
+      "节点 data.mode 取自 build-nodes 的 phaseModeFromFiles(...) ?? phaseKindFromTopologyMode(topology.mode)：先按 phase 目录下落地的节点文件派生，文件缺失才回退引擎注入的 topology.mode（与文件名一致），不再读可变的 manifest phase.mode。"
+    ],
+    "used_by": "#1（canvas-projection 投影节点种类）、#16（node-type-derivation 显示类型，F1 已闭合）。",
+    "boundary": "做：把 phase 算成三类标签 + 反算文件名（以落地文件名为先）。不做：不写盘——节点类型真相是「该 phase 目录下存在哪个节点文件」，mode 仅文件缺失时的 fallback（F1 已满足）。",
+    "api": "无 —— 纯前端派生，输入来自编译产物的 graph_topology + manifest。",
+    "design_note": "F1（phase-editing 能力文档里『节点类型据文件、非可变 mode 字段』那条不变量）要求：改旧 mode frontmatter 不应改变渲染的节点类型，只有文件类型才改。现状已满足——build-nodes.ts:239 文件名优先派生（phaseModeFromFiles），旧的 `?? phase.mode` 兜底已删，F1 在代码侧已闭合（2026-06-23 核实）。此前本卡『以可变 mode 为准、违 F1、N2 真实未修缺陷』是旧代码的滞后描述，已纠正。"
+  },
+  {
+    "name": "phase 白名单序列化",
+    "what": "三类节点 Properties 表单的解析与白名单写回：把 phase 文件顶部 YAML frontmatter 解析成表单数据，保存时只写各类型白名单键、保留 name/io/未知键/body。",
+    "where": "phase-frontmatter.ts：parsePhaseFrontmatter（把文件拆成『已解析 frontmatter 对象 + 原始 body 字符串』的函数）、applyPhaseFrontmatterForm（把表单写回 phase 源码、保留白名单外内容的函数）、frontmatterFromForm（按节点种类把表单合并进原 frontmatter、只 set/delete 白名单键的函数）。表单形状 = PhaseFrontmatterFormData。",
+    "duties": [
+      "解析：parsePhaseFrontmatter 把 SKILL/LOGIC/SUBGRAPH.md 顶部 frontmatter 解析成表单数据，失败回不可解析标记。",
+      "白名单写回：frontmatterFromForm 以原 frontmatter 浅拷贝为起点，agent → 只 set llm_role/tools/subagents、logic → actions/validator、subgraph → path/validator，从不触碰别的键。",
+      "round-trip 保真：applyPhaseFrontmatterForm 保证 name / io / 非本类型字段 / 任意未知键 / body 全部原样保留；空值用 delete 而非写 null。"
+    ],
+    "used_by": "#18（agent-whitelist）、#19（logic-whitelist）、#20（subgraph-whitelist）、#21（whitelist-roundtrip-save）。",
+    "boundary": "做：frontmatter 解析 + 三类白名单写回 + round-trip 保真。不做：不编辑 io.inputs/outputs（归 i/o 面板）、不编辑正文 XML 步骤（归画布内联）、不决定节点类型（类型由文件决定）。",
+    "api": "无 —— 纯前端解析/序列化；落盘由 Properties 保存经 graph round-trip 客户端走 native-fs。"
+  },
+  {
+    "name": "子图 path 解析",
+    "what": "判定一个 subgraph phase 的子图引用是否解析得到（绝对 path）、还是缺失、还是仍用旧 target_skill 需迁移，并给出迁移提示文案。",
+    "where": "subgraph-path.ts：resolveSubgraphReference（据 path / 旧 target_skill 出 resolved|missing|migration-required 三态的函数）、normalizeAbsoluteSubgraphPath（把值规整成绝对 path、非绝对返回 null 的函数）、legacySubgraphTargetSkill（从 frontmatter 读旧 target_skill 的函数）、invalidSubgraphPathMessage（生成迁移提示文案的函数）。",
+    "duties": [
+      "path 命中绝对路径 → resolved；否则看是否有旧 target_skill → migration-required；都没有 → missing。",
+      "normalizeAbsoluteSubgraphPath 强制绝对路径（D7：子图按 path 解析、无注册表），非绝对回 null。",
+      "对 migration-required 给出「旧 target_skill 不再解析子图、存一个绝对 path 迁移」的提示文案。"
+    ],
+    "used_by": "#20（subgraph-whitelist 子图 path 字段 + 迁移提示）、#30（subgraph-io-no-1to1，子图引用的 outputs 比对依赖它定位子图）。",
+    "boundary": "做：判定子图引用状态 + 迁移提示。不做：不提供「path 找不到 → OS 选文件夹导入工作区」的 folder picker 入口（F4 未落，属偏差）、不真去磁盘读子图（读子图预览归子图 inline 预览）。",
+    "api": "无 —— 纯前端判定；子图真实子拓扑由子图 inline 预览经 GET child-graph-topology 拉。",
+    "design_note": "F4（phase-editing 能力文档里『子图绝对 path + 找不到标红 + 导入入口』那条）：path 字段与迁移提示已落，但「找不到 → 标红 → OS 选文件夹导入工作区」的导入入口仍缺（R5 / D7）。"
+  },
+  {
+    "name": "io schema 推断",
+    "what": "i/o 面板的一组纯函数：从拖入的 JSON 文本推断 io.inputs schema、把推断结果写回 GRAPH.md io.inputs、给 io.outputs 字段配 artifact 落盘目标，全在内存算、不发网络。",
+    "where": "schema-infer.ts：inferJsonSchemaFromText（从一段 JSON 文本/文件推断字段 schema 的函数）、applyInputSchemaToGraph（把推断的 schema 写进 GRAPH.md io.inputs 的纯函数）、applyOutputArtifactPathToGraph（往 io.outputs.<字段> 写 {target:'artifact', path} 落盘目标的纯函数）；只读投影 io 契约的 inputContractView / IoContractView（panel-files.ts，已不再投影磁盘上不存在的假文件）。",
+    "duties": [
+      "inferJsonSchemaFromText：把用户拖入的 JSON 样本推断成字段 + 类型的 io.inputs schema。",
+      "applyInputSchemaToGraph：把推断结果直接写进 GRAPH.md 的 io.inputs.properties（不经投影假文件、不走死路径）。",
+      "applyOutputArtifactPathToGraph：给某个 io.outputs 字段写 {target:'artifact', path} 落盘目标，空 path 清除目标（G3 artifact 落盘）。",
+      "inputContractView：只读投影 io.inputs/outputs 给面板渲染，并出一个种子 JSON 字符串供 schema-infer 文本框预填——不再投影磁盘上不存在的 input/schema.json、input/sample.json 假文件。"
+    ],
+    "used_by": "#25（input-field-edit）、#26（input-files-import）、#29（output-artifact-path）。",
+    "boundary": "做：io schema 推断 / 写回 GRAPH.md / artifact 落盘目标标注，纯内存。不做：不真把 artifact 写盘（运行期由引擎 io/manager 落 .workspace/artifacts，归 N4 运行）、不发网络。",
+    "api": "无 —— 纯前端函数，写回的 GRAPH.md 经 graph round-trip 客户端落盘。"
+  },
+  {
+    "name": "子图 inline 预览",
+    "what": "在画布上把一个 subgraph 节点 inline 展开成画布级子拓扑：拉子图真实 phase 列表 + DAG，在 expand 节点旁靠右起虚线容器（动态 group bbox），容器内用主画布同款 React Flow 节点+边渲染子图真实子拓扑（真节点带种类/状态灯、只读），父图依赖边以虚线 bridge 接驳到子图首/末节点。数据真、绝不编造子图未声明的 phase。",
+    "where": "subgraph-expansion.ts：buildSubgraphExpansion（画布级子拓扑展开纯构建函数——给定已布局父节点 + 各展开子图真实拓扑，产出 subgraphGroup 容器节点 + 子 phase 真节点 + intra/bridge 边；子节点带显式 width/height 避免 React Flow overlay 量尺丢失而 visibility:hidden）、isSubgraphPreviewId（判 __subpreview__ 预览 id 的函数）；SubgraphGroupNode.tsx（虚线容器节点，头部 FileCode2 + 父名 + 绝对 path 徽标，loading/error 态）。数据源 getChildGraphTopology（api/client.ts 拉某子图真实拓扑的客户端函数）。布局复用 lib/layout.ts getAutoLayoutedElements（dagre TB）。",
+    "duties": [
+      "subgraph 节点 toggle 展开时按绝对 path 调 getChildGraphTopology 拉子图真实 phase 列表 + DAG。",
+      "buildSubgraphExpansion 以子图真实 phase 为存在性/顺序真相，用 dagre TB 布局成虚线容器内的真 React Flow 子节点 + intra 真边，父图 expand 节点 bridge 接驳子图首（entry）/末（terminal）。",
+      "子预览节点带显式 width/height（overlay 不进 useNodesState、量尺 change 被丢，无显式尺寸会一直 visibility:hidden）；loading/error/loaded 三态分别渲染。"
+    ],
+    "used_by": "#13（subgraph-inline-preview 子图 inline 展开真子拓扑预览）。",
+    "boundary": "做：拉子图真实拓扑、画布级 inline 渲染（虚线容器 + 真子节点/边 + 父图 bridge 接驳）、只读预览。不做：不编造子图未声明的 phase、不做子图下钻聚焦（#14 是另一回事）、预览子节点不可拖/选/连/删、不改子图源码。",
+    "api": "GET child-graph-topology（拉子图真实拓扑）；详见后端接口契约页 mech_io。"
+  },
+  {
+    "name": "资产与子图文件浏览",
+    "what": "Assets 面板的真实文件树：Skill Files 展示当前 skill 根目录完整目录树（含隐藏文件），Subgraphs 以可折叠文件夹显示每个 subgraph path 指向的完整目录树；文件可打开到 Monaco，子图文件默认只读打开，避免误写父 skill。",
+    "where": "AssetsPanel.tsx：buildAssetTree 是浏览器态 fallback；useNativeDirectoryTree / loadNativeDirectoryTree / appendNativeDirectory 在 Tauri runtime 下通过 native-fs 递归 workspaceRoot 或 subgraph.path；SubgraphFolder 把每个 resolved 子图渲染成 FolderRow；SubgraphLinkBadge 显示 linked/missing/migration 状态并给 missing/migration 入口。FileRow.tsx / FolderRow.tsx 负责窄栏 truncation、title 与可折叠交互。Workspace.tsx 给左 Assets、右 Copilot ResizePanel 加 min-w，避免百分比侧栏过窄。",
+    "duties": [
+      "Skill Files：优先按 workspaceRoot 递归读磁盘文件夹，不过滤隐藏文件（.worktree 等也显示）；非 Tauri / 读不到时保留 skillDetail.files 投影 fallback。",
+      "Subgraphs：根据 subgraphMembership 从 graph_topology 找 SUBGRAPH phase 的 path/filePath；resolved path 下递归显示整个子图文件夹，missing/migration 状态可选择文件夹并写回 SUBGRAPH.md。",
+      "打开文件：openFile 先读对应 workspaceRoot + relative path 的真实内容与 hash，再交给 Workspace/LazyMonacoPanel；子图目录文件 saveEnabled=false，只读查看且不触发父 skill lint。",
+      "布局：左右侧栏在百分比 resize 基础上加最小宽度，文件/文件夹行稳定 truncate，窄窗口不把关键信息挤没。"
+    ],
+    "used_by": "N2.5（Assets 面板：Skill Files / Subgraphs 文件浏览）；也服务 #20 subgraph-whitelist 的 missing/migration 导入路径。",
+    "boundary": "做：浏览当前 skill 与子图的真实文件夹树、打开文件、给 missing/migration 子图选 path 并写回对应 SUBGRAPH.md。不做：不编译子图、不修改子图目录文件（只读打开）、不自己越过 native-fs 边界访问磁盘。",
+    "api": "Tauri native-fs：listWorkspaceDir / readWorkspaceFile / writeWorkspaceFile / selectSkillDirectory；浏览器 fallback 读 SkillDetail.files。",
+    "design_note": "2026-06-23 快速前端迭代按产品反馈修正：Skill Files 必须是整个 skill 文件夹（含隐藏文件，尤其 .worktree）；Subgraphs 参考 VS Code/Cursor explorer，可收起到底部，展开后显示子图完整文件夹而不是只有 linked 状态。"
+  },
+  {
+    "name": "命名弹框",
+    "kind": "共享 UI 组件（跨节点）",
+    "what": "一个通用的「给东西起名 / 改名」弹框：单输入框 + 重名/空名校验，提交只吐 trim 后的名字。它和「角色」「节点」本身无关——任何需要命名/改名的地方都能用。",
+    "where": "组件本体 RoleNameDialog.tsx（物理放在 llm-roles/ 目录、名字带 role 语义不准）；N2 画布建节点的命名走它（在画布新建 phase 时给节点起名）。它与 N0 API Keys / LLM Roles 用的是同一个组件。",
+    "duties": [
+      "渲染带单输入框的命名弹框，支持受控/非受控开合，提交回调只吐 trim 后的名字。",
+      "校验名字：空名报 required、与已有名撞名报 already exists，拦住非法提交。",
+      "提交成功后关闭弹框、回传名字给上层。"
+    ],
+    "used_by": "N2：#4（create-node-is-file，给新建 phase 节点命名）；另跨节点服务 N0 API Keys（给第三方 provider 命名）与 LLM Roles（给角色命名）——单处定义、多处复用。",
+    "boundary": "做：命名/改名弹框交互 + 重名/空名校验。不做：不录入 path/io/字段、不做保存、不碰节点内容。",
+    "reuse_note": "跨节点共享：同一个组件同时服务 N2（建节点命名）、N0 API Keys、N0 LLM Roles。它是共享前端模块，不在每个节点各写一遍。",
+    "design_note": "命名问题：当前代码名 RoleNameDialog、且放在 llm-roles/ 目录，名字带「role」语义不准（它根本不只服务角色）。设计上应提升为共享组件、改成中性名（如 NameDialog）、挪到共享目录。",
+    "api": "无 —— 只收集名字、回调给调用方；真正的建节点保存由 canvas-authoring + graph round-trip 客户端做。"
+  }
+]

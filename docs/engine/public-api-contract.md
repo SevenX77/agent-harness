@@ -375,7 +375,7 @@ Family mapping summary:
 - **Source module**: `graph_agent.core.manifest`
 - **Consumer files**: apps/studio/backend/app/services/skills.py:23
 - **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
-- **Fields**: `id: str`, `src: str`, `depends_on: list[str]`
+- **Fields**: `id: str`, `src: str`, `depends_on: list[str]`, `output: bool`
 - **Preconditions**: Consumers must use the frozen field names, field types, constructor shape, and source module listed here.
 - **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.

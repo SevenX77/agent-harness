@@ -62,7 +62,7 @@ def test_scorecard_workflow_matches_design_contract() -> None:
     }
 
     steps = analysis["steps"]
-    checkout_steps = [step for step in steps if step.get("uses") == "actions/checkout@v4"]
+    checkout_steps = [step for step in steps if step.get("uses") == "actions/checkout@v7"]
     assert checkout_steps[0]["with"]["persist-credentials"] is False
 
     scorecard_steps = [

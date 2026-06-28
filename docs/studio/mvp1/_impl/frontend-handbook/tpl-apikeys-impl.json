@@ -1,8 +1,9 @@
 {
  "id": "apikeys_impl",
- "title": "API Keys · 实施详情",
+ "title": "API Keys · 实施结果",
  "design_ref": "apikeys_design",
- "intro": "本页是 API Keys 前端的现状/差距/实施计划/测试,1:1 对应设计页 apikeys_design(原子 #16–#31)。设计已说清「应该怎样」,这里写「现在怎样、差多少、按什么顺序补、怎么测」。代码一律按「文件名 + 函数/对象名」引用(可全局搜索定位,不写行号——行号会漂、名字稳定);后端引 后端实施手册 D5/D6。底层依赖的凭证读写/探测机制见 mech_cred,后端契约就绪情况引 后端实施手册 框架(D5 凭证/route 已收口=ok,D6 六态投影已收口=ok)。",
+ "intro": "本页是 API Keys 前端的实施结果与测试,1:1 对应设计页 apikeys_design(原子 #16–#31)。设计页说明「应该怎样」,这里只保留「现在怎样、最终结果是什么、怎么验证」。代码一律按「文件名 + 函数/对象名」引用(可全局搜索定位,不写行号——行号会漂、名字稳定);后端引 后端实施手册 D5/D6。底层依赖的凭证读写/探测机制见 mech_cred。",
+ "result_only": true,
  "functions": [
   {
    "n": 16,
@@ -81,12 +82,12 @@
    "n": 24,
    "cap": "official-test-job",
    "design_ref": "atom-24",
-   "current": "现状:前端已统一为一个 `Test` 动作。官方 ProviderCard 只有 API Key 行右侧 Test,不再渲染手动 Endpoint test;测试结果除 route/model 列表外也投影到 Available Endpoints。后端 Probe Knowledge Catalog 免重探策略仍按 mech_cred 状态追踪。",
-   "gap": "前端形态符合;后端是否完整读取 Probe Knowledge Catalog / compact job 细节以 mech_cred 为准。",
+   "current": "现状:已实现且符合。官方 ProviderCard 只有 API Key 行右侧 Test,不再渲染手动 Endpoint test;测试结果除 route/model 列表外也投影到 Available Endpoints。官方 Test 拉 provider model list / route candidates 并写回 credentials;远端 community catalog 的读取是 cache-only,只有 Test 保存 endpoint/route 结果时才把匹配的 probe-verified evidence 晋升到 credentials route.metadata.evidence_refs。",
+   "gap": "符合设计,无需改。页面加载或 sync-verified 只更新 disposable verified cache 与顶部 advisory 区,不直接 applied to your keys;按 Test 后,匹配 evidence_refs 已写入 credentials 的 route 才能投影 historical_ready 蓝态。",
    "fe_status": "符合",
-   "be_dep": "契约要先改。统一入口 POST /endpoints/{id}/test(官/三同走)与解除 test-jobs 的官方-only 门禁(llm.py)需后端先动;批量探测策略归 mech_cred。注:后端实施手册 D5 路由/凭证收口=ok,但「官/三测试入口对称化 + 批量探测」属 API Keys 测试路径,需后端按设计补齐。 另:官方 Test 拉模型这步还应读 Probe Knowledge Catalog 做「回填已证实能力 / get-models 拿不到清单用 Catalog 补 / 批量探测前免盲测」，现状全程不读 Catalog、属未实现缺口(记在 mech_cred「后端实现状态」)。",
+   "be_dep": "已就绪可接。POST /endpoints/{id}/test 是统一入口;官方 Test 写 endpoint/route 结果时会应用 cached community catalog evidence 到 credentials,并保持 sync-verified cache-only。GET /registry 再从 credentials 投影 endpoint/route/ui_state。",
    "fe_resync": "apikeys 后端+前端齐(2026-06-20)",
-   "be_status": "契约问题"
+   "be_status": "已实现"
   },
   {
    "n": 25,
@@ -140,11 +141,11 @@
    "cap": "test-status-projection",
    "design_ref": "atom-30",
       "current": "现状:已接 6 态(本轮后端 Probe Knowledge Catalog 生命周期补齐 + 前端蓝态层级订正后端到端打通)。前端半——ProviderCard(ProviderCard.tsx)已从旧 RouteStatus 枚举迁到后端 6 态。**蓝态层级(2026-06-23 订正,关键)**:蓝(historical_ready『Previously Connected』)落在**路由标签**上——routeTagVariantFromUiState 据 route.ui_state 给标签着色(§143);**provider 标题不挂 6 态徽章**(§140 官方),按下 Test 后官方卡的连通状态显示在『API Key』旁的**绿色 ✓**(可达),不是蓝。第三方卡标题仍挂 Connected/Ready/failed 徽章(§143)。六态色映射复用 LLM Roles 同一套 provider-state-badge.tsx(ready 绿 / historical_ready 蓝 / untested 灰 / failed 红 / cooling_down 灰+倒计时 / off 灰禁用)。Available Models 已区分视角:official 的 Available Routes 仍按 route 展示;third-party/custom 的 Available Models 先按真实 model id 聚合,任一 endpoint route ready/verified 则 model 标签为绿,否则任一 historical_ready/probe-verified 则为蓝;只有 reason_code=invalid_model/model_not_found 等模型级失败才标红;endpoint/protocol/API key/upstream failure 只在 tooltip 中标 Endpoint failed,model 标签保持 untested/neutral。第三方模型 tooltip 展示聚合下的 route status、endpoint id、route id、失败作用域、失败消息和 probe attempts,避免多 endpoint route 把同一个 model 刷成重复标签,也避免把 endpoint failed 误判为 model failed。蓝态证据来源已收紧为:Probe Knowledge Catalog 的 probe-verified 历史必须先通过晋升规则写进 credentials route.metadata.evidence_refs,registry/role materialization 再从 credentials 投影出蓝;catalog-only 孤立证据不出蓝。口径收回真探历史(gap③,观测 provider-list-observed 永不出蓝)。真机验证(真后端 :8795 + .env 真 key 按 Test):OpenAI/Anthropic/Gemini/OpenRouter 真 verified→provider 绿 ✓、路由灰 untested;WaveSpeed 两 base 真 401→红 failed + 真错误码;空卡 placeholder 可读(见 #30 四张真机图)。蓝态(historical_ready)路由标签渲染由单测守(本轮真探路由均 untested/ready,不强造蓝图)。注:旧 import-draft 路径非 MVP1 主线,蓝态靠 credentials evidence_refs 点亮。",
-   "gap": "差距(已基本收口):前端 6 态迁移 + 蓝态/cooling_down 渲染 + 结果常驻 inline(§1.4)已落(FE 半,commit 5d7413cd);后端蓝态证据链——测试路径读 Probe Knowledge Catalog 做回填/兜底/免盲测、云端知识库启动同步、蓝态口径收回到 credentials evidence_refs、知识库证据→配置档案晋升——本轮全部补齐(见 mech_cred『后端实现状态』对应四项 = ok)。Import Draft 已退出 MVP1,不再作为蓝态依赖。",
+   "gap": "符合设计,无需改。蓝态证据链已收口:catalog sync/cache 不直接点亮 UI,Test 才把匹配 evidence_refs 写进 credentials;registry / role materialization 只从 credentials 投影 historical_ready。Import Draft 已退出 MVP1,不再作为蓝态依赖。",
    "fe_status": "符合",
-   "be_dep": "契约已就绪 + 蓝态证据链已补。GET /registry 在 endpoint/route 上内嵌 6 态 ui_state(后端实施手册 D6 Gateway 六态投影已收口=ok,API Keys 走的 registry DTO 已确认内嵌)。蓝态点亮的后端证据链(读 Probe Knowledge Catalog 做回填/兜底/免盲测 / 启动同步云端知识库 / 口径收回到 credentials route.metadata.evidence_refs / 证据→配置档案晋升)本轮补齐;观测(provider-list-observed)不得出蓝、catalog-only evidence 不得出蓝的口径已钉死并加回归测试。Import Draft 属非 MVP legacy,不再阻塞蓝态。",
+   "be_dep": "已就绪可接。GET /registry 在 endpoint/route 上内嵌 6 态 ui_state;蓝态只由 credentials route.metadata.evidence_refs 投影。sync-verified 只拉远端 verified cache,不写 credentials;endpoint Test 保存结果时应用 cached community evidence。观测(provider-list-observed)不得出蓝、catalog-only evidence 不得出蓝的口径已钉死并加回归测试。",
    "fe_resync": "apikeys 后端+前端齐(2026-06-20)",
-   "be_status": "契约问题"
+   "be_status": "已实现"
   },
   {
    "n": 31,
@@ -154,57 +155,6 @@
    "gap": "符合设计(只投影 registry、不持第二份),无需改。",
    "fe_status": "符合",
    "be_dep": "已就绪可接。GET /registry 返回全量 endpoint/route/role 打码快照(恢复 key 占位/状态/Available Models),key 真值另走 #16 secret 端点。后端实施手册 D5/D6 已收口=ok。"
-  }
- ],
- "plan": [
-  {
-   "step": 1,
-   "what": "#22 secret-mask-toggle:把 API Key 输入框改为永远 type='text',替换原生 password。已有 key 的 ProviderCard 隐藏态渲染同长度 mask value,显示态才渲染真实 key;新建/录入场景可继续用 apiKeyInputClassName 的 CSS mask 避免 placeholder 被打码。",
-   "depends_on": "无(纯前端 + CSS,后端不动)。",
-   "why": "纯前端、零后端依赖、改动最小且独立,最先做掉;消除原生 password 触发密码管理器的契约违背。",
-   "block": "前端独立"
-  },
-  {
-   "step": 2,
-   "what": "#19 tp-add-provider:实现一个一次填全(name / base_url / api_key)的 inline Add Provider 表单,替换 ApiKeysTab.tsx 现在只填 name 的 RoleNameDialog;提交组成 AddProviderFormSubmission(baseUrl/apiKey 非空)交给现成的 addProviderWithData(SettingsPage.tsx)→draftFromAddProviderSubmission(provider-utils.ts)。协议不暴露给用户(留给自动探测)。",
-   "depends_on": "前端依赖:复用现有 addProviderWithData / draftFromAddProviderSubmission 链路(已能落 baseUrl/apiKey);UI 沿用 shadcn 组件。后端不动(仍走 PUT /registry/endpoints debounce 保存)。",
-   "why": "纯前端、后端契约不变,可与 step 1 并行或紧随;把两步建卡收敛成一步,直接对齐设计且不被后端阻塞。",
-   "block": "前端独立"
-  },
-  {
-   "step": 3,
-   "what": "后端先行:把 API Keys 测试路径的统一契约落下来——① POST /endpoints/{id}/test 做成官/三统一入口(官方 get-models 连通即可,第三方协议自动探测 + 批量推理探测验通升 verified);② 解除 test-jobs 的官方-only 门禁(llm.py);③ 统一 POST /endpoints/{id}/models/test 的能力探测、解除官/三分叉(llm.py);④ 在 GET /registry 的 endpoint/route DTO 内嵌 6 态 ui_state;⑤ route/endpoint probe 写入 Probe Knowledge Catalog 的 probe-verified 历史证据。",
-   "depends_on": "后端契约(后端实施手册 D5 路由/凭证、D6 六态投影虽已收口=ok,但官/三测试入口对称化、批量探测、API Keys 路径的 ui_state 内嵌、Probe Catalog evidence 写入这些需后端按设计补)。这是 #24/#25/#27/#30 的共同前置。",
-   "why": "后端先于前端铁律:#24/#25/#27/#30 的前端改法都取决于后端先定下统一入口/DTO 形状,后端没动就改前端=返工。排在所有依赖后端的前端项之前。",
-   "block": "等后端（后端先行）"
-  },
-  {
-   "step": 4,
-   "what": "#30 test-status-projection(前端接 6 态):把 ProviderCard 状态位从 RouteStatus 旧枚举迁到后端 6 态 ui_state DTO,补齐蓝态(historical_ready)/cooling_down,复用 LLM Roles 的 provider-state-badge.tsx(provider-state-badge.tsx)6 态色映射;结果常驻 inline 写在 key/Base URL 旁,不只靠 toast。",
-   "depends_on": "后端 step 3-④(registry 内嵌 ui_state);蓝态点亮还依赖 step 3-⑤(Probe Knowledge Catalog 中有 probe-verified 历史证据)。前端复用已存在的 6 态徽章组件。",
-   "why": "6 态投影是 #24/#25/#27 结果呈现的共同底座(它们的测试结果都要按 6 态显示),先把状态投影统一,后面三项的呈现才有一致出口。",
-   "block": "等后端"
-  },
-  {
-   "step": 5,
-   "what": "#24 official-test-job + #25 tp-getmodels(前端统一入口):官方与第三方的 Test 都打统一 POST /endpoints/{id}/test(有异步 job 则统一轮询 GET /endpoint-test-jobs/{job_id}),去掉 getProviderModels(llm.ts)按 provider_kind 的分叉;第三方按钮文案 `Get Models`→`Test`,判定从『get-models 可达=ok』改为『批量推理探测验通=verified』。",
-   "depends_on": "后端 step 3-①②(统一入口 + 解门禁 + 协议/批量探测);呈现依赖 step 4(6 态)。",
-   "why": "官/三测试对称化是 #24/#25 的核心,必须在后端统一入口(step 3)与 6 态呈现(step 4)就位后做,否则前端无路可打、结果无处展示。",
-   "block": "等后端"
-  },
-  {
-   "step": 6,
-   "what": "#20 tp-credential-edit(去协议下拉)+ #27 manual-model-probe(前端 6 态呈现):删第三方卡的 Protocol 手选下拉(ProviderCard.tsx),协议改由 #24/#25 的探测回填;Manual 面板结果从旧 Badge 二态(ManualModelTestPanel.tsx)改为 6 态 inline 呈现。",
-   "depends_on": "#20 依赖 step 5(协议自动探测落地后才能安全去掉手选兜底);#27 前端呈现依赖 step 4(6 态)、能力统一依赖 step 3-③。",
-   "why": "去协议下拉必须等自动探测真能用(step 5)再做,否则用户失去兜底;Manual 面板 6 态呈现收尾,与其它项的 6 态呈现统一。放最后做收口。",
-   "block": "等后端"
-  },
-  {
-   "step": 7,
-   "what": "后端 · Probe Knowledge Catalog 生命周期补齐(本轮新增):① 测试路径读 Catalog——回填已证实能力、get-models 拿不到清单用 Catalog 补、批量探测前免盲测;② 云端知识库同步从「进设置页」移到后端启动 lifespan;③ 蓝态判定口径收回到真探连通(probe-verified)历史，回退「观测也算蓝」;④ 知识库证据 → 配置档案晋升规则落地。",
-   "depends_on": "纯后端(gateway / Studio 后端);前端 6 态投影就绪后即可受益，无需前端再改判定。",
-   "why": "兑现拉云端知识库「免重探」的意义，并把蓝 / 灰红线钉死，防「看到 = 蓝」误判。",
-   "block": "已交付 · 本 PR(Probe Knowledge Catalog 生命周期补齐)"
   }
  ],
  "tests": [

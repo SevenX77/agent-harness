@@ -222,9 +222,9 @@
    "cap": "official-test-job",
    "track": "官",
    "module": "测试与模型探测",
-   "func": "设计:官方卡点 Test 验证 endpoint 可连通——拉一遍模型目录(get-models),连通即验证通过,并给用户进度反馈而不是干等。",
+   "func": "设计:官方卡点 Test 验证 endpoint 可连通——拉一遍模型目录(get-models),连通即验证通过；若本地已缓存远端 community catalog 的真探历史证据，则在 Test 写 credentials 时把匹配 evidence 一并挂到 route 上。",
    "action": "用户在官方卡点 `Test` 按钮。",
-   "fe_design": "官方卡点 Test → 前端起一个后端测试任务、按节奏轮询进度实时刷到卡上 → 任务拉到模型目录(get-models)即判 endpoint 验证通过。拉模型这步同时要吃 Probe Knowledge Catalog(历史探测知识库)的料,但它只通过 credentials 生效:① 把 Catalog 里真探连通过的能力晋升/回填进 credentials route 后再进入 model list(出蓝见 #30);② get-models 拿不到清单(空 / 失败)时，用 Catalog 里该 provider / endpoint 的已知模型经 credentials 补出候选清单(清单兜底);③ 批量探测前先查 Catalog 历史，已知通过的可跳 / 优先信，不全量盲测——读取本地/远端只读知识库就是为了免重探。设计目标:官方与第三方走同一套测试入口 + 批量探测，官 / 三只在「身份与 canonical 默认」上有别(§1.1 vs §1.2);官方因 endpoint 可控，只需 get-models 连通即可，不强制逐模型 probe。前端只负责触发 + 展示进度，Catalog 回填 / 兜底 / 免盲测的策略归后端机制(mech_cred),状态读取仍只信 credentials DTO。",
+   "fe_design": "官方卡点 Test → 前端触发统一后端 endpoint test → 后端读取 provider model list / route candidates 并写回 credentials。远端 community catalog 的读取是 cache-only:后端启动或 Settings 页同步只把签名 catalog 拉进 disposable verified cache,不直接改 credentials,也不直接点亮蓝态。只有用户按 Test 时,后端才把缓存中与本 endpoint/route 匹配的 probe-verified evidence 晋升到 credentials route.metadata.evidence_refs;状态投影仍只信 credentials DTO。Catalog-only 孤立证据只显示在页面顶部 community-verified advisory 区,不 applied to your keys、不出蓝;Test 后已挂 evidence_refs 且当前非绿的 route 才显示 historical_ready 蓝态。官方因 endpoint 可控,只需 get-models 连通即可,不强制逐模型 generation probe;单模型 generation/profile probe 留给 Manual model probing 或 Role Test。",
    "fe_modules": [
     {
      "name": "状态投影",
@@ -234,7 +234,7 @@
    "be_contract": [
     {
      "endpoint": "POST /api/llm/endpoints/{endpoint_id}/test",
-     "purpose": "官/三统一测试入口:对该 endpoint 跑连通 + 批量模型探测,返回模型列表与新状态(目标统一路径)。",
+     "purpose": "官/三统一测试入口:官方读取 provider model list / route candidates 并写 credentials;第三方按候选 endpoint 跑模型 probe。Test 时会把已缓存且匹配的 community catalog evidence 写入 credentials route.metadata.evidence_refs。",
      "mechanism_ref": "mech_cred",
      "iface_ref": "iface-4"
     },
@@ -247,7 +247,7 @@
    ],
    "fe_status": "符合",
    "be_status": "已实现",
-   "gap_brief": "符合设计。2026-06-20:代码已落地(design-audit vs code 核实),状态回填。官/三测试入口已统一:POST /endpoints/{id}/test(llm.py:511)是唯一入口,旧的官方专属 POST /endpoints/{id}/test-jobs 路由及其 provider_kind!='official' 拒第三方门禁已删(路由表无 test-jobs/endpoint-test-jobs);官方因 endpoint 可控仅需 get-models 连通即验证(llm.py:580-584,不逐模型 probe)。前端 getProviderModels(api/llm.ts:1356-1362)去掉了 provider_kind 分叉与 testOfficialProviderModelsWithJob,官/三都 POST /llm/endpoints/{id}/test,按钮文案两类都是 'Test'(ProviderCard.tsx:1035)。 补(2026-06-22 代码核实):上面「读 Probe Knowledge Catalog 回填已证实能力 / get-models 拿不到清单用 Catalog 补 / 批量探测前免盲测」这三件后端测试路径都没做——官方 test 路径(test_endpoint)get-models 成功后写的是本次实时能力、只追加观测证据，全程不读 Catalog;属未实现缺口，状态记在 mech_cred「后端实现状态」。",
+   "gap_brief": "符合设计。官/三测试入口已统一为 POST /endpoints/{id}/test,官方卡只有一个 Test 动作;官方因 endpoint 可控,Test 拉 provider model list 即可验证 endpoint 连通,不逐模型 generation probe。远端 community catalog 同步是 cache-only,不会在页面加载或 sync-verified 时写 credentials;Test 保存 endpoint/route 结果时,才把匹配的 probe-verified catalog evidence 写入 credentials route.metadata.evidence_refs,由 credentials 投影出 historical_ready 蓝态。Catalog-only evidence 不直接出蓝。",
    "impl_ref": "fn-24"
   },
   {
@@ -433,7 +433,7 @@
    ],
    "fe_status": "符合",
    "be_status": "已实现",
-   "gap_brief": "符合设计。2026-06-20:代码已落地(design-audit vs code 核实),状态回填。前端 6 态接通:ProviderCard.tsx:931-937 在 CardHeader 内常驻 inline 渲染 ProviderStateBadge(挨着 name/key),由 representativeProviderUiState(:338-361,读 model.ui_state)驱动。后端把每条 route 的 ui_state 内嵌进 registry DTO,经规范 gateway 投影器:_project_route_ui_states 调 adapter.project_route_state(与 LLM Roles 同一投影器);蓝态 historical_ready 只由 credentials route.metadata.evidence_refs 产出。API Keys 测试路径先写 credentials 的 route 状态 / capabilities / verified_profiles / evidence_refs,再追加 Probe Knowledge Catalog evidence 供后续晋升和共享。6 态色表复用 settings/llm-roles/provider-state-badge.tsx,三页同色。Import Draft 特性路径非 MVP1 主线,不影响 API Keys 卡蓝态。补(2026-06-24):蓝态口径再次收紧——registry / role materialization 不再直接读取 catalog evidence_records;catalog-only probe-verified 不出蓝,必须先晋升进 credentials。",
+   "gap_brief": "符合设计。前端 6 态已接通,ProviderCard 从后端 route.ui_state / model ui_state 渲染状态标签;后端把每条 route 的 ui_state 内嵌进 registry DTO,经 gateway 投影器与 LLM Roles 使用同一套状态语义。蓝态 historical_ready 只由 credentials route.metadata.evidence_refs 产出:sync-verified / 页面加载只刷新 disposable verified cache 和 advisory 展示,不直接写 credentials;API Keys Test 写 credentials 的 route 状态 / capabilities / verified_profiles / evidence_refs 时才应用匹配 catalog evidence。6 态色表复用 settings/llm-roles/provider-state-badge.tsx,三页同色。Import Draft 特性路径非 MVP1 主线,不影响 API Keys 卡蓝态。Catalog-only probe-verified 不出蓝,必须先晋升进 credentials。",
    "impl_ref": "fn-30"
   },
   {

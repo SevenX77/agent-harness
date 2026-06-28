@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/studio-settings
 doc: mvp1-alignment
-status: FROZEN（Settings UI/API 大体 live；6 态仍是旧 5 态/`needs_setup`，部分 ③b 内核逻辑还在 Studio 后端巨型路由中 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（Settings UI/API 大体 live；API Keys 已消费 6 态投影与 catalog evidence_refs 蓝态；部分 ③b 内核逻辑仍在 Studio 后端适配壳中待边界收敛。；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [settings-six-state-provider-health, model-group-role-materialization, node-properties-role-test, copilot-sdk-test-parity]
 aligns_with: 01_workflows/00_settings-ux-spec.md（settings runtime base）
@@ -9,7 +9,7 @@ aligns_with: 01_workflows/00_settings-ux-spec.md（settings runtime base）
 
 # studio-settings — MVP1 Alignment
 
-> **Tier**: capability | **Owns**: `settings-six-state-provider-health` / `model-group-role-materialization` 的 Studio UI/消费切面 + `node-properties-role-test` 机制 + `copilot-sdk-test-parity` 配置切面 | **现状**: Settings UI/API 大体 live；6 态仍是旧 5 态/`needs_setup`，部分 ③b 内核逻辑还在 Studio 后端巨型路由中 ⚠️。 | **Related**: [baseline](./baseline.md)（双向）· `settings` region · `gateway` · `llm-copilot-http-api` · `copilot-assist` · `i18n`
+> **Tier**: capability | **Owns**: `settings-six-state-provider-health` / `model-group-role-materialization` 的 Studio UI/消费切面 + `node-properties-role-test` 机制 + `copilot-sdk-test-parity` 配置切面 | **现状**: Settings UI/API 大体 live；API Keys 已消费 6 态投影与 catalog evidence_refs 蓝态；部分 ③b 内核逻辑还在 Studio 后端适配壳中待边界收敛。 | **Related**: [baseline](./baseline.md)（双向）· `settings` region · `gateway` · `llm-copilot-http-api` · `copilot-assist` · `i18n`
 
 ## 1. 定义
 `studio-settings` owns the runtime configuration capability that makes predict, run, publish, and copilot usable: identity/path basics, provider credentials, model groups, abstract LLM roles, and Copilot route configuration.
@@ -32,7 +32,7 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:340`, `01_workflows/
 - 决策: API Keys owns concrete provider reachability; LLM Roles consumes only routable model groups.
 - 原话/来源: `01_workflows/00_settings-ux-spec.md:361` assigns API Keys responsibilities; `01_workflows/00_settings-ux-spec.md:530` lists current API Keys drift.
 - 测试: missing key/base URL, failed endpoint, cooling-down circuit, and successful model fetch map to the canonical visible state.
-- Status: live but state model stale.
+- Status: live.
 - 归属: capability `studio-settings`; region `settings`; platform `gateway`.
 
 ### F3. LLM Roles Materialization
@@ -55,11 +55,11 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:340`, `01_workflows/
 
 ### F5. Canonical Six-state Projection
 
-- 机制: provider/model/role status should project through the canonical six states used in settings copy and downstream gating.
-- 决策: users need distinguish setup missing, historically ready, failed with reason, cooling-down, ready, and off cases.
+- 机制: provider/model/role status projects through the canonical six states used in settings copy and downstream gating.
+- 决策: users need distinguish untested/setup missing, historically ready, failed with reason, cooling-down, ready, and off cases.
 - 原话/来源: `01_workflows/00_settings-ux-spec.md:255` records the canonical state model and current draft gaps.
 - 测试: each canonical state is reachable in fixtures; old `needs_setup` does not leak into new UI copy.
-- Status: target-design.
+- Status: live for API Keys / registry projection; remaining work is module-boundary cleanup.
 - 归属: capability `studio-settings`; platform `gateway`; region `settings`.
 
 ### F6. Settings As Runtime Dependency
@@ -92,7 +92,7 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:340`, `01_workflows/
 | STUDIO_SETTINGS-4 | 设置不挡壳 | 单元 `shell-runtime-gate`（消费；owner=shell-layout）；**为什么**：Settings 中央 overlay 不卸载 copilot、不阻塞壳，边调边看 |
 
 ## 6. 测试关键点
-1. 六态: baseline 现状为 前后端仍有 `needs_setup` 旧 5 态 ⚠️；目标为 ready/historical_ready/untested/failed/cooling_down/off 六态投影。
+1. 六态: API Keys / registry 已消费 ready/historical_ready/untested/failed/cooling_down/off 六态投影；历史 `needs_setup` 不应再泄漏到新 UI copy。
 2. materialize 边界: baseline 现状为 `llm.py` 混 HTTP glue/probe/materialize/draft ⚠️；目标为 ③b graph-agent-gateway 负责公共内核，Studio 只做 UI/策略/适配。
 3. Copilot test: baseline 现状为 探测路径与真实 chat 不等价 ⚠️；目标为 短 smoke 走真实 SDK session。
 4. 设置不挡壳: baseline 现状为 Settings 不完整时仍可 edit/compile；目标为 predict/run/copilot/publish 显示局部 setup error。
@@ -101,7 +101,7 @@ Source workflow basis: `01_workflows/00_settings-ux-spec.md:340`, `01_workflows/
 `settings` region · `gateway` · `llm-copilot-http-api` · `copilot-assist` · `i18n`
 
 ## 8. gaps / 报警
-- 🚨 六态: 前后端仍有 `needs_setup` 旧 5 态 ⚠️；目标 ready/historical_ready/untested/failed/cooling_down/off 六态投影。
+- 六态: API Keys / registry 六态投影已落地；继续关注其它 Settings 消费面是否仍有旧 `needs_setup` 文案或枚举残留。
 - 🚨 materialize 边界: `llm.py` 混 HTTP glue/probe/materialize/draft ⚠️；目标 ③b graph-agent-gateway 负责公共内核，Studio 只做 UI/策略/适配。
 - 🚨 Copilot test: 探测路径与真实 chat 不等价 ⚠️；目标 短 smoke 走真实 SDK session。
 

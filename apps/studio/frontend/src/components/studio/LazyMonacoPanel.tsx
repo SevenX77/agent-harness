@@ -247,7 +247,10 @@ export function LazyMonacoPanel({
 
   // Realtime lint (workflow 03_compile F1): the live editor draft drives the debounced
   // /lint call; its diagnostics are the single source of truth the panel below projects.
-  const { result: lintResult } = useDebouncedLint(saveEnabled ? skillId : "", draft)
+  const { result: lintResult } = useDebouncedLint(saveEnabled ? skillId : "", draft, {
+    filePath,
+    workspaceRoot,
+  })
   const editorRef = useRef<MonacoEditorInstance | null>(null)
   const monacoRef = useRef<MonacoApi | null>(null)
 
@@ -280,8 +283,8 @@ export function LazyMonacoPanel({
   }, [])
 
   return (
-    <section className="flex h-full min-h-0 flex-col bg-card">
-      <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-3">
+    <section className="flex h-full min-h-0 flex-col bg-transparent">
+      <div className="studio-canvas-panel-header flex h-10 shrink-0 items-center justify-between border-b px-3">
         <h2 className="text-sm font-semibold text-foreground">{title}</h2>
         <div className="flex items-center gap-2">
           <Badge variant="secondary" className="font-mono text-muted-foreground">{language}</Badge>

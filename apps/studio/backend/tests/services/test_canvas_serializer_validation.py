@@ -1,6 +1,5 @@
 from app.core.adapters.engine import (
     GraphPhaseRef,
-    GraphTopologySerializationError,
     serialize_graph_topology_from_markdown,
 )
 
@@ -31,18 +30,15 @@ def test_canvas_serializer_allows_disconnected_phase_nodes() -> None:
         ],
     )
 
-    assert '<phase depends_on="input" output>init</phase>' in markdown
-    assert '<phase depends_on="input" output>agent</phase>' in markdown
+    assert "<phase>init</phase>" in markdown
+    assert "<phase>agent</phase>" in markdown
 
 
-def test_canvas_serializer_still_rejects_unknown_dependencies() -> None:
-    try:
-        serialize_graph_topology_from_markdown(
-            skill_id="serializer-validation",
-            original_md=_GRAPH_MD,
-            phases=[GraphPhaseRef(id="agent", src="phases/agent/SKILL.md", depends_on=["missing"])],
-        )
-    except GraphTopologySerializationError as exc:
-        assert exc.code == "serializer_orphan"
-    else:
-        raise AssertionError("expected unknown dependency to be rejected")
+def test_canvas_serializer_preserves_unknown_dependencies_for_compiler_validation() -> None:
+    markdown = serialize_graph_topology_from_markdown(
+        skill_id="serializer-validation",
+        original_md=_GRAPH_MD,
+        phases=[GraphPhaseRef(id="agent", src="phases/agent/SKILL.md", depends_on=["missing"])],
+    )
+
+    assert '<phase depends_on="missing">agent</phase>' in markdown

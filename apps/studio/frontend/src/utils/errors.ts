@@ -109,6 +109,12 @@ export function errorMessage(error: unknown): string {
     if (typeof error.message === 'string') {
       return error.message
     }
+    if (isRecord(error.data) && typeof error.data.message === 'string') {
+      return error.data.message
+    }
+    if (error.type === 'HashConflict') {
+      return 'File changed on disk. Reload the file and try again.'
+    }
     try {
       return JSON.stringify(error)
     } catch {

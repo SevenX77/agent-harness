@@ -1,15 +1,25 @@
-import { isValidElement, type ReactElement, type ReactNode } from 'react'
+import { isValidElement, type CSSProperties, type ReactElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { Position } from '@xyflow/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ContextEdge } from './ContextEdge'
+import { ContextEdge, EdgeContextDot } from './ContextEdge'
 
 const { getBezierPathMock } = vi.hoisted(() => ({
   getBezierPathMock: vi.fn(() => ['M0,0 C50,0 50,100 100,100', 50, 50]),
 }))
 
 vi.mock('@xyflow/react', () => ({
-  BaseEdge: ({ id, path }: { id: string; path: string }) => <path data-edge-id={id} d={path} />,
+  BaseEdge: ({
+    id,
+    path,
+    className,
+    style,
+  }: {
+    id: string
+    path: string
+    className?: string
+    style?: CSSProperties
+  }) => <path data-edge-id={id} d={path} className={className} style={style} />,
   EdgeLabelRenderer: ({ children }: { children: ReactNode }) => <>{children}</>,
   Position: { Left: 'left', Right: 'right', Top: 'top', Bottom: 'bottom' },
   getBezierPath: getBezierPathMock,
@@ -19,12 +29,6 @@ vi.mock('../ui/tooltip', () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
   TooltipContent: ({ children }: { children: ReactNode }) => <div role="tooltip">{children}</div>,
   TooltipTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
-}))
-
-const { workspaceCtxMock } = vi.hoisted(() => ({ workspaceCtxMock: vi.fn<() => unknown>(() => null) }))
-
-vi.mock('../studio/WorkspaceContext', () => ({
-  useOptionalWorkspaceContext: workspaceCtxMock,
 }))
 
 const baseProps: Parameters<typeof ContextEdge>[0] = {
@@ -44,9 +48,10 @@ const baseProps: Parameters<typeof ContextEdge>[0] = {
   },
 }
 
-function findButton(node: ReactNode): ReactElement<{
+function findDot(node: ReactNode): ReactElement<{
   onClick?: (event: { stopPropagation: () => void }) => void
   onContextMenu?: (event: { preventDefault: () => void; stopPropagation: () => void }) => void
+  'data-edge-context-target'?: string
 }> | null {
   if (!isValidElement(node)) {
     return null
@@ -55,26 +60,26 @@ function findButton(node: ReactNode): ReactElement<{
     children?: ReactNode
     onClick?: (event: { stopPropagation: () => void }) => void
     onContextMenu?: (event: { preventDefault: () => void; stopPropagation: () => void }) => void
+    'data-edge-context-target'?: string
   }>
-  if (element.type === 'button') {
+  if (element.type === 'g' && element.props['data-edge-context-target'] === 'true') {
     return element
   }
   const children = element.props.children
   if (Array.isArray(children)) {
     for (const child of children) {
-      const match = findButton(child)
+      const match = findDot(child)
       if (match) {
         return match
       }
     }
   }
-  return findButton(children)
+  return findDot(children)
 }
 
 describe('ContextEdge', () => {
   beforeEach(() => {
     getBezierPathMock.mockClear()
-    workspaceCtxMock.mockReturnValue(null)
   })
 
   it('renders a straight path for horizontally aligned handles', () => {
@@ -98,13 +103,28 @@ describe('ContextEdge', () => {
     expect(getBezierPathMock).not.toHaveBeenCalled()
   })
 
-  it('renders a design-time edge dot button when hasTraceData is false', () => {
+  it('renders a design-time edge dot inside the edge SVG when hasTraceData is false', () => {
     const html = renderToStaticMarkup(<ContextEdge {...baseProps} />)
 
     expect(html).toContain('aria-label="View edge trace data"')
-    expect(html).toContain('size-4')
-    expect(html).toContain('bg-primary')
-    expect(html).toContain('border-primary')
+    expect(html).toContain('edge-context-dot')
+    expect(html).toContain('<circle')
+  })
+
+  it('uses shared canvas edge tokens for the line and context dot', () => {
+    const html = renderToStaticMarkup(<ContextEdge
+      {...baseProps}
+      data={{
+        hasTraceData: true,
+        sourcePhaseId: 'a',
+        targetPhaseId: 'b',
+      }}
+    />)
+
+    expect(html).toContain('var(--studio-canvas-edge')
+    expect(html).toContain('var(--studio-canvas-accent')
+    expect(html).not.toContain('#27272a')
+    expect(html).not.toContain('#6366f1')
   })
 
   it('renders the design-time tooltip copy', () => {
@@ -115,25 +135,57 @@ describe('ContextEdge', () => {
 
   it('clicking the design-time dot is a no-op beyond stopping propagation', () => {
     const stopPropagation = vi.fn()
-    const button = findButton(ContextEdge(baseProps))
+    const dot = findDot(EdgeContextDot({
+      id: 'a->b',
+      x: 50,
+      y: 50,
+      hasTraceData: false,
+      tooltipCopy: 'Run the skill to inspect transferred data',
+      data: baseProps.data,
+    }))
 
-    expect(() => button?.props.onClick?.({ stopPropagation })).not.toThrow()
+    expect(() => dot?.props.onClick?.({ stopPropagation })).not.toThrow()
     expect(stopPropagation).toHaveBeenCalledOnce()
   })
 
-  it('routes the dot to the trace timeline (not Properties) when the workspace is wired', () => {
-    const setSelectedEdge = vi.fn()
-    const onPanelChange = vi.fn()
-    workspaceCtxMock.mockReturnValue({ setSelectedEdge, onPanelChange, traceEvents: [] })
-    const button = findButton(ContextEdge(baseProps))
+  it('routes the dot through the injected inspect callback', () => {
+    const onInspectEdge = vi.fn()
+    const dot = findDot(EdgeContextDot({
+      id: 'a->b',
+      x: 50,
+      y: 50,
+      hasTraceData: false,
+      tooltipCopy: 'Run the skill to inspect transferred data',
+      data: {
+        hasTraceData: false,
+        sourcePhaseId: 'a',
+        targetPhaseId: 'b',
+        onInspectEdge,
+      },
+    }))
 
-    button?.props.onClick?.({ stopPropagation: vi.fn() })
+    dot?.props.onClick?.({ stopPropagation: vi.fn() })
 
-    expect(setSelectedEdge).toHaveBeenCalledWith(
-      expect.objectContaining({ source: 'a', target: 'b' }),
-    )
-    expect(onPanelChange).toHaveBeenCalledWith('timeline')
-    expect(onPanelChange).not.toHaveBeenCalledWith('properties')
+    expect(onInspectEdge).toHaveBeenCalledWith({
+      id: 'a->b',
+      source: 'a',
+      target: 'b',
+      contextJson: undefined,
+    })
+  })
+
+  it('can render a lightweight edge without the inspect dot', () => {
+    const html = renderToStaticMarkup(<ContextEdge
+      {...baseProps}
+      data={{
+        hasTraceData: false,
+        sourcePhaseId: 'a',
+        targetPhaseId: 'b',
+        showContextControl: false,
+      }}
+    />)
+
+    expect(html).not.toContain('aria-label="View edge trace data"')
   })
 
   it('right-clicking the design-time dot opens the edge context menu callback', () => {
@@ -142,8 +194,12 @@ describe('ContextEdge', () => {
       stopPropagation: vi.fn(),
     }
     const onEdgeContextMenu = vi.fn()
-    const button = findButton(ContextEdge({
-      ...baseProps,
+    const dot = findDot(EdgeContextDot({
+      id: 'a->b',
+      x: 50,
+      y: 50,
+      hasTraceData: false,
+      tooltipCopy: 'Run the skill to inspect transferred data',
       data: {
         hasTraceData: false,
         sourcePhaseId: 'a',
@@ -152,7 +208,7 @@ describe('ContextEdge', () => {
       },
     }))
 
-    button?.props.onContextMenu?.(event)
+    dot?.props.onContextMenu?.(event)
 
     expect(event.preventDefault).not.toHaveBeenCalled()
     expect(event.stopPropagation).not.toHaveBeenCalled()

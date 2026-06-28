@@ -120,14 +120,27 @@ describe('buildNodes', () => {
     expect(phaseNode(nodes, 'review').errorMessage).toBeUndefined()
   })
 
-  it('always brackets phase nodes with global input/output nodes', () => {
+  it('brackets phase nodes with global input/output nodes', () => {
     const nodes = buildNodes('demo', skillDetail({
       phases: ['only'],
       graph_topology: [{ id: 'only', src: 'phases/only/LOGIC.md', depends_on: [], mode: 'logic' }],
     }), new Set(), () => {}, {})
 
-    expect(nodes[0].id).toBe(INPUT_ID)
-    expect(nodes[nodes.length - 1].id).toBe(OUTPUT_ID)
+    expect(nodes.map((node) => node.id)).toEqual([INPUT_ID, 'only', OUTPUT_ID])
+    expect(nodes.map((node) => node.type)).toEqual(['globalInput', 'skill', 'globalOutput'])
+  })
+
+  it('projects explicit graph output markers onto phase node data', () => {
+    const nodes = buildNodes('demo', skillDetail({
+      phases: ['draft', 'review'],
+      graph_topology: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'agent' },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'], mode: 'logic', output: true },
+      ],
+    }), new Set(), () => {}, {})
+
+    expect(phaseNode(nodes, 'draft').isOutput).toBe(false)
+    expect(phaseNode(nodes, 'review').isOutput).toBe(true)
   })
 
   it('derives node kind from the phase FILE when topology.mode is absent (file is truth source)', () => {
@@ -197,7 +210,7 @@ describe('buildNodes', () => {
     }), new Set(), () => {}, {})
 
     const legacy = phaseNode(nodes, 'legacy')
-    // Drill-down still requires an ABSOLUTE child path, so a legacy target_skill
+    // Drill-down still requires a real path field, so a legacy target_skill
     // exposes no drillable path…
     expect(legacy.subgraphPath).toBeNull()
     // …but the inline expand toggle IS wired (it surfaces the recovery state for
@@ -205,19 +218,20 @@ describe('buildNodes', () => {
     expect(legacy.onToggleSubgraph).toBeTypeOf('function')
   })
 
-  it('only exposes absolute subgraph paths for drill-down and trims surrounding whitespace', () => {
+  it('keeps absolute and relative subgraph paths for drill-down and trims surrounding whitespace', () => {
     const nodes = buildNodes('demo', skillDetail({
       phases: ['trimmed', 'relative'],
       graph_topology: [
         { id: 'trimmed', src: 'phases/trimmed/SUBGRAPH.md', depends_on: [], mode: 'subgraph', path: '  /abs/child  ' },
-        { id: 'relative', src: 'phases/relative/SUBGRAPH.md', depends_on: [], mode: 'subgraph', path: 'legacy.registry.child' },
+        { id: 'relative', src: 'phases/relative/SUBGRAPH.md', depends_on: [], mode: 'subgraph', path: 'subgraph/child' },
       ],
-    }), new Set(), () => {}, {})
+    }), new Set(), () => {}, {}, {}, {}, {}, {}, '/skills/parent')
 
     expect(phaseNode(nodes, 'trimmed').subgraphPath).toBe('/abs/child')
     expect(phaseNode(nodes, 'trimmed').onToggleSubgraph).toBeTypeOf('function')
     // A relative path is still NOT drillable (subgraphPath null)…
-    expect(phaseNode(nodes, 'relative').subgraphPath).toBeNull()
+    expect(phaseNode(nodes, 'relative').workspaceRoot).toBe('/skills/parent')
+    expect(phaseNode(nodes, 'relative').subgraphPath).toBe('subgraph/child')
     // …yet every SUBGRAPH-kind node now gets the expand toggle, so the unresolved
     // one opens its inline recovery state instead of silently offering nothing.
     expect(phaseNode(nodes, 'relative').onToggleSubgraph).toBeTypeOf('function')
@@ -342,10 +356,9 @@ describe('buildNodesFromTopology (drilled child graph)', () => {
     { id: 'nested', src: 'phases/nested/SUBGRAPH.md', depends_on: ['plan'], mode: 'subgraph', path: '/skills/grandchild' },
   ]
 
-  it('brackets drilled phases with global input/output and preserves order + deps', () => {
+  it('brackets drilled phase nodes with global input/output and preserves order + deps', () => {
     const nodes = buildNodesFromTopology('demo', ['plan', 'nested'], topology, {})
-    expect(nodes[0].id).toBe(INPUT_ID)
-    expect(nodes[nodes.length - 1].id).toBe(OUTPUT_ID)
+    expect(nodes.map((node) => node.id)).toEqual([INPUT_ID, 'plan', 'nested', OUTPUT_ID])
 
     const plan = phaseNode(nodes, 'plan')
     expect(plan.mode).toBe('agent')
@@ -353,6 +366,16 @@ describe('buildNodesFromTopology (drilled child graph)', () => {
 
     const nested = phaseNode(nodes, 'nested')
     expect(nested.dependsOn).toEqual(['plan'])
+  })
+
+  it('projects explicit drilled graph output markers onto phase node data', () => {
+    const nodes = buildNodesFromTopology('demo', ['plan', 'nested'], [
+      { id: 'plan', src: 'phases/plan/SKILL.md', depends_on: [], mode: 'agent' },
+      { id: 'nested', src: 'phases/nested/LOGIC.md', depends_on: ['plan'], mode: 'logic', output: true },
+    ], {})
+
+    expect(phaseNode(nodes, 'plan').isOutput).toBe(false)
+    expect(phaseNode(nodes, 'nested').isOutput).toBe(true)
   })
 
   it('exposes a nested subgraph child path so deeper drilling is possible', () => {

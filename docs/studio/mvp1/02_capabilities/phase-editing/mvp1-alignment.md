@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/phase-editing
 doc: mvp1-alignment
-status: FROZEN（Properties/phase parser 仍读写旧 `mode/system_prompt/exit_contract/python_callable/target_skill` 字段 ⚠️。；目标结构已按 R4-R8 retrofit）
+status: FROZEN（Properties 按 phase kind 暴露可写白名单；SUBGRAPH 通过 folder reconnect 写 `path`，旧字段只读迁移、不写回；目标结构已按 R4-R8 retrofit）
 binds_baseline: ./baseline.md
 units: [phase-field-whitelist, node-properties-role-test, io-panel-artifacts-test-inputs]
 aligns_with: 01_workflows/02_authoring.md（phase editing / properties）· 01_workflows/00_settings-ux-spec.md（node role test）
@@ -9,7 +9,7 @@ aligns_with: 01_workflows/02_authoring.md（phase editing / properties）· 01_w
 
 # phase-editing — MVP1 Alignment
 
-> **Tier**: capability | **Owns**: `phase-field-whitelist`（字段白名单/Properties）+ `node-properties-role-test` UI 落点 + `io-panel-artifacts-test-inputs` 消费切面 | **现状**: Properties/phase parser 仍读写旧 `mode/system_prompt/exit_contract/python_callable/target_skill` 字段 ⚠️。 | **Related**: [baseline](./baseline.md)（双向）· `properties` · `input` · `studio-settings` · `engine` skill-syntax
+> **Tier**: capability | **Owns**: `phase-field-whitelist`（字段白名单/Properties）+ `node-properties-role-test` UI 落点 + `io-panel-artifacts-test-inputs` 消费切面 | **现状**: Properties 按 phase kind 暴露可写白名单；SUBGRAPH 通过 folder reconnect 写 `path`，旧字段只读迁移、不写回。 | **Related**: [baseline](./baseline.md)（双向）· `properties` · `input` · `studio-settings` · `engine` skill-syntax
 
 ## 1. 定义
 `phase-editing` owns editing the selected phase node's allowed fields and body details in Properties/input/editor surfaces, then saving back to the node file and triggering compile feedback.
@@ -46,10 +46,10 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/02_autho
 
 ### F4. Subgraph Path Field
 
-- 机制: subgraph nodes store an **绝对 path**(engine skill-syntax §2.1:绝对路径、无 registry), and missing path recovery is handled by workspace/assets.
+- 机制: subgraph nodes store a `path` reference (relative to the current skill root when possible; absolute accepted only inside the boundary). Properties changes it by reconnecting an existing child graph folder, not by freeform text input.
 - 决策: no registry id for child graph resolution in MVP1.
 - 原话/来源: `01_workflows/02_authoring.md:37` records subgraph path; `01_workflows/02_authoring.md:38` records relaxed child IO.
-- 测试: Properties exposes `path`; missing path marks Assets and offers folder add; no strict child IO one-to-one check blocks compile.
+- 测试: Properties exposes a subgraph target reconnect control; missing path marks the target/assets state and offers folder reconnect; no strict child IO one-to-one check blocks compile.
 - Status: target-design; current code stale.
 - 归属: capability `phase-editing`; capability `skill-workspace`; region `properties`, `assets`.
 
@@ -86,12 +86,12 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/02_autho
 | ID | 决策 | 动机 |
 |---|---|---|
 | PHASE_EDITING-1 | 字段白名单 | 单元 `phase-field-whitelist`；**为什么**：字段权威归 engine skill-syntax，Properties 只按三类节点(SKILL/LOGIC/SUBGRAPH)白名单显示 |
-| PHASE_EDITING-2 | subgraph path | 单元 `phase-field-whitelist`；**为什么**：SUBGRAPH.md 的 target_skill 是 path 字段(D7)，纳入白名单表单 |
+| PHASE_EDITING-2 | subgraph path | 单元 `phase-field-whitelist`；**为什么**：SUBGRAPH.md 使用 `path` 引用 child graph；Properties 只能通过重连文件夹写入该字段 |
 | PHASE_EDITING-3 | role test | 单元 `node-properties-role-test`；**为什么**：节点 Properties 的 role 旁要有 Test 键+状态，复用 settings 的 role 测试机制 |
 
 ## 6. 测试关键点
 1. 字段白名单: baseline 现状为 parser/form 仍用旧字段 ⚠️；目标为 只暴露 engine MVP1 phase schema 白名单字段。
-2. subgraph path: baseline 现状为 旧 `targetSkill` / local-path 口径残留 ⚠️；目标为 使用绝对 `path`，解析 contract 引 engine。
+2. subgraph path: 目标为 `path` 引用 child graph；UI 通过 folder reconnect 设置，保存时优先相对 skill root，解析 contract 引 engine。
 3. role test: baseline 现状为 Properties role 行 Test+状态未建 ⚠️；目标为 role 旁有 Test 键，状态来自 studio-settings/gateway 投影。
 
 ## 7. 涉及 region / platform
@@ -99,7 +99,7 @@ Source workflow basis: `01_workflows/02_authoring.md:18`, `01_workflows/02_autho
 
 ## 8. gaps / 报警
 - 🚨 字段白名单: parser/form 仍用旧字段 ⚠️；目标 只暴露 engine MVP1 phase schema 白名单字段。
-- 🚨 subgraph path: 旧 `targetSkill` / local-path 口径残留 ⚠️；目标 使用绝对 `path`，解析 contract 引 engine。
+- 🚨 subgraph path: 目标使用 `path` 引用 child graph；UI 通过 folder reconnect 设置，保存时优先相对 skill root，解析 contract 引 engine。
 - 🚨 role test: Properties role 行 Test+状态未建 ⚠️；目标 role 旁有 Test 键，状态来自 studio-settings/gateway 投影。
 
 ## 交叉引用（链接, 不复制）

@@ -57,6 +57,8 @@ def load_graph_topology_projection(skill_dir: Path) -> GraphTopologyProjection:
         }
         if mode == "subgraph":
             row["path"] = read_subgraph_path(skill_dir, ref.name)
+        if ref.output:
+            row["output"] = True
         topology.append(row)
 
     return GraphTopologyProjection(phases=phases, graph_topology=topology)

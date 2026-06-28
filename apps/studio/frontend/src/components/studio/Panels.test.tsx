@@ -6,25 +6,56 @@ import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 import { AssetsPanel, PropertiesPanel, subagentSkillFilePath } from './Panels'
 
 describe('PropertiesPanel', () => {
-  it('renders an empty state without a selected node', () => {
-    const html = renderToStaticMarkup(<PropertiesPanel selectedNode={null} />)
+  it('renders graph frontmatter fields without a selected node', () => {
+    const html = renderToStaticMarkup(
+      <PropertiesPanel
+        skillDetail={skillDetailWithFiles({
+          'GRAPH.md': [
+            '---',
+            'schema_version: v0.3.0',
+            'name: story-deconstruction',
+            'description: Builds story analysis.',
+            'llm_role: analyst',
+            'io:',
+            '  inputs:',
+            '    type: object',
+            '    properties: {}',
+            '  outputs:',
+            '    type: object',
+            '    properties: {}',
+            'phases:',
+            '  - setup',
+            '---',
+            '<phase>setup</phase>',
+          ].join('\n'),
+        })}
+        selectedNode={null}
+      />,
+    )
 
-    expect(html).toContain('Select a node to inspect')
+    expect(html).toContain('Graph')
+    expect(html).toContain('name')
+    expect(html).toContain('story-deconstruction')
+    expect(html).toContain('description')
+    expect(html).toContain('Builds story analysis.')
+    expect(html).toContain('llm_role')
+    expect(html).toContain('analyst')
+    expect(html).not.toContain('Select a node to inspect')
+    expect(html).not.toContain('schema_version')
+    expect(html).not.toContain('phases')
+    expect(html).not.toContain('id="graph-io"')
   })
 
-  it('renders selected phase metadata in the sidebar panel', () => {
+  it('renders selected phase editable fields in the sidebar panel', () => {
     const html = renderToStaticMarkup(
       <PropertiesPanel
         skillDetail={skillDetailWithFiles({
           'phases/setup/LOGIC.md': [
             '---',
             'name: setup',
-            'mode: logic',
+            'actions:',
+            '  - prepare',
             '---',
-            '<python_callable>',
-            'prepare',
-            '</python_callable>',
-            '',
             'Body',
           ].join('\n'),
         })}
@@ -46,14 +77,16 @@ describe('PropertiesPanel', () => {
 
     expect(html).toContain('setup')
     expect(html).toContain('LOGIC')
-    // FROZEN whitelist: a logic node edits Actions + Validator, never the
+    // FROZEN whitelist: a logic node edits actions + validator, never the
     // deprecated mode/python_callable/system_prompt fields.
-    expect(html).toContain('Actions')
+    expect(html).toContain('actions')
+    expect(html).toContain('prepare')
     expect(html).not.toContain('Python callable')
     expect(html).not.toContain('System prompt')
-    expect(html).toContain('input')
-    expect(html).toContain('prepare')
-    expect(html).toContain('phases/setup/LOGIC.md')
+    expect(html).not.toContain('>Depends On<')
+    expect(html).not.toContain('>input<')
+    expect(html).not.toContain('>File<')
+    expect(html).not.toContain('phases/setup/LOGIC.md')
   })
 
   it('renders agent frontmatter fields for skill phase files', () => {
@@ -94,11 +127,11 @@ describe('PropertiesPanel', () => {
       />,
     )
 
-    // FROZEN whitelist: an agent node edits LLM role + Tools + Subagents, never
+    // FROZEN whitelist: an agent node edits llm_role + tools + subagents, never
     // the deprecated system_prompt/exit_contract/python_callable fields.
-    expect(html).toContain('LLM role')
-    expect(html).toContain('Tools')
-    expect(html).toContain('Subagents')
+    expect(html).toContain('llm_role')
+    expect(html).toContain('tools')
+    expect(html).toContain('subagents')
     expect(html).not.toContain('System prompt')
     expect(html).not.toContain('Exit contract')
     expect(html).not.toContain('Python callable')
@@ -133,9 +166,14 @@ describe('PropertiesPanel', () => {
       />,
     )
 
-    // FROZEN whitelist: a subgraph node edits Path (absolute) + Validator, never
+    // FROZEN whitelist: a subgraph node exposes name/path/validator/iterate, never
     // the deprecated target_skill/system_prompt fields.
-    expect(html).toContain('>Path<')
+    expect(html).toContain('>name<')
+    expect(html).toContain('>path<')
+    expect(html).toContain('>validator<')
+    expect(html).toContain('>iterate<')
+    expect(html).not.toContain('id="phase-io"')
+    expect(html).toContain('aria-label="Reconnect path"')
     expect(html).not.toContain('Target skill')
     expect(html).not.toContain('System prompt')
     expect(html).not.toContain('phase-tools')
@@ -172,7 +210,7 @@ describe('PropertiesPanel', () => {
     expect(html).toContain('disabled=""')
   })
 
-  it('renders subagents in the selected phase metadata', () => {
+  it('does not render selected-node subagents as read-only metadata', () => {
     const html = renderToStaticMarkup(
       <PropertiesPanel
         skillId="demo-skill"
@@ -199,9 +237,8 @@ describe('PropertiesPanel', () => {
       />,
     )
 
-    expect(html).toContain('Subagents')
-    expect(html).toContain('echo_expert')
-    expect(html).toContain('Echoes text from a child expert skill.')
+    expect(html).not.toContain('echo_expert')
+    expect(html).not.toContain('Echoes text from a child expert skill.')
   })
 
   it('builds the onFileOpen path for subagent click navigation', () => {
@@ -258,7 +295,7 @@ describe('AssetsPanel', () => {
   it('shows no subgraphs (no hardcoded mock) when the skill has none', () => {
     const html = renderAssetsPanel({ 'phases/step1/LOGIC.md': '---\nname: step1\n---\n' })
 
-    // The panel must render gateway/skill facts only — never the old hardcoded
+    // The panel must render gateway/skill facts only - never the old hardcoded
     // intent_classifier / translator_subgraph fallback.
     expect(html).not.toContain('intent_classifier')
     expect(html).not.toContain('translator_subgraph')
@@ -293,6 +330,137 @@ describe('AssetsPanel', () => {
     expect(html).toContain('Linked')
     // Logic phases are not subgraph members.
     expect(html).not.toContain('phases/setup')
+  })
+
+  it('renders subgraph files as a flat panel with recursive level and right-aligned status', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceProvider value={workspaceContextStub}>
+        <AssetsPanel
+          skillDetail={{
+            ...skillDetailWithFiles({}),
+            graph_topology: [
+              {
+                id: 'segmentation',
+                src: 'phases/segmentation',
+                depends_on: [],
+                mode: 'subgraph',
+                path: '/abs/skills/segmentation',
+              },
+              {
+                id: 'summary',
+                src: 'phases/summary',
+                depends_on: ['segmentation'],
+                mode: 'subgraph',
+                path: '/abs/skills/summary',
+                level: 2,
+              } as NonNullable<SkillDetail['graph_topology']>[number],
+            ],
+          }}
+          selectedNode={null}
+        />
+      </WorkspaceProvider>,
+    )
+
+    expect(html).toContain('data-assets-section="subgraphs-files"')
+    expect(html).toContain('data-subgraph-level="1"')
+    expect(html).toContain('data-subgraph-level="2"')
+    expect(html).toContain('L1')
+    expect(html).toContain('L2')
+    expect(html).toContain('data-subgraph-level-tag="true"')
+    expect(html.indexOf('data-subgraph-level-tag="true"')).toBeLessThan(html.indexOf('data-subgraph-name="true"'))
+    expect(html).toContain('data-subgraph-folder="true"')
+    expect(html).toContain('data-subgraph-default-expanded="false"')
+    expect(html).toContain('data-subgraph-status-slot="true"')
+    expect(html).toContain('data-subgraph-row-grid="true"')
+    expect(html).toContain('w-full min-w-0 space-y-1 overflow-hidden py-1')
+    expect(html).toContain('grid w-full min-w-0 grid-cols-[minmax(0,1fr)_max-content]')
+    expect(html).toContain('grid-cols-[auto_auto_minmax(0,1fr)]')
+    expect(html).toContain('min-w-max justify-self-end')
+    expect(html).not.toContain('w-[4.75rem]')
+    expect(html).not.toContain('w-10 px-0')
+    expect(html).not.toContain('--subgraph-indent')
+    expect(html).not.toContain('var(--subgraph-indent)')
+    expect(html).not.toContain('calc(1rem +')
+    expect(html).not.toContain('padding-left:12px')
+    expect(html).not.toContain('title="Subgraphs"')
+  })
+
+  it('suppresses recursive level pills when every subgraph is top-level', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceProvider value={workspaceContextStub}>
+        <AssetsPanel
+          skillDetail={{
+            ...skillDetailWithFiles({}),
+            graph_topology: [
+              {
+                id: 'segmentation',
+                src: 'phases/segmentation',
+                depends_on: [],
+                mode: 'subgraph',
+                path: '/abs/skills/segmentation',
+              },
+              {
+                id: 'event_timeline',
+                src: 'phases/event_timeline',
+                depends_on: ['segmentation'],
+                mode: 'subgraph',
+                path: '/abs/skills/event_timeline',
+              },
+            ],
+          }}
+          selectedNode={null}
+        />
+      </WorkspaceProvider>,
+    )
+
+    expect(html).toContain('segmentation')
+    expect(html).toContain('event_timeline')
+    expect(html).toContain('Linked')
+    expect(html).not.toContain('L1')
+    expect(html).not.toContain('Recursive level 1')
+  })
+
+  it('keeps each subgraph folder collapsed by default', () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceProvider value={workspaceContextStub}>
+        <AssetsPanel
+          skillDetail={{
+            ...skillDetailWithFiles({}),
+            graph_topology: [
+              {
+                id: 'story_analysis',
+                src: 'phases/story_analysis',
+                depends_on: [],
+                mode: 'subgraph',
+                path: '/abs/skills/story_analysis',
+              },
+            ],
+          }}
+          selectedNode={null}
+        />
+      </WorkspaceProvider>,
+    )
+
+    expect(html).toContain('data-subgraph-folder="true"')
+    expect(html).toContain('data-subgraph-default-expanded="false"')
+    expect(html).not.toContain('data-subgraph-folder-contents="true"')
+  })
+
+  it('keeps the assets split panes constrained to the sidebar height', () => {
+    const html = renderAssetsPanel({ 'phases/step1/LOGIC.md': '---\nname: step1\n---\n' })
+
+    expect(html).toContain('data-assets-split-container="true"')
+    expect(html).toContain('grid h-full min-h-0')
+    expect(html).toContain('overflow-hidden px-0 pb-2')
+    expect(html).not.toContain('px-1.5 pb-2')
+    expect(html).not.toContain('calc(100vh - 5.25rem)')
+  })
+
+  it('does not draw an extra hard border between asset sections', () => {
+    const html = renderAssetsPanel({ 'phases/step1/LOGIC.md': '---\nname: step1\n---\n' })
+
+    expect(html).not.toContain('border-y border-border/40')
+    expect(html).not.toContain('bg-border/60')
   })
 
   it('surfaces a referenced subgraph with no path honestly as missing', () => {

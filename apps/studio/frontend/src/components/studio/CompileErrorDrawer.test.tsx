@@ -105,6 +105,7 @@ describe("CompileErrorDrawer rendering", () => {
     // bottom edge via absolute inset-x-0 bottom-0 — never to the viewport.
     expect(html).toContain("absolute inset-x-0 bottom-0")
   })
+
 })
 
 describe("CompileErrorDrawer copy behavior", () => {

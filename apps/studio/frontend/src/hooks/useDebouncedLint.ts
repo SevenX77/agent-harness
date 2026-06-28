@@ -86,7 +86,12 @@ export function formatLintDiagnostic(error: LintError): string {
   return segments.join(' - ')
 }
 
-export function useDebouncedLint(skillId: string, markdown: string) {
+export interface DebouncedLintTarget {
+  filePath?: string | null
+  workspaceRoot?: string | null
+}
+
+export function useDebouncedLint(skillId: string, markdown: string, target: DebouncedLintTarget = {}) {
   const [status, setStatus] = useState<LintStatus>('idle')
   const [result, setResult] = useState<LintResult | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -107,7 +112,11 @@ export function useDebouncedLint(skillId: string, markdown: string) {
     publishLintStatus(skillId, 'checking')
 
     const timeout = window.setTimeout(() => {
-      api.post<LintResult>(`/skills/${skillId}/lint`, { markdown })
+      api.post<LintResult>(`/skills/${skillId}/lint`, {
+        markdown,
+        ...(target.filePath ? { file_path: target.filePath } : {}),
+        ...(target.workspaceRoot ? { workspace_root: target.workspaceRoot } : {}),
+      })
         .then((response) => {
           const nextStatus = response.data.status === 'passed' ? 'passed' : 'failed'
           setResult(response.data)
@@ -128,7 +137,7 @@ export function useDebouncedLint(skillId: string, markdown: string) {
     }, LINT_DEBOUNCE_MS)
 
     return () => window.clearTimeout(timeout)
-  }, [markdown, skillId])
+  }, [markdown, skillId, target.filePath, target.workspaceRoot])
 
   return { status, result, message, errors: deriveLintDiagnostics(result) }
 }

@@ -26,9 +26,18 @@ from app.models.llm_config import (
 )
 from app.routers import llm as llm_router
 from app.services import copilot_test
+from app.services.community_catalog import (
+    parse_catalog_evidence,
+    promote_community_evidence_into_credentials,
+)
+from app.services.community_catalog_sync import (
+    CommunityCatalogCache,
+    DisposableCatalogCacheStore,
+)
 from app.services.copilot_test import ModelProbeResult, PingResult, _Unauthorized
 from app.services.llm_credentials import credentials_path, load_credentials, save_credentials
 from app.services.llm_import_drafts import append_evidence_record, load_evidence_library
+from app.services.llm_paths import community_catalog_cache_path
 from app.services.llm_roles import load_roles_file, save_roles_file
 from app.services.llm_roles import roles_path as active_roles_path
 from fastapi.testclient import TestClient
@@ -252,6 +261,208 @@ def test_registry_read_and_endpoint_upsert_redacts_secret(
     }
     raw = json.loads(credentials_path().read_text())
     assert raw["provider_endpoints"]["anthropic-official"]["api_key"] == "anthropic-secret"
+
+
+def _write_community_cache(*records: object) -> None:
+    DisposableCatalogCacheStore(community_catalog_cache_path()).save(
+        CommunityCatalogCache(
+            manifest_etag='"abc-1"',
+            generated_at="2026-06-26T14:40:44Z",
+            protocol_major=1,
+            records=list(records),  # type: ignore[arg-type]
+        )
+    )
+
+
+def test_registry_probe_catalog_exposes_verified_community_cache(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """The registry surfaces the disposable verified community cache so the UI
+    can show 'past connected' community evidence as an advisory layer."""
+    _seed(tmp_path, monkeypatch)
+    record = parse_catalog_evidence(
+        {
+            "evidence_type": "probe_result",
+            "trust_state": "probe-verified",
+            "evidence_id": "cat-deepseek-pro",
+            "normalized_public_base_url": "https://api.deepseek.com",
+            "provider_model_id": "deepseek-v4-pro",
+            "model_id": "deepseek-v4-pro",
+            "method_id": "deepseek_chat_completions",
+            "capability_family": "language_reasoning",
+            "observed_at": "2026-06-26T09:33:40+00:00",
+            "probe_status": "ok",
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+        }
+    )
+    _write_community_cache(record)
+
+    body = client.get("/api/llm/registry").json()
+
+    community = body["probe_catalog"]["community_catalog"]
+    assert community["synced"] is True
+    assert community["record_count"] == 1
+    assert community["generated_at"] == "2026-06-26T14:40:44Z"
+    entry = community["entries"][0]
+    assert entry["public_base_url"] == "https://api.deepseek.com"
+    assert entry["model_id"] == "deepseek-v4-pro"
+    assert entry["capability_family"] == "language_reasoning"
+    # Community evidence is advisory: it must NOT inflate the local counts.
+    assert body["probe_catalog"]["local_verified_records_count"] == 0
+
+
+def test_registry_probe_catalog_community_absent_when_no_cache(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+
+    body = client.get("/api/llm/registry").json()
+
+    community = body["probe_catalog"]["community_catalog"]
+    assert community["synced"] is False
+    assert community["record_count"] == 0
+    assert community["entries"] == []
+
+
+def _seed_deepseek_verified_endpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    route_status: str = "unverified_manual",
+) -> Path:
+    """A VERIFIED DeepSeek endpoint (api.deepseek.com/v1) with one not-yet-tested
+    route — the exact shape of the screenshot the user reported."""
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    creds_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "deepseek-official": ProviderEndpoint(
+                    endpoint_id="deepseek-official",
+                    display_name="DeepSeek Official",
+                    protocol="openai_compatible",
+                    base_url="https://api.deepseek.com/v1",
+                    api_key="secret",
+                    status="verified",
+                )
+            },
+            provider_routes={
+                "deepseek-official:deepseek-v4-pro": ProviderRoute(
+                    route_id="deepseek-official:deepseek-v4-pro",
+                    endpoint_id="deepseek-official",
+                    route_slug="deepseek-v4-pro",
+                    provider_model_id="deepseek-v4-pro",
+                    canonical_id="deepseek-v4-pro",
+                    display_name="DeepSeek V4 Pro",
+                    status=route_status,
+                )
+            },
+        ),
+        creds_path,
+    )
+    save_roles_file(
+        roles_path,
+        RolesData(),
+        known_route_ids={"deepseek-official:deepseek-v4-pro"},
+    )
+    return creds_path
+
+
+def _community_probe_record(
+    *,
+    evidence_id: str = "cat-deepseek-pro",
+    normalized_public_base_url: str = "https://api.deepseek.com",
+    model_id: str = "deepseek-v4-pro",
+    trust_state: str = "probe-verified",
+    evidence_type: str = "probe_result",
+) -> EvidenceRecord:
+    return parse_catalog_evidence(
+        {
+            "evidence_type": evidence_type,
+            "trust_state": trust_state,
+            "evidence_id": evidence_id,
+            "normalized_public_base_url": normalized_public_base_url,
+            "provider_model_id": model_id,
+            "model_id": model_id,
+            "method_id": "deepseek_chat_completions",
+            "capability_family": "language_reasoning",
+            "observed_at": "2026-06-26T09:33:40+00:00",
+            "probe_status": "ok",
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+        }
+    )
+
+
+def test_community_evidence_promotes_matching_route_to_historical_ready(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Community catalog is a data carrier INTO credentials (the single source of
+    truth). A probe-verified community record whose host + model match a VERIFIED
+    endpoint's route writes evidence into that route's credential, so the registry
+    projects it as historical_ready (blue) — host-tolerant across a /v1 suffix."""
+    creds_path = _seed_deepseek_verified_endpoint(tmp_path, monkeypatch)
+
+    updated = promote_community_evidence_into_credentials(
+        community_records=[_community_probe_record()]
+    )
+    assert updated == 1
+
+    # The credential now carries the community evidence ...
+    route = load_credentials(creds_path).provider_routes["deepseek-official:deepseek-v4-pro"]
+    assert "cat-deepseek-pro" in route.metadata.get("evidence_refs", [])
+    # ... but community evidence must NEVER promote a route to verified/green.
+    assert route.status == "unverified_manual"
+
+    # ... and the registry projects the route as historical_ready (blue).
+    body = client.get("/api/llm/registry").json()
+    provider_models = {
+        opt["route_id"]: opt
+        for group in body["model_groups"]
+        for opt in group["provider_models"]
+    }
+    assert provider_models["deepseek-official:deepseek-v4-pro"]["ui_state"] == "historical_ready"
+
+
+def test_community_evidence_skips_unmatched_host_and_observed_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No write when host does not match, and observed-only (not probe-verified)
+    community records never contribute to historical_ready."""
+    creds_path = _seed_deepseek_verified_endpoint(tmp_path, monkeypatch)
+
+    updated = promote_community_evidence_into_credentials(
+        community_records=[
+            # Wrong host — different provider, must not touch DeepSeek route.
+            _community_probe_record(
+                evidence_id="cat-other-host",
+                normalized_public_base_url="https://api.openai.com",
+            ),
+            # Right host + model but only list-observed, not probe-verified.
+            EvidenceRecord(
+                evidence_id="cat-observed-only",
+                evidence_type="model_list_observation",
+                trust_state="provider-list-observed",
+                model_id="deepseek-v4-pro",
+                provider_model_id="deepseek-v4-pro",
+                metadata={"normalized_public_base_url": "https://api.deepseek.com"},
+            ),
+        ]
+    )
+
+    assert updated == 0
+    route = load_credentials(creds_path).provider_routes["deepseek-official:deepseek-v4-pro"]
+    assert route.metadata.get("evidence_refs", []) == []
 
 
 def test_legacy_import_draft_routes_are_not_public_api(client: TestClient) -> None:
@@ -1709,8 +1920,62 @@ def test_endpoint_test_third_party_failed_inference_probe_stays_failed(
     monkeypatch,
 ) -> None:
     # apikeys#25: get-models reachability alone never reaches verified for a
-    # third-party endpoint — if no model generates, the endpoint stays failed.
-    _seed(tmp_path, monkeypatch)
+    # third-party endpoint that was NEVER verified before — if no model generates
+    # and there is no prior verified route to fall back on, it stays failed.
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "oai-fresh": ProviderEndpoint(
+                    endpoint_id="oai-fresh",
+                    display_name="Fresh OpenAI",
+                    protocol="openai_compatible",
+                    base_url="https://api.openai.example/v1",
+                    api_key="secret",
+                )
+            },
+        ),
+        credentials_path(),
+    )
+
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        return PingResult(latency_ms=42, model_ids=("gpt-5", "gpt-5-mini"))
+
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+    ) -> ModelProbeResult:
+        return ModelProbeResult(
+            model_id=model_id,
+            status="invalid_model",
+            message="generation failed for endpoint protocol/base_url combination",
+        )
+
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
+
+    response = client.post("/api/llm/endpoints/oai-fresh/test")
+
+    assert response.status_code == 200
+    body = response.json()
+    endpoint = body["registry"]["provider_endpoints"]["oai-fresh"]
+    assert endpoint["status"] == "failed"
+
+
+def test_endpoint_test_third_party_retains_verified_when_reachable_and_previously_verified(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # apikeys: an endpoint Test only needs to prove the *endpoint* connects. When
+    # get-models proves the key+URL are live AND the endpoint already has a
+    # verified route, a round where every catalog model probe fails (flaky /
+    # phantom upstream models) must NOT regress the endpoint to failed — it keeps
+    # its verified status by reusing the previously verified model.
+    _seed(tmp_path, monkeypatch)  # seeds a verified openai-direct:gpt-5 route
 
     async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
         return PingResult(latency_ms=42, model_ids=("gpt-5", "gpt-5-mini"))
@@ -1735,7 +2000,11 @@ def test_endpoint_test_third_party_failed_inference_probe_stays_failed(
     assert response.status_code == 200
     body = response.json()
     endpoint = body["registry"]["provider_endpoints"]["openai-direct"]
-    assert endpoint["status"] == "failed"
+    assert endpoint["status"] == "verified"
+    assert "previously verified" in endpoint["last_test_message"].lower()
+    # the previously verified route must remain verified
+    routes = body["registry"]["provider_routes"]
+    assert routes["openai-direct:gpt-5"]["status"] == "verified"
 
 
 def test_endpoint_test_third_party_auto_detects_protocol_and_persists_it(
@@ -2003,10 +2272,14 @@ def test_third_party_probe_model_ids_fall_back_to_draft_known_models(
     assert llm_router._third_party_probe_model_ids(endpoint, ()) == ["draft-known-model"]
 
 
-def test_third_party_probe_model_ids_skip_verified_and_put_failed_last(
+def test_third_party_probe_model_ids_leads_with_verified_then_unknown_then_failed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # apikeys: an endpoint Test proves the *endpoint* connects with the fewest
+    # attempts, so it must LEAD with a model that connected before (known-ok),
+    # then untried models, then known-failed last. It must NOT skip the known-good
+    # model — skipping it forces the probe onto flaky/phantom catalog models.
     settings_dir = tmp_path / "settings"
     monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
     endpoint = ProviderEndpoint(
@@ -2044,7 +2317,46 @@ def test_third_party_probe_model_ids_skip_verified_and_put_failed_last(
         ("known-fail", "fresh", "known-ok"),
     )
 
-    assert model_ids == ["fresh", "known-fail"]
+    assert model_ids == ["known-ok", "fresh", "known-fail"]
+
+
+def test_third_party_probe_model_ids_puts_currently_verified_routes_first(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # apikeys: a model with a currently-verified route (green) is the surest bet,
+    # so it leads ahead of a model that merely connected in the past (blue).
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    endpoint = ProviderEndpoint(
+        endpoint_id="openai-direct",
+        display_name="OpenAI",
+        protocol="openai_compatible",
+        base_url="https://api.openai.example/v1",
+        api_key="secret",
+    )
+    # Both models connected before (historical / blue) in the evidence library...
+    for model_id in ("hist-ok", "green-ok"):
+        append_evidence_record(
+            EvidenceRecord(
+                evidence_id=f"probe-{model_id}",
+                evidence_type="probe",
+                trust_state="probe-verified",
+                endpoint_id="openai-direct",
+                route_id=f"openai-direct:{model_id}",
+                model_id=model_id,
+                provider_model_id=model_id,
+            )
+        )
+
+    # ...but only green-ok has a currently-verified route, so it must lead.
+    model_ids = llm_router._third_party_probe_model_ids(
+        endpoint,
+        ("hist-ok", "green-ok"),
+        verified_model_ids=frozenset({"green-ok"}),
+    )
+
+    assert model_ids == ["green-ok", "hist-ok"]
 
 
 def test_endpoint_test_reprobes_when_all_listed_models_are_probe_verified_in_draft(
@@ -2582,9 +2894,26 @@ def test_endpoint_test_third_party_empty_model_list_falls_back_to_notable_probe(
     monkeypatch,
 ) -> None:
     # apikeys#25: when get-models returns no ids the third-party Test falls back to
-    # doc-maintained notable model ids for the inference probe. If none generate,
-    # the endpoint is NOT verified (get-models reachability alone is insufficient).
-    _seed(tmp_path, monkeypatch)
+    # doc-maintained notable model ids for the inference probe. If none generate
+    # AND the endpoint was never verified before, it is NOT verified (get-models
+    # reachability alone is insufficient). Uses a fresh endpoint with no prior
+    # verified route so the reachability-alone invariant is tested in isolation.
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "oai-fresh": ProviderEndpoint(
+                    endpoint_id="oai-fresh",
+                    display_name="Fresh OpenAI",
+                    protocol="openai_compatible",
+                    base_url="https://api.openai.example/v1",
+                    api_key="secret",
+                )
+            },
+        ),
+        credentials_path(),
+    )
     probe_calls: list[str] = []
 
     async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
@@ -2602,16 +2931,15 @@ def test_endpoint_test_third_party_empty_model_list_falls_back_to_notable_probe(
     monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
     monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
 
-    response = client.post("/api/llm/endpoints/openai-direct/test")
+    response = client.post("/api/llm/endpoints/oai-fresh/test")
 
     assert response.status_code == 200
     body = response.json()
-    endpoint = body["registry"]["provider_endpoints"]["openai-direct"]
+    endpoint = body["registry"]["provider_endpoints"]["oai-fresh"]
     assert body["discovered_model_count"] == 0
     assert endpoint["status"] == "failed"
     # notable openai model ids were probed (fallback fired) and none generated.
     assert probe_calls
-    assert "openai-direct:gpt-5" in body["registry"]["provider_routes"]
 
 
 def test_official_endpoint_test_records_model_list_without_generation_probes(
@@ -5267,6 +5595,13 @@ def test_registry_includes_last_remote_catalog_source(
             "local_failed_records_count": 1,
             "local_route_candidates_count": 0,
             "remote_catalog_source": source.model_dump(mode="json"),
+            "community_catalog": {
+                "synced": False,
+                "generated_at": None,
+                "protocol_major": 0,
+                "record_count": 0,
+                "entries": [],
+            },
             "sharing": {
                 "mode": "local_export_only",
                 "auto_upload_enabled": False,

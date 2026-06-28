@@ -40,6 +40,7 @@ export interface CompileError {
   field: string | null
   severity: 'fatal' | 'warning'
   message: string
+  error_code?: string | null
 }
 
 export interface ArtifactRef {
@@ -511,6 +512,7 @@ export interface SerializableGraphPhaseRef {
   id: string
   src: string
   depends_on: string[]
+  output?: boolean
   mode: GraphPhaseMode
 }
 
@@ -656,8 +658,10 @@ export interface GraphTopologyItem {
   id: string
   src: string
   depends_on: string[]
+  /** True only when the GRAPH.md phase ref carries the explicit output marker. */
+  output?: boolean
   mode: 'logic' | 'subgraph' | 'skill' | string
-  /** Absolute child-graph path, surfaced only for subgraph phases. */
+  /** Child-graph path, surfaced only for subgraph phases. May be absolute or relative to the owning skill root. */
   path?: string | null
   /** n2-canvas#10: this phase's per-node io.inputs/io.outputs field schema. */
   io_fields?: IoFieldsProjection
@@ -666,7 +670,7 @@ export interface GraphTopologyItem {
 }
 
 /**
- * Child graph resolved by absolute path for inline subgraph rendering.
+ * Child graph resolved by path for inline subgraph rendering. The backend response path is absolute.
  * Mirrors the backend `ChildGraphTopology` model.
  */
 export interface ChildGraphTopology {
@@ -675,6 +679,7 @@ export interface ChildGraphTopology {
   description: string
   phases: string[]
   graph_topology: GraphTopologyItem[]
+  detail?: SkillDetail | null
 }
 
 export interface SkillDetail {

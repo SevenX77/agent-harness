@@ -1,4 +1,5 @@
 import { useRef, useState, type ReactElement, type WheelEvent } from "react"
+import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import {
   Brain,
@@ -36,6 +37,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import i18n from "@/i18n"
 import { translateErrorCode, translateTestStatus } from "@/lib/llm-error-messages"
 import { cn } from "@/lib/utils"
 import type { CredentialsState, ModelInfo, ModelProbeStatus, ProviderTestResult, ProviderType, ProviderUiState, RouteStatus } from "../../../api/llm"
@@ -60,7 +62,7 @@ type BaseUrlReachabilityState = "connected" | "failed" | "testing" | "unknown"
 const availableModelsPreviewLimit = 12
 const fieldRowClassName = "grid grid-cols-[minmax(0,1fr)_11.5rem] items-center gap-2"
 const fieldActionClassName = "flex min-w-0 items-center justify-start gap-2"
-const providerTestButtonClassName = "min-w-[7.5rem] shrink-0 justify-start px-4"
+const providerTestButtonClassName = "min-w-[7rem] shrink-0 justify-center px-3 has-data-[icon=inline-start]:ps-3"
 const scrollableInputClassName = "overflow-x-auto whitespace-nowrap text-clip"
 const officialProviderNamesByKey: Record<string, string> = {
   anthropic: "Anthropic Official",
@@ -77,6 +79,29 @@ const officialProviderBrandNames: Record<string, string> = {
   ark: "Ark",
 }
 const apiKeyMaskChar = "\u2022"
+
+// Diagnostic classification (warning / failure) of a tooltip line is rendered by
+// RouteTooltipContent with a colored icon. The classification must stay
+// language-independent: instead of re-parsing the translated display text we
+// prefix diagnostic lines with a stable, non-translated zero-width sentinel that
+// survives any locale and is stripped before the line is shown to the user.
+// routeTooltipLineStatus() reads the sentinel first, then falls back to the
+// (English) literals so the exported pure function keeps classifying raw strings.
+const tooltipDiagnosticSentinel = {
+  warning: "\u200b\u26a0\u200b",
+  failed: "\u200b\u2717\u200b",
+} as const
+type TooltipDiagnostic = keyof typeof tooltipDiagnosticSentinel
+
+function markTooltipDiagnostic(kind: TooltipDiagnostic, line: string): string {
+  return `${tooltipDiagnosticSentinel[kind]}${line}`
+}
+
+function stripTooltipDiagnostic(line: string): string {
+  return line
+    .replace(tooltipDiagnosticSentinel.warning, "")
+    .replace(tooltipDiagnosticSentinel.failed, "")
+}
 
 export function apiKeyInputType(): "text" {
   // §1 / atom-22 contract: the secret field is ALWAYS a text input. Masking is
@@ -111,14 +136,14 @@ export async function copyCredentialValue(value: string, label: string): Promise
   if (!value) return
   try {
     await navigator.clipboard.writeText(value)
-    toast.success(`${label} copied`)
+    toast.success(i18n.t("apiKeys.card.copiedToast", { label }))
   } catch {
-    toast.error(`Failed to copy ${label.toLowerCase()}`)
+    toast.error(i18n.t("apiKeys.card.copyFailedToast", { label: label.toLowerCase() }))
   }
 }
 
 export function copyAvailableModelId(modelId: string): Promise<void> {
-  return copyCredentialValue(modelId, "Model name")
+  return copyCredentialValue(modelId, i18n.t("apiKeys.card.modelNameLabel"))
 }
 
 export function sortModelInfos(models: ModelInfo[]): ModelInfo[] {
@@ -164,11 +189,12 @@ export function TestMessage({
   latencyMs?: number | null
   errorCode?: string | null
 }) {
+  const { t } = useTranslation("settings")
   if (status === "testing") {
     return (
       <Badge variant="outline" className="gap-1">
         <Loader2 className="size-3 animate-spin" />
-        Testing...
+        {t("apiKeys.card.testingBadge")}
       </Badge>
     )
   }
@@ -177,13 +203,13 @@ export function TestMessage({
     return (
       <Badge variant="success">
         <CheckCircle2 className="size-3" />
-        {latencyMs != null ? `Connected (${latencyMs}ms)` : "Connected"}
+        {latencyMs != null ? t("apiKeys.card.connectedWithLatency", { latencyMs }) : t("apiKeys.card.connectedBadge")}
       </Badge>
     )
   }
 
   if (status === "not_configured") {
-    return <Badge variant="secondary">Not configured</Badge>
+    return <Badge variant="secondary">{t("apiKeys.card.notConfigured")}</Badge>
   }
 
   if (status === "error") {
@@ -206,7 +232,7 @@ export function TestMessage({
     )
   }
 
-  return <Badge variant="secondary">Not configured</Badge>
+  return <Badge variant="secondary">{t("apiKeys.card.notConfigured")}</Badge>
 }
 
 function directPersistedTestResult(
@@ -244,21 +270,24 @@ export function ProviderDeleteButton({
   draftName: string
   onDelete: () => void
 }) {
-  const displayName = draftName.trim() || "this provider"
+  // Tests invoke ProviderDeleteButton() directly as a plain function (not inside
+  // a React render tree), so it must use the global i18n.t singleton rather than
+  // the useTranslation() hook — the hook needs a live React dispatcher.
+  const displayName = draftName.trim() || i18n.t("apiKeys.card.thisProvider")
 
   return (
     <Button
       type="button"
       variant="ghost"
       size="icon"
-      aria-label="Delete provider"
+      aria-label={i18n.t("apiKeys.card.aria.deleteProvider")}
       data-delete-toast-trigger={true}
       className="text-muted-foreground/70 hover:text-muted-foreground"
       onClick={() => {
         requestDeleteConfirmationToast({
           id: `delete-provider-${displayName}`,
-          title: `Delete ${displayName}?`,
-          description: "This provider and its routes will be removed from API Keys, LLM Roles, and model bundles.",
+          title: i18n.t("apiKeys.card.deleteConfirm.title", { displayName }),
+          description: i18n.t("apiKeys.card.deleteConfirm.description"),
           onConfirm: onDelete,
         })
       }}
@@ -269,6 +298,7 @@ export function ProviderDeleteButton({
 }
 
 function FieldCopyButton({ value, label, className }: { value: string; label: string; className?: string }) {
+  const { t } = useTranslation("settings")
   return (
     <Button
       type="button"
@@ -277,7 +307,7 @@ function FieldCopyButton({ value, label, className }: { value: string; label: st
       className={cn("text-muted-foreground/70 transition-none hover:text-muted-foreground", className)}
       onClick={() => void copyCredentialValue(value, label)}
       disabled={!value}
-      aria-label={`Copy ${label}`}
+      aria-label={t("apiKeys.card.copyLabelButton", { label })}
     >
       <Copy className="size-4" />
     </Button>
@@ -285,11 +315,13 @@ function FieldCopyButton({ value, label, className }: { value: string; label: st
 }
 
 function FieldReachabilityCheck({ label }: { label: string }) {
+  const { t } = useTranslation("settings")
+  const text = t("apiKeys.card.fieldReachable", { label })
   return (
     <span
       className="inline-flex size-4 shrink-0 items-center justify-center text-success"
-      title={`${label} accepted by the model-list endpoint`}
-      aria-label={`${label} accepted by the model-list endpoint`}
+      title={text}
+      aria-label={text}
     >
       <CheckCircle2 className="size-3.5" />
     </span>
@@ -297,13 +329,15 @@ function FieldReachabilityCheck({ label }: { label: string }) {
 }
 
 function BaseUrlReachabilityIcon({ state, url }: { state: BaseUrlReachabilityState; url: string }) {
+  const { t } = useTranslation("settings")
   if (state === "unknown") return null
   if (state === "testing") {
+    const text = t("apiKeys.card.baseUrlTesting", { url: url || t("apiKeys.card.baseUrlFallback") })
     return (
       <span
         className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground"
-        title={`${url || "Base URL"} is being tested`}
-        aria-label={`${url || "Base URL"} is being tested`}
+        title={text}
+        aria-label={text}
         data-base-url-status="testing"
       >
         <Loader2 className="size-3.5 animate-spin" />
@@ -311,22 +345,24 @@ function BaseUrlReachabilityIcon({ state, url }: { state: BaseUrlReachabilitySta
     )
   }
   if (state === "connected") {
+    const text = t("apiKeys.card.baseUrlConnected", { url })
     return (
       <span
         className="inline-flex size-4 shrink-0 items-center justify-center text-success"
-        title={`${url} connected`}
-        aria-label={`${url} connected`}
+        title={text}
+        aria-label={text}
         data-base-url-status="connected"
       >
         <CheckCircle2 className="size-3.5" />
       </span>
     )
   }
+  const failedText = t("apiKeys.card.baseUrlFailed", { url })
   return (
     <span
       className="inline-flex size-4 shrink-0 items-center justify-center text-destructive"
-      title={`${url} failed`}
-      aria-label={`${url} failed`}
+      title={failedText}
+      aria-label={failedText}
       data-base-url-status="failed"
     >
       <XCircle className="size-3.5" />
@@ -354,10 +390,11 @@ type EndpointSummary = {
 }
 
 function AvailableEndpointSummary({ endpoints }: { endpoints: EndpointSummary[] }) {
+  const { t } = useTranslation("settings")
   if (endpoints.length === 0) return null
   return (
     <div className="border-t pt-3 space-y-2 text-xs" data-testid="available-endpoints">
-      <div className="text-muted-foreground">Available Endpoints:</div>
+      <div className="text-muted-foreground">{t("apiKeys.card.availableEndpointsLabel")}</div>
       <div className="flex flex-wrap gap-1">
         <TooltipProvider>
           {endpoints.map((endpoint) => {
@@ -414,43 +451,52 @@ function endpointTooltipText(endpoint: EndpointSummary): string {
 }
 
 function endpointTooltipLines(endpoint: EndpointSummary): string[] {
-  const inputBaseUrl = endpoint.baseUrl || "Not set"
+  const inputBaseUrl = endpoint.baseUrl || i18n.t("apiKeys.card.tooltip.notSet")
   const runtimeBaseUrl = endpoint.runtimeBaseUrl || endpoint.baseUrl || ""
+  const toolProtocolStatus = endpoint.toolProtocol === "supported"
+    ? i18n.t("apiKeys.card.tooltip.toolProtocolSupported")
+    : i18n.t("apiKeys.card.tooltip.toolProtocolNotListed")
   const lines = [
-    `Provider: ${endpoint.label}`,
-    `Endpoint: ${endpoint.id}`,
-    `Input URL: ${inputBaseUrl}`,
-    ...(runtimeBaseUrl && runtimeBaseUrl !== endpoint.baseUrl ? [`Runtime URL: ${runtimeBaseUrl}`] : []),
-    `Protocol: ${endpointProtocolLabel(endpoint.protocol)}`,
-    `Status: ${endpointStatusLabel(endpoint.status)}`,
-    `Routes: ${endpoint.routeCount}`,
-    `Profiles: ${endpoint.profileCount}`,
-    `Methods: ${endpoint.methodIds.length > 0 ? endpoint.methodIds.join(", ") : "Not verified yet"}`,
-    `Request mappers: ${endpoint.requestMapperIds.length > 0 ? endpoint.requestMapperIds.join(", ") : "Not verified yet"}`,
-    `Profile capabilities: ${endpoint.profileCapabilities.length > 0 ? endpoint.profileCapabilities.map(profileCapabilityLabel).join(", ") : "Not verified yet"}`,
-    `Tool protocol: ${endpoint.toolProtocol === "supported" ? "supported" : "not listed by backend"}`,
+    i18n.t("apiKeys.card.tooltip.provider", { label: endpoint.label }),
+    i18n.t("apiKeys.card.tooltip.endpoint", { id: endpoint.id }),
+    i18n.t("apiKeys.card.tooltip.inputUrl", { url: inputBaseUrl }),
+    ...(runtimeBaseUrl && runtimeBaseUrl !== endpoint.baseUrl ? [i18n.t("apiKeys.card.tooltip.runtimeUrl", { url: runtimeBaseUrl })] : []),
+    i18n.t("apiKeys.card.tooltip.protocol", { protocol: endpointProtocolLabel(endpoint.protocol) }),
+    i18n.t("apiKeys.card.tooltip.status", { status: endpointStatusLabel(endpoint.status) }),
+    i18n.t("apiKeys.card.tooltip.routes", { n: endpoint.routeCount }),
+    i18n.t("apiKeys.card.tooltip.profiles", { n: endpoint.profileCount }),
+    endpoint.methodIds.length > 0
+      ? i18n.t("apiKeys.card.tooltip.methods", { methods: endpoint.methodIds.join(", ") })
+      : i18n.t("apiKeys.card.tooltip.methodsNotVerified"),
+    endpoint.requestMapperIds.length > 0
+      ? i18n.t("apiKeys.card.tooltip.requestMappers", { mappers: endpoint.requestMapperIds.join(", ") })
+      : i18n.t("apiKeys.card.tooltip.requestMappersNotVerified"),
+    endpoint.profileCapabilities.length > 0
+      ? i18n.t("apiKeys.card.tooltip.profileCapabilities", { capabilities: endpoint.profileCapabilities.map(profileCapabilityLabel).join(", ") })
+      : i18n.t("apiKeys.card.tooltip.profileCapabilitiesNotVerified"),
+    i18n.t("apiKeys.card.tooltip.toolProtocol", { status: toolProtocolStatus }),
   ]
-  if (endpoint.sdkCount > 0) lines.push(`SDKs: ${endpoint.sdkCount}`)
-  if (endpoint.lastTestAt) lines.push(`Last test: ${endpoint.lastTestAt}`)
-  if (endpoint.message) lines.push(`Message: ${endpoint.message}`)
-  if (endpoint.errorCode) lines.push(`Error code: ${endpoint.errorCode}`)
+  if (endpoint.sdkCount > 0) lines.push(i18n.t("apiKeys.card.tooltip.sdks", { n: endpoint.sdkCount }))
+  if (endpoint.lastTestAt) lines.push(i18n.t("apiKeys.card.tooltip.lastTest", { timestamp: endpoint.lastTestAt }))
+  if (endpoint.message) lines.push(i18n.t("apiKeys.card.tooltip.message", { message: endpoint.message }))
+  if (endpoint.errorCode) lines.push(i18n.t("apiKeys.card.tooltip.errorCode", { code: endpoint.errorCode }))
   return lines
 }
 
 function endpointProtocolLabel(providerType: ProviderType | null): string {
-  if (providerType === "anthropic_compatible") return "Anthropic-compatible"
-  if (providerType === "ark_runtime") return "Ark runtime"
-  if (providerType === "google_genai") return "Google GenAI"
-  if (providerType === "openai_compatible") return "OpenAI-compatible"
-  return "Unknown"
+  if (providerType === "anthropic_compatible") return i18n.t("apiKeys.card.protocol.anthropic")
+  if (providerType === "ark_runtime") return i18n.t("apiKeys.card.protocol.ark")
+  if (providerType === "google_genai") return i18n.t("apiKeys.card.protocol.google")
+  if (providerType === "openai_compatible") return i18n.t("apiKeys.card.protocol.openai")
+  return i18n.t("apiKeys.card.protocol.unknown")
 }
 
 function endpointProtocolShortLabel(providerType: ProviderType | null): string {
-  if (providerType === "anthropic_compatible") return "Anth"
-  if (providerType === "google_genai") return "Gemini"
-  if (providerType === "openai_compatible") return "OpenAI"
-  if (providerType === "ark_runtime") return "Ark"
-  return "Endpoint"
+  if (providerType === "anthropic_compatible") return i18n.t("apiKeys.card.protocolShort.anthropic")
+  if (providerType === "google_genai") return i18n.t("apiKeys.card.protocolShort.gemini")
+  if (providerType === "openai_compatible") return i18n.t("apiKeys.card.protocolShort.openai")
+  if (providerType === "ark_runtime") return i18n.t("apiKeys.card.protocolShort.ark")
+  return i18n.t("apiKeys.card.protocolShort.unknown")
 }
 
 function endpointHostLabel(value: string): string {
@@ -510,10 +556,10 @@ function endpointProfileSummary(models: ModelInfo[]): Pick<
 }
 
 function endpointStatusLabel(status: TestMessageStatus): string {
-  if (status === "not_configured") return "Not configured"
-  if (status === "testing") return "Testing"
-  if (status === "ok") return "Connected"
-  if (status === "untested") return "Untested"
+  if (status === "not_configured") return i18n.t("apiKeys.card.endpointStatus.notConfigured")
+  if (status === "testing") return i18n.t("apiKeys.card.endpointStatus.testing")
+  if (status === "ok") return i18n.t("apiKeys.card.endpointStatus.connected")
+  if (status === "untested") return i18n.t("apiKeys.card.endpointStatus.untested")
   return translateTestStatus(status)
 }
 
@@ -595,11 +641,11 @@ function providerDisplayName(
   notableProviderKey?: string,
 ): string {
   const raw = draft.name.trim() || draft.id.trim()
-  if (!isOfficial) return raw || "Unnamed Provider"
+  if (!isOfficial) return raw || i18n.t("apiKeys.card.unnamedProvider")
   const providerKey = officialProviderKey(draft, notableProviderKey)
   if (providerKey) return officialProviderNamesByKey[providerKey]
   const normalizedName = humanizeOfficialProviderName(raw)
-  return normalizedName ? `${normalizedName} Official` : "Official Provider"
+  return normalizedName ? `${normalizedName} Official` : i18n.t("apiKeys.card.officialProvider")
 }
 
 function officialProviderKey(draft: ProviderDraft, notableProviderKey?: string): string | null {
@@ -710,13 +756,13 @@ function routeTagVariantFromUiState(
 }
 
 function routeStatusLabel(status: RouteDisplayStatus): string {
-  if (status === "verified") return "Verified route"
-  if (status === "failed") return "Route test failed"
-  if (status === "disabled") return "Disabled route"
-  if (status === "testing") return "Testing route"
-  if (status === "probe-verified") return "Probe verified route (historical success)"
-  if (status === "unverified_manual") return "Untested route"
-  return "Route status unknown"
+  if (status === "verified") return i18n.t("apiKeys.card.routeStatus.verified")
+  if (status === "failed") return i18n.t("apiKeys.card.routeStatus.failed")
+  if (status === "disabled") return i18n.t("apiKeys.card.routeStatus.disabled")
+  if (status === "testing") return i18n.t("apiKeys.card.routeStatus.testing")
+  if (status === "probe-verified") return i18n.t("apiKeys.card.routeStatus.probeVerified")
+  if (status === "unverified_manual") return i18n.t("apiKeys.card.routeStatus.unverified")
+  return i18n.t("apiKeys.card.routeStatus.unknown")
 }
 
 function routeFailureScopeFromSignals({
@@ -883,22 +929,37 @@ function aggregateRoutesTooltipText(model: ModelInfo): string | null {
   const summaries = aggregateRouteSummaries(model)
   if (summaries.length <= 1) return null
   const lines = summaries.slice(0, 6).map((summary) => {
-    const target = summary.endpoint_id ?? summary.route_id ?? "route"
+    const target = summary.endpoint_id ?? summary.route_id ?? i18n.t("apiKeys.card.routeWord")
     const state = aggregateRouteSummaryLabel(summary)
-    return `${state}: ${target}${summary.message ? ` - ${summary.message}` : ""}`
+    const line = `${state}: ${target}${summary.message ? ` - ${summary.message}` : ""}`
+    const diagnostic = aggregateRouteSummaryDiagnostic(summary)
+    return diagnostic ? markTooltipDiagnostic(diagnostic, line) : line
   })
   const remaining = summaries.length - lines.length
-  return `Routes:\n${lines.join("\n")}${remaining > 0 ? `\n+${remaining} more` : ""}`
+  return `${i18n.t("apiKeys.card.tooltip.routesHeader")}\n${lines.join("\n")}${remaining > 0 ? `\n${i18n.t("apiKeys.card.tooltip.plusMore", { n: remaining })}` : ""}`
+}
+
+// Classify the aggregate-route summary by its source enum/scope, NOT by the
+// translated display label, so RouteTooltipContent can paint the warning/failed
+// icon correctly in any language.
+function aggregateRouteSummaryDiagnostic(summary: AggregatedRouteSummary): TooltipDiagnostic | null {
+  if (summary.ui_state === "historical_ready") return null
+  if (summary.status === "failed") {
+    if (summary.failure_scope === "endpoint") return "warning"
+    return "failed"
+  }
+  if (summary.ui_state === "failed") return "warning"
+  return null
 }
 
 function aggregateRouteSummaryLabel(summary: AggregatedRouteSummary): string {
-  if (summary.ui_state === "historical_ready") return "Previously Connected"
+  if (summary.ui_state === "historical_ready") return i18n.t("apiKeys.card.routeStatus.previouslyConnected")
   if (summary.status === "failed") {
-    if (summary.failure_scope === "endpoint") return "Endpoint failed"
-    if (summary.failure_scope === "model") return "Model failed"
-    return "Route test failed"
+    if (summary.failure_scope === "endpoint") return i18n.t("apiKeys.card.routeStatus.endpointFailed")
+    if (summary.failure_scope === "model") return i18n.t("apiKeys.card.routeStatus.modelFailed")
+    return i18n.t("apiKeys.card.routeStatus.failed")
   }
-  if (summary.ui_state === "failed") return "Endpoint failed"
+  if (summary.ui_state === "failed") return i18n.t("apiKeys.card.routeStatus.endpointFailed")
   return routeStatusLabel(summary.status)
 }
 
@@ -940,13 +1001,13 @@ function officialModelTypeLabel(model: ModelInfo): string | null {
   const label = modelCapabilityValue(model, "model_type_label")
   if (typeof label === "string" && label) return label
   const modelType = officialModelType(model)
-  if (modelType === "language_reasoning") return "Language/reasoning model"
-  if (modelType === "image_generation") return "Image generation model"
-  if (modelType === "video_generation") return "Video generation model"
-  if (modelType === "audio") return "Audio/realtime model"
-  if (modelType === "embedding") return "Embedding model"
-  if (modelType === "translation") return "Translation model"
-  if (modelType === "3d_generation") return "3D generation model"
+  if (modelType === "language_reasoning") return i18n.t("apiKeys.card.modelTypeLabel.languageReasoning")
+  if (modelType === "image_generation") return i18n.t("apiKeys.card.modelTypeLabel.imageGeneration")
+  if (modelType === "video_generation") return i18n.t("apiKeys.card.modelTypeLabel.videoGeneration")
+  if (modelType === "audio") return i18n.t("apiKeys.card.modelTypeLabel.audio")
+  if (modelType === "embedding") return i18n.t("apiKeys.card.modelTypeLabel.embedding")
+  if (modelType === "translation") return i18n.t("apiKeys.card.modelTypeLabel.translation")
+  if (modelType === "3d_generation") return i18n.t("apiKeys.card.modelTypeLabel.threeD")
   return null
 }
 
@@ -961,6 +1022,9 @@ function groupOfficialRouteInfos(models: ModelInfo[]): Array<{ label: string; mo
     .map(([label, groupModels]) => ({ label, models: groupModels }))
 }
 
+// Stable, non-translated group key — used for grouping, ranking
+// (officialRouteGroupRank), the data-route-type-group attribute and React keys.
+// The user-visible text is produced by officialRouteGroupDisplayLabel().
 function officialRouteGroupLabel(model: ModelInfo): string {
   const modelType = officialModelType(model)
   if (modelType === "language_reasoning") return "Language"
@@ -973,6 +1037,31 @@ function officialRouteGroupLabel(model: ModelInfo): string {
   if (modelType === "moderation") return "Moderation"
   if (modelType === "interactions_agent") return "Interactions Agent"
   return "Other"
+}
+
+function officialRouteGroupDisplayLabel(groupKey: string): string {
+  switch (groupKey) {
+    case "Language":
+      return i18n.t("apiKeys.card.routeGroup.language")
+    case "Multimodal":
+      return i18n.t("apiKeys.card.routeGroup.multimodal")
+    case "Embedding":
+      return i18n.t("apiKeys.card.routeGroup.embedding")
+    case "Audio":
+      return i18n.t("apiKeys.card.routeGroup.audio")
+    case "Video":
+      return i18n.t("apiKeys.card.routeGroup.video")
+    case "Translation":
+      return i18n.t("apiKeys.card.routeGroup.translation")
+    case "3D":
+      return i18n.t("apiKeys.card.routeGroup.threeD")
+    case "Moderation":
+      return i18n.t("apiKeys.card.routeGroup.moderation")
+    case "Interactions Agent":
+      return i18n.t("apiKeys.card.routeGroup.interactionsAgent")
+    default:
+      return i18n.t("apiKeys.card.routeGroup.other")
+  }
 }
 
 function officialRouteGroupRank(label: string): number {
@@ -1001,15 +1090,15 @@ function routeProfileTooltipText(model: ModelInfo, status: RouteDisplayStatus): 
   )
   const capabilityText = capabilityLabels.length > 0
     ? capabilityLabels.join(" + ")
-    : "language"
+    : i18n.t("apiKeys.card.routeTooltip.languageFallback")
   const methodLabels = uniqueStrings(
     profiles
       .map((profile) => profile.method_id)
       .filter((method): method is string => Boolean(method)),
   )
   return [
-    `Verified ${capabilityText} route`,
-    methodLabels.length > 0 ? `Methods: ${methodLabels.join(", ")}` : null,
+    i18n.t("apiKeys.card.routeTooltip.verifiedRoute", { capability: capabilityText }),
+    methodLabels.length > 0 ? i18n.t("apiKeys.card.routeTooltip.methods", { methods: methodLabels.join(", ") }) : null,
   ].filter((line): line is string => Boolean(line)).join("\n")
 }
 
@@ -1019,14 +1108,14 @@ function routeCapabilityTooltipText(model: ModelInfo): string | null {
   const maxInputTokens = modelCapabilityNumber(model, "max_input_tokens")
   const maxOutputTokens = modelCapabilityNumber(model, "max_output_tokens")
   const lines = [
-    inputModalities.length > 0 ? `Input: ${inputModalities.map(modalityLabel).join(", ")}` : null,
-    outputModalities.length > 0 ? `Output: ${outputModalities.map(modalityLabel).join(", ")}` : null,
+    inputModalities.length > 0 ? i18n.t("apiKeys.card.routeTooltip.input", { modalities: inputModalities.map(modalityLabel).join(", ") }) : null,
+    outputModalities.length > 0 ? i18n.t("apiKeys.card.routeTooltip.output", { modalities: outputModalities.map(modalityLabel).join(", ") }) : null,
     maxInputTokens !== null
-      ? `Max input: ${formatTokenLimit(maxInputTokens)} tokens`
-      : "Max input: not listed",
+      ? i18n.t("apiKeys.card.routeTooltip.maxInput", { value: formatTokenLimit(maxInputTokens) })
+      : i18n.t("apiKeys.card.routeTooltip.maxInputNotListed"),
     maxOutputTokens !== null
-      ? `Max output: ${formatTokenLimit(maxOutputTokens)} tokens`
-      : "Max output: not listed",
+      ? i18n.t("apiKeys.card.routeTooltip.maxOutput", { value: formatTokenLimit(maxOutputTokens) })
+      : i18n.t("apiKeys.card.routeTooltip.maxOutputNotListed"),
   ].filter((line): line is string => Boolean(line))
   return lines.length > 0 ? lines.join("\n") : null
 }
@@ -1040,8 +1129,11 @@ function routeFailureTooltipText(model: ModelInfo, status: RouteDisplayStatus): 
   if (status !== "failed") return null
   const message = modelProbeMessage(model)
   const attempts = modelProbeAttemptTooltipText(model)
+  const failureLine = message
+    ? i18n.t("apiKeys.card.routeTooltip.routeTestFailed", { message })
+    : i18n.t("apiKeys.card.routeTooltip.routeTestFailedBare")
   return [
-    message ? `Route test failed: ${message}` : "Route test failed",
+    markTooltipDiagnostic("failed", failureLine),
     attempts,
   ].filter((line): line is string => Boolean(line)).join("\n")
 }
@@ -1051,11 +1143,14 @@ function RouteTooltipContent({ text }: { text: string }) {
     <div className="space-y-1 whitespace-normal">
       {text.split("\n").map((line, index) => {
         const status = routeTooltipLineStatus(line)
+        // The diagnostic sentinel is an internal marker only — strip it before
+        // the line is shown so the user never sees it.
+        const displayLine = stripTooltipDiagnostic(line)
         if (status) {
           const Icon = status === "warning" ? TriangleAlert : XCircle
           return (
             <div
-              key={`${status}-${index}-${line}`}
+              key={`${status}-${index}-${displayLine}`}
               data-tooltip-diagnostic={status}
               className={cn(
                 "flex items-start gap-1.5",
@@ -1067,17 +1162,25 @@ function RouteTooltipContent({ text }: { text: string }) {
                 data-tooltip-diagnostic-icon={status}
                 className="mt-0.5 size-3 shrink-0"
               />
-              <span className="min-w-0 break-words">{line}</span>
+              <span className="min-w-0 break-words">{displayLine}</span>
             </div>
           )
         }
-        return <div key={`${index}-${line}`} className="break-words">{line}</div>
+        return <div key={`${index}-${displayLine}`} className="break-words">{displayLine}</div>
       })}
     </div>
   )
 }
 
+// Classify a tooltip line as a warning/failure diagnostic. Primary path: the
+// language-independent sentinel the line-builders prepend (see
+// tooltipDiagnosticSentinel). Fallback path: the legacy English markers, kept so
+// (a) the exported pure function still classifies raw English strings (tests +
+// any caller) and (b) English-literal lines coming from out-of-scope siblings
+// (e.g. role-route-status' "Warning:"/"Failed:") still light up.
 export function routeTooltipLineStatus(line: string): "warning" | "failed" | null {
+  if (line.includes(tooltipDiagnosticSentinel.warning)) return "warning"
+  if (line.includes(tooltipDiagnosticSentinel.failed)) return "failed"
   if (line.includes("Warning:")) return "warning"
   if (line.includes("Endpoint failed")) return "warning"
   if (line.includes("Failed:") || line.includes("Route test failed") || line.includes("Model failed")) return "failed"
@@ -1123,18 +1226,18 @@ function modelProbeAttemptTooltipText(model: ModelInfo): string | null {
     })
   if (lines.length === 0) return null
   const remaining = attempts.length - lines.length
-  return `Attempts:\n${lines.join("\n")}${remaining > 0 ? `\n+${remaining} more` : ""}`
+  return `${i18n.t("apiKeys.card.tooltip.attemptsHeader")}\n${lines.join("\n")}${remaining > 0 ? `\n${i18n.t("apiKeys.card.tooltip.plusMore", { n: remaining })}` : ""}`
 }
 
 function thirdPartyModelTooltipText(model: ModelInfo, status: RouteDisplayStatus): string {
   const lines = [
     model.id,
-    `Status: ${thirdPartyModelStatusLabel(model, status)}`,
+    i18n.t("apiKeys.card.tooltip.status", { status: thirdPartyModelStatusLabel(model, status) }),
   ]
-  if (model.endpoint_id) lines.push(`Endpoint: ${model.endpoint_id}`)
-  if (model.route_id) lines.push(`Route: ${model.route_id}`)
+  if (model.endpoint_id) lines.push(i18n.t("apiKeys.card.tooltip.endpoint", { id: model.endpoint_id }))
+  if (model.route_id) lines.push(i18n.t("apiKeys.card.routeTooltip.route", { id: model.route_id }))
   const message = modelProbeMessage(model)
-  if (message) lines.push(`Message: ${message}`)
+  if (message) lines.push(i18n.t("apiKeys.card.tooltip.message", { message }))
   const aggregatedRoutes = aggregateRoutesTooltipText(model)
   if (aggregatedRoutes) lines.push(aggregatedRoutes)
   const attempts = modelProbeAttemptTooltipText(model)
@@ -1143,12 +1246,12 @@ function thirdPartyModelTooltipText(model: ModelInfo, status: RouteDisplayStatus
 }
 
 function thirdPartyModelStatusLabel(model: ModelInfo, status: RouteDisplayStatus): string {
-  if (model.ui_state === "historical_ready" || status === "probe-verified") return "Previously Connected"
+  if (model.ui_state === "historical_ready" || status === "probe-verified") return i18n.t("apiKeys.card.routeStatus.previouslyConnected")
   const summaries = routeSummariesForModel(model)
   const hasEndpointFailure = summaries.some((summary) => summary.failure_scope === "endpoint")
   const hasModelFailure = summaries.some((summary) => summary.failure_scope === "model")
   if (status === "unverified_manual" && hasEndpointFailure && !hasModelFailure) {
-    return "Model not verified; endpoint failed"
+    return i18n.t("apiKeys.card.routeStatus.modelNotVerified")
   }
   return routeStatusLabel(status)
 }
@@ -1183,13 +1286,13 @@ function modelVerifiedProfiles(model: ModelInfo): Array<{
 }
 
 function profileCapabilityLabel(capability: string | undefined): string | null {
-  if (capability === "text_chat") return "text chat"
-  if (capability === "reasoning" || capability === "thinking") return "reasoning"
-  if (capability === "image_input") return "image input"
-  if (capability === "audio_input") return "audio input"
-  if (capability === "tool_calling") return "tool calling"
-  if (capability === "structured_output") return "structured output"
-  if (capability === "translation") return "translation"
+  if (capability === "text_chat") return i18n.t("apiKeys.card.capability.textChat")
+  if (capability === "reasoning" || capability === "thinking") return i18n.t("apiKeys.card.capability.reasoning")
+  if (capability === "image_input") return i18n.t("apiKeys.card.capability.imageInput")
+  if (capability === "audio_input") return i18n.t("apiKeys.card.capability.audioInput")
+  if (capability === "tool_calling") return i18n.t("apiKeys.card.capability.toolCalling")
+  if (capability === "structured_output") return i18n.t("apiKeys.card.capability.structuredOutput")
+  if (capability === "translation") return i18n.t("apiKeys.card.capability.translation")
   if (!capability) return null
   return capability.replaceAll("_", " ")
 }
@@ -1259,15 +1362,15 @@ function fallbackModelOutputModalities(model: ModelInfo): string[] {
 }
 
 function modalityLabel(modality: string): string {
-  if (modality === "text") return "text"
-  if (modality === "image") return "image"
-  if (modality === "video") return "video"
-  if (modality === "audio") return "audio"
-  if (modality === "file") return "file"
-  if (modality === "pdf") return "PDF"
-  if (modality === "embedding") return "embedding"
-  if (modality === "moderation") return "moderation"
-  if (modality === "3d") return "3D"
+  if (modality === "text") return i18n.t("apiKeys.card.modality.text")
+  if (modality === "image") return i18n.t("apiKeys.card.modality.image")
+  if (modality === "video") return i18n.t("apiKeys.card.modality.video")
+  if (modality === "audio") return i18n.t("apiKeys.card.modality.audio")
+  if (modality === "file") return i18n.t("apiKeys.card.modality.file")
+  if (modality === "pdf") return i18n.t("apiKeys.card.modality.pdf")
+  if (modality === "embedding") return i18n.t("apiKeys.card.modality.embedding")
+  if (modality === "moderation") return i18n.t("apiKeys.card.modality.moderation")
+  if (modality === "3d") return i18n.t("apiKeys.card.modality.threeD")
   return modality
 }
 
@@ -1377,6 +1480,7 @@ export function ProviderCard({
   notableProviderKey?: string
   onModelsUpdated?: (models: ModelInfo[]) => void
 }) {
+  const { t } = useTranslation("settings")
   const [visible, setVisible] = useState(false)
   const [showAllModels, setShowAllModels] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
@@ -1431,8 +1535,8 @@ export function ProviderCard({
     ? sortOfficialRouteInfos(primaryEndpointState?.models ?? [])
     : sortModelInfos(aggregateThirdPartyModelInfos(endpointStates.flatMap((state) => state.models)))
   const hasAvailableModels = availableModels.length > 0
-  const availableModelsLabel = isOfficial ? "Available Routes:" : "Available Models:"
-  const copyTargetLabel = isOfficial ? "route" : "model"
+  const availableModelsLabel = isOfficial ? t("apiKeys.card.availableRoutesLabel") : t("apiKeys.card.availableModelsLabel")
+  const copyTargetLabel = isOfficial ? t("apiKeys.card.routeWord") : t("apiKeys.card.modelWord")
   const visibleModels = showAllModels ? availableModels : availableModels.slice(0, availableModelsPreviewLimit)
   const hiddenModelCount = Math.max(0, availableModels.length - visibleModels.length)
   const matchedStatus = matchedResult?.last_test_status
@@ -1531,8 +1635,8 @@ export function ProviderCard({
   }
 
   const handleGetModels = () => {
-    const nextApiKeyError = hasApiKey ? "" : "API key is required."
-    const nextBaseUrlError = providerKind === "third-party" && filledBaseUrlRows.length === 0 ? "Base URL is required." : ""
+    const nextApiKeyError = hasApiKey ? "" : t("apiKeys.card.apiKeyRequired")
+    const nextBaseUrlError = providerKind === "third-party" && filledBaseUrlRows.length === 0 ? t("apiKeys.card.baseUrlRequired") : ""
     setApiKeyError(nextApiKeyError)
     setBaseUrlError(nextBaseUrlError)
     if (nextApiKeyError) {
@@ -1558,7 +1662,7 @@ export function ProviderCard({
     const uiState = model.ui_state
     const tagVariant = uiState ? routeTagVariantFromUiState(uiState) : routeStatusTagVariant(status)
     const statusLabel = isOfficial
-      ? uiState === "historical_ready" ? "Previously Connected" : routeStatusLabel(status)
+      ? uiState === "historical_ready" ? t("apiKeys.card.routeStatus.previouslyConnected") : routeStatusLabel(status)
       : thirdPartyModelStatusLabel(model, status)
     const modelType = isOfficial ? officialModelType(model) : null
     const modelTypeLabel = isOfficial ? officialModelTypeLabel(model) : null
@@ -1590,8 +1694,8 @@ export function ProviderCard({
     const inputCapabilityIcons = modalityIcons(inputModalities, "input")
     const outputCapabilityIcons = modalityIcons(outputModalities, "output")
     const ariaLabel = isOfficial
-      ? `Copy ${copyTargetLabel} ${model.id}. ${tooltipDetail.replace(/\s+/g, " ")}`
-      : `Copy ${copyTargetLabel} ${model.id}. ${statusLabel}`
+      ? t("apiKeys.card.copyTagAria", { target: copyTargetLabel, modelId: model.id, detail: tooltipDetail.replace(/\s+/g, " ") })
+      : t("apiKeys.card.copyTagAria", { target: copyTargetLabel, modelId: model.id, detail: statusLabel })
     const tagKey = isOfficial ? `${model.route_id ?? model.id}:${model.status ?? "model"}` : model.id
     const isDisabled = status === "disabled"
     const aggregateRouteCount = aggregateRouteSummaries(model).length
@@ -1643,7 +1747,7 @@ export function ProviderCard({
         <div className="min-w-0 max-w-xs truncate text-sm font-semibold text-foreground">{displayName}</div>
         {providerKind && !isOfficial ? (
           <Badge variant="outline" className="text-[10px] text-muted-foreground">
-            Third-party
+            {t("apiKeys.card.thirdPartyBadge")}
           </Badge>
         ) : null}
         {!isOfficial ? <TestMessage status={testStatus} latencyMs={null} errorCode={matchedErrorCode ?? null} /> : null}
@@ -1660,7 +1764,7 @@ export function ProviderCard({
                 variant="ghost"
                 size="icon"
                 className="shrink-0 text-muted-foreground"
-                aria-label={`More actions for ${draft.name}`}
+                aria-label={t("apiKeys.card.moreActionsButton", { draftName: draft.name })}
               >
                 <MoreVertical className="size-4" />
               </Button>
@@ -1668,7 +1772,7 @@ export function ProviderCard({
             <DropdownMenuContent align="end" className="w-36">
               <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
                 <Pencil className="size-3.5 mr-2" />
-                Rename
+                {t("apiKeys.card.renameButton")}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -1676,14 +1780,14 @@ export function ProviderCard({
                 onSelect={() => {
                   requestDeleteConfirmationToast({
                     id: `delete-provider-${draft.name}`,
-                    title: `Delete ${draft.name}?`,
-                    description: "This provider and its routes will be removed from API Keys, LLM Roles, and model bundles.",
+                    title: t("apiKeys.card.deleteConfirm.title", { displayName: draft.name }),
+                    description: t("apiKeys.card.deleteConfirm.description"),
                     onConfirm: onDelete,
                   })
                 }}
               >
                 <Trash2 className="size-3.5 mr-2" />
-                Delete
+                {t("apiKeys.card.deleteButton")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -1692,8 +1796,8 @@ export function ProviderCard({
       <CardContent className="space-y-4">
         <div className="space-y-2">
           <div className="flex items-center gap-1.5">
-            <Label htmlFor={`api-key-${draft.id}`}>API Key</Label>
-            {hasReachableModelList ? <FieldReachabilityCheck label="API key" /> : null}
+            <Label htmlFor={`api-key-${draft.id}`}>{t("apiKeys.card.apiKeyLabel")}</Label>
+            {hasReachableModelList ? <FieldReachabilityCheck label={t("apiKeys.card.apiKeyShort")} /> : null}
           </div>
           <div className={fieldRowClassName}>
             <div className="flex flex-1 min-w-0 items-center gap-1.5">
@@ -1708,7 +1812,7 @@ export function ProviderCard({
                   if (apiKeyError) setApiKeyError("")
                   onFieldChange({ api_key: event.target.value })
                 }}
-                placeholder={`Enter your ${apiKeyProviderName} API Key`}
+                placeholder={t("apiKeys.card.apiKeyPlaceholder", { providerName: apiKeyProviderName })}
                 name={`provider-secret-${draft.id}`}
                 autoComplete="off"
                 autoCorrect="off"
@@ -1729,11 +1833,11 @@ export function ProviderCard({
                   variant="ghost"
                   className="size-7 text-muted-foreground/70 transition-none hover:text-muted-foreground [&_svg]:size-3.5"
                   onClick={() => setVisible((value) => !value)}
-                  aria-label={visible ? "Hide API key" : "Show API key"}
+                  aria-label={visible ? t("apiKeys.card.hideApiKeyButton") : t("apiKeys.card.showApiKeyButton")}
                 >
                   {visible ? <EyeOff /> : <Eye />}
                 </Button>
-                <FieldCopyButton value={draft.api_key} label="API key" className="size-7 [&_svg]:size-3.5" />
+                <FieldCopyButton value={draft.api_key} label={t("apiKeys.card.apiKeyShort")} className="size-7 [&_svg]:size-3.5" />
               </div>
             </div>
             <div className={fieldActionClassName}>
@@ -1750,7 +1854,7 @@ export function ProviderCard({
                   <FlaskConical data-icon="inline-start" className="size-3.5 shrink-0" />
                 )}
                 {/* apikeys#24/#25: official and third-party share one real connectivity Test entry. */}
-                Test
+                {t("apiKeys.card.testButton")}
               </Button>
             </div>
           </div>
@@ -1762,7 +1866,7 @@ export function ProviderCard({
         {!isOfficial ? (
           <div className="space-y-2">
             <div className="flex items-center gap-1.5">
-              <Label htmlFor={`base-url-${draft.id}`}>Base URL</Label>
+              <Label htmlFor={`base-url-${draft.id}`}>{t("apiKeys.card.baseUrlLabel")}</Label>
             </div>
             <div className="space-y-2">
               {baseUrlRows.map((row, index) => {
@@ -1778,7 +1882,7 @@ export function ProviderCard({
                           if (baseUrlError) setBaseUrlError("")
                           updateBaseUrlRow(row.id, event.target.value)
                         }}
-                        placeholder={index === 0 ? "https://api.openai.com/v1" : "https://api.backup.example.com/v1"}
+                        placeholder={index === 0 ? t("apiKeys.card.baseUrlPlaceholder1") : t("apiKeys.card.baseUrlPlaceholder2")}
                         autoComplete="off"
                         autoCorrect="off"
                         autoCapitalize="none"
@@ -1790,7 +1894,7 @@ export function ProviderCard({
                       />
                       <BaseUrlReachabilityIcon state={rowStatus} url={row.value} />
                       <div className="flex shrink-0 items-center">
-                        <FieldCopyButton value={row.value} label="Base URL" className="size-7 [&_svg]:size-3.5" />
+                        <FieldCopyButton value={row.value} label={t("apiKeys.card.baseUrlLabel")} className="size-7 [&_svg]:size-3.5" />
                         {baseUrlRows.length > 1 ? (
                           <Button
                             type="button"
@@ -1798,7 +1902,7 @@ export function ProviderCard({
                             variant="ghost"
                             className="size-7 text-muted-foreground/70 transition-none hover:text-destructive [&_svg]:size-3.5"
                             onClick={() => deleteBaseUrlRow(row.id)}
-                            aria-label="Remove Base URL"
+                            aria-label={t("apiKeys.card.removeBaseUrlButton")}
                           >
                             <Trash2 />
                           </Button>
@@ -1817,7 +1921,7 @@ export function ProviderCard({
                 onClick={addBaseUrlRow}
               >
                 <Plus className="size-3.5" />
-                Add URL
+                {t("apiKeys.card.addUrlButton")}
               </Button>
             </div>
             {baseUrlError ? <p id={`base-url-error-${draft.id}`} className="text-xs text-destructive">{baseUrlError}</p> : null}
@@ -1838,7 +1942,7 @@ export function ProviderCard({
                       officialRouteGroups.map((group) => (
                         <div key={group.label} className="space-y-1" data-route-type-group={group.label}>
                           <div className="text-[10px] font-medium uppercase text-muted-foreground">
-                            {group.label}
+                            {officialRouteGroupDisplayLabel(group.label)}
                           </div>
                           <div className="flex flex-wrap gap-1">
                             {group.models.map(renderAvailableModelTag)}
@@ -1858,7 +1962,7 @@ export function ProviderCard({
                     className="h-5 px-1 text-xs text-muted-foreground hover:text-foreground"
                     onClick={() => setShowAllModels((value) => !value)}
                   >
-                    {showAllModels ? "Show fewer" : `Show ${hiddenModelCount} more`}
+                    {showAllModels ? t("apiKeys.card.showFewerButton") : t("apiKeys.card.showMoreButton", { n: hiddenModelCount })}
                   </Button>
                 ) : null}
               </div>
@@ -1868,7 +1972,7 @@ export function ProviderCard({
                 <div className="text-muted-foreground">{availableModelsLabel}</div>
                 <Badge variant="warning" className="gap-1">
                   <TriangleAlert className="size-3" />
-                  No models returned
+                  {t("apiKeys.card.noModelsWarning")}
                 </Badge>
               </div>
             ) : null}
@@ -1885,13 +1989,13 @@ export function ProviderCard({
       </CardContent>
       {!isOfficial ? (
         <RoleNameDialog
-          title="Rename provider"
+          title={t("apiKeys.card.renameDialog.title")}
           initialName={draft.name}
           existingNames={[]}
           open={renameOpen}
           onOpenChange={setRenameOpen}
           onSubmit={(nextName: string) => onFieldChange({ name: nextName })}
-          fieldLabel="Provider name"
+          fieldLabel={t("apiKeys.card.renameDialog.fieldLabel")}
         />
       ) : null}
     </Card>

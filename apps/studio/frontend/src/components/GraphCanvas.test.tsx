@@ -1,11 +1,13 @@
 import { isValidElement, type ReactElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { AddPhaseControl, buildEdges, CanvasContextMenuContent, GraphCanvas, SkillNode, type SkillGraphNode } from './GraphCanvas'
+import { buildEdges, CanvasContextMenuContent, GraphCanvas, SkillNode, type SkillGraphNode } from './GraphCanvas'
+import { layoutViewportSignature, nextExpandedSubgraphs, topologyOwnerSkillIdForNode } from './GraphCanvas/GraphCanvas'
 import { CycleDetectedError, getAutoLayoutedElements } from '../lib/layout'
 import type { Edge, Node } from '@xyflow/react'
 import type { SkillDetail } from '@/api/types'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
+import { INPUT_ID, OUTPUT_ID, type GlobalNodeData } from './nodes'
 
 const { reactFlowPropsRef, contextMenuItems } = vi.hoisted(() => ({
   reactFlowPropsRef: { current: null as null | Record<string, unknown> },
@@ -28,6 +30,10 @@ vi.mock('@xyflow/react', () => ({
   reconnectEdge: vi.fn((_oldEdge, newConnection, edges) => [...edges, newConnection]),
   useEdgesState: vi.fn((initialEdges) => [initialEdges, vi.fn(), vi.fn()]),
   useNodesState: vi.fn((initialNodes) => [initialNodes, vi.fn(), vi.fn()]),
+  useReactFlow: vi.fn(() => ({
+    flowToScreenPosition: (position: { x: number; y: number }) => position,
+  })),
+  useViewport: vi.fn(() => ({ x: 0, y: 0, zoom: 1 })),
 }))
 
 vi.mock('../lib/layout', () => {
@@ -50,11 +56,26 @@ vi.mock('./ui/tooltip', () => ({
   TooltipTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
 }))
 
+vi.mock('@/components/ui/popover', () => ({
+  Popover: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  PopoverAnchor: ({ children }: { children: ReactNode }) => <>{children}</>,
+  PopoverContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+}))
+
 vi.mock('@/components/ui/context-menu', () => ({
   ContextMenu: ({ children }: { children: ReactNode }) => <div data-testid="context-menu">{children}</div>,
   ContextMenuContent: ({ children }: { children: ReactNode }) => <div data-testid="context-menu-content">{children}</div>,
   ContextMenuItem: ({ children, onSelect }: { children: ReactNode; onSelect?: () => void }) => {
-    const label = String(children)
+    const labelFromNode = (node: ReactNode): string => {
+      if (Array.isArray(node)) {
+        return node.map(labelFromNode).join('')
+      }
+      if (typeof node === 'string' || typeof node === 'number') {
+        return String(node)
+      }
+      return ''
+    }
+    const label = labelFromNode(children)
     contextMenuItems.push({ label, onSelect })
     return <button type="button">{children}</button>
   },
@@ -73,7 +94,7 @@ vi.mock('sonner', () => ({
 
 const layoutMock = vi.mocked(getAutoLayoutedElements)
 
-function phaseNode(id: string, dependsOn: string[] = []): SkillGraphNode {
+function phaseNode(id: string, dependsOn: string[] = [], isOutput = false): SkillGraphNode {
   return {
     id,
     type: 'skill',
@@ -84,6 +105,20 @@ function phaseNode(id: string, dependsOn: string[] = []): SkillGraphNode {
       mode: 'llm',
       status: 'idle',
       dependsOn,
+      isOutput,
+    },
+  }
+}
+
+function globalNode(id: string, type: 'globalInput' | 'globalOutput'): Node<GlobalNodeData, typeof type> {
+  return {
+    id,
+    type,
+    position: { x: 0, y: 0 },
+    data: {
+      type: type === 'globalInput' ? 'global-input' : 'global-output',
+      schema: { inputs: [], outputs: [] },
+      skillId: 'demo',
     },
   }
 }
@@ -124,6 +159,33 @@ function renderSkillNodeRoot(overrides: Partial<SkillGraphNode['data']> = {}) {
   return node as ReactElement<{
     onDoubleClick?: (event: { stopPropagation: () => void }) => void
   }>
+}
+
+function textContent(node: ReactNode): string {
+  if (Array.isArray(node)) return node.map(textContent).join('')
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (isValidElement(node)) {
+    const props = node.props as { children?: ReactNode }
+    return textContent(props.children)
+  }
+  return ''
+}
+
+function findClickableByText(node: ReactNode, text: string): ReactElement<{ onClick?: () => void }> | null {
+  if (!isValidElement(node)) return null
+  const props = node.props as { children?: ReactNode; onClick?: () => void }
+  if (typeof props.onClick === 'function' && textContent(props.children).includes(text)) {
+    return node as ReactElement<{ onClick?: () => void }>
+  }
+  const children = props.children
+  if (Array.isArray(children)) {
+    for (const child of children) {
+      const match = findClickableByText(child, text)
+      if (match) return match
+    }
+    return null
+  }
+  return findClickableByText(children, text)
 }
 
 function edgeIds(nodes: SkillGraphNode[]): string[] {
@@ -190,7 +252,15 @@ describe('GraphCanvas', () => {
   it('opens the properties panel when a skill node is clicked', () => {
     const onNodeSelect = vi.fn()
     const onPanelChange = vi.fn()
-    renderToStaticMarkup(<GraphCanvas skillId="demo-skill" onNodeSelect={onNodeSelect} onPanelChange={onPanelChange} />)
+    const onNodeFileOpen = vi.fn()
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        onNodeSelect={onNodeSelect}
+        onNodeFileOpen={onNodeFileOpen}
+        onPanelChange={onPanelChange}
+      />,
+    )
 
     const props = reactFlowPropsRef.current as {
       onNodeClick?: (event: unknown, node: SkillGraphNode) => void
@@ -200,12 +270,255 @@ describe('GraphCanvas', () => {
 
     expect(onNodeSelect).toHaveBeenCalledWith({ id: 'setup', data: selected.data })
     expect(onPanelChange).toHaveBeenCalledWith('properties')
+    expect(onNodeFileOpen).not.toHaveBeenCalled()
+  })
+
+  it('opens graph properties and clears node selection when the empty pane is clicked', () => {
+    const onNodeDeselect = vi.fn()
+    const onPanelChange = vi.fn()
+    const onNodeFileOpen = vi.fn()
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        selectedNodeId="setup"
+        onNodeDeselect={onNodeDeselect}
+        onNodeFileOpen={onNodeFileOpen}
+        onPanelChange={onPanelChange}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as {
+      onPaneClick?: () => void
+    } | null
+    props?.onPaneClick?.()
+
+    expect(onNodeDeselect).toHaveBeenCalled()
+    expect(onPanelChange).toHaveBeenCalledWith('properties')
+    expect(onNodeFileOpen).not.toHaveBeenCalled()
+  })
+
+  it('does not treat a node as still selected after the empty pane was clicked', () => {
+    vi.useFakeTimers()
+    try {
+      const onNodeSelect = vi.fn()
+      const onNodeDeselect = vi.fn()
+      const onPanelChange = vi.fn()
+      const onNodeFileOpen = vi.fn()
+      renderToStaticMarkup(
+        <GraphCanvas
+          skillId="demo-skill"
+          selectedNodeId="setup"
+          onNodeSelect={onNodeSelect}
+          onNodeDeselect={onNodeDeselect}
+          onNodeFileOpen={onNodeFileOpen}
+          onPanelChange={onPanelChange}
+        />,
+      )
+
+      const props = reactFlowPropsRef.current as {
+        onPaneClick?: () => void
+        onNodeClick?: (event: unknown, node: SkillGraphNode) => void
+      } | null
+      props?.onPaneClick?.()
+      onNodeFileOpen.mockClear()
+      onPanelChange.mockClear()
+
+      const selected = phaseNode('setup')
+      selected.data = {
+        ...selected.data,
+        mode: 'logic',
+        filePath: 'phases/setup/LOGIC.md',
+      }
+      props?.onNodeClick?.({}, selected)
+      vi.advanceTimersByTime(220)
+
+      expect(onNodeDeselect).toHaveBeenCalled()
+      expect(onNodeSelect).toHaveBeenCalledWith({ id: 'setup', data: selected.data })
+      expect(onPanelChange).toHaveBeenCalledWith('properties')
+      expect(onNodeFileOpen).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('opens the I/O panel when a global input or output node is clicked', () => {
+    const onNodeSelect = vi.fn()
+    const onNodeDeselect = vi.fn()
+    const onPanelChange = vi.fn()
+    const onNodeFileOpen = vi.fn()
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        onNodeSelect={onNodeSelect}
+        onNodeDeselect={onNodeDeselect}
+        onNodeFileOpen={onNodeFileOpen}
+        onPanelChange={onPanelChange}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as {
+      onNodeClick?: (event: unknown, node: Node<GlobalNodeData, 'globalInput' | 'globalOutput'>) => void
+    } | null
+
+    props?.onNodeClick?.({}, globalNode(INPUT_ID, 'globalInput'))
+    props?.onNodeClick?.({}, globalNode(OUTPUT_ID, 'globalOutput'))
+
+    expect(onPanelChange).toHaveBeenCalledTimes(2)
+    expect(onPanelChange).toHaveBeenNthCalledWith(1, 'input')
+    expect(onPanelChange).toHaveBeenNthCalledWith(2, 'input')
+    expect(onNodeSelect).not.toHaveBeenCalled()
+    expect(onNodeDeselect).toHaveBeenCalledTimes(2)
+    expect(onNodeFileOpen).not.toHaveBeenCalled()
+  })
+
+  it('opens the phase file when an already-selected skill node is clicked again', () => {
+    vi.useFakeTimers()
+    try {
+      const onNodeSelect = vi.fn()
+      const onPanelChange = vi.fn()
+      const onNodeFileOpen = vi.fn()
+      renderToStaticMarkup(
+        <GraphCanvas
+          skillId="demo-skill"
+          selectedNodeId="setup"
+          onNodeSelect={onNodeSelect}
+          onNodeFileOpen={onNodeFileOpen}
+          onPanelChange={onPanelChange}
+        />,
+      )
+
+      const props = reactFlowPropsRef.current as {
+        onNodeClick?: (event: unknown, node: SkillGraphNode) => void
+      } | null
+      const selected = phaseNode('setup')
+      selected.data = {
+        ...selected.data,
+        mode: 'logic',
+        filePath: 'phases/setup/LOGIC.md',
+      }
+      props?.onNodeClick?.({}, selected)
+
+      expect(onNodeSelect).toHaveBeenCalledWith({ id: 'setup', data: selected.data })
+      expect(onPanelChange).not.toHaveBeenCalledWith('properties')
+      expect(onNodeFileOpen).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(220)
+
+      expect(onNodeFileOpen).toHaveBeenCalledWith({
+        path: 'phases/setup/LOGIC.md',
+        skillId: 'demo',
+        workspaceRoot: null,
+        language: 'markdown',
+        saveEnabled: true,
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('opens inline subgraph child files with the child workspace identity, not a parent-prefixed string', () => {
+    vi.useFakeTimers()
+    try {
+      const onNodeFileOpen = vi.fn()
+      const childNode: SkillGraphNode = {
+        ...phaseNode('__subpreview__::node::event_timeline::review'),
+        data: {
+          ...phaseNode('review').data,
+          skillId: 'event-extraction',
+          workspaceRoot: '/repo/skills/story-deconstruction-v3/subgraph/event-timeline/subgraph/event-extraction',
+          phaseId: 'review',
+          label: 'review',
+          mode: 'llm',
+          filePath: 'phases/review/SKILL.md',
+        },
+      }
+      renderToStaticMarkup(
+        <GraphCanvas
+          skillId="story-deconstruction-v3"
+          selectedNodeId={childNode.id}
+          onNodeFileOpen={onNodeFileOpen}
+        />,
+      )
+
+      const props = reactFlowPropsRef.current as {
+        onNodeClick?: (event: unknown, node: SkillGraphNode) => void
+      } | null
+      props?.onNodeClick?.({}, childNode)
+      vi.advanceTimersByTime(220)
+
+      expect(onNodeFileOpen).toHaveBeenCalledWith({
+        path: 'phases/review/SKILL.md',
+        skillId: 'event-extraction',
+        workspaceRoot: '/repo/skills/story-deconstruction-v3/subgraph/event-timeline/subgraph/event-extraction',
+        language: 'markdown',
+        saveEnabled: true,
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not open a subgraph file when the second click becomes a drill double-click', () => {
+    vi.useFakeTimers()
+    try {
+      const onNodeFileOpen = vi.fn()
+      renderToStaticMarkup(
+        <GraphCanvas
+          skillId="demo-skill"
+          selectedNodeId="child"
+          onNodeFileOpen={onNodeFileOpen}
+        />,
+      )
+
+      const props = reactFlowPropsRef.current as {
+        onNodeClick?: (event: unknown, node: SkillGraphNode) => void
+        onNodeDoubleClick?: (event: unknown, node: SkillGraphNode) => void
+      } | null
+      const selected = phaseNode('child')
+      selected.data = {
+        ...selected.data,
+        mode: 'subgraph',
+        subgraphPath: '/abs/child',
+        filePath: 'phases/child/SUBGRAPH.md',
+      }
+
+      props?.onNodeClick?.({}, selected)
+      props?.onNodeDoubleClick?.({}, selected)
+      vi.advanceTimersByTime(220)
+
+      expect(onNodeFileOpen).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('selects inline subgraph child nodes by their canonical phase id, not canvas namespace id', () => {
+    const onNodeSelect = vi.fn()
+    renderToStaticMarkup(<GraphCanvas skillId="demo-skill" onNodeSelect={onNodeSelect} />)
+
+    const props = reactFlowPropsRef.current as {
+      onNodeClick?: (event: unknown, node: SkillGraphNode) => void
+    } | null
+    const selected: SkillGraphNode = {
+      ...phaseNode('__subpreview__::node::parent::plan'),
+      data: {
+        ...phaseNode('plan').data,
+        skillId: 'child-skill',
+        phaseId: 'plan',
+        label: 'plan',
+      },
+    }
+    props?.onNodeClick?.({}, selected)
+
+    expect(onNodeSelect).toHaveBeenCalledWith({ id: 'plan', data: selected.data })
   })
 
   it('renders new phase node actions under an Add Phase Node submenu', () => {
     const onCreatePhase = vi.fn()
     const html = renderToStaticMarkup(<GraphCanvas skillId="demo-skill" onCreatePhase={onCreatePhase} />)
 
+    expect(html).not.toContain('Add phase')
+    expect(html).not.toContain('Macro contract')
     expect(html).toContain('Add Phase Node')
     expect(html).toContain('Agent Phase')
     expect(html).toContain('Logic Phase')
@@ -215,9 +528,39 @@ describe('GraphCanvas', () => {
     contextMenuItems.find((item) => item.label === 'Logic Phase')?.onSelect?.()
     contextMenuItems.find((item) => item.label === 'Subgraph Phase')?.onSelect?.()
 
-    expect(onCreatePhase).toHaveBeenNthCalledWith(1, 'skill')
-    expect(onCreatePhase).toHaveBeenNthCalledWith(2, 'logic')
-    expect(onCreatePhase).toHaveBeenNthCalledWith(3, 'subgraph')
+    expect(onCreatePhase).not.toHaveBeenCalled()
+  })
+
+  it('keeps viewport controls out of the canvas chrome and exposes them in the context menu', () => {
+    const onZoomIn = vi.fn()
+    const onZoomOut = vi.fn()
+    const onFitView = vi.fn()
+    const onToggleCanvasLock = vi.fn()
+    const html = renderToStaticMarkup(<GraphCanvas skillId="demo-skill" />)
+
+    expect(html).not.toContain('data-testid="controls"')
+
+    contextMenuItems.length = 0
+    renderToStaticMarkup(
+      <CanvasContextMenuContent
+        edgeMenuConnection={null}
+        canvasLocked={false}
+        onZoomIn={onZoomIn}
+        onZoomOut={onZoomOut}
+        onFitView={onFitView}
+        onToggleCanvasLock={onToggleCanvasLock}
+      />,
+    )
+
+    contextMenuItems.find((item) => item.label === 'Zoom in')?.onSelect?.()
+    contextMenuItems.find((item) => item.label === 'Zoom out')?.onSelect?.()
+    contextMenuItems.find((item) => item.label === 'Fit view')?.onSelect?.()
+    contextMenuItems.find((item) => item.label === 'Lock canvas')?.onSelect?.()
+
+    expect(onZoomIn).toHaveBeenCalled()
+    expect(onZoomOut).toHaveBeenCalled()
+    expect(onFitView).toHaveBeenCalled()
+    expect(onToggleCanvasLock).toHaveBeenCalled()
   })
 
   it('persists valid phase node connections', () => {
@@ -241,6 +584,28 @@ describe('GraphCanvas', () => {
     expect(onPersistConnection).toHaveBeenCalledWith({ source: 'draft', target: 'review' })
   })
 
+  it('persists explicit graph input and output boundary connections', () => {
+    const onPersistConnection = vi.fn()
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        skillDetail={graphSkillDetail([
+          { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+        ])}
+        onPersistConnection={onPersistConnection}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as {
+      onConnect?: (connection: { source: string; target: string }) => void
+    } | null
+    props?.onConnect?.({ source: INPUT_ID, target: 'draft' })
+    props?.onConnect?.({ source: 'draft', target: OUTPUT_ID })
+
+    expect(onPersistConnection).toHaveBeenCalledWith({ source: INPUT_ID, target: 'draft' })
+    expect(onPersistConnection).toHaveBeenCalledWith({ source: 'draft', target: OUTPUT_ID })
+  })
+
   it('does not persist invalid phase node connections', () => {
     const onPersistConnection = vi.fn()
     renderToStaticMarkup(
@@ -259,8 +624,8 @@ describe('GraphCanvas', () => {
     } | null
     props?.onConnect?.({ source: 'draft', target: 'draft' })
     props?.onConnect?.({ source: 'draft', target: 'review' })
-    props?.onConnect?.({ source: '__global_input__', target: 'review' })
-    props?.onConnect?.({ source: 'draft', target: '__global_output__' })
+    props?.onConnect?.({ source: 'missing_phase', target: 'review' })
+    props?.onConnect?.({ source: 'draft', target: 'missing_phase' })
 
     expect(onPersistConnection).not.toHaveBeenCalled()
   })
@@ -277,6 +642,21 @@ describe('GraphCanvas', () => {
     contextMenuItems.find((item) => item.label === 'Disconnect')?.onSelect?.()
 
     expect(onDisconnectConnection).toHaveBeenCalledWith({ source: 'draft', target: 'review' })
+  })
+
+  it('opens a destructive node context menu action for deleting phase nodes', () => {
+    const onDeletePhase = vi.fn()
+    renderToStaticMarkup(
+      <CanvasContextMenuContent
+        edgeMenuConnection={null}
+        nodeMenuPhaseId="draft"
+        onDeletePhase={onDeletePhase}
+      />,
+    )
+
+    contextMenuItems.find((item) => item.label === 'Delete node')?.onSelect?.()
+
+    expect(onDeletePhase).toHaveBeenCalledWith('draft')
   })
 
   it('enables reconnectable edges on the canvas', () => {
@@ -332,6 +712,60 @@ describe('GraphCanvas', () => {
     // The two-round-trip chain must NOT be used when the atomic handler exists.
     expect(onDisconnectConnection).not.toHaveBeenCalled()
     expect(onPersistConnection).not.toHaveBeenCalled()
+  })
+
+  it('reconnects phase edges onto graph Output through the same atomic reconnect path', async () => {
+    const onReconnectConnection = vi.fn().mockResolvedValue(undefined)
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        skillDetail={graphSkillDetail([
+          { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+          { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+        ])}
+        onReconnectConnection={onReconnectConnection}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as {
+      onReconnect?: (oldEdge: { source: string; target: string }, newConnection: { source: string; target: string }) => void
+    } | null
+
+    props?.onReconnect?.({ source: 'draft', target: 'review' }, { source: 'draft', target: OUTPUT_ID })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(onReconnectConnection).toHaveBeenCalledWith(
+      { source: 'draft', target: 'review' },
+      { source: 'draft', target: OUTPUT_ID },
+    )
+  })
+
+  it('reconnects phase edges onto graph Input through the same atomic reconnect path', async () => {
+    const onReconnectConnection = vi.fn().mockResolvedValue(undefined)
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="demo-skill"
+        skillDetail={graphSkillDetail([
+          { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+          { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+        ])}
+        onReconnectConnection={onReconnectConnection}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as {
+      onReconnect?: (oldEdge: { source: string; target: string }, newConnection: { source: string; target: string }) => void
+    } | null
+
+    props?.onReconnect?.({ source: 'draft', target: 'review' }, { source: INPUT_ID, target: 'review' })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(onReconnectConnection).toHaveBeenCalledWith(
+      { source: 'draft', target: 'review' },
+      { source: INPUT_ID, target: 'review' },
+    )
   })
 
   it('falls back to disconnect-then-persist when no atomic onReconnectConnection is wired', async () => {
@@ -436,35 +870,129 @@ describe('GraphCanvas', () => {
     expect(html).toContain('Loading graph...')
   })
 
+  it('keeps the initial loading canvas blank and hidden until the first viewport fit is controlled', () => {
+    renderToStaticMarkup(<GraphCanvas skillId="demo-skill" isLoading />)
+
+    const props = reactFlowPropsRef.current as {
+      nodes?: unknown[]
+      fitView?: boolean
+      className?: string
+    } | null
+    expect(props?.nodes).toEqual([])
+    expect(props?.fitView).toBeUndefined()
+    expect(props?.className).toContain('opacity-0')
+    expect(props?.className).toContain('pointer-events-none')
+  })
+
+  it('does not treat subgraph expand state as a viewport-refit layout change', () => {
+    const collapsed = phaseNode('subgraph')
+    collapsed.data.mode = 'subgraph'
+    collapsed.data.subgraphPath = '/abs/subgraph'
+    collapsed.data.isExpanded = false
+    collapsed.data.onToggleSubgraph = () => undefined
+    const expanded: SkillGraphNode = {
+      ...collapsed,
+      data: {
+        ...collapsed.data,
+        isExpanded: true,
+      },
+    }
+
+    expect(layoutViewportSignature([collapsed], [])).toBe(layoutViewportSignature([expanded], []))
+    expect(layoutViewportSignature([collapsed], [])).not.toBe(layoutViewportSignature([collapsed, phaseNode('next')], []))
+  })
+
+  it('keeps inline subgraph topology expansion single-select per canvas level', () => {
+    const childA = '__subpreview__::node::segmentation::extract'
+    const childB = '__subpreview__::node::segmentation::review'
+
+    expect([...nextExpandedSubgraphs(new Set(), 'segmentation')]).toEqual(['segmentation'])
+    expect([...nextExpandedSubgraphs(new Set(['segmentation']), 'event_timeline')]).toEqual(['event_timeline'])
+    expect([...nextExpandedSubgraphs(new Set(['event_timeline']), 'event_timeline')]).toEqual([])
+    expect([...nextExpandedSubgraphs(new Set(['segmentation']), childA)]).toEqual(['segmentation', childA])
+    expect([...nextExpandedSubgraphs(new Set(['segmentation', childA]), childB)]).toEqual(['segmentation', childB])
+    expect([...nextExpandedSubgraphs(new Set(['segmentation', childA]), childA)]).toEqual(['segmentation'])
+    expect([...nextExpandedSubgraphs(new Set(['segmentation', childA]), 'event_timeline')]).toEqual(['event_timeline'])
+  })
+
+  it('keeps nested topology fetches pinned to the root skill boundary', () => {
+    const nested = phaseNode('__subpreview__::node::event_timeline::extract')
+    nested.data.skillId = 'event-timeline'
+    nested.data.workspaceRoot = '/repo/skills/story-deconstruction-v3/subgraph/event-timeline'
+    nested.data.subgraphPath = '/repo/skills/story-deconstruction-v3/subgraph/event-timeline/subgraph/event-extraction'
+
+    expect(topologyOwnerSkillIdForNode(nested, 'story-deconstruction-v3')).toBe('story-deconstruction-v3')
+
+    nested.data.topologyOwnerSkillId = 'story-deconstruction-v3'
+    expect(topologyOwnerSkillIdForNode(nested, 'other-root')).toBe('story-deconstruction-v3')
+  })
+
   it('keeps the error overlay', () => {
     const html = renderToStaticMarkup(<GraphCanvas skillId="demo-skill" error={new Error('failed')} />)
 
     expect(html).toContain('Failed to load skill graph.')
   })
 
-  it('keeps the cycle warning overlay', () => {
+  it('keeps rendering the graph when auto-layout detects a cycle', () => {
     layoutMock.mockImplementation(() => {
       throw new CycleDetectedError()
     })
 
     const html = renderToStaticMarkup(<GraphCanvas skillId="demo-skill" />)
 
-    expect(html).toContain('SKILL contains cyclic dependency - cannot render graph.')
+    const props = reactFlowPropsRef.current as {
+      nodes?: unknown[]
+      edges?: unknown[]
+    } | null
+    expect(html).not.toContain('SKILL contains cyclic dependency - cannot render graph.')
+    expect(props?.nodes?.length).toBeGreaterThan(0)
+    expect(props?.edges).toBeDefined()
   })
 
-  it('builds serial edges through global input and output', () => {
+  it('builds declared serial dependency edges without inferred graph boundaries', () => {
     const nodes = [phaseNode('A'), phaseNode('B', ['A']), phaseNode('C', ['B'])]
 
     expect(edgeIds(nodes)).toEqual([
-      '__global_input__->A',
       'A->B',
       'B->C',
-      'C->__global_output__',
     ])
     expectContextEdges(nodes)
   })
 
-  it('builds branching edges through global input and output', () => {
+  it('uses Cancel/Allow actions for sequential overwrite warnings', () => {
+    const html = skillNodeHtml({
+      activeConflict: {
+        nodeId: 'review',
+        fieldName: 'events_raw',
+        ancestorNodeId: 'aggregate',
+      },
+      onAllowSequentialOverwrite: () => undefined,
+      onCancelSequentialOverwrite: () => undefined,
+    })
+
+    expect(html).toContain('Cancel')
+    expect(html).toContain('Allow Overwrite')
+    expect(html).not.toContain('Deny')
+  })
+
+  it('passes the full conflict identity when allowing a sequential overwrite', () => {
+    const onAllowSequentialOverwrite = vi.fn()
+    const node = renderSkillNodeRoot({
+      activeConflict: {
+        nodeId: 'review',
+        fieldName: 'events_raw',
+        ancestorNodeId: 'aggregate',
+      },
+      onAllowSequentialOverwrite,
+      onCancelSequentialOverwrite: () => undefined,
+    })
+
+    findClickableByText(node, 'Allow Overwrite')?.props.onClick?.()
+
+    expect(onAllowSequentialOverwrite).toHaveBeenCalledWith('review', 'events_raw', 'aggregate')
+  })
+
+  it('builds only declared branching dependency edges', () => {
     const nodes = [
       phaseNode('A'),
       phaseNode('B', ['A']),
@@ -473,28 +1001,30 @@ describe('GraphCanvas', () => {
     ]
 
     expect(edgeIds(nodes)).toEqual([
-      '__global_input__->A',
       'A->B',
       'A->C',
       'B->D',
       'C->D',
-      'D->__global_output__',
     ])
     expectContextEdges(nodes)
   })
 
-  it('builds single-node edges through global input and output', () => {
+  it('does not infer boundary edges for a single node with no dependencies', () => {
     const nodes = [phaseNode('X')]
 
-    expect(edgeIds(nodes)).toEqual([
-      '__global_input__->X',
-      'X->__global_output__',
-    ])
+    expect(edgeIds(nodes)).toEqual([])
     expectContextEdges(nodes)
   })
 
-  it('builds a direct global input to output edge for empty phases', () => {
-    expect(edgeIds([])).toEqual(['__global_input__->__global_output__'])
+  it('renders explicit input and output declarations only', () => {
+    const nodes = [phaseNode('A', ['input']), phaseNode('B', ['A'], true)]
+
+    expect(edgeIds(nodes)).toEqual([`${INPUT_ID}->A`, 'A->B', `B->${OUTPUT_ID}`])
+    expectContextEdges(nodes)
+  })
+
+  it('renders no edges for empty phases', () => {
+    expect(edgeIds([])).toEqual([])
     expectContextEdges([])
   })
 
@@ -521,10 +1051,8 @@ describe('GraphCanvas', () => {
     expect(html).toContain('aria-label="Expand subgraph"')
   })
 
-  it('does not render the expand toggle on a read-only preview child (no toggle callback)', () => {
-    // Preview children inside an expanded container have their callback stripped,
-    // so they never offer a re-expand control.
-    const html = skillNodeHtml({ mode: 'subgraph', subgraphPath: '/abs/child', isSubgraphPreview: true })
+  it('does not render the expand toggle when no toggle callback is wired', () => {
+    const html = skillNodeHtml({ mode: 'subgraph', subgraphPath: '/abs/child' })
 
     expect(html).not.toContain('aria-label="Expand subgraph"')
     expect(html).not.toContain('aria-label="Collapse subgraph"')
@@ -575,24 +1103,5 @@ describe('GraphCanvas', () => {
 
     expect(stopPropagation).not.toHaveBeenCalled()
     expect(onToggleSubgraph).not.toHaveBeenCalled()
-  })
-})
-
-describe('AddPhaseControl', () => {
-  it('invokes onCreatePhase with the chosen kind when a menu item is selected', () => {
-    const onCreatePhase = vi.fn()
-    // Walk the element tree (no DOM): DropdownMenu > [trigger, content];
-    // content children = the ADD_PHASE_OPTIONS items keyed by kind.
-    const element = AddPhaseControl({ onCreatePhase }) as ReactElement<{ children: ReactNode[] }>
-    const content = element.props.children[1] as ReactElement<{ children: ReactNode[] }>
-    const items = content.props.children.flat() as ReactElement<{ onSelect?: () => void }>[]
-
-    const logicItem = items.find((item) => item.key === 'logic')
-    logicItem?.props.onSelect?.()
-    expect(onCreatePhase).toHaveBeenCalledWith('logic')
-
-    const agentItem = items.find((item) => item.key === 'skill')
-    agentItem?.props.onSelect?.()
-    expect(onCreatePhase).toHaveBeenCalledWith('skill')
   })
 })

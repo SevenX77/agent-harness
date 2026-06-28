@@ -1,7 +1,7 @@
 import yaml from 'js-yaml'
-import type { CompileError, IoDeclaration, PhaseDef, SkillDetail, SkillManifest, IoInput, IoOutput, GraphManifestV030, GraphTopologyItem } from '@/api/types'
+import type { CompileError, GraphManifestV030, GraphTopologyItem, IoDeclaration, IoInput, IoOutput, PhaseDef, SkillDetail, SkillManifest } from '@/api/types'
 import { INPUT_ID, OUTPUT_ID, type GlobalNodeData, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus, type SubagentRef } from '@/components/nodes'
-import { normalizeAbsoluteSubgraphPath } from '@/components/studio/subgraph-path'
+import { normalizeSubgraphPath } from '@/components/studio/subgraph-path'
 import type { GoldenNodeState } from '@/components/studio/node-golden'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 
@@ -222,6 +222,7 @@ export function buildNodes(
   goldenStateByNodeId: Record<string, GoldenNodeState> = {},
   errorMessageByNodeId: Record<string, string> = {},
   agentSteps: AgentStepsInputs = {},
+  workspaceRoot: string | null = null,
 ): GraphCanvasNode[] {
   const phases = phasesFromManifest(detail?.manifest, skillId)
   const io = ioFromManifest(detail?.manifest)
@@ -237,7 +238,7 @@ export function buildNodes(
     // override the file truth (the F1 ambiguity). This mirrors the drilled-child
     // path's `phaseKindFromTopologyMode(topology?.mode)`.
     const mode = phaseModeFromFiles(phase.name, detail?.files) ?? phaseKindFromTopologyMode(topology?.mode)
-    const subgraphPath = normalizeAbsoluteSubgraphPath(topology?.path)
+    const subgraphPath = normalizeSubgraphPath(topology?.path)
     const filePath = `phases/${phase.name}/${phaseKindFile({ mode, subgraphPath })}`
     const frontmatter = phaseFrontmatter(detail?.files?.[filePath])
     // N2 atom #15: AGENT nodes (SKILL.md) get the inline L3 step editor wired off
@@ -251,6 +252,8 @@ export function buildNodes(
       position: { x: 160 + (index % 2) * 320, y: 80 + index * 150 },
       data: {
         skillId,
+        workspaceRoot,
+        phaseId: phase.name,
         label: phase.name,
         mode,
         role: phase.mode === 'llm' ? phase.llm_role : null,
@@ -264,6 +267,7 @@ export function buildNodes(
         // N5 atom #3: gray this node when it is in the resume's affected-downstream set.
         isDirtyDownstream: agentSteps.dirtyDownstreamNodeIds?.has(phase.name) ?? false,
         dependsOn: topology?.depends_on ?? normalizeDependsOn(phase.depends_on),
+        isOutput: topology?.output === true,
         subgraphPath,
         isExpanded: expandedSubgraphs.has(phase.name),
         // Every SUBGRAPH-kind node gets the expand toggle — including ones whose
@@ -290,14 +294,14 @@ export function buildNodes(
       id: INPUT_ID,
       type: 'globalInput',
       position: { x: 0, y: 0 },
-      data: { type: 'global-input', schema: io } satisfies GlobalNodeData,
+      data: { type: 'global-input', schema: io, skillId, workspaceRoot } satisfies GlobalNodeData,
     },
     ...phaseNodes,
     {
       id: OUTPUT_ID,
       type: 'globalOutput',
       position: { x: 0, y: 0 },
-      data: { type: 'global-output', schema: io } satisfies GlobalNodeData,
+      data: { type: 'global-output', schema: io, skillId, workspaceRoot } satisfies GlobalNodeData,
     },
   ]
 }
@@ -331,13 +335,14 @@ export function buildNodesFromTopology(
   graphTopology: GraphTopologyItem[],
   statusByNodeId: Record<string, SkillNodeStatus>,
   agentSteps: AgentStepsInputs = {},
+  workspaceRoot: string | null = null,
 ): GraphCanvasNode[] {
   const io = EMPTY_IO
   const topologyById = new Map(graphTopology.map((row) => [row.id, row]))
   const phaseNodes: SkillGraphNode[] = phases.map((phaseName, index) => {
     const topology = topologyById.get(phaseName)
     const mode = phaseKindFromTopologyMode(topology?.mode)
-    const subgraphPath = normalizeAbsoluteSubgraphPath(topology?.path)
+    const subgraphPath = normalizeSubgraphPath(topology?.path)
     const filePath = `phases/${phaseName}/${phaseKindFile({ mode, subgraphPath })}`
     // n2-canvas #14: the topology-only (drill loading / fallback) view has no file
     // body, so the AGENT step-editor open/close toggle is wired but the body-bound
@@ -352,6 +357,8 @@ export function buildNodesFromTopology(
       position: { x: 160 + (index % 2) * 320, y: 80 + index * 150 },
       data: {
         skillId,
+        workspaceRoot,
+        phaseId: phaseName,
         label: phaseName,
         mode,
         role: null,
@@ -360,6 +367,7 @@ export function buildNodesFromTopology(
         filePath,
         status: statusByNodeId[phaseName] ?? 'idle',
         dependsOn: topology?.depends_on ?? [],
+        isOutput: topology?.output === true,
         subgraphPath,
         isExpanded: false,
         onToggleSubgraph: undefined,
@@ -375,14 +383,14 @@ export function buildNodesFromTopology(
       id: INPUT_ID,
       type: 'globalInput',
       position: { x: 0, y: 0 },
-      data: { type: 'global-input', schema: io } satisfies GlobalNodeData,
+      data: { type: 'global-input', schema: io, skillId, workspaceRoot } satisfies GlobalNodeData,
     },
     ...phaseNodes,
     {
       id: OUTPUT_ID,
       type: 'globalOutput',
       position: { x: 0, y: 0 },
-      data: { type: 'global-output', schema: io } satisfies GlobalNodeData,
+      data: { type: 'global-output', schema: io, skillId, workspaceRoot } satisfies GlobalNodeData,
     },
   ]
 }

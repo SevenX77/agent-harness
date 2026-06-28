@@ -1,18 +1,6 @@
 import type { CallbackEvent, EventEnvelope } from '@/api/types'
 import type { EdgeContextJson, EdgeOperation } from '@/components/studio/WorkspaceContext'
 
-// The graph canvas models the two ends of a run with synthetic global node ids.
-// Mirror them here (rather than importing from buildEdges) to keep this selector
-// free of a cycle with the nodes module that consumes it.
-const INPUT_ID = '__global_input__'
-const OUTPUT_ID = '__global_output__'
-
-// The engine emits one InputDispatchEvent per transition with the flat dict it
-// dispatched into the downstream phase. The engine reports the graph-entry
-// transition with `from_phase` null or "input", so normalise the canvas's
-// INPUT_ID boundary to the same logical source before matching.
-const GRAPH_ENTRY_ALIASES = new Set([INPUT_ID, 'input'])
-
 type TraceEventInput = CallbackEvent | EventEnvelope
 
 function callbackPayload(event: TraceEventInput): CallbackEvent {
@@ -67,16 +55,7 @@ function operationFromEvent(event: CallbackEvent): EdgeOperation | null {
 }
 
 function phaseMatches(eventPhase: unknown, edgePhase: string): boolean {
-  const normalisedEdge = typeof edgePhase === 'string' ? edgePhase : ''
-  if (eventPhase === normalisedEdge) {
-    return true
-  }
-  // Graph entry: the canvas uses INPUT_ID for the source while the engine emits
-  // `from_phase` = null/"input". Treat them as the same boundary.
-  if (GRAPH_ENTRY_ALIASES.has(normalisedEdge)) {
-    return eventPhase == null || eventPhase === 'input' || eventPhase === INPUT_ID
-  }
-  return false
+  return eventPhase === edgePhase
 }
 
 /**
@@ -131,12 +110,6 @@ export function edgeContextFromEvents(
   fromPhase: string,
   toPhase: string,
 ): EdgeContextJson | null {
-  // The OUTPUT_ID boundary is the graph exit; the engine does not dispatch into
-  // it, so a `to_phase` aimed at OUTPUT_ID never has a matching event.
-  if (toPhase === OUTPUT_ID) {
-    return null
-  }
-
   let match: CallbackEvent | null = null
   for (const traceEvent of events) {
     const event = callbackPayload(traceEvent)

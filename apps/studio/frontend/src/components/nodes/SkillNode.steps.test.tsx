@@ -3,12 +3,24 @@ import type { ReactNode } from "react"
 import { describe, expect, it, vi } from "vitest"
 import type { NodeProps } from "@xyflow/react"
 import { SkillNode } from "./SkillNode"
+import {
+  SKILL_FLOW_SOURCE_HANDLE_ID,
+  SKILL_FLOW_TARGET_HANDLE_ID,
+  SUBGRAPH_BRIDGE_SOURCE_HANDLE_ID,
+} from "./subgraph-bridge-handles"
 import type { SkillGraphNode, SkillGraphNodeData } from "./types"
 
 // xyflow's Handle needs a ReactFlow provider; stub the primitives so SkillNode
 // renders standalone (same approach as the other SkillNode tests).
 vi.mock("@xyflow/react", () => ({
-  Handle: () => <span data-testid="handle" />,
+  Handle: (props: { id?: string; type?: string; position?: string }) => (
+    <span
+      data-testid="handle"
+      data-handle-id={props.id}
+      data-handle-type={props.type}
+      data-handle-position={props.position}
+    />
+  ),
   Position: { Left: "left", Right: "right", Top: "top", Bottom: "bottom" },
 }))
 
@@ -73,5 +85,38 @@ describe("SkillNode inline L3 step editor (N2 atom #15, l3-step-edit)", () => {
   it("does not offer step editing for an agent node whose callbacks are not wired", () => {
     const html = renderNode(baseData({ agentBody: AGENT_BODY }))
     expect(html).not.toContain('aria-label="Edit steps"')
+  })
+
+  it("renders a dedicated bridge source handle only when the subgraph is expanded", () => {
+    const expandedHtml = renderNode(baseData({
+      mode: "subgraph",
+      isExpanded: true,
+      onToggleSubgraph: () => undefined,
+    }))
+    const collapsedHtml = renderNode(baseData({
+      mode: "subgraph",
+      isExpanded: false,
+      onToggleSubgraph: () => undefined,
+    }))
+
+    expect(expandedHtml).toContain('aria-label="Collapse subgraph"')
+    expect(expandedHtml).toContain(`data-handle-id="${SUBGRAPH_BRIDGE_SOURCE_HANDLE_ID}"`)
+    expect(expandedHtml).toContain('data-handle-type="source"')
+    expect(expandedHtml).toContain('data-handle-position="right"')
+    expect(collapsedHtml).toContain('aria-label="Expand subgraph"')
+    expect(collapsedHtml).not.toContain(`data-handle-id="${SUBGRAPH_BRIDGE_SOURCE_HANDLE_ID}"`)
+    expect(expandedHtml).not.toContain("subgraph-toggle-bridge-line")
+  })
+
+  it("keeps normal flow handles separate from the subgraph bridge handle", () => {
+    const html = renderNode(baseData({
+      mode: "subgraph",
+      isExpanded: true,
+      onToggleSubgraph: () => undefined,
+    }))
+
+    expect(html).toContain(`data-handle-id="${SKILL_FLOW_TARGET_HANDLE_ID}"`)
+    expect(html).toContain(`data-handle-id="${SKILL_FLOW_SOURCE_HANDLE_ID}"`)
+    expect(html).toContain(`data-handle-id="${SUBGRAPH_BRIDGE_SOURCE_HANDLE_ID}"`)
   })
 })

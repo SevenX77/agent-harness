@@ -329,6 +329,7 @@ pub fn run() {
             native_fs::publish_package_writer,
             native_fs::read_workspace_file,
             native_fs::delete_workspace_path,
+            native_fs::move_workspace_path,
             native_fs::list_workspace_dir,
             native_fs::checkpoint_workspace_file,
             native_fs::seed_workspace_checkpoint,
@@ -508,6 +509,15 @@ mod tests {
         assert!(
             source.contains("native_fs::publish_package_writer"),
             "publish package writer must be registered in the Tauri invoke handler"
+        );
+    }
+
+    #[test]
+    fn invoke_handler_registers_move_workspace_path_command() {
+        let source = include_str!("lib.rs");
+        assert!(
+            source.contains("native_fs::move_workspace_path"),
+            "move workspace path must be registered in the Tauri invoke handler"
         );
     }
 

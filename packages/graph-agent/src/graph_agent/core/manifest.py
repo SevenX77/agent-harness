@@ -17,6 +17,7 @@ class GraphPhaseRef(BaseModel):
     id: str = Field(min_length=1)
     src: str = Field(min_length=1)
     depends_on: list[str] = Field(...)
+    output: bool = False
 
 
 class ContextBridge(BaseModel):

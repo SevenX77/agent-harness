@@ -7,7 +7,7 @@ import hashlib
 import logging
 import re
 import uuid
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -38,7 +38,6 @@ from app.core.adapters.gateway import (
     known_model_ids_for_endpoint,
     lint_role_routes,
     normalize_route_capabilities,
-    probe_priority,
     promotable_route_update,
     select_verified_profile,
 )
@@ -58,9 +57,11 @@ from app.core.adapters.gateway import (
     test_provider_route as _gateway_test_provider_route_request,
 )
 from app.core.adapters.transport_factory import build_gateway_adapter
-from app.core.backends import get_backend_config
+from app.core.backends import get_backend_config, get_metadata
 from app.models.llm_config import (
     CapabilityValue,
+    CommunityCatalogEntry,
+    CommunityCatalogSummary,
     EvidenceRecord,
     FieldSource,
     LLMCredentialsFile,
@@ -79,6 +80,23 @@ from app.models.llm_config import (
     overlay_bundle_reference_chain,
 )
 from app.services import copilot
+from app.services.community_catalog import (
+    apply_community_evidence_to_credentials,
+)
+from app.services.community_catalog_sync import (
+    DisposableCatalogCacheStore,
+    VerifiedSyncError,
+    make_httpx_fetcher,
+    sync_verified_catalog,
+)
+from app.services.community_catalog_upload import (
+    CommunityUploadClient,
+    OfflineUploadQueue,
+    UploadDeferred,
+    batch_idempotency_key,
+    collect_uploadable_uploads,
+    community_upload_configured,
+)
 from app.services.copilot_test import (
     ModelProbeResult,
     PingResult,
@@ -108,6 +126,10 @@ from app.services.llm_model_groups import (
 )
 from app.services.llm_model_identity import project_model_identity
 from app.services.llm_notable_models import notable_model_ids
+from app.services.llm_paths import (
+    community_catalog_cache_path,
+    community_upload_queue_path,
+)
 from app.services.llm_probe_catalog import (
     append_evidence_record,
     load_evidence_library,
@@ -143,6 +165,45 @@ from app.services.official_capability_sources import (
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
 logger = logging.getLogger(__name__)
+
+
+async def _autoshare_after_probe_best_effort() -> None:
+    """Best-effort community auto-share to the gate after a successful probe.
+
+    Silently uploads newly probe-verified evidence to the community catalog gate
+    through a clean open API (no token, no credentials — the gate rate-limits
+    server-side). NEVER raises: a probe must not fail because background sharing
+    did. On by default; stays dormant only if an operator hard-disables the write
+    path OR the single community model-catalog toggle
+    (``remote_model_catalog_enabled``, which gates both read and contribute) is off.
+    """
+    try:
+        cfg = get_backend_config()
+        if not community_upload_configured(
+            gate_url=cfg.community_gate_url,
+            enabled=cfg.community_upload_enabled,
+        ):
+            return
+        # The single community model-catalog toggle gates both reading the
+        # catalog and contributing to it; honour the user's opt-out before upload.
+        settings = await get_metadata().read_app_settings()
+        if not settings.remote_model_catalog_enabled:
+            return
+        uploads = collect_uploadable_uploads(load_evidence_library(), load_credentials())
+        if not uploads:
+            return
+        client = CommunityUploadClient(
+            gate_url=cfg.community_gate_url,
+            protocol_major=cfg.community_protocol_major,
+        )
+        queue = OfflineUploadQueue(community_upload_queue_path())
+        await client.upload_batch(
+            uploads, idempotency_key=batch_idempotency_key(uploads), queue=queue
+        )
+    except Exception:  # noqa: BLE001 — best-effort: sharing must never fail a probe
+        logger.warning("post-probe community auto-share failed", exc_info=True)
+
+
 OFFICIAL_PROVIDER_TEST_CONCURRENCY = 4
 OFFICIAL_PROVIDER_TEST_BATCH_SIZE = 8
 NO_VERIFIED_ROUTE_PROFILE_MESSAGE = "No verified language route profile."
@@ -530,6 +591,128 @@ async def share_catalog() -> dict[str, Any]:
         ) from exc
 
 
+@router.post("/catalog/contribute")
+async def contribute_catalog() -> dict[str, Any]:
+    """Upload sanitized probe evidence to the community catalog gate.
+
+    Active by default through a clean open API (no token). Dormant only if an
+    operator hard-disables the write path or no gate URL is set (Phase 2a). When
+    dormant this is a no-op that never reaches the network; the local export path
+    stays unchanged.
+    """
+    cfg = get_backend_config()
+    if not community_upload_configured(
+        gate_url=cfg.community_gate_url,
+        enabled=cfg.community_upload_enabled,
+    ):
+        return {
+            "status": "disabled",
+            "sharing_mode": "local_export_only",
+            "auto_upload_enabled": False,
+            "message": (
+                "Community upload is disabled. It is on by default; it is off only when an "
+                "operator hard-disables the write path or no gate URL is set."
+            ),
+        }
+
+    try:
+        uploads = collect_uploadable_uploads(load_evidence_library(), load_credentials())
+        if not uploads:
+            return {
+                "status": "success",
+                "auto_upload_enabled": True,
+                "accepted": 0,
+                "message": "No probe-verified evidence is available to contribute.",
+            }
+        client = CommunityUploadClient(
+            gate_url=cfg.community_gate_url,
+            protocol_major=cfg.community_protocol_major,
+        )
+        queue = OfflineUploadQueue(community_upload_queue_path())
+        key = batch_idempotency_key(uploads)
+        try:
+            ack = await client.upload_batch(uploads, idempotency_key=key, queue=queue)
+        except UploadDeferred:
+            return {
+                "status": "deferred",
+                "auto_upload_enabled": True,
+                "queued": True,
+                "records_queued": len(uploads),
+                "message": "Gate unreachable; the batch was queued locally for retry.",
+            }
+        return {
+            "status": "success",
+            "auto_upload_enabled": True,
+            "accepted": ack.accepted,
+            "rejected": ack.rejected,
+            "receipt_token": ack.receipt_token,
+            "records_submitted": len(uploads),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to contribute catalog evidence: {exc}",
+        ) from exc
+
+
+@router.post("/catalog/sync-verified")
+async def sync_verified_community_catalog() -> dict[str, Any]:
+    """Pull the signed community catalog into a disposable, verified cache (R4).
+
+    Dormant unless a manifest URL and a signing public key are configured. The
+    sync is fail-closed: a bad signature, shard digest, or incompatible protocol
+    surfaces as an error and the disposable cache is left untouched.
+
+    This endpoint is read/cache only. Credentials remain the route truth, and
+    cached community evidence is applied later during endpoint Test, once the
+    matching routes exist locally.
+    """
+    cfg = get_backend_config()
+    manifest_url = cfg.community_catalog_manifest_url.strip()
+    public_key_hex = cfg.community_catalog_signing_pubkey.strip()
+    if not manifest_url or not public_key_hex:
+        return {
+            "status": "disabled",
+            "verified_sync_enabled": False,
+            "message": (
+                "Verified community sync is not configured. Set a manifest URL and a signing "
+                "public key to enable the verified read path."
+            ),
+        }
+
+    cache_store = DisposableCatalogCacheStore(community_catalog_cache_path())
+    prev_etag = cache_store.load().manifest_etag
+    signature_url = f"{manifest_url}.sig"
+    shard_base_url = manifest_url.rsplit("/", 1)[0] + "/"
+    try:
+        outcome = await sync_verified_catalog(
+            manifest_url=manifest_url,
+            signature_url=signature_url,
+            shard_base_url=shard_base_url,
+            public_key_hex=public_key_hex,
+            client_protocol_major=cfg.community_protocol_major,
+            cache_store=cache_store,
+            fetch=make_httpx_fetcher(),
+            prev_etag=prev_etag,
+        )
+    except VerifiedSyncError as exc:
+        raise HTTPException(status_code=502, detail=f"Verified catalog sync failed: {exc}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Verified catalog sync error: {exc}") from exc
+
+    return {
+        "status": "success",
+        "verified_sync_enabled": True,
+        "sync_status": outcome.status,
+        "record_count": outcome.record_count,
+        "manifest_etag": outcome.manifest_etag,
+        "protocol_major": outcome.protocol_major,
+        "promoted_route_count": 0,
+    }
+
+
 @router.post("/endpoints/{endpoint_id}/test", response_model=EndpointTestResponse)
 async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
     """Verify an endpoint by making the provider's minimal models-list call."""
@@ -607,10 +790,18 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
         else:
             # Third-party endpoints must prove the protocol matches AND that the
             # endpoint can actually generate before reaching verified (apikeys#25).
+            # The probe leads with this endpoint's already-verified models so the
+            # Test confirms the *endpoint* in as few attempts as possible.
+            verified_model_ids = frozenset(
+                route.provider_model_id
+                for route in latest_credentials.provider_routes.values()
+                if route.endpoint_id == endpoint_id and route.status == "verified"
+            )
             verification = await _verify_third_party_endpoint_by_probe(
                 latest_endpoint,
                 discovered_model_ids,
                 raw_capabilities_by_model,
+                verified_model_ids=verified_model_ids,
             )
             status = verification.status
             message = verification.message
@@ -634,6 +825,25 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
                         status="ok",
                     ),
                     route_id=verified_route_ids.get(verification.verified_model_id),
+                )
+            elif (
+                verification.status != "verified"
+                and verified_model_ids
+                and not verification.failure_is_structural
+            ):
+                # An endpoint Test only proves the *endpoint* connects. get-models
+                # just proved the key+URL are live and this endpoint already has a
+                # verified route, so a round where every catalog model probe fails
+                # for model-level reasons (flaky / phantom upstream models the
+                # provider lists but cannot serve) must NOT regress the endpoint to
+                # failed — keep it verified by reusing the previously verified
+                # model. Structural failures (invalid_key / quota) are NOT reused:
+                # those mean the endpoint itself is broken and must fail.
+                retained_model_id = sorted(verified_model_ids)[0]
+                status = "verified"
+                message = (
+                    "Endpoint reachable; reusing previously verified model "
+                    f"{retained_model_id}. No new model verified this run."
                 )
     elif endpoint.provider_kind != "official" and result.status not in _STRUCTURAL_PROBE_STATUSES:
         probe_results = await _probe_third_party_models_for_endpoint(endpoint, ())
@@ -661,6 +871,7 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
     )
     updated = latest_endpoint.model_copy(update=endpoint_update)
     latest_credentials.provider_endpoints[endpoint_id] = updated
+    _apply_cached_community_evidence(latest_credentials)
     save_credentials(latest_credentials)
     return EndpointTestResponse(
         registry=_registry_response(latest_credentials, _load_roles_or_empty()),
@@ -776,6 +987,7 @@ async def test_endpoint_models(
                 result,
                 route_id=route_ids_by_model.get(result.model_id),
             )
+        await _autoshare_after_probe_best_effort()
         return EndpointModelTestResponse(
             registry=_registry_response(latest_credentials, _load_roles_or_empty()),
             results=results,
@@ -875,6 +1087,7 @@ async def test_endpoint_models(
             probe_result,
             route_id=route_ids_by_model.get(probe_result.model_id),
         )
+    await _autoshare_after_probe_best_effort()
     return EndpointModelTestResponse(
         registry=_registry_response(latest_credentials, _load_roles_or_empty()),
         results=results,
@@ -1773,6 +1986,41 @@ def _registry_response(
     )
 
 
+def _community_catalog_summary() -> CommunityCatalogSummary:
+    """Project the disposable verified community cache for the Settings UI.
+
+    Advisory, read-only view of community-observed evidence (the verified read
+    path's `community_catalog_cache.json`). These records are never merged into
+    local evidence nor auto-applied to credentials; the public endpoint identity
+    lives in each record's metadata (see ``parse_catalog_evidence``).
+    """
+    cache = DisposableCatalogCacheStore(community_catalog_cache_path()).load()
+    entries = [
+        CommunityCatalogEntry(
+            public_base_url=record.metadata.get("normalized_public_base_url"),
+            model_id=record.model_id,
+            capability_family=record.capability_family,
+            method_id=record.method_id,
+            observed_at=record.observed_at,
+        )
+        for record in cache.records
+    ]
+    return CommunityCatalogSummary(
+        synced=cache.generated_at is not None or bool(cache.records),
+        generated_at=cache.generated_at,
+        protocol_major=cache.protocol_major,
+        record_count=len(cache.records),
+        entries=entries,
+    )
+
+
+def _apply_cached_community_evidence(credentials: LLMCredentialsFile) -> int:
+    cache = DisposableCatalogCacheStore(community_catalog_cache_path()).load()
+    if not cache.records:
+        return 0
+    return apply_community_evidence_to_credentials(credentials, cache.records)
+
+
 def _probe_catalog_summary(remote_catalog_source: dict[str, Any] | None) -> ProbeCatalogSummary:
     library = load_evidence_library()
     probe_records = [
@@ -1788,6 +2036,7 @@ def _probe_catalog_summary(remote_catalog_source: dict[str, Any] | None) -> Prob
         ),
         local_route_candidates_count=len(library.route_candidates),
         remote_catalog_source=remote_catalog_source,
+        community_catalog=_community_catalog_summary(),
     )
 
 
@@ -4315,6 +4564,9 @@ class ThirdPartyEndpointVerification:
     verified_model_id: str | None
     message: str
     probe_capabilities: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # True when the failure is protocol-agnostic (invalid_key / quota_exceeded):
+    # the endpoint itself is broken, so a prior verified route must NOT be reused.
+    failure_is_structural: bool = False
 
 
 def _third_party_protocol_candidates(endpoint: ProviderEndpoint) -> tuple[ProviderType, ...]:
@@ -4326,15 +4578,79 @@ def _third_party_protocol_candidates(endpoint: ProviderEndpoint) -> tuple[Provid
     return tuple(ordered)
 
 
+def _endpoint_probe_model_ids_by_trust(
+    library: ProviderImportDraft,
+    endpoint_id: str,
+    trust_state: str,
+) -> set[str]:
+    """Model ids with a probe evidence record of ``trust_state`` for one endpoint."""
+    result: set[str] = set()
+    for record in library.evidence_records:
+        if (
+            record.evidence_type != "probe"
+            or record.trust_state != trust_state
+            or record.endpoint_id != endpoint_id
+        ):
+            continue
+        model_id = record.model_id or record.provider_model_id
+        if model_id is not None:
+            result.add(model_id)
+    return result
+
+
+def _endpoint_probe_order(
+    library: ProviderImportDraft,
+    endpoint_id: str,
+    candidate_model_ids: Sequence[str],
+    *,
+    verified_model_ids: frozenset[str] = frozenset(),
+) -> list[str]:
+    """Order probe candidates so an endpoint Test confirms reachability fastest.
+
+    An endpoint Test only needs to prove the *endpoint* connects, so it leads
+    with the model most likely to succeed and stops on the first ``ok``:
+
+    1. models with a currently-verified route (green) — the surest bet,
+    2. models that connected before (probe-verified evidence / historical "blue"),
+    3. untried models,
+    4. known-failed models last.
+
+    This deliberately differs from gateway ``probe_priority`` (which *skips*
+    already-verified models to discover *new* capabilities); leading with a
+    known-good model is what an endpoint Test wants — fewest attempts to a green.
+    """
+    historical = _endpoint_probe_model_ids_by_trust(library, endpoint_id, "probe-verified")
+    failed = _endpoint_probe_model_ids_by_trust(library, endpoint_id, "probe-failed")
+    tier_current: list[str] = []
+    tier_historical: list[str] = []
+    tier_unknown: list[str] = []
+    tier_failed: list[str] = []
+    for model_id in candidate_model_ids:
+        if model_id in verified_model_ids:
+            tier_current.append(model_id)
+        elif model_id in historical:
+            tier_historical.append(model_id)
+        elif model_id in failed:
+            tier_failed.append(model_id)
+        else:
+            tier_unknown.append(model_id)
+    return [*tier_current, *tier_historical, *tier_unknown, *tier_failed]
+
+
 def _third_party_probe_model_ids(
     endpoint: ProviderEndpoint,
     discovered_model_ids: tuple[str, ...],
+    *,
+    verified_model_ids: frozenset[str] = frozenset(),
 ) -> list[str]:
     """Pick the model ids to drive the batch inference probe.
 
-    Discovered ids (from the get-models call) come first; when the endpoint
-    exposes no list API we fall back to the doc-maintained notable ids for its
-    probe backend so an unlistable-but-generating endpoint can still verify.
+    Discovered ids (from the get-models call) drive the candidate set; when the
+    endpoint exposes no list API we fall back to the doc-maintained notable ids
+    for its probe backend so an unlistable-but-generating endpoint can still
+    verify. The candidates are then ordered by :func:`_endpoint_probe_order` so
+    the probe leads with a known-good model and confirms the endpoint in as few
+    attempts as possible.
     """
     library = load_evidence_library()
     candidates = list(discovered_model_ids)
@@ -4342,29 +4658,30 @@ def _third_party_probe_model_ids(
         candidates = known_model_ids_for_endpoint(library, endpoint.endpoint_id)
     if not candidates:
         candidates = notable_model_ids(_endpoint_probe_backend(endpoint))
-    prioritized = probe_priority(
+    ordered = _endpoint_probe_order(
         library,
         endpoint.endpoint_id,
         _requested_model_ids(candidates),
+        verified_model_ids=verified_model_ids,
     )
-    if not prioritized and candidates:
-        prioritized = _requested_model_ids(candidates)
-    return prioritized[:_THIRD_PARTY_PROBE_MODEL_LIMIT]
+    return ordered[:_THIRD_PARTY_PROBE_MODEL_LIMIT]
 
 
 async def _detect_third_party_protocol(
     endpoint: ProviderEndpoint,
     probe_model_id: str,
-) -> tuple[ProviderType, RouteProbeResult] | None:
+) -> tuple[ProviderType | None, RouteProbeResult | None]:
     """Auto-detect the working protocol by probing one model per candidate.
 
     For each candidate protocol we clone the endpoint with that protocol and run
     a real generation probe for ``probe_model_id``. The FIRST candidate whose
     probe is not a transport/protocol-level structural mismatch wins: an ``ok``
     obviously wins, and an ``invalid_model`` also wins because it proves the
-    protocol/auth reached the provider (the model id is just wrong). Returns the
-    detected protocol plus that probe result, or ``None`` if every candidate
-    failed structurally (so the endpoint stays unverified).
+    protocol/auth reached the provider (the model id is just wrong). Returns
+    ``(protocol, probe)`` on success; on failure returns ``(None, probe)`` where
+    ``probe`` is the last (structural or exhausted) result so the caller can tell
+    a broken endpoint (invalid_key / quota) from a merely wrong model id, or
+    ``(None, None)`` when there were no candidates to probe.
     """
     last_result: RouteProbeResult | None = None
     for candidate in _third_party_protocol_candidates(endpoint):
@@ -4405,20 +4722,22 @@ async def _detect_third_party_protocol(
                 endpoint.endpoint_id,
                 route_probe.status,
             )
-            return None
+            return None, route_probe
     if last_result is not None:
         logger.warning(
             "third-party protocol auto-detect exhausted endpoint=%s last_status=%s",
             endpoint.endpoint_id,
             last_result.status,
         )
-    return None
+    return None, last_result
 
 
 async def _verify_third_party_endpoint_by_probe(
     endpoint: ProviderEndpoint,
     discovered_model_ids: tuple[str, ...],
     raw_capabilities_by_model: dict[str, dict[str, Any]],
+    *,
+    verified_model_ids: frozenset[str] = frozenset(),
 ) -> ThirdPartyEndpointVerification:
     """Run protocol auto-detect + batch inference probing for a third-party endpoint.
 
@@ -4429,7 +4748,11 @@ async def _verify_third_party_endpoint_by_probe(
     on the first ``ok`` and short-circuiting structural errors. The endpoint is
     promoted to ``verified`` ONLY when a real generation probe returns ``ok``.
     """
-    probe_model_ids = _third_party_probe_model_ids(endpoint, discovered_model_ids)
+    probe_model_ids = _third_party_probe_model_ids(
+        endpoint,
+        discovered_model_ids,
+        verified_model_ids=verified_model_ids,
+    )
     if not probe_model_ids:
         return ThirdPartyEndpointVerification(
             status="failed",
@@ -4438,16 +4761,29 @@ async def _verify_third_party_endpoint_by_probe(
             message="Endpoint reachable but no model ids were available to probe.",
         )
 
-    detection = await _detect_third_party_protocol(endpoint, probe_model_ids[0])
-    if detection is None:
+    detected_protocol, detection_probe = await _detect_third_party_protocol(
+        endpoint, probe_model_ids[0]
+    )
+    if detected_protocol is None:
+        structural = (
+            detection_probe is not None
+            and detection_probe.status in _STRUCTURAL_PROBE_STATUSES
+        )
+        message = (
+            _model_probe_failure_message(_model_probe_result_from_route_probe(detection_probe))
+            if structural and detection_probe is not None
+            else "Could not auto-detect a working protocol for this endpoint."
+        )
         return ThirdPartyEndpointVerification(
             status="failed",
             detected_protocol=endpoint.protocol,
             verified_model_id=None,
-            message="Could not auto-detect a working protocol for this endpoint.",
+            message=message,
+            failure_is_structural=structural,
         )
 
-    detected_protocol, first_probe = detection
+    assert detection_probe is not None  # detected_protocol set => probe present
+    first_probe = detection_probe
     detected_endpoint = endpoint.model_copy(update={"protocol": detected_protocol})
 
     last_failure: RouteProbeResult = first_probe
@@ -4495,6 +4831,7 @@ async def _verify_third_party_endpoint_by_probe(
         message=_model_probe_failure_message(
             _model_probe_result_from_route_probe(last_failure)
         ),
+        failure_is_structural=last_failure.status in _STRUCTURAL_PROBE_STATUSES,
     )
 
 

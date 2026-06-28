@@ -33,6 +33,7 @@ import { sha256Hex } from "@/lib/hash"
 import { isTauriRuntime } from "@/config/runtime"
 import { errorMessage } from "@/utils/errors"
 import { PanelHeader } from "./_shared/PanelHeader"
+import { PanelBody, PanelSection } from "./_shared/PanelSection"
 import { SectionHeading } from "./_shared/SectionHeading"
 import { GoldenSection } from "./GoldenSection"
 import { fieldSupplyByField, resolveIoEditTarget, type SelectedNode } from "./io-target"
@@ -818,10 +819,12 @@ export function InputPanel({
       <PanelHeader title="I/O" />
 
       <ScrollArea className="flex-1">
-        <div className="space-y-3 px-2 py-2 text-xs">
-          <div className="px-1 text-[11px] text-muted-foreground" aria-label="I/O edit scope">
-            {scopeLabel}
-          </div>
+        <PanelBody>
+          <PanelSection>
+            <div className="text-[11px] text-muted-foreground" aria-label="I/O edit scope">
+              {scopeLabel}
+            </div>
+          </PanelSection>
 
           <TestInputsSection
             skillId={skillId}
@@ -878,7 +881,7 @@ export function InputPanel({
               />
             </>
           ) : null}
-        </div>
+        </PanelBody>
       </ScrollArea>
     </div>
   )

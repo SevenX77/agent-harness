@@ -5,6 +5,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import type { CompileError } from '@/api/types'
+import {
+  SKILL_FLOW_SOURCE_HANDLE_ID,
+  SKILL_FLOW_TARGET_HANDLE_ID,
+  SUBGRAPH_BRIDGE_SOURCE_HANDLE_ID,
+} from './subgraph-bridge-handles'
 import type { SkillGraphNode, SkillGraphNodeData, SkillNodeStatus } from './types'
 
 type PhaseKind = 'LOGIC' | 'AGENT' | 'SUBGRAPH'
@@ -119,7 +124,12 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
           : 'border-border',
       ].join(' ')}
     >
-      <Handle type="target" position={Position.Top} className="!size-2.5 !border-background !bg-primary opacity-60 group-hover:opacity-100 transition-opacity duration-200" />
+      <Handle
+        id={SKILL_FLOW_TARGET_HANDLE_ID}
+        type="target"
+        position={Position.Top}
+        className="skill-flow-target-handle !size-2.5 !border-background !bg-primary opacity-60 group-hover:opacity-100 transition-opacity duration-200"
+      />
       <div className="flex items-start gap-3">
         <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
           <KindIcon className="size-4" />
@@ -257,23 +267,39 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
         // recovery state — never on read-only preview children (their callback is
         // stripped). `top-1/2 -translate-y-1/2 translate-x-1/2` centers it on, and
         // half-overhangs, the node's right border.
-        <button
-          type="button"
-          aria-label={data.isExpanded ? 'Collapse subgraph' : 'Expand subgraph'}
-          onClick={(event) => {
-            event.stopPropagation()
-            data.onToggleSubgraph?.()
-          }}
-          className="absolute right-0 top-1/2 inline-flex size-5 -translate-y-1/2 translate-x-1/2 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-sm transition-colors hover:border-primary"
-        >
-          {data.isExpanded ? <Minus className="size-3" /> : <Plus className="size-3" />}
-        </button>
+        <div className="absolute right-0 top-1/2 z-10 -translate-y-1/2 translate-x-1/2">
+          {data.isExpanded ? (
+            <Handle
+              id={SUBGRAPH_BRIDGE_SOURCE_HANDLE_ID}
+              type="source"
+              position={Position.Right}
+              isConnectable={false}
+              className="subgraph-bridge-source-handle"
+            />
+          ) : null}
+          <button
+            type="button"
+            aria-label={data.isExpanded ? 'Collapse subgraph' : 'Expand subgraph'}
+            onClick={(event) => {
+              event.stopPropagation()
+              data.onToggleSubgraph?.()
+            }}
+            className="nodrag nopan relative z-10 inline-flex size-5 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-sm transition-colors hover:border-primary"
+          >
+            {data.isExpanded ? <Minus className="size-3" /> : <Plus className="size-3" />}
+          </button>
+        </div>
       ) : null}
       {/* N2 atom #13: expanding a subgraph node now renders a canvas-level dashed
           container with the child's REAL nodes/edges (see GraphCanvas
           subgraphExpansion), not an in-node row list. The toggle above only flips
           the expand state; the container is drawn beside this node on the canvas. */}
-      <Handle type="source" position={Position.Bottom} className="!size-2.5 !border-background !bg-primary opacity-60 group-hover:opacity-100 transition-opacity duration-200" />
+      <Handle
+        id={SKILL_FLOW_SOURCE_HANDLE_ID}
+        type="source"
+        position={Position.Bottom}
+        className="skill-flow-source-handle !size-2.5 !border-background !bg-primary opacity-60 group-hover:opacity-100 transition-opacity duration-200"
+      />
     </div>
   )
 
@@ -283,7 +309,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
         <PopoverAnchor asChild>
           {nodeContent}
         </PopoverAnchor>
-        <PopoverContent side="top" align="center" className="w-[280px] p-3 bg-zinc-950 border border-zinc-800 rounded-md text-foreground shadow-xl z-50">
+        <PopoverContent portalled={false} side="top" align="center" avoidCollisions={false} className="w-[280px] p-3 bg-popover border border-border rounded-md text-foreground shadow-xl z-50">
           <div className="flex items-start gap-2.5">
             <AlertTriangle className="size-4 shrink-0 text-amber-500 mt-0.5" />
             <div className="flex-1 min-w-0">
@@ -296,18 +322,26 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
                   size="sm"
                   variant="ghost"
                   className="h-7 text-[11px] px-2 text-muted-foreground hover:text-foreground"
-                  onClick={() => data.onCancelWarning?.(data.activeConflict!.nodeId)}
+                  onClick={() => data.onCancelSequentialOverwrite?.(
+                    data.activeConflict!.nodeId,
+                    data.activeConflict!.fieldName,
+                    data.activeConflict!.ancestorNodeId,
+                  )}
                 >
                   Cancel
                 </Button>
-                <Button
-                  size="sm"
-                  variant="default"
-                  className="h-7 text-[11px] px-2.5 bg-amber-500 hover:bg-amber-600 text-zinc-950 font-medium rounded-md"
-                  onClick={() => data.onAllowSequentialOverwrite?.(data.activeConflict!.nodeId, data.activeConflict!.fieldName)}
-                >
-                  Allow Overwrite
-                </Button>
+                  <Button
+                    size="sm"
+                    variant="default"
+                    className="h-7 text-[11px] px-2.5 bg-amber-500 hover:bg-amber-600 text-zinc-950 font-medium rounded-md"
+                    onClick={() => data.onAllowSequentialOverwrite?.(
+                      data.activeConflict!.nodeId,
+                      data.activeConflict!.fieldName,
+                      data.activeConflict!.ancestorNodeId,
+                    )}
+                  >
+                    Allow Overwrite
+                  </Button>
               </div>
             </div>
           </div>

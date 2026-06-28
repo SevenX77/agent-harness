@@ -1,5 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react"
+import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Tag } from "@/components/ui/tag"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import type { SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData } from "@/components/GraphCanvas"
@@ -11,10 +24,9 @@ import type { FileMeta } from "../file-types"
 import { FileRow } from "./_shared/FileRow"
 import { FolderRow } from "./_shared/FolderRow"
 import { PanelHeader } from "./_shared/PanelHeader"
-import { SectionHeading } from "./_shared/SectionHeading"
 import { applyPhaseFrontmatterForm, parsePhaseFrontmatter, phaseFrontmatterToForm } from "./phase-frontmatter"
 import { fileFromDetail, languageForPath } from "./panel-files"
-import { subgraphMembership, type SubgraphMembership } from "./subgraph-membership"
+import { loadRecursiveSubgraphMembership, subgraphMembership, type SubgraphMembership } from "./subgraph-membership"
 import { toast } from "sonner"
 
 interface AssetsPanelProps {
@@ -39,6 +51,10 @@ interface DirectoryTreeState {
   tree: AssetTreeNode | null
   message?: string
 }
+
+const DEFAULT_SUBGRAPHS_PANEL_PERCENT = 36
+const MIN_SUBGRAPHS_PANEL_PERCENT = 16
+const MAX_SUBGRAPHS_PANEL_PERCENT = 50
 
 function createAssetTreeNode(name: string, path: string, kind: "file" | "dir" = "dir"): AssetTreeNode {
   return {
@@ -276,12 +292,66 @@ function TreeStatusLine({ state }: { state: DirectoryTreeState }) {
   return null
 }
 
-function SubgraphFolder({
+function AssetExplorerSection({
+  sectionId,
+  label,
+  children,
+  action,
+  collapsed = false,
+}: {
+  sectionId: string
+  label: string
+  children: ReactNode
+  action?: ReactNode
+  collapsed?: boolean
+}) {
+  return (
+    <section data-assets-section={sectionId} className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="flex h-7 shrink-0 items-center bg-muted/20 px-2">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{label}</span>
+        {action ? <div className="ml-auto flex items-center gap-1">{action}</div> : null}
+      </div>
+      {collapsed ? null : <div className="min-h-0 flex-1">{children}</div>}
+    </section>
+  )
+}
+
+function SubgraphFilesList({
+  subgraphs,
+  onOpen,
+  onChoosePath,
+}: {
+  subgraphs: SubgraphMembership[]
+  onOpen: (file: FileMeta) => void
+  onChoosePath: (subgraph: SubgraphMembership) => void
+}) {
+  if (subgraphs.length === 0) {
+    return <div className="px-2 py-1.5 text-[11px] text-muted-foreground">No subgraphs</div>
+  }
+
+  return (
+    <div className="w-full min-w-0 space-y-1 overflow-hidden py-1">
+      {subgraphs.map((subgraph) => (
+        <SubgraphFilesBlock
+          key={`${subgraph.level}:${subgraph.id}:${subgraph.filePath}`}
+          subgraph={subgraph}
+          showLevelTag={subgraphs.some((candidate) => candidate.level > 1)}
+          onOpen={onOpen}
+          onChoosePath={onChoosePath}
+        />
+      ))}
+    </div>
+  )
+}
+
+function SubgraphFilesBlock({
   subgraph,
+  showLevelTag,
   onOpen,
   onChoosePath,
 }: {
   subgraph: SubgraphMembership
+  showLevelTag: boolean
   onOpen: (file: FileMeta) => void
   onChoosePath: (subgraph: SubgraphMembership) => void
 }) {
@@ -291,21 +361,72 @@ function SubgraphFolder({
     titlePrefix: subgraph.label,
     saveEnabled: false,
   })
+  const [expanded, setExpanded] = useState(false)
+  const endAdornment = (
+    <div
+      data-subgraph-status-slot="true"
+      className="flex shrink-0 items-center justify-end gap-1"
+    >
+      <SubgraphLinkBadge subgraph={subgraph} onChoosePath={() => onChoosePath(subgraph)} />
+    </div>
+  )
 
   return (
-    <FolderRow
-      name={subgraph.label}
-      endAdornment={<SubgraphLinkBadge subgraph={subgraph} onChoosePath={() => onChoosePath(subgraph)} />}
-      defaultExpanded={true}
+    <div
+      data-subgraph-row="true"
+      data-subgraph-level={subgraph.level}
+      data-subgraph-folder="true"
+      data-subgraph-default-expanded="false"
+      className="w-full min-w-0"
     >
-      <div className="space-y-1 pb-1">
-        <TreeStatusLine state={treeState} />
-        {treeState.tree ? (
-          <AssetTreeRows node={treeState.tree} onOpen={onOpen} emptyLabel="Empty subgraph folder" />
-        ) : null}
+      <div
+        data-subgraph-row-grid="true"
+        className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_max-content] items-center gap-2 rounded-md px-2 py-1 text-xs transition-colors hover:bg-accent"
+      >
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          title={subgraph.label}
+          className={`grid min-w-0 cursor-pointer items-center gap-2 border-0 bg-transparent p-0 text-left text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring ${
+            showLevelTag ? "grid-cols-[auto_auto_minmax(0,1fr)]" : "grid-cols-[auto_minmax(0,1fr)]"
+          }`}
+        >
+          {expanded ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />}
+          {showLevelTag ? (
+            <Tag
+              size="xs"
+              variant="muted"
+              className="shrink-0"
+              data-subgraph-level-tag="true"
+              aria-label={`Recursive level ${subgraph.level}`}
+            >
+              L{subgraph.level}
+            </Tag>
+          ) : null}
+          <span data-subgraph-name="true" className="truncate font-medium text-foreground">{subgraph.label}</span>
+        </button>
+        <div className="min-w-max justify-self-end">{endAdornment}</div>
       </div>
-    </FolderRow>
+      {expanded ? (
+        <div
+          data-subgraph-folder-contents="true"
+          className="space-y-0.5 pb-1 pl-4"
+        >
+          <TreeStatusLine state={treeState} />
+          {!subgraph.path && treeState.status === "idle" ? (
+            <div className="px-2 py-1 text-[11px] text-muted-foreground">{subgraphLinkTooltip(subgraph)}</div>
+          ) : null}
+          {treeState.tree ? (
+            <AssetTreeRows node={treeState.tree} onOpen={onOpen} emptyLabel="Empty subgraph folder" />
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   )
+}
+
+function clampSubgraphsPanelPercent(value: number): number {
+  return Math.min(MAX_SUBGRAPHS_PANEL_PERCENT, Math.max(MIN_SUBGRAPHS_PANEL_PERCENT, value))
 }
 
 function subgraphStatusLabel(subgraph: SubgraphMembership): string {
@@ -333,27 +454,26 @@ function SubgraphLinkBadge({
 }) {
   const linked = Boolean(subgraph.path)
   const label = subgraphLinkTooltip(subgraph)
-  const className = linked
-    ? "inline-flex h-5 items-center rounded border border-success-border bg-success-background px-1.5 text-[10px] font-medium leading-none text-success-foreground"
-    : "inline-flex h-5 items-center rounded border border-destructive-border bg-destructive-background px-1.5 text-[10px] font-medium leading-none text-destructive"
+  const visibleLabel = subgraphStatusLabel(subgraph)
+  const variant = linked ? "success" : subgraph.status === "migration-required" ? "warning" : "destructive"
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         {linked ? (
-          <span title={label} aria-label={label} className={className}>
-            link
-          </span>
+          <Badge variant={variant} aria-label={label}>
+            {visibleLabel}
+          </Badge>
         ) : (
-          <button
-            type="button"
-            title={label}
-            aria-label={`${subgraphStatusLabel(subgraph)} - choose subgraph folder`}
-            onClick={onChoosePath}
-            className={className}
-          >
-            link
-          </button>
+          <Badge asChild variant={variant}>
+            <button
+              type="button"
+              aria-label={label}
+              onClick={onChoosePath}
+            >
+              {visibleLabel}
+            </button>
+          </Badge>
         )}
       </TooltipTrigger>
       <TooltipContent side="right" className="max-w-80 break-all">
@@ -366,6 +486,9 @@ function SubgraphLinkBadge({
 export function AssetsPanel({ skillId = null, workspaceRoot = null, skillDetail }: AssetsPanelProps) {
   const { onFileOpen } = useWorkspaceContext()
   const [subgraphPathOverrides, setSubgraphPathOverrides] = useState<Record<string, string>>({})
+  const [subgraphsCollapsed, setSubgraphsCollapsed] = useState(false)
+  const [subgraphsPanelPercent, setSubgraphsPanelPercent] = useState(DEFAULT_SUBGRAPHS_PANEL_PERCENT)
+  const splitContainerRef = useRef<HTMLDivElement | null>(null)
   const rootTarget = workspaceRoot ?? skillId
   const fallbackFileTree = useMemo(
     () => buildAssetTree(skillDetail, { skillId, workspaceRoot: rootTarget }),
@@ -399,8 +522,11 @@ export function AssetsPanel({ skillId = null, workspaceRoot = null, skillDetail 
 
   // Real path-based membership: the subgraphs this skill actually references,
   // derived from the backend topology (R4). No fake in-memory "registered" cache.
-  const subgraphs = useMemo(() => subgraphMembership(skillDetail), [skillDetail])
-  const displayedSubgraphs = useMemo(
+  const subgraphs = useMemo(() => {
+    const ownerRoot = rootTarget ?? null
+    return subgraphMembership(skillDetail, ownerRoot).map((subgraph) => ({ ...subgraph, workspaceRoot: ownerRoot }))
+  }, [rootTarget, skillDetail])
+  const topLevelSubgraphs = useMemo(
     () => subgraphs.map((subgraph) => {
       const override = subgraphPathOverrides[subgraph.id]
       return override
@@ -409,17 +535,62 @@ export function AssetsPanel({ skillId = null, workspaceRoot = null, skillDetail 
     }),
     [subgraphPathOverrides, subgraphs],
   )
+  const topLevelSubgraphKey = useMemo(
+    () => topLevelSubgraphs.map((subgraph) => [
+      subgraph.id,
+      subgraph.level,
+      subgraph.filePath,
+      subgraph.workspaceRoot ?? "",
+      subgraph.path ?? "",
+      subgraph.status,
+    ].join("\u0001")).join("\u0002"),
+    [topLevelSubgraphs],
+  )
+  const [recursiveSubgraphs, setRecursiveSubgraphs] = useState<{
+    key: string
+    items: SubgraphMembership[]
+  } | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    setRecursiveSubgraphs({ key: topLevelSubgraphKey, items: topLevelSubgraphs })
+
+    if (!isTauriRuntime() || topLevelSubgraphs.length === 0) {
+      return () => {
+        cancelled = true
+      }
+    }
+
+    void loadRecursiveSubgraphMembership(topLevelSubgraphs, readWorkspaceFile)
+      .then((memberships) => {
+        if (!cancelled) {
+          setRecursiveSubgraphs({ key: topLevelSubgraphKey, items: memberships })
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRecursiveSubgraphs({ key: topLevelSubgraphKey, items: topLevelSubgraphs })
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [topLevelSubgraphKey, topLevelSubgraphs])
+  const displayedSubgraphs = recursiveSubgraphs?.key === topLevelSubgraphKey
+    ? recursiveSubgraphs.items
+    : topLevelSubgraphs
   const chooseSubgraphPath = useCallback(async (subgraph: SubgraphMembership) => {
-    if (!rootTarget) {
+    const writeRoot = subgraph.workspaceRoot ?? rootTarget ?? workspaceRoot
+    if (!writeRoot) {
       toast.error("Open a skill before linking a subgraph.")
       return
     }
 
-    const selected = await selectSkillDirectory(subgraph.path ?? workspaceRoot ?? rootTarget)
+    const selected = await selectSkillDirectory(subgraph.path ?? writeRoot)
     if (!selected) return
 
     try {
-      const current = await readWorkspaceFile(rootTarget, subgraph.filePath)
+      const current = await readWorkspaceFile(writeRoot, subgraph.filePath)
       const parsed = parsePhaseFrontmatter(current.content)
       if (!parsed.ok) {
         throw new Error(parsed.message)
@@ -429,43 +600,135 @@ export function AssetsPanel({ skillId = null, workspaceRoot = null, skillDetail 
       if (!next.ok) {
         throw new Error(next.message)
       }
-      await writeWorkspaceFile(rootTarget, subgraph.filePath, next.markdown, current.hash)
+      await writeWorkspaceFile(writeRoot, subgraph.filePath, next.markdown, current.hash)
       setSubgraphPathOverrides((currentOverrides) => ({ ...currentOverrides, [subgraph.id]: selected }))
       toast.success(`Linked ${subgraph.label}`, { description: selected })
     } catch (error) {
       toast.error("Could not link subgraph", { description: errorMessage(error) })
     }
   }, [rootTarget, workspaceRoot])
+  const resizeSubgraphsPanel = useCallback((clientY: number) => {
+    const rect = splitContainerRef.current?.getBoundingClientRect()
+    if (!rect || rect.height <= 0) return
+
+    const nextPercent = ((rect.bottom - clientY) / rect.height) * 100
+    setSubgraphsPanelPercent(clampSubgraphsPanelPercent(nextPercent))
+    setSubgraphsCollapsed(false)
+  }, [])
+  const startSubgraphsResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (subgraphsCollapsed) return
+
+    event.preventDefault()
+    const target = event.currentTarget
+    const pointerId = event.pointerId
+    target.setPointerCapture(pointerId)
+
+    const handleMove = (moveEvent: PointerEvent) => resizeSubgraphsPanel(moveEvent.clientY)
+    const stopResize = () => {
+      target.removeEventListener("pointermove", handleMove)
+      if (target.hasPointerCapture(pointerId)) {
+        target.releasePointerCapture(pointerId)
+      }
+    }
+
+    target.addEventListener("pointermove", handleMove)
+    target.addEventListener("pointerup", stopResize, { once: true })
+    target.addEventListener("pointercancel", stopResize, { once: true })
+  }, [resizeSubgraphsPanel, subgraphsCollapsed])
+  const handleSplitterKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (subgraphsCollapsed) return
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault()
+      setSubgraphsPanelPercent((value) => clampSubgraphsPanelPercent(value + 4))
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault()
+      setSubgraphsPanelPercent((value) => clampSubgraphsPanelPercent(value - 4))
+    } else if (event.key === "Home") {
+      event.preventDefault()
+      setSubgraphsPanelPercent(MIN_SUBGRAPHS_PANEL_PERCENT)
+    } else if (event.key === "End") {
+      event.preventDefault()
+      setSubgraphsPanelPercent(MAX_SUBGRAPHS_PANEL_PERCENT)
+    }
+  }, [subgraphsCollapsed])
+  const toggleSubgraphsPanel = useCallback(() => {
+    setSubgraphsCollapsed((value) => !value)
+  }, [])
+  const subgraphsToggleLabel = subgraphsCollapsed ? "Expand Subgraphs Files" : "Collapse Subgraphs Files"
 
   return (
     <TooltipProvider>
-      <div className="flex h-full flex-col bg-background">
+      <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-background">
         <PanelHeader title="Assets" />
 
-        <ScrollArea className="flex-1">
-          <div className="space-y-4 px-1.5 py-2 text-xs">
-            <div>
-              <SectionHeading label="Skill Files" />
-              <div className="space-y-0.5 mt-1">
-                <TreeStatusLine state={nativeFileTree} />
-                <AssetTreeRows node={fileTree} onOpen={openFile} emptyLabel="No files" />
-              </div>
-            </div>
-
-            <div className="border-t border-border/40 pt-3">
-              <div className="mt-1 space-y-0.5">
-                <FolderRow name="Subgraphs" defaultExpanded={true}>
-                  {displayedSubgraphs.length === 0 ? (
-                    <div className="px-2 py-1.5 text-[11px] text-muted-foreground">No subgraphs</div>
-                  ) : null}
-                  {displayedSubgraphs.map((sub) => (
-                    <SubgraphFolder key={sub.id} subgraph={sub} onOpen={openFile} onChoosePath={chooseSubgraphPath} />
-                  ))}
-                </FolderRow>
-              </div>
-            </div>
+        <div
+          ref={splitContainerRef}
+          data-assets-split-container="true"
+          className="grid h-full min-h-0 overflow-hidden px-0 pb-2"
+          style={{
+            gridTemplateRows: subgraphsCollapsed
+              ? "minmax(0, 1fr) 1.75rem"
+              : `minmax(0, ${100 - subgraphsPanelPercent}fr) 0.5rem minmax(0, ${subgraphsPanelPercent}fr)`,
+          }}
+        >
+          <div className="min-h-0 overflow-hidden">
+            <AssetExplorerSection sectionId="skill-files" label="Skill Files">
+              <ScrollArea className="h-full min-h-0">
+                <div className="space-y-0.5 px-0.5 py-1 text-xs">
+                  <TreeStatusLine state={nativeFileTree} />
+                  <AssetTreeRows node={fileTree} onOpen={openFile} emptyLabel="No files" />
+                </div>
+              </ScrollArea>
+            </AssetExplorerSection>
           </div>
-        </ScrollArea>
+
+          {subgraphsCollapsed ? null : (
+            <div
+              role="separator"
+              aria-label="Resize Subgraphs Files"
+              aria-orientation="horizontal"
+              tabIndex={0}
+              onPointerDown={startSubgraphsResize}
+              onKeyDown={handleSplitterKeyDown}
+              className="group flex h-2 shrink-0 cursor-row-resize items-center outline-none"
+            >
+              <div className="h-px w-full bg-transparent transition-colors group-hover:bg-border/50 group-focus-visible:bg-ring" />
+            </div>
+          )}
+
+          <div className="min-h-0 overflow-hidden">
+            <AssetExplorerSection
+              sectionId="subgraphs-files"
+              label="Subgraphs Files"
+              collapsed={subgraphsCollapsed}
+              action={(
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={subgraphsToggleLabel}
+                      onClick={toggleSubgraphsPanel}
+                    >
+                      {subgraphsCollapsed ? <ChevronUp /> : <ChevronDown />}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">{subgraphsToggleLabel}</TooltipContent>
+                </Tooltip>
+              )}
+            >
+              <ScrollArea className="h-full min-h-0">
+                <SubgraphFilesList
+                  subgraphs={displayedSubgraphs}
+                  onOpen={openFile}
+                  onChoosePath={chooseSubgraphPath}
+                />
+              </ScrollArea>
+            </AssetExplorerSection>
+          </div>
+        </div>
       </div>
     </TooltipProvider>
   )

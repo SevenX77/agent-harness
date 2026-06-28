@@ -126,6 +126,7 @@ describe("lintErrorToCompileError (N3 atom #4 — feed lint into the node toolti
       field: "validator",
       severity: "fatal",
       message: "validator must be a boolean",
+      error_code: "F-v3-001",
     })
   })
 

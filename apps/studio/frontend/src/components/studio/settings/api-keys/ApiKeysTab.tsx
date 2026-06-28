@@ -171,24 +171,56 @@ function ProbeCatalogStatus({
   probeCatalog: SettingsPageContentProps["credentials"]["probe_catalog"]
 }) {
   if (!probeCatalog) return null
-  const remoteSynced = Boolean(probeCatalog.remote_catalog_source?.fetched_at)
+  const community = probeCatalog.community_catalog
+  const remoteSynced = Boolean(community?.synced)
+  const communityEntries = community?.entries ?? []
   return (
     <div
-      className="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-border/60 bg-muted/10 px-3 py-2 text-xs text-muted-foreground"
+      className="mb-4 space-y-2 rounded-md border border-border/60 bg-muted/10 px-3 py-2 text-xs text-muted-foreground"
       data-testid="probe-catalog-status"
     >
-      <span className="font-medium text-foreground">Local probe evidence</span>
-      <Badge variant="success">{probeCatalog.local_verified_records_count} verified</Badge>
-      <Badge variant={probeCatalog.local_failed_records_count > 0 ? "warning" : "secondary"}>
-        {probeCatalog.local_failed_records_count} failed
-      </Badge>
-      <Badge variant="outline">
-        {remoteSynced ? "Remote catalog synced" : "Remote catalog not synced"}
-      </Badge>
-      <Badge variant="secondary">Local only</Badge>
-      <span className="min-w-0">
-        {probeCatalog.sharing.message}
-      </span>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium text-foreground">Local probe evidence</span>
+        <Badge variant="success">{probeCatalog.local_verified_records_count} verified</Badge>
+        <Badge variant={probeCatalog.local_failed_records_count > 0 ? "warning" : "secondary"}>
+          {probeCatalog.local_failed_records_count} failed
+        </Badge>
+        <Badge variant="outline">
+          {remoteSynced ? "Remote catalog synced" : "Remote catalog not synced"}
+        </Badge>
+        {community && community.record_count > 0 ? (
+          <Badge variant="secondary">{community.record_count} community-verified</Badge>
+        ) : null}
+        <Badge variant="secondary">Local only</Badge>
+        <span className="min-w-0">{probeCatalog.sharing.message}</span>
+      </div>
+      {communityEntries.length > 0 ? (
+        <div className="rounded-md border border-dashed border-border/60 bg-background/40 px-2.5 py-2">
+          <p className="font-medium text-foreground/80">
+            Community-verified routes
+            <span className="ml-1 font-normal text-muted-foreground">
+              (advisory · community-observed, not applied to your keys)
+            </span>
+          </p>
+          <ul className="mt-1.5 space-y-1" data-testid="community-catalog-entries">
+            {communityEntries.map((entry, index) => (
+              <li
+                key={`${entry.public_base_url ?? "?"}:${entry.model_id ?? "?"}:${index}`}
+                className="flex flex-wrap items-center gap-x-2 gap-y-0.5"
+              >
+                <span className="font-mono text-foreground/70">
+                  {entry.public_base_url ?? "(unknown endpoint)"}
+                </span>
+                <span className="text-muted-foreground">·</span>
+                <span className="text-foreground/70">{entry.model_id ?? "(unknown model)"}</span>
+                {entry.capability_family ? (
+                  <Badge variant="outline">{entry.capability_family}</Badge>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </div>
   )
 }

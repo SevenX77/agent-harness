@@ -380,6 +380,38 @@ class ProbeCatalogSharingSummary(BaseModel):
     )
 
 
+class CommunityCatalogEntry(BaseModel):
+    """One advisory community-verified route surfaced to the Settings UI.
+
+    Sourced from the disposable verified cache; community-observed, never merged
+    into local evidence.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    public_base_url: str | None = None
+    model_id: str | None = None
+    capability_family: str | None = None
+    method_id: str | None = None
+    observed_at: str | None = None
+
+
+class CommunityCatalogSummary(BaseModel):
+    """Verified community catalog (disposable cache) status for Settings UI.
+
+    Advisory only — these records are community-observed and never auto-applied
+    to local credentials.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    synced: bool = False
+    generated_at: str | None = None
+    protocol_major: int = 0
+    record_count: int = 0
+    entries: list[CommunityCatalogEntry] = []
+
+
 class ProbeCatalogSummary(BaseModel):
     """Local + remote Probe Knowledge Catalog status for Settings UI."""
 
@@ -390,6 +422,7 @@ class ProbeCatalogSummary(BaseModel):
     local_failed_records_count: int = 0
     local_route_candidates_count: int = 0
     remote_catalog_source: dict[str, Any] | None = None
+    community_catalog: CommunityCatalogSummary = Field(default_factory=CommunityCatalogSummary)
     sharing: ProbeCatalogSharingSummary = Field(default_factory=ProbeCatalogSharingSummary)
 
 

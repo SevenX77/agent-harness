@@ -62,7 +62,7 @@ jobs:
             --tb=short -q
 
       - name: Upload backend coverage to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage-backend.xml
@@ -109,7 +109,7 @@ jobs:
             --cov-report=term
 
       - name: Upload graph-agent coverage to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage-graph-agent.xml

@@ -18,6 +18,7 @@ export function SettingsPageContent({
   credentialsLoading,
   credentialsError,
   drafts,
+  pendingAddProviderId,
   saveStatus,
   rolesData,
   modelGroups,
@@ -29,7 +30,10 @@ export function SettingsPageContent({
   onProviderFieldChange,
   onGetProviderModels,
   onDeleteProvider,
+  onDeleteProviderEndpoints,
+  onBeginAddProvider,
   onAddProvider,
+  onCancelAddProvider,
   onProviderModelsUpdated,
   onRolesDataChange,
   onDeleteRole,
@@ -136,11 +140,15 @@ export function SettingsPageContent({
                     credentialsLoading={credentialsLoading}
                     credentialsError={credentialsError}
                     drafts={drafts}
+                    pendingAddProviderId={pendingAddProviderId}
                     saveStatus={saveStatus}
                     onProviderFieldChange={onProviderFieldChange}
                     onGetProviderModels={onGetProviderModels}
                     onDeleteProvider={onDeleteProvider}
+                    onDeleteProviderEndpoints={onDeleteProviderEndpoints}
+                    onBeginAddProvider={onBeginAddProvider}
                     onAddProvider={onAddProvider}
+                    onCancelAddProvider={onCancelAddProvider}
                     onProviderModelsUpdated={onProviderModelsUpdated}
                   />
                 </SettingsErrorBoundary>

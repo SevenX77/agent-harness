@@ -89,9 +89,9 @@ describe("ProviderCard API key masking", () => {
     const maskedValue = apiKeyDisplayValue("sk-secret-123", false)
 
     // §1 contract: the secret field is ALWAYS type=text, so the browser /
-    // extension password manager is never triggered. Hidden provider cards render
-    // an explicit same-length mask value instead of relying on CSS text-security;
-    // WebKit can otherwise make long secrets look like only a few bullets.
+    // extension password manager is never triggered. Hidden idle provider cards
+    // render an explicit same-length mask value instead of relying on CSS
+    // text-security; focusing the field enters readable edit mode.
     expect(html).toContain('type="text"')
     expect(html).not.toContain('type="password"')
     expect(maskedValue).toHaveLength("sk-secret-123".length)
@@ -100,7 +100,7 @@ describe("ProviderCard API key masking", () => {
     expect(html).not.toContain('value="sk-secret-123"')
     expect(html).not.toContain("mask-input")
     expect(html).toContain('name="provider-secret-p1"')
-    expect(html).toContain('readOnly=""')
+    expect(html).not.toContain('readOnly')
     expect(html).toContain('data-1p-ignore=""')
     expect(html).toContain('data-lpignore="true"')
     expect(html).toContain('data-form-type="other"')
@@ -116,9 +116,10 @@ describe("ProviderCard API key masking", () => {
     expect(html).toContain(">Test</button>")
   })
 
-  it("returns the real API key only when the field is visible", () => {
+  it("returns the real API key when the field is visible or being edited", () => {
     expect(apiKeyDisplayValue("sk-secret-123", false)).toBe("\u2022".repeat("sk-secret-123".length))
     expect(apiKeyDisplayValue("sk-secret-123", true)).toBe("sk-secret-123")
+    expect(apiKeyDisplayValue("sk-secret-123", false, true)).toBe("sk-secret-123")
     expect(apiKeyDisplayValue("", false)).toBe("")
   })
 

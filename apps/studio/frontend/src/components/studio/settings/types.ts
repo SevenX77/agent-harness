@@ -22,6 +22,10 @@ export interface ProviderDraft {
   testingAction?: "models" | null
 }
 
+export interface ProviderDraftChangeOptions {
+  save?: boolean
+}
+
 export interface SettingsPageProps {
   onClose: () => void
 }
@@ -32,6 +36,7 @@ export interface SettingsPageContentProps {
   credentialsLoading: boolean
   credentialsError: string | null
   drafts: ProviderDraft[]
+  pendingAddProviderId: string | null
   saveStatus: SaveStatus
   rolesData: RolesData | null
   modelGroups: ModelGroup[]
@@ -59,10 +64,13 @@ export interface SettingsPageContentProps {
   connectionLost?: boolean
   onClose: () => void
   onTabChange: (tab: SettingsTab) => void
-  onProviderFieldChange: (providerId: string, patch: Partial<ProviderDraft>) => void
+  onProviderFieldChange: (providerId: string, patch: Partial<ProviderDraft>, options?: ProviderDraftChangeOptions) => void
   onGetProviderModels: (providerId: string) => void
   onDeleteProvider: (providerId: string) => void
+  onDeleteProviderEndpoints: (endpointIds: string[]) => void
+  onBeginAddProvider: () => void
   onAddProvider: (data: AddProviderFormSubmission) => Promise<void> | void
+  onCancelAddProvider: () => void
   onProviderModelsUpdated: (providerId: string, models: ModelInfo[]) => void
   onRolesDataChange: (next: RolesData) => void
   onDeleteRole: (roleName: string) => void

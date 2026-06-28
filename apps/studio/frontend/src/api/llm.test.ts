@@ -64,6 +64,26 @@ const route: ProviderRoute = {
   metadata: {},
 }
 
+const probeCatalog = {
+  local_evidence_records_count: 6,
+  local_verified_records_count: 2,
+  local_failed_records_count: 1,
+  local_route_candidates_count: 3,
+  remote_catalog_source: null,
+  community_catalog: {
+    synced: true,
+    generated_at: '2026-06-20T23:00:00+00:00',
+    protocol_major: 1,
+    record_count: 5,
+    entries: [],
+  },
+  sharing: {
+    mode: 'local_export_only' as const,
+    auto_upload_enabled: false,
+    message: 'Local probe evidence is recorded on this machine.',
+  },
+}
+
 function registry(overrides: Partial<RegistryResponse> = {}): RegistryResponse {
   return {
     provider_endpoints: { [endpoint.endpoint_id]: endpoint },
@@ -386,13 +406,14 @@ describe('API Keys v4 registry adapter', () => {
 
   it('saves API Keys edits through v4 endpoint upsert without calling legacy credentials API', async () => {
     const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
+    let currentRegistry = registry()
     api.defaults.adapter = adapter((config) => {
       seen.push({ method: config.method, url: config.url, data: config.data })
       if (config.url === '/llm/registry/endpoints/openrouter-custom/secret') {
         return { endpoint_id: 'openrouter-custom', api_key: 'sk-openrouter-real' }
       }
-      if (config.method === 'get') return registry()
-      return registry({
+      if (config.method === 'get') return currentRegistry
+      currentRegistry = registry({
         provider_endpoints: {
           'openrouter-custom': {
             ...endpoint,
@@ -400,6 +421,7 @@ describe('API Keys v4 registry adapter', () => {
           },
         },
       })
+      return currentRegistry
     })
 
     const loaded = await getCredentials()
@@ -417,6 +439,7 @@ describe('API Keys v4 registry adapter', () => {
       'get /llm/registry',
       'get /llm/registry/endpoints/openrouter-custom/secret',
       'put /llm/registry/endpoints',
+      'get /llm/registry',
     ])
     expect(JSON.parse(String(seen[2].data))).toEqual({
       provider_endpoints: {
@@ -441,13 +464,14 @@ describe('API Keys v4 registry adapter', () => {
 
   it('sends an explicit empty secret when the user clears an API key', async () => {
     const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
+    let currentRegistry = registry()
     api.defaults.adapter = adapter((config) => {
       seen.push({ method: config.method, url: config.url, data: config.data })
       if (config.url === '/llm/registry/endpoints/openrouter-custom/secret') {
         return { endpoint_id: 'openrouter-custom', api_key: 'sk-openrouter-real' }
       }
-      if (config.method === 'get') return registry()
-      return registry({
+      if (config.method === 'get') return currentRegistry
+      currentRegistry = registry({
         provider_endpoints: {
           'openrouter-custom': {
             ...endpoint,
@@ -455,6 +479,7 @@ describe('API Keys v4 registry adapter', () => {
           },
         },
       })
+      return currentRegistry
     })
 
     await getCredentials()
@@ -469,6 +494,42 @@ describe('API Keys v4 registry adapter', () => {
     ])
 
     expect(JSON.parse(String(seen[2].data)).provider_endpoints['openrouter-custom'].api_key).toBe('')
+  })
+
+  it('keeps the full registry projection after saving endpoint credentials', async () => {
+    let currentRegistry = registry({ probe_catalog: probeCatalog })
+    api.defaults.adapter = adapter((config) => {
+      if (config.method === 'get') return currentRegistry
+      currentRegistry = registry({
+        provider_endpoints: {
+          'openrouter-custom': {
+            ...endpoint,
+            display_name: 'OpenRouter Renamed',
+          },
+        },
+        probe_catalog: probeCatalog,
+      })
+      return {
+        schema_version: 4,
+        provider_endpoints: currentRegistry.provider_endpoints,
+        provider_routes: currentRegistry.provider_routes,
+        runtime_policy: currentRegistry.runtime_policy,
+      }
+    })
+
+    await getCredentials({ hydrateSecrets: false })
+    const saved = await putCredentials([
+      {
+        id: 'openrouter-custom',
+        name: 'OpenRouter Renamed',
+        api_key: 'sk-openrouter-real',
+        base_url: 'https://openrouter.ai/api/v1',
+        provider_type: 'openai_compatible',
+      },
+    ])
+
+    expect(saved.probe_catalog).toEqual(probeCatalog)
+    expect(saved.providers[0].name).toBe('OpenRouter Renamed')
   })
 
   it('tests a provider by upserting the endpoint before calling the v4 endpoint test API', async () => {
@@ -711,6 +772,12 @@ describe('API Keys v4 registry adapter', () => {
           tested_endpoint_id: 'openai-official',
           discovered_model_count: 1,
         }
+      }
+      if (config.method === 'get' && config.url === '/llm/registry') {
+        return registry({
+          provider_endpoints: { 'openai-official': officialEndpoint },
+          provider_routes: { [verifiedRoute.route_id]: verifiedRoute },
+        })
       }
       throw new Error(`Unexpected request: ${config.method} ${config.url}`)
     })
@@ -957,6 +1024,10 @@ describe('API Keys v4 registry adapter', () => {
       capabilities: {},
     }
     const putPayloads: Array<{ provider_endpoints: Record<string, ProviderEndpoint> }> = []
+    let currentRegistry = registry({
+      provider_endpoints: { 'openai-official': officialEndpoint },
+      provider_routes: { [verifiedRoute.route_id]: verifiedRoute },
+    })
     api.defaults.adapter = adapter((config) => {
       if (config.method === 'put' && config.url === '/llm/registry/endpoints') {
         const payload = typeof config.data === 'string' ? JSON.parse(config.data) : config.data
@@ -966,28 +1037,31 @@ describe('API Keys v4 registry adapter', () => {
           ...payload.provider_endpoints['openai-official'],
           provider_kind: 'official',
         }
-        return registry({
+        currentRegistry = registry({
           provider_endpoints: { 'openai-official': savedEndpoint },
           provider_routes: {},
         })
+        return currentRegistry
       }
       if (config.method === 'post' && config.url === '/llm/endpoints/openai-official/test') {
-        return {
-          registry: registry({
-            provider_endpoints: {
-              'openai-official': {
-                ...officialEndpoint,
-                status: 'verified',
-                last_test_at: '2026-06-20T12:00:00Z',
-                last_test_message: 'Connected in 42ms. Model seen: gpt-5.',
-              },
+        currentRegistry = registry({
+          provider_endpoints: {
+            'openai-official': {
+              ...officialEndpoint,
+              status: 'verified',
+              last_test_at: '2026-06-20T12:00:00Z',
+              last_test_message: 'Connected in 42ms. Model seen: gpt-5.',
             },
-            provider_routes: { [verifiedRoute.route_id]: verifiedRoute },
-          }),
+          },
+          provider_routes: { [verifiedRoute.route_id]: verifiedRoute },
+        })
+        return {
+          registry: currentRegistry,
           tested_endpoint_id: 'openai-official',
           discovered_model_count: 1,
         }
       }
+      if (config.method === 'get' && config.url === '/llm/registry') return currentRegistry
       throw new Error(`Unexpected request: ${config.method} ${config.url}`)
     })
 
@@ -1224,7 +1298,7 @@ describe('API Keys v4 registry adapter', () => {
     ])
 
     const editedPayload = JSON.parse(String(seen[2].data)).provider_endpoints['openrouter-custom']
-    const restoredPayload = JSON.parse(String(seen[3].data)).provider_endpoints['openrouter-custom']
+    const restoredPayload = JSON.parse(String(seen[4].data)).provider_endpoints['openrouter-custom']
     expect(editedPayload.api_key).toBe('sk-liv')
     expect(restoredPayload.api_key).toBe('sk-live')
     for (const payload of [editedPayload, restoredPayload]) {
@@ -1235,14 +1309,15 @@ describe('API Keys v4 registry adapter', () => {
   })
 
   it('does not expose stale routes as available models after autosave invalidates test params', async () => {
+    let currentRegistry = registry()
     api.defaults.adapter = adapter((config) => {
       if (config.url === '/llm/registry/endpoints/openrouter-custom/secret') {
         return { endpoint_id: 'openrouter-custom', api_key: 'sk-openrouter-real' }
       }
-      if (config.method === 'get') return registry()
+      if (config.method === 'get') return currentRegistry
       if (config.method === 'put') {
         const sent = JSON.parse(String(config.data)).provider_endpoints['openrouter-custom']
-        return registry({
+        currentRegistry = registry({
           provider_endpoints: {
             'openrouter-custom': {
               ...endpoint,
@@ -1257,8 +1332,9 @@ describe('API Keys v4 registry adapter', () => {
             [route.route_id]: route,
           },
         })
+        return currentRegistry
       }
-      return registry()
+      return currentRegistry
     })
 
     await getCredentials()
@@ -1333,13 +1409,15 @@ describe('API Keys v4 registry adapter', () => {
 
   it('deletes cached endpoints that are absent from the API Keys save snapshot', async () => {
     const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
+    let currentRegistry = registry()
     api.defaults.adapter = adapter((config) => {
       seen.push({ method: config.method, url: config.url, data: config.data })
       if (config.url === '/llm/registry/endpoints/openrouter-custom/secret') {
         return { endpoint_id: 'openrouter-custom', api_key: 'sk-openrouter-real' }
       }
-      if (config.method === 'get') return registry()
-      return registry({ provider_endpoints: {}, provider_routes: {} })
+      if (config.method === 'get') return currentRegistry
+      currentRegistry = registry({ provider_endpoints: {}, provider_routes: {} })
+      return currentRegistry
     })
 
     await getCredentials()
@@ -1349,6 +1427,7 @@ describe('API Keys v4 registry adapter', () => {
       'get /llm/registry',
       'get /llm/registry/endpoints/openrouter-custom/secret',
       'delete /llm/registry/endpoints/openrouter-custom',
+      'get /llm/registry',
     ])
     expect(saved.providers).toEqual([])
   })

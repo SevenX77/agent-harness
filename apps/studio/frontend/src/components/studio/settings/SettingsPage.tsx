@@ -5,12 +5,12 @@ import { buildPutPayload, useDebouncedCredentialsSave } from "@/hooks/useDebounc
 import { useDebouncedRolesSave } from "@/hooks/useDebouncedRolesSave"
 import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-error-messages"
 import { useStudioEventStream } from "@/hooks/useStudioEventStream"
-import { deleteModelBundle, deleteRole, getCredentials, getModelGroups, getProviderModels, getRoles, syncVerifiedCommunityCatalog, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
+import { deleteEndpoint, deleteModelBundle, deleteRole, getCredentials, getModelGroups, getProviderModels, getRoles, syncVerifiedCommunityCatalog, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
-import { draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, providerCachedTestResult, providerDraftForAction, providerEndpointDraftsForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
+import { blankThirdPartyProviderDraft, draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, providerCachedTestResult, providerDraftForAction, providerEndpointDraftsForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
 import { normalizeRolesDraft, validateRolesDraft } from "./role-utils"
-import type { ProviderDraft, SettingsPageProps, SettingsTab } from "./types"
+import type { ProviderDraft, ProviderDraftChangeOptions, SettingsPageProps, SettingsTab } from "./types"
 
 const emptyCredentials: CredentialsState = { providers: [] }
 const emptyModelGroups: ModelGroup[] = []
@@ -89,10 +89,61 @@ function errorText(error: unknown): string {
   return chunks.join(" ")
 }
 
+function draftEditableSignature(draft: ProviderDraft): string {
+  const rows = (draft.base_urls?.length ? draft.base_urls : [{
+    id: draft.id,
+    value: draft.base_url,
+    provider_type: draft.provider_type,
+  }]).map((row) => ({
+    value: row.value.trim(),
+  }))
+  return JSON.stringify({
+    id: draft.id,
+    name: draft.name,
+    base_url: draft.base_url.trim(),
+    api_key: draft.api_key,
+    base_urls: rows,
+  })
+}
+
+function reconcileDraftsWithCredentials(
+  credentials: CredentialsState,
+  currentDrafts: ProviderDraft[],
+  dirtyProviderIds: Set<string>,
+  deletedProviderIds: Set<string>,
+): ProviderDraft[] {
+  const credentialDrafts = draftsFromCredentials(credentials)
+  const credentialDraftIds = new Set(credentialDrafts.map((draft) => draft.id))
+  for (const deletedProviderId of deletedProviderIds) {
+    if (!credentialDraftIds.has(deletedProviderId)) {
+      deletedProviderIds.delete(deletedProviderId)
+    }
+  }
+  const nextDrafts = credentialDrafts.filter((draft) => !deletedProviderIds.has(draft.id))
+  if (currentDrafts.length === 0) return nextDrafts
+  const currentById = new Map(currentDrafts.map((draft) => [draft.id, draft]))
+  const nextIds = new Set(nextDrafts.map((draft) => draft.id))
+  const reconciled = nextDrafts.map((nextDraft) => {
+    const currentDraft = currentById.get(nextDraft.id)
+    if (!currentDraft || !dirtyProviderIds.has(nextDraft.id)) return nextDraft
+    if (draftEditableSignature(currentDraft) === draftEditableSignature(nextDraft)) {
+      dirtyProviderIds.delete(nextDraft.id)
+      return nextDraft
+    }
+    return currentDraft
+  })
+  const dirtyDraftsNotInCredentials = currentDrafts.filter((draft) => (
+    dirtyProviderIds.has(draft.id) && !nextIds.has(draft.id)
+  ))
+  return [...reconciled, ...dirtyDraftsNotInCredentials]
+}
+
 function modelInfoEvidenceRank(model: ModelInfo): number {
   if (
     model.status === "verified" ||
     model.status === "probe-verified" ||
+    model.ui_state === "ready" ||
+    model.ui_state === "historical_ready" ||
     (model.verified_profile_count ?? 0) > 0 ||
     (model.verified_profiles ?? []).some((profile) => profile.status === "ready")
   ) return 4
@@ -146,6 +197,13 @@ function resetProviderTestOutcome(
     available_models: [],
     available_sdks: [],
   }
+}
+
+function withCredentialProviders(
+  current: CredentialsState,
+  providers: CredentialsState["providers"],
+): CredentialsState {
+  return { ...current, providers }
 }
 
 export function officialProviderTestSummary(models: ModelInfo[]): {
@@ -234,9 +292,10 @@ export function upsertProviderTestResponse(
     available_models: nextProvider.available_models,
     available_sdks: nextProvider.available_sdks,
   }
-  return {
-    providers: found ? providers : [...providers, { ...nextProvider, test_results: [fallbackTestResult] }],
-  }
+  return withCredentialProviders(
+    current,
+    found ? providers : [...providers, { ...nextProvider, test_results: [fallbackTestResult] }],
+  )
 }
 
 export function upsertProviderModelsListResponse(
@@ -289,7 +348,7 @@ export function upsertProviderModelsListResponse(
       test_results: testResults,
     }
   })
-  if (found) return { providers }
+  if (found) return withCredentialProviders(current, providers)
   const nextProvider: CredentialsState["providers"][number] = {
     id: latestDraft.id,
     name: latestDraft.name,
@@ -304,9 +363,7 @@ export function upsertProviderModelsListResponse(
     available_sdks: sdks,
     test_results: [testResult],
   }
-  return {
-    providers: [...providers, nextProvider],
-  }
+  return withCredentialProviders(current, [...providers, nextProvider])
 }
 
 export function upsertProviderModels(
@@ -321,9 +378,10 @@ export function upsertProviderModels(
     found = true
     return { ...provider, available_models: models }
   })
-  if (found || !draft) return { providers }
-  return {
-    providers: [
+  if (found || !draft) return withCredentialProviders(current, providers)
+  return withCredentialProviders(
+    current,
+    [
       ...providers,
       {
         id: draft.id,
@@ -336,7 +394,7 @@ export function upsertProviderModels(
         available_sdks: [draft.provider_type],
       },
     ],
-  }
+  )
 }
 
 export function SettingsPage({ onClose }: SettingsPageProps) {
@@ -346,6 +404,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   const [credentialsLoading, setCredentialsLoading] = useState(true)
   const [credentialsError, setCredentialsError] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<ProviderDraft[]>([])
+  const [pendingAddProviderDraft, setPendingAddProviderDraft] = useState<ProviderDraft | null>(null)
   const [providerTestingActions, setProviderTestingActions] = useState<Record<string, ProviderDraft["testingAction"]>>({})
   const [rolesData, setRolesData] = useState<RolesData | null>(null)
   const [modelGroups, setModelGroups] = useState<ModelGroup[]>(emptyModelGroups)
@@ -360,6 +419,8 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   const rolesDataRef = useRef<RolesData | null>(rolesData)
   rolesDataRef.current = rolesData
   const invalidatedTestOutcomeIdsRef = useRef<Set<string>>(new Set())
+  const dirtyProviderIdsRef = useRef<Set<string>>(new Set())
+  const deletedProviderIdsRef = useRef<Set<string>>(new Set())
   const credentialsHydratedRef = useRef(false)
   const pendingRoleProjectionRefreshRef = useRef(false)
   // #6: a roles_changed event arrived while the Roles/Copilot tab had never been
@@ -367,17 +428,19 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   // lazy load refetches fresh the first time the tab opens.
   const rolesDirtyRef = useRef(false)
   const remoteModelCatalogSyncedRef = useRef(false)
-  const visibleDrafts = useMemo(() => (
-    drafts.map((draft) => {
+  const pendingAddProviderId = pendingAddProviderDraft?.id ?? null
+  const visibleDrafts = useMemo(() => {
+    const displayDrafts = pendingAddProviderDraft ? [...drafts, pendingAddProviderDraft] : drafts
+    return displayDrafts.map((draft) => {
       const testingAction = providerTestingActions[draft.id] ?? null
       return testingAction
         ? { ...draft, isTesting: true, testingAction }
         : { ...draft, isTesting: false, testingAction: null }
     })
-  ), [drafts, providerTestingActions])
+  }, [drafts, pendingAddProviderDraft, providerTestingActions])
 
   const handleSaved = useCallback((next: CredentialsState) => {
-    setCredentials({
+    const nextCredentials: CredentialsState = {
       providers: next.providers.map((provider) => {
         if (!invalidatedTestOutcomeIdsRef.current.has(provider.id)) return provider
         const draft = draftsRef.current.find((item) => item.id === provider.id)
@@ -396,7 +459,10 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         }
         return resetProviderTestOutcome(provider)
       }),
-    })
+      probe_catalog: next.probe_catalog ?? null,
+    }
+    setCredentials(nextCredentials)
+    setDrafts((current) => reconcileDraftsWithCredentials(nextCredentials, current, dirtyProviderIdsRef.current, deletedProviderIdsRef.current))
     if (pendingRoleProjectionRefreshRef.current) {
       pendingRoleProjectionRefreshRef.current = false
       void refreshLoadedLlmRolesProjection({
@@ -435,7 +501,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       getCredentials({ hydrateSecrets: credentialsHydratedRef.current })
         .then((next) => {
           setCredentials(next)
-          setDrafts(draftsFromCredentials(next))
+          setDrafts((current) => reconcileDraftsWithCredentials(next, current, dirtyProviderIdsRef.current, deletedProviderIdsRef.current))
         })
         .catch(() => {})
 
@@ -519,7 +585,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     getCredentials({ hydrateSecrets: credentialsHydratedRef.current })
       .then((next) => {
         setCredentials(next)
-        setDrafts(draftsFromCredentials(next))
+        setDrafts((current) => reconcileDraftsWithCredentials(next, current, dirtyProviderIdsRef.current, deletedProviderIdsRef.current))
       })
       .catch((error) => {
         console.warn("phase=settings-event-refresh action=credentials-refetch-failed error=%o", error)
@@ -594,7 +660,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         invalidatedTestOutcomeIdsRef.current.clear()
         setCredentialsError(null)
         setCredentials(next)
-        setDrafts(draftsFromCredentials(next))
+        setDrafts((current) => reconcileDraftsWithCredentials(next, current, dirtyProviderIdsRef.current, deletedProviderIdsRef.current))
         setCredentialsLoading(false)
       })
       .catch((error) => {
@@ -612,7 +678,6 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   useEffect(() => {
     if (activeTab !== "api_keys" || credentialsHydratedRef.current) return
     let cancelled = false
-    setCredentialsLoading(true)
     getCredentials()
       .then((next) => {
         if (cancelled) return
@@ -620,7 +685,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         invalidatedTestOutcomeIdsRef.current.clear()
         setCredentialsError(null)
         setCredentials(next)
-        setDrafts(draftsFromCredentials(next))
+        setDrafts((current) => reconcileDraftsWithCredentials(next, current, dirtyProviderIdsRef.current, deletedProviderIdsRef.current))
         setCredentialsLoading(false)
       })
       .catch((error) => {
@@ -673,7 +738,12 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     queueSave(() => buildPutPayload(draftsRef.current))
   }
 
-  function updateProviderField(providerId: string, patch: Partial<ProviderDraft>) {
+  function updateProviderField(
+    providerId: string,
+    patch: Partial<ProviderDraft>,
+    options?: ProviderDraftChangeOptions,
+  ) {
+    dirtyProviderIdsRef.current.add(providerId)
     const currentDraft = draftsRef.current.find((draft) => draft.id === providerId)
     const nextDraft = currentDraft ? { ...currentDraft, ...patch } : null
     if (currentDraft && nextDraft && !providerTestParamsMatch(currentDraft, nextDraft)) {
@@ -704,7 +774,9 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         },
       ]
     })
-    scheduleSave()
+    if (options?.save !== false) {
+      scheduleSave()
+    }
   }
 
   function setProviderTesting(providerId: string, testingAction: ProviderDraft["testingAction"]) {
@@ -719,7 +791,9 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   }
 
   function addProviderWithData(data: AddProviderFormSubmission) {
-    const draft = draftFromAddProviderSubmission(data)
+    const draft = draftFromAddProviderSubmission(data, pendingAddProviderDraft?.id)
+    setPendingAddProviderDraft(null)
+    dirtyProviderIdsRef.current.add(draft.id)
     setDrafts((current) => {
       const next = [...current, draft]
       queueSave(() => buildPutPayload(next))
@@ -727,10 +801,40 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     })
   }
 
+  function beginAddProvider() {
+    setPendingAddProviderDraft((current) => current ?? blankThirdPartyProviderDraft())
+  }
+
+  function cancelAddProvider() {
+    setPendingAddProviderDraft(null)
+  }
+
   function deleteProvider(providerId: string) {
+    const draft = providerDraftForAction(draftsRef.current, providerId)
+    const endpointIds = draft
+      ? providerEndpointDraftsForAction(draft).map((endpointDraft) => endpointDraft.id)
+      : [providerId]
     pendingRoleProjectionRefreshRef.current = true
+    dirtyProviderIdsRef.current.delete(providerId)
+    deletedProviderIdsRef.current.add(providerId)
     setDrafts((current) => current.filter((draft) => draft.id !== providerId))
-    scheduleSave()
+    void deleteProviderEndpoints(endpointIds)
+  }
+
+  async function deleteProviderEndpoints(endpointIds: string[]) {
+    const uniqueEndpointIds = Array.from(new Set(endpointIds.filter(Boolean)))
+    if (uniqueEndpointIds.length === 0) return
+    pendingRoleProjectionRefreshRef.current = true
+    try {
+      for (const endpointId of uniqueEndpointIds) {
+        await deleteEndpoint(endpointId)
+      }
+      const next = await getCredentials({ hydrateSecrets: credentialsHydratedRef.current })
+      setCredentials(next)
+      setDrafts((current) => reconcileDraftsWithCredentials(next, current, dirtyProviderIdsRef.current, deletedProviderIdsRef.current))
+    } catch (error) {
+      toast.error(composeRequestErrorMessage(error, "Base URL delete failed"))
+    }
   }
 
   function updateProviderModels(providerId: string, models: ModelInfo[]) {
@@ -750,6 +854,11 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     if (!draft) return
     const isOfficial = inferProviderKind(draft) === "official"
     const endpointDrafts = isOfficial ? [draft] : providerEndpointDraftsForAction(draft)
+    const baseUrlSteps = isOfficial ? [] : providerBaseUrlStepsForEndpointDrafts(endpointDrafts)
+    const baseUrlStepByKey = new Map(baseUrlSteps.map((step, index) => [step.key, { ...step, index }]))
+    const totalProgressSteps = endpointDrafts.length + baseUrlSteps.length
+    const announcedBaseUrlSteps = new Set<string>()
+    const reportedBaseUrlSteps = new Set<string>()
 
     setProviderTesting(providerId, "models")
     const toastId = `get-models-${providerId}`
@@ -768,7 +877,22 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         endpointDraft: ProviderDraft
         response: ProviderTestResponse
       }> = []
-      for (const endpointDraft of endpointDrafts) {
+      for (let index = 0; index < endpointDrafts.length; index += 1) {
+        const endpointDraft = endpointDrafts[index]
+        if (!endpointDraft) continue
+        const baseUrlKey = comparableProviderBaseUrl(endpointDraft.base_url)
+        const baseUrlStep = baseUrlStepByKey.get(baseUrlKey)
+        if (baseUrlStep && !announcedBaseUrlSteps.has(baseUrlKey)) {
+          announcedBaseUrlSteps.add(baseUrlKey)
+          toast.loading(
+            `${providerBaseUrlProgressLabel(baseUrlStep, baseUrlSteps.length, totalProgressSteps)}: loading model list with the current API key...`,
+            { id: toastId },
+          )
+        }
+        const stepLabel = isOfficial
+          ? providerEndpointStepLabel(endpointDraft, index, endpointDrafts.length)
+          : providerEndpointProgressLabel(endpointDraft, index, endpointDrafts.length, baseUrlSteps.length, totalProgressSteps)
+        toast.loading(`${stepLabel}: probing generation endpoint...`, { id: toastId })
         try {
           endpointResults.push({
             endpointDraft,
@@ -785,6 +909,18 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
             endpointDraft,
             response: providerTestResponseFromRequestFailure(error),
           })
+        }
+        const latestResult = endpointResults[endpointResults.length - 1]
+        const resultSummary = latestResult ? providerEndpointResultSummary(latestResult.response) : "request failed"
+        if (baseUrlStep && latestResult && !reportedBaseUrlSteps.has(baseUrlKey)) {
+          reportedBaseUrlSteps.add(baseUrlKey)
+          toast.loading(
+            `${providerBaseUrlProgressLabel(baseUrlStep, baseUrlSteps.length, totalProgressSteps)}: ${providerModelListStepSummary(latestResult.response)}.`,
+            { id: toastId },
+          )
+        }
+        if (index < endpointDrafts.length - 1) {
+          toast.loading(`${stepLabel}: ${resultSummary}. Next step...`, { id: toastId })
         }
       }
       const latestDraft = providerDraftForAction(draftsRef.current, providerId)
@@ -837,11 +973,8 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
           toast.warning("Model-list endpoint is reachable, but no models were returned.", { id: toastId })
         }
       } else {
-        const response = responses[0]
         toast.error(
-          response
-            ? composeTestErrorMessage(response.status, response.error_code, response.message)
-            : "Provider test failed",
+          providerEndpointFailureSummary(endpointResults, baseUrlSteps.length),
           { id: toastId },
         )
       }
@@ -912,6 +1045,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       credentialsLoading={credentialsLoading}
       credentialsError={credentialsError}
       drafts={visibleDrafts}
+      pendingAddProviderId={pendingAddProviderId}
       saveStatus={saveStatus}
       rolesData={rolesData}
       modelGroups={modelGroups}
@@ -937,7 +1071,10 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       onProviderFieldChange={updateProviderField}
       onGetProviderModels={(providerId) => void runProviderGetModels(providerId)}
       onDeleteProvider={deleteProvider}
+      onDeleteProviderEndpoints={(endpointIds) => void deleteProviderEndpoints(endpointIds)}
+      onBeginAddProvider={beginAddProvider}
       onAddProvider={addProviderWithData}
+      onCancelAddProvider={cancelAddProvider}
       onProviderModelsUpdated={updateProviderModels}
       onRolesDataChange={updateRolesData}
       onDeleteRole={deleteRoleByName}
@@ -955,6 +1092,103 @@ function providerEndpointIdentityMatches(left: ProviderDraft, right: ProviderDra
     (left.provider_type ?? null) === (right.provider_type ?? null) &&
     comparableProviderBaseUrl(left.base_url) === comparableProviderBaseUrl(right.base_url)
   )
+}
+
+type ProviderBaseUrlStep = {
+  key: string
+  baseUrl: string
+}
+
+function providerBaseUrlStepsForEndpointDrafts(endpointDrafts: ProviderDraft[]): ProviderBaseUrlStep[] {
+  const steps: ProviderBaseUrlStep[] = []
+  const seen = new Set<string>()
+  for (const endpointDraft of endpointDrafts) {
+    const key = comparableProviderBaseUrl(endpointDraft.base_url)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    steps.push({ key, baseUrl: endpointDraft.base_url })
+  }
+  return steps
+}
+
+function providerBaseUrlProgressLabel(
+  step: ProviderBaseUrlStep & { index: number },
+  baseUrlTotal: number,
+  progressTotal: number,
+): string {
+  return `Step ${step.index + 1}/${progressTotal}: Checking base URL ${step.index + 1}/${baseUrlTotal} / ${compactProviderHost(step.baseUrl)}`
+}
+
+function providerEndpointStepLabel(
+  draft: ProviderDraft,
+  index: number,
+  total: number,
+): string {
+  const ordinal = total > 1 ? `${index + 1}/${total} ` : ""
+  return `Testing ${ordinal}${providerTypeShortName(draft.provider_type)} / ${compactProviderHost(draft.base_url)}`
+}
+
+function providerEndpointProgressLabel(
+  draft: ProviderDraft,
+  index: number,
+  total: number,
+  stepOffset: number,
+  progressTotal: number,
+): string {
+  return `Step ${stepOffset + index + 1}/${progressTotal}: ${providerEndpointStepLabel(draft, index, total)}`
+}
+
+function providerModelListStepSummary(response: ProviderTestResponse): string {
+  const modelCount = response.available_models?.length ?? 0
+  if (modelCount > 0) return `model list returned ${modelCount}`
+  if (response.status === "missing_api_key") return "model list skipped because the API key is empty"
+  return "model list empty or unavailable"
+}
+
+function providerEndpointResultSummary(response: ProviderTestResponse): string {
+  const modelCount = response.available_models?.length ?? 0
+  const modelList = modelCount > 0
+    ? `model list returned ${modelCount}`
+    : "model list empty or unavailable"
+  if (response.status === "ok") return `${modelList}; generation probe passed`
+  const reason = composeTestErrorMessage(response.status, response.error_code, response.message)
+  return `${modelList}; generation probe failed (${reason})`
+}
+
+function providerEndpointFailureSummary(
+  endpointResults: Array<{ endpointDraft: ProviderDraft; response: ProviderTestResponse }>,
+  baseUrlStepCount = 0,
+): string {
+  if (endpointResults.length === 0) return "Provider test failed"
+  const lines = endpointResults.map(({ endpointDraft, response }, index) => {
+    const label = providerEndpointStepLabel(endpointDraft, index, endpointResults.length).replace(/^Testing /, "")
+    return `${label}: ${providerEndpointResultSummary(response)}`
+  })
+  const preview = lines.slice(0, 3).join(" | ")
+  const omitted = lines.length > 3 ? ` | ${lines.length - 3} more endpoints tested` : ""
+  if (baseUrlStepCount > 0) {
+    const baseUrlStepLabel = baseUrlStepCount === 1 ? "base URL model-list step" : "base URL model-list steps"
+    return `Checked ${baseUrlStepCount} ${baseUrlStepLabel} and tested ${lines.length} protocol endpoints; none generated successfully. ${preview}${omitted}`
+  }
+  return `All ${lines.length} endpoints tested; none generated successfully. ${preview}${omitted}`
+}
+
+function providerTypeShortName(providerType: ProviderDraft["provider_type"]): string {
+  if (providerType === "anthropic_compatible") return "Anth"
+  if (providerType === "google_genai") return "Gemini"
+  if (providerType === "ark_runtime") return "Ark"
+  return "OpenAI"
+}
+
+function compactProviderHost(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return "empty URL"
+  try {
+    const parsed = new URL(trimmed)
+    return parsed.hostname.replace(/^www\./, "")
+  } catch {
+    return trimmed.replace(/^https?:\/\//, "").replace(/\/.*$/, "")
+  }
 }
 
 function providerTestResponseFromRequestFailure(error: unknown): ProviderTestResponse {

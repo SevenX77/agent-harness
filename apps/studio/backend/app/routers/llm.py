@@ -4781,6 +4781,40 @@ def _endpoint_probe_order(
     return [*tier_current, *tier_historical, *tier_unknown, *tier_failed]
 
 
+def _endpoint_notable_provider_key(endpoint: ProviderEndpoint) -> str:
+    haystack = " ".join(
+        [
+            endpoint.endpoint_id,
+            endpoint.display_name or "",
+            endpoint.base_url,
+        ]
+    ).lower()
+    if "qiniu" in haystack or "qnaigc.com" in haystack:
+        return "qiniu"
+    if "openrouter" in haystack or "openrouter.ai" in haystack:
+        return "openrouter"
+    return _endpoint_probe_backend(endpoint)
+
+
+def _prioritize_notable_probe_models(
+    endpoint: ProviderEndpoint,
+    candidate_model_ids: Sequence[str],
+) -> list[str]:
+    requested = _requested_model_ids(candidate_model_ids)
+    if not requested:
+        return []
+    notable = notable_model_ids(_endpoint_notable_provider_key(endpoint))
+    if not notable:
+        return requested
+    requested_set = set(requested)
+    prioritized = [model_id for model_id in notable if model_id in requested_set]
+    prioritized_set = set(prioritized)
+    return [
+        *prioritized,
+        *(model_id for model_id in requested if model_id not in prioritized_set),
+    ]
+
+
 def _third_party_probe_model_ids(
     endpoint: ProviderEndpoint,
     discovered_model_ids: tuple[str, ...],
@@ -4802,10 +4836,11 @@ def _third_party_probe_model_ids(
         candidates = known_model_ids_for_endpoint(library, endpoint.endpoint_id)
     if not candidates:
         candidates = notable_model_ids(_endpoint_probe_backend(endpoint))
+    prioritized_candidates = _prioritize_notable_probe_models(endpoint, candidates)
     ordered = _endpoint_probe_order(
         library,
         endpoint.endpoint_id,
-        _requested_model_ids(candidates),
+        prioritized_candidates,
         verified_model_ids=verified_model_ids,
     )
     return ordered[:_THIRD_PARTY_PROBE_MODEL_LIMIT]
@@ -4876,6 +4911,25 @@ async def _detect_third_party_protocol(
     return None, last_result
 
 
+async def _detect_third_party_protocol_for_models(
+    endpoint: ProviderEndpoint,
+    probe_model_ids: Sequence[str],
+) -> tuple[ProviderType | None, RouteProbeResult | None]:
+    """Detect protocol using the same batch model set used for verification."""
+    last_probe: RouteProbeResult | None = None
+    for probe_model_id in probe_model_ids:
+        detected_protocol, detection_probe = await _detect_third_party_protocol(
+            endpoint,
+            probe_model_id,
+        )
+        if detected_protocol is not None:
+            return detected_protocol, detection_probe
+        last_probe = detection_probe
+        if detection_probe is not None and detection_probe.status in _STRUCTURAL_PROBE_STATUSES:
+            return None, detection_probe
+    return None, last_probe
+
+
 async def _verify_third_party_endpoint_by_probe(
     endpoint: ProviderEndpoint,
     discovered_model_ids: tuple[str, ...],
@@ -4905,8 +4959,8 @@ async def _verify_third_party_endpoint_by_probe(
             message="Endpoint reachable but no model ids were available to probe.",
         )
 
-    detected_protocol, detection_probe = await _detect_third_party_protocol(
-        endpoint, probe_model_ids[0]
+    detected_protocol, detection_probe = await _detect_third_party_protocol_for_models(
+        endpoint, probe_model_ids
     )
     if detected_protocol is None:
         structural = (
@@ -4916,7 +4970,7 @@ async def _verify_third_party_endpoint_by_probe(
         message = (
             _model_probe_failure_message(_model_probe_result_from_route_probe(detection_probe))
             if structural and detection_probe is not None
-            else "Could not auto-detect a working protocol for this endpoint."
+            else _protocol_detection_failure_message(probe_model_ids, detection_probe)
         )
         return ThirdPartyEndpointVerification(
             status="failed",
@@ -4928,12 +4982,13 @@ async def _verify_third_party_endpoint_by_probe(
 
     assert detection_probe is not None  # detected_protocol set => probe present
     first_probe = detection_probe
+    first_probe_model_id = first_probe.model_id
     detected_endpoint = endpoint.model_copy(update={"protocol": detected_protocol})
 
     last_failure: RouteProbeResult = first_probe
-    for index, model_id in enumerate(probe_model_ids):
-        if index == 0:
-            # The first model was already probed during protocol detection.
+    for model_id in probe_model_ids:
+        if model_id == first_probe_model_id:
+            # This model was already probed during protocol detection.
             probe = first_probe
         else:
             probe = await _gateway_test_provider_route(
@@ -4977,6 +5032,25 @@ async def _verify_third_party_endpoint_by_probe(
         ),
         failure_is_structural=last_failure.status in _STRUCTURAL_PROBE_STATUSES,
     )
+
+
+def _protocol_detection_failure_message(
+    probe_model_ids: Sequence[str],
+    detection_probe: RouteProbeResult | None,
+) -> str:
+    message = (
+        "Could not auto-detect a working protocol for this endpoint "
+        f"after probing {len(probe_model_ids)} candidate models."
+    )
+    if detection_probe is None:
+        return message
+    detail = (
+        f" Last probe: {detection_probe.backend} / {detection_probe.model_id} "
+        f"returned {detection_probe.status}"
+    )
+    if detection_probe.message:
+        detail += f" ({detection_probe.message})"
+    return f"{message}{detail}"
 
 
 async def _probe_third_party_models_for_endpoint(
@@ -5843,6 +5917,16 @@ async def _legacy_endpoint_probe_adapter(endpoint: ProviderEndpoint) -> Endpoint
     backend = _endpoint_probe_backend(endpoint)
     base_url = _endpoint_probe_base_url(endpoint)
     api_key = endpoint.api_key.get_secret_value() if endpoint.api_key is not None else ""
+    if not base_url:
+        return EndpointProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            provider_kind=endpoint.provider_kind,
+            backend=backend,
+            base_url=base_url,
+            status="error",
+            message="Base URL is empty.",
+            error_code="missing_config",
+        )
     if not api_key:
         return EndpointProbeResult(
             endpoint_id=endpoint.endpoint_id,

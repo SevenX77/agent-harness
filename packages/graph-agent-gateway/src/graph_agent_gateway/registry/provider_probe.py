@@ -86,6 +86,16 @@ async def test_provider_endpoint(
     backend = endpoint_probe_backend(endpoint)
     base_url = endpoint_probe_base_url(endpoint)
     secret = _endpoint_secret(endpoint, api_key)
+    if not base_url:
+        return EndpointProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            provider_kind=endpoint.provider_kind,
+            backend=backend,
+            base_url=base_url,
+            status="error",
+            message="Base URL is empty.",
+            error_code="missing_config",
+        )
     if not secret:
         return EndpointProbeResult(
             endpoint_id=endpoint.endpoint_id,
@@ -134,6 +144,17 @@ async def test_provider_route(
     backend = endpoint_probe_backend(endpoint)
     base_url = endpoint_probe_base_url(endpoint)
     secret = _endpoint_secret(endpoint, api_key)
+    if not base_url:
+        return RouteProbeResult(
+            endpoint_id=endpoint.endpoint_id,
+            route_id=route.route_id,
+            provider_kind=endpoint.provider_kind,
+            backend=backend,
+            base_url=base_url,
+            model_id=route.provider_model_id,
+            status="error",
+            message="Base URL is empty.",
+        )
     if not secret:
         return RouteProbeResult(
             endpoint_id=endpoint.endpoint_id,

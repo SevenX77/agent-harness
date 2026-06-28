@@ -1182,7 +1182,7 @@ function hydrateRegistryWithKnownSecrets<T extends CredentialRegistryResponse>(r
   } as T
 }
 
-function cacheRegistry<T extends CredentialRegistryResponse>(registry: T): T {
+function cacheRegistry(registry: CredentialRegistryResponse): RegistryResponse {
   const hydrated = hydrateRegistryWithKnownSecrets(registry)
   cachedRegistry = {
     ...(cachedRegistry ?? {
@@ -1195,7 +1195,7 @@ function cacheRegistry<T extends CredentialRegistryResponse>(registry: T): T {
     }),
     ...hydrated,
   } as RegistryResponse
-  return hydrated
+  return cachedRegistry
 }
 
 type EndpointFailureScope = 'endpoint' | 'model' | 'unknown'
@@ -1236,7 +1236,7 @@ function endpointTestVerdict(endpoint: ProviderEndpoint, routes: ProviderRoute[]
   if (endpointFailure === 'model') {
     return {
       responseStatus: 'error',
-      testStatus: 'untested',
+      testStatus: 'error',
       errorCode: endpointErrorCode(endpoint),
       hasCompletedTest,
     }
@@ -1472,7 +1472,7 @@ async function hydrateEndpointSecrets<T extends CredentialRegistryResponse>(regi
 
 export async function putRegistryEndpoints(
   providerEndpoints: Record<string, ProviderEndpointWrite>,
-): Promise<CredentialRegistryResponse> {
+): Promise<RegistryResponse> {
   for (const [endpointId, endpoint] of Object.entries(providerEndpoints)) {
     rememberEndpointSecret(endpointId, endpoint.api_key)
   }
@@ -1483,23 +1483,10 @@ export async function putRegistryEndpoints(
   return cacheRegistry(response.data)
 }
 
-export async function deleteEndpoint(endpointId: string): Promise<CredentialRegistryResponse> {
+export async function deleteEndpoint(endpointId: string): Promise<RegistryResponse> {
   const response = await api.delete<CredentialRegistryResponse>(`/llm/registry/endpoints/${segment(endpointId)}`)
   forgetEndpointSecret(endpointId)
-  if (cachedRegistry) {
-    const providerEndpoints = { ...cachedRegistry.provider_endpoints }
-    delete providerEndpoints[endpointId]
-    const providerRoutes = Object.fromEntries(
-      Object.entries(cachedRegistry.provider_routes).filter(([, route]) => route.endpoint_id !== endpointId),
-    )
-    cachedRegistry = {
-      ...cachedRegistry,
-      ...response.data,
-      provider_endpoints: response.data.provider_endpoints ?? providerEndpoints,
-      provider_routes: response.data.provider_routes ?? providerRoutes,
-    }
-  }
-  return response.data
+  return cacheRegistry(response.data)
 }
 
 export async function testEndpoint(endpointId: string): Promise<ProviderEndpoint> {
@@ -1587,18 +1574,10 @@ export async function putCredentials(
       ),
     ]),
   )
-  if (Object.keys(providerEndpoints).length === 0) {
-    return registryToCredentials(cachedRegistry ?? {
-      provider_endpoints: {},
-      provider_routes: {},
-      runtime_policy: {
-        provider_down_ttl_seconds: 60,
-        probe_timeout_seconds: 5,
-        token_escalation_rounds: 2,
-      },
-    })
+  if (Object.keys(providerEndpoints).length > 0) {
+    await putRegistryEndpoints(providerEndpoints)
   }
-  const registry = await putRegistryEndpoints(providerEndpoints)
+  const registry = await getRegistry()
   return registryToCredentials(registry)
 }
 

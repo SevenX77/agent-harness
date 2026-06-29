@@ -546,6 +546,10 @@ function logicPhaseMarkdown(phaseId: string): string {
     '    properties: {}',
     'actions: []',
     '---',
+    // LOGIC requires at least one <action> tag (engine F-v3-logic-actions-empty), so
+    // scaffold an empty one for the user to fill — the same idiom as the agent scaffold's
+    // empty <role>/<goal>. Discoverable required tag, not a hidden must-add.
+    '<action></action>',
     '',
   ].join('\n')
 }

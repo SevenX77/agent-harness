@@ -127,6 +127,9 @@ describe('canvas authoring helpers', () => {
     expect(logic.fileContent).toContain('inputs:')
     expect(logic.fileContent).toContain('outputs:')
     expect(logic.fileContent).toContain('actions:')
+    // LOGIC requires at least one <action> tag — scaffold it (empty) so the required
+    // tag is discoverable, mirroring the agent scaffold's <role>/<goal>.
+    expect(logic.fileContent).toContain('<action>')
 
     expect(skill.fileContent).toContain('name: agent')
     expect(skill.fileContent).toContain('io:')

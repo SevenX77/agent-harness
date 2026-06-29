@@ -391,18 +391,22 @@ def test_missing_output_phase_uses_leaf_terminal_fallback(tmp_path: Path, mock_s
     ]
 
 
-def test_bare_body_phase_compiles_as_dependency_free_node(
+def test_bare_body_phase_missing_depends_on_is_rejected(
     tmp_path: Path,
     mock_skill_resolver: object,
 ) -> None:
+    # skill-spec 00-FORMAT-GROUND-TRUTH (body <phase> rules): `depends_on` is 必填
+    # ("first node: depends_on=\"input\""). A bare <phase> with no depends_on is a
+    # disconnected node and MUST be flagged, not silently treated as an input root.
     _graph(tmp_path, body="<phase>main</phase>")
     _agent_phase(tmp_path)
 
-    compiled = SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
+    with pytest.raises(SkillLoadError) as exc:
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
-    assert compiled.raw["graph_topology"]["phases"] == [
-        {"name": "main", "depends_on": [], "output": False},
-    ]
+    _expect_code(exc, "[F-v3-graph-phase-island]")
+    # carries the node locator so Studio's realtime-lint badges the offending node
+    assert exc.value.payload.field_path == "main.depends_on"
 
 
 @pytest.mark.parametrize(

@@ -69,4 +69,5 @@ validator: true
 <step id="S1" name="global_synthesis">启动全书高潮提取、伏笔对应和别名对齐，评估各角色全局叙事权重。</step>
 <step id="S2" name="finish">调用 finish_task 提交完成，后台会自动计算 climax_ranking、character_ranking 和 foreshadowing_closure 数据。</step>
 
+
 <protocol id="P1">高潮排名必须在全局尺度上做 1-10 的归一化分布，避免局部的尺度偏差。</protocol>

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from typing import Any, Literal
 
@@ -389,7 +391,38 @@ class EvidenceRecord(BaseModel):
     successful_probe: dict[str, Any] | None = None
     failed_probe: dict[str, Any] | None = None
     agent_note: dict[str, Any] | None = None
+    # Studio LLM credentials/catalog SSOT (problem 3): endpoint public identity is a
+    # FORMAL field (not metadata) so a locally-built record and one parsed back from
+    # the remote catalog hash identically. content_hash is the LOCAL dedup key
+    # (credentials de-dup + stable upload candidates); it is never placed on the wire.
+    normalized_public_base_url: str | None = None
+    content_hash: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+def compute_evidence_content_hash(record: EvidenceRecord) -> str:
+    """Deterministic content hash keyed only on an evidence record's semantic identity.
+
+    Studio LLM credentials/catalog SSOT (R2.1): the same observation produced at
+    different times, on different machines, or locally vs. parsed back from the
+    remote catalog yields the SAME hash. Timestamps, api keys, random
+    evidence/endpoint ids, display names, and free-form ``metadata`` are excluded so
+    they cannot perturb dedup. Used local-side only (credentials de-dup + stable
+    upload candidates); it is never placed on the upload/download wire.
+    """
+    payload: dict[str, str | None] = {
+        "evidence_type": record.evidence_type,
+        "trust_state": record.trust_state,
+        "normalized_public_base_url": record.normalized_public_base_url,
+        "provider_model_id": record.provider_model_id,
+        "model_id": record.model_id,
+        "method_id": record.method_id,
+        "request_mapper_id": record.request_mapper_id,
+        "probe_status": record.probe_status,
+        "capability_family": record.capability_family,
+    }
+    canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return f"sha256:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
 
 
 class ProviderImportDraft(BaseModel):

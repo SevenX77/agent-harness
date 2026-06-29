@@ -102,14 +102,14 @@ export function CenterActionBar({ stage, onCompile, onPredict, onRun }: CenterAc
   return (
     <div
       data-studio-center-action-bar="true"
-      className="studio-center-action-bar fixed bottom-6 left-1/2 z-40 inline-flex -translate-x-1/2 items-center gap-1 rounded-md border px-1.5 py-1"
+      className="studio-center-action-bar fixed bottom-6 left-1/2 z-40 inline-flex -translate-x-1/2 items-center gap-0 rounded-full border p-1"
     >
       <Button
         variant="ghost"
         size="default"
         disabled={d.compileDisabled}
         onClick={onCompile}
-        className={`studio-center-action-button h-9 gap-1.5 rounded-md px-3.5 text-xs ${d.compileHighlight ? "studio-center-action-button--active" : ""}`}
+        className={`studio-center-action-button h-10 gap-1.5 rounded-full px-4 text-xs ${d.compileHighlight ? "studio-center-action-button--active" : ""}`}
       >
         <Hammer className="size-3.5" />
         Compile
@@ -120,7 +120,7 @@ export function CenterActionBar({ stage, onCompile, onPredict, onRun }: CenterAc
           size="default"
           disabled={d.predictDisabled}
           onClick={onPredict}
-          className={`studio-center-action-button h-9 gap-1.5 rounded-md px-3.5 text-xs ${d.predictHighlight ? "studio-center-action-button--active" : ""}`}
+          className={`studio-center-action-button h-10 gap-1.5 rounded-full px-4 text-xs ${d.predictHighlight ? "studio-center-action-button--active" : ""}`}
         >
           <Zap className="size-3.5" />
           Predict
@@ -132,7 +132,7 @@ export function CenterActionBar({ stage, onCompile, onPredict, onRun }: CenterAc
           size="default"
           disabled={d.runDisabled}
           onClick={onRun}
-          className={`studio-center-action-button h-9 gap-1.5 rounded-md px-3.5 text-xs ${d.runHighlight ? "studio-center-action-button--active" : ""}`}
+          className={`studio-center-action-button h-10 gap-1.5 rounded-full px-4 text-xs ${d.runHighlight ? "studio-center-action-button--active" : ""}`}
         >
           <Play fill="currentColor" className="size-3.5" />
           Run

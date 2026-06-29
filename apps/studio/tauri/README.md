@@ -37,8 +37,8 @@ apps/studio/tauri/
 同时让 Tauri sidecar 拉起动态端口的 FastAPI 后端。
 
 ```bash
-cd apps/studio/tauri
-cargo tauri dev
+# from repo root
+powershell -ExecutionPolicy Bypass -File .\scripts\studio-dev.ps1
 ```
 
 默认配置来自 `apps/studio/tauri/tauri.conf.json`:

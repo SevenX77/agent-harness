@@ -26,21 +26,6 @@ def roles_path() -> Path:
     )
 
 
-def import_drafts_path() -> Path:
-    """Return the legacy import-drafts path alias for the probe catalog."""
-    return probe_catalog_path()
-
-
-def probe_catalog_path() -> Path:
-    """Return the active Studio LLM probe knowledge catalog path."""
-    override = os.environ.get("STUDIO_LLM_PROBE_CATALOG_PATH") or os.environ.get(
-        "STUDIO_LLM_IMPORT_DRAFTS_PATH"
-    )
-    if override:
-        return Path(override).expanduser()
-    return config.APP_SETTINGS_DIR / _LLM_SETTINGS_DIR / "llm_probe_catalog.json"
-
-
 def role_test_results_path() -> Path:
     """Return the active Studio LLM role/copilot test-result store path."""
     return _env_or_default(
@@ -57,22 +42,6 @@ def canonical_rules_path() -> Path:
     )
 
 
-def community_upload_queue_path() -> Path:
-    """Return the offline retry queue path for community catalog uploads."""
-    return _env_or_default(
-        "STUDIO_COMMUNITY_UPLOAD_QUEUE_PATH",
-        "community_upload_queue.json",
-    )
-
-
-def community_catalog_cache_path() -> Path:
-    """Return the disposable verified-sync cache path (isolated from evidence)."""
-    return _env_or_default(
-        "STUDIO_COMMUNITY_CATALOG_CACHE_PATH",
-        "community_catalog_cache.json",
-    )
-
-
 def _env_or_default(env_name: str, filename: str) -> Path:
     override = os.environ.get(env_name)
     if override:
@@ -82,11 +51,7 @@ def _env_or_default(env_name: str, filename: str) -> Path:
 
 __all__ = [
     "canonical_rules_path",
-    "community_catalog_cache_path",
-    "community_upload_queue_path",
     "credentials_path",
-    "import_drafts_path",
-    "probe_catalog_path",
     "role_test_results_path",
     "roles_path",
 ]

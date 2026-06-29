@@ -54,7 +54,11 @@ io:
               type: object
           metadata:
             type: object
-phases: [setup, aggregate, review, settings]
+phases:
+  - setup
+  - aggregate
+  - review
+  - settings
 ---
 <phase depends_on="input">setup</phase>
 <phase depends_on="setup">aggregate</phase>

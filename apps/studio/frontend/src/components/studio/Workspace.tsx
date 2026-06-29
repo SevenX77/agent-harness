@@ -3,7 +3,8 @@ import type { Connection } from "@xyflow/react"
 import { toast } from "sonner"
 import useSWR from "swr"
 import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
-import { GraphCanvas, type SkillGraphNodeData } from "@/components/GraphCanvas"
+import { GraphCanvas, type ChildDetailPatch, type SkillGraphNodeData } from "@/components/GraphCanvas"
+import { buildNodes } from "@/components/GraphCanvas/build-nodes"
 import { CopilotPanel } from "@/components/copilot/copilot-panel"
 import { copilotFileActionEffects, type CopilotFileAction } from "@/components/copilot/patch-proposed-bubble"
 import { PromptInspector } from "@/components/PromptInspector"
@@ -19,14 +20,19 @@ import type { CopilotJudgeResponse, ResumeRunOptions } from "@/api/client"
 import type { TraceHitlResumeRequest } from "@/components/TracePanel"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
 import { compileSkill, fetcher, getCompareGroup, getResumeValidity, getSkillDetail, resolveRunInput, serializeSkillGraph, writeSkillFile, wsUrl, postPredictRun, startRun, resumeRun } from "@/api/client"
-import type { CompareCandidateRun, GoldenBaseline, LintResult, ResumeValidityResponse, SerializableGraphPhaseRef, SkillDetail } from "@/api/types"
+import type { CompareCandidateRun, GoldenBaseline, GraphTopologyItem, LintResult, ResumeValidityResponse, SerializableGraphPhaseRef, SkillDetail } from "@/api/types"
 import { compareTabsFromGroup } from "./run-compare"
 import { isTauriRuntime } from "@/config/runtime"
+import { CURRENT_SCHEMA_VERSION } from "@/config/schema"
 import { deleteWorkspacePath, listWorkspaceDir, moveWorkspacePath, readWorkspaceFile, writeWorkspaceFile } from "@/lib/tauri"
 import { errorMessage } from "@/utils/errors"
 import type { CompileError } from "@/api/types"
 import { connectPhaseRefs, createPhaseDraft, disconnectPhaseRefs, orphanPhaseDirectoryIds, phaseDirectoryPath, phaseFilePath, phaseRefsFromSkillDetail, reconnectPhaseRefs, removePhaseRefs, renamePhaseRefs, type NewPhaseKind } from "@/components/GraphCanvas/canvas-authoring"
+import { autoCreatedSubgraphChildDir, defaultSubgraphChildDir, subgraphChildScaffoldFiles } from "@/components/studio/subgraph-scaffold"
 import { isReadOnlySkillError, type ChildSaveTarget } from "@/components/GraphCanvas/drill-edit"
+import { actionFilePath, actionStubContent, applyActionsList, isValidActionName, readActionsList } from "@/components/studio/panels/phase-actions"
+import { applyPhaseValidator } from "@/components/studio/panels/phase-frontmatter"
+import { validatorFilePath, validatorStubContent } from "@/components/studio/panels/phase-validator"
 import { sha256Hex } from "@/lib/hash"
 import { CenterActionBar, type SkillBuildStage } from "./center-action-bar"
 import { deriveNodeErrorMessages, deriveNodeStatuses } from "./node-status"
@@ -45,7 +51,10 @@ import { WorkspaceEditorOverlay } from "./WorkspaceEditorOverlay"
 import { WorkspaceLeftPanelOverlay } from "./WorkspaceLeftPanelOverlay"
 import { WorkspaceRightPanelOverlay } from "./WorkspaceRightPanelOverlay"
 import { applyPhaseName } from "./panels/phase-frontmatter"
-import type { FileOpenInput } from "./file-types"
+import { useSkillSubgraphMembershipTree } from "./panels/use-subgraph-membership-tree"
+import { useWorkspaceDirectoryTree } from "./panels/use-workspace-directory-tree"
+import type { FileMeta, FileOpenInput } from "./file-types"
+import { phaseIdFromFilePath } from "./panels/asset-tree-target"
 import { conflictFromSaveError, isSameSaveConflict, overwriteRetryPayload } from "./save-conflicts"
 import {
   WorkspaceProvider,
@@ -65,6 +74,75 @@ interface WorkspaceProps {
 
 const MINI_MAP_TOOL_SPACE_THRESHOLD_PX = 300
 
+function skillDetailWithFile(detail: SkillDetail, path: string, content: string): SkillDetail {
+  return {
+    ...detail,
+    files: {
+      ...(detail.files ?? {}),
+      [path]: content,
+    },
+  }
+}
+
+function skillDetailWithRenamedPhase(
+  detail: SkillDetail,
+  phases: SerializableGraphPhaseRef[],
+  options: {
+    oldPhaseId: string
+    nextPhaseId: string
+    oldFilePath: string
+    newFilePath: string
+    renamedContent: string
+    graphContent: string
+  },
+): SkillDetail {
+  const files = { ...(detail.files ?? {}) }
+  delete files[options.oldFilePath]
+  files[options.newFilePath] = options.renamedContent
+  files["GRAPH.md"] = options.graphContent
+
+  const filePaths = { ...detail.file_paths }
+  if (options.oldFilePath in filePaths) {
+    filePaths[options.newFilePath] = filePaths[options.oldFilePath]
+    delete filePaths[options.oldFilePath]
+  }
+
+  const existingTopologyById = new Map((detail.graph_topology ?? []).map((phase) => [phase.id, phase]))
+  const graphTopology: GraphTopologyItem[] = phases.map((phase) => {
+    const existing = existingTopologyById.get(phase.id)
+      ?? (phase.id === options.nextPhaseId ? existingTopologyById.get(options.oldPhaseId) : undefined)
+    return {
+      ...existing,
+      id: phase.id,
+      src: phase.src,
+      depends_on: phase.depends_on,
+      mode: phase.mode,
+      ...(phase.output === true ? { output: true } : { output: undefined }),
+    }
+  })
+
+  return {
+    ...detail,
+    manifest: detail.manifest.schema_version === CURRENT_SCHEMA_VERSION
+      ? { ...detail.manifest, phases: phases.map((phase) => phase.id) }
+      : detail.manifest,
+    graph_topology: graphTopology,
+    file_paths: filePaths,
+    files,
+  }
+}
+
+function selectedNodeMatchesTarget(
+  node: { id: string; data: SkillGraphNodeData } | null,
+  target: ChildSaveTarget,
+): node is { id: string; data: SkillGraphNodeData } {
+  return Boolean(
+    node
+    && node.data.skillId === target.skillId
+    && (node.data.workspaceRoot ?? null) === target.workspaceRoot,
+  )
+}
+
 export function hasMiniMapToolSpace(
   centerActionBarRect: Pick<DOMRect, "right"> | null,
   rightOverlayRect: Pick<DOMRect, "left"> | null,
@@ -76,11 +154,19 @@ export function hasMiniMapToolSpace(
 }
 
 function useMiniMapToolSpace(copilotOpen: boolean, currentSkillId: string | null, settingsOpen: boolean): boolean {
-  const [hasSpace, setHasSpace] = useState(true)
+  const measurementKey = copilotOpen && currentSkillId && !settingsOpen ? currentSkillId : null
+  const [measurement, setMeasurement] = useState<{ key: string | null; hasSpace: boolean }>({
+    key: null,
+    hasSpace: true,
+  })
 
   useLayoutEffect(() => {
-    if (!copilotOpen || !currentSkillId || settingsOpen) {
-      setHasSpace(true)
+    if (!measurementKey) {
+      setMeasurement((current) => (
+        current.key === null && current.hasSpace
+          ? current
+          : { key: null, hasSpace: true }
+      ))
       return
     }
 
@@ -89,10 +175,13 @@ function useMiniMapToolSpace(copilotOpen: boolean, currentSkillId: string | null
       frameId = 0
       const actionBar = document.querySelector<HTMLElement>('[data-studio-center-action-bar="true"]')
       const rightOverlay = document.querySelector<HTMLElement>('[data-studio-right-overlay="true"]')
-      setHasSpace(hasMiniMapToolSpace(
-        actionBar?.getBoundingClientRect() ?? null,
-        rightOverlay?.getBoundingClientRect() ?? null,
-      ))
+      setMeasurement({
+        key: measurementKey,
+        hasSpace: hasMiniMapToolSpace(
+          actionBar?.getBoundingClientRect() ?? null,
+          rightOverlay?.getBoundingClientRect() ?? null,
+        ),
+      })
     }
     const scheduleMeasure = () => {
       if (frameId === 0) {
@@ -115,9 +204,13 @@ function useMiniMapToolSpace(copilotOpen: boolean, currentSkillId: string | null
         window.cancelAnimationFrame(frameId)
       }
     }
-  }, [copilotOpen, currentSkillId, settingsOpen])
+  }, [measurementKey])
 
-  return hasSpace
+  if (!measurementKey) {
+    return true
+  }
+
+  return measurement.key === measurementKey ? measurement.hasSpace : false
 }
 
 interface CopilotJudgeReplayContext {
@@ -181,10 +274,30 @@ export function compareReplayArgsForJudgeResult(
   }
 }
 
+/**
+ * Optimistic-concurrency hash for a GRAPH.md snapshot.
+ *
+ * The backend reads GRAPH.md through a pipeline that normalizes line endings to
+ * LF before hashing (verified: serialize's `current_hash` == sha256 of the
+ * LF-normalized file). On Windows, git's autocrlf checks the file out as CRLF,
+ * so hashing the RAW bytes yields a digest that never matches the backend's —
+ * and every canvas save 409s with snapshot_conflict. Normalizing to LF here is
+ * the single source of agreement between the two sides.
+ */
+function graphSnapshotHash(content: string): Promise<string> {
+  return sha256Hex(normalizeWorkspaceText(content))
+}
+
 export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspaceProps) {
   const [navStack, setNavStack] = useState<string[]>(() => (skillId ? [skillId] : []))
   const [activePanel, setActivePanel] = useState<PanelKind | null>(skillId ? "assets" : null)
   const [copilotOpen, setCopilotOpen] = useState(Boolean(skillId))
+  // User-resizable overlay sizes (px). The editor height is null until first drag
+  // so it keeps the responsive CSS default (min(52%, 34rem)) until then. These
+  // feed both the overlay sizes and the canvas safe-area vars, so fit-view tracks.
+  const [leftPanelWidth, setLeftPanelWidth] = useState(384)
+  const [copilotWidth, setCopilotWidth] = useState(352)
+  const [editorHeight, setEditorHeight] = useState<number | null>(null)
   const currentWorkspaceSelection = navStack.at(-1) ?? null
   const currentWorkspaceIdentity = useMemo(
     () => resolveWorkspaceIdentity(currentWorkspaceSelection),
@@ -213,11 +326,28 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedNode, setSelectedNode] = useState<{ id: string; data: SkillGraphNodeData } | null>(null)
+  const [childDetailPatch, setChildDetailPatch] = useState<ChildDetailPatch | null>(null)
   const [selectedEdge, setSelectedEdge] = useState<SelectedEdge | null>(null)
   const [inFlight, setInFlight] = useState<Partial<Record<EditorSide, boolean>>>({})
   const inFlightRef = useRef<Partial<Record<EditorSide, boolean>>>({})
   const [conflict, setConflict] = useState<SaveConflict | null>(null)
   const { skillDetail, skillDetailError, mutateSkillDetail } = useSkills(currentSkillId)
+  const assetDirectoryTree = useWorkspaceDirectoryTree({
+    workspaceRoot: currentWorkspaceRoot ?? currentSkillId,
+    skillId: currentSkillId,
+    skillDetail,
+    enabled: Boolean(currentSkillId),
+  })
+  const assetSubgraphTree = useSkillSubgraphMembershipTree({
+    skillDetail,
+    workspaceRoot: currentWorkspaceRoot ?? currentSkillId,
+    enabled: Boolean(currentSkillId),
+  })
+  // Read the asset tree through a ref inside the WS file-change handler so live
+  // tree refresh doesn't add the (frequently-changing) tree to that effect's deps
+  // and thrash the WebSocket connection.
+  const assetDirectoryTreeRef = useRef(assetDirectoryTree)
+  assetDirectoryTreeRef.current = assetDirectoryTree
   const isLoading = useMemo(() => Boolean(currentSkillId && !skillDetail && !skillDetailError), [skillDetail, skillDetailError, currentSkillId])
   const [compileStages, setCompileStages] = useState<Record<string, SkillBuildStage>>({})
   const [compileErrors, setCompileErrors] = useState<Record<string, CompileError[]>>({})
@@ -517,6 +647,57 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     setSelectedEdge(null)
   }
 
+  // Reverse of the node→file reveal: clicking a node-definition file in the
+  // Assets tree selects its canvas node. Only the open skill's own graph is on
+  // the root canvas, so files belonging to a child/subgraph skill are skipped.
+  // buildNodes is reused (the canvas's own builder) so the selected node's data
+  // matches a real click — no hand-rolled node shape that could drift.
+  // Center the canvas on a root-graph node when its file is clicked (file-driven
+  // only — a nonce-bumped request GraphCanvas pans to, leaving selection alone).
+  const focusNodeNonceRef = useRef(0)
+  const [focusNodeRequest, setFocusNodeRequest] = useState<{ nodeId: string; nonce: number } | null>(null)
+  const handleRevealNodeForFile = useCallback((file: FileMeta) => {
+    if (!currentSkillId || !skillDetail) return
+    if (file.skillId && file.skillId !== currentSkillId) return
+    const phaseId = phaseIdFromFilePath(file.path)
+    if (!phaseId) return
+    const nodes = buildNodes(currentSkillId, skillDetail, new Set(), () => {}, {}, {}, {}, {}, {}, currentWorkspaceRoot ?? null)
+    const match = nodes.find(
+      (node) => node.type === "skill" && (node.data as SkillGraphNodeData).phaseId === phaseId,
+    )
+    if (!match) return
+    setSelectedNodeId(phaseId)
+    setSelectedNode({ id: phaseId, data: match.data as SkillGraphNodeData })
+    setSelectedEdge(null)
+    focusNodeNonceRef.current += 1
+    setFocusNodeRequest({ nodeId: phaseId, nonce: focusNodeNonceRef.current })
+  }, [currentSkillId, currentWorkspaceRoot, skillDetail])
+
+  // Reveal something inside a subgraph's inline canvas topology, driven by an
+  // Assets file click. Forwarded to GraphCanvas as a nonce-bumped request so it
+  // can expand (+ optionally select) once the (possibly nested) preview node
+  // resolves: `select-child` for a child node file, `expand-subgraph` for the
+  // subgraph's own GRAPH.md (which also deselects any node).
+  const revealNonceRef = useRef(0)
+  const [revealRequest, setRevealRequest] = useState<
+    { phaseChain: string[]; intent: "select-child" | "expand-subgraph"; nonce: number } | null
+  >(null)
+  const handleRevealSubgraphChildNode = useCallback((phaseChain: string[]) => {
+    if (phaseChain.length < 2) return
+    revealNonceRef.current += 1
+    setRevealRequest({ phaseChain, intent: "select-child", nonce: revealNonceRef.current })
+  }, [])
+  const handleRevealSubgraphGraph = useCallback((phaseChain: string[]) => {
+    if (phaseChain.length < 1) return
+    // Opening a subgraph's GRAPH.md is a graph-level action: drop the node
+    // selection so the editor/Properties reflect the graph, not a stale node.
+    setSelectedNodeId(null)
+    setSelectedNode(null)
+    setSelectedEdge(null)
+    revealNonceRef.current += 1
+    setRevealRequest({ phaseChain, intent: "expand-subgraph", nonce: revealNonceRef.current })
+  }, [])
+
   const toOpenFile = useCallback(async (fileOrPath: FileOpenInput): Promise<OpenFile | null> => {
     if (!currentSkillId) return null
     const currentFiles = skillDetail?.files ?? {}
@@ -585,6 +766,43 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       return current[remainingSide] ? { left: current[remainingSide] } : {}
     })
   }, [])
+
+  // Remember the last panel the user had open so re-opening a selected node
+  // restores THAT panel instead of always snapping to Properties.
+  const lastPanelKindRef = useRef<PanelKind>("properties")
+  useEffect(() => {
+    if (activePanel) lastPanelKindRef.current = activePanel
+  }, [activePanel])
+  const openSelectedNodePanel = useCallback(() => {
+    setActivePanel(lastPanelKindRef.current)
+  }, [])
+
+  // Close every open file editor (both split sides) — used when clicking empty
+  // canvas clears the workspace.
+  const closeAllEditors = useCallback(() => {
+    setActiveFileDetails({})
+    setInFlight({})
+    setSplitMode(false)
+  }, [])
+
+  // Header title: single-click clears the node selection and shows the
+  // graph.md / global panel; double-click opens graph.md in the editor.
+  const handleTitleSelect = useCallback(() => {
+    setSelectedNodeId(null)
+    setSelectedNode(null)
+    setSelectedEdge(null)
+    setActivePanel("properties")
+  }, [])
+  const handleTitleEdit = useCallback(() => {
+    if (!currentSkillId) return
+    handleFileOpen({
+      path: "GRAPH.md",
+      skillId: currentSkillId,
+      workspaceRoot: currentWorkspaceRoot,
+      language: "markdown",
+      saveEnabled: true,
+    })
+  }, [currentSkillId, currentWorkspaceRoot, handleFileOpen])
 
   const updateFileContent = useCallback((side: EditorSide, content: string) => {
     setActiveFileDetails((current) => {
@@ -682,6 +900,31 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     return await doReadWorkspaceFile(path, target)
   }, [doReadWorkspaceFile])
 
+  // Optimistic-concurrency hash for canvas serialize/save, read from the ONE
+  // source of truth: the GRAPH.md file on disk. native-fs D10/D12 makes the Rust
+  // native command the local read authority, so the parent graph and a drilled
+  // child read the SAME way — only `override` (which skill) differs, so their
+  // behaviour is identical (no "trusted parent / untrusted child" split). Line
+  // endings are normalized to LF (via normalizeWorkspaceText) so the hash matches
+  // the backend serializer, which reads GRAPH.md through Python text mode → LF.
+  // The browser dev/test runtime has no native-fs, so fall back to the fetched
+  // in-memory copy (which the backend already served as LF).
+  const readGraphHash = useCallback(async (
+    editDetail: SkillDetail,
+    override?: { skillId: string; workspaceRoot: string | null },
+  ): Promise<string | null> => {
+    if (isTauriRuntime()) {
+      try {
+        const graph = await doReadWorkspaceFile("GRAPH.md", override)
+        return await graphSnapshotHash(graph.content)
+      } catch {
+        return null
+      }
+    }
+    const graphContent = editDetail.files?.["GRAPH.md"]
+    return graphContent === undefined ? null : await graphSnapshotHash(graphContent)
+  }, [doReadWorkspaceFile])
+
   const doListWorkspaceDir = useCallback(async (
     path: string,
     override?: { skillId: string; workspaceRoot: string | null },
@@ -771,6 +1014,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     if (target) {
       try {
         const result = await doWriteSkillFile(path, content, expectedHash, { skillId: target.skillId, workspaceRoot: target.workspaceRoot })
+        const updatedDetail = skillDetailWithFile(target.detail, path, content)
         setActiveFileDetails((current) => {
           const next = { ...current }
           for (const side of ["left", "right"] as const) {
@@ -784,6 +1028,17 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
             }
           }
           return next
+        })
+        setSelectedNode((current) => (
+          selectedNodeMatchesTarget(current, target)
+            ? { ...current, data: { ...current.data, resolvedSkillDetail: updatedDetail } }
+            : current
+        ))
+        setChildDetailPatch({
+          skillId: target.skillId,
+          workspaceRoot: target.workspaceRoot,
+          detail: updatedDetail,
+          revision: Date.now(),
         })
         toast.success("Saved phase properties")
         clearStaleCompileProjection(target.skillId)
@@ -819,35 +1074,230 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     void mutateSkillDetail()
   }, [clearStaleCompileProjection, currentSkillId, doWriteSkillFile, mutateSkillDetail])
 
-  const handleCreatePhase = useCallback(async (kind: NewPhaseKind, requestedPhaseId?: string) => {
-    if (!currentSkillId || !skillDetail) {
+  // Add a LOGIC action: scaffold `phases/<id>/actions/<name>.py` (one action per
+  // file, function name = action name — project convention, copilot.py), keep the
+  // LOGIC.md frontmatter `actions:` and body `<action>` tags in sync (engine
+  // requires they match), then open the new file for editing.
+  const handleActionCreate = useCallback(async (phaseId: string, name: string, target?: ChildSaveTarget) => {
+    const editDetail = target?.detail ?? skillDetail
+    const targetSkillId = target?.skillId ?? currentSkillId
+    const override = target ? { skillId: target.skillId, workspaceRoot: target.workspaceRoot } : undefined
+    if (!targetSkillId || !editDetail) {
+      toast.error("Open a skill before adding an action")
+      return
+    }
+    const trimmed = name.trim()
+    if (!isValidActionName(trimmed)) {
+      toast.error("Action name must be a Python identifier (letters, digits, underscore; not starting with a digit).")
+      return
+    }
+    const logicPath = `phases/${phaseId}/LOGIC.md`
+    const logicContent = editDetail.files?.[logicPath]
+    if (logicContent === undefined) {
+      toast.error(`Phase file is missing: ${logicPath}`)
+      return
+    }
+    const current = readActionsList(logicContent)
+    if (current.includes(trimmed)) {
+      toast.error(`Action ${trimmed} already exists`)
+      return
+    }
+    const applied = applyActionsList(logicContent, [...current, trimmed])
+    if (!applied.ok) {
+      toast.error(applied.message)
+      return
+    }
+    const pyPath = actionFilePath(phaseId, trimmed)
+    let createdPy = false
+    try {
+      await doWriteSkillFile(pyPath, actionStubContent(trimmed), null, override, { createIfAbsent: true })
+      createdPy = true
+      await doWriteSkillFile(logicPath, applied.markdown, await sha256Hex(logicContent), override)
+      clearStaleCompileProjection(targetSkillId)
+      toast.success(`Created action ${trimmed}`)
+      // Open the new file in the SAME skill the node lives in (child subgraph when
+      // drilled) — pass skillId/workspaceRoot so it doesn't resolve against root.
+      handleFileOpen({
+        path: pyPath,
+        skillId: targetSkillId,
+        workspaceRoot: override ? override.workspaceRoot : currentWorkspaceRoot,
+        language: "python",
+        saveEnabled: true,
+      })
+      if (target) await target.onSettled()
+      else await mutateSkillDetail()
+    } catch (error) {
+      if (createdPy) {
+        try {
+          await doDeleteWorkspacePath(pyPath, override)
+        } catch (rollbackError) {
+          toast.warning(`Could not clean up ${pyPath}: ${errorMessage(rollbackError)}`)
+        }
+      }
+      toast.error(isReadOnlySkillError(error) ? "This skill is read-only — fork it into your workspace to edit." : errorMessage(error))
+      if (target) void target.onSettled()
+      else void mutateSkillDetail()
+    }
+  }, [clearStaleCompileProjection, currentSkillId, currentWorkspaceRoot, doDeleteWorkspacePath, doWriteSkillFile, handleFileOpen, mutateSkillDetail, skillDetail])
+
+  // Create a phase validator: scaffold the sibling `phases/<id>/validator.py` from a
+  // passing stub (engine `def validate(output, state_slice, **kwargs)` contract) AND
+  // flip the node file's `validator: true`, then open the file. Shared by all three
+  // phase kinds (the flag lives on SKILL/LOGIC/SUBGRAPH.md). Mirrors handleActionCreate's
+  // write-then-sync + rollback shape.
+  const handleValidatorCreate = useCallback(async (phaseId: string, target?: ChildSaveTarget) => {
+    const editDetail = target?.detail ?? skillDetail
+    const targetSkillId = target?.skillId ?? currentSkillId
+    const override = target ? { skillId: target.skillId, workspaceRoot: target.workspaceRoot } : undefined
+    if (!targetSkillId || !editDetail) {
+      toast.error("Open a skill before adding a validator")
+      return
+    }
+    const phase = phaseRefsFromSkillDetail(editDetail).find((entry) => entry.id === phaseId)
+    if (!phase) {
+      toast.error("Phase not found")
+      return
+    }
+    const phasePath = phaseFilePath(phaseId, phase.mode)
+    const phaseContent = editDetail.files?.[phasePath]
+    if (phaseContent === undefined) {
+      toast.error(`Phase file is missing: ${phasePath}`)
+      return
+    }
+    const enabled = applyPhaseValidator(phaseContent, true)
+    if (!enabled.ok) {
+      toast.error(enabled.message)
+      return
+    }
+    const pyPath = validatorFilePath(phaseId)
+    let createdPy = false
+    try {
+      await doWriteSkillFile(pyPath, validatorStubContent(), null, override, { createIfAbsent: true })
+      createdPy = true
+      await doWriteSkillFile(phasePath, enabled.markdown, await sha256Hex(phaseContent), override)
+      clearStaleCompileProjection(targetSkillId)
+      toast.success("Created validator.py")
+      handleFileOpen({
+        path: pyPath,
+        skillId: targetSkillId,
+        workspaceRoot: override ? override.workspaceRoot : currentWorkspaceRoot,
+        language: "python",
+        saveEnabled: true,
+      })
+      if (target) await target.onSettled()
+      else await mutateSkillDetail()
+    } catch (error) {
+      if (createdPy) {
+        try {
+          await doDeleteWorkspacePath(pyPath, override)
+        } catch (rollbackError) {
+          toast.warning(`Could not clean up ${pyPath}: ${errorMessage(rollbackError)}`)
+        }
+      }
+      toast.error(isReadOnlySkillError(error) ? "This skill is read-only — fork it into your workspace to edit." : errorMessage(error))
+      if (target) void target.onSettled()
+      else void mutateSkillDetail()
+    }
+  }, [clearStaleCompileProjection, currentSkillId, currentWorkspaceRoot, doDeleteWorkspacePath, doWriteSkillFile, handleFileOpen, mutateSkillDetail, skillDetail])
+
+  // Delete a LOGIC action: drop it from LOGIC.md frontmatter + body (kept in sync)
+  // and remove its `actions/<name>.py` file when present.
+  const handleActionDelete = useCallback(async (phaseId: string, name: string, target?: ChildSaveTarget) => {
+    const editDetail = target?.detail ?? skillDetail
+    const targetSkillId = target?.skillId ?? currentSkillId
+    const override = target ? { skillId: target.skillId, workspaceRoot: target.workspaceRoot } : undefined
+    if (!targetSkillId || !editDetail) {
+      toast.error("Open a skill before deleting an action")
+      return
+    }
+    const logicPath = `phases/${phaseId}/LOGIC.md`
+    const logicContent = editDetail.files?.[logicPath]
+    if (logicContent === undefined) {
+      toast.error(`Phase file is missing: ${logicPath}`)
+      return
+    }
+    const current = readActionsList(logicContent)
+    const applied = applyActionsList(logicContent, current.filter((entry) => entry !== name))
+    if (!applied.ok) {
+      toast.error(applied.message)
+      return
+    }
+    const pyPath = actionFilePath(phaseId, name)
+    const hasFile = editDetail.files?.[pyPath] !== undefined
+    try {
+      await doWriteSkillFile(logicPath, applied.markdown, await sha256Hex(logicContent), override)
+      if (hasFile) {
+        await doDeleteWorkspacePath(pyPath, override)
+      }
+      clearStaleCompileProjection(targetSkillId)
+      toast.success(`Deleted action ${name}`)
+      if (target) await target.onSettled()
+      else await mutateSkillDetail()
+    } catch (error) {
+      toast.error(isReadOnlySkillError(error) ? "This skill is read-only — fork it into your workspace to edit." : errorMessage(error))
+      if (target) void target.onSettled()
+      else void mutateSkillDetail()
+    }
+  }, [clearStaleCompileProjection, currentSkillId, doDeleteWorkspacePath, doWriteSkillFile, mutateSkillDetail, skillDetail])
+
+  const handleCreatePhase = useCallback(async (kind: NewPhaseKind, requestedPhaseId?: string, target?: ChildSaveTarget) => {
+    // Drilled-child create mirrors handleDeletePhase: when a child target is given,
+    // edit/serialize the CHILD's detail and write through its override so a node
+    // created inside a drilled subgraph lands in the child's GRAPH.md, not the root's.
+    const editDetail = target?.detail ?? skillDetail
+    if (!currentSkillId || !editDetail) {
       toast.error("Open a skill before creating a phase")
       return
     }
-    const graphContent = skillDetail.files?.["GRAPH.md"]
-    const graphHash = graphContent === undefined ? null : await sha256Hex(graphContent)
-    const draft = createPhaseDraft(skillDetail, kind, [], requestedPhaseId)
+    const targetSkillId = target?.skillId ?? currentSkillId
+    const override = target ? { skillId: target.skillId, workspaceRoot: target.workspaceRoot } : undefined
+    // Optimistic-concurrency hash for serialize, read from the ONE source of
+    // truth: the GRAPH.md file on disk. Parent graph and drilled child go through
+    // the identical readGraphHash path; only `override` (which skill) differs.
+    const graphHash = await readGraphHash(editDetail, override)
+    const draft = createPhaseDraft(editDetail, kind, [], requestedPhaseId)
     let createdPhaseDir: string | null = null
+    let createdSubgraphChildDir: string | null = null
     try {
-      await doWriteSkillFile(draft.filePath, draft.fileContent, null, undefined, { createIfAbsent: true })
+      await doWriteSkillFile(draft.filePath, draft.fileContent, null, override, { createIfAbsent: true })
       createdPhaseDir = phaseDirectoryPath(draft.phaseId)
-      const serialized = await serializeSkillGraph(currentSkillId, draft.phases, graphHash)
-      await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash)
-      clearStaleCompileProjection(currentSkillId)
+      // A new subgraph phase auto-scaffolds a standard child skill at its default
+      // landing (subgraph/<phaseId>) so the SUBGRAPH.md `path:` resolves immediately
+      // (graph-authoring F4 / engine FORMAT-GROUND-TRUTH §1/§4). Folder writes go
+      // through the native-fs sole writer (D12), so this is desktop-runtime only; the
+      // browser fallback keeps the bare reference and lets the author point it later.
+      if (kind === "subgraph" && isTauriRuntime()) {
+        const childDir = defaultSubgraphChildDir(draft.phaseId)
+        for (const file of subgraphChildScaffoldFiles(childDir, draft.phaseId)) {
+          await doWriteSkillFile(file.path, file.content, null, override, { createIfAbsent: true })
+          // Mark the dir for rollback only once the first create-if-absent write
+          // succeeds: that proves the folder did not pre-exist (so it is ours to
+          // remove), while a collision on the first file leaves it untouched.
+          createdSubgraphChildDir = childDir
+        }
+      }
+      const serialized = override
+        ? await serializeSkillGraph(targetSkillId, draft.phases, graphHash, override.workspaceRoot)
+        : await serializeSkillGraph(targetSkillId, draft.phases, graphHash)
+      await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash, override)
+      clearStaleCompileProjection(targetSkillId)
       toast.success(`Created ${draft.phaseId}`)
-      await mutateSkillDetail()
+      if (target) await target.onSettled()
+      else await mutateSkillDetail()
     } catch (error) {
-      if (createdPhaseDir) {
+      for (const createdDir of [createdSubgraphChildDir, createdPhaseDir]) {
+        if (!createdDir) continue
         try {
-          await doDeleteWorkspacePath(createdPhaseDir)
+          await doDeleteWorkspacePath(createdDir, override)
         } catch (rollbackError) {
-          toast.warning(`Could not clean up ${createdPhaseDir}: ${errorMessage(rollbackError)}`)
+          toast.warning(`Could not clean up ${createdDir}: ${errorMessage(rollbackError)}`)
         }
       }
       toast.error(errorMessage(error))
-      void mutateSkillDetail()
+      if (target) void target.onSettled()
+      else void mutateSkillDetail()
     }
-  }, [clearStaleCompileProjection, currentSkillId, doDeleteWorkspacePath, doWriteSkillFile, mutateSkillDetail, skillDetail])
+  }, [clearStaleCompileProjection, currentSkillId, doDeleteWorkspacePath, doWriteSkillFile, mutateSkillDetail, readGraphHash, skillDetail])
 
   const handleDeletePhase = useCallback(async (phaseId: string, target?: ChildSaveTarget) => {
     const editDetail = target?.detail ?? skillDetail
@@ -863,17 +1313,39 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
 
     const targetSkillId = target?.skillId ?? currentSkillId
     const override = target ? { skillId: target.skillId, workspaceRoot: target.workspaceRoot } : undefined
-    const graphContent = editDetail.files?.["GRAPH.md"]
-    const graphHash = graphContent === undefined ? null : await sha256Hex(graphContent)
+    const graphHash = await readGraphHash(editDetail, override)
     const phaseDirsToDelete = [
       phaseId,
       ...orphanPhaseDirectoryIds(editDetail, result.phases).filter((orphanId) => orphanId !== phaseId),
     ]
+    // Mirror of create: a subgraph phase auto-scaffolds its child graph at
+    // subgraph/<phaseId>, so deleting that phase also removes the child folder —
+    // but ONLY when the path is still the auto-created default shape. A re-pointed
+    // absolute/external/shared path (D7 "随便放哪里") is left untouched so we never
+    // destroy a child graph Studio did not create.
+    const deletedRow = editDetail.graph_topology?.find((row) => row.id === phaseId)
+    const subgraphChildDirToDelete = deletedRow?.mode === "subgraph"
+      ? autoCreatedSubgraphChildDir(deletedRow.path)
+      : null
     try {
-      const serialized = await serializeSkillGraph(targetSkillId, result.phases, graphHash)
+      const serialized = override
+        ? await serializeSkillGraph(targetSkillId, result.phases, graphHash, override.workspaceRoot)
+        : await serializeSkillGraph(targetSkillId, result.phases, graphHash)
       await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash, override)
       for (const deletedPhaseId of phaseDirsToDelete) {
         await doDeleteWorkspacePath(phaseDirectoryPath(deletedPhaseId), override)
+      }
+      if (subgraphChildDirToDelete && isTauriRuntime()) {
+        // Best-effort: the phase is already gone from GRAPH.md, so a missing or
+        // un-removable child folder must not fail the whole delete. A not-found
+        // child (manually removed, or never scaffolded in browser mode) is a no-op.
+        try {
+          await doDeleteWorkspacePath(subgraphChildDirToDelete, override)
+        } catch (childDeleteError) {
+          if (!errorMessage(childDeleteError).toLowerCase().includes("not found")) {
+            toast.warning(`Could not delete subgraph folder ${subgraphChildDirToDelete}: ${errorMessage(childDeleteError)}`)
+          }
+        }
       }
       const verifiedGraph = await doReadWorkspaceFile("GRAPH.md", override)
       if (normalizeWorkspaceText(verifiedGraph.content) !== normalizeWorkspaceText(serialized.markdown_content)) {
@@ -917,28 +1389,31 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       }
       toast.error(errorMessage(error))
     }
-  }, [clearStaleCompileProjection, currentSkillId, doDeleteWorkspacePath, doListWorkspaceDir, doReadWorkspaceFile, doWriteSkillFile, mutateSkillDetail, skillDetail])
+  }, [clearStaleCompileProjection, currentSkillId, doDeleteWorkspacePath, doListWorkspaceDir, doReadWorkspaceFile, doWriteSkillFile, mutateSkillDetail, readGraphHash, skillDetail])
 
-  const handleRenamePhase = useCallback(async (phaseId: string, nextPhaseId: string) => {
-    if (!currentSkillId || !skillDetail) {
+  const handleRenamePhase = useCallback(async (phaseId: string, nextPhaseId: string, target?: ChildSaveTarget) => {
+    const editDetail = target?.detail ?? skillDetail
+    const targetSkillId = target?.skillId ?? currentSkillId
+    const override = target ? { skillId: target.skillId, workspaceRoot: target.workspaceRoot } : undefined
+    if (!targetSkillId || !editDetail) {
       toast.error("Open a skill before renaming a phase")
       return
     }
-    const result = renamePhaseRefs(skillDetail, phaseId, nextPhaseId)
+    const result = renamePhaseRefs(editDetail, phaseId, nextPhaseId)
     if (!result.ok) {
       toast.error(result.message)
       return
     }
 
     const nextId = nextPhaseId.trim()
-    const phase = phaseRefsFromSkillDetail(skillDetail).find((entry) => entry.id === phaseId)
+    const phase = phaseRefsFromSkillDetail(editDetail).find((entry) => entry.id === phaseId)
     if (!phase) {
       toast.error("Phase not found")
       return
     }
     const oldFilePath = phaseFilePath(phaseId, phase.mode)
     const newFilePath = phaseFilePath(nextId, phase.mode)
-    const oldContent = skillDetail.files?.[oldFilePath]
+    const oldContent = editDetail.files?.[oldFilePath]
     if (oldContent === undefined) {
       toast.error(`Phase file is missing: ${oldFilePath}`)
       return
@@ -949,20 +1424,31 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       return
     }
 
-    const graphContent = skillDetail.files?.["GRAPH.md"]
-    const graphHash = graphContent === undefined ? null : await sha256Hex(graphContent)
+    const graphHash = await readGraphHash(editDetail, override)
     const oldDir = phaseDirectoryPath(phaseId)
     const newDir = phaseDirectoryPath(nextId)
     let moved = false
     let phaseWriteHash: string | null = null
 
     try {
-      const serialized = await serializeSkillGraph(currentSkillId, result.phases, graphHash)
-      await doMoveWorkspacePath(oldDir, newDir)
+      const serialized = override
+        ? await serializeSkillGraph(targetSkillId, result.phases, graphHash, override.workspaceRoot)
+        : await serializeSkillGraph(targetSkillId, result.phases, graphHash)
+      await doMoveWorkspacePath(oldDir, newDir, override)
       moved = true
-      const phaseWrite = await doWriteSkillFile(newFilePath, renamedContent.markdown, await sha256Hex(oldContent))
+      const phaseWrite = await doWriteSkillFile(newFilePath, renamedContent.markdown, await sha256Hex(oldContent), override)
       phaseWriteHash = phaseWrite.hash
-      const graphWrite = await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash)
+      const graphWrite = await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash, override)
+      const updatedDetail = target
+        ? skillDetailWithRenamedPhase(editDetail, result.phases, {
+            oldPhaseId: phaseId,
+            nextPhaseId: nextId,
+            oldFilePath,
+            newFilePath,
+            renamedContent: renamedContent.markdown,
+            graphContent: serialized.markdown_content,
+          })
+        : null
       setSelectedNodeId((current) => current === phaseId ? nextId : current)
       setSelectedNode((current) => (
         current?.id === phaseId
@@ -973,6 +1459,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
               phaseId: nextId,
               label: nextId,
               filePath: newFilePath,
+              ...(updatedDetail ? { resolvedSkillDetail: updatedDetail } : {}),
             },
           }
           : current
@@ -983,7 +1470,11 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         const newPrefix = `${newDir}/`
         for (const side of ["left", "right"] as const) {
           const file = current[side]
-          if (!file || file.skillId !== currentSkillId) {
+          if (
+            !file
+            || file.skillId !== targetSkillId
+            || (target && file.workspaceRoot !== target.workspaceRoot)
+          ) {
             continue
           }
           if (file.path === "GRAPH.md") {
@@ -1013,24 +1504,43 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         }
         return next
       })
+      if (target && updatedDetail) {
+        setChildDetailPatch({
+          skillId: target.skillId,
+          workspaceRoot: target.workspaceRoot,
+          detail: updatedDetail,
+          revision: Date.now(),
+        })
+      }
       toast.success(`Renamed ${phaseId} to ${nextId}`)
-      clearStaleCompileProjection(currentSkillId)
-      await mutateSkillDetail()
+      clearStaleCompileProjection(targetSkillId)
+      if (target) {
+        await target.onSettled()
+      } else {
+        await mutateSkillDetail()
+      }
     } catch (error) {
       if (moved) {
         try {
           if (phaseWriteHash) {
-            await doWriteSkillFile(newFilePath, oldContent, phaseWriteHash)
+            await doWriteSkillFile(newFilePath, oldContent, phaseWriteHash, override)
           }
-          await doMoveWorkspacePath(newDir, oldDir)
+          await doMoveWorkspacePath(newDir, oldDir, override)
         } catch (rollbackError) {
           toast.warning(`Could not roll back phase folder rename: ${errorMessage(rollbackError)}`)
         }
       }
+      if (target && isReadOnlySkillError(error)) {
+        toast.error("This subgraph is read-only - fork it into your workspace to edit.")
+      }
       toast.error(errorMessage(error))
-      void mutateSkillDetail()
+      if (target) {
+        void target.onSettled()
+      } else {
+        void mutateSkillDetail()
+      }
     }
-  }, [clearStaleCompileProjection, currentSkillId, doMoveWorkspacePath, doWriteSkillFile, mutateSkillDetail, skillDetail])
+  }, [clearStaleCompileProjection, currentSkillId, doMoveWorkspacePath, doWriteSkillFile, mutateSkillDetail, readGraphHash, skillDetail])
 
   // Shared serialize -> write GRAPH.md -> settle tail for graph-structure edits
   // (connect / disconnect / reconnect). Compile stays an explicit user action so
@@ -1043,10 +1553,11 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   ) => {
     const targetSkillId = target?.skillId ?? parentSkillId
     const override = target ? { skillId: target.skillId, workspaceRoot: target.workspaceRoot } : undefined
-    const graphContent = editDetail.files?.["GRAPH.md"]
-    const graphHash = graphContent === undefined ? null : await sha256Hex(graphContent)
+    const graphHash = await readGraphHash(editDetail, override)
     try {
-      const serialized = await serializeSkillGraph(targetSkillId, phases, graphHash)
+      const serialized = override
+        ? await serializeSkillGraph(targetSkillId, phases, graphHash, override.workspaceRoot)
+        : await serializeSkillGraph(targetSkillId, phases, graphHash)
       await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash, override)
       clearStaleCompileProjection(targetSkillId)
       if (target) {
@@ -1065,7 +1576,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       }
       throw error
     }
-  }, [clearStaleCompileProjection, doWriteSkillFile, mutateSkillDetail])
+  }, [clearStaleCompileProjection, doWriteSkillFile, mutateSkillDetail, readGraphHash])
 
   const handlePersistConnection = useCallback(async (connection: Connection, target?: ChildSaveTarget) => {
     const editDetail = target?.detail ?? skillDetail
@@ -1245,6 +1756,19 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       try {
         const event = JSON.parse(String(message.data)) as { type?: string, skill_id?: string, path?: string }
         if (event.type !== "skill_changed" || event.skill_id !== currentSkillId || !event.path) return
+        // Keep the file tree live like a native explorer's watcher: refresh every
+        // already-loaded ancestor folder of the changed path so external edits AND
+        // Studio's own native-fs create/delete/rename show up without a manual
+        // re-expand — reloading ancestors (not just the file's folder) also surfaces
+        // a brand-new nested folder. Unexpanded folders stay lazy (native behaviour).
+        const changedParts = event.path.split("/").filter(Boolean)
+        const tree = assetDirectoryTreeRef.current
+        for (let depth = 0; depth < changedParts.length; depth += 1) {
+          const dir = changedParts.slice(0, depth).join("/")
+          if (tree.getDirectory(dir).status !== "idle") {
+            tree.reloadDirectory(dir)
+          }
+        }
         const entries = (["left", "right"] as const).filter((side) => activeFileDetails[side]?.path === event.path)
         for (const side of entries) {
           const file = activeFileDetails[side]
@@ -1294,6 +1818,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     activeFileDetails,
     splitMode,
     onFileOpen: handleFileOpen,
+    onRevealNodeForFile: handleRevealNodeForFile,
+    onRevealSubgraphChildNode: handleRevealSubgraphChildNode,
+    onRevealSubgraphGraph: handleRevealSubgraphGraph,
     openSplitEditor: () => setSplitMode(true),
     closeFile,
     updateFileContent,
@@ -1312,6 +1839,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     closeFile,
     currentSkillId,
     handleFileOpen,
+    handleRevealNodeForFile,
+    handleRevealSubgraphChildNode,
+    handleRevealSubgraphGraph,
     markFileSaved,
     displayNavStack,
     popNavTo,
@@ -1695,18 +2225,27 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   }, [compileErrors, currentSkillId, realtimeLint])
 
   const leftPanelOverlay = activePanel ? (
-    <WorkspaceLeftPanelOverlay onClose={() => setActivePanel(null)}>
+    <WorkspaceLeftPanelOverlay
+      onClose={() => setActivePanel(null)}
+      width={leftPanelWidth}
+      onResize={setLeftPanelWidth}
+    >
       <Panels
         activePanel={activePanel}
         skillId={currentSkillId}
         workspaceRoot={currentWorkspaceRoot}
         skillDetail={skillDetail}
+        assetDirectoryTree={assetDirectoryTree}
+        assetSubgraphTree={assetSubgraphTree}
         selectedNode={selectedNode}
         selectedNodeStatus={selectedNodeStatus}
         selectedTestInputId={selectedTestInputId}
         onSelectTestInput={setSelectedTestInputId}
         onPhaseFileSave={handlePhaseFileSave}
         onPhaseRename={handleRenamePhase}
+        onActionCreate={handleActionCreate}
+        onActionDelete={handleActionDelete}
+        onValidatorCreate={handleValidatorCreate}
         runId={runId}
         lintErrors={propertiesFieldErrors}
         resumeValidity={resumeValidity}
@@ -1734,14 +2273,15 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   ) : null
   const editorOpen = Boolean(activeFileDetails.left || activeFileDetails.right)
   const hasMiniMapSpace = useMiniMapToolSpace(copilotOpen, currentSkillId, settingsOpen)
+  // Safe areas = overlay size + its 1.5rem outer margin (0.75rem each side).
   const workspaceOverlayStyle = {
-    "--studio-canvas-left-safe-area": activePanel ? "25.5rem" : "0px",
-    "--studio-canvas-right-safe-area": copilotOpen ? "23.5rem" : "0px",
+    "--studio-canvas-left-safe-area": activePanel ? `calc(${leftPanelWidth}px + 1.5rem)` : "0px",
+    "--studio-canvas-right-safe-area": copilotOpen ? `calc(${copilotWidth}px + 1.5rem)` : "0px",
     "--studio-canvas-editor-safe-area": editorOpen ? "calc(var(--studio-editor-overlay-height) + 1.5rem)" : "0px",
-    "--studio-editor-overlay-height": "min(52%, 34rem)",
+    "--studio-editor-overlay-height": editorHeight != null ? `${editorHeight}px` : "min(52%, 34rem)",
   } as CSSProperties
   const rightPanelOverlay = copilotOpen ? (
-    <WorkspaceRightPanelOverlay>
+    <WorkspaceRightPanelOverlay width={copilotWidth} onResize={setCopilotWidth}>
       <CopilotPanel
         skillId={currentSkillId}
         workspaceRoot={currentWorkspaceRoot}
@@ -1762,6 +2302,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         workspaceRoot={currentWorkspaceRoot}
         navStack={displayNavStack}
         onBreadcrumbClick={popNavTo}
+        onTitleSelect={handleTitleSelect}
+        onTitleEdit={handleTitleEdit}
         copilotOpen={copilotOpen}
         onCopilotToggle={() => setCopilotOpen((open) => !open)}
         onHome={handleHome}
@@ -1803,13 +2345,18 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                       skillId={currentSkillId}
                       workspaceRoot={currentWorkspaceRoot}
                       skillDetail={skillDetail}
+                      childDetailPatch={childDetailPatch}
                       isLoading={isLoading}
                       error={skillDetailError}
                       selectedNodeId={selectedNodeId}
                       onNodeSelect={handleNodeSelect}
                       onNodeDeselect={handleNodeDeselect}
+                      revealRequest={revealRequest}
+                      focusNodeRequest={focusNodeRequest}
                       onNodeFileOpen={handleFileOpen}
                       onPanelChange={setActivePanel}
+                      onOpenSelectedNodePanel={openSelectedNodePanel}
+                      onCloseEditors={closeAllEditors}
                       onCreatePhase={handleCreatePhase}
                       onDeletePhase={handleDeletePhase}
                       onPersistConnection={handlePersistConnection}
@@ -1835,7 +2382,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                       hitlSubmitting={resumeLoading}
                     />
                     {leftPanelOverlay}
-                    <WorkspaceEditorOverlay />
+                    <WorkspaceEditorOverlay onResizeHeight={setEditorHeight} />
                     {rightPanelOverlay}
                   </div>
                   {settingsOpen ? (

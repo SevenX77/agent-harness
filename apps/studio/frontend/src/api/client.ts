@@ -55,7 +55,6 @@ function resolveInitialApiBaseURL(): string {
   if (import.meta.env.DEV) {
     const message =
       'VITE_STUDIO_API_BASE_URL is undefined. Launch via Tauri (which injects the dynamic sidecar port) or set VITE_STUDIO_API_BASE_URL in apps/studio/frontend/.env.local to match STUDIO_SIDECAR_PORT.'
-    // eslint-disable-next-line no-console
     console.error('[studio-client]', message)
     throw new Error(message)
   }
@@ -137,6 +136,49 @@ export interface RoleTestResultsResponse {
   results: Record<string, PersistedRoleTestResult>
 }
 
+export interface RuntimeActivityLogEntry {
+  id: string
+  recorded_at: string
+  source_id: string
+  action: string
+  message: string
+  changes: Record<string, unknown>
+}
+
+export interface TruthSource {
+  id: string
+  label: string
+  path: string
+  kind: string
+  description: string
+  open_mode: 'file' | 'directory'
+  exists: boolean
+  size_bytes: number | null
+  updated_at: string | null
+  logs: RuntimeActivityLogEntry[]
+  can_preview: boolean
+}
+
+export interface TruthSourceSection {
+  id: string
+  label: string
+  description: string
+  sources: TruthSource[]
+}
+
+export interface TruthSourcesResponse {
+  sections: TruthSourceSection[]
+}
+
+export interface TruthSourceContentResponse {
+  source_id: string
+  path: string
+  kind: string
+  content: string
+  truncated: boolean
+  size_bytes: number
+}
+
 /**
  * R20: fetch the persisted last-known role/copilot test results so the settings
  * tabs can re-seed their badges on mount (survives server restart / remount).
@@ -144,6 +186,18 @@ export interface RoleTestResultsResponse {
  */
 export async function getRoleTestResults(): Promise<RoleTestResultsResponse> {
   const response = await api.get<RoleTestResultsResponse>('/llm/roles/test-results')
+  return response.data
+}
+
+export async function getTruthSources(): Promise<TruthSourcesResponse> {
+  const response = await api.get<TruthSourcesResponse>('/system/truth-sources')
+  return response.data
+}
+
+export async function getTruthSourceContent(sourceId: string): Promise<TruthSourceContentResponse> {
+  const response = await api.get<TruthSourceContentResponse>(
+    `/system/truth-sources/${encodeURIComponent(sourceId)}/content`,
+  )
   return response.data
 }
 
@@ -195,6 +249,7 @@ export async function serializeSkillGraph(
   skillId: string,
   phases: SerializableGraphPhaseRef[],
   expectedHash?: string | null,
+  workspaceRoot?: string | null,
 ): Promise<SerializeGraphRes> {
   const topologyPhases = phases.map(({ id, src, depends_on, output }) => ({
     id,
@@ -205,6 +260,10 @@ export async function serializeSkillGraph(
   const response = await api.post<SerializeGraphRes>(`/skills/${skillId}/graph/serialize`, {
     phases: topologyPhases,
     expected_hash: expectedHash ?? null,
+    // A drilled subgraph is identified by its absolute path so the backend
+    // serializes against THAT GRAPH.md, not a name-colliding bare id. Omitted for
+    // the parent graph so its request body is unchanged.
+    ...(workspaceRoot ? { workspace_root: workspaceRoot } : {}),
   })
   return response.data
 }

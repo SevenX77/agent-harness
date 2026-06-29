@@ -1,8 +1,6 @@
-import { Bot, KeyRound, Plug, Settings, WifiOff, X } from "lucide-react"
+import { Bot, KeyRound, Plug, Settings, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { SaveStatusBadge } from "@/components/ui/save-status-badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ApiKeysTab } from "./api-keys/ApiKeysTab"
 import { CopilotTab } from "./copilot/CopilotTab"
@@ -11,7 +9,6 @@ import { GeneralTabSkeleton } from "./GeneralTabSkeleton"
 import { LlmRolesTab } from "./LlmRolesTab"
 import { RolesTabSkeleton } from "./RolesTabSkeleton"
 import { SettingsErrorBoundary } from "./SettingsErrorBoundary"
-import { mergeSaveStatuses } from "./save-status-merge"
 import { NavButton } from "./shared"
 import type { SettingsPageContentProps } from "./types"
 
@@ -21,19 +18,22 @@ export function SettingsPageContent({
   credentialsLoading,
   credentialsError,
   drafts,
+  pendingAddProviderId,
   saveStatus,
   rolesData,
   modelGroups,
   rolesSaveStatus,
   rolesError,
   appSettings,
-  connectionLost = false,
   onClose,
   onTabChange,
   onProviderFieldChange,
   onGetProviderModels,
   onDeleteProvider,
+  onDeleteProviderEndpoints,
+  onBeginAddProvider,
   onAddProvider,
+  onCancelAddProvider,
   onProviderModelsUpdated,
   onRolesDataChange,
   onDeleteRole,
@@ -44,28 +44,9 @@ export function SettingsPageContent({
 }: SettingsPageContentProps) {
   const { t } = useTranslation("settings")
 
-  const globalSaveStatus = mergeSaveStatuses([saveStatus, rolesSaveStatus, appSettings.saveStatus])
-
   return (
     <div className="flex size-full flex-col bg-background">
-      <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border pl-4 pr-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="text-sm font-semibold text-foreground">{t("shell.title")}</span>
-          <span data-shell-save-status={globalSaveStatus}>
-            <SaveStatusBadge status={globalSaveStatus} />
-          </span>
-          {connectionLost ? (
-            <Badge
-              variant="warning"
-              className="gap-1 text-[10px] font-normal"
-              data-shell-connection-lost="true"
-              aria-live="assertive"
-            >
-              <WifiOff className="size-3" aria-hidden="true" />
-              {t("shell.connectionLost")}
-            </Badge>
-          ) : null}
-        </div>
+      <div className="flex h-11 shrink-0 items-center justify-end border-b border-border px-2">
         <Button variant="ghost" size="icon" onClick={onClose} aria-label={t("shell.close")} className="size-7">
           <X className="size-4" />
         </Button>
@@ -159,11 +140,15 @@ export function SettingsPageContent({
                     credentialsLoading={credentialsLoading}
                     credentialsError={credentialsError}
                     drafts={drafts}
+                    pendingAddProviderId={pendingAddProviderId}
                     saveStatus={saveStatus}
                     onProviderFieldChange={onProviderFieldChange}
                     onGetProviderModels={onGetProviderModels}
                     onDeleteProvider={onDeleteProvider}
+                    onDeleteProviderEndpoints={onDeleteProviderEndpoints}
+                    onBeginAddProvider={onBeginAddProvider}
                     onAddProvider={onAddProvider}
+                    onCancelAddProvider={onCancelAddProvider}
                     onProviderModelsUpdated={onProviderModelsUpdated}
                   />
                 </SettingsErrorBoundary>

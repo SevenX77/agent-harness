@@ -456,6 +456,31 @@ describe('api client auth token', () => {
     })
   })
 
+  it('serializeSkillGraph sends workspace_root for a drilled subgraph path', async () => {
+    api.defaults.adapter = async (config): Promise<AxiosResponse> => {
+      expect(config.url).toBe('/skills/text-segmentation/graph/serialize')
+      expect(JSON.parse(String(config.data))).toEqual({
+        phases: [{ id: 'setup', src: 'phases/setup', depends_on: [] }],
+        expected_hash: 'abc123',
+        workspace_root: '/abs/story/subgraph/text-segmentation',
+      })
+      return {
+        data: { markdown_content: '', phase_count: 1, elapsed_ms: 1, current_hash: 'def456' },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    }
+
+    await serializeSkillGraph(
+      'text-segmentation',
+      [{ id: 'setup', src: 'phases/setup', depends_on: [], output: false, mode: 'logic' }],
+      'abc123',
+      '/abs/story/subgraph/text-segmentation',
+    )
+  })
+
   it('browser writeSkillFile marks FastAPI writes as explicit fallback', async () => {
     runtimeMocks.isTauriRuntime.mockReturnValue(false)
     api.defaults.adapter = async (config): Promise<AxiosResponse> => {

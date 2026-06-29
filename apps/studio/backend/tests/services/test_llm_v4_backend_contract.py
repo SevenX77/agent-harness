@@ -71,7 +71,7 @@ def test_credentials_v4_schema_redacts_secret_and_rejects_legacy_v3() -> None:
 
     dumped = data.model_dump(mode="json")
 
-    assert dumped["schema_version"] == 4
+    assert dumped["schema_version"] == 5  # v5: credentials now carries route.evidence (SSOT)
     assert dumped["provider_endpoints"]["openai-direct"]["api_key"] == "**********"
     with pytest.raises(ValidationError):
         LLMCredentialsFile.model_validate(
@@ -130,7 +130,7 @@ def test_migrate_v3_credentials_to_v4_preserves_secret_and_models(tmp_path: Path
 
     migrated = migrate_v3_credentials_to_v4(path)
 
-    assert migrated.schema_version == 4
+    assert migrated.schema_version == 5  # v3 migration lands on the current schema (v5)
     endpoint = migrated.provider_endpoints["anthropic-official"]
     assert endpoint.api_key is not None
     assert endpoint.api_key.get_secret_value() == "anthropic-secret"
@@ -142,7 +142,7 @@ def test_migrate_v3_credentials_to_v4_preserves_secret_and_models(tmp_path: Path
     assert route.capabilities["thinking_protocol"].value is True
     assert route.capabilities["thinking_protocol"].source == "probed_verified"
     assert route.capabilities["min_thinking_budget_tokens"].value == 1024
-    assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == 4
+    assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == 5
     assert (tmp_path / "llm_credentials.json.v3.bak").exists()
 
 

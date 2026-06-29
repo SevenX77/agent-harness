@@ -2,20 +2,18 @@
 
 Downloads a signed manifest + content-addressed shards, verifies the Ed25519
 signature and every shard digest, refuses an incompatible manifest protocol
-version, and writes the mapped records into a **disposable cache** that is
-isolated from the local evidence store. Every check fails closed: nothing is
-written unless the whole chain verifies.
+version, and RETURNS the verified, mapped records. Phase 5: there is NO disposable
+cache — the caller merges the returned records straight into credentials
+route.evidence. Every check fails closed: nothing is returned unless the whole
+chain verifies.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import os
-import tempfile
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from pathlib import Path
 
 import httpx
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -61,17 +59,6 @@ class CatalogManifest(BaseModel):
     shards: list[ShardRef] = []
 
 
-class CommunityCatalogCache(BaseModel):
-    """Disposable, advisory cache of verified community evidence."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    manifest_etag: str | None = None
-    generated_at: str | None = None
-    protocol_major: int = 0
-    records: list[EvidenceRecord] = []
-
-
 @dataclass(frozen=True)
 class FetchResult:
     """One fetched resource: raw bytes plus its ETag."""
@@ -83,12 +70,19 @@ class FetchResult:
 
 @dataclass(frozen=True)
 class SyncOutcome:
-    """Result of a verified sync attempt."""
+    """Result of a verified sync attempt.
+
+    Phase 5: carries the verified ``records`` (no disk cache) so the caller can merge
+    them straight into credentials route.evidence, plus ``generated_at`` for the tiny
+    ``last_remote_catalog_sync`` marker. ``status`` is advisory (etag-derived) only.
+    """
 
     status: str
     record_count: int
     manifest_etag: str | None
     protocol_major: int
+    generated_at: str | None = None
+    records: tuple[EvidenceRecord, ...] = ()
 
 
 Fetcher = Callable[[str], Awaitable[FetchResult]]
@@ -149,34 +143,6 @@ def make_httpx_fetcher(
     return fetch
 
 
-class DisposableCatalogCacheStore:
-    """A disposable on-disk cache, separate from the durable evidence store."""
-
-    def __init__(self, path: Path) -> None:
-        self._path = path
-
-    def load(self) -> CommunityCatalogCache:
-        if not self._path.exists():
-            return CommunityCatalogCache()
-        return CommunityCatalogCache.model_validate_json(self._path.read_text(encoding="utf-8"))
-
-    def save(self, cache: CommunityCatalogCache) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        payload = cache.model_dump_json(indent=2)
-        fd, tmp = tempfile.mkstemp(dir=self._path.parent, suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                handle.write(payload)
-            os.replace(tmp, self._path)
-        finally:
-            if os.path.exists(tmp):
-                os.unlink(tmp)
-
-    def clear(self) -> None:
-        if self._path.exists():
-            self._path.unlink()
-
-
 async def sync_verified_catalog(
     *,
     manifest_url: str,
@@ -184,21 +150,17 @@ async def sync_verified_catalog(
     shard_base_url: str,
     public_key_hex: str,
     client_protocol_major: int,
-    cache_store: DisposableCatalogCacheStore,
     fetch: Fetcher,
     prev_etag: str | None = None,
 ) -> SyncOutcome:
-    """Fetch, verify, and cache the community catalog. Fails closed on any
-    signature/digest/protocol failure without mutating the cache."""
-    manifest_res = await fetch(manifest_url)
-    if prev_etag is not None and manifest_res.etag is not None and manifest_res.etag == prev_etag:
-        return SyncOutcome(
-            status="unchanged",
-            record_count=0,
-            manifest_etag=manifest_res.etag,
-            protocol_major=client_protocol_major,
-        )
+    """Fetch, verify, and PARSE the community catalog; return the verified records.
 
+    Phase 5: NO disk cache and NO ``prev_etag`` short-circuit — we never persist
+    unmatched evidence, so every sync must return records (a route added AFTER a prior
+    sync can still go blue). The etag is reported as ``status`` only, never used to skip
+    records. Fails closed on any signature/digest/protocol failure.
+    """
+    manifest_res = await fetch(manifest_url)
     signature_res = await fetch(signature_url)
     signature_hex = signature_res.content.decode("utf-8").strip()
     if not verify_manifest_signature(
@@ -223,26 +185,19 @@ async def sync_verified_catalog(
         for wire_record in payload.get("records", []):
             records.append(parse_catalog_evidence(wire_record))
 
-    cache_store.save(
-        CommunityCatalogCache(
-            manifest_etag=manifest_res.etag,
-            generated_at=manifest.generated_at,
-            protocol_major=manifest.protocol_major,
-            records=records,
-        )
-    )
+    status = "unchanged" if (prev_etag is not None and manifest_res.etag == prev_etag) else "updated"
     return SyncOutcome(
-        status="updated",
+        status=status,
         record_count=len(records),
         manifest_etag=manifest_res.etag,
         protocol_major=manifest.protocol_major,
+        generated_at=manifest.generated_at,
+        records=tuple(records),
     )
 
 
 __all__ = [
     "CatalogManifest",
-    "CommunityCatalogCache",
-    "DisposableCatalogCacheStore",
     "FetchResult",
     "ProtocolVersionRefused",
     "ShardDigestMismatch",

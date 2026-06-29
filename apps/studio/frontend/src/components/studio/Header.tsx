@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ChevronDown, Layers, Loader2, Package, Sparkles } from "lucide-react"
 import { toast, type ExternalToast } from "sonner"
 import { Badge } from "@/components/ui/badge"
@@ -35,6 +35,10 @@ interface HeaderProps {
   onCopilotToggle: () => void
   onHome: () => void
   onBreadcrumbClick?: (index: number) => void
+  // Single-click the current-skill title: clear node selection + show the
+  // graph.md / global panel. Double-click: open graph.md in the editor.
+  onTitleSelect?: () => void
+  onTitleEdit?: () => void
   onSyncSuccess?: (result: CollaborateResult) => void
   onOpenSettings?: () => void
 }
@@ -76,6 +80,8 @@ export function Header({
   onCopilotToggle,
   onHome,
   onBreadcrumbClick,
+  onTitleSelect,
+  onTitleEdit,
   onSyncSuccess,
   onOpenSettings,
 }: HeaderProps) {
@@ -84,6 +90,28 @@ export function Header({
   const [isPackaging, setIsPackaging] = useState(false)
   const [packageTargetRequest, setPackageTargetRequest] = useState<PackageTargetPathRequest | null>(null)
   const [packageTargetDraft, setPackageTargetDraft] = useState("")
+  // A double-click on the title would otherwise fire single-click (open the
+  // graph.md panel) AND double-click (open the editor). Defer the single-click
+  // action so a double-click can cancel it and open the editor alone.
+  const titleClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (titleClickTimerRef.current) clearTimeout(titleClickTimerRef.current)
+  }, [])
+  const handleTitleClick = () => {
+    if (titleClickTimerRef.current) clearTimeout(titleClickTimerRef.current)
+    titleClickTimerRef.current = setTimeout(() => {
+      titleClickTimerRef.current = null
+      onTitleSelect?.()
+    }, 220)
+  }
+  const handleTitleDoubleClick = () => {
+    if (titleClickTimerRef.current) {
+      clearTimeout(titleClickTimerRef.current)
+      titleClickTimerRef.current = null
+    }
+    onTitleEdit?.()
+  }
+
   const isSaving = skillSync.status === "saving"
   const isSyncing = skillSync.status === "syncing"
   const isSubmitting = skillSync.status === "submitting"
@@ -155,18 +183,25 @@ export function Header({
       <div className="flex min-w-0 items-center justify-center gap-2">
         {navStack.length > 0 ? (
           <nav className="flex min-w-0 items-center gap-1 text-sm font-medium text-foreground">
-            {navStack.map((item, index) => (
-              <span key={`${item}-${index}`} className="flex min-w-0 items-center gap-1">
-                {index > 0 ? <span className="text-muted-foreground">/</span> : null}
-                <button
-                  type="button"
-                  onClick={() => onBreadcrumbClick?.(index)}
-                  className="truncate rounded-sm px-1 hover:bg-accent"
-                >
-                  {item}
-                </button>
-              </span>
-            ))}
+            {navStack.map((item, index) => {
+              // The LAST item is the current-skill title: single-click clears the
+              // node selection and shows the graph.md/global panel, double-click
+              // opens graph.md in the editor. Earlier crumbs keep navigation.
+              const isTitle = index === navStack.length - 1
+              return (
+                <span key={`${item}-${index}`} className="flex min-w-0 items-center gap-1">
+                  {index > 0 ? <span className="text-muted-foreground">/</span> : null}
+                  <button
+                    type="button"
+                    onClick={() => (isTitle && onTitleSelect ? handleTitleClick() : onBreadcrumbClick?.(index))}
+                    onDoubleClick={isTitle && onTitleEdit ? handleTitleDoubleClick : undefined}
+                    className="truncate rounded-sm px-1 hover:bg-accent"
+                  >
+                    {item}
+                  </button>
+                </span>
+              )
+            })}
           </nav>
         ) : (
           <span className="truncate text-sm font-medium text-foreground">Studio Workspace</span>

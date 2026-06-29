@@ -17,8 +17,10 @@ io:
         required: [events]
         properties:
           events: {type: array, items: {type: object}}
-phases: [extract, stitch]
+phases:
+  - extrac
+  - stitch
 ---
 
-<phase depends_on="input">extract</phase>
-<phase depends_on="extract" output>stitch</phase>
+<phase depends_on="input">extrac</phase>
+<phase depends_on="extrac" output>stitch</phase>

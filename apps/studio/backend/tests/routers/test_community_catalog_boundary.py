@@ -32,8 +32,10 @@ def test_share_endpoint_unaffected_when_community_upload_configured(
     assert body["auto_upload_enabled"] is False
 
 
-def test_repository_ensure_rejects_without_token(client: TestClient) -> None:
-    # Default config has no GitHub token; the endpoint still rejects with 400
-    # (unchanged) rather than reaching the network.
+def test_repository_ensure_is_retired_noop(client: TestClient) -> None:
+    # Phase 9: the GitHub-repo probe-catalog concept is retired. The endpoint is a no-op
+    # that never reaches the network and never creates llm_probe_catalog.json — it just
+    # reports disabled (no GitHub token check anymore).
     response = client.post("/api/llm/catalog/repository/ensure")
-    assert response.status_code == 400
+    assert response.status_code == 200
+    assert response.json()["status"] == "disabled"

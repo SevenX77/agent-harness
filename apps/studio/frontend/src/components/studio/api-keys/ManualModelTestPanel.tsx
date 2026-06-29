@@ -83,13 +83,14 @@ export function manualModelAccordionValue(expanded: boolean): string {
 
 export function modelIdPlaceholder(
   notableProviderKey: string,
-  notableModels: string[],
+  notableModels: string[] | undefined | null,
   index: number,
 ): string {
   const normalizedProviderKey = notableProviderKey.toLowerCase()
+  const modelOptions = Array.isArray(notableModels) ? notableModels : []
   const example =
-    notableModels[index] ??
-    notableModels[0] ??
+    modelOptions[index] ??
+    modelOptions[0] ??
     exampleModelIdsByProvider[normalizedProviderKey] ??
     "gpt-5"
   const display = vendorPrefixedModelProviders.has(normalizedProviderKey)
@@ -185,7 +186,7 @@ export function ManualModelTestPanel({ providerKey, notableProviderKey, onModels
     setLoadingCandidates(true)
     getNotableModels(notableProviderKey)
       .then((response) => {
-        if (!cancelled) setNotableModels(response.notable_models)
+        if (!cancelled) setNotableModels(Array.isArray(response.notable_models) ? response.notable_models : [])
       })
       .catch((candidateError: unknown) => {
         if (!cancelled) {

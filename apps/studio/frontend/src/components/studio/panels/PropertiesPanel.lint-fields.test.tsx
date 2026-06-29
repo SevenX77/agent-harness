@@ -107,7 +107,8 @@ describe("PropertiesPanel — field-level lint projection (atom #5)", () => {
       lintErrors: [],
     })
     expect(html).not.toContain("Field has")
-    // The field itself still renders.
-    expect(html).toContain("Validator")
+    // The validator field still renders. No sibling validator.py here, so it shows the
+    // create affordance rather than the on/off switch.
+    expect(html).toContain("Create validator.py")
   })
 })

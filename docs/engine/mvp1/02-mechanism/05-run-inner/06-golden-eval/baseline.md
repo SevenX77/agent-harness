@@ -80,4 +80,4 @@ N/A(engine 无前端)—— golden 编辑 / diff 展示 / promote 在 studio 侧
 回放:`runner.py:resolve_generation`(:84,P0 :94)← gateway `predict_interception.py:_generate`(:34,`resolver.py:119` 接线)。策略选择:`strategy.py:MockStrategy.from_param`(:151)→ `GoldenCaseStrategy`(:103)。engine 路径 diff:`runner.py:335` → `path_diff.py:compute_diff`(:11)→ `RunResult.success`。失效 warn(退役):`runner.py:_warn_on_stale_golden_hashes_sdk`(:127,调用 :246)。studio 字段 diff(待复用):`golden_diff.py:_diff_value`(:130)。engine 拦截 skeleton(G5 标的):`_predict_internal/interception.py:29`。
 
 ## 交叉引用(链接, 不复制)
-[mvp1-alignment](./mvp1-alignment.md)· `01-contract/01-physical-layout`(`.workspace/golden` 落点,双向)· `01-contract/05-invalidation`(失效轴 / 退役标的,双向)· `06-seam/01-models`(predict mock 拦截搬引擎 G5)· `01-contract/03-compile-rules`(CR3 golden-stale 码归属)· `_migration-src/09-golden-eval`(源;§G1-G5 含反转前旧决策 A,勿当现状)
+[mvp1-alignment](./mvp1-alignment.md)· `01-contract/01-physical-layout`(`.workspace/golden` 落点,双向)· `01-contract/05-invalidation`(失效轴 / 退役标的,双向)· `06-seam/01-models`(predict mock 拦截搬引擎 G5)· `01-contract/03-compile-rules`(CR3 golden-stale 码归属)

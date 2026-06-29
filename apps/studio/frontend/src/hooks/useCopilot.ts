@@ -6,9 +6,13 @@ import type { CopilotEvent, CopilotMessage } from '../types/copilot'
 import { normalizeCopilotEvent } from '../types/copilot'
 import { resolveWorkspaceIdentity } from '../components/studio/workspace-identity'
 
-type ConnectionStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'reconnecting' | 'error'
+export type ConnectionStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'reconnecting' | 'error'
 
 let messageIdFallbackCounter = 0
+
+export function visibleCopilotSocketError(status: ConnectionStatus, transportError: string | null): string | null {
+  return status === 'error' ? transportError : null
+}
 
 function nextId(prefix: string) {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -204,7 +208,6 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
       }
       socket.onerror = () => {
         setConnectionStatus('error')
-        setLastError('Copilot WebSocket failed')
       }
       socket.onclose = () => {
         if (closed) {
@@ -257,7 +260,7 @@ export function useCopilot(skillId: string | null, workspaceRootOverride?: strin
     messages: snapshot.messages,
     connectionStatus,
     reconnectInMs,
-    lastError,
+    lastError: visibleCopilotSocketError(connectionStatus, lastError),
     sendMessage,
     clearMessages: copilotStore.clearMessages,
     persistenceError: snapshot.persistenceError,

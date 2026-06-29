@@ -24,6 +24,31 @@ describe("AddProviderForm", () => {
       providerCode: "my-openrouter",
       name: "My OpenRouter",
       baseUrl: "https://openrouter.ai/api/v1",
+      baseUrls: ["https://openrouter.ai/api/v1"],
+      apiKey: "sk-test",
+      type: "third-party",
+    })
+  })
+
+  it("derives multiple third-party base URLs when provided", () => {
+    const submission = deriveAddProviderFormSubmission({
+      customName: "My Multi Endpoint Provider",
+      customBaseUrl: "https://primary.example/v1",
+      customBaseUrls: [
+        "https://primary.example/v1",
+        "https://backup.example/v1",
+      ],
+      apiKey: "sk-test",
+    })
+
+    expect(submission).toEqual({
+      providerCode: "my-multi-endpoint-provider",
+      name: "My Multi Endpoint Provider",
+      baseUrl: "https://primary.example/v1",
+      baseUrls: [
+        "https://primary.example/v1",
+        "https://backup.example/v1",
+      ],
       apiKey: "sk-test",
       type: "third-party",
     })
@@ -36,6 +61,7 @@ describe("AddProviderForm", () => {
       providerCode: "custom-00000000-0000-4000-8000-000000000001",
       name: "New Provider",
       baseUrl: "",
+      baseUrls: [""],
       apiKey: "",
       type: "third-party",
     })
@@ -67,13 +93,15 @@ describe("AddProviderForm component (atom-19 one-step inline form)", () => {
     )
   }
 
-  it("renders a single inline form with name, base_url and api_key inputs", () => {
+  it("renders a single inline form with name, api_key and base_url inputs", () => {
     const html = renderForm()
     expect(html).toContain('data-add-provider-form="true"')
     expect(html).toContain('id="add-provider-name"')
     expect(html).toContain('id="add-provider-base-url"')
     expect(html).toContain('id="add-provider-api-key"')
     expect(html).toContain('data-add-provider-submit="true"')
+    expect(html.indexOf('id="add-provider-api-key"')).toBeLessThan(html.indexOf('id="add-provider-base-url"'))
+    expect(html).toContain("Add URL")
   })
 
   it("keeps the empty api_key placeholder readable while still using type=text", () => {

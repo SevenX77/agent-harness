@@ -222,6 +222,36 @@ fn reveal_in_file_manager(path: String) -> Result<(), String> {
     Err("revealing in file manager is not supported on this platform".to_string())
 }
 
+#[tauri::command]
+fn open_path(path: String) -> Result<(), String> {
+    let target = existing_path(&path)?;
+    if cfg!(target_os = "macos") {
+        return Command::new("open")
+            .arg(target)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("failed to open path: {error}"));
+    }
+
+    if cfg!(target_os = "linux") {
+        return Command::new("xdg-open")
+            .arg(target)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("failed to open path: {error}"));
+    }
+
+    if cfg!(target_os = "windows") {
+        return Command::new("explorer")
+            .arg(target)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("failed to open Explorer: {error}"));
+    }
+
+    Err("opening paths is not supported on this platform".to_string())
+}
+
 #[cfg(all(target_os = "macos", test))]
 fn macos_edit_menu_labels() -> &'static [&'static str] {
     &["Undo", "Redo", "Cut", "Copy", "Paste", "Select All"]
@@ -325,6 +355,7 @@ pub fn run() {
             restart_sidecar,
             select_directory,
             reveal_in_file_manager,
+            open_path,
             native_fs::write_workspace_file,
             native_fs::publish_package_writer,
             native_fs::read_workspace_file,
@@ -524,6 +555,15 @@ mod tests {
     /// R-F19.2 — make sure the `confirm_quit_ready` command stays wired into
     /// the invoke handler (it's the frontend's only way to ack the
     /// `before-quit` flush handshake before sidecar shutdown).
+    #[test]
+    fn invoke_handler_registers_open_path_command() {
+        let source = include_str!("lib.rs");
+        assert!(
+            source.contains("open_path,"),
+            "open_path must be registered in the Tauri invoke handler"
+        );
+    }
+
     #[test]
     fn invoke_handler_registers_confirm_quit_ready_command() {
         let source = include_str!("lib.rs");

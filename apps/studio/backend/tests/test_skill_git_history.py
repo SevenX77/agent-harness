@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -42,6 +43,20 @@ def test_skill_history_lists_commits_newest_first(client: TestClient) -> None:
     assert body[0]["kind"] == "auto_run"
     assert body[0]["sha"]
     assert body[0]["author"] == "studio-user"
+
+
+def test_skill_history_handles_utf8_commit_messages(client: TestClient) -> None:
+    client.post(
+        "/api/skills",
+        json={"skill_id": "history-utf8-skill", "files": _agent_skill_files("history-utf8-skill")},
+    )
+    skill_dir = config.DEFAULT_SKILLS_ROOT / "history-utf8-skill"
+    _git(skill_dir, "commit", "--allow-empty", "-m", "manual-中文-🤖")
+
+    response = client.get("/api/skills/history-utf8-skill/history")
+
+    assert response.status_code == 200
+    assert response.json()[0]["message"] == "manual-中文-🤖"
 
 
 def test_skill_history_damaged_git_returns_empty(client: TestClient) -> None:
@@ -102,13 +117,14 @@ def _git(skill_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
 
 
 def _remove_git_dir(skill_dir: Path) -> None:
-    for path in sorted((skill_dir / ".git").rglob("*"), reverse=True):
-        if path.is_dir():
-            path.rmdir()
-        else:
-            path.unlink()
-    (skill_dir / ".git").rmdir()
+    def retry_writable(function: object, path: str, _exc_info: object) -> None:
+        Path(path).chmod(0o700)
+        function(path)  # type: ignore[operator]
+
+    shutil.rmtree(skill_dir / ".git", onerror=retry_writable)

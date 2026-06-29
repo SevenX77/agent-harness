@@ -8,6 +8,9 @@ from graph_agent_gateway.registry.schema import CapabilityValue, RoleRouteEntry
 from graph_agent_gateway.state_projection import project_route_state
 
 _FailedReasonCode = Literal["missing_config", "endpoint_unreachable", "model_failed"]
+# Phase 3 / problem 4: only probe-verified evidence embedded on a route projects
+# blue historical_ready; provider-list-observed / probe-failed / stale never do.
+_PROJECTABLE_EVIDENCE_TRUST_STATES = frozenset({"probe-verified"})
 
 
 @dataclass(frozen=True)
@@ -262,11 +265,19 @@ def _credential_available(endpoint: Any) -> bool:
 
 
 def _route_credential_evidence_refs(route: Any) -> list[str]:
-    route_metadata = _value(route, "metadata", {}) or {}
-    refs = route_metadata.get("evidence_refs")
-    if not isinstance(refs, list):
-        return []
-    return [ref for ref in refs if isinstance(ref, str)]
+    # Phase 3: refs come from probe-verified evidence embedded ON the route
+    # (``route.evidence``) — the credentials SSOT — NOT ``route.metadata`` (the
+    # retired link). Keeps the role-materialization read path in lockstep with the
+    # Studio adapter's UI projection, so an endpoint-failed route carrying
+    # probe-verified evidence stays historical_ready instead of being skipped.
+    refs: list[str] = []
+    for evidence in _value(route, "evidence", None) or []:
+        if _value(evidence, "trust_state", None) not in _PROJECTABLE_EVIDENCE_TRUST_STATES:
+            continue
+        ref = _value(evidence, "content_hash", None) or _value(evidence, "evidence_id", None)
+        if isinstance(ref, str):
+            refs.append(ref)
+    return refs
 
 
 def _apply_intent(

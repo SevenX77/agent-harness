@@ -89,9 +89,9 @@ describe("ProviderCard API key masking", () => {
     const maskedValue = apiKeyDisplayValue("sk-secret-123", false)
 
     // §1 contract: the secret field is ALWAYS type=text, so the browser /
-    // extension password manager is never triggered. Hidden provider cards render
-    // an explicit same-length mask value instead of relying on CSS text-security;
-    // WebKit can otherwise make long secrets look like only a few bullets.
+    // extension password manager is never triggered. Hidden idle provider cards
+    // render an explicit same-length mask value instead of relying on CSS
+    // text-security; focusing the field enters readable edit mode.
     expect(html).toContain('type="text"')
     expect(html).not.toContain('type="password"')
     expect(maskedValue).toHaveLength("sk-secret-123".length)
@@ -100,7 +100,7 @@ describe("ProviderCard API key masking", () => {
     expect(html).not.toContain('value="sk-secret-123"')
     expect(html).not.toContain("mask-input")
     expect(html).toContain('name="provider-secret-p1"')
-    expect(html).toContain('readOnly=""')
+    expect(html).not.toContain('readOnly')
     expect(html).toContain('data-1p-ignore=""')
     expect(html).toContain('data-lpignore="true"')
     expect(html).toContain('data-form-type="other"')
@@ -116,9 +116,10 @@ describe("ProviderCard API key masking", () => {
     expect(html).toContain(">Test</button>")
   })
 
-  it("returns the real API key only when the field is visible", () => {
+  it("returns the real API key when the field is visible or being edited", () => {
     expect(apiKeyDisplayValue("sk-secret-123", false)).toBe("\u2022".repeat("sk-secret-123".length))
     expect(apiKeyDisplayValue("sk-secret-123", true)).toBe("sk-secret-123")
+    expect(apiKeyDisplayValue("sk-secret-123", false, true)).toBe("sk-secret-123")
     expect(apiKeyDisplayValue("", false)).toBe("")
   })
 
@@ -437,9 +438,9 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
     const testButton = html.slice(html.lastIndexOf("<button", testIndex), html.indexOf("</button>", testIndex))
     expect(testIndex).toBeGreaterThan(-1)
     expect(testButton).toContain('data-variant="default"')
-    expect(testButton).toContain("min-w-[7rem]")
+    expect(testButton).toContain("w-24")
     expect(testButton).toContain("justify-center")
-    expect(testButton).toContain("has-data-[icon=inline-start]:ps-3")
+    expect(testButton).not.toContain("min-w-[7rem]")
     expect(testButton).not.toContain('data-variant="secondary"')
     expect(html).not.toContain("Get Models")
     expect(html).not.toContain("Endpoint test")
@@ -479,9 +480,9 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
     const testButton = html.slice(html.lastIndexOf("<button", testIndex), html.indexOf("</button>", testIndex))
     expect(testIndex).toBeGreaterThan(-1)
     expect(testButton).toContain('data-variant="default"')
-    expect(testButton).toContain("min-w-[7rem]")
+    expect(testButton).toContain("w-24")
     expect(testButton).toContain("justify-center")
-    expect(testButton).toContain("has-data-[icon=inline-start]:ps-3")
+    expect(testButton).not.toContain("min-w-[7rem]")
     expect(testButton).not.toContain('data-variant="secondary"')
     expect(html).toContain("https://api.qnaigc.com/v1")
     expect(html).toContain("Protocol: OpenAI-compatible")

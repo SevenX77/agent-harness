@@ -1,7 +1,7 @@
 ---
 module: 02_capabilities/studio-settings
 doc: baseline
-status: FROZEN（现状对齐 pinned 代码 0d9fbaf；Settings UI/API 大体 live；6 态仍是旧 5 态/`needs_setup`，部分 ③b 内核逻辑还在 Studio 后端巨型路由中 ⚠️。）
+status: FROZEN（现状已更新；Settings UI/API 大体 live；API Keys 已消费 6 态投影与 catalog evidence_refs 蓝态；部分 ③b 内核逻辑还在 Studio 后端适配壳中待边界收敛。）
 binds_alignment: ./mvp1-alignment.md
 binds_code: apps/studio/frontend/src/components/studio/settings/SettingsPage.tsx:SettingsPage · apps/studio/frontend/src/components/studio/api-keys/ProviderCard.tsx:ProviderCard · apps/studio/frontend/src/api/llm.ts:ProviderUiState · apps/studio/backend/app/services/llm_state_projection.py:ProviderUiState · apps/studio/backend/app/routers/llm.py:router
 units: [settings-six-state-provider-health, model-group-role-materialization, node-properties-role-test, copilot-sdk-test-parity]
@@ -10,7 +10,7 @@ units: [settings-six-state-provider-health, model-group-role-materialization, no
 # studio-settings — Baseline（当下代码实现逻辑）
 
 > **Scope**: Settings 运行底座：provider credentials、model groups、LLM roles、Copilot route 配置与状态投影消费。
-> **现状一句话**: Settings UI/API 大体 live；6 态仍是旧 5 态/`needs_setup`，部分 ③b 内核逻辑还在 Studio 后端巨型路由中 ⚠️。
+> **现状一句话**: Settings UI/API 大体 live；API Keys 已消费 6 态投影与 catalog evidence_refs 蓝态；部分 ③b 内核逻辑还在 Studio 后端适配壳中待边界收敛。
 
 ## UI/UX
 Settings 运行底座：provider credentials、model groups、LLM roles、Copilot route 配置与状态投影消费。 当前在 UI 上的可见入口、提示、面板或状态详见下方前端证据；带 ⚠️ 的项是已验真的 code↔design drift。
@@ -22,14 +22,14 @@ Settings 运行底座：provider credentials、model groups、LLM roles、Copilo
 | Settings overlay | Workspace mounts Settings over the center area when selected. | `apps/studio/frontend/src/components/studio/Workspace.tsx:currentCompileErrors（L496）` |
 | Load/save | Settings page loads credentials/roles, debounces saves, and listens to registry/roles websocket events. | `apps/studio/frontend/src/components/studio/settings/SettingsPage.tsx:cached（L398）`, `apps/studio/frontend/src/components/studio/settings/SettingsPage.tsx:handleFocus（L444）` |
 | Provider card | API Keys card owns key visibility, copy, endpoint, test, and get-models controls. | `apps/studio/frontend/src/components/studio/api-keys/ProviderCard.tsx:tag（L907）`, `apps/studio/frontend/src/components/studio/api-keys/ProviderCard.tsx:tag（L1001）` |
-| Frontend state enum | Frontend provider state still uses `ready/untested/cooling_down/needs_setup/off`. | `apps/studio/frontend/src/api/llm.ts:llm（L3）` |
+| Frontend state enum | Frontend provider state exposes `ready/historical_ready/untested/cooling_down/failed/off`; API Keys consumes backend route `ui_state` for tag color. | `apps/studio/frontend/src/api/llm.ts:ProviderUiState` |
 | Copilot tab | Copilot tab derives roles from model groups, but ignores save status/error and can rekey role names incorrectly — 后端分流逻辑依赖 `copilot_` 前缀边界。 | `apps/studio/frontend/src/components/studio/settings/copilot/CopilotTab.tsx:CopilotTab（L70）`, `apps/studio/frontend/src/components/studio/settings/copilot/CopilotTab.tsx:selectModelGroup（L219）`, `apps/studio/backend/app/routers/llm.py:_is_copilot_role（L909）` |
 
 ## 后端功能
 | 面 | 现状 | 证据（文件:符号名） |
 |---|---|---|
-| Backend state enum | Backend projection uses the same five-state enum with `needs_setup`. | `apps/studio/backend/app/services/llm_state_projection.py:llm_state_projection（L12）` |
-| Role materializer | Materializer skips `needs_setup/off`, keeps cooling-down routes with warning, and builds fallback chains. | `apps/studio/backend/app/services/llm_role_materializer.py:materialize_role（L51）`, `apps/studio/backend/app/services/llm_role_materializer.py:materialize_role（L85）` |
+| Backend state enum | Backend projection exposes six-state route/provider UI state; historical_ready is derived from credentials route.metadata.evidence_refs, not from catalog cache directly. | `apps/studio/backend/app/services/llm_state_projection.py:project_provider_model_state`, `apps/studio/backend/app/routers/llm.py:_project_route_ui_states` |
+| Role materializer | Materializer consumes route state from registry/gateway projection, keeps cooling-down routes with warning, and builds fallback chains. | `apps/studio/backend/app/services/llm_role_materializer.py:materialize_role` |
 | LLM HTTP API | Backend exposes registry, roles, endpoint tests, model groups, and role tests. | `apps/studio/backend/app/routers/llm.py:EndpointModelTestResponse（L312）`, `apps/studio/backend/app/routers/llm.py:apply_import_draft（L899）` |
 | Copilot SDK test | Backend role test uses an Anthropic probe path distinct from the real Copilot service session path. | `apps/studio/backend/app/routers/llm.py:_probe_copilot_sdk_tool_call（L2150）`, `apps/studio/backend/app/services/copilot.py:stream_query（L201）` |
 
@@ -40,7 +40,7 @@ Settings 运行底座：provider credentials、model groups、LLM roles、Copilo
 ## baseline / alignment 差异（测试锚点）
 | 维度 | 现状（baseline） | 目标（alignment） |
 |---|---|---|
-| 六态 | 前后端仍有 `needs_setup` 旧 5 态 ⚠️ | ready/historical_ready/untested/failed/cooling_down/off 六态投影 |
+| 六态 | API Keys / registry 已消费 ready/historical_ready/untested/failed/cooling_down/off 六态投影 | 继续清理其它 Settings 消费面里的旧 `needs_setup` 文案或枚举残留 |
 | materialize 边界 | `llm.py` 混 HTTP glue/probe/materialize/draft ⚠️ | ③b graph-agent-gateway 负责公共内核，Studio 只做 UI/策略/适配 |
 | Copilot test | 探测路径与真实 chat 不等价 ⚠️ | 短 smoke 走真实 SDK session |
 | 设置不挡壳 | Settings 不完整时仍可 edit/compile | predict/run/copilot/publish 显示局部 setup error |

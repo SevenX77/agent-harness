@@ -18,6 +18,93 @@ _LOGIC_MD = (
     "  outputs:\n    type: object\n    properties: {}\nactions: [x]\nvalidator: false\n---\n<action>x</action>\n"
 )
 
+# A drilled subgraph GRAPH.md that shares the bare name "text-segmentation" with
+# the conftest public skill of the same name, but has DIFFERENT content (so a
+# different content hash). Resolving the bare id alone finds the public skill.
+_SUBGRAPH_GRAPH_MD = (
+    '---\n'
+    'schema_version: "v0.3.0"\n'
+    "name: text-segmentation\n"
+    "description: drilled subgraph copy\n"
+    "io:\n"
+    "  inputs:\n"
+    "    type: object\n"
+    "    properties:\n"
+    "      input_text:\n"
+    "        type: string\n"
+    "    required: [input_text]\n"
+    "    additionalProperties: false\n"
+    "  outputs:\n"
+    "    type: object\n"
+    "    properties:\n"
+    "      prepared:\n"
+    "        type: boolean\n"
+    "    required: [prepared]\n"
+    "    additionalProperties: true\n"
+    "phases:\n"
+    "  - setup\n"
+    "---\n"
+    '<phase depends_on="input" output>setup</phase>\n'
+)
+
+
+def _make_colliding_subgraph(skills_dir: Path) -> Path:
+    subgraph_dir = skills_dir / "story-deconstruction" / "subgraph" / "text-segmentation"
+    subgraph_dir.mkdir(parents=True)
+    (subgraph_dir / "GRAPH.md").write_text(_SUBGRAPH_GRAPH_MD, encoding="utf-8")
+    return subgraph_dir
+
+
+def test_serialize_uses_workspace_root_for_drilled_subgraph(
+    client: TestClient, studio_roots: tuple[Path, Path]
+) -> None:
+    # The drilled-subgraph fix: the canvas passes the subgraph's absolute path as
+    # workspace_root, so the serializer reads THAT GRAPH.md instead of the
+    # name-colliding public skill the bare id would resolve to.
+    skills_dir, _ = studio_roots
+    subgraph_dir = _make_colliding_subgraph(skills_dir)
+    expected_hash = _graph_content_hash(_SUBGRAPH_GRAPH_MD)
+
+    response = client.post(
+        "/api/skills/text-segmentation/graph/serialize",
+        json={
+            "phases": [
+                {"id": "setup", "src": "phases/setup", "depends_on": []},
+                {"id": "logic", "src": "phases/logic", "depends_on": []},
+            ],
+            "expected_hash": expected_hash,
+            "workspace_root": str(subgraph_dir),
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    # current_hash matches the SUBGRAPH file, proving the serializer read that
+    # GRAPH.md (the colliding public skill has different content -> different hash).
+    assert response.json()["current_hash"] == expected_hash
+    assert "  - logic" in response.json()["markdown_content"]
+
+
+def test_serialize_bare_id_cannot_disambiguate_colliding_subgraph(
+    client: TestClient, studio_roots: tuple[Path, Path]
+) -> None:
+    # Documents the drilled-subgraph 409 the workspace_root path fixes: without a
+    # path the bare id resolves the PUBLIC text-segmentation skill, whose content
+    # (and hash) differ from the subgraph the canvas is editing -> snapshot_conflict.
+    skills_dir, _ = studio_roots
+    _make_colliding_subgraph(skills_dir)
+    subgraph_hash = _graph_content_hash(_SUBGRAPH_GRAPH_MD)
+
+    response = client.post(
+        "/api/skills/text-segmentation/graph/serialize",
+        json={
+            "phases": [{"id": "setup", "src": "phases/setup", "depends_on": []}],
+            "expected_hash": subgraph_hash,
+        },
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["code"] == "snapshot_conflict"
+
 
 def test_serialize_adds_a_disconnected_phase_without_500(client: TestClient) -> None:
     # Mirrors "+ Add phase": the existing `setup` plus a freshly-added, not-yet-

@@ -62,7 +62,7 @@ related: INDEX.md（设计单元台账）· 各模块 mvp1-alignment.md §8（im
 | C2 | `data-contracts` | 物理抽 `core/` → 零依赖 L0 叶 |
 | C3 | `02-resolver` | `LocalWorkspaceResolver` 函数体改绝对 path 边界/合法性校验(退 registry 旧语义) |
 | C4 | `01-compile` | 死簇清理(`code_phase_node`/`phase_executor` 等) |
-| C5 | (Gemini 建议,**待 PM 点头**) | 归档 `_migration-src/`(已迁源)消 SSOT 噪音——本架构师有"不碰 `_migration-src`"约束,需授权 |
+| C5 | done 2026-06-28 | 历史迁移源已删除；正式模块文档和 `skill-spec/00-FORMAT-GROUND-TRUTH.md` 为当前入口 |
 
 ## 派单序(daemon 恢复后)
 K1→K2(keystone)→ 并行 [Tier 1 挂 create_agent] + [Tier 2 独立轨] → Tier 3 错误 V2(P0-1 起)→ Tier 4 需 studio 协同(S1-S3 现在就可路由)→ Tier 5 收尾。

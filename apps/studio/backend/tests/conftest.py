@@ -32,7 +32,10 @@ _TEST_TOKEN = "studio-test-token"
 
 
 @pytest.fixture(autouse=True)
-def _community_catalog_neutralized_in_tests(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def _community_catalog_neutralized_in_tests(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[None]:
     """Keep the community catalog feature off the network during tests.
 
     Production ships the catalog ON by default (clean open API, baked gate URL +
@@ -54,6 +57,10 @@ def _community_catalog_neutralized_in_tests(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv("STUDIO_COMMUNITY_GATE_URL", "")
     monkeypatch.setenv("STUDIO_COMMUNITY_CATALOG_SIGNING_PUBKEY", "")
     monkeypatch.setenv("STUDIO_COMMUNITY_CATALOG_MANIFEST_URL", "")
+    monkeypatch.setenv(
+        "STUDIO_RUNTIME_ACTIVITY_LOG_PATH",
+        str(tmp_path / "runtime-activity" / "studio_runtime_activity.jsonl"),
+    )
     clear_backend_caches()
     yield
     clear_backend_caches()

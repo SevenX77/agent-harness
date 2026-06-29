@@ -24,6 +24,14 @@ export function resolveWorkspaceIdentity(selection: string | null): { skillId: s
   }
 }
 
+export function topLevelSkillIdFromWorkspaceRoot(workspaceRoot: string | null | undefined): string | null {
+  if (!workspaceRoot || !isAbsolutePath(workspaceRoot)) return null
+  const parts = workspaceRoot.split(/[\\/]+/).filter(Boolean)
+  const skillsIndex = parts.lastIndexOf('skills')
+  if (skillsIndex < 0 || skillsIndex + 1 >= parts.length) return null
+  return normalizeSkillIdSegment(parts[skillsIndex + 1]) || null
+}
+
 export function isAbsolutePath(value: string): boolean {
   return value.startsWith('/') || isWindowsAbsolutePath(value)
 }

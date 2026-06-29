@@ -702,6 +702,12 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   width: 2px !important;
 }
 
+/* Locked canvas: panning/zooming are disabled in behavior, but the pane keeps the
+   grab ("hand") cursor — only the drag does nothing, the cursor must not change. */
+.react-flow.canvas-locked .react-flow__pane {
+  cursor: grab !important;
+}
+
 .react-flow .subgraph-bridge-edge {
   /* stroke-dasharray is set inline per-edge (subgraphBridgeDashArray) so the
      rhythm fits the path length and both ends land on a full dash. */

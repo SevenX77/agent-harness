@@ -817,6 +817,30 @@ async def resolve_skill_dir_async(
     _raise_skill_not_found(safe_skill_id)
 
 
+async def _resolve_canvas_serialize_dir(
+    user_id: str,
+    skill_id: str,
+    workspace_root: str | None,
+    storage: StorageBackend,
+    metadata: MetadataStore,
+) -> Path:
+    """Resolve the directory whose GRAPH.md a canvas topology-save targets.
+
+    A drilled subgraph is identified by its ABSOLUTE PATH (MVP1 design: subgraph
+    identity is a path, not a registry id). When the canvas passes that path as
+    ``workspace_root`` we read/serialize THAT GRAPH.md directly, so a subgraph
+    whose bare name collides with another skill (e.g. a top-level skill of the
+    same name) is never mis-resolved through the global index / public dir.
+    Without a path we fall back to bare-id resolution for the parent graph.
+    """
+    if workspace_root:
+        skill_dir = Path(workspace_root)
+        if skill_dir.is_absolute() and await storage.exists(str(skill_dir / "GRAPH.md")):
+            return skill_dir
+        _raise_skill_not_found(skill_id)
+    return await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
+
+
 async def latest_run_metadata_async(
     user_id: str,
     skill_id: str,
@@ -1409,7 +1433,9 @@ async def serialize_skill_graph_markdown(
 ) -> SerializeGraphRes:
     """Serialize a Canvas topology snapshot against the latest on-disk GRAPH.md."""
     started = time.perf_counter()
-    skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
+    skill_dir = await _resolve_canvas_serialize_dir(
+        user_id, skill_id, request.workspace_root, storage, metadata
+    )
     graph_path = skill_dir / "GRAPH.md"
     original_md = await storage.read_text(str(graph_path))
     current_hash = _graph_content_hash(original_md)

@@ -369,38 +369,42 @@ function groupRect(left: number, top: number, width: number, height: number): Re
   }
 }
 
-function groupOverlapsVisibleNode(
-  parentNodes: PositionedParentNode[],
-  parentNodeId: string,
-  rect: Rect,
-): boolean {
-  return parentNodes.some((node) => node.id !== parentNodeId && rectsOverlap(rect, nodeRect(node)))
-}
-
-function alignedGroupTop(expandOriginY: number): number {
-  return expandOriginY - CONTAINER_HEADER / 2
+function alignedGroupTop(expandOriginY: number, parentHeight: number): number {
+  // Place the frame so the header's vertical center lands on the parent button Y
+  // (→ a horizontal bridge). groupNode positions the frame relative to the parent
+  // CENTER, but React Flow's center node-origin renders its top-left parentHeight/2
+  // lower, so subtract that back out together with the header half-height.
+  return expandOriginY - CONTAINER_HEADER / 2 - parentHeight / 2
 }
 
 function chooseGroupPlacement(
   parentNodes: PositionedParentNode[],
-  parentGraphRight: number,
   parentNodeId: string,
   expandOrigin: { x: number; y: number },
+  parentHeight: number,
   width: number,
   height: number,
 ): { left: number; top: number } {
-  const top = alignedGroupTop(expandOrigin.y)
-  const directLeft = expandOrigin.x + SUBGRAPH_BRIDGE_LENGTH
-  const directRect = groupRect(directLeft, top, width, height)
-  if (!groupOverlapsVisibleNode(parentNodes, parentNodeId, directRect)) {
-    return { left: directLeft, top }
+  const top = alignedGroupTop(expandOrigin.y, parentHeight)
+  // Nearest avoidance: start just past the parent's expand toggle, then step
+  // right past ONLY the nodes that actually overlap this row band — never past
+  // every node on the canvas. Clearing one blocker can reveal another further
+  // right, so re-check until the band is clear (guarded against cycles).
+  let left = expandOrigin.x + SUBGRAPH_BRIDGE_LENGTH
+  for (let guard = 0; guard <= parentNodes.length; guard += 1) {
+    const rect = groupRect(left, top, width, height)
+    let blockerRight = Number.NEGATIVE_INFINITY
+    for (const node of parentNodes) {
+      if (node.id === parentNodeId) continue
+      const candidate = nodeRect(node)
+      if (rectsOverlap(rect, candidate)) {
+        blockerRight = Math.max(blockerRight, candidate.right)
+      }
+    }
+    if (!Number.isFinite(blockerRight)) break
+    left = blockerRight + SUBGRAPH_BRIDGE_LENGTH
   }
-
-  const graphRight = Number.isFinite(parentGraphRight) ? parentGraphRight : expandOrigin.x
-  return {
-    left: Math.max(expandOrigin.x, graphRight) + SUBGRAPH_BRIDGE_LENGTH,
-    top,
-  }
+  return { left, top }
 }
 
 function groupNode(
@@ -454,10 +458,6 @@ export function buildSubgraphExpansion(
   }
 
   const parentById = new Map(parentNodes.map((node) => [node.id, node]))
-  const parentGraphRight = parentNodes.reduce((right, node) => {
-    const { width } = positionedNodeSize(node)
-    return Math.max(right, node.position.x + width / 2)
-  }, Number.NEGATIVE_INFINITY)
   const nodes: GraphCanvasNode[] = []
   const edges: Edge<ContextEdgeData>[] = []
 
@@ -479,9 +479,9 @@ export function buildSubgraphExpansion(
       const height = 132
       const { left, top } = chooseGroupPlacement(
         parentNodes,
-        parentGraphRight,
         request.parentNodeId,
         expandOrigin,
+        parentSize.height,
         width,
         height,
       )
@@ -510,9 +510,9 @@ export function buildSubgraphExpansion(
       const height = 132
       const { left, top } = chooseGroupPlacement(
         parentNodes,
-        parentGraphRight,
         request.parentNodeId,
         expandOrigin,
+        parentSize.height,
         width,
         height,
       )
@@ -526,9 +526,9 @@ export function buildSubgraphExpansion(
     const height = child.contentHeight + CONTAINER_HEADER + CONTAINER_PADDING * 2
     const { left: groupLeft, top: groupTop } = chooseGroupPlacement(
       parentNodes,
-      parentGraphRight,
       request.parentNodeId,
       expandOrigin,
+      parentSize.height,
       width,
       height,
     )

@@ -496,7 +496,12 @@ describe('Workspace WS-1 local writer contracts', () => {
       content: 'serialized graph\n',
       expectedHash: 'graph-hash',
     }))
-    expect((mocks.invoke.mock.calls[0][1] as Record<string, unknown>)).not.toHaveProperty('path')
+    const connectGraphWrite = mocks.invoke.mock.calls.find(
+      ([command, payload]) =>
+        command === 'write_workspace_file'
+        && (payload as { relativePath?: string }).relativePath === 'GRAPH.md',
+    )
+    expect(connectGraphWrite?.[1] as Record<string, unknown>).not.toHaveProperty('path')
   })
 
   it('does not auto-compile after a canvas connection writes GRAPH.md successfully', async () => {
@@ -589,14 +594,13 @@ describe('Workspace WS-1 local writer contracts', () => {
     expect(html).toContain('data-studio-canvas-overlay-host="true"')
     expect(html).toContain('studio-left-panel-overlay')
     expect(html).toContain('data-studio-left-panel-content="true"')
-    expect(html).toContain('h-fit')
-    expect(html).toContain('max-h-[calc(100%-1.5rem)]')
-    expect(html).toContain('flex min-h-0 max-h-[inherit]')
+    expect(html).toContain('bottom-3 left-3 top-3')
+    expect(html).toContain('flex h-full min-h-0 flex-1')
     expect(html).toContain('--studio-canvas-left-safe-area:25.5rem')
     expect(html).toContain('--studio-canvas-right-safe-area:23.5rem')
     expect(html).toContain('rounded-lg')
     expect(html).toContain('top-3')
-    expect(html).not.toContain('bottom-3 left-3 top-3')
+    expect(html).not.toContain('h-fit')
     expect(html).toContain('Close panel')
     expect(html).toContain('data-testid="panels"')
     expect(html).toContain('data-panel-id="canvas"')
@@ -766,15 +770,15 @@ describe('Workspace WS-1 local writer contracts', () => {
     await mocks.graphCanvasProps?.onCreatePhase?.('logic')
 
     expect(mocks.writeSkillFile).not.toHaveBeenCalled()
-    expect(mocks.invoke).toHaveBeenNthCalledWith(1, 'write_workspace_file', expect.objectContaining({
+    // The expected hash comes from the on-disk GRAPH.md (single source of truth),
+    // so the canvas reads it through native fs before writing.
+    expect(mocks.invoke).toHaveBeenCalledWith('read_workspace_file', expect.objectContaining({ path: 'GRAPH.md' }))
+    expect(mocks.invoke).toHaveBeenCalledWith('write_workspace_file', expect.objectContaining({
       workspaceRoot: '/Users/sevenx/Projects/writer-smoke',
       relativePath: 'phases/logic/LOGIC.md',
       expectedHash: null,
       createIfAbsent: true,
     }))
-    expect(mocks.invoke.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.serializeSkillGraph.mock.invocationCallOrder[0],
-    )
     expect(mocks.serializeSkillGraph).toHaveBeenCalledWith(
       'writer-smoke',
       expect.arrayContaining([
@@ -787,13 +791,32 @@ describe('Workspace WS-1 local writer contracts', () => {
       ]),
       'graph-hash',
     )
-    expect(mocks.invoke).toHaveBeenCalledTimes(2)
-    expect(mocks.invoke).toHaveBeenNthCalledWith(2, 'write_workspace_file', expect.objectContaining({
+    expect(mocks.invoke).toHaveBeenCalledWith('write_workspace_file', expect.objectContaining({
       workspaceRoot: '/Users/sevenx/Projects/writer-smoke',
       relativePath: 'GRAPH.md',
       content: 'serialized graph\n',
       expectedHash: 'graph-hash',
     }))
+    // The phase file is created before the sidecar serialize, which runs before
+    // GRAPH.md is persisted.
+    const logicPhaseWriteIndex = mocks.invoke.mock.calls.findIndex(
+      ([command, payload]) =>
+        command === 'write_workspace_file'
+        && (payload as { relativePath?: string }).relativePath === 'phases/logic/LOGIC.md',
+    )
+    const logicGraphWriteIndex = mocks.invoke.mock.calls.findIndex(
+      ([command, payload]) =>
+        command === 'write_workspace_file'
+        && (payload as { relativePath?: string }).relativePath === 'GRAPH.md',
+    )
+    expect(logicPhaseWriteIndex).toBeGreaterThanOrEqual(0)
+    expect(logicGraphWriteIndex).toBeGreaterThanOrEqual(0)
+    expect(mocks.invoke.mock.invocationCallOrder[logicPhaseWriteIndex]).toBeLessThan(
+      mocks.serializeSkillGraph.mock.invocationCallOrder[0],
+    )
+    expect(mocks.serializeSkillGraph.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.invoke.mock.invocationCallOrder[logicGraphWriteIndex],
+    )
     expect(mocks.compileSkill).not.toHaveBeenCalled()
   })
 
@@ -891,7 +914,7 @@ describe('Workspace WS-1 local writer contracts', () => {
 
     await mocks.graphCanvasProps?.onCreatePhase?.('logic', 'summarize_events')
 
-    expect(mocks.invoke).toHaveBeenNthCalledWith(1, 'write_workspace_file', expect.objectContaining({
+    expect(mocks.invoke).toHaveBeenCalledWith('write_workspace_file', expect.objectContaining({
       relativePath: 'phases/summarize_events/LOGIC.md',
       content: expect.stringContaining('name: summarize_events'),
       createIfAbsent: true,
@@ -979,15 +1002,29 @@ describe('Workspace WS-1 local writer contracts', () => {
     const serializedPhases = mocks.serializeSkillGraph.mock.calls[0][1] as SerializableGraphPhaseRef[]
     expect(serializedPhases.some((phase) => phase.id === 'draft')).toBe(false)
     expect(serializedPhases.find((phase) => phase.id === 'review')?.depends_on).toEqual([])
-    expect(mocks.invoke).toHaveBeenNthCalledWith(1, 'write_workspace_file', expect.objectContaining({
+    expect(mocks.invoke).toHaveBeenCalledWith('write_workspace_file', expect.objectContaining({
       relativePath: 'GRAPH.md',
       content: 'serialized graph\n',
       expectedHash: 'graph-hash',
     }))
-    expect(mocks.invoke).toHaveBeenNthCalledWith(2, 'delete_workspace_path', {
+    expect(mocks.invoke).toHaveBeenCalledWith('delete_workspace_path', {
       workspaceRoot: RECONNECT_FIXTURE_SKILL_ID,
       path: 'phases/draft',
     })
+    // GRAPH.md is persisted without the phase before its directory is deleted, so a
+    // crash can never orphan the directory.
+    const deleteGraphWriteIndex = mocks.invoke.mock.calls.findIndex(
+      ([command, payload]) =>
+        command === 'write_workspace_file'
+        && (payload as { relativePath?: string }).relativePath === 'GRAPH.md',
+    )
+    const draftDirDeleteIndex = mocks.invoke.mock.calls.findIndex(
+      ([command, payload]) =>
+        command === 'delete_workspace_path'
+        && (payload as { path?: string }).path === 'phases/draft',
+    )
+    expect(deleteGraphWriteIndex).toBeGreaterThanOrEqual(0)
+    expect(draftDirDeleteIndex).toBeGreaterThan(deleteGraphWriteIndex)
     expect(mocks.compileSkill).not.toHaveBeenCalled()
   })
 
@@ -999,7 +1036,7 @@ describe('Workspace WS-1 local writer contracts', () => {
     expect(mocks.serializeSkillGraph).toHaveBeenCalledTimes(1)
     const serializedPhases = mocks.serializeSkillGraph.mock.calls[0][1] as SerializableGraphPhaseRef[]
     expect(serializedPhases.map((phase) => phase.id)).toEqual(['review'])
-    expect(mocks.invoke).toHaveBeenNthCalledWith(1, 'write_workspace_file', expect.objectContaining({
+    expect(mocks.invoke).toHaveBeenCalledWith('write_workspace_file', expect.objectContaining({
       relativePath: 'GRAPH.md',
       content: 'serialized graph\n',
     }))

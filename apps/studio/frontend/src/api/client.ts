@@ -250,6 +250,7 @@ export async function serializeSkillGraph(
   skillId: string,
   phases: SerializableGraphPhaseRef[],
   expectedHash?: string | null,
+  workspaceRoot?: string | null,
 ): Promise<SerializeGraphRes> {
   const topologyPhases = phases.map(({ id, src, depends_on, output }) => ({
     id,
@@ -260,6 +261,10 @@ export async function serializeSkillGraph(
   const response = await api.post<SerializeGraphRes>(`/skills/${skillId}/graph/serialize`, {
     phases: topologyPhases,
     expected_hash: expectedHash ?? null,
+    // A drilled subgraph is identified by its absolute path so the backend
+    // serializes against THAT GRAPH.md, not a name-colliding bare id. Omitted for
+    // the parent graph so its request body is unchanged.
+    ...(workspaceRoot ? { workspace_root: workspaceRoot } : {}),
   })
   return response.data
 }

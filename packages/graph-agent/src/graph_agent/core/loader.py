@@ -1344,8 +1344,18 @@ def _collect_graph_dependencies(
     unknown_deps: list[tuple[BodyPhaseRef, str]] = []
     for ref in body_phase_refs:
         if not ref.depends_on:
-            input_roots.append(ref.name)
-            continue
+            # `depends_on` is required (skill-spec 00-FORMAT-GROUND-TRUTH: 必填;
+            # first node must declare `depends_on="input"`). A bare <phase> with no
+            # depends_on is a disconnected node — flag it as an island instead of
+            # silently treating it as an implicit input root. field_path carries the
+            # node locator so Studio's realtime-lint badges the offending node.
+            _graph_fatal(
+                graph_path,
+                ref.diag_line,
+                f"[F-v3-graph-phase-island] phase {ref.name!r} declares no depends_on "
+                '(every phase must connect to "input" or an upstream phase)',
+                field_path=f"{ref.name}.depends_on",
+            )
         for dep in ref.depends_on:
             if dep == "input":
                 input_roots.append(ref.name)

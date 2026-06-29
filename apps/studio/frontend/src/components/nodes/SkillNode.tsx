@@ -87,8 +87,9 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
   const compileErrors = data.compileErrors ?? []
   const compileErrorCount = compileErrors.length
   // The expanded per-error list (field · line — message) lives on the trigger's accessible
-  // name + native title too, so the detail is reachable without opening the portalled Radix
-  // Tooltip (and survives SSR / screen readers) — same idiom as PropertiesPanel's marker.
+  // name (aria-label) so the detail survives SSR / screen readers. We deliberately do NOT
+  // also set a native `title`: it would render a SECOND, duplicate browser tooltip on hover
+  // alongside the styled Radix TooltipContent below.
   const compileErrorSummary = compileErrorCount > 0
     ? `${compileErrorCount} compile error${compileErrorCount === 1 ? '' : 's'} on this node: ${compileErrors.map(formatNodeCompileError).join('; ')}`
     : ''
@@ -156,7 +157,6 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
                 <TooltipTrigger asChild>
                   <span
                     aria-label={compileErrorSummary}
-                    title={compileErrorSummary}
                     className="inline-flex items-center gap-0.5 rounded-md border border-destructive/40 bg-destructive/10 px-1 font-medium text-destructive"
                   >
                     <AlertTriangle className="size-3" />

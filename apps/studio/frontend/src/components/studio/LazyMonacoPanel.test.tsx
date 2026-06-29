@@ -142,6 +142,27 @@ describe("saveMonacoDraft", () => {
     )
   })
 
+  it("surfaces a read_only result when the backend refuses a read-only skill (403 SKILL_READ_ONLY)", async () => {
+    const onSaved = vi.fn()
+    const onConflict = vi.fn()
+    vi.mocked(writeSkillFile).mockRejectedValueOnce(readOnlySkillError())
+
+    await expect(saveMonacoDraft({
+      skillId: "bundled-skill",
+      workspaceRoot: "/Users/sevenx/Projects/bundled-skill",
+      filePath: "SKILL.md",
+      content: "# Local\n",
+      savedContent: "# Original\n",
+      currentHash: "original-hash",
+      onSaved,
+      onConflict,
+    })).resolves.toEqual({ status: "read_only" })
+
+    // A read-only refusal is neither a save nor a hash conflict.
+    expect(onSaved).not.toHaveBeenCalled()
+    expect(onConflict).not.toHaveBeenCalled()
+  })
+
   it("maps hash conflicts into the Monaco conflict payload", async () => {
     const onConflict = vi.fn()
     vi.mocked(writeSkillFile).mockRejectedValueOnce(hashConflictError({
@@ -180,4 +201,16 @@ function hashConflictError(data: Record<string, unknown>): AxiosError {
     config,
   }
   return new AxiosError("Hash conflict", "ERR_BAD_RESPONSE", config, null, response)
+}
+
+function readOnlySkillError(): AxiosError {
+  const config = { headers: {} } as InternalAxiosRequestConfig
+  const response: AxiosResponse = {
+    data: { error_code: "SKILL_READ_ONLY", message: "Skill is read-only" },
+    status: 403,
+    statusText: "Forbidden",
+    headers: {},
+    config,
+  }
+  return new AxiosError("Read only", "ERR_BAD_REQUEST", config, null, response)
 }

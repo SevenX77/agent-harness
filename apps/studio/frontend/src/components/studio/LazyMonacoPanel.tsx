@@ -8,8 +8,9 @@ import { Button } from '@/components/ui/button'
 import { isTauriRuntime } from '@/config/runtime'
 import { useDebouncedLint } from '@/hooks/useDebouncedLint'
 import { sha256Hex } from '@/lib/hash'
-import { LintDiagnosticsPanel, type EditorOnMount, type MonacoApi, type MonacoEditor as MonacoEditorInstance } from '@/components/MonacoPanel'
+import { type EditorOnMount, type MonacoApi, type MonacoEditor as MonacoEditorInstance } from '@/components/MonacoPanel'
 import { applyLintMarkers } from '@/components/studio/lint-monaco-markers'
+import { isReadOnlySkillError } from '@/components/GraphCanvas/drill-edit'
 
 const MonacoEditor = lazy(async () => {
   const module = await import('@monaco-editor/react')
@@ -69,6 +70,7 @@ interface SaveMonacoDraftArgs {
 type SaveMonacoDraftResult =
   | { status: 'saved'; hash: string; savedContent: string }
   | { status: 'conflict' }
+  | { status: 'read_only' }
 
 export async function saveMonacoDraft({
   skillId,
@@ -102,6 +104,12 @@ export async function saveMonacoDraft({
       })
       return { status: 'conflict' }
     }
+    // The backend refuses writes to a read-only skill (bundled/public, outside the
+    // writable workspace) with 403 SKILL_READ_ONLY. Surface it as an explicit result
+    // so the editor can flip read-only + tell the user, instead of failing silently.
+    if (isReadOnlySkillError(error)) {
+      return { status: 'read_only' }
+    }
     throw error
   }
 }
@@ -123,6 +131,12 @@ export function LazyMonacoPanel({
   onSplit,
 }: LazyMonacoPanelProps) {
   const [draft, setDraft] = useState(value)
+  // Server-confirmed read-only: set when an autosave is refused with 403 SKILL_READ_ONLY
+  // (a bundled/public skill outside the writable workspace). Distinct from the caller's
+  // `saveEnabled` prop so a skill the frontend THOUGHT was writable still flips read-only
+  // once the backend — the single source of truth for writability — refuses the write.
+  const [serverReadOnly, setServerReadOnly] = useState(false)
+  const serverReadOnlyRef = useRef(false)
   const draftRef = useRef(value)
   const savedRef = useRef(value)
   const hashRef = useRef<string | null>(initialHash)
@@ -156,6 +170,11 @@ export function LazyMonacoPanel({
       draftRef.current = value
       savedRef.current = value
       hashRef.current = initialHash
+      if (pathChanged) {
+        // A different file may be writable even if the previous one was refused.
+        serverReadOnlyRef.current = false
+        setServerReadOnly(false)
+      }
       if (timerRef.current !== null) {
         window.clearTimeout(timerRef.current)
         timerRef.current = null
@@ -184,6 +203,17 @@ export function LazyMonacoPanel({
           onConflict: onConflictRef.current,
         })
         if (result.status === 'conflict') {
+          return
+        }
+        if (result.status === 'read_only') {
+          // Backend is the source of truth for writability: flip the editor read-only
+          // and tell the user once (mirrors the Properties-panel read-only toast),
+          // instead of silently dropping their edits.
+          if (!serverReadOnlyRef.current) {
+            serverReadOnlyRef.current = true
+            setServerReadOnly(true)
+            toast.error('This skill is read-only — fork it into your workspace to edit.')
+          }
           return
         }
         hashRef.current = result.hash
@@ -258,32 +288,18 @@ export function LazyMonacoPanel({
     editorRef.current = editor
     monacoRef.current = monaco
     // Paint any diagnostics the lint hook already resolved before mount (atom #6).
-    applyLintMarkers(monaco, editor.getModel(), lintResult)
-  }, [lintResult])
+    applyLintMarkers(monaco, editor.getModel(), lintResult, filePath)
+  }, [lintResult, filePath])
 
   // IDE-style inline markers (authoring N3 atom #6): project the engine's line-bearing
   // diagnostics onto the Monaco model. Pure mapping in `lint-monaco-markers`; no second
   // source of truth. Line-less diagnostics degrade to the strip above, never guess a line.
   useEffect(() => {
-    applyLintMarkers(monacoRef.current, editorRef.current?.getModel() ?? null, lintResult)
-  }, [lintResult])
-
-  const handleJumpToLine = useCallback((line: number | null) => {
-    const editor = editorRef.current
-    if (!editor || !line) {
-      return
-    }
-    editor.revealLineInCenter(line)
-    editor.setPosition({ lineNumber: line, column: 1 })
-    editor.focus()
-  }, [])
-
-  const handleCopyDiagnostics = useCallback((message: string) => {
-    void navigator.clipboard?.writeText(message)
-  }, [])
+    applyLintMarkers(monacoRef.current, editorRef.current?.getModel() ?? null, lintResult, filePath)
+  }, [lintResult, filePath])
 
   return (
-    <section className="flex h-full min-h-0 flex-col bg-transparent">
+    <section className="flex size-full min-h-0 min-w-0 flex-col bg-transparent">
       <div className="studio-canvas-panel-header flex h-10 shrink-0 items-center justify-between border-b px-3">
         <h2 className="text-sm font-semibold text-foreground">{title}</h2>
         <div className="flex items-center gap-2">
@@ -314,11 +330,6 @@ export function LazyMonacoPanel({
           ) : null}
         </div>
       </div>
-      <LintDiagnosticsPanel
-        lintResult={lintResult}
-        onJumpToLine={handleJumpToLine}
-        onCopyErrors={handleCopyDiagnostics}
-      />
       <div className="min-h-0 flex-1">
         <Suspense fallback={<MonacoSkeleton />}>
           <MonacoEditor
@@ -332,7 +343,14 @@ export function LazyMonacoPanel({
               wordWrap: 'on',
               scrollBeyondLastLine: false,
               automaticLayout: true,
-              readOnly: !saveEnabled,
+              readOnly: !saveEnabled || serverReadOnly,
+              // Use the classic hidden <textarea> input, NOT the new EditContext API.
+              // Monaco's EditContext renders the input as <div class="native-edit-context">,
+              // which canvas-level key handlers (e.g. React Flow's space-to-pan, whose
+              // isInputDOMNode only matches INPUT/SELECT/TEXTAREA) do NOT recognise as an
+              // editable target — so they preventDefault keystrokes (Space) while you type.
+              // A textarea is recognised everywhere, keeping editor input fully free.
+              editContext: false,
             }}
             onMount={handleEditorMount}
             onChange={(nextValue) => handleChange(nextValue ?? '')}

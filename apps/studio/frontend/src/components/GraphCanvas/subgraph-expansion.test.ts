@@ -11,9 +11,47 @@ import {
   buildSubgraphExpansion,
   isSubgraphPreviewId,
   positionedParentNodes,
+  subgraphNodeIdChain,
+  subgraphPreviewChildNodeId,
+  subgraphRevealNodeIds,
   type PositionedParentNode,
   type SubgraphExpansionRequest,
 } from './subgraph-expansion'
+
+describe('subgraphNodeIdChain', () => {
+  it('builds the node id at every depth, root-first', () => {
+    expect(subgraphNodeIdChain([])).toEqual([])
+    expect(subgraphNodeIdChain(['event_timeline'])).toEqual(['event_timeline'])
+    expect(subgraphNodeIdChain(['event_timeline', 'event_extraction'])).toEqual([
+      'event_timeline',
+      subgraphPreviewChildNodeId('event_timeline', 'event_extraction'),
+    ])
+  })
+})
+
+describe('subgraphRevealNodeIds', () => {
+  it('returns null when the chain has no leaf below an ancestor', () => {
+    expect(subgraphRevealNodeIds([])).toBeNull()
+    expect(subgraphRevealNodeIds(['only'])).toBeNull()
+  })
+
+  it('maps a level-1 chain to the root ancestor + its preview child', () => {
+    const resolved = subgraphRevealNodeIds(['event_timeline', 'review'])
+    expect(resolved).toEqual({
+      expandIds: ['event_timeline'],
+      selectId: subgraphPreviewChildNodeId('event_timeline', 'review'),
+    })
+  })
+
+  it('nests deeper levels, expanding every ancestor root-first', () => {
+    const nestedId = subgraphPreviewChildNodeId('event_timeline', 'event_extraction')
+    const resolved = subgraphRevealNodeIds(['event_timeline', 'event_extraction', 'review'])
+    expect(resolved).toEqual({
+      expandIds: ['event_timeline', nestedId],
+      selectId: subgraphPreviewChildNodeId(nestedId, 'review'),
+    })
+  })
+})
 
 const PARENT_NODES: PositionedParentNode[] = [
   { id: 'draft', type: 'skill', position: { x: 160, y: 150 } },

@@ -41,7 +41,7 @@ import { SubgraphBridgeEdge } from '@/components/edges/SubgraphBridgeEdge'
 import { SubgraphGroupNode } from '@/components/nodes/SubgraphGroupNode'
 import { buildEdges, GlobalInputNode, GlobalOutputNode, INPUT_ID, OUTPUT_ID, SkillNode, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
 import { SUBGRAPH_BRIDGE_EDGE_TYPE } from '@/components/nodes/subgraph-bridge-handles'
-import { buildSubgraphExpansion, positionedParentNodes, type ExpandedSubgraphView, type SubgraphExpansionRequest } from '@/components/GraphCanvas/subgraph-expansion'
+import { buildSubgraphExpansion, positionedParentNodes, subgraphGroupNodeId, subgraphNodeIdChain, subgraphRevealNodeIds, type ExpandedSubgraphView, type SubgraphExpansionRequest } from '@/components/GraphCanvas/subgraph-expansion'
 import type { GoldenNodeState } from '@/components/studio/node-golden'
 import { useOptionalWorkspaceContext, type EdgeContextJson } from '@/components/studio/WorkspaceContext'
 import type { FileOpenInput, FileOpenRequest } from '@/components/studio/file-types'
@@ -100,6 +100,23 @@ interface GraphCanvasProps {
   selectedNodeId?: string | null
   onNodeSelect?: (node: { id: string, data: SkillGraphNodeData }) => void
   onNodeDeselect?: () => void
+  /**
+   * Reveal something inside a subgraph's inline topology, driven by clicking a
+   * file in the Assets trees. `phaseChain` is the root→leaf chain of phase ids;
+   * `nonce` makes repeated requests re-fire.
+   * - `select-child`: expand ancestors + select/highlight the leaf child node.
+   * - `expand-subgraph`: expand the subgraph's own inline preview and DESELECT
+   *   any node (driven by clicking the subgraph's GRAPH.md).
+   * Either way the targeted node is centered in the canvas viewport.
+   */
+  revealRequest?: { phaseChain: string[]; intent: 'select-child' | 'expand-subgraph'; nonce: number } | null
+  /**
+   * Center the canvas viewport on a root-graph node (at the current zoom),
+   * driven by clicking that node's file in the Assets "Skill Files" tree. `nonce`
+   * makes repeated requests re-fire. Canvas clicks never set this — selecting a
+   * node ON the canvas must not move the viewport.
+   */
+  focusNodeRequest?: { nodeId: string; nonce: number } | null
   onNodeFileOpen?: (file: FileOpenInput) => void
   onPanelChange?: (panel: PanelKind | null) => void
   // Clicking an already-selected node opens the LAST panel the user had open
@@ -510,6 +527,8 @@ export function GraphCanvas({
   selectedNodeId,
   onNodeSelect,
   onNodeDeselect,
+  revealRequest,
+  focusNodeRequest,
   onNodeFileOpen,
   onPanelChange,
   onOpenSelectedNodePanel,
@@ -1589,6 +1608,142 @@ export function GraphCanvas({
       return changed ? nextNodes : currentNodes
     })
   }, [applySelectionOverride, setNodes])
+
+  // Bring a node into the visible canvas, accounting for the panel/copilot/editor
+  // overlay insets (the editor is anchored at the canvas top, so its height is the
+  // top inset — focus never lands under it). Used only for Assets-driven reveals;
+  // selecting a node ON the canvas must leave the viewport untouched.
+  //  - default (pan-only): keep the current zoom, just center the node. For
+  //    selecting a specific node, where a zoom jump would be jarring.
+  //  - fit: zoom OUT if needed so a whole panel fits, but never zoom IN past
+  //    current. For expanding a subgraph, where the goal is to see the full group.
+  const focusNodeOnCanvas = useCallback((nodeId: string, opts?: { fit?: boolean }): boolean => {
+    const instance = reactFlowInstanceRef.current
+    if (!instance || !instance.getNode(nodeId)) return false
+    const zoom = instance.getZoom()
+    const host = canvasRef.current
+    const insets = host ? readCanvasSafeInsets(host) : { left: 0, right: 0, top: 0 }
+    const BASE = 48
+    void instance.fitView({
+      nodes: [{ id: nodeId }],
+      duration: 400,
+      maxZoom: zoom,
+      ...(opts?.fit ? {} : { minZoom: zoom }),
+      padding: {
+        top: `${insets.top + BASE}px`,
+        left: `${insets.left + BASE}px`,
+        right: `${insets.right + BASE}px`,
+        bottom: `${BASE}px`,
+      },
+    })
+    return true
+  }, [])
+
+  // Reveal (Assets trees → canvas): two intents, both retried as the live `nodes`
+  // update because nested preview nodes only exist after their parent expands +
+  // the child topology resolves asynchronously.
+  //  - select-child: expand ancestors, then select+highlight the leaf child node.
+  //  - expand-subgraph: expand the subgraph's own inline preview, deselecting any
+  //    node (clicking a subgraph's GRAPH.md).
+  const pendingChildSelectRef = useRef<{ expandIds: string[]; selectId: string } | null>(null)
+  const pendingExpandRef = useRef<string[] | null>(null)
+  // `onNodeSelect`/`onNodeDeselect` are NOT memoized by the parent (new ref every
+  // render). Read them (and syncCanvasSelection) through refs so the try* helpers
+  // are STABLE callbacks — otherwise the reveal effects would re-run every render,
+  // perpetually re-arm + re-select, and setState in an infinite loop.
+  const onNodeSelectRef = useRef(onNodeSelect)
+  onNodeSelectRef.current = onNodeSelect
+  const onNodeDeselectRef = useRef(onNodeDeselect)
+  onNodeDeselectRef.current = onNodeDeselect
+  const syncCanvasSelectionRef = useRef(syncCanvasSelection)
+  syncCanvasSelectionRef.current = syncCanvasSelection
+  const trySelectPendingChild = useCallback(() => {
+    const pending = pendingChildSelectRef.current
+    if (!pending) return
+    // Expand each subgraph ancestor as it surfaces. A nested preview node only
+    // exists once its parent is expanded AND the child topology resolves, so we
+    // walk the chain progressively across `nodes` updates (deeper levels appear
+    // on later passes). Each step only flips state when it actually changes
+    // something, so this can never feed an infinite loop.
+    for (const id of pending.expandIds) {
+      const exists = nodesRef.current.some((candidate) => candidate.type === 'skill' && candidate.id === id)
+      if (exists) {
+        setExpandedSubgraphs((current) => (current.has(id) ? current : nextExpandedSubgraphs(current, id)))
+      }
+    }
+    const node = nodesRef.current.find(
+      (candidate): candidate is SkillGraphNode => candidate.type === 'skill' && candidate.id === pending.selectId,
+    )
+    if (!node) return
+    pendingChildSelectRef.current = null
+    syncCanvasSelectionRef.current(pending.selectId)
+    onNodeSelectRef.current?.({ id: skillNodePhaseId(node), data: node.data })
+    focusNodeOnCanvas(pending.selectId)
+  }, [focusNodeOnCanvas])
+  const tryExpandPending = useCallback(() => {
+    const ids = pendingExpandRef.current
+    if (!ids || ids.length === 0) return
+    for (const id of ids) {
+      const exists = nodesRef.current.some((candidate) => candidate.type === 'skill' && candidate.id === id)
+      if (exists) {
+        setExpandedSubgraphs((current) => (current.has(id) ? current : nextExpandedSubgraphs(current, id)))
+      }
+    }
+    // Focus the expanded GROUP container (the child topology box), not the small
+    // subgraph chip — the chip sits to the LEFT of the group, so centering on it
+    // would leave the topology off to the right. The group node only exists once
+    // the subgraph is expanded + its layout composes, so wait for it (retried on
+    // each `nodes` update). Loading/error states also render a group node.
+    const groupId = subgraphGroupNodeId(ids[ids.length - 1])
+    const group = nodesRef.current.find((candidate) => candidate.id === groupId)
+    if (!group) return // expansion / deeper level still resolving; retry next update
+    // Wait until the child topology has LOADED — while loading the group is a tiny
+    // 300×132 placeholder, so centering on it then would frame the header, not the
+    // full panel. Once loaded (or errored) it has its real size; fit the WHOLE
+    // group centered. Keep retrying on each `nodes` update until then.
+    if ((group.data as { status?: string }).status === 'loading') return
+    if (focusNodeOnCanvas(groupId, { fit: true })) {
+      pendingExpandRef.current = null
+    }
+  }, [focusNodeOnCanvas])
+  // Arm pending state ONLY when a new request (nonce) arrives — never on a plain
+  // re-render — so the reveal can't feed back into re-arming.
+  const handledRevealNonceRef = useRef(0)
+  useEffect(() => {
+    if (!revealRequest || revealRequest.nonce === handledRevealNonceRef.current) return
+    handledRevealNonceRef.current = revealRequest.nonce
+    if (revealRequest.intent === 'expand-subgraph') {
+      const ids = subgraphNodeIdChain(revealRequest.phaseChain)
+      if (ids.length === 0) return
+      pendingChildSelectRef.current = null
+      pendingExpandRef.current = ids
+      // Deselect any node — opening a subgraph's GRAPH.md is a graph-level action.
+      syncCanvasSelectionRef.current(null)
+      onNodeDeselectRef.current?.()
+      tryExpandPending()
+      return
+    }
+    const resolved = subgraphRevealNodeIds(revealRequest.phaseChain)
+    if (!resolved) return
+    pendingExpandRef.current = null
+    pendingChildSelectRef.current = resolved
+    // Already-expanded case: ancestors/preview node may exist right now.
+    trySelectPendingChild()
+  }, [revealRequest, trySelectPendingChild, tryExpandPending])
+  useEffect(() => {
+    // Retry as expansion + child topology resolve surface the target node. Once
+    // handled, pending is cleared so this is a no-op until the next request.
+    trySelectPendingChild()
+    tryExpandPending()
+  }, [nodes, trySelectPendingChild, tryExpandPending])
+  // Root-graph node focus (Assets "Skill Files" → canvas): pan to the node a file
+  // click selected, without touching selection (the parent owns that).
+  const handledFocusNonceRef = useRef(0)
+  useEffect(() => {
+    if (!focusNodeRequest || focusNodeRequest.nonce === handledFocusNonceRef.current) return
+    handledFocusNonceRef.current = focusNodeRequest.nonce
+    focusNodeOnCanvas(focusNodeRequest.nodeId)
+  }, [focusNodeRequest, focusNodeOnCanvas])
 
   // Selection is OWNED by the app (selectedNodeId + override), never by React
   // Flow's internal selection. `stampSelection` flips ONLY the `selected` flag

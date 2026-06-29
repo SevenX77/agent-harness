@@ -33,12 +33,51 @@ export function isSubgraphPreviewId(id: string): boolean {
   return id.startsWith(PREVIEW_PREFIX)
 }
 
-function groupNodeId(parentNodeId: string): string {
+/** The inline-preview GROUP container node id for an expanded subgraph node —
+ * the box that holds the child topology (sits to the right of the subgraph chip). */
+export function subgraphGroupNodeId(parentNodeId: string): string {
   return `${PREVIEW_PREFIX}::group::${parentNodeId}`
 }
 
 export function subgraphPreviewChildNodeId(parentNodeId: string, childId: string): string {
   return `${PREVIEW_PREFIX}::node::${parentNodeId}::${childId}`
+}
+
+/**
+ * Resolve a root→leaf phase-id chain into the canvas node id at every depth
+ * (root-first). `phaseChain[0]` is a root-canvas phase id (its node id equals the
+ * phase id); each subsequent element nests one inline-preview level deeper.
+ *
+ * Example: ["event_timeline", "event_extraction"] →
+ *   ["event_timeline", "__subpreview__::node::event_timeline::event_extraction"]
+ */
+export function subgraphNodeIdChain(phaseChain: string[]): string[] {
+  if (phaseChain.length === 0) return []
+  let current = phaseChain[0]
+  const chain = [current]
+  for (let index = 1; index < phaseChain.length; index += 1) {
+    current = subgraphPreviewChildNodeId(current, phaseChain[index])
+    chain.push(current)
+  }
+  return chain
+}
+
+/**
+ * Resolve a root→leaf phase-id chain pointing at a CHILD node into the ids needed
+ * to reveal it: every subgraph ancestor to expand (root-first, `expandIds`) plus
+ * the final preview child node id to select (`selectId`). Null when the chain is
+ * too short to point at a child (needs ≥1 ancestor + leaf).
+ *
+ * Example: ["event_timeline", "event_extraction", "review"] →
+ *   expandIds: ["event_timeline", "__subpreview__::node::event_timeline::event_extraction"]
+ *   selectId:  "__subpreview__::node::__subpreview__::node::event_timeline::event_extraction::review"
+ */
+export function subgraphRevealNodeIds(
+  phaseChain: string[],
+): { expandIds: string[]; selectId: string } | null {
+  if (phaseChain.length < 2) return null
+  const chain = subgraphNodeIdChain(phaseChain)
+  return { expandIds: chain.slice(0, -1), selectId: chain[chain.length - 1] }
 }
 
 function childEdgeId(parentNodeId: string, edgeId: string): string {
@@ -422,7 +461,7 @@ function groupNode(
   const parentLeft = parent.position.x - parentSize.width / 2
   const parentTop = parent.position.y - parentSize.height / 2
   return {
-    id: groupNodeId(request.parentNodeId),
+    id: subgraphGroupNodeId(request.parentNodeId),
     type: 'subgraphGroup',
     parentId: request.parentNodeId,
     position: {

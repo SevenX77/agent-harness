@@ -259,6 +259,15 @@ export function useWorkspaceDirectoryTree({
           ...existing,
           [path]: createReadySnapshot(entries),
         }))
+        // Eager (non-lazy) load: pull every source subdirectory up front so the
+        // whole tree is loaded without expanding folder by folder. Runtime/hidden
+        // dirs (.workspace runs, .gemini, .git, ...) are skipped — they can be huge
+        // and stay on-demand via ensureDirectory when actually expanded.
+        for (const entry of entries) {
+          if (entry.kind === "dir" && !entry.name.startsWith(".")) {
+            loadDirectoryRef.current(entry.path, false)
+          }
+        }
       })
       .catch((error) => {
         if (requestTokenRef.current[path] !== token) return
@@ -272,6 +281,10 @@ export function useWorkspaceDirectoryTree({
         }))
       })
   }, [enabled, native, resolvedRoot, saveEnabled, skillId, titlePrefix])
+  // Stable handle so loadDirectory's success cascade can recurse without making
+  // loadDirectory depend on itself.
+  const loadDirectoryRef = useRef(loadDirectory)
+  loadDirectoryRef.current = loadDirectory
 
   useEffect(() => {
     if (!enabled) {
@@ -309,6 +322,33 @@ export function useWorkspaceDirectoryTree({
     if (loadedDirectories.length === 0) return
     loadedDirectories.forEach((path) => loadDirectory(path, true))
   }, [enabled, fallbackRefreshKey, loadDirectory, native, resolvedRoot])
+
+  // Re-list every loaded directory when the window regains focus (or the document
+  // becomes visible). The backend file watcher only covers the app's config skills
+  // dirs, so it never sees external changes to a workspace opened from an arbitrary
+  // folder. Refreshing on focus catches those — a file deleted/added in the OS file
+  // manager shows up the moment the user switches back to Studio, like a native
+  // explorer. Native runtime only; the browser fallback has no live disk to re-read.
+  useEffect(() => {
+    if (!enabled || !resolvedRoot || !native) return
+    if (typeof window === "undefined") return
+
+    const reloadLoaded = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return
+      for (const [path, snapshot] of Object.entries(snapshotsRef.current)) {
+        if (snapshot.status === "ready" || snapshot.status === "error") {
+          loadDirectory(path, true)
+        }
+      }
+    }
+
+    window.addEventListener("focus", reloadLoaded)
+    document.addEventListener("visibilitychange", reloadLoaded)
+    return () => {
+      window.removeEventListener("focus", reloadLoaded)
+      document.removeEventListener("visibilitychange", reloadLoaded)
+    }
+  }, [enabled, loadDirectory, native, resolvedRoot])
 
   const getDirectory = useCallback((path: string) => {
     return snapshots[normalizeDirectoryPath(path)] ?? EMPTY_DIRECTORY

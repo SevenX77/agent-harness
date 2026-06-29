@@ -7,6 +7,7 @@ export function FolderRow({
   children,
   endAdornment,
   defaultExpanded = false,
+  expanded: controlledExpanded,
   onExpandedChange,
   rowClassName,
   buttonClassName,
@@ -16,18 +17,24 @@ export function FolderRow({
   children: ReactNode
   endAdornment?: ReactNode
   defaultExpanded?: boolean
+  /** Controlled expansion. When provided, internal state is bypassed and the
+   * caller owns expand/collapse (used by the Assets panel to reveal a node's
+   * file). Omit for the default uncontrolled behaviour. */
+  expanded?: boolean
   onExpandedChange?: (expanded: boolean) => void
   rowClassName?: string
   buttonClassName?: string
   labelClassName?: string
 }) {
-  const [expanded, setExpanded] = useState(defaultExpanded)
+  const [internalExpanded, setInternalExpanded] = useState(defaultExpanded)
+  const isControlled = controlledExpanded !== undefined
+  const expanded = isControlled ? controlledExpanded : internalExpanded
   const toggleExpanded = () => {
-    setExpanded((value) => {
-      const next = !value
-      onExpandedChange?.(next)
-      return next
-    })
+    const next = !expanded
+    if (!isControlled) {
+      setInternalExpanded(next)
+    }
+    onExpandedChange?.(next)
   }
 
   return (

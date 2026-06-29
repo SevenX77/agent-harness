@@ -57,7 +57,7 @@ from app.models.skills import (
 )
 from app.services.canvas_data_gap import build_phase_io_index, compute_field_supply
 from app.services.canvas_errors import CanvasConflictError, CanvasSerializerFatal
-from app.services.file_watcher import record_api_write
+from app.services.file_watcher import record_api_write, register_workspace
 from app.services.git_local import initialize_skill_repository
 from app.services.graph_roundtrip import serialize_graph_topology_from_markdown
 from app.services.skill_resolver import build_studio_skill_resolver
@@ -190,6 +190,10 @@ async def get_skill_detail(
 ) -> SkillDetail:
     """Compile one skill into a Studio SkillDetail response."""
     skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
+    # Follow whatever the user opens: watch this skill's actual directory (from any
+    # path), not just the app's built-in skills dirs, so external file changes push
+    # live skill_changed events. Idempotent — a no-op once already watched.
+    register_workspace(skill_dir, skill_id)
     lint = lint_result or lint_skill_path(skill_dir)
     if lint.status == "failed":
         return await _broken_detail_from_files_async(

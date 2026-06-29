@@ -4,6 +4,7 @@ import { toast } from "sonner"
 import useSWR from "swr"
 import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { GraphCanvas, type ChildDetailPatch, type SkillGraphNodeData } from "@/components/GraphCanvas"
+import { buildNodes } from "@/components/GraphCanvas/build-nodes"
 import { CopilotPanel } from "@/components/copilot/copilot-panel"
 import { copilotFileActionEffects, type CopilotFileAction } from "@/components/copilot/patch-proposed-bubble"
 import { PromptInspector } from "@/components/PromptInspector"
@@ -52,7 +53,8 @@ import { WorkspaceRightPanelOverlay } from "./WorkspaceRightPanelOverlay"
 import { applyPhaseName } from "./panels/phase-frontmatter"
 import { useSkillSubgraphMembershipTree } from "./panels/use-subgraph-membership-tree"
 import { useWorkspaceDirectoryTree } from "./panels/use-workspace-directory-tree"
-import type { FileOpenInput } from "./file-types"
+import type { FileMeta, FileOpenInput } from "./file-types"
+import { phaseIdFromFilePath } from "./panels/asset-tree-target"
 import { conflictFromSaveError, isSameSaveConflict, overwriteRetryPayload } from "./save-conflicts"
 import {
   WorkspaceProvider,
@@ -341,6 +343,11 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     workspaceRoot: currentWorkspaceRoot ?? currentSkillId,
     enabled: Boolean(currentSkillId),
   })
+  // Read the asset tree through a ref inside the WS file-change handler so live
+  // tree refresh doesn't add the (frequently-changing) tree to that effect's deps
+  // and thrash the WebSocket connection.
+  const assetDirectoryTreeRef = useRef(assetDirectoryTree)
+  assetDirectoryTreeRef.current = assetDirectoryTree
   const isLoading = useMemo(() => Boolean(currentSkillId && !skillDetail && !skillDetailError), [skillDetail, skillDetailError, currentSkillId])
   const [compileStages, setCompileStages] = useState<Record<string, SkillBuildStage>>({})
   const [compileErrors, setCompileErrors] = useState<Record<string, CompileError[]>>({})
@@ -639,6 +646,57 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     setSelectedNode(null)
     setSelectedEdge(null)
   }
+
+  // Reverse of the node→file reveal: clicking a node-definition file in the
+  // Assets tree selects its canvas node. Only the open skill's own graph is on
+  // the root canvas, so files belonging to a child/subgraph skill are skipped.
+  // buildNodes is reused (the canvas's own builder) so the selected node's data
+  // matches a real click — no hand-rolled node shape that could drift.
+  // Center the canvas on a root-graph node when its file is clicked (file-driven
+  // only — a nonce-bumped request GraphCanvas pans to, leaving selection alone).
+  const focusNodeNonceRef = useRef(0)
+  const [focusNodeRequest, setFocusNodeRequest] = useState<{ nodeId: string; nonce: number } | null>(null)
+  const handleRevealNodeForFile = useCallback((file: FileMeta) => {
+    if (!currentSkillId || !skillDetail) return
+    if (file.skillId && file.skillId !== currentSkillId) return
+    const phaseId = phaseIdFromFilePath(file.path)
+    if (!phaseId) return
+    const nodes = buildNodes(currentSkillId, skillDetail, new Set(), () => {}, {}, {}, {}, {}, {}, currentWorkspaceRoot ?? null)
+    const match = nodes.find(
+      (node) => node.type === "skill" && (node.data as SkillGraphNodeData).phaseId === phaseId,
+    )
+    if (!match) return
+    setSelectedNodeId(phaseId)
+    setSelectedNode({ id: phaseId, data: match.data as SkillGraphNodeData })
+    setSelectedEdge(null)
+    focusNodeNonceRef.current += 1
+    setFocusNodeRequest({ nodeId: phaseId, nonce: focusNodeNonceRef.current })
+  }, [currentSkillId, currentWorkspaceRoot, skillDetail])
+
+  // Reveal something inside a subgraph's inline canvas topology, driven by an
+  // Assets file click. Forwarded to GraphCanvas as a nonce-bumped request so it
+  // can expand (+ optionally select) once the (possibly nested) preview node
+  // resolves: `select-child` for a child node file, `expand-subgraph` for the
+  // subgraph's own GRAPH.md (which also deselects any node).
+  const revealNonceRef = useRef(0)
+  const [revealRequest, setRevealRequest] = useState<
+    { phaseChain: string[]; intent: "select-child" | "expand-subgraph"; nonce: number } | null
+  >(null)
+  const handleRevealSubgraphChildNode = useCallback((phaseChain: string[]) => {
+    if (phaseChain.length < 2) return
+    revealNonceRef.current += 1
+    setRevealRequest({ phaseChain, intent: "select-child", nonce: revealNonceRef.current })
+  }, [])
+  const handleRevealSubgraphGraph = useCallback((phaseChain: string[]) => {
+    if (phaseChain.length < 1) return
+    // Opening a subgraph's GRAPH.md is a graph-level action: drop the node
+    // selection so the editor/Properties reflect the graph, not a stale node.
+    setSelectedNodeId(null)
+    setSelectedNode(null)
+    setSelectedEdge(null)
+    revealNonceRef.current += 1
+    setRevealRequest({ phaseChain, intent: "expand-subgraph", nonce: revealNonceRef.current })
+  }, [])
 
   const toOpenFile = useCallback(async (fileOrPath: FileOpenInput): Promise<OpenFile | null> => {
     if (!currentSkillId) return null
@@ -1199,9 +1257,25 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     const graphHash = await readGraphHash(editDetail, override)
     const draft = createPhaseDraft(editDetail, kind, [], requestedPhaseId)
     let createdPhaseDir: string | null = null
+    let createdSubgraphChildDir: string | null = null
     try {
       await doWriteSkillFile(draft.filePath, draft.fileContent, null, override, { createIfAbsent: true })
       createdPhaseDir = phaseDirectoryPath(draft.phaseId)
+      // A new subgraph phase auto-scaffolds a standard child skill at its default
+      // landing (subgraph/<phaseId>) so the SUBGRAPH.md `path:` resolves immediately
+      // (graph-authoring F4 / engine FORMAT-GROUND-TRUTH §1/§4). Folder writes go
+      // through the native-fs sole writer (D12), so this is desktop-runtime only; the
+      // browser fallback keeps the bare reference and lets the author point it later.
+      if (kind === "subgraph" && isTauriRuntime()) {
+        const childDir = defaultSubgraphChildDir(draft.phaseId)
+        for (const file of subgraphChildScaffoldFiles(childDir, draft.phaseId)) {
+          await doWriteSkillFile(file.path, file.content, null, override, { createIfAbsent: true })
+          // Mark the dir for rollback only once the first create-if-absent write
+          // succeeds: that proves the folder did not pre-exist (so it is ours to
+          // remove), while a collision on the first file leaves it untouched.
+          createdSubgraphChildDir = childDir
+        }
+      }
       const serialized = override
         ? await serializeSkillGraph(targetSkillId, draft.phases, graphHash, override.workspaceRoot)
         : await serializeSkillGraph(targetSkillId, draft.phases, graphHash)
@@ -1211,11 +1285,12 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       if (target) await target.onSettled()
       else await mutateSkillDetail()
     } catch (error) {
-      if (createdPhaseDir) {
+      for (const createdDir of [createdSubgraphChildDir, createdPhaseDir]) {
+        if (!createdDir) continue
         try {
-          await doDeleteWorkspacePath(createdPhaseDir, override)
+          await doDeleteWorkspacePath(createdDir, override)
         } catch (rollbackError) {
-          toast.warning(`Could not clean up ${createdPhaseDir}: ${errorMessage(rollbackError)}`)
+          toast.warning(`Could not clean up ${createdDir}: ${errorMessage(rollbackError)}`)
         }
       }
       toast.error(errorMessage(error))
@@ -1243,6 +1318,15 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       phaseId,
       ...orphanPhaseDirectoryIds(editDetail, result.phases).filter((orphanId) => orphanId !== phaseId),
     ]
+    // Mirror of create: a subgraph phase auto-scaffolds its child graph at
+    // subgraph/<phaseId>, so deleting that phase also removes the child folder —
+    // but ONLY when the path is still the auto-created default shape. A re-pointed
+    // absolute/external/shared path (D7 "随便放哪里") is left untouched so we never
+    // destroy a child graph Studio did not create.
+    const deletedRow = editDetail.graph_topology?.find((row) => row.id === phaseId)
+    const subgraphChildDirToDelete = deletedRow?.mode === "subgraph"
+      ? autoCreatedSubgraphChildDir(deletedRow.path)
+      : null
     try {
       const serialized = override
         ? await serializeSkillGraph(targetSkillId, result.phases, graphHash, override.workspaceRoot)
@@ -1250,6 +1334,18 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       await doWriteSkillFile("GRAPH.md", serialized.markdown_content, graphHash, override)
       for (const deletedPhaseId of phaseDirsToDelete) {
         await doDeleteWorkspacePath(phaseDirectoryPath(deletedPhaseId), override)
+      }
+      if (subgraphChildDirToDelete && isTauriRuntime()) {
+        // Best-effort: the phase is already gone from GRAPH.md, so a missing or
+        // un-removable child folder must not fail the whole delete. A not-found
+        // child (manually removed, or never scaffolded in browser mode) is a no-op.
+        try {
+          await doDeleteWorkspacePath(subgraphChildDirToDelete, override)
+        } catch (childDeleteError) {
+          if (!errorMessage(childDeleteError).toLowerCase().includes("not found")) {
+            toast.warning(`Could not delete subgraph folder ${subgraphChildDirToDelete}: ${errorMessage(childDeleteError)}`)
+          }
+        }
       }
       const verifiedGraph = await doReadWorkspaceFile("GRAPH.md", override)
       if (normalizeWorkspaceText(verifiedGraph.content) !== normalizeWorkspaceText(serialized.markdown_content)) {
@@ -1660,6 +1756,19 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       try {
         const event = JSON.parse(String(message.data)) as { type?: string, skill_id?: string, path?: string }
         if (event.type !== "skill_changed" || event.skill_id !== currentSkillId || !event.path) return
+        // Keep the file tree live like a native explorer's watcher: refresh every
+        // already-loaded ancestor folder of the changed path so external edits AND
+        // Studio's own native-fs create/delete/rename show up without a manual
+        // re-expand — reloading ancestors (not just the file's folder) also surfaces
+        // a brand-new nested folder. Unexpanded folders stay lazy (native behaviour).
+        const changedParts = event.path.split("/").filter(Boolean)
+        const tree = assetDirectoryTreeRef.current
+        for (let depth = 0; depth < changedParts.length; depth += 1) {
+          const dir = changedParts.slice(0, depth).join("/")
+          if (tree.getDirectory(dir).status !== "idle") {
+            tree.reloadDirectory(dir)
+          }
+        }
         const entries = (["left", "right"] as const).filter((side) => activeFileDetails[side]?.path === event.path)
         for (const side of entries) {
           const file = activeFileDetails[side]
@@ -1709,6 +1818,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     activeFileDetails,
     splitMode,
     onFileOpen: handleFileOpen,
+    onRevealNodeForFile: handleRevealNodeForFile,
+    onRevealSubgraphChildNode: handleRevealSubgraphChildNode,
+    onRevealSubgraphGraph: handleRevealSubgraphGraph,
     openSplitEditor: () => setSplitMode(true),
     closeFile,
     updateFileContent,
@@ -1727,6 +1839,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     closeFile,
     currentSkillId,
     handleFileOpen,
+    handleRevealNodeForFile,
+    handleRevealSubgraphChildNode,
+    handleRevealSubgraphGraph,
     markFileSaved,
     displayNavStack,
     popNavTo,
@@ -2236,6 +2351,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                       selectedNodeId={selectedNodeId}
                       onNodeSelect={handleNodeSelect}
                       onNodeDeselect={handleNodeDeselect}
+                      revealRequest={revealRequest}
+                      focusNodeRequest={focusNodeRequest}
                       onNodeFileOpen={handleFileOpen}
                       onPanelChange={setActivePanel}
                       onOpenSelectedNodePanel={openSelectedNodePanel}

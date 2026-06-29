@@ -53,6 +53,24 @@ describe("applyLintMarkers", () => {
     expect(markers[1]).toMatchObject({ startLineNumber: 2, severity: SEVERITY.Warning })
   })
 
+  it("scopes inline markers to the open file when a filePath is given (other files' lines stay out)", () => {
+    const { monaco, setModelMarkers } = fakeMonaco()
+
+    applyLintMarkers(
+      monaco,
+      {} as never,
+      result([
+        lintErr({ file: "phases/aggregate/SKILL.md", line: 4, message: "mine" }),
+        lintErr({ file: "phases/agent/SKILL.md", line: 1, message: "another file" }),
+      ]),
+      "phases/aggregate/SKILL.md",
+    )
+
+    const [, , markers] = setModelMarkers.mock.calls[0]
+    expect(markers).toHaveLength(1)
+    expect(markers[0]).toMatchObject({ startLineNumber: 4, message: "mine" })
+  })
+
   it("clears markers (empty array) when the result has no line-bearing errors", () => {
     const { monaco, setModelMarkers } = fakeMonaco()
     applyLintMarkers(monaco, {} as never, result([lintErr({ line: null })]))

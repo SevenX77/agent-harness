@@ -5439,6 +5439,30 @@ def test_provider_notable_models_are_doc_driven_for_manual_probe_placeholders(
     ]
 
 
+def test_endpoint_notable_provider_key_matches_registered_domains_by_hostname() -> None:
+    endpoint = ProviderEndpoint(
+        endpoint_id="third-party",
+        display_name="Third Party",
+        protocol="openai_compatible",
+        base_url="https://openrouter.ai.evil.example/v1",
+        api_key="secret",
+    )
+
+    assert llm_router._endpoint_notable_provider_key(endpoint) == "openai"
+
+
+def test_endpoint_notable_provider_key_accepts_qiniu_registered_host() -> None:
+    endpoint = ProviderEndpoint(
+        endpoint_id="third-party",
+        display_name="Third Party",
+        protocol="openai_compatible",
+        base_url="https://api.qnaigc.com/v1",
+        api_key="secret",
+    )
+
+    assert llm_router._endpoint_notable_provider_key(endpoint) == "qiniu"
+
+
 def test_sync_catalog_endpoint_is_retired_and_disabled(
     client: TestClient, tmp_path: Path, monkeypatch
 ) -> None:

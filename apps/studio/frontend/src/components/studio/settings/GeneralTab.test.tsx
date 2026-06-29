@@ -138,7 +138,7 @@ describe("GeneralTab render contract", () => {
     const html = renderTab({ remoteModelCatalogEnabled: true })
     expect(html).toContain("Community model catalog")
     expect(html).toContain(
-      "Read the community catalog to improve route suggestions, and anonymously contribute your sanitized probe results back to it. Turn off to stop both.",
+      "Download the verified community catalog for local route evidence and allow sanitized successful probe evidence to be contributed back. Turn off to stop both read and contribute paths.",
     )
     expect(html).toContain('data-slot="switch"')
     expect(html).toContain('aria-label="Community model catalog"')

@@ -267,9 +267,39 @@ def _split_frontmatter(text: str) -> str | None:
 _LLM_ROLE_RE = re.compile(r"^llm_role:[ \t]*(\S.*?)[ \t]*$", re.MULTILINE)
 
 
-def _frontmatter_llm_role(path: Path) -> str | None:
-    """Read the top-level `llm_role` string from a markdown file's YAML frontmatter."""
+def _safe_skill_child_path(skill_dir: Path, *relative_parts: str) -> Path | None:
+    if any(part in {"", ".", ".."} or "/" in part or "\\" in part for part in relative_parts):
+        return None
     try:
+        root = skill_dir.resolve(strict=False)
+        child = root.joinpath(*relative_parts).resolve(strict=False)
+        child.relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return child
+
+
+def _safe_skill_child_file(skill_dir: Path, *relative_parts: str) -> Path | None:
+    child = _safe_skill_child_path(skill_dir, *relative_parts)
+    if child is None or not child.is_file():
+        return None
+    return child
+
+
+def _safe_skill_child_dir(skill_dir: Path, *relative_parts: str) -> Path | None:
+    child = _safe_skill_child_path(skill_dir, *relative_parts)
+    if child is None or not child.is_dir():
+        return None
+    return child
+
+
+def _frontmatter_llm_role(skill_dir: Path, *relative_parts: str) -> str | None:
+    """Read the top-level `llm_role` string from a markdown file's YAML frontmatter."""
+    path = _safe_skill_child_file(skill_dir, *relative_parts)
+    if path is None:
+        return None
+    try:
+        # codeql[py/path-injection] _safe_skill_child_file resolves symlinks and confines this path to skill_dir.
         text = path.read_text(encoding="utf-8")
     except OSError:
         return None
@@ -303,20 +333,16 @@ def _unconfigured_role_error(file: str, role: str, phase_name: str | None) -> Li
 def _llm_role_lint_errors(skill_dir: Path, role_names: set[str]) -> list[LintError]:
     """Warn for any llm_role (graph default or an agent SKILL.md) not in role_names."""
     errors: list[LintError] = []
-    graph_role = _frontmatter_llm_role(skill_dir / "GRAPH.md")
+    graph_role = _frontmatter_llm_role(skill_dir, "GRAPH.md")
     if graph_role and graph_role not in role_names:
         errors.append(_unconfigured_role_error("GRAPH.md", graph_role, None))
-    phases_dir = skill_dir / "phases"
-    if phases_dir.is_dir():
-        for phase_dir in sorted(phases_dir.iterdir()):
-            skill_md = phase_dir / "SKILL.md"
-            if not skill_md.is_file():
-                continue
-            role = _frontmatter_llm_role(skill_md)
+    phases_dir = _safe_skill_child_dir(skill_dir, "phases")
+    if phases_dir is not None:
+        for phase_dir in sorted(phases_dir.iterdir(), key=lambda path: path.name):
+            phase_name = phase_dir.name
+            role = _frontmatter_llm_role(skill_dir, "phases", phase_name, "SKILL.md")
             if role and role not in role_names:
-                errors.append(
-                    _unconfigured_role_error(f"phases/{phase_dir.name}/SKILL.md", role, phase_dir.name)
-                )
+                errors.append(_unconfigured_role_error(f"phases/{phase_name}/SKILL.md", role, phase_name))
     return errors
 
 

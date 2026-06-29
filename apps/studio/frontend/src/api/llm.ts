@@ -1216,7 +1216,7 @@ function endpointTestVerdict(endpoint: ProviderEndpoint, routes: ProviderRoute[]
   if (endpointFailure === 'model') {
     return {
       responseStatus: 'error',
-      testStatus: 'error',
+      testStatus: 'untested',
       errorCode: endpointErrorCode(endpoint),
       hasCompletedTest,
     }

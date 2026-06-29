@@ -119,3 +119,37 @@ def test_absent_llm_role_is_not_flagged(
 
     assert result.status == "passed"
     assert [e for e in result.errors if e.field_path == "llm_role"] == []
+
+
+def test_llm_role_lint_does_not_read_graph_symlink_outside_skill_root(tmp_path: Path) -> None:
+    skill_dir = tmp_path / "skill"
+    outside_dir = tmp_path / "outside"
+    skill_dir.mkdir()
+    outside_dir.mkdir()
+    (outside_dir / "GRAPH.md").write_text("---\nllm_role: ghost_role\n---\n", encoding="utf-8")
+    graph_path = skill_dir / "GRAPH.md"
+    try:
+        graph_path.symlink_to(outside_dir / "GRAPH.md")
+    except OSError as exc:
+        pytest.skip(f"symlink unavailable on this platform: {exc}")
+
+    errors = skill_service._llm_role_lint_errors(skill_dir, role_names=set())
+
+    assert [e for e in errors if e.field_path == "llm_role"] == []
+
+
+def test_llm_role_lint_does_not_read_phase_symlink_outside_skill_root(tmp_path: Path) -> None:
+    skill_dir = tmp_path / "skill"
+    outside_phase_dir = tmp_path / "outside" / "review"
+    (skill_dir / "phases").mkdir(parents=True)
+    outside_phase_dir.mkdir(parents=True)
+    (outside_phase_dir / "SKILL.md").write_text(_skill_md("ghost_role"), encoding="utf-8")
+    phase_link = skill_dir / "phases" / "review"
+    try:
+        phase_link.symlink_to(outside_phase_dir, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink unavailable on this platform: {exc}")
+
+    errors = skill_service._llm_role_lint_errors(skill_dir, role_names=set())
+
+    assert [e for e in errors if e.field_path == "llm_role"] == []

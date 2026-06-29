@@ -590,7 +590,9 @@ function endpointStateDisplayStatus({
   if (!hasApiKey || !hasBaseUrl) return "not_configured"
   if (isTesting) return "testing"
   const status = result?.last_test_status
-  if (status && status !== "untested" && status !== "ok") return status
+  if (status && status !== "untested" && status !== "ok") {
+    return providerTestResultFailureScope(result) === "model" ? "untested" : status
+  }
   if (endpointHasUsableRoute(models)) return "ok"
   if (!status || status === "untested") return "untested"
   return status
@@ -617,6 +619,46 @@ function resultLooksReachable(result: ProviderTestResult | null | undefined): bo
     (result.available_models?.length ?? 0) > 0 ||
     (result.available_sdks?.length ?? 0) > 0
   )
+}
+
+function providerTestResultFailureScope(result: ProviderTestResult | null | undefined): RouteFailureScope | undefined {
+  if (!result) return undefined
+  const reason = result.last_error_code?.trim().toLowerCase()
+  if (reason === "invalid_model" || reason === "model_not_found") return "model"
+  if (
+    reason === "invalid_api_key" ||
+    reason === "invalid_x_api_key" ||
+    reason === "unauthorized" ||
+    reason === "rate_limited" ||
+    reason === "quota_exceeded" ||
+    reason === "timeout" ||
+    reason === "network_error" ||
+    reason === "upstream_error" ||
+    reason === "processing_error" ||
+    reason === "protocol_mismatch" ||
+    reason === "endpoint_test_failed"
+  ) {
+    return "endpoint"
+  }
+  const text = result.last_test_message?.toLowerCase() ?? ""
+  if (text.includes("invalid_model") || text.includes("model_not_found") || text.includes("no available channels for model")) {
+    return "model"
+  }
+  if (
+    text.includes("invalid api key") ||
+    text.includes("authentication_error") ||
+    text.includes("direct access to") ||
+    text.includes("use /v1/messages") ||
+    text.includes("chat/completions is not allowed") ||
+    text.includes("upstream_error") ||
+    text.includes("processing_error") ||
+    text.includes("service temporarily unavailable") ||
+    text.includes("timeout") ||
+    text.includes("network")
+  ) {
+    return "endpoint"
+  }
+  return undefined
 }
 
 function providerDisplayName(
@@ -1528,6 +1570,10 @@ export function ProviderCard({
   const hiddenModelCount = Math.max(0, availableModels.length - visibleModels.length)
   const matchedStatus = matchedResult?.last_test_status
   const matchedErrorCode = matchedResult?.last_error_code
+  const matchedStatusForEndpoint =
+    matchedStatus && matchedStatus !== "untested" && matchedStatus !== "ok" && providerTestResultFailureScope(matchedResult) === "model"
+      ? "untested"
+      : matchedStatus
   const matchedHasListedModels = availableModels.length > 0 || availableSdks.length > 0
   const hasReachableModelList = Boolean(
     hasRequiredConfig &&
@@ -1548,10 +1594,10 @@ export function ProviderCard({
     ? "testing"
     : !hasMatchedTestResult
       ? "not_configured"
-    : matchedStatus === "ok"
+    : matchedStatusForEndpoint === "ok"
       ? "ok"
-    : matchedStatus && matchedStatus !== "untested"
-      ? matchedStatus
+    : matchedStatusForEndpoint && matchedStatusForEndpoint !== "untested"
+      ? matchedStatusForEndpoint
       : "not_configured"
   const endpointSummaries: EndpointSummary[] = endpointStates
     .filter((state) => state.row.value.trim() || isOfficial || state.persisted)

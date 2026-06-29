@@ -17,7 +17,6 @@ export default defineConfig(({ mode }) => {
   const sidecarHttpTarget = `http://127.0.0.1:${sidecarPort}`
   const sidecarWsTarget = `ws://127.0.0.1:${sidecarPort}`
   // Surface the resolved port so misalignments are obvious in vite startup logs.
-  // eslint-disable-next-line no-console
   console.log(`[vite] proxy /api -> ${sidecarHttpTarget}  (STUDIO_SIDECAR_PORT=${sidecarPort})`)
   return {
   cacheDir: process.env.VITE_CACHE_DIR ?? 'node_modules/.vite',

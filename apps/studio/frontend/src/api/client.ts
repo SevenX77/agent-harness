@@ -55,7 +55,6 @@ function resolveInitialApiBaseURL(): string {
   if (import.meta.env.DEV) {
     const message =
       'VITE_STUDIO_API_BASE_URL is undefined. Launch via Tauri (which injects the dynamic sidecar port) or set VITE_STUDIO_API_BASE_URL in apps/studio/frontend/.env.local to match STUDIO_SIDECAR_PORT.'
-    // eslint-disable-next-line no-console
     console.error('[studio-client]', message)
     throw new Error(message)
   }

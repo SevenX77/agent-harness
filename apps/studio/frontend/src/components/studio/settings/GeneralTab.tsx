@@ -49,6 +49,18 @@ const truthSourceFieldRowClassName = "grid w-full grid-cols-[minmax(0,1fr)_6.5re
 const truthSourceFieldActionClassName = "flex min-w-0 items-center justify-center gap-2"
 const truthSourceActionButtonClassName = "w-24"
 const truthSourceScrollableInputClassName = "overflow-x-auto whitespace-nowrap text-clip text-muted-foreground"
+const truthSourceCategoryLabelKeys = {
+  settings: "general.truthSources.categories.settings",
+  workspace: "general.truthSources.categories.workspace",
+  credentials: "general.truthSources.categories.credentials",
+  roles: "general.truthSources.categories.roles",
+  health: "general.truthSources.categories.health",
+  modelRules: "general.truthSources.categories.modelRules",
+  diagnostics: "general.truthSources.categories.diagnostics",
+  runtime: "general.truthSources.categories.runtime",
+} as const
+
+type TruthSourceCategory = keyof typeof truthSourceCategoryLabelKeys
 
 export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appSettings">) {
   const { i18n, t } = useTranslation("settings")
@@ -351,7 +363,7 @@ function TruthSourceCard({
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <div className="truncate text-sm font-semibold text-foreground">{label}</div>
             <Badge variant="secondary" className="shrink-0 text-[10px] font-normal">
-              {t(`general.truthSources.categories.${category}`)}
+              {t(truthSourceCategoryLabelKeys[category])}
             </Badge>
           </div>
           <p className="text-xs/relaxed text-muted-foreground">
@@ -529,7 +541,7 @@ function RuntimeLogItem({ log }: { log: RuntimeActivityLogEntry }) {
   )
 }
 
-function truthSourceCategory(sourceId: string): string {
+function truthSourceCategory(sourceId: string): TruthSourceCategory {
   if (sourceId === "app_settings") return "settings"
   if (sourceId === "skill_index" || sourceId === "workspaces_root" || sourceId === "default_skills_root") {
     return "workspace"

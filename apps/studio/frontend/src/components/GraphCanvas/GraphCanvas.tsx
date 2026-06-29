@@ -1900,12 +1900,12 @@ export function GraphCanvas({
     }
     let childArgs: readonly [ChildSaveTarget] | readonly []
     if (scope.parentNodeId) {
-      const targetSkill = expandedChildSaveTarget(scope.parentNodeId)
-      if (!targetSkill) {
+      const childTarget = expandedChildSaveTarget(scope.parentNodeId)
+      if (!childTarget) {
         toast.error('Loading subgraph. Try again in a moment.')
         return
       }
-      childArgs = [targetSkill]
+      childArgs = [childTarget]
     } else {
       if (blockDrilledEditIfUnwritable()) {
         return
@@ -2004,12 +2004,12 @@ export function GraphCanvas({
     }
     let childArgs: readonly [ChildSaveTarget] | readonly []
     if (newScope.parentNodeId) {
-      const targetSkill = expandedChildSaveTarget(newScope.parentNodeId)
-      if (!targetSkill) {
+      const childTarget = expandedChildSaveTarget(newScope.parentNodeId)
+      if (!childTarget) {
         toast.error('Loading subgraph. Try again in a moment.')
         return
       }
-      childArgs = [targetSkill]
+      childArgs = [childTarget]
     } else {
       if (blockDrilledEditIfUnwritable()) {
         return
@@ -2057,12 +2057,12 @@ export function GraphCanvas({
     }
     let childArgs: readonly [ChildSaveTarget] | readonly []
     if (scope.parentNodeId) {
-      const targetSkill = expandedChildSaveTarget(scope.parentNodeId)
-      if (!targetSkill) {
+      const childTarget = expandedChildSaveTarget(scope.parentNodeId)
+      if (!childTarget) {
         toast.error('Loading subgraph. Try again in a moment.')
         return
       }
-      childArgs = [targetSkill]
+      childArgs = [childTarget]
     } else {
       if (blockDrilledEditIfUnwritable()) return
       childArgs = drilledChildTarget ? [drilledChildTarget] : []
@@ -2079,12 +2079,12 @@ export function GraphCanvas({
     const phaseId = phaseIdFromCanvasNodeId(nodeId)
     let childArgs: readonly [ChildSaveTarget] | readonly []
     if (parentNodeId) {
-      const targetSkill = expandedChildSaveTarget(parentNodeId)
-      if (!targetSkill) {
+      const childTarget = expandedChildSaveTarget(parentNodeId)
+      if (!childTarget) {
         toast.error('Loading subgraph. Try again in a moment.')
         return
       }
-      childArgs = [targetSkill]
+      childArgs = [childTarget]
     } else {
       if (blockDrilledEditIfUnwritable()) return
       childArgs = drilledChildTarget ? [drilledChildTarget] : []
@@ -2136,12 +2136,12 @@ export function GraphCanvas({
     }
     let childArgs: readonly [ChildSaveTarget] | readonly []
     if (scope.parentNodeId) {
-      const targetSkill = expandedChildSaveTarget(scope.parentNodeId)
-      if (!targetSkill) {
+      const childTarget = expandedChildSaveTarget(scope.parentNodeId)
+      if (!childTarget) {
         toast.error('Loading subgraph. Try again in a moment.')
         return
       }
-      childArgs = [targetSkill]
+      childArgs = [childTarget]
     } else {
       if (blockDrilledEditIfUnwritable()) {
         return

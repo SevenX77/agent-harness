@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, NoReturn, cast
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -4624,17 +4625,34 @@ def _third_party_protocol_candidates(endpoint: ProviderEndpoint) -> tuple[Provid
     return tuple(ordered)
 
 
+def _base_url_hostname(base_url: str) -> str:
+    raw_url = base_url.strip()
+    if not raw_url:
+        return ""
+    try:
+        parsed = urlsplit(raw_url)
+        if parsed.hostname is None and "://" not in raw_url:
+            parsed = urlsplit(f"//{raw_url}")
+    except ValueError:
+        return ""
+    return (parsed.hostname or "").lower().strip(".")
+
+
+def _hostname_matches_registered_domain(hostname: str, registered_domain: str) -> bool:
+    return hostname == registered_domain or hostname.endswith(f".{registered_domain}")
+
+
 def _endpoint_notable_provider_key(endpoint: ProviderEndpoint) -> str:
-    haystack = " ".join(
+    text_haystack = " ".join(
         [
             endpoint.endpoint_id,
             endpoint.display_name or "",
-            endpoint.base_url,
         ]
     ).lower()
-    if "qiniu" in haystack or "qnaigc.com" in haystack:
+    hostname = _base_url_hostname(endpoint.base_url)
+    if "qiniu" in text_haystack or _hostname_matches_registered_domain(hostname, "qnaigc.com"):
         return "qiniu"
-    if "openrouter" in haystack or "openrouter.ai" in haystack:
+    if "openrouter" in text_haystack or _hostname_matches_registered_domain(hostname, "openrouter.ai"):
         return "openrouter"
     return _endpoint_probe_backend(endpoint)
 

@@ -596,8 +596,8 @@ describe('Workspace WS-1 local writer contracts', () => {
     expect(html).toContain('data-studio-left-panel-content="true"')
     expect(html).toContain('bottom-3 left-3 top-3')
     expect(html).toContain('flex h-full min-h-0 flex-1')
-    expect(html).toContain('--studio-canvas-left-safe-area:25.5rem')
-    expect(html).toContain('--studio-canvas-right-safe-area:23.5rem')
+    expect(html).toContain('--studio-canvas-left-safe-area:calc(384px + 1.5rem)')
+    expect(html).toContain('--studio-canvas-right-safe-area:calc(352px + 1.5rem)')
     expect(html).toContain('rounded-lg')
     expect(html).toContain('top-3')
     expect(html).not.toContain('h-fit')
@@ -642,7 +642,9 @@ describe('Workspace WS-1 local writer contracts', () => {
       expect(mocks.graphCanvasProps?.hideMiniMap).toBe(true)
       expect(mocks.graphCanvasProps).not.toHaveProperty('viewportInsets')
     } finally {
-      root.unmount()
+      act(() => {
+        root.unmount()
+      })
       container.remove()
     }
   })

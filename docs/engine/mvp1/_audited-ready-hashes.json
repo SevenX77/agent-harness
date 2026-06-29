@@ -8,7 +8,7 @@
   "hashes": {
     "01-contract/01-physical-layout/baseline.md": "ab7e5c104053f5fbf1395e95d5549068a9758ffd2512c4587c1d1b9d521c12ab",
     "01-contract/01-physical-layout/mvp1-alignment.md": "43600524b5ca85ba5a7ffe4628987fc905650611353868716563382cfff94100",
-    "01-contract/05-invalidation/baseline.md": "2fbe87d807eafd621336ccc069f0e54f08e673cc484d5e444cebb6da527485b8",
+    "01-contract/05-invalidation/baseline.md": "84ea7c747611c58b9a16bd335c6d74cba98f5efaeb11ccf689ef6a15e881e2cf",
     "01-contract/05-invalidation/mvp1-alignment.md": "1d7e0549174933332da5808aef85690d1a2c07ac4d505f42539009920be4bd9e",
     "02-mechanism/01-compile/baseline.md": "e20a6187c32265768043ca3df4d2dcec7f0c66f9a298b22764684dcf4f85edaa",
     "02-mechanism/01-compile/mvp1-alignment.md": "f983b22b129022a79844a3a3d3949a36933ee9fab313ef81025c6187766b8b20",
@@ -18,7 +18,7 @@
     "02-mechanism/04-run-outer/03-checkpoint/mvp1-alignment.md": "ce34ac54a4d725b6a5860ac948b68c5537bf5091489d5866339836cda875fde8",
     "02-mechanism/05-run-inner/05-exit-control/baseline.md": "39560a4e0e164288ad052a3878f509ef3b273e2be8efcd07ceab340b3b69b522",
     "02-mechanism/05-run-inner/05-exit-control/mvp1-alignment.md": "f45e788e15cf7b6fdeb9306cbc8882675f39edd6cbf8a414e5f8af7e34e394fb",
-    "02-mechanism/05-run-inner/06-golden-eval/baseline.md": "df19fc8a2b7cfec34ee890423e84784e41b6502938bee1e29e3c6446c2f1445a",
+    "02-mechanism/05-run-inner/06-golden-eval/baseline.md": "a4aaa98db6a668b09948a589e4f0e2d08c83f0f6746f8459de7a1232729e4582",
     "02-mechanism/05-run-inner/06-golden-eval/mvp1-alignment.md": "28ac7a19a6f0f0d385293581e8bf94fad50e116aa08ed4c1f14ee13ebdf4c13d",
     "02-mechanism/05-run-inner/08-messages-state/baseline.md": "60d9508c8872be99ced2e2044cd74dc844e9ea5414edeb710de2ac83ac51399f",
     "02-mechanism/05-run-inner/08-messages-state/mvp1-alignment.md": "01428f0a5b8ec4600a0024fad0089cc57236bbfefffe3189234a2bf53ea503c1"

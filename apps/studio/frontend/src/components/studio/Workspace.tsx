@@ -27,8 +27,11 @@ import { deleteWorkspacePath, listWorkspaceDir, moveWorkspacePath, readWorkspace
 import { errorMessage } from "@/utils/errors"
 import type { CompileError } from "@/api/types"
 import { connectPhaseRefs, createPhaseDraft, disconnectPhaseRefs, orphanPhaseDirectoryIds, phaseDirectoryPath, phaseFilePath, phaseRefsFromSkillDetail, reconnectPhaseRefs, removePhaseRefs, renamePhaseRefs, type NewPhaseKind } from "@/components/GraphCanvas/canvas-authoring"
+import { autoCreatedSubgraphChildDir, defaultSubgraphChildDir, subgraphChildScaffoldFiles } from "@/components/studio/subgraph-scaffold"
 import { isReadOnlySkillError, type ChildSaveTarget } from "@/components/GraphCanvas/drill-edit"
 import { actionFilePath, actionStubContent, applyActionsList, isValidActionName, readActionsList } from "@/components/studio/panels/phase-actions"
+import { applyPhaseValidator } from "@/components/studio/panels/phase-frontmatter"
+import { validatorFilePath, validatorStubContent } from "@/components/studio/panels/phase-validator"
 import { sha256Hex } from "@/lib/hash"
 import { CenterActionBar, type SkillBuildStage } from "./center-action-bar"
 import { deriveNodeErrorMessages, deriveNodeStatuses } from "./node-status"
@@ -1079,6 +1082,66 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     }
   }, [clearStaleCompileProjection, currentSkillId, currentWorkspaceRoot, doDeleteWorkspacePath, doWriteSkillFile, handleFileOpen, mutateSkillDetail, skillDetail])
 
+  // Create a phase validator: scaffold the sibling `phases/<id>/validator.py` from a
+  // passing stub (engine `def validate(output, state_slice, **kwargs)` contract) AND
+  // flip the node file's `validator: true`, then open the file. Shared by all three
+  // phase kinds (the flag lives on SKILL/LOGIC/SUBGRAPH.md). Mirrors handleActionCreate's
+  // write-then-sync + rollback shape.
+  const handleValidatorCreate = useCallback(async (phaseId: string, target?: ChildSaveTarget) => {
+    const editDetail = target?.detail ?? skillDetail
+    const targetSkillId = target?.skillId ?? currentSkillId
+    const override = target ? { skillId: target.skillId, workspaceRoot: target.workspaceRoot } : undefined
+    if (!targetSkillId || !editDetail) {
+      toast.error("Open a skill before adding a validator")
+      return
+    }
+    const phase = phaseRefsFromSkillDetail(editDetail).find((entry) => entry.id === phaseId)
+    if (!phase) {
+      toast.error("Phase not found")
+      return
+    }
+    const phasePath = phaseFilePath(phaseId, phase.mode)
+    const phaseContent = editDetail.files?.[phasePath]
+    if (phaseContent === undefined) {
+      toast.error(`Phase file is missing: ${phasePath}`)
+      return
+    }
+    const enabled = applyPhaseValidator(phaseContent, true)
+    if (!enabled.ok) {
+      toast.error(enabled.message)
+      return
+    }
+    const pyPath = validatorFilePath(phaseId)
+    let createdPy = false
+    try {
+      await doWriteSkillFile(pyPath, validatorStubContent(), null, override, { createIfAbsent: true })
+      createdPy = true
+      await doWriteSkillFile(phasePath, enabled.markdown, await sha256Hex(phaseContent), override)
+      clearStaleCompileProjection(targetSkillId)
+      toast.success("Created validator.py")
+      handleFileOpen({
+        path: pyPath,
+        skillId: targetSkillId,
+        workspaceRoot: override ? override.workspaceRoot : currentWorkspaceRoot,
+        language: "python",
+        saveEnabled: true,
+      })
+      if (target) await target.onSettled()
+      else await mutateSkillDetail()
+    } catch (error) {
+      if (createdPy) {
+        try {
+          await doDeleteWorkspacePath(pyPath, override)
+        } catch (rollbackError) {
+          toast.warning(`Could not clean up ${pyPath}: ${errorMessage(rollbackError)}`)
+        }
+      }
+      toast.error(isReadOnlySkillError(error) ? "This skill is read-only — fork it into your workspace to edit." : errorMessage(error))
+      if (target) void target.onSettled()
+      else void mutateSkillDetail()
+    }
+  }, [clearStaleCompileProjection, currentSkillId, currentWorkspaceRoot, doDeleteWorkspacePath, doWriteSkillFile, handleFileOpen, mutateSkillDetail, skillDetail])
+
   // Delete a LOGIC action: drop it from LOGIC.md frontmatter + body (kept in sync)
   // and remove its `actions/<name>.py` file when present.
   const handleActionDelete = useCallback(async (phaseId: string, name: string, target?: ChildSaveTarget) => {
@@ -2067,6 +2130,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         onPhaseRename={handleRenamePhase}
         onActionCreate={handleActionCreate}
         onActionDelete={handleActionDelete}
+        onValidatorCreate={handleValidatorCreate}
         runId={runId}
         lintErrors={propertiesFieldErrors}
         resumeValidity={resumeValidity}

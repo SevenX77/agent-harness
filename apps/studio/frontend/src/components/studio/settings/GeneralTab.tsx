@@ -187,7 +187,10 @@ export function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appS
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="remote-model-catalog-enabled">
+            <FieldLabel
+              htmlFor="remote-model-catalog-enabled"
+              onClick={(event) => event.preventDefault()}
+            >
               {t("general.remoteModelCatalog.label")}
             </FieldLabel>
             <div className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-muted/30 p-3">

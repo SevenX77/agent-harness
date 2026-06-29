@@ -37,6 +37,7 @@ interface PanelsProps {
   onPhaseRename?: (phaseId: string, nextPhaseId: string, target?: ChildSaveTarget) => Promise<void> | void
   onActionCreate?: (phaseId: string, name: string, target?: ChildSaveTarget) => Promise<void> | void
   onActionDelete?: (phaseId: string, name: string, target?: ChildSaveTarget) => Promise<void> | void
+  onValidatorCreate?: (phaseId: string, target?: ChildSaveTarget) => Promise<void> | void
   // trace-observability F1: while a run is active the timeline region streams
   // live trace events (TracePanel); with no active run it shows run history (F2).
   runId?: string | null
@@ -82,6 +83,7 @@ export function Panels({
   onPhaseRename,
   onActionCreate,
   onActionDelete,
+  onValidatorCreate,
   runId,
   selectedNodeStatus,
   resumeValidity,
@@ -154,6 +156,11 @@ export function Panels({
       ? (phaseId: string, name: string) => onActionDelete(phaseId, name, selectedNodeEditTarget)
       : undefined
     : onActionDelete
+  const propertiesValidatorCreate = selectedNodeUsesDifferentSkill
+    ? selectedNodeEditTarget && onValidatorCreate
+      ? (phaseId: string) => onValidatorCreate(phaseId, selectedNodeEditTarget)
+      : undefined
+    : onValidatorCreate
   if (!skillId) {
     return (
       <div className="flex h-full w-full flex-col bg-sidebar">
@@ -261,6 +268,7 @@ export function Panels({
         onPhaseRename={propertiesPhaseRename}
         onActionCreate={propertiesActionCreate}
         onActionDelete={propertiesActionDelete}
+        onValidatorCreate={propertiesValidatorCreate}
         onResumeNode={onResumeNode}
         onPromoteNode={onPromoteNode}
       />

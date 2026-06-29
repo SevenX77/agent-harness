@@ -42,6 +42,7 @@ import type { ResumeRunOptions } from "@/api/client"
 import { isPathInsideWorkspaceRoot, subgraphPathFieldState, subgraphPathValueFromSelection } from "@/components/studio/subgraph-path"
 import { nodeResumeOptionsFromValidity } from "@/components/studio/node-resume"
 import { getChildGraphTopology } from "@/api/client"
+import { getRoles } from "@/api/llm"
 import { selectSkillDirectory } from "@/lib/tauri"
 import { sha256Hex } from "@/lib/hash"
 import { errorMessage } from "@/utils/errors"
@@ -60,9 +61,12 @@ import {
   type PhaseFrontmatterFormData,
   type PhaseFrontmatterKind,
   type PhaseIterateFormData,
+  type PhaseResourceRef,
   type PhaseSubagentRef,
+  type PhaseSubgraphRef,
 } from "./phase-frontmatter"
 import { actionFilePath, isValidActionName, readActionsList, scanActionFiles } from "./phase-actions"
+import { validatorFilePath } from "./phase-validator"
 
 // Node KIND is owned by the physical phase FILE (SKILL/LOGIC/SUBGRAPH.md) that
 // exists in the phase directory - `data.mode` is derived from that file in
@@ -124,6 +128,8 @@ interface PropertiesPanelProps {
   onActionCreate?: (phaseId: string, name: string) => Promise<void> | void
   /** Delete a LOGIC action: removes it from frontmatter/body and deletes its .py file. */
   onActionDelete?: (phaseId: string, name: string) => Promise<void> | void
+  /** Create a phase validator.py (passing stub) + enable validator: true, then open it. */
+  onValidatorCreate?: (phaseId: string) => Promise<void> | void
   onResumeNode?: (options: ResumeRunOptions) => Promise<void> | void
   /** Per-node golden promote (atom #32): write golden for just this node from the active run. */
   onPromoteNode?: (nodeId: string) => Promise<void> | void
@@ -146,9 +152,31 @@ export function PropertiesPanel({
   onPhaseRename,
   onActionCreate,
   onActionDelete,
+  onValidatorCreate,
   onResumeNode,
   onPromoteNode,
 }: PropertiesPanelProps) {
+
+  // Configured LLM roles for the llm_role dropdown (GET /llm/roles). Fetched once on
+  // mount; a stale list just means the author may need to reopen after editing roles
+  // in Settings. On failure it stays empty — the field still shows (graph default)
+  // plus the current value, so nothing is lost.
+  const [roleNames, setRoleNames] = useState<string[]>([])
+  useEffect(() => {
+    let cancelled = false
+    getRoles()
+      .then((data) => {
+        if (!cancelled) {
+          setRoleNames(Object.keys(data.roles).sort((a, b) => a.localeCompare(b)))
+        }
+      })
+      .catch(() => {
+        // Roles unavailable (backend not ready / none configured) — leave empty.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const graphContent = skillDetail?.files?.["GRAPH.md"]
   const graphFormState = useMemo(() => {
@@ -403,6 +431,7 @@ export function PropertiesPanel({
                 canSave={canSave}
                 canReset={dirty && !saving}
                 roleTest={roleTest}
+                roleNames={roleNames}
                 fieldErrors={fieldErrors}
                 allowOverwriteCandidates={allowOverwriteCandidates}
                 skillId={skillId}
@@ -410,9 +439,10 @@ export function PropertiesPanel({
                 phaseId={selectedPhaseId ?? selectedNode.id}
                 files={skillDetail?.files}
                 onFileOpen={onFileOpen}
-                onPhaseRename={kind === "subgraph" || kind === "logic" ? onPhaseRename : undefined}
+                onPhaseRename={onPhaseRename}
                 onActionCreate={onActionCreate}
                 onActionDelete={onActionDelete}
+                onValidatorCreate={onValidatorCreate}
                 onReconnectSubgraphFolder={handleReconnectSubgraphFolder}
                 onFieldChange={setField}
                 onReset={handleReset}
@@ -445,6 +475,7 @@ export function PropertiesPanel({
             {graphFormState.ok && activeGraphDraft ? (
               <GraphFrontmatterForm
                 value={activeGraphDraft}
+                roleNames={roleNames}
                 saving={graphSaving}
                 canSave={graphCanSave}
                 canReset={graphDirty && !graphSaving}
@@ -587,8 +618,11 @@ function PropertiesFileBadge({
   )
 }
 
+const GRAPH_LLM_ROLE_NONE_SENTINEL = "__none__"
+
 function GraphFrontmatterForm({
   value,
+  roleNames,
   saving,
   canSave,
   canReset,
@@ -597,6 +631,7 @@ function GraphFrontmatterForm({
   onSave,
 }: {
   value: GraphFrontmatterFormData
+  roleNames: string[]
   saving: boolean
   canSave: boolean
   canReset: boolean
@@ -604,6 +639,10 @@ function GraphFrontmatterForm({
   onReset: () => void
   onSave: () => void
 }) {
+  const trimmedGraphRole = value.llmRole.trim()
+  const graphRoleOptions = trimmedGraphRole && !roleNames.includes(trimmedGraphRole)
+    ? [trimmedGraphRole, ...roleNames]
+    : roleNames
   return (
     <form
       className="space-y-2"
@@ -634,13 +673,31 @@ function GraphFrontmatterForm({
             </Field>
           </PanelFieldRow>
           <PanelFieldRow>
-            <YamlInputField
-              id="graph-llm-role"
-              label="llm_role"
-              value={value.llmRole}
-              placeholder="analyst"
-              onChange={(next) => onFieldChange("llmRole", next)}
-            />
+            <Field>
+              <YamlFieldLabel htmlFor="graph-llm-role">
+                llm_role
+                <HelpTooltip label="About llm_role">
+                  The default LLM role for the whole graph; agent phases inherit it unless they set their own.
+                  Manage roles in Settings &rsaquo; LLM Roles.
+                </HelpTooltip>
+              </YamlFieldLabel>
+              <Select
+                value={trimmedGraphRole || GRAPH_LLM_ROLE_NONE_SENTINEL}
+                onValueChange={(next) => onFieldChange("llmRole", next === GRAPH_LLM_ROLE_NONE_SENTINEL ? "" : next)}
+              >
+                <SelectTrigger id="graph-llm-role" aria-label="llm_role" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={GRAPH_LLM_ROLE_NONE_SENTINEL}>(none)</SelectItem>
+                  {graphRoleOptions.map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {roleNames.includes(name) ? name : `${name} (not configured)`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
           </PanelFieldRow>
         </FieldGroup>
         <PanelActions>
@@ -945,6 +1002,7 @@ function PhaseFrontmatterForm({
   canSave,
   canReset,
   roleTest,
+  roleNames,
   fieldErrors,
   allowOverwriteCandidates,
   skillId,
@@ -955,6 +1013,7 @@ function PhaseFrontmatterForm({
   onPhaseRename,
   onActionCreate,
   onActionDelete,
+  onValidatorCreate,
   onReconnectSubgraphFolder,
   onFieldChange,
   onReset,
@@ -967,6 +1026,7 @@ function PhaseFrontmatterForm({
   canSave: boolean
   canReset: boolean
   roleTest: RoleTestStatusInput
+  roleNames: string[]
   fieldErrors: Record<string, LintError[]>
   allowOverwriteCandidates: AllowOverwriteCandidate[]
   skillId: string | null
@@ -977,6 +1037,7 @@ function PhaseFrontmatterForm({
   onPhaseRename?: (phaseId: string, nextPhaseId: string) => Promise<void> | void
   onActionCreate?: (phaseId: string, name: string) => Promise<void> | void
   onActionDelete?: (phaseId: string, name: string) => Promise<void> | void
+  onValidatorCreate?: (phaseId: string) => Promise<void> | void
   onReconnectSubgraphFolder: () => void
   onFieldChange: <Key extends keyof PhaseFrontmatterFormData>(field: Key, value: PhaseFrontmatterFormData[Key]) => void
   onReset: () => void
@@ -996,52 +1057,85 @@ function PhaseFrontmatterForm({
           {kind === "agent" ? (
             <>
               <PanelFieldRow>
-                <YamlInputField
-                  id="phase-llm-role"
-                  label={(
-                    <>
-                      llm_role
-                      <HelpTooltip label="About llm_role">
-                        The LLM role this agent node runs as, overriding the graph default. Role-to-model/credential
-                        mapping is configured in Settings &rsaquo; LLM Roles; use Test to verify it resolves.
-                      </HelpTooltip>
-                      <FieldErrorMarker errors={fieldErrors.llm_role} />
-                    </>
-                  )}
-                  value={value.llmRole}
-                  placeholder="analyst"
-                  action={(
-                    <RoleTestControl
-                      roleName={value.llmRole}
-                      roleTest={roleTest}
-                      onRoleTest={onRoleTest}
-                    />
-                  )}
-                  onChange={(next) => onFieldChange("llmRole", next)}
+                <PhaseNameField
+                  phaseId={phaseId}
+                  onPhaseRename={onPhaseRename}
                 />
               </PanelFieldRow>
               <PanelFieldRow>
-                <Field>
-                  <YamlFieldLabel htmlFor="phase-tools">
-                    tools
-                    <HelpTooltip label="About tools">
-                      One tool name per line that this agent may call at runtime. Reference a tool in the body with
-                      <span className="font-mono"> @tool:&lt;name&gt;</span>; it must be declared here first.
-                    </HelpTooltip>
-                    <FieldErrorMarker errors={fieldErrors.tools} />
-                  </YamlFieldLabel>
-                  <Textarea
-                    id="phase-tools"
-                    value={value.tools}
-                    onChange={(event) => onFieldChange("tools", event.currentTarget.value)}
-                    rows={4}
-                  />
-                </Field>
+                <LlmRoleField
+                  key={phaseId}
+                  value={value.llmRole}
+                  roleNames={roleNames}
+                  roleTest={roleTest}
+                  errors={fieldErrors.llm_role}
+                  onChange={(next) => onFieldChange("llmRole", next)}
+                  onRoleTest={onRoleTest}
+                />
+              </PanelFieldRow>
+              <PanelFieldRow>
+                <ValidatorField
+                  value={value.validator}
+                  errors={fieldErrors.validator}
+                  phaseId={phaseId}
+                  files={files}
+                  skillId={skillId}
+                  workspaceRoot={workspaceRoot}
+                  onChange={(next) => onFieldChange("validator", next)}
+                  onValidatorCreate={onValidatorCreate}
+                  onFileOpen={onFileOpen}
+                />
+              </PanelFieldRow>
+              <PanelFieldRow>
+                <MaxIterationsField
+                  value={value.maxIterations}
+                  errors={fieldErrors.max_iterations}
+                  onChange={(next) => onFieldChange("maxIterations", next)}
+                />
+              </PanelFieldRow>
+              <PanelFieldRow>
+                <ToolsField
+                  value={value.tools}
+                  errors={fieldErrors.tools}
+                  onChange={(next) => onFieldChange("tools", next)}
+                />
               </PanelFieldRow>
               <PanelFieldRow>
                 <SubagentsField
                   value={value.subagents}
                   onChange={(next) => onFieldChange("subagents", next)}
+                />
+              </PanelFieldRow>
+              <PanelFieldRow>
+                <SubgraphRefsField
+                  value={value.subgraphs}
+                  errors={fieldErrors.subgraphs}
+                  workspaceRoot={workspaceRoot}
+                  onChange={(next) => onFieldChange("subgraphs", next)}
+                />
+              </PanelFieldRow>
+              <PanelFieldRow>
+                <ResourceRefField
+                  fieldKey="references"
+                  value={value.references}
+                  errors={fieldErrors.references}
+                  skillId={skillId}
+                  workspaceRoot={workspaceRoot}
+                  files={files}
+                  onFileOpen={onFileOpen}
+                  onChange={(next) => onFieldChange("references", next)}
+                />
+              </PanelFieldRow>
+              <PanelFieldRow>
+                <ResourceRefField
+                  fieldKey="examples"
+                  value={value.examples}
+                  errors={fieldErrors.examples}
+                  skillId={skillId}
+                  workspaceRoot={workspaceRoot}
+                  files={files}
+                  onFileOpen={onFileOpen}
+                  onChange={(next) => onFieldChange("examples", next)}
                 />
               </PanelFieldRow>
             </>
@@ -1070,7 +1164,13 @@ function PhaseFrontmatterForm({
                 <ValidatorField
                   value={value.validator}
                   errors={fieldErrors.validator}
+                  phaseId={phaseId}
+                  files={files}
+                  skillId={skillId}
+                  workspaceRoot={workspaceRoot}
                   onChange={(next) => onFieldChange("validator", next)}
+                  onValidatorCreate={onValidatorCreate}
+                  onFileOpen={onFileOpen}
                 />
               </PanelFieldRow>
             </>
@@ -1096,7 +1196,13 @@ function PhaseFrontmatterForm({
                 <ValidatorField
                   value={value.validator}
                   errors={fieldErrors.validator}
+                  phaseId={phaseId}
+                  files={files}
+                  skillId={skillId}
+                  workspaceRoot={workspaceRoot}
                   onChange={(next) => onFieldChange("validator", next)}
+                  onValidatorCreate={onValidatorCreate}
+                  onFileOpen={onFileOpen}
                 />
               </PanelFieldRow>
             </>
@@ -1957,32 +2063,83 @@ function RoleTestControl({
   )
 }
 
+// validator gates on whether the sibling validator.py EXISTS. No file → there is no
+// switch, only a "Create validator.py" action (scaffolds a passing stub + flips the
+// flag on). File present → the on/off switch plus an Edit button. Mirrors the user's
+// rule that the toggle is only meaningful once the file backing it exists.
 function ValidatorField({
   value,
   errors,
+  phaseId,
+  files,
+  skillId,
+  workspaceRoot,
   onChange,
+  onValidatorCreate,
+  onFileOpen,
 }: {
   value: boolean
   errors?: LintError[]
+  phaseId: string
+  files?: Record<string, string>
+  skillId: string | null
+  workspaceRoot: string | null
   onChange: (next: boolean) => void
+  onValidatorCreate?: (phaseId: string) => Promise<void> | void
+  onFileOpen?: (fileOrPath: FileOpenInput) => void
 }) {
+  const filePath = validatorFilePath(phaseId)
+  const fileExists = files != null && files[filePath] !== undefined
+
   return (
     <Field orientation="horizontal" className="items-center justify-between gap-3">
-      <YamlFieldLabel htmlFor="phase-validator" className="min-w-0">
+      <YamlFieldLabel
+        htmlFor="phase-validator"
+        className="min-w-0"
+        onClick={(event) => event.preventDefault()}
+      >
         validator
         <HelpTooltip label="About validator">
           When on, the engine runs this node&rsquo;s sibling <span className="font-mono">validator.py</span> after the
-          node finishes to check its output. Off by default.
+          node finishes to check its output (return None to pass). Create the file to enable it.
         </HelpTooltip>
         <FieldErrorMarker errors={errors} />
       </YamlFieldLabel>
-      <Switch
-        id="phase-validator"
-        size="sm"
-        checked={value}
-        onCheckedChange={onChange}
-        aria-label="Validator"
-      />
+      {fileExists ? (
+        <div className="flex shrink-0 items-center gap-2">
+          {onFileOpen ? (
+            <Button
+              type="button"
+              size="icon"
+              variant="secondary"
+              className={YAML_ICON_BUTTON_CLASS}
+              aria-label="Edit validator.py"
+              onClick={() => onFileOpen({ path: filePath, skillId, workspaceRoot, language: "python", saveEnabled: true })}
+            >
+              <Pencil className="size-3.5" aria-hidden />
+            </Button>
+          ) : null}
+          <Switch
+            id="phase-validator"
+            size="sm"
+            checked={value}
+            onCheckedChange={onChange}
+            aria-label="Validator"
+          />
+        </div>
+      ) : (
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          className="shrink-0"
+          disabled={!onValidatorCreate}
+          onClick={() => onValidatorCreate?.(phaseId)}
+        >
+          <Plus className="size-3.5" aria-hidden />
+          Create validator.py
+        </Button>
+      )}
     </Field>
   )
 }
@@ -2090,6 +2247,489 @@ function SubagentsField({
   )
 }
 
+// llm_role as a dropdown of CONFIGURED roles (GET /llm/roles), gated by a "Use graph
+// default" toggle. Empty frontmatter = inherit the graph's llm_role (toggle on, dropdown
+// disabled); a written value = a specific role (toggle off). A value not among the
+// configured roles (hand-typed or since-deleted) is still surfaced so saving never drops
+// it. Remounts per node (key={phaseId}) so the toggle reflects the selected node.
+function LlmRoleField({
+  value,
+  roleNames,
+  roleTest,
+  errors,
+  onChange,
+  onRoleTest,
+}: {
+  value: string
+  roleNames: string[]
+  roleTest: RoleTestStatusInput
+  errors?: LintError[]
+  onChange: (next: string) => void
+  onRoleTest: (roleName: string) => void
+}) {
+  const trimmed = value.trim()
+  // A written role is always "custom"; while empty, this local flag distinguishes
+  // "mid-selecting a custom role" from "using the graph default" (both are empty
+  // frontmatter until a role is picked).
+  const [customizing, setCustomizing] = useState(trimmed !== "")
+  const isCustom = trimmed !== "" || customizing
+  const options = useMemo(
+    () => (trimmed && !roleNames.includes(trimmed) ? [trimmed, ...roleNames] : roleNames),
+    [roleNames, trimmed],
+  )
+
+  return (
+    <Field>
+      <YamlFieldLabel htmlFor="phase-llm-role">
+        llm_role
+        <HelpTooltip label="About llm_role">
+          The configured LLM role this agent runs as. Keep &ldquo;Use graph default&rdquo; on to inherit the
+          graph&rsquo;s llm_role; turn it off to pick a specific role. Manage roles in Settings &rsaquo; LLM Roles.
+        </HelpTooltip>
+        <FieldErrorMarker errors={errors} />
+      </YamlFieldLabel>
+      <Field orientation="horizontal" className="items-center justify-between gap-3">
+        <YamlNestedFieldLabel
+          htmlFor="phase-llm-role-default"
+          className="min-w-0"
+          onClick={(event) => event.preventDefault()}
+        >
+          Use graph default
+        </YamlNestedFieldLabel>
+        <Switch
+          id="phase-llm-role-default"
+          size="sm"
+          checked={!isCustom}
+          aria-label="Use graph default llm_role"
+          onCheckedChange={(useDefault) => {
+            if (useDefault) {
+              setCustomizing(false)
+              onChange("")
+            } else {
+              setCustomizing(true)
+            }
+          }}
+        />
+      </Field>
+      <div className="flex items-center gap-2">
+        <Select
+          value={trimmed || undefined}
+          disabled={!isCustom}
+          onValueChange={(next) => onChange(next)}
+        >
+          <SelectTrigger id="phase-llm-role" aria-label="llm_role" className="min-w-0 flex-1">
+            <SelectValue placeholder="Select a role" />
+          </SelectTrigger>
+          <SelectContent>
+            {options.map((name) => (
+              <SelectItem key={name} value={name}>
+                {roleNames.includes(name) ? name : `${name} (not configured)`}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <RoleTestControl
+          roleName={value}
+          roleTest={roleTest}
+          onRoleTest={onRoleTest}
+        />
+      </div>
+    </Field>
+  )
+}
+
+// Engine built-in tools (loader.py scan_mentions tool set) are always available to an
+// agent — they must NOT be declared in `tools`. Adding them is blocked below.
+const RESERVED_TOOL_NAMES = new Set(["finish_task", "read_reference", "read_example", "log_ambiguity"])
+
+// Agent `tools` as a managed name list — same flat-card idiom as LOGIC actions, minus
+// the file scaffolding (a tool name is just a declaration the body references via
+// @tool:<name>, no sibling file to create or open). Add/remove edit the form draft.
+function ToolsField({
+  value,
+  errors,
+  onChange,
+}: {
+  value: string
+  errors?: LintError[]
+  onChange: (next: string) => void
+}) {
+  const tools = useMemo(
+    () => value.split("\n").map((line) => line.trim()).filter(Boolean),
+    [value],
+  )
+  const remove = (name: string) => {
+    onChange(tools.filter((tool) => tool !== name).join("\n"))
+  }
+  const add = (name: string) => {
+    onChange([...tools, name].join("\n"))
+  }
+
+  return (
+    <Field>
+      <YamlFieldLabel>
+        tools
+        <HelpTooltip label="About tools">
+          Tools this agent may call at runtime, referenced in the body with
+          <span className="font-mono"> @tool:&lt;name&gt;</span>. Each must be declared here first.
+        </HelpTooltip>
+        <FieldErrorMarker errors={errors} />
+      </YamlFieldLabel>
+      {tools.length > 0 ? (
+        <div className="space-y-1.5 rounded-md bg-muted/30 px-2 py-2">
+          {tools.map((name) => (
+            <div key={name} className="flex items-center justify-between gap-2 text-xs text-foreground">
+              <span className="min-w-0 flex-1 truncate">
+                <span aria-hidden className="mr-1.5 text-muted-foreground">&bull;</span>
+                {name}
+              </span>
+              <Button
+                type="button"
+                size="icon"
+                variant="secondary"
+                className={YAML_ICON_BUTTON_CLASS}
+                aria-label={`Remove tool ${name}`}
+                onClick={() => remove(name)}
+              >
+                <Trash2 className="size-3.5" aria-hidden />
+              </Button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <FieldDescription>No tools yet — add one this agent can call.</FieldDescription>
+      )}
+      <AddToolDialog existing={tools} onAdd={add} />
+      <FieldDescription>
+        Built-in tools (finish_task, read_reference, read_example, log_ambiguity) are always available — don&rsquo;t list them here.
+      </FieldDescription>
+    </Field>
+  )
+}
+
+function AddToolDialog({ existing, onAdd }: { existing: string[]; onAdd: (name: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState("")
+  const name = draft.trim()
+  const duplicate = name.length > 0 && existing.includes(name)
+  const reserved = name.length > 0 && RESERVED_TOOL_NAMES.has(name)
+  const canAdd = Boolean(name && !duplicate && !reserved)
+
+  useEffect(() => {
+    if (open) {
+      setDraft("")
+    }
+  }, [open])
+
+  const submit = () => {
+    if (!canAdd) {
+      return
+    }
+    onAdd(name)
+    setOpen(false)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button type="button" size="sm" variant="secondary" className="mt-1">
+          <Plus className="size-3.5" aria-hidden />
+          Add tool
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add tool</DialogTitle>
+          <DialogDescription>
+            Declares a tool this agent may call, referenced in the body with
+            <span className="font-mono"> @tool:&lt;name&gt;</span>.
+          </DialogDescription>
+        </DialogHeader>
+        <Field>
+          <form
+            className="contents"
+            autoComplete="off"
+            onSubmit={(event) => {
+              event.preventDefault()
+              submit()
+            }}
+          >
+            <FieldLabel htmlFor="tool-name-input">Tool name</FieldLabel>
+            <Input
+              id="tool-name-input"
+              value={draft}
+              autoFocus
+              spellCheck={false}
+              placeholder="my_tool"
+              aria-invalid={duplicate || reserved || undefined}
+              onChange={(event) => setDraft(event.currentTarget.value)}
+            />
+            {duplicate ? <p className="text-xs text-destructive">{name} is already declared.</p> : null}
+            {reserved ? <p className="text-xs text-destructive">{name} is a built-in tool — always available, no need to declare it.</p> : null}
+          </form>
+        </Field>
+        <DialogFooter>
+          <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          <Button type="button" disabled={!canAdd} onClick={submit}>
+            Add
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function MaxIterationsField({
+  value,
+  errors,
+  onChange,
+}: {
+  value: string
+  errors?: LintError[]
+  onChange: (next: string) => void
+}) {
+  return (
+    <Field>
+      <YamlFieldLabel htmlFor="phase-max-iterations">
+        max_iterations
+        <HelpTooltip label="About max_iterations">
+          The most internal reasoning rounds this agent may take before it must call
+          <span className="font-mono"> finish_task</span>. Integer 1&ndash;50; defaults to 10 when left empty.
+        </HelpTooltip>
+        <FieldErrorMarker errors={errors} />
+      </YamlFieldLabel>
+      <Input
+        id="phase-max-iterations"
+        inputMode="numeric"
+        value={value}
+        placeholder="10"
+        onChange={(event) => onChange(event.currentTarget.value)}
+      />
+    </Field>
+  )
+}
+
+// Agent subgraph resources (frontmatter `subgraphs:`). Same flat-card list idiom as
+// SubagentsField / ActionsField, but each row's path is a CHILD GRAPH FOLDER picked
+// via the OS directory picker (engine requires an absolute path), not free text.
+function SubgraphRefsField({
+  value,
+  errors,
+  workspaceRoot,
+  onChange,
+}: {
+  value: PhaseSubgraphRef[]
+  errors?: LintError[]
+  workspaceRoot: string | null
+  onChange: (next: PhaseSubgraphRef[]) => void
+}) {
+  const update = (index: number, patch: Partial<PhaseSubgraphRef>) => {
+    onChange(value.map((entry, idx) => (idx === index ? { ...entry, ...patch } : entry)))
+  }
+  const remove = (index: number) => {
+    onChange(value.filter((_, idx) => idx !== index))
+  }
+  const add = () => {
+    onChange([...value, { name: "", path: "", description: "" }])
+  }
+  const choosePath = async (index: number) => {
+    const selected = await selectSkillDirectory(value[index]?.path || workspaceRoot)
+    if (!selected) {
+      return
+    }
+    if (!isPathInsideWorkspaceRoot(selected, workspaceRoot)) {
+      toast.error("Select a child graph folder inside the current skill root.")
+      return
+    }
+    update(index, { path: selected })
+  }
+
+  return (
+    <Field>
+      <YamlFieldLabel>
+        subgraphs
+        <HelpTooltip label="About subgraphs">
+          Child graphs this agent can invoke, referenced in the body with
+          <span className="font-mono"> @subgraph:&lt;name&gt;</span>. Each binds a <span className="font-mono">name</span> to a
+          child graph folder (absolute <span className="font-mono">path</span>). This is a runtime resource, distinct from a
+          SUBGRAPH phase node.
+        </HelpTooltip>
+        <FieldErrorMarker errors={errors} />
+      </YamlFieldLabel>
+      <div className="space-y-2">
+        {value.map((entry, index) => (
+          <div key={index} className="space-y-1.5 rounded-md bg-muted/30 px-2 py-2">
+            <Input
+              aria-label={`Subgraph ${index + 1} name`}
+              value={entry.name}
+              placeholder="name"
+              onChange={(event) => update(index, { name: event.currentTarget.value })}
+            />
+            <div className="flex items-center gap-2">
+              <Input
+                aria-label={`Subgraph ${index + 1} path`}
+                value={entry.path}
+                placeholder="No folder selected"
+                readOnly
+                className={YAML_READONLY_VALUE_CLASS}
+              />
+              <Button
+                type="button"
+                size="icon"
+                variant="secondary"
+                className={YAML_ICON_BUTTON_CLASS}
+                aria-label={`Choose folder for subgraph ${index + 1}`}
+                onClick={() => void choosePath(index)}
+              >
+                <FolderOpen className="size-3.5" aria-hidden />
+              </Button>
+            </div>
+            <Input
+              aria-label={`Subgraph ${index + 1} description`}
+              value={entry.description}
+              placeholder="description"
+              onChange={(event) => update(index, { description: event.currentTarget.value })}
+            />
+            <div className="flex justify-end">
+              <Button type="button" size="sm" variant="ghost" onClick={() => remove(index)}>
+                Remove
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <Button type="button" size="sm" variant="secondary" className="mt-1" onClick={add}>
+        Add subgraph
+      </Button>
+    </Field>
+  )
+}
+
+const RESOURCE_FIELD_COPY = {
+  references: {
+    label: "references",
+    addLabel: "Add reference",
+    help: (
+      <>
+        Reference documents this agent can consult, cited in the body with
+        <span className="font-mono"> @reference:&lt;id&gt;</span>. Each binds an <span className="font-mono">id</span>
+        {" "}(e.g. <span className="font-mono">R1</span>) to a file <span className="font-mono">path</span> with a short summary.
+      </>
+    ),
+  },
+  examples: {
+    label: "examples",
+    addLabel: "Add example",
+    help: (
+      <>
+        Example documents this agent can consult, cited in the body with
+        <span className="font-mono"> @example:&lt;id&gt;</span>. Each binds an <span className="font-mono">id</span>
+        {" "}(e.g. <span className="font-mono">E1</span>) to a file <span className="font-mono">path</span> with a short summary.
+        Distinct from inline <span className="font-mono">&lt;example&gt;</span> tags in the body.
+      </>
+    ),
+  },
+} as const
+
+// Agent reference / example resources (frontmatter `references:` / `examples:`).
+// Both are id/path/summary shaped, so one component renders either; `path` points
+// at a file the author can open in the editor.
+function ResourceRefField({
+  fieldKey,
+  value,
+  errors,
+  skillId,
+  workspaceRoot,
+  files,
+  onFileOpen,
+  onChange,
+}: {
+  fieldKey: "references" | "examples"
+  value: PhaseResourceRef[]
+  errors?: LintError[]
+  skillId: string | null
+  workspaceRoot: string | null
+  files?: Record<string, string>
+  onFileOpen?: (fileOrPath: FileOpenInput) => void
+  onChange: (next: PhaseResourceRef[]) => void
+}) {
+  const copy = RESOURCE_FIELD_COPY[fieldKey]
+  const update = (index: number, patch: Partial<PhaseResourceRef>) => {
+    onChange(value.map((entry, idx) => (idx === index ? { ...entry, ...patch } : entry)))
+  }
+  const remove = (index: number) => {
+    onChange(value.filter((_, idx) => idx !== index))
+  }
+  const add = () => {
+    onChange([...value, { id: "", path: "", summary: "" }])
+  }
+
+  return (
+    <Field>
+      <YamlFieldLabel>
+        {copy.label}
+        <HelpTooltip label={`About ${copy.label}`}>{copy.help}</HelpTooltip>
+        <FieldErrorMarker errors={errors} />
+      </YamlFieldLabel>
+      <div className="space-y-2">
+        {value.map((entry, index) => {
+          const trimmedPath = entry.path.trim()
+          const fileMissing = trimmedPath.length > 0 && files != null && files[trimmedPath] === undefined
+          return (
+            <div key={index} className="space-y-1.5 rounded-md bg-muted/30 px-2 py-2">
+              <Input
+                aria-label={`${copy.label} ${index + 1} id`}
+                value={entry.id}
+                placeholder="id"
+                onChange={(event) => update(index, { id: event.currentTarget.value })}
+              />
+              <div className="flex items-center gap-2">
+                <Input
+                  aria-label={`${copy.label} ${index + 1} path`}
+                  value={entry.path}
+                  placeholder="path"
+                  className="min-w-0 flex-1"
+                  onChange={(event) => update(index, { path: event.currentTarget.value })}
+                />
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="secondary"
+                  className={YAML_ICON_BUTTON_CLASS}
+                  aria-label={`Open ${copy.label} ${index + 1} file`}
+                  disabled={!onFileOpen || trimmedPath.length === 0}
+                  onClick={() => onFileOpen?.({ path: trimmedPath, skillId, workspaceRoot, saveEnabled: true })}
+                >
+                  <Pencil className="size-3.5" aria-hidden />
+                </Button>
+              </div>
+              {fileMissing ? (
+                <p className="text-xs text-amber-500">File not found in this skill yet.</p>
+              ) : null}
+              <Input
+                aria-label={`${copy.label} ${index + 1} summary`}
+                value={entry.summary}
+                placeholder="summary"
+                onChange={(event) => update(index, { summary: event.currentTarget.value })}
+              />
+              <div className="flex justify-end">
+                <Button type="button" size="sm" variant="ghost" onClick={() => remove(index)}>
+                  Remove
+                </Button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <Button type="button" size="sm" variant="secondary" className="mt-1" onClick={add}>
+        {copy.addLabel}
+      </Button>
+    </Field>
+  )
+}
+
 function formsEqual(left: PhaseFrontmatterFormData, right: PhaseFrontmatterFormData): boolean {
   return (
     left.llmRole === right.llmRole
@@ -2098,8 +2738,12 @@ function formsEqual(left: PhaseFrontmatterFormData, right: PhaseFrontmatterFormD
     && left.path === right.path
     && left.validator === right.validator
     && left.allowSequentialOverwrite === right.allowSequentialOverwrite
+    && left.maxIterations === right.maxIterations
     && iterateEqual(left.iterate, right.iterate)
     && subagentsEqual(left.subagents, right.subagents)
+    && subgraphsEqual(left.subgraphs, right.subgraphs)
+    && resourcesEqual(left.references, right.references)
+    && resourcesEqual(left.examples, right.examples)
   )
 }
 
@@ -2129,6 +2773,36 @@ function subagentsEqual(left: PhaseSubagentRef[], right: PhaseSubagentRef[]): bo
       && entry.name === other.name
       && entry.target_skill === other.target_skill
       && entry.description === other.description
+    )
+  })
+}
+
+function subgraphsEqual(left: PhaseSubgraphRef[], right: PhaseSubgraphRef[]): boolean {
+  if (left.length !== right.length) {
+    return false
+  }
+  return left.every((entry, index) => {
+    const other = right[index]
+    return (
+      other !== undefined
+      && entry.name === other.name
+      && entry.path === other.path
+      && entry.description === other.description
+    )
+  })
+}
+
+function resourcesEqual(left: PhaseResourceRef[], right: PhaseResourceRef[]): boolean {
+  if (left.length !== right.length) {
+    return false
+  }
+  return left.every((entry, index) => {
+    const other = right[index]
+    return (
+      other !== undefined
+      && entry.id === other.id
+      && entry.path === other.path
+      && entry.summary === other.summary
     )
   })
 }

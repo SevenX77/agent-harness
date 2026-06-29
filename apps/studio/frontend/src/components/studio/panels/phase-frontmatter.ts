@@ -11,6 +11,18 @@ export interface PhaseSubagentRef {
   description: string
 }
 
+export interface PhaseSubgraphRef {
+  name: string
+  path: string
+  description: string
+}
+
+export interface PhaseResourceRef {
+  id: string
+  path: string
+  summary: string
+}
+
 export type IterateMode = '' | 'batch' | 'loop'
 export type IterateMergeMode = 'append' | 'extend' | 'merge' | 'replace'
 
@@ -32,11 +44,15 @@ export interface PhaseFrontmatterFormData {
   llmRole: string
   tools: string
   subagents: PhaseSubagentRef[]
+  subgraphs: PhaseSubgraphRef[]
+  references: PhaseResourceRef[]
+  examples: PhaseResourceRef[]
+  maxIterations: string
   // logic (LOGIC.md)
   actions: string
   // subgraph (SUBGRAPH.md)
   path: string
-  // shared (logic + subgraph)
+  // shared (agent + logic + subgraph)
   validator: boolean
   // shared (agent + logic + subgraph)
   allowSequentialOverwrite: string
@@ -65,6 +81,10 @@ export const EMPTY_FORM: PhaseFrontmatterFormData = {
   llmRole: '',
   tools: '',
   subagents: [],
+  subgraphs: [],
+  references: [],
+  examples: [],
+  maxIterations: '',
   actions: '',
   path: '',
   validator: false,
@@ -105,6 +125,10 @@ export function phaseFrontmatterToForm(frontmatter: Partial<PhaseFrontmatter>): 
     llmRole: stringValue(frontmatter.llm_role),
     tools: linesValue(frontmatter.tools),
     subagents: subagentsValue(frontmatter.subagents),
+    subgraphs: subgraphsValue(frontmatter.subgraphs),
+    references: resourcesValue(frontmatter.references),
+    examples: resourcesValue(frontmatter.examples),
+    maxIterations: numberStringValue(frontmatter.max_iterations),
     actions: linesValue(frontmatter.actions),
     path: stringValue(frontmatter.path),
     validator: booleanValue(frontmatter.validator),
@@ -158,6 +182,29 @@ export function applyPhaseName(markdown: string, nextName: string): ApplyPhaseFr
   }
 }
 
+/**
+ * Toggle just the `validator` flag on a phase file, preserving everything else.
+ * Used when Studio creates a `validator.py` (enable) — separate from the form save
+ * path so it can run as a standalone file action. Default `false` is dropped, never
+ * written as an explicit `validator: false`.
+ */
+export function applyPhaseValidator(markdown: string, enabled: boolean): ApplyPhaseFrontmatterResult {
+  const parsed = parsePhaseFrontmatter(markdown)
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      reason: parsed.reason,
+      message: parsed.message,
+    }
+  }
+  const next: PhaseFrontmatter = { ...parsed.frontmatter }
+  setBoolean(next, 'validator', enabled)
+  return {
+    ok: true,
+    markdown: serializePhaseMarkdown(next, parsed.body),
+  }
+}
+
 function splitMarkdownFrontmatter(markdown: string):
   | { ok: true; frontmatter: string; body: string }
   | { ok: false; reason: 'missing-frontmatter' | 'unterminated-frontmatter'; message: string } {
@@ -197,6 +244,11 @@ function frontmatterFromForm(
     setOptionalString(next, 'llm_role', form.llmRole)
     setOptionalList(next, 'tools', form.tools)
     setSubagents(next, form.subagents)
+    setSubgraphs(next, form.subgraphs)
+    setResourceList(next, 'references', form.references)
+    setResourceList(next, 'examples', form.examples)
+    setBoolean(next, 'validator', form.validator)
+    setMaxIterations(next, form.maxIterations)
     setOptionalList(next, 'allow_sequential_overwrite', form.allowSequentialOverwrite)
     setIterate(next, form.iterate)
     return next
@@ -399,6 +451,82 @@ function setSubagents(target: PhaseFrontmatter, subagents: PhaseSubagentRef[]): 
     target.subagents = cleaned
   } else {
     delete target.subagents
+  }
+}
+
+function subgraphsValue(value: unknown): PhaseSubgraphRef[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.flatMap((item) => {
+    if (!isRecord(item)) {
+      return []
+    }
+    return [{
+      name: stringValue(item.name),
+      path: stringValue(item.path),
+      description: stringValue(item.description),
+    }]
+  })
+}
+
+function resourcesValue(value: unknown): PhaseResourceRef[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.flatMap((item) => {
+    if (!isRecord(item)) {
+      return []
+    }
+    return [{
+      id: stringValue(item.id),
+      path: stringValue(item.path),
+      summary: stringValue(item.summary),
+    }]
+  })
+}
+
+// Agent-only subgraph registry items (AgentRegistryItem: name/path/description).
+// Engine requires path to be absolute; the form/UI carries that constraint, this
+// serializer only trims and drops fully-empty rows so blanks never pollute YAML.
+function setSubgraphs(target: PhaseFrontmatter, subgraphs: PhaseSubgraphRef[]): void {
+  const cleaned = subgraphs
+    .map((entry) => ({
+      name: entry.name.trim(),
+      path: entry.path.trim(),
+      description: entry.description.trim(),
+    }))
+    .filter((entry) => entry.name || entry.path || entry.description)
+  if (cleaned.length > 0) {
+    target.subgraphs = cleaned
+  } else {
+    delete target.subgraphs
+  }
+}
+
+// Shared serializer for the agent `references` / `examples` arrays — both are
+// ReferenceSpec/ExampleSpec shaped (id/path/summary).
+function setResourceList(target: PhaseFrontmatter, key: 'references' | 'examples', items: PhaseResourceRef[]): void {
+  const cleaned = items
+    .map((entry) => ({
+      id: entry.id.trim(),
+      path: entry.path.trim(),
+      summary: entry.summary.trim(),
+    }))
+    .filter((entry) => entry.id || entry.path || entry.summary)
+  if (cleaned.length > 0) {
+    target[key] = cleaned
+  } else {
+    delete target[key]
+  }
+}
+
+function setMaxIterations(target: PhaseFrontmatter, value: string): void {
+  const parsed = intValue(value)
+  if (parsed != null) {
+    target.max_iterations = parsed
+  } else {
+    delete target.max_iterations
   }
 }
 

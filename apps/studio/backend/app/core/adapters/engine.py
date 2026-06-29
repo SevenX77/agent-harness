@@ -213,23 +213,26 @@ class _PrivateStudioSkillResolver:
         return path.is_dir() and (path / "GRAPH.md").is_file()
 
 
+def _load_resolver_credentials(cred_path: Path) -> Any:
+    """Load resolver credentials, upgrading v4->v5 through the shared loader. A
+    missing file is first-run empty; a malformed/corrupt file stays FATAL (matching
+    ``load_credentials``) — we do NOT swallow a broken file into empty config (P2)."""
+    from app.services.llm_credentials import load_credentials
+
+    return load_credentials(cred_path)
+
+
 def _private_build_gateway_model_resolver() -> Any:
 
     from app.core import config
     from app.core.adapters.gateway import ModelResolver
-    from app.models.llm_config import LLMCredentialsFile, RolesData
+    from app.models.llm_config import RolesData
 
     cred_path_env = os.environ.get("STUDIO_LLM_CREDENTIALS_PATH")
     cred_path = (
         Path(cred_path_env).expanduser() if cred_path_env else config.APP_SETTINGS_DIR / "llm" / "llm_credentials.json"
     )
-    if cred_path.exists():
-        try:
-            cred_data = LLMCredentialsFile.model_validate(json.loads(cred_path.read_text(encoding="utf-8")))
-        except Exception:
-            cred_data = LLMCredentialsFile()
-    else:
-        cred_data = LLMCredentialsFile()
+    cred_data = _load_resolver_credentials(cred_path)
 
     roles_path_env = os.environ.get("STUDIO_LLM_ROLES_PATH")
     roles_path = (

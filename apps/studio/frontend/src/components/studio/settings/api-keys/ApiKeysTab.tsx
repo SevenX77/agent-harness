@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import { Plus, TriangleAlert } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { Badge } from "@/components/ui/badge"
@@ -21,11 +21,15 @@ export function ApiKeysTab({
   credentialsLoading,
   credentialsError,
   drafts,
+  pendingAddProviderId,
   saveStatus,
   onProviderFieldChange,
   onGetProviderModels,
   onDeleteProvider,
+  onDeleteProviderEndpoints,
+  onBeginAddProvider,
   onAddProvider,
+  onCancelAddProvider,
   onProviderModelsUpdated,
 }: Pick<
   SettingsPageContentProps,
@@ -33,21 +37,27 @@ export function ApiKeysTab({
   | "credentialsLoading"
   | "credentialsError"
   | "drafts"
+  | "pendingAddProviderId"
   | "saveStatus"
   | "onProviderFieldChange"
   | "onGetProviderModels"
   | "onDeleteProvider"
+  | "onDeleteProviderEndpoints"
+  | "onBeginAddProvider"
   | "onAddProvider"
+  | "onCancelAddProvider"
   | "onProviderModelsUpdated"
 >) {
   const { t } = useTranslation("settings")
-  const [addProviderOpen, setAddProviderOpen] = useState(false)
   const persistedById = useMemo(
     () => Object.fromEntries(credentials.providers.map((provider) => [provider.id, provider])),
     [credentials.providers],
   )
   const officialDrafts = useMemo(() => officialProviderDrafts(drafts), [drafts])
   const thirdPartyDrafts = useMemo(() => thirdPartyProviderDrafts(drafts), [drafts])
+  const pendingAddProviderActive = Boolean(
+    pendingAddProviderId && thirdPartyDrafts.some((draft) => draft.id === pendingAddProviderId),
+  )
 
   return (
     <div className="max-w-3xl">
@@ -85,9 +95,10 @@ export function ApiKeysTab({
                       key={draft.id}
                       draft={draft}
                       persisted={persisted}
-                      onFieldChange={(patch) => onProviderFieldChange(draft.id, { ...draft, ...patch })}
+                      onFieldChange={(patch, options) => onProviderFieldChange(draft.id, { ...draft, ...patch }, options)}
                       onGetModels={() => onGetProviderModels(draft.id)}
                       onDelete={() => onDeleteProvider(draft.id)}
+                      onDeleteEndpointIds={onDeleteProviderEndpoints}
                       providerKind="official"
                       showManualModelPanel={shouldShowManualModelPanel(draft, persisted)}
                       notableProviderKey={notableProviderKeyForDraft(draft)}
@@ -104,6 +115,18 @@ export function ApiKeysTab({
               </CatalogAccordionTrigger>
               <CatalogAccordionContent className="space-y-3 pb-5">
                 {thirdPartyDrafts.map((draft) => {
+                  if (draft.id === pendingAddProviderId) {
+                    return (
+                      <AddProviderForm
+                        key={draft.id}
+                        existingNames={thirdPartyDrafts
+                          .filter((item) => item.id !== pendingAddProviderId)
+                          .map((item) => item.name)}
+                        onSubmit={onAddProvider}
+                        onCancel={onCancelAddProvider}
+                      />
+                    )
+                  }
                   const persisted = persistedById[draft.id] ?? null
                   const persistedEndpoints = Object.fromEntries(
                     providerEndpointDraftsForAction(draft).map((endpointDraft) => [
@@ -122,9 +145,10 @@ export function ApiKeysTab({
                       draft={draft}
                       persisted={persisted}
                       persistedEndpoints={persistedEndpoints}
-                      onFieldChange={(patch) => onProviderFieldChange(draft.id, patch)}
+                      onFieldChange={(patch, options) => onProviderFieldChange(draft.id, patch, options)}
                       onGetModels={() => onGetProviderModels(draft.id)}
                       onDelete={() => onDeleteProvider(draft.id)}
+                      onDeleteEndpointIds={onDeleteProviderEndpoints}
                       providerKind="third-party"
                       showManualModelPanel={shouldShowManualModelPanel(draft, persisted)}
                       notableProviderKey={notableProviderKeyForDraft(draft)}
@@ -137,17 +161,8 @@ export function ApiKeysTab({
                     <p className="text-xs text-muted-foreground">{t("apiKeys.noThirdPartyProviders")}</p>
                   </div>
                 ) : null}
-                {addProviderOpen ? (
-                  <AddProviderForm
-                    existingNames={thirdPartyDrafts.map((d) => d.name)}
-                    onSubmit={(submission) => {
-                      onAddProvider(submission)
-                      setAddProviderOpen(false)
-                    }}
-                    onCancel={() => setAddProviderOpen(false)}
-                  />
-                ) : (
-                  <Button type="button" variant="default" onClick={() => setAddProviderOpen(true)} className="gap-1">
+                {pendingAddProviderActive ? null : (
+                  <Button type="button" variant="default" onClick={onBeginAddProvider} className="gap-1">
                     <Plus className="size-3.5" />
                     {t("apiKeys.addProvider")}
                   </Button>
@@ -173,7 +188,6 @@ function ProbeCatalogStatus({
   if (!probeCatalog) return null
   const community = probeCatalog.community_catalog
   const remoteSynced = Boolean(community?.synced)
-  const communityEntries = community?.entries ?? []
   return (
     <div
       className="mb-4 space-y-2 rounded-md border border-border/60 bg-muted/10 px-3 py-2 text-xs text-muted-foreground"
@@ -194,33 +208,6 @@ function ProbeCatalogStatus({
         <Badge variant="secondary">Local only</Badge>
         <span className="min-w-0">{probeCatalog.sharing.message}</span>
       </div>
-      {communityEntries.length > 0 ? (
-        <div className="rounded-md border border-dashed border-border/60 bg-background/40 px-2.5 py-2">
-          <p className="font-medium text-foreground/80">
-            Community-verified routes
-            <span className="ml-1 font-normal text-muted-foreground">
-              (advisory · community-observed, not applied to your keys)
-            </span>
-          </p>
-          <ul className="mt-1.5 space-y-1" data-testid="community-catalog-entries">
-            {communityEntries.map((entry, index) => (
-              <li
-                key={`${entry.public_base_url ?? "?"}:${entry.model_id ?? "?"}:${index}`}
-                className="flex flex-wrap items-center gap-x-2 gap-y-0.5"
-              >
-                <span className="font-mono text-foreground/70">
-                  {entry.public_base_url ?? "(unknown endpoint)"}
-                </span>
-                <span className="text-muted-foreground">·</span>
-                <span className="text-foreground/70">{entry.model_id ?? "(unknown model)"}</span>
-                {entry.capability_family ? (
-                  <Badge variant="outline">{entry.capability_family}</Badge>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
     </div>
   )
 }

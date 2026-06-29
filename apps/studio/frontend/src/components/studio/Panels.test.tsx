@@ -1,9 +1,32 @@
+// @vitest-environment jsdom
+import { act } from 'react'
+import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { SkillDetail } from '@/api/types'
 import { WorkspaceProvider, type WorkspaceContextValue } from './WorkspaceContext'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 import { AssetsPanel, PropertiesPanel, subagentSkillFilePath } from './Panels'
+
+vi.hoisted(() => {
+  if (typeof window !== 'undefined' && !window.matchMedia) {
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      value: (query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: () => undefined,
+        removeListener: () => undefined,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+        dispatchEvent: () => false,
+      }),
+    })
+  }
+})
+
+;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 describe('PropertiesPanel', () => {
   it('renders graph frontmatter fields without a selected node', () => {
@@ -333,96 +356,6 @@ describe('AssetsPanel', () => {
     expect(html).not.toContain('phases/setup')
   })
 
-  it('renders subgraph files as a flat panel with recursive level and right-aligned status', () => {
-    const html = renderToStaticMarkup(
-      <WorkspaceProvider value={workspaceContextStub}>
-        <AssetsPanel
-          skillDetail={{
-            ...skillDetailWithFiles({}),
-            graph_topology: [
-              {
-                id: 'segmentation',
-                src: 'phases/segmentation',
-                depends_on: [],
-                mode: 'subgraph',
-                path: '/abs/skills/segmentation',
-              },
-              {
-                id: 'summary',
-                src: 'phases/summary',
-                depends_on: ['segmentation'],
-                mode: 'subgraph',
-                path: '/abs/skills/summary',
-                level: 2,
-              } as NonNullable<SkillDetail['graph_topology']>[number],
-            ],
-          }}
-          selectedNode={null}
-        />
-      </WorkspaceProvider>,
-    )
-
-    expect(html).toContain('data-assets-section="subgraphs-files"')
-    expect(html).toContain('data-subgraph-level="1"')
-    expect(html).toContain('data-subgraph-level="2"')
-    expect(html).toContain('L1')
-    expect(html).toContain('L2')
-    expect(html).toContain('data-subgraph-level-tag="true"')
-    expect(html).toContain('data-variant="info"')
-    expect(html).toContain('data-variant="warning"')
-    expect(html.indexOf('data-subgraph-level-tag="true"')).toBeLessThan(html.indexOf('data-subgraph-name="true"'))
-    expect(html).toContain('data-subgraph-folder="true"')
-    expect(html).toContain('data-subgraph-default-expanded="false"')
-    expect(html).toContain('data-subgraph-status-slot="true"')
-    expect(html).toContain('data-subgraph-row-grid="true"')
-    expect(html).toContain('w-full min-w-0 space-y-1 overflow-hidden py-1')
-    expect(html).toContain('grid w-full min-w-0 grid-cols-[minmax(0,1fr)_max-content]')
-    expect(html).toContain('grid-cols-[auto_auto_minmax(0,1fr)]')
-    expect(html).toContain('min-w-max justify-self-end')
-    expect(html).not.toContain('w-[4.75rem]')
-    expect(html).not.toContain('w-10 px-0')
-    expect(html).not.toContain('--subgraph-indent')
-    expect(html).not.toContain('var(--subgraph-indent)')
-    expect(html).not.toContain('calc(1rem +')
-    expect(html).not.toContain('padding-left:12px')
-    expect(html).not.toContain('title="Subgraphs"')
-  })
-
-  it('suppresses recursive level pills when every subgraph is top-level', () => {
-    const html = renderToStaticMarkup(
-      <WorkspaceProvider value={workspaceContextStub}>
-        <AssetsPanel
-          skillDetail={{
-            ...skillDetailWithFiles({}),
-            graph_topology: [
-              {
-                id: 'segmentation',
-                src: 'phases/segmentation',
-                depends_on: [],
-                mode: 'subgraph',
-                path: '/abs/skills/segmentation',
-              },
-              {
-                id: 'event_timeline',
-                src: 'phases/event_timeline',
-                depends_on: ['segmentation'],
-                mode: 'subgraph',
-                path: '/abs/skills/event_timeline',
-              },
-            ],
-          }}
-          selectedNode={null}
-        />
-      </WorkspaceProvider>,
-    )
-
-    expect(html).toContain('segmentation')
-    expect(html).toContain('event_timeline')
-    expect(html).toContain('Linked')
-    expect(html).not.toContain('L1')
-    expect(html).not.toContain('Recursive level 1')
-  })
-
   it('keeps each subgraph folder collapsed by default', () => {
     const html = renderToStaticMarkup(
       <WorkspaceProvider value={workspaceContextStub}>
@@ -457,6 +390,8 @@ describe('AssetsPanel', () => {
     expect(html).toContain('flex h-full min-h-0 flex-col')
     expect(html).toContain('data-assets-subgraphs-drawer="true"')
     expect(html).toContain('overflow-hidden px-0 pb-2')
+    expect(html).toContain('grid h-full min-h-0')
+    expect(html).not.toContain('h-[calc(100vh-1.5rem)]')
     expect(html).not.toContain('px-1.5 pb-2')
     expect(html).not.toContain('calc(100vh - 5.25rem)')
   })
@@ -470,6 +405,70 @@ describe('AssetsPanel', () => {
     expect(html).toContain('aria-label="Collapse Subgraphs Files"')
     expect(html).toContain('aria-expanded="true"')
     expect(html).toContain('w-full cursor-pointer justify-between')
+  })
+
+  it('keeps only one subgraph folder expanded at a time', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+
+    try {
+      await act(async () => {
+        root.render(
+          <WorkspaceProvider value={workspaceContextStub}>
+            <AssetsPanel
+              skillDetail={{
+                ...skillDetailWithFiles({}),
+                graph_topology: [
+                  {
+                    id: 'segmentation',
+                    src: 'phases/segmentation',
+                    depends_on: [],
+                    mode: 'subgraph',
+                    path: '/abs/skills/segmentation',
+                    level: 1,
+                  } as NonNullable<SkillDetail['graph_topology']>[number],
+                  {
+                    id: 'event_extraction',
+                    src: 'phases/event_extraction',
+                    depends_on: ['segmentation'],
+                    mode: 'subgraph',
+                    path: '/abs/skills/event_extraction',
+                    level: 2,
+                  } as NonNullable<SkillDetail['graph_topology']>[number],
+                ],
+              }}
+              selectedNode={null}
+            />
+          </WorkspaceProvider>,
+        )
+      })
+
+      const first = container.querySelector<HTMLButtonElement>('button[title="segmentation"]')
+      const second = container.querySelector<HTMLButtonElement>('button[title="event_extraction"]')
+      expect(first).not.toBeNull()
+      expect(second).not.toBeNull()
+      expect(container.querySelectorAll('[data-subgraph-folder-contents="true"]')).toHaveLength(0)
+
+      await act(async () => {
+        first?.click()
+      })
+      expect(first?.getAttribute('aria-expanded')).toBe('true')
+      expect(second?.getAttribute('aria-expanded')).toBe('false')
+      expect(container.querySelectorAll('[data-subgraph-folder-contents="true"]')).toHaveLength(1)
+
+      await act(async () => {
+        second?.click()
+      })
+      expect(first?.getAttribute('aria-expanded')).toBe('false')
+      expect(second?.getAttribute('aria-expanded')).toBe('true')
+      expect(container.querySelectorAll('[data-subgraph-folder-contents="true"]')).toHaveLength(1)
+    } finally {
+      await act(async () => {
+        root.unmount()
+      })
+      document.body.removeChild(container)
+    }
   })
 
   it('does not draw an extra hard border between asset sections', () => {

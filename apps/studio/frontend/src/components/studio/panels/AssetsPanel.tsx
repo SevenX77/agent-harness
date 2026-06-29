@@ -11,12 +11,10 @@ import {
 import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Tag } from "@/components/ui/tag"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import type { SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData } from "@/components/GraphCanvas"
-import { isTauriRuntime } from "@/config/runtime"
-import { listWorkspaceDir, readWorkspaceFile, selectSkillDirectory, writeWorkspaceFile } from "@/lib/tauri"
+import { readWorkspaceFile, selectSkillDirectory, writeWorkspaceFile } from "@/lib/tauri"
 import { errorMessage } from "@/utils/errors"
 import { useWorkspaceContext } from "../WorkspaceContext"
 import type { FileMeta } from "../file-types"
@@ -24,8 +22,23 @@ import { FileRow } from "./_shared/FileRow"
 import { FolderRow } from "./_shared/FolderRow"
 import { PanelHeader } from "./_shared/PanelHeader"
 import { applyPhaseFrontmatterForm, parsePhaseFrontmatter, phaseFrontmatterToForm } from "./phase-frontmatter"
-import { fileFromDetail, languageForPath } from "./panel-files"
-import { loadRecursiveSubgraphMembership, subgraphMembership, type SubgraphMembership } from "./subgraph-membership"
+import {
+  ancestorDirsForFile,
+  assetTreeTargetForNode,
+  phaseIdFromFilePath,
+  subgraphChildPhaseChainForFile,
+  subgraphGraphChainForFile,
+} from "./asset-tree-target"
+import { subgraphMembership, type SubgraphMembership } from "./subgraph-membership"
+import {
+  type SubgraphMembershipTree,
+  useSubgraphMembershipTree,
+} from "./use-subgraph-membership-tree"
+import {
+  type DirectoryTreeState,
+  type WorkspaceDirectoryTree,
+  useWorkspaceDirectoryTree,
+} from "./use-workspace-directory-tree"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 
@@ -34,128 +47,83 @@ interface AssetsPanelProps {
   workspaceRoot?: string | null
   skillDetail?: SkillDetail
   selectedNode: { id: string; data: SkillGraphNodeData } | null
-}
-
-interface AssetTreeNode {
-  name: string
-  path: string
-  kind: "file" | "dir"
-  file?: FileMeta
-  children: Map<string, AssetTreeNode>
-}
-
-type DirectoryTreeStatus = "idle" | "loading" | "ready" | "error"
-
-interface DirectoryTreeState {
-  status: DirectoryTreeStatus
-  tree: AssetTreeNode | null
-  message?: string
+  directoryTree?: WorkspaceDirectoryTree
+  subgraphTree?: SubgraphMembershipTree
 }
 
 const DEFAULT_SUBGRAPHS_PANEL_PERCENT = 36
 const MIN_SUBGRAPHS_PANEL_PERCENT = 16
 const MAX_SUBGRAPHS_PANEL_PERCENT = 50
 
-function createAssetTreeNode(name: string, path: string, kind: "file" | "dir" = "dir"): AssetTreeNode {
-  return {
-    name,
-    path,
-    kind,
-    children: new Map(),
-  }
-}
-
-function createFileMeta({
-  path,
-  content = "",
-  skillId,
-  workspaceRoot,
-  titlePrefix,
-  saveEnabled = true,
-}: {
-  path: string
-  content?: string
-  skillId?: string | null
-  workspaceRoot?: string | null
-  titlePrefix?: string | null
-  saveEnabled?: boolean
-}): FileMeta {
-  return {
-    path,
-    language: languageForPath(path),
-    content,
-    skillId,
-    workspaceRoot,
-    title: titlePrefix ? `${titlePrefix} / ${path}` : undefined,
-    saveEnabled,
-  }
-}
-
-function buildAssetTree(skillDetail?: SkillDetail, options: {
-  skillId?: string | null
-  workspaceRoot?: string | null
-} = {}): AssetTreeNode {
-  const root = createAssetTreeNode("", "")
-  for (const path of Object.keys(skillDetail?.files ?? {}).sort((a, b) => a.localeCompare(b))) {
-    const parts = path.split("/").filter(Boolean)
-    if (parts.length === 0) continue
-
-    let current = root
-    parts.forEach((part, index) => {
-      const nodePath = parts.slice(0, index + 1).join("/")
-      let node = current.children.get(part)
-      if (!node) {
-        node = createAssetTreeNode(part, nodePath, index === parts.length - 1 ? "file" : "dir")
-        current.children.set(part, node)
-      }
-      if (index === parts.length - 1) {
-        node.kind = "file"
-        node.file = {
-          ...fileFromDetail(skillDetail, path),
-          skillId: options.skillId,
-          workspaceRoot: options.workspaceRoot,
-        }
-      }
-      current = node
-    })
-  }
-  return root
-}
-
-function sortedAssetChildren(node: AssetTreeNode): AssetTreeNode[] {
-  return [...node.children.values()].sort((left, right) => {
-    const leftIsFolder = left.kind === "dir"
-    const rightIsFolder = right.kind === "dir"
-    if (leftIsFolder !== rightIsFolder) return leftIsFolder ? -1 : 1
-    return left.name.localeCompare(right.name)
-  })
+/**
+ * Drives expand-to + highlight of the file for the canvas-selected node. When
+ * present, folders are controlled by `expandedDirs` (so the panel can reveal a
+ * deep path on open) and the matching file row is highlighted. Omit it for plain
+ * uncontrolled browsing.
+ */
+interface AssetTreeReveal {
+  expandedDirs: Set<string>
+  setDirExpanded: (path: string, expanded: boolean) => void
+  highlightPath: string | null
 }
 
 function AssetTreeRows({
-  node,
+  directoryTree,
+  directoryPath,
   onOpen,
   emptyLabel,
+  reveal,
 }: {
-  node: AssetTreeNode
+  directoryTree: WorkspaceDirectoryTree
+  directoryPath: string
   onOpen: (file: FileMeta) => void
   emptyLabel?: string
+  reveal?: AssetTreeReveal
 }) {
-  const children = sortedAssetChildren(node)
-  if (children.length === 0 && emptyLabel) {
+  const directory = directoryTree.getDirectory(directoryPath)
+
+  if (directory.status === "loading" && directory.entries.length === 0) {
+    return <TreeStatusLine state={directory} />
+  }
+
+  if (directory.status === "error" && directory.entries.length === 0) {
+    return <TreeStatusLine state={directory} />
+  }
+
+  if (directory.entries.length === 0 && emptyLabel) {
     return <div className="px-2 py-1.5 text-[11px] text-muted-foreground">{emptyLabel}</div>
   }
 
   return (
     <>
-      {children.map((child) => {
+      <TreeStatusLine state={directory} subtle />
+      {directory.entries.map((child) => {
         if (child.kind === "dir") {
           return (
-            <FolderRow key={child.path} name={child.name}>
-              <AssetTreeRows node={child} onOpen={onOpen} emptyLabel="Empty folder" />
+            <FolderRow
+              key={child.path}
+              name={child.name}
+              expanded={reveal ? reveal.expandedDirs.has(child.path) : undefined}
+              onExpandedChange={(expanded) => {
+                if (expanded) {
+                  directoryTree.ensureDirectory(child.path)
+                }
+                reveal?.setDirExpanded(child.path, expanded)
+              }}
+            >
+              <AssetTreeRows
+                directoryTree={directoryTree}
+                directoryPath={child.path}
+                onOpen={onOpen}
+                emptyLabel="Empty folder"
+                reveal={reveal}
+              />
             </FolderRow>
           )
         }
-        return child.file ? <FileRow key={child.path} file={child.file} onOpen={onOpen} /> : null
+        return child.file
+          ? <FileRow key={child.path} file={child.file} onOpen={onOpen} active={reveal?.highlightPath === child.path} />
+          : null
       })}
     </>
   )
@@ -185,14 +153,24 @@ function skillRootLabel({
 
 function SkillRootTree({
   rootLabel,
-  node,
+  directoryTree,
   onOpen,
+  reveal,
 }: {
   rootLabel: string
-  node: AssetTreeNode
+  directoryTree: WorkspaceDirectoryTree
   onOpen: (file: FileMeta) => void
+  reveal?: AssetTreeReveal
 }) {
-  if (sortedAssetChildren(node).length === 0) {
+  if (directoryTree.root.status === "loading" && directoryTree.root.entries.length === 0) {
+    return <TreeStatusLine state={directoryTree.root} />
+  }
+
+  if (directoryTree.root.status === "error" && directoryTree.root.entries.length === 0) {
+    return <TreeStatusLine state={directoryTree.root} />
+  }
+
+  if (directoryTree.root.entries.length === 0) {
     return <div className="px-2 py-1.5 text-[11px] text-muted-foreground">No files</div>
   }
 
@@ -200,138 +178,19 @@ function SkillRootTree({
     <FolderRow
       name={rootLabel}
       defaultExpanded
+      expanded={reveal ? reveal.expandedDirs.has("") : undefined}
+      onExpandedChange={(expanded) => reveal?.setDirExpanded("", expanded)}
       rowClassName="rounded-none hover:bg-transparent"
       buttonClassName="py-1.5"
       labelClassName="font-medium text-foreground"
     >
-      <AssetTreeRows node={node} onOpen={onOpen} emptyLabel="No files" />
+      <AssetTreeRows directoryTree={directoryTree} directoryPath="" onOpen={onOpen} emptyLabel="No files" reveal={reveal} />
     </FolderRow>
   )
 }
 
-function sortedNativeEntries(entries: Awaited<ReturnType<typeof listWorkspaceDir>>) {
-  return [...entries].sort((left, right) => {
-    if (left.kind !== right.kind) return left.kind === "dir" ? -1 : 1
-    return left.name.localeCompare(right.name)
-  })
-}
-
-async function appendNativeDirectory({
-  node,
-  workspaceRoot,
-  relativeDir,
-  skillId,
-  titlePrefix,
-  saveEnabled,
-}: {
-  node: AssetTreeNode
-  workspaceRoot: string
-  relativeDir: string
-  skillId?: string | null
-  titlePrefix?: string | null
-  saveEnabled: boolean
-}) {
-  const entries = sortedNativeEntries(await listWorkspaceDir(workspaceRoot, relativeDir || "."))
-  for (const entry of entries) {
-    const path = relativeDir ? `${relativeDir}/${entry.name}` : entry.name
-    const child = createAssetTreeNode(entry.name, path, entry.kind)
-    if (entry.kind === "file") {
-      child.file = createFileMeta({
-        path,
-        skillId,
-        workspaceRoot,
-        titlePrefix,
-        saveEnabled,
-      })
-    } else {
-      try {
-        await appendNativeDirectory({
-          node: child,
-          workspaceRoot,
-          relativeDir: path,
-          skillId,
-          titlePrefix,
-          saveEnabled,
-        })
-      } catch {
-        // Keep the directory visible even when native-fs refuses one child path
-        // (for example, a protected symlink). The Rust layer remains the guard.
-      }
-    }
-    node.children.set(entry.name, child)
-  }
-}
-
-async function loadNativeDirectoryTree({
-  workspaceRoot,
-  skillId,
-  titlePrefix,
-  saveEnabled,
-}: {
-  workspaceRoot: string
-  skillId?: string | null
-  titlePrefix?: string | null
-  saveEnabled: boolean
-}): Promise<AssetTreeNode> {
-  const root = createAssetTreeNode("", "")
-  await appendNativeDirectory({
-    node: root,
-    workspaceRoot,
-    relativeDir: "",
-    skillId,
-    titlePrefix,
-    saveEnabled,
-  })
-  return root
-}
-
-function useNativeDirectoryTree({
-  workspaceRoot,
-  skillId,
-  titlePrefix,
-  saveEnabled = true,
-}: {
-  workspaceRoot?: string | null
-  skillId?: string | null
-  titlePrefix?: string | null
-  saveEnabled?: boolean
-}): DirectoryTreeState {
-  const [state, setState] = useState<DirectoryTreeState>({ status: "idle", tree: null })
-
-  useEffect(() => {
-    if (!workspaceRoot || !isTauriRuntime()) {
-      setState({ status: "idle", tree: null })
-      return undefined
-    }
-
-    let cancelled = false
-    setState((current) => ({ status: "loading", tree: current.tree }))
-    void loadNativeDirectoryTree({ workspaceRoot, skillId, titlePrefix, saveEnabled })
-      .then((tree) => {
-        if (!cancelled) {
-          setState({ status: "ready", tree })
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setState({
-            status: "error",
-            tree: null,
-            message: error instanceof Error ? error.message : String(error || "Could not read folder"),
-          })
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [saveEnabled, skillId, titlePrefix, workspaceRoot])
-
-  return state
-}
-
-function TreeStatusLine({ state }: { state: DirectoryTreeState }) {
-  if (state.status === "loading") {
+function TreeStatusLine({ state, subtle = false }: { state: DirectoryTreeState; subtle?: boolean }) {
+  if (state.status === "loading" && (!subtle || state.entries.length === 0)) {
     return <div className="px-2 py-1.5 text-[11px] text-muted-foreground">Loading folder...</div>
   }
   if (state.status === "error") {
@@ -393,53 +252,190 @@ function AssetExplorerSection({
   )
 }
 
+/**
+ * A file to reveal inside a Subgraphs Files block, matched to a block by its
+ * child workspace root. Sourced from the open editor file and the canvas-selected
+ * node (same inputs Skill Files uses) so subgraph highlight uses ONE method with
+ * Skill Files — stable, derived, never an object rebuilt per render.
+ */
+interface SubgraphHighlightSource {
+  root: string
+  filePath: string
+  /** True when the source is a canvas node selection (focus the tree: collapse
+   * other folders), false/absent when it is just the open editor file (expand
+   * only, so browsing stays fluid). Mirrors the Skill Files forward behavior. */
+  fromNode?: boolean
+}
+
 function SubgraphFilesList({
   subgraphs,
   onOpen,
   onChoosePath,
+  highlightSources,
+  onRevealChildNode,
+  onRevealSubgraphGraph,
 }: {
   subgraphs: SubgraphMembership[]
   onOpen: (file: FileMeta) => void
   onChoosePath: (subgraph: SubgraphMembership) => void
+  /** Files to reveal/highlight, matched to a block by child workspace root. */
+  highlightSources: SubgraphHighlightSource[]
+  /** Expand + select a child node on the canvas when its file is clicked here.
+   * `phaseChain` is the root→leaf chain of phase ids (handles nested subgraphs). */
+  onRevealChildNode?: (phaseChain: string[]) => void
+  /** Expand a subgraph's own topology when its GRAPH.md is clicked here. */
+  onRevealSubgraphGraph?: (phaseChain: string[]) => void
 }) {
+  const [expandedSubgraphKey, setExpandedSubgraphKey] = useState<string | null>(null)
+  useEffect(() => {
+    if (expandedSubgraphKey && !subgraphs.some((subgraph) => subgraphFilesKey(subgraph) === expandedSubgraphKey)) {
+      setExpandedSubgraphKey(null)
+    }
+  }, [expandedSubgraphKey, subgraphs])
+
+  // The block that owns a file to reveal (its child root matches a source), so it
+  // auto-opens. `revealKey` is a stable string, so this never loops.
+  const revealKey = useMemo(() => {
+    for (const source of highlightSources) {
+      const match = subgraphs.find(
+        (subgraph) => normalizeComparableRoot(subgraph.path) === normalizeComparableRoot(source.root),
+      )
+      if (match) return subgraphFilesKey(match)
+    }
+    return null
+  }, [highlightSources, subgraphs])
+  useEffect(() => {
+    if (revealKey) {
+      setExpandedSubgraphKey(revealKey)
+    }
+  }, [revealKey])
+
   if (subgraphs.length === 0) {
     return <div className="px-2 py-1.5 text-[11px] text-muted-foreground">No subgraphs</div>
   }
 
   return (
     <div className="w-full min-w-0 space-y-1 overflow-hidden py-1">
-      {subgraphs.map((subgraph) => (
-        <SubgraphFilesBlock
-          key={`${subgraph.level}:${subgraph.id}:${subgraph.filePath}`}
-          subgraph={subgraph}
-          showLevelTag={subgraphs.some((candidate) => candidate.level > 1)}
-          onOpen={onOpen}
-          onChoosePath={onChoosePath}
-        />
-      ))}
+      {subgraphs.map((subgraph) => {
+        const key = subgraphFilesKey(subgraph)
+        return (
+          <SubgraphFilesBlock
+            key={key}
+            subgraph={subgraph}
+            expanded={expandedSubgraphKey === key}
+            onToggle={() => setExpandedSubgraphKey((current) => (current === key ? null : key))}
+            onOpen={onOpen}
+            onChoosePath={onChoosePath}
+            highlightSources={highlightSources}
+            onRevealChildNode={onRevealChildNode}
+            onRevealSubgraphGraph={onRevealSubgraphGraph}
+          />
+        )
+      })}
     </div>
   )
 }
 
+function normalizeComparableRoot(value: string | null | undefined): string | null {
+  const trimmed = value?.trim()
+  if (!trimmed) return null
+  return trimmed.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase()
+}
+
 function SubgraphFilesBlock({
   subgraph,
-  showLevelTag,
+  expanded,
+  onToggle,
   onOpen,
   onChoosePath,
+  highlightSources,
+  onRevealChildNode,
+  onRevealSubgraphGraph,
 }: {
   subgraph: SubgraphMembership
-  showLevelTag: boolean
+  expanded: boolean
+  onToggle: () => void
   onOpen: (file: FileMeta) => void
   onChoosePath: (subgraph: SubgraphMembership) => void
+  highlightSources: SubgraphHighlightSource[]
+  onRevealChildNode?: (phaseChain: string[]) => void
+  onRevealSubgraphGraph?: (phaseChain: string[]) => void
 }) {
-  const treeState = useNativeDirectoryTree({
+  const directoryTree = useWorkspaceDirectoryTree({
     workspaceRoot: subgraph.path,
     skillId: subgraph.label,
     titlePrefix: subgraph.label,
-    saveEnabled: false,
+    // Editability is NOT decided by how a file is opened. Open subgraph files editable
+    // like any other; the backend (403 SKILL_READ_ONLY) is the single source of truth
+    // and flips the editor read-only only when the skill is genuinely not writable.
+    enabled: expanded,
   })
-  const [expanded, setExpanded] = useState(false)
-  const levelVariant = subgraphLevelTagVariant(subgraph.level)
+  const [innerExpandedDirs, setInnerExpandedDirs] = useState<Set<string>>(() => new Set([""]))
+  const setInnerDirExpanded = useCallback((path: string, isExpanded: boolean) => {
+    setInnerExpandedDirs((current) => {
+      const next = new Set(current)
+      if (isExpanded) next.add(path)
+      else next.delete(path)
+      return next
+    })
+  }, [])
+  const directoryTreeRef = useRef(directoryTree)
+  directoryTreeRef.current = directoryTree
+  // Highlight = the source file whose child root matches THIS subgraph. PURELY
+  // DERIVED (no setState), so it can never feed an update loop — the same model
+  // Skill Files uses. `innerHighlight` is a stable string, changing only when the
+  // matched file actually changes.
+  const innerHighlight = useMemo(() => {
+    const blockRoot = normalizeComparableRoot(subgraph.path)
+    if (!blockRoot) return null
+    const source = highlightSources.find((candidate) => normalizeComparableRoot(candidate.root) === blockRoot)
+    return source ? { path: source.filePath, fromNode: source.fromNode === true } : null
+  }, [highlightSources, subgraph.path])
+  const innerHighlightPath = innerHighlight?.path ?? null
+  const innerHighlightFromNode = innerHighlight?.fromNode ?? false
+  // Reveal the path down to the highlighted file. A node selection FOCUSES the
+  // tree (collapse every other folder so the path stands alone — same as Skill
+  // Files); an open-editor file only expands (never collapses), so browsing stays
+  // fluid. Primitive deps → no render loop.
+  useEffect(() => {
+    if (!expanded || !innerHighlightPath) return
+    const ancestors = ancestorDirsForFile(innerHighlightPath)
+    setInnerExpandedDirs((current) => {
+      if (innerHighlightFromNode) return new Set(ancestors)
+      const next = new Set(current)
+      for (const dir of ancestors) next.add(dir)
+      return next
+    })
+    for (const dir of ancestors) {
+      directoryTreeRef.current.ensureDirectory(dir)
+    }
+  }, [expanded, innerHighlightFromNode, innerHighlightPath])
+  // Clicking a file in THIS subgraph: highlight it here (expand-only so browsing
+  // is fluid), open it, and reveal+select its node inside the inline topology on
+  // the canvas — at ANY nesting depth. `subgraph.id` is already the root→here
+  // chain of phase ids ("a/b/c"); append the clicked file's phase id to get the
+  // full chain GraphCanvas expands + selects.
+  const openInnerFile = useCallback((file: FileMeta) => {
+    // Expand to the clicked file immediately; its highlight is derived from the
+    // open editor file once it loads (innerHighlight above).
+    setInnerExpandedDirs((current) => {
+      const next = new Set(current)
+      for (const dir of ancestorDirsForFile(file.path)) next.add(dir)
+      return next
+    })
+    onOpen(file)
+    const chain = subgraph.id.split("/").filter(Boolean)
+    // This subgraph's OWN GRAPH.md (root of its tree) → expand its topology.
+    if (file.path.replace(/\\/g, "/").toLowerCase() === "graph.md") {
+      onRevealSubgraphGraph?.(chain)
+      return
+    }
+    const childPhaseId = phaseIdFromFilePath(file.path)
+    if (childPhaseId) {
+      onRevealChildNode?.([...chain, childPhaseId])
+    }
+  }, [onOpen, onRevealChildNode, onRevealSubgraphGraph, subgraph.id])
+  const levelClassName = subgraphLevelTagClassName(subgraph.level)
   const endAdornment = (
     <div
       data-subgraph-status-slot="true"
@@ -463,24 +459,33 @@ function SubgraphFilesBlock({
       >
         <button
           type="button"
-          onClick={() => setExpanded((value) => !value)}
+          aria-expanded={expanded}
+          onClick={onToggle}
           title={subgraph.label}
-          className={`grid min-w-0 cursor-pointer items-center gap-2 border-0 bg-transparent p-0 text-left text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring ${
-            showLevelTag ? "grid-cols-[auto_auto_minmax(0,1fr)]" : "grid-cols-[auto_minmax(0,1fr)]"
-          }`}
+          className="grid min-w-0 cursor-pointer grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-2 border-0 bg-transparent p-0 text-left text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
         >
           {expanded ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />}
-          {showLevelTag ? (
-            <Tag
-              size="xs"
-              variant={levelVariant}
-              className="shrink-0"
-              data-subgraph-level-tag="true"
-              aria-label={`Recursive level ${subgraph.level}`}
+          <span
+            className={cn(
+              "grid h-4 w-6 min-w-6 max-w-6 shrink-0 grid-cols-[auto_auto] items-center justify-center gap-px overflow-hidden rounded-sm px-0.5 text-[9px] leading-none",
+              levelClassName,
+            )}
+            data-subgraph-level-tag="true"
+            aria-label={`Recursive level ${subgraph.level}`}
+          >
+            <span
+              data-subgraph-level-prefix="true"
+              className="justify-self-center text-center font-medium"
             >
-              L{subgraph.level}
-            </Tag>
-          ) : null}
+              L
+            </span>
+            <span
+              data-subgraph-level-number="true"
+              className="justify-self-center text-center font-semibold tabular-nums"
+            >
+              {subgraph.level}
+            </span>
+          </span>
           <span data-subgraph-name="true" className="truncate font-medium text-foreground">{subgraph.label}</span>
         </button>
         <div className="min-w-max justify-self-end">{endAdornment}</div>
@@ -490,12 +495,21 @@ function SubgraphFilesBlock({
           data-subgraph-folder-contents="true"
           className="space-y-0.5 pb-1 pl-6"
         >
-          <TreeStatusLine state={treeState} />
-          {!subgraph.path && treeState.status === "idle" ? (
+          {!subgraph.path && directoryTree.root.status === "idle" ? (
             <div className="px-2 py-1 text-[11px] text-muted-foreground">{subgraphLinkTooltip(subgraph)}</div>
           ) : null}
-          {treeState.tree ? (
-            <AssetTreeRows node={treeState.tree} onOpen={onOpen} emptyLabel="Empty subgraph folder" />
+          {subgraph.path ? (
+            <AssetTreeRows
+              directoryTree={directoryTree}
+              directoryPath=""
+              onOpen={openInnerFile}
+              emptyLabel="Empty subgraph folder"
+              reveal={{
+                expandedDirs: innerExpandedDirs,
+                setDirExpanded: setInnerDirExpanded,
+                highlightPath: innerHighlightPath,
+              }}
+            />
           ) : null}
         </div>
       ) : null}
@@ -503,11 +517,15 @@ function SubgraphFilesBlock({
   )
 }
 
-function subgraphLevelTagVariant(level: number): "info" | "warning" | "success" | "muted" {
-  if (level === 1) return "info"
-  if (level === 2) return "warning"
-  if (level === 3) return "success"
-  return "muted"
+function subgraphLevelTagClassName(level: number): string {
+  if (level === 1) return "bg-foreground/15 text-foreground"
+  if (level === 2) return "bg-muted/55 text-muted-foreground"
+  if (level === 3) return "bg-muted/35 text-muted-foreground/80"
+  return "bg-muted/20 text-muted-foreground/60"
+}
+
+function subgraphFilesKey(subgraph: SubgraphMembership): string {
+  return `${subgraph.level}:${subgraph.id}:${subgraph.filePath}`
 }
 
 function clampSubgraphsPanelPercent(value: number): number {
@@ -568,24 +586,149 @@ function SubgraphLinkBadge({
   )
 }
 
-export function AssetsPanel({ skillId = null, workspaceRoot = null, skillDetail }: AssetsPanelProps) {
-  const { onFileOpen } = useWorkspaceContext()
+export function AssetsPanel({
+  skillId = null,
+  workspaceRoot = null,
+  skillDetail,
+  selectedNode,
+  directoryTree: providedDirectoryTree,
+  subgraphTree: providedSubgraphTree,
+}: AssetsPanelProps) {
+  const { onFileOpen, onRevealNodeForFile, onRevealSubgraphChildNode, onRevealSubgraphGraph, activeFileDetails } = useWorkspaceContext()
   const [subgraphPathOverrides, setSubgraphPathOverrides] = useState<Record<string, string>>({})
   const [subgraphsCollapsed, setSubgraphsCollapsed] = useState(false)
   const [subgraphsPanelPercent, setSubgraphsPanelPercent] = useState(DEFAULT_SUBGRAPHS_PANEL_PERCENT)
   const splitContainerRef = useRef<HTMLDivElement | null>(null)
   const rootTarget = workspaceRoot ?? skillId
-  const fallbackFileTree = useMemo(
-    () => buildAssetTree(skillDetail, { skillId, workspaceRoot: rootTarget }),
-    [rootTarget, skillDetail, skillId],
-  )
-  const nativeFileTree = useNativeDirectoryTree({
+  const localDirectoryTree = useWorkspaceDirectoryTree({
     workspaceRoot: rootTarget,
     skillId,
+    skillDetail,
+    enabled: !providedDirectoryTree,
   })
-  const fileTree = nativeFileTree.tree ?? fallbackFileTree
+  const directoryTree = providedDirectoryTree ?? localDirectoryTree
   const rootLabel = skillRootLabel({ skillDetail, skillId, workspaceRoot: rootTarget })
+
+  // Reveal the canvas-selected node's file: expand the tree to it and highlight
+  // it when the Assets panel is shown (or the selection changes). A node from the
+  // open skill reveals in the Skill Files tree; a child-graph node routes to its
+  // Subgraphs Files block instead (see SubgraphFilesList revealTarget).
+  const revealTarget = useMemo(
+    () => assetTreeTargetForNode(selectedNode, { rootTarget, skillId }),
+    [selectedNode, rootTarget, skillId],
+  )
+  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => new Set([""]))
+  const [highlightSkillPath, setHighlightSkillPath] = useState<string | null>(null)
+  const setDirExpanded = useCallback((path: string, expanded: boolean) => {
+    setExpandedDirs((current) => {
+      const next = new Set(current)
+      if (expanded) next.add(path)
+      else next.delete(path)
+      return next
+    })
+  }, [])
+  const directoryTreeRef = useRef(directoryTree)
+  directoryTreeRef.current = directoryTree
+  // Reveal a file in the Skill Files tree: highlight it and expand the path down
+  // to it. Expand-only (never collapse siblings) so the highlight following a
+  // selection/click never "locks" the tree to one path or fights browsing.
+  const revealSkillPath = useCallback((filePath: string) => {
+    setHighlightSkillPath(filePath)
+    setExpandedDirs((current) => {
+      const next = new Set(current)
+      for (const dir of ancestorDirsForFile(filePath)) next.add(dir)
+      return next
+    })
+    for (const dir of ancestorDirsForFile(filePath)) {
+      directoryTreeRef.current.ensureDirectory(dir)
+    }
+  }, [])
+  // Reverse/robust: the file actually OPEN in the editor. Opening a file always
+  // updates this (it is core editor state, independent of the node round-trip), so
+  // clicking any file in the tree — which opens it — moves the highlight.
+  const openLeftPath = activeFileDetails.left?.path
+  const openLeftSkillId = activeFileDetails.left?.skillId
+  useEffect(() => {
+    if (openLeftPath && (!openLeftSkillId || openLeftSkillId === skillId)) {
+      revealSkillPath(openLeftPath)
+    }
+  }, [openLeftPath, openLeftSkillId, revealSkillPath, skillId])
+  // Forward: the canvas-selected node FOCUSES the tree — highlight its file and
+  // collapse every other folder so the path stands alone. Declared after the
+  // open-file effect so a node selection wins ties (opening Assets with a node
+  // selected reveals THAT node's file). File clicks go through the open-file
+  // effect above, which expands WITHOUT collapsing so browsing stays fluid.
+  useEffect(() => {
+    if (revealTarget?.section !== "skill") return
+    setHighlightSkillPath(revealTarget.filePath)
+    for (const dir of revealTarget.ancestorDirs) {
+      directoryTreeRef.current.ensureDirectory(dir)
+    }
+    setExpandedDirs(new Set(revealTarget.ancestorDirs))
+  }, [revealTarget])
+  const skillReveal = useMemo<AssetTreeReveal>(
+    () => ({ expandedDirs, setDirExpanded, highlightPath: highlightSkillPath }),
+    [expandedDirs, setDirExpanded, highlightSkillPath],
+  )
+  // Files the Subgraphs Files blocks should reveal/highlight — the open editor
+  // file and the canvas-selected node, matched to a block by child workspace
+  // root. Same inputs as Skill Files (one unified method); a stable array (keyed
+  // on primitive deps), so the blocks derive highlight without any update loop.
+  const openLeftWorkspaceRoot = activeFileDetails.left?.workspaceRoot ?? null
+  const selectedNodeFilePath = selectedNode?.data.filePath ?? null
+  const selectedNodeWorkspaceRoot = selectedNode?.data.workspaceRoot ?? null
+  const subgraphHighlightSources = useMemo<SubgraphHighlightSource[]>(() => {
+    const sources: SubgraphHighlightSource[] = []
+    // Node selection listed FIRST so it wins when both match a block: a node
+    // focus collapses other folders, an open file only expands.
+    if (selectedNodeFilePath && selectedNodeWorkspaceRoot) {
+      sources.push({ root: selectedNodeWorkspaceRoot, filePath: selectedNodeFilePath, fromNode: true })
+    }
+    if (openLeftPath && openLeftWorkspaceRoot) {
+      sources.push({ root: openLeftWorkspaceRoot, filePath: openLeftPath })
+    }
+    return sources
+  }, [openLeftPath, openLeftWorkspaceRoot, selectedNodeFilePath, selectedNodeWorkspaceRoot])
+
+  // Real path-based membership: the subgraphs this skill actually references,
+  // derived from the backend topology (R4). No fake in-memory "registered" cache.
+  const subgraphs = useMemo(() => {
+    const ownerRoot = rootTarget ?? null
+    return subgraphMembership(skillDetail, ownerRoot).map((subgraph) => ({ ...subgraph, workspaceRoot: ownerRoot }))
+  }, [rootTarget, skillDetail])
+  const topLevelSubgraphs = useMemo(
+    () => subgraphs.map((subgraph) => {
+      const override = subgraphPathOverrides[subgraph.id]
+      return override
+        ? { ...subgraph, path: override, legacyTargetSkill: null, status: "resolved" as const }
+        : subgraph
+    }),
+    [subgraphPathOverrides, subgraphs],
+  )
+  const hasSubgraphOverrides = Object.keys(subgraphPathOverrides).length > 0
+  const localSubgraphTree = useSubgraphMembershipTree({
+    topLevel: topLevelSubgraphs,
+    enabled: !providedSubgraphTree || hasSubgraphOverrides,
+  })
+  const activeSubgraphTree = providedSubgraphTree && !hasSubgraphOverrides
+    ? providedSubgraphTree
+    : localSubgraphTree
+  const displayedSubgraphs = activeSubgraphTree.items
   const openFile = useCallback(async (file: FileMeta) => {
+    // Drive the canvas from this file click. Priority:
+    //  1. a subgraph's own GRAPH.md → expand that subgraph's topology (+ deselect)
+    //  2. a subgraph child node file → reveal + select the (nested) child node
+    //  3. any other node file → reverse-select a root-graph node
+    // All no-ops for non-node files, and independent of the content read.
+    const graphChain = subgraphGraphChainForFile(file.path, rootTarget, displayedSubgraphs)
+    const childChain = graphChain ? null : subgraphChildPhaseChainForFile(file.path, rootTarget, displayedSubgraphs)
+    if (graphChain && onRevealSubgraphGraph) {
+      onRevealSubgraphGraph(graphChain)
+    } else if (childChain && onRevealSubgraphChildNode) {
+      onRevealSubgraphChildNode(childChain)
+    } else {
+      onRevealNodeForFile?.(file)
+    }
     const targetRoot = file.workspaceRoot ?? rootTarget
     if (targetRoot) {
       try {
@@ -604,67 +747,7 @@ export function AssetsPanel({ skillId = null, workspaceRoot = null, skillDetail 
       }
     }
     onFileOpen(file)
-  }, [onFileOpen, rootTarget])
-
-  // Real path-based membership: the subgraphs this skill actually references,
-  // derived from the backend topology (R4). No fake in-memory "registered" cache.
-  const subgraphs = useMemo(() => {
-    const ownerRoot = rootTarget ?? null
-    return subgraphMembership(skillDetail, ownerRoot).map((subgraph) => ({ ...subgraph, workspaceRoot: ownerRoot }))
-  }, [rootTarget, skillDetail])
-  const topLevelSubgraphs = useMemo(
-    () => subgraphs.map((subgraph) => {
-      const override = subgraphPathOverrides[subgraph.id]
-      return override
-        ? { ...subgraph, path: override, legacyTargetSkill: null, status: "resolved" as const }
-        : subgraph
-    }),
-    [subgraphPathOverrides, subgraphs],
-  )
-  const topLevelSubgraphKey = useMemo(
-    () => topLevelSubgraphs.map((subgraph) => [
-      subgraph.id,
-      subgraph.level,
-      subgraph.filePath,
-      subgraph.workspaceRoot ?? "",
-      subgraph.path ?? "",
-      subgraph.status,
-    ].join("\u0001")).join("\u0002"),
-    [topLevelSubgraphs],
-  )
-  const [recursiveSubgraphs, setRecursiveSubgraphs] = useState<{
-    key: string
-    items: SubgraphMembership[]
-  } | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    setRecursiveSubgraphs({ key: topLevelSubgraphKey, items: topLevelSubgraphs })
-
-    if (!isTauriRuntime() || topLevelSubgraphs.length === 0) {
-      return () => {
-        cancelled = true
-      }
-    }
-
-    void loadRecursiveSubgraphMembership(topLevelSubgraphs, readWorkspaceFile)
-      .then((memberships) => {
-        if (!cancelled) {
-          setRecursiveSubgraphs({ key: topLevelSubgraphKey, items: memberships })
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setRecursiveSubgraphs({ key: topLevelSubgraphKey, items: topLevelSubgraphs })
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [topLevelSubgraphKey, topLevelSubgraphs])
-  const displayedSubgraphs = recursiveSubgraphs?.key === topLevelSubgraphKey
-    ? recursiveSubgraphs.items
-    : topLevelSubgraphs
+  }, [displayedSubgraphs, onFileOpen, onRevealNodeForFile, onRevealSubgraphChildNode, onRevealSubgraphGraph, rootTarget])
   const chooseSubgraphPath = useCallback(async (subgraph: SubgraphMembership) => {
     const writeRoot = subgraph.workspaceRoot ?? rootTarget ?? workspaceRoot
     if (!writeRoot) {
@@ -747,7 +830,7 @@ export function AssetsPanel({ skillId = null, workspaceRoot = null, skillDetail 
     <TooltipProvider>
       <div
         data-assets-panel-stable-height="true"
-        className="grid h-[calc(100vh-1.5rem)] max-h-[calc(100vh-1.5rem)] min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-background"
+        className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-background"
       >
         <PanelHeader title="Assets" />
 
@@ -760,8 +843,7 @@ export function AssetsPanel({ skillId = null, workspaceRoot = null, skillDetail 
             <AssetExplorerSection sectionId="skill-files" label="Skill Files">
               <ScrollArea className="h-full min-h-0">
                 <div className="space-y-0.5 px-0.5 py-1 text-xs">
-                  <TreeStatusLine state={nativeFileTree} />
-                  <SkillRootTree rootLabel={rootLabel} node={fileTree} onOpen={openFile} />
+                  <SkillRootTree rootLabel={rootLabel} directoryTree={directoryTree} onOpen={openFile} reveal={skillReveal} />
                 </div>
               </ScrollArea>
             </AssetExplorerSection>
@@ -799,6 +881,9 @@ export function AssetsPanel({ skillId = null, workspaceRoot = null, skillDetail 
                   subgraphs={displayedSubgraphs}
                   onOpen={openFile}
                   onChoosePath={chooseSubgraphPath}
+                  highlightSources={subgraphHighlightSources}
+                  onRevealChildNode={onRevealSubgraphChildNode}
+                  onRevealSubgraphGraph={onRevealSubgraphGraph}
                 />
               </ScrollArea>
             </AssetExplorerSection>

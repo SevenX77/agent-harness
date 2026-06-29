@@ -42,7 +42,7 @@ import { translateErrorCode, translateTestStatus } from "@/lib/llm-error-message
 import { cn } from "@/lib/utils"
 import type { CredentialsState, ModelInfo, ModelProbeStatus, ProviderTestResult, ProviderType, ProviderUiState, RouteStatus } from "../../../api/llm"
 import { inferProviderType, providerCachedTestResult, providerEndpointDraftsForAction, providerTestParamsMatch } from "../settings/provider-utils"
-import type { ProviderDraft } from "../settings/types"
+import type { ProviderDraft, ProviderDraftChangeOptions } from "../settings/types"
 import { ManualModelTestPanel } from "./ManualModelTestPanel"
 import { RoleNameDialog } from "../settings/llm-roles/RoleNameDialog"
 
@@ -60,10 +60,11 @@ type AggregatedRouteSummary = {
 }
 type BaseUrlReachabilityState = "connected" | "failed" | "testing" | "unknown"
 const availableModelsPreviewLimit = 12
-const fieldRowClassName = "grid grid-cols-[minmax(0,1fr)_11.5rem] items-center gap-2"
-const fieldActionClassName = "flex min-w-0 items-center justify-start gap-2"
-const providerTestButtonClassName = "min-w-[7rem] shrink-0 justify-center px-3 has-data-[icon=inline-start]:ps-3"
+const fieldRowClassName = "grid w-full grid-cols-[minmax(0,1fr)_6.5rem] items-center gap-2"
+const fieldActionClassName = "flex min-w-0 items-center justify-center gap-2"
+const providerTestButtonClassName = "w-24"
 const scrollableInputClassName = "overflow-x-auto whitespace-nowrap text-clip"
+const diagnosticTooltipContentClassName = "whitespace-pre-wrap break-words [overflow-wrap:anywhere] pointer-events-auto cursor-text select-text"
 const officialProviderNamesByKey: Record<string, string> = {
   anthropic: "Anthropic Official",
   openai: "OpenAI Official",
@@ -110,8 +111,8 @@ export function apiKeyInputType(): "text" {
   return "text"
 }
 
-export function apiKeyDisplayValue(value: string, visible: boolean): string {
-  if (visible || !value) return value
+export function apiKeyDisplayValue(value: string, visible: boolean, editing = false): string {
+  if (visible || editing || !value) return value
   return apiKeyMaskChar.repeat(value.length)
 }
 
@@ -423,7 +424,10 @@ function AvailableEndpointSummary({ endpoints }: { endpoints: EndpointSummary[] 
                     ) : null}
                   </span>
                 </TooltipTrigger>
-                <TooltipContent className="max-w-sm break-words">
+                <TooltipContent
+                  className={diagnosticTooltipContentClassName}
+                  data-allow-native-double-click
+                >
                   <EndpointTooltipContent endpoint={endpoint} />
                 </TooltipContent>
               </Tooltip>
@@ -438,11 +442,11 @@ function AvailableEndpointSummary({ endpoints }: { endpoints: EndpointSummary[] 
 function EndpointTooltipContent({ endpoint }: { endpoint: EndpointSummary }) {
   const lines = endpointTooltipLines(endpoint)
   return (
-    <span className="flex flex-col gap-0.5 text-left">
+    <div className="flex min-w-0 max-w-full select-text flex-col gap-0.5 whitespace-pre-wrap text-left">
       {lines.map((line) => (
-        <span key={line}>{line}</span>
+        <span key={line} className="break-words [overflow-wrap:anywhere]">{line}</span>
       ))}
-    </span>
+    </div>
   )
 }
 
@@ -585,10 +589,10 @@ function endpointStateDisplayStatus({
 }): TestMessageStatus {
   if (!hasApiKey || !hasBaseUrl) return "not_configured"
   if (isTesting) return "testing"
-  if (endpointHasUsableRoute(models)) return "ok"
   const status = result?.last_test_status
+  if (status && status !== "untested" && status !== "ok") return status
+  if (endpointHasUsableRoute(models)) return "ok"
   if (!status || status === "untested") return "untested"
-  if (endpointFailureIsOnlyModelScoped(result, models)) return "untested"
   return status
 }
 
@@ -602,29 +606,9 @@ function endpointHasUsableRoute(models: ModelInfo[]): boolean {
   ))
 }
 
-function endpointFailureIsOnlyModelScoped(
-  result: ProviderTestResult | null | undefined,
-  models: ModelInfo[],
-): boolean {
-  const summaries = models.flatMap(routeSummariesForModel)
-  const failureSummaries = summaries.filter((summary) => (
-    summary.status === "failed" || summary.ui_state === "failed" || summary.failure_scope
-  ))
-  if (failureSummaries.some((summary) => summary.failure_scope === "endpoint")) return false
-  if (failureSummaries.length > 0 && failureSummaries.every((summary) => summary.failure_scope === "model")) return true
-  const errorCode = result?.last_error_code?.trim().toLowerCase()
-  const message = result?.last_test_message?.toLowerCase() ?? ""
-  return (
-    errorCode === "invalid_model" ||
-    errorCode === "model_not_found" ||
-    message.includes("invalid_model") ||
-    message.includes("model_not_found") ||
-    message.includes("no available channels for model")
-  )
-}
-
 function resultLooksReachable(result: ProviderTestResult | null | undefined): boolean {
   if (!result) return false
+  if ((result.available_models?.length ?? 0) > 0 || (result.available_sdks?.length ?? 0) > 0) return true
   if (result.last_error_code) return false
   if (result.last_test_status !== "untested" && result.last_test_status !== "ok") return false
   return Boolean(
@@ -1140,7 +1124,7 @@ function routeFailureTooltipText(model: ModelInfo, status: RouteDisplayStatus): 
 
 function RouteTooltipContent({ text }: { text: string }) {
   return (
-    <div className="space-y-1 whitespace-normal">
+    <div className="min-w-0 max-w-full select-text space-y-1 whitespace-pre-wrap">
       {text.split("\n").map((line, index) => {
         const status = routeTooltipLineStatus(line)
         // The diagnostic sentinel is an internal marker only — strip it before
@@ -1162,11 +1146,11 @@ function RouteTooltipContent({ text }: { text: string }) {
                 data-tooltip-diagnostic-icon={status}
                 className="mt-0.5 size-3 shrink-0"
               />
-              <span className="min-w-0 break-words">{displayLine}</span>
+              <span className="min-w-0 break-words [overflow-wrap:anywhere]">{displayLine}</span>
             </div>
           )
         }
-        return <div key={`${index}-${displayLine}`} className="break-words">{displayLine}</div>
+        return <div key={`${index}-${displayLine}`} className="break-words [overflow-wrap:anywhere]">{displayLine}</div>
       })}
     </div>
   )
@@ -1463,6 +1447,7 @@ export function ProviderCard({
   onFieldChange,
   onGetModels,
   onDelete,
+  onDeleteEndpointIds,
   providerKind,
   showManualModelPanel = false,
   notableProviderKey,
@@ -1471,10 +1456,11 @@ export function ProviderCard({
   draft: ProviderDraft
   persisted: CredentialsState["providers"][number] | null
   persistedEndpoints?: Record<string, CredentialsState["providers"][number] | null | undefined>
-  onFieldChange: (patch: Partial<ProviderDraft>) => void
+  onFieldChange: (patch: Partial<ProviderDraft>, options?: ProviderDraftChangeOptions) => void
   onGetModels: () => void
   onEndpointTest?: (modelId: string) => void
   onDelete: () => void
+  onDeleteEndpointIds?: (endpointIds: string[]) => void
   providerKind?: "official" | "third-party"
   showManualModelPanel?: boolean
   notableProviderKey?: string
@@ -1482,6 +1468,7 @@ export function ProviderCard({
 }) {
   const { t } = useTranslation("settings")
   const [visible, setVisible] = useState(false)
+  const [apiKeyEditing, setApiKeyEditing] = useState(false)
   const [showAllModels, setShowAllModels] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
   const [apiKeyError, setApiKeyError] = useState("")
@@ -1541,12 +1528,18 @@ export function ProviderCard({
   const hiddenModelCount = Math.max(0, availableModels.length - visibleModels.length)
   const matchedStatus = matchedResult?.last_test_status
   const matchedErrorCode = matchedResult?.last_error_code
+  const matchedHasListedModels = availableModels.length > 0 || availableSdks.length > 0
   const hasReachableModelList = Boolean(
     hasRequiredConfig &&
     matchedResult &&
-    !matchedErrorCode &&
-    (matchedStatus === "untested" || matchedStatus === "ok") &&
-    (matchedResult.last_test_at || matchedResult.last_test_message || availableModels.length > 0 || availableSdks.length > 0),
+    (
+      matchedHasListedModels ||
+      (
+        !matchedErrorCode &&
+        (matchedStatus === "untested" || matchedStatus === "ok") &&
+        (matchedResult.last_test_at || matchedResult.last_test_message)
+      )
+    ),
   )
   const hasEmptyModelListWarning = hasReachableModelList && !hasAvailableModels
   const testStatus: TestMessageStatus = !hasRequiredConfig
@@ -1601,8 +1594,7 @@ export function ProviderCard({
         result,
         models: state.models,
       })
-      if (status === "ok") return "connected"
-      if (status === "untested" && resultLooksReachable(result)) return "connected"
+      if (status === "ok" || resultLooksReachable(result)) return "connected"
       if (status && status !== "untested" && status !== "not_configured") return "failed"
       return "unknown"
     })
@@ -1611,13 +1603,16 @@ export function ProviderCard({
     return "unknown"
   }
 
-  const updateBaseUrlRows = (nextRows: NonNullable<ProviderDraft["base_urls"]>) => {
+  const updateBaseUrlRows = (
+    nextRows: NonNullable<ProviderDraft["base_urls"]>,
+    options?: ProviderDraftChangeOptions,
+  ) => {
     const rows = nextRows.length > 0 ? nextRows : [{ id: draft.id, value: "", provider_type: draft.provider_type }]
     onFieldChange({
       base_url: rows[0]?.value ?? "",
       provider_type: rows[0]?.provider_type ?? draft.provider_type,
       base_urls: rows,
-    })
+    }, options)
   }
 
   const updateBaseUrlRow = (rowId: string, value: string) => {
@@ -1627,11 +1622,33 @@ export function ProviderCard({
   }
 
   const addBaseUrlRow = () => {
-    updateBaseUrlRows([...baseUrlRows, { id: newBaseUrlDraftId(draft.id), value: "", provider_type: draft.provider_type }])
+    updateBaseUrlRows([
+      ...baseUrlRows,
+      { id: newBaseUrlDraftId(draft.id), value: "", provider_type: draft.provider_type },
+    ])
   }
 
   const deleteBaseUrlRow = (rowId: string) => {
-    updateBaseUrlRows(baseUrlRows.filter((row) => row.id !== rowId))
+    const removedRow = baseUrlRows.find((row) => row.id === rowId)
+    const removedUrl = removedRow?.value.trim() ?? ""
+    const removedEndpointIds = Object.values(removedRow?.endpoint_ids ?? {})
+      .filter((endpointId): endpointId is string => Boolean(endpointId))
+    const removeRow = () => {
+      updateBaseUrlRows(baseUrlRows.filter((row) => row.id !== rowId))
+      if (removedUrl && removedEndpointIds.length > 0) {
+        onDeleteEndpointIds?.(removedEndpointIds)
+      }
+    }
+    if (!removedUrl) {
+      removeRow()
+      return
+    }
+    requestDeleteConfirmationToast({
+      id: `delete-base-url-${draft.id}-${rowId}`,
+      title: `Remove ${removedUrl}?`,
+      description: "This will remove this Base URL and its generated endpoints from the provider.",
+      onConfirm: removeRow,
+    })
   }
 
   const handleGetModels = () => {
@@ -1734,7 +1751,10 @@ export function ProviderCard({
     return (
       <Tooltip key={`${tagKey}:tooltip`}>
         <TooltipTrigger asChild>{tag}</TooltipTrigger>
-        <TooltipContent className="max-w-sm break-words">
+        <TooltipContent
+          className={diagnosticTooltipContentClassName}
+          data-allow-native-double-click
+        >
           <RouteTooltipContent text={tooltipText} />
         </TooltipContent>
       </Tooltip>
@@ -1805,13 +1825,16 @@ export function ProviderCard({
                 ref={apiKeyInputRef}
                 id={`api-key-${draft.id}`}
                 type={apiKeyInputType()}
-                value={apiKeyDisplayValue(draft.api_key, visible)}
-                readOnly={!visible && hasApiKey}
+                value={apiKeyDisplayValue(draft.api_key, visible, apiKeyEditing)}
                 onChange={(event) => {
-                  if (!visible && hasApiKey) return
+                  if (!visible) setApiKeyEditing(true)
                   if (apiKeyError) setApiKeyError("")
                   onFieldChange({ api_key: event.target.value })
                 }}
+                onFocus={() => {
+                  if (!visible && hasApiKey) setApiKeyEditing(true)
+                }}
+                onBlur={() => setApiKeyEditing(false)}
                 placeholder={t("apiKeys.card.apiKeyPlaceholder", { providerName: apiKeyProviderName })}
                 name={`provider-secret-${draft.id}`}
                 autoComplete="off"
@@ -1824,7 +1847,7 @@ export function ProviderCard({
                 aria-invalid={apiKeyError ? true : undefined}
                 aria-describedby={apiKeyError ? `api-key-error-${draft.id}` : undefined}
                 onWheel={scrollInputContentOnWheel}
-                className={apiKeyInputClassName(visible, hasApiKey, { cssMask: false })}
+                className={apiKeyInputClassName(visible || apiKeyEditing, hasApiKey, { cssMask: false })}
               />
               <div className="flex shrink-0 items-center gap-0.5">
                 <Button
@@ -1832,7 +1855,10 @@ export function ProviderCard({
                   size="icon"
                   variant="ghost"
                   className="size-7 text-muted-foreground/70 transition-none hover:text-muted-foreground [&_svg]:size-3.5"
-                  onClick={() => setVisible((value) => !value)}
+                  onClick={() => {
+                    setApiKeyEditing(false)
+                    setVisible((value) => !value)
+                  }}
                   aria-label={visible ? t("apiKeys.card.hideApiKeyButton") : t("apiKeys.card.showApiKeyButton")}
                 >
                   {visible ? <EyeOff /> : <Eye />}

@@ -22,8 +22,9 @@
 - **Python is one uv workspace** with a SINGLE root `uv.lock` shared by all
   three modules. Refresh with `uv sync --all-packages --all-extras --group dev`.
   Never hand-edit `uv.lock`; change a module's `pyproject.toml`, then `uv lock`.
-- **Run the app**: `cd apps/studio/tauri && cargo tauri dev` (owns both Vite and
-  the FastAPI sidecar). Details in `apps/studio/tauri/README.md`.
+- **Run the app**: from repo root run `powershell -ExecutionPolicy Bypass -File
+  .\scripts\studio-dev.ps1` (pins the sidecar port for both Tauri and Vite,
+  then runs `cargo tauri dev`). Details in `apps/studio/tauri/README.md`.
 
 ## Workflow Pipeline (branch → PR → auto-merge → cleanup)
 
@@ -181,16 +182,20 @@ one-page orientation, not the full design.
 
 ## Studio Tauri Dev
 
-- Standard startup is documented in `apps/studio/tauri/README.md`:
-  `cd apps/studio/tauri && cargo tauri dev`.
+- Standard startup is documented in `apps/studio/tauri/README.md`: from repo
+  root run `powershell -ExecutionPolicy Bypass -File .\scripts\studio-dev.ps1`.
+- Agents must use this launcher for normal Studio startup. Do not run
+  `cargo tauri dev` directly unless debugging the launcher itself or an explicit
+  low-level Tauri startup issue.
 - **Fresh machine? Provision the sidecar first.** `cargo tauri dev` alone shows a
   red "Backend unavailable" banner until the Python sidecar is vendored: run
   `apps/studio/backend/scripts/build_vendor.py` (installs the dep closure into
   `apps/studio/tauri/vendor/site-packages`), then pre-warm `.pyc` so the first
   cold start doesn't exceed the health-check timeout. Full steps + the headless
   VPS verify method: `docs/development/RUN_AND_SCREENSHOT.md`.
-- Prefer one Tauri dev session only. It owns both Vite and the dynamic FastAPI
-  sidecar.
+- Prefer one Tauri dev session only. The launcher owns both Vite and the
+  FastAPI sidecar, and pins `STUDIO_SIDECAR_PORT` so the Vite dev proxy and
+  sidecar cannot drift apart.
 - If using a non-default Vite port, ensure backend CORS allows the exact frontend
   origin via `STUDIO_CORS_EXTRA_ORIGINS` or a checked-in config change.
 

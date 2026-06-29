@@ -65,6 +65,7 @@ describe("ManualModelTestPanel", () => {
     expect(modelIdPlaceholder("openrouter", ["openai/gpt-5"], 0)).toBe("e.g. openai/gpt-5")
     expect(modelIdPlaceholder("wavespeed", ["anthropic/claude-opus-4"], 0)).toBe("e.g. anthropic/claude-opus-4")
     expect(modelIdPlaceholder("qiniu", [], 0)).toBe("e.g. deepseek-r1")
+    expect(modelIdPlaceholder("openai", undefined, 0)).toBe("e.g. gpt-5")
   })
 
   it("can render collapsed when automatic model listing already returned models", () => {

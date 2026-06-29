@@ -3,7 +3,11 @@ llm_role: analyst
 io:
   inputs:
     type: object
-    required: [segments_summary, chapter_with_line_numbers, chapter_lines, chapter_number]
+    required:
+      - segments_summary
+      - chapter_with_line_numbers
+      - chapter_lines
+      - chapter_number
     properties:
       segments_summary:
         type: string
@@ -17,19 +21,30 @@ io:
         type: integer
   outputs:
     type: object
-    required: [parsed_segments, segments, segmentation_result]
+    required:
+      - parsed_segments
+      - segments
+      - segmentation_result
     properties:
       parsed_segments:
         type: array
         items:
           type: object
-          required: [index, type, start_line, end_line, description]
+          required:
+            - index
+            - type
+            - start_line
+            - end_line
+            - description
           properties:
             index:
               type: integer
             type:
               type: string
-              enum: [A, B, C]
+              enum:
+                - A
+                - B
+                - C
             start_line:
               type: integer
             end_line:
@@ -46,6 +61,10 @@ tools:
   - finish_task
 max_iterations: 20
 validator: true
+allow_sequential_overwrite:
+  - parsed_segments
+  - segmentation_result
+  - segments
 ---
 <role>
 你是专业的小说编辑。你的任务是检查并修正已有的分段结果。

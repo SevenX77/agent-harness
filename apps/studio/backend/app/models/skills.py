@@ -76,6 +76,11 @@ class SerializeGraphReq(BaseModel):
 
     phases: list[PhaseRef]
     expected_hash: str | None = None
+    # Absolute path of the directory whose GRAPH.md the canvas is editing. A
+    # drilled subgraph is identified by its PATH (MVP1: subgraph identity is a
+    # path, not a registry id), so passing it here serializes against that exact
+    # GRAPH.md instead of re-resolving the (possibly name-colliding) bare skill id.
+    workspace_root: str | None = None
 
     @model_validator(mode="after")
     def reject_duplicate_phase_ids(self) -> SerializeGraphReq:

@@ -13,8 +13,10 @@ Two parts:
 
 ## 1. Startup (any machine)
 
-The standard command is `cd apps/studio/tauri && cargo tauri dev` (it owns both
-Vite and the dynamic-port FastAPI sidecar — see `apps/studio/tauri/README.md`).
+The standard command, from repo root, is
+`powershell -ExecutionPolicy Bypass -File .\scripts\studio-dev.ps1` on Windows.
+That launcher pins `STUDIO_SIDECAR_PORT` before running `cargo tauri dev`, so
+Vite's `/api` proxy and the FastAPI sidecar use the same port.
 On a **fresh machine** that command alone shows a red **"Backend unavailable"**
 banner, because the sidecar's Python runtime + dependencies are not provisioned
 yet. The sidecar (`apps/studio/tauri/src/sidecar.rs`) runs a *vendored* Python
@@ -46,7 +48,7 @@ PYBIN=apps/studio/tauri/vendor/python/x86_64-unknown-linux-gnu/bin/python3.12
   apps/studio/backend/app
 
 # 4. run
-cd apps/studio/tauri && cargo tauri dev
+powershell -ExecutionPolicy Bypass -File .\scripts\studio-dev.ps1
 ```
 
 Notes:

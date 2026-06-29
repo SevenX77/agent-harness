@@ -58,7 +58,7 @@ async def test_autoshare_dormant_when_upload_disabled(monkeypatch: pytest.Monkey
         collected = True
         return []
 
-    monkeypatch.setattr(llm_router, "collect_uploadable_uploads", spy_collect)
+    monkeypatch.setattr(llm_router, "collect_uploadable",spy_collect)
     await llm_router._autoshare_after_probe_best_effort()
     assert collected is False  # disabled => no network, no collection
 
@@ -68,10 +68,9 @@ async def test_autoshare_uploads_batch_when_configured(monkeypatch: pytest.Monke
     """When configured AND the catalog toggle is on, the batch is uploaded."""
     monkeypatch.setattr(llm_router, "get_backend_config", _enabled_config)
     _patch_metadata(monkeypatch, catalog_enabled=True)
-    monkeypatch.setattr(llm_router, "load_evidence_library", lambda: object())
     monkeypatch.setattr(llm_router, "load_credentials", lambda: object())
     sentinel = [object()]
-    monkeypatch.setattr(llm_router, "collect_uploadable_uploads", lambda *a, **k: sentinel)
+    monkeypatch.setattr(llm_router, "collect_uploadable",lambda *a, **k: sentinel)
     monkeypatch.setattr(llm_router, "batch_idempotency_key", lambda uploads: "key-1")
 
     captured: dict[str, object] = {}
@@ -80,9 +79,7 @@ async def test_autoshare_uploads_batch_when_configured(monkeypatch: pytest.Monke
         def __init__(self, **kwargs: object) -> None:
             captured["init"] = kwargs
 
-        async def upload_batch(
-            self, records: object, *, idempotency_key: str, queue: object = None
-        ) -> object:
+        async def upload_batch(self, records: object, *, idempotency_key: str) -> object:
             captured["records"] = records
             captured["idempotency_key"] = idempotency_key
             return object()
@@ -112,7 +109,7 @@ async def test_autoshare_respects_user_optout(monkeypatch: pytest.MonkeyPatch) -
         collected = True
         return [object()]
 
-    monkeypatch.setattr(llm_router, "collect_uploadable_uploads", spy_collect)
+    monkeypatch.setattr(llm_router, "collect_uploadable",spy_collect)
 
     constructed = False
 
@@ -134,9 +131,8 @@ async def test_autoshare_skips_when_no_uploadable_evidence(
     """Nothing to upload => the client is never constructed."""
     monkeypatch.setattr(llm_router, "get_backend_config", _enabled_config)
     _patch_metadata(monkeypatch, catalog_enabled=True)
-    monkeypatch.setattr(llm_router, "load_evidence_library", lambda: object())
     monkeypatch.setattr(llm_router, "load_credentials", lambda: object())
-    monkeypatch.setattr(llm_router, "collect_uploadable_uploads", lambda *a, **k: [])
+    monkeypatch.setattr(llm_router, "collect_uploadable",lambda *a, **k: [])
 
     constructed = False
 
@@ -155,18 +151,15 @@ async def test_autoshare_swallows_errors(monkeypatch: pytest.MonkeyPatch) -> Non
     """Best-effort: an upload failure must not propagate out of the hook."""
     monkeypatch.setattr(llm_router, "get_backend_config", _enabled_config)
     _patch_metadata(monkeypatch, catalog_enabled=True)
-    monkeypatch.setattr(llm_router, "load_evidence_library", lambda: object())
     monkeypatch.setattr(llm_router, "load_credentials", lambda: object())
-    monkeypatch.setattr(llm_router, "collect_uploadable_uploads", lambda *a, **k: [object()])
+    monkeypatch.setattr(llm_router, "collect_uploadable",lambda *a, **k: [object()])
     monkeypatch.setattr(llm_router, "batch_idempotency_key", lambda uploads: "key-1")
 
     class BoomClient:
         def __init__(self, **kwargs: object) -> None:
             pass
 
-        async def upload_batch(
-            self, records: object, *, idempotency_key: str, queue: object = None
-        ) -> object:
+        async def upload_batch(self, records: object, *, idempotency_key: str) -> object:
             raise RuntimeError("gate down")
 
     monkeypatch.setattr(llm_router, "CommunityUploadClient", BoomClient)

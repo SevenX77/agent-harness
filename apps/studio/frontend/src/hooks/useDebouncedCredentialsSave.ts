@@ -175,10 +175,8 @@ export function buildPutPayload(
     const baseUrlRows = provider.base_urls?.length
       ? provider.base_urls
       : [{ id: provider.id, value: provider.base_url ?? "" }]
-    const nonEmptyBaseUrlRows = baseUrlRows.filter((row) => row.value.trim().length > 0)
-    const rows = nonEmptyBaseUrlRows.length > 0 ? nonEmptyBaseUrlRows : baseUrlRows.slice(0, 1)
     if (provider.base_urls?.length) {
-      return rows.flatMap((row) => thirdPartyProtocolCandidates.map((protocol) => ({
+      return baseUrlRows.flatMap((row) => thirdPartyProtocolCandidates.map((protocol) => ({
         id: endpointIdForBaseUrlProtocol(provider.id, row, protocol),
         name: provider.name,
         api_key: provider.api_key ?? "",
@@ -186,6 +184,8 @@ export function buildPutPayload(
         provider_type: protocol,
       })))
     }
+    const nonEmptyBaseUrlRows = baseUrlRows.filter((row) => row.value.trim().length > 0)
+    const rows = nonEmptyBaseUrlRows.length > 0 ? nonEmptyBaseUrlRows : baseUrlRows.slice(0, 1)
     return rows.map((row) => ({
       id: row.id || provider.id,
       name: provider.name,

@@ -1,13 +1,19 @@
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import type { ReactNode } from "react"
 import { LazyMonacoPanel } from "./LazyMonacoPanel"
+import { OverlayResizeHandle } from "./OverlayResizeHandle"
 import { useWorkspaceContext, type EditorSide, type OpenFile } from "./WorkspaceContext"
+
+export const EDITOR_MIN_HEIGHT = 200
+export const EDITOR_MAX_HEIGHT = 1200
 
 interface WorkspaceEditorOverlayProps {
   children?: ReactNode
+  /** Reports the new overlay height (px) as the user drags the bottom edge. */
+  onResizeHeight?: (heightPx: number) => void
 }
 
-export function WorkspaceEditorOverlay({ children }: WorkspaceEditorOverlayProps) {
+export function WorkspaceEditorOverlay({ children, onResizeHeight }: WorkspaceEditorOverlayProps) {
   const {
     activeFileDetails,
     splitMode,
@@ -76,6 +82,15 @@ export function WorkspaceEditorOverlay({ children }: WorkspaceEditorOverlayProps
         ) : (
           renderEditor(primarySide, primaryFile, true)
         )}
+        {onResizeHeight ? (
+          <OverlayResizeHandle
+            side="bottom"
+            min={EDITOR_MIN_HEIGHT}
+            max={EDITOR_MAX_HEIGHT}
+            onResize={onResizeHeight}
+            ariaLabel="Resize editor"
+          />
+        ) : null}
       </section>
     </>
   )

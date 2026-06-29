@@ -45,6 +45,7 @@ def _route(
     *,
     status: str = "verified",
     metadata: dict[str, Any] | None = None,
+    evidence: list[EvidenceRecord] | None = None,
 ) -> ProviderRoute:
     return ProviderRoute(
         route_id="ep-1:gpt-5",
@@ -55,6 +56,7 @@ def _route(
         display_name="GPT-5",
         status=status,
         metadata=metadata or {},
+        evidence=evidence or [],
     )
 
 
@@ -131,10 +133,10 @@ def test_studio_delegates_to_gateway_projector_with_derived_inputs(monkeypatch) 
     assert "evidence_records" not in captured
 
 
-def test_studio_renders_historical_ready_from_credential_evidence_refs(monkeypatch) -> None:
-    # historical_ready is only reachable when the stored credential route has
-    # accepted evidence refs; a standalone catalog evidence list is not a state
-    # source for user-facing projection.
+def test_studio_renders_historical_ready_from_route_evidence(monkeypatch) -> None:
+    # historical_ready is reachable only when the stored credential route carries
+    # probe-verified evidence ON the route (route.evidence) — NOT route.metadata,
+    # NOT a standalone catalog list (Phase 3: route.evidence is the truth).
     seen_projection_inputs: dict[str, Any] = {}
 
     def _spy(**kwargs: Any) -> GatewayProjection:
@@ -150,10 +152,9 @@ def test_studio_renders_historical_ready_from_credential_evidence_refs(monkeypat
     adapter = GatewayAdapter(transport="in_process")
     now = datetime.now(UTC)
     endpoint = _endpoint(status="verified")
-    route = _route(status="unverified_manual", metadata={"evidence_refs": ["probe-ep1-gpt5"]})
-    evidence = _evidence_record()
+    route = _route(status="unverified_manual", evidence=[_evidence_record()])
 
-    result = _project(adapter, endpoint=endpoint, route=route, circuits=[], now=now, evidence_records=[evidence])
+    result = _project(adapter, endpoint=endpoint, route=route, circuits=[], now=now)
 
     assert seen_projection_inputs["credential_evidence_refs"] == ["probe-ep1-gpt5"]
     assert "evidence_records" not in seen_projection_inputs
@@ -264,15 +265,25 @@ def test_six_states_project_through_gateway_for_their_canonical_inputs() -> None
     )
     assert untested.ui_state == "untested"
 
-    metadata_only = _project(
+    evidence_history = _project(
         adapter,
         endpoint=_endpoint(status="verified"),
-        route=_route(status="unverified_manual", metadata={"evidence_refs": ["probe-ep1-gpt5"]}),
+        route=_route(status="unverified_manual", evidence=[_evidence_record()]),
         circuits=[],
         now=now,
     )
-    assert metadata_only.ui_state == "historical_ready"
-    assert metadata_only.evidence_refs == ["probe-ep1-gpt5"]
+    assert evidence_history.ui_state == "historical_ready"
+    assert evidence_history.evidence_refs == ["probe-ep1-gpt5"]
+
+    endpoint_failed_history = _project(
+        adapter,
+        endpoint=_endpoint(status="failed"),
+        route=_route(status="unverified_manual", evidence=[_evidence_record()]),
+        circuits=[],
+        now=now,
+    )
+    assert endpoint_failed_history.ui_state == "historical_ready"
+    assert endpoint_failed_history.evidence_refs == ["probe-ep1-gpt5"]
 
     catalog_only = _project(
         adapter,

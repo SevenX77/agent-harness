@@ -100,7 +100,11 @@ export function RoleSettingsFields({
               data-role-setting-key="model_fallback_enabled"
               className="min-h-10 items-center justify-between gap-3 rounded-md border border-border/70 bg-background/70 px-3"
             >
-              <FieldLabel htmlFor={`model-fallback-${roleName}`} className="min-w-0 text-xs font-medium">
+              <FieldLabel
+                htmlFor={`model-fallback-${roleName}`}
+                className="min-w-0 text-xs font-medium"
+                onClick={(event) => event.preventDefault()}
+              >
                 Model Fallback
               </FieldLabel>
               <Switch

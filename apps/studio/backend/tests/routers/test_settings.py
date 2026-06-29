@@ -5,6 +5,7 @@ from pathlib import Path
 from app.core import config
 from app.core.backends import clear_backend_caches
 from app.main import create_app
+from app.services.runtime_activity import load_runtime_activity
 from fastapi.testclient import TestClient
 
 
@@ -37,6 +38,10 @@ def test_put_then_get_roundtrip(client: TestClient, tmp_path: Path) -> None:
     assert put_response.json() == payload
     assert get_response.status_code == 200
     assert get_response.json() == payload
+    logs = load_runtime_activity(source_id="app_settings", limit=1)
+    assert logs[0]["action"] == "update_app_settings"
+    assert logs[0]["changes"]["user_id"]["to"] == "alice"
+    assert logs[0]["changes"]["remote_model_catalog_enabled"]["to"] is False
 
 
 def test_put_blank_default_skills_directory_uses_effective_default(client: TestClient) -> None:

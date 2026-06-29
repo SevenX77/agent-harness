@@ -126,6 +126,9 @@ from graph_agent_gateway.registry.schema import (
     RuntimeSettings as RuntimeSettings,
 )
 from graph_agent_gateway.registry.schema import VerifiedProfile as VerifiedProfile
+from graph_agent_gateway.registry.schema import (
+    compute_evidence_content_hash as compute_evidence_content_hash,
+)
 
 # Re-exports from graph_agent_gateway for services isolation
 from graph_agent_gateway.resolver import ModelResolver as ModelResolver
@@ -154,6 +157,9 @@ materialize_import_draft_candidates = materialize_probe_catalog_candidates
 
 ProviderUiState = Literal["ready", "historical_ready", "untested", "cooling_down", "off", "failed"]
 _OPAQUE_SECRET_HANDLE_RE = re.compile(r"^secret-handle://studio-local/[a-f0-9]{32}$")
+# Phase 3 / problem 4: only probe-verified evidence embedded on a route projects
+# blue historical_ready. provider-list-observed / probe-failed / stale never do.
+_PROJECTABLE_EVIDENCE_TRUST_STATES = frozenset({"probe-verified"})
 
 
 @dataclass(frozen=True)
@@ -199,9 +205,10 @@ class GatewayAdapter:
         credentials = payload["credentials"]
         roles = payload["roles"]
 
-        from app.models.llm_config import LLMCredentialsFile, RolesData
+        from app.models.llm_config import RolesData
+        from app.services.llm_credentials import validate_credentials_payload
         if isinstance(credentials, dict):
-            credentials_obj = LLMCredentialsFile.model_validate(credentials)
+            credentials_obj = validate_credentials_payload(credentials)
         else:
             credentials_obj = credentials
 
@@ -248,17 +255,15 @@ class GatewayAdapter:
             )
 
         # in_process
-        from app.models.llm_config import (
-            LLMCredentialsFile,
-            RoleEntry,
-        )
+        from app.models.llm_config import RoleEntry
+        from app.services.llm_credentials import validate_credentials_payload
 
         role = payload["role"]
         if isinstance(role, dict):
             role = RoleEntry.model_validate(role)
         credentials = payload["credentials"]
         if isinstance(credentials, dict):
-            credentials = LLMCredentialsFile.model_validate(credentials)
+            credentials = validate_credentials_payload(credentials)
 
         health_store = payload.get("health_store")
         if health_store is None:
@@ -297,14 +302,15 @@ class GatewayAdapter:
             )
 
         # in_process
-        from app.models.llm_config import LLMCredentialsFile, ModelBundle, RoleEntry
+        from app.models.llm_config import ModelBundle, RoleEntry
+        from app.services.llm_credentials import validate_credentials_payload
 
         bundle = payload["bundle"]
         if isinstance(bundle, dict):
             bundle = ModelBundle.model_validate(bundle)
         credentials = payload["credentials"]
         if isinstance(credentials, dict):
-            credentials = LLMCredentialsFile.model_validate(credentials)
+            credentials = validate_credentials_payload(credentials)
 
         if not bundle.model_groups:
             return bundle
@@ -401,14 +407,19 @@ class GatewayAdapter:
         )
 
     def _route_credential_evidence_refs(self, route: Any) -> list[str]:
-        # User-facing state projection reads accepted credential facts only. The
-        # probe catalog can promote refs into route metadata, but the adapter must
-        # not project from a standalone catalog evidence list.
-        route_metadata = getattr(route, "metadata", None) or {}
-        refs = route_metadata.get("evidence_refs")
-        if not isinstance(refs, list):
-            return []
-        return [ref for ref in refs if isinstance(ref, str)]
+        # Blue historical_ready is driven by probe-verified evidence embedded ON the
+        # route (``route.evidence``) — the credentials SSOT — NOT ``route.metadata``
+        # (the retired link) and NOT a standalone catalog list. Only "probe-verified"
+        # contributes (problem 4 / community-probe-catalog-service-phase2a:43:
+        # provider-list-observed never feeds historical_ready).
+        refs: list[str] = []
+        for evidence in getattr(route, "evidence", None) or []:
+            if getattr(evidence, "trust_state", None) not in _PROJECTABLE_EVIDENCE_TRUST_STATES:
+                continue
+            ref = getattr(evidence, "content_hash", None) or getattr(evidence, "evidence_id", None)
+            if isinstance(ref, str):
+                refs.append(ref)
+        return refs
 
     def _map_gateway_projection(
         self,
@@ -511,11 +522,11 @@ class GatewayAdapter:
             )
 
         # in_process
-        from app.models.llm_config import LLMCredentialsFile
+        from app.services.llm_credentials import validate_credentials_payload
 
         credentials = payload["credentials"]
         if isinstance(credentials, dict):
-            credentials = LLMCredentialsFile.model_validate(credentials)
+            credentials = validate_credentials_payload(credentials)
         try:
             owner_response = gateway_resolve_credential(
                 GatewayCredentialResolveRequest(
@@ -824,6 +835,7 @@ __all__ = [
     "CredentialProviderProtocol",
     "EndpointCredentialProvider",
     "EvidenceRecord",
+    "compute_evidence_content_hash",
     "EVIDENCE_LIBRARY_DRAFT_ID",
     "ImportDraftStore",
     "ProbeCatalogStore",

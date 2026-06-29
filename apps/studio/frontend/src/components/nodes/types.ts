@@ -107,8 +107,9 @@ export interface SubgraphGroupNodeData extends Record<string, unknown> {
   status: 'loading' | 'error' | 'loaded'
   childName?: string
   message?: string
-  /** Local y coordinate where the parent-to-group visual bridge lands on the frame. */
-  bridgeTargetOffsetY?: number
+  // Drill INTO the child graph (focus the canvas on this subgraph). Wired by the
+  // host canvas onto the expanded board's "open canvas" button.
+  onOpenCanvas?: (path: string, label: string) => void
 }
 
 export type GraphCanvasNode =

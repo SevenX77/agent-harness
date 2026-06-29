@@ -1,6 +1,7 @@
 import type { ResumeRunOptions } from "@/api/client"
 import type { CallbackEvent, EventEnvelope, LintError, ResumeValidityResponse, SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData, SkillNodeStatus } from "@/components/GraphCanvas"
+import type { ChildSaveTarget } from "@/components/GraphCanvas/drill-edit"
 import { TraceDocumentPanel } from "@/components/MonacoPanel"
 import { TracePanel, type TraceHitlResumeRequest } from "@/components/TracePanel"
 import type { CompareTab } from "../run-compare"
@@ -15,18 +16,28 @@ import { PanelHeader } from "./_shared/PanelHeader"
 import { EdgeContextView } from "./EdgeContextView"
 import { PropertiesPanel } from "./PropertiesPanel"
 import { TimelinePanel } from "./TimelinePanel"
+import type { SubgraphMembershipTree } from "./use-subgraph-membership-tree"
+import type { WorkspaceDirectoryTree } from "./use-workspace-directory-tree"
 
 interface PanelsProps {
   activePanel: PanelKind
   skillId: string | null
   workspaceRoot?: string | null
   skillDetail?: SkillDetail
+  assetDirectoryTree?: WorkspaceDirectoryTree
+  assetSubgraphTree?: SubgraphMembershipTree
   selectedNode: { id: string; data: SkillGraphNodeData } | null
   // F4: i/o-panel test-input selection that feeds Predict/Run.
   selectedTestInputId?: string | null
   onSelectTestInput?: (id: string | null) => void
-  onPhaseFileSave?: (payload: { path: string; content: string; expectedHash: string }) => Promise<void> | void
-  onPhaseRename?: (phaseId: string, nextPhaseId: string) => Promise<void> | void
+  onPhaseFileSave?: (
+    payload: { path: string; content: string; expectedHash: string },
+    target?: ChildSaveTarget,
+  ) => Promise<void> | void
+  onPhaseRename?: (phaseId: string, nextPhaseId: string, target?: ChildSaveTarget) => Promise<void> | void
+  onActionCreate?: (phaseId: string, name: string, target?: ChildSaveTarget) => Promise<void> | void
+  onActionDelete?: (phaseId: string, name: string, target?: ChildSaveTarget) => Promise<void> | void
+  onValidatorCreate?: (phaseId: string, target?: ChildSaveTarget) => Promise<void> | void
   // trace-observability F1: while a run is active the timeline region streams
   // live trace events (TracePanel); with no active run it shows run history (F2).
   runId?: string | null
@@ -63,11 +74,16 @@ export function Panels({
   skillId,
   workspaceRoot = null,
   skillDetail,
+  assetDirectoryTree,
+  assetSubgraphTree,
   selectedNode,
   selectedTestInputId,
   onSelectTestInput,
   onPhaseFileSave,
   onPhaseRename,
+  onActionCreate,
+  onActionDelete,
+  onValidatorCreate,
   runId,
   selectedNodeStatus,
   resumeValidity,
@@ -95,7 +111,14 @@ export function Panels({
   const { onFileOpen, selectedEdge, setSelectedEdge } = useWorkspaceContext()
   const isDarkMode = useThemeValue() === "dark"
   const selectedNodeSkillId = selectedNode?.data.skillId ?? null
-  const selectedNodeUsesDifferentSkill = Boolean(selectedNodeSkillId && selectedNodeSkillId !== skillId)
+  const selectedNodeWorkspaceRoot = selectedNode?.data.workspaceRoot ?? null
+  const selectedNodeUsesDifferentSkill = Boolean(
+    selectedNode
+    && (
+      (selectedNodeSkillId && selectedNodeSkillId !== skillId)
+      || (selectedNodeWorkspaceRoot && selectedNodeWorkspaceRoot !== (workspaceRoot ?? null))
+    ),
+  )
   const selectedNodeResolvedDetail = selectedNode?.data.resolvedSkillDetail
   const selectedNodeSkill = useSkills(selectedNodeUsesDifferentSkill && !selectedNodeResolvedDetail ? selectedNodeSkillId : null)
   const propertiesSkillId = selectedNodeUsesDifferentSkill ? selectedNodeSkillId : skillId
@@ -105,6 +128,39 @@ export function Panels({
   const propertiesSkillDetail = selectedNodeUsesDifferentSkill
     ? selectedNodeResolvedDetail ?? selectedNodeSkill.skillDetail
     : skillDetail
+  const selectedNodeEditTarget = selectedNodeUsesDifferentSkill && propertiesSkillId && propertiesSkillDetail
+    ? {
+        skillId: propertiesSkillId,
+        workspaceRoot: propertiesWorkspaceRoot,
+        detail: propertiesSkillDetail,
+        onSettled: async () => undefined,
+      } satisfies ChildSaveTarget
+    : null
+  const propertiesPhaseFileSave = selectedNodeUsesDifferentSkill
+    ? selectedNodeEditTarget && onPhaseFileSave
+      ? (payload: { path: string; content: string; expectedHash: string }) => onPhaseFileSave(payload, selectedNodeEditTarget)
+      : undefined
+    : onPhaseFileSave
+  const propertiesPhaseRename = selectedNodeUsesDifferentSkill
+    ? selectedNodeEditTarget && onPhaseRename
+      ? (phaseId: string, nextPhaseId: string) => onPhaseRename(phaseId, nextPhaseId, selectedNodeEditTarget)
+      : undefined
+    : onPhaseRename
+  const propertiesActionCreate = selectedNodeUsesDifferentSkill
+    ? selectedNodeEditTarget && onActionCreate
+      ? (phaseId: string, name: string) => onActionCreate(phaseId, name, selectedNodeEditTarget)
+      : undefined
+    : onActionCreate
+  const propertiesActionDelete = selectedNodeUsesDifferentSkill
+    ? selectedNodeEditTarget && onActionDelete
+      ? (phaseId: string, name: string) => onActionDelete(phaseId, name, selectedNodeEditTarget)
+      : undefined
+    : onActionDelete
+  const propertiesValidatorCreate = selectedNodeUsesDifferentSkill
+    ? selectedNodeEditTarget && onValidatorCreate
+      ? (phaseId: string) => onValidatorCreate(phaseId, selectedNodeEditTarget)
+      : undefined
+    : onValidatorCreate
   if (!skillId) {
     return (
       <div className="flex h-full w-full flex-col bg-sidebar">
@@ -121,6 +177,8 @@ export function Panels({
         workspaceRoot={workspaceRoot}
         skillDetail={skillDetail}
         selectedNode={selectedNode}
+        directoryTree={assetDirectoryTree}
+        subgraphTree={assetSubgraphTree}
       />
     )
   }
@@ -206,12 +264,24 @@ export function Panels({
         resumeLoading={traceResumeLoading}
         lintErrors={lintErrors}
         onFileOpen={onFileOpen}
-        onPhaseFileSave={selectedNodeUsesDifferentSkill ? undefined : onPhaseFileSave}
-        onPhaseRename={selectedNodeUsesDifferentSkill ? undefined : onPhaseRename}
+        onPhaseFileSave={propertiesPhaseFileSave}
+        onPhaseRename={propertiesPhaseRename}
+        onActionCreate={propertiesActionCreate}
+        onActionDelete={propertiesActionDelete}
+        onValidatorCreate={propertiesValidatorCreate}
         onResumeNode={onResumeNode}
         onPromoteNode={onPromoteNode}
       />
     )
   }
-  return <AssetsPanel skillId={skillId} workspaceRoot={workspaceRoot} skillDetail={skillDetail} selectedNode={selectedNode} />
+  return (
+    <AssetsPanel
+      skillId={skillId}
+      workspaceRoot={workspaceRoot}
+      skillDetail={skillDetail}
+      selectedNode={selectedNode}
+      directoryTree={assetDirectoryTree}
+      subgraphTree={assetSubgraphTree}
+    />
+  )
 }

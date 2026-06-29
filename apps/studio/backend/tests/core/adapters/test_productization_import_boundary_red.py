@@ -87,13 +87,6 @@ SDK_IMPORT_ALLOWLIST = {
         "expiry": "expose the stable-ID helpers through a Studio-owned config port before Wave 3 runtime settings expansion",
         "gate": "test_studio_business_layer_does_not_import_sdk_internals_directly",
     },
-    "app/services/llm_stable_id_migration.py": {
-        "owner": "studio-settings",
-        "reason": "one-shot migration rewriting legacy credentials to the gateway's stable IDs; needs route_identity (canonical ID helpers) and ImportDraftStore to re-key evidence stored under the old IDs",
-        "risk": "gateway stable-ID or import-draft-store contract changes would break the migration path",
-        "expiry": "retire once all installs are migrated off legacy IDs and this module is removed",
-        "gate": "test_studio_business_layer_does_not_import_sdk_internals_directly",
-    },
 }
 
 

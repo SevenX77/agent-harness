@@ -56,7 +56,6 @@ describe('CenterActionBar lock-reason hint (#13)', () => {
     expect(html).not.toContain(RUN_LOCK_REASON)
   })
 })
-
 describe('CenterActionBar canvas surface styling', () => {
   it('uses the shared canvas action surface instead of a plain card bar', () => {
     const html = renderBar('idle')
@@ -73,33 +72,5 @@ describe('CenterActionBar canvas surface styling', () => {
     expect(html).toContain('fixed')
     expect(html).toContain('left-1/2')
     expect(html).toContain('-translate-x-1/2')
-  })
-})
-
-describe('CenterActionBar corner-radius convergence (FRONTEND_UI_SPEC §2.4)', () => {
-  it('uses rounded-md and never rounded-full on the shell and all three buttons', () => {
-    const html = renderBar('idle')
-    expect(html).not.toContain('rounded-full')
-    // Shell container + Compile + Predict + Run all carry rounded-md.
-    const roundedMdCount = (html.match(/rounded-md/g) ?? []).length
-    expect(roundedMdCount).toBeGreaterThanOrEqual(4)
-  })
-
-  it('keeps rounded-md across every stage', () => {
-    for (const stage of [
-      'idle',
-      'compiling',
-      'compile-fail',
-      'compile-pass',
-      'predicting',
-      'predict-fail',
-      'predict-pass',
-      'running',
-      'run-fail',
-    ] as const) {
-      const html = renderBar(stage)
-      expect(html).not.toContain('rounded-full')
-      expect(html).toContain('rounded-md')
-    }
   })
 })

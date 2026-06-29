@@ -583,10 +583,13 @@ def render_impl(im, ns, label, nctx):
             for a in ats:
                 tested_map.setdefault(a, primary)
     funcs = ""
+    result_only = bool(im.get("result_only"))
+    gap_label = "结果 / 说明" if result_only else "差距 / 要改"
+    function_title = "逐功能实施结果" if result_only else "逐功能 现状 / 差距"
     for f in im["functions"]:
         rows = [
             ("现状", listify(f.get("current", ""))),
-            ("差距 / 要改", listify(f.get("gap", ""))),
+            (gap_label, listify(f.get("gap", ""))),
             ("后端依赖", listify(f.get("be_dep", ""))),
             ("对应设计", f'<a class="xlink" href="#{apfx}atom-{f["n"]}">设计页 #{f["n"]} · {ESC(f["cap"])} →</a>'),
         ]
@@ -595,7 +598,7 @@ def render_impl(im, ns, label, nctx):
         funcs += card(f'#{f["n"]} · {ESC(f["cap"])}', rows,
                       tag=fe_badge(f.get("fe_status", "")), anchor=f"{apfx}fn-{f['n']}", mono=False)
     plan = ""
-    for s in im["plan"]:
+    for s in im.get("plan", []):
         blk = s.get("block", "")
         plan += card(f'Step {s.get("step","")}', [
             ("改什么", listify(s.get("what", ""))),
@@ -604,7 +607,7 @@ def render_impl(im, ns, label, nctx):
         ], tag=badge(blk, "a" if "后端" in blk else "g"), mono=False)
     content = (
         f'<p class="body-copy">{code(im.get("intro",""))}</p>'
-        + f'<div class="ig-title">逐功能 现状 / 差距（{len(im["functions"])}）</div>{funcs}'
+        + f'<div class="ig-title">{function_title}（{len(im["functions"])}）</div>{funcs}'
         + ('<div class="ig-title">实施计划（按依赖排序）</div>'
            '<div class="callout">排序轴 = <b>后端先于前端</b>铁律：能<b>前端独立</b>做的（绿标）先做；<b>等后端</b>契约的（琥珀标）排在「后端先行」项之后。</div>' + plan if plan else "")
     )

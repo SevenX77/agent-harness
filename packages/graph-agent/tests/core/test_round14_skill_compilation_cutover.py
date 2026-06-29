@@ -373,6 +373,11 @@ def test_unreachable_phase_uses_island_code(tmp_path: Path, mock_skill_resolver:
         SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     _expect_code(exc, "[F-v3-graph-phase-island]")
+    # Node-scoped topology diagnostics carry a `<phase>.<x>` field_path locator so
+    # Studio's realtime-lint node projection can attribute them to the offending
+    # node badge (the same node-id-prefix channel the manual Compile path uses).
+    assert exc.value.payload is not None
+    assert exc.value.payload.field_path == "orphan.depends_on"
 
 
 def test_missing_output_phase_uses_leaf_terminal_fallback(tmp_path: Path, mock_skill_resolver: object) -> None:

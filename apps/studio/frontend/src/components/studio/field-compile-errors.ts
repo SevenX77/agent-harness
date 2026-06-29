@@ -88,6 +88,38 @@ export function compileErrorsToFieldLintErrors(
   }))
 }
 
+/**
+ * Project the whole-skill lint result down to the diagnostics of ONE open file.
+ *
+ * Realtime lint is engine-owned and intentionally whole-skill: the SAME `LintResult`
+ * feeds the canvas node badges (by phase), the Properties panel (by field), AND the
+ * editor (by line). Each surface is a pure projection of that one source — this is the
+ * editor's "by file" slice, the sibling of {@link fieldErrorsByKey} (by phase) and
+ * {@link lintErrorsToMarkers} (by line). Per compile-lint design F1 ("real-time lint marks
+ * context only"), the editor shows only THIS file's diagnostics; cross-file / structural /
+ * file-less errors degrade to the manual Compile drawer, never as inline marks here.
+ *
+ * Matching is separator-insensitive and tolerates an absolute sandbox-path leak (the
+ * realtime lint normally strips the throwaway sandbox prefix to a skill-relative path, but
+ * a leak would end with the relative path). Errors with no `file` are skill-level and dropped.
+ */
+export function lintErrorsForFile(
+  errors: readonly LintError[] | null | undefined,
+  filePath: string,
+): LintError[] {
+  const target = filePath.replace(/\\/g, "/").replace(/^\/+/, "")
+  if (!target) {
+    return []
+  }
+  return (errors ?? []).filter((error) => {
+    if (typeof error?.file !== "string" || !error.file) {
+      return false
+    }
+    const candidate = error.file.replace(/\\/g, "/").replace(/^\/+/, "")
+    return candidate === target || candidate.endsWith(`/${target}`)
+  })
+}
+
 /** Monaco-shaped marker descriptor (severity kept as a string so this module is monaco-free). */
 export interface LintMarkerDescriptor {
   startLineNumber: number

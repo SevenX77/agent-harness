@@ -131,6 +131,10 @@ class BodyPhaseRef:
     depends_on: tuple[str, ...]
     output: bool
     token: PhaseTokenInfo
+    # FILE-absolute line of this phase's ``<phase>`` tag, for diagnostics
+    # (phase-cycle / depends-unknown). Kept separate from ``token.line_start``,
+    # which stays body-relative for the serializer/cache round-trip (hash-locked).
+    diag_line: int
 
 
 class SkillLoader:
@@ -202,13 +206,23 @@ class SkillLoader:
 
         discovered = _discover_phase_files(root)
         phase_docs: list[PhaseDocument] = []
+        # Collect-all: one broken node must not hide another's defects, so each
+        # node is parsed independently and its errors accumulated. We raise the
+        # batch at this barrier — before the post-loop validators, which assume a
+        # complete, valid node set.
+        node_errors: list[SkillLoadError] = []
         for phase_name, phase_file, mode in discovered:
-            frontmatter, body, _ = parse_markdown_parts(phase_file)
-            _reject_phase_forbidden_metadata(phase_file, frontmatter)
-            scan_forbidden_topology_tags(phase_file, body)
-            phase_docs.append(
-                _build_phase_document(phase_name, phase_file, mode, frontmatter, body)
-            )
+            try:
+                frontmatter, body, _ = parse_markdown_parts(phase_file)
+                _reject_phase_forbidden_metadata(phase_file, frontmatter)
+                scan_forbidden_topology_tags(phase_file, body)
+                phase_docs.append(
+                    _build_phase_document(phase_name, phase_file, mode, frontmatter, body)
+                )
+            except SkillLoadError as exc:
+                node_errors.append(exc)
+        if node_errors:
+            _raise_collected_node_errors(node_errors)
         _validate_agent_reference_paths(root, phase_docs)
         _validate_subgraph_io_contracts(
             root,
@@ -355,6 +369,104 @@ def _io_fatal(
             source_path=_payload_source_path(path),
         ),
     )
+
+
+# --------------------------------------------------------------------------- #
+# Collect-all diagnostics (compile/lint is static analysis, not a run): gather  #
+# every independent defect in one pass instead of aborting at the first         #
+# ``_fatal``. Structural failures that make further parsing impossible still    #
+# abort; only per-node content/whitelist checks accumulate. The full set rides  #
+# on ``exc.compile_result.issues`` (the seam Studio's compile drawer already    #
+# projects); the primary ``payload`` stays the first defect for single-error    #
+# (realtime-lint) consumers.                                                    #
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class _Diag:
+    """One independent compile defect, line-located in its source file."""
+
+    path: Path
+    line: int
+    code: str
+    message: str
+    field_path: str | None = None
+
+
+def _make_diag(
+    path: Path, line: int, raw_message: str, *, field_path: str | None = None
+) -> _Diag:
+    code, clean = _split_code_message("[F-v3-graph-root-missing]", raw_message)
+    return _Diag(path, line, code, clean, field_path)
+
+
+def _compile_result(diags: list[_Diag]) -> Any:
+    """Build the legacy ``CompileResult`` container Studio's drawer projects.
+
+    ``location`` uses the skill-relative source path (never the absolute path) so
+    Studio's ``file:line`` split is not tripped by a Windows drive-letter colon.
+    """
+    from graph_agent.core.compiler import CompileIssue, CompileResult
+
+    return CompileResult(
+        issues=[
+            CompileIssue(
+                rule_id=d.code,
+                severity="FATAL",
+                location=f"{_payload_source_path(d.path)}:{d.line}",
+                message=f"{d.path}:{d.line} {d.message}",
+            )
+            for d in diags
+        ]
+    )
+
+
+def _raise_diags(diags: list[_Diag]) -> NoReturn:
+    """Raise one error carrying every collected defect; primary = the first."""
+    first = diags[0]
+    detail = f"{first.path}:{first.line} {first.message}"
+    error = SkillLoadError(
+        detail,
+        payload=make_error_payload(
+            first.code,
+            detail,
+            field_path=first.field_path,
+            source_path=_payload_source_path(first.path),
+        ),
+    )
+    error.compile_result = _compile_result(diags)  # type: ignore[attr-defined]
+    raise error
+
+
+def _issues_of(exc: SkillLoadError) -> list[Any]:
+    """Extract this error's CompileIssue list (its own, or one from its payload)."""
+    from graph_agent.core.compiler import CompileIssue, CompileResult
+
+    existing = getattr(exc, "compile_result", None)
+    if isinstance(existing, CompileResult) and existing.issues:
+        return list(existing.issues)
+    payload = exc.payload
+    code = payload.code if payload is not None else "[F-v3-graph-root-missing]"
+    source = payload.source_path if payload is not None else None
+    match = re.search(r":(\d+)(?:\s|$)", str(exc))
+    line = match.group(1) if match else "1"
+    location = f"{source}:{line}" if source else str(exc)
+    return [CompileIssue(rule_id=code, severity="FATAL", location=location, message=str(exc))]
+
+
+def _raise_collected_node_errors(node_errors: list[SkillLoadError]) -> NoReturn:
+    """Re-raise the first node's error verbatim, with every node's defects merged.
+
+    The first error keeps its identity/payload/attributes (so single-error
+    consumers and existing assertions are untouched); ``compile_result`` is
+    widened to carry the whole batch for the compile drawer.
+    """
+    from graph_agent.core.compiler import CompileResult
+
+    primary = node_errors[0]
+    issues = [issue for exc in node_errors for issue in _issues_of(exc)]
+    primary.compile_result = CompileResult(issues=issues)  # type: ignore[attr-defined]
+    raise primary
 
 
 def _graph_fatal(
@@ -1099,7 +1211,7 @@ def _extract_body_phase_refs(graph_path: Path, graph_body: str) -> list[BodyPhas
         if not name:
             _graph_fatal(
                 graph_path,
-                _xml_line(graph_body, match.start()),
+                _body_file_line(graph_path, graph_body, match.start()),
                 "[F-v3-graph-phase-id-invalid] body <phase> name is empty",
             )
         depends_raw = attrs.get("depends_on")
@@ -1125,6 +1237,7 @@ def _extract_body_phase_refs(graph_path: Path, graph_body: str) -> list[BodyPhas
                 depends_on=depends_on,
                 output="output" in attrs_raw.split(),
                 token=token,
+                diag_line=_body_file_line(graph_path, graph_body, match.start()),
             )
         )
     return refs
@@ -1145,9 +1258,12 @@ def _validate_graph_topology(
         body_phase_refs,
     )
 
-    _validate_acyclic_graph(graph_path, adjacency)
+    # FILE-absolute line for each phase's own <phase> tag, shared by the cycle and
+    # island diagnostics so both mark the offending tag (not the frontmatter ---).
+    line_by_name = {ref.name: ref.diag_line for ref in body_phase_refs}
+    _validate_acyclic_graph(graph_path, adjacency, line_by_name)
     if input_roots:
-        _validate_no_islands(graph_path, adjacency, input_roots)
+        _validate_no_islands(graph_path, adjacency, input_roots, line_by_name)
     _validate_unknown_dependencies(graph_path, unknown_deps)
     _validate_output_phases(graph_path, body_phase_refs, adjacency)
     for phase in phases:
@@ -1240,7 +1356,7 @@ def _collect_graph_dependencies(
             if dep == ref.name:
                 _graph_fatal(
                     graph_path,
-                    ref.token.line_start,
+                    ref.diag_line,
                     f"[F-v3-graph-phase-cycle] phase {ref.name!r} cannot depend on itself",
                 )
             adjacency[dep].append(ref.name)
@@ -1255,12 +1371,16 @@ def _validate_unknown_dependencies(
         ref, dep = unknown_deps[0]
         _graph_fatal(
             graph_path,
-            ref.token.line_start,
+            ref.diag_line,
             f"[F-v3-graph-depends-unknown] phase {ref.name!r} depends_on unknown phase {dep!r}",
         )
 
 
-def _validate_acyclic_graph(graph_path: Path, adjacency: dict[str, list[str]]) -> None:
+def _validate_acyclic_graph(
+    graph_path: Path,
+    adjacency: dict[str, list[str]],
+    line_by_name: dict[str, int],
+) -> None:
 
     state: dict[str, str] = {}
     stack: list[str] = []
@@ -1274,7 +1394,7 @@ def _validate_acyclic_graph(graph_path: Path, adjacency: dict[str, list[str]]) -
                 cycle = stack[start:] + [nxt]
                 _graph_fatal(
                     graph_path,
-                    1,
+                    line_by_name.get(cycle[0], 1),
                     "[F-v3-graph-phase-cycle] cycle detected: " + " -> ".join(cycle),
                 )
             if state.get(nxt) is None:
@@ -1291,6 +1411,7 @@ def _validate_no_islands(
     graph_path: Path,
     adjacency: dict[str, list[str]],
     input_roots: list[str],
+    line_by_name: dict[str, int],
 ) -> None:
     visited: set[str] = set()
     stack = list(input_roots)
@@ -1301,12 +1422,19 @@ def _validate_no_islands(
         visited.add(node)
         stack.extend(sorted(set(adjacency[node]) - visited))
 
+    # Point the diagnostic at the offending phase's own ``<phase>`` tag and carry a
+    # ``<phase>.depends_on`` field_path so Studio's editor marks the exact GRAPH.md
+    # line and the realtime-lint node projection attributes it to that node's badge
+    # (the node-id-prefix channel the manual Compile path already uses). Use the
+    # FILE-absolute ``diag_line`` (like the sibling cycle / depends-unknown
+    # diagnostics), never the body-relative ``token.line_start``.
     for phase_id in adjacency:
         if phase_id not in visited:
             _graph_fatal(
                 graph_path,
-                1,
+                line_by_name.get(phase_id, 1),
                 f"[F-v3-graph-phase-island] phase {phase_id!r} is unreachable from input",
+                field_path=f"{phase_id}.depends_on",
             )
 
 
@@ -1665,10 +1793,21 @@ def _extract_logic_actions(path: Path, body: str) -> list[str]:
     pattern = re.compile(r"<action\b[^>]*>(.*?)</action>", re.IGNORECASE | re.DOTALL)
     for match in pattern.finditer(body):
         action = match.group(1).strip()
-        if action:
-            actions.append(action)
+        if not action:
+            # Mirror the agent's strict role/goal check: an empty <action></action>
+            # is itself a defect even when other actions are filled.
+            _fatal(
+                path,
+                _body_file_line(path, body, match.start()),
+                "[F-v3-logic-actions-empty] LOGIC.md <action> tags must not be empty",
+            )
+        actions.append(action)
     if not actions:
-        _fatal(path, 1, "[F-v3-logic-actions-empty] LOGIC.md requires <action> tags")
+        _fatal(
+            path,
+            _body_file_line(path, body, 0),
+            "[F-v3-logic-actions-empty] LOGIC.md requires <action> tags",
+        )
     return actions
 
 
@@ -1694,13 +1833,13 @@ def _parse_agent_body(
         if tag not in allowed_tags:
             _fatal(
                 path,
-                _xml_line(body, match.start()),
+                _body_file_line(path, body, match.start()),
                 f"[F-v3-agent-body-tag-unknown] unknown top-level tag {tag}",
             )
     if "<steps" in body.lower() or "</steps" in body.lower():
         _fatal(
             path,
-            _xml_line(body, body.lower().find("<steps")),
+            _body_file_line(path, body, body.lower().find("<steps")),
             "[F-v3-agent-body-tag-unknown] unknown top-level tag steps",
         )
     role = blocks.get("role")
@@ -1708,13 +1847,30 @@ def _parse_agent_body(
     if "<exit_contract" in body.lower() or "</exit_contract" in body.lower():
         _fatal(
             path,
-            _xml_line(body, body.lower().find("<exit_contract")),
+            _body_file_line(path, body, body.lower().find("<exit_contract")),
             "[F-v3-agent-body-tag-unknown] unknown top-level tag exit_contract",
         )
+    # Role and goal are independent presence checks: collect both so a single
+    # compile reports them together rather than aborting after role.
+    block_diags: list[_Diag] = []
     if not role:
-        _fatal(path, 1, "[F-v3-agent-role-missing] Agent body requires <role>")
+        block_diags.append(
+            _make_diag(
+                path,
+                _missing_block_line(path, body, "role"),
+                "[F-v3-agent-role-missing] Agent body requires <role>",
+            )
+        )
     if not goal:
-        _fatal(path, 1, "[F-v3-agent-goal-missing] Agent body requires <goal>")
+        block_diags.append(
+            _make_diag(
+                path,
+                _missing_block_line(path, body, "goal"),
+                "[F-v3-agent-goal-missing] Agent body requires <goal>",
+            )
+        )
+    if block_diags:
+        _raise_diags(block_diags)
     return {
         "role": role,
         "goal": goal,
@@ -1734,7 +1890,7 @@ def _extract_agent_steps(path: Path, body: str) -> list[dict[str, str]]:
         if not step_id or not name:
             _fatal(
                 path,
-                _xml_line(body, match.start()),
+                _body_file_line(path, body, match.start()),
                 "[F-v3-agent-step-invalid] step requires id and name",
             )
         steps.append({"id": step_id, "name": name, "content": match.group(2).strip()})
@@ -1750,7 +1906,7 @@ def _extract_agent_protocols(path: Path, body: str) -> list[dict[str, str]]:
         if not protocol_id:
             _fatal(
                 path,
-                _xml_line(body, match.start()),
+                _body_file_line(path, body, match.start()),
                 "[F-v3-agent-protocol-invalid] protocol requires id",
             )
         protocols.append({"id": protocol_id, "content": match.group(2).strip()})
@@ -1768,7 +1924,7 @@ def _extract_agent_examples(path: Path, body: str) -> list[dict[str, str]]:
         if not example_id or not content or example_id in seen:
             _fatal(
                 path,
-                _xml_line(body, match.start()),
+                _body_file_line(path, body, match.start()),
                 "[F-v3-agent-example-invalid] example requires unique id and non-empty content",
             )
         seen.add(example_id)
@@ -1781,7 +1937,7 @@ def _validate_agent_mentions(path: Path, ast: AgentNodeAST, body: str) -> None:
     if broken is not None:
         _fatal(
             path,
-            _xml_line(body, broken.start()),
+            _body_file_line(path, body, broken.start()),
             "[F-v3-mention-syntax-invalid] malformed @-mention",
         )
     domains = {
@@ -1797,13 +1953,50 @@ def _validate_agent_mentions(path: Path, ast: AgentNodeAST, body: str) -> None:
         if mention.name not in domains.get(mention.kind, set()):
             _fatal(
                 path,
-                _xml_line(body, mention.start),
+                _body_file_line(path, body, mention.start),
                 f"[F-v3-mention-target-not-found] @{mention.kind}:{mention.name}",
             )
 
 
 def _xml_line(body: str, offset: int) -> int:
     return body[: max(0, offset)].count("\n") + 1
+
+
+def _body_file_line(path: Path, body: str, offset: int) -> int:
+    """Map a 0-based offset into the frontmatter-stripped ``body`` to a 1-based
+    FILE line.
+
+    Body diagnostics must share the file-absolute axis that frontmatter errors
+    use (``_frontmatter_key_line`` / ``locate_line_for_pydantic_loc``): the editor
+    marks the whole file (frontmatter included) and Studio forwards the engine's
+    line verbatim, so a body-relative ``_xml_line`` value would land too high by
+    the frontmatter length. ``body`` is a suffix of the file content (parser
+    ``_strip_frontmatter`` removes the frontmatter), so its start anchors exactly.
+    """
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        return _xml_line(body, offset)
+    if body:
+        body_index = content.rfind(body)
+        if body_index >= 0:
+            return content[: body_index + max(0, offset)].count("\n") + 1
+    # Empty / unlocatable body: fall back to the first line after the frontmatter.
+    match = re.match(r"^---\r?\n.*?\r?\n---", content, re.DOTALL)
+    if match:
+        return content[: match.end()].count("\n") + 2
+    return _xml_line(body, offset)
+
+
+def _missing_block_line(path: Path, body: str, tag: str) -> int:
+    """File line for a required-but-absent/empty agent block.
+
+    When the ``<tag>`` exists (e.g. an empty ``<role></role>``) point at the tag;
+    when it is missing entirely point at the body start, never the hardcoded
+    line 1 (which lands on the frontmatter ``---``).
+    """
+    index = body.lower().find(f"<{tag}")
+    return _body_file_line(path, body, index if index >= 0 else 0)
 
 
 _ATTR_RE = re.compile(r"([A-Za-z_][\w:-]*)\s*=\s*(['\"])(.*?)\2", re.DOTALL)

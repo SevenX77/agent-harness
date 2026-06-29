@@ -277,12 +277,35 @@ _FORBIDDEN_TOPOLOGY_TAG_RE = re.compile(
 )
 
 
+def _body_offset_to_file_line(path: Path, body: str, offset: int) -> int:
+    """File-absolute (frontmatter-inclusive) line for a 0-based offset into the
+    frontmatter-stripped ``body``.
+
+    Mirrors loader's ``_body_file_line`` so body diagnostics share the file axis
+    frontmatter errors use (the editor marks the whole file). ``body`` is a suffix
+    of the file content, so it anchors exactly; falls back to body-relative only
+    when the file cannot be read.
+    """
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        return body[: max(0, offset)].count("\n") + 1
+    if body:
+        body_index = content.rfind(body)
+        if body_index >= 0:
+            return content[: body_index + max(0, offset)].count("\n") + 1
+    match = re.match(r"^---\r?\n.*?\r?\n---", content, re.DOTALL)
+    if match:
+        return content[: match.end()].count("\n") + 2
+    return body[: max(0, offset)].count("\n") + 1
+
+
 def scan_forbidden_topology_tags(path: Path, body: str) -> None:
     """Reject graph-topology tags inside phase XML bodies."""
     match = _FORBIDDEN_TOPOLOGY_TAG_RE.search(body)
     if match is None:
         return
-    line = body[: match.start()].count("\n") + 1
+    line = _body_offset_to_file_line(path, body, match.start())
     tag = match.group(0).replace(" ", "")
     if not tag.endswith(">"):
         tag += ">"

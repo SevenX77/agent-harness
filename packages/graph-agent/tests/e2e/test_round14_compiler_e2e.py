@@ -74,7 +74,10 @@ def _rewrite_copied_subgraph_paths(root: Path) -> None:
         root / "phases" / "segment" / "SKILL.md",
     ):
         text = path.read_text(encoding="utf-8")
-        text = re.sub(r"path: .*/registry/expander", f"path: {expander}", text)
+        # Replacement passed as a function so a Windows tmp path (e.g. C:\Users\...)
+        # is inserted literally — a plain repl string would treat its backslashes
+        # (\U, \t, ...) as regex escapes and raise during _compile_template.
+        text = re.sub(r"path: .*/registry/expander", lambda _match: f"path: {expander}", text)
         path.write_text(text, encoding="utf-8")
 
 

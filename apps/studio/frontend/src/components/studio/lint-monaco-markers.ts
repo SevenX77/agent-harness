@@ -1,6 +1,6 @@
 import type { LintResult } from "@/api/types"
 import type { MonacoApi, MonacoEditor } from "@/components/MonacoPanel"
-import { lintErrorsToMarkers, type LintMarkerDescriptor } from "./field-compile-errors"
+import { lintErrorsForFile, lintErrorsToMarkers, type LintMarkerDescriptor } from "./field-compile-errors"
 
 /**
  * Monaco runtime adapter for IDE-style inline lint markers (authoring N3 atom #6).
@@ -37,11 +37,15 @@ export function applyLintMarkers(
   monaco: MonacoApi | null,
   model: ReturnType<MonacoEditor["getModel"]> | null,
   lintResult: LintResult | null,
+  filePath?: string,
 ): void {
   if (!monaco || !model) {
     return
   }
-  const markers: ModelMarkerData[] = lintErrorsToMarkers(lintResult?.errors).map((marker) => ({
+  // Realtime lint is whole-skill; the editor only marks the open file's diagnostics
+  // (compile-lint design F1: "mark context only"). Scope by file when known.
+  const scopedErrors = filePath ? lintErrorsForFile(lintResult?.errors, filePath) : lintResult?.errors
+  const markers: ModelMarkerData[] = lintErrorsToMarkers(scopedErrors).map((marker) => ({
     startLineNumber: marker.startLineNumber,
     endLineNumber: marker.endLineNumber,
     startColumn: marker.startColumn,

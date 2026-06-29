@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { LintError } from "@/api/types"
-import { fieldErrorsByKey, lintErrorsToMarkers } from "./field-compile-errors"
+import { fieldErrorsByKey, lintErrorsForFile, lintErrorsToMarkers } from "./field-compile-errors"
 
 function lintErr(overrides: Partial<LintError>): LintError {
   return {
@@ -65,6 +65,63 @@ describe("fieldErrorsByKey", () => {
   it("returns an empty map for null/empty input", () => {
     expect(fieldErrorsByKey(null, "setup")).toEqual({})
     expect(fieldErrorsByKey([], "setup")).toEqual({})
+  })
+})
+
+describe("lintErrorsForFile", () => {
+  it("keeps only diagnostics that belong to the open file (realtime lint = this file's context)", () => {
+    const scoped = lintErrorsForFile(
+      [
+        lintErr({ file: "phases/aggregate/SKILL.md", line: 1, message: "mine" }),
+        lintErr({ file: "phases/agent/SKILL.md", line: 1, message: "another file" }),
+        lintErr({ file: "GRAPH.md", line: 2, message: "structural" }),
+      ],
+      "phases/aggregate/SKILL.md",
+    )
+    expect(scoped.map((error) => error.message)).toEqual(["mine"])
+  })
+
+  it("matches separator-insensitively and tolerates an absolute sandbox-path leak", () => {
+    const scoped = lintErrorsForFile(
+      [
+        lintErr({ file: "phases\\aggregate\\SKILL.md", message: "win-seps" }),
+        lintErr({ file: "C:/tmp/studio-lint-xxx/skill/phases/aggregate/SKILL.md", message: "abs-leak" }),
+      ],
+      "phases/aggregate/SKILL.md",
+    )
+    expect(scoped.map((error) => error.message).sort()).toEqual(["abs-leak", "win-seps"])
+  })
+
+  it("drops diagnostics with no file (skill-level → Compile drawer, never inline on this file)", () => {
+    const scoped = lintErrorsForFile(
+      [lintErr({ file: null, line: 1, message: "no file" })],
+      "phases/aggregate/SKILL.md",
+    )
+    expect(scoped).toEqual([])
+  })
+
+  it("returns an empty array for null/empty input", () => {
+    expect(lintErrorsForFile(null, "phases/aggregate/SKILL.md")).toEqual([])
+    expect(lintErrorsForFile([], "phases/aggregate/SKILL.md")).toEqual([])
+  })
+
+  it("renders a GRAPH.md-located topology diagnostic as an inline marker when GRAPH.md is open", () => {
+    // The realtime-lint GRAPH.md surface for structural topology errors (e.g.
+    // [F-v3-graph-phase-island]): scoping to GRAPH.md keeps it, and it carries a
+    // line so it becomes a Monaco marker — the editor counterpart of the node badge.
+    const island = lintErr({
+      file: "GRAPH.md",
+      line: 7,
+      error_code: "F-v3-graph-phase-island",
+      message: "phase 'orphan' is unreachable from input",
+      field_path: "orphan.depends_on",
+    })
+    const scoped = lintErrorsForFile([island], "GRAPH.md")
+    expect(scoped).toHaveLength(1)
+    const markers = lintErrorsToMarkers(scoped)
+    expect(markers).toHaveLength(1)
+    expect(markers[0].startLineNumber).toBe(7)
+    expect(markers[0].message).toContain("unreachable from input")
   })
 })
 

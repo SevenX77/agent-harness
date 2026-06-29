@@ -104,6 +104,30 @@ describe("lintErrorsByNode", () => {
     expect(Object.keys(byNode)).toEqual(["p"])
   })
 
+  // Surfacing parity with the manual-Compile node channel: a GRAPH.md-located
+  // topology diagnostic (e.g. [F-v3-graph-phase-island]) that carries a node
+  // locator must badge the offending node in realtime lint too, not just the
+  // GRAPH.md editor markers + compile drawer.
+  it("attributes a GRAPH.md-located diagnostic to its node via phase_name", () => {
+    const byNode = lintErrorsByNode([
+      lintErr("GRAPH.md", { phase_name: "orphan", message: "orphan is unreachable from input" }),
+    ])
+    expect(Object.keys(byNode)).toEqual(["orphan"])
+    expect(byNode.orphan).toHaveLength(1)
+  })
+
+  it("attributes a GRAPH.md-located diagnostic to its node via the field_path node-id prefix", () => {
+    const byNode = lintErrorsByNode([
+      lintErr("GRAPH.md", { field_path: "orphan.depends_on", message: "orphan is unreachable from input" }),
+    ])
+    expect(Object.keys(byNode)).toEqual(["orphan"])
+  })
+
+  it("still omits a GRAPH.md diagnostic with no node locator (no phase_name, no field_path)", () => {
+    const byNode = lintErrorsByNode([lintErr("GRAPH.md", { field_path: null, phase_name: null })])
+    expect(byNode).toEqual({})
+  })
+
   it("returns an empty map for null/empty input", () => {
     expect(lintErrorsByNode(null)).toEqual({})
     expect(lintErrorsByNode([])).toEqual({})

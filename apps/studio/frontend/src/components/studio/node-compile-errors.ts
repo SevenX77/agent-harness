@@ -65,30 +65,61 @@ export function compileErrorsByNode(
 }
 
 /**
+ * Resolve the phase node a realtime/first-screen `LintError` belongs to. Mirrors the
+ * manual-Compile {@link compileErrorNodeId} so both channels attribute identically:
+ * prefer the engine's typed `phase_name`, then the `file` phase path (`phases/<id>/...`),
+ * then the `field_path` node-id prefix (`<node_id>.<x>`). Returns null when none attributes
+ * the error to a node (graph-level / unattributable).
+ *
+ * The `field_path` fallback is what surfaces GRAPH.md-located TOPOLOGY diagnostics
+ * (e.g. `[F-v3-graph-phase-island]`, whose engine payload carries
+ * `field_path="<phase>.depends_on"`) onto the node badge in realtime lint — previously
+ * only the GRAPH.md editor markers + compile drawer showed them. Errors with no node
+ * locator (no `phase_name`, a non-`phases/` file, no `<id>.` field) still degrade to the
+ * file/drawer surface, so per-file phase diagnostics keep matching by `file` exactly as
+ * before.
+ */
+function lintErrorNodeId(error: LintError | null | undefined): string | null {
+  const phaseName = error?.phase_name
+  if (typeof phaseName === "string" && phaseName) {
+    return phaseName
+  }
+  const file = error?.file
+  if (typeof file === "string") {
+    const fileMatch = PHASE_FILE_RE.exec(file)
+    if (fileMatch) {
+      return fileMatch[1]
+    }
+  }
+  const field = error?.field_path
+  if (typeof field === "string") {
+    const fieldMatch = FIELD_NODE_PREFIX_RE.exec(field)
+    if (fieldMatch) {
+      return fieldMatch[1]
+    }
+  }
+  return null
+}
+
+/**
  * Realtime-lint counterpart of {@link compileErrorsByNode}: group flat `LintError[]`
- * (from the debounced `/lint` call) by the phase node they belong to, derived from
- * each diagnostic's `file` path (`phases/<id>/...`).
+ * (from the debounced `/lint` call) by the phase node they belong to via
+ * {@link lintErrorNodeId} (phase_name → `phases/<id>/` file → `field_path` node-id prefix).
  *
  * Realtime lint marks context only — workflow 03_compile decision: "only mark red in
  * context, do not flood a global panel/toast mid-edit". This per-node bucketing is the
- * skeleton that future field-level Monaco markers (Wave 2) project onto; graph-level
- * diagnostics (GRAPH.md or no/undefined phase path) are not attributable to a node and
- * are omitted, exactly like the compile path.
+ * skeleton that field-level Monaco markers project onto; diagnostics with no resolvable
+ * node locator are omitted (they degrade to the GRAPH.md editor markers + compile drawer).
  */
 export function lintErrorsByNode(
   errors: readonly LintError[] | null | undefined,
 ): Record<string, LintError[]> {
   const byNode: Record<string, LintError[]> = {}
   for (const error of errors ?? []) {
-    const file = error?.file
-    if (typeof file !== "string") {
+    const phaseId = lintErrorNodeId(error)
+    if (phaseId === null) {
       continue
     }
-    const match = PHASE_FILE_RE.exec(file)
-    if (!match) {
-      continue
-    }
-    const phaseId = match[1]
     const bucket = byNode[phaseId] ?? (byNode[phaseId] = [])
     bucket.push(error)
   }

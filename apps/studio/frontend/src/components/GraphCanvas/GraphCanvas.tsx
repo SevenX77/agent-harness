@@ -1898,7 +1898,7 @@ export function GraphCanvas({
       toast.error('This output marker already exists')
       return
     }
-    let childArgs: readonly [ChildSaveTarget] | readonly [] = []
+    let childArgs: readonly [ChildSaveTarget] | readonly []
     if (scope.parentNodeId) {
       const targetSkill = expandedChildSaveTarget(scope.parentNodeId)
       if (!targetSkill) {
@@ -2002,7 +2002,7 @@ export function GraphCanvas({
       toast.error('This dependency already exists')
       return
     }
-    let childArgs: readonly [ChildSaveTarget] | readonly [] = []
+    let childArgs: readonly [ChildSaveTarget] | readonly []
     if (newScope.parentNodeId) {
       const targetSkill = expandedChildSaveTarget(newScope.parentNodeId)
       if (!targetSkill) {
@@ -2055,7 +2055,7 @@ export function GraphCanvas({
       toast.error('Disconnect nodes within the same graph.')
       return
     }
-    let childArgs: readonly [ChildSaveTarget] | readonly [] = []
+    let childArgs: readonly [ChildSaveTarget] | readonly []
     if (scope.parentNodeId) {
       const targetSkill = expandedChildSaveTarget(scope.parentNodeId)
       if (!targetSkill) {
@@ -2077,7 +2077,7 @@ export function GraphCanvas({
     if (!onDeletePhase) return
     const parentNodeId = previewNodeParentId(nodeId)
     const phaseId = phaseIdFromCanvasNodeId(nodeId)
-    let childArgs: readonly [ChildSaveTarget] | readonly [] = []
+    let childArgs: readonly [ChildSaveTarget] | readonly []
     if (parentNodeId) {
       const targetSkill = expandedChildSaveTarget(parentNodeId)
       if (!targetSkill) {
@@ -2134,7 +2134,7 @@ export function GraphCanvas({
       toast.error('Disconnect nodes within the same graph.')
       return
     }
-    let childArgs: readonly [ChildSaveTarget] | readonly [] = []
+    let childArgs: readonly [ChildSaveTarget] | readonly []
     if (scope.parentNodeId) {
       const targetSkill = expandedChildSaveTarget(scope.parentNodeId)
       if (!targetSkill) {

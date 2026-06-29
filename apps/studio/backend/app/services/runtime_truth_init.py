@@ -9,23 +9,13 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from graph_agent_gateway.import_draft_store import ImportDraftStore
-
 from app.core import config
 from app.models.llm_config import LLMCredentialsFile, RolesData
 from app.models.settings import AppSettings
-from app.services.community_catalog_sync import (
-    CommunityCatalogCache,
-    DisposableCatalogCacheStore,
-)
-from app.services.community_catalog_upload import OfflineUploadQueue
 from app.services.llm_credentials import save_credentials
 from app.services.llm_paths import (
     canonical_rules_path,
-    community_catalog_cache_path,
-    community_upload_queue_path,
     credentials_path,
-    probe_catalog_path,
     role_test_results_path,
     roles_path,
 )
@@ -46,9 +36,10 @@ def ensure_runtime_truth_sources() -> list[str]:
     _ensure_credentials_file(created)
     _ensure_roles_file(created)
     _ensure_json_file("llm_role_test_results", role_test_results_path(), {"results": {}}, created)
-    _ensure_probe_catalog_file(created)
-    _ensure_community_catalog_cache_file(created)
-    _ensure_upload_queue_file(created)
+    # Phase 9: the three legacy catalog files (llm_probe_catalog.json /
+    # community_catalog_cache.json / community_upload_queue.json) are retired — startup no
+    # longer seeds them. Evidence lives in credentials route.evidence; community evidence
+    # arrives via verified sync; uploads re-derive from credentials (no offline queue).
     _ensure_text_file("llm_canonical_rules", canonical_rules_path(), "{}\n", created)
     _ensure_text_file("runtime_activity_log", runtime_activity_log_path(), "", created)
 
@@ -98,32 +89,6 @@ def _ensure_roles_file(created: list[tuple[str, Path]]) -> None:
         return
     save_roles_file(path, RolesData(), known_route_ids=set(), known_bundle_ids=set())
     created.append(("llm_roles", path))
-
-
-def _ensure_probe_catalog_file(created: list[tuple[str, Path]]) -> None:
-    path = probe_catalog_path()
-    if path.exists():
-        return
-    store = ImportDraftStore(path)
-    draft = store.load_evidence_library()
-    store.save_all({draft.draft_id: draft})
-    created.append(("llm_probe_catalog", path))
-
-
-def _ensure_community_catalog_cache_file(created: list[tuple[str, Path]]) -> None:
-    path = community_catalog_cache_path()
-    if path.exists():
-        return
-    DisposableCatalogCacheStore(path).save(CommunityCatalogCache())
-    created.append(("community_catalog_cache", path))
-
-
-def _ensure_upload_queue_file(created: list[tuple[str, Path]]) -> None:
-    path = community_upload_queue_path()
-    if path.exists():
-        return
-    OfflineUploadQueue(path).replace([])
-    created.append(("community_upload_queue", path))
 
 
 def _ensure_json_file(

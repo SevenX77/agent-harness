@@ -37,13 +37,9 @@ from app.routers import (
     test_inputs,
     websockets,
 )
-from app.services.community_catalog_runtime import sync_verified_community_catalog_cache
+from app.services.community_catalog_runtime import sync_verified_community_catalog_into_credentials
 from app.services.copilot import cleanup_all_sessions
 from app.services.file_watcher import file_watcher
-from app.services.llm_probe_catalog import (
-    load_remote_catalog_source_metadata,
-    sync_remote_probe_catalog,
-)
 from app.services.run_manager import run_manager
 from app.services.runtime_truth_init import ensure_runtime_truth_sources
 from app.services.skills import ensure_workspace_layout
@@ -60,7 +56,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     clear_backend_caches()
     ensure_workspace_layout()
     ensure_runtime_truth_sources()
-    await _sync_remote_probe_catalog_on_startup()
     await _sync_verified_community_catalog_on_startup()
     terminal_manager.start_reaper()
     file_watcher.start(asyncio.get_running_loop())
@@ -73,19 +68,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await run_manager.shutdown()
 
 
-async def _sync_remote_probe_catalog_on_startup() -> None:
-    catalog_source = load_remote_catalog_source_metadata()
-    if catalog_source is None or not getattr(catalog_source, "enabled", True):
-        return
-    try:
-        await sync_remote_probe_catalog()
-    except Exception:
-        logger.warning("Remote LLM probe catalog sync failed during startup", exc_info=True)
-
-
 async def _sync_verified_community_catalog_on_startup() -> None:
     try:
-        await sync_verified_community_catalog_cache(trigger="startup")
+        await sync_verified_community_catalog_into_credentials(trigger="startup")
     except Exception:
         logger.warning("Verified community catalog sync failed during startup", exc_info=True)
 

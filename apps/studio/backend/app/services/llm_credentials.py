@@ -35,6 +35,8 @@ SECRET_REDACTION_PLACEHOLDER = "**********"
 LEGACY_FAKE_TEST_MESSAGE = "Credential present."
 LEGACY_FAKE_TEST_REPLACEMENT_MESSAGE = "Needs retest after v4 provider probe upgrade."
 CATALOG_ONLY_PROBE_MESSAGE = "No verified language route profile."
+_SUPPORTED_CREDENTIALS_SCHEMA_VERSIONS = (4, 5)
+_LEGACY_CREDENTIALS_FIELDS = ("providers", "provider_credentials")
 CURATED_PROVIDER_KIND_BY_ENDPOINT_ID = {
     "anthropic-official": "official",
     "ark-official": "official",
@@ -45,9 +47,9 @@ CURATED_PROVIDER_KIND_BY_ENDPOINT_ID = {
 
 
 def load_credentials(path: Path | None = None) -> LLMCredentialsFile:
-    """Read v4 credentials.
+    """Read credentials; v4 files are upgraded to v5 in memory.
 
-    A missing file is first-run setup and returns an empty v4 registry.
+    A missing file is first-run setup and returns an empty v5 registry.
     Legacy or malformed files are fatal so runtime never silently falls back
     to old provider/env behavior.
     """
@@ -58,15 +60,46 @@ def load_credentials(path: Path | None = None) -> LLMCredentialsFile:
         payload = json.loads(credential_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ValueError(f"LLM_CREDENTIALS_SCHEMA: invalid llm_credentials.json: {credential_path}") from exc
-    if isinstance(payload, dict) and (payload.get("schema_version") != 4 or "providers" in payload):
-        raise ValueError(
-            f"LLM_CREDENTIALS_SCHEMA: llm_credentials.json must use schema_version 4; "
-            f"legacy provider credentials are rejected: {credential_path}"
-        )
     try:
-        return _normalize_loaded_credentials(LLMCredentialsFile.model_validate(payload))
+        return validate_credentials_payload(payload)
     except ValidationError as exc:
-        raise ValueError(f"LLM_CREDENTIALS_SCHEMA: invalid v4 llm credentials schema: {credential_path}") from exc
+        raise ValueError(f"LLM_CREDENTIALS_SCHEMA: invalid v5 llm credentials schema: {credential_path}") from exc
+
+
+def validate_credentials_payload(payload: Any) -> LLMCredentialsFile:
+    """Reject legacy versions/fields, upgrade v4->v5 (if a dict), then validate + normalize.
+
+    The SINGLE shared entry every credentials loader funnels through —
+    ``load_credentials`` (disk), the engine resolver builder, and the gateway
+    adapter — so BOTH the version gate AND the v4->v5 in-memory upgrade are
+    universal, never path-specific (P1). A non-dict payload passes straight to
+    ``model_validate``, which raises as before.
+    """
+    if isinstance(payload, dict):
+        schema_version = payload.get("schema_version")
+        legacy = sorted(field for field in _LEGACY_CREDENTIALS_FIELDS if field in payload)
+        if schema_version not in _SUPPORTED_CREDENTIALS_SCHEMA_VERSIONS or legacy:
+            raise ValueError(
+                "LLM_CREDENTIALS_SCHEMA: credentials must use schema_version 4 or 5; "
+                f"legacy provider credentials are rejected (schema_version={schema_version!r}, "
+                f"legacy_fields={legacy})"
+            )
+        payload = _upgrade_v4_payload_to_v5(payload)
+    return _normalize_loaded_credentials(LLMCredentialsFile.model_validate(payload))
+
+
+def _upgrade_v4_payload_to_v5(payload: dict[str, Any]) -> dict[str, Any]:
+    """In-memory v4->v5 structural upgrade (R1.1/R1.4): bump version + default the
+    new fields. Lossless and side-effect free — the file is rewritten as v5 on the
+    next save. Evidence DATA backfill from the legacy catalog files is a separate
+    one-shot migration (Phase 7), not this load-time bump."""
+    if payload.get("schema_version") == 5:
+        return payload
+    upgraded = dict(payload)
+    upgraded["schema_version"] = 5
+    upgraded.setdefault("last_remote_catalog_sync", None)
+    # Per-route ``evidence`` defaults to [] via the model; nothing to inject here.
+    return upgraded
 
 
 def save_credentials(data: LLMCredentialsFile, path: Path | None = None) -> None:
@@ -528,4 +561,5 @@ __all__ = [
     "serialize_for_response",
     "upsert_endpoints",
     "upsert_routes",
+    "validate_credentials_payload",
 ]

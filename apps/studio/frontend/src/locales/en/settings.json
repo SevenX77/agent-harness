@@ -81,7 +81,6 @@
         "credentials": "Credentials",
         "roles": "Roles",
         "health": "Health",
-        "catalog": "Catalog",
         "modelRules": "Model rules",
         "diagnostics": "Diagnostics",
         "runtime": "Runtime"
@@ -94,10 +93,6 @@
         "llm_runtime": {
           "label": "LLM runtime truth",
           "description": "Credential, route, role, and health stores owned by the backend."
-        },
-        "catalog": {
-          "label": "Probe and community catalog",
-          "description": "Local probe evidence, remote community cache, and upload retry state."
         },
         "diagnostics": {
           "label": "Runtime diagnostics",
@@ -136,18 +131,6 @@
         "llm_health": {
           "label": "LLM health database",
           "description": "Local health and cooldown diagnostics for provider routing."
-        },
-        "llm_probe_catalog": {
-          "label": "Local probe catalog",
-          "description": "Local evidence collected by manual probes and endpoint tests."
-        },
-        "community_catalog_cache": {
-          "label": "Community catalog cache",
-          "description": "Disposable verified snapshot downloaded from the remote community catalog."
-        },
-        "community_upload_queue": {
-          "label": "Community upload queue",
-          "description": "Offline retry queue for sanitized local evidence that could not be uploaded."
         },
         "llm_canonical_rules": {
           "label": "Canonical model rules",

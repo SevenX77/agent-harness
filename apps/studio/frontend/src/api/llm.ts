@@ -182,7 +182,6 @@ export interface RegistryResponse extends CredentialRegistryResponse {
   canonical_groups: CanonicalGroup[]
   lint_results: LintResult[]
   route_runtime_settings?: Record<string, Record<string, RuntimeSettingDescriptor>>
-  catalog_source?: CatalogSourceMetadata | null
   role_effective_runtime_settings?: Record<string, Record<string, Record<string, EffectiveRuntimeSetting>>>
   setup_required: boolean
 }
@@ -190,18 +189,6 @@ export interface RegistryResponse extends CredentialRegistryResponse {
 export interface EndpointSecretResponse {
   endpoint_id: string
   api_key: string
-}
-
-export interface CatalogSourceMetadata {
-  enabled: boolean
-  source_url: string
-  fetched_at: string
-  etag: string | null
-  cache: boolean
-  route_candidates_count: number
-  evidence_records_count: number
-  new_records_count: number
-  last_error: string | null
 }
 
 export interface ProbeCatalogSharingStatus {
@@ -239,18 +226,8 @@ export interface ProbeCatalogSummary {
   local_verified_records_count: number
   local_failed_records_count: number
   local_route_candidates_count: number
-  remote_catalog_source: CatalogSourceMetadata | null
   community_catalog: CommunityCatalogSummary
   sharing: ProbeCatalogSharingStatus
-}
-
-export interface CatalogSyncResponse {
-  status: 'success'
-  message: string
-  route_candidates_count: number
-  evidence_records_count: number
-  new_records_count: number
-  catalog_source: CatalogSourceMetadata
 }
 
 /**
@@ -267,8 +244,11 @@ export interface VerifiedCatalogSyncResponse {
   record_count?: number
   manifest_etag?: string | null
   protocol_major?: number
-  /** Cache-only sync does not promote routes; endpoint Test applies matching evidence later. */
-  promoted_route_count?: number
+  /**
+   * Phase 5: verified evidence is merged straight into credentials route.evidence
+   * (no disposable cache). This is the count of routes whose evidence actually changed.
+   */
+  merged_route_count?: number
   message?: string
 }
 
@@ -1413,17 +1393,11 @@ export async function getRegistry(): Promise<RegistryResponse> {
   return cacheRegistry(response.data)
 }
 
-export async function syncRemoteModelCatalog(): Promise<CatalogSyncResponse> {
-  const response = await api.post<CatalogSyncResponse>('/llm/catalog/sync')
-  cachedRegistry = null
-  return response.data
-}
-
 /**
- * Pull the signed community catalog into the disposable, verified cache via the
- * verified read path. The verified evidence it caches is surfaced back through
- * the registry snapshot's `probe_catalog.community_catalog`, so callers refetch
- * the registry afterwards to display it.
+ * Pull the signed community catalog via the verified read path and merge the verified
+ * evidence straight into credentials route.evidence (Phase 5: no disposable cache). The
+ * merged evidence is surfaced back through the registry snapshot's
+ * `probe_catalog.community_catalog`, so callers refetch the registry afterwards.
  */
 export async function syncVerifiedCommunityCatalog(): Promise<VerifiedCatalogSyncResponse> {
   const response = await api.post<VerifiedCatalogSyncResponse>('/llm/catalog/sync-verified')

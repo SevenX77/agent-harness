@@ -14,7 +14,6 @@ import {
   resetLlmApiCachesForTests,
   getRoleTestJob,
   startRoleTestJob,
-  syncRemoteModelCatalog,
   syncVerifiedCommunityCatalog,
   testRole,
   testProviderModels,
@@ -69,7 +68,6 @@ const probeCatalog = {
   local_verified_records_count: 2,
   local_failed_records_count: 1,
   local_route_candidates_count: 3,
-  remote_catalog_source: null,
   community_catalog: {
     synced: true,
     generated_at: '2026-06-20T23:00:00+00:00',
@@ -192,52 +190,6 @@ describe('API Keys v4 registry adapter', () => {
     })
   })
 
-  it('syncs the remote model catalog through the backend catalog sync endpoint', async () => {
-    const seen: string[] = []
-    api.defaults.adapter = adapter((config) => {
-      seen.push(`${config.method} ${config.url}`)
-      return {
-        status: 'success',
-        message: 'Catalog synced successfully with remote repository.',
-        route_candidates_count: 3,
-        evidence_records_count: 5,
-        new_records_count: 2,
-        catalog_source: {
-          enabled: true,
-          source_url: 'https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_probe_catalog.json',
-          fetched_at: '2026-06-20T23:00:00+00:00',
-          etag: 'W/test',
-          cache: false,
-          route_candidates_count: 3,
-          evidence_records_count: 5,
-          new_records_count: 2,
-          last_error: null,
-        },
-      }
-    })
-
-    await expect(syncRemoteModelCatalog()).resolves.toEqual({
-      status: 'success',
-      message: 'Catalog synced successfully with remote repository.',
-      route_candidates_count: 3,
-      evidence_records_count: 5,
-      new_records_count: 2,
-      catalog_source: {
-        enabled: true,
-        source_url: 'https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_probe_catalog.json',
-        fetched_at: '2026-06-20T23:00:00+00:00',
-        etag: 'W/test',
-        cache: false,
-        route_candidates_count: 3,
-        evidence_records_count: 5,
-        new_records_count: 2,
-        last_error: null,
-      },
-    })
-
-    expect(seen).toEqual(['post /llm/catalog/sync'])
-  })
-
   it('syncs the verified community catalog through the verified read-path endpoint', async () => {
     const seen: string[] = []
     api.defaults.adapter = adapter((config) => {
@@ -271,17 +223,6 @@ describe('API Keys v4 registry adapter', () => {
         local_verified_records_count: 2,
         local_failed_records_count: 1,
         local_route_candidates_count: 0,
-        remote_catalog_source: {
-          enabled: true,
-          source_url: 'https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_probe_catalog.json',
-          fetched_at: '2026-06-20T23:00:00+00:00',
-          etag: 'W/test',
-          cache: false,
-          route_candidates_count: 7,
-          evidence_records_count: 11,
-          new_records_count: 4,
-          last_error: null,
-        },
         community_catalog: {
           synced: true,
           generated_at: '2026-06-26T14:40:44Z',
@@ -312,17 +253,6 @@ describe('API Keys v4 registry adapter', () => {
       local_verified_records_count: 2,
       local_failed_records_count: 1,
       local_route_candidates_count: 0,
-      remote_catalog_source: {
-        enabled: true,
-        source_url: 'https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_probe_catalog.json',
-        fetched_at: '2026-06-20T23:00:00+00:00',
-        etag: 'W/test',
-        cache: false,
-        route_candidates_count: 7,
-        evidence_records_count: 11,
-        new_records_count: 4,
-        last_error: null,
-      },
       community_catalog: {
         synced: true,
         generated_at: '2026-06-26T14:40:44Z',

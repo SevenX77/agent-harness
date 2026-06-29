@@ -81,7 +81,6 @@
         "credentials": "凭据",
         "roles": "角色",
         "health": "健康状态",
-        "catalog": "Catalog",
         "modelRules": "模型规则",
         "diagnostics": "诊断",
         "runtime": "运行时"
@@ -94,10 +93,6 @@
         "llm_runtime": {
           "label": "LLM 运行时真相",
           "description": "后端持有的凭据、路由、角色和健康状态存储。"
-        },
-        "catalog": {
-          "label": "探测与社区 catalog",
-          "description": "本地探测证据、远端社区缓存和上传重试状态。"
         },
         "diagnostics": {
           "label": "运行诊断",
@@ -136,18 +131,6 @@
         "llm_health": {
           "label": "LLM 健康数据库",
           "description": "本地服务商路由健康状态和冷却诊断。"
-        },
-        "llm_probe_catalog": {
-          "label": "本地 probe catalog",
-          "description": "手动探测和 endpoint test 收集到的本地证据。"
-        },
-        "community_catalog_cache": {
-          "label": "社区 catalog 缓存",
-          "description": "从远端社区 catalog 下载并验签后的临时快照。"
-        },
-        "community_upload_queue": {
-          "label": "社区上传队列",
-          "description": "无法上传时本地排队的脱敏探测证据。"
         },
         "llm_canonical_rules": {
           "label": "模型规范化规则",

@@ -537,13 +537,6 @@ function truthSourceCategory(sourceId: string): string {
   if (sourceId === "llm_credentials") return "credentials"
   if (sourceId === "llm_roles" || sourceId === "llm_role_test_results") return "roles"
   if (sourceId === "llm_health") return "health"
-  if (
-    sourceId === "llm_probe_catalog"
-    || sourceId === "community_catalog_cache"
-    || sourceId === "community_upload_queue"
-  ) {
-    return "catalog"
-  }
   if (sourceId === "llm_canonical_rules") return "modelRules"
   if (sourceId === "runtime_activity_log") return "diagnostics"
   return "runtime"

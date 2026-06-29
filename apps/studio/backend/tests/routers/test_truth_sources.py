@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from app.services.llm_paths import community_catalog_cache_path, credentials_path
+from app.services.llm_paths import credentials_path
 from app.services.runtime_activity import record_runtime_activity
 
 
@@ -38,10 +38,12 @@ def test_truth_sources_lists_store_files_and_logs(client) -> None:
     assert response.status_code == 200
     sources = _flatten_sources(response.json())
     assert "llm_credentials" in sources
-    assert "community_catalog_cache" in sources
+    # Phase 9: the three retired legacy catalog files are no longer surfaced as truth sources.
+    assert "llm_probe_catalog" not in sources
+    assert "community_catalog_cache" not in sources
+    assert "community_upload_queue" not in sources
     assert sources["llm_credentials"]["path"] == str(credentials_path())
     assert sources["llm_credentials"]["exists"] is True
-    assert sources["community_catalog_cache"]["path"] == str(community_catalog_cache_path())
     assert sources["llm_credentials"]["logs"][0]["action"] == "endpoint_test"
     assert sources["llm_credentials"]["logs"][0]["changes"]["promoted_catalog_records"] == 2
 

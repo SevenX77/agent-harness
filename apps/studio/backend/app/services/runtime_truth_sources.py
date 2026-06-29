@@ -9,10 +9,7 @@ from typing import Any
 from app.core import config
 from app.services.llm_paths import (
     canonical_rules_path,
-    community_catalog_cache_path,
-    community_upload_queue_path,
     credentials_path,
-    probe_catalog_path,
     role_test_results_path,
     roles_path,
 )
@@ -163,43 +160,6 @@ def _truth_source_sections() -> tuple[TruthSourceSection, ...]:
                     path=llm_health_path,
                     kind="sqlite",
                     description="Local health and cooldown diagnostics for provider routing.",
-                ),
-            ),
-        ),
-        TruthSourceSection(
-            id="catalog",
-            label="Probe and community catalog",
-            description="Local probe evidence, disposable remote community cache, and upload retry state.",
-            sources=(
-                TruthSource(
-                    id="llm_probe_catalog",
-                    label="Local probe catalog",
-                    path=probe_catalog_path(),
-                    kind="json",
-                    description=(
-                        "Local evidence collected by manual probes and endpoint tests. It is "
-                        "not auto-uploaded unless an explicit sharing path runs."
-                    ),
-                ),
-                TruthSource(
-                    id="community_catalog_cache",
-                    label="Community catalog cache",
-                    path=community_catalog_cache_path(),
-                    kind="json",
-                    description=(
-                        "Disposable verified snapshot downloaded from the remote community "
-                        "catalog. It advises route candidates and is refreshed by sync."
-                    ),
-                ),
-                TruthSource(
-                    id="community_upload_queue",
-                    label="Community upload queue",
-                    path=community_upload_queue_path(),
-                    kind="json",
-                    description=(
-                        "Offline retry queue for sanitized local evidence that could not be "
-                        "uploaded to the community catalog."
-                    ),
                 ),
                 TruthSource(
                     id="llm_canonical_rules",

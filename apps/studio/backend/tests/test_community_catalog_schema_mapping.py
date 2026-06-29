@@ -101,4 +101,6 @@ def test_round_trip_upload_then_ingest_preserves_safe_fields() -> None:
     assert ingested.provider_model_id == "gpt-4o"
     assert ingested.capability_family == "chat"
     assert ingested.metadata["provenance"] == COMMUNITY_PROVENANCE
-    assert ingested.metadata["normalized_public_base_url"] == "https://api.openai.com/v1"
+    # Phase 5: the published endpoint identity lands on the FORMAL field (so it feeds
+    # content_hash + host matching), not in metadata.
+    assert ingested.normalized_public_base_url == "https://api.openai.com/v1"

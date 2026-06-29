@@ -4,8 +4,8 @@ Role-test and copilot-route-test jobs are otherwise transient (held in
 in-memory job dicts in ``app.routers.llm``), so a server restart or a settings
 tab remount loses every "last test result / route status". This store writes
 the result of the most recently COMPLETED job per role to disk under the LLM
-config dir, reusing the same atomic-write idiom as ``llm_import_drafts``, so the
-badges can be re-seeded after restart.
+config dir using an atomic temp-file-then-replace write, so the badges can be
+re-seeded after restart.
 """
 
 from __future__ import annotations

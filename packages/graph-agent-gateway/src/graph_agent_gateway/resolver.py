@@ -292,10 +292,10 @@ def _route_resolution_error_payload(
 
 def _assert_v4_credentials(payload: dict[str, Any], path: Path) -> None:
     schema_version = payload.get("schema_version")
-    if schema_version != 4:
+    if schema_version not in {4, 5}:
         raise ValueError(
-            f"credentials file must use schema_version 4: {path}; "
-            "legacy provider credentials are rejected at the v4 cutover boundary"
+            f"credentials file must use schema_version 4 or 5: {path}; "
+            "legacy provider credentials are rejected at the v4/v5 cutover boundary"
         )
     forbidden = {"providers", "provider_credentials"}
     present = sorted(forbidden.intersection(payload))

@@ -73,7 +73,6 @@ const probeCatalog: CredentialsState['probe_catalog'] = {
   local_verified_records_count: 2,
   local_failed_records_count: 1,
   local_route_candidates_count: 0,
-  remote_catalog_source: null,
   community_catalog: {
     synced: true,
     generated_at: '2026-06-20T23:00:00+00:00',
@@ -1033,17 +1032,6 @@ describe('SettingsPageContent (api_keys)', () => {
               local_verified_records_count: 2,
               local_failed_records_count: 1,
               local_route_candidates_count: 0,
-              remote_catalog_source: {
-                enabled: true,
-                source_url: 'https://raw.githubusercontent.com/sevenx/studio-llm-model-catalog/main/llm_probe_catalog.json',
-                fetched_at: '2026-06-20T23:00:00+00:00',
-                etag: 'W/test',
-                cache: false,
-                route_candidates_count: 7,
-                evidence_records_count: 11,
-                new_records_count: 4,
-                last_error: null,
-              },
               community_catalog: {
                 synced: true,
                 generated_at: '2026-06-20T23:00:00+00:00',
@@ -1082,7 +1070,6 @@ describe('SettingsPageContent (api_keys)', () => {
               local_verified_records_count: 1,
               local_failed_records_count: 0,
               local_route_candidates_count: 0,
-              remote_catalog_source: null,
               community_catalog: {
                 synced: true,
                 generated_at: '2026-06-26T14:40:44Z',

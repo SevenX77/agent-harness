@@ -9,10 +9,9 @@ from __future__ import annotations
 
 import pytest
 from app.core.backends import clear_backend_caches
-from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint
-from app.services.community_catalog_upload import UploadAck, UploadDeferred
+from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint, ProviderRoute
+from app.services.community_catalog_upload import CommunityUploadError, UploadAck
 from app.services.llm_credentials import save_credentials
-from app.services.llm_probe_catalog import append_evidence_record
 from fastapi.testclient import TestClient
 
 from tests.helpers_community_catalog import probe_record  # type: ignore[import-not-found]
@@ -52,9 +51,24 @@ def _seed_one_verified_probe() -> None:
             "display_name": "OpenAI",
         }
     )
-    save_credentials(LLMCredentialsFile(provider_endpoints={"openai-main": endpoint}))
-    append_evidence_record(
-        probe_record(endpoint_id="openai-main", provider_id="openai", provider_model_id="gpt-4o")
+    # Upload candidates derive from credentials route.evidence (SSOT, R9.1) — put the
+    # probe-verified record on a route, not the probe catalog.
+    record = probe_record(endpoint_id="openai-main", provider_id="openai", provider_model_id="gpt-4o")
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={"openai-main": endpoint},
+            provider_routes={
+                "openai-main:gpt-4o": ProviderRoute(
+                    route_id="openai-main:gpt-4o",
+                    endpoint_id="openai-main",
+                    route_slug="gpt-4o",
+                    provider_model_id="gpt-4o",
+                    canonical_id="gpt-4o",
+                    status="unverified_manual",
+                    evidence=[record],
+                )
+            },
+        )
     )
 
 
@@ -62,18 +76,18 @@ class _FakeClient:
     def __init__(self, **_kwargs: object) -> None:
         pass
 
-    async def upload_batch(self, records: list[object], *, idempotency_key: str, queue: object = None) -> UploadAck:
-        del idempotency_key, queue
+    async def upload_batch(self, records: list[object], *, idempotency_key: str) -> UploadAck:
+        del idempotency_key
         return UploadAck(accepted=len(records), rejected=0, receipt_token="rcpt-1")
 
 
-class _DeferringClient:
+class _FailingClient:
     def __init__(self, **_kwargs: object) -> None:
         pass
 
-    async def upload_batch(self, records: list[object], *, idempotency_key: str, queue: object = None) -> UploadAck:
-        del records, queue
-        raise UploadDeferred(idempotency_key)
+    async def upload_batch(self, records: list[object], *, idempotency_key: str) -> UploadAck:
+        del records
+        raise CommunityUploadError(f"gate unreachable: {idempotency_key}")
 
 
 def test_contribute_endpoint_uploads_when_configured(
@@ -88,15 +102,20 @@ def test_contribute_endpoint_uploads_when_configured(
     assert body["receipt_token"] == "rcpt-1"
 
 
-def test_contribute_endpoint_reports_deferred_when_gate_unreachable(
+def test_contribute_endpoint_reports_failed_when_gate_unreachable(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Phase 6: no offline queue. A gate failure reports "failed" (not "deferred"),
+    # never claims a local queue, and truthfully says it will retry by re-deriving
+    # from credentials next time. The content-derived key keeps the retry idempotent.
     _enable_gate(monkeypatch)
     _seed_one_verified_probe()
-    monkeypatch.setattr("app.routers.llm.CommunityUploadClient", _DeferringClient)
+    monkeypatch.setattr("app.routers.llm.CommunityUploadClient", _FailingClient)
     body = client.post("/api/llm/catalog/contribute").json()
-    assert body["status"] == "deferred"
-    assert body["queued"] is True
+    assert body["status"] == "failed"
+    assert body.get("queued") in (None, False)
+    assert "queue" not in body["message"].lower()
+    assert "credential" in body["message"].lower()
 
 
 def test_contribute_active_by_default_with_baked_gate(

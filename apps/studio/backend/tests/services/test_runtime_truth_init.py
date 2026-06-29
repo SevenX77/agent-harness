@@ -5,16 +5,10 @@ import logging
 from typing import Any
 
 from app.core import config
-from app.services.community_catalog_sync import DisposableCatalogCacheStore
-from app.services.community_catalog_upload import OfflineUploadQueue
 from app.services.llm_credentials import load_credentials
-from app.services.llm_import_drafts import load_evidence_library
 from app.services.llm_paths import (
     canonical_rules_path,
-    community_catalog_cache_path,
-    community_upload_queue_path,
     credentials_path,
-    probe_catalog_path,
     roles_path,
 )
 from app.services.llm_role_test_results import load_all as load_role_test_results
@@ -36,17 +30,16 @@ def test_ensure_runtime_truth_sources_creates_safe_empty_stores(
     assert "skill_index" in created
     assert "llm_credentials" in created
     assert "llm_roles" in created
-    assert "llm_probe_catalog" in created
-    assert "community_catalog_cache" in created
-    assert "community_upload_queue" in created
+    # Phase 9: the three legacy catalog files are no longer created or seeded — neither
+    # reported in `created` nor written to disk on a clean startup.
+    assert "llm_probe_catalog" not in created
+    assert "community_catalog_cache" not in created
+    assert "community_upload_queue" not in created
     assert config.APP_SETTINGS_PATH.exists()
     assert json.loads(config.SKILL_INDEX_PATH.read_text(encoding="utf-8")) == {}
-    assert load_credentials().schema_version == 4
+    assert load_credentials().schema_version == 5
     assert load_roles_file(roles_path()).schema_version == 2
     assert load_role_test_results() == {}
-    assert load_evidence_library(path=probe_catalog_path()).draft_id == "studio-evidence-library"
-    assert DisposableCatalogCacheStore(community_catalog_cache_path()).load().records == []
-    assert OfflineUploadQueue(community_upload_queue_path()).load() == []
     assert canonical_rules_path().read_text(encoding="utf-8") == "{}\n"
     assert runtime_activity_log_path().exists()
     assert not credentials_path().with_name("llm_health.sqlite").exists()

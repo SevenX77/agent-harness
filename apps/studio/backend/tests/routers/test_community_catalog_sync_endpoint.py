@@ -35,24 +35,23 @@ def test_verified_sync_endpoint_runs_when_configured(
     assert body["record_count"] == 3
 
 
-def test_verified_sync_caches_without_promoting_credentials(
+def test_verified_sync_merges_matching_evidence_into_credentials(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Page-load catalog sync only refreshes the disposable verified cache.
-    Route evidence is written into credentials later, during endpoint Test."""
+    """Phase 5: a verified sync MERGES matching community evidence straight into the
+    credential route's ``evidence`` (no cache file, no metadata refs) and persists a
+    tiny last-sync marker. historical_ready then projects from route.evidence."""
     from app.models.llm_config import (
         LLMCredentialsFile,
         ProviderEndpoint,
         ProviderRoute,
     )
     from app.services.community_catalog import parse_catalog_evidence
-    from app.services.community_catalog_sync import CommunityCatalogCache
     from app.services.llm_credentials import (
         credentials_path,
         load_credentials,
         save_credentials,
     )
-    from app.services.runtime_activity import load_runtime_activity
 
     save_credentials(
         LLMCredentialsFile(
@@ -99,16 +98,14 @@ def test_verified_sync_caches_without_promoting_credentials(
     )
 
     async def fake_sync(**kwargs: object) -> SyncOutcome:
-        store = kwargs["cache_store"]
-        store.save(  # type: ignore[attr-defined]
-            CommunityCatalogCache(
-                generated_at="2026-06-26T00:00:00Z",
-                protocol_major=1,
-                records=[record],
-            )
-        )
+        # Phase 5: no cache_store; the verified records are RETURNED for merge.
         return SyncOutcome(
-            status="updated", record_count=1, manifest_etag='"v2"', protocol_major=1
+            status="updated",
+            record_count=1,
+            manifest_etag='"v2"',
+            protocol_major=1,
+            generated_at="2026-06-26T00:00:00Z",
+            records=(record,),
         )
 
     monkeypatch.setattr(
@@ -117,41 +114,34 @@ def test_verified_sync_caches_without_promoting_credentials(
 
     body = client.post("/api/llm/catalog/sync-verified").json()
     assert body["status"] == "success"
-    assert body["promoted_route_count"] == 0
-    assert body["cached_record_count"] == 1
+    assert body["merged_route_count"] == 1
 
-    catalog_logs = load_runtime_activity(source_id="community_catalog_cache")
-    assert catalog_logs
-    latest_log = catalog_logs[0]
-    assert latest_log["action"] == "sync_verified_catalog"
-    assert latest_log["changes"]["cached_record_count"] == 1
-    assert latest_log["changes"]["catalog_routes"] == [
-        "https://api.deepseek.com | deepseek-v4-pro | (unknown capability)"
-    ]
-
-    route = load_credentials(credentials_path()).provider_routes[
-        "deepseek-official:deepseek-v4-pro"
-    ]
-    assert route.metadata.get("evidence_refs", []) == []
+    creds = load_credentials(credentials_path())
+    route = creds.provider_routes["deepseek-official:deepseek-v4-pro"]
+    # Merged ONTO route.evidence (SSOT) with community provenance — not metadata refs.
+    assert [e.evidence_id for e in route.evidence] == ["cat-deepseek-pro"]
+    assert route.evidence[0].metadata.get("provenance") == "community-catalog"
+    assert "evidence_refs" not in route.metadata
+    # Tiny last-sync marker persisted (etag for status only); no cache file.
+    assert creds.last_remote_catalog_sync is not None
+    assert creds.last_remote_catalog_sync.etag == '"v2"'
 
 
-def test_endpoint_test_carries_cached_community_evidence_for_new_routes(
+def test_verified_sync_blues_a_route_added_after_an_earlier_sync(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When an endpoint Test creates route rows after the verified catalog was
-    already synced, the new routes must still receive matching community
-    evidence before the registry response is returned."""
-    from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint
-    from app.routers import llm as llm_router
-    from app.services.community_catalog import parse_catalog_evidence
-    from app.services.community_catalog_sync import (
-        CommunityCatalogCache,
-        DisposableCatalogCacheStore,
+    """Phase 5 (locked: no cache, no etag short-circuit). A route added AFTER an earlier
+    sync must still go blue on the NEXT sync — even though the remote etag is unchanged.
+    We keep no unmatched evidence, so every sync re-fetches and re-attempts the merge."""
+    from app.models.llm_config import (
+        LLMCredentialsFile,
+        ProviderEndpoint,
+        ProviderRoute,
     )
+    from app.services.community_catalog import parse_catalog_evidence
     from app.services.llm_credentials import credentials_path, load_credentials, save_credentials
-    from app.services.llm_paths import community_catalog_cache_path
-    from graph_agent_gateway.registry.provider_probe import EndpointProbeResult
 
+    # A verified endpoint with NO matching route yet.
     save_credentials(
         LLMCredentialsFile(
             provider_endpoints={
@@ -162,12 +152,18 @@ def test_endpoint_test_carries_cached_community_evidence_for_new_routes(
                     base_url="https://api.anthropic.com",
                     api_key="secret",
                     provider_kind="official",
-                    status="unverified_manual",
+                    status="verified",
                 )
             },
         ),
         credentials_path(),
     )
+    monkeypatch.setenv(
+        "STUDIO_COMMUNITY_CATALOG_MANIFEST_URL", "https://cdn.example.org/catalog/manifest.json"
+    )
+    monkeypatch.setenv("STUDIO_COMMUNITY_CATALOG_SIGNING_PUBKEY", "ab" * 32)
+    clear_backend_caches()
+
     record = parse_catalog_evidence(
         {
             "evidence_type": "probe_result",
@@ -180,41 +176,45 @@ def test_endpoint_test_carries_cached_community_evidence_for_new_routes(
             "probe_status": "ok",
         }
     )
-    DisposableCatalogCacheStore(community_catalog_cache_path()).save(
-        CommunityCatalogCache(
-            generated_at="2026-06-26T00:00:00Z",
+
+    async def fake_sync(**kwargs: object) -> SyncOutcome:
+        # Always returns the records; reports "unchanged" once the marker etag matches.
+        prev = kwargs.get("prev_etag")
+        return SyncOutcome(
+            status="unchanged" if prev == '"v2"' else "updated",
+            record_count=1,
+            manifest_etag='"v2"',
             protocol_major=1,
-            records=[record],
-        )
-    )
-
-    async def fake_endpoint_probe(endpoint: ProviderEndpoint) -> EndpointProbeResult:
-        return EndpointProbeResult(
-            endpoint_id=endpoint.endpoint_id,
-            provider_kind=endpoint.provider_kind,
-            backend="claude",
-            base_url=endpoint.base_url,
-            status="ok",
-            latency_ms=11,
-            model_ids=("claude-opus-4-8",),
+            generated_at="2026-06-26T00:00:00Z",
+            records=(record,),
         )
 
-    monkeypatch.setattr(llm_router, "_gateway_test_provider_endpoint", fake_endpoint_probe)
+    monkeypatch.setattr("app.services.community_catalog_runtime.sync_verified_catalog", fake_sync)
 
-    response = client.post("/api/llm/endpoints/anthropic-official/test")
+    # First sync: no matching route → nothing merged, no route created; marker set.
+    body1 = client.post("/api/llm/catalog/sync-verified").json()
+    assert body1["merged_route_count"] == 0
+    creds1 = load_credentials(credentials_path())
+    assert "anthropic-official:claude-opus-4-8" not in creds1.provider_routes
+    assert creds1.last_remote_catalog_sync is not None
+    assert creds1.last_remote_catalog_sync.etag == '"v2"'
 
-    assert response.status_code == 200
-    registry = response.json()["registry"]
-    routes = registry["provider_routes"]
-    route = next(
-        item for item in routes.values() if item["provider_model_id"] == "claude-opus-4-8"
+    # Now the matching route is added (e.g. via endpoint Test).
+    creds1.provider_routes["anthropic-official:claude-opus-4-8"] = ProviderRoute(
+        route_id="anthropic-official:claude-opus-4-8",
+        endpoint_id="anthropic-official",
+        route_slug="claude-opus-4-8",
+        provider_model_id="claude-opus-4-8",
+        canonical_id="claude-opus-4-8",
+        status="unverified_manual",
     )
-    assert route["metadata"]["evidence_refs"] == ["cat-anthropic-opus"]
-    assert route["ui_state"] == "historical_ready"
+    save_credentials(creds1, credentials_path())
 
-    saved_route = next(
-        item
-        for item in load_credentials(credentials_path()).provider_routes.values()
-        if item.provider_model_id == "claude-opus-4-8"
-    )
-    assert saved_route.metadata["evidence_refs"] == ["cat-anthropic-opus"]
+    # Second sync: etag is UNCHANGED, but the sync still fetches + returns records and
+    # merges → the late route goes blue. (Proves etag never short-circuits records.)
+    body2 = client.post("/api/llm/catalog/sync-verified").json()
+    assert body2["sync_status"] == "unchanged"
+    assert body2["merged_route_count"] == 1
+    route = load_credentials(credentials_path()).provider_routes["anthropic-official:claude-opus-4-8"]
+    assert [e.evidence_id for e in route.evidence] == ["cat-anthropic-opus"]
+    assert route.evidence[0].metadata.get("provenance") == "community-catalog"

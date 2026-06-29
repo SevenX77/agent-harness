@@ -232,7 +232,7 @@ def lint_skill_path(skill_path: Path) -> LintResult:
     # "role not configured" is surfaced here as a NON-FATAL warning on the llm_role field
     # — compile still passes; the Properties panel / node badge / editor underline light
     # up from this same diagnostic.
-    role_warnings = _llm_role_lint_errors(skill_path, _configured_role_names())
+    role_warnings = _llm_role_lint_errors(compiled, _configured_role_names())
     return LintResult(
         status="passed",
         errors=role_warnings,
@@ -254,62 +254,11 @@ def _configured_role_names() -> set[str]:
     return set(data.roles.keys())
 
 
-def _split_frontmatter(text: str) -> str | None:
-    lines = text.split("\n")
-    if not lines or lines[0].strip() != "---":
+def _frontmatter_llm_role_value(frontmatter: dict[str, Any]) -> str | None:
+    value = frontmatter.get("llm_role")
+    if not isinstance(value, str):
         return None
-    for index in range(1, len(lines)):
-        if lines[index].strip() == "---":
-            return "\n".join(lines[1:index])
-    return None
-
-
-_LLM_ROLE_RE = re.compile(r"^llm_role:[ \t]*(\S.*?)[ \t]*$", re.MULTILINE)
-
-
-def _safe_skill_child_path(skill_dir: Path, *relative_parts: str) -> Path | None:
-    if any(part in {"", ".", ".."} or "/" in part or "\\" in part for part in relative_parts):
-        return None
-    try:
-        root = skill_dir.resolve(strict=False)
-        child = root.joinpath(*relative_parts).resolve(strict=False)
-        child.relative_to(root)
-    except (OSError, RuntimeError, ValueError):
-        return None
-    return child
-
-
-def _safe_skill_child_file(skill_dir: Path, *relative_parts: str) -> Path | None:
-    child = _safe_skill_child_path(skill_dir, *relative_parts)
-    if child is None or not child.is_file():
-        return None
-    return child
-
-
-def _safe_skill_child_dir(skill_dir: Path, *relative_parts: str) -> Path | None:
-    child = _safe_skill_child_path(skill_dir, *relative_parts)
-    if child is None or not child.is_dir():
-        return None
-    return child
-
-
-def _frontmatter_llm_role(skill_dir: Path, *relative_parts: str) -> str | None:
-    """Read the top-level `llm_role` string from a markdown file's YAML frontmatter."""
-    path = _safe_skill_child_file(skill_dir, *relative_parts)
-    if path is None:
-        return None
-    try:
-        # codeql[py/path-injection] _safe_skill_child_file resolves symlinks and confines this path to skill_dir.
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return None
-    frontmatter = _split_frontmatter(text)
-    if frontmatter is None:
-        return None
-    match = _LLM_ROLE_RE.search(frontmatter)
-    if not match:
-        return None
-    value = match.group(1).strip().strip('"').strip("'").strip()
+    value = value.strip().strip('"').strip("'").strip()
     return value or None
 
 
@@ -330,19 +279,20 @@ def _unconfigured_role_error(file: str, role: str, phase_name: str | None) -> Li
     )
 
 
-def _llm_role_lint_errors(skill_dir: Path, role_names: set[str]) -> list[LintError]:
+def _llm_role_lint_errors(compiled: CompiledSkill, role_names: set[str]) -> list[LintError]:
     """Warn for any llm_role (graph default or an agent SKILL.md) not in role_names."""
     errors: list[LintError] = []
-    graph_role = _frontmatter_llm_role(skill_dir, "GRAPH.md")
+    graph_raw = compiled.raw.get("graph")
+    graph_frontmatter = graph_raw.get("frontmatter", {}) if isinstance(graph_raw, dict) else {}
+    graph_role = _frontmatter_llm_role_value(graph_frontmatter if isinstance(graph_frontmatter, dict) else {})
     if graph_role and graph_role not in role_names:
         errors.append(_unconfigured_role_error("GRAPH.md", graph_role, None))
-    phases_dir = _safe_skill_child_dir(skill_dir, "phases")
-    if phases_dir is not None:
-        for phase_dir in sorted(phases_dir.iterdir(), key=lambda path: path.name):
-            phase_name = phase_dir.name
-            role = _frontmatter_llm_role(skill_dir, "phases", phase_name, "SKILL.md")
-            if role and role not in role_names:
-                errors.append(_unconfigured_role_error(f"phases/{phase_name}/SKILL.md", role, phase_name))
+    for phase in compiled.nodes:
+        if phase.mode != "agent":
+            continue
+        role = _frontmatter_llm_role_value(phase.frontmatter)
+        if role and role not in role_names:
+            errors.append(_unconfigured_role_error(f"phases/{phase.phase_name}/SKILL.md", role, phase.phase_name))
     return errors
 
 

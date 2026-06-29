@@ -121,35 +121,19 @@ def test_absent_llm_role_is_not_flagged(
     assert [e for e in result.errors if e.field_path == "llm_role"] == []
 
 
-def test_llm_role_lint_does_not_read_graph_symlink_outside_skill_root(tmp_path: Path) -> None:
-    skill_dir = tmp_path / "skill"
-    outside_dir = tmp_path / "outside"
-    skill_dir.mkdir()
-    outside_dir.mkdir()
-    (outside_dir / "GRAPH.md").write_text("---\nllm_role: ghost_role\n---\n", encoding="utf-8")
-    graph_path = skill_dir / "GRAPH.md"
-    try:
-        graph_path.symlink_to(outside_dir / "GRAPH.md")
-    except OSError as exc:
-        pytest.skip(f"symlink unavailable on this platform: {exc}")
+def test_llm_role_lint_uses_compiled_metadata_without_rereading_phase_file(
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, _workspaces = studio_roots
+    skill_dir = skills_dir / "role-demo"
+    _write_agent_skill(skill_dir, llm_role="ghost_role")
+    compiled = skill_service._load_compiled(skill_dir)
 
-    errors = skill_service._llm_role_lint_errors(skill_dir, role_names=set())
+    (skill_dir / "phases" / "review" / "SKILL.md").write_text(_skill_md("analyst"), encoding="utf-8")
 
-    assert [e for e in errors if e.field_path == "llm_role"] == []
+    errors = skill_service._llm_role_lint_errors(compiled, role_names={"analyst"})
 
-
-def test_llm_role_lint_does_not_read_phase_symlink_outside_skill_root(tmp_path: Path) -> None:
-    skill_dir = tmp_path / "skill"
-    outside_phase_dir = tmp_path / "outside" / "review"
-    (skill_dir / "phases").mkdir(parents=True)
-    outside_phase_dir.mkdir(parents=True)
-    (outside_phase_dir / "SKILL.md").write_text(_skill_md("ghost_role"), encoding="utf-8")
-    phase_link = skill_dir / "phases" / "review"
-    try:
-        phase_link.symlink_to(outside_phase_dir, target_is_directory=True)
-    except OSError as exc:
-        pytest.skip(f"symlink unavailable on this platform: {exc}")
-
-    errors = skill_service._llm_role_lint_errors(skill_dir, role_names=set())
-
-    assert [e for e in errors if e.field_path == "llm_role"] == []
+    role_errs = [e for e in errors if e.field_path == "llm_role"]
+    assert len(role_errs) == 1
+    assert role_errs[0].file == "phases/review/SKILL.md"
+    assert "ghost_role" in role_errs[0].message

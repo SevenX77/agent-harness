@@ -80,6 +80,8 @@ vi.mock('@/components/ui/context-menu', () => ({
     contextMenuItems.push({ label, onSelect })
     return <button type="button">{children}</button>
   },
+  ContextMenuLabel: ({ children }: { children: ReactNode }) => <div data-testid="context-menu-label">{children}</div>,
+  ContextMenuShortcut: ({ children }: { children: ReactNode }) => <span data-testid="context-menu-shortcut">{children}</span>,
   ContextMenuSeparator: () => <hr />,
   ContextMenuSub: ({ children }: { children: ReactNode }) => <div data-testid="context-menu-sub">{children}</div>,
   ContextMenuSubContent: ({ children }: { children: ReactNode }) => <div data-testid="context-menu-sub-content">{children}</div>,
@@ -260,7 +262,7 @@ describe('GraphCanvas', () => {
     expect(props?.proOptions?.hideAttribution).toBe(true)
   })
 
-  it('opens the properties panel when a skill node is clicked', () => {
+  it('selects (highlights) a skill node without opening a panel on the first click', () => {
     const onNodeSelect = vi.fn()
     const onPanelChange = vi.fn()
     const onNodeFileOpen = vi.fn()
@@ -280,13 +282,14 @@ describe('GraphCanvas', () => {
     props?.onNodeClick?.({}, selected)
 
     expect(onNodeSelect).toHaveBeenCalledWith({ id: 'setup', data: selected.data })
-    expect(onPanelChange).toHaveBeenCalledWith('properties')
+    expect(onPanelChange).not.toHaveBeenCalled()
     expect(onNodeFileOpen).not.toHaveBeenCalled()
   })
 
-  it('opens graph properties and clears node selection when the empty pane is clicked', () => {
+  it('closes the panel and editors and clears selection when the empty pane is clicked', () => {
     const onNodeDeselect = vi.fn()
     const onPanelChange = vi.fn()
+    const onCloseEditors = vi.fn()
     const onNodeFileOpen = vi.fn()
     renderToStaticMarkup(
       <GraphCanvas
@@ -295,6 +298,7 @@ describe('GraphCanvas', () => {
         onNodeDeselect={onNodeDeselect}
         onNodeFileOpen={onNodeFileOpen}
         onPanelChange={onPanelChange}
+        onCloseEditors={onCloseEditors}
       />,
     )
 
@@ -304,11 +308,12 @@ describe('GraphCanvas', () => {
     props?.onPaneClick?.()
 
     expect(onNodeDeselect).toHaveBeenCalled()
-    expect(onPanelChange).toHaveBeenCalledWith('properties')
+    expect(onPanelChange).toHaveBeenCalledWith(null)
+    expect(onCloseEditors).toHaveBeenCalled()
     expect(onNodeFileOpen).not.toHaveBeenCalled()
   })
 
-  it('does not treat a node as still selected after the empty pane was clicked', () => {
+  it('treats a node click after an empty-pane click as a fresh first click (no panel)', () => {
     vi.useFakeTimers()
     try {
       const onNodeSelect = vi.fn()
@@ -345,7 +350,8 @@ describe('GraphCanvas', () => {
 
       expect(onNodeDeselect).toHaveBeenCalled()
       expect(onNodeSelect).toHaveBeenCalledWith({ id: 'setup', data: selected.data })
-      expect(onPanelChange).toHaveBeenCalledWith('properties')
+      // Pane click deselected, so this is a first click again: selection only.
+      expect(onPanelChange).not.toHaveBeenCalled()
       expect(onNodeFileOpen).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
@@ -382,7 +388,7 @@ describe('GraphCanvas', () => {
     expect(onNodeFileOpen).not.toHaveBeenCalled()
   })
 
-  it('opens the phase file when an already-selected skill node is clicked again', () => {
+  it('opens the recorded panel when an already-selected skill node is clicked again', () => {
     vi.useFakeTimers()
     try {
       const onNodeSelect = vi.fn()
@@ -410,74 +416,95 @@ describe('GraphCanvas', () => {
       props?.onNodeClick?.({}, selected)
 
       expect(onNodeSelect).toHaveBeenCalledWith({ id: 'setup', data: selected.data })
-      expect(onPanelChange).not.toHaveBeenCalledWith('properties')
-      expect(onNodeFileOpen).not.toHaveBeenCalled()
+      // The panel open is deferred (so a double-click can pre-empt it).
+      expect(onPanelChange).not.toHaveBeenCalled()
 
       vi.advanceTimersByTime(220)
 
-      expect(onNodeFileOpen).toHaveBeenCalledWith({
-        path: 'phases/setup/LOGIC.md',
-        skillId: 'demo',
-        workspaceRoot: null,
-        language: 'markdown',
-        saveEnabled: true,
-      })
+      // With no onOpenSelectedNodePanel host hook, the second click falls back to
+      // the Properties panel — never the file editor.
+      expect(onPanelChange).toHaveBeenCalledWith('properties')
+      expect(onNodeFileOpen).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('opens inline subgraph child files with the child workspace identity, not a parent-prefixed string', () => {
+  it('opens the recorded panel via the host hook on the second click of a selected node', () => {
     vi.useFakeTimers()
     try {
-      const onNodeFileOpen = vi.fn()
-      const childNode: SkillGraphNode = {
-        ...phaseNode('__subpreview__::node::event_timeline::review'),
-        data: {
-          ...phaseNode('review').data,
-          skillId: 'event-extraction',
-          workspaceRoot: '/repo/skills/story-deconstruction-v3/subgraph/event-timeline/subgraph/event-extraction',
-          phaseId: 'review',
-          label: 'review',
-          mode: 'llm',
-          filePath: 'phases/review/SKILL.md',
-        },
-      }
+      const onOpenSelectedNodePanel = vi.fn()
+      const onPanelChange = vi.fn()
       renderToStaticMarkup(
         <GraphCanvas
-          skillId="story-deconstruction-v3"
-          selectedNodeId={childNode.id}
-          onNodeFileOpen={onNodeFileOpen}
+          skillId="demo-skill"
+          selectedNodeId="setup"
+          onOpenSelectedNodePanel={onOpenSelectedNodePanel}
+          onPanelChange={onPanelChange}
         />,
       )
 
       const props = reactFlowPropsRef.current as {
         onNodeClick?: (event: unknown, node: SkillGraphNode) => void
       } | null
-      props?.onNodeClick?.({}, childNode)
+      props?.onNodeClick?.({}, phaseNode('setup'))
       vi.advanceTimersByTime(220)
 
-      expect(onNodeFileOpen).toHaveBeenCalledWith({
-        path: 'phases/review/SKILL.md',
-        skillId: 'event-extraction',
-        workspaceRoot: '/repo/skills/story-deconstruction-v3/subgraph/event-timeline/subgraph/event-extraction',
-        language: 'markdown',
-        saveEnabled: true,
-      })
+      // The host decides which panel to restore; the canvas does not force one.
+      expect(onOpenSelectedNodePanel).toHaveBeenCalledTimes(1)
+      expect(onPanelChange).not.toHaveBeenCalledWith('properties')
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('does not open a subgraph file when the second click becomes a drill double-click', () => {
+  it('opens inline subgraph child files with the child workspace identity on double-click', () => {
+    const onNodeFileOpen = vi.fn()
+    const childNode: SkillGraphNode = {
+      ...phaseNode('__subpreview__::node::event_timeline::review'),
+      data: {
+        ...phaseNode('review').data,
+        skillId: 'event-extraction',
+        workspaceRoot: '/repo/skills/story-deconstruction-v3/subgraph/event-timeline/subgraph/event-extraction',
+        phaseId: 'review',
+        label: 'review',
+        mode: 'llm',
+        filePath: 'phases/review/SKILL.md',
+      },
+    }
+    renderToStaticMarkup(
+      <GraphCanvas
+        skillId="story-deconstruction-v3"
+        selectedNodeId={childNode.id}
+        onNodeFileOpen={onNodeFileOpen}
+      />,
+    )
+
+    const props = reactFlowPropsRef.current as {
+      onNodeDoubleClick?: (event: unknown, node: SkillGraphNode) => void
+    } | null
+    props?.onNodeDoubleClick?.({}, childNode)
+
+    expect(onNodeFileOpen).toHaveBeenCalledWith({
+      path: 'phases/review/SKILL.md',
+      skillId: 'event-extraction',
+      workspaceRoot: '/repo/skills/story-deconstruction-v3/subgraph/event-timeline/subgraph/event-extraction',
+      language: 'markdown',
+      saveEnabled: true,
+    })
+  })
+
+  it('opens the subgraph file on double-click and cancels the pending second-click panel', () => {
     vi.useFakeTimers()
     try {
       const onNodeFileOpen = vi.fn()
+      const onPanelChange = vi.fn()
       renderToStaticMarkup(
         <GraphCanvas
           skillId="demo-skill"
           selectedNodeId="child"
           onNodeFileOpen={onNodeFileOpen}
+          onPanelChange={onPanelChange}
         />,
       )
 
@@ -493,11 +520,20 @@ describe('GraphCanvas', () => {
         filePath: 'phases/child/SUBGRAPH.md',
       }
 
+      // Second click on the already-selected node arms the deferred panel open…
       props?.onNodeClick?.({}, selected)
+      // …and the double-click cancels it, opening the subgraph file instead.
       props?.onNodeDoubleClick?.({}, selected)
       vi.advanceTimersByTime(220)
 
-      expect(onNodeFileOpen).not.toHaveBeenCalled()
+      expect(onNodeFileOpen).toHaveBeenCalledWith({
+        path: 'phases/child/SUBGRAPH.md',
+        skillId: 'demo',
+        workspaceRoot: null,
+        language: 'markdown',
+        saveEnabled: true,
+      })
+      expect(onPanelChange).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
     }
@@ -524,13 +560,15 @@ describe('GraphCanvas', () => {
     expect(onNodeSelect).toHaveBeenCalledWith({ id: 'plan', data: selected.data })
   })
 
-  it('renders new phase node actions under an Add Phase Node submenu', () => {
+  it('renders new phase node actions flattened directly in the menu', () => {
     const onCreatePhase = vi.fn()
     const html = renderToStaticMarkup(<GraphCanvas skillId="demo-skill" onCreatePhase={onCreatePhase} />)
 
     expect(html).not.toContain('Add phase')
     expect(html).not.toContain('Macro contract')
-    expect(html).toContain('Add Phase Node')
+    // Flattened: an "Add node" label heads the options, no nested submenu trigger.
+    expect(html).toContain('Add node')
+    expect(html).not.toContain('Add Phase Node')
     expect(html).toContain('Agent Phase')
     expect(html).toContain('Logic Phase')
     expect(html).toContain('Subgraph Phase')
@@ -1102,12 +1140,13 @@ describe('GraphCanvas', () => {
     expect(html).not.toContain('lucide-briefcase')
   })
 
-  it('lets double-click on a subgraph node propagate so ReactFlow can drill in', () => {
-    // Regression (2026-06-23): the node must NOT swallow the double-click. Drill-
-    // down is routed by ReactFlow's onNodeDoubleClick on the canvas; if SkillNode
-    // calls stopPropagation for subgraph nodes, that handler never fires and
-    // double-clicking a subgraph node silently fails to drill in. Inline expand is
-    // a separate affordance (the explicit Expand-subgraph button), not double-click.
+  it('lets double-click on a subgraph node propagate so ReactFlow can open its file', () => {
+    // The node must NOT swallow the double-click. Opening the subgraph's file is
+    // routed by ReactFlow's onNodeDoubleClick on the canvas; if SkillNode calls
+    // stopPropagation for subgraph nodes, that handler never fires and
+    // double-clicking a subgraph node silently fails to open the editor. Inline
+    // expand is a separate affordance (the explicit Expand-subgraph button), and
+    // drilling into the child canvas now lives on the expanded board's button.
     const stopPropagation = vi.fn()
     const onToggleSubgraph = vi.fn()
     const node = renderSkillNodeRoot({

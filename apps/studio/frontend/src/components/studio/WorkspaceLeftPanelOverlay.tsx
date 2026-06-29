@@ -1,20 +1,24 @@
 import type { ReactNode } from "react"
 import { X } from "lucide-react"
+import { OverlayResizeHandle } from "./OverlayResizeHandle"
 
-const LEFT_PANEL_WIDTH = "24rem"
+export const LEFT_PANEL_MIN_WIDTH = 280
+export const LEFT_PANEL_MAX_WIDTH = 720
 
 interface WorkspaceLeftPanelOverlayProps {
   children: ReactNode
   onClose: () => void
+  width: number
+  onResize: (widthPx: number) => void
 }
 
-export function WorkspaceLeftPanelOverlay({ children, onClose }: WorkspaceLeftPanelOverlayProps) {
+export function WorkspaceLeftPanelOverlay({ children, onClose, width, onResize }: WorkspaceLeftPanelOverlayProps) {
   return (
     <section
       aria-label="Workspace panel"
       data-studio-left-overlay="true"
-      className="studio-left-panel-overlay pointer-events-auto absolute left-3 top-3 z-30 flex h-fit min-h-0 max-h-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-lg border text-card-foreground"
-      style={{ width: LEFT_PANEL_WIDTH, maxWidth: "calc(100% - 1.5rem)" }}
+      className="studio-left-panel-overlay pointer-events-auto absolute bottom-3 left-3 top-3 z-30 flex min-h-0 flex-col overflow-hidden rounded-lg border text-card-foreground"
+      style={{ width: `${width}px`, maxWidth: "calc(100% - 1.5rem)" }}
     >
       <button
         type="button"
@@ -24,9 +28,16 @@ export function WorkspaceLeftPanelOverlay({ children, onClose }: WorkspaceLeftPa
       >
         <X className="size-3.5" aria-hidden />
       </button>
-      <div data-studio-left-panel-content="true" className="flex min-h-0 max-h-[inherit]">
+      <div data-studio-left-panel-content="true" className="flex h-full min-h-0 flex-1">
         {children}
       </div>
+      <OverlayResizeHandle
+        side="right"
+        min={LEFT_PANEL_MIN_WIDTH}
+        max={LEFT_PANEL_MAX_WIDTH}
+        onResize={onResize}
+        ariaLabel="Resize panel"
+      />
     </section>
   )
 }

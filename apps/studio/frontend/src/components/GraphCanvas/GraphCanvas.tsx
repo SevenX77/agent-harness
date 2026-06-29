@@ -29,10 +29,9 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuLabel,
   ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
+  ContextMenuShortcut,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { CycleDetectedError, getAutoLayoutedElements } from '@/lib/layout'
@@ -42,7 +41,7 @@ import { SubgraphBridgeEdge } from '@/components/edges/SubgraphBridgeEdge'
 import { SubgraphGroupNode } from '@/components/nodes/SubgraphGroupNode'
 import { buildEdges, GlobalInputNode, GlobalOutputNode, INPUT_ID, OUTPUT_ID, SkillNode, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
 import { SUBGRAPH_BRIDGE_EDGE_TYPE } from '@/components/nodes/subgraph-bridge-handles'
-import { buildSubgraphExpansion, positionedParentNodes, type ExpandedSubgraphView, type SubgraphExpansionRequest, type SubgraphExpansionResult } from '@/components/GraphCanvas/subgraph-expansion'
+import { buildSubgraphExpansion, positionedParentNodes, type ExpandedSubgraphView, type SubgraphExpansionRequest } from '@/components/GraphCanvas/subgraph-expansion'
 import type { GoldenNodeState } from '@/components/studio/node-golden'
 import { useOptionalWorkspaceContext, type EdgeContextJson } from '@/components/studio/WorkspaceContext'
 import type { FileOpenInput, FileOpenRequest } from '@/components/studio/file-types'
@@ -103,7 +102,13 @@ interface GraphCanvasProps {
   onNodeDeselect?: () => void
   onNodeFileOpen?: (file: FileOpenInput) => void
   onPanelChange?: (panel: PanelKind | null) => void
-  onCreatePhase?: (kind: NewPhaseKind, phaseId?: string) => Promise<void> | void
+  // Clicking an already-selected node opens the LAST panel the user had open
+  // (recorded by the host), not a hard-coded Properties panel. Falls back to
+  // 'properties' when the host does not provide it.
+  onOpenSelectedNodePanel?: () => void
+  // Clicking empty canvas closes any open side panel AND the file editor(s).
+  onCloseEditors?: () => void
+  onCreatePhase?: (kind: NewPhaseKind, phaseId?: string, target?: ChildSaveTarget) => Promise<void> | void
   onDeletePhase?: (phaseId: string, target?: ChildSaveTarget) => Promise<void> | void
   // n2-canvas #14: every save handler takes an optional drilled-child `target`. When
   // editing INSIDE a drilled subgraph the canvas passes the child's own identity +
@@ -457,6 +462,44 @@ function childGraphErrorMessage(error: unknown, path: string): string {
   return `Failed to load subgraph at ${path}`
 }
 
+// Fit-view must frame the graph inside the VISIBLE canvas area, not the full
+// container — the side panel / copilot / file editor float ON TOP of the canvas.
+// The host already maintains those overlay sizes as CSS custom properties; we
+// resolve them to pixels with a throwaway probe so calc()/rem/% are computed by
+// the browser. Left/right insets are width-based (rem). The file editor overlay
+// is anchored at the TOP of the canvas (`.studio-editor-overlay` is `top-3`) and
+// its `min(52%, …)` height is height-relative, so its inset is measured as a
+// height and applied to the TOP. Returns zeros when the vars are absent (e.g.
+// the compact canvas).
+function readCanvasSafeInsets(host: HTMLElement): { left: number; right: number; top: number } {
+  if (typeof document === 'undefined') return { left: 0, right: 0, top: 0 }
+  const probe = document.createElement('div')
+  probe.style.position = 'absolute'
+  probe.style.visibility = 'hidden'
+  probe.style.pointerEvents = 'none'
+  probe.style.top = '0'
+  probe.style.left = '0'
+  probe.style.width = '0px'
+  probe.style.height = '0px'
+  host.appendChild(probe)
+  try {
+    const widthOf = (varName: string): number => {
+      probe.style.width = `var(${varName}, 0px)`
+      const value = probe.getBoundingClientRect().width
+      probe.style.width = '0px'
+      return Number.isFinite(value) ? value : 0
+    }
+    const left = widthOf('--studio-canvas-left-safe-area')
+    const right = widthOf('--studio-canvas-right-safe-area')
+    probe.style.height = 'var(--studio-canvas-editor-safe-area, 0px)'
+    const topRaw = probe.getBoundingClientRect().height
+    const top = Number.isFinite(topRaw) ? topRaw : 0
+    return { left, right, top }
+  } finally {
+    host.removeChild(probe)
+  }
+}
+
 export function GraphCanvas({
   skillId,
   workspaceRoot,
@@ -469,6 +512,8 @@ export function GraphCanvas({
   onNodeDeselect,
   onNodeFileOpen,
   onPanelChange,
+  onOpenSelectedNodePanel,
+  onCloseEditors,
   onCreatePhase,
   onDeletePhase,
   onPersistConnection,
@@ -557,16 +602,26 @@ export function GraphCanvas({
     result: { nodes: GraphCanvasNode[]; edges: Edge<ContextEdgeData>[]; error: CycleDetectedError | null }
   } | null>(null)
   const stableLayoutPositionsRef = useRef<Map<string, GraphCanvasNode['position']>>(new Map())
-  const pendingNodeFileOpenRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Where the last pane right-click landed, in flow coordinates — used to drop a
+  // newly-created node AT the cursor instead of the auto-layout's default slot.
+  const lastPaneContextFlowPositionRef = useRef<{ x: number; y: number } | null>(null)
+  // Positions to force onto nodes as soon as they appear (keyed by phase id). A
+  // created node may not exist in the graph yet when we capture its placement, so
+  // we hold the position here until the rebuild surfaces it, then apply + clear.
+  const pendingCreatePositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map())
+  // Deferred single-click action (open the recorded panel on the SECOND click of
+  // an already-selected node). Held in a timeout so a double-click can cancel it
+  // and open the editor instead of flashing a panel open.
+  const pendingNodeClickActionRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const cancelPendingNodeFileOpen = useCallback(() => {
-    if (pendingNodeFileOpenRef.current) {
-      clearTimeout(pendingNodeFileOpenRef.current)
-      pendingNodeFileOpenRef.current = null
+  const cancelPendingNodeClickAction = useCallback(() => {
+    if (pendingNodeClickActionRef.current) {
+      clearTimeout(pendingNodeClickActionRef.current)
+      pendingNodeClickActionRef.current = null
     }
   }, [])
 
-  useEffect(() => cancelPendingNodeFileOpen, [cancelPendingNodeFileOpen])
+  useEffect(() => cancelPendingNodeClickAction, [cancelPendingNodeClickAction])
 
   const applySelectionOverride = useCallback((nodeId: string | null) => {
     const next = { active: true, nodeId }
@@ -764,12 +819,67 @@ export function GraphCanvas({
   const handleZoomOut = useCallback(() => {
     void reactFlowInstanceRef.current?.zoomOut()
   }, [])
-  const handleFitView = useCallback(() => {
-    void (fitViewRef.current?.() ?? reactFlowInstanceRef.current?.fitView({ padding: 0.2 }))
+  // Fit the graph into the area NOT covered by the open panel / copilot / editor
+  // overlays. Base breathing room plus the live overlay insets, per side.
+  const runFitView = useCallback(() => {
+    const instance = reactFlowInstanceRef.current
+    if (!instance) return
+    const host = canvasRef.current
+    const insets = host ? readCanvasSafeInsets(host) : { left: 0, right: 0, top: 0 }
+    const BASE = 32
+    return instance.fitView({
+      padding: {
+        top: `${insets.top + BASE}px`,
+        left: `${insets.left + BASE}px`,
+        right: `${insets.right + BASE}px`,
+        bottom: `${BASE}px`,
+      },
+    })
   }, [])
+  const handleFitView = useCallback(() => {
+    void (fitViewRef.current?.() ?? runFitView())
+  }, [runFitView])
   const handleToggleCanvasLock = useCallback(() => {
     setCanvasLocked((locked) => !locked)
   }, [])
+  // #3.2: keyboard shortcuts for the high-frequency canvas actions (shown in the
+  // right-click menu). Window-level but ignored while typing in a field; zoom/fit
+  // honor the canvas lock (the lock toggle itself always works). Modified combos
+  // are left to the browser/OS.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      // Require the platform modifier (Ctrl on Win/Linux, Cmd on macOS) so the
+      // shortcuts can never fire from plain typing. Ignore other modifier combos.
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return
+      const target = event.target as HTMLElement | null
+      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return
+      switch (event.key) {
+        case '=':
+        case '+':
+          if (canvasLocked) return
+          handleZoomIn()
+          break
+        case '-':
+        case '_':
+          if (canvasLocked) return
+          handleZoomOut()
+          break
+        case '0':
+          if (canvasLocked) return
+          handleFitView()
+          break
+        case 'l':
+        case 'L':
+          handleToggleCanvasLock()
+          break
+        default:
+          return
+      }
+      event.preventDefault()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [canvasLocked, handleFitView, handleToggleCanvasLock, handleZoomIn, handleZoomOut])
   const fitInitialViewportOnce = useCallback((hasLayoutNodes: boolean) => {
     const fitView = fitViewRef.current
     if (!shouldRunInitialViewportFit({
@@ -1201,9 +1311,19 @@ export function GraphCanvas({
   }, [compactRatio, layoutCanvasHeight, layoutSignature, rawNodes, topologyEdges])
   const baseLayout = useMemo(() => {
     const stableLayout = mergeStableLayoutPositions(rawNodes, layoutResult.nodes, stableLayoutPositionsRef.current)
+    // Drop right-click-created nodes at the captured cursor position the moment
+    // they materialize, overriding the auto-layout slot. Consumed once applied.
+    const pending = pendingCreatePositionsRef.current
+    const positionedNodes = pending.size === 0 ? stableLayout.nodes : stableLayout.nodes.map((node) => {
+      const placement = pending.get(node.id)
+      if (!placement) return node
+      pending.delete(node.id)
+      stableLayout.positions.set(node.id, placement)
+      return { ...node, position: placement }
+    })
     stableLayoutPositionsRef.current = stableLayout.positions
     return {
-      nodes: stableLayout.nodes,
+      nodes: positionedNodes,
       edges: rawEdges,
     }
   }, [layoutResult.nodes, rawEdges, rawNodes])
@@ -1214,7 +1334,9 @@ export function GraphCanvas({
   // canvas pipeline. The base layout signature is visible-node based: editing
   // dependency edges redraws lines, but it must not rerun dagre or move nodes.
   const subgraphExpansion = useMemo(() => {
-    if (isDrilled) return { nodes: [], edges: [] } satisfies SubgraphExpansionResult
+    // Inline subgraph expansion works the SAME at root depth and inside a drilled
+    // child graph — expanding a subgraph node previews its topology beside it
+    // either way (no isDrilled short-circuit).
     const nodes: GraphCanvasNode[] = []
     const edges: Edge<ContextEdgeData>[] = []
     const processed = new Set<string>()
@@ -1261,18 +1383,24 @@ export function GraphCanvas({
         onToggleSteps: toggleSteps,
         onStepsSave: handleExpandedPreviewStepsSave,
       })
-      nodes.push(...partial.nodes)
+      // The expanded subgraph board carries an "open child canvas" button
+      // (drill-in). Double-clicking the subgraph node now opens its file instead.
+      nodes.push(...partial.nodes.map((node) => (
+        node.type === 'subgraphGroup'
+          ? { ...node, data: { ...node.data, onOpenCanvas: drillInto } }
+          : node
+      )))
       edges.push(...partial.edges)
     }
 
     return { nodes, edges }
   }, [
     baseLayout.nodes,
+    drillInto,
     expandedSteps,
     expandedSubgraphs,
     expandedTopologies,
     handleExpandedPreviewStepsSave,
-    isDrilled,
     topologyRootSkillId,
     toggleSteps,
     toggleSubgraph,
@@ -1336,7 +1464,6 @@ export function GraphCanvas({
   // embedded child roots, otherwise a same-name global skill can be picked as the
   // parent boundary and reject a valid nested child path.
   const expandedPathPairs = useMemo(() => {
-    if (isDrilled) return [] as Array<{ id: string; path: string; ownerSkillId: string }>
     return composedLayout.nodes
       .filter((node): node is SkillGraphNode => node.type === 'skill' && expandedSubgraphs.has(node.id))
       .map((node) => ({
@@ -1346,7 +1473,7 @@ export function GraphCanvas({
       }))
       .filter((pair): pair is { id: string; path: string; ownerSkillId: string } => Boolean(pair.path))
       .sort((a, b) => a.id.localeCompare(b.id))
-  }, [composedLayout.nodes, expandedSubgraphs, isDrilled, topologyRootSkillId, workspaceRoot])
+  }, [composedLayout.nodes, expandedSubgraphs, topologyRootSkillId, workspaceRoot])
   const expandedPathKey = useMemo(
     () => expandedPathPairs.map((pair) => `${pair.id}\0${pair.ownerSkillId}\0${pair.path}`).join('|'),
     [expandedPathPairs],
@@ -1463,8 +1590,40 @@ export function GraphCanvas({
     })
   }, [applySelectionOverride, setNodes])
 
+  // Selection is OWNED by the app (selectedNodeId + override), never by React
+  // Flow's internal selection. `stampSelection` flips ONLY the `selected` flag
+  // from the active id, read through a ref so the layout-rebuild effect can apply
+  // it WITHOUT depending on selection — otherwise every select (e.g. starting to
+  // drag another node) would re-run that effect and snap dragged nodes back to
+  // their stale composed-layout positions.
+  const activeSelectionRef = useRef<string | null>(null)
+  const stampSelection = useCallback((list: GraphCanvasNode[]): GraphCanvasNode[] => {
+    const activeId = activeSelectionRef.current
+    let changed = false
+    const next = list.map((node) => {
+      if (node.type === 'subgraphGroup') return node
+      const selected = node.id === activeId
+      if (node.selected === selected) return node
+      changed = true
+      return { ...node, selected }
+    })
+    return changed ? next : list
+  }, [])
+
+  // Re-apply selection to the LIVE nodes whenever the active selection changes.
+  // Only `selected` is touched, so any in-progress drag positions are preserved.
+  useEffect(() => {
+    activeSelectionRef.current = currentActiveSelectedNodeId() ?? null
+    setNodes((current) => stampSelection(current))
+  }, [currentActiveSelectedNodeId, setNodes, stampSelection])
+
   const handleNodesChange = useCallback((changes: NodeChange<GraphCanvasNode>[]) => {
-    onNodesChange(changes)
+    // Drop React Flow's own selection changes — the app is the single source of
+    // truth for selection (so the highlight can never drift from selectedNodeId).
+    const nonSelectChanges = changes.filter((change) => change.type !== 'select')
+    if (nonSelectChanges.length > 0) {
+      onNodesChange(nonSelectChanges)
+    }
     stableLayoutPositionsRef.current = updateStableLayoutPositionsFromNodeChanges(
       stableLayoutPositionsRef.current,
       changes,
@@ -1474,10 +1633,10 @@ export function GraphCanvas({
   const hasLayoutNodes = baseLayout.nodes.length > 0
 
   useCanvasLayoutEffect(() => {
-    setNodes(composedLayout.nodes)
+    setNodes(stampSelection(composedLayout.nodes))
     setEdges(decoratedComposedEdges)
     fitInitialViewportOnce(hasLayoutNodes)
-  }, [composedLayout.nodes, decoratedComposedEdges, fitInitialViewportOnce, hasLayoutNodes, setEdges, setNodes])
+  }, [stampSelection, composedLayout.nodes, decoratedComposedEdges, fitInitialViewportOnce, hasLayoutNodes, setEdges, setNodes])
 
   // Controlled effect to sync activeConflict, isConflictCancelled, and callbacks into the nodes state
   useEffect(() => {
@@ -1844,13 +2003,16 @@ export function GraphCanvas({
   }, [blockDrilledEditIfUnwritable, composedLayout.nodes, decoratedComposedEdges, drilledChildTarget, expandedChildSaveTarget, onDisconnectConnection, setEdges, setNodes])
 
   const handlePaneClick = useCallback(() => {
-    cancelPendingNodeFileOpen()
+    cancelPendingNodeClickAction()
     syncCanvasSelection(null)
     onNodeDeselect?.()
     setEdgeMenuConnection(null)
     setNodeMenuPhaseId(null)
-    onPanelChange?.('properties')
-  }, [cancelPendingNodeFileOpen, onNodeDeselect, onPanelChange, syncCanvasSelection])
+    // Clicking empty canvas clears the workspace: close the open side panel AND
+    // the file editor(s). It no longer opens the graph.md panel.
+    onPanelChange?.(null)
+    onCloseEditors?.()
+  }, [cancelPendingNodeClickAction, onCloseEditors, onNodeDeselect, onPanelChange, syncCanvasSelection])
 
   return (
     <ContextMenu>
@@ -1874,7 +2036,7 @@ export function GraphCanvas({
           editor split uses normal canvas mode so authoring behaviour stays the
           same when the canvas is squeezed into the lower pane. */}
       <ReactFlow
-        className={isViewportReady ? undefined : HIDDEN_INITIAL_VIEWPORT_CLASS}
+        className={[isViewportReady ? '' : HIDDEN_INITIAL_VIEWPORT_CLASS, canvasLocked ? 'canvas-locked' : ''].filter(Boolean).join(' ') || undefined}
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
@@ -1897,6 +2059,12 @@ export function GraphCanvas({
           if (isEdgeContextTarget(event.target)) {
             return
           }
+          // Remember where the menu opened (flow coords) so "Add node" can place
+          // the new node right here instead of the auto-layout default.
+          const instance = reactFlowInstanceRef.current
+          lastPaneContextFlowPositionRef.current = instance
+            ? instance.screenToFlowPosition({ x: event.clientX, y: event.clientY })
+            : null
           setEdgeMenuConnection(null)
           setNodeMenuPhaseId(null)
         }}
@@ -1919,7 +2087,7 @@ export function GraphCanvas({
         }}
         onNodeClick={(_, node) => {
           if (node.type === 'subgraphGroup') return
-          cancelPendingNodeFileOpen()
+          cancelPendingNodeClickAction()
           const wasSelected = isCanvasNodeSelected(node.id)
           syncCanvasSelection(node.id)
           if (node.type === 'globalInput' || node.type === 'globalOutput') {
@@ -1929,13 +2097,18 @@ export function GraphCanvas({
           }
           if (node.type === 'skill') {
             onNodeSelect?.({ id: skillNodePhaseId(node), data: node.data })
+            // First click selects/highlights only. The SECOND click on an
+            // already-selected node opens the last-recorded panel (deferred so a
+            // double-click opens the editor instead of flashing the panel open).
             if (wasSelected) {
-              pendingNodeFileOpenRef.current = setTimeout(() => {
-                pendingNodeFileOpenRef.current = null
-                openNodeFile(node)
+              pendingNodeClickActionRef.current = setTimeout(() => {
+                pendingNodeClickActionRef.current = null
+                if (onOpenSelectedNodePanel) {
+                  onOpenSelectedNodePanel()
+                } else {
+                  onPanelChange?.('properties')
+                }
               }, 220)
-            } else {
-              onPanelChange?.('properties')
             }
           }
         }}
@@ -1949,7 +2122,7 @@ export function GraphCanvas({
         selectNodesOnDrag
         onNodeDoubleClick={(_, node) => {
           if (node.type === 'subgraphGroup') return
-          cancelPendingNodeFileOpen()
+          cancelPendingNodeClickAction()
           syncCanvasSelection(node.id)
           if (node.type === 'globalInput' || node.type === 'globalOutput') {
             onNodeDeselect?.()
@@ -1958,30 +2131,17 @@ export function GraphCanvas({
           }
           if (node.type === 'skill') {
             const phaseId = skillNodePhaseId(node)
-            // R9: double-clicking a NESTED subgraph node focuses INTO its child
-            // graph in-place (drill DEEPER); non-subgraph phases open their source
-            // file as before. Unchanged at any depth.
-            const subgraphPath = resolveSubgraphPath(node.data.subgraphPath, node.data.workspaceRoot)
-            if (subgraphPath) {
-              drillInto(subgraphPath, node.data.label)
-              return
-            }
-            // n2-canvas #14 (edit write-back): while drilled, a leaf (non-subgraph)
-            // child node belongs to the CHILD subgraph and is edited IN PLACE; no
-            // project switch. The node's data.skillId is already the CHILD's own id
-            // (the drilled build keys nodes to the child identity) and its filePath
-            // is child-relative, so opening `${node.data.skillId}/<filePath>`
-            // resolves the child's real file. The removed pushNavSkill escape hatch
-            // (which swapped the whole Workspace to the child as a standalone
-            // project) is gone; drilled editing stays on the same canvas.
+            // Double-click opens the node's source file in the editor — for BOTH
+            // subgraph nodes (their SUBGRAPH.md) and leaf phases. Drilling INTO a
+            // child graph now lives on the expanded subgraph board's "open canvas"
+            // button (see SubgraphGroupNode), not on this double-click.
             onNodeSelect?.({ id: phaseId, data: node.data })
             openNodeFile(node)
-            onPanelChange?.('properties')
           }
         }}
         onInit={(instance) => {
           reactFlowInstanceRef.current = instance
-          fitViewRef.current = () => instance.fitView({ padding: 0.2 })
+          fitViewRef.current = runFitView
           fitInitialViewportOnce(hasLayoutNodes)
         }}
         nodeOrigin={CENTER_NODE_ORIGIN}
@@ -2048,7 +2208,7 @@ export function GraphCanvas({
         onZoomOut={handleZoomOut}
         onFitView={handleFitView}
         onToggleCanvasLock={handleToggleCanvasLock}
-        onCreatePhase={isDrilled ? undefined : handleOpenCreatePhaseDialog}
+        onCreatePhase={canEditCanvas ? handleOpenCreatePhaseDialog : undefined}
         onDeletePhase={handleMenuDeletePhase}
         onDisconnectConnection={handleMenuDisconnect}
         onCloseEdgeMenu={() => {
@@ -2071,7 +2231,17 @@ export function GraphCanvas({
           const kind = createPhaseKind
           if (!kind || !onCreatePhase) return
           setCreatePhaseKind(null)
-          void Promise.resolve(onCreatePhase(kind, phaseId))
+          // Same drilled-child routing as delete/connect: a read-only drilled child
+          // is blocked with a toast; an editable one routes the create to its target
+          // so the new node writes the CHILD's GRAPH.md.
+          if (blockDrilledEditIfUnwritable()) return
+          // Drop the new node where the user right-clicked (if captured).
+          const placement = lastPaneContextFlowPositionRef.current
+          if (placement) {
+            pendingCreatePositionsRef.current.set(phaseId, placement)
+            lastPaneContextFlowPositionRef.current = null
+          }
+          void Promise.resolve(onCreatePhase(kind, phaseId, drilledChildTarget ?? undefined))
             .catch((createError: unknown) => {
               toast.error(createError instanceof Error ? createError.message : 'Could not create phase')
             })
@@ -2086,6 +2256,9 @@ const ADD_PHASE_OPTIONS: ReadonlyArray<{ kind: NewPhaseKind; label: string }> = 
   { kind: 'logic', label: 'Logic Phase' },
   { kind: 'subgraph', label: 'Subgraph Phase' },
 ]
+
+// Display label for the canvas shortcut modifier: ⌘ on macOS, Ctrl+ elsewhere.
+const SHORTCUT_MOD = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform) ? '⌘' : 'Ctrl+'
 
 export function CanvasContextMenuContent({
   edgeMenuConnection,
@@ -2120,18 +2293,26 @@ export function CanvasContextMenuContent({
     return null
   }
   return (
-    <ContextMenuContent>
-      <ContextMenuItem onSelect={onZoomIn}>
+    // No scroll: show the whole menu (override the default available-height clamp).
+    // Wider min-width so the label and the right-aligned shortcut aren't cramped.
+    <ContextMenuContent className="min-w-52 max-h-none overflow-visible">
+      {/* Zoom / Fit are no-ops while the canvas is locked. Shortcuts mirror the
+          window-level keydown handler in GraphCanvas (#3.2). */}
+      <ContextMenuItem onSelect={onZoomIn} disabled={canvasLocked}>
         Zoom in
+        <ContextMenuShortcut>{SHORTCUT_MOD}=</ContextMenuShortcut>
       </ContextMenuItem>
-      <ContextMenuItem onSelect={onZoomOut}>
+      <ContextMenuItem onSelect={onZoomOut} disabled={canvasLocked}>
         Zoom out
+        <ContextMenuShortcut>{SHORTCUT_MOD}−</ContextMenuShortcut>
       </ContextMenuItem>
-      <ContextMenuItem onSelect={onFitView}>
+      <ContextMenuItem onSelect={onFitView} disabled={canvasLocked}>
         Fit view
+        <ContextMenuShortcut>{SHORTCUT_MOD}0</ContextMenuShortcut>
       </ContextMenuItem>
       <ContextMenuItem onSelect={onToggleCanvasLock}>
         {canvasLocked ? 'Unlock canvas' : 'Lock canvas'}
+        <ContextMenuShortcut>{SHORTCUT_MOD}L</ContextMenuShortcut>
       </ContextMenuItem>
       <ContextMenuSeparator />
       {edgeMenuConnection ? (
@@ -2147,19 +2328,19 @@ export function CanvasContextMenuContent({
         <ContextMenuItem variant="destructive" onSelect={() => { void onDeletePhase(nodeMenuPhaseId) }}>
           <Trash2 className="size-3.5" />
           Delete node
+          <ContextMenuShortcut>Del</ContextMenuShortcut>
         </ContextMenuItem>
-      ) : (
-        <ContextMenuSub>
-          <ContextMenuSubTrigger>Add Phase Node</ContextMenuSubTrigger>
-          <ContextMenuSubContent>
-            {ADD_PHASE_OPTIONS.map((option) => (
-              <ContextMenuItem key={option.kind} onSelect={() => { void onCreatePhase?.(option.kind) }}>
-                {option.label}
-              </ContextMenuItem>
-            ))}
-          </ContextMenuSubContent>
-        </ContextMenuSub>
-      )}
+      ) : onCreatePhase ? (
+        // Add-node options flattened directly into the menu (no nested submenu).
+        <>
+          <ContextMenuLabel>Add node</ContextMenuLabel>
+          {ADD_PHASE_OPTIONS.map((option) => (
+            <ContextMenuItem key={option.kind} onSelect={() => { void onCreatePhase?.(option.kind) }}>
+              {option.label}
+            </ContextMenuItem>
+          ))}
+        </>
+      ) : null}
     </ContextMenuContent>
   )
 }

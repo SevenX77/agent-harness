@@ -107,6 +107,9 @@ export interface SubgraphGroupNodeData extends Record<string, unknown> {
   status: 'loading' | 'error' | 'loaded'
   childName?: string
   message?: string
+  // Drill INTO the child graph (focus the canvas on this subgraph). Wired by the
+  // host canvas onto the expanded board's "open canvas" button.
+  onOpenCanvas?: (path: string, label: string) => void
 }
 
 export type GraphCanvasNode =

@@ -1,5 +1,5 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
-import { FileCode2, GripHorizontal } from 'lucide-react'
+import { FileCode2, GripHorizontal, Maximize2 } from 'lucide-react'
 import { SUBGRAPH_BRIDGE_TARGET_HANDLE_ID } from './subgraph-bridge-handles'
 import type { SubgraphGroupNodeData } from './types'
 import { Spinner } from '../ui/spinner'
@@ -40,6 +40,21 @@ export function SubgraphGroupNode({ data }: NodeProps<SubgraphGroupNode>) {
           <span className="studio-subgraph-badge ml-auto shrink-0 rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
             subgraph
           </span>
+          {typeof data.onOpenCanvas === 'function' ? (
+            <button
+              type="button"
+              aria-label="Open subgraph canvas"
+              title="Open subgraph canvas"
+              onClick={(event) => {
+                event.stopPropagation()
+                data.onOpenCanvas?.(data.path, title)
+              }}
+              onDoubleClick={(event) => event.stopPropagation()}
+              className="nodrag nopan pointer-events-auto inline-flex size-5 shrink-0 items-center justify-center rounded border border-border bg-card text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
+            >
+              <Maximize2 className="size-3" />
+            </button>
+          ) : null}
         </div>
         {data.status === 'loading' ? (
           <div className="flex flex-1 items-center justify-center gap-2 text-xs text-muted-foreground">

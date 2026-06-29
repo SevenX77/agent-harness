@@ -1,7 +1,7 @@
 ---
 status: FROZEN
 ssot: graph_skill_format_templates
-updated: 2026-06-28
+updated: 2026-06-29
 supersedes:
   - docs/engine/mvp1/01-contract/02-skill-syntax/mvp1-alignment.md inline templates
   - docs/engine/mvp1/_migration-src/
@@ -186,6 +186,7 @@ iterate:
 | `io.outputs` | yes | JSON Schema object | action 链允许写回黑板的输出字段 |
 | `actions` | yes | list[string] | action 名注册表 |
 | `validator` | no | boolean, default `false` | 是否运行同级 `validator.py` |
+| `allow_sequential_overwrite` | no | list[string], default `[]` | 允许本 phase 顺序覆盖上游同名输出字段的白名单，格式见第 10 节 |
 | `iterate` | no | IterateSpec | 节点级迭代声明，格式见第 7 节 |
 
 body `<action>` 必须与 frontmatter `actions` 完全一致，并决定实际执行顺序。
@@ -233,6 +234,7 @@ iterate:
 | `io.inputs` | yes | JSON Schema object | 从父图黑板切给子图的输入字段 |
 | `io.outputs` | yes | JSON Schema object | 子图返回后允许合并回父图黑板的输出字段 |
 | `validator` | no | boolean, default `false` | 是否运行同级 `validator.py` |
+| `allow_sequential_overwrite` | no | list[string], default `[]` | 允许本 phase 顺序覆盖上游同名输出字段的白名单，格式见第 10 节 |
 | `iterate` | no | IterateSpec | 父图调用这个子图节点时的节点级迭代声明 |
 
 SUBGRAPH 没有 body XML。
@@ -328,6 +330,7 @@ iterate:
 | `subgraphs` | no | list[SubgraphRef] | Agent 可引用的子图资源 |
 | `references` | no | list[ReferenceRef] | 可查阅资料 |
 | `examples` | no | list[ExampleRef] | 可查阅样例文件 |
+| `allow_sequential_overwrite` | no | list[string], default `[]` | 允许本 phase 顺序覆盖上游同名输出字段的白名单，格式见第 10 节 |
 | `iterate` | no | IterateSpec | 节点级迭代声明，格式见第 7 节 |
 
 `subagents` 与 `subgraphs` 不是一回事：
@@ -469,3 +472,37 @@ Studio Properties 面板必须从本文模板推导可编辑字段：
 - `name` 可以改，但应通过重命名动作完成，同步目录名与引用，而不是普通文本框直接写。
 - `path` 可以改，但应通过选择/重连已有子图目录完成，而不是让用户手输一个可能不存在的路径。
 - `io` 属于 Input/Output 专门面板；Properties 可以显示入口或跳转，但不应在普通属性表单里重复维护整块 schema。
+- `allow_sequential_overwrite` 在每个 phase 节点（LOGIC / SUBGRAPH / SKILL）的 Properties 表单里编辑，每行一个输出字段名；面板可依据上游 phase 的 `io.outputs` 给出候选勾选。语义见第 10 节。
+
+## 10. allow_sequential_overwrite
+
+`allow_sequential_overwrite` 是 phase frontmatter 字段，可出现在 `LOGIC.md`、`SUBGRAPH.md`、`SKILL.md`，不是 `GRAPH.md` 根字段。它是一个输出字段名白名单，类型 `list[string]`，默认 `[]`。
+
+compile 会检查每个 phase 的 `io.outputs` 声明字段是否与其**上游祖先 phase**（传递依赖的上游）已声明的输出字段重名。重名意味着本 phase 会顺序覆盖上游写入黑板的同名字段：默认这是非法的，compile 失败并报 `[F-v3-sequential-overwrite-unauthorized]`；只有把该字段名显式列进本 phase 的 `allow_sequential_overwrite`，才放行这次覆盖。
+
+```yaml
+# phases/refine/LOGIC.md
+name: refine
+io:
+  outputs:
+    type: object
+    required: [draft]
+    properties:
+      draft: {type: string}      # 上游某祖先 phase 也输出 draft
+actions:
+  - refine_draft
+allow_sequential_overwrite:
+  - draft                         # 明确允许覆盖上游的 draft
+```
+
+字段：
+
+| field | required | type | purpose |
+| --- | --- | --- | --- |
+| `allow_sequential_overwrite` | no | list[string], default `[]` | 列出本 phase 允许覆盖的上游同名 `io.outputs` 字段名 |
+
+规则：
+
+- 只对与**祖先 phase**输出字段重名的情况触发；与并行/非祖先 phase 同名不触发。
+- 列表元素必须是本 phase `io.outputs.properties` 中存在的字段名。
+- 不声明就重名 → compile 失败，错误码 `[F-v3-sequential-overwrite-unauthorized]`。

@@ -219,7 +219,7 @@ function frontmatterFromForm(
   return next
 }
 
-function serializePhaseMarkdown(frontmatter: PhaseFrontmatter, bodyContent: string): string {
+export function serializePhaseMarkdown(frontmatter: PhaseFrontmatter, bodyContent: string): string {
   const dumped = yaml.dump(frontmatter, {
     lineWidth: 120,
     noRefs: true,

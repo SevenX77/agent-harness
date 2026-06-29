@@ -28,6 +28,7 @@ import { errorMessage } from "@/utils/errors"
 import type { CompileError } from "@/api/types"
 import { connectPhaseRefs, createPhaseDraft, disconnectPhaseRefs, orphanPhaseDirectoryIds, phaseDirectoryPath, phaseFilePath, phaseRefsFromSkillDetail, reconnectPhaseRefs, removePhaseRefs, renamePhaseRefs, type NewPhaseKind } from "@/components/GraphCanvas/canvas-authoring"
 import { isReadOnlySkillError, type ChildSaveTarget } from "@/components/GraphCanvas/drill-edit"
+import { actionFilePath, actionStubContent, applyActionsList, isValidActionName, readActionsList } from "@/components/studio/panels/phase-actions"
 import { sha256Hex } from "@/lib/hash"
 import { CenterActionBar, type SkillBuildStage } from "./center-action-bar"
 import { deriveNodeErrorMessages, deriveNodeStatuses } from "./node-status"
@@ -929,6 +930,112 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     clearStaleCompileProjection(currentSkillId)
     void mutateSkillDetail()
   }, [clearStaleCompileProjection, currentSkillId, doWriteSkillFile, mutateSkillDetail])
+
+  // Add a LOGIC action: scaffold `phases/<id>/actions/<name>.py` (one action per
+  // file, function name = action name — project convention, copilot.py), keep the
+  // LOGIC.md frontmatter `actions:` and body `<action>` tags in sync (engine
+  // requires they match), then open the new file for editing.
+  const handleActionCreate = useCallback(async (phaseId: string, name: string, target?: ChildSaveTarget) => {
+    const editDetail = target?.detail ?? skillDetail
+    const targetSkillId = target?.skillId ?? currentSkillId
+    const override = target ? { skillId: target.skillId, workspaceRoot: target.workspaceRoot } : undefined
+    if (!targetSkillId || !editDetail) {
+      toast.error("Open a skill before adding an action")
+      return
+    }
+    const trimmed = name.trim()
+    if (!isValidActionName(trimmed)) {
+      toast.error("Action name must be a Python identifier (letters, digits, underscore; not starting with a digit).")
+      return
+    }
+    const logicPath = `phases/${phaseId}/LOGIC.md`
+    const logicContent = editDetail.files?.[logicPath]
+    if (logicContent === undefined) {
+      toast.error(`Phase file is missing: ${logicPath}`)
+      return
+    }
+    const current = readActionsList(logicContent)
+    if (current.includes(trimmed)) {
+      toast.error(`Action ${trimmed} already exists`)
+      return
+    }
+    const applied = applyActionsList(logicContent, [...current, trimmed])
+    if (!applied.ok) {
+      toast.error(applied.message)
+      return
+    }
+    const pyPath = actionFilePath(phaseId, trimmed)
+    let createdPy = false
+    try {
+      await doWriteSkillFile(pyPath, actionStubContent(trimmed), null, override, { createIfAbsent: true })
+      createdPy = true
+      await doWriteSkillFile(logicPath, applied.markdown, await sha256Hex(logicContent), override)
+      clearStaleCompileProjection(targetSkillId)
+      toast.success(`Created action ${trimmed}`)
+      // Open the new file in the SAME skill the node lives in (child subgraph when
+      // drilled) — pass skillId/workspaceRoot so it doesn't resolve against root.
+      handleFileOpen({
+        path: pyPath,
+        skillId: targetSkillId,
+        workspaceRoot: override ? override.workspaceRoot : currentWorkspaceRoot,
+        language: "python",
+        saveEnabled: true,
+      })
+      if (target) await target.onSettled()
+      else await mutateSkillDetail()
+    } catch (error) {
+      if (createdPy) {
+        try {
+          await doDeleteWorkspacePath(pyPath, override)
+        } catch (rollbackError) {
+          toast.warning(`Could not clean up ${pyPath}: ${errorMessage(rollbackError)}`)
+        }
+      }
+      toast.error(isReadOnlySkillError(error) ? "This skill is read-only — fork it into your workspace to edit." : errorMessage(error))
+      if (target) void target.onSettled()
+      else void mutateSkillDetail()
+    }
+  }, [clearStaleCompileProjection, currentSkillId, currentWorkspaceRoot, doDeleteWorkspacePath, doWriteSkillFile, handleFileOpen, mutateSkillDetail, skillDetail])
+
+  // Delete a LOGIC action: drop it from LOGIC.md frontmatter + body (kept in sync)
+  // and remove its `actions/<name>.py` file when present.
+  const handleActionDelete = useCallback(async (phaseId: string, name: string, target?: ChildSaveTarget) => {
+    const editDetail = target?.detail ?? skillDetail
+    const targetSkillId = target?.skillId ?? currentSkillId
+    const override = target ? { skillId: target.skillId, workspaceRoot: target.workspaceRoot } : undefined
+    if (!targetSkillId || !editDetail) {
+      toast.error("Open a skill before deleting an action")
+      return
+    }
+    const logicPath = `phases/${phaseId}/LOGIC.md`
+    const logicContent = editDetail.files?.[logicPath]
+    if (logicContent === undefined) {
+      toast.error(`Phase file is missing: ${logicPath}`)
+      return
+    }
+    const current = readActionsList(logicContent)
+    const applied = applyActionsList(logicContent, current.filter((entry) => entry !== name))
+    if (!applied.ok) {
+      toast.error(applied.message)
+      return
+    }
+    const pyPath = actionFilePath(phaseId, name)
+    const hasFile = editDetail.files?.[pyPath] !== undefined
+    try {
+      await doWriteSkillFile(logicPath, applied.markdown, await sha256Hex(logicContent), override)
+      if (hasFile) {
+        await doDeleteWorkspacePath(pyPath, override)
+      }
+      clearStaleCompileProjection(targetSkillId)
+      toast.success(`Deleted action ${name}`)
+      if (target) await target.onSettled()
+      else await mutateSkillDetail()
+    } catch (error) {
+      toast.error(isReadOnlySkillError(error) ? "This skill is read-only — fork it into your workspace to edit." : errorMessage(error))
+      if (target) void target.onSettled()
+      else void mutateSkillDetail()
+    }
+  }, [clearStaleCompileProjection, currentSkillId, doDeleteWorkspacePath, doWriteSkillFile, mutateSkillDetail, skillDetail])
 
   const handleCreatePhase = useCallback(async (kind: NewPhaseKind, requestedPhaseId?: string) => {
     if (!currentSkillId || !skillDetail) {
@@ -1857,6 +1964,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         onSelectTestInput={setSelectedTestInputId}
         onPhaseFileSave={handlePhaseFileSave}
         onPhaseRename={handleRenamePhase}
+        onActionCreate={handleActionCreate}
+        onActionDelete={handleActionDelete}
         runId={runId}
         lintErrors={propertiesFieldErrors}
         resumeValidity={resumeValidity}

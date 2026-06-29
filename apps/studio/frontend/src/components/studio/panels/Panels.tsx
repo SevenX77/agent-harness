@@ -35,6 +35,8 @@ interface PanelsProps {
     target?: ChildSaveTarget,
   ) => Promise<void> | void
   onPhaseRename?: (phaseId: string, nextPhaseId: string, target?: ChildSaveTarget) => Promise<void> | void
+  onActionCreate?: (phaseId: string, name: string, target?: ChildSaveTarget) => Promise<void> | void
+  onActionDelete?: (phaseId: string, name: string, target?: ChildSaveTarget) => Promise<void> | void
   // trace-observability F1: while a run is active the timeline region streams
   // live trace events (TracePanel); with no active run it shows run history (F2).
   runId?: string | null
@@ -78,6 +80,8 @@ export function Panels({
   onSelectTestInput,
   onPhaseFileSave,
   onPhaseRename,
+  onActionCreate,
+  onActionDelete,
   runId,
   selectedNodeStatus,
   resumeValidity,
@@ -140,6 +144,16 @@ export function Panels({
       ? (phaseId: string, nextPhaseId: string) => onPhaseRename(phaseId, nextPhaseId, selectedNodeEditTarget)
       : undefined
     : onPhaseRename
+  const propertiesActionCreate = selectedNodeUsesDifferentSkill
+    ? selectedNodeEditTarget && onActionCreate
+      ? (phaseId: string, name: string) => onActionCreate(phaseId, name, selectedNodeEditTarget)
+      : undefined
+    : onActionCreate
+  const propertiesActionDelete = selectedNodeUsesDifferentSkill
+    ? selectedNodeEditTarget && onActionDelete
+      ? (phaseId: string, name: string) => onActionDelete(phaseId, name, selectedNodeEditTarget)
+      : undefined
+    : onActionDelete
   if (!skillId) {
     return (
       <div className="flex h-full w-full flex-col bg-sidebar">
@@ -245,6 +259,8 @@ export function Panels({
         onFileOpen={onFileOpen}
         onPhaseFileSave={propertiesPhaseFileSave}
         onPhaseRename={propertiesPhaseRename}
+        onActionCreate={propertiesActionCreate}
+        onActionDelete={propertiesActionDelete}
         onResumeNode={onResumeNode}
         onPromoteNode={onPromoteNode}
       />

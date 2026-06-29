@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useState, type ComponentProps, type ReactNode } from "react"
 import { AxiosError } from "axios"
-import { AlertTriangle, CircleHelp, FolderOpen, Loader2, Pencil, ShieldCheck } from "lucide-react"
+import { AlertTriangle, CircleHelp, FolderOpen, Loader2, Pencil, Plus, ShieldCheck, Trash2 } from "lucide-react"
 import yaml from "js-yaml"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -47,7 +46,7 @@ import { selectSkillDirectory } from "@/lib/tauri"
 import { sha256Hex } from "@/lib/hash"
 import { errorMessage } from "@/utils/errors"
 import { runRoleTestJobToResult } from "../settings/llm-roles/role-test-store"
-import type { FileMeta } from "../file-types"
+import type { FileOpenInput } from "../file-types"
 import { PanelHeader } from "./_shared/PanelHeader"
 import { PanelActions, PanelBody, PanelFieldRow } from "./_shared/PanelSection"
 import { roleTestStatusBadge, type RoleTestStatusInput } from "./role-test-status"
@@ -63,6 +62,7 @@ import {
   type PhaseIterateFormData,
   type PhaseSubagentRef,
 } from "./phase-frontmatter"
+import { actionFilePath, isValidActionName, readActionsList, scanActionFiles } from "./phase-actions"
 
 // Node KIND is owned by the physical phase FILE (SKILL/LOGIC/SUBGRAPH.md) that
 // exists in the phase directory - `data.mode` is derived from that file in
@@ -117,9 +117,13 @@ interface PropertiesPanelProps {
   // Realtime lint diagnostics (engine field axis). Projected per-field by `field_path`
   // onto the matching frontmatter field below; no-field errors degrade to the node badge.
   lintErrors?: LintError[] | null
-  onFileOpen?: (fileOrPath: FileMeta | string) => void
+  onFileOpen?: (fileOrPath: FileOpenInput) => void
   onPhaseFileSave?: (payload: { path: string; content: string; expectedHash: string }) => Promise<void> | void
   onPhaseRename?: (phaseId: string, nextPhaseId: string) => Promise<void> | void
+  /** Add a LOGIC action: scaffolds actions/<name>.py + syncs frontmatter/body, then opens it. */
+  onActionCreate?: (phaseId: string, name: string) => Promise<void> | void
+  /** Delete a LOGIC action: removes it from frontmatter/body and deletes its .py file. */
+  onActionDelete?: (phaseId: string, name: string) => Promise<void> | void
   onResumeNode?: (options: ResumeRunOptions) => Promise<void> | void
   /** Per-node golden promote (atom #32): write golden for just this node from the active run. */
   onPromoteNode?: (nodeId: string) => Promise<void> | void
@@ -140,6 +144,8 @@ export function PropertiesPanel({
   onFileOpen,
   onPhaseFileSave,
   onPhaseRename,
+  onActionCreate,
+  onActionDelete,
   onResumeNode,
   onPromoteNode,
 }: PropertiesPanelProps) {
@@ -402,7 +408,11 @@ export function PropertiesPanel({
                 skillId={skillId}
                 workspaceRoot={effectiveWorkspaceRoot}
                 phaseId={selectedPhaseId ?? selectedNode.id}
-                onPhaseRename={kind === "subgraph" ? onPhaseRename : undefined}
+                files={skillDetail?.files}
+                onFileOpen={onFileOpen}
+                onPhaseRename={kind === "subgraph" || kind === "logic" ? onPhaseRename : undefined}
+                onActionCreate={onActionCreate}
+                onActionDelete={onActionDelete}
                 onReconnectSubgraphFolder={handleReconnectSubgraphFolder}
                 onFieldChange={setField}
                 onReset={handleReset}
@@ -561,7 +571,7 @@ function PropertiesFileBadge({
 }: {
   fileLabel: "GRAPH.md" | "LOGIC.md" | "SKILL.md" | "SUBGRAPH.md"
   filePath: string
-  onFileOpen?: (fileOrPath: FileMeta | string) => void
+  onFileOpen?: (fileOrPath: FileOpenInput) => void
 }) {
   return (
     <button
@@ -940,7 +950,11 @@ function PhaseFrontmatterForm({
   skillId,
   workspaceRoot,
   phaseId,
+  files,
+  onFileOpen,
   onPhaseRename,
+  onActionCreate,
+  onActionDelete,
   onReconnectSubgraphFolder,
   onFieldChange,
   onReset,
@@ -958,7 +972,11 @@ function PhaseFrontmatterForm({
   skillId: string | null
   workspaceRoot: string | null
   phaseId: string
+  files?: Record<string, string>
+  onFileOpen?: (fileOrPath: FileOpenInput) => void
   onPhaseRename?: (phaseId: string, nextPhaseId: string) => Promise<void> | void
+  onActionCreate?: (phaseId: string, name: string) => Promise<void> | void
+  onActionDelete?: (phaseId: string, name: string) => Promise<void> | void
   onReconnectSubgraphFolder: () => void
   onFieldChange: <Key extends keyof PhaseFrontmatterFormData>(field: Key, value: PhaseFrontmatterFormData[Key]) => void
   onReset: () => void
@@ -1031,22 +1049,22 @@ function PhaseFrontmatterForm({
           {kind === "logic" ? (
             <>
               <PanelFieldRow>
-                <Field>
-                  <YamlFieldLabel htmlFor="phase-actions">
-                    actions
-                    <HelpTooltip label="About actions">
-                      One action name per line. This logic node runs them as deterministic code in this exact order; the
-                      list must match the <span className="font-mono">&lt;action&gt;</span> tags in the file body.
-                    </HelpTooltip>
-                    <FieldErrorMarker errors={fieldErrors.actions} />
-                  </YamlFieldLabel>
-                  <Textarea
-                    id="phase-actions"
-                    value={value.actions}
-                    onChange={(event) => onFieldChange("actions", event.currentTarget.value)}
-                    rows={4}
-                  />
-                </Field>
+                <PhaseNameField
+                  phaseId={phaseId}
+                  onPhaseRename={onPhaseRename}
+                />
+              </PanelFieldRow>
+              <PanelFieldRow>
+                <ActionsField
+                  phaseId={phaseId}
+                  skillId={skillId}
+                  workspaceRoot={workspaceRoot}
+                  files={files}
+                  errors={fieldErrors.actions}
+                  onOpenFile={onFileOpen}
+                  onActionCreate={onActionCreate}
+                  onActionDelete={onActionDelete}
+                />
               </PanelFieldRow>
               <PanelFieldRow>
                 <ValidatorField
@@ -1055,20 +1073,12 @@ function PhaseFrontmatterForm({
                   onChange={(next) => onFieldChange("validator", next)}
                 />
               </PanelFieldRow>
-              {/* n2-properties #19 (atom #19): the fields an action may write back
-                  are bounded by io.outputs.properties, but that boundary is edited
-                  in the I/O panel - not here. Surface a NON-blocking hint so the
-                  author doesn't assume a logic node has no io constraint. */}
-              <FieldDescription>
-                Output fields an action writes are bounded by io.outputs - edit those field
-                boundaries in the I/O panel (toolbar tab 3).
-              </FieldDescription>
             </>
           ) : null}
           {kind === "subgraph" ? (
             <>
               <PanelFieldRow>
-                <SubgraphNameField
+                <PhaseNameField
                   phaseId={phaseId}
                   onPhaseRename={onPhaseRename}
                 />
@@ -1120,6 +1130,247 @@ function PhaseFrontmatterForm({
   )
 }
 
+// LOGIC actions manager. The list reflects the SAVED LOGIC.md (add/delete are
+// immediate file operations, not part of the form draft), reconciled with the
+// `actions/*.py` files on disk. Add scaffolds a file + opens it; Delete removes
+// the registration and the file. Frontmatter/body sync is done in the handler.
+function ActionsField({
+  phaseId,
+  skillId,
+  workspaceRoot,
+  files,
+  errors,
+  onOpenFile,
+  onActionCreate,
+  onActionDelete,
+}: {
+  phaseId: string
+  skillId: string | null
+  workspaceRoot: string | null
+  files?: Record<string, string>
+  errors?: LintError[]
+  onOpenFile?: (fileOrPath: FileOpenInput) => void
+  onActionCreate?: (phaseId: string, name: string) => Promise<void> | void
+  onActionDelete?: (phaseId: string, name: string) => Promise<void> | void
+}) {
+  const logicPath = `phases/${phaseId}/LOGIC.md`
+  const declared = useMemo(() => readActionsList(files?.[logicPath] ?? ""), [files, logicPath])
+  const filesPresent = useMemo(() => scanActionFiles(files, phaseId), [files, phaseId])
+  // Orphan = an actions/*.py on disk not declared in actions:. Surface it so it
+  // isn't invisible (the engine would still load it as an action).
+  const orphans = useMemo(
+    () => [...filesPresent].filter((name) => !declared.includes(name)).sort((a, b) => a.localeCompare(b)),
+    [declared, filesPresent],
+  )
+
+  return (
+    <Field>
+      <YamlFieldLabel>
+        actions
+        <HelpTooltip label="About actions">
+          The deterministic functions this logic node runs, in order. Each action is one
+          <span className="font-mono"> def &lt;name&gt;(context)</span> in <span className="font-mono">actions/&lt;name&gt;.py</span>;
+          the frontmatter list and body <span className="font-mono">&lt;action&gt;</span> tags are kept in sync for you.
+        </HelpTooltip>
+        <FieldErrorMarker errors={errors} />
+      </YamlFieldLabel>
+      {declared.length > 0 || orphans.length > 0 ? (
+        <div className="space-y-1.5 rounded-md bg-muted/30 px-2 py-2">
+          {declared.map((name) => (
+            <ActionRow
+              key={name}
+              name={name}
+              missingFile={!filesPresent.has(name)}
+              onEdit={onOpenFile ? () => onOpenFile({ path: actionFilePath(phaseId, name), skillId, workspaceRoot, language: "python", saveEnabled: true }) : undefined}
+              onDelete={onActionDelete ? () => onActionDelete(phaseId, name) : undefined}
+            />
+          ))}
+          {orphans.map((name) => (
+            <ActionRow
+              key={`orphan:${name}`}
+              name={name}
+              orphan
+              onEdit={onOpenFile ? () => onOpenFile({ path: actionFilePath(phaseId, name), skillId, workspaceRoot, language: "python", saveEnabled: true }) : undefined}
+              onDelete={onActionDelete ? () => onActionDelete(phaseId, name) : undefined}
+            />
+          ))}
+        </div>
+      ) : (
+        <FieldDescription>No actions yet — add one to scaffold its file.</FieldDescription>
+      )}
+      {onActionCreate ? (
+        <AddActionDialog existing={[...declared, ...orphans]} onAdd={(name) => onActionCreate(phaseId, name)} />
+      ) : null}
+      {/* n2-properties #19: an action's writeable outputs are bounded by io.outputs,
+          edited in the I/O panel — surfaced here as a non-blocking hint. */}
+      <FieldDescription>
+        Output fields an action writes are bounded by io.outputs - edit those field boundaries in the I/O panel (toolbar tab 3).
+      </FieldDescription>
+    </Field>
+  )
+}
+
+function ActionRow({
+  name,
+  missingFile = false,
+  orphan = false,
+  onEdit,
+  onDelete,
+}: {
+  name: string
+  missingFile?: boolean
+  orphan?: boolean
+  onEdit?: () => void
+  onDelete?: () => void
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2 text-xs text-foreground">
+      <span className="min-w-0 flex-1 truncate">
+        <span aria-hidden className="mr-1.5 text-muted-foreground">&bull;</span>
+        {name}
+        {orphan ? <span className="ml-1 text-amber-500">unregistered file</span> : null}
+        {missingFile ? <span className="ml-1 text-destructive">missing file</span> : null}
+      </span>
+      <div className="flex shrink-0 items-center gap-1">
+        {onEdit ? (
+          <Button
+            type="button"
+            size="icon"
+            variant="secondary"
+            className={YAML_ICON_BUTTON_CLASS}
+            aria-label={`Edit action ${name}`}
+            onClick={onEdit}
+          >
+            <Pencil className="size-3.5" aria-hidden />
+          </Button>
+        ) : null}
+        {onDelete ? <DeleteActionButton name={name} onConfirm={onDelete} /> : null}
+      </div>
+    </div>
+  )
+}
+
+function DeleteActionButton({ name, onConfirm }: { name: string; onConfirm: () => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button
+          type="button"
+          size="icon"
+          variant="secondary"
+          className={YAML_ICON_BUTTON_CLASS}
+          aria-label={`Delete action ${name}`}
+        >
+          <Trash2 className="size-3.5" aria-hidden />
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Delete action {name}?</DialogTitle>
+          <DialogDescription>
+            Removes <span className="font-mono">{name}</span> from this phase and deletes
+            <span className="font-mono"> actions/{name}.py</span>. This cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={() => {
+              setOpen(false)
+              onConfirm()
+            }}
+          >
+            Delete
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function AddActionDialog({ existing, onAdd }: { existing: string[]; onAdd: (name: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState("")
+  const name = draft.trim()
+  const invalid = name.length > 0 && !isValidActionName(name)
+  const duplicate = name.length > 0 && existing.includes(name)
+  const canAdd = Boolean(name && !invalid && !duplicate)
+
+  useEffect(() => {
+    if (open) {
+      setDraft("")
+    }
+  }, [open])
+
+  const submit = () => {
+    if (!canAdd) {
+      return
+    }
+    onAdd(name)
+    setOpen(false)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button type="button" size="sm" variant="secondary" className="mt-1">
+          <Plus className="size-3.5" aria-hidden />
+          Add action
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add action</DialogTitle>
+          <DialogDescription>
+            Creates <span className="font-mono">actions/&lt;name&gt;.py</span> with a stub and registers it on this phase.
+          </DialogDescription>
+        </DialogHeader>
+        <Field>
+          <form
+            className="contents"
+            autoComplete="off"
+            onSubmit={(event) => {
+              event.preventDefault()
+              submit()
+            }}
+          >
+            <FieldLabel htmlFor="action-name-input">Action name</FieldLabel>
+            <Input
+              id="action-name-input"
+              value={draft}
+              autoFocus
+              spellCheck={false}
+              placeholder="strip_noise"
+              aria-invalid={invalid || duplicate || undefined}
+              onChange={(event) => setDraft(event.currentTarget.value)}
+            />
+            <FieldDescription>
+              A Python identifier — becomes <span className="font-mono">def &lt;name&gt;(context)</span>.
+            </FieldDescription>
+            {invalid ? (
+              <p className="text-xs text-destructive">Use letters, digits, underscore; not starting with a digit.</p>
+            ) : null}
+            {duplicate ? <p className="text-xs text-destructive">An action named {name} already exists.</p> : null}
+          </form>
+        </Field>
+        <DialogFooter>
+          <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          <Button type="button" disabled={!canAdd} onClick={submit}>
+            Add
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function AllowSequentialOverwriteField({
   value,
   candidates,
@@ -1132,9 +1383,9 @@ function AllowSequentialOverwriteField({
   onChange: (next: string) => void
 }) {
   const selectedFields = useMemo(() => overwriteFieldLines(value), [value])
-  const toggleCandidate = (field: string, checked: boolean | "indeterminate") => {
+  const setAllowed = (field: string, allowed: boolean) => {
     const next = new Set(selectedFields)
-    if (checked === true) {
+    if (allowed) {
       next.add(field)
     } else {
       next.delete(field)
@@ -1142,47 +1393,76 @@ function AllowSequentialOverwriteField({
     onChange([...next].sort((a, b) => a.localeCompare(b)).join("\n"))
   }
 
+  // Rows = union of (a) detected upstream output collisions and (b) fields already
+  // written into the YAML array. (b) keeps stale / no-longer-detected entries
+  // visible with a Deny button so the author can still clear them. `allowed` means
+  // the field is currently in allow_sequential_overwrite.
+  const upstreamByField = new Map(candidates.map((candidate) => [candidate.field, candidate.upstreamPhaseIds]))
+  const rows = [...new Set([...candidates.map((candidate) => candidate.field), ...selectedFields])]
+    .sort((a, b) => a.localeCompare(b))
+    .map((field) => ({
+      field,
+      upstreamPhaseIds: upstreamByField.get(field) ?? [],
+      allowed: selectedFields.has(field),
+    }))
+
   return (
     <Field>
-      <YamlFieldLabel htmlFor="phase-allow-sequential-overwrite">
+      <YamlFieldLabel>
         allow_sequential_overwrite
         <HelpTooltip label="About allow_sequential_overwrite">
-          One output field per line that this phase is allowed to intentionally overwrite when an upstream phase already
-          wrote the same field to the blackboard. Fields not listed here are flagged by the engine as illegal overwrites.
+          Output fields this phase writes that an upstream phase already wrote to the blackboard. Allow the ones you mean
+          to overwrite; any collision left un-allowed is flagged by the engine as an illegal overwrite.
         </HelpTooltip>
         <FieldErrorMarker errors={errors} />
       </YamlFieldLabel>
-      {candidates.length > 0 ? (
-        <div className="space-y-1.5 rounded-md border border-border bg-background px-2 py-2">
-          {candidates.map((candidate) => (
-            <label
-              key={candidate.field}
-              className="flex items-start gap-2 text-xs text-foreground"
+      {rows.length > 0 ? (
+        <div className="space-y-1.5 rounded-md bg-muted/30 px-2 py-2">
+          {rows.map((row) => (
+            <div
+              key={row.field}
+              className="flex items-center justify-between gap-2 text-xs text-foreground"
             >
-              <Checkbox
-                checked={selectedFields.has(candidate.field)}
-                onCheckedChange={(checked) => toggleCandidate(candidate.field, checked)}
-                aria-label={`Allow overwrite for ${candidate.field}`}
-              />
               <span className="min-w-0 flex-1">
-                <span className="font-mono">{candidate.field}</span>
-                <span className="ml-1 text-muted-foreground">
-                  from {candidate.upstreamPhaseIds.join(", ")}
-                </span>
+                <span aria-hidden className="mr-1.5 text-muted-foreground">&bull;</span>
+                {row.field}
+                {row.upstreamPhaseIds.length > 0 ? (
+                  <span className="ml-1 text-muted-foreground">
+                    from {row.upstreamPhaseIds.join(", ")}
+                  </span>
+                ) : null}
               </span>
-            </label>
+              {row.allowed ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="h-6 shrink-0"
+                  aria-label={`Deny overwrite for ${row.field}`}
+                  onClick={() => setAllowed(row.field, false)}
+                >
+                  Deny
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="default"
+                  className="h-6 shrink-0"
+                  aria-label={`Allow overwrite for ${row.field}`}
+                  onClick={() => setAllowed(row.field, true)}
+                >
+                  Allow
+                </Button>
+              )}
+            </div>
           ))}
         </div>
-      ) : null}
-      <Textarea
-        id="phase-allow-sequential-overwrite"
-        value={value}
-        rows={3}
-        onChange={(event) => onChange(event.currentTarget.value)}
-      />
-      <FieldDescription>
-        One output field per line that this phase may intentionally overwrite from upstream phases.
-      </FieldDescription>
+      ) : (
+        <FieldDescription>
+          No upstream phase output collides with this phase&rsquo;s output fields.
+        </FieldDescription>
+      )}
     </Field>
   )
 }
@@ -1303,7 +1583,10 @@ function HelpTooltip({ label, children }: { label: string; children: ReactNode }
   )
 }
 
-function SubgraphNameField({
+// Generic phase `name` field: read-only display of the phase id with the rename
+// action (folder + GRAPH.md refs kept in sync). Shared by LOGIC and SUBGRAPH per
+// the skill-spec rule that `name` is changed via a rename action, not a raw textbox.
+function PhaseNameField({
   phaseId,
   onPhaseRename,
 }: {
@@ -1773,7 +2056,7 @@ function SubagentsField({
       </YamlFieldLabel>
       <div className="space-y-2">
         {value.map((entry, index) => (
-          <div key={index} className="space-y-1.5 rounded-md border border-border bg-background px-2 py-2">
+          <div key={index} className="space-y-1.5 rounded-md bg-muted/30 px-2 py-2">
             <Input
               aria-label={`Subagent ${index + 1} name`}
               value={entry.name}
